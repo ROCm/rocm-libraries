@@ -12,9 +12,12 @@ namespace ck_tile::core::arch::mma {
  * @class TileDistrEncCalc
  * @brief Given an MmaOp and modifiers, provides warp-level tile distribution encodings for mapping
  * ABC matrix fragment coordinates to register coordinates (lane, vector item) and vice versa. Note
- * that in case of compression or packed data types, the matrix minor dimension is effectively
- * shrunk by that factor. This is because tile distribution encodings always describe compressed /
- * packed *Datatype* elements, not logical / mathematical uncompressed *value* elements.
+ * that in case of compression (sparse intrinsics), we can choose to describe the compressed or
+ * uncompressed A matrix, where the former is the default (see UncompressedA). When considering A as
+ * compressed, the matrix minor dimension is effectively shrunk by the compression factor. Generally
+ * the compressed interpretation is used at the MmaOp level (compression has already taken place),
+ * whereas the uncompressed interpretation is used at the WarpGemm / MmaPipeline level (expects to
+ * be invoked with uncompressed A matrix, compression handled internally).
  * @tparam MmaOp           Intrinsic (amdgcn_mma).
  * @tparam CTranspose      Whether we are using CTranspose.
  * @tparam SFactor         Swizzle factor. Not implemented.
@@ -46,23 +49,17 @@ struct TileDistrEncCalc
     static_assert(AttrNumAccessBV % MmaOp::kBKNumAccess == 0,
                   "Requesting NumAccessB incompatible with builtin.");
 
-    static_assert(MmaOp::kABKPerLane %
-                      (NumAccessA * MmaOp::kCompressionRatio * MmaOp::APackedSize) ==
-                  0);
-    static_assert(MmaOp::kABKPerLane % (NumAccessB * MmaOp::BPackedSize) == 0);
+    static_assert(MmaOp::kABKPerLane % (NumAccessA * MmaOp::kCompressionRatio) == 0);
+    static_assert(MmaOp::kABKPerLane % NumAccessB == 0);
     static_assert(SFactor == 1, "Swizzle not implemented yet."); // TODO: Implement Swizzle.
 
-    template <index_t MajorDimSize,
-              index_t Repeat,
-              index_t NumAccess,
-              index_t PackedSize       = 1,
-              index_t CompressionRatio = 1>
+    template <index_t MajorDimSize, index_t Repeat, index_t NumAccess, index_t CompressionRatio = 1>
     using ABWarpDstrEnc = tile_distribution_encoding<
         sequence<Repeat>,
         tuple<sequence<MajorDimSize>,
               sequence<NumAccess,
                        MmaOp::kK / MmaOp::kABKPerLane,
-                       MmaOp::kABKPerLane / NumAccess / CompressionRatio / PackedSize * kIter>>,
+                       MmaOp::kABKPerLane / NumAccess / CompressionRatio * kIter>>,
         tuple<sequence<2, 0, 1>>,
         tuple<sequence<1, 0, 0>>,
         sequence<2, 2>,
@@ -106,12 +103,8 @@ struct TileDistrEncCalc
     }
 
     static constexpr index_t compressionRatioA = UncompressedA ? 1 : MmaOp::kCompressionRatio;
-    using AEnc_                                = ABWarpDstrEnc<MmaOp::kM,
-                                                               MmaOp::kARepeat,
-                                                               NumAccessA,
-                                                               MmaOp::APackedSize,
-                                                               compressionRatioA>;
-    using BEnc_ = ABWarpDstrEnc<MmaOp::kN, MmaOp::kBRepeat, NumAccessB, MmaOp::BPackedSize>;
+    using AEnc_ = ABWarpDstrEnc<MmaOp::kM, MmaOp::kARepeat, NumAccessA, compressionRatioA>;
+    using BEnc_ = ABWarpDstrEnc<MmaOp::kN, MmaOp::kBRepeat, NumAccessB>;
 
     public:
     // When using CTranspose, the A and B matrices are swapped.
@@ -125,10 +118,11 @@ struct TileDistrEncCalc
     static_assert(TileDistrEncRegMap<CWarpDstrEncoding>::num_lanes == MmaOp::WaveSize);
 
     static_assert(TileDistrEncRegMap<AWarpDstrEncoding>::num_vector_items ==
-                  vector_traits<typename MmaOp::AVecType>::vector_size * kIter *
-                      MmaOp::kCompressionRatio / compressionRatioA);
+                  vector_traits<typename MmaOp::AVecType>::vector_size * MmaOp::APackedSize *
+                      kIter * MmaOp::kCompressionRatio / compressionRatioA);
     static_assert(TileDistrEncRegMap<BWarpDstrEncoding>::num_vector_items ==
-                  vector_traits<typename MmaOp::BVecType>::vector_size * kIter);
+                  vector_traits<typename MmaOp::BVecType>::vector_size * MmaOp::BPackedSize *
+                      kIter);
     static_assert(TileDistrEncRegMap<CWarpDstrEncoding>::num_vector_items ==
                   vector_traits<typename MmaOp::CVecType>::vector_size);
 };
