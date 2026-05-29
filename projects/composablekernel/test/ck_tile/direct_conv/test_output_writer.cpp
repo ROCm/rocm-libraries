@@ -37,8 +37,8 @@ using namespace grouped_4c_tile::v3;
 // ============================================================================
 // Config indices
 //
-// KernelConfigurations<>::configs[9]  — Fprop, no swizzle, direct DRAM (OutputWriter)
-// KernelConfigurations<>::configs[49] — Fprop, CyclicShift, vector_size=1, direct DRAM (OutputWriter)
+// KernelConfigurations<>::configs_map.get(9)  — Fprop, no swizzle, direct DRAM (OutputWriter)
+// KernelConfigurations<>::configs_map.get(49) — Fprop, CyclicShift, vector_size=1, direct DRAM (OutputWriter)
 // ============================================================================
 static constexpr int CFG_DIRECT   = 9;
 static constexpr int CFG_VEC8     = 43;
@@ -61,8 +61,8 @@ __global__ void test_output_write_kernel(_Float16* __restrict__ out,
                                           int c_per_group = 0)
 {
 #ifdef __HIP_DEVICE_COMPILE__
-    using TC = TileConstants<KernelConfigurations<>::configs[CfgIdx]>;
-    constexpr auto cfg = KernelConfigurations<>::configs[CfgIdx];
+    using TC = TileConstants<KernelConfigurations<>::configs_map.get(CfgIdx)>;
+    constexpr auto cfg = KernelConfigurations<>::configs_map.get(CfgIdx);
 
     // When c_per_group is 0 (default), use GROUP_SIZE for backward compatibility.
     const int cpg = (c_per_group > 0) ? c_per_group : cfg.group_size();
@@ -102,8 +102,8 @@ protected:
     template <int CfgIdx>
     void run_and_verify(int k_per_group, int c_per_group = 0)
     {
-        using TC = TileConstants<KernelConfigurations<>::configs[CfgIdx]>;
-        constexpr auto cfg = KernelConfigurations<>::configs[CfgIdx];
+        using TC = TileConstants<KernelConfigurations<>::configs_map.get(CfgIdx)>;
+        constexpr auto cfg = KernelConfigurations<>::configs_map.get(CfgIdx);
         constexpr int BLOCK_SIZE = cfg.block_size();
         constexpr int BLOCK_Q = TC::BLOCK_Q;
         constexpr int BLOCK_GROUPS = cfg.block_groups();
@@ -288,8 +288,8 @@ __global__ void test_output_write_kernel_16c(_Float16* __restrict__ out,
                                               int c_per_group = 0)
 {
 #ifdef __HIP_DEVICE_COMPILE__
-    using TC = ns_16c::TileConstants<ns_16c::KernelConfigurations<>::KernelConfigurations<>::configs[CfgIdx]>;
-    constexpr auto cfg = ns_16c::KernelConfigurations<>::KernelConfigurations<>::configs[CfgIdx];
+    using TC = ns_16c::TileConstants<ns_16c::KernelConfigurations<>::configs_map.get(CfgIdx)>;
+    constexpr auto cfg = ns_16c::KernelConfigurations<>::configs_map.get(CfgIdx);
 
     const int cpg = (c_per_group > 0) ? c_per_group : cfg.group_size();
     ck_tile::direct_conv::BlockCoords<cfg> bc(groups, cpg, k_per_group);
@@ -317,8 +317,8 @@ protected:
     template <int CfgIdx>
     void run_and_verify(int k_per_group, int c_per_group = 0)
     {
-        using TC = ns_16c::TileConstants<ns_16c::KernelConfigurations<>::KernelConfigurations<>::configs[CfgIdx]>;
-        constexpr auto cfg = ns_16c::KernelConfigurations<>::KernelConfigurations<>::configs[CfgIdx];
+        using TC = ns_16c::TileConstants<ns_16c::KernelConfigurations<>::configs_map.get(CfgIdx)>;
+        constexpr auto cfg = ns_16c::KernelConfigurations<>::configs_map.get(CfgIdx);
         constexpr int BLOCK_SIZE = cfg.block_size();
         constexpr int BLOCK_Q = TC::BLOCK_Q;
         constexpr int BLOCK_GROUPS = cfg.block_groups();
@@ -444,8 +444,8 @@ __global__ void test_output_write_kernel_8c(_Float16* __restrict__ out,
                                              int c_per_group = 0)
 {
 #ifdef __HIP_DEVICE_COMPILE__
-    using TC = ns_8c::TileConstants<ns_8c::KernelConfigurations<>::KernelConfigurations<>::configs[CfgIdx]>;
-    constexpr auto cfg = ns_8c::KernelConfigurations<>::KernelConfigurations<>::configs[CfgIdx];
+    using TC = ns_8c::TileConstants<ns_8c::KernelConfigurations<>::configs_map.get(CfgIdx)>;
+    constexpr auto cfg = ns_8c::KernelConfigurations<>::configs_map.get(CfgIdx);
 
     const int cpg = (c_per_group > 0) ? c_per_group : cfg.group_size();
     ck_tile::direct_conv::BlockCoords<cfg> bc(groups, cpg, k_per_group);
@@ -473,8 +473,8 @@ protected:
     template <int CfgIdx>
     void run_and_verify(int k_per_group, int c_per_group = 0)
     {
-        using TC = ns_8c::TileConstants<ns_8c::KernelConfigurations<>::KernelConfigurations<>::configs[CfgIdx]>;
-        constexpr auto cfg = ns_8c::KernelConfigurations<>::KernelConfigurations<>::configs[CfgIdx];
+        using TC = ns_8c::TileConstants<ns_8c::KernelConfigurations<>::configs_map.get(CfgIdx)>;
+        constexpr auto cfg = ns_8c::KernelConfigurations<>::configs_map.get(CfgIdx);
         constexpr int BLOCK_SIZE = cfg.block_size();
         constexpr int BLOCK_Q = TC::BLOCK_Q;
         constexpr int BLOCK_GROUPS = cfg.block_groups();

@@ -36,8 +36,8 @@ using namespace grouped_4c_tile::v3;
 // ============================================================================
 // Config indices used by the tests
 //
-// KernelConfigurations<>::configs[9]  — Fprop, vector_size=8, waves_c64=1 (unpadded baseline)
-// KernelConfigurations<>::configs[49] — Fprop, CyclicShift, vector_size=1, waves_c64=2 (any c)
+// KernelConfigurations<>::configs_map.get(9)  — Fprop, vector_size=8, waves_c64=1 (unpadded baseline)
+// KernelConfigurations<>::configs_map.get(49) — Fprop, CyclicShift, vector_size=1, waves_c64=2 (any c)
 // ============================================================================
 static constexpr int CFG_UNPADDED = 9;
 static constexpr int CFG_VEC2     = 48;
@@ -58,8 +58,8 @@ __global__ void test_input_load_kernel(const _Float16* __restrict__ in,
                                        int k_per_group = 0)
 {
 #ifdef __HIP_DEVICE_COMPILE__
-    using TC = TileConstants<KernelConfigurations<>::configs[CfgIdx]>;
-    constexpr auto cfg = KernelConfigurations<>::configs[CfgIdx];
+    using TC = TileConstants<KernelConfigurations<>::configs_map.get(CfgIdx)>;
+    constexpr auto cfg = KernelConfigurations<>::configs_map.get(CfgIdx);
     constexpr int BLOCK_SIZE = cfg.block_size();
 
     // When k_per_group is 0 (default), use c_per_group for both (backward compat).
@@ -131,8 +131,8 @@ protected:
     template <int CfgIdx, bool Padding = true>
     void run_and_verify(int c_per_group, int px = 0, int k_per_group = 0)
     {
-        using TC = TileConstants<KernelConfigurations<>::configs[CfgIdx]>;
-        constexpr auto cfg = KernelConfigurations<>::configs[CfgIdx];
+        using TC = TileConstants<KernelConfigurations<>::configs_map.get(CfgIdx)>;
+        constexpr auto cfg = KernelConfigurations<>::configs_map.get(CfgIdx);
         constexpr int BLOCK_SIZE = cfg.block_size();
         constexpr int LDS_FP16 = TC::INPUT_LDS_BUFFER_SIZE_FP16;
         constexpr int BLOCK_W = TC::BLOCK_W;
@@ -297,8 +297,8 @@ __global__ void test_input_load_kernel_16c(const _Float16* __restrict__ in,
                                            int k_per_group = 0)
 {
 #ifdef __HIP_DEVICE_COMPILE__
-    using TC = ns_16c::TileConstants<ns_16c::KernelConfigurations<>::configs[CfgIdx]>;
-    constexpr auto cfg = ns_16c::KernelConfigurations<>::configs[CfgIdx];
+    using TC = ns_16c::TileConstants<ns_16c::KernelConfigurations<>::configs_map.get(CfgIdx)>;
+    constexpr auto cfg = ns_16c::KernelConfigurations<>::configs_map.get(CfgIdx);
     constexpr int BLOCK_SIZE = cfg.block_size();
 
     const int kpg = (k_per_group > 0) ? k_per_group : c_per_group;
@@ -346,8 +346,8 @@ protected:
     template <int CfgIdx, bool Padding = true>
     void run_and_verify(int c_per_group, int px = 0, int k_per_group = 0)
     {
-        using TC = ns_16c::TileConstants<ns_16c::KernelConfigurations<>::configs[CfgIdx]>;
-        constexpr auto cfg = ns_16c::KernelConfigurations<>::configs[CfgIdx];
+        using TC = ns_16c::TileConstants<ns_16c::KernelConfigurations<>::configs_map.get(CfgIdx)>;
+        constexpr auto cfg = ns_16c::KernelConfigurations<>::configs_map.get(CfgIdx);
         constexpr int BLOCK_SIZE = cfg.block_size();
         constexpr int LDS_FP16 = TC::INPUT_LDS_BUFFER_SIZE_FP16;
         constexpr int BLOCK_W = TC::BLOCK_W;
@@ -468,8 +468,8 @@ __global__ void test_input_load_kernel_8c(const _Float16* __restrict__ in,
                                           int k_per_group = 0)
 {
 #ifdef __HIP_DEVICE_COMPILE__
-    using TC = ns_8c::TileConstants<ns_8c::KernelConfigurations<>::configs[CfgIdx]>;
-    constexpr auto cfg = ns_8c::KernelConfigurations<>::configs[CfgIdx];
+    using TC = ns_8c::TileConstants<ns_8c::KernelConfigurations<>::configs_map.get(CfgIdx)>;
+    constexpr auto cfg = ns_8c::KernelConfigurations<>::configs_map.get(CfgIdx);
     constexpr int BLOCK_SIZE = cfg.block_size();
 
     const int kpg = (k_per_group > 0) ? k_per_group : c_per_group;
@@ -517,8 +517,8 @@ protected:
     template <int CfgIdx, bool Padding = true>
     void run_and_verify(int c_per_group, int px = 0, int k_per_group = 0)
     {
-        using TC = ns_8c::TileConstants<ns_8c::KernelConfigurations<>::configs[CfgIdx]>;
-        constexpr auto cfg = ns_8c::KernelConfigurations<>::configs[CfgIdx];
+        using TC = ns_8c::TileConstants<ns_8c::KernelConfigurations<>::configs_map.get(CfgIdx)>;
+        constexpr auto cfg = ns_8c::KernelConfigurations<>::configs_map.get(CfgIdx);
         constexpr int BLOCK_SIZE = cfg.block_size();
         constexpr int LDS_FP16 = TC::INPUT_LDS_BUFFER_SIZE_FP16;
         constexpr int BLOCK_W = TC::BLOCK_W;

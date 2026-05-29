@@ -42,7 +42,7 @@ __global__ void test_chunked_weight_kernel(const _Float16* __restrict__ wei,
                                             int C_total)
 {
 #ifdef __HIP_DEVICE_COMPILE__
-    constexpr auto cfg = v3::KernelConfigurations<>::configs[CfgIdx];
+    constexpr auto cfg = v3::KernelConfigurations<>::configs_map.get(CfgIdx);
     using TC = v3::TileConstants<cfg>;
     using WeightLoader = v3::WeightLoader<cfg>;
 
@@ -127,7 +127,7 @@ protected:
     template <int CfgIdx>
     void run_and_verify()
     {
-        constexpr auto cfg = v3::KernelConfigurations<>::configs[CfgIdx];
+        constexpr auto cfg = v3::KernelConfigurations<>::configs_map.get(CfgIdx);
 
         constexpr int N_CSPW = cfg.c_slices_per_wave;
         constexpr int KH     = cfg.kh;

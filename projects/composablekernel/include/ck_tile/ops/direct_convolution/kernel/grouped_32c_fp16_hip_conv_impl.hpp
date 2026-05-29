@@ -8,10 +8,10 @@
 #include "ck_tile/ops/direct_convolution/utils/types.hpp"
 #include "ck_tile/ops/direct_convolution/utils/mathutil.hpp"
 #include "ck_tile/ops/direct_convolution/utils/launch_params.hpp"
-#include "ck_tile/ops/direct_convolution/utils/kernel_variant.hpp"
 #include "ck_tile/ops/direct_convolution/utils/transpose_lds_layout.hpp"
 #include "ck_tile/ops/direct_convolution/utils/memory.hpp"
 #include "ck_tile/ops/direct_convolution/utils/detail.hpp"
+#include "ck_tile/ops/direct_convolution/utils/config_map.hpp"
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 #include <string>
@@ -57,17 +57,22 @@ struct Config
     }
 };
 
-// All instantiated configurations.
+// All instantiated configurations. Keys are explicit integers — the mapping from key to
+// Config is stable regardless of insertion order, unlike a plain array where position
+// implicitly encodes the key.
 // waves_per_wg = groups_per_wg * 2 (since 32c uses 2 waves per group)
 // groups_per_wg=2 -> waves_per_wg=4, groups_per_wg=1 -> waves_per_wg=2
-constexpr Config configs[] = {
-    {.waves_per_wg = 4, .direction = Direction::Dgrad},
-    {.waves_per_wg = 2, .direction = Direction::Dgrad},
-    {.waves_per_wg = 4},
-    {.waves_per_wg = 2},
-};
+constexpr auto configs_map = make_config_map<Config>({
+    // Dgrad (keys 0–1)
+    {0, {.waves_per_wg = 4, .direction = Direction::Dgrad}},
+    {1, {.waves_per_wg = 2, .direction = Direction::Dgrad}},
+    // Fprop (keys 2–3)
+    {2, {.waves_per_wg = 4}},
+    {3, {.waves_per_wg = 2}},
+});
+static_assert(configs_map.is_valid(), "Duplicate or negative config key in grouped_32c configs_map");
 
-constexpr int NUM_CONFIGS = sizeof(configs) / sizeof(configs[0]);
+constexpr int NUM_CONFIGS = configs_map.size;
 
 inline bool is_valid_config(const Conv2dParams& par, const Config& cfg)
 {
@@ -86,10 +91,9 @@ inline bool is_valid_config(const Conv2dParams& par, const Config& cfg)
     return true;
 }
 
-inline LaunchParams get_launch_params(int config_idx, const Conv2dParams& par)
+template <auto cfg>
+inline LaunchParams get_launch_params(const Conv2dParams& par)
 {
-    const auto& cfg = configs[config_idx];
-
     // Compute the grid size.
     // For Dgrad the output is the input gradient (width = par.w, not par.q).
     const int out_q    = (cfg.direction == Direction::Dgrad) ? par.w : par.q;
@@ -102,6 +106,36 @@ inline LaunchParams get_launch_params(int config_idx, const Conv2dParams& par)
     launch.grid       = dim3(blocks_w_n, blocks_c, blocks_n_fold);
     launch.block_size = dim3(cfg.block_size(), 1, 1);
     return launch;
+}
+
+inline bool is_applicable(const Conv2dParams& par)
+{
+    if(par.in_type != DataType::fp16)
+        return false;
+    if(par.wei_type != DataType::fp16)
+        return false;
+    if(par.out_type != DataType::fp16)
+        return false;
+    if(par.order != TensorOrder::NHWC)
+        return false;
+    if(par.direction != Direction::Fprop &&
+       par.direction != Direction::Dgrad)
+        return false;
+    if(par.kh != 3 || par.kw != 3)
+        return false;
+    if(par.k_tot != par.c_tot)
+        return false;
+    if(par.channels_per_group() != 32)
+        return false;
+    if(par.c_tot % 32 != 0)
+        return false;
+    if(par.stride_h != 1 || par.stride_w != 1)
+        return false;
+    if(par.dilation_h != 1 || par.dilation_w != 1)
+        return false;
+    if(par.pad_h > par.kh - 1 || par.pad_w > par.kw - 1)
+        return false;
+    return true;
 }
 
 } // namespace ck_tile::direct_hip_conv::grouped_32c
@@ -615,101 +649,38 @@ __global__ void conv2d_grouped_32c_fp16_nhwc_cdna4(const _Float16* __restrict__ 
 namespace ck_tile::direct_hip_conv::grouped_32c
 {
 
-template <size_t... Is>
-void launch_dispatch(int config_idx,
-                     std::index_sequence<Is...>,
-                     const LaunchParams& lp,
-                     const Conv2dParams& par,
-                     const void* in,
-                     const void* wei,
-                     void* out,
-                     hipStream_t stream)
+template <auto cfg>
+inline void launch_kernel(const LaunchParams& lp,
+                          const Conv2dParams& par,
+                          const void* in,
+                          const void* wei,
+                          void* out,
+                          hipStream_t stream)
 {
-    auto kernel_launch = [&]<size_t I>()
-    {
-        auto view = SizeView<configs[I].direction>(par);
-        conv2d_grouped_32c_fp16_nhwc_cdna4<configs[I]>
-            <<<lp.grid, lp.block_size, lp.dynamic_shared_bytes, stream>>>(
-                static_cast<const _Float16*>(in),
-                static_cast<const _Float16*>(wei),
-                1.0,
-                0.0,
-                static_cast<_Float16*>(out),
-                par.n,
-                par.groups,
-                par.channels_per_group(),
-                par.filters_per_group(),
-                view.h(),
-                view.w(),
-                view.p(),
-                view.q(),
-                par.kh,
-                par.kw,
-                par.stride_h,
-                par.stride_w,
-                par.dilation_h,
-                par.dilation_w,
-                view.pad_h(),
-                view.pad_w());
-    };
-    (void)((config_idx == static_cast<int>(Is) ? (kernel_launch.template operator()<Is>(), true)
-                                               : false) ||
-           ...);
-}
-
-inline void launch(int config_idx,
-                   const LaunchParams& lp,
-                   const Conv2dParams& par,
-                   const void* in,
-                   const void* wei,
-                   void* out,
-                   void* /*workspace*/,
-                   hipStream_t stream)
-{
-    launch_dispatch(
-        config_idx, std::make_index_sequence<NUM_CONFIGS>{}, lp, par, in, wei, out, stream);
-}
-
-constexpr KernelVariant make_variant()
-{
-    return {
-        .is_applicable =
-            [](const Conv2dParams& par)
-        {
-            if(par.in_type != DataType::fp16)
-                return false;
-            if(par.wei_type != DataType::fp16)
-                return false;
-            if(par.out_type != DataType::fp16)
-                return false;
-            if(par.order != TensorOrder::NHWC)
-                return false;
-            if(par.direction != Direction::Fprop &&
-               par.direction != Direction::Dgrad)
-                return false;
-            if(par.kh != 3 || par.kw != 3)
-                return false;
-            if(par.k_tot != par.c_tot)
-                return false;
-            if(par.channels_per_group() != 32)
-                return false;
-            if(par.c_tot % 32 != 0)
-                return false;
-            if(par.stride_h != 1 || par.stride_w != 1)
-                return false;
-            if(par.dilation_h != 1 || par.dilation_w != 1)
-                return false;
-            if(par.pad_h > par.kh - 1 || par.pad_w > par.kw - 1)
-                return false;
-            return true;
-        },
-        .config_is_compatible = [](const Conv2dParams& par, int idx)
-        { return is_valid_config(par, configs[idx]); },
-        .get_launch_params  = &get_launch_params,
-        .launch             = &launch,
-        .get_workspace_size = [](int, const Conv2dParams&) -> size_t { return 0; },
-        .num_configs        = NUM_CONFIGS,
-    };
+    auto view = SizeView<cfg.direction>(par);
+    conv2d_grouped_32c_fp16_nhwc_cdna4<cfg>
+        <<<lp.grid, lp.block_size, lp.dynamic_shared_bytes, stream>>>(
+            static_cast<const _Float16*>(in),
+            static_cast<const _Float16*>(wei),
+            1.0,
+            0.0,
+            static_cast<_Float16*>(out),
+            par.n,
+            par.groups,
+            par.channels_per_group(),
+            par.filters_per_group(),
+            view.h(),
+            view.w(),
+            view.p(),
+            view.q(),
+            par.kh,
+            par.kw,
+            par.stride_h,
+            par.stride_w,
+            par.dilation_h,
+            par.dilation_w,
+            view.pad_h(),
+            view.pad_w());
 }
 
 } // namespace ck_tile::direct_hip_conv::grouped_32c

@@ -215,12 +215,12 @@ run_grouped_conv_backward_data_tile_algs(const ckt::Args<SIGNATURE>& args,
 #ifndef DISABLE_IMPLICIT_GEMM_INSTANCES
 #include "../../experimental/grouped_convolution_tile_instances/instances/backward_data/grouped_convolution_backward_data_tile_nhwgc_fp16_calls.inc"
 #endif // DISABLE_IMPLICIT_GEMM_INSTANCES
-        // for(auto fn : get_bwd_data_direct_instances_nhwgc_fp16_4c())
-        //     run_alg(fn);
-        // for(auto fn : get_bwd_data_direct_instances_nhwgc_fp16_16c())
-        //     run_alg(fn);
-        // for(auto fn : get_bwd_data_direct_instances_nhwgc_fp16_8c())
-        //     run_alg(fn);
+        for(auto fn : get_bwd_data_direct_instances_nhwgc_fp16_4c())
+            run_alg(fn);
+        for(auto fn : get_bwd_data_direct_instances_nhwgc_fp16_16c())
+            run_alg(fn);
+        for(auto fn : get_bwd_data_direct_instances_nhwgc_fp16_8c())
+            run_alg(fn);
         for(auto fn : get_bwd_data_direct_instances_nhwgc_fp16_32c())
             run_alg(fn);
     }
@@ -229,12 +229,12 @@ run_grouped_conv_backward_data_tile_algs(const ckt::Args<SIGNATURE>& args,
 #ifndef DISABLE_IMPLICIT_GEMM_INSTANCES
 #include "../../experimental/grouped_convolution_tile_instances/instances/backward_data/grouped_convolution_backward_data_tile_nhwgc_bf16_calls.inc"
 #endif // DISABLE_IMPLICIT_GEMM_INSTANCES
-        // for(auto fn : get_bwd_data_direct_instances_nhwgc_bf16_4c())
-        //     run_alg(fn);
-        // for(auto fn : get_bwd_data_direct_instances_nhwgc_bf16_16c())
-        //     run_alg(fn);
-        // for(auto fn : get_bwd_data_direct_instances_nhwgc_bf16_8c())
-        //     run_alg(fn);
+        for(auto fn : get_bwd_data_direct_instances_nhwgc_bf16_4c())
+            run_alg(fn);
+        for(auto fn : get_bwd_data_direct_instances_nhwgc_bf16_16c())
+            run_alg(fn);
+        for(auto fn : get_bwd_data_direct_instances_nhwgc_bf16_8c())
+            run_alg(fn);
         for(auto fn : get_bwd_data_direct_instances_nhwgc_bf16_32c())
             run_alg(fn);
     }
