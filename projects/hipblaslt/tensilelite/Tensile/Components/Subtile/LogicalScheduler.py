@@ -1662,8 +1662,24 @@ class LogicalScheduler:
                         dep = gr_deps[0]
                         cross_set = set(id(d) for d in cross)
                         is_cross = id(dep) in cross_set
-                        counts = self._compute_inflight_loads(
-                            pi, lr.subIterK_slot, dep.ref.tensor, dep)
+                        # Multi-DU + multi-partition: when an LR has any GR
+                        # dep with non-zero mt_offset (= cross-body-iter dep),
+                        # the walk-back inflight count understates outstanding
+                        # loads because consolidate_uid_grs moved GRs across
+                        # slots.  Force a full vmcnt(0) drain so the LR sees
+                        # fully written LDS.  PR 7781 PR2 (mt320x256 / MIWT[10,8]
+                        # asymmetric-MIWT bug).
+                        any_cross_iter_dep = any(
+                            d.mt_offset != 0 for d in gr_deps)
+                        force_drain = (
+                            self.config.numPartitions > 1 and
+                            max(self.config.numUnroll.values()) > 1 and
+                            (lr.mtIteration > 0 or any_cross_iter_dep))
+                        if force_drain:
+                            counts = WaitGRCounts()
+                        else:
+                            counts = self._compute_inflight_loads(
+                                pi, lr.subIterK_slot, dep.ref.tensor, dep)
                         lr.preOps.append(WaitGROp(wait_gr_counts=counts,
                                                   has_sync=True,
                                                   adjustVmcnt=is_cross))
