@@ -43,7 +43,6 @@
 #include "ck_tile/ops/gemm/kernel/mx_gemm_kernel.hpp"
 #include "ck_tile/ops/gemm/kernel/mx_grouped_gemm_kernel.hpp"
 #include "ck_tile/ops/gemm/kernel/streamk_gemm/streamk_gemm_coherency.hpp"
-#include "ck_tile/ops/gemm/kernel/streamk_gemm/streamk_gemm_kernel.hpp"
 #include "ck_tile/ops/gemm/kernel/streamk_gemm/streamk_gemm_tile_partitioner.hpp"
 #include "ck_tile/ops/gemm/kernel/streamk_gemm/streamk_gemm_tile_partitioner_impl.hpp"
 #include "ck_tile/ops/gemm/kernel/universal_gemm_kernel.hpp"
