@@ -12,8 +12,8 @@ The output JSON is consumed by patch_actor_critic.py.
 
 Usage
 =====
-    python3 scripts/probe_actor_critic.py \\
-        --build-dir build \\
+    python3 scripts/update_actor_critic/probe_actor_critic.py \
+        --build-dir build \
         --output    results_gfx90a.json
 
 Options
