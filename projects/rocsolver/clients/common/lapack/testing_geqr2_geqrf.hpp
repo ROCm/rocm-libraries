@@ -36,6 +36,8 @@
 #include "common/misc/rocsolver_test.hpp"
 #include "common/misc/rocsolver_timer.hpp"
 
+#include "print_matrix.hpp"
+
 template <bool STRIDED, bool GEQRF, typename T, typename I, typename U>
 void geqr2_geqrf_checkBadArgs(const rocblas_handle handle,
                               const I m,
@@ -182,6 +184,7 @@ void geqr2_geqrf_initData(const rocblas_handle handle,
 template <bool STRIDED, bool GEQRF, typename T, typename I, typename Td, typename Ud, typename Th, typename Uh>
 void geqr2_geqrf_getError(const rocblas_handle handle,
                           const std::string& matrix,
+                          const rocblas_int verbose,
                           const I m,
                           const I n,
                           Td& dA,
@@ -200,17 +203,36 @@ void geqr2_geqrf_getError(const rocblas_handle handle,
     // input data initialization
     geqr2_geqrf_initData<true, true, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
 
+    if (verbose >= 2)
+    {
+        print_matrix( "A", m, n, dA[0], lda );
+    }
+
     // execute computations
     // GPU lapack
     CHECK_ROCBLAS_ERROR(rocsolver_geqr2_geqrf(STRIDED, GEQRF, handle, m, n, dA.data(), lda, stA,
                                               dIpiv.data(), stP, bc));
     CHECK_HIP_ERROR(hARes.transfer_from(dA));
 
+    if (verbose >= 2)
+    {
+        rocblas_int min_mn = std::min( m, n );
+        print_matrix( "Aout", m, n, dA[0], lda );
+        print_matrix( "tau", min_mn, 1, dIpiv[0], min_mn );
+    }
+
     // CPU lapack
     for(I b = 0; b < bc; ++b)
     {
         GEQRF ? cpu_geqrf(m, n, hA[b], lda, hIpiv[b], hW.data(), n)
               : cpu_geqr2(m, n, hA[b], lda, hIpiv[b], hW.data());
+    }
+
+    if (verbose >= 2)
+    {
+        rocblas_int min_mn = std::min( m, n );
+        print_matrix( "Aref", m, n, hA[0], lda );
+        print_matrix( "tau_ref", min_mn, 1, hIpiv[0], min_mn );
     }
 
     // error is ||hA - hARes|| / ||hA|| (ideally ||QR - Qres Rres|| / ||QR||)
@@ -310,6 +332,7 @@ void testing_geqr2_geqrf(Arguments& argus)
     I lda = argus.get<I>("lda", m);
     rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
     rocblas_stride stP = argus.get<rocblas_stride>("strideP", min(m, n));
+    rocblas_int verbose = argus.get<rocblas_int>("verbose", 0);
     std::string matrix = argus.get<std::string>("matrix", "default");
 
     I bc = argus.batch_count;
@@ -392,7 +415,7 @@ void testing_geqr2_geqrf(Arguments& argus)
 
         // check computations
         if(argus.unit_check || argus.norm_check)
-            geqr2_geqrf_getError<STRIDED, GEQRF, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA,
+            geqr2_geqrf_getError<STRIDED, GEQRF, T>(handle, matrix, verbose, m, n, dA, lda, stA, dIpiv, stP, bc, hA,
                                                     hARes, hIpiv, &max_error);
 
         // collect performance data
@@ -428,7 +451,7 @@ void testing_geqr2_geqrf(Arguments& argus)
 
         // check computations
         if(argus.unit_check || argus.norm_check)
-            geqr2_geqrf_getError<STRIDED, GEQRF, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA,
+            geqr2_geqrf_getError<STRIDED, GEQRF, T>(handle, matrix, verbose, m, n, dA, lda, stA, dIpiv, stP, bc, hA,
                                                     hARes, hIpiv, &max_error);
 
         // collect performance data
@@ -464,7 +487,7 @@ void testing_geqr2_geqrf(Arguments& argus)
 
         // check computations
         if(argus.unit_check || argus.norm_check)
-            geqr2_geqrf_getError<STRIDED, GEQRF, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA,
+            geqr2_geqrf_getError<STRIDED, GEQRF, T>(handle, matrix, verbose, m, n, dA, lda, stA, dIpiv, stP, bc, hA,
                                                     hARes, hIpiv, &max_error);
 
         // collect performance data
