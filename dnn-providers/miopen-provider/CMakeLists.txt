@@ -187,7 +187,7 @@ target_link_libraries(miopen_plugin_private PUBLIC MIOpen hipdnn_data_sdk hipdnn
 add_library(miopen_plugin SHARED $<TARGET_OBJECTS:miopen_plugin_impl>)
 target_link_libraries(miopen_plugin PRIVATE MIOpen hipdnn_data_sdk hipdnn_plugin_sdk)
 
-if(NOT WIN32)
+if(NOT WIN32 AND NOT APPLE)
     target_link_libraries(miopen_plugin PRIVATE "-Xlinker --exclude-libs=ALL")
 endif()
 

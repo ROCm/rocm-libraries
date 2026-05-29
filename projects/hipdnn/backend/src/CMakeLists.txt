@@ -60,7 +60,8 @@ add_library(
     utilities/EngineOrdering.cpp
     LastErrorManager.cpp
     $<$<BOOL:${WIN32}>:PlatformUtils.windows.cpp>
-    $<$<BOOL:${UNIX}>:PlatformUtils.linux.cpp>
+    $<$<BOOL:${APPLE}>:PlatformUtils.macos.cpp>
+    $<$<AND:$<BOOL:${UNIX}>,$<NOT:$<BOOL:${APPLE}>>>:PlatformUtils.linux.cpp>
 )
 
 target_include_directories(
@@ -104,7 +105,7 @@ target_link_libraries(hipdnn_backend PRIVATE hipdnn_backend_private)
 # Export dependencies for consumers because backend public API needs HIP runtime dep
 target_link_libraries(hipdnn_backend INTERFACE hip::host)
 # HIDE symbols from linked static libs
-if(NOT WIN32)
+if(NOT WIN32 AND NOT APPLE)
     target_link_libraries(hipdnn_backend PRIVATE "-Xlinker --exclude-libs=ALL")
 endif()
 set_target_properties(hipdnn_backend PROPERTIES CXX_VISIBILITY_PRESET hidden)

@@ -38,7 +38,9 @@
 #include <psapi.h>
 #else
 #include <dlfcn.h>
+#ifndef __APPLE__
 #include <link.h>
+#endif
 #endif
 
 // Return the string of the rocfft_status code

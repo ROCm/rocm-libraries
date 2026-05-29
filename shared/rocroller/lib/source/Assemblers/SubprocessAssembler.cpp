@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <unistd.h>
 
 #include <rocRoller/Assemblers/SubprocessAssembler.hpp>
 

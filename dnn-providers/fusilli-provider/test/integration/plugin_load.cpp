@@ -54,9 +54,8 @@ TEST(IntegrationTests, PluginLoad) {
   // Set plugin paths.
   //
   // FUSILLI_PLUGIN_PATH is a relative path from the executable directory where
-  // this test lives to the location of the plugin's .so e.g.
-  // "../lib/hipdnn_plugins/engines/fusilli_plugin". The tests will be
-  // installed, and therefore re-located, in some build configurations
+  // this test lives to the platform-specific plugin directory. The tests will
+  // be installed, and therefore re-located, in some build configurations
   // (`TheRock` for example) so we must use a relative path.
   auto pluginPath = std::filesystem::canonical(getCurrentExecutableDirectory() /
                                                FUSILLI_PLUGIN_PATH);
@@ -77,7 +76,7 @@ TEST(IntegrationTests, PluginLoad) {
 
   // Check that fusilli plugin did load.
   auto expectedPath =
-      pluginPath / std::format("lib{}.so", FUSILLI_PLUGIN_TARGET);
+      pluginPath / hipdnn_data_sdk::utilities::getLibraryName(FUSILLI_PLUGIN_TARGET);
   EXPECT_TRUE(std::ranges::any_of(
       loadedPlugins, [&expectedPath](const std::string &loadedPluginPath) {
         return std::filesystem::canonical(loadedPluginPath) ==

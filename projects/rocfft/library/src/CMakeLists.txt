@@ -407,7 +407,7 @@ rocfft_add_coverage_flags( rocfft )
 # rocFFT contains default implementations of callback functions that
 # need to be built as relocatable device code (causes failure at link
 # stage on Windows)
-if (NOT WIN32)
+if (NOT WIN32 AND NOT APPLE)
   target_compile_options( rocfft PRIVATE -fgpu-rdc )
   target_link_options( rocfft PRIVATE -fgpu-rdc )
 endif()

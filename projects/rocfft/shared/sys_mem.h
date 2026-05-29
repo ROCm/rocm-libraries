@@ -32,6 +32,9 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#elif defined(__APPLE__)
+#include <mach/mach.h>
+#include <sys/sysctl.h>
 #else
 #include <sys/sysinfo.h>
 #endif
@@ -197,6 +200,30 @@ private:
             ret = info.ullTotalPhys;
         else
             ret = info.ullAvailPhys;
+#elif defined(__APPLE__)
+        if constexpr(mem_label == sys_mem_label::TOTAL)
+        {
+            uint64_t mem_size = 0;
+            size_t   len      = sizeof(mem_size);
+            if(sysctlbyname("hw.memsize", &mem_size, &len, nullptr, 0) == 0)
+                ret = static_cast<size_t>(mem_size);
+        }
+        else
+        {
+            vm_statistics64_data_t vmstat;
+            mach_msg_type_number_t count = HOST_VM_INFO64_COUNT;
+            vm_size_t              page_size;
+            if(host_page_size(mach_host_self(), &page_size) == KERN_SUCCESS
+               && host_statistics64(mach_host_self(),
+                                    HOST_VM_INFO64,
+                                    reinterpret_cast<host_info64_t>(&vmstat),
+                                    &count)
+                      == KERN_SUCCESS)
+            {
+                const uint64_t available_pages = vmstat.free_count + vmstat.inactive_count;
+                ret = static_cast<size_t>(available_pages) * static_cast<size_t>(page_size);
+            }
+        }
 #else
         // Read from /proc/meminfo if possible
         try

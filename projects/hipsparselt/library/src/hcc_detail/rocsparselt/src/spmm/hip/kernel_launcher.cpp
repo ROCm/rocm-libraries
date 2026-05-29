@@ -44,16 +44,19 @@
 #include <type_traits>
 #include <vector>
 
+#include <dlfcn.h>
 #include <glob.h>
 #include <libgen.h>
+#ifndef __APPLE__
 #include <link.h>
+#endif
 #include <unistd.h>
 
 #define ROCSPARSELT_LIB_PATH "/opt/rocm/hipsparselt/lib"
 
 namespace
 {
-#ifndef WIN32
+#if !defined(WIN32) && !defined(__APPLE__)
     std::string rocsparselt_so_path;
 
     int rocsparselt_dl_iterate_phdr_callback(struct dl_phdr_info* hdr_info, size_t size, void* data)
@@ -67,6 +70,25 @@ namespace
         return 0;
     }
 #endif
+
+    std::string rocsparselt_internal_get_so_path()
+    {
+#ifdef __APPLE__
+        Dl_info info;
+        if(dladdr(reinterpret_cast<void*>(&rocsparselt_internal_get_so_path), &info) != 0
+           && info.dli_fname)
+        {
+            return std::string(info.dli_fname);
+        }
+        return {};
+#elif !defined(WIN32)
+        rocsparselt_so_path.clear();
+        dl_iterate_phdr(rocsparselt_dl_iterate_phdr_callback, nullptr);
+        return rocsparselt_so_path;
+#else
+        return {};
+#endif
+    }
 
     size_t totalAllcoatedElement(std::vector<size_t>& sizes,
                                  std::vector<size_t>& strides,
@@ -500,7 +522,7 @@ namespace
                 // Fall back on hard-coded path if static library or not found
 
 #ifndef ROCSPARSELT_STATIC_LIB
-                dl_iterate_phdr(rocsparselt_dl_iterate_phdr_callback, NULL);
+                auto rocsparselt_so_path = rocsparselt_internal_get_so_path();
                 if(rocsparselt_so_path.size())
                     path = std::string{dirname(&rocsparselt_so_path[0])};
 #endif // ifndef ROCSPARSELT_STATIC_LIB

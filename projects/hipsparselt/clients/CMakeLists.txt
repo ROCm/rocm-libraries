@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: MIT
 
 find_package(Threads REQUIRED)
-find_package(OpenMP REQUIRED)
+if(HIPSPARSELT_ENABLE_OPENMP)
+    find_package(OpenMP REQUIRED)
+endif()
 
 if(HIPSPARSELT_ENABLE_THEROCK)
     # TheRock's cblas package provides OpenBLAS which includes BLAS, CBLAS, and LAPACK Use NO_*_PATH
@@ -20,7 +22,8 @@ target_compile_features(hipsparselt-clients-common PRIVATE cxx_std_17)
 
 target_compile_definitions(hipsparselt-clients-common PUBLIC HIPSPARSELT_INTERNAL_API)
 
-if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang"
+   AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|i[3-6]86)$")
     target_compile_options(hipsparselt-clients-common PUBLIC -mf16c)
 endif()
 

@@ -112,7 +112,7 @@ public:
                                          rocsparse_const_spmat_descr source,
                                          rocsparse_spmat_descr       target,
                                          rocsparse_extract_stage     stage,
-                                         uint64_t* __restrict__ buffer_size_in_bytes)
+                                         size_t* __restrict__ buffer_size_in_bytes)
         = 0;
 
     ///
@@ -129,7 +129,7 @@ public:
                                  rocsparse_const_spmat_descr source,
                                  rocsparse_spmat_descr       target,
                                  rocsparse_extract_stage     stage,
-                                 uint64_t                    buffer_size_in_bytes,
+                                 size_t                      buffer_size_in_bytes,
                                  void* __restrict__ buffer)
         = 0;
 };

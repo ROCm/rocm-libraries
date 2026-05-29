@@ -64,7 +64,7 @@ set(TENSILE_CREATE_LIBRARY_COMMAND
 add_custom_command(
     OUTPUT "${output_stamp}"
     COMMENT "Building device libraries to ${HIPBLASLT_TENSILE_LIBPATH} ..."
-    COMMAND ${TENSILE_CREATE_LIBRARY_COMMAND}
+    COMMAND ${CMAKE_COMMAND} -E env TENSILE_REUSE_ASM_OBJECTS=1 ${TENSILE_CREATE_LIBRARY_COMMAND}
     COMMAND ${CMAKE_COMMAND} -E touch "${output_stamp}"
     DEPENDS  ${HIPBLASLT_PYTHON_DEPS}
     # Because the command can contain special characters

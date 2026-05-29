@@ -47,7 +47,7 @@ namespace {
 // Divide two non-negative integers and return ceil of the quotient
 constexpr uint64_t DivCeil(uint64_t numer, uint64_t denom) { return (numer + denom - 1) / denom; }
 
-constexpr uint64_t maxNGroups = WinoShaderArgs::PowOf2<16>() - 1;
+constexpr std::size_t maxNGroups = static_cast<std::size_t>(WinoShaderArgs::PowOf2<16>() - 1);
 
 template <uint32_t Winodata, uint32_t Winofilter>
 struct ConvWinoRageRxSCommon

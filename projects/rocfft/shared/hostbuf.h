@@ -123,6 +123,7 @@ public:
 #ifdef _WIN32
             buf = _aligned_malloc(size, 64);
 #else
+#if defined(MADV_HUGEPAGE)
             // On Linux, ask for hugepages to reduce TLB pressure and
             // improve performance.  Allocations need to be aligned to
             // the hugepage size, and rounded up to the next whole
@@ -136,6 +137,9 @@ public:
             }
             else
                 buf = aligned_alloc(64, size);
+#else
+            buf = aligned_alloc(64, size);
+#endif
 #endif
         }
         if(!buf)

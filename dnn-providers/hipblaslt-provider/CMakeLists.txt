@@ -124,9 +124,10 @@ target_compile_options(hipblaslt_plugin_private PRIVATE ${HIPDNN_WARNING_COMPILE
 
 add_library(hipblaslt_plugin SHARED HipblasltPluginPublic.cpp)
 target_link_libraries(hipblaslt_plugin PRIVATE hipblaslt_plugin_private)
-target_link_libraries(
-    hipblaslt_plugin PRIVATE "-Xlinker --exclude-libs=ALL"
-) # Hide symbols from linked static libs
+if(NOT WIN32 AND NOT APPLE)
+    # Hide symbols from linked static libs.
+    target_link_libraries(hipblaslt_plugin PRIVATE "-Xlinker --exclude-libs=ALL")
+endif()
 target_compile_options(hipblaslt_plugin PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 set_target_properties(
     hipblaslt_plugin

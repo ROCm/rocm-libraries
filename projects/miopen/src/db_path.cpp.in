@@ -33,7 +33,7 @@
 #include <miopen/filesystem.hpp>
 
 #include <cstdlib>
-#ifdef __linux__
+#if defined(__linux__) || defined(__APPLE__)
 #include <dlfcn.h>
 #endif
 
@@ -42,7 +42,7 @@ MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_USER_DB_PATH)
 
 namespace miopen {
 
-#ifdef __linux__
+#if defined(__linux__) || defined(__APPLE__)
 fs::path GetLibPath()
 {
     fs::path path;

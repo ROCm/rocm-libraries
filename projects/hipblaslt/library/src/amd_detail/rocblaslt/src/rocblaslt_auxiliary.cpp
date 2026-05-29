@@ -36,7 +36,9 @@
 #define _GNU_SOURCE 1
 #endif
 #include <dlfcn.h>
+#ifndef __APPLE__
 #include <link.h>
+#endif
 #include <unistd.h>
 #include <cstring>
 #endif
@@ -85,8 +87,8 @@ inline void assignAlphaBeta1(const rocblaslt_compute_type& compute_type, void* a
 
 inline void heuristicResult_copy(rocblaslt_matmul_heuristic_result* heuristicResultsDest,
                                  rocblaslt_matmul_heuristic_result* heuristicResultsSrc,
-                                 size_t&                            maxWorkSpaceBytes,
-                                 size_t&                            required_workspace_size)
+                                 size_t                             maxWorkSpaceBytes,
+                                 size_t                             required_workspace_size)
 {
     memcpy(heuristicResultsDest->algo.data,
            heuristicResultsSrc->algo.data,

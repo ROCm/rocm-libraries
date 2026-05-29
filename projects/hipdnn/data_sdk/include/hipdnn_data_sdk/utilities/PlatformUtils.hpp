@@ -13,6 +13,10 @@
 
 #include "PlatformUtils.linux.hpp"
 
+#elif defined(__APPLE__)
+
+#include "PlatformUtils.macos.hpp"
+
 #else
 
 #error "Unsupported platform"

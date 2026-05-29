@@ -40,8 +40,10 @@ def CPUThreadCount(enable=True):
             # WaitForMultipleObjects directly, which has the limit (the limit
             # is actually 64, but some handles are needed for accounting).
             cpu_count = min(os.cpu_count(), 61)
-        else:
+        elif hasattr(os, "sched_getaffinity"):
             cpu_count = len(os.sched_getaffinity(0))
+        else:
+            cpu_count = os.cpu_count() or 1
         cpuThreads = globalParameters["CpuThreads"]
         if cpuThreads < 1:
             return min(cpu_count, 64)  # Max build threads to avoid out-of-memory

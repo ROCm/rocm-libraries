@@ -22,12 +22,14 @@
 #
 # SPDX-License-Identifier: MIT
 ################################################################################
+import platform as py_platform
 from os import name as os_name
 from os import environ
 from pathlib import Path
 from re import search, IGNORECASE
 from shlex import split
 from subprocess import check_output, STDOUT, CalledProcessError, PIPE, run
+from sys import platform as sys_platform
 from typing import List
 
 from Tensile.Common import SemanticVersion, print2
@@ -88,6 +90,35 @@ def get_rocm_version() -> str:
         ROCm version string
     """
     return _getVersion(ToolchainDefaults.HIP_CONFIG, "--version", r'(.+)')
+
+
+def _darwin_hip_host_args() -> List[str]:
+    """Returns host-side flags needed for HIP clang to find libc++ on macOS."""
+    if sys_platform != "darwin":
+        return []
+
+    sdkroot = environ.get("SDKROOT", "")
+    if not sdkroot:
+        try:
+            sdkroot = run(
+                ["xcrun", "--show-sdk-path"],
+                stdout=PIPE,
+                stderr=PIPE,
+                check=True,
+            ).stdout.decode().strip()
+        except Exception:
+            sdkroot = ""
+
+    deployment_target = environ.get("MACOSX_DEPLOYMENT_TARGET", "13.0")
+    arch = environ.get("CMAKE_OSX_ARCHITECTURES", py_platform.machine() or "arm64")
+    if ";" in arch:
+        arch = arch.split(";")[0]
+    target = environ.get("Tensile_DARWIN_TARGET", f"{arch}-apple-macos{deployment_target}")
+
+    args = ["-target", target, "-stdlib=libc++"]
+    if sdkroot:
+        args.extend(["-isysroot", sdkroot])
+    return args
 
 
 class Component:
@@ -211,6 +242,7 @@ class Compiler(Component):
         self.default_args = [
             *split(environ.get("Tensile_CXX_COMPILER_LAUNCHER", "")),
              compiler_path,
+            *_darwin_hip_host_args(),
             "-D__HIP_HCC_COMPAT_MODE__=1",
             "--offload-device-only",
             "-x", "hip", "-O3",

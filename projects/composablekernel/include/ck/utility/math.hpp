@@ -92,6 +92,12 @@ __host__ __device__ constexpr T max(T x, T y)
     return x > y ? x : y;
 }
 
+template <typename X, typename Y>
+__host__ __device__ constexpr auto max(X x, Y y)
+{
+    return x > y ? x : y;
+}
+
 template <index_t X>
 __host__ __device__ constexpr index_t max(Number<X>, index_t y)
 {
@@ -104,11 +110,9 @@ __host__ __device__ constexpr index_t max(index_t x, Number<Y>)
     return x > Y ? x : Y;
 }
 
-template <typename X, typename... Ys>
+template <typename X, typename... Ys, typename enable_if<sizeof...(Ys) >= 2, bool>::type = false>
 __host__ __device__ constexpr auto max(X x, Ys... ys)
 {
-    static_assert(sizeof...(Ys) > 0, "not enough argument");
-
     return max(x, max(ys...));
 }
 
@@ -120,6 +124,12 @@ __host__ __device__ constexpr T min(T x)
 
 template <typename T>
 __host__ __device__ constexpr T min(T x, T y)
+{
+    return x < y ? x : y;
+}
+
+template <typename X, typename Y>
+__host__ __device__ constexpr auto min(X x, Y y)
 {
     return x < y ? x : y;
 }
@@ -136,11 +146,9 @@ __host__ __device__ constexpr index_t min(index_t x, Number<Y>)
     return x < Y ? x : Y;
 }
 
-template <typename X, typename... Ys>
+template <typename X, typename... Ys, typename enable_if<sizeof...(Ys) >= 2, bool>::type = false>
 __host__ __device__ constexpr auto min(X x, Ys... ys)
 {
-    static_assert(sizeof...(Ys) > 0, "not enough argument");
-
     return min(x, min(ys...));
 }
 

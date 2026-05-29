@@ -3,6 +3,8 @@
 
 #include <rocRoller/AssertOpKinds.hpp>
 
+#include <ostream>
+
 namespace rocRoller
 {
 

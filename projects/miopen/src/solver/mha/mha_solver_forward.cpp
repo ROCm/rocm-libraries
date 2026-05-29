@@ -127,7 +127,7 @@ ConvSolution MhaForward::GetSolution(const ExecutionContext& context,
 
     auto warpSize = context.GetStream().GetWavefrontWidth();
 
-    size_t local_threads  = std::clamp(nextPow2(S), warpSize, static_cast<size_t>(256));
+    size_t local_threads  = std::clamp<std::size_t>(nextPow2(S), warpSize, 256);
     size_t global_threads = nhs * local_threads;
 
     auto softmax_kernel         = KernelInfo{};
@@ -152,8 +152,8 @@ ConvSolution MhaForward::GetSolution(const ExecutionContext& context,
         return static_cast<void*>(static_cast<std::byte*>(buffer) + ws.GetOffset(part_idx));
     };
 
-    local_threads  = std::clamp(nextPow2(nhsd), warpSize, static_cast<size_t>(256));
-    global_threads = RoundUpToMultiple(nhsd, local_threads);
+    local_threads  = std::clamp<std::size_t>(nextPow2(nhsd), warpSize, 256);
+    global_threads = RoundUpToMultiple(static_cast<std::size_t>(nhsd), local_threads);
 
     auto scale_reduce_kernel         = KernelInfo{};
     scale_reduce_kernel.comp_options = KernelBuildParameters{

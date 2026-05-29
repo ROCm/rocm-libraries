@@ -25,6 +25,7 @@
 import itertools
 import os.path
 import subprocess
+import sys
 import time
 from collections import OrderedDict
 from copy import deepcopy
@@ -595,8 +596,8 @@ def assignGlobalParameters(config, isaInfoMap: Dict[IsaVersion, IsaInfo]):
     try:
         globalParameters["ROCmSMIPath"] = locateExe(globalParameters["ROCmBinPath"], "rocm-smi")
     except OSError:
-        if os.name == "nt":
-            # rocm-smi is not presently supported on Windows so do not require it.
+        if os.name == "nt" or sys.platform == "darwin":
+            # rocm-smi is not presently supported on Windows or macOS so do not require it.
             pass
         else:
             raise
@@ -674,7 +675,7 @@ def setupRestoreClocks():
     def restoreClocks():
         # Clocks will only be pinned if rocm-smi is available, therefore
         # we only need to restore if found.
-        if globalParameters["PinClocks"]:
+        if globalParameters.get("PinClocks", False):
             rsmi = globalParameters["ROCmSMIPath"]
             if rsmi is not None:
                 subprocess.call([rsmi, "-d", "0", "--resetclocks"])

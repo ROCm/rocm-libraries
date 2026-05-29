@@ -45,7 +45,9 @@ namespace std
 #include <psapi.h>
 #else
 #include <dlfcn.h>
+#ifndef __APPLE__
 #include <link.h>
+#endif
 #endif
 
 #include "../../shared/CLI11.hpp"

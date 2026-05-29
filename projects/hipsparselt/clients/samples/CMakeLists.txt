@@ -8,7 +8,8 @@ foreach(sample_name ${SAMPLE_EXECUTABLES})
 
   target_compile_features(${sample_name} PRIVATE cxx_std_17)
 
-  if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  if((CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+     AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|i[3-6]86)$")
     target_compile_options(${sample_name} PRIVATE -mf16c)
     target_compile_definitions(${sample_name} PRIVATE HIPSPARSELT_INTERNAL_API)
   endif()

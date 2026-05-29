@@ -30,6 +30,7 @@
 #endif
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
+#include <type_traits>
 
 #include "rocsparse_assert.hpp"
 
@@ -369,6 +370,11 @@ namespace rocsparse
     {
         return std::max(x, y);
     }
+    template <typename T, std::enable_if_t<std::is_integral<T>::value, int> = 0>
+    __device__ __host__ __forceinline__ T max(T x, T y)
+    {
+        return std::max(x, y);
+    }
 
     __device__ __host__ __forceinline__ float min(float x, float y)
     {
@@ -391,6 +397,11 @@ namespace rocsparse
         return std::min(x, y);
     }
     __device__ __host__ __forceinline__ uint64_t min(uint64_t x, uint64_t y)
+    {
+        return std::min(x, y);
+    }
+    template <typename T, std::enable_if_t<std::is_integral<T>::value, int> = 0>
+    __device__ __host__ __forceinline__ T min(T x, T y)
     {
         return std::min(x, y);
     }

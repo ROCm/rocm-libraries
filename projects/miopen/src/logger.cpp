@@ -36,8 +36,11 @@
 #include <iomanip>
 #include <sstream>
 
-#ifdef __linux__
+#ifndef _WIN32
 #include <unistd.h>
+#endif
+
+#ifdef __linux__
 #include <sys/syscall.h> /* For SYS_xxx definitions */
 #endif
 

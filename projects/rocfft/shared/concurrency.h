@@ -22,7 +22,7 @@
 
 #include <thread>
 
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__APPLE__)
 #include <sched.h>
 #endif
 
@@ -32,7 +32,7 @@
 // return std::thread::hardware_concurrency().
 static unsigned int rocfft_concurrency()
 {
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__APPLE__)
     cpu_set_t cpuset;
     if(sched_getaffinity(0, sizeof(cpuset), &cpuset) == 0)
         return CPU_COUNT(&cpuset);

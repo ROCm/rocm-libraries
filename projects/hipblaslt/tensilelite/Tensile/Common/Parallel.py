@@ -25,20 +25,30 @@
 import concurrent.futures
 import itertools
 import os
+import re
 import sys
 import time
 
-from joblib import Parallel, delayed
+try:
+    from joblib import Parallel, delayed
+except ImportError:
+    Parallel = None
+
+    def delayed(function):
+        return lambda *args, **kwargs: (function, args, kwargs)
 
 from .Utilities import tqdm
 
 
 def joblibParallelSupportsGenerator():
-    import joblib
-    from packaging.version import Version
+    if Parallel is None:
+        return False
 
-    joblibVer = joblib.__version__
-    return Version(joblibVer) >= Version("1.4.0")
+    import joblib
+
+    version_parts = re.split(r"[^\d]+", joblib.__version__)
+    version_tuple = tuple(int(part) for part in version_parts[:3] if part)
+    return version_tuple >= (1, 4, 0)
 
 
 def CPUThreadCount(enable=True):
@@ -53,8 +63,11 @@ def CPUThreadCount(enable=True):
             # is actually 64, but some handles are needed for accounting).
             cpu_count = min(os.cpu_count(), 61)
         else:
-            cpu_count = len(os.sched_getaffinity(0))
-        cpuThreads = globalParameters["CpuThreads"]
+            if hasattr(os, "sched_getaffinity"):
+                cpu_count = len(os.sched_getaffinity(0))
+            else:
+                cpu_count = os.cpu_count() or 1
+        cpuThreads = globalParameters.get("CpuThreads", -1)
         if cpuThreads == -1:
             return cpu_count
 
@@ -94,6 +107,7 @@ def apply_print_exception(item, *args):
 def OverwriteGlobalParameters(newGlobalParameters):
     from . import GlobalParameters
 
+    newGlobalParameters = dict(newGlobalParameters)
     GlobalParameters.globalParameters.clear()
     GlobalParameters.globalParameters.update(newGlobalParameters)
 
@@ -236,7 +250,10 @@ def ParallelMap2(
     pcall = pcallWithGlobalParamsMultiArg if multiArg else pcallWithGlobalParamsSingleArg
     pargs = zip(objects, itertools.repeat(globalParameters))
 
-    if joblibParallelSupportsGenerator():
+    if Parallel is None:
+        results = (pcall(function, a, params) for a, params in pargs)
+        rv = results if return_as in ("generator", "generator_unordered") else list(results)
+    elif joblibParallelSupportsGenerator():
         rv = Parallel(n_jobs=threadCount, timeout=99999, return_as=return_as)(
             delayed(pcall)(function, a, params) for a, params in pargs
         )

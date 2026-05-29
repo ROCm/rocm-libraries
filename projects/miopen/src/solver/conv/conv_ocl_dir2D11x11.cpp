@@ -166,7 +166,7 @@ ConvSolution ConvOclDirectFwd11x11::GetSolution(const ExecutionContext& ctx,
     // param
     // 6 get us the min
     // cppcheck-suppress knownConditionTrueFalse
-    static const uint64_t backwards_min_output =
+    static const std::size_t backwards_min_output =
         (data_multiplier1 > 1 || data_multiplier0 > 1) ? 1 : 4;
     result.n_out_pix_tiles =
         (is_forward) ? std::min(static_cast<std::size_t>(6),

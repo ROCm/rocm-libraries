@@ -22,7 +22,7 @@ typedef HMODULE PluginLibHandle;
 
 }
 
-#elif defined(__linux__)
+#elif defined(__linux__) || defined(__APPLE__)
 
 namespace hipdnn_backend::platform_utilities
 {

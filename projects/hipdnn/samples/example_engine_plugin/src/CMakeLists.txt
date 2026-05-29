@@ -52,7 +52,7 @@ target_link_libraries(example_provider_private PUBLIC hipdnn_plugin_sdk hipdnn_d
 add_library(example_provider_plugin SHARED $<TARGET_OBJECTS:example_provider_impl>)
 target_link_libraries(example_provider_plugin PRIVATE hipdnn_plugin_sdk hipdnn_data_sdk hip::host hiprtc::hiprtc)
 
-if(NOT WIN32)
+if(NOT WIN32 AND NOT APPLE)
     target_link_libraries(example_provider_plugin PRIVATE "-Xlinker --exclude-libs=ALL")
 endif()
 

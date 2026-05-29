@@ -25,6 +25,9 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #else
+#ifdef __APPLE__
+#include <crt_externs.h>
+#endif
 #include <fcntl.h>
 #include <poll.h>
 #include <spawn.h>
@@ -33,6 +36,42 @@
 #include <unistd.h>
 #endif
 #include <stdexcept>
+
+#ifndef _WIN32
+static int rocfft_pipe_cloexec(int pipefd[2])
+{
+#ifdef __APPLE__
+    if(pipe(pipefd) != 0)
+        return -1;
+
+    for(int i = 0; i < 2; ++i)
+    {
+        int flags = fcntl(pipefd[i], F_GETFD);
+        if(flags == -1 || fcntl(pipefd[i], F_SETFD, flags | FD_CLOEXEC) == -1)
+        {
+            ::close(pipefd[0]);
+            ::close(pipefd[1]);
+            pipefd[0] = -1;
+            pipefd[1] = -1;
+            return -1;
+        }
+    }
+    return 0;
+#else
+    return pipe2(pipefd, O_CLOEXEC);
+#endif
+}
+
+static char* const* rocfft_subprocess_environ()
+{
+#ifdef __APPLE__
+    return *_NSGetEnviron();
+#else
+    extern char** environ;
+    return environ;
+#endif
+}
+#endif
 
 // simple RAII wrapper around file handles
 struct file_handle_wrapper
@@ -317,13 +356,13 @@ static std::vector<char> execute_subprocess(const std::string&              exe,
     subprocess_failed = exit_code != 0;
 #else
     int stdin_fds[2] = {-1, -1};
-    if(pipe2(stdin_fds, O_CLOEXEC) != 0)
+    if(rocfft_pipe_cloexec(stdin_fds) != 0)
         throw std::runtime_error("failed to create stdin pipe");
     file_handle_wrapper child_stdin_read(stdin_fds[0]);
     file_handle_wrapper child_stdin_write(stdin_fds[1]);
 
     int stdout_fds[2] = {-1, -1};
-    if(pipe2(stdout_fds, O_CLOEXEC) != 0)
+    if(rocfft_pipe_cloexec(stdout_fds) != 0)
         throw std::runtime_error("failed to create stdout pipe");
     file_handle_wrapper child_stdout_read(stdout_fds[0]);
     file_handle_wrapper child_stdout_write(stdout_fds[1]);
@@ -348,7 +387,7 @@ static std::vector<char> execute_subprocess(const std::string&              exe,
                                    &spawn_file_actions,
                                    nullptr,
                                    const_cast<char* const*>(child_argv.data()),
-                                   environ);
+                                   rocfft_subprocess_environ());
     posix_spawn_file_actions_destroy(&spawn_file_actions);
     if(spawn_result != 0)
     {

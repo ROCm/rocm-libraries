@@ -16,6 +16,7 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
+option(FUSILLI_PLUGIN_SKIP_TESTS "Skip building fusilli-plugin tests" OFF)
 
 # CMake includes
 include(GNUInstallDirs)
@@ -54,19 +55,21 @@ find_package(hip CONFIG REQUIRED)
 find_package(hipdnn_data_sdk CONFIG REQUIRED)
 find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
 find_package(hipdnn_frontend CONFIG REQUIRED)
-find_package(hipdnn_test_sdk CONFIG REQUIRED)
 find_package(Fusilli CONFIG REQUIRED)
-# Fetch GTest if system install isn't available
-find_package(GTest CONFIG QUIET)
-if(NOT GTest_FOUND)
-  message(STATUS "GTest not found on system: Fetching from GitHub")
-  FetchContent_Declare(
-    googletest
-    QUIET
-    GIT_REPOSITORY https://github.com/google/googletest.git
-    GIT_TAG        v1.16.0
-  )
-  FetchContent_MakeAvailable(googletest)
+if(NOT FUSILLI_PLUGIN_SKIP_TESTS)
+  find_package(hipdnn_test_sdk CONFIG REQUIRED)
+  # Fetch GTest if system install isn't available
+  find_package(GTest CONFIG QUIET)
+  if(NOT GTest_FOUND)
+    message(STATUS "GTest not found on system: Fetching from GitHub")
+    FetchContent_Declare(
+      googletest
+      QUIET
+      GIT_REPOSITORY https://github.com/google/googletest.git
+      GIT_TAG        v1.16.0
+    )
+    FetchContent_MakeAvailable(googletest)
+  endif()
 endif()
 
 
@@ -114,10 +117,12 @@ set_target_properties(${FUSILLI_PLUGIN_TARGET} PROPERTIES
   VISIBILITY_INLINES_HIDDEN ON
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/${FUSILLI_PLUGIN_RELATIVE_PATH}"
 )
-# Version script hides all symbol definitions not staring with "hipdnn"
-target_link_options(
-  ${FUSILLI_PLUGIN_TARGET} PRIVATE "LINKER:--version-script=${CMAKE_SOURCE_DIR}/exports.map"
-)
+if(NOT WIN32 AND NOT APPLE)
+  # Version script hides all symbol definitions not starting with "hipdnn".
+  target_link_options(
+    ${FUSILLI_PLUGIN_TARGET} PRIVATE "LINKER:--version-script=${CMAKE_SOURCE_DIR}/exports.map"
+  )
+endif()
 
 # Installation
 install(TARGETS ${FUSILLI_PLUGIN_TARGET}
@@ -125,5 +130,7 @@ install(TARGETS ${FUSILLI_PLUGIN_TARGET}
 )
 
 # Tests
-enable_testing()
-add_subdirectory(test)
+if(NOT FUSILLI_PLUGIN_SKIP_TESTS)
+  enable_testing()
+  add_subdirectory(test)
+endif()

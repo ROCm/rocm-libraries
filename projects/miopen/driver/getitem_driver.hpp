@@ -276,7 +276,8 @@ int GetitemDriver<Tgpu, Tref>::GetandSetData()
         }
     }
 
-    if(SetTensorNd(dyDesc, dyTensorParam.lengths, data_type) != miopenStatusSuccess)
+    std::vector<std::size_t> dyLengths(dyTensorParam.lengths.begin(), dyTensorParam.lengths.end());
+    if(SetTensorNd(dyDesc, dyLengths, data_type) != miopenStatusSuccess)
         MIOPEN_THROW("Error parsing doutput tensor: " + inflags.GetValueStr("doutput") + ".");
 
     for(auto indexTensorLength : indexTensorLengths)
@@ -288,7 +289,8 @@ int GetitemDriver<Tgpu, Tref>::GetandSetData()
         indexDescs.push_back(indexDesc);
     }
 
-    if(SetTensorNd(dxDesc, dxTensorParam.lengths, data_type) != miopenStatusSuccess)
+    std::vector<std::size_t> dxLengths(dxTensorParam.lengths.begin(), dxTensorParam.lengths.end());
+    if(SetTensorNd(dxDesc, dxLengths, data_type) != miopenStatusSuccess)
         MIOPEN_THROW("Error parsing dinput tensor: " + inflags.GetValueStr("dinput") + ".");
 
     std::vector<int32_t> error_length;

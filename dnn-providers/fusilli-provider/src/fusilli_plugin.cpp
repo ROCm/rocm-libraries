@@ -14,6 +14,7 @@
 #include <flatbuffers/flatbuffers.h>
 #include <flatbuffers/vector.h>
 #include <fusilli.h>
+#include <fusilli/support/target_platform.h>
 #include <hip/hip_runtime.h>
 #include <hipdnn_data_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_data_sdk/data_objects/engine_details_generated.h>
@@ -502,6 +503,14 @@ hipdnnPluginStatus_t hipdnnEnginePluginExecuteOpGraph(
   std::unordered_map<std::shared_ptr<fusilli::TensorAttr>,
                      std::shared_ptr<fusilli::Buffer>>
       variantPack;
+#if defined(FUSILLI_PLATFORM_DARWIN)
+  struct StagedOutput {
+    void *devicePtr;
+    size_t sizeBytes;
+    std::shared_ptr<fusilli::Buffer> buffer;
+  };
+  std::vector<StagedOutput> stagedOutputs;
+#endif
   for (auto &[uid, tensorAttr] : executionContext->uidToFusilliTensorAttr) {
     // 1. Find associated buffer.
     FUSILLI_PLUGIN_ASSIGN_OR_RETURN(
@@ -516,6 +525,28 @@ hipdnnPluginStatus_t hipdnnEnginePluginExecuteOpGraph(
         elementType, static_cast<size_t>(tensorAttr->getVolume()));
     std::vector<int64_t> dims = tensorAttr->getPhysicalDim();
     std::vector<iree_hal_dim_t> shape(dims.begin(), dims.end());
+#if defined(FUSILLI_PLATFORM_DARWIN)
+    // IREE's HIP external-buffer import path currently wedges the macOS eGPU
+    // direct queue on dispatch. Stage through IREE-owned buffers for correctness
+    // until imported HIP device allocations are supported end-to-end.
+    std::vector<uint8_t> hostBytes(sizeBytes, 0);
+    if (executionContext->graph.isGraphInput(tensorAttr)) {
+      FUSILLI_PLUGIN_CHECK_ERROR(
+          hipMemcpy(hostBytes.data(), hipMallocedBuffer.ptr, sizeBytes,
+                    hipMemcpyDeviceToHost));
+    }
+    FUSILLI_PLUGIN_ASSIGN_OR_RETURN(
+        auto fusilliBuffer,
+        allocateDeviceBufferCopy(/*device=*/fusilliHandle.get(),
+                                 /*deviceAllocator=*/deviceAllocator,
+                                 /*hostBytes=*/hostBytes,
+                                 /*shape=*/shape,
+                                 /*elementType=*/elementType));
+    if (executionContext->graph.isGraphOutput(tensorAttr)) {
+      stagedOutputs.push_back(
+          StagedOutput{hipMallocedBuffer.ptr, sizeBytes, fusilliBuffer});
+    }
+#else
     FUSILLI_PLUGIN_ASSIGN_OR_RETURN(
         auto fusilliBuffer,
         importDevicePointer(/*deviceAllocator=*/deviceAllocator,
@@ -523,6 +554,7 @@ hipdnnPluginStatus_t hipdnnEnginePluginExecuteOpGraph(
                             /*sizeBytes=*/sizeBytes,
                             /*shape=*/shape,
                             /*elementType=*/elementType));
+#endif
     variantPack[tensorAttr] = std::move(fusilliBuffer);
   }
 
@@ -556,6 +588,23 @@ hipdnnPluginStatus_t hipdnnEnginePluginExecuteOpGraph(
 
   FUSILLI_PLUGIN_CHECK_ERROR(
       executionContext->graph.execute(fusilliHandle, variantPack, workspace));
+
+#if defined(FUSILLI_PLATFORM_DARWIN)
+  for (auto &output : stagedOutputs) {
+    std::vector<uint8_t> hostBytes;
+    FUSILLI_PLUGIN_CHECK_ERROR(output.buffer->read(fusilliHandle.get(), hostBytes));
+    if (hostBytes.size() != output.sizeBytes) {
+      return hipdnn_plugin_sdk::PluginLastErrorManager::setLastError(
+          HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+          "Staged output size mismatch: read " +
+              std::to_string(hostBytes.size()) + " bytes, expected " +
+              std::to_string(output.sizeBytes) + " bytes");
+    }
+    FUSILLI_PLUGIN_CHECK_ERROR(
+        hipMemcpy(output.devicePtr, hostBytes.data(), hostBytes.size(),
+                  hipMemcpyHostToDevice));
+  }
+#endif
 
   LOG_API_SUCCESS_AUTO("executed graph");
   return HIPDNN_PLUGIN_STATUS_SUCCESS;

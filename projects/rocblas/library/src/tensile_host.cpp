@@ -71,7 +71,11 @@
 #else
 #include <glob.h>
 #include <libgen.h>
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#else
 #include <link.h>
+#endif
 #include <unistd.h>
 #define ROCBLAS_LIB_PATH "/opt/rocm/lib"
 #endif
@@ -90,9 +94,10 @@ namespace fs = std::experimental::filesystem;
 
 namespace
 {
-#ifndef WIN32
+#if !defined(WIN32)
     std::string rocblas_so_path;
 
+#ifndef __APPLE__
     int rocblas_dl_iterate_phdr_callback(struct dl_phdr_info* hdr_info, size_t size, void* data)
     {
         // uncomment to see all dependent .so files
@@ -103,6 +108,7 @@ namespace
         }
         return 0;
     }
+#endif
 #endif
 
     std::string rocblas_exepath()
@@ -127,6 +133,26 @@ namespace
         // Add trailing "/" to exepath if required
         exepath += exepath.empty() ? "" : "/";
         return exepath.string();
+#elif defined(__APPLE__)
+        std::string pathstr;
+        uint32_t    size = 0;
+        _NSGetExecutablePath(nullptr, &size);
+        std::vector<char> path(size);
+        if(_NSGetExecutablePath(path.data(), &size) == 0)
+        {
+            char* real_path = realpath(path.data(), nullptr);
+            if(real_path)
+            {
+                char* p = strrchr(real_path, '/');
+                if(p)
+                {
+                    p[1]    = 0;
+                    pathstr = real_path;
+                }
+                free(real_path);
+            }
+        }
+        return pathstr;
 #else
         std::string pathstr;
         char*       path = realpath("/proc/self/exe", 0);
@@ -725,7 +751,19 @@ namespace
                     }
                 }
 #else
+#ifdef __APPLE__
+                for(uint32_t i = 0; i < _dyld_image_count(); ++i)
+                {
+                    const char* image_name = _dyld_get_image_name(i);
+                    if(image_name && strstr(image_name, "rocblas."))
+                    {
+                        rocblas_so_path = image_name;
+                        break;
+                    }
+                }
+#else
                 dl_iterate_phdr(rocblas_dl_iterate_phdr_callback, NULL);
+#endif
                 if(rocblas_so_path.size())
                     base_path = std::string{dirname(&rocblas_so_path[0])};
 #endif

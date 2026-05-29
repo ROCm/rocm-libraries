@@ -125,6 +125,49 @@ __device__ inline int64_t amd_wave_read_first_lane(int64_t value)
     return *reinterpret_cast<int64_t*>(to_obj);
 }
 
+template <typename T,
+          ck::enable_if_t<ck::is_integral<T>::value && !ck::is_unsigned<T>::value &&
+                              sizeof(T) == sizeof(int64_t) && !ck::is_same_v<T, int32_t> &&
+                              !ck::is_same_v<T, int64_t>,
+                          bool> = false>
+__device__ inline T amd_wave_read_first_lane(T value)
+{
+    constexpr unsigned object_size        = sizeof(T);
+    constexpr unsigned second_part_offset = object_size / 2;
+    auto* const from_obj                  = reinterpret_cast<const ck::byte*>(&value);
+    alignas(T) ck::byte to_obj[object_size];
+
+    using Sgpr = uint32_t;
+
+    *reinterpret_cast<Sgpr*>(to_obj) =
+        amd_wave_read_first_lane(*reinterpret_cast<const Sgpr*>(from_obj));
+    *reinterpret_cast<Sgpr*>(to_obj + second_part_offset) =
+        amd_wave_read_first_lane(*reinterpret_cast<const Sgpr*>(from_obj + second_part_offset));
+
+    return *reinterpret_cast<T*>(to_obj);
+}
+
+template <typename T,
+          ck::enable_if_t<ck::is_integral<T>::value && ck::is_unsigned<T>::value &&
+                              sizeof(T) == sizeof(uint64_t) && !ck::is_same_v<T, uint32_t>,
+                          bool> = false>
+__device__ inline T amd_wave_read_first_lane(T value)
+{
+    constexpr unsigned object_size        = sizeof(T);
+    constexpr unsigned second_part_offset = object_size / 2;
+    auto* const from_obj                  = reinterpret_cast<const ck::byte*>(&value);
+    alignas(T) ck::byte to_obj[object_size];
+
+    using Sgpr = uint32_t;
+
+    *reinterpret_cast<Sgpr*>(to_obj) =
+        amd_wave_read_first_lane(*reinterpret_cast<const Sgpr*>(from_obj));
+    *reinterpret_cast<Sgpr*>(to_obj + second_part_offset) =
+        amd_wave_read_first_lane(*reinterpret_cast<const Sgpr*>(from_obj + second_part_offset));
+
+    return *reinterpret_cast<T*>(to_obj);
+}
+
 template <typename Object,
           typename = ck::enable_if_t<ck::is_class_v<Object> && ck::is_trivially_copyable_v<Object>>>
 __device__ auto amd_wave_read_first_lane(const Object& obj)

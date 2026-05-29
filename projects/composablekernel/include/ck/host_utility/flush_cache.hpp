@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <hip/hip_runtime.h>
 #include <numeric>
 #include <set>
@@ -48,7 +49,7 @@ struct RotatingMemWrapperMultiABD
         const uint64_t footprint = std::accumulate(size_as.begin(), size_as.end(), 0UL) +
                                    std::accumulate(size_bs.begin(), size_bs.end(), 0UL) +
                                    std::accumulate(size_ds.begin(), size_ds.end(), 0UL);
-        const uint64_t max_rotating_count = (1ULL << 31) / footprint;
+        const auto max_rotating_count = static_cast<std::size_t>((1ULL << 31) / footprint);
         rotating_count                    = std::min(rotating_count, max_rotating_count);
 
         for(size_t i = 1; i < rotating_count; i++)
@@ -198,7 +199,7 @@ struct RotatingMemWrapperMultiD
         // limit the rotating count to prevent oom
         const uint64_t footprint =
             std::accumulate(size_ds.begin(), size_ds.end(), 0UL) + (size_a + size_b);
-        const uint64_t max_rotating_count = (1ULL << 31) / footprint;
+        const auto max_rotating_count = static_cast<std::size_t>((1ULL << 31) / footprint);
         rotating_count                    = std::min(rotating_count, max_rotating_count);
 
         for(size_t i = 1; i < rotating_count; i++)
@@ -313,7 +314,7 @@ struct RotatingMemWrapper
 
         // limit the rotating count to prevent oom
         const uint64_t footprint          = (size_a + size_b);
-        const uint64_t max_rotating_count = (1ULL << 31) / footprint;
+        const auto max_rotating_count = static_cast<std::size_t>((1ULL << 31) / footprint);
         rotating_count                    = std::min(rotating_count, max_rotating_count);
 
         for(size_t i = 1; i < rotating_count; i++)

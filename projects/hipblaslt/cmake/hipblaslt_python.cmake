@@ -34,6 +34,9 @@ function(hipblaslt_configure_bundled_python_command python_binary_dir asan_optio
         "${hipblaslt_SOURCE_DIR}/tensilelite"
     )
     list(JOIN _python_path "${_ds}" _python_path)
+    if(DEFINED ENV{PYTHONPATH} AND NOT "$ENV{PYTHONPATH}" STREQUAL "")
+        set(_python_path "${_python_path}${_ds}$ENV{PYTHONPATH}")
+    endif()
 
     # Capture the configure time path so that the build environment is always
     # fixed to what we saw at configure time.

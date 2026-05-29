@@ -28,7 +28,9 @@ target_compile_definitions(
                              "__HIP_HCC_COMPAT_MODE__=1"
 )
 
-target_compile_options(hipsparselt-test PRIVATE -mf16c)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|i[3-6]86)$")
+    target_compile_options(hipsparselt-test PRIVATE -mf16c)
+endif()
 
 target_link_libraries(
     hipsparselt-test PRIVATE hipsparselt-clients-common GTest::gtest GTest::gtest_main

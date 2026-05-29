@@ -33,7 +33,7 @@
 #include <optional>
 #endif
 
-#ifdef __linux__
+#ifndef _WIN32
 #include <miopen/stringutils.hpp>
 #endif
 
@@ -47,7 +47,7 @@ MIOPEN_DECLARE_ENV_VAR_STR(HOMEDRIVE)
 
 namespace miopen {
 
-#ifdef __linux__
+#ifndef _WIN32
 
 namespace {
 std::string GetHomeDir()

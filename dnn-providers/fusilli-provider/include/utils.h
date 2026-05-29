@@ -21,8 +21,10 @@
 #include <iree/hal/allocator.h>
 #include <iree/hal/buffer_view.h>
 
+#include <cstdint>
 #include <span>
 #include <type_traits>
+#include <vector>
 
 namespace fusilli_plugin {
 
@@ -249,6 +251,38 @@ importDevicePointer(iree_hal_allocator_t *deviceAllocator, void *devicePtr,
   // view.
   iree_hal_buffer_view_release(outBufferView);
 
+  return fusilli::ok(std::move(result));
+}
+
+inline fusilli::ErrorOr<std::shared_ptr<fusilli::Buffer>>
+allocateDeviceBufferCopy(iree_hal_device_t *device,
+                         iree_hal_allocator_t *deviceAllocator,
+                         std::span<const uint8_t> hostBytes,
+                         std::span<const iree_hal_dim_t> shape,
+                         iree_hal_element_type_t elementType) {
+  iree_hal_buffer_view_t *rawBufferView = nullptr;
+  iree_hal_buffer_params_t bufferParams = {
+      .usage = IREE_HAL_BUFFER_USAGE_DEFAULT,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+      .queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY,
+      .min_alignment = 0,
+  };
+  FUSILLI_CHECK_ERROR(iree_hal_buffer_view_allocate_buffer_copy(
+      /*device=*/device, /*device_allocator=*/deviceAllocator,
+      /*shape_rank=*/shape.size(), /*shape=*/shape.data(),
+      /*element_type=*/elementType,
+      /*encoding_type=*/IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
+      /*buffer_params=*/bufferParams,
+      /*initial_value=*/iree_make_const_byte_span(hostBytes.data(),
+                                                  hostBytes.size()),
+      /*out_buffer_view=*/&rawBufferView));
+
+  FUSILLI_ASSIGN_OR_RETURN(auto fusilliBuffer,
+                           fusilli::Buffer::import(rawBufferView));
+  std::shared_ptr<fusilli::Buffer> result =
+      std::make_shared<fusilli::Buffer>(std::move(fusilliBuffer));
+  iree_hal_buffer_view_release(rawBufferView);
   return fusilli::ok(std::move(result));
 }
 

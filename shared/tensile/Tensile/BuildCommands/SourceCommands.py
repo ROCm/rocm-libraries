@@ -24,6 +24,7 @@
 
 import itertools
 import os
+import platform
 import re
 import shlex
 import shutil
@@ -69,6 +70,33 @@ def _computeSourceCodeObjectPath(
     return coPath
 
 
+def _darwinHipHostArgs() -> List[str]:
+    if os.sys.platform != "darwin":
+        return []
+
+    sdkroot = os.environ.get("SDKROOT", "")
+    if not sdkroot:
+        try:
+            sdkroot = (
+                subprocess.check_output(["xcrun", "--show-sdk-path"], stderr=subprocess.DEVNULL)
+                .decode()
+                .strip()
+            )
+        except Exception:
+            sdkroot = ""
+
+    deploymentTarget = os.environ.get("MACOSX_DEPLOYMENT_TARGET", "13.0")
+    arch = os.environ.get("CMAKE_OSX_ARCHITECTURES", platform.machine() or "arm64")
+    if ";" in arch:
+        arch = arch.split(";")[0]
+
+    target = os.environ.get("Tensile_DARWIN_TARGET", f"{arch}-apple-macos{deploymentTarget}")
+    args = ["-target", target, "-stdlib=libc++"]
+    if sdkroot:
+        args.extend(["-isysroot", sdkroot])
+    return args
+
+
 def _compileSourceObjectFile(
     cmdlineArchs: List[str],
     cxxCompiler: str,
@@ -92,7 +120,7 @@ def _compileSourceObjectFile(
     """
     archFlags = ["--offload-arch=" + arch for arch in cmdlineArchs]
 
-    hipFlags = ["-D__HIP_HCC_COMPAT_MODE__=1"]
+    hipFlags = _darwinHipHostArgs() + ["-D__HIP_HCC_COMPAT_MODE__=1"]
     # TODO(@tensile-infra): hipcc is deprecated and should be removed for ROCm 6.5
     hipFlags += (
         ["--genco"]

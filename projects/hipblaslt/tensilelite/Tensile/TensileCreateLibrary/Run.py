@@ -481,7 +481,9 @@ def writeSolutionsAndKernelsTCL(
 
     def assemble(ret, removeTemporaries: bool):
         asmPath, isa, wavefrontsize, result = ret
-        asmToolchain.assembler(isaToGfx(isa), wavefrontsize, str(asmPath), str(asmPath.with_suffix(".o")))
+        objPath = asmPath.with_suffix(".o")
+        if not (os.environ.get("TENSILE_REUSE_ASM_OBJECTS") and objPath.exists()):
+            asmToolchain.assembler(isaToGfx(isa), wavefrontsize, str(asmPath), str(objPath))
         if removeTemporaries:
             asmPath.unlink()
         return result

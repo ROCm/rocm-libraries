@@ -68,8 +68,9 @@ option(TENSILELITE_ENABLE_AUTOBUILD "Generate scripts for wrapping tensile pytho
 if(HIPBLASLT_ENABLE_CLIENT)
     option(HIPBLASLT_BUILD_TESTING "Build hipblaslt client tests." ON)
     option(HIPBLASLT_ENABLE_SAMPLES "Build client samples." ON)
-    # amd-smi is not presently available on Windows so we do not require it.
-    cmake_dependent_option(HIPBLASLT_ENABLE_AMD_SMI "Require amd_smi." ON "NOT WIN32" OFF)
+    # amd-smi is not presently available on Windows or Apple platforms so we do
+    # not require it there.
+    cmake_dependent_option(HIPBLASLT_ENABLE_AMD_SMI "Require amd_smi." ON "NOT WIN32;NOT APPLE" OFF)
     option(HIPBLASLT_ENABLE_BLIS "Enable BLIS support." ON)
 endif()
 
@@ -132,7 +133,7 @@ endif()
 
 if(HIPBLASLT_ENABLE_AMD_SMI)
     find_package(amd_smi REQUIRED)
-else()
+elseif(NOT CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     find_package(amd_smi)
 endif()
 

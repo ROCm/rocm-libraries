@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <iosfwd>
 #include <string>
 
 #include <rocRoller/AssertOpKinds_fwd.hpp>

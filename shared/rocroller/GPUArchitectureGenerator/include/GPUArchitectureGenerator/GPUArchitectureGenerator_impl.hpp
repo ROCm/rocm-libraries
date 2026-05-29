@@ -14,6 +14,7 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <unistd.h>
 
 #include "GPUArchitectureGenerator_defs.hpp"
 

@@ -137,7 +137,7 @@ public:
         if(fd == -1)
             return;
 
-        flock fl    = {};
+        struct flock fl = {};
         fl.l_type   = F_UNLCK;
         fl.l_whence = SEEK_SET;
         fl.l_start  = 0;
@@ -185,7 +185,7 @@ private:
 
     bool lock_impl(bool exclusive, bool nonblocking) const
     {
-        flock fl    = {};
+        struct flock fl = {};
         fl.l_type   = exclusive ? F_WRLCK : F_RDLCK;
         fl.l_whence = SEEK_SET;
         fl.l_start  = 0;

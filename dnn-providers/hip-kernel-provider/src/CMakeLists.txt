@@ -51,7 +51,7 @@ endif()
 add_library(hip_kernel_provider SHARED $<TARGET_OBJECTS:hip_kernel_provider_impl>)
 target_link_libraries(hip_kernel_provider PRIVATE hipdnn_data_sdk hipdnn_plugin_sdk hiprtc::hiprtc hip::host)
 
-if(NOT WIN32)
+if(NOT WIN32 AND NOT APPLE)
     target_link_libraries(hip_kernel_provider PRIVATE "-Xlinker --exclude-libs=ALL")
 endif()
 

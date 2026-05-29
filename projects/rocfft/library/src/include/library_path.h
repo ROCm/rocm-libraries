@@ -28,7 +28,9 @@
 #include <windows.h>
 #else
 #include <dlfcn.h>
+#ifndef __APPLE__
 #include <link.h>
+#endif
 #endif
 
 #if __has_include(<filesystem>)
@@ -40,6 +42,7 @@ namespace std
     namespace filesystem = experimental::filesystem;
 }
 #endif
+#include <stdexcept>
 
 #ifdef _WIN32
 static std::filesystem::path get_library_path_win32()
@@ -60,7 +63,12 @@ static std::filesystem::path get_library_path_win32()
 static std::filesystem::path get_library_path_unix()
 {
     // get address of rocfft lib by looking for a symbol in it
-    Dl_info   info;
+    Dl_info info;
+#ifdef __APPLE__
+    if(!dladdr(reinterpret_cast<const void*>(rocfft_plan_create), &info) || !info.dli_fname)
+        throw std::runtime_error("dladdr failed");
+    return info.dli_fname;
+#else
     link_map* map = nullptr;
     if(!dladdr1(reinterpret_cast<const void*>(rocfft_plan_create),
                 &info,
@@ -68,6 +76,7 @@ static std::filesystem::path get_library_path_unix()
                 RTLD_DL_LINKMAP))
         throw std::runtime_error("dladdr failed");
     return map->l_name;
+#endif
 }
 #endif
 

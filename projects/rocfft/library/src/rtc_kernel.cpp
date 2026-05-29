@@ -63,8 +63,11 @@ RTCKernel::RTCKernel(const std::string&                       kernel_name,
         return;
 #endif
 
-    if(hipModuleGetFunction(&kernel, module.get(), kernel_name.c_str()) != hipSuccess)
-        throw std::runtime_error("failed to get function " + kernel_name);
+    auto get_function_status = hipModuleGetFunction(&kernel, module.get(), kernel_name.c_str());
+    if(get_function_status != hipSuccess)
+        throw std::runtime_error("failed to get function " + kernel_name + ": "
+                                 + hipGetErrorName(get_function_status) + " ("
+                                 + hipGetErrorString(get_function_status) + ")");
 }
 
 #ifndef ROCFFT_DEBUG_GENERATE_KERNEL_HARNESS
@@ -112,19 +115,21 @@ void RTCKernel::launch(RTCKernelArgs&         kargs,
     }
 #endif
 
-    if(hipModuleLaunchKernel(kernel,
-                             gridDim.x,
-                             gridDim.y,
-                             gridDim.z,
-                             blockDim.x,
-                             blockDim.y,
-                             blockDim.z,
-                             lds_bytes,
-                             stream,
-                             nullptr,
-                             config)
-       != hipSuccess)
-        throw std::runtime_error("hipModuleLaunchKernel failure");
+    auto launch_status = hipModuleLaunchKernel(kernel,
+                                               gridDim.x,
+                                               gridDim.y,
+                                               gridDim.z,
+                                               blockDim.x,
+                                               blockDim.y,
+                                               blockDim.z,
+                                               lds_bytes,
+                                               stream,
+                                               nullptr,
+                                               config);
+    if(launch_status != hipSuccess)
+        throw std::runtime_error("hipModuleLaunchKernel failure for " + kernel_name + ": "
+                                 + hipGetErrorName(launch_status) + " ("
+                                 + hipGetErrorString(launch_status) + ")");
 }
 
 bool RTCKernel::get_occupancy(dim3 blockDim, unsigned int lds_bytes, int& occupancy)
