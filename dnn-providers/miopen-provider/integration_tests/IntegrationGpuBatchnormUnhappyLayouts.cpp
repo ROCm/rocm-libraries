@@ -53,7 +53,7 @@ Graph makeGraph(const UnhappyBnLayoutCase& tc)
 
     auto xAttr = makeTensorAttributes(
         "X", DataType::FLOAT, dims, generateStrides(dims, tc.layoutX.strideOrder));
-    auto X = std::make_shared<TensorAttributes>(std::move(xAttr));
+    auto x = std::make_shared<TensorAttributes>(std::move(xAttr));
 
     auto meanAttr = makeTensorAttributes(
         "mean", DataType::FLOAT, cDims, generateStrides(cDims, tc.layoutParam.strideOrder));
@@ -69,9 +69,9 @@ Graph makeGraph(const UnhappyBnLayoutCase& tc)
     auto scale = std::make_shared<TensorAttributes>(std::move(scaleAttr));
     auto bias = std::make_shared<TensorAttributes>(std::move(biasAttr));
 
-    BatchnormInferenceAttributes bn;
-    auto Y = g.batchnorm_inference(X, mean, invVar, scale, bias, bn);
-    Y->set_output(true);
+    const BatchnormInferenceAttributes bn;
+    auto y = g.batchnorm_inference(x, mean, invVar, scale, bias, bn);
+    y->set_output(true);
 
     return g;
 }
@@ -124,25 +124,27 @@ TEST_P(IntegrationGpuBatchnormUnhappyLayouts, RejectsUnsupportedLayouts)
 
     auto result = g.build(_handle);
 
-    EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR) << "err_msg: " << result.err_msg;
+    EXPECT_EQ(result.code, ErrorCode::GRAPH_NOT_SUPPORTED) << "err_msg: " << result.err_msg;
 
     EXPECT_FALSE(result.err_msg.empty()) << "err_msg is empty";
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         IntegrationGpuBatchnormUnhappyLayouts,
-                         ::testing::Values(UnhappyBnLayoutCase{make3d(),
-                                                               makeLayout({0, 1, 2}),
-                                                               makeLayout({0, 1, 2}),
-                                                               "ThreeDimInput"},
-                                           UnhappyBnLayoutCase{make4d(),
-                                                               makeLayout({1, 0, 2, 3}),
-                                                               makeLayout({0, 2, 3, 1}),
-                                                               "MixedLayouts"},
-                                           UnhappyBnLayoutCase{make4d(),
-                                                               makeLayout({0, 1, 2, 3}),
-                                                               makeLayout({1, 0, 2, 3}),
-                                                               "NonStandardStrideOrder"}),
-                         [](const ::testing::TestParamInfo<UnhappyBnLayoutCase>& info) {
-                             return std::string(info.param.name);
-                         });
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuBatchnormUnhappyLayouts,
+    ::testing::Values(
+        // 3D batchnorm is supported, but only with a standard NCH
+        // layout (strideOrder {2, 1, 0}). This case uses a non-standard
+        // strideOrder {0, 1, 2}, which no engine accepts, so the graph
+        // is rejected.
+        UnhappyBnLayoutCase{
+            make3d(), makeLayout({0, 1, 2}), makeLayout({0, 1, 2}), "ThreeDimInput"},
+        UnhappyBnLayoutCase{
+            make4d(), makeLayout({1, 0, 2, 3}), makeLayout({0, 2, 3, 1}), "MixedLayouts"},
+        UnhappyBnLayoutCase{make4d(),
+                            makeLayout({0, 1, 2, 3}),
+                            makeLayout({1, 0, 2, 3}),
+                            "NonStandardStrideOrder"}),
+    [](const ::testing::TestParamInfo<UnhappyBnLayoutCase>& info) {
+        return std::string(info.param.name);
+    });
