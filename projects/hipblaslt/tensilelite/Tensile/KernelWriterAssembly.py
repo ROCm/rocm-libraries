@@ -7770,6 +7770,97 @@ class KernelWriterAssembly(KernelWriter):
       return vgpr("ValuC+%u"%idx, sz)
 
   ##############################################################################
+  # Pure MFMA instruction emission helpers (no self dependency).
+  # Each returns a Module containing the emitted instructions.
+  # These are candidates for future migration to StinkyTofu.
+  ##############################################################################
+
+  @staticmethod
+  def _accVgprStr(miArchVgpr, maxLimitAgprs, idx, sz=1):
+    if not miArchVgpr:
+      if idx >= maxLimitAgprs:
+        return vgpr(idx - maxLimitAgprs, sz)
+      else:
+        return accvgpr(idx, sz)
+    else:
+      return vgpr("ValuC+%u" % idx, sz)
+
+  @staticmethod
+  def _emitStandardMfma(miInInstType, miOutInstType, variant, mfma_1k,
+                        acc, src0, src1, acc2, neg_flag, comment):
+    imod = Module("standard_mfma")
+    imod.add(MFMAInstruction(instType=miInInstType, accType=miOutInstType, variant=variant, mfma1k=mfma_1k, \
+                             acc=acc, a=src0, b=src1, acc2=acc2, neg=neg_flag, \
+                             comment=comment))
+    return imod
+
+  @staticmethod
+  def _emitSparseMfma(miInInstType, miOutInstType, variant, mfma_1k,
+                      acc, src0, src1, metadata, neg_flag, comment):
+    imod = Module("sparse_mfma")
+    imod.add(SMFMAInstruction(instType=miInInstType, accType=miOutInstType, variant=variant, mfma1k=mfma_1k, \
+                              acc=acc, a=src0, b=src1, metadata=metadata, neg=neg_flag, \
+                              comment=comment))
+    return imod
+
+  @staticmethod
+  def _emitF32XEmulationMfma(miOutInstType, variant, mfma_1k,
+                             acc, acc2, src0_0, src0_1, src1_0, src1_1,
+                             neg_flag, sourceSwap, comment):
+    imod = Module("f32x_mfma")
+    imod.add(MFMAInstruction(instType=InstType.INST_BF16, accType=miOutInstType, variant=variant, mfma1k=mfma_1k, \
+                             acc=acc, a=src0_0, b=src1_0, acc2=acc2, neg=neg_flag, \
+                             comment="src0_h*src1_h, " + comment))
+    if sourceSwap:
+      imod.add(MFMAInstruction(instType=InstType.INST_BF16, accType=miOutInstType, variant=variant, mfma1k=mfma_1k, \
+                               acc=acc, a=src0_0, b=src1_1, acc2=acc2, neg=neg_flag, \
+                               comment="src0_h*src1_l, " + comment))
+      imod.add(MFMAInstruction(instType=InstType.INST_BF16, accType=miOutInstType, variant=variant, mfma1k=mfma_1k, \
+                               acc=acc, a=src0_1, b=src1_0, acc2=acc2, neg=neg_flag, \
+                               comment="src0_l*src1_h, " + comment))
+    else:
+      imod.add(MFMAInstruction(instType=InstType.INST_BF16, accType=miOutInstType, variant=variant, mfma1k=mfma_1k, \
+                               acc=acc, a=src0_1, b=src1_0, acc2=acc2, neg=neg_flag, \
+                               comment="src0_l*src1_h, " + comment))
+      imod.add(MFMAInstruction(instType=InstType.INST_BF16, accType=miOutInstType, variant=variant, mfma1k=mfma_1k, \
+                               acc=acc, a=src0_0, b=src1_1, acc2=acc2, neg=neg_flag, \
+                               comment="src0_h*src1_l, " + comment))
+    return imod
+
+  @staticmethod
+  def _emitMXBlockMfma(miInInstType, miOutInstType, miInScale0InstType, miInScale1InstType,
+                       variant, acc, src0, src1, acc2, srcMX0, srcMX1, block, comment):
+    imod = Module("mx_mfma")
+    imod.add(MXMFMAInstruction(instType=miInInstType, accType=miOutInstType, \
+                               mxScaleAType=miInScale0InstType, mxScaleBType=miInScale1InstType, variant=variant, \
+                               acc=acc, a=src0, b=src1, acc2=acc2, \
+                               mxsa=srcMX0, mxsb=srcMX1, block=block, \
+                               comment=comment))
+    return imod
+
+  @staticmethod
+  def _emitComplexMfma(miInInstType, miOutInstType, variant,
+                       src0_rr, src1_rr, acc_cr, acc2_cr,
+                       src0_ri, src1_ri, acc_cr2, acc2_cr2,
+                       src0_ir, src1_ir, acc_ci, acc2_ci,
+                       src0_ii, src1_ii, acc_ci2, acc2_ci2,
+                       commentCr1, commentCr2, commentCi1, commentCi2):
+    imod = Module("complex_mfma")
+    imod.add(MFMAInstruction(instType=miInInstType, accType=miOutInstType, variant=variant, mfma1k=False, \
+                             acc=acc_cr, a=src0_rr, b=src1_rr, acc2=acc2_cr, \
+                             comment=commentCr1))
+    imod.add(MFMAInstruction(instType=miInInstType, accType=miOutInstType, variant=variant, mfma1k=False, \
+                             acc=acc_cr2, a=src0_ri, b=src1_ri, acc2=acc2_cr2, \
+                             comment=commentCr2))
+    imod.add(MFMAInstruction(instType=miInInstType, accType=miOutInstType, variant=variant, mfma1k=False, \
+                             acc=acc_ci, a=src0_ir, b=src1_ir, acc2=acc2_ci, \
+                             comment=commentCi1))
+    imod.add(MFMAInstruction(instType=miInInstType, accType=miOutInstType, variant=variant, mfma1k=False, \
+                             acc=acc_ci2, a=src0_ii, b=src1_ii, acc2=acc2_ci2, \
+                             comment=commentCi2))
+    return imod
+
+  ##############################################################################
   # MFMA Iteration
   ##############################################################################
   def mfmaIter(self, kernel, tPA, tPB, u, innerUnroll, vregSetIdx, unrollLoopIdx = 0, unrollIdx = 0, tail = False, firstIter = False, postShiftK = Module()):
@@ -8683,21 +8774,34 @@ class KernelWriterAssembly(KernelWriter):
               if inst is not None:
                 imod.add(inst)
             variant = [kernel["MatrixInstM"], kernel["MatrixInstN"], kernel["MatrixInstK"], kernel["MatrixInstB"]]
-            imod.add(MFMAInstruction(instType=miInInstType, accType=miOutInstType, variant=variant, mfma1k=False, \
-                     acc=self.accVgprReadWriteIndex(kernel, accStart, (accEnd-accStart+1)), a=src0, b=src1, acc2=self.accVgprReadWriteIndex(kernel, accStart, (accEnd-accStart+1)), \
-                     comment="Cr += Ar*Br"))
-            (src0, src1) = (bi, (vgpr(ccVgprs[0] + offsetVgpr[0], numRegistersOut) if ccVgprs[0] else ai)) if kernel["SourceSwap"] else ((vgpr(ccVgprs[0] + offsetVgpr[0], numRegistersOut) if ccVgprs[0] else ai), bi)
-            imod.add(MFMAInstruction(instType=miInInstType, accType=miOutInstType, variant=variant, mfma1k=False, \
-                     acc=self.accVgprReadWriteIndex(kernel, (accStart+accStoreCIdx), (accEnd-accStart+1)), a=src0, b=src1, acc2=self.accVgprReadWriteIndex(kernel, accStart, (accEnd-accStart+1)), \
-                     comment="Cr += %sAi*Bi"%("-" if ccVgprs[0] else "")))
-            (src0, src1) = (br, (vgpr(ccVgprs[1] + offsetVgpr[1], numRegistersOut) if ccVgprs[1] else ai)) if kernel["SourceSwap"] else ((vgpr(ccVgprs[1] + offsetVgpr[1], numRegistersOut) if ccVgprs[1] else ai), br)
-            imod.add(MFMAInstruction(instType=miInInstType, accType=miOutInstType, variant=variant, mfma1k=False, \
-                     acc=self.accVgprReadWriteIndex(kernel, (accStart+accImOffset), (accEnd-accStart+1)), a=src0, b=src1, acc2=self.accVgprReadWriteIndex(kernel, accStartSrcImg, (accEndSrcImg-accStartSrcImg+1)), \
-                     comment="Ci += %sAi*Br"%("-" if ccVgprs[1] else "")))
-            (src0, src1) = (bi, (vgpr(ccVgprs[2] + offsetVgpr[2], numRegistersOut) if ccVgprs[2] else ar)) if kernel["SourceSwap"] else ((vgpr(ccVgprs[2] + offsetVgpr[2], numRegistersOut) if ccVgprs[2] else ar), bi)
-            imod.add(MFMAInstruction(instType=miInInstType, accType=miOutInstType, variant=variant, mfma1k=False, \
-                     acc=self.accVgprReadWriteIndex(kernel, (accStart+accImOffset+accStoreCIdx), (accEnd-accStart+1)), a=src0, b=src1, acc2=self.accVgprReadWriteIndex(kernel, accStartSrcImg, (accEndSrcImg-accStartSrcImg+1)), \
-                     comment="Ci += %sAr*Bi"%("-" if ccVgprs[2] else "")))
+            miArchVgpr = kernel["MIArchVgpr"]
+            maxLimitAgprs = self.states.maxLimitAgprs
+            accSz = accEnd - accStart + 1
+            accSzImg = accEndSrcImg - accStartSrcImg + 1
+            negAi0 = vgpr(ccVgprs[0] + offsetVgpr[0], numRegistersOut) if ccVgprs[0] else ai
+            negAi1 = vgpr(ccVgprs[1] + offsetVgpr[1], numRegistersOut) if ccVgprs[1] else ai
+            negAr2 = vgpr(ccVgprs[2] + offsetVgpr[2], numRegistersOut) if ccVgprs[2] else ar
+            (src0_ri, src1_ri) = (bi, negAi0) if kernel["SourceSwap"] else (negAi0, bi)
+            (src0_ir, src1_ir) = (br, negAi1) if kernel["SourceSwap"] else (negAi1, br)
+            (src0_ii, src1_ii) = (bi, negAr2) if kernel["SourceSwap"] else (negAr2, bi)
+            imod.add(self._emitComplexMfma(
+                     miInInstType, miOutInstType, variant,
+                     src0, src1,
+                     self._accVgprStr(miArchVgpr, maxLimitAgprs, accStart, accSz),
+                     self._accVgprStr(miArchVgpr, maxLimitAgprs, accStart, accSz),
+                     src0_ri, src1_ri,
+                     self._accVgprStr(miArchVgpr, maxLimitAgprs, accStart+accStoreCIdx, accSz),
+                     self._accVgprStr(miArchVgpr, maxLimitAgprs, accStart, accSz),
+                     src0_ir, src1_ir,
+                     self._accVgprStr(miArchVgpr, maxLimitAgprs, accStart+accImOffset, accSz),
+                     self._accVgprStr(miArchVgpr, maxLimitAgprs, accStartSrcImg, accSzImg),
+                     src0_ii, src1_ii,
+                     self._accVgprStr(miArchVgpr, maxLimitAgprs, accStart+accImOffset+accStoreCIdx, accSz),
+                     self._accVgprStr(miArchVgpr, maxLimitAgprs, accStartSrcImg, accSzImg),
+                     "Cr += Ar*Br",
+                     "Cr += %sAi*Bi"%("-" if ccVgprs[0] else ""),
+                     "Ci += %sAi*Br"%("-" if ccVgprs[1] else ""),
+                     "Ci += %sAr*Bi"%("-" if ccVgprs[2] else "")))
             for v in ccVgprs:
               if v is not None: self.vgprPool.checkIn(v)
           else:
@@ -8722,20 +8826,23 @@ class KernelWriterAssembly(KernelWriter):
             waits = self.mfmaIter_waitCount(kernel)
             if waits > 0 and prevAccIdx == accIdx:
               imod.add(SNop(waits - 1, "Wait for C"))
+            miArchVgpr = kernel["MIArchVgpr"]
+            maxLimitAgprs = self.states.maxLimitAgprs
+            accSz = accEnd - accStart + 1
+            acc  = self._accVgprStr(miArchVgpr, maxLimitAgprs, accStart + accStoreCIdx, accSz)
+            acc2 = self._accVgprStr(miArchVgpr, maxLimitAgprs, accStart, accSz)
+            comment = "left value = %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)
+
             if(kernel["ProblemType"]["Sparse"]):
               if kernel["DirectToVgprSparseMetadata"]:
                 miWaveTile = kernel["MIWaveTileB"] if kernel["ProblemType"]["Sparse"] == 2 else kernel["MIWaveTileA"]
                 idx = idx1 if kernel["ProblemType"]["Sparse"] == 2 else idx0
                 accInStart = miWaveTile * kernel["LoopIters"] * unrollLoopIdx + idx * kernel["LoopIters"] + unrollIdx
-                imod.add(SMFMAInstruction(instType=miInInstType, accType=miOutInstType, variant=variant, mfma1k=mfma_1k, \
-                                        acc=self.accVgprReadWriteIndex(kernel, (accStart+accStoreCIdx), (accEnd-accStart+1)), \
-                                        a=src0, b=src1, metadata=vgpr("ValuMetadata+%u"%(accInStart)), neg=neg_flag, \
-                                        comment="left value = %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)))
+                imod.add(self._emitSparseMfma(miInInstType, miOutInstType, variant, mfma_1k,
+                           acc, src0, src1, vgpr("ValuMetadata+%u"%(accInStart)), neg_flag, comment))
               else:
-                imod.add(SMFMAInstruction(instType=miInInstType, accType=miOutInstType, variant=variant, mfma1k=mfma_1k, \
-                           acc=self.accVgprReadWriteIndex(kernel, (accStart+accStoreCIdx), (accEnd-accStart+1)), \
-                           a=src0, b=src1, metadata=mStr, neg=neg_flag, \
-                           comment="left value = %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)))
+                imod.add(self._emitSparseMfma(miInInstType, miOutInstType, variant, mfma_1k,
+                           acc, src0, src1, mStr, neg_flag, comment))
             else:
               if kernel["UseF32XEmulation"]:
                 abOffsetStr = "+" + str(vgprPerInputA // 2)
@@ -8750,41 +8857,16 @@ class KernelWriterAssembly(KernelWriter):
                   src0_0     = vgpr(aStr_base[:-4], vgprPerInputA / 2)
                   src0_1     = vgpr(aStr_base[:-4] + abOffsetStr, vgprPerInputA / 2)
 
-                imod.add(MFMAInstruction(instType=InstType.INST_BF16, accType=miOutInstType, variant=variant, mfma1k=mfma_1k, \
-                                       acc=self.accVgprReadWriteIndex(kernel, (accStart+accStoreCIdx), (accEnd-accStart+1)), \
-                                       a=src0_0, b=src1_0, acc2=self.accVgprReadWriteIndex(kernel, accStart, (accEnd-accStart+1)), neg=neg_flag,\
-                                       comment="src0_h*src1_h, left value = %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)))
-                if kernel["SourceSwap"]:
-                  imod.add(MFMAInstruction(instType=InstType.INST_BF16, accType=miOutInstType, variant=variant, mfma1k=mfma_1k, \
-                                        acc=self.accVgprReadWriteIndex(kernel, (accStart+accStoreCIdx), (accEnd-accStart+1)), \
-                                        a=src0_0, b=src1_1, acc2=self.accVgprReadWriteIndex(kernel, accStart, (accEnd-accStart+1)), neg=neg_flag,\
-                                        comment="src0_h*src1_l, left value = %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)))
-                  imod.add(MFMAInstruction(instType=InstType.INST_BF16, accType=miOutInstType, variant=variant, mfma1k=mfma_1k, \
-                                        acc=self.accVgprReadWriteIndex(kernel, (accStart+accStoreCIdx), (accEnd-accStart+1)), \
-                                        a=src0_1, b=src1_0, acc2=self.accVgprReadWriteIndex(kernel, accStart, (accEnd-accStart+1)), neg=neg_flag,\
-                                        comment="src0_l*src1_h, left value = %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)))
-                else:
-                  imod.add(MFMAInstruction(instType=InstType.INST_BF16, accType=miOutInstType, variant=variant, mfma1k=mfma_1k, \
-                                        acc=self.accVgprReadWriteIndex(kernel, (accStart+accStoreCIdx), (accEnd-accStart+1)), \
-                                        a=src0_1, b=src1_0, acc2=self.accVgprReadWriteIndex(kernel, accStart, (accEnd-accStart+1)), neg=neg_flag,\
-                                        comment="src0_l*src1_h, left value = %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)))
-                  imod.add(MFMAInstruction(instType=InstType.INST_BF16, accType=miOutInstType, variant=variant, mfma1k=mfma_1k, \
-                                        acc=self.accVgprReadWriteIndex(kernel, (accStart+accStoreCIdx), (accEnd-accStart+1)), \
-                                        a=src0_0, b=src1_1, acc2=self.accVgprReadWriteIndex(kernel, accStart, (accEnd-accStart+1)), neg=neg_flag,\
-                                        comment="src0_h*src1_l, left value = %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)))
+                imod.add(self._emitF32XEmulationMfma(miOutInstType, variant, mfma_1k,
+                           acc, acc2, src0_0, src0_1, src1_0, src1_1,
+                           neg_flag, kernel["SourceSwap"], comment))
               elif kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]:
                 block = max(kernel["ProblemType"]["MXBlockA"], kernel["ProblemType"]["MXBlockB"])
-                imod.add(MXMFMAInstruction(instType=miInInstType, accType=miOutInstType, \
-                                       mxScaleAType=miInScale0InstType, mxScaleBType=miInScale1InstType, variant=variant, \
-                                       acc=self.accVgprReadWriteIndex(kernel, (accStart+accStoreCIdx), (accEnd-accStart+1)), \
-                                       a=src0, b=src1, acc2=self.accVgprReadWriteIndex(kernel, accStart, (accEnd-accStart+1)), \
-                                       mxsa=srcMX0, mxsb=srcMX1, block=block,
-                                       comment="left value = %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)))
+                imod.add(self._emitMXBlockMfma(miInInstType, miOutInstType, miInScale0InstType, miInScale1InstType,
+                           variant, acc, src0, src1, acc2, srcMX0, srcMX1, block, comment))
               else:
-                imod.add(MFMAInstruction(instType=miInInstType, accType=miOutInstType, variant=variant, mfma1k=mfma_1k, \
-                                       acc=self.accVgprReadWriteIndex(kernel, (accStart+accStoreCIdx), (accEnd-accStart+1)), \
-                                       a=src0, b=src1, acc2=self.accVgprReadWriteIndex(kernel, accStart, (accEnd-accStart+1)), neg=neg_flag,\
-                                       comment="left value = %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)))
+                imod.add(self._emitStandardMfma(miInInstType, miOutInstType, variant, mfma_1k,
+                           acc, src0, src1, acc2, neg_flag, comment))
             prevAccIdx = accIdx
 
       if kernel["ExpertSchedulingMode"] > 0:
