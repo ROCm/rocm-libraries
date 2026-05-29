@@ -3478,21 +3478,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(LACN2_BLOCKSIZE)
     }
 
     // reduce within Warp
-    sum += shift_left(sum, 1);
-    repeated = repeated & __shfl_down(repeated, 1);
-    sum += shift_left(sum, 2);
-    repeated = repeated & __shfl_down(repeated, 2);
-    sum += shift_left(sum, 4);
-    repeated = repeated & __shfl_down(repeated, 4);
-    sum += shift_left(sum, 8);
-    repeated = repeated & __shfl_down(repeated, 8);
-    sum += shift_left(sum, 16);
-    repeated = repeated & __shfl_down(repeated, 16);
-    if(WarpSize > 32)
-    {
-        sum += shift_left(sum, 32);
-        repeated = repeated & __shfl_down(repeated, 32);
-    }
+    reduce_wave_sum(sum);
+    reduce_wave_and(repeated);
 
     if(tid % WarpSize == 0)
     {

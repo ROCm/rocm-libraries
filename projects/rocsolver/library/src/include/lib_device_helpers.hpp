@@ -1496,11 +1496,16 @@ __device__ inline T shfl_bcast_T(T v, int src_lane)
 
 #endif // AMDGCN GFX8+
 
-template <std::int32_t WDIM = 0, typename S>
-__device__ inline void reduce_wave_max_nan(S& val)
+// Bitwise-AND reduction across the wavefront. val receives the AND of all lanes.
+// AMDGCN GFX8+: DPP register-to-register shuffles (no LDS traffic).
+// Fallback: __shfl_down halving loop; result lands in lane 0.
+template <std::int32_t WDIM = 0>
+__device__ inline void reduce_wave_and(int& val)
 {
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__AMDGCN__) && !defined(__GFX6__) \
     && !defined(__GFX7__)
+    // GFX10/11/12 = RDNA (wavefront=32, row_bcast DPP not available on GFX11).
+    // All other AMDGCN in this guard = CDNA (gfx90x/94x, wavefront=64).
 #if defined(__GFX10__) || defined(__GFX11__) || defined(__GFX12__)
     constexpr bool is_cdna = false;
     constexpr bool bndCtrl = false;
@@ -1509,23 +1514,79 @@ __device__ inline void reduce_wave_max_nan(S& val)
     constexpr bool bndCtrl = true;
 #endif
 
-    val = rocblas_max_nan(val, move_dpp_T<0xb1, 0xf, 0xf, bndCtrl>(val));
-    val = rocblas_max_nan(val, move_dpp_T<0x4e, 0xf, 0xf, bndCtrl>(val));
-    val = rocblas_max_nan(val, move_dpp_T<0x124, 0xf, 0xf, bndCtrl>(val));
-    val = rocblas_max_nan(val, move_dpp_T<0x128, 0xf, 0xf, bndCtrl>(val));
+    // Steps 1-4: cover the first 16 lanes (present on all supported wavefront sizes).
+    val &= __builtin_amdgcn_mov_dpp(val, 0xb1, 0xf, 0xf, bndCtrl); // quad_perm:[1,0,3,2]  shift 1
+    val &= __builtin_amdgcn_mov_dpp(val, 0x4e, 0xf, 0xf, bndCtrl); // quad_perm:[2,3,0,1]  shift 2
+    val &= __builtin_amdgcn_mov_dpp(val, 0x124, 0xf, 0xf, bndCtrl); // row_ror:4            shift 4
+    val &= __builtin_amdgcn_mov_dpp(val, 0x128, 0xf, 0xf, bndCtrl); // row_ror:8            shift 8
 
+    // Step 5: broadcast lane-15 result into lanes 16-31.
     if constexpr(is_cdna)
-        val = rocblas_max_nan(val, move_dpp_T<0x142, 0xf, 0xf, bndCtrl>(val));
+        val &= __builtin_amdgcn_mov_dpp(val, 0x142, 0xf, 0xf, bndCtrl); // row_bcast:15 (CDNA)
     else
-        val = rocblas_max_nan(val, ds_swizzle_T<0x1e0>(val));
+        val &= __builtin_amdgcn_ds_swizzle(val, 0x1e0); // GFX11 equivalent via ds_swizzle
 
+    // Step 6: broadcast lane-31 result into lanes 32-63 (CDNA wavefront=64 only).
     if constexpr(is_cdna)
-        val = rocblas_max_nan(val, move_dpp_T<0x143, 0xf, 0xf, bndCtrl>(val));
+        val &= __builtin_amdgcn_mov_dpp(val, 0x143, 0xf, 0xf, bndCtrl); // row_bcast:31
 
-    val = shfl_bcast_T(val, warpSize - 1);
+    // Result is in the last lane; broadcast to all lanes so any caller lane can read it.
+    val = __shfl(val, warpSize - 1);
+#else
+    // Shuffle fallback for non-AMDGCN or pre-GFX8.
+#pragma unroll
+    for(rocblas_int r = warpSize / 2; r >= 1; r /= 2)
+        val &= __shfl_down(val, r);
 #endif
 }
 
+// NaN-propagating max reduction across the wavefront. val receives the max of all lanes.
+// AMDGCN GFX8+: DPP register-to-register shuffles (no LDS traffic).
+// Fallback: __shfl_down halving loop; result lands in lane 0.
+template <std::int32_t WDIM = 0, typename S>
+__device__ inline void reduce_wave_max_nan(S& val)
+{
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__AMDGCN__) && !defined(__GFX6__) \
+    && !defined(__GFX7__)
+    // GFX10/11/12 = RDNA (wavefront=32, row_bcast DPP not available on GFX11).
+    // All other AMDGCN in this guard = CDNA (gfx90x/94x, wavefront=64).
+#if defined(__GFX10__) || defined(__GFX11__) || defined(__GFX12__)
+    constexpr bool is_cdna = false;
+    constexpr bool bndCtrl = false;
+#else
+    constexpr bool is_cdna = true;
+    constexpr bool bndCtrl = true;
+#endif
+
+    // Steps 1-4: cover the first 16 lanes (present on all supported wavefront sizes).
+    val = rocblas_max_nan(val, move_dpp_T<0xb1, 0xf, 0xf, bndCtrl>(val)); // quad_perm:[1,0,3,2]  shift 1
+    val = rocblas_max_nan(val, move_dpp_T<0x4e, 0xf, 0xf, bndCtrl>(val)); // quad_perm:[2,3,0,1]  shift 2
+    val = rocblas_max_nan(val, move_dpp_T<0x124, 0xf, 0xf, bndCtrl>(val)); // row_ror:4            shift 4
+    val = rocblas_max_nan(val, move_dpp_T<0x128, 0xf, 0xf, bndCtrl>(val)); // row_ror:8            shift 8
+
+    // Step 5: broadcast lane-15 result into lanes 16-31.
+    if constexpr(is_cdna)
+        val = rocblas_max_nan(val, move_dpp_T<0x142, 0xf, 0xf, bndCtrl>(val)); // row_bcast:15 (CDNA)
+    else
+        val = rocblas_max_nan(val, ds_swizzle_T<0x1e0>(val)); // GFX11 equivalent via ds_swizzle
+
+    // Step 6: broadcast lane-31 result into lanes 32-63 (CDNA wavefront=64 only).
+    if constexpr(is_cdna)
+        val = rocblas_max_nan(val, move_dpp_T<0x143, 0xf, 0xf, bndCtrl>(val)); // row_bcast:31
+
+    // Result is in the last lane; broadcast to all lanes so any caller lane can read it.
+    val = shfl_bcast_T(val, warpSize - 1);
+#else
+    // Shuffle fallback for non-AMDGCN or pre-GFX8.
+#pragma unroll
+    for(rocblas_int r = warpSize / 2; r >= 1; r /= 2)
+        val = rocblas_max_nan(val, shift_left(val, r));
+#endif
+}
+
+// Sum reduction across the wavefront. val receives the sum of all lanes.
+// AMDGCN GFX8+: DPP register-to-register shuffles (no LDS traffic).
+// Fallback: __shfl_down halving loop; result lands in lane 0.
 template <std::int32_t WDIM = 0, typename S>
 __device__ inline void reduce_wave_sum(S& val)
 {
@@ -1557,14 +1618,14 @@ __device__ inline void reduce_wave_sum(S& val)
     if constexpr(is_cdna)
         val += move_dpp_T<0x143, 0xf, 0xf, bndCtrl>(val); // row_bcast:31
 
-    // Result is in the last lane; broadcast to lane 0 so callers using lane_id==0 are unchanged.
+    // Result is in the last lane; broadcast to all lanes so any caller lane can read it.
     val = shfl_bcast_T(val, warpSize - 1);
 
 #else
-//     // Shuffle fallback for non-AMDGCN or pre-GFX8.
-// #pragma unroll
-//     for(rocblas_int r = warpSize / 2; r >= 1; r /= 2)
-//         val += shift_left(val, r);
+    // Shuffle fallback for non-AMDGCN or pre-GFX8.
+#pragma unroll
+    for(rocblas_int r = warpSize / 2; r >= 1; r /= 2)
+        val += shift_left(val, r);
 #endif
 }
 
