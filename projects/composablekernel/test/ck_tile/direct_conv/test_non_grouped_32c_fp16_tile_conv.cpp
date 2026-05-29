@@ -628,7 +628,7 @@ TEST_F(DirectConvNonGrouped32cFp16V3CyclicShift8wave3x3DgradTest, Dgrad_Config46
 }
 
 // =============================================================================
-// v3 tests — new wave counts 3,5,6,7 (CyclicShift only) + XOR 8-wave (40-43)
+// v3 tests — wave counts 3,5,6,7 (CyclicShift only) + XOR 8-wave (40-43)
 //
 // For Fprop: C == waves_per_wg * 32, K must be multiple of 16.
 // For Dgrad: K == waves_per_wg * 32, C must be multiple of 16.
@@ -640,6 +640,10 @@ TEST_F(DirectConvNonGrouped32cFp16V3CyclicShift8wave3x3DgradTest, Dgrad_Config46
 // waves=6: block_c=192  (Fprop CyclicShift DRAM=33, LDS=35 / Dgrad DRAM=32, LDS=34)
 // waves=7: block_c=224  (Fprop CyclicShift DRAM=37, LDS=39 / Dgrad DRAM=36, LDS=38)
 // waves=8 XOR:          (Fprop XOR DRAM=41, LDS=43         / Dgrad DRAM=40, LDS=42)
+//
+// For waves=3,5,6,7: BLOCK_C8 does not divide 64, so the tile distribution
+// maps fewer than 64 lanes. Excess lanes are masked by the load_active guard
+// in the base InputLoader.
 // =============================================================================
 
 // --- waves=3 Fprop (CyclicShift DRAM=25, CyclicShift+LDS=27) ---
@@ -816,6 +820,80 @@ TEST_F(DirectConvNonGrouped32cFp16V3Waves7DgradTest, Dgrad_Cfg36_CyclicShift_DRA
 TEST_F(DirectConvNonGrouped32cFp16V3Waves7DgradTest, Dgrad_Cfg38_CyclicShift_LDS_C64_K224)
 {
     ASSERT_TRUE((RunDgrad<38>(1, 8, 8, 1, 64, 224, 3, 3, 1, 1)));
+}
+
+// --- Integration tests: odd-wave configs with larger K ---
+// These test the failing profiler case (C=192, K=48) and similar shapes
+// where K is not a power of 2 or requires multiple K-blocks.
+
+class DirectConvNonGrouped32cFp16V3OddWavesIntegrationTest
+    : public DirectConvGroupedTestHarness<TileConv32cDenseKernelTraitsV3>
+{
+};
+
+// waves=3 (C=96): K=48 requires 3 K-blocks of 16
+TEST_F(DirectConvNonGrouped32cFp16V3OddWavesIntegrationTest, Fprop_Cfg25_Waves3_C96_K48)
+{
+    ASSERT_TRUE((RunFprop<25>(1, 8, 8, 1, 96, 48, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3OddWavesIntegrationTest, Dgrad_Cfg24_Waves3_C48_K96)
+{
+    ASSERT_TRUE((RunDgrad<24>(1, 8, 8, 1, 48, 96, 3, 3, 1, 1)));
+}
+
+// waves=5 (C=160): K=48 requires 3 K-blocks of 16
+TEST_F(DirectConvNonGrouped32cFp16V3OddWavesIntegrationTest, Fprop_Cfg29_Waves5_C160_K48)
+{
+    ASSERT_TRUE((RunFprop<29>(1, 8, 8, 1, 160, 48, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3OddWavesIntegrationTest, Dgrad_Cfg28_Waves5_C48_K160)
+{
+    ASSERT_TRUE((RunDgrad<28>(1, 8, 8, 1, 48, 160, 3, 3, 1, 1)));
+}
+
+// waves=6 (C=192): K=48
+TEST_F(DirectConvNonGrouped32cFp16V3OddWavesIntegrationTest, Fprop_Cfg33_Waves6_C192_K48)
+{
+    ASSERT_TRUE((RunFprop<33>(1, 8, 8, 1, 192, 48, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3OddWavesIntegrationTest, Fprop_Cfg35_Waves6_C192_K48_LDS)
+{
+    ASSERT_TRUE((RunFprop<35>(1, 8, 8, 1, 192, 48, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3OddWavesIntegrationTest, Dgrad_Cfg32_Waves6_C48_K192)
+{
+    ASSERT_TRUE((RunDgrad<32>(1, 8, 8, 1, 48, 192, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3OddWavesIntegrationTest, Dgrad_Cfg34_Waves6_C48_K192_LDS)
+{
+    ASSERT_TRUE((RunDgrad<34>(1, 8, 8, 1, 48, 192, 3, 3, 1, 1)));
+}
+
+// waves=6 (C=192): K=48, larger spatial — matches the failing profiler test case
+TEST_F(DirectConvNonGrouped32cFp16V3OddWavesIntegrationTest, Fprop_Cfg33_Waves6_C192_K48_LargeSpatial)
+{
+    ASSERT_TRUE((RunFprop<33>(8, 64, 64, 1, 192, 48, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3OddWavesIntegrationTest, Dgrad_Cfg32_Waves6_C48_K192_LargeSpatial)
+{
+    ASSERT_TRUE((RunDgrad<32>(8, 64, 64, 1, 48, 192, 3, 3, 1, 1)));
+}
+
+// waves=7 (C=224): K=48
+TEST_F(DirectConvNonGrouped32cFp16V3OddWavesIntegrationTest, Fprop_Cfg37_Waves7_C224_K48)
+{
+    ASSERT_TRUE((RunFprop<37>(1, 8, 8, 1, 224, 48, 3, 3, 1, 1)));
+}
+
+TEST_F(DirectConvNonGrouped32cFp16V3OddWavesIntegrationTest, Dgrad_Cfg36_Waves7_C48_K224)
+{
+    ASSERT_TRUE((RunDgrad<36>(1, 8, 8, 1, 48, 224, 3, 3, 1, 1)));
 }
 
 // --- waves=8 XOR Fprop (XOR DRAM=41, XOR+LDS=43) ---

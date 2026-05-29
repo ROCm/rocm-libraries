@@ -112,6 +112,12 @@ struct InputLoader
         // Extract load_active from a tile_window's warp-level LDS mapping.
         // The thread's LDS write position must fall within the BLOCK_W region;
         // threads beyond BLOCK_W are inactive and must not write to LDS.
+        //
+        // Additionally, the tile distribution decomposes lane_id as
+        // {BLOCK_C8, LANES_PER_ROW}. When BLOCK_C8 * LANES_PER_ROW < 64
+        // (i.e. 64 % BLOCK_C8 != 0, e.g. waves_per_wg=6 → BLOCK_C8=24),
+        // excess lanes beyond the mapped range have undefined tile-distribution
+        // coordinates and must not issue loads.
         auto compute_load_active = [&](const auto& dram_window) {
             constexpr auto lds_store_desc = TC::Input::MakeLdsWriteDescriptor();
             auto warp_bottom_idx =
@@ -119,7 +125,8 @@ struct InputLoader
                                                           [ck_tile::number<0>{}].get_bottom_index();
             auto lds_offset = ck_tile::make_tensor_coordinate(lds_store_desc, warp_bottom_idx).get_offset();
             const int lane_id = ck_tile::get_lane_id();
-            return lds_offset + lane_id * 8 < TC::BLOCK_W * TC::BLOCK_C8 * 8;
+            return lds_offset + lane_id * 8 < TC::BLOCK_W * TC::BLOCK_C8 * 8
+                && lane_id < TC::BLOCK_C8 * TC::LANES_PER_ROW;
         };
 
         // ---- Unpadded init: extracted as a lambda so it can be called from

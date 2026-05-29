@@ -501,14 +501,17 @@ template <auto cfg>
 using ConvBlockCoordsT = direct_conv::BlockCoordsNonGrouped<cfg>;
 
 // ===================================================================
-// ConvInputLoader — extends InputLoader for v3.
+// ConvInputLoader — extends InputLoader.
 //
-// Key differences from v1:
+// Key properties:
 //   1. wave_group = wave (not wave / 2): each wave is its own C-group.
 //   2. Supplementary overflow loads for spatial positions beyond
-//      TOTAL_SPATIAL. The tile distribution covers TOTAL_SPATIAL = 16
-//      positions, but BLOCK_W = BLOCK_Q + kw - 1 = 18. The extra
-//      2 positions (16-17) are loaded by the first 2*BLOCK_C8 threads.
+//      DIST_SPATIAL. The tile distribution covers DIST_SPATIAL =
+//      NUM_WAVES * LANES_PER_ROW positions (which may be less than
+//      TOTAL_SPATIAL when 64 % BLOCK_C8 != 0, e.g. waves=6).
+//      BLOCK_W = BLOCK_Q + kw - 1. The extra positions from
+//      DIST_SPATIAL to BLOCK_W-1 are loaded by the first
+//      OVERFLOW_COUNT threads.
 // ===================================================================
 template <auto cfg>
 struct ConvInputLoader : direct_conv::InputLoader<TileConstants<cfg>, cfg,
@@ -522,9 +525,17 @@ struct ConvInputLoader : direct_conv::InputLoader<TileConstants<cfg>, cfg,
     using TC = TileConstants<cfg>;
     using input_type = typename base::input_type;
 
-    // Number of extra tile positions beyond TOTAL_SPATIAL.
+    // Number of spatial positions actually covered by the tile distribution.
+    // The distribution maps NUM_WAVES * LANES_PER_ROW positions. When
+    // BLOCK_C8 doesn't divide 64 (waves=3,5,6,7), this is less than
+    // TOTAL_SPATIAL because some lanes are excess. The overflow loader must
+    // handle all positions from DIST_SPATIAL to BLOCK_W-1.
+    static constexpr int DIST_SPATIAL = TC::NUM_WAVES * TC::LANES_PER_ROW;
+
+    // Number of extra tile positions beyond DIST_SPATIAL that must be loaded
+    // by the overflow path.
     static constexpr int OVERFLOW_COUNT =
-        (TC::BLOCK_W - TC::TOTAL_SPATIAL) * TC::BLOCK_C8;
+        (TC::BLOCK_W - DIST_SPATIAL) * TC::BLOCK_C8;
 
     // Byte offset added to input_voffset / overflow_voffset to point at chunk
     // CS of the current input row (constant across rows). For c_slices_per_wave
@@ -602,14 +613,14 @@ struct ConvInputLoader : direct_conv::InputLoader<TileConstants<cfg>, cfg,
             });
 
         // --- Overflow load setup ---
-        // The tile distribution covers TOTAL_SPATIAL spatial positions, but
-        // we need BLOCK_W = TOTAL_SPATIAL + (kw-1). The first OVERFLOW_COUNT
-        // threads each handle one extra (spatial, c8) tile position.
+        // The tile distribution covers DIST_SPATIAL spatial positions, but
+        // we need BLOCK_W positions. The first OVERFLOW_COUNT threads each
+        // handle one extra (spatial, c8) tile position.
         const int tid = static_cast<int>(threadIdx.x);
         overflow_active = (tid < OVERFLOW_COUNT);
         if(overflow_active)
         {
-            const int ov_spatial = TC::TOTAL_SPATIAL + tid / TC::BLOCK_C8;
+            const int ov_spatial = DIST_SPATIAL + tid / TC::BLOCK_C8;
             const int ov_c8      = tid % TC::BLOCK_C8;
 
             // LDS destination for overflow position.
