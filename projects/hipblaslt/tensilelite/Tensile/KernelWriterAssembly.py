@@ -2144,14 +2144,6 @@ class KernelWriterAssembly(KernelWriter):
         if not isPackedIndex(kernel,idx):
           module.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr(Batch), src1=0x8, comment="offset of global buffer address"))
           module.add(SLoadB64(dst=sgpr("AddressD", 2), base=sgpr("AddressD",2), soffset=sgpr(tmpSgpr), comment="load global buffer D address"))
-          # Apply batch offset to AddressD for general batched mode
-          # Load offset on-demand from kernel args (no persistent SGPRs needed)
-          if kernel["ProblemType"]["SupportUserArgs"] and not kernel["ProblemType"]["GroupedGemm"]:
-            with self.allocTmpSgpr(2) as tmpSgprOffset:
-              module.add(self.argLoader.loadKernArg(tmpSgprOffset.idx, "KernArgAddress", sgprOffset=hex(self.states.batchOffsetDKernArgOffset), dword=2))
-              module.add(SWaitCnt(kmcnt=0, comment="Wait for the Matrix Address and Batch Offset Loads"))
-              module.add(SAddU32(dst=sgpr("AddressD+0"), src0=sgpr("AddressD+0"), src1=sgpr(tmpSgprOffset.idx), comment="add batch offset to D address (low)"))
-              module.add(SAddCU32(dst=sgpr("AddressD+1"), src0=sgpr("AddressD+1"), src1=sgpr(tmpSgprOffset.idx+1), comment="add batch offset to D address (high)"))
 
       # Only load C buffer address if Beta is used and potentially non-zero
       if kernel["ProblemType"]["UseBeta"]:
@@ -2163,14 +2155,6 @@ class KernelWriterAssembly(KernelWriter):
           if not isPackedIndex(kernel,idx):
             module.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr(Batch), src1=0x8, comment="offset of global buffer address"))
             module.add(SLoadB64(dst=sgpr("AddressC", 2), base=sgpr("AddressC",2), soffset=sgpr(tmpSgpr), comment="load global buffer C address"))
-            # Apply batch offset to AddressC for general batched mode
-            # Load offset on-demand from kernel args (no persistent SGPRs needed)
-            if kernel["ProblemType"]["SupportUserArgs"] and not kernel["ProblemType"]["GroupedGemm"]:
-              with self.allocTmpSgpr(2) as tmpSgprOffset:
-                module.add(self.argLoader.loadKernArg(tmpSgprOffset.idx, "KernArgAddress", sgprOffset=hex(self.states.batchOffsetCKernArgOffset), dword=2))
-                module.add(SWaitCnt(kmcnt=0, comment="Wait for the Matrix Address and Batch Offset Loads"))
-                module.add(SAddU32(dst=sgpr("AddressC+0"), src0=sgpr("AddressC+0"), src1=sgpr(tmpSgprOffset.idx), comment="add batch offset to C address (low)"))
-                module.add(SAddCU32(dst=sgpr("AddressC+1"), src0=sgpr("AddressC+1"), src1=sgpr(tmpSgprOffset.idx+1), comment="add batch offset to C address (high)"))
 
         module.add(endCheckLabel)
 
@@ -2189,20 +2173,6 @@ class KernelWriterAssembly(KernelWriter):
       if not isPackedIndex(kernel,idx):
         module.add(SLoadB64(dst=sgpr("AddressA", 2), base=sgpr("AddressA",2), soffset=sgpr(tmpSgpr), comment="load global buffer A address"))
         module.add(SLoadB64(dst=sgpr("AddressB", 2), base=sgpr("AddressB",2), soffset=sgpr(tmpSgpr), comment="load global buffer B address"))
-        # Apply batch offset to AddressA and AddressB for general batched mode
-        # Load offsets on-demand from kernel args (no persistent SGPRs needed)
-        if kernel["ProblemType"]["SupportUserArgs"] and not kernel["ProblemType"]["GroupedGemm"]:
-          with self.allocTmpSgpr(2) as tmpSgprOffset:
-            # Load and apply offset A
-            module.add(self.argLoader.loadKernArg(tmpSgprOffset.idx, "KernArgAddress", sgprOffset=hex(self.states.batchOffsetAKernArgOffset), dword=2))
-            module.add(SWaitCnt(kmcnt=1, comment="Wait for the AddressA Load from the Pointer Array"))
-            module.add(SAddU32(dst=sgpr("AddressA+0"), src0=sgpr("AddressA+0"), src1=sgpr(tmpSgprOffset.idx), comment="add batch offset to A address (low)"))
-            module.add(SAddCU32(dst=sgpr("AddressA+1"), src0=sgpr("AddressA+1"), src1=sgpr(tmpSgprOffset.idx+1), comment="add batch offset to A address (high)"))
-            # Load and apply offset B (reuse same tmpSgprOffset)
-            module.add(self.argLoader.loadKernArg(tmpSgprOffset.idx, "KernArgAddress", sgprOffset=hex(self.states.batchOffsetBKernArgOffset), dword=2))
-            module.add(SWaitCnt(kmcnt=0, comment="Wait for the AddressB and Batch Offset Loads"))
-            module.add(SAddU32(dst=sgpr("AddressB+0"), src0=sgpr("AddressB+0"), src1=sgpr(tmpSgprOffset.idx), comment="add batch offset to B address (low)"))
-            module.add(SAddCU32(dst=sgpr("AddressB+1"), src0=sgpr("AddressB+1"), src1=sgpr(tmpSgprOffset.idx+1), comment="add batch offset to B address (high)"))
 
     module.add(endCheckLabel)
 
@@ -13636,18 +13606,18 @@ class KernelWriterAssembly(KernelWriter):
               module.add(SAddU32(dst=sgpr(tmpS0), src0=sgpr(tmpS0), src1=sgpr("Address%s+0"%mat), comment="Offsetting to the location [Lower half of address]"))
               module.add(SAddCU32(dst=sgpr(tmpS1), src0=sgpr("Address%s+1"%mat), src1=0, comment="Offsetting to the location [Higher half of address]"))
               module.add(SLoadB64(dst=sgpr(tmpS0, 2), base=sgpr(tmpS0, 2), soffset=0, comment="Load the Matrix Address in the Pointer Array"))
-              # Load and apply batch offset for General Batched GEMM (C or D matrix)
+              module.add(SWaitCnt(kmcnt=0, comment="Wait for the Matrix Address Load from the Pointer Array"))
+              module.add(SAddU32(dst=sgpr("Srd%s+0"%mat), src0=sgpr("Srd%s+0"%mat), src1=sgpr(tmpS0), comment="Offsetting within the Batch Matrix [Lower half of address]"))
+              module.add(SAddCU32(dst=sgpr("Srd%s+1"%mat), src0=sgpr("Srd%s+1"%mat), src1=sgpr(tmpS1), comment="Offsetting within the Batch Matrix [Higher half of address]"))
+              # Now, we have starting matrix address of a specific batch in the corresponding Srd.
+              # Load and apply batch offset for General Batched GEMM (C or D matrix) as necessary.
               if kernel["ProblemType"]["SupportUserArgs"] and not kernel["ProblemType"]["GroupedGemm"]:
                 batchOffsetKernArgOffset = self.states.batchOffsetCKernArgOffset if mat == "C" else self.states.batchOffsetDKernArgOffset
-                module.add(SLoadB64(dst=sgpr("Srd%s"%mat, 2), base=sgpr("KernArgAddress", 2), soffset=hex(batchOffsetKernArgOffset), comment="Load batchOffset%s from kernel args"%mat))
+                module.add(SLoadB64(dst=sgpr(tmpS0, 2), base=sgpr("KernArgAddress", 2), soffset=hex(batchOffsetKernArgOffset), comment="Load batchOffset%s from kernel args"%mat))
                 module.add(SWaitCnt(kmcnt=0, comment="Wait for Matrix Address and Batch Offset Loads"))
                 # Add loaded matrix address to SRD
                 module.add(SAddU32(dst=sgpr("Srd%s+0"%mat), src0=sgpr("Srd%s+0"%mat), src1=sgpr(tmpS0), comment="Add matrix address to SRD (low)"))
                 module.add(SAddCU32(dst=sgpr("Srd%s+1"%mat), src0=sgpr("Srd%s+1"%mat), src1=sgpr(tmpS1), comment="Add matrix address to SRD (high)"))
-              else:
-                module.add(SWaitCnt(kmcnt=0, comment="Wait for the Matrix Address Load from the Pointer Array"))
-                module.add(SAddU32(dst=sgpr("Srd%s+0"%mat), src0=sgpr("Srd%s+0"%mat), src1=sgpr(tmpS0), comment="Offsetting within the Batch Matrix [Lower half of address]"))
-                module.add(SAddCU32(dst=sgpr("Srd%s+1"%mat), src0=sgpr("Srd%s+1"%mat), src1=sgpr(tmpS1), comment="Offsetting within the Batch Matrix [Higher half of address]"))
               module.add(generalBatchedGemmLoad_End)
           module.addSpaceLine()
 
