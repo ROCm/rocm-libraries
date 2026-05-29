@@ -28,10 +28,64 @@ struct conv3d_test : public conv3d_test_base<T, TestCase>
     }
 };
 
-using MIOPEN_TESTSUITE_NAME(GPU_Conv3d_) = conv3d_test<MIOPEN_GTEST_DATA_TYPE>;
+#if MIOPEN_GTEST_SUFFIX == FP16
+using GPU_Conv3d_FP16 = conv3d_test<half_float::half>;
+TEST_P(GPU_Conv3d_FP16, TestFloat16) { run(); }
+#elif MIOPEN_GTEST_SUFFIX == FP32
+using GPU_Conv3d_FP32 = conv3d_test<float>;
+TEST_P(GPU_Conv3d_FP32, TestFloat32) { run(); }
+#elif MIOPEN_GTEST_SUFFIX == BFP16
+using GPU_Conv3d_BFP16 = conv3d_test<bfloat16>;
+TEST_P(GPU_Conv3d_BFP16, TestBFloat16) { run(); }
+#elif MIOPEN_GTEST_SUFFIX == I8
+using GPU_Conv3d_I8 = conv3d_test<int8_t>;
+TEST_P(GPU_Conv3d_I8, TestInt8) { run(); }
+#else
+#error "Unsupported test input data type"
+#endif
 
-TEST_P(MIOPEN_TESTSUITE_NAME(GPU_Conv3d_), MIOPEN_TEST_INFO(Test)) { run(); }
-
-// The last argument is a dummy argument, just to make the 'INSTANTIATE_MIOPEN_TEST_SUITE' macro
-// happy. It is not used in the test.
-INSTANTIATE_MIOPEN_TEST_SUITE(MIOPEN_TESTSUITE_PREFIX(0), MIOPEN_TESTSUITE_NAME(GPU_Conv3d_), 0);
+#ifdef MIOPEN_GTEST_ALL
+#if MIOPEN_GTEST_SUFFIX == FP16
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_Conv3d_FP16,
+                         GenCases<half_float::half>(false),
+                         DefaultTestNameGenerator<TestCase>{});
+#elif MIOPEN_GTEST_SUFFIX == FP32
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_Conv3d_FP32,
+                         GenCases<float>(false),
+                         DefaultTestNameGenerator<TestCase>{});
+#elif MIOPEN_GTEST_SUFFIX == BFP16
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_Conv3d_BFP16,
+                         GenCases<bfloat16>(false),
+                         DefaultTestNameGenerator<TestCase>{});
+#elif MIOPEN_GTEST_SUFFIX == I8
+INSTANTIATE_TEST_SUITE_P(Full,
+                         GPU_Conv3d_I8,
+                         GenCases<int8_t>(false),
+                         DefaultTestNameGenerator<TestCase>{});
+#endif
+#else // MIOPEN_GTEST_ALL
+#if MIOPEN_GTEST_SUFFIX == FP16
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_Conv3d_FP16,
+                         GenCases<half_float::half>(true),
+                         DefaultTestNameGenerator<TestCase>{});
+#elif MIOPEN_GTEST_SUFFIX == FP32
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_Conv3d_FP32,
+                         GenCases<float>(true),
+                         DefaultTestNameGenerator<TestCase>{});
+#elif MIOPEN_GTEST_SUFFIX == BFP16
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_Conv3d_BFP16,
+                         GenCases<bfloat16>(true),
+                         DefaultTestNameGenerator<TestCase>{});
+#elif MIOPEN_GTEST_SUFFIX == I8
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_Conv3d_I8,
+                         GenCases<int8_t>(true),
+                         DefaultTestNameGenerator<TestCase>{});
+#endif
+#endif // MIOPEN_GTEST_ALL

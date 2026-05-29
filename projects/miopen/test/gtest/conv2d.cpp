@@ -72,14 +72,11 @@ struct conv2d_test_regression_issue_2624 : public conv2d_test_base<T, TestCase>
     }
 };
 
-using MIOPEN_TESTSUITE_NAME(GPU_Conv2d_) = conv2d_test<MIOPEN_GTEST_DATA_TYPE>;
-using MIOPEN_TESTSUITE_NAME(GPU_Conv2d_RegressionIssue2624_) =
-    conv2d_test_regression_issue_2624<MIOPEN_GTEST_DATA_TYPE>;
-
-TEST_P(MIOPEN_TESTSUITE_NAME(GPU_Conv2d_), MIOPEN_TEST_INFO(Test)) { run(); }
-
-TEST_P(MIOPEN_TESTSUITE_NAME(GPU_Conv2d_RegressionIssue2624_),
-       MIOPEN_TEST_INFO(TestRegressionIssue2624))
+#if MIOPEN_GTEST_SUFFIX == FP16
+using GPU_Conv2d_FP16                     = conv2d_test<half_float::half>;
+using GPU_Conv2d_RegressionIssue2624_FP16 = conv2d_test_regression_issue_2624<half_float::half>;
+TEST_P(GPU_Conv2d_FP16, TestFloat16) { run(); }
+TEST_P(GPU_Conv2d_RegressionIssue2624_FP16, TestRegressionIssue2624Float16)
 {
     if(!IsTestSupportedForDevice(get_handle()))
     {
@@ -94,45 +91,239 @@ TEST_P(MIOPEN_TESTSUITE_NAME(GPU_Conv2d_RegressionIssue2624_),
 
     run();
 }
+#elif MIOPEN_GTEST_SUFFIX == FP32
+using GPU_Conv2d_FP32                     = conv2d_test<float>;
+using GPU_Conv2d_RegressionIssue2624_FP32 = conv2d_test_regression_issue_2624<float>;
+TEST_P(GPU_Conv2d_FP32, TestFloat32) { run(); }
+TEST_P(GPU_Conv2d_RegressionIssue2624_FP32, TestRegressionIssue2624Float32)
+{
+    if(!IsTestSupportedForDevice(get_handle()))
+    {
+        GTEST_SKIP() << "Test not supported for the current device";
+    }
 
-INSTANTIATE_MIOPEN_TEST_SUITE(MIOPEN_TESTSUITE_PREFIX(0),
-                              MIOPEN_TESTSUITE_NAME(GPU_Conv2d_RegressionIssue2624_),
-                              {2, 1, 22, 22},
-                              {1, 1, 4, 4},
-                              {1, 2, 4, 4, 3, 2},
-                              "conv",
-                              true,
-                              false,
-                              false);
+    ScopedEnvironment<bool> winograd(MIOPEN_DEBUG_CONV_WINOGRAD, false);
+    ScopedEnvironment<bool> fft(MIOPEN_DEBUG_CONV_FFT, false);
+    ScopedEnvironment<bool> direct(MIOPEN_DEBUG_CONV_DIRECT, false);
+    ScopedEnvironment<bool> gemm(MIOPEN_DEBUG_CONV_GEMM, false);
+    ScopedEnvironment<bool> implicit_gemm(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM, true);
 
-INSTANTIATE_MIOPEN_TEST_SUITE(MIOPEN_TESTSUITE_PREFIX(0),
-                              MIOPEN_TESTSUITE_NAME(GPU_Conv2d_),
-                              {1, 16, 24, 24},
-                              {16, 16, 7, 7},
-                              {3, 3, 1, 1, 1, 1},
-                              "transpose",
-                              true,
-                              false,
-                              false);
+    run();
+}
+#elif MIOPEN_GTEST_SUFFIX == BFP16
+using GPU_Conv2d_BFP16                     = conv2d_test<bfloat16>;
+using GPU_Conv2d_RegressionIssue2624_BFP16 = conv2d_test_regression_issue_2624<bfloat16>;
+TEST_P(GPU_Conv2d_BFP16, TestBFloat16) { run(); }
+TEST_P(GPU_Conv2d_RegressionIssue2624_BFP16, TestRegressionIssue2624BFloat16)
+{
+    if(!IsTestSupportedForDevice(get_handle()))
+    {
+        GTEST_SKIP() << "Test not supported for the current device";
+    }
 
-INSTANTIATE_MIOPEN_TEST_SUITE(MIOPEN_TESTSUITE_PREFIX(1),
-                              MIOPEN_TESTSUITE_NAME(GPU_Conv2d_),
-                              {64, 64, 28, 28},
-                              {64, 64, 1, 1},
-                              {0, 0, 1, 1, 1, 1},
-                              "transpose",
-                              false,
-                              true,
-                              false);
+    ScopedEnvironment<bool> winograd(MIOPEN_DEBUG_CONV_WINOGRAD, false);
+    ScopedEnvironment<bool> fft(MIOPEN_DEBUG_CONV_FFT, false);
+    ScopedEnvironment<bool> direct(MIOPEN_DEBUG_CONV_DIRECT, false);
+    ScopedEnvironment<bool> gemm(MIOPEN_DEBUG_CONV_GEMM, false);
+    ScopedEnvironment<bool> implicit_gemm(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM, true);
 
-INSTANTIATE_MIOPEN_TEST_SUITE(MIOPEN_TESTSUITE_PREFIX(2),
-                              MIOPEN_TESTSUITE_NAME(GPU_Conv2d_),
-                              {64, 64, 28, 28},
-                              {64, 64, 1, 1},
-                              {0, 0, 1, 1, 1, 1},
-                              "transpose",
-                              false,
-                              false,
-                              true);
+    run();
+}
+#elif MIOPEN_GTEST_SUFFIX == I8
+using GPU_Conv2d_I8                     = conv2d_test<int8_t>;
+using GPU_Conv2d_RegressionIssue2624_I8 = conv2d_test_regression_issue_2624<int8_t>;
+TEST_P(GPU_Conv2d_I8, TestInt8) { run(); }
+TEST_P(GPU_Conv2d_RegressionIssue2624_I8, TestRegressionIssue2624Int8)
+{
+    if(!IsTestSupportedForDevice(get_handle()))
+    {
+        GTEST_SKIP() << "Test not supported for the current device";
+    }
+
+    ScopedEnvironment<bool> winograd(MIOPEN_DEBUG_CONV_WINOGRAD, false);
+    ScopedEnvironment<bool> fft(MIOPEN_DEBUG_CONV_FFT, false);
+    ScopedEnvironment<bool> direct(MIOPEN_DEBUG_CONV_DIRECT, false);
+    ScopedEnvironment<bool> gemm(MIOPEN_DEBUG_CONV_GEMM, false);
+    ScopedEnvironment<bool> implicit_gemm(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM, true);
+
+    run();
+}
+#else
+#error "Unsupported test input data type"
+#endif
+
+#if MIOPEN_GTEST_SUFFIX == FP16
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    GPU_Conv2d_RegressionIssue2624_FP16,
+    GenCases<half_float::half>(
+        false, {2, 1, 22, 22}, {1, 1, 4, 4}, {1, 2, 4, 4, 3, 2}, "conv", true, false, false),
+    DefaultTestNameGenerator<TestCase>{});
+
+INSTANTIATE_TEST_SUITE_P(Full_0,
+                         GPU_Conv2d_FP16,
+                         GenCases<half_float::half>(false,
+                                                    {1, 16, 24, 24},
+                                                    {16, 16, 7, 7},
+                                                    {3, 3, 1, 1, 1, 1},
+                                                    "transpose",
+                                                    true,
+                                                    false,
+                                                    false),
+                         DefaultTestNameGenerator<TestCase>{});
+
+INSTANTIATE_TEST_SUITE_P(Full_1,
+                         GPU_Conv2d_FP16,
+                         GenCases<half_float::half>(false,
+                                                    {64, 64, 28, 28},
+                                                    {64, 64, 1, 1},
+                                                    {0, 0, 1, 1, 1, 1},
+                                                    "transpose",
+                                                    false,
+                                                    true,
+                                                    false),
+                         DefaultTestNameGenerator<TestCase>{});
+
+INSTANTIATE_TEST_SUITE_P(Full_2,
+                         GPU_Conv2d_FP16,
+                         GenCases<half_float::half>(false,
+                                                    {64, 64, 28, 28},
+                                                    {64, 64, 1, 1},
+                                                    {0, 0, 1, 1, 1, 1},
+                                                    "transpose",
+                                                    false,
+                                                    false,
+                                                    true),
+                         DefaultTestNameGenerator<TestCase>{});
+#elif MIOPEN_GTEST_SUFFIX == FP32
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    GPU_Conv2d_RegressionIssue2624_FP32,
+    GenCases<float>(
+        false, {2, 1, 22, 22}, {1, 1, 4, 4}, {1, 2, 4, 4, 3, 2}, "conv", true, false, false),
+    DefaultTestNameGenerator<TestCase>{});
+
+INSTANTIATE_TEST_SUITE_P(Full_0,
+                         GPU_Conv2d_FP32,
+                         GenCases<float>(false,
+                                         {1, 16, 24, 24},
+                                         {16, 16, 7, 7},
+                                         {3, 3, 1, 1, 1, 1},
+                                         "transpose",
+                                         true,
+                                         false,
+                                         false),
+                         DefaultTestNameGenerator<TestCase>{});
+
+INSTANTIATE_TEST_SUITE_P(Full_1,
+                         GPU_Conv2d_FP32,
+                         GenCases<float>(false,
+                                         {64, 64, 28, 28},
+                                         {64, 64, 1, 1},
+                                         {0, 0, 1, 1, 1, 1},
+                                         "transpose",
+                                         false,
+                                         true,
+                                         false),
+                         DefaultTestNameGenerator<TestCase>{});
+
+INSTANTIATE_TEST_SUITE_P(Full_2,
+                         GPU_Conv2d_FP32,
+                         GenCases<float>(false,
+                                         {64, 64, 28, 28},
+                                         {64, 64, 1, 1},
+                                         {0, 0, 1, 1, 1, 1},
+                                         "transpose",
+                                         false,
+                                         false,
+                                         true),
+                         DefaultTestNameGenerator<TestCase>{});
+#elif MIOPEN_GTEST_SUFFIX == BFP16
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    GPU_Conv2d_RegressionIssue2624_BFP16,
+    GenCases<bfloat16>(
+        false, {2, 1, 22, 22}, {1, 1, 4, 4}, {1, 2, 4, 4, 3, 2}, "conv", true, false, false),
+    DefaultTestNameGenerator<TestCase>{});
+
+INSTANTIATE_TEST_SUITE_P(Full_0,
+                         GPU_Conv2d_BFP16,
+                         GenCases<bfloat16>(false,
+                                            {1, 16, 24, 24},
+                                            {16, 16, 7, 7},
+                                            {3, 3, 1, 1, 1, 1},
+                                            "transpose",
+                                            true,
+                                            false,
+                                            false),
+                         DefaultTestNameGenerator<TestCase>{});
+
+INSTANTIATE_TEST_SUITE_P(Full_1,
+                         GPU_Conv2d_BFP16,
+                         GenCases<bfloat16>(false,
+                                            {64, 64, 28, 28},
+                                            {64, 64, 1, 1},
+                                            {0, 0, 1, 1, 1, 1},
+                                            "transpose",
+                                            false,
+                                            true,
+                                            false),
+                         DefaultTestNameGenerator<TestCase>{});
+
+INSTANTIATE_TEST_SUITE_P(Full_2,
+                         GPU_Conv2d_BFP16,
+                         GenCases<bfloat16>(false,
+                                            {64, 64, 28, 28},
+                                            {64, 64, 1, 1},
+                                            {0, 0, 1, 1, 1, 1},
+                                            "transpose",
+                                            false,
+                                            false,
+                                            true),
+                         DefaultTestNameGenerator<TestCase>{});
+#elif MIOPEN_GTEST_SUFFIX == I8
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    GPU_Conv2d_I8,
+    GenCases<int8_t>(
+        false, {2, 1, 22, 22}, {1, 1, 4, 4}, {1, 2, 4, 4, 3, 2}, "conv", true, false, false),
+    DefaultTestNameGenerator<TestCase>{});
+
+INSTANTIATE_TEST_SUITE_P(Full_0,
+                         GPU_Conv2d_I8,
+                         GenCases<int8_t>(false,
+                                          {1, 16, 24, 24},
+                                          {16, 16, 7, 7},
+                                          {3, 3, 1, 1, 1, 1},
+                                          "transpose",
+                                          true,
+                                          false,
+                                          false),
+                         DefaultTestNameGenerator<TestCase>{});
+
+INSTANTIATE_TEST_SUITE_P(Full_1,
+                         GPU_Conv2d_I8,
+                         GenCases<int8_t>(false,
+                                          {64, 64, 28, 28},
+                                          {64, 64, 1, 1},
+                                          {0, 0, 1, 1, 1, 1},
+                                          "transpose",
+                                          false,
+                                          true,
+                                          false),
+                         DefaultTestNameGenerator<TestCase>{});
+
+INSTANTIATE_TEST_SUITE_P(Full_2,
+                         GPU_Conv2d_I8,
+                         GenCases<int8_t>(false,
+                                          {64, 64, 28, 28},
+                                          {64, 64, 1, 1},
+                                          {0, 0, 1, 1, 1, 1},
+                                          "transpose",
+                                          false,
+                                          false,
+                                          true),
+                         DefaultTestNameGenerator<TestCase>{});
+#endif
 
 #endif // MIOPEN_GTEST_ALL
