@@ -134,46 +134,66 @@ def main() -> None:
         )
         sorter = MoeSortingLauncher(spec.to_sort_spec())
 
-        # Outputs (pre-allocated by sorter)
-        sorted_tok_dsl = torch.empty(T * K, dtype=torch.int32, device="cuda")
-        sorted_wts_dsl = torch.empty(T * K, dtype=torch.float32, device="cuda")
-        sorted_exp_dsl = torch.empty(E, dtype=torch.int32, device="cuda")
-        num_valid_dsl = torch.zeros(1, dtype=torch.int32, device="cuda")
+        T_K = T * K
+        # Workspace.  MoeSortingLauncher does NOT own Hist/Counter lifetime:
+        # the histogram phase atomic-adds into Hist and the scatter phase
+        # atomic-adds into Counter, so both must be zeroed before each chain.
+        hist = torch.zeros(E, dtype=torch.int32, device="cuda")
+        counter = torch.zeros(E, dtype=torch.int32, device="cuda")
+        offsets = torch.zeros(E, dtype=torch.int32, device="cuda")
         counts = torch.zeros(E, dtype=torch.int32, device="cuda")
-        offsets = torch.zeros(E + 1, dtype=torch.int32, device="cuda")
+        sorted_tok_dsl = torch.empty(T_K, dtype=torch.int32, device="cuda")
+        sorted_kid_dsl = torch.empty(T_K, dtype=torch.int32, device="cuda")
+        sorted_wts_dsl = torch.empty(T_K, dtype=torch.float32, device="cuda")
+        weights_f32 = topk_wts.float()
+        stream_h = int(torch.cuda.current_stream().cuda_stream)
 
-        sorter.sort(
-            topk_ids,
-            topk_wts.float(),
-            sorted_tok_dsl,
-            sorted_wts_dsl,
-            sorted_exp_dsl,
-            num_valid_dsl,
-            counts,
-            offsets,
-        )
+        def sort_fn():
+            hist.zero_()
+            counter.zero_()
+            sorter.run(
+                {
+                    "histogram": {
+                        "TopkIds": topk_ids,
+                        "Hist": hist,
+                        "num_pairs": T_K,
+                        "num_experts": E,
+                    },
+                    "scan": {
+                        "Hist": hist,
+                        "Offsets": offsets,
+                        "Counts": counts,
+                        "num_experts": E,
+                    },
+                    "scatter": {
+                        "TopkIds": topk_ids,
+                        "TopkWeights": weights_f32,
+                        "Offsets": offsets,
+                        "Counter": counter,
+                        "SortedTokenIds": sorted_tok_dsl,
+                        "SortedTopkIds": sorted_kid_dsl,
+                        "SortedWeights": sorted_wts_dsl,
+                        "tokens": T,
+                        "topk": K,
+                        "num_experts": E,
+                    },
+                },
+                stream=stream_h,
+            )
+
+        sort_fn()
         torch.cuda.synchronize()
 
-        dsl_ms = ms(
-            lambda: sorter.sort(
-                topk_ids,
-                topk_wts.float(),
-                sorted_tok_dsl,
-                sorted_wts_dsl,
-                sorted_exp_dsl,
-                num_valid_dsl,
-                counts,
-                offsets,
-            )
-        )
+        dsl_ms = ms(sort_fn)
         print(
             f"  DSL MoeSortingLauncher (3-kernel):       {dsl_ms * 1000:.2f}µs  "
             f"speedup={speedup(bl_ms, dsl_ms):.3f}×"
         )
 
-        # Correctness: total valid pairs
+        # Correctness: every routed (token, topk) pair must be placed exactly
+        # once → the per-expert counts must sum to T*K.
         torch.cuda.synchronize()
-        nv = num_valid_dsl.item()
+        nv = int(counts.sum().item())
         print(
             f"  Correctness: num_valid={nv} (expected {T * K})  "
             f"{'PASS' if nv == T * K else 'FAIL'}"

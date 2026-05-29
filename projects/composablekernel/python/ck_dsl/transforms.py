@@ -72,7 +72,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from .core.ir import F16, I32, IRBuilder, Type, Value
+from .core.ir import F16, I32, I64, IRBuilder, Type, Value
 
 
 # ---------------------------------------------------------------------
@@ -742,25 +742,10 @@ class TensorDescriptor:
                 break
         return {name: cv.value for name, cv in coords.items()}
 
-    def offset(
-        self,
-        b: IRBuilder,
-        **upper_values: Value,
-    ) -> Tuple[Value, Optional[Value]]:
-        """Compute (offset, valid) for the supplied upper-level coord values.
-
-        `upper_values` maps `upper_names` -> i32 SSA values. Returns
-        the linear i32 offset into the naive tensor (in elements, not
-        bytes) and the i1 in-bounds predicate (or None if no
-        boundary check is in flight).
-
-        Implementation: we run the chain in topological order. A
-        transform T can be applied once all of `T.upper` coords are
-        in `coords`. We repeat until no more transforms are
-        applicable; if any transforms remain unapplied at that point
-        the chain has an unresolvable dependency cycle or a typo in
-        coord names (we raise with a precise diagnostic).
-        """
+    def _run_chain(
+        self, b: IRBuilder, upper_values: Dict[str, Value]
+    ) -> Dict[str, "CoordVar"]:
+        """Resolve the transform chain to the base coords (topological)."""
         missing = set(self.upper_names) - set(upper_values.keys())
         if missing:
             raise ValueError(
@@ -777,13 +762,6 @@ class TensorDescriptor:
             for t in remaining:
                 if all(name in coords for name in t.upper):
                     produced = t.apply(b, coords)
-                    # Don't actually remove uppers from `coords`: an
-                    # intermediate coord may be needed by multiple
-                    # transforms (e.g. `c` appears in two unmerges).
-                    # The chain-validity invariant (computed in
-                    # transform()) guarantees the user-facing coords
-                    # are exactly those whose final value the
-                    # descriptor consumes.
                     for n, v in produced.items():
                         coords[n] = v
                     progress = True
@@ -797,7 +775,21 @@ class TensorDescriptor:
                     f"= {names}; available coords = {avail}"
                 )
             remaining = next_remaining
-        # Now coords should contain exactly self.base_names.
+        return coords
+
+    def offset(
+        self,
+        b: IRBuilder,
+        **upper_values: Value,
+    ) -> Tuple[Value, Optional[Value]]:
+        """Compute (offset, valid) for the supplied upper-level coord values.
+
+        `upper_values` maps `upper_names` -> i32 SSA values. Returns
+        the linear i32 offset into the naive tensor (in elements, not
+        bytes) and the i1 in-bounds predicate (or None if no
+        boundary check is in flight).
+        """
+        coords = self._run_chain(b, upper_values)
         offset: Optional[Value] = None
         valid: Optional[Value] = None
         for name, stride in zip(self.base_names, self.base_strides):
@@ -815,6 +807,84 @@ class TensorDescriptor:
         if offset is None:
             offset = b.const_i32(0)
         return offset, valid
+
+    def offset_i64_split(
+        self,
+        b: IRBuilder,
+        base_coord: str,
+        **upper_values: Value,
+    ) -> Tuple[Value, Value, Optional[Value]]:
+        """Like :meth:`offset` but returns ``(base_i64, within_i32, valid)``.
+
+        ``base_i64`` is the ``base_coord`` term computed in **i64** (so it
+        does not overflow the i32 offset for paged caches > 2 GiB);
+        ``within_i32`` is the sum of all the other (small) base terms. A
+        paged-KV load can put ``base_i64`` into a 64-bit buffer base and
+        keep ``within_i32`` in the 32-bit buffer voffset. ``base_coord``'s
+        value must be wave-uniform for the buffer base to stay scalar.
+        """
+        coords = self._run_chain(b, upper_values)
+        base_i64: Optional[Value] = None
+        within: Optional[Value] = None
+        valid: Optional[Value] = None
+        for name, stride in zip(self.base_names, self.base_strides):
+            if name not in coords:
+                raise ValueError(
+                    f"after chain, base coord {name!r} not in {sorted(coords.keys())}"
+                )
+            c = coords[name]
+            valid = _and(b, valid, c.valid)
+            if name == base_coord:
+                # i64 term -- no 2 GiB overflow. The base feeds a buffer
+                # descriptor (uniform per wave), so pin the (wave-uniform)
+                # block id to an SGPR before widening.
+                base_val = b.to_sgpr_u32(c.value)
+                base_i64 = b.mul(b.zext(base_val, I64), b.const_i64(int(stride)))
+            else:
+                term = c.value if stride == 1 else b.mul(c.value, b.const_i32(stride))
+                within = term if within is None else b.add(within, term)
+        if base_i64 is None:
+            raise ValueError(
+                f"offset_i64_split: base_coord {base_coord!r} not among "
+                f"base coords {list(self.base_names)}"
+            )
+        if within is None:
+            within = b.const_i32(0)
+        return base_i64, within, valid
+
+    def offset_i64(
+        self,
+        b: IRBuilder,
+        i64_coord: str,
+        **upper_values: Value,
+    ) -> Tuple[Value, Optional[Value]]:
+        """Like :meth:`offset` but returns the FULL offset as a single i64.
+
+        ``i64_coord``'s term is widened to i64 (so it cannot overflow for
+        paged caches > 2 GiB); the other terms are zero-extended and summed
+        in i64. Unlike :meth:`offset_i64_split` this does NOT scalarise, so
+        it is for **flat per-lane global loads** where the block id varies
+        per lane (e.g. the fp8 sync-dequant loader). The returned i64
+        offset is in the descriptor's units (bytes here)."""
+        coords = self._run_chain(b, upper_values)
+        off: Optional[Value] = None
+        valid: Optional[Value] = None
+        for name, stride in zip(self.base_names, self.base_strides):
+            if name not in coords:
+                raise ValueError(
+                    f"after chain, base coord {name!r} not in {sorted(coords.keys())}"
+                )
+            c = coords[name]
+            valid = _and(b, valid, c.valid)
+            if name == i64_coord:
+                term = b.mul(b.zext(c.value, I64), b.const_i64(int(stride)))
+            else:
+                t32 = c.value if stride == 1 else b.mul(c.value, b.const_i32(stride))
+                term = b.zext(t32, I64)
+            off = term if off is None else b.add(off, term)
+        if off is None:
+            off = b.const_i64(0)
+        return off, valid
 
 
 __all__ = [

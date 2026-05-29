@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Compare rocprof stats between CK DSL and CK Tile C++"""
 
+import argparse
 import csv
 import sys
 
@@ -65,11 +66,24 @@ def calculate_occupancy(vgpr, agpr, lds_bytes):
     return occupancy, vgpr_limit, lds_limit
 
 
-# Parse both files
-ckdsl = parse_kernel_trace("experiments/ckdsl_rocprof_stats_kernel_trace.csv")
-cktile = parse_kernel_trace(
-    "/workspace/FlyDSL_CKTile_conv_comparison/comparison/ck_tile/rocprof_stats/run_kernel_trace.csv"
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument(
+    "ckdsl_csv",
+    nargs="?",
+    default="experiments/ckdsl_rocprof_stats_kernel_trace.csv",
+    help="rocprof kernel-trace CSV for CK DSL",
 )
+parser.add_argument(
+    "cktile_csv",
+    nargs="?",
+    default="experiments/cktile_rocprof_stats_kernel_trace.csv",
+    help="rocprof kernel-trace CSV for the comparison baseline (CK Tile C++, FlyDSL, etc.)",
+)
+args = parser.parse_args()
+
+# Parse both files
+ckdsl = parse_kernel_trace(args.ckdsl_csv)
+cktile = parse_kernel_trace(args.cktile_csv)
 
 if not ckdsl or not cktile:
     sys.exit(1)

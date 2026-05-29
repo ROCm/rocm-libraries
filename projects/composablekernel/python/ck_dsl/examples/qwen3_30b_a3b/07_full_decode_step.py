@@ -33,7 +33,7 @@ All timings use the same batched-event pattern:
 Baselines are always the actual ATOM/AITER production kernels:
   RMSNorm   aiter.rmsnorm2d_fwd_with_add
   GEMMs     torch.matmul (→ hipBLASLt, same as ATOM LinearBase.forward)
-  Attention aiter unified_attention backend=triton (ATOM decode path)
+  Attention aiter.ops.triton unified_attention (ATOM decode path)
   TopK      aiter.moe_fused_gate (or torch.topk fallback)
   MoE e2e   aiter.fused_moe (2-stage CK, same as ATOM MoE layers)
 
@@ -103,7 +103,8 @@ def bench_rmsnorm() -> Row:
     try:
         import aiter
 
-        bl_ms = ms(lambda: aiter.rmsnorm2d_fwd_with_add(Xout, X, R, Gam, eps))
+        # (out, input, residual_in, residual_out, weight, epsilon)
+        bl_ms = ms(lambda: aiter.rmsnorm2d_fwd_with_add(Xout, X, R, Yout, Gam, eps))
     except Exception:
         pass
 
@@ -125,12 +126,14 @@ def bench_rmsnorm() -> Row:
         block = (spec.block_size, 1, 1)
         rt = Runtime()
         fn = rt.load_module(art.hsaco).get_function(art.kernel_name)
+        # Kernel param order (save_residual=True): A, B, Gamma, X(residual_out),
+        # Y(normalized_out) — A=X, B=R, X(resid)=Xout, Y(norm)=Yout.
         packed = struct.pack(
             "<QQQQQiif",
-            int(Xout.data_ptr()),
+            int(X.data_ptr()),
             int(R.data_ptr()),
             int(Gam.data_ptr()),
-            int(X.data_ptr()),
+            int(Xout.data_ptr()),
             int(Yout.data_ptr()),
             M,
             N,
@@ -173,7 +176,9 @@ def bench_decode_attn(kv_len: int = 1024) -> Row:
         * 0.1
     )
     vc = torch.randn_like(kc)
-    cu_q = torch.tensor([0, BATCH], dtype=torch.int32, device="cuda")
+    # Decode: one query token per sequence → cu_seqlens_q = [0, 1, ..., BATCH]
+    # (a plain [0, BATCH] reads cu_q[BATCH] out of bounds → intermittent fault).
+    cu_q = torch.arange(0, BATCH + 1, dtype=torch.int32, device="cuda")
     kv_l = torch.full((BATCH,), kv_len, dtype=torch.int32, device="cuda")
     bt = torch.randint(0, pool, (BATCH, num_blks), dtype=torch.int32, device="cuda")
     stream_h = int(torch.cuda.current_stream().cuda_stream)
@@ -207,7 +212,6 @@ def bench_decode_attn(kv_len: int = 1024) -> Row:
                 alibi_slopes=None,
                 qq_bias=None,
                 sinks=None,
-                backend="triton",
             )
 
         bl_ms = ms(tri_fn)
@@ -279,9 +283,19 @@ def bench_topk() -> Row:
         try:
             from aiter import moe_fused_gate
 
-            moe_fused_gate(logits, gate_out, gate_ids)
+            # (input, bias, topk_weights, topk_ids, num_expert_group,
+            #  topk_group, topk, n_share_experts_fusion); experts/group <= 32.
+            n_grp = max(1, E // 16)
+            gate_bias = torch.zeros(E, dtype=torch.float32, device="cuda")
+
+            def gate_fn():
+                moe_fused_gate(
+                    logits, gate_bias, gate_out, gate_ids, n_grp, n_grp, K, 0
+                )
+
+            gate_fn()
             torch.cuda.synchronize()
-            bl_ms = ms(lambda: moe_fused_gate(logits, gate_out, gate_ids))
+            bl_ms = ms(gate_fn)
         except Exception:
             bl_ms = ms(lambda: torch.topk(logits, K, dim=-1))
     except Exception:
@@ -296,23 +310,20 @@ def bench_topk() -> Row:
         from ck_dsl.helpers import compile_kernel
         from ck_dsl.runtime.hip_module import Runtime
 
-        spec = TopkSoftmaxSpec(
-            num_tokens=T, num_experts=E, topk=K, block_size=128, dtype="fp32"
-        )
+        spec = TopkSoftmaxSpec(n_per_row=E, k=K, block_size=128, dtype="f32")
         art = compile_kernel(build_topk_softmax(spec), isa=ISA)
         grid = (T, 1, 1)
         block = (spec.block_size, 1, 1)
         rt = Runtime()
         fn = rt.load_module(art.hsaco).get_function(art.kernel_name)
-        sl = torch.empty(T * E, dtype=torch.float32, device="cuda")
-        si = torch.empty(T * E, dtype=torch.int32, device="cuda")
+        # Kernel signature: (X=logits, Y=topk_weights, Idx=topk_ids, M, N).
         tw = torch.empty(T, K, dtype=torch.float32, device="cuda")
+        tid = torch.empty(T, K, dtype=torch.int32, device="cuda")
         packed = struct.pack(
-            "<QQQQii",
+            "<QQQii",
             int(logits.data_ptr()),
-            int(sl.data_ptr()),
-            int(si.data_ptr()),
             int(tw.data_ptr()),
+            int(tid.data_ptr()),
             T,
             E,
         )
