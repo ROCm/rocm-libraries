@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <set>
 #include <string>
 #include <utility>
@@ -20,18 +21,19 @@ using hipdnn_integration_tests::GraphSupportRecord;
 using hipdnn_integration_tests::SupportMatcher;
 
 // Build a record with just the fields the condenser reads: opChain,
-// ioDtype, layout, and supportingEngines. graphName / testName don't
-// affect grouping.
+// ioDtype, layout, testName, and supportingEngines.
 GraphSupportRecord makeRecord(std::string op,
                               std::string io,
                               std::string layout,
                               bool engineSupports,
+                              std::string testName = "TestSuite.TestCase",
                               std::string engineName = "TEST_ENGINE")
 {
     GraphSupportRecord r;
     r.opChain = std::move(op);
     r.ioDtype = std::move(io);
     r.layout = std::move(layout);
+    r.testName = std::move(testName);
     if(engineSupports)
     {
         r.supportingEngines.insert(std::move(engineName));
@@ -207,7 +209,12 @@ TEST(TestSupportClaimsCondenser, RecordsForOtherEnginesAreIgnored)
     // "engine doesn't support" from our perspective, so the cell lands
     // in U and the matcher set is empty.
     std::vector<GraphSupportRecord> records = {
-        makeRecord("ConvFprop", "fp32", "NCHW", true, "OTHER_ENGINE"),
+        makeRecord("ConvFprop",
+                   "fp32",
+                   "NCHW",
+                   true,
+                   /*testName=*/"SomeTest.Correctness/0",
+                   /*engineName=*/"OTHER_ENGINE"),
     };
     auto result = condenseSupportClaims(records, "TEST_ENGINE");
     EXPECT_TRUE(result.matchers.empty());
@@ -258,6 +265,85 @@ TEST(TestSupportClaimsCondenser, OutputIsDeterministicAcrossInputOrder)
 //
 // When an axis value appears in some op_chains but not others, the
 // algorithm shouldn't synthesize coverage for unobserved combinations.
+
+// -- S∩U conflict detection --------------------------------------------
+//
+// RFC 0012 §7's Safety invariant says a tuple can be in S xor U, never
+// both. When it lands in both, the op_chain string is too coarse for
+// the engine's actual dispatch granularity and the condenser must
+// refuse rather than silently exclude.
+
+TEST(TestSupportClaimsCondenser, TupleInBothSAndUProducesConflict)
+{
+    // Same (op, io, layout) tuple reported as supported by one test and
+    // unsupported by another. Real-world cause: BatchnormFwdTrainingActiv
+    // runs both FULL_TRAINING and WITH_BATCH_STATS scenarios — same
+    // node type but different optional inputs wired up.
+    std::vector<GraphSupportRecord> records = {
+        makeRecord("Batchnorm + Pointwise:RELU_FWD",
+                   "fp32",
+                   "NCHW",
+                   /*supports=*/true,
+                   "BNTrainingActiv2dFp32.Correctness/0"),
+        makeRecord("Batchnorm + Pointwise:RELU_FWD",
+                   "fp32",
+                   "NCHW",
+                   /*supports=*/false,
+                   "BNTrainingActiv2dFp32.Correctness/1"),
+    };
+    auto result = condenseSupportClaims(records, "TEST_ENGINE");
+    ASSERT_EQ(result.conflictingObservations.size(), 1u);
+    const auto& conflict = result.conflictingObservations[0];
+    EXPECT_EQ(std::get<0>(conflict.tuple), "Batchnorm + Pointwise:RELU_FWD");
+    EXPECT_EQ(std::get<1>(conflict.tuple), "fp32");
+    EXPECT_EQ(std::get<2>(conflict.tuple), "NCHW");
+    ASSERT_EQ(conflict.supportedBy.size(), 1u);
+    EXPECT_EQ(conflict.supportedBy[0], "BNTrainingActiv2dFp32.Correctness/0");
+    ASSERT_EQ(conflict.unsupportedBy.size(), 1u);
+    EXPECT_EQ(conflict.unsupportedBy[0], "BNTrainingActiv2dFp32.Correctness/1");
+    // No matchers emitted when conflict detected — caller (write driver)
+    // refuses to write.
+    EXPECT_TRUE(result.matchers.empty());
+}
+
+TEST(TestSupportClaimsCondenser, AllConflictsAreReportedNotJustFirst)
+{
+    // The diagnostic is most useful when it lists every conflict in
+    // one pass — engineer can address all variant-tag gaps in one PR.
+    std::vector<GraphSupportRecord> records = {
+        makeRecord("ConvFprop", "fp16", "NCHW", true, "A"),
+        makeRecord("ConvFprop", "fp16", "NCHW", false, "B"),
+        makeRecord("ConvDgrad", "fp32", "NHWC", true, "C"),
+        makeRecord("ConvDgrad", "fp32", "NHWC", false, "D"),
+        makeRecord("Batchnorm", "bf16", "NCDHW", true, "E"),
+        makeRecord("Batchnorm", "bf16", "NCDHW", false, "F"),
+    };
+    auto result = condenseSupportClaims(records, "TEST_ENGINE");
+    EXPECT_EQ(result.conflictingObservations.size(), 3u);
+}
+
+TEST(TestSupportClaimsCondenser, ConflictListsAllTestCasesOnEachSide)
+{
+    // The supportedBy / unsupportedBy lists are sorted and complete so
+    // an engineer reading the diagnostic can pattern-match across
+    // test names to spot the scenario split (e.g. all "Correctness/0"
+    // even, all "Correctness/1" odd).
+    std::vector<GraphSupportRecord> records = {
+        makeRecord("Batchnorm", "fp32", "NCHW", true, "Smoke/Foo.Correctness/0"),
+        makeRecord("Batchnorm", "fp32", "NCHW", true, "Smoke/Foo.Correctness/2"),
+        makeRecord("Batchnorm", "fp32", "NCHW", true, "Smoke/Foo.Correctness/4"),
+        makeRecord("Batchnorm", "fp32", "NCHW", false, "Smoke/Foo.Correctness/1"),
+        makeRecord("Batchnorm", "fp32", "NCHW", false, "Smoke/Foo.Correctness/3"),
+    };
+    auto result = condenseSupportClaims(records, "TEST_ENGINE");
+    ASSERT_EQ(result.conflictingObservations.size(), 1u);
+    const auto& conflict = result.conflictingObservations[0];
+    EXPECT_EQ(conflict.supportedBy.size(), 3u);
+    EXPECT_EQ(conflict.unsupportedBy.size(), 2u);
+    // Sort guarantee.
+    EXPECT_TRUE(std::is_sorted(conflict.supportedBy.begin(), conflict.supportedBy.end()));
+    EXPECT_TRUE(std::is_sorted(conflict.unsupportedBy.begin(), conflict.unsupportedBy.end()));
+}
 
 TEST(TestSupportClaimsCondenser, UnobservedCellsArePreferredOutOfRectangle)
 {

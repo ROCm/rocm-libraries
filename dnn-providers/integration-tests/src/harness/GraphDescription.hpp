@@ -8,6 +8,7 @@
 
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Types.hpp>
+#include <hipdnn_frontend/node/BatchnormNode.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
 #include <hipdnn_frontend/node/ReductionNode.hpp>
 
@@ -33,6 +34,43 @@ struct StructuredGraphDescription
     // Intermediate dtype, or empty if graph_attributes has NOT_SET.
     std::string intermediateDtype;
 };
+
+// Per-node "variant" tag — returned by describeNodeVariant when a node's
+// attribute set affects MIOpen solver dispatch in a way the bare node
+// type can't capture. Producing distinct op_chain strings for these
+// variants prevents the RFC 0012 §7 condenser's S∩U collision: without
+// the tag, two structurally different graphs (e.g. training Batchnorm
+// with vs. without running-stats inputs) serialize identically and the
+// engine's per-variant support classification gets lost.
+//
+// Empty string means no variant — the node has no dispatch-affecting
+// attribute variation we care about (yet).
+inline std::string describeNodeVariant(const hipdnn_frontend::graph::INode& node)
+{
+    using namespace hipdnn_frontend::graph;
+
+    if(const auto* pw = dynamic_cast<const PointwiseNode*>(&node))
+    {
+        return to_string(pw->attributes.get_mode());
+    }
+    if(const auto* red = dynamic_cast<const ReductionNode*>(&node))
+    {
+        auto mode = red->attributes.get_mode();
+        return mode.has_value() ? std::string(to_string(*mode)) : std::string{};
+    }
+    if(const auto* bn = dynamic_cast<const BatchnormNode*>(&node))
+    {
+        // FULL_TRAINING vs WITH_BATCH_STATS scenarios in the integration
+        // tests produce identical node types but wire different optional
+        // inputs (prev_running_mean/variance + momentum). MIOpen dispatches
+        // them to different solvers; without a variant tag they collide
+        // in S∩U. Tag chosen for human-readability over hash compactness.
+        const bool hasRunningStats = bn->attributes.get_prev_running_mean() != nullptr;
+        return hasRunningStats ? std::string("training_with_running_stats")
+                               : std::string("batch_stats_only");
+    }
+    return {};
+}
 
 // Build the structured description from a graph. Visit order and node
 // stringification match describeGraph() byte-for-byte; the two functions
@@ -64,19 +102,10 @@ inline StructuredGraphDescription
 
         ops << to_string(node.getNodeType());
 
-        // For Pointwise nodes, append the mode
-        if(const auto* pw = dynamic_cast<const PointwiseNode*>(&node))
+        const auto variant = describeNodeVariant(node);
+        if(!variant.empty())
         {
-            ops << ":" << to_string(pw->attributes.get_mode());
-        }
-        // For Reduction nodes, append the mode
-        else if(const auto* red = dynamic_cast<const ReductionNode*>(&node))
-        {
-            auto mode = red->attributes.get_mode();
-            if(mode.has_value())
-            {
-                ops << ":" << to_string(*mode);
-            }
+            ops << ":" << variant;
         }
     });
 

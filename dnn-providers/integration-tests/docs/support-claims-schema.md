@@ -29,13 +29,16 @@ The sidecar is discovered automatically — `TestSettings` looks for
 
 ```toml
 [meta]
-version = 1
+version = 2
 engine  = "MIOPEN_ENGINE"
 ```
 
-- `version` — schema version. Currently `1`. A v1 reader refuses to
-  parse a higher-versioned file loudly rather than silently dropping
-  unknown sections.
+- `version` — sidecar schema version. Currently `2`. v2 extended the
+  `op_chain` string format to include per-node variant tags (see
+  `op_chains` below). v1 sidecars are refused at load — regenerate via
+  `--write-support-claims`. The main TOML's `[meta].version` is a
+  separate, unrelated version stream (the main file's schema is
+  tolerance overrides + test skips and hasn't changed).
 - `engine` — required in the sidecar. Optional in the main file but
   must match the sidecar's value if present. Cross-checked at load
   against `--test-engine` so the same TOML can't be misapplied to a
@@ -88,9 +91,26 @@ layouts   = ["NCHW", "NHWC"]
 
 | Field      | Source                                                  | Example values |
 |------------|---------------------------------------------------------|----------------|
-| `op_chains`| `describeGraphStructured(graph).opChain` — visit order + `to_string(NodeType)` joined by ` + `, with `Pointwise`/`Reduction` mode appended as `:MODE` | `"ConvFprop"`, `"ConvFprop + Pointwise:RELU_FWD"` |
+| `op_chains`| `describeGraphStructured(graph).opChain` — visit order + `to_string(NodeType)` joined by ` + `, with a `:VARIANT` suffix per node when the node's attributes affect MIOpen solver dispatch | `"ConvFprop"`, `"ConvFprop + Pointwise:RELU_FWD"`, `"Batchnorm:training_with_running_stats + Pointwise:RELU_FWD"` |
 | `io_dtypes`| `to_string(graph.graph_attributes.get_io_data_type())`  | `"fp16"`, `"fp32"`, `"bf16"`, `"fp64"` |
 | `layouts`  | Fixtures call `setTestCaseLayout("NCHW"|"NHWC"|...)`    | `"NCHW"`, `"NHWC"`, `"NCDHW"`, `"NDHWC"` |
+
+### Per-node variant tags (v2)
+
+`describeNodeVariant()` returns a stable string per node type when the
+bare node type isn't enough to capture MIOpen's dispatch behavior.
+Today:
+
+| Node | Variant values | Why |
+|------|----------------|-----|
+| `Pointwise` | `RELU_FWD`, `SIGMOID`, ... (the mode) | Different solvers per activation mode. |
+| `Reduction` | `ADD`, `MAX`, ... when mode is set | Different solvers per reduction op. |
+| `Batchnorm` | `training_with_running_stats`, `batch_stats_only` | Same node type; presence of `previous_running_stats` inputs flips MIOpen dispatch (FULL_TRAINING vs WITH_BATCH_STATS in the test fixtures). |
+
+Variants are extended per-node-type as new dispatch divergences are
+discovered. The condenser fails loudly on `S∩U≠∅` to surface the next
+missing variant — when that fires, add a variant tag for the offending
+node type, bump the schema version, regenerate.
 
 The op_chain string format is a stability contract once this RFC ships
 (RFC 0012 §12 risks). Any change to graph visit order, `to_string`

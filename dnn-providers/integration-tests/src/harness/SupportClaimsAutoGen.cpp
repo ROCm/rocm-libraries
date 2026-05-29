@@ -208,6 +208,14 @@ CondensedSupportData condenseSupportClaims(const std::vector<GraphSupportRecord>
     std::set<std::string> allIosSet;
     std::set<std::string> allLayoutsSet;
 
+    // Track per-tuple which test cases voted S or U so we can produce a
+    // useful diagnostic when both sides have entries (S∩U≠∅). RFC §7's
+    // Safety invariant says a tuple can be in S xor U, never both — if
+    // it's both, the op_chain string isn't fine-grained enough to
+    // partition graphs MIOpen dispatches differently.
+    std::map<Tuple, std::vector<std::string>> supportedBy;
+    std::map<Tuple, std::vector<std::string>> unsupportedBy;
+
     for(const auto& record : records)
     {
         if(record.opChain.empty())
@@ -221,13 +229,51 @@ CondensedSupportData condenseSupportClaims(const std::vector<GraphSupportRecord>
         {
             S.insert(tuple);
             opsInS.insert(record.opChain);
+            supportedBy[tuple].push_back(record.testName);
         }
         else
         {
             U.insert(tuple);
+            unsupportedBy[tuple].push_back(record.testName);
         }
         allIosSet.insert(record.ioDtype);
         allLayoutsSet.insert(record.layout);
+    }
+
+    // Detect S∩U conflicts before condensation. Walking S is cheap and
+    // deterministic; we surface every conflict (not just the first) so
+    // the engineer's variant-tag PR can address them in one pass rather
+    // than rediscovering them iteratively.
+    CondensedSupportData out;
+    for(const auto& tuple : S)
+    {
+        if(U.find(tuple) == U.end())
+        {
+            continue;
+        }
+        CondensedSupportData::ConflictDetail detail;
+        detail.tuple = tuple;
+        auto sIt = supportedBy.find(tuple);
+        if(sIt != supportedBy.end())
+        {
+            detail.supportedBy = sIt->second;
+            std::sort(detail.supportedBy.begin(), detail.supportedBy.end());
+        }
+        auto uIt = unsupportedBy.find(tuple);
+        if(uIt != unsupportedBy.end())
+        {
+            detail.unsupportedBy = uIt->second;
+            std::sort(detail.unsupportedBy.begin(), detail.unsupportedBy.end());
+        }
+        out.conflictingObservations.push_back(std::move(detail));
+    }
+    if(!out.conflictingObservations.empty())
+    {
+        // Caller refuses to write; don't bother running the condensation
+        // pass — its output would be misleading anyway since the safety
+        // invariant is violated.
+        out.unsupportedObservations = std::move(U);
+        return out;
     }
 
     // Sort axis values once; rectangle enumeration uses these as the
@@ -277,7 +323,6 @@ CondensedSupportData condenseSupportClaims(const std::vector<GraphSupportRecord>
         }
     }
 
-    CondensedSupportData out;
     for(const auto& [rect, ops] : rectToOps)
     {
         SupportMatcher matcher;
@@ -356,7 +401,7 @@ std::string defaultHeader(const std::string& engineName)
            "support-claims-schema.md\n"
         << "\n"
         << "[meta]\n"
-        << "version = 1\n"
+        << "version = 2\n"
         << "engine  = \"" << engineName << "\"\n"
         << "\n";
     return out.str();
@@ -755,6 +800,86 @@ bool generateSupportClaimsForCurrentArch(const std::filesystem::path& sidecarPat
     }
 
     const auto condensed = condenseSupportClaims(records, engineName);
+
+    // S∩U conflict: same (op_chain, io_dtype, layout) reported as both
+    // supported and unsupported by different test cases. RFC 0012 §7's
+    // safety invariant doesn't permit this — it means describeGraph()
+    // is too coarse for the engine's actual dispatch granularity. List
+    // every conflict (not just the first) so a follow-up PR can extend
+    // describeNodeVariant() for all the offending node types at once.
+    if(!condensed.conflictingObservations.empty())
+    {
+        std::cerr << "[--write-support-claims] FATAL: " << condensed.conflictingObservations.size()
+                  << " tuple(s) observed as BOTH supported AND unsupported in the same run.\n"
+                  << "  describeGraph() produces the same op_chain string for graphs MIOpen "
+                     "dispatches differently. Either narrow the op_chain (extend "
+                     "describeNodeVariant in GraphDescription.hpp, bump [meta].version) or add "
+                     "[[test_skips]] for the unsupported variant.\n\n";
+        constexpr size_t maxTuplesShown = 25;
+        constexpr size_t maxTestsPerSide = 3;
+        size_t shown = 0;
+        for(const auto& conflict : condensed.conflictingObservations)
+        {
+            if(shown++ >= maxTuplesShown)
+            {
+                std::cerr << "  ... (" << condensed.conflictingObservations.size() - maxTuplesShown
+                          << " more conflicts in support_claim_conflicts.txt)\n";
+                break;
+            }
+            const auto& [op, io, layout] = conflict.tuple;
+            std::cerr << "  (\"" << op << "\", \"" << io << "\", \"" << layout << "\")\n";
+            std::cerr << "    supported by:";
+            for(size_t i = 0; i < std::min(conflict.supportedBy.size(), maxTestsPerSide); ++i)
+            {
+                std::cerr << "\n      " << conflict.supportedBy[i];
+            }
+            if(conflict.supportedBy.size() > maxTestsPerSide)
+            {
+                std::cerr << "\n      (and " << conflict.supportedBy.size() - maxTestsPerSide
+                          << " more)";
+            }
+            std::cerr << "\n    unsupported by:";
+            for(size_t i = 0; i < std::min(conflict.unsupportedBy.size(), maxTestsPerSide); ++i)
+            {
+                std::cerr << "\n      " << conflict.unsupportedBy[i];
+            }
+            if(conflict.unsupportedBy.size() > maxTestsPerSide)
+            {
+                std::cerr << "\n      (and " << conflict.unsupportedBy.size() - maxTestsPerSide
+                          << " more)";
+            }
+            std::cerr << "\n";
+        }
+
+        // Dump the full conflict list to an artifact file — CI can
+        // upload it without the stderr volume getting truncated.
+        std::ofstream artifact("support_claim_conflicts.txt");
+        if(artifact.is_open())
+        {
+            artifact << "Support claim S∩U conflicts: " << condensed.conflictingObservations.size()
+                     << "\n\n";
+            for(const auto& conflict : condensed.conflictingObservations)
+            {
+                const auto& [op, io, layout] = conflict.tuple;
+                artifact << "(\"" << op << "\", \"" << io << "\", \"" << layout << "\")\n";
+                artifact << "  supported by:\n";
+                for(const auto& t : conflict.supportedBy)
+                {
+                    artifact << "    " << t << "\n";
+                }
+                artifact << "  unsupported by:\n";
+                for(const auto& t : conflict.unsupportedBy)
+                {
+                    artifact << "    " << t << "\n";
+                }
+                artifact << "\n";
+            }
+        }
+        std::cerr << "\n[--write-support-claims] full conflict list written to "
+                     "support_claim_conflicts.txt\n";
+        return false;
+    }
+
     if(condensed.matchers.empty())
     {
         std::cerr << "[--write-support-claims] engine '" << engineName

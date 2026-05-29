@@ -20,17 +20,33 @@ struct GraphSupportRecord; // forward decl; full type in SupportMatrixCollector.
 
 // Output of the condensation pass: one matcher per emit-group plus the
 // list of (op_chain, io, layout) tuples that were observed in U (engine
-// returned empty support). The U-list is surfaced to the engineer on
-// stderr so the diff review isn't just "trust the tool".
+// returned empty support), plus any tuples observed in BOTH S and U
+// (engine refused for some test cases but accepted for others — a hard
+// schema-granularity failure surfaced as conflictingObservations).
 struct CondensedSupportData
 {
     std::vector<SupportMatcher> matchers;
     std::set<std::tuple<std::string, std::string, std::string>> unsupportedObservations;
+    // Per-conflict diagnostic: (op, io, layout) -> { supportedBy, unsupportedBy }
+    // populated only when a tuple landed in both S and U during the run.
+    // Non-empty here means the caller MUST refuse to write the sidecar
+    // because the op_chain string isn't fine-grained enough to capture
+    // what MIOpen actually dispatches differently — RFC 0012 §7 doesn't
+    // permit a tuple to be both targetable and forbidden.
+    struct ConflictDetail
+    {
+        std::tuple<std::string, std::string, std::string> tuple;
+        std::vector<std::string> supportedBy; // test names reporting support
+        std::vector<std::string> unsupportedBy; // test names reporting no support
+    };
+    std::vector<ConflictDetail> conflictingObservations;
 };
 
 // Condense observed records into the minimal safe matcher set described
 // in RFC 0012 §7. Pure set operations — no globs, no token-splitting,
-// no trie.
+// no trie. If any tuple ends up in both S and U across the records,
+// conflictingObservations is populated and the caller is expected to
+// refuse to write — see RFC 0012 §7 "Safety" invariant.
 CondensedSupportData condenseSupportClaims(const std::vector<GraphSupportRecord>& records,
                                            std::string_view engineName);
 

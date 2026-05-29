@@ -168,11 +168,17 @@ SupportClaims::SupportClaims(const std::filesystem::path& sidecarPath,
         throw std::runtime_error("SupportClaims: missing [meta].version in "
                                  + sidecarPath.string());
     }
-    if(*version != 1)
+    // RFC 0012 §5: sidecar version is decoupled from the main TOML's
+    // version. v2 bumped the op_chain string format to include per-node
+    // variant tags (describeGraph extension) — v1 sidecars are stale
+    // because their op_chain strings no longer match what verifyGraph
+    // records. Refuse loudly rather than silently mis-evaluate.
+    if(*version != 2)
     {
         throw std::runtime_error("SupportClaims: unsupported version " + std::to_string(*version)
                                  + " in " + sidecarPath.string()
-                                 + " (expected 1; bump engine TOML toolchain to read v2)");
+                                 + " (expected 2; v1 sidecars predate the op_chain variant tag "
+                                   "and need regeneration via --write-support-claims)");
     }
 
     auto engine = table["meta"]["engine"].value<std::string>();
