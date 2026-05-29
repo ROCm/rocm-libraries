@@ -22,7 +22,10 @@ if(HIPSPARSE_BUILD_TESTING OR BUILD_TESTING)
     set(HIPSPARSE_TEMPLATE "${PROJECT_BINARY_DIR}/clients/staging/hipsparse_template.yaml")
     set(HIPSPARSE_GENTEST "${PROJECT_BINARY_DIR}/clients/staging/hipsparse_gentest.py")
     set(HIPSPARSE_CONVERT "${PROJECT_BINARY_DIR}/clients/hipsparse_mtx2csr")
-    set(HIPSPARSE_CLIENTMATRICES "${PROJECT_SOURCE_DIR}/cmake/hipsparse_clientmatrices.cmake")
+    set(HIPSPARSE_CLIENTMATRICES
+        "${PROJECT_SOURCE_DIR}/cmake/hipsparse_clientmatrices.cmake"
+        "${PROJECT_SOURCE_DIR}/cmake/hipsparse_test_matrices_common.cmake"
+    )
     
     rocm_install(
         FILES "${HIPSPARSE_COMMON}" "${HIPSPARSE_TEMPLATE}"
@@ -40,7 +43,7 @@ if(HIPSPARSE_BUILD_TESTING OR BUILD_TESTING)
         DESTINATION ${CMAKE_INSTALL_BINDIR}
     )
     rocm_install(
-        FILES "${HIPSPARSE_CLIENTMATRICES}"
+        FILES ${HIPSPARSE_CLIENTMATRICES}
         COMPONENT clients-common
         DESTINATION "${CMAKE_INSTALL_DATADIR}/hipsparse/test"
     )
