@@ -13,16 +13,11 @@ platform = "windows"
 
 [[supported.matchers]]
 op_chains = [
-    "Batchnorm:batch_stats_only",
-    "Batchnorm:batch_stats_only + Pointwise:RELU_FWD",
-    "Batchnorm:batch_stats_only + Pointwise:RELU_FWD[lower_clip,upper_clip]",
-    "Batchnorm:batch_stats_only + Pointwise:RELU_FWD[lower_clip]",
-    "Batchnorm:batch_stats_only + Pointwise:RELU_FWD[upper_clip]",
-    "Batchnorm:training_with_running_stats",
-    "Batchnorm:training_with_running_stats + Pointwise:RELU_FWD",
-    "Batchnorm:training_with_running_stats + Pointwise:RELU_FWD[lower_clip,upper_clip]",
-    "Batchnorm:training_with_running_stats + Pointwise:RELU_FWD[lower_clip]",
-    "Batchnorm:training_with_running_stats + Pointwise:RELU_FWD[upper_clip]",
+    "Batchnorm",
+    "Batchnorm + Pointwise:RELU_FWD",
+    "Batchnorm + Pointwise:RELU_FWD[lower_clip,upper_clip]",
+    "Batchnorm + Pointwise:RELU_FWD[lower_clip]",
+    "Batchnorm + Pointwise:RELU_FWD[upper_clip]",
     "BatchnormBackward",
     "BatchnormInference",
     "BatchnormInference + Pointwise:RELU_FWD",
