@@ -17,19 +17,31 @@
 namespace ck_dsl_provider {
 
 class CompileServiceBridge;
+class JitCache;
 
 /// Type alias for engine pointers used during registration.
 using CkDslEnginePtr =
     std::unique_ptr<hipdnn_plugin_sdk::IEngine<::CkDslHandle, CkDslSettings, CkDslContext>>;
 
 /// Container class that owns engine instantiations for the CK DSL
-/// provider plugin. Constructed once per plugin handle (shared across
-/// handles via std::shared_ptr).
+/// provider plugin.
 ///
-/// For I-1 it registers a single engine
-/// (CkDslConvImplicitGemmEngine). Sibling per-op engines
-/// (CkDslGemmEngine, CkDslAttentionEngine, ...) join the
-/// s_engineDefinitions vector in M5 without refactoring this class.
+/// Lifetime: hipDNN's ``SharedContainerManager`` keeps a
+/// ``std::weak_ptr`` to this container; the strong reference lives on
+/// each plugin handle. The container is therefore alive for as long as
+/// at least one handle exists, and is reconstructed when a handle is
+/// created after the previous generation's last handle was released.
+/// Long-lived process-wide state (the embedded interpreter; the JIT
+/// module cache) must NOT live on the container, since that would
+/// throw it away on handle-generation cycling. Such state lives on the
+/// container as a reference to a process-static side table, defined in
+/// the implementation file.
+///
+/// Engine set is declared once in the implementation file
+/// (``engineDefinitions()``) as a ``(id, factory)`` table read by both
+/// ``copyEngineIds`` (for the SDK's engine-listing C ABI) and
+/// ``createEngine`` (for the per-handle construction path). Sibling
+/// per-op engines join that table without changing this class.
 class CkDslContainer {
    public:
     CkDslContainer();
@@ -57,16 +69,24 @@ class CkDslContainer {
     /// container was not fully constructed.
     CompileServiceBridge& compileServiceBridge();
 
+    /// Access to the process-wide JIT module cache. Shared across
+    /// every container generation so kernels compiled by an earlier
+    /// generation are still hits after a handle-cycle.
+    JitCache& jitCache();
+
    private:
-    /// Per-engine constructor invoked from the container ctor. Each
-    /// engine takes a non-owning ref to the container's
-    /// CompileServiceBridge; the container owns the bridge for the
-    /// engine's lifetime.
+    /// Per-engine constructor invoked from the container ctor. Engines
+    /// take non-owning references to the container's
+    /// ``CompileServiceBridge`` and to the process-wide ``JitCache``;
+    /// they outlive both for the duration of the container's lifetime.
     CkDslEnginePtr createEngine(int64_t id) const;
 
     std::unique_ptr<hipdnn_plugin_sdk::EngineManager<::CkDslHandle, CkDslSettings, CkDslContext>>
         _engineManager;
     std::unique_ptr<CompileServiceBridge> _compileServiceBridge;
+    // Non-owning reference into a process-static JitCache; ownership is
+    // documented in the .cpp.
+    JitCache* _jitCache{nullptr};
 };
 
 }  // namespace ck_dsl_provider

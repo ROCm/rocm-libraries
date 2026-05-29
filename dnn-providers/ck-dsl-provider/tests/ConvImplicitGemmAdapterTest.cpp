@@ -244,7 +244,7 @@ TEST(TestConvImplicitGemmAdapter, RejectsNonHalfDtype) {
 /// Payload conversion needs the embedded interpreter. We construct a
 /// CkDslContainer so the per-process interpreter is up, then exercise
 /// the spec -> py::dict translation under the GIL.
-class ConvImplicitGemmPayload : public ::testing::Test {
+class TestConvImplicitGemmPayload : public ::testing::Test {
    protected:
     void SetUp() override {
         // The container owns the embedded interpreter; constructing
@@ -255,7 +255,7 @@ class ConvImplicitGemmPayload : public ::testing::Test {
     std::unique_ptr<CkDslContainer> _container;
 };
 
-TEST_F(ConvImplicitGemmPayload, PayloadDictForBakeOffShape) {
+TEST_F(TestConvImplicitGemmPayload, PayloadDictForBakeOffShape) {
     ConvGraphFixture fx;
     auto spec = ConvImplicitGemmAdapter::buildSpec(*fx.convAttr, fx.tensorMap);
 
@@ -303,7 +303,7 @@ TEST_F(ConvImplicitGemmPayload, PayloadDictForBakeOffShape) {
     EXPECT_EQ(problem["dH"].cast<int>(), 1);
 }
 
-TEST_F(ConvImplicitGemmPayload, RoundTripsThroughPythonDataclass) {
+TEST_F(TestConvImplicitGemmPayload, RoundTripsThroughPythonDataclass) {
     // Cross-check: splat the payload into the actual Python
     // ImplicitGemmConvSpec dataclass. If our field set drifts from
     // the dataclass (extra/missing field) this fails loudly with a

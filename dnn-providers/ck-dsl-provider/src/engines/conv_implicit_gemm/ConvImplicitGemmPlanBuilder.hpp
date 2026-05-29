@@ -23,9 +23,11 @@ class CompileServiceBridge;
 
 /// IPlanBuilder for the implicit-GEMM convolution kernel.
 ///
-/// Owns the per-op ``JitCache`` (each op gets its own cache so a key
-/// collision across ops is impossible by construction). The bridge
-/// reference comes from the container; the builder does not own it.
+/// Holds non-owning references to the container's
+/// ``CompileServiceBridge`` and the process-wide ``JitCache``. A single
+/// cache is shared by every engine in the provider: the cache key
+/// already includes ``op_kind`` as its first folded field, so
+/// cross-engine collisions are impossible by construction.
 ///
 /// **isApplicable**: returns true iff the graph has exactly one node,
 /// that node is a ``ConvolutionFwdAttributes`` node, and the adapter
@@ -37,12 +39,11 @@ class CompileServiceBridge;
 /// ``JitCache::getOrLoad`` with a loader that runs the adapter +
 /// ``CompileServiceBridge::compile``, wraps the resulting
 /// ``HipModule`` in a ``ConvImplicitGemmPlan``, and stores it on the
-/// execution context via ``setPlan``. The plan's ``execute()`` is a
-/// stub for I-7 (wired in I-8).
+/// execution context via ``setPlan``.
 class ConvImplicitGemmPlanBuilder
     : public hipdnn_plugin_sdk::IPlanBuilder<::CkDslHandle, CkDslSettings, CkDslContext> {
    public:
-    explicit ConvImplicitGemmPlanBuilder(CompileServiceBridge& bridge);
+    ConvImplicitGemmPlanBuilder(CompileServiceBridge& bridge, JitCache& cache);
 
     bool isApplicable(
         const ::CkDslHandle& handle,
@@ -68,8 +69,8 @@ class ConvImplicitGemmPlanBuilder
         const ::CkDslHandle& handle,
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
 
-    /// Test-only access to the cache so the I-7 plan-builder test can
-    /// assert miss-then-hit behaviour across two buildPlan calls.
+    /// Test-only access to the shared cache so unit tests can assert
+    /// miss-then-hit behaviour across two buildPlan calls.
     JitCache& cacheForTesting() const {
         return _cache;
     }
@@ -83,11 +84,7 @@ class ConvImplicitGemmPlanBuilder
 
    private:
     CompileServiceBridge& _bridge;
-
-    // ``mutable`` because IPlanBuilder methods are const, but the
-    // cache fundamentally mutates on a miss. The mutation is
-    // thread-safe via the JitCache's internal mutex.
-    mutable JitCache _cache;
+    JitCache& _cache;
 };
 
 }  // namespace ck_dsl_provider

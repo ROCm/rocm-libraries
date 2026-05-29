@@ -217,6 +217,19 @@ KernelArtifact dictToArtifact(const py::dict& resultDict, const char* contextTag
         // funnel through the PythonError translation.
         throw py::error_already_set();
     }
+    // Hard cap: a runaway compile path could otherwise request a
+    // multi-GB allocation that succeeds host-side and then fails
+    // inside hipModuleLoadData -- OOM rather than fail-fast. 256 MB
+    // is two orders of magnitude above the largest realistic HSACO
+    // we expect from ck_dsl (~few MB).
+    constexpr Py_ssize_t kHsacoMaxBytes = 256LL * 1024 * 1024;
+    if (len > kHsacoMaxBytes) {
+        std::ostringstream oss;
+        oss << contextTag << ": HSACO blob is " << len << " bytes; rejecting (max "
+            << kHsacoMaxBytes << ")";
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                                       oss.str());
+    }
     artifact.hsaco.resize(static_cast<std::size_t>(len));
     if (len > 0) {
         std::memcpy(artifact.hsaco.data(), buf, static_cast<std::size_t>(len));

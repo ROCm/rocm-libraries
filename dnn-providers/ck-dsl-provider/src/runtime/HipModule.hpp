@@ -49,24 +49,47 @@ class HipModule {
     HipModule(const HipModule&) = delete;
     HipModule& operator=(const HipModule&) = delete;
     HipModule(HipModule&& other) noexcept;
+    /// Move-assignment is deliberately not provided. Implementing it
+    /// would require unloading ``this``'s current module before
+    /// overwriting it -- the same sequence the destructor runs, but
+    /// in a context where we don't want the failure-swallowing
+    /// noexcept behaviour. Since the cache stores ``shared_ptr<HipModule>``
+    /// and the plan layer holds the module by shared pointer too, there
+    /// is no concrete call site that needs move-assignment today. If a
+    /// future caller wants to hold ``HipModule`` by value inside a
+    /// vector for re-pointing, add the operator here with explicit
+    /// unload-of-the-overwritten-handle semantics rather than
+    /// re-enabling it without that bookkeeping.
     HipModule& operator=(HipModule&&) = delete;
 
-    /// Launch the kernel with the supplied packed argument buffer,
-    /// grid, block, dynamic LDS size, and stream. The packed buffer
-    /// is typically produced by ``LaunchAbi::pack``; an empty buffer
-    /// is permitted for kernels with no parameters.
+    /// Launch the kernel with the supplied packed argument buffer
+    /// (raw pointer + size variant). The buffer is typically produced
+    /// either by ``LaunchAbi::pack`` (for tests / generic launch sites)
+    /// or by an op-specific per-plan pre-packed template (for hot-path
+    /// launches that want to avoid the per-call vector allocation).
+    /// An empty buffer (``args == nullptr && argsSize == 0``) is
+    /// permitted for kernels with no parameters.
     ///
     /// Throws ``HipdnnPluginException`` with the HIP error name if
     /// ``hipModuleLaunchKernel`` returns non-success.
-    void launch(const std::vector<std::byte>& packedArgs, const KernelArtifact::GridSpec& grid,
+    void launch(const std::byte* args, std::size_t argsSize, const KernelArtifact::GridSpec& grid,
                 const KernelArtifact::BlockSpec& block, std::uint32_t ldsBytes, hipStream_t stream);
+
+    /// Vector overload preserved for callers (mostly tests) that
+    /// already hold a ``std::vector`` from ``LaunchAbi::pack``.
+    void launch(const std::vector<std::byte>& packedArgs, const KernelArtifact::GridSpec& grid,
+                const KernelArtifact::BlockSpec& block, std::uint32_t ldsBytes,
+                hipStream_t stream) {
+        launch(packedArgs.data(), packedArgs.size(), grid, block, ldsBytes, stream);
+    }
 
     /// Convenience overload: pull grid / block / lds from the
     /// artifact's defaults. Used by smoke tests and by future per-op
     /// engines whose artifacts encode the canonical launch shape.
     void launch(const KernelArtifact& artifact, const std::vector<std::byte>& packedArgs,
                 hipStream_t stream) {
-        launch(packedArgs, artifact.grid, artifact.block, artifact.ldsBytes, stream);
+        launch(packedArgs.data(), packedArgs.size(), artifact.grid, artifact.block,
+               artifact.ldsBytes, stream);
     }
 
     /// Test-only accessors. Production code launches via ``launch``;

@@ -134,6 +134,17 @@ PerfResult PerfMeasurement::measureImpl(const std::function<void()>& launchFn, d
         launchFn();
     }
 
+    // Drain the warmup launches before the first timed iter records
+    // its start event. Without this sync, residual warmup work on the
+    // stream pushes back the first start_event's effective time slot
+    // and inflates the first sample with whatever overlap leaks in.
+    // The median filter would mask a single outlier, but on small
+    // kernels the leak can be wide enough to skew several samples.
+    if (_warmupIters > 0) {
+        checkHip(hipStreamSynchronize(stream),
+                 "PerfMeasurement::measure hipStreamSynchronize after warmup");
+    }
+
     // Per-iter event pairs. Vector storage so the events outlive the
     // launch loop without per-iter allocation.
     std::vector<ScopedEvent> starts;

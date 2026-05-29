@@ -13,10 +13,12 @@
 #include "CkDslContainer.hpp"
 #include "CkDslContext.hpp"
 #include "CkDslHandle.hpp"
+#include "TestUtils.hpp"
 #include "engines/conv_implicit_gemm/CkDslConvImplicitGemmEngine.hpp"
 #include "engines/conv_implicit_gemm/ConvImplicitGemmPlan.hpp"
 #include "engines/conv_implicit_gemm/ConvImplicitGemmPlanBuilder.hpp"
 #include "python/CompileServiceBridge.hpp"
+#include "runtime/JitCache.hpp"
 
 namespace {
 
@@ -66,8 +68,12 @@ class ConvImplicitGemmPlanBuilderHost : public ::testing::Test {
     void SetUp() override {
         _container = std::make_unique<CkDslContainer>();
         _handle = std::make_unique<::CkDslHandle>();
-        _planBuilder =
-            std::make_unique<ConvImplicitGemmPlanBuilder>(_container->compileServiceBridge());
+        // Test-owned cache so size() assertions are deterministic
+        // across test cases; the container's process-static cache
+        // would carry state in from earlier runs.
+        _cache = std::make_unique<ck_dsl_provider::JitCache>();
+        _planBuilder = std::make_unique<ConvImplicitGemmPlanBuilder>(
+            _container->compileServiceBridge(), *_cache);
     }
 
     ConvImplicitGemmPlanBuilder& builder() {
@@ -76,6 +82,7 @@ class ConvImplicitGemmPlanBuilderHost : public ::testing::Test {
 
     std::unique_ptr<CkDslContainer> _container;
     std::unique_ptr<::CkDslHandle> _handle;
+    std::unique_ptr<ck_dsl_provider::JitCache> _cache;
     std::unique_ptr<ConvImplicitGemmPlanBuilder> _planBuilder;
 };
 
@@ -110,13 +117,7 @@ TEST_F(ConvImplicitGemmPlanBuilderHost, GetCustomKnobsIsEmpty) {
 class ConvImplicitGemmPlanBuilderGpu : public ConvImplicitGemmPlanBuilderHost {
    protected:
     void SetUp() override {
-        int deviceCount = 0;
-        hipError_t err = hipGetDeviceCount(&deviceCount);
-        if (err != hipSuccess || deviceCount == 0) {
-            GTEST_SKIP() << "no HIP-visible device (deviceCount=" << deviceCount
-                         << ", hipError=" << static_cast<int>(err) << ")";
-        }
-        ASSERT_EQ(hipSetDevice(0), hipSuccess);
+        CK_DSL_PROVIDER_SKIP_IF_NOT_GFX950("ConvImplicitGemmPlanBuilderGpu");
         ConvImplicitGemmPlanBuilderHost::SetUp();
     }
 };
@@ -248,20 +249,15 @@ TEST_F(ConvImplicitGemmPlanBuilderGpu, PlanExecuteLaunches) {
 }
 
 TEST_F(ConvImplicitGemmPlanBuilderHost, ExecuteRejectsMissingDeviceBuffer) {
-    // Host-only: the uid-lookup throws before any HIP call, so this
-    // case doesn't need a device. Build a plan, then call execute()
-    // with an incomplete deviceBuffers array.
+    // The uid-lookup throws before any HIP call, but the buildPlan
+    // step still needs to load a real HSACO via hipModuleLoadData,
+    // which requires a gfx950 device for the DSL's emitted ISA.
+    CK_DSL_PROVIDER_SKIP_IF_NOT_GFX950(
+        "ConvImplicitGemmPlanBuilderHost.ExecuteRejectsMissingDeviceBuffer");
+
     auto fbBuilder = makeBakeOffConvFwdGraph();
     flatbuffer_utilities::GraphWrapper graph(fbBuilder.GetBufferPointer(), fbBuilder.GetSize());
     flatbuffer_utilities::EngineConfigWrapper engineConfig(nullptr, 0);
-
-    // The buildPlan compile-on-miss step needs the GPU (it loads the
-    // HSACO via hipModuleLoadData). Skip this case on host-only lanes.
-    int deviceCount = 0;
-    if (hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount == 0) {
-        GTEST_SKIP() << "ExecuteRejectsMissingDeviceBuffer needs a device to build the plan";
-    }
-    ASSERT_EQ(hipSetDevice(0), hipSuccess);
 
     CkDslContext ctx;
     builder().buildPlan(*_handle, graph, engineConfig, ctx);
