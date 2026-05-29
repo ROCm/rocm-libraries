@@ -32,7 +32,7 @@
 #   * Pre-fix (commit 0a9b6367693, gfx950): 6/6 PASS.
 #     PR 7767's non-power-of-two MIWT_M=6 + WGM4 pin cleared on the
 #     auto-detected multi-DU path.
-#   * Post LR-vs-GR drain fix (commit 41c40863e96): 6/6 PASS preserved.
+#   * Post LR-vs-GR drain fix (commit ce19b77af42): 6/6 PASS preserved.
 #     The drain fix is a no-op for this kernel (numPartitions=1 picks
 #     the single-partition candidate before VGPR pressure forces the
 #     5-partition split that triggered the bug on MIWT=10 cases).

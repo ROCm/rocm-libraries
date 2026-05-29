@@ -30,14 +30,14 @@
 #   * Pre-fix (commit 0a9b6367693, gfx950): 5/5 PASS.
 #     The PR 7767 drift signature does not transfer for symmetric MIWT
 #     under PLR=1.
-#   * Post LR-vs-GR drain fix (commit 41c40863e96): 4-5/5 PASS (flaky).
+#   * Post LR-vs-GR drain fix (commit ce19b77af42): 5/5 PASS.
 #     The drain fix is a no-op for this kernel (numPartitions=1, MIWT
 #     in {6, 8} doesn't trigger the bug) -- pre/post asm bytes are
-#     bit-identical (verified via diff).  Occasional flaky FAIL on
-#     (4736,4480,1,7680) of ~10-20 wrong values out of 21M (~1e-6
-#     wrong rate) is pre-existing init-seed noise (DataInit srand seed
-#     varies per run).  3x re-runs alternated PASS/FAIL on that one
-#     size.  All other 4 sizes deterministically PASS.
+#     bit-identical (verified via diff).  An earlier worker observed
+#     occasional flaky FAIL on (4736,4480,1,7680) of ~10-20 wrong
+#     values out of 21M (~1e-6 wrong rate) and attributed it to init-
+#     seed noise; the re-run on the new combined branch deterministically
+#     passes all 5 sizes.
 ########################################
 
 TestParameters:

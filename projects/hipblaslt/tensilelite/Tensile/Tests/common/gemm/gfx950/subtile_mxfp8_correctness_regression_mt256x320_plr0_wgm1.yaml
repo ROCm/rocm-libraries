@@ -39,7 +39,8 @@
 #     values wrong on deep-K shapes).  TENSILE_STREAMK_DYNAMIC_GRID=4
 #     reduced (9728,9600,1,13824) drift from ~9% to ~1.7%, isolating
 #     the dominant cause to StreamK partial-K under multi-DU.
-#   * Post StreamK partial-K _depthUForTc fix (commit 23d9418e031):
+#   * Post StreamK partial-K _depthUForTc fix (author commit 05522601062
+#     "Fix StreamK multi-DU pre-advance, gate multi-DU on macro tile size"):
 #     drift drops to ~2% wrong on (9728,9600,1,13824) and ~1.2% on
 #     (14336,10880,1,9472) -- both still FAIL the validator's
 #     threshold but match the TENSILE_STREAMK_DYNAMIC_GRID=4
@@ -52,7 +53,7 @@
 #     drain need.  PLR=0 + MIWT_N=10 produces only ~2% drift
 #     (instead of mt320x256's 46%) because the wave-cooperative
 #     pattern hits a smaller fraction of the MFMAs.
-#   * Post LR-vs-GR drain fix (commit 41c40863e96): **5/5 PASS.**
+#   * Post LR-vs-GR drain fix (commit ce19b77af42): **5/5 PASS.**
 #     Same root cause and fix as mt320x256_plr1_wgm4 (force vmcnt(0)
 #     drain for wrap-LR / cross-body-iter LR-GR dep under multi-DU +
 #     multi-partition).
