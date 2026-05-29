@@ -310,7 +310,7 @@ void testing_geqr2_geqrf(Arguments& argus)
     I lda = argus.get<I>("lda", m);
     rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
     rocblas_stride stP = argus.get<rocblas_stride>("strideP", min(m, n));
-    std::string matrix = argus.get<std::string>("matrix");
+    std::string matrix = argus.get<std::string>("matrix", "default");
 
     I bc = argus.batch_count;
     rocblas_int hot_calls = argus.iters;

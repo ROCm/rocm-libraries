@@ -822,7 +822,7 @@ void testing_syevd_heevd(Arguments& argus)
     rocblas_stride stD = argus.get<rocblas_stride>("strideD", n);
     rocblas_stride stE = argus.get<rocblas_stride>("strideE", n);
     rocblas_int verbose = argus.get<rocblas_int>("verbose", 0);
-    std::string matrix = argus.get<std::string>("matrix", "randint");
+    std::string matrix = argus.get<std::string>("matrix", "default");
 
     rocblas_evect evect = char2rocblas_evect(evectC);
     rocblas_fill uplo = char2rocblas_fill(uploC);
