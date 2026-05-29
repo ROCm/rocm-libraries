@@ -111,7 +111,7 @@ reason  = "Engine returns wrong results on gfx90a — ROCm/rocm-libraries#6979"
 ### 5.2 Sidecar file (machine-managed)
 
 ```toml
-# MIOPEN_ENGINE.supported.toml — wholesale rewritten by --write-support-claims.
+# MIOPEN_ENGINE.supported.toml Updates should be made by --write-support-claims.
 # Do not hand-edit.
 
 [meta]
