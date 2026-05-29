@@ -3540,14 +3540,17 @@ namespace TensileLite
             skGrid = cuCount;
         }
 
-        // For tree-reduction there are some limits for divisions to avoid overflow
-        // If we hit one of the limits, fallback to DP
-        size_t itersPerTile = problem.getItersPerTile(sizeMapping);
-        size_t itersPerWG   = tiles * itersPerTile / skGrid;
-        if(itersPerTile >= 65536 || itersPerWG >= 65536 || (tiles * itersPerTile) >= 16777216)
+        // Tree-fixup uses scalarUInt24DivideAndRemainder (dividend < 2^24, divisor < 2^16).
+        // If we exceed those bounds, fall back to DP.
+        if(reductionStrat == origami::reduction_t::tree)
         {
-            reductionStrat = origami::reduction_t::tree;
-            skGrid         = tiles;
+            size_t itersPerTile = problem.getItersPerTile(sizeMapping);
+            size_t itersPerWG   = tiles * itersPerTile / skGrid;
+
+            if(itersPerTile >= 65536 || itersPerWG >= 65536 || (tiles * itersPerTile) >= 16777216)
+            {
+                skGrid = tiles;
+            }
         }
 
         return skGrid;

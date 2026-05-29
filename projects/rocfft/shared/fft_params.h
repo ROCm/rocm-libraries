@@ -39,6 +39,7 @@
 #include "../shared/arithmetic.h"
 #include "../shared/array_validator.h"
 #include "../shared/client_data_layout_helpers.h"
+#include "../shared/client_except.h"
 #include "../shared/data_gen_device.h"
 #include "../shared/data_gen_host.h"
 #include "../shared/device_properties.h"
@@ -2369,11 +2370,13 @@ public:
 
     // Specific exception type for work buffer allocation failure.
     // Tests that hit this can't fit on the GPU and should be skipped.
-    struct work_buffer_alloc_failure : public std::runtime_error
+    struct work_buffer_alloc_failure : public hip_runtime_error
     {
         const size_t attempted_size;
-        work_buffer_alloc_failure(const std::string& s, size_t _attempted_size = 0)
-            : std::runtime_error(s)
+        work_buffer_alloc_failure(const std::string& s,
+                                  size_t             _attempted_size = 0,
+                                  hipError_t         hip_status      = hipErrorUnknown)
+            : hip_runtime_error(s, hip_status)
             , attempted_size(_attempted_size)
         {
         }
