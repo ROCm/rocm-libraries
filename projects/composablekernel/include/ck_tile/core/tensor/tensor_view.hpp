@@ -134,11 +134,12 @@ struct tensor_view
     {
         const OffsetType offset = coord.get_offset();
         assert_offset_type<decltype(offset), decltype(linear_offset)>();
-        return buf_.template get<X, OffsetType, static_offset / PackedSize>(offset / PackedSize,
-                                                linear_offset / PackedSize,
-                                                is_valid_element,
-                                                bool_constant<oob_conditional_check>{},
-                                                bool_constant<LargeTensor>{});
+        return buf_.template get<X, OffsetType, static_offset / PackedSize>(
+            offset / PackedSize,
+            linear_offset / PackedSize,
+            is_valid_element,
+            bool_constant<oob_conditional_check>{},
+            bool_constant<LargeTensor>{});
     }
 
     // X is vector of DataType.
