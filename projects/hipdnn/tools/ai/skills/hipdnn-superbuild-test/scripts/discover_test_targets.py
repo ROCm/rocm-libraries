@@ -3,20 +3,10 @@
 # SPDX-License-Identifier: MIT
 """Discover ctest targets in a hipDNN superbuild.
 
-Knows about the hip-kernel-provider naming inconsistency: that provider
-registers ctest targets as bare `unit-check` / `check` / `integration-check`
-under `dnn-providers/hip-kernel-provider/src/` rather than prefixed.
-This helper falls back to the path-qualified target when the prefixed
-form is not present.
-
-Outputs one matching target per line on stdout, formatted as:
-    <component>:<target>
-
-Components: hipdnn, miopen, hipblaslt, hip-kernel, integration-tests
-Scopes: unit, integration, all
-
-Usage:
-    discover_test_targets.py --build-dir <path> [--component <name>] [--scope <name>]
+The hip-kernel-provider currently registers bare `unit-check`, `check`, and
+`integration-check` targets under `dnn-providers/hip-kernel-provider/src/`
+rather than prefixed top-level targets. This helper checks the normal prefixed
+form first, then falls back to the path-qualified target for that provider.
 """
 
 import argparse
@@ -32,7 +22,6 @@ COMPONENT_PREFIXES = {
     "integration-tests": "hipdnn-integration-tests",
 }
 
-# Fallback path fragments used when the prefixed top-level target doesn't exist.
 COMPONENT_FALLBACK_PATHS = {
     "hip-kernel": "dnn-providers/hip-kernel-provider/src",
 }
@@ -45,14 +34,20 @@ SCOPE_SUFFIXES = {
 
 
 def list_ninja_targets(build_dir):
-    r = subprocess.run(
+    result = subprocess.run(
         ["ninja", "-C", build_dir, "-t", "targets", "all"],
         capture_output=True,
         text=True,
         check=False,
     )
+    if result.returncode != 0:
+        stderr = result.stderr.strip()
+        stdout = result.stdout.strip()
+        detail = stderr or stdout or "no diagnostic output"
+        raise RuntimeError(f"ninja target discovery failed: {detail}")
+
     targets = set()
-    for line in r.stdout.splitlines():
+    for line in result.stdout.splitlines():
         if ":" not in line:
             continue
         name = line.split(":", 1)[0].strip()
@@ -77,22 +72,20 @@ def find_target(targets, component, scope_suffix):
 
 
 def main():
-    p = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
-    )
+    p = argparse.ArgumentParser(description=__doc__)
     p.add_argument(
         "--build-dir",
         required=True,
-        help="Path to superbuild build dir (contains build.ninja)",
+        help="Path to superbuild build dir containing build.ninja",
     )
     p.add_argument(
-        "--component", default="all", help="Component name or 'all' (default: all)"
+        "--component", default="all", help="Component name or all. Default: all."
     )
     p.add_argument(
         "--scope",
         default="unit",
         choices=["unit", "integration", "all"],
-        help="Test scope (default: unit). 'all' returns every scope present.",
+        help="Test scope. Default: unit. all returns every scope present.",
     )
     args = p.parse_args()
 
@@ -104,7 +97,12 @@ def main():
         )
         return 2
 
-    targets = list_ninja_targets(args.build_dir)
+    try:
+        targets = list_ninja_targets(args.build_dir)
+    except RuntimeError as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        return 1
+
     if not targets:
         print(
             f"ERROR: no ninja targets discovered in {args.build_dir}", file=sys.stderr
@@ -114,17 +112,18 @@ def main():
     components = (
         list(COMPONENT_PREFIXES) if args.component == "all" else [args.component]
     )
-    if args.scope == "all":
-        scopes = ["unit-check", "integration-check"]
-    else:
-        scopes = [SCOPE_SUFFIXES[args.scope]]
+    scopes = (
+        ["unit-check", "integration-check"]
+        if args.scope == "all"
+        else [SCOPE_SUFFIXES[args.scope]]
+    )
 
     found_any = False
     for comp in components:
         for scope_suffix in scopes:
-            t = find_target(targets, comp, scope_suffix)
-            if t:
-                print(f"{comp}:{t}")
+            target = find_target(targets, comp, scope_suffix)
+            if target:
+                print(f"{comp}:{target}")
                 found_any = True
 
     return 0 if found_any else 1

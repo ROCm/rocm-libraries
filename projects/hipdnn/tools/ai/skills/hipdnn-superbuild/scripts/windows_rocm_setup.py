@@ -8,9 +8,7 @@ Outputs key=value lines to stdout so callers can parse them:
     CLANG_PATH=<forward-slash path>
     GPU_TARGETS=<arch>
 
-On Linux this is a no-op that just echoes any provided overrides.
-
-Exits non-zero on failure with diagnostics on stderr.
+On Linux this is a no-op that echoes any provided overrides.
 """
 
 import argparse
@@ -40,8 +38,8 @@ def main():
     p.add_argument(
         "--repo-root", required=True, help="Path to the rocm-libraries repository root"
     )
-    p.add_argument("--rocm-path", help="Override ROCm SDK devel path")
-    p.add_argument("--clang-path", help="Override clang bin directory (Windows only)")
+    p.add_argument("--rocm-path", help="ROCm SDK devel path (required on Windows)")
+    p.add_argument("--clang-path", help="Clang bin directory (required on Windows)")
     p.add_argument("--gpu-targets", help="Override GPU target")
     p.add_argument("--sha", help="Optional S3 staging SHA passed to wheel setup")
     args = p.parse_args()
@@ -50,38 +48,21 @@ def main():
         emit(args.rocm_path, None, args.gpu_targets)
         return 0
 
-    rocm_path = Path(args.rocm_path) if args.rocm_path else DEFAULT_ROCM_DEVEL
-    clang_path = Path(args.clang_path) if args.clang_path else DEFAULT_CLANG_BIN
+    # Windows: require explicit rocm-path and clang-path
+    if not args.rocm_path:
+        p.error("--rocm-path is required on Windows")
+    if not args.clang_path:
+        p.error("--clang-path is required on Windows")
+
+    rocm_path = Path(args.rocm_path)
+    clang_path = Path(args.clang_path)
     gpu_targets = args.gpu_targets or DEFAULT_GPU_TARGET
 
-    if not args.rocm_path:
-        hipcc = rocm_path / "bin" / "hipcc.exe"
-        if not hipcc.exists():
-            script = (
-                Path(args.repo_root)
-                / "projects/hipdnn/scripts/windows/wheel_build_setup.ps1"
-            )
-            if not script.exists():
-                print(f"ERROR: wheel setup script not found: {script}", file=sys.stderr)
-                return 1
-            cmd = ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(script)]
-            if args.sha:
-                cmd.extend(["-SHA", args.sha])
-            if args.gpu_targets:
-                cmd.extend(["-GpuTarget", args.gpu_targets])
-            print(f"Running wheel setup: {' '.join(cmd)}", file=sys.stderr)
-            r = subprocess.run(cmd, text=True)
-            if r.returncode != 0:
-                print(
-                    f"ERROR: wheel setup failed (exit {r.returncode})", file=sys.stderr
-                )
-                return 1
-            if not hipcc.exists():
-                print(
-                    f"ERROR: wheel setup ran but hipcc.exe still missing at {hipcc}",
-                    file=sys.stderr,
-                )
-                return 1
+    hipcc = rocm_path / "bin" / "hipcc.exe"
+    if not hipcc.exists():
+        print(f"ERROR: hipcc.exe not found at {hipcc}", file=sys.stderr)
+        print("Pass --rocm-path=<your-path> if ROCm is elsewhere.", file=sys.stderr)
+        return 1
 
     if not (clang_path / "clang.exe").exists():
         print(f"ERROR: clang.exe not found at {clang_path}", file=sys.stderr)
