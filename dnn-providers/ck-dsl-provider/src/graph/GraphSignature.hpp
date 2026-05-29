@@ -10,6 +10,7 @@
 #include <string_view>
 #include <unordered_map>
 
+#include "../adapters/conv_implicit_gemm/ConvImplicitGemmSpec.hpp"
 #include "../runtime/JitCache.hpp"
 
 namespace ck_dsl_provider {
@@ -48,14 +49,26 @@ class GraphSignature {
     using TensorAttributes = hipdnn_flatbuffers_sdk::data_objects::TensorAttributes;
     using TensorMap = std::unordered_map<std::int64_t, const TensorAttributes*>;
 
-    /// Compute a cache key for a single conv-fwd node + its tensors.
-    /// Throws ``hipdnn_plugin_sdk::HipdnnPluginException`` on any
-    /// validation failure (missing tensor, malformed dims, missing
-    /// spatial attr). Validation duplicates what the adapter would
-    /// reject so a cache lookup that misses for a "shouldn't be
-    /// applicable" graph fails the same way the buildPlan path
-    /// would -- callers can rely on a successful signature meaning
-    /// the adapter will also succeed.
+    /// Compute a cache key directly from a built spec. This is the
+    /// production path: the adapter runs once to build the spec, then
+    /// the spec is folded into the hash here. Folding the spec rather
+    /// than re-walking the FlatBuffer eliminates the second FB read
+    /// path that earlier versions of this class implemented (the
+    /// adapter is the single source of truth for what the spec
+    /// fields mean).
+    ///
+    /// Folded inputs:
+    ///   * ``CK_DSL_PROVIDER_VERSION_STRING`` (provider/DSL version)
+    ///   * ``opKind``
+    ///   * ``spec.problem`` fields (N, Hi, Wi, C, K, R, S + sH, sW,
+    ///     pH, pW, dH, dW) so any shape / stride / padding / dilation
+    ///     change produces a distinct key.
+    static SignatureHash computeForSpec(std::string_view opKind, const ConvImplicitGemmSpec& spec);
+
+    /// Legacy FB-walking entry point. Retained for tests that exercise
+    /// signature sensitivity directly against raw FlatBuffer inputs;
+    /// production callers should prefer ``computeForSpec`` so the
+    /// adapter remains the single FB reader.
     static SignatureHash computeForConvFwd(std::string_view opKind,
                                            const ConvolutionFwdAttributes& convAttr,
                                            const TensorMap& tensorMap);

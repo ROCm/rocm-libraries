@@ -59,8 +59,9 @@ const data_objects::ConvolutionFwdAttributes& getSingleConvFwdNode(
 
 }  // namespace
 
-ConvImplicitGemmPlanBuilder::ConvImplicitGemmPlanBuilder(CompileServiceBridge& bridge)
-    : _bridge(bridge) {}
+ConvImplicitGemmPlanBuilder::ConvImplicitGemmPlanBuilder(CompileServiceBridge& bridge,
+                                                         JitCache& cache)
+    : _bridge(bridge), _cache(cache) {}
 
 bool ConvImplicitGemmPlanBuilder::isApplicable(const ::CkDslHandle& /*handle*/,
                                                const flatbuffer_utilities::IGraph& opGraph) const {
@@ -103,24 +104,18 @@ void ConvImplicitGemmPlanBuilder::buildPlan(
     const auto& convAttr = getSingleConvFwdNode(opGraph);
     const auto& tensorMap = opGraph.getTensorMap();
 
-    // Build the spec once -- both the cache key derivation (via the
-    // same input attrs) and the loader (which payloads it) need the
-    // same view. We don't share the spec object between them because
-    // the loader runs lazily inside JitCache::getOrLoad and may not
-    // run at all on a cache hit.
+    // Single adapter walk: the spec drives both the cache key
+    // derivation and the loader closure. Captured by value into the
+    // closure so the loader sees the exact same spec the byte-size
+    // computation below uses -- no risk of drift from re-deriving the
+    // spec on the compile path.
     ConvImplicitGemmSpec spec = ConvImplicitGemmAdapter::buildSpec(convAttr, tensorMap);
 
-    SignatureHash key = GraphSignature::computeForConvFwd(opKind(), convAttr, tensorMap);
+    SignatureHash key = GraphSignature::computeForSpec(opKind(), spec);
 
-    auto loader = [&]() -> KernelArtifact {
-        // Re-derive the spec inside the loader so a future change to
-        // the adapter (e.g. autotuning that mutates spec by graph) is
-        // visible on the compile path. For M1 the second buildSpec is
-        // cheap and runs at most once per signature.
-        ConvImplicitGemmSpec specForCompile =
-            ConvImplicitGemmAdapter::buildSpec(convAttr, tensorMap);
+    auto loader = [spec, this]() -> KernelArtifact {
         py::gil_scoped_acquire gil;
-        py::dict payload = convImplicitGemmSpecToPayload(specForCompile);
+        py::dict payload = convImplicitGemmSpecToPayload(spec);
         return _bridge.compile(opKind(), payload);
     };
 
@@ -134,14 +129,16 @@ void ConvImplicitGemmPlanBuilder::buildPlan(
     //   Y (NHWK fp16): N * Ho * Wo * K * 2
     // The kernel's signature is i32 for these; the bake-off shape
     // produces values well under 2^31 (~3.2 MB for X/Y, ~73 KB for W).
-    // I-8 only handles FP16, so the byte multiplier is hardcoded to 2;
-    // M2+ will derive this from the spec's dtype field when the
-    // adapter starts surfacing one.
-    constexpr std::int64_t kFp16Bytes = 2;
+    // Only FP16 is supported today, so the byte multiplier is fixed;
+    // when the adapter starts surfacing a dtype this will become a
+    // dtype-aware lookup.
+    constexpr std::int64_t kFp16BytesPerElement = 2;
     const auto& p = spec.problem;
-    std::int64_t xBytes64 = static_cast<std::int64_t>(p.N) * p.Hi * p.Wi * p.C * kFp16Bytes;
-    std::int64_t wBytes64 = static_cast<std::int64_t>(p.K) * p.R * p.S * p.C * kFp16Bytes;
-    std::int64_t yBytes64 = static_cast<std::int64_t>(p.N) * p.Ho() * p.Wo() * p.K * kFp16Bytes;
+    std::int64_t xBytes64 =
+        static_cast<std::int64_t>(p.N) * p.Hi * p.Wi * p.C * kFp16BytesPerElement;
+    std::int64_t wBytes64 = static_cast<std::int64_t>(p.K) * p.R * p.S * p.C * kFp16BytesPerElement;
+    std::int64_t yBytes64 =
+        static_cast<std::int64_t>(p.N) * p.Ho() * p.Wo() * p.K * kFp16BytesPerElement;
     if (xBytes64 > std::numeric_limits<std::int32_t>::max() ||
         wBytes64 > std::numeric_limits<std::int32_t>::max() ||
         yBytes64 > std::numeric_limits<std::int32_t>::max()) {
@@ -149,7 +146,7 @@ void ConvImplicitGemmPlanBuilder::buildPlan(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "ConvImplicitGemmPlanBuilder: tensor byte sizes exceed int32_t "
             "(the kernel signature is i32 for A_bytes/B_bytes/D_bytes); "
-            "shapes this large need an M2+ extension to widen the ABI");
+            "shapes this large need an ABI widening before they can be supported");
     }
 
     // The plan needs the module + tensor UIDs + buffer-rsrc byte

@@ -48,20 +48,31 @@ PerfStats computePerfStats(std::vector<double> samplesUs);
 
 /// hipEvent-based warmup-and-iterate timing helper.
 ///
-/// Defaults (5 warmup, 50 timed) come from PREP_FINDINGS P-7: warmup
-/// matches launcher.cpp:559, timed is half of launcher.cpp's 100 so
-/// the integration test stays under ~1s of kernel time while keeping
-/// the median stable.
+/// Defaults (5 warmup, 50 timed) keep the integration test under
+/// roughly a second of kernel time while keeping the median stable.
 ///
-/// **Sync protocol** (per P-7): no ``hipDeviceSynchronize`` between
-/// launches. Each timed iter records a start event, runs the launch
-/// callable, then records a stop event -- all on the same stream so
-/// the GPU sees the launches in order. After the timed loop the
-/// helper synchronises on the final stop event and walks the event
-/// pairs to compute per-iter elapsed times.
+/// **What this measures.** GPU stream time only. Each timed iter
+/// brackets the launch with hipEventRecord(start) /
+/// hipEventRecord(stop) on the same stream, then
+/// hipEventElapsedTime reports the GPU-side elapsed time between the
+/// two events. Host-side work performed BETWEEN ``execute()`` entry
+/// and the stream submission (argument packing, validation, logging
+/// formatting) is NOT included in the reported numbers. If you need
+/// to measure host overhead, wrap a separate std::chrono pair around
+/// the launch callable; the reference launcher.cpp does this for
+/// total wall time.
+///
+/// **Sync protocol:** no ``hipDeviceSynchronize`` between launches.
+/// Each timed iter records a start event, runs the launch callable,
+/// then records a stop event -- all on the same stream so the GPU
+/// sees the launches in order. After the warmup loop the helper
+/// drains the stream so the first timed iter starts from a clean
+/// queue; after the timed loop the helper synchronises on the final
+/// stop event and walks the event pairs to compute per-iter elapsed
+/// times.
 ///
 /// **No assertions** -- this is a logging-only helper. The integration
-/// test (I-10) prints the result; M2+ adds perf-target checks.
+/// test prints the result; future work adds perf-target checks.
 class PerfMeasurement {
    public:
     static constexpr std::uint32_t kDefaultWarmupIters = 5;
