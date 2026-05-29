@@ -122,3 +122,6 @@ the performance baseline.
 | `build_harness.sh` | (d) | hipcc build of the harness against a generated header |
 | `check_parity.py` | (e)(f) | the 3-stage orchestrator above |
 | `configs/single_fp16_rcr.json` | — | example single fp16 rcr config |
+| `make_docs.py` | — | regenerates the two PDFs below (reportlab) |
+| `parity_design.pdf` | — | design walkthrough: every file and how it serves parity |
+| `parity_usage.pdf` | — | basic-usage guide |
