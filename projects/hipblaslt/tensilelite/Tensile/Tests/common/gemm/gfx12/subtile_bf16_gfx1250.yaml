@@ -17,6 +17,7 @@ GlobalParameters:
   CpuThreads: 1
   RotatingBufferSize: 0
   Architecture: gfx1250
+  ISA: [[12, 5, 0]]
   PrintSolutionRejectionReason: True
 
 BenchmarkProblems:
