@@ -201,8 +201,13 @@ void geqr2_geqrf_getError(const rocblas_handle handle,
 {
     using S = decltype(std::real(T{}));
 
-    const T one    = T(1);
-    const T negone = T(-1);
+    // todo: fix const-correctness in rocsolver_gemm
+    T one    = T(1);
+    T negone = T(-1);
+
+    rocblas_pointer_mode old_mode;
+    rocblas_get_pointer_mode(handle, &old_mode);
+    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
 
     std::vector<T> hW(n);
     rocblas_int min_mn = (rocblas_int)std::min(m, n);
@@ -383,6 +388,8 @@ void geqr2_geqrf_getError(const rocblas_handle handle,
         double err = norm_error('F', m, n, lda, hA[b], hARes[b]);
         max_errors[2] = rocblas_max_nan(err, max_errors[2]);
     }
+
+    rocblas_set_pointer_mode(handle, old_mode);
 }
 
 template <bool STRIDED, bool GEQRF, typename T, typename I, typename Td, typename Ud, typename Th, typename Uh>
