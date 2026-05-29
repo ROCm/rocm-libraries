@@ -33,6 +33,38 @@ std::uint16_t naturalSize(ArgSchema::Kind kind) {
         "LaunchAbi::naturalSize: unhandled ArgSchema::Kind enumerator");
 }
 
+const char* kindName(ArgSchema::Kind kind) {
+    switch (kind) {
+        case ArgSchema::Kind::Pointer:
+            return "Pointer";
+        case ArgSchema::Kind::I32:
+            return "I32";
+        case ArgSchema::Kind::I64:
+            return "I64";
+        case ArgSchema::Kind::F32:
+            return "F32";
+        case ArgSchema::Kind::F16:
+            return "F16";
+    }
+    return "<unknown>";
+}
+
+const char* tagName(ArgValue::Tag tag) {
+    switch (tag) {
+        case ArgValue::Tag::Pointer:
+            return "Pointer";
+        case ArgValue::Tag::I32:
+            return "I32";
+        case ArgValue::Tag::I64:
+            return "I64";
+        case ArgValue::Tag::F32:
+            return "F32";
+        case ArgValue::Tag::F16:
+            return "F16";
+    }
+    return "<unknown>";
+}
+
 bool tagMatchesKind(ArgValue::Tag tag, ArgSchema::Kind kind) {
     switch (kind) {
         case ArgSchema::Kind::Pointer:
@@ -91,8 +123,24 @@ std::vector<std::byte> LaunchAbi::pack(const std::vector<ArgSchema>& schema,
         if (slot.size != natural) {
             std::ostringstream oss;
             oss << "LaunchAbi::pack: schema slot " << i << " (name='" << slot.name
-                << "') declares size " << slot.size << " but natural size for its kind is "
-                << natural;
+                << "') declares size " << slot.size << " but natural size for kind "
+                << kindName(slot.kind) << " is " << natural;
+            throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                                           oss.str());
+        }
+
+        // Reject over-aligned slots. AMDGPU host-side calling convention
+        // is natural alignment; an over-aligned slot (e.g. align=16 for
+        // an I32) would silently insert padding and misalign every
+        // subsequent slot relative to what the kernel was compiled for.
+        // The Python compile service today only emits matching
+        // align/size pairs, but enforcing the invariant at the packer
+        // boundary keeps the wire shape self-defending.
+        if (slot.align != 0 && slot.align != natural) {
+            std::ostringstream oss;
+            oss << "LaunchAbi::pack: schema slot " << i << " (name='" << slot.name
+                << "') declares align " << slot.align << " but kind " << kindName(slot.kind)
+                << " requires natural alignment (" << natural << ")";
             throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                                                            oss.str());
         }
@@ -100,8 +148,8 @@ std::vector<std::byte> LaunchAbi::pack(const std::vector<ArgSchema>& schema,
         if (!tagMatchesKind(val.tag, slot.kind)) {
             std::ostringstream oss;
             oss << "LaunchAbi::pack: schema slot " << i << " (name='" << slot.name
-                << "') expects kind tag " << static_cast<int>(slot.kind)
-                << " but caller supplied value tag " << static_cast<int>(val.tag);
+                << "') expects kind " << kindName(slot.kind) << " but caller supplied value tag "
+                << tagName(val.tag);
             throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                                                            oss.str());
         }

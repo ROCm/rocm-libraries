@@ -79,6 +79,46 @@ void checkSpatialAttr(const flatbuffers::Vector<std::int64_t>* attr, const char*
 
 }  // namespace
 
+SignatureHash GraphSignature::computeForSpec(std::string_view opKind,
+                                             const ConvImplicitGemmSpec& spec) {
+    std::uint64_t h = kFnv1aOffset;
+
+    // Provider/DSL version string. Folding the macro contents
+    // (including the git SHA suffix) means any DSL or provider change
+    // invalidates the namespace.
+    h = fnv1aString(h, CK_DSL_PROVIDER_VERSION_STRING);
+    h = fnv1aFold(h, 0x00);
+
+    h = fnv1aString(h, opKind);
+    h = fnv1aFold(h, 0x00);
+
+    // ConvProblem fields, in declaration order so a future field
+    // addition to the spec extends the hash deterministically (just
+    // add the new field at the bottom; the existing prefix stays
+    // identical for unchanged shapes, so cache entries for
+    // pre-extension keys remain reachable until the version-string
+    // fold bumps them).
+    const auto& p = spec.problem;
+    h = fnv1aI32(h, p.N);
+    h = fnv1aI32(h, p.Hi);
+    h = fnv1aI32(h, p.Wi);
+    h = fnv1aI32(h, p.C);
+    h = fnv1aI32(h, p.K);
+    h = fnv1aI32(h, p.R);
+    h = fnv1aI32(h, p.S);
+    h = fnv1aFold(h, 0x00);
+    h = fnv1aI32(h, p.sH);
+    h = fnv1aI32(h, p.sW);
+    h = fnv1aFold(h, 0x00);
+    h = fnv1aI32(h, p.pH);
+    h = fnv1aI32(h, p.pW);
+    h = fnv1aFold(h, 0x00);
+    h = fnv1aI32(h, p.dH);
+    h = fnv1aI32(h, p.dW);
+
+    return static_cast<SignatureHash>(h);
+}
+
 SignatureHash GraphSignature::computeForConvFwd(std::string_view opKind,
                                                 const ConvolutionFwdAttributes& convAttr,
                                                 const TensorMap& tensorMap) {

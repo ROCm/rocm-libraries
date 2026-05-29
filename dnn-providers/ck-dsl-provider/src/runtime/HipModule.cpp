@@ -47,6 +47,22 @@ HipModule::HipModule(const KernelArtifact& artifact)
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR, "HipModule: KernelArtifact has empty kernelName");
     }
+    // Defense-in-depth: validate the ELF magic before handing the
+    // bytes to hipModuleLoadData. HSA code objects are ELF files;
+    // bytes that do not start with 0x7F 'E' 'L' 'F' cannot be a
+    // valid HSACO and would otherwise reach the HIP runtime as
+    // generic ELF-parse failures. Catching here gives a clear
+    // diagnostic for "wrong blob type" / accidental data corruption.
+    if (artifact.hsaco.size() < 4 || std::to_integer<unsigned char>(artifact.hsaco[0]) != 0x7F ||
+        std::to_integer<unsigned char>(artifact.hsaco[1]) != 'E' ||
+        std::to_integer<unsigned char>(artifact.hsaco[2]) != 'L' ||
+        std::to_integer<unsigned char>(artifact.hsaco[3]) != 'F') {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "HipModule: HSACO for kernel '" + _kernelName +
+                "' does not start with the ELF magic (0x7F 'E' 'L' 'F'); "
+                "the compile path produced a non-ELF blob");
+    }
 
     checkHip(hipModuleLoadData(&_module, artifact.hsaco.data()),
              "HipModule::ctor hipModuleLoadData for '" + _kernelName + "'");
@@ -105,14 +121,13 @@ HipModule::HipModule(HipModule&& other) noexcept
     other._function = nullptr;
 }
 
-void HipModule::launch(const std::vector<std::byte>& packedArgs,
+void HipModule::launch(const std::byte* args, std::size_t argsSize,
                        const KernelArtifact::GridSpec& grid, const KernelArtifact::BlockSpec& block,
                        std::uint32_t ldsBytes, hipStream_t stream) {
     // hipModuleLaunchKernel's BUFFER_POINTER path takes a non-const
     // void* into the args buffer; HIP only reads from it during the
-    // call, so const_cast'ing the local buffer's data() is safe.
-    std::size_t argsSize = packedArgs.size();
-    void* argsPtr = const_cast<void*>(static_cast<const void*>(packedArgs.data()));
+    // call, so const_cast'ing the caller's buffer is safe.
+    void* argsPtr = const_cast<void*>(static_cast<const void*>(args));
 
     void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, argsPtr, HIP_LAUNCH_PARAM_BUFFER_SIZE,
                       &argsSize, HIP_LAUNCH_PARAM_END};
@@ -121,7 +136,7 @@ void HipModule::launch(const std::vector<std::byte>& packedArgs,
     // rejects an extras array with BUFFER_SIZE==0 on some driver
     // versions. The two args (kernelParams, extra) are mutually
     // exclusive per the HIP runtime contract.
-    void** extras = packedArgs.empty() ? nullptr : config;
+    void** extras = (argsSize == 0) ? nullptr : config;
 
     hipError_t err = hipModuleLaunchKernel(_function, grid.x, grid.y, grid.z, block.x, block.y,
                                            block.z, ldsBytes, stream,

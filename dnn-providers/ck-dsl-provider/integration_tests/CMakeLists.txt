@@ -30,6 +30,7 @@ target_link_libraries(
 
 target_include_directories(ck_dsl_provider_integration_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+            ${CMAKE_CURRENT_SOURCE_DIR}/..
 )
 
 include(${CMAKE_CURRENT_LIST_DIR}/../../cmake/Tests.cmake)

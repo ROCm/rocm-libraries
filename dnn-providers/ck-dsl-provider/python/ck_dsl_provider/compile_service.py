@@ -172,15 +172,63 @@ def _conv_implicit_gemm_arg_schema() -> List[Dict[str, Any]]:
     ]
 
 
+# Whitelisted keys that the C++ ConvImplicitGemmPayload may set. Any
+# other key surfaced through the wire dict is rejected before we let
+# `**kwargs` reach the dataclass: a future C++ regression that leaks
+# an unintended field (a debugging tag, an unsanitised FlatBuffer
+# attribute, etc.) fails closed rather than silently configuring the
+# JIT compile.
+_CONV_PROBLEM_KEYS = frozenset(
+    {"N", "Hi", "Wi", "C", "K", "R", "S", "sH", "sW", "pH", "pW", "dH", "dW"}
+)
+_CONV_IMPLICIT_GEMM_SPEC_TOP_KEYS = frozenset(
+    {
+        "problem",
+        "name",
+        "tile_m",
+        "tile_n",
+        "tile_k",
+        "warp_m",
+        "warp_n",
+        "warp_tile_m",
+        "warp_tile_n",
+        "warp_tile_k",
+        "wave_size",
+        "pipeline",
+        "epilogue",
+        "async_dma",
+        "unroll_k",
+        "lds_k_pad",
+        "chiplet_swizzle",
+        "chiplet_wgm",
+        "chiplet_num_xcds",
+        "chiplet_chunk_size",
+        "waves_per_eu",
+    }
+)
+
+
+def _reject_unexpected(payload_keys, expected, context: str) -> None:
+    extras = set(payload_keys) - expected
+    if extras:
+        raise ValueError(
+            f"ck_dsl_provider.compile_service: {context} payload has unexpected "
+            f"keys {sorted(extras)!r}; allowed keys are {sorted(expected)!r}. "
+            "If a new field is needed, add it to the C++ payload contract and "
+            "to the whitelist together."
+        )
+
+
 def _compile_conv_implicit_gemm(payload: dict) -> dict:
     """Build + compile an implicit-GEMM conv kernel from the payload.
 
     Caller contract: ``payload`` is the dict
     ``ConvImplicitGemmPayload::convImplicitGemmSpecToPayload`` emits --
     a nested ``"problem"`` dict plus the top-level
-    ``ImplicitGemmConvSpec`` kwargs. We forward it verbatim into the
-    dataclass constructors; field-set drift would have failed at the
-    adapter test stage (the I-6 round-trip canary).
+    ``ImplicitGemmConvSpec`` kwargs. The payload keys are whitelisted
+    against ``_CONV_IMPLICIT_GEMM_SPEC_TOP_KEYS`` /
+    ``_CONV_PROBLEM_KEYS`` so an unexpected field fails closed rather
+    than being silently forwarded into the dataclass via ``**kwargs``.
     """
     from ck_dsl.helpers.compile import compile_kernel
     from ck_dsl.instances.conv_implicit_gemm import (
@@ -189,7 +237,14 @@ def _compile_conv_implicit_gemm(payload: dict) -> dict:
         build_implicit_gemm_conv,
     )
 
+    _reject_unexpected(
+        payload.keys(), _CONV_IMPLICIT_GEMM_SPEC_TOP_KEYS, "conv_implicit_gemm spec"
+    )
+
     problem_payload = dict(payload["problem"])
+    _reject_unexpected(
+        problem_payload.keys(), _CONV_PROBLEM_KEYS, "conv_implicit_gemm problem"
+    )
     problem = ConvProblem(**problem_payload)
 
     spec_kwargs = {k: v for k, v in payload.items() if k != "problem"}
@@ -198,13 +253,13 @@ def _compile_conv_implicit_gemm(payload: dict) -> dict:
     kernel_def = build_implicit_gemm_conv(spec)
     artifact = compile_kernel(kernel_def)
 
-    # Grid derivation per plan §4:
+    # Grid derivation:
     #   M = N*Ho*Wo, num_pid_m = ceil(M / tile_m)
     #   num_pid_n = ceil(K / tile_n)
     #   grid = (num_pid_n, num_pid_m, 1)  -- matches the kernel's
     #     ``grid_order="NM"`` convention where block.x indexes N tiles
-    #     and block.y indexes M tiles (see
-    #     ``build_implicit_gemm_conv`` body, line ~490).
+    #     and block.y indexes M tiles (set in
+    #     ``build_implicit_gemm_conv``).
     #   block = (block_size, 1, 1)
     M = problem.M
     num_pid_m = (M + spec.tile_m - 1) // spec.tile_m

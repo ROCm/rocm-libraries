@@ -111,6 +111,15 @@ else()
     set(HIPDNN_PLUGIN_ENGINE_ROOTDIR "lib")
 endif()
 
+# Both HIPDNN_PLUGIN_ENGINE_SUBDIR and HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR
+# are populated by the hipdnn_data_sdk package import above. Guard
+# defensively so a standalone build (or a misconfigured SDK install)
+# fails with a clear message instead of silently producing
+# `build/lib//libfoo.so`.
+if(NOT DEFINED HIPDNN_PLUGIN_ENGINE_SUBDIR)
+    message(FATAL_ERROR "HIPDNN_PLUGIN_ENGINE_SUBDIR was not set by hipdnn_data_sdk package import.")
+endif()
+
 set(HIPDNN_BUILD_PLUGIN_ENGINE_DIR
     "${CMAKE_BINARY_DIR}/${HIPDNN_PLUGIN_ENGINE_ROOTDIR}/${HIPDNN_PLUGIN_ENGINE_SUBDIR}"
 )

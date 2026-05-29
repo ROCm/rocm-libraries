@@ -13,8 +13,9 @@
 namespace ck_dsl_provider {
 
 CkDslConvImplicitGemmEngine::CkDslConvImplicitGemmEngine(std::int64_t id,
-                                                         CompileServiceBridge& bridge)
-    : _id(id), _planBuilder(std::make_unique<ConvImplicitGemmPlanBuilder>(bridge)) {}
+                                                         CompileServiceBridge& bridge,
+                                                         JitCache& cache)
+    : _id(id), _planBuilder(std::make_unique<ConvImplicitGemmPlanBuilder>(bridge, cache)) {}
 
 std::int64_t CkDslConvImplicitGemmEngine::id() const {
     return _id;
