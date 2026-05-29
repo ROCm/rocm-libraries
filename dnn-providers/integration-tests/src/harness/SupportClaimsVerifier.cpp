@@ -84,7 +84,7 @@ TestOutcome testOutcomeFor(const std::string& testName)
     return TestOutcome::UNKNOWN;
 }
 
-SupportClaimFinding buildRuleA(const GraphSupportRecord& record)
+SupportClaimFinding buildRuleA(const GraphSupportRecord& record, const SupportMatcher& matcher)
 {
     std::ostringstream body;
     body << "  CLAIM BROKEN (Rule A):\n"
@@ -92,6 +92,7 @@ SupportClaimFinding buildRuleA(const GraphSupportRecord& record)
          << "      observed: op_chain=\"" << record.opChain << "\"\n"
          << "                io_dtype=\"" << record.ioDtype << "\" layout=\"" << record.layout
          << "\"\n"
+         << "      claim source: " << matcher.sourceLocation << "\n"
          << "      engine returned no support for this graph\n"
          << "      Action: narrow op_chains/io_dtypes/layouts to exclude this tuple, "
             "add a [[test_skips]]\n"
@@ -289,18 +290,26 @@ bool SupportClaimsVerifier::runAndReport()
 
         const bool engineSupports
             = record.supportingEngines.find(_engineName) != record.supportingEngines.end();
-        const bool isClaimed = block != nullptr
-                               && std::any_of(block->matchers.begin(),
-                                              block->matchers.end(),
-                                              [&](const SupportMatcher& matcher) {
-                                                  return matcher.contains(record.opChain,
-                                                                          record.ioDtype,
-                                                                          record.layout);
-                                              });
+        // Find the matching matcher (not just whether one exists) so the
+        // Rule A failure can point at the exact [[supported.matchers]]
+        // entry the engineer needs to edit.
+        const SupportMatcher* matchingMatcher = nullptr;
+        if(block != nullptr)
+        {
+            for(const auto& matcher : block->matchers)
+            {
+                if(matcher.contains(record.opChain, record.ioDtype, record.layout))
+                {
+                    matchingMatcher = &matcher;
+                    break;
+                }
+            }
+        }
+        const bool isClaimed = matchingMatcher != nullptr;
 
         if(isClaimed && !engineSupports)
         {
-            _findings.push_back(buildRuleA(record));
+            _findings.push_back(buildRuleA(record, *matchingMatcher));
             continue;
         }
 
