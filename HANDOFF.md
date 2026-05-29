@@ -107,6 +107,45 @@ FP6 MFMA 理论峰值约 9216 TFLOPS (256 CUs × 4 SIMDs × 131072 FLOPs/MFMA / 
 
 > ⚠️ 修正早期判断:瓶颈**不是 "A/B 的 HBM load 延迟"**(HBM 很闲),而是 **load 延迟未被掩盖 + occupancy 过低(4 waves) + 每 iter 计算量太小(仅 4 MFMA / 128 矩阵周期,掩盖不住 ~700cyc 的 LDS 读和 ~400cyc 的 VMEM load)**。
 
+### Step 8 ✅ 让编译器管理 waitcnt（v2，`test_pipeline_v2.cpp`）
+
+原 kernel 手写的 `s_waitcnt` 全是绝对清零 `(0)`、无重叠。**实测确认:把 load 从 inline asm 里拿出来改成普通 typed 指针读,编译器的 SIInsertWaitcnts 会自动插入相对计数(如 `vmcnt(1) lgkmcnt(2)`)并与 MFMA 重叠**——手写 `(0)` 永远做不到。
+
+- 边界(probe_waitcnt.cpp 三变体证实):load **藏在 inline asm 里编译器看不见**,一条 waitcnt 都不插 → race;改普通指针读才行。
+- **MFMA 操作数必须保持单个 v6i 向量值**——用标量 `v8i{...,0,0}` 重建会让分配器把两次 b96 读散到不相邻寄存器、漏掉 gather → 操作数错乱(HANDOFF 问题 #2)。新增 `ds_read_fp6x32_plain`(返回 v6i)+ v6i 版 MFMA 重载。
+- scale 的 `v_and 0xFF` 是冗余的(ubyte load 自动零扩展),删掉,且它正是逼出每-scale 一次 vmcnt drain 的元凶。
+- 结果:8192³ 752→766,小矩阵 2048×4096² +25%,代码大幅简化。
+
+### Step 9 ✅ A 加载方式调查 + 大 tile 突破（v3–v10）
+
+**深挖"A 矩阵该怎么 load",连试 8 个变体,纠正了多个错误诊断:**
+
+| 版本 | 方案 | 8192³ | 合法? |
+|---|---|---|---|
+| v2 | 行主序非合并 → LDS → ds_read | 766 | ✓ |
+| v3 | + B 寄存器双缓冲 | 725 | ✓ 回归(B 非瓶颈) |
+| v4 | host pre-shuffle A 成合并 + 直载无 LDS | **1252** | ✗ A 运行时激活不可预处理 |
+| v5 | 行主序非合并直载,无 LDS | 769 | ✓ 最简单 |
+| v6 | LDS + 2线程/行"合并"加载 | 703 | ✓ |
+| v7 | LDS K=256 slab 合并加载 | 792 | ✓ |
+| v8 | v7 + 双缓冲软件流水 | 701 | ✓ |
+| v9 | v7 + 预计算地址 + ds_read 预取 | 726 | ✓ |
+| **v10** | **v5 直载 raw A + 大寄存器 tile** | **1375** | ✓ **最优** |
+
+**关键纠错链(每步都有 PMC/隔离实验支撑):**
+1. ~~"LDS 是瓶颈"~~ 错:v5(去 LDS 非合并)=769 ≈ v2(LDS)766 → **LDS 有无是平局**。
+2. ~~"barrier 是瓶颈"~~ 错:v2 去 barrier = 733 ≈ 766 → **barrier 不是瓶颈**。
+3. ~~"VALU/LDS-wait 是瓶颈"~~ 错:v9 把两者都降了却更慢。
+4. **真相①:A 行主序、每 lane 读不同行 → 全局加载天生非合并(cache line 只用 37.5%),这是 ~770 的墙。v4 快只因 pre-shuffle 让访存合并(但对运行时激活非法)。合法范围内 A 加载方式不是杠杆。**
+5. **真相②(突破):主导杠杆是 Volkov 式大寄存器 tile + 低 occupancy**(每 wave 做更多 MFMA,把 A 不可避免的非合并加载摊到更多计算上)。
+
+**v10 实现(`test_pipeline_v10.cpp`)**:v5 的直载 raw A(合法)+ 每 wave `M_PER_WAVE×N_PER_WAVE` 的 acc 网格 + `__launch_bounds__`(否则编译器为保 occ4 砍 AGPR 到 64、装不下多 acc → spill):
+- **N_TILE=512(2×8=16 acc=256 AGPR,132 VGPR,0 spill,occ1)**:8192³=**1375**,4096³=1368,但 2048×4096²=778(occ1 时 grid 仅 128 WG<256 CU、半数闲)。
+- N_TILE=256(2×4=8 acc=128 AGPR,84 VGPR,occ2):8192³=1115,小矩阵均衡(1032)。
+- **tile 按规模选**:大矩阵 512,小矩阵 256。
+
+**当前最优:8192³ 合法 1375 TFLOPS(~15% 峰值),从最初 766 接近翻倍,反超需非法预处理的 v4。** B 仍 pre-shuffle(权重,可离线,合法)。
+
 ## 🔑 核心技术要点
 
 ### MFMA 32x32x64 f8f6f4 数据布局 (ISA Section 7.1.5)
@@ -205,9 +244,16 @@ mxfp6_gemm/
 ├── test_k_loop.cpp          # K 循环测试 (K=64~512, AccTileV)
 ├── test_accvgpr.cpp         # AccVGPR 路径测试 (AccTileA)
 ├── test_multitile.cpp       # Multi-tile 128×128 测试
-├── test_pipeline.cpp        # Double buffer pipeline 测试 + benchmark
+├── test_pipeline.cpp        # 旧 baseline: 手动 waitcnt LDS pipeline (752 TFLOPS)
+├── test_pipeline_v2.cpp     # Step8: 编译器管 waitcnt, plain load (766)
+├── test_pipeline_v4.cpp     # ⚠️非法: pre-shuffle A 直载 (1252, A 需预处理)
+├── test_pipeline_v5.cpp     # 合法基底: 直载 raw A 无 LDS (769)
+├── test_pipeline_v7.cpp     # LDS K=256 slab 合并加载 (792)
+├── test_pipeline_v10.cpp    # ★最优: v5 + 大 tile, N_TILE=512→1375 / 256→1115
+│                            #   (v3/v6/v8/v9 为探索中的回归版, 可删)
 ├── bench_gemm.cpp           # 性能 benchmark (无 pipeline 基线)
 ├── bench_lds_shuffle.cpp    # LDS 带宽基准
+├── probe_waitcnt.cpp        # Step8 探针: 证实 asm 内 load 编译器看不见
 ├── Makefile
 └── counters.txt             # rocprofv3 计数器配置
 ```
@@ -220,14 +266,16 @@ mxfp6_gemm/
 
 ## Next Steps
 
-**性能优化方向（当前 ~750 TFLOPS, 峰值 ~9200 TFLOPS, 利用率 ~8%）。已由 Step 7.5 的 ATT profile 验证瓶颈,按预期收益排序：**
+**当前最优 v10:8192³ 1375 TFLOPS(~15% 峰值)。已确认主导杠杆是大寄存器 tile,不是 A 加载方式。按预期收益:**
 
-1. **真正的跨迭代软件流水（最高收益,攻 ~70% stall）**: iter 开始即 issue 下一轮 A 的 ds_read + B 的 global_load,然后立刻对**本轮**已就位数据做 4×MFMA,让 load 在 MFMA 执行期后台完成。当前 A 虽是 LDS 双缓冲但**读仍阻塞**(lgkmcnt 32.9% stall)、B 根本没预取(vmcnt 36.7% stall)。
-2. **B 寄存器双缓冲**: 两组 B VGPR 交替,消除每 iter 的 `wait vmcnt(0)` 关键路径。
-3. **预取 A 改 async 且移到 MFMA 之后**: 现在源码 L111-124 的预取排在 MFMA 之前、VMEM+ds_write 压在关键路径上;改用 GLOBAL_LOAD_LDS async(见 memory `mxfp6_a_matrix_shuffle`)并置于 MFMA 之后,与之并行。
-4. **提高 occupancy**: arch+acc VGPR 同步压到 ≤51 → 5 waves/SIMD,多 wave 互相掩盖延迟(当前 64/64 双双卡 4 waves)。
-5. **增大 N 方向寄存器 tile（更多 MFMA/iter）**: 当前每 iter 仅 4 MFMA=128 矩阵周期,太小掩盖不住 load;增大可摊薄 load 延迟与 barrier。
-6. **降低 barrier 频率**: ≥3 buffer 让 barrier 不必每 iter(当前 barrier 占 11.8% stall)。
-7. **减少每-MFMA 的 VALU 开销**: 11.1 条纯 VALU/MFMA;scale 字节清理(v_and)出内循环、地址增量改加法、精简 ds_read_complete 的 v_mov。
+1. **小矩阵 split-K(最高收益,针对 M=2048 等)**: 大 tile(N_TILE=512, occ1)在小矩阵下 grid WG 数 < 256 CU,半数 CU 闲(2048×4096²=778)。split-K 沿 K 切分增加 WG 数填满 CU;或对小矩阵 dispatch 用 N_TILE=256(occ2)。生产 kernel 应按 (M,N,K) 选 tile。
+2. **重新 profile v10 定位新瓶颈**: 之前所有 PMC 结论是旧 kernel 的,v10 结构已变(大 tile/低 occ),老结论全过期。须在 v10 上重测 stall(MFMA util / VMEM wait / 是否 issue-bound)再定下一步。
+3. **继续调 tile 形状**: 试 M 方向加大(4×4 等)、不同 M_TILE/N_TILE 组合;K 方向寄存器/LDS 预取在大 tile 下是否还有收益(之前小 tile 下软件流水都是负优化)。
+4. **B 也用大 tile 复用**: 当前 B pre-shuffled 直载;大 tile 下每个 B 也复用更多次,检查 B 流量是否成新瓶颈。
+5. **Epilogue/输出类型**: F16/BF16 输出(当前 F32 直写),见 memory `mxfp6_output_epilogue`。
 
-**复现 profile**: `cd mxfp6_gemm && cp test_pipeline.cpp prof_pipeline.cpp`(改 main 为单发,见旧 driver),`hipcc -O3 --offload-arch=gfx950`,然后用 gpu-profile skill(`/opt/rocm/bin/rocprofv3`)。最新结果在 `mxfp6_gemm/prof_out/`。
+**重要提醒**: 反复证实"凭计数器猜瓶颈"屡屡出错(LDS/barrier/VALU/LDS-wait 都被证伪过)。**改动前先在当前最优版上做隔离实验或 profile,改动后必对比同会话基线**(热状态会漂移,跨会话数字不可直接比)。
+
+**复现 profile**: 见本会话用法——cp 目标 cpp → 改 main 为单 dispatch(8192³)→ `hipcc -O2 --offload-arch=gfx950` → `/opt/rocm/bin/rocprofv3 -i counters.txt -d out --output-format csv -- ./prof`。旧结果在 `mxfp6_gemm/prof_out/`(对应 test_pipeline.cpp 旧 kernel,已过期)。
+
+**关联 memory**: `mxfp6_big_tile`(突破)、`mxfp6_a_no_lds`(A 加载诊断纠错)、`mxfp6_compiler_waitcnt`(让编译器管 waitcnt)、`mxfp6_pipeline_bottleneck`(旧瓶颈,部分已过期)。

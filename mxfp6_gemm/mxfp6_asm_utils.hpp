@@ -83,6 +83,36 @@ __device__ __forceinline__ v8i ds_read_fp6x32(uint32_t lds_byte_offset) {
     return ds_read_fp6x32_complete(lo, hi);
 }
 
+// ---- DS_READ for FP6, COMPILER-MANAGED waitcnt ----
+//
+// Plain typed LDS load (no inline asm) so the backend's SIInsertWaitcnts pass
+// sees real DS_READ machine instructions and inserts *relative* lgkmcnt itself
+// — enabling automatic overlap with MFMA. `aligned(4)` keeps the access at
+// 4-byte alignment so the compiler picks ds_read_b96 (matching the verified
+// zero-bank-conflict layout) instead of assuming 16B-aligned ds_read_b128.
+// Returns a v6i (single SSA vector → 6 *contiguous* VGPRs) so the MFMA operand
+// constraint is satisfiable without scalar reconstruction. Building a v8i from
+// 6 scalars lets the allocator scatter the two b96 reads into non-adjacent regs
+// and skip the gather — corrupting the MFMA operand (HANDOFF 问题 #2).
+__device__ __forceinline__ v6i ds_read_fp6x32_plain(
+    const void* lds, uint32_t lds_byte_offset)
+{
+    using v6i_a = int __attribute__((__vector_size__(24), __aligned__(4)));
+    const char* p = reinterpret_cast<const char*>(lds) + lds_byte_offset;
+    v6i_a x = *reinterpret_cast<const v6i_a*>(p);
+    return v6i{x[0], x[1], x[2], x[3], x[4], x[5]};
+}
+
+// ---- DS_WRITE, COMPILER-MANAGED ----
+// Plain typed LDS store so the compiler tracks the lgkmcnt for __syncthreads.
+__device__ __forceinline__ void ds_write_b128_plain(
+    void* lds, uint32_t lds_byte_offset, v4i data)
+{
+    using v4i_a = int __attribute__((__vector_size__(16), __aligned__(4)));
+    char* p = reinterpret_cast<char*>(lds) + lds_byte_offset;
+    *reinterpret_cast<v4i_a*>(p) = v4i_a{data[0], data[1], data[2], data[3]};
+}
+
 // ---- DS_WRITE: VGPR → LDS ----
 
 __device__ __forceinline__ void ds_write_b128(uint32_t lds_byte_offset, v4i data) {
@@ -148,6 +178,20 @@ __device__ __forceinline__ void mfma_scale_f32_32x32x64_fp6(
         "v_mfma_scale_f32_32x32x64_f8f6f4 %0, %1, %2, %0, %3, %4 cbsz:2 blgp:2"
         : "+a"(acc.vec)
         : "v"(b6), "v"(a6), "v"(scale_b), "v"(scale_a)
+    );
+}
+
+// MFMA: v6i operands (already 6 contiguous VGPRs from plain loads).
+// No to_v6i round-trip → no scalar reconstruction → operand stays contiguous.
+template <int BYTE_SEL>
+__device__ __forceinline__ void mfma_scale_f32_32x32x64_fp6(
+    AccTileA& acc, v6i a, v6i b, int scale_a, int scale_b)
+{
+    static_assert(BYTE_SEL == 0, "only BYTE_SEL=0 supported for now");
+    asm volatile(
+        "v_mfma_scale_f32_32x32x64_f8f6f4 %0, %1, %2, %0, %3, %4 cbsz:2 blgp:2"
+        : "+a"(acc.vec)
+        : "v"(b), "v"(a), "v"(scale_b), "v"(scale_a)
     );
 }
 
