@@ -42,83 +42,73 @@ using cholqr_tuple = tuple<vector<I>, int>;
 
     - If singular = 0, the input matrix is non singular (cond(A) small).
     - If singular = 1, the matrix is singular (has zero columns/rows, i.e cond(A) = inf or very large)
-    - If singular = s > 1, then a matrix A with repeated columns/rows is diagonally loaded as 
+    - If singular = s > 1, then a matrix A with repeated columns/rows is diagonally loaded as
       A = A + I * eps * 10^(s - 1) to gradually reduce cond(A). **/
 
 // case when m = n = 0 and singular = 0 will also execute the bad arguments test
 // (null handle, null pointers and invalid values)
 
-
 // ============================================================================
 // Size cases for checkin_lapack tests (small/quick tests)
 // ============================================================================
 const vector<int> singular_range = {
-    0,  // test with rocsolver_cholqr_shift_none, cholnum = 1  
-    1,  // test with rocsolver_cholqr_shift_computed, cholnum = 2
-    3,  // test with rocsolver_cholqr_shift_computed, cholnum = 2,3
-    5   // test with rocsolver_cholqr_shift_none, cholnum = 1,2
-        // cases 3 and 5 are tested with different cholnum values to verify that
-        // the orthogonallity error improved.  
-}; 
+    0, // test with rocsolver_cholqr_shift_none, cholnum = 1
+    1, // test with rocsolver_cholqr_shift_computed, cholnum = 2
+    3, // test with rocsolver_cholqr_shift_computed, cholnum = 2,3
+    5 // test with rocsolver_cholqr_shift_none, cholnum = 1,2
+    // cases 3 and 5 are tested with different cholnum values to verify that
+    // the orthogonallity error improved.
+};
 
 const vector<vector<int>> matrix_size_range = {
     // quick return
-    {0, 1, 1, 1},       // m = 0
-    {1, 0, 1, 1},       // n = 0
-    {0, 0, 1, 1},       // m = n = 0
+    {0, 1, 1, 1}, // m = 0
+    {1, 0, 1, 1}, // n = 0
+    {0, 0, 1, 1}, // m = n = 0
     // invalid
-    {-1, 1, 1, 1},      // invalid size
-    {20, 5, 10, 5},     // invalid lda
-    {20, 10, 20, 5},    // invalid ldr (m > n)
-    {10, 20, 10, 5},    // invalid ldr (n > m)
+    {-1, 1, 1, 1}, // invalid size
+    {20, 5, 10, 5}, // invalid lda
+    {20, 10, 20, 5}, // invalid ldr (m > n)
+    {10, 20, 10, 5}, // invalid ldr (n > m)
     // normal (valid) samples
     {15, 15, 15, 15},
     {30, 30, 100, 30},
     {40, 40, 40, 100},
     {100, 30, 130, 30},
     {20, 80, 20, 20},
-    {10, 100, 40, 80}
-};
+    {10, 100, 40, 80}};
 
 const vector<vector<int64_t>> matrix_size_range_64 = {
     // quick return
-    {0, 1, 1, 1},       // m = 0
-    {1, 0, 1, 1},       // n = 0
-    {0, 0, 1, 1},       // m = n = 0
+    {0, 1, 1, 1}, // m = 0
+    {1, 0, 1, 1}, // n = 0
+    {0, 0, 1, 1}, // m = n = 0
     // invalid
-    {-1, 1, 1, 1},      // invalid size
-    {20, 5, 10, 5},     // invalid lda
-    {20, 10, 20, 5},    // invalid ldr (m > n)
-    {10, 20, 10, 5},    // invalid ldr (n > m)
+    {-1, 1, 1, 1}, // invalid size
+    {20, 5, 10, 5}, // invalid lda
+    {20, 10, 20, 5}, // invalid ldr (m > n)
+    {10, 20, 10, 5}, // invalid ldr (n > m)
     // normal (valid) samples
     {15, 15, 15, 15},
     {30, 30, 100, 30},
     {40, 40, 40, 100},
     {100, 30, 130, 30},
     {20, 80, 20, 20},
-    {10, 100, 40, 80}
-};
+    {10, 100, 40, 80}};
 
 // ============================================================================
 // Test sizes for daily_lapack tests (larger/longer tests)
 // ============================================================================
 const vector<int> large_singular_range = {
-    0,  // test with rocsolver_cholqr_shift_none, cholnum = 1  
-    1,  // test with rocsolver_cholqr_shift_computed, cholnum = 2
-}; 
-
-const vector<vector<int>> large_matrix_size_range = {
-    {152, 152, 152, 152},
-    {640, 800, 640, 640},
-    {1024, 256, 1000, 256}
+    0, // test with rocsolver_cholqr_shift_none, cholnum = 1
+    1, // test with rocsolver_cholqr_shift_computed, cholnum = 2
 };
 
-const vector<vector<int64_t>> large_matrix_size_range_64 = {
-    {152, 152, 152, 152},
-    {640, 800, 640, 640},
-    {1024, 256, 1000, 256}
-};
+const vector<vector<int>> large_matrix_size_range
+    = {{152, 152, 152, 152}, {640, 800, 640, 640}, {1024, 256, 1000, 256}};
 
+const vector<vector<int64_t>> large_matrix_size_range_64
+    = {{152, 152, 152, 152}, {640, 800, 640, 640}, {1024, 256, 1000, 256}};
 
 // ============================================================================
 // Argument setup functions
@@ -183,10 +173,10 @@ protected:
     void run_tests()
     {
         Arguments arg = cholqr_setup_arguments(this->GetParam());
-    
+
         if(arg.peek<I>("m") == 0 && arg.peek<I>("n") == 0 && arg.singular == 0)
             testing_cholqr_bad_arg<BATCHED, STRIDED, T, I>();
-        
+
         arg.batch_count = (BATCHED || STRIDED ? 3 : 1);
         testing_cholqr<BATCHED, STRIDED, T, I>(arg);
     }
@@ -347,19 +337,16 @@ TEST_P(CHOLQR_64, strided_batched__double_complex)
 // Checkin tests: all algorithms, smaller sizes
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          CHOLQR,
-                         Combine(ValuesIn(matrix_size_range),
-                                 ValuesIn(singular_range)));
+                         Combine(ValuesIn(matrix_size_range), ValuesIn(singular_range)));
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          CHOLQR_64,
-                         Combine(ValuesIn(matrix_size_range_64),
-                                 ValuesIn(singular_range)));
+                         Combine(ValuesIn(matrix_size_range_64), ValuesIn(singular_range)));
 
 // Daily tests: reduced algorithms, larger sizes
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          CHOLQR,
-                         Combine(ValuesIn(large_matrix_size_range),
-                                 ValuesIn(large_singular_range)));
+                         Combine(ValuesIn(large_matrix_size_range), ValuesIn(large_singular_range)));
 
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          CHOLQR_64,

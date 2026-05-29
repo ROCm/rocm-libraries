@@ -583,13 +583,13 @@ try
             "N = None, C = Computed, P = Provided.\n"
             "                           Specifies how sigma is determined for the shifted cholqr method.\n"
             "                           ")
-        
+
         ("cholnum",
          value<rocblas_int>()->default_value(1),
             "Total number of Cholesky factorizations performed by the cholqr method.\n"
             "                           Cholnum - 1 factorizations are used for the refinement.\n"
             "                           ")
-        
+
         ("sigma",
          value<double>()->default_value(0),
             "Value of sigma when provided for the shifted cholqr method .\n"
@@ -675,7 +675,6 @@ try
             "U = upper, L = lower.\n"
             "                           Indicates where the data for a triangular or symmetric/hermitian matrix is stored.\n"
             "                           ");
-
 
     // clang-format on
 

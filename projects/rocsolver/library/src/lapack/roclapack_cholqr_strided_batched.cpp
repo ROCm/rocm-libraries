@@ -45,9 +45,9 @@ rocblas_status rocsolver_cholqr_strided_batched_impl(rocblas_handle handle,
                                                      I* nr,
                                                      const I batch_count)
 {
-    ROCSOLVER_ENTER_TOP("cholqr_strided_batched", "--cholshift", cholshift, "--cholnum", cholnum, "-m", m, "-n", n, "--lda", lda,
-                        "--strideA", strideA, "--ldw", ldw, "--strideW", strideW, "--batch_count",
-                        batch_count);
+    ROCSOLVER_ENTER_TOP("cholqr_strided_batched", "--cholshift", cholshift, "--cholnum", cholnum,
+                        "-m", m, "-n", n, "--lda", lda, "--strideA", strideA, "--ldw", ldw,
+                        "--strideW", strideW, "--batch_count", batch_count);
 
     if(!handle)
         return rocblas_status_invalid_handle;
@@ -57,8 +57,8 @@ rocblas_status rocsolver_cholqr_strided_batched_impl(rocblas_handle handle,
     rocblas_stride shiftW = 0;
 
     // argument checking
-    rocblas_status st = rocsolver_cholqr_argCheck<T>(handle, cholshift, cholnum, m, n, A, lda, strideA, W, ldw,
-                                                     strideW, sigma, nr, batch_count);
+    rocblas_status st = rocsolver_cholqr_argCheck<T>(
+        handle, cholshift, cholnum, m, n, A, lda, strideA, W, ldw, strideW, sigma, nr, batch_count);
     if(st != rocblas_status_continue)
         return st;
 
@@ -72,9 +72,10 @@ rocblas_status rocsolver_cholqr_strided_batched_impl(rocblas_handle handle,
     size_t size_scalars, size_pivots, size_iinfo;
     // size of arrays of pointers (for batched cases)
     size_t size_workArr;
-    rocsolver_cholqr_getMemorySize<false, true, T>(cholshift,
-        cholnum, m, n, lda, ldw, batch_count, &size_scalars, &size_work1, &size_work2, &size_work3,
-        &size_work4, &size_pivots, &size_iinfo, &size_W1, &size_Acpy, &size_workArr, &optim_mem);
+    rocsolver_cholqr_getMemorySize<false, true, T>(
+        cholshift, cholnum, m, n, lda, ldw, batch_count, &size_scalars, &size_work1, &size_work2,
+        &size_work3, &size_work4, &size_pivots, &size_iinfo, &size_W1, &size_Acpy, &size_workArr,
+        &optim_mem);
 
     if(rocblas_is_device_memory_size_query(handle))
         return rocblas_set_optimal_device_memory_size(handle, size_scalars, size_work1, size_work2,
@@ -104,8 +105,8 @@ rocblas_status rocsolver_cholqr_strided_batched_impl(rocblas_handle handle,
 
     // execution
     return rocsolver_cholqr_template<false, true, T>(
-        handle, cholshift, cholnum, m, n, A, shiftA, lda, strideA, W, shiftW, ldw, strideW, sigma, nr,
-        batch_count, (T*)scalars, work1, work2, work3, work4, (T*)pivots, (I*)iinfo, (T*)W1,
+        handle, cholshift, cholnum, m, n, A, shiftA, lda, strideA, W, shiftW, ldw, strideW, sigma,
+        nr, batch_count, (T*)scalars, work1, work2, work3, work4, (T*)pivots, (I*)iinfo, (T*)W1,
         (T*)Acpy, (T**)workArr, optim_mem);
 }
 

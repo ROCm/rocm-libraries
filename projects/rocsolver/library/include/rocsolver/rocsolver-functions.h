@@ -10089,7 +10089,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgetrs_strided_batched_64(rocblas_hand
     \brief The SYTRS functions solve a system of ``n`` linear equations on ``n`` variables in its factorized form.
 
     \details
-    It solves the linear system \f$ A X = B \f$, where the n-by-n matrix A is symmetric and maybe indefinite, 
+    It solves the linear system \f$ A X = B \f$, where the n-by-n matrix A is symmetric and maybe indefinite,
     using one of the following factorizations that depends on the value of ``uplo``:
 
     \f[
@@ -10231,7 +10231,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zsytrs_64(rocblas_handle handle,
         \end{array}
     \f]
 
-    Matrix \f$A_l\f$ is defined by its triangular factors as returned by 
+    Matrix \f$A_l\f$ is defined by its triangular factors as returned by
     \ref rocsolver_ssytrf_batched "SYTRF_BATCHED".
     Note matrix \f$ D_l \f$ contains 1-by-1 or 2-by-2 blocks on the main diagonal.
 
@@ -10386,7 +10386,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zsytrs_batched_64(rocblas_handle handl
         \end{array}
     \f]
 
-    Matrix \f$A_l\f$ is defined by its triangular factors as returned by 
+    Matrix \f$A_l\f$ is defined by its triangular factors as returned by
     \ref rocsolver_ssytrf_strided_batched "SYTRF_STRIDED_BATCHED".
     Note matrix \f$ D_l \f$ contains 1-by-1 or 2-by-2 blocks on the main diagonal.
 
@@ -30523,7 +30523,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zhegvdx_strided_batched(rocblas_handle
 //! @}
 
 /*! @{
-    \brief CHOLQR computes an orthogonal factorization of a number of columns (rows) of a general m-by-n matrix 
+    \brief CHOLQR computes an orthogonal factorization of a number of columns (rows) of a general m-by-n matrix
     \f$A\f$ using the Cholesky factorization of \f$A'A\f$ if \f$m \geq n\f$ or \f$AA'\f$ if \f$m < n\f$.
 
     \details
@@ -30534,8 +30534,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zhegvdx_strided_batched(rocblas_handle
     \f]
     \f[
         H = \left[\begin{array}{c|c}
-        Q & A^* 
-        \end{array}\right], \quad \text{and} \quad         
+        Q & A^*
+        \end{array}\right], \quad \text{and} \quad
         W = \left[\begin{array}{c|c}
         R & 0\\
         \hline
@@ -30560,55 +30560,55 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zhegvdx_strided_batched(rocblas_handle
     \f]
     if \f$m < n\f$.
 
-    R is an nr-by-nr upper triangular matrix. L is an nr-by-nr lower triangular matrix. Q is an m-by-nr (or nr-by-n) matrix with orthonormal columns (rows), and matrix A* represents the last n - nr columns (or m - nr rows) of A. 
+    R is an nr-by-nr upper triangular matrix. L is an nr-by-nr lower triangular matrix. Q is an m-by-nr (or nr-by-n) matrix with orthonormal columns (rows), and matrix A* represents the last n - nr columns (or m - nr rows) of A.
     nr is an output argument that indicates the number of columns (rows) of A that were properly factorized
-    by the function (\f$\text{nr} \leq \text{min}(m,n)\f$). 
+    by the function (\f$\text{nr} \leq \text{min}(m,n)\f$).
     The factorization is computed using the CholeskyQR algorithm as described below.
 
     The algorithm starts by computing \f$B = A'A\f$ (or \f$B = AA'\f$), and produces \f$W\f$ via the Cholesky
     factorization \f$B=W'W\f$ (or \f$B=WW'\f$). Finally, it computes the factor \f$H\f$ as the solution of the
-    triangular system \f$A=HW\f$ (\f$A=WH\f$). 
+    triangular system \f$A=HW\f$ (\f$A=WH\f$).
 
     The initial Cholesky factorization could fail if B is not positive definite, which could happen
-    when A is ill-conditioned or singular. In this case, only nr columns (rows) of B will be reduced properly, 
-    which yields the general form of the factor W depicted above. 
-    nr is thus related with the value of info as returned by \ref rocsolver_spotrf "POTRF". 
+    when A is ill-conditioned or singular. In this case, only nr columns (rows) of B will be reduced properly,
+    which yields the general form of the factor W depicted above.
+    nr is thus related with the value of info as returned by \ref rocsolver_spotrf "POTRF".
 
     Alternatively, the algorithm could use a preconditioned matrix \f$B = A'A + \text{sigma}\cdot I\f$
     (or \f$B = AA' + \text{sigma}\cdot I\f$)
     to increase the chances of the Cholesky factorization of B to succeed, and thus increasing the
     value of nr. The shift, sigma, could be provided by the user
     (if cholshift = rocsolver_cholqr_shift_provided), or an "ideal" number could be computed internally
-    (if cholshift = rocsolver_cholqr_shift_computed). If cholshift = rocsolver_cholqr_shift_none, 
+    (if cholshift = rocsolver_cholqr_shift_computed). If cholshift = rocsolver_cholqr_shift_none,
     then sigma is not referenced and could be null.
 
     Additionally, an iterative refinement process could be used to improve the orthonormality of the columns (or rows) in Q.
     If \f$A=Q_1R_1\f$ (or \f$A=L_1Q_1\f$) is an intial factorization of A, one can always re-apply the CholeskyQR
-    process to \f$Q_1\f$ to produce \f$Q_1=Q_2R_2\f$ (or \f$Q_1=L_2Q_2\f$). This would yield a new factorization \f$A=QR\f$ (or \f$A=LQ\f$), with 
+    process to \f$Q_1\f$ to produce \f$Q_1=Q_2R_2\f$ (or \f$Q_1=L_2Q_2\f$). This would yield a new factorization \f$A=QR\f$ (or \f$A=LQ\f$), with
     \f$R=R_2R_1\f$ (\f$L=L_1L_2)\f$, and \f$Q=Q_2\f$. The columns (rows) of Q are now expected to be closer to be orthonormal than
-    the columns (rows) of the initial \f$Q_1\f$. CHOLQR will execute cholnum - 1 extra Cholesky factorizations 
-    to refine the factor Q.   
+    the columns (rows) of the initial \f$Q_1\f$. CHOLQR will execute cholnum - 1 extra Cholesky factorizations
+    to refine the factor Q.
 
     \note
     If the Cholesky factorization of B fails, it returns the order of the first
-    leading minor of B that is negative or zero as the value in info. nr is then equal to info - 1. 
+    leading minor of B that is negative or zero as the value in info. nr is then equal to info - 1.
     However, the Cholesky factorization is not inherently a rank revealing method. Thus, nr should not be interpreted as the
-    numerical rank of matrix A.      
+    numerical rank of matrix A.
 
     \note
-    Common configurations of the CholeskyQR algorithm studied in the literature include: 
-    CholeskyQR1, which is equivalent to cholshift = rocsolver_cholqr_shift_none, and cholnum = 1; 
-    CholeskyQR2, equivalent to cholshift = rocsolver_cholqr_shift_none, and cholnum = 2; and 
+    Common configurations of the CholeskyQR algorithm studied in the literature include:
+    CholeskyQR1, which is equivalent to cholshift = rocsolver_cholqr_shift_none, and cholnum = 1;
+    CholeskyQR2, equivalent to cholshift = rocsolver_cholqr_shift_none, and cholnum = 2; and
     ShiftedCholeskyQR3, which can be executed with cholshift = rocsolver_cholqr_shift_computed, and cholnum = 3.
-    It is documented that ShiftedCholeskyQR3 can succesfully factorize ill-conditioned matrices with condition
+    It is documented that ShiftedCholeskyQR3 can successfully factorize ill-conditioned matrices with condition
     numbers up to \f$O(\text{eps}^{-1})\f$ (i.e. \f$\approx 4\times10^{15}\f$ in double precision).
 
     \note
     Even if the factorization is complete, i.e. nr = min(m,n), the returned factors H and W do not
     form a full QR (or LQ) factorization of A. H will always be missing the last columns (rows) which correspond to
     the m - n (or n - m) orthonormal vectors generating the row (column) null-space of A. In other words, cholqr cannot be used as a
-    row (column) compression method if the back transformation is required.   
-   
+    row (column) compression method if the back transformation is required.
+
 
     @param[in]
     handle      rocblas_handle.
@@ -30617,7 +30617,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zhegvdx_strided_batched(rocblas_handle
                 Specifies how the shift sigma will be used in the Cholesky factorization.
     @param[in]
     cholnum     rocblas_int. cholnum > 0 if cholshift = rocsolver_cholqr_shift_none, cholnum > 1 otherwise.
-                Specifies how many Cholesky factorizations will be executed in total. cholnum - 1 
+                Specifies how many Cholesky factorizations will be executed in total. cholnum - 1
                 factorization will be used for the refinement of Q.
     @param[in]
     m           rocblas_int. m >= 0.
@@ -30645,7 +30645,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zhegvdx_strided_batched(rocblas_handle
                 Not referenced for rocsolver_cholqr_shift_none.
     @param[out]
     nr          pointer to rocblas_int on the GPU.
-                The number of columns (rows) of A succesfully factorized. 
+                The number of columns (rows) of A succesfully factorized.
     ********************************************************************/
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_scholqr(rocblas_handle handle,
@@ -30697,8 +30697,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zcholqr(rocblas_handle handle,
                                                   rocblas_int* nr);
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_scholqr_64(rocblas_handle handle,
-                                                  const rocsolver_cholqr_shift cholshift,
-                                                  const rocblas_int cholnum,
+                                                     const rocsolver_cholqr_shift cholshift,
+                                                     const rocblas_int cholnum,
                                                      const int64_t m,
                                                      const int64_t n,
                                                      float* A,
@@ -30709,8 +30709,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_scholqr_64(rocblas_handle handle,
                                                      int64_t* nr);
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_dcholqr_64(rocblas_handle handle,
-                                                  const rocsolver_cholqr_shift cholshift,
-                                                  const rocblas_int cholnum,
+                                                     const rocsolver_cholqr_shift cholshift,
+                                                     const rocblas_int cholnum,
                                                      const int64_t m,
                                                      const int64_t n,
                                                      double* A,
@@ -30721,8 +30721,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dcholqr_64(rocblas_handle handle,
                                                      int64_t* nr);
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_ccholqr_64(rocblas_handle handle,
-                                                  const rocsolver_cholqr_shift cholshift,
-                                                  const rocblas_int cholnum,
+                                                     const rocsolver_cholqr_shift cholshift,
+                                                     const rocblas_int cholnum,
                                                      const int64_t m,
                                                      const int64_t n,
                                                      rocblas_float_complex* A,
@@ -30733,8 +30733,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_ccholqr_64(rocblas_handle handle,
                                                      int64_t* nr);
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_zcholqr_64(rocblas_handle handle,
-                                                  const rocsolver_cholqr_shift cholshift,
-                                                  const rocblas_int cholnum,
+                                                     const rocsolver_cholqr_shift cholshift,
+                                                     const rocblas_int cholnum,
                                                      const int64_t m,
                                                      const int64_t n,
                                                      rocblas_double_complex* A,
@@ -30746,7 +30746,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zcholqr_64(rocblas_handle handle,
 //! @}
 
 /*! @{
-    \brief CHOLQR_BATCHED computes an orthogonal factorization of a number of columns (rows) of a batch of general m-by-n matrices 
+    \brief CHOLQR_BATCHED computes an orthogonal factorization of a number of columns (rows) of a batch of general m-by-n matrices
     \f$A_l\f$ using the Cholesky factorization of \f$A_l'A_l\f$ if \f$m \geq n\f$ or \f$A_lA_l'\f$ if \f$m < n\f$.
 
     \details
@@ -30757,8 +30757,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zcholqr_64(rocblas_handle handle,
     \f]
     \f[
         H_l = \left[\begin{array}{c|c}
-        Q_l & A_l^* 
-        \end{array}\right], \quad \text{and} \quad         
+        Q_l & A_l^*
+        \end{array}\right], \quad \text{and} \quad
         W_l = \left[\begin{array}{c|c}
         R_l & 0\\
         \hline
@@ -30783,58 +30783,58 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zcholqr_64(rocblas_handle handle,
     \f]
     if \f$m < n\f$.
 
-    \f$R_l\f$ is an nr[l]-by-nr[l] upper triangular matrix. \f$L_l\f$ is an nr[l]-by-nr[l] lower triangular matrix. 
-    \f$Q_l\f$ is an m-by-nr[l] (or nr[l]-by-n) matrix with orthonormal columns (rows), and matrix \f$A_l^*\f$ 
-    represents the last n - nr[l] columns (or m - nr[l] rows) of \f$A_l\f$. 
-    nr[l], the l-th element of vector nr, is an output argument that indicates the number of columns (rows) of \f$A_l\f$ 
-    that were properly factorized by the function (\f$\text{nr[l]} \leq \text{min}(m,n)\f$). 
+    \f$R_l\f$ is an nr[l]-by-nr[l] upper triangular matrix. \f$L_l\f$ is an nr[l]-by-nr[l] lower triangular matrix.
+    \f$Q_l\f$ is an m-by-nr[l] (or nr[l]-by-n) matrix with orthonormal columns (rows), and matrix \f$A_l^*\f$
+    represents the last n - nr[l] columns (or m - nr[l] rows) of \f$A_l\f$.
+    nr[l], the l-th element of vector nr, is an output argument that indicates the number of columns (rows) of \f$A_l\f$
+    that were properly factorized by the function (\f$\text{nr[l]} \leq \text{min}(m,n)\f$).
     The factorization is computed using the CholeskyQR algorithm as described below.
 
     The algorithm starts by computing \f$B_l = A_l'A_l\f$ (or \f$B_l = A_lA_l'\f$), and produces \f$W_l\f$ via the Cholesky
     factorization \f$B_l=W_l'W_l\f$ (or \f$B_l=W_lW_l'\f$). Finally, it computes the factor \f$H_l\f$ as the solution of the
-    triangular system \f$A_l=H_lW_l\f$ (\f$A_l=W_lH_l\f$). 
+    triangular system \f$A_l=H_lW_l\f$ (\f$A_l=W_lH_l\f$).
 
     The initial Cholesky factorization could fail if \f$B_l\f$ is not positive definite, which could happen
-    when \f$A_l\f$ is ill-conditioned or singular. In this case, only nr[l] columns (rows) of \f$B_l\f$ will be reduced properly, 
-    which yields the general form of the factor \f$W_l\f$ depicted above. 
-    nr[l] is thus related with the value of info[l] as returned by \ref rocsolver_spotrf_batched "POTRF_BATCHED". 
+    when \f$A_l\f$ is ill-conditioned or singular. In this case, only nr[l] columns (rows) of \f$B_l\f$ will be reduced properly,
+    which yields the general form of the factor \f$W_l\f$ depicted above.
+    nr[l] is thus related with the value of info[l] as returned by \ref rocsolver_spotrf_batched "POTRF_BATCHED".
 
     Alternatively, the algorithm could use a preconditioned matrix \f$B_l = A_l'A_l + \text{sigma[l]}\cdot I\f$
     (or \f$B_l = A_lA_l' + \text{sigma[l]}\cdot I\f$)
     to increase the chances of the Cholesky factorization of \f$B_l\f$ to succeed, and thus increasing the
     value of nr[l]. The shift, sigma[l], could be provided by the user
     (if cholshift = rocsolver_cholqr_shift_provided), or an "ideal" number could be computed internally
-    (if cholshift = rocsolver_cholqr_shift_computed). If cholshift = rocsolver_cholqr_shift_none, 
+    (if cholshift = rocsolver_cholqr_shift_computed). If cholshift = rocsolver_cholqr_shift_none,
     then sigma is not referenced and could be null.
 
     Additionally, an iterative refinement process could be used to improve the orthonormality of the columns (or rows) in \f$Q_l\f$.
     If \f$A_l=Q_{l_1}R_{l_1}\f$ (or \f$A_l=L_{l_1}Q_{l_1}\f$) is an intial factorization of \f$A_l\f$, one can always re-apply the CholeskyQR
-    process to \f$Q_{l_1}\f$ to produce \f$Q_{l_1}=Q_{l_2}R_{l_2}\f$ (or \f$Q_{l_1}=L_{l_2}Q_{l_2}\f$). 
-    This would yield a new factorization \f$A_l=Q_lR_l\f$ (or \f$A_l=L_lQ_l\f$), with 
-    \f$R_l=R_{l_2}R_{l_1}\f$ (\f$L_l=L_{l_1}L_{l_2})\f$, and \f$Q_l=Q_{l_2}\f$. The columns (rows) of \f$Q_l\f$ are now 
-    expected to be closer to be orthonormal than the columns (rows) of the initial \f$Q_{l_1}\f$. 
-    CHOLQR will execute cholnum - 1 extra Cholesky factorizations to refine the factor \f$Q_l\f$.   
+    process to \f$Q_{l_1}\f$ to produce \f$Q_{l_1}=Q_{l_2}R_{l_2}\f$ (or \f$Q_{l_1}=L_{l_2}Q_{l_2}\f$).
+    This would yield a new factorization \f$A_l=Q_lR_l\f$ (or \f$A_l=L_lQ_l\f$), with
+    \f$R_l=R_{l_2}R_{l_1}\f$ (\f$L_l=L_{l_1}L_{l_2})\f$, and \f$Q_l=Q_{l_2}\f$. The columns (rows) of \f$Q_l\f$ are now
+    expected to be closer to be orthonormal than the columns (rows) of the initial \f$Q_{l_1}\f$.
+    CHOLQR will execute cholnum - 1 extra Cholesky factorizations to refine the factor \f$Q_l\f$.
 
     \note
     If the Cholesky factorization of \f$B_l\f$ fails, it returns the order of the first
-    leading minor of \f$B_l\f$ that is negative or zero as the value in info[l]. nr[l] is then equal to info[l] - 1. 
+    leading minor of \f$B_l\f$ that is negative or zero as the value in info[l]. nr[l] is then equal to info[l] - 1.
     However, the Cholesky factorization is not inherently a rank revealing method. Thus, nr[l] should not be interpreted as the
-    numerical rank of matrix \f$A_l\f$.      
+    numerical rank of matrix \f$A_l\f$.
 
     \note
-    Common configurations of the CholeskyQR algorithm studied in the literature include: 
-    CholeskyQR1, which is equivalent to cholshift = rocsolver_cholqr_shift_none, and cholnum = 1; 
-    CholeskyQR2, equivalent to cholshift = rocsolver_cholqr_shift_none, and cholnum = 2; and 
+    Common configurations of the CholeskyQR algorithm studied in the literature include:
+    CholeskyQR1, which is equivalent to cholshift = rocsolver_cholqr_shift_none, and cholnum = 1;
+    CholeskyQR2, equivalent to cholshift = rocsolver_cholqr_shift_none, and cholnum = 2; and
     ShiftedCholeskyQR3, which can be executed with cholshift = rocsolver_cholqr_shift_computed, and cholnum = 3.
-    It is documented that ShiftedCholeskyQR3 can succesfully factorize ill-conditioned matrices with condition
+    It is documented that ShiftedCholeskyQR3 can successfully factorize ill-conditioned matrices with condition
     numbers up to \f$O(\text{eps}^{-1})\f$ (i.e. \f$\approx 4\times10^{15}\f$ in double precision).
 
     \note
     Even if the factorization of a matrix in the batch is complete, i.e. nr[l] = min(m,n), the returned factors \f$H_l\f$ and \f$W_l\f$ do not
     form a full QR (or LQ) factorization of \f$A_l\f$. \f$H_l\f$ will always be missing the last columns (rows) which correspond to
     the m - n (or n - m) orthonormal vectors generating the row (column) null-space of \f$A_l\f$. In other words, cholqr cannot be used as a
-    row (column) compression method if the back transformation is required.   
-   
+    row (column) compression method if the back transformation is required.
+
 
     @param[in]
     handle      rocblas_handle.
@@ -30843,7 +30843,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zcholqr_64(rocblas_handle handle,
                 Specifies how the shift sigma will be used in the Cholesky factorization.
     @param[in]
     cholnum     rocblas_int. cholnum > 0 if cholshift = rocsolver_cholqr_shift_none, cholnum > 1 otherwise.
-                Specifies how many Cholesky factorizations will be executed in total. cholnum - 1 
+                Specifies how many Cholesky factorizations will be executed in total. cholnum - 1
                 factorization will be used for the refinement of Q_l.
     @param[in]
     m           rocblas_int. m >= 0.
@@ -30864,8 +30864,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zcholqr_64(rocblas_handle handle,
     @param[in]
     ldw         rocblas_int. ldw >= min(m,n).
                 Specifies the leading dimension of W_l.
-    @param[in] 
-    strideW     rocblas_stride. Stride from the start of one matrix W_l to the next one W_(l+1). 
+    @param[in]
+    strideW     rocblas_stride. Stride from the start of one matrix W_l to the next one W_(l+1).
                 There is no restriction for the value of strideW. Normal use case is strideW >= ldw*min(m,n).
     @param[inout]
     sigma       pointer to real type. Array on the GPU of size batch_count.
@@ -30876,13 +30876,13 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zcholqr_64(rocblas_handle handle,
     nr          pointer to rocblas_int. Array on the GPU of size batch_count.
                 The number of columns (rows) succesfully factorized of each A_l.
     @param[in]
-    batch_count rocblas_int. batch_count >= 0. 
-                Number of matrices in the batch. 
+    batch_count rocblas_int. batch_count >= 0.
+                Number of matrices in the batch.
     ********************************************************************/
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_scholqr_batched(rocblas_handle handle,
-                                                  const rocsolver_cholqr_shift cholshift,
-                                                  const rocblas_int cholnum,
+                                                          const rocsolver_cholqr_shift cholshift,
+                                                          const rocblas_int cholnum,
                                                           const rocblas_int m,
                                                           const rocblas_int n,
                                                           float* const A[],
@@ -30895,8 +30895,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_scholqr_batched(rocblas_handle handle,
                                                           const rocblas_int batch_count);
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_dcholqr_batched(rocblas_handle handle,
-                                                  const rocsolver_cholqr_shift cholshift,
-                                                  const rocblas_int cholnum,
+                                                          const rocsolver_cholqr_shift cholshift,
+                                                          const rocblas_int cholnum,
                                                           const rocblas_int m,
                                                           const rocblas_int n,
                                                           double* const A[],
@@ -30909,8 +30909,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dcholqr_batched(rocblas_handle handle,
                                                           const rocblas_int batch_count);
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_ccholqr_batched(rocblas_handle handle,
-                                                  const rocsolver_cholqr_shift cholshift,
-                                                  const rocblas_int cholnum,
+                                                          const rocsolver_cholqr_shift cholshift,
+                                                          const rocblas_int cholnum,
                                                           const rocblas_int m,
                                                           const rocblas_int n,
                                                           rocblas_float_complex* const A[],
@@ -30923,8 +30923,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_ccholqr_batched(rocblas_handle handle,
                                                           const rocblas_int batch_count);
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_zcholqr_batched(rocblas_handle handle,
-                                                  const rocsolver_cholqr_shift cholshift,
-                                                  const rocblas_int cholnum,
+                                                          const rocsolver_cholqr_shift cholshift,
+                                                          const rocblas_int cholnum,
                                                           const rocblas_int m,
                                                           const rocblas_int n,
                                                           rocblas_double_complex* const A[],
@@ -30937,8 +30937,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zcholqr_batched(rocblas_handle handle,
                                                           const rocblas_int batch_count);
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_scholqr_batched_64(rocblas_handle handle,
-                                                  const rocsolver_cholqr_shift cholshift,
-                                                  const rocblas_int cholnum,
+                                                             const rocsolver_cholqr_shift cholshift,
+                                                             const rocblas_int cholnum,
                                                              const int64_t m,
                                                              const int64_t n,
                                                              float* const A[],
@@ -30951,8 +30951,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_scholqr_batched_64(rocblas_handle hand
                                                              const int64_t batch_count);
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_dcholqr_batched_64(rocblas_handle handle,
-                                                  const rocsolver_cholqr_shift cholshift,
-                                                  const rocblas_int cholnum,
+                                                             const rocsolver_cholqr_shift cholshift,
+                                                             const rocblas_int cholnum,
                                                              const int64_t m,
                                                              const int64_t n,
                                                              double* const A[],
@@ -30965,8 +30965,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dcholqr_batched_64(rocblas_handle hand
                                                              const int64_t batch_count);
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_ccholqr_batched_64(rocblas_handle handle,
-                                                  const rocsolver_cholqr_shift cholshift,
-                                                  const rocblas_int cholnum,
+                                                             const rocsolver_cholqr_shift cholshift,
+                                                             const rocblas_int cholnum,
                                                              const int64_t m,
                                                              const int64_t n,
                                                              rocblas_float_complex* const A[],
@@ -30979,8 +30979,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_ccholqr_batched_64(rocblas_handle hand
                                                              const int64_t batch_count);
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_zcholqr_batched_64(rocblas_handle handle,
-                                                  const rocsolver_cholqr_shift cholshift,
-                                                  const rocblas_int cholnum,
+                                                             const rocsolver_cholqr_shift cholshift,
+                                                             const rocblas_int cholnum,
                                                              const int64_t m,
                                                              const int64_t n,
                                                              rocblas_double_complex* const A[],
@@ -30994,7 +30994,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zcholqr_batched_64(rocblas_handle hand
 //! @}
 
 /*! @{
-    \brief CHOLQR_STRIDED_BATCHED computes an orthogonal factorization of a number of columns (rows) of a batch of general m-by-n matrices 
+    \brief CHOLQR_STRIDED_BATCHED computes an orthogonal factorization of a number of columns (rows) of a batch of general m-by-n matrices
     \f$A_l\f$ using the Cholesky factorization of \f$A_l'A_l\f$ if \f$m \geq n\f$ or \f$A_lA_l'\f$ if \f$m < n\f$.
 
     \details
@@ -31005,8 +31005,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zcholqr_batched_64(rocblas_handle hand
     \f]
     \f[
         H_l = \left[\begin{array}{c|c}
-        Q_l & A_l^* 
-        \end{array}\right], \quad \text{and} \quad         
+        Q_l & A_l^*
+        \end{array}\right], \quad \text{and} \quad
         W_l = \left[\begin{array}{c|c}
         R_l & 0\\
         \hline
@@ -31031,58 +31031,58 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zcholqr_batched_64(rocblas_handle hand
     \f]
     if \f$m < n\f$.
 
-    \f$R_l\f$ is an nr[l]-by-nr[l] upper triangular matrix. \f$L_l\f$ is an nr[l]-by-nr[l] lower triangular matrix. 
-    \f$Q_l\f$ is an m-by-nr[l] (or nr[l]-by-n) matrix with orthonormal columns (rows), and matrix \f$A_l^*\f$ 
-    represents the last n - nr[l] columns (or m - nr[l] rows) of \f$A_l\f$. 
-    nr[l], the l-th element of vector nr, is an output argument that indicates the number of columns (rows) of \f$A_l\f$ 
-    that were properly factorized by the function (\f$\text{nr[l]} \leq \text{min}(m,n)\f$). 
+    \f$R_l\f$ is an nr[l]-by-nr[l] upper triangular matrix. \f$L_l\f$ is an nr[l]-by-nr[l] lower triangular matrix.
+    \f$Q_l\f$ is an m-by-nr[l] (or nr[l]-by-n) matrix with orthonormal columns (rows), and matrix \f$A_l^*\f$
+    represents the last n - nr[l] columns (or m - nr[l] rows) of \f$A_l\f$.
+    nr[l], the l-th element of vector nr, is an output argument that indicates the number of columns (rows) of \f$A_l\f$
+    that were properly factorized by the function (\f$\text{nr[l]} \leq \text{min}(m,n)\f$).
     The factorization is computed using the CholeskyQR algorithm as described below.
 
     The algorithm starts by computing \f$B_l = A_l'A_l\f$ (or \f$B_l = A_lA_l'\f$), and produces \f$W_l\f$ via the Cholesky
     factorization \f$B_l=W_l'W_l\f$ (or \f$B_l=W_lW_l'\f$). Finally, it computes the factor \f$H_l\f$ as the solution of the
-    triangular system \f$A_l=H_lW_l\f$ (\f$A_l=W_lH_l\f$). 
+    triangular system \f$A_l=H_lW_l\f$ (\f$A_l=W_lH_l\f$).
 
     The initial Cholesky factorization could fail if \f$B_l\f$ is not positive definite, which could happen
-    when \f$A_l\f$ is ill-conditioned or singular. In this case, only nr[l] columns (rows) of \f$B_l\f$ will be reduced properly, 
-    which yields the general form of the factor \f$W_l\f$ depicted above. 
-    nr[l] is thus related with the value of info[l] as returned by \ref rocsolver_spotrf_strided_batched "POTRF_STRIDED_BATCHED". 
+    when \f$A_l\f$ is ill-conditioned or singular. In this case, only nr[l] columns (rows) of \f$B_l\f$ will be reduced properly,
+    which yields the general form of the factor \f$W_l\f$ depicted above.
+    nr[l] is thus related with the value of info[l] as returned by \ref rocsolver_spotrf_strided_batched "POTRF_STRIDED_BATCHED".
 
     Alternatively, the algorithm could use a preconditioned matrix \f$B_l = A_l'A_l + \text{sigma[l]}\cdot I\f$
     (or \f$B_l = A_lA_l' + \text{sigma[l]}\cdot I\f$)
     to increase the chances of the Cholesky factorization of \f$B_l\f$ to succeed, and thus increasing the
     value of nr[l]. The shift, sigma[l], could be provided by the user
     (if cholshift = rocsolver_cholqr_shift_provided), or an "ideal" number could be computed internally
-    (if cholshift = rocsolver_cholqr_shift_computed). If cholshift = rocsolver_cholqr_shift_none, 
+    (if cholshift = rocsolver_cholqr_shift_computed). If cholshift = rocsolver_cholqr_shift_none,
     then sigma is not referenced and could be null.
 
     Additionally, an iterative refinement process could be used to improve the orthonormality of the columns (or rows) in \f$Q_l\f$.
     If \f$A_l=Q_{l_1}R_{l_1}\f$ (or \f$A_l=L_{l_1}Q_{l_1}\f$) is an intial factorization of \f$A_l\f$, one can always re-apply the CholeskyQR
-    process to \f$Q_{l_1}\f$ to produce \f$Q_{l_1}=Q_{l_2}R_{l_2}\f$ (or \f$Q_{l_1}=L_{l_2}Q_{l_2}\f$). 
-    This would yield a new factorization \f$A_l=Q_lR_l\f$ (or \f$A_l=L_lQ_l\f$), with 
-    \f$R_l=R_{l_2}R_{l_1}\f$ (\f$L_l=L_{l_1}L_{l_2})\f$, and \f$Q_l=Q_{l_2}\f$. The columns (rows) of \f$Q_l\f$ are now 
-    expected to be closer to be orthonormal than the columns (rows) of the initial \f$Q_{l_1}\f$. 
-    CHOLQR will execute cholnum - 1 extra Cholesky factorizations to refine the factor \f$Q_l\f$.   
+    process to \f$Q_{l_1}\f$ to produce \f$Q_{l_1}=Q_{l_2}R_{l_2}\f$ (or \f$Q_{l_1}=L_{l_2}Q_{l_2}\f$).
+    This would yield a new factorization \f$A_l=Q_lR_l\f$ (or \f$A_l=L_lQ_l\f$), with
+    \f$R_l=R_{l_2}R_{l_1}\f$ (\f$L_l=L_{l_1}L_{l_2})\f$, and \f$Q_l=Q_{l_2}\f$. The columns (rows) of \f$Q_l\f$ are now
+    expected to be closer to be orthonormal than the columns (rows) of the initial \f$Q_{l_1}\f$.
+    CHOLQR will execute cholnum - 1 extra Cholesky factorizations to refine the factor \f$Q_l\f$.
 
     \note
     If the Cholesky factorization of \f$B_l\f$ fails, it returns the order of the first
-    leading minor of \f$B_l\f$ that is negative or zero as the value in info[l]. nr[l] is then equal to info[l] - 1. 
+    leading minor of \f$B_l\f$ that is negative or zero as the value in info[l]. nr[l] is then equal to info[l] - 1.
     However, the Cholesky factorization is not inherently a rank revealing method. Thus, nr[l] should not be interpreted as the
-    numerical rank of matrix \f$A_l\f$.      
+    numerical rank of matrix \f$A_l\f$.
 
     \note
-    Common configurations of the CholeskyQR algorithm studied in the literature include: 
-    CholeskyQR1, which is equivalent to cholshift = rocsolver_cholqr_shift_none, and cholnum = 1; 
-    CholeskyQR2, equivalent to cholshift = rocsolver_cholqr_shift_none, and cholnum = 2; and 
+    Common configurations of the CholeskyQR algorithm studied in the literature include:
+    CholeskyQR1, which is equivalent to cholshift = rocsolver_cholqr_shift_none, and cholnum = 1;
+    CholeskyQR2, equivalent to cholshift = rocsolver_cholqr_shift_none, and cholnum = 2; and
     ShiftedCholeskyQR3, which can be executed with cholshift = rocsolver_cholqr_shift_computed, and cholnum = 3.
-    It is documented that ShiftedCholeskyQR3 can succesfully factorize ill-conditioned matrices with condition
+    It is documented that ShiftedCholeskyQR3 can successfully factorize ill-conditioned matrices with condition
     numbers up to \f$O(\text{eps}^{-1})\f$ (i.e. \f$\approx 4\times10^{15}\f$ in double precision).
 
     \note
     Even if the factorization of a matrix in the batch is complete, i.e. nr[l] = min(m,n), the returned factors \f$H_l\f$ and \f$W_l\f$ do not
     form a full QR (or LQ) factorization of \f$A_l\f$. \f$H_l\f$ will always be missing the last columns (rows) which correspond to
     the m - n (or n - m) orthonormal vectors generating the row (column) null-space of \f$A_l\f$. In other words, cholqr cannot be used as a
-    row (column) compression method if the back transformation is required.   
-   
+    row (column) compression method if the back transformation is required.
+
 
     @param[in]
     handle      rocblas_handle.
@@ -31091,7 +31091,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zcholqr_batched_64(rocblas_handle hand
                 Specifies how the shift sigma will be used in the Cholesky factorization.
     @param[in]
     cholnum     rocblas_int. cholnum > 0 if cholshift = rocsolver_cholqr_shift_none, cholnum > 1 otherwise.
-                Specifies how many Cholesky factorizations will be executed in total. cholnum - 1 
+                Specifies how many Cholesky factorizations will be executed in total. cholnum - 1
                 factorization will be used for the refinement of Q_l.
     @param[in]
     m           rocblas_int. m >= 0.
@@ -31115,8 +31115,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zcholqr_batched_64(rocblas_handle hand
     @param[in]
     ldw         rocblas_int. ldw >= min(m,n).
                 Specifies the leading dimension of W_l.
-    @param[in] 
-    strideW     rocblas_stride. Stride from the start of one matrix W_l to the next one W_(l+1). 
+    @param[in]
+    strideW     rocblas_stride. Stride from the start of one matrix W_l to the next one W_(l+1).
                 There is no restriction for the value of strideW. Normal use case is strideW >= ldw*min(m,n).
     @param[inout]
     sigma       pointer to real type. Array on the GPU of size batch_count.
@@ -31127,14 +31127,14 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zcholqr_batched_64(rocblas_handle hand
     nr          pointer to rocblas_int. Array on the GPU of size batch_count.
                 The number of columns (rows) succesfully factorized of each A_l.
     @param[in]
-    batch_count rocblas_int. batch_count >= 0. 
-                Number of matrices in the batch. 
+    batch_count rocblas_int. batch_count >= 0.
+                Number of matrices in the batch.
 
     ********************************************************************/
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_scholqr_strided_batched(rocblas_handle handle,
-                                                  const rocsolver_cholqr_shift cholshift,
-                                                  const rocblas_int cholnum,
+                                                                  const rocsolver_cholqr_shift cholshift,
+                                                                  const rocblas_int cholnum,
                                                                   const rocblas_int m,
                                                                   const rocblas_int n,
                                                                   float* A,
@@ -31148,8 +31148,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_scholqr_strided_batched(rocblas_handle
                                                                   const rocblas_int batch_count);
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_dcholqr_strided_batched(rocblas_handle handle,
-                                                  const rocsolver_cholqr_shift cholshift,
-                                                  const rocblas_int cholnum,
+                                                                  const rocsolver_cholqr_shift cholshift,
+                                                                  const rocblas_int cholnum,
                                                                   const rocblas_int m,
                                                                   const rocblas_int n,
                                                                   double* A,
@@ -31163,8 +31163,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dcholqr_strided_batched(rocblas_handle
                                                                   const rocblas_int batch_count);
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_ccholqr_strided_batched(rocblas_handle handle,
-                                                  const rocsolver_cholqr_shift cholshift,
-                                                  const rocblas_int cholnum,
+                                                                  const rocsolver_cholqr_shift cholshift,
+                                                                  const rocblas_int cholnum,
                                                                   const rocblas_int m,
                                                                   const rocblas_int n,
                                                                   rocblas_float_complex* A,
@@ -31178,8 +31178,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_ccholqr_strided_batched(rocblas_handle
                                                                   const rocblas_int batch_count);
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_zcholqr_strided_batched(rocblas_handle handle,
-                                                  const rocsolver_cholqr_shift cholshift,
-                                                  const rocblas_int cholnum,
+                                                                  const rocsolver_cholqr_shift cholshift,
+                                                                  const rocblas_int cholnum,
                                                                   const rocblas_int m,
                                                                   const rocblas_int n,
                                                                   rocblas_double_complex* A,
@@ -31192,65 +31192,69 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zcholqr_strided_batched(rocblas_handle
                                                                   rocblas_int* nr,
                                                                   const rocblas_int batch_count);
 
-ROCSOLVER_EXPORT rocblas_status rocsolver_scholqr_strided_batched_64(rocblas_handle handle,
-                                                  const rocsolver_cholqr_shift cholshift,
-                                                  const rocblas_int cholnum,
-                                                                     const int64_t m,
-                                                                     const int64_t n,
-                                                                     float* A,
-                                                                     const int64_t lda,
-                                                                     const rocblas_stride strideA,
-                                                                     float* W,
-                                                                     const int64_t ldw,
-                                                                     const rocblas_stride strideW,
-                                                                     float* sigma,
-                                                                     int64_t* nr,
-                                                                     const int64_t batch_count);
+ROCSOLVER_EXPORT rocblas_status
+    rocsolver_scholqr_strided_batched_64(rocblas_handle handle,
+                                         const rocsolver_cholqr_shift cholshift,
+                                         const rocblas_int cholnum,
+                                         const int64_t m,
+                                         const int64_t n,
+                                         float* A,
+                                         const int64_t lda,
+                                         const rocblas_stride strideA,
+                                         float* W,
+                                         const int64_t ldw,
+                                         const rocblas_stride strideW,
+                                         float* sigma,
+                                         int64_t* nr,
+                                         const int64_t batch_count);
 
-ROCSOLVER_EXPORT rocblas_status rocsolver_dcholqr_strided_batched_64(rocblas_handle handle,
-                                                  const rocsolver_cholqr_shift cholshift,
-                                                  const rocblas_int cholnum,
-                                                                     const int64_t m,
-                                                                     const int64_t n,
-                                                                     double* A,
-                                                                     const int64_t lda,
-                                                                     const rocblas_stride strideA,
-                                                                     double* W,
-                                                                     const int64_t ldw,
-                                                                     const rocblas_stride strideW,
-                                                                     double* sigma,
-                                                                     int64_t* nr,
-                                                                     const int64_t batch_count);
+ROCSOLVER_EXPORT rocblas_status
+    rocsolver_dcholqr_strided_batched_64(rocblas_handle handle,
+                                         const rocsolver_cholqr_shift cholshift,
+                                         const rocblas_int cholnum,
+                                         const int64_t m,
+                                         const int64_t n,
+                                         double* A,
+                                         const int64_t lda,
+                                         const rocblas_stride strideA,
+                                         double* W,
+                                         const int64_t ldw,
+                                         const rocblas_stride strideW,
+                                         double* sigma,
+                                         int64_t* nr,
+                                         const int64_t batch_count);
 
-ROCSOLVER_EXPORT rocblas_status rocsolver_ccholqr_strided_batched_64(rocblas_handle handle,
-                                                  const rocsolver_cholqr_shift cholshift,
-                                                  const rocblas_int cholnum,
-                                                                     const int64_t m,
-                                                                     const int64_t n,
-                                                                     rocblas_float_complex* A,
-                                                                     const int64_t lda,
-                                                                     const rocblas_stride strideA,
-                                                                     rocblas_float_complex* W,
-                                                                     const int64_t ldw,
-                                                                     const rocblas_stride strideW,
-                                                                     float* sigma,
-                                                                     int64_t* nr,
-                                                                     const int64_t batch_count);
+ROCSOLVER_EXPORT rocblas_status
+    rocsolver_ccholqr_strided_batched_64(rocblas_handle handle,
+                                         const rocsolver_cholqr_shift cholshift,
+                                         const rocblas_int cholnum,
+                                         const int64_t m,
+                                         const int64_t n,
+                                         rocblas_float_complex* A,
+                                         const int64_t lda,
+                                         const rocblas_stride strideA,
+                                         rocblas_float_complex* W,
+                                         const int64_t ldw,
+                                         const rocblas_stride strideW,
+                                         float* sigma,
+                                         int64_t* nr,
+                                         const int64_t batch_count);
 
-ROCSOLVER_EXPORT rocblas_status rocsolver_zcholqr_strided_batched_64(rocblas_handle handle,
-                                                  const rocsolver_cholqr_shift cholshift,
-                                                  const rocblas_int cholnum,
-                                                                     const int64_t m,
-                                                                     const int64_t n,
-                                                                     rocblas_double_complex* A,
-                                                                     const int64_t lda,
-                                                                     const rocblas_stride strideA,
-                                                                     rocblas_double_complex* W,
-                                                                     const int64_t ldw,
-                                                                     const rocblas_stride strideW,
-                                                                     double* sigma,
-                                                                     int64_t* nr,
-                                                                     const int64_t batch_count);
+ROCSOLVER_EXPORT rocblas_status
+    rocsolver_zcholqr_strided_batched_64(rocblas_handle handle,
+                                         const rocsolver_cholqr_shift cholshift,
+                                         const rocblas_int cholnum,
+                                         const int64_t m,
+                                         const int64_t n,
+                                         rocblas_double_complex* A,
+                                         const int64_t lda,
+                                         const rocblas_stride strideA,
+                                         rocblas_double_complex* W,
+                                         const int64_t ldw,
+                                         const rocblas_stride strideW,
+                                         double* sigma,
+                                         int64_t* nr,
+                                         const int64_t batch_count);
 //! @}
 
 #ifdef __cplusplus
