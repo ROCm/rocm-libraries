@@ -1,30 +1,3 @@
-// Composable Kernel Jenkins Pipeline
-//
-// SMART BUILD SYSTEM:
-// This pipeline uses intelligent dependency analysis to speed up PR builds while
-// maintaining full validation on nightly runs.
-//
-// How it works:
-// 1. PR Builds (Selective):
-//    - Configure: cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON (~30s)
-//    - Analyze: Parse compile_commands.json + clang -MM for dependencies (~2min)
-//    - Select: git diff to find affected tests (~1s)
-//    - Build: ninja <affected-tests> only (minutes vs hours)
-//    - Test: ctest -R <affected-pattern>
-//
-// 2. Nightly Builds (Full):
-//    - FORCE_CI=true from cron triggers full build
-//    - All targets built and tested for validation
-//
-// 3. Safety Checks:
-//    - Forces full build if CMake configuration changes
-//    - Forces full build if dependency cache stale (>7 days)
-//    - Manual override: set DISABLE_SMART_BUILD=true
-//
-// Benefits: PR builds 5h -> 30min (typical), nightly builds unchanged
-// See: script/dependency-parser/README.md for details
-//
-
 @NonCPS
 String getGitHubCommitHash(def build)
 {
@@ -932,29 +905,29 @@ def Build_CK(Map conf=[:]){
                             sh "projects/composablekernel/script/run_inductor_tests.sh"
                     }
                     // run performance tests, stash the logs, results will be processed on the master node
-		    dir("projects/composablekernel/script"){
+                    dir("projects/composablekernel/script"){
                         if (params.RUN_PERFORMANCE_TESTS){
-                        if (params.RUN_FULL_QA && (arch == "gfx90a" || arch == "gfx942")){
-                            // run full tests on gfx90a or gfx942
-                            echo "Run full performance tests"
-                            sh "./run_full_performance_tests.sh 0 QA_${params.COMPILER_VERSION} ${env.BRANCH_NAME} ${NODE_NAME} ${arch}"
-                            archiveArtifacts "perf_*.log"
-                            stash includes: "perf_**.log", name: "perf_log_${arch}"
-                        }
-                        else if (!params.RUN_FULL_QA && (arch == "gfx90a" || arch == "gfx942")){
-                            // run standard tests on gfx90a or gfx942
-                            echo "Run performance tests"
-                            sh "./run_performance_tests.sh 0 CI_${params.COMPILER_VERSION} ${env.BRANCH_NAME} ${NODE_NAME} ${arch}"
-                            archiveArtifacts "perf_*.log"
-                            stash includes: "perf_**.log", name: "perf_log_${arch}"
-                        }
-				        else if ( arch != "gfx10"){
-                            // run basic tests on gfx11/gfx12/gfx908/gfx950, but not on gfx10, it takes too long
-                            echo "Run gemm performance tests"
-                            sh "./run_gemm_performance_tests.sh 0 CI_${params.COMPILER_VERSION} ${env.BRANCH_NAME} ${NODE_NAME} ${arch}"
-                            archiveArtifacts "perf_onnx_gemm_*.log"
-                            stash includes: "perf_onnx_gemm_**.log", name: "perf_log_${arch}"
-                        }
+                            if (params.RUN_FULL_QA && (arch == "gfx90a" || arch == "gfx942")){
+                                // run full tests on gfx90a or gfx942
+                                echo "Run full performance tests"
+                                sh "./run_full_performance_tests.sh 0 QA_${params.COMPILER_VERSION} ${env.BRANCH_NAME} ${NODE_NAME} ${arch}"
+                                archiveArtifacts "perf_*.log"
+                                stash includes: "perf_**.log", name: "perf_log_${arch}"
+                            }
+                            else if (!params.RUN_FULL_QA && (arch == "gfx90a" || arch == "gfx942")){
+                                // run standard tests on gfx90a or gfx942
+                                echo "Run performance tests"
+                                sh "./run_performance_tests.sh 0 CI_${params.COMPILER_VERSION} ${env.BRANCH_NAME} ${NODE_NAME} ${arch}"
+                                archiveArtifacts "perf_*.log"
+                                stash includes: "perf_**.log", name: "perf_log_${arch}"
+                            }
+                            else if ( arch != "gfx10"){
+                                // run basic tests on gfx11/gfx12/gfx908/gfx950, but not on gfx10, it takes too long
+                                echo "Run gemm performance tests"
+                                sh "./run_gemm_performance_tests.sh 0 CI_${params.COMPILER_VERSION} ${env.BRANCH_NAME} ${NODE_NAME} ${arch}"
+                                archiveArtifacts "perf_onnx_gemm_*.log"
+                                stash includes: "perf_onnx_gemm_**.log", name: "perf_log_${arch}"
+                            }
                         }
                     }
                     if (params.hipTensor_test && arch == "gfx90a" ){
@@ -1435,5 +1408,3 @@ def runBuildInstancesOnly(String compiler) {
                 -D CMAKE_BUILD_TYPE=Release .. && ninja -j64"""
     )
 }
-
-return this
