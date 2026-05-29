@@ -6,7 +6,7 @@
 #include "BackendDescriptor.hpp"
 #include "IGraphOperation.hpp"
 #include <flatbuffers/detached_buffer.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <memory>
 #include <optional>
@@ -44,15 +44,18 @@ private:
     std::vector<std::shared_ptr<IBackendDescriptor>> _operations;
 
     // Graph-level attributes set via setAttribute (applied during buildGraphFromOperations)
-    hipdnn_data_sdk::data_objects::DataType _computeDataType
-        = hipdnn_data_sdk::data_objects::DataType::UNSET;
-    hipdnn_data_sdk::data_objects::DataType _intermediateDataType
-        = hipdnn_data_sdk::data_objects::DataType::UNSET;
-    hipdnn_data_sdk::data_objects::DataType _ioDataType
-        = hipdnn_data_sdk::data_objects::DataType::UNSET;
+    hipdnn_flatbuffers_sdk::data_objects::DataType _computeDataType
+        = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
+    hipdnn_flatbuffers_sdk::data_objects::DataType _intermediateDataType
+        = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
+    hipdnn_flatbuffers_sdk::data_objects::DataType _ioDataType
+        = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
 
     // Preferred engine ID, empty when unset.
     std::optional<int64_t> _preferredEngineId = std::nullopt;
+
+    // Opt-in flag for overridable tensor shapes (RFC 0008).
+    bool _isOverrideShapeEnabled = false;
 
     // Optional human-readable name for the graph, empty when unset.
     std::string _name;
@@ -86,7 +89,7 @@ private:
                               void* arrayOfElements) const;
 
     // Build GraphT from operation descriptors and return it
-    std::unique_ptr<hipdnn_data_sdk::data_objects::GraphT> buildGraphFromOperations() const;
+    std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT> buildGraphFromOperations() const;
 
     // Clears the cached serialized buffer.
     // Called when _operations is mutated to keep the cache consistent.
@@ -134,6 +137,7 @@ public:
         createFromJsonGraph(GraphDescriptor& desc, const char* jsonGraph, size_t jsonByteSize);
 
     virtual hipdnnHandle_t getHandle() const;
+    virtual bool isOverrideShapeEnabled() const;
 
     static hipdnnBackendDescriptorType_t getStaticType();
 

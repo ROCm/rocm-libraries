@@ -4,8 +4,8 @@
 #pragma once
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
@@ -14,12 +14,17 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceMiopenRmsValidation.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/VectorLoggingUtils.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/GraphTensorBundle.hpp>
 
+#include "../tests/common/TestWorkarounds.hpp"
+
 #include <functional>
+#include <optional>
+#include <string>
 
 namespace miopen_plugin::test_utilities
 {
@@ -69,7 +74,21 @@ protected:
     }
 
 protected:
-    /// Execute graph with knob settings (for smoke tests without CPU validation)
+    /// Predicate hook for derived fixtures to inspect errors returned from
+    /// engine-config-querying frontend calls (`Graph::build()`,
+    /// `get_ranked_engine_ids()`, `create_execution_plan*()`) and request a
+    /// skip. Returning a non-empty optional causes the caller to
+    /// `GTEST_SKIP()` with that string as the message prefix; the default is
+    /// `std::nullopt` so the subsequent `ASSERT_EQ(..., OK)` fires on any
+    /// error. The base harness intentionally has no knowledge of any specific
+    /// workaround -- subclasses own that mapping.
+    virtual std::optional<std::string>
+        shouldSkipOnEngineConfigResult(const hipdnn_frontend::Error& /*result*/)
+    {
+        return std::nullopt;
+    }
+
+    /// Execute graph with knob settings (for smoke tests without CPU validation).
     void executeGraphWithKnobs(hipdnn_frontend::graph::Graph& graph,
                                std::vector<hipdnn_frontend::KnobSetting> knobSettings)
     {
@@ -83,10 +102,19 @@ protected:
 
         std::vector<int64_t> rankedEngineIds;
         result = graph.get_ranked_engine_ids(rankedEngineIds);
+        if(auto skipReason = shouldSkipOnEngineConfigResult(result))
+        {
+            GTEST_SKIP() << *skipReason << " (get_ranked_engine_ids): " << result.err_msg;
+        }
+        // Non-skip errors must still surface -- the next assertion is intentional.
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
         ASSERT_GT(rankedEngineIds.size(), 0) << "No engines available";
 
         result = graph.create_execution_plan_ext(rankedEngineIds[0], knobSettings);
+        if(auto skipReason = shouldSkipOnEngineConfigResult(result))
+        {
+            GTEST_SKIP() << *skipReason << " (create_execution_plan_ext): " << result.err_msg;
+        }
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
         result = graph.build_plans();
@@ -124,11 +152,17 @@ protected:
         ASSERT_EQ(hipStreamSynchronize(_stream), hipSuccess);
     }
 
+    /// Verify graph against CPU reference.
     void verifyGraph(hipdnn_frontend::graph::Graph& graph, unsigned int seed)
     {
         hipdnn_test_sdk::utilities::GraphTensorBundle gpuBundle, cpuBundle;
 
         auto result = graph.build(_handle);
+        if(auto skipReason = shouldSkipOnEngineConfigResult(result))
+        {
+            GTEST_SKIP() << *skipReason << " (graph.build): " << result.err_msg;
+        }
+        // Non-skip errors must still surface -- the next assertion is intentional.
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
         generateBundles(graph, cpuBundle, gpuBundle);
@@ -190,7 +224,9 @@ protected:
             _tensorIdToValidatorMap.insert(
                 {attr->get_uid(),
                  hipdnn_test_sdk::utilities::createAllCloseValidator(
-                     toSdkType(attr->get_data_type()), absoluteTolerance, relativeTolerance)});
+                     hipdnn_test_sdk::utilities::frontendToSdkDataType(attr->get_data_type()),
+                     absoluteTolerance,
+                     relativeTolerance)});
             _tensorIdToNameMap.insert({attr->get_uid(), attr->get_name()});
         });
     }
@@ -200,9 +236,11 @@ protected:
     {
         // Since the graph can infer properties + Ids, we defer validator registration until right before validation in verifyGraph
         _deferredValidators.emplace_back([=]() {
-            _tensorIdToValidatorMap.insert({attr->get_uid(),
-                                            hipdnn_test_sdk::utilities::createRmsValidator(
-                                                toSdkType(attr->get_data_type()), rmsThreshold)});
+            _tensorIdToValidatorMap.insert(
+                {attr->get_uid(),
+                 hipdnn_test_sdk::utilities::createRmsValidator(
+                     hipdnn_test_sdk::utilities::frontendToSdkDataType(attr->get_data_type()),
+                     rmsThreshold)});
             _tensorIdToNameMap.insert({attr->get_uid(), attr->get_name()});
         });
     }
@@ -262,10 +300,11 @@ private:
     void executeCpuGraph(hipdnn_frontend::graph::Graph& graph,
                          hipdnn_test_sdk::utilities::GraphTensorBundle& bundle)
     {
-        auto flatbufferGraph = graph.buildFlatbufferOperationGraph();
+        auto [serializedGraph, serErr] = graph.to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
         hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor().execute(
-            flatbufferGraph.data(), flatbufferGraph.size(), bundle.toHostVariantPack());
+            serializedGraph.data(), serializedGraph.size(), bundle.toHostVariantPack());
     }
 
     std::string getOutputTensorName(int64_t tensorId)
@@ -284,7 +323,8 @@ private:
             return false;
         }
 
-        bundle.tensors.insert({tensorId, createTensorFromAttribute(*tensorAttr)});
+        bundle.tensors.insert(
+            {tensorId, hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr)});
         return true;
     }
 
@@ -302,9 +342,9 @@ private:
         }
 
         cpuBundle.tensors.insert(
-            {tensorId, hipdnn_frontend::graph::createTensorFromAttribute(*tensorAttr)});
+            {tensorId, hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr)});
         gpuBundle.tensors.insert(
-            {tensorId, hipdnn_frontend::graph::createTensorFromAttribute(*tensorAttr)});
+            {tensorId, hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr)});
         _tensorIdToNameMap.insert({tensorId, tensorAttr->get_name()});
 
         return true;

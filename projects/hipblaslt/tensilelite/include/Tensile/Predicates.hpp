@@ -35,6 +35,10 @@
 #include <Tensile/Properties.hpp>
 #include <Tensile/Utils.hpp>
 
+#include <Tensile/Macros.hpp>
+
+TENSILE_HIDDEN_BEGIN
+
 namespace TensileLite
 {
     /**
@@ -155,7 +159,7 @@ namespace TensileLite
                 return "And";
             }
 
-            virtual bool operator()(Object const& obj) const
+            virtual bool operator()(Object const& obj) const override
             {
                 return std::all_of(
                     value.begin(), value.end(), [&obj](const auto& pred) {
@@ -163,7 +167,7 @@ namespace TensileLite
                     });
             }
 
-            virtual bool debugEval(Object const& obj, std::ostream& stream) const
+            virtual bool debugEval(Object const& obj, std::ostream& stream) const override
             {
                 bool rv = (*this)(obj);
                 std::ostringstream details;
@@ -205,7 +209,7 @@ namespace TensileLite
                 return "Or";
             }
 
-            virtual bool operator()(Object const& obj) const
+            virtual bool operator()(Object const& obj) const override
             {
                 return std::any_of(
                     value.begin(), value.end(), [&obj](const auto& pred) {
@@ -213,7 +217,7 @@ namespace TensileLite
                     });
             }
 
-            virtual bool debugEval(Object const& obj, std::ostream& stream) const
+            virtual bool debugEval(Object const& obj, std::ostream& stream) const override
             {
                 bool rv = (*this)(obj);
                 std::ostringstream details;
@@ -250,12 +254,12 @@ namespace TensileLite
                 return "Not";
             }
 
-            virtual bool operator()(Object const& obj) const
+            virtual bool operator()(Object const& obj) const override
             {
                 return !(*value)(obj);
             }
 
-            virtual bool debugEval(Object const& obj, std::ostream& stream) const
+            virtual bool debugEval(Object const& obj, std::ostream& stream) const override
             {
                 bool rv = (*this)(obj);
                 PredicateDebugger::printRow(stream, rv, "Not", "negates following predicate");
@@ -328,3 +332,5 @@ namespace TensileLite
  */
     } // namespace Predicates
 } // namespace TensileLite
+
+TENSILE_HIDDEN_END

@@ -26,7 +26,7 @@ void TensorDescriptor::finalize()
                 _data.strides.size(),
                 HIPDNN_STATUS_BAD_PARAM,
                 "TensorDescriptor::finalize() failed: dims and strides size mismatch");
-    THROW_IF_TRUE(_data.data_type == hipdnn_data_sdk::data_objects::DataType::UNSET,
+    THROW_IF_TRUE(_data.data_type == hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET,
                   HIPDNN_STATUS_BAD_PARAM,
                   "TensorDescriptor::finalize() failed: data type not set");
 
@@ -70,20 +70,22 @@ void TensorDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
                     "TensorDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_TENSOR_DIMENSIONS:
-        getInt64Vector(_data.dims,
-                       attributeType,
-                       requestedElementCount,
-                       elementCount,
-                       arrayOfElements,
-                       "TensorDescriptor::getAttribute()");
+        getScalarVector<int64_t>(_data.dims,
+                                 HIPDNN_TYPE_INT64,
+                                 attributeType,
+                                 requestedElementCount,
+                                 elementCount,
+                                 arrayOfElements,
+                                 "TensorDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_TENSOR_STRIDES:
-        getInt64Vector(_data.strides,
-                       attributeType,
-                       requestedElementCount,
-                       elementCount,
-                       arrayOfElements,
-                       "TensorDescriptor::getAttribute()");
+        getScalarVector<int64_t>(_data.strides,
+                                 HIPDNN_TYPE_INT64,
+                                 attributeType,
+                                 requestedElementCount,
+                                 elementCount,
+                                 arrayOfElements,
+                                 "TensorDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_TENSOR_IS_VIRTUAL:
         getScalar(_data.virtual_,
@@ -99,7 +101,8 @@ void TensorDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
         break;
     case HIPDNN_ATTR_TENSOR_IS_BY_VALUE:
     {
-        const bool isByValue = _data.value.type != hipdnn_data_sdk::data_objects::TensorValue::NONE;
+        const bool isByValue
+            = _data.value.type != hipdnn_flatbuffers_sdk::data_objects::TensorValue::NONE;
         getScalar(isByValue,
                   HIPDNN_TYPE_BOOLEAN,
                   attributeType,
@@ -145,18 +148,20 @@ void TensorDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
                     "TensorDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_TENSOR_DIMENSIONS:
-        setInt64Vector(_data.dims,
-                       attributeType,
-                       elementCount,
-                       arrayOfElements,
-                       "TensorDescriptor::setAttribute()");
+        setScalarVector<int64_t>(_data.dims,
+                                 HIPDNN_TYPE_INT64,
+                                 attributeType,
+                                 elementCount,
+                                 arrayOfElements,
+                                 "TensorDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_TENSOR_STRIDES:
-        setInt64Vector(_data.strides,
-                       attributeType,
-                       elementCount,
-                       arrayOfElements,
-                       "TensorDescriptor::setAttribute()");
+        setScalarVector<int64_t>(_data.strides,
+                                 HIPDNN_TYPE_INT64,
+                                 attributeType,
+                                 elementCount,
+                                 arrayOfElements,
+                                 "TensorDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_TENSOR_IS_VIRTUAL:
         setScalar(_data.virtual_,
@@ -210,7 +215,7 @@ void TensorDescriptor::setTensorValue(hipdnnBackendAttributeType_t attributeType
     THROW_IF_NULL(arrayOfElements,
                   HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
                   "TensorDescriptor::setAttribute(): arrayOfElements is null");
-    THROW_IF_TRUE(_data.data_type == hipdnn_data_sdk::data_objects::DataType::UNSET,
+    THROW_IF_TRUE(_data.data_type == hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET,
                   HIPDNN_STATUS_BAD_PARAM,
                   "TensorDescriptor::setAttribute(): data type must be set before tensor value");
 
@@ -221,7 +226,7 @@ void TensorDescriptor::setTensorValue(hipdnnBackendAttributeType_t attributeType
                        + ") does not match data type byte size (" + std::to_string(expectedSize)
                        + ")");
 
-    using namespace hipdnn_data_sdk::data_objects;
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
 
     auto bytes = static_cast<const uint8_t*>(arrayOfElements);
 
@@ -269,10 +274,19 @@ void TensorDescriptor::setTensorValue(hipdnnBackendAttributeType_t attributeType
         _data.value.Set(Int64Value(val));
         break;
     }
+    case DataType::BOOLEAN:
+    {
+        bool val;
+        std::memcpy(&val, bytes, sizeof(bool));
+        _data.value.Set(BoolValue(val));
+        break;
+    }
     case DataType::UINT8:
     case DataType::INT8:
     case DataType::FP8_E4M3:
     case DataType::FP8_E5M2:
+    case DataType::FP8_E4M3_FNUZ:
+    case DataType::FP8_E5M2_FNUZ:
     {
         _data.value.Set(Float8Value(bytes[0]));
         break;
@@ -294,7 +308,7 @@ void TensorDescriptor::getTensorValue(hipdnnBackendAttributeType_t attributeType
                    "TensorDescriptor::getAttribute(): attributeType must be HIPDNN_TYPE_CHAR "
                    "for TENSOR_VALUE");
 
-    using namespace hipdnn_data_sdk::data_objects;
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
 
     if(arrayOfElements == nullptr || requestedElementCount == 0)
     {
@@ -383,6 +397,16 @@ void TensorDescriptor::getTensorValue(hipdnnBackendAttributeType_t attributeType
         std::memcpy(output, &nativeVal, sizeof(int64_t));
         break;
     }
+    case DataType::BOOLEAN:
+    {
+        const auto* val = _data.value.AsBoolValue();
+        THROW_IF_TRUE(val == nullptr,
+                      HIPDNN_STATUS_BAD_PARAM,
+                      "TensorDescriptor::getAttribute(): value type mismatch");
+        auto nativeVal = val->value();
+        std::memcpy(output, &nativeVal, sizeof(bool));
+        break;
+    }
     case DataType::UINT8:
     case DataType::INT8:
     {
@@ -395,6 +419,8 @@ void TensorDescriptor::getTensorValue(hipdnnBackendAttributeType_t attributeType
     }
     case DataType::FP8_E4M3:
     case DataType::FP8_E5M2:
+    case DataType::FP8_E4M3_FNUZ:
+    case DataType::FP8_E5M2_FNUZ:
     {
         const auto* val = _data.value.AsFloat8Value();
         THROW_IF_TRUE(val == nullptr,
@@ -416,7 +442,7 @@ void TensorDescriptor::getTensorValue(hipdnnBackendAttributeType_t attributeType
 }
 
 std::shared_ptr<TensorDescriptor> TensorDescriptor::fromFlatBuffer(
-    const hipdnn_data_sdk::data_objects::TensorAttributesT& tensorT)
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT& tensorT)
 {
     auto desc = std::make_shared<TensorDescriptor>();
     desc->_data = tensorT;
@@ -424,8 +450,8 @@ std::shared_ptr<TensorDescriptor> TensorDescriptor::fromFlatBuffer(
     return desc;
 }
 
-std::shared_ptr<TensorDescriptor>
-    TensorDescriptor::fromFlatBuffer(hipdnn_data_sdk::data_objects::TensorAttributesT&& tensorT)
+std::shared_ptr<TensorDescriptor> TensorDescriptor::fromFlatBuffer(
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT&& tensorT)
 {
     auto desc = std::make_shared<TensorDescriptor>();
     desc->_data = std::move(tensorT);
@@ -443,7 +469,7 @@ std::string TensorDescriptor::toString() const
     using hipdnn_data_sdk::utilities::vecToString;
     std::string str = "TensorDescriptor: {uid=" + std::to_string(_data.uid);
     str += ", name=" + _data.name;
-    if(_data.data_type == hipdnn_data_sdk::data_objects::DataType::UNSET)
+    if(_data.data_type == hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET)
     {
         str += ", dataType=UNSET";
     }
@@ -455,7 +481,7 @@ std::string TensorDescriptor::toString() const
     str += ", dims=" + vecToString(_data.dims);
     str += ", strides=" + vecToString(_data.strides);
     str += ", virtual=" + std::string(_data.virtual_ ? "true" : "false");
-    using hipdnn_data_sdk::data_objects::TensorValue;
+    using hipdnn_flatbuffers_sdk::data_objects::TensorValue;
     if(_data.value.type != TensorValue::NONE)
     {
         str += ", value=";
@@ -478,6 +504,9 @@ std::string TensorDescriptor::toString() const
             break;
         case TensorValue::Int64Value:
             str += std::to_string(_data.value.AsInt64Value()->value());
+            break;
+        case TensorValue::BoolValue:
+            str += _data.value.AsBoolValue()->value() ? "true" : "false";
             break;
         case TensorValue::Float8Value:
             str += std::to_string(_data.value.AsFloat8Value()->value());

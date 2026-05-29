@@ -4,9 +4,9 @@
 #include "BackendTestHelpers.hpp"
 #include "hipdnn_backend.h"
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/convolution_common_generated.h>
-#include <hipdnn_data_sdk/data_objects/data_types_generated.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/convolution_common_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_test_sdk/constants/ConvFpropConstants.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -15,7 +15,7 @@
 
 using namespace backend_test;
 using namespace hipdnn_tests::constants;
-using DataTypeSdk = hipdnn_data_sdk::data_objects::DataType;
+using DataTypeSdk = hipdnn_flatbuffers_sdk::data_objects::DataType;
 
 class IntegrationGraphDescriptorApi : public ::testing::Test
 {
@@ -38,6 +38,35 @@ TEST_F(IntegrationGraphDescriptorApi, CreateAndDeserializeGraphExtWithNullGraph)
 
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
     EXPECT_EQ(descriptor, nullptr);
+}
+
+TEST_F(IntegrationGraphDescriptorApi, OverrideShapeEnabledSetGetRoundTrip)
+{
+    hipdnnBackendDescriptor_t descriptor = nullptr;
+    ASSERT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR, &descriptor),
+              HIPDNN_STATUS_SUCCESS);
+
+    bool enabled = true;
+    EXPECT_EQ(hipdnnBackendSetAttribute(descriptor,
+                                        HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT,
+                                        HIPDNN_TYPE_BOOLEAN,
+                                        1,
+                                        &enabled),
+              HIPDNN_STATUS_SUCCESS);
+
+    bool retrieved = false;
+    int64_t elementCount = 0;
+    EXPECT_EQ(hipdnnBackendGetAttribute(descriptor,
+                                        HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT,
+                                        HIPDNN_TYPE_BOOLEAN,
+                                        1,
+                                        &elementCount,
+                                        &retrieved),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(elementCount, 1);
+    EXPECT_TRUE(retrieved);
+
+    EXPECT_EQ(hipdnnBackendDestroyDescriptor(descriptor), HIPDNN_STATUS_SUCCESS);
 }
 
 TEST_F(IntegrationGraphDescriptorApi, SetOperationGraph)
@@ -155,7 +184,7 @@ TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphSizeQueryMatchesCopySize
     EXPECT_EQ(copySize, queriedSize);
 
     // Verify data is valid FlatBuffer
-    auto graphFb = hipdnn_data_sdk::data_objects::GetGraph(buffer.data());
+    auto graphFb = hipdnn_flatbuffers_sdk::data_objects::GetGraph(buffer.data());
     ASSERT_NE(graphFb, nullptr);
 
     hipdnnBackendDestroyDescriptor(desc);
@@ -195,9 +224,9 @@ TEST_F(IntegrationGraphDescriptorApi, SerializedGraphRoundTripPreservesGraphProp
               HIPDNN_STATUS_SUCCESS);
 
     // Verify graph properties match what we set
-    auto graphFb = hipdnn_data_sdk::data_objects::GetGraph(buffer.data());
+    auto graphFb = hipdnn_flatbuffers_sdk::data_objects::GetGraph(buffer.data());
     ASSERT_NE(graphFb, nullptr);
-    hipdnn_data_sdk::data_objects::GraphT graphT;
+    hipdnn_flatbuffers_sdk::data_objects::GraphT graphT;
     graphFb->UnPackTo(&graphT);
 
     EXPECT_EQ(graphT.name, "test");
@@ -285,7 +314,7 @@ TEST_F(IntegrationGraphDescriptorApi, GetSerializedGraphSucceedsWithOversizedBuf
     EXPECT_EQ(reportedSize, queriedSize);
 
     // Verify data is valid
-    auto graphFb = hipdnn_data_sdk::data_objects::GetGraph(buffer.data());
+    auto graphFb = hipdnn_flatbuffers_sdk::data_objects::GetGraph(buffer.data());
     ASSERT_NE(graphFb, nullptr);
 
     hipdnnBackendDestroyDescriptor(desc);

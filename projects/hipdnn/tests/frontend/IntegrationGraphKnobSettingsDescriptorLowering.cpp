@@ -9,18 +9,18 @@
 #include <test_plugins/TestPluginConstants.hpp>
 #include <test_plugins/TestPluginKnobRecorder.hpp>
 
-#include <hipdnn_data_sdk/data_objects/engine_config_generated.h>
-#include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
 #include <hipdnn_test_sdk/utilities/TestableGraph.hpp>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
-using hipdnn_data_sdk::data_objects::EngineConfigT;
-using hipdnn_data_sdk::data_objects::FloatValueT;
-using hipdnn_data_sdk::data_objects::IntValueT;
-using hipdnn_data_sdk::data_objects::KnobSettingT;
-using hipdnn_data_sdk::data_objects::StringValueT;
+using hipdnn_flatbuffers_sdk::data_objects::EngineConfigT;
+using hipdnn_flatbuffers_sdk::data_objects::FloatValueT;
+using hipdnn_flatbuffers_sdk::data_objects::IntValueT;
+using hipdnn_flatbuffers_sdk::data_objects::KnobSettingT;
+using hipdnn_flatbuffers_sdk::data_objects::StringValueT;
 using hipdnn_tests::IntegrationTestFixture;
 using hipdnn_tests::TestableGraphKnobLowering;
 
@@ -74,6 +74,12 @@ protected:
     void SetUp() override
     {
         IntegrationTestFixture::SetUp();
+        // GTEST_SKIP() in the base only unwinds the base SetUp() frame; without this
+        // guard, the post-base setup below would dereference a null _handle.
+        if(IsSkipped())
+        {
+            return;
+        }
 
         // Query the exact plugin paths the backend resolved when loading,
         // then find the knobs plugin by name. This ensures we dlopen the same
@@ -140,7 +146,7 @@ TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithIntKnob)
     const int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
     const std::vector<KnobSetting> settings = {KnobSetting("test.int_knob", int64_t{80})};
 
-    auto result = graph.create_execution_plan_ext_via_descriptors(engineId, settings);
+    auto result = graph.create_execution_plan_ext(engineId, settings);
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(_knobRecorder->last(), buildExpectedEngineConfig(engineId, settings));
 }
@@ -152,7 +158,7 @@ TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithFloatKnob
     const int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
     const std::vector<KnobSetting> settings = {KnobSetting("test.float_knob", 0.75)};
 
-    auto result = graph.create_execution_plan_ext_via_descriptors(engineId, settings);
+    auto result = graph.create_execution_plan_ext(engineId, settings);
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(_knobRecorder->last(), buildExpectedEngineConfig(engineId, settings));
 }
@@ -165,7 +171,7 @@ TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithStringKno
     const std::vector<KnobSetting> settings
         = {KnobSetting("test.string_knob", std::string("accurate"))};
 
-    auto result = graph.create_execution_plan_ext_via_descriptors(engineId, settings);
+    auto result = graph.create_execution_plan_ext(engineId, settings);
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(_knobRecorder->last(), buildExpectedEngineConfig(engineId, settings));
 }
@@ -180,7 +186,7 @@ TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithMultipleK
            KnobSetting("test.float_knob", 0.75),
            KnobSetting("test.string_knob", std::string("accurate"))};
 
-    auto result = graph.create_execution_plan_ext_via_descriptors(engineId, settings);
+    auto result = graph.create_execution_plan_ext(engineId, settings);
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(_knobRecorder->last(), buildExpectedEngineConfig(engineId, settings));
 }
@@ -193,7 +199,7 @@ TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithSharedKno
     const std::vector<KnobSetting> settings
         = {KnobSetting("test.shared.deterministic", int64_t{1})};
 
-    auto result = graph.create_execution_plan_ext_via_descriptors(engineId, settings);
+    auto result = graph.create_execution_plan_ext(engineId, settings);
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(_knobRecorder->last(), buildExpectedEngineConfig(engineId, settings));
 }
@@ -205,7 +211,7 @@ TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithDeprecate
     const int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
     const std::vector<KnobSetting> settings = {KnobSetting("test.deprecated_knob", int64_t{5})};
 
-    auto result = graph.create_execution_plan_ext_via_descriptors(engineId, settings);
+    auto result = graph.create_execution_plan_ext(engineId, settings);
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(_knobRecorder->last(), buildExpectedEngineConfig(engineId, settings));
 }
@@ -217,7 +223,7 @@ TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanWithEmptyKnob
     const int64_t engineId = hipdnn_tests::plugin_constants::engineId<KnobsPlugin>();
     const std::vector<KnobSetting> settings;
 
-    auto result = graph.create_execution_plan_ext_via_descriptors(engineId, settings);
+    auto result = graph.create_execution_plan_ext(engineId, settings);
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(_knobRecorder->last(), buildExpectedEngineConfig(engineId, settings));
 }
@@ -230,7 +236,7 @@ TEST_F(IntegrationGraphKnobsDescriptorLowering, CreateExecutionPlanFiltersUnsupp
     const std::vector<KnobSetting> settings = {KnobSetting("nonexistent.knob", int64_t{42})};
     const std::vector<KnobSetting> expectedSettings;
 
-    auto result = graph.create_execution_plan_ext_via_descriptors(engineId, settings);
+    auto result = graph.create_execution_plan_ext(engineId, settings);
     EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(_knobRecorder->last(), buildExpectedEngineConfig(engineId, expectedSettings));
 }

@@ -9,17 +9,17 @@
 /.github/                                           @ROCm/rocm-libraries-reviewers
 
 # Project-specific ownership
-/dnn-providers/miopen-provider/                     @ROCm/hipdnn-reviewers
-/dnn-providers/hipblaslt-provider/                  @ROCm/hipdnn-reviewers
-/dnn-providers/hip-kernel-provider/                 @ROCm/hipdnn-reviewers
+/dnn-providers/miopen-provider/                     @ROCm/dnn-providers-core
+/dnn-providers/hipblaslt-provider/                  @ROCm/dnn-providers-core
+/dnn-providers/hip-kernel-provider/                 @ROCm/dnn-providers-core @ROCm/hip-kernel-provider-reviewers
 /dnn-providers/fusilli-provider/                    @ROCm/fusilli-provider-reviewers
-/dnn-providers/integration-tests/                   @ROCm/hipdnn-reviewers
+/dnn-providers/integration-tests/                   @ROCm/dnn-providers-core
 /projects/composablekernel/                         @ROCm/ck-reviewers
 /projects/hipblas/                                  @ROCm/hipblas-reviewers
 /projects/hipblas-common/                           @ROCm/hipblas-common-reviewers
 /projects/hipblaslt/                                @ROCm/hipblaslt-reviewers
 /projects/hipcub/                                   @ROCm/prims-rands-reviewers
-/projects/hipdnn/                                   @ROCm/hipdnn-reviewers
+/projects/hipdnn/                                   @ROCm/hipdnn-core
 /projects/hipfft/                                   @ROCm/fft-reviewers
 /projects/hiprand/                                  @ROCm/prims-rands-reviewers
 /projects/hipsolver/                                @ROCm/solvers-reviewers
@@ -39,6 +39,7 @@
 /shared/mxdatagenerator/                            @ROCm/rocroller-developers
 /shared/rocroller/                                  @ROCm/rocroller-developers
 /shared/tensile/                                    @ROCm/tensile-reviewers
+/shared/stinkytofu/                                 @ROCm/stinkytofu-reviewers
 
 # Next CMake-specific ownership
 /projects/hipblas-common/**/*.cmake                 @ROCm/rocm-math-lib-build-infra
@@ -178,3 +179,8 @@
 /shared/tensile/**/*.rst                            @ROCm/tensile-reviewers @ROCm/tensile-docs-reviewers
 /shared/tensile/**/.readthedocs.yaml                @ROCm/tensile-reviewers @ROCm/tensile-docs-reviewers
 /shared/tensile/docs/                               @ROCm/tensile-reviewers @ROCm/tensile-docs-reviewers
+
+/projects/composablekernel/**/*.md                  @ROCm/ck-reviewers @ROCm/ck-docs-reviewers
+/projects/composablekernel/**/*.rst                 @ROCm/ck-reviewers @ROCm/ck-docs-reviewers
+/projects/composablekernel/**/.readthedocs.yaml     @ROCm/ck-reviewers @ROCm/ck-docs-reviewers
+/projects/composablekernel/docs/                    @ROCm/ck-reviewers @ROCm/ck-docs-reviewers

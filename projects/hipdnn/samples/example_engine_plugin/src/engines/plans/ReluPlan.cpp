@@ -1,4 +1,4 @@
-// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
 #include "ReluPlan.hpp"
@@ -14,8 +14,8 @@
 namespace example_provider
 {
 
-ReluPlan::ReluPlan(ReluParams&& params)
-    : _params(std::move(params))
+ReluPlan::ReluPlan(const ReluParams& params)
+    : _params(params)
 {
 }
 
@@ -49,11 +49,11 @@ void ReluPlan::execute(const ExampleProviderHandle& handle,
             HIPDNN_PLUGIN_STATUS_INVALID_VALUE, "Number of elements exceeds unsigned int maximum");
     }
 
-    static constexpr unsigned int kBlockSize = 256;
+    static constexpr unsigned int BLOCK_SIZE = 256;
     auto numElementsU = static_cast<unsigned int>(_params.numElements);
-    unsigned int gridSize = (numElementsU + kBlockSize - 1) / kBlockSize;
+    const unsigned int gridSize = (numElementsU + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
-    _kernel->setBlockSize(kBlockSize, 1, 1);
+    _kernel->setBlockSize(BLOCK_SIZE, 1, 1);
     _kernel->setGridSize(gridSize, 1, 1);
 
     auto negSlope = static_cast<float>(_params.negativeSlope);

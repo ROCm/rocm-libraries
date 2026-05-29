@@ -23,9 +23,10 @@ template <typename BlockGemmShapeType,
 struct StreamKTilePartitionerBase
 {
 
-    static constexpr index_t MPerBlock                          = BlockGemmShapeType::kM;
-    static constexpr index_t NPerBlock                          = BlockGemmShapeType::kN;
-    static constexpr index_t KPerBlock                          = BlockGemmShapeType::kK;
+    using BlockGemmShape                                        = BlockGemmShapeType;
+    static constexpr index_t MPerBlock                          = BlockGemmShape::kM;
+    static constexpr index_t NPerBlock                          = BlockGemmShape::kN;
+    static constexpr index_t KPerBlock                          = BlockGemmShape::kK;
     static constexpr StreamKReductionStrategy ReductionStrategy = ReductionStrategyType;
     static constexpr auto MemoryOperation = (ReductionStrategy == StreamKReductionStrategy::Atomic)
                                                 ? memory_operation_enum::atomic_add
@@ -140,6 +141,19 @@ struct StreamKTilePartitionerBase
     get_output_tile_index(index_t tile_idx) const noexcept -> tuple<index_t, index_t>;
 
     /**
+     * @brief Calculates the total size along the K dimension the workgroup is using in this
+     * Stream-K loop iteration
+     *
+     * @param num_macro_tiles  The number of macro tiles along the K dimension this workgroup is
+     * assigned.
+     * @param local_iter_end The workgroup's non-inclusive end iteration that is local to its
+     * current tile.
+     * @return index_t  The K dimension size for the current Stream-K loop iteration.
+     */
+    CK_TILE_DEVICE index_t get_k_size(index_t num_macro_tiles,
+                                      index_t local_iter_end) const noexcept;
+
+    /**
      * @brief Calculates the total space needed for the partials and flags buffers.
      *
      * @param acc_element_bytes  The number of bytes for the accumulator data type used in the GEMM.
@@ -209,9 +223,32 @@ struct StreamKTilePartitionerBase
     CK_TILE_HOST_DEVICE index_t get_n() const noexcept;
 
     /**
+     * @brief Returns the k dimension for the GEMM problem.
+     */
+    CK_TILE_HOST_DEVICE index_t get_k() const noexcept;
+
+    /**
+     * @brief Returns the remainder along the k dimension when k is not evenly divisible by
+     * KPerBlock.
+     */
+    CK_TILE_HOST_DEVICE index_t get_remainder_along_k() const noexcept;
+
+    /**
      * @brief Returns an estimate of the number of workgroups writing to the same macro tile in C.
      */
     CK_TILE_HOST index_t estimate_num_wgs_per_tile() const noexcept;
+
+    /**
+     * @brief XCDs access ids in round robin format, this function remaps the 1D ids to continguous
+     * XCD segments
+     *
+     * @param block_1d_id       grid 1D id
+     * @param total_num_tiles   size of the 1D grid
+     * @param num_xcds          number of XCDs
+     * @return index_t  The id after XCD remap
+     */
+    CK_TILE_HOST_DEVICE static index_t
+    remap_xcd(index_t block_1d_id, index_t total_num_tiles, index_t num_xcds = 8) noexcept;
 
     protected:
     index_t num_tiles_;
@@ -232,6 +269,8 @@ struct StreamKTilePartitionerBase
     index_t extra_iters_;
     index_t total_dp_iters_;
     index_t n_;
+    index_t k_;
+    index_t remainder_along_k_;
 };
 
 /**
@@ -239,17 +278,15 @@ struct StreamKTilePartitionerBase
  *
  * This partitioner is responsible for mapping workgroups to tiles in the C tensor
  * for the Stream-K algorithm. This struct is derived from
- * StreamKTilePartitionerBase<BlockGemmShapeType, ReductionStrategyType>. Behavior of the
+ * StreamKTilePartitionerBase<BlockGemmShape, ReductionStrategyType>. Behavior of the
  * StreamKTilePartitioner based on persistency will be in the template specializations.
  *
- *  @tparam BlockGemmShapeType     A class providing basic GEMM parameters.
+ *  @tparam BlockGemmShape     A class providing basic GEMM parameters.
  *  @tparam ReductionStrategyType  An enum that defines the reduction strategy for the results in
  * the C Tensor.
  *  @tparam Persistent          A bool that indicates whether to use a Persistent approach
  */
-template <typename BlockGemmShapeType,
-          StreamKReductionStrategy ReductionStrategyType,
-          bool Persistent>
+template <typename BlockGemmShape, StreamKReductionStrategy ReductionStrategyType, bool Persistent>
 struct StreamKTilePartitioner;
 
 /**
@@ -259,13 +296,13 @@ struct StreamKTilePartitioner;
  * for the Stream-K algorithm when using a Persistent approach where no extra workgroups
  * are allocated for data parallel.
  *
- *  @tparam BlockGemmShapeType      A class providing basic GEMM parameters.
+ *  @tparam BlockGemmShape      A class providing basic GEMM parameters.
  *  @tparam ReductionStrategyType   An enum that defines the reduction strategy for the results in
  * the C Tensor.
  */
-template <typename BlockGemmShapeType, StreamKReductionStrategy ReductionStrategyType>
-struct StreamKTilePartitioner<BlockGemmShapeType, ReductionStrategyType, true>
-    : StreamKTilePartitionerBase<BlockGemmShapeType, ReductionStrategyType>
+template <typename BlockGemmShape, StreamKReductionStrategy ReductionStrategyType>
+struct StreamKTilePartitioner<BlockGemmShape, ReductionStrategyType, true>
+    : StreamKTilePartitionerBase<BlockGemmShape, ReductionStrategyType>
 {
     StreamKTilePartitioner(ck_tile::index_t m,
                            ck_tile::index_t n,
@@ -281,7 +318,7 @@ struct StreamKTilePartitioner<BlockGemmShapeType, ReductionStrategyType, true>
      *
      * @return dim_3           The launching grid size for the kernel.
      */
-    CK_TILE_HOST auto grid_size() const noexcept -> dim3;
+    CK_TILE_HOST_DEVICE auto grid_size() const noexcept -> dim3;
 
     /**
      * @brief Returns the total number of DP tiles per workgroup.
@@ -306,13 +343,13 @@ struct StreamKTilePartitioner<BlockGemmShapeType, ReductionStrategyType, true>
  * for the Stream-K algorithm when using a Non-Persistent approach where extra workgroups
  * are allocated for the data parallel section.
  *
- *  @tparam BlockGemmShapeType  A class providing basic GEMM parameters.
+ *  @tparam BlockGemmShape  A class providing basic GEMM parameters.
  *  @tparam ReductionStrategyType   An enum that defines the reduction strategy for the results in
  * the C Tensor.
  */
-template <typename BlockGemmShapeType, StreamKReductionStrategy ReductionStrategyType>
-struct StreamKTilePartitioner<BlockGemmShapeType, ReductionStrategyType, false>
-    : StreamKTilePartitionerBase<BlockGemmShapeType, ReductionStrategyType>
+template <typename BlockGemmShape, StreamKReductionStrategy ReductionStrategyType>
+struct StreamKTilePartitioner<BlockGemmShape, ReductionStrategyType, false>
+    : StreamKTilePartitionerBase<BlockGemmShape, ReductionStrategyType>
 {
     StreamKTilePartitioner(ck_tile::index_t m,
                            ck_tile::index_t n,
@@ -328,7 +365,7 @@ struct StreamKTilePartitioner<BlockGemmShapeType, ReductionStrategyType, false>
      *
      * @return dim_3           The launching grid size for the kernel.
      */
-    CK_TILE_HOST auto grid_size() const noexcept -> dim3;
+    CK_TILE_HOST_DEVICE auto grid_size() const noexcept -> dim3;
 
     /**
      * @brief Returns the total number of DP workgroups.

@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -34,6 +34,7 @@
 #include "hipblaslt_test.hpp"
 #include "hipblaslt_vector.hpp"
 #ifdef CODE_COVERAGE
+#include "check_numerics_matrix.hpp"
 #include "hipblaslt_internal.hpp"
 #include "rocblaslt/rocblaslt_mat_utils.hpp"
 #include "rocblaslt/rocroller_host.hpp"
@@ -664,13 +665,13 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
 
     ASSERT_TRUE(scale_mode_a_r == scale_mode_a); // validate
 
-    scale_mode_a = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3; // will not set anything
-    scale_mode_b = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3; // ditto
+    scale_mode_a = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3;
+    scale_mode_b = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3;
 
     EXPECT_HIPBLAS_STATUS(
         hipblasLtMatmulDescSetAttribute(
             matmul, HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, &scale_mode_a, sizeof(uint32_t)),
-        HIPBLAS_STATUS_INVALID_VALUE);
+        HIPBLAS_STATUS_SUCCESS);
 
     EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(matmul,
                                                           HIPBLASLT_MATMUL_DESC_A_SCALE_MODE,
@@ -682,7 +683,7 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
     EXPECT_HIPBLAS_STATUS(
         hipblasLtMatmulDescSetAttribute(
             matmul, HIPBLASLT_MATMUL_DESC_B_SCALE_MODE, &scale_mode_b, sizeof(uint32_t)),
-        HIPBLAS_STATUS_INVALID_VALUE);
+        HIPBLAS_STATUS_SUCCESS);
 
     EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(matmul,
                                                           HIPBLASLT_MATMUL_DESC_B_SCALE_MODE,
@@ -693,8 +694,8 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
 
     ASSERT_TRUE(
         scale_mode_a_r
-        == HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F); // validate, it's still the previous value as expected
-    ASSERT_TRUE(scale_mode_b_r == HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F); // ditto
+        == HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3); // validate round-trip
+    ASSERT_TRUE(scale_mode_b_r == HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3); // ditto
 
     hipStream_t stream;
     CHECK_HIP_ERROR(hipStreamCreate(&stream));
@@ -1730,9 +1731,9 @@ void testing_aux_auxiliary_func(const Arguments& arg)
     ASSERT_TRUE(hip_datatype_to_string(HIP_R_8F_E5M2_FNUZ) == "bf8_fnuz_r");
     ASSERT_TRUE(hip_datatype_to_string(HIP_R_8F_E4M3) == "f8_r");
     ASSERT_TRUE(hip_datatype_to_string(HIP_R_8F_E5M2) == "bf8_r");
-    ASSERT_TRUE(hip_datatype_to_string(static_cast<hipDataType>(HIP_R_6F_E2M3_EXT)) == "f6_r");
-    ASSERT_TRUE(hip_datatype_to_string(static_cast<hipDataType>(HIP_R_6F_E3M2_EXT)) == "bf6_r");
-    ASSERT_TRUE(hip_datatype_to_string(static_cast<hipDataType>(HIP_R_4F_E2M1_EXT)) == "f4_r");
+    ASSERT_TRUE(hip_datatype_to_string(static_cast<hipDataType>(HIP_R_6F_E2M3)) == "f6_r");
+    ASSERT_TRUE(hip_datatype_to_string(static_cast<hipDataType>(HIP_R_6F_E3M2)) == "bf6_r");
+    ASSERT_TRUE(hip_datatype_to_string(static_cast<hipDataType>(HIP_R_4F_E2M1)) == "f4_r");
 
     // Test hipblas_computetype_to_string
     hipblas_computetype_to_string(HIPBLAS_COMPUTE_16F);
@@ -1756,9 +1757,9 @@ void testing_aux_auxiliary_func(const Arguments& arg)
     ASSERT_TRUE(string_to_hip_datatype("f16_r") == HIP_R_16F);
     ASSERT_TRUE(string_to_hip_datatype("bf16_r") == HIP_R_16BF);
     ASSERT_TRUE(string_to_hip_datatype("i8_r") == HIP_R_8I);
-    ASSERT_TRUE(string_to_hip_datatype("f6_r") == static_cast<hipDataType>(HIP_R_6F_E2M3_EXT));
-    ASSERT_TRUE(string_to_hip_datatype("bf6_r") == static_cast<hipDataType>(HIP_R_6F_E3M2_EXT));
-    ASSERT_TRUE(string_to_hip_datatype("f4_r") == static_cast<hipDataType>(HIP_R_4F_E2M1_EXT));
+    ASSERT_TRUE(string_to_hip_datatype("f6_r") == static_cast<hipDataType>(HIP_R_6F_E2M3));
+    ASSERT_TRUE(string_to_hip_datatype("bf6_r") == static_cast<hipDataType>(HIP_R_6F_E3M2));
+    ASSERT_TRUE(string_to_hip_datatype("f4_r") == static_cast<hipDataType>(HIP_R_4F_E2M1));
     ASSERT_TRUE(string_to_hip_datatype("i32_r") == HIP_R_32I);
     ASSERT_TRUE(string_to_hip_datatype("") == HIPBLASLT_DATATYPE_INVALID);
 
@@ -2332,11 +2333,11 @@ void testing_aux_rocblaslt_utility_func(const Arguments& arg)
     ASSERT_TRUE(std::string_view{hipDataType_to_string(HIP_R_8F_E4M3)} == "R_8F_E4M3");
     ASSERT_TRUE(std::string_view{hipDataType_to_string(HIP_R_8F_E5M2)} == "R_8F_E5M2");
     ASSERT_TRUE(std::string_view{hipDataType_to_string(HIP_R_8I)} == "R_8I");
-    ASSERT_TRUE(std::string_view{hipDataType_to_string(static_cast<hipDataType>(HIP_R_6F_E2M3_EXT))}
+    ASSERT_TRUE(std::string_view{hipDataType_to_string(static_cast<hipDataType>(HIP_R_6F_E2M3))}
                 == "R_6F_E2M3");
-    ASSERT_TRUE(std::string_view{hipDataType_to_string(static_cast<hipDataType>(HIP_R_6F_E3M2_EXT))}
+    ASSERT_TRUE(std::string_view{hipDataType_to_string(static_cast<hipDataType>(HIP_R_6F_E3M2))}
                 == "R_6F_E3M2");
-    ASSERT_TRUE(std::string_view{hipDataType_to_string(static_cast<hipDataType>(HIP_R_4F_E2M1_EXT))}
+    ASSERT_TRUE(std::string_view{hipDataType_to_string(static_cast<hipDataType>(HIP_R_4F_E2M1))}
                 == "R_4F_E2M1");
     ASSERT_TRUE(std::string_view{hipDataType_to_string(static_cast<hipDataType>(999))}
                 == "Invalid");
@@ -2353,16 +2354,16 @@ void testing_aux_rocblaslt_utility_func(const Arguments& arg)
     ASSERT_TRUE(std::string_view{hipDataType_to_bench_string(HIP_R_8F_E5M2)} == "bf8_r");
     ASSERT_TRUE(std::string_view{hipDataType_to_bench_string(HIP_R_8F_E5M2_FNUZ)} == "bf8_r");
     ASSERT_TRUE(
-        std::string_view{hipDataType_to_bench_string(static_cast<hipDataType>(HIP_R_6F_E2M3_EXT))}
+        std::string_view{hipDataType_to_bench_string(static_cast<hipDataType>(HIP_R_6F_E2M3))}
         == "f6_r");
     ASSERT_TRUE(
-        std::string_view{hipDataType_to_bench_string(static_cast<hipDataType>(HIP_R_6F_E3M2_EXT))}
+        std::string_view{hipDataType_to_bench_string(static_cast<hipDataType>(HIP_R_6F_E3M2))}
         == "bf6_r");
     ASSERT_TRUE(
-        std::string_view{hipDataType_to_bench_string(static_cast<hipDataType>(HIP_R_4F_E2M1_EXT))}
+        std::string_view{hipDataType_to_bench_string(static_cast<hipDataType>(HIP_R_4F_E2M1))}
         == "f4_r");
     ASSERT_TRUE(std::string_view{
-                    hipDataType_to_bench_string(static_cast<hipDataType>(HIP_R_4F_E2M1_EXT + 1))}
+                    hipDataType_to_bench_string(static_cast<hipDataType>(HIP_R_4F_E2M1 + 1))}
                 == "invalid");
 
     // Test rocblaslt_compute_type_to_string
@@ -3257,7 +3258,7 @@ void testing_aux_rocblaslt_rocroller_host_func(const Arguments& arg)
     bool                   gradient = false;
     rocblaslt_compute_type compute_type;
     rocblaslt_handle       roc_handle = (rocblaslt_handle)handle;
-
+    hipblasLtBatchMode_t batchMode = HIPBLASLT_BATCH_MODE_STRIDED;
     rocblaslt_status isValid = rocblaslt_matmul_valid_args(matmul_descr,
                                                            A,
                                                            B,
@@ -3355,7 +3356,8 @@ void testing_aux_rocblaslt_rocroller_host_func(const Arguments& arg)
                                         stream, // stream
                                         roc_handle->Synchronizer,
                                         arg.swizzle_a, // swizzleA
-                                        arg.swizzle_b}; // swizzleB
+                                        arg.swizzle_b,
+                                        batchMode}; // swizzleB
 
     const hipblasLtMatmulAlgo_t* hip_algo = &heuristicResult[0].algo;
     const rocblaslt_matmul_algo* roc_algo = (const rocblaslt_matmul_algo*)hip_algo;
@@ -3391,5 +3393,350 @@ void testing_aux_rocblaslt_rocroller_host_func(const Arguments& arg)
     CHECK_HIPBLASLT_ERROR(hipblasLtMatrixLayoutDestroy(matD));
     CHECK_HIPBLASLT_ERROR(hipblasLtDestroy(handle));
     CHECK_HIP_ERROR(hipStreamDestroy(stream));
+}
+
+// Coverage for the post-GEMM HIPBLASLT_CHECK_NUMERICS scanner: env-var parsing,
+// public drain API, and the happy-path NaN detection round-trip.
+void testing_aux_check_numerics_func(const Arguments& arg)
+{
+    // setenv/unsetenv are not thread-safe; serialize the body so concurrent
+    // RUN_TEST_ON_THREADS_STREAMS threads can't interleave env mutations with
+    // hipblasLtCreate() reads of those vars.
+    static std::mutex           env_mutex;
+    std::lock_guard<std::mutex> env_lock(env_mutex);
+
+    auto reset_env = []() {
+        unsetenv("HIPBLASLT_CHECK_NUMERICS");
+        unsetenv("HIPBLASLT_CHECK_NUMERICS_SCAN_EVERY");
+        unsetenv("HIPBLASLT_CHECK_NUMERICS_SCAN_FROM");
+        unsetenv("HIPBLASLT_CHECK_NUMERICS_SCAN_UNTIL");
+    };
+    auto with_env = [](std::initializer_list<std::pair<const char*, const char*>> env,
+                       auto                                                       inspect) {
+        for(auto& kv : env)
+            setenv(kv.first, kv.second, 1);
+        hipblasLtHandle_t h = nullptr;
+        EXPECT_HIPBLAS_STATUS(hipblasLtCreate(&h), HIPBLAS_STATUS_SUCCESS);
+        inspect((rocblaslt_handle)h);
+        EXPECT_HIPBLAS_STATUS(hipblasLtDestroy(h), HIPBLAS_STATUS_SUCCESS);
+    };
+
+    reset_env();
+
+    EXPECT_HIPBLAS_STATUS(hipblasLtCheckNumericsDrain(nullptr, nullptr),
+                          HIPBLAS_STATUS_NOT_INITIALIZED);
+
+    // Default handle (env unset): scanning disabled, drain returns 0.
+    {
+        hipblasLtHandle_t h = nullptr;
+        EXPECT_HIPBLAS_STATUS(hipblasLtCreate(&h), HIPBLAS_STATUS_SUCCESS);
+        rocblaslt_handle rh = (rocblaslt_handle)h;
+        ASSERT_TRUE(rh->check_numerics == hipblaslt_check_numerics_mode_no_check);
+        ASSERT_TRUE(rh->check_numerics_flag == nullptr);
+        uint32_t out = 99;
+        EXPECT_HIPBLAS_STATUS(hipblasLtCheckNumericsDrain(h, &out), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(out, 0u);
+        EXPECT_HIPBLAS_STATUS(hipblasLtCheckNumericsDrain(h, nullptr), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_HIPBLAS_STATUS(hipblasLtDestroy(h), HIPBLAS_STATUS_SUCCESS);
+    }
+
+    // HIPBLASLT_CHECK_NUMERICS string/numeric forms.
+    auto check_mode = [&](const char* val, hipblaslt_check_numerics_mode expected) {
+        reset_env();
+        setenv("HIPBLASLT_CHECK_NUMERICS", val, 1);
+        hipblasLtHandle_t h = nullptr;
+        EXPECT_HIPBLAS_STATUS(hipblasLtCreate(&h), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_TRUE(((rocblaslt_handle)h)->check_numerics == expected);
+        EXPECT_HIPBLAS_STATUS(hipblasLtDestroy(h), HIPBLAS_STATUS_SUCCESS);
+    };
+    for(const char* v : {"0", "none", "off", "OFF", "", "   ", "garbage", "4", "8"})
+        check_mode(v, hipblaslt_check_numerics_mode_no_check);
+    for(const char* v : {"1", "info", "INFO"})
+        check_mode(v, hipblaslt_check_numerics_mode_info);
+    for(const char* v : {"2", "Warn", "  warn  "})
+        check_mode(v, hipblaslt_check_numerics_mode_warn);
+
+    // SCAN_EVERY parsing: valid values, plus 0/negative/garbage -> 1.
+    reset_env();
+    with_env({{"HIPBLASLT_CHECK_NUMERICS", "1"}, {"HIPBLASLT_CHECK_NUMERICS_SCAN_EVERY", "5"}},
+             [](rocblaslt_handle rh) { ASSERT_EQ(rh->check_numerics_scan_every, 5u); });
+    for(const char* v : {"0", "-3", "abc"})
+    {
+        reset_env();
+        with_env({{"HIPBLASLT_CHECK_NUMERICS", "1"}, {"HIPBLASLT_CHECK_NUMERICS_SCAN_EVERY", v}},
+                 [](rocblaslt_handle rh) { ASSERT_EQ(rh->check_numerics_scan_every, 1u); });
+    }
+
+    // SCAN_FROM / SCAN_UNTIL: valid window, inverted resets to defaults.
+    reset_env();
+    with_env({{"HIPBLASLT_CHECK_NUMERICS", "2"},
+              {"HIPBLASLT_CHECK_NUMERICS_SCAN_FROM", "10"},
+              {"HIPBLASLT_CHECK_NUMERICS_SCAN_UNTIL", "20"}},
+             [](rocblaslt_handle rh) {
+                 ASSERT_EQ(rh->check_numerics_scan_from, 10u);
+                 ASSERT_EQ(rh->check_numerics_scan_until, 20u);
+             });
+    reset_env();
+    with_env({{"HIPBLASLT_CHECK_NUMERICS", "2"},
+              {"HIPBLASLT_CHECK_NUMERICS_SCAN_FROM", "600"},
+              {"HIPBLASLT_CHECK_NUMERICS_SCAN_UNTIL", "500"}},
+             [](rocblaslt_handle rh) {
+                 ASSERT_EQ(rh->check_numerics_scan_from, 1u);
+                 ASSERT_EQ(rh->check_numerics_scan_until, ~uint32_t(0));
+             });
+
+    // Happy path: enable scanning, write NaN, scan_D, drain returns call_id 1.
+    reset_env();
+    setenv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
+    {
+        hipblasLtHandle_t h = nullptr;
+        EXPECT_HIPBLAS_STATUS(hipblasLtCreate(&h), HIPBLAS_STATUS_SUCCESS);
+        rocblaslt_handle rh = (rocblaslt_handle)h;
+        ASSERT_TRUE(rh->check_numerics_flag != nullptr);
+
+        constexpr int64_t M = 4, N = 4;
+        float*            d_buf = nullptr;
+        ASSERT_EQ(hipMalloc(&d_buf, M * N * sizeof(float)), hipSuccess);
+        std::vector<float> h_buf(M * N, std::numeric_limits<float>::quiet_NaN());
+        ASSERT_EQ(hipMemcpy(d_buf, h_buf.data(),
+                            M * N * sizeof(float), hipMemcpyHostToDevice),
+                  hipSuccess);
+
+        const uint32_t call_id = hipblaslt_check_numerics_begin_call(rh);
+        ASSERT_EQ(call_id, 1u);
+        ASSERT_TRUE(hipblaslt_check_numerics_scan_D(rh, nullptr, call_id,
+                                                    M, N, 1, HIP_R_32F,
+                                                    d_buf, M, M * N, false)
+                    == rocblaslt_status_success);
+
+        uint32_t out = 0;
+        EXPECT_HIPBLAS_STATUS(hipblasLtCheckNumericsDrain(h, &out), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(out, 1u);
+        // Second drain after reset: no NaN.
+        out = 99;
+        EXPECT_HIPBLAS_STATUS(hipblasLtCheckNumericsDrain(h, &out), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(out, 0u);
+
+        ASSERT_EQ(hipFree(d_buf), hipSuccess);
+        EXPECT_HIPBLAS_STATUS(hipblasLtDestroy(h), HIPBLAS_STATUS_SUCCESS);
+    }
+
+    // Per-dtype dispatch coverage: every arm of the type switch in
+    // hipblaslt_check_numerics_output_D gets a 4x4 NaN-prefilled buffer and
+    // we assert the device flag captures call_id 1. Catches a regression in
+    // any single dtype's template instantiation that the f32 happy path
+    // above would miss.
+    auto scan_one_with_nan
+        = [](hipDataType dt, const void* host_buf, size_t elem_size, uint32_t expected_drain) {
+              reset_env();
+              setenv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
+              hipblasLtHandle_t h = nullptr;
+              EXPECT_HIPBLAS_STATUS(hipblasLtCreate(&h), HIPBLAS_STATUS_SUCCESS);
+              rocblaslt_handle  rh = (rocblaslt_handle)h;
+              constexpr int64_t M = 4, N = 4;
+              void*             d_buf = nullptr;
+              ASSERT_EQ(hipMalloc(&d_buf, M * N * elem_size), hipSuccess);
+              ASSERT_EQ(
+                  hipMemcpy(d_buf, host_buf, M * N * elem_size, hipMemcpyHostToDevice),
+                  hipSuccess);
+              const uint32_t call_id = hipblaslt_check_numerics_begin_call(rh);
+              ASSERT_EQ(call_id, 1u);
+              ASSERT_TRUE(hipblaslt_check_numerics_scan_D(
+                              rh, nullptr, call_id, M, N, 1, dt, d_buf, M, M * N, false)
+                          == rocblaslt_status_success);
+              uint32_t out = 0;
+              EXPECT_HIPBLAS_STATUS(hipblasLtCheckNumericsDrain(h, &out),
+                                    HIPBLAS_STATUS_SUCCESS);
+              ASSERT_EQ(out, expected_drain);
+              ASSERT_EQ(hipFree(d_buf), hipSuccess);
+              EXPECT_HIPBLAS_STATUS(hipblasLtDestroy(h), HIPBLAS_STATUS_SUCCESS);
+          };
+
+    {
+        std::vector<double> b(16, std::numeric_limits<double>::quiet_NaN());
+        scan_one_with_nan(HIP_R_64F, b.data(), sizeof(double), 1u);
+    }
+    {
+        std::vector<hipblasLtHalf> b(16, static_cast<hipblasLtHalf>(NAN));
+        scan_one_with_nan(HIP_R_16F, b.data(), sizeof(hipblasLtHalf), 1u);
+    }
+    {
+        // f32 quiet NaN truncates to bf16 0x7FC0 (exp=0xFF, mantissa nonzero) -- still NaN.
+        std::vector<hip_bfloat16> b(16,
+                                    hip_bfloat16(std::numeric_limits<float>::quiet_NaN()));
+        scan_one_with_nan(HIP_R_16BF, b.data(), sizeof(hip_bfloat16), 1u);
+    }
+    {
+        // FNUZ NaN bit pattern (all f8/bf8 fnuz: 0x80).
+        hipblaslt_f8_fnuz nv;
+        nv.__x = 0x80;
+        std::vector<hipblaslt_f8_fnuz> b(16, nv);
+        scan_one_with_nan(HIP_R_8F_E4M3_FNUZ, b.data(), sizeof(hipblaslt_f8_fnuz), 1u);
+    }
+    {
+        hipblaslt_bf8_fnuz nv;
+        nv.__x = 0x80;
+        std::vector<hipblaslt_bf8_fnuz> b(16, nv);
+        scan_one_with_nan(HIP_R_8F_E5M2_FNUZ, b.data(), sizeof(hipblaslt_bf8_fnuz), 1u);
+    }
+    {
+        // OCP E4M3 canonical NaN: 0x7f.
+        hipblaslt_f8 nv;
+        nv.__x = 0x7f;
+        std::vector<hipblaslt_f8> b(16, nv);
+        scan_one_with_nan(HIP_R_8F_E4M3, b.data(), sizeof(hipblaslt_f8), 1u);
+    }
+    {
+        // OCP E5M2 NaN: any of 0x7d/0x7e/0x7f (exp=11111, mant!=0). Use 0x7d
+        // to match hipblaslt_isnan coverage above.
+        hipblaslt_bf8 nv;
+        nv.__x = 0x7d;
+        std::vector<hipblaslt_bf8> b(16, nv);
+        scan_one_with_nan(HIP_R_8F_E5M2, b.data(), sizeof(hipblaslt_bf8), 1u);
+    }
+
+    // Default-arm silent skip: integer dtypes hit the dispatcher's `default`
+    // and must return success without touching the flag.
+    {
+        reset_env();
+        setenv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
+        hipblasLtHandle_t h = nullptr;
+        EXPECT_HIPBLAS_STATUS(hipblasLtCreate(&h), HIPBLAS_STATUS_SUCCESS);
+        rocblaslt_handle  rh = (rocblaslt_handle)h;
+        constexpr int64_t M = 4, N = 4;
+        // Any non-zero pattern; integer arms must NOT inspect it.
+        std::vector<int8_t> h_buf(M * N, static_cast<int8_t>(0xFF));
+        int8_t*             d_buf = nullptr;
+        ASSERT_EQ(hipMalloc(&d_buf, M * N * sizeof(int8_t)), hipSuccess);
+        ASSERT_EQ(
+            hipMemcpy(d_buf, h_buf.data(), M * N * sizeof(int8_t), hipMemcpyHostToDevice),
+            hipSuccess);
+        const uint32_t call_id = hipblaslt_check_numerics_begin_call(rh);
+        ASSERT_TRUE(hipblaslt_check_numerics_scan_D(rh, nullptr, call_id, M, N, 1, HIP_R_8I,
+                                                    d_buf, M, M * N, false)
+                    == rocblaslt_status_success);
+        uint32_t out = 99;
+        EXPECT_HIPBLAS_STATUS(hipblasLtCheckNumericsDrain(h, &out), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(out, 0u); // never tripped
+        ASSERT_EQ(hipFree(d_buf), hipSuccess);
+        EXPECT_HIPBLAS_STATUS(hipblasLtDestroy(h), HIPBLAS_STATUS_SUCCESS);
+    }
+
+    // STOP_ON_FIRST: env parses; the sticky short_circuit fires after the
+    // first NaN; re-drain returns the same call_id (sticky doesn't reset
+    // the device flag).
+    {
+        reset_env();
+        setenv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
+        setenv("HIPBLASLT_CHECK_NUMERICS_STOP_ON_FIRST", "1", 1);
+        hipblasLtHandle_t h = nullptr;
+        EXPECT_HIPBLAS_STATUS(hipblasLtCreate(&h), HIPBLAS_STATUS_SUCCESS);
+        rocblaslt_handle rh = (rocblaslt_handle)h;
+        ASSERT_TRUE(rh->check_numerics_stop_on_first);
+        ASSERT_FALSE(rh->check_numerics_short_circuit.load());
+
+        constexpr int64_t M = 4, N = 4;
+        float*            d_buf = nullptr;
+        ASSERT_EQ(hipMalloc(&d_buf, M * N * sizeof(float)), hipSuccess);
+        std::vector<float> h_buf(M * N, std::numeric_limits<float>::quiet_NaN());
+        ASSERT_EQ(hipMemcpy(d_buf, h_buf.data(), M * N * sizeof(float),
+                            hipMemcpyHostToDevice),
+                  hipSuccess);
+
+        const uint32_t cid = hipblaslt_check_numerics_begin_call(rh);
+        ASSERT_TRUE(hipblaslt_check_numerics_scan_D(rh, nullptr, cid, M, N, 1, HIP_R_32F,
+                                                    d_buf, M, M * N, false)
+                    == rocblaslt_status_success);
+        uint32_t out = 0;
+        EXPECT_HIPBLAS_STATUS(hipblasLtCheckNumericsDrain(h, &out), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(out, cid);
+        // After the sticky drain, short_circuit is set so further scans bail.
+        ASSERT_TRUE(rh->check_numerics_short_circuit.load());
+        const uint32_t cid2 = hipblaslt_check_numerics_begin_call(rh);
+        ASSERT_TRUE(hipblaslt_check_numerics_scan_D(rh, nullptr, cid2, M, N, 1, HIP_R_32F,
+                                                    d_buf, M, M * N, false)
+                    == rocblaslt_status_success);
+        // Re-drain returns the same id (device flag was not memset).
+        out = 0;
+        EXPECT_HIPBLAS_STATUS(hipblasLtCheckNumericsDrain(h, &out), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(out, cid);
+
+        ASSERT_EQ(hipFree(d_buf), hipSuccess);
+        EXPECT_HIPBLAS_STATUS(hipblasLtDestroy(h), HIPBLAS_STATUS_SUCCESS);
+    }
+
+    // SCAN_EVERY runtime: every=3 means scan_D only runs the kernel when
+    // call_id % 3 == 0. With 5 calls, only call_id 3 inspects the buffer,
+    // so drain returns 3.
+    {
+        reset_env();
+        setenv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
+        setenv("HIPBLASLT_CHECK_NUMERICS_SCAN_EVERY", "3", 1);
+        hipblasLtHandle_t h = nullptr;
+        EXPECT_HIPBLAS_STATUS(hipblasLtCreate(&h), HIPBLAS_STATUS_SUCCESS);
+        rocblaslt_handle rh = (rocblaslt_handle)h;
+        ASSERT_EQ(rh->check_numerics_scan_every, 3u);
+
+        constexpr int64_t M = 4, N = 4;
+        float*            d_buf = nullptr;
+        ASSERT_EQ(hipMalloc(&d_buf, M * N * sizeof(float)), hipSuccess);
+        std::vector<float> h_buf(M * N, std::numeric_limits<float>::quiet_NaN());
+        ASSERT_EQ(hipMemcpy(d_buf, h_buf.data(), M * N * sizeof(float),
+                            hipMemcpyHostToDevice),
+                  hipSuccess);
+
+        for(int i = 0; i < 5; ++i)
+        {
+            const uint32_t cid = hipblaslt_check_numerics_begin_call(rh);
+            ASSERT_TRUE(hipblaslt_check_numerics_scan_D(rh, nullptr, cid, M, N, 1, HIP_R_32F,
+                                                        d_buf, M, M * N, false)
+                        == rocblaslt_status_success);
+        }
+        uint32_t out = 0;
+        EXPECT_HIPBLAS_STATUS(hipblasLtCheckNumericsDrain(h, &out), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(out, 3u);
+
+        ASSERT_EQ(hipFree(d_buf), hipSuccess);
+        EXPECT_HIPBLAS_STATUS(hipblasLtDestroy(h), HIPBLAS_STATUS_SUCCESS);
+    }
+
+    // SCAN_FROM/SCAN_UNTIL window: gates calls outside [from, until]. With
+    // from=3, until=4 and 5 NaN-bearing calls, drain returns 3 (the first
+    // in-window call).
+    {
+        reset_env();
+        setenv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
+        setenv("HIPBLASLT_CHECK_NUMERICS_SCAN_FROM", "3", 1);
+        setenv("HIPBLASLT_CHECK_NUMERICS_SCAN_UNTIL", "4", 1);
+        hipblasLtHandle_t h = nullptr;
+        EXPECT_HIPBLAS_STATUS(hipblasLtCreate(&h), HIPBLAS_STATUS_SUCCESS);
+        rocblaslt_handle rh = (rocblaslt_handle)h;
+        ASSERT_EQ(rh->check_numerics_scan_from, 3u);
+        ASSERT_EQ(rh->check_numerics_scan_until, 4u);
+
+        constexpr int64_t M = 4, N = 4;
+        float*            d_buf = nullptr;
+        ASSERT_EQ(hipMalloc(&d_buf, M * N * sizeof(float)), hipSuccess);
+        std::vector<float> h_buf(M * N, std::numeric_limits<float>::quiet_NaN());
+        ASSERT_EQ(hipMemcpy(d_buf, h_buf.data(), M * N * sizeof(float),
+                            hipMemcpyHostToDevice),
+                  hipSuccess);
+
+        for(int i = 0; i < 5; ++i)
+        {
+            const uint32_t cid = hipblaslt_check_numerics_begin_call(rh);
+            ASSERT_TRUE(hipblaslt_check_numerics_scan_D(rh, nullptr, cid, M, N, 1, HIP_R_32F,
+                                                        d_buf, M, M * N, false)
+                        == rocblaslt_status_success);
+        }
+        uint32_t out = 0;
+        EXPECT_HIPBLAS_STATUS(hipblasLtCheckNumericsDrain(h, &out), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(out, 3u);
+
+        ASSERT_EQ(hipFree(d_buf), hipSuccess);
+        EXPECT_HIPBLAS_STATUS(hipblasLtDestroy(h), HIPBLAS_STATUS_SUCCESS);
+    }
+
+    reset_env();
 }
 #endif // CODE_COVERAGE

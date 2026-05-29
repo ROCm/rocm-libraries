@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -61,6 +61,11 @@ void init_enum(nb::module_ m)
         .value("BFloat8", rocisa::DataType::BFloat8)
         .value("Float8BFloat8", rocisa::DataType::Float8BFloat8)
         .value("BFloat8Float8", rocisa::DataType::BFloat8Float8)
+        .value("Float6", rocisa::DataType::Float6)
+        .value("BFloat6", rocisa::DataType::BFloat6)
+        .value("Float4", rocisa::DataType::Float4)
+        .value("E8", rocisa::DataType::E8)
+        .value("E5M3", rocisa::DataType::E5M3)
         .export_values();
 
     nb::enum_<rocisa::SignatureValueKind>(m_enum, "SignatureValueKind")
@@ -69,6 +74,13 @@ void init_enum(nb::module_ m)
         .export_values();
 
     nb::enum_<rocisa::InstType>(m_enum, "InstType")
+        .value("INST_E5M3", rocisa::InstType::INST_E5M3)
+        .value("INST_E8", rocisa::InstType::INST_E8)
+        .value("INST_F4", rocisa::InstType::INST_F4)
+        .value("INST_F6", rocisa::InstType::INST_F6)
+        .value("INST_BF6", rocisa::InstType::INST_BF6)
+        .value("INST_F6_B6", rocisa::InstType::INST_F6_B6)
+        .value("INST_B6_F6", rocisa::InstType::INST_B6_F6)
         .value("INST_F8", rocisa::InstType::INST_F8)
         .value("INST_F16", rocisa::InstType::INST_F16)
         .value("INST_F32", rocisa::InstType::INST_F32)
@@ -107,8 +119,25 @@ void init_enum(nb::module_ m)
         .value("INST_BF8_F8", rocisa::InstType::INST_BF8_F8)
         .value("INST_TR8_B64", rocisa::InstType::INST_TR8_B64)
         .value("INST_TR16_B128", rocisa::InstType::INST_TR16_B128)
+        .value("INST_F8_F4", rocisa::InstType::INST_F8_F4)
+        .value("INST_F4_F8", rocisa::InstType::INST_F4_F8)
+        .value("INST_F6_F4", rocisa::InstType::INST_F6_F4)
+        .value("INST_F4_F6", rocisa::InstType::INST_F4_F6)
+        .value("INST_F8_F6", rocisa::InstType::INST_F8_F6)
+        .value("INST_F6_F8", rocisa::InstType::INST_F6_F8)
+        .value("INST_F8_B6", rocisa::InstType::INST_F8_B6)
+        .value("INST_B6_F8", rocisa::InstType::INST_B6_F8)
+        .value("INST_B8_F4", rocisa::InstType::INST_B8_F4)
+        .value("INST_F4_B8", rocisa::InstType::INST_F4_B8)
+        .value("INST_B6_F4", rocisa::InstType::INST_B6_F4)
+        .value("INST_F4_B6", rocisa::InstType::INST_F4_B6)
+        .value("INST_B8_F6", rocisa::InstType::INST_B8_F6)
+        .value("INST_F6_B8", rocisa::InstType::INST_F6_B8)
+        .value("INST_B8_B6", rocisa::InstType::INST_B8_B6)
+        .value("INST_B6_B8", rocisa::InstType::INST_B6_B8)
         .value("INST_CVT", rocisa::InstType::INST_CVT)
         .value("INST_MACRO", rocisa::InstType::INST_MACRO)
+        .value("INST_B192", rocisa::InstType::INST_B192)
         .value("INST_NOTYPE", rocisa::InstType::INST_NOTYPE)
         .export_values();
 
@@ -155,6 +184,18 @@ void init_enum(nb::module_ m)
         .value("CVT_PK_F32_to_BF8", rocisa::CvtType::CVT_PK_F32_to_BF8)
         .value("CVT_SR_F32_to_FP8", rocisa::CvtType::CVT_SR_F32_to_FP8)
         .value("CVT_SR_F32_to_BF8", rocisa::CvtType::CVT_SR_F32_to_BF8)
+        .export_values();
+
+    nb::enum_<rocisa::ArgType>(m_enum, "ArgType")
+        .value("DST",  rocisa::ArgType::DST)
+        .value("DST1", rocisa::ArgType::DST1)
+        .value("SRC0", rocisa::ArgType::SRC0)
+        .export_values();
+
+    nb::enum_<rocisa::HighBitSel>(m_enum, "HighBitSel")
+        .value("NONE",  rocisa::HighBitSel::NONE)
+        .value("LOW", rocisa::HighBitSel::LOW)
+        .value("HIGH", rocisa::HighBitSel::HIGH)
         .export_values();
 
     nb::enum_<rocisa::RoundType>(m_enum, "RoundType")

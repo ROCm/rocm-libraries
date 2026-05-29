@@ -57,3 +57,5 @@ external_projects_current_project = "hiptensor"
 
 for sphinx_var in ROCmDocs.SPHINX_VARS:
     globals()[sphinx_var] = getattr(docs_core, sphinx_var)
+
+exclude_patterns = globals().get("exclude_patterns", []) + [".venv"]

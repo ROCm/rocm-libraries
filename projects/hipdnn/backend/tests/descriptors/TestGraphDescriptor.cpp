@@ -13,7 +13,7 @@
 #include <cstring>
 #include <flatbuffers/flatbuffers.h>
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <nlohmann/json.hpp>
 #include <vector>
 
@@ -28,18 +28,19 @@ public:
         return test_utilities::createValidGraph();
     }
 
-    static void verifyGraph(const hipdnn_data_sdk::data_objects::GraphT& graph)
+    static void verifyGraph(const hipdnn_flatbuffers_sdk::data_objects::GraphT& graph)
     {
         EXPECT_EQ(graph.name, "test");
-        EXPECT_EQ(graph.compute_data_type, hipdnn_data_sdk::data_objects::DataType::FLOAT);
-        EXPECT_EQ(graph.intermediate_data_type, hipdnn_data_sdk::data_objects::DataType::HALF);
-        EXPECT_EQ(graph.io_data_type, hipdnn_data_sdk::data_objects::DataType::BFLOAT16);
+        EXPECT_EQ(graph.compute_data_type, hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+        EXPECT_EQ(graph.intermediate_data_type,
+                  hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
+        EXPECT_EQ(graph.io_data_type, hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
         EXPECT_EQ(graph.tensors.size(), 3);
         EXPECT_EQ(graph.nodes.size(), 1);
     }
 
-    static void verifyGraphsEquivalent(const hipdnn_data_sdk::data_objects::GraphT& graph1,
-                                       const hipdnn_data_sdk::data_objects::GraphT& graph2)
+    static void verifyGraphsEquivalent(const hipdnn_flatbuffers_sdk::data_objects::GraphT& graph1,
+                                       const hipdnn_flatbuffers_sdk::data_objects::GraphT& graph2)
     {
         EXPECT_EQ(graph1.name, graph2.name);
         EXPECT_EQ(graph1.compute_data_type, graph2.compute_data_type);
@@ -84,10 +85,10 @@ TEST_F(TestGraphDescriptor, SerializeDeserializeGraph)
 
     auto output = descriptor.getSerializedGraph();
     flatbuffers::Verifier verifier(static_cast<const uint8_t*>(output.ptr), output.size);
-    ASSERT_TRUE(verifier.VerifyBuffer<hipdnn_data_sdk::data_objects::Graph>());
+    ASSERT_TRUE(verifier.VerifyBuffer<hipdnn_flatbuffers_sdk::data_objects::Graph>());
 
-    auto graph
-        = hipdnn_data_sdk::data_objects::UnPackGraph(static_cast<const uint8_t*>(output.ptr));
+    auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(
+        static_cast<const uint8_t*>(output.ptr));
     ASSERT_NE(graph, nullptr);
     verifyGraph(*graph);
 }
@@ -261,7 +262,7 @@ TEST_F(TestGraphDescriptor, EmptyGraphDeserializesButFailsToFinalize)
     descriptor.buildSerializedGraph();
     auto data = descriptor.getSerializedGraph();
     flatbuffers::Verifier verifier(static_cast<const uint8_t*>(data.ptr), data.size);
-    ASSERT_TRUE(verifier.VerifyBuffer<hipdnn_data_sdk::data_objects::Graph>());
+    ASSERT_TRUE(verifier.VerifyBuffer<hipdnn_flatbuffers_sdk::data_objects::Graph>());
 }
 
 TEST_F(TestGraphDescriptor, GetSerializedGraphWithoutPopulationThrows)
@@ -314,12 +315,96 @@ TEST_F(TestGraphDescriptor, JsonRoundTripViaDescriptorApi)
     auto binary1 = descriptor1.getSerializedGraph();
     auto binary2 = descriptor2.getSerializedGraph();
 
-    auto graph1
-        = hipdnn_data_sdk::data_objects::UnPackGraph(static_cast<const uint8_t*>(binary1.ptr));
-    auto graph2
-        = hipdnn_data_sdk::data_objects::UnPackGraph(static_cast<const uint8_t*>(binary2.ptr));
+    auto graph1 = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(
+        static_cast<const uint8_t*>(binary1.ptr));
+    auto graph2 = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(
+        static_cast<const uint8_t*>(binary2.ptr));
 
     verifyGraphsEquivalent(*graph1, *graph2);
+}
+
+TEST_F(TestGraphDescriptor, JsonSerializationEmitsOverrideShapeTrue)
+{
+    auto builder = createValidGraph();
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor descriptor;
+    descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+
+    bool overrideShapeEnabled = true;
+    ASSERT_NO_THROW(
+        descriptor.setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT,
+                                HIPDNN_TYPE_BOOLEAN,
+                                1,
+                                &overrideShapeEnabled));
+
+    descriptor.buildSerializedGraph();
+    const auto jsonStr = descriptor.getSerializedJsonGraph();
+    const auto parsed = nlohmann::json::parse(jsonStr);
+
+    ASSERT_TRUE(parsed.contains("is_override_shape_enabled"));
+    EXPECT_TRUE(parsed.at("is_override_shape_enabled").get<bool>());
+}
+
+TEST_F(TestGraphDescriptor, JsonRoundTripPreservesOverrideShapeTrue)
+{
+    auto builder = createValidGraph();
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor original;
+    original.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+
+    bool overrideShapeEnabled = true;
+    ASSERT_NO_THROW(original.setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT,
+                                          HIPDNN_TYPE_BOOLEAN,
+                                          1,
+                                          &overrideShapeEnabled));
+
+    original.buildSerializedGraph();
+    const auto jsonStr = original.getSerializedJsonGraph();
+
+    GraphDescriptor roundTripped;
+    ASSERT_NO_THROW(
+        GraphDescriptor::createFromJsonGraph(roundTripped, jsonStr.c_str(), jsonStr.size()));
+
+    bool output = false;
+    int64_t count = 0;
+    ASSERT_NO_THROW(
+        roundTripped.getAttribute(HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT,
+                                  HIPDNN_TYPE_BOOLEAN,
+                                  1,
+                                  &count,
+                                  &output));
+    EXPECT_EQ(count, 1);
+    EXPECT_TRUE(output);
+}
+
+TEST_F(TestGraphDescriptor, JsonMissingOverrideShapeFieldDefaultsFalse)
+{
+    auto builder = createValidGraph();
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor descriptor;
+    descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+    descriptor.buildSerializedGraph();
+
+    auto parsed = nlohmann::json::parse(descriptor.getSerializedJsonGraph());
+    parsed.erase("is_override_shape_enabled");
+    const auto jsonStr = parsed.dump();
+
+    GraphDescriptor fromJson;
+    ASSERT_NO_THROW(
+        GraphDescriptor::createFromJsonGraph(fromJson, jsonStr.c_str(), jsonStr.size()));
+
+    bool output = true;
+    int64_t count = 0;
+    ASSERT_NO_THROW(fromJson.getAttribute(HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT,
+                                          HIPDNN_TYPE_BOOLEAN,
+                                          1,
+                                          &count,
+                                          &output));
+    EXPECT_EQ(count, 1);
+    EXPECT_FALSE(output);
 }
 
 // ============================================================================
@@ -482,10 +567,10 @@ TEST_F(TestGraphDescriptor, JsonRoundTripViaApi)
     auto binary1 = graphDesc1->getSerializedGraph();
     auto binary2 = graphDesc2->getSerializedGraph();
 
-    auto graph1
-        = hipdnn_data_sdk::data_objects::UnPackGraph(static_cast<const uint8_t*>(binary1.ptr));
-    auto graph2
-        = hipdnn_data_sdk::data_objects::UnPackGraph(static_cast<const uint8_t*>(binary2.ptr));
+    auto graph1 = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(
+        static_cast<const uint8_t*>(binary1.ptr));
+    auto graph2 = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(
+        static_cast<const uint8_t*>(binary2.ptr));
 
     verifyGraphsEquivalent(*graph1, *graph2);
 }
@@ -494,15 +579,15 @@ TEST_F(TestGraphDescriptor, DeserializeInvalidatesSerializedBuffer)
 {
     // Build graph A with name "graphA"
     flatbuffers::FlatBufferBuilder builderA;
-    const std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+    const std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
         emptyTensorsA;
-    const std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> emptyNodesA;
-    auto graphA = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+    const std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> emptyNodesA;
+    auto graphA = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builderA,
         "graphA",
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
-        hipdnn_data_sdk::data_objects::DataType::HALF,
-        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
         &emptyTensorsA,
         &emptyNodesA);
     builderA.Finish(graphA);
@@ -524,15 +609,15 @@ TEST_F(TestGraphDescriptor, DeserializeInvalidatesSerializedBuffer)
 
     // Build graph B with name "graphB"
     flatbuffers::FlatBufferBuilder builderB;
-    const std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::TensorAttributes>>
+    const std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
         emptyTensorsB;
-    const std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>> emptyNodesB;
-    auto graphB = hipdnn_data_sdk::data_objects::CreateGraphDirect(
+    const std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> emptyNodesB;
+    auto graphB = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
         builderB,
         "graphB",
-        hipdnn_data_sdk::data_objects::DataType::FLOAT,
-        hipdnn_data_sdk::data_objects::DataType::HALF,
-        hipdnn_data_sdk::data_objects::DataType::BFLOAT16,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
         &emptyTensorsB,
         &emptyNodesB);
     builderB.Finish(graphB);
@@ -702,7 +787,7 @@ TEST_F(TestGraphDescriptor, BinarySerializeOversizedBuffer)
 
     // Verify the binary content is valid
     flatbuffers::Verifier verifier(buffer.data(), returnedSize);
-    ASSERT_TRUE(verifier.VerifyBuffer<hipdnn_data_sdk::data_objects::Graph>());
+    ASSERT_TRUE(verifier.VerifyBuffer<hipdnn_flatbuffers_sdk::data_objects::Graph>());
 }
 
 TEST_F(TestGraphDescriptor, BinaryRoundTripViaApi)
@@ -750,10 +835,108 @@ TEST_F(TestGraphDescriptor, BinaryRoundTripViaApi)
     auto binary1 = graphDesc1->getSerializedGraph();
     auto binary2 = graphDesc2->getSerializedGraph();
 
-    auto graph1
-        = hipdnn_data_sdk::data_objects::UnPackGraph(static_cast<const uint8_t*>(binary1.ptr));
-    auto graph2
-        = hipdnn_data_sdk::data_objects::UnPackGraph(static_cast<const uint8_t*>(binary2.ptr));
+    auto graph1 = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(
+        static_cast<const uint8_t*>(binary1.ptr));
+    auto graph2 = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(
+        static_cast<const uint8_t*>(binary2.ptr));
 
     verifyGraphsEquivalent(*graph1, *graph2);
+}
+
+// ============================================================================
+// HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT (RFC 0008)
+// ============================================================================
+
+TEST_F(TestGraphDescriptor, IsOverrideShapeEnabledDefaultsToFalseWhenUnset)
+{
+    // A freshly-created descriptor that never had IS_OVERRIDE_SHAPE_ENABLED set
+    // should report false (the wire default for an absent optional bool).
+    const GraphDescriptor descriptor;
+
+    bool value = true;
+    int64_t count = 0;
+    ASSERT_NO_THROW(
+        descriptor.getAttribute(HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT,
+                                HIPDNN_TYPE_BOOLEAN,
+                                1,
+                                &count,
+                                &value));
+    EXPECT_FALSE(value);
+}
+
+TEST_F(TestGraphDescriptor, IsOverrideShapeEnabledSetGetTrueRoundTrip)
+{
+    GraphDescriptor descriptor;
+
+    bool input = true;
+    ASSERT_NO_THROW(descriptor.setAttribute(
+        HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT, HIPDNN_TYPE_BOOLEAN, 1, &input));
+
+    bool output = false;
+    int64_t count = 0;
+    ASSERT_NO_THROW(
+        descriptor.getAttribute(HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT,
+                                HIPDNN_TYPE_BOOLEAN,
+                                1,
+                                &count,
+                                &output));
+    EXPECT_TRUE(output);
+}
+
+TEST_F(TestGraphDescriptor, IsOverrideShapeEnabledTrueSurvivesSerializationRoundTrip)
+{
+    // Build a valid graph, set the opt-in flag, serialize, deserialize, verify
+    // the flag is preserved as true through the flatbuffer round-trip.
+    auto builder = createValidGraph();
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor original;
+    original.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+
+    bool input = true;
+    ASSERT_NO_THROW(original.setAttribute(
+        HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT, HIPDNN_TYPE_BOOLEAN, 1, &input));
+
+    auto handle = reinterpret_cast<hipdnnHandle_t>(0x12345678);
+    ASSERT_NO_THROW(original.setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
+                                          HIPDNN_TYPE_HANDLE,
+                                          1,
+                                          static_cast<const void*>(&handle)));
+    ASSERT_NO_THROW(original.finalize());
+
+    auto serialized = original.getSerializedGraph();
+
+    GraphDescriptor revived;
+    revived.deserializeGraph(static_cast<const uint8_t*>(serialized.ptr), serialized.size);
+
+    bool output = false;
+    int64_t count = 0;
+    ASSERT_NO_THROW(revived.getAttribute(HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT,
+                                         HIPDNN_TYPE_BOOLEAN,
+                                         1,
+                                         &count,
+                                         &output));
+    EXPECT_TRUE(output);
+}
+
+TEST_F(TestGraphDescriptor, LegacyGraphWithoutOverrideShapeFieldRoundTripsToFalse)
+{
+    // createValidGraph() does NOT set is_override_shape_enabled — it produces a
+    // wire image equivalent to a legacy graph that predates this field. Verify
+    // deserialize+get reports the wire default (false) without throwing.
+    auto builder = createValidGraph();
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor descriptor;
+    descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+
+    bool value = true;
+    int64_t count = 0;
+    ASSERT_NO_THROW(
+        descriptor.getAttribute(HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT,
+                                HIPDNN_TYPE_BOOLEAN,
+                                1,
+                                &count,
+                                &value));
+    EXPECT_FALSE(value);
 }

@@ -6,7 +6,6 @@
 #include <exception>
 #include <optional>
 
-#include <hipdnn_data_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
 #include <hipdnn_frontend/Types.hpp>
 
 namespace test_activation_common
@@ -19,14 +18,14 @@ struct ActivTestCase
     std::optional<float> reluUpperClip = std::nullopt;
     std::optional<float> swishBeta = std::nullopt;
 
-    ActivTestCase(hipdnn_frontend::PointwiseMode mode_,
-                  std::optional<float> reluLowerClip_ = std::nullopt,
-                  std::optional<float> reluUpperClip_ = std::nullopt,
-                  std::optional<float> swishBeta_ = std::nullopt)
-        : mode(mode_)
-        , reluLowerClip(reluLowerClip_)
-        , reluUpperClip(reluUpperClip_)
-        , swishBeta(swishBeta_)
+    ActivTestCase(hipdnn_frontend::PointwiseMode mode,
+                  std::optional<float> reluLowerClip = std::nullopt,
+                  std::optional<float> reluUpperClip = std::nullopt,
+                  std::optional<float> swishBeta = std::nullopt)
+        : mode(mode)
+        , reluLowerClip(reluLowerClip)
+        , reluUpperClip(reluUpperClip)
+        , swishBeta(swishBeta)
     {
         using PM = hipdnn_frontend::PointwiseMode;
 
@@ -44,7 +43,7 @@ struct ActivTestCase
 
     friend std::ostream& operator<<(std::ostream& ss, const ActivTestCase& tc)
     {
-        ss << "(mode:" << hipdnn_frontend::toSdkType(tc.mode);
+        ss << "(mode:" << hipdnn_frontend::to_string(tc.mode);
         if(tc.reluLowerClip)
         {
             ss << " reluLowerClip:" << tc.reluLowerClip.value();

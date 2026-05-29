@@ -1,0 +1,43 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyWaitCntInsertionPass --print-output
+#
+# StinkyWaitCntInsertionPass (gfx1250): conservative fallback at the
+# tensor-barrier matching site (Site C) when a candidate tensor_load_to_lds
+# in the deque is missing its MemTokenData modifier.
+#
+# IR (single block):
+#   tensor_load_to_lds   tokens=[1]            (T0)
+#   tensor_load_to_lds   (NO MemTokenData)     (T1, untagged)
+#   tensor_load_to_lds   tokens=[3]            (T2, disjoint from barrier)
+#   s_barrier            tokens=[99]
+#
+# Walk the tensorLoads deque from the youngest entry:
+#   T2: tokens=[3], no overlap with barrier [99]  -> skip
+#   T1: NO MemTokenData                            -> match (lastDependentIndex=1)
+# Drain through T1; remaining = size - 1 - 1 = 1 (T2).
+#   -> Emit s_wait_tensorcnt 1 before the barrier.
+#
+# CHECK-LABEL: @waitcnt_insertion_conservative_tensor_barrier_untagged_load
+# First tensor load is tagged with tokens=[1].
+# CHECK: tokens = [1]
+# Second tensor load has NO mod.memtoken: assert by matching a regex that
+# requires the line to end with `latencyCycles = 1 }` (an untagged op),
+# which uniquely identifies T1 in this test.
+# CHECK-NEXT: tensor_load_to_lds{{.*}}latencyCycles = 1 }
+# Third tensor load is tagged with tokens=[3].
+# CHECK-NEXT: tokens = [3]
+# Drain through the untagged load; one tagged-disjoint load (T2) remains.
+# CHECK-NEXT: s_wait_tensorcnt
+# CHECK-SAME: tlcnt = 1
+# CHECK-NEXT: s_barrier
+# CHECK-SAME: tokens = [99]
+# CHECK-NOT: s_wait_tensorcnt
+# CHECK-NOT: s_wait_dscnt
+# CHECK-NOT: s_wait_loadcnt
+
+st.func @waitcnt_insertion_conservative_tensor_barrier_untagged_load() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [1] } }
+  "st.tensor_load_to_lds"(s[4:7], s[18:25]) { issueCycles = 1, latencyCycles = 1 }
+  "st.tensor_load_to_lds"(s[8:11], s[26:33]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [3] } }
+  "st.s_barrier"() { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [99] } }
+}

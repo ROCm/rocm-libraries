@@ -1,5 +1,5 @@
 /******************************************************************************
-* Copyright (C) 2016 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+* Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -85,7 +85,7 @@ int main()
 
     if(workBufferSize > 0)
     {
-        printf("size of workbuffer=%d\n", (int)workBufferSize);
+        std::cout << "size of workbuffer=" << workBufferSize << "\n";
         if(hipMalloc(&workBuffer, workBufferSize) != hipSuccess)
             throw std::runtime_error("hipMalloc failed.");
         if(rocfft_execution_info_set_work_buffer(info, workBuffer, workBufferSize)

@@ -6,6 +6,7 @@
 #include "ck_tile/ops/gemm/kernel/gemm_kernel.hpp"
 #include "ck_tile/ops/common.hpp"
 #include "ck_tile/host/concat.hpp"
+#include "ck_tile/host/device_prop.hpp"
 #include "streamk_gemm_coherency.hpp"
 
 namespace ck_tile {
@@ -178,7 +179,7 @@ struct StreamKKernel
                    int occupancy = Occupancy<Kernel, StreamKKernelArgs, kBlockSize>())
     {
         const index_t max_active_wgs = num_cu * occupancy;
-
+        const int num_xccs           = get_num_xccs();
         // Convert StreamKHostArgs to UniversalGemmHostArgs
         const ck_tile::UniversalGemmHostArgs<1, 1, 0> universal_host_args(host_args.as_ptr,
                                                                           host_args.bs_ptr,
@@ -193,7 +194,7 @@ struct StreamKKernel
                                                                           host_args.stride_Ds,
                                                                           host_args.stride_E);
 
-        return StreamKKernelArgs{universal_host_args, max_active_wgs};
+        return StreamKKernelArgs{universal_host_args, max_active_wgs, num_xccs};
     }
 
     template <bool UseDefaultScheduler = true>
@@ -337,7 +338,8 @@ struct StreamKKernel
 
             // Determine the total size along the K dimension the workgroup is using in this
             // iteration (used to construct tensor views).
-            index_t k_size = num_loop_sk * TilePartitioner::KPerBlock;
+            index_t k_size = amd_wave_read_first_lane(
+                kargs.tile_partitioner.get_k_size(num_loop_sk, local_iter_end));
 
             // Get the K offsets for the A and B tensors
             auto [i_k_a, i_k_b] = GetKOffsets<ALayout, BLayout>(
@@ -512,14 +514,19 @@ struct StreamKKernel
     CK_TILE_DEVICE void operator()(StreamKKernelArgs kargs) const
     {
         __shared__ char smem_ptr_0[UniversalGemmKernel::GetSmemSize()];
+        index_t block_idx         = ck_tile::get_block_1d_id();
+        index_t grid_size         = kargs.tile_partitioner.grid_size().x;
         const index_t dp_num_loop = kargs.tile_partitioner.get_iters_per_tile();
+
+        block_idx = kargs.tile_partitioner.remap_xcd(block_idx, grid_size, kargs.num_xccs);
 
         StreamKDispatch(
             kargs.tile_partitioner,
             [&](index_t tile_idx) {
                 BaseGemm(kargs, tile_idx, dp_num_loop, 0, 0, kargs.K, smem_ptr_0);
             },
-            [&](index_t sk_cta_idx) { StreamKGemm(kargs, sk_cta_idx, smem_ptr_0); });
+            [&](index_t sk_cta_idx) { StreamKGemm(kargs, sk_cta_idx, smem_ptr_0); },
+            block_idx);
     }
 
     private:
@@ -560,4 +567,5 @@ struct StreamKKernel
         return make_tuple(base_offset * stride_offset_a, base_offset * stride_offset_b);
     }
 };
+
 } // namespace ck_tile
