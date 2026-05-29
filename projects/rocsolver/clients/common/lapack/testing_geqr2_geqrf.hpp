@@ -212,12 +212,23 @@ void geqr2_geqrf_getError(const rocblas_handle handle,
         print_matrix( "A", m, n, dA[0], lda );
     }
 
-    // Save original A before CPU geqrf overwrites hA
-    std::vector<std::vector<T>> hA_orig(bc, std::vector<T>(lda * n));
-    for(I b = 0; b < bc; ++b)
-        std::copy(hA[b], hA[b] + lda * n, hA_orig[b].data());
+    // GPU scalar for lange output, shared by all checks below.
+    device_strided_batch_vector<S> dnorm(1, 1, 1, 1);
+    CHECK_HIP_ERROR(dnorm.memcheck());
+    host_strided_batch_vector<S> hnorm(1, 1, 1, 1);
 
-    // execute computations
+    // Compute norm( A ) on GPU before geqrf overwrites dA.
+    // Store per batch element for use in the backward error check.
+    std::vector<S> A_norms(bc);
+    for(I b = 0; b < bc; ++b)
+    {
+        CHECK_ROCBLAS_ERROR(rocsolver_lange(
+            handle, rocsolver_norm_type_one,
+            (rocblas_int)m, (rocblas_int)n, dA[b], (rocblas_int)lda, dnorm[0]));
+        CHECK_HIP_ERROR(hnorm.transfer_from(dnorm));
+        A_norms[b] = hnorm[0][0];
+    }
+
     // GPU lapack
     CHECK_ROCBLAS_ERROR(rocsolver_geqr2_geqrf(STRIDED, GEQRF, handle, m, n, dA.data(), lda, stA,
                                               dIpiv.data(), stP, bc));
@@ -229,40 +240,16 @@ void geqr2_geqrf_getError(const rocblas_handle handle,
         print_matrix( "tau", min_mn, 1, dIpiv[0], min_mn );
     }
 
-    // CPU lapack
-    for(I b = 0; b < bc; ++b)
-    {
-        GEQRF ? cpu_geqrf(m, n, hA[b], lda, hIpiv[b], hW.data(), n)
-              : cpu_geqr2(m, n, hA[b], lda, hIpiv[b], hW.data());
-    }
-
-    if (verbose >= 2)
-    {
-        print_matrix( "Aref", m, n, hA[0], lda );
-        print_matrix( "tau_ref", min_mn, 1, hIpiv[0], min_mn );
-    }
-
-    // Forward error: ||hA - hARes|| / ||hA|| (GPU vs CPU factored form)
-    // (THIS DOES NOT ACCOUNT FOR NUMERICAL REPRODUCIBILITY ISSUES.
-    // IT MIGHT BE REVISITED IN THE FUTURE)
-    // using frobenius norm
-    double err;
-    max_errors[0] = 0;
-    for(I b = 0; b < bc; ++b)
-    {
-        err = norm_error('F', m, n, lda, hA[b], hARes[b]);
-        max_errors[0] = rocblas_max_nan(err, max_errors[0]);
-    }
-
     // Backward error: norm( A - Q*R ) / norm( A ), using 1-norm.
+    // Done before cpu_geqrf so hA still holds the original A.
     // Q*R is computed via unmqr applied to R extracted from the GPU factored output.
     //
     // For each batch element b:
-    //   1. Extract R (upper triangle) from hARes[b] into a work array hC, zeroing below diagonal.
+    //   1. Extract R (upper triangle) from hARes[b] into hC, zeroing below diagonal.
     //   2. Upload hC to GPU (dC).
     //   3. Apply unmqr on GPU: dC = Q * R  (side=left, trans=none, Q from dA[b] and dIpiv[b]).
     //   4. Transfer result back to host.
-    //   5. Compute norm( A_orig - Q*R ) and norm( A_orig ) on CPU.
+    //   5. Compute norm( hA[b] - Q*R ) on CPU (hA[b] is still the original A here).
 
     // Allocate GPU work buffer for one matrix (m x n), reused per batch element.
     size_t size_C = size_t(lda) * n;
@@ -278,12 +265,8 @@ void geqr2_geqrf_getError(const rocblas_handle handle,
         // Build R: copy upper triangle of hARes[b], zero the strict lower triangle.
         std::vector<T> hC(lda * n);
         for(I j = 0; j < n; ++j)
-        {
             for(I i = 0; i < m; ++i)
-            {
                 hC[i + j * lda] = (i <= j) ? hARes[b][i + j * lda] : T(0);
-            }
-        }
 
         // Upload R to GPU.
         CHECK_HIP_ERROR(hipMemcpy(dC[0], hC.data(), sizeof(T) * lda * n, hipMemcpyHostToDevice));
@@ -301,14 +284,13 @@ void geqr2_geqrf_getError(const rocblas_handle handle,
         // Transfer Q*R back to host.
         CHECK_HIP_ERROR(hipMemcpy(hC.data(), dC[0], sizeof(T) * lda * n, hipMemcpyDeviceToHost));
 
-        // Compute norm( A_orig - Q*R ) on CPU.
-        // Subtract Q*R from A_orig in-place into hC.
+        // Compute norm( A - Q*R ) on CPU; hA[b] is still original A.
         for(I j = 0; j < n; ++j)
             for(I i = 0; i < m; ++i)
-                hC[i + j * lda] = hA_orig[b][i + j * lda] - hC[i + j * lda];
+                hC[i + j * lda] = hA[b][i + j * lda] - hC[i + j * lda];
 
         S res_norm = cpu_lange('1', (rocblas_int)m, (rocblas_int)n, hC.data(), (rocblas_int)lda, hrwork.data());
-        S A_norm   = cpu_lange('1', (rocblas_int)m, (rocblas_int)n, hA_orig[b].data(), (rocblas_int)lda, hrwork.data());
+        S A_norm   = A_norms[b];
 
         double berr = (A_norm != S(0)) ? double(res_norm) / double(A_norm) : double(res_norm);
         max_errors[1] = rocblas_max_nan(berr, max_errors[1]);
@@ -327,11 +309,6 @@ void geqr2_geqrf_getError(const rocblas_handle handle,
     size_t size_R = size_t(min_mn) * min_mn;
     device_strided_batch_vector<T> dR(size_R, 1, size_R, 1);
     CHECK_HIP_ERROR(dR.memcheck());
-
-    // GPU scalar for lange output.
-    device_strided_batch_vector<S> dnorm(1, 1, 1, 1);
-    CHECK_HIP_ERROR(dnorm.memcheck());
-    host_strided_batch_vector<S> hnorm(1, 1, 1, 1);
 
     // Build identity matrix on host for upload into dR before each gemm.
     std::vector<T> hR_id(min_mn * min_mn, T(0));
@@ -375,6 +352,31 @@ void geqr2_geqrf_getError(const rocblas_handle handle,
 
         double oerr = double(hnorm[0][0]) / min_mn;
         max_errors[2] = rocblas_max_nan(oerr, max_errors[2]);
+    }
+
+    // CPU lapack — runs last so hA holds the original A for all checks above.
+    for(I b = 0; b < bc; ++b)
+    {
+        GEQRF ? cpu_geqrf(m, n, hA[b], lda, hIpiv[b], hW.data(), n)
+              : cpu_geqr2(m, n, hA[b], lda, hIpiv[b], hW.data());
+    }
+
+    if (verbose >= 2)
+    {
+        print_matrix( "Aref", m, n, hA[0], lda );
+        print_matrix( "tau_ref", min_mn, 1, hIpiv[0], min_mn );
+    }
+
+    // Forward error: ||hA - hARes|| / ||hA|| (GPU vs CPU factored form)
+    // (THIS DOES NOT ACCOUNT FOR NUMERICAL REPRODUCIBILITY ISSUES.
+    // IT MIGHT BE REVISITED IN THE FUTURE)
+    // using frobenius norm
+    double err;
+    max_errors[0] = 0;
+    for(I b = 0; b < bc; ++b)
+    {
+        err = norm_error('F', m, n, lda, hA[b], hARes[b]);
+        max_errors[0] = rocblas_max_nan(err, max_errors[0]);
     }
 }
 
