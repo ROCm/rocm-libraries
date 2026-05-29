@@ -365,10 +365,7 @@ COPY --from=build_ck /opt/rocm /opt/rocm
 COPY --from=build_ck /usr/local /usr/local
 
 # Install explicit version of tools that are supported for miopen development
-# (clang-format, clang-tidy)
-RUN wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add - && \
-    echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-21 main" | sudo tee /etc/apt/sources.list.d/llvm21.list 
-
+# (clang-format)
 RUN apt-get update && apt-get install -y \
     clang-format-18 \
     && rm -rf /var/lib/apt/lists/*
