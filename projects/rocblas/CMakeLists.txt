@@ -137,8 +137,6 @@ set_property(CACHE GPU_TARGETS PROPERTY STRINGS
   all
   ${SUPPORTED_TARGETS})
 
-set( GPU_TARGETS "amdgcnspirv" CACHE STRING "List of GPUs (gfx targets) to support" FORCE ) # TEST ONLY
-
 # Detect if target ID syntax if supported for default all GPU_TARGETS list
 # Sets the GPU_TARGETS with backward compatibility
 if (GPU_TARGETS STREQUAL "all")
