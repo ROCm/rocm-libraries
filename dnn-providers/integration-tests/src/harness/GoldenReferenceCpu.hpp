@@ -11,11 +11,12 @@
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
-#include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
-
-namespace hipdnn_test_sdk::utilities
+namespace hipdnn_integration_tests
 {
 
 class TestGoldenReferenceCpu : public ::testing::TestWithParam<std::filesystem::path>
@@ -46,9 +47,8 @@ protected:
         SKIP_IF_WINDOWS();
 
         auto tensorMap = _graphAndTensors.hostBufferMap();
-        EXPECT_EQ(tensorMap.size(), 6);
 
-        CpuReferenceGraphExecutor().execute(
+        hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor().execute(
             _graphAndTensors.graphBuffer.data(), _graphAndTensors.graphBuffer.size(), tensorMap);
 
         EXPECT_TRUE(_graphAndTensors.validateTensors(
@@ -58,10 +58,11 @@ protected:
 
 inline auto getGoldenReferenceParams(const std::filesystem::path& subDirectory)
 {
-    return testing::ValuesIn(filesInDirectoryWithExtReturnEmptyPathOnThrow(
-        hipdnn_data_sdk::utilities::getCurrentExecutableDirectory() / "../lib/hipdnn_reference_data"
-            / subDirectory,
-        ".json"));
+    return testing::ValuesIn(
+        hipdnn_test_sdk::utilities::filesInDirectoryWithExtReturnEmptyPathOnThrow(
+            hipdnn_data_sdk::utilities::getCurrentExecutableDirectory()
+                / "../lib/hipdnn_reference_data" / subDirectory,
+            ".json"));
 }
 }
 

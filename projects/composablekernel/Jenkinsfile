@@ -875,9 +875,7 @@ pipeline {
                 node(rocmnode("nogpu")) {
                     loadCk()
                     ck.setGithubStatus('Math CI Summary', 'failure', "Math CI failed")
-                    script {
-                        ck.checkoutComposableKernel()
-                    }
+                    ck.checkoutComposableKernel()
                     withCredentials([string(credentialsId: 'ck_ci_errors_webhook_url', variable: 'WEBHOOK_URL')]) {
                         sh 'bash projects/composablekernel/script/infra_helper/send_failure_notifications.sh'
                     }

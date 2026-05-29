@@ -33,6 +33,36 @@ DEF_ARCH(Gfx1250,
     .defaultCycle = 1, .defaultLatency = 1)
 
 //------------------------------------------------------------------------------
+// Tablegen emits a per-arch (name -> id) lookup table into <Arch>_hwreg.inc,
+// consumed by HwReg.cpp's nameToId / idToName.
+//------------------------------------------------------------------------------
+DEF_HWREG(HW_REG_WAVE_MODE,                1)
+DEF_HWREG(HW_REG_WAVE_STATUS,              2)
+DEF_HWREG(HW_REG_WAVE_STATE_PRIV,          4)
+DEF_HWREG(HW_REG_WAVE_GPR_ALLOC,           5)
+DEF_HWREG(HW_REG_WAVE_LDS_ALLOC,           6)
+DEF_HWREG(HW_REG_PERF_SNAPSHOT_DATA,      10)
+DEF_HWREG(HW_REG_PERF_SNAPSHOT_PC_LO,     11)
+DEF_HWREG(HW_REG_PERF_SNAPSHOT_PC_HI,     12)
+DEF_HWREG(HW_REG_PERF_SNAPSHOT_DATA1,     15)
+DEF_HWREG(HW_REG_PERF_SNAPSHOT_DATA2,     16)
+DEF_HWREG(HW_REG_WAVE_EXCP_FLAG_PRIV,     17)
+DEF_HWREG(HW_REG_WAVE_EXCP_FLAG_USER,     18)
+DEF_HWREG(HW_REG_WAVE_TRAP_CTRL,          19)
+DEF_HWREG(HW_REG_WAVE_SCRATCH_BASE_LO,    20)
+DEF_HWREG(HW_REG_WAVE_SCRATCH_BASE_HI,    21)
+DEF_HWREG(HW_REG_WAVE_HW_ID1,             23)
+DEF_HWREG(HW_REG_WAVE_HW_ID2,             24)
+DEF_HWREG(HW_REG_WAVE_SCHED_MODE,         26)
+DEF_HWREG(HW_REG_IB_STS2,                 28)
+DEF_HWREG(HW_REG_SHADER_CYCLES_LO,        29)
+DEF_HWREG(HW_REG_SHADER_CYCLES_HI,        30)
+DEF_HWREG(HW_REG_WAVE_DVGPR_ALLOC_LO,     31)
+DEF_HWREG(HW_REG_WAVE_DVGPR_ALLOC_HI,     32)
+DEF_HWREG(HW_REG_XNACK_STATE_PRIV,        33)
+DEF_HWREG(HW_REG_XNACK_MASK,              34)
+
+//------------------------------------------------------------------------------
 // This file defines default properties for each instruction encoding format.
 // Instructions using a format inherit its defaults and can optionally override them.
 //

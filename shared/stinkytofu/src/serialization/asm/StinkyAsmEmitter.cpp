@@ -28,6 +28,7 @@
 #include <limits>
 #include <sstream>
 
+#include "stinkytofu/hardware/HwRegHelpers.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
@@ -439,6 +440,10 @@ static void emitRegister(std::ostream& os, const StinkyRegister& reg,
 
         case StinkyRegister::Type::LiteralString:
             os << reg.getLiteralString();
+            break;
+
+        case StinkyRegister::Type::HwReg:
+            HwReg::printOperand(os, reg);
             break;
 
         case StinkyRegister::Type::Invalid:
