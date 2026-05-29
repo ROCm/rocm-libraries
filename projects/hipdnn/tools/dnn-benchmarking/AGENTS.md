@@ -13,7 +13,7 @@
 - Install (ROCm): `bash setup.sh`
 - Install (CUDA): `pip install torch --index-url https://download.pytorch.org/whl/cu124 && pip install -e .`
 - Run CLI: `python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --warmup 10 --iters 100`
-- A/B test: `python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --AId 1 --BId 2`
+- Engine comparison: `python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --engine 1,2`
 - Tests (CPU-only): `pytest -m "not gpu"`
 - Tests (GPU): `LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH pytest`
 - Coverage: `LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH pytest --cov=dnn_benchmarking tests/`

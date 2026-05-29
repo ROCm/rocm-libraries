@@ -5,7 +5,7 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Literal, Optional
+from typing import Dict, List, Literal, Optional
 
 
 @dataclass
@@ -90,7 +90,7 @@ class MetricsConfig:
 
     Attributes:
         tier: ``basic`` enables always-on probes. ``off`` disables all
-            metric collection — useful for clean A/B timing comparisons.
+            metric collection — useful for clean engine-comparison timing.
         emit_trace: ``pftrace`` or ``kineto`` — re-run benchmark under
             ``rocprofv3 --kernel-trace --memory-copy-trace`` and write a
             trace file. ``kineto`` falls back to pftrace if the rocpd
@@ -224,13 +224,14 @@ class MetricsConfig:
 class EngineSelection:
     """One ordered engine execution selection.
 
-    The plugin path is attached to the selection row rather than looked up by
-    engine ID so repeated engine IDs can be benchmarked against different
-    plugin builds.
+    The plugin path and optional display name are attached to the selection row
+    rather than looked up by engine ID so repeated engine IDs can be benchmarked
+    against different plugin builds.
     """
 
     engine_id: int
     plugin_path: Optional[Path] = None
+    name: Optional[str] = None
 
 
 @dataclass
@@ -252,6 +253,8 @@ class SuiteConfig:
         verbose: If True, print rich per-engine block per graph instead of summary.
         metrics: Metric collection configuration. Defaults to ``basic`` tier
             (always-on probes, no extra runs).
+        engine_names: Optional display names aligned positionally with
+            ``engine_filter``.
     """
 
     warmup_iters: int = 10
@@ -265,6 +268,7 @@ class SuiteConfig:
     verbose: bool = False
     metrics: MetricsConfig = field(default_factory=MetricsConfig)
     plugin_paths: Optional[List[Path]] = None
+    engine_names: Optional[List[Optional[str]]] = None
 
     def __post_init__(self) -> None:
         """Validate configuration values."""
@@ -280,6 +284,26 @@ class SuiteConfig:
             if len(self.engine_filter) == 0:
                 raise ValueError("engine_filter must be non-empty when set")
             # engine IDs are FNV-1a hashes -- may be negative as signed int64.
+        if self.engine_names is not None:
+            if self.engine_filter is None:
+                raise ValueError("engine_names require engine_filter")
+            if len(self.engine_names) != len(self.engine_filter):
+                raise ValueError("engine_names must match engine_filter count")
+            normalised_names: List[Optional[str]] = []
+            seen_names: set[str] = set()
+            for name in self.engine_names:
+                if name is None:
+                    normalised_names.append(None)
+                    continue
+                if not isinstance(name, str) or not name:
+                    raise ValueError(
+                        "engine_names entries must be non-empty strings or None"
+                    )
+                if name in seen_names:
+                    raise ValueError("engine_names entries must be unique")
+                seen_names.add(name)
+                normalised_names.append(name)
+            self.engine_names = normalised_names
         if self.plugin_paths is not None:
             if len(self.plugin_paths) == 0:
                 raise ValueError("plugin_paths must be non-empty when set")
@@ -314,6 +338,12 @@ class SuiteConfig:
             return None
         return self.plugin_paths[0]
 
+    def _engine_name_for_selection(self, index: int) -> Optional[str]:
+        """Return the configured display name for the selection at ``index``."""
+        if self.engine_names is None:
+            return None
+        return self.engine_names[index]
+
     def engine_selections_for(self, engine_ids: List[int]) -> List[EngineSelection]:
         """Return ordered engine selections for the provided engine IDs.
 
@@ -322,14 +352,29 @@ class SuiteConfig:
         Multiple plugin paths are only valid with an explicit engine list and
         are associated positionally with that list.
         """
+        if (
+            self.engine_names is not None
+            and len(engine_ids) != len(self.engine_names)
+        ):
+            raise ValueError("engine_names must match selected engine count")
         if self.plugin_paths is None:
-            return [EngineSelection(engine_id) for engine_id in engine_ids]
+            return [
+                EngineSelection(
+                    engine_id,
+                    name=self._engine_name_for_selection(index),
+                )
+                for index, engine_id in enumerate(engine_ids)
+            ]
 
         if len(self.plugin_paths) == 1:
             plugin_path = self.plugin_paths[0]
             return [
-                EngineSelection(engine_id, plugin_path=plugin_path)
-                for engine_id in engine_ids
+                EngineSelection(
+                    engine_id,
+                    plugin_path=plugin_path,
+                    name=self._engine_name_for_selection(index),
+                )
+                for index, engine_id in enumerate(engine_ids)
             ]
 
         if self.engine_filter is None or len(engine_ids) != len(self.plugin_paths):
@@ -338,6 +383,12 @@ class SuiteConfig:
             )
 
         return [
-            EngineSelection(engine_id, plugin_path=plugin_path)
-            for engine_id, plugin_path in zip(engine_ids, self.plugin_paths)
+            EngineSelection(
+                engine_id,
+                plugin_path=plugin_path,
+                name=self._engine_name_for_selection(index),
+            )
+            for index, (engine_id, plugin_path) in enumerate(
+                zip(engine_ids, self.plugin_paths)
+            )
         ]

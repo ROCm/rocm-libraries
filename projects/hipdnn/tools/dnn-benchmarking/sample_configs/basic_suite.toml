@@ -1,0 +1,16 @@
+# Basic dnn-benchmarking suite recipe.
+# Run with:
+#   dnn-benchmark --config sample_configs/basic_suite.toml
+
+version = 1
+
+graphs = [
+  "../graphs/sample_conv_fwd.json",
+  "../graphs/sample_batchnorm.json",
+]
+
+warmup = 10
+iters = 100
+seed = 123
+validate = "none"
+metrics_tier = "basic"

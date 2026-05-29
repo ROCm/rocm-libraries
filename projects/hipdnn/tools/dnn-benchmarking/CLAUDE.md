@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Benchmarking and validation tool for hipDNN graphs. Loads JSON-serialized hipDNN graphs, executes them via the MIOpen plugin, captures performance metrics, and supports A/B testing between different plugin/engine configurations.
+Benchmarking and validation tool for hipDNN graphs. Loads JSON-serialized hipDNN graphs, executes them via hipDNN engine plugins, captures performance metrics, and supports explicit multi-engine comparison.
 
 ## Build and Development Commands
 
@@ -89,8 +89,11 @@ python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json \
 python -m dnn_benchmarking --graph 'graphs/*.json' \
   --plugin-path /path/to/hipdnn/plugins --output results.json
 
-# A/B testing (separate path, kept for now)
-python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --AId 1 --BId 2
+# Repeatable recipe from TOML config
+python -m dnn_benchmarking --config sample_configs/engine_compare.toml
+
+# Engine comparison
+python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --engine 1,2
 
 # PyTorch backend (separate executor; single graph only)
 python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --backend pytorch
@@ -100,12 +103,12 @@ python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --backend pytor
 
 ```
 src/dnn_benchmarking/
-├── cli/              # Entry point (main.py, parser.py)
+├── cli/              # Entry point, parser, TOML config loading
 ├── common/           # Shared utilities (exceptions.py)
-├── config/           # BenchmarkConfig, ABTestConfig, SuiteConfig dataclasses
-├── execution/        # executor.py, buffer_manager.py, ab_runner.py,
-│                     # suite_runner.py, timing.py,
-│                     # pytorch_executor.py, pytorch_buffer_manager.py, pytorch_ops.py
+├── config/           # BenchmarkConfig, MetricsConfig, SuiteConfig dataclasses
+├── execution/        # executor.py, buffer_manager.py, suite_runner.py,
+│                     # timing.py, pytorch_executor.py,
+│                     # pytorch_buffer_manager.py, pytorch_ops.py
 ├── graph/            # loader.py (JSON loading), validator.py, tensor_info.py
 ├── reporting/        # reporter.py (console output), statistics.py, suite_results.py
 └── validation/       # validator.py, comparison.py, reference_provider.py
@@ -122,4 +125,4 @@ src/dnn_benchmarking/
 
 - 0: Success (all pass)
 - 1: Error (graph load, execution, configuration)
-- 2: Correctness failure (A/B comparison mismatch or suite tolerance_match failure)
+- 2: Correctness failure (suite tolerance_match failure)

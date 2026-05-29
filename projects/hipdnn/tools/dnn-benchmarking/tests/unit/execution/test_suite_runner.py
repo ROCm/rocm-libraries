@@ -138,6 +138,33 @@ class TestRunGraphAllProviders:
     @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
     @patch("dnn_benchmarking.execution.suite_runner.Executor")
     @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
+    def test_configured_engine_names_override_resolved_names(
+        self,
+        mock_bm_cls,
+        mock_exec_cls,
+        mock_get_ref,
+        mock_resolve_name,
+    ):
+        mock_resolve_name.side_effect = lambda eid: f"resolved_{eid}"
+        mock_get_ref.return_value = None
+        mock_exec_cls.side_effect = _make_exec_factory(engine_ids=[2])
+        mock_bm_cls.return_value = _make_bm_mock()
+
+        result = run_graph_all_providers(
+            graph_path=Path("test.json"),
+            graph_json=_make_graph_json(),
+            tensor_infos=[_make_tensor_info(1)],
+            config=_make_config(engine_filter=[2], engine_names=["baseline"]),
+            handle=MagicMock(),
+        )
+
+        assert result.results[0].provider == "baseline"
+        mock_resolve_name.assert_not_called()
+
+    @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
+    @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
+    @patch("dnn_benchmarking.execution.suite_runner.Executor")
+    @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
     def test_prepare_failure_records_error_status(
         self,
         mock_bm_cls,

@@ -66,6 +66,8 @@ Examples:
   dnn-benchmark -g ./graphs/conv1_fwd.json -e 1
   dnn-benchmark -g ./graphs/conv1_fwd.json -v        # verbose per-engine output
   dnn-benchmark -g ./graphs/conv1_fwd.json -e 1,2
+  dnn-benchmark --config sample_configs/basic_suite.toml
+  dnn-benchmark --config sample_configs/engine_compare.toml --iters 500
 
 PyTorch Backend (GPU via PyTorch):
   dnn-benchmark -g ./graph.json --backend pytorch
@@ -99,12 +101,19 @@ Tarball Input:
         "--graph",
         "-g",
         nargs="+",
-        required=True,
+        required=False,
         metavar="PATH",
         help="One or more paths, directories, glob patterns (e.g., 'graphs/*.json'), or "
         "tarballs (.tar, .tar.gz, .tgz) containing JSON graph files. "
         "A directory is searched recursively for .json files. "
         "Shell expansion (e.g., Workloads/BNorm/*) is accepted directly.",
+    )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help="TOML benchmark recipe. CLI flags override config values.",
     )
 
     parser.add_argument(

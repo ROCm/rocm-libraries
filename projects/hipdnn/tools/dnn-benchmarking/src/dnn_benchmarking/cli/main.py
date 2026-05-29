@@ -26,6 +26,7 @@ for _var, _default in _LOCAL_CACHE_DEFAULTS.items():
 
 from ..common.exceptions import GraphLoadError
 from ..reporting.reporter import Reporter
+from .config_file import apply_config_file, collect_provided_options
 from .internal_profiling import run_internal_profiling
 from .parser import create_parser
 from .pytorch_runner_cli import run_pytorch_cli
@@ -61,14 +62,20 @@ def _resolve_graphs(args, reporter: Reporter):
 def main() -> int:
     """CLI entry point."""
     parser = create_parser()
+    provided_options = collect_provided_options(sys.argv[1:])
     args = parser.parse_args()
-    reporter = Reporter()
-
+    try:
+        apply_config_file(args, provided_options)
+    except ValueError as e:
+        parser.error(str(e))
     # Hidden re-exec sub-mode for the profiling orchestrator. Skips
     # gpu_check / Reporter / engine discovery and runs a single
     # (graph, engine) workload as quietly as possible.
     if getattr(args, "internal_profiling_run", False):
         return run_internal_profiling(args)
+    if not args.graph:
+        parser.error("--graph is required unless --config provides graphs")
+    reporter = Reporter()
 
     if not gpu_is_available():
         reporter.print_error(

@@ -384,7 +384,7 @@ def run_graph_all_providers(
     for selection in engine_selections:
         engine_id = selection.engine_id
         engine_plugin_path = selection.plugin_path
-        engine_name = _resolve_engine_name(engine_id)
+        engine_name = selection.name or _resolve_engine_name(engine_id)
         engine_handle = handle
         with Timer() as t:
             if engine_handle is None:
