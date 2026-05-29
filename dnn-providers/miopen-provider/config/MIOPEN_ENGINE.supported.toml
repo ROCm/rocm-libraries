@@ -13,21 +13,36 @@ platform = "windows"
 
 [[supported.matchers]]
 op_chains = [
-    "Batchnorm",
+    "Batchnorm:batch_stats_only",
+    "Batchnorm:batch_stats_only + Pointwise:RELU_FWD",
+    "Batchnorm:batch_stats_only + Pointwise:RELU_FWD[lower_clip,upper_clip]",
+    "Batchnorm:batch_stats_only + Pointwise:RELU_FWD[lower_clip]",
+    "Batchnorm:batch_stats_only + Pointwise:RELU_FWD[upper_clip]",
+    "Batchnorm:training_with_running_stats",
+    "Batchnorm:training_with_running_stats + Pointwise:RELU_FWD",
+    "Batchnorm:training_with_running_stats + Pointwise:RELU_FWD[lower_clip,upper_clip]",
+    "Batchnorm:training_with_running_stats + Pointwise:RELU_FWD[lower_clip]",
+    "Batchnorm:training_with_running_stats + Pointwise:RELU_FWD[upper_clip]",
     "BatchnormBackward",
     "BatchnormInference",
+    "BatchnormInference + Pointwise:RELU_FWD",
     "BatchnormInferenceVarianceExt",
+    "BatchnormInferenceVarianceExt + Pointwise:RELU_FWD",
 ]
 io_dtypes = ["bf16", "fp16", "fp32"]
 layouts = ["NCDHW", "NCHW", "NCL", "NDHWC", "NHWC", "NLC"]
 
 [[supported.matchers]]
 op_chains = [
-    "BatchnormInference + Pointwise:RELU_FWD",
-    "BatchnormInferenceVarianceExt + Pointwise:RELU_FWD",
+    "BatchnormInference + Pointwise:RELU_FWD[lower_clip,upper_clip]",
+    "BatchnormInference + Pointwise:RELU_FWD[lower_clip]",
+    "BatchnormInference + Pointwise:RELU_FWD[upper_clip]",
+    "BatchnormInferenceVarianceExt + Pointwise:RELU_FWD[lower_clip,upper_clip]",
+    "BatchnormInferenceVarianceExt + Pointwise:RELU_FWD[lower_clip]",
+    "BatchnormInferenceVarianceExt + Pointwise:RELU_FWD[upper_clip]",
 ]
 io_dtypes = ["bf16", "fp16", "fp32"]
-layouts = ["NCDHW", "NDHWC"]
+layouts = ["NCHW", "NCL", "NHWC", "NLC"]
 
 [[supported.matchers]]
 op_chains = [
