@@ -6,9 +6,6 @@
 namespace hip_kernel_provider_common
 {
 
-// MaskType lives in asm_sdpa_engine::plan_utils (plans/SdpaPlanUtils.hpp) as the
-// single source of truth shared by the forward and backward dispatch paths.
-
 enum RoundingMode : int
 {
     RTNE = 0, // Round to Nearest Even (IEEE default)
