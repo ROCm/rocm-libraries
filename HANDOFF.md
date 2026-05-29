@@ -80,7 +80,32 @@
 | 4096²×8192 | 680.5 | 713.3 | +4.8% |
 | **8192³** | **701.4** | **754.5** | **+7.6%** |
 
-FP6 MFMA 理论峰值约 9216 TFLOPS (256 CUs × 4 SIMDs × 131072 FLOPs/MFMA / 32 cycles × 2.2 GHz)。当前利用率约 8%。主要瓶颈是每次 K 迭代的 A/B load 延迟未被 MFMA 充分掩盖。
+FP6 MFMA 理论峰值约 9216 TFLOPS (256 CUs × 4 SIMDs × 131072 FLOPs/MFMA / 32 cycles × 2.2 GHz)。当前利用率约 8%。
+
+### Step 7.5 ✅ rocprofv3 full profile (8192³, MI350X)
+
+完整 PMC + ATT 逐指令分析（交付物在 `mxfp6_gemm/prof_out/`：`pipeline_profile.md` / `pipeline_annotated.asm` / `pipeline_raw.asm` / `pipeline_rcv_trace.tar.gz`）。
+
+**瓶颈类型：latency / stall-bound —— 不是 bandwidth-bound,也不是 compute-bound。**
+
+- MFMA 利用率仅 **8.4%**,但 CU busy **99%**,VALU 发射利用率仅 **14%** → CU 被占满但执行单元空转,waves 在等 load。
+- L2 命中 **94.8%**,HBM 读仅 ~964 MB(~10% 时间)→ **HBM 带宽不是瓶颈**。
+- LDS bank conflict = 0。occupancy 4 waves/SIMD(arch 64 + acc 64 双双卡 256/64=4)。
+- 每个 MFMA 摊 **11.1 条纯 VALU** + 1.38 LDS + 2.38 VMEM_RD。
+
+**ATT 总 stall 的 93% 是内存等待**(MFMA 本身仅 1.6%,被饿着):
+
+| Stall 来源 | 占比 | stall/hit |
+|---|---|---|
+| 等 B 的 VMEM (`vmcnt`) | 36.7% | 293-408 |
+| 等 A 的 LDS (`lgkmcnt`) | 32.9% | **694/696** (critical) |
+| ds_read/write | 11.9% | |
+| barrier (每 iter __syncthreads) | 11.8% | 609 |
+| MFMA | 1.6% | 9-29 |
+
+**关键结构性问题**(见 annotated.asm):① A 读串行阻塞(读完才能 MFMA,零 overlap);② B 无预取,每 iter 现载现等;③ 源码 L111-124 的"预取下一 A"其实排在 MFMA **之前**,VMEM 等待+ds_write 压在关键路径上,完全没和 MFMA 重叠;④ 每 iter 一个 barrier。
+
+> ⚠️ 修正早期判断:瓶颈**不是 "A/B 的 HBM load 延迟"**(HBM 很闲),而是 **load 延迟未被掩盖 + occupancy 过低(4 waves) + 每 iter 计算量太小(仅 4 MFMA / 128 矩阵周期,掩盖不住 ~700cyc 的 LDS 读和 ~400cyc 的 VMEM load)**。
 
 ## 🔑 核心技术要点
 
@@ -195,11 +220,14 @@ mxfp6_gemm/
 
 ## Next Steps
 
-**性能优化方向（当前 ~750 TFLOPS, 峰值 ~9200 TFLOPS, 利用率 ~8%）：**
+**性能优化方向（当前 ~750 TFLOPS, 峰值 ~9200 TFLOPS, 利用率 ~8%）。已由 Step 7.5 的 ATT profile 验证瓶颈,按预期收益排序：**
 
-1. **更激进的 prefetch pipeline**: 在 MFMA 执行期间同时 prefetch A 和 B 的 VMEM loads（需要精确 vmcnt 管理，issue A/B global_load → MFMA → wait → ds_write）
-2. **增大 tile size**: 当前 128×128，可以尝试 256×128 或 128×256 增加数据复用
-3. **Wave-level B 共享**: 当前同 N 列的 2 个 wave 重复加载 B，可通过 LDS 共享消除冗余
-4. **寄存器级 B double buffer**: 交替使用两组 B VGPR，隐藏 B VMEM 延迟
-5. **减少地址计算开销**: 将循环中的地址增量改为加法而非乘法
-6. **调试 split ds_read**: 找到不增加 VGPR 压力的方式实现 ds_read/VMEM overlap
+1. **真正的跨迭代软件流水（最高收益,攻 ~70% stall）**: iter 开始即 issue 下一轮 A 的 ds_read + B 的 global_load,然后立刻对**本轮**已就位数据做 4×MFMA,让 load 在 MFMA 执行期后台完成。当前 A 虽是 LDS 双缓冲但**读仍阻塞**(lgkmcnt 32.9% stall)、B 根本没预取(vmcnt 36.7% stall)。
+2. **B 寄存器双缓冲**: 两组 B VGPR 交替,消除每 iter 的 `wait vmcnt(0)` 关键路径。
+3. **预取 A 改 async 且移到 MFMA 之后**: 现在源码 L111-124 的预取排在 MFMA 之前、VMEM+ds_write 压在关键路径上;改用 GLOBAL_LOAD_LDS async(见 memory `mxfp6_a_matrix_shuffle`)并置于 MFMA 之后,与之并行。
+4. **提高 occupancy**: arch+acc VGPR 同步压到 ≤51 → 5 waves/SIMD,多 wave 互相掩盖延迟(当前 64/64 双双卡 4 waves)。
+5. **增大 N 方向寄存器 tile（更多 MFMA/iter）**: 当前每 iter 仅 4 MFMA=128 矩阵周期,太小掩盖不住 load;增大可摊薄 load 延迟与 barrier。
+6. **降低 barrier 频率**: ≥3 buffer 让 barrier 不必每 iter(当前 barrier 占 11.8% stall)。
+7. **减少每-MFMA 的 VALU 开销**: 11.1 条纯 VALU/MFMA;scale 字节清理(v_and)出内循环、地址增量改加法、精简 ds_read_complete 的 v_mov。
+
+**复现 profile**: `cd mxfp6_gemm && cp test_pipeline.cpp prof_pipeline.cpp`(改 main 为单发,见旧 driver),`hipcc -O3 --offload-arch=gfx950`,然后用 gpu-profile skill(`/opt/rocm/bin/rocprofv3`)。最新结果在 `mxfp6_gemm/prof_out/`。
