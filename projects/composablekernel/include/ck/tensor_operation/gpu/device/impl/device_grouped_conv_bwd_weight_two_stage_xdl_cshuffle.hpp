@@ -1025,9 +1025,9 @@ struct DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle
         template <typename GridwiseGemm>
         float RunGemmV3(const Argument& arg, const StreamConfig& stream_config = StreamConfig{})
         {
-            const index_t GemmM = arg.a_grid_desc_k0_m_k1_.GetLength(I1);
-            const index_t GemmN = arg.b_grid_desc_k0_n_k1_.GetLength(I1);
-            const index_t GemmK =
+            const IndexType GemmM = arg.a_grid_desc_k0_m_k1_.GetLength(I1);
+            const IndexType GemmN = arg.b_grid_desc_k0_n_k1_.GetLength(I1);
+            const IndexType GemmK =
                 arg.a_grid_desc_k0_m_k1_.GetLength(I0) * arg.a_grid_desc_k0_m_k1_.GetLength(I2);
 
             AccDataType* p_c_grid = type_convert<AccDataType*>(arg.p_workspace_);
@@ -1050,7 +1050,7 @@ struct DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle
             typename GridwiseGemm::Argument gemm_arg{
                 p_a_grid, p_b_grid, p_c_grid, GemmM, GemmN, GemmK, I0, I0, I0, arg.k_batch_};
 
-            index_t gdx, gdy, gdz;
+            IndexType gdx, gdy, gdz;
             std::tie(gdx, gdy, gdz) = GridwiseGemm::CalculateGridSize(
                 gemm_arg.M, gemm_arg.N, gemm_arg.KBatch, arg.Conv_G_ / NumGroupsToMerge);
 
