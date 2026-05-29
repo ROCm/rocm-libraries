@@ -152,10 +152,6 @@ protected:
 
     void runGraphTest() override
     {
-        // Known failures under MIOPEN_FIND_ENFORCE=4 (exhaustive tuning) on degenerate spatial
-        // dims (e.g. [2,3,1,1], [32,3,1,14]): exhaustive search selects a kernel with numerical
-        // accuracy issues on 1-element spatial dimensions. Not an ASAN error. Root cause is in
-        // MIOpen kernel selection for degenerate shapes.
         const auto& testCase = this->GetParam();
         const auto& [layout, bnTestCase] = testCase;
 
