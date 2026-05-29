@@ -151,7 +151,7 @@ namespace
                     name << "_SAux";
 
                 if(arg.scaleAlpha_vector)
-                    name << "_SAV";
+                    name << "_DA";
 
                 if(arg.amaxScaleA)
                     name << "_ASA";

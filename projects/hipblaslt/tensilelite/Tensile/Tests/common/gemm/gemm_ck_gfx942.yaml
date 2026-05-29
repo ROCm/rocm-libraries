@@ -45,10 +45,10 @@ BenchmarkProblems:
     - # BenchmarkProblemSizeGroup - Standard
       CustomKernels:
         [
-          "Custom_Cijk_Alik_Bljk_BBS_BH_Bias_AS_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_K1_MIWT4_16_DTVA",
-          "Custom_Cijk_Alik_Bljk_BBS_BH_Bias_AS_SAV_UserArgs_MT256x256x64_MI16x16x1_SN_K1_MIWT4_16_WSGRB2_DTVA",
-          "Custom_Cijk_Alik_Bljk_BBS_BH_Bias_AS_SAV_UserArgs_MT256x224x64_MI16x16x1_SN_K1_MIWT4_14_DTVA",
-          "Custom_Cijk_Alik_Bljk_BBS_BH_Bias_AS_SAV_UserArgs_MT256x224x64_MI16x16x1_SN_K1_MIWT4_14_WSGRB2_DTVA"
+          "Custom_Cijk_Alik_Bljk_BBS_BH_Bias_AS_DA1_UserArgs_MT256x256x64_MI16x16x1_SN_K1_MIWT4_16_DTVA",
+          "Custom_Cijk_Alik_Bljk_BBS_BH_Bias_AS_DA1_UserArgs_MT256x256x64_MI16x16x1_SN_K1_MIWT4_16_WSGRB2_DTVA",
+          "Custom_Cijk_Alik_Bljk_BBS_BH_Bias_AS_DA1_UserArgs_MT256x224x64_MI16x16x1_SN_K1_MIWT4_14_DTVA",
+          "Custom_Cijk_Alik_Bljk_BBS_BH_Bias_AS_DA1_UserArgs_MT256x224x64_MI16x16x1_SN_K1_MIWT4_14_WSGRB2_DTVA"
         ]
       InitialSolutionParameters:
       BenchmarkCommonParameters:
@@ -95,10 +95,10 @@ BenchmarkProblems:
     - # BenchmarkProblemSizeGroup - Standard
       CustomKernels:
         [
-          "Custom_Cijk_Alik_Bljk_F8NBS_BH_BiasSB_AS_SABV_SAV_UserArgs_MT256x256x128_MI16x16x1_SN_K1_MIWT4_16_DTVA",
-          "Custom_Cijk_Alik_Bljk_F8NBS_BH_BiasSB_AS_SABV_SAV_UserArgs_MT256x256x128_MI16x16x1_SN_K1_MIWT4_16_WSGRB2_DTVA",
-          "Custom_Cijk_Alik_Bljk_F8NBS_BH_BiasSB_AS_SABV_SAV_UserArgs_MT256x224x128_MI16x16x1_SN_K1_MIWT4_14_DTVA",
-          "Custom_Cijk_Alik_Bljk_F8NBS_BH_BiasSB_AS_SABV_SAV_UserArgs_MT256x224x128_MI16x16x1_SN_K1_MIWT4_14_WSGRB2_DTVA"
+          "Custom_Cijk_Alik_Bljk_F8NBS_BH_BiasSB_AS_SABV_DA1_UserArgs_MT256x256x128_MI16x16x1_SN_K1_MIWT4_16_DTVA",
+          "Custom_Cijk_Alik_Bljk_F8NBS_BH_BiasSB_AS_SABV_DA1_UserArgs_MT256x256x128_MI16x16x1_SN_K1_MIWT4_16_WSGRB2_DTVA",
+          "Custom_Cijk_Alik_Bljk_F8NBS_BH_BiasSB_AS_SABV_DA1_UserArgs_MT256x224x128_MI16x16x1_SN_K1_MIWT4_14_DTVA",
+          "Custom_Cijk_Alik_Bljk_F8NBS_BH_BiasSB_AS_SABV_DA1_UserArgs_MT256x224x128_MI16x16x1_SN_K1_MIWT4_14_WSGRB2_DTVA"
         ]
       InitialSolutionParameters:
       BenchmarkCommonParameters:

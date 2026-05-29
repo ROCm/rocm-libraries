@@ -318,7 +318,7 @@ def TensileLibLogicToYaml(
         RuntimeError: If tensileYamlFile string is empty or name is not valid.
 
     Example:
-        TensileLibLogicToYaml("gfx950_Cijk_Alik_Bljk_BSS_BH_BiasS_HAS_SAV_UserArgs.yaml", 0, "config.yaml", False)
+        TensileLibLogicToYaml("gfx950_Cijk_Alik_Bljk_BSS_BH_BiasS_HAS_DA_UserArgs.yaml", 0, "config.yaml", False)
     """
 
     tPrint(1, "")

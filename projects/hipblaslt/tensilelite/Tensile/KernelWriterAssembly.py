@@ -7463,9 +7463,8 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["ProblemType"]["UseDeviceAlpha"]:
       self.defineSgpr("SrdDeviceAlpha", 4, 4)
       module.add(RegSet("s", "sgprSrdDeviceAlpha", self.sgprs["SrdDeviceAlpha"]))
-    if kernel["ProblemType"]["UseDeviceAlpha"] & 4:
-      self.defineSgpr("SgprDeviceAlphaScalar", 1)
-      module.add(RegSet("s", "sgprSgprDeviceAlphaScalar", self.sgprs["SgprDeviceAlphaScalar"]))
+    # UseDeviceAlpha bit 2 (scalar) no longer needs a dedicated SGPR;
+    # the scalar is folded into sgprAlpha in the post-loop.
     if self.states.useBias != DataDirection.NONE:
       self.defineSgpr("SrdBias", 4, 4)
       module.add(RegSet("s", "sgprSrdBias", self.sgprs["SrdBias"]))
@@ -14170,6 +14169,8 @@ class KernelWriterAssembly(KernelWriter):
         factorDims = [0, 1]
       elif needDim1:
         factorDims = [1]
+      elif needDim0:
+        factorDims = [0]
       else:
         factorDims = [0]
       if useDeviceAlpha & 4:
@@ -14203,8 +14204,16 @@ class KernelWriterAssembly(KernelWriter):
           labelStrScalar = self.labels.getNameInc("DeviceAlphaScalar")
           module.add(self.allocPostLoopSrdSuppress("DeviceAlpha", labelStrScalar, sgprLength=1))
           module.add(SMulI32(dst=sgpr("SrdDeviceAlpha+2"), src0=hex(self.states.bpeCinternal), src1=sgpr("SrdDeviceAlpha+2"), comment="DeviceAlpha scaled by BPE"))
-          module.add(SLoadB32(dst=sgpr("SgprDeviceAlphaScalar"), base=sgpr("AddressDeviceAlpha",2), soffset=0, comment="load device alpha scalar"))
-          module.add(SWaitCnt(kmcnt=0, comment="wait for device alpha scalar load"))
+          with self.allocTmpSgpr(1, 1) as tmpSgprRes:
+            tmpSgprScalar = tmpSgprRes.idx
+            module.add(SLoadB32(dst=sgpr(tmpSgprScalar), base=sgpr("AddressDeviceAlpha",2), soffset=0, comment="load device alpha scalar"))
+            module.add(SWaitCnt(kmcnt=0, comment="wait for device alpha scalar load"))
+            newAlphaVgpr = self.vgprPool.checkOut(1)
+            module.add(VMovB32(dst=vgpr(newAlphaVgpr), src=sgpr("Alpha")))
+            module.add(VMulF32(dst=vgpr(newAlphaVgpr), src0=vgpr(newAlphaVgpr), src1=sgpr(tmpSgprScalar), comment="alpha *= device alpha scalar"))
+            module.add(SNop(waitState=0, comment="1 wait states"))
+            module.add(VReadfirstlaneB32(dst=sgpr("Alpha"), src=vgpr(newAlphaVgpr), comment="Update Alpha with device alpha scalar"))
+            self.vgprPool.checkIn(newAlphaVgpr)
           if useDeviceAlpha & 3:
             module.add(deviceAlphaSrdEndLabel)
         for d in range(len(factorDims)):

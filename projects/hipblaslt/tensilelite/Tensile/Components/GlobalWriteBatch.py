@@ -556,7 +556,7 @@ class GlobalWriteBatchWriter:
 
       isSingleKernel = ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel") or self.kernel["StreamK"] > 0
 
-      if self.kernel["ProblemType"]["UseDeviceAlpha"] and isSingleKernel and self.factorDim != 2:
+      if (self.kernel["ProblemType"]["UseDeviceAlpha"] & 3) and isSingleKernel and self.factorDim != 2:
         modGwvwDeviceAlpha = Module("GwvwDeviceAlpha")
         self.loadsDeviceAlphaIssued += addEpilogueLoad(modGwvwDeviceAlpha, "DeviceAlpha", addrDeviceAlphaVgpr, self.addrDeviceAlpha, dataDeviceAlpha, loadedDataDeviceAlpha, addrCalc.deviceAlphaOffset[self.factorDim], factor_gwvw, localReferenceVgpr, self.factorDim, self.factorDim, skipLoad=skipLoad, comment="load deviceAlpha")
         if localReferenceVgpr == None:
@@ -1012,25 +1012,6 @@ class GlobalWriteBatchWriter:
           module.addSpaceLine()
           module.add(waitcntInst)
 
-      def applyDeviceAlphaScalar(vecModule):
-        if not self.beta and not self.applyAlpha:
-          if (self.kernel["ProblemType"]["DestDataType"].isInt8() or self.kernel["ProblemType"]["DestDataType"].isInt32() or \
-              (self.kernel["ProblemType"]["DataType"].isInt8() and self.kernel["ProblemType"]["DestDataType"].isHalf()) or \
-              (self.kernel["ProblemType"]["DataType"].isInt8() and self.kernel["ProblemType"]["DestDataType"].isBFloat16())) and \
-            self.kernel["ProblemType"]["ComputeDataType"].isSingle():
-            module.add(convertData(self.gwvw, self.ss.elementSumIdx[elementIdx], cvtType=CvtType.CVT_I32_to_F32, \
-                                        inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu))
-        for vi in range(0, self.gwvw):
-          sumIdxV = self.ss.elementSumIdx[elementIdx] + vi
-          if self.kernel["ProblemType"]["ComputeDataType"].isSingle():
-            vgprIdx = sumIdxV - self.parentWriter.states.c.startVgprValu
-            vecModule.add(VMulF32(dst=vgpr("ValuC+%d"%vgprIdx), src0=sgpr("SgprDeviceAlphaScalar"), src1=vgpr("ValuC+%d"%vgprIdx), comment="*= device alpha scalar"))
-          elif self.kernel["ProblemType"]["ComputeDataType"].isInt32():
-            vgprIdx = sumIdxV - self.parentWriter.states.c.startVgprValu
-            vecModule.add(VMulLOU32(dst=vgpr("ValuC+%d"%vgprIdx), src0=sgpr("SgprDeviceAlphaScalar"), src1=vgpr("ValuC+%d"%vgprIdx), comment="*= device alpha scalar"))
-          else:
-            raise RuntimeError("Unsupported DeviceAlphaScalar compute data type %s." % str(self.kernel["ProblemType"]["ComputeDataType"]))
-
       def applyScaleVec(vecModule, addressStr, dataScaleVec, factorDim, isGlobal=True):
         if not self.beta and not self.applyAlpha: # case for beta-0 and alpha == 1,(OptNLL)
           if (self.kernel["ProblemType"]["DestDataType"].isInt8() or self.kernel["ProblemType"]["DestDataType"].isInt32() or \
@@ -1095,10 +1076,8 @@ class GlobalWriteBatchWriter:
       module.add(scaleBVecModule)
 
       deviceAlphaModule = Module("deviceAlphaModule")
-      if self.kernel["ProblemType"]["UseDeviceAlpha"] and isSingleKernel:
-        if self.factorDim == 2:
-          applyDeviceAlphaScalar(deviceAlphaModule)
-        else:
+      if (self.kernel["ProblemType"]["UseDeviceAlpha"] & 3) and isSingleKernel:
+        if self.factorDim != 2:
           applyScaleVec(deviceAlphaModule, "DeviceAlpha", dataDeviceAlpha, self.factorDim, isGlobal=False)
       module.add(deviceAlphaModule)
 

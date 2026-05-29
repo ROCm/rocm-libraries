@@ -529,7 +529,7 @@ class MasterSolutionLibrary:
                 if problemType.useScaleCD:
                     placeholderName += '_SCD'
                 if problemType.useDeviceAlpha:
-                    placeholderName += '_SAV'
+                    placeholderName += '_DA'
                 if problemType.sparse:
                     placeholderName += '_SPB' if problemType.sparse == 2 else '_SPA'
                     placeholderName += "ML" + str(problemType.metadataLayout)

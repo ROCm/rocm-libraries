@@ -1330,7 +1330,7 @@ class ProblemType(Mapping):
     elif self["UseScaleAB"] == "Vector":
       name.append("SABV")
     if self["UseScaleCD"]: name.append("SCD")
-    if self["UseDeviceAlpha"]: name.append("SAV")
+    if self["UseDeviceAlpha"]: name.append("DA%d" % self["UseDeviceAlpha"])
 
     if self["SupportUserArgs"]: name.append("UserArgs")
 

@@ -28,7 +28,7 @@ Tests:
   transA_transB: *transA_transB_range
   alpha_beta: *alpha_beta_range
 
-- name: matmul_bias_relu_SAV_smoke
+- name: matmul_bias_relu_DA_smoke
   category: smoke
   function:
     matmul: *real_precisions
