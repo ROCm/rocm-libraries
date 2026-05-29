@@ -11,15 +11,14 @@ script merges them and writes a single patched source file.
 Usage
 =====
     # Basic: single ASIC
-    python3 scripts/patch_actor_critic.py results_gfx90a.json
+    python3 scripts/update_actor_critic/patch_actor_critic.py results_gfx90a.json
 
     # Multiple ASICs: list them in priority order (first file wins on conflict)
-    python3 scripts/patch_actor_critic.py \\
+    python3 scripts/update_actor_critic/patch_actor_critic.py \
         results_gfx942.json results_gfx90a.json
 
     # Preview only — do not write anything
-    python3 scripts/patch_actor_critic.py results_*.json --dry-run
-
+    python3 scripts/update_actor_critic/patch_actor_critic.py results_*.json --dry-run
 Options
 =======
   JSON_FILES        One or more probe-result JSON files produced by
