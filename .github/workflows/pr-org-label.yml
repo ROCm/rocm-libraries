@@ -4,6 +4,8 @@
 name: "Label PRs by Author Org Membership"
 
 on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
   schedule:
     - cron: "*/30 * * * *"  # every 30 minutes
@@ -29,24 +31,24 @@ jobs:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-members: read
+          permission-pull-requests: read
+          permission-issues: write
 
-      - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          sparse-checkout: |
-            .github
-            ${{ github.event.inputs.subrepo-prefix }}
-          sparse-checkout-cone-mode: true
-          token: ${{ steps.generate-token.outputs.token }}
-          fetch-depth: 0  #for subtree operations
+      - name: Get current PR number
+        if: ${{ github.event_name == 'pull_request_target' }}
+        run: printf '%s\n' '${{ github.event.pull_request.number }}' > pr_numbers.txt
 
       - name: Get open PR numbers
+        if: ${{ github.event_name != 'pull_request_target' }}
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
         run: |
           gh pr list --state open --json number,labels \
             --jq '[.[] | select(
               ([.labels[].name] | index(env.ORG_LABEL) | not) and
+              ([.labels[].name] | index(env.STREAMHPC_LABEL) | not) and
               ([.labels[].name] | index(env.EXTERNAL_LABEL) | not)
             ) | .number] | .[]' \
             > pr_numbers.txt
@@ -69,8 +71,8 @@ jobs:
 
             author=$(gh pr view "$pr" --json author --jq '.author.login')
 
-            if gh api orgs/${{ env.ORG_TO_CHECK }}/members/$author --silent; then
-              if gh api orgs/${{ env.ORG_TO_CHECK }}/teams/${{ env.STREAMHPC_TEAM }}/members/$author --silent; then
+            if gh api "orgs/${{ env.ORG_TO_CHECK }}/members/$author" --silent; then
+              if gh api "orgs/${{ env.ORG_TO_CHECK }}/teams/${{ env.STREAMHPC_TEAM }}/members/$author" --silent; then
                 gh pr edit "$pr" --add-label "${{ env.STREAMHPC_LABEL }}"
               else
                 gh pr edit "$pr" --add-label "${{ env.ORG_LABEL }}"
