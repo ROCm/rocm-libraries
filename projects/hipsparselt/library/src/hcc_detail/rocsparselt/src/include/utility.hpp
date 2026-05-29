@@ -73,10 +73,18 @@ template <>
 static constexpr char rocsparselt_precision_string<int32_t>[] = "i32_r";
 template <>
 static constexpr char rocsparselt_precision_string<uint32_t>[] = "u32_r";
+#if HIP_FP8_TYPE_OCP
 template <>
 static constexpr char rocsparselt_precision_string<__hip_fp8_e4m3>[] = "f8_r";
 template <>
 static constexpr char rocsparselt_precision_string<__hip_fp8_e5m2>[] = "bf8_r";
+#endif
+#if HIP_FP8_TYPE_FNUZ
+template <>
+static constexpr char rocsparselt_precision_string<__hip_fp8_e4m3_fnuz>[] = "f8_fnuz_r";
+template <>
+static constexpr char rocsparselt_precision_string<__hip_fp8_e5m2_fnuz>[] = "bf8_fnuz_r";
+#endif
 
 std::string prefix(const char* layer, const char* caller);
 

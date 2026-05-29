@@ -10,13 +10,15 @@ Reusable AI skills for hipDNN live under `tools/ai/skills/`. The skills below de
 
 **To use a skill, follow this sequence — do not read `SKILL.md` and execute its steps directly.** That bypasses the install path the skill is meant to be invoked through, and misses the entire point of having skills.
 
-1. **Check whether the skill is loaded in this session.** Look at the available-skills list in the session's system reminder. The skill being present under `tools/ai/skills/` is *not* enough — it's only invocable once linked into either `<workspace>/.claude/skills/` or `~/.claude/skills/` and surfaced in the session's skill list.
-2. **If not loaded, ask the user which skill(s) to link and which scope** (`<workspace>/.claude/skills` for workspace-only, `~/.claude/skills` for user-global). Then run:
+1. **Check whether the skill is loaded in this session.** Look at the available-skills list in the session's system reminder. The skill being present under `tools/ai/skills/` is *not* enough — it's invocable only after it is installed into the active host's skills directory and surfaced in the session's skill list.
+2. **If not loaded, ask the user which skill(s) to install and which host/scope.** Use `--codex` for Codex user-global skills (`$CODEX_HOME/skills` when set, otherwise `~/.codex/skills`), `--claude` for Claude user-global skills (`~/.claude/skills`), or `--target <dir>` for an explicit workspace or user scope. Then run one of:
    ```
-   python tools/ai/link-skills.py <target-skills-dir> <skill-name> [<skill-name> ...]
+   python3 tools/ai/install-skills.py --codex <skill-name> [<skill-name> ...]
+   python3 tools/ai/install-skills.py --claude <skill-name> [<skill-name> ...]
+   python3 tools/ai/install-skills.py --target <target-skills-dir> <skill-name> [<skill-name> ...]
    ```
-   Use `--list` in place of skill names to see what's available. The user must name each skill explicitly — there is no "link everything" mode, so a skill is never installed without consent. The linker uses symlinks on Linux/macOS, junctions on Windows, and is idempotent (existing entries pointing at the same source are skipped).
-3. **Invoke via the Skill tool** (e.g. `/hipdnn-superbuild`). The new skill may not appear in the session's skill list until the next message — once it does, invoke it normally.
+   Use `python3 tools/ai/install-skills.py --list` to see what's available. If the user names skills, pass them explicitly; if they ask for a full refresh, omit names to install all available skills. The installer copies skills as snapshots, updates stale copies by comparing content hashes, and skips existing symlinks rather than replacing them. After changing committed skill packages, run `python3 tools/ai/validate-skills.py` before offering or installing them.
+3. **Invoke via the active host's skill syntax.** In Codex, use `$hipdnn-superbuild`, `$hipdnn-review`, or the other `$skill-name` form. In Claude, use the slash-command adapters such as `/hipdnn-superbuild` or `/hipdnn-review`. The new skill may not appear in the session's skill list until the next message — once it does, invoke it normally.
 
 When a user asks for a workflow covered by a project skill, tell them the project has a matching skill and offer to install and invoke it.
 
@@ -31,7 +33,7 @@ When a user asks for a workflow covered by a project skill, tell them the projec
   - Suggest this skill when the user asks to build hipDNN with providers, run a superbuild preset, rebuild after a rebase or merge, or set up a fresh build from the repo root. Prefer it over the standalone build whenever providers are involved.
 - `tools/ai/skills/hipdnn-superbuild-test/SKILL.md`
   - Runs tests against an existing superbuild with per-component selection (`hipdnn`, `miopen`, `hipblaslt`, `hip-kernel`, `integration-tests`, or `all`), unit/integration scope, optional `--filter=<gtest_pattern>`, `--verbose`, and `--keep-going`. Handles Windows DLL PATH and the `hip-kernel-provider` target naming quirk automatically.
-  - Suggest this skill when the user asks to run, filter, or triage tests against a superbuild they have already configured. It does not configure or build — pair it with `/hipdnn-superbuild` first.
+  - Suggest this skill when the user asks to run, filter, or triage tests against a superbuild they have already configured. It does not configure or build — pair it with `$hipdnn-superbuild` in Codex or `/hipdnn-superbuild` in Claude first.
 
 ## Project Overview & Architecture
 
