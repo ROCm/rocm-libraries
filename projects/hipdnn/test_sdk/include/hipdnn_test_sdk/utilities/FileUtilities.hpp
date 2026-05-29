@@ -57,15 +57,14 @@ public:
 inline auto getGoldenReferenceParams(const std::filesystem::path& subDirectory)
 {
     auto dir = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory()
-        / "../lib/golden_reference_data" / subDirectory;
+               / "../lib/golden_reference_data" / subDirectory;
 
     std::vector<std::filesystem::path> paths;
     try
     {
         for(const auto& entry : std::filesystem::recursive_directory_iterator(dir))
         {
-            if(entry.path().extension() == ".json"
-               && entry.path().filename() != "meta.json")
+            if(entry.path().extension() == ".json" && entry.path().filename() != "meta.json")
             {
                 paths.push_back(entry.path());
             }
@@ -73,8 +72,8 @@ inline auto getGoldenReferenceParams(const std::filesystem::path& subDirectory)
     }
     catch(const std::exception& e)
     {
-        std::cerr << "Warning: failed to scan golden reference data in " << dir
-                  << ": " << e.what() << '\n';
+        std::cerr << "Warning: failed to scan golden reference data in " << dir << ": " << e.what()
+                  << '\n';
         return testing::ValuesIn(std::vector<std::filesystem::path>{""});
     }
 
