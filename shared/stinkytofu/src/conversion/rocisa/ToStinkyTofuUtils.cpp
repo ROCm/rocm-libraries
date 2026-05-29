@@ -456,12 +456,20 @@ static MatrixFmtModifiers extractMatrixFormats(std::string_view instString) {
     return fmts;
 }
 
+/// WMMA/MFMA matrix operand reuse hints from rocisa toString() (matrix_a_reuse / matrix_b_reuse).
+static void applyMfmaReuseFromAsmString(MFMAModifiers& mod, const std::string& instString) {
+    mod.reuseA = instString.find("matrix_a_reuse") != std::string::npos;
+    mod.reuseB = instString.find("matrix_b_reuse") != std::string::npos;
+}
+
 /// Helper to handle MXMFMA instruction modifiers
 void handleMXMFMAModifiers(StinkyInstruction* stinkyInst, const std::string& instString) {
     // MXMFMA does not support neg_lo/neg_hi modifiers; only matrix formats.
     auto fmts = extractMatrixFormats(instString);
     if (!fmts.empty()) stinkyInst->addModifier<MatrixFmtModifiers>(fmts);
-    stinkyInst->addModifier<MFMAModifiers>(MFMAModifiers{});
+    MFMAModifiers mod;
+    applyMfmaReuseFromAsmString(mod, instString);
+    stinkyInst->addModifier<MFMAModifiers>(mod);
 }
 
 /// Helper to handle MFMA instruction modifiers
@@ -471,6 +479,7 @@ void handleMFMAModifiers(StinkyInstruction* stinkyInst, const std::string& instS
 
     MFMAModifiers mod;
     mod.negBits = extractNegModifiers(instString);
+    applyMfmaReuseFromAsmString(mod, instString);
     stinkyInst->addModifier<MFMAModifiers>(mod);
 }
 
@@ -478,6 +487,7 @@ void handleMFMAModifiers(StinkyInstruction* stinkyInst, const std::string& instS
 void handleSMFMAModifiers(StinkyInstruction* stinkyInst, const std::string& instString) {
     MFMAModifiers mod;
     mod.negBits = extractNegModifiers(instString);
+    applyMfmaReuseFromAsmString(mod, instString);
     stinkyInst->addModifier<MFMAModifiers>(mod);
 }
 
