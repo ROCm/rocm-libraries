@@ -23,6 +23,137 @@ adapter accepts the hipDNN `ConvolutionFwdAttributes` graph shape and
 rejects asymmetric padding, true-convolution mode, non-FP16 dtypes,
 and 3D conv.
 
+## Architecture
+
+### Component view
+
+The plugin is organised into layers. The container is created once per
+handle generation and owns the long-lived collaborators (the embedded
+interpreter, the Python compile bridge, and the process-wide JIT
+cache); the engine, adapter, and plan are per-request.
+
+```mermaid
+flowchart TB
+    subgraph host["hipDNN host"]
+        SDK["hipDNN SDK<br/>(EnginePluginImpl)"]
+    end
+
+    subgraph plugin["ck_dsl_provider_plugin.so"]
+        direction TB
+
+        subgraph entry["Entry / lifetime"]
+            Container["CkDslContainer<br/>(EngineManager + bridge + cache)"]
+            Handle["CkDslHandle<br/>(HIP stream)"]
+            Context["CkDslContext<br/>(holds Plan)"]
+        end
+
+        subgraph engine["Engine layer (per request)"]
+            Engine["CkDslConvImplicitGemmEngine"]
+            Builder["ConvImplicitGemmPlanBuilder"]
+            Plan["ConvImplicitGemmPlan<br/>execute() → launch"]
+        end
+
+        subgraph adapt["Adapter layer"]
+            Adapter["ConvImplicitGemmAdapter<br/>validate + buildSpec()"]
+            Spec["ConvImplicitGemmSpec"]
+            Payload["convImplicitGemmSpecToPayload()"]
+            Sig["GraphSignature<br/>→ SignatureHash key"]
+        end
+
+        subgraph runtime["Runtime layer"]
+            Cache["JitCache<br/>key → shared_ptr&lt;HipModule&gt;"]
+            Module["HipModule<br/>(hipModule_t + hipFunction_t)"]
+            Artifact["KernelArtifact<br/>(HSACO + launch metadata)"]
+            Abi["LaunchAbi<br/>pack() arg buffer"]
+        end
+
+        subgraph pybound["Python boundary"]
+            Interp["EmbeddedInterpreter<br/>(isolated CPython)"]
+            Bridge["CompileServiceBridge<br/>compile(opKind, payload)"]
+        end
+    end
+
+    subgraph pysrc["Trusted Python source (sys.path)"]
+        Service["ck_dsl_provider.compile_service"]
+        DSL["ck_dsl<br/>(build + compile_kernel)"]
+    end
+
+    SDK -->|create| Container
+    SDK -->|isApplicable / init| Engine
+    SDK -->|execute| Plan
+
+    Container --> Engine
+    Container --> Bridge
+    Container --> Cache
+    Engine --> Builder
+    Builder --> Adapter
+    Adapter --> Spec --> Payload
+    Builder --> Sig
+    Builder -->|getOrLoad key, loader| Cache
+    Cache -->|miss| Bridge
+    Payload -.payload dict.-> Bridge
+    Bridge --> Interp
+    Bridge -->|GIL| Service
+    Service --> DSL
+    DSL -.HSACO + metadata.-> Bridge
+    Bridge --> Artifact --> Module
+    Cache --> Module
+    Builder --> Plan
+    Plan --> Module
+    Plan -.uses.-> Abi
+    Plan --> Context
+```
+
+### End-to-end sequence
+
+The compile step (heavy, Python/DSL) runs once per logical shape; the
+`JitCache` short-circuits every subsequent request with the same
+`GraphSignature` to a cached `HipModule`.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant SDK as hipDNN SDK
+    participant Eng as Engine
+    participant Bld as PlanBuilder
+    participant Adp as Adapter
+    participant Cache as JitCache
+    participant Br as CompileServiceBridge
+    participant Py as compile_service.py / ck_dsl
+    participant Mod as HipModule
+    participant Plan as ConvImplicitGemmPlan
+
+    SDK->>Eng: isApplicable(graph)
+    Eng->>Bld: isApplicable(graph)
+    Bld->>Adp: buildSpec(convAttr, tensors)
+    Adp-->>Bld: Spec (or reject)
+
+    SDK->>Eng: initializeExecutionContext(graph)
+    Eng->>Bld: buildPlan(graph, context)
+    Bld->>Adp: buildSpec(...)
+    Bld->>Bld: GraphSignature::computeForSpec → key
+    Bld->>Cache: getOrLoad(key, loader)
+
+    alt cache miss
+        Cache->>Br: compile(opKind, payload)  [GIL]
+        Br->>Py: compile(op_kind, payload)
+        Py-->>Br: dict{hsaco, kernel_name, grid, block, arg_schema, ...}
+        Br-->>Cache: KernelArtifact
+        Cache->>Mod: HipModule(artifact)<br/>hipModuleLoadData + GetFunction
+    else cache hit
+        Cache-->>Bld: cached HipModule
+    end
+
+    Cache-->>Bld: shared_ptr of HipModule
+    Bld->>Plan: new Plan(module, uids, byte sizes)
+    Bld-->>SDK: plan stored in context
+
+    SDK->>Plan: execute(handle, deviceBuffers)
+    Plan->>Plan: resolve x/w/y pointers, pack 36-byte args
+    Plan->>Mod: launch(args, grid, block, stream)
+    Mod-->>SDK: hipModuleLaunchKernel
+```
+
 ## Trust boundary
 
 The Python source tree that this plugin loads from is part of the
