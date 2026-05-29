@@ -31,10 +31,23 @@ struct TileConvVariant4c;
 template <DataType DT>
 struct TileConvVariant4c<Version::v3, DT>
 {
-    static constexpr auto& configs         = grouped_4c_tile::v3::KernelConfigurations<DT>::configs;
-    static constexpr auto  get_launch_params = &grouped_4c_tile::v3::get_launch_params<DT>;
-    static constexpr auto  launch           = &grouped_4c_tile::v3::launch<DT>;
-    static constexpr auto  make_variant     = &grouped_4c_tile::v3::make_variant<DT>;
+    static constexpr auto& configs_map = grouped_4c_tile::v3::KernelConfigurations<DT>::configs_map;
+
+    static bool is_applicable(const Conv2dParams& par)
+    { return grouped_4c_tile::v3::is_applicable<DT>(par); }
+
+    template <auto Cfg>
+    static bool is_config_compatible(const Conv2dParams& par)
+    { return grouped_4c_tile::v3::is_valid_config<DT>(par, Cfg); }
+
+    template <auto Cfg>
+    static LaunchParams get_launch_params(const Conv2dParams& par)
+    { return grouped_4c_tile::v3::get_launch_params<Cfg>(par); }
+
+    template <auto Cfg>
+    static void launch_kernel(const LaunchParams& lp, const Conv2dParams& par,
+                              const void* in, const void* wei, void* out, hipStream_t stream)
+    { grouped_4c_tile::v3::launch_kernel<Cfg, DT>(lp, par, in, wei, out, stream); }
 };
 
 template <Version V, DataType DT = DataType::fp16>
@@ -43,10 +56,23 @@ struct TileConvVariant8c;
 template <DataType DT>
 struct TileConvVariant8c<Version::v2, DT>
 {
-    static constexpr auto& configs         = grouped_8c_tile::v2::KernelConfigurations<DT>::configs;
-    static constexpr auto  get_launch_params = &grouped_8c_tile::v2::get_launch_params<DT>;
-    static constexpr auto  launch           = &grouped_8c_tile::v2::launch<DT>;
-    static constexpr auto  make_variant     = &grouped_8c_tile::v2::make_variant<DT>;
+    static constexpr auto& configs_map = grouped_8c_tile::v2::KernelConfigurations<DT>::configs_map;
+
+    static bool is_applicable(const Conv2dParams& par)
+    { return grouped_8c_tile::v2::is_applicable<DT>(par); }
+
+    template <auto Cfg>
+    static bool is_config_compatible(const Conv2dParams& par)
+    { return grouped_8c_tile::v2::is_valid_config<DT>(par, Cfg); }
+
+    template <auto Cfg>
+    static LaunchParams get_launch_params(const Conv2dParams& par)
+    { return grouped_8c_tile::v2::get_launch_params<Cfg>(par); }
+
+    template <auto Cfg>
+    static void launch_kernel(const LaunchParams& lp, const Conv2dParams& par,
+                              const void* in, const void* wei, void* out, hipStream_t stream)
+    { grouped_8c_tile::v2::launch_kernel<Cfg, DT>(lp, par, in, wei, out, stream); }
 };
 
 template <Version V, DataType DT = DataType::fp16>
@@ -55,10 +81,23 @@ struct TileConvVariant16c;
 template <DataType DT>
 struct TileConvVariant16c<Version::v2, DT>
 {
-    static constexpr auto& configs         = grouped_16c_tile::v2::KernelConfigurations<DT>::configs;
-    static constexpr auto  get_launch_params = &grouped_16c_tile::v2::get_launch_params<DT>;
-    static constexpr auto  launch           = &grouped_16c_tile::v2::launch<DT>;
-    static constexpr auto  make_variant     = &grouped_16c_tile::v2::make_variant<DT>;
+    static constexpr auto& configs_map = grouped_16c_tile::v2::KernelConfigurations<DT>::configs_map;
+
+    static bool is_applicable(const Conv2dParams& par)
+    { return grouped_16c_tile::v2::is_applicable<DT>(par); }
+
+    template <auto Cfg>
+    static bool is_config_compatible(const Conv2dParams& par)
+    { return grouped_16c_tile::v2::is_valid_config<DT>(par, Cfg); }
+
+    template <auto Cfg>
+    static LaunchParams get_launch_params(const Conv2dParams& par)
+    { return grouped_16c_tile::v2::get_launch_params<Cfg>(par); }
+
+    template <auto Cfg>
+    static void launch_kernel(const LaunchParams& lp, const Conv2dParams& par,
+                              const void* in, const void* wei, void* out, hipStream_t stream)
+    { grouped_16c_tile::v2::launch_kernel<Cfg, DT>(lp, par, in, wei, out, stream); }
 };
 
 template <Version V, DataType DT = DataType::fp16>
@@ -67,10 +106,23 @@ struct TileConvVariant32c;
 template <DataType DT>
 struct TileConvVariant32c<Version::v2, DT>
 {
-    static constexpr auto& configs         = grouped_32c_tile::v2::KernelConfigurations<DT>::configs;
-    static constexpr auto  get_launch_params = &grouped_32c_tile::v2::get_launch_params<DT>;
-    static constexpr auto  launch           = &grouped_32c_tile::v2::launch<DT>;
-    static constexpr auto  make_variant     = &grouped_32c_tile::v2::make_variant<DT>;
+    static constexpr auto& configs_map = grouped_32c_tile::v2::KernelConfigurations<DT>::configs_map;
+
+    static bool is_applicable(const Conv2dParams& par)
+    { return grouped_32c_tile::v2::is_applicable<DT>(par); }
+
+    template <auto Cfg>
+    static bool is_config_compatible(const Conv2dParams& par)
+    { return grouped_32c_tile::v2::is_valid_config<DT>(par, Cfg); }
+
+    template <auto Cfg>
+    static LaunchParams get_launch_params(const Conv2dParams& par)
+    { return grouped_32c_tile::v2::get_launch_params<Cfg>(par); }
+
+    template <auto Cfg>
+    static void launch_kernel(const LaunchParams& lp, const Conv2dParams& par,
+                              const void* in, const void* wei, void* out, hipStream_t stream)
+    { grouped_32c_tile::v2::launch_kernel<Cfg, DT>(lp, par, in, wei, out, stream); }
 };
 
 // Non-grouped (standard) conv — 32c MFMA with C-reduction (v3 cross-wave LDS reduction)
@@ -80,10 +132,23 @@ struct TileConvVariant32cDense;
 template <DataType DT>
 struct TileConvVariant32cDense<Version::v3, DT>
 {
-    static constexpr auto& configs         = conv_32c_tile::v3::KernelConfigurations<DT>::configs;
-    static constexpr auto  get_launch_params = &conv_32c_tile::v3::get_launch_params<DT>;
-    static constexpr auto  launch           = &conv_32c_tile::v3::launch<DT>;
-    static constexpr auto  make_variant     = &conv_32c_tile::v3::make_variant<DT>;
+    static constexpr auto& configs_map = conv_32c_tile::v3::KernelConfigurations<DT>::configs_map;
+
+    static bool is_applicable(const Conv2dParams& par)
+    { return conv_32c_tile::v3::is_applicable<DT>(par); }
+
+    template <auto Cfg>
+    static bool is_config_compatible(const Conv2dParams& par)
+    { return conv_32c_tile::v3::is_valid_config<DT>(par, Cfg); }
+
+    template <auto Cfg>
+    static LaunchParams get_launch_params(const Conv2dParams& par)
+    { return conv_32c_tile::v3::get_launch_params<Cfg>(par); }
+
+    template <auto Cfg>
+    static void launch_kernel(const LaunchParams& lp, const Conv2dParams& par,
+                              const void* in, const void* wei, void* out, hipStream_t stream)
+    { conv_32c_tile::v3::launch_kernel<Cfg, DT>(lp, par, in, wei, out, stream); }
 };
 
 // ============================================================================
@@ -92,34 +157,86 @@ struct TileConvVariant32cDense<Version::v3, DT>
 
 struct HipConvVariant4c
 {
-    static constexpr auto& configs         = ck_tile::direct_hip_conv::grouped_4c::configs;
-    static constexpr auto  get_launch_params = &ck_tile::direct_hip_conv::grouped_4c::get_launch_params;
-    static constexpr auto  launch           = &ck_tile::direct_hip_conv::grouped_4c::launch;
-    static constexpr auto  make_variant     = &ck_tile::direct_hip_conv::grouped_4c::make_variant;
+    static constexpr auto& configs_map = ck_tile::direct_hip_conv::grouped_4c::configs_map;
+
+    static bool is_applicable(const Conv2dParams& par)
+    { return ck_tile::direct_hip_conv::grouped_4c::is_applicable(par); }
+
+    template <auto Cfg>
+    static bool is_config_compatible(const Conv2dParams& par)
+    { return ck_tile::direct_hip_conv::grouped_4c::is_valid_config(par, Cfg); }
+
+    template <auto Cfg>
+    static LaunchParams get_launch_params(const Conv2dParams& par)
+    { return ck_tile::direct_hip_conv::grouped_4c::get_launch_params<Cfg>(par); }
+
+    template <auto Cfg>
+    static void launch_kernel(const LaunchParams& lp, const Conv2dParams& par,
+                              const void* in, const void* wei, void* out, hipStream_t stream)
+    { ck_tile::direct_hip_conv::grouped_4c::launch_kernel<Cfg>(lp, par, in, wei, out, stream); }
 };
 
 struct HipConvVariant8c
 {
-    static constexpr auto& configs         = ck_tile::direct_hip_conv::grouped_8c::configs;
-    static constexpr auto  get_launch_params = &ck_tile::direct_hip_conv::grouped_8c::get_launch_params;
-    static constexpr auto  launch           = &ck_tile::direct_hip_conv::grouped_8c::launch;
-    static constexpr auto  make_variant     = &ck_tile::direct_hip_conv::grouped_8c::make_variant;
+    static constexpr auto& configs_map = ck_tile::direct_hip_conv::grouped_8c::configs_map;
+
+    static bool is_applicable(const Conv2dParams& par)
+    { return ck_tile::direct_hip_conv::grouped_8c::is_applicable(par); }
+
+    template <auto Cfg>
+    static bool is_config_compatible(const Conv2dParams& par)
+    { return ck_tile::direct_hip_conv::grouped_8c::is_valid_config(par, Cfg); }
+
+    template <auto Cfg>
+    static LaunchParams get_launch_params(const Conv2dParams& par)
+    { return ck_tile::direct_hip_conv::grouped_8c::get_launch_params<Cfg>(par); }
+
+    template <auto Cfg>
+    static void launch_kernel(const LaunchParams& lp, const Conv2dParams& par,
+                              const void* in, const void* wei, void* out, hipStream_t stream)
+    { ck_tile::direct_hip_conv::grouped_8c::launch_kernel<Cfg>(lp, par, in, wei, out, stream); }
 };
 
 struct HipConvVariant16c
 {
-    static constexpr auto& configs         = ck_tile::direct_hip_conv::grouped_16c::configs;
-    static constexpr auto  get_launch_params = &ck_tile::direct_hip_conv::grouped_16c::get_launch_params;
-    static constexpr auto  launch           = &ck_tile::direct_hip_conv::grouped_16c::launch;
-    static constexpr auto  make_variant     = &ck_tile::direct_hip_conv::grouped_16c::make_variant;
+    static constexpr auto& configs_map = ck_tile::direct_hip_conv::grouped_16c::configs_map;
+
+    static bool is_applicable(const Conv2dParams& par)
+    { return ck_tile::direct_hip_conv::grouped_16c::is_applicable(par); }
+
+    template <auto Cfg>
+    static bool is_config_compatible(const Conv2dParams& par)
+    { return ck_tile::direct_hip_conv::grouped_16c::is_valid_config(par, Cfg); }
+
+    template <auto Cfg>
+    static LaunchParams get_launch_params(const Conv2dParams& par)
+    { return ck_tile::direct_hip_conv::grouped_16c::get_launch_params<Cfg>(par); }
+
+    template <auto Cfg>
+    static void launch_kernel(const LaunchParams& lp, const Conv2dParams& par,
+                              const void* in, const void* wei, void* out, hipStream_t stream)
+    { ck_tile::direct_hip_conv::grouped_16c::launch_kernel<Cfg>(lp, par, in, wei, out, stream); }
 };
 
 struct HipConvVariant32c
 {
-    static constexpr auto& configs         = ck_tile::direct_hip_conv::grouped_32c::configs;
-    static constexpr auto  get_launch_params = &ck_tile::direct_hip_conv::grouped_32c::get_launch_params;
-    static constexpr auto  launch           = &ck_tile::direct_hip_conv::grouped_32c::launch;
-    static constexpr auto  make_variant     = &ck_tile::direct_hip_conv::grouped_32c::make_variant;
+    static constexpr auto& configs_map = ck_tile::direct_hip_conv::grouped_32c::configs_map;
+
+    static bool is_applicable(const Conv2dParams& par)
+    { return ck_tile::direct_hip_conv::grouped_32c::is_applicable(par); }
+
+    template <auto Cfg>
+    static bool is_config_compatible(const Conv2dParams& par)
+    { return ck_tile::direct_hip_conv::grouped_32c::is_valid_config(par, Cfg); }
+
+    template <auto Cfg>
+    static LaunchParams get_launch_params(const Conv2dParams& par)
+    { return ck_tile::direct_hip_conv::grouped_32c::get_launch_params<Cfg>(par); }
+
+    template <auto Cfg>
+    static void launch_kernel(const LaunchParams& lp, const Conv2dParams& par,
+                              const void* in, const void* wei, void* out, hipStream_t stream)
+    { ck_tile::direct_hip_conv::grouped_32c::launch_kernel<Cfg>(lp, par, in, wei, out, stream); }
 };
 
 // ============================================================================
@@ -129,7 +246,8 @@ struct HipConvVariant32c
 // 4c TileConv
 template <int ConfigIdx, Version Ver = Version::v3, DataType DT = DataType::fp16>
 struct DirectTileConvForward4CKernel
-    : DirectConvKernel<DirectTileConvForward4CKernel<ConfigIdx, Ver, DT>, ConfigIdx>
+    : DirectConvKernel<DirectTileConvForward4CKernel<ConfigIdx, Ver, DT>,
+                       TileConvVariant4c<Ver, DT>::configs_map.get(ConfigIdx)>
 {
     using V = TileConvVariant4c<Ver, DT>;
     static constexpr bool kIsFprop = true;
@@ -145,7 +263,8 @@ struct DirectTileConvForward4CKernel
 
 template <int ConfigIdx, Version Ver = Version::v3, DataType DT = DataType::fp16>
 struct DirectTileConvBwdData4CKernel
-    : DirectConvKernel<DirectTileConvBwdData4CKernel<ConfigIdx, Ver, DT>, ConfigIdx>
+    : DirectConvKernel<DirectTileConvBwdData4CKernel<ConfigIdx, Ver, DT>,
+                       TileConvVariant4c<Ver, DT>::configs_map.get(ConfigIdx)>
 {
     using V = TileConvVariant4c<Ver, DT>;
     static constexpr bool kIsFprop = false;
@@ -162,7 +281,8 @@ struct DirectTileConvBwdData4CKernel
 // 8c TileConv
 template <int ConfigIdx, Version Ver = Version::v2, DataType DT = DataType::fp16>
 struct DirectTileConvForward8CKernel
-    : DirectConvKernel<DirectTileConvForward8CKernel<ConfigIdx, Ver, DT>, ConfigIdx>
+    : DirectConvKernel<DirectTileConvForward8CKernel<ConfigIdx, Ver, DT>,
+                       TileConvVariant8c<Ver, DT>::configs_map.get(ConfigIdx)>
 {
     using V = TileConvVariant8c<Ver, DT>;
     static constexpr bool kIsFprop = true;
@@ -178,7 +298,8 @@ struct DirectTileConvForward8CKernel
 
 template <int ConfigIdx, Version Ver = Version::v2, DataType DT = DataType::fp16>
 struct DirectTileConvBwdData8CKernel
-    : DirectConvKernel<DirectTileConvBwdData8CKernel<ConfigIdx, Ver, DT>, ConfigIdx>
+    : DirectConvKernel<DirectTileConvBwdData8CKernel<ConfigIdx, Ver, DT>,
+                       TileConvVariant8c<Ver, DT>::configs_map.get(ConfigIdx)>
 {
     using V = TileConvVariant8c<Ver, DT>;
     static constexpr bool kIsFprop = false;
@@ -195,7 +316,8 @@ struct DirectTileConvBwdData8CKernel
 // 16c TileConv
 template <int ConfigIdx, Version Ver = Version::v2, DataType DT = DataType::fp16>
 struct DirectTileConvForward16CKernel
-    : DirectConvKernel<DirectTileConvForward16CKernel<ConfigIdx, Ver, DT>, ConfigIdx>
+    : DirectConvKernel<DirectTileConvForward16CKernel<ConfigIdx, Ver, DT>,
+                       TileConvVariant16c<Ver, DT>::configs_map.get(ConfigIdx)>
 {
     using V = TileConvVariant16c<Ver, DT>;
     static constexpr bool kIsFprop = true;
@@ -211,7 +333,8 @@ struct DirectTileConvForward16CKernel
 
 template <int ConfigIdx, Version Ver = Version::v2, DataType DT = DataType::fp16>
 struct DirectTileConvBwdData16CKernel
-    : DirectConvKernel<DirectTileConvBwdData16CKernel<ConfigIdx, Ver, DT>, ConfigIdx>
+    : DirectConvKernel<DirectTileConvBwdData16CKernel<ConfigIdx, Ver, DT>,
+                       TileConvVariant16c<Ver, DT>::configs_map.get(ConfigIdx)>
 {
     using V = TileConvVariant16c<Ver, DT>;
     static constexpr bool kIsFprop = false;
@@ -228,7 +351,8 @@ struct DirectTileConvBwdData16CKernel
 // 32c TileConv
 template <int ConfigIdx, Version Ver = Version::v2, DataType DT = DataType::fp16>
 struct DirectTileConvForward32CKernel
-    : DirectConvKernel<DirectTileConvForward32CKernel<ConfigIdx, Ver, DT>, ConfigIdx>
+    : DirectConvKernel<DirectTileConvForward32CKernel<ConfigIdx, Ver, DT>,
+                       TileConvVariant32c<Ver, DT>::configs_map.get(ConfigIdx)>
 {
     using V = TileConvVariant32c<Ver, DT>;
     static constexpr bool kIsFprop = true;
@@ -244,7 +368,8 @@ struct DirectTileConvForward32CKernel
 
 template <int ConfigIdx, Version Ver = Version::v2, DataType DT = DataType::fp16>
 struct DirectTileConvBwdData32CKernel
-    : DirectConvKernel<DirectTileConvBwdData32CKernel<ConfigIdx, Ver, DT>, ConfigIdx>
+    : DirectConvKernel<DirectTileConvBwdData32CKernel<ConfigIdx, Ver, DT>,
+                       TileConvVariant32c<Ver, DT>::configs_map.get(ConfigIdx)>
 {
     using V = TileConvVariant32c<Ver, DT>;
     static constexpr bool kIsFprop = false;
@@ -261,7 +386,8 @@ struct DirectTileConvBwdData32CKernel
 // Non-grouped (standard) conv 32c TileConv
 template <int ConfigIdx, Version Ver = Version::v3, DataType DT = DataType::fp16>
 struct DirectTileConvForward32CDenseKernel
-    : DirectConvKernel<DirectTileConvForward32CDenseKernel<ConfigIdx, Ver, DT>, ConfigIdx>
+    : DirectConvKernel<DirectTileConvForward32CDenseKernel<ConfigIdx, Ver, DT>,
+                       TileConvVariant32cDense<Ver, DT>::configs_map.get(ConfigIdx)>
 {
     using V = TileConvVariant32cDense<Ver, DT>;
     static constexpr bool kIsFprop = true;
@@ -277,7 +403,8 @@ struct DirectTileConvForward32CDenseKernel
 
 template <int ConfigIdx, Version Ver = Version::v3, DataType DT = DataType::fp16>
 struct DirectTileConvBwdData32CDenseKernel
-    : DirectConvKernel<DirectTileConvBwdData32CDenseKernel<ConfigIdx, Ver, DT>, ConfigIdx>
+    : DirectConvKernel<DirectTileConvBwdData32CDenseKernel<ConfigIdx, Ver, DT>,
+                       TileConvVariant32cDense<Ver, DT>::configs_map.get(ConfigIdx)>
 {
     using V = TileConvVariant32cDense<Ver, DT>;
     static constexpr bool kIsFprop = false;
@@ -298,7 +425,8 @@ struct DirectTileConvBwdData32CDenseKernel
 // 4c HipConv
 template <int ConfigIdx>
 struct DirectHipConvForward4CFp16Kernel
-    : DirectConvKernel<DirectHipConvForward4CFp16Kernel<ConfigIdx>, ConfigIdx>
+    : DirectConvKernel<DirectHipConvForward4CFp16Kernel<ConfigIdx>,
+                       HipConvVariant4c::configs_map.get(ConfigIdx)>
 {
     using V = HipConvVariant4c;
     static constexpr bool kIsFprop = true;
@@ -308,7 +436,8 @@ struct DirectHipConvForward4CFp16Kernel
 
 template <int ConfigIdx>
 struct DirectHipConvBwdData4CFp16Kernel
-    : DirectConvKernel<DirectHipConvBwdData4CFp16Kernel<ConfigIdx>, ConfigIdx>
+    : DirectConvKernel<DirectHipConvBwdData4CFp16Kernel<ConfigIdx>,
+                       HipConvVariant4c::configs_map.get(ConfigIdx)>
 {
     using V = HipConvVariant4c;
     static constexpr bool kIsFprop = false;
@@ -319,7 +448,8 @@ struct DirectHipConvBwdData4CFp16Kernel
 // 8c HipConv
 template <int ConfigIdx>
 struct DirectHipConvForward8CFp16Kernel
-    : DirectConvKernel<DirectHipConvForward8CFp16Kernel<ConfigIdx>, ConfigIdx>
+    : DirectConvKernel<DirectHipConvForward8CFp16Kernel<ConfigIdx>,
+                       HipConvVariant8c::configs_map.get(ConfigIdx)>
 {
     using V = HipConvVariant8c;
     static constexpr bool kIsFprop = true;
@@ -329,7 +459,8 @@ struct DirectHipConvForward8CFp16Kernel
 
 template <int ConfigIdx>
 struct DirectHipConvBwdData8CFp16Kernel
-    : DirectConvKernel<DirectHipConvBwdData8CFp16Kernel<ConfigIdx>, ConfigIdx>
+    : DirectConvKernel<DirectHipConvBwdData8CFp16Kernel<ConfigIdx>,
+                       HipConvVariant8c::configs_map.get(ConfigIdx)>
 {
     using V = HipConvVariant8c;
     static constexpr bool kIsFprop = false;
@@ -340,7 +471,8 @@ struct DirectHipConvBwdData8CFp16Kernel
 // 16c HipConv
 template <int ConfigIdx>
 struct DirectHipConvForward16CFp16Kernel
-    : DirectConvKernel<DirectHipConvForward16CFp16Kernel<ConfigIdx>, ConfigIdx>
+    : DirectConvKernel<DirectHipConvForward16CFp16Kernel<ConfigIdx>,
+                       HipConvVariant16c::configs_map.get(ConfigIdx)>
 {
     using V = HipConvVariant16c;
     static constexpr bool kIsFprop = true;
@@ -350,7 +482,8 @@ struct DirectHipConvForward16CFp16Kernel
 
 template <int ConfigIdx>
 struct DirectHipConvBwdData16CFp16Kernel
-    : DirectConvKernel<DirectHipConvBwdData16CFp16Kernel<ConfigIdx>, ConfigIdx>
+    : DirectConvKernel<DirectHipConvBwdData16CFp16Kernel<ConfigIdx>,
+                       HipConvVariant16c::configs_map.get(ConfigIdx)>
 {
     using V = HipConvVariant16c;
     static constexpr bool kIsFprop = false;
@@ -361,7 +494,8 @@ struct DirectHipConvBwdData16CFp16Kernel
 // 32c HipConv
 template <int ConfigIdx>
 struct DirectHipConvForward32CFp16Kernel
-    : DirectConvKernel<DirectHipConvForward32CFp16Kernel<ConfigIdx>, ConfigIdx>
+    : DirectConvKernel<DirectHipConvForward32CFp16Kernel<ConfigIdx>,
+                       HipConvVariant32c::configs_map.get(ConfigIdx)>
 {
     using V = HipConvVariant32c;
     static constexpr bool kIsFprop = true;
@@ -371,7 +505,8 @@ struct DirectHipConvForward32CFp16Kernel
 
 template <int ConfigIdx>
 struct DirectHipConvBwdData32CFp16Kernel
-    : DirectConvKernel<DirectHipConvBwdData32CFp16Kernel<ConfigIdx>, ConfigIdx>
+    : DirectConvKernel<DirectHipConvBwdData32CFp16Kernel<ConfigIdx>,
+                       HipConvVariant32c::configs_map.get(ConfigIdx)>
 {
     using V = HipConvVariant32c;
     static constexpr bool kIsFprop = false;

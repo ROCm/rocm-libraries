@@ -26,7 +26,6 @@
 #include "ck_tile/ops/direct_convolution/utils/common.hpp"
 #include "ck_tile/ops/direct_convolution/utils/detail.hpp"
 #include "ck_tile/ops/direct_convolution/utils/launch_params.hpp"
-#include "ck_tile/ops/direct_convolution/utils/kernel_variant.hpp"
 #include "ck_tile/ops/direct_convolution/utils/conv_params.hpp"
 #include "ck_tile/ops/direct_convolution/utils/memory.hpp"
 #include <hip/hip_runtime.h>

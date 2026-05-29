@@ -51,7 +51,7 @@ __global__ void test_chunked_prefetch_kernel(const _Float16* __restrict__ in,
                                               int target_y)
 {
 #ifdef __HIP_DEVICE_COMPILE__
-    constexpr auto cfg = v3::KernelConfigurations<>::configs[CfgIdx];
+    constexpr auto cfg = v3::KernelConfigurations<>::configs_map.get(CfgIdx);
     using TC          = v3::TileConstants<cfg>;
     using BlockCoords = v3::ConvBlockCoordsT<cfg>;
     using InputLoader = v3::ConvInputLoader<cfg>;
@@ -148,7 +148,7 @@ protected:
     template <int CfgIdx>
     void run_and_verify(int hi, int wi, int px, int target_y = 0)
     {
-        constexpr auto cfg = v3::KernelConfigurations<>::configs[CfgIdx];
+        constexpr auto cfg = v3::KernelConfigurations<>::configs_map.get(CfgIdx);
         using TC = v3::TileConstants<cfg>;
 
         constexpr int N_CSPW   = cfg.c_slices_per_wave;

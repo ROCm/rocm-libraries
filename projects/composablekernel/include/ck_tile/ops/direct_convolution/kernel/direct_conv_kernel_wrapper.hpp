@@ -16,12 +16,18 @@ namespace ck_tile::direct_conv {
 
 /// CRTP base class for all direct convolution kernel wrappers.
 ///
-/// Derived must provide:
-///   using V = <VariantAccessor>;  // has: configs, get_launch_params, launch, make_variant
-///   static constexpr bool kIsFprop = true/false;
-///   static std::string GetNamePrefix();  // e.g. "direct_tile_conv_fp16_fwd_"
+/// `Config` is a non-type template parameter (NTTP) carrying the full Config
+/// value at compile time.  This eliminates all runtime config-map lookups.
 ///
-template <typename Derived, int ConfigIdx>
+/// Derived must provide:
+///   using V = <VariantAccessor>;  // has: configs_map, get_launch_params<cfg>,
+///                                 //      launch_kernel<cfg>, is_applicable,
+///                                 //      is_config_compatible<cfg>
+///   static constexpr bool kIsFprop = true/false;
+///   static constexpr DataType kDataType = ...;
+///   static std::string GetNamePrefix();
+///
+template <typename Derived, auto Config>
 struct DirectConvKernel
 {
     struct KernelArgs
@@ -35,7 +41,7 @@ struct DirectConvKernel
 
     std::string GetName() const
     {
-        return Derived::GetNamePrefix() + Derived::V::configs[ConfigIdx].GetName();
+        return Derived::GetNamePrefix() + Config.GetName();
     }
 
     std::string GetTypeString() const { return GetName(); }
@@ -50,7 +56,7 @@ struct DirectConvKernel
         par.direction  = Direction::Fprop;
         par.compute_output_size();
 
-        auto lp = Derived::V::get_launch_params(ConfigIdx, par);
+        auto lp = Derived::V::template get_launch_params<Config>(par);
         return {par, lp, host_args.in_ptr, host_args.wei_ptr, host_args.out_ptr};
     }
 
@@ -69,23 +75,22 @@ struct DirectConvKernel
         par.direction  = Direction::Dgrad;
         par.compute_output_size();
 
-        auto lp = Derived::V::get_launch_params(ConfigIdx, par);
+        auto lp = Derived::V::template get_launch_params<Config>(par);
         // Swap pointers: kernel reads output gradient, writes input gradient
         return {par, lp, host_args.out_ptr, host_args.wei_ptr, host_args.in_ptr};
     }
 
     static bool IsSupportedArgument(const KernelArgs& kargs)
     {
-        auto variant = Derived::V::make_variant();
-        return variant.is_applicable(kargs.par) &&
-               variant.config_is_compatible(kargs.par, ConfigIdx);
+        return Derived::V::is_applicable(kargs.par) &&
+               Derived::V::template is_config_compatible<Config>(kargs.par);
     }
 
     static dim3 GridSize(const KernelArgs& kargs) { return kargs.lp.grid; }
 
     static dim3 BlockSize()
     {
-        return dim3(static_cast<unsigned>(Derived::V::configs[ConfigIdx].block_size()));
+        return dim3(static_cast<unsigned>(Config.block_size()));
     }
 
     static constexpr ck_tile::index_t GetSmemSize() { return 0; }
@@ -99,14 +104,13 @@ struct DirectConvKernel
             return {false, 0.0f, GetInstanceString()};
 
         auto callable = [&](const ck_tile::stream_config& sc) {
-            Derived::V::launch(ConfigIdx,
-                               kargs.lp,
-                               kargs.par,
-                               kargs.in_ptr,
-                               kargs.wei_ptr,
-                               kargs.out_ptr,
-                               nullptr,
-                               sc.stream_id_);
+            Derived::V::template launch_kernel<Config>(
+                kargs.lp,
+                kargs.par,
+                kargs.in_ptr,
+                kargs.wei_ptr,
+                kargs.out_ptr,
+                sc.stream_id_);
         };
 
         float avg_time = ck_tile::launch_kernel(s_conf, callable);

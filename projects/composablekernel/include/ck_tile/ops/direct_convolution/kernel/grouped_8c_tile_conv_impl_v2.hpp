@@ -27,8 +27,8 @@
 #include "ck_tile/ops/direct_convolution/utils/common.hpp"
 #include "ck_tile/ops/direct_convolution/utils/mfma.hpp"
 #include "ck_tile/ops/direct_convolution/utils/launch_params.hpp"
-#include "ck_tile/ops/direct_convolution/utils/kernel_variant.hpp"
 #include "ck_tile/ops/direct_convolution/utils/memory.hpp"
+#include "ck_tile/ops/direct_convolution/utils/config_map.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
 #include "ck_tile/core/tensor/buffer_view.hpp"
 #include "ck_tile/core/tensor/tensor_view.hpp"
@@ -157,219 +157,209 @@ struct Config
 template <DataType DT = DataType::fp16>
 struct KernelConfigurations
 {
-static constexpr Config<DT> configs[] = {
-    // ---- Group 0: Cyclic-shift swizzle, direct DRAM epilogue (default) ----
-    // Dgrad (indices 0-8)
-    {.waves_per_wg = 16, .direction = Direction::Dgrad},
-    {.waves_per_wg = 8, .direction = Direction::Dgrad},
-    {.waves_per_wg = 7, .direction = Direction::Dgrad},
-    {.waves_per_wg = 6, .direction = Direction::Dgrad},
-    {.waves_per_wg = 5, .direction = Direction::Dgrad},
-    {.waves_per_wg = 4, .direction = Direction::Dgrad},
-    {.waves_per_wg = 3, .direction = Direction::Dgrad},
-    {.waves_per_wg = 2, .direction = Direction::Dgrad},
-    {.waves_per_wg = 1, .direction = Direction::Dgrad},
-    // Fprop (indices 9-17)
-    {.waves_per_wg = 16},
-    {.waves_per_wg = 8},
-    {.waves_per_wg = 7},
-    {.waves_per_wg = 6},
-    {.waves_per_wg = 5},
-    {.waves_per_wg = 4},
-    {.waves_per_wg = 3},
-    {.waves_per_wg = 2},
-    {.waves_per_wg = 1},
-    // ---- Group 1: Cyclic-shift swizzle, LDS-staged epilogue ----
-    // Dgrad (indices 18-26)
-    {.waves_per_wg = 16, .direction = Direction::Dgrad,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
-    {.waves_per_wg = 8, .direction = Direction::Dgrad,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
-    {.waves_per_wg = 7, .direction = Direction::Dgrad,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
-    {.waves_per_wg = 6, .direction = Direction::Dgrad,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
-    {.waves_per_wg = 5, .direction = Direction::Dgrad,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
-    {.waves_per_wg = 4, .direction = Direction::Dgrad,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
-    {.waves_per_wg = 3, .direction = Direction::Dgrad,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
-    {.waves_per_wg = 2, .direction = Direction::Dgrad,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
-    {.waves_per_wg = 1, .direction = Direction::Dgrad,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
-    // Fprop (indices 27-35)
-    {.waves_per_wg = 16,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
-    {.waves_per_wg = 8,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
-    {.waves_per_wg = 7,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
-    {.waves_per_wg = 6,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
-    {.waves_per_wg = 5,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
-    {.waves_per_wg = 4,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
-    {.waves_per_wg = 3,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
-    {.waves_per_wg = 2,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
-    {.waves_per_wg = 1,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
+static constexpr auto configs_map = make_config_map<Config<DT>>({
+    // ---- Group 0: No swizzle, direct DRAM epilogue ----
+    // Dgrad (keys 0-8)
+    { 0, {.waves_per_wg = 16, .direction = Direction::Dgrad}},
+    { 1, {.waves_per_wg = 8,  .direction = Direction::Dgrad}},
+    { 2, {.waves_per_wg = 7,  .direction = Direction::Dgrad}},
+    { 3, {.waves_per_wg = 6,  .direction = Direction::Dgrad}},
+    { 4, {.waves_per_wg = 5,  .direction = Direction::Dgrad}},
+    { 5, {.waves_per_wg = 4,  .direction = Direction::Dgrad}},
+    { 6, {.waves_per_wg = 3,  .direction = Direction::Dgrad}},
+    { 7, {.waves_per_wg = 2,  .direction = Direction::Dgrad}},
+    { 8, {.waves_per_wg = 1,  .direction = Direction::Dgrad}},
+    // Fprop (keys 9-17)
+    { 9, {.waves_per_wg = 16}},
+    {10, {.waves_per_wg = 8}},
+    {11, {.waves_per_wg = 7}},
+    {12, {.waves_per_wg = 6}},
+    {13, {.waves_per_wg = 5}},
+    {14, {.waves_per_wg = 4}},
+    {15, {.waves_per_wg = 3}},
+    {16, {.waves_per_wg = 2}},
+    {17, {.waves_per_wg = 1}},
+    // ---- Group 1: No swizzle, LDS-staged epilogue ----
+    // Dgrad (keys 18-26)
+    {18, {.waves_per_wg = 16, .direction = Direction::Dgrad,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}},
+    {19, {.waves_per_wg = 8,  .direction = Direction::Dgrad,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}},
+    {20, {.waves_per_wg = 7,  .direction = Direction::Dgrad,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}},
+    {21, {.waves_per_wg = 6,  .direction = Direction::Dgrad,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}},
+    {22, {.waves_per_wg = 5,  .direction = Direction::Dgrad,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}},
+    {23, {.waves_per_wg = 4,  .direction = Direction::Dgrad,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}},
+    {24, {.waves_per_wg = 3,  .direction = Direction::Dgrad,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}},
+    {25, {.waves_per_wg = 2,  .direction = Direction::Dgrad,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}},
+    {26, {.waves_per_wg = 1,  .direction = Direction::Dgrad,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}},
+    // Fprop (keys 27-35)
+    {27, {.waves_per_wg = 16,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}},
+    {28, {.waves_per_wg = 8,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}},
+    {29, {.waves_per_wg = 7,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}},
+    {30, {.waves_per_wg = 6,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}},
+    {31, {.waves_per_wg = 5,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}},
+    {32, {.waves_per_wg = 4,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}},
+    {33, {.waves_per_wg = 3,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}},
+    {34, {.waves_per_wg = 2,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}},
+    {35, {.waves_per_wg = 1,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}},
     // ---- Group 2: XOR swizzle, direct DRAM epilogue ----
-    // Dgrad (indices 36-44)
-    {.waves_per_wg = 16, .direction = Direction::Dgrad,
-     .swizzle_type = SwizzleType::XOR},
-    {.waves_per_wg = 8, .direction = Direction::Dgrad,
-     .swizzle_type = SwizzleType::XOR},
-    {.waves_per_wg = 7, .direction = Direction::Dgrad,
-     .swizzle_type = SwizzleType::XOR},
-    {.waves_per_wg = 6, .direction = Direction::Dgrad,
-     .swizzle_type = SwizzleType::XOR},
-    {.waves_per_wg = 5, .direction = Direction::Dgrad,
-     .swizzle_type = SwizzleType::XOR},
-    {.waves_per_wg = 4, .direction = Direction::Dgrad,
-     .swizzle_type = SwizzleType::XOR},
-    {.waves_per_wg = 3, .direction = Direction::Dgrad,
-     .swizzle_type = SwizzleType::XOR},
-    {.waves_per_wg = 2, .direction = Direction::Dgrad,
-     .swizzle_type = SwizzleType::XOR},
-    {.waves_per_wg = 1, .direction = Direction::Dgrad,
-     .swizzle_type = SwizzleType::XOR},
-    // Fprop (indices 45-53)
-    {.waves_per_wg = 16,
-     .swizzle_type = SwizzleType::XOR},
-    {.waves_per_wg = 8,
-     .swizzle_type = SwizzleType::XOR},
-    {.waves_per_wg = 7,
-     .swizzle_type = SwizzleType::XOR},
-    {.waves_per_wg = 6,
-     .swizzle_type = SwizzleType::XOR},
-    {.waves_per_wg = 5,
-     .swizzle_type = SwizzleType::XOR},
-    {.waves_per_wg = 4,
-     .swizzle_type = SwizzleType::XOR},
-    {.waves_per_wg = 3,
-     .swizzle_type = SwizzleType::XOR},
-    {.waves_per_wg = 2,
-     .swizzle_type = SwizzleType::XOR},
-    {.waves_per_wg = 1,
-     .swizzle_type = SwizzleType::XOR},
+    // Dgrad (keys 36-44)
+    {36, {.waves_per_wg = 16, .direction = Direction::Dgrad,
+          .swizzle_type = SwizzleType::XOR}},
+    {37, {.waves_per_wg = 8,  .direction = Direction::Dgrad,
+          .swizzle_type = SwizzleType::XOR}},
+    {38, {.waves_per_wg = 7,  .direction = Direction::Dgrad,
+          .swizzle_type = SwizzleType::XOR}},
+    {39, {.waves_per_wg = 6,  .direction = Direction::Dgrad,
+          .swizzle_type = SwizzleType::XOR}},
+    {40, {.waves_per_wg = 5,  .direction = Direction::Dgrad,
+          .swizzle_type = SwizzleType::XOR}},
+    {41, {.waves_per_wg = 4,  .direction = Direction::Dgrad,
+          .swizzle_type = SwizzleType::XOR}},
+    {42, {.waves_per_wg = 3,  .direction = Direction::Dgrad,
+          .swizzle_type = SwizzleType::XOR}},
+    {43, {.waves_per_wg = 2,  .direction = Direction::Dgrad,
+          .swizzle_type = SwizzleType::XOR}},
+    {44, {.waves_per_wg = 1,  .direction = Direction::Dgrad,
+          .swizzle_type = SwizzleType::XOR}},
+    // Fprop (keys 45-53)
+    {45, {.waves_per_wg = 16, .swizzle_type = SwizzleType::XOR}},
+    {46, {.waves_per_wg = 8,  .swizzle_type = SwizzleType::XOR}},
+    {47, {.waves_per_wg = 7,  .swizzle_type = SwizzleType::XOR}},
+    {48, {.waves_per_wg = 6,  .swizzle_type = SwizzleType::XOR}},
+    {49, {.waves_per_wg = 5,  .swizzle_type = SwizzleType::XOR}},
+    {50, {.waves_per_wg = 4,  .swizzle_type = SwizzleType::XOR}},
+    {51, {.waves_per_wg = 3,  .swizzle_type = SwizzleType::XOR}},
+    {52, {.waves_per_wg = 2,  .swizzle_type = SwizzleType::XOR}},
+    {53, {.waves_per_wg = 1,  .swizzle_type = SwizzleType::XOR}},
     // ---- Group 3: XOR swizzle, LDS-staged epilogue ----
-    // Dgrad (indices 54-62)
-    {.waves_per_wg = 16, .direction = Direction::Dgrad,
-     .swizzle_type = SwizzleType::XOR,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
-    {.waves_per_wg = 8, .direction = Direction::Dgrad,
-     .swizzle_type = SwizzleType::XOR,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
-    {.waves_per_wg = 7, .direction = Direction::Dgrad,
-     .swizzle_type = SwizzleType::XOR,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
-    {.waves_per_wg = 6, .direction = Direction::Dgrad,
-     .swizzle_type = SwizzleType::XOR,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
-    {.waves_per_wg = 5, .direction = Direction::Dgrad,
-     .swizzle_type = SwizzleType::XOR,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
-    {.waves_per_wg = 4, .direction = Direction::Dgrad,
-     .swizzle_type = SwizzleType::XOR,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
-    {.waves_per_wg = 3, .direction = Direction::Dgrad,
-     .swizzle_type = SwizzleType::XOR,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
-    {.waves_per_wg = 2, .direction = Direction::Dgrad,
-     .swizzle_type = SwizzleType::XOR,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
-    {.waves_per_wg = 1, .direction = Direction::Dgrad,
-     .swizzle_type = SwizzleType::XOR,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
-    // Fprop (indices 63-71)
-    {.waves_per_wg = 16,
-     .swizzle_type = SwizzleType::XOR,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
-    {.waves_per_wg = 8,
-     .swizzle_type = SwizzleType::XOR,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
-    {.waves_per_wg = 7,
-     .swizzle_type = SwizzleType::XOR,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
-    {.waves_per_wg = 6,
-     .swizzle_type = SwizzleType::XOR,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
-    {.waves_per_wg = 5,
-     .swizzle_type = SwizzleType::XOR,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
-    {.waves_per_wg = 4,
-     .swizzle_type = SwizzleType::XOR,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
-    {.waves_per_wg = 3,
-     .swizzle_type = SwizzleType::XOR,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
-    {.waves_per_wg = 2,
-     .swizzle_type = SwizzleType::XOR,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
-    {.waves_per_wg = 1,
-     .swizzle_type = SwizzleType::XOR,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
-    // Cyclic shift instances
-    {.waves_per_wg = 8,
-     .swizzle_type = SwizzleType::CyclicShift,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
-    {.waves_per_wg = 8,
-     .swizzle_type = SwizzleType::CyclicShift,
-     .epilogue = EpilogueType::RegistersToGlobalMemory},
-    {.waves_per_wg = 8, .direction = Direction::Dgrad,
-     .swizzle_type = SwizzleType::CyclicShift,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
-    {.waves_per_wg = 8, .direction = Direction::Dgrad,
-     .swizzle_type = SwizzleType::CyclicShift,
-     .epilogue = EpilogueType::RegistersToGlobalMemory},
-     // ---- Group 4: cyclic-shift swizzle, LDS-staged epilogue ----
-    // Small vector load/store configs for padding cases (channels_per_group < 8)
-    // where we can't use vectorized accesses without out-of-bounds.
-    // Dgrad CyclicShift (indices 76-78)
-    {.waves_per_wg = 8, .direction = Direction::Dgrad,
-     .swizzle_type = SwizzleType::CyclicShift,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 4},
-    {.waves_per_wg = 8, .direction = Direction::Dgrad,
-     .swizzle_type = SwizzleType::CyclicShift,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 2},
-    {.waves_per_wg = 8, .direction = Direction::Dgrad,
-     .swizzle_type = SwizzleType::CyclicShift,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 1},
-    // Fprop CyclicShift (indices 79-81)
-    {.waves_per_wg = 8,
-     .swizzle_type = SwizzleType::CyclicShift,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 4},
-    {.waves_per_wg = 8,
-     .swizzle_type = SwizzleType::CyclicShift,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 2},
-    {.waves_per_wg = 8,
-     .swizzle_type = SwizzleType::CyclicShift,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 1},
-    // No-swizzle fallback for padding (indices 82-83)
-    {.waves_per_wg = 8, .direction = Direction::Dgrad,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 1},
-    {.waves_per_wg = 8,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 1},
-    // Additional cyclisft swizzle instances
-    {.waves_per_wg = 16,
-     .swizzle_type = SwizzleType::CyclicShift,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
-    {.waves_per_wg = 16,
-     .swizzle_type = SwizzleType::CyclicShift,
-     .epilogue = EpilogueType::RegistersToGlobalMemory},
-    {.waves_per_wg = 16, .direction = Direction::Dgrad,
-     .swizzle_type = SwizzleType::CyclicShift,
-     .epilogue = EpilogueType::RegistersToLdsToGlobalMemory},
-    {.waves_per_wg = 16, .direction = Direction::Dgrad,
-     .swizzle_type = SwizzleType::CyclicShift,
-     .epilogue = EpilogueType::RegistersToGlobalMemory},
-};
-static constexpr int NUM_CONFIGS = sizeof(configs) / sizeof(configs[0]);
+    // Dgrad (keys 54-62)
+    {54, {.waves_per_wg = 16, .direction = Direction::Dgrad,
+          .swizzle_type = SwizzleType::XOR,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}},
+    {55, {.waves_per_wg = 8,  .direction = Direction::Dgrad,
+          .swizzle_type = SwizzleType::XOR,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}},
+    {56, {.waves_per_wg = 7,  .direction = Direction::Dgrad,
+          .swizzle_type = SwizzleType::XOR,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}},
+    {57, {.waves_per_wg = 6,  .direction = Direction::Dgrad,
+          .swizzle_type = SwizzleType::XOR,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}},
+    {58, {.waves_per_wg = 5,  .direction = Direction::Dgrad,
+          .swizzle_type = SwizzleType::XOR,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}},
+    {59, {.waves_per_wg = 4,  .direction = Direction::Dgrad,
+          .swizzle_type = SwizzleType::XOR,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}},
+    {60, {.waves_per_wg = 3,  .direction = Direction::Dgrad,
+          .swizzle_type = SwizzleType::XOR,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}},
+    {61, {.waves_per_wg = 2,  .direction = Direction::Dgrad,
+          .swizzle_type = SwizzleType::XOR,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}},
+    {62, {.waves_per_wg = 1,  .direction = Direction::Dgrad,
+          .swizzle_type = SwizzleType::XOR,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}},
+    // Fprop (keys 63-71)
+    {63, {.waves_per_wg = 16,
+          .swizzle_type = SwizzleType::XOR,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}},
+    {64, {.waves_per_wg = 8,
+          .swizzle_type = SwizzleType::XOR,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}},
+    {65, {.waves_per_wg = 7,
+          .swizzle_type = SwizzleType::XOR,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}},
+    {66, {.waves_per_wg = 6,
+          .swizzle_type = SwizzleType::XOR,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}},
+    {67, {.waves_per_wg = 5,
+          .swizzle_type = SwizzleType::XOR,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}},
+    {68, {.waves_per_wg = 4,
+          .swizzle_type = SwizzleType::XOR,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}},
+    {69, {.waves_per_wg = 3,
+          .swizzle_type = SwizzleType::XOR,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}},
+    {70, {.waves_per_wg = 2,
+          .swizzle_type = SwizzleType::XOR,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}},
+    {71, {.waves_per_wg = 1,
+          .swizzle_type = SwizzleType::XOR,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}},
+    // Cyclic shift instances (keys 72-75)
+    {72, {.waves_per_wg = 8,
+          .swizzle_type = SwizzleType::CyclicShift,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}},
+    {73, {.waves_per_wg = 8,
+          .swizzle_type = SwizzleType::CyclicShift,
+          .epilogue = EpilogueType::RegistersToGlobalMemory}},
+    {74, {.waves_per_wg = 8, .direction = Direction::Dgrad,
+          .swizzle_type = SwizzleType::CyclicShift,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}},
+    {75, {.waves_per_wg = 8, .direction = Direction::Dgrad,
+          .swizzle_type = SwizzleType::CyclicShift,
+          .epilogue = EpilogueType::RegistersToGlobalMemory}},
+    // ---- Group 4: CyclicShift, small vector sizes for padding cases ----
+    // Dgrad CyclicShift (keys 76-78)
+    {76, {.waves_per_wg = 8, .direction = Direction::Dgrad,
+          .swizzle_type = SwizzleType::CyclicShift,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 4}},
+    {77, {.waves_per_wg = 8, .direction = Direction::Dgrad,
+          .swizzle_type = SwizzleType::CyclicShift,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 2}},
+    {78, {.waves_per_wg = 8, .direction = Direction::Dgrad,
+          .swizzle_type = SwizzleType::CyclicShift,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 1}},
+    // Fprop CyclicShift (keys 79-81)
+    {79, {.waves_per_wg = 8,
+          .swizzle_type = SwizzleType::CyclicShift,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 4}},
+    {80, {.waves_per_wg = 8,
+          .swizzle_type = SwizzleType::CyclicShift,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 2}},
+    {81, {.waves_per_wg = 8,
+          .swizzle_type = SwizzleType::CyclicShift,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 1}},
+    // No-swizzle fallback for padding (keys 82-83)
+    {82, {.waves_per_wg = 8, .direction = Direction::Dgrad,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 1}},
+    {83, {.waves_per_wg = 8,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory, .vector_size = 1}},
+    // Additional cyclic shift instances (keys 84-87)
+    {84, {.waves_per_wg = 16,
+          .swizzle_type = SwizzleType::CyclicShift,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}},
+    {85, {.waves_per_wg = 16,
+          .swizzle_type = SwizzleType::CyclicShift,
+          .epilogue = EpilogueType::RegistersToGlobalMemory}},
+    {86, {.waves_per_wg = 16, .direction = Direction::Dgrad,
+          .swizzle_type = SwizzleType::CyclicShift,
+          .epilogue = EpilogueType::RegistersToLdsToGlobalMemory}},
+    {87, {.waves_per_wg = 16, .direction = Direction::Dgrad,
+          .swizzle_type = SwizzleType::CyclicShift,
+          .epilogue = EpilogueType::RegistersToGlobalMemory}},
+});
+static_assert(configs_map.is_valid(), "Duplicate or negative config key in grouped_8c_tile configs_map");
+static constexpr int NUM_CONFIGS = configs_map.size;
 }; // KernelConfigurations
 
 template <DataType DT = DataType::fp16>
@@ -393,10 +383,10 @@ inline bool is_valid_config(const Conv2dParams& par, const Config<DT>& cfg)
     return true;
 }
 
-template <DataType DT = DataType::fp16>
-inline LaunchParams get_launch_params(int config_idx, const Conv2dParams& par)
+template <auto cfg>
+inline LaunchParams get_launch_params(const Conv2dParams& par)
 {
-    return get_launch_params_impl(KernelConfigurations<DT>::configs[config_idx], par);
+    return get_launch_params_impl(cfg, par);
 }
 
 // ===================================================================
@@ -770,28 +760,49 @@ __global__ void ck_tile_conv2d_grouped_8c_nhwc(const ToType<cfg.data_type>* __re
 }
 
 // ============================================================================
-// Launch dispatch
+// Applicability check
 // ============================================================================
 
-template <DataType DT = DataType::fp16, size_t... Is>
-void launch_dispatch(int config_idx,
-                     std::index_sequence<Is...>,
-                     const LaunchParams& lp,
-                     const Conv2dParams& par,
-                     const void* in,
-                     const void* wei,
-                     void* out,
-                     hipStream_t stream)
+static bool channels_can_be_padded(const Conv2dParams& par)
+{
+    int c = par.channels_per_group();
+    int k = par.filters_per_group();
+    // Only pad to 8 if at least one dimension exceeds the 4c kernel's range.
+    return c <= 8 && k <= 8 && (c > 4 || k > 4);
+}
+
+template <DataType DT = DataType::fp16>
+inline bool is_applicable(const Conv2dParams& par)
+{
+    if(!is_applicable_base(par))
+        return false;
+    if(par.in_type != DT || par.wei_type != DT || par.out_type != DT)
+        return false;
+    if(!channels_can_be_padded(par))
+        return false;
+    return true;
+}
+
+// ============================================================================
+// Kernel launch
+// ============================================================================
+
+template <auto cfg, DataType DT = DataType::fp16>
+inline void launch_kernel(const LaunchParams& lp,
+                          const Conv2dParams& par,
+                          const void* in,
+                          const void* wei,
+                          void* out,
+                          hipStream_t stream)
 {
     using ElementType = ToType<DT>;
-    using KC = KernelConfigurations<DT>;
-    const bool needs_padding = par.channels_per_group() != KC::configs[0].group_size() ||
-                               par.filters_per_group() != KC::configs[0].group_size();
+    const bool needs_padding = par.channels_per_group() != cfg.group_size() ||
+                               par.filters_per_group() != cfg.group_size();
+    auto view = SizeView<cfg.direction>(par);
 
-    auto kernel_launch = [&]<size_t I, bool P>()
+    auto do_launch = [&]<bool Pad>()
     {
-        auto view = SizeView<KC::configs[I].direction>(par);
-        ck_tile_conv2d_grouped_8c_nhwc<KC::configs[I], P>
+        ck_tile_conv2d_grouped_8c_nhwc<cfg, Pad>
             <<<lp.grid, lp.block_size, lp.dynamic_shared_bytes, stream>>>(
                 static_cast<const ElementType*>(in),
                 static_cast<const ElementType*>(wei),
@@ -816,64 +827,10 @@ void launch_dispatch(int config_idx,
                 view.pad_w());
     };
 
-    auto dispatch_config = [&]<size_t I>()
-    {
-        if(needs_padding)
-            kernel_launch.template operator()<I, true>();
-        else
-            kernel_launch.template operator()<I, false>();
-    };
-
-    (void)((config_idx == static_cast<int>(Is) ? (dispatch_config.template operator()<Is>(), true)
-                                               : false) ||
-           ...);
-}
-
-template <DataType DT = DataType::fp16>
-inline void launch(int config_idx,
-                   const LaunchParams& lp,
-                   const Conv2dParams& par,
-                   const void* in,
-                   const void* wei,
-                   void* out,
-                   void* /*workspace*/,
-                   hipStream_t stream)
-{
-    launch_dispatch<DT>(
-        config_idx, std::make_index_sequence<KernelConfigurations<DT>::NUM_CONFIGS>{},
-        lp, par, in, wei, out, stream);
-}
-
-static bool channels_can_be_padded(const Conv2dParams& par)
-{
-    int c = par.channels_per_group();
-    int k = par.filters_per_group();
-    // Only pad to 8 if at least one dimension exceeds the 4c kernel's range.
-    return c <= 8 && k <= 8 && (c > 4 || k > 4);
-}
-
-template <DataType DT = DataType::fp16>
-constexpr KernelVariant make_variant()
-{
-    return {
-        .is_applicable =
-            [](const Conv2dParams& par)
-        {
-            if(!is_applicable_base(par))
-                return false;
-            if(par.in_type != DT || par.wei_type != DT || par.out_type != DT)
-                return false;
-            if(!channels_can_be_padded(par))
-                return false;
-            return true;
-        },
-        .config_is_compatible = [](const Conv2dParams& par, int idx)
-        { return is_valid_config<DT>(par, KernelConfigurations<DT>::configs[idx]); },
-        .get_launch_params  = &get_launch_params<DT>,
-        .launch             = &launch<DT>,
-        .get_workspace_size = [](int, const Conv2dParams&) -> size_t { return 0; },
-        .num_configs        = KernelConfigurations<DT>::NUM_CONFIGS,
-    };
+    if(needs_padding)
+        do_launch.template operator()<true>();
+    else
+        do_launch.template operator()<false>();
 }
 
 } // namespace ck_tile::direct_conv::grouped_8c_tile::v2
