@@ -31,7 +31,7 @@ struct StreamKTilePartitionerBase
                                                 ? memory_operation_enum::atomic_add
                                                 : memory_operation_enum::set;
 
-    StreamKTilePartitionerBase(index_t m, index_t n, index_t k, index_t grid);
+    StreamKTilePartitionerBase(index_t m, index_t n, index_t k, index_t max_number_wgs);
 
     /**
      * @brief Calculates the total space needed for the partials buffer.
@@ -156,7 +156,7 @@ struct StreamKTilePartitionerBase
      * @brief Returns the maximum number of active workgroups; this is assumed to be number of CUs *
      * occupancy.
      */
-    CK_TILE_HOST_DEVICE index_t get_grid() const noexcept;
+    CK_TILE_HOST_DEVICE index_t get_max_active_wgs() const noexcept;
 
     /**
      * @brief Returns the number of tiles in the C tensor that will use the data-parallel (DP)
@@ -213,9 +213,21 @@ struct StreamKTilePartitionerBase
      */
     CK_TILE_HOST index_t estimate_num_wgs_per_tile() const noexcept;
 
+    /**
+     * @brief XCDs access ids in round robin format, this function remaps the 1D ids to continguous
+     * XCD segments
+     *
+     * @param block_1d_id       grid 1D id
+     * @param total_num_tiles   size of the 1D grid
+     * @param num_xcds          number of XCDs
+     * @return index_t  The id after XCD remap
+     */
+    CK_TILE_HOST_DEVICE static index_t
+    remap_xcd(index_t block_1d_id, index_t total_num_tiles, index_t num_xcds = 8) noexcept;
+
     protected:
     index_t num_tiles_;
-    index_t grid_;
+    index_t max_active_wgs_;
     index_t dp_tiles_;
 
     private:
@@ -270,7 +282,7 @@ struct StreamKTilePartitioner<BlockGemmShapeType, ReductionStrategyType, true>
     StreamKTilePartitioner(ck_tile::index_t m,
                            ck_tile::index_t n,
                            ck_tile::index_t k,
-                           ck_tile::index_t grid);
+                           ck_tile::index_t max_active_wgs);
 
     public:
     static constexpr bool PERSISTENT = true;
@@ -281,7 +293,7 @@ struct StreamKTilePartitioner<BlockGemmShapeType, ReductionStrategyType, true>
      *
      * @return dim_3           The launching grid size for the kernel.
      */
-    CK_TILE_HOST auto grid_size() const noexcept -> dim3;
+    CK_TILE_HOST_DEVICE auto grid_size() const noexcept -> dim3;
 
     /**
      * @brief Returns the total number of DP tiles per workgroup.
@@ -290,7 +302,7 @@ struct StreamKTilePartitioner<BlockGemmShapeType, ReductionStrategyType, true>
 
     /**
      * @brief Returns the total number of DP tiles left over when `dp_tiles_` is not evenly
-     * divisible by `grid_`.
+     * divisible by `max_active_wgs_`.
      */
     CK_TILE_HOST_DEVICE index_t get_extra_dp_tiles() const noexcept;
 
@@ -317,7 +329,7 @@ struct StreamKTilePartitioner<BlockGemmShapeType, ReductionStrategyType, false>
     StreamKTilePartitioner(ck_tile::index_t m,
                            ck_tile::index_t n,
                            ck_tile::index_t k,
-                           ck_tile::index_t grid);
+                           ck_tile::index_t max_number_wgs);
 
     public:
     static constexpr bool PERSISTENT = false;
@@ -328,7 +340,7 @@ struct StreamKTilePartitioner<BlockGemmShapeType, ReductionStrategyType, false>
      *
      * @return dim_3           The launching grid size for the kernel.
      */
-    CK_TILE_HOST auto grid_size() const noexcept -> dim3;
+    CK_TILE_HOST_DEVICE auto grid_size() const noexcept -> dim3;
 
     /**
      * @brief Returns the total number of DP workgroups.

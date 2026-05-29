@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -42,6 +42,10 @@ namespace rocsparse
         rocsparse_index_base bsr_base,
         rocsparse_int* __restrict__ bsr_row_ptr)
     {
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
+        static_assert(WFSIZE % ROW_BLOCKDIM == 0, "WFSIZE must be a multiple of ROW_BLOCKDIM.");
         int bid = hipBlockIdx_x;
         int tid = hipThreadIdx_x;
 
@@ -142,6 +146,10 @@ namespace rocsparse
                                                       rocsparse_index_base bsr_base,
                                                       rocsparse_int* __restrict__ bsr_row_ptr)
     {
+        static_assert(BLOCKSIZE > 0 && (BLOCKSIZE & (BLOCKSIZE - 1)) == 0,
+                      "BLOCKSIZE must be a power of two.");
+        static_assert(BLOCKSIZE % ROW_BLOCKDIM == 0,
+                      "BLOCKSIZE must be a multiple of ROW_BLOCKDIM.");
         int bid = hipBlockIdx_x;
         int tid = hipThreadIdx_x;
 
@@ -242,6 +250,8 @@ namespace rocsparse
                                      rocsparse_int* __restrict__ bsr_row_ptr,
                                      rocsparse_int* __restrict__ temp1)
     {
+        static_assert(BLOCKSIZE > 0 && (BLOCKSIZE & (BLOCKSIZE - 1)) == 0,
+                      "BLOCKSIZE must be a power of two.");
         rocsparse_int block_id = hipBlockIdx_x;
         rocsparse_int lane_id  = hipThreadIdx_x;
 
@@ -341,6 +351,10 @@ namespace rocsparse
                                                       rocsparse_int* __restrict__ bsr_row_ptr,
                                                       rocsparse_int* __restrict__ bsr_col_ind)
     {
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
+        static_assert(WFSIZE % ROW_BLOCKDIM == 0, "WFSIZE must be a multiple of ROW_BLOCKDIM.");
         int bid = hipBlockIdx_x;
         int tid = hipThreadIdx_x;
 
@@ -471,6 +485,14 @@ namespace rocsparse
                                                   rocsparse_int* __restrict__ bsr_row_ptr,
                                                   rocsparse_int* __restrict__ bsr_col_ind)
     {
+        static_assert(BLOCKSIZE > 0 && (BLOCKSIZE & (BLOCKSIZE - 1)) == 0,
+                      "BLOCKSIZE must be a power of two.");
+        static_assert(BLOCKSIZE % ROW_BLOCKDIM == 0,
+                      "BLOCKSIZE must be a multiple of ROW_BLOCKDIM.");
+        constexpr uint32_t REQUIRED_SHARED_MEMORY
+            = std::max(ROW_BLOCKDIM * COL_BLOCKDIM,
+                       BLOCKSIZE * static_cast<uint32_t>(sizeof(rocsparse_int) / sizeof(T)));
+
         int bid = hipBlockIdx_x;
         int tid = hipThreadIdx_x;
 
@@ -483,7 +505,7 @@ namespace rocsparse
         rocsparse_int row       = row_block_dim * bid + wid;
 
         __shared__ bool table;
-        __shared__ T    data[ROW_BLOCKDIM * COL_BLOCKDIM];
+        __shared__ T    data[REQUIRED_SHARED_MEMORY];
 
         rocsparse_int row_begin
             = (row < m && wid < row_block_dim) ? csr_row_ptr[row] - csr_base : 0;
@@ -603,6 +625,8 @@ namespace rocsparse
                                  rocsparse_int* __restrict__ temp1,
                                  T* __restrict__ temp2)
     {
+        static_assert(BLOCKSIZE > 0 && (BLOCKSIZE & (BLOCKSIZE - 1)) == 0,
+                      "BLOCKSIZE must be a power of two.");
         rocsparse_int block_id = hipBlockIdx_x;
         rocsparse_int lane_id  = hipThreadIdx_x;
 

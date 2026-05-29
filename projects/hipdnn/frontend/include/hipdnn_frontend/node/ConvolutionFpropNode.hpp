@@ -3,17 +3,17 @@
 #pragma once
 
 #include "Node.hpp"
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/detail/ConvolutionFpropPacker.hpp>
+#include <hipdnn_frontend/detail/ConvolutionFpropUnpacker.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 
 namespace hipdnn_frontend::graph
 {
-class ConvolutionFpropNode : public BaseNode<ConvolutionFpropNode>
+class ConvolutionFpropNode : public BaseNode<ConvolutionFpropNode, NodeType::CONVOLUTION_FPROP>
 {
 public:
     ConvFpropAttributes attributes;
@@ -22,6 +22,16 @@ public:
         : BaseNode(graphAttrs)
         , attributes(std::move(convAttrs))
     {
+    }
+
+    Error unpack_from_descriptor(
+        hipdnnBackendDescriptor_t opDesc,
+        std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap) override
+    {
+        ConvFpropAttributes convAttr;
+        HIPDNN_CHECK_ERROR(detail::unpackConvFpropOperation(opDesc, tensorMap, convAttr));
+        attributes = std::move(convAttr);
+        return {};
     }
 
     Error pre_validate_node() const override
@@ -203,7 +213,7 @@ public:
                                         + std::to_string(kernelSize) + ") and dilation ("
                                         + std::to_string(dilationVal) + ")");
 
-                int64_t expectedOutputSize = (numerator / strideVal) + 1;
+                const int64_t expectedOutputSize = (numerator / strideVal) + 1;
 
                 HIPDNN_RETURN_IF_NE(
                     outputSize,
@@ -355,17 +365,6 @@ public:
         }
 
         return {};
-    }
-
-    flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>
-        pack_node(flatbuffers::FlatBufferBuilder& builder) const override
-    {
-        return hipdnn_data_sdk::data_objects::CreateNodeDirect(
-            builder,
-            attributes.get_name().c_str(),
-            toSdkType(attributes.compute_data_type),
-            hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes,
-            attributes.pack_attributes(builder).Union());
     }
 
     Error create_operation(

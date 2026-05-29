@@ -33,6 +33,7 @@
 #include "tensor_holder.hpp"
 #include "get_handle.hpp"
 #include "cba.hpp"
+#include "gtest_desc_guard.hpp"
 #include "../lib_env_var.hpp"
 
 #if MIOPEN_BACKEND_HIP
@@ -168,21 +169,18 @@ TEST(CPU_FusionCreateOpConvForward_FP32, TestInvalidConvLayout)
     std::vector<int> dilation{1, 1};
     std::vector<int> stride{1, 1};
 
-    miopenTensorDescriptor_t xDesc;
-    miopenCreateTensorDescriptor(&xDesc);
+    TensorDescGuard xDesc;
     miopenSetTensorDescriptor(
         xDesc, miopenDataType_t::miopenFloat, xDims.size(), xDims.data(), xStrides.data());
 
-    miopenTensorDescriptor_t wDesc;
-    miopenCreateTensorDescriptor(&wDesc);
+    TensorDescGuard wDesc;
     miopenSetTensorDescriptor(
         wDesc, miopenDataType_t::miopenFloat, wDims.size(), wDims.data(), wStrides.data());
 
     miopenFusionPlanDescriptor_t fusionPlanDesc;
     miopenCreateFusionPlan(&fusionPlanDesc, miopenVerticalFusion, xDesc);
 
-    miopenConvolutionDescriptor_t convDesc;
-    miopenCreateConvolutionDescriptor(&convDesc);
+    ConvDescGuard convDesc;
     miopenInitConvolutionNdDescriptor(convDesc,
                                       2,
                                       padding.data(),
@@ -193,10 +191,11 @@ TEST(CPU_FusionCreateOpConvForward_FP32, TestInvalidConvLayout)
     miopenFusionOpDescriptor_t convOp;
     auto status = miopenCreateOpConvForward(fusionPlanDesc, &convOp, convDesc, wDesc);
     EXPECT_EQUAL(status, miopenStatusUnknownError);
+
+    miopenDestroyFusionPlan(fusionPlanDesc);
 }
 
 MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_AMD_WINOGRAD_RXS_F2X3_G1)
-MIOPEN_LIB_ENV_VAR(MIOPEN_DEBUG_AMD_WINOGRAD_RAGE_RXS_F2X3)
 
 // The test uses a specific fusion configuration that triggers the solver.
 // ConvCKIgemmGrpFwdBiasActivFused
@@ -264,7 +263,6 @@ public:
         miopenConvFwdAlgorithm_t algo{}; // not used in GetWorkSpaceSize
         {
             ScopedEnvironment<bool> find_mode_env1(MIOPEN_DEBUG_AMD_WINOGRAD_RXS_F2X3_G1, false);
-            ScopedEnvironment<bool> find_mode_env2(MIOPEN_DEBUG_AMD_WINOGRAD_RAGE_RXS_F2X3, false);
             ASSERT_TRUE(
                 IsOnlyConvCKIgemmGrpFwdBiasActivFusedSolverApplicable(cba_base::fusePlanDesc))
                 << "Test configuration is invalid as other solvers are applicable. Please update "

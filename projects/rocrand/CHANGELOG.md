@@ -1,7 +1,18 @@
-# Changelog for rocRAND
+#Changelog for rocRAND
 
 Documentation for rocRAND is available at
 [https://rocm.docs.amd.com/projects/rocRAND/en/latest/](https://rocm.docs.amd.com/projects/rocRAND/en/latest/)
+
+## Since last release ROCm 7.12
+
+### Added
+
+* gfx1150,gfx1152 and gfx1153 support
+* rocrand.dll now contains embedded file version metadata.
+
+### Resolved Issues
+
+* Fixed memory leak in unit tests.
 
 ## rocRAND 4.3.0 for ROCm 7.12
 
@@ -9,17 +20,9 @@ Documentation for rocRAND is available at
 
 * Fixed dynamic ordering support for threefry generators.
 
-## rocRAND x.y.z for ROCm x.y.z
-
-### Added
-
-* Occupancy-based tooling for `benchmark_rocrand_device_api` workload increase.
-* New `provision` command-line parameter for `benchmark_rocrand_device_api` - a multiplier for automatic block computation.
-
 ### Changed
 
-* Updated `benchmark_rocrand_device_api` to use occupancy-based tooling to increase benchmark workloads.
-* Changed input size for `benchmark_rocrand_host_api` to increase it's workload.
+* Optimized `xorwow` generator performance for `gfx908` and `gfx942` architectures.
 
 ## rocRAND 4.2.0 for ROCm 7.2
 

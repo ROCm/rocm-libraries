@@ -4,76 +4,27 @@
 
 .. _windows-install:
 
-********************************************************************
-Installing and building on Microsoft Windows
-********************************************************************
+****************************
+Build and install on Windows
+****************************
 
-This topic discusses how to install rocBLAS on Microsoft Windows from a prebuilt package or from source.
+To build rocBLAS as part of the ROCm Core SDK, see `TheRock build
+instructions
+<https://github.com/ROCm/TheRock/blob/main/docs/development/README.md>`__.
+TheRock is the recommended way to build ROCm components from source.
 
-=====================================
+Alternatively, you can build rocBLAS standalone using the following
+instructions.
+
 Prerequisites
-=====================================
+=============
 
-rocBLAS requires an AMD HIP SDK-enabled platform. For more information,
-see :doc:`System requirements for Windows <rocm-install-on-windows:reference/system-requirements>`.
-rocBLAS is supported on the same Windows versions and toolchains that HIP SDK supports.
+rocBLAS requires a ROCm-enabled platform. For more information,
+see :ref:`ROCm Core SDK components <rocm:release-components>`.
 
-.. note::
-
-   The :doc:`AMD HIP SDK documentation <rocm-install-on-windows:index>` contains more up-to-date Windows install information.
-
-============================
-Installing prebuilt packages
-============================
-
-rocBLAS can be installed on Windows using the :doc:`AMD HIP SDK installer <rocm-install-on-windows:index>`.
-For version support information, see the :doc:`System requirements for Windows <rocm-install-on-windows:reference/system-requirements>`.
-
-The simplest way to use rocBLAS in your code is to use CMake. To install rocBLAS on Windows, follow these steps:
-
-#. Add the SDK installation location to ``CMAKE_PREFIX_PATH`` in the CMake configuration command.
-
-   .. code-block:: shell
-
-      -DCMAKE_PREFIX_PATH="C:\Program Files\AMD\ROCm\5.5"
-
-   .. note::
-
-      You must use quotes around the path because it contains a space.
-
-#. Add the following lines to ``CMakeLists.txt``:
-
-   .. code-block:: shell
-
-      find_package(rocblas)
-      target_link_libraries( your_exe PRIVATE roc::rocblas )
-
-Examples demonstrating how to build rocBLAS on Windows with CMake can be found at the
-`rocBLAS-Examples GitHub page <https://github.com/ROCm/rocBLAS-Examples>`_.
-
-After installation, use rocBLAS like any other library with a C API.
-The ``rocblas.h`` header file must be included in the user code to make calls
-into rocBLAS, while the rocBLAS shared library is link-time and run-time
-dependent for the user application.
-
-.. note::
-
-   Run-time dependencies include the dynamic link library (``.dll``) file and the entire ``rocblas/``
-   subdirectory, which is found in the HIP SDK ``bin`` folder. This folder
-   can either reside in the same directory as ``rocblas.dll``
-   or be moved elsewhere provided that the environment variable ``ROCBLAS_TENSILE_LIBPATH`` is set to the
-   new location. The contents are read at execution time much like additional DLL files.
-
-After installation, you can find ``rocblas.h`` in the HIP SDK ``\include\rocblas``
-directory. Only use these two installed files when needed in user code.
-You can find the other rocBLAS included files included in the HIP SDK in ``\include\rocblas\internal`` but
-do not include these files directly into source code.
-
-===============================
 Building and installing rocBLAS
 ===============================
 
-Most users do not need to build rocBLAS from source because it can be used after installing the prebuilt packages as described above.
 If necessary, follow these instructions to build rocBLAS from source.
 The rocBLAS codebase for the HIP SDK is the same as the one used for the Linux ROCm distribution.
 However, because these two distributions have different stacks, the code and build process have subtle variations.
@@ -132,6 +83,14 @@ Use the following commands for a sparse checkout:
    git sparse-checkout init --cone
    git sparse-checkout set projects/rocblas shared/tensile
    git checkout develop # or use the branch you want to work with
+
+The checkout above omits other top-level trees (for example ``shared/ctest``). If you build the test
+client (``BUILD_CLIENTS_TESTS=ON``) and want YAML-based CTest labels and the installed
+``CTestTestfile.cmake`` from the shared categorization helpers, add ``shared/ctest`` to the
+``git sparse-checkout set`` list (or use a full clone). Without ``shared/ctest`` present under
+``ROCM_LIBRARIES_ROOT``, ``ROCBLAS_ENABLE_CTEST`` defaults to OFF. If you turn
+``ROCBLAS_ENABLE_CTEST`` ON explicitly, configuration requires both ``clients/gtest/test_categories.yaml``
+and ``shared/ctest/TestCategories.cmake`` to exist.
 
 .. note::
 

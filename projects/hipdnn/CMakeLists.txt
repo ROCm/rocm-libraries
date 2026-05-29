@@ -7,21 +7,34 @@ cmake_minimum_required(VERSION 3.25.2)
 set(HIPDNN_SPDLOG_VERSION "1.15.3" CACHE STRING "Version of spdlog to use")
 set(HIPDNN_FLATBUFFERS_VERSION "25.9.23" CACHE STRING "Version of flatbuffers to use")
 set(HIPDNN_NLOHMANN_JSON_VERSION "3.12.0" CACHE STRING "Version of nlohmann_json to use")
-set(HIPDNN_FMTLIB_VERSION "11.1.3" CACHE STRING "Version of fmtlib to use")
 set(HIPDNN_GTEST_VERSION "1.16.0" CACHE STRING "Version of googletest to use")
+set(HIPDNN_NANOBIND_VERSION "2.12.0" CACHE STRING "Version of nanobind to use")
+set(HIPDNN_TSL_ROBIN_MAP_VERSION "1.4.1" CACHE STRING "Version of tsl-robin-map to use")
 
-option(HIPDNN_FRONTEND_SKIP_JSON_LIB "Defines whether FE should not include nlohmann/json.hpp." OFF)
+option(HIPDNN_SKIP_JSON_LIB "Defines whether SDK public headers should not include nlohmann/json.hpp." OFF)
 
 # Status message
-if(HIPDNN_FRONTEND_SKIP_JSON_LIB)
-    message(STATUS "hipDNN: JSON serialization disabled")
+if(HIPDNN_SKIP_JSON_LIB)
+    message(STATUS "hipDNN: JSON serialization disabled in SDK public headers")
 else()
-    message(STATUS "hipDNN: JSON serialization enabled (requires nlohmann_json)")
+    message(STATUS "hipDNN: JSON serialization enabled in SDK public headers (requires nlohmann_json)")
+endif()
+
+option(HIPDNN_ENABLE_SDPA "Enable SDPA (Scaled Dot-Product Attention) support" OFF)
+
+if(HIPDNN_ENABLE_SDPA)
+    message(STATUS "hipDNN: SDPA support enabled")
+else()
+    message(STATUS "hipDNN: SDPA support disabled")
 endif()
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 add_compile_definitions(__HIP_PLATFORM_AMD__)
+
+if(HIPDNN_ENABLE_SDPA)
+    add_compile_definitions(HIPDNN_ENABLE_SDPA)
+endif()
 
 if(NOT CMAKE_TOOLCHAIN_FILE)
     set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/ClangToolChain.cmake"
@@ -90,24 +103,28 @@ set(HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR
     "${HIPDNN_PLUGIN_ROOTDIR}/${HIPDNN_PLUGIN_ENGINE_SUBDIR}"
     CACHE STRING "Relative install directory for official hipDNN engine plugins"
 )
+set(HIPDNN_PLUGIN_HEURISTIC_SUBDIR "hipdnn_plugins/heuristics"
+    CACHE STRING "Subdirectory for official hipDNN heuristic plugins"
+)
+set(HIPDNN_BUILD_PLUGIN_HEURISTIC_DIR
+    "${CMAKE_BINARY_DIR}/${HIPDNN_PLUGIN_ROOTDIR}/${HIPDNN_PLUGIN_HEURISTIC_SUBDIR}"
+    CACHE PATH "Build directory for official hipDNN heuristic plugins"
+)
+set(HIPDNN_FULL_INSTALL_PLUGIN_HEURISTIC_DIR
+    "${HIPDNN_PLUGIN_FULL_ROOTDIR}/${HIPDNN_PLUGIN_HEURISTIC_SUBDIR}"
+    CACHE
+        STRING
+        "Full install directory for official hipDNN heuristic plugins. Uses the CMAKE_INSTALL_PREFIX set at configure time (defaults to /opt/rocm/)."
+)
+set(HIPDNN_RELATIVE_INSTALL_PLUGIN_HEURISTIC_DIR
+    "${HIPDNN_PLUGIN_ROOTDIR}/${HIPDNN_PLUGIN_HEURISTIC_SUBDIR}"
+    CACHE STRING "Relative install directory for official hipDNN heuristic plugins"
+)
 set(HIPDNN_TEST_PLUGIN_DIR "${CMAKE_BINARY_DIR}/${HIPDNN_PLUGIN_ROOTDIR}/test_plugins"
     CACHE INTERNAL "Build directory for test plugins"
 )
 set(HIPDNN_TEST_PLUGIN_INSTALL_DIR "${HIPDNN_PLUGIN_ROOTDIR}/test_plugins"
     CACHE INTERNAL "Install directory for test plugins"
-)
-
-set(HIPDNN_TEST_REFERENCE_DIR "${CMAKE_BINARY_DIR}/lib/hipdnn_reference_data"
-    CACHE INTERNAL "Directory for test reference data"
-)
-set(HIPDNN_TEST_REFERENCE_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}"
-    CACHE INTERNAL "Install directory for test reference data"
-)
-file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/hipdnn_reference_data/"
-     DESTINATION ${HIPDNN_TEST_REFERENCE_DIR}
-) # Copies only on calls to cmake
-install(DIRECTORY "${CMAKE_BINARY_DIR}/lib/hipdnn_reference_data"
-        DESTINATION ${HIPDNN_TEST_REFERENCE_INSTALL_DIR}
 )
 
 # Migrate HIP_DNN_BUILD_BACKEND -> HIPDNN_BUILD_BACKEND
@@ -142,17 +159,24 @@ if(DEFINED HIP_DNN_SKIP_TESTS)
 endif()
 option(HIPDNN_SKIP_TESTS "Skips building all tests" OFF)
 
+option(HIPDNN_BUILD_PYTHON_BINDINGS "Build Python bindings (requires Python and nanobind)" OFF)
+
 option(HIPDNN_ENABLE_COVERAGE "Build with code coverage flags" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
 option(BUILD_THREAD_SANITIZER "Build with Thread Sanitizer enabled" OFF)
 option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)
 if(WIN32)
     option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" OFF)
-    if(ENABLE_CLANG_TIDY)
+else()
+    option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" ON)
+endif()
+
+if(ENABLE_CLANG_TIDY)
+    if(WIN32)
         message(WARNING "Clang-Tidy enabled on Windows - this significantly increases build time.")
     endif()
 else()
-    option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" ON)
+    message(WARNING "Clang-Tidy is disabled - some build issues may be missed.")
 endif()
 
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL
@@ -166,6 +190,7 @@ include(cmake/ClangCheck.cmake)
 include(cmake/ClangTidy.cmake)
 include(cmake/Sanitizers.cmake)
 include(cmake/Tests.cmake)
+include(cmake/TestPluginNames.cmake)
 include(cmake/Spdlog.cmake)
 
 # Add global compile options
@@ -197,14 +222,23 @@ list(
     -Wformat=2 # Enable stricter format string checks
     -Winit-self # Warn about variables initialized with itself
     -Wunreachable-code # Warn about unreachable code
-    -Wno-error=unused-command-line-argument # Disable error for unused command line arguments
+    $<$<CXX_COMPILER_ID:Clang>:-Wno-error=unused-command-line-argument> # Clang: disable error for unused command line arguments
+    -Wno-error=null-dereference # Downgrade null-dereference to warning (false positives with flatbuffers in backend/data_sdk)
     -Wswitch-default # Warn if a switch statement does not have a default case
 )
 
 add_compile_options(${EXTRA_COMPILE_OPTIONS})
 add_link_options(${EXTRA_LINK_OPTIONS})
 
+# Disable RTTI in production code and RTTI-free test targets.
+# Public headers must not use typeid, dynamic_cast, or dynamic_pointer_cast.
+set(HIPDNN_NO_RTTI_OPTIONS
+    $<$<CXX_COMPILER_ID:MSVC>:/GR->
+    $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-fno-rtti>
+)
+
 add_subdirectory(data_sdk)
+add_subdirectory(flatbuffers_sdk)
 
 if(HIPDNN_BUILD_BACKEND)
     add_subdirectory(backend)
@@ -219,6 +253,10 @@ add_subdirectory(plugin_sdk)
 
 add_subdirectory(tests)
 add_subdirectory(tools)
+
+if(HIPDNN_BUILD_PYTHON_BINDINGS)
+    add_subdirectory(python)
+endif()
 
 if(NOT HIPDNN_SKIP_TESTS)
     # Keep this after all build folders have been added so they have a chance to register their tests
@@ -259,7 +297,7 @@ if(HIPDNN_ENABLE_COVERAGE)
     findandcheckllvmtools()
 
     set(CODE_COVERAGE_IGNORE_REGEX
-        ".*deps.*|.*tests.*|.*data_sdk.*data_objects.*|.*HipErrorHandler.*"
+        ".*deps.*|.*tests.*|.*data_objects.*|.*HipErrorHandler.*|.*/test_sdk/.*/Mock[^/]*"
     )
     set(CODE_COVERAGE_OBJECTS
         -object
@@ -269,9 +307,11 @@ if(HIPDNN_ENABLE_COVERAGE)
         -object
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_frontend_tests
         -object
-        ./${CMAKE_INSTALL_BINDIR}/public_hipdnn_backend_tests
+        ./${CMAKE_INSTALL_BINDIR}/hipdnn_public_backend_tests
         -object
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_data_sdk_tests
+        -object
+        ./${CMAKE_INSTALL_BINDIR}/hipdnn_flatbuffers_sdk_tests
         -object
         ./${CMAKE_INSTALL_BINDIR}/hipdnn_plugin_sdk_tests
         -object

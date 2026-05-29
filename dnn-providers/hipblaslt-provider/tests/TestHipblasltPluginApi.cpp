@@ -2,9 +2,11 @@
 // SPDX-License-Identifier:  MIT
 
 #include "hipdnn_plugin_sdk/PluginApi.h"
+#include "version.h"
 #include <HipblasltPlugin.hpp>
 #include <array>
 #include <gtest/gtest.h>
+#include <hipdnn_data_sdk/logging/LogLevel.hpp>
 #include <iostream>
 
 namespace
@@ -44,7 +46,7 @@ TEST_F(TestHipblasltPluginApi, GetVersionSuccess)
 {
     const char* version = nullptr;
     EXPECT_EQ(hipdnnPluginGetVersionImpl(&version), HIPDNN_PLUGIN_STATUS_SUCCESS);
-    EXPECT_STREQ(version, "1.0.0");
+    EXPECT_STREQ(version, HIPBLASLT_PROVIDER_VERSION_STRING);
 }
 
 TEST_F(TestHipblasltPluginApi, GetVersionNullptr)
@@ -75,4 +77,17 @@ TEST_F(TestHipblasltPluginApi, GetLastErrorStringSuccess)
 TEST_F(TestHipblasltPluginApi, GetLastErrorStringNullptr)
 {
     EXPECT_NO_THROW(hipdnnPluginGetLastErrorStringImpl(nullptr));
+}
+
+TEST_F(TestHipblasltPluginApi, SetLogLevelSuccess)
+{
+    EXPECT_EQ(hipdnnPluginSetLogLevelImpl(HIPDNN_SEV_INFO), HIPDNN_PLUGIN_STATUS_SUCCESS);
+    EXPECT_TRUE(hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_INFO));
+}
+
+TEST_F(TestHipblasltPluginApi, SetLogLevelFiltersLowerSeverity)
+{
+    ASSERT_EQ(hipdnnPluginSetLogLevelImpl(HIPDNN_SEV_WARN), HIPDNN_PLUGIN_STATUS_SUCCESS);
+    EXPECT_TRUE(hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_WARN));
+    EXPECT_FALSE(hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_INFO));
 }

@@ -1,0 +1,74 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --BuildUseDefChainPass --PeepholeOptimizationPass --print-output
+#
+# Move Propagation: v_mov_b32 + consumer → consumer with propagated source.
+# Single-use MOV is eliminated; consumer uses the original source register.
+# Converted from PeepholeOptimizationPassTest.*MovPropagation*
+
+#--- F32 add: v_mov v1,v0 + v_add v2,2.0,v1 → v_add v2,2.0,v0
+# CHECK-LABEL: @mov_prop_f32_add
+# CHECK: v_add_f32
+# CHECK-SAME: v2
+# CHECK-SAME: 2
+# CHECK-SAME: v0
+# CHECK-NOT: v_mov_b32
+
+st.func @mov_prop_f32_add() {
+^entry:
+  v1 = "st.v_mov_b32"(v0) { issueCycles = 1, latencyCycles = 5 }
+  v2 = "st.v_add_f32"(2.0, v1) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- F16 add
+# CHECK-LABEL: @mov_prop_f16_add
+# CHECK: v_add_f16
+# CHECK-SAME: v2
+# CHECK-SAME: 2
+# CHECK-SAME: v0
+# CHECK-NOT: v_mov_b32
+
+st.func @mov_prop_f16_add() {
+^entry:
+  v1 = "st.v_mov_b32"(v0) { issueCycles = 1, latencyCycles = 5 }
+  v2 = "st.v_add_f16"(2.0, v1) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- F32 mul
+# CHECK-LABEL: @mov_prop_f32_mul
+# CHECK: v_mul_f32
+# CHECK-SAME: v2
+# CHECK-SAME: 2
+# CHECK-SAME: v0
+# CHECK-NOT: v_mov_b32
+
+st.func @mov_prop_f32_mul() {
+^entry:
+  v1 = "st.v_mov_b32"(v0) { issueCycles = 1, latencyCycles = 5 }
+  v2 = "st.v_mul_f32"(2.0, v1) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- F16 mul
+# CHECK-LABEL: @mov_prop_f16_mul
+# CHECK: v_mul_f16
+# CHECK-SAME: v2
+# CHECK-SAME: 2
+# CHECK-SAME: v0
+# CHECK-NOT: v_mov_b32
+
+st.func @mov_prop_f16_mul() {
+^entry:
+  v1 = "st.v_mov_b32"(v0) { issueCycles = 1, latencyCycles = 5 }
+  v2 = "st.v_mul_f16"(2.0, v1) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- Negative: MOV result has multiple uses → no propagation
+# CHECK-LABEL: @no_mov_prop_multiple_uses
+# CHECK: v_mov_b32
+# CHECK: v_add_f32
+# CHECK: v_mul_f32
+
+st.func @no_mov_prop_multiple_uses() {
+^entry:
+  v1 = "st.v_mov_b32"(v0) { issueCycles = 1, latencyCycles = 5 }
+  v2 = "st.v_add_f32"(2.0, v1) { issueCycles = 1, latencyCycles = 5 }
+  v3 = "st.v_mul_f32"(3.0, v1) { issueCycles = 1, latencyCycles = 5 }
+}

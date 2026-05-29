@@ -46,7 +46,8 @@ bool profile_grouped_conv_fwd_bilinear_impl(
     bool time_kernel,
     const ck::utils::conv::ConvParam& conv_param,
     const ck::tensor_operation::element_wise::Bilinear& bilinear_op =
-        ck::tensor_operation::element_wise::Bilinear{})
+        ck::tensor_operation::element_wise::Bilinear{},
+    index_t instance_index = -1)
 {
     using InElementOp      = ck::tensor_operation::element_wise::PassThrough;
     using WeiElementOp     = ck::tensor_operation::element_wise::PassThrough;
@@ -106,6 +107,27 @@ bool profile_grouped_conv_fwd_bilinear_impl(
     std::cout << "weight: " << weight.mDesc << std::endl;
     std::cout << "d_tensor: " << d_tensor.mDesc << std::endl;
     std::cout << "output: " << host_output.mDesc << std::endl;
+
+    using DeviceOp =
+        ck::tensor_operation::device::DeviceGroupedConvFwdMultipleABD<NDimSpatial,
+                                                                      InLayout,
+                                                                      WeiLayout,
+                                                                      ck::Tuple<DLayout>,
+                                                                      OutLayout,
+                                                                      InDataType,
+                                                                      WeiDataType,
+                                                                      ck::Tuple<DDataType>,
+                                                                      OutDataType,
+                                                                      InElementOp,
+                                                                      WeiElementOp,
+                                                                      OutElementOp,
+                                                                      AComputeType,
+                                                                      BComputeType>;
+
+    const auto op_ptrs = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
+        DeviceOp>::GetInstances();
+
+    std::cout << "found " << op_ptrs.size() << " instances" << std::endl;
 
     switch(init_method)
     {
@@ -231,29 +253,13 @@ bool profile_grouped_conv_fwd_bilinear_impl(
     float best_gb_per_sec = 0;
     int valids            = 0;
 
-    using DeviceOp =
-        ck::tensor_operation::device::DeviceGroupedConvFwdMultipleABD<NDimSpatial,
-                                                                      InLayout,
-                                                                      WeiLayout,
-                                                                      ck::Tuple<DLayout>,
-                                                                      OutLayout,
-                                                                      InDataType,
-                                                                      WeiDataType,
-                                                                      ck::Tuple<DDataType>,
-                                                                      OutDataType,
-                                                                      InElementOp,
-                                                                      WeiElementOp,
-                                                                      OutElementOp,
-                                                                      AComputeType,
-                                                                      BComputeType>;
-
-    const auto op_ptrs = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
-        DeviceOp>::GetInstances();
-
-    std::cout << "found " << op_ptrs.size() << " instances" << std::endl;
-
     for(std::size_t i = 0; i < op_ptrs.size(); ++i)
     {
+        if((instance_index != -1) && (instance_index != static_cast<int>(i)))
+        {
+            // skip test if instance_index is specified
+            continue;
+        }
         auto& op_ptr = op_ptrs[i];
 
         auto argument_ptr = op_ptr->MakeArgumentPointer(

@@ -319,6 +319,9 @@ int main(int argc, char** argv)
 
     ::testing::InitGoogleTest(&argc, argv);
 
+    // Free up all temporary data generated during test creation
+    test_cleanup::cleanup();
+
     // Set Google Test listener
     hipblas_set_listener();
 

@@ -231,9 +231,39 @@ namespace rocRoller::Client::GEMMClient
             hostBForKernel = DGen::preSwizzle(hostB, sizes, {}, preTileSize);
         }
 
+        // Pre-tile A on the host when pretileA is set (kernel expects pre-tiled layout)
+        std::vector<PackedTypeA> hostAForKernel(hostA);
+        if(not problemParams.types.pretileA.empty() && problemParams.types.pretileA.size() == 2)
+        {
+            auto const packing = TypeInfo<PackedTypeA>::ElementBits / TypeInfo<A>::ElementBits;
+
+            std::vector<size_t> sizes       = descA.sizes();
+            std::vector<size_t> preTileSize = problemParams.types.pretileA;
+            if(packing > 1)
+            {
+                // Tile sizes are in logical elements; convert sizes and preTileSize to packed
+                // element space. Packing is along the last (fast) dimension for A (K).
+                AssertFatal(sizes[1] % packing == 0,
+                            "pretileA: K dimension must be a multiple of packing factor (",
+                            packing,
+                            ") for packed type A.");
+                AssertFatal(preTileSize[1] % packing == 0,
+                            "pretileA: tile K must be a multiple of packing factor (",
+                            packing,
+                            ") for packed type A.");
+                sizes[1] /= packing;
+                preTileSize[1] /= packing;
+            }
+
+            // The preSwizzle helper assumes column-major; so we swap sizes here.
+            std::vector<size_t> swappedSizes       = {sizes[1], sizes[0]};
+            std::vector<size_t> swappedPreTileSize = {preTileSize[1], preTileSize[0]};
+            hostAForKernel = DGen::preSwizzle(hostA, swappedSizes, {}, swappedPreTileSize);
+        }
+
         size_t rotatingSize = benchmarkParams.rotatingBuffSize;
 
-        RotatingBuffer<PackedTypeA> rotatingA(hostA, rotatingSize);
+        RotatingBuffer<PackedTypeA> rotatingA(hostAForKernel, rotatingSize);
         RotatingBuffer<PackedTypeB> rotatingB(hostBForKernel, rotatingSize);
         RotatingBuffer<C>           rotatingC(hostC, rotatingSize);
         auto deviceD = make_shared_device<D>(problemParams.m * problemParams.n, D{});
@@ -362,42 +392,12 @@ namespace rocRoller::Client::GEMMClient
 
         if(problemParams.types.scaleA == Operations::ScaleMode::Separate)
         {
-            TensorDescriptor descAScale;
-            if(not problemParams.types.scalePretileA.empty())
-            {
-                //
-                // AScale is M x (K / scaleBlockSize); just write as M
-                // x K for now.  Let T_M and T_K be the tile sizes.
-                //
-                // Pre-tiled AScale is; slow-to-fast:
-                //
-                //   tileM * ((K // T_K) * T_M * T_K) + tileK * (T_M * T_K) + m * T_K + k
-                //
-                // Note the strides.
-                //
+            TensorDescriptor descAScale = TensorDescriptor(
+                problemParams.types.scaleTypeA,
+                {static_cast<size_t>(problemParams.m),
+                 static_cast<size_t>(problemParams.k / problemParams.types.scaleBlockSize)},
+                problemParams.types.transA == TransposeType::T ? "T" : "N");
 
-                // Only works for TranspostType::T for now
-                AssertFatal(problemParams.types.transA == TransposeType::T,
-                            "Pre-tiling scale A only supported for TransposeType::T");
-
-                auto const M     = problemParams.m;
-                auto const K     = problemParams.k / problemParams.types.scaleBlockSize;
-                auto const tileM = problemParams.types.scalePretileA[0];
-                auto const tileK = problemParams.types.scalePretileA[1];
-
-                descAScale = TensorDescriptor(problemParams.types.scaleTypeA,
-                                              {M, K},
-                                              {static_cast<size_t>((K / tileK) * tileM * tileK),
-                                               static_cast<size_t>(tileM * tileK)});
-            }
-            else
-            {
-                descAScale = TensorDescriptor(
-                    problemParams.types.scaleTypeA,
-                    {static_cast<size_t>(problemParams.m),
-                     static_cast<size_t>(problemParams.k / problemParams.types.scaleBlockSize)},
-                    problemParams.types.transA == TransposeType::T ? "T" : "N");
-            }
             auto [aScaleTag, bScaleTag] = gemm->getABScaleTags();
             setCommandTensorArg(commandArgs, aScaleTag.value(), descAScale, deviceScaleA.get());
         }
@@ -413,42 +413,12 @@ namespace rocRoller::Client::GEMMClient
 
         if(problemParams.types.scaleB == Operations::ScaleMode::Separate)
         {
-            TensorDescriptor descBScale;
-            if(not problemParams.types.scalePretileB.empty())
-            {
-                //
-                // BScale is (K / scaleBlockSize) x N; just write as K
-                // x N for now.  Let T_K and T_N be the tile sizes.
-                //
-                // Pre-tiled BScale is; slow-to-fast:
-                //
-                //   tileN * ((K // T_N) * T_N * T_K) + tileK * (T_N * T_K) + n * T_K + k
-                //
-                // Note the strides.
-                //
+            TensorDescriptor descBScale = TensorDescriptor(
+                problemParams.types.scaleTypeB,
+                {static_cast<size_t>(problemParams.k / problemParams.types.scaleBlockSize),
+                 static_cast<size_t>(problemParams.n)},
+                problemParams.types.transB == TransposeType::T ? "T" : "N");
 
-                // Only works for TranspostType::T for now
-                AssertFatal(problemParams.types.transB == TransposeType::N,
-                            "Pre-tiling scale B only supported for TransposeType::N");
-
-                auto const K     = problemParams.k / problemParams.types.scaleBlockSize;
-                auto const N     = problemParams.n;
-                auto const tileK = problemParams.types.scalePretileB[0];
-                auto const tileN = problemParams.types.scalePretileB[1];
-
-                descBScale = TensorDescriptor(problemParams.types.scaleTypeB,
-                                              {K, N},
-                                              {static_cast<size_t>(tileK * tileN),
-                                               static_cast<size_t>((K / tileK) * tileK * tileN)});
-            }
-            else
-            {
-                descBScale = TensorDescriptor(
-                    problemParams.types.scaleTypeB,
-                    {static_cast<size_t>(problemParams.k / problemParams.types.scaleBlockSize),
-                     static_cast<size_t>(problemParams.n)},
-                    problemParams.types.transB == TransposeType::T ? "T" : "N");
-            }
             auto [aScaleTag, bScaleTag] = gemm->getABScaleTags();
             setCommandTensorArg(commandArgs, bScaleTag.value(), descBScale, deviceScaleB.get());
         }
@@ -961,10 +931,10 @@ namespace rocRoller::Client::GEMMClient
             Settings::getInstance()->set(Settings::SchedulerCost, cost);
         }
 
-        auto context
-            = Context::ForTarget(arch,
-                                 solution.generateKernelName().shortName,
-                                 {{.scaleSkipPermlane = solution.types.scaleSkipPermlane}});
+        auto context = Context::ForTarget(arch,
+                                          solution.generateKernelName().shortName,
+                                          {{.scaleSkipPermlane = solution.types.scaleSkipPermlane,
+                                            .ldsSwizzleMode    = solution.ldsBankSwizzle}});
 
         if(doInfo)
         {
@@ -1268,7 +1238,8 @@ namespace rocRoller::Client::GEMMClient::CLI
         std::make_pair("--scheduler", &SolutionParameters::scheduler),
         std::make_pair("--schedulerCost", &SolutionParameters::schedulerCost),
         std::make_pair("--tailLoops", &SolutionParameters::tailLoops),
-        std::make_pair("--streamK", &SolutionParameters::streamK));
+        std::make_pair("--streamK", &SolutionParameters::streamK),
+        std::make_pair("--ldsBankSwizzle", &SolutionParameters::ldsBankSwizzle));
 
     template <typename T, typename U>
     std::string getSolutionParameterArgumentName(U T::*member_ptr)
@@ -1473,6 +1444,7 @@ namespace rocRoller::Client::GEMMClient::CLI
         update(SN(&SP::swizzleScale), solution.swizzleScale);
         update(SN(&SP::swizzleTileSize), solution.swizzleTileSize);
         update(SN(&SP::prefetchScale), solution.prefetchScale);
+        update(SN(&SP::ldsBankSwizzle), solution.ldsBankSwizzle);
 
         // Prefetching
 
@@ -1722,6 +1694,7 @@ int main(int argc, const char* argv[])
                    "Experimental: Skip Permlane instructions for scale data. Options: None, "
                    "PreSwizzleScale, PreSwizzleScaleGFX950.");
 
+    auto pretileAOption = app.add_option("--pretileA", "Pre-tile A matrix. Dimensions are: MxK.");
     auto pretileBOption = app.add_option("--pretileB", "Pre-tile B matrix. Dimensions are: KxN.");
 
     bool pretileScale = false;
@@ -1794,6 +1767,8 @@ int main(int argc, const char* argv[])
     app.add_option(SN(&SP::streamK),
                    "StreamK mode (None, Standard, TwoTile, TwoTileDPFirst). Default: None")
         ->check(CLI::IsMember(rocRoller::enumStrings<StreamKMode>()));
+    app.add_option(SN(&SP::ldsBankSwizzle), "LDS bank swizzle mode (None, Swizzle). Default: None")
+        ->check(CLI::IsMember(rocRoller::enumStrings<LDSBankSwizzleMode>()));
 
     app.add_option(SN(&SP::loadPathAScale),
                    "How to load AScale (BufferToVGPR, BufferToLDSViaVGPR, BufferToLDS). Default: "
@@ -1943,6 +1918,11 @@ int main(int argc, const char* argv[])
 
     CLI11_PARSE(app, argc, argv);
 
+    if(pretileAOption->count() > 0)
+    {
+        auto xy        = pretileAOption->as<Client::GEMMClient::XYTuple>();
+        types.pretileA = {static_cast<unsigned long>(xy.x), static_cast<unsigned long>(xy.y)};
+    }
     if(pretileBOption->count() > 0)
     {
         auto xy        = pretileBOption->as<Client::GEMMClient::XYTuple>();

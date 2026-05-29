@@ -5,6 +5,7 @@
 #include "DescriptorAttributeUtils.hpp"
 #include "HipdnnBackendDescriptorType.h"
 #include "HipdnnException.hpp"
+#include "HipdnnOperationType.h"
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 
 namespace hipdnn_backend
@@ -21,25 +22,7 @@ void ConvolutionWrwOperationDescriptor::finalize()
     THROW_IF_NULL(_dwDesc,
                   HIPDNN_STATUS_BAD_PARAM,
                   "ConvolutionWrwOperationDescriptor::finalize() failed: DW tensor not set");
-    THROW_IF_TRUE(_data.pre_padding.empty(),
-                  HIPDNN_STATUS_BAD_PARAM,
-                  "ConvolutionWrwOperationDescriptor::finalize() failed: pre_padding not set");
-    THROW_IF_TRUE(_data.post_padding.empty(),
-                  HIPDNN_STATUS_BAD_PARAM,
-                  "ConvolutionWrwOperationDescriptor::finalize() failed: post_padding not set");
-    THROW_IF_TRUE(_data.stride.empty(),
-                  HIPDNN_STATUS_BAD_PARAM,
-                  "ConvolutionWrwOperationDescriptor::finalize() failed: stride not set");
-    THROW_IF_TRUE(_data.dilation.empty(),
-                  HIPDNN_STATUS_BAD_PARAM,
-                  "ConvolutionWrwOperationDescriptor::finalize() failed: dilation not set");
-    THROW_IF_TRUE(_computeDataType == hipdnn_data_sdk::data_objects::DataType::UNSET,
-                  HIPDNN_STATUS_BAD_PARAM,
-                  "ConvolutionWrwOperationDescriptor::finalize() failed: compute data type not "
-                  "set");
-    THROW_IF_TRUE(_data.conv_mode == hipdnn_data_sdk::data_objects::ConvMode::UNSET,
-                  HIPDNN_STATUS_BAD_PARAM,
-                  "ConvolutionWrwOperationDescriptor::finalize() failed: conv_mode not set");
+    validateConvolutionFinalize(_data, _computeDataType, "ConvolutionWrwOperationDescriptor");
 
     HipdnnBackendDescriptorImpl<ConvolutionWrwOperationDescriptor>::finalize();
 }
@@ -59,7 +42,7 @@ void ConvolutionWrwOperationDescriptor::setAttribute(hipdnnBackendAttributeName_
 
     switch(attributeName)
     {
-    case HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_X:
+    case HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_X:
         setTensorDescriptor(_xDesc,
                             _data.x_tensor_uid,
                             attributeType,
@@ -67,7 +50,7 @@ void ConvolutionWrwOperationDescriptor::setAttribute(hipdnnBackendAttributeName_
                             arrayOfElements,
                             "ConvolutionWrwOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_DY:
+    case HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_DY:
         setTensorDescriptor(_dyDesc,
                             _data.dy_tensor_uid,
                             attributeType,
@@ -75,7 +58,7 @@ void ConvolutionWrwOperationDescriptor::setAttribute(hipdnnBackendAttributeName_
                             arrayOfElements,
                             "ConvolutionWrwOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_DW:
+    case HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_DW:
         setTensorDescriptor(_dwDesc,
                             _data.dw_tensor_uid,
                             attributeType,
@@ -83,52 +66,16 @@ void ConvolutionWrwOperationDescriptor::setAttribute(hipdnnBackendAttributeName_
                             arrayOfElements,
                             "ConvolutionWrwOperationDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS:
-        setInt64Vector(_data.pre_padding,
-                       attributeType,
-                       elementCount,
-                       arrayOfElements,
-                       "ConvolutionWrwOperationDescriptor::setAttribute()");
-        break;
-    case HIPDNN_ATTR_CONVOLUTION_POST_PADDINGS:
-        setInt64Vector(_data.post_padding,
-                       attributeType,
-                       elementCount,
-                       arrayOfElements,
-                       "ConvolutionWrwOperationDescriptor::setAttribute()");
-        break;
-    case HIPDNN_ATTR_CONVOLUTION_FILTER_STRIDES:
-        setInt64Vector(_data.stride,
-                       attributeType,
-                       elementCount,
-                       arrayOfElements,
-                       "ConvolutionWrwOperationDescriptor::setAttribute()");
-        break;
-    case HIPDNN_ATTR_CONVOLUTION_DILATIONS:
-        setInt64Vector(_data.dilation,
-                       attributeType,
-                       elementCount,
-                       arrayOfElements,
-                       "ConvolutionWrwOperationDescriptor::setAttribute()");
-        break;
-    case HIPDNN_ATTR_CONVOLUTION_CONV_MODE:
-        setConvMode(_data.conv_mode,
-                    attributeType,
-                    elementCount,
-                    arrayOfElements,
-                    "ConvolutionWrwOperationDescriptor::setAttribute()");
-        break;
-    case HIPDNN_ATTR_CONVOLUTION_COMP_TYPE:
-        setDataType(_computeDataType,
-                    attributeType,
-                    elementCount,
-                    arrayOfElements,
-                    "ConvolutionWrwOperationDescriptor::setAttribute()");
-        break;
     default:
-        throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
-                              "ConvolutionWrwOperationDescriptor::setAttribute: attributeName not "
-                              "supported");
+        setConvolutionAttribute(_data,
+                                _computeDataType,
+                                _name,
+                                attributeName,
+                                attributeType,
+                                elementCount,
+                                arrayOfElements,
+                                "ConvolutionWrwOperationDescriptor::setAttribute()");
+        break;
     }
 }
 
@@ -148,7 +95,7 @@ void ConvolutionWrwOperationDescriptor::getAttribute(hipdnnBackendAttributeName_
 
     switch(attributeName)
     {
-    case HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_X:
+    case HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_X:
         getTensorDescriptor(_xDesc,
                             attributeType,
                             requestedElementCount,
@@ -156,7 +103,7 @@ void ConvolutionWrwOperationDescriptor::getAttribute(hipdnnBackendAttributeName_
                             arrayOfElements,
                             "ConvolutionWrwOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_DY:
+    case HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_DY:
         getTensorDescriptor(_dyDesc,
                             attributeType,
                             requestedElementCount,
@@ -164,7 +111,7 @@ void ConvolutionWrwOperationDescriptor::getAttribute(hipdnnBackendAttributeName_
                             arrayOfElements,
                             "ConvolutionWrwOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_FILTER_DW:
+    case HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER_DW:
         getTensorDescriptor(_dwDesc,
                             attributeType,
                             requestedElementCount,
@@ -172,58 +119,18 @@ void ConvolutionWrwOperationDescriptor::getAttribute(hipdnnBackendAttributeName_
                             arrayOfElements,
                             "ConvolutionWrwOperationDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS:
-        getInt64Vector(_data.pre_padding,
-                       attributeType,
-                       requestedElementCount,
-                       elementCount,
-                       arrayOfElements,
-                       "ConvolutionWrwOperationDescriptor::getAttribute()");
-        break;
-    case HIPDNN_ATTR_CONVOLUTION_POST_PADDINGS:
-        getInt64Vector(_data.post_padding,
-                       attributeType,
-                       requestedElementCount,
-                       elementCount,
-                       arrayOfElements,
-                       "ConvolutionWrwOperationDescriptor::getAttribute()");
-        break;
-    case HIPDNN_ATTR_CONVOLUTION_FILTER_STRIDES:
-        getInt64Vector(_data.stride,
-                       attributeType,
-                       requestedElementCount,
-                       elementCount,
-                       arrayOfElements,
-                       "ConvolutionWrwOperationDescriptor::getAttribute()");
-        break;
-    case HIPDNN_ATTR_CONVOLUTION_DILATIONS:
-        getInt64Vector(_data.dilation,
-                       attributeType,
-                       requestedElementCount,
-                       elementCount,
-                       arrayOfElements,
-                       "ConvolutionWrwOperationDescriptor::getAttribute()");
-        break;
-    case HIPDNN_ATTR_CONVOLUTION_CONV_MODE:
-        getConvMode(_data.conv_mode,
-                    attributeType,
-                    requestedElementCount,
-                    elementCount,
-                    arrayOfElements,
-                    "ConvolutionWrwOperationDescriptor::getAttribute()");
-        break;
-    case HIPDNN_ATTR_CONVOLUTION_COMP_TYPE:
-        getDataType(_computeDataType,
-                    attributeType,
-                    requestedElementCount,
-                    elementCount,
-                    arrayOfElements,
-                    "ConvolutionWrwOperationDescriptor::getAttribute()");
-        break;
     default:
-        throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
-                              "ConvolutionWrwOperationDescriptor::getAttribute: attributeName not "
-                              "supported");
+        getConvolutionAttribute(_data,
+                                _computeDataType,
+                                _name,
+                                HIPDNN_OPERATION_TYPE_CONVOLUTION_BACKWARD_WEIGHTS_EXT,
+                                attributeName,
+                                attributeType,
+                                requestedElementCount,
+                                elementCount,
+                                arrayOfElements,
+                                "ConvolutionWrwOperationDescriptor::getAttribute()");
+        break;
     }
 }
 
@@ -237,12 +144,13 @@ std::vector<std::shared_ptr<TensorDescriptor>>
     return {_xDesc, _dyDesc, _dwDesc};
 }
 
-std::unique_ptr<hipdnn_data_sdk::data_objects::NodeT>
+std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::NodeT>
     ConvolutionWrwOperationDescriptor::buildNode() const
 {
-    auto node = std::make_unique<hipdnn_data_sdk::data_objects::NodeT>();
+    auto node = std::make_unique<hipdnn_flatbuffers_sdk::data_objects::NodeT>();
+    node->name = _name;
     node->compute_data_type = _computeDataType;
-    node->attributes.Set(hipdnn_data_sdk::data_objects::ConvolutionWrwAttributesT(_data));
+    node->attributes.Set(hipdnn_flatbuffers_sdk::data_objects::ConvolutionWrwAttributesT(_data));
     return node;
 }
 
@@ -255,7 +163,8 @@ std::string ConvolutionWrwOperationDescriptor::toString() const
 {
     using hipdnn_data_sdk::utilities::vecToString;
     std::string str = "ConvolutionWrwOperationDescriptor: {";
-    str += "x_uid=" + std::to_string(_data.x_tensor_uid);
+    str += "name=" + _name;
+    str += ", x_uid=" + std::to_string(_data.x_tensor_uid);
     str += ", dy_uid=" + std::to_string(_data.dy_tensor_uid);
     str += ", dw_uid=" + std::to_string(_data.dw_tensor_uid);
     str += ", pre_padding=" + vecToString(_data.pre_padding);
@@ -263,11 +172,34 @@ std::string ConvolutionWrwOperationDescriptor::toString() const
     str += ", stride=" + vecToString(_data.stride);
     str += ", dilation=" + vecToString(_data.dilation);
     str += ", conv_mode=";
-    str += hipdnn_data_sdk::data_objects::EnumNameConvMode(_data.conv_mode);
+    str += hipdnn_flatbuffers_sdk::data_objects::EnumNameConvMode(_data.conv_mode);
     str += ", compute_data_type=";
-    str += hipdnn_data_sdk::data_objects::EnumNameDataType(_computeDataType);
+    str += hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(_computeDataType);
     str += "}";
     return str;
+}
+
+std::shared_ptr<ConvolutionWrwOperationDescriptor> ConvolutionWrwOperationDescriptor::fromNode(
+    const hipdnn_flatbuffers_sdk::data_objects::NodeT& nodeT,
+    const std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>>& tensorMap)
+{
+    const auto* attrs = nodeT.attributes.AsConvolutionWrwAttributes();
+    THROW_IF_NULL(attrs,
+                  HIPDNN_STATUS_INTERNAL_ERROR,
+                  "ConvolutionWrwOperationDescriptor::fromNode: ConvolutionWrwAttributes is null");
+
+    auto desc = std::make_shared<ConvolutionWrwOperationDescriptor>();
+    desc->_data = *attrs;
+    desc->_computeDataType = nodeT.compute_data_type;
+    desc->_name = nodeT.name;
+    desc->_xDesc = findTensorInMap(
+        tensorMap, attrs->x_tensor_uid, "ConvolutionWrwOperationDescriptor::fromNode: X");
+    desc->_dyDesc = findTensorInMap(
+        tensorMap, attrs->dy_tensor_uid, "ConvolutionWrwOperationDescriptor::fromNode: Dy");
+    desc->_dwDesc = findTensorInMap(
+        tensorMap, attrs->dw_tensor_uid, "ConvolutionWrwOperationDescriptor::fromNode: Dw");
+    desc->finalize();
+    return desc;
 }
 
 } // namespace hipdnn_backend

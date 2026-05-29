@@ -51,11 +51,13 @@ def create_base_kernel():
             "DataTypeB": _mock_dtype(),
             "TransposeA": False,
             "TransposeB": False,
+            "TLUA": True,
+            "TLUB": False,
         },
         "MacroTile0": 0, "MacroTile1": 0, "DepthU": 64,
         "PrefetchGlobalRead": 0, "PrefetchLocalRead": 0, "DirectToLds": 1,  "DtlPlusLdsBuf": False,
         "GlobalReadVectorWidthA": 0, "GlobalReadVectorWidthB": 0,
-        "LocalReadVectorWidth": 0,
+        "LocalReadVectorWidthA": 0, "LocalReadVectorWidthB": 0,
         "WaveSeparateGlobalReadA": 0,
         "WaveSeparateGlobalReadB": 0,
         "Use64bShadowLimit" : 1,
@@ -67,10 +69,32 @@ def create_base_kernel():
         "SwapGlobalReadOrder": False, # For asserting it gets set
         "UsePLRPack": False, # For asserting it gets set
         "UseF32XEmulation": False,
+        "VectorWidthA": 1,
+        "VectorWidthB": 1,
         "MIWaveTileA": 2,
         "MIWaveTileB": 2,
     }
     return kernel
+
+def update_kernel(kernel, updates):
+    """Update kernel dict, auto-deriving TLUA/TLUB from TransposeA/TransposeB.
+
+    Args:
+        kernel: kernel dict to modify in-place
+        updates: dict mirroring the kernel structure. "ProblemType" key (if present)
+                 is applied via kernel["ProblemType"].update(); all other keys are
+                 applied via kernel.update(). If TransposeA or TransposeB appear in
+                 the ProblemType sub-dict, TLUA and TLUB are auto-derived.
+    """
+    if "ProblemType" in updates:
+        pt = updates.pop("ProblemType")
+        if "TransposeA" in pt or "TransposeB" in pt:
+            transA = pt.get("TransposeA", kernel["ProblemType"]["TransposeA"])
+            transB = pt.get("TransposeB", kernel["ProblemType"]["TransposeB"])
+            pt["TLUA"] = not transA
+            pt["TLUB"] = transB
+        kernel["ProblemType"].update(pt)
+    kernel.update(updates)
 
 class TestCustomScheduleBF16:
     @staticmethod
@@ -98,14 +122,14 @@ class TestCustomScheduleBF16:
 
         kernel = create_base_kernel()
         dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
-        kernel["ProblemType"].update({
-            "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
-            "TransposeA": transA, "TransposeB": transB
-        })
-        kernel.update({
+        update_kernel(kernel, {
+            "ProblemType": {
+                "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
+                "TransposeA": transA, "TransposeB": transB,
+            },
             "MacroTile0": 256, "MacroTile1": 256, "DepthU": 64,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
-            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
+            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidthA": 8, "LocalReadVectorWidthB": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2], "TransposeLDS": 0 if NT else 1, "MIWaveTileA": 8, "MIWaveTileB": 8,
         })
 
@@ -140,14 +164,14 @@ class TestCustomScheduleBF16:
 
         kernel = create_base_kernel()
         dtype_8bit = _mock_dtype(is_8bit=True, num_bytes=1)
-        kernel["ProblemType"].update({
-            "DataType": dtype_8bit, "DataTypeA": dtype_8bit, "DataTypeB": dtype_8bit,
-            "TransposeA": True, "TransposeB": False
-        })
-        kernel.update({
+        update_kernel(kernel, {
+            "ProblemType": {
+                "DataType": dtype_8bit, "DataTypeA": dtype_8bit, "DataTypeB": dtype_8bit,
+                "TransposeA": True, "TransposeB": False,
+            },
             "MacroTile0": 256, "MacroTile1": 256, "DepthU": 128,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 0,
-            "GlobalReadVectorWidthA": 16, "GlobalReadVectorWidthB": 16, "LocalReadVectorWidth": 16,
+            "GlobalReadVectorWidthA": 16, "GlobalReadVectorWidthB": 16, "LocalReadVectorWidthA": 16, "LocalReadVectorWidthB": 16,
             "MatrixInstruction": [16,16,128,1], "MIWaveGroup": [2,2], "TransposeLDS": 1, "MIWaveTileA": 8, "MIWaveTileB": 8, "ForceUnrollSubIter": force_unroll_sub_iter,
         })
 
@@ -171,14 +195,14 @@ class TestCustomScheduleBF16:
         """Tests the 256x96x64 16-bit schedule."""
         kernel = create_base_kernel()
         dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
-        kernel["ProblemType"].update({
-            "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
-            "TransposeA": transA, "TransposeB": transB,
-        })
-        kernel.update({
+        update_kernel(kernel, {
+            "ProblemType": {
+                "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
+                "TransposeA": transA, "TransposeB": transB,
+            },
             "MacroTile0": 256, "MacroTile1": 96, "DepthU": 64,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
-            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
+            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidthA": 8, "LocalReadVectorWidthB": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
             "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds,
             "MIWaveTileA": 8, "MIWaveTileB": 3,
@@ -209,14 +233,14 @@ class TestCustomScheduleBF16:
         """Tests the 96x256x64 16-bit schedules."""
         kernel = create_base_kernel()
         dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
-        kernel["ProblemType"].update({
-            "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
-            "TransposeA": transA, "TransposeB": transB
-        })
-        kernel.update({
+        update_kernel(kernel, {
+            "ProblemType": {
+                "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
+                "TransposeA": transA, "TransposeB": transB,
+            },
             "MacroTile0": 96, "MacroTile1": 256, "DepthU": 64,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
-            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
+            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidthA": 8, "LocalReadVectorWidthB": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
             "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds,
             "MIWaveTileA": 3, "MIWaveTileB": 8,
@@ -236,14 +260,14 @@ class TestCustomScheduleBF16:
         NT = not transA and transB
         kernel = create_base_kernel()
         dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
-        kernel["ProblemType"].update({
-            "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
-            "TransposeA": transA, "TransposeB": transB
-        })
-        kernel.update({
+        update_kernel(kernel, {
+            "ProblemType": {
+                "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
+                "TransposeA": transA, "TransposeB": transB,
+            },
             "MacroTile0": 192, "MacroTile1": 256, "DepthU": 64,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
-            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
+            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidthA": 8, "LocalReadVectorWidthB": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
             "LDSTrInst": NN, "TransposeLDS": 0 if NT else 1, "MIWaveTileA": 6, "MIWaveTileB": 8,
         })
@@ -271,14 +295,14 @@ class TestCustomScheduleBF16:
         """Tests the 256x192x64 16-bit TN schedule."""
         kernel = create_base_kernel()
         dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
-        kernel["ProblemType"].update({
-            "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
-            "TransposeA": transA, "TransposeB": transB
-        })
-        kernel.update({
+        update_kernel(kernel, {
+            "ProblemType": {
+                "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
+                "TransposeA": transA, "TransposeB": transB,
+            },
             "MacroTile0": 256, "MacroTile1": 192, "DepthU": 64,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
-            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
+            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidthA": 8, "LocalReadVectorWidthB": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
             "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": 8, "MIWaveTileB": 6,
         })
@@ -296,14 +320,14 @@ class TestCustomScheduleBF16:
         """Tests the 160x256x64 16-bit schedule."""
         kernel = create_base_kernel()
         dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
-        kernel["ProblemType"].update({
-            "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
-            "TransposeA": transA, "TransposeB": transB
-        })
-        kernel.update({
+        update_kernel(kernel, {
+            "ProblemType": {
+                "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
+                "TransposeA": transA, "TransposeB": transB,
+            },
             "MacroTile0": 160, "MacroTile1": 256, "DepthU": 64,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
-            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
+            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidthA": 8, "LocalReadVectorWidthB": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
             "LDSTrInst": not transA, "TransposeLDS": not transB, "MIWaveTileA": 5, "MIWaveTileB": 8,
         })
@@ -321,14 +345,14 @@ class TestCustomScheduleBF16:
         """Tests the 256x160x64 16-bit schedule."""
         kernel = create_base_kernel()
         dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
-        kernel["ProblemType"].update({
-            "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
-            "TransposeA": transA, "TransposeB": transB
-        })
-        kernel.update({
+        update_kernel(kernel, {
+            "ProblemType": {
+                "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
+                "TransposeA": transA, "TransposeB": transB,
+            },
             "MacroTile0": 256, "MacroTile1": 160, "DepthU": 64,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
-            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
+            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidthA": 8, "LocalReadVectorWidthB": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
             # Match CustomSchedule.py predicates:
             # - NN/NT useLDSTr=True, TN useLDSTr=False  -> useLDSTr == (not TransposeA)
@@ -352,14 +376,14 @@ class TestCustomScheduleBF16:
         """Tests the 256x240x64 16-bit schedule."""
         kernel = create_base_kernel()
         dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
-        kernel["ProblemType"].update({
-            "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
-            "TransposeA": transA, "TransposeB": transB
-        })
-        kernel.update({
+        update_kernel(kernel, {
+            "ProblemType": {
+                "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
+                "TransposeA": transA, "TransposeB": transB,
+            },
             "MacroTile0": 256, "MacroTile1": 240, "DepthU": 64,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
-            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 2, "LocalReadVectorWidth": 8,
+            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 2, "LocalReadVectorWidthA": 8, "LocalReadVectorWidthB": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [4,1],
             "LDSTrInst": True, "TransposeLDS": 1 if transA or not (transA or transB) else 0, "MIWaveTileA": 4, "MIWaveTileB": 15,
         })
@@ -377,14 +401,14 @@ class TestCustomScheduleBF16:
         """Tests the 256x208x64 16-bit schedule."""
         kernel = create_base_kernel()
         dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
-        kernel["ProblemType"].update({
-            "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
-            "TransposeA": transA, "TransposeB": transB
-        })
-        kernel.update({
+        update_kernel(kernel, {
+            "ProblemType": {
+                "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
+                "TransposeA": transA, "TransposeB": transB,
+            },
             "MacroTile0": 256, "MacroTile1": 208, "DepthU": 64,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
-            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 2, "LocalReadVectorWidth": 8,
+            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 2, "LocalReadVectorWidthA": 8, "LocalReadVectorWidthB": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [4,1],
             "LDSTrInst": not transA , "TransposeLDS": 1, "MIWaveTileA": 4, "MIWaveTileB": 13,
         })
@@ -409,14 +433,14 @@ class TestCustomScheduleBF16:
         """Tests the 224x256x64 16-bit schedule."""
         kernel = create_base_kernel()
         dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
-        kernel["ProblemType"].update({
-            "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
-            "TransposeA": transA, "TransposeB": transB
-        })
-        kernel.update({
+        update_kernel(kernel, {
+            "ProblemType": {
+                "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
+                "TransposeA": transA, "TransposeB": transB,
+            },
             "MacroTile0": 224, "MacroTile1": 256, "DepthU": 64,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
-            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
+            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidthA": 8, "LocalReadVectorWidthB": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
             "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": 7, "MIWaveTileB": 8,
         })
@@ -441,14 +465,14 @@ class TestCustomScheduleBF16:
         """Tests the 192x320x64 16-bit NN schedule."""
         kernel = create_base_kernel()
         dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
-        kernel["ProblemType"].update({
-            "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
-            "TransposeA": transA, "TransposeB": transB
-        })
-        kernel.update({
+        update_kernel(kernel, {
+            "ProblemType": {
+                "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
+                "TransposeA": transA, "TransposeB": transB,
+            },
             "MacroTile0": 192, "MacroTile1": 320, "DepthU": 64,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
-            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
+            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidthA": 8, "LocalReadVectorWidthB": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
             "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": 6, "MIWaveTileB": 10,
         })
@@ -481,14 +505,14 @@ class TestCustomScheduleBF16:
         NT = (not transA and transB)
         kernel = create_base_kernel()
         dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
-        kernel["ProblemType"].update({
-            "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
-            "TransposeA": transA, "TransposeB": transB
-        })
-        kernel.update({
+        update_kernel(kernel, {
+            "ProblemType": {
+                "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
+                "TransposeA": transA, "TransposeB": transB,
+            },
             "MacroTile0": mt0, "MacroTile1": mt1, "DepthU": 64,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
-            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
+            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidthA": 8, "LocalReadVectorWidthB": 8,
             "MatrixInstruction": mi, "MIWaveGroup": mi_wave_group,
             "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": mi_wave_tile[0], "MIWaveTileB": mi_wave_tile[1],
         })
@@ -514,14 +538,14 @@ class TestCustomScheduleBF16:
         """Tests the 256x224x64 16-bit schedule."""
         kernel = create_base_kernel()
         dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
-        kernel["ProblemType"].update({
-            "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
-            "TransposeA": transA, "TransposeB": transB
-        })
-        kernel.update({
+        update_kernel(kernel, {
+            "ProblemType": {
+                "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
+                "TransposeA": transA, "TransposeB": transB,
+            },
             "MacroTile0": 256, "MacroTile1": 224, "DepthU": 64,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
-            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
+            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidthA": 8, "LocalReadVectorWidthB": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
             "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": 8, "MIWaveTileB": 7,
         })
@@ -546,14 +570,14 @@ class TestCustomScheduleBF16:
         """Tests the 320x192x64 16-bit schedule."""
         kernel = create_base_kernel()
         dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
-        kernel["ProblemType"].update({
-            "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
-            "TransposeA": transA, "TransposeB": transB
-        })
-        kernel.update({
+        update_kernel(kernel, {
+            "ProblemType": {
+                "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
+                "TransposeA": transA, "TransposeB": transB,
+            },
             "MacroTile0": 320, "MacroTile1": 192, "DepthU": 64,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
-            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
+            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidthA": 8, "LocalReadVectorWidthB": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
             "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": 10, "MIWaveTileB": 6,
         })
@@ -583,14 +607,14 @@ class TestCustomScheduleBF16:
         TN = transA and not transB
         kernel = create_base_kernel()
         dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
-        kernel["ProblemType"].update({
-            "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
-            "TransposeA": transA, "TransposeB": transB
-        })
-        kernel.update({
+        update_kernel(kernel, {
+            "ProblemType": {
+                "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
+                "TransposeA": transA, "TransposeB": transB,
+            },
             "MacroTile0": 240, "MacroTile1": 256, "DepthU": 64,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
-            "GlobalReadVectorWidthA": 2, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
+            "GlobalReadVectorWidthA": 2, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidthA": 8, "LocalReadVectorWidthB": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [1,4],
             "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": 15, "MIWaveTileB": 4,
         })
@@ -615,14 +639,14 @@ class TestCustomScheduleBF16:
         """Tests the 208x256x64 16-bit schedule."""
         kernel = create_base_kernel()
         dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
-        kernel["ProblemType"].update({
-            "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
-            "TransposeA": transA, "TransposeB": transB
-        })
-        kernel.update({
+        update_kernel(kernel, {
+            "ProblemType": {
+                "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
+                "TransposeA": transA, "TransposeB": transB,
+            },
             "MacroTile0": 208, "MacroTile1": 256, "DepthU": 64,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
-            "GlobalReadVectorWidthA": 2, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
+            "GlobalReadVectorWidthA": 2, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidthA": 8, "LocalReadVectorWidthB": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [1,4],
             "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": 13, "MIWaveTileB": 4,
         })
@@ -646,14 +670,14 @@ class TestCustomScheduleBF16:
         """Tests the 208x256x64 16-bit schedule."""
         kernel = create_base_kernel()
         dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
-        kernel["ProblemType"].update({
-            "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
-            "TransposeA": transA, "TransposeB": transB
-        })
-        kernel.update({
+        update_kernel(kernel, {
+            "ProblemType": {
+                "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
+                "TransposeA": transA, "TransposeB": transB,
+            },
             "MacroTile0": 128, "MacroTile1": 224, "DepthU": 64,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
-            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
+            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidthA": 8, "LocalReadVectorWidthB": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
             "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": 4, "MIWaveTileB": 7,
         })
@@ -683,14 +707,14 @@ class TestCustomScheduleBF16:
         mi_wave_tile = (mt0 // (mi[0] * mi_wave_group[0]), mt1 // (mi[1] * mi_wave_group[1]))
 
         kernel = create_base_kernel()
-        kernel["ProblemType"].update({
-            "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
-            "TransposeA": True, "TransposeB": False
-        })
-        kernel.update({
+        update_kernel(kernel, {
+            "ProblemType": {
+                "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
+                "TransposeA": True, "TransposeB": False,
+            },
             "MacroTile0": mt0, "MacroTile1": mt1, "DepthU": du,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
-            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
+            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidthA": 8, "LocalReadVectorWidthB": 8,
             "MatrixInstruction": mi, "MIWaveGroup": mi_wave_group,
             "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": mi_wave_tile[0], "MIWaveTileB": mi_wave_tile[1],
         })
@@ -706,16 +730,15 @@ class TestCustomScheduleBF16:
         """Tests the 128x256x64  NN schedule."""
         kernel = create_base_kernel()
         dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
-        kernel["ProblemType"].update({
-            "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
-            "TransposeA": False, "TransposeB": False
-        })
-
-        kernel.update({
+        update_kernel(kernel, {
+            "ProblemType": {
+                "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
+                "TransposeA": False, "TransposeB": False,
+            },
             "MacroTile0": 128, "MacroTile1": 256, "DepthU": 64,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
             "DirectToLds": True,
-            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
+            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidthA": 8, "LocalReadVectorWidthB": 8,
             "MatrixInstruction": [16, 16, 32, 1], "MIWaveGroup": [2, 2],
             "LDSTrInst": True, "TransposeLDS": 1, "MIWaveTileA": 4, "MIWaveTileB": 8,
         })
@@ -738,14 +761,14 @@ class TestCustomScheduleBF16:
         """Tests the 352x192x64 16-bit TN schedule."""
         kernel = create_base_kernel()
         dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
-        kernel["ProblemType"].update({
-            "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
-            "TransposeA": transA, "TransposeB": transB
-        })
-        kernel.update({
+        update_kernel(kernel, {
+            "ProblemType": {
+                "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
+                "TransposeA": transA, "TransposeB": transB,
+            },
             "MacroTile0": 352, "MacroTile1": 192, "DepthU": 64,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
-            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
+            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidthA": 8, "LocalReadVectorWidthB": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
             "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": 11, "MIWaveTileB": 6,
         })
@@ -768,14 +791,14 @@ class TestCustomScheduleBF16:
         """Tests the 224x320x64 16-bit TN schedule."""
         kernel = create_base_kernel()
         dtype_16bit = _mock_dtype(is_16bit=True, num_bytes=2)
-        kernel["ProblemType"].update({
-            "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
-            "TransposeA": transA, "TransposeB": transB
-        })
-        kernel.update({
+        update_kernel(kernel, {
+            "ProblemType": {
+                "DataType": dtype_16bit, "DataTypeA": dtype_16bit, "DataTypeB": dtype_16bit,
+                "TransposeA": transA, "TransposeB": transB,
+            },
             "MacroTile0": 224, "MacroTile1": 320, "DepthU": 64,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
-            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidth": 8,
+            "GlobalReadVectorWidthA": 8, "GlobalReadVectorWidthB": 8, "LocalReadVectorWidthA": 8, "LocalReadVectorWidthB": 8,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
             "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": 7, "MIWaveTileB": 10,
         })
@@ -802,18 +825,18 @@ class TestCustomScheduleTF32:
         (False, False, 1),
         ])
     def test_schedule_192x256x32_TF32(self, transA, transB, vwa):
-        """Tests the 192x256x32 TF32 schedule."""        
+        """Tests the 192x256x32 TF32 schedule."""
         kernel = create_base_kernel()
-        kernel["ProblemType"].update({
-            "TransposeA": transA, "TransposeB": transB
-        })
-        kernel.update({
+        update_kernel(kernel, {
+            "ProblemType": {
+                "TransposeA": transA, "TransposeB": transB,
+            },
             "UseF32XEmulation": True, "UseDirect32XEmulation": True,
             "ForceUnrollSubIter": True,
             "MacroTile0": 192, "MacroTile1": 256, "DepthU": 32,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
             "DirectToLds": True,
-            "GlobalReadVectorWidthA": 4, "GlobalReadVectorWidthB": 4, "LocalReadVectorWidth": 4,
+            "GlobalReadVectorWidthA": 4, "GlobalReadVectorWidthB": 4, "LocalReadVectorWidthA": 4, "LocalReadVectorWidthB": 4,
             "MatrixInstruction": [16, 16, 32, 1], "MIWaveGroup": [2, 2],
             "LDSTrInst": False, "TransposeLDS": 1, "MIWaveTileA": 6, "MIWaveTileB": 8,
         })
@@ -832,16 +855,16 @@ class TestCustomScheduleTF32:
     def test_schedule_128x192x32_TF32(self):
         """Tests the 128x192x32 TF32 TN schedule."""
         kernel = create_base_kernel()
-        kernel["ProblemType"].update({
-            "TransposeA": True, "TransposeB": False
-        })
-        kernel.update({
+        update_kernel(kernel, {
+            "ProblemType": {
+                "TransposeA": True, "TransposeB": False,
+            },
             "UseF32XEmulation": True, "UseDirect32XEmulation": True,
             "ForceUnrollSubIter": True,
             "MacroTile0": 128, "MacroTile1": 192, "DepthU": 32,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
             "DirectToLds": True,
-            "GlobalReadVectorWidthA": 4, "GlobalReadVectorWidthB": 4, "LocalReadVectorWidth": 4,
+            "GlobalReadVectorWidthA": 4, "GlobalReadVectorWidthB": 4, "LocalReadVectorWidthA": 4, "LocalReadVectorWidthB": 4,
             "MatrixInstruction": [16, 16, 32, 1], "MIWaveGroup": [2, 2],
             "LDSTrInst": False, "TransposeLDS": 1, "MIWaveTileA": 4, "MIWaveTileB": 6,
         })
@@ -858,16 +881,16 @@ class TestCustomScheduleTF32:
     def test_schedule_192x128x32_TF32(self):
         """Tests the 192x128x32 TF32 TN schedule."""
         kernel = create_base_kernel()
-        kernel["ProblemType"].update({
-            "TransposeA": True, "TransposeB": False
-        })
-        kernel.update({
+        update_kernel(kernel, {
+            "ProblemType": {
+                "TransposeA": True, "TransposeB": False,
+            },
             "UseF32XEmulation": True, "UseDirect32XEmulation": True,
             "ForceUnrollSubIter": True,
             "MacroTile0": 192, "MacroTile1": 128, "DepthU": 32,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
             "DirectToLds": True,
-            "GlobalReadVectorWidthA": 4, "GlobalReadVectorWidthB": 4, "LocalReadVectorWidth": 4,
+            "GlobalReadVectorWidthA": 4, "GlobalReadVectorWidthB": 4, "LocalReadVectorWidthA": 4, "LocalReadVectorWidthB": 4,
             "MatrixInstruction": [16, 16, 32, 1], "MIWaveGroup": [2, 2],
             "LDSTrInst": True, "TransposeLDS": 1, "MIWaveTileA": 6, "MIWaveTileB": 4,
         })
@@ -891,16 +914,16 @@ class TestCustomScheduleTF32:
     def test_schedule_256x256x32_TF32(self,transA, transB, lds_tr_inst, tr_lds, vwa, vwb):
         """Tests the 256x256x32 TF32 TN schedule."""
         kernel = create_base_kernel()
-        kernel["ProblemType"].update({
-            "TransposeA": transA, "TransposeB": transB
-        })
-        kernel.update({
+        update_kernel(kernel, {
+            "ProblemType": {
+                "TransposeA": transA, "TransposeB": transB,
+            },
             "UseF32XEmulation": True, "UseDirect32XEmulation": True,
             "ForceUnrollSubIter": True,
             "MacroTile0": 256, "MacroTile1": 256, "DepthU": 32,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
             "DirectToLds": True,
-            "GlobalReadVectorWidthA": 4, "GlobalReadVectorWidthB": 4, "LocalReadVectorWidth": 4,
+            "GlobalReadVectorWidthA": 4, "GlobalReadVectorWidthB": 4, "LocalReadVectorWidthA": 4, "LocalReadVectorWidthB": 4,
             "MatrixInstruction": [16, 16, 32, 1], "MIWaveGroup": [2, 2],
             "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": 8, "MIWaveTileB": 8,
         })
@@ -929,16 +952,16 @@ class TestCustomScheduleTF32:
     def test_schedule_256x192x32_TF32(self, transA, transB, vwa):
         """Tests the 256x192x32 TF32 TN schedule."""
         kernel = create_base_kernel()
-        kernel["ProblemType"].update({
-            "TransposeA": transA, "TransposeB": transB
-        })
-        kernel.update({
+        update_kernel(kernel, {
+            "ProblemType": {
+                "TransposeA": transA, "TransposeB": transB,
+            },
             "UseF32XEmulation": True, "UseDirect32XEmulation": True,
             "ForceUnrollSubIter": True,
             "MacroTile0": 256, "MacroTile1": 192, "DepthU": 32,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
             "DirectToLds": True,
-            "GlobalReadVectorWidthA": 4, "GlobalReadVectorWidthB": 4, "LocalReadVectorWidth": 4,
+            "GlobalReadVectorWidthA": 4, "GlobalReadVectorWidthB": 4, "LocalReadVectorWidthA": 4, "LocalReadVectorWidthB": 4,
             "MatrixInstruction": [16, 16, 32, 1], "MIWaveGroup": [2, 2],
             "LDSTrInst": False, "TransposeLDS": 1, "MIWaveTileA": 8, "MIWaveTileB": 6,
         })
@@ -959,16 +982,16 @@ class TestCustomScheduleTF32:
     def test_schedule_128x256x32_TF32(self):
         """Tests the 128x256x32 TF32 TN schedule."""
         kernel = create_base_kernel()
-        kernel["ProblemType"].update({
-            "TransposeA": True, "TransposeB": False
-        })
-        kernel.update({
+        update_kernel(kernel, {
+            "ProblemType": {
+                "TransposeA": True, "TransposeB": False,
+            },
             "UseF32XEmulation": True, "UseDirect32XEmulation": True,
             "ForceUnrollSubIter": True,
             "MacroTile0": 128, "MacroTile1": 256, "DepthU": 32,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
             "DirectToLds": True,
-            "GlobalReadVectorWidthA": 4, "GlobalReadVectorWidthB": 4, "LocalReadVectorWidth": 4,
+            "GlobalReadVectorWidthA": 4, "GlobalReadVectorWidthB": 4, "LocalReadVectorWidthA": 4, "LocalReadVectorWidthB": 4,
             "MatrixInstruction": [16, 16, 32, 1], "MIWaveGroup": [2, 2],
             "LDSTrInst": False, "TransposeLDS": 1, "MIWaveTileA": 4, "MIWaveTileB": 8,
         })
@@ -995,19 +1018,19 @@ class TestCustomScheduleTF32:
     def test_schedule_128x128x32(self, transA, transB, lds_tr_inst, tr_lds, plr, vwa, vwb, mi, ncp):
         """Tests the 128x128x32 TF32 schedule."""
         kernel = create_base_kernel()
-        kernel["ProblemType"].update({
-            "TransposeA": transA, "TransposeB": transB
-        })
         macro_tile = (128,128,32)
         mi_wave_group = (2,2)
         mi_wave_tile = (macro_tile[0] // (mi[0] * mi_wave_group[0]), macro_tile[1] // (mi[1] * mi_wave_group[1]))
 
-        kernel.update({
+        update_kernel(kernel, {
+            "ProblemType": {
+                "TransposeA": transA, "TransposeB": transB,
+            },
             "UseF32XEmulation": True, "UseDirect32XEmulation": True,
-            "ForceUnrollSubIter": (True if plr == 0 else False), # internal state/config that needs to be set explicitly 
+            "ForceUnrollSubIter": (macro_tile[2] == mi[2]), # production sets True when DU == matrixInstK (Solution.py:1442)
             "MacroTile0": macro_tile[0], "MacroTile1": macro_tile[1], "DepthU": macro_tile[2],
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": plr,
-            "GlobalReadVectorWidthA": 4, "GlobalReadVectorWidthB": 4, "LocalReadVectorWidth": 4,
+            "GlobalReadVectorWidthA": 4, "GlobalReadVectorWidthB": 4, "LocalReadVectorWidthA": 4, "LocalReadVectorWidthB": 4,
             "MatrixInstruction": mi, "MIWaveGroup": [2,2],
             "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": mi_wave_tile[0], "MIWaveTileB": mi_wave_tile[1],
         })
@@ -1020,7 +1043,6 @@ class TestCustomScheduleTF32:
         assert has_schedule
         assert isinstance(schedule_info, ScheduleInfo)
         assert schedule_info.numCodePaths == ncp
-        schedule_info.pretty_print()
         numMfma = (mi_wave_tile[0] * mi_wave_tile[1] *
                    3 *                      # tf32 emulated with 3 bf16
                    (1 if mi[0] == 16 else 2)   # two sub-iterations with mi32
@@ -1040,14 +1062,14 @@ class TestCustomScheduleTF32:
     def test_schedule_128x128x64(self, transA, transB, lds_tr_inst, tr_lds, vwa):
         """Tests the 128x128x64 TF32 TN schedule."""
         kernel = create_base_kernel()
-        kernel["ProblemType"].update({
-            "TransposeA": transA, "TransposeB": transB
-        })
-        kernel.update({
+        update_kernel(kernel, {
+            "ProblemType": {
+                "TransposeA": transA, "TransposeB": transB,
+            },
             "UseF32XEmulation": True, "UseDirect32XEmulation": True,
             "MacroTile0": 128, "MacroTile1": 128, "DepthU": 64,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
-            "GlobalReadVectorWidthA": 4, "GlobalReadVectorWidthB": 4, "LocalReadVectorWidth": 4,
+            "GlobalReadVectorWidthA": 4, "GlobalReadVectorWidthB": 4, "LocalReadVectorWidthA": 4, "LocalReadVectorWidthB": 4,
             "MatrixInstruction": [16,16,32,1], "MIWaveGroup": [2,2],
             "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": 4, "MIWaveTileB": 4,
         })
@@ -1079,20 +1101,20 @@ class TestCustomScheduleTF32:
         """Tests the 128x160x64, 160x128x64 TF32 TN schedule and 160x128x64 TF32 NN."""
 
         kernel = create_base_kernel()
-        kernel["ProblemType"].update({
-            "TransposeA": transA, "TransposeB": transB
-        })
 
         du = 64
         mi = [16,16,32,1]
         mi_wave_group = [2, 2]
         mi_wave_tile = (mt0 // (mi[0] * mi_wave_group[0]), mt1 // (mi[1] * mi_wave_group[1]))
 
-        kernel.update({
+        update_kernel(kernel, {
+            "ProblemType": {
+                "TransposeA": transA, "TransposeB": transB,
+            },
             "UseF32XEmulation": True, "UseDirect32XEmulation": True,
             "MacroTile0": mt0, "MacroTile1": mt1, "DepthU": du,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
-            "GlobalReadVectorWidthA": 4, "GlobalReadVectorWidthB": 4, "LocalReadVectorWidth": 4,
+            "GlobalReadVectorWidthA": 4, "GlobalReadVectorWidthB": 4, "LocalReadVectorWidthA": 4, "LocalReadVectorWidthB": 4,
             "MatrixInstruction": mi, "MIWaveGroup": mi_wave_group,
             "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": mi_wave_tile[0], "MIWaveTileB": mi_wave_tile[1],
         })
@@ -1114,20 +1136,19 @@ class TestCustomScheduleTF32:
     def test_schedule_64x128x64_128x64x64(self, transA, transB, lds_tr_inst, tr_lds, mt0, mt1):
         """Tests the 64x128x64 & 128x64x64 TF32 TN schedules."""
         kernel = create_base_kernel()
-        kernel["ProblemType"].update({
-            "TransposeA": transA, "TransposeB": transB
-        })
         du = 64
         mi = [16,16,32,1]
         mi_wave_group = [2, 2]
         mi_wave_tile = (mt0 // (mi[0] * mi_wave_group[0]), mt1 // (mi[1] * mi_wave_group[1]))
 
-
-        kernel.update({
+        update_kernel(kernel, {
+            "ProblemType": {
+                "TransposeA": transA, "TransposeB": transB,
+            },
             "UseF32XEmulation": True, "UseDirect32XEmulation": True,
             "MacroTile0": mt0, "MacroTile1": mt1, "DepthU": du,
             "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1,
-            "GlobalReadVectorWidthA": 4, "GlobalReadVectorWidthB": 4, "LocalReadVectorWidth": 4,
+            "GlobalReadVectorWidthA": 4, "GlobalReadVectorWidthB": 4, "LocalReadVectorWidthA": 4, "LocalReadVectorWidthB": 4,
             "MatrixInstruction": mi, "MIWaveGroup": mi_wave_group,
             "LDSTrInst": lds_tr_inst, "TransposeLDS": tr_lds, "MIWaveTileA": mi_wave_tile[0], "MIWaveTileB": mi_wave_tile[1],
         })

@@ -462,19 +462,17 @@ static void
 template <typename Tfloat>
 void execute_reference_fft(const fft_params& params, std::vector<hostbuf>& input)
 {
-    auto cpu_plan = fftw_plan_via_rocfft<Tfloat>(params.length,
-                                                 params.istride,
-                                                 params.ostride,
-                                                 params.nbatch,
-                                                 params.idist,
-                                                 params.odist,
-                                                 params.transform_type,
-                                                 input,
-                                                 input);
+    fftw_plan_wrapper_t<Tfloat> cpu_plan = fftw_plan_via_rocfft<Tfloat>(params.length,
+                                                                        params.istride,
+                                                                        params.ostride,
+                                                                        params.nbatch,
+                                                                        params.idist,
+                                                                        params.odist,
+                                                                        params.transform_type,
+                                                                        input,
+                                                                        input);
 
     fftw_run<Tfloat>(params.transform_type, cpu_plan, input, input);
-
-    fftw_destroy_plan_type(cpu_plan);
 }
 
 bool   use_fftw_wisdom = false;
@@ -628,21 +626,10 @@ void exec_testcases(std::function<AllParams(const std::vector<std::string>&)> ma
         std::vector<void*>                        store_cb_data;
         if(all_params[testcase].run_callbacks)
         {
-            auto runtime_err_handler
-                = [&](const std::string& msg) { throw std::runtime_error(msg); };
-
-            get_rank_load_callbacks(all_params[testcase],
-                                    load_cb_func,
-                                    load_cb_data,
-                                    runtime_err_handler,
-                                    false,
-                                    all_cb_data);
-            get_rank_store_callbacks(all_params[testcase],
-                                     store_cb_func,
-                                     store_cb_data,
-                                     runtime_err_handler,
-                                     false,
-                                     all_cb_data);
+            get_rank_load_callbacks(
+                all_params[testcase], load_cb_func, load_cb_data, false, all_cb_data);
+            get_rank_store_callbacks(
+                all_params[testcase], store_cb_func, store_cb_data, false, all_cb_data);
 
             auto fft_status = all_params[testcase].set_callbacks(
                 &load_cb_func, &load_cb_data, &store_cb_func, &store_cb_data);

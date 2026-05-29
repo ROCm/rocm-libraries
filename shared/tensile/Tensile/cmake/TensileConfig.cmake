@@ -248,7 +248,36 @@ function(TensileCreateLibraryFiles
           set(Tensile_VAR_PREFIX TENSILE)
       endif()
 
-      set(Tensile_MANIFEST_FILE_PATH "${Tensile_OUTPUT_PATH}/library/TensileManifest.txt")
+      # Compute the manifest path using the same routing logic as TensileCreateLibrary.py
+      # libraryDir(): route by distinct base arch count, not raw arch string count.
+      # xnack variants of one arch (e.g. gfx90a:xnack+;gfx90a:xnack-) form a single-family
+      # shard and share a library/gfx90a/ subdirectory; truly multi-arch builds use library/.
+      set(_tensile_manifest_dir "${Tensile_OUTPUT_PATH}/library")
+      list(LENGTH Tensile_ARCHITECTURE _tensile_arch_count)
+      if(_tensile_arch_count GREATER 0)
+        # Collect unique base arch names (strip everything from ':' onwards).
+        set(_tensile_base_archs "")
+        foreach(_arch IN LISTS Tensile_ARCHITECTURE)
+          string(REGEX REPLACE ":.*$" "" _base "${_arch}")
+          list(APPEND _tensile_base_archs "${_base}")
+        endforeach()
+        list(REMOVE_DUPLICATES _tensile_base_archs)
+        list(LENGTH _tensile_base_archs _tensile_base_arch_count)
+        if(_tensile_base_arch_count EQUAL 1)
+          # Single base arch (possibly multiple xnack variants): use arch subdir.
+          list(GET _tensile_base_archs 0 _tensile_base_arch)
+          if(_tensile_arch_count EQUAL 1)
+            # Exactly one variant: use full dash-form arch name (e.g. gfx90a-xnack-).
+            list(GET Tensile_ARCHITECTURE 0 _tensile_single_arch)
+            string(REPLACE ":" "-" _tensile_arch_dir "${_tensile_single_arch}")
+          else()
+            # Multiple xnack variants of same arch: use base arch name (e.g. gfx90a).
+            set(_tensile_arch_dir "${_tensile_base_arch}")
+          endif()
+          set(_tensile_manifest_dir "${Tensile_OUTPUT_PATH}/library/${_tensile_arch_dir}")
+        endif()
+      endif()
+      set(Tensile_MANIFEST_FILE_PATH "${_tensile_manifest_dir}/TensileManifest.txt")
       message(STATUS "Tensile_MANIFEST_FILE_PATH: ${Tensile_MANIFEST_FILE_PATH}")
 
       if($ENV{ENABLE_ADDRESS_SANITIZER})
