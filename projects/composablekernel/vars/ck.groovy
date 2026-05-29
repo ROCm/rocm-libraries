@@ -1408,3 +1408,5 @@ def runBuildInstancesOnly(String compiler) {
                 -D CMAKE_BUILD_TYPE=Release .. && ninja -j64"""
     )
 }
+
+return this
