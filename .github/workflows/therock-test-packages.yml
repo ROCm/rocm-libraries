@@ -3,6 +3,9 @@ name: TheRock Test Packages
 on:
   workflow_call:
     inputs:
+      therock_ref:
+        type: string
+        required: true
       projects_to_test:
         type: string
       amdgpu_families:
@@ -70,6 +73,7 @@ jobs:
     uses: './.github/workflows/therock-test-component.yml'
     with:
       artifact_run_id: ${{  github.run_id }}
+      therock_ref: ${{ inputs.therock_ref }}
       amdgpu_families: ${{ inputs.amdgpu_families }}
       test_runs_on: ${{ inputs.test_runs_on }}
       platform: ${{ inputs.platform }}

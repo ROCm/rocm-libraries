@@ -52,7 +52,6 @@ jobs:
           repository: "ROCm/TheRock"
           path: TheRock
           ref: 32329200459aa4396127a53560e1f454d136d706
-
       - name: Install python deps
         run: |
           pip install -r TheRock/requirements.txt
@@ -157,6 +156,7 @@ jobs:
     if: ${{ inputs.amdgpu_families != 'gfx950-dcgpu' }}
     uses: ./.github/workflows/therock-test-packages.yml
     with:
+      therock_ref: ${{ inputs.therock_ref }}
       projects_to_test: ${{ inputs.projects_to_test }}
       amdgpu_families: ${{ inputs.amdgpu_families }}
       test_runs_on: ${{ inputs.test_runs_on }}
