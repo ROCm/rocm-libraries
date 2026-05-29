@@ -287,6 +287,28 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem) -> int:
     # variants were >=258us and often incorrect under hipcc).
     if problem.use_fp8 and problem.sliding_window > 0 and problem.max_seqlen_q > 256:
         return problem.block_size
+    # Qwen3-30B-A3B prefill specialization (bf16, hd64, BS=16, num_seqs=1,
+    # num_queries_per_kv=8). At BS=16 the default ``T=2*BS=32`` gives the
+    # async DMA loader only 32*64 = 2048 bytes per iter, which under-feeds
+    # the long-prefill kv loop. Measured on MI355X with the bench at
+    # ``/tmp/bench_prefill_sweep2.py``:
+    #   - q=128:   T=64 best (29µs vs 37µs)
+    #   - q=256:   T=64 best
+    #   - q=512:   T=128 best (37µs vs 56µs)
+    #   - q>=1024: T=64 with mfma_32x32+half_local_pv best (the
+    #     ``_select_2d_block_m_per_warp`` gate picks mw=32 for this case)
+    if (
+        problem.head_size == 64
+        and problem.block_size == 16
+        and problem.num_seqs <= 1
+        and not problem.use_fp8
+        and problem.dtype == "bf16"
+        and problem.num_queries_per_kv >= 4
+    ):
+        if problem.max_seqlen_q >= 512 and problem.max_seqlen_q <= 768:
+            return 128
+        if problem.max_seqlen_q > 64:
+            return 64
     # T = 4 * block_size = 128 was tested on bf16 long-prefill (the
     # ``n=402 q=1000 k=1050`` regression bucket) and got WORSE, not
     # better: 333us → 953us. The reason is the async DMA loader uses
@@ -336,7 +358,32 @@ def _select_2d_num_warps(problem: UnifiedAttentionProblem) -> int:
       - an LDS-budget check (``<= 96 KiB`` so we keep >= 1 CTA/CU on
         MI355X comfortably).
     """
-    if problem.max_seqlen_q <= 64:
+    # Qwen3-30B-A3B prefill specialization (bf16, hd64, BS=16, num_seqs=1,
+    # num_queries_per_kv>=4). The default heuristic was tuned for HD=128 /
+    # multi-batch prefill; for this hd64 single-seq path the per-CTA cost
+    # is much higher than necessary because (a) q<=128 had NW=2 which
+    # over-allocated LDS/VGPR for a tiny grid, and (b) q>256 num_seqs<=1
+    # kept NW=2 which left perf on the table on long single-seq prefill.
+    # Measured (``/tmp/bench_prefill_sweep2.py``, MI355X bf16 hd64):
+    #   q=128:   NW=1 best  (28.7µs vs 37µs default)
+    #   q=256:   NW=2 best  (32µs vs 43µs default)
+    #   q>=512:  NW=2 (mw=16) or NW=4 (mw=32) best
+    if (
+        problem.head_size == 64
+        and problem.block_size == 16
+        and problem.num_seqs <= 1
+        and not problem.use_fp8
+        and problem.dtype == "bf16"
+        and problem.num_queries_per_kv >= 4
+    ):
+        if problem.max_seqlen_q <= 128:
+            target = 1
+        elif problem.max_seqlen_q <= 768:
+            target = 2
+        else:
+            # Long single-seq prefill: NW=4 wins paired with mw=32+mfma_32x32
+            target = 4
+    elif problem.max_seqlen_q <= 64:
         target = 1
     elif problem.max_seqlen_q <= 128:
         target = 2
@@ -438,6 +485,7 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
         _select_2d_block_m_per_warp(problem),
         _enable_mfma_32x32(problem),
         _enable_transposed_qk_32x32(problem),
+        _enable_transposed_half_local_pv(problem),
         _enable_register_pv(problem),
         _select_2d_compile_backend(problem),
     )
@@ -570,11 +618,36 @@ def _enable_transposed_qk_32x32(problem: UnifiedAttentionProblem) -> bool:
     if problem.head_size not in (64, 128):
         return False
     # Must match _select_2d_block_m_per_warp's mw=32 conditions exactly.
-    if not (problem.max_seqlen_q > 256 and problem.num_seqs >= 2):
+    multi_batch = problem.max_seqlen_q > 256 and problem.num_seqs >= 2
+    single_seq_hd64 = (
+        problem.head_size == 64
+        and problem.block_size == 16
+        and problem.num_seqs <= 1
+        and problem.num_queries_per_kv >= 4
+        and problem.max_seqlen_q > 768
+    )
+    if not (multi_batch or single_seq_hd64):
         return False
     if problem.sliding_window > 0 and not problem.use_fp8:
         return False
     return True
+
+
+def _enable_transposed_half_local_pv(problem: UnifiedAttentionProblem) -> bool:
+    """Enable the half-local PV optimization for the transposed 32x32 path.
+
+    When the transposed 32x32 kernel is selected, ``use_transposed_half_local_pv``
+    rewrites the PV phase so each 32-lane half consumes only P rows it owns,
+    avoiding the cross-half ``lane^32`` P fetches. Measured on Qwen3-30B-A3B
+    prefill (bf16 hd64, num_seqs=1, q=2048): 125µs → 101µs = 1.24× win on top
+    of plain mfma_32x32 (``/tmp/bench_prefill_min32.py``).
+
+    This is bit-identical to the without-flag path; it is a pure VALU schedule
+    rewrite. The existing prod heuristic never enabled it because the original
+    transposed-32x32 calibration was done before this opt landed. Enable it
+    whenever the transposed-32x32 path itself fires.
+    """
+    return _enable_transposed_qk_32x32(problem)
 
 
 def _enable_register_pv(problem: UnifiedAttentionProblem) -> bool:
@@ -602,6 +675,11 @@ def _enable_register_pv(problem: UnifiedAttentionProblem) -> bool:
         return False
     if _kv_storage_dtype(problem) is not None:
         return False
+    # use_register_pv requires the 16x16x32 MFMA path; it conflicts with
+    # use_mfma_32x32. When the 32x32 path is selected we leave it disabled
+    # (the 32x32 path has its own in-register P pipeline).
+    if _enable_mfma_32x32(problem):
+        return False
     return True
 
 
@@ -627,6 +705,7 @@ def _tiled_spec_from_problem(
         block_m_per_warp=_select_2d_block_m_per_warp(problem),
         use_mfma_32x32=_enable_mfma_32x32(problem),
         use_transposed_qk_32x32=_enable_transposed_qk_32x32(problem),
+        use_transposed_half_local_pv=_enable_transposed_half_local_pv(problem),
         use_register_pv=_enable_register_pv(problem),
         use_fp8_mfma_qk=_enable_fp8_mfma_qk(problem),
     )
@@ -677,6 +756,28 @@ def _select_2d_block_m_per_warp(problem: UnifiedAttentionProblem) -> int:
         problem.max_seqlen_q > 256
         and problem.num_seqs >= 2
         and not (problem.sliding_window > 0 and not problem.use_fp8)
+    ):
+        return 32
+    # Qwen3-30B-A3B prefill specialization (bf16, hd64, BS=16, num_seqs=1,
+    # num_queries_per_kv>=4). Long single-seq prefill is the dominant
+    # bucket for chunked-prefill production traces with one decode-class
+    # request at a time. Measured at ``/tmp/bench_prefill_sweep2.py``:
+    # mw=32 with NW=4 + transposed-32x32 + half_local_pv beats the default
+    # mw=16 by 1.5-1.8× at q in {1024, 2048}. Below q=1024 the per-CTA
+    # prelude is small enough that mw=16 wins.
+    if (
+        problem.head_size == 64
+        and problem.block_size == 16
+        and problem.num_seqs <= 1
+        and not problem.use_fp8
+        and problem.dtype == "bf16"
+        and problem.num_queries_per_kv >= 4
+        and problem.max_seqlen_q > 768
+        and problem.sliding_window == 0
+        and problem.softcap == 0
+        and not problem.use_sinks
+        and not problem.use_alibi
+        and not problem.use_qq_bias
     ):
         return 32
     return 16
