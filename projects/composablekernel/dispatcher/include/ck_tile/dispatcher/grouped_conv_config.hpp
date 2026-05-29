@@ -32,6 +32,11 @@ namespace dispatcher {
 // DataType, Pipeline, Scheduler, Epilogue are defined in kernel_key.hpp
 // No need to redefine them here
 
+// TODO(#7280): the conv-specific enums below (ConvDataType, EpilogueType,
+// PipelineVersion, ConvSpecialization, MemoryOperation, GemmPadding,
+// ElementwiseOp) duplicate definitions in ck_common -- consolidate as part
+// of the rocm-libraries#7280 deduplication epic (pt.2).
+
 // =============================================================================
 // Data Type Enum (matching CK Tile numeric types)
 // =============================================================================

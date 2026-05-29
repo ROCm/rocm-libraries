@@ -619,9 +619,9 @@ struct KernelKeyBuilder
     DataType dtype_acc = DataType::FP32;
 
     // Layouts
-    LayoutTag layout_a = LayoutTag::RowMajor;
-    LayoutTag layout_b = LayoutTag::ColMajor;
-    LayoutTag layout_c = LayoutTag::RowMajor;
+    LayoutTag layout_a = LayoutTag::Row;
+    LayoutTag layout_b = LayoutTag::Col;
+    LayoutTag layout_c = LayoutTag::Row;
 
     // Pipeline/scheduler
     Pipeline pipeline   = Pipeline::CompV4;
@@ -690,7 +690,7 @@ struct KernelKeyBuilder
     static KernelKeyBuilder fp16_rrr()
     {
         auto b     = KernelKeyBuilder{};
-        b.layout_b = LayoutTag::RowMajor;
+        b.layout_b = LayoutTag::Row;
         return b;
     }
 

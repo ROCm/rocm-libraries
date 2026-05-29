@@ -43,12 +43,17 @@ target_include_directories(ck_tile_dispatcher
         $<INSTALL_INTERFACE:include>
 )
 
-# Common types shared across CK Tile, rocm_ck, and dispatcher
-target_include_directories(ck_tile_dispatcher
-    PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../common/include>
-        $<INSTALL_INTERFACE:include>
-)
+# Common types shared across CK Tile, rocm_ck, and dispatcher.
+# Prefer linking the ck_common target (brings include dirs + compile features)
+# over reaching into the headers via a raw path. When this dispatcher is built
+# standalone (without the parent CK super-build), add the ck_common subdir and
+# remember that we own its install/export here.
+set(_ck_common_owned_here FALSE)
+if(NOT TARGET ck_common)
+    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../common ${CMAKE_BINARY_DIR}/_ck_common)
+    set(_ck_common_owned_here TRUE)
+endif()
+target_link_libraries(ck_tile_dispatcher PUBLIC ck_common)
 
 # CK project root -- needed only for FMHA generated wrappers that include
 # "example/ck_tile/01_fmha/fmha_fwd.hpp". PRIVATE to avoid exposing the
@@ -74,8 +79,8 @@ elseif(CMAKE_CXX_COMPILER_ID MATCHES "MSVC")
     )
 endif()
 
-# Optional: Build tests
-option(BUILD_DISPATCHER_TESTS "Build dispatcher unit tests" OFF)
+# Build dispatcher tests by default so the rename adaptations land in CI.
+option(BUILD_DISPATCHER_TESTS "Build dispatcher unit tests" ON)
 if(BUILD_DISPATCHER_TESTS)
     enable_testing()
     add_subdirectory(tests)
@@ -113,8 +118,13 @@ if(DISPATCHER_AUTO_GENERATE_WRAPPERS AND DISPATCHER_GENERATED_INCLUDE_DIR)
     )
 endif()
 
-# Installation
-install(TARGETS ck_tile_dispatcher
+# Installation. When ck_common was added by this build (standalone dispatcher),
+# include it in the export set so the install(EXPORT ...) below is consistent.
+set(_dispatcher_install_targets ck_tile_dispatcher)
+if(_ck_common_owned_here)
+    list(APPEND _dispatcher_install_targets ck_common)
+endif()
+install(TARGETS ${_dispatcher_install_targets}
     EXPORT ck_tile_dispatcher_targets
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib

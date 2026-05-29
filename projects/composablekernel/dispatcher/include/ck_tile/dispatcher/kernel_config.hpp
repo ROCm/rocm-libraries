@@ -62,9 +62,9 @@ class KernelConfig
     // =========================================================================
     // Layouts
     // =========================================================================
-    LayoutTag layout_a = LayoutTag::RowMajor;
-    LayoutTag layout_b = LayoutTag::ColMajor;
-    LayoutTag layout_c = LayoutTag::RowMajor;
+    LayoutTag layout_a = LayoutTag::Row;
+    LayoutTag layout_b = LayoutTag::Col;
+    LayoutTag layout_c = LayoutTag::Row;
 
     // =========================================================================
     // Tile shape
@@ -213,7 +213,7 @@ class KernelConfig
     static KernelConfig fp16_rrr()
     {
         KernelConfig cfg;
-        cfg.layout_b = LayoutTag::RowMajor;
+        cfg.layout_b = LayoutTag::Row;
         return cfg;
     }
 

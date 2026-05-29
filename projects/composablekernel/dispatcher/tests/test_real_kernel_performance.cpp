@@ -47,9 +47,9 @@ int main()
     key.signature.dtype_b             = DataType::FP16;
     key.signature.dtype_c             = DataType::FP16;
     key.signature.dtype_acc           = DataType::FP32;
-    key.signature.layout_a            = LayoutTag::RowMajor;
-    key.signature.layout_b            = LayoutTag::ColMajor;
-    key.signature.layout_c            = LayoutTag::RowMajor;
+    key.signature.layout_a            = LayoutTag::Row;
+    key.signature.layout_b            = LayoutTag::Col;
+    key.signature.layout_c            = LayoutTag::Row;
     key.signature.transpose_a         = false;
     key.signature.transpose_b         = false;
     key.signature.grouped             = false;

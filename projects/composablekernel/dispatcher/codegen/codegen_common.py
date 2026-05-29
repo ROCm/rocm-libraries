@@ -109,7 +109,15 @@ class TraitConfigBase:
 
 
 class CommonTypeMappings:
-    """Centralized type mappings shared by GEMM and grouped conv codegen."""
+    """Centralized type mappings shared by GEMM and grouped conv codegen.
+
+    BREAKING (rocm-libraries#7845): the DataType / LayoutTag / Scheduler
+    enumerators emitted by these mappings were renamed when the dispatcher
+    migrated to ck_common types -- DataType::FP8 -> FP8_FNUZ, INT8 -> I8,
+    LayoutTag::RowMajor -> Row, Scheduler::Auto -> Default. Any pre-generated
+    .hpp/.cpp files or downstream Python tooling that reads these identifiers
+    as strings (e.g. dispatcher ctypes bindings) must be regenerated/updated.
+    """
 
     DTYPE_TO_CK = {
         "fp16": "fp16_t",

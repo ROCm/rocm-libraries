@@ -58,12 +58,12 @@ class LayoutTagTest : public ::testing::Test
 TEST_F(LayoutTagTest, AllLayoutsExist)
 {
     std::vector<LayoutTag> all_layouts = {
-        LayoutTag::RowMajor, LayoutTag::ColMajor, LayoutTag::PackedExternal};
+        LayoutTag::Row, LayoutTag::Col, LayoutTag::PackedExternal};
 
     EXPECT_EQ(all_layouts.size(), 3);
 }
 
-TEST_F(LayoutTagTest, LayoutsAreDifferent) { EXPECT_NE(LayoutTag::RowMajor, LayoutTag::ColMajor); }
+TEST_F(LayoutTagTest, LayoutsAreDifferent) { EXPECT_NE(LayoutTag::Row, LayoutTag::Col); }
 
 // =============================================================================
 // Pipeline Tests
@@ -143,9 +143,9 @@ class SignatureTest : public ::testing::Test
         sig.dtype_b             = DataType::FP16;
         sig.dtype_c             = DataType::FP16;
         sig.dtype_acc           = DataType::FP32;
-        sig.layout_a            = LayoutTag::RowMajor;
-        sig.layout_b            = LayoutTag::ColMajor;
-        sig.layout_c            = LayoutTag::RowMajor;
+        sig.layout_a            = LayoutTag::Row;
+        sig.layout_b            = LayoutTag::Col;
+        sig.layout_c            = LayoutTag::Row;
         sig.transpose_a         = false;
         sig.transpose_b         = false;
         sig.grouped             = false;
@@ -198,12 +198,12 @@ TEST_F(SignatureTest, AllLayoutCombinations)
     for(const std::string& code : layout_codes)
     {
         KernelKey::Signature sig = CreateDefaultSignature();
-        sig.layout_a             = (code[0] == 'r') ? LayoutTag::RowMajor : LayoutTag::ColMajor;
-        sig.layout_b             = (code[1] == 'r') ? LayoutTag::RowMajor : LayoutTag::ColMajor;
-        sig.layout_c             = (code[2] == 'r') ? LayoutTag::RowMajor : LayoutTag::ColMajor;
+        sig.layout_a             = (code[0] == 'r') ? LayoutTag::Row : LayoutTag::Col;
+        sig.layout_b             = (code[1] == 'r') ? LayoutTag::Row : LayoutTag::Col;
+        sig.layout_c             = (code[2] == 'r') ? LayoutTag::Row : LayoutTag::Col;
 
         // Just verify assignment works
-        EXPECT_TRUE(sig.layout_a == LayoutTag::RowMajor || sig.layout_a == LayoutTag::ColMajor);
+        EXPECT_TRUE(sig.layout_a == LayoutTag::Row || sig.layout_a == LayoutTag::Col);
     }
 }
 
@@ -418,7 +418,7 @@ TEST_F(KeyEqualityTest, DifferentLayoutsNotEqual)
 {
     KernelKey key1          = make_test_key(256);
     KernelKey key2          = make_test_key(256);
-    key2.signature.layout_a = LayoutTag::ColMajor;
+    key2.signature.layout_a = LayoutTag::Col;
 
     EXPECT_NE(key1, key2);
 }
