@@ -28,6 +28,7 @@
 #include <limits>
 #include <sstream>
 
+#include "stinkytofu/hardware/HwRegHelpers.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
@@ -210,6 +211,13 @@ inline std::ostream& operator<<(std::ostream& os, const MUBUFModifiers& mubufMod
     }
     if (mubufMod.lds) {
         os << " lds";
+    }
+    return os;
+}
+
+inline std::ostream& operator<<(std::ostream& os, const CacheScopeModifiers& mod) {
+    if (mod.scope != MUBUFScope::SCOPE_NONE) {
+        os << " scope:" << toString(mod.scope);
     }
     return os;
 }
@@ -434,6 +442,10 @@ static void emitRegister(std::ostream& os, const StinkyRegister& reg,
             os << reg.getLiteralString();
             break;
 
+        case StinkyRegister::Type::HwReg:
+            HwReg::printOperand(os, reg);
+            break;
+
         case StinkyRegister::Type::Invalid:
             os << "<invalid>";
             break;
@@ -527,7 +539,11 @@ static void emitOperands(std::ostream& os, const StinkyInstruction& inst,
     // Check if instruction has VOP3 modifiers
     const VOP3Modifiers* vop3Mod = inst.getModifier<VOP3Modifiers>();
 
-    // Check if this is a MUBUF instruction (buffer operations) with offen
+    // Check if this is a MUBUF instruction (buffer operations) with offen.
+    // Note: SOPP fences (global_wb / global_inv) carry a CacheScopeModifiers
+    // instead of MUBUFModifiers, so this query correctly returns nullptr for
+    // them — the null/0-soffset substitution below is only meaningful for
+    // true buffer ops with src registers.
     const MUBUFModifiers* mubufMod = inst.getModifier<MUBUFModifiers>();
 
     // Compute the number of source operands to emit from the HW field metadata.
@@ -715,6 +731,7 @@ static void emitTrailingModifiers(std::ostream& os, const StinkyInstruction& ins
             EMIT_TRAILING_MODIFIER(DS, DS);
             EMIT_TRAILING_MODIFIER(FLAT, FLAT);
             EMIT_TRAILING_MODIFIER(MUBUF, MUBUF);
+            EMIT_TRAILING_MODIFIER(CACHE_SCOPE, CacheScope);
             EMIT_TRAILING_MODIFIER(SMEM, SMEM);
             EMIT_TRAILING_MODIFIER(SDWA, SDWA);
             EMIT_TRAILING_MODIFIER(DPP, DPP);

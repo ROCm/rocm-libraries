@@ -50,6 +50,11 @@ Datatypes:
         uniform_01: 777
         integer_exact: 888
         fp16_accumulator_probe: 889
+        inf: 890
+        neg_zero: 891
+        neg_inf: 892
+        nan: 893
+        norm_dist_one_special: 894
         uniform_low_precision: 999
   - hipblaslt_activation_type:
       bases: [ c_int ]

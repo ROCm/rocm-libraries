@@ -113,9 +113,10 @@ struct buffer_store;
 template <index_t bytes>
 struct buffer_store_if;
 
+#ifdef __clang__
 #pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wundefined-reinterpret-cast"
+#endif
 // TODO: strict aliasing rule seems fail when reinterpret_cast between vector type
 // (exp_vector_type(xxx))
 
@@ -500,7 +501,9 @@ struct buffer_load_if<1, pre_nop>
     }
 };
 #endif
-#pragma clang diagnostic pop // "-Wundefined-reinterpret-cast"
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif // "-Wundefined-reinterpret-cast"
 template <index_t bytes>
 struct buffer_store;
 
@@ -1449,21 +1452,21 @@ CK_TILE_DEVICE void async_buffer_load_fence(index_t cnt = 0)
 // Bypasses the SRD's 32-bit offset limit; required when the KV cache exceeds
 // INT32_MAX (2GB) byte offset on the SRD voffset path.
 //
-// !!! M0 PRECONDITION — IMPLICIT INPUT NOT VISIBLE IN OPERAND LIST !!!
+// !!! M0 PRECONDITION - IMPLICIT INPUT NOT VISIBLE IN OPERAND LIST !!!
 //
 //   The LDS destination address is taken from M0 (per AMD CDNA3 ISA §10.3:
 //   `LDS_ADDR = LDSbase + LDSoffset(M0[17:2] * 4) + INST.OFFSET + ThreadID*4`).
 //   M0 does NOT appear as an operand of these instructions or of the inline
-//   asm below — the compiler cannot see the dependency. Caller must:
+//   asm below - the compiler cannot see the dependency. Caller must:
 //
 //     1. Initialize M0 once before the load loop:
 //          `m0_set_with_memory(amd_wave_read_first_lane(lds_byte_offset));`
-//        M0 is SALU-only — `m0_set_with_memory` uses an "s" constraint to
+//        M0 is SALU-only - `m0_set_with_memory` uses an "s" constraint to
 //        enforce this. Direct VALU writes to M0 are illegal.
 //
 //     2. Advance M0 between successive issues:
 //          `m0_inc_with_memory(size_per_issue);`
-//        `size_per_issue` MUST be a multiple of 4 — GLOBAL/FLAT LDS path
+//        `size_per_issue` MUST be a multiple of 4 - GLOBAL/FLAT LDS path
 //        only honors M0[17:2]*4 (dword-aligned), so low 2 bits are silently
 //        dropped (NOTE: this differs from MUBUF buffer_load_lds which uses
 //        M0[15:0] as a raw byte offset).
@@ -1479,7 +1482,7 @@ CK_TILE_DEVICE void async_buffer_load_fence(index_t cnt = 0)
 //
 // Verified instruction emission (HIP 6.4 / clang 19, gfx942 + gfx950):
 //   `global_load_lds_dwordx4` is a single instruction (encoding 0xDDF48000
-//   0x007F0000), NOT software-expanded into 4× dword. Same encoding on both
+//   0x007F0000), NOT software-expanded into 4x dword. Same encoding on both
 //   arches. The opcode is undocumented in CDNA3 ISA spec §13.6.2 but
 //   supported by the LLVM AMDGPU backend.
 //
@@ -1501,7 +1504,7 @@ async_global_load_lds_dwordxn(void* smem, const void* global_addr, bool_constant
 
 // Inline asm: only the global address is an explicit operand. The LDS
 // destination is implicit via M0 (see contract above). `"=r"(smem)` is a
-// SSA scheduling anchor only — `smem` is NOT written by this asm; the
+// SSA scheduling anchor only - `smem` is NOT written by this asm; the
 // load goes to LDS at `M0[17:2]*4 + offset:0 + ThreadID*4`.
 #define CK_TILE_GLOBAL_LOAD_LDS_INSTR(instr)                                 \
     if constexpr(pre_nop)                                                    \
@@ -1984,9 +1987,10 @@ CK_TILE_DEVICE void amd_async_buffer_load(CK_TILE_LDS_ADDR T* smem,
     if constexpr(oob_conditional_check)
         v_offset = flag ? v_offset : 0x7fffffff; // large offset to cause OOB access
 
+#ifdef __clang__
 #pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wold-style-cast"
+#endif
     // Use C-style cast to change address space without dropping llvm noalias attribute
     __builtin_amdgcn_raw_ptr_buffer_load_lds(rsrc,
                                              smem,
@@ -1995,7 +1999,9 @@ CK_TILE_DEVICE void amd_async_buffer_load(CK_TILE_LDS_ADDR T* smem,
                                              src_wave_addr_offset,
                                              /*imm*/ IMM,
                                              static_cast<index_t>(coherence));
+#ifdef __clang__
 #pragma clang diagnostic pop
+#endif
 }
 
 template <index_t N,
@@ -2793,13 +2799,15 @@ template <typename T,
 CK_TILE_DEVICE void amd_async_buffer_load_with_oob(CK_TILE_LDS_ADDR T* smem,
                                                    const __amdgpu_buffer_rsrc_t rsrc,
                                                    index_t src_thread_element_offset,
-                                                   index_t src_wave_addr_offset,
+                                                   index_t src_wave_element_offset,
                                                    linear_offset_t,
                                                    bool is_valid_element,
                                                    bool_constant<oob_conditional_check> = {})
 {
     index_t src_thread_addr_offset           = src_thread_element_offset * sizeof(T);
     constexpr index_t src_linear_addr_offset = static_cast<index_t>(linear_offset_t{}) * sizeof(T);
+    constexpr index_t PackedSize             = numeric_traits<T>::PackedSize;
+    index_t src_wave_addr_offset             = src_wave_element_offset * sizeof(T) / PackedSize;
 
     amd_async_buffer_load<T, N, coherence>(smem,
                                            rsrc,
@@ -3262,12 +3270,15 @@ __device__ auto amd_transpose_load_to_vgpr(const T* __restrict__ in_ptr)
     static_assert(__has_builtin(__builtin_amdgcn_raw_buffer_load_b32),
                   "We need to have the compatible compiler version to build this instruction");
 
+#ifdef __clang__
 #pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wold-style-cast"
+#endif
     // Use C-style cast to change address space without dropping llvm noalias attribute
     const auto in_ptr_ = (__LDS_ADDR T*)(const_cast<T*>(in_ptr));
+#ifdef __clang__
 #pragma clang diagnostic pop
+#endif
     if constexpr(std::is_same_v<remove_cvref_t<T>, ck_tile::half_t>)
     {
 #if defined(__gfx950__)

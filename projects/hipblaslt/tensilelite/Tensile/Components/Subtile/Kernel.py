@@ -75,8 +75,8 @@ from .SubtileGeometry import (
   ABInputGeometry,
   ABGRGeometry,
   ABLRGeometry,
-  GRTag_1x2, GRTag_2x2, GRTag_TLU1,
-  LRTag_1x2, LRTag_TLU1,
+  GRTag_1x1, GRTag_1x2, GRTag_2x2, GRTag_TLU1,
+  LRTag_1x1, LRTag_1x2, LRTag_TLU1,
   ABTilePair,
   CDTileGeometry,
   MXScaleInputGeometry,
@@ -289,8 +289,8 @@ AB_B4 = ABTilePair(
     lr=ABLRGeometry(tag=LRTag_1x2(), **_B4, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=32)), # 128-bit LR: 32 fp4 along K
 )
 AB_B8 = ABTilePair(
-    gr=ABGRGeometry(tag=GRTag_1x2(), **_B8, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=16)),                  # 128-bit GR: 16 fp8 along K
-    lr=ABLRGeometry(tag=LRTag_1x2(), **_B8, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=32), loadWidth=32), # 256-bit LR: 32 fp8 along K
+    gr=ABGRGeometry(tag=GRTag_1x1(), **_B8, subtileShape=(1, 1), loadShape=LoadShape(m=1, k=16)),  # 128-bit GR: 16 fp8 along K
+    lr=ABLRGeometry(tag=LRTag_1x1(), **_B8, subtileShape=(1, 1), loadShape=LoadShape(m=1, k=16)), # 128-bit LR: 16 fp8 along K
 )
 
 AB_B4_2x2 = ABTilePair(
@@ -314,10 +314,14 @@ AB_B16_TLU1_16x1 = ABTilePair(
 
 # MX scale factor inputs (one scale per mxBlock data elements)
 _MXS_B4 = dict(scaleLayout=MFMA_SCALE_16x16_1B_MX32_8V, instK=128, bpe=1, supportedTypes=('fp4',))
+_MXS_B8 = dict(scaleLayout=MFMA_SCALE_16x16_1B_MX32_8V, instK=128, bpe=1, supportedTypes=('fp8', 'bf8'))
+
 # GR: subtileShape=None -> derived from kernel as (mt_mma, du_scale) to span entire macro tile
 # LR: subtileShape=(2,2) -> 2 scale MMA tiles in M x 2 in K per local read
 MXSA_B4 = MXScaleTilePair(gr=MXScaleGRGeometry(**_MXS_B4, loadWidth=16), lr=MXScaleLRGeometry(**_MXS_B4, loadWidth=4))
 MXSB_B4 = MXScaleTilePair(gr=MXScaleGRGeometry(**_MXS_B4, loadWidth=16), lr=MXScaleLRGeometry(**_MXS_B4, loadWidth=4))
+MXSA_B8 = MXScaleTilePair(gr=MXScaleGRGeometry(**_MXS_B8, loadWidth=16), lr=MXScaleLRGeometry(**_MXS_B8, loadWidth=4))
+MXSB_B8 = MXScaleTilePair(gr=MXScaleGRGeometry(**_MXS_B8, loadWidth=16), lr=MXScaleLRGeometry(**_MXS_B8, loadWidth=4))
 
 # C/D output: 128-bit store = 4 f32 elements along N
 CD_F32 = CDTile_1x1(mmaLayout=MFMA_16x16_1B_4N_4V, bpe=4, supportedTypes=('f32',), storeShape=LoadShape(m=1, k=4))
@@ -328,6 +332,8 @@ def selectMXScaleGeometry(kernel: dict, tc: str) -> MXScaleTilePair:
   dtype = kernel["ProblemType"][f"DataType{data_tc}"]
   if dtype.is6bitFloat() or dtype.isFloat4():
     return MXSA_B4 if tc == 'MXSA' else MXSB_B4
+  if dtype.is8bitFloat():
+    return MXSA_B8 if tc == 'MXSA' else MXSB_B8
   raise NotImplementedError(f"selectMXScaleGeometry: unsupported dtype {dtype} for tc={tc}")
 
 
@@ -1217,11 +1223,13 @@ def mainLoop(writer, kernel):
   vgprBudget = writer.states.regCaps["MaxVgpr"]
   vgprUsed = writer.vgprPool.size() - writer.vgprPool.available()
 
-  candidates = [(1, 1)] if pgr == 0 else MFMASchedulerConfig.get_partition_candidates(tiA, tiB)
-  for numPartM, numPartN in candidates:
+  M = tiA.localMMATileGrid[0]
+  N = tiB.localMMATileGrid[0]
+  candidates = [(M, N)] if pgr == 0 else MFMASchedulerConfig.get_partition_candidates(tiA, tiB)
+  for partSizeM, partSizeN in candidates:
       cfg = MFMASchedulerConfig(
-          numMFMATilesM=tiA.localMMATileGrid[0],
-          numMFMATilesN=tiB.localMMATileGrid[0],
+          numMFMATilesM=M,
+          numMFMATilesN=N,
           numSubIterK=tiA.localMMATileGrid[1],
           lrA=lrAGran,
           lrB=lrBGran,
@@ -1231,17 +1239,17 @@ def mainLoop(writer, kernel):
           lrSB=lrSBGran,
           grSA=grSAGran,
           grSB=grSBGran,
-          numPartitionsM=numPartM,
-          numPartitionsN=numPartN,
+          partitionSizeM=partSizeM,
+          partitionSizeN=partSizeN,
           pgr=schedulerPgr
       )
+      
       scheduler = LogicalScheduler(cfg)
       scheduler.build()
 
       numVgpr = scheduler.getNumVgpr(tiA, tiB, scaleTiA, scaleTiB)
       if vgprUsed + numVgpr <= vgprBudget:
           break
-
   scheduler.allocVgprTiles(writer, tiA, tiB,
                            scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
   dtileInfo = writer.states.d.tileInfo
