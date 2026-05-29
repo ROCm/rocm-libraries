@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "CkDslContainer.hpp"
+#include "TestUtils.hpp"
 #include "perf/PerfMeasurement.hpp"
 #include "python/CompileServiceBridge.hpp"
 #include "runtime/HipModule.hpp"
@@ -74,12 +75,7 @@ TEST(TestPerfMeasurement, DefaultsMatchP7) {
 class PerfMeasurementGpu : public ::testing::Test {
    protected:
     void SetUp() override {
-        int deviceCount = 0;
-        hipError_t err = hipGetDeviceCount(&deviceCount);
-        if (err != hipSuccess || deviceCount == 0) {
-            GTEST_SKIP() << "PerfMeasurementGpu: no HIP-visible device";
-        }
-        ASSERT_EQ(hipSetDevice(0), hipSuccess);
+        CK_DSL_PROVIDER_SKIP_IF_NOT_GFX950("PerfMeasurementGpu");
 
         _container = std::make_unique<CkDslContainer>();
         _artifact =

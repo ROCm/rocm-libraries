@@ -24,6 +24,7 @@
 #include "engines/conv_implicit_gemm/ConvImplicitGemmPlanBuilder.hpp"
 #include "perf/PerfMeasurement.hpp"
 #include "python/CompileServiceBridge.hpp"
+#include "tests/TestUtils.hpp"
 
 namespace {
 
@@ -68,17 +69,12 @@ using hipdnn_test_sdk::utilities::CpuFpReferenceConvolution;
 class IntegrationGpuCkDslConvFp16Gpu : public ::testing::Test {
    protected:
     void SetUp() override {
-        int deviceCount = 0;
-        hipError_t err = hipGetDeviceCount(&deviceCount);
-        if (err != hipSuccess || deviceCount == 0) {
-            GTEST_SKIP() << "no HIP-visible device";
-        }
-        ASSERT_EQ(hipSetDevice(0), hipSuccess);
+        CK_DSL_PROVIDER_SKIP_IF_NOT_GFX950("IntegrationGpuCkDslConvFp16Gpu");
 
         _container = std::make_unique<CkDslContainer>();
         _handle = std::make_unique<::CkDslHandle>();
-        _planBuilder =
-            std::make_unique<ConvImplicitGemmPlanBuilder>(_container->compileServiceBridge());
+        _planBuilder = std::make_unique<ConvImplicitGemmPlanBuilder>(
+            _container->compileServiceBridge(), _container->jitCache());
     }
 
     std::unique_ptr<CkDslContainer> _container;

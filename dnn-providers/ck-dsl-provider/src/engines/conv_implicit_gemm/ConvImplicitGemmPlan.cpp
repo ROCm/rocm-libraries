@@ -3,24 +3,24 @@
 
 #include "ConvImplicitGemmPlan.hpp"
 
+#include <array>
+#include <cstring>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <sstream>
 #include <string>
 #include <utility>
-#include <vector>
 
-#include "../../runtime/LaunchAbi.hpp"
+#include "../../runtime/KernelArtifact.hpp"
 
 namespace ck_dsl_provider {
 
 namespace {
 
-/// Linear scan over the device-buffer array. Matches miopen-provider's
-/// findDeviceBuffer pattern; the array is typically <10 entries so an
-/// O(n) lookup is the right shape. Throws with the missing uid in the
-/// message so a graph-vs-buffer mismatch surfaces with concrete
-/// context.
+/// Linear scan over the device-buffer array. The array is typically
+/// <10 entries so an O(n) lookup is the right shape. Throws with the
+/// missing uid in the message so a graph-vs-buffer mismatch surfaces
+/// with concrete context.
 const hipdnnPluginDeviceBuffer_t& findDeviceBuffer(std::int64_t uid,
                                                    const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                                                    std::uint32_t numDeviceBuffers,
@@ -61,13 +61,46 @@ ConvImplicitGemmPlan::ConvImplicitGemmPlan(std::shared_ptr<HipModule> module, st
         throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                                                        oss.str());
     }
+
+    // Validate the kernel's argument schema is exactly the shape we
+    // pre-pack against. If a future kernel variant grows or rearranges
+    // its parameter list, the plan must refuse to launch rather than
+    // patch pointers into wrong-sized slots. The schema arrives via
+    // KernelArtifact at JIT time, so this is fixed for the lifetime of
+    // each cached HipModule.
+    const auto& schema = _module->argSchema();
+    if (schema.size() != 6 || schema[0].kind != ArgSchema::Kind::Pointer ||
+        schema[1].kind != ArgSchema::Kind::Pointer || schema[2].kind != ArgSchema::Kind::Pointer ||
+        schema[3].kind != ArgSchema::Kind::I32 || schema[4].kind != ArgSchema::Kind::I32 ||
+        schema[5].kind != ArgSchema::Kind::I32) {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "ConvImplicitGemmPlan: kernel argSchema does not match the expected "
+            "(Pointer, Pointer, Pointer, I32, I32, I32) layout for the conv kernel signature");
+    }
+
+    // Pre-write the three i32 byte counts at their natural-alignment
+    // offsets. Pointer slots stay zero; execute() patches them in.
+    std::memcpy(_argTemplate.data() + kXBytesOffset, &_xBytes, sizeof(_xBytes));
+    std::memcpy(_argTemplate.data() + kWBytesOffset, &_wBytes, sizeof(_wBytes));
+    std::memcpy(_argTemplate.data() + kYBytesOffset, &_yBytes, sizeof(_yBytes));
+
+    // One-shot launch-shape log: useful operator diagnostic at plan
+    // construction without polluting the per-call hot path. Mirrors the
+    // grid/block info the per-launch log used to emit.
+    HIPDNN_PLUGIN_LOG_INFO("ConvImplicitGemmPlan: built plan for kernel '"
+                           << _module->kernelName() << "' grid=(" << _module->grid().x << ","
+                           << _module->grid().y << "," << _module->grid().z << ") block=("
+                           << _module->block().x << "," << _module->block().y << ","
+                           << _module->block().z << ") xBytes=" << _xBytes << " wBytes=" << _wBytes
+                           << " yBytes=" << _yBytes);
 }
 
 std::size_t ConvImplicitGemmPlan::getWorkspaceSize(const ::CkDslHandle& /*handle*/) const {
     // The implicit-GEMM kernel allocates its scratch in static LDS;
-    // no external workspace is needed for M1. If a future variant
-    // needs an external buffer (e.g. a global-memory scratchpad for
-    // multi-block reductions) it surfaces here.
+    // no external workspace is needed. If a future variant needs an
+    // external buffer (e.g. a global-memory scratchpad for multi-block
+    // reductions) it surfaces here.
     return 0;
 }
 
@@ -84,27 +117,16 @@ void ConvImplicitGemmPlan::execute(const ::CkDslHandle& handle,
     const auto& wBuf = findDeviceBuffer(_wUid, deviceBuffers, numDeviceBuffers, "W");
     const auto& yBuf = findDeviceBuffer(_yUid, deviceBuffers, numDeviceBuffers, "Y");
 
-    // Kernel signature is (A: ptr, B: ptr, D: ptr, A_bytes: i32,
-    // B_bytes: i32, D_bytes: i32). The bytes are buffer-rsrc bounds
-    // used by the DSL kernel for free OOB clamping (see
-    // ck_dsl/instances/conv_implicit_gemm.py: a_rsrc =
-    // b.buffer_rsrc(A, A_bytes)). Order matches the module's
-    // argSchema exactly.
-    std::vector<ArgValue> values = {
-        ArgValue::pointer(xBuf.ptr), ArgValue::pointer(wBuf.ptr), ArgValue::pointer(yBuf.ptr),
-        ArgValue::i32(_xBytes),      ArgValue::i32(_wBytes),      ArgValue::i32(_yBytes),
-    };
-    std::vector<std::byte> packed = LaunchAbi::pack(_module->argSchema(), values);
+    // Stack-resident scratch copy of the template; no heap allocation
+    // on this path. Per-call work is three memcpys (pointers in), one
+    // template-copy assignment, and one HIP launch call.
+    std::array<std::byte, kArgBufferSize> args = _argTemplate;
+    std::memcpy(args.data() + kXPtrOffset, &xBuf.ptr, sizeof(xBuf.ptr));
+    std::memcpy(args.data() + kWPtrOffset, &wBuf.ptr, sizeof(wBuf.ptr));
+    std::memcpy(args.data() + kYPtrOffset, &yBuf.ptr, sizeof(yBuf.ptr));
 
-    HIPDNN_PLUGIN_LOG_INFO("ConvImplicitGemmPlan::execute launching '"
-                           << _module->kernelName() << "' grid=(" << _module->grid().x << ","
-                           << _module->grid().y << "," << _module->grid().z << ") block=("
-                           << _module->block().x << "," << _module->block().y << ","
-                           << _module->block().z << ") xBytes=" << _xBytes << " wBytes=" << _wBytes
-                           << " yBytes=" << _yBytes);
-
-    _module->launch(packed, _module->grid(), _module->block(), _module->ldsBytes(),
-                    handle.getStream());
+    _module->launch(args.data(), args.size(), _module->grid(), _module->block(),
+                    _module->ldsBytes(), handle.getStream());
 }
 
 }  // namespace ck_dsl_provider

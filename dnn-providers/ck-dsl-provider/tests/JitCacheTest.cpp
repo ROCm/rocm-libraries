@@ -11,6 +11,7 @@
 #include <stdexcept>
 
 #include "CkDslContainer.hpp"
+#include "TestUtils.hpp"
 #include "python/CompileServiceBridge.hpp"
 #include "runtime/HipModule.hpp"
 #include "runtime/JitCache.hpp"
@@ -36,13 +37,7 @@ using ck_dsl_provider::SignatureHash;
 class JitCacheSmoke : public ::testing::Test {
    protected:
     void SetUp() override {
-        int deviceCount = 0;
-        hipError_t err = hipGetDeviceCount(&deviceCount);
-        if (err != hipSuccess || deviceCount == 0) {
-            GTEST_SKIP() << "JitCacheSmoke: no HIP-visible device (deviceCount=" << deviceCount
-                         << ", hipError=" << static_cast<int>(err) << ")";
-        }
-        ASSERT_EQ(hipSetDevice(0), hipSuccess);
+        CK_DSL_PROVIDER_SKIP_IF_NOT_GFX950("JitCacheSmoke");
     }
 };
 

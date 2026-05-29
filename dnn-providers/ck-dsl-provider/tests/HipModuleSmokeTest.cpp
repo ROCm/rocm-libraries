@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "CkDslContainer.hpp"
+#include "TestUtils.hpp"
 #include "python/CompileServiceBridge.hpp"
 #include "runtime/HipModule.hpp"
 #include "runtime/KernelArtifact.hpp"
@@ -31,18 +32,7 @@ using ck_dsl_provider::LaunchAbi;
 class HipModuleSmoke : public ::testing::Test {
    protected:
     void SetUp() override {
-        int deviceCount = 0;
-        hipError_t err = hipGetDeviceCount(&deviceCount);
-        // hipErrorNoDevice / hipErrorInsufficientDriver are the
-        // "no GPU available" sentinel paths; either should skip rather
-        // than fail (the test is only meaningful on a real device).
-        if (err != hipSuccess || deviceCount == 0) {
-            GTEST_SKIP() << "HipModuleSmoke: no HIP-visible device (deviceCount=" << deviceCount
-                         << ", hipError=" << static_cast<int>(err) << ")";
-        }
-        // Pin to device 0 so subsequent hipMalloc / launches run on
-        // the same device the module was loaded against.
-        ASSERT_EQ(hipSetDevice(0), hipSuccess);
+        CK_DSL_PROVIDER_SKIP_IF_NOT_GFX950("HipModuleSmoke");
     }
 };
 
