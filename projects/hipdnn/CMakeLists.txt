@@ -127,19 +127,6 @@ set(HIPDNN_TEST_PLUGIN_INSTALL_DIR "${HIPDNN_PLUGIN_ROOTDIR}/test_plugins"
     CACHE INTERNAL "Install directory for test plugins"
 )
 
-set(HIPDNN_TEST_REFERENCE_DIR "${CMAKE_BINARY_DIR}/lib/hipdnn_reference_data"
-    CACHE INTERNAL "Directory for test reference data"
-)
-set(HIPDNN_TEST_REFERENCE_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}"
-    CACHE INTERNAL "Install directory for test reference data"
-)
-file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/hipdnn_reference_data/"
-     DESTINATION ${HIPDNN_TEST_REFERENCE_DIR}
-) # Copies only on calls to cmake
-install(DIRECTORY "${CMAKE_BINARY_DIR}/lib/hipdnn_reference_data"
-        DESTINATION ${HIPDNN_TEST_REFERENCE_INSTALL_DIR}
-)
-
 # Migrate HIP_DNN_BUILD_BACKEND -> HIPDNN_BUILD_BACKEND
 if(DEFINED HIP_DNN_BUILD_BACKEND)
     set(HIPDNN_BUILD_BACKEND ${HIP_DNN_BUILD_BACKEND} CACHE BOOL "Build the backend code" FORCE)
@@ -310,7 +297,7 @@ if(HIPDNN_ENABLE_COVERAGE)
     findandcheckllvmtools()
 
     set(CODE_COVERAGE_IGNORE_REGEX
-        ".*deps.*|.*tests.*|.*data_objects.*|.*HipErrorHandler.*"
+        ".*deps.*|.*tests.*|.*data_objects.*|.*HipErrorHandler.*|.*/test_sdk/.*/Mock[^/]*"
     )
     set(CODE_COVERAGE_OBJECTS
         -object
