@@ -186,6 +186,8 @@ protected:
                           GraphTensorBundle& bundle,
                           unsigned int seed) override
     {
+        bundle.sentinelFillOutputTensors();
+
         bundle.tensors.at(BatchnormActivationTensorIds::X_UID)
             ->fillTensorWithRandomValues(-1.0f, 1.0f, seed);
         bundle.tensors.at(BatchnormActivationTensorIds::DY_UID)
