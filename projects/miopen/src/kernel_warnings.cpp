@@ -108,16 +108,16 @@ const std::string& OclKernelWarningsString()
 #else
     const std::string prefix = " ";
 #endif
-
-    static const std::string result = MakeKernelWarningsString(OclKernelWarnings(), prefix);
+    [[clang::no_destroy]] static const std::string result =
+        MakeKernelWarningsString(OclKernelWarnings(), prefix);
     return result;
 }
 
 const std::string& HipKernelWarningsString()
 {
     const std::string prefix = " ";
-
-    static const std::string result = MakeKernelWarningsString(HipKernelWarnings(), prefix);
+    [[clang::no_destroy]] static const std::string result =
+        MakeKernelWarningsString(HipKernelWarnings(), prefix);
     return result;
 }
 

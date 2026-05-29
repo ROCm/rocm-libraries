@@ -51,7 +51,7 @@ static const inline std::vector<PerformanceConfigAsmImplicitGemmGTCBwdXdlopsNHWC
 GetBwdXdlopsNHWCConfigList()
 {
     // clang-format off
-    static const  std::vector<PerformanceConfigAsmImplicitGemmGTCBwdXdlopsNHWC> kernel_param_list {
+    [[clang::no_destroy]] static const  std::vector<PerformanceConfigAsmImplicitGemmGTCBwdXdlopsNHWC> kernel_param_list {
         {"bwd", "nhwc", miopenFloat,  0, 1, 256,  64,  16, 32, 32,  2, 1, 1, 2, 2, 1, 0, 0, 0, 0, { 1, 4, 4, 1}, {  1,  4,  1, 64}, { 1, 4, 1, 1}, {  1,  4,  1, 64}},
         {"bwd", "nhwc", miopenFloat,  0, 0, 256,  64,  16, 32, 32,  2, 1, 1, 2, 2, 0, 0, 0, 0, 0, { 1, 4, 4, 1}, {  1,  4,  1, 64}, { 1, 4, 1, 1}, {  1,  4,  1, 64}},
         {"bwd", "nhwc", miopenFloat,  0, 1, 256,  64,  16, 32, 32,  2, 1, 1, 2, 2, 1, 0, 1, 0, 0, { 1, 4, 4, 1}, {  1,  4,  1, 64}, { 1, 4, 1, 1}, {  1,  4,  1, 64}},
@@ -478,6 +478,7 @@ GetImplicitGemmGtcDynamicBwdXdlopsNHWCKernel(
 void PerformanceConfigAsmImplicitGemmGTCBwdXdlopsNHWC::HeuristicInit(
     const ExecutionContext&, const ProblemDescription& problem)
 {
+    [[clang::no_destroy]]
     static const std::vector<std::tuple<int, int, int>> tile_list_fp32 = {
         std::make_tuple(128, 128, 16),
         std::make_tuple(128, 64, 16),
@@ -496,6 +497,7 @@ void PerformanceConfigAsmImplicitGemmGTCBwdXdlopsNHWC::HeuristicInit(
         std::make_tuple(16, 64, 32),
     };
 
+    [[clang::no_destroy]]
     static const std::vector<std::tuple<int, int, int>> tile_list_fp16 = {
         std::make_tuple(128, 128, 32),
         std::make_tuple(256, 128, 32),
@@ -515,6 +517,7 @@ void PerformanceConfigAsmImplicitGemmGTCBwdXdlopsNHWC::HeuristicInit(
         std::make_tuple(32, 64, 32),
     };
 
+    [[clang::no_destroy]]
     static const std::vector<std::tuple<int, int, int>> tile_list_bfp16 = {
         std::make_tuple(128, 128, 32),
         std::make_tuple(256, 128, 32),

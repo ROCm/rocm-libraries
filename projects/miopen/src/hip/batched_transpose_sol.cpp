@@ -68,8 +68,9 @@ static inline const std::vector<BatchedTransposeParam>& GetKernelList(const Exec
 {
     if(data_size == 1)
     {
-        static const std::vector<BatchedTransposeParam> byte_kernel_list{
-            // clang-format off
+        // clang-format off
+        [[clang::no_destroy]] static const std::vector<BatchedTransposeParam> byte_kernel_list
+        {
             {16, 16, 1, 1, 1, 1},
             {16, 32, 1, 1, 1, 1},
             {32, 16, 1, 1, 1, 1},
@@ -81,14 +82,15 @@ static inline const std::vector<BatchedTransposeParam>& GetKernelList(const Exec
             {128, 4, 1, 1, 1, 1},
             {4, 256, 1, 1, 1, 1},
             {256, 4, 1, 1, 1, 1},
-            // clang-format on
         };
+        // clang-format on
         return byte_kernel_list;
     }
     if(data_size == 2)
     {
-        static const std::vector<BatchedTransposeParam> half_kernel_list_short{
-            // clang-format off
+        // clang-format off
+        [[clang::no_destroy]] static const std::vector<BatchedTransposeParam> half_kernel_list_short
+        {
             {16, 16, 1, 1, 1, 1},
             {32, 16, 1, 1, 1, 1},
             {16, 32, 1, 1, 1, 1},
@@ -100,10 +102,9 @@ static inline const std::vector<BatchedTransposeParam>& GetKernelList(const Exec
             {128, 4, 1, 1, 1, 1},
             {4, 256, 1, 1, 1, 1},
             {256, 4, 1, 1, 1, 1},
-            // clang-format on
         };
-        static const std::vector<BatchedTransposeParam> half_kernel_list_long{
-            // clang-format off
+        [[clang::no_destroy]] static const std::vector<BatchedTransposeParam> half_kernel_list_long
+        {
             {16, 16, 1, 1, 1, 1},
             {32, 16, 1, 1, 1, 1},
             {16, 32, 1, 1, 1, 1},
@@ -134,8 +135,8 @@ static inline const std::vector<BatchedTransposeParam>& GetKernelList(const Exec
 
             {64, 64, 4, 4, 2, 2},
             {64, 64, 4, 4, 4, 4},
-            // clang-format on
         };
+        // clang-format on
 
         bool force_shortlist   = env::enabled(MIOPEN_FORCE_HALF_TRANSPOSE_SHORTLIST);
         const auto device_name = ctx.GetStream().GetDeviceName();
@@ -146,8 +147,9 @@ static inline const std::vector<BatchedTransposeParam>& GetKernelList(const Exec
     }
     if(data_size == 4)
     {
-        static const std::vector<BatchedTransposeParam> dword_kernel_list{
-            // clang-format off
+        // clang-format off
+        [[clang::no_destroy]] static const std::vector<BatchedTransposeParam> dword_kernel_list
+        {
             {16, 16, 1, 1, 1, 1},
             {16, 32, 1, 1, 1, 1},
             {32, 16, 1, 1, 1, 1},
@@ -159,8 +161,8 @@ static inline const std::vector<BatchedTransposeParam>& GetKernelList(const Exec
             {128, 4, 1, 1, 1, 1},
             {4, 256, 1, 1, 1, 1},
             {256, 4, 1, 1, 1, 1},
-            // clang-format on
         };
+        // clang-format on
         return dword_kernel_list;
     }
     MIOPEN_THROW("data type not supported");

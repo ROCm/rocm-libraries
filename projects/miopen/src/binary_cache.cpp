@@ -166,10 +166,11 @@ bool IsCacheDisabled()
 using KDb = DbTimer<MultiFileDb<KernDb, KernDb, false>>;
 KDb GetDb(const TargetProperties& target, size_t num_cu)
 {
-    static const auto user_dir = ComputeUserCachePath();
-    static const auto sys_dir  = ComputeSysCachePath();
-    fs::path user_path         = user_dir / (Handle::GetDbBasename(target, num_cu) + ".ukdb");
-    fs::path sys_path          = sys_dir / (Handle::GetDbBasename(target, num_cu) + ".kdb");
+    auto user_dir = ComputeUserCachePath();
+    auto sys_dir  = ComputeSysCachePath();
+
+    fs::path user_path = user_dir / (Handle::GetDbBasename(target, num_cu) + ".ukdb");
+    fs::path sys_path  = sys_dir / (Handle::GetDbBasename(target, num_cu) + ".kdb");
     if(user_dir.empty())
         user_path = user_dir;
     if(!fs::exists(sys_path))

@@ -6149,7 +6149,7 @@ typedef enum
 /*! @enum miopenTensorArgumentId_t
  * Identifiers for tensor arguments of problems and operations.
  */
-typedef enum
+typedef enum : unsigned int
 {
     miopenTensorArgumentIdInvalid = 0,
     miopenTensorConvolutionX      = 1,

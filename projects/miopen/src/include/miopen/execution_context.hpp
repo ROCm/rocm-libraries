@@ -184,7 +184,7 @@ struct ExecutionContext
 #else
     fs::path GetPerfDbPathFile(std::string_view prefix = "") const
     {
-        static const auto result = [&] {
+        [[clang::no_destroy]] static const auto result = [&] {
             const auto pdb_path(GetSystemDbPath());
 #if MIOPEN_ENABLE_SQLITE && MIOPEN_USE_SQLITE_PERFDB
             constexpr std::string_view ext = ".db";

@@ -59,7 +59,7 @@ inline void SetKernelPhase(KernelPhase phase) { GetKernelPhase() = phase; }
 /// Get the last printed solution name
 inline std::string& GetLastPrintedSolutionName()
 {
-    thread_local std::string last_solution;
+    [[clang::no_destroy]] thread_local std::string last_solution;
     return last_solution;
 }
 
@@ -198,7 +198,7 @@ inline std::string JsonEscape(const std::string& str)
 /// Thread-local JSON accumulator
 inline SolutionExecutionData& GetJsonAccumulator()
 {
-    thread_local SolutionExecutionData accumulator;
+    [[clang::no_destroy]] thread_local SolutionExecutionData accumulator;
     return accumulator;
 }
 

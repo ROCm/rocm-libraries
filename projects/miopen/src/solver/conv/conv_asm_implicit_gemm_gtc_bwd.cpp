@@ -45,7 +45,7 @@ static inline const std::vector<TunableImplicitGemmGTCDynamic_t>&
 GetImplicitGemmGtcDynamicBwdTunablesList(const ProblemDescription& problem)
 {
     // clang-format off
-    static const std::vector<TunableImplicitGemmGTCDynamic_t> tunables_fp32 = {
+    [[clang::no_destroy]] static const std::vector<TunableImplicitGemmGTCDynamic_t> tunables_fp32 = {
         { "bwd", miopenFloat,  16,   0, 128, 128,  16,  32,  32,   1,   1,   1,   2,   2,   {2,   1,   1,   4},   {1,   8,   1,  32},   {2,   1,   1,   4},   {1,   8,   1,  32},   0},
         { "bwd", miopenFloat,   4,   0, 128, 128,  16,  32,  32,   1,   1,   1,   2,   2,   {2,   1,   1,   4},   {1,   8,   1,  32},   {2,   1,   1,   4},   {1,   8,   1,  32},   0},
         { "bwd", miopenFloat,   1,   0, 128, 128,  16,  32,  32,   1,   1,   1,   2,   2,   {2,   1,   1,   4},   {1,   8,   1,  32},   {2,   1,   4,   1},   {1,   8,   1,  32},   0},
@@ -169,7 +169,7 @@ GetImplicitGemmGtcDynamicBwdTunablesList(const ProblemDescription& problem)
         { "bwd", miopenFloat,   1,   0,   4,  64,  16,   4,  64,   1,   1,   1,   1,   1,   {1,   1,   1,   1},   {1,  16,   1,   4},   {1,   1,  16,   1},   {1,  16,   1,   4},   0},
         { "bwd", miopenFloat,   4,   1,   4,  64,  16,   4,  64,   1,   1,   1,   1,   1,   {1,   1,   1,   1},   {1,  16,   1,   4},   {1,   1,  16,   1},   {1,  16,   1,   4},   0},
     };
-    static const std::vector<TunableImplicitGemmGTCDynamic_t> tunables_fp16 = {
+    [[clang::no_destroy]] static const std::vector<TunableImplicitGemmGTCDynamic_t> tunables_fp16 = {
         { "bwd",  miopenHalf,  4,  0,  256,  128,  32,  32,  32,  8,  2,  1,  2,  2,  {1,  16,  1,  2},  {1,  2,  1,  128},  {1,  16,  1,  1},  {1,  2,  1,  128},  0 },
         { "bwd",  miopenHalf,  1,  0,  256,  128,  32,  32,  32,  8,  2,  1,  2,  2,  {1,  16,  1,  2},  {1,  2,  1,  128},  {1,  16,  1,  1},  {1,  2,  1,  128},  0 },
         { "bwd",  miopenHalf,  4,  1,  256,  128,  32,  32,  32,  8,  2,  1,  2,  2,  {1,  16,  1,  2},  {1,  2,  1,  128},  {1,  16,  1,  1},  {1,  2,  1,  128},  0 },

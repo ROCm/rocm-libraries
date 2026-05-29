@@ -170,6 +170,7 @@ std::mutex& CkImplLibLoader::CacheMutex()
 
 std::unordered_map<std::string, std::unique_ptr<CkImplLibLoader>>& CkImplLibLoader::Cache()
 {
+    [[clang::no_destroy]]
     static std::unordered_map<std::string, std::unique_ptr<CkImplLibLoader>> cache;
     return cache;
 }

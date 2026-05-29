@@ -39,7 +39,7 @@ namespace miopen {
 
 const std::unordered_map<fs::path, std::string_view, FsPathHash>& kernel_includes()
 {
-    static const std::unordered_map<fs::path, std::string_view, FsPathHash> data{
+    [[clang::no_destroy]] static const std::unordered_map<fs::path, std::string_view, FsPathHash> data{
 #ifndef MIOPEN_USE_CLANG_TIDY // Huge generated source
         ${INIT_KERNELS}
 #endif
@@ -58,7 +58,7 @@ std::string_view GetKernelInc(const fs::path& name)
 
 const std::vector<std::reference_wrapper<const fs::path>>& GetKernelIncList()
 {
-    static const std::vector<std::reference_wrapper<const fs::path>> keys{[]() {
+    [[clang::no_destroy]] static const std::vector<std::reference_wrapper<const fs::path>> keys{[]() {
         std::vector<std::reference_wrapper<const fs::path>> ref_keys;
         for(const auto& m : kernel_includes())
         {

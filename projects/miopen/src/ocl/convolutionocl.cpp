@@ -921,7 +921,7 @@ ConvolutionDescriptor::GetSolutionsFallback(const ExecutionContext& ctx,
     {
         if(fallbackPathTaken != nullptr)
             *fallbackPathTaken = FallbackPath::AI;
-        const static std::string arch = ctx.GetStream().GetDeviceName();
+        [[clang::no_destroy]] const static std::string arch = ctx.GetStream().GetDeviceName();
         std::vector<uint64_t> solvers;
         try
         {

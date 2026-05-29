@@ -78,7 +78,7 @@ template <class T>
 inline std::unique_lock<handle_mutex> get_handle_lock(T, int timeout = 120)
 {
     // NOLINTNEXTLINE (cppcoreguidelines-avoid-non-const-global-variables)
-    static handle_mutex m{get_handle_lock_path(T::value())};
+    [[clang::no_destroy]] static handle_mutex m{get_handle_lock_path(T::value())};
     return {m, std::chrono::seconds{timeout}};
 }
 

@@ -85,7 +85,7 @@ size_t& GetBufferIdx()
 // Optimization: Thread-local stream pool to avoid repeated ostringstream construction
 std::ostringstream& GetThreadLocalLogStream()
 {
-    static thread_local std::ostringstream stream;
+    [[clang::no_destroy]] static thread_local std::ostringstream stream;
     stream.str(""); // Clear contents
     stream.clear(); // Clear state flags
     return stream;
@@ -94,7 +94,8 @@ std::ostringstream& GetThreadLocalLogStream()
 std::vector<std::string>& GetLogBuffer()
 {
     auto log_buffer_size = GetBufferSize();
-    static thread_local std::vector<std::string> log_buffer(log_buffer_size, "");
+    [[clang::no_destroy]] static thread_local std::vector<std::string> log_buffer(log_buffer_size,
+                                                                                  "");
     if(log_buffer_size != log_buffer.size())
     {
         log_buffer.resize(log_buffer_size);
@@ -351,7 +352,7 @@ std::string LoggingPrefixMinimal()
     // Optimization: Cache the static prefix to avoid repeated string construction
     // This minimal prefix skips expensive syscalls (hostname, TID, timestamps)
     // and is used for buffer-only logs when actual logging is disabled.
-    static const std::string prefix = []() {
+    [[clang::no_destroy]] static const std::string prefix = []() {
         std::stringstream ss;
         ss << "MIOpen";
 #if MIOPEN_BACKEND_OPENCL

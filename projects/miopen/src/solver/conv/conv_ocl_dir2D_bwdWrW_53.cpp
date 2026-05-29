@@ -392,7 +392,7 @@ ConvSolution ConvOclBwdWrW53::GetSolution(const ExecutionContext& ctx,
                                  : (problem.GetOutWidth() % 2 == 0) ? 2
                                                                     : 1;
 
-    static const std::string READ_TYPE =
+    [[clang::no_destroy]] static const std::string READ_TYPE =
         (read_unit == 1) ? "_FLOAT" : "_FLOAT" + std::to_string((read_unit));
 
     // calculate number of input scans in the input block

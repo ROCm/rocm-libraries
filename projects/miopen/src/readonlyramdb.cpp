@@ -58,9 +58,10 @@ ReadonlyRamDb::GetCached(DbKinds db_kind_, const fs::path& path, bool warn_if_un
 
     // We don't have to store kind to properly index as different dbs would have different paths
     // NOLINTNEXTLINE (cppcoreguidelines-avoid-non-const-global-variables)
-    static auto instances = std::map<fs::path, std::unique_ptr<ReadonlyRamDb>>{};
-    const auto it         = instances.find(path);
+    [[clang::no_destroy]] static auto instances =
+        std::map<fs::path, std::unique_ptr<ReadonlyRamDb>>{};
 
+    const auto it = instances.find(path);
     if(it != instances.end())
         return *it->second;
 

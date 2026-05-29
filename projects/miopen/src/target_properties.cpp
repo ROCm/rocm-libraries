@@ -37,7 +37,7 @@ namespace miopen {
 
 static std::string GetDeviceNameFromMap(const std::string& in)
 {
-    static const std::map<std::string, std::string> device_name_map = {
+    [[clang::no_destroy]] static const std::map<std::string, std::string> device_name_map = {
         {"Ellesmere", "gfx803"},
         {"Baffin", "gfx803"},
         {"RacerX", "gfx803"},

@@ -128,7 +128,8 @@ struct SolverRegistrar
 static auto& IdRegistry()
 {
     // NOLINTNEXTLINE (cppcoreguidelines-avoid-non-const-global-variables)
-    static auto data            = IdRegistryData{};
+    [[clang::no_destroy]] static auto data = IdRegistryData{};
+
     static const auto registrar = SolverRegistrar{data};
     (void)registrar; // clang-tidy
     return data;

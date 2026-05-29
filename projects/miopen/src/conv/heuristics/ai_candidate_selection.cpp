@@ -379,6 +379,7 @@ MIOPEN_INTERNALS_EXPORT
 const CandidateSelectionModel& GetCandidateSelectionModel(const std::string& arch,
                                                           const std::string& solver)
 {
+    [[clang::no_destroy]]
     static std::map<std::string, std::unique_ptr<CandidateSelectionModel>> models;
     static std::mutex models_mutex;
     std::string key = arch + "_" + solver;

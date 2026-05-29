@@ -174,8 +174,9 @@ private:
 const LibEnvVar& FindEnvVariable(std::string_view name)
 {
     // MT-Unsafe
-    static const std::unordered_map<std::string_view, LibEnvVar> env_variables = {
-        // clang-format off
+    // clang-format off
+    [[clang::no_destroy]] static const std::unordered_map<std::string_view, LibEnvVar> env_variables =
+    {
         {MIOPEN_COMPILE_PARALLEL_LEVEL.GetName(), MIOPEN_COMPILE_PARALLEL_LEVEL},
         {MIOPEN_DEBUG_AMD_MP_BD_WINOGRAD_F2X3.GetName(), MIOPEN_DEBUG_AMD_MP_BD_WINOGRAD_F2X3},
         {MIOPEN_DEBUG_AMD_MP_BD_WINOGRAD_F3X3.GetName(), MIOPEN_DEBUG_AMD_MP_BD_WINOGRAD_F3X3},
@@ -213,8 +214,8 @@ const LibEnvVar& FindEnvVariable(std::string_view name)
         {MIOPEN_CUSTOM_CACHE_DIR.GetName(), MIOPEN_CUSTOM_CACHE_DIR},
         {MIOPEN_DEBUG_CONV_DIRECT_ASM_WRW1X1_PERF_VALS.GetName(), MIOPEN_DEBUG_CONV_DIRECT_ASM_WRW1X1_PERF_VALS},
         {MIOPEN_SKIP_ASAN_DISABLED_TESTS.GetName(), MIOPEN_SKIP_ASAN_DISABLED_TESTS},
-        // clang-format on
     };
+    // clang-format on
 
     const auto& v = env_variables.find(name);
     if(v == env_variables.cend())

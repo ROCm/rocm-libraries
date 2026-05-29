@@ -392,7 +392,7 @@ RunParameterPredictionModel<int8_t, bool (*)(int, int)>(
 // helper function to get a dummy execution context for when we do not have a real context
 const miopen::ExecutionContext& GetDummyCtx()
 {
-    static miopen::ExecutionContext ctx;
+    [[clang::no_destroy]] static miopen::ExecutionContext ctx;
     return ctx;
 }
 

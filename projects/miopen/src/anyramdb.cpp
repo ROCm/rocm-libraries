@@ -57,9 +57,9 @@ AnyRamDb& AnyRamDb::GetCached(const fs::path& path)
     static std::mutex mutex;
     const std::lock_guard<std::mutex> lock{mutex};
 
-    static auto instances = std::map<fs::path, std::unique_ptr<AnyRamDb>>{};
-    const auto it         = instances.find(path);
+    [[clang::no_destroy]] static auto instances = std::map<fs::path, std::unique_ptr<AnyRamDb>>{};
 
+    const auto it = instances.find(path);
     if(it != instances.end())
         return *it->second;
 

@@ -1133,7 +1133,7 @@ private:
  */
 std::shared_ptr<Model> GetModel(const std::string& arch, const std::string& solver)
 {
-    static std::map<std::string, std::shared_ptr<Model>> models;
+    [[clang::no_destroy]] static std::map<std::string, std::shared_ptr<Model>> models;
     auto it = models.find(solver);
 
     auto model_arch = arch;
@@ -1259,7 +1259,7 @@ namespace candidate_selection {
 // Helper to load and cache fdeep models
 const fdeep::model& GetFdeepModel(const std::string& path, const std::string& key)
 {
-    static std::map<std::string, std::unique_ptr<fdeep::model>> models;
+    [[clang::no_destroy]] static std::map<std::string, std::unique_ptr<fdeep::model>> models;
     auto it = models.find(key);
     if(it == models.end())
     {

@@ -1745,10 +1745,11 @@ struct ConvBinWinoRxS final : ConvTunableSolver<PerformanceConfigConvBinWinograd
 
     static const std::string& GetSolverDbId()
     {
-        static const std::string dbId = std::string("ConvBinWinogradRxSf")
-                                            .append(std::to_string(Winodata))
-                                            .append("x")
-                                            .append(std::to_string(Winofilter));
+        [[clang::no_destroy]] static const std::string dbId =
+            std::string("ConvBinWinogradRxSf")
+                .append(std::to_string(Winodata))
+                .append("x")
+                .append(std::to_string(Winofilter));
         return dbId;
     }
 
@@ -1820,7 +1821,8 @@ struct ConvMPBidirectWinograd final : ConvSolver
     // kernel_file_name for solver identification
     static fs::path GetSolverFileNames(int id)
     {
-        static const fs::path names[3] = {"xform_bidirect_winograd_data.s",
+        [[clang::no_destroy]] static const fs::path names[3] = {
+                                          "xform_bidirect_winograd_data.s",
                                           "xform_bidirect_winograd_filter.s",
                                           "xform_bidirect_winograd_out.s"};
         return names[id];
@@ -1828,10 +1830,10 @@ struct ConvMPBidirectWinograd final : ConvSolver
 
     static std::string GetSolverKernelNames(int id)
     {
-        static const std::string name_suffix =
+        [[clang::no_destroy]] static const std::string name_suffix =
             '_' + std::to_string(WinoDataH) + '_' + std::to_string(WinoDataW) + '_' +
             std::to_string(WinoFilterH) + '_' + std::to_string(WinoFilterW);
-        static const std::string names[3] = {
+        [[clang::no_destroy]] static const std::string names[3] = {
             "miopenGcnAsmMPBidirectWinogradXformData" + name_suffix,
             "miopenGcnAsmMPBidirectWinogradXformFilter" + name_suffix,
             "miopenGcnAsmMPBidirectWinogradXformOut" + name_suffix};
@@ -1984,18 +1986,20 @@ struct ConvWinograd3x3MultipassWrW final : ConvSolver
     // kernel_file_name for solver identification
     static fs::path GetSolverFileNames(int id)
     {
-        static const fs::path names[3] = {"xform_data.s", "xform_filter.s", "xform_out.s"};
+        [[clang::no_destroy]] static const fs::path names[3] = {
+            "xform_data.s", "xform_filter.s", "xform_out.s"};
         return names[id];
     }
 
     static std::string GetSolverKernelNames(int id)
     {
-        static const std::string name_suffix =
+        [[clang::no_destroy]] static const std::string name_suffix =
             '_' + std::to_string(WinoDataH) + '_' + std::to_string(WinoDataW) + '_' +
             std::to_string(WinoFilterH) + '_' + std::to_string(WinoFilterW);
-        static const std::string names[3] = {"miopenGcnAsmWinogradXformData" + name_suffix,
-                                             "miopenGcnAsmWinogradXformFilter" + name_suffix,
-                                             "miopenGcnAsmWinogradXformOut" + name_suffix};
+        [[clang::no_destroy]] static const std::string names[3] = {
+            "miopenGcnAsmWinogradXformData" + name_suffix,
+            "miopenGcnAsmWinogradXformFilter" + name_suffix,
+            "miopenGcnAsmWinogradXformOut" + name_suffix};
 
         return names[id];
     }

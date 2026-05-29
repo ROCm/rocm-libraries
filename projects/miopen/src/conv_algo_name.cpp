@@ -38,7 +38,7 @@ using mapWrw_t = std::unordered_map<std::string, miopenConvBwdWeightsAlgorithm_t
 
 static const mapFwd_t& FwdAlgoMap()
 {
-    static const mapFwd_t data{
+    [[clang::no_destroy]] static const mapFwd_t data{
         {"miopenConvolutionFwdAlgoGEMM", miopenConvolutionFwdAlgoGEMM},
         {"miopenConvolutionFwdAlgoDirect", miopenConvolutionFwdAlgoDirect},
         {"miopenConvolutionFwdAlgoFFT", miopenConvolutionFwdAlgoFFT},
@@ -64,7 +64,7 @@ miopenConvFwdAlgorithm_t StringToConvolutionFwdAlgo(const std::string& s)
 
 static const mapBwd_t& BwdAlgoMap()
 {
-    static const mapBwd_t data{
+    [[clang::no_destroy]] static const mapBwd_t data{
         {"miopenConvolutionBwdDataAlgoGEMM", miopenConvolutionBwdDataAlgoGEMM},
         {"miopenConvolutionBwdDataAlgoDirect", miopenConvolutionBwdDataAlgoDirect},
         {"miopenConvolutionBwdDataAlgoFFT", miopenConvolutionBwdDataAlgoFFT},
@@ -82,7 +82,7 @@ miopenConvBwdDataAlgorithm_t StringToConvolutionBwdDataAlgo(const std::string& s
 
 static const mapWrw_t& WrwAlgoMap()
 {
-    static const mapWrw_t data{
+    [[clang::no_destroy]] static const mapWrw_t data{
         {"miopenConvolutionBwdWeightsAlgoGEMM", miopenConvolutionBwdWeightsAlgoGEMM},
         {"miopenConvolutionBwdWeightsAlgoDirect", miopenConvolutionBwdWeightsAlgoDirect},
         {"miopenConvolutionBwdWeightsAlgoWinograd", miopenConvolutionBwdWeightsAlgoWinograd},

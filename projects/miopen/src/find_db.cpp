@@ -49,7 +49,7 @@ MIOPEN_EXPORT bool testing_find_db_enabled = true;
 std::optional<fs::path>& testing_find_db_path_override()
 {
     // NOLINTNEXTLINE (cppcoreguidelines-avoid-non-const-global-variables)
-    static std::optional<fs::path> data{std::nullopt};
+    [[clang::no_destroy]] static std::optional<fs::path> data{std::nullopt};
     return data;
 }
 
@@ -60,7 +60,7 @@ template <class TDb>
 fs::path FindDbRecord_t<TDb>::GetInstalledPathEmbed(const Handle& handle,
                                                     const std::string& path_suffix)
 {
-    static const auto embed_path = [&] {
+    [[clang::no_destroy]] static const auto embed_path = [&] {
         const std::string ext = ".fdb.txt";
         const auto root_path  = GetSystemDbPath();
         const auto base_name  = handle.GetDbBasename();
@@ -127,7 +127,7 @@ template <class TDb>
 fs::path FindDbRecord_t<TDb>::GetInstalledPathFile(const Handle& handle,
                                                    const std::string& path_suffix)
 {
-    static const fs::path installed_path = [&] {
+    [[clang::no_destroy]] static const fs::path installed_path = [&] {
         const std::string ext = ".fdb.txt";
         const auto root_path  = GetSystemDbPath();
         const auto base_name  = handle.GetDbBasename();

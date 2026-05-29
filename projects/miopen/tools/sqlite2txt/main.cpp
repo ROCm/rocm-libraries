@@ -96,7 +96,7 @@ struct ProblemConfig
 
     [[nodiscard]] static const std::string& GetFieldNames()
     {
-        static const std::string value = []() {
+        [[clang::no_destroy]] static const std::string value = []() {
             std::ostringstream ss;
             ProblemConfig::VisitAll(ProblemConfig{}, [&](auto&&, auto name) {
                 if(ss.tellp() != 0)

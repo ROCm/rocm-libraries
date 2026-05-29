@@ -878,7 +878,7 @@ private:
 
 static const std::vector<std::unique_ptr<ISolversFinder>>& GetFusionSolverFinders()
 {
-    static const std::vector<std::unique_ptr<ISolversFinder>> finders = [] {
+    [[clang::no_destroy]] static const std::vector<std::unique_ptr<ISolversFinder>> finders = [] {
         constexpr const auto add = [](auto& to, auto solvers, const std::string& algo) {
             to.emplace_back(std::make_unique<FusionSolverFinder<decltype(solvers)>>(solvers, algo));
         };

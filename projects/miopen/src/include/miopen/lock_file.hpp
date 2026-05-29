@@ -166,7 +166,7 @@ private:
     static std::map<fs::path, LockFile>& LockFiles()
     {
         // NOLINTNEXTLINE (cppcoreguidelines-avoid-non-const-global-variables)
-        static std::map<fs::path, LockFile> lock_files;
+        [[clang::no_destroy]] static std::map<fs::path, LockFile> lock_files;
         return lock_files;
     }
 

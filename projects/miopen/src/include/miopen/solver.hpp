@@ -101,7 +101,7 @@ protected:
             new(&result) std::string(ComputeSolverDbId(type_name_bare<Solver>()));
         }
 #else  // !BUILD_SHARED_LIBS || !MIOPEN_ENABLE_FIN_INTERFACE
-        static const auto result = ComputeSolverDbId(type_name_bare<Solver>());
+        [[clang::no_destroy]] static const auto result = ComputeSolverDbId(type_name_bare<Solver>());
 #endif // !BUILD_SHARED_LIBS || !MIOPEN_ENABLE_FIN_INTERFACE
         return result;
     }
@@ -139,7 +139,7 @@ struct SolverInterface : SolverBase
     /// and provides correct result for the problem config.
     virtual bool IsApplicable(const Context& ctx, const Problem& problem) const = 0;
 
-    static constexpr float wti_approximate_worst = -2;
+    static constexpr float wti_approximate_worst = -2.f;
 
     /// [Informative as of Sep 2020] Returns an approximated value of the expected
     /// WTI or wti_approximate_worst when this value can't be computed. Tips:

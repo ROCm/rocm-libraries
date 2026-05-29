@@ -77,7 +77,7 @@ static inline auto get_ck_common_compiler_flag(const Handle& handle)
     compiler_flag << " --std=c++17";
 
     // GPU target
-    static const std::string device_name = handle.GetDeviceName();
+    [[clang::no_destroy]] static const std::string device_name = handle.GetDeviceName();
 
     // device_name: "gfx90a" -> macro: "CK_AMD_GPU_GFX90A"
     if(StartsWith(device_name, "gfx"))

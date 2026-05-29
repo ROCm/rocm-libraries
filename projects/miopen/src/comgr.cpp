@@ -138,7 +138,7 @@ namespace lc {
 
 static auto GetOptionsNoSplit()
 {
-    static const std::vector<std::string> rv = {
+    [[clang::no_destroy]] static const std::vector<std::string> rv = {
         "-isystem", "-L", "-Wl,-rpath", "-Xclang", "-hip-path", "-mllvm", "-x"};
     return rv;
 }

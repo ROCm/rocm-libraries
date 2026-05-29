@@ -156,6 +156,7 @@ private:
         using value_type = _type;                                                  \
         static ::miopen::env::detail::EnvVar<_type>& ref()                         \
         {                                                                          \
+            [[clang::no_destroy]]                                                  \
             static ::miopen::env::detail::EnvVar<_type> var{#_name, __VA_ARGS__};  \
             return var;                                                            \
         }                                                                          \

@@ -124,7 +124,7 @@ constexpr std::string_view type_name_bare()
 template <class T>
 const std::string& get_type_name()
 {
-    static const auto ret = std::string(type_name<T>());
+    [[clang::no_destroy]] static const auto ret = std::string(type_name<T>());
     return ret;
 }
 
