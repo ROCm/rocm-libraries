@@ -284,12 +284,24 @@ int main(int argc, char** argv) noexcept
                 static_cast<void>(hipStreamDestroy(stream));
                 return 1;
             }
-            // Note: RFC 0012 §13 mentions multi-engine attribution as
-            // future work, but in practice we always require --test-engine
-            // for enforce/write modes (checked above) — the verifier and
-            // condenser scope per-engine via supportingEngines.find(name),
-            // so multiple plugins being loaded is harmless. The reference
-            // engine alongside the test plugin is the common case here.
+            // RFC 0012 §6.4: refuse multi-plugin runs. Multi-engine
+            // attribution is deferred to v2 (§13) — the verifier scopes
+            // per-engine via supportingEngines.find(name), but the writer
+            // can't safely condense observations across engines and the
+            // RFC text is the contract. If you're tripping this with a
+            // reference engine loading alongside the test plugin, point
+            // --test-article at *only* the engine you want measured.
+            size_t numEngines = 0;
+            if(hipdnnGetEngineCount_ext(handle, &numEngines) == HIPDNN_STATUS_SUCCESS
+               && numEngines > 1)
+            {
+                std::cerr << "Error: more than one plugin loaded (" << numEngines
+                          << " engines). --enforce-support-claims/--write-support-claims "
+                             "require a single engine per RFC 0012 §6.4. Multi-engine "
+                             "attribution is deferred to v2 (§13).\n";
+                static_cast<void>(hipStreamDestroy(stream));
+                return 1;
+            }
 
             // MSVC mode treats std::getenv as deprecated under -Werror; use
             // the project's cross-platform getEnv (returns "" for unset).
