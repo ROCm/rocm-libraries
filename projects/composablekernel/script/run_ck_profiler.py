@@ -38,9 +38,6 @@ def parse_test_cases(test_cases_path: Path) -> list[list[str]]:
             # Remove commas (some lines have "150, 150" style values)
             line = line.replace(",", " ")
             args = line.split()
-            # Skip the header line (starts with non-numeric tokens like "data_type")
-            if not args[0].lstrip("-").isdigit():
-                continue
             cases.append(args)
     return cases
 
@@ -61,7 +58,7 @@ def make_label(args: list[str]) -> str:
 def run_profiler(binary_dir: Path, args: list[str]) -> tuple[str, str, bool]:
     """Run ckProfiler with args and return (stdout, stderr, had_error)."""
     exe = binary_dir / "ckProfiler"
-    cmd = [str(exe)] + ["grouped_conv_fwd_tile"] + args
+    cmd = [str(exe)] + args
     try:
         result = subprocess.run(
             cmd,
@@ -281,7 +278,7 @@ def main():
         print(f"\n[{i+1}/{len(cases)}] Running: {label}")
 
         if args.dry_run:
-            print(f"  CMD: ckProfiler grouped_conv_fwd_tile {' '.join(case_args)}")
+            print(f"  CMD: ckProfiler {' '.join(case_args)}")
             igemm_best.append(None)
             igemm_names.append(None)
             direct_best.append(None)
