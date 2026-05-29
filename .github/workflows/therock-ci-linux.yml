@@ -3,6 +3,12 @@ name: TheRock CI Linux
 on:
   workflow_call:
     inputs:
+      therock_ref:
+        type: string
+        required: true
+      docker_image:
+        type: string
+        required: true
       cmake_options:
         type: string
       projects_to_test:
@@ -26,7 +32,7 @@ jobs:
     permissions:
       id-token: write
     container:
-      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:48492540591673fdc8d51beb89bde41e7ba13cbb528f643c0a481ba42c4058f2
+      image: ${{ inputs.docker_image }}
       options: -v /runner/config:/home/awsconfig/
     strategy:
       fail-fast: true
@@ -45,7 +51,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: 482ff586c261379e1132cf776f122e1d0972a8a0 # 2026-05-11 commit
+          ref: ${{ inputs.therock_ref }}
 
       - name: Install python deps
         run: |
@@ -86,8 +92,7 @@ jobs:
       - name: Fetch sources
         timeout-minutes: 30
         run: |
-          # contains() matches the literal "=THEROCK_ENABLE_IREE_LIBS=ON" emitted by therock_matrix.py
-          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-libraries --no-include-ml-frameworks ${{ contains(inputs.cmake_options, 'THEROCK_ENABLE_IREE_LIBS=ON') && '--include-iree-libs' || '' }}
+          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-libraries --no-include-ml-frameworks
 
       - name: Configure Projects
         env:
@@ -152,6 +157,7 @@ jobs:
     if: ${{ inputs.amdgpu_families != 'gfx950-dcgpu' }}
     uses: ./.github/workflows/therock-test-packages.yml
     with:
+      therock_ref: ${{ inputs.therock_ref }}
       projects_to_test: ${{ inputs.projects_to_test }}
       amdgpu_families: ${{ inputs.amdgpu_families }}
       test_runs_on: ${{ inputs.test_runs_on }}

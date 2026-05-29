@@ -18,15 +18,19 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
     static constexpr auto I2             = number<2>{};
     static constexpr auto WGAccessDouble = WGAttrNumAccessEnum::Double;
 
-    using ALayout         = remove_cvref_t<typename Problem::ALayout>;
-    using BLayout         = remove_cvref_t<typename Problem::BLayout>;
-    using ADataType       = remove_cvref_t<typename Problem::ADataType>;
-    using BDataType       = remove_cvref_t<typename Problem::BDataType>;
-    using CDataType       = remove_cvref_t<typename Problem::CDataType>;
-    using ComputeDataType = remove_cvref_t<typename Problem::ComputeDataType>;
+    using ALayout          = remove_cvref_t<typename Problem::ALayout>;
+    using BLayout          = remove_cvref_t<typename Problem::BLayout>;
+    using ADataType        = remove_cvref_t<typename Problem::ADataType>;
+    using BDataType        = remove_cvref_t<typename Problem::BDataType>;
+    using CDataType        = remove_cvref_t<typename Problem::CDataType>;
+    using AComputeDataType = remove_cvref_t<typename Problem::AComputeDataType>;
+    using BComputeDataType = remove_cvref_t<typename Problem::BComputeDataType>;
     static_assert(std::is_same_v<ALayout, ck_tile::tensor_layout::gemm::RowMajor>, "Wrong!");
     static_assert(std::is_same_v<BLayout, ck_tile::tensor_layout::gemm::ColumnMajor>, "Wrong!");
-    static_assert(std::is_same_v<ComputeDataType, fp8_t> || std::is_same_v<ComputeDataType, bf8_t>);
+    static_assert(std::is_same_v<AComputeDataType, fp8_t> ||
+                  std::is_same_v<AComputeDataType, bf8_t>);
+    static_assert(std::is_same_v<BComputeDataType, fp8_t> ||
+                  std::is_same_v<BComputeDataType, bf8_t>);
     static_assert(std::is_same_v<CDataType, float>);
 
     using BlockGemmShape = typename Problem::BlockGemmShape;
@@ -57,7 +61,7 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
     static constexpr index_t NIterPerWarp = NWarpTiles / NWarps;
     static constexpr index_t KPerWarp     = KPerBlock / KWarps;
     static constexpr index_t NPerWarp     = NPerBlock / NWarps;
-    static_assert(NWarps == 2, "KWarps == 2 for ping-pong!");
+    static_assert(NWarps == 2, "NWarps == 2 for ping-pong!");
     static_assert(KWarpTiles == KWarps, "Wrong!");
 
     static constexpr index_t KPerWarpAQ  = KPerWarp / Problem::AQuantGroupSize::kK;
@@ -82,6 +86,11 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
     CK_TILE_HOST_DEVICE static constexpr auto GetVectorSizeBQ() { return 1; }
     CK_TILE_HOST_DEVICE static constexpr auto GetKStepAQ() { return KPerBlockAQ; }
     CK_TILE_HOST_DEVICE static constexpr auto GetKStepBQ() { return KPerBlockBQ; }
+
+    // TODO: generalize instruction count calculation
+    CK_TILE_HOST_DEVICE static constexpr auto GetInstCountAQ() { return MIterPerWarp; }
+
+    CK_TILE_HOST_DEVICE static constexpr auto GetInstCountBQ() { return 1; }
 
     CK_TILE_HOST_DEVICE static constexpr auto MakeAQBlockDistribution()
     {
@@ -113,8 +122,8 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy
                       "KPerWarpGemm must be a multiple of QuantGroupSize::kK!");
         static_assert(Problem::TransposeC, "Wrong!");
 
-        using WarpGemm = WarpGemmDispatcher<ComputeDataType,
-                                            ComputeDataType,
+        using WarpGemm = WarpGemmDispatcher<AComputeDataType,
+                                            BComputeDataType,
                                             CDataType,
                                             WarpTileM,
                                             WarpTileN,
@@ -152,6 +161,8 @@ struct GemmABQuantPipelineAgBgCrAsyncPolicy : public GemmPipelineAgBgCrCompAsync
     FORWARD_METHOD_(GetBlockGemm);
     FORWARD_METHOD_(GetKStepAQ);
     FORWARD_METHOD_(GetKStepBQ);
+    FORWARD_METHOD_(GetInstCountAQ);
+    FORWARD_METHOD_(GetInstCountBQ);
 
 #undef FORWARD_METHOD_
 };
