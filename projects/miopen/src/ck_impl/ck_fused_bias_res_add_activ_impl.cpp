@@ -243,13 +243,20 @@ bool CheckIsArgSupported(const ProblemDescription& problem, const std::string& k
 template <typename Fn>
 auto DispatchFusedByDataType(miopenDataType_t dtype, Fn&& fn)
 {
-    switch(dtype)
+    if(dtype == miopenHalf)
     {
-    case miopenHalf: return fn(ck::half_t{}, ck::half_t{});
-    case miopenBFloat16: return fn(ck::bhalf_t{}, ck::bhalf_t{});
-    case miopenInt8: return fn(int8_t{}, float{});
-    default: return fn(float{}, float{});
+        return fn(ck::half_t{}, ck::half_t{});
     }
+    else if(dtype == miopenBFloat16)
+    {
+        return fn(ck::bhalf_t{}, ck::bhalf_t{});
+    }
+    else if(dtype == miopenInt8)
+    {
+        return fn(int8_t{}, float{});
+    }
+
+    return fn(float{}, float{});
 }
 
 } // anonymous namespace
@@ -358,7 +365,13 @@ ck_impl_fused_bias_res_add_activ_get_solution(const miopen::ExecutionContext* /*
             solution = InitAnyInvokerFactory<DeviceOp<ck::bhalf_t, ck::bhalf_t>, CKArgs, ParamType>(
                 *problem, kid);
             break;
-        default: throw CkImplException(CK_IMPL_STATUS_INVALID_VALUE, "Unsupported data type");
+
+        case miopenInt32:
+        case miopenDouble:
+        case miopenFloat8_fnuz:
+        case miopenBFloat8_fnuz:
+        case miopenInt64:
+            throw CkImplException(CK_IMPL_STATUS_INVALID_VALUE, "Unsupported data type");
         }
 
         *out_solution = new miopen::solver::ConvSolution(std::move(solution));

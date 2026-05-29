@@ -294,7 +294,9 @@ std::vector<std::string> FillValidKernelsByAlphaBeta(const ProblemDescription& p
         return miopen::solver::FillValidKernelsIDs<
             miopen::solver::conv::DeviceOpGBwdWeightScalePtrs<DataType, ComputeType>,
             CKArgs<DataType, ComputeType>>(problem);
-    default:
+
+    case DEFAULT:
+    case ERROR_STATE:
         return miopen::solver::FillValidKernelsIDs<
             miopen::solver::conv::DeviceOpGBwdWeightDefaultPtrs<DataType, ComputeType>,
             CKArgs<DataType, ComputeType>>(problem);
@@ -314,7 +316,9 @@ bool CheckCKApplicabilityByAlphaBeta(const ProblemDescription& problem)
         return miopen::solver::IsCKApplicable<
             miopen::solver::conv::DeviceOpGBwdWeightScalePtrs<DataType, ComputeType>,
             CKArgs<DataType, ComputeType>>(problem);
-    default:
+
+    case DEFAULT:
+    case ERROR_STATE:
         return miopen::solver::IsCKApplicable<
             miopen::solver::conv::DeviceOpGBwdWeightDefaultPtrs<DataType, ComputeType>,
             CKArgs<DataType, ComputeType>>(problem);
@@ -334,7 +338,9 @@ bool CheckIsArgSupportedByAlphaBeta(const ProblemDescription& problem, const std
         return miopen::solver::IsCKArgsSupported<
             miopen::solver::conv::DeviceOpGBwdWeightScalePtrs<DataType, ComputeType>,
             CKArgs<DataType, ComputeType>>(problem, kernel_id);
-    default:
+
+    case DEFAULT:
+    case ERROR_STATE:
         return miopen::solver::IsCKArgsSupported<
             miopen::solver::conv::DeviceOpGBwdWeightDefaultPtrs<DataType, ComputeType>,
             CKArgs<DataType, ComputeType>>(problem, kernel_id);
@@ -354,7 +360,9 @@ std::size_t GetWorkspaceSizeByAlphaBeta(const ProblemDescription& problem)
         return miopen::solver::GetCKSplitkMaxWorkspaceSize<
             miopen::solver::conv::DeviceOpGBwdWeightScalePtrs<DataType, ComputeType>,
             CKArgs<DataType, ComputeType>>(problem);
-    default:
+
+    case DEFAULT:
+    case ERROR_STATE:
         return miopen::solver::GetCKSplitkMaxWorkspaceSize<
             miopen::solver::conv::DeviceOpGBwdWeightDefaultPtrs<DataType, ComputeType>,
             CKArgs<DataType, ComputeType>>(problem);
@@ -541,7 +549,9 @@ ck_impl_3d_wrw_get_solution(const miopen::ExecutionContext* ctx,
                         miopen::solver::conv::DeviceOpGBwdWeightScalePtrs<T, TCompute>,
                         CKArgs<T, TCompute>,
                         miopen::conv::WrWInvokeParams>(*ctx, *problem, kid);
-                default:
+
+                case DEFAULT:
+                case ERROR_STATE:
                     return InitInvokerFactoryWrwNCHW<
                         3,
                         false,
@@ -567,7 +577,9 @@ ck_impl_3d_wrw_get_solution(const miopen::ExecutionContext* ctx,
                         miopen::solver::conv::DeviceOpGBwdWeightScalePtrs<T, TCompute>,
                         CKArgs<T, TCompute>,
                         miopen::conv::WrWInvokeParams>(*ctx, *problem, kid);
-                default:
+
+                case DEFAULT:
+                case ERROR_STATE:
                     return InitInvokerFactoryNHWC<
                         false,
                         miopen::solver::conv::DeviceOpGBwdWeightDefaultPtrs<T, TCompute>,

@@ -238,7 +238,6 @@ struct verify_rnn_api_base
         case miopenRNNRELU: ss << " relu "; break;
         case miopenLSTM: ss << " lstm "; break;
         case miopenGRU: ss << " gru "; break;
-        default: break;
         }
 
         auto& inLens = input.desc.GetLengths();

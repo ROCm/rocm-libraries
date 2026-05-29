@@ -32,7 +32,7 @@ enum class KernelPhase
 };
 
 /// Convert KernelPhase enum to string for JSON output
-inline const char* KernelPhaseToString(KernelPhase phase)
+inline std::string KernelPhaseToString(KernelPhase phase)
 {
     switch(phase)
     {
@@ -41,8 +41,9 @@ inline const char* KernelPhaseToString(KernelPhase phase)
     case KernelPhase::Validation: return "validation";
     case KernelPhase::SolverTuning: return "solver_tuning";
     case KernelPhase::Tuning: return "tuning";
-    default: return "unknown";
     }
+
+    return "unknown";
 }
 
 /// Thread-local storage for current kernel execution phase

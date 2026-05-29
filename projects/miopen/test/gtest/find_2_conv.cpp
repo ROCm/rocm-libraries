@@ -120,7 +120,10 @@ void RunFind2ConvTest(const Find2ConvTestCase& test_case)
                               handle, &y.desc, &x.desc, &filter, &w.desc, &workspace_max),
                           miopenStatusSuccess);
                 break;
-            default: MIOPEN_THROW(miopenStatusNotImplemented);
+
+#ifdef MIOPEN_BETA_API
+            case miopenProblemDirectionInference: MIOPEN_THROW(miopenStatusNotImplemented);
+#endif
             }
 
             const auto workspace_size = std::min(test_case.workspace_limit, workspace_max);

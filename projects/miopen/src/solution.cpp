@@ -397,7 +397,11 @@ void Solution::RunImpl(const Handle& handle,
             return mha::InvokeParams(dataBackward, workspace, workspace_size);
         }
 
-        default: MIOPEN_THROW(miopenStatusNotImplemented);
+        case miopenProblemDirectionBackwardWeights:
+#ifdef MIOPEN_BETA_API
+        case miopenProblemDirectionInference:
+#endif
+            MIOPEN_THROW(miopenStatusNotImplemented);
         }
     }();
 
@@ -520,7 +524,11 @@ void Solution::RunImpl(const Handle& handle,
                                          mode);
         }
 
-        default: MIOPEN_THROW(miopenStatusNotImplemented);
+        case miopenProblemDirectionBackwardWeights:
+#ifdef MIOPEN_BETA_API
+        case miopenProblemDirectionInference:
+#endif
+            MIOPEN_THROW(miopenStatusNotImplemented);
         }
     }();
 
@@ -707,7 +715,9 @@ AnyInvokeParams Solution::MakeInvokeParams(const Problem& problem_,
                                      workspace,
                                      workspace_size,
                                      conv_desc.attribute.gfx90aFp16alt.GetWrW()};
-    default: MIOPEN_THROW(miopenStatusNotImplemented);
+#ifdef MIOPEN_BETA_API
+    case miopenProblemDirectionInference: MIOPEN_THROW(miopenStatusNotImplemented);
+#endif
     }
 }
 

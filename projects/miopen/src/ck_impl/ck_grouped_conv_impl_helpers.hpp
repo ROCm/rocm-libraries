@@ -238,11 +238,19 @@ auto DispatchByDataType(miopenDataType_t dtype, Fn&& fn)
                       std::is_same_v<decltype(fn(ck::bhalf_t{})), decltype(fn(float{}))> &&
                       std::is_same_v<decltype(fn(int8_t{})), decltype(fn(float{}))>,
                   "DispatchByDataType requires Fn to return the same type for all data types");
-    switch(dtype)
+
+    if(dtype == miopenHalf)
     {
-    case miopenHalf: return fn(ck::half_t{});
-    case miopenBFloat16: return fn(ck::bhalf_t{});
-    case miopenInt8: return fn(int8_t{});
-    default: return fn(float{});
+        return fn(ck::half_t{});
     }
+    else if(dtype == miopenBFloat16)
+    {
+        return fn(ck::bhalf_t{});
+    }
+    else if(dtype == miopenInt8)
+    {
+        return fn(int8_t{});
+    }
+
+    return fn(float{});
 }
