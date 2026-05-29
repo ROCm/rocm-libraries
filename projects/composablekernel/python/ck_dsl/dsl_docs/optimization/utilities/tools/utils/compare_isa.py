@@ -88,12 +88,27 @@ def analyze_hot_loop(isa_file):
 
 
 def main():
-    ck_dsl_isa = Path(
-        "/workspace/mlse-tools-internal/performance/kernel_optimization/comparison/ck_dsl_isa/mem_sync.s"
+    import argparse
+
+    _default_ck = (
+        Path(__file__).resolve().parents[1] / "comparison" / "ck_dsl_isa" / "mem_sync.s"
     )
-    flydsl_isa = Path(
-        "/workspace/FlyDSL_CKTile_conv_comparison/comparison/flydsl/isa_latest/igemm_conv2d_kernel_0/21_final_isa.s"
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "ck_dsl_isa",
+        nargs="?",
+        default=str(_default_ck),
+        help="path to CK DSL ISA .s file",
     )
+    parser.add_argument(
+        "compare_isa",
+        nargs="?",
+        default=None,
+        help="path to comparison ISA .s file (FlyDSL, CK Tile C++, etc.)",
+    )
+    _args = parser.parse_args()
+    ck_dsl_isa = Path(_args.ck_dsl_isa)
+    flydsl_isa = Path(_args.compare_isa) if _args.compare_isa else None
 
     print("=" * 70)
     print("ISA COMPARISON: CK DSL mem_sync vs FlyDSL")
@@ -102,6 +117,11 @@ def main():
     # Count instructions
     print("\n## Instruction Counts\n")
     ck_counts = count_instructions(ck_dsl_isa)
+    if flydsl_isa is None:
+        print("No comparison ISA file provided; showing CK DSL counts only.")
+        for key, val in sorted(ck_counts.items()):
+            print(f"  {key:<30} {val}")
+        return
     fly_counts = count_instructions(flydsl_isa)
 
     # Print comparison table

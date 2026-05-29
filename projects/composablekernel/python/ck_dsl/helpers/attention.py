@@ -484,6 +484,11 @@ def mfma_32x32x16_for_dtype(
         return b.mfma_f32_32x32x16_f16(a, bv, c)
     if dtype.name == "bf16":
         return b.mfma_f32_32x32x16_bf16(a, bv, c)
+    if dtype.name == "fp8e4m3":
+        # Native fp8 x fp8 -> f32 (same per-lane operand layout as bf16:
+        # 8 fp8 / lane for A and B, 16 f32 / lane for C). Used by the
+        # native-fp8 QK path to skip the fp8->bf16 dequant entirely.
+        return b.mfma_f32_32x32x16_fp8(a, bv, c)
     raise ValueError(f"unsupported MFMA 32x32x16 dtype {dtype.name}")
 
 

@@ -124,21 +124,26 @@ def main() -> None:
     try:
         import aiter
 
-        aiter.rmsnorm2d_fwd_with_add(Xout, X, R, Gam, eps)
+        # Signature: (out, input, residual_in, residual_out, weight, epsilon).
+        # out=Xout (normalized), residual_out=Yout (= input + residual_in).
+        aiter.rmsnorm2d_fwd_with_add(Xout, X, R, Yout, Gam, eps)
         torch.cuda.synchronize()
-        bl_ms = ms(lambda: aiter.rmsnorm2d_fwd_with_add(Xout, X, R, Gam, eps))
+        bl_ms = ms(lambda: aiter.rmsnorm2d_fwd_with_add(Xout, X, R, Yout, Gam, eps))
         print(f"  AITER rmsnorm2d_fwd_with_add (production): {bl_ms * 1000:.2f}µs")
     except Exception as exc:
         print(f"  SKIP AITER: {exc}")
 
     # ── DSL kernel (no graph) ─────────────────────────────────────────────────
     rt, fn, grid, block = build_norm_kernel(M, N)
+    # Kernel param order (save_residual=True): A, B, Gamma, X(residual_out),
+    # Y(normalized_out).  A/B are the two summed inputs; X receives A+B and Y
+    # receives rmsnorm(A+B)*Gamma.  So A=X, B=R, X(resid)=Xout, Y(norm)=Yout.
     packed = struct.pack(
         "<QQQQQiif",
-        int(Xout.data_ptr()),
+        int(X.data_ptr()),
         int(R.data_ptr()),
         int(Gam.data_ptr()),
-        int(X.data_ptr()),
+        int(Xout.data_ptr()),
         int(Yout.data_ptr()),
         M,
         N,
@@ -169,10 +174,18 @@ def main() -> None:
 
     # ── Correctness ───────────────────────────────────────────────────────────
     X_ref = (X + R).float()
-    rms = (X_ref**2).mean(dim=-1, keepdim=True).sqrt() + eps
+    rms = ((X_ref**2).mean(dim=-1, keepdim=True) + eps).sqrt()
     Y_ref = (X_ref / rms * Gam.float()).to(DTYPE)
     err = (Yout - Y_ref).abs().max().item()
-    print(f"\n  Correctness: max|err|={err:.2e}  {'PASS' if err < 0.01 else 'FAIL'}")
+    # bf16 carries ~2^-7 relative precision; the normalized output reaches
+    # |y|~3.5 here, so 1 ULP is ~2.7e-2.  Judge with a relative tolerance of
+    # 2 ULP rather than a fixed absolute threshold.
+    rel = err / (Y_ref.float().abs().max().item() + 1e-6)
+    ok = rel < 2.0**-6
+    print(
+        f"\n  Correctness: max|err|={err:.2e}  rel={rel:.2e}  "
+        f"{'PASS' if ok else 'FAIL'}"
+    )
 
     print()
     print("  Optimization note: CUDA graph eliminates ~5µs HIP command-submission")

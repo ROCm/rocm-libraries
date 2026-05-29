@@ -526,6 +526,16 @@ class _Lowerer:
         base, off = op.operands
         self._emit(f"int64_t {_name(op.result)} = {_name(base)} + {_name(off)};")
 
+    def _op_tile_global_ptr_add(self, op: Op) -> None:
+        # ptr + byte_off as a new global pointer (byte arithmetic). The
+        # result feeds make_buffer_rsrc (which casts to void*), so a char*
+        # is the right C++ type. byte_off is i64 -> no 2 GiB overflow.
+        ptr, off = op.operands
+        self._emit(
+            f"const char* {_name(op.result)} = "
+            f"(const char*){_name(ptr)} + (int64_t){_name(off)};"
+        )
+
     def _op_tile_buffer_load_vN_f16(self, op: Op) -> None:
         # Lowers to ``__builtin_amdgcn_raw_buffer_load_b{32,64,128}``,
         # which on ROCm 7 / clang 20 takes ``__amdgpu_buffer_rsrc_t`` (aka

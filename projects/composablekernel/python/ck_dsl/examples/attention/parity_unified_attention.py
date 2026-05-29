@@ -1101,7 +1101,17 @@ def _run_ck_dsl(s: Scenario, data, *, path: str, warmup: int, attempts: int):
 
     hip_stream = _bench_stream_handle()
 
-    if path in ("auto", "2d"):
+    # NOTE: the ``"2d"`` lane force-builds the hand-tuned MFMA-32x32 /
+    # half-local-PV 2D kernel directly so we can measure the *best* 2D
+    # variant for a shape (this is the aspirational ceiling for the 2D
+    # path, including the d64/b32/h64kv8 trace family). The ``"auto"``
+    # lane must instead exercise the *production* dispatcher
+    # (``run_unified_attention_torch(backend="auto")`` -> ``select_path``),
+    # otherwise we'd be reporting forced-2D timings as if they were what
+    # production launches -- which mis-measures decode shapes by ~6x
+    # (production correctly routes them to the 3D split-KV path). Keep the
+    # two lanes strictly separate.
+    if path == "2d":
         from ck_dsl import compile_kernel
         from ck_dsl.instances import (
             UnifiedAttention2DTiledSpec,

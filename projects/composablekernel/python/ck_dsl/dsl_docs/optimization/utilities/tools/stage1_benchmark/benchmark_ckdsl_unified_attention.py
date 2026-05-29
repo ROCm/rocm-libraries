@@ -46,7 +46,8 @@ if _CKDSL_ROOT:
     sys.path.insert(0, _CKDSL_ROOT)
 else:
     for candidate in (
-        Path("/workspace/rocm-libraries/projects/composablekernel/python"),
+        REPO_ROOT,  # this file lives inside python/ck_dsl/...
+        REPO_ROOT.parent / "rocm-libraries-streaming/projects/composablekernel/python",
         REPO_ROOT.parent / "rocm-libraries/projects/composablekernel/python",
     ):
         if candidate.exists():

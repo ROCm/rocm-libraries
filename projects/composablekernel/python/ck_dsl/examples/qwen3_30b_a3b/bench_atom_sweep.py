@@ -14,7 +14,8 @@ Usage:
       [--kv-cache-dtype bf16] [--max-model-len 16384] [--level 3]
 
 Output:
-  Per-round raw lines, then a summary table with mean ± stdev for each config.
+  Per-round raw lines, then a summary table with mean ± stdev for each config
+  covering all five metrics: TTFT, decode step, TPOT, throughput, total time.
 """
 
 from __future__ import annotations
@@ -29,10 +30,13 @@ from pathlib import Path
 CONFIGS = ["baseline", "dsl_gemm", "dsl_all"]
 SCRIPT = Path(__file__).parent / "bench_atom.py"
 
+# Fields returned by SINGLE_SHOT: total_ms step_us tpot_ms ttft_ms throughput
+FIELDS = ["total_ms", "step_us", "tpot_ms", "ttft_ms", "throughput"]
+
 
 def run_single_shot(
     python: str, args: argparse.Namespace, config: str
-) -> tuple[float, float, float] | None:
+) -> dict[str, float] | None:
     """Launch one bench_atom.py --single-shot subprocess and parse its output."""
     cmd = [
         python,
@@ -63,19 +67,25 @@ def run_single_shot(
     if args.ck_path:
         env["PYTHONPATH"] = args.ck_path + ":" + env.get("PYTHONPATH", "")
     if args.aiter_path:
-        env["AITER_PATH"] = args.aiter_path
+        env["PYTHONPATH"] = args.aiter_path + ":" + env.get("PYTHONPATH", "")
 
     result = subprocess.run(cmd, capture_output=True, text=True, env=env)
     for line in result.stdout.splitlines():
         if line.startswith("SINGLE_SHOT"):
-            _, cfg, total_ms, step_us, throughput = line.split()
-            assert cfg == config
-            return float(total_ms), float(step_us), float(throughput)
-    # Print stderr for debugging if parse failed
+            parts = line.split()
+            # format: SINGLE_SHOT <config> total_ms step_us tpot_ms ttft_ms throughput
+            assert parts[1] == config
+            return {f: float(v) for f, v in zip(FIELDS, parts[2:])}
     print(f"  [WARN] no SINGLE_SHOT line from {config}:", file=sys.stderr)
     for line in result.stderr.splitlines()[-5:]:
         print(f"    {line}", file=sys.stderr)
     return None
+
+
+def _pct(mean: float, baseline: float) -> str:
+    if baseline == 0:
+        return ""
+    return f"{(mean - baseline) / baseline * 100:+.1f}%"
 
 
 def main():
@@ -108,57 +118,98 @@ def main():
         help="Path to prepend to PYTHONPATH (CK DSL root)",
     )
     parser.add_argument(
-        "--aiter-path", dest="aiter_path", default=None, help="AITER_PATH env var value"
+        "--aiter-path",
+        dest="aiter_path",
+        default=None,
+        help="AITER_PATH env var value",
     )
     args = parser.parse_args()
 
-    data: dict[str, list[float]] = {c: [] for c in CONFIGS}  # step_us per config
+    # Accumulate all metrics per config
+    data: dict[str, dict[str, list[float]]] = {
+        c: {f: [] for f in FIELDS} for c in CONFIGS
+    }
 
-    print("=" * 72)
+    print("=" * 80)
     print("ATOM interleaved benchmark sweep")
-    print("=" * 72)
-    print(f"  Rounds:    {args.rounds}  (one rep per config per round, round-robin)")
-    print(f"  Configs:   {', '.join(CONFIGS)}")
-    print(f"  Model:     {args.model}")
+    print("=" * 80)
+    print(f"  Rounds:  {args.rounds}  (round-robin: baseline → dsl_gemm → dsl_all)")
+    print(f"  Model:   {args.model}")
     print(f"  bs={args.batch_size}  in={args.input_len}tok  out={args.output_len}tok")
     print()
     print(
-        f"  {'Rnd':>4}  {'Config':<12}  {'Total(ms)':>10}  {'Step(µs)':>10}  {'Thru(tok/s)':>12}"
+        f"  {'Rnd':>4}  {'Config':<12}  {'Total(ms)':>10}  {'Step(µs)':>10}"
+        f"  {'TPOT(ms)':>9}  {'TTFT(ms)':>9}  {'Thru(tok/s)':>12}"
     )
-    print(f"  {'-' * 4}  {'-' * 12}  {'-' * 10}  {'-' * 10}  {'-' * 12}")
+    print(
+        f"  {'-' * 4}  {'-' * 12}  {'-' * 10}  {'-' * 10}"
+        f"  {'-' * 9}  {'-' * 9}  {'-' * 12}"
+    )
 
     for rnd in range(1, args.rounds + 1):
         for config in CONFIGS:
-            result = run_single_shot(args.python, args, config)
-            if result is None:
+            r = run_single_shot(args.python, args, config)
+            if r is None:
                 print(f"  {rnd:>4}  {config:<12}  {'ERROR':>10}")
                 continue
-            total_ms, step_us, throughput = result
-            data[config].append(step_us)
+            for f in FIELDS:
+                data[config][f].append(r[f])
             print(
-                f"  {rnd:>4}  {config:<12}  {total_ms:>10.1f}  {step_us:>10.1f}  {throughput:>12.1f}"
+                f"  {rnd:>4}  {config:<12}"
+                f"  {r['total_ms']:>10.1f}  {r['step_us']:>10.1f}"
+                f"  {r['tpot_ms']:>9.3f}  {r['ttft_ms']:>9.1f}  {r['throughput']:>12.1f}"
             )
         sys.stdout.flush()
 
     print()
-    print("=" * 72)
-    print(f"RESULTS (mean ± stdev, n={args.rounds} interleaved rounds)")
-    print("=" * 72)
-    baseline_mean = (
-        statistics.mean(data["baseline"]) if data["baseline"] else float("nan")
-    )
-    for config in CONFIGS:
-        vals = data[config]
-        if len(vals) < 2:
-            print(f"  {config:<12}  insufficient data")
-            continue
-        mean = statistics.mean(vals)
-        stdev = statistics.stdev(vals)
-        delta = ""
-        if config != "baseline" and baseline_mean:
-            pct = (mean - baseline_mean) / baseline_mean * 100
-            delta = f"  ({pct:+.1f}% vs baseline)"
-        print(f"  {config:<12}  {mean:.1f} ± {stdev:.1f} µs/step{delta}")
+    print("=" * 80)
+    print(f"RESULTS — mean ± stdev  (n={args.rounds} interleaved rounds)")
+    print("=" * 80)
+
+    # Per-metric summary tables
+    metrics = [
+        (
+            "Step (µs)",
+            "step_us",
+            ".1f",
+            True,
+        ),  # lower is better → negative % = improvement
+        ("TTFT (ms)", "ttft_ms", ".1f", True),
+        ("TPOT (ms)", "tpot_ms", ".3f", True),
+        (
+            "Throughput",
+            "throughput",
+            ".1f",
+            False,
+        ),  # higher is better → positive % = improvement
+        ("Total (ms)", "total_ms", ".1f", True),
+    ]
+
+    baseline_means: dict[str, float] = {}
+    for _, field, _, _ in metrics:
+        vals = data["baseline"][field]
+        baseline_means[field] = statistics.mean(vals) if vals else float("nan")
+
+    for label, field, fmt, lower_better in metrics:
+        print(f"\n  {label}")
+        print(f"  {'Config':<14}  {'Mean':>10}  {'±Stdev':>8}  {'vs baseline':>12}")
+        print(f"  {'-' * 14}  {'-' * 10}  {'-' * 8}  {'-' * 12}")
+        bm = baseline_means[field]
+        for config in CONFIGS:
+            vals = data[config][field]
+            if len(vals) < 2:
+                print(f"  {config:<14}  insufficient data")
+                continue
+            mean = statistics.mean(vals)
+            stdev = statistics.stdev(vals)
+            if config == "baseline":
+                delta = "—"
+            else:
+                pct = (mean - bm) / bm * 100 if bm else 0.0
+                sign = "▼" if (pct < 0) == lower_better else "▲"
+                delta = f"{sign} {abs(pct):.1f}%"
+            print(f"  {config:<14}  {mean:{fmt}:>10}  ±{stdev:{fmt}:>7}  {delta:>12}")
+
     print()
 
 

@@ -30,7 +30,7 @@ Every DSL column uses pure CK DSL — no AITER in any DSL implementation.
 Run (MANDATORY exec pattern — direct python3 script launch segfaults on gfx950):
   PYTHONPATH=/workspace/rocm-libraries-streaming/projects/composablekernel/python \\
   /workspace/rocm-libraries-streaming/.venv/bin/python3 -c \\
-    "import sys; sys.path.insert(0,'/workspace/aiter'); \\
+    "import sys; import os; aiter=os.environ.get('AITER_PATH',''); aiter and sys.path.insert(0,aiter); \\
      exec(open('ck_dsl/examples/qwen3_30b_a3b_decode.py').read())"
 """
 
@@ -51,13 +51,13 @@ _THIS_DIR = os.path.dirname(os.path.abspath(_THIS_FILE)) if _THIS_FILE else os.g
 CK_DSL_PATH = os.path.normpath(
     os.path.join(_THIS_DIR, "..", "..")
 )  # examples/../.. = python/
-AITER_PATH = os.environ.get("AITER_PATH", "/workspace/aiter")
+AITER_PATH = os.environ.get("AITER_PATH", "")
 DATA_DIR = os.environ.get("CK_DSL_DATA_DIR", os.path.join(_THIS_DIR, "data"))
 os.makedirs(DATA_DIR, exist_ok=True)
 
 if CK_DSL_PATH not in sys.path:
     sys.path.insert(0, CK_DSL_PATH)
-if AITER_PATH not in sys.path:
+if AITER_PATH and AITER_PATH not in sys.path:
     sys.path.insert(0, AITER_PATH)
 
 # ── Qwen3-30B-A3B constants ──────────────────────────────────────────────────

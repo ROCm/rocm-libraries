@@ -40,7 +40,10 @@ from ck_dsl.instances.conv_implicit_gemm import (
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--output-dir", required=True)
+    parser.add_argument(
+        "--output-dir",
+        default=str(Path(__file__).parent / "output" / "bake_off_implicit_gemm"),
+    )
     parser.add_argument("--isa", default="amdgcn-amd-amdhsa--gfx950")
     args = parser.parse_args()
 
