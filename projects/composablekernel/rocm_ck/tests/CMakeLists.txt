@@ -40,6 +40,13 @@ set(ROCM_CK_UNIT_SOURCES
     unit/unit_args.cpp
     unit/unit_datatype.cpp
     unit/unit_fixed_string.cpp
+    unit/unit_fmha_bwd_common.cpp
+    unit/unit_fmha_bwd_compat.cpp
+    unit/unit_fmha_bwd_consteval.cpp
+    unit/unit_fmha_bwd_convert_dq.cpp
+    unit/unit_fmha_bwd_dqdkdv.cpp
+    unit/unit_fmha_bwd_ograd_dot_o.cpp
+    unit/unit_fmha_bwd_validate_args.cpp
     unit/unit_gemm_spec.cpp
     unit/unit_index_t.cpp
     unit/unit_layout.cpp
