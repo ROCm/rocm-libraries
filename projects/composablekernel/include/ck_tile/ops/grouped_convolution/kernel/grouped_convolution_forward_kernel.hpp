@@ -580,7 +580,7 @@ struct GroupedConvolutionForwardKernel
     using GroupedConvFwdKernelArgsSpecialized =
         GroupedConvFwdKernelArgs<GroupedConvTraitsType_, CDElementwise>;
 
-    static constexpr bool LargeTensors = GemmPipeline::LargeTensors;
+    static constexpr bool LargeTensors = Pipeline::LargeTensors;
 
     static constexpr bool IsSplitKSupported = false;
 
