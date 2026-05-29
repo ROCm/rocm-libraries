@@ -503,6 +503,111 @@ void SupportClaimsWriter::writeSidecar(const std::filesystem::path& sidecarPath,
     }
 }
 
+// RFC 0012 §8.3 shrinkage-refusal precondition. Before overwriting the
+// sidecar, check the existing block for (archToken, platform): if any
+// of its matchers' cross-product tuples are entirely absent from the
+// current observation set, the engineer is running a partial baseline
+// and would silently drop a previously valid claim. Refuse and tell
+// them what's missing.
+//
+// Returns true if it's safe to proceed (no shrinkage detected, or no
+// existing block to compare against). Returns false if the run would
+// shrink the sidecar — caller aborts.
+bool checkShrinkagePrecondition(const std::filesystem::path& sidecarPath,
+                                const std::string& engineName,
+                                const std::string& archToken,
+                                const std::optional<std::string>& platform,
+                                const std::vector<GraphSupportRecord>& records)
+{
+    if(!std::filesystem::exists(sidecarPath))
+    {
+        // First-time bring-up — nothing to shrink.
+        return true;
+    }
+
+    std::optional<SupportClaims> existing;
+    try
+    {
+        existing.emplace(sidecarPath, engineName);
+    }
+    catch(const std::exception& ex)
+    {
+        // A broken/mismatched sidecar is a different failure mode —
+        // surface it directly rather than silently overwriting.
+        std::cerr << "[--write-support-claims] cannot read existing sidecar for "
+                     "shrinkage check: "
+                  << ex.what() << "\n"
+                  << "  Either fix the sidecar's [meta] or delete it to start fresh.\n";
+        return false;
+    }
+
+    const std::string platformStr = platform.has_value() ? *platform : std::string{};
+    const auto* existingBlock = existing->blockFor(archToken, platformStr);
+    if(existingBlock == nullptr)
+    {
+        // No prior block for this (arch, platform) — first-time bring-up
+        // for this asic.
+        return true;
+    }
+
+    // Build the observed-tuple set from the current run.
+    std::set<std::tuple<std::string, std::string, std::string>> observed;
+    for(const auto& r : records)
+    {
+        if(r.opChain.empty())
+        {
+            continue;
+        }
+        observed.emplace(r.opChain, r.ioDtype, r.layout);
+    }
+
+    // Collect any matchers whose cross-product has zero overlap with the
+    // observed set. List them all rather than bailing on the first —
+    // gives the engineer the full picture in one error.
+    std::vector<const SupportMatcher*> zeroCoverage;
+    for(const auto& matcher : existingBlock->matchers)
+    {
+        bool anyObserved = false;
+        matcher.forEachTuple(
+            [&](const std::string& op, const std::string& io, const std::string& layout) {
+                if(observed.find({op, io, layout}) != observed.end())
+                {
+                    anyObserved = true;
+                    return false;
+                }
+                return true;
+            });
+        if(!anyObserved)
+        {
+            zeroCoverage.push_back(&matcher);
+        }
+    }
+
+    if(zeroCoverage.empty())
+    {
+        return true;
+    }
+
+    std::cerr << "[--write-support-claims] REFUSING to overwrite sidecar (RFC 0012 §8.3): "
+              << zeroCoverage.size() << " existing matcher(s) for arch=" << archToken
+              << " platform=" << (platform.has_value() ? *platform : "any")
+              << " had zero observed coverage in this run. Overwriting now would silently "
+                 "drop previously valid claims.\n";
+    for(const auto* matcher : zeroCoverage)
+    {
+        std::cerr << "  - " << matcher->sourceLocation << "\n"
+                  << "    op_chains[0] = \""
+                  << (matcher->opChains.empty() ? "" : matcher->opChains.front())
+                  << "\"  io_dtypes=" << matcher->ioDtypes.size()
+                  << "  layouts=" << matcher->layouts.size() << "\n";
+    }
+    std::cerr << "  This usually means a partial run (--gtest_filter set, or the suite ran on "
+                 "different hardware than the existing block was generated for). Investigate "
+                 "before regenerating: either rerun unfiltered on matching hardware, or hand-"
+                 "remove the stale block from the sidecar and regenerate.\n";
+    return false;
+}
+
 bool generateSupportClaimsForCurrentArch(const std::filesystem::path& sidecarPath,
                                          const std::string& engineName,
                                          const std::string& archToken,
@@ -514,6 +619,11 @@ bool generateSupportClaimsForCurrentArch(const std::filesystem::path& sidecarPat
         std::cerr << "[--write-support-claims] no observations recorded — refusing to write "
                      "an empty block (run without --gtest_filter and ensure the integration "
                      "suite ran).\n";
+        return false;
+    }
+
+    if(!checkShrinkagePrecondition(sidecarPath, engineName, archToken, platform, records))
+    {
         return false;
     }
 
