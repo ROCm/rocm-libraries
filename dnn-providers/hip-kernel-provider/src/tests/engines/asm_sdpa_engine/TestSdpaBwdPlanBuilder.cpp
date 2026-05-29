@@ -12,7 +12,12 @@
 #include "HipKernelHandle.hpp"
 #include "HipKernelSettings.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaBwdPlanBuilder.hpp"
+#include "engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
 #include "hip_kernel_provider_common/HipDeviceUtils.hpp"
+
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/sdpa_backward_attributes_generated.h>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
 
 namespace asm_sdpa_engine
 {
@@ -473,6 +478,214 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_RejectsAsymmetricHdim)
         builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper));
+}
+
+// =============================================================================
+// Canonical mask-attribute policy (plan_utils::getMaskType)
+// =============================================================================
+//
+// These tests exercise the shared mask-contradiction policy directly through
+// plan_utils::getMaskType rather than through isApplicable. The policy is
+// hardware-agnostic (it runs before any device dispatch and independent of the
+// kernel registry), so the assertions are meaningful on any device — including
+// this gfx950 box. The backward isApplicable cannot be used here: it rejects
+// non-gfx942 devices at its first gate, so on gfx950 it would return false
+// before ever reaching getMaskType, making an isApplicable-based assertion
+// pass for the wrong reason.
+
+// Build a backward SDPA graph that sets the deprecated causal booleans and the
+// modern bounds trio explicitly, so contradictory combinations can be
+// constructed. Returns the FlatBufferBuilder owning the graph buffer.
+flatbuffers::FlatBufferBuilder createSdpaBwdGraphWithMask(
+    bool causalMask,
+    bool causalMaskBottomRight,
+    flatbuffers::Optional<int64_t> leftBound,
+    flatbuffers::Optional<int64_t> rightBound,
+    hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment diagAlignment)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensorAttributes;
+
+    const std::vector<int64_t> dims = {4, 8, 256, 128};
+    const std::vector<int64_t> strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+
+    int64_t uid = 1;
+    const auto qUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, qUid, "q", DataType::BFLOAT16, &strides, &dims));
+    const auto kUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, kUid, "k", DataType::BFLOAT16, &strides, &dims));
+    const auto vUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, vUid, "v", DataType::BFLOAT16, &strides, &dims));
+    const auto oUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, oUid, "o", DataType::BFLOAT16, &strides, &dims));
+    const auto doUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, doUid, "do", DataType::BFLOAT16, &strides, &dims));
+
+    const std::vector<int64_t> statsDims = {dims[0], dims[1], dims[2], 1};
+    const std::vector<int64_t> statsStrides = {dims[1] * dims[2], dims[2], 1, 1};
+    const auto statsUid = uid++;
+    tensorAttributes.push_back(CreateTensorAttributesDirect(
+        builder, statsUid, "stats", DataType::FLOAT, &statsStrides, &statsDims));
+
+    const auto dqUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, dqUid, "dq", DataType::BFLOAT16, &strides, &dims));
+    const auto dkUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, dkUid, "dk", DataType::BFLOAT16, &strides, &dims));
+    const auto dvUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, dvUid, "dv", DataType::BFLOAT16, &strides, &dims));
+
+    const auto sdpaAttributes
+        = CreateSdpaBackwardAttributes(builder,
+                                       qUid,
+                                       kUid,
+                                       vUid,
+                                       oUid,
+                                       doUid,
+                                       statsUid,
+                                       dqUid,
+                                       dkUid,
+                                       dvUid,
+                                       flatbuffers::nullopt, // scale_tensor_uid
+                                       flatbuffers::nullopt, // attn_mask_tensor_uid
+                                       flatbuffers::nullopt, // seq_len_q_tensor_uid
+                                       flatbuffers::nullopt, // seq_len_kv_tensor_uid
+                                       flatbuffers::nullopt, // seed_tensor_uid
+                                       flatbuffers::nullopt, // offset_tensor_uid
+                                       flatbuffers::nullopt, // dropout_mask_tensor_uid
+                                       flatbuffers::nullopt, // dropout_scale_tensor_uid
+                                       flatbuffers::nullopt, // dropout_scale_inv_tensor_uid
+                                       flatbuffers::nullopt, // dbias_tensor_uid
+                                       false, // alibi_mask
+                                       false, // padding_mask
+                                       causalMask,
+                                       causalMaskBottomRight,
+                                       flatbuffers::nullopt, // dropout_probability
+                                       flatbuffers::nullopt, // attn_scale_value
+                                       leftBound,
+                                       rightBound,
+                                       diagAlignment);
+
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(builder,
+                                     "sdpa_bwd",
+                                     DataType::BFLOAT16,
+                                     NodeAttributes::SdpaBackwardAttributes,
+                                     sdpaAttributes.Union()));
+
+    const auto graphOffset = CreateGraphDirect(builder,
+                                               "test",
+                                               DataType::FLOAT,
+                                               DataType::HALF,
+                                               DataType::BFLOAT16,
+                                               &tensorAttributes,
+                                               &nodes);
+    builder.Finish(graphOffset);
+    return builder;
+}
+
+// Resolve the SDPA backward attributes from a graph buffer and classify the mask.
+plan_utils::MaskType classifyMask(const flatbuffers::FlatBufferBuilder& builder)
+{
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+    const auto& attrs
+        = graphWrapper.nodeWrappers()
+              .front()
+              ->attributesAs<hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes>();
+    return plan_utils::getMaskType(attrs);
+}
+
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_RejectsCausalMaskAndBottomRightSetTogether)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    // Both deprecated causal booleans set is a contradiction.
+    auto builder = createSdpaBwdGraphWithMask(
+        /*causalMask=*/true,
+        /*causalMaskBottomRight=*/true,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        DiagonalAlignment::TOP_LEFT);
+
+    EXPECT_THROW(classifyMask(builder), hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_RejectsCausalMaskWithIncompatibleBounds)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    // causal_mask=true implies TOP_LEFT_CAUSAL, but the bounds describe a
+    // sliding window (left=64, right=64 -> WINDOW_GENERIC): contradiction.
+    auto builder = createSdpaBwdGraphWithMask(
+        /*causalMask=*/true,
+        /*causalMaskBottomRight=*/false,
+        flatbuffers::Optional<int64_t>(64),
+        flatbuffers::Optional<int64_t>(64),
+        DiagonalAlignment::TOP_LEFT);
+
+    EXPECT_THROW(classifyMask(builder), hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_RejectsBottomRightCausalWithTopLeftAlignment)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    // causal_mask_bottom_right=true requires BOTTOM_RIGHT alignment, but the
+    // bounds trio (left=-1, right=0, diag=TOP_LEFT) derives TOP_LEFT_CAUSAL:
+    // contradiction.
+    auto builder = createSdpaBwdGraphWithMask(
+        /*causalMask=*/false,
+        /*causalMaskBottomRight=*/true,
+        flatbuffers::Optional<int64_t>(-1),
+        flatbuffers::Optional<int64_t>(0),
+        DiagonalAlignment::TOP_LEFT);
+
+    EXPECT_THROW(classifyMask(builder), hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_AcceptsConsistentCausalMaskAndBounds)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    // causal_mask=true with a consistent bounds trio (left=-1, right=0,
+    // diag=TOP_LEFT -> TOP_LEFT_CAUSAL) must not throw and classify as causal.
+    auto builder = createSdpaBwdGraphWithMask(
+        /*causalMask=*/true,
+        /*causalMaskBottomRight=*/false,
+        flatbuffers::Optional<int64_t>(-1),
+        flatbuffers::Optional<int64_t>(0),
+        DiagonalAlignment::TOP_LEFT);
+
+    plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
+    EXPECT_NO_THROW(maskType = classifyMask(builder));
+    EXPECT_EQ(maskType, plan_utils::MaskType::TOP_LEFT_CAUSAL);
+}
+
+TEST_F(TestSdpaBwdPlanBuilder, IsApplicable_RejectsBottomRightCausalWithWindowBounds)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    // causal_mask_bottom_right=true requires BOTTOM_RIGHT_CAUSAL, but a
+    // symmetric sliding window (left=64, right=64 -> WINDOW_GENERIC) derives
+    // neither causal nor bottom-right: contradiction.
+    auto builder = createSdpaBwdGraphWithMask(
+        /*causalMask=*/false,
+        /*causalMaskBottomRight=*/true,
+        flatbuffers::Optional<int64_t>(64),
+        flatbuffers::Optional<int64_t>(64),
+        DiagonalAlignment::BOTTOM_RIGHT);
+
+    EXPECT_THROW(classifyMask(builder), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 } // namespace

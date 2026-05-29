@@ -6,6 +6,7 @@
 #include "asm/AsmKernelPath.hpp"
 #include "asm_fmha_v3_bwd_configs.hpp"
 #include "plans/SdpaBwdPlan.hpp"
+#include "plans/SdpaPlanUtils.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -15,7 +16,6 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_backward_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
-#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <utility>
@@ -29,15 +29,10 @@ namespace asm_sdpa_engine
 namespace
 {
 
-// Backward-local enums. Mirror the forward definitions but kept distinct so
-// fwd and bwd dispatch can evolve independently.
-enum class MaskType : int
-{
-    NO_MASK = 0,
-    TOP_LEFT_CAUSAL = 1,
-    BOTTOM_RIGHT_CAUSAL = 2,
-    WINDOW_GENERIC = 3
-};
+// Mask classification is shared with the forward path via
+// plan_utils::MaskType. The remaining dispatch enums below stay backward-local
+// so fwd and bwd dispatch can evolve independently.
+using plan_utils::MaskType;
 
 enum class RoundingMode : int
 {
@@ -87,43 +82,6 @@ struct BwdDispatchTuples
     BwdDispatchTuple dqdkdv;
     BwdDispatchTuple dqConvert;
 };
-
-// Mask classification — ported verbatim from SdpaFwdPlanBuilder. Handles the
-// modern left_bound / right_bound / diagonal_alignment trio plus the
-// deprecated causal_mask* booleans.
-MaskType getMaskType(const hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes& attrs)
-{
-    using namespace hipdnn_flatbuffers_sdk::data_objects;
-
-    const bool leftAndRightBoundsSet
-        = attrs.left_bound().has_value() && attrs.right_bound().has_value();
-    if(!leftAndRightBoundsSet)
-    {
-        if(attrs.causal_mask())
-        {
-            return MaskType::TOP_LEFT_CAUSAL;
-        }
-        if(attrs.causal_mask_bottom_right())
-        {
-            return MaskType::BOTTOM_RIGHT_CAUSAL;
-        }
-        return MaskType::NO_MASK;
-    }
-
-    auto left = attrs.left_bound().value();
-    auto right = attrs.right_bound().value();
-    if(left == -1 && right == -1)
-    {
-        return MaskType::NO_MASK;
-    }
-    if(left == -1 && right == 0)
-    {
-        return attrs.diagonal_alignment() == DiagonalAlignment::BOTTOM_RIGHT
-                   ? MaskType::BOTTOM_RIGHT_CAUSAL
-                   : MaskType::TOP_LEFT_CAUSAL;
-    }
-    return MaskType::WINDOW_GENERIC;
-}
 
 RoundingMode
     getRoundingMode(const hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes& /*attrs*/)
@@ -260,7 +218,6 @@ std::string getKernelCoPath(const std::string& coName)
     return asm_kernels::getAsmKernelPath(coName);
 }
 
-constexpr int64_t K_U32_MAX_AS_I64 = static_cast<int64_t>(std::numeric_limits<uint32_t>::max());
 constexpr int64_t K_BF16_BYTES = 2;
 constexpr int64_t K_FP32_BYTES = 4;
 
@@ -287,15 +244,7 @@ bool wouldBwdByteStridesFitUint32(
     bool useA32)
 {
     auto check = [](const char* name, int64_t elements, int64_t elementBytes) {
-        if(elements >= 0 && elements * elementBytes <= K_U32_MAX_AS_I64)
-        {
-            return true;
-        }
-        HIPDNN_PLUGIN_LOG_INFO("SDPA backward: byte stride overflows uint32_t (field="
-                               << name << ", elements=" << elements << ", elementBytes="
-                               << elementBytes << ", scaled=" << elements * elementBytes
-                               << ", max=" << K_U32_MAX_AS_I64 << ")");
-        return false;
+        return plan_utils::byteStrideFitsU32(name, elements, elementBytes);
     };
 
     // [B, H, S, D] tensors: Get(0)=batch, Get(1)=head, Get(2)=seq.
@@ -594,7 +543,18 @@ bool SdpaBwdPlanBuilder::isApplicable(
         dataTypeId != "bf16",
         "Backward dispatch currently restricted to BF16 (Actual dtype: " + dataTypeId + ")");
 
-    auto maskType = getMaskType(attrs);
+    // Classify the mask; contradictory mask attributes are an invalid-input
+    // condition the engine declines rather than dispatches.
+    MaskType maskType = MaskType::NO_MASK;
+    try
+    {
+        maskType = plan_utils::getMaskType(attrs);
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
+    {
+        HIPDNN_PLUGIN_LOG_INFO(std::string{HIP_KERNEL_LOG_PREFIX} + e.what());
+        return false;
+    }
     HIP_KERNEL_RETURN_FALSE_IF(maskType != MaskType::NO_MASK,
                                "Masked attention not currently dispatched (Mask type ordinal: "
                                    + std::to_string(static_cast<int>(maskType)) + ")");
@@ -860,7 +820,7 @@ void SdpaBwdPlanBuilder::buildPlan(
             "(isApplicable should have rejected)");
     }
     const auto& dataTypeId = *dataTypeIdOpt;
-    auto maskType = getMaskType(sdpaAttrs);
+    auto maskType = plan_utils::getMaskType(sdpaAttrs);
     auto batchMode = getBatchMode(sdpaAttrs);
     const int bf16CvtValue = (dataTypeId == "fp16") ? BF16_CVT_FP16_SENTINEL
                                                     : static_cast<int>(getRoundingMode(sdpaAttrs));

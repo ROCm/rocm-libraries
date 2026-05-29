@@ -6,13 +6,8 @@
 namespace hip_kernel_provider_common
 {
 
-enum MaskType : int
-{
-    NO_MASK = 0,
-    TOP_LEFT_CAUSAL,
-    BOTTOM_RIGHT_CAUSAL,
-    WINDOW_GENERIC
-};
+// MaskType lives in asm_sdpa_engine::plan_utils (plans/SdpaPlanUtils.hpp) as the
+// single source of truth shared by the forward and backward dispatch paths.
 
 enum RoundingMode : int
 {

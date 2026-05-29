@@ -3,6 +3,7 @@
 
 #include "plans/SdpaBwdPlan.hpp"
 #include "asm/SdpaBwdKernelArgs.hpp"
+#include "plans/SdpaPlanUtils.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -347,26 +348,6 @@ MhaBwdArgs buildMhaBwdArgs(const asm_sdpa_engine::SdpaBwdParams& p,
     return a;
 }
 
-// =============================================================================
-// Per-launch post-check
-// =============================================================================
-//
-// Surfaces async launch faults that hipModuleLaunchKernel itself returned
-// success for.  Without this, a memory-access fault inside the ASM kernel
-// would propagate silently to the next stage.  Throws
-// HipdnnPluginException(INTERNAL_ERROR) on async error so the caller's
-// API status reflects the actual root cause.
-void throwOnLaunchPostError(const char* stage)
-{
-    const hipError_t err = hipPeekAtLastError();
-    if(err != hipSuccess)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-            std::string(stage) + ": post-launch error: " + hipGetErrorString(err));
-    }
-}
-
 } // anonymous namespace
 
 namespace asm_sdpa_engine
@@ -482,7 +463,7 @@ void SdpaBwdPlan::execute(const HipKernelHandle& handle,
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
             "SdpaBwdPlan::execute: hipModuleLaunchKernel failed for SDPA backward ODO");
     }
-    throwOnLaunchPostError("SDPA backward ODO");
+    plan_utils::throwOnLaunchPostError("SDPA backward ODO");
 
     // 6b. Build args and launch kernel 2: DQDKDV
     auto dqdkdvArgs = buildDqdkdvArgs(mhaArgs, _params.dqdkdvTiles.ts);
@@ -523,7 +504,7 @@ void SdpaBwdPlan::execute(const HipKernelHandle& handle,
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
             "SdpaBwdPlan::execute: hipModuleLaunchKernel failed for SDPA backward DQDKDV");
     }
-    throwOnLaunchPostError("SDPA backward DQDKDV");
+    plan_utils::throwOnLaunchPostError("SDPA backward DQDKDV");
 
     // 6c. DQ_CONVERT (FP32 → BF16) — A32 path only.
     // A16 wrote dQ directly to the output BF16 buffer in step 6b; no cast needed.
@@ -549,7 +530,7 @@ void SdpaBwdPlan::execute(const HipKernelHandle& handle,
                 HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                 "SdpaBwdPlan::execute: hipModuleLaunchKernel failed for SDPA backward DQ_CONVERT");
         }
-        throwOnLaunchPostError("SDPA backward DQ_CONVERT");
+        plan_utils::throwOnLaunchPostError("SDPA backward DQ_CONVERT");
     }
 }
 
