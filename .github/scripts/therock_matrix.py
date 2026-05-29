@@ -48,7 +48,7 @@ project_map = {
     },
     "blas": {
         "cmake_options": ["-DTHEROCK_ENABLE_BLAS=ON"],
-        "projects_to_test": ["hipblaslt", "rocblas", "hipblas", "rocroller"],
+        "projects_to_test": ["hipblaslt", "rocblas", "hipblas", "rocroller", "tensilelite"],
     },
     "miopen": {
         "cmake_options": [
