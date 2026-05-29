@@ -183,7 +183,7 @@ def main() -> None:
         print(f"ERROR: build directory not found: {build_dir}", file=sys.stderr)
         sys.exit(1)
 
-    ranks = [int(r) for r in args.ranks.split(",")]
+    ranks = [int(r.strip()) for r in args.ranks.split(",") if r.strip()]
 
     results = probe_all(build_dir, ranks, args.timeout)
 
