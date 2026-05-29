@@ -913,7 +913,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           macItems = []
         iterCode.add(pointerLWCode)
         iterCode.add(pointerLRCode)
-        if kernel["PrefetchGlobalRead"] >= 2: 
+        if kernel["PrefetchGlobalRead"] >= 2:
           if kernel["ClusterBarrier"]:
             iterCode.add(clusterBarrierCode)
           iterCode.add(globalReadCode)
@@ -927,10 +927,18 @@ class KernelWriter(metaclass=abc.ABCMeta):
           iterCode.add(localWriteCode)
           iterCode.add(pointerLWCode)
           iterCode.add(pointerLRCode)
-          if kernel["ClusterBarrier"]:
-            iterCode.add(clusterBarrierCode)
-          iterCode.add(globalReadCode)
-          iterCode.add(waitCode)
+          # PLR=0 + NoLdsWriteCode: drain dscnt before async LDS write to avoid
+          # self-wave WAR (ds_load vs tensor_load_to_lds/DTL on the same buffer).
+          if not self.states.numItersPLR and kernel["NoLdsWriteCode"]:
+            iterCode.add(waitCode)
+            if kernel["ClusterBarrier"]:
+              iterCode.add(clusterBarrierCode)
+            iterCode.add(globalReadCode)
+          else:
+            if kernel["ClusterBarrier"]:
+              iterCode.add(clusterBarrierCode)
+            iterCode.add(globalReadCode)
+            iterCode.add(waitCode)
           # iterCode.add(packPreCode)
           iterCode.add(packCode)
           iterCode.add(macIterCode)
