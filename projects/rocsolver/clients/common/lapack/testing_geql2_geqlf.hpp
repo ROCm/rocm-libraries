@@ -36,6 +36,8 @@
 #include "common/misc/rocsolver_test.hpp"
 #include "common/misc/rocsolver_timer.hpp"
 
+#include "print_matrix.hpp"
+
 template <bool STRIDED, bool GEQLF, typename T, typename U>
 void geql2_geqlf_checkBadArgs(const rocblas_handle handle,
                               const rocblas_int m,
@@ -176,6 +178,7 @@ void geql2_geqlf_initData(const rocblas_handle handle,
 template <bool STRIDED, bool GEQLF, typename T, typename Td, typename Ud, typename Th, typename Uh>
 void geql2_geqlf_getError(const rocblas_handle handle,
                           const std::string& matrix,
+                          const rocblas_int verbose,
                           const rocblas_int m,
                           const rocblas_int n,
                           Td& dA,
@@ -205,6 +208,9 @@ void geql2_geqlf_getError(const rocblas_handle handle,
     // input data initialization
     geql2_geqlf_initData<true, true, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
 
+    if(verbose >= 2)
+        print_matrix("A", m, n, dA[0], lda);
+
     // GPU scalar for lange output, shared by all checks below.
     device_strided_batch_vector<S> dnorm(1, 1, 1, 1);
     CHECK_HIP_ERROR(dnorm.memcheck());
@@ -225,6 +231,12 @@ void geql2_geqlf_getError(const rocblas_handle handle,
     CHECK_ROCBLAS_ERROR(rocsolver_geql2_geqlf(STRIDED, GEQLF, handle, m, n, dA.data(), lda, stA,
                                               dIpiv.data(), stP, bc));
     CHECK_HIP_ERROR(hARes.transfer_from(dA));
+
+    if(verbose >= 2)
+    {
+        print_matrix("Aout", m, n, dA[0], lda);
+        print_matrix("tau", min_mn, 1, dIpiv[0], min_mn);
+    }
 
     //--------------------
     // Check 0: Backward error: norm(A - Q*L) / (m * norm(A)), using 1-norm.
@@ -358,6 +370,12 @@ void geql2_geqlf_getError(const rocblas_handle handle,
               : cpu_geql2(m, n, hA[b], lda, hIpiv[b], hW.data());
     }
 
+    if(verbose >= 2)
+    {
+        print_matrix("Aref", m, n, hA[0], lda);
+        print_matrix("tau_ref", min_mn, 1, hIpiv[0], min_mn);
+    }
+
     // forward comparison: ||hA - hARes|| / ||hA|| (GPU vs CPU factored form)
     // (This does not account for numerical reproducibility issues. Checks 0 and
     // 1 above are more robust.)
@@ -456,6 +474,7 @@ void testing_geql2_geqlf(Arguments& argus)
     rocblas_int lda = argus.get<rocblas_int>("lda", m);
     rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
     rocblas_stride stP = argus.get<rocblas_stride>("strideP", min(m, n));
+    rocblas_int verbose = argus.get<rocblas_int>("verbose", 0);
     std::string matrix = argus.get<std::string>("matrix", "default");
 
     rocblas_int bc = argus.batch_count;
@@ -538,7 +557,7 @@ void testing_geql2_geqlf(Arguments& argus)
 
         // check computations
         if(argus.unit_check || argus.norm_check)
-            geql2_geqlf_getError<STRIDED, GEQLF, T>(handle, matrix, m, n, dA, lda, stA,
+            geql2_geqlf_getError<STRIDED, GEQLF, T>(handle, matrix, verbose, m, n, dA, lda, stA,
                                                     dIpiv, stP, bc, hA, hARes, hIpiv, max_errors);
 
         // collect performance data
@@ -575,7 +594,7 @@ void testing_geql2_geqlf(Arguments& argus)
 
         // check computations
         if(argus.unit_check || argus.norm_check)
-            geql2_geqlf_getError<STRIDED, GEQLF, T>(handle, matrix, m, n, dA, lda, stA,
+            geql2_geqlf_getError<STRIDED, GEQLF, T>(handle, matrix, verbose, m, n, dA, lda, stA,
                                                     dIpiv, stP, bc, hA, hARes, hIpiv, max_errors);
 
         // collect performance data
