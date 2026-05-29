@@ -24,9 +24,6 @@
  #
  ###############################################################################
 
-#Prevent CMake to add building path to RUNPATH
-set(CMAKE_SKIP_RPATH  TRUE)
-
 # Check whether building within hiptensor context
 if(CMAKE_PROJECT_NAME STREQUAL "hiptensor")
     # Target that will trigger build of all samples

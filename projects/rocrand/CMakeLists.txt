@@ -23,6 +23,14 @@
 cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 cmake_policy(VERSION 3.16...3.25)
 
+# ROCm libraries root (for shared/ctest and other shared resources).
+# Only set the default when not already defined (e.g. by superproject /
+# rocm-libraries). The default assumes the standard
+# rocm-libraries/projects/rocrand layout.
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+  set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
+
 # Build options
 include(CMakeDependentOption)
 

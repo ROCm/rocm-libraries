@@ -55,7 +55,8 @@ enum InstFlag : uint8_t {
 //
 // 2. (simpler) Just add another std::bitset<32> flag.
 constexpr size_t flagCapacity = 64;
-
+static_assert(static_cast<size_t>(InstFlag::IF_COUNT) <= flagCapacity,
+              "InstFlag indices must fit in HwInstDesc.flags (increase flagCapacity)");
 // Helper function to convert flags to a bit pattern at compile time
 constexpr uint64_t makeFlagBits(std::initializer_list<InstFlag> flags) {
     static_assert(flagCapacity <= 64, "flagCapacity exceeds uint64_t bit width");
@@ -157,6 +158,8 @@ enum class EncodeField : uint8_t {
     literal,
     // Scalar memory (SMEM)
     sdata,
+    /// PC-relative SMEM offset field (e.g. S_PREFETCH_INST_PC_REL koffset).
+    ioffset,
     sbase,
     // Scalar / control-flow
     simm16,
@@ -194,10 +197,16 @@ enum class FieldType : uint8_t {
     sleep,
     // Scalar memory types
     smem_offset,
+    /// SMEM offset without K (e.g. slength on S_PREFETCH_INST_PC_REL).
+    smem_offset_nok,
     // Immediate / control-flow types
     label,
     simm16,
     simm32,
+    /// 24-bit signed immediate (e.g. koffset on S_PREFETCH_INST_PC_REL).
+    simm24,
+    /// 5-bit signed immediate (e.g. klength on S_PREFETCH_INST_PC_REL).
+    simm5,
     ssrc_barrier_id,
     // Vector ALU source types
     src,
@@ -224,6 +233,10 @@ struct HwInstDesc {
     // issue cycles and latency cycles in specific ISA.
     uint16_t issue = 0;
     uint16_t latency = 0;
+
+    // per-cycle VALU co-issue window: bit i = 1 means VALU can co-issue at cycle i
+    // after this instruction is issued (used for matrix instructions).
+    uint16_t coIssueWindow = 0;
 
     // mnemonic string for the instruction.
     const char* mnemonic = nullptr;

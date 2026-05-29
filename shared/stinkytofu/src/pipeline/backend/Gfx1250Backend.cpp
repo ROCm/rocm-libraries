@@ -35,16 +35,22 @@
 #include "stinkytofu/pipeline/BackendRegistry.hpp"
 #include "stinkytofu/pipeline/OptimizationPasses.hpp"
 #include "stinkytofu/pipeline/ScopeAdaptor.hpp"
+#include "stinkytofu/transforms/asm/AccumulateInstructionSizePass.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
+#include "stinkytofu/transforms/asm/EstimateAsmCyclesPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
+#include "stinkytofu/transforms/asm/LoopRegionRemarkPass.hpp"
+#include "stinkytofu/transforms/asm/MemTokenConsistencyCheckPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/ScheduleFirstLRsPass.hpp"
 #include "stinkytofu/transforms/asm/ScheduleLastLRsPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyBuildImplicitDependencyPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
+#include "stinkytofu/transforms/asm/StinkyRemoveNopPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
+#include "stinkytofu/transforms/asm/SwPrefetchInsertionPass.hpp"
 
 namespace stinkytofu {
 namespace {
@@ -63,6 +69,7 @@ void addGfx1250RegionPasses(PassManager& pm, const StinkyAsmModule& module, OptL
     pm.addPass(createCFGBuilderPass());
     if (enableWaitCnt) {
         pm.addPass(createStinkyRemoveWaitCntPass());
+        pm.addPass(createStinkyRemoveNopPass());
     }
 
     // addPeepholeOptPasses(pm, optLevel);
@@ -122,10 +129,19 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module) {
 
     // -- kernel --
     pm.addPass(createInsertVgprMsbPass());
+    pm.addPass(createCFGBuilderPass());
+    pm.addPass(createMemTokenConsistencyCheckPass());
     if (optLevel != OptLevel::O0) {
-        pm.addPass(createCFGBuilderPass());
         pm.addPass(createInsertDelayAluPass());
+        pm.addPass(createLoopRegionRemarkPass());
     }
+    pm.addPass(createEstimateAsmCyclesPass());
+    if (moduleOptions.EnableSwPrefetchInsertion) {
+        pm.addPass(createSwPrefetchInsertionPass(module));
+    }
+    // When StinkyTofuCostOutputDir is set, dump pass debug (per-instruction + summary) to
+    // <outputDir>/<kernel>/accumulate_instruction_size_pass_debug.txt (same layout as Backend).
+    pm.addPass(createAccumulateInstructionSizePass(module));
 
     return true;
 }
@@ -139,6 +155,6 @@ struct Gfx1250Registrar {
 static Gfx1250Registrar s_gfx1250Registrar;
 }  // namespace
 
-void anchorGfx1250Backend() {}
+void anchorGfx1250Backend() {}  // NOLINT(misc-use-internal-linkage)
 
 }  // namespace stinkytofu

@@ -63,7 +63,7 @@ struct RewriteStmt {
         Remove        // remove $inst
     };
 
-    Kind kind;
+    Kind kind{Kind::CreateInst};
     std::string lhs;                    // Left-hand side variable (for CreateInst, BuiltinCall)
     std::string opcode;                 // Opcode (for CreateInst)
     std::string function;               // Function name (for BuiltinCall)
