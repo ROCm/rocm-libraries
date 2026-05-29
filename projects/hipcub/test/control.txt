@@ -127,10 +127,10 @@
 # ---------------
 # Add rules here:
 #----------------
-# Test Regex                               : Arch Regex                            : Sizes           : Build Types    : Skip Message
-/HipcubDeviceRadixSort\/.*/                : /<apus>/                              : >= (1 << 32)    : *              : "Skipping sizes over 2^32 on APUs"
-/HipcubDeviceRadixSortLargeInput.*/        : /<apus>/                              : >= (1 << 32)    : *              : "Skipping sizes over 2^32 on APUs"
-/HipcubDeviceMergeSort\/.*/                : /<apus>/                              : >= (1 << 32)    : *              : "Skipping sizes over 2^32 on APUs"
-/HipcubIteratorTests\/\d+\.TestTex.+/      : /<mi300-family>|navi4x-family|<apus>/ : *               : *              : "Test not run on gfx94x, gfx95x, or gfx120x as texture cache API is not supported."
-/HipcubCachingDeviceAllocatorTests\.Test1/ : /<all>/                               : *               : valgrind, asan : "Skipping timing-sensitive test under Valgrind and ASAN."
-/HipcubDeviceSelectLargeIndicesTest\/.*/   : /<nvidia>/                            : *               : *              : "Test disabled for large sizes until support is present in CUB."
+# Test Regex                               : Arch Regex                              : Sizes           : Build Types    : Skip Message
+/HipcubDeviceRadixSort\/.*/                : /<apus>/                                : >= (1 << 32)    : *              : "Skipping sizes over 2^32 on APUs"
+/HipcubDeviceRadixSortLargeInput.*/        : /<apus>/                                : >= (1 << 32)    : *              : "Skipping sizes over 2^32 on APUs"
+/HipcubDeviceMergeSort\/.*/                : /<apus>/                                : >= (1 << 32)    : *              : "Skipping sizes over 2^32 on APUs"
+/HipcubIteratorTests\/\d+\.TestTex.+/      : /<mi300-family>|<navi4x-family>|<apus>/ : *               : *              : "Test not run on gfx94x, gfx95x, or gfx120x as texture cache API is not supported."
+/HipcubCachingDeviceAllocatorTests\.Test1/ : /<all>/                                 : *               : valgrind, asan : "Skipping timing-sensitive test under Valgrind and ASAN."
+/HipcubDeviceSelectLargeIndicesTest\/.*/   : /<nvidia>/                              : *               : *              : "Test disabled for large sizes until support is present in CUB."

@@ -237,13 +237,13 @@ private:
         // Parsed from size filters. These are unary functions that accept a size and return true if that size should be skipped.
         std::vector<std::function<bool(size_t)>> size_test_fns;
         // Set to true if the user has specified a '*' to skip all test sizes.
-        bool disable_all_sizes;
+        bool disable_all_sizes = false;
         // Parsed from build types. These are no-argument functions that return true if the tests should be skipped under the current build type.
         std::vector<std::function<bool()>> build_type_test_fns;
         // Record the test control file line number this information comes from, so we can output it when skipping tests.
         // This allows you to see exactly which line in the control file is causing a given test to be skipped,
         // which can be useful when when adding/removing rules.
-        size_t line_num;
+        size_t line_num = 0;
     };
 
     // Represents a single token (operator or numeric value) in an arithmetic size expression.
@@ -253,8 +253,8 @@ private:
         // Note: avoid using a union here, since op needs to be a string (non-primitive type),
         // which needs special treatment in unions.
         std::string op;
-        size_t val;
-        bool is_val;
+        size_t val = 0;
+        bool is_val = false;
 
         Token(size_t val) : op(""), val(val), is_val(true)
         {}
@@ -270,15 +270,15 @@ private:
     // the control file data for specific scenarios.
     inline void reset(const std::optional<std::string> text=std::nullopt)
     {
-        this->control_data.clear();
+        this->control_info.clear();
         if (text)
         {
             std::istringstream ss(text.value());
-            this->parse_control_data(ss);
+            this->parse_control_info(ss);
         }
         else
         {
-            this->parse_control_data();
+            this->parse_control_info();
         }
     }
 
@@ -322,24 +322,30 @@ private:
     // Returns the gfx id of the device that's currently in use.
     inline static std::string get_arch()
     {
+		std::string arch;
 #ifdef __HIP_PLATFORM_AMD__
         // Make sure we get the device ID from ctest, in case we're running tests in
         // parallel on multiple devices.
         const int device_id = test_common_utils::obtain_device_from_ctest();
         hipDeviceProp_t dev_prop;
         HIP_CHECK(hipGetDeviceProperties(&dev_prop, device_id));
-        char* arch_name = dev_prop.gcnArchName;
+        std::string gcn_arch_name(dev_prop.gcnArchName);
 
         // The name may contain extra bits we don't need - eg. the xnack portion of "gfx942:xnack+".
-        const auto length = sizeof(hipDeviceProp_t::gcnArchName);
-        char* arch_end = std::find_if(arch_name,
-                                      arch_name + length,
-                                      [](const char& val) { return val == ':' || val == '\0'; });
-        *arch_end = '\0';
-		return std::string(arch_name);
+		std::regex arch_regex(R"(^([^:\0]+))");
+		std::smatch match;
+		if (std::regex_match(gcn_arch_name, match, arch_regex))
+		{
+			arch = match[1].str();
+		}
+		else
+		{
+			std::cerr << "Warning: unable to parse architecture identifier." << std::endl;
+		}
 #else
-		return "nvidia";
+		arch = "nvidia";
 #endif
+		return arch;
     }
 
     // Uses system calls to get the path to the currently running test binary.
@@ -360,12 +366,15 @@ private:
 #else
         // Linux does not add a '\0' at the end of the path, so we must do that manually.
         // If truncate if the path exceeds max_len chars.
-        int bytes_read = readlink("/proc/self/exe", path_buf, max_len);
-        if (bytes_read >= max_len)
-            bytes_read = max_len - 1;
+        const int bytes_read = readlink("/proc/self/exe", path_buf, max_len);
+		
+        if (bytes_read <= 0 || bytes_read >= max_len)
+		{
+			std::cerr << "Error: Unable to determine path of running binary." << std::endl;
+            return false;
+		}
         
-        if (bytes_read >= 0)
-            path_buf[bytes_read] = '\0';
+        path_buf[bytes_read] = '\0';
 #endif
 
         // At this point we have the path to the binary executable.
@@ -470,15 +479,15 @@ private:
         // Remember this so we can figure out how many sizes were removed later.
         const size_t num_unfiltered_sizes = sizes.size();
 
-        // Each line of the control file has create a ControlInfo object (stored in this->control_data)
+        // Each line of the control file has create a ControlInfo object (stored in this->control_info)
         // that contains information about how sizes should be filtered.
         // For each object (i.e. line of the control file), we need to go through all (remaining)
         // input sizes and check which ones it filters out.
         // Note: we can short-circuit here if all sizes have been filtered out.
-        for (size_t i = 0; !sizes.empty() && i < this->control_data.size(); i++)
+        for (size_t i = 0; !sizes.empty() && i < this->control_info.size(); i++)
         {
             // Grab the filter information that was parsed from the current line.
-            ControlInfo info = this->control_data[i];
+            const ControlInfo& info = this->control_info[i];
             
             // Check if the name of the currently running test and the current architecture match
             // the filter data.
@@ -608,9 +617,9 @@ private:
         ControlInfo info;
         std::smatch test_match;
         std::smatch arch_match;
-        for (size_t i = 0; !is_disabled && i < this->control_data.size(); i++)
+        for (size_t i = 0; !is_disabled && i < this->control_info.size(); i++)
         {
-            info = this->control_data[i];
+            info = this->control_info[i];
             // info.disable_all_sizes records whether the "*" is present in the size part of
             // the control line.
             is_disabled = (this->is_build_type_considered(info) &&
@@ -1088,8 +1097,6 @@ private:
                     info.size_test_fns.push_back(it->second);
                 }
             }
-
-            size_part = match_result.suffix();
         }
 
         // -- Process the build_type_part --
@@ -1133,8 +1140,6 @@ private:
                 else
                     info.build_type_test_fns.push_back(it->second);
             }
-
-            build_type_part = match_result.suffix();
         }
 
         return true;
@@ -1142,7 +1147,7 @@ private:
 
     // Parses the control data from the given stream, populating this->control data with the results.
     template<class T>
-    inline void parse_control_data(std::basic_istream<T>& istream)
+    inline void parse_control_info(std::basic_istream<T>& istream)
     {
         std::string line;
         size_t line_num = 1;
@@ -1154,7 +1159,7 @@ private:
             if (this->parse_line(line, line_num, is_ignored, info))
             {
                 if (!is_ignored)
-                    control_data.push_back(info);
+                    control_info.push_back(info);
             }
             
             ++line_num;
@@ -1162,7 +1167,7 @@ private:
     }
 
     // As above, but uses the control file as the input stream.
-    inline void parse_control_data()
+    inline void parse_control_info()
     {
         // Attempt to locate the path to the control file.
         std::filesystem::path control_path;
@@ -1182,7 +1187,7 @@ private:
             return;
         }
 
-        this->parse_control_data(control_file);
+        this->parse_control_info(control_file);
         control_file.close();
     }
 
@@ -1215,7 +1220,7 @@ private:
     }
 
     // Each entry represents the parsed information from one line of the control file.
-    std::vector<ControlInfo> control_data;
+    std::vector<ControlInfo> control_info;
 
     // Maps <keyword> => <regex string for all gfx ids that keyword represents>
     // Store the regexes as strings since they will be substituted into user-provided strings.
@@ -1235,7 +1240,7 @@ private:
 };
 
 // -- Macros to use in unit tests --
-// Use macros here, even though they're ugle, since it's the only way to call
+// Use macros here, even though they're ugly, since it's the only way to call
 // GTEST_SKIP() in such a way that we can guarantee that the test is skipped.
 // If not using a macro (even if using an inline function), GTEST_SKIP() will
 // only skip the function that is currently running, which may not be the top
