@@ -147,6 +147,8 @@ ctest
 
 ## Running benchmarks
 
+rocRAND uses [primbench](https://github.com/ROCm/rocm-libraries/tree/develop/shared/primbench) for benchmarking; see its [command-line options](https://github.com/ROCm/rocm-libraries/tree/develop/shared/primbench#command-line-options) for advanced usage.
+
 ```shell
 # Go to rocRAND build directory
 cd rocm-libraries/projects/rocrand; cd build
