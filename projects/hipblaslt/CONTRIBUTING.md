@@ -126,7 +126,7 @@ If you run from elsewhere, the test may not find the data file. For more run opt
 
 - **YAML data:** Test cases are driven by YAML under `clients/tests/data/` (e.g. `matmul_gtest.yaml`, `hipblaslt_common.yaml`). The build generates `hipblaslt_gtest.data` from these.
 - **Test coverage:** Inspect the YAML under `clients/tests/data/` and the test sources under `clients/`.
-- **Known bugs:** To skip tests on specific platforms, add an entry in `clients/tests/data/known_bugs.yaml` (e.g. `function`, `initialization`, `known_bug_platforms`).
+- **Known bugs:** Add an entry in `clients/tests/data/known_bugs.yaml` to mark a test as a known failure on one or more GPU architectures (e.g. `function`, `initialization`, `known_bug_platforms`). At test time, any `Arguments`-driven test (matmul, rocroller_predicate, aux) whose parameters match an entry and whose current GPU `gcnArchName` matches `known_bug_platforms` is skipped via `GTEST_SKIP()` and counted in the `[ SKIPPED ]` summary; the test still appears in the test list. Entries with no `known_bug_platforms` are treated as known-bug on all platforms. Tests under `matrix_transform_gtest.cpp` and `hipblaslt_gtest_ext_op.cpp` use raw gtest fixtures and are not driven by this YAML.
 - After editing YAML under `clients/tests/data/`, rebuild so `hipblaslt_gtest.data` is regenerated.
 
 ---

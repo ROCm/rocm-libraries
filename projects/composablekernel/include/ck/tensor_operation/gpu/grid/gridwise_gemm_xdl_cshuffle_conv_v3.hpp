@@ -15,10 +15,10 @@
 #include "ck/tensor_operation/gpu/block/thread_group_tensor_slice_transfer_direct_load.hpp"
 #include "ck/tensor_operation/gpu/grid/gridwise_gemm_xdl_cshuffle_common.hpp"
 
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-
+#endif
 namespace ck {
 
 template <typename ALayout,
@@ -69,7 +69,8 @@ template <typename ALayout,
           typename ComputeTypeB                       = ComputeTypeA,
           bool DirectLoad                             = false,
           bool ALdsScalarLoadToVgpr                   = false,
-          bool BLdsScalarLoadToVgpr                   = false>
+          bool BLdsScalarLoadToVgpr                   = false,
+          bool LargeTensors                           = false>
 struct GridwiseGemm_xdl_cshuffle_conv_v3
     : public GridwiseGemm_xdl_cshuffle_base<
           ALayout,
@@ -115,11 +116,16 @@ struct GridwiseGemm_xdl_cshuffle_conv_v3
           Sequence<CShuffleBlockTransferScalarPerVector_NPerBlock>,
           ComputeTypeA,
           ComputeTypeB,
-          false> // ForceNaiveLayout
+          false, // ForceNaiveLayout
+          false, // DirectLoad (base default)
+          false, // IsMxGemm  (base default)
+          LargeTensors>
 {
     static_assert((is_same_v<AElementwiseOperation, tensor_operation::element_wise::PassThrough> &&
                    is_same_v<BElementwiseOperation, tensor_operation::element_wise::PassThrough>) ||
                   !DirectLoad);
+
+    using IndexType = conditional_t<LargeTensors, long_index_t, index_t>;
 
     using Base = GridwiseGemm_xdl_cshuffle_base<
         ALayout,
@@ -165,7 +171,10 @@ struct GridwiseGemm_xdl_cshuffle_conv_v3
         Sequence<CShuffleBlockTransferScalarPerVector_NPerBlock>,
         ComputeTypeA,
         ComputeTypeB,
-        false>; // ForceNaiveLayout
+        false, // ForceNaiveLayout
+        false, // DirectLoad (base default)
+        false, // IsMxGemm  (base default)
+        LargeTensors>;
 
     using Base::AK0Number;
     using Base::AK1Number;
@@ -184,7 +193,11 @@ struct GridwiseGemm_xdl_cshuffle_conv_v3
           lcm_AK1_BK1 <= 4) ||
          (is_same<ComputeTypeA, int8_t>::value && lcm_AK1_BK1 <= 8) ||
          ((is_same<ComputeTypeA, f8_t>::value || is_same<ComputeTypeA, bf8_t>::value) &&
+#if defined(__gfx125__)
+          lcm_AK1_BK1 < 128))
+#else
           lcm_AK1_BK1 < 32))
+#endif
             ? true
             : false;
     static constexpr auto is_scale_mfma = false;
@@ -537,6 +550,8 @@ struct GridwiseGemm_xdl_cshuffle_conv_v3
                  NXdlPerWave,
                  KPack,
                  DirectLoad,
+                 false, // TransposeC
+                 false, // UseDataCachePrefetch
                  ALdsScalarLoadToVgpr,
                  BLdsScalarLoadToVgpr>())>;
 
@@ -625,9 +640,13 @@ struct GridwiseGemm_xdl_cshuffle_conv_v3
         const long_index_t a_space_size_divisor = SplitKOffsetHack ? k_batch : 1;
         const long_index_t b_space_size_divisor = SplitKOffsetHack ? k_batch : 1;
 
-        const auto a_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
+        const auto a_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global,
+                                                    AmdBufferCoherenceEnum::DefaultCoherence,
+                                                    IndexType>(
             p_a_grid, a_grid_desc_ak0_m_ak1.GetElementSpaceSize() / a_space_size_divisor);
-        const auto b_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
+        const auto b_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global,
+                                                    AmdBufferCoherenceEnum::DefaultCoherence,
+                                                    IndexType>(
             p_b_grid, b_grid_desc_bk0_n_bk1.GetElementSpaceSize() / b_space_size_divisor);
 
         const AElementwiseOperation a_element_op{};
@@ -710,7 +729,8 @@ struct GridwiseGemm_xdl_cshuffle_conv_v3
                     1,
                     AThreadTransferSrcResetCoordinateAfterRun,
                     true,
-                    BlockwiseGemmPipe::GlobalBufferNum>(
+                    BlockwiseGemmPipe::GlobalBufferNum,
+                    IndexType>(
                     a_grid_desc_ak0_m_ak1,
                     make_multi_index(SplitKOffsetHack ? 0 : k_id, m_block_data_idx_on_grid, 0),
                     a_element_op,
@@ -762,7 +782,8 @@ struct GridwiseGemm_xdl_cshuffle_conv_v3
                     1,
                     BThreadTransferSrcResetCoordinateAfterRun,
                     true,
-                    BlockwiseGemmPipe::GlobalBufferNum>(
+                    BlockwiseGemmPipe::GlobalBufferNum,
+                    IndexType>(
                     b_grid_desc_bk0_n_bk1,
                     make_multi_index(SplitKOffsetHack ? 0 : k_id, n_block_data_idx_on_grid, 0),
                     b_element_op,
@@ -851,11 +872,17 @@ struct GridwiseGemm_xdl_cshuffle_conv_v3
         const long_index_t a_space_size_divisor = SplitKOffsetHack ? k_batch : 1;
         const long_index_t b_space_size_divisor = SplitKOffsetHack ? k_batch : 1;
 
-        const auto a_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
+        const auto a_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global,
+                                                    AmdBufferCoherenceEnum::DefaultCoherence,
+                                                    IndexType>(
             p_a_grid, a_grid_desc_ak0_m_ak1.GetElementSpaceSize() / a_space_size_divisor);
-        const auto b_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
+        const auto b_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global,
+                                                    AmdBufferCoherenceEnum::DefaultCoherence,
+                                                    IndexType>(
             p_b_grid, b_grid_desc_bk0_n_bk1.GetElementSpaceSize() / b_space_size_divisor);
-        auto c_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global>(
+        auto c_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global,
+                                              AmdBufferCoherenceEnum::DefaultCoherence,
+                                              IndexType>(
             p_c_grid, c_grid_desc_mblock_mperblock_nblock_nperblock.GetElementSpaceSize());
 
         const AElementwiseOperation a_element_op{};
@@ -938,7 +965,8 @@ struct GridwiseGemm_xdl_cshuffle_conv_v3
                     1,
                     AThreadTransferSrcResetCoordinateAfterRun,
                     true,
-                    BlockwiseGemmPipe::GlobalBufferNum>(
+                    BlockwiseGemmPipe::GlobalBufferNum,
+                    IndexType>(
                     a_grid_desc_ak0_m_ak1,
                     make_multi_index(SplitKOffsetHack ? 0 : k_id, m_block_data_idx_on_grid, 0),
                     a_element_op,
@@ -990,7 +1018,8 @@ struct GridwiseGemm_xdl_cshuffle_conv_v3
                     1,
                     BThreadTransferSrcResetCoordinateAfterRun,
                     true,
-                    BlockwiseGemmPipe::GlobalBufferNum>(
+                    BlockwiseGemmPipe::GlobalBufferNum,
+                    IndexType>(
                     b_grid_desc_bk0_n_bk1,
                     make_multi_index(SplitKOffsetHack ? 0 : k_id, n_block_data_idx_on_grid, 0),
                     b_element_op,
@@ -1068,4 +1097,6 @@ struct GridwiseGemm_xdl_cshuffle_conv_v3
 
 } // namespace ck
 
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
+#endif

@@ -526,7 +526,6 @@ inline hipDoubleComplex testing_mult(hipDoubleComplex p, hipDoubleComplex q)
 {
     return hipCmul(p, q);
 }
-
 /* ============================================================================================ */
 /*! \brief div */
 template <typename T>
@@ -595,16 +594,6 @@ static inline double testing_abs(hipDoubleComplex x)
 
 /* ============================================================================================ */
 /*! \brief conj */
-static inline float testing_conj(float x)
-{
-    return x;
-}
-
-static inline double testing_conj(double x)
-{
-    return x;
-}
-
 static inline int8_t testing_conj(int8_t x)
 {
     return x;
@@ -621,6 +610,16 @@ static inline hipsparseFloat16 testing_conj(hipsparseFloat16 x)
 }
 
 static inline hipsparseBfloat16 testing_conj(hipsparseBfloat16 x)
+{
+    return x;
+}
+
+static inline float testing_conj(float x)
+{
+    return x;
+}
+
+static inline double testing_conj(double x)
 {
     return x;
 }
@@ -670,9 +669,9 @@ static inline double testing_real(hipDoubleComplex x)
 template <typename T>
 inline T random_generator()
 {
-    // return rand()/( (T)RAND_MAX + 1);
-    return make_DataType<T>(rand() % 10 + 1,
-                            rand() % 10 + 1); // generate a integer number between [1, 10]
+    const auto re = rand() % 10 + 1;
+    const auto im = rand() % 10 + 1;
+    return make_DataType<T>(re, im);
 };
 
 /* ============================================================================================ */
@@ -7515,7 +7514,7 @@ void host_hybmv(int                  m,
 
             if(beta != zero)
             {
-                y[i] = testing_fma(alpha, sum, testing_mult(beta, y[i]));
+                y[i] = testing_fma(beta, y[i], testing_mult(alpha, sum));
             }
             else
             {
@@ -7534,12 +7533,20 @@ void host_hybmv(int                  m,
             y[i] = testing_mult(y[i], coo_beta);
         }
 
-        for(int i = 0; i < coo_nnz; ++i)
+        int i = 0;
+        while(i < coo_nnz)
         {
-            int row = coo_row_ind[i] - idx_base;
-            int col = coo_col_ind[i] - idx_base;
+            const int row     = coo_row_ind[i] - idx_base;
+            T         row_sum = zero;
 
-            y[row] = testing_fma(alpha, testing_mult(coo_val[i], x[col]), y[row]);
+            while(i < coo_nnz && (coo_row_ind[i] - idx_base) == row)
+            {
+                const int col = coo_col_ind[i] - idx_base;
+                row_sum       = row_sum + testing_mult(coo_val[i], x[col]);
+                ++i;
+            }
+
+            y[row] = testing_fma(alpha, row_sum, y[row]);
         }
     }
 }
@@ -7615,11 +7622,11 @@ void host_coomv_aos(I                    m,
 
 /* ============================================================================================ */
 /*! \brief  Host spvv (sparse vector-vector dot product) */
-template <typename I, typename T>
+template <typename I, typename X, typename Y, typename T>
 void host_spvv(I                    nnz,
-               const T*             x_val,
+               const X*             x_val,
                const I*             x_ind,
-               const T*             y,
+               const Y*             y,
                T*                   result,
                hipsparseOperation_t op,
                hipsparseIndexBase_t idx_base)
@@ -7630,14 +7637,18 @@ void host_spvv(I                    nnz,
     {
         for(I i = 0; i < nnz; ++i)
         {
-            *result = *result + testing_mult(testing_conj(x_val[i]), y[x_ind[i] - idx_base]);
+            *result = *result
+                      + testing_mult(static_cast<T>(testing_conj(x_val[i])),
+                                     static_cast<T>(y[x_ind[i] - idx_base]));
         }
     }
     else
     {
         for(I i = 0; i < nnz; ++i)
         {
-            *result = *result + testing_mult(x_val[i], y[x_ind[i] - idx_base]);
+            *result
+                = *result
+                  + testing_mult(static_cast<T>(x_val[i]), static_cast<T>(y[x_ind[i] - idx_base]));
         }
     }
 }
@@ -7861,24 +7872,30 @@ void host_sddmm_coo_aos(I                    C_m,
 
 /* ============================================================================================ */
 /*! \brief  Host axpby (y = alpha * x + beta * y for sparse vectors) */
-template <typename I, typename T>
+template <typename I, typename X, typename Y, typename T>
 void host_axpby(I                    size,
                 I                    nnz,
                 T                    alpha,
-                const T*             x_val,
+                const X*             x_val,
                 const I*             x_ind,
                 T                    beta,
-                T*                   y,
+                Y*                   y,
                 hipsparseIndexBase_t idx_base)
 {
     for(I i = 0; i < size; ++i)
     {
-        y[i] = testing_mult(beta, y[i]);
+        T yi = static_cast<T>(y[i]);
+        yi   = testing_mult(beta, yi);
+        y[i] = static_cast<Y>(yi);
     }
 
     for(I i = 0; i < nnz; ++i)
     {
-        y[x_ind[i] - idx_base] = testing_fma(alpha, x_val[i], y[x_ind[i] - idx_base]);
+        I       idx = x_ind[i] - idx_base;
+        T       yi  = static_cast<T>(y[idx]);
+        const T xi  = static_cast<T>(x_val[i]);
+        yi          = testing_fma(alpha, xi, yi);
+        y[idx]      = static_cast<Y>(yi);
     }
 }
 

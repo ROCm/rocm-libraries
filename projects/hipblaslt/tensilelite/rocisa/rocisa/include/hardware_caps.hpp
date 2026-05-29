@@ -412,6 +412,7 @@ inline std::map<std::string, int>
                        isDebug);
 
     rv["HasNewBarrier"] = tryAssembler(isaVersion, assemblerPath, "s_barrier_wait -1", isDebug);
+    rv["HasClusterBarrier"] = tryAssembler(isaVersion, assemblerPath, "s_barrier_wait -3", isDebug);
     rv["HasTDM"] = tryAssembler(isaVersion, assemblerPath, "tensor_load_to_lds s[0:3], s[4:11]", isDebug);
 
     rv["s_delay_alu"]
@@ -464,6 +465,16 @@ inline std::map<std::string, int>
         rv["MaxLgkmcnt"] = getMaxCnt(isaVersion, assemblerPath, "s_waitcnt lgkmcnt(", ")", isDebug);
     }
 
+    // s_wait_xcnt drains XNACK-replay tracking before a subsequent volatile/atomic
+    // VMEM op. Probed independently because not every arch with separate vmem
+    // counters supports xcnt (e.g. it is gfx1250+). The immediate accepts 16 bits
+    // but hardware only consumes the lowest 6 bits, matching loadcnt/storecnt.
+    rv["HasXcnt"] = tryAssembler(isaVersion, assemblerPath, "s_wait_xcnt 0", isDebug);
+    if(rv["HasXcnt"])
+    {
+        rv["MaxXcnt"] = 63;
+    }
+
     rv["SupportedSource"] = true;
 
     return rv;
@@ -485,7 +496,7 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     rv["DeviceLDS"]          = deviceLDS;
     rv["CMPXWritesSGPR"]     = checkNotInList(isaVersion[0], {10, 11, 12});
     rv["HasWave32"]          = checkInList(isaVersion[0], {10, 11, 12});
-    rv["HasSchedMode"]       = checkInList(isaVersion[0], {}); //TODO: https://github.com/ROCm/rocm-libraries/issues/3211
+    rv["HasSchedMode"]       = checkInList(isaVersion[0], {12});
     rv["HasAccCD"]           = checkInList(isaVersion, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
     rv["ArchAccUnifiedRegs"] = checkInList(isaVersion, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
     rv["CrosslaneWait"]      = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}});
@@ -499,6 +510,8 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     rv["HasFP8_OCP"]         = isaVersion[0] == 12;
     rv["HasWmmaArbStallBit"] = isaVersion[0] == 12 && isaVersion[1] == 5;
     rv["HasF32XEmulation"]   = checkInList(isaVersion, {{9, 5, 0}, {12, 5, 0}});
+    rv["MaxSgprPreload"]     = checkInList(isaVersion, {{12, 5, 0}}) ? 32 : 16;
+    rv["SgprPreloadPad"]     = checkInList(isaVersion, {{9, 5, 0}}) || checkInList(isaVersion, {{9, 0, 10}}) || (isaVersion[0] == 9 && isaVersion[1] == 4);
 
     // True on archs whose MFMA-scale path can consume a swizzled MX scale
     // layout: gfx950 (HostPreSwizzle via the subtile path) and gfx1250
@@ -522,18 +535,6 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     // LDS bank geometry — used for swizzle/rotation in subtile-based tiling.
     rv["LDSBankCount"] = 64;
     rv["LDSBankWidth"] = 4; // bytes per bank
-
-    // Vector L1 Data cache line size (bytes) used for alignment-sensitive optimizations in codegen.
-    // NOTE: This is a *codegen-time* (compile-time) constant selected by target ISA.
-    //
-    // Per project convention:
-    // - MI100 (gfx908 / ISA 9.0.8) : 64B
-    // - MI200 (gfx90a / ISA 9.0.10): 64B
-    // - Others                      : 128B
-    int vL1DCacheLineBytes = 128;
-    if(checkInList(isaVersion, {{9, 0, 8}, {9, 0, 10}}))
-        vL1DCacheLineBytes = 64;
-    rv["vL1DCacheLineBytes"] = vL1DCacheLineBytes;
 
     return rv;
 }

@@ -84,6 +84,7 @@ public:
         EXPECT_CALL(*getMockGraph(), getSerializedGraph()).WillRepeatedly(Invoke([this]() {
             return hipdnnPluginConstData_t{_serializedGraph.data(), _serializedGraph.size()};
         }));
+        EXPECT_CALL(*getMockGraph(), isOverrideShapeEnabled()).WillRepeatedly(Return(false));
         EXPECT_CALL(*getMockEngine(), getEngineId()).WillOnce(Return(ENGINE_ID));
         EXPECT_CALL(*getMockEngine(), getGraph()).WillOnce(Return(getMockGraph()));
 
@@ -111,7 +112,8 @@ public:
                                                    bool includeTensorUids = true,
                                                    bool includePluginPayload = true,
                                                    bool emptyTensorUids = false,
-                                                   bool emptyPluginPayload = false) const
+                                                   bool emptyPluginPayload = false,
+                                                   bool isOverrideShapeEnabled = false) const
     {
         flatbuffers::FlatBufferBuilder builder;
         flatbuffers::Offset<flatbuffers::Vector<int64_t>> tensorUids;
@@ -130,7 +132,13 @@ public:
         }
 
         auto plan = hipdnn_flatbuffers_sdk::data_objects::CreateSerializedExecutionPlan(
-            builder, version, ENGINE_ID, workspaceSize, tensorUids, pluginPayload);
+            builder,
+            version,
+            ENGINE_ID,
+            workspaceSize,
+            tensorUids,
+            pluginPayload,
+            isOverrideShapeEnabled);
         builder.Finish(plan);
         return builder.Release();
     }
@@ -448,6 +456,7 @@ TEST_F(TestExecutionPlanDescriptor, DeserializeRestoresSerializedExecutionPlan)
 
     ASSERT_TRUE(plan->isFinalized());
     ASSERT_EQ(plan->getTensorUids(), _tensorUids);
+    ASSERT_FALSE(plan->isOverrideShapeEnabled());
     ASSERT_EQ(plan->getExecutionContext(), getExecutionContext());
 
     int64_t workspaceSize = 0;
@@ -514,12 +523,49 @@ TEST_F(TestExecutionPlanDescriptor, SerializeRoundTripsFlatBufferEnvelope)
     ASSERT_EQ(executionPlan->version(), 1);
     ASSERT_EQ(executionPlan->engine_id(), ENGINE_ID);
     ASSERT_EQ(executionPlan->workspace_size(), 1024);
+    ASSERT_FALSE(executionPlan->is_override_shape_enabled());
     ASSERT_EQ(std::vector<int64_t>(executionPlan->tensor_uids()->begin(),
                                    executionPlan->tensor_uids()->end()),
               _tensorUids);
     ASSERT_EQ(std::vector<uint8_t>(executionPlan->plugin_payload()->begin(),
                                    executionPlan->plugin_payload()->end()),
               pluginPayload);
+}
+
+TEST_F(TestExecutionPlanDescriptor, SerializeRoundTripsOverrideShapeEnabledFlag)
+{
+    auto plan = getExecutionPlanDescriptor();
+    auto serializedPlan
+        = makeSerializedPlan(1, 1024, true, true, false, false, /*isOverrideShapeEnabled=*/true);
+    const std::vector<uint8_t> pluginPayload{9, 8, 7, 6};
+
+    EXPECT_CALL(*_mockEnginePluginResourceManager,
+                createExecutionContextFromSerialized(ENGINE_ID, _))
+        .WillOnce(Return(getExecutionContext()));
+    EXPECT_CALL(*_mockEnginePluginResourceManager, destroyExecutionContext(_, _));
+    ASSERT_NO_THROW(plan->deserializeBackendPlan(
+        _mockEnginePluginResourceManager, serializedPlan.data(), serializedPlan.size()));
+    ASSERT_TRUE(plan->isOverrideShapeEnabled());
+
+    EXPECT_CALL(*_mockEnginePluginResourceManager,
+                serializeExecutionContext(ENGINE_ID, getExecutionContext(), _))
+        .Times(2)
+        .WillRepeatedly([&pluginPayload](int64_t,
+                                         hipdnnEnginePluginExecutionContext_t,
+                                         std::vector<uint8_t>& serializedContext) {
+            serializedContext = pluginPayload;
+        });
+
+    size_t planByteSize = 0;
+    ASSERT_NO_THROW(plan->serializeBackendPlan(0, &planByteSize, nullptr));
+
+    std::vector<uint8_t> serializedOutput(planByteSize);
+    ASSERT_NO_THROW(
+        plan->serializeBackendPlan(planByteSize, &planByteSize, serializedOutput.data()));
+
+    auto executionPlan
+        = hipdnn_flatbuffers_sdk::data_objects::GetSerializedExecutionPlan(serializedOutput.data());
+    EXPECT_TRUE(executionPlan->is_override_shape_enabled());
 }
 
 TEST_F(TestExecutionPlanDescriptor, SerializeRejectsInsufficientBuffer)
