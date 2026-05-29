@@ -70,7 +70,11 @@ def bench_kv_len(kv_len: int) -> None:
         * 0.1
     )
     vc = torch.randn_like(kc)
-    cu_q = torch.tensor([0, BATCH], dtype=torch.int32, device="cuda")
+    # Decode: one query token per sequence → cu_seqlens_q = [0, 1, ..., BATCH].
+    # (A plain [0, BATCH] declares a *single* length-BATCH sequence, which
+    # mismatches the BATCH-row block_table / seqused_k and reads cu_q[BATCH]
+    # out of bounds inside the kernel — an intermittent GPU memory fault.)
+    cu_q = torch.arange(0, BATCH + 1, dtype=torch.int32, device="cuda")
     kv_l = torch.full((BATCH,), kv_len, dtype=torch.int32, device="cuda")
     bt = torch.randint(0, pool, (BATCH, num_blks), dtype=torch.int32, device="cuda")
     stream_h = int(torch.cuda.current_stream().cuda_stream)
@@ -107,7 +111,6 @@ def bench_kv_len(kv_len: int) -> None:
                 alibi_slopes=None,
                 qq_bias=None,
                 sinks=None,
-                backend="triton",
             )
 
         bl_ms = ms(tri_fn, warmup=WARMUP, iters=ITERS, repeats=REPEATS)

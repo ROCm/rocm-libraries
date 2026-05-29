@@ -64,12 +64,12 @@ subdirectories and CK DSL Python root.
 Example:
 
 ```bash
-cd /workspace/rocm-libraries/projects/composablekernel
+cd /workspace/rocm-libraries-streaming/projects/composablekernel
 
 PYTHONPATH="python:python/ck_dsl/dsl_docs/optimization/mlse_kernel_optimization/tools/stage1_benchmark" \
   python/ck_dsl/.venv/bin/python \
   python/ck_dsl/dsl_docs/optimization/mlse_kernel_optimization/tools/stage1_benchmark/benchmark_ckdsl_unified_attention.py \
-  --shapes /workspace/mlse-tools-internal/performance/kernel_optimization/tests/aiter_ua_prefill2d_allbf16.json \
+  --shapes python/ck_dsl/dsl_docs/optimization/utilities/tools/stage1_benchmark/tests/aiter_ua_prefill2d_allbf16.json \
   --dtype bf16 \
   --limit 1
 ```

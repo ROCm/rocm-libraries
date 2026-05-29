@@ -362,7 +362,7 @@ rocprofv3 --stats --kernel-trace -o before -- python run_kernel.py
 rocprofv3 --stats --kernel-trace -o after -- python run_kernel.py
 
 # Compare metrics
-python /workspace/mlse-tools-internal/performance/kernel_optimization/src/stage5_compare/compare_rocprof_stats.py \
+python python/ck_dsl/dsl_docs/optimization/utilities/tools/stage5_compare/compare_rocprof_stats.py \
   before_kernel_stats.csv after_kernel_stats.csv
 ```
 

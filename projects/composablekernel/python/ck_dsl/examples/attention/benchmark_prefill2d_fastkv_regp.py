@@ -1,13 +1,12 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Benchmark CK DSL prefill-2D kernels on traced AITER shapes.
+"""Benchmark experimental CK DSL prefill-2D fastKV + register-P kernels.
 
-This unified harness compares R4 tiled-2D baselines, the current combo policies,
-and the experimental fastKV + register-P kernels from
-``attention_tiled_2d_fastkv_regp.py``.  It optionally joins against a Triton CSV
-by ``shape_signature``.  ``benchmark_prefill2d_traces.py`` is kept as a
-compatibility wrapper around this file.
+This is intentionally separate from ``benchmark_prefill2d_traces.py``.  It
+compares the R4 tiled-2D baseline with the experimental kernel from
+``attention_tiled_2d_fastkv_regp.py`` and optionally joins against a Triton CSV
+by ``shape_signature``.
 
 The emitted 2D kernel name omits specialization constants such as ``num_seqs``
 and the derived binary-search trip count.  This harness appends a short shape
@@ -44,22 +43,12 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[4]  # projects/composablekernel
 sys.path.insert(0, str(ROOT / "python"))
 
-EXAMPLES_DIR = Path(__file__).resolve().parent
-DEFAULT_SHAPES = EXAMPLES_DIR / "aiter_ua_prefill2d_allbf16.json"
-DEFAULT_TRITON_CSV = Path(
-    "/workspace/mlse-tools-internal/performance/kernel_optimization/results/"
-    "triton_ua_prefill2d_bf16.csv"
-)
-DEFAULT_SHAPE_UTILS_PATH = (
-    ROOT
-    / "python"
-    / "ck_dsl"
-    / "dsl_docs"
-    / "optimization"
-    / "mlse_kernel_optimization"
-    / "tools"
-    / "stage1_benchmark"
-)
+# Root of the in-tree optimization utilities (replaces the old external MLSE checkout).
+_DSL_DOCS = ROOT / "python" / "ck_dsl" / "dsl_docs" / "optimization" / "utilities"
+DEFAULT_SHAPE_UTILS = _DSL_DOCS / "tools" / "stage1_benchmark"
+DEFAULT_SHAPES = DEFAULT_SHAPE_UTILS / "tests" / "aiter_ua_prefill2d_allbf16.json"
+DEFAULT_TRITON_CSV = DEFAULT_SHAPE_UTILS / "results" / "triton_ua_prefill2d_bf16.csv"
+
 
 def _add_shape_utils_path(path: Path) -> None:
     if str(path) not in sys.path:
@@ -86,36 +75,20 @@ def _bench_stream_handle() -> int:
 
 
 def _gm(vals: list[float]) -> float:
-    return math.exp(sum(math.log(v) for v in vals) / len(vals)) if vals else float("nan")
+    return (
+        math.exp(sum(math.log(v) for v in vals) / len(vals)) if vals else float("nan")
+    )
 
 
 def _sliding_window(shape) -> int:
     return shape.window_size[0] + 1 if shape.window_size[0] >= 0 else 0
 
 
-def _use_trace_combo_policy(shape, sliding_window: int) -> bool:
-    """Original trace-combo policy preserved for the compatibility wrapper."""
-
-    if shape.q_dtype != "torch.bfloat16":
-        return False
-    if shape.head_size != 64 or shape.block_size != 32:
-        return False
-    if shape.num_query_heads != 64 or shape.num_kv_heads != 8:
-        return False
-    if shape.softcap > 0 or shape.has_alibi:
-        return False
-    if shape.max_seqlen_q <= 256:
-        return False
-    return sliding_window == 0
-
-
-def _smart_dispatch_variant(policy: str, shape, sliding_window: int) -> str:
+def _smart_dispatch_variant(policy: str, sliding_window: int) -> str:
     """Return the measured-best CK DSL variant for one trace shape."""
 
     if policy == "latest":
         return "combo_early_v" if sliding_window == 0 else "combo_t32"
-    if policy == "trace_combo":
-        return "combo" if _use_trace_combo_policy(shape, sliding_window) else "r4"
     raise ValueError(f"unknown smart dispatch policy: {policy}")
 
 
@@ -194,7 +167,9 @@ class CkDslFastKvRegPBench:
             use_early_v_schedule=early_v,
         )
 
-    def _variant_spec_and_builder(self, shape, problem, variant: str, sliding_window: int):
+    def _variant_spec_and_builder(
+        self, shape, problem, variant: str, sliding_window: int
+    ):
         from ck_dsl.instances import build_unified_attention_2d_tiled, supports_tiled_2d
         from ck_dsl.instances.attention_tiled_2d_fastkv_regp import (
             build_unified_attention_2d_fastkv_register_p,
@@ -223,23 +198,33 @@ class CkDslFastKvRegPBench:
         if variant == "r4":
             return base, build_unified_attention_2d_tiled, "R4"
         if variant == "r4_t32":
-            return self._base_r4_spec(shape, sliding_window, tile_mult=1), (
-                build_unified_attention_2d_tiled
-            ), "R4_t32"
-        if variant == "combo":
-            return self._combo_spec(base, shape, sliding_window), (
-                build_unified_attention_2d_tiled
-            ), "R4_s1mask_hlpv_combo"
-        if variant == "combo_t32":
-            return self._combo_spec(
+            return (
                 self._base_r4_spec(shape, sliding_window, tile_mult=1),
-                shape,
-                sliding_window,
-            ), (build_unified_attention_2d_tiled), "R4_s1mask_hlpv_combo_t32"
+                (build_unified_attention_2d_tiled),
+                "R4_t32",
+            )
+        if variant == "combo":
+            return (
+                self._combo_spec(base, shape, sliding_window),
+                (build_unified_attention_2d_tiled),
+                "R4_s1mask_hlpv_combo",
+            )
+        if variant == "combo_t32":
+            return (
+                self._combo_spec(
+                    self._base_r4_spec(shape, sliding_window, tile_mult=1),
+                    shape,
+                    sliding_window,
+                ),
+                (build_unified_attention_2d_tiled),
+                "R4_s1mask_hlpv_combo_t32",
+            )
         if variant == "combo_early_v":
-            return self._combo_spec(base, shape, sliding_window, early_v=True), (
-                build_unified_attention_2d_tiled
-            ), "R4_s1mask_hlpv_combo_early_v"
+            return (
+                self._combo_spec(base, shape, sliding_window, early_v=True),
+                (build_unified_attention_2d_tiled),
+                "R4_s1mask_hlpv_combo_early_v",
+            )
         if variant == "fastkv_regp":
             ok, reason = supports_fastkv_register_p_2d(
                 head_size=shape.head_size,
@@ -278,9 +263,7 @@ class CkDslFastKvRegPBench:
             if not ok:
                 raise NotImplementedError(reason)
             use_mask_limit = (
-                sliding_window == 0
-                and shape.softcap <= 0
-                and not shape.has_alibi
+                sliding_window == 0 and shape.softcap <= 0 and not shape.has_alibi
             )
             return (
                 make_fastkv_register_p_spec(
@@ -476,11 +459,6 @@ def _join_triton(
                 "triton_kernel_name": tr.get("kernel_name", ""),
                 "ckdsl_over_triton_latency": ck_ms / tri_ms if tri_ms > 0 else "",
                 "triton_over_ckdsl_latency": tri_ms / ck_ms if ck_ms > 0 else "",
-                "ckdsl_latency_ms": ck_ms,
-                "ckdsl_tflops": row.get("tflops", ""),
-                "ckdsl_policy": row.get("policy", ""),
-                "ckdsl_kernel_name": row.get("kernel_name", ""),
-                "speedup_triton_over_ckdsl": tri_ms / ck_ms if ck_ms > 0 else "",
             }
         )
         joined.append(out)
@@ -528,7 +506,7 @@ def _print_summary(rows: list[dict[str, Any]], joined: list[dict[str, Any]]) -> 
         )
 
 
-def main(argv: list[str] | None = None) -> int:
+def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--shapes", nargs="+", type=Path, default=[DEFAULT_SHAPES])
     parser.add_argument(
@@ -563,18 +541,17 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--smart-dispatch-policy",
-        choices=("none", "latest", "trace_combo"),
+        choices=("none", "latest"),
         default="none",
         help=(
             "benchmark one host-selected variant per shape; 'latest' uses "
-            "combo_early_v for no-SW and combo_t32 for SW; 'trace_combo' "
-            "preserves the original benchmark_prefill2d_traces.py policy"
+            "combo_early_v for no-SW and combo_t32 for SW"
         ),
     )
     parser.add_argument(
         "--shape-utils-path",
         type=Path,
-        default=DEFAULT_SHAPE_UTILS_PATH,
+        default=DEFAULT_SHAPE_UTILS,
         help="directory containing _ua_shape_utils.py",
     )
     parser.add_argument("--triton-csv", type=Path, default=DEFAULT_TRITON_CSV)
@@ -593,7 +570,7 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=Path("/tmp/ckdsl_prefill2d_fastkv_regp_triton_joined.csv"),
     )
-    args = parser.parse_args(argv)
+    args = parser.parse_args()
 
     import torch
 
@@ -640,7 +617,7 @@ def main(argv: list[str] | None = None) -> int:
             variant_requests = [(variant, variant) for variant in args.variants]
         else:
             selected_variant = _smart_dispatch_variant(
-                args.smart_dispatch_policy, shape, sliding_window
+                args.smart_dispatch_policy, sliding_window
             )
             variant_requests = [
                 (f"smart_{args.smart_dispatch_policy}", selected_variant)
@@ -694,7 +671,9 @@ def main(argv: list[str] | None = None) -> int:
         _write_csv(args.joined_csv, joined)
         print(f"wrote joined CSV: {args.joined_csv}")
     else:
-        print(f"skipped joined CSV; Triton CSV not found or no matching rows: {args.triton_csv}")
+        print(
+            f"skipped joined CSV; Triton CSV not found or no matching rows: {args.triton_csv}"
+        )
 
     _print_summary(results, joined)
     ok = sum(1 for row in results if row.get("success"))

@@ -1498,13 +1498,16 @@ class _Lowerer:
         ptr, idx = op.operands
         vec = int(op.attrs["vec"])
         elem_ty = _llvm_type(op.result.type.elem)  # type: ignore[attr-defined]
+        # GEP index width must match the operand type -- i64 indices are
+        # needed for paged caches > 2 GiB (element offset overflows i32).
+        idx_ty = _llvm_type(idx.type)
         gep = self._fresh("gep")
-        # Cast the index-into-half offset into a pointer-cast: we GEP by
-        # half, then bitcast to ptr to <vec x half>. This is exactly the
+        # Cast the index-into-elem offset into a pointer-cast: we GEP by
+        # elem, then bitcast to ptr to <vec x elem>. This is exactly the
         # pattern Clang emits for `*(__fp16x4_t*)(ptr + idx)`.
         self._current().emit(
             f"  {gep} = getelementptr inbounds {elem_ty}, ptr addrspace(1) "
-            f"{self._operand(ptr)}, i32 {self._operand(idx)}"
+            f"{self._operand(ptr)}, {idx_ty} {self._operand(idx)}"
         )
         align = int(op.attrs.get("align", vec * 2))
         self._current().emit(
@@ -2402,6 +2405,25 @@ class _Lowerer:
         base, off = op.operands
         self._current().emit(
             f"  {op.result.name} = add i64 {self._operand(base)}, {self._operand(off)}"
+        )
+
+    def _op_tile_global_ptr_add(self, op: Op) -> None:
+        # ptr + byte_off as a new global pointer (getelementptr i8). The
+        # offset must be i64 so block bases beyond 2 GiB do not overflow.
+        ptr, off = op.operands
+        off_ty = _llvm_type(off.type)
+        if off_ty == "i32":
+            off64 = self._fresh("goff64")
+            self._current().emit(f"  {off64} = zext i32 {self._operand(off)} to i64")
+        elif off_ty == "i64":
+            off64 = self._operand(off)
+        else:
+            raise ValueError(
+                f"tile.global_ptr_add offset must be i32 or i64, got {off_ty}"
+            )
+        self._current().emit(
+            f"  {op.result.name} = getelementptr inbounds i8, ptr addrspace(1) "
+            f"{self._operand(ptr)}, i64 {off64}"
         )
 
     def _op_tile_async_buffer_load_lds_addr(self, op: Op) -> None:

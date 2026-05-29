@@ -10,7 +10,7 @@ until every required primitive and correctness/perf path is present.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Dict, Optional, Tuple
 
 from ..core.ir import BF16, F16, F32, I32, IRBuilder, KernelDef, PtrType, Type, Value
@@ -87,6 +87,11 @@ class UnifiedAttentionProblem:
     #     (~450ms compile but ~5% faster on long-running kernels).
     # See ``probe_hip_lowering.py`` for the per-shape comparison.
     compile_backend: Optional[str] = None
+    # Number of physical blocks in the paged KV cache (``k.shape[0]``). Used
+    # only to decide whether the i32 buffer voffset can address the whole
+    # cache; 0 means "unknown" (assume small / fast i32 path). The
+    # dispatcher fills this from the K tensor when available.
+    num_kv_blocks: int = 0
 
     @property
     def num_queries_per_kv(self) -> int:
@@ -287,6 +292,15 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem) -> int:
     # variants were >=258us and often incorrect under hipcc).
     if problem.use_fp8 and problem.sliding_window > 0 and problem.max_seqlen_q > 256:
         return problem.block_size
+    # bf16 transposed-combo sliding-window. Paired with the combo's
+    # ``num_warps=2`` (BLOCK_M=64) prelude-light geometry, the smaller
+    # ``T = block_size`` tile prunes the window finer (less compute on
+    # partially-masked tiles) and dramatically cuts the per-CTA prelude:
+    # measured SW geomean 0.67x -> ~1.04x vs Triton-2d (bit-exact). This
+    # supersedes the older T=64 SW choice, which assumed num_warps=4 / no
+    # combo and a much heavier prelude.
+    if _enable_combo_2d(problem) and problem.sliding_window > 0:
+        return problem.block_size
     # Qwen3-30B-A3B prefill specialization (bf16, hd64, BS=16, num_seqs=1,
     # num_queries_per_kv=8). At BS=16 the default ``T=2*BS=32`` gives the
     # async DMA loader only 32*64 = 2048 bytes per iter, which under-feeds
@@ -358,6 +372,33 @@ def _select_2d_num_warps(problem: UnifiedAttentionProblem) -> int:
       - an LDS-budget check (``<= 96 KiB`` so we keep >= 1 CTA/CU on
         MI355X comfortably).
     """
+    # The validated combo family (d64/b32/GQA-8 bf16, with sinks).
+    #   * full attention: num_warps=4 (BLOCK_M=128) amortises the per-CTA
+    #     prelude over the many KV tiles a long no-SW context produces.
+    #   * sliding window: num_warps=2 (BLOCK_M=64). The window prunes the
+    #     KV loop to a handful of tiles, so the shape is prelude-bound;
+    #     halving BLOCK_M halves the per-CTA Q-load prelude and doubles the
+    #     CTA count for better latency hiding. Paired with T=block_size
+    #     (see _select_2d_tile_size) this takes SW from 0.67x to ~1.04x vs
+    #     Triton-2d (bit-exact).
+    if _enable_combo_2d(problem):
+        # bf16 sliding-window is prelude-bound -> nw2 (lighter prelude). But
+        # fp8 SW is dequant-bound, not prelude-bound, so it wants nw4 to
+        # spread the fp8->bf16 dequant across more warps (nw2 concentrates
+        # it and regresses). No-SW (compute-bound) is nw4 for both.
+        target = 2 if (problem.sliding_window > 0 and not problem.use_fp8) else 4
+        HD = problem.head_size
+        BS = problem.block_size
+        T = _select_2d_tile_size(problem)
+        while target > 1:
+            if (T * HD) < 64 * target * 8:
+                target //= 2
+                continue
+            if (64 * 8) // HD > BS:
+                target //= 2
+                continue
+            break
+        return max(1, target)
     # Qwen3-30B-A3B prefill specialization (bf16, hd64, BS=16, num_seqs=1,
     # num_queries_per_kv>=4). The default heuristic was tuned for HD=128 /
     # multi-batch prefill; for this hd64 single-seq path the per-CTA cost
@@ -487,6 +528,7 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
         _enable_transposed_qk_32x32(problem),
         _enable_transposed_half_local_pv(problem),
         _enable_register_pv(problem),
+        _enable_i64_kv_addr(problem),
         _select_2d_compile_backend(problem),
     )
 
@@ -508,6 +550,10 @@ def _select_2d_waves_per_eu(problem: UnifiedAttentionProblem) -> Optional[int]:
     """
     if problem.waves_per_eu is not None:
         return problem.waves_per_eu
+    # Combo (incl. fp8 combo) wants wpe=4 -- handled below; check it before
+    # the generic fp8 wpe=3 rule so fp8 combo prefill gets wpe=4, not 3.
+    if _enable_combo_2d(problem):
+        return 4
     # FP8 long-prefill specialisation. The sync FP8 dequant path runs
     # extra VALU per iter (cvt_pk_f32_fp8 + scale + cvt_to_bf16 per K/V
     # tile element) which makes the inner loop more VALU-bound than the
@@ -519,6 +565,9 @@ def _select_2d_waves_per_eu(problem: UnifiedAttentionProblem) -> Optional[int]:
     # decode the VALU pressure is already low so wpe=2 stays better.
     if problem.use_fp8 and problem.max_seqlen_q > 256 and problem.num_seqs >= 2:
         return 3
+    # (The transposed-32x32 combo is handled at the top of this function:
+    # wpe=4 reaches 4 WG/CU on both the nw4/T64 and nw2/T32 geometries and
+    # is a consistent win over wpe=2/3 on the d64 prefill-2D cohort.)
     return 2
 
 
@@ -546,15 +595,27 @@ def _enable_fp8_mfma_qk(problem: UnifiedAttentionProblem) -> bool:
     pattern from the production trace:
       - decode / short prefill: wins 10-55% (loader LDS writes are the
         bottleneck; we save them by storing K as fp8 in LDS).
-      - long prefill no-SW (many KV iters * many MFMAs): loses ~10%
-        (per-MFMA in-register dequant accumulates faster than the
-        loader LDS writes we replaced).
-    Gate on (sliding-window OR ``max_seqlen_k <= 16 * T``) plus the
-    loader fitness check.
+      - long prefill (many KV iters * many MFMAs), no-SW *and* SW: loses
+        ~10% (per-MFMA in-register dequant accumulates faster than the
+        loader LDS writes we replaced). Measured on the AmirFix fp8 SW
+        prefill cohort (q~8000, k~10000, SW=128): fp8qk=True 0.60x vs
+        sync-dequant 0.67x -- so prefill stays on the sync path.
+    Gate on (sliding-window OR ``max_seqlen_k <= 16 * T``) AND a small
+    ``max_seqlen_q`` (decode / short prefill), plus the loader fitness
+    check.
     """
     if not problem.use_fp8:
         return False
+    # The 32x32 combo reads bf16 K from LDS, so it MUST use the sync-dequant
+    # loader (bf16 K_lds), not this in-LDS-fp8 path. Never combine them.
+    if _enable_combo_2d(problem):
+        return False
     if not _fp8_qk_loader_fits(problem):
+        return False
+    # Large prefill (long per-CTA KV loop) prefers the sync-dequant path
+    # regardless of sliding window; the K-in-LDS loader only wins when the
+    # KV loop is short (decode / short prefill).
+    if problem.max_seqlen_q > 256:
         return False
     T_eff = _select_2d_tile_size(problem)
     return problem.sliding_window > 0 or problem.max_seqlen_k <= 16 * T_eff
@@ -606,7 +667,13 @@ def _enable_transposed_qk_32x32(problem: UnifiedAttentionProblem) -> bool:
       * no ALiBi or QQ bias (transposed mask block doesn't fold them yet)
       * head_size in {64, 128} (hd=256 not benchmarked yet)
       * no softcap / sinks (not wired into transposed softmax yet)
+
+    The validated ``_enable_combo_2d`` family is a superset that DOES wire
+    sinks (and sliding window) through the transposed softmax, so it
+    short-circuits to True here.
     """
+    if _enable_combo_2d(problem):
+        return True
     if problem.dtype != "bf16":
         return False
     if problem.use_fp8:
@@ -683,9 +750,86 @@ def _enable_register_pv(problem: UnifiedAttentionProblem) -> bool:
     return True
 
 
+def _enable_combo_2d(problem: UnifiedAttentionProblem) -> bool:
+    """The full transposed-32x32 "combo" stack for the validated 2D family.
+
+    This wires the kernel config that the parity + trace benchmarks proved
+    fastest-and-correct for the AITER prefill-2D trace family (d64 / b32 /
+    GQA-8 / bf16, with attention sinks) into production. The combo stacks,
+    on top of ``use_mfma_32x32`` + ``use_transposed_qk_32x32``:
+
+      * ``use_transposed_scalar_state``  (one m/l per lane + broadcast alpha)
+      * ``use_transposed_mask_once``     (mask invariants once / KV iter; no-SW)
+      * ``use_transposed_half_local_pv`` (avoid cross-half lane^32 P fetches)
+      * ``use_mfma32_skip_legacy_qreg``  (drop the dead 16x16 Q gather)
+      * ``use_transposed_mask_limit``    (single min() softmax mask; no-SW)
+      * ``use_fast_paged_kv_desc``       (fast multi-block KV descriptor)
+
+    Crucially this stack supports attention **sinks** in the transposed
+    softmax path (the kernel folds the sink as the per-lane running-max
+    init), which the older ``_enable_transposed_qk_32x32`` gate refused.
+
+    Gating mirrors the validated cohort. ``max_seqlen_q > 256`` keeps it on
+    chunked-prefill / long-prefill (decode-class shapes prefer the 3D path
+    via ``select_path``). The half-local-PV transpose regresses on the
+    very-high-num-seq sliding-window tail (per-CTA work shrinks below the
+    transpose's fixed overhead), so we hand those back to the plain path.
+    """
+    if problem.dtype != "bf16":
+        return False
+    # FP8 KV is supported via the *sync-dequant* loader, which writes bf16
+    # into K_lds/V_lds (k_scale folded in) -- exactly what the 32x32 combo
+    # reads. ``_enable_fp8_mfma_qk`` is forced off for the combo so the
+    # in-LDS-fp8 mode (incompatible with the bf16 32x32 reads) never fires.
+    # This takes the fp8 prefill cohort from ~0.5x to ~0.9x vs Triton-2d.
+    if problem.use_alibi or problem.use_qq_bias or problem.softcap > 0:
+        return False
+    if problem.head_size != 64 or problem.block_size != 32:
+        return False
+    if problem.num_queries_per_kv != 8:
+        return False
+    if problem.max_seqlen_q <= 256:
+        return False
+    # (Historically the half-local-PV transpose regressed on the very-high
+    # num-seqs sliding-window tail, so it was handed back to the plain path
+    # at num_seqs >= 450. With waves_per_eu=3 unlocking the 4th WG/CU the
+    # combo now wins across the whole SW range -- measured +22% over the
+    # plain fallback at num_seqs=464 -- so the cutoff is removed.)
+    return True
+
+
+def _enable_i64_kv_addr(problem: UnifiedAttentionProblem) -> bool:
+    """Enable 64-bit paged-KV addressing when the cache may exceed ~2 GiB.
+
+    The default load path puts the full byte offset (incl.
+    ``physical_block * block_stride``) in a 32-bit buffer voffset, which
+    overflows -- and silently corrupts -- once the paged cache exceeds
+    2 GiB. When the cache is that large we fold the per-block offset into a
+    64-bit buffer base (a tiny, wave-uniform ``make_buffer_rsrc`` per
+    block; measured within ~1-2% of the i32 path). Below the cap we keep
+    the fast i32 path. ``num_kv_blocks == 0`` means the cache size is
+    unknown (caller did not supply it) -> assume small / fast path.
+    """
+    if problem.num_kv_blocks <= 0:
+        return False
+    elem_bytes = 1 if problem.use_fp8 else 2
+    block_stride = (
+        problem.block_size * problem.num_kv_heads * problem.head_size * elem_bytes
+    )
+    cache_bytes = problem.num_kv_blocks * block_stride
+    # The within-block voffset is always < block_stride, so the i32 offset
+    # overflows exactly when cache_bytes > 2^31 (the last block's base alone
+    # reaches 2^31). Keep the fast i32 path at/below that; switch to i64
+    # strictly above. (Verified: cap=65536 bf16 = 2^31 bytes, max offset
+    # 2147483646 < 2^31 -> still correct on i32.)
+    return cache_bytes > 0x8000_0000
+
+
 def _tiled_spec_from_problem(
     problem: UnifiedAttentionProblem,
 ) -> UnifiedAttention2DTiledSpec:
+    combo = _enable_combo_2d(problem)
+    combo_no_sw = combo and problem.sliding_window == 0
     return UnifiedAttention2DTiledSpec(
         head_size=problem.head_size,
         block_size=problem.block_size,
@@ -706,8 +850,19 @@ def _tiled_spec_from_problem(
         use_mfma_32x32=_enable_mfma_32x32(problem),
         use_transposed_qk_32x32=_enable_transposed_qk_32x32(problem),
         use_transposed_half_local_pv=_enable_transposed_half_local_pv(problem),
+        # Full combo stack (only fires for the validated _enable_combo_2d
+        # family; a strict superset of the plain transposed path).
+        use_transposed_scalar_state=combo,
+        use_transposed_mask_once=combo_no_sw,
+        use_transposed_mask_limit=combo_no_sw,
+        use_mfma32_skip_legacy_qreg=combo,
+        # The fast paged-KV descriptor is specialised for bf16 / T=64 /
+        # num_warps=4, which only the bf16 no-SW combo geometry uses (SW
+        # combo is nw2 / T=32; fp8 combo uses the sync-dequant loader).
+        use_fast_paged_kv_desc=combo_no_sw and not problem.use_fp8,
         use_register_pv=_enable_register_pv(problem),
         use_fp8_mfma_qk=_enable_fp8_mfma_qk(problem),
+        use_i64_kv_addr=_enable_i64_kv_addr(problem),
     )
 
 
@@ -752,11 +907,17 @@ def _select_2d_block_m_per_warp(problem: UnifiedAttentionProblem) -> int:
     Gate: ``max_seqlen_q > 256 and num_seqs >= 2``. Below this, mw=16
     is consistently within noise of mw=32 in the per-shape sweep.
     """
-    if (
-        problem.max_seqlen_q > 256
-        and problem.num_seqs >= 2
-        and not (problem.sliding_window > 0 and not problem.use_fp8)
-    ):
+    # mw=32 (BLOCK_M = 32 * num_warps) only pays off when a path actually
+    # exploits the doubled M rows:
+    #   * the transposed-32x32 / combo path (32x32 MFMA atoms), or
+    #   * the fp8 path (amortises the per-K-byte dequant over 2x the rows).
+    # Picking mw=32 with plain 16x16 atoms (no transpose, no fp8) was a
+    # latent trap: it doubled BLOCK_M without the atom benefit and ran
+    # ~1.4x slower than mw=16 on the sinks trace family. ``select_path``
+    # has already routed decode-class shapes to 3D before we get here.
+    if _enable_transposed_qk_32x32(problem):  # includes _enable_combo_2d
+        return 32
+    if problem.use_fp8 and problem.max_seqlen_q > 256 and problem.num_seqs >= 2:
         return 32
     # Qwen3-30B-A3B prefill specialization (bf16, hd64, BS=16, num_seqs=1,
     # num_queries_per_kv>=4). Long single-seq prefill is the dominant
@@ -1342,6 +1503,12 @@ def run_unified_attention_torch(
         if hasattr(block_table, "stride")
         else int(block_table.shape[1])
     )
+
+    # Fill the paged-cache block count from the K tensor (k.shape[0]) so the
+    # 2D dispatcher can switch to 64-bit KV addressing when the cache exceeds
+    # the ~2 GiB i32-voffset cap. Only inject if the caller did not set it.
+    if problem.num_kv_blocks <= 0 and hasattr(k, "shape") and len(k.shape) >= 1:
+        problem = replace(problem, num_kv_blocks=int(k.shape[0]))
 
     # Auto path selection. Historically we *always* preferred 3D when
     # supported because split-KV produces a huge grid that beats Triton

@@ -6,8 +6,8 @@ import sys
 import subprocess
 from pathlib import Path
 
-# Add CK DSL to path
-CKDSL_ROOT = Path("/workspace/rocm-libraries/projects/composablekernel/python")
+# Add CK DSL to path — resolve relative to this file so no absolute paths needed.
+CKDSL_ROOT = Path(__file__).resolve().parents[7]  # .../python
 if str(CKDSL_ROOT) not in sys.path:
     sys.path.insert(0, str(CKDSL_ROOT))
 
@@ -35,9 +35,7 @@ problem = ConvProblem(
     dW=1,
 )
 
-OUT_DIR = Path(
-    "/workspace/mlse-tools-internal/performance/kernel_optimization/comparison/ck_dsl_isa"
-)
+OUT_DIR = Path(__file__).resolve().parents[1] / "comparison" / "ck_dsl_isa"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 

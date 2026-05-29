@@ -2217,6 +2217,25 @@ class IRBuilder:
 
     # ----- buffer resources + async DRAM->LDS -----
 
+    def global_ptr_add(self, ptr: Value, byte_off: Value) -> Value:
+        """Return ``ptr + byte_off`` as a new global pointer (same type).
+
+        Lowers to ``getelementptr inbounds i8, ptr addrspace(1) ptr,
+        i64 byte_off`` (the offset is zero-extended to i64 if needed).
+        This is the enabler for 64-bit paged-KV addressing: by folding a
+        block's ``physical_block * stride`` (which overflows the i32 buffer
+        voffset above a ~2 GiB cache) into a per-block 64-bit buffer
+        *base*, the remaining within-block voffset stays small. Without
+        this the tiled attention kernel silently corrupts loads once the
+        paged cache exceeds 2 GiB (~65 K bf16 / ~131 K fp8 blocks).
+        """
+        return self._op(
+            "tile.global_ptr_add",
+            [ptr, byte_off],
+            [ptr.type],
+            result_name_hint="gptr",
+        ).result
+
     def buffer_rsrc(self, ptr: Value, num_bytes: Value) -> Value:
         """Build an AMDGPU 128-bit buffer resource descriptor.
 
