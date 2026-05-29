@@ -68,7 +68,19 @@ def fill_mma_tile_buffer(tileInfo, mt, du, stride):
     mma_k = tileInfo.mmaTileShape[1]
     nK = int(tileInfo.globalMMATileGrid[1])
 
-    buf = np.zeros(mt * stride, dtype=np.float16)
+    # Some GR shapes over-fetch a partial final subtile group. Keep that
+    # region zero-filled so the raw-buffer test does not read allocator data.
+    padded_mt = max(
+        mt,
+        int(
+            math.ceil(int(tileInfo.localSubtileGrid[0]) / tileInfo.loadRatioGR)
+            * tileInfo.loadRatioGR
+            * tileInfo.subtileShape[0]
+            * mma_m
+        ),
+    )
+
+    buf = np.zeros(padded_mt * stride, dtype=np.float16)
     for m in range(mt):
         for k in range(du):
             mma_r = m // mma_m
