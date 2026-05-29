@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <type_traits>
+
 #include "test_gemm_quant_base.hpp"
 #include "ck_tile/host/permute_pk_int4.hpp"
 #include "ck_tile/host/tensor_shuffle_utils.hpp"
@@ -1353,7 +1355,9 @@ class TestCkTileGemmABQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGe
                                                      Base::K_Warp_Tile,
                                                      transpose_c>>>;
 
-            const auto LaunchKernel = [&]<bool RuntimeSplitKTail>() {
+            // TODO: Replace with templated lambda when C++20 is available
+            auto LaunchKernel = [&](auto RuntimeSplitKTailTag) {
+                constexpr bool RuntimeSplitKTail = decltype(RuntimeSplitKTailTag)::value;
                 using Kernel = ck_tile::QuantGemmKernel<TilePartitioner,
                                                         GemmPipeline,
                                                         GemmEpilogue,
@@ -1376,11 +1380,11 @@ class TestCkTileGemmABQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGe
 
             if(allow_runtime_splitk_tail)
             {
-                LaunchKernel.template operator()<true>();
+                LaunchKernel(std::true_type{});
             }
             else
             {
-                LaunchKernel.template operator()<false>();
+                LaunchKernel(std::false_type{});
             }
         };
 
