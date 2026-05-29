@@ -29,6 +29,7 @@
 #include "hipblaslt_vector.hpp"
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <hipblaslt/hipblaslt.h>
 #include <iomanip>
 #include <iostream>
@@ -544,13 +545,22 @@ int32_t            hipblaslt_get_arch_full();
 //     gfx1250 today. gfx1200/1201 fp16 GEMM uses VALU FMA (preserves Inf)
 //     so the WMMA rule does NOT apply there.
 //
+// Disable both under FFM simulator (FFM_ROOT env var) so the reference
+// matches FFM GPU output.
+//
 // Cached because saturate_cast runs in the CPU reference inner loop.
 
 // True when fp32->fp16/bf16 finite overflow on the GPU saturates to +/-max
-// (VALU cvt rule). All gfx12.
+// (VALU cvt rule). All gfx12 unless under FFM.
 inline bool hipblaslt_fp16_hw_saturation_enabled()
 {
-    static const bool enabled = hipblaslt_get_arch_major() == 12;
+    static const bool enabled = []() {
+        if(hipblaslt_get_arch_major() != 12)
+            return false;
+        if(std::getenv("FFM_ROOT"))
+            return false;
+        return true;
+    }();
     return enabled;
 }
 
