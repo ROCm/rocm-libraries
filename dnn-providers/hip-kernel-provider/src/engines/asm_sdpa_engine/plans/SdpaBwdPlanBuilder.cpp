@@ -8,7 +8,10 @@
 #include "plans/SdpaBwdPlan.hpp"
 #include "plans/SdpaPlanUtils.hpp"
 
+#include <array>
+#include <cassert>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <hip/hip_runtime.h>
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
@@ -16,8 +19,10 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_backward_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
+#include <mutex>
 #include <optional>
 #include <stdexcept>
+#include <string>
 #include <utility>
 
 // Backward CSV columns consumed by this builder:
@@ -64,6 +69,7 @@ struct BwdDispatchTuple
     int pssk;
     int pddv;
     int bf16Cvt;
+    bool verified; // see Verified Kernel Matrix; true only for calibrated (dtype, hdim)
 };
 
 // Output of resolveStage: the .co file path, kernel symbol name, and tile
@@ -302,14 +308,77 @@ bool wouldBwdByteStridesFitUint32(
 // (pssk=0, pddv=0) row uses a different kernarg layout than the engine
 // builds today. TODO: lift the pin once the engine emits the unpadded
 // kernarg layout for shapes where seqLenKv % tsKv == 0.
-BwdDispatchTuples computeDispatchTuples(MaskType maskType, int bf16CvtValue)
+//
+// The `verified` flag records whether the resolved (dtype, hdim) kernels have a
+// CPU backward reference that has been calibrated against the in-tree kernels.
+// It is keyed on (dtype, hdim) — not on pipeline stage — so all three stages of
+// a dispatch share the same value. Today only (bf16, hd128) is calibrated; see
+// the Verified Kernel Matrix and ALMIOPEN-1832.
+BwdDispatchTuples computeDispatchTuples(const std::string& dataType,
+                                        int hdimQ,
+                                        MaskType maskType,
+                                        int bf16CvtValue)
 {
+    const bool verified = (dataType == "bf16" && hdimQ == 128);
+
     BwdDispatchTuples tuples{};
-    tuples.odo = {0, 0, 0, 0, BF16_CVT_FP16_SENTINEL};
-    tuples.dqdkdv
-        = {static_cast<int>(maskType), static_cast<int>(AccumulatorMode::A32), 1, 1, bf16CvtValue};
-    tuples.dqConvert = {0, 0, 0, 0, bf16CvtValue};
+    tuples.odo = {0, 0, 0, 0, BF16_CVT_FP16_SENTINEL, verified};
+    tuples.dqdkdv = {static_cast<int>(maskType),
+                     static_cast<int>(AccumulatorMode::A32),
+                     1,
+                     1,
+                     bf16CvtValue,
+                     verified};
+    tuples.dqConvert = {0, 0, 0, 0, bf16CvtValue, verified};
     return tuples;
+}
+
+// One-time dispatch logging. Each (dtype, hdim, mask) combination logs exactly
+// once over the program lifetime: an INFO line for a CPU-reference-verified
+// kernel, or a WARN line for an unverified one. The flag array is sized to the
+// full enum cardinality (dtype x hdim x mask) so adding mask support later does
+// not require resizing. Static storage duration; lifetime is the program
+// duration.
+constexpr size_t K_NUM_DTYPES = 2; // bf16, fp16
+constexpr size_t K_NUM_HDIMS = 3; // hd64, hd128, hd192
+constexpr size_t K_NUM_MASKS = 4; // plan_utils::MaskType cardinality
+constexpr size_t K_LOG_FLAGS = K_NUM_DTYPES * K_NUM_HDIMS * K_NUM_MASKS;
+std::array<std::once_flag, K_LOG_FLAGS> dispatchLogFlags;
+
+// Map a (dtype, hdim, mask) triple to a flat index into dispatchLogFlags.
+// isApplicable filters to the supported axes before buildPlan reaches this, so
+// the asserts document the contract and the clamps are a defensive guard
+// against an out-of-bounds index should an unexpected combination slip through.
+size_t dispatchLogIndex(const std::string& dtype, int hdim, MaskType mask)
+{
+    const size_t dtypeIdx = (dtype == "fp16") ? 1U : 0U; // bf16 -> 0, fp16 -> 1
+
+    size_t hdimIdx = 0U; // hd64 -> 0, hd128 -> 1, hd192 -> 2
+    switch(hdim)
+    {
+    case 64:
+        hdimIdx = 0U;
+        break;
+    case 128:
+        hdimIdx = 1U;
+        break;
+    case 192:
+        hdimIdx = 2U;
+        break;
+    default:
+        assert(false && "dispatchLogIndex: unexpected head dimension");
+        hdimIdx = 0U;
+        break;
+    }
+
+    auto maskIdx = static_cast<size_t>(mask);
+    assert(maskIdx < K_NUM_MASKS && "dispatchLogIndex: mask ordinal out of range");
+    if(maskIdx >= K_NUM_MASKS)
+    {
+        maskIdx = 0U;
+    }
+
+    return (dtypeIdx * K_NUM_HDIMS + hdimIdx) * K_NUM_MASKS + maskIdx;
 }
 
 } // namespace
@@ -528,20 +597,18 @@ bool SdpaBwdPlanBuilder::isApplicable(
                                "Asymmetric head dimensions not supported (D_qk = "
                                    + std::to_string(headDimQk)
                                    + ", D_v = " + std::to_string(headDimV) + ")");
-    // The codegen-generated registry carries hd64, hd128, and hd192 rows, but
-    // only hd128 has a CPU backward reference that has been calibrated against
-    // the in-tree kernels. Other head dims are reachable infrastructure but
-    // gated here until ALMIOPEN-1832 extends correctness coverage.
-    HIP_KERNEL_RETURN_FALSE_IF(headDimQk != 128,
-                               "Head dimension currently dispatched is 128 only (Actual value: "
-                                   + std::to_string(headDimQk) + ")");
 
-    // Likewise, only BF16 has a verified CPU reference path today. FP16
-    // backward kernels exist in the registry but are not yet correctness-
-    // validated against the CPU reference.
-    HIP_KERNEL_RETURN_FALSE_IF(
-        dataTypeId != "bf16",
-        "Backward dispatch currently restricted to BF16 (Actual dtype: " + dataTypeId + ")");
+    // Registry-supported (dtype, hdim) combinations are dispatched; the one-time
+    // log in buildPlan warns when the kernel is not yet CPU-reference validated
+    // (see ALMIOPEN-1832). Head dims outside the registry's {64, 128, 192} set
+    // have no row at all and are rejected here so unsupported geometries still
+    // fail fast; the per-stage checkRegistry lookups below then reject the
+    // (dtype, hdim) combinations that have no matching CSV row (e.g. hd64, whose
+    // registry carries only pddv=0 rows that the day-one dispatch tuple does not
+    // request).
+    HIP_KERNEL_RETURN_FALSE_IF(headDimQk != 64 && headDimQk != 128 && headDimQk != 192,
+                               "Head dimension must be one of {64, 128, 192} (Actual value: "
+                                   + std::to_string(headDimQk) + ")");
 
     // Classify the mask; contradictory mask attributes are an invalid-input
     // condition the engine declines rather than dispatches.
@@ -561,7 +628,7 @@ bool SdpaBwdPlanBuilder::isApplicable(
 
     const int bf16CvtValue = (dataTypeId == "fp16") ? BF16_CVT_FP16_SENTINEL
                                                     : static_cast<int>(getRoundingMode(attrs));
-    auto dispatchTuples = computeDispatchTuples(maskType, bf16CvtValue);
+    auto dispatchTuples = computeDispatchTuples(dataTypeId, headDimQk, maskType, bf16CvtValue);
 
     auto checkRegistry = [&](const char* registryName,
                              bwd_dispatch::PipelineStage stage,
@@ -824,7 +891,33 @@ void SdpaBwdPlanBuilder::buildPlan(
     auto batchMode = getBatchMode(sdpaAttrs);
     const int bf16CvtValue = (dataTypeId == "fp16") ? BF16_CVT_FP16_SENTINEL
                                                     : static_cast<int>(getRoundingMode(sdpaAttrs));
-    auto dispatchTuples = computeDispatchTuples(maskType, bf16CvtValue);
+    auto dispatchTuples
+        = computeDispatchTuples(dataTypeId, static_cast<int>(headDimQk), maskType, bf16CvtValue);
+
+    // Surface, exactly once per (dtype, hdim, mask) over the program lifetime,
+    // whether the kernel about to be dispatched has a calibrated CPU reference.
+    // The verified flag is keyed on (dtype, hdim) so any stage is representative;
+    // the dqdkdv stage is used here. The lambda is noexcept because it only logs
+    // (a throwing call_once initializer would let the exception escape, which
+    // bugprone-exception-escape forbids).
+    std::call_once(
+        dispatchLogFlags[dispatchLogIndex(dataTypeId, static_cast<int>(headDimQk), maskType)],
+        [&]() noexcept {
+            const int maskOrdinal = static_cast<int>(maskType);
+            if(dispatchTuples.dqdkdv.verified)
+            {
+                HIPDNN_PLUGIN_LOG_INFO("SDPA bwd dispatch: verified kernel dtype="
+                                       << dataTypeId << " hd=" << headDimQk
+                                       << " mask=" << maskOrdinal);
+            }
+            else
+            {
+                HIPDNN_PLUGIN_LOG_WARN(
+                    "SDPA bwd dispatch: UNVERIFIED kernel dtype="
+                    << dataTypeId << " hd=" << headDimQk << " mask=" << maskOrdinal
+                    << " - results not validated against CPU reference; see ALMIOPEN-1832");
+            }
+        });
 
     auto resolveStage
         = [&](const char* stageName, std::optional<fmha_v3_bwdConfig> cfgOpt) -> ResolvedKernel {

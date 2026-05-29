@@ -77,21 +77,24 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableSdpaBwdVariations)
     }
 
     const std::vector<std::pair<GraphTest, bool>> applicabilityTests = {
-        // Valid backward graph: BF16, HD=128, FP32 stats, no masking — only
-        // configuration with a calibrated CPU reference today.
+        // Valid backward graph: BF16, HD=128, FP32 stats, no masking — the one
+        // configuration with a calibrated CPU reference today (logs INFO).
         {GraphTest{createSdpaBwdGraph(), "Valid BF16 HD128 backward"}, true},
 
-        // HD=64: rejected — registry has only pddv=0 rows for hd64, and the
-        // CPU reference is not calibrated for the kernel anyway.
+        // HD=64: rejected by the registry lookup, not by a dtype/hdim gate. The
+        // hd64 registry carries only pddv=0 rows, but the day-one dispatch tuple
+        // requests pddv=1, so no dqdkdv row matches.
         {GraphTest{createSdpaBwdGraph({4, 8, 256, 64}), "Head dimension 64"}, false},
 
-        // HD=192: dispatch infrastructure exists but CPU reference correctness
-        // has not been verified. Gated until ALMIOPEN-1832.
-        {GraphTest{createSdpaBwdGraph({4, 8, 256, 192}), "Head dimension 192"}, false},
+        // HD=192 BF16: registry-supported and now dispatched. The CPU reference
+        // is not yet calibrated, so buildPlan logs a one-time WARN (see
+        // ALMIOPEN-1832); isApplicable accepts.
+        {GraphTest{createSdpaBwdGraph({4, 8, 256, 192}), "Head dimension 192"}, true},
 
-        // FP16: dispatch infrastructure exists but CPU reference correctness
-        // has not been verified. Gated until ALMIOPEN-1832.
-        {GraphTest{createSdpaBwdGraph({4, 8, 256, 128}, DataType::HALF), "FP16 tensors"}, false},
+        // FP16 HD128: registry-supported and now dispatched. The CPU reference
+        // is not yet calibrated, so buildPlan logs a one-time WARN (see
+        // ALMIOPEN-1832); isApplicable accepts.
+        {GraphTest{createSdpaBwdGraph({4, 8, 256, 128}, DataType::HALF), "FP16 tensors"}, true},
 
         // Causal mask not currently dispatched.
         {GraphTest{
