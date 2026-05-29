@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>MXFP6 A矩阵 LDS Shuffle</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#0a0e14;color:#e0e0e0;padding:12px 16px;line-height:1.45;max-width:1100px;margin:0 auto}
+h1{color:#58a6ff;font-size:1.25em;margin-bottom:2px}
+.sub{font-size:0.78em;color:#8b949e;margin-bottom:6px}
+code{background:#161b22;padding:1px 4px;border-radius:3px;font-family:'Cascadia Code',monospace;font-size:0.85em;color:#ffa657}
+.good{color:#3fb950;font-weight:bold}
+.hi{color:#ffa657;font-weight:bold}
+
+/* ===== Controls (sticky) ===== */
+.ctl{display:flex;gap:10px;align-items:center;flex-wrap:wrap;position:sticky;top:0;background:#0a0e14;z-index:100;padding:8px 0;border-bottom:2px solid #1e2630}
+.ctl button{background:#21262d;color:#e0e0e0;border:1px solid #30363d;padding:5px 14px;border-radius:5px;cursor:pointer;font-size:0.82em}
+.ctl button:hover{background:#30363d}
+.ctl button.on{background:#1f6feb;border-color:#1f6feb}
+.ctl .cnt{color:#8b949e;font-size:0.8em}
+
+#desc{background:#161b22;border:1px solid #30363d;border-radius:6px;padding:10px 12px;margin:8px 0;font-size:0.85em;white-space:pre-line;line-height:1.6;max-height:200px;overflow-y:auto}
+
+/* ===== Section boxes ===== */
+.box{background:#0d1117;border:1px solid #1e2630;border-radius:6px;padding:10px;margin:8px 0}
+.box-t{font-weight:bold;font-size:0.9em;margin-bottom:2px}
+.box-s{font-size:0.68em;color:#8b949e;margin-bottom:6px}
+
+/* ===== Data Grid ===== */
+.grid-wrap{overflow:auto;max-height:520px;border:1px solid #1e2630;border-radius:4px}
+table.dg{border-collapse:collapse;font-size:0.68em}
+table.dg th,table.dg td{border:1px solid #1a1f28;text-align:center;white-space:nowrap}
+table.dg th{background:#161b22;color:#8b949e;position:sticky;top:0;z-index:2;padding:3px 2px}
+table.dg th.corner{z-index:3}
+table.dg td.rh{background:#161b22;color:#d2a8ff;font-weight:bold;position:sticky;left:0;z-index:1;text-align:right;padding-right:4px}
+table.dg td.dc{transition:background 0.3s;font-weight:bold;padding:0}
+
+/* ===== VGPR ===== */
+.vg{display:flex;flex-wrap:wrap;gap:4px}
+.vg-card{display:flex;align-items:center;gap:2px;padding:2px 4px;background:#0d1117;border:1px solid #1e2630;border-radius:4px}
+.vg-lbl{font-size:0.62em;color:#8b949e;width:40px;text-align:right;line-height:1.15}
+.vg-r{width:26px;height:18px;display:flex;align-items:center;justify-content:center;border:1px solid #1a1f28;border-radius:2px;font-size:0.6em;font-weight:bold;transition:background 0.3s}
+
+/* ===== Bank ===== */
+.bk-wrap{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.bk-strip{display:flex;flex-wrap:wrap;gap:1px}
+.bk-col{display:flex;flex-direction:column;align-items:center}
+.bk-n{font-size:0.5em;color:#484f58;width:22px;text-align:center}
+.bk-c{width:22px;height:22px;display:flex;align-items:center;justify-content:center;font-size:0.5em;border-radius:2px;border:1px solid #1a1f28;font-weight:bold;transition:background 0.3s;color:#000}
+.bk-c.empty{background:#0d1117;color:#1e2630}
+@media(max-width:800px){.bk-wrap{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<h1>MXFP6 A矩阵 LDS Shuffle 全流程</h1>
+<div class="sub"><code>V_MFMA_SCALE_F32_32x32x64_F8F6F4</code> FP6×FP6 | A tile: 32M × 64K FP6 = 1536 bytes | 每行 48B = 12 DW</div>
+
+<div class="ctl">
+  <button onclick="go(-1)">◀ 上一步</button>
+  <button onclick="go(1)">下一步 ▶</button>
+  <button id="bp" onclick="tp()">▶ 播放</button>
+  <span class="cnt" id="sc">0/12</span>
+</div>
+<div id="desc"></div>
+
+<!-- ===== 主数据网格: HBM/LDS 共用 ===== -->
+<div class="box">
+  <div class="box-t" id="grid-title" style="color:#ffa657">数据网格</div>
+  <div class="box-s" id="grid-sub">每格=1 DWORD(4B) | 每行 12 DW = 48B | 橙色粗线=16B chunk边界(write) | 紫色虚线=12B边界(read)</div>
+  <div class="grid-wrap" id="grid-wrap"></div>
+</div>
+
+<!-- ===== VGPR ===== -->
+<div class="box">
+  <div class="box-t" style="color:#d2a8ff">VGPR 寄存器 (8个代表线程)</div>
+  <div class="box-s">Load阶段: 4 VGPR暂存 | MFMA阶段: 6 VGPR = 32 FP6</div>
+  <div class="vg" id="vgpr"></div>
+</div>
+
+<!-- ===== Bank Conflict ===== -->
+<div class="bk-wrap">
+  <div class="box">
+    <div class="box-t" style="color:#58a6ff">DS_WRITE_B128 Bank检查</div>
+    <div class="box-s">每8连续线程一组, 每线程4 banks</div>
+    <div class="bk-strip" id="wb"></div>
+    <div id="wbv" style="font-size:0.72em;margin-top:4px;line-height:1.5"></div>
+  </div>
+  <div class="box">
+    <div class="box-t" style="color:#58a6ff">DS_READ_B96 Bank检查</div>
+    <div class="box-s">{t0-3,t20-23}同色组, 每线程3 banks</div>
+    <div class="bk-strip" id="rb"></div>
+    <div id="rbv" style="font-size:0.72em;margin-top:4px;line-height:1.5"></div>
+  </div>
+</div>
+
+<script>
+const R=32, D=12, CW=44, CH=20;
+
+// Thread colors
+const TC=[];
+for(let t=0;t<96;t++){
+  const h=(Math.floor(t/3)*17)%360, s=55+(t%3)*12, l=38+(t%3)*10;
+  TC[t]=`hsl(${h},${s}%,${l}%)`;
+}
+
+// Mappings
+const loadI=t=>({r:Math.floor(t/3),c:t%3});
+const mfmaI=t=>({m:t<16?t:t<32?t:t<48?t-32:t-32, ks:t<32?0:32});
+
+// Pass2: T0-T31 fill remaining 32 chunks
+function p2(t){
+  const rem=[];
+  rem.push({r:21,c:1},{r:21,c:2});
+  for(let r=22;r<R;r++) for(let c=0;c<3;c++) rem.push({r,c});
+  return t<rem.length?rem[t]:null;
+}
+
+const VT=[0,1,2,3,16,32,48,63]; // show threads
+
+// ===== Build grid =====
+function buildGrid(){
+  const w=document.getElementById('grid-wrap');
+  let h='<table class="dg"><thead><tr>';
+  h+=`<th class="corner" style="width:56px;min-width:56px"></th>`;
+  for(let d=0;d<D;d++){
+    const bdr=(d%4===0)?'border-left:2.5px solid #ffa65780;':'';
+    const rbdr=(d%3===0&&d%4!==0)?'border-left:2px dashed #d2a8ff40;':'';
+    h+=`<th style="width:${CW}px;min-width:${CW}px;${bdr}${rbdr}">DW${d}</th>`;
+  }
+  h+='</tr></thead><tbody>';
+  for(let r=0;r<R;r++){
+    h+=`<tr><td class="rh" style="width:56px;min-width:56px;height:${CH}px">R${r}<br><span style="font-size:0.8em;color:#484f58">${r*48}</span></td>`;
+    for(let d=0;d<D;d++){
+      const bdr=(d%4===0)?'border-left:2.5px solid #ffa65780;':'';
+      const rbdr=(d%3===0&&d%4!==0)?'border-left:2px dashed #d2a8ff40;':'';
+      h+=`<td class="dc" id="g-${r}-${d}" style="width:${CW}px;height:${CH}px;background:#0d1117;color:#0d1117;${bdr}${rbdr}">.</td>`;
+    }
+    h+='</tr>';
+  }
+  h+='</tbody></table>';
+  w.innerHTML=h;
+}
+
+// ===== Build VGPR =====
+function buildVGPR(){
+  const el=document.getElementById('vgpr');
+  let h='';
+  VT.forEach(t=>{
+    const{m,ks}=mfmaI(t);
+    h+=`<div class="vg-card"><div class="vg-lbl">T${t}<br>M=${m}<br>k=${ks}-${ks+31}</div>`;
+    for(let v=0;v<6;v++) h+=`<div class="vg-r" id="v-${t}-${v}" style="background:#0d1117;color:#484f58">v${v}</div>`;
+    h+='</div>';
+  });
+  el.innerHTML=h;
+}
+
+// ===== Build Banks =====
+function buildBanks(){
+  ['wb','rb'].forEach(id=>{
+    const el=document.getElementById(id);
+    let h='';
+    for(let b=0;b<32;b++){
+      h+=`<div class="bk-col"><div class="bk-n">${b}</div><div class="bk-c empty" id="${id}-${b}">-</div></div>`;
+    }
+    el.innerHTML=h;
+  });
+}
+
+// ===== Reset =====
+function rst(){
+  for(let r=0;r<R;r++) for(let d=0;d<D;d++){
+    const e=document.getElementById(`g-${r}-${d}`);
+    if(e){e.style.background='#0d1117';e.style.color='#0d1117';e.textContent='.';e.style.outline='';e.style.boxShadow='';}
+  }
+  VT.forEach(t=>{for(let v=0;v<6;v++){
+    const e=document.getElementById(`v-${t}-${v}`);
+    if(e){e.style.background='#0d1117';e.style.color='#484f58';e.textContent=`v${v}`;}
+  }});
+  for(let b=0;b<32;b++) ['wb','rb'].forEach(id=>{
+    const e=document.getElementById(`${id}-${b}`);
+    if(e){e.style.background='#0d1117';e.textContent='-';e.className='bk-c empty';}
+  });
+  document.getElementById('wbv').innerHTML='';
+  document.getElementById('rbv').innerHTML='';
+}
+
+// ===== Highlights =====
+function hlLoad(ts){
+  ts.forEach(t=>{
+    const{r,c}=loadI(t); if(r>=R)return;
+    for(let d=0;d<4;d++){const e=document.getElementById(`g-${r}-${c*4+d}`);if(e){e.style.background=TC[t];e.style.color='#000';e.textContent=`T${t}`;}}
+  });
+}
+function hlVL(ts){
+  ts.forEach(t=>{if(!VT.includes(t))return;
+    for(let v=0;v<4;v++){const e=document.getElementById(`v-${t}-${v}`);if(e){e.style.background=TC[t];e.style.color='#000';e.textContent='LD';}}
+  });
+}
+function hlP2(ts){
+  ts.forEach(t=>{
+    const info=p2(t); if(!info||info.r>=R)return;
+    for(let d=0;d<4;d++){const e=document.getElementById(`g-${info.r}-${info.c*4+d}`);if(e){e.style.background=TC[t];e.style.color='#000';e.textContent=`T${t}'`;}}
+  });
+}
+function hlRead(n){
+  VT.forEach(t=>{
+    const{m,ks}=mfmaI(t); if(m>=R)return;
+    const bases=[];
+    if(n>=1)bases.push(ks<32?0:6);
+    if(n>=2)bases.push(ks<32?3:9);
+    bases.forEach((db,ri)=>{
+      for(let d=0;d<3;d++){
+        const e=document.getElementById(`g-${m}-${db+d}`);
+        if(e){e.style.outline=`2px solid ${TC[t]}`;e.style.boxShadow=`inset 0 0 10px ${TC[t]}60`;}
+      }
+      for(let v=ri*3;v<ri*3+3;v++){
+        const e=document.getElementById(`v-${t}-${v}`);
+        if(e){e.style.background=TC[t];e.style.color='#000';e.textContent=`v${v}`;}
+      }
+    });
+  });
+}
+function hlWB(){
+  const cs=['#e6194b','#3cb44b','#ffe119','#4363d8','#f58231','#42d4f4','#f032e6','#bcf60c'];
+  for(let t=0;t<8;t++){const sb=t*4;for(let j=0;j<4;j++){const e=document.getElementById(`wb-${(sb+j)%32}`);if(e){e.style.background=cs[t];e.textContent=`T${t}`;e.className='bk-c';}}}
+  let v='';for(let t=0;t<8;t++)v+=`T${t}→bank{${t*4}-${t*4+3}} `;
+  v+='<br><span class="good">8×4=32 铺满 → 零冲突 ✓</span>';
+  document.getElementById('wbv').innerHTML=v;
+}
+function hlRB(){
+  const grp=[0,1,2,3,20,21,22,23];
+  const cs=['#e6194b','#ff6347','#ff8c00','#ff4500','#3cb44b','#2ecc71','#27ae60','#1abc9c'];
+  const used=new Set();let cf=false;
+  grp.forEach((t,i)=>{
+    const m=mfmaI(t).m,off=m*48,sb=Math.floor(off/4)%32;
+    for(let j=0;j<3;j++){const bk=(sb+j)%32;if(used.has(bk))cf=true;used.add(bk);const e=document.getElementById(`rb-${bk}`);if(e){e.style.background=cs[i];e.textContent=`T${t}`;e.className='bk-c';}}
+  });
+  let v='';
+  grp.forEach(t=>{const m=mfmaI(t).m,off=m*48,sb=Math.floor(off/4)%32;v+=`T${t}(M=${m})→{${sb},${(sb+1)%32},${(sb+2)%32}} `;});
+  v+=`<br>起始bank: <span class="hi">{0,12,24,4,16,28,8,20}</span> stride=12DW, width=3`;
+  v+=`<br>${cf?'<span style="color:#f85149">冲突!</span>':'<span class="good">8×3=24/32 banks, 零冲突 ✓</span>'}`;
+  document.getElementById('rbv').innerHTML=v;
+}
+
+const A=[]; for(let t=0;t<64;t++)A.push(t);
+const A2=[];for(let t=0;t<32;t++)A2.push(t);
+
+function setTitle(t,c){document.getElementById('grid-title').textContent=t;document.getElementById('grid-title').style.color=c;}
+
+const STEPS=[
+{t:'初始状态',
+ d:`A矩阵 [32×64] FP6, 行主序。每行 64 FP6 = 48 bytes = 12 DWORDs。总计 1536 bytes。\n协作策略: 每行 3 chunk (每 chunk 16B = 4 DW), 3个线程/行。\n64线程 → Pass1 覆盖 ~21行, Pass2 补剩余 ~11行。`,
+ fn(){setTitle('HBM: A[M][K] 原始数据','#ffa657');}},
+
+{t:'Step 1: GLOBAL_LOAD_DWORDX4 — T0-T2 加载 Row0',
+ d:`指令: GLOBAL_LOAD_DWORDX4 (16B = 4 DW → 4 VGPR 暂存)\n  T0 → Row0 chunk0: byte[0:15]  (DW0-3)\n  T1 → Row0 chunk1: byte[16:31] (DW4-7)\n  T2 → Row0 chunk2: byte[32:47] (DW8-11)\n\n行内3线程访问连续地址 → 合并访存。\nFP6 是 6-bit 密集打包, 跨 16B 边界的 FP6 会被拆到两个线程的字节里。\n没关系 — 搬的是原始字节, 后续 DS_READ_B96 按 12B 对齐读取。`,
+ fn(){setTitle('HBM: Global Load','#ffa657');hlLoad([0,1,2]);hlVL([0,1,2]);}},
+
+{t:'Step 2: GLOBAL_LOAD_DWORDX4 — T0-T8 加载 Row0-2',
+ d:`  T0-T2 → Row0    T3-T5 → Row1    T6-T8 → Row2\n所有线程同时发射, 每3线程处理1行。`,
+ fn(){setTitle('HBM: Global Load','#ffa657');hlLoad([0,1,2,3,4,5,6,7,8]);hlVL([0,1,2,3]);}},
+
+{t:'Step 3: Global Load Pass 1 — 全64线程',
+ d:`64线程同时 GLOBAL_LOAD_DWORDX4:\n  T0-T2→R0   T15-T17→R5   T30-T32→R10  T45-T47→R15  T60-T62→R20\n  T3-T5→R1   T18-T20→R6   T33-T35→R11  T48-T50→R16  T63→R21 chunk0\n  T6-T8→R2   T21-T23→R7   T36-T38→R12  T51-T53→R17\n  T9-T11→R3  T24-T26→R8   T39-T41→R13  T54-T56→R18\n  T12-T14→R4 T27-T29→R9   T42-T44→R14  T57-T59→R19\n\nPass1: Row0-20完整 + Row21 chunk0 = 1024 bytes (66.7%)`,
+ fn(){setTitle('HBM: Global Load Pass 1','#ffa657');hlLoad(A);hlVL(A);}},
+
+{t:'Step 4: DS_WRITE_B128 Pass 1 — VGPR→LDS',
+ d:`线程 t 写 4 DWORDs 到 LDS[t×16]:\n  T0→LDS[0:15]=R0 DW0-3     T3→LDS[48:63]=R1 DW0-3\n  T1→LDS[16:31]=R0 DW4-7    T4→LDS[64:79]=R1 DW4-7\n  T2→LDS[32:47]=R0 DW8-11   T5→LDS[80:95]=R1 DW8-11\n\n关键: 48 = 3×16 → 线性映射 LDS[t×16] 天然等于 stride=48 行主序!\nLDS 字节排列与 HBM 完全一致。`,
+ fn(){setTitle('LDS: DS_WRITE_B128 Pass 1','#3fb950');hlLoad(A);}},
+
+{t:'Step 5: Pass 2 — 补齐 Row21-31',
+ d:`Pass2: T0-T31 加载剩余 32 chunk (512B):\n  T0→R21 c1  T5→R23 c0  T10→R24 c2  T15→R26 c1  T20→R28 c0  T25→R29 c2  T30→R31 c1\n  T1→R21 c2  T6→R23 c1  T11→R25 c0  T16→R26 c2  T21→R28 c1  T26→R30 c0  T31→R31 c2\n  T2→R22 c0  T7→R23 c2  T12→R25 c1  T17→R27 c0  T22→R28 c2  T27→R30 c1\n  T3→R22 c1  T8→R24 c0  T13→R25 c2  T18→R27 c1  T23→R29 c0  T28→R30 c2\n  T4→R22 c2  T9→R24 c1  T14→R26 c0  T19→R27 c2  T24→R29 c1  T29→R31 c0\n\nLDS 现在有完整 1536 bytes! (标记 T' 表示 Pass2)`,
+ fn(){setTitle('LDS: 完整数据 (Pass1 + Pass2)','#3fb950');hlLoad(A);hlP2(A2);}},
+
+{t:'Step 6: DS_WRITE_B128 Bank Conflict 检查',
+ d:`检查规则: 每8个连续线程一组。以 {T0-T7} 为例:\n  T0:LDS[0]→bank{0,1,2,3}   T4:LDS[64]→bank{16,17,18,19}\n  T1:LDS[16]→bank{4,5,6,7}   T5:LDS[80]→bank{20,21,22,23}\n  T2:LDS[32]→bank{8,9,10,11}  T6:LDS[96]→bank{24,25,26,27}\n  T3:LDS[48]→bank{12,13,14,15} T7:LDS[112]→bank{28,29,30,31}\n\n8×4=32 铺满!`,
+ fn(){setTitle('LDS: Bank Conflict (Write)','#3fb950');hlLoad(A);hlP2(A2);hlWB();}},
+
+{t:'Step 7: Shuffle 本质 — 写≠读',
+ d:`__syncthreads() 后, 每个线程从 LDS 读自己 MFMA 所需的数据:\n\nMFMA 线程布局:\n  T0-15 (row0): M=0-15,  K=0-31  → 每线程需 24B (6 DW)\n  T16-31(row1): M=16-31, K=0-31\n  T32-47(row2): M=0-15,  K=32-63\n  T48-63(row3): M=16-31, K=32-63\n\n举例 T0:\n  写入: Row0 chunk0 (DW0-3, 16B)\n  读取: Row0 DW0-5 (24B, k=0-31) ← 多出的 DW4-5 是 T1 写入的!\n\n这就是 Shuffle: 通过 LDS 实现线程间数据重分配。`,
+ fn(){setTitle('LDS: Shuffle 读取模式','#d2a8ff');hlLoad(A);hlP2(A2);}},
+
+{t:'Step 8: DS_READ_B96 ×1 — 读前16个FP6 → v0,v1,v2',
+ d:`每线程 DS_READ_B96 (12B = 3 DW = 96 bit = 16 FP6):\n\n线程 0-31 (K=0-31):\n  T0(M=0): LDS[0×48+0]=LDS[0]   → v0,v1,v2 (k=0-15)\n  T1(M=1): LDS[1×48+0]=LDS[48]  → v0,v1,v2\n  T16(M=16):LDS[16×48]=LDS[768] → v0,v1,v2\n\n线程 32-63 (K=32-63):\n  T32(M=0): LDS[0×48+24]=LDS[24] → v0,v1,v2 (k=32-47)\n  T48(M=16):LDS[16×48+24]=LDS[792] → v0,v1,v2\n\n12 bytes = 96 bits = 16×6bit → FP6 完美对齐!`,
+ fn(){setTitle('LDS: DS_READ_B96 #1','#d2a8ff');hlLoad(A);hlP2(A2);hlRead(1);}},
+
+{t:'Step 9: DS_READ_B96 ×2 — 读后16个FP6 → v3,v4,v5',
+ d:`每线程再读 12 bytes:\n\n线程 0-31:\n  T0: LDS[0×48+12]=LDS[12]  → v3,v4,v5 (k=16-31)\n  T1: LDS[1×48+12]=LDS[60]  → v3,v4,v5\n  T16:LDS[16×48+12]=LDS[780] → v3,v4,v5\n\n线程 32-63:\n  T32:LDS[0×48+36]=LDS[36]  → v3,v4,v5 (k=48-63)\n  T48:LDS[16×48+36]=LDS[804] → v3,v4,v5\n\n每线程 v0-v5 = 6 VGPR = 192 bits = 32 FP6, 完整!`,
+ fn(){setTitle('LDS: DS_READ_B96 #1+#2 完成','#d2a8ff');hlLoad(A);hlP2(A2);hlRead(2);}},
+
+{t:'Step 10: DS_READ_B96 Bank Conflict 检查',
+ d:`检查组(红色): {T0,T1,T2,T3} 和 {T20,T21,T22,T23}\n\n  T0:  LDS[0]    → bank{0,1,2}\n  T1:  LDS[48]   → bank{12,13,14}\n  T2:  LDS[96]   → bank{24,25,26}\n  T3:  LDS[144]  → bank{4,5,6}\n  T20: LDS[960]  → bank{16,17,18}\n  T21: LDS[1008] → bank{28,29,30}\n  T22: LDS[1056] → bank{8,9,10}\n  T23: LDS[1104] → bank{20,21,22}\n\n8×3=24/32 banks, 全不重叠!\nstride=12 DW, 间距(12) >> 宽度(3) → 数学上不可能冲突。`,
+ fn(){setTitle('LDS: Bank Conflict (Read)','#d2a8ff');hlLoad(A);hlP2(A2);hlRead(2);hlRB();}},
+
+{t:'Step 11: V_MFMA_SCALE_F32_32x32x64_F8F6F4',
+ d:`v0-v5 (6 VGPR, 32 FP6) 送入 MFMA:\n  CBSZ=0b010 (FP6 E2M3)  BLGP=0b010 (FP6 E2M3)  ABID[0]=1 (scale)\n\n32 cycles → 32×32 F32 输出 (16 VGPR 累积器)\n\n════════════════════════════════\n全流程总结:\n  ✅ GLOBAL_LOAD_DWORDX4 — 按字节搬, 不关心 FP6 边界\n  ✅ DS_WRITE_B128 — 线性写=行主序, 零 bank conflict\n  ✅ DS_READ_B96 ×2 — 12B=16 FP6 完美对齐, 零 bank conflict\n  ✅ 零 VGPR 浪费, 零 LDS padding\n════════════════════════════════`,
+ fn(){setTitle('MFMA 执行!','#1f6feb');hlLoad(A);hlP2(A2);hlRead(2);
+   VT.forEach(t=>{for(let v=0;v<6;v++){const e=document.getElementById(`v-${t}-${v}`);if(e){e.style.background='#1f6feb';e.style.color='#fff';e.textContent=`v${v}`;}}});
+ }},
+];
+
+let cur=0,tmr=null;
+function render(i){
+  cur=Math.max(0,Math.min(i,STEPS.length-1));
+  document.getElementById('sc').textContent=`${cur}/${STEPS.length-1}`;
+  const s=STEPS[cur];
+  document.getElementById('desc').innerHTML=`<strong style="color:#58a6ff">${s.t}</strong>\n${s.d}`;
+  rst();s.fn();
+}
+function go(d){render(cur+d);}
+function tp(){
+  const b=document.getElementById('bp');
+  if(tmr){clearInterval(tmr);tmr=null;b.textContent='▶ 播放';b.classList.remove('on');}
+  else{b.textContent='⏸';b.classList.add('on');tmr=setInterval(()=>{if(cur<STEPS.length-1)render(cur+1);else{clearInterval(tmr);tmr=null;b.textContent='▶ 播放';b.classList.remove('on');}},3500);}
+}
+document.addEventListener('keydown',e=>{if(e.key==='ArrowRight'||e.key===' '){e.preventDefault();go(1);}if(e.key==='ArrowLeft'){e.preventDefault();go(-1);}});
+
+buildGrid();buildVGPR();buildBanks();render(0);
+</script>
+</body>
+</html>
