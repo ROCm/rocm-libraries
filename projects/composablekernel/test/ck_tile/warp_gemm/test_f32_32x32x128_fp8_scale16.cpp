@@ -1,9 +1,15 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 //
-// Unit test for 32x32x128 block-scaled GEMM with scale16, mimicking the pipeline:
-// a 16x16x128 scale16 warp gemm is called in a 2x2 block-level loop over M and N,
-// with INDEPENDENT per-M-block and per-N-block K-scales.
+// Unit test for a 32x32x128 block-scaled GEMM built from the 16x16x128 scale16
+// warp gemm (V_WMMA_SCALE16_F32_16X16X128_F8F6F4), modeled after the MX GEMM
+// pipelines (BlockGemmARegBRegCRegV1 / mx_flatmm pipeline): all A/B sub-tiles and
+// their per-block K-scales for the 2x2 block-level loop are preloaded into
+// registers in advance, then consumed by the warp-gemm loop. OpSelA/OpSelB are
+// threaded through the warp-gemm call as the pipeline does; for a 16x16 tile the
+// hardware A/B sub-block index is 0, so per-M-block / per-N-block scale selection
+// is realized by indexing the preloaded per-block scales (each int64 carries that
+// block's 8 e8m0 K-scales).
 
 #include <gtest/gtest.h>
 #include "ck_tile/host.hpp"
@@ -25,8 +31,9 @@ CK_TILE_DEVICE static constexpr auto MakeScaleDistribution()
                                    sequence<0>>{});
 }
 
-// Pipeline-style kernel: 2x2 block loop over 16x16x128 scale16 warp gemm.
-// Each (mIter, nIter) sub-tile gets its own independent K-scales.
+// Pipeline-style kernel: preload all scales for the 2x2 block in advance, then
+// run a 2x2 block-level loop over the 16x16x128 scale16 warp gemm. Each (mIter,
+// nIter) sub-tile consumes its own independent per-M/per-N-block K-scales.
 template <typename AType,
           typename BType,
           typename CType,
@@ -95,7 +102,18 @@ struct WarpGemmScale16BlockLoopKernel
         constexpr auto c_dstr     = typename WarpGemm::CWarpDstr{};
         constexpr auto scale_dstr = MakeScaleDistribution<NumScales>();
 
-        // 2x2 block-level loop, mimicking BlockGemmARegBRegCRegV1
+        // ---- Preload phase ----
+        // Stage every A/B sub-tile and its per-block K-scales into registers before
+        // the compute loop, mirroring how the MX GEMM pipelines pre-stage scales
+        // (each int64 holds one 16-row block's 8 e8m0 K-scales).
+        statically_indexed_array<decltype(load_tile(make_tile_window(
+                                     a_view,
+                                     make_tuple(number<MPerWarp>{}, number<K>{}),
+                                     make_multi_index(0, 0),
+                                     a_dstr))),
+                                 MIter>
+            a_tiles;
+        statically_indexed_array<int64_t, MIter> scale_a;
         static_for<0, MIter, 1>{}([&](auto mIter) {
             auto a_win  = make_tile_window(a_view,
                                           make_tuple(number<MPerWarp>{}, number<K>{}),
@@ -105,36 +123,53 @@ struct WarpGemmScale16BlockLoopKernel
                                            make_tuple(number<MPerWarp>{}, number<NumScales>{}),
                                            make_multi_index(mIter.value * MPerWarp, 0),
                                            scale_dstr);
-
-            auto a_tile     = load_tile(a_win);
-            auto sa_tile    = load_tile(sa_win);
-            int64_t scale_a = bit_cast<int64_t>(
+            a_tiles(mIter)   = load_tile(a_win);
+            auto sa_tile     = load_tile(sa_win);
+            scale_a(mIter)   = bit_cast<int64_t>(
                 sa_tile.get_thread_buffer()
                     .template get_as<ext_vector_t<e8m0_t, NumScales>>()[number<0>{}]);
+        });
 
+        statically_indexed_array<decltype(load_tile(make_tile_window(
+                                     b_view,
+                                     make_tuple(number<NPerWarp>{}, number<K>{}),
+                                     make_multi_index(0, 0),
+                                     b_dstr))),
+                                 NIter>
+            b_tiles;
+        statically_indexed_array<int64_t, NIter> scale_b;
+        static_for<0, NIter, 1>{}([&](auto nIter) {
+            auto b_win  = make_tile_window(b_view,
+                                          make_tuple(number<NPerWarp>{}, number<K>{}),
+                                          make_multi_index(nIter.value * NPerWarp, 0),
+                                          b_dstr);
+            auto sb_win = make_tile_window(sb_view,
+                                           make_tuple(number<NPerWarp>{}, number<NumScales>{}),
+                                           make_multi_index(nIter.value * NPerWarp, 0),
+                                           scale_dstr);
+            b_tiles(nIter)   = load_tile(b_win);
+            auto sb_tile     = load_tile(sb_win);
+            scale_b(nIter)   = bit_cast<int64_t>(
+                sb_tile.get_thread_buffer()
+                    .template get_as<ext_vector_t<e8m0_t, NumScales>>()[number<0>{}]);
+        });
+
+        // ---- Compute phase ----
+        // 2x2 block-level loop, mimicking BlockGemmARegBRegCRegV1. All scales are
+        // already register-resident. The proper per-M/per-N-block scale set is
+        // selected by indexing the preloaded scale_a / scale_b. OpSelA/OpSelB (the
+        // hardware A/B sub-block index) are 0 for a 16x16 tile, i.e. the warp-gemm
+        // default -- the int64 scale itself fully specifies the block's K-scales.
+        static_for<0, MIter, 1>{}([&](auto mIter) {
             static_for<0, NIter, 1>{}([&](auto nIter) {
-                auto b_win  = make_tile_window(b_view,
-                                              make_tuple(number<NPerWarp>{}, number<K>{}),
-                                              make_multi_index(nIter.value * NPerWarp, 0),
-                                              b_dstr);
-                auto sb_win = make_tile_window(sb_view,
-                                               make_tuple(number<NPerWarp>{}, number<NumScales>{}),
-                                               make_multi_index(nIter.value * NPerWarp, 0),
-                                               scale_dstr);
-
                 auto c_win = make_tile_window(
                     c_view,
                     make_tuple(number<MPerWarp>{}, number<NPerWarp>{}),
                     make_multi_index(mIter.value * MPerWarp, nIter.value * NPerWarp),
                     c_dstr);
 
-                auto b_tile     = load_tile(b_win);
-                auto sb_tile    = load_tile(sb_win);
-                int64_t scale_b = bit_cast<int64_t>(
-                    sb_tile.get_thread_buffer()
-                        .template get_as<ext_vector_t<e8m0_t, NumScales>>()[number<0>{}]);
-
-                auto c_tile = WarpGemm{}(a_tile, b_tile, scale_a, scale_b);
+                auto c_tile =
+                    WarpGemm{}(a_tiles(mIter), b_tiles(nIter), scale_a(mIter), scale_b(nIter));
                 store_tile(c_win, c_tile);
             });
         });
