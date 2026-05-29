@@ -416,7 +416,7 @@ def getDockerImage(Map conf=[:])
     def gpu_arch
     if (gpu_family == "ci")
     {
-        gpu_arch = "gfx908;gfx90a;gfx942;gfx1101;gfx1151" // Builds docker image with subset of architectures that CI is run on.
+        gpu_arch = "gfx908;gfx90a;gfx942;gfx950;gfx1101;gfx1151" // Builds docker image with subset of architectures that CI is run on.
     }
     else if (gpu_family == "gfx90X")
     {
