@@ -310,8 +310,7 @@ bool wouldBwdByteStridesFitUint32(
 // The `verified` flag records whether the resolved (dtype, hdim) kernels have a
 // CPU backward reference that has been calibrated against the in-tree kernels.
 // It is keyed on (dtype, hdim) — not on pipeline stage — so all three stages of
-// a dispatch share the same value. Today only (bf16, hd128) is calibrated; see
-// the Verified Kernel Matrix and ALMIOPEN-1832.
+// a dispatch share the same value. Today only (bf16, hd128) is calibrated.
 BwdDispatchTuples computeDispatchTuples(const std::string& dataType,
                                         int hdimQ,
                                         MaskType maskType,
@@ -597,8 +596,8 @@ bool SdpaBwdPlanBuilder::isApplicable(
                                    + ", D_v = " + std::to_string(headDimV) + ")");
 
     // Registry-supported (dtype, hdim) combinations are dispatched; the one-time
-    // log in buildPlan warns when the kernel is not yet CPU-reference validated
-    // (see ALMIOPEN-1832). Head dims outside the registry's {64, 128, 192} set
+    // log in buildPlan warns when the kernel is not yet CPU-reference validated.
+    // Head dims outside the registry's {64, 128, 192} set
     // have no row at all and are rejected here so unsupported geometries still
     // fail fast; the per-stage checkRegistry lookups below then reject the
     // (dtype, hdim) combinations that have no matching CSV row (e.g. hd64, whose
@@ -910,10 +909,10 @@ void SdpaBwdPlanBuilder::buildPlan(
             }
             else
             {
-                HIPDNN_PLUGIN_LOG_WARN(
-                    "SDPA bwd dispatch: UNVERIFIED kernel dtype="
-                    << dataTypeId << " hd=" << headDimQk << " mask=" << maskOrdinal
-                    << " - results not validated against CPU reference; see ALMIOPEN-1832");
+                HIPDNN_PLUGIN_LOG_WARN("SDPA bwd dispatch: UNVERIFIED kernel dtype="
+                                       << dataTypeId << " hd=" << headDimQk
+                                       << " mask=" << maskOrdinal
+                                       << " - results not validated against CPU reference");
             }
         });
 
