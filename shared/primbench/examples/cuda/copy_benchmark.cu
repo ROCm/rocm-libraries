@@ -74,20 +74,18 @@ struct copy_benchmark : public primbench::benchmark_interface
         // Optional output validation (called once during warmup)
         // Disable by defining PRIMBENCH_NO_TEST
         state.test(
-            [&] {
+            [&]
+            {
                 // Copy part of the output to host for quick validation
                 std::vector<T> h_output(3);
-                PRIMBENCH_CHECK(cudaMemcpy(h_output.data(),
-                                           d_output,
-                                           3 * sizeof(T),
-                                           cudaMemcpyDeviceToHost));
+                PRIMBENCH_CHECK(
+                    cudaMemcpy(h_output.data(), d_output, 3 * sizeof(T), cudaMemcpyDeviceToHost));
 
                 // Use placeholders (e.g., {0, 0, 0}) if expected
                 // values are unknown; assertion failures will print
                 // the actual values for you to copy-paste
                 PRIMBENCH_ASSERT(h_output, {0, 1, 2});
-            }
-        );
+            });
 
         // This passes a lambda to primbench, which calls it many times
         // primbench completely handles synchronization

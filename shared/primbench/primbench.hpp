@@ -337,37 +337,41 @@ inline std::string value_to_string(const __half& v)
 }
 
 template<typename T>
-constexpr bool is_numeric = std::is_arithmetic_v<std::remove_cv_t<T>> || std::is_same_v<std::remove_cv_t<T>, __half>;
+constexpr bool is_numeric
+    = std::is_arithmetic_v<std::remove_cv_t<T>> || std::is_same_v<std::remove_cv_t<T>, __half>;
 
 template<typename T>
-constexpr bool is_fp_or_half =
-    std::is_floating_point_v<std::remove_cv_t<T>> ||
-    std::is_same_v<std::remove_cv_t<T>, __half>;
+constexpr bool is_fp_or_half
+    = std::is_floating_point_v<std::remove_cv_t<T>> || std::is_same_v<std::remove_cv_t<T>, __half>;
 
 /// Asserts equality between two scalar values.
 /// For floating-point types an optional tolerance can be specified.
 /// Prints an error message to stderr and exits on mismatch.
 template<typename T, typename U>
 std::enable_if_t<is_numeric<T> && is_numeric<U>>
-assert_equal(const char* file, int line, const T& input, const U& expected, double tol = 0.0)
+    assert_equal(const char* file, int line, const T& input, const U& expected, double tol = 0.0)
 {
     clearline(std::cout);
     const std::string prefix = std::string(file) + ":" + std::to_string(line) + ": ";
-    if constexpr (is_fp_or_half<T> || is_fp_or_half<U>) {
+    if constexpr(is_fp_or_half<T> || is_fp_or_half<U>)
+    {
         const double diff = std::abs(static_cast<double>(input) - static_cast<double>(expected));
-        if(diff > tol) {
+        if(diff > tol)
+        {
             std::cerr << prefix
                       << "primbench::assert_equal() failed: Expected " + value_to_string(expected)
-                      + ", got "  + value_to_string(input)
-                      + " (diff " + value_to_string(diff)
-                      + ", tol "  + std::to_string(tol) + ")\n";
+                             + ", got " + value_to_string(input) + " (diff " + value_to_string(diff)
+                             + ", tol " + std::to_string(tol) + ")\n";
             exit(EXIT_FAILURE);
         }
-    } else {
-        if(input != expected) {
+    }
+    else
+    {
+        if(input != expected)
+        {
             std::cerr << prefix
                       << "primbench::assert_equal() failed: Expected " + value_to_string(expected)
-                      + ", got " + value_to_string(input) + "\n";
+                             + ", got " + value_to_string(input) + "\n";
             exit(EXIT_FAILURE);
         }
     }
@@ -379,36 +383,47 @@ assert_equal(const char* file, int line, const T& input, const U& expected, doub
 /// with a message indicating the index and the mismatching values.
 template<typename ContainerT, typename ContainerU>
 std::enable_if_t<!is_numeric<ContainerT> && !is_numeric<ContainerU>>
-assert_equal(const char* file, int line, const ContainerT& input, const ContainerU& expected, double tol = 0.0)
+    assert_equal(const char*       file,
+                 int               line,
+                 const ContainerT& input,
+                 const ContainerU& expected,
+                 double            tol = 0.0)
 {
     clearline(std::cout);
     const std::string prefix = std::string(file) + ":" + std::to_string(line) + ": ";
-    if(input.size() != expected.size()) {
+    if(input.size() != expected.size())
+    {
         std::cerr << prefix
-                  << "primbench::assert_equal() failed: Expected "
-                  + std::to_string(expected.size()) + " values, got " + std::to_string(input.size()) + "\n";
+                  << "primbench::assert_equal() failed: Expected " + std::to_string(expected.size())
+                         + " values, got " + std::to_string(input.size()) + "\n";
         exit(EXIT_FAILURE);
     }
     using T = typename ContainerT::value_type;
     using U = typename ContainerU::value_type;
-    for(size_t i = 0; i < input.size(); ++i) {
-        if constexpr (is_fp_or_half<T> || is_fp_or_half<U>) {
-            const double diff = std::abs(static_cast<double>(input[i]) - static_cast<double>(expected[i]));
-            if(diff > tol) {
+    for(size_t i = 0; i < input.size(); ++i)
+    {
+        if constexpr(is_fp_or_half<T> || is_fp_or_half<U>)
+        {
+            const double diff
+                = std::abs(static_cast<double>(input[i]) - static_cast<double>(expected[i]));
+            if(diff > tol)
+            {
                 std::cerr << prefix
                           << "primbench::assert_equal() failed at index " + std::to_string(i)
-                          + ": Expected " + value_to_string(expected[i])
-                          + ", got "      + value_to_string(input[i])
-                          + " (diff "     + value_to_string(diff)
-                          + ", tol "      + std::to_string(tol) + ")\n";
+                                 + ": Expected " + value_to_string(expected[i]) + ", got "
+                                 + value_to_string(input[i]) + " (diff " + value_to_string(diff)
+                                 + ", tol " + std::to_string(tol) + ")\n";
                 exit(EXIT_FAILURE);
             }
-        } else {
-            if(input[i] != expected[i]) {
+        }
+        else
+        {
+            if(input[i] != expected[i])
+            {
                 std::cerr << prefix
                           << "primbench::assert_equal() failed at index " + std::to_string(i)
-                          + ": Expected " + value_to_string(expected[i])
-                          + ", got "      + value_to_string(input[i]) + "\n";
+                                 + ": Expected " + value_to_string(expected[i]) + ", got "
+                                 + value_to_string(input[i]) + "\n";
                 exit(EXIT_FAILURE);
             }
         }
@@ -421,7 +436,11 @@ assert_equal(const char* file, int line, const ContainerT& input, const Containe
 /// with a message indicating the index and the mismatching values.
 template<typename ContainerT>
 std::enable_if_t<!is_numeric<ContainerT>>
-assert_equal(const char* file, int line, const ContainerT& input, std::initializer_list<typename ContainerT::value_type> expected, double tol = 0.0)
+    assert_equal(const char*                                            file,
+                 int                                                    line,
+                 const ContainerT&                                      input,
+                 std::initializer_list<typename ContainerT::value_type> expected,
+                 double                                                 tol = 0.0)
 {
     // Forward directly to the generic container overload.
     assert_equal(file, line, input, std::vector(expected), tol);
@@ -2759,7 +2778,8 @@ private:
         for(auto& event : events)
             PRIMBENCH_CHECK(event_create(&event));
         run_batch(events, kernel);
-        if (m_test_lambda) {
+        if(m_test_lambda)
+        {
             primbench::log("Running tests");
             m_test_lambda();
         }
@@ -2953,7 +2973,7 @@ private:
     cache_thrasher& m_cache;
 
     std::function<void()> m_run_before_every_iteration_lambda = nullptr;
-    std::function<void()> m_test_lambda = nullptr;
+    std::function<void()> m_test_lambda                       = nullptr;
     std::vector<double>   m_times;
     size_t                m_kernels_per_batch = 0;
     double                m_ms_per_batch      = 0.0;
