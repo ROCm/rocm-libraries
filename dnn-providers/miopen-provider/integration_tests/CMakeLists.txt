@@ -16,6 +16,7 @@ add_executable(
     miopen_plugin_integration_tests
     main.cpp
     IntegrationGpuBatchnormUnsupportedDataTypes.cpp
+    IntegrationGpuBatchnormTrainingUnhappySpatial.cpp
     IntegrationGpuBatchnormUnhappyActivation.cpp
     IntegrationGpuBenchmarkingKnob.cpp
     IntegrationGpuDeterministic.cpp
