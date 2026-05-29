@@ -13,6 +13,10 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestGpuConvolutionFwdSignatureKey.cpp
     TestGpuConvolutionFwdPlan.cpp
     TestReferenceGraphExecutorFactory.cpp
+    # Harness sources reached transitively through TestSettings/TestConfig
+    # need to link into the unit-test binary too. SupportClaimsVerifier/AutoGen
+    # are integration-binary only — the unit tests don't reach them.
+    ../src/harness/SupportClaims.cpp
 )
 
 target_include_directories(hipdnn_integration_tests_unit_tests

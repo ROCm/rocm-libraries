@@ -101,12 +101,13 @@ public:
 
         if(configPath.has_value())
         {
-            instance._testSettings.emplace(*configPath);
+            instance._testSettings.emplace(*configPath, instance._engineName);
         }
 
         // Detect device 0's gfx arch once at startup. Used by [[test_skips]]
         // todo: In future allow the test runner to use any specified device.
         instance._currentArch = currentDeviceArchRaw();
+        instance._currentArchToken = archTokenOf(instance._currentArch);
 
         // Detect platform once at startup (always succeeds; PlatformUtils.hpp
         // refuses to compile on unsupported OSes).
@@ -206,6 +207,34 @@ public:
         return _currentArch;
     }
 
+    // Prefix of getCurrentArch() before the first ':' (e.g. "gfx942").
+    // Used as the exact-match key against [[supported]] arch entries —
+    // substring matching would collide families (RFC 0012 §5.3).
+    const std::string& getCurrentArchToken() const
+    {
+        throwIfNotInitialized();
+        return _currentArchToken;
+    }
+
+    // True iff a sidecar with [[supported]] data was loaded for the
+    // active (engine, arch, platform). False either disables enforcement
+    // (RFC 0012 §6 "absence = not enforced").
+    bool hasSupportClaims() const
+    {
+        throwIfNotInitialized();
+        return _testSettings.has_value() && _testSettings->hasSupportClaims();
+    }
+
+    const SupportClaims& getSupportClaims() const
+    {
+        throwIfNotInitialized();
+        if(!hasSupportClaims())
+        {
+            throw std::runtime_error("getSupportClaims() called but no sidecar is loaded");
+        }
+        return _testSettings->supportClaims();
+    }
+
     // Lowercase platform name detected at init time ("windows" or "linux").
     const std::string& getCurrentPlatform() const
     {
@@ -250,6 +279,7 @@ private:
     std::optional<TestSettings> _testSettings;
     std::optional<ReferenceExecutorType> _referenceExecutorType;
     std::string _currentArch;
+    std::string _currentArchToken;
     std::string _currentPlatform;
     bool _failOnUnsupported = false;
     bool _skipGraphValidation = false;

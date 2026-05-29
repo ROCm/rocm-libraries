@@ -15,6 +15,8 @@
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 
+#include "harness/GraphDescription.hpp"
+
 namespace hipdnn_integration_tests
 {
 
@@ -26,6 +28,15 @@ struct GraphSupportRecord
     std::set<std::string> supportingEngines;
     std::string note;
     std::string layout;
+
+    // Structured pieces consumed by the support-claim verifier. Filled in
+    // by the structured recordGraphSupport overload added for RFC 0012.
+    // The opChain field deliberately excludes the dtype suffix so claim
+    // matching never has to re-parse the human-readable description.
+    std::string opChain;
+    std::string ioDtype;
+    std::string computeDtype;
+    std::string intermediateDtype;
 };
 
 // Singleton that collects graph-support information during test execution
@@ -64,8 +75,59 @@ public:
         return _outputPath;
     }
 
-    // Record support information for a graph.
+    // Record support information for a graph using already-computed
+    // structured pieces. Preferred for new call sites — keeps the support
+    // matrix markdown and the claim verifier in lockstep about how the
+    // observation is identified.
     // Thread-safe: protected by mutex for parallel GTest execution.
+    void recordGraphSupport(const std::string& graphName,
+                            const StructuredGraphDescription& description,
+                            const std::string& testName,
+                            const std::vector<int64_t>& supportingEngineIds,
+                            const std::string& note = {},
+                            const std::string& layout = {})
+    {
+        if(!_enabled)
+        {
+            return;
+        }
+
+        std::set<std::string> engineNames;
+        for(auto id : supportingEngineIds)
+        {
+            try
+            {
+                engineNames.emplace(hipdnn_data_sdk::utilities::getEngineNameFromId(id));
+            }
+            catch(const std::out_of_range&)
+            {
+                engineNames.emplace("Unknown(" + std::to_string(id) + ")");
+            }
+        }
+
+        GraphSupportRecord record;
+        record.graphName = graphName;
+        record.graphDescription = describeGraph(description);
+        record.testName = testName;
+        record.supportingEngines = std::move(engineNames);
+        record.note = note;
+        record.layout = layout;
+        record.opChain = description.opChain;
+        record.ioDtype = description.ioDtype;
+        record.computeDtype = description.computeDtype;
+        record.intermediateDtype = description.intermediateDtype;
+
+        const std::lock_guard<std::mutex> lock(_mutex);
+        _records.push_back(std::move(record));
+    }
+
+    // Legacy overload: records only the pre-rendered description string
+    // and leaves the structured fields empty. Kept so existing call
+    // sites and the SupportMatrixCollector unit tests still compile.
+    // The verifier skips records whose opChain is empty (treats them as
+    // legacy/un-evaluable) so this overload is safe alongside the new
+    // structured one.
+    // Thread-safe.
     void recordGraphSupport(const std::string& graphName,
                             const std::string& graphDescription,
                             const std::string& testName,
@@ -91,9 +153,32 @@ public:
             }
         }
 
+        GraphSupportRecord record;
+        record.graphName = graphName;
+        record.graphDescription = graphDescription;
+        record.testName = testName;
+        record.supportingEngines = std::move(engineNames);
+        record.note = note;
+        record.layout = layout;
+
         const std::lock_guard<std::mutex> lock(_mutex);
-        _records.push_back(
-            {graphName, graphDescription, testName, std::move(engineNames), note, layout});
+        _records.push_back(std::move(record));
+    }
+
+    // Mark that a test using the integration-graph harness has entered
+    // SetUp(). The verifier uses this set (minus skipped tests, minus
+    // tests with records) to detect Rule B failures — tests that errored
+    // before reaching the recordGraphSupport() call (RFC 0012 §6.1).
+    void registerHarnessTest(const std::string& testName)
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+        _harnessTests.insert(testName);
+    }
+
+    std::set<std::string> getHarnessTests() const
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+        return _harnessTests;
     }
 
     // Thread-safe: returns a copy of the records under mutex protection.
@@ -108,6 +193,7 @@ public:
     void reset()
     {
         _records.clear();
+        _harnessTests.clear();
         _enabled = false;
         _outputPath = "support_matrix.md";
     }
@@ -270,6 +356,7 @@ private:
 
     mutable std::mutex _mutex;
     std::vector<GraphSupportRecord> _records;
+    std::set<std::string> _harnessTests;
     bool _enabled = false;
     std::string _outputPath = "support_matrix.md";
 };

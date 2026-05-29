@@ -16,12 +16,35 @@
 namespace hipdnn_integration_tests
 {
 
-// Produces a compact description of a graph's operations and data types.
-// Example: "ConvFprop + Pointwise:RELU_FWD [io=fp16, compute=fp32, intermediate=fp16]"
-inline std::string describeGraph(const hipdnn_frontend::graph::Graph& graph)
+// Structured view of a graph's identifying features, used by the support
+// claim verifier to match observations against [[supported.matchers]]
+// entries. Producing structured fields rather than re-parsing the
+// human-readable description avoids the test-name glob hazards described
+// in RFC 0012 §11.4.
+struct StructuredGraphDescription
+{
+    // Op chain only — e.g., "ConvFprop + Pointwise:ADD + Pointwise:RELU_FWD".
+    // No dtype suffix.
+    std::string opChain;
+    // IO dtype string from to_string(DataType) — e.g., "fp16", "fp32", "bf16".
+    std::string ioDtype;
+    // Compute dtype — same value space as ioDtype.
+    std::string computeDtype;
+    // Intermediate dtype, or empty if graph_attributes has NOT_SET.
+    std::string intermediateDtype;
+};
+
+// Build the structured description from a graph. Visit order and node
+// stringification match describeGraph() byte-for-byte; the two functions
+// are co-designed so the composed description equals describeGraph()'s
+// output.
+inline StructuredGraphDescription
+    describeGraphStructured(const hipdnn_frontend::graph::Graph& graph)
 {
     using namespace hipdnn_frontend;
     using namespace hipdnn_frontend::graph;
+
+    StructuredGraphDescription result;
 
     std::ostringstream ops;
     bool first = true;
@@ -57,18 +80,36 @@ inline std::string describeGraph(const hipdnn_frontend::graph::Graph& graph)
         }
     });
 
-    // Append data type context
-    ops << " [io=" << to_string(graph.graph_attributes.get_io_data_type())
-        << ", compute=" << to_string(graph.graph_attributes.get_compute_data_type());
+    result.opChain = ops.str();
+    result.ioDtype = to_string(graph.graph_attributes.get_io_data_type());
+    result.computeDtype = to_string(graph.graph_attributes.get_compute_data_type());
 
     if(graph.graph_attributes.get_intermediate_data_type() != DataType::NOT_SET)
     {
-        ops << ", intermediate=" << to_string(graph.graph_attributes.get_intermediate_data_type());
+        result.intermediateDtype = to_string(graph.graph_attributes.get_intermediate_data_type());
     }
 
-    ops << "]";
+    return result;
+}
 
-    return ops.str();
+// Compose the structured description back into the historical single-string
+// form, e.g. "ConvFprop + Pointwise:RELU_FWD [io=fp16, compute=fp32, intermediate=fp16]".
+// The format is stable — see RFC 0012 §12 "describeGraph output format" risk.
+inline std::string describeGraph(const StructuredGraphDescription& desc)
+{
+    std::ostringstream out;
+    out << desc.opChain << " [io=" << desc.ioDtype << ", compute=" << desc.computeDtype;
+    if(!desc.intermediateDtype.empty())
+    {
+        out << ", intermediate=" << desc.intermediateDtype;
+    }
+    out << "]";
+    return out.str();
+}
+
+inline std::string describeGraph(const hipdnn_frontend::graph::Graph& graph)
+{
+    return describeGraph(describeGraphStructured(graph));
 }
 
 } // namespace hipdnn_integration_tests

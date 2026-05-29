@@ -51,6 +51,18 @@ protected:
 
     void SetUp() override
     {
+        // Register this test with the SupportMatrixCollector before any
+        // ASSERT_* or GTEST_SKIP could short-circuit SetUp(). The Rule B
+        // detector (RFC 0012 §6.1) uses this set to tell "test errored
+        // before recording" apart from "utility test that never calls
+        // verifyGraph". Always-register (independent of collector enabled
+        // state) — the cost is one set insert and it makes wiring simpler.
+        if(auto* info = ::testing::UnitTest::GetInstance()->current_test_info(); info != nullptr)
+        {
+            SupportMatrixCollector::get().registerHarnessTest(std::string(info->test_suite_name())
+                                                              + "." + info->name());
+        }
+
         SKIP_IF_NO_DEVICES();
 
         // Initialize HIP
@@ -127,7 +139,13 @@ protected:
         std::vector<int64_t> engineIds;
         auto status = graph.get_ranked_engine_ids(engineIds);
 
-        // Record support information for the support matrix output
+        // Record support information FIRST — RFC 0012 §6.1 Rule B requires
+        // the observation to be captured before any later ASSERT_*/FAIL
+        // can short-circuit verifyGraph(). The verifier distinguishes "no
+        // record" from "record present but engineIds empty"; moving the
+        // record to the first statement after get_ranked_engine_ids keeps
+        // the structured description, layout, and note tied to whatever
+        // outcome the test reaches.
         if(SupportMatrixCollector::get().isEnabled())
         {
             std::string testName;
@@ -136,9 +154,10 @@ protected:
             {
                 testName = std::string(testInfo->test_suite_name()) + "." + testInfo->name();
             }
+            const auto structured = describeGraphStructured(graph);
             SupportMatrixCollector::get().recordGraphSupport(
                 graph.graph_attributes.get_name(),
-                describeGraph(graph),
+                structured,
                 testName,
                 status.is_good() ? engineIds : std::vector<int64_t>{},
                 _testCaseNote,

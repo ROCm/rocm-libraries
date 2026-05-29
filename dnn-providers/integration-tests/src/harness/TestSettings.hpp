@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "common/PlatformUtils.hpp"
+#include "harness/SupportClaims.hpp"
 
 // HIP's host_defines.h redefines __noinline__ as either
 // __attribute__((noinline)) or empty, which collides with tomlplusplus's
@@ -75,10 +76,36 @@ class TestSettings
 {
 public:
     // Load config from a TOML file. Throws on parse errors or invalid format.
-    explicit TestSettings(const std::filesystem::path& configPath)
+    // If a paired sidecar file (<stem>.supported.toml) exists next to the
+    // main file, it is loaded too — but only when expectedEngineName is
+    // provided so the loader can fail loudly on [meta].engine mismatch.
+    explicit TestSettings(const std::filesystem::path& configPath,
+                          std::optional<std::string> expectedEngineName = std::nullopt)
+        : _configPath(configPath)
     {
         auto table = toml::parse_file(configPath.string());
         validateMetaVersion(table, configPath);
+
+        // [meta].engine in the main file is optional today (legacy configs
+        // pre-RFC 0012 omit it). When present, it must match the engine
+        // the binary was launched with — otherwise the sidecar's same
+        // declaration could silently apply to the wrong plugin.
+        if(auto engine = table["meta"]["engine"].value<std::string>(); engine.has_value())
+        {
+            if(engine->empty())
+            {
+                throw std::runtime_error("TestSettings: [meta].engine is empty in "
+                                         + configPath.string());
+            }
+            _declaredEngine = std::move(*engine);
+            if(expectedEngineName.has_value() && _declaredEngine != *expectedEngineName)
+            {
+                throw std::runtime_error("TestSettings: [meta].engine mismatch in "
+                                         + configPath.string() + " (file declares '"
+                                         + *_declaredEngine + "', binary loaded engine '"
+                                         + *expectedEngineName + "')");
+            }
+        }
 
         if(auto* arr = table["tolerance_overrides"].as_array())
         {
@@ -95,6 +122,42 @@ public:
                 _skips.push_back(parseTestSkip(node));
             }
         }
+
+        // Sidecar is optional. We only load it when the caller named the
+        // engine — without an engine name there's nothing safe to validate
+        // [meta].engine against.
+        if(expectedEngineName.has_value())
+        {
+            const auto sidecar = sidecarPathFor(configPath);
+            if(std::filesystem::exists(sidecar))
+            {
+                _supportClaims = SupportClaims(sidecar, *expectedEngineName);
+            }
+        }
+    }
+
+    bool hasSupportClaims() const
+    {
+        return _supportClaims.has_value();
+    }
+
+    const SupportClaims& supportClaims() const
+    {
+        if(!_supportClaims.has_value())
+        {
+            throw std::runtime_error("TestSettings::supportClaims() called but no sidecar loaded");
+        }
+        return *_supportClaims;
+    }
+
+    const std::optional<std::string>& declaredEngine() const
+    {
+        return _declaredEngine;
+    }
+
+    const std::filesystem::path& configPath() const
+    {
+        return _configPath;
     }
 
     // Find a tolerance override matching the given test name.
@@ -307,6 +370,9 @@ private:
         return parsed;
     }
 
+    std::filesystem::path _configPath;
+    std::optional<std::string> _declaredEngine;
+    std::optional<SupportClaims> _supportClaims;
     std::vector<OverrideEntry> _overrides;
     std::vector<SkipEntry> _skips;
 };

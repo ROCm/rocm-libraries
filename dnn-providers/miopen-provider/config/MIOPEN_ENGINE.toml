@@ -4,6 +4,9 @@
 
 [meta]
 version = 1
+# RFC 0012: when set, must match the engine the binary was launched with
+# (--test-engine), and must match the paired sidecar's [meta].engine.
+engine  = "MIOPEN_ENGINE"
 
 # -- Tolerance Overrides --
 # Override default tolerances for specific tests or groups of tests.

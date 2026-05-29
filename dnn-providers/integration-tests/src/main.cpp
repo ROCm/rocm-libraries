@@ -18,6 +18,9 @@
 
 #include "common/Utilities.hpp"
 #include "harness/SharedHandle.hpp"
+#include "harness/SupportClaims.hpp"
+#include "harness/SupportClaimsAutoGen.hpp"
+#include "harness/SupportClaimsVerifier.hpp"
 #include "harness/SupportMatrixCollector.hpp"
 #include "harness/TestConfig.hpp"
 
@@ -78,6 +81,18 @@ int main(int argc, char** argv) noexcept
             .default_value(std::string("support_matrix.md"))
             .implicit_value(std::string("support_matrix.md"))
             .help("Generate a markdown support matrix file (default: support_matrix.md).");
+        parser.add_argument("--enforce-support-claims")
+            .default_value(false)
+            .implicit_value(true)
+            .help("After RUN_ALL_TESTS, evaluate the engine's [[supported]] sidecar against "
+                  "observed support. Process exits non-zero on Rule A/B/C failures. See "
+                  "docs/support-claims-schema.md.");
+        parser.add_argument("--write-support-claims")
+            .default_value(false)
+            .implicit_value(true)
+            .help("Regenerate the engine's <ENGINE>.supported.toml [[supported]] block for "
+                  "the current arch+platform from observed support. Engineer-driven; CI must "
+                  "not invoke. See docs/support-claims-bringup.md.");
 
         std::vector<std::string> remainingArgs;
         try
@@ -173,11 +188,31 @@ int main(int argc, char** argv) noexcept
             hipdnn_integration_tests::SupportMatrixCollector::get().setOutputPath(outputFile);
         }
 
+        const auto enforceClaims = parser.get<bool>("--enforce-support-claims");
+        const auto writeClaims = parser.get<bool>("--write-support-claims");
+        if(enforceClaims && writeClaims)
+        {
+            std::cerr << "Error: --enforce-support-claims and --write-support-claims are "
+                         "mutually exclusive.\n";
+            return 1;
+        }
+        // Both verifier and auto-gen need observations — they piggyback
+        // on the support matrix collector's record stream.
+        if(enforceClaims || writeClaims)
+        {
+            hipdnn_integration_tests::SupportMatrixCollector::get().setEnabled(true);
+        }
+
+        // NOTE: do not std::move(configPath) — the post-RUN_ALL_TESTS code
+        // below (--write-support-claims) reads *configPath to derive the
+        // sidecar path. Moving leaves the optional's contained path in a
+        // valid-but-empty state and the sidecar would land at ".supported"
+        // in CWD instead of next to the main config.
         hipdnn_integration_tests::TestConfig::initialize(std::move(articlePath),
                                                          std::move(engineName),
                                                          failOnUnsupported,
                                                          skipGraphValidation,
-                                                         std::move(configPath),
+                                                         configPath,
                                                          refExecType);
 
         // Reconstruct argc/argv for GTest from remaining (unknown) args.
@@ -234,6 +269,79 @@ int main(int argc, char** argv) noexcept
             return 1;
         }
 
+        // RFC 0012 §6.4 / §8.3 preconditions. Both enforcement and
+        // regeneration require an engine name + sidecar; both require
+        // unsharded, single-plugin runs because the verifier/condenser
+        // operate per-engine and a partial observation set produces
+        // either false positives or unsafe matchers.
+        if(enforceClaims || writeClaims)
+        {
+            if(!hipdnn_integration_tests::TestConfig::get().hasEngineName())
+            {
+                std::cerr << "Error: --enforce-support-claims/--write-support-claims require "
+                             "--test-engine to be set so the verifier knows which engine's "
+                             "support to evaluate.\n";
+                static_cast<void>(hipStreamDestroy(stream));
+                return 1;
+            }
+            // Note: RFC 0012 §13 mentions multi-engine attribution as
+            // future work, but in practice we always require --test-engine
+            // for enforce/write modes (checked above) — the verifier and
+            // condenser scope per-engine via supportingEngines.find(name),
+            // so multiple plugins being loaded is harmless. The reference
+            // engine alongside the test plugin is the common case here.
+
+            // MSVC mode treats std::getenv as deprecated under -Werror; use
+            // the project's cross-platform getEnv (returns "" for unset).
+            if(const auto shardTotal = hipdnn_data_sdk::utilities::getEnv("GTEST_TOTAL_SHARDS");
+               !shardTotal.empty() && shardTotal != "1")
+            {
+                std::cerr << "Error: GTEST_TOTAL_SHARDS is set (" << shardTotal
+                          << "). Sharding is deferred to v2; run unsharded "
+                             "(RFC 0012 §9).\n";
+                static_cast<void>(hipStreamDestroy(stream));
+                return 1;
+            }
+            if(!hipdnn_data_sdk::utilities::getEnv("GTEST_SHARD_INDEX").empty())
+            {
+                std::cerr << "Error: GTEST_SHARD_INDEX is set. Sharding is deferred to v2 "
+                             "(RFC 0012 §9).\n";
+                static_cast<void>(hipStreamDestroy(stream));
+                return 1;
+            }
+            if(::testing::GTEST_FLAG(break_on_failure))
+            {
+                std::cerr << "Error: --gtest_break_on_failure aborts before the verifier "
+                             "runs; remove it when using --enforce-support-claims.\n";
+                static_cast<void>(hipStreamDestroy(stream));
+                return 1;
+            }
+            if(::testing::GTEST_FLAG(repeat) > 1)
+            {
+                std::cerr << "Error: --gtest_repeat with N>1 produces duplicate records that "
+                             "confuse the verifier; remove it when enforcing claims.\n";
+                static_cast<void>(hipStreamDestroy(stream));
+                return 1;
+            }
+#ifndef NDEBUG
+            std::cerr << "Error: --enforce-support-claims/--write-support-claims require a "
+                         "release build; debug builds produce non-deterministic gtest param "
+                         "strings (RFC 0012 §6.4/§8.3).\n";
+            static_cast<void>(hipStreamDestroy(stream));
+            return 1;
+#endif
+            if(writeClaims && ::testing::GTEST_FLAG(filter) != ""
+               && ::testing::GTEST_FLAG(filter) != "*")
+            {
+                std::cerr << "Error: --write-support-claims refuses partial runs "
+                             "(--gtest_filter='"
+                          << ::testing::GTEST_FLAG(filter)
+                          << "'); the sidecar must reflect the full observed set.\n";
+                static_cast<void>(hipStreamDestroy(stream));
+                return 1;
+            }
+        }
+
         const int result = RUN_ALL_TESTS();
 
         // Generate support matrix if requested
@@ -263,10 +371,57 @@ int main(int argc, char** argv) noexcept
             hipdnn_integration_tests::SupportMatrixCollector::get().writeMarkdown(allEngineNames);
         }
 
+        // Post-RUN_ALL_TESTS: enforcement or regeneration. We deliberately
+        // run after the support matrix write so an engineer who passed
+        // both flags still gets the markdown for review.
+        int claimsExit = 0;
+        if(writeClaims)
+        {
+            if(!configPath.has_value())
+            {
+                std::cerr << "Error: --write-support-claims requires --test-config so the "
+                             "sidecar location is known.\n";
+                claimsExit = 1;
+            }
+            else
+            {
+                const auto& cfg = hipdnn_integration_tests::TestConfig::get();
+                const auto sidecar = hipdnn_integration_tests::sidecarPathFor(*configPath);
+                const bool ok = hipdnn_integration_tests::generateSupportClaimsForCurrentArch(
+                    sidecar,
+                    std::string(cfg.getEngineName()),
+                    cfg.getCurrentArchToken(),
+                    std::optional<std::string>(cfg.getCurrentPlatform()));
+                claimsExit = ok ? 0 : 1;
+            }
+        }
+        else if(enforceClaims)
+        {
+            const auto& cfg = hipdnn_integration_tests::TestConfig::get();
+            if(!cfg.hasSupportClaims())
+            {
+                std::cerr << "[--enforce-support-claims] no sidecar loaded for engine '"
+                          << cfg.getEngineName() << "' on arch=" << cfg.getCurrentArchToken()
+                          << "; treating as 'not enforced' (RFC 0012 §6).\n";
+            }
+            else
+            {
+                const bool fullCi = hipdnn_integration_tests::detectFullCiMode();
+                hipdnn_integration_tests::SupportClaimsVerifier verifier(
+                    cfg.getSupportClaims(),
+                    std::string(cfg.getEngineName()),
+                    cfg.getCurrentArchToken(),
+                    cfg.getCurrentPlatform(),
+                    fullCi);
+                const bool clean = verifier.runAndReport();
+                claimsExit = clean ? 0 : 1;
+            }
+        }
+
         // Clean up shared handle and stream
         static_cast<void>(hipStreamDestroy(stream));
         hipdnnDestroy(handle);
-        return result;
+        return result != 0 ? result : claimsExit;
     }
     catch(const std::exception& e)
     {
