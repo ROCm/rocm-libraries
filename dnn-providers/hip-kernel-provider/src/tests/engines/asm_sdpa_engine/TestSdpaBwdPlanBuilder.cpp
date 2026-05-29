@@ -44,7 +44,7 @@ auto createSdpaBwdGraph(const std::vector<int64_t>& dims = {4, 8, 256, 128},
                         bool paddingMask = false,
                         bool causalMask = false)
 {
-    auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
     return hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(dims,
                                                                strides,
                                                                dims,
