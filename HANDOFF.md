@@ -188,8 +188,8 @@ mxfp6_gemm/
 ```
 
 **工具：**
-- rocprofv3: `/home/AMD/zhewan/rocm-tools/opt/rocm-7.0.2.1/bin/rocprofv3`
-  - 需要 `LD_LIBRARY_PATH=/home/AMD/zhewan/miniforge3/lib` (libatomic.so.1)
+- rocprofv3: 直接用系统版 `/opt/rocm/bin/rocprofv3` (ROCm 7.0.2.1)，**不再需要** libatomic 的 `LD_LIBRARY_PATH` workaround
+  - 仅 ATT 解码追踪时需 `--att-library-path /home/AMD/zhewan/rocm-tools/opt/rocm-7.0.2.1/lib`（trace decoder 库只在该用户态目录）
 - ISA PDF: `python3 -c "import fitz; doc = fitz.open('path'); print(doc[page].get_text())"`
 - ISA dump: `hipcc -save-temps` 或 `hipcc -S`
 
