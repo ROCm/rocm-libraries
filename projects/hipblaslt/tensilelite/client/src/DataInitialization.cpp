@@ -3092,11 +3092,23 @@ namespace TensileLite
                         = m_rm->getDataSize() - m_rm->getDataLargestUnitSize();
                     if(totalRotatingSizeNeeded > rotatingAllocatedSize)
                     {
-                        std::cout << "Rotating buffer size: " << rotatingAllocatedSize
-                                  << " is not enough for rotating buffer size: " << rotatingSize
-                                  << " * " << rotatingNum << " = " << totalRotatingSizeNeeded
-                                  << std::endl;
-                        throw std::runtime_error("Insufficient rotating buffer size.");
+                        // The pre-allocated rotating pool does not have enough spare
+                        // capacity for the requested number of copies (this happens when
+                        // the pool is sized from the global-max problem footprint while
+                        // this problem requests copies based on its own smaller footprint).
+                        // Rather than aborting the whole benchmark, clamp the rotating
+                        // count to what actually fits (possibly 0, i.e. no rotation).
+                        int32_t fittedRotatingNum = static_cast<int32_t>(
+                            rotatingSize ? rotatingAllocatedSize / rotatingSize : 0);
+                        fittedRotatingNum = std::max(0, std::min(rotatingNum, fittedRotatingNum));
+                        std::cout << "Warning: rotating buffer spare size: "
+                                  << rotatingAllocatedSize
+                                  << " is not enough for requested rotating buffer size: "
+                                  << rotatingSize << " * " << rotatingNum << " = "
+                                  << totalRotatingSizeNeeded << ". Reducing rotating num from "
+                                  << rotatingNum << " to " << fittedRotatingNum << "." << std::endl;
+                        rotatingNum             = fittedRotatingNum;
+                        totalRotatingSizeNeeded = rotatingNum * rotatingSize;
                     }
                     uint8_t* ptr = (uint8_t*)m_rm->getData().get() + m_rm->getDataLargestUnitSize();
                     int64_t  offset = 0;
@@ -3154,11 +3166,23 @@ namespace TensileLite
                         = m_rm->getDataSize() - m_rm->getDataLargestUnitSize();
                     if(totalRotatingSizeNeeded > rotatingAllocatedSize)
                     {
-                        std::cout << "Rotating buffer size: " << rotatingAllocatedSize
-                                  << " is not enough for rotating buffer size: " << rotatingSize
-                                  << " * " << rotatingNum << " = " << totalRotatingSizeNeeded
-                                  << std::endl;
-                        throw std::runtime_error("Insufficient rotating buffer size.");
+                        // The pre-allocated rotating pool does not have enough spare
+                        // capacity for the requested number of copies (this happens when
+                        // the pool is sized from the global-max problem footprint while
+                        // this problem requests copies based on its own smaller footprint).
+                        // Rather than aborting the whole benchmark, clamp the rotating
+                        // count to what actually fits (possibly 0, i.e. no rotation).
+                        int32_t fittedRotatingNum = static_cast<int32_t>(
+                            rotatingSize ? rotatingAllocatedSize / rotatingSize : 0);
+                        fittedRotatingNum = std::max(0, std::min(rotatingNum, fittedRotatingNum));
+                        std::cout << "Warning: rotating buffer spare size: "
+                                  << rotatingAllocatedSize
+                                  << " is not enough for requested rotating buffer size: "
+                                  << rotatingSize << " * " << rotatingNum << " = "
+                                  << totalRotatingSizeNeeded << ". Reducing rotating num from "
+                                  << rotatingNum << " to " << fittedRotatingNum << "." << std::endl;
+                        rotatingNum             = fittedRotatingNum;
+                        totalRotatingSizeNeeded = rotatingNum * rotatingSize;
                     }
                     uint8_t* ptr = (uint8_t*)m_rm->getData().get() + m_rm->getDataLargestUnitSize();
                     int64_t  offset = 0;
