@@ -163,6 +163,40 @@ class TraitSpec:
     # strided scalar loads of the column-major path). The flag-free
     # default keeps the canonical strided-scalar load.
     preshuffle_b: bool = False
+    # P41: DirectToLDS (DTLA/DTLB). When True, the global -> LDS load
+    # phase emits ``raw.ptr.buffer.load.lds`` (one instruction per chunk;
+    # hardware writes the dword payload straight into LDS) instead of
+    # the round-trip ``buffer_load -> VGPR -> ds_write_b128`` pair the
+    # default path uses. Matches Tensile's ``DTLA1_DTLB1`` token in
+    # tuned kernels like ``MT16x16x512`` on gfx950. Constraints inherited
+    # from :class:`AsyncTileLoader`: per-lane payload must be 4 / 12 / 16
+    # bytes (dwords in {1,3,4}; dwords=2 is rejected by the intrinsic).
+    direct_to_lds: bool = False
+    # Per-operand cache hints when direct_to_lds is True. Default mirrors
+    # rocBLAS skinny-M behaviour: A is small (M*K halves) and reused
+    # across CTAs through L2 -> CACHE_ALL; B is the 32 MiB weight matrix,
+    # one-shot streamed -> CACHE_STREAM.
+    dtl_cache_a: int = 0  # CACHE_ALL
+    dtl_cache_b: int = 2  # CACHE_STREAM
+    # Prefetch ping-pong on top of direct_to_lds. Allocates two LDS buffers
+    # per operand and issues next-iter DTLA loads while current-iter MFMAs
+    # run, then waits with ``s_waitcnt vmcnt(loads_in_flight)`` so only the
+    # current tile's loads have to complete before MFMAs start. Requires
+    # ``direct_to_lds=True``. Doubles LDS usage (knocks 2 WGs/CU down to 1
+    # at typical tile sizes) but hides the global-load latency that
+    # otherwise serialises every K-tile.
+    dtl_prefetch: bool = False
+    # MoE active-tile early-exit. When True (only honored in
+    # ``batched=True`` mode), the kernel takes two extra args
+    # (``SortedTokenIds: ptr<i32>``, ``slot_size: i32``) and at CTA
+    # entry computes a wave-uniform ``do_work`` predicate from
+    # ``SortedTokenIds[block_id_z * slot_size + block_id_y * tile_m]``.
+    # The K-loop + epilogue are wrapped in ``scf.if(do_work)`` so an
+    # inactive expert tile (``first_row_token == -1``) skips all
+    # MFMAs, LDS reads, and HBM stores. Enables CK Tile-style
+    # "expert-by-expert" MoE dispatch over a static grid that's
+    # padded to the worst-case ``experts`` size.
+    active_tile_skip: bool = False
 
 
 @dataclass(frozen=True)
@@ -222,6 +256,10 @@ class UniversalGemmSpec:
                 "pad": any([tr.pad_m, tr.pad_n, tr.pad_k]),
                 "pers": tr.persistent,
                 "bat": self.batched,
+                "preb": tr.preshuffle_b,
+                "dtl": tr.direct_to_lds,
+                "pref": tr.dtl_prefetch,
+                "actt": tr.active_tile_skip,
             },
         )
 
@@ -321,7 +359,10 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
     # When we land the AB/C aliasing in the cshuffle emitter, swap the
     # `+` for a `max`.
     ab_single = ((t.tile_m * t.tile_k) + (t.tile_n * t.tile_k)) * 2
-    ab_bytes = ab_single * (2 if spec.trait.pipeline == "compv4" else 1)
+    # Both compv4 (logical double-buffer) and dtl_prefetch (real ping-pong)
+    # request 2x the AB LDS.
+    _ab_dbl = spec.trait.pipeline == "compv4" or spec.trait.dtl_prefetch
+    ab_bytes = ab_single * (2 if _ab_dbl else 1)
     c_bytes = t.tile_m * t.tile_n * 2 if spec.trait.epilogue == "cshuffle" else 0
     bytes_lds = ab_bytes + c_bytes
     if bytes_lds > 160 * 1024:
@@ -471,6 +512,18 @@ def build_universal_gemm(spec: UniversalGemmSpec) -> KernelDef:
         stride_a = b.param("stride_a", I32)
         stride_b = b.param("stride_b", I32)
         stride_c = b.param("stride_c", I32)
+    if spec.batched and spec.trait.active_tile_skip:
+        # MoE active-tile gate. ``SortedTokenIds`` carries the
+        # bucket -> token-id map; ``-1`` marks an inactive padded
+        # row. ``slot_size`` is the per-expert padded row count.
+        sorted_token_ids = b.param(
+            "SortedTokenIds",
+            PtrType(I32, "global"),
+            noalias=True,
+            readonly=True,
+            align=4,
+        )
+        slot_size_p = b.param("slot_size", I32)
 
     t = spec.tile
     a_per_lane, b_per_lane, c_per_lane = _mfma_atom_widths(spec)
@@ -553,8 +606,18 @@ def build_universal_gemm(spec: UniversalGemmSpec) -> KernelDef:
     # *reuses* the larger of (AB, C) since lifetimes don't overlap, but
     # for simplicity (and to match what CK's compv4 does — separate
     # allocations) we keep them distinct.
-    A_smem = b.smem_alloc(storage_dtype, [block_m, block_k], name_hint="A_smem")
-    B_smem = b.smem_alloc(storage_dtype, [block_n, block_k], name_hint="B_smem")
+    #
+    # When ``dtl_prefetch`` is on, we double the M and N dimensions of
+    # each LDS buffer; the ``parity`` (0 or 1) selects which half is the
+    # current write target / read source, and the K-loop alternates so
+    # next-iter DTLA writes go to the buffer the MFMAs aren't reading.
+    _prefetch = bool(spec.trait.dtl_prefetch)
+    if _prefetch and not spec.trait.direct_to_lds:
+        raise ValueError("dtl_prefetch requires direct_to_lds=True")
+    _A_LDS_M = 2 * block_m if _prefetch else block_m
+    _B_LDS_N = 2 * block_n if _prefetch else block_n
+    A_smem = b.smem_alloc(storage_dtype, [_A_LDS_M, block_k], name_hint="A_smem")
+    B_smem = b.smem_alloc(storage_dtype, [_B_LDS_N, block_k], name_hint="B_smem")
     # NOTE: a true double-buffered (`compv4`) pipeline would also allocate
     # `A_smem2 / B_smem2` here. We currently use a single LDS buffer per
     # operand in both single- and double-buffer modes; this kernel does
@@ -616,7 +679,49 @@ def build_universal_gemm(spec: UniversalGemmSpec) -> KernelDef:
         addr_space="lds",
     )
 
-    def emit_load_phase(A_dst: Value, B_dst: Value, k_off: Value) -> None:
+    # DirectToLDS (DTLA/DTLB) plumbing. We issue
+    # ``async_buffer_load_lds_addr`` directly because
+    # :class:`AsyncTileLoader` assumes a tile shape where the row dimension
+    # wraps at ``halves_per_chunk`` — that's an attention-specific layout
+    # and does not match a [block_m, block_k] GEMM tile with block_k >>
+    # halves_per_chunk.
+    #
+    # The intrinsic writes ``dwords * 4`` bytes per lane lane-contiguous
+    # starting at the wave-uniform ``lds_dst``. For our tile we lay
+    # ``block_size`` lanes across the tile such that each lane covers one
+    # chunk of ``dwords * 2`` halves (bf16 elements). Passes cover the
+    # remaining chunks_total / block_size iterations.
+    if spec.trait.direct_to_lds:
+        from ..core.ir import I64 as _I64
+
+        _DTL_DWORDS = 4  # 16 bytes/lane
+        _DTL_HALVES = _DTL_DWORDS * 2  # 8 elements (bf16 halves) per lane chunk
+        _DTL_BYTES_PER_LANE = _DTL_DWORDS * 4
+        if (block_k % _DTL_HALVES) != 0:
+            raise ValueError(
+                f"direct_to_lds requires block_k % {_DTL_HALVES} == 0 (got {block_k})"
+            )
+        _dtl_a_chunks = (block_m * block_k) // _DTL_HALVES
+        _dtl_b_chunks = (block_n * block_k) // _DTL_HALVES
+        _dtl_a_passes = (_dtl_a_chunks + spec.block_size - 1) // spec.block_size
+        _dtl_b_passes = (_dtl_b_chunks + spec.block_size - 1) // spec.block_size
+        # block_size lanes write block_size * BYTES_PER_LANE bytes per pass
+        # to LDS. Single workgroup writes share the LDS base.
+        _dtl_pass_bytes = spec.block_size * _DTL_BYTES_PER_LANE
+
+        _dtl_big_bytes = b.const_i32(0x7FFF0000)
+        _dtl_a_rsrc = b.buffer_rsrc(A, _dtl_big_bytes)
+        _dtl_b_rsrc = b.buffer_rsrc(Bp, _dtl_big_bytes)
+        _dtl_a_lds_base = b.smem_addr_of(A_smem)
+        _dtl_b_lds_base = b.smem_addr_of(B_smem)
+        _dtl_zero_soff = b.const_i32(0)
+        # chunks-per-row in halves: block_k halves wide / chunk width
+        _dtl_chunks_per_row = block_k // _DTL_HALVES
+        _dtl_c_chunks_per_row = b.const_i32(_dtl_chunks_per_row)
+        _dtl_c_halves_per_chunk = b.const_i32(_DTL_HALVES)
+        _dtl_c_block_size = b.const_i32(spec.block_size)
+
+    def emit_load_phase(A_dst: Value, B_dst: Value, k_off: Value, lds_parity=0) -> None:
         """Coalesced global -> LDS copy for one K tile.
 
         Driven by :class:`TileWindow`: the A/B global views carry the
@@ -625,7 +730,123 @@ def build_universal_gemm(spec: UniversalGemmSpec) -> KernelDef:
         in the batch-axis origin and the descriptor's `mul-by-1`
         folds away in LLVM, yielding identical lowered IR to the
         pre-helpers version.
+
+        ``lds_parity`` (DTLA + prefetch only): 0 writes the first LDS
+        half-buffer; 1 writes the second. May be a Python int (0/1) or
+        an i32 :class:`Value` for runtime parity. Ignored when prefetch
+        is off.
         """
+        if spec.trait.direct_to_lds:
+            # For each pass, every lane copies one chunk of HALVES halves
+            # from global -> LDS via the hardware DTLA/DTLB intrinsic.
+            #   chunk_idx_global = tid + pass * block_size
+            #   tile_row         = chunk_idx_global / chunks_per_row
+            #   tile_col_halves  = (chunk_idx_global % chunks_per_row) * HALVES
+            # The LDS destination address advances by pass_bytes per pass.
+            #
+            # Parity offset (prefetch ping-pong): adds the size of one
+            # half-buffer in bytes to the LDS base when writing the second
+            # buffer; size = block_m*block_k*2 for A, block_n*block_k*2 for B.
+            # ``lds_parity`` may be a Python int (compile-time) or an i32
+            # Value (runtime, carried as a scf.for iter-arg).
+            _parity_is_value = isinstance(lds_parity, Value)
+            a_half_bytes = block_m * block_k * 2
+            b_half_bytes = block_n * block_k * 2
+            if _prefetch and _parity_is_value:
+                # Runtime parity: precompute a single i64 byte offset and
+                # add it once to the LDS base per pass.
+                _a_par_v = b.zext(b.mul(lds_parity, b.const_i32(a_half_bytes)), _I64)
+                _b_par_v = b.zext(b.mul(lds_parity, b.const_i32(b_half_bytes)), _I64)
+                a_lds_par_base = b.smem_ptr_add(_dtl_a_lds_base, _a_par_v)
+                b_lds_par_base = b.smem_ptr_add(_dtl_b_lds_base, _b_par_v)
+            else:
+                a_lds_par_base = _dtl_a_lds_base
+                b_lds_par_base = _dtl_b_lds_base
+            a_parity_bytes_static = (
+                lds_parity * a_half_bytes if _prefetch and not _parity_is_value else 0
+            )
+            b_parity_bytes_static = (
+                lds_parity * b_half_bytes if _prefetch and not _parity_is_value else 0
+            )
+            c2 = b.const_i32(2)
+            # Per-wave LDS offset. ``async_buffer_load_lds_addr`` is a
+            # wave-level intrinsic: every wave writes
+            # ``wave_size * BYTES_PER_LANE`` contiguous bytes starting
+            # at the wave-uniform ``lds_dst``. With multiple waves per
+            # WG, each wave must target a different LDS slice or they
+            # stomp on each other. The block-wide ``chunk_idx`` already
+            # uses ``tid``, so wave w covers chunks [w*wave .. (w+1)*wave),
+            # which in the LDS layout (block_m x block_k row-major)
+            # corresponds to a ``wave_size * BYTES_PER_LANE`` slice
+            # starting at ``w * wave_size * BYTES_PER_LANE`` within the
+            # per-pass region. We compute the per-wave LDS base once.
+            _wave_bytes = spec.wave_size * _DTL_BYTES_PER_LANE
+            if t.warp_m * t.warp_n * t.warp_k > 1:
+                _warp_id = b.div(tid, c_wave)
+                _wave_par_off = b.zext(b.mul(_warp_id, b.const_i32(_wave_bytes)), _I64)
+                a_lds_wave_base = b.smem_ptr_add(a_lds_par_base, _wave_par_off)
+                b_lds_wave_base = b.smem_ptr_add(b_lds_par_base, _wave_par_off)
+            else:
+                a_lds_wave_base = a_lds_par_base
+                b_lds_wave_base = b_lds_par_base
+            for p in range(_dtl_a_passes):
+                pass_off_bytes = p * _dtl_pass_bytes + a_parity_bytes_static
+                pass_lds_a = (
+                    b.smem_ptr_add(
+                        a_lds_wave_base, b.zext(b.const_i32(pass_off_bytes), _I64)
+                    )
+                    if pass_off_bytes > 0
+                    else a_lds_wave_base
+                )
+                chunk_idx = b.add(tid, b.const_i32(p * spec.block_size))
+                row = b.div(chunk_idx, _dtl_c_chunks_per_row)
+                col_v = b.mod(chunk_idx, _dtl_c_chunks_per_row)
+                col = b.mul(col_v, _dtl_c_halves_per_chunk)
+                # element offset for A row in halves
+                off_elems = b.add(
+                    batch_off_a,
+                    b.add(b.mul(b.add(block_m_off, row), K), b.add(k_off, col)),
+                )
+                off_bytes = b.mul(off_elems, c2)
+                b.async_buffer_load_lds_addr(
+                    _dtl_a_rsrc,
+                    pass_lds_a,
+                    off_bytes,
+                    _dtl_zero_soff,
+                    _DTL_DWORDS,
+                    coherency=spec.trait.dtl_cache_a,
+                )
+            for p in range(_dtl_b_passes):
+                pass_off_bytes = p * _dtl_pass_bytes + b_parity_bytes_static
+                pass_lds_b = (
+                    b.smem_ptr_add(
+                        b_lds_wave_base, b.zext(b.const_i32(pass_off_bytes), _I64)
+                    )
+                    if pass_off_bytes > 0
+                    else b_lds_wave_base
+                )
+                chunk_idx = b.add(tid, b.const_i32(p * spec.block_size))
+                row = b.div(chunk_idx, _dtl_c_chunks_per_row)
+                col_v = b.mod(chunk_idx, _dtl_c_chunks_per_row)
+                col = b.mul(col_v, _dtl_c_halves_per_chunk)
+                off_elems = b.add(
+                    batch_off_b,
+                    b.add(b.mul(b.add(block_n_off, row), K), b.add(k_off, col)),
+                )
+                off_bytes = b.mul(off_elems, c2)
+                b.async_buffer_load_lds_addr(
+                    _dtl_b_rsrc,
+                    pass_lds_b,
+                    off_bytes,
+                    _dtl_zero_soff,
+                    _DTL_DWORDS,
+                    coherency=spec.trait.dtl_cache_b,
+                )
+            # The following ``b.sync()`` (in the caller) lowers to
+            # ``s_waitcnt vmcnt(0) lgkmcnt(0) ; s_barrier``, which drains
+            # the in-flight DTLA writes before any wave reads LDS.
+            return
+
         a_global_tile = make_tile_window(
             a_view,
             lengths=(1, block_m, block_k),
@@ -658,23 +879,93 @@ def build_universal_gemm(spec: UniversalGemmSpec) -> KernelDef:
             else:
                 a_val = a_global_tile.load_vec(b, b.const_i32(0), row, col, n=load_vec)
                 a_lds_tile.store_vec(b, row, col, value=a_val, n=load_vec)
-        for e in range(b_vecs_per_thread):
-            vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-            row = b.div(vec_idx, c_block_k_div_vec)
-            col_v = b.mod(vec_idx, c_block_k_div_vec)
-            col = b.mul(col_v, c_load_vec) if load_vec > 1 else col_v
-            if load_vec == 1:
-                b_val = b_global_tile.load_scalar(b, b.const_i32(0), row, col)
-                b_lds_tile.store_scalar(b, row, col, value=b_val)
-            else:
-                b_val = b_global_tile.load_vec(b, b.const_i32(0), row, col, n=load_vec)
-                b_lds_tile.store_vec(b, row, col, value=b_val, n=load_vec)
+        # B-load branch.
+        #
+        # Canonical (row-major B): each lane reads ``load_vec`` halves at
+        # `(n_global_row, k_global_col)`; address arithmetic is strided
+        # (one row of B is K halves apart). The wave's lanes hit
+        # different rows -> multiple discontiguous VMEM transactions per
+        # K-tile.
+        #
+        # ``preshuffle_b`` (B is pre-shuffled to ``(k_tiles, n_tiles,
+        # block_n, block_k)`` per batch by the host): the (block_n x
+        # block_k) tile for the current `(n_tile, k_tile)` lives as
+        # ``block_n * block_k`` consecutive elements in B. Loading it
+        # contiguously into ``B_smem`` (which is row-major
+        # ``(block_n, block_k)``) yields **the same** in-LDS layout as
+        # the canonical path, so the MFMA inner loop is unchanged. The
+        # win is that the per-K global loads collapse to one wide
+        # ``buffer_load_dwordxN`` burst per warp.
+        if spec.trait.preshuffle_b:
+            n_tile_idx = b.div(block_n_off, c_block_n)
+            k_tile_idx = b.div(k_off, c_block_k)
+            # ceil(N / block_n); pre-condition: caller pads N to a
+            # multiple of block_n so the ceiling is N / block_n exactly.
+            n_tile_count = b.div(N, c_block_n)
+            tile_offset_elements = b.mul(
+                b.add(b.mul(k_tile_idx, n_tile_count), n_tile_idx),
+                b.const_i32(block_n * block_k),
+            )
+            base_off = b.add(batch_off_b, tile_offset_elements)
+            for e in range(b_vecs_per_thread):
+                vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
+                glob_off = b.add(base_off, b.mul(vec_idx, c_load_vec))
+                row = b.div(vec_idx, c_block_k_div_vec)
+                col_v = b.mod(vec_idx, c_block_k_div_vec)
+                col = b.mul(col_v, c_load_vec) if load_vec > 1 else col_v
+                if load_vec == 1:
+                    b_val = b.global_load(Bp, glob_off, storage_dtype)
+                    b_lds_tile.store_scalar(b, row, col, value=b_val)
+                else:
+                    b_val = b.global_load_vN(Bp, glob_off, storage_dtype, load_vec)
+                    b_lds_tile.store_vec(b, row, col, value=b_val, n=load_vec)
+        else:
+            for e in range(b_vecs_per_thread):
+                vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
+                row = b.div(vec_idx, c_block_k_div_vec)
+                col_v = b.mod(vec_idx, c_block_k_div_vec)
+                col = b.mul(col_v, c_load_vec) if load_vec > 1 else col_v
+                if load_vec == 1:
+                    b_val = b_global_tile.load_scalar(b, b.const_i32(0), row, col)
+                    b_lds_tile.store_scalar(b, row, col, value=b_val)
+                else:
+                    b_val = b_global_tile.load_vec(
+                        b, b.const_i32(0), row, col, n=load_vec
+                    )
+                    b_lds_tile.store_vec(b, row, col, value=b_val, n=load_vec)
 
     def emit_mfma_phase(
-        A_src: Value, B_src: Value, iter_vars: Sequence[Value]
+        A_src: Value,
+        B_src: Value,
+        iter_vars: Sequence[Value],
+        lds_parity=0,
     ) -> List[Value]:
         """One K-tile worth of MFMAs across all per-warp atom positions
-        and every K atom step inside this K-tile."""
+        and every K atom step inside this K-tile.
+
+        ``lds_parity`` (DTLA + prefetch only): shifts every A row by
+        ``parity * block_m`` and every B row by ``parity * block_n`` so
+        the reads target the half-buffer that holds the freshly-loaded
+        K-tile. Ignored when prefetch is off. May be a Python int or
+        runtime i32 Value.
+        """
+        _mp_is_val = isinstance(lds_parity, Value)
+        if _prefetch:
+            if _mp_is_val:
+                a_par_row_v = b.mul(lds_parity, b.const_i32(block_m))
+                b_par_row_v = b.mul(lds_parity, b.const_i32(block_n))
+                a_row_parity_off = 0  # carried as a Value addition below
+                b_row_parity_off = 0
+            else:
+                a_par_row_v = None
+                b_par_row_v = None
+                a_row_parity_off = lds_parity * block_m
+                b_row_parity_off = lds_parity * block_n
+        else:
+            a_par_row_v = None
+            b_par_row_v = None
+            a_row_parity_off = 0
+            b_row_parity_off = 0
         # Lane mapping into LDS: A wants per-lane `a_per_lane` K-elements
         # starting at K = k_blk * a_per_lane.
         if (t.warp_tile_m, t.warp_tile_n) == (16, 16):
@@ -706,8 +997,13 @@ def build_universal_gemm(spec: UniversalGemmSpec) -> KernelDef:
             a_rows = []
             for mi in range(mfmas_m):
                 a_row = b.add(
-                    warp_m_off, b.add(b.const_i32(mi * t.warp_tile_m), m_in_atom)
+                    warp_m_off,
+                    b.add(
+                        b.const_i32(mi * t.warp_tile_m + a_row_parity_off), m_in_atom
+                    ),
                 )
+                if a_par_row_v is not None:
+                    a_row = b.add(a_row, a_par_row_v)
                 a_rows.append(
                     _emit_smem_load(
                         b, A_src, a_row, col_base, a_per_lane, storage_dtype
@@ -718,8 +1014,13 @@ def build_universal_gemm(spec: UniversalGemmSpec) -> KernelDef:
             b_cols = []
             for ni in range(mfmas_n):
                 b_row = b.add(
-                    warp_n_off, b.add(b.const_i32(ni * t.warp_tile_n), n_in_atom)
+                    warp_n_off,
+                    b.add(
+                        b.const_i32(ni * t.warp_tile_n + b_row_parity_off), n_in_atom
+                    ),
                 )
+                if b_par_row_v is not None:
+                    b_row = b.add(b_row, b_par_row_v)
                 b_cols.append(
                     _emit_smem_load(
                         b, B_src, b_row, col_base, b_per_lane, storage_dtype
@@ -742,63 +1043,160 @@ def build_universal_gemm(spec: UniversalGemmSpec) -> KernelDef:
 
         return new_accs
 
-    # ---- the K loop ----
-    for_op = b.scf_for_iter(c0, K, c_block_k, accs, iv_name="k0")
-    with for_op as (k0, iter_vars):
-        # Single-stage prefetch is the simplest correct pipeline. For
-        # `compv4` with the double-buffered LDS we logically have:
-        #   stage = (k0 / block_k) & 1
-        # but we collapse that to a static "use A_smem this iteration"
-        # since the loop body is fixed; the double buffer pays off via
-        # the scheduler reordering loads vs MFMAs, not via per-iteration
-        # ping-pong (we keep the body simple and rely on compv4's
-        # sched_group_barrier interleave hints).
-        emit_load_phase(A_smem, B_smem, k0)
-        b.sync()
+    # ---- active-tile gate ----
+    # When ``trait.active_tile_skip`` is on, the K-loop + epilogue
+    # are wrapped in ``scf.if(do_work)``. The condition is wave-
+    # uniform (CTA-uniform inputs + a single CTA-uniform global
+    # load) so the AMDGPU backend collapses the whole if-then to
+    # a scalar branch around the body; inactive tiles do one
+    # ``buffer_load_dword`` of the bucket head and exit.
+    do_work_cond: Optional[Value] = None
+    if spec.batched and spec.trait.active_tile_skip:
+        # Bucket head index for THIS CTA's (expert, m-tile) slot:
+        # ``block_id_z * slot_size + block_m_off``. Using
+        # ``block_m_off`` (already chiplet-swizzle-aware and
+        # tile_m-aligned) keeps the gate consistent with the actual
+        # rows the address arithmetic below will read.
+        bucket_head = b.add(b.mul(b.block_id_z(), slot_size_p), block_m_off)
+        first_token = b.global_load_i32(sorted_token_ids, bucket_head)
+        do_work_cond = b.cmp_ge(first_token, c0)
 
-        new_accs = emit_mfma_phase(A_smem, B_smem, iter_vars)
+    def emit_compute_and_epilogue() -> None:
+        if _prefetch:
+            _emit_kloop_prefetch()
+        else:
+            _emit_kloop_simple()
+        _emit_epilogue()
 
-        b.sync()
-        b.scf_yield(*new_accs)
+    def _emit_kloop_simple() -> None:
+        for_op = b.scf_for_iter(c0, K, c_block_k, accs, iv_name="k0")
+        with for_op as (k0, iter_vars):
+            # Single-stage prefetch is the simplest correct pipeline.
+            # For `compv4` the double-buffered LDS is conceptual; the
+            # scheduler hints below carry the actual interleave.
+            emit_load_phase(A_smem, B_smem, k0)
+            b.sync()
 
-    # ---- epilogue ----
-    fused_ep = getattr(spec, "_fused_epilogue", None)
-    if spec.trait.epilogue == "cshuffle":
-        _emit_epilogue_cshuffle(
-            b,
-            spec,
-            A_smem,
-            for_op.results,
-            warp_m_idx,
-            warp_n_idx,
-            lane,
-            block_m_off,
-            block_n_off,
-            M,
-            N,
-            C,
-            a_per_lane,
-            b_per_lane,
-            c_per_lane,
-            batch_off_c=batch_off_c,
-            fused_epilogue=fused_ep,
+            new_accs = emit_mfma_phase(A_smem, B_smem, iter_vars)
+
+            b.sync()
+            b.scf_yield(*new_accs)
+        nonlocal _for_results
+        _for_results = for_op.results
+
+    def _emit_kloop_prefetch() -> None:
+        """Software-pipelined K-loop with DTLA ping-pong.
+
+        Structure:
+          prologue:        DTLA load tile 0 -> half 0
+          for k in [0, K-block_k) step block_k:
+              parity = (k / block_k) & 1   ; next_parity = parity ^ 1
+              DTLA load tile k+block_k -> half (parity ^ 1)
+              s_waitcnt vmcnt(loads_in_flight_for_next_tile) ; barrier
+              MFMA from half parity
+              ; no end-barrier — half (parity ^ 1) has its own LDS region
+          epilogue:        ; last tile already loaded into the final parity
+              s_waitcnt vmcnt(0) ; barrier
+              MFMA from final parity
+
+        The post-issue ``s_waitcnt vmcnt(N)`` keeps N loads (= next
+        tile's count) in flight while the current tile drains, so the
+        loop's MFMA work overlaps the next tile's HBM transfers.
+        """
+        loads_per_tile = _dtl_a_passes + _dtl_b_passes
+        # vmcnt is 6 bits on gfx950 (max 63). If next-tile loads exceed
+        # that, we'd saturate and the prefetch buys nothing extra.
+        if loads_per_tile > 63:
+            # Fall back to the non-prefetched path; the constant would
+            # have to be encoded as 63 either way.
+            _emit_kloop_simple()
+            return
+
+        # Prologue: load tile 0 into half 0.
+        emit_load_phase(A_smem, B_smem, c0, lds_parity=0)
+
+        # Loop bounds: iterate k in [0, K - block_k), so the last tile
+        # is handled by the epilogue (which doesn't need to issue a
+        # next-tile load).
+        K_minus_one_tile = b.sub(K, c_block_k)
+        # iter_args: (parity_i32, acc...). parity flips each iter.
+        c1_i32 = b.const_i32(1)
+        loop_args = [("par", c0)] + list(accs)
+        for_op = b.scf_for_iter(
+            c0, K_minus_one_tile, c_block_k, loop_args, iv_name="k0"
         )
+        with for_op as (k0, iter_vars):
+            parity = iter_vars[0]
+            acc_iter = iter_vars[1:]
+            next_parity = b.sub(c1_i32, parity)  # 1 - parity (0/1 only)
+            k_next = b.add(k0, c_block_k)
+            # Issue next-tile loads into the other half (will be drained
+            # at the start of *next* iter via vmcnt(loads_per_tile)).
+            emit_load_phase(A_smem, B_smem, k_next, lds_parity=next_parity)
+            # Wait until only the next tile's loads remain — i.e., the
+            # *current* tile's loads have all completed.
+            b.s_waitcnt(vmcnt=loads_per_tile, lgkmcnt=0)
+            b.sync_lds_only()  # WG barrier; LDS visible to all waves
+            new_accs = emit_mfma_phase(A_smem, B_smem, acc_iter, lds_parity=parity)
+            b.scf_yield(next_parity, *new_accs)
+
+        # Epilogue: drain remaining loads, MFMA last tile.
+        final_parity = for_op.results[0]
+        b.s_waitcnt(vmcnt=0, lgkmcnt=0)
+        b.sync_lds_only()
+        epi_accs = emit_mfma_phase(
+            A_smem, B_smem, for_op.results[1:], lds_parity=final_parity
+        )
+        nonlocal _for_results
+        _for_results = epi_accs
+
+    _for_results: Sequence[Value] = ()
+
+    def _emit_epilogue() -> None:
+        # ---- epilogue ----
+        fused_ep = getattr(spec, "_fused_epilogue", None)
+        if spec.trait.epilogue == "cshuffle":
+            _emit_epilogue_cshuffle(
+                b,
+                spec,
+                A_smem,
+                _for_results,
+                warp_m_idx,
+                warp_n_idx,
+                lane,
+                block_m_off,
+                block_n_off,
+                M,
+                N,
+                C,
+                a_per_lane,
+                b_per_lane,
+                c_per_lane,
+                batch_off_c=batch_off_c,
+                fused_epilogue=fused_ep,
+            )
+        else:
+            _emit_epilogue_default(
+                b,
+                spec,
+                _for_results,
+                warp_m_idx,
+                warp_n_idx,
+                lane,
+                block_m_off,
+                block_n_off,
+                M,
+                N,
+                C,
+                c_per_lane,
+                batch_off_c=batch_off_c,
+            )
+
+    if do_work_cond is None:
+        emit_compute_and_epilogue()
     else:
-        _emit_epilogue_default(
-            b,
-            spec,
-            for_op.results,
-            warp_m_idx,
-            warp_n_idx,
-            lane,
-            block_m_off,
-            block_n_off,
-            M,
-            N,
-            C,
-            c_per_lane,
-            batch_off_c=batch_off_c,
-        )
+        with b.scf_if(do_work_cond):
+            emit_compute_and_epilogue()
 
     return b.kernel
 

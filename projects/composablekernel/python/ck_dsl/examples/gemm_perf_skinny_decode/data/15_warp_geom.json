@@ -1,0 +1,125 @@
+{
+  "shape": {
+    "M": 2,
+    "N": 4096,
+    "K": 4096
+  },
+  "results": [
+    {
+      "ms_best": 0.010507644414901733,
+      "ms_median": 0.01055524468421936,
+      "pct_hbm": 39.95567259628535,
+      "vs_rocblas": 1.010350424509782,
+      "max_abs": 0.0,
+      "label": "w1_1_1_bs64_wpeNone",
+      "warp_m": 1,
+      "warp_n": 1,
+      "warp_k": 1,
+      "waves_per_eu": null,
+      "block_size": 64
+    },
+    {
+      "ms_best": 0.010485060214996338,
+      "ms_median": 0.01058326005935669,
+      "pct_hbm": 40.04173475317964,
+      "vs_rocblas": 1.008178866826571,
+      "max_abs": 0.0,
+      "label": "w1_1_1_bs64_wpe2",
+      "warp_m": 1,
+      "warp_n": 1,
+      "warp_k": 1,
+      "waves_per_eu": 2,
+      "block_size": 64
+    },
+    {
+      "ms_best": 0.010444860458374023,
+      "ms_median": 0.01050246000289917,
+      "pct_hbm": 40.19584576291769,
+      "vs_rocblas": 1.004313505612887,
+      "max_abs": 0.0,
+      "label": "w1_1_1_bs64_wpe4",
+      "warp_m": 1,
+      "warp_n": 1,
+      "warp_k": 1,
+      "waves_per_eu": 4,
+      "block_size": 64
+    },
+    {
+      "ms_best": 0.010528260469436645,
+      "ms_median": 0.010579664707183838,
+      "pct_hbm": 39.87743285975762,
+      "vs_rocblas": 1.0123327374458313,
+      "max_abs": 0.0,
+      "label": "w1_1_1_bs64_wpe8",
+      "warp_m": 1,
+      "warp_n": 1,
+      "warp_k": 1,
+      "waves_per_eu": 8,
+      "block_size": 64
+    },
+    {
+      "label": "w1_1_2_bs128_wpeNone",
+      "error": "compile: invalid GEMM spec: block_size 128 != warp_m*warp_n*wave_size = 64",
+      "warp_m": 1,
+      "warp_n": 1,
+      "warp_k": 2,
+      "waves_per_eu": null
+    },
+    {
+      "label": "w1_1_2_bs128_wpe2",
+      "error": "compile: invalid GEMM spec: block_size 128 != warp_m*warp_n*wave_size = 64",
+      "warp_m": 1,
+      "warp_n": 1,
+      "warp_k": 2,
+      "waves_per_eu": 2
+    },
+    {
+      "label": "w1_1_2_bs128_wpe4",
+      "error": "compile: invalid GEMM spec: block_size 128 != warp_m*warp_n*wave_size = 64",
+      "warp_m": 1,
+      "warp_n": 1,
+      "warp_k": 2,
+      "waves_per_eu": 4
+    },
+    {
+      "label": "w1_1_2_bs128_wpe8",
+      "error": "compile: invalid GEMM spec: block_size 128 != warp_m*warp_n*wave_size = 64",
+      "warp_m": 1,
+      "warp_n": 1,
+      "warp_k": 2,
+      "waves_per_eu": 8
+    },
+    {
+      "label": "w1_1_4_bs256_wpeNone",
+      "error": "compile: invalid GEMM spec: block_size 256 != warp_m*warp_n*wave_size = 64",
+      "warp_m": 1,
+      "warp_n": 1,
+      "warp_k": 4,
+      "waves_per_eu": null
+    },
+    {
+      "label": "w1_1_4_bs256_wpe2",
+      "error": "compile: invalid GEMM spec: block_size 256 != warp_m*warp_n*wave_size = 64",
+      "warp_m": 1,
+      "warp_n": 1,
+      "warp_k": 4,
+      "waves_per_eu": 2
+    },
+    {
+      "label": "w1_1_4_bs256_wpe4",
+      "error": "compile: invalid GEMM spec: block_size 256 != warp_m*warp_n*wave_size = 64",
+      "warp_m": 1,
+      "warp_n": 1,
+      "warp_k": 4,
+      "waves_per_eu": 4
+    },
+    {
+      "label": "w1_1_4_bs256_wpe8",
+      "error": "compile: invalid GEMM spec: block_size 256 != warp_m*warp_n*wave_size = 64",
+      "warp_m": 1,
+      "warp_n": 1,
+      "warp_k": 4,
+      "waves_per_eu": 8
+    }
+  ]
+}
