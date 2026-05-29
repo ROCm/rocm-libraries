@@ -35,6 +35,7 @@
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
 #include "common/misc/rocsolver_timer.hpp"
+#include "rocblas_utility.hpp"
 
 #include "print_matrix.hpp"
 
@@ -196,9 +197,12 @@ void geqr2_geqrf_getError(const rocblas_handle handle,
                           Th& hA,
                           Th& hARes,
                           Uh& hIpiv,
-                          double* max_err)
+                          double max_errors[3])
 {
+    using S = decltype(std::real(T{}));
+
     std::vector<T> hW(n);
+    rocblas_int min_mn = (rocblas_int)std::min(m, n);
 
     // input data initialization
     geqr2_geqrf_initData<true, true, T>(handle, matrix, m, n, dA, lda, stA, dIpiv, stP, bc, hA, hIpiv);
@@ -208,6 +212,11 @@ void geqr2_geqrf_getError(const rocblas_handle handle,
         print_matrix( "A", m, n, dA[0], lda );
     }
 
+    // Save original A before CPU geqrf overwrites hA
+    std::vector<std::vector<T>> hA_orig(bc, std::vector<T>(lda * n));
+    for(I b = 0; b < bc; ++b)
+        std::copy(hA[b], hA[b] + lda * n, hA_orig[b].data());
+
     // execute computations
     // GPU lapack
     CHECK_ROCBLAS_ERROR(rocsolver_geqr2_geqrf(STRIDED, GEQRF, handle, m, n, dA.data(), lda, stA,
@@ -216,7 +225,6 @@ void geqr2_geqrf_getError(const rocblas_handle handle,
 
     if (verbose >= 2)
     {
-        rocblas_int min_mn = std::min( m, n );
         print_matrix( "Aout", m, n, dA[0], lda );
         print_matrix( "tau", min_mn, 1, dIpiv[0], min_mn );
     }
@@ -230,21 +238,143 @@ void geqr2_geqrf_getError(const rocblas_handle handle,
 
     if (verbose >= 2)
     {
-        rocblas_int min_mn = std::min( m, n );
         print_matrix( "Aref", m, n, hA[0], lda );
         print_matrix( "tau_ref", min_mn, 1, hIpiv[0], min_mn );
     }
 
-    // error is ||hA - hARes|| / ||hA|| (ideally ||QR - Qres Rres|| / ||QR||)
+    // Forward error: ||hA - hARes|| / ||hA|| (GPU vs CPU factored form)
     // (THIS DOES NOT ACCOUNT FOR NUMERICAL REPRODUCIBILITY ISSUES.
     // IT MIGHT BE REVISITED IN THE FUTURE)
     // using frobenius norm
     double err;
-    *max_err = 0;
+    max_errors[0] = 0;
     for(I b = 0; b < bc; ++b)
     {
         err = norm_error('F', m, n, lda, hA[b], hARes[b]);
-        *max_err = err > *max_err ? err : *max_err;
+        max_errors[0] = rocblas_max_nan(err, max_errors[0]);
+    }
+
+    // Backward error: norm( A - Q*R ) / norm( A ), using 1-norm.
+    // Q*R is computed via unmqr applied to R extracted from the GPU factored output.
+    //
+    // For each batch element b:
+    //   1. Extract R (upper triangle) from hARes[b] into a work array hC, zeroing below diagonal.
+    //   2. Upload hC to GPU (dC).
+    //   3. Apply unmqr on GPU: dC = Q * R  (side=left, trans=none, Q from dA[b] and dIpiv[b]).
+    //   4. Transfer result back to host.
+    //   5. Compute norm( A_orig - Q*R ) and norm( A_orig ) on CPU.
+
+    // Allocate GPU work buffer for one matrix (m x n), reused per batch element.
+    size_t size_C = size_t(lda) * n;
+    device_strided_batch_vector<T> dC(size_C, 1, size_C, 1);
+    CHECK_HIP_ERROR(dC.memcheck());
+
+    // Work array for cpu_lange (needs size max(m,n)).
+    std::vector<S> hrwork(std::max(m, n));
+
+    max_errors[1] = 0;
+    for(I b = 0; b < bc; ++b)
+    {
+        // Build R: copy upper triangle of hARes[b], zero the strict lower triangle.
+        std::vector<T> hC(lda * n);
+        for(I j = 0; j < n; ++j)
+        {
+            for(I i = 0; i < m; ++i)
+            {
+                hC[i + j * lda] = (i <= j) ? hARes[b][i + j * lda] : T(0);
+            }
+        }
+
+        // Upload R to GPU.
+        CHECK_HIP_ERROR(hipMemcpy(dC[0], hC.data(), sizeof(T) * lda * n, hipMemcpyHostToDevice));
+
+        // Compute Q*R on GPU using unmqr:
+        //   dC = Q * dC,  where Q is stored implicitly in dA[b] and dIpiv[b].
+        CHECK_ROCBLAS_ERROR(rocsolver_ormxr_unmxr(
+            GEQRF, handle,
+            rocblas_side_left, rocblas_operation_none,
+            m, n, min_mn,
+            dA[b], lda,
+            dIpiv[b],
+            dC[0], lda));
+
+        // Transfer Q*R back to host.
+        CHECK_HIP_ERROR(hipMemcpy(hC.data(), dC[0], sizeof(T) * lda * n, hipMemcpyDeviceToHost));
+
+        // Compute norm( A_orig - Q*R ) on CPU.
+        // Subtract Q*R from A_orig in-place into hC.
+        for(I j = 0; j < n; ++j)
+            for(I i = 0; i < m; ++i)
+                hC[i + j * lda] = hA_orig[b][i + j * lda] - hC[i + j * lda];
+
+        S res_norm = cpu_lange('1', (rocblas_int)m, (rocblas_int)n, hC.data(), (rocblas_int)lda, hrwork.data());
+        S A_norm   = cpu_lange('1', (rocblas_int)m, (rocblas_int)n, hA_orig[b].data(), (rocblas_int)lda, hrwork.data());
+
+        double berr = (A_norm != S(0)) ? double(res_norm) / double(A_norm) : double(res_norm);
+        max_errors[1] = rocblas_max_nan(berr, max_errors[1]);
+    }
+
+    // Orthogonality: norm( I - Q^H * Q ) / min_mn, using 1-norm.
+    // Q is generated explicitly via ungqr from the GPU factored output.
+    // Q is m x min_mn; Q^H * Q is min_mn x min_mn.
+
+    // GPU work buffer for Q (m x min_mn, leading dim lda).
+    size_t size_Q = size_t(lda) * min_mn;
+    device_strided_batch_vector<T> dQ(size_Q, 1, size_Q, 1);
+    CHECK_HIP_ERROR(dQ.memcheck());
+
+    // GPU work buffer for I - Q^H * Q (min_mn x min_mn, leading dim min_mn).
+    size_t size_R = size_t(min_mn) * min_mn;
+    device_strided_batch_vector<T> dR(size_R, 1, size_R, 1);
+    CHECK_HIP_ERROR(dR.memcheck());
+
+    // GPU scalar for lange output.
+    device_strided_batch_vector<S> dnorm(1, 1, 1, 1);
+    CHECK_HIP_ERROR(dnorm.memcheck());
+    host_strided_batch_vector<S> hnorm(1, 1, 1, 1);
+
+    // Build identity matrix on host for upload into dR before each gemm.
+    std::vector<T> hR_id(min_mn * min_mn, T(0));
+    for(rocblas_int i = 0; i < min_mn; ++i)
+        hR_id[i + i * min_mn] = T(1);
+
+    const T one    = T(1);
+    const T negone = T(-1);
+
+    max_errors[2] = 0;
+    for(I b = 0; b < bc; ++b)
+    {
+        // Copy first min_mn columns of dA[b] (Householder vectors) to dQ.
+        CHECK_HIP_ERROR(hipMemcpy(dQ[0], dA[b], sizeof(T) * lda * min_mn, hipMemcpyDeviceToDevice));
+
+        // Generate explicit Q (m x min_mn) in dQ via ungqr.
+        CHECK_ROCBLAS_ERROR(rocsolver_orgxr_ungxr(
+            GEQRF, handle,
+            (rocblas_int)m, min_mn, min_mn,
+            dQ[0], (rocblas_int)lda,
+            dIpiv[b]));
+
+        // Set dR = I (min_mn x min_mn).
+        CHECK_HIP_ERROR(hipMemcpy(dR[0], hR_id.data(), sizeof(T) * min_mn * min_mn, hipMemcpyHostToDevice));
+
+        // Compute dR = I - Q^H * Q.
+        CHECK_ROCBLAS_ERROR(rocsolver_gemm(
+            false, handle,
+            rocblas_operation_conjugate_transpose, rocblas_operation_none,
+            min_mn, min_mn, (rocblas_int)m,
+            &negone, dQ[0], (rocblas_int)lda, 0,
+                     dQ[0], (rocblas_int)lda, 0,
+            &one,    dR[0], min_mn,            0,
+            1));
+
+        // Compute norm( I - Q^H * Q ) via rocsolver_lange.
+        CHECK_ROCBLAS_ERROR(rocsolver_lange(
+            handle, rocsolver_norm_type_one,
+            min_mn, min_mn, dR[0], min_mn, dnorm[0]));
+        CHECK_HIP_ERROR(hnorm.transfer_from(dnorm));
+
+        double oerr = double(hnorm[0][0]) / min_mn;
+        max_errors[2] = rocblas_max_nan(oerr, max_errors[2]);
     }
 }
 
@@ -346,7 +476,7 @@ void testing_geqr2_geqrf(Arguments& argus)
     // determine sizes
     size_t size_A = size_t(lda) * n;
     size_t size_P = size_t(min(m, n));
-    double max_error = 0, gpu_time_used = 0, cpu_time_used = 0;
+    double max_errors[3] = {0, 0, 0}, gpu_time_used = 0, cpu_time_used = 0;
 
     size_t size_ARes = (argus.unit_check || argus.norm_check) ? size_A : 0;
 
@@ -416,7 +546,7 @@ void testing_geqr2_geqrf(Arguments& argus)
         // check computations
         if(argus.unit_check || argus.norm_check)
             geqr2_geqrf_getError<STRIDED, GEQRF, T>(handle, matrix, verbose, m, n, dA, lda, stA, dIpiv, stP, bc, hA,
-                                                    hARes, hIpiv, &max_error);
+                                                    hARes, hIpiv, max_errors);
 
         // collect performance data
         if(argus.timing && hot_calls > 0)
@@ -452,7 +582,7 @@ void testing_geqr2_geqrf(Arguments& argus)
         // check computations
         if(argus.unit_check || argus.norm_check)
             geqr2_geqrf_getError<STRIDED, GEQRF, T>(handle, matrix, verbose, m, n, dA, lda, stA, dIpiv, stP, bc, hA,
-                                                    hARes, hIpiv, &max_error);
+                                                    hARes, hIpiv, max_errors);
 
         // collect performance data
         if(argus.timing && hot_calls > 0)
@@ -488,7 +618,7 @@ void testing_geqr2_geqrf(Arguments& argus)
         // check computations
         if(argus.unit_check || argus.norm_check)
             geqr2_geqrf_getError<STRIDED, GEQRF, T>(handle, matrix, verbose, m, n, dA, lda, stA, dIpiv, stP, bc, hA,
-                                                    hARes, hIpiv, &max_error);
+                                                    hARes, hIpiv, max_errors);
 
         // collect performance data
         if(argus.timing && hot_calls > 0)
@@ -501,7 +631,11 @@ void testing_geqr2_geqrf(Arguments& argus)
     // using m * machine_precision as tolerance
     // (for possibly singular of ill-conditioned matrices we could use m*min(m,n))
     if(argus.unit_check)
-        ROCSOLVER_TEST_CHECK(T, max_error, m);
+    {
+        ROCSOLVER_TEST_CHECK(T, max_errors[0], m);
+        ROCSOLVER_TEST_CHECK(T, max_errors[1], m);
+        ROCSOLVER_TEST_CHECK(T, max_errors[2], m);
+    }
 
     // output results for rocsolver-bench
     if(argus.timing)
@@ -527,8 +661,8 @@ void testing_geqr2_geqrf(Arguments& argus)
             rocsolver_bench_header("Results:");
             if(argus.norm_check)
             {
-                rocsolver_bench_output("cpu_time_us", "gpu_time_us", "error");
-                rocsolver_bench_output(cpu_time_used, gpu_time_used, max_error);
+                rocsolver_bench_output("cpu_time_us", "gpu_time_us", "forward error", "backward error", "orthogonality");
+                rocsolver_bench_output(cpu_time_used, gpu_time_used, max_errors[0], max_errors[1], max_errors[2]);
             }
             else
             {
@@ -540,7 +674,7 @@ void testing_geqr2_geqrf(Arguments& argus)
         else
         {
             if(argus.norm_check)
-                rocsolver_bench_output(gpu_time_used, max_error);
+                rocsolver_bench_output(gpu_time_used, max_errors[0], max_errors[1], max_errors[2]);
             else
                 rocsolver_bench_output(gpu_time_used);
         }
