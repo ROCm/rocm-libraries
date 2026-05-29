@@ -91,7 +91,7 @@ layouts   = ["NCHW", "NHWC"]
 
 | Field      | Source                                                  | Example values |
 |------------|---------------------------------------------------------|----------------|
-| `op_chains`| `describeGraphStructured(graph).opChain` — visit order + `to_string(NodeType)` joined by ` + `, with a `:VARIANT` suffix per node when the node's attributes affect MIOpen solver dispatch | `"ConvFprop"`, `"ConvFprop + Pointwise:RELU_FWD"`, `"Batchnorm:training_with_running_stats + Pointwise:RELU_FWD"` |
+| `op_chains`| `describeGraphStructured(graph).opChain` — visit order + `to_string(NodeType)` joined by ` + `, with a `:VARIANT` suffix per node when the node's attributes affect MIOpen solver dispatch | `"ConvFprop"`, `"ConvFprop + Pointwise:RELU_FWD"`, `"BatchnormInference + Pointwise:RELU_FWD[upper_clip]"` |
 | `io_dtypes`| `to_string(graph.graph_attributes.get_io_data_type())`  | `"fp16"`, `"fp32"`, `"bf16"`, `"fp64"` |
 | `layouts`  | Fixtures call `setTestCaseLayout("NCHW"|"NHWC"|...)`    | `"NCHW"`, `"NHWC"`, `"NCDHW"`, `"NDHWC"` |
 
@@ -103,14 +103,15 @@ Today:
 
 | Node | Variant values | Why |
 |------|----------------|-----|
-| `Pointwise` | `RELU_FWD`, `SIGMOID`, ... (the mode) | Different solvers per activation mode. |
+| `Pointwise` | `MODE` plus `[flags]` listing which optional params are set — `lower_clip`, `upper_clip`, `lower_slope`, `swish_beta`, `elu_alpha`, `softplus_beta` (alphabetical, deterministic). Example: `RELU_FWD[lower_clip,upper_clip]`. | Different MIOpen solvers per (mode, params) combination — plain ReLU, ReLU6, clamp, and leaky-ReLU all use mode `RELU_FWD` but dispatch differently. |
 | `Reduction` | `ADD`, `MAX`, ... when mode is set | Different solvers per reduction op. |
-| `Batchnorm` | `training_with_running_stats`, `batch_stats_only` | Same node type; presence of `previous_running_stats` inputs flips MIOpen dispatch (FULL_TRAINING vs WITH_BATCH_STATS in the test fixtures). |
 
-Variants are extended per-node-type as new dispatch divergences are
-discovered. The condenser fails loudly on `S∩U≠∅` to surface the next
-missing variant — when that fires, add a variant tag for the offending
-node type, bump the schema version, regenerate.
+**Rule of thumb**: variants are extended per-node-type only when a real
+S∩U conflict has demonstrated the bare node type is too coarse. Adding
+speculative variants creates matcher-set noise (extra entries that the
+engine treats identically). The condenser fails loudly on `S∩U≠∅` to
+surface the next missing variant — when that fires, add a variant tag
+for the offending node type, bump the schema version, regenerate.
 
 The op_chain string format is a stability contract once this RFC ships
 (RFC 0012 §12 risks). Any change to graph visit order, `to_string`

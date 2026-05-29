@@ -8,7 +8,6 @@
 
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Types.hpp>
-#include <hipdnn_frontend/node/BatchnormNode.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
 #include <hipdnn_frontend/node/ReductionNode.hpp>
 
@@ -108,17 +107,16 @@ inline std::string describeNodeVariant(const hipdnn_frontend::graph::INode& node
         auto mode = red->attributes.get_mode();
         return mode.has_value() ? std::string(to_string(*mode)) : std::string{};
     }
-    if(const auto* bn = dynamic_cast<const BatchnormNode*>(&node))
-    {
-        // FULL_TRAINING vs WITH_BATCH_STATS scenarios in the integration
-        // tests produce identical node types but wire different optional
-        // inputs (prev_running_mean/variance + momentum). MIOpen dispatches
-        // them to different solvers; without a variant tag they collide
-        // in S∩U. Tag chosen for human-readability over hash compactness.
-        const bool hasRunningStats = bn->attributes.get_prev_running_mean() != nullptr;
-        return hasRunningStats ? std::string("training_with_running_stats")
-                               : std::string("batch_stats_only");
-    }
+    // BatchnormNode intentionally has no variant tag. An earlier attempt
+    // distinguished FULL_TRAINING vs WITH_BATCH_STATS via the presence of
+    // prev_running_stats inputs, on the hypothesis that MIOpen would
+    // dispatch the two topologies to different solvers. The regenerated
+    // sidecar showed both variants landing in the same matcher with the
+    // same coverage rectangle — MIOpen evidently treats them identically
+    // on RDNA3 (the optional inputs are a no-op when not consumed). The
+    // variant was non-load-bearing and added matcher-set noise. Rule of
+    // thumb: a variant tag belongs here only when a real S∩U conflict
+    // has demonstrated the bare node type is too coarse.
     return {};
 }
 
