@@ -15,7 +15,19 @@
 #ifdef _WIN32
 #include <process.h>
 #define hipdnn_getpid _getpid
+
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
 #else
+#include <cerrno>
+#include <cstring>
+#include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #define hipdnn_getpid getpid
 #endif
@@ -445,6 +457,143 @@ std::pair<std::string, std::string> stripBlockFor(const std::filesystem::path& s
 
 } // namespace
 
+namespace
+{
+
+// RFC 0012 §8.2 atomic write helpers. Goals:
+//   1. Refuse to clobber a stale tmp from a prior crashed run
+//      (O_EXCL on POSIX, CREATE_NEW on Windows).
+//   2. Flush data to disk before swapping (fsync / FlushFileBuffers)
+//      so a power loss between write and rename can't leave a
+//      half-written file readable.
+//   3. Replace the destination atomically (rename / MoveFileExA with
+//      MOVEFILE_REPLACE_EXISTING). The previous remove+rename fallback
+//      opened a window where the sidecar didn't exist at all — a
+//      crashed regenerator could vaporise the file CI gates on.
+//
+// On any failure mid-flight we unlink the tmp; the original sidecar
+// is never observed mid-write.
+
+void writeFileAtomic(const std::filesystem::path& tmpPath,
+                     const std::filesystem::path& finalPath,
+                     const std::string& content)
+{
+#ifdef _WIN32
+    const std::string tmpStr = tmpPath.string();
+    const std::string finalStr = finalPath.string();
+
+    HANDLE h = CreateFileA(tmpStr.c_str(),
+                           GENERIC_WRITE,
+                           0, // no sharing while we're writing
+                           nullptr,
+                           CREATE_NEW, // fails if tmp already exists
+                           FILE_ATTRIBUTE_NORMAL,
+                           nullptr);
+    if(h == INVALID_HANDLE_VALUE)
+    {
+        const DWORD err = GetLastError();
+        throw std::runtime_error("SupportClaimsWriter: CreateFileA(CREATE_NEW) failed for " + tmpStr
+                                 + " (error " + std::to_string(err)
+                                 + "; if a previous run crashed, delete the stale .tmp file)");
+    }
+
+    DWORD written = 0;
+    const DWORD toWrite = static_cast<DWORD>(content.size());
+    if(!WriteFile(h, content.data(), toWrite, &written, nullptr) || written != toWrite)
+    {
+        const DWORD err = GetLastError();
+        CloseHandle(h);
+        std::filesystem::remove(tmpPath);
+        throw std::runtime_error("SupportClaimsWriter: WriteFile failed for " + tmpStr + " (error "
+                                 + std::to_string(err) + ")");
+    }
+
+    if(!FlushFileBuffers(h))
+    {
+        const DWORD err = GetLastError();
+        CloseHandle(h);
+        std::filesystem::remove(tmpPath);
+        throw std::runtime_error("SupportClaimsWriter: FlushFileBuffers failed for " + tmpStr
+                                 + " (error " + std::to_string(err) + ")");
+    }
+
+    CloseHandle(h);
+
+    if(!MoveFileExA(
+           tmpStr.c_str(), finalStr.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+    {
+        const DWORD err = GetLastError();
+        std::filesystem::remove(tmpPath);
+        throw std::runtime_error("SupportClaimsWriter: MoveFileExA failed swapping " + tmpStr
+                                 + " -> " + finalStr + " (error " + std::to_string(err) + ")");
+    }
+#else
+    const std::string tmpStr = tmpPath.string();
+    const std::string finalStr = finalPath.string();
+
+    const int fd = ::open(tmpStr.c_str(),
+                          O_WRONLY | O_CREAT | O_EXCL | O_TRUNC,
+                          S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    if(fd < 0)
+    {
+        const int err = errno;
+        throw std::runtime_error("SupportClaimsWriter: open(O_EXCL) failed for " + tmpStr + ": "
+                                 + std::strerror(err)
+                                 + " (if a previous run crashed, delete the stale .tmp file)");
+    }
+
+    const char* buf = content.data();
+    size_t remaining = content.size();
+    while(remaining > 0)
+    {
+        const ssize_t w = ::write(fd, buf, remaining);
+        if(w < 0)
+        {
+            if(errno == EINTR)
+            {
+                continue;
+            }
+            const int err = errno;
+            ::close(fd);
+            std::filesystem::remove(tmpPath);
+            throw std::runtime_error("SupportClaimsWriter: write failed for " + tmpStr + ": "
+                                     + std::strerror(err));
+        }
+        buf += w;
+        remaining -= static_cast<size_t>(w);
+    }
+
+    if(::fsync(fd) != 0)
+    {
+        const int err = errno;
+        ::close(fd);
+        std::filesystem::remove(tmpPath);
+        throw std::runtime_error("SupportClaimsWriter: fsync failed for " + tmpStr + ": "
+                                 + std::strerror(err));
+    }
+
+    if(::close(fd) != 0)
+    {
+        const int err = errno;
+        std::filesystem::remove(tmpPath);
+        throw std::runtime_error("SupportClaimsWriter: close failed for " + tmpStr + ": "
+                                 + std::strerror(err));
+    }
+
+    // POSIX rename(2) is atomic when source and target are on the same
+    // filesystem — which they are here (same parent directory).
+    if(::rename(tmpStr.c_str(), finalStr.c_str()) != 0)
+    {
+        const int err = errno;
+        std::filesystem::remove(tmpPath);
+        throw std::runtime_error("SupportClaimsWriter: rename failed swapping " + tmpStr + " -> "
+                                 + finalStr + ": " + std::strerror(err));
+    }
+#endif
+}
+
+} // namespace
+
 void SupportClaimsWriter::writeSidecar(const std::filesystem::path& sidecarPath,
                                        const std::string& engineName,
                                        const std::string& archToken,
@@ -464,43 +613,21 @@ void SupportClaimsWriter::writeSidecar(const std::filesystem::path& sidecarPath,
         header = defaultHeader(engineName);
     }
 
+    std::string content = header;
+    if(!preservedBody.empty())
+    {
+        content += preservedBody;
+        if(preservedBody.back() != '\n')
+        {
+            content += '\n';
+        }
+    }
+    content += newBlock;
+
     const auto tmpPath
         = sidecarPath.parent_path()
           / (sidecarPath.filename().string() + ".tmp." + std::to_string(hipdnn_getpid()));
-    std::ofstream tmp(tmpPath, std::ios::out | std::ios::trunc);
-    if(!tmp.is_open())
-    {
-        throw std::runtime_error("SupportClaimsWriter: failed to open " + tmpPath.string()
-                                 + " for writing");
-    }
-    tmp << header;
-    if(!preservedBody.empty())
-    {
-        tmp << preservedBody;
-        if(preservedBody.back() != '\n')
-        {
-            tmp << "\n";
-        }
-    }
-    tmp << newBlock;
-    tmp.flush();
-    tmp.close();
-
-    // std::filesystem::rename is atomic on Linux and on Windows when the
-    // destination doesn't exist; if it does, swap via remove+rename.
-    std::error_code ec;
-    std::filesystem::rename(tmpPath, sidecarPath, ec);
-    if(ec)
-    {
-        std::filesystem::remove(sidecarPath, ec);
-        std::filesystem::rename(tmpPath, sidecarPath, ec);
-        if(ec)
-        {
-            std::filesystem::remove(tmpPath);
-            throw std::runtime_error("SupportClaimsWriter: failed to commit " + sidecarPath.string()
-                                     + ": " + ec.message());
-        }
-    }
+    writeFileAtomic(tmpPath, sidecarPath, content);
 }
 
 // RFC 0012 §8.3 shrinkage-refusal precondition. Before overwriting the
