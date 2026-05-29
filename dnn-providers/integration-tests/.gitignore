@@ -1,0 +1,4 @@
+# Transient diagnostic output from --write-support-claims runs.
+write_claims_*.log
+support_claim_failures.txt
+support_matrix.md
