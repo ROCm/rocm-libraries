@@ -23,7 +23,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Unit tests for Solution._validateMXScaleFormatCombination.
+"""Unit tests for `Validators.MXScaleFormat.validateMXScaleFormatCombination`.
 
 gfx1250's v_wmma_scale_f32_16x16x128_f8f6f4 only accepts a fixed set of
 (A matrix class, A scale, B matrix class, B scale) tuples. The AMDGPU
@@ -49,7 +49,7 @@ import pytest
 
 from rocisa.enum import DataTypeEnum
 from Tensile.Common.DataType import DataType
-from Tensile.SolutionStructs.Solution import _validateMXScaleFormatCombination
+from Tensile.SolutionStructs.Validators.MXScaleFormat import validateMXScaleFormatCombination
 
 
 # ---------------------------------------------------------------------------
@@ -103,7 +103,7 @@ def _call(state, asmCaps=_GFX1250_CAPS):
     Defaults to a gfx1250 (``HasWMMA_V3=True``) asmCaps mapping so the rule
     set fires; gating tests pass ``_NON_GFX1250_CAPS`` explicitly.
     """
-    return _validateMXScaleFormatCombination(
+    return validateMXScaleFormatCombination(
         state, asmCaps=asmCaps, printRejectionReason=False)
 
 
@@ -331,7 +331,7 @@ class TestErrorMessageShape:
     def _captured_reject(self, st, capsys):
         # printRejectionReason=True so reject() emits the diagnostic to
         # stdout, then capsys captures it for assertion.
-        assert _validateMXScaleFormatCombination(
+        assert validateMXScaleFormatCombination(
             st, asmCaps=_GFX1250_CAPS, printRejectionReason=True) is False
         return capsys.readouterr().out
 
