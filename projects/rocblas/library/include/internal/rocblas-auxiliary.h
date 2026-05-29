@@ -75,26 +75,33 @@ ROCBLAS_EXPORT rocblas_status rocblas_set_atomics_mode(rocblas_handle       hand
 ROCBLAS_EXPORT rocblas_status rocblas_get_atomics_mode(rocblas_handle        handle,
                                                        rocblas_atomics_mode* atomics_mode);
 
-/*! \brief Set alpha stride stored on the handle (spacing between successive alpha values). Default is 0.
-Used by limited set of L2 and L1 batched functions to specify the spacing between successive alpha values.
+/*! \brief Set alpha stride for limited set of batched and strided_batched functions to specify the stride for alpha between successive batch elements. 
+Only applies to rocblas_pointer_mode_device and thus device side allocations.
+It enables interpretation of the alpha pointer for both batched and strided_batched functions as a pointer to a vector of values.
+Default value is 0 which treats it as a pointer to a single scalar. Support is denoted with specific function documentation.
+Warning this is a modal like state in the handle.  Restore to value 0 if no longer applicable to later function calls.
  */
-ROCBLAS_EXPORT rocblas_status rocblas_set_stride_alpha(rocblas_handle   handle,
-                                                       rocblas_stride stride_alpha);
+ROCBLAS_EXPORT rocblas_status rocblas_set_batch_alpha_stride(rocblas_handle handle,
+                                                             rocblas_stride alpha_stride);
 
-/*! \brief Get alpha stride from the handle.
+/*! \brief Get batch alpha stride from the handle.
  */
-ROCBLAS_EXPORT rocblas_status rocblas_get_stride_alpha(rocblas_handle    handle,
-                                                       rocblas_stride* stride_alpha);
+ROCBLAS_EXPORT rocblas_status rocblas_get_batch_alpha_stride(rocblas_handle  handle,
+                                                             rocblas_stride* alpha_stride);
 
-/*! \brief Set beta stride stored on the handle (spacing between successive beta values). Default is 0.
+/*! \brief Set beta stride for limited set of batched and strided_batched functions to specify the stride for beta between successive batch elements. 
+Only applies to rocblas_pointer_mode_device and thus device side allocations.
+It enables interpretation of the beta pointer for both batched and strided_batched functions as a pointer to a vector of values.
+Default value is 0 which treats it as a pointer to a single scalar. Support is denoted with specific function documentation.
+Warning this is a modal like state in the handle. Restore to value 0 if no longer applicable to later function calls.
  */
-ROCBLAS_EXPORT rocblas_status rocblas_set_stride_beta(rocblas_handle   handle,
-                                                      rocblas_stride stride_beta);
+ROCBLAS_EXPORT rocblas_status rocblas_set_batch_beta_stride(rocblas_handle handle,
+                                                            rocblas_stride beta_stride);
 
-/*! \brief Get beta stride from the handle.
+/*! \brief Get batch beta stride from the handle.
  */
-ROCBLAS_EXPORT rocblas_status rocblas_get_stride_beta(rocblas_handle    handle,
-                                                      rocblas_stride* stride_beta);
+ROCBLAS_EXPORT rocblas_status rocblas_get_batch_beta_stride(rocblas_handle  handle,
+                                                            rocblas_stride* beta_stride);
 
 /*! \brief Set ``rocblas_math_mode``.
  */

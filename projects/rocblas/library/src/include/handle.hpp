@@ -455,6 +455,26 @@ public:
         this->data_ptr = data_ptr;
     }
 
+    rocblas_stride get_stride_alpha() const
+    {
+        // only applicable to device mode alpha, load_scalar ignores for value
+        return stride_alpha;
+    }
+    void set_stride_alpha(rocblas_stride stride)
+    {
+        stride_alpha = stride;
+    }
+
+    rocblas_stride get_stride_beta() const
+    {
+        // only applicable to device mode beta, load_scalar ignores for value
+        return stride_beta;
+    }
+    void set_stride_beta(rocblas_stride stride)
+    {
+        stride_beta = stride;
+    }
+
     // C interfaces for manipulating device memory
     friend rocblas_status(::rocblas_start_device_memory_size_query)(_rocblas_handle*);
     friend rocblas_status(::rocblas_stop_device_memory_size_query)(_rocblas_handle*, size_t*);

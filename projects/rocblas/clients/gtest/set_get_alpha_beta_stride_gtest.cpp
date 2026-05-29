@@ -37,31 +37,39 @@ namespace
             rocblas_handle handle;
             CHECK_ROCBLAS_ERROR(rocblas_create_handle(&handle));
 
-            rocblas_stride stride_alpha = -1;
-            rocblas_stride stride_beta  = -1;
-            CHECK_ROCBLAS_ERROR(rocblas_get_stride_alpha(handle, &stride_alpha));
-            CHECK_ROCBLAS_ERROR(rocblas_get_stride_beta(handle, &stride_beta));
-            EXPECT_EQ(0, stride_alpha);
-            EXPECT_EQ(0, stride_beta);
+            CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device));
 
-            CHECK_ROCBLAS_ERROR(rocblas_set_stride_alpha(handle, 7));
-            CHECK_ROCBLAS_ERROR(rocblas_get_stride_alpha(handle, &stride_alpha));
-            EXPECT_EQ(7, stride_alpha);
-            CHECK_ROCBLAS_ERROR(rocblas_get_stride_beta(handle, &stride_beta));
-            EXPECT_EQ(0, stride_beta);
+            rocblas_stride batch_alpha_stride = -1;
+            rocblas_stride batch_beta_stride  = -1;
+            CHECK_ROCBLAS_ERROR(rocblas_get_batch_alpha_stride(handle, &batch_alpha_stride));
+            CHECK_ROCBLAS_ERROR(rocblas_get_batch_beta_stride(handle, &batch_beta_stride));
+            EXPECT_EQ(0, batch_alpha_stride);
+            EXPECT_EQ(0, batch_beta_stride);
 
-            CHECK_ROCBLAS_ERROR(rocblas_set_stride_beta(handle, 11));
-            CHECK_ROCBLAS_ERROR(rocblas_get_stride_beta(handle, &stride_beta));
-            EXPECT_EQ(11, stride_beta);
-            CHECK_ROCBLAS_ERROR(rocblas_get_stride_alpha(handle, &stride_alpha));
-            EXPECT_EQ(7, stride_alpha);
+            CHECK_ROCBLAS_ERROR(rocblas_set_batch_alpha_stride(handle, 7));
+            CHECK_ROCBLAS_ERROR(rocblas_get_batch_alpha_stride(handle, &batch_alpha_stride));
+            EXPECT_EQ(7, batch_alpha_stride);
+            CHECK_ROCBLAS_ERROR(rocblas_set_batch_beta_stride(handle, 7));
+            CHECK_ROCBLAS_ERROR(rocblas_get_batch_beta_stride(handle, &batch_beta_stride));
+            EXPECT_EQ(7, batch_beta_stride);
 
-            CHECK_ROCBLAS_ERROR(rocblas_set_stride_alpha(handle, 0));
-            CHECK_ROCBLAS_ERROR(rocblas_set_stride_beta(handle, 0));
-            CHECK_ROCBLAS_ERROR(rocblas_get_stride_alpha(handle, &stride_alpha));
-            CHECK_ROCBLAS_ERROR(rocblas_get_stride_beta(handle, &stride_beta));
-            EXPECT_EQ(0, stride_alpha);
-            EXPECT_EQ(0, stride_beta);
+            CHECK_ROCBLAS_ERROR(rocblas_set_batch_alpha_stride(handle, 0));
+            CHECK_ROCBLAS_ERROR(rocblas_set_batch_beta_stride(handle, 0));
+            CHECK_ROCBLAS_ERROR(rocblas_get_batch_alpha_stride(handle, &batch_alpha_stride));
+            CHECK_ROCBLAS_ERROR(rocblas_get_batch_beta_stride(handle, &batch_beta_stride));
+            EXPECT_EQ(0, batch_alpha_stride);
+            EXPECT_EQ(0, batch_beta_stride);
+
+            // stored regardless of mode, but only utilized in device mode kernels
+            CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host));
+
+            CHECK_ROCBLAS_ERROR(rocblas_set_batch_alpha_stride(handle, 7));
+            CHECK_ROCBLAS_ERROR(rocblas_set_batch_beta_stride(handle, 11));
+
+            CHECK_ROCBLAS_ERROR(rocblas_get_batch_alpha_stride(handle, &batch_alpha_stride));
+            EXPECT_EQ(7, batch_alpha_stride);
+            CHECK_ROCBLAS_ERROR(rocblas_get_batch_beta_stride(handle, &batch_beta_stride));
+            EXPECT_EQ(11, batch_beta_stride);
 
             CHECK_ROCBLAS_ERROR(rocblas_destroy_handle(handle));
         }
