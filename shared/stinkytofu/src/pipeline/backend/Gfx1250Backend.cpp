@@ -32,6 +32,7 @@
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
 #include "stinkytofu/analysis/asm/AsmVerifierPass.hpp"
 #include "stinkytofu/bindings/python/Module.hpp"
+#include "stinkytofu/ir/DumpStinkyFunctionPass.hpp"
 #include "stinkytofu/pipeline/BackendRegistry.hpp"
 #include "stinkytofu/pipeline/OptimizationPasses.hpp"
 #include "stinkytofu/pipeline/ScopeAdaptor.hpp"
@@ -121,6 +122,7 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module) {
             addGfx1250RegionPasses(innerPM, module, optLevel, moduleOptions.EnableWaitCntInsertion);
             if (moduleOptions.EnableWaitCntInsertion) {
                 innerPM.addPass(createStinkyWaitCntInsertionPass());
+                innerPM.addPass(createDumpStinkyFunctionPass({.stirPath = "dump_function.stir"}));
             }
             pm.addPass(createKernelToRegionsPassAdaptor(
                 module, {"loopWithPrefetch", "noLoadLoopBody"}, std::move(innerPM)));
