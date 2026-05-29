@@ -308,6 +308,32 @@ public:
             serializedGraph.data(), serializedGraph.size(), variantPack);
     }
 
+    static void runRMSBwdNormTest(hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
+                                  hipdnn_flatbuffers_sdk::data_objects::DataType scaleDataType,
+                                  hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType)
+    {
+        const unsigned int seed = getGlobalTestSeed();
+        const std::vector<int64_t> dims = {1, 3, 14, 14};
+
+        auto graph = buildRMSNormBwdGraph(
+            inputDataType, scaleDataType, computeDataType, dims, TensorLayout::NCHW);
+
+        auto result = graph->validate();
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+
+        auto [serializedGraph, serErr] = graph->to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+        const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
+
+        RMSNormBwdTensorBundle tensorBundle(
+            graphWrapper.getNodeWrapper(0), graphWrapper.getTensorMap(), seed);
+
+        auto variantPack = tensorBundle.toHostVariantPack();
+
+        CpuReferenceGraphExecutor().execute(
+            serializedGraph.data(), serializedGraph.size(), variantPack);
+    }
+
 #ifdef HIPDNN_ENABLE_SDPA
     template <typename InputType>
     static void runSdpaTest(hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
@@ -556,6 +582,24 @@ TEST(TestCpuReferenceGraphExecutor, RMSNormAllHalfs)
 TEST(TestCpuReferenceGraphExecutor, RMSNormAllBFloat16)
 {
     TestCpuReferenceGraphExecutor::runRMSNormTest(
+        DataType::BFLOAT16, DataType::BFLOAT16, DataType::BFLOAT16);
+}
+
+TEST(TestCpuReferenceGraphExecutor, RMSNormBwdAllFloats)
+{
+    TestCpuReferenceGraphExecutor::runRMSBwdNormTest(
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
+}
+
+TEST(TestCpuReferenceGraphExecutor, RMSNormBwdAllHalfs)
+{
+    TestCpuReferenceGraphExecutor::runRMSBwdNormTest(
+        DataType::HALF, DataType::HALF, DataType::HALF);
+}
+
+TEST(TestCpuReferenceGraphExecutor, RMSNormBwdAllBFloat16)
+{
+    TestCpuReferenceGraphExecutor::runRMSBwdNormTest(
         DataType::BFLOAT16, DataType::BFLOAT16, DataType::BFLOAT16);
 }
 

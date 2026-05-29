@@ -130,6 +130,9 @@ void testing_hybmv(Arguments argus)
     CHECK_GENERATE_MATRIX_ERROR(
         generate_csr_matrix(filename, m, n, nnz, hcsr_row_ptr, hcol_ind, hval, idx_base));
 
+    // Redefine sparse matrix values
+    hipsparseInit<T>(hval, hval.size(), 1);
+
     std::vector<T> hx(n);
     std::vector<T> hy_1(m);
     std::vector<T> hy_2(m);
