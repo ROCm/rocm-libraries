@@ -39,7 +39,7 @@ TEST(TestBatchnormNode, PreValidateAcceptsBroadcastableScaleBias)
     EXPECT_EQ(error.code, ErrorCode::OK);
 }
 
-TEST(TestBatchnormNode, PreValidateAcceptsMismatchedScaleBiasShapes)
+TEST(TestBatchnormNode, PreValidateRejectsMismatchedScaleBiasShapes)
 {
     BatchnormAttributes batchnormAttributes;
 
@@ -54,7 +54,7 @@ TEST(TestBatchnormNode, PreValidateAcceptsMismatchedScaleBiasShapes)
     batchnormAttributes.set_scale(scaleTensor);
 
     auto biasTensor = std::make_shared<TensorAttributes>();
-    biasTensor->set_dim({32}); // intentionally different
+    biasTensor->set_dim({32}); // intentionally mismatched
     batchnormAttributes.set_bias(biasTensor);
 
     auto epsilonTensor = std::make_shared<TensorAttributes>();
@@ -65,7 +65,7 @@ TEST(TestBatchnormNode, PreValidateAcceptsMismatchedScaleBiasShapes)
     const BatchnormNode node(std::move(batchnormAttributes), graphAttributes);
 
     auto error = node.pre_validate_node();
-    EXPECT_EQ(error.code, ErrorCode::OK);
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
 }
 
 TEST(TestBatchnormNode, PreValidateAcceptsRank2BroadcastableScaleBias)

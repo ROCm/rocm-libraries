@@ -111,6 +111,9 @@ public:
         auto& xDims = x->get_dim();
         const int64_t channels = xDims[1];
 
+        // Validate that scale and bias tensors have matching shapes
+        HIPDNN_CHECK_ERROR(
+            detail::validateTensorShapesMatchIfSet(scale, bias, "Scale tensor", "Bias tensor"));
         // Validate optional mean and inv_variance tensors (only if dimensions set)
         HIPDNN_CHECK_ERROR(
             detail::validateChannelOnlyShapeIfSet(attributes.get_mean(), channels, "Mean tensor"));

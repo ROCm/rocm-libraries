@@ -420,9 +420,9 @@ TEST_F(IntegrationBatchnormDescriptorLowering, AcceptsBroadcastableScaleBiasShap
     auto scale = std::make_shared<TensorAttributes>();
     scale->set_uid(2).set_dim({64}).set_stride({1}).set_data_type(DataType::FLOAT);
 
-    // Mismatched but allowed
+    // Must match scale shape
     auto bias = std::make_shared<TensorAttributes>();
-    bias->set_uid(3).set_dim({32}).set_stride({1}).set_data_type(DataType::FLOAT);
+    bias->set_uid(3).set_dim({64}).set_stride({1}).set_data_type(DataType::FLOAT);
 
     auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
     epsilon->set_uid(4);
