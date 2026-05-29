@@ -164,8 +164,8 @@
          || __builtin_amdgcn_processor_is("gfx9-generic"))
     #define ROCPRIM_IS_RDNA4()                                                                \
         (__builtin_amdgcn_processor_is("gfx1200") || __builtin_amdgcn_processor_is("gfx1201") \
-         || __builtin_amdgcn_processor_is(                                                    \
-             "gfx12-generic")) // TODO: Re-enable gfx1250 when supported by compiler
+            || __builtin_amdgcn_processor_is("gfx1250")                                       \
+            || __builtin_amdgcn_processor_is("gfx12-generic"))
     #define ROCPRIM_IS_RDNA3()                                                                   \
         (__builtin_amdgcn_processor_is("gfx1100") || __builtin_amdgcn_processor_is("gfx1101")    \
          || __builtin_amdgcn_processor_is("gfx1102") || __builtin_amdgcn_processor_is("gfx1103") \
