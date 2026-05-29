@@ -204,6 +204,10 @@ inline hipError_t histogram_impl(void*          temporary_storage,
                                      * params.histogram_global_config.items_per_thread;
 
         int device_id = hipGetStreamDeviceId(stream);
+        if(device_id < 0)
+        {
+            return hipErrorInvalidHandle;
+        }
 
         // Get the number of multiprocessors
         int num_multi_processors{};
