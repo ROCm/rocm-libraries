@@ -80,8 +80,13 @@ struct ResolvedKernel
     SdpaBwdParams::KernelTiles tiles;
 };
 
-// Indexed by bwd_dispatch::PipelineStage ordinal (ODO=0, DQDKDV=1, DQ_CONVERT=2).
-using BwdDispatchTuples = std::array<BwdDispatchTuple, 3>;
+// Per-pipeline-stage dispatch tuples for the three backward kernels.
+struct BwdDispatchTuples
+{
+    BwdDispatchTuple odo;
+    BwdDispatchTuple dqdkdv;
+    BwdDispatchTuple dqConvert;
+};
 
 // Mask classification — ported verbatim from SdpaFwdPlanBuilder. Handles the
 // modern left_bound / right_bound / diagonal_alignment trio plus the
@@ -351,12 +356,10 @@ bool wouldBwdByteStridesFitUint32(
 BwdDispatchTuples computeDispatchTuples(MaskType maskType, int bf16CvtValue)
 {
     BwdDispatchTuples tuples{};
-    tuples[static_cast<size_t>(bwd_dispatch::PipelineStage::ODO)]
-        = {0, 0, 0, 0, BF16_CVT_FP16_SENTINEL};
-    tuples[static_cast<size_t>(bwd_dispatch::PipelineStage::DQDKDV)]
+    tuples.odo = {0, 0, 0, 0, BF16_CVT_FP16_SENTINEL};
+    tuples.dqdkdv
         = {static_cast<int>(maskType), static_cast<int>(AccumulatorMode::A32), 1, 1, bf16CvtValue};
-    tuples[static_cast<size_t>(bwd_dispatch::PipelineStage::DQ_CONVERT)]
-        = {0, 0, 0, 0, bf16CvtValue};
+    tuples.dqConvert = {0, 0, 0, 0, bf16CvtValue};
     return tuples;
 }
 
@@ -629,29 +632,22 @@ bool SdpaBwdPlanBuilder::isApplicable(
     };
 
     HIP_KERNEL_RETURN_FALSE_IF(
-        !checkRegistry("odo",
-                       bwd_dispatch::PipelineStage::ODO,
-                       dispatchTuples[static_cast<size_t>(bwd_dispatch::PipelineStage::ODO)]),
+        !checkRegistry("odo", bwd_dispatch::PipelineStage::ODO, dispatchTuples.odo),
         "Failed odo registry lookup");
     HIP_KERNEL_RETURN_FALSE_IF(
-        !checkRegistry("dqdkdv",
-                       bwd_dispatch::PipelineStage::DQDKDV,
-                       dispatchTuples[static_cast<size_t>(bwd_dispatch::PipelineStage::DQDKDV)]),
+        !checkRegistry("dqdkdv", bwd_dispatch::PipelineStage::DQDKDV, dispatchTuples.dqdkdv),
         "Failed dqdkdv registry lookup");
-    HIP_KERNEL_RETURN_FALSE_IF(
-        !checkRegistry(
-            "dq_convert",
-            bwd_dispatch::PipelineStage::DQ_CONVERT,
-            dispatchTuples[static_cast<size_t>(bwd_dispatch::PipelineStage::DQ_CONVERT)]),
-        "Failed dq_convert registry lookup");
+    HIP_KERNEL_RETURN_FALSE_IF(!checkRegistry("dq_convert",
+                                              bwd_dispatch::PipelineStage::DQ_CONVERT,
+                                              dispatchTuples.dqConvert),
+                               "Failed dq_convert registry lookup");
 
     // Reject oversized graphs whose byte strides would silently truncate when
     // packed into the kernarg uint32_t fields. Caught here rather than at
     // execute time so the engine can be excluded from heuristics for graphs it
     // cannot represent. Uses the resolved DQDKDV row's tile size for the Ts
     // product (tsKv * stride_k * BF16).
-    const auto& dqdkdvTuple
-        = dispatchTuples[static_cast<size_t>(bwd_dispatch::PipelineStage::DQDKDV)];
+    const auto& dqdkdvTuple = dispatchTuples.dqdkdv;
     auto dqdkdvCfgOpt = findConfig(cfg_fmha_bwd_dqdkdv,
                                    deviceString,
                                    dataTypeId,
@@ -885,10 +881,9 @@ void SdpaBwdPlanBuilder::buildPlan(
                               SdpaBwdParams::KernelTiles{static_cast<unsigned int>(cfgOpt->ts)}};
     };
 
-    const auto& odtuple = dispatchTuples[static_cast<size_t>(bwd_dispatch::PipelineStage::ODO)];
-    const auto& dqdtuple = dispatchTuples[static_cast<size_t>(bwd_dispatch::PipelineStage::DQDKDV)];
-    const auto& dqctuple
-        = dispatchTuples[static_cast<size_t>(bwd_dispatch::PipelineStage::DQ_CONVERT)];
+    const auto& odtuple = dispatchTuples.odo;
+    const auto& dqdtuple = dispatchTuples.dqdkdv;
+    const auto& dqctuple = dispatchTuples.dqConvert;
 
     auto odoResolved = resolveStage("odo",
                                     findConfig(cfg_fmha_bwd_odo,
@@ -921,9 +916,7 @@ void SdpaBwdPlanBuilder::buildPlan(
     // verify correctness), this branch will resolve dq_convert conditionally,
     // skip the dq_acc allocation, and route DQDKDV's dQ output directly to the
     // output BF16 buffer.
-    const bool useA32
-        = (dispatchTuples[static_cast<size_t>(bwd_dispatch::PipelineStage::DQDKDV)].atomic32
-           == static_cast<int>(AccumulatorMode::A32));
+    const bool useA32 = (dispatchTuples.dqdkdv.atomic32 == static_cast<int>(AccumulatorMode::A32));
 
     std::optional<ResolvedKernel> dqConvertResolved;
     if(useA32)
