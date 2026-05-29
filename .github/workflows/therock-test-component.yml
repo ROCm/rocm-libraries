@@ -73,7 +73,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: 32329200459aa4396127a53560e1f454d136d706     
+          ref: 9c0ca0a4a6900c6dfb5ede35f2034f303b53433e
 
 
       - name: Configure git for long paths on Windows
