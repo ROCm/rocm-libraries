@@ -182,8 +182,6 @@ struct MXFlatmmPipelineAgBgCrPolicySync : UniversalFlatmmPipelineAgBgCrPolicy
 
     CK_TILE_DEVICE static constexpr auto MakeMX_ALdsBytesBlockDescriptor()
     {
-        // Phase 2: K2=12 (ds_read_b96 for MFMA), K2_Pad=12 (no padding → K contiguous).
-        // 16-byte dwordx4 writes never cross K0 boundaries (96 is a multiple of 16).
         constexpr index_t K2     = std::is_same_v<ADataType, pk_fp6x16_t> ? DWORDx3 : AK1 / APackedSize;
         constexpr index_t K2_Pad = std::is_same_v<ADataType, pk_fp6x16_t> ? DWORDx3 : 16;
         constexpr index_t K1     = kDramLoadPackBytes / DWORDx4; // 8
@@ -199,7 +197,7 @@ struct MXFlatmmPipelineAgBgCrPolicySync : UniversalFlatmmPipelineAgBgCrPolicy
         constexpr index_t M0 = MPerBlock / (M1 * M2 * M3); // MPerBlock/16
         static_assert(M0 * M1 * M2 * M3 == MPerBlock, "M0, M1, M2, M3 must cover whole MPerBlock!");
 
-        constexpr index_t Pad = 4 * K2; // 4 dwords
+        constexpr index_t Pad = 4 * K2;
 
         constexpr auto a_lds_block_desc_0 = make_naive_tensor_descriptor( //
             make_tuple(number<M0>{},
@@ -216,7 +214,7 @@ struct MXFlatmmPipelineAgBgCrPolicySync : UniversalFlatmmPipelineAgBgCrPolicy
                        number<K1 * K2_Pad>{},
                        number<K2_Pad>{},
                        number<1>{}),
-            number<K2>{},
+            number<std::is_same_v<ADataType, pk_fp6x16_t> ? 3 * DWORDx4 : K2>{},
             number<1>{});
 
         // [v3 P1.1 / D1] identity transform on <M3, K1> (sync path).
