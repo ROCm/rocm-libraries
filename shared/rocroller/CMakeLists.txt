@@ -6,6 +6,10 @@ set(ROCROLLER_VERSION 1.0.0)
 set(ROCROLLER_SOVERSION 1)
 project(rocroller VERSION ${ROCROLLER_VERSION} LANGUAGES CXX)
 
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+  set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 include(CMakeRC)
@@ -79,12 +83,18 @@ endif()
 find_package(spdlog QUIET)
 if(NOT spdlog_FOUND)
     if(ROCROLLER_ENABLE_FETCH)
-        FetchContent_Declare(
-            spdlog
-            GIT_REPOSITORY https://github.com/gabime/spdlog.git
-            GIT_TAG v1.x
-        )
-        FetchContent_MakeAvailable(spdlog)
+        block(SCOPE_FOR VARIABLES PROPAGATE spdlog_SOURCE_DIR)
+            # option() honors existing variables
+            set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
+
+            set(ROCM_WARN_TOOLCHAIN_VAR OFF)
+            FetchContent_Declare(
+                spdlog
+                GIT_REPOSITORY https://github.com/gabime/spdlog.git
+                GIT_TAG v1.x
+            )
+            FetchContent_MakeAvailable(spdlog)
+        endblock()
         set_property(DIRECTORY ${spdlog_SOURCE_DIR} PROPERTY EXCLUDE_FROM_ALL ON)
     else()
         message(FATAL_ERROR "Failed to find spdlog")
@@ -166,15 +176,21 @@ endif()
 
 if(ROCROLLER_ENABLE_YAML_CPP)
     if(ROCROLLER_ENABLE_FETCH)
-        set(YAML_CPP_BUILD_TOOLS OFF)
-        set(YAML_BUILD_SHARED_LIBS OFF)
-        option(YAML_CPP_INSTALL "" ON)
-        FetchContent_Declare(
-            yaml_cpp
-            GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
-            GIT_TAG 0.8.0
-        )
-        FetchContent_MakeAvailable(yaml_cpp)
+        block(SCOPE_FOR VARIABLES PROPAGATE yaml_cpp_SOURCE_DIR)
+            # option() honors existing variables
+            set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
+
+            set(YAML_CPP_BUILD_TOOLS OFF)
+            set(YAML_BUILD_SHARED_LIBS OFF)
+            set(BUILD_TESTING OFF)
+            option(YAML_CPP_INSTALL "" ON)
+            FetchContent_Declare(
+                yaml_cpp
+                GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
+                GIT_TAG 0.8.0
+            )
+            FetchContent_MakeAvailable(yaml_cpp)
+        endblock()
         set_property(DIRECTORY ${yaml_cpp_SOURCE_DIR} PROPERTY EXCLUDE_FROM_ALL ON)
     else()
         find_package(yaml-cpp 0.8.0 REQUIRED)

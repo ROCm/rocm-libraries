@@ -4,10 +4,11 @@
 #pragma once
 
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 
@@ -19,7 +20,8 @@ struct GraphTensorBundle
     GraphTensorBundle() = default;
 
     GraphTensorBundle(
-        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap)
     {
         for(const auto& [id, attr] : tensorMap)
@@ -90,7 +92,25 @@ struct GraphTensorBundle
         return *it->second;
     }
 
+    bool isOutput(int64_t id) const
+    {
+        return outputTensorIds.find(id) != outputTensorIds.end();
+    }
+
+    void sentinelFillOutputTensors()
+    {
+        for(auto id : outputTensorIds)
+        {
+            auto it = tensors.find(id);
+            if(it != tensors.end())
+            {
+                it->second->fillWithSentinelValue();
+            }
+        }
+    }
+
     std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>> tensors;
+    std::unordered_set<int64_t> outputTensorIds;
 };
 
 }

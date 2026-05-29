@@ -3,7 +3,7 @@
 
 set(INST_TARGETS ${SUPPORTED_GPU_TARGETS})
 # Currently only gfx9 and gfx12 archs are supported by FMHA
-list(FILTER INST_TARGETS INCLUDE REGEX "gfx9|gfx1[12]")
+list(FILTER INST_TARGETS INCLUDE REGEX "gfx9|gfx12")
 if(NOT INST_TARGETS)
   message(WARNING "Skipping Tile Engine FMHA compilation: No supported GPU targets (gfx9, gfx11, gfx12) found in SUPPORTED_GPU_TARGETS: ${SUPPORTED_GPU_TARGETS}")
   return()
@@ -48,7 +48,6 @@ set(FMHA_FWD_CODE_GEN_COMMON_ARGS
   --targets ${FMHA_TARGETS_ARG}
   --api ${FMHA_FWD_APIS}
   --optdim 32,64,80,128,256
-  # --filter fmha_fwd...
 )
 set(FMHA_BWD_CODE_GEN_COMMON_ARGS
   ${CMAKE_CURRENT_LIST_DIR}/generate.py
@@ -174,10 +173,45 @@ else()
   list(APPEND FMHA_FWD_INTERFACE_COMPILE_OPTIONS -DCK_TILE_FMHA_FWD_PAGEDKV_API=0)
 endif()
 
+# conditionally enable call to the batch_prefill API in fmha_fwd example and tests
+if("batch_prefill" IN_LIST FMHA_FWD_ENABLE_APIS)
+  list(APPEND FMHA_FWD_INTERFACE_COMPILE_OPTIONS -DCK_TILE_FMHA_FWD_BATCH_PREFILL_API=1)
+else()
+  list(APPEND FMHA_FWD_INTERFACE_COMPILE_OPTIONS -DCK_TILE_FMHA_FWD_BATCH_PREFILL_API=0)
+endif()
+
 # conditionally specify the use of OCP_FP8
 if(CK_USE_OCP_FP8)
   list(APPEND FMHA_FWD_PRIVATE_COMPILE_OPTIONS -DCK_TILE_USE_OCP_FP8)
   list(APPEND FMHA_FWD_INTERFACE_COMPILE_OPTIONS -DCK_TILE_USE_OCP_FP8)
+endif()
+
+set(FMHA_HAS_RDNA_TARGET OFF)
+set(FMHA_HAS_NON_RDNA_TARGET OFF)
+foreach(inst_target ${INST_TARGETS})
+  if(inst_target MATCHES "^(gfx11|gfx12)")
+    set(FMHA_HAS_RDNA_TARGET ON)
+  else()
+    set(FMHA_HAS_NON_RDNA_TARGET ON)
+  endif()
+endforeach()
+
+if(FMHA_HAS_RDNA_TARGET)
+  set(FMHA_FWD_RDNA_GEN_BLOBS)
+  foreach(fwd_blob ${FMHA_FWD_GEN_BLOBS})
+    if(fwd_blob MATCHES "_gfx1[12][^/]*\\.cpp$")
+      list(APPEND FMHA_FWD_RDNA_GEN_BLOBS ${fwd_blob})
+    endif()
+  endforeach()
+
+  if(FMHA_FWD_RDNA_GEN_BLOBS)
+    set_property(SOURCE ${FMHA_FWD_RDNA_GEN_BLOBS}
+      APPEND PROPERTY COMPILE_DEFINITIONS CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT=5)
+  endif()
+
+  if(NOT FMHA_HAS_NON_RDNA_TARGET)
+    list(APPEND FMHA_FWD_INTERFACE_COMPILE_OPTIONS -DCK_TILE_FLOAT_TO_BFLOAT16_DEFAULT=5)
+  endif()
 endif()
 
 # use RTN_ASM on float to bfloat16 conversion by default, align with FA upstream
@@ -200,6 +234,7 @@ message(DEBUG "adding example ${EXAMPLE_FMHA_FWD}")
 add_executable(${EXAMPLE_FMHA_FWD} EXCLUDE_FROM_ALL example_fmha_fwd.cpp)
 target_link_libraries(${EXAMPLE_FMHA_FWD} ${FMHA_FWD_INSTANCES})
 target_include_directories(${EXAMPLE_FMHA_FWD} PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+set_property(TARGET ${EXAMPLE_FMHA_FWD} PROPERTY HIP_ARCHITECTURES ${INST_TARGETS})
 
 message(DEBUG "adding example ${EXAMPLE_FMHA_BWD}")
 # not using add_example_executable() to add this target, since we don't want this to be included in
@@ -207,6 +242,7 @@ message(DEBUG "adding example ${EXAMPLE_FMHA_BWD}")
 add_executable(${EXAMPLE_FMHA_BWD} EXCLUDE_FROM_ALL example_fmha_bwd.cpp)
 target_link_libraries(${EXAMPLE_FMHA_BWD} ${FMHA_BWD_INSTANCES})
 target_include_directories(${EXAMPLE_FMHA_BWD} PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+set_property(TARGET ${EXAMPLE_FMHA_BWD} PROPERTY HIP_ARCHITECTURES ${INST_TARGETS})
 
 # TODO: we have to turn off this global prop, otherwise the progress bar generated
 # by cmake will print too many files, execvp: /bin/sh: Argument list too long

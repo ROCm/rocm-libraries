@@ -7,7 +7,7 @@
 #include "FloatTypes.h"
 #include "VectorTypes.hpp"
 
-namespace hip_kernel_plugin
+namespace hip_kernel_provider
 {
 namespace detail
 {
@@ -215,7 +215,7 @@ __forceinline__ __device__ ushort cos(ushort x)
 }
 __forceinline__ __device__ ushort fabs(ushort x)
 {
-    return float_to_bfloat16(__habs(bfloat16_to_float(x)));
+    return float_to_bfloat16(fabsf(bfloat16_to_float(x)));
 }
 __forceinline__ __device__ ushort fmax(ushort x, ushort y)
 {
@@ -640,4 +640,4 @@ __forceinline__ __device__ FpVecType fabs(FpVecType x)
     }
 }
 
-} // namespace hip_kernel_plugin
+} // namespace hip_kernel_provider

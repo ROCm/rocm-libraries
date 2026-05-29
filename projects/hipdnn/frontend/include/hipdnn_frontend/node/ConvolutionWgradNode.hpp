@@ -3,12 +3,13 @@
 #pragma once
 
 #include "Node.hpp"
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
+#include <hipdnn_frontend/Logging.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/detail/ConvolutionWgradPacker.hpp>
+#include <hipdnn_frontend/detail/ConvolutionWgradUnpacker.hpp>
 
 namespace hipdnn_frontend::graph
 {
@@ -21,6 +22,16 @@ public:
         : BaseNode(graphAttrs)
         , attributes(std::move(convAttrs))
     {
+    }
+
+    Error unpack_from_descriptor(
+        hipdnnBackendDescriptor_t opDesc,
+        std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap) override
+    {
+        ConvWgradAttributes attrs;
+        HIPDNN_CHECK_ERROR(detail::unpackConvWgradOperation(opDesc, tensorMap, attrs));
+        attributes = std::move(attrs);
+        return {};
     }
 
     Error pre_validate_node() const override
@@ -123,11 +134,11 @@ public:
             for(size_t i = 0; i < spatialDims; ++i)
             {
                 auto spatialIdx = i + 2;
-                int64_t const xDim = xDims[spatialIdx];
-                int64_t const dyDim = dyDims[spatialIdx];
-                int64_t const kernelDim = dwDims[spatialIdx];
+                const int64_t xDim = xDims[spatialIdx];
+                const int64_t dyDim = dyDims[spatialIdx];
+                const int64_t kernelDim = dwDims[spatialIdx];
 
-                int64_t const kernelSize = (dilation[i] * (kernelDim - 1)) + 1;
+                const int64_t kernelSize = (dilation[i] * (kernelDim - 1)) + 1;
                 auto numerator = xDim + prePadding[i] + postPadding[i] - kernelSize;
 
                 HIPDNN_RETURN_IF_LT(numerator,
@@ -139,7 +150,7 @@ public:
                                         + std::to_string(kernelDim) + ") and dilation ("
                                         + std::to_string(dilation[i]) + ")");
 
-                int64_t const expectedDyDim = (numerator / stride[i]) + 1;
+                const int64_t expectedDyDim = (numerator / stride[i]) + 1;
 
                 // Verifying dy implicitly verifies dw and x
                 HIPDNN_RETURN_IF_NE(
@@ -244,9 +255,15 @@ public:
 
             dwDims[0] = dyDims[1]; // Output channels match dy channels
 
-            // Impossible to infer group count without dw dimensions.
-            // Therefore, assume groups = 1.
-            dwDims[1] = xDims[1]; // Input channels (per group)
+            // Group count cannot be inferred from x and dy alone, so the
+            // inferred dw[1] uses x[1] (i.e. assumes groups = 1). For
+            // grouped convolutions, callers should set dw dimensions
+            // explicitly to avoid an incorrect channel count on the
+            // inferred weight tensor.
+            HIPDNN_FE_LOG_WARN("ConvolutionWgradNode: inferring dw dimensions without an "
+                               "explicit dw shape; assuming groups=1. For grouped "
+                               "convolutions, set dw dimensions explicitly.");
+            dwDims[1] = xDims[1]; // Input channels (per group), assuming groups=1
 
             // Calculate kernel spatial dimensions (k_2, ..., k_n)
             for(size_t i = 2; i < dyDims.size(); ++i)
@@ -345,17 +362,6 @@ public:
         }
 
         return {};
-    }
-
-    flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>
-        pack_node(flatbuffers::FlatBufferBuilder& builder) const override
-    {
-        return hipdnn_data_sdk::data_objects::CreateNodeDirect(
-            builder,
-            attributes.get_name().c_str(),
-            toSdkType(attributes.compute_data_type),
-            hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes,
-            attributes.pack_attributes(builder).Union());
     }
 
     Error create_operation(

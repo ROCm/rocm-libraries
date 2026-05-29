@@ -19,7 +19,7 @@ add_library(hipdnn_plugin_sdk INTERFACE)
 # Generate version header
 hipdnn_generate_version_header(hipdnn_plugin_sdk)
 
-target_link_libraries(hipdnn_plugin_sdk INTERFACE hipdnn_data_sdk)
+target_link_libraries(hipdnn_plugin_sdk INTERFACE hipdnn_flatbuffers_sdk hipdnn_data_sdk)
 
 set(HIP_DNN_PLUGIN_SDK_INSTALL_INCLUDE_DIR "${CMAKE_INSTALL_INCLUDEDIR}/hipdnn/plugin_sdk")
 

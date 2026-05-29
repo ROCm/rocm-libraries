@@ -18,6 +18,11 @@ import os
 from pr_detect_changed_subtrees import get_valid_prefixes, find_matched_subtrees
 from config_loader import load_repo_config
 
+# Add TheRock's github_actions to path for shared utilities
+THEROCK_ACTIONS_PATH = Path("TheRock") / "build_tools" / "github_actions"
+sys.path.insert(0, str(THEROCK_ACTIONS_PATH))
+from amdgpu_family_matrix import BUILD_RUNNER_LABELS, select_weighted_label
+
 logging.basicConfig(level=logging.INFO)
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -25,24 +30,27 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 # build or test workflows so any related jobs can be skipped if all paths
 # modified by a commit/PR match a pattern in this list.
 SKIPPABLE_PATH_PATTERNS = [
-    "docs/*",
-    ".gitignore",
+    "*.clinerules",
+    "*.cursorrules",
+    "*.mdc",
     "*.md",
-    "*.rtf",
     "*.rst",
+    "*.rtf",
     "*/.markdownlint-ci2.yaml",
     "*/.readthedocs.yaml",
     "*/.spellcheck.local.yaml",
     "*/.wordlist.txt",
-    "projects/*/docs/*",
-    "projects/*/.gitignore",
-    "shared/*/docs/*",
-    "shared/*/.gitignore",
-    "dnn-providers/*/docs/*",
+    ".gitignore",
     "dnn-providers/*/.gitignore",
-    "*.clinerules",
-    "*.cursorrules",
-    "*.mdc",
+    "dnn-providers/*/docs/*",
+    "docs/*",
+    "projects/*/.gitignore",
+    "projects/*/docs/*",
+    # Tools are standalone scripts/utilities not part of the build or test pipeline.
+    # Changes here should not trigger CI builds.
+    "projects/hipdnn/tools/*",
+    "shared/*/.gitignore",
+    "shared/*/docs/*",
 ]
 
 
@@ -145,13 +153,28 @@ def get_changed_path_projects(paths: Optional[Iterable[str]]) -> Iterable[str]:
     return matched_subtrees
 
 
+def select_build_runner(platform: str) -> str:
+    """Select a build runner label based on platform and build variant."""
+    if platform not in BUILD_RUNNER_LABELS:
+        # Platform not configured for weighted selection, return default
+        print(f"  No build runner config for platform {platform}, using default")
+        return ""
+
+    platform_config = BUILD_RUNNER_LABELS[platform]
+
+    labels_config = platform_config["default"]
+    context_name = f"build-runner ({platform})"
+
+    return select_weighted_label(labels_config, context_name)
+
+
 def retrieve_projects(args):
     # For pushes and pull_requests, we only want to test changed projects
     base_ref = args.get("base_ref")
     modified_paths = get_modified_paths(base_ref)
 
-    # by default, we select full tests
-    test_type = "full"
+    # by default, we select standard tests
+    test_type = "standard"
 
     # Check if CI should be skipped based on modified paths
     # (only for push and pull_request events, not workflow_dispatch or nightly)
@@ -190,6 +213,7 @@ def retrieve_projects(args):
     # for nightly runs, run everything with full tests
     if args.get("is_nightly"):
         subtrees = list(subtree_to_project_map.keys())
+        test_type = "comprehensive"
 
     project_to_run = collect_projects_to_run(subtrees)
 
@@ -199,8 +223,13 @@ def retrieve_projects(args):
 def run(args):
     platform = args.get("platform")
     project_to_run, test_type = retrieve_projects(args)
+    build_runs_on = select_build_runner(platform)
     set_github_output(
-        {f"{platform}_projects": json.dumps(project_to_run), "test_type": test_type}
+        {
+            f"{platform}_projects": json.dumps(project_to_run),
+            "test_type": test_type,
+            "build_runs_on": build_runs_on,
+        }
     )
 
 

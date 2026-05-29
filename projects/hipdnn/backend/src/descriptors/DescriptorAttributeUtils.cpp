@@ -3,6 +3,7 @@
 
 #include "DescriptorAttributeUtils.hpp"
 #include "BackendDescriptor.hpp"
+#include "BackendEnumStringUtils.hpp"
 #include "DataTypeConversion.hpp"
 
 #include <algorithm>
@@ -36,52 +37,6 @@ void checkGetArgs(hipdnnBackendAttributeType_t expectedType,
                    std::string(errorPrefix) + ": attributeType mismatch");
 }
 
-void setInt64Vector(std::vector<int64_t>& target,
-                    hipdnnBackendAttributeType_t attributeType,
-                    int64_t elementCount,
-                    const void* arrayOfElements,
-                    const char* errorPrefix)
-{
-    checkSetArgs(HIPDNN_TYPE_INT64, attributeType, arrayOfElements, errorPrefix);
-    THROW_IF_FALSE(elementCount > 0,
-                   HIPDNN_STATUS_BAD_PARAM,
-                   std::string(errorPrefix) + ": elementCount must be positive");
-    target.resize(static_cast<size_t>(elementCount));
-    std::memcpy(
-        target.data(), arrayOfElements, static_cast<size_t>(elementCount) * sizeof(int64_t));
-}
-
-void getInt64Vector(const std::vector<int64_t>& source,
-                    hipdnnBackendAttributeType_t attributeType,
-                    int64_t requestedElementCount,
-                    int64_t* elementCount,
-                    void* arrayOfElements,
-                    const char* errorPrefix)
-{
-    checkGetArgs(HIPDNN_TYPE_INT64, attributeType, errorPrefix);
-
-    if(arrayOfElements == nullptr || requestedElementCount == 0)
-    {
-        THROW_IF_NULL(elementCount,
-                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
-                      std::string(errorPrefix) + ": elementCount is null");
-        *elementCount = static_cast<int64_t>(source.size());
-        return;
-    }
-
-    THROW_IF_LT(requestedElementCount,
-                static_cast<int64_t>(0),
-                HIPDNN_STATUS_BAD_PARAM,
-                std::string(errorPrefix) + ": requestedElementCount is negative");
-
-    auto copyCount = std::min<size_t>(static_cast<size_t>(requestedElementCount), source.size());
-    if(elementCount != nullptr)
-    {
-        *elementCount = static_cast<int64_t>(copyCount);
-    }
-    std::memcpy(arrayOfElements, source.data(), copyCount * sizeof(int64_t));
-}
-
 void setString(std::string& target,
                hipdnnBackendAttributeType_t attributeType,
                int64_t elementCount,
@@ -95,6 +50,25 @@ void setString(std::string& target,
                 std::string(errorPrefix) + ": elementCount is negative");
     target
         = std::string(static_cast<const char*>(arrayOfElements), static_cast<size_t>(elementCount));
+}
+
+void setBoundedString(std::string& target,
+                      hipdnnBackendAttributeType_t attributeType,
+                      int64_t elementCount,
+                      const void* arrayOfElements,
+                      const char* errorPrefix,
+                      int64_t maxLength,
+                      int64_t minLength)
+{
+    THROW_IF_TRUE(elementCount < minLength,
+                  HIPDNN_STATUS_BAD_PARAM,
+                  std::string(errorPrefix)
+                      + ": elementCount must be >= " + std::to_string(minLength));
+    THROW_IF_TRUE(elementCount > maxLength,
+                  HIPDNN_STATUS_BAD_PARAM,
+                  std::string(errorPrefix) + ": elementCount exceeds maximum length ("
+                      + std::to_string(maxLength) + ")");
+    setString(target, attributeType, elementCount, arrayOfElements, errorPrefix);
 }
 
 void getString(const std::string& source,
@@ -130,7 +104,55 @@ void getString(const std::string& source,
     }
 }
 
-void setDataType(hipdnn_data_sdk::data_objects::DataType& target,
+void setByteArray(std::vector<uint8_t>& target,
+                  hipdnnBackendAttributeType_t attributeType,
+                  int64_t elementCount,
+                  const void* arrayOfElements,
+                  const char* errorPrefix)
+{
+    checkSetArgs(HIPDNN_TYPE_CHAR, attributeType, arrayOfElements, errorPrefix);
+    THROW_IF_LT(elementCount,
+                static_cast<int64_t>(0),
+                HIPDNN_STATUS_BAD_PARAM,
+                std::string(errorPrefix) + ": elementCount is negative");
+    auto ptr = static_cast<const uint8_t*>(arrayOfElements);
+    target.assign(ptr, ptr + static_cast<size_t>(elementCount));
+}
+
+void getByteArray(const std::vector<uint8_t>& source,
+                  hipdnnBackendAttributeType_t attributeType,
+                  int64_t requestedElementCount,
+                  int64_t* elementCount,
+                  void* arrayOfElements,
+                  const char* errorPrefix)
+{
+    checkGetArgs(HIPDNN_TYPE_CHAR, attributeType, errorPrefix);
+
+    auto count = static_cast<int64_t>(source.size());
+
+    if(arrayOfElements == nullptr || requestedElementCount == 0)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      std::string(errorPrefix) + ": elementCount is null");
+        *elementCount = count;
+        return;
+    }
+
+    THROW_IF_LT(requestedElementCount,
+                static_cast<int64_t>(0),
+                HIPDNN_STATUS_BAD_PARAM,
+                std::string(errorPrefix) + ": requestedElementCount is negative");
+
+    auto copyCount = std::min(requestedElementCount, count);
+    if(elementCount != nullptr)
+    {
+        *elementCount = copyCount;
+    }
+    std::memcpy(arrayOfElements, source.data(), static_cast<size_t>(copyCount));
+}
+
+void setDataType(hipdnn_flatbuffers_sdk::data_objects::DataType& target,
                  hipdnnBackendAttributeType_t attributeType,
                  int64_t elementCount,
                  const void* arrayOfElements,
@@ -145,7 +167,7 @@ void setDataType(hipdnn_data_sdk::data_objects::DataType& target,
     target = toSdkDataType(tmp);
 }
 
-void getDataType(hipdnn_data_sdk::data_objects::DataType source,
+void getDataType(hipdnn_flatbuffers_sdk::data_objects::DataType source,
                  hipdnnBackendAttributeType_t attributeType,
                  int64_t requestedElementCount,
                  int64_t* elementCount,
@@ -153,6 +175,19 @@ void getDataType(hipdnn_data_sdk::data_objects::DataType source,
                  const char* errorPrefix)
 {
     checkGetArgs(HIPDNN_TYPE_DATA_TYPE, attributeType, errorPrefix);
+
+    // UNSET storage means the field was never assigned a value. Report count=0 so
+    // callers can distinguish "absent" from a real value, matching the pattern
+    // used by getString and other optional-by-default getters. Validation that a
+    // particular field must be set lives in the descriptor's finalize().
+    if(source == hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      std::string(errorPrefix) + ": elementCount is null");
+        *elementCount = 0;
+        return;
+    }
 
     if(arrayOfElements == nullptr || requestedElementCount == 0)
     {
@@ -174,7 +209,7 @@ void getDataType(hipdnn_data_sdk::data_objects::DataType source,
     }
 }
 
-void setConvMode(hipdnn_data_sdk::data_objects::ConvMode& target,
+void setConvMode(hipdnn_flatbuffers_sdk::data_objects::ConvMode& target,
                  hipdnnBackendAttributeType_t attributeType,
                  int64_t elementCount,
                  const void* arrayOfElements,
@@ -189,7 +224,7 @@ void setConvMode(hipdnn_data_sdk::data_objects::ConvMode& target,
     target = toSdkConvMode(tmp);
 }
 
-void getConvMode(hipdnn_data_sdk::data_objects::ConvMode source,
+void getConvMode(hipdnn_flatbuffers_sdk::data_objects::ConvMode source,
                  hipdnnBackendAttributeType_t attributeType,
                  int64_t requestedElementCount,
                  int64_t* elementCount,
@@ -218,7 +253,7 @@ void getConvMode(hipdnn_data_sdk::data_objects::ConvMode source,
     }
 }
 
-void setPointwiseMode(hipdnn_data_sdk::data_objects::PointwiseMode& target,
+void setPointwiseMode(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode& target,
                       hipdnnBackendAttributeType_t attributeType,
                       int64_t elementCount,
                       const void* arrayOfElements,
@@ -233,7 +268,7 @@ void setPointwiseMode(hipdnn_data_sdk::data_objects::PointwiseMode& target,
     target = toSdkPointwiseMode(tmp);
 }
 
-void getPointwiseMode(hipdnn_data_sdk::data_objects::PointwiseMode source,
+void getPointwiseMode(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode source,
                       hipdnnBackendAttributeType_t attributeType,
                       int64_t requestedElementCount,
                       int64_t* elementCount,
@@ -262,7 +297,7 @@ void getPointwiseMode(hipdnn_data_sdk::data_objects::PointwiseMode source,
     }
 }
 
-void setNormFwdPhase(hipdnn_data_sdk::data_objects::NormFwdPhase& target,
+void setNormFwdPhase(hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase& target,
                      hipdnnBackendAttributeType_t attributeType,
                      int64_t elementCount,
                      const void* arrayOfElements,
@@ -277,7 +312,7 @@ void setNormFwdPhase(hipdnn_data_sdk::data_objects::NormFwdPhase& target,
     target = toSdkNormFwdPhase(tmp);
 }
 
-void getNormFwdPhase(hipdnn_data_sdk::data_objects::NormFwdPhase source,
+void getNormFwdPhase(hipdnn_flatbuffers_sdk::data_objects::NormFwdPhase source,
                      hipdnnBackendAttributeType_t attributeType,
                      int64_t requestedElementCount,
                      int64_t* elementCount,
@@ -307,7 +342,51 @@ void getNormFwdPhase(hipdnn_data_sdk::data_objects::NormFwdPhase source,
     std::memcpy(arrayOfElements, &tmp, sizeof(tmp));
 }
 
-void getOperationType(hipdnnOperationType_t source,
+void setReductionMode(hipdnn_flatbuffers_sdk::data_objects::ReductionMode& target,
+                      hipdnnBackendAttributeType_t attributeType,
+                      int64_t elementCount,
+                      const void* arrayOfElements,
+                      const char* errorPrefix)
+{
+    checkSetArgs(HIPDNN_TYPE_REDUCTION_OPERATOR_TYPE, attributeType, arrayOfElements, errorPrefix);
+    THROW_IF_FALSE(elementCount == 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": elementCount is not 1");
+    hipdnnReduceTensorOp_t tmp;
+    std::memcpy(&tmp, arrayOfElements, sizeof(tmp));
+    target = toSdkReductionMode(tmp);
+}
+
+void getReductionMode(hipdnn_flatbuffers_sdk::data_objects::ReductionMode source,
+                      hipdnnBackendAttributeType_t attributeType,
+                      int64_t requestedElementCount,
+                      int64_t* elementCount,
+                      void* arrayOfElements,
+                      const char* errorPrefix)
+{
+    checkGetArgs(HIPDNN_TYPE_REDUCTION_OPERATOR_TYPE, attributeType, errorPrefix);
+
+    if(arrayOfElements == nullptr || requestedElementCount == 0)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      std::string(errorPrefix) + ": elementCount is null");
+        *elementCount = 1;
+        return;
+    }
+
+    THROW_IF_FALSE(requestedElementCount >= 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": requestedElementCount < 1");
+    auto tmp = fromSdkReductionMode(source);
+    std::memcpy(arrayOfElements, &tmp, sizeof(tmp));
+    if(elementCount != nullptr)
+    {
+        *elementCount = 1;
+    }
+}
+
+void getOperationType(hipdnnOperationType_ext_t source,
                       hipdnnBackendAttributeType_t attributeType,
                       int64_t requestedElementCount,
                       int64_t* elementCount,
@@ -328,7 +407,7 @@ void getOperationType(hipdnnOperationType_t source,
     THROW_IF_FALSE(requestedElementCount >= 1,
                    HIPDNN_STATUS_BAD_PARAM,
                    std::string(errorPrefix) + ": requestedElementCount < 1");
-    std::memcpy(arrayOfElements, &source, sizeof(hipdnnOperationType_t));
+    std::memcpy(arrayOfElements, &source, sizeof(hipdnnOperationType_ext_t));
     if(elementCount != nullptr)
     {
         *elementCount = 1;
@@ -511,13 +590,13 @@ void getTensorDescriptorArray(const std::vector<std::shared_ptr<TensorDescriptor
     }
 }
 
-void setDiagonalAlignment(hipdnn_data_sdk::data_objects::DiagonalAlignment& target,
+void setDiagonalAlignment(hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment& target,
                           hipdnnBackendAttributeType_t attributeType,
                           int64_t elementCount,
                           const void* arrayOfElements,
                           const char* errorPrefix)
 {
-    checkSetArgs(HIPDNN_TYPE_DIAGONAL_ALIGNMENT, attributeType, arrayOfElements, errorPrefix);
+    checkSetArgs(HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT, attributeType, arrayOfElements, errorPrefix);
     THROW_IF_FALSE(elementCount == 1,
                    HIPDNN_STATUS_BAD_PARAM,
                    std::string(errorPrefix) + ": elementCount is not 1");
@@ -526,14 +605,14 @@ void setDiagonalAlignment(hipdnn_data_sdk::data_objects::DiagonalAlignment& targ
     target = toSdkDiagonalAlignment(tmp);
 }
 
-void getDiagonalAlignment(hipdnn_data_sdk::data_objects::DiagonalAlignment source,
+void getDiagonalAlignment(hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment source,
                           hipdnnBackendAttributeType_t attributeType,
                           int64_t requestedElementCount,
                           int64_t* elementCount,
                           void* arrayOfElements,
                           const char* errorPrefix)
 {
-    checkGetArgs(HIPDNN_TYPE_DIAGONAL_ALIGNMENT, attributeType, errorPrefix);
+    checkGetArgs(HIPDNN_TYPE_DIAGONAL_ALIGNMENT_EXT, attributeType, errorPrefix);
 
     if(arrayOfElements == nullptr || requestedElementCount == 0)
     {
@@ -555,13 +634,15 @@ void getDiagonalAlignment(hipdnn_data_sdk::data_objects::DiagonalAlignment sourc
     }
 }
 
-void setAttentionImplementation(hipdnn_data_sdk::data_objects::AttentionImplementation& target,
-                                hipdnnBackendAttributeType_t attributeType,
-                                int64_t elementCount,
-                                const void* arrayOfElements,
-                                const char* errorPrefix)
+void setAttentionImplementation(
+    hipdnn_flatbuffers_sdk::data_objects::AttentionImplementation& target,
+    hipdnnBackendAttributeType_t attributeType,
+    int64_t elementCount,
+    const void* arrayOfElements,
+    const char* errorPrefix)
 {
-    checkSetArgs(HIPDNN_TYPE_ATTENTION_IMPLEMENTATION, attributeType, arrayOfElements, errorPrefix);
+    checkSetArgs(
+        HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT, attributeType, arrayOfElements, errorPrefix);
     THROW_IF_FALSE(elementCount == 1,
                    HIPDNN_STATUS_BAD_PARAM,
                    std::string(errorPrefix) + ": elementCount is not 1");
@@ -570,14 +651,15 @@ void setAttentionImplementation(hipdnn_data_sdk::data_objects::AttentionImplemen
     target = toSdkAttentionImplementation(tmp);
 }
 
-void getAttentionImplementation(hipdnn_data_sdk::data_objects::AttentionImplementation source,
-                                hipdnnBackendAttributeType_t attributeType,
-                                int64_t requestedElementCount,
-                                int64_t* elementCount,
-                                void* arrayOfElements,
-                                const char* errorPrefix)
+void getAttentionImplementation(
+    hipdnn_flatbuffers_sdk::data_objects::AttentionImplementation source,
+    hipdnnBackendAttributeType_t attributeType,
+    int64_t requestedElementCount,
+    int64_t* elementCount,
+    void* arrayOfElements,
+    const char* errorPrefix)
 {
-    checkGetArgs(HIPDNN_TYPE_ATTENTION_IMPLEMENTATION, attributeType, errorPrefix);
+    checkGetArgs(HIPDNN_TYPE_ATTENTION_IMPLEMENTATION_EXT, attributeType, errorPrefix);
 
     if(arrayOfElements == nullptr || requestedElementCount == 0)
     {
@@ -592,6 +674,223 @@ void getAttentionImplementation(hipdnn_data_sdk::data_objects::AttentionImplemen
                    HIPDNN_STATUS_BAD_PARAM,
                    std::string(errorPrefix) + ": requestedElementCount < 1");
     auto tmp = fromSdkAttentionImplementation(source);
+    std::memcpy(arrayOfElements, &tmp, sizeof(tmp));
+    if(elementCount != nullptr)
+    {
+        *elementCount = 1;
+    }
+}
+
+void copyKnobValueUnion(const hipdnn_flatbuffers_sdk::data_objects::KnobValueUnion& src,
+                        hipdnn_flatbuffers_sdk::data_objects::KnobValueUnion& dst,
+                        const char* errorPrefix)
+{
+    switch(src.type)
+    {
+    case hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue:
+    {
+        hipdnn_flatbuffers_sdk::data_objects::IntValueT intVal;
+        intVal.value = src.AsIntValue()->value;
+        dst.Set(intVal);
+        break;
+    }
+    case hipdnn_flatbuffers_sdk::data_objects::KnobValue::FloatValue:
+    {
+        hipdnn_flatbuffers_sdk::data_objects::FloatValueT floatVal;
+        floatVal.value = src.AsFloatValue()->value;
+        dst.Set(floatVal);
+        break;
+    }
+    case hipdnn_flatbuffers_sdk::data_objects::KnobValue::StringValue:
+    {
+        hipdnn_flatbuffers_sdk::data_objects::StringValueT strVal;
+        strVal.value = src.AsStringValue()->value;
+        dst.Set(std::move(strVal));
+        break;
+    }
+    default:
+        throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
+                              std::string(errorPrefix) + ": unknown value type ("
+                                  + std::to_string(static_cast<int>(src.type)) + ")");
+    }
+}
+
+void setKnobValueUnion(hipdnn_flatbuffers_sdk::data_objects::KnobValueUnion& target,
+                       hipdnnBackendAttributeType_t attributeType,
+                       int64_t elementCount,
+                       const void* arrayOfElements,
+                       const char* errorPrefix,
+                       int64_t maxStringLength)
+{
+    switch(attributeType)
+    {
+    case HIPDNN_TYPE_INT64:
+    {
+        hipdnn_flatbuffers_sdk::data_objects::IntValueT intVal;
+        setScalar(intVal.value,
+                  HIPDNN_TYPE_INT64,
+                  attributeType,
+                  elementCount,
+                  arrayOfElements,
+                  errorPrefix);
+        target.Set(intVal);
+        break;
+    }
+    case HIPDNN_TYPE_DOUBLE:
+    {
+        hipdnn_flatbuffers_sdk::data_objects::FloatValueT floatVal;
+        setScalar(floatVal.value,
+                  HIPDNN_TYPE_DOUBLE,
+                  attributeType,
+                  elementCount,
+                  arrayOfElements,
+                  errorPrefix);
+        target.Set(floatVal);
+        break;
+    }
+    case HIPDNN_TYPE_CHAR:
+    {
+        hipdnn_flatbuffers_sdk::data_objects::StringValueT strVal;
+        setBoundedString(strVal.value,
+                         attributeType,
+                         elementCount,
+                         arrayOfElements,
+                         errorPrefix,
+                         maxStringLength);
+        target.Set(std::move(strVal));
+        break;
+    }
+    default:
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
+                              std::string(errorPrefix)
+                                  + ": unsupported attribute type for knob value: "
+                                  + hipdnn_backend::hipdnnGetAttributeTypeString(attributeType));
+    }
+}
+
+void getKnobValueUnion(const hipdnn_flatbuffers_sdk::data_objects::KnobValueUnion& source,
+                       hipdnnBackendAttributeType_t attributeType,
+                       int64_t requestedElementCount,
+                       int64_t* elementCount,
+                       void* arrayOfElements,
+                       const char* errorPrefix)
+{
+    switch(source.type)
+    {
+    case hipdnn_flatbuffers_sdk::data_objects::KnobValue::IntValue:
+        getScalar(source.AsIntValue()->value,
+                  HIPDNN_TYPE_INT64,
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  errorPrefix);
+        break;
+    case hipdnn_flatbuffers_sdk::data_objects::KnobValue::FloatValue:
+        getScalar(source.AsFloatValue()->value,
+                  HIPDNN_TYPE_DOUBLE,
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  errorPrefix);
+        break;
+    case hipdnn_flatbuffers_sdk::data_objects::KnobValue::StringValue:
+        getString(source.AsStringValue()->value,
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  errorPrefix);
+        break;
+    default:
+        throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
+                              std::string(errorPrefix) + ": unknown value type ("
+                                  + std::to_string(static_cast<int>(source.type)) + ")");
+    }
+}
+
+void setResampleMode(hipdnn_flatbuffers_sdk::data_objects::ResampleMode& target,
+                     hipdnnBackendAttributeType_t attributeType,
+                     int64_t elementCount,
+                     const void* arrayOfElements,
+                     const char* errorPrefix)
+{
+    checkSetArgs(HIPDNN_TYPE_RESAMPLE_MODE, attributeType, arrayOfElements, errorPrefix);
+    THROW_IF_FALSE(elementCount == 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": elementCount is not 1");
+    hipdnnResampleMode_t tmp;
+    std::memcpy(&tmp, arrayOfElements, sizeof(tmp));
+    target = toSdkResampleMode(tmp);
+}
+
+void getResampleMode(hipdnn_flatbuffers_sdk::data_objects::ResampleMode source,
+                     hipdnnBackendAttributeType_t attributeType,
+                     int64_t requestedElementCount,
+                     int64_t* elementCount,
+                     void* arrayOfElements,
+                     const char* errorPrefix)
+{
+    checkGetArgs(HIPDNN_TYPE_RESAMPLE_MODE, attributeType, errorPrefix);
+
+    if(arrayOfElements == nullptr || requestedElementCount == 0)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      std::string(errorPrefix) + ": elementCount is null");
+        *elementCount = 1;
+        return;
+    }
+
+    THROW_IF_FALSE(requestedElementCount >= 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": requestedElementCount < 1");
+    auto tmp = fromSdkResampleMode(source);
+    std::memcpy(arrayOfElements, &tmp, sizeof(tmp));
+    if(elementCount != nullptr)
+    {
+        *elementCount = 1;
+    }
+}
+
+void setPaddingMode(hipdnn_flatbuffers_sdk::data_objects::PaddingMode& target,
+                    hipdnnBackendAttributeType_t attributeType,
+                    int64_t elementCount,
+                    const void* arrayOfElements,
+                    const char* errorPrefix)
+{
+    checkSetArgs(HIPDNN_TYPE_PADDING_MODE, attributeType, arrayOfElements, errorPrefix);
+    THROW_IF_FALSE(elementCount == 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": elementCount is not 1");
+    hipdnnPaddingMode_t tmp;
+    std::memcpy(&tmp, arrayOfElements, sizeof(tmp));
+    target = toSdkPaddingMode(tmp);
+}
+
+void getPaddingMode(hipdnn_flatbuffers_sdk::data_objects::PaddingMode source,
+                    hipdnnBackendAttributeType_t attributeType,
+                    int64_t requestedElementCount,
+                    int64_t* elementCount,
+                    void* arrayOfElements,
+                    const char* errorPrefix)
+{
+    checkGetArgs(HIPDNN_TYPE_PADDING_MODE, attributeType, errorPrefix);
+
+    if(arrayOfElements == nullptr || requestedElementCount == 0)
+    {
+        THROW_IF_NULL(elementCount,
+                      HIPDNN_STATUS_BAD_PARAM_NULL_POINTER,
+                      std::string(errorPrefix) + ": elementCount is null");
+        *elementCount = 1;
+        return;
+    }
+
+    THROW_IF_FALSE(requestedElementCount >= 1,
+                   HIPDNN_STATUS_BAD_PARAM,
+                   std::string(errorPrefix) + ": requestedElementCount < 1");
+    auto tmp = fromSdkPaddingMode(source);
     std::memcpy(arrayOfElements, &tmp, sizeof(tmp));
     if(elementCount != nullptr)
     {

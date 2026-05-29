@@ -60,6 +60,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --driver-mode=g++ -Xclang -fallow-half-a
 if( CMAKE_PROJECT_NAME STREQUAL "rocwmma" )
   option( ROCWMMA_BUILD_TESTS "Build rocWMMA tests" ON )
   option( ROCWMMA_BUILD_SAMPLES "Build rocWMMA samples" ON )
+  option( ROCWMMA_BUILD_COMMUNITY_SAMPLES "Build community-contributed rocWMMA samples" OFF )
   option( ROCWMMA_BUILD_ASSEMBLY "Output assembly files" OFF )
   option( BUILD_OFFLOAD_COMPRESS "Build rocWMMA with offload compression" ON )
   option( ROCWMMA_CODE_COVERAGE "Build with code coverage flags (clang only)" OFF)
@@ -88,7 +89,7 @@ include(ROCMCheckTargetIds)
 include(ROCMClients)
 
 # Versioning via rocm-cmake
-set ( VERSION_STRING "2.2.0" )
+set ( VERSION_STRING "2.2.1" )
 rocm_setup_version( VERSION ${VERSION_STRING} )
 
 # configure a header file to pass the CMake version settings to the source
@@ -206,6 +207,9 @@ endif()
 if(ROCWMMA_BUILD_SAMPLES)
   rocm_package_setup_component(samples PARENT clients)
   add_subdirectory(samples)
+elseif(ROCWMMA_BUILD_COMMUNITY_SAMPLES)
+  rocm_package_setup_component(community_samples PARENT clients)
+  add_subdirectory(samples/community)
 endif()
 
 

@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -1350,14 +1350,14 @@ class ActivationInline:
         kStr += (padSpacesStr + "%s.s = %s.s & 0x7fff;\n"%(unionName, unionName))
         kStr += (padSpacesStr + "value = %s.f;\n"%unionName)
       elif (self.dataType.isSingle() or self.dataType.isDouble() or self.dataType.isInt32()):
-        kStr += (padSpacesStr + "value = abs(value);\n")
+        kStr += (padSpacesStr + "value = (value < decltype(value)(0)) ? -value : value;\n")
       else:
         raise RuntimeError("Unrecognized data type %s."%self.dataType)
     elif (activationType == 'clippedrelu'):
       if (self.dataType.isSingle() or self.dataType.isHalf() or self.dataType.isDouble()):
-        kStr += (padSpacesStr + "value = (value > alpha) ? min(value, beta) : min(0.0, beta);\n")
+        kStr += (padSpacesStr + "value = (value > alpha) ? std::min(value, beta) : std::min(decltype(beta)(0), beta);\n")
       elif self.dataType.isInt32():
-        kStr += (padSpacesStr + "value = (value > alpha) ? min(value, beta) : min(0, beta);\n")
+        kStr += (padSpacesStr + "value = (value > alpha) ? std::min(value, beta) : std::min(0, beta);\n")
     elif (activationType == 'exp'):
       kStr += (asm + " // Exp\n")
       module = activation.getExpModule(self.dataType, 0, 0)
@@ -1385,9 +1385,9 @@ class ActivationInline:
         raise RuntimeError("Unsupported data type %s."%ptrStr)
     elif (activationType == 'relu'):
       if (self.dataType.isSingle() or self.dataType.isHalf() or self.dataType.isDouble()):
-        kStr += (padSpacesStr + "value = max(0.0, value);\n")
+        kStr += (padSpacesStr + "value = std::max(decltype(value)(0), value);\n")
       elif self.dataType.isInt32():
-        kStr += (padSpacesStr + "value = max(0, value);\n")
+        kStr += (padSpacesStr + "value = std::max(0, value);\n")
       else:
         raise RuntimeError("Unsupported data type %s."%ptrStr)
     elif (activationType == 'sigmoid'):
@@ -1427,7 +1427,7 @@ class ActivationInline:
       kStr += addSpace(asm, ": \"+v\"(value) : \"s\"(alpha)\n")
       kStr += self.getRequiredRegStr(asm, activation.vgprCounter, activation.sgprCounter)
     elif (activationType == 'clamp'):
-      kStr += (padSpacesStr + "value = max(alpha, min(value, beta));\n")
+      kStr += (padSpacesStr + "value = std::max(alpha, std::min(value, beta));\n")  # clamp
     else:
       if (activationType != 'none'):
         raise RuntimeError("Unrecognized type %s."%activationType)

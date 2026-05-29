@@ -6,6 +6,7 @@
 #include <type_traits>
 
 #include <ck_tile/core/numeric/math.hpp>
+#include <ck_tile/core/numeric/math_v2.hpp>
 #include <ck_tile/core/numeric/type_convert.hpp>
 
 #define CK_TILE_ATTENTION_LOGITS_SOFT_CAP_TANH 0
@@ -19,6 +20,10 @@
 #define CK_TILE_ATTENTION_USE_SOFTSIGN_ASM 0
 #endif
 
+#if __clang_major__ >= 23
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+#endif
 namespace ck_tile {
 namespace internal {
 __device__ inline float
@@ -333,3 +338,7 @@ struct ComposedAttention
 };
 
 } // namespace ck_tile
+
+#if __clang_major__ >= 23
+#pragma clang diagnostic pop
+#endif

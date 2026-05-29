@@ -62,10 +62,14 @@ class TestBenchmarkConfig:
         with pytest.raises(ValueError, match="benchmark_iters must be positive"):
             BenchmarkConfig(graph_path=Path("/test/graph.json"), benchmark_iters=-1)
 
-    def test_negative_engine_id_raises(self) -> None:
-        """Test that negative engine_id raises ValueError."""
-        with pytest.raises(ValueError, match="engine_id must be non-negative"):
-            BenchmarkConfig(graph_path=Path("/test/graph.json"), engine_id=-1)
+    def test_negative_engine_id_accepted(self) -> None:
+        """Engine IDs are FNV-1a hashes; negative values (high bit set in
+        signed int64) must be accepted."""
+        config = BenchmarkConfig(
+            graph_path=Path("/test/graph.json"),
+            engine_id=-4567890123456789012,
+        )
+        assert config.engine_id == -4567890123456789012
 
 
 class TestABTestConfig:
@@ -112,15 +116,11 @@ class TestABTestConfig:
         assert config.a_path == Path("/path/to/pluginA")
         assert config.b_path == Path("/path/to/pluginB")
 
-    def test_negative_a_id_raises(self) -> None:
-        """Test that negative a_id raises ValueError."""
-        with pytest.raises(ValueError, match="a_id must be non-negative"):
-            ABTestConfig(a_id=-1)
-
-    def test_negative_b_id_raises(self) -> None:
-        """Test that negative b_id raises ValueError."""
-        with pytest.raises(ValueError, match="b_id must be non-negative"):
-            ABTestConfig(b_id=-1)
+    def test_negative_ids_accepted(self) -> None:
+        """a_id / b_id may be negative (FNV-1a engine ID hashes)."""
+        config = ABTestConfig(a_id=-1, b_id=-2)
+        assert config.a_id == -1
+        assert config.b_id == -2
 
     def test_negative_rtol_raises(self) -> None:
         """Test that negative rtol raises ValueError."""

@@ -93,10 +93,21 @@ private:
         case hipblaslt_initialization::hpl:
             hipblaslt_init_hpl<DType>(ref.data(), ref.size(), 1, 1);
             break;
+        case hipblaslt_initialization::uniform_low_precision:
+            hipblaslt_init_low_precision<DType>(ref.data(), ref.size(), 1, 1);
+            break;
         case hipblaslt_initialization::special:
             hipblaslt_init_alt_impl_big<DType>(ref.data(), ref.size(), 1, 1);
             break;
         case hipblaslt_initialization::zero:
+            hipblaslt_init_zero<DType>(ref.data(), ref.size(), 1, 1);
+            break;
+        // Matmul-oriented inits need proper M×K / K×N (GEMM ABC) layout; ext-op benches only flatten — zero-fill
+        // instead of silently skipping (ref would stay default-constructed).
+        case hipblaslt_initialization::integer_exact:
+        case hipblaslt_initialization::norm_dist:
+        case hipblaslt_initialization::uniform_01:
+        case hipblaslt_initialization::fp16_accumulator_probe:
             hipblaslt_init_zero<DType>(ref.data(), ref.size(), 1, 1);
             break;
         default:

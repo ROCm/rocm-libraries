@@ -4,10 +4,12 @@
 #pragma once
 
 #include "Bfloat16Dev.hpp"
+#ifndef __HIPCC_RTC__
 #include <hip/hip_fp16.h>
+#endif
 #include <type_traits>
 
-namespace hip_kernel_plugin
+namespace hip_kernel_provider
 {
 
 // used by batch norm functions.
@@ -174,4 +176,4 @@ __forceinline__ __device__ __host__ OutType cast(InType input)
     }
 }
 
-} // namespace hip_kernel_plugin
+} // namespace hip_kernel_provider
