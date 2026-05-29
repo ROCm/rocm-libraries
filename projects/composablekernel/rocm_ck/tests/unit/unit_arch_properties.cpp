@@ -103,9 +103,9 @@ TEST(TargetSet, DefaultConstructsToEmpty)
     EXPECT_EQ(ts.count(), 0);
 }
 
-TEST(TargetSet, ImplicitConversionFromSingleTarget)
+TEST(TargetSet, ConstructionFromSingleTarget)
 {
-    constexpr TargetSet ts = GpuTarget::gfx942;
+    constexpr TargetSet ts = TargetSet::of(GpuTarget::gfx942);
     EXPECT_TRUE(ts.is_single_target());
     EXPECT_EQ(ts.single_target(), GpuTarget::gfx942);
     EXPECT_EQ(ts.count(), 1);
