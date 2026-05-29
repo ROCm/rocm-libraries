@@ -23,6 +23,14 @@ layouts = ["NCDHW", "NCHW", "NCL", "NDHWC", "NHWC", "NLC"]
 
 [[supported.matchers]]
 op_chains = [
+    "BatchnormInference + Pointwise:RELU_FWD",
+    "BatchnormInferenceVarianceExt + Pointwise:RELU_FWD",
+]
+io_dtypes = ["bf16", "fp16", "fp32"]
+layouts = ["NCDHW", "NDHWC"]
+
+[[supported.matchers]]
+op_chains = [
     "ConvDgrad",
     "ConvFprop",
     "ConvWgrad",
