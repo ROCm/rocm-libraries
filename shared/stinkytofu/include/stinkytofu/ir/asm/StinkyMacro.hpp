@@ -62,7 +62,7 @@ struct MacroInstruction : public IRBase {
     MacroInstruction()
         : IRBase(IRType::StinkyTofu), divisor(0), sizeBytes(0), offsetBytes(0), value(0) {}
 
-    ~MacroInstruction() = default;
+    ~MacroInstruction() override = default;
 
    public:
     // Implement IRBase::dump()

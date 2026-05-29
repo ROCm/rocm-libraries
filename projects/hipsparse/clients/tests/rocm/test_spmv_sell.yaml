@@ -49,6 +49,23 @@ Tests:
   spmv_alg: [HIPSPARSE_SPMV_ALG_DEFAULT, 
              HIPSPARSE_SPMV_SELL_ALG1]
 
+- name: spmv_sell_mixed
+  category: quick
+  function: spmv_sell
+  indextype: *i32_i64
+  precision: *spmv_mixed_precisions
+  M: [50]
+  N: [84]
+  slice_size: [2, 3, 4]
+  alpha: [2.0]
+  alphai: [0.75]
+  beta: [1.0]
+  betai: [-0.5]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  spmv_alg: [HIPSPARSE_SPMV_ALG_DEFAULT,
+             HIPSPARSE_SPMV_SELL_ALG1]
+
 - name: spmv_sell
   category: pre_checkin
   function: spmv_sell

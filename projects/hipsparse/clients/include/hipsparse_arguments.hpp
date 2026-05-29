@@ -75,6 +75,9 @@ struct Arguments
 
     hipsparseIndexType_t index_type_I;
     hipsparseIndexType_t index_type_J;
+    hipDataType          a_type;
+    hipDataType          x_type;
+    hipDataType          y_type;
     hipDataType          compute_type;
 
     double alpha;
@@ -157,6 +160,9 @@ struct Arguments
 
         this->index_type_I = HIPSPARSE_INDEX_32I;
         this->index_type_J = HIPSPARSE_INDEX_32I;
+        this->a_type       = HIP_R_32F;
+        this->x_type       = HIP_R_32F;
+        this->y_type       = HIP_R_32F;
         this->compute_type = HIP_R_32F;
 
         this->alpha      = 0.0;
@@ -296,6 +302,9 @@ struct Arguments
         HIPSPARSE_FORMAT_CHECK(batch_count);
         HIPSPARSE_FORMAT_CHECK(index_type_I);
         HIPSPARSE_FORMAT_CHECK(index_type_J);
+        HIPSPARSE_FORMAT_CHECK(a_type);
+        HIPSPARSE_FORMAT_CHECK(x_type);
+        HIPSPARSE_FORMAT_CHECK(y_type);
         HIPSPARSE_FORMAT_CHECK(compute_type);
         HIPSPARSE_FORMAT_CHECK(alpha);
         HIPSPARSE_FORMAT_CHECK(alphai);
@@ -440,6 +449,9 @@ private:
         print("batch_count", arg.batch_count);
         print("index_type_I", hipsparse_indextype2string(arg.index_type_I));
         print("index_type_J", hipsparse_indextype2string(arg.index_type_J));
+        print("a_type", hipsparse_datatype2string(arg.a_type));
+        print("x_type", hipsparse_datatype2string(arg.x_type));
+        print("y_type", hipsparse_datatype2string(arg.y_type));
         print("compute_type", hipsparse_datatype2string(arg.compute_type));
         print("alpha", arg.alpha);
         print("alphai", arg.alphai);

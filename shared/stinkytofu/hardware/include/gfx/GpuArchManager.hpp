@@ -44,10 +44,10 @@ class GpuArchManager {
     // Sorted by alphabetical order of the mnemonic strings.
     std::vector<std::string> allOpcodes;
 
-    void addArch(const std::string& arch, std::function<void(GpuArch&)> defineInsts,
-                 std::function<void(GpuArch&)> setLogicalToArchMap,
-                 std::function<void(GpuArch&)> setRocisaToArchMap,
-                 std::function<void(GpuArch&)> setRocisaConversionMap);
+    void addArch(const std::string& arch, const std::function<void(GpuArch&)>& defineInsts,
+                 const std::function<void(GpuArch&)>& setLogicalToArchMap,
+                 const std::function<void(GpuArch&)>& setRocisaToArchMap,
+                 const std::function<void(GpuArch&)>& setRocisaConversionMap);
 
     void enumAllOpcodes();
 

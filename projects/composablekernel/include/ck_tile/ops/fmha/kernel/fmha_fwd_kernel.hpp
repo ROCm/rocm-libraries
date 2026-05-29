@@ -1528,10 +1528,18 @@ struct FmhaFwdKernel
             long_index_t batch_offset_q_descale = 0;
             long_index_t batch_offset_k_descale = 0;
             long_index_t batch_offset_v_descale = 0;
-            const float sink_value =
-                kargs.sink_ptr != nullptr
-                    ? (*(static_cast<const float*>(kargs.sink_ptr) + i_nhead)) / kargs.scale_s
-                    : -numeric<float>::infinity();
+            float sink_value                    = -numeric<float>::infinity();
+            if constexpr(kHasMask && !kHasSink)
+            {
+                sink_value = -numeric<float>::infinity();
+            }
+            else
+            {
+                sink_value =
+                    kargs.sink_ptr != nullptr
+                        ? (*(static_cast<const float*>(kargs.sink_ptr) + i_nhead)) / kargs.scale_s
+                        : -numeric<float>::infinity();
+            }
 
             if constexpr(kIsGroupMode)
             {
@@ -2335,7 +2343,8 @@ struct FmhaFwdKernel
             //     2. use more LDS, as we want better memory latency hiding
             // If SplitKV off, we don't expect Q data reused by different ThreadGroups, bypass the
             // cache
-            constexpr bool PrefillCase = FmhaPipeline::kM0 > 64;
+            constexpr bool PrefillCase =
+                FmhaPipeline::kM0 > 64 && FmhaPipeline::BlockFmhaShape::kQKHeaddim < 256;
             // divide problem
             const auto [i_tile_m, i_tile_n, i_nhead, i_batch] = GetTileIndex(kargs);
             const float sink_value =

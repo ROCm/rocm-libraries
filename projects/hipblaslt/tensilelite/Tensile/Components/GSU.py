@@ -491,6 +491,11 @@ class GSUOn(GSU):
                 isMxSwizzledScale = ('MXS' in tc) and mxFmt in ("InMemorySwizzle", "HostPreSwizzle")
                 if isMxSwizzledScale:
                     module.add(SMulI32(dst=incSgpr, src0=sgpr("Size%s"%INDEX_CHARS[tIdx]), src1=duBpe, comment="GSU*DepthU*Bpe*MI_dim(%d) (swizzled MX scale layout)"%(mi_dim)))
+                elif kernel["enableTDMMetadata"] and tP["isM"] and kernel["ProblemType"]["MetadataLayout"]:
+                    ia = kernel["ProblemType"]["IndexAssignmentsMetadata"]
+                    metadataStrideSgpr = f"Stride{tc}{writer.states.indexChars[ia[1]]}"
+                    module.add(SMovB32(dst=incSgpr, src=sgpr(metadataStrideSgpr), comment="incSgpr = stride"))
+                    module.add(SMulI32(dst=incSgpr, src0=incSgpr, src1=(du), comment="incSgpr = stride * du"))
                 else:
                     module.add(SMovB32(dst=incSgpr, src=duBpe, comment="GSU*DepthU*Bpe*MI_dim(%d)"%(mi_dim)))
                 module.add(SMulI32(dst=sgpr(gsuSgpr), src0=sgpr(gsuSgpr), src1=incSgpr, comment="GSU*DepthU*Bpe*MI_dim(%d)"%(mi_dim)))
@@ -503,7 +508,7 @@ class GSUOn(GSU):
 
                 duBpe = int(du * tP["bpeGR"]) * mi_dim
                 # multiply by stride, optimizing if unit stride
-                if writer.isConstUnitStride(stride):
+                if writer.isConstUnitStride(stride) or (kernel["enableTDMMetadata"] and tP["isM"]):
                     module.add(SCSelectB32(dst=incr, src0=incSgpr, src1=m, comment="incr%s (unrollIdx)"%(tc)))
                 else:
                     module.add(SCMovB32(dst=m, src=duBpe, comment="DepthU*Bpe if GSUC = 1"))
@@ -1144,9 +1149,10 @@ class GSUOn(GSU):
         # for the top-left corner this thread will write.    These are not changed
         # across all the store loop iters.
         if writer.db["ConservativeWaitCnt"] & 0x10:
-            module.add(SBarrier("debug"))
+            module.add(SBarrier(comment="debug"))
             module.add(SWaitCnt(vlcnt=0, vscnt=0, comment="ConservativeWaitCnt"))
-            module.add(SBarrier("debug"))
+            module.add(SBarrier(comment="debug"))
+
         if not edge and writer.db["ForceEdgeStores"]>=2:
             module.add(writer.getBomb()) # should not get here
         if edge and writer.db["AssertNoEdge"]:
@@ -1300,9 +1306,10 @@ class GSUOn(GSU):
         # for the top-left corner this thread will write.    These are not changed
         # across all the store loop iters.
         if writer.db["ConservativeWaitCnt"] & 0x10:
-            module.add(SBarrier("debug"))
+            module.add(SBarrier(comment="debug"))
             module.add(SWaitCnt(vlcnt=0, vscnt=0, comment="ConservativeWaitCnt"))
-            module.add(SBarrier("debug"))
+            module.add(SBarrier(comment="debug"))
+
         if not edge and writer.db["ForceEdgeStores"]>=2:
             module.add(writer.getBomb()) # should not get here
         if edge and writer.db["AssertNoEdge"]:
@@ -1369,9 +1376,9 @@ class GSUOn(GSU):
             module.add(self.getEdgeMovInstType()(EXEC(), -1, "full mask -> exec"))
 
         if writer.db["ConservativeWaitCnt"] & 0x40:
-            module.add(SBarrier("debug"))
+            module.add(SBarrier(comment="debug"))
             module.add(SWaitCnt(vlcnt=0, vscnt=0, comment="ConservativeWaitCnt"))
-            module.add(SBarrier("debug"))
+            module.add(SBarrier(comment="debug"))
 
         # return registers to pool:
         lastDataD = -1

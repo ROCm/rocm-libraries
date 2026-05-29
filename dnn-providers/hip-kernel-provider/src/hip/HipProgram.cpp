@@ -33,6 +33,9 @@ HipProgram::HipProgram(std::string kernelFileName, const std::vector<std::string
 
     // Create program
     hiprtcProgram prog;
+    // Kernel sources are generated from R-string literals (null-terminated) — see
+    // kernels/templates/kernel_sources.cpp.in.
+    // NOLINTNEXTLINE(bugprone-suspicious-stringview-data-usage)
     HIPRTC_CHECK(hiprtcCreateProgram(&prog,
                                      kernelSrc.data(),
                                      _programName.c_str(),
