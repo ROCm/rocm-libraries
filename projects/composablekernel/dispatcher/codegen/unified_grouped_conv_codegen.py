@@ -49,9 +49,22 @@ try:
         COMMON_TILES,
         TILE_TO_WAVE,
         TILE_TO_WARP,
+        TILE_TO_VECTOR,
+        TILE_TO_WAVE_WARP,
         VARIANT_PIPELINES,
         BWD_WEIGHT_TILES,
         COMPV4_COMPATIBLE_TILES,
+        # New extended API
+        FWD_TILES,
+        BWD_DATA_TILES,
+        get_tiles_for_variant,
+        VARIANT_PIPELINE_SCHEDULER,
+        VARIANT_SPECIALIZATIONS,
+        VARIANT_FEATURES,
+        FeatureSpec,
+        StreamKSpec,
+        compute_vector_sizes,
+        get_vector_sizes_for_tile,
         # Shared validation functions
         check_vectors,
         check_warp_coverage,
@@ -65,9 +78,27 @@ except ImportError:
     COMMON_TILES = []
     TILE_TO_WAVE = {}
     TILE_TO_WARP = {}
+    TILE_TO_VECTOR = {}
+    TILE_TO_WAVE_WARP = {}
     VARIANT_PIPELINES = {}
     BWD_WEIGHT_TILES = []
     COMPV4_COMPATIBLE_TILES = []
+    FWD_TILES = []
+    BWD_DATA_TILES = []
+    VARIANT_PIPELINE_SCHEDULER = {}
+    VARIANT_SPECIALIZATIONS = {}
+    VARIANT_FEATURES = {}
+    FeatureSpec = None
+    StreamKSpec = None
+
+    def get_tiles_for_variant(variant):
+        return COMMON_TILES
+
+    def compute_vector_sizes(tile_m, tile_n, tile_k, dtype_class, variant):
+        return [(4, 8, 8)]
+
+    def get_vector_sizes_for_tile(tile_m, tile_n, tile_k, warp_tile_k):
+        return [(4, 8, 8)]
 
 
 # ============================================================================
@@ -1973,126 +2004,177 @@ def get_default_configs(
     arch: str = "gfx942",
     variants: Optional[List[GroupedConvVariant]] = None,
     ndims: Optional[List[int]] = None,
+    datatypes: Optional[List[str]] = None,
 ) -> List[GroupedConvKernelConfig]:
     """Get default grouped convolution configurations for target architecture.
 
-    Uses tile configurations from grouped_conv_instance_builder.py as single source of truth.
-    """
-    configs = []
+    Generates configs by iterating over all tile shapes, warp configs,
+    vector sizes, pipelines, schedulers, specializations, and feature flags
+    defined in grouped_config_rules.py.
 
+    Args:
+        arch: Target GPU architecture (e.g., "gfx942", "gfx950").
+        variants: Conv variants to generate. Defaults to [FORWARD].
+        ndims: Spatial dimensions to generate (2 or 3). Defaults to [2].
+        datatypes: Data type strings (e.g., ["fp16", "bf16", "fp32"]).
+                   Controls which dtype class (half vs float) is used for
+                   vector size selection. Defaults to ["fp16"].
+    """
     if variants is None:
         variants = [GroupedConvVariant.FORWARD]
     if ndims is None:
         ndims = [2]
+    if datatypes is None:
+        datatypes = ["fp16"]
 
-    # Import tile configs from instance builder (single source of truth)
-    if not HAS_TILE_CONFIGS or not COMMON_TILES:
-        log.warning("grouped_config_rules not available, using fallback tile configs")
-        # Fallback to minimal set if grouped_config_rules unavailable
-        fwd_bwd_data_tiles = [
-            (128, 128, 32, 2, 2, 32, 32, 16),
-            (64, 64, 32, 1, 4, 16, 16, 16),
-            (16, 64, 64, 1, 4, 16, 16, 32),
-        ]
-        bwd_weight_tiles = [(16, 64, 64, 1, 4, 16, 16, 32)]
-    else:
-        # Build tile list from COMMON_TILES with wave/warp mappings
-        fwd_bwd_data_tiles = []
-        for tile_m, tile_n, tile_k in COMMON_TILES:
-            tile_key = (tile_m, tile_n, tile_k)
-            if tile_key in TILE_TO_WAVE and tile_key in TILE_TO_WARP:
-                wave_m, wave_n, wave_k = TILE_TO_WAVE[tile_key]
-                warp_m, warp_n, warp_k = TILE_TO_WARP[tile_key]
-                fwd_bwd_data_tiles.append(
-                    (tile_m, tile_n, tile_k, wave_m, wave_n, warp_m, warp_n, warp_k)
-                )
+    if not HAS_TILE_CONFIGS:
+        log.warning("grouped_config_rules not available, returning empty config list")
+        return []
 
-        # Backward weight: use BWD_WEIGHT_TILES from config rules
-        bwd_weight_tiles = []
-        for tile_m, tile_n, tile_k in BWD_WEIGHT_TILES:
-            tile_key = (tile_m, tile_n, tile_k)
-            if tile_key in TILE_TO_WAVE and tile_key in TILE_TO_WARP:
-                wave_m, wave_n, wave_k = TILE_TO_WAVE[tile_key]
-                warp_m, warp_n, warp_k = TILE_TO_WARP[tile_key]
-                bwd_weight_tiles.append(
-                    (tile_m, tile_n, tile_k, wave_m, wave_n, warp_m, warp_n, warp_k)
-                )
+    seen: set = set()
+    configs: List[GroupedConvKernelConfig] = []
 
-    for variant in variants:
-        # Select tile configs based on variant
-        if variant == GroupedConvVariant.BACKWARD_WEIGHT:
-            tile_configs = bwd_weight_tiles
-            # Backward weight supports compv3 and mem pipelines
-            # (compv4/compv5 have transpose_tile2d issues)
-            pipelines = [("compv3", "cshuffle"), ("mem", "default")]
-            # Also generate two-stage variants (fp32 workspace + elementwise convert)
-            two_stage_flags = [False, True]
-        elif variant == GroupedConvVariant.BACKWARD_DATA:
-            tile_configs = fwd_bwd_data_tiles
-            # Backward data supports compv3 and mem pipelines
-            # (compv4/compv5 have get_length issues in bwd_data kernel)
-            pipelines = [("compv3", "cshuffle"), ("mem", "default")]
-            two_stage_flags = [False]
-        else:
-            tile_configs = fwd_bwd_data_tiles
-            # Only forward grouped convolution supports both compv3 and compv4
-            pipelines = [("compv3", "cshuffle"), ("compv4", "cshuffle")]
-            two_stage_flags = [False]
-        for ndim in ndims:
-            for pipeline, epilogue in pipelines:
-                for (
-                    tile_m,
-                    tile_n,
-                    tile_k,
-                    warp_m,
-                    warp_n,
-                    warp_tile_m,
-                    warp_tile_n,
-                    warp_tile_k,
-                ) in tile_configs:
-                    # Skip tiles incompatible with compv4
-                    if pipeline == "compv4" and HAS_TILE_CONFIGS:
-                        tile_key = (tile_m, tile_n, tile_k)
-                        if tile_key not in COMPV4_COMPATIBLE_TILES:
-                            continue  # Skip this tile for compv4
+    def _add_config(config: "GroupedConvKernelConfig") -> None:
+        """Deduplicate and add config if arch-valid."""
+        if not config.is_valid_for_arch():
+            return
+        key = (
+            config.variant,
+            config.ndim_spatial,
+            config.tile.tile_m, config.tile.tile_n, config.tile.tile_k,
+            config.tile.warp_m, config.tile.warp_n, config.tile.warp_k,
+            config.tile.warp_tile_m, config.tile.warp_tile_n, config.tile.warp_tile_k,
+            config.trait.pipeline, config.trait.scheduler, config.trait.epilogue,
+            config.vector_size_a, config.vector_size_b, config.vector_size_c,
+            config.trait.double_smem_buffer, config.trait.two_stage,
+            config.trait.explicit_gemm, config.trait.split_image,
+            config.trait.num_groups_to_merge, config.trait.specialization,
+            getattr(config.trait.streamk_config, "streamk_enabled", False),
+            getattr(config.trait.streamk_config, "streamk_persistent", False),
+        )
+        if key in seen:
+            return
+        seen.add(key)
+        configs.append(config)
 
-                    for two_stage in two_stage_flags:
-                        adj_tile_k = tile_k * 2 if pipeline == "compv4" else tile_k
+    def _make_streamk_config(spec_sk) -> StreamKConfig:
+        """Convert a StreamKSpec from grouped_config_rules into a StreamKConfig."""
+        return StreamKConfig(
+            streamk_enabled=True,
+            strategy=StreamKReductionStrategy.TREE if spec_sk.strategy == "TREE"
+                     else StreamKReductionStrategy.LINEAR,
+            streamk_persistent=spec_sk.persistent,
+        )
+
+    def _emit_configs_for_tile(
+        tile_m: int, tile_n: int, tile_k: int,
+        pipelines: List[Tuple[str, str]],
+        specializations: List[str],
+        variant: "GroupedConvVariant",
+        ndim: int,
+        feat: Optional["FeatureSpec"] = None,
+    ) -> None:
+        """Emit all valid configs for a single tile shape + pipeline list."""
+        tile_key = (tile_m, tile_n, tile_k)
+
+        if tile_key not in TILE_TO_WAVE_WARP:
+            return
+        pairs = TILE_TO_WAVE_WARP[tile_key]
+
+        for (wave_m, wave_n, wave_k), (warp_tile_m, warp_tile_n, warp_tile_k) in pairs:
+            # Vector sizes are indexed by (tile_m, tile_n, tile_k, warp_tile_k)
+            vec_list = get_vector_sizes_for_tile(tile_m, tile_n, tile_k, warp_tile_k)
+            for vec_a, vec_b, vec_c in vec_list:
+                for pipeline, scheduler in pipelines:
+                    # compv4 forces double_smem_buffer
+                    dsb = (pipeline == "compv4") or (feat.double_smem_buffer if feat else False)
+
+                    for spec in specializations:
+                        # Build StreamKConfig
+                        if feat and feat.streamk_config:
+                            sk_cfg = _make_streamk_config(feat.streamk_config)
+                        else:
+                            sk_cfg = StreamKConfig()  # disabled by default
 
                         trait = GroupedConvTraitConfig(
                             pipeline=pipeline,
-                            scheduler="intrawave",
-                            epilogue=epilogue,
-                            double_smem_buffer=(pipeline == "compv4"),
+                            scheduler=scheduler,
+                            epilogue="cshuffle",
+                            double_smem_buffer=dsb,
                             pad_m=True,
                             pad_n=True,
                             pad_k=True,
-                            two_stage=two_stage,
+                            two_stage=(feat.two_stage if feat else False),
+                            explicit_gemm=(feat.explicit_gemm if feat else False),
+                            split_image=(feat.split_image if feat else False),
+                            num_groups_to_merge=(feat.num_groups_to_merge if feat else 1),
+                            specialization=spec,
+                            streamk_config=sk_cfg,
                         )
 
                         if not trait.is_valid():
                             continue
 
+                        tile_cfg = TileConfig(
+                            tile_m=tile_m,
+                            tile_n=tile_n,
+                            tile_k=tile_k,
+                            warp_m=wave_m,
+                            warp_n=wave_n,
+                            warp_k=wave_k,
+                            warp_tile_m=warp_tile_m,
+                            warp_tile_n=warp_tile_n,
+                            warp_tile_k=warp_tile_k,
+                        )
+
+                        if not tile_cfg.is_valid():
+                            continue
+
                         config = GroupedConvKernelConfig(
-                            tile=TileConfig(
-                                tile_m=tile_m,
-                                tile_n=tile_n,
-                                tile_k=adj_tile_k,
-                                warp_m=warp_m,
-                                warp_n=warp_n,
-                                warp_k=1,
-                                warp_tile_m=warp_tile_m,
-                                warp_tile_n=warp_tile_n,
-                                warp_tile_k=warp_tile_k,
-                            ),
+                            tile=tile_cfg,
                             trait=trait,
                             variant=variant,
                             ndim_spatial=ndim,
                             arch=arch,
+                            vector_size_a=vec_a,
+                            vector_size_b=vec_b,
+                            vector_size_c=vec_c,
                         )
+                        _add_config(config)
 
-                        if config.is_valid_for_arch():
-                            configs.append(config)
+    for variant in variants:
+        variant_str = {
+            GroupedConvVariant.FORWARD: "forward",
+            GroupedConvVariant.BACKWARD_DATA: "bwd_data",
+            GroupedConvVariant.BACKWARD_WEIGHT: "bwd_weight",
+        }[variant]
+
+        base_tiles = get_tiles_for_variant(variant_str)
+        base_pipelines = VARIANT_PIPELINE_SCHEDULER.get(variant_str, [])
+        base_specs = VARIANT_SPECIALIZATIONS.get(variant_str, ["default"])
+        features = VARIANT_FEATURES.get(variant_str, [])
+
+        for ndim in ndims:
+            # --- Base configs (no feature flags) ---
+            for tile_m, tile_n, tile_k in base_tiles:
+                _emit_configs_for_tile(
+                    tile_m, tile_n, tile_k,
+                    base_pipelines, base_specs,
+                    variant, ndim,
+                    feat=None,
+                )
+
+            # --- Feature-flag configs ---
+            for feat in features:
+                feat_tiles = feat.tile_override if feat.tile_override is not None else base_tiles
+                feat_pipes = feat.pipeline_override if feat.pipeline_override is not None else base_pipelines
+                for tile_m, tile_n, tile_k in feat_tiles:
+                    _emit_configs_for_tile(
+                        tile_m, tile_n, tile_k,
+                        feat_pipes, base_specs,
+                        variant, ndim,
+                        feat=feat,
+                    )
 
     return configs
 
