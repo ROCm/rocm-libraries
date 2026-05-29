@@ -825,7 +825,7 @@ validParameters = { # we need to make sure this matches develop
     # Typically matching 16 bytes is good choice since the stores will be optimally coalesced with 16 bytes/WI.
     # Using a VW too large which results in >16bytes/thread isn't supported
     # For MFMA non SourceSwap: this parameter didn't take effect
-    # -1 means set vw to largest localReadWidth according to MIWaveTile
+    # -1 means set vw to largest localReadWidth according to MIWaveTile, LDS padding and LDS capacity
     "VectorWidthA": [-1, 1, 2, 3, 4, 6, 8],
     "VectorWidthB": [-1, 1, 2, 3, 4, 6, 8],
     # If 0, store 1 element per instruction.
@@ -1026,6 +1026,8 @@ validParameters = { # we need to make sure this matches develop
     #   "Auto":        triggers defaulting in Solution.assignDerivedParameters. The default is
     #                  TDM iff TDMInst != 0, otherwise BufferLoad.
     "MXLoadInst": ["Auto", "TDM", "BufferLoad", "GlobalLoad"],
+    # Enable cluster barrier.
+    "ClusterBarrier": [False, True],
     # Cluster dimension. Clusters have up to 16 work-groups in a cluster, but each work-group in a
     # cluster runs on a separate WGP.
     "ClusterDim": validClusterDimensions,
