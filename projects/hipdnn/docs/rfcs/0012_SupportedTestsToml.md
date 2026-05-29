@@ -20,7 +20,8 @@
 11. [Alternatives Considered](#11-alternatives-considered)
 12. [Risks](#12-risks)
 13. [Open Questions and Future Work](#13-open-questions-and-future-work)
-14. [Glossary](#14-glossary)
+14. [Documentation](#14-documentation)
+15. [Glossary](#15-glossary)
 
 ## 1. Executive Summary
 
@@ -358,7 +359,19 @@ Earlier drafts used `patterns = ["*ConvFwd*"]` matched against GTest test names 
 - **Detecting obsolete `[[test_skips]]`.** A `detect_obsolete = true` flag could trigger an offline check that builds each skipped graph and queries engine support without executing. Requires harness API changes for graph-build-without-execute.
 - **Wildcards in matchers.** Rejected for v1. If a real engine (e.g. compiler-based) needs the "commit to all" stance, add explicit wildcard semantics in v2 with documentation that it commits to current AND future enum values.
 
-## 14. Glossary
+## 14. Documentation
+
+Alongside the implementation, this RFC commits to maintainer documentation in three artifacts under `dnn-providers/integration-tests/docs/`:
+
+1. **Schema reference** (`support-claims-schema.md`) — field-by-field reference for `[meta]`, `[[supported]]`, `[[supported.matchers]]`, with common shapes for new asics and op families.
+2. **Failure-mode runbook** (`support-claims-failures.md`) — one section per Rule (A–E). Each answers: what triggered this, what the message means, ranked likely root causes, and step-by-step remediation.
+3. **Bring-up guide** (`support-claims-bringup.md`) — adding a new asic or engine end-to-end: regen via the binary, review the diff, what to look for, what to commit. Cross-links the schema and the runbook.
+
+**Runtime linking — load-bearing.** Every verifier failure message ends with a stable anchor pointing into the failure-mode runbook, e.g. `see docs/support-claims-failures.md#rule-c-zero-coverage-matcher`. A maintainer reading a CI log can click straight to the entry that addresses what they're looking at. Anchor names and verifier output are co-designed; renaming an anchor without updating the verifier fails CI lint.
+
+Docs land in the same PR as the implementation. PRs that change schema or verifier behaviour without updating the docs fail review.
+
+## 15. Glossary
 
 - **Matcher.** A `[[supported.matchers]]` entry. Claims that the cross-product of its `op_chains × io_dtypes × layouts` is fully supported by the engine.
 - **Claimed.** A test whose `(op_chain, io_dtype, layout)` lies in some matcher's cross-product for the current `(arch, platform)`.
