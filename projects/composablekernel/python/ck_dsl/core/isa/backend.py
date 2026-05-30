@@ -56,6 +56,21 @@ class ISABackend:
             f'target datalayout = "{self.datalayout}"\ntarget triple = "{self.triple}"'
         )
 
+    # --- buffer resource descriptor --------------------------------------
+    @property
+    def buffer_rsrc_word3(self) -> int:
+        """DWORD3 of the buffer resource descriptor fed to
+        ``llvm.amdgcn.make.buffer.rsrc`` as its ``flags`` operand.
+
+        The format/OOB-select encoding in word3 is **ISA-specific**: the
+        CDNA (gfx9) layout is *not* binary-compatible with the RDNA
+        (gfx10/11) layout. The CDNA value ``0x00027000`` ("32-bit-uint,
+        bounds-checked"; matches CK Tile's hardcoded gfx9 constant) places
+        the resource in an out-of-bounds-everything state on gfx11, so a
+        ``raw.ptr.buffer.load/store`` against it silently returns 0 / drops
+        the write. RDNA backends override this with the gfx10/11 word3."""
+        return 0x00027000
+
     # --- s_waitcnt -------------------------------------------------------
     def encode_waitcnt(self, vmcnt: int, expcnt: int, lgkmcnt: int) -> int:
         """Encode an ``s_waitcnt`` immediate. The gfx9/gfx10 split layout
@@ -145,6 +160,18 @@ class Gfx11RdnaBackend(ISABackend):
     (no MFMA), and a distinct ``s_waitcnt`` layout from gfx9/10. Datalayout +
     triple are identical to CDNA on the ROCm releases we target (clang-verified
     on gfx1151), so those are inherited unchanged."""
+
+    @property
+    def buffer_rsrc_word3(self) -> int:
+        """RDNA (gfx10/11/12) buffer resource DWORD3.
+
+        ``0x31014000`` is the gfx10+ "raw" SRD word3 used by ROCm / CK Tile
+        for ``gfx103`` / ``gfx11`` / ``gfx12`` (the format + OOB-select field
+        encoding moved relative to gfx9). The CDNA value ``0x00027000`` makes
+        every ``raw.ptr.buffer.load/store`` read 0 / drop on gfx11; this is
+        the value that makes bounds-checked raw buffer access work on the
+        gfx1151 Strix Halo box."""
+        return 0x31014000
 
     def emit_mma(self, lowerer, op) -> None:
         """Lower ``tile.mma`` to an RDNA WMMA call.

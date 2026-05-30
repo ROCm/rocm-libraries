@@ -5,14 +5,16 @@
 
 DSL counterpart of CK Tile's ``example/ck_tile/06_permute`` /
 ``include/ck_tile/ops/permute/kernel/generic_permute_kernel.hpp``.
-Computes::
+Computes ``Y = np.transpose(X, perm)`` (equivalently
+``y = x.permute(*perm).contiguous()``): output axis ``d`` indexes input
+axis ``perm[d]``, so::
 
-    Y[i_0, i_1, ..., i_{n-1}] = X[i_{pi(0)}, i_{pi(1)}, ..., i_{pi(n-1)}]
+    Y[o_0, o_1, ..., o_{n-1}] = X[a_0, a_1, ..., a_{n-1}]
+        where a_{perm[d]} == o_d   (i.e. a == o ∘ perm^{-1})
 
-where ``pi`` is the permutation (so e.g. ``pi=(2,1,0)`` on a rank-3
-tensor is equivalent to ``y = x.permute(2, 1, 0).contiguous()``).
-``Y`` is row-major contiguous with shape
-``(x_shape[pi[0]], x_shape[pi[1]], ..., x_shape[pi[n-1]])``.
+For example ``perm=(2,1,0)`` on a rank-3 tensor is
+``y = x.permute(2, 1, 0).contiguous()``. ``Y`` is row-major contiguous
+with shape ``(x_shape[perm[0]], x_shape[perm[1]], ..., x_shape[perm[n-1]])``.
 
 Scalar -> tile/vector replacements
 ----------------------------------
@@ -141,21 +143,12 @@ class PermuteSpec:
                 if inner % v == 0 and self.total_elements % v == 0:
                     return v
             return 1
-        # P84: when ``perm[-1] != rank - 1`` but a *prefix* matches —
-        # i.e., the last few axes permute among themselves while the
-        # leading axes are pass-through — we can still vectorise along
-        # the next-inner output axis with a one-extra-gather pattern.
-        # The simplest sufficient condition is that ``perm[-2] ==
-        # rank - 1``, which means the second-to-last output axis is
-        # the innermost input axis: each lane vec-loads the inner
-        # input row and one extra lane-stride scatter writes the
-        # permuted slot. Match the same divisibility test as the
-        # primary branch.
-        if self.rank >= 2 and self.perm[-2] == self.rank - 1:
-            inner = self.x_shape[-1]
-            for v in (8, 4, 2):
-                if inner % v == 0 and self.total_elements % v == 0:
-                    return v
+        # ``perm[-1] != rank - 1``: the innermost output axis maps to a
+        # non-innermost input axis, so ``vec`` consecutive output
+        # elements come from input elements that are ``stride[perm[-1]]``
+        # apart -- not a contiguous chunk. A vec-wide load would gather
+        # the wrong halves, so we fall back to the scalar (vec=1) path
+        # and let the transform-DAG drive each element's source offset.
         return 1
 
     def kernel_name(self) -> str:
@@ -266,11 +259,16 @@ def _build_offset_descriptor(spec: PermuteSpec) -> RichTensorDescriptor:
         )
     ]
     for d in range(n):
-        # Input coord d == output coord perm[d]. ``pass_through`` is
-        # the identity rename so the descriptor's naive base sees the
-        # renamed input coord ``i_d`` whose value equals ``o_{perm[d]}``.
+        # ``np.transpose(X, perm)`` semantics: output axis ``d`` indexes
+        # input axis ``perm[d]``, i.e. ``i_{perm[d]} == o_d``. So the
+        # rename binds output coord ``o_d`` to input coord
+        # ``i_{perm[d]}`` (``pass_through(upper=o_d, lower=i_{perm[d]})``
+        # sets ``i_{perm[d]} := o_d``). The naive base then evaluates
+        # ``sum_a x_strides[a] * i_a == sum_a x_strides[a] *
+        # o_{perm^{-1}(a)}`` -- the row-major-input offset of the
+        # element that lands at output position ``out_idx``.
         transforms.append(
-            pass_through(out_coord_names[spec.perm[d]], in_coord_names[d])
+            pass_through(out_coord_names[d], in_coord_names[spec.perm[d]])
         )
     return desc.transform(*transforms)
 

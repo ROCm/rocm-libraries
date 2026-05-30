@@ -2623,10 +2623,11 @@ class _Lowerer:
         else:
             intrinsic = "llvm.amdgcn.make.buffer.rsrc.p1"
             nb_text = f"i32 {self._operand(num_bytes)}"
+        word3 = self._backend.buffer_rsrc_word3
         self._current().emit(
             f"  {op.result.name} = call ptr addrspace(8) @{intrinsic}("
             f"ptr addrspace(1) {self._operand(ptr)}, "
-            f"i16 0, {nb_text}, i32 159744)"  # 0x00027000
+            f"i16 0, {nb_text}, i32 {word3})"  # ISA-specific rsrc DWORD3
         )
 
     def _op_tile_buffer_load_vN_f16(self, op: Op) -> None:
