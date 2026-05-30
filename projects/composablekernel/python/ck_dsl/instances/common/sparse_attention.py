@@ -52,6 +52,7 @@ from ...helpers.mfma_attention import (
     mfma_attention_fwd_inner_body,
 )
 from ...helpers.spec import kernel_name_join
+from ...helpers.transforms import calculate_magic_numbers, do_magic_division
 from ._fmha_common import FmhaCommonSpec, FmhaKernelBuilder, validate_common_spec
 from .fmha_arch import validate_fmha_mfma_atom
 
@@ -71,6 +72,22 @@ __all__ = [
 
 
 _BLOCK_SIZE = 64  # one wave64 per CTA (matches mfma_attention helper)
+
+
+def _magic_div(b: IRBuilder, dividend: Value, divisor: int) -> Value:
+    """``dividend // divisor`` via CK Tile's magic mul-hi division.
+
+    Used for the sparsity-block index decode (``q_tile_base // block_q``
+    and ``kt // tiles_per_block_k``). The divisor is a compile-time
+    constant, so ``(multiplier, shift)`` fold to immediates and the cost is
+    one ``v_mul_hi_u32`` + add + shift instead of the AMDGPU integer
+    divider. The dividend is a non-negative i32 (a Q-tile base or an MFMA
+    K-tile index), inside the magic sequence's 31-bit unsigned range, so
+    the unsigned magic quotient equals the ``b.div`` it replaces (device
+    lowering of ``merge_v2_magic_division``).
+    """
+    mult, shift = calculate_magic_numbers(divisor)
+    return do_magic_division(b, dividend, mult, shift)
 
 
 @dataclass(frozen=True)
@@ -469,7 +486,7 @@ def build_jenga_sparse_attention(
     kv_head_idx = kb.kv_head_idx
     q_tile_base = b.mul(q_tile_idx, b.const_i32(MFMA_ATTN_BLOCK_M))
     # The Q tile's first row determines its sparsity-q-block.
-    q_block_idx = b.div(q_tile_base, b.const_i32(spec.block_q))
+    q_block_idx = _magic_div(b, q_tile_base, spec.block_q)
     mask_row_base = b.mul(q_block_idx, b.const_i32(spec.num_k_blocks))
 
     # Stage the per-Q-block mask row into LDS once. The K-tile predicate
@@ -487,11 +504,10 @@ def build_jenga_sparse_attention(
     # Each MFMA K-tile = ``MFMA_ATTN_BLOCK_K`` K positions = one
     # ``block_k / MFMA_ATTN_BLOCK_K``-th of one sparsity block.
     tiles_per_block_k = spec.block_k // MFMA_ATTN_BLOCK_K
-    c_tpbk = b.const_i32(tiles_per_block_k)
 
     def _jenga_tile_predicate(b: IRBuilder, kt):
         """``MaskBitmap[q_block, kt // tiles_per_block_k] != 0`` from LDS."""
-        k_block_idx = b.div(kt, c_tpbk)
+        k_block_idx = _magic_div(b, kt, tiles_per_block_k)
         return _lds_bitmap_predicate(b, mask_lds, k_block_idx)
 
     mfma_attention_fwd_inner_body(
@@ -567,7 +583,7 @@ def build_vsa_sparse_attention(spec: VsaSparseSpec, arch: str = "gfx950") -> Ker
     head_idx = kb.head_idx
     kv_head_idx = kb.kv_head_idx
     q_tile_base = b.mul(q_tile_idx, b.const_i32(MFMA_ATTN_BLOCK_M))
-    q_block_idx = b.div(q_tile_base, b.const_i32(spec.block_q))
+    q_block_idx = _magic_div(b, q_tile_base, spec.block_q)
     lut_row_base = b.mul(q_block_idx, b.const_i32(spec.max_blocks_per_q))
 
     tid = b.thread_id_x()
@@ -584,7 +600,6 @@ def build_vsa_sparse_attention(spec: VsaSparseSpec, arch: str = "gfx950") -> Ker
     b.sync()
 
     tiles_per_block_k = spec.block_k // MFMA_ATTN_BLOCK_K
-    c_tpbk = b.const_i32(tiles_per_block_k)
 
     def _vsa_tile_predicate(b: IRBuilder, kt):
         """Tile-level VSA predicate via the LDS-staged bitmap.
@@ -594,7 +609,7 @@ def build_vsa_sparse_attention(spec: VsaSparseSpec, arch: str = "gfx950") -> Ker
         whole "is this block in the LUT?" question collapses to one
         LDS byte read + i8 compare.
         """
-        k_block_idx = b.div(kt, c_tpbk)
+        k_block_idx = _magic_div(b, kt, tiles_per_block_k)
         return _lds_bitmap_predicate(b, bitmap_lds, k_block_idx)
 
     mfma_attention_fwd_inner_body(

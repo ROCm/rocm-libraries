@@ -38,6 +38,7 @@ from ..core.ir import (
     IRBuilder,
     Value,
 )
+from .distribution import TileDistributionEncoding
 
 
 @dataclass(frozen=True)
@@ -367,6 +368,85 @@ class MfmaAtom:
             name="mfma_f32_4x4x4_f16",
         )
 
+    # ---- HotLoop scheduler timing traits (additive; see F0 brief) ----
+    #
+    # These are *derived properties* (not new constructor fields) so every
+    # existing ``MfmaAtom(...)`` factory call stays byte-identical. They surface
+    # the per-atom timing constants the v3/v4 HotLoopScheduler needs:
+    #   - ``k_per_xdlops`` == the atom's full per-instruction K (CK's KPerXdlops,
+    #     == ``self.k``; this is the value the ``C_MFMA_Inst_Cycle`` table and the
+    #     ``KGroup`` predicate switch on, blkgemmpipe_scheduler.hpp:34/65-74 and
+    #     blockwise_gemm_pipeline_xdlops_base.hpp:72-85).
+    #   - ``mfma_cycle`` == the per-shape/dtype MFMA latency in cycles, the exact
+    #     ``C_MFMA_Inst_Cycle`` closed form (blkgemmpipe_scheduler.hpp:63-74):
+    #         IsF4F6 ? speedup=2 : 1
+    #         NPerXDL==16 -> (KPerXDL==128 ? 32 : 16) / speedup
+    #         NPerXDL==32 -> (KPerXDL== 64 ? 64 : 32) / speedup
+    #     ck_tile's comp_v3 uses the simpler ``NPerXDL==16 ? 16 : 32`` form
+    #     (comp_v3.hpp:305) which coincides with the classic-CK table for every
+    #     shipped non-F4F6 atom (16x16x{16,32}->16, 32x32x{8,16}->32), so this
+    #     single property serves both pipelines.
+    #   - ``is_f4f6`` / ``f8_kgroup`` flags drive the speedup and the f8 16-elem
+    #     ds_read split.
+
+    @property
+    def is_f4f6(self) -> bool:
+        """True for the MX fp4 / fp6 atoms (CK ``IsF4F6``, 2x MFMA speed-up)."""
+        return self.dtype_in in ("fp4", "fp6")
+
+    @property
+    def k_per_xdlops(self) -> int:
+        """CK ``KPerXdlops``: the atom's full per-instruction K (== ``self.k``).
+
+        This is the value the ``C_MFMA_Inst_Cycle`` latency table and the
+        f8 ``KGroup`` predicate switch on
+        (``blkgemmpipe_scheduler.hpp:65-74``,
+        ``blockwise_gemm_pipeline_xdlops_base.hpp:79-81``).
+        """
+        return self.k
+
+    @property
+    def mfma_cycle(self) -> int:
+        """Per-shape/dtype MFMA latency in cycles (CK ``C_MFMA_Inst_Cycle``).
+
+        Exact port of ``blkgemmpipe_scheduler.hpp:63-74``. ``NPerXDL`` is
+        ``self.n`` and ``KPerXDL`` is ``self.k`` (== :attr:`k_per_xdlops`).
+        Raises for atom shapes outside the ``NPerXDL in {16, 32}`` table
+        (the batched 4x4 atom), matching the C++ which only instantiates
+        the scheduler for the 16x16 / 32x32 XDL shapes.
+        """
+        speedup = 2 if self.is_f4f6 else 1
+        if self.n == 16:
+            return (32 if self.k == 128 else 16) // speedup
+        if self.n == 32:
+            return (64 if self.k == 64 else 32) // speedup
+        raise NotImplementedError(
+            f"no C_MFMA_Inst_Cycle for atom NPerXDL={self.n} "
+            f"(only the 16x16 and 32x32 XDL shapes have a latency table)"
+        )
+
+    @property
+    def f8_kgroup(self) -> int:
+        """CK ``KGroup`` for f8 atoms (``..._base.hpp:72-85``).
+
+        On gfx950 an f8 MFMA consumes 32 f8 elements split into 2
+        non-contiguous groups of 16 (one ds_read can fetch only 16 f8 at a
+        time). Returns 2 for the f8/bf8 atoms whose XDL shape hits the
+        gfx950 wide-K f8 instruction (16x16 KPerXdlops==128 or 32x32
+        KPerXdlops==64), else 1. The shipped fp8/bf8 atoms here are the
+        16x16x32 / 32x32x16 catalog entries; CK's gfx950 f8 MFMA is the
+        wide-K (128/64) instruction those map onto, so the split applies
+        when the per-XDL K reaches the wide-K threshold. Non-f8 atoms
+        always return 1.
+        """
+        if self.dtype_in not in ("fp8e4m3", "bf8e5m2"):
+            return 1
+        if (self.m == 16 and self.n == 16 and self.k_per_xdlops == 128) or (
+            self.m == 32 and self.n == 32 and self.k_per_xdlops == 64
+        ):
+            return 2
+        return 1
+
     # ---- emit ----
 
     def emit(self, b: IRBuilder, a: Value, bb: Value, c: Value) -> Value:
@@ -472,6 +552,109 @@ class MfmaAtom:
         raise NotImplementedError(
             f"no lane_to_output dispatch for atom {self.m}x{self.n}"
         )
+
+
+# ---------------------------------------------------------------------
+# C-accumulator warp distribution (CWarpDstrEncoding)
+# ---------------------------------------------------------------------
+#
+# CK Tile expresses the MFMA C-fragment lane/register layout as a
+# ``tile_distribution_encoding`` rather than as hand-rolled lane->(row,
+# col) arithmetic. The canonical encoding lives in
+# ``ops/gemm/warp/warp_gemm_attribute_mfma.hpp``:
+#
+#     using CWarpDstrEncoding = tile_distribution_encoding<
+#         sequence<>,                                         // Rs (none)
+#         tuple<sequence<kCM0PerLane, kCMLane, kCM1PerLane>,  // M decomposition
+#               sequence<kCNLane>>,                           // N decomposition
+#         tuple<sequence<1, 2>>,   // single P (lane) -> M-level1 and N-level0
+#         tuple<sequence<1, 0>>,   //   at M minor 1 (kCMLane) and N minor 0
+#         sequence<1, 1>,          // two Y dims, both on the M axis
+#         sequence<0, 2>>;         //   at M minor 0 (kCM0PerLane) and 2 (kCM1PerLane)
+#
+# where (from ``warp_gemm_attribute_mfma_impl.hpp``):
+#   16x16 atoms: kCMLane=4, kCNLane=16, kCM0PerLane=1, kCM1PerLane=4
+#   32x32 atoms: kCMLane=2, kCNLane=32, kCM0PerLane=4, kCM1PerLane=4
+#
+# Reading the encoding (single-warp, wave64) the lane decomposes as
+# ``(m_blk, n) = (lane // kCNLane, lane % kCNLane)`` and the per-lane
+# accumulator slot ``i`` decomposes as ``(y0, y1)`` (row-major over the
+# two Y lengths kCM0PerLane, kCM1PerLane). ``calculate_x`` then yields
+#   row = y0 * (kCMLane * kCM1PerLane) + m_blk * kCM1PerLane + y1
+#   col = n
+# which is exactly :meth:`MfmaAtom.lane_to_output` for every supported
+# atom (verified element-by-element against the SSA both helpers emit).
+
+
+# (kCM0PerLane, kCMLane, kCM1PerLane, kCNLane) for each (m, n) C tile.
+# Sourced from the kC* constants in warp_gemm_attribute_mfma_impl.hpp.
+_C_WARP_PARAMS: Dict[Tuple[int, int], Tuple[int, int, int, int]] = {
+    (16, 16): (1, 4, 4, 16),
+    (32, 32): (4, 2, 4, 32),
+}
+
+
+def c_warp_params(atom: "MfmaAtom") -> Tuple[int, int, int, int]:
+    """Return ``(kCM0PerLane, kCMLane, kCM1PerLane, kCNLane)`` for ``atom``.
+
+    These are the four CK Tile ``WarpGemmAttributeMfmaImpl`` constants
+    that fully describe the MFMA C-fragment layout. ``kCM0PerLane *
+    kCM1PerLane`` is the per-lane accumulator count (``c_per_lane``) and
+    ``kCMLane * kCNLane`` is the wavefront size that participates in the
+    M/N spatial tiling (64 on wave64). Raises for atom shapes CK Tile
+    does not give a ``CWarpDstrEncoding`` for (the batched 4x4 atom).
+    """
+    key = (atom.m, atom.n)
+    if key not in _C_WARP_PARAMS:
+        raise NotImplementedError(
+            f"no CWarpDstrEncoding for atom {atom.m}x{atom.n} "
+            f"(only the 16x16 and 32x32 MFMA C tiles are supported)"
+        )
+    m0, m_lane, m1, n_lane = _C_WARP_PARAMS[key]
+    if m0 * m1 != atom.c_per_lane:
+        raise ValueError(
+            f"atom {atom.name}: kCM0PerLane*kCM1PerLane ({m0 * m1}) "
+            f"!= c_per_lane ({atom.c_per_lane})"
+        )
+    return m0, m_lane, m1, n_lane
+
+
+def make_c_warp_dstr_encoding(atom: "MfmaAtom") -> TileDistributionEncoding:
+    """Build the MFMA C-tile :class:`TileDistributionEncoding` for ``atom``.
+
+    Port of CK Tile's ``CWarpDstrEncoding``
+    (``ops/gemm/warp/warp_gemm_attribute_mfma.hpp``) /
+    ``make_embed_tile_distribution_encoding`` for the C accumulator. The
+    returned encoding describes, for one wavefront, how the (lane,
+    per-lane register slot) pair maps onto the (row, col) of the warp's
+    output tile -- i.e. it expresses the accumulator layout as a
+    :class:`TileDistribution` instead of the hand-rolled lane arithmetic
+    in :meth:`MfmaAtom.lane_to_output`.
+
+    Driving it: split the lane as ``(m_blk, n) = (lane // kCNLane, lane
+    % kCNLane)`` to form the single P sub-sequence ``[m_blk, n]``, and
+    split the accumulator slot ``i`` row-major over the two Y lengths
+    (``kCM0PerLane``, ``kCM1PerLane``). Then
+    ``make_static_tile_distribution(enc).calculate_x(b, ys=[y0, y1],
+    ps=[[m_blk, n]])`` returns ``(row_in_atom, col_in_atom)`` identical
+    to :meth:`MfmaAtom.lane_to_output`.
+
+    Raises :class:`NotImplementedError` for atom shapes without a CK
+    Tile ``CWarpDstrEncoding`` (the batched 4x4 atom).
+    """
+    m0, m_lane, m1, n_lane = c_warp_params(atom)
+    return TileDistributionEncoding(
+        Rs=(),
+        Hs=((m0, m_lane, m1), (n_lane,)),
+        # Single P (the lane): sub0 -> X-major 1 (M) at minor 1 (kCMLane),
+        # sub1 -> X-major 2 (N) at minor 0 (kCNLane).
+        Ps2RHs_major=((1, 2),),
+        Ps2RHs_minor=((1, 0),),
+        # Two Y dims, both on the M axis: minor 0 (kCM0PerLane) and
+        # minor 2 (kCM1PerLane).
+        Ys2RHs_major=(1, 1),
+        Ys2RHs_minor=(0, 2),
+    )
 
 
 # ---------------------------------------------------------------------

@@ -25,7 +25,7 @@ CK Tile-inspired data abstractions (port of ``make_tensor_view`` etc.)
  `make_lds_view` plus ``make_naive_tensor_descriptor_packed``.
  - `make_naive_tensor_view_packed`, CK Tile literal-name aliases for the
  `make_tile_window` two free-function forms; use either.
- - `view_from_transforms_descriptor` Bridge ``ck_dsl.transforms`` (rich
+ - `view_from_transforms_descriptor` Bridge ``ck_dsl.helpers.transforms`` (rich
  transform-pipeline descriptors with
  named coords) into the :class:`TensorView`
  API; discards validity masks for now.
@@ -72,7 +72,7 @@ barriers, wrong epilogue indexing).
 See `python/ck_dsl/helpers/README.md` for a top-to-bottom worked
 example that uses every helper in this module, and
 `python/ck_dsl/TRANSFORM_DAG.md` for how the coord-transform algebra
-in `ck_dsl.transforms` composes with these helpers to build full
+in `ck_dsl.helpers.transforms` composes with these helpers to build full
 convolution kernels in the CK Tile style.
 """
 

@@ -41,6 +41,7 @@ from ...helpers.io import (
     store_vec,
 )
 from ...helpers.spec import kernel_name_join
+from ...helpers.transforms import calculate_magic_numbers, do_magic_division
 from ._fmha_common import FmhaCommonSpec, FmhaKernelBuilder, validate_common_spec
 from ._fmha_warp_body import WARP_SIZE
 from .fmha_arch import validate_fmha_mfma_atom
@@ -216,9 +217,18 @@ def build_fmha_fwd_splitkv_decode_segment(
     head_idx = b.block_id_y()
     segment_idx = b.block_id_z()
     nqkv = s.shape.num_queries_per_kv
-    # ``num_queries_per_kv`` need not be a power of two (e.g. 6 in
-    # some GQA layouts), so keep the div for the head -> kv-head map.
-    kv_head_idx = b.div(head_idx, b.const_i32(nqkv))
+    # GQA head -> kv-head map: ``kv_head = head // num_queries_per_kv``.
+    # ``num_queries_per_kv`` need not be a power of two (e.g. 6 in some
+    # GQA layouts), so the pow-2 right-shift fast path is unavailable.
+    # Instead of a hardware integer divide, emit CK Tile's magic-division
+    # mul-hi sequence (``do_magic_division``; the device lowering of
+    # ``merge_v2_magic_division``): the divisor is a compile-time constant
+    # so ``(multiplier, shift)`` fold to immediates and the runtime cost is
+    # one ``v_mul_hi_u32`` + add + shift instead of the ~20-cycle integer
+    # divider. ``head_idx`` is a grid axis (0..num_query_heads-1), well
+    # inside the documented 31-bit unsigned range of the magic sequence.
+    nqkv_mult, nqkv_shift = calculate_magic_numbers(nqkv)
+    kv_head_idx = do_magic_division(b, head_idx, nqkv_mult, nqkv_shift)
 
     # ``num_segments`` is validated as a positive power of two
     # ({1, 2, 4, ..., 128}); replace ``seqlen_k / NUM_SEG`` with a

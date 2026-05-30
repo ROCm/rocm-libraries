@@ -483,7 +483,7 @@ class TensorView:
     # ---- flat-offset variants (skip the descriptor) ----
     #
     # These are useful when the caller already has a flat element offset
-    # (e.g. from a ``ck_dsl.transforms.TensorDescriptor`` with named
+    # (e.g. from a ``ck_dsl.helpers.transforms.TensorDescriptor`` with named
     # coords + a transform DAG) and just wants to issue the load/store
     # in the right address space. They also support the ``mask=`` kwarg
     # for buffer-space loads where the AMDGPU OOB-zero behaviour is the
@@ -1182,10 +1182,10 @@ def move_tensor_coordinate(
 
 
 # ---------------------------------------------------------------------
-# Bridge to ``ck_dsl.transforms``
+# Bridge to ``ck_dsl.helpers.transforms``
 # ---------------------------------------------------------------------
 #
-# ``ck_dsl.transforms.TensorDescriptor`` (the "rich" descriptor with
+# ``ck_dsl.helpers.transforms.TensorDescriptor`` (the "rich" descriptor with
 # named coords and a transform chain) provides ``offset(b, **named_coords)
 # -> (flat_offset, optional_valid_mask)``. The helper below wraps such
 # a descriptor as a :class:`TensorView` so the small-op authoring
@@ -1199,12 +1199,12 @@ def move_tensor_coordinate(
 
 def view_from_transforms_descriptor(
     base: Value,
-    rich_desc,  # ck_dsl.transforms.TensorDescriptor
+    rich_desc,  # ck_dsl.helpers.transforms.TensorDescriptor
     *,
     addr_space: AddrSpace = "global",
     coord_order: Optional[Sequence[str]] = None,
 ) -> TensorView:
-    """Wrap a ``ck_dsl.transforms.TensorDescriptor`` as a CK Tile-style
+    """Wrap a ``ck_dsl.helpers.transforms.TensorDescriptor`` as a CK Tile-style
     :class:`TensorView`.
 
     The rich descriptor (with named upper coords) is exposed through a
@@ -1263,3 +1263,171 @@ def _default_dtype_for_bridge():
     from ..core.ir import F16
 
     return F16
+
+
+# ---------------------------------------------------------------------
+# TransformCoordinate — incremental move through a transform-chain descriptor
+# ---------------------------------------------------------------------
+#
+# :class:`TensorCoordinate` above is the incremental-offset idiom for the
+# *naive* (shape + strides) :class:`TensorDescriptor`. CK Tile's real
+# ``move_tensor_coordinate`` also works over the rich transform-chain
+# descriptor (``ck_dsl.helpers.transforms.TensorDescriptor``): moving the upper
+# index re-derives the lower index through each transform's
+# ``update_lower_index`` and updates the cached flat offset by the delta
+# only. The bridge below provides that for the rich descriptor without
+# re-running the whole chain on the offset hot path.
+#
+# Correctness model. The rich descriptor's flat offset is linear in its
+# *base* coords, and every composable transform except ``Unmerge`` maps
+# upper coords to lower coords *affinely* (``PassThrough`` is identity,
+# ``Pad`` is identity-on-value, ``Embed`` and ``Merge`` are linear +
+# constant). For an affine chain the offset delta is independent of the
+# absolute position::
+#
+#     offset(x + Δ) - offset(x)  ==  offset(Δ) - offset(0)
+#
+# so the cached offset can be advanced by ``offset(Δ) - offset(0)``,
+# which the IRBuilder constant-folds to a single ``add`` for
+# compile-time deltas (the GEMM K-loop step, the sliding-window stride).
+# When V1 lands an explicit incremental ``move`` on the rich descriptor
+# the bridge delegates to it; when a moved coord flows through a
+# non-affine ``Unmerge`` the bridge falls back to a full re-lowering of
+# the new absolute index (still exactly correct, just not delta-only).
+
+
+def _rich_chain_is_affine_for(rich_desc, moved_names: Sequence[str]) -> bool:
+    """True iff every transform whose ``upper`` touches a moved coord is
+    linear in coordinate value (so a position-independent offset delta is
+    exact). Uses V1's canonical ``Transform.is_linear`` flag (CK Tile's
+    ``IsLinearTransform`` set): ``Unmerge`` / ``Modulo`` / ``XorT`` are
+    non-linear and force the full re-lowering fallback. The chain is
+    walked naive-to-upper but the moved-ness is propagated from the upper
+    side: a transform is on the moved path iff one of its ``upper`` coords
+    is moved (directly or via an upstream transform that produced it).
+    """
+    live = set(moved_names)
+    # Walk upper -> naive so a moved upper coord taints the lowers it feeds.
+    for t in reversed(getattr(rich_desc, "chain", ())):
+        upper = set(getattr(t, "upper", ()))
+        if upper & live:
+            if not getattr(t, "is_linear", False):
+                return False
+            live |= set(getattr(t, "lower", ()))
+    return True
+
+
+@dataclass(frozen=True)
+class TransformCoordinate:
+    """An upper index + cached flat offset over a rich transform-chain
+    descriptor (``ck_dsl.helpers.transforms.TensorDescriptor``).
+
+    The rich-descriptor analogue of :class:`TensorCoordinate`. Construct
+    via :func:`make_transform_coordinate` (eager offset) and shift with
+    :func:`move_transform_coordinate` (incremental). ``index`` maps each
+    of the descriptor's ``upper_names`` to an i32 SSA :class:`Value`.
+
+    Like :class:`TensorCoordinate` the object is immutable; every move
+    returns a fresh coordinate. The cached offset is the element offset
+    the rich descriptor's :meth:`offset` would return (the validity mask
+    is intentionally not cached -- callers that need per-lane validity
+    re-query ``rich_desc.offset`` at the absolute index).
+    """
+
+    desc: Any  # ck_dsl.helpers.transforms.TensorDescriptor
+    index: Tuple[Tuple[str, Value], ...]  # ordered (name, value) pairs
+    _offset: Optional[Value] = None
+
+    def index_map(self) -> dict:
+        """Return the upper index as a ``{name: Value}`` dict."""
+        return {name: val for name, val in self.index}
+
+    @property
+    def has_cached_offset(self) -> bool:
+        return self._offset is not None
+
+    def offset(self, b: IRBuilder) -> Value:
+        """Return (and cache) the flat element offset for this index."""
+        if self._offset is None:
+            off, _valid = self.desc.offset(b, **self.index_map())
+            object.__setattr__(self, "_offset", off)
+        return self._offset  # type: ignore[return-value]
+
+
+def make_transform_coordinate(
+    b: IRBuilder, rich_desc, index: dict
+) -> TransformCoordinate:
+    """``make_tensor_coordinate(rich_desc, index)`` for a transform chain.
+
+    ``index`` maps each ``rich_desc.upper_names`` entry to an i32 SSA
+    :class:`Value`. Eagerly materialises the cached offset so subsequent
+    :func:`move_transform_coordinate` calls emit only delta arithmetic
+    (on affine chains).
+    """
+    names = tuple(getattr(rich_desc, "upper_names", ()))
+    missing = set(names) - set(index.keys())
+    if missing:
+        raise ValueError(
+            f"make_transform_coordinate missing upper coords {sorted(missing)} "
+            f"for descriptor {getattr(rich_desc, 'name', '?')!r}"
+        )
+    ordered = tuple((n, index[n]) for n in names)
+    coord = TransformCoordinate(desc=rich_desc, index=ordered, _offset=None)
+    coord.offset(b)  # populate cache
+    return coord
+
+
+def move_transform_coordinate(
+    b: IRBuilder, coord: TransformCoordinate, deltas: dict
+) -> TransformCoordinate:
+    """``move_tensor_coordinate(rich_desc, coord, step)`` for a transform chain.
+
+    ``deltas`` maps a subset of the descriptor's ``upper_names`` to i32
+    SSA step :class:`Value`\\s; unlisted coords are unchanged. Returns a
+    new :class:`TransformCoordinate` whose ``index`` is shifted by the
+    deltas and whose cached offset is advanced incrementally.
+
+    Resolution order, mirroring CK Tile's ``move_tensor_coordinate``:
+
+    1. If every transform on the moved coords' path to the base is linear
+       (V1's ``Transform.is_linear``), advance the cached offset by the
+       position-independent delta ``offset(Δ) - offset(0)`` (a single
+       folded ``add`` for constant steps).
+    2. Otherwise re-lower the new absolute index through the full chain
+       (exactly correct; loses the delta-only fast path -- this is the
+       ``Unmerge`` / ``Modulo`` div-mod case).
+    """
+    names = tuple(name for name, _ in coord.index)
+    name_set = set(names)
+    bad = set(deltas.keys()) - name_set
+    if bad:
+        raise ValueError(
+            f"move_transform_coordinate: deltas reference unknown upper coords "
+            f"{sorted(bad)} (descriptor upper coords: {sorted(name_set)})"
+        )
+
+    old_map = coord.index_map()
+    new_map = dict(old_map)
+    for name, step in deltas.items():
+        new_map[name] = b.add(old_map[name], step)
+    new_index = tuple((n, new_map[n]) for n in names)
+
+    if not coord.has_cached_offset:
+        return TransformCoordinate(desc=coord.desc, index=new_index, _offset=None)
+
+    # (1) Linear fast path: position-independent offset delta.
+    if _rich_chain_is_affine_for(coord.desc, list(deltas.keys())):
+        zero = b.const_i32(0)
+        zero_map = {n: zero for n in names}
+        delta_map = {n: deltas.get(n, zero) for n in names}
+        off_delta, _ = coord.desc.offset(b, **delta_map)
+        off_zero, _ = coord.desc.offset(b, **zero_map)
+        new_off: Optional[Value] = b.add(
+            coord._offset,
+            b.sub(off_delta, off_zero),  # type: ignore[arg-type]
+        )
+        return TransformCoordinate(desc=coord.desc, index=new_index, _offset=new_off)
+
+    # (2) Non-linear path (Unmerge/Modulo on the moved coords): re-lower.
+    full_off, _ = coord.desc.offset(b, **new_map)
+    return TransformCoordinate(desc=coord.desc, index=new_index, _offset=full_off)

@@ -32,7 +32,7 @@ Mapping to CK Tile primitives (``include/ck_tile/ops/batched_contraction``):
 * Host-side flatten of ``(G_0, ..., G_{r-1}) -> G_total`` is the same
   product reduction CK Tile's
   ``BatchedContractionKernel::MakeKernelArgs`` runs on ``G_dims``;
-  algebraically it is a :class:`ck_dsl.transforms.Merge` over the
+  algebraically it is a :class:`ck_dsl.helpers.transforms.Merge` over the
   batch axes (``make_merge_transform(dims_G)`` in
   ``tensor_descriptor_utils.hpp``).
 * Per-batch device-time pointer offset (``i_batch_flat *
@@ -66,7 +66,7 @@ from dataclasses import dataclass, field
 from typing import Optional, Sequence, Tuple
 
 from ...core.ir import F16, KernelDef, Type
-from ...transforms import (
+from ...helpers.transforms import (
     Merge,
     TensorDescriptor,
     Unmerge,
@@ -92,7 +92,7 @@ def _flatten_batch(shape: Sequence[int]) -> int:
     """Total batch count = product of all leading batch dims.
 
     Algebraically this is the scalar evaluation of a
-    :class:`ck_dsl.transforms.Merge` over the batch axes: given
+    :class:`ck_dsl.helpers.transforms.Merge` over the batch axes: given
     ``dims = batch_shape``, the flattened batch index is the linear
     combination ``b_0 * prod(dims[1:]) + b_1 * prod(dims[2:]) + ...``
     and the total count is ``prod(dims)``. We keep this as a pure
@@ -284,7 +284,7 @@ def batch_merge_transform(
     into: str = "batch",
     names: Optional[Sequence[str]] = None,
 ) -> Merge:
-    """Build a :class:`ck_dsl.transforms.Merge` for the batch flatten.
+    """Build a :class:`ck_dsl.helpers.transforms.Merge` for the batch flatten.
 
     Algebraically the same as CK Tile's
     ``make_merge_transform(dims_G)`` -- given user-level coords
@@ -322,7 +322,7 @@ def batch_unmerge_transform(
     from_name: str = "batch",
     into: Optional[Sequence[str]] = None,
 ) -> Unmerge:
-    """Build a :class:`ck_dsl.transforms.Unmerge` for the inverse split.
+    """Build a :class:`ck_dsl.helpers.transforms.Unmerge` for the inverse split.
 
     The dual of :func:`batch_merge_transform`: consumes the flat
     ``batch`` upper coord and produces ``(g_0, ..., g_{r-1})`` via
@@ -397,7 +397,7 @@ def _build_contraction_descriptor(
 
     To present a flat user-facing coord and split it back into the
     naive multi-dim coords we use :class:`Unmerge` (split, the
-    inverse of :class:`Merge` in ``ck_dsl.transforms``). For
+    inverse of :class:`Merge` in ``ck_dsl.helpers.transforms``). For
     single-axis groups we use :func:`pass_through` for an identity
     rename so the user-facing surface is shape-invariant.
 

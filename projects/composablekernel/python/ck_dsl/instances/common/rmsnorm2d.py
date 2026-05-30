@@ -29,7 +29,13 @@ from typing import Literal, Tuple
 
 from ...core.ir import F32, I32, IRBuilder, KernelDef, PtrType
 from ...helpers.io import io_ir_type, store_scalar_from_f32
-from ...helpers.reduction import block_lds_reduce, tree_reduce
+from ...helpers.reduction import (
+    REGISTER_TILE_MAX_ELEMS_PER_THREAD,
+    block_lds_reduce,
+    block_lds_reduce_with_wave_prologue,
+    row_norm_needs_two_pass,
+    tree_reduce,
+)
 from ...helpers.spec import (
     IOSpecRule,
     SignatureBuilder,
@@ -88,6 +94,13 @@ def is_valid_spec(spec: RMSNorm2DSpec, arch: str = "gfx950") -> Tuple[bool, str]
     one f32 reduction buffer (``block_size`` words) fits both gfx942
     (64 KiB) and gfx950 (160 KiB) for every valid ``block_size``, so
     gfx950 behavior is unchanged.
+
+    The per-thread register cap
+    (:data:`ck_dsl.helpers.reduction.REGISTER_TILE_MAX_ELEMS_PER_THREAD`)
+    only bounds the cached *single-pass* path: a row whose
+    ``elems_per_thread`` overflows it builds the streaming *two-pass*
+    kernel (re-reads X from HBM for pass 2) instead of being rejected, so
+    large-N shapes that don't fit in VGPRs are still supported.
     """
     from ...core.arch import ArchTarget
 
@@ -96,13 +109,21 @@ def is_valid_spec(spec: RMSNorm2DSpec, arch: str = "gfx950") -> Tuple[bool, str]
     except KeyError as e:
         return False, str(e)
 
+    # Cap ``elems_per_thread`` only when the cached single-pass path would
+    # be used; the two-pass path streams X twice and carries no per-row
+    # register cache, so it is not bounded by the VGPR budget.
+    cap = (
+        None
+        if row_norm_needs_two_pass(spec.elems_per_thread)
+        else REGISTER_TILE_MAX_ELEMS_PER_THREAD
+    )
     ok, why = validate_io(
         IOSpecRule(
             dtype=spec.dtype,
             block_size=spec.block_size,
             vec=spec.vec,
             n_per_block=spec.n_per_block,
-            max_elems_per_thread=64,
+            max_elems_per_thread=cap,
         )
     )
     if not ok:
@@ -177,6 +198,14 @@ def build_rmsnorm2d(spec: RMSNorm2DSpec) -> KernelDef:
     # the same fold via ``sweep_tile_span`` but for the canonical
     # 2D distribution; here the per-thread cardinality maps to the
     # VEC-wide chunk so the tree pays off uniformly.
+    # Two-pass (large-N) selection mirrors legacy CK's ``isSweepOnce``:
+    # a row whose ``elems_per_thread`` overflows the per-thread register
+    # tile cannot be cached in VGPRs, so pass 1 only streams + reduces
+    # (``cache=False``) and pass 2 re-reads X from HBM. For every in-budget
+    # config ``two_pass`` is False and the cached single-pass path below is
+    # byte-identical to the pre-two-pass kernel.
+    two_pass = row_norm_needs_two_pass(spec.elems_per_thread)
+
     s2 = b.const_f32(0.0)
 
     def pass1_body(_n_off, x_scalars):
@@ -192,10 +221,29 @@ def build_rmsnorm2d(spec: RMSNorm2DSpec) -> KernelDef:
         vec=VEC,
         elems_per_thread=spec.elems_per_thread,
         body=pass1_body,
-        cache=True,
+        cache=not two_pass,
     )
 
-    total_s2 = block_lds_reduce(b, s2, lds, tid, block_size=BS, combine="sum")
+    # Cross-thread reduction. The wave-aligned path is the CK Tile
+    # ``BlockReduce2dSync`` (warp XOR butterfly) + ``CrossWarpSync``
+    # (one ``num_warps``-slot LDS round + tree-combine) shape, mirroring
+    # ``instances/common/reduce.py``: for BS=256 / wave64 it replaces the
+    # 8-round LDS tree (8 syncs) with six cross-lane shuffles + one
+    # ``sync``. The fallback keeps the canonical full LDS tree for any
+    # block size that isn't a clean multiple of ``wave_size`` (e.g. a
+    # wave32 target), preserving the wave-agnostic correctness path.
+    if spec.block_size % spec.wave_size == 0:
+        total_s2 = block_lds_reduce_with_wave_prologue(
+            b,
+            s2,
+            lds,
+            tid,
+            block_size=spec.block_size,
+            combine="sum",
+            wave_size=spec.wave_size,
+        )
+    else:
+        total_s2 = block_lds_reduce(b, s2, lds, tid, block_size=BS, combine="sum")
 
     rcp_n = b.rcp(b.const_f32(float(N)))
     mean_sq = b.fmul(total_s2, rcp_n)
@@ -214,7 +262,12 @@ def build_rmsnorm2d(spec: RMSNorm2DSpec) -> KernelDef:
     # the prior form where ``inv_rms`` was a "hot" shared operand for
     # every inner ``fmul``). Matches the form used by CK Tile's
     # ``Rmsnorm2dFwdPipelineOnePass`` sweep_tile body.
+    # In the single-pass path ``x_scalars`` are the cached f32 values from
+    # pass 1; in the two-pass path the cache is empty, so re-stream X from
+    # HBM (the same ``x_tile`` window) before scaling.
     def pass2_body(n_off, _k, x_scalars):
+        if two_pass:
+            x_scalars = x_tile.load_vec_as_f32(b, b.const_i32(0), n_off, n=VEC)
         gv = g_view.load_vec_as_f32(b, [n_off], n=VEC)
         return [b.fmul(x_scalars[i], b.fmul(inv_rms, gv[i])) for i in range(VEC)]
 

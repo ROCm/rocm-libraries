@@ -79,7 +79,7 @@ from ...core.ir import (
     PtrType,
     Value,
 )
-from ...transforms import TensorDescriptor, embed, unmerge
+from ...helpers.transforms import TensorDescriptor, embed, unmerge_magic
 
 
 @dataclass(frozen=True)
@@ -433,12 +433,20 @@ def build_direct_conv_16c(spec: DirectConv16cSpec, arch: str = "gfx950") -> Kern
     # the -PAD shift folded in). We use that algebra via a
     # :class:`TensorDescriptor` chain so the ad-hoc SSA disappears
     # behind one ``a_desc.offset(...)`` call per chunk.
+    # The per-wave chunk index splits into (W_lds, group_in_wg,
+    # ch_block) -- a ``merge((LDS_W, BLOCK_GROUPS, 4))`` whose inverse is
+    # the CK Tile default magic-division unmerge
+    # (``merge_v2_magic_division`` -> :class:`UnmergeMagicDiv`). Driving
+    # the split through the descriptor's :meth:`unmerge_lower` (instead
+    # of the prior inline ``b.div`` / ``b.mod`` chain) removes the two
+    # integer divisions per chunk from the loader's address path and
+    # turns the documentation-only ``chunk_desc`` into the live decode.
     chunk_desc = TensorDescriptor.naive(
         "chunk_unmerge",
         lengths=[LDS_W, BLOCK_GROUPS, 4],
         coord_names=("W_lds", "group_in_wg", "ch_block"),
     ).transform(
-        unmerge(
+        unmerge_magic(
             "chunk_idx",
             into=("W_lds", "group_in_wg", "ch_block"),
             dims=[LDS_W, BLOCK_GROUPS, 4],
@@ -447,21 +455,10 @@ def build_direct_conv_16c(spec: DirectConv16cSpec, arch: str = "gfx950") -> Kern
     chunk_meta = []
     for pass_idx in range(PASSES):
         chunk_idx = b.add(tid, b.const_i32(pass_idx * THREADS))
-        # ``offset`` returns the row-major flat offset over (W_lds,
-        # group_in_wg, ch_block) (= chunk_idx for valid lanes) plus the
-        # named lower coords. We pull the lowered names back through
-        # the chain by re-invoking ``Unmerge.apply`` — but the public
-        # surface only exposes ``offset``; instead, just compute the
-        # three coords inline using the same algebra and ``b.div`` /
-        # ``b.mod`` calls the unmerge would emit. (The descriptor build
-        # above is the authoring-side documentation; it pins the shape
-        # contract even though the body still spells out the unmerge
-        # because :meth:`TensorDescriptor.offset` returns a single
-        # offset, not the lower-coord SSA values.)
-        ch_block = b.mod(chunk_idx, b.const_i32(4))
-        gw_idx = b.div(chunk_idx, b.const_i32(4))
-        group_in_wg = b.mod(gw_idx, c_BG)
-        W_lds = b.div(gw_idx, c_BG)
+        decoded = chunk_desc.unmerge_lower(b, chunk_idx=chunk_idx)
+        ch_block = decoded["ch_block"]
+        group_in_wg = decoded["group_in_wg"]
+        W_lds = decoded["W_lds"]
         in_bounds = b.cmp_lt(chunk_idx, b.const_i32(NUM_VEC4))
         abs_group = b.add(b.mul(g_tile, c_BG), group_in_wg)
         chunk_meta.append(
@@ -474,7 +471,6 @@ def build_direct_conv_16c(spec: DirectConv16cSpec, arch: str = "gfx950") -> Kern
                 "abs_group": abs_group,
             }
         )
-    _ = chunk_desc  # silence "unused" while the documentation chain stays
 
     # Input descriptor: A[N, H, W, total_c] in NHWC. Two embeds fold
     # the conv-spatial coord algebra into the descriptor so the loader

@@ -7,7 +7,7 @@ DSL counterpart of CK Tile's ``example/ck_tile/02_layernorm2d``. For
 each row of an ``(M, N)`` activation tensor, computes:
 
     mean[m]    = sum_n(X[m,n]) / N
-    var[m]     = sum_n(X[m,n]^2) / N - mean[m]^2
+    var[m]     = sum_n((X[m,n] - mean[m])^2) / N    (stable Welford)
     inv_std[m] = 1 / sqrt(var[m] + eps)
     Y[m,n]     = (X[m,n] - mean[m]) * inv_std[m] * gamma[n] + beta[n]
 
@@ -23,7 +23,10 @@ What we cover today:
   - Dtypes ``f16`` / ``bf16`` for X/gamma/beta/Y (compute in f32)
   - Optional save of ``mean`` / ``inv_std`` per row (CK Tile's
     ``save_mean_var`` traits)
-  - Single-pass row reduction using ``E[X^2] - E[X]^2``
+  - Single-pass row reduction with a numerically-stable Welford
+    ``(mean, M2, count)`` block merge (no ``E[X^2] - E[X]^2``
+    catastrophic cancellation for the post-residual |mean| >> sigma
+    activations LayerNorm sees in transformer blocks)
 
 Performance shape:
   - One CTA per row, ``block_size`` threads
@@ -41,7 +44,12 @@ from typing import Literal, Tuple
 
 from ...core.ir import F32, I32, IRBuilder, KernelDef, PtrType
 from ...helpers.io import io_ir_type, store_scalar_from_f32
-from ...helpers.reduction import block_lds_reduce_pair, tree_reduce
+from ...helpers.reduction import (
+    REGISTER_TILE_MAX_ELEMS_PER_THREAD,
+    row_norm_needs_two_pass,
+    tree_reduce,
+    welford_block_reduce_stable,
+)
 from ...helpers.spec import (
     IOSpecRule,
     SignatureBuilder,
@@ -95,9 +103,16 @@ def is_valid_spec(spec: LayerNorm2DSpec, arch: str = "gfx950") -> Tuple[bool, st
     architecture facts that matter are the per-WG LDS capacity and max
     threads/block, both sourced from :class:`ck_dsl.core.arch.ArchTarget`
     so an unknown arch / over-budget ``block_size`` is rejected with a
-    structured reason. The two f32 reduction buffers (``2 * block_size``
-    words) fit both gfx942 (64 KiB) and gfx950 (160 KiB), so gfx950
-    behavior is unchanged.
+    structured reason. The three f32 Welford reduction buffers
+    (``3 * block_size`` words: mean / M2 / count) fit both gfx942
+    (64 KiB) and gfx950 (160 KiB), so gfx950 behavior is unchanged.
+
+    The per-thread register cap
+    (:data:`ck_dsl.helpers.reduction.REGISTER_TILE_MAX_ELEMS_PER_THREAD`)
+    only bounds the cached *single-pass* path: a row whose
+    ``elems_per_thread`` overflows it builds the streaming *two-pass*
+    kernel (re-reads X from HBM for pass 2) instead of being rejected, so
+    large-N shapes that don't fit in VGPRs are still supported.
     """
     from ...core.arch import ArchTarget
 
@@ -106,13 +121,21 @@ def is_valid_spec(spec: LayerNorm2DSpec, arch: str = "gfx950") -> Tuple[bool, st
     except KeyError as e:
         return False, str(e)
 
+    # Cap ``elems_per_thread`` only when the cached single-pass path would
+    # be used; the two-pass path streams X twice and carries no per-row
+    # register cache, so it is not bounded by the VGPR budget.
+    cap = (
+        None
+        if row_norm_needs_two_pass(spec.elems_per_thread)
+        else REGISTER_TILE_MAX_ELEMS_PER_THREAD
+    )
     ok, why = validate_io(
         IOSpecRule(
             dtype=spec.dtype,
             block_size=spec.block_size,
             vec=spec.vec,
             n_per_block=spec.n_per_block,
-            max_elems_per_thread=64,
+            max_elems_per_thread=cap,
         )
     )
     if not ok:
@@ -124,8 +147,9 @@ def is_valid_spec(spec: LayerNorm2DSpec, arch: str = "gfx950") -> Tuple[bool, st
             f"{target.max_threads_per_block} on {arch}"
         )
 
-    # Two f32 LDS reduction buffers (sum + sumsq), ``block_size`` words each.
-    bytes_lds = 2 * spec.block_size * 4
+    # Three f32 Welford reduction buffers (mean + M2 + count),
+    # ``block_size`` words each.
+    bytes_lds = 3 * spec.block_size * 4
     if not target.fits_lds(bytes_lds):
         return False, (
             f"LDS budget {bytes_lds} > {target.lds_capacity_bytes} cap on {arch}"
@@ -185,17 +209,17 @@ def build_layernorm2d(spec: LayerNorm2DSpec) -> KernelDef:
     x_tile = make_tile_window(x_view, lengths=(1, N), origin=(row, b.const_i32(0)))
     y_tile = make_tile_window(y_view, lengths=(1, N), origin=(row, b.const_i32(0)))
 
-    # LDS scratch for the two block-wide reductions. We allocate two
-    # ``block_size``-sized f32 buffers so the sum (``s1``) and the
-    # sum-of-squares (``s2``) folds can share a *single* halving
-    # schedule via :func:`ck_dsl.helpers.reduction.block_lds_reduce_pair`
-    # instead of
-    # paying for two back-to-back ``block_lds_reduce`` round-trips
-    # (which would double the ``s_barrier`` count). The extra LDS
-    # cost is ``block_size * 4 == 1 KB`` for the default ``BS=256``,
-    # well within the 64 KB CU budget.
-    lds_s1 = make_lds_view(b, dtype=F32, shape=(BS,), name_hint="lds_s1").base
-    lds_s2 = make_lds_view(b, dtype=F32, shape=(BS,), name_hint="lds_s2").base
+    # LDS scratch for the numerically-stable Welford block merge. The
+    # count-weighted ``(mean, M2, count)`` triple combiner is not a plain
+    # associative add, so it cannot ride the generic ``block_lds_reduce``
+    # / ``block_lds_reduce_pair`` ``combine=`` path; it needs a dedicated
+    # three-channel LDS tree (one ``block_size``-wide f32 buffer per
+    # channel). The extra channel vs the old two-buffer sum/sumsq form
+    # costs ``block_size * 4 == 1 KB`` for the default ``BS=256``, well
+    # within the CU LDS budget.
+    lds_mean = make_lds_view(b, dtype=F32, shape=(BS,), name_hint="lds_mean").base
+    lds_m2 = make_lds_view(b, dtype=F32, shape=(BS,), name_hint="lds_m2").base
+    lds_count = make_lds_view(b, dtype=F32, shape=(BS,), name_hint="lds_count").base
 
     # Pass 1: ``sweep_row_chunks`` plays the role of CK Tile's
     # ``sweep_tile``: it streams the row through ``vec``-wide chunks,
@@ -203,22 +227,33 @@ def build_layernorm2d(spec: LayerNorm2DSpec) -> KernelDef:
     # ``cache=True``) records the f32 scalars so pass 2 doesn't
     # re-load from HBM.
     #
-    # Per-chunk we materialise ``chunk_s1`` (sum of x) and ``chunk_s2``
+    # Per-chunk we materialise ``chunk_sum`` (sum of x) and ``chunk_sumsq``
     # (sum of x^2) via :func:`ck_dsl.helpers.reduction.tree_reduce` so each fold has
     # critical-path depth ``log2(VEC)`` instead of ``VEC``. The
-    # per-chunk partial is then merged once into the running ``s1`` /
-    # ``s2`` scalars; this matches the latency structure of CK Tile's
-    # ``BlockNormReduce`` per-Y sweep (where ``MeanDistributedTensor``
-    # gets folded one Y-position at a time, but each Y position is a
-    # tree-reduce internally).
-    s1 = b.const_f32(0.0)
-    s2 = b.const_f32(0.0)
+    # per-chunk partial is then merged once into the running per-thread
+    # ``sum_p`` / ``sumsq_p`` scalars; this matches the latency structure
+    # of CK Tile's ``BlockNormReduce`` per-Y sweep (where
+    # ``MeanDistributedTensor`` gets folded one Y-position at a time, but
+    # each Y position is a tree-reduce internally). The per-thread
+    # ``(mean, M2, count)`` Welford triple is derived from these partials
+    # after the sweep and merged across threads with the count-weighted
+    # stable combiner.
+    # Two-pass (large-N) selection mirrors legacy CK's ``isSweepOnce``:
+    # a row whose ``elems_per_thread`` overflows the per-thread register
+    # tile cannot be cached in VGPRs, so pass 1 only streams + reduces
+    # (``cache=False``) and pass 2 re-reads X from HBM. For every in-budget
+    # config ``two_pass`` is False and the cached single-pass path below is
+    # byte-identical to the pre-two-pass kernel.
+    two_pass = row_norm_needs_two_pass(spec.elems_per_thread)
+
+    sum_p = b.const_f32(0.0)
+    sumsq_p = b.const_f32(0.0)
 
     def pass1_body(_n_off, x_scalars):
-        nonlocal s1, s2
+        nonlocal sum_p, sumsq_p
         sq_scalars = [b.fmul(xi, xi) for xi in x_scalars]
-        s1 = b.fadd(s1, tree_reduce(b, b.fadd, list(x_scalars)))
-        s2 = b.fadd(s2, tree_reduce(b, b.fadd, sq_scalars))
+        sum_p = b.fadd(sum_p, tree_reduce(b, b.fadd, list(x_scalars)))
+        sumsq_p = b.fadd(sumsq_p, tree_reduce(b, b.fadd, sq_scalars))
 
     sweep_res = sweep_row_chunks(
         b,
@@ -228,29 +263,40 @@ def build_layernorm2d(spec: LayerNorm2DSpec) -> KernelDef:
         vec=VEC,
         elems_per_thread=spec.elems_per_thread,
         body=pass1_body,
-        cache=True,
+        cache=not two_pass,
     )
 
-    # Twin-channel cross-thread reduction: one halving schedule
-    # produces both ``total_s1`` and ``total_s2`` with half the
-    # ``s_barrier`` count of the original double ``block_lds_reduce``
-    # call.
-    total_s1, total_s2 = block_lds_reduce_pair(
+    # Numerically-stable Welford block merge. Each thread reads exactly
+    # ``elems_per_thread`` elements (``N == block_size * elems_per_thread``)
+    # so the per-thread count is the compile-time ``elems_per_thread``.
+    # Derive this thread's partial Welford triple ``(mean_p, m2_p, count)``
+    # from the per-thread ``sum_p`` / ``sumsq_p`` accumulators:
+    #
+    #     mean_p = sum_p / count
+    #     m2_p   = sumsq_p - mean_p * sum_p     ( = Sum (x - mean_p)^2 )
+    #
+    # then merge across the workgroup with the count-weighted
+    # ``(mean, M2, count)`` combiner (CK ``BlockwiseWelford::Merge``),
+    # which has no catastrophic cancellation when ``|mean| >> sigma`` --
+    # unlike the previous ``var = E[X^2] - E[X]^2`` block form. The helper
+    # returns the biased (population) variance ``M2_total / count_total``,
+    # exactly the statistic the old form computed but accurately.
+    count_p = float(spec.elems_per_thread)
+    inv_count_p = b.const_f32(1.0 / count_p)
+    mean_p = b.fmul(sum_p, inv_count_p)
+    m2_p = b.fsub(sumsq_p, b.fmul(mean_p, sum_p))
+
+    mean, var = welford_block_reduce_stable(
         b,
-        s1,
-        s2,
-        lds_s1,
-        lds_s2,
+        mean_p,
+        m2_p,
+        b.const_f32(count_p),
+        lds_mean,
+        lds_m2,
+        lds_count,
         tid,
         block_size=BS,
-        combine_a="sum",
-        combine_c="sum",
     )
-
-    rcp_n = b.rcp(b.const_f32(float(N)))
-    mean = b.fmul(total_s1, rcp_n)
-    second_moment = b.fmul(total_s2, rcp_n)
-    var = b.fsub(second_moment, b.fmul(mean, mean))
     inv_std = b.rsqrt(b.fadd(var, eps))
 
     if spec.save_mean_invstd:
@@ -271,7 +317,12 @@ def build_layernorm2d(spec: LayerNorm2DSpec) -> KernelDef:
     # The op count is unchanged; this is purely a scheduling win
     # (and FMA-fusion-friendly should the lowering ever set
     # ``fp-contract=fast`` on ``arith.fadd``/``arith.fmul``).
+    # In the single-pass path ``x_scalars`` are the cached f32 values from
+    # pass 1; in the two-pass path the cache is empty, so re-stream X from
+    # HBM (the same ``x_tile`` window) before normalising.
     def pass2_body(n_off, _k, x_scalars):
+        if two_pass:
+            x_scalars = x_tile.load_vec_as_f32(b, b.const_i32(0), n_off, n=VEC)
         gv = g_view.load_vec_as_f32(b, [n_off], n=VEC)
         bv = b_view.load_vec_as_f32(b, [n_off], n=VEC)
         return [
