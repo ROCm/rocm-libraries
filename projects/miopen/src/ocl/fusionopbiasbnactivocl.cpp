@@ -150,19 +150,20 @@ void BatchNormBwdTrainFusionOpDescriptor::calcBNParams(std::vector<size_t> in_le
         }
     }
 }
+
 miopenStatus_t
 BatchNormBwdTrainFusionOpDescriptor::GetNetworkConfig(std::ostringstream& network_config)
 {
     int n, c, h, w;
-    int variant          = 0;
+    int variant{0};
     std::tie(n, c, h, w) = tien<4>(input_desc.GetLengths());
     size_t in_cstride, in_nstride, in_nchw;
     size_t xlocalsize, ylocalsize, zlocalsize;
     std::tie(xlocalsize, ylocalsize, zlocalsize) = tien<3>(GetLocalWGSz());
     size_t zgridsize, ygridsize, xgridsize;
     std::tie(xgridsize, ygridsize, zgridsize) = tien<3>(GetGlobalWGSz());
-    unsigned int ldsgcn                       = 0;
-    unsigned int ldsnogcn                     = 0;
+    unsigned int ldsgcn{0};
+    unsigned int ldsnogcn{0};
     calcBNParams(
         input_desc.GetLengths(), variant, in_cstride, in_nstride, in_nchw, ldsgcn, ldsnogcn);
 
@@ -181,14 +182,13 @@ BatchNormBwdTrainFusionOpDescriptor::GetNetworkConfig(std::ostringstream& networ
 
 std::vector<size_t> BatchNormBwdTrainFusionOpDescriptor::GetLocalWGSz()
 {
-    size_t xlocalsize, ylocalsize, zlocalsize;
     int h, w;
     std::tie(std::ignore, std::ignore, h, w) = tien<4>(input_desc.GetLengths());
-    size_t in_cstride                        = static_cast<size_t>(h) * w;
+    size_t in_cstride                        = size_t{h} * size_t{w};
 
-    xlocalsize = 1;
-    ylocalsize = 1;
-    zlocalsize = 1;
+    size_t xlocalsize = 1;
+    size_t ylocalsize = 1;
+    size_t zlocalsize = 1;
 
     if(mode == miopenBNSpatial)
     {
@@ -234,7 +234,7 @@ std::vector<size_t> BatchNormBwdTrainFusionOpDescriptor::GetGlobalWGSz()
     }
     else
     {
-        auto segment = int(std::ceil(double(in_cstride) / double(ylocalsize)));
+        auto segment = static_cast<int>(std::ceil(double(in_cstride) / double(ylocalsize)));
         xgridsize    = c;
         ygridsize    = segment * ylocalsize;
     }
@@ -313,14 +313,13 @@ BatchNormFwdTrainFusionOpDescriptor::GetNetworkConfig(std::ostringstream& networ
 
 std::vector<size_t> BatchNormFwdTrainFusionOpDescriptor::GetLocalWGSz()
 {
-    size_t xlocalsize, ylocalsize, zlocalsize;
     int h, w;
     std::tie(std::ignore, std::ignore, h, w) = tien<4>(input_desc.GetLengths());
-    size_t in_cstride                        = static_cast<size_t>(h) * w;
+    size_t in_cstride                        = size_t{h} * size_t{w};
 
-    xlocalsize = 1024;
-    ylocalsize = 1;
-    zlocalsize = 1;
+    size_t xlocalsize = 1024;
+    size_t ylocalsize = 1;
+    size_t zlocalsize = 1;
 
     if(mode == miopenBNSpatial)
     {
@@ -349,11 +348,11 @@ std::vector<size_t> BatchNormFwdTrainFusionOpDescriptor::GetGlobalWGSz()
     size_t zgridsize = 1;
     size_t ygridsize = 1;
 
-    size_t in_cstride = static_cast<size_t>(h) * w;
+    size_t in_cstride = size_t{h} * size_t{w};
 
     if(mode != miopenBNSpatial)
     {
-        auto segment = int(std::ceil(double(in_cstride) / double(ylocalsize)));
+        auto segment = static_cast<int>(std::ceil(double(in_cstride) / double(ylocalsize)));
         xgridsize    = c;
         ygridsize    = segment * ylocalsize;
     }

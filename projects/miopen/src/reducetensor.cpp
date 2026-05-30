@@ -369,7 +369,6 @@ static std::pair<bool, bool> get_padding_need(ReductionMethod_t reduceImpl,
     bool src_need_padding = false;
     bool dst_need_padding = false;
     size_t copySliceLen;
-    int reduceSizePerBlock;
 
     switch(reduceImpl)
     {
@@ -390,11 +389,15 @@ static std::pair<bool, bool> get_padding_need(ReductionMethod_t reduceImpl,
         src_need_padding = (toReduceLen % copySliceLen > 0);
         break;
     case Reduce_MultiBlock:
-        copySliceLen       = size_t(BlockSize * tunable->GredAccessesPerThreadInBlock);
-        reduceSizePerBlock = int(
-            (((toReduceLen + size_t(BlkGroupSize) - 1) / size_t(BlkGroupSize) + copySliceLen - 1) /
-             copySliceLen) * copySliceLen);
-        src_need_padding = (toReduceLen < static_cast<size_t>(reduceSizePerBlock * BlkGroupSize));
+        copySliceLen = size_t(BlockSize * tunable->GredAccessesPerThreadInBlock);
+        {
+            size_t blkGroupSize = size_t(BlkGroupSize);
+            size_t reduceSizePerBlock =
+                (((toReduceLen + blkGroupSize - 1) / blkGroupSize + copySliceLen - 1) /
+                 copySliceLen) *
+                copySliceLen;
+            src_need_padding = (toReduceLen < (reduceSizePerBlock * blkGroupSize));
+        }
         break;
     default: MIOPEN_THROW("Invalid reduction method ID!"); break;
     };

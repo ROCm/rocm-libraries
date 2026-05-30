@@ -249,21 +249,18 @@ ConvSolution ActivBwdSolver1::GetSolution(const ExecutionContext&,
 
     constexpr const auto hw_wave_sz = 64;
 
-    const auto element_size     = (xDesc.GetType() == miopenHalf) ? 2 : 4;
-    const size_t map_size       = static_cast<size_t>(wIn) * hIn * nIn * cIn;
-    const auto read_unit        = (map_size % 8 == 0 && element_size == 2) ? 8
-                                  : (map_size % 4 == 0)                    ? 4
-                                  : (map_size % 2 == 0)                    ? 2
-                                                                           : 1;
-    const auto map_size_aligned = (map_size + read_unit - 1) / read_unit;
-    const auto N_PIXS_OFF       = map_size - (map_size / read_unit) * read_unit;
+    const auto element_size = (xDesc.GetType() == miopenHalf) ? 2 : 4;
+    const size_t map_size   = size_t{wIn} * size_t{hIn} * size_t{nIn} * size_t{cIn};
+    const size read_unit    = (map_size % 8 == 0 && element_size == 2) ? 8
+                              : (map_size % 4 == 0)                    ? 4
+                              : (map_size % 2 == 0)                    ? 2
+                                                                       : 1;
+    const auto N_PIXS_OFF   = map_size - (map_size / read_unit) * read_unit;
 
-    const auto glbl_wk = map_size_aligned;
-
-    const auto grp_tile0 =
-        std::min(static_cast<int>((glbl_wk + hw_wave_sz - 1) / hw_wave_sz) * hw_wave_sz, 256);
-    const auto grp_tile1 = 1;
-    const auto grp_tile2 = 1;
+    const int glbl_wk   = static_cast<int>((map_size + read_unit - 1) / read_unit);
+    const int grp_tile0 = std::min(((glbl_wk + hw_wave_sz - 1) / hw_wave_sz) * hw_wave_sz, 256);
+    const int grp_tile1 = 1;
+    const int grp_tile2 = 1;
 
     auto compiler_options = KernelBuildParameters{
         {"MIOPEN_N_IN", nIn},
@@ -338,13 +335,13 @@ ConvSolution ActivBwdSolver1::GetSolution(const ExecutionContext&,
         kernel.kernel_file = "MIOpenNeuron.cpp";
         kernel.kernel_name = "MIOpenNeuronBwd";
 
-        kernel.l_wk.push_back(grp_tile0);
+        kernel.l_wk.push_back(size_t{grp_tile0});
         kernel.l_wk.push_back(grp_tile1);
         kernel.l_wk.push_back(1);
 
         const auto global_work_size = ((glbl_wk + grp_tile0 - 1) / grp_tile0) * grp_tile0;
 
-        kernel.g_wk.push_back(global_work_size);
+        kernel.g_wk.push_back(size_t{global_work_size});
         kernel.g_wk.push_back(1);
         kernel.g_wk.push_back(1);
 
@@ -359,16 +356,16 @@ ConvSolution ActivBwdSolver1::GetSolution(const ExecutionContext&,
             const auto& params = invoke_params.CastTo<miopen::activ::BwdInvokeParams>();
 
             visit_float(xDesc.GetType(), [&](auto as_float) {
-                auto f_activ_alpha = as_float(params.alpha);
-                auto f_activ_beta  = as_float(params.beta);
-                auto f_activ_gamma = as_float(params.gamma);
+                auto f_activ_alpha = float(params.alpha);
+                auto f_activ_beta  = float(params.beta);
+                auto f_activ_gamma = float(params.gamma);
                 auto f_diff_scale  = f_activ_beta * f_activ_gamma;
 
                 kernel(params.dx,
                        params.dy,
                        params.x,
                        params.y,
-                       static_cast<int>(map_size_aligned),
+                       glbl_wk,
                        as_float(f_diff_scale),
                        as_float(f_activ_gamma),
                        as_float(f_activ_beta),

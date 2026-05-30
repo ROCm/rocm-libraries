@@ -409,17 +409,17 @@ struct mlo_construct_activ_lrn_pooling_common : mlo_construct_base
                                w_stride);
 
         const int data_len = static_cast<int>(miopen::GetTypeSize(data_type));
-        const int size =
+        const size_t size =
             (layout == "NCHW")
-                ? batch * channels * depth * height * width * data_len
-                : batch * batch_stride * channel_stride * stride * w_stride * data_len;
+                ? size_t(batch * channels * depth * height * width * data_len)
+                : size_t(batch * batch_stride * channel_stride * stride * w_stride * data_len);
 
         _out_df_width          = width;
         _out_df_height         = height;
         _out_df_batch_stride   = batch_stride;
         _out_df_channel_stride = channel_stride;
         _out_df_stride         = stride;
-        _top_df_sz             = static_cast<size_t>(size);
+        _top_df_sz             = size;
         _out_df_layout         = layout;
         _out_df_data_type      = miopen::GetDataTypeName(data_type);
     }
@@ -452,10 +452,10 @@ struct mlo_construct_activ_lrn_pooling_common : mlo_construct_base
                                w_stride);
 
         const int data_len = static_cast<int>(miopen::GetTypeSize(data_type));
-        const int size =
+        const size_t size =
             (layout == "NCHW")
-                ? batch * channels * depth * height * width * data_len
-                : batch * batch_stride * channel_stride * stride * w_stride * data_len;
+                ? size_t(batch * channels * depth * height * width * data_len)
+                : size_t(batch * batch_stride * channel_stride * stride * w_stride * data_len);
 
         _in_df_width          = width;
         _in_df_height         = height;

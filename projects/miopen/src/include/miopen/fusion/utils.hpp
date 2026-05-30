@@ -71,7 +71,8 @@ inline bool WinoCommonIsApplicable(const FusionContext& context, const FusionDes
     }();
     if(activ_idx != -1)
     {
-        const auto& activ_op  = dynamic_cast<ActivFwdFusionOpDescriptor&>(*desc.op_map[size_t(activ_idx)]);
+        const auto& activ_op =
+            dynamic_cast<ActivFwdFusionOpDescriptor&>(*desc.op_map[size_t(activ_idx)]);
         const auto activ_mode = activ_op.activMode;
         if(!(activ_mode == miopenActivationRELU || activ_mode == miopenActivationLEAKYRELU))
             return false;

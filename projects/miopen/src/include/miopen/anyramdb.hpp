@@ -46,7 +46,7 @@ struct AnyRamDb
 
 public:
     AnyRamDb(const fs::path& filename_)
-        : filename(filename_), lock_file(LockFile::Get(LockFilePath(filename_))){};
+        : filename(filename_), lock_file(LockFile::Get(LockFilePath(filename_))) {};
 
     AnyRamDb(const AnyRamDb&)            = delete;
     AnyRamDb(AnyRamDb&&)                 = delete;
@@ -109,7 +109,8 @@ class DbTimer<AnyRamDb>
         const auto start = std::chrono::high_resolution_clock::now();
         const auto ret   = func();
         const auto end   = std::chrono::high_resolution_clock::now();
-        MIOPEN_LOG_I2("Db::" << funcName << " time: " << float((end - start).count()) * .000001f << " ms");
+        MIOPEN_LOG_I2("Db::" << funcName << " time: " << float((end - start).count()) * .000001f
+                             << " ms");
         return ret;
     }
 

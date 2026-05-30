@@ -706,8 +706,8 @@ miopenStatus_t CallGemm(const Handle& handle,
         case miopenInt8: {
             assert(gemm_desc.k % 4 == 0);
 
-            auto alpha = int{gemm_desc.alpha};
-            auto beta  = int{gemm_desc.beta};
+            auto alpha = static_cast<int>(gemm_desc.alpha);
+            auto beta  = static_cast<int>(gemm_desc.beta);
 
             rb_status = miopen_rocblas_gemm_ex(
                 handle,
@@ -1086,8 +1086,8 @@ miopenStatus_t CallGemmStridedBatched(const Handle& handle,
         case miopenInt8: {
             assert(gemm_desc.k % 4 == 0);
 
-            auto alpha = int{gemm_desc.alpha};
-            auto beta  = int{gemm_desc.beta};
+            auto alpha = static_cast<int>(gemm_desc.alpha);
+            auto beta  = static_cast<int>(gemm_desc.beta);
 
             rb_status = miopen_rocblas_gemm_strided_batched_ex(
                 handle.rhandle().get(),
@@ -1495,8 +1495,8 @@ miopenStatus_t CallGemmStridedBatchedSequential(const Handle& handle,
         case miopenInt8: {
             assert(gemm_desc.k % 4 == 0);
 
-            auto alpha = int{gemm_desc.alpha};
-            auto beta  = int{gemm_desc.beta};
+            auto alpha = static_cast<int>(gemm_desc.alpha);
+            auto beta  = static_cast<int>(gemm_desc.beta);
 
             for(int i = 0; i < gemm_desc.batch_count; ++i)
             {

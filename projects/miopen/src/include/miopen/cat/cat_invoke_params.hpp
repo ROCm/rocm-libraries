@@ -48,17 +48,14 @@ struct CatInvokeParams : public miopen::InvokeParams
     const TensorDescriptor* const* xDescs = nullptr;
     ConstData_t* xs                       = nullptr;
     TensorDescriptor yDesc{};
-    Data_t y    = nullptr;
+    Data_t y     = nullptr;
     uint32_t dim = 0;
 
     size_t GetXDimSize(unsigned int xIndex) const
     {
         return xIndex < xCount ? xDescs[xIndex]->GetLengths()[dim] : 0;
     }
-    const void* GetX(unsigned int xIndex) const
-    {
-        return xIndex < xCount ? xs[xIndex] : nullptr;
-    }
+    const void* GetX(unsigned int xIndex) const { return xIndex < xCount ? xs[xIndex] : nullptr; }
 
     std::size_t GetWorkspaceSize() const { return 0; }
     Data_t GetWorkspace() const { return nullptr; }

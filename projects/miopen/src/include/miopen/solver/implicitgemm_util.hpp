@@ -163,9 +163,9 @@ static inline size_t ComputeLDSRequiredSize(const miopen::conv::ProblemDescripti
 
     // Multiplied worst_case_alignment_adjustment by 2 as
     // Both A and B matrix LDS size is increased.
-    const auto lds_size = static_cast<unsigned>((BPerBlock + KPerBlock) * EPerBlock) *
-                            EPACKSize * GetTypeSize(problem.GetInDataType()) * 2 +
-                                2 * worst_case_alignment_adjustment;
+    const auto lds_size = static_cast<unsigned>((BPerBlock + KPerBlock) * EPerBlock) * EPACKSize *
+                              GetTypeSize(problem.GetInDataType()) * 2 +
+                          2 * worst_case_alignment_adjustment;
 
     return static_cast<size_t>(lds_size);
 }

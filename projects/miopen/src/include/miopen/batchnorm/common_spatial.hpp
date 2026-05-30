@@ -62,8 +62,8 @@ inline void GetLocalConfigNHWC(const miopen::batchnorm::ProblemDescription& prob
     {
         // xlocalsize must be power of 2 as reductions in the kernels rely on it, here c is rounded
         // up to next power of 2.
-        xlocalsize  = std::min(size_t{1 << int(std::ceil(std::log2(c / vectorsize)))},
-                              size_t{xlocalsize_limit});
+        auto shift = static_cast<int>(std::ceil(std::log2(c / vectorsize)));
+        xlocalsize  = std::min(1UL << shift, size_t{xlocalsize_limit});
         ylocalsize  = max_localsize / xlocalsize;
         nworkgroups = ((c / vectorsize + xlocalsize - 1) / xlocalsize) *
                       ((h * w + ylocalsize - 1) / ylocalsize);
@@ -386,9 +386,8 @@ inline bool IsSpatialMultipleApplicable(const miopen::batchnorm::ProblemDescript
         size_t last_ylocalsize =
             in_cstride % ylocalsize == 0 ? ylocalsize : in_cstride % ylocalsize;
 
-        size_t last_zlocalsize = n % (zlocalsize * nelements) == 0
-                                     ? (zlocalsize * nelements)
-                                     : n % (zlocalsize * nelements);
+        size_t last_zlocalsize = n % (zlocalsize * nelements) == 0 ? (zlocalsize * nelements)
+                                                                   : n % (zlocalsize * nelements);
 
         // FP32:
         //  - last block must have enough space to stash intermediate results in HW dimension
@@ -417,9 +416,8 @@ inline bool IsSpatialMultipleApplicable(const miopen::batchnorm::ProblemDescript
         size_t last_ylocalsize =
             in_cstride % ylocalsize == 0 ? ylocalsize : in_cstride % ylocalsize;
 
-        size_t last_zlocalsize = n % (zlocalsize * nelements) == 0
-                                     ? (zlocalsize * nelements)
-                                     : n % (zlocalsize * nelements);
+        size_t last_zlocalsize = n % (zlocalsize * nelements) == 0 ? (zlocalsize * nelements)
+                                                                   : n % (zlocalsize * nelements);
         // Restrictions:
         //  - last block must have enough space to stash intermediate results in HW dimension
         //  - if last block doesn't fit, intermediate results are stored in N dimension which must
@@ -717,8 +715,9 @@ inline void DefaultConfigSpatialMultiple(const miopen::batchnorm::ProblemDescrip
                     size_t xgridsize =
                         xlocalsize * ((c_ / vectorsize + xlocalsize - 1) / xlocalsize);
                     size_t ygridsize = ylocalsize * ((in_cstride + ylocalsize - 1) / ylocalsize);
-                    size_t zgridsize = zlocalsize * ((n_ / nelements + zlocalsize - 1) / zlocalsize);
-                    size_t nWG       = (xgridsize / xlocalsize) * (ygridsize / ylocalsize) *
+                    size_t zgridsize =
+                        zlocalsize * ((n_ / nelements + zlocalsize - 1) / zlocalsize);
+                    size_t nWG = (xgridsize / xlocalsize) * (ygridsize / ylocalsize) *
                                  (zgridsize / zlocalsize);
                     if(in_cstride > 64 && nWG < problem.GetMinWorkgroups())
                     {

@@ -44,12 +44,12 @@ void Bin2Hex(std::istream& source,
         source.read(reinterpret_cast<char*>(buffer.get()), std::streamsize(bufferSize));
 
         const std::streamoff pos = source.tellg();
-        const auto blockSize = (pos < 0 ? sourceSize : pos) - blockStart;
+        const auto blockSize     = (pos < 0 ? sourceSize : pos) - blockStart;
 
         size_t i = 0;
         while(i < blockSize)
         {
-            size_t j = i;
+            size_t j       = i;
             const auto end = std::min<size_t>(i + lineSize, size_t(blockSize));
 
             for(; j < end; j++)

@@ -37,8 +37,10 @@ namespace miopen {
 
 // Tensor Helper APIs
 template <class TTo, class TFunc>
-size_t
-SetDescFromMLDesc(unsigned spatial_dims, TTo& to, const TensorDescriptor& tensor, const TFunc method)
+size_t SetDescFromMLDesc(unsigned spatial_dims,
+                         TTo& to,
+                         const TensorDescriptor& tensor,
+                         const TFunc method)
 {
     int n, c, d = 1, h, w;
     int ns, cs, hs, ws;
@@ -134,10 +136,9 @@ struct ProblemDescriptionCompatTemporary
     {
         batch_sz           = batch;
         const int data_len = int(GetTypeSize(data_type));
-        const int size =
-            (layout == "NCHW")
-                ? batch * channels * depth * height * width * data_len
-                : batch * batch_stride * channel_stride * stride * w_stride * data_len;
+        const int size     = (layout == "NCHW")
+                                 ? batch * channels * depth * height * width * data_len
+                                 : batch * batch_stride * channel_stride * stride * w_stride * data_len;
 
         out_width          = width;
         out_height         = height;
@@ -170,10 +171,9 @@ struct ProblemDescriptionCompatTemporary
     {
         batch_sz           = batch;
         const int data_len = int(GetTypeSize(data_type));
-        const int size =
-            (layout == "NCHW")
-                ? batch * channels * depth * height * width * data_len
-                : batch * batch_stride * channel_stride * stride * w_stride * data_len;
+        const int size     = (layout == "NCHW")
+                                 ? batch * channels * depth * height * width * data_len
+                                 : batch * batch_stride * channel_stride * stride * w_stride * data_len;
 
         in_width          = width;
         in_height         = height;
@@ -262,7 +262,7 @@ struct UnifiedDescriptionConv2d
         if(!problem.Is2d())
             MIOPEN_THROW(miopenStatusInternalError, "UnifiedDescriptionConv2d supports only 2D");
 
-        const auto group_count = size_t(problem.GetGroupCount());
+        const auto group_count         = size_t(problem.GetGroupCount());
         const auto n_inputs_per_group  = problem.GetInChannels() / group_count;
         const auto n_outputs_per_group = problem.GetOutChannels() / group_count;
         if(!problem.IsDirectionBackwardWrW())

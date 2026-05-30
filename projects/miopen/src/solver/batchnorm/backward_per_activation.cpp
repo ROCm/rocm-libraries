@@ -89,7 +89,8 @@ BnBwdTrainingPerActivation::GetSolution(const ExecutionContext& context,
         size_t ylocalsize = (64 >= in_cstride) ? 64 : 256;
         size_t zlocalsize = 1;
 
-        auto segment = static_cast<unsigned int>(std::ceil(double(in_cstride) / double(ylocalsize)));
+        auto segment =
+            static_cast<unsigned int>(std::ceil(double(in_cstride) / double(ylocalsize)));
 
         size_t xgridsize = c;
         size_t ygridsize = segment * ylocalsize;

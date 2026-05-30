@@ -62,7 +62,7 @@ struct ProblemDescription : ProblemDescriptionBase
             }
         }
 
-        auto ydims = yDesc.GetLengths();
+        auto ydims         = yDesc.GetLengths();
         ydims[size_t(dim)] = 0;
         for(int i = 0; i < xCount; i++)
         {

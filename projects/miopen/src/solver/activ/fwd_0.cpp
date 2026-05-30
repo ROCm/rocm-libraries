@@ -91,7 +91,7 @@ ConvSolution ActivFwdSolver0::GetSolution(const ExecutionContext&,
     const auto packed       = problem.GetXDesc().IsPacked() && problem.GetYDesc().IsPacked();
     const auto read_len     = (packed) ? x_elem_sz : x_width2D;
     const auto element_size = (problem.GetXDesc().GetType() == miopenHalf) ? 2 : 4;
-    const auto read_unit    = (read_len % 8 == 0 && element_size == 2) ? 8
+    const size_t read_unit  = (read_len % 8 == 0 && element_size == 2) ? 8
                               : (read_len % 4 == 0)                    ? 4
                               : (read_len % 2 == 0)                    ? 2
                                                                        : 1;
@@ -161,9 +161,9 @@ ConvSolution ActivFwdSolver0::GetSolution(const ExecutionContext&,
             decltype(auto) params = raw_params.CastTo<miopen::activ::InvokeParams>();
 
             visit_float(params.x_desc.GetType(), [&](auto as_float) {
-                const auto alpha = as_float(params.alpha);
-                const auto beta  = as_float(params.beta);
-                const auto gamma = as_float(params.gamma);
+                const auto alpha = as_float(float(params.alpha));
+                const auto beta  = as_float(float(params.beta));
+                const auto gamma = as_float(float(params.gamma));
 
                 if(packed)
                 {

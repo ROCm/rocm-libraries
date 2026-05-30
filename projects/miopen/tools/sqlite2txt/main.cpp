@@ -26,7 +26,8 @@ std::unique_ptr<sqlite3_stmt, int (*)(sqlite3_stmt*)> PrepareStatement(sqlite3* 
 {
     sqlite3_stmt* stmt;
     const char* tail;
-    if(sqlite3_prepare_v2(db, sql.c_str(), static_cast<int>(sql.length()), &stmt, &tail) != SQLITE_OK ||
+    if(sqlite3_prepare_v2(db, sql.c_str(), static_cast<int>(sql.length()), &stmt, &tail) !=
+           SQLITE_OK ||
        stmt == nullptr)
     {
         std::cerr << "Error while preparing SQL statement: " << sqlite3_errmsg(db) << std::endl;

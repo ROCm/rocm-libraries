@@ -604,8 +604,9 @@ InvokerFactory MakeImplGemmDynamicForwardXdlopsNHWCInvokerFactory(
             trans_output_idx = idx++;
     }
 
-    const auto cast_size =
-        need_cast ? miopen::GetTypeSize(miopenFloat) * size_t(n * k * ho * wo) : 0;
+    const auto cast_size = need_cast ? miopen::GetTypeSize(miopenFloat) * size_t{n} * size_t{k} *
+                                           size_t{ho} * size_t{wo}
+                                     : 0;
 
     MultiBufferWorkspaceTraits wt(
         {trans_input_size, trans_weight_size, trans_output_size, cast_size});
@@ -923,8 +924,9 @@ InvokerFactory MakeImplGemmDynamicBackwardDataXdlopsNHWCInvokerFactory(
             trans_output_idx = idx++;
     }
 
-    const auto cast_size =
-        need_cast ? miopen::GetTypeSize(miopenFloat) * size_t(n * c * hi * wi) : 0;
+    const auto cast_size = need_cast ? miopen::GetTypeSize(miopenFloat) * size_t{n} * size_t{c} *
+                                           size_t{hi} * size_t{wi}
+                                     : 0;
 
     MultiBufferWorkspaceTraits wt(
         {trans_input_size, trans_weight_size, trans_output_size, cast_size});

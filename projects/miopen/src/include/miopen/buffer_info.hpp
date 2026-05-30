@@ -68,7 +68,7 @@ enum class LPart_t
 struct BuffInfo
 {
     size_t total_byte_size = 0;
-    size_t element_size  = 4;
+    size_t element_size    = 4;
 
     struct
     {

@@ -90,8 +90,8 @@ inline void GetCompiledInParameters(const ExecutionContext& ctx,
     assert(filter_size_H && filter_size_W && pad_H && pad_W);
     *filter_size_H = int(problem.GetWeightsHeight());
     *filter_size_W = int(problem.GetWeightsWidth());
-    *pad_H         = problem.IsDirectionForward() ? problem.GetPadH() : int(problem.GetBackwardPadH());
-    *pad_W         = problem.IsDirectionForward() ? problem.GetPadW() : int(problem.GetBackwardPadW());
+    *pad_H = problem.IsDirectionForward() ? problem.GetPadH() : int(problem.GetBackwardPadH());
+    *pad_W = problem.IsDirectionForward() ? problem.GetPadW() : int(problem.GetBackwardPadW());
 }
 
 } // namespace miopen

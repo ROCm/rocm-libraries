@@ -46,10 +46,7 @@ public:
     {
     }
 
-    hipStream_t getStream(int stream_id) const
-    {
-        return streamPoolCache[size_t(stream_id)];
-    }
+    hipStream_t getStream(int stream_id) const { return streamPoolCache[size_t(stream_id)]; }
 
     void ChangeActiveStream(int stream_id) const
     {

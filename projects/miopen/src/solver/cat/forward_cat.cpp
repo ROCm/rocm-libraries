@@ -105,10 +105,10 @@ ConvSolution CatForward::GetSolution(const ExecutionContext& context,
         (x_dim_size_max * stride * data_size + sizeof(short4) - 1) / sizeof(short4);
 
     size_t xlocalsize = std::min(max_inner_size, local_size);
-    size_t ylocalsize = std::max((local_size / xlocalsize), 1ULL);
+    size_t ylocalsize = std::max((local_size / xlocalsize), 1UL);
     size_t zlocalsize = 1;
     size_t ygridsize  = AlignUp(outer_size, ylocalsize);
-    size_t xgridsize  = std::max((numCu * 8 / (ygridsize / ylocalsize)), 1ULL) * xlocalsize;
+    size_t xgridsize  = std::max((numCu * 8 / (ygridsize / ylocalsize)), 1UL) * xlocalsize;
     xgridsize         = std::min(xgridsize, AlignUp(max_inner_size, xlocalsize));
     size_t zgridsize  = 1;
 

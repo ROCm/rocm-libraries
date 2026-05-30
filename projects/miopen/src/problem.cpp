@@ -700,7 +700,7 @@ void Problem::ValidateGroupCount(const TensorDescriptor& x,
                                  const ConvolutionDescriptor& conv)
 {
     assert(conv.group_count > 0);
-    const auto layout = w.GetLayoutEnum();
+    const auto layout   = w.GetLayoutEnum();
     const size_t groups = static_cast<size_t>(conv.group_count);
 
     const auto ok_c = IsValidFilterChannelNumber(x, w, layout, groups);

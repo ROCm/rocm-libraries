@@ -70,14 +70,14 @@ bool UseUpsample(const ProblemDescription& problem)
 /// As padding = 0, we can simply re-use output image size (no computations required).
 /// \note For backward convolutions input image size is held in
 /// out_height/out_width and vice versa.
-std::size_t AsmImgHeight(const ProblemDescription& problem)
+auto AsmImgHeight(const ProblemDescription& problem)
 {
-    return UseSubsample(problem) ? problem.GetOutHeight() : problem.GetInHeight();
+    return UseSubsample(problem) ? int{problem.GetOutHeight()} : int{problem.GetInHeight()};
 }
 
-std::size_t AsmImgWidth(const ProblemDescription& problem)
+auto AsmImgWidth(const ProblemDescription& problem)
 {
-    return UseSubsample(problem) ? problem.GetOutWidth() : problem.GetInWidth();
+    return UseSubsample(problem) ? int{problem.GetOutWidth()} : int{problem.GetInWidth()};
 }
 
 /// \todo move to separate header and use in other solvers.
@@ -299,7 +299,7 @@ bool PerformanceConfigConvAsm1x1U::IsValidImpl(const ProblemDescription& problem
     const int elements_in_dword = 4 / GetTypeSize(problem.GetInDataType());
     if(elements_in_dword == 0) // For clang-tidy (DIV/0)
         MIOPEN_THROW(miopenStatusInternalError);
-    const int img_hw = problem.GetOutHeight() * problem.GetOutWidth();
+    const auto img_hw = long{problem.GetOutHeight() * problem.GetOutWidth()};
     if(!IsValidValueImpl(sequence_length))
         return false;
     if(sequence_length > 1)
@@ -318,13 +318,13 @@ bool PerformanceConfigConvAsm1x1U::IsValidImpl(const ProblemDescription& problem
     }
     if(sequence_length > 3)
     {
-        const int total_chunks = (img_hw + chunk_size - 1) / chunk_size;
+        const auto total_chunks = (img_hw + chunk_size - 1) / chunk_size;
         if(!(chunks_per_wave <= total_chunks))
             return false;
     }
     if(sequence_length > 4)
     {
-        auto n_per_gpr = uint32_t(GetNPerGpr());
+        auto n_per_gpr           = size_t{GetNPerGpr()};
         const int total_n_blocks = (problem.GetBatchSize() + n_per_gpr - 1) / n_per_gpr;
         if(!(n_mult <= total_n_blocks))
             return false;
@@ -564,7 +564,7 @@ bool ConvAsm1x1U::IsApplicable(const ExecutionContext& ctx, const ProblemDescrip
     if(elements_in_dword == 0) // For clang-tidy (false positive DIV/0)
         MIOPEN_THROW(miopenStatusInternalError);
     // clang-format off
-    const int img_hw = problem.GetOutHeight() * problem.GetOutWidth();
+    const auto img_hw = long{problem.GetOutHeight() * problem.GetOutWidth()};
     bool ok = (problem.GetPadW() == 0       // -q  pad_w
         && problem.GetPadH() == 0           // -p  pad_h
         && problem.GetKernelStrideW() <= 2  // -u  stride_w
@@ -591,32 +591,33 @@ bool ConvAsm1x1U::IsApplicable(const ExecutionContext& ctx, const ProblemDescrip
         const uint64_t input_line_size = 4 * problem.GetInWidth();
         const uint64_t input_feature_map_size = input_line_size * problem.GetInHeight();
         const uint64_t input_stack_size = input_feature_map_size * problem.GetInChannels();
-        if (! (input_stack_size < (1U << 24)))
+        if (!(input_stack_size < (1UL << 24)))
             return false;
     }
     {
         const uint64_t output_line_size = 4 * problem.GetOutWidth();
         const uint64_t output_feature_map_size = output_line_size * problem.GetOutHeight();
         const uint64_t output_stack_size = output_feature_map_size * problem.GetOutChannels();
-        if (! (output_stack_size < (1U << 24)))
+        if (!(output_stack_size < (1UL << 24)))
             return false;
     }
     // Check limits:
-    const auto h_w = AsmImgHeight(problem) * AsmImgWidth(problem);
+    const auto h_w     = size_t{AsmImgHeight(problem) * AsmImgWidth(problem)};
     const auto r_s     = problem.GetWeightsHeight() * problem.GetWeightsWidth();
     const auto c_h_w   = problem.GetInChannels() * h_w;  // C*H*W
     const auto k_h_w   = problem.GetOutChannels() * h_w; // K*H*W
     const auto n_c_h_w = problem.GetBatchSize() * c_h_w; // N*C*H*W
     const auto n_k_h_w = problem.GetBatchSize() * k_h_w; // N*K*H*W
     const auto c_k_r_s = problem.GetInChannels() * problem.GetOutChannels() * r_s; // C*K*R*S
-    ok = problem.GetBatchSize() < std::pow(2, 16)       // -n   N batch_size
-         && problem.GetInChannels() < std::pow(2, 16)   // -c   C input_channels
-         && problem.GetOutChannels() < std::pow(2, 16)  // -k   K output_channels
-         && c_h_w < std::pow(2, 24)
-         && k_h_w < std::pow(2, 24)
-         && n_c_h_w < std::pow(2, 29)
-         && n_k_h_w < std::pow(2, 29)
-         && c_k_r_s < std::pow(2, 29); // clang-format on
+    ok = problem.GetBatchSize() < (1UL << 16)      // -n   N batch_size
+         && problem.GetInChannels() < (1UL << 16)  // -c   C input_channels
+         && problem.GetOutChannels() < (1UL << 16) // -k   K output_channels
+         && c_h_w < (1UL << 24)
+         && k_h_w < (1UL << 24)
+         && n_c_h_w < (1UL << 29)
+         && n_k_h_w < (1UL << 29)
+         && c_k_r_s < (1UL << 29);
+    // clang-format on
     return ok;
 }
 
@@ -626,19 +627,18 @@ size_t ConvAsm1x1U::GetWorkspaceSize(const ExecutionContext&,
     if(UseSubsample(problem) || UseUpsample(problem))
     {
         auto in_batch_stride =
-            AsmImgWidth(problem) * AsmImgHeight(problem) *
+            size_t{AsmImgWidth(problem) * AsmImgHeight(problem)} *
             (UseSubsample(problem) ? problem.GetInChannels() : problem.GetOutChannels());
         auto data_len = GetTypeSize(problem.GetOutDataType());
         return in_batch_stride * problem.GetBatchSize() * data_len;
     }
     return 0;
 }
-static int divide_round_plus_inf(const int x, const int y)
+
+static inline int divide_round_plus_inf(const int x, const int y)
 {
     assert(x >= 0 && y > 0);
-    if(x % y != 0)
-        return x / y + 1;
-    return x / y;
+    return (x / y) + (x % y != 0);
 }
 
 KernelInfo GetSampleKernelInfo(const ProblemDescription& problem)
@@ -647,7 +647,7 @@ KernelInfo GetSampleKernelInfo(const ProblemDescription& problem)
 
     // subsampled input, in_height equals to image size after downsampling
     auto in_batch_stride =
-        AsmImgWidth(problem) * AsmImgHeight(problem) *
+        size_t{AsmImgWidth(problem) * AsmImgHeight(problem)} *
         (UseSubsample(problem) ? problem.GetInChannels() : problem.GetOutChannels());
     unsigned write_unit    = (AsmImgWidth(problem) % 4 == 0)   ? 4
                              : (AsmImgWidth(problem) % 3 == 0) ? 3
@@ -706,7 +706,7 @@ ConvSolution ConvAsm1x1U::GetSolution(const ExecutionContext& ctx,
 
     std::ostringstream options;
 
-    int data_len = GetTypeSize(problem.GetOutDataType());
+    auto data_len = int{GetTypeSize(problem.GetOutDataType())};
 
     result.workspace_sz = GetWorkspaceSize(ctx, problem);
 
@@ -748,8 +748,8 @@ ConvSolution ConvAsm1x1U::GetSolution(const ExecutionContext& ctx,
         buff_info(MemLayout layout, int nk, int c, int h, int w, int vec_c, int data_len_t)
         {
             int c_hi        = (c + vec_c - 1) / vec_c;
-            auto count      = static_cast<size_t>(nk) * c_hi * h * w * vec_c;
-            total_byte_size = count * data_len_t;
+            auto count      = size_t{nk} * size_t{c_hi} * size_t{h} * size_t{w} * size_t{vec_c};
+            total_byte_size = count * size_t{data_len_t};
             size.nk         = nk;
             size.c          = c;
             size.h          = h;
@@ -781,26 +781,29 @@ ConvSolution ConvAsm1x1U::GetSolution(const ExecutionContext& ctx,
         }
     };
 
+    int batchSize   = int{problem.GetBatchSize()};
+    int inChannels  = int{problem.GetInChannels()};
+    int outChannels = int{problem.GetOutChannels()};
     // cppcheck-suppress unreadVariable
     buff_info ibuf(MemLayout::NCHW,
-                   problem.GetBatchSize(),
-                   problem.GetInChannels(),
+                   batchSize,
+                   inChannels,
                    AsmImgHeight(problem),
                    AsmImgWidth(problem),
                    1,
                    data_len);
     // cppcheck-suppress unreadVariable
     buff_info obuf(MemLayout::NCHW,
-                   problem.GetBatchSize(),
-                   problem.GetOutChannels(),
+                   batchSize,
+                   outChannels,
                    AsmImgHeight(problem),
                    AsmImgWidth(problem),
                    1,
                    data_len);
     // cppcheck-suppress unreadVariable
     buff_info fbuf(problem.IsDirectionForward() ? MemLayout::NCHW : MemLayout::CNHW,
-                   problem.GetOutChannels(),
-                   problem.GetInChannels(),
+                   outChannels,
+                   inChannels,
                    1,
                    1,
                    1,
@@ -861,7 +864,7 @@ ConvSolution ConvAsm1x1U::GetSolution(const ExecutionContext& ctx,
 
     const int waves_in_group = pcfg->GetWavesCInGroup() * pcfg->GetWavesKInGroup();
     main_kernel.l_wk.clear(); // workgroupsize
-    main_kernel.l_wk.push_back(64ULL * waves_in_group);
+    main_kernel.l_wk.push_back(64ULL * unsigned(waves_in_group));
     main_kernel.l_wk.push_back(1);
     main_kernel.l_wk.push_back(1);
 
@@ -872,10 +875,10 @@ ConvSolution ConvAsm1x1U::GetSolution(const ExecutionContext& ctx,
         main_kernel.l_wk[0] *
         divide_round_plus_inf(AsmImgHeight(problem) * AsmImgWidth(problem), hw_per_wave));
 
-    main_kernel.g_wk.push_back(divide_round_plus_inf(problem.GetOutChannels(),
-                                                     pcfg->GetKMult() * pcfg->GetWavesKInGroup()));
+    main_kernel.g_wk.push_back(
+        divide_round_plus_inf(outChannels, pcfg->GetKMult() * pcfg->GetWavesKInGroup()));
     const int n_images_per_wave = pcfg->GetNMult() * pcfg->GetNPerGpr();
-    main_kernel.g_wk.push_back(divide_round_plus_inf(problem.GetBatchSize(), n_images_per_wave));
+    main_kernel.g_wk.push_back(divide_round_plus_inf(batchSize, n_images_per_wave));
 
     main_kernel.kernel_file = "conv1x1u.s";
     main_kernel.kernel_name = "miopenGcnAsmConv1x1U";

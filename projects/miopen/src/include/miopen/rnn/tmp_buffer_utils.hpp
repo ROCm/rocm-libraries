@@ -784,9 +784,8 @@ public:
     size_t getPhisParamRelativeOff(int /*dir_id*/, int param_id) const
     {
         auto paramID = static_cast<size_t>(param_id);
-        return hVec * ((paramID >= gatesCnt)
-                           ? inVec * gatesCnt + xInVec * (paramID - gatesCnt)
-                           : inVec * paramID);
+        return hVec * ((paramID >= gatesCnt) ? inVec * gatesCnt + xInVec * (paramID - gatesCnt)
+                                             : inVec * paramID);
     }
 
     size_t getMatrixOff(size_t layer_id, int dir_id, int param_id) const

@@ -284,8 +284,8 @@ ConvolutionDescriptor::GetForwardOutputTensorWithLayout(const TensorDescriptor& 
 
         for(int i = 0; i < spatial_dim; ++i)
         {
-            out_spatial[i] =
-                size_t(miopen::integer_division_ceil(in_spatial[i], GetConvStrides()[unsigned(i)]));
+            out_spatial[i] = static_cast<size_t>(
+                miopen::integer_division_ceil(in_spatial[i], GetConvStrides()[unsigned(i)]));
         }
     }
     else if(paddingMode == miopenPaddingValid && mode == miopenConvolution &&
@@ -295,8 +295,9 @@ ConvolutionDescriptor::GetForwardOutputTensorWithLayout(const TensorDescriptor& 
 
         for(int i = 0; i < spatial_dim; ++i)
         {
-            out_spatial[i] = size_t(miopen::integer_division_ceil(
-                std::ptrdiff_t(in_spatial[i] - wei_spatial[i] + 1), GetConvStrides()[unsigned(i)]));
+            out_spatial[i] = static_cast<size_t>(miopen::integer_division_ceil(
+                ptrdiff_t(in_spatial[i]) - ptrdiff_t(wei_spatial[i]) + 1,
+                GetConvStrides()[unsigned(i)]));
         }
     }
     else if(paddingMode == miopenPaddingDefault || paddingMode == miopenPaddingSame ||
@@ -327,7 +328,8 @@ ConvolutionDescriptor::GetForwardOutputTensorWithLayout(const TensorDescriptor& 
                     (ptrdiff_t(in_spatial[i]) -
                      (1 + GetConvDilations()[i] * (std::ptrdiff_t(wei_spatial[i]) - 1)) +
                      2 * static_cast<std::ptrdiff_t>(GetConvPads()[i])) /
-                            GetConvStrides()[i] + 1));
+                            GetConvStrides()[i] +
+                        1));
             }
         }
     }

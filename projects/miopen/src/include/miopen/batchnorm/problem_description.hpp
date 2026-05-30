@@ -418,15 +418,15 @@ private:
 #pragma clang diagnostic pop
 #endif
 
-    bool resultsave            = false;
-    bool resultrunning         = false;
-    bool useSaved              = false;
-    bool useInverseVariance    = false;
-    std::string in_layout      = "NCHW";
-    std::string out_layout     = "NCHW";
-    std::string din_layout     = "NCHW";
-    unsigned spatial_dim  = 2;
-    size_t min_workgroups = 1;
+    bool resultsave         = false;
+    bool resultrunning      = false;
+    bool useSaved           = false;
+    bool useInverseVariance = false;
+    std::string in_layout   = "NCHW";
+    std::string out_layout  = "NCHW";
+    std::string din_layout  = "NCHW";
+    unsigned spatial_dim    = 2;
+    size_t min_workgroups   = 1;
 
     ActivationDescriptor activDesc;
 

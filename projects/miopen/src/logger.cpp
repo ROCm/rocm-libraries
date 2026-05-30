@@ -218,13 +218,13 @@ inline bool operator>(const int& lhs, const LoggingLevel& rhs)
 
 /// Returns value which uniquiely identifies current process/thread
 /// and can be printed into logs for MP/MT environments.
-inline int GetProcessAndThreadId()
+inline long int GetProcessAndThreadId()
 {
 #ifdef __linux__
     // LWP is fine for identifying both processes and threads.
     return syscall(SYS_gettid); // NOLINT
 #else
-    return 0; // Not implemented.
+    return 0L; // Not implemented.
 #endif
 }
 

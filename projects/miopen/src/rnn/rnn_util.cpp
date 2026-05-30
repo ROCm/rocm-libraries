@@ -319,16 +319,28 @@ void RNNTensorPaddingConverter::ConvertTensorData(const Handle& handle,
 
             if(is_src_padded)
             {
-                CopyTensor(handle, padded_desc, src, packed_desc, dst,
-                           int(src_offset), int(dst_offset), true);
+                CopyTensor(handle,
+                           padded_desc,
+                           src,
+                           packed_desc,
+                           dst,
+                           int(src_offset),
+                           int(dst_offset),
+                           true);
 
                 src_offset += WA_padded_ElementSpace;
                 dst_offset += packed_desc.GetElementSpace();
             }
             else
             {
-                CopyTensor(handle, packed_desc, src, padded_desc, dst,
-                           int(src_offset), int(dst_offset), true);
+                CopyTensor(handle,
+                           packed_desc,
+                           src,
+                           padded_desc,
+                           dst,
+                           int(src_offset),
+                           int(dst_offset),
+                           true);
 
                 src_offset += packed_desc.GetElementSpace();
                 dst_offset += WA_padded_ElementSpace;
@@ -396,8 +408,7 @@ void ReorderTensorGPUData(const Handle& handle,
     {
         const auto dst_offset = i * dst_sample_stride;
         const auto src_offset = sample_order[i] * src_sample_stride;
-        CopyTensor(handle, src_desc, src, dst_desc, dst,
-                   int(src_offset), int(dst_offset), true);
+        CopyTensor(handle, src_desc, src, dst_desc, dst, int(src_offset), int(dst_offset), true);
     }
 }
 
@@ -558,16 +569,16 @@ void RNNTensorBaseLayoutConverter::ChangeTensorGPUDataPadding(
 
         if(is_src_padded)
         {
-            CopyTensor(handle, padded_desc, src, packed_desc, dst,
-                       int(src_offset), int(dst_offset), true);
+            CopyTensor(
+                handle, padded_desc, src, packed_desc, dst, int(src_offset), int(dst_offset), true);
 
             src_offset += WA_padded_ElementSpace;
             dst_offset += packed_desc.GetElementSpace();
         }
         else
         {
-            CopyTensor(handle, packed_desc, src, padded_desc, dst,
-                       int(src_offset), int(dst_offset), true);
+            CopyTensor(
+                handle, packed_desc, src, padded_desc, dst, int(src_offset), int(dst_offset), true);
 
             src_offset += packed_desc.GetElementSpace();
             dst_offset += WA_padded_ElementSpace;

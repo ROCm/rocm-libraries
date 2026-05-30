@@ -154,21 +154,18 @@ ConvSolution ActivFwdSolver1::GetSolution(const ExecutionContext&,
 
     constexpr const auto hw_wave_sz = 64;
 
-    const auto element_size     = (xDesc.GetType() == miopenHalf) ? 2 : 4;
-    const size_t map_size       = static_cast<size_t>(wIn) * hIn * nIn * cIn;
-    const auto read_unit        = (map_size % 8 == 0 && element_size == 2) ? 8
-                                  : (map_size % 4 == 0)                    ? 4
-                                  : (map_size % 2 == 0)                    ? 2
-                                                                           : 1;
-    const auto map_size_aligned = (map_size + read_unit - 1) / read_unit;
-    const auto N_PIXS_OFF       = map_size - (map_size / read_unit) * read_unit;
+    const auto element_size = (xDesc.GetType() == miopenHalf) ? 2 : 4;
+    const size_t map_size   = size_t{wIn} * size_t{hIn} * size_t{nIn} * size_t{cIn};
+    const size_t read_unit  = (map_size % 8 == 0 && element_size == 2) ? 8
+                              : (map_size % 4 == 0)                    ? 4
+                              : (map_size % 2 == 0)                    ? 2
+                                                                       : 1;
+    const auto N_PIXS_OFF   = map_size - (map_size / read_unit) * read_unit;
 
-    const auto glbl_wk = map_size_aligned;
-
-    const auto grp_tile0 =
-        std::min(static_cast<int>((glbl_wk + hw_wave_sz - 1) / hw_wave_sz) * hw_wave_sz, 256);
-    const auto grp_tile1 = 1;
-    const auto grp_tile2 = 1;
+    const int glbl_wk   = static_cast<int>((map_size + read_unit - 1) / read_unit);
+    const int grp_tile0 = std::min(((glbl_wk + hw_wave_sz - 1) / hw_wave_sz) * hw_wave_sz, 256);
+    const int grp_tile1 = 1;
+    const int grp_tile2 = 1;
 
     auto compiler_options = KernelBuildParameters{
         {"MIOPEN_N_IN", nIn},
@@ -242,13 +239,13 @@ ConvSolution ActivFwdSolver1::GetSolution(const ExecutionContext&,
     kernel.kernel_name  = "MIOpenNeuronFwd";
     kernel.comp_options = compiler_options.GenerateFor(kbp::HIP{});
 
-    kernel.l_wk.push_back(grp_tile0);
+    kernel.l_wk.push_back(size_t{grp_tile0});
     kernel.l_wk.push_back(grp_tile1);
     kernel.l_wk.push_back(1);
 
     const auto global_work_size = ((glbl_wk + grp_tile0 - 1) / grp_tile0) * grp_tile0;
 
-    kernel.g_wk.push_back(global_work_size);
+    kernel.g_wk.push_back(size_t{global_work_size});
     kernel.g_wk.push_back(1);
     kernel.g_wk.push_back(1);
 
@@ -262,10 +259,10 @@ ConvSolution ActivFwdSolver1::GetSolution(const ExecutionContext&,
             visit_float(xDesc.GetType(), [&](auto as_float) {
                 k(params.x,
                   params.y,
-                  static_cast<int>(map_size_aligned),
-                  as_float(params.gamma),
-                  as_float(params.beta),
-                  as_float(params.alpha),
+                  glbl_wk,
+                  as_float(float(params.gamma)),
+                  as_float(float(params.beta)),
+                  as_float(float(params.alpha)),
                   static_cast<long long>(params.x_offset),
                   static_cast<long long>(params.y_offset));
             });

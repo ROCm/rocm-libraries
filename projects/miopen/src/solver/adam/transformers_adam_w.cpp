@@ -165,7 +165,8 @@ ConvSolution TransformersAdamW::GetSolution(const ExecutionContext& context,
                         {
                             auto bias_correction1 = 1.0 - pow(params.beta1, params.step);
                             auto bias_correction2 = 1.0 - pow(params.beta2, params.step);
-                            step_size = float(params.lr * sqrt(bias_correction2) / bias_correction1);
+                            step_size =
+                                float(params.lr * sqrt(bias_correction2) / bias_correction1);
                         }
                         else
                         {
@@ -209,7 +210,8 @@ ConvSolution TransformersAdamW::GetSolution(const ExecutionContext& context,
                         {
                             auto bias_correction1 = 1.0 - pow(params.beta1, params.step);
                             auto bias_correction2 = 1.0 - pow(params.beta2, params.step);
-                            step_size = float(params.lr * sqrt(bias_correction2) / bias_correction1);
+                            step_size =
+                                float(params.lr * sqrt(bias_correction2) / bias_correction1);
                         }
                         else
                         {

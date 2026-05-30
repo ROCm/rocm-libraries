@@ -233,7 +233,7 @@ void BatchNormForwardTraining(const Handle& handle,
         epsilon,
         resultsave,
         resultrunning,
-        std::max(size_t{1}, size_t{0.6 * handle.GetMaxComputeUnits()}),
+        std::max(1UL, static_cast<size_t>(0.6 * handle.GetMaxComputeUnits())),
         activDesc};
 
     const auto algo = bn_mode == miopenBNSpatial

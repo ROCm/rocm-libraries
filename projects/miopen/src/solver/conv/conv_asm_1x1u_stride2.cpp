@@ -102,12 +102,7 @@ inline static bool IsLinear(const int v)
     return L <= v && v <= H;
 }
 
-static inline size_t divide_round_plus_inf(const size_t x, const unsigned y)
-{
-    if(x % y != 0)
-        return x / y + 1;
-    return x / y;
-}
+static inline int divide_round_plus_inf(const int x, const int y) { return (x / y) + (x % y != 0) }
 
 enum class MemLayout : int
 {
@@ -134,14 +129,14 @@ struct config_helper
             dilation_h = problem.GetKernelStrideH();
         }
 
-        in_strided_w = divide_round_plus_inf(problem.GetInWidth(), stride_w);
-        in_strided_h = divide_round_plus_inf(problem.GetInHeight(), stride_h);
+        in_strided_w = divide_round_plus_inf(int{problem.GetInWidth()}, stride_w);
+        in_strided_h = divide_round_plus_inf(int{problem.GetInHeight()}, stride_h);
 
-        w_per_wave  = static_cast<int>(divide_round_plus_inf(config.dwords_per_ld, stride_w) *
-                                      config.w_mult * (config.chunk_size / config.h_per_chunk));
+        w_per_wave = divide_round_plus_inf(config.dwords_per_ld, stride_w) * config.w_mult *
+                     (config.chunk_size / config.h_per_chunk);
         h_per_wave  = config.h_per_chunk * config.h_mult;
-        gid_hw_size = static_cast<int>(divide_round_plus_inf(in_strided_w, h_per_wave) *
-                                       divide_round_plus_inf(in_strided_h, w_per_wave));
+        gid_hw_size = divide_round_plus_inf(in_strided_w, h_per_wave) *
+                      divide_round_plus_inf(in_strided_h, w_per_wave);
     }
 
     int stride_w, stride_h;
@@ -164,8 +159,8 @@ struct buff_info
     buff_info(MemLayout layout, int nk, int c, int h, int w, int vec_c, int data_len_t)
     {
         int c_hi        = (c + vec_c - 1) / vec_c;
-        auto count      = static_cast<size_t>(nk) * c_hi * h * w * vec_c;
-        total_byte_size = count * data_len_t;
+        auto count      = size_t{nk} * size_t{c_hi} * size_t{h} * size_t{w} * size_t{vec_c};
+        total_byte_size = count * size_t{data_len_t};
         size.nk         = nk;
         size.c          = c;
         size.h          = h;
@@ -348,8 +343,7 @@ bool PerformanceConfigConvAsm1x1UV2::IsValid(const ProblemDescription& problem) 
     const config_helper uv_lj(problem, *this);
 
     const auto elements_per_ld = (dwords_per_ld * elements_in_dword);
-    const auto active_elements =
-        static_cast<int>(divide_round_plus_inf(elements_per_ld, uv_lj.stride_w));
+    const auto active_elements = divide_round_plus_inf(elements_per_ld, uv_lj.stride_w);
 
     const auto in_gprs  = dwords_per_ld * w_mult * h_mult * c_mult * n_mult * 2;
     const auto acc_gprs = active_elements * w_mult * h_mult * k_mult * n_mult;
@@ -382,7 +376,8 @@ bool PerformanceConfigConvAsm1x1UV2::IsValid(const ProblemDescription& problem) 
     const auto sgprs = 25 + 2 * k_mult * c_mult;
     if(!(sgprs < 102))
         return false;
-    const auto total_n_blocks = (problem.GetBatchSize() + GetNPerGpr() - 1) / GetNPerGpr();
+    const auto nPerGrp        = size_t{GetNPerGpr()};
+    const auto total_n_blocks = (problem.GetBatchSize() + nPerGpr - 1) / nPerGpr;
     if(!(n_mult <= total_n_blocks))
         return false;
 

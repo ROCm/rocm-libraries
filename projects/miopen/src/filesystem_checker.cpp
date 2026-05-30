@@ -142,9 +142,10 @@ bool FilesystemChecker::IsNetworkedFilesystem(const fs::path& path_) const
         MIOPEN_LOG_NQE("statfs('" << path << "') rc = " << rc << ", '" << strerror(errno) << "'");
         return false;
     }
+    auto stat_f_type = size_t(stat.f_type);
     MIOPEN_LOG_NQI("Filesystem type at '" << path << "' is: 0x" << std::hex << stat.f_type << " '"
-                                          << Stringize(stat.f_type) << '\'');
-    return IsNetworked(stat.f_type);
+                                          << Stringize(stat_f_type) << '\'');
+    return IsNetworked(stat_f_type);
 }
 
 #else
