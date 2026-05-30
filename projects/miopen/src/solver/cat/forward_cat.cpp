@@ -95,8 +95,8 @@ ConvSolution CatForward::GetSolution(const ExecutionContext& context,
     auto& handle = context.GetStream();
     auto numCu   = handle.GetMaxComputeUnits();
 
-    auto outer_size =
-        std::accumulate(ydims.begin(), ydims.begin() + int64_t(dim), 1ULL, std::multiplies<size_t>());
+    auto outer_size = std::accumulate(
+        ydims.begin(), ydims.begin() + int64_t(dim), 1ULL, std::multiplies<size_t>());
 
     constexpr size_t local_size = 192;
 

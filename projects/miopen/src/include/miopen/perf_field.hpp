@@ -40,7 +40,7 @@ struct PerfField
     std::string algorithm;
     std::string solver_id;
     float time;
-    std::size_t workspace;
+    size_t workspace;
 
     bool operator<(const PerfField& p) const { return (time < p.time); }
 };
@@ -48,12 +48,12 @@ struct PerfField
 struct FindDbData : solver::Serializable<FindDbData>
 {
     float time;
-    int64_t workspace;
+    size_t workspace;
     std::string algorithm;
 
-    FindDbData() : time(-1), workspace(-1), algorithm("<invalid>") {}
+    FindDbData() : time(-1), workspace(size_t{-1}), algorithm("<invalid>") {}
 
-    FindDbData(float time_, int64_t workspace_, const std::string& algorithm_)
+    FindDbData(float time_, size_t workspace_, const std::string& algorithm_)
         : time(time_), workspace(workspace_), algorithm(algorithm_)
     {
     }

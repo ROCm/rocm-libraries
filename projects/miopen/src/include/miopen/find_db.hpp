@@ -184,7 +184,7 @@ public:
             const auto algo = solution.GetSolver().GetAlgo(problem.GetDirection());
             record.content->SetValues(
                 solution.GetSolver().ToString(),
-                FindDbData{solution.GetTime(), int64_t(solution.GetWorkspaceSize()), algo});
+                FindDbData{solution.GetTime(), solution.GetWorkspaceSize(), algo});
         }
 
         return result.solutions;

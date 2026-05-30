@@ -62,7 +62,7 @@ inline void GetLocalConfigNHWC(const miopen::batchnorm::ProblemDescription& prob
     {
         // xlocalsize must be power of 2 as reductions in the kernels rely on it, here c is rounded
         // up to next power of 2.
-        auto shift = static_cast<int>(std::ceil(std::log2(c / vectorsize)));
+        auto shift  = static_cast<int>(std::ceil(std::log2(c / vectorsize)));
         xlocalsize  = std::min(1UL << shift, size_t{xlocalsize_limit});
         ylocalsize  = max_localsize / xlocalsize;
         nworkgroups = ((c / vectorsize + xlocalsize - 1) / xlocalsize) *
