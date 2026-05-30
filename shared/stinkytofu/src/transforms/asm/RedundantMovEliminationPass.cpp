@@ -41,8 +41,6 @@ bool isEligibleForRedundantMovElimination(const StinkyInstruction& inst) {
     // Currently: v_mov_b32 and s_mov_b32
     // Easy to extend by adding more checks here
 
-    uint32_t opcode = inst.getUnifiedOpcode();
-
     // Check if it's a mov instruction by looking at the opcode
     // This is a simple implementation - you may want to check specific opcode values
     // or use instruction flags to identify mov instructions
@@ -97,15 +95,12 @@ class RedundantMovEliminationPassImpl : public Pass {
     }
 
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
-        int totalEliminated = 0;
-
         // Process all basic blocks
         for (BasicBlock& bb : func) {
             // Skip filtered basic blocks
             if (!passCtx.shouldProcessBasicBlock(bb)) continue;
 
-            int eliminated = runOnBasicBlock(bb);
-            totalEliminated += eliminated;
+            runOnBasicBlock(bb);
         }
         return preserveCFGAnalyses();
     }

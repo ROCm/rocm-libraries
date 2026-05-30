@@ -16,6 +16,7 @@ add_library(
     engines/plans/batchnorm/BatchnormFwdInferencePlan.cpp
     engines/plans/batchnorm/BatchnormFwdInferenceWithVariancePlan.cpp
     engines/plans/batchnorm/BatchnormFwdTrainingPlan.cpp
+    engines/plans/batchnorm/BatchnormBwdPlan.cpp
     engines/plans/batchnorm/BatchnormApplicabilityChecks.cpp
     engines/plans/batchnorm/BatchnormFwdTrainingPlanBuilder.cpp
     engines/plans/RMSnorm/RMSnormPlanBuilder.cpp
@@ -42,6 +43,7 @@ dnn_provider_generate_version_header(hip_kernel_provider hip_kernel_provider_imp
 target_link_libraries(hip_kernel_provider_impl PUBLIC hip::host hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hiprtc::hiprtc)
 
 target_compile_options(hip_kernel_provider_impl PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+set_source_files_properties(${KERNEL_GENERATED_SOURCES} PROPERTIES COMPILE_OPTIONS "-Wno-overlength-strings")
 set_target_properties(hip_kernel_provider_impl PROPERTIES
     CXX_VISIBILITY_PRESET hidden
     POSITION_INDEPENDENT_CODE ON
@@ -93,7 +95,11 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
 
     # Keep this after all build folders have been added so they have a chance to register their tests
     # using add_*_test_target()
-    finalize_test_targets()
+    if(HIPKERNELPROVIDER_ENABLE_COVERAGE)
+        finalize_test_targets("${PROJECT_NAME}" ENABLE_COVERAGE)
+    else()
+        finalize_test_targets("${PROJECT_NAME}")
+    endif()
 
-    install_hip_kernel_provider_ctest_files()
+    install_provider_ctest_files("hip_kernel_provider")
 endif()

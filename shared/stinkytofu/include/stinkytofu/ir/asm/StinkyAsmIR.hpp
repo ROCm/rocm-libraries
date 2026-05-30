@@ -51,6 +51,7 @@ struct STINKYTOFU_EXPORT StinkyInstruction : public IRBase {
     friend class DefUseChainUpdater;
     friend class DefUseChainBuilder;
 
+    const HwInstDesc* hwInstDesc;
     int issueCycles;
     int latencyCycles;
 
@@ -63,8 +64,6 @@ struct STINKYTOFU_EXPORT StinkyInstruction : public IRBase {
     // instructions that DEFINE the values USED by this instruction
     // (producers of this instruction's operands).
     std::vector<StinkyInstruction*> sources;
-
-    const HwInstDesc* hwInstDesc;
 
     // Modifiers are extra bits/fields in the instruction encoding that
     // tweak how the operation is performed, without needing a completely
@@ -83,7 +82,7 @@ struct STINKYTOFU_EXPORT StinkyInstruction : public IRBase {
           issueCycles(mcid->issue),
           latencyCycles(mcid->latency) {}
 
-    ~StinkyInstruction() = default;
+    ~StinkyInstruction() override = default;
 
    public:
     void addSrcReg(const StinkyRegister& srcReg) {
@@ -293,7 +292,7 @@ class STINKYTOFU_EXPORT AsmIRBuilder : public IRBuilder {
     /// reordered across it.
     StinkyInstruction* createFence() {
         static const HwInstDesc fenceMCID{
-            GFX::FENCE, GFX::FENCE, 0, 0, "FENCE", makeFlagSet({InstFlag::IF_HasSideEffect})};
+            GFX::FENCE, GFX::FENCE, 0, 0, 0, "FENCE", makeFlagSet({InstFlag::IF_HasSideEffect})};
         return create(&fenceMCID);
     }
 
@@ -338,12 +337,20 @@ inline bool isMUBUFStore(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_MUBUFStore);
 }
 
+inline bool isMUBUFAtomic(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_MUBUFAtomic);
+}
+
 inline bool isFLATLoad(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_FLATLoad);
 }
 
 inline bool isFLATStore(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_FLATStore);
+}
+
+inline bool isFLATAtomic(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_FLATAtomic);
 }
 
 inline bool isGLOBALLoad(const StinkyInstruction& inst) {
@@ -380,8 +387,7 @@ inline bool isGlobalMemLoad(const StinkyInstruction& inst) {
 }
 
 inline bool isGlobalMemAtomic(const StinkyInstruction& inst) {
-    return inst.is(InstFlag::IF_SMemAtomic) || inst.is(InstFlag::IF_MUBUFAtomic) ||
-           inst.is(InstFlag::IF_FLATAtomic);
+    return inst.is(InstFlag::IF_SMemAtomic) || isMUBUFAtomic(inst) || isFLATAtomic(inst);
 }
 
 inline bool isGlobalMemStore(const StinkyInstruction& inst) {
@@ -398,6 +404,10 @@ inline bool isDSRead(const StinkyInstruction& inst) {
 
 inline bool isDSWrite(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_DSStore);
+}
+
+inline bool isDSAtomic(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_DSAtomic);
 }
 
 inline bool isBarrier(const StinkyInstruction& inst) {
@@ -519,6 +529,31 @@ inline bool mustPreserveInstruction(const StinkyInstruction& inst) {
     return false;
 }
 
+/// Returns true if the instruction has LDS pseudo-register operands,
+/// indicating MemTokenData has been assigned and ordering is enforced
+/// by the DAG via def-use edges.
+inline bool hasLdsPseudoRegs(const StinkyInstruction& inst) {
+    for (const StinkyRegister& r : inst.getSrcRegs())
+        if (r.isRegister() && r.reg.type == RegType::LDS) return true;
+    for (const StinkyRegister& r : inst.getDestRegs())
+        if (r.isRegister() && r.reg.type == RegType::LDS) return true;
+    return false;
+}
+
+/// Returns true if the instruction forces the DAG scheduler to cut a new
+/// region.  This covers true side effects (stores, branches, waits) and
+/// memory ops that lack MemTokenData (LDS pseudo-registers), where the
+/// scheduler has no dependency edges to prove reordering is safe.
+inline bool hasSideEffect(const StinkyInstruction& inst) {
+    if (!inst.getHwInstDesc()) return false;
+    if (isGlobalMemStore(inst) || isBranch(inst) || isWaitCnt(inst) || isHasSideEffect(inst))
+        return true;
+    if ((isBarrier(inst) || isTensorLoad(inst) || isDSRead(inst) || isDSWrite(inst)) &&
+        !hasLdsPseudoRegs(inst))
+        return true;
+    return false;
+}
+
 /// Check if instruction is a vector ALU instruction (v_*)
 /// Excludes transcendental instructions which are classified separately
 inline bool isVectorALU(const StinkyInstruction& inst) {
@@ -535,6 +570,18 @@ inline bool isTranscendental(const StinkyInstruction& inst) {
 /// Excludes: control flow, memory operations, waitcnt, barrier, delay_alu
 inline bool isScalarALU(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_SALU);
+}
+
+/// Check if instruction is an XDL WMMA/SWMMAC instruction.
+/// Excludes FP32-input WMMA (v_wmma_f32_16x16x4_f32).
+inline bool isXDLWMMA(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_WMMA_XDL);
+}
+
+/// Check if instruction is a 64-bit transcendental.
+/// Includes v_rcp_f64, v_rsq_f64, v_sqrt_f64.
+inline bool isTrans64(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_Trans64);
 }
 
 }  // namespace stinkytofu

@@ -16,6 +16,20 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# Sanitizer support for Address Sanitizer when enabled in the enviornment.
+option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
+if(BUILD_ADDRESS_SANITIZER AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    execute_process(
+        COMMAND ${CMAKE_CXX_COMPILER} -print-resource-dir
+        OUTPUT_VARIABLE CLANG_RESOURCE_DIR
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    link_directories(${CLANG_RESOURCE_DIR}/lib/linux)
+    add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=address -fno-omit-frame-pointer -shared-libasan)
+    add_compile_definitions(ADDRESS_SANITIZER)
+endif()
+
 # =============================================================================
 # Output directories
 # =============================================================================

@@ -107,8 +107,6 @@ void scheduleFinalLocalReadWithLatency(BasicBlock& bb, PassContext& passCtx) {
     BasicBlock::iterator regionEnd = endIt;
 
     // 1. Find the last barrier
-    BasicBlock::reverse_iterator revStartIt = bb.rbegin(), revEndIt = bb.rend();
-
     for (BasicBlock::iterator rit = beginIt; rit != endIt; ++rit) {
         StinkyInstruction& inst = getStinkyInst(rit);
         if (isBarrier(inst)) {
@@ -119,7 +117,7 @@ void scheduleFinalLocalReadWithLatency(BasicBlock& bb, PassContext& passCtx) {
         if (labelData != nullptr) {
             const std::string& labelName = labelData->label;
             auto pos = labelName.find("label_LoopBeginL");
-            if (pos != std::string::npos && pos == 0) {
+            if (pos == 0) {
                 regionEnd = rit;
                 break;
             }
@@ -153,8 +151,6 @@ void scheduleFinalLocalReadWithLatency(BasicBlock& bb, PassContext& passCtx) {
     }
     // 3. Count the number of MFMAs and LRs.
     // get the distance with cycles where a LR dst is used.
-    auto numMFMA = 0;
-    auto numLR = 0;
     std::queue<StinkyInstruction*> scheLR;
 
     auto scheduleRemainingLRs = [&]() {
@@ -170,8 +166,6 @@ void scheduleFinalLocalReadWithLatency(BasicBlock& bb, PassContext& passCtx) {
         StinkyInstruction& inst = getStinkyInst(it);
         // inst.dump(std::cout);
         if (isDSRead(inst)) {
-            // std::cout<<numLR<<"th Local Read:";
-            numLR++;
             auto dist = getLRDistance(it, endIt, beginIt, inst.getDestRegs());
             // std::cout<<", distance: "<<dist<<std::endl;
             if (dist < inst.latencyCycles) {
@@ -182,7 +176,6 @@ void scheduleFinalLocalReadWithLatency(BasicBlock& bb, PassContext& passCtx) {
                 scheLR.push(&inst);
             }
         } else if (isWMMA(inst)) {
-            numMFMA++;
             scheduled.push_back(&inst);
             if (!scheLR.empty()) {
                 // pop LR

@@ -56,23 +56,17 @@ class DeadCodeEliminationPassImpl : public Pass {
     }
 
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
-        int totalRemoved = 0;
-
         // Process all basic blocks
         for (BasicBlock& bb : func) {
             // Skip filtered basic blocks
             if (!passCtx.shouldProcessBasicBlock(bb)) continue;
 
             // Iteratively remove dead stores until fixpoint
-            int removedInBB = 0;
             bool changed = true;
             while (changed) {
                 int removed = runOnBasicBlock(bb, func);
-                removedInBB += removed;
                 changed = (removed > 0);
             }
-
-            totalRemoved += removedInBB;
         }
         return preserveCFGAnalyses();
     }
