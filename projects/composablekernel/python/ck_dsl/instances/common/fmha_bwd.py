@@ -25,9 +25,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Tuple
 
-from ...core.ir import IRBuilder, KernelDef, Value
+from ...core.ir import KernelDef
 from ...helpers.attention import apply_attention_mask, warp_xor_reduce_sum
-from ...helpers.io import load_scalar_as_f32, load_vec_as_f32
+from ...helpers.io import load_lane_slice_f32
 from ...helpers.spec import kernel_name_join
 from ._fmha_common import FmhaCommonSpec, FmhaKernelBuilder, validate_common_spec
 from ._fmha_warp_body import WARP_SIZE
@@ -40,51 +40,6 @@ __all__ = [
     "fmha_bwd_signature",
     "is_valid_spec",
 ]
-
-
-# Power-of-two vector widths the DSL's ``global_load_vN`` covers.
-# Standard FMHA head sizes (64 / 128 / 256) give EPT in {1, 2, 4};
-# head_size=192 gives EPT=3 (no power-of-two vector). We fall back to
-# per-element scalar loads for EPT not in this set so head_size=192
-# keeps working through the same helper.
-_VEC_WIDTHS = (2, 4, 8)
-
-
-def _load_lane_slice_f32(
-    b: IRBuilder,
-    ptr: Value,
-    row_base: Value,
-    lane_d_base: Value,
-    *,
-    dtype: str,
-    ept: int,
-) -> list[Value]:
-    """Load this lane's ``EPT`` consecutive elements as a list of f32.
-
-    Uses one vectorised ``global_load_vN`` + ``vec_extract`` chain when
-    ``EPT`` is a supported vector width (2 / 4 / 8 -- one VMEM
-    transaction per call). Falls back to per-element scalar loads for
-    the ``EPT == 1`` (head_size=64) and ``EPT == 3`` (head_size=192,
-    not a power of two) corner cases so every supported head size
-    keeps working.
-
-    Matches the per-warp K/V/Q load pattern used by CK Tile's
-    ``BlockFmhaBwd*`` register-tile loads (``load_tile`` over a
-    distributed ``rt<bf16, ..., row_l, rt_16x32_s>`` tensor) and
-    AITER's varlen bwd ``tl.load(ptr + offs, ...)`` 8-element vector
-    loads in ``mha_varlen_bwd_kernels.cu``.
-    """
-    if ept in _VEC_WIDTHS:
-        return load_vec_as_f32(b, ptr, b.add(row_base, lane_d_base), dtype=dtype, n=ept)
-    return [
-        load_scalar_as_f32(
-            b,
-            ptr,
-            b.add(row_base, b.add(lane_d_base, b.const_i32(k))),
-            dtype=dtype,
-        )
-        for k in range(ept)
-    ]
 
 
 @dataclass(frozen=True)
@@ -251,10 +206,7 @@ def build_fmha_bwd(spec: FmhaBwdSpec, arch: str = "gfx950") -> KernelDef:
     lane_d_base = b.mul(tid, b.const_i32(ept))
 
     q_row = kb.q_row_base()
-    do_row = b.add(
-        b.mul(q_token, kb.stride_token("do")),
-        b.mul(head_idx, kb.stride_head("do")),
-    )
+    do_row = kb.row_base("do", q_token, head_idx)
 
     # Saved M / L are indexed by (q_token, head) -- linear (q * HQ + h).
     # Hoist the ``q * HQ + h`` row index so we don't rematerialise the
@@ -270,8 +222,8 @@ def build_fmha_bwd(spec: FmhaBwdSpec, arch: str = "gfx950") -> KernelDef:
     # ``rt<bf16, 16, D>`` register tile -- the per-CTA Q / dO buffers
     # are constant over the K-loop, so the loads happen once per CTA
     # and the results live in registers.
-    q_lane = _load_lane_slice_f32(b, Q, q_row, lane_d_base, dtype=dtype, ept=ept)
-    do_lane = _load_lane_slice_f32(b, dO, do_row, lane_d_base, dtype=dtype, ept=ept)
+    q_lane = load_lane_slice_f32(b, Q, q_row, lane_d_base, dtype=dtype, ept=ept)
+    do_lane = load_lane_slice_f32(b, dO, do_row, lane_d_base, dtype=dtype, ept=ept)
 
     zero_f = b.const_f32(0.0)
 
@@ -290,8 +242,8 @@ def build_fmha_bwd(spec: FmhaBwdSpec, arch: str = "gfx950") -> KernelDef:
         # EPT in {2, 4, 8}); the QK + dO.V partial accumulators stay
         # scalar f32 because the warp-distributed body uses a
         # ``warp_xor_reduce_sum`` butterfly to fold across the warp.
-        k_lane = _load_lane_slice_f32(b, K, k_row, lane_d_base, dtype=dtype, ept=ept)
-        v_lane = _load_lane_slice_f32(b, V, v_row, lane_d_base, dtype=dtype, ept=ept)
+        k_lane = load_lane_slice_f32(b, K, k_row, lane_d_base, dtype=dtype, ept=ept)
+        v_lane = load_lane_slice_f32(b, V, v_row, lane_d_base, dtype=dtype, ept=ept)
         partial_qk = zero_f
         partial_dov = zero_f
         for k in range(ept):
@@ -343,8 +295,8 @@ def build_fmha_bwd(spec: FmhaBwdSpec, arch: str = "gfx950") -> KernelDef:
         # K-step). One ``global_load_vN`` per tensor keeps the inner
         # loop's address-arithmetic / MEM-channel pressure as low as
         # the CK Tile ``BlockFmhaBwd*`` register-tile loaders.
-        k_lane = _load_lane_slice_f32(b, K, k_row, lane_d_base, dtype=dtype, ept=ept)
-        v_lane = _load_lane_slice_f32(b, V, v_row, lane_d_base, dtype=dtype, ept=ept)
+        k_lane = load_lane_slice_f32(b, K, k_row, lane_d_base, dtype=dtype, ept=ept)
+        v_lane = load_lane_slice_f32(b, V, v_row, lane_d_base, dtype=dtype, ept=ept)
         partial_qk = zero_f
         partial_dov = zero_f
         for k in range(ept):

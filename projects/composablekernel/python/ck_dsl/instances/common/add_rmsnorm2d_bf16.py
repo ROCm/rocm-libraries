@@ -31,11 +31,11 @@ caches ``x`` for pass 2.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, List, Literal, Tuple
+from typing import List, Literal, Tuple
 
 from ...core.ir import F32, I32, IRBuilder, KernelDef, PtrType, Value
 from ...helpers.io import io_ir_type
-from ...helpers.reduction import block_lds_reduce
+from ...helpers.reduction import block_lds_reduce, tree_reduce
 from ...helpers.spec import (
     IOSpecRule,
     SignatureBuilder,
@@ -52,31 +52,6 @@ from ...helpers.tensor_view import (
 
 
 DType = Literal["f16", "bf16"]
-
-
-def _balanced_combine(
-    values: List[Value], combine: Callable[[Value, Value], Value]
-) -> Value:
-    """Balanced-tree fold of ``values`` under ``combine`` (depth log2(N)).
-
-    Identical to the helper in ``rmsnorm2d`` / ``add_rmsnorm2d_rdquant``:
-    serialises the per-chunk sum-of-squares fold to a log-depth tree so
-    the AMDGPU pipeline can interleave the chunk multiplies with each
-    other instead of waiting on a straight-line ``fadd`` chain.
-    """
-    if not values:
-        raise ValueError("_balanced_combine requires at least one value")
-    cur = list(values)
-    while len(cur) > 1:
-        nxt: List[Value] = []
-        i = 0
-        while i + 1 < len(cur):
-            nxt.append(combine(cur[i], cur[i + 1]))
-            i += 2
-        if i < len(cur):
-            nxt.append(cur[i])
-        cur = nxt
-    return cur[0]
 
 
 @dataclass(frozen=True)
@@ -242,7 +217,7 @@ def build_add_rmsnorm2d_bf16(
             x_i = b.fadd(a_scalars[i], b_scalars[i])
             chunk_x.append(x_i)
             chunk_sq.append(b.fmul(x_i, x_i))
-        s_sq = b.fadd(s_sq, _balanced_combine(chunk_sq, b.fadd))
+        s_sq = b.fadd(s_sq, tree_reduce(b, b.fadd, chunk_sq))
         cached_x.extend(chunk_x)
         if spec.save_residual:
             # Write x = a + b back to the residual buffer in vec stores

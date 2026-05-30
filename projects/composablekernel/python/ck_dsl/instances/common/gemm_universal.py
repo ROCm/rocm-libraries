@@ -66,7 +66,7 @@ from ...core.ir import (
     Value,
 )
 from ...helpers.io import io_ir_type
-from ...helpers.spec import WarpTileBlockSizeMixin
+from ...helpers.spec import WarpTileBlockSizeMixin, choose_load_vec
 from ...helpers.tensor_view import make_global_view, make_tile_window
 
 
@@ -342,6 +342,39 @@ def _storage_dtype(spec: UniversalGemmSpec) -> Type:
     return _dtype_ir(d.dtype_a)
 
 
+def _ab_lds_plan(spec: UniversalGemmSpec, arch: str) -> Tuple[int, bool, bool]:
+    """AB LDS double-buffer plan, shared by the validity gate and emitter.
+
+    Returns ``(ab_single, db, two_buf)`` as pure Python ints/bools:
+
+    * ``ab_single`` — bytes for one (single-buffered) AB LDS region,
+      ``(tile_m*tile_k + tile_n*tile_k) * 2``.
+    * ``db`` — whether the compv4 software-pipelined double buffer is
+      enabled (compv4, direct epilogue, not DTL, and the doubled buffer
+      still fits 2 WG/CU).
+    * ``two_buf`` — whether the AB LDS is double-buffered at all
+      (``dtl_prefetch`` ping-pong OR ``db``).
+
+    Keeping ``is_valid_spec`` and ``build_universal_gemm`` in lock-step
+    through this single source avoids the class of bug where the gate
+    reserves 2x AB but the emitter single-buffers (or vice-versa).
+    """
+    from ...core.arch import ArchTarget
+
+    t = spec.tile
+    ab_single = ((t.tile_m * t.tile_k) + (t.tile_n * t.tile_k)) * 2
+    lds_cap = ArchTarget.from_gfx(arch).lds_capacity_bytes
+    db_fits_2wg = (2 * ab_single) * 2 <= lds_cap
+    db = (
+        spec.trait.pipeline == "compv4"
+        and spec.trait.epilogue != "cshuffle"
+        and not spec.trait.direct_to_lds
+        and db_fits_2wg
+    )
+    two_buf = bool(spec.trait.dtl_prefetch) or db
+    return ab_single, db, two_buf
+
+
 def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, str]:
     """Return `(ok, reason)`. The same predicate CK's dispatcher uses
     to drop unbuildable configs from a sweep.
@@ -448,7 +481,6 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
     #   total:              double_buffer_AB + (cshuffle ? C : 0)
     # When we land the AB/C aliasing in the cshuffle emitter, swap the
     # `+` for a `max`.
-    ab_single = ((t.tile_m * t.tile_k) + (t.tile_n * t.tile_k)) * 2
     # AB is double-buffered (2x LDS) only when the emitter actually
     # ping-pongs two halves: ``dtl_prefetch`` (DTLA ping-pong) or the
     # compv4 software-pipelined double buffer, which the emitter enables
@@ -456,14 +488,9 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
     # staging would overflow the budget — see ``_db`` in
     # :func:`build_universal_gemm`). Keeping this gate in lock-step with
     # the emitter avoids both spurious rejections (over-reserving 2x AB
-    # for a single-buffered compv4+cshuffle) and under-reserving.
-    _db_fits_2wg = (2 * ab_single) * 2 <= target.lds_capacity_bytes
-    _ab_dbl = spec.trait.dtl_prefetch or (
-        spec.trait.pipeline == "compv4"
-        and spec.trait.epilogue != "cshuffle"
-        and not spec.trait.direct_to_lds
-        and _db_fits_2wg
-    )
+    # for a single-buffered compv4+cshuffle) and under-reserving. Both
+    # sites share :func:`_ab_lds_plan` to stay in lock-step.
+    ab_single, _, _ab_dbl = _ab_lds_plan(spec, arch)
     ab_bytes = ab_single * (2 if _ab_dbl else 1)
     c_bytes = t.tile_m * t.tile_n * 2 if spec.trait.epilogue == "cshuffle" else 0
     bytes_lds = ab_bytes + c_bytes
@@ -579,22 +606,13 @@ def _emit_zero_acc_op(b: IRBuilder, op) -> Value:
 
 def _choose_load_vec(spec: UniversalGemmSpec) -> int:
     """Choose the widest naturally-aligned global-load width for this
-    block shape. f16 -> we can vectorise up to 8 halves per lane."""
+    block shape. f16 -> we can vectorise up to 8 halves per lane.
+
+    Thin adapter over :func:`ck_dsl.helpers.spec.choose_load_vec`, the shared
+    single-source picker; kept so callers (incl. ``moe_gemm_fused``) that
+    pass a whole spec stay unchanged."""
     t = spec.tile
-    threads = spec.block_size
-    # We need block_k % vec == 0 AND total_halves / vec >= threads AND
-    # total_halves / vec % threads == 0 (coalesced).
-    for v in (8, 4, 2, 1):
-        if t.tile_k % v:
-            continue
-        a_vecs = (t.tile_m * t.tile_k) // v
-        b_vecs = (t.tile_n * t.tile_k) // v
-        if a_vecs < threads or b_vecs < threads:
-            continue
-        if a_vecs % threads or b_vecs % threads:
-            continue
-        return v
-    raise ValueError(f"no usable load_vec for {spec}")
+    return choose_load_vec(t.tile_m, t.tile_n, t.tile_k, spec.block_size)
 
 
 def _emit_smem_load(
@@ -798,18 +816,9 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     # config from 2 WG/CU down to 1, the lost occupancy outweighs the
     # prefetch overlap (measured: 256x128x64 regresses -3% when it drops
     # to 1 WG/CU). In that case we keep the single-buffer pipeline.
-    from ...core.arch import ArchTarget as _AT
-
-    _lds_cap = _AT.from_gfx(arch).lds_capacity_bytes
-    _ab_single_bytes = ((block_m * block_k) + (block_n * block_k)) * 2
-    _db_fits_2wg = (2 * _ab_single_bytes) * 2 <= _lds_cap
-    _db = (
-        spec.trait.pipeline == "compv4"
-        and spec.trait.epilogue != "cshuffle"
-        and not spec.trait.direct_to_lds
-        and _db_fits_2wg
-    )
-    _two_buf = _prefetch or _db
+    # AB LDS double-buffer plan, shared with the validity gate via
+    # :func:`_ab_lds_plan` so the reserved/used budget stays in lock-step.
+    _, _db, _two_buf = _ab_lds_plan(spec, arch)
     _A_LDS_M = 2 * block_m if _two_buf else block_m
     _B_LDS_N = 2 * block_n if _two_buf else block_n
     A_smem = b.smem_alloc(storage_dtype, [_A_LDS_M, block_k], name_hint="A_smem")
@@ -1087,11 +1096,20 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 return b.add(r, b.mul(lds_parity, b.const_i32(block_n)))
             return b.add(r, b.const_i32(lds_parity * block_n)) if lds_parity else r
 
-        for e in range(a_vecs_per_thread):
-            vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
+        # Coalesced (row, col_v, col) decode of a per-thread vec index,
+        # shared by the A / B-canonical / B-preshuffle copy loops. Takes
+        # the already-built ``vec_idx`` so the emitted SSA matches the
+        # inline order verbatim (callers that also need ``vec_idx`` for a
+        # global offset compute it before calling).
+        def _vec_rc(vec_idx: Value) -> Tuple[Value, Value, Value]:
             row = b.div(vec_idx, c_block_k_div_vec)
             col_v = b.mod(vec_idx, c_block_k_div_vec)
             col = b.mul(col_v, c_load_vec) if load_vec > 1 else col_v
+            return row, col_v, col
+
+        for e in range(a_vecs_per_thread):
+            vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
+            row, col_v, col = _vec_rc(vec_idx)
             if load_vec == 1:
                 a_val = a_global_tile.load_scalar(b, b.const_i32(0), row, col)
                 a_lds_tile.store_scalar(b, _ld_a_row(row), col, value=a_val)
@@ -1129,9 +1147,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             for e in range(b_vecs_per_thread):
                 vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
                 glob_off = b.add(base_off, b.mul(vec_idx, c_load_vec))
-                row = b.div(vec_idx, c_block_k_div_vec)
-                col_v = b.mod(vec_idx, c_block_k_div_vec)
-                col = b.mul(col_v, c_load_vec) if load_vec > 1 else col_v
+                row, col_v, col = _vec_rc(vec_idx)
                 if load_vec == 1:
                     b_val = b.global_load(Bp, glob_off, storage_dtype)
                     b_lds_tile.store_scalar(b, _ld_b_row(row), col, value=b_val)
@@ -1143,9 +1159,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         else:
             for e in range(b_vecs_per_thread):
                 vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-                row = b.div(vec_idx, c_block_k_div_vec)
-                col_v = b.mod(vec_idx, c_block_k_div_vec)
-                col = b.mul(col_v, c_load_vec) if load_vec > 1 else col_v
+                row, col_v, col = _vec_rc(vec_idx)
                 if load_vec == 1:
                     b_val = b_global_tile.load_scalar(b, b.const_i32(0), row, col)
                     b_lds_tile.store_scalar(b, _ld_b_row(row), col, value=b_val)
@@ -1948,11 +1962,19 @@ def _emit_epilogue_cshuffle(
     vecs_per_thread = (t.tile_m * t.tile_n // store_vec) // threads
     pad_m = bool(spec.trait.pad_m)
     pad_n = bool(spec.trait.pad_n)
-    for e in range(vecs_per_thread):
-        vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
+
+    # Coalesced (row, col_v, col) decode of a per-thread vec index for the
+    # wide C store. Takes the already-built ``vec_idx`` so the emitted SSA
+    # matches the inline order verbatim.
+    def _vec_rc(vec_idx: Value) -> Tuple[Value, Value, Value]:
         row = b.div(vec_idx, c_tile_n_div_vec)
         col_v = b.mod(vec_idx, c_tile_n_div_vec)
         col = b.mul(col_v, b.const_i32(store_vec)) if store_vec > 1 else col_v
+        return row, col_v, col
+
+    for e in range(vecs_per_thread):
+        vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
+        row, col_v, col = _vec_rc(vec_idx)
 
         c_m = b.add(block_m_off, row)
         c_n = b.add(block_n_off, col)

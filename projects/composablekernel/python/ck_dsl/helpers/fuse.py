@@ -63,6 +63,7 @@ import operator
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from ..core.ir import BF16, F16, F32, IRBuilder, PtrType, Type, Value
+from .activations import _sigmoid_via_exp2, _tanh_via_exp2
 from .autotune import Autotuner, AutotuneConfig
 
 
@@ -319,32 +320,6 @@ def _ir_unary_via_f32(b: IRBuilder, dtype: Type, v: Value, fn) -> Value:
     v32 = b.cast_to_f32(v)
     r32 = fn(b, v32)
     return b.cast_f32_to(r32, dtype)
-
-
-def _sigmoid_via_exp2(b: IRBuilder, x: Value) -> Value:
-    """1 / (1 + e^-x), implemented via exp2.
-
-    ``exp(-x) = exp2(-x * log2(e))``. Matches the formula used in the
-    ``elementwise`` instance and avoids ``math.exp`` (which the AMDGPU
-    backend does not lower on its own).
-    """
-    c_neg_log2e = b.const_f32(-1.4426950408889634)
-    one = b.const_f32(1.0)
-    return b.rcp(b.fadd(one, b.exp2(b.fmul(c_neg_log2e, x))))
-
-
-def _tanh_via_exp2(b: IRBuilder, x: Value) -> Value:
-    """tanh(x) = (e^{2x} - 1) / (e^{2x} + 1).
-
-    Same primitive set the ``elementwise`` instance uses for
-    ``gelu_tanh``; deliberately avoids ``math.tanh`` to keep the
-    fused-epilogue body AMDGPU-lowerable without extra runtime
-    libraries.
-    """
-    c_2log2e = b.const_f32(2.0 * 1.4426950408889634)
-    one = b.const_f32(1.0)
-    e2x = b.exp2(b.fmul(c_2log2e, x))
-    return b.fmul(b.fsub(e2x, one), b.rcp(b.fadd(e2x, one)))
 
 
 @dataclass(frozen=True)

@@ -60,11 +60,13 @@ from ...core.ir import (
 from ...helpers.attention import (
     apply_softcap_log2,
     binary_search_seq_idx,
+    dequant_fp8x8_to_dtype,
     mfma_16x16x16_for_dtype,
     mfma_16x16x32_for_dtype,
     mfma_32x32x16_c_col,
     mfma_32x32x16_c_row,
     mfma_32x32x16_for_dtype,
+    pv32_v_load_paired,
     warp_xor_reduce_max,
     warp_xor_reduce_max_32lane,
     warp_xor_reduce_sum,
@@ -2179,18 +2181,7 @@ def build_unified_attention_2d_tiled(
             # no dequant. (k_scale is folded into qk_scale post-MFMA.)
             return b.smem_load_vN(K_lds, buf_idx, k_row, k_off, dtype=FP8E4M3, n=8)
         k_fp8 = b.smem_load_vN(K_lds, buf_idx, k_row, k_off, dtype=FP8E4M3, n=8)
-        lo_fp8 = b.vec_pack([b.vec_extract(k_fp8, i) for i in range(4)], FP8E4M3)
-        hi_fp8 = b.vec_pack([b.vec_extract(k_fp8, i) for i in range(4, 8)], FP8E4M3)
-        lo_f32 = b.cvt_pk_f32_fp8x4(lo_fp8)
-        hi_f32 = b.cvt_pk_f32_fp8x4(hi_fp8)
-        deq = [
-            b.cast_f32_to(b.fmul(b.vec_extract(lo_f32, i), k_scale_p), dtype)
-            for i in range(4)
-        ] + [
-            b.cast_f32_to(b.fmul(b.vec_extract(hi_f32, i), k_scale_p), dtype)
-            for i in range(4)
-        ]
-        return b.vec_pack(deq, dtype)
+        return dequant_fp8x8_to_dtype(b, k_fp8, k_scale_p, dtype)
 
     # ---- Per-lane Q → VGPR gather (eliminates per-iter Q LDS reads) ----
     # Each lane reads its MFMA-A operand slice of Q (16 halves per atom)
@@ -2885,34 +2876,11 @@ def build_unified_attention_2d_tiled(
                             dtype=FP8E4M3,
                             n=8,
                         )
-                        lo_fp8 = b.vec_pack(
-                            [b.vec_extract(B_fp8, i) for i in range(4)],
-                            FP8E4M3,
-                        )
-                        hi_fp8 = b.vec_pack(
-                            [b.vec_extract(B_fp8, i) for i in range(4, 8)],
-                            FP8E4M3,
-                        )
-                        # See FP8 dequant note in _issue_fp8_dequant_loads:
+                        # See FP8 dequant note in dequant_fp8x8_to_dtype:
                         # cvt_scalef32_pk_f32_fp8 uses E8M0-only scale,
-                        # silently truncating non-pow2 scales. Use unfused
-                        # cvt_pk_f32_fp8 + explicit f32 multiply.
-                        lo_f32 = b.cvt_pk_f32_fp8x4(lo_fp8)
-                        hi_f32 = b.cvt_pk_f32_fp8x4(hi_fp8)
-                        deq = []
-                        for i in range(4):
-                            deq.append(
-                                b.cast_f32_to(
-                                    b.fmul(b.vec_extract(lo_f32, i), k_scale_p), dtype
-                                )
-                            )
-                        for i in range(4):
-                            deq.append(
-                                b.cast_f32_to(
-                                    b.fmul(b.vec_extract(hi_f32, i), k_scale_p), dtype
-                                )
-                            )
-                        B_v = b.vec_pack(deq, dtype)
+                        # silently truncating non-pow2 scales. The helper uses
+                        # the unfused cvt_pk_f32_fp8 + explicit f32 multiply.
+                        B_v = dequant_fp8x8_to_dtype(b, B_fp8, k_scale_p, dtype)
                         for atom in range(M_ATOMS_PER_WARP):
                             acc_per_atom[atom] = _mfma_16x16x32(
                                 b, dtype, A_kits[atom][k], B_v, acc_per_atom[atom]
@@ -3209,39 +3177,16 @@ def build_unified_attention_2d_tiled(
                             # {4..7, 12..15}. Use matching half-local
                             # transpose LDS reads for V so V and P share the
                             # same permuted K order.
-                            col_group16 = b.mul(
-                                b.div(lane_col32, b.const_i32(16)), b.const_i32(16)
-                            )
-                            tr_col32 = b.add(
-                                col_group16,
-                                b.mul(
-                                    b.mod(lane_col32, b.const_i32(4)), b.const_i32(4)
-                                ),
-                            )
-                            tr_row_base32 = b.add(
-                                b.add(
-                                    b.const_i32(k * 16),
-                                    b.mul(lane_half32, b.const_i32(4)),
-                                ),
-                                b.mod(
-                                    b.div(lane_col32, b.const_i32(4)), b.const_i32(4)
-                                ),
-                            )
-                            A_r0 = b.ds_read_tr16_b64(
-                                V_lds,
-                                v_buf,
-                                tr_row_base32,
-                                b.add(b.const_i32(n * 32), tr_col32),
+                            A_v_t = pv32_v_load_paired(
+                                b,
+                                V_lds=V_lds,
+                                v_buf=v_buf,
+                                n=n,
+                                k=k,
+                                lane_half32=lane_half32,
+                                lane_col32=lane_col32,
                                 dtype=dtype,
                             )
-                            A_r1 = b.ds_read_tr16_b64(
-                                V_lds,
-                                v_buf,
-                                b.add(tr_row_base32, b.const_i32(8)),
-                                b.add(b.const_i32(n * 32), tr_col32),
-                                dtype=dtype,
-                            )
-                            A_v_t = b.vec_concat(A_r0, A_r1)
                             b_p_elems = []
                             for kk in range(8):
                                 local_in_group = kk % 4

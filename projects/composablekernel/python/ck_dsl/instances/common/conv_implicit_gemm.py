@@ -63,12 +63,14 @@ from ...core.ir import (
     Value,
 )
 from ...helpers.atoms import MfmaAtom, mfma_atom
+from ...helpers.epilogues import CShuffleEpilogue, DirectEpilogue
 from ...helpers.geometry import WarpGrid
 from ...helpers.layouts import LdsLayout
 from ...helpers.loads import AsyncTileLoader, CoalescedTileLoader
 from ...helpers.mfma_gemm_inner import decode_mfma_lanes
 from ...helpers.pipeline import SoftwarePipeline
 from ...helpers.schedule import SchedulePolicy
+from ...helpers.spec import choose_load_vec
 from ...helpers.tensor_view import (
     make_buffer_resource,
 )
@@ -607,19 +609,10 @@ def _emit_frag_smem_load(
 
 def _choose_load_vec(spec: ImplicitGemmConvSpec) -> int:
     """Pick the largest fp16 load vector width that divides the K tile and
-    distributes evenly over `block_size` threads. Same rule as GEMM."""
-    threads = spec.block_size
-    for v in (8, 4, 2, 1):
-        if spec.tile_k % v:
-            continue
-        a_vecs = (spec.tile_m * spec.tile_k) // v
-        b_vecs = (spec.tile_n * spec.tile_k) // v
-        if a_vecs < threads or b_vecs < threads:
-            continue
-        if a_vecs % threads or b_vecs % threads:
-            continue
-        return v
-    raise ValueError(f"no usable load_vec for {spec}")
+    distributes evenly over `block_size` threads. Same rule as GEMM.
+
+    Thin adapter over the shared :func:`ck_dsl.helpers.spec.choose_load_vec`."""
+    return choose_load_vec(spec.tile_m, spec.tile_n, spec.tile_k, spec.block_size)
 
 
 def build_implicit_gemm_conv(
@@ -694,6 +687,8 @@ def build_implicit_gemm_conv(
     tid = grid.tid
     lane = grid.lane
     warp_id = grid.warp_id
+    # The mfma cshuffle/direct epilogues consume warp_m_idx/warp_n_idx via the
+    # bound ``grid``; the WMMA direct epilogue still takes them explicitly.
     warp_m_idx = grid.warp_m_idx
     warp_n_idx = grid.warp_n_idx
 
@@ -1144,20 +1139,16 @@ def build_implicit_gemm_conv(
         )
 
     # ---- epilogue ----
+    # Both ``DirectEpilogue`` and ``CShuffleEpilogue`` consume the bound
+    # :class:`WarpGrid`, which carries the per-warp / per-block / per-lane
+    # SSA values plus the tile origins. The conv-specific bit is the
+    # D-descriptor address callback.
     if spec.epilogue == "cshuffle":
-        _emit_cshuffle_epilogue(
-            b,
-            spec,
-            final_accs,
-            warp_m_idx,
-            warp_n_idx,
-            lane,
-            block_m_off_v,
-            block_n_off_v,
-            d_rsrc,
-            c0,
-        )
+        _emit_cshuffle_epilogue(b, spec, final_accs, grid, d_rsrc)
     elif op.family == "wmma":
+        # WMMA (RDNA) direct epilogue still uses the explicit per-warp/lane
+        # decomposition (it predates the helper-based path); pass the bound
+        # grid's components.
         _emit_direct_epilogue_wmma(
             b,
             spec,
@@ -1172,18 +1163,7 @@ def build_implicit_gemm_conv(
             c0,
         )
     else:
-        _emit_direct_epilogue(
-            b,
-            spec,
-            final_accs,
-            warp_m_idx,
-            warp_n_idx,
-            lane,
-            block_m_off_v,
-            block_n_off_v,
-            d_rsrc,
-            c0,
-        )
+        _emit_direct_epilogue(b, spec, final_accs, grid, d_rsrc)
     return b.kernel
 
 
@@ -1196,67 +1176,31 @@ def _emit_direct_epilogue(
     b: IRBuilder,
     spec: ImplicitGemmConvSpec,
     accs: Sequence[Value],
-    warp_m_idx: Value,
-    warp_n_idx: Value,
-    lane: Value,
-    block_m_off: Value,
-    block_n_off: Value,
+    grid: WarpGrid,
     d_rsrc: Value,
-    c0: Value,
 ) -> None:
     """Per-lane scalar-fp16 store driven by the D descriptor DAG.
 
-    The accumulator layout for a 16x16 atom (the bake-off baseline)
-    is per-lane: lane = m_blk * 16 + n_in_atom with m_blk = lane / 16
-    and the 4 floats in acc map to rows (m_blk * 4 + i) for i=0..3,
-    column n_in_atom. We then ask the D descriptor for the final
-    NHWK linear offset and store there with a per-lane bounds check
-    on m < M and (n + n_in_atom) < N.
+    Delegates to :class:`ck_dsl.helpers.epilogues.DirectEpilogue`,
+    which owns the per-(mi, ni)-atom + per-``c_per_lane``-slot lane
+    loop and the OOB-sentinel address routing. The conv-specific
+    bit is the ``addr_fn``: the D descriptor maps
+    ``(m, k_out) -> NHWK linear element offset`` via the
+    coordinate-transform DAG.
     """
     p = spec.problem
-    atom = spec.atom
-    mfmas_m = spec.mfmas_per_warp_m
-    mfmas_n = spec.mfmas_per_warp_n
-
-    warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * spec.warp_tile_m))
-    warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * spec.warp_tile_n))
-
-    c_M = b.const_i32(p.M)
-    c_N = b.const_i32(p.N_gemm)
     D_desc = make_d_descriptor(p)
 
-    flat = 0
-    for mi in range(mfmas_m):
-        for ni in range(mfmas_n):
-            acc = accs[flat]
-            flat += 1
-            atom_m_off = b.add(
-                b.add(block_m_off, warp_m_off),
-                b.const_i32(mi * spec.warp_tile_m),
-            )
-            atom_n_off = b.add(
-                b.add(block_n_off, warp_n_off),
-                b.const_i32(ni * spec.warp_tile_n),
-            )
-            for i in range(atom.c_per_lane):
-                row_off, col_off = atom.lane_to_output(b, lane, i)
-                m_val = b.add(atom_m_off, row_off)
-                n_val = b.add(atom_n_off, col_off)
-                m_ok = b.cmp_lt(m_val, c_M)
-                n_ok = b.cmp_lt(n_val, c_N)
-                ok = b.land(m_ok, n_ok)
+    def d_addr(b_: IRBuilder, m_val: Value, n_val: Value):
+        return D_desc.offset(b_, m=m_val, k_out=n_val)
 
-                v_f32 = b.vec_extract(acc, i)
-                v_f16 = b.trunc_f32_to_f16(v_f32)
-
-                d_off_elems, _ = D_desc.offset(b, m=m_val, k_out=n_val)
-                d_off_bytes = b.mul(d_off_elems, b.const_i32(2))
-                # CK Tile direct-epilogue trick: OOB byte offsets are
-                # silently dropped by the buffer rsrc (see
-                # `cktile_fixed_lean_kernel.hpp`:
-                # `b_offs[bi] = valid ? real_off_b : 0x80000000`).
-                safe_off = b.select(ok, d_off_bytes, b.const_i32((1 << 31) - 1))
-                b.buffer_store_f16(d_rsrc, safe_off, c0, v_f16)
+    DirectEpilogue(atom=spec.atom, grid=grid).store(
+        b,
+        accs=accs,
+        addr_fn=d_addr,
+        d_rsrc=d_rsrc,
+        bounds=(b.const_i32(p.M), b.const_i32(p.N_gemm)),
+    )
 
 
 def _emit_direct_epilogue_wmma(
@@ -1327,171 +1271,42 @@ def _emit_cshuffle_epilogue(
     b: IRBuilder,
     spec: ImplicitGemmConvSpec,
     accs: Sequence[Value],
-    warp_m_idx: Value,
-    warp_n_idx: Value,
-    lane: Value,
-    block_m_off: Value,
-    block_n_off: Value,
+    grid: WarpGrid,
     d_rsrc: Value,
-    c0: Value,
 ) -> None:
     """LDS-staged cshuffle epilogue — the runbook §9.3 lever.
 
-    Three-stage pattern (mirrors CK Tile's `cshuffle_epilogue.hpp`):
+    Delegates to :class:`ck_dsl.helpers.epilogues.CShuffleEpilogue`,
+    which implements the canonical three-stage pattern (mirrors CK
+    Tile's ``cshuffle_epilogue.hpp``):
+
       1. Each lane converts its `<c_per_lane x f32>` accumulator to
-         `<c_per_lane x f16>` and stores them into an `[tile_m x
-         tile_n]` LDS region at the MFMA *output* layout
-         (`row = warp_m_off + atom_m_off + lane_to_output_row`,
-         `col = warp_n_off + atom_n_off + n_in_atom`). Each scalar
-         store is a single `ds_write_b16`.
-      2. `block_sync_lds` (s_barrier).
+         `<c_per_lane x f16>` and stores them into an
+         `[tile_m x tile_n]` LDS region at the MFMA *output* layout.
+      2. ``block_sync_lds`` (s_barrier).
       3. A flat distribution of `block_size` threads reads
          `<store_vec x f16>` from LDS at consecutive row-major
-         positions, computes the NHWK output address via the same
-         D descriptor (so an output that lives at (m=M_tile_off+r,
-         k_out=N_tile_off+c*store_vec)) and issues one
+         positions and issues one
          `<store_vec x f16>` buffer_store_short_or_b{32,64,128}.
 
-    The win over the direct epilogue:
-      - Direct: every lane writes 4 scalar fp16's at MFMA-layout
-        positions. Adjacent lanes are 16 columns apart in N
-        (within the same M row), so the writes are NOT coalesced.
-      - Cshuffle: 256 threads each write `store_vec` (typically 8)
-        contiguous halves of the OUTPUT layout. One wide store per
-        thread, perfectly coalesced.
+    For the bake-off shape (block_m=64, block_n=64, block_size=256,
+    store_vec=8) this swaps 4096 scalar fp16 stores per block for
+    512 wide-aligned 16-byte stores — same bytes, fully coalesced.
 
-    Concretely for the bake-off shape (block_m=64, block_n=64,
-    block_size=256, store_vec=8): the direct epilogue issues
-    `4 atoms * 4 slots = 16` scalar `buffer_store_short` per thread
-    = 4096 stores/block. Cshuffle issues `64*64/8/256 = 2` wide
-    stores per thread = 512 wide stores/block. Each store moves 16
-    bytes contiguously, so we go from 4096*2 = 8 KB written via
-    scalar stores to 512*16 = 8 KB written via wide stores —
-    *same bytes but wide-aligned, fully coalesced*.
+    The conv-specific bit is the ``addr_fn``: the D descriptor maps
+    ``(m, k_out) -> NHWK linear element offset`` via the
+    coordinate-transform DAG.
     """
     p = spec.problem
-    t = spec
-    atom = spec.atom
-    mfmas_m = spec.mfmas_per_warp_m
-    mfmas_n = spec.mfmas_per_warp_n
-
-    warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * spec.warp_tile_m))
-    warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * spec.warp_tile_n))
-
-    # Step 1: stage accumulators in LDS at the MFMA output layout.
-    # tile_m * tile_n halves of LDS staging.
-    C_smem = b.smem_alloc(F16, [t.tile_m, t.tile_n], name_hint="C_smem")
-
-    is_32x32 = (spec.warp_tile_m, spec.warp_tile_n) == (32, 32)
-
-    if is_32x32:
-        c_atom_n = b.const_i32(spec.warp_tile_n)
-        n_in_atom = b.mod(lane, c_atom_n)
-        m_blk = b.div(lane, c_atom_n)
-        flat = 0
-        for mi in range(mfmas_m):
-            for ni in range(mfmas_n):
-                acc = accs[flat]
-                flat += 1
-                acc_h = b.vec_trunc_f32_to_f16(acc)
-                ld_n = b.add(
-                    b.add(warp_n_off, b.const_i32(ni * spec.warp_tile_n)),
-                    n_in_atom,
-                )
-                for i in range(atom.c_per_lane):
-                    rb = i // 4
-                    ri = i % 4
-                    m_off = b.add(
-                        b.add(b.const_i32(rb * 8), b.mul(m_blk, b.const_i32(4))),
-                        b.const_i32(ri),
-                    )
-                    ld_m = b.add(
-                        b.add(warp_m_off, b.const_i32(mi * spec.warp_tile_m)),
-                        m_off,
-                    )
-                    h = b.vec_extract(acc_h, i)
-                    b.smem_store_f16(C_smem, [ld_m, ld_n], h)
-    else:
-        c_atom_n = b.const_i32(spec.warp_tile_n)
-        c_clen = b.const_i32(atom.c_per_lane)
-        n_in_atom = b.mod(lane, c_atom_n)
-        m_blk = b.div(lane, c_atom_n)
-        m_base = b.mul(m_blk, c_clen)
-        flat = 0
-        for mi in range(mfmas_m):
-            for ni in range(mfmas_n):
-                acc = accs[flat]
-                flat += 1
-                acc_h = b.vec_trunc_f32_to_f16(acc)
-                ld_n = b.add(
-                    b.add(warp_n_off, b.const_i32(ni * spec.warp_tile_n)),
-                    n_in_atom,
-                )
-                for i in range(atom.c_per_lane):
-                    m_off = b.add(m_base, b.const_i32(i))
-                    ld_m = b.add(
-                        b.add(warp_m_off, b.const_i32(mi * spec.warp_tile_m)),
-                        m_off,
-                    )
-                    h = b.vec_extract(acc_h, i)
-                    b.smem_store_f16(C_smem, [ld_m, ld_n], h)
-
-    # Step 2: barrier.
-    b.sync()
-
-    # Step 3: wide global stores. We pick the widest `store_vec` that
-    # the tile_n divides and the block_size can evenly distribute.
-    threads = spec.block_size
-    store_vec = 8
-    while store_vec > 1:
-        if (
-            spec.tile_n % store_vec == 0
-            and (spec.tile_m * spec.tile_n) // store_vec >= threads
-            and ((spec.tile_m * spec.tile_n) // store_vec) % threads == 0
-        ):
-            break
-        store_vec //= 2
-
-    tid = b.thread_id_x()
-    c_threads = b.const_i32(threads)
-    c_tile_n_div_vec = b.const_i32(spec.tile_n // store_vec)
-    vecs_per_thread = (spec.tile_m * spec.tile_n // store_vec) // threads
-
     D_desc = make_d_descriptor(p)
-    c_M = b.const_i32(p.M)
-    c_N = b.const_i32(p.N_gemm)
-    c_half_bytes = b.const_i32(2)
 
-    for e in range(vecs_per_thread):
-        vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-        row = b.div(vec_idx, c_tile_n_div_vec)
-        col_v = b.mod(vec_idx, c_tile_n_div_vec)
-        col = b.mul(col_v, b.const_i32(store_vec)) if store_vec > 1 else col_v
+    def d_addr(b_: IRBuilder, m_val: Value, n_val: Value):
+        return D_desc.offset(b_, m=m_val, k_out=n_val)
 
-        m_val = b.add(block_m_off, row)
-        n_val = b.add(block_n_off, col)
-        m_ok = b.cmp_lt(m_val, c_M)
-        # The store is wide, so we need the whole `store_vec`-wide range
-        # to be in-bounds. `n + store_vec - 1 < N` ↔ `n + store_vec <= N`.
-        n_end = b.add(n_val, b.const_i32(store_vec))
-        n_ok = b.cmp_le(n_end, c_N)
-        ok = b.land(m_ok, n_ok)
-
-        d_off_elems, _ = D_desc.offset(b, m=m_val, k_out=n_val)
-        d_off_bytes = b.mul(d_off_elems, c_half_bytes)
-        safe_off = b.select(ok, d_off_bytes, b.const_i32((1 << 31) - 1))
-
-        if store_vec == 1:
-            # Pathological fallback — single half load + scalar store.
-            v = b.smem_load_vN_f16(C_smem, row, col, n=2)
-            h = b.vec_extract(v, 0)
-            b.buffer_store_f16(d_rsrc, safe_off, c0, h)
-        else:
-            v = (
-                b.smem_load_v4_f16(C_smem, row, col)
-                if store_vec == 4
-                else b.smem_load_vN_f16(C_smem, row, col, n=store_vec)
-            )
-            # buffer_store_vN_f16 dwords = store_vec / 2
-            dwords = store_vec // 2
-            b.buffer_store_vN_f16(d_rsrc, safe_off, c0, v, dwords)
+    CShuffleEpilogue.from_grid(atom=spec.atom, grid=grid).store(
+        b,
+        accs=accs,
+        addr_fn=d_addr,
+        d_rsrc=d_rsrc,
+        bounds=(b.const_i32(p.M), b.const_i32(p.N_gemm)),
+    )

@@ -59,6 +59,7 @@ from ..core.ir import F16, BF16, IRBuilder, Value
 from .atoms import MfmaAtom
 from .attention import (
     apply_attention_mask,
+    safe_inv_l,
     wave_reduce_max,
     wave_reduce_stages,
     wave_reduce_sum,
@@ -810,10 +811,7 @@ def mfma_attention_fwd_inner_body(
             # would poison the output; force ``inv_l = 0`` for the
             # zero case so the contribution evaluates to ``acc * 0
             # == 0`` (the intended "no attention" output).
-            l_safe = ls_final[r]
-            zero_mask = b.fcmp("oeq", l_safe, b.const_f32(0.0))
-            inv_l_raw = b.rcp(l_safe)
-            inv_l = b.select(zero_mask, b.const_f32(0.0), inv_l_raw)
+            inv_l = safe_inv_l(b, ls_final[r])
             v_f32 = b.fmul(b.vec_extract(accs_final[n_blk_atom], r), inv_l)
             if v_scale is not None:
                 v_f32 = b.fmul(v_f32, v_scale)

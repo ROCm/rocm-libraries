@@ -57,7 +57,7 @@ from ...helpers.fuse import (
     dtype_to_ir,
     ir_dtype_global_load,
 )
-from ...helpers.spec import SignatureBuilder, kernel_name_join
+from ...helpers.spec import SignatureBuilder, ceil_div_grid, kernel_name_join
 from .gemm_universal import (
     DataSpec,
     TileSpec,
@@ -480,9 +480,8 @@ def gemm_multi_d_signature(spec: GemmMultiDSpec):
 def gemm_multi_d_grid(spec: GemmMultiDSpec, m: int, n: int, batch: int = 1):
     """Same grid as :func:`build_universal_gemm`: ``(N_tiles, M_tiles, batch)``."""
     t = spec.base.tile
-    nx = (n + t.tile_n - 1) // t.tile_n
-    ny = (m + t.tile_m - 1) // t.tile_m
-    return (nx, ny, batch if spec.base.batched else 1)
+    z = batch if spec.base.batched else 1
+    return ceil_div_grid((n, t.tile_n), (m, t.tile_m), (z, 1))
 
 
 __all__ = [

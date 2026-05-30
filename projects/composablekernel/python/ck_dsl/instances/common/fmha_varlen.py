@@ -107,6 +107,27 @@ def is_valid_spec(spec: FmhaFwdVarlenSpec, arch: str = "gfx950") -> Tuple[bool, 
     return True, "ok"
 
 
+def _declare_params(kb: FmhaKernelBuilder) -> None:
+    """Declare the varlen FMHA-fwd kernel ABI (shared between build + sig).
+
+    Single-sources the param list so the build path and the signature
+    probe can't drift. The ``readonly`` / ``writeonly`` alias hints
+    affect only the emitted param attributes (not the signature shape,
+    which :meth:`FmhaKernelBuilder.signature` derives from the param
+    *order*), so the same declaration is reused verbatim by both.
+    """
+    kb.add_tensor("Q", readonly=True)
+    kb.add_tensor("K", readonly=True)
+    kb.add_tensor("V", readonly=True)
+    kb.add_tensor("O", readonly=False, writeonly=True)
+    kb.add_ptr("cu_seqlens_q", dtype="i32")
+    kb.add_ptr("cu_seqlens_k", dtype="i32")
+    kb.add_scalar("scale_log2", "f32")
+    kb.add_scalar("total_q", "i32")
+    kb.add_scalar("batch", "i32")
+    kb.add_strides("q", "k", "v", "o")
+
+
 def build_fmha_fwd_varlen(spec: FmhaFwdVarlenSpec, arch: str = "gfx950"):
     """Varlen FMHA forward kernel (MFMA-tiled body).
 
@@ -124,16 +145,7 @@ def build_fmha_fwd_varlen(spec: FmhaFwdVarlenSpec, arch: str = "gfx950"):
     kb = FmhaKernelBuilder(spec.kernel_name(), s)
     # MFMA: one wave64 warp per CTA.
     kb.block_size(64)
-    kb.add_tensor("Q", readonly=True)
-    kb.add_tensor("K", readonly=True)
-    kb.add_tensor("V", readonly=True)
-    kb.add_tensor("O", readonly=False, writeonly=True)
-    kb.add_ptr("cu_seqlens_q", dtype="i32")
-    kb.add_ptr("cu_seqlens_k", dtype="i32")
-    kb.add_scalar("scale_log2", "f32")
-    kb.add_scalar("total_q", "i32")
-    kb.add_scalar("batch", "i32")
-    kb.add_strides("q", "k", "v", "o")
+    _declare_params(kb)
     kb.decode_grid()
 
     b = kb.builder
@@ -235,14 +247,5 @@ def fmha_fwd_varlen_signature(spec: FmhaFwdVarlenSpec):
     # This keeps the signature contract single-sourced from the
     # builder so the spec and the build function can't drift.
     kb = FmhaKernelBuilder("ck_dsl_fmha_fwd_varlen_sig_probe", spec.common)
-    kb.add_tensor("Q")
-    kb.add_tensor("K")
-    kb.add_tensor("V")
-    kb.add_tensor("O")
-    kb.add_ptr("cu_seqlens_q", dtype="i32")
-    kb.add_ptr("cu_seqlens_k", dtype="i32")
-    kb.add_scalar("scale_log2", "f32")
-    kb.add_scalar("total_q", "i32")
-    kb.add_scalar("batch", "i32")
-    kb.add_strides("q", "k", "v", "o")
+    _declare_params(kb)
     return kb.signature()

@@ -62,6 +62,8 @@ from ...helpers.mfma_gemm_inner import (
     load_a_row_major_contiguous,
     load_b_col_strided_scalars,
     store_acc_to_global,
+    validate_arch_and_block_size,
+    validate_mfma_atom_in_catalog,
 )
 from ...helpers.mx_scale import decode_mx_scale_e8m0
 from ...helpers.quant import quant_ir_type
@@ -138,12 +140,9 @@ def is_valid_spec(spec: MxGemmSpec, arch: str = "gfx950") -> Tuple[bool, str]:
     fp6 mantissa families that genuinely require the gfx950-only MX MFMA
     intrinsics.
     """
-    from ...core.arch import ArchTarget
-
-    try:
-        target = ArchTarget.from_gfx(arch)
-    except KeyError as e:
-        return False, str(e)
+    ok, reason, _target = validate_arch_and_block_size(arch, spec.block_size)
+    if not ok:
+        return False, reason
 
     if spec.mantissa_dtype not in ("fp8e4m3", "bf8e5m2"):
         return False, (
@@ -164,40 +163,7 @@ def is_valid_spec(spec: MxGemmSpec, arch: str = "gfx950") -> Tuple[bool, str]:
             f"mx_gemm MFMA path supports 16x16 tiles only "
             f"(got {spec.block_tile_m}x{spec.block_tile_n})"
         )
-    if spec.block_size > target.max_threads_per_block:
-        return False, (
-            f"block_size {spec.block_size} > {target.max_threads_per_block} "
-            f"(hardware cap) on {arch}"
-        )
     return True, "ok"
-
-
-def _validate_mx_atom(atom: MfmaAtom, arch: str) -> None:
-    """Guard the selected MFMA atom against the per-arch MMA catalog.
-
-    The fp8 / bf8 ``16x16x32`` atom this kernel uses ships on both gfx942
-    and gfx950, so this is a no-op on the supported mantissas. The guard
-    exists so any future gfx950-only mantissa (fp4 / fp6) raises a clean
-    Python error *before* IR/compile instead of letting a gfx950-only
-    intrinsic reach comgr (an uncatchable ``LLVM ERROR`` process abort).
-    """
-    from ...core.arch import ArchTarget
-
-    target = ArchTarget.from_gfx(arch)
-    if not target.mma.has_shape(
-        a_dtype=atom.dtype_in,
-        b_dtype=atom.dtype_in,
-        c_dtype=atom.dtype_out,
-        m=atom.m,
-        n=atom.n,
-        k=atom.k,
-    ):
-        raise NotImplementedError(
-            f"mx_gemm MFMA atom {atom.name!r} "
-            f"({atom.dtype_in} {atom.m}x{atom.n}x{atom.k}) is not in the "
-            f"{arch} MMA catalog; this configuration requires a different "
-            f"target."
-        )
 
 
 def build_mx_gemm(spec: MxGemmSpec, arch: str = "gfx950") -> KernelDef:
@@ -224,7 +190,7 @@ def build_mx_gemm(spec: MxGemmSpec, arch: str = "gfx950") -> KernelDef:
     ok, why = is_valid_spec(spec, arch=arch)
     if not ok:
         raise ValueError(f"invalid mx_gemm spec for {arch}: {why}")
-    _validate_mx_atom(spec.atom, arch)
+    validate_mfma_atom_in_catalog(spec.atom, arch, where="mx_gemm")
 
     mantissa_ty = quant_ir_type(spec.mantissa_dtype)
     BS = spec.block_size

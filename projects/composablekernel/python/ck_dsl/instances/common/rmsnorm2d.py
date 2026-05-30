@@ -25,11 +25,11 @@ visible delta vs the C++ reference is essentially three lines of code.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, List, Literal, Tuple
+from typing import Literal, Tuple
 
-from ...core.ir import F32, I32, IRBuilder, KernelDef, PtrType, Value
+from ...core.ir import F32, I32, IRBuilder, KernelDef, PtrType
 from ...helpers.io import io_ir_type, store_scalar_from_f32
-from ...helpers.reduction import block_lds_reduce
+from ...helpers.reduction import block_lds_reduce, tree_reduce
 from ...helpers.spec import (
     IOSpecRule,
     SignatureBuilder,
@@ -47,38 +47,6 @@ from ...helpers.tensor_view import (
 
 
 DType = Literal["f16", "bf16"]
-
-
-def _balanced_combine(
-    values: List[Value], combine: Callable[[Value, Value], Value]
-) -> Value:
-    """Balanced-tree fold of ``values`` under ``combine``.
-
-    The per-chunk accumulator for the sum-of-squares is the latency
-    hot-spot of the pass-1 inner loop: a serial ``fadd(fadd(fadd(s, x0),
-    x1), ...)`` chain has critical-path depth ``len(values)`` because
-    IEEE-754 ``fadd`` is non-associative (the LLVM ``reassoc`` fastmath
-    flag is *not* set on the DSL's ``arith.fadd``; see
-    ``core/lower_llvm.py::_op_arith_fadd``). Emitting an explicit
-    balanced tree drops the depth to ``ceil(log2(len(values)))``,
-    matching the latency profile a programmer expects from a
-    ``sum(...)`` reduction without sacrificing strict IEEE rounding
-    (the *tree* rounding is still deterministic and lies well inside
-    the CK Tile parity tolerance of 2.5e-3 for f16 outputs).
-    """
-    if not values:
-        raise ValueError("_balanced_combine requires at least one value")
-    cur = list(values)
-    while len(cur) > 1:
-        nxt: List[Value] = []
-        i = 0
-        while i + 1 < len(cur):
-            nxt.append(combine(cur[i], cur[i + 1]))
-            i += 2
-        if i < len(cur):
-            nxt.append(cur[i])
-        cur = nxt
-    return cur[0]
 
 
 @dataclass(frozen=True)
@@ -214,7 +182,7 @@ def build_rmsnorm2d(spec: RMSNorm2DSpec) -> KernelDef:
     def pass1_body(_n_off, x_scalars):
         nonlocal s2
         chunk_sq = [b.fmul(xi, xi) for xi in x_scalars]
-        s2 = b.fadd(s2, _balanced_combine(chunk_sq, b.fadd))
+        s2 = b.fadd(s2, tree_reduce(b, b.fadd, chunk_sq))
 
     sweep_res = sweep_row_chunks(
         b,

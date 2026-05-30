@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
 from ...core.ir import F32, I32, IRBuilder, KernelDef, PtrType, Value
+from ...helpers.spec import choose_load_vec
 from ...helpers.tensor_view import (
     TensorDescriptor,
     TensorView,
@@ -43,7 +44,6 @@ from .gemm_universal import (
     TileSpec,
     TraitSpec,
     UniversalGemmSpec,
-    _choose_load_vec,
     _emit_mfma,
     _emit_smem_load,
     _emit_zero_acc,
@@ -69,6 +69,420 @@ __all__ = [
     "moe_interleaved_gate_up_silu_gemm_grid",
     "moe_interleaved_gate_up_silu_gemm_signature",
 ]
+
+
+def _vec_rowcol(
+    b: IRBuilder,
+    e: int,
+    tid: Value,
+    c_threads: Value,
+    c_block_k_div_vec: Value,
+    c_load_vec: Value,
+    load_vec: int,
+) -> Tuple[Value, Value]:
+    """Decode the per-thread (row, col) for vec-load element ``e``.
+
+    Emits the same 3-4 ops in the same order as every inline copy of the
+    global-load / LDS-store vec-index decode in the three GEMM builders.
+    """
+    vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
+    row = b.div(vec_idx, c_block_k_div_vec)
+    col_v = b.mod(vec_idx, c_block_k_div_vec)
+    col = b.mul(col_v, c_load_vec) if load_vec > 1 else col_v
+    return row, col
+
+
+def _silu_mul_f32(
+    b: IRBuilder,
+    g: Value,
+    u: Value,
+    *,
+    one_f32: Value,
+    c_neg_log2e: Value,
+) -> Value:
+    """Emit the f32 SwiGLU chain ``silu(g) * u`` (sigmoid via exp2).
+
+    Same op order as the inline silu sites: ``sig = rcp(1 + exp2(-x*log2e))``,
+    ``silu = g*sig``, ``out = silu*u``. Constants are caller-supplied so the
+    emitted SSA matches the existing inline order exactly.
+    """
+    sig = b.rcp(b.fadd(one_f32, b.exp2(b.fmul(c_neg_log2e, g))))
+    silu = b.fmul(g, sig)
+    return b.fmul(silu, u)
+
+
+def _pad_in_bounds(
+    b: IRBuilder,
+    c_m: Value,
+    c_n: Value,
+    M: Value,
+    N: Value,
+    *,
+    pad_m: bool,
+    pad_n: bool,
+    vec: int,
+) -> Optional[Value]:
+    """Build the epilogue store-mask predicate, or ``None`` when unpadded.
+
+    Emits the same ``cmp_lt`` / ``land`` op stream as the inline pad-mask
+    sites: an optional ``c_m < M`` check and an optional last-column check
+    (``c_n + (vec-1) < N`` for vec>1, else ``c_n < N``), combined with
+    ``land`` when both are present.
+    """
+    if not (pad_m or pad_n):
+        return None
+    checks = []
+    if pad_m:
+        checks.append(b.cmp_lt(c_m, M))
+    if pad_n:
+        if vec == 1:
+            checks.append(b.cmp_lt(c_n, N))
+        else:
+            c_n_last = b.add(c_n, b.const_i32(vec - 1))
+            checks.append(b.cmp_lt(c_n_last, N))
+    return checks[0] if len(checks) == 1 else b.land(checks[0], checks[1])
+
+
+# ---------------------------------------------------------------------
+# Shared MoE MFMA k-loop core
+# ---------------------------------------------------------------------
+#
+# The three MoE GEMM fusions (gate+up+silu, interleaved gate+up+silu,
+# down+reduce) drive the *same* software-prefetched MFMA k-loop: load tile 0
+# into registers before the loop, then each iteration (a) stores the
+# prefetched regs into single-buffered LDS, (b) syncs, (c) issues the *next*
+# tile's clamped global loads (in flight during the MFMAs), (d) runs the
+# per-K-tile MFMA stream from LDS, (e) syncs, and (f) yields accumulators +
+# prefetch regs for the next trip. They differ only in (i) how many B operands
+# the loader streams (1 for interleaved / down, 2 for gate+up which shares one
+# A read across W_gate and W_up), (ii) how many accumulator groups the MFMA
+# feeds, and (iii) the optional ``preshuffle_b`` global-offset arithmetic for
+# the single-B interleaved path. They share an identical LDS load (A) and store
+# (A + every B) decode and an identical per-(mi, ni, kk) MFMA schedule.
+#
+# These helpers promote that shared loader / k-loop core to module level,
+# parameterised by an :class:`_MoeOperand` list (one entry per B matrix, each
+# bound to its accumulator group and LDS staging buffer). Each MoE builder
+# wires its operands + custom epilogue and calls :func:`_emit_moe_prefetch_kloop`.
+# This is a numerically-equivalent (Tier-2) rewrite: the emitted SSA temporary
+# order can differ from the prior hand-inlined copies, but every read is from a
+# distinct ``noalias`` pointer so the loads/MFMAs/stores compute identical
+# results.
+
+
+@dataclass
+class _MoeOperand:
+    """One B matrix of a MoE GEMM fusion, bound to its LDS + accumulator group.
+
+    ``global_view`` / ``lds_view`` are the 3D global and 2D LDS
+    :class:`TensorView`s; ``smem`` is the raw LDS allocation the MFMA reads
+    from. ``load_b`` is an optional per-element loader override
+    ``(b, e, k_off, row, col) -> Value`` used by the ``preshuffle_b`` path
+    (whose global offset is not the canonical strided window load); when
+    ``None`` the canonical ``lds_view``-window vec/scalar load is used.
+    ``store_scalar_ok`` is ``False`` for the interleaved preshuffle path, whose
+    LDS store is always vectorised even when ``load_vec == 1`` is otherwise
+    scalar.
+    """
+
+    global_view: object
+    lds_view: object
+    smem: Value
+    load_b: Optional[object] = None
+    store_scalar_ok: bool = True
+
+
+class _MoeKloopPlan:
+    """Static per-kernel geometry shared by the loader / store / MFMA helpers.
+
+    Built once per builder; carries the spec-derived counts and the hoisted i32
+    constants every phase needs so the three phases stay in lock-step.
+    """
+
+    def __init__(self, b: IRBuilder, u: UniversalGemmSpec, tid: Value) -> None:
+        t = u.tile
+        self.b = b
+        self.u = u
+        self.tid = tid
+        self.t = t
+        self.storage_dtype = _storage_dtype(u)
+        self.a_per_lane, self.b_per_lane, self.c_per_lane = _mfma_atom_widths(u)
+        self.block_m = t.tile_m
+        self.block_n = t.tile_n
+        self.block_k = t.tile_k
+        self.mfmas_m = t.mfmas_per_warp_m
+        self.mfmas_n = t.mfmas_per_warp_n
+        self.k_atoms = t.k_atoms_per_tile_k
+
+        threads = u.block_size
+        load_vec = choose_load_vec(t.tile_m, t.tile_n, t.tile_k, u.block_size)
+        self.threads = threads
+        self.load_vec = load_vec
+        self.a_vecs_per_thread = (self.block_m * self.block_k) // load_vec // threads
+        self.b_vecs_per_thread = (self.block_n * self.block_k) // load_vec // threads
+        self.c_threads = b.const_i32(threads)
+        self.c_load_vec = b.const_i32(load_vec)
+        self.c_block_k_div_vec = b.const_i32(self.block_k // load_vec)
+
+    def _rowcol(self, e: int) -> Tuple[Value, Value]:
+        return _vec_rowcol(
+            self.b,
+            e,
+            self.tid,
+            self.c_threads,
+            self.c_block_k_div_vec,
+            self.c_load_vec,
+            self.load_vec,
+        )
+
+
+def _emit_moe_global_load(
+    plan: _MoeKloopPlan,
+    a_view: object,
+    a_mn_origin: Tuple[Value, Value],
+    operands: List[_MoeOperand],
+    b_mn_origin: Tuple[Value, Value],
+    k_off: Value,
+) -> Tuple[List[Value], List[List[Value]]]:
+    """Coalesced global -> register load of the A tile and every B operand.
+
+    Returns ``(a_regs, [b_regs per operand])``. ``a_mn_origin`` /
+    ``b_mn_origin`` are the ``(batch_off, block_mn_off)`` origin prefixes; the
+    per-call ``k_off`` is the K-axis origin. The A read is shared across all
+    operands (W_gate / W_up reuse the same A tile); each B operand either uses
+    its ``load_b`` override (preshuffle) or the canonical strided window load.
+    """
+    b = plan.b
+    a_origin = (a_mn_origin[0], a_mn_origin[1], k_off)
+    b_origin = (b_mn_origin[0], b_mn_origin[1], k_off)
+    a_global = make_tile_window(
+        a_view, lengths=(1, plan.block_m, plan.block_k), origin=a_origin
+    )
+    a_regs: List[Value] = []
+    for e in range(plan.a_vecs_per_thread):
+        row, col = plan._rowcol(e)
+        if plan.load_vec == 1:
+            a_regs.append(a_global.load_scalar(b, b.const_i32(0), row, col))
+        else:
+            a_regs.append(
+                a_global.load_vec(b, b.const_i32(0), row, col, n=plan.load_vec)
+            )
+    b_reg_groups: List[List[Value]] = []
+    for op in operands:
+        regs: List[Value] = []
+        if op.load_b is not None:
+            for e in range(plan.b_vecs_per_thread):
+                row, col = plan._rowcol(e)
+                regs.append(op.load_b(b, e, k_off, row, col))
+        else:
+            b_global = make_tile_window(
+                op.global_view,
+                lengths=(1, plan.block_n, plan.block_k),
+                origin=b_origin,
+            )
+            for e in range(plan.b_vecs_per_thread):
+                row, col = plan._rowcol(e)
+                if plan.load_vec == 1:
+                    regs.append(b_global.load_scalar(b, b.const_i32(0), row, col))
+                else:
+                    regs.append(
+                        b_global.load_vec(b, b.const_i32(0), row, col, n=plan.load_vec)
+                    )
+        b_reg_groups.append(regs)
+    return a_regs, b_reg_groups
+
+
+def _emit_moe_lds_store(
+    plan: _MoeKloopPlan,
+    a_lds_view: object,
+    a_regs: List[Value],
+    operands: List[_MoeOperand],
+    b_reg_groups: List[List[Value]],
+) -> None:
+    """Store the prefetched A + B registers into single-buffered LDS."""
+    b = plan.b
+    z = (b.const_i32(0), b.const_i32(0))
+    a_lds = make_tile_window(a_lds_view, lengths=(plan.block_m, plan.block_k), origin=z)
+    for e in range(plan.a_vecs_per_thread):
+        row, col = plan._rowcol(e)
+        if plan.load_vec == 1:
+            a_lds.store_scalar(b, row, col, value=a_regs[e])
+        else:
+            a_lds.store_vec(b, row, col, value=a_regs[e], n=plan.load_vec)
+    for op, regs in zip(operands, b_reg_groups):
+        b_lds = make_tile_window(
+            op.lds_view, lengths=(plan.block_n, plan.block_k), origin=z
+        )
+        for e in range(plan.b_vecs_per_thread):
+            row, col = plan._rowcol(e)
+            if plan.load_vec == 1 and op.store_scalar_ok:
+                b_lds.store_scalar(b, row, col, value=regs[e])
+            else:
+                b_lds.store_vec(b, row, col, value=regs[e], n=plan.load_vec)
+
+
+def _emit_moe_mfma_phase(
+    plan: _MoeKloopPlan,
+    a_smem: Value,
+    operands: List[_MoeOperand],
+    acc_groups: List[List[Value]],
+    warp_m_idx: Value,
+    warp_n_idx: Value,
+    lane: Value,
+    *,
+    sched_groups: int,
+) -> List[List[Value]]:
+    """One K-tile of MFMAs, fed into every accumulator group.
+
+    ``operands[g]`` supplies the B fragments for ``acc_groups[g]`` (the A
+    fragments are loaded once and shared). For each ``(mi, ni)`` cell every
+    group's MFMA is emitted in operand order, matching the gate-then-up
+    interleave of the dual-B path. ``sched_groups`` is the MFMA-count argument
+    of the optional ``sched_group_barrier`` hint (0 disables it).
+    """
+    b = plan.b
+    t = plan.t
+    m_in_atom = b.mod(lane, b.const_i32(t.warp_tile_m))
+    k_blk = b.div(lane, b.const_i32(t.warp_tile_m))
+    n_in_atom = b.mod(lane, b.const_i32(t.warp_tile_n))
+    warp_m_off = b.mul(warp_m_idx, b.const_i32(plan.mfmas_m * t.warp_tile_m))
+    warp_n_off = b.mul(warp_n_idx, b.const_i32(plan.mfmas_n * t.warp_tile_n))
+
+    new_groups = [list(g) for g in acc_groups]
+    for kk in range(plan.k_atoms):
+        col_base = b.add(
+            b.mul(k_blk, b.const_i32(plan.a_per_lane)),
+            b.const_i32(kk * t.warp_tile_k),
+        )
+        a_rows = []
+        for mi in range(plan.mfmas_m):
+            a_row = b.add(warp_m_off, b.add(b.const_i32(mi * t.warp_tile_m), m_in_atom))
+            a_rows.append(
+                _emit_smem_load(
+                    b, a_smem, a_row, col_base, plan.a_per_lane, plan.storage_dtype
+                )
+            )
+        # B fragments: one column set per operand / accumulator group.
+        b_cols_per_op = []
+        for op in operands:
+            cols = []
+            for ni in range(plan.mfmas_n):
+                b_row = b.add(
+                    warp_n_off, b.add(b.const_i32(ni * t.warp_tile_n), n_in_atom)
+                )
+                cols.append(
+                    _emit_smem_load(
+                        b, op.smem, b_row, col_base, plan.b_per_lane, plan.storage_dtype
+                    )
+                )
+            b_cols_per_op.append(cols)
+        flat = 0
+        for mi in range(plan.mfmas_m):
+            for ni in range(plan.mfmas_n):
+                for gi in range(len(operands)):
+                    new_groups[gi][flat] = _emit_mfma(
+                        b,
+                        plan.u,
+                        a_rows[mi],
+                        b_cols_per_op[gi][ni],
+                        new_groups[gi][flat],
+                    )
+                flat += 1
+        if sched_groups and plan.u.trait.pipeline in ("compv3", "compv4"):
+            b.sched_group_barrier(0x100, 1, 0)
+            b.sched_group_barrier(0x008, sched_groups, 0)
+    return new_groups
+
+
+def _emit_moe_prefetch_kloop(
+    plan: _MoeKloopPlan,
+    a_view: object,
+    a_lds_view: object,
+    a_smem: Value,
+    a_mn_origin: Tuple[Value, Value],
+    operands: List[_MoeOperand],
+    b_mn_origin: Tuple[Value, Value],
+    acc_groups: List[List[Tuple[str, Value]]],
+    K: Value,
+    warp_m_idx: Value,
+    warp_n_idx: Value,
+    lane: Value,
+    *,
+    sched_groups: int,
+) -> List[List[Value]]:
+    """Drive the software-prefetched MFMA k-loop; return final accumulator groups.
+
+    ``acc_groups`` is one list of named ``(name, init)`` iter-arg tuples per B
+    operand. ``a_mn_origin`` / ``b_mn_origin`` are the
+    ``(batch_off, block_mn_off)`` origin prefixes (K-axis origin is the loop's
+    ``k0``). Loop-carries the next tile's A/B prefetch registers so the global
+    loads overlap the MFMA stream over a single LDS buffer.
+    """
+    b = plan.b
+    c0 = b.const_i32(0)
+    c_block_k = b.const_i32(plan.block_k)
+
+    a_pre0, b_pre0_groups = _emit_moe_global_load(
+        plan, a_view, a_mn_origin, operands, b_mn_origin, c0
+    )
+    n_a = len(a_pre0)
+    group_sizes = [len(g) for g in acc_groups]
+    n_b_per = [len(g) for g in b_pre0_groups]
+
+    carried: List[Tuple[str, Value]] = []
+    for g in acc_groups:
+        carried += list(g)
+    carried += [(f"a_pre{i}", v) for i, v in enumerate(a_pre0)]
+    for gi, regs in enumerate(b_pre0_groups):
+        carried += [(f"b{gi}_pre{i}", v) for i, v in enumerate(regs)]
+
+    for_op = b.scf_for_iter(c0, K, c_block_k, carried, iv_name="k0")
+    with for_op as (k0, iter_vars):
+        off = 0
+        cur_groups: List[List[Value]] = []
+        for sz in group_sizes:
+            cur_groups.append(list(iter_vars[off : off + sz]))
+            off += sz
+        a_regs = list(iter_vars[off : off + n_a])
+        off += n_a
+        b_reg_groups: List[List[Value]] = []
+        for sz in n_b_per:
+            b_reg_groups.append(list(iter_vars[off : off + sz]))
+            off += sz
+
+        _emit_moe_lds_store(plan, a_lds_view, a_regs, operands, b_reg_groups)
+        b.sync()
+        k_next = b.add(k0, c_block_k)
+        k_clamped = b.select(b.cmp_lt(k_next, K), k_next, k0)
+        a_next, b_next_groups = _emit_moe_global_load(
+            plan, a_view, a_mn_origin, operands, b_mn_origin, k_clamped
+        )
+        new_groups = _emit_moe_mfma_phase(
+            plan,
+            a_smem,
+            operands,
+            cur_groups,
+            warp_m_idx,
+            warp_n_idx,
+            lane,
+            sched_groups=sched_groups,
+        )
+        b.sync()
+        yielded: List[Value] = []
+        for g in new_groups:
+            yielded += g
+        yielded += a_next
+        for g in b_next_groups:
+            yielded += g
+        b.scf_yield(*yielded)
+
+    results = list(for_op.results)
+    out_groups: List[List[Value]] = []
+    off = 0
+    for sz in group_sizes:
+        out_groups.append(results[off : off + sz])
+        off += sz
+    return out_groups
 
 
 @dataclass(frozen=True)
@@ -182,18 +596,16 @@ def build_moe_gate_up_silu_gemm(
     stride_c = b.param("stride_c", I32)
 
     t = spec.tile
-    a_per_lane, b_per_lane, c_per_lane = _mfma_atom_widths(u)
+    _, _, c_per_lane = _mfma_atom_widths(u)
 
     block_m = t.tile_m
     block_n = t.tile_n
     block_k = t.tile_k
 
-    c0 = b.const_i32(0)
     c_wave = b.const_i32(spec.wave_size)
     c_warps_n = b.const_i32(t.warp_n)
     c_block_m = b.const_i32(block_m)
     c_block_n = b.const_i32(block_n)
-    c_block_k = b.const_i32(block_k)
 
     tid = b.thread_id_x()
     warp_id = b.div(tid, c_wave)
@@ -215,7 +627,6 @@ def build_moe_gate_up_silu_gemm(
 
     mfmas_m = t.mfmas_per_warp_m
     mfmas_n = t.mfmas_per_warp_n
-    k_atoms = t.k_atoms_per_tile_k
 
     acc_init = _emit_zero_acc(b, u)
     gate_accs = [
@@ -228,18 +639,6 @@ def build_moe_gate_up_silu_gemm(
         for mi in range(mfmas_m)
         for ni in range(mfmas_n)
     ]
-
-    threads = spec.block_size
-    load_vec = _choose_load_vec(u)
-    a_total = block_m * block_k
-    b_total = block_n * block_k
-    a_vec_total = a_total // load_vec
-    b_vec_total = b_total // load_vec
-    a_vecs_per_thread = a_vec_total // threads
-    b_vecs_per_thread = b_vec_total // threads
-    c_threads = b.const_i32(threads)
-    c_load_vec = b.const_i32(load_vec)
-    c_block_k_div_vec = b.const_i32(block_k // load_vec)
 
     a_view = make_global_view(
         A, shape=(1, 1, 1), dtype=storage_dtype, strides=(1, K, 1)
@@ -267,200 +666,36 @@ def build_moe_gate_up_silu_gemm(
         addr_space="lds",
     )
 
-    # Split global load (long-latency VMEM) from the LDS store so the
-    # k-loop can prefetch the *next* tile's global loads while the current
-    # tile's MFMAs run (software prefetch / register double-buffer). Same
-    # single-buffer LDS footprint, hides global-load latency behind MFMA.
-    def emit_global_load(k_off: Value) -> Tuple[List[Value], List[Value], List[Value]]:
-        a_global = make_tile_window(
-            a_view,
-            lengths=(1, block_m, block_k),
-            origin=(batch_off_a, block_m_off, k_off),
-        )
-        wg_global = make_tile_window(
-            wg_view,
-            lengths=(1, block_n, block_k),
-            origin=(batch_off_b, block_n_off, k_off),
-        )
-        wu_global = make_tile_window(
-            wu_view,
-            lengths=(1, block_n, block_k),
-            origin=(batch_off_b, block_n_off, k_off),
-        )
-        a_regs: List[Value] = []
-        g_regs: List[Value] = []
-        u_regs: List[Value] = []
-        for e in range(a_vecs_per_thread):
-            vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-            row = b.div(vec_idx, c_block_k_div_vec)
-            col_v = b.mod(vec_idx, c_block_k_div_vec)
-            col = b.mul(col_v, c_load_vec) if load_vec > 1 else col_v
-            if load_vec == 1:
-                a_regs.append(a_global.load_scalar(b, b.const_i32(0), row, col))
-            else:
-                a_regs.append(
-                    a_global.load_vec(b, b.const_i32(0), row, col, n=load_vec)
-                )
-        for e in range(b_vecs_per_thread):
-            vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-            row = b.div(vec_idx, c_block_k_div_vec)
-            col_v = b.mod(vec_idx, c_block_k_div_vec)
-            col = b.mul(col_v, c_load_vec) if load_vec > 1 else col_v
-            if load_vec == 1:
-                g_regs.append(wg_global.load_scalar(b, b.const_i32(0), row, col))
-                u_regs.append(wu_global.load_scalar(b, b.const_i32(0), row, col))
-            else:
-                g_regs.append(
-                    wg_global.load_vec(b, b.const_i32(0), row, col, n=load_vec)
-                )
-                u_regs.append(
-                    wu_global.load_vec(b, b.const_i32(0), row, col, n=load_vec)
-                )
-        return a_regs, g_regs, u_regs
-
-    def emit_lds_store(
-        a_regs: List[Value], g_regs: List[Value], u_regs: List[Value]
-    ) -> None:
-        a_lds = make_tile_window(
-            a_lds_view,
-            lengths=(block_m, block_k),
-            origin=(b.const_i32(0), b.const_i32(0)),
-        )
-        bg_lds = make_tile_window(
-            bg_lds_view,
-            lengths=(block_n, block_k),
-            origin=(b.const_i32(0), b.const_i32(0)),
-        )
-        bu_lds = make_tile_window(
-            bu_lds_view,
-            lengths=(block_n, block_k),
-            origin=(b.const_i32(0), b.const_i32(0)),
-        )
-        for e in range(a_vecs_per_thread):
-            vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-            row = b.div(vec_idx, c_block_k_div_vec)
-            col_v = b.mod(vec_idx, c_block_k_div_vec)
-            col = b.mul(col_v, c_load_vec) if load_vec > 1 else col_v
-            if load_vec == 1:
-                a_lds.store_scalar(b, row, col, value=a_regs[e])
-            else:
-                a_lds.store_vec(b, row, col, value=a_regs[e], n=load_vec)
-        for e in range(b_vecs_per_thread):
-            vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-            row = b.div(vec_idx, c_block_k_div_vec)
-            col_v = b.mod(vec_idx, c_block_k_div_vec)
-            col = b.mul(col_v, c_load_vec) if load_vec > 1 else col_v
-            if load_vec == 1:
-                bg_lds.store_scalar(b, row, col, value=g_regs[e])
-                bu_lds.store_scalar(b, row, col, value=u_regs[e])
-            else:
-                bg_lds.store_vec(b, row, col, value=g_regs[e], n=load_vec)
-                bu_lds.store_vec(b, row, col, value=u_regs[e], n=load_vec)
-
-    def emit_dual_mfma_phase(
-        gate_vars: List[Value], up_vars: List[Value]
-    ) -> Tuple[List[Value], List[Value]]:
-        if (t.warp_tile_m, t.warp_tile_n) == (16, 16):
-            m_in_atom = b.mod(lane, b.const_i32(t.warp_tile_m))
-            k_blk = b.div(lane, b.const_i32(t.warp_tile_m))
-            n_in_atom = b.mod(lane, b.const_i32(t.warp_tile_n))
-        else:
-            m_in_atom = b.mod(lane, b.const_i32(t.warp_tile_m))
-            k_blk = b.div(lane, b.const_i32(t.warp_tile_m))
-            n_in_atom = b.mod(lane, b.const_i32(t.warp_tile_n))
-
-        warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * t.warp_tile_m))
-        warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * t.warp_tile_n))
-
-        new_gate = list(gate_vars)
-        new_up = list(up_vars)
-
-        for kk in range(k_atoms):
-            col_base = b.add(
-                b.mul(k_blk, b.const_i32(a_per_lane)),
-                b.const_i32(kk * t.warp_tile_k),
-            )
-            a_rows = []
-            for mi in range(mfmas_m):
-                a_row = b.add(
-                    warp_m_off, b.add(b.const_i32(mi * t.warp_tile_m), m_in_atom)
-                )
-                a_rows.append(
-                    _emit_smem_load(
-                        b, A_smem, a_row, col_base, a_per_lane, storage_dtype
-                    )
-                )
-
-            gate_cols = []
-            up_cols = []
-            for ni in range(mfmas_n):
-                b_row = b.add(
-                    warp_n_off, b.add(b.const_i32(ni * t.warp_tile_n), n_in_atom)
-                )
-                gate_cols.append(
-                    _emit_smem_load(
-                        b, Bg_smem, b_row, col_base, b_per_lane, storage_dtype
-                    )
-                )
-                up_cols.append(
-                    _emit_smem_load(
-                        b, Bu_smem, b_row, col_base, b_per_lane, storage_dtype
-                    )
-                )
-
-            flat = 0
-            for mi in range(mfmas_m):
-                for ni in range(mfmas_n):
-                    new_gate[flat] = _emit_mfma(
-                        b, u, a_rows[mi], gate_cols[ni], new_gate[flat]
-                    )
-                    new_up[flat] = _emit_mfma(
-                        b, u, a_rows[mi], up_cols[ni], new_up[flat]
-                    )
-                    flat += 1
-
-            if spec.trait.pipeline in ("compv3", "compv4"):
-                b.sched_group_barrier(0x100, 1, 0)
-                # Two MFMA streams: gate + up.
-                b.sched_group_barrier(0x008, 2 * mfmas_m * mfmas_n, 0)
-
-        return new_gate, new_up
-
-    # Software-prefetched k-loop: carry the next tile's A/Bg/Bu global-load
-    # registers across iterations so VMEM latency overlaps the MFMA stream.
-    a_pre0, g_pre0, u_pre0 = emit_global_load(c0)
-    n_accs = len(gate_accs)
-    n_a = len(a_pre0)
-    n_g = len(g_pre0)
-    carried0 = (
-        list(gate_accs)
-        + list(up_accs)
-        + [(f"a_pre{i}", v) for i, v in enumerate(a_pre0)]
-        + [(f"g_pre{i}", v) for i, v in enumerate(g_pre0)]
-        + [(f"u_pre{i}", v) for i, v in enumerate(u_pre0)]
+    # Dual-B (gate + up share one A read) software-prefetched MFMA k-loop via
+    # the shared MoE loader core; the custom SwiGLU epilogue stays local.
+    plan = _MoeKloopPlan(b, u, tid)
+    operands = [
+        _MoeOperand(global_view=wg_view, lds_view=bg_lds_view, smem=Bg_smem),
+        _MoeOperand(global_view=wu_view, lds_view=bu_lds_view, smem=Bu_smem),
+    ]
+    a_mn_origin = (batch_off_a, block_m_off)
+    b_mn_origin = (batch_off_b, block_n_off)
+    gate_res, up_res = _emit_moe_prefetch_kloop(
+        plan,
+        a_view,
+        a_lds_view,
+        A_smem,
+        a_mn_origin,
+        operands,
+        b_mn_origin,
+        [gate_accs, up_accs],
+        K,
+        warp_m_idx,
+        warp_n_idx,
+        lane,
+        sched_groups=2 * mfmas_m * mfmas_n,
     )
-    for_op = b.scf_for_iter(c0, K, c_block_k, carried0, iv_name="k0")
-    with for_op as (k0, iter_vars):
-        gate_vars = list(iter_vars[:n_accs])
-        up_vars = list(iter_vars[n_accs : 2 * n_accs])
-        base = 2 * n_accs
-        a_regs = list(iter_vars[base : base + n_a])
-        g_regs = list(iter_vars[base + n_a : base + n_a + n_g])
-        u_regs = list(iter_vars[base + n_a + n_g :])
-        emit_lds_store(a_regs, g_regs, u_regs)
-        b.sync()
-        k_next = b.add(k0, c_block_k)
-        k_clamped = b.select(b.cmp_lt(k_next, K), k_next, k0)
-        a_next, g_next, u_next = emit_global_load(k_clamped)
-        new_gate, new_up = emit_dual_mfma_phase(gate_vars, up_vars)
-        b.sync()
-        b.scf_yield(*(new_gate + new_up + a_next + g_next + u_next))
 
     _emit_gate_up_silu_epilogue_default(
         b,
         u,
-        for_op.results[:n_accs],
-        for_op.results[n_accs : 2 * n_accs],
+        gate_res,
+        up_res,
         warp_m_idx,
         warp_n_idx,
         lane,
@@ -547,9 +782,12 @@ def _emit_gate_up_silu_epilogue_default(
                     )
                     g = b.vec_extract(gate_acc, i)
                     up = b.vec_extract(up_acc, i)
-                    sig = b.rcp(b.fadd(one_f32, b.exp2(b.fmul(c_neg_log2e, g))))
-                    silu = b.fmul(g, sig)
-                    h = b.cast_f32_to(b.fmul(silu, up), storage_dtype)
+                    h = b.cast_f32_to(
+                        _silu_mul_f32(
+                            b, g, up, one_f32=one_f32, c_neg_log2e=c_neg_log2e
+                        ),
+                        storage_dtype,
+                    )
                     b.smem_store_vN(Cs, [ld_m, ld_n], h, n=1)
     else:
         c_atom_n = b.const_i32(t.warp_tile_n)
@@ -573,9 +811,12 @@ def _emit_gate_up_silu_epilogue_default(
                     )
                     g = b.vec_extract(gate_acc, i)
                     up = b.vec_extract(up_acc, i)
-                    sig = b.rcp(b.fadd(one_f32, b.exp2(b.fmul(c_neg_log2e, g))))
-                    silu = b.fmul(g, sig)
-                    h = b.cast_f32_to(b.fmul(silu, up), storage_dtype)
+                    h = b.cast_f32_to(
+                        _silu_mul_f32(
+                            b, g, up, one_f32=one_f32, c_neg_log2e=c_neg_log2e
+                        ),
+                        storage_dtype,
+                    )
                     b.smem_store_vN(Cs, [ld_m, ld_n], h, n=1)
 
     b.sync()
@@ -604,18 +845,9 @@ def _emit_gate_up_silu_epilogue_default(
         c_n = b.add(block_n_off, col)
         c_off = b.add(batch_off_c, b.add(b.mul(c_m, N), c_n))
 
-        in_bounds = None
-        if pad_m or pad_n:
-            checks = []
-            if pad_m:
-                checks.append(b.cmp_lt(c_m, M))
-            if pad_n:
-                if store_vec == 1:
-                    checks.append(b.cmp_lt(c_n, N))
-                else:
-                    c_n_last = b.add(c_n, b.const_i32(store_vec - 1))
-                    checks.append(b.cmp_lt(c_n_last, N))
-            in_bounds = checks[0] if len(checks) == 1 else b.land(checks[0], checks[1])
+        in_bounds = _pad_in_bounds(
+            b, c_m, c_n, M, N, pad_m=pad_m, pad_n=pad_n, vec=store_vec
+        )
 
         if store_vec == 1:
             h = _load_smem_scalar(b, Cs, row, col, storage_dtype)
@@ -776,7 +1008,7 @@ def build_moe_interleaved_gate_up_silu_gemm(
         slot_size_p = b.param("slot_size", I32)
 
     t = spec.tile
-    a_per_lane, b_per_lane, c_per_lane = _mfma_atom_widths(u)
+    _, _, c_per_lane = _mfma_atom_widths(u)
     block_m = t.tile_m
     block_n = t.tile_n
     block_k = t.tile_k
@@ -809,23 +1041,12 @@ def build_moe_interleaved_gate_up_silu_gemm(
 
     mfmas_m = t.mfmas_per_warp_m
     mfmas_n = t.mfmas_per_warp_n
-    k_atoms = t.k_atoms_per_tile_k
     acc_init = _emit_zero_acc(b, u)
     accs = [
         (f"gu_acc_m{mi}_n{ni}", acc_init)
         for mi in range(mfmas_m)
         for ni in range(mfmas_n)
     ]
-
-    threads = spec.block_size
-    load_vec = _choose_load_vec(u)
-    a_vec_total = (block_m * block_k) // load_vec
-    b_vec_total = (block_n * block_k) // load_vec
-    a_vecs_per_thread = a_vec_total // threads
-    b_vecs_per_thread = b_vec_total // threads
-    c_threads = b.const_i32(threads)
-    c_load_vec = b.const_i32(load_vec)
-    c_block_k_div_vec = b.const_i32(block_k // load_vec)
 
     a_view = make_global_view(
         A, shape=(1, 1, 1), dtype=storage_dtype, strides=(1, K, 1)
@@ -844,132 +1065,47 @@ def build_moe_interleaved_gate_up_silu_gemm(
         addr_space="lds",
     )
 
-    # Split global load (long-latency VMEM) from the LDS store so the
-    # k-loop can prefetch the *next* tile's global loads while the current
-    # tile's MFMAs run (software prefetch / register double-buffer). Same
-    # single-buffer LDS footprint, hides global-load latency behind MFMA.
-    def emit_global_load(k_off: Value) -> Tuple[List[Value], List[Value]]:
-        a_global = make_tile_window(
-            a_view,
-            lengths=(1, block_m, block_k),
-            origin=(batch_off_a, block_m_off, k_off),
-        )
-        b_global = make_tile_window(
-            b_view,
-            lengths=(1, block_n, block_k),
-            origin=(batch_off_b, block_n_off, k_off),
-        )
-        a_regs: List[Value] = []
-        b_regs: List[Value] = []
-        for e in range(a_vecs_per_thread):
-            vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-            row = b.div(vec_idx, c_block_k_div_vec)
-            col_v = b.mod(vec_idx, c_block_k_div_vec)
-            col = b.mul(col_v, c_load_vec) if load_vec > 1 else col_v
-            a_regs.append(a_global.load_vec(b, b.const_i32(0), row, col, n=load_vec))
-        # B-load: identical preshuffle pattern to ``gemm_universal``,
-        # except the GEMM N is ``2*N`` (gate+up packed along N).
-        if u.trait.preshuffle_b:
-            n_tile_idx = b.div(block_n_off, c_block_n)
-            k_tile_idx = b.div(k_off, c_block_k)
-            two_n = b.mul(N, b.const_i32(2))
-            n_tile_count = b.div(two_n, c_block_n)
-            tile_offset_elements = b.mul(
-                b.add(b.mul(k_tile_idx, n_tile_count), n_tile_idx),
-                b.const_i32(block_n * block_k),
-            )
-            base_off = b.add(batch_off_b, tile_offset_elements)
-            for e in range(b_vecs_per_thread):
-                vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-                glob_off = b.add(base_off, b.mul(vec_idx, c_load_vec))
-                if load_vec == 1:
-                    b_regs.append(b.global_load(WGateUp, glob_off, storage_dtype))
-                else:
-                    b_regs.append(
-                        b.global_load_vN(WGateUp, glob_off, storage_dtype, load_vec)
-                    )
-        else:
-            for e in range(b_vecs_per_thread):
-                vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-                row = b.div(vec_idx, c_block_k_div_vec)
-                col_v = b.mod(vec_idx, c_block_k_div_vec)
-                col = b.mul(col_v, c_load_vec) if load_vec > 1 else col_v
-                b_regs.append(
-                    b_global.load_vec(b, b.const_i32(0), row, col, n=load_vec)
-                )
-        return a_regs, b_regs
+    plan = _MoeKloopPlan(b, u, tid)
 
-    def emit_lds_store(a_regs: List[Value], b_regs: List[Value]) -> None:
-        a_lds = make_tile_window(
-            a_lds_view,
-            lengths=(block_m, block_k),
-            origin=(b.const_i32(0), b.const_i32(0)),
-        )
-        b_lds = make_tile_window(
-            b_lds_view,
-            lengths=(block_n, block_k),
-            origin=(b.const_i32(0), b.const_i32(0)),
-        )
-        for e in range(a_vecs_per_thread):
-            vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-            row = b.div(vec_idx, c_block_k_div_vec)
-            col_v = b.mod(vec_idx, c_block_k_div_vec)
-            col = b.mul(col_v, c_load_vec) if load_vec > 1 else col_v
-            a_lds.store_vec(b, row, col, value=a_regs[e], n=load_vec)
-        for e in range(b_vecs_per_thread):
-            vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-            row = b.div(vec_idx, c_block_k_div_vec)
-            col_v = b.mod(vec_idx, c_block_k_div_vec)
-            col = b.mul(col_v, c_load_vec) if load_vec > 1 else col_v
-            if u.trait.preshuffle_b and load_vec == 1:
-                b_lds.store_scalar(b, row, col, value=b_regs[e])
-            else:
-                b_lds.store_vec(b, row, col, value=b_regs[e], n=load_vec)
+    # Single-B (gate/up interleaved along N) loader. ``preshuffle_b`` reads the
+    # pre-shuffled ``(k_tiles, n_tiles, block_n, block_k)`` slab with a
+    # contiguous per-tile offset (GEMM N is ``2*N``); the canonical path uses
+    # the strided window load. Both feed the same single-buffer LDS store and
+    # the shared register-prefetch k-loop.
+    presh = bool(u.trait.preshuffle_b)
+    if presh:
+        c_load_vec = plan.c_load_vec
+        c_threads = plan.c_threads
+        load_vec = plan.load_vec
 
-    def emit_mfma_phase(iter_vars: List[Value]) -> List[Value]:
-        if (t.warp_tile_m, t.warp_tile_n) == (16, 16):
-            m_in_atom = b.mod(lane, b.const_i32(t.warp_tile_m))
-            k_blk = b.div(lane, b.const_i32(t.warp_tile_m))
-            n_in_atom = b.mod(lane, b.const_i32(t.warp_tile_n))
-        else:
-            m_in_atom = b.mod(lane, b.const_i32(t.warp_tile_m))
-            k_blk = b.div(lane, b.const_i32(t.warp_tile_m))
-            n_in_atom = b.mod(lane, b.const_i32(t.warp_tile_n))
-        warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * t.warp_tile_m))
-        warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * t.warp_tile_n))
-        new_accs = list(iter_vars)
-        for kk in range(k_atoms):
-            col_base = b.add(
-                b.mul(k_blk, b.const_i32(a_per_lane)), b.const_i32(kk * t.warp_tile_k)
+        def _load_wgateup(bb, e, k_off, row, col):
+            n_tile_idx = bb.div(block_n_off, c_block_n)
+            k_tile_idx = bb.div(k_off, c_block_k)
+            two_n = bb.mul(N, bb.const_i32(2))
+            n_tile_count = bb.div(two_n, c_block_n)
+            tile_offset_elements = bb.mul(
+                bb.add(bb.mul(k_tile_idx, n_tile_count), n_tile_idx),
+                bb.const_i32(block_n * block_k),
             )
-            a_rows = []
-            for mi in range(mfmas_m):
-                a_row = b.add(
-                    warp_m_off, b.add(b.const_i32(mi * t.warp_tile_m), m_in_atom)
-                )
-                a_rows.append(
-                    _emit_smem_load(
-                        b, A_smem, a_row, col_base, a_per_lane, storage_dtype
-                    )
-                )
-            b_cols = []
-            for ni in range(mfmas_n):
-                b_row = b.add(
-                    warp_n_off, b.add(b.const_i32(ni * t.warp_tile_n), n_in_atom)
-                )
-                b_cols.append(
-                    _emit_smem_load(
-                        b, B_smem, b_row, col_base, b_per_lane, storage_dtype
-                    )
-                )
-            flat = 0
-            for mi in range(mfmas_m):
-                for ni in range(mfmas_n):
-                    new_accs[flat] = _emit_mfma(
-                        b, u, a_rows[mi], b_cols[ni], new_accs[flat]
-                    )
-                    flat += 1
-        return new_accs
+            base_off = bb.add(batch_off_b, tile_offset_elements)
+            vec_idx = bb.add(bb.mul(bb.const_i32(e), c_threads), tid)
+            glob_off = bb.add(base_off, bb.mul(vec_idx, c_load_vec))
+            if load_vec == 1:
+                return bb.global_load(WGateUp, glob_off, storage_dtype)
+            return bb.global_load_vN(WGateUp, glob_off, storage_dtype, load_vec)
+
+        operand = _MoeOperand(
+            global_view=b_view,
+            lds_view=b_lds_view,
+            smem=B_smem,
+            load_b=_load_wgateup,
+            store_scalar_ok=False,
+        )
+    else:
+        operand = _MoeOperand(global_view=b_view, lds_view=b_lds_view, smem=B_smem)
+
+    a_mn_origin = (batch_off_a, block_m_off)
+    b_mn_origin = (batch_off_b, block_n_off)
 
     # ---- active-tile gate ----
     # Bucket head index = ``block_id_z * slot_size + block_m_off``;
@@ -983,35 +1119,27 @@ def build_moe_interleaved_gate_up_silu_gemm(
         do_work_cond = b.cmp_ge(first_token, c0)
 
     def emit_compute_and_epilogue() -> None:
-        # Software-prefetched k-loop (see emit_global_load / emit_lds_store):
-        # carry the next tile's global-load registers across the loop so the
-        # VMEM latency overlaps the current tile's MFMA stream.
-        a_pre0, b_pre0 = emit_global_load(c0)
-        n_a = len(a_pre0)
-        n_accs = len(accs)
-        carried0 = (
-            list(accs)
-            + [(f"a_pre{i}", v) for i, v in enumerate(a_pre0)]
-            + [(f"b_pre{i}", v) for i, v in enumerate(b_pre0)]
+        # Software-prefetched single-B MFMA k-loop via the shared MoE core.
+        (acc_res,) = _emit_moe_prefetch_kloop(
+            plan,
+            a_view,
+            a_lds_view,
+            A_smem,
+            a_mn_origin,
+            [operand],
+            b_mn_origin,
+            [accs],
+            K,
+            warp_m_idx,
+            warp_n_idx,
+            lane,
+            sched_groups=0,
         )
-        for_op = b.scf_for_iter(c0, K, c_block_k, carried0, iv_name="k0")
-        with for_op as (k0, iter_vars):
-            cur_accs = list(iter_vars[:n_accs])
-            a_regs = list(iter_vars[n_accs : n_accs + n_a])
-            b_regs = list(iter_vars[n_accs + n_a :])
-            emit_lds_store(a_regs, b_regs)
-            b.sync()
-            k_next = b.add(k0, c_block_k)
-            k_clamped = b.select(b.cmp_lt(k_next, K), k_next, k0)
-            a_next, b_next = emit_global_load(k_clamped)
-            new_accs = emit_mfma_phase(cur_accs)
-            b.sync()
-            b.scf_yield(*(new_accs + a_next + b_next))
 
         _emit_interleaved_silu_epilogue(
             b,
             u,
-            for_op.results[:n_accs],
+            acc_res,
             C_smem,
             warp_m_idx,
             warp_n_idx,
@@ -1168,19 +1296,14 @@ def _emit_interleaved_silu_epilogue(
             )
             g = b.cast_to_f32(gate_h)
             up = b.cast_to_f32(up_h)
-            sig = b.rcp(b.fadd(one_f32, b.exp2(b.fmul(c_neg_log2e, g))))
-            out_v = b.cast_f32_to(b.fmul(b.fmul(g, sig), up), storage_dtype)
+            out_v = b.cast_f32_to(
+                _silu_mul_f32(b, g, up, one_f32=one_f32, c_neg_log2e=c_neg_log2e),
+                storage_dtype,
+            )
 
-            in_bounds = None
-            if pad_m or pad_n:
-                checks = []
-                if pad_m:
-                    checks.append(b.cmp_lt(c_m, M))
-                if pad_n:
-                    checks.append(b.cmp_lt(c_n_start, N))
-                in_bounds = (
-                    checks[0] if len(checks) == 1 else b.land(checks[0], checks[1])
-                )
+            in_bounds = _pad_in_bounds(
+                b, c_m, c_n_start, M, N, pad_m=pad_m, pad_n=pad_n, vec=1
+            )
             if in_bounds is not None:
                 with b.scf_if(in_bounds):
                     b.global_store(Hidden, off, out_v, align=2)
@@ -1194,25 +1317,21 @@ def _emit_interleaved_silu_epilogue(
             for i in range(vec_h):
                 g = b.cast_to_f32(b.vec_extract(gu_vec, 2 * i))
                 up = b.cast_to_f32(b.vec_extract(gu_vec, 2 * i + 1))
-                sig = b.rcp(b.fadd(one_f32, b.exp2(b.fmul(c_neg_log2e, g))))
                 h_scalars.append(
-                    b.cast_f32_to(b.fmul(b.fmul(g, sig), up), storage_dtype)
+                    b.cast_f32_to(
+                        _silu_mul_f32(
+                            b, g, up, one_f32=one_f32, c_neg_log2e=c_neg_log2e
+                        ),
+                        storage_dtype,
+                    )
                 )
             h_packed = b.vec_pack(h_scalars, storage_dtype)
 
-            in_bounds = None
-            if pad_m or pad_n:
-                checks = []
-                if pad_m:
-                    checks.append(b.cmp_lt(c_m, M))
-                if pad_n:
-                    # vec_h consecutive columns; bounds-check the last
-                    # one (the first is implied).
-                    c_n_last = b.add(c_n_start, b.const_i32(vec_h - 1))
-                    checks.append(b.cmp_lt(c_n_last, N))
-                in_bounds = (
-                    checks[0] if len(checks) == 1 else b.land(checks[0], checks[1])
-                )
+            # vec_h consecutive columns; bounds-check the last one (the
+            # first is implied).
+            in_bounds = _pad_in_bounds(
+                b, c_m, c_n_start, M, N, pad_m=pad_m, pad_n=pad_n, vec=vec_h
+            )
             if in_bounds is not None:
                 with b.scf_if(in_bounds):
                     b.global_store_vN(Hidden, off, h_packed, vec_h)
@@ -1347,18 +1466,16 @@ def build_moe_down_reduce_gemm(
     tokens = b.param("tokens", I32)
 
     t = spec.tile
-    a_per_lane, b_per_lane, c_per_lane = _mfma_atom_widths(u)
+    _, _, c_per_lane = _mfma_atom_widths(u)
 
     block_m = t.tile_m
     block_n = t.tile_n
     block_k = t.tile_k
 
-    c0 = b.const_i32(0)
     c_wave = b.const_i32(spec.wave_size)
     c_warps_n = b.const_i32(t.warp_n)
     c_block_m = b.const_i32(block_m)
     c_block_n = b.const_i32(block_n)
-    c_block_k = b.const_i32(block_k)
 
     tid = b.thread_id_x()
     warp_id = b.div(tid, c_wave)
@@ -1381,7 +1498,6 @@ def build_moe_down_reduce_gemm(
 
     mfmas_m = t.mfmas_per_warp_m
     mfmas_n = t.mfmas_per_warp_n
-    k_atoms = t.k_atoms_per_tile_k
 
     acc_init = _emit_zero_acc(b, u)
     accs = [
@@ -1389,18 +1505,6 @@ def build_moe_down_reduce_gemm(
         for mi in range(mfmas_m)
         for ni in range(mfmas_n)
     ]
-
-    threads = spec.block_size
-    load_vec = _choose_load_vec(u)
-    a_total = block_m * block_k
-    b_total = block_n * block_k
-    a_vec_total = a_total // load_vec
-    b_vec_total = b_total // load_vec
-    a_vecs_per_thread = a_vec_total // threads
-    b_vecs_per_thread = b_vec_total // threads
-    c_threads = b.const_i32(threads)
-    c_load_vec = b.const_i32(load_vec)
-    c_block_k_div_vec = b.const_i32(block_k // load_vec)
 
     a_view = make_global_view(
         A, shape=(1, 1, 1), dtype=storage_dtype, strides=(1, K, 1)
@@ -1420,168 +1524,35 @@ def build_moe_down_reduce_gemm(
         addr_space="lds",
     )
 
-    # Split the global load (long-latency VMEM) from the LDS store so the
-    # k-loop can issue the *next* tile's global loads while the *current*
-    # tile's MFMAs run (software prefetch / register double-buffer). This
-    # keeps the single-buffer LDS footprint (no occupancy change on the
-    # LDS-limited gfx950 path) but hides global-load latency behind the
-    # MFMA stream — the down-reduce GEMM is VMEM-bound (vmem_load >> mfma).
-    def emit_global_load(k_off: Value) -> Tuple[List[Value], List[Value]]:
-        a_global = make_tile_window(
-            a_view,
-            lengths=(1, block_m, block_k),
-            origin=(batch_off_a, block_m_off, k_off),
-        )
-        b_global = make_tile_window(
-            b_view,
-            lengths=(1, block_n, block_k),
-            origin=(batch_off_b, block_n_off, k_off),
-        )
-        a_regs: List[Value] = []
-        b_regs: List[Value] = []
-        for e in range(a_vecs_per_thread):
-            vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-            row = b.div(vec_idx, c_block_k_div_vec)
-            col_v = b.mod(vec_idx, c_block_k_div_vec)
-            col = b.mul(col_v, c_load_vec) if load_vec > 1 else col_v
-            if load_vec == 1:
-                a_regs.append(a_global.load_scalar(b, b.const_i32(0), row, col))
-            else:
-                a_regs.append(
-                    a_global.load_vec(b, b.const_i32(0), row, col, n=load_vec)
-                )
-        for e in range(b_vecs_per_thread):
-            vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-            row = b.div(vec_idx, c_block_k_div_vec)
-            col_v = b.mod(vec_idx, c_block_k_div_vec)
-            col = b.mul(col_v, c_load_vec) if load_vec > 1 else col_v
-            if load_vec == 1:
-                b_regs.append(b_global.load_scalar(b, b.const_i32(0), row, col))
-            else:
-                b_regs.append(
-                    b_global.load_vec(b, b.const_i32(0), row, col, n=load_vec)
-                )
-        return a_regs, b_regs
-
-    def emit_lds_store(a_regs: List[Value], b_regs: List[Value]) -> None:
-        a_lds = make_tile_window(
-            a_lds_view,
-            lengths=(block_m, block_k),
-            origin=(b.const_i32(0), b.const_i32(0)),
-        )
-        b_lds = make_tile_window(
-            b_lds_view,
-            lengths=(block_n, block_k),
-            origin=(b.const_i32(0), b.const_i32(0)),
-        )
-        for e in range(a_vecs_per_thread):
-            vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-            row = b.div(vec_idx, c_block_k_div_vec)
-            col_v = b.mod(vec_idx, c_block_k_div_vec)
-            col = b.mul(col_v, c_load_vec) if load_vec > 1 else col_v
-            if load_vec == 1:
-                a_lds.store_scalar(b, row, col, value=a_regs[e])
-            else:
-                a_lds.store_vec(b, row, col, value=a_regs[e], n=load_vec)
-        for e in range(b_vecs_per_thread):
-            vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-            row = b.div(vec_idx, c_block_k_div_vec)
-            col_v = b.mod(vec_idx, c_block_k_div_vec)
-            col = b.mul(col_v, c_load_vec) if load_vec > 1 else col_v
-            if load_vec == 1:
-                b_lds.store_scalar(b, row, col, value=b_regs[e])
-            else:
-                b_lds.store_vec(b, row, col, value=b_regs[e], n=load_vec)
-
-    def emit_mfma_phase(iter_vars: List[Value]) -> List[Value]:
-        if (t.warp_tile_m, t.warp_tile_n) == (16, 16):
-            m_in_atom = b.mod(lane, b.const_i32(t.warp_tile_m))
-            k_blk = b.div(lane, b.const_i32(t.warp_tile_m))
-            n_in_atom = b.mod(lane, b.const_i32(t.warp_tile_n))
-        else:
-            m_in_atom = b.mod(lane, b.const_i32(t.warp_tile_m))
-            k_blk = b.div(lane, b.const_i32(t.warp_tile_m))
-            n_in_atom = b.mod(lane, b.const_i32(t.warp_tile_n))
-
-        warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * t.warp_tile_m))
-        warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * t.warp_tile_n))
-        new_accs = list(iter_vars)
-
-        for kk in range(k_atoms):
-            col_base = b.add(
-                b.mul(k_blk, b.const_i32(a_per_lane)),
-                b.const_i32(kk * t.warp_tile_k),
-            )
-            a_rows = []
-            for mi in range(mfmas_m):
-                a_row = b.add(
-                    warp_m_off, b.add(b.const_i32(mi * t.warp_tile_m), m_in_atom)
-                )
-                a_rows.append(
-                    _emit_smem_load(
-                        b, A_smem, a_row, col_base, a_per_lane, storage_dtype
-                    )
-                )
-
-            b_cols = []
-            for ni in range(mfmas_n):
-                b_row = b.add(
-                    warp_n_off, b.add(b.const_i32(ni * t.warp_tile_n), n_in_atom)
-                )
-                b_cols.append(
-                    _emit_smem_load(
-                        b, B_smem, b_row, col_base, b_per_lane, storage_dtype
-                    )
-                )
-
-            flat = 0
-            for mi in range(mfmas_m):
-                for ni in range(mfmas_n):
-                    new_accs[flat] = _emit_mfma(
-                        b, u, a_rows[mi], b_cols[ni], new_accs[flat]
-                    )
-                    flat += 1
-
-            if spec.trait.pipeline in ("compv3", "compv4"):
-                b.sched_group_barrier(0x100, 1, 0)
-                b.sched_group_barrier(0x008, mfmas_m * mfmas_n, 0)
-        return new_accs
-
-    # Software-prefetched k-loop: load tile 0 to registers before the
-    # loop, then each iteration stores the prefetched regs to LDS, issues
-    # the *next* tile's global loads (in flight during the MFMA), runs the
-    # MFMA from LDS, and yields the prefetched regs for the next trip.
-    # The loop-carried register values let the next global load overlap
-    # the current MFMA without a second LDS buffer.
-    a_pre0, b_pre0 = emit_global_load(c0)
-    n_a = len(a_pre0)
-    carried0 = (
-        list(accs)
-        + [(f"a_pre{i}", v) for i, v in enumerate(a_pre0)]
-        + [(f"b_pre{i}", v) for i, v in enumerate(b_pre0)]
+    # Single-B software-prefetched MFMA k-loop via the shared MoE core. The
+    # down-reduce GEMM is VMEM-bound, so the register-prefetch loop (single LDS
+    # buffer, next-tile global loads in flight during the MFMAs) hides the
+    # global-load latency behind the MFMA stream; the custom atomic
+    # weighted-reduce epilogue stays local.
+    plan = _MoeKloopPlan(b, u, tid)
+    operand = _MoeOperand(global_view=b_view, lds_view=b_lds_view, smem=B_smem)
+    a_mn_origin = (batch_off_a, block_m_off)
+    b_mn_origin = (batch_off_b, block_n_off)
+    (acc_res,) = _emit_moe_prefetch_kloop(
+        plan,
+        a_view,
+        a_lds_view,
+        A_smem,
+        a_mn_origin,
+        [operand],
+        b_mn_origin,
+        [accs],
+        K,
+        warp_m_idx,
+        warp_n_idx,
+        lane,
+        sched_groups=mfmas_m * mfmas_n,
     )
-    n_accs = len(accs)
-    for_op = b.scf_for_iter(c0, K, c_block_k, carried0, iv_name="k0")
-    with for_op as (k0, iter_vars):
-        cur_accs = list(iter_vars[:n_accs])
-        a_regs = list(iter_vars[n_accs : n_accs + n_a])
-        b_regs = list(iter_vars[n_accs + n_a :])
-        emit_lds_store(a_regs, b_regs)
-        b.sync()
-        # Prefetch next tile (clamp k to a valid in-bounds offset so the
-        # final iteration's speculative load stays addressable; the regs
-        # are simply not consumed after the last trip).
-        k_next = b.add(k0, c_block_k)
-        k_clamped = b.select(b.cmp_lt(k_next, K), k_next, k0)
-        a_next, b_next = emit_global_load(k_clamped)
-        new_accs = emit_mfma_phase(cur_accs)
-        b.sync()
-        b.scf_yield(*(new_accs + a_next + b_next))
 
     _emit_down_reduce_epilogue_atomic(
         b,
         u,
-        for_op.results[:n_accs],
+        acc_res,
         warp_m_idx,
         warp_n_idx,
         lane,

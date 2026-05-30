@@ -31,13 +31,11 @@ from typing import Tuple
 
 from ...core.ir import IRBuilder, KernelDef, Value
 from ...helpers.attention import (
-    OnlineSoftmaxState,
     apply_attention_mask,
     warp_xor_reduce_sum,
 )
 from ...helpers.io import (
-    load_scalar_as_f32,
-    load_vec_as_f32,
+    load_lane_slice_f32,
     pack_f32_to,
     store_scalar_from_f32,
     store_vec,
@@ -65,38 +63,6 @@ __all__ = [
 # 192) fall back to per-element scalar paths so every supported head
 # size keeps working.
 _VEC_WIDTHS = (2, 4, 8)
-
-
-def _load_lane_slice_f32(
-    b: IRBuilder,
-    ptr: Value,
-    row_base: Value,
-    lane_d_base: Value,
-    *,
-    dtype: str,
-    ept: int,
-) -> list[Value]:
-    """One vectorised ``global_load_vN`` + ``vec_extract`` chain when
-    ``EPT`` is a supported vector width; per-element scalar loads
-    otherwise. Same shape as the helper in :mod:`fmha_bwd`; kept
-    local to avoid editing shared infra.
-
-    Matches CK Tile's ``load_tile`` over a distributed
-    ``rt<bf16, ..., row_l, rt_16x32_s>`` register tile and AITER's
-    ``tl.load(... mask=...)`` 8-element decode-time vector loads in
-    ``aiter.ops.triton.attention.unified_attention``.
-    """
-    if ept in _VEC_WIDTHS:
-        return load_vec_as_f32(b, ptr, b.add(row_base, lane_d_base), dtype=dtype, n=ept)
-    return [
-        load_scalar_as_f32(
-            b,
-            ptr,
-            b.add(row_base, b.add(lane_d_base, b.const_i32(k))),
-            dtype=dtype,
-        )
-        for k in range(ept)
-    ]
 
 
 def _store_lane_slice_f32_packed(
@@ -294,7 +260,7 @@ def build_fmha_fwd_splitkv_decode_segment(
 
     # One vectorised global load for this lane's Q slice (constant
     # across the K-loop, lives in registers thereafter).
-    q_lane = _load_lane_slice_f32(b, Q, q_row, lane_d_base, dtype=s.dtype, ept=ept)
+    q_lane = load_lane_slice_f32(b, Q, q_row, lane_d_base, dtype=s.dtype, ept=ept)
 
     iter_args = [("m", neg_inf), ("l", zero_f)]
     for k in range(ept):
@@ -312,7 +278,7 @@ def build_fmha_fwd_splitkv_decode_segment(
         acc_iter = state_vals[2:]
         # Address math hoisted: only ``k_idx * stride_token`` varies per
         # iter; the head + lane terms are folded into ``kv_head_*_off``
-        # outside the loop. ``_load_lane_slice_f32`` takes a zero lane
+        # outside the loop. ``load_lane_slice_f32`` takes a zero lane
         # offset because the lane term is already baked into the base.
         k_row = b.add(b.mul(k_idx, stride_k_tok), kv_head_k_off)
         v_row = b.add(b.mul(k_idx, stride_v_tok), kv_head_v_off)
@@ -321,10 +287,10 @@ def build_fmha_fwd_splitkv_decode_segment(
         # the whole HEAD_SIZE_PADDED slice per K position (the K-loop
         # there has the same shape -- iterate over keys, accumulate
         # online softmax in registers).
-        k_lane = _load_lane_slice_f32(
+        k_lane = load_lane_slice_f32(
             b, K, k_row, b.const_i32(0), dtype=s.dtype, ept=ept
         )
-        v_lane = _load_lane_slice_f32(
+        v_lane = load_lane_slice_f32(
             b, V, v_row, b.const_i32(0), dtype=s.dtype, ept=ept
         )
         partial = zero_f
@@ -571,6 +537,3 @@ def fmha_fwd_splitkv_decode_reduce_signature(spec: FmhaFwdSplitKvDecodeSpec):
     )
     _declare_reduce_params(kb)
     return kb.signature()
-
-
-_OnlineSoftmaxState = OnlineSoftmaxState  # noqa: F841 - re-export anchor

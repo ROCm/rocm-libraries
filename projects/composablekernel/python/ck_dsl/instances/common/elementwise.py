@@ -51,9 +51,15 @@ from dataclasses import dataclass
 from typing import Literal, Tuple
 
 from ...core.ir import I32, IRBuilder, KernelDef, PtrType, Value
+from ...helpers.activations import _sigmoid_via_exp2, _tanh_via_exp2
+from ...helpers.distribution import (
+    TileDistributionEncoding,
+    make_static_distributed_tensor,
+    make_static_tile_distribution,
+)
 from ...helpers.io import io_ir_type
 from ...helpers.spec import SignatureBuilder, kernel_name_join
-from ...helpers.tensor_view import make_global_view
+from ...helpers.tensor_view import make_global_view, make_tile_window
 
 
 UnaryOp = Literal[
@@ -138,27 +144,6 @@ def is_valid_spec(spec: ElementwiseSpec) -> Tuple[bool, str]:
 # ---------------------------------------------------------------------
 # Op kernels (f32 scalar arithmetic).
 # ---------------------------------------------------------------------
-
-
-def _tanh_via_exp2(b: IRBuilder, x: Value) -> Value:
-    """tanh(x) = (e^(2x) - 1) / (e^(2x) + 1), via exp2.
-
-    Same primitive set as :func:`apply_softcap_runtime` in
-    ``attention_unified``; we avoid ``llvm.tanh.f32`` because the
-    AMDGPU backend doesn't lower it (it produces a
-    ``CODEGEN_BC_TO_RELOCATABLE`` failure in ``amd_comgr``).
-    """
-    c_2log2e = b.const_f32(2.0 * 1.4426950408889634)
-    c_one = b.const_f32(1.0)
-    e2x = b.exp2(b.fmul(c_2log2e, x))
-    return b.fmul(b.fsub(e2x, c_one), b.rcp(b.fadd(e2x, c_one)))
-
-
-def _sigmoid_via_exp2(b: IRBuilder, x: Value) -> Value:
-    """sigmoid(x) = 1 / (1 + e^-x) via exp2."""
-    c_neg_log2e = b.const_f32(-1.4426950408889634)
-    one = b.const_f32(1.0)
-    return b.rcp(b.fadd(one, b.exp2(b.fmul(c_neg_log2e, x))))
 
 
 def _gelu_tanh(b: IRBuilder, x: Value) -> Value:
@@ -278,17 +263,45 @@ def build_elementwise(spec: ElementwiseSpec) -> KernelDef:
     C = b.param("C", PtrType(io_ty, "global"), noalias=True, writeonly=True, align=16)
     N = b.param("N", I32)
 
+    # CK Tile distribution of the per-block fast tile.
+    #
+    # The fast path owns a contiguous ``block_size * vec`` slab; we model
+    # it as a single 1D X dim hierarchically split as
+    # ``Hs = ((block_size, vec),)``:
+    #
+    #   * level 0 (``block_size``) is the lane/thread axis -> P0
+    #   * level 1 (``vec``)        is the per-thread vector  -> Y0
+    #
+    # ``calculate_x`` then reconstructs the in-tile element index as
+    # ``x = tid * vec + y`` -- exactly the ``thread_base + i`` decode the
+    # hand-rolled path used, but now expressed through the idiomatic
+    # ``TileDistribution`` + ``StaticDistributedTensor`` surface (the same
+    # machinery ``examples/common/distribution_2d_add_demo.py`` drives).
+    encoding = TileDistributionEncoding(
+        Hs=((spec.block_size, spec.vec),),
+        Ps2RHs_major=((1,),),
+        Ps2RHs_minor=((0,),),
+        Ys2RHs_major=(1,),
+        Ys2RHs_minor=(1,),
+    )
+    distribution = make_static_tile_distribution(encoding)
+    tile_elems = spec.block_size * spec.vec
+
     # 1D views over the contiguous buffer. The shape entry is just
     # informational (no rank-1 bounds check); offset computation only
     # uses the stride which defaults to 1.
-    a_view = make_global_view(A, shape=(1,), dtype=io_ty)
-    c_view = make_global_view(C, shape=(1,), dtype=io_ty)
-    b_view = make_global_view(Bp, shape=(1,), dtype=io_ty) if spec.is_binary() else None
+    a_view = make_global_view(A, shape=(tile_elems,), dtype=io_ty)
+    c_view = make_global_view(C, shape=(tile_elems,), dtype=io_ty)
+    b_view = (
+        make_global_view(Bp, shape=(tile_elems,), dtype=io_ty)
+        if spec.is_binary()
+        else None
+    )
 
     tid = b.thread_id_x()
     bid = b.block_id_x()
     c_vec = b.const_i32(spec.vec)
-    c_chunk = b.const_i32(spec.block_size * spec.vec)
+    c_chunk = b.const_i32(tile_elems)
 
     block_base = b.mul(bid, c_chunk)
     thread_base = b.add(block_base, b.mul(tid, c_vec))
@@ -296,22 +309,34 @@ def build_elementwise(spec: ElementwiseSpec) -> KernelDef:
     fast_lim = b.add(thread_base, c_vec)
     in_fast = b.cmp_le(fast_lim, N)
 
+    # Per-block tile windows anchored at this CTA's slab origin. The
+    # distribution P-coordinate is just the lane id; it feeds level 0 of
+    # the H decomposition.
+    a_tile = make_tile_window(a_view, lengths=(tile_elems,), origin=(block_base,))
+    c_tile = make_tile_window(c_view, lengths=(tile_elems,), origin=(block_base,))
+    b_tile = (
+        make_tile_window(b_view, lengths=(tile_elems,), origin=(block_base,))
+        if spec.is_binary()
+        else None
+    )
+    ps = [[tid]]
+
     def emit_vec_path() -> None:
-        # Tile-shaped fast path: one vec load + per-lane f32 promote
-        # via the TileWindow, the per-element op in f32, and one
-        # vec_pack + vec store on the way out. Mirrors CK Tile's
-        # ``store_tile(y_window, cast_tile<YDataType>(y_tile))`` where
-        # ``y_tile`` is the per-thread register span.
-        a_scalars = a_view.load_vec_as_f32(b, [thread_base], n=spec.vec)
+        # Tile-shaped fast path, CK Tile idiom: ``load_tile`` ingests the
+        # per-thread Y span (f32-promoted) into a StaticDistributedTensor,
+        # we sweep Y applying the per-element f32 op, and ``store_tile``
+        # packs + writes the result. Mirrors CK Tile's
+        # ``store_tile(y_window, cast_tile<YDataType>(y_tile))``.
+        a_dt = a_tile.load(b, distribution=distribution, ps=ps)
+        out_dt = make_static_distributed_tensor(distribution, dtype=io_ty)
         if spec.is_binary():
-            b_scalars = b_view.load_vec_as_f32(b, [thread_base], n=spec.vec)
-            results = [
-                _apply_binary(b, a_scalars[i], b_scalars[i], spec.op)
-                for i in range(spec.vec)
-            ]
+            b_dt = b_tile.load(b, distribution=distribution, ps=ps)
+            for y in distribution.iterate_ys():
+                out_dt.set(y, _apply_binary(b, a_dt.get(y), b_dt.get(y), spec.op))
         else:
-            results = [_apply_unary(b, a_scalars[i], spec.op) for i in range(spec.vec)]
-        c_view.store_vec_from_f32(b, [thread_base], values=results)
+            for y in distribution.iterate_ys():
+                out_dt.set(y, _apply_unary(b, a_dt.get(y), spec.op))
+        c_tile.store(b, out_dt, ps=ps)
 
     def emit_scalar_path() -> None:
         # Trailing-tail scalar fallback. The fast path's

@@ -42,7 +42,11 @@ from typing import Literal, Tuple
 
 from ...core.ir import F32, I32, IRBuilder, KernelDef, PtrType, Value
 from ...helpers.io import io_ir_type, store_scalar_from_f32
-from ...helpers.reduction import block_lds_reduce
+from ...helpers.reduction import (
+    block_lds_reduce,
+    block_lds_reduce_with_wave_prologue,
+    tree_reduce,
+)
 from ...helpers.spec import (
     IOSpecRule,
     SignatureBuilder,
@@ -134,112 +138,6 @@ def _combine_scalar(
     raise ValueError(f"unsupported combine {combine!r}")
 
 
-def _tree_reduce(
-    b: IRBuilder,
-    combine: Literal["sum", "max", "min", "prod"],
-    xs: list[Value],
-) -> Value:
-    """Balanced binary-tree fold over ``xs`` (length >= 1).
-
-    Yields a dependency-chain depth of ``ceil(log2(len(xs)))`` instead
-    of the ``len(xs) - 1`` you get from a left-fold. For ``vec`` in
-    the typical ``{2, 4, 8}`` set this lets back-to-back ``fadd`` /
-    ``fmax`` issue in parallel rather than serialising on one
-    accumulator register.
-    """
-    if not xs:
-        raise ValueError("_tree_reduce: empty input list")
-    parts = list(xs)
-    while len(parts) > 1:
-        nxt: list[Value] = []
-        for i in range(0, len(parts), 2):
-            if i + 1 < len(parts):
-                nxt.append(_combine_scalar(b, combine, parts[i], parts[i + 1]))
-            else:
-                nxt.append(parts[i])
-        parts = nxt
-    return parts[0]
-
-
-def _warp_xor_reduce(
-    b: IRBuilder,
-    combine: Literal["sum", "max", "min", "prod"],
-    v: Value,
-    *,
-    wave_size: int = 64,
-) -> Value:
-    """XOR-butterfly cross-lane reduction within one wave.
-
-    Mirrors CK Tile's ``BlockReduce2dSync`` (which calls
-    ``block_tile_reduce_xor_sync`` per Y slot): for ``wave_size = 2^n``
-    we do ``n`` stages of ``ds_swizzle_xor`` / ``ds_bpermute`` with
-    lane-XOR masks ``1, 2, 4, ..., wave_size / 2``. After the last
-    stage every lane in the wave holds the wave-local reduction.
-
-    Cheaper than an LDS tree at the same width because each stage is
-    a single LDS op with no addressing arithmetic on the user side
-    (the swizzle pattern is encoded in the instruction immediate for
-    masks < 32, the ``ds_bpermute`` form for mask == 32).
-    """
-    if wave_size & (wave_size - 1):
-        raise ValueError(f"wave_size {wave_size} is not a power of two")
-    stages = wave_size.bit_length() - 1
-    cur = v
-    for k in range(stages):
-        remote = b.warp_shuffle_xor(cur, 1 << k)
-        cur = _combine_scalar(b, combine, cur, remote)
-    return cur
-
-
-def _block_tile_reduce(
-    b: IRBuilder,
-    combine: Literal["sum", "max", "min", "prod"],
-    val: Value,
-    lds_buf: Value,
-    tid: Value,
-    *,
-    block_size: int,
-    wave_size: int,
-) -> Value:
-    """CK Tile-style block reduction = warp XOR butterfly + cross-warp LDS.
-
-    Equivalent to ``BlockReduce2dSync`` followed by
-    ``BlockReduce2dCrossWarpSync`` in
-    :file:`include/ck_tile/ops/reduce/block/block_reduce2d.hpp`, in
-    the one-Y-slot specialisation that the small-op reduce kernel
-    needs. For wave64 / BS=256 this replaces the 8-round LDS tree
-    that :func:`block_lds_reduce` would emit (one ``sync`` per round)
-    with six cross-lane shuffle stages + one ``sync`` over a
-    ``num_warps``-slot scratch buffer (4 entries for BS=256, 8 for
-    BS=512).
-
-    ``lds_buf`` must point to at least ``num_warps`` f32 slots; we
-    re-use the kernel's ``block_size``-element LDS allocation so the
-    kernel's LDS footprint doesn't change.
-    """
-    warp_partial = _warp_xor_reduce(b, combine, val, wave_size=wave_size)
-
-    num_warps = block_size // wave_size
-    if num_warps == 1:
-        return warp_partial
-
-    # Stage 3: lane 0 of each wave stages its partial to LDS; one
-    # sync; then every thread reads all ``num_warps`` entries and
-    # folds them via the same binary tree.
-    c_wave = b.const_i32(wave_size)
-    lane = b.mod(tid, c_wave)
-    warp = b.div(tid, c_wave)
-    with b.scf_if(b.cmp_eq(lane, b.const_i32(0))):
-        b.smem_store_vN_f32(lds_buf, [warp], warp_partial, 1)
-    b.sync()
-
-    parts: list[Value] = []
-    for w in range(num_warps):
-        v_vec = b.smem_load_vN_f32(lds_buf, b.const_i32(w), n=1)
-        parts.append(b.vec_extract(v_vec, 0))
-    return _tree_reduce(b, combine, parts)
-
-
 def build_reduce2d(spec: Reduce2DSpec) -> KernelDef:
     """Build the IR for one row-reduction instance.
 
@@ -295,7 +193,9 @@ def build_reduce2d(spec: Reduce2DSpec) -> KernelDef:
     # natural left fold, same op count.
     def body(_n_off, x_scalars):
         nonlocal acc
-        chunk_partial = _tree_reduce(b, combine, list(x_scalars))
+        chunk_partial = tree_reduce(
+            b, lambda a, c: _combine_scalar(b, combine, a, c), list(x_scalars)
+        )
         acc = _combine_scalar(b, combine, acc, chunk_partial)
 
     sweep_row_chunks(
@@ -313,13 +213,13 @@ def build_reduce2d(spec: Reduce2DSpec) -> KernelDef:
     # the canonical full LDS tree (kept for any future BS that isn't a
     # clean multiple of ``wave_size``).
     if spec.block_size % spec.wave_size == 0:
-        total = _block_tile_reduce(
+        total = block_lds_reduce_with_wave_prologue(
             b,
-            combine,
             acc,
             lds,
             tid,
             block_size=spec.block_size,
+            combine=combine,
             wave_size=spec.wave_size,
         )
     else:

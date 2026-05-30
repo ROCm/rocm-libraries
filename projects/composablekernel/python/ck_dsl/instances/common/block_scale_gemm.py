@@ -64,6 +64,8 @@ from ...helpers.mfma_gemm_inner import (
     load_b_col_strided_scalars,
     mfma_k_loop,
     store_acc_to_global,
+    validate_arch_and_block_size,
+    validate_mfma_atom_in_catalog,
 )
 from ...helpers.quant import quant_ir_type
 from ...helpers.spec import SignatureBuilder, kernel_name_join
@@ -156,17 +158,9 @@ def is_valid_spec(spec: BlockScaleGemmSpec, arch: str = "gfx950") -> Tuple[bool,
     catalog ``has_shape`` check because the per-arch catalog tracks the
     f16/bf16 GEMM warp-tile shapes rather than this fp8 block-scale atom.
     """
-    from ...core.arch import ArchTarget
-
-    try:
-        target = ArchTarget.from_gfx(arch)
-    except KeyError as e:
-        return False, str(e)
-    if spec.block_size > target.max_threads_per_block:
-        return False, (
-            f"block_size {spec.block_size} > {target.max_threads_per_block} "
-            f"(hardware cap) on {arch}"
-        )
+    ok, reason, _target = validate_arch_and_block_size(arch, spec.block_size)
+    if not ok:
+        return False, reason
     if spec.quant_mode not in ("aquant", "bquant", "abquant"):
         return False, f"unsupported quant_mode {spec.quant_mode!r}"
     if spec.quant_mode != "abquant":
@@ -211,34 +205,6 @@ def _mantissa_storage_dtype(spec: BlockScaleGemmSpec) -> str:
     return "i8"
 
 
-def _validate_block_scale_atom(atom: MfmaAtom, arch: str) -> None:
-    """Guard the selected MFMA atom against the per-arch MMA catalog.
-
-    The fp8 / bf8 ``16x16x32`` atom this kernel uses ships on both gfx942
-    and gfx950, so this is a no-op on the supported mantissas. The guard
-    exists so any future atom that is gfx950-only raises a clean Python
-    error *before* IR/compile instead of letting a gfx950-only intrinsic
-    reach comgr (an uncatchable ``LLVM ERROR`` process abort).
-    """
-    from ...core.arch import ArchTarget
-
-    target = ArchTarget.from_gfx(arch)
-    if not target.mma.has_shape(
-        a_dtype=atom.dtype_in,
-        b_dtype=atom.dtype_in,
-        c_dtype=atom.dtype_out,
-        m=atom.m,
-        n=atom.n,
-        k=atom.k,
-    ):
-        raise NotImplementedError(
-            f"block_scale_gemm MFMA atom {atom.name!r} "
-            f"({atom.dtype_in} {atom.m}x{atom.n}x{atom.k}) is not in the "
-            f"{arch} MMA catalog; this configuration requires a different "
-            f"target."
-        )
-
-
 def build_block_scale_gemm(spec: BlockScaleGemmSpec, arch: str = "gfx950") -> KernelDef:
     """Build the IR for one block-scaled GEMM instance (v1 scalar inner).
 
@@ -276,7 +242,7 @@ def build_block_scale_gemm(spec: BlockScaleGemmSpec, arch: str = "gfx950") -> Ke
     ok, why = is_valid_spec(spec, arch=arch)
     if not ok:
         raise ValueError(f"invalid block_scale_gemm spec for {arch}: {why}")
-    _validate_block_scale_atom(spec.atom, arch)
+    validate_mfma_atom_in_catalog(spec.atom, arch, where="block_scale_gemm")
 
     mantissa_store = _mantissa_storage_dtype(spec)
     BS = spec.block_size

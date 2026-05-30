@@ -124,6 +124,21 @@ def _effective_vec(spec_vec: int, block_size: int, n: int) -> int:
     return ev
 
 
+def _silu_mul_f32(b, g, u, *, one_f32, c_neg_log2e):
+    """Emit the f32 SwiGLU chain ``silu(g) * u`` (sigmoid via exp2).
+
+    Same op order as the inline silu_mul sites:
+    ``sig = rcp(1 + exp2(-x*log2e))``, ``silu = g*sig``, ``out = silu*u``.
+    Constants are caller-supplied so the emitted SSA matches the existing
+    inline order exactly. Kept module-local per the instance-file
+    convention (see report 03 §4); a sibling copy lives in
+    ``moe_gemm_fused.py``.
+    """
+    sig = b.rcp(b.fadd(one_f32, b.exp2(b.fmul(c_neg_log2e, g))))
+    silu = b.fmul(g, sig)
+    return b.fmul(silu, u)
+
+
 __all__ = [
     "FusedMoeLauncher",
     "FusedMoeSpec",
@@ -479,9 +494,7 @@ def build_moe_silu_mul(spec: FusedMoeSpec) -> KernelDef:
         if VEC == 1:
             g = load_scalar_as_f32(b, GateOut, off, dtype=dtype)
             u = load_scalar_as_f32(b, UpOut, off, dtype=dtype)
-            sig = b.rcp(b.fadd(one_f32, b.exp2(b.fmul(c_neg_log2e, g))))
-            silu = b.fmul(g, sig)
-            h = b.fmul(silu, u)
+            h = _silu_mul_f32(b, g, u, one_f32=one_f32, c_neg_log2e=c_neg_log2e)
             store_scalar_from_f32(b, Hidden, off, h, dtype=dtype)
         else:
             g_vec = b.global_load_vN(GateOut, off, ty, VEC)
@@ -490,9 +503,14 @@ def build_moe_silu_mul(spec: FusedMoeSpec) -> KernelDef:
             for i in range(VEC):
                 g = b.cast_to_f32(b.vec_extract(g_vec, i))
                 u = b.cast_to_f32(b.vec_extract(u_vec, i))
-                sig = b.rcp(b.fadd(one_f32, b.exp2(b.fmul(c_neg_log2e, g))))
-                silu = b.fmul(g, sig)
-                h_scalars.append(b.cast_f32_to(b.fmul(silu, u), ty))
+                h_scalars.append(
+                    b.cast_f32_to(
+                        _silu_mul_f32(
+                            b, g, u, one_f32=one_f32, c_neg_log2e=c_neg_log2e
+                        ),
+                        ty,
+                    )
+                )
             h_packed = b.vec_pack(h_scalars, ty)
             b.global_store_vN(Hidden, off, h_packed, VEC)
 
@@ -589,9 +607,7 @@ def build_moe_silu_mul_packed(spec: FusedMoeSpec) -> KernelDef:
         if VEC == 1:
             g = load_scalar_as_f32(b, GateUp, g_off, dtype=dtype)
             u = load_scalar_as_f32(b, GateUp, u_off, dtype=dtype)
-            sig = b.rcp(b.fadd(one_f32, b.exp2(b.fmul(c_neg_log2e, g))))
-            silu = b.fmul(g, sig)
-            h = b.fmul(silu, u)
+            h = _silu_mul_f32(b, g, u, one_f32=one_f32, c_neg_log2e=c_neg_log2e)
             store_scalar_from_f32(b, Hidden, o_off, h, dtype=dtype)
         else:
             g_vec = b.global_load_vN(GateUp, g_off, ty, VEC)
@@ -600,9 +616,14 @@ def build_moe_silu_mul_packed(spec: FusedMoeSpec) -> KernelDef:
             for i in range(VEC):
                 g = b.cast_to_f32(b.vec_extract(g_vec, i))
                 u = b.cast_to_f32(b.vec_extract(u_vec, i))
-                sig = b.rcp(b.fadd(one_f32, b.exp2(b.fmul(c_neg_log2e, g))))
-                silu = b.fmul(g, sig)
-                h_scalars.append(b.cast_f32_to(b.fmul(silu, u), ty))
+                h_scalars.append(
+                    b.cast_f32_to(
+                        _silu_mul_f32(
+                            b, g, u, one_f32=one_f32, c_neg_log2e=c_neg_log2e
+                        ),
+                        ty,
+                    )
+                )
             h_packed = b.vec_pack(h_scalars, ty)
             b.global_store_vN(Hidden, o_off, h_packed, VEC)
 
