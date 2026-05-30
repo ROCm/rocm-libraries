@@ -381,21 +381,14 @@ class GemmEpilogueLowerer:
         # The unified WMMA body pairs the 16x16x16 atom with the ``mem``
         # pipeline + ``default`` epilogue; the richer compv4/cshuffle path
         # encodes MFMA-shaped assumptions and is gated off for WMMA. The
-        # ``default`` epilogue does NOT yet apply a fused pointwise chain (that
-        # lives only in the cshuffle path), so on WMMA we only emit candidates
-        # for the matmul-only case. Regions that carry fused pointwise ops fall
-        # back to zero candidates on gfx1151 until the shared change wiring the
-        # fused epilogue into ``_emit_epilogue_default`` lands (reported as a
-        # needed-shared-change); the autotuner then reports "no WMMA epilogue
-        # coverage" instead of silently dropping the ops.
+        # ``default`` epilogue applies the fused pointwise chain per-lane
+        # (see ``_emit_epilogue_default``'s WMMA scatter), so fused regions
+        # emit real candidates on gfx1151 just like the matmul-only case.
         if wmma:
             tile_table = self._WMMA_TILES
             pipeline = "mem"
             epilogue_kind = "default"
             wgm_choices: Tuple[int, ...] = (0,)
-            has_fused_ops = bool(getattr(epilogue, "ops", ()))
-            if has_fused_ops:
-                return []
         else:
             tile_table = self._tile_choices(dtype)
             pipeline = "compv4"

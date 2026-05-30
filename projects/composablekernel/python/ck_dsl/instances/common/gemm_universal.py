@@ -1576,6 +1576,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 C,
                 c_per_lane,
                 batch_off_c=batch_off_c,
+                fused_epilogue=fused_ep,
             )
 
     if do_work_cond is None:
@@ -1699,6 +1700,7 @@ def _emit_epilogue_default(
     c_per_lane: int,
     *,
     batch_off_c: Optional[Value] = None,
+    fused_epilogue=None,  # Optional[FusedEpilogue] from helpers.fuse
 ) -> None:
     """Direct vector-store epilogue.
 
@@ -1728,6 +1730,16 @@ def _emit_epilogue_default(
 
     warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * t.warp_tile_m))
     warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * t.warp_tile_n))
+
+    # A fused epilogue (BiasAdd, ReLU, residual, ...) declares its extra
+    # kernel params once before the scatter, then transforms each per-lane
+    # scalar at its (c_m, c_n) below. Guarded by ``None`` so the matmul-only
+    # default path (and the byte-identical CDNA MFMA store) is unchanged.
+    if fused_epilogue is not None:
+        fused_epilogue.declare_params(b)
+        record_runtime = getattr(fused_epilogue, "record_runtime", None)
+        if record_runtime is not None:
+            record_runtime(b, N=N)
 
     def _store_masked(c_m: Value, c_n: Value, c_off: Value, h: Value) -> None:
         """Per-element global store with optional ``pad_m`` / ``pad_n`` guard.
@@ -1775,6 +1787,8 @@ def _emit_epilogue_default(
                     if batch_off_c is not None:
                         c_off = b.add(batch_off_c, c_off)
                     h = b.vec_extract(acc_h, i)
+                    if fused_epilogue is not None:
+                        h = fused_epilogue.apply_scalar(b, h, c_m, c_n)
                     _store_masked(c_m, c_n, c_off, h)
         return
 
@@ -1794,6 +1808,8 @@ def _emit_epilogue_default(
         if batch_off_c is not None:
             c_off = b.add(batch_off_c, c_off)
         h = b.vec_extract(acc_h, i)
+        if fused_epilogue is not None:
+            h = fused_epilogue.apply_scalar(b, h, c_m, c_n)
         _store_masked(c_m, c_n, c_off, h)
 
     _emit_mfma_acc_scatter(
