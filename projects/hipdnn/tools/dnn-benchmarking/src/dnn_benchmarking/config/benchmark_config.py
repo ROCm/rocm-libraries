@@ -220,6 +220,17 @@ class MetricsConfig:
             + int(self.roofline)
         )
 
+@dataclass(frozen=True)
+class EngineSelection:
+    """One ordered engine execution selection.
+
+    The plugin path is attached to the selection row rather than looked up by
+    engine ID so repeated engine IDs can be benchmarked against different
+    plugin builds.
+    """
+
+    engine_id: int
+    plugin_path: Optional[Path] = None
 
 @dataclass
 class SuiteConfig:
@@ -232,7 +243,7 @@ class SuiteConfig:
         warmup_iters: Number of warmup iterations per provider/engine.
         benchmark_iters: Number of benchmark iterations for timing.
         seed: Optional random seed for reproducible inputs.
-        engine_filter: If set, only iterate engine IDs in this list.
+        engine_filter: If set, ordered engine selections to run.
         rtol: Relative tolerance for correctness comparison.
         atol: Absolute tolerance for correctness comparison.
         gpu_backend: GPU timer backend to use.
@@ -304,16 +315,30 @@ class SuiteConfig:
                 f"Valid options: {valid_reference_providers}"
             )
 
-    def plugin_path_for_engine(self, engine_id: int) -> Optional[Path]:
-        """Return the plugin path assigned to ``engine_id``, if any."""
+    def engine_selections_for(self, engine_ids: List[int]) -> List[EngineSelection]:
+        """Return ordered engine selections for the provided engine IDs.
+
+        ``engine_ids`` is either the explicit ``--engine`` list, where duplicate
+        IDs are meaningful selections, or the backend-discovered engine list.
+        Multiple plugin paths are only valid with an explicit engine list and
+        are associated positionally with that list.
+        """
         if self.plugin_paths is None:
-            return None
+            return [EngineSelection(engine_id) for engine_id in engine_ids]
+
         if len(self.plugin_paths) == 1:
-            return self.plugin_paths[0]
-        if self.engine_filter is None:
-            return None
-        try:
-            index = self.engine_filter.index(engine_id)
-        except ValueError:
-            return None
-        return self.plugin_paths[index]
+            plugin_path = self.plugin_paths[0]
+            return [
+                EngineSelection(engine_id, plugin_path=plugin_path)
+                for engine_id in engine_ids
+            ]
+
+        if self.engine_filter is None or len(engine_ids) != len(self.plugin_paths):
+            raise ValueError(
+                "--plugin-path entry count must be 1 or match --engine count"
+            )
+
+        return [
+            EngineSelection(engine_id, plugin_path=plugin_path)
+            for engine_id, plugin_path in zip(engine_ids, self.plugin_paths)
+        ]

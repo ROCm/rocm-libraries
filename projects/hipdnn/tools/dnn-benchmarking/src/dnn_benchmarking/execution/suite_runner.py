@@ -79,11 +79,37 @@ def _resolve_engine_name(engine_id: int) -> str:
     return f"engine_{engine_id:#x}"
 
 
-def _set_plugin_path(hipdnn: Any, plugin_path: Optional[Path]) -> None:
+def _set_plugin_path(
+    hipdnn: Any, plugin_path: Optional[Path], loading_mode: Optional[Any] = None
+) -> None:
     """Set the process-wide hipDNN plugin search path for the next handle."""
     if plugin_path is None:
         return
-    hipdnn.set_engine_plugin_paths([str(plugin_path)])
+    paths = [str(plugin_path)]
+    if loading_mode is None:
+        hipdnn.set_engine_plugin_paths(paths)
+    else:
+        hipdnn.set_engine_plugin_paths(paths, loading_mode)
+
+
+def _engine_setup_error_result(
+    provider: str,
+    engine_id: int,
+    plugin_path: Optional[Path],
+    config: SuiteConfig,
+    error_message: str,
+) -> ProviderEngineResult:
+    """Build a per-engine error row for plugin-path/handle setup failures."""
+    return ProviderEngineResult(
+        provider=provider,
+        engine_id=engine_id,
+        status="error",
+        plugin_path=str(plugin_path) if plugin_path is not None else None,
+        error_message=error_message,
+        correctness=CorrectnessResult.failed(
+            rtol=config.rtol, atol=config.atol, error_message=error_message
+        ),
+    )
 
 
 def _delta_pct(value: Optional[float], baseline: Optional[float]) -> Optional[float]:
@@ -378,7 +404,7 @@ def run_graph_all_providers(
                 )
             ],
         )
-
+    engine_selections = config.engine_selections_for(engine_ids)
     ref_provider = _get_reference_provider(config, graph_json)
 
     # Compute analytical metrics once per graph — they're a function of
@@ -399,19 +425,40 @@ def run_graph_all_providers(
             warn_once("analytical", f"compute_io_bytes failed for {graph_name}: {e}")
 
     pe_results: List[ProviderEngineResult] = []
-    for engine_id in engine_ids:
-        engine_plugin_path = config.plugin_path_for_engine(engine_id)
-        engine_handle = handle
-        if engine_handle is None:
-            import hipdnn_frontend as hipdnn
-
-            _set_plugin_path(hipdnn, engine_plugin_path)
-            engine_handle = hipdnn.Handle()
-
+    for selection in engine_selections:
+        engine_id = selection.engine_id
+        engine_plugin_path = selection.plugin_path
         engine_name = _resolve_engine_name(engine_id)
-        if reporter is not None:
-            reporter.print_engine_start(engine_name)
+        engine_handle = handle
         with Timer() as t:
+            if engine_handle is None:
+                try:
+                    import hipdnn_frontend as hipdnn
+
+                    _set_plugin_path(
+                        hipdnn,
+                        engine_plugin_path,
+                        hipdnn.PluginLoadingMode.ABSOLUTE,
+                    )
+                    engine_handle = hipdnn.Handle()
+                except (ImportError, RuntimeError, ValueError, OSError) as e:
+                    pe_result = _engine_setup_error_result(
+                        provider=engine_name,
+                        engine_id=engine_id,
+                        plugin_path=engine_plugin_path,
+                        config=config,
+                        error_message=str(e),
+                    )
+                    pe_result.elapsed_time_ms = t.elapsed_ms
+                    if reporter is not None:
+                        reporter.print_engine_start(engine_name)
+                        reporter.print_engine_result(pe_result)
+                    pe_results.append(pe_result)
+                    continue
+
+            if reporter is not None:
+                reporter.print_engine_start(engine_name)
+
             pe_result = _run_single_provider_engine(
                 graph_path=graph_path,
                 graph_json_str=graph_json_str,
@@ -421,6 +468,7 @@ def run_graph_all_providers(
                 handle=engine_handle,
                 provider=engine_name,
                 engine_id=engine_id,
+                plugin_path=engine_plugin_path,
                 ref_provider=ref_provider,
                 validation_requested=validation_requested,
                 graph_json=graph_json,
@@ -515,6 +563,7 @@ def _run_single_provider_engine(
     handle: Any,
     provider: str,
     engine_id: int,
+    plugin_path: Optional[Path],
     ref_provider: Optional[ReferenceProvider],
     validation_requested: bool,
     graph_json: Dict[str, Any],
@@ -655,7 +704,7 @@ def _run_single_provider_engine(
                     warmup_iters=config.warmup_iters,
                     benchmark_iters=config.benchmark_iters,
                     metrics_config=config.metrics,
-                    plugin_path=config.plugin_path_for_engine(engine_id),
+                    plugin_path=plugin_path,
                 )
                 if extra:
                     result.extra_metrics = extra

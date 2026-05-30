@@ -13,14 +13,16 @@ def _parse_engine_list(s: str) -> List[int]:
 
     Engine IDs are deterministic FNV-1a hashes of the engine name and may
     be negative when interpreted as signed int64, so we accept any int.
-    Duplicates are removed while preserving first-seen order.
+    Duplicate IDs are preserved because each comma-delimited entry is an
+    ordered execution selection; this allows comparing the same engine ID
+    from different plugin paths.
 
     Examples:
       "1"                      -> [1]
       "1,2,3"                  -> [1, 2, 3]
       "1, 2"                   -> [1, 2]
-      "1,1,2"                  -> [1, 2]
-      "3,1,3,2"                -> [3, 1, 2]
+      "1,1,2"                  -> [1, 1, 2]
+      "3,1,3,2"                -> [3, 1, 3, 2]
       "-4567890123456789012"   -> [-4567890123456789012]
     """
     parts = [p.strip() for p in s.split(",")]
@@ -31,14 +33,7 @@ def _parse_engine_list(s: str) -> List[int]:
         ids = [int(p) for p in parts]
     except ValueError:
         raise argparse.ArgumentTypeError(f"--engine expects integer ID(s), got {s!r}")
-    # Deduplicate while preserving first-seen order
-    seen: set = set()
-    deduped: List[int] = []
-    for i in ids:
-        if i not in seen:
-            seen.add(i)
-            deduped.append(i)
-    return deduped
+    return ids
 
 def _parse_plugin_path_list(s: str) -> List[Path]:
     """Parse --plugin-path as a comma-separated list of plugin directories."""

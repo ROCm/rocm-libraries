@@ -107,6 +107,7 @@ def run_internal_profiling(args: argparse.Namespace) -> int:
             handle=handle,
             provider="profiling-inner",
             engine_id=engine_id,
+            plugin_path=plugin_path,
             ref_provider=None,
             validation_requested=False,
             graph_json=graph_json,

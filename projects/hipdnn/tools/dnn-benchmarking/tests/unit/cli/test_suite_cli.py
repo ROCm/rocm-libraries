@@ -80,14 +80,14 @@ class TestParserGlobAndFilters:
         args = parser.parse_args(["--graph", "g.json"])
         assert args.engine is None
 
-    def test_engine_flag_deduplicates_preserving_order(self) -> None:
-        """--engine 1,1,1 -> [1]; '3,1,3,2' -> [3, 1, 2] (first-seen order)."""
+    def test_engine_flag_preserves_duplicates(self) -> None:
+        """--engine entries are ordered execution selections, not a set."""
         parser = create_parser()
         args = parser.parse_args(["--graph", "g.json", "--engine", "1,1,1"])
-        assert args.engine == [1]
+        assert args.engine == [1, 1, 1]
 
         args = parser.parse_args(["--graph", "g.json", "--engine", "3,1,3,2"])
-        assert args.engine == [3, 1, 2]
+        assert args.engine == [3, 1, 3, 2]
 
     def test_plugin_path_accepts_comma_separated_list(self) -> None:
         parser = create_parser()
@@ -261,6 +261,42 @@ class TestMainRouting:
         suite_config = mock_benchmark.call_args.kwargs["config"]
         assert suite_config.engine_filter == [2, 1]
         assert suite_config.plugin_paths == [Path("/plugins/b"), Path("/plugins/a")]
+        assert suite_config.compare_engines is True
+
+    @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
+    @patch("dnn_benchmarking.cli.suite_runner_cli.run_suite_benchmark")
+    def test_same_engine_plugin_paths_propagate_as_ordered_selections(
+        self, mock_benchmark: MagicMock, mock_gpu: MagicMock
+    ) -> None:
+        mock_benchmark.return_value = 0
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            paths = self._create_graph_files(Path(tmpdir), 1)
+
+            from dnn_benchmarking.cli.main import main
+
+            with patch(
+                "sys.argv",
+                [
+                    "dnn-benchmark",
+                    "--graph",
+                    paths[0],
+                    "--engine",
+                    "1,1",
+                    "--plugin-path",
+                    "/plugins/a,/plugins/b",
+                    "--compare-engines",
+                ],
+            ):
+                main()
+
+        suite_config = mock_benchmark.call_args.kwargs["config"]
+        selections = suite_config.engine_selections_for(suite_config.engine_filter)
+        assert suite_config.engine_filter == [1, 1]
+        assert [s.plugin_path for s in selections] == [
+            Path("/plugins/a"),
+            Path("/plugins/b"),
+        ]
         assert suite_config.compare_engines is True
 
     def test_plugin_path_count_mismatch_rejected_at_cli_layer(self) -> None:

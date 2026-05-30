@@ -80,9 +80,13 @@ class TestSuiteConfigPluginPaths:
             engine_filter=[1, 2],
             plugin_paths=[Path("/plugins/a")],
         )
+        selections = config.engine_selections_for([1, 2])
 
-        assert config.plugin_path_for_engine(1) == Path("/plugins/a")
-        assert config.plugin_path_for_engine(2) == Path("/plugins/a")
+        assert [s.engine_id for s in selections] == [1, 2]
+        assert [s.plugin_path for s in selections] == [
+            Path("/plugins/a"),
+            Path("/plugins/a"),
+        ]
         assert config.plugin_path == Path("/plugins/a")
 
     def test_multiple_plugin_paths_follow_engine_order(self) -> None:
@@ -90,10 +94,28 @@ class TestSuiteConfigPluginPaths:
             engine_filter=[2, 1],
             plugin_paths=[Path("/plugins/b"), Path("/plugins/a")],
         )
+        selections = config.engine_selections_for([2, 1])
 
-        assert config.plugin_path_for_engine(2) == Path("/plugins/b")
-        assert config.plugin_path_for_engine(1) == Path("/plugins/a")
+        assert [s.engine_id for s in selections] == [2, 1]
+        assert [s.plugin_path for s in selections] == [
+            Path("/plugins/b"),
+            Path("/plugins/a"),
+        ]
         assert config.plugin_path is None
+
+    def test_repeated_engine_ids_keep_distinct_plugin_paths(self) -> None:
+        config = SuiteConfig(
+            engine_filter=[1, 1],
+            plugin_paths=[Path("/plugins/a"), Path("/plugins/b")],
+        )
+
+        selections = config.engine_selections_for([1, 1])
+
+        assert [s.engine_id for s in selections] == [1, 1]
+        assert [s.plugin_path for s in selections] == [
+            Path("/plugins/a"),
+            Path("/plugins/b"),
+        ]
 
     def test_multiple_plugin_paths_require_engine_filter(self) -> None:
         with pytest.raises(ValueError, match="requires --engine"):

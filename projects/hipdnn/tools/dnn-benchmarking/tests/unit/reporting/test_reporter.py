@@ -210,6 +210,37 @@ class TestReporterEngineTable:
                         e2e_mean_delta_pct=0.0,
                         e2e_median_delta_pct=0.0,
                     ),
+                ),
+                ProviderEngineResult(
+                    provider="engine_1",
+                    engine_id=1,
+                    status="success",
+                    plugin_path="/plugins/a",
+                    gpu_kernel_stats=BenchmarkStats(
+                        mean_ms=1.25,
+                        median_ms=0.81,
+                        std_ms=0.1,
+                        min_ms=0.8,
+                        max_ms=1.4,
+                        p95_ms=1.3,
+                        p99_ms=1.4,
+                    ),
+                    e2e_stats=BenchmarkStats(
+                        mean_ms=1.5,
+                        median_ms=2.16,
+                        std_ms=0.2,
+                        min_ms=1.2,
+                        max_ms=2.4,
+                        p95_ms=2.2,
+                        p99_ms=2.4,
+                    ),
+                    comparison=EngineComparison(
+                        baseline_engine_id=2,
+                        kernel_mean_delta_pct=25.0,
+                        kernel_median_delta_pct=-10.0,
+                        e2e_mean_delta_pct=-25.0,
+                        e2e_median_delta_pct=20.0,
+                    ),
                 )
             ],
         )
@@ -223,3 +254,7 @@ class TestReporterEngineTable:
         assert "e2e_mean_delta_pct" in result
         assert "e2e_median_delta_pct" in result
         assert "0.00%" in result
+        assert "25.00%" in result
+        assert "-10.00%" in result
+        assert "-25.00%" in result
+        assert "20.00%" in result

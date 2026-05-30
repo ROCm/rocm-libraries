@@ -14,6 +14,7 @@ import pytest
 from dnn_benchmarking.reporting.statistics import BenchmarkStats
 from dnn_benchmarking.reporting.suite_results import (
     CorrectnessResult,
+    EngineComparison,
     GraphResult,
     ProviderEngineResult,
     StatusCounts,
@@ -148,6 +149,44 @@ class TestProviderEngineResult:
         assert "e2e_stats" in d
         assert "correctness" in d
         assert d["gpu_kernel_stats"]["mean_ms"] == 1.0
+
+    def test_success_serializes_plugin_path_and_comparison(self):
+        stats = BenchmarkStats(
+            mean_ms=1.0,
+            std_ms=0.1,
+            min_ms=0.5,
+            max_ms=1.5,
+            p95_ms=1.4,
+            p99_ms=1.49,
+            median_ms=0.9,
+        )
+        pe = ProviderEngineResult(
+            provider="miopen",
+            engine_id=1,
+            status="success",
+            plugin_path="/plugins/a",
+            cpu_build_time_ms=10.5,
+            gpu_kernel_stats=stats,
+            e2e_stats=stats,
+            comparison=EngineComparison(
+                baseline_engine_id=2,
+                kernel_mean_delta_pct=25.0,
+                kernel_median_delta_pct=-10.0,
+                e2e_mean_delta_pct=-25.0,
+                e2e_median_delta_pct=20.0,
+            ),
+        )
+
+        d = pe.to_dict()
+
+        assert d["plugin_path"] == "/plugins/a"
+        assert d["comparison_to_baseline"] == {
+            "baseline_engine_id": 2,
+            "kernel_mean_delta_pct": 25.0,
+            "kernel_median_delta_pct": -10.0,
+            "e2e_mean_delta_pct": -25.0,
+            "e2e_median_delta_pct": 20.0,
+        }
 
     def test_error_serializes_without_timing(self):
         """ProviderEngineResult with status='error' serializes with
