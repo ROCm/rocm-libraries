@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -68,7 +68,7 @@
 #define rocsparse_hipFree(p_) rocsparse_hip_free((p_), ROCSPARSE_HIP_SOURCE_TAG(__LINE__))
 
 #define rocsparse_hipMallocAsync(p_, nbytes_, stream_) \
-    rocsparse_hip_malloc_async(                         \
+    rocsparse_hip_malloc_async(                        \
         (void**)(p_), (nbytes_), (stream_), ROCSPARSE_HIP_SOURCE_TAG(__LINE__))
 
 #define rocsparse_hipFreeAsync(p_, stream_) \
