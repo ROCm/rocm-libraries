@@ -1,0 +1,128 @@
+name: TheRock CI ASAN
+
+# Opt-in hipblaslt ASAN smoke build. Runs only when a PR carries the
+# `ci:asan` label so we do not burn the limited gfx90a runner pool on
+# every PR. Scope is intentionally narrow:
+#   - gfx90a only (cheap arch, fast TensileCreateLibrary)
+#   - hipblaslt only (skip rocblas/rocroller/hipblas — those have their
+#     own ASAN issues we do not own)
+#   - full hipblaslt-test (gfx90a is fast enough)
+#   - non-blocking (continue-on-error). Promote to required after the
+#     suppression list stabilizes.
+#
+# The build/test infrastructure is reused verbatim from therock-ci-linux:
+# the only delta is the cmake_options block and the artifact_group suffix
+# which carries the "asan" marker through to ARTIFACT_GROUP at test time,
+# tripping is_asan() in test/therock/test_hipblaslt.py.
+
+on:
+  pull_request:
+    types:
+      - labeled
+      - synchronize
+      - reopened
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  # The labeled-event fires for every label add/remove; gate on the actual
+  # label set so we run only when ci:asan is present. workflow_dispatch
+  # bypasses the gate (manual run is always opt-in).
+  check_label:
+    name: "Check ci:asan label"
+    runs-on: ubuntu-24.04
+    outputs:
+      run: ${{ steps.gate.outputs.run }}
+    steps:
+      - id: gate
+        env:
+          IS_DISPATCH: ${{ github.event_name == 'workflow_dispatch' }}
+          HAS_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'ci:asan') }}
+        run: |
+          if [[ "$IS_DISPATCH" == "true" || "$HAS_LABEL" == "true" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  setup:
+    name: "Setup"
+    needs: check_label
+    if: needs.check_label.outputs.run == 'true'
+    runs-on: ubuntu-24.04
+    outputs:
+      therock_ref: ${{ steps.ci-env.outputs.therock-ref }}
+      docker_image: ${{ steps.ci-env.outputs.docker-image }}
+      build_runs_on: ${{ steps.ci-env.outputs.linux-runner }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github
+          sparse-checkout-cone-mode: true
+          fetch-depth: 1
+
+      - name: Load CI environment
+        id: ci-env
+        uses: ./.github/actions/ci-env
+
+  asan:
+    name: "Linux ASAN (hipblaslt | gfx90a)"
+    needs: setup
+    permissions:
+      contents: read
+      id-token: write
+    # Non-blocking: ASAN findings are surfaced but do not fail the PR
+    # check until the suppression set is established. Flip to false when
+    # the run is stable.
+    continue-on-error: true
+    uses: ./.github/workflows/therock-ci-linux.yml
+    secrets: inherit
+    with:
+      therock_ref: ${{ needs.setup.outputs.therock_ref }}
+      docker_image: ${{ needs.setup.outputs.docker_image }}
+      # Build flags:
+      #   THEROCK_ENABLE_BLAS=ON          — pulls hipblaslt into the build
+      #   THEROCK_SANITIZER=ASAN          — TheRock-side sanitizer preset
+      #                                     (sets -fsanitize=address,
+      #                                     -shared-libasan, -fuse-ld=lld
+      #                                     via therock_sanitizers.cmake)
+      #   HIPBLASLT_ENABLE_ASAN=ON        — hipblaslt-side opt-in (kept
+      #                                     explicit so the option does
+      #                                     not silently regress)
+      cmake_options: "-DTHEROCK_ENABLE_BLAS=ON -DTHEROCK_SANITIZER=ASAN -DHIPBLASLT_ENABLE_ASAN=ON"
+      projects_to_test: "hipblaslt"
+      test_type: "full"
+      amdgpu_families: "gfx90a"
+      # Suffix routes artifacts into a separate S3 path so the ASAN build
+      # does not collide with non-ASAN runs, and trips is_asan() at test
+      # time via ARTIFACT_GROUP detection.
+      artifact_group: "gfx90a-asan"
+      test_runs_on: "linux-gfx90a-gpu-rocm"
+      build_runs_on: ${{ needs.setup.outputs.build_runs_on }}
+
+  summary:
+    name: "TheRock CI ASAN Summary"
+    if: always()
+    needs:
+      - check_label
+      - asan
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Report
+        env:
+          GATE: ${{ needs.check_label.outputs.run }}
+          ASAN: ${{ needs.asan.result }}
+        run: |
+          if [[ "$GATE" != "true" ]]; then
+            echo "Skipped (ci:asan label not set)."
+            exit 0
+          fi
+          echo "ASAN job result: ${ASAN}"
+          # Intentionally do not fail; the asan job is continue-on-error.

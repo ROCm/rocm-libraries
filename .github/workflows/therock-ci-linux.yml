@@ -24,6 +24,14 @@ on:
         type: string
       build_runs_on:
         type: string
+      # Optional override for the S3 artifact group / test-side ARTIFACT_GROUP.
+      # Defaults to amdgpu_families. Set this for variant builds (e.g. ASAN)
+      # so their artifacts do not collide with the standard build's S3 path
+      # and so test_hipblaslt.py's is_asan() check fires by detecting "asan"
+      # in ARTIFACT_GROUP.
+      artifact_group:
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -139,10 +147,15 @@ jobs:
 
       - name: Post Build Upload
         if: always()
+        env:
+          # Use the caller-supplied artifact_group when set so variant builds
+          # (ASAN, etc.) land in their own S3 path; otherwise fall back to
+          # AMDGPU_FAMILIES for parity with prior behavior.
+          ARTIFACT_GROUP: ${{ inputs.artifact_group != '' && inputs.artifact_group || env.AMDGPU_FAMILIES }}
         run: |
           python3 TheRock/build_tools/github_actions/post_build_upload.py \
             --run-id ${{ github.run_id }} \
-            --artifact-group ${{ env.AMDGPU_FAMILIES }} \
+            --artifact-group ${ARTIFACT_GROUP} \
             --build-dir TheRock/build \
             --upload
 
@@ -167,6 +180,7 @@ jobs:
       therock_ref: ${{ inputs.therock_ref }}
       projects_to_test: ${{ inputs.projects_to_test }}
       amdgpu_families: ${{ inputs.amdgpu_families }}
+      artifact_group: ${{ inputs.artifact_group }}
       test_runs_on: ${{ inputs.test_runs_on }}
       platform: "linux"
       test_type: ${{ inputs.test_type }}
