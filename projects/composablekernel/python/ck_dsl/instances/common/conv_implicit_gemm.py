@@ -354,8 +354,22 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
             f"(hardware cap) on {arch}"
         )
 
-    # MFMA atom must be in the target's catalog (f16 in/out fp32 acc).
+    # The MMA *family* is selected from the target's wave size: CDNA (wave64)
+    # uses MFMA, the RDNA wave32 targets (gfx11xx) use WMMA. The same warp-tile
+    # shape thus resolves to an MFMA op_id on gfx942/gfx950 and a WMMA op_id on
+    # gfx1151. ``spec.wave_size`` is baked into ``block_size``, so it must match
+    # the target's wave size or the lane geometry is wrong on hardware.
+    family = "wmma" if target.wave_size == 32 else "mma"
+    if spec.wave_size != target.wave_size:
+        return False, (
+            f"spec wave_size {spec.wave_size} != {arch} wave_size "
+            f"{target.wave_size}"
+        )
+
+    # MMA atom must be in the target's catalog (f16 in/out fp32 acc).
+    atom = (spec.warp_tile_m, spec.warp_tile_n, spec.warp_tile_k)
     if not target.mma.has_shape(
+        family=family,
         a_dtype="f16",
         b_dtype="f16",
         c_dtype="fp32",
@@ -363,10 +377,72 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
         n=spec.warp_tile_n,
         k=spec.warp_tile_k,
     ):
-        atom = (spec.warp_tile_m, spec.warp_tile_n, spec.warp_tile_k)
         return False, f"unsupported f16 warp_tile {atom} on {arch}"
 
+    # WMMA (RDNA wave32) coverage mirrors the unified GEMM's narrow subset: the
+    # 16x16x16 atom with the simple ``mem`` pipeline + ``default`` epilogue and
+    # synchronous descriptor-driven loads. The richer MFMA-shaped paths
+    # (compv3/compv4 scheduler interleave, cshuffle LDS-staged C, async DMA,
+    # K-unroll, chiplet swizzle, grouped conv) are gated off until ported.
+    if family == "wmma":
+        if atom != (16, 16, 16):
+            return False, f"WMMA conv supports only 16x16x16 (got {atom}) on {arch}"
+        if spec.pipeline != "mem":
+            return False, (
+                f"WMMA conv supports only the 'mem' pipeline "
+                f"(got {spec.pipeline!r}) on {arch}"
+            )
+        if spec.epilogue != "default":
+            return False, (
+                f"WMMA conv supports only the 'default' epilogue "
+                f"(got {spec.epilogue!r}) on {arch}"
+            )
+        for flag, label in (
+            (spec.async_dma, "async_dma"),
+            (spec.unroll_k, "unroll_k"),
+            (spec.chiplet_swizzle, "chiplet_swizzle"),
+        ):
+            if flag:
+                return False, f"WMMA conv does not support {label} on {arch}"
+        if spec.groups != 1:
+            return False, f"WMMA conv supports only groups=1 (got {spec.groups})"
+
     return True, "ok"
+
+
+def _conv_mma_family(arch: str) -> str:
+    from ...core.arch import ArchTarget
+
+    return "wmma" if ArchTarget.from_gfx(arch).wave_size == 32 else "mma"
+
+
+def _resolve_conv_op(spec: ImplicitGemmConvSpec, arch: str):
+    """Resolve the :class:`~ck_dsl.core.arch.MmaOp` for ``spec`` on ``arch``.
+
+    Returns the MFMA op on CDNA and the WMMA op on gfx1151. The op carries the
+    backend ``op_id`` (consumed by :meth:`IRBuilder.mma`), the per-lane fragment
+    lengths, and the lane/slot -> tile-coordinate layout maps that drive the
+    fragment loads and the accumulator scatter — the cross-arch contract that
+    lets one conv body emit both ISAs.
+    """
+    from ...core.arch import ArchTarget
+
+    target = ArchTarget.from_gfx(arch)
+    op = target.mma.op_for_shape(
+        family=_conv_mma_family(arch),
+        a_dtype="f16",
+        b_dtype="f16",
+        c_dtype="fp32",
+        m=spec.warp_tile_m,
+        n=spec.warp_tile_n,
+        k=spec.warp_tile_k,
+    )
+    if op is None:
+        raise ValueError(
+            f"no MMA atom for conv warp_tile "
+            f"({spec.warp_tile_m},{spec.warp_tile_n},{spec.warp_tile_k}) on {arch}"
+        )
+    return op
 
 
 # ---------------------------------------------------------------------
@@ -499,6 +575,36 @@ def _emit_smem_load(b: IRBuilder, smem: Value, row: Value, col: Value, n: int) -
     return b.smem_load_vN_f16(smem, row, col, n=n)
 
 
+def _emit_frag_smem_load(
+    b: IRBuilder,
+    src: Value,
+    mn_in_atom: Value,
+    k_in_atom: Value,
+    atom_mn_base: Value,
+    k_tile_base: Value,
+    frag_len: int,
+) -> Value:
+    """Load one ``frag_len``-wide operand fragment from a row-major LDS tile.
+
+    Both the A LDS tile ``(block_m, block_k)`` and the B LDS tile
+    ``(block_n, block_k)`` are row-major with the M/N index as the row and K as
+    the column. One lane's fragment occupies a single tile row
+    (``atom_mn_base + mn_in_atom``) and ``frag_len`` contiguous K columns from
+    ``k_tile_base + k_in_atom`` — true for both the MFMA and WMMA layout maps,
+    whose A/B fragment slots are K-contiguous. fp16 smem loads cap at 8 lanes,
+    so a wider fragment (WMMA ``<16 x half>``) is assembled from 8-wide chunks.
+    """
+    lds_row = b.add(atom_mn_base, mn_in_atom)
+    lds_col = b.add(k_tile_base, k_in_atom)
+    if frag_len <= 8:
+        return _emit_smem_load(b, src, lds_row, lds_col, frag_len)
+    frag = None
+    for off in range(0, frag_len, 8):
+        chunk = _emit_smem_load(b, src, lds_row, b.add(lds_col, b.const_i32(off)), 8)
+        frag = chunk if frag is None else b.vec_concat(frag, chunk)
+    return frag
+
+
 def _choose_load_vec(spec: ImplicitGemmConvSpec) -> int:
     """Pick the largest fp16 load vector width that divides the K tile and
     distributes evenly over `block_size` threads. Same rule as GEMM."""
@@ -555,10 +661,17 @@ def build_implicit_gemm_conv(
     B_bytes = b.param("B_bytes", I32)
     D_bytes = b.param("D_bytes", I32)
 
-    atom = spec.atom
-    a_per_lane = atom.a_per_lane
-    b_per_lane = atom.b_per_lane
-    c_per_lane = atom.c_per_lane
+    # Resolve the MMA atom from the target catalog: an MFMA op on CDNA, a WMMA
+    # op on gfx1151. ``op`` carries the per-lane fragment lengths and the
+    # lane/slot -> coordinate layout maps that drive both the fragment loads and
+    # the accumulator scatter, so the single conv body emits both ISAs. The
+    # legacy ``MfmaAtom`` (``spec.atom``) is only used by the MFMA-specific
+    # phases; it is ``None`` on the WMMA path.
+    op = _resolve_conv_op(spec, arch)
+    atom = spec.atom if op.family == "mma" else None
+    a_per_lane = op.a_frag_len
+    b_per_lane = op.b_frag_len
+    c_per_lane = op.c_frag_len
 
     block_m, block_n, block_k = spec.tile_m, spec.tile_n, spec.tile_k
 
@@ -570,7 +683,7 @@ def build_implicit_gemm_conv(
     # Replaces ~8 lines of hand-rolled ``b.div``/``b.mod`` lane arithmetic
     # plus the manual ``block_m_off = block_id_y * block_m`` math.
     grid = WarpGrid.from_atom(
-        atom,
+        op,
         tile_m=block_m,
         tile_n=block_n,
         tile_k=block_k,
@@ -832,6 +945,52 @@ def build_implicit_gemm_conv(
             rsrc=b_rsrc,
         )
 
+    def emit_wmma_phase(
+        A_src: Value, B_src: Value, iter_vars: Sequence[Value]
+    ) -> List[Value]:
+        """One K-tile of WMMA atoms, fully MMA-contract driven (gfx1151).
+
+        Mirrors ``gemm_universal._emit_wmma_phase``: operand fragments come from
+        the op's A/B layout maps and the matmul is emitted target-neutrally via
+        :meth:`IRBuilder.mma` (the backend selects the WMMA intrinsic). The A
+        map yields ``(row, k)`` and the B map ``(k, col)``; both LDS tiles store
+        the M/N index as the row and K as the column, so we read the M-coord
+        from the A map and the N-coord (= ``col``) from the B map.
+        """
+        a_map = op.a_layout()
+        b_map = op.b_layout()
+        a_row_in_atom, a_k_in_atom = a_map.coord(b, lane, 0)
+        b_k_in_atom, b_col_in_atom = b_map.coord(b, lane, 0)
+        warp_m_off = grid.warp_m_off(b)
+        warp_n_off = grid.warp_n_off(b)
+        new_accs: List[Value] = list(iter_vars)
+        for kk in range(k_atoms):
+            k_tile_base = b.const_i32(kk * spec.warp_tile_k)
+            a_rows = []
+            for mi in range(mfmas_m):
+                atom_row = b.add(warp_m_off, b.const_i32(mi * spec.warp_tile_m))
+                a_rows.append(
+                    _emit_frag_smem_load(
+                        b, A_src, a_row_in_atom, a_k_in_atom,
+                        atom_row, k_tile_base, a_per_lane,
+                    )
+                )
+            b_cols = []
+            for ni in range(mfmas_n):
+                atom_row = b.add(warp_n_off, b.const_i32(ni * spec.warp_tile_n))
+                b_cols.append(
+                    _emit_frag_smem_load(
+                        b, B_src, b_col_in_atom, b_k_in_atom,
+                        atom_row, k_tile_base, b_per_lane,
+                    )
+                )
+            flat = 0
+            for mi in range(mfmas_m):
+                for ni in range(mfmas_n):
+                    new_accs[flat] = b.mma(op, a_rows[mi], b_cols[ni], new_accs[flat])
+                    flat += 1
+        return new_accs
+
     def emit_mfma_phase(
         A_src: Value, B_src: Value, iter_vars: Sequence[Value]
     ) -> List[Value]:
@@ -842,6 +1001,8 @@ def build_implicit_gemm_conv(
         + MFMA + VMEM traffic. The hints don't reorder our SSA — they tell
         the post-RA scheduler what groups to keep together.
         """
+        if op.family == "wmma":
+            return emit_wmma_phase(A_src, B_src, iter_vars)
         # Tile-level lane decode (CK Tile ``BlockGemmAdaptor`` analogue):
         #   16x16:  m_in_atom = lane % 16,  k_blk = lane / 16,  n_in_atom = lane % 16
         #   32x32:  m_in_atom = lane % 32,  k_blk = lane / 32,  n_in_atom = lane % 32
@@ -996,6 +1157,20 @@ def build_implicit_gemm_conv(
             d_rsrc,
             c0,
         )
+    elif op.family == "wmma":
+        _emit_direct_epilogue_wmma(
+            b,
+            spec,
+            op,
+            final_accs,
+            warp_m_idx,
+            warp_n_idx,
+            lane,
+            block_m_off_v,
+            block_n_off_v,
+            d_rsrc,
+            c0,
+        )
     else:
         _emit_direct_epilogue(
             b,
@@ -1080,6 +1255,70 @@ def _emit_direct_epilogue(
                 # silently dropped by the buffer rsrc (see
                 # `cktile_fixed_lean_kernel.hpp`:
                 # `b_offs[bi] = valid ? real_off_b : 0x80000000`).
+                safe_off = b.select(ok, d_off_bytes, b.const_i32((1 << 31) - 1))
+                b.buffer_store_f16(d_rsrc, safe_off, c0, v_f16)
+
+
+def _emit_direct_epilogue_wmma(
+    b: IRBuilder,
+    spec: ImplicitGemmConvSpec,
+    op,
+    accs: Sequence[Value],
+    warp_m_idx: Value,
+    warp_n_idx: Value,
+    lane: Value,
+    block_m_off: Value,
+    block_n_off: Value,
+    d_rsrc: Value,
+    c0: Value,
+) -> None:
+    """Per-lane fp16 store for the WMMA (gfx1151) accumulator layout.
+
+    The WMMA wave32 accumulator scatters the M x N tile across lanes
+    differently from MFMA, so the (row, col) of every per-lane slot comes from
+    the op's accumulator layout map (``op.c_layout()``) rather than the
+    MFMA-specific ``MfmaAtom.lane_to_output``. Each slot is one f16 store routed
+    through the same D descriptor + OOB-safe buffer-store idiom as the MFMA
+    direct epilogue.
+    """
+    p = spec.problem
+    mfmas_m = spec.mfmas_per_warp_m
+    mfmas_n = spec.mfmas_per_warp_n
+
+    warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * spec.warp_tile_m))
+    warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * spec.warp_tile_n))
+
+    c_M = b.const_i32(p.M)
+    c_N = b.const_i32(p.N_gemm)
+    D_desc = make_d_descriptor(p)
+    c_map = op.c_layout()
+
+    flat = 0
+    for mi in range(mfmas_m):
+        for ni in range(mfmas_n):
+            acc = accs[flat]
+            flat += 1
+            atom_m_off = b.add(
+                b.add(block_m_off, warp_m_off),
+                b.const_i32(mi * spec.warp_tile_m),
+            )
+            atom_n_off = b.add(
+                b.add(block_n_off, warp_n_off),
+                b.const_i32(ni * spec.warp_tile_n),
+            )
+            for i in range(op.c_frag_len):
+                row_off, col_off = c_map.coord(b, lane, i)
+                m_val = b.add(atom_m_off, row_off)
+                n_val = b.add(atom_n_off, col_off)
+                m_ok = b.cmp_lt(m_val, c_M)
+                n_ok = b.cmp_lt(n_val, c_N)
+                ok = b.land(m_ok, n_ok)
+
+                v_f32 = b.vec_extract(acc, i)
+                v_f16 = b.trunc_f32_to_f16(v_f32)
+
+                d_off_elems, _ = D_desc.offset(b, m=m_val, k_out=n_val)
+                d_off_bytes = b.mul(d_off_elems, b.const_i32(2))
                 safe_off = b.select(ok, d_off_bytes, b.const_i32((1 << 31) - 1))
                 b.buffer_store_f16(d_rsrc, safe_off, c0, v_f16)
 

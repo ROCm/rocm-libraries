@@ -3382,7 +3382,18 @@ class TestLoweringRegistryBuild(unittest.TestCase):
         self.assertEqual(args["K"], 64)
         self.assertIs(args["bias"], runtime_args["bias"])
         self.assertIs(args["residual_0"], runtime_args["residual"])
-        self.assertEqual(grid, (1, 1, 1))
+        # The grid is derived from the first candidate's tile, which the
+        # autotuner selects against the launch device's MMA catalog (WMMA on
+        # gfx11 wave32 picks a 32x32 first tile; a CDNA/no-GPU box picks a
+        # larger one). Assert the grid matches the chosen tile rather than
+        # hardcoding a single-tile (1,1,1) expectation.
+        tile = cfg.spec.tile
+        expected_grid = (
+            (128 + tile.tile_n - 1) // tile.tile_n,
+            (128 + tile.tile_m - 1) // tile.tile_m,
+            1,
+        )
+        self.assertEqual(grid, expected_grid)
 
     def test_elementwise_lowerer_launch_args_binary(self):
         from ck_dsl.helpers import (

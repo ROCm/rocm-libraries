@@ -292,6 +292,21 @@ def is_valid_spec(
 
     if spec.out_dtype not in ("i8", "fp8e4m3", "bf8e5m2"):
         return False, f"unsupported out_dtype {spec.out_dtype!r}"
+
+    # fp8/bf8 output goes through ``v_cvt_pk_{fp8,bf8}_f32`` (the
+    # ``llvm.amdgcn.cvt.pk.{fp8,bf8}.f32`` intrinsic), which only exists on
+    # the CDNA (gfx9xx) ISA — RDNA3.5 (gfx1151) has no fp8/bf8 pack
+    # conversion op, so selection would abort with an uncatchable
+    # ``LLVM ERROR: Cannot select``. Reject it as a clean spec error so
+    # callers get a structured reason. The ``i8`` path uses
+    # ``v_cvt_f32_to_i8`` (available everywhere) and stays wave32-valid.
+    if spec.out_dtype in ("fp8e4m3", "bf8e5m2") and target.family != "cdna":
+        return False, (
+            f"out_dtype {spec.out_dtype!r} needs the CDNA-only "
+            f"v_cvt_pk_{{fp8,bf8}}_f32 conversion; {arch} (family "
+            f"{target.family!r}) has no fp8/bf8 pack op -- use out_dtype='i8'"
+        )
+
     ok, why = validate_io(
         IOSpecRule(
             dtype=spec.dtype,
