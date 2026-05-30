@@ -45,7 +45,7 @@ inline size_t getPow2Mask(size_t pow_2)
     {
         mask = (mask >> 1) | pow_2;
     }
-    return mask & ~(3);
+    return mask & ~(3u);
 }
 
 inline size_t getPow2Minimum(size_t pow_2)
@@ -90,7 +90,8 @@ public:
 
         static Iterator BuildEnd(size_t mask) { return {mask, MAX_BIT_POS}; }
 
-        Iterator(size_t range_mask, int bit_position) : mask(range_mask), bitPosition(bit_position)
+        Iterator(size_t range_mask, unsigned int bit_position)
+            : mask(range_mask), bitPosition(bit_position)
         {
         }
 
@@ -401,7 +402,7 @@ public:
     void realPropDhy(const Handle& handle,
                      ConstData_t dhy,
                      Data_t workSpace,
-                     unsigned int layer,
+                     size_t layer,
                      const SequenceIterator& currentSeq,
                      SequenceDirection direction) const;
 
@@ -411,7 +412,7 @@ public:
                                     Data_t,
                                     Data_t workSpace,
                                     Data_t reserveSpace,
-                                    int layer,
+                                    size_t layer,
                                     const SequenceIterator& seq,
                                     SequenceDirection direction) const;
 

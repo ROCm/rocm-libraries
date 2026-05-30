@@ -86,7 +86,7 @@ struct ProblemDescription : ProblemDescriptionBase
     const TensorDescriptor& GetYDesc() const { return yDesc; }
     const TensorDescriptor& GetMeanDesc() const { return meanDesc; }
     const TensorDescriptor& GetRstdDesc() const { return rstdDesc; }
-    int32_t GetNumGroups() const { return num_groups; }
+    int32_t GetNumGroups() const { return static_cast<int32_t>(num_groups); }
     float GetEpsilon() const { return epsilon; }
 
     bool IsValidType() const

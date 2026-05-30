@@ -65,7 +65,7 @@ void RNNBackwardDataModularAlgo::PrepareWriteBuffers(const Handle& handle,
 void RNNBackwardDataModularAlgo::PropDhy(const Handle& handle,
                                          ConstData_t dhy,
                                          Data_t workSpace,
-                                         unsigned int layer,
+                                         size_t layer,
                                          const SequenceIterator& currentSeq,
                                          SequenceDirection direction) const
 {
@@ -126,7 +126,7 @@ void RNNBackwardDataModularAlgo::PropDhy(const Handle& handle,
 void RNNBackwardDataModularAlgo::PropHiddenDht(const Handle& handle,
                                                ConstData_t w,
                                                Data_t workSpace,
-                                               int layer,
+                                               size_t layer,
                                                const SequenceIterator& currentSeq,
                                                SequenceDirection direction) const
 {
@@ -168,7 +168,7 @@ void RNNBackwardDataModularAlgo::UpdateHStatePerTimeSeq(const Handle& handle,
                                                         Data_t,
                                                         Data_t workSpace,
                                                         Data_t reserveSpace,
-                                                        int layer,
+                                                        size_t layer,
                                                         const SequenceIterator& seq,
                                                         SequenceDirection direction) const
 {
@@ -455,7 +455,7 @@ void RNNBackwardDataModularAlgo::PropHiddenDy(const Handle& handle,
         MIOPEN_THROW(miopenStatusInternalError, "Only lstm");
     }
 
-    if(!float_equal(miopen::deref(rnnDesc.dropoutDesc).dropout, 0))
+    if(!float_equal(miopen::deref(rnnDesc.dropoutDesc).dropout, 0.f))
     {
         // size_t hid_shift   = layer * reservLayout.hStateSizes[1] * hy_stride;
         // auto dhd_off     = direction_mult * hy_h * 5;
@@ -586,7 +586,7 @@ void RNNBackwardDataModularAlgo::UpdateHStatePerTimeSeq(const Handle& handle,
                                                         size_t batchSizeUpdate,
                                                         size_t useDcyIfGtBatch,
                                                         size_t useCxIfGTBatch,
-                                                        int layer,
+                                                        size_t layer,
                                                         const SequenceIterator& seq,
                                                         SequenceDirection direction) const
 {
@@ -678,7 +678,7 @@ void RNNBackwardModuleAlgoDynamic::realDxProp(const Handle& handle,
 void RNNBackwardModuleAlgoDynamic::realPropDhy(const Handle& handle,
                                                ConstData_t dhy,
                                                Data_t workSpace,
-                                               unsigned int layer,
+                                               size_t layer,
                                                const SequenceIterator& currentSeq,
                                                SequenceDirection direction) const
 {
@@ -742,7 +742,7 @@ void RNNBackwardModuleAlgoDynamic::realUpdateHStatePerTimeSeq(const Handle& hand
                                                               Data_t,
                                                               Data_t workSpace,
                                                               Data_t reserveSpace,
-                                                              int layer,
+                                                              size_t layer,
                                                               const SequenceIterator& seq,
                                                               SequenceDirection direction) const
 {
@@ -789,7 +789,7 @@ void RNNBackwardModuleAlgoDynamic::PrepareWriteBuffers(
         handle, runtimeArgsExt.dhx, runtimeArgsExt.dcx, runtimeArgsExt.workSpace);
 
     {
-        float beta        = 0;
+        float beta{0.f};
         auto temp_dy_size = buildDynamicVirtual(realDyDesc).GetElementCount();
         miopen::TensorDescriptor temp_dy_desk{
             rnnDesc.dataType, {1, temp_dy_size}, {temp_dy_size, 1}};

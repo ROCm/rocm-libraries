@@ -49,13 +49,13 @@ static float CallImplGemmDynamicForward1x1(const miopen::Handle& handle,
     MIOPEN_LOG_I(kernel.GetName());
 
     // clang-format off
-    int hi          = int{problem.GetInHeight()};
-    int wi          = int{problem.GetInWidth()};
-    int n           = int{problem.GetInBatchSize()};
-    int k           = int{problem.GetOutChannels()};
-    int c           = int{problem.GetInChannels()};
-    int ho          = int{problem.GetOutHeight()};
-    int wo          = int{problem.GetOutWidth()};
+    int hi          = int(problem.GetInHeight());
+    int wi          = int(problem.GetInWidth());
+    int n           = int(problem.GetInBatchSize());
+    int k           = int(problem.GetOutChannels());
+    int c           = int(problem.GetInChannels());
+    int ho          = int(problem.GetOutHeight());
+    int wo          = int(problem.GetOutWidth());
     int stride_h    = problem.GetKernelStrideH();
     int stride_w    = problem.GetKernelStrideW();
     int dilation_h  = problem.GetDilationH();
@@ -175,8 +175,8 @@ InvokerFactory MakeImplGemmDynamicBackwardDataInvokerFactory(const ProblemDescri
     std::vector<bool> is_gemm_not_empty;
     for(size_t gemm_id = 0; gemm_id < num_of_gemms; gemm_id++)
     {
-        dtile_iy_gid.emplace_back(gemm_id / size_t{x_tilda});
-        dtile_ix_gid.emplace_back(gemm_id % size_t{x_tilda});
+        dtile_iy_gid.emplace_back(gemm_id / static_cast<size_t>(x_tilda));
+        dtile_ix_gid.emplace_back(gemm_id % static_cast<size_t>(x_tilda));
         y_dot_slice_gid.emplace_back((dtile_iy_gid[gemm_id] + 1) * y_dot <= y ? y_dot : y % y_dot);
         x_dot_slice_gid.emplace_back((dtile_ix_gid[gemm_id] + 1) * x_dot <= x ? x_dot : x % x_dot);
         const int gemm_k_gid = k * y_dot_slice_gid[gemm_id] * x_dot_slice_gid[gemm_id];
@@ -311,8 +311,8 @@ MakeImplGemmDynamicBackwardDataInvokerFactory(const ProblemDescription& problem,
     std::vector<bool> is_gemm_not_empty;
     for(size_t gemm_id = 0; gemm_id < num_of_gemms; gemm_id++)
     {
-        dtile_iy_gid.emplace_back(gemm_id / size_t{x_tilda});
-        dtile_ix_gid.emplace_back(gemm_id % size_t{x_tilda});
+        dtile_iy_gid.emplace_back(gemm_id / static_cast<size_t>(x_tilda));
+        dtile_ix_gid.emplace_back(gemm_id % static_cast<size_t>(x_tilda));
         y_dot_slice_gid.emplace_back((dtile_iy_gid[gemm_id] + 1) * y_dot <= y ? y_dot : y % y_dot);
         x_dot_slice_gid.emplace_back((dtile_ix_gid[gemm_id] + 1) * x_dot <= x ? x_dot : x % x_dot);
         const int gemm_k_gid = k * y_dot_slice_gid[gemm_id] * x_dot_slice_gid[gemm_id];
@@ -461,7 +461,7 @@ InvokerFactory MakeImplGemmDynamicForwardXdlopsNHWCInvokerFactory(
     int x_karg            = x;
 
     int splits_4G = solver::igemm_split_batch_size(
-        hi, wi, ho, wo, n, k, c, int{miopen::GetTypeSize(problem.GetInDataType())});
+        hi, wi, ho, wo, n, k, c, int(miopen::GetTypeSize(problem.GetInDataType())));
     splits_4G = splits_4G == 0 ? n : splits_4G;
 
     auto gemm_m = (n / splits_4G) * ho * wo;
@@ -605,7 +605,7 @@ InvokerFactory MakeImplGemmDynamicForwardXdlopsNHWCInvokerFactory(
     }
 
     const auto cast_size =
-        need_cast ? miopen::GetTypeSize(miopenFloat) * size_t{n * k * ho * wo} : size_t{0};
+        need_cast ? miopen::GetTypeSize(miopenFloat) * size_t(n * k * ho * wo) : 0;
 
     MultiBufferWorkspaceTraits wt(
         {trans_input_size, trans_weight_size, trans_output_size, cast_size});
@@ -668,19 +668,19 @@ InvokerFactory MakeImplGemmDynamicForwardXdlopsNHWCInvokerFactory(
             {
                 if(!trans_input_skippable)
                 {
-                    auto& karg_input = opArgsTrans[size_t{trans_input_idx}];
+                    auto& karg_input = opArgsTrans[size_t(trans_input_idx)];
                     karg_input[0]    = OpKernelArg(trans_input_buf.get());
                     karg_input[1]    = OpKernelArg(tensors.in);
-                    handle.Run(kernels[kID_trans_start + size_t{trans_input_idx}])(karg_input);
+                    handle.Run(kernels[kID_trans_start + size_t(trans_input_idx)])(karg_input);
                     if(handle.IsProfilingEnabled())
                         elapsed += handle.GetKernelTime();
                 }
                 if(!trans_weight_skippable)
                 {
-                    auto& karg_weight = opArgsTrans[size_t{trans_weight_idx}];
+                    auto& karg_weight = opArgsTrans[size_t(trans_weight_idx)];
                     karg_weight[0]    = OpKernelArg(trans_weight_buf.get());
                     karg_weight[1]    = OpKernelArg(tensors.w);
-                    handle.Run(kernels[kID_trans_start + size_t{trans_weight_idx}])(karg_weight);
+                    handle.Run(kernels[kID_trans_start + size_t(trans_weight_idx)])(karg_weight);
                     if(handle.IsProfilingEnabled())
                         elapsed += handle.GetKernelTime();
                 }
@@ -717,10 +717,10 @@ InvokerFactory MakeImplGemmDynamicForwardXdlopsNHWCInvokerFactory(
 
             if(is_nchw && !trans_output_skippable)
             {
-                auto& karg_output = opArgsTrans[size_t{trans_output_idx}];
+                auto& karg_output = opArgsTrans[size_t(trans_output_idx)];
                 karg_output[0]    = OpKernelArg(tensors.out);
                 karg_output[1]    = OpKernelArg(trans_output_buf.get());
-                handle.Run(kernels[kID_trans_start + size_t{trans_output_idx}])(karg_output);
+                handle.Run(kernels[kID_trans_start + size_t(trans_output_idx)])(karg_output);
                 if(handle.IsProfilingEnabled())
                     elapsed += handle.GetKernelTime();
             }
@@ -776,7 +776,7 @@ InvokerFactory MakeImplGemmDynamicBackwardDataXdlopsNHWCInvokerFactory(
     int num_of_gemms = x_tilda * y_tilda;
 
     int splits_4G = solver::igemm_split_batch_size(
-        hi, wi, ho, wo, n, k, c, int{miopen::GetTypeSize(problem.GetInDataType())});
+        hi, wi, ho, wo, n, k, c, int(miopen::GetTypeSize(problem.GetInDataType())));
     int n_in_1_block = splits_4G == 0 ? 1 : (n / splits_4G);
 
     auto gemm_m = n_in_1_block * h_tilda_slice * w_tilda_slice;
@@ -924,7 +924,7 @@ InvokerFactory MakeImplGemmDynamicBackwardDataXdlopsNHWCInvokerFactory(
     }
 
     const auto cast_size =
-        need_cast ? miopen::GetTypeSize(miopenFloat) * size_t{n * c * hi * wi} : size_t{0};
+        need_cast ? miopen::GetTypeSize(miopenFloat) * size_t(n * c * hi * wi) : 0;
 
     MultiBufferWorkspaceTraits wt(
         {trans_input_size, trans_weight_size, trans_output_size, cast_size});
@@ -987,19 +987,19 @@ InvokerFactory MakeImplGemmDynamicBackwardDataXdlopsNHWCInvokerFactory(
             {
                 if(!trans_output_skippable)
                 {
-                    auto& karg_output = opArgsTrans[size_t{trans_output_idx}];
+                    auto& karg_output = opArgsTrans[size_t(trans_output_idx)];
                     karg_output[0]    = OpKernelArg(trans_output_buf.get());
                     karg_output[1]    = OpKernelArg(tensors.in);
-                    handle.Run(kernels[kID_trans_start + size_t{trans_output_idx}])(karg_output);
+                    handle.Run(kernels[kID_trans_start + size_t(trans_output_idx)])(karg_output);
                     if(handle.IsProfilingEnabled())
                         elapsed += handle.GetKernelTime();
                 }
                 if(!trans_weight_skippable)
                 {
-                    auto& karg_weight = opArgsTrans[size_t{trans_weight_idx}];
+                    auto& karg_weight = opArgsTrans[size_t(trans_weight_idx)];
                     karg_weight[0]    = OpKernelArg(trans_weight_buf.get());
                     karg_weight[1]    = OpKernelArg(tensors.w);
-                    handle.Run(kernels[kID_trans_start + size_t{trans_weight_idx}])(karg_weight);
+                    handle.Run(kernels[kID_trans_start + size_t(trans_weight_idx)])(karg_weight);
                     if(handle.IsProfilingEnabled())
                         elapsed += handle.GetKernelTime();
                 }
@@ -1035,10 +1035,10 @@ InvokerFactory MakeImplGemmDynamicBackwardDataXdlopsNHWCInvokerFactory(
             }
             if((is_nchw && !trans_input_skippable))
             {
-                auto& karg_input = opArgsTrans[size_t{trans_input_idx}];
+                auto& karg_input = opArgsTrans[size_t(trans_input_idx)];
                 karg_input[0]    = OpKernelArg(tensors.out);
                 karg_input[1]    = OpKernelArg(trans_input_buf.get());
-                handle.Run(kernels[kID_trans_start + size_t{trans_input_idx}])(karg_input);
+                handle.Run(kernels[kID_trans_start + size_t(trans_input_idx)])(karg_input);
                 if(handle.IsProfilingEnabled())
                     elapsed += handle.GetKernelTime();
             }
@@ -1056,11 +1056,11 @@ InvokerFactory MakeImplGemmDynamicForwardDlopsNCHWCInvokerFactory(
     const ProblemDescription& problem,
     const solver::conv::PerformanceConfigAsmImplicitGemmGTCFwdDlopsNCHWC& config)
 {
-    int hi    = int{problem.GetInHeight()};
-    int wi    = int{problem.GetInWidth()};
-    int n     = int{problem.GetInBatchSize()};
-    int k     = int{problem.GetOutChannels()} * config.vector_c;
-    int c     = int{problem.GetInChannels()};
+    int hi    = int(problem.GetInHeight());
+    int wi    = int(problem.GetInWidth());
+    int n     = int(problem.GetInBatchSize());
+    int k     = int(problem.GetOutChannels()) * config.vector_c;
+    int c     = int(problem.GetInChannels());
     int ks    = 1;
     int group = problem.GetGroupCount();
 
@@ -1108,7 +1108,7 @@ InvokerFactory MakeImplGemmDynamicForwardDlopsNCHWCInvokerFactory(
     uint32_t move_slice_k = (s_move_slice_k_y << 16) | (s_move_slice_k_x << 8) | s_move_slice_k_c;
 
     int splits_4G = solver::igemm_split_batch_size(
-        hi, wi, int{ho}, int{wo}, n, k, c, int{miopen::GetTypeSize(problem.GetInDataType())});
+        hi, wi, int(ho), int(wo), n, k, c, int(miopen::GetTypeSize(problem.GetInDataType())));
     splits_4G       = (splits_4G == 0 ? n : splits_4G);
     uint32_t gemm_n = 1;
     uint32_t gemm_m = 1;

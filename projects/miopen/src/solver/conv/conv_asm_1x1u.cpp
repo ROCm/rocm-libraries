@@ -296,17 +296,17 @@ bool PerformanceConfigConvAsm1x1U::IsValidValueImpl(const int sequence_length) c
 bool PerformanceConfigConvAsm1x1U::IsValidImpl(const ProblemDescription& problem,
                                                const int sequence_length) const
 {
-    const auto elements_in_dword = 4 / static_cast<int>(GetTypeSize(problem.GetInDataType()));
+    const int elements_in_dword = 4 / GetTypeSize(problem.GetInDataType());
     if(elements_in_dword == 0) // For clang-tidy (DIV/0)
         MIOPEN_THROW(miopenStatusInternalError);
-    const unsigned img_hw = problem.GetOutHeight() * problem.GetOutWidth();
+    const int img_hw = problem.GetOutHeight() * problem.GetOutWidth();
     if(!IsValidValueImpl(sequence_length))
         return false;
     if(sequence_length > 1)
     {
         if((k_mult % elements_in_dword) != 0)
             return false;
-        if(problem.IsDirectionBackwardData() && !(problem.GetOutChannels() % k_mult == 0))
+        if(problem.IsDirectionBackwardData() && !(problem.GetOutChannels() % size_t(k_mult) == 0))
             return false;
     }
     if(sequence_length > 2)
@@ -324,7 +324,8 @@ bool PerformanceConfigConvAsm1x1U::IsValidImpl(const ProblemDescription& problem
     }
     if(sequence_length > 4)
     {
-        const int total_n_blocks = (problem.GetBatchSize() + GetNPerGpr() - 1) / GetNPerGpr();
+        auto n_per_gpr = uint32_t(GetNPerGpr());
+        const int total_n_blocks = (problem.GetBatchSize() + n_per_gpr - 1) / n_per_gpr;
         if(!(n_mult <= total_n_blocks))
             return false;
     }
@@ -351,8 +352,7 @@ bool PerformanceConfigConvAsm1x1U::IsValidImpl(const ProblemDescription& problem
         if(!(waves_c_in_group <= problem.GetInChannels()))
             return false;
         const int c_per_wave = (problem.GetInChannels() + waves_c_in_group - 1) / waves_c_in_group;
-        const int c_per_last_wave =
-            problem.GetInChannels() - static_cast<std::size_t>(c_per_wave * (waves_c_in_group - 1));
+        const int c_per_last_wave = problem.GetInChannels() - c_per_wave * (waves_c_in_group - 1);
         if(c_per_wave % c_mult != 0 || c_per_last_wave % c_mult != 0)
             return false;
     }

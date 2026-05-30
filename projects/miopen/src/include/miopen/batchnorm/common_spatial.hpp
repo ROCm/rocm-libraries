@@ -62,7 +62,7 @@ inline void GetLocalConfigNHWC(const miopen::batchnorm::ProblemDescription& prob
     {
         // xlocalsize must be power of 2 as reductions in the kernels rely on it, here c is rounded
         // up to next power of 2.
-        xlocalsize  = std::min(size_t{1 << int{std::ceil(std::log2(c / vectorsize))}},
+        xlocalsize  = std::min(size_t{1 << int(std::ceil(std::log2(c / vectorsize)))},
                               size_t{xlocalsize_limit});
         ylocalsize  = max_localsize / xlocalsize;
         nworkgroups = ((c / vectorsize + xlocalsize - 1) / xlocalsize) *
@@ -85,11 +85,11 @@ inline void GetSpatialMultipleConfig(const miopen::batchnorm::ProblemDescription
 
     int n, c, h, w;
     std::tie(n, c, h, w)    = tien<4>(problem.GetXDesc().GetLengths());
-    unsigned int in_cstride = h * w;
+    unsigned int in_cstride = static_cast<unsigned int>(h * w);
 
     if(problem.IsLayoutNHWC())
     {
-        if(c % vectorsize != 0)
+        if(size_t(c) % vectorsize != 0)
         {
             // xlocalsize and ylocalsize already initialized to 1
             return;
@@ -109,7 +109,7 @@ inline void GetSpatialMultipleConfig(const miopen::batchnorm::ProblemDescription
         {
             // No need to use workgroups larger than the HW dimension
             ylocalsize = std::max(size_t{64},
-                                  size_t{1 << int{std::ceil(std::log2(in_cstride / vectorsize))}});
+                                  size_t{1 << int(std::ceil(std::log2(in_cstride / vectorsize)))});
         }
     }
 }
@@ -127,8 +127,8 @@ inline bool UseMultiple(const miopen::batchnorm::ProblemDescription& problem)
                           ? true
                           : false;
 
-    unsigned int in_cstride = h * w;
-    unsigned int in_nhw     = n * in_cstride;
+    unsigned int in_cstride = static_cast<unsigned int>(h * w);
+    unsigned int in_nhw     = static_cast<unsigned int>(n * in_cstride);
     // Check heuristics (used to choose between spatial single and multiple for performance)
     if(!problem.IsLayoutNHWC() &&
        problem.GetDirection() == miopen::batchnorm::Direction::Backward &&
@@ -166,9 +166,9 @@ inline int GetStashMethod(bool IsLayoutNHWC,
     // See `batchnorm_functions.hpp` for stash implementation of different methods
     int stash_method = 0;
     stash_values *= (problem_type == miopenFloat ? 1 : 2);
-    unsigned int last_ylocalsize =
+    size_t last_ylocalsize =
         (in_cstride) % ylocalsize == 0 ? ylocalsize : (in_cstride) % ylocalsize;
-    unsigned int last_zlocalsize =
+    size_t last_zlocalsize =
         n % (zlocalsize * nelements) == 0 ? (zlocalsize * nelements) : n % (zlocalsize * nelements);
     if(last_ylocalsize < stash_values && last_zlocalsize >= (size_t)stash_values)
     {
@@ -225,7 +225,7 @@ inline void GetVariantFromKernelId(const std::string& kernel_id,
         seglist.push_back(segment);
     }
     variant    = std::stoi(seglist[0]);
-    vectorsize = std::stoi(seglist[1]);
+    vectorsize = std::stoull(seglist[1]);
     if(variant != 2)
     {
         // For variant 0, 1, 3 (spatial single), kernel_id only contains
@@ -234,21 +234,21 @@ inline void GetVariantFromKernelId(const std::string& kernel_id,
         // computed by the caller based on problem-size heuristics.
         return;
     }
-    xlocalsize = std::stoi(seglist[2]);
-    ylocalsize = std::stoi(seglist[3]);
-    zlocalsize = std::stoi(seglist[4]);
-    nelements  = std::stoi(seglist[5]);
+    xlocalsize = std::stoull(seglist[2]);
+    ylocalsize = std::stoull(seglist[3]);
+    zlocalsize = std::stoull(seglist[4]);
+    nelements  = std::stoull(seglist[5]);
 }
 
 // Add spatial single instances for given problem
 inline void DefaultConfigSpatialSingle(const miopen::batchnorm::ProblemDescription& problem,
                                        std::vector<std::string>& valid_kernels)
 {
-    int n, c, h, w;
+    unsigned int n, c, h, w;
     std::tie(n, c, h, w) = tien<4>(problem.GetXDesc().GetLengths());
 
-    unsigned int in_cstride = h * w;
-    unsigned int in_nhw     = n * in_cstride;
+    unsigned int in_cstride = (h * w);
+    unsigned int in_nhw     = (n * in_cstride);
 
     bool bfpmixparm =
         problem.GetXDesc().GetType() == miopenHalf && problem.GetBnScale().GetType() == miopenFloat
@@ -365,7 +365,7 @@ inline bool IsSpatialMultipleApplicable(const miopen::batchnorm::ProblemDescript
                                         size_t zlocalsize,
                                         size_t nelements)
 {
-    int n, c, h, w;
+    unsigned int n, c, h, w;
     std::tie(n, c, h, w)    = tien<4>(problem.GetXDesc().GetLengths());
     unsigned int in_cstride = h * w;
 
@@ -383,12 +383,12 @@ inline bool IsSpatialMultipleApplicable(const miopen::batchnorm::ProblemDescript
                              : true;
 
         stash_values *= (bfp32parm ? 1 : 2);
-        unsigned int last_ylocalsize =
+        size_t last_ylocalsize =
             in_cstride % ylocalsize == 0 ? ylocalsize : in_cstride % ylocalsize;
 
-        unsigned int last_zlocalsize = n % (zlocalsize * nelements) == 0
-                                           ? (zlocalsize * nelements)
-                                           : n % (zlocalsize * nelements);
+        size_t last_zlocalsize = n % (zlocalsize * nelements) == 0
+                                     ? (zlocalsize * nelements)
+                                     : n % (zlocalsize * nelements);
 
         // FP32:
         //  - last block must have enough space to stash intermediate results in HW dimension
@@ -414,12 +414,12 @@ inline bool IsSpatialMultipleApplicable(const miopen::batchnorm::ProblemDescript
             return false;
         }
 
-        unsigned int last_ylocalsize =
+        size_t last_ylocalsize =
             in_cstride % ylocalsize == 0 ? ylocalsize : in_cstride % ylocalsize;
 
-        unsigned int last_zlocalsize = n % (zlocalsize * nelements) == 0
-                                           ? (zlocalsize * nelements)
-                                           : n % (zlocalsize * nelements);
+        size_t last_zlocalsize = n % (zlocalsize * nelements) == 0
+                                     ? (zlocalsize * nelements)
+                                     : n % (zlocalsize * nelements);
         // Restrictions:
         //  - last block must have enough space to stash intermediate results in HW dimension
         //  - if last block doesn't fit, intermediate results are stored in N dimension which must
@@ -444,7 +444,7 @@ inline void GetHeuristicsConfigTuningNHWC(const miopen::batchnorm::ProblemDescri
 
     // if c is not a power of 2, set vectorsize and xlocalsize pair to have modulo equal
     // to zero or the highest possible in order to minimize the number of inactive threads
-    size_t c_next_pow2 = size_t{1 << int{std::ceil(std::log2(c))}};
+    size_t c_next_pow2 = size_t{1 << int(std::ceil(std::log2(c)))};
     if(c != c_next_pow2)
     {
         size_t max_modulo = 0;
@@ -452,7 +452,7 @@ inline void GetHeuristicsConfigTuningNHWC(const miopen::batchnorm::ProblemDescri
         {
             for(size_t xl = 64; xl > 8; xl >>= 1)
             {
-                size_t xl_pow2 = std::min(size_t{1 << int{std::ceil(std::log2(c / vs))}}, xl);
+                size_t xl_pow2 = std::min(size_t{1 << int(std::ceil(std::log2(c / vs)))}, xl);
                 size_t modulo  = c % (xl_pow2 * vs);
                 if(modulo == 0)
                 {
@@ -545,7 +545,7 @@ inline void GetHeuristicsConfigTuningNHWC(const miopen::batchnorm::ProblemDescri
             xlocalsize = 64;
         }
     }
-    xlocalsize = std::min(size_t{1 << int{std::ceil(std::log2(c / vectorsize))}}, xlocalsize);
+    xlocalsize = std::min(size_t{1 << int(std::ceil(std::log2(c / vectorsize)))}, xlocalsize);
 }
 
 // Add spatial multiple instances for given problem.
@@ -561,7 +561,7 @@ inline void DefaultConfigSpatialMultiple(const miopen::batchnorm::ProblemDescrip
                                          unsigned int stash_values,
                                          std::vector<std::string>& valid_kernels)
 {
-    int n, c, h, w;
+    unsigned int n, c, h, w;
     std::tie(n, c, h, w)    = tien<4>(problem.GetXDesc().GetLengths());
     unsigned int in_cstride = h * w;
 
@@ -629,8 +629,9 @@ inline void DefaultConfigSpatialMultiple(const miopen::batchnorm::ProblemDescrip
         // xlocalsize and vectorsize are set using heuristics
         size_t vectorsize = 1;
         size_t xlocalsize = 64;
+        auto c_{static_cast<size_t>(c)};
         {
-            size_t reference_dimension = problem.IsLayoutNHWC() ? c : in_cstride;
+            size_t reference_dimension = problem.IsLayoutNHWC() ? c_ : in_cstride;
             if(problem.IsLayoutNHWC())
             {
                 GetHeuristicsConfigTuningNHWC(problem, vectorsize, xlocalsize);
@@ -642,7 +643,7 @@ inline void DefaultConfigSpatialMultiple(const miopen::batchnorm::ProblemDescrip
             if(vectorsize == 1)
             {
                 xlocalsize =
-                    std::min(size_t{1 << int{std::ceil(std::log2(c / vectorsize))}}, size_t{64});
+                    std::min(size_t{1 << int(std::ceil(std::log2(c_ / vectorsize)))}, size_t{64});
             }
         }
 
@@ -698,24 +699,25 @@ inline void DefaultConfigSpatialMultiple(const miopen::batchnorm::ProblemDescrip
                 // Use multiple zblocks if batch size is large enough.
                 // nelements = 32 is an optimal value for the current implementation when
                 // the batch size is large enough.
-                std::vector<size_t> nelements_vector = {n / zlocalsize};
-                if(n / zlocalsize > 64)
+                auto n_{static_cast<size_t>(n)};
+                std::vector<size_t> nelements_vector = {n_ / zlocalsize};
+                if(n_ / zlocalsize > 64)
                 {
                     nelements_vector.push_back(32);
                 }
                 for(const size_t& nelements : nelements_vector)
                 {
                     // Restriction of the current implementation
-                    if(n % nelements != 0)
+                    if(n_ % nelements != 0)
                     {
                         continue;
                     }
 
                     // Restriction based on the number of CUs
                     size_t xgridsize =
-                        xlocalsize * ((c / vectorsize + xlocalsize - 1) / xlocalsize);
+                        xlocalsize * ((c_ / vectorsize + xlocalsize - 1) / xlocalsize);
                     size_t ygridsize = ylocalsize * ((in_cstride + ylocalsize - 1) / ylocalsize);
-                    size_t zgridsize = zlocalsize * ((n / nelements + zlocalsize - 1) / zlocalsize);
+                    size_t zgridsize = zlocalsize * ((n_ / nelements + zlocalsize - 1) / zlocalsize);
                     size_t nWG       = (xgridsize / xlocalsize) * (ygridsize / ylocalsize) *
                                  (zgridsize / zlocalsize);
                     if(in_cstride > 64 && nWG < problem.GetMinWorkgroups())

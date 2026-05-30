@@ -112,7 +112,7 @@ bool PerformanceConfigBnFwdTraining::SetNextValue(
     if((this->index + 1) < valid_kernels.size())
     {
         ++this->index;
-        this->kernel_id = this->valid_kernels[index];
+        this->kernel_id = this->valid_kernels[size_t(index)];
         return true;
     }
     else
@@ -209,7 +209,7 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
         bfp32parm    = false;
     }
 
-    int n, c, h, w;
+    unsigned int n, c, h, w;
     std::tie(n, c, h, w) = tien<4>(problem.GetXDesc().GetLengths());
 
     unsigned int in_cstride = h * w;
@@ -218,7 +218,7 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
     unsigned int in_nchw    = n * in_nstride;
     auto inhw               = float(1.0 / in_nhw);
 
-    int variant       = -1;
+    int variant{-1};
     size_t vectorsize = 1;
     size_t xlocalsize = 1, xgridsize = 1;
     size_t ylocalsize = 1, ygridsize = 1;
@@ -240,8 +240,8 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
             xlocalsize = 256;
         }
         xgridsize = c * xlocalsize;
-        ldsgcn    = xlocalsize / 64;
-        ldsnogcn  = xlocalsize;
+        ldsgcn    = static_cast<unsigned int>(xlocalsize / 64);
+        ldsnogcn  = static_cast<unsigned int>(xlocalsize);
     }
     else
     {
@@ -281,8 +281,8 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
             ylocalsize_final =
                 (xlocalsize * ylocalsize * zlocalsize) / xlocalsize_final / zlocalsize_final;
         }
-        ldsnogcn = xlocalsize * ylocalsize * zlocalsize;
-        ldsgcn   = xlocalsize * ylocalsize * zlocalsize / 64;
+        ldsnogcn = static_cast<unsigned int>(xlocalsize * ylocalsize * zlocalsize);
+        ldsgcn   = static_cast<unsigned int>(xlocalsize * ylocalsize * zlocalsize / 64);
     }
 
     auto result = ConvSolution{miopenStatusSuccess};
@@ -379,8 +379,8 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
                                        params.nextResultRunningVariance != nullptr &&
                                        !context.is_for_generic_search;
 
-            float alpha_activ = problem.GetActivationDesc().GetAlpha();
-            float beta_activ  = problem.GetActivationDesc().GetBeta();
+            float alpha_activ = float(problem.GetActivationDesc().GetAlpha());
+            float beta_activ  = float(problem.GetActivationDesc().GetBeta());
 
             float ctime = 0.;
             visit_float(dtype, [&](auto as_float) {

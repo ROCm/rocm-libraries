@@ -115,7 +115,7 @@ bool RNNDescriptor::CheckDynamicAlgoSelection(const Handle& /*handle*/,
     bool algo_mode_match = algoMode == miopenRNNroundedDynamic ||
                            (algoMode == miopenRNNdefault && env::enabled(MIOPEN_RNN_DYNAMIC_FORCE));
 
-    bool use_dropout = !float_equal(miopen::deref(dropoutDesc).dropout, 0);
+    bool use_dropout = !float_equal(miopen::deref(dropoutDesc).dropout, 0.f);
     bool rnn_config_match =
         (dirMode == 0 && inputMode == miopenRNNlinear && rnnMode == miopenLSTM && !use_dropout);
 
@@ -190,7 +190,7 @@ void RNNDescriptor::ModularBackward(const Handle& handle,
     }
     else
     {
-        if(RNNBwdMSIsFast(xDesc, hDesc, xDesc.GetMaxSequenceLength()))
+        if(RNNBwdMSIsFast(xDesc, hDesc, int(xDesc.GetMaxSequenceLength())))
         {
             rnn_base::RNNModularMultiStreamBWD multi_stream{
                 *this, xDesc, yDesc, hDesc, miopenRNNFWDMode_t::miopenRNNTraining};
@@ -228,7 +228,7 @@ void RNNDescriptor::ModularBackwardWeights(const Handle& handle,
     }
     else
     {
-        if(RNNBwWeightMSIsFast(xDesc, hDesc, xDesc.GetMaxSequenceLength()))
+        if(RNNBwWeightMSIsFast(xDesc, hDesc, int(xDesc.GetMaxSequenceLength())))
         {
             rnn_base::RNNModularMultiStreamBWWeights multi_stream{*this, xDesc, yDesc, hDesc};
             multi_stream.Compute(

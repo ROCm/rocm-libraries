@@ -63,7 +63,7 @@ ConvSolution BnFwdTrgActivationFused::GetSolution(const FusionContext& context,
 {
     const auto bn_problem = problem.GetBnProblem(0, miopen::batchnorm::Direction::ForwardTraining);
 
-    int n, c, h, w;
+    unsigned int n, c, h, w;
     auto result = ConvSolution{miopenStatusSuccess};
     miopenDataType_t input_type;
     bool savePopStats         = true;
@@ -89,7 +89,7 @@ ConvSolution BnFwdTrgActivationFused::GetSolution(const FusionContext& context,
         const auto& input_desc = bn_problem.GetXDesc();
         input_type             = input_desc.GetType();
         std::tie(n, c, h, w)   = tien<4>(input_desc.GetLengths());
-        size_t in_cstride      = static_cast<size_t>(h) * w;
+        size_t in_cstride      = static_cast<size_t>(h * w);
         size_t in_nstride      = c * in_cstride;
         size_t in_nchw         = n * in_nstride;
 
@@ -126,8 +126,8 @@ ConvSolution BnFwdTrgActivationFused::GetSolution(const FusionContext& context,
 
         kernel.g_wk = {xgridsize, ygridsize, zgridsize};
 
-        unsigned int ldsgcn   = xlocalsize / 64;
-        unsigned int ldsnogcn = xlocalsize;
+        unsigned int ldsgcn   = static_cast<unsigned int>(xlocalsize / 64);
+        unsigned int ldsnogcn = static_cast<unsigned int>(xlocalsize);
 
         int variant = 0;
 
@@ -205,7 +205,7 @@ ConvSolution BnFwdTrgActivationFused::GetSolution(const FusionContext& context,
             const auto mode        = bn_problem.GetMode();
             std::vector<OpKernelArg> kern_args;
             if(mode == miopenBNSpatial)
-                kern_args.push_back({static_cast<float>(1.0f / (n * h * w))});
+                kern_args.push_back({static_cast<float>(1.0 / (n * h * w))});
 
             if(input_type == miopenFloat)
             {
@@ -215,9 +215,9 @@ ConvSolution BnFwdTrgActivationFused::GetSolution(const FusionContext& context,
             }
             else if(input_type == miopenHalf)
             {
-                kern_args.push_back({static_cast<half_float::half>(activ_alpha)});
-                kern_args.push_back({static_cast<half_float::half>(activ_beta)});
-                kern_args.push_back({static_cast<half_float::half>(activ_gamma)});
+                kern_args.push_back({static_cast<half_float::half>(float(activ_alpha))});
+                kern_args.push_back({static_cast<half_float::half>(float(activ_beta))});
+                kern_args.push_back({static_cast<half_float::half>(float(activ_gamma))});
             }
             else
                 MIOPEN_THROW("Unsupported Precision");

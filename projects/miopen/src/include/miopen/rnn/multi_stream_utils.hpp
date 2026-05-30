@@ -46,11 +46,14 @@ public:
     {
     }
 
-    hipStream_t getStream(int stream_id) const { return streamPoolCache[stream_id]; }
+    hipStream_t getStream(int stream_id) const
+    {
+        return streamPoolCache[size_t(stream_id)];
+    }
 
     void ChangeActiveStream(int stream_id) const
     {
-        activeHandle.SetStreamFromPool(streamPoolIdsMapping[stream_id]);
+        activeHandle.SetStreamFromPool(streamPoolIdsMapping[size_t(stream_id)]);
     }
 
     hipError_t RecordEvent(const hipEvent_t event, int stream_id) const
@@ -65,7 +68,7 @@ public:
 
     void RootWaitToAllStreams() const
     {
-        for(size_t i = 0, stream_cnt = size(); i < stream_cnt; i++)
+        for(int i = 0, stream_cnt = int(size()); i < stream_cnt; i++)
         {
             if(i != rootStreamId)
             {
@@ -82,12 +85,12 @@ public:
 
         (void)RecordEvent(main_event.get(), rootStreamId);
 
-        for(size_t i = 0, stream_cnt = size(); i < stream_cnt; i++)
+        for(int i = 0, stream_cnt = int(size()); i < stream_cnt; i++)
         {
             if(i != rootStreamId)
                 (void)SetWaitEvent(main_event.get(), i);
         }
-    };
+    }
 
     size_t size() const { return streamPoolIdsMapping.size(); }
 
@@ -97,7 +100,7 @@ private:
     static std::vector<int> init_stream_pool_ids(const Handle& handle, int extra_stream_cnt)
     {
         std::vector<int> ids;
-        ids.reserve(extra_stream_cnt + 1);
+        ids.reserve(size_t(extra_stream_cnt) + 1);
 
         bool ms_wa_fix_active = extra_stream_cnt > 2 && !env::disabled(MIOPEN_MS_WA_FIX);
         handle.SetStreamFromPool(0);

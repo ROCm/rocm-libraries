@@ -46,13 +46,13 @@ NetworkConfig ProblemDescription::MakeNetworkConfig() const
     for(int i = 0; i < xCount; i++)
     {
         auto xlength   = xDescs[i]->GetLengths();
-        max_x_dim_size = std::max(max_x_dim_size, xlength[size_t{dim}]);
+        max_x_dim_size = std::max(max_x_dim_size, xlength[size_t(dim)]);
     }
 
     auto ylength    = yDesc.GetLengths();
     auto outer_size = std::accumulate(
         ylength.begin(), ylength.begin() + dim, static_cast<size_t>(1), std::multiplies<size_t>());
-    auto stride         = yDesc.GetStrides()[size_t{dim}];
+    auto stride         = yDesc.GetStrides()[size_t(dim)];
     auto dtype          = yDesc.GetType();
     auto data_size      = get_data_size(dtype);
     auto max_inner_size = max_x_dim_size * stride * data_size / sizeof(short4);

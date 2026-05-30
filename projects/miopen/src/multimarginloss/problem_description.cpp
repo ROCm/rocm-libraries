@@ -39,7 +39,7 @@ NetworkConfig ForwardProblemDescription::MakeNetworkConfig() const
     ss << "itype" << iDesc.GetType();
     ss << "ilen";
     auto ilen = iDesc.GetLengths();
-    for(unsigned long i : ilen)
+    for(auto i : ilen)
         ss << i << "_";
     ss << "cont" << iDesc.IsContiguous();
     ss << "reduction" << reduction;

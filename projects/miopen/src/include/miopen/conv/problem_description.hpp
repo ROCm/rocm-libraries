@@ -376,17 +376,17 @@ struct ProblemDescription : ProblemDescriptionBase
         f(self.GetWeightsDepth(), "fil_d");
         f(self.GetOutChannels(), "out_channels");
         f(self.GetBatchSize(), "batchsize");
-        f(size_t{self.GetPadH()}, "pad_h");
-        f(size_t{self.GetPadW()}, "pad_w");
-        f(size_t{self.GetPadD()}, "pad_d");
-        f(size_t{self.GetKernelStrideH()}, "conv_stride_h");
-        f(size_t{self.GetKernelStrideW()}, "conv_stride_w");
-        f(size_t{self.GetKernelStrideD()}, "conv_stride_d");
-        f(size_t{self.GetDilationH()}, "dilation_h");
-        f(size_t{self.GetDilationW()}, "dilation_w");
-        f(size_t{self.GetDilationD()}, "dilation_d");
-        f(size_t{self.GetBias()}, "bias");
-        f(size_t{self.GetGroupCount()}, "group_count");
+        f(size_t(self.GetPadH()), "pad_h");
+        f(size_t(self.GetPadW()), "pad_w");
+        f(size_t(self.GetPadD()), "pad_d");
+        f(size_t(self.GetKernelStrideH()), "conv_stride_h");
+        f(size_t(self.GetKernelStrideW()), "conv_stride_w");
+        f(size_t(self.GetKernelStrideD()), "conv_stride_d");
+        f(size_t(self.GetDilationH()), "dilation_h");
+        f(size_t(self.GetDilationW()), "dilation_w");
+        f(size_t(self.GetDilationD()), "dilation_d");
+        f(size_t(self.GetBias()), "bias");
+        f(size_t(self.GetGroupCount()), "group_count");
     }
 
     template <class Self>

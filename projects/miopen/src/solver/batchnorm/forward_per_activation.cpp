@@ -57,7 +57,7 @@ BnFwdTrainingPerActivation::GetSolution(const ExecutionContext& context,
 
     decltype(auto) xDesc = problem.GetXDesc();
 
-    int n, c, h, w;
+    unsigned int n, c, h, w;
     std::tie(n, c, h, w) = tien<4>(xDesc.GetLengths());
 
     unsigned int in_cstride = h * w;

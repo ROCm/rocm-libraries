@@ -52,7 +52,7 @@ size_t RNNLayoutTransformTotalTmpSpace(miopenRNNMode_t rnnMode,
 
     const auto transform_workspace = 2 * std::max(xin_tmp_size, yout_tmp_size);
 
-    const auto cnt_mult = fwdMode == miopenRNNTraining ? 3 : 2;
+    const auto cnt_mult = fwdMode == miopenRNNTraining ? size_t{3} : size_t{2};
 
     const auto h_tmp_size = cnt_mult * batch * h_vec * num_layers;
     const auto c_tmp_size = cnt_mult * batch * c_vec * num_layers;

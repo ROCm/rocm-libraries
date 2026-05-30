@@ -80,7 +80,7 @@ ConvSolution CatForward::GetSolution(const ExecutionContext& context,
 
     auto dtype  = problem.GetYDesc().GetType();
     auto ydims  = problem.GetYDesc().GetLengths();
-    auto dim    = problem.GetDim();
+    size_t dim  = size_t(problem.GetDim());
     auto stride = problem.GetYDesc().GetStrides()[dim];
     auto xCount = problem.GetXCount();
 
@@ -96,7 +96,7 @@ ConvSolution CatForward::GetSolution(const ExecutionContext& context,
     auto numCu   = handle.GetMaxComputeUnits();
 
     auto outer_size =
-        std::accumulate(ydims.begin(), ydims.begin() + dim, 1ULL, std::multiplies<size_t>());
+        std::accumulate(ydims.begin(), ydims.begin() + int64_t(dim), 1ULL, std::multiplies<size_t>());
 
     constexpr size_t local_size = 192;
 
@@ -105,13 +105,12 @@ ConvSolution CatForward::GetSolution(const ExecutionContext& context,
         (x_dim_size_max * stride * data_size + sizeof(short4) - 1) / sizeof(short4);
 
     size_t xlocalsize = std::min(max_inner_size, local_size);
-    size_t ylocalsize = std::max(static_cast<int>(local_size / xlocalsize), 1);
+    size_t ylocalsize = std::max((local_size / xlocalsize), 1ULL);
     size_t zlocalsize = 1;
     size_t ygridsize  = AlignUp(outer_size, ylocalsize);
-    size_t xgridsize =
-        std::max(static_cast<int>(numCu * 8 / (ygridsize / ylocalsize)), 1) * xlocalsize;
-    xgridsize        = std::min(xgridsize, AlignUp(max_inner_size, xlocalsize));
-    size_t zgridsize = 1;
+    size_t xgridsize  = std::max((numCu * 8 / (ygridsize / ylocalsize)), 1ULL) * xlocalsize;
+    xgridsize         = std::min(xgridsize, AlignUp(max_inner_size, xlocalsize));
+    size_t zgridsize  = 1;
 
     KernelBuildParameters build_params;
 
@@ -145,7 +144,7 @@ ConvSolution CatForward::GetSolution(const ExecutionContext& context,
                 decltype(auto) params  = raw_params.CastTo<miopen::cat::CatInvokeParams>();
 
                 auto ydims_      = params.yDesc.GetLengths();
-                auto dim_        = params.dim;
+                uint32_t dim_    = uint32_t(params.dim);
                 auto stride_     = params.yDesc.GetStrides()[dim_];
                 auto y_dim_size  = ydims_[dim_];
                 auto outer_size_ = std::accumulate(
@@ -171,7 +170,7 @@ ConvSolution CatForward::GetSolution(const ExecutionContext& context,
                 decltype(auto) params  = raw_params.CastTo<miopen::cat::CatInvokeParams>();
 
                 auto ydims_      = params.yDesc.GetLengths();
-                auto dim_        = params.dim;
+                uint32_t dim_    = uint32_t(params.dim);
                 auto stride_     = params.yDesc.GetStrides()[dim_];
                 auto y_dim_size  = ydims_[dim_];
                 auto outer_size_ = std::accumulate(

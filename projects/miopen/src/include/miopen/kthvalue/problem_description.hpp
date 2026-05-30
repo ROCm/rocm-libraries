@@ -49,7 +49,7 @@ struct FwdProblemDescription : ProblemDescriptionBase
           k(k_),
           keepDim(keepDim_)
     {
-        if(k < 1 || k > inputDesc.GetLengths()[dim])
+        if(k < 1 || k > inputDesc.GetLengths()[size_t(dim)])
         {
             MIOPEN_THROW(miopenStatusBadParm,
                          "Kthvalue: selected number k out of range for dimension");
@@ -88,8 +88,8 @@ struct FwdProblemDescription : ProblemDescriptionBase
             return false;
         }
 
-        int32_t posOut = 0;
-        for(int32_t i = 0; i < inputDesc.GetLengths().size(); i++)
+        uint32_t posOut = 0;
+        for(uint32_t i = 0; i < inputDesc.GetLengths().size(); i++)
         {
             if(i == dim)
             {

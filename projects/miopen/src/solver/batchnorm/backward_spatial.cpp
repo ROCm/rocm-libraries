@@ -114,7 +114,7 @@ bool PerformanceConfigBnBwdBackward::SetNextValue(
     if((this->index + 1) < valid_kernels.size())
     {
         ++this->index;
-        this->kernel_id = this->valid_kernels[index];
+        this->kernel_id = this->valid_kernels[size_t(index)];
         return true;
     }
     else
@@ -221,7 +221,7 @@ ConvSolution BnBwdTrainingSpatial::GetSolution(const ExecutionContext& context,
         bfp32parm    = false;
     }
 
-    int n, c, h, w;
+    unsigned int n, c, h, w;
     std::tie(n, c, h, w) = tien<4>(problem.GetXDesc().GetLengths());
 
     unsigned int in_cstride = h * w;
@@ -231,7 +231,7 @@ ConvSolution BnBwdTrainingSpatial::GetSolution(const ExecutionContext& context,
 
     auto inhw = float(1.0 / in_nhw);
 
-    int variant       = -1;
+    int variant{-1};
     size_t vectorsize = 1;
     size_t xlocalsize = 1, xgridsize = 1;
     size_t ylocalsize = 1, ygridsize = 1;
@@ -249,8 +249,8 @@ ConvSolution BnBwdTrainingSpatial::GetSolution(const ExecutionContext& context,
     {
         xlocalsize = 1024;
         xgridsize  = static_cast<size_t>(1024) * c;
-        ldsgcn     = xlocalsize / wavesize;
-        ldsnogcn   = xlocalsize;
+        ldsgcn     = static_cast<unsigned int>(xlocalsize / wavesize);
+        ldsnogcn   = static_cast<unsigned int>(xlocalsize);
     }
     else
     {
@@ -291,8 +291,8 @@ ConvSolution BnBwdTrainingSpatial::GetSolution(const ExecutionContext& context,
             ylocalsize_final =
                 (xlocalsize * ylocalsize * zlocalsize) / xlocalsize_final / zlocalsize_final;
         }
-        ldsnogcn = xlocalsize * ylocalsize * zlocalsize;
-        ldsgcn   = xlocalsize * ylocalsize * zlocalsize / wavesize;
+        ldsnogcn = static_cast<unsigned int>(xlocalsize * ylocalsize * zlocalsize);
+        ldsgcn   = static_cast<unsigned int>(xlocalsize * ylocalsize * zlocalsize / wavesize);
     }
 
     auto result = ConvSolution{miopenStatusSuccess};
@@ -395,8 +395,8 @@ ConvSolution BnBwdTrainingSpatial::GetSolution(const ExecutionContext& context,
         return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
             decltype(auto) params = raw_params.CastTo<miopen::batchnorm::BwdInvokeParams>();
 
-            float alpha_activ = problem.GetActivationDesc().GetAlpha();
-            float beta_activ  = problem.GetActivationDesc().GetBeta();
+            float alpha_activ = float(problem.GetActivationDesc().GetAlpha());
+            float beta_activ  = float(problem.GetActivationDesc().GetBeta());
             float ctime       = 0.;
             visit_float(dtype, [&](auto as_float) {
                 if(variant != 2)

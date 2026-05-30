@@ -77,8 +77,8 @@ void CTCLossDescriptor::CTCLoss(const Handle& handle,
         }
     }
 
-    size_t max_S_len       = 2 * size_t{max_label_len} + 1;
-    size_t lb_prime_offset = 4 * batch_size + size_t{total_label_len};
+    size_t max_S_len       = 2 * size_t(max_label_len) + 1;
+    size_t lb_prime_offset = 4 * batch_size + size_t(total_label_len);
     size_t problog_offset  = lb_prime_offset + batch_size * max_S_len;
 
     if(probsDesc.GetType() == miopenHalf)
@@ -112,7 +112,7 @@ void CTCLossDescriptor::CTCLoss(const Handle& handle,
                               handle.GetStream());
     (void)hipMemcpyWithStream(static_cast<int*>(workSpace) + 4 * static_cast<ptrdiff_t>(batch_size),
                               labels,
-                              size_t{total_label_len} * sizeof(int),
+                              size_t(total_label_len) * sizeof(int),
                               hipMemcpyHostToDevice,
                               handle.GetStream());
 
@@ -131,8 +131,8 @@ void CTCLossDescriptor::CTCLoss(const Handle& handle,
     if(apply_softmax_layer)
     {
         std::vector<int> sfm_size(4, 1);
-        sfm_size[0]   = int{max_time_step * batch_size};
-        sfm_size[1]   = int{class_sz};
+        sfm_size[0]   = int(max_time_step * batch_size);
+        sfm_size[1]   = int(class_sz);
         auto sfm_desc = miopen::TensorDescriptor(probsDesc.GetType(), sfm_size);
 
         float alpha = 1;
@@ -147,7 +147,7 @@ void CTCLossDescriptor::CTCLoss(const Handle& handle,
                        MIOPEN_SOFTMAX_LOG,
                        MIOPEN_SOFTMAX_MODE_CHANNEL,
                        0,
-                       int{problog_offset});
+                       int(problog_offset));
         if(handle.IsProfilingEnabled())
         {
             time += handle.GetKernelTime();
@@ -180,7 +180,7 @@ void CTCLossDescriptor::CTCLoss(const Handle& handle,
         }
         else if(blank_label_id >= class_sz)
         {
-            blank_label = int{class_sz} - 1;
+            blank_label = int(class_sz) - 1;
         }
         else
         {
@@ -273,9 +273,9 @@ size_t CTCLossDescriptor::GetCTCLossWorkspaceSize(const Handle& handle,
             "The probability tensor's dimensions do not match the gradient tensor's dimensions");
     }
 
-    int class_sz        = int{probsDesc.GetLengths()[2]};
+    int class_sz        = int(probsDesc.GetLengths()[2]);
     size_t batch_size   = probsDesc.GetLengths()[1];
-    int max_time_step   = int{probsDesc.GetLengths()[0]};
+    int max_time_step   = int(probsDesc.GetLengths()[0]);
     int max_label_len   = 0;
     int total_label_len = 0;
     std::vector<int> repeat(batch_size, 0);
@@ -325,19 +325,19 @@ size_t CTCLossDescriptor::GetCTCLossWorkspaceSize(const Handle& handle,
     wksp_sz_lb += batch_size;
 
     // labels
-    wksp_sz_lb += size_t{total_label_len};
+    wksp_sz_lb += size_t(total_label_len);
 
     // labels with blanks
-    wksp_sz_lb += batch_size * (2 * size_t{max_label_len} + 1);
+    wksp_sz_lb += batch_size * (2 * size_t(max_label_len) + 1);
 
     // logsoftmax of probs
-    wksp_sz_dat += size_t{max_time_step} * batch_size * size_t{class_sz};
+    wksp_sz_dat += size_t(max_time_step) * batch_size * size_t(class_sz);
 
     // alphas
-    wksp_sz_dat += size_t{max_time_step} * batch_size * (2 * size_t{max_label_len} + 1);
+    wksp_sz_dat += size_t(max_time_step) * batch_size * (2 * size_t(max_label_len) + 1);
 
     // beta buffer
-    wksp_sz_dat += 2 * batch_size * (2 * size_t{max_label_len} + 1);
+    wksp_sz_dat += 2 * batch_size * (2 * size_t(max_label_len) + 1);
 
     size_t total_size = wksp_sz_dat * sizeof(float) + wksp_sz_lb * sizeof(int);
     if(total_size > handle.GetMaxMemoryAllocSize())

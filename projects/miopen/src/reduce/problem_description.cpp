@@ -43,7 +43,7 @@ NetworkConfig ProblemDescriptionExtreme::MakeNetworkConfig() const
     else
         outputlength = indiceDesc.GetLengths();
 
-    auto size         = xlength[dim];
+    auto size         = xlength[size_t(dim)];
     auto output_numel = std::accumulate(outputlength.begin(),
                                         outputlength.end(),
                                         static_cast<size_t>(1),
@@ -76,7 +76,7 @@ NetworkConfig ProblemDescriptionCalculation::MakeNetworkConfig() const
     std::vector<std::size_t> outputlength;
     outputlength = yDesc.GetLengths();
 
-    auto size         = xlength[dim];
+    auto size         = xlength[size_t(dim)];
     auto output_numel = std::accumulate(outputlength.begin(),
                                         outputlength.end(),
                                         static_cast<size_t>(1),

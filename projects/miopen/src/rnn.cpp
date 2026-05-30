@@ -231,24 +231,24 @@ std::vector<int> RNNDescriptor::pTensorLengthsCalculation(const TensorDescriptor
         {
             if(paramID >= nHiddenTensorsPerLayer)
             {
-                tdim[0] = tdim[1] = int{hsize};
+                tdim[0] = tdim[1] = static_cast<int>(hsize);
             }
             else
             {
-                tdim[0] = int{hsize};
-                tdim[1] = int{hsize * 2};
+                tdim[0] = static_cast<int>(hsize);
+                tdim[1] = static_cast<int>(hsize * 2);
             }
         }
         else // IS the input layer
         {
             if(paramID >= nHiddenTensorsPerLayer)
             {
-                tdim[0] = tdim[1] = int{hsize};
+                tdim[0] = tdim[1] = static_cast<int>(hsize);
             }
             else
             {
-                tdim[0] = int{hsize};
-                tdim[1] = int{inputVectorLen};
+                tdim[0] = static_cast<int>(hsize);
+                tdim[1] = static_cast<int>(inputVectorLen);
             }
         }
     }
@@ -256,18 +256,18 @@ std::vector<int> RNNDescriptor::pTensorLengthsCalculation(const TensorDescriptor
     {
         if(layer > 0) // NOT the input layer
         {
-            tdim[0] = tdim[1] = int{hsize};
+            tdim[0] = tdim[1] = static_cast<int>(hsize);
         }
         else
         {
             if(paramID >= nHiddenTensorsPerLayer)
             {
-                tdim[0] = tdim[1] = int{hsize};
+                tdim[0] = tdim[1] = static_cast<int>(hsize);
             }
             else
             {
-                tdim[0] = int{hsize};
-                tdim[1] = int{inputVectorLen};
+                tdim[0] = static_cast<int>(hsize);
+                tdim[1] = static_cast<int>(inputVectorLen);
             }
         }
     }
@@ -337,8 +337,8 @@ RNNDescriptor::RNNDescriptor(int hsz,
         typeSize = dType == miopenHalf ? 2 : 4;
     }
 
-    hsize                       = size_t{hsz};
-    nLayers                     = size_t{layers};
+    hsize                       = static_cast<size_t>(hsz);
+    nLayers                     = static_cast<size_t>(layers);
     inputMode                   = inMode;
     dirMode                     = bidir;
     rnnMode                     = rmode;
@@ -374,8 +374,8 @@ RNNDescriptor::RNNDescriptor(int hsz,
                              miopenRNNAlgo_t amode,
                              miopenDataType_t dType,
                              miopenDropoutDescriptor_t dropDesc)
-    : hsize(size_t{hsz}),
-      nLayers(size_t{layers}),
+    : hsize(static_cast<size_t>(hsz)),
+      nLayers(static_cast<size_t>(layers)),
       rnnMode(rmode),
       dirMode(bidir),
       algoMode(amode),
@@ -533,7 +533,7 @@ size_t RNNDescriptor::GetWorkspaceSize(const Handle& handle,
     }
 
     SeqTensorDescriptor xSeqTDesc =
-        makeSeqTensorDescriptor(xDesc, size_t{seqLength}, miopenRNNDataSeqMajorNotPadded);
+        makeSeqTensorDescriptor(xDesc, size_t(seqLength), miopenRNNDataSeqMajorNotPadded);
 
     if(CheckDynamicAlgoSelection(handle, xSeqTDesc, miopenRNNTraining))
     {
@@ -578,7 +578,7 @@ size_t RNNDescriptor::GetReserveSize(size_t batchLenSum) const
         x += (nLayers - 1) * batchLenSum * hsize * typeSize;
         x += (nLayers - 1) * batchLenSum * hsize * sizeof(bool);
     }
-    return size_t{dirMode == miopenRNNbidirection ? 2 * x : x};
+    return size_t(dirMode == miopenRNNbidirection ? 2 * x : x);
 }
 
 // This function should return the size of the Reserve buffer which will be sufficient for the
@@ -614,7 +614,7 @@ size_t RNNDescriptor::GetReserveSize(const Handle& handle,
         MIOPEN_THROW(miopenStatusBadParm, "Data type mismatch between descriptors");
     }
     SeqTensorDescriptor xSeqTDesc =
-        makeSeqTensorDescriptor(xDesc, size_t{seqLength}, miopenRNNDataSeqMajorNotPadded);
+        makeSeqTensorDescriptor(xDesc, size_t(seqLength), miopenRNNDataSeqMajorNotPadded);
 
     if(CheckDynamicAlgoSelection(handle, xSeqTDesc, miopenRNNTraining))
     {
@@ -654,7 +654,7 @@ size_t RNNDescriptor::GetParamsSize(size_t inputVector) const
     {
         sz += nLayers * 2 * nHiddenTensorsPerLayer * hsize * bi;
     }
-    return size_t{typeSize * sz};
+    return static_cast<size_t>(typeSize * sz);
 }
 
 size_t RNNDescriptor::GetParamsSize(const Handle& /* handle */,
@@ -690,11 +690,11 @@ size_t RNNDescriptor::GetRNNInputSuperTensorSize(const Handle& /* handle */,
     else
     {
         auto maxBatchSize = xDesc[0].GetLengths()[0];
-        inputBatchLenSum  = size_t{seqLength} * maxBatchSize;
+        inputBatchLenSum  = static_cast<size_t>(seqLength) * maxBatchSize;
     }
     auto x = inputBatchLenSum * xDesc[0].GetLengths()[1] * typeSize;
 
-    return size_t{x};
+    return static_cast<size_t>(x);
 }
 
 size_t
@@ -706,7 +706,7 @@ RNNDescriptor::GetRNNHiddenSuperTensorSize(const Handle& /* handle */,
         MIOPEN_THROW(miopenStatusBadParm, "Data type mismatch between descriptors");
     }
     auto x = xDesc[0].GetLengths()[0] * hsize * nLayers * typeSize;
-    return size_t{dirMode == miopenRNNbidirection ? 2 * x : x};
+    return static_cast<size_t>(dirMode == miopenRNNbidirection ? 2 * x : x);
 }
 
 void RNNDescriptor::GetParamsDescriptor(const Handle& /* handle */,
@@ -727,8 +727,8 @@ void RNNDescriptor::GetParamsDescriptor(const Handle& /* handle */,
     // Create weight super tensor descriptor
     size_t bi = (dirMode == miopenRNNbidirection) ? 2 : 1;
     std::vector<int> weight_lens(2, 0);
-    weight_lens[0] = int{inputVectorLen + ((nLayers - 1) * (bi + 1) + 1) * hsize};
-    weight_lens[1] = int{bi * hsize * nHiddenTensorsPerLayer};
+    weight_lens[0] = int(inputVectorLen + ((nLayers - 1) * (bi + 1) + 1) * hsize);
+    weight_lens[1] = int(bi * hsize * nHiddenTensorsPerLayer);
     if(biasMode == miopenRNNwithBias)
     {
         weight_lens[0] += (nLayers * 2);
@@ -753,26 +753,26 @@ std::size_t RNNDescriptor::GetLayerParamSize(const Handle& /*handle*/,
     if((((dirMode != 0u) && layer <= 1) || ((dirMode == 0u) && layer < 1)))
     {
         if(paramID >= nHiddenTensorsPerLayer)
-            return size_t{typeSize * hsize * hsize};
+            return static_cast<size_t>(typeSize * hsize * hsize);
         else if(isNotRNNskip())
-            return size_t{typeSize * inputVectorLen * hsize};
+            return static_cast<size_t>(typeSize * inputVectorLen * hsize);
         else
             return 0;
     }
     else if((dirMode != 0u) && paramID < nHiddenTensorsPerLayer)
     {
-        return size_t{typeSize * hsize * hsize * 2};
+        return static_cast<size_t>(typeSize * hsize * hsize * 2);
     }
     else
     {
-        return size_t{typeSize * hsize * hsize};
+        return static_cast<size_t>(typeSize * hsize * hsize);
     }
 }
 
 std::size_t
 RNNDescriptor::GetLayerBiasSize(const Handle& /* handle */, int /*layer*/, int /*biasID*/) const
 {
-    return size_t{typeSize * hsize}; // is ther more needed here?
+    return static_cast<size_t>(typeSize * hsize); // is ther more needed here?
 }
 
 void RNNDescriptor::GetLayerParam(const Handle& handle,
@@ -812,7 +812,7 @@ void RNNDescriptor::GetLayerParam(const Handle& handle,
 #endif
 
     // Copy over data to previously allocated param tensor
-    miopen::CopyTensor(handle, paramDesc, w, paramDesc, param, int{poffset}, 0);
+    miopen::CopyTensor(handle, paramDesc, w, paramDesc, param, int(poffset), 0);
 }
 
 void RNNDescriptor::GetLayerBias(const Handle& handle,
@@ -854,7 +854,7 @@ void RNNDescriptor::GetLayerBias(const Handle& handle,
 #endif
 
     // Copy over data to previously allocated param tensor
-    miopen::CopyTensor(handle, biasDesc, w, biasDesc, bias, int{boffset}, 0);
+    miopen::CopyTensor(handle, biasDesc, w, biasDesc, bias, int(boffset), 0);
 }
 
 void RNNDescriptor::SetLayerParam(const Handle& handle,
@@ -884,7 +884,7 @@ void RNNDescriptor::SetLayerParam(const Handle& handle,
     // 2. Calculate the strides for the matrix
     std::vector<int> pstride(2, 1);
 
-    pstride[1] = int{paramDesc.GetLengths()[0]};
+    pstride[1] = static_cast<int>(paramDesc.GetLengths()[0]);
 
     std::vector<int> intLens(paramDesc.GetLengths().begin(), paramDesc.GetLengths().end());
 
@@ -906,7 +906,7 @@ void RNNDescriptor::SetLayerParam(const Handle& handle,
 #endif
 
     // 4. Copy over data to previously allocated param tensor
-    miopen::CopyTensor(handle, paramDesc, param, paramSrc, w, 0, int{poffset});
+    miopen::CopyTensor(handle, paramDesc, param, paramSrc, w, 0, int(poffset));
 }
 
 void RNNDescriptor::SetLayerBias(const Handle& handle,
@@ -959,7 +959,7 @@ void RNNDescriptor::SetLayerBias(const Handle& handle,
 #endif
 
     // 4. Copy over data to previously allocated param tensor
-    miopen::CopyTensor(handle, biasSrc, bias, biasDesc, w, 0, int{boffset});
+    miopen::CopyTensor(handle, biasSrc, bias, biasDesc, w, 0, int(boffset));
 }
 
 void RNNDescriptor::SetPaddingmode(miopenRNNPaddingMode_t padding)
@@ -1140,7 +1140,7 @@ RNNDescriptor::makeSeqTensorDescriptor(c_array_view<const miopenTensorDescriptor
     lens_per_seq.reserve(max_batch);
     auto push_back_n_lens = [&lens_per_seq](auto N, auto seq) {
         for(auto i = N; i > 0; --i)
-            lens_per_seq.push_back(size_t{seq});
+            lens_per_seq.push_back(size_t(seq));
     };
 
     std::vector<size_t> batch_cache =
@@ -1235,7 +1235,7 @@ void RNNDescriptor::RNNVanillaForward(const Handle& handle,
     if(fwdMode == miopenRNNFWDMode_t::miopenRNNTraining)
     {
         return RNNForwardTrainingPackedTensors(handle,
-                                               int{seq_len},
+                                               static_cast<int>(seq_len),
                                                xDescArray,
                                                x,
                                                hDesc,
@@ -1259,7 +1259,7 @@ void RNNDescriptor::RNNVanillaForward(const Handle& handle,
     else
     {
         return RNNForwardInferencePacked(handle,
-                                         int{seq_len},
+                                         static_cast<int>(seq_len),
                                          xDescArray,
                                          x,
                                          hDesc,
@@ -1311,7 +1311,7 @@ void RNNDescriptor::RNNVanillaBackwardData(const Handle& handle,
     miopen::c_array_view<const miopenTensorDescriptor_t> yDescArray{output_descs.data(), seq_len};
 
     return RNNBackwardDataPackedTensors(handle,
-                                        int{seq_len),
+                                        static_cast<int>(seq_len),
                                         yDescArray,
                                         dy,
                                         dhy,
@@ -1355,7 +1355,7 @@ void RNNDescriptor::RNNVanillaBackwardWeights(const Handle& handle,
     miopen::c_array_view<const miopenTensorDescriptor_t> yDescArray{output_descs.data(), seq_len};
 
     return RNNBackwardWeightsPackedTensors(handle,
-                                           int{seq_len},
+                                           static_cast<int>(seq_len),
                                            xDescArray,
                                            x,
                                            hDesc,

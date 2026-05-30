@@ -419,7 +419,7 @@ struct mlo_construct_activ_lrn_pooling_common : mlo_construct_base
         _out_df_batch_stride   = batch_stride;
         _out_df_channel_stride = channel_stride;
         _out_df_stride         = stride;
-        _top_df_sz             = size_t{size};
+        _top_df_sz             = static_cast<size_t>(size);
         _out_df_layout         = layout;
         _out_df_data_type      = miopen::GetDataTypeName(data_type);
     }
@@ -462,7 +462,7 @@ struct mlo_construct_activ_lrn_pooling_common : mlo_construct_base
         _in_df_batch_stride   = batch_stride;
         _in_df_channel_stride = channel_stride;
         _in_df_stride         = stride;
-        _bot_df_sz            = size_t{size};
+        _bot_df_sz            = static_cast<size_t>(size);
         _in_df_layout         = layout;
         _in_df_data_type      = miopen::GetDataTypeName(data_type);
     }

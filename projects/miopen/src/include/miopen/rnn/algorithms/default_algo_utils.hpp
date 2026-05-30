@@ -77,7 +77,7 @@ protected:
     static GeneralLstmTempBuffer backwardInterimInfoBuilder(const RNNDescriptor& rnnDesc,
                                                             const SeqTensorDescriptor& xDesc)
     {
-        auto layers_cnt             = static_cast<int>(rnnDesc.nLayers);
+        auto layers_cnt             = rnnDesc.nLayers;
         const size_t seq_directions = rnnDesc.dirMode == miopenRNNbidirection ? 2 : 1;
         auto hidden_vec_sz          = rnnDesc.hsize;
 
@@ -88,7 +88,7 @@ protected:
     static GeneralLstmRedBuffer forwardInterimInfoBuilder(const RNNDescriptor& rnnDesc,
                                                           const SeqTensorDescriptor& xDesc)
     {
-        auto layers_cnt             = static_cast<int>(rnnDesc.nLayers);
+        auto layers_cnt             = rnnDesc.nLayers;
         const size_t seq_directions = rnnDesc.dirMode == miopenRNNbidirection ? 2 : 1;
         auto hidden_vec_sz          = rnnDesc.hsize;
 
@@ -298,7 +298,7 @@ public:
         return BuildLstmTmpBlockDesc2D(buf_info, batch_size, rnnDesc.dataType);
     }
 
-    inline miopen::TensorDescriptor BuildLstmFilterXDesc2D(int layer_id) const
+    inline miopen::TensorDescriptor BuildLstmFilterXDesc2D(size_t layer_id) const
     {
         assert(rnnDesc.inputMode == 0 || layer_id != 0);
         // TODO replace by stride
@@ -403,19 +403,19 @@ public:
     void AddBias(const Handle& handle, const runtimeArgsFwd& runtimeArgs) const;
     void PropHxCx(const Handle& handle,
                   const runtimeArgsFwd& runtimeArgs,
-                  unsigned int layer,
+                  size_t layer,
                   const SequenceIterator& currentSeq,
                   SequenceDirection direction) const;
 
     void PropHiddenHt(const Handle& handle,
                       const runtimeArgsFwd& runtimeArgs,
-                      int layer,
+                      size_t layer,
                       const SequenceIterator& currentSeq,
                       SequenceDirection direction) const;
 
     void UpdateHStatePerTimeSeq(const Handle& handle,
                                 const runtimeArgsFwd& runtimeArgs,
-                                int layer,
+                                size_t layer,
                                 const SequenceIterator& seq,
                                 SequenceDirection direction) const;
 
@@ -517,14 +517,14 @@ public:
     void PropDhy(const Handle& handle,
                  ConstData_t dhy,
                  Data_t workSpace,
-                 unsigned int layer,
+                 size_t layer,
                  const SequenceIterator& currentSeq,
                  SequenceDirection direction) const;
 
     void PropHiddenDht(const Handle& handle,
                        ConstData_t w,
                        Data_t workSpace,
-                       int layer,
+                       size_t layer,
                        const SequenceIterator& currentSeq,
                        SequenceDirection direction) const;
 
@@ -534,7 +534,7 @@ public:
                                 Data_t,
                                 Data_t workSpace,
                                 Data_t reserveSpace,
-                                int layer,
+                                size_t layer,
                                 const SequenceIterator& seq,
                                 SequenceDirection direction) const;
 
@@ -547,7 +547,7 @@ public:
                                 size_t batchSizeUpdate,
                                 size_t useDcyIfGtBatch,
                                 size_t useCxIfGTBatch,
-                                int layer,
+                                size_t layer,
                                 const SequenceIterator& seq,
                                 SequenceDirection direction) const;
 

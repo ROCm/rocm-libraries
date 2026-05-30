@@ -58,7 +58,7 @@ ProblemDescription::ProblemDescription(const TensorDescriptor& inputDesc_,
                      "be divisible by 2.");
     }
 
-    for(auto i = 0; i < inputDesc.GetNumDims(); i++)
+    for(size_t i = 0; i < inputDesc.GetNumDims(); i++)
     {
         if(i == dim)
         {
@@ -116,7 +116,7 @@ ProblemDescription::ProblemDescription(const TensorDescriptor& inputDesc_,
                      "be divisible by 2.");
     }
 
-    for(auto i = 0; i < inputDesc.GetNumDims(); i++)
+    for(size_t i = 0; i < inputDesc.GetNumDims(); i++)
     {
         if(i == dim)
         {

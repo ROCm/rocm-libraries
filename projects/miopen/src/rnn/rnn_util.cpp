@@ -61,7 +61,7 @@ void LSTMForwardHiddenStateUpdate(const Handle& handle,
     std::string kernel_name  = "LSTMFwdHiddenUpdate";
 
     size_t max_active_threads = handle.GetMaxComputeUnits() * handle.GetWavefrontWidth() * 32;
-    size_t total_work         = static_cast<size_t>(max_batch) * hy_h;
+    size_t total_work         = static_cast<size_t>(max_batch * hy_h);
     size_t read_block         = (total_work >= 4 * max_active_threads && hy_h % 4 == 0)
                                     ? 4
                                     : ((total_work >= 2 * max_active_threads && hy_h % 2 == 0) ? 2 : 1);
@@ -175,7 +175,7 @@ void LSTMBackwardHiddenStateUpdate(const Handle& handle,
     std::string kernel_name  = "LSTMBwdHiddenUpdate";
 
     size_t max_active_threads = handle.GetMaxComputeUnits() * handle.GetWavefrontWidth() * 32;
-    size_t total_work         = static_cast<size_t>(max_batch) * hy_h;
+    size_t total_work         = static_cast<size_t>(max_batch * hy_h);
     size_t read_block         = (total_work >= 4 * max_active_threads && hy_h % 4 == 0)
                                     ? 4
                                     : ((total_work >= 2 * max_active_threads && hy_h % 2 == 0) ? 2 : 1);
@@ -285,7 +285,7 @@ void RNNTensorPaddingConverter::ConvertTensorData(const Handle& handle,
                                                   bool is_src_padded)
 {
 
-    const int seq_len = bsize_per_time.size();
+    const size_t seq_len = bsize_per_time.size();
     if(seq_len == 0)
         MIOPEN_THROW("Wrong seq_len size");
 
@@ -298,7 +298,7 @@ void RNNTensorPaddingConverter::ConvertTensorData(const Handle& handle,
     unsigned int left_id    = 0;
     unsigned int src_offset = 0, dst_offset = 0;
 
-    for(int i = 1; i <= seq_len; i++)
+    for(unsigned int i = 1; i <= seq_len; i++)
     {
         if(i == seq_len || bsize_per_time[left_id] != bsize_per_time[i])
         {
@@ -315,20 +315,20 @@ void RNNTensorPaddingConverter::ConvertTensorData(const Handle& handle,
 
             // Result from GetElementSpace does not include the padding from the last sequence
             // WA: So calculated manually.
-            unsigned int WA_padded_ElementSpace = padded_stride[0] * copy_size[0];
+            auto WA_padded_ElementSpace = uint32_t(padded_stride[0] * copy_size[0]);
 
             if(is_src_padded)
             {
-                CopyTensor(
-                    handle, padded_desc, src, packed_desc, dst, src_offset, dst_offset, true);
+                CopyTensor(handle, padded_desc, src, packed_desc, dst,
+                           int(src_offset), int(dst_offset), true);
 
                 src_offset += WA_padded_ElementSpace;
                 dst_offset += packed_desc.GetElementSpace();
             }
             else
             {
-                CopyTensor(
-                    handle, packed_desc, src, padded_desc, dst, src_offset, dst_offset, true);
+                CopyTensor(handle, packed_desc, src, padded_desc, dst,
+                           int(src_offset), int(dst_offset), true);
 
                 src_offset += packed_desc.GetElementSpace();
                 dst_offset += WA_padded_ElementSpace;
@@ -368,7 +368,7 @@ RNNTensorBaseLayoutConverter::GetSamplesDescendingOrder(const SeqTensorDescripto
 
 void ReorderTensorGPUData(const Handle& handle,
                           const std::vector<size_t>& tensor_lens,
-                          int reordering_dim,
+                          size_t reordering_dim,
                           const std::vector<size_t>& sample_order,
                           std::vector<size_t> src_stride,
                           std::vector<size_t> dst_stride,
@@ -379,7 +379,7 @@ void ReorderTensorGPUData(const Handle& handle,
     if(tensor_lens[reordering_dim] != sample_order.size())
         MIOPEN_THROW(miopenStatusInternalError, "Wrong tensor lens");
 
-    auto get_single_sample_lens = [](const std::vector<size_t>& lens, int reordering_dim_) {
+    auto get_single_sample_lens = [](const std::vector<size_t>& lens, size_t reordering_dim_) {
         std::vector<size_t> new_lens = lens;
         new_lens[reordering_dim_]    = 1;
         return new_lens;
@@ -396,7 +396,8 @@ void ReorderTensorGPUData(const Handle& handle,
     {
         const auto dst_offset = i * dst_sample_stride;
         const auto src_offset = sample_order[i] * src_sample_stride;
-        CopyTensor(handle, src_desc, src, dst_desc, dst, src_offset, dst_offset, true);
+        CopyTensor(handle, src_desc, src, dst_desc, dst,
+                   int(src_offset), int(dst_offset), true);
     }
 }
 
@@ -427,7 +428,7 @@ void RNNTensorBaseLayoutConverter::ReorderInputTensorGPUData(
 
 void RNNTensorBaseLayoutConverter::ReorderHiddenTensorGPUData(const Handle& handle,
                                                               const TensorDescriptor& tensor_desc,
-                                                              int reordering_dim,
+                                                              size_t reordering_dim,
                                                               std::vector<size_t> sample_order,
                                                               ConstData_t src,
                                                               Data_t dst)
@@ -509,7 +510,7 @@ void RNNTensorBaseLayoutConverter::ChangeTensorGPUDataPadding(
         size_t box_seq_size = *start_pos, box_batch_size;
         while(sample_it != sample_it_end && *sample_it == box_seq_size)
             sample_it++;
-        box_batch_size = std::distance(start_pos, sample_it);
+        box_batch_size = static_cast<size_t>(std::distance(start_pos, sample_it));
         return {box_seq_size, box_batch_size};
     };
 
@@ -517,7 +518,7 @@ void RNNTensorBaseLayoutConverter::ChangeTensorGPUDataPadding(
         [](auto& sample_it, auto& sample_it_end, bool is_first) -> std::tuple<size_t, size_t> {
         size_t start_len      = *sample_it,
                box_seq_size   = is_first ? start_len : start_len - *(sample_it - 1),
-               box_batch_size = std::distance(sample_it, sample_it_end);
+               box_batch_size = size_t(std::distance(sample_it, sample_it_end));
         while(sample_it != sample_it_end && *sample_it == start_len)
             sample_it++;
         return {box_seq_size, box_batch_size};
@@ -557,14 +558,16 @@ void RNNTensorBaseLayoutConverter::ChangeTensorGPUDataPadding(
 
         if(is_src_padded)
         {
-            CopyTensor(handle, padded_desc, src, packed_desc, dst, src_offset, dst_offset, true);
+            CopyTensor(handle, padded_desc, src, packed_desc, dst,
+                       int(src_offset), int(dst_offset), true);
 
             src_offset += WA_padded_ElementSpace;
             dst_offset += packed_desc.GetElementSpace();
         }
         else
         {
-            CopyTensor(handle, packed_desc, src, padded_desc, dst, src_offset, dst_offset, true);
+            CopyTensor(handle, packed_desc, src, padded_desc, dst,
+                       int(src_offset), int(dst_offset), true);
 
             src_offset += packed_desc.GetElementSpace();
             dst_offset += WA_padded_ElementSpace;

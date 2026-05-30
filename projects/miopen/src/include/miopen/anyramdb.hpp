@@ -109,7 +109,7 @@ class DbTimer<AnyRamDb>
         const auto start = std::chrono::high_resolution_clock::now();
         const auto ret   = func();
         const auto end   = std::chrono::high_resolution_clock::now();
-        MIOPEN_LOG_I2("Db::" << funcName << " time: " << (end - start).count() * .000001f << " ms");
+        MIOPEN_LOG_I2("Db::" << funcName << " time: " << float((end - start).count()) * .000001f << " ms");
         return ret;
     }
 

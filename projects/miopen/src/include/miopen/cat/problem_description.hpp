@@ -63,7 +63,7 @@ struct ProblemDescription : ProblemDescriptionBase
         }
 
         auto ydims = yDesc.GetLengths();
-        ydims[size_t{dim}] = 0;
+        ydims[size_t(dim)] = 0;
         for(int i = 0; i < xCount; i++)
         {
             auto& xdims = xDescs[i]->GetLengths();
@@ -82,10 +82,10 @@ struct ProblemDescription : ProblemDescriptionBase
                                  "CatForward: Tensor dimension lengths do not match.");
                 }
             }
-            ydims[size_t{dim}] += xdims[size_t{dim}];
+            ydims[size_t(dim)] += xdims[size_t(dim)];
         }
 
-        if(ydims[size_t{dim}] != yDesc.GetLengths()[size_t{dim}])
+        if(ydims[size_t(dim)] != yDesc.GetLengths()[size_t(dim)])
         {
             MIOPEN_THROW(miopenStatusBadParm, "CatForward: Tensor dimension lengths do not match.");
         }

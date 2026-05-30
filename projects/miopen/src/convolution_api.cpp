@@ -162,7 +162,7 @@ extern "C" miopenStatus_t miopenInitConvolutionNdDescriptor(miopenConvolutionDes
     MIOPEN_LOG_FUNCTION(convDesc, spatialDim, pads, strides, dilations, c_mode);
     return miopen::try_([&] {
         miopen::deref(convDesc) =
-            miopen::ConvolutionDescriptor(size_t{spatialDim},
+            miopen::ConvolutionDescriptor(size_t(spatialDim),
                                           c_mode,
                                           miopenPaddingDefault,
                                           pads,
@@ -236,7 +236,7 @@ miopenConvolutionABBackwardWeightsGetWorkSpaceSize(const miopenAlphaBetaCase_t a
         miopenDataType_t data_type = miopen::deref(outputTensorDesc).GetType();
         unsigned spatial_dims      = unsigned(miopen::deref(convDesc).GetSpatialDimension());
 
-        size_t G = size_t{miopen::deref(convDesc).GetGroupCount()};
+        size_t G = size_t(miopen::deref(convDesc).GetGroupCount());
         size_t K = std::get<1>(
             miopen::GetNCDHW(spatial_dims, miopen::deref(inputTensorDesc).GetLengths()));
         size_t C = std::get<1>(
@@ -384,7 +384,7 @@ extern "C" miopenStatus_t miopenGetConvolutionNdDescriptor(miopenConvolutionDesc
 {
     MIOPEN_LOG_FUNCTION(convDesc, requestedSpatialDim);
     return miopen::try_([&] {
-        int spatial_dim = int{miopen::deref(convDesc).GetSpatialDimension()};
+        int spatial_dim = int(miopen::deref(convDesc).GetSpatialDimension());
         if(spatial_dim < requestedSpatialDim)
         {
             MIOPEN_THROW("requestedSpatialDim is larger than actual spatial dimension");
@@ -410,7 +410,7 @@ extern "C" miopenStatus_t miopenGetConvolutionSpatialDim(miopenConvolutionDescri
 {
     MIOPEN_LOG_FUNCTION(convDesc);
     return miopen::try_(
-        [&] { miopen::deref(spatialDim) = int{miopen::deref(convDesc).GetSpatialDimension()}; });
+        [&] { miopen::deref(spatialDim) = int(miopen::deref(convDesc).GetSpatialDimension()); });
 }
 
 MIOPEN_EXPORT extern "C" miopenStatus_t
@@ -448,11 +448,11 @@ miopenGetConvolutionNdForwardOutputDim(miopenConvolutionDescriptor_t convDesc,
         auto out_desc = miopen::deref(convDesc).GetForwardOutputTensor(
             miopen::deref(inputTensorDesc), miopen::deref(filterDesc));
 
-        miopen::deref(nDim) = int{out_desc.GetNumDims()};
+        miopen::deref(nDim) = int(out_desc.GetNumDims());
 
         for(unsigned i = 0; i < out_desc.GetNumDims(); ++i)
         {
-            outputTensorDimA[i] = int{out_desc.GetLengths()[i]};
+            outputTensorDimA[i] = int(out_desc.GetLengths()[i]);
         }
     });
 }

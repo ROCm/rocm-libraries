@@ -234,7 +234,7 @@ std::vector<size_t> BatchNormBwdTrainFusionOpDescriptor::GetGlobalWGSz()
     }
     else
     {
-        auto segment = int{std::ceil(double(in_cstride) / double(ylocalsize))};
+        auto segment = int(std::ceil(double(in_cstride) / double(ylocalsize)));
         xgridsize    = c;
         ygridsize    = segment * ylocalsize;
     }
@@ -353,7 +353,7 @@ std::vector<size_t> BatchNormFwdTrainFusionOpDescriptor::GetGlobalWGSz()
 
     if(mode != miopenBNSpatial)
     {
-        auto segment = int{std::ceil(double(in_cstride) / double(ylocalsize))};
+        auto segment = int(std::ceil(double(in_cstride) / double(ylocalsize)));
         xgridsize    = c;
         ygridsize    = segment * ylocalsize;
     }

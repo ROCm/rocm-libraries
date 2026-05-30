@@ -78,7 +78,7 @@ ConvSolution BnFwdInference::GetSolution(const ExecutionContext& context,
         bfp32parm    = false;
     }
 
-    int n, c, h, w;
+    unsigned int n, c, h, w;
     std::tie(n, c, h, w) = tien<4>(problem.GetXDesc().GetLengths());
 
     unsigned int in_cstride = h * w;
@@ -86,27 +86,29 @@ ConvSolution BnFwdInference::GetSolution(const ExecutionContext& context,
     auto result = ConvSolution{miopenStatusSuccess};
 
     {
+        size_t c64{static_cast<size_t>(c)};
+        size_t in_cstride64{static_cast<size_t>(in_cstride)};
         size_t xlocalsize, xgridsize, ylocalsize, ygridsize, zlocalsize, zgridsize;
-        size_t max_localsize = 256;
-        size_t vectorsize    = problem.IsLayoutNHWC()
-                                   ? (c % 4 == 0 ? 4 : (c % 2 == 0 ? 2 : 1))
-                                   : (in_cstride % 4 == 0 ? 4 : (in_cstride % 2 == 0 ? 2 : 1));
+        size_t max_localsize{256};
+        size_t vectorsize = problem.IsLayoutNHWC()
+                                ? (c % 4 == 0 ? 4 : (c % 2 == 0 ? 2 : 1))
+                                : (in_cstride % 4 == 0 ? 4 : (in_cstride % 2 == 0 ? 2 : 1));
 
         if(problem.GetXDesc().GetLayout_t() == miopenTensorNHWC)
         {
-            xlocalsize = std::min(size_t{c / vectorsize}, max_localsize);
-            xgridsize  = AlignUp(size_t{c / vectorsize}, xlocalsize);
+            xlocalsize = std::min(c64 / vectorsize, max_localsize);
+            xgridsize  = AlignUp(c64 / vectorsize, xlocalsize);
 
             ylocalsize = max_localsize / xlocalsize;
-            ygridsize  = AlignUp(size_t{in_cstride}, ylocalsize);
+            ygridsize  = AlignUp(in_cstride64, ylocalsize);
         }
         else
         {
             xlocalsize = 1;
-            xgridsize  = AlignUp(size_t{c}, xlocalsize);
+            xgridsize  = AlignUp(c64, xlocalsize);
 
             ylocalsize = max_localsize;
-            ygridsize  = AlignUp(size_t{in_cstride / vectorsize}, ylocalsize);
+            ygridsize  = AlignUp(in_cstride64 / vectorsize, ylocalsize);
         }
 
         // HIP runtime does not support non-uniform blocks
@@ -120,7 +122,7 @@ ConvSolution BnFwdInference::GetSolution(const ExecutionContext& context,
                                     handle.GetWavefrontWidth(); // considering max 32 waves per CU
         if(active_threads_xy < max_active_threads)
         {
-            zgridsize = std::min(size_t{(max_active_threads / active_threads_xy)}, size_t{n});
+            zgridsize = std::min(size_t(max_active_threads / active_threads_xy), size_t(n));
         }
         else
         {
@@ -185,13 +187,13 @@ ConvSolution BnFwdInference::GetSolution(const ExecutionContext& context,
             decltype(auto) kernel = handle_.Run(kernels.front());
             decltype(auto) params = raw_params.CastTo<miopen::batchnorm::InfInvokeParams>();
 
-            int n_, c_, h_, w_;
+            unsigned int n_, c_, h_, w_;
             std::tie(n_, c_, h_, w_) = tien<4>(params.xDesc->GetLengths());
 
             unsigned int in_nstride_ = c_ * h_ * w_;
 
-            float alpha_activ = problem.GetActivationDesc().GetAlpha();
-            float beta_activ  = problem.GetActivationDesc().GetBeta();
+            float alpha_activ = float(problem.GetActivationDesc().GetAlpha());
+            float beta_activ  = float(problem.GetActivationDesc().GetBeta());
 
             if(params.xDesc->GetLayout_t() == miopenTensorNHWC)
             {

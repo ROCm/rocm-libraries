@@ -36,7 +36,7 @@ inline int GetOpIdx(const std::vector<std::shared_ptr<FusionOpDescriptor>>& op_m
 {
     auto it = std::find_if(
         op_map.cbegin(), op_map.cend(), [op](auto&& item) { return item->kind() == op; });
-    return it == op_map.cend() ? -1 : int{std::distance(op_map.cbegin(), it)};
+    return it == op_map.cend() ? -1 : int(std::distance(op_map.cbegin(), it));
 }
 
 inline bool WinoCommonIsApplicable(const FusionContext& context, const FusionDescription& problem)
@@ -71,7 +71,7 @@ inline bool WinoCommonIsApplicable(const FusionContext& context, const FusionDes
     }();
     if(activ_idx != -1)
     {
-        const auto& activ_op  = dynamic_cast<ActivFwdFusionOpDescriptor&>(*desc.op_map[size_t{activ_idx}]);
+        const auto& activ_op  = dynamic_cast<ActivFwdFusionOpDescriptor&>(*desc.op_map[size_t(activ_idx)]);
         const auto activ_mode = activ_op.activMode;
         if(!(activ_mode == miopenActivationRELU || activ_mode == miopenActivationLEAKYRELU))
             return false;

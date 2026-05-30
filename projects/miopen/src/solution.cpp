@@ -817,7 +817,7 @@ void to_json(nlohmann::json& json, const Solution& solution)
     {
         const auto program_it        = std::find(programs.begin(), programs.end(), kernel.program);
         auto prepared_kernel         = SerializedSolutionKernelInfo{};
-        prepared_kernel.program      = std::distance(programs.begin(), program_it);
+        prepared_kernel.program      = int(std::distance(programs.begin(), program_it));
         prepared_kernel.kernel_name  = kernel.kernel_name;
         prepared_kernel.program_name = kernel.program_name;
         prepared_kernel.global_work_dims = kernel.global_work_dims;
@@ -852,7 +852,7 @@ void to_json(nlohmann::json& json, const Solution& solution)
             constexpr auto mode = std::ios::binary | std::ios::ate;
             const auto path     = program.GetCodeObjectPathname();
             auto file           = std::ifstream(path, mode);
-            const auto filesize = file.tellg();
+            const auto filesize = static_cast<size_t>(file.tellg());
 
             file.unsetf(std::ios::skipws);
             file.seekg(0, std::ios::beg);
@@ -921,7 +921,7 @@ void from_json(const nlohmann::json& json, Solution& solution)
         for(auto&& serialized_kernel_info : kernel_infos)
         {
             auto kernel_info             = Solution::KernelInfo{};
-            kernel_info.program          = programs[serialized_kernel_info.program];
+            kernel_info.program          = programs[size_t(serialized_kernel_info.program)];
             kernel_info.local_work_dims  = std::move(serialized_kernel_info.local_work_dims);
             kernel_info.global_work_dims = std::move(serialized_kernel_info.global_work_dims);
             kernel_info.kernel_name      = std::move(serialized_kernel_info.kernel_name);

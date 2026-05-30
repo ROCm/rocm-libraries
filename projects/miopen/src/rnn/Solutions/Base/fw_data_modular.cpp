@@ -70,7 +70,7 @@ void RNNForwardDataModularAlgo::PropX(const Handle& handle,
                                       size_t gemm_batch_offset,
                                       size_t gemm_batch_size) const
 {
-    constexpr size_t layer                = 0;
+    constexpr size_t layer{0};
     constexpr SequenceDirection direction = SequenceDirection::Forward;
     // rnnocl 1512
 
@@ -113,11 +113,6 @@ void RNNForwardDataModularAlgo::PropX(const Handle& handle,
                  ht_x_offset,           // B offset
                  tmp_block_offset,      // C offset
                  true);
-
-        // for(int gi = 0; gi < nHiddenTensorsPerLayer * bi; gi++)
-        //{
-        //    CopyTensor(handle, x_desc, x, sp_desc, workSpace, 0, gi * hy_h);
-        //}
     }
     else
     {
@@ -142,7 +137,7 @@ void RNNForwardDataModularAlgo::PropX(const Handle& handle,
 
 void RNNForwardDataModularAlgo::PropHxCx(const Handle& handle,
                                          const runtimeArgsFwd& runtimeArgs,
-                                         unsigned int layer,
+                                         size_t layer,
                                          const SequenceIterator& currentSeq,
                                          SequenceDirection direction) const
 {
@@ -197,9 +192,9 @@ void RNNForwardDataModularAlgo::AddBias(const Handle& handle,
     auto sequence_directions =
         rnnDesc.dirMode == miopenRNNDirectionMode_t::miopenRNNbidirection ? 2 : 1;
 
-    float alpha0 = 1;
-    float alpha1 = 1;
-    float beta_t = 0;
+    float alpha0 = 1.f;
+    float alpha1 = 1.f;
+    float beta_t = 0.f;
 
     // single layer, single direction
     const auto bias_desc = miopen::TensorDescriptor(
@@ -217,7 +212,7 @@ void RNNForwardDataModularAlgo::AddBias(const Handle& handle,
                             reservLayout.getGateBlockStride()[1],
                             reservLayout.getGateBlockStride()[3]});
 
-    for(int layer = 0; layer < rnnDesc.nLayers; layer++)
+    for(size_t layer = 0; layer < rnnDesc.nLayers; layer++)
     {
         for(int dir = 0; dir < sequence_directions; dir++)
         {
@@ -269,7 +264,7 @@ void RNNForwardDataModularAlgo::AddBias(const Handle& handle,
 
 void RNNForwardDataModularAlgo::PropHiddenHt(const Handle& handle,
                                              const runtimeArgsFwd& runtimeArgs,
-                                             int layer,
+                                             size_t layer,
                                              const SequenceIterator& currentSeq,
                                              SequenceDirection direction) const
 {
@@ -312,7 +307,7 @@ void RNNForwardDataModularAlgo::PropHiddenHt(const Handle& handle,
 
 void RNNForwardDataModularAlgo::UpdateHStatePerTimeSeq(const Handle& handle,
                                                        const runtimeArgsFwd& runtimeArgs,
-                                                       int layer,
+                                                       size_t layer,
                                                        const SequenceIterator& currentSeq,
                                                        SequenceDirection direction) const
 {
@@ -371,7 +366,7 @@ void RNNForwardDataModularAlgo::PropHyCy(const Handle& handle,
 
         const auto gap_batch_offset = [&]() {
             if(currentSeq.isLast())
-                return static_cast<size_t>(0);
+                return size_t{0};
             else
                 return batchController.getBatchSize(currentSeq.getPhisVal()) - gap_batch_size;
         }();
@@ -393,9 +388,9 @@ void RNNForwardDataModularAlgo::PropHyCy(const Handle& handle,
                            runtimeArgs.reserveSpace,
                            dst_desc,
                            runtimeArgs.hy,
-                           reservLayout.getGasOffset(
-                               layer, tmp_batch_offset, direction, LstmGateAndState::Ht),
-                           hiddenHxCxInfo.getOffset(layer, gap_batch_offset));
+                           int(reservLayout.getGasOffset(
+                               layer, tmp_batch_offset, direction, LstmGateAndState::Ht)),
+                           int(hiddenHxCxInfo.getOffset(layer, gap_batch_offset)));
             }
 
             if(runtimeArgs.cy != nullptr)
@@ -405,9 +400,9 @@ void RNNForwardDataModularAlgo::PropHyCy(const Handle& handle,
                            runtimeArgs.reserveSpace,
                            dst_desc,
                            runtimeArgs.cy,
-                           reservLayout.getGasOffset(
-                               layer, tmp_batch_offset, direction, LstmGateAndState::St),
-                           hiddenHxCxInfo.getOffset(layer, gap_batch_offset));
+                           int(reservLayout.getGasOffset(
+                               layer, tmp_batch_offset, direction, LstmGateAndState::St)),
+                           int(hiddenHxCxInfo.getOffset(layer, gap_batch_offset)));
             }
         }
     }
@@ -649,9 +644,9 @@ void RNNModuleAlgoDynamic::PropHyCy(const Handle& handle,
                            runtimeArgs.reserveSpace,
                            dst_desc,
                            runtimeArgs.hy,
-                           reservLayout.getGasOffset(
-                               layer, tmp_batch_offset, direction, LstmGateAndState::Ht),
-                           hiddenHxCxInfo.getOffset(layer, gap_batch_offset));
+                           int(reservLayout.getGasOffset(
+                               layer, tmp_batch_offset, direction, LstmGateAndState::Ht)),
+                           int(hiddenHxCxInfo.getOffset(layer, gap_batch_offset)));
             }
 
             if(runtimeArgs.cy != nullptr)
@@ -661,9 +656,9 @@ void RNNModuleAlgoDynamic::PropHyCy(const Handle& handle,
                            runtimeArgs.reserveSpace,
                            dst_desc,
                            runtimeArgs.cy,
-                           reservLayout.getGasOffset(
-                               layer, tmp_batch_offset, direction, LstmGateAndState::St),
-                           hiddenHxCxInfo.getOffset(layer, gap_batch_offset));
+                           int(reservLayout.getGasOffset(
+                               layer, tmp_batch_offset, direction, LstmGateAndState::St)),
+                           int(hiddenHxCxInfo.getOffset(layer, gap_batch_offset)));
             }
         }
     }

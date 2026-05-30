@@ -120,7 +120,8 @@ miopenStatus_t ReducAddBias(const miopen::Handle& handle,
     {
         // nothing to reduce
         // just copy data from workspace to dw
-        CopyTensor(handle, ws_desc, backDataSpace, dw_desc, dw, back_bias_offset, dw_bias_offset);
+        CopyTensor(handle, ws_desc, backDataSpace, dw_desc, dw,
+                   int(back_bias_offset), int(dw_bias_offset));
     }
 
     return miopenStatusSuccess;
@@ -206,7 +207,7 @@ void RNNBackwardWeightsModularAlgo::HiddenXInputWeights(const Handle& handle,
     assert(gemm_batch_size != 0);
     assert(layer > 0);
 
-    [[maybe_unused]] bool use_dropout = !float_equal(miopen::deref(rnnDesc.dropoutDesc).dropout, 0);
+    [[maybe_unused]] bool use_dropout = !float_equal(miopen::deref(rnnDesc.dropoutDesc).dropout, 0.f);
 
     assert(use_dropout == false);
 
@@ -273,7 +274,8 @@ void RNNBackwardWeightsModularAlgo::BiasUpdate(const Handle& handle,
         // second dw bias equal to the first, so just copy reduction result
         size_t dw_bias_2_offset =
             weightsLayout.getBiasHidOff(layer, static_cast<int>(SequenceDirection::Forward), 0);
-        CopyTensor(handle, dw_desc, dw, dw_desc, dw, dw_bias_offset, dw_bias_2_offset);
+        CopyTensor(handle, dw_desc, dw, dw_desc, dw,
+                   int(dw_bias_offset), int(dw_bias_2_offset));
     }
 }
 

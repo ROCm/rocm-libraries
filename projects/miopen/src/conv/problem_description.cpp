@@ -242,19 +242,19 @@ void ProblemDescription::MakeNetworkConfig(std::string& conf_key) const
     SerializeStrides(optional, in, out, weights, sep);
 
     ss << 'x'
-       << PrintDHW('x', GetSpatialDims(), size_t{GetPadD()}, size_t{GetPadH()}, size_t{GetPadW()});
+       << PrintDHW('x', GetSpatialDims(), size_t(GetPadD()), size_t(GetPadH()), size_t(GetPadW()));
     ss << 'x'
        << PrintDHW('x',
                    GetSpatialDims(),
-                   size_t{GetKernelStrideD()},
-                   size_t{GetKernelStrideH()},
-                   size_t{GetKernelStrideW()});
+                   size_t(GetKernelStrideD()),
+                   size_t(GetKernelStrideH()),
+                   size_t(GetKernelStrideW()));
     ss << 'x'
        << PrintDHW('x',
                    GetSpatialDims(),
-                   size_t{GetDilationD()},
-                   size_t{GetDilationH()},
-                   size_t{GetDilationW()});
+                   size_t(GetDilationD()),
+                   size_t(GetDilationH()),
+                   size_t(GetDilationW()));
     ss << 'x' << GetGroupCount();
     ss << 'x' << GetDirectionStr();
     ss << 'x' << GetAlphaBetaCaseStr();
@@ -276,9 +276,9 @@ void ProblemDescription::Serialize(std::ostream& stream) const
     stream << sep << GetOutChannels();
     stream << sep << PrintDHW(sep, GetSpatialDims(), GetOutDepth(), GetOutHeight(), GetOutWidth());
     stream << sep << GetInBatchSize();
-    stream << sep << PrintDHW('x', GetSpatialDims(), size_t{GetPadD()}, size_t{GetPadH()}, size_t{GetPadW()});
-    stream << sep << PrintDHW('x', GetSpatialDims(), size_t{GetKernelStrideD()}, size_t{GetKernelStrideH()}, size_t{GetKernelStrideW()});
-    stream << sep << PrintDHW('x', GetSpatialDims(), size_t{GetDilationD()}, size_t{GetDilationH()}, size_t{GetDilationW()});
+    stream << sep << PrintDHW('x', GetSpatialDims(), size_t(GetPadD()), size_t(GetPadH()), size_t(GetPadW()));
+    stream << sep << PrintDHW('x', GetSpatialDims(), size_t(GetKernelStrideD()), size_t(GetKernelStrideH()), size_t(GetKernelStrideW()));
+    stream << sep << PrintDHW('x', GetSpatialDims(), size_t(GetDilationD()), size_t(GetDilationH()), size_t(GetDilationW()));
     stream << sep << GetBias();
     if ((GetInLayout() == "NCHW" && GetWeightsLayout() == "NCHW" && GetOutLayout() == "NCHW")
         || (GetInLayout() == "NCDHW" && GetWeightsLayout() == "NCDHW" && GetOutLayout() == "NCDHW"))

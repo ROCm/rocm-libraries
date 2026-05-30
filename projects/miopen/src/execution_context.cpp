@@ -136,7 +136,7 @@ static bool CalculateIsAmdRocmOpencl(const miopen::ExecutionContext& context)
 
 static rocm_meta_version AmdRocmMetadataVersionGetEnv()
 {
-    rocm_meta_version val = int{env::value(MIOPEN_DEBUG_AMD_ROCM_METADATA_ENFORCE)};
+    rocm_meta_version val = int(env::value(MIOPEN_DEBUG_AMD_ROCM_METADATA_ENFORCE));
     if(!val.IsValid())
     {
         MIOPEN_LOG_W("Incorrect MIOPEN_DEBUG_AMD_ROCM_ENFORCE_MDVERSION = " << val.getValue()

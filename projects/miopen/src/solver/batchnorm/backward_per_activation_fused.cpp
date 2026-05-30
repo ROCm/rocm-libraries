@@ -88,7 +88,7 @@ ConvSolution BnBwdTrgActivationFused::GetSolution(const FusionContext& context,
         const auto& input_desc = bn_problem.GetXDesc();
         input_type             = input_desc.GetType();
         std::tie(n, c, h, w)   = tien<4>(input_desc.GetLengths());
-        size_t in_cstride      = static_cast<size_t>(h) * w;
+        size_t in_cstride      = static_cast<size_t>(h * w);
 
         xlocalsize = 1;
         ylocalsize = 1;
@@ -128,15 +128,15 @@ ConvSolution BnBwdTrgActivationFused::GetSolution(const FusionContext& context,
         }
         else
         {
-            auto segment = int{std::ceil(double(in_cstride) / double(ylocalsize))};
-            xgridsize    = c;
+            auto segment = size_t(std::ceil(double(in_cstride) / double(ylocalsize)));
+            xgridsize    = static_cast<size_t>(c);
             ygridsize    = segment * ylocalsize;
         }
 
         kernel.g_wk = {xgridsize, ygridsize, zgridsize};
 
-        unsigned int ldsgcn   = xlocalsize / 64;
-        unsigned int ldsnogcn = xlocalsize;
+        auto ldsgcn   = static_cast<unsigned int>(xlocalsize / 64);
+        auto ldsnogcn = static_cast<unsigned int>(xlocalsize);
 
         int variant = 0;
         if(mode == miopenBNSpatial)
@@ -209,10 +209,10 @@ ConvSolution BnBwdTrgActivationFused::GetSolution(const FusionContext& context,
             }
             else if(input_type == miopenHalf)
             {
-                kern_args.push_back(static_cast<half_float::half>(activ_beta * activ_gamma));
-                kern_args.push_back(static_cast<half_float::half>(activ_gamma));
-                kern_args.push_back(static_cast<half_float::half>(activ_beta));
-                kern_args.push_back(static_cast<half_float::half>(activ_alpha));
+                kern_args.push_back(static_cast<half_float::half>(float(activ_beta * activ_gamma)));
+                kern_args.push_back(static_cast<half_float::half>(float(activ_gamma)));
+                kern_args.push_back(static_cast<half_float::half>(float(activ_beta)));
+                kern_args.push_back(static_cast<half_float::half>(float(activ_alpha)));
             }
             kern_args.push_back(bn_invoke.bnScale);
             kern_args.push_back(bn_invoke.bnBias);

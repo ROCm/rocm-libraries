@@ -161,7 +161,7 @@ fs::path FindDbRecord_t<TDb>::GetInstalledPathFile(const Handle& handle,
         }
 
         const auto db_id        = handle.GetTargetProperties().DbId();
-        const int real_cu_count = int{handle.GetMaxComputeUnits()};
+        const int real_cu_count = static_cast<int>(handle.GetMaxComputeUnits());
         int closest_cu          = std::numeric_limits<int>::max();
 
         for(const auto& entry : all_files)
@@ -272,7 +272,7 @@ void FindDbRecord_t<TDb>::CopyTo(std::vector<Solution>& to) const
         const auto range = content->As<FindDbData>();
         std::transform(range.begin(), range.end(), std::back_inserter(to), [](const auto& pair) {
             return Solution{
-                solver::Id{pair.first}, pair.second.time, size_t{pair.second.workspace}};
+                solver::Id{pair.first}, pair.second.time, size_t(pair.second.workspace)};
         });
     }
     else

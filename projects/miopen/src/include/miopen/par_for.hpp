@@ -84,7 +84,7 @@ void par_for_impl(std::size_t n, std::size_t threadsize, F f)
     else
     {
         std::vector<joinable_thread> threads(threadsize);
-        const std::size_t grainsize = std::ceil(static_cast<double>(n) / threads.size());
+        const std::size_t grainsize = std::size_t(std::ceil(double(n) / double(threads.size())));
 
         std::size_t work = 0;
         std::generate(threads.begin(),

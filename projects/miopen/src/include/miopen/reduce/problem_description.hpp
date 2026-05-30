@@ -70,8 +70,8 @@ struct ProblemDescriptionExtreme : ProblemDescriptionBase
         if(xDesc.GetLengths().size() == 1)
             return true;
 
-        int32_t posy = 0;
-        for(int32_t i = 0; i < xDesc.GetLengths().size(); ++i)
+        uint32_t posy = 0;
+        for(uint32_t i = 0; i < xDesc.GetLengths().size(); ++i)
         {
             if(i == dim)
                 continue;
@@ -91,8 +91,8 @@ struct ProblemDescriptionExtreme : ProblemDescriptionBase
         if(xDesc.GetLengths().size() == 1)
             return true;
 
-        int32_t posy = 0;
-        for(int32_t i = 0; i < xDesc.GetLengths().size(); ++i)
+        uint32_t posy = 0;
+        for(uint32_t i = 0; i < xDesc.GetLengths().size(); ++i)
         {
             if(i == dim)
                 continue;
@@ -177,7 +177,7 @@ struct ProblemDescriptionExtreme : ProblemDescriptionBase
 
     bool IsLargeReduceSize() const
     {
-        if(xDesc.GetLengths()[dim] > 64)
+        if(xDesc.GetLengths()[size_t(dim)] > 64)
             return false;
         return true;
     }
@@ -221,8 +221,8 @@ struct ProblemDescriptionCalculation : ProblemDescriptionBase
         if(xDesc.GetLengths().size() == 1)
             return true;
 
-        int32_t posy = 0;
-        for(int32_t i = 0; i < xDesc.GetLengths().size(); ++i)
+        uint32_t posy = 0;
+        for(uint32_t i = 0; i < xDesc.GetLengths().size(); ++i)
         {
             if(i == dim)
                 continue;
@@ -287,7 +287,7 @@ struct ProblemDescriptionCalculation : ProblemDescriptionBase
 
     bool IsLargeReduceSize() const
     {
-        if(xDesc.GetLengths()[dim] > 64)
+        if(xDesc.GetLengths()[size_t(dim)] > 64)
             return false;
         return true;
     }

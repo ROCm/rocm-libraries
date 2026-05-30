@@ -221,27 +221,27 @@ private:
         {
             if(op->kind() == miopenFusionOpConvForward)
             {
-                const auto prob = GetConvProblem(size_t{op->GetIdx()},
+                const auto prob = GetConvProblem(size_t(op->GetIdx()),
                                                  conv::Direction::Forward);
                 net_config << prob.MakeNetworkConfig().ToString();
             }
             else if(op->kind() == miopenFusionOpBatchNormInference)
             {
-                const auto prob = GetBnProblem(size_t{op->GetIdx()},
+                const auto prob = GetBnProblem(size_t(op->GetIdx()),
                                                miopen::batchnorm::Direction::ForwardInference);
                 net_config << prob.MakeNetworkConfig().ToString();
             }
             else if(op->kind() == miopenFusionOpBatchNormFwdTrain)
             {
                 const auto prob =
-                    GetBnProblem(size_t{op->GetIdx()},
+                    GetBnProblem(size_t(op->GetIdx()),
                                         miopen::batchnorm::Direction::ForwardTraining);
                 net_config << prob.MakeNetworkConfig().ToString();
             }
             else if(op->kind() == miopenFusionOpBatchNormBwdTrain)
             {
                 const auto prob =
-                    GetBnProblem(size_t{op->GetIdx()},
+                    GetBnProblem(size_t(op->GetIdx()),
                                         miopen::batchnorm::Direction::Backward);
                 net_config << prob.MakeNetworkConfig().ToString();
             }

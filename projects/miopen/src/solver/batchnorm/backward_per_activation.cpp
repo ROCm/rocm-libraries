@@ -73,7 +73,7 @@ BnBwdTrainingPerActivation::GetSolution(const ExecutionContext& context,
         bfp32parm    = false;
     }
 
-    int n, c, h, w;
+    unsigned int n, c, h, w;
     std::tie(n, c, h, w) = tien<4>(problem.GetXDesc().GetLengths());
 
     unsigned int in_cstride = h * w;
@@ -89,7 +89,7 @@ BnBwdTrainingPerActivation::GetSolution(const ExecutionContext& context,
         size_t ylocalsize = (64 >= in_cstride) ? 64 : 256;
         size_t zlocalsize = 1;
 
-        unsigned int segment = std::ceil(double(in_cstride) / double(ylocalsize));
+        auto segment = static_cast<unsigned int>(std::ceil(double(in_cstride) / double(ylocalsize)));
 
         size_t xgridsize = c;
         size_t ygridsize = segment * ylocalsize;
@@ -113,7 +113,7 @@ BnBwdTrainingPerActivation::GetSolution(const ExecutionContext& context,
             {"MIO_BN_NHW", static_cast<int>(in_nhw)},
             {"MIO_BN_CHW", in_nstride},
             {"MIO_BN_NCHW", in_nchw},
-            {"MIO_BN_NGRPS", int{std::ceil(float(ygridsize) / ylocalsize)}},
+            {"MIO_BN_NGRPS", int(std::ceil(float(ygridsize) / ylocalsize))},
             {"MIO_BN_GRP0", xlocalsize},
             {"MIO_BN_GRP1", ylocalsize},
             {"MIO_BN_GRP2", zlocalsize},

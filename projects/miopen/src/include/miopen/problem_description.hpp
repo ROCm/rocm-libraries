@@ -133,7 +133,7 @@ struct ProblemDescriptionCompatTemporary
                      int w_stride)
     {
         batch_sz           = batch;
-        const int data_len = int{GetTypeSize(data_type)};
+        const int data_len = int(GetTypeSize(data_type));
         const int size =
             (layout == "NCHW")
                 ? batch * channels * depth * height * width * data_len
@@ -146,10 +146,10 @@ struct ProblemDescriptionCompatTemporary
         out_batch_stride   = batch_stride;
         out_channel_stride = channel_stride;
         out_stride         = stride;
-        top_sz             = size_t{size};
+        top_sz             = size_t(size);
         out_layout         = layout;
         out_data_type      = data_type;
-        bias_sz            = (bias != 0) ? size_t{n_outputs * data_len} : size_t{0};
+        bias_sz            = (bias != 0) ? size_t(n_outputs * data_len) : 0;
     }
 
     /*
@@ -169,7 +169,7 @@ struct ProblemDescriptionCompatTemporary
                      int w_stride)
     {
         batch_sz           = batch;
-        const int data_len = int{GetTypeSize(data_type)};
+        const int data_len = int(GetTypeSize(data_type));
         const int size =
             (layout == "NCHW")
                 ? batch * channels * depth * height * width * data_len
@@ -182,7 +182,7 @@ struct ProblemDescriptionCompatTemporary
         in_batch_stride   = batch_stride;
         in_channel_stride = channel_stride;
         in_stride         = stride;
-        bot_sz            = size_t{size};
+        bot_sz            = size_t(size);
         in_layout         = layout;
         in_data_type      = data_type;
         //			_tens_layout = layout;
@@ -262,15 +262,15 @@ struct UnifiedDescriptionConv2d
         if(!problem.Is2d())
             MIOPEN_THROW(miopenStatusInternalError, "UnifiedDescriptionConv2d supports only 2D");
 
-        const auto group_count = size_t{problem.GetGroupCount()};
+        const auto group_count = size_t(problem.GetGroupCount());
         const auto n_inputs_per_group  = problem.GetInChannels() / group_count;
         const auto n_outputs_per_group = problem.GetOutChannels() / group_count;
         if(!problem.IsDirectionBackwardWrW())
         {
             R     = problem.GetWeightsHeight();
             S     = problem.GetWeightsWidth();
-            U     = problem.IsDirectionForward() ? size_t{problem.GetKernelStrideH()} : 1;
-            V     = problem.IsDirectionForward() ? size_t{problem.GetKernelStrideW()} : 1;
+            U     = problem.IsDirectionForward() ? size_t(problem.GetKernelStrideH()) : 1;
+            V     = problem.IsDirectionForward() ? size_t(problem.GetKernelStrideW()) : 1;
             C     = n_inputs_per_group;     // Bwd: C and K is reversed in ProblemDescription.
             K     = n_outputs_per_group;    // Ditto.
             out_h = problem.GetOutHeight(); // Bwd: height/width is reversed in ProblemDescription.
@@ -278,17 +278,17 @@ struct UnifiedDescriptionConv2d
             N     = problem.GetBatchSize();
             pad_h = problem.IsDirectionForward() ? problem.GetPadH() : problem.GetBackwardPadH();
             pad_w = problem.IsDirectionForward() ? problem.GetPadW() : problem.GetBackwardPadW();
-            input_stride_h  = problem.IsDirectionForward() ? 1 : size_t{problem.GetKernelStrideH()};
-            input_stride_w  = problem.IsDirectionForward() ? 1 : size_t{problem.GetKernelStrideW()};
-            filter_stride_h = size_t{problem.GetDilationH()};
-            filter_stride_w = size_t{problem.GetDilationW()};
+            input_stride_h  = problem.IsDirectionForward() ? 1 : size_t(problem.GetKernelStrideH());
+            input_stride_w  = problem.IsDirectionForward() ? 1 : size_t(problem.GetKernelStrideW());
+            filter_stride_h = size_t(problem.GetDilationH());
+            filter_stride_w = size_t(problem.GetDilationW());
         }
         else
         { // WrW
             R               = problem.GetInHeight();
             S               = problem.GetInWidth();
-            U               = size_t{problem.GetDilationH()};
-            V               = size_t{problem.GetDilationW()};
+            U               = size_t(problem.GetDilationH());
+            V               = size_t(problem.GetDilationW());
             C               = problem.GetBatchSize();
             K               = n_inputs_per_group;
             out_h           = problem.GetWeightsHeight();
@@ -298,8 +298,8 @@ struct UnifiedDescriptionConv2d
             pad_w           = problem.GetPadW();
             input_stride_h  = 1;
             input_stride_w  = 1;
-            filter_stride_h = size_t{problem.GetKernelStrideH()};
-            filter_stride_w = size_t{problem.GetKernelStrideW()};
+            filter_stride_h = size_t(problem.GetKernelStrideH());
+            filter_stride_w = size_t(problem.GetKernelStrideW());
         }
     }
 };

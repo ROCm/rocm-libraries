@@ -50,7 +50,7 @@ OutputIt exclusive_scan_wa(InputIt first, InputIt last, OutputIt d_first, T init
     if(first == last)
         return d_first;
 
-    auto acc = init;
+    auto acc = decltype(*d_first)(init);
 
     for(; first != last; ++first)
     {
@@ -551,13 +551,13 @@ public:
     template <typename TimeIndexT>
     size_t getBatchSize(TimeIndexT time_id) const
     {
-        return batchAtTime[time_id];
+        return batchAtTime[static_cast<size_t>(time_id)];
     }
 
     template <typename TimeIndexT>
     size_t getBatchSum(TimeIndexT time_id) const
     {
-        return batchPrefSumAtTime[time_id];
+        return batchPrefSumAtTime[static_cast<size_t>(time_id)];
     }
 
     size_t size() const { return batchAtTime.size(); }
@@ -593,12 +593,12 @@ public:
     SequenceIterator getNext() const
     {
         assert(!isLast());
-        return PartClone(value + (isFwdPass ? 1 : -1));
+        return PartClone(isFwdPass ? value + 1 : value - 1);
     }
     SequenceIterator getPrev() const
     {
         assert(!isFirst());
-        return PartClone(value + (isFwdPass ? -1 : 1));
+        return PartClone(isFwdPass ? value - 1 : value + 1);
     }
 
     bool isFirst() const { return value == startVal; }
@@ -778,14 +778,15 @@ public:
     size_t getParamRelativeOff([[maybe_unused]] size_t layer_id, int /*dir_id*/, int param_id) const
     {
         assert(layer_id > 0);
-        return param_id * hVec * xInVec;
+        return size_t(param_id) * hVec * xInVec;
     }
 
     size_t getPhisParamRelativeOff(int /*dir_id*/, int param_id) const
     {
-        return hVec * ((static_cast<size_t>(param_id) >= gatesCnt)
-                           ? inVec * gatesCnt + xInVec * (param_id - gatesCnt)
-                           : inVec * param_id);
+        auto paramID = static_cast<size_t>(param_id);
+        return hVec * ((paramID >= gatesCnt)
+                           ? inVec * gatesCnt + xInVec * (paramID - gatesCnt)
+                           : inVec * paramID);
     }
 
     size_t getMatrixOff(size_t layer_id, int dir_id, int param_id) const
@@ -813,13 +814,14 @@ public:
 
     size_t getMatrixHidOff(size_t layer_id, int dir_id) const
     {
-        return getMatrixOff(layer_id, dir_id, gatesCnt);
+        return getMatrixOff(layer_id, dir_id, int(gatesCnt));
     }
 
     size_t getBiasOff(size_t layer_id, int dir_id, int param_id) const
     {
-        return biasStartOff + biasStrides[0] * layer_id + biasStrides[1] * dir_id +
-               biasStrides[2] * param_id;
+        return biasStartOff + biasStrides[0] * layer_id +
+               biasStrides[1] * static_cast<size_t>(dir_id) +
+               biasStrides[2] * static_cast<size_t>(param_id);
     }
 
     size_t getBiasXinOff(size_t layer_id, int dir_id, int param_id) const
@@ -831,7 +833,7 @@ public:
     size_t getBiasHidOff(size_t layer_id, int dir_id, int param_id) const
     {
         assert(param_id < gatesCnt);
-        return getBiasOff(layer_id, dir_id, param_id + gatesCnt);
+        return getBiasOff(layer_id, dir_id, param_id + int(gatesCnt));
     }
 
     //[layers][dirs][params][vec_size]
@@ -907,11 +909,12 @@ public:
         std::vector<size_t> packed_lens{xyDesc.GetTotalSequenceLen(), lens[2]};
         std::vector<size_t> packed_strides(2);
 
-        WA_RHEL::exclusive_scan_wa(packed_lens.crbegin(),
-                                   std::next(packed_lens.crbegin(), packed_strides.size()),
-                                   packed_strides.rbegin(),
-                                   1LL,
-                                   std::multiplies<size_t>{});
+        WA_RHEL::exclusive_scan_wa(
+            packed_lens.crbegin(),
+            std::next(packed_lens.crbegin(), ptrdiff_t(packed_strides.size())),
+            packed_strides.rbegin(),
+            1LL,
+            std::multiplies<size_t>{});
 
         std::vector<size_t> seq_lens_per_sample = xyDesc.GetSequenceLengthsVector();
         return {(std::move(lens)),

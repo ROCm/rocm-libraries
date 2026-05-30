@@ -512,7 +512,7 @@ std::vector<Solution> Problem::FindSolutionsImpl(const Handle& handle,
         MakeConvInvokeParams(x_desc, x, w_desc, w, y_desc, y, workspace, workspace_size);
 
     auto results =
-        FindConvolution(ctx, conv_problem, invoke_ctx, int{max_solutions}, options.attach_binaries);
+        FindConvolution(ctx, conv_problem, invoke_ctx, int(max_solutions), options.attach_binaries);
     auto db = MakeConvDbGetter(ctx);
 
     for(auto& result : results)

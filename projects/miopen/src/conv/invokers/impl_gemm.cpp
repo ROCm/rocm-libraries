@@ -56,7 +56,7 @@ InvokerFactory MakeImplGemmDataInvokerFactory(const ProblemDescription& problem)
                     for(size_t i = size_t{0}; i < conv.GetSpatialDimension(); ++i)
                     {
                         const auto conv_stride   = conv.GetConvStrides()[i];
-                        const auto conv_dilation = size_t{conv.GetConvDilations()[i]};
+                        const auto conv_dilation = size_t(conv.GetConvDilations()[i]);
                         const auto filter_size   = tensors.wDesc.GetLengths()[2 + i];
 
                         if(conv_stride < conv_dilation * (filter_size - 1) + 1)

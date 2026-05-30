@@ -123,10 +123,10 @@ ConvSolution ActivBwdSolver0::GetSolution(const ExecutionContext&,
     const auto read_len = (packed) ? dx_elem_sz : dx_width2D;
 
     const auto element_size = (problem.GetXDesc().GetType() == miopenHalf) ? 2 : 4;
-    const auto read_unit    = (read_len % 8 == 0 && element_size == 2) ? 8
-                              : (read_len % 4 == 0)                    ? 4
-                              : (read_len % 2 == 0)                    ? 2
-                                                                       : 1;
+    const auto read_unit    = (read_len % 8 == 0 && element_size == 2) ? 8ull
+                              : (read_len % 4 == 0)                    ? 4ull
+                              : (read_len % 2 == 0)                    ? 2ull
+                                                                       : 1ull;
 
     const auto READ_TYPE = (read_unit == 1) ? "FP_TYPE" : "FP_TYPE" + std::to_string(read_unit);
     const auto map_size_aligned = (read_len + read_unit - 1) / read_unit;
@@ -192,10 +192,10 @@ ConvSolution ActivBwdSolver0::GetSolution(const ExecutionContext&,
             const auto& yOffset  = params.y_offset;
 
             visit_float(params.x_desc.GetType(), [&](auto as_float) {
-                decltype(auto) f_activ_alpha = as_float(params.alpha);
-                decltype(auto) f_activ_beta  = as_float(params.beta);
-                decltype(auto) f_activ_gamma = as_float(params.gamma);
-                decltype(auto) f_diff_scale  = as_float(params.beta * params.gamma);
+                auto f_activ_alpha = as_float(float(params.alpha));
+                auto f_activ_beta  = as_float(float(params.beta));
+                auto f_activ_gamma = as_float(float(params.gamma));
+                auto f_diff_scale  = as_float(float(params.beta * params.gamma));
 
                 if(packed)
                 {

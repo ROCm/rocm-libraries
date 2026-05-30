@@ -199,7 +199,7 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase,
                              {},
                              {},
                              epsilon_,
-                             int{xDesc_.GetLengths().size()} - 1)
+                             int(xDesc_.GetLengths().size()) - 1)
     {
     }
 
@@ -224,7 +224,7 @@ struct MIOPEN_INTERNALS_EXPORT ProblemDescription : ProblemDescriptionBase,
                              dwDesc_,
                              {},
                              {},
-                             int{xDesc_.GetLengths().size()} - 1)
+                             int(xDesc_.GetLengths().size()) - 1)
     {
     }
 
