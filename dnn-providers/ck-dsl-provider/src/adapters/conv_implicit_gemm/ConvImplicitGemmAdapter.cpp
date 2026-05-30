@@ -18,7 +18,7 @@ using ConvMode = hipdnn_flatbuffers_sdk::data_objects::ConvMode;
 using TensorAttributes = hipdnn_flatbuffers_sdk::data_objects::TensorAttributes;
 using TensorMap = ConvImplicitGemmAdapter::TensorMap;
 
-[[noreturn]] void badParam(const std::string& msg) {
+[[noreturn]] void throwBadParam(const std::string& msg) {
     throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                                                    "ConvImplicitGemmAdapter: " + msg);
 }
@@ -29,7 +29,7 @@ const TensorAttributes& lookupTensor(const TensorMap& tensorMap, std::int64_t ui
     if (it == tensorMap.end() || it->second == nullptr) {
         std::ostringstream oss;
         oss << "tensor map missing entry for " << role << " uid=" << uid;
-        badParam(oss.str());
+        throwBadParam(oss.str());
     }
     return *it->second;
 }
@@ -39,7 +39,7 @@ std::int32_t narrowToI32(std::int64_t value, const char* fieldName) {
         value > std::numeric_limits<std::int32_t>::max()) {
         std::ostringstream oss;
         oss << "field '" << fieldName << "' value " << value << " does not fit in int32_t";
-        badParam(oss.str());
+        throwBadParam(oss.str());
     }
     return static_cast<std::int32_t>(value);
 }
@@ -52,7 +52,7 @@ void checkDtypeFp16(const TensorAttributes& t, const char* role) {
     if (t.data_type() != DataType::HALF) {
         std::ostringstream oss;
         oss << role << " data_type must be HALF (FP16); got " << static_cast<int>(t.data_type());
-        badParam(oss.str());
+        throwBadParam(oss.str());
     }
 }
 
@@ -61,7 +61,7 @@ void check4dDims(const TensorAttributes& t, const char* role) {
         std::ostringstream oss;
         oss << role << " dims must be 4-D (logical NCHW for X/Y, KCRS for W); got size "
             << (t.dims() == nullptr ? 0u : t.dims()->size());
-        badParam(oss.str());
+        throwBadParam(oss.str());
     }
 }
 
@@ -74,13 +74,13 @@ std::int32_t getDim(const TensorAttributes& t, std::uint32_t idx, const char* ro
 
 void checkSpatialAttr(const flatbuffers::Vector<std::int64_t>* attr, const char* name) {
     if (attr == nullptr) {
-        badParam(std::string("conv attribute '") + name + "' must be set");
+        throwBadParam(std::string("conv attribute '") + name + "' must be set");
     }
     if (attr->size() != 2) {
         std::ostringstream oss;
         oss << "conv attribute '" << name << "' must have size 2 (2-D conv only for M1); got size "
             << attr->size();
-        badParam(oss.str());
+        throwBadParam(oss.str());
     }
 }
 
@@ -89,7 +89,8 @@ void checkSpatialAttr(const flatbuffers::Vector<std::int64_t>* attr, const char*
 ConvImplicitGemmSpec ConvImplicitGemmAdapter::buildSpec(const ConvolutionFwdAttributes& convAttr,
                                                         const TensorMap& tensorMap) {
     if (convAttr.conv_mode() != ConvMode::CROSS_CORRELATION) {
-        badParam("conv_mode must be CROSS_CORRELATION (true convolution is unsupported for M1)");
+        throwBadParam(
+            "conv_mode must be CROSS_CORRELATION (true convolution is unsupported for M1)");
     }
 
     const auto& X = lookupTensor(tensorMap, convAttr.x_tensor_uid(), "X");
@@ -125,7 +126,7 @@ ConvImplicitGemmSpec ConvImplicitGemmAdapter::buildSpec(const ConvolutionFwdAttr
         std::ostringstream oss;
         oss << "X.C (" << Cx << ") must equal W.C (" << Cw
             << "); grouped convolutions are unsupported for M1";
-        badParam(oss.str());
+        throwBadParam(oss.str());
     }
 
     // We don't lift K/R/S from Y -- the conv-fwd math determines Y's
@@ -134,10 +135,10 @@ ConvImplicitGemmSpec ConvImplicitGemmAdapter::buildSpec(const ConvolutionFwdAttr
     // deferred to I-7 (where it can use the spec's Ho()/Wo() helpers
     // once the spec is built).
     if (getDim(Y, 0, "Y", "N") != N) {
-        badParam("Y.N must equal X.N");
+        throwBadParam("Y.N must equal X.N");
     }
     if (getDim(Y, 1, "Y", "K") != K) {
-        badParam("Y.K must equal W.K");
+        throwBadParam("Y.K must equal W.K");
     }
 
     checkSpatialAttr(convAttr.pre_padding(), "pre_padding");
@@ -150,7 +151,7 @@ ConvImplicitGemmSpec ConvImplicitGemmAdapter::buildSpec(const ConvolutionFwdAttr
     // axis; encoding asymmetric pads would require descriptor changes.
     if (convAttr.pre_padding()->Get(0) != convAttr.post_padding()->Get(0) ||
         convAttr.pre_padding()->Get(1) != convAttr.post_padding()->Get(1)) {
-        badParam("asymmetric padding is not supported");
+        throwBadParam("asymmetric padding is not supported");
     }
 
     ConvImplicitGemmSpec spec{};
