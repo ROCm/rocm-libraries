@@ -22,6 +22,7 @@ from ...helpers.io import (
     load_scalar_as_f32,
     pack_f32_to,
     store_scalar_from_f32,
+    vector_row_copy,
 )
 from ...helpers.rotary import (
     RotarySpec,
@@ -309,25 +310,22 @@ def _copy_row_vec(
     ``include/ck_tile/ops/fmha/pipeline/block_fmha_fwd_appendkv_pipeline.hpp``:
     one head_dim row is moved with the widest aligned vector the
     pointer's ``align=16`` declaration supports.
+
+    Delegates to :func:`ck_dsl.helpers.io.vector_row_copy` (whose
+    docstring names this function as its promotion source); the helper
+    emits the identical ``H // _VEC`` vector copies + scalar tail. The
+    ``vec_bytes=16`` argument maps to ``_VEC = 16 / 2`` for f16 / bf16.
     """
-    ty = io_ir_type(dtype)
-    n_chunks = H // _VEC
-    elem_bytes = 2  # f16 / bf16
-
-    for c in range(n_chunks):
-        d = c * _VEC
-        src_addr = b.add(src_row_base, b.const_i32(d))
-        dst_addr = b.add(dst_row_base, b.const_i32(d))
-        vec = b.global_load_vN(src_ptr, src_addr, ty, _VEC, align=_VEC * elem_bytes)
-        b.global_store_vN(dst_ptr, dst_addr, vec, _VEC, align=_VEC * elem_bytes)
-
-    for d in range(n_chunks * _VEC, H):
-        v = load_scalar_as_f32(
-            b, src_ptr, b.add(src_row_base, b.const_i32(d)), dtype=dtype
-        )
-        store_scalar_from_f32(
-            b, dst_ptr, b.add(dst_row_base, b.const_i32(d)), v, dtype=dtype
-        )
+    vector_row_copy(
+        b,
+        src=src_ptr,
+        dst=dst_ptr,
+        src_base=src_row_base,
+        dst_base=dst_row_base,
+        H=H,
+        dtype=dtype,
+        vec_bytes=_VEC * 2,
+    )
 
 
 def _appendkv_copy_k(

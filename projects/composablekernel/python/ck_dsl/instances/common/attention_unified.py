@@ -33,11 +33,17 @@ from ...helpers.attention import (
     Attention2DConfig,
     Attention3DConfig,
     PagedKvDescriptor,
+    apply_softcap_log2,
     select_2d_config,
     select_3d_config,
     use_2d_kernel,
 )
+
 from ...transforms import TensorDescriptor
+
+# Alias the promoted log2-domain softcap helper under the local name used by
+# the scalar reference kernels (matches the gfx950 tiled modules' convention).
+_apply_softcap = apply_softcap_log2
 
 # NOTE: this dispatcher lives in ``instances/common/`` (arch-neutral) but the
 # optimized tiled kernels it dispatches to are arch-specific. To keep
@@ -1802,32 +1808,15 @@ def build_unified_attention_2d(spec: UnifiedAttention2DSpec) -> KernelDef:
     output = b.param(
         "output_ptr", PtrType(dtype, "global"), noalias=True, writeonly=True, align=16
     )
-    query = b.param(
-        "query_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
-    )
-    key = b.param(
-        "key_cache_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
-    )
-    value = b.param(
-        "value_cache_ptr",
-        PtrType(dtype, "global"),
-        noalias=True,
-        readonly=True,
-        align=16,
-    )
-    sinks = b.param("sink_ptr", PtrType(dtype, "global"), readonly=True, align=16)
-    block_tables = b.param(
-        "block_tables_ptr", PtrType(I32, "global"), readonly=True, align=4
-    )
-    seq_lens = b.param("seq_lens_ptr", PtrType(I32, "global"), readonly=True, align=4)
-    _alibi = b.param("alibi_slopes_ptr", PtrType(F32, "global"), readonly=True, align=4)
-    _qq_bias = b.param("qq_bias_ptr", PtrType(F32, "global"), readonly=True, align=4)
-    cu_q = b.param(
-        "query_start_len_ptr", PtrType(I32, "global"), readonly=True, align=4
-    )
-    scale = b.param("scale", F32)
-    _k_scale = b.param("k_scale", F32)
-    _v_scale = b.param("v_scale", F32)
+    abi = _declare_scalar_attn_params(b, dtype)
+    query = abi["query"]
+    key = abi["key"]
+    value = abi["value"]
+    sinks = abi["sink"]
+    block_tables = abi["block_tables"]
+    seq_lens = abi["seq_lens"]
+    cu_q = abi["cu_q"]
+    scale = abi["scale"]
     _out_scale = b.param("out_scale", F32)
     softcap = b.param("softcap", F32)
     num_seqs = b.param("num_seqs", I32)
@@ -1875,18 +1864,9 @@ def build_unified_attention_2d(spec: UnifiedAttention2DSpec) -> KernelDef:
     # Coordinate transforms over the kernel's tensors. Q/output are a
     # naive ``(query_token, query_head, dim)`` layout; the paged KV
     # cache uses ``PagedKvDescriptor`` (in element units, not bytes).
-    q_desc = TensorDescriptor.naive(
-        "Q",
-        lengths=[p.max_seqlen_q + 1, p.num_query_heads, p.head_size],
-        coord_names=("token", "head", "dim"),
-    )
-    kv_desc_elem = PagedKvDescriptor(
-        block_size=p.block_size,
-        stride_0=p.block_size * p.num_kv_heads * p.head_size,
-        stride_1=p.num_kv_heads * p.head_size,
-        stride_2=p.head_size,
-        stride_3=1,
-    )
+    # Both share the descriptor builders the 3D/reduce scalar kernels use.
+    q_desc = _q_descriptor(p)
+    kv_desc_elem = _paged_kv_descriptor(p)
 
     loop = b.scf_for_iter(
         b.const_i32(0),
@@ -1962,7 +1942,7 @@ def build_unified_attention_2d(spec: UnifiedAttention2DSpec) -> KernelDef:
 
         score = b.fmul(b.fmul(score, scale), rcp_ln2)
         if p.softcap > 0:
-            score = b.fmul(apply_softcap_runtime(b, score, softcap), rcp_ln2)
+            score = b.fmul(_apply_softcap(b, score, softcap), rcp_ln2)
 
         causal_ok = b.cmp_le(kpos, b.add(context_len, query_pos))
         if p.sliding_window > 0:
@@ -1997,29 +1977,6 @@ def build_unified_attention_2d(spec: UnifiedAttention2DSpec) -> KernelDef:
     with b.scf_if(valid):
         b.global_store(output, out_off, out_cast, align=2)
     return b.kernel
-
-
-def apply_softcap_runtime(b: IRBuilder, score_log2: Value, softcap: Value) -> Value:
-    """Triton-equivalent softcap on a log2-domain score.
-
-    Computes `softcap * tanh(score_natural / softcap)` using only `exp2` so the
-    same primitives that drive the online softmax also handle softcap (matches
-    AITER's `apply_softcap`). Given `score_log2 = score_natural * log2(e)`,
-
-        Sdiv = score_log2 / softcap
-        p1   = exp2(Sdiv)      = e^(score_natural / softcap)
-        p2   = exp2(-Sdiv)     = e^(-score_natural / softcap)
-        return softcap * (p1 - p2) / (p1 + p2)
-
-    Returned value is in *natural* domain; the caller is responsible for
-    multiplying by `RCP_LN2` to bring it back to log2 for the next `exp2`.
-    """
-    sdiv = b.fdiv(score_log2, softcap)
-    p1 = b.exp2(sdiv)
-    p2 = b.exp2(b.fneg(sdiv))
-    diff = b.fsub(p1, p2)
-    summ = b.fadd(p1, p2)
-    return b.fmul(softcap, b.fmul(diff, b.rcp(summ)))
 
 
 @dataclass(frozen=True)
@@ -2067,32 +2024,14 @@ def build_unified_attention_3d(spec: UnifiedAttention3DSpec) -> KernelDef:
         writeonly=True,
         align=16,
     )
-    query = b.param(
-        "query_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
-    )
-    key = b.param(
-        "key_cache_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
-    )
-    value = b.param(
-        "value_cache_ptr",
-        PtrType(dtype, "global"),
-        noalias=True,
-        readonly=True,
-        align=16,
-    )
-    _sinks = b.param("sink_ptr", PtrType(dtype, "global"), readonly=True, align=16)
-    block_tables = b.param(
-        "block_tables_ptr", PtrType(I32, "global"), readonly=True, align=4
-    )
-    seq_lens = b.param("seq_lens_ptr", PtrType(I32, "global"), readonly=True, align=4)
-    _alibi = b.param("alibi_slopes_ptr", PtrType(F32, "global"), readonly=True, align=4)
-    _qq_bias = b.param("qq_bias_ptr", PtrType(F32, "global"), readonly=True, align=4)
-    cu_q = b.param(
-        "query_start_len_ptr", PtrType(I32, "global"), readonly=True, align=4
-    )
-    scale = b.param("scale", F32)
-    _k_scale = b.param("k_scale", F32)
-    _v_scale = b.param("v_scale", F32)
+    abi = _declare_scalar_attn_params(b, dtype)
+    query = abi["query"]
+    key = abi["key"]
+    value = abi["value"]
+    block_tables = abi["block_tables"]
+    seq_lens = abi["seq_lens"]
+    cu_q = abi["cu_q"]
+    scale = abi["scale"]
     _softcap = b.param("softcap", F32)
     num_seqs = b.param("num_seqs", I32)
 
@@ -2298,6 +2237,69 @@ def _emit_find_seq_idx_scan(
         iterations=32,  # bounded scf.for trip count; 32 covers num_seqs <= 2^32
         per_token=True,
     )
+
+
+def _declare_scalar_attn_params(b: IRBuilder, dtype_ir: Type) -> dict:
+    """Declare the shared scalar-attention ABI prefix (Q/K/V + aux + scales).
+
+    The 2D and 3D scalar reference kernels declare an identical leading run
+    of params -- ``query/key/value``, the ``sink/block_tables/seq_lens/alibi/
+    qq_bias/cu_q`` aux pointers, then the ``scale/k_scale/v_scale`` f32
+    scalars -- in exactly this order. Param declaration order is load-bearing
+    (it fixes the kernel arg layout / ABI), so this helper emits the same
+    ``b.param`` calls in the same order, returning the SSA values by name. The
+    builders append their own kernel-specific tail params (``out_scale``,
+    ``softcap``, ``num_seqs``, ...) after calling this, preserving the overall
+    ABI byte-for-byte.
+
+    The ``sink`` and ``alibi``/``qq_bias`` pointers are unused by the scalar
+    oracle bodies (they only model causal/sliding masking + softcap), but they
+    are part of the AITER ABI and must occupy their slots.
+    """
+    query = b.param(
+        "query_ptr", PtrType(dtype_ir, "global"), noalias=True, readonly=True, align=16
+    )
+    key = b.param(
+        "key_cache_ptr",
+        PtrType(dtype_ir, "global"),
+        noalias=True,
+        readonly=True,
+        align=16,
+    )
+    value = b.param(
+        "value_cache_ptr",
+        PtrType(dtype_ir, "global"),
+        noalias=True,
+        readonly=True,
+        align=16,
+    )
+    sink = b.param("sink_ptr", PtrType(dtype_ir, "global"), readonly=True, align=16)
+    block_tables = b.param(
+        "block_tables_ptr", PtrType(I32, "global"), readonly=True, align=4
+    )
+    seq_lens = b.param("seq_lens_ptr", PtrType(I32, "global"), readonly=True, align=4)
+    alibi = b.param("alibi_slopes_ptr", PtrType(F32, "global"), readonly=True, align=4)
+    qq_bias = b.param("qq_bias_ptr", PtrType(F32, "global"), readonly=True, align=4)
+    cu_q = b.param(
+        "query_start_len_ptr", PtrType(I32, "global"), readonly=True, align=4
+    )
+    scale = b.param("scale", F32)
+    k_scale = b.param("k_scale", F32)
+    v_scale = b.param("v_scale", F32)
+    return {
+        "query": query,
+        "key": key,
+        "value": value,
+        "sink": sink,
+        "block_tables": block_tables,
+        "seq_lens": seq_lens,
+        "alibi": alibi,
+        "qq_bias": qq_bias,
+        "cu_q": cu_q,
+        "scale": scale,
+        "k_scale": k_scale,
+        "v_scale": v_scale,
+    }
 
 
 def _q_descriptor(p: UnifiedAttentionProblem) -> TensorDescriptor:

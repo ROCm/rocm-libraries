@@ -175,26 +175,28 @@ class LdsLayout:
     def cshuffle(
         cls,
         *,
-        atom_m: int,
-        atom_n: int,
-        warps_m: int,
-        warps_n: int,
+        tile_m: int,
+        tile_n: int,
     ) -> "LdsLayout":
-        """CShuffle-style LDS layout (P42).
+        """CShuffle-style LDS staging layout (P42).
 
-        Places adjacent-same-lane registers at adjacent LDS addresses
-        so that the stage-1 LDS publish in the cshuffle epilogue can
-        coalesce into ``ds_write_b64`` / ``ds_write_b128`` instead of
-        the per-element ``ds_write_b16`` chain. The layout is
-        ``[warps_m * atom_m, warps_n * atom_n]`` with no swizzle —
-        the MFMA distribution itself provides the conflict-free
-        access pattern at the cost of a slightly larger LDS footprint
-        (one full warp tile vs the legacy half-overlap layout).
+        Describes the ``[tile_m, tile_n]`` row-major LDS region used to
+        stage one block's worth of accumulator before the wide,
+        fully-coalesced global store. The MFMA accumulator distribution
+        naturally puts adjacent same-lane registers at adjacent LDS
+        addresses, so the stage-1 publish coalesces into
+        ``ds_write_b64`` / ``ds_write_b128`` (and the stage-3 read into
+        ``ds_read_b128``) instead of the per-element ``ds_write_b16``
+        chain the legacy cshuffle code emits. No swizzle: the MFMA
+        distribution itself provides the conflict-free access pattern.
+
+        ``tile_n`` is the row stride (``logical_cols``); ``tile_m`` is
+        the number of rows and is supplied to :meth:`storage_shape`.
 
         Reference: CK Tile ``cshuffle_epilogue.hpp:316-384, 661-759``.
         """
         return cls(
-            logical_cols=int(warps_n * atom_n),
+            logical_cols=int(tile_n),
             k_pad=0,
             swizzle=None,
             requires_packed_async=False,

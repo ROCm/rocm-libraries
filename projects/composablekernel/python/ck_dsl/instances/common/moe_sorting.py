@@ -53,7 +53,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Mapping, Tuple
 
-from ...core.ir import F32, I32, IRBuilder, KernelDef, PtrType
+from ...core.ir import F32, I32, IRBuilder, KernelDef, PtrType, Value
 from ...helpers.scan import (
     block_exclusive_scan_i32,
     lds_zero_i32,
@@ -63,6 +63,25 @@ from ...helpers.spec import (
     ceil_div_grid,
     kernel_name_join,
 )
+
+
+def _decode_expert_load(
+    b: IRBuilder, TopkIds: Value, pair_idx: Value, num_experts: Value
+) -> Tuple[Value, Value]:
+    """Load the expert id for one ``(t, k)`` pair and its range-validity flag.
+
+    Returns ``(eid, valid_e)`` where ``eid = TopkIds[pair_idx]`` and
+    ``valid_e = (eid >= 0) and (eid < num_experts)``. Mal-formed router
+    output (an out-of-range id) yields ``valid_e == False`` so the caller
+    drops the contribution rather than corrupting an unrelated counter.
+
+    Emits ``global_load_i32 -> const_i32(0) -> cmp_ge -> cmp_lt -> land`` in
+    that order, matching the inline decode the histogram / scatter kernels
+    used (byte-identical for sites that build ``const_i32(0)`` inline).
+    """
+    eid = b.global_load_i32(TopkIds, pair_idx)
+    valid_e = b.land(b.cmp_ge(eid, b.const_i32(0)), b.cmp_lt(eid, num_experts))
+    return eid, valid_e
 
 
 def _resolve_launch_arch(arch: "str | None") -> str:
@@ -208,11 +227,10 @@ def build_moe_sort_histogram(spec: MoeSortingSpec, arch: str = "gfx950") -> Kern
 
     in_bounds = b.cmp_lt(pair_idx, num_pairs)
     with b.scf_if(in_bounds):
-        eid = b.global_load_i32(TopkIds, pair_idx)
         # Guard the expert id against [0, num_experts). Mal-formed
         # router output (an out-of-range id) silently drops the
         # contribution rather than corrupting an unrelated counter.
-        valid_e = b.land(b.cmp_ge(eid, b.const_i32(0)), b.cmp_lt(eid, num_experts))
+        eid, valid_e = _decode_expert_load(b, TopkIds, pair_idx, num_experts)
         with b.scf_if(valid_e):
             b.lds_atomic_add(lds_hist, [eid], b.const_i32(1))
     b.sync()
@@ -485,8 +503,7 @@ def build_moe_sort_scatter(spec: MoeSortingSpec, arch: str = "gfx950") -> Kernel
     in_bounds = b.cmp_lt(pair_idx, num_pairs)
 
     with b.scf_if(in_bounds):
-        eid = b.global_load_i32(TopkIds, pair_idx)
-        valid_e = b.land(b.cmp_ge(eid, b.const_i32(0)), b.cmp_lt(eid, num_experts))
+        eid, valid_e = _decode_expert_load(b, TopkIds, pair_idx, num_experts)
         with b.scf_if(valid_e):
             local_off = b.global_atomic_add(Counter, eid, b.const_i32(1))
             base = b.global_load_i32(Offsets, eid)

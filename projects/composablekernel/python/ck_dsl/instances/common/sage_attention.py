@@ -65,9 +65,8 @@ from ...core.ir import (
     KernelDef,
     Value,
 )
-from ...helpers.attention import apply_attention_mask, warp_xor_reduce_sum
 from ...helpers.i4_dequant import unpack_i4_byte_to_pair_i32
-from ...helpers.io import io_ir_type, load_scalar_as_f32, store_scalar_from_f32
+from ...helpers.io import io_ir_type, load_scalar_as_f32
 from ...helpers.mfma_attention import (
     MFMA_ATTN_BLOCK_K,
     MFMA_ATTN_BLOCK_M,
@@ -81,7 +80,7 @@ from ...helpers.qk_scale import (
 )
 from ...helpers.spec import kernel_name_join
 from ._fmha_common import FmhaCommonSpec, FmhaKernelBuilder, validate_common_spec
-from ._fmha_warp_body import WARP_SIZE
+from ._fmha_warp_body import WARP_SIZE, fmha_warp_fwd_inner_body
 from .fmha_arch import validate_fmha_mfma_atom
 
 
@@ -589,18 +588,29 @@ def _build_sage_warp(spec: SageAttentionSpec) -> KernelDef:
     and the online softmax state plus the per-lane accumulator slice
     live in registers across the K-loop via ``scf.for`` iter_args.
 
-    Vs the v1 monolithic body, this path:
+    The online-softmax loop + epilogue are delegated to the shared
+    :func:`fmha_warp_fwd_inner_body`; sage only supplies:
 
-    1. **Vectorises the K/V (and Q) byte slice load** per lane via
-       :func:`_load_kv_lane_f32` (single ``global_load_vN`` for the
-       lane's ``EPT`` consecutive elements; one VMEM transaction
-       instead of ``EPT``).
-    2. **Drops the i8 / i4 fp8 round-trip** -- :func:`_codebook_i8_to_f32`
-       / :func:`_codebook_i4_pair_to_f32` consume the f32 codebook
-       value directly, saving two ``llvm.amdgcn.cvt.*.fp8`` per
-       dequanted element.
-    3. Pre-loads ``q_scale`` once per CTA (q_token is wave-uniform);
-       only the K-loop reloads ``k_scale`` per-iter for per_block.
+    1. A **dequant K/V lane loader** (``kv_lane_loader`` seam) that
+       reads this lane's head-dim slice and dequantises it to f32:
+       vectorised byte slice + f32 cast for fp16/fp8 (via
+       :func:`_load_kv_lane_f32`), direct f32-codebook lookup for the
+       int variants (i8 via :func:`_load_kv_lane_f32`, i4 via
+       :func:`_codebook_i4_pair_to_f32`) -- no fp8 round-trip.
+    2. A **Q lane loader** (``q_lane_loader`` seam) that reads this
+       lane's Q slice as f32 (vectorised when ``EPT`` admits a
+       power-of-two ``global_load_vN``).
+    3. The **per-block Q+K scale** as an ``extra_score_transform``:
+       ``q_scale`` is loaded once per CTA (q_token is wave-uniform);
+       ``k_scale`` is reloaded per K-iter for per_block. Both fold into
+       the score via :func:`apply_qk_scales` after the QK reduction and
+       before the softmax update -- the same point sage applied them in
+       the open-coded loop.
+
+    The shared body keeps the per-slot scalar accumulator iter_args and
+    scalar epilogue stores (the ``kv_lane_loader`` list path), so the
+    int loaders fully own their packed-byte addressing and the dequant
+    arithmetic is numerically identical to the previous open-coded body.
     """
     s = spec.common
     dtype = s.dtype
@@ -627,7 +637,6 @@ def _build_sage_warp(spec: SageAttentionSpec) -> KernelDef:
                 "i4 sage v1 supports head_size == 128 (one byte per lane); "
                 f"got head_size={H} which would need {ept_pairs} bytes/lane"
             )
-    ept = H // WARP_SIZE
 
     kb = FmhaKernelBuilder(spec.kernel_name(), s)
     kb.block_size(block_size)
@@ -670,22 +679,6 @@ def _build_sage_warp(spec: SageAttentionSpec) -> KernelDef:
         )
         b.sync()
 
-    # Per-lane head-dim slice. For most quant modes EPT slots per lane.
-    # For i4 mode EPT is 2 (one byte = two nibbles per lane).
-    if spec.quant_mode == "i4_fp8_bf16":
-        lane_d_base = b.mul(tid, b.const_i32(2))
-        n_slots = 2
-    else:
-        lane_d_base = b.mul(tid, b.const_i32(ept))
-        n_slots = ept
-
-    q_row = kb.q_row_base()
-    o_row = kb.o_row_base()
-
-    # Pre-load this lane's Q slice as f32 scalars (vectorised when EPT
-    # admits a power-of-two ``global_load_vN``).
-    q_lane = _load_q_lane_f32(b, Q, q_row, lane_d_base, n_slots, dtype, q_pointee)
-
     # Per-Q-block scale (loaded once for the whole CTA -- q_token is
     # the same across the wave).
     q_block_idx = (
@@ -702,24 +695,57 @@ def _build_sage_warp(spec: SageAttentionSpec) -> KernelDef:
         q_block_idx=q_block_idx,
     )
 
-    neg_inf = b.const_f32(-1e30)
-    zero_f = b.const_f32(0.0)
+    is_i4 = spec.quant_mode == "i4_fp8_bf16"
 
-    iter_args = [("m", neg_inf), ("l", zero_f)]
-    for k in range(n_slots):
-        iter_args.append((f"a{k}", zero_f))
+    def _q_lane_loader(b: IRBuilder, q_row_base, lane_d_base, ept) -> list[Value]:
+        """This lane's ``ept`` Q elements as f32 (vectorised when ept>=2)."""
+        return _load_q_lane_f32(b, Q, q_row_base, lane_d_base, ept, dtype, q_pointee)
 
-    k_loop = b.scf_for_iter(
-        b.const_i32(0),
-        seqlen_k,
-        b.const_i32(1),
-        iter_args=iter_args,
-        iv_name="k_idx",
-    )
-    with k_loop as (k_idx, state_vals):
-        m, l = state_vals[0], state_vals[1]  # noqa: E741 - online-softmax state
-        acc_iter = state_vals[2:]
+    def _kv_lane_loader(b: IRBuilder, k_idx, k_row_base, v_row_base, lane_d_base, ept):
+        """This lane's K and V head-dim slices, dequantised to f32.
 
+        i4: one packed byte per lane -> two nibbles -> two f32 (direct
+        codebook). All other modes: vectorised byte slice + f32 dequant
+        via :func:`_load_kv_lane_f32`.
+        """
+        if is_i4:
+            byte_off = b.div(lane_d_base, b.const_i32(2))  # = tid
+            packed_k = b.global_load(K, b.add(k_row_base, byte_off), I8)
+            lo_k, hi_k = _codebook_i4_pair_to_f32(b, cb_k, packed_k)
+            packed_v = b.global_load(V, b.add(v_row_base, byte_off), I8)
+            v_lo, v_hi = _codebook_i4_pair_to_f32(b, cb_v, packed_v)
+            return [lo_k, hi_k], [v_lo, v_hi]
+        k_lane = _load_kv_lane_f32(
+            b,
+            KV=K,
+            base=k_row_base,
+            lane_d_base=lane_d_base,
+            ept=ept,
+            quant_mode=spec.quant_mode,
+            cb_ptr=cb_k,
+            kv_ty=kv_ty,
+            dtype=dtype,
+        )
+        v_lane = _load_kv_lane_f32(
+            b,
+            KV=V,
+            base=v_row_base,
+            lane_d_base=lane_d_base,
+            ept=ept,
+            quant_mode=spec.quant_mode,
+            cb_ptr=cb_v,
+            kv_ty=kv_ty,
+            dtype=dtype,
+        )
+        return k_lane, v_lane
+
+    def _qk_scale_transform(b: IRBuilder, score_log2: Value, k_idx: Value) -> Value:
+        """Apply ``q_scale * k_scale`` to the post-reduction score.
+
+        Mirrors the open-coded ``apply_qk_scales`` call: ``q_scale`` is
+        the wave-uniform per-Q-block scale; ``k_scale`` is reloaded per
+        K-iter for per_block layout.
+        """
         k_block_idx = (
             b.div(k_idx, b.const_i32(spec.k_scale.scale_block))
             if spec.k_scale.layout == "per_block"
@@ -733,90 +759,38 @@ def _build_sage_warp(spec: SageAttentionSpec) -> KernelDef:
             head_idx=kv_head_idx,
             k_block_idx=k_block_idx,
         )
+        return apply_qk_scales(b, score_log2, q_scale=q_scale_v, k_scale=k_scale_v)
 
-        k_row_base = kb.k_row_base(k_idx)
-        v_row_base = kb.v_row_base(k_idx)
+    causal_ctx = q_token if s.mask_mode in ("causal", "sliding_window") else None
 
-        partial = b.const_f32(0.0)
-        if spec.quant_mode == "i4_fp8_bf16":
-            # Each lane reads one packed byte = two nibbles -> two
-            # head_dim slots [2*tid, 2*tid+1]. Direct f32 codebook
-            # lookup -- no fp8 round-trip.
-            byte_off = b.div(lane_d_base, b.const_i32(2))  # = tid
-            packed_k = b.global_load(K, b.add(k_row_base, byte_off), I8)
-            lo_k, hi_k = _codebook_i4_pair_to_f32(b, cb_k, packed_k)
-            partial = b.fadd(partial, b.fmul(q_lane[0], lo_k))
-            partial = b.fadd(partial, b.fmul(q_lane[1], hi_k))
-            packed_v = b.global_load(V, b.add(v_row_base, byte_off), I8)
-            v_lo, v_hi = _codebook_i4_pair_to_f32(b, cb_v, packed_v)
-            v_lane = [v_lo, v_hi]
-        else:
-            # fp16_bf16 / fp8_bf16 / i8_fp8_bf16 -- vectorised f32 dequant
-            # via the shared lane loader.
-            k_lane = _load_kv_lane_f32(
-                b,
-                KV=K,
-                base=k_row_base,
-                lane_d_base=lane_d_base,
-                ept=n_slots,
-                quant_mode=spec.quant_mode,
-                cb_ptr=cb_k,
-                kv_ty=kv_ty,
-                dtype=dtype,
-            )
-            for k in range(n_slots):
-                partial = b.fadd(partial, b.fmul(q_lane[k], k_lane[k]))
-            v_lane = _load_kv_lane_f32(
-                b,
-                KV=V,
-                base=v_row_base,
-                lane_d_base=lane_d_base,
-                ept=n_slots,
-                quant_mode=spec.quant_mode,
-                cb_ptr=cb_v,
-                kv_ty=kv_ty,
-                dtype=dtype,
-            )
-
-        dot = warp_xor_reduce_sum(b, partial, stages=6)
-        score_log2 = b.fmul(dot, scale_log2)
-        score_log2 = apply_qk_scales(
-            b,
-            score_log2,
-            q_scale=q_scale_v,
-            k_scale=k_scale_v,
-        )
-        score_log2 = apply_attention_mask(
-            b,
-            score_log2,
-            mask_mode=s.mask_mode,
-            k_idx=k_idx,
-            query_pos=q_token,
-            sliding_window=s.sliding_window,
-        )
-
-        m_new = b.fmax(m, score_log2)
-        alpha = b.exp2(b.fsub(m, m_new))
-        p = b.exp2(b.fsub(score_log2, m_new))
-        l_new = b.fadd(b.fmul(l, alpha), p)
-
-        new_yields = [m_new, l_new]
-        for k in range(n_slots):
-            new_yields.append(b.fadd(b.fmul(acc_iter[k], alpha), b.fmul(p, v_lane[k])))
-        b.scf_yield(*new_yields)
-
-    l_final = k_loop.results[1]
-    acc_final = list(k_loop.results[2:])
-    inv_l = b.rcp(l_final)
-    for k in range(n_slots):
-        d = b.add(lane_d_base, b.const_i32(k))
-        store_scalar_from_f32(
-            b,
-            O,
-            b.add(o_row, d),
-            b.fmul(acc_final[k], inv_l),
-            dtype=dtype,
-        )
+    fmha_warp_fwd_inner_body(
+        b,
+        Q=Q,
+        K=K,
+        V=V,
+        O=O,
+        head_size=H,
+        seqlen_k=seqlen_k,
+        q_token=q_token,
+        head_idx=head_idx,
+        kv_head_idx=kv_head_idx,
+        stride_q_token=kb.stride_token("q"),
+        stride_q_head=kb.stride_head("q"),
+        stride_k_token=kb.stride_token("k"),
+        stride_k_head=kb.stride_head("k"),
+        stride_v_token=kb.stride_token("v"),
+        stride_v_head=kb.stride_head("v"),
+        stride_o_token=kb.stride_token("o"),
+        stride_o_head=kb.stride_head("o"),
+        scale_log2=scale_log2,
+        dtype=dtype,
+        mask_mode=s.mask_mode,
+        sliding_window=s.sliding_window,
+        causal_ctx_len=causal_ctx,
+        extra_score_transform=_qk_scale_transform,
+        kv_lane_loader=_kv_lane_loader,
+        q_lane_loader=_q_lane_loader,
+    )
 
     b.ret()
     return kb.kernel

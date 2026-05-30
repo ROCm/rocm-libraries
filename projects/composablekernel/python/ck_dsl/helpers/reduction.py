@@ -27,7 +27,7 @@ implementation that the norm / reduce / pooling kernels share.
 
 from __future__ import annotations
 
-from typing import List, Literal, Tuple
+from typing import Callable, List, Literal, Tuple
 
 from ..core.ir import IRBuilder, Value
 
@@ -37,6 +37,7 @@ __all__ = [
     "block_lds_reduce",
     "block_lds_reduce_pair",
     "block_lds_reduce_with_wave_prologue",
+    "tree_reduce",
     "welford_block_reduce",
 ]
 
@@ -203,19 +204,48 @@ def _warp_xor_reduce(
     return cur
 
 
-def _tree_reduce_scalars(
-    b: IRBuilder, combine: ReduceCombine, parts: List[Value]
+def tree_reduce(
+    b: IRBuilder,
+    combine: Callable[[Value, Value], Value],
+    xs: List[Value],
 ) -> Value:
-    """Balanced binary tree fold of N scalars (depth ~ log2 N)."""
-    cur = list(parts)
+    """Balanced binary-tree fold of N scalars (depth ~ log2 N).
+
+    ``combine`` is the binary combiner emitted at each tree node — e.g.
+    ``b.fadd`` for a sum fold, ``b.fmax`` for an abs-max fold. Pairs
+    ``xs[i]`` with ``xs[i+1]`` left-to-right and carries any odd tail
+    element forward unchanged, so for power-of-two ``len(xs)`` the tree
+    is fully balanced with no carried tail.
+
+    Emitting the tree explicitly drops the per-thread critical-path
+    depth from ``len(xs) - 1`` (the natural left-fold chain) to
+    ``ceil(log2(len(xs)))``: the DSL never sets the LLVM ``reassoc``
+    fastmath flag on ``arith.fadd`` (see ``core/lower_llvm.py``), so the
+    optimiser cannot re-shape the chain on our behalf. This is the
+    canonical home for the per-chunk folds the norm / reduce kernels
+    copied inline (``_balanced_combine`` / ``_tree_reduce``).
+
+    The ``b`` argument is accepted for API symmetry with the other
+    reduction helpers; the combiner already closes over the builder.
+    """
+    if not xs:
+        raise ValueError("tree_reduce requires at least one value")
+    cur = list(xs)
     while len(cur) > 1:
         nxt: List[Value] = []
         for i in range(0, len(cur) - 1, 2):
-            nxt.append(_emit_combine(b, combine, cur[i], cur[i + 1]))
+            nxt.append(combine(cur[i], cur[i + 1]))
         if len(cur) % 2 == 1:
             nxt.append(cur[-1])
         cur = nxt
     return cur[0]
+
+
+def _tree_reduce_scalars(
+    b: IRBuilder, combine: ReduceCombine, parts: List[Value]
+) -> Value:
+    """Balanced binary tree fold of N scalars (depth ~ log2 N)."""
+    return tree_reduce(b, lambda a, c: _emit_combine(b, combine, a, c), parts)
 
 
 def block_lds_reduce_with_wave_prologue(

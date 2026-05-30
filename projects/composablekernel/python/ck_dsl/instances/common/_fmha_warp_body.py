@@ -112,6 +112,8 @@ def fmha_warp_fwd_inner_body(
     extra_mask_predicate=None,
     k_row_base_fn=None,
     v_row_base_fn=None,
+    kv_lane_loader=None,
+    q_lane_loader=None,
 ) -> None:
     """One warp's worth of FMHA forward for one ``(q_token, head)`` row.
 
@@ -119,6 +121,24 @@ def fmha_warp_fwd_inner_body(
     ``(b, score_log2, k_idx) -> score_log2`` invoked after the
     QK reduction and before the softmax update. Used by the sage
     attention path to apply per-block Q+K scales.
+
+    ``kv_lane_loader`` (if set) overrides the per-lane K/V slice load.
+    It is a callable ``(b, k_idx, k_row_base, v_row_base, lane_d_base,
+    ept) -> (k_f32_list, v_f32_list)`` returning two Python lists of
+    ``ept`` f32 :class:`Value` (this lane's head-dim slice of K and V,
+    already dequantised to f32). The default (``None``) reads the slice
+    directly from ``K`` / ``V`` via :func:`load_scalar_as_f32` /
+    :func:`load_vec_as_f32`. Sage attention supplies a loader that
+    dequantises fp8 / i8 / i4 codebook K/V. When set, the body uses the
+    generalised list path (per-slot scalar iter_args + scalar epilogue
+    stores) regardless of ``ept`` so any per-lane addressing the loader
+    owns (e.g. packed-i4 bytes) is respected.
+
+    ``q_lane_loader`` (if set) overrides the per-lane Q slice load. It is
+    a callable ``(b, q_row_base, lane_d_base, ept) -> q_f32_list``
+    returning a Python list of ``ept`` f32 :class:`Value`. Only consulted
+    when ``kv_lane_loader`` is also set (the list path). Defaults to the
+    built-in Q load.
 
     ``extra_mask_predicate`` (if set) is a callable
     ``(b, k_idx) -> i1`` invoked before the softmax update. When the
@@ -210,6 +230,79 @@ def fmha_warp_fwd_inner_body(
             )
             score_log2 = b.select(keep, score_log2, neg_inf)
         return score_log2
+
+    if kv_lane_loader is not None:
+        # ------------------------------------------------------------------
+        # Generalised list path (custom per-lane loaders).
+        #
+        # The K/V (and optionally Q) slices come from a caller-supplied
+        # dequant loader returning ``ept`` f32 values per lane. The QK
+        # partial dot, online-softmax update and PV accumulator are kept
+        # in the scalar-per-slot shape (``ept`` accumulator iter_args +
+        # ``ept`` scalar epilogue stores) so the loader fully owns the
+        # K/V addressing (e.g. packed-i4 bytes that do not map linearly
+        # onto ``lane_d_base``). Used by the sage attention warp body.
+        # ------------------------------------------------------------------
+        if q_lane_loader is not None:
+            q_f32_list = q_lane_loader(b, q_row_base, lane_d_base, ept)
+        else:
+            q_f32_list = load_vec_as_f32(b, Q, q_lane_addr, dtype=dtype, n=ept)
+
+        iter_args = [("m", neg_inf), ("l", zero_f)]
+        for slot in range(ept):
+            iter_args.append((f"a{slot}", zero_f))
+
+        k_loop = b.scf_for_iter(
+            b.const_i32(0),
+            seqlen_k,
+            b.const_i32(1),
+            iter_args=iter_args,
+            iv_name="k_idx",
+        )
+        with k_loop as (k_idx, state_vals):
+            m, lse = state_vals[0], state_vals[1]
+            acc_iter = state_vals[2:]
+            k_row_base, v_row_base = _row_bases(k_idx)
+
+            k_f32_list, v_f32_list = kv_lane_loader(
+                b, k_idx, k_row_base, v_row_base, lane_d_base, ept
+            )
+
+            partial = b.const_f32(0.0)
+            for slot in range(ept):
+                partial = b.fadd(partial, b.fmul(q_f32_list[slot], k_f32_list[slot]))
+
+            dot = warp_xor_reduce_sum(b, partial, stages=6)
+            score_log2 = _apply_mask_and_score(b.fmul(dot, scale_log2), k_idx)
+
+            m_new = b.fmax(m, score_log2)
+            alpha = b.exp2(b.fsub(m, m_new))
+            p = b.exp2(b.fsub(score_log2, m_new))
+            lse_new = b.fadd(b.fmul(lse, alpha), p)
+
+            new_yields = [m_new, lse_new]
+            for slot in range(ept):
+                new_yields.append(
+                    b.fadd(
+                        b.fmul(acc_iter[slot], alpha),
+                        b.fmul(p, v_f32_list[slot]),
+                    )
+                )
+            b.scf_yield(*new_yields)
+
+        results = k_loop.results
+        l_final = results[1]
+        acc_final = list(results[2:])
+        inv_l = b.rcp(l_final)
+        for slot in range(ept):
+            store_scalar_from_f32(
+                b,
+                O,
+                b.add(o_lane_addr, b.const_i32(slot)),
+                b.fmul(acc_final[slot], inv_l),
+                dtype=dtype,
+            )
+        return
 
     if ept == 1:
         # Scalar lane path (head_size == warp_size == 64). The vector

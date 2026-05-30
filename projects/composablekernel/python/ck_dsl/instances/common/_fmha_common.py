@@ -46,7 +46,6 @@ __all__ = [
     "FmhaKernelBuilder",
     "FmhaMaskMode",
     "FmhaShape",
-    "FmhaTensorSpec",
     "validate_common_spec",
 ]
 
@@ -154,25 +153,6 @@ def validate_common_spec(spec: FmhaCommonSpec) -> Tuple[bool, str]:
 # ---------------------------------------------------------------------
 # FmhaKernelBuilder -- the boilerplate-killing helper
 # ---------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class FmhaTensorSpec:
-    """One named FMHA tensor: ``Q`` / ``K`` / ``V`` / ``O`` etc.
-
-    * ``name`` -- the param name (matches the kernel signature).
-    * ``dtype`` -- one of ``"f16"`` / ``"bf16"`` / ``"fp8e4m3"`` /
-      ``"bf8e5m2"`` / ``"i8"``; mapped to the pointer pointee type.
-    * ``readonly`` / ``writeonly`` -- standard CK alias hints.
-    * ``align`` -- pointer alignment guarantee in bytes (16 for f16
-      pixels of 8 elems, 8 for fp8 pixels of 8 elems, 1 for i8).
-    """
-
-    name: str
-    dtype: str
-    readonly: bool = True
-    writeonly: bool = False
-    align: int = 16
 
 
 def _stride_param_names(name: str) -> Tuple[str, str]:
@@ -504,6 +484,16 @@ class FmhaKernelBuilder:
     def o_row_base(self) -> Value:
         """``q_token * stride_o_token + head_idx * stride_o_head``."""
         return self._row_base("o", self.q_token, self.head_idx)
+
+    def row_base(self, tensor_name: str, tok: Value, hd: Value) -> Value:
+        """Public ``tok * stride_{name}_token + hd * stride_{name}_head``.
+
+        Thin wrapper over :meth:`_row_base` for tensors whose token /
+        head pairing doesn't match the canonical Q/K/V/O accessors
+        (e.g. the bwd ``do`` gradient tensor, which uses the Q token /
+        head pairing under its own stride params).
+        """
+        return self._row_base(tensor_name, tok, hd)
 
     def k_row_base(self, k_idx: Value) -> Value:
         """``k_idx * stride_k_token + kv_head_idx * stride_k_head``."""

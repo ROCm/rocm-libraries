@@ -31,6 +31,7 @@ __all__ = [
     "SignatureBuilder",
     "WarpTileBlockSizeMixin",
     "ceil_div_grid",
+    "choose_load_vec",
     "derive_block_size",
     "kernel_name_join",
     "ptr_type_str",
@@ -96,6 +97,41 @@ def validate_io(rule: IOSpecRule) -> Tuple[bool, str]:
                     "pick a larger block_size or a multi-pass kernel"
                 )
     return True, "ok"
+
+
+# ---------------------------------------------------------------------
+# choose_load_vec
+# ---------------------------------------------------------------------
+
+
+def choose_load_vec(tile_m: int, tile_n: int, tile_k: int, block_size: int) -> int:
+    """Pick the widest fp16 global-load vector width for a GEMM block tile.
+
+    Returns the largest ``v`` in ``(8, 4, 2, 1)`` such that ``v`` divides the
+    K tile, and the per-thread A/B load distribution is coalesced over
+    ``block_size`` threads: both ``(tile_m*tile_k)//v`` and
+    ``(tile_n*tile_k)//v`` are ``>= block_size`` and divisible by it.
+
+    This is the single source of truth for the compile-time picker that
+    ``gemm_universal`` / ``conv_implicit_gemm`` / ``moe_gemm_fused`` each
+    re-implemented; the returned ``int`` is baked into a ``const_i32`` so an
+    identical result means byte-identical IR.
+    """
+    threads = block_size
+    for v in (8, 4, 2, 1):
+        if tile_k % v:
+            continue
+        a_vecs = (tile_m * tile_k) // v
+        b_vecs = (tile_n * tile_k) // v
+        if a_vecs < threads or b_vecs < threads:
+            continue
+        if a_vecs % threads or b_vecs % threads:
+            continue
+        return v
+    raise ValueError(
+        f"no usable load_vec for tile_m={tile_m} tile_n={tile_n} "
+        f"tile_k={tile_k} block_size={block_size}"
+    )
 
 
 # ---------------------------------------------------------------------

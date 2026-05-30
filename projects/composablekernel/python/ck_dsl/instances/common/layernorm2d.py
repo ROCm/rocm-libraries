@@ -37,10 +37,11 @@ Performance shape:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, List, Literal, Tuple
+from typing import Literal, Tuple
 
-from ...core.ir import F32, I32, IRBuilder, KernelDef, PtrType, Value
+from ...core.ir import F32, I32, IRBuilder, KernelDef, PtrType
 from ...helpers.io import io_ir_type, store_scalar_from_f32
+from ...helpers.reduction import block_lds_reduce_pair, tree_reduce
 from ...helpers.spec import (
     IOSpecRule,
     SignatureBuilder,
@@ -58,92 +59,6 @@ from ...helpers.tensor_view import (
 
 
 DType = Literal["f16", "bf16"]
-
-
-def _balanced_combine(
-    values: List[Value], combine: Callable[[Value, Value], Value]
-) -> Value:
-    """Balanced-tree fold of ``values`` under ``combine``.
-
-    Used for the per-chunk fold of f32 partials in pass 1. Without an
-    explicit tree, the serial ``fadd(fadd(fadd(s, x0), x1), ...)``
-    pattern has critical-path depth ``len(values)``; the LLVM ``reassoc``
-    fastmath flag is not set on ``arith.fadd`` (see
-    ``core/lower_llvm.py::_op_arith_fadd``) so the optimiser cannot
-    re-shape the chain on our behalf. Emitting the tree explicitly
-    drops the depth to ``ceil(log2(len(values)))``, mirroring the
-    "leaves first, then merges" structure CK Tile gets from its
-    ``sweep_tile_span`` over a per-Y register tile.
-    """
-    if not values:
-        raise ValueError("_balanced_combine requires at least one value")
-    cur = list(values)
-    while len(cur) > 1:
-        nxt: List[Value] = []
-        i = 0
-        while i + 1 < len(cur):
-            nxt.append(combine(cur[i], cur[i + 1]))
-            i += 2
-        if i < len(cur):
-            nxt.append(cur[i])
-        cur = nxt
-    return cur[0]
-
-
-def _paired_block_lds_reduce_sum(
-    b: IRBuilder,
-    val_a: Value,
-    val_c: Value,
-    lds_a: Value,
-    lds_c: Value,
-    tid: Value,
-    *,
-    block_size: int,
-) -> Tuple[Value, Value]:
-    """Twin-channel block sum reduction sharing one barrier schedule.
-
-    Functionally equivalent to two back-to-back
-    :func:`ck_dsl.helpers.reduction.block_lds_reduce` calls (one for
-    ``val_a``, one for ``val_c``), but interleaves the two channels'
-    LDS writes and reads inside a *single* halving loop so the
-    ``s_barrier`` between halving steps is amortised across both
-    reductions. For ``block_size == 256`` this cuts the sync count
-    from ``2 * (log2(256) + 1) == 18`` down to ``log2(256) + 1 == 9``
-    and the LDS round-trip count in half -- a real perf win for the
-    row-norm sum + sumsq fold (LayerNorm) since the two reductions
-    used to dominate the cross-thread wallclock on the LDS-bound path.
-
-    The implementation mirrors :func:`block_lds_reduce` line-for-line
-    except every step touches both LDS buffers. The caller owns both
-    ``lds_a`` / ``lds_c`` allocations; both must be at least
-    ``block_size`` f32 slots wide.
-    """
-    if val_a.type.name != "f32" or val_c.type.name != "f32":
-        raise ValueError("_paired_block_lds_reduce_sum expects f32 inputs")
-
-    b.smem_store_vN_f32(lds_a, [tid], val_a, 1)
-    b.smem_store_vN_f32(lds_c, [tid], val_c, 1)
-    b.sync()
-
-    n = block_size
-    while n > 1:
-        half = n // 2
-        c_half = b.const_i32(half)
-        in_first = b.cmp_lt(tid, c_half)
-        with b.scf_if(in_first):
-            j = b.add(tid, c_half)
-            a_a = b.vec_extract(b.smem_load_vN_f32(lds_a, tid, n=1), 0)
-            c_a = b.vec_extract(b.smem_load_vN_f32(lds_a, j, n=1), 0)
-            a_c = b.vec_extract(b.smem_load_vN_f32(lds_c, tid, n=1), 0)
-            c_c = b.vec_extract(b.smem_load_vN_f32(lds_c, j, n=1), 0)
-            b.smem_store_vN_f32(lds_a, [tid], b.fadd(a_a, c_a), 1)
-            b.smem_store_vN_f32(lds_c, [tid], b.fadd(a_c, c_c), 1)
-        b.sync()
-        n = half
-
-    out_a = b.vec_extract(b.smem_load_vN_f32(lds_a, b.const_i32(0), n=1), 0)
-    out_c = b.vec_extract(b.smem_load_vN_f32(lds_c, b.const_i32(0), n=1), 0)
-    return out_a, out_c
 
 
 @dataclass(frozen=True)
@@ -273,7 +188,8 @@ def build_layernorm2d(spec: LayerNorm2DSpec) -> KernelDef:
     # LDS scratch for the two block-wide reductions. We allocate two
     # ``block_size``-sized f32 buffers so the sum (``s1``) and the
     # sum-of-squares (``s2``) folds can share a *single* halving
-    # schedule via :func:`_paired_block_lds_reduce_sum` instead of
+    # schedule via :func:`ck_dsl.helpers.reduction.block_lds_reduce_pair`
+    # instead of
     # paying for two back-to-back ``block_lds_reduce`` round-trips
     # (which would double the ``s_barrier`` count). The extra LDS
     # cost is ``block_size * 4 == 1 KB`` for the default ``BS=256``,
@@ -288,7 +204,7 @@ def build_layernorm2d(spec: LayerNorm2DSpec) -> KernelDef:
     # re-load from HBM.
     #
     # Per-chunk we materialise ``chunk_s1`` (sum of x) and ``chunk_s2``
-    # (sum of x^2) via :func:`_balanced_combine` so each fold has
+    # (sum of x^2) via :func:`ck_dsl.helpers.reduction.tree_reduce` so each fold has
     # critical-path depth ``log2(VEC)`` instead of ``VEC``. The
     # per-chunk partial is then merged once into the running ``s1`` /
     # ``s2`` scalars; this matches the latency structure of CK Tile's
@@ -301,8 +217,8 @@ def build_layernorm2d(spec: LayerNorm2DSpec) -> KernelDef:
     def pass1_body(_n_off, x_scalars):
         nonlocal s1, s2
         sq_scalars = [b.fmul(xi, xi) for xi in x_scalars]
-        s1 = b.fadd(s1, _balanced_combine(list(x_scalars), b.fadd))
-        s2 = b.fadd(s2, _balanced_combine(sq_scalars, b.fadd))
+        s1 = b.fadd(s1, tree_reduce(b, b.fadd, list(x_scalars)))
+        s2 = b.fadd(s2, tree_reduce(b, b.fadd, sq_scalars))
 
     sweep_res = sweep_row_chunks(
         b,
@@ -319,8 +235,16 @@ def build_layernorm2d(spec: LayerNorm2DSpec) -> KernelDef:
     # produces both ``total_s1`` and ``total_s2`` with half the
     # ``s_barrier`` count of the original double ``block_lds_reduce``
     # call.
-    total_s1, total_s2 = _paired_block_lds_reduce_sum(
-        b, s1, s2, lds_s1, lds_s2, tid, block_size=BS
+    total_s1, total_s2 = block_lds_reduce_pair(
+        b,
+        s1,
+        s2,
+        lds_s1,
+        lds_s2,
+        tid,
+        block_size=BS,
+        combine_a="sum",
+        combine_c="sum",
     )
 
     rcp_n = b.rcp(b.const_f32(float(N)))

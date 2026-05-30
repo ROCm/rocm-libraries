@@ -44,6 +44,7 @@ from ...core.ir import (
 from ...helpers.attention import (
     apply_softcap_log2 as _apply_softcap,
     binary_search_seq_idx as _binary_search_seq_idx_helper,
+    dequant_fp8x8_to_dtype,
     mfma_16x16x16_for_dtype as _mfma_16x16x16,
     mfma_16x16x32_for_dtype as _mfma_16x16x32,
     warp_xor_reduce_max as _warp_xor_reduce_max,
@@ -53,22 +54,6 @@ from ...helpers.attention import (
 )
 from ...helpers.layouts import TransposeLdsReader
 from ...transforms import TensorDescriptor, indirect, unmerge
-
-
-def _binary_search_seq_idx(b, cu_q, q_block_global_idx, num_seqs, block_q, iterations):
-    """Positional-arg adapter for the legacy 3D call site.
-
-    Lets the 3D kernel keep its original call shape while the helper now
-    enforces keyword-only ``block_q`` / ``iterations`` for new callers.
-    """
-    return _binary_search_seq_idx_helper(
-        b,
-        cu_q,
-        q_block_global_idx,
-        num_seqs,
-        block_q=block_q,
-        iterations=iterations,
-    )
 
 
 MFMA_M = 16
@@ -332,8 +317,13 @@ def build_unified_attention_3d_tiled(
     seg_idx = b.block_id_z()
     tid = b.thread_id_x()
 
-    seq_idx = _binary_search_seq_idx(
-        b, cu_q, q_block_global_idx, num_seqs_p, BLOCK_Q, spec.binary_search_iters
+    seq_idx = _binary_search_seq_idx_helper(
+        b,
+        cu_q,
+        q_block_global_idx,
+        num_seqs_p,
+        block_q=BLOCK_Q,
+        iterations=spec.binary_search_iters,
     )
     cu_q_start = b.global_load_i32(cu_q, seq_idx)
     cu_q_stop = b.global_load_i32(cu_q, b.add(seq_idx, b.const_i32(1)))
@@ -665,26 +655,7 @@ def build_unified_attention_3d_tiled(
             # backend collapses the extract+pack chain back into a
             # bitcast-equivalent shuffle once it sees the
             # cvt.pk.f32.fp8 operand is whole-i32.
-            lo_quad = b.vec_pack(
-                [b.vec_extract(fp8_vec, i) for i in range(4)],
-                FP8E4M3,
-            )
-            hi_quad = b.vec_pack(
-                [b.vec_extract(fp8_vec, i) for i in range(4, 8)],
-                FP8E4M3,
-            )
-            lo_f32x4 = b.cvt_pk_f32_fp8x4(lo_quad)
-            hi_f32x4 = b.cvt_pk_f32_fp8x4(hi_quad)
-            dequanted = []
-            for i in range(4):
-                dequanted.append(
-                    b.cast_f32_to(b.fmul(b.vec_extract(lo_f32x4, i), scale), dtype)
-                )
-            for i in range(4):
-                dequanted.append(
-                    b.cast_f32_to(b.fmul(b.vec_extract(hi_f32x4, i), scale), dtype)
-                )
-            packed = b.vec_pack(dequanted, dtype)
+            packed = dequant_fp8x8_to_dtype(b, fp8_vec, scale, dtype)
             b.smem_store_vN(lds, [buf_idx, row, col], packed, fp8_elems_per_chunk)
 
     def _issue_k(tile_idx: Value, buf_idx: Value) -> None:

@@ -143,6 +143,7 @@ from ...core.ir import I32, IRBuilder, KernelDef, PtrType
 from ...helpers.io import io_ir_type
 from ...helpers.spec import (
     SignatureBuilder,
+    ceil_div_grid,
     kernel_name_join,
 )
 from ...helpers.tensor_view import (
@@ -440,11 +441,7 @@ def transpose_bc_grid(m: int, k: int, spec: TransposeBcSpec) -> Tuple[int, int, 
     ``BatchedTransposeKernel::GridSize`` and keeps the L2 hot on the
     source rows of ``X``.
     """
-    return (
-        (k + spec.tile_n - 1) // spec.tile_n,
-        (m + spec.tile_m - 1) // spec.tile_m,
-        1,
-    )
+    return ceil_div_grid((k, spec.tile_n), (m, spec.tile_m))
 
 
 def transpose_bc_signature(spec: TransposeBcSpec):

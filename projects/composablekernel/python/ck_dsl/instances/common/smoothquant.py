@@ -83,9 +83,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Literal, Tuple
 
-from ...core.ir import F32, I32, I64, IRBuilder, KernelDef, PtrType, Value
+from ...core.ir import F32, I32, IRBuilder, KernelDef, PtrType, Value
 from ...helpers.io import io_ir_type
-from ...helpers.quant import QDType, quant_ir_type, quant_max_abs, quantize_scalar_f32
+from ...helpers.quant import (
+    QDType,
+    pack_quant_chunk_local_f32,
+    quant_ir_type,
+    quant_max_abs,
+    quantize_scalar_f32,
+    store_packed_chunk_local,
+)
 from ...helpers.reduction import block_lds_reduce
 from ...helpers.spec import (
     IOSpecRule,
@@ -130,111 +137,6 @@ def _tree_fmax(b: IRBuilder, values: List[Value]) -> Value:
             nxt.append(cur[-1])
         cur = nxt
     return cur[0]
-
-
-def _pack_quant_chunk_f32(
-    b: IRBuilder,
-    scaled_f32: List[Value],
-    *,
-    q_ty,
-    out_dtype: QDType,
-) -> Value:
-    """Quantise ``len(scaled_f32)`` f32 scalars and pack them into a
-    ``<N x q_ty>`` vector.
-
-    ``scaled_f32`` is the chunk of ``y * inv_yscale`` values **already
-    multiplied by ``inv_yscale``** — i.e. ready for the dtype-specific
-    saturating cast. The packing routes are:
-
-    * For ``fp8e4m3`` / ``bf8e5m2`` with a 4-wide chunk we issue one
-      packed ``v_cvt_pk_fp8_f32`` (resp. ``v_cvt_pk_bf8_f32``) via
-      :func:`IRBuilder.cvt_pk_fp8_f32x4` / ``cvt_pk_bf8_f32x4``,
-      saving 3 scalar ``v_cvt_*_f32`` instructions and the redundant
-      ``clamp_f32`` (the hardware saturates on conversion).
-    * For ``i8`` (no packed cvt today) and ``VEC == 2`` chunks (no
-      2-wide packed cvt), we emit per-element
-      :func:`quantize_scalar_f32` and pack via :func:`IRBuilder.vec_pack`.
-
-    For ``len(scaled_f32) == 8`` we stitch two 4-wide chunks together
-    with :func:`IRBuilder.vec_concat`; the resulting ``<8 x q_ty>``
-    lowers to a single 8-byte VMEM store.
-    """
-    n = len(scaled_f32)
-    if n not in (2, 4, 8):
-        raise ValueError(f"_pack_quant_chunk_f32 expects n in {{2,4,8}}, got {n}")
-
-    if out_dtype in ("fp8e4m3", "bf8e5m2") and n % 4 == 0:
-        cvt = b.cvt_pk_fp8_f32x4 if out_dtype == "fp8e4m3" else b.cvt_pk_bf8_f32x4
-        # Pack into <4 x f32> chunks and feed each through the packed cvt.
-        packed_chunks: List[Value] = []
-        for off in range(0, n, 4):
-            quad = b.vec_pack(scaled_f32[off : off + 4], F32)
-            packed_chunks.append(cvt(quad))
-        if len(packed_chunks) == 1:
-            return packed_chunks[0]
-        out = packed_chunks[0]
-        for chunk in packed_chunks[1:]:
-            out = b.vec_concat(out, chunk)
-        return out
-
-    # i8 path (or VEC=2 fp8/bf8): per-element saturating cast + vec_pack.
-    qs: List[Value] = []
-    for sf in scaled_f32:
-        if out_dtype == "i8":
-            qs.append(
-                b.cvt_f32_to_i8_sat(
-                    b.clamp_f32(sf, b.const_f32(-127.0), b.const_f32(127.0))
-                )
-            )
-        elif out_dtype == "fp8e4m3":
-            qs.append(b.cvt_f32_to_fp8(sf))
-        elif out_dtype == "bf8e5m2":
-            qs.append(b.cvt_f32_to_bf8(sf))
-        else:
-            raise ValueError(f"unsupported out_dtype {out_dtype!r}")
-    return b.vec_pack(qs, q_ty)
-
-
-def _store_packed_chunk(
-    b: IRBuilder,
-    qy_ptr: Value,
-    byte_off: Value,
-    packed: Value,
-    *,
-    n: int,
-) -> None:
-    """Bitcast a ``<n x q_ty>`` (q_ty is an 8-bit dtype) to an
-    integer and emit a single global store.
-
-    The IR's :func:`IRBuilder.global_store_vN` only accepts f16/bf16
-    today, so to coalesce the 8-bit-per-element output into a single
-    VMEM transaction we bitcast the packed vector to an integer of
-    matching width:
-
-    * ``n == 4`` -> ``i32``, one ``buffer_store_dword``.
-    * ``n == 8`` -> ``i64``, one ``buffer_store_dwordx2``.
-
-    ``byte_off`` is the absolute byte offset within the QY buffer; the
-    integer GEP stride for the chosen integer type is ``n`` bytes, so
-    the helper divides ``byte_off`` by ``n`` via a logical right shift.
-    Both ``byte_off`` and ``n`` are guaranteed multiples of ``n`` by
-    spec validation (``N % (BS * VEC) == 0``).
-
-    ``n == 2`` is not supported here: there is no ``I16`` IR type
-    exposed today, and the AMDGPU backend already coalesces adjacent
-    lanes' single-byte stores into a wave-wide dword in the scalar
-    fall-back path, so the packed-store win is marginal for VEC=2.
-    """
-    if n == 4:
-        as_int = b.bitcast(packed, I32)
-        idx = b.lshr(byte_off, b.const_i32(2))
-        b.global_store(qy_ptr, idx, as_int, align=4)
-    elif n == 8:
-        as_int = b.bitcast(packed, I64)
-        idx = b.lshr(byte_off, b.const_i32(3))
-        b.global_store(qy_ptr, idx, as_int, align=8)
-    else:
-        raise ValueError(f"_store_packed_chunk supports n in {{4, 8}}, got {n}")
 
 
 DType = Literal["f16", "bf16"]
@@ -458,7 +360,7 @@ def build_smoothquant(spec: SmoothQuantSpec, arch: str = "gfx950") -> KernelDef:
     # only sometimes folds adjacent byte stores into a wave-wide
     # dword). The packed path packs ``y * inv_yscale`` into a
     # ``<VEC x f32>``, applies the dtype-specific saturating cast
-    # (``v_cvt_pk_fp8_f32`` for fp8/bf8 via :func:`_pack_quant_chunk_f32`,
+    # (``v_cvt_pk_fp8_f32`` for fp8/bf8 via :func:`pack_quant_chunk_local_f32`,
     # or scalar ``v_cvt_f32_to_i8_sat`` + :func:`IRBuilder.vec_pack`
     # for i8), and emits one i32 (or i64) ``global_store`` per chunk.
     cached = sweep_res.cached
@@ -475,11 +377,11 @@ def build_smoothquant(spec: SmoothQuantSpec, arch: str = "gfx950") -> KernelDef:
                 x_f32 = cached[k * VEC + i]
                 y_f32 = b.fmul(x_f32, sm_scalars[i])
                 scaled_f32.append(b.fmul(y_f32, inv_yscale))
-            packed = _pack_quant_chunk_f32(
+            packed = pack_quant_chunk_local_f32(
                 b, scaled_f32, q_ty=q_ty, out_dtype=spec.out_dtype
             )
             byte_off = b.add(row_base_byte_off, n_off)
-            _store_packed_chunk(b, QY, byte_off, packed, n=VEC)
+            store_packed_chunk_local(b, QY, byte_off, packed, n=VEC)
         else:
             # VEC == 2: keep the per-element scalar path. The backend
             # already coalesces adjacent lanes' byte stores into a

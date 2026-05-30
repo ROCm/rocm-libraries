@@ -42,11 +42,19 @@ Implementation:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, List, Literal, Tuple
+from typing import List, Literal, Tuple
 
-from ...core.ir import F32, I32, I64, IRBuilder, KernelDef, PtrType, Value
+from ...core.ir import F32, I32, IRBuilder, KernelDef, PtrType, Value
 from ...helpers.io import io_ir_type, store_scalar_from_f32
-from ...helpers.quant import QDType, quant_ir_type, quant_max_abs, quantize_scalar_f32
+from ...helpers.quant import (
+    QDType,
+    pack_quant_chunk_local_f32,
+    quant_ir_type,
+    quant_max_abs,
+    quantize_scalar_f32,
+    store_packed_chunk_local,
+)
+from ...helpers.reduction import block_lds_reduce_pair, tree_reduce
 from ...helpers.spec import (
     IOSpecRule,
     SignatureBuilder,
@@ -64,180 +72,6 @@ from ...helpers.tensor_view import (
 
 
 DType = Literal["f16", "bf16"]
-
-
-def _balanced_combine(
-    values: List[Value], combine: Callable[[Value, Value], Value]
-) -> Value:
-    """Balanced-tree fold of ``values`` under ``combine``.
-
-    Used for the per-chunk fold of f32 partials in pass 1: pairing the
-    sum-of-squares and the abs-max reduces from ``len(values)`` strict
-    serial ops down to ``ceil(log2(len(values)))``. ``arith.fadd`` and
-    ``arith.fmax`` lower without the ``reassoc`` fastmath flag (see
-    ``core/lower_llvm.py``), so the optimiser cannot re-shape the
-    chain on our behalf -- emitting the tree explicitly is the only
-    way to get the lower latency. CK Tile achieves the same effect via
-    its ``sweep_tile_span`` over a per-Y register tile (which the
-    ``BlockNormReduce`` / ``ReduceOp::SquareAdd`` pair sweeps in
-    parallel-friendly order).
-    """
-    if not values:
-        raise ValueError("_balanced_combine requires at least one value")
-    cur = list(values)
-    while len(cur) > 1:
-        nxt: List[Value] = []
-        i = 0
-        while i + 1 < len(cur):
-            nxt.append(combine(cur[i], cur[i + 1]))
-            i += 2
-        if i < len(cur):
-            nxt.append(cur[i])
-        cur = nxt
-    return cur[0]
-
-
-def _pack_quant_chunk_f32(
-    b: IRBuilder,
-    scaled_f32: List[Value],
-    *,
-    q_ty,
-    out_dtype: QDType,
-) -> Value:
-    """Quantise ``len(scaled_f32)`` f32 scalars (already multiplied by
-    the inverse quant scale) and pack them into a ``<N x q_ty>`` vector.
-
-    Mirror of the SmoothQuant pass-2 packed-store path (kept local to
-    this instance file to honour the "instance files only" scope):
-
-    * ``fp8e4m3`` / ``bf8e5m2`` with a 4-wide chunk -> one packed
-      ``v_cvt_pk_fp8_f32`` (resp. ``v_cvt_pk_bf8_f32``); the hardware
-      saturates on conversion so no explicit clamp is needed.
-    * ``i8`` (no packed cvt today) and ``VEC == 2`` chunks (no 2-wide
-      packed cvt) -> per-element saturating cast + :func:`vec_pack`.
-
-    For ``len(scaled_f32) == 8`` two 4-wide cvt results are stitched
-    together with :func:`vec_concat` into a ``<8 x q_ty>`` that lowers
-    to a single 8-byte VMEM store.
-    """
-    n = len(scaled_f32)
-    if n not in (2, 4, 8):
-        raise ValueError(f"_pack_quant_chunk_f32 expects n in {{2,4,8}}, got {n}")
-
-    if out_dtype in ("fp8e4m3", "bf8e5m2") and n % 4 == 0:
-        cvt = b.cvt_pk_fp8_f32x4 if out_dtype == "fp8e4m3" else b.cvt_pk_bf8_f32x4
-        packed_chunks: List[Value] = []
-        for off in range(0, n, 4):
-            quad = b.vec_pack(scaled_f32[off : off + 4], F32)
-            packed_chunks.append(cvt(quad))
-        if len(packed_chunks) == 1:
-            return packed_chunks[0]
-        out = packed_chunks[0]
-        for chunk in packed_chunks[1:]:
-            out = b.vec_concat(out, chunk)
-        return out
-
-    # i8 path (or VEC=2 fp8/bf8): per-element saturating cast + vec_pack.
-    qs: List[Value] = []
-    for sf in scaled_f32:
-        if out_dtype == "i8":
-            qs.append(
-                b.cvt_f32_to_i8_sat(
-                    b.clamp_f32(sf, b.const_f32(-127.0), b.const_f32(127.0))
-                )
-            )
-        elif out_dtype == "fp8e4m3":
-            qs.append(b.cvt_f32_to_fp8(sf))
-        elif out_dtype == "bf8e5m2":
-            qs.append(b.cvt_f32_to_bf8(sf))
-        else:
-            raise ValueError(f"unsupported out_dtype {out_dtype!r}")
-    return b.vec_pack(qs, q_ty)
-
-
-def _store_packed_chunk(
-    b: IRBuilder,
-    qy_ptr: Value,
-    byte_off: Value,
-    packed: Value,
-    *,
-    n: int,
-) -> None:
-    """Bitcast a ``<n x q_ty>`` (8-bit q_ty) to an integer and emit one
-    coalesced global store (``n == 4`` -> i32 / ``buffer_store_dword``;
-    ``n == 8`` -> i64 / ``buffer_store_dwordx2``).
-
-    ``byte_off`` is the absolute byte offset within the QY buffer; the
-    GEP stride for the chosen integer type is ``n`` bytes, so the helper
-    divides ``byte_off`` by ``n`` via a logical right shift. Both
-    ``byte_off`` and ``n`` are multiples of ``n`` by spec validation
-    (``N % (BS * VEC) == 0``). Mirror of the SmoothQuant helper.
-    """
-    if n == 4:
-        as_int = b.bitcast(packed, I32)
-        idx = b.lshr(byte_off, b.const_i32(2))
-        b.global_store(qy_ptr, idx, as_int, align=4)
-    elif n == 8:
-        as_int = b.bitcast(packed, I64)
-        idx = b.lshr(byte_off, b.const_i32(3))
-        b.global_store(qy_ptr, idx, as_int, align=8)
-    else:
-        raise ValueError(f"_store_packed_chunk supports n in {{4, 8}}, got {n}")
-
-
-def _paired_block_lds_reduce_sum_max(
-    b: IRBuilder,
-    val_sum: Value,
-    val_max: Value,
-    lds_sum: Value,
-    lds_max: Value,
-    tid: Value,
-    *,
-    block_size: int,
-) -> Tuple[Value, Value]:
-    """Twin-channel block reduction: ``sum`` and ``max`` on one barrier schedule.
-
-    Functionally equivalent to two back-to-back
-    :func:`ck_dsl.helpers.reduction.block_lds_reduce` calls (one with
-    ``combine="sum"``, one with ``combine="max"``), but interleaves the
-    two channels' LDS writes and reads inside a *single* halving loop
-    so the ``s_barrier`` between halving steps is amortised across
-    both reductions. For ``block_size == 256`` this cuts the sync
-    count from ``2 * (log2(256) + 1) == 18`` down to
-    ``log2(256) + 1 == 9`` and the LDS round-trip count in half.
-
-    The structure mirrors :func:`ck_dsl.helpers.reduction.block_lds_reduce`
-    line-for-line except every step touches both LDS buffers and the
-    two channels use independent combiners (``fadd`` and ``fmax``).
-    The caller owns both ``lds_sum`` / ``lds_max`` allocations; both
-    must be at least ``block_size`` f32 slots wide.
-    """
-    if val_sum.type.name != "f32" or val_max.type.name != "f32":
-        raise ValueError("_paired_block_lds_reduce_sum_max expects f32 inputs")
-
-    b.smem_store_vN_f32(lds_sum, [tid], val_sum, 1)
-    b.smem_store_vN_f32(lds_max, [tid], val_max, 1)
-    b.sync()
-
-    n = block_size
-    while n > 1:
-        half = n // 2
-        c_half = b.const_i32(half)
-        in_first = b.cmp_lt(tid, c_half)
-        with b.scf_if(in_first):
-            j = b.add(tid, c_half)
-            a_sum = b.vec_extract(b.smem_load_vN_f32(lds_sum, tid, n=1), 0)
-            c_sum = b.vec_extract(b.smem_load_vN_f32(lds_sum, j, n=1), 0)
-            a_max = b.vec_extract(b.smem_load_vN_f32(lds_max, tid, n=1), 0)
-            c_max = b.vec_extract(b.smem_load_vN_f32(lds_max, j, n=1), 0)
-            b.smem_store_vN_f32(lds_sum, [tid], b.fadd(a_sum, c_sum), 1)
-            b.smem_store_vN_f32(lds_max, [tid], b.fmax(a_max, c_max), 1)
-        b.sync()
-        n = half
-
-    out_sum = b.vec_extract(b.smem_load_vN_f32(lds_sum, b.const_i32(0), n=1), 0)
-    out_max = b.vec_extract(b.smem_load_vN_f32(lds_max, b.const_i32(0), n=1), 0)
-    return out_sum, out_max
 
 
 @dataclass(frozen=True)
@@ -357,7 +191,7 @@ def build_add_rmsnorm2d_rdquant(
     ``arch`` selects the validation target (default ``"gfx950"`` keeps
     the CDNA wave64 behavior byte-identical). The body is wave-size
     agnostic: both cross-thread folds go through the LDS tree
-    (:func:`_paired_block_lds_reduce_sum_max`), which halves over
+    (:func:`ck_dsl.helpers.reduction.block_lds_reduce_pair`), which halves over
     ``block_size`` and barriers between steps with no wave64-only
     cross-lane op, so the same IR is correct on the gfx1151 wave32
     target. ``arch`` is therefore only threaded into
@@ -410,7 +244,8 @@ def build_add_rmsnorm2d_rdquant(
         x_tile = make_tile_window(x_view, lengths=(1, N), origin=(row, b.const_i32(0)))
 
     # Two LDS scratch buffers (sum + max) feed a single twin-channel
-    # reduction via :func:`_paired_block_lds_reduce_sum_max` -- one
+    # reduction via :func:`ck_dsl.helpers.reduction.block_lds_reduce_pair`
+    # -- one
     # halving schedule instead of the previous two back-to-back
     # ``block_lds_reduce`` calls, halving the ``s_barrier`` count.
     # 1 KB per buffer for the default ``BS=256`` -- trivial vs LDS
@@ -434,7 +269,7 @@ def build_add_rmsnorm2d_rdquant(
     #   stays the same. When ``save_residual=True`` we still write
     #   ``x`` back to the residual buffer; we just don't cache it.
     # * The per-chunk ``s_sq`` and ``s_amax_g`` partials are folded
-    #   via :func:`_balanced_combine` so the critical-path depth is
+    #   via :func:`ck_dsl.helpers.reduction.tree_reduce` so the critical-path depth is
     #   ``log2(VEC)`` (3 for VEC=8) instead of ``VEC`` (8). Total op
     #   count is unchanged -- the win is latency, not arithmetic.
     # * ``|xg|`` via ``fmax(xg, fneg(xg))`` is kept (no fabs IR op;
@@ -464,8 +299,8 @@ def build_add_rmsnorm2d_rdquant(
         # ``add_rmsnorm_dynquant`` device kernel uses the same
         # "vectorised compute, scalar accumulator at the bottom"
         # structure; we mirror it in the DSL.
-        s_sq = b.fadd(s_sq, _balanced_combine(chunk_sq, b.fadd))
-        s_amax_g = b.fmax(s_amax_g, _balanced_combine(chunk_abs_xg, b.fmax))
+        s_sq = b.fadd(s_sq, tree_reduce(b, b.fadd, chunk_sq))
+        s_amax_g = b.fmax(s_amax_g, tree_reduce(b, b.fmax, chunk_abs_xg))
         cached_xg.extend(chunk_xg)
         if spec.save_residual:
             # Residual write-back of ``x = a + b`` happens here so
@@ -487,8 +322,16 @@ def build_add_rmsnorm2d_rdquant(
 
     # Twin-channel cross-thread reduction: ``sum`` for the sum-of-squares
     # and ``max`` for the abs-max of ``x * gamma``.
-    total_sq, total_amax_g = _paired_block_lds_reduce_sum_max(
-        b, s_sq, s_amax_g, lds_sum, lds_max, tid, block_size=BS
+    total_sq, total_amax_g = block_lds_reduce_pair(
+        b,
+        s_sq,
+        s_amax_g,
+        lds_sum,
+        lds_max,
+        tid,
+        block_size=BS,
+        combine_a="sum",
+        combine_c="max",
     )
 
     rcp_n = b.rcp(b.const_f32(float(N)))
@@ -517,11 +360,11 @@ def build_add_rmsnorm2d_rdquant(
     #
     # For ``VEC in {4, 8}`` the per-chunk quantise + store now uses the
     # packed path (mirror of SmoothQuant pass 2): the VEC scaled f32
-    # scalars go through :func:`_pack_quant_chunk_f32` (one packed
+    # scalars go through :func:`pack_quant_chunk_local_f32` (one packed
     # ``v_cvt_pk_fp8_f32`` per 4 lanes for fp8/bf8, or scalar
     # ``v_cvt_f32_to_i8_sat`` + :func:`vec_pack` for i8) and the whole
     # chunk is emitted as a single i32/i64 ``global_store`` via
-    # :func:`_store_packed_chunk` -- collapsing the previous VEC scalar
+    # :func:`store_packed_chunk_local` -- collapsing the previous VEC scalar
     # 8-bit stores into one VMEM transaction per chunk. ``VEC == 2``
     # keeps the per-element scalar path (no packed-store helper for n=2;
     # the backend already coalesces adjacent lanes' byte stores there).
@@ -534,11 +377,11 @@ def build_add_rmsnorm2d_rdquant(
         n_off = b.add(b.mul(b.const_i32(k * BS), c_vec), b.mul(tid, c_vec))
         if use_packed_store:
             scaled_f32 = [b.fmul(cached_xg[k * VEC + i], rms_q) for i in range(VEC)]
-            packed = _pack_quant_chunk_f32(
+            packed = pack_quant_chunk_local_f32(
                 b, scaled_f32, q_ty=q_ty, out_dtype=spec.out_dtype
             )
             byte_off = b.add(row_base_byte_off, n_off)
-            _store_packed_chunk(b, QY, byte_off, packed, n=VEC)
+            store_packed_chunk_local(b, QY, byte_off, packed, n=VEC)
         else:
             for i in range(VEC):
                 xg_f32 = cached_xg[k * VEC + i]

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 import math
 from typing import Tuple
 
-from ..core.ir import IRBuilder, Type, Value
+from ..core.ir import FP8E4M3, IRBuilder, Type, Value
 
 
 def next_power_of_2(x: int) -> int:
@@ -557,6 +557,23 @@ def apply_softcap_log2(b: IRBuilder, score_log2: Value, softcap: Value) -> Value
     return b.fmul(softcap, b.fmul(b.fsub(p1, p2), b.rcp(b.fadd(p1, p2))))
 
 
+def safe_inv_l(b: IRBuilder, denom: Value) -> Value:
+    """Reciprocal of the online-softmax denominator with a zero guard.
+
+    When an entire Q tile is masked off (sparse jenga / VSA all-masked
+    rows), the softmax denominator ``denom`` is zero and ``rcp(0) = +inf``
+    would poison the output (``inf * 0 -> NaN``). This forces
+    ``inv_l = 0`` for the zero case so the normalized contribution
+    evaluates to ``acc * 0 == 0`` (the intended "no attention" output).
+
+    Emits the three ops ``fcmp oeq denom, 0 -> rcp denom -> select`` in
+    that order, matching the inline guard the MFMA / WMMA epilogues use.
+    """
+    zero_mask = b.fcmp("oeq", denom, b.const_f32(0.0))
+    inv_l_raw = b.rcp(denom)
+    return b.select(zero_mask, b.const_f32(0.0), inv_l_raw)
+
+
 # ---------------------------------------------------------------------------
 # MFMA dtype dispatch (small but shared across every tiled attention kernel)
 # ---------------------------------------------------------------------------
@@ -677,6 +694,44 @@ def binary_search_seq_idx(
         nr = b.select(le, right, mid)
         b.scf_yield(b.select(done, left, nl), b.select(done, right, nr))
     return b.sub(loop.results[0], b.const_i32(1))
+
+
+def dequant_fp8x8_to_dtype(
+    b: IRBuilder,
+    fp8_vec: Value,
+    scale: Value,
+    dtype: Type,
+) -> Value:
+    """In-register dequant of ``<8 x fp8e4m3>`` to a packed ``<8 x dtype>``.
+
+    Splits the 8 fp8 inputs into two ``<4 x fp8>`` quads, runs the packed
+    ``cvt_pk_f32_fp8x4`` on each, multiplies every f32 lane by ``scale``,
+    casts to ``dtype`` and re-packs into a ``<8 x dtype>`` ready to feed the
+    bf16/fp16 MFMA.
+
+    **Invariant (correctness-critical):** the scale is applied as an
+    *unfused* explicit ``fmul`` after ``cvt_pk_f32_fp8`` -- NOT via the fused
+    ``cvt_scalef32_pk_f32_fp8``, which uses an E8M0-only scale and silently
+    truncates non-power-of-two scales. Keeping the multiply explicit
+    preserves correctness for arbitrary (non-pow2) ``k_scale``/``v_scale``.
+
+    This is the promotion of the byte-identical dequant chain that the 2D
+    tiled QK path (``_read_k8_mfma_operand`` and the inline 16x16 K_FP8_MFMA
+    branch) and the 3D segment loader (``_issue_fp8_dequant_loads``) each
+    emitted independently. ``b.vec_pack`` / ``b.cvt_pk_f32_fp8x4`` /
+    ``b.fmul`` / ``b.cast_f32_to`` are emitted in the same order the inline
+    sites used, so the lowered IR is unchanged.
+    """
+    lo_fp8 = b.vec_pack([b.vec_extract(fp8_vec, i) for i in range(4)], FP8E4M3)
+    hi_fp8 = b.vec_pack([b.vec_extract(fp8_vec, i) for i in range(4, 8)], FP8E4M3)
+    lo_f32 = b.cvt_pk_f32_fp8x4(lo_fp8)
+    hi_f32 = b.cvt_pk_f32_fp8x4(hi_fp8)
+    deq = [
+        b.cast_f32_to(b.fmul(b.vec_extract(lo_f32, i), scale), dtype) for i in range(4)
+    ] + [
+        b.cast_f32_to(b.fmul(b.vec_extract(hi_f32, i), scale), dtype) for i in range(4)
+    ]
+    return b.vec_pack(deq, dtype)
 
 
 def pv32_v_load_paired(

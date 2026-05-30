@@ -42,8 +42,8 @@ Optimization notes (mirror the sibling :mod:`smoothquant`):
   depth, enabling the AMDGPU backend's ``v_max3_f32`` pattern-match
   (matches CK Tile's ``UseMax3`` inline-asm path).
 * Pass-2 quantise+store packs ``VEC`` f32 lanes into one i32/i64 store
-  per chunk via :func:`_pack_quant_chunk_f32` +
-  :func:`_store_packed_chunk`. For ``fp8e4m3`` / ``bf8e5m2`` the cvt
+  per chunk via :func:`pack_quant_chunk_local_f32` +
+  :func:`store_packed_chunk_local`. For ``fp8e4m3`` / ``bf8e5m2`` the cvt
   uses the packed ``v_cvt_pk_{fp8,bf8}_f32`` AMDGPU intrinsics, which
   is the AITER ``q8x4_t`` vec4 path from
   ``csrc/include/quant_common.cuh``.
@@ -60,9 +60,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Literal, Optional, Tuple
 
-from ...core.ir import F32, I32, I64, IRBuilder, KernelDef, PtrType, Value
+from ...core.ir import F32, I32, IRBuilder, KernelDef, PtrType, Value
 from ...helpers.io import io_ir_type
-from ...helpers.quant import QDType, quant_ir_type, quant_max_abs, quantize_scalar_f32
+from ...helpers.quant import (
+    QDType,
+    pack_quant_chunk_local_f32,
+    quant_ir_type,
+    quant_max_abs,
+    quantize_scalar_f32,
+    store_packed_chunk_local,
+)
 from ...helpers.reduction import block_lds_reduce
 from ...helpers.spec import (
     IOSpecRule,
@@ -102,77 +109,6 @@ def _tree_fmax(b: IRBuilder, values: List[Value]) -> Value:
             nxt.append(cur[-1])
         cur = nxt
     return cur[0]
-
-
-def _pack_quant_chunk_f32(
-    b: IRBuilder,
-    scaled_f32: List[Value],
-    *,
-    q_ty,
-    out_dtype: QDType,
-) -> Value:
-    """Quantise + vec-pack a chunk of ``y * inv_yscale`` f32 scalars.
-
-    Dispatches on ``out_dtype`` exactly like the sibling helper in
-    :mod:`ck_dsl.instances.common.smoothquant`: packed ``v_cvt_pk_fp8_f32``
-    / ``v_cvt_pk_bf8_f32`` for the fp8/bf8 paths, per-element
-    ``cvt_f32_to_i8_sat`` (with the [-127, 127] clamp) + ``vec_pack``
-    for the i8 path.
-    """
-    n = len(scaled_f32)
-    if n not in (2, 4, 8):
-        raise ValueError(f"_pack_quant_chunk_f32 expects n in {{2,4,8}}, got {n}")
-
-    if out_dtype in ("fp8e4m3", "bf8e5m2") and n % 4 == 0:
-        cvt = b.cvt_pk_fp8_f32x4 if out_dtype == "fp8e4m3" else b.cvt_pk_bf8_f32x4
-        packed_chunks: List[Value] = []
-        for off in range(0, n, 4):
-            quad = b.vec_pack(scaled_f32[off : off + 4], F32)
-            packed_chunks.append(cvt(quad))
-        if len(packed_chunks) == 1:
-            return packed_chunks[0]
-        out = packed_chunks[0]
-        for chunk in packed_chunks[1:]:
-            out = b.vec_concat(out, chunk)
-        return out
-
-    qs: List[Value] = []
-    for sf in scaled_f32:
-        if out_dtype == "i8":
-            qs.append(
-                b.cvt_f32_to_i8_sat(
-                    b.clamp_f32(sf, b.const_f32(-127.0), b.const_f32(127.0))
-                )
-            )
-        elif out_dtype == "fp8e4m3":
-            qs.append(b.cvt_f32_to_fp8(sf))
-        elif out_dtype == "bf8e5m2":
-            qs.append(b.cvt_f32_to_bf8(sf))
-        else:
-            raise ValueError(f"unsupported out_dtype {out_dtype!r}")
-    return b.vec_pack(qs, q_ty)
-
-
-def _store_packed_chunk(
-    b: IRBuilder,
-    qy_ptr: Value,
-    byte_off: Value,
-    packed: Value,
-    *,
-    n: int,
-) -> None:
-    """Bitcast ``<n x q_ty>`` (8-bit elements) to i32/i64 and emit a
-    single global store (see sibling smoothquant helper for details)."""
-    if n == 4:
-        as_int = b.bitcast(packed, I32)
-        idx = b.lshr(byte_off, b.const_i32(2))
-        b.global_store(qy_ptr, idx, as_int, align=4)
-    elif n == 8:
-        as_int = b.bitcast(packed, I64)
-        idx = b.lshr(byte_off, b.const_i32(3))
-        b.global_store(qy_ptr, idx, as_int, align=8)
-    else:
-        raise ValueError(f"_store_packed_chunk supports n in {{4, 8}}, got {n}")
 
 
 DType = Literal["f16", "bf16"]
@@ -447,11 +383,11 @@ def build_moe_smoothquant(spec: MoeSmoothQuantSpec, arch: str = "gfx950") -> Ker
                 x_f32 = cached[k * VEC + i]
                 y_f32 = b.fmul(x_f32, sm_scalars[i])
                 scaled_f32.append(b.fmul(y_f32, inv_yscale))
-            packed = _pack_quant_chunk_f32(
+            packed = pack_quant_chunk_local_f32(
                 b, scaled_f32, q_ty=q_ty, out_dtype=spec.out_dtype
             )
             byte_off = b.add(row_base_byte_off, n_off)
-            _store_packed_chunk(b, QY, byte_off, packed, n=VEC)
+            store_packed_chunk_local(b, QY, byte_off, packed, n=VEC)
         else:
             # VEC == 2: per-element scalar quant + store fallback.
             for i in range(VEC):
