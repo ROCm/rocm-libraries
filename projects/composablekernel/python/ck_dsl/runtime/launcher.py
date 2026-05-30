@@ -82,7 +82,7 @@ on every subsequent dispatch.
 A migration of ``attention_unified`` to use this API is the
 in-tree reference (see ``_get_3d_pipeline``, ``_get_2d_launcher``,
 and ``_get_scalar_launcher`` in
-``ck_dsl/instances/attention_unified.py``); the same template
+``ck_dsl/instances/common/attention_unified.py``); the same template
 applies to ``gemm``, ``grouped_gemm``, ``conv``, and any future op.
 """
 

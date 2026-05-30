@@ -356,7 +356,7 @@ def fmha_sweep_manifest(
     Each entry is a dict ``{"kernel": "fmha_fwd_<variant>", "shape":
     (head_size, seqlen_q, seqlen_k, dtype), ...}`` matching the
     keyword surface that
-    :func:`ck_dsl.examples.parity_extended_kernels` builders consume.
+    :func:`ck_dsl.examples.common.parity_extended_kernels` builders consume.
     Used by FMHA before/after benchmarking for P67 / P68 / P69.
 
     Returns a list rather than emitting a JSON file so callers can

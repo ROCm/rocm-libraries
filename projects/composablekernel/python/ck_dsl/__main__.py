@@ -6,9 +6,9 @@
 The DSL no longer ships a single hard-coded "emit this kernel" path.
 Each kernel family has its own runnable module:
 
-    python -m ck_dsl.examples.bake_off_implicit_gemm   --output-dir <dir>
-    python -m ck_dsl.examples.bake_off_direct_conv_16c --output-dir <dir>
-    python -m ck_dsl.examples.bake_off_direct_conv_4c  --output-dir <dir>
+    python -m ck_dsl.examples.common.bake_off_implicit_gemm   --output-dir <dir>
+    python -m ck_dsl.examples.common.bake_off_direct_conv_16c --output-dir <dir>
+    python -m ck_dsl.examples.common.bake_off_direct_conv_4c  --output-dir <dir>
 
     python -m ck_dsl.run_manifest <hsaco> <manifest.json> [--verify]
     python -m ck_dsl.sweep_bench <sweep_manifest.json> [--csv ...]

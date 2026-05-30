@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """DSL example 06: universal GEMM builder + cshuffle epilogue.
 
-First example that goes through `ck_dsl.instances.gemm_universal` —
+First example that goes through `ck_dsl.instances.common.gemm_universal` —
 the same code path the sweep harness drives for every dispatcher
 config. The spec mirrors CK's `_base_fp16_rcr_compute` 2x2 entry
 (`tile=(128,128,32), warp_grid=(2,2,1), warp_tile=(32,32,16),

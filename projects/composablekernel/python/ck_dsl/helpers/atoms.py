@@ -370,38 +370,22 @@ class MfmaAtom:
     # ---- emit ----
 
     def emit(self, b: IRBuilder, a: Value, bb: Value, c: Value) -> Value:
-        """Issue one MFMA at this atom's shape."""
-        if (self.m, self.n, self.k, self.dtype_in) == (16, 16, 16, "f16"):
-            return b.mfma_f32_16x16x16_f16(a, bb, c)
-        if (self.m, self.n, self.k, self.dtype_in) == (16, 16, 32, "f16"):
-            return b.mfma_f32_16x16x32_f16(a, bb, c)
-        if (self.m, self.n, self.k, self.dtype_in) == (32, 32, 8, "f16"):
-            return b.mfma_f32_32x32x8_f16(a, bb, c)
-        if (self.m, self.n, self.k, self.dtype_in) == (32, 32, 16, "f16"):
-            return b.mfma_f32_32x32x16_f16(a, bb, c)
-        if (self.m, self.n, self.k, self.dtype_in) == (4, 4, 4, "f16"):
-            return b.mfma_f32_4x4x4_f16(a, bb, c)
-        if (self.m, self.n, self.k, self.dtype_in) == (16, 16, 16, "bf16"):
-            return b.mfma_f32_16x16x16_bf16(a, bb, c)
-        if (self.m, self.n, self.k, self.dtype_in) == (16, 16, 32, "bf16"):
-            return b.mfma_f32_16x16x32_bf16(a, bb, c)
-        if (self.m, self.n, self.k, self.dtype_in) == (32, 32, 16, "bf16"):
-            return b.mfma_f32_32x32x16_bf16(a, bb, c)
-        if (self.m, self.n, self.k, self.dtype_in) == (16, 16, 32, "fp8e4m3"):
-            return b.mfma_f32_16x16x32_fp8(a, bb, c)
-        if (self.m, self.n, self.k, self.dtype_in) == (16, 16, 32, "bf8e5m2"):
-            return b.mfma_f32_16x16x32_bf8(a, bb, c)
-        if (self.m, self.n, self.k, self.dtype_in) == (32, 32, 16, "fp8e4m3"):
-            return b.mfma_f32_32x32x16_fp8(a, bb, c)
-        if (self.m, self.n, self.k, self.dtype_in) == (32, 32, 16, "bf8e5m2"):
-            return b.mfma_f32_32x32x16_bf8(a, bb, c)
-        if (self.m, self.n, self.k, self.dtype_in) == (16, 16, 128, "fp4"):
-            return b.mfma_f32_16x16x128_fp4(a, bb, c)
-        if (self.m, self.n, self.k, self.dtype_in) == (16, 16, 96, "fp6"):
-            return b.mfma_f32_16x16x96_fp6(a, bb, c)
-        raise NotImplementedError(
-            f"no MFMA dispatch for atom {self.dtype_in} {self.m}x{self.n}x{self.k}"
-        )
+        """Issue one MMA at this atom's shape via the unified contract.
+
+        The atom's :attr:`name` *is* the backend ``op_id`` (the
+        :data:`MFMA_ATOMS` catalog and ``ck_dsl.core.arch`` register the same
+        strings), so this routes straight through the target-neutral
+        :meth:`IRBuilder.mma`. The prior per-shape ``b.mfma_f32_*`` dispatch
+        table was a 1:1 wrapper layer over exactly this call — emission is
+        byte-identical (same ``op_id`` attribute, same ``c_frag_len``-sized
+        result, same SSA name hint) — and routing through ``mma`` lets the
+        same atom drive WMMA on RDNA once a WMMA-named atom is added.
+        """
+        if self.name not in _OP_ID_NAMES:
+            raise NotImplementedError(
+                f"no MMA dispatch for atom {self.dtype_in} {self.m}x{self.n}x{self.k}"
+            )
+        return b.mma(self.name, a, bb, c)
 
     def emit_scaled(
         self,
@@ -548,6 +532,12 @@ _DTYPE_ALIAS = {
 _BY_SHAPE: Dict[Tuple[str, int, int, int], MfmaAtom] = {
     (a.dtype_in, a.m, a.n, a.k): a for a in MFMA_ATOMS
 }
+
+# The set of backend ``op_id`` strings (== ``MfmaAtom.name``) that
+# :meth:`MfmaAtom.emit` knows how to issue through :meth:`IRBuilder.mma`.
+# Sourced from the catalog so adding a factory + catalog row is the only
+# step needed to make a new atom emittable.
+_OP_ID_NAMES: frozenset = frozenset(a.name for a in MFMA_ATOMS)
 
 
 def mfma_atom(dtype: str, m: int, n: int, k: int) -> MfmaAtom:

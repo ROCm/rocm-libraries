@@ -61,7 +61,7 @@ Build and verify one generated example:
 export PYTHONPATH=python
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
 
-python -m ck_dsl.examples.bake_off_implicit_gemm --output-dir "$OUT_DIR"
+python -m ck_dsl.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
 python -m ck_dsl.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 ```
 

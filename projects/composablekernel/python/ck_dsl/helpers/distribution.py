@@ -755,13 +755,17 @@ def store_tile(
         window.store_vec_from_f32(b, *x_coords, values=scalars)
 
 
+CShuffleCoordFn = Callable[[IRBuilder, Tuple[int, ...], int], Sequence[Value]]
+
+
 def store_tile_cshuffle(
     b: IRBuilder,
     lds_window: TileWindow,
     distributed: StaticDistributedTensor,
     *,
-    ps: Sequence[Sequence[Value]],
+    ps: Optional[Sequence[Sequence[Value]]] = None,
     traits: Optional[LoadStoreTraits] = None,
+    coord_fn: Optional[CShuffleCoordFn] = None,
 ) -> None:
     """LDS-staged ``store_tile`` for the cshuffle epilogue (P48).
 
@@ -773,31 +777,51 @@ def store_tile_cshuffle(
     ``ds_write_b16`` chain the legacy cshuffle code emits (~64
     per-element ops per warp tile).
 
+    Two coordinate sources are supported:
+
+    * ``coord_fn`` (preferred for the MFMA epilogue): a callback
+      ``coord_fn(b, y_base, k) -> (row, col)`` that returns the LDS
+      coordinate for the scalar at Y position ``y_base`` with the
+      vector-dim index set to ``k``. This lets the caller publish at
+      the exact MFMA *output* layout (lane / register decode), which
+      is not a clean ``unmerge`` of the lane id and therefore cannot
+      be expressed by :meth:`TileDistribution.calculate_x`.
+    * ``ps`` (the original distribution-driven path): the LDS
+      coordinate comes from ``distribution.calculate_x(ys, ps)``.
+      Exactly one of ``coord_fn`` / ``ps`` must be provided.
+
     Reference: CK Tile ``cshuffle_epilogue.hpp::MakeLdsBlockDescriptor``.
     """
-    if lds_window.tensor_view.addr_space != "lds":
+    if lds_window.view.addr_space != "lds":
         raise ValueError(
             "store_tile_cshuffle requires an LDS TileWindow; "
-            f"got addr_space={lds_window.tensor_view.addr_space!r}"
+            f"got addr_space={lds_window.view.addr_space!r}"
         )
+    if (coord_fn is None) == (ps is None):
+        raise ValueError("store_tile_cshuffle requires exactly one of coord_fn / ps")
     distribution = distributed.distribution
     if traits is None:
         traits = make_load_store_traits(distribution)
+    base = lds_window.view.base
     for y_base in traits.iterate_accesses():
-        x_coords = distribution.calculate_x(
-            b,
-            ys=[b.const_i32(int(yi)) for yi in y_base],
-            ps=ps,
-        )
+        x_coords: Optional[Sequence[Value]] = None
+        if coord_fn is None:
+            x_coords = distribution.calculate_x(
+                b,
+                ys=[b.const_i32(int(yi)) for yi in y_base],
+                ps=ps,
+            )
         for k in range(traits.scalar_per_vector):
             y_full = list(y_base)
             y_full[traits.vector_dim_y] = k
             scalar = distributed.get(y_full)
-            # The cshuffle LDS view is 2D `(row, col)`. The static
-            # distributed tensor's calculate_x already produces the
-            # right `(row, col)`; smem_store_vN at n=1 issues one
-            # ``ds_write_b16`` per scalar — the AMDGPU backend
-            # coalesces adjacent ones for us when the LDS layout
-            # supports it (cshuffle layout puts adjacent y at
-            # adjacent LDS slots).
-            b.smem_store_vN(lds_window.tensor_view.base, list(x_coords), scalar, 1)
+            # The cshuffle LDS view is 2D `(row, col)`. ``smem_store_vN``
+            # at n=1 issues one ``ds_write_b16`` per scalar — the AMDGPU
+            # backend coalesces adjacent ones for us when the LDS layout
+            # places adjacent y at adjacent LDS slots (cshuffle layout).
+            coords = (
+                list(coord_fn(b, tuple(y_base), k))
+                if coord_fn is not None
+                else list(x_coords)  # type: ignore[arg-type]
+            )
+            b.smem_store_vN(base, coords, scalar, 1)

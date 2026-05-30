@@ -9,7 +9,7 @@ python/test/test_ck_dsl.py            # static unit suite (no GPU required)
 python/test/test_ck_dsl_examples.py   # end-to-end example harness (HIP required)
 example/ck_tile/dsl/<N>_*/gen.py      # one generator per example, plus expected.json
 python/ck_dsl/examples/               # Python-owned example generators
-python/ck_dsl/examples/attention/parity_unified_attention.py   # attention parity harness
+python/ck_dsl/examples/gfx950/attention/parity_unified_attention.py   # attention parity harness
 python/ck_dsl/examples/ck_tile_parity.py                       # small-op parity harness
 ```
 
@@ -86,7 +86,7 @@ cd <composablekernel-checkout>
 # Build the implicit-GEMM conv example.
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
 PYTHONPATH=python python \
-    -m ck_dsl.examples.bake_off_implicit_gemm --output-dir "$OUT_DIR"
+    -m ck_dsl.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
 
 # Inspect what was emitted.
 ls "$OUT_DIR"
@@ -128,7 +128,7 @@ Runs every shipped small-op against a torch reference with per-op tolerance gate
 export AITER_PATH=<aiter-checkout>
 PYTHONPATH="python:${AITER_PATH}" \
   python \
-  python/ck_dsl/examples/attention/parity_unified_attention.py \
+  python/ck_dsl/examples/gfx950/attention/parity_unified_attention.py \
   --attempts 10 --warmup 5 \
   --paths auto,2d,3d \
   --set default \
@@ -144,7 +144,7 @@ Requires AITER for the Triton baseline and the reference attention path. Set
 4. Compares both to AITER's `ref_paged_attn`.
 5. Times each lane on a single HIP queue, the same timer for both backends.
 
-The harness writes a JSON report. Use the `--scenario` filter for targeted reruns. See `examples/attention/README.md` for the canonical 5-run methodology.
+The harness writes a JSON report. Use the `--scenario` filter for targeted reruns. See `examples/gfx950/attention/README.md` for the canonical 5-run methodology.
 
 ## Benchmark + Sweep
 
@@ -262,7 +262,7 @@ export PYTHONPATH=python
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
 
 python python/test/test_ck_dsl.py                       # static
-python -m ck_dsl.examples.bake_off_implicit_gemm \
+python -m ck_dsl.examples.common.bake_off_implicit_gemm \
     --output-dir "$OUT_DIR"
 python -m ck_dsl.run_manifest \
     "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify

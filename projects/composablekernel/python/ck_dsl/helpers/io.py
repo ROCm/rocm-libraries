@@ -28,6 +28,7 @@ from ..core.ir import BF16, F16, IRBuilder, Type, Value
 __all__ = [
     "DType",
     "io_ir_type",
+    "load_lane_slice_f32",
     "load_scalar",
     "load_scalar_as_f32",
     "load_vec",
@@ -114,6 +115,51 @@ def load_vec_as_f32(
     return [b.cast_to_f32(b.vec_extract(v, i)) for i in range(n)]
 
 
+# Power-of-two vector widths the DSL's ``global_load_vN`` covers. EPT
+# values outside this set (1 / 3 for head_size 64 / 192) fall back to
+# per-element scalar loads so every supported head size keeps working.
+_VEC_WIDTHS = (2, 4, 8)
+
+
+def load_lane_slice_f32(
+    b: IRBuilder,
+    ptr: Value,
+    row_base: Value,
+    lane_d_base: Value,
+    *,
+    dtype: str,
+    ept: int,
+) -> list[Value]:
+    """Load this lane's ``EPT`` consecutive elements as a list of f32.
+
+    Uses one vectorised ``global_load_vN`` + ``vec_extract`` chain when
+    ``EPT`` is a supported vector width (2 / 4 / 8 -- one VMEM
+    transaction per call). Falls back to per-element scalar loads for
+    the ``EPT == 1`` (head_size=64) and ``EPT == 3`` (head_size=192,
+    not a power of two) corner cases so every supported head size keeps
+    working.
+
+    Promoted from the AST-identical local ``_load_lane_slice_f32`` in
+    :mod:`ck_dsl.instances.common.fmha_bwd` and
+    :mod:`ck_dsl.instances.common.fmha_splitkv_decode`. Matches the
+    per-warp K/V/Q load pattern used by CK Tile's ``BlockFmhaBwd*``
+    register-tile loads (``load_tile`` over a distributed
+    ``rt<bf16, ..., row_l, rt_16x32_s>`` tensor) and AITER's varlen bwd
+    ``tl.load(ptr + offs, ...)`` 8-element vector loads.
+    """
+    if ept in _VEC_WIDTHS:
+        return load_vec_as_f32(b, ptr, b.add(row_base, lane_d_base), dtype=dtype, n=ept)
+    return [
+        load_scalar_as_f32(
+            b,
+            ptr,
+            b.add(row_base, b.add(lane_d_base, b.const_i32(k))),
+            dtype=dtype,
+        )
+        for k in range(ept)
+    ]
+
+
 def store_scalar(
     b: IRBuilder, ptr: Value, idx: Value, value: Value, *, dtype: str
 ) -> None:
@@ -179,7 +225,7 @@ def vector_row_copy(
     """Vectorised row copy along a head / hidden dimension.
 
     Promotes the inline ``_copy_row_vec`` from
-    :mod:`ck_dsl.instances.fmha_appendkv` into a shared helper so the
+    :mod:`ck_dsl.instances.common.fmha_appendkv` into a shared helper so the
     same 16-byte-vector pattern can be reused by ``moe_gather`` and
     ``fmha_bwd`` postlude.
 
@@ -220,8 +266,8 @@ def pack_quant_chunk_f32(
     """Pack a list of 4 f32 scalars into a single packed quant vector.
 
     Promotes the inline ``_pack_quant_chunk_f32`` from
-    :mod:`ck_dsl.instances.smoothquant` (and the duplicate copy in
-    :mod:`ck_dsl.instances.moe_smoothquant`) into a shared helper.
+    :mod:`ck_dsl.instances.common.smoothquant` (and the duplicate copy in
+    :mod:`ck_dsl.instances.common.moe_smoothquant`) into a shared helper.
 
     Routes through the matching packed cvt primitive on the IR:
 

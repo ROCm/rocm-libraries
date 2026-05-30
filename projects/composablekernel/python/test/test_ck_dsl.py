@@ -1389,7 +1389,7 @@ class TestLlvmFlavorPolymorphism(unittest.TestCase):
 
     def _fp8_mfma_kernel(self):
         from ck_dsl.instances import BlockScaleGemmSpec
-        from ck_dsl.instances.block_scale_gemm import build_block_scale_gemm
+        from ck_dsl.instances.common.block_scale_gemm import build_block_scale_gemm
 
         return build_block_scale_gemm(
             BlockScaleGemmSpec(
@@ -3307,7 +3307,7 @@ class TestLoweringRegistryBuild(unittest.TestCase):
         # candidate sweep emits a few (block_size, vec) combos; some
         # are illegal under the spec's divisibility constraint and we
         # expect the lowerer to round-trip with at least one.
-        from ck_dsl.instances.reduce import is_valid_spec
+        from ck_dsl.instances.common.reduce import is_valid_spec
 
         buildable = [c for c in cfgs if is_valid_spec(c.spec)[0]]
         self.assertGreater(len(buildable), 0)
@@ -3382,7 +3382,18 @@ class TestLoweringRegistryBuild(unittest.TestCase):
         self.assertEqual(args["K"], 64)
         self.assertIs(args["bias"], runtime_args["bias"])
         self.assertIs(args["residual_0"], runtime_args["residual"])
-        self.assertEqual(grid, (1, 1, 1))
+        # The grid is derived from the first candidate's tile, which the
+        # autotuner selects against the launch device's MMA catalog (WMMA on
+        # gfx11 wave32 picks a 32x32 first tile; a CDNA/no-GPU box picks a
+        # larger one). Assert the grid matches the chosen tile rather than
+        # hardcoding a single-tile (1,1,1) expectation.
+        tile = cfg.spec.tile
+        expected_grid = (
+            (128 + tile.tile_n - 1) // tile.tile_n,
+            (128 + tile.tile_m - 1) // tile.tile_m,
+            1,
+        )
+        self.assertEqual(grid, expected_grid)
 
     def test_elementwise_lowerer_launch_args_binary(self):
         from ck_dsl.helpers import (
@@ -3393,7 +3404,7 @@ class TestLoweringRegistryBuild(unittest.TestCase):
             build_graph,
         )
         from ck_dsl.helpers.fusion_ir import FusionRegion
-        from ck_dsl.instances.elementwise import ElementwiseSpec
+        from ck_dsl.instances.common.elementwise import ElementwiseSpec
 
         class FakeTensor:
             shape = (1024,)
@@ -3655,7 +3666,7 @@ class TestAttentionHarnessTimers(unittest.TestCase):
         # path only worked on one author's machine.
         module_path = (
             Path(__file__).resolve().parents[1]
-            / "ck_dsl/examples/attention/parity_unified_attention.py"
+            / "ck_dsl/examples/gfx950/attention/parity_unified_attention.py"
         )
         fake_aiter = types.ModuleType("aiter")
         fake_ops = types.ModuleType("aiter.ops")
@@ -5194,7 +5205,7 @@ class TestFmhaKernelBuilder(unittest.TestCase):
     """Tests for the FmhaKernelBuilder boilerplate-killer."""
 
     def _common(self):
-        from ck_dsl.instances._fmha_common import FmhaCommonSpec, FmhaShape
+        from ck_dsl.instances.common._fmha_common import FmhaCommonSpec, FmhaShape
 
         return FmhaCommonSpec(
             shape=FmhaShape(head_size=64, num_query_heads=8, num_kv_heads=2),
@@ -5205,7 +5216,7 @@ class TestFmhaKernelBuilder(unittest.TestCase):
     def test_signature_matches_old_varlen(self):
         """The builder-generated signature for fmha_varlen must match
         the canonical Q/K/V/O/cu/scale/total/batch/strides ABI exactly."""
-        from ck_dsl.instances._fmha_common import FmhaKernelBuilder
+        from ck_dsl.instances.common._fmha_common import FmhaKernelBuilder
 
         kb = FmhaKernelBuilder("probe", self._common())
         kb.add_tensor("Q")
@@ -5247,7 +5258,7 @@ class TestFmhaKernelBuilder(unittest.TestCase):
         """When ``num_queries_per_kv > 1`` the grid decode emits a
         divide on head_idx (otherwise it short-circuits to identity).
         """
-        from ck_dsl.instances._fmha_common import FmhaKernelBuilder
+        from ck_dsl.instances.common._fmha_common import FmhaKernelBuilder
 
         kb = FmhaKernelBuilder("probe_grid", self._common())
         kb.add_scalar("scale_log2", "f32")
@@ -5262,7 +5273,7 @@ class TestFmhaKernelBuilder(unittest.TestCase):
     def test_add_tensor_accepts_fp8_kv_dtype(self):
         """add_tensor with dtype='fp8e4m3' produces an fp8 pointer
         (used by fmha_fwd_fp8 / sage)."""
-        from ck_dsl.instances._fmha_common import FmhaKernelBuilder
+        from ck_dsl.instances.common._fmha_common import FmhaKernelBuilder
 
         kb = FmhaKernelBuilder("probe_fp8", self._common())
         kb.add_tensor("K", dtype="fp8e4m3", align=8)
@@ -5274,7 +5285,7 @@ class TestFmhaKernelBuilder(unittest.TestCase):
     def test_tensor_descriptor_naive_3d(self):
         """tensor_descriptor returns a 3-coord descriptor whose
         offset() works for an (token, head, d) triple."""
-        from ck_dsl.instances._fmha_common import FmhaKernelBuilder
+        from ck_dsl.instances.common._fmha_common import FmhaKernelBuilder
 
         kb = FmhaKernelBuilder("probe_desc", self._common())
         kb.add_tensor("Q")
@@ -5330,7 +5341,7 @@ class TestMfmaGemm(unittest.TestCase):
         with an error string that mentions the *current* atom shape.
         """
         from ck_dsl.instances import MfmaGemmSpec
-        from ck_dsl.instances.mfma_gemm import is_valid_spec
+        from ck_dsl.instances.common.mfma_gemm import is_valid_spec
 
         # M=17 is invalid for both the legacy 16x16x16 atom and the new
         # 16x16x32 default — the test exercises the "non-atom shape"
@@ -5389,7 +5400,7 @@ class TestEveryKernelUsesMfma(unittest.TestCase):
 
     def test_block_scale_gemm_fp8_uses_mfma(self):
         from ck_dsl.instances import BlockScaleGemmSpec
-        from ck_dsl.instances.block_scale_gemm import build_block_scale_gemm
+        from ck_dsl.instances.common.block_scale_gemm import build_block_scale_gemm
 
         spec = BlockScaleGemmSpec(
             M=32,
@@ -5406,7 +5417,7 @@ class TestEveryKernelUsesMfma(unittest.TestCase):
 
     def test_mx_gemm_fp8_uses_mfma(self):
         from ck_dsl.instances import MxGemmSpec
-        from ck_dsl.instances.mx_gemm import build_mx_gemm
+        from ck_dsl.instances.common.mx_gemm import build_mx_gemm
 
         spec = MxGemmSpec(M=16, N=16, K=64, mantissa_dtype="fp8e4m3")
         ll = self._llvm_for(build_mx_gemm, spec)
@@ -5414,7 +5425,7 @@ class TestEveryKernelUsesMfma(unittest.TestCase):
 
     def test_fmha_mfma_uses_mfma(self):
         from ck_dsl.instances import FmhaMfmaSpec, build_fmha_fwd_mfma
-        from ck_dsl.instances._fmha_common import FmhaCommonSpec, FmhaShape
+        from ck_dsl.instances.common._fmha_common import FmhaCommonSpec, FmhaShape
 
         spec = FmhaMfmaSpec(
             common=FmhaCommonSpec(
@@ -5437,7 +5448,7 @@ class TestEveryKernelUsesMfma(unittest.TestCase):
         """The pre-existing gemm_universal kernel underpins
         batched_gemm / grouped_gemm / flatmm / img2col (via implicit
         GEMM) / fused_moe; it must continue to emit MFMA."""
-        from ck_dsl.instances.gemm_universal import (
+        from ck_dsl.instances.common.gemm_universal import (
             DataSpec,
             TileSpec,
             TraitSpec,

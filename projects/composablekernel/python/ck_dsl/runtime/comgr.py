@@ -26,7 +26,7 @@ import time
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
-from .hip_module import _LazyFn, _candidate_lib_paths
+from .hip_module import _IS_WINDOWS, _LazyFn, _add_dll_dir, _candidate_lib_paths
 
 
 # Status codes.
@@ -62,10 +62,12 @@ def _load_lib() -> ctypes.CDLL:
     err = None
     for p in _candidate_lib_paths("amd_comgr", "CK_DSL_COMGR_LIB", ["3"]):
         try:
+            _add_dll_dir(p)
             return ctypes.CDLL(p)
         except OSError as e:
             err = e
-    raise ComgrError(f"cannot load libamd_comgr.so ({err!r})")
+    name = "amd_comgr.dll" if _IS_WINDOWS else "libamd_comgr.so"
+    raise ComgrError(f"cannot load {name} ({err!r})")
 
 
 # Lazy: resolved on first call so that ck_dsl and torch can be imported

@@ -18,7 +18,7 @@ from ck_dsl.helpers import (  # noqa: E402
     make_conv_manifest,
     write_artifact,
 )
-from ck_dsl.instances.conv_implicit_gemm import (  # noqa: E402
+from ck_dsl.instances.common.conv_implicit_gemm import (  # noqa: E402
     ConvProblem,
     ImplicitGemmConvSpec,
     build_implicit_gemm_conv,

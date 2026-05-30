@@ -20,10 +20,14 @@ We expose only what the GEMM kernel needs:
 from __future__ import annotations
 
 import ctypes
+import glob
 import os
 import sys
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
+
+
+_IS_WINDOWS = sys.platform == "win32"
 
 
 HIP_LAUNCH_PARAM_BUFFER_POINTER = ctypes.c_void_p(1)
@@ -74,8 +78,48 @@ def _torch_bundled_lib(stem: str) -> Optional[str]:
     torch_file = getattr(torch_mod, "__file__", None)
     if not torch_file:
         return None
-    candidate = os.path.join(os.path.dirname(torch_file), "lib", f"lib{stem}.so")
+    libdir = os.path.join(os.path.dirname(torch_file), "lib")
+    if _IS_WINDOWS:
+        # ROCm-for-Windows torch wheels (TheRock / AMD nightlies) bundle
+        # ``amdhip64.dll`` and a version-stamped ``amd_comgr*.dll`` (no
+        # ``lib`` prefix). Prefer an exact match, else glob the versioned
+        # comgr name.
+        direct = os.path.join(libdir, f"{stem}.dll")
+        if os.path.exists(direct):
+            return direct
+        matches = sorted(glob.glob(os.path.join(libdir, f"{stem}*.dll")))
+        return matches[0] if matches else None
+    candidate = os.path.join(libdir, f"lib{stem}.so")
     return candidate if os.path.exists(candidate) else None
+
+
+def _rocm_sdk_dll(stem: str) -> Optional[str]:
+    """Locate a ROCm runtime DLL shipped by the ``rocm-sdk-core`` wheel.
+
+    ROCm-for-Windows torch nightlies (AMD's gfx1151 index / TheRock) put
+    the HIP runtime and comgr in ``_rocm_sdk_core/bin`` with a version
+    suffix (e.g. ``amdhip64_7.dll``, ``amd_comgr0702.dll``) rather than in
+    ``torch/lib``. Returns the first match for ``<stem>*.dll`` or None.
+    """
+    if not _IS_WINDOWS:
+        return None
+    try:
+        import importlib.util
+
+        spec = importlib.util.find_spec("_rocm_sdk_core")
+    except Exception:
+        return None
+    if spec is None or not spec.submodule_search_locations:
+        return None
+    for loc in spec.submodule_search_locations:
+        bindir = os.path.join(loc, "bin")
+        direct = os.path.join(bindir, f"{stem}.dll")
+        if os.path.exists(direct):
+            return direct
+        matches = sorted(glob.glob(os.path.join(bindir, f"{stem}*.dll")))
+        if matches:
+            return matches[0]
+    return None
 
 
 def _candidate_lib_paths(stem: str, env_var: str, sonames: List[str]) -> List[str]:
@@ -94,6 +138,22 @@ def _candidate_lib_paths(stem: str, env_var: str, sonames: List[str]) -> List[st
     bundled = _torch_bundled_lib(stem)
     if bundled is not None:
         paths.append(bundled)
+    sdk = _rocm_sdk_dll(stem)
+    if sdk is not None:
+        paths.append(sdk)
+    if _IS_WINDOWS:
+        # ROCm-for-Windows / HIP SDK install: ``%HIP_PATH%\bin`` then the
+        # bare DLL name (resolved via the default DLL search path). The
+        # comgr DLL carries a version suffix, so glob it.
+        for root_env in ("HIP_PATH", "ROCM_PATH"):
+            root = os.environ.get(root_env)
+            if not root:
+                continue
+            bindir = os.path.join(root, "bin")
+            paths.append(os.path.join(bindir, f"{stem}.dll"))
+            paths.extend(sorted(glob.glob(os.path.join(bindir, f"{stem}*.dll"))))
+        paths.append(f"{stem}.dll")
+        return paths
     paths.append(f"/opt/rocm/lib/lib{stem}.so")
     for soname in sonames:
         paths.append(f"/opt/rocm/lib/lib{stem}.so.{soname}")
@@ -101,14 +161,31 @@ def _candidate_lib_paths(stem: str, env_var: str, sonames: List[str]) -> List[st
     return paths
 
 
+def _add_dll_dir(path: str) -> None:
+    """On Windows, register a resolved DLL's own directory so its
+    dependent DLLs (bundled alongside it in ``torch/lib`` or the HIP SDK
+    ``bin``) are found by the loader. No-op off Windows or for bare names.
+    """
+    if not _IS_WINDOWS:
+        return
+    d = os.path.dirname(path)
+    if d and os.path.isdir(d):
+        try:
+            os.add_dll_directory(d)
+        except (OSError, AttributeError):
+            pass
+
+
 def _load_lib() -> ctypes.CDLL:
     err = None
     for p in _candidate_lib_paths("amdhip64", "CK_DSL_HIP_LIB", ["7"]):
         try:
+            _add_dll_dir(p)
             return ctypes.CDLL(p)
         except OSError as e:
             err = e
-    raise HipError(f"cannot load libamdhip64.so ({err!r})")
+    name = "amdhip64.dll" if _IS_WINDOWS else "libamdhip64.so"
+    raise HipError(f"cannot load {name} ({err!r})")
 
 
 # Holds the resolved ``libamdhip64`` handle. Stays ``None`` until the
@@ -228,6 +305,39 @@ def _check(s: int, where: str) -> None:
     if s != 0:
         msg = _hipGetErrorString(s)
         raise HipError(f"{where}: hipError({s}) {msg.decode() if msg else ''}")
+
+
+def get_device_arch(device: int = 0) -> Optional[str]:
+    """Best-effort gfx string of a HIP device (e.g. ``"gfx942"``).
+
+    Returns ``None`` when it can't be determined (no GPU present, or the
+    properties symbol is unavailable). Launch paths use this to compile for
+    the device they will actually run on instead of defaulting to a fixed
+    arch — building a gfx950 code object and launching it on gfx942 yields
+    ``hipError(209) no kernel image``.
+
+    The ``hipDeviceProp_t`` struct layout changes across ROCm releases (and
+    the symbol was versioned to ``...R0600`` in ROCm 6.x), so rather than
+    mirroring the struct we allocate a generous zeroed buffer, fill it via
+    ``hipGetDeviceProperties*``, and scan it for the ``gfx<...>`` token that
+    ``gcnArchName`` carries. ``name`` (the marketing string) contains no
+    ``gfx`` token, so the first match is the architecture name.
+    """
+    import re
+
+    buf = ctypes.create_string_buffer(4096)
+    for sym in ("hipGetDevicePropertiesR0600", "hipGetDeviceProperties"):
+        fn = _b(sym, ctypes.c_void_p, ctypes.c_int)
+        try:
+            rc = fn(buf, int(device))
+        except (AttributeError, OSError):
+            continue
+        if rc != 0:
+            continue
+        m = re.search(rb"gfx[0-9a-z]+", buf.raw)
+        if m:
+            return m.group(0).decode("ascii")
+    return None
 
 
 @dataclass

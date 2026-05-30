@@ -26,7 +26,7 @@ from ck_dsl.helpers import (  # noqa: E402
     make_simple_op_manifest,
     write_artifact,
 )
-from ck_dsl.instances.elementwise import (  # noqa: E402
+from ck_dsl.instances.common.elementwise import (  # noqa: E402
     ElementwiseSpec,
     build_elementwise,
     elementwise_signature,

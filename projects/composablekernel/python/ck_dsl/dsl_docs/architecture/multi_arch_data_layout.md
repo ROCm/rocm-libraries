@@ -28,6 +28,107 @@ gfx-specific operations. `helpers/atoms.py`, `helpers/layouts.py`, and selected
 instances contain architecture-shaped metadata that should be selected from a
 single target description.
 
+## Code Organization (Hybrid Layout)
+
+The codebase is split along **two axes**: the *lower* stack (`core/`, `helpers/`)
+is **polymorphic** — architecture enters only as data (`ArchTarget`,
+`RocmProfile`) and pluggable behaviour (`ISABackend`, layout backends), never as
+a directory name. The *upper* stack (`instances/`, `examples/`) is organized so
+that genuinely arch-divergent **algorithms** live in **gfx-id subfolders**, while
+shared algorithms stay in one place and parametrize over the target.
+
+This is the authoritative layout. Where earlier drafts of this document implied
+instances are *always* a single arch-polymorphic builder per family, that holds
+only for **shared** kernels; see "Reconciliation" below.
+
+```text
+core/                      polymorphic — no gfx-id subfolders
+  arch/                    ArchTarget, MmaCatalog, RocmProfile (data + predicates)
+  isa/                     ISABackend classes (gfx950, gfx9_mfma, ...)
+  layout/                  OperandLayout, Lds{Producer,Consumer}Layout
+  ir.py, lower_llvm.py     generic _Lowerer walk (target-neutral)
+helpers/                   polymorphic building blocks — no gfx-id subfolders
+  (atoms, layouts, loads, attention reductions: select from ArchTarget)
+instances/                 HYBRID
+  common/                  builders whose ALGORITHM is identical across arches
+                           and only swap target-selected ops (MMA op_id, waitcnt,
+                           datalayout, wave primitives) — e.g. elementwise, reduce,
+                           plain GEMM bodies.
+  gfx950/                  builders whose algorithm GENUINELY DIVERGES on gfx950
+                           (e.g. transpose-LDS attention, MX fp4 GEMM).
+  gfx942/                  gfx942-specific algorithm variants.
+  gfx1151/                 RDNA3.5 wave32/WMMA-specific algorithm variants
+                           (e.g. wmma_fmha_fwd adapter).
+  common/gemm_policy.py    per-family capability filtering (GemmPipelinePolicy,
+                           AttentionPipelinePolicy) — arch-agnostic code that
+                           READS ArchTarget facts. Policy modules live under
+                           common/ alongside the shared builders, not in a
+                           per-family subfolder.
+examples/                  per-arch, shared-where-possible
+  common/                  arch-neutral demos + harnesses taking --arch/--isa
+                           (e.g. universal_gemm_verify).
+  gfx950/                  showcases exercising gfx950-only features.
+  gfx942/                  gfx942-tuned / gfx942-specific showcases.
+  gfx1151/                 RDNA wave32/WMMA showcases + verify harnesses.
+```
+
+### Where does a kernel live?
+
+- **`instances/common/`** — if its IR construction is the same across arches
+  *modulo* values selected from the target (`MmaOp` op-id, waitcnt encoding,
+  datalayout, `arch.wave.*`). A `common/` builder must contain **no** `if arch
+  == ...:` around structural control flow; only target lookups.
+- **`instances/<gfx>/`** — the moment the *algorithm itself* differs (staging
+  strategy, K-loop shape, memory path, which fused phases exist). If a single
+  builder would need arch branches around structural code, split it into
+  per-gfx modules instead. Adding/improving one arch's variant leaves the other
+  arches' files untouched.
+- **`instances/common/gemm_policy.py`** (and sibling `common/*_policy` modules)
+  — pipeline/scheduler/warp-tile validity and LDS-budget rules for the family.
+  Policy is shared, arch-agnostic code that composes `ArchTarget` predicates; it
+  lives under `common/` next to the shared builders and is *not* duplicated per
+  gfx.
+
+Examples follow the same rule: arch-neutral harnesses in `examples/common/`
+(imported by arch showcases to avoid duplication); only the arch-specific spec,
+config, or feature demo lives under `examples/<gfx>/`.
+
+### Module paths (no shims)
+
+The hybrid layout shipped without per-module re-export shims. Relocated kernels
+and examples now live directly under `instances/common/` (or `instances/<gfx>/`
+for arch-divergent variants), and the **single** public surface is the
+`ck_dsl.instances` package `__init__`, which re-exports every spec and builder
+(`build_universal_gemm`, `UniversalGemmSpec`, `GemmPipelinePolicy`, ...). Import
+from the package, e.g.
+
+```python
+from ck_dsl.instances import build_universal_gemm, UniversalGemmSpec, GemmPipelinePolicy
+# or, for a specific home, the fully-qualified module:
+from ck_dsl.instances.common.gemm_universal import build_universal_gemm
+from ck_dsl.instances.common.gemm_policy import GemmPipelinePolicy
+```
+
+There are no `ck_dsl.instances.<flat>` (e.g. `ck_dsl.instances.gemm_universal`,
+`ck_dsl.instances.gemm`) modules and no `DeprecationWarning` shims at the old
+flat paths — those import targets do **not** exist. In-tree callers, tests, and
+harnesses (`ck_dsl.examples.common.bake_off_implicit_gemm`,
+`ck_dsl.examples.common.universal_gemm_verify`) import via the package or the
+fully-qualified `common/` path.
+
+### Reconciliation with the polymorphic-instances sections
+
+The "Pipeline Policy (Instance-Side)", "Review Rules", and "Success Criteria"
+sections were drafted assuming a single arch-polymorphic builder per family that
+is *never* edited to add an arch. Under the hybrid layout that goal holds for
+**shared** kernels (`instances/common/` + `<family>/policy.py`): adding an arch
+is data + backend + catalog/layout rows, and shared builders pick it up through
+the predicates they already compose — no edit to a shared builder or a policy.
+For kernels with **genuinely arch-divergent algorithms**, adding or improving an
+arch *does* add a module under `instances/<gfx>/`. That is expected and allowed;
+it does not perturb other arches and adds no pipeline vocabulary to `core/`. The
+review rules below are annotated accordingly.
+
 ## Current Coupling
 
 ```text
@@ -104,7 +205,7 @@ emit ISA-specific names or encode device-specific constants themselves.
 **Pipeline policy is a Layer 2 concern, not Layer 1.** Core (`core/arch/`)
 publishes hardware predicates only — wave size, LDS bytes, MMA catalog,
 async/transpose-LDS bits, vector-load alignment. Each kernel family owns a
-policy module (`instances/<family>/policy.py`) that filters pipeline names,
+policy module (`instances/common/<family>_policy.py`) that filters pipeline names,
 schedulers, warp tiles, and LDS budget factors by *composing* core
 predicates. See "Pipeline Policy (Instance-Side)".
 
@@ -287,7 +388,7 @@ Three forces push pipeline metadata out of `ArchTarget`:
                             ^  (read-only)
                             |
 +--------------------------------------------------------------+
-| instances/<family>/policy.py      kernel-family pipeline policy|
+| instances/common/<family>_policy.py     family pipeline policy|
 |   GemmPipelinePolicy                                           |
 |     valid_pipelines(target) -> ("mem", "compv3", "compv4")     |
 |     valid_schedulers(target, pipeline) -> ("intrawave", ...)   |
@@ -661,10 +762,21 @@ drives backend selection.
 | --- | --- | --- | --- | --- | --- | --- |
 | gfx908 | no | no | classic | 4 | 64 | MI100 |
 | gfx90a | no | no | `.1k` | 4 | 64 | MI200 |
-| gfx942 | yes | yes | `.1k` | 4 | 64 | MI300 |
-| gfx950 | yes | yes (incl. fp4) | `.1k` | 6 | 160 | MI350; `ds_read_*_tr_*` |
+| gfx942 | yes | yes | `.1k` | 4 | 64 | MI300; f16/bf16 atoms 16x16x16, 32x32x8 only |
+| gfx950 | yes | yes (incl. fp4) | `.1k` | 6 | 160 | MI350; `ds_read_*_tr_*`; adds k=32 f16/bf16 atoms 16x16x32, 32x32x16 |
 | gfx1100 | no | no (WMMA) | WMMA | n/a | 64 | RDNA3, wave32 |
+| gfx1151 | no | no (WMMA) | WMMA | n/a | 64 | RDNA3.5 (Strix Halo), wave32; shipped RDNA target |
 | gfx1201 | no | no (WMMA) | WMMA | n/a | 64 | RDNA4, wave32 |
+
+> MMA-catalog note (not IR drift): the k=32 f16/bf16 MFMA atoms
+> (`16x16x32`, `32x32x16`) exist **only** on gfx950. gfx942's f16/bf16
+> catalog is `{16x16x16, 32x32x8}`, and gfx942 also has the smaller 64 KB
+> LDS budget. A k=32 (or oversized-LDS) GEMM/FMHA spec is therefore
+> *rejected* with a structured `ValueError` on gfx942 by
+> `GemmPipelinePolicy` / `is_valid_spec` before any IR is emitted. This is
+> intended arch filtering, **not** a regression or byte-identity drift — the
+> CDNA MFMA body is byte-identical between gfx942 and gfx950 for every config
+> that is legal on both.
 
 This collapses into the following concrete backend classes:
 
@@ -1023,10 +1135,11 @@ wave-level and memory-level primitives must be selected from `ArchTarget`.
   `DeprecationWarning` wrapper around `self.mma(...)`.
 - Migrate `MfmaAtom.emit` to call `b.mma(self.op_id, ...)`.
 - Move `MfmaAtom.lane_to_output` to `OperandLayout` on the selected `MmaOp`.
-- Introduce `instances/<family>/policy.py` modules. Start with `gemm/` and
-  `attention/`. Move today's `is_valid_spec` bodies and warp-tile globals
-  into the family policy class; the existing entry point becomes a thin
-  shim that calls `policy.validate(target, spec)`.
+- Introduce `instances/common/<family>_policy.py` modules. Start with
+  `gemm_policy.py` (shipped) and an `attention` policy. Move today's
+  `is_valid_spec` bodies and warp-tile globals into the family policy class;
+  the existing entry point becomes a thin wrapper that calls
+  `policy.validate(target, spec)`.
 - Migrate the remaining instance-side validity branches
   (`conv_implicit_gemm`, `grouped_gemm`, `flatmm`, FMHA variants) to their
   family policy classes. gfx950 output stays byte-identical.
@@ -1204,12 +1317,15 @@ Use these as review checks when implementing the plan:
 - `core/ir.py` operation names do not contain gfx-specific names.
 - Architecture constants live under `core/arch/` or an `ISABackend`.
 - Physical layout code returns coordinates or byte offsets; backends emit LLVM.
-- New GPU support adds a data row, an `MmaCatalog` extension, layout
-  entries, and a backend class — and does not touch any
-  `instances/<family>/policy.py`. Existing policies pick up the new arch
-  automatically through the hardware predicates they already compose.
+- New GPU support for **shared** capabilities adds a data row, an `MmaCatalog`
+  extension, layout entries, and a backend class — and does not touch any
+  `instances/common/<family>_policy.py` or any `instances/common/` builder. Existing
+  policies pick up the new arch automatically through the hardware predicates
+  they already compose. A **genuinely arch-divergent algorithm** may add a module
+  under `instances/<gfx>/` (and a showcase under `examples/<gfx>/`); this must not
+  edit another arch's files, a shared `common/` builder, or `core/`.
 - Pipeline names, scheduler strings, warp-tile tables, and LDS budget
-  factors live exclusively in `instances/<family>/policy.py`. Core files
+  factors live exclusively in `instances/common/<family>_policy.py`. Core files
   (`core/arch/`, `core/ir.py`, `core/lower_llvm.py`) must not contain
   pipeline vocabulary.
 - After Phase 1, `instances/<family>/` files must validate specs via the
@@ -1223,19 +1339,25 @@ Use these as review checks when implementing the plan:
 
 - CK_DSL builds, installs, and tests without the `dispatcher/` tree on disk.
 - Changing `arch="gfx942"` to `arch="gfx950"` does not require instance code
-  edits for shared capabilities.
+  edits for shared capabilities (kernels in `instances/common/`).
 - Adding a target adds data, catalog rows, layout tables, and one backend
-  class — never an edit to a kernel-family policy and never an edit to the
-  generic `_Lowerer` walk.
+  class — never an edit to a kernel-family policy, a shared `common/` builder,
+  or the generic `_Lowerer` walk. Genuinely arch-divergent algorithms may add
+  modules under `instances/<gfx>/` and `examples/<gfx>/`, which leave every
+  other arch untouched.
+- Code organization follows the hybrid layout: polymorphic `core/` + `helpers/`
+  (no gfx-id subfolders); `instances/{common,<gfx>,<family>/policy.py}`;
+  `examples/{common,<gfx>}`. Relocated modules keep back-compat shims at their
+  old import paths.
 - Adding a kernel family or a pipeline variant edits only that family's
-  `instances/<family>/policy.py` and the family's instance builder — never
+  `instances/common/<family>_policy.py` and the family's instance builder — never
   `core/arch/`.
 - Adding a ROCm release adds a `RocmProfile` row — never an edit to backend
   code in the common case.
 - Cross-compilation works: artifacts produced against `target_rocm` other
   than the host's `build_rocm` are recorded and reproducible.
 - Pipeline `(pipeline, scheduler, epilogue)` combo validity comes from
-  `instances/<family>/policy.py.validate(target, spec)`, not from inline
+  `instances/common/<family>_policy.py.validate(target, spec)`, not from inline
   tables and not from core. Forbidden combos fail with stable, structured
   reasons.
 - Attention pipeline-variant choice (`qr_ks_vs`, `qr_ks_vs_async`,
