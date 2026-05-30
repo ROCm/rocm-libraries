@@ -46,7 +46,7 @@ from dataclasses import dataclass, field
 from itertools import product
 from typing import Callable, Iterable, List, Optional, Sequence, Tuple
 
-from ..core.ir import IRBuilder, Type, Value
+from ..core.ir import F32, IRBuilder, Type, Value
 from .tensor_view import TileWindow
 
 
@@ -55,9 +55,16 @@ __all__ = [
     "StaticDistributedTensor",
     "TileDistribution",
     "TileDistributionEncoding",
+    "block_tile_reduce_sync",
+    "load_tile",
+    "load_tile_transpose",
     "make_load_store_traits",
+    "make_reduce_tile_distribution_encoding",
     "make_static_distributed_tensor",
     "make_static_tile_distribution",
+    "make_transposed_distribution",
+    "shuffle_tile",
+    "store_tile",
 ]
 
 
@@ -217,6 +224,57 @@ class TileDistributionEncoding:
     def has_replication(self) -> bool:
         return bool(self.Rs)
 
+    # -- R (replication) support (Phase B0 additive) -----------------
+    #
+    # In CK Tile a P or Y entry whose ``major == 0`` targets an R
+    # (replication) bucket. R buckets do NOT enter the X coordinate:
+    # iterating an R index sweeps "broadcast" copies of the same X
+    # data (the canonical reduce/norm row distribution maps the warp /
+    # lane partition of the reduced axis onto R via P->R, and a Y->R
+    # entry materialises the per-thread replicated copies in registers).
+    #
+    # V1 already tolerated ``Ys2RHs_major == 0`` in :meth:`Y_lengths`
+    # and in the contributor map (R contributors are skipped because
+    # they are not part of X). These accessors make the R side a
+    # first-class, queryable part of the encoding so the reduce/norm
+    # distributions (R + Y->R, 2D-P) are fully expressible. Encodings
+    # with ``Rs == ()`` are unaffected: ``num_R`` is 0 and every list
+    # below is empty.
+
+    @property
+    def num_R(self) -> int:
+        """Number of replication (R) levels."""
+        return len(self.Rs)
+
+    @property
+    def R_lengths(self) -> Tuple[int, ...]:
+        """Length of each R (replication) level."""
+        return tuple(int(r) for r in self.Rs)
+
+    @property
+    def ys_to_r_minor(self) -> Tuple[int, ...]:
+        """For each Y dim, the R level it targets, or ``-1`` if the Y
+        maps to an X (H) bucket rather than to R."""
+        return tuple(
+            int(minor) if int(maj) == 0 else -1
+            for maj, minor in zip(self.Ys2RHs_major, self.Ys2RHs_minor)
+        )
+
+    def p_feeds_r(self, p_idx: int) -> Tuple[Tuple[int, int], ...]:
+        """List of ``(inner_idx, r_minor)`` for P dim ``p_idx``'s
+        contributions that target an R bucket (``major == 0``).
+
+        Empty for every V1 encoding (no P feeds R). The reduce/norm
+        scatter form has the warp / lane partition feeding R here.
+        """
+        out: List[Tuple[int, int]] = []
+        maj_seq = self.Ps2RHs_major[p_idx]
+        min_seq = self.Ps2RHs_minor[p_idx]
+        for inner_idx, (maj, minor) in enumerate(zip(maj_seq, min_seq)):
+            if int(maj) == 0:
+                out.append((inner_idx, int(minor)))
+        return tuple(out)
+
 
 # ---------------------------------------------------------------------
 # TileDistribution
@@ -352,6 +410,67 @@ class TileDistribution:
             off = off * int(length) + int(v)
         return off
 
+    # -- R (replication / partition) support (Phase B0 additive) -----
+
+    @property
+    def num_R(self) -> int:
+        return self.encoding.num_R
+
+    @property
+    def R_lengths(self) -> Tuple[int, ...]:
+        return self.encoding.R_lengths
+
+    def calculate_rs_index(
+        self,
+        *,
+        ps: Sequence[Sequence[Value]],
+    ) -> Tuple[Value, ...]:
+        """Return the replication (R) index tuple for one P position.
+
+        The R index is the partition coordinate over the replicated
+        copies of the X tile -- it does **not** feed :meth:`calculate_x`
+        (R buckets are not part of X). It is the value a reduce/norm
+        kernel uses to decide which lane / warp owns the reduced row.
+
+        ``ps`` has the same shape :meth:`calculate_x` expects (one
+        sub-sequence per P dim). For each R level we look up the P
+        contribution that targets it (``Ps2RHs_major == 0`` at that
+        level). Levels with no P contributor (only a Y->R contributor)
+        return ``None`` in their slot, since their value is a
+        compile-time Y coordinate rather than a runtime P value.
+        """
+        enc = self.encoding
+        if len(ps) != self.num_P:
+            raise ValueError(f"expected {self.num_P} P sequences, got {len(ps)}")
+        # (r_minor) -> SSA value supplied by a P contribution.
+        r_from_p: dict[int, Value] = {}
+        for p_idx in range(self.num_P):
+            for inner_idx, r_minor in enc.p_feeds_r(p_idx):
+                r_from_p[r_minor] = ps[p_idx][inner_idx]
+        out: List[Optional[Value]] = []
+        for level in range(enc.num_R):
+            out.append(r_from_p.get(level))
+        return tuple(out)  # type: ignore[return-value]
+
+    def get_distributed_spans(self) -> Tuple[Tuple[int, ...], ...]:
+        """Per-X-dim *distributed span* lengths (CK Tile
+        ``get_distributed_spans``).
+
+        Each span collects the lengths of the Y dims that contribute to
+        that X dim, in Y order. This is the structure :func:`sweep_tile`
+        with ``unpacks`` walks: the body unpacks ``unpacks[x]`` pixels
+        along X dim ``x``'s span. Y dims that map to R are grouped into
+        a trailing pseudo-span (index ``num_X``) so a Y->R sweep is
+        still expressible.
+        """
+        enc = self.encoding
+        spans: List[List[int]] = [[] for _ in range(enc.num_X + 1)]
+        for y_idx in range(self.num_Y):
+            maj = int(enc.Ys2RHs_major[y_idx])
+            span = enc.num_X if maj == 0 else maj - 1
+            spans[span].append(int(self.Y_lengths[y_idx]))
+        return tuple(tuple(s) for s in spans)
+
 
 def make_static_tile_distribution(
     encoding: TileDistributionEncoding,
@@ -462,6 +581,70 @@ class StaticDistributedTensor:
             result = body(y, current)
             if result is not None:
                 self.storage[off] = result
+
+    def sweep_unpacks(
+        self,
+        body: Callable[
+            [Sequence[Tuple[Tuple[int, ...], Value]]],
+            Optional[Sequence[Optional[Value]]],
+        ],
+        unpacks: Sequence[int],
+    ) -> None:
+        """Multi-pixel sweep (CK Tile ``sweep_tile(.., UnpacksPerXDim)``).
+
+        ``unpacks`` is one factor per Y dim (``1`` = single-pixel along
+        that dim, ``2`` = consume two consecutive pixels per call, ...).
+        The body is invoked once per *group*; it receives the group as
+        a list of ``(y_tuple, value)`` pairs (in row-major order over
+        the unpacked sub-block) and may return a same-length sequence of
+        replacement values (or ``None`` to leave the slots unchanged;
+        individual entries may also be ``None`` to skip that one slot).
+
+        With ``unpacks == (1,) * num_Y`` this degrades to the
+        single-pixel :meth:`sweep` (one pair per call), so it is a
+        strict superset. Each ``unpacks[i]`` must divide ``Y_lengths[i]``
+        -- exactly the C++ ``get_y_unpacks_from_x_unpacks`` requirement.
+
+        This mirrors the ``sweep<2,2>`` 2x2-pixel norm/elementwise body
+        in ``sweep_tile.hpp:213-223`` without forcing the caller to
+        hand-roll the index arithmetic.
+        """
+        dist = self.distribution
+        y_lengths = [int(length) for length in dist.Y_lengths]
+        ups = [int(u) for u in unpacks]
+        if len(ups) != len(y_lengths):
+            raise ValueError(f"unpacks rank {len(ups)} != num_Y {len(y_lengths)}")
+        for axis, (u, length) in enumerate(zip(ups, y_lengths)):
+            if u < 1 or length % u != 0:
+                raise ValueError(
+                    f"unpacks[{axis}]={u} must be >=1 and divide Y length {length}"
+                )
+        # Outer iteration steps each Y dim by its unpack factor; the
+        # inner group enumerates the [0, unpacks[i]) offsets per dim in
+        # row-major order, matching the C++ static_uford traversal.
+        outer_ranges = [range(0, length, u) for length, u in zip(y_lengths, ups)]
+        inner_ranges = [range(u) for u in ups]
+        for base in product(*outer_ranges):
+            group: List[Tuple[Tuple[int, ...], Value]] = []
+            offs: List[int] = []
+            for delta in product(*inner_ranges):
+                y = tuple(b + d for b, d in zip(base, delta))
+                off = dist.y_to_linear(y)
+                current = self.storage[off]
+                if current is None:
+                    raise KeyError(f"Y slot {y} (offset {off}) not initialised")
+                group.append((y, current))
+                offs.append(off)
+            result = body(group)
+            if result is not None:
+                if len(result) != len(group):
+                    raise ValueError(
+                        f"body returned {len(result)} values for a group of "
+                        f"{len(group)}"
+                    )
+                for off, new_value in zip(offs, result):
+                    if new_value is not None:
+                        self.storage[off] = new_value
 
 
 def make_static_distributed_tensor(
@@ -672,6 +855,9 @@ def make_load_store_traits(
 # ---------------------------------------------------------------------
 
 
+MaskFn = Callable[[IRBuilder, Tuple[Value, ...]], Value]
+
+
 def load_tile(
     b: IRBuilder,
     window: TileWindow,
@@ -679,6 +865,7 @@ def load_tile(
     distribution: TileDistribution,
     ps: Sequence[Sequence[Value]],
     traits: Optional[LoadStoreTraits] = None,
+    mask_fn: Optional[MaskFn] = None,
 ) -> StaticDistributedTensor:
     """``load_tile(window)`` analogue.
 
@@ -695,12 +882,33 @@ def load_tile(
     issues one vector load of ``traits.scalar_per_vector`` elements
     and unpacks them into the Y slots ``[..., 0 .. scalar_per_vector)``
     along ``traits.vector_dim_y``.
+
+    ``f32`` (and any dtype :meth:`TileWindow.load_vec_as_f32` accepts)
+    works as well as f16/bf16: the f32 promote is a no-op for f32 and
+    the Y slots simply hold the native f32 scalars. This lets the
+    reduce / norm f32-accumulator tiles flow through the same path.
+
+    **Masked / OOB-safe variant** (``mask_fn``): when ``N`` need not divide
+    the block extent (img2col K-tail, pooling, topk) the in-bounds region
+    is partial. ``mask_fn(b, x_coords) -> i1`` returns the per-access
+    validity predicate; the load then routes through the buffer
+    OOB-zero-fill path (:meth:`TensorView.load_vec_at` with ``mask=``),
+    which substitutes an INT32_MAX byte offset on masked-off lanes so the
+    hardware returns 0. Requires a ``buffer`` window (the only address
+    space with hardware OOB-zero). This is the
+    ``pad_tensor_view(..., sequence<false,true>)`` tail idiom CK Tile uses
+    in ``image_to_column_kernel.hpp`` / ``pool_kernel.hpp``.
     """
     if traits is None:
         traits = make_load_store_traits(distribution)
-    if window.dtype.name not in ("f16", "bf16"):
+    if window.dtype.name not in ("f16", "bf16", "f32"):
         raise NotImplementedError(
-            f"load_tile dtype {window.dtype.name} not wired (f16/bf16 only)"
+            f"load_tile dtype {window.dtype.name} not wired (f16/bf16/f32 only)"
+        )
+    if mask_fn is not None and window.view.addr_space != "buffer":
+        raise NotImplementedError(
+            "load_tile mask_fn= requires a buffer window (hardware OOB-zero); "
+            f"got addr_space={window.view.addr_space!r}"
         )
 
     dt = make_static_distributed_tensor(distribution, dtype=window.dtype)
@@ -710,7 +918,24 @@ def load_tile(
             ys=[b.const_i32(int(yi)) for yi in y_base],
             ps=ps,
         )
-        scalars = window.load_vec_as_f32(b, *x_coords, n=traits.scalar_per_vector)
+        if mask_fn is not None:
+            # Buffer OOB-zero-fill tail: compute the flat element offset
+            # for this access and a per-access mask, then issue one masked
+            # vector load that returns 0 on the out-of-bounds lanes.
+            glob = window._global_indices(b, x_coords)
+            elem_off = window.view.desc.offset(b, glob)
+            mask = mask_fn(b, tuple(glob))
+            n = traits.scalar_per_vector
+            if n == 1:
+                raw = [window.view.load_scalar_at(b, elem_off, mask=mask)]
+            else:
+                vec = window.view.load_vec_at(b, elem_off, n=n, mask=mask)
+                raw = [b.vec_extract(vec, i) for i in range(n)]
+            scalars = [
+                v if window.dtype.name == "f32" else b.cast_to_f32(v) for v in raw
+            ]
+        else:
+            scalars = window.load_vec_as_f32(b, *x_coords, n=traits.scalar_per_vector)
         # Splice each loaded scalar into the matching Y slot along
         # the vector dim.
         for k, scalar in enumerate(scalars):
@@ -733,13 +958,21 @@ def store_tile(
     The inverse of :func:`load_tile`: gathers per-Y scalars from
     ``distributed``, packs them into ``traits.scalar_per_vector``-wide
     vectors, and writes them through ``window``.
+
+    Like :func:`load_tile`, ``f32`` is supported in addition to
+    f16/bf16. For f16/bf16 we route through
+    :meth:`TileWindow.store_vec_from_f32` (f32 demote + pack); for f32
+    the demote is a no-op so we pack the native scalars directly via
+    :meth:`TileWindow.store_vec` / :meth:`TileWindow.store_scalar`.
     """
     distribution = distributed.distribution
     if traits is None:
         traits = make_load_store_traits(distribution)
-    if window.dtype.name not in ("f16", "bf16"):
+    quant_dtypes = ("i8", "fp8e4m3", "bf8e5m2")
+    if window.dtype.name not in ("f16", "bf16", "f32", "i32") + quant_dtypes:
         raise NotImplementedError(
-            f"store_tile dtype {window.dtype.name} not wired (f16/bf16 only)"
+            f"store_tile dtype {window.dtype.name} not wired "
+            "(f16/bf16/f32/i32/i8/fp8e4m3/bf8e5m2)"
         )
     for y_base in traits.iterate_accesses():
         x_coords = distribution.calculate_x(
@@ -752,7 +985,73 @@ def store_tile(
             y_full = list(y_base)
             y_full[traits.vector_dim_y] = k
             scalars.append(distributed.get(y_full))
-        window.store_vec_from_f32(b, *x_coords, values=scalars)
+        if window.dtype.name in quant_dtypes:
+            # Quant outputs (i8 / fp8e4m3 / bf8e5m2): the Y slots hold the
+            # already-scaled f32 chunk. Reproduce the legacy packed-store
+            # byte layout exactly -- per-element saturating cvt + vec_pack
+            # (the helpers.quant.pack_quant_chunk_local_f32 op stream) then
+            # one coalesced vector store (helpers.quant.store_packed_chunk_local
+            # layout: <N x q_ty> bitcast to the matching dword store).
+            packed = _pack_quant_local(b, scalars, q_ty=window.dtype)
+            window.store_vec(b, *x_coords, value=packed, n=len(scalars))
+        elif window.dtype.name == "i32":
+            # Index outputs (topk): the Y slots already hold i32 scalars.
+            if len(scalars) == 1:
+                window.store_scalar(b, *x_coords, value=scalars[0])
+            else:
+                packed = b.vec_pack(scalars, window.dtype)
+                window.store_vec(b, *x_coords, value=packed, n=len(scalars))
+        elif window.dtype.name == "f32":
+            # f32 demote is a no-op; TileWindow.store_vec_from_f32
+            # rejects non-16-bit dtypes, so pack/store the native f32
+            # scalars directly here.
+            if len(scalars) == 1:
+                window.store_scalar(b, *x_coords, value=scalars[0])
+            else:
+                packed = b.vec_pack(scalars, window.dtype)
+                window.store_vec(b, *x_coords, value=packed, n=len(scalars))
+        else:
+            window.store_vec_from_f32(b, *x_coords, values=scalars)
+
+
+def _pack_quant_local(b: IRBuilder, scaled_f32: List[Value], *, q_ty: Type) -> Value:
+    """Quantise + pack a chunk of already-scaled f32 scalars into ``<N x q_ty>``.
+
+    Reproduces the *local* packed-store op stream of
+    :func:`ck_dsl.helpers.quant.pack_quant_chunk_local_f32`: a 4-wide fp8 /
+    bf8 chunk routes through the packed ``v_cvt_pk_{fp8,bf8}_f32`` intrinsic
+    (stitched with ``vec_concat`` for the 8-wide case); i8 (and 2-wide
+    fp8/bf8) uses per-element saturating scalar cvt + ``vec_pack``. Kept
+    inline so :func:`store_tile` does not import the quant module (it lives
+    in a different helper layer).
+    """
+    name = q_ty.name
+    n = len(scaled_f32)
+    if name in ("fp8e4m3", "bf8e5m2") and n % 4 == 0:
+        cvt = b.cvt_pk_fp8_f32x4 if name == "fp8e4m3" else b.cvt_pk_bf8_f32x4
+        chunks: List[Value] = []
+        for off in range(0, n, 4):
+            quad = b.vec_pack(scaled_f32[off : off + 4], F32)
+            chunks.append(cvt(quad))
+        out = chunks[0]
+        for chunk in chunks[1:]:
+            out = b.vec_concat(out, chunk)
+        return out
+    qs: List[Value] = []
+    for sf in scaled_f32:
+        if name == "i8":
+            qs.append(
+                b.cvt_f32_to_i8_sat(
+                    b.clamp_f32(sf, b.const_f32(-127.0), b.const_f32(127.0))
+                )
+            )
+        elif name == "fp8e4m3":
+            qs.append(b.cvt_f32_to_fp8(sf))
+        elif name == "bf8e5m2":
+            qs.append(b.cvt_f32_to_bf8(sf))
+        else:
+            raise ValueError(f"_pack_quant_local: unsupported q_ty {name!r}")
+    return b.vec_pack(qs, q_ty)
 
 
 CShuffleCoordFn = Callable[[IRBuilder, Tuple[int, ...], int], Sequence[Value]]
@@ -825,3 +1124,491 @@ def store_tile_cshuffle(
                 else list(x_coords)  # type: ignore[arg-type]
             )
             b.smem_store_vN(base, coords, scalar, 1)
+
+
+# ---------------------------------------------------------------------
+# shuffle_tile: in-register transpose between two distributions
+# ---------------------------------------------------------------------
+
+
+def _rh_bucket_to_y(encoding: "TileDistributionEncoding") -> dict:
+    """Map ``(rh_major, rh_minor) -> y_idx`` for one encoding.
+
+    Mirrors ``shuffle_tile.hpp``'s ``get_rh_major_minor_to_y``: each Y
+    dim is keyed by the (R or H) bucket it targets so the two
+    distributions can be matched bucket-for-bucket.
+    """
+    out: dict = {}
+    for y_idx, (maj, minor) in enumerate(
+        zip(encoding.Ys2RHs_major, encoding.Ys2RHs_minor)
+    ):
+        out[(int(maj), int(minor))] = y_idx
+    return out
+
+
+def shuffle_tile(
+    out_dt: StaticDistributedTensor,
+    in_dt: StaticDistributedTensor,
+) -> None:
+    """``shuffle_tile(out, in)`` analogue (CK Tile ``shuffle_tile.hpp``).
+
+    Re-distributes the per-thread register values of ``in_dt`` into the
+    Y layout of ``out_dt``. Both distributions must share the same
+    ``Rs`` / ``Hs`` / ``Ps`` (the C++ guard at ``shuffle_tile.hpp:166``)
+    and the same number of Y dims; they differ only in the **order** of
+    their Y dims (each out Y targets the same (R/H) bucket as some in
+    Y). This is exactly the FMHA P->P' / V register relayout and the
+    norm row reshuffle.
+
+    The data movement is a transpose of register vectors along the
+    space-filling curve: in the C++ a ``vec_length_in``x``vec_length_out``
+    block of registers is transposed per access. Because this Python
+    container stores per-Y *scalars* (the IR builder packs them into
+    VGPR vectors at codegen), the transpose reduces to the pure
+    relabel ``out[y_out] = in[y_in]`` where ``y_out`` and ``y_in``
+    address the **same logical bucket coordinates**. We still iterate in
+    the SFC order of the *input* distribution so the emitted reads
+    mirror ``shuffle_tile_impl_in_thread`` (no IR is emitted here -- the
+    values are already SSA -- but the traversal order is preserved for
+    parity and to keep adjacent accesses local).
+
+    Operates in place on ``out_dt`` (every slot is written).
+    """
+    in_enc = in_dt.distribution.encoding
+    out_enc = out_dt.distribution.encoding
+    # Guard: matching Rs / Hs / Ps / NDimY (shuffle_tile.hpp:166-170).
+    if in_enc.Rs != out_enc.Rs:
+        raise ValueError("shuffle_tile: Rs (replication) lengths differ")
+    if in_enc.Hs != out_enc.Hs:
+        raise ValueError("shuffle_tile: Hs (hierarchical) lengths differ")
+    if in_enc.Ps2RHs_major != out_enc.Ps2RHs_major or (
+        in_enc.Ps2RHs_minor != out_enc.Ps2RHs_minor
+    ):
+        raise ValueError("shuffle_tile: Ps->RHs mapping differs")
+    if in_enc.num_Y != out_enc.num_Y:
+        raise ValueError("shuffle_tile: number of Y dims differs")
+
+    rh_to_y_in = _rh_bucket_to_y(in_enc)
+    rh_to_y_out = _rh_bucket_to_y(out_enc)
+    if set(rh_to_y_in) != set(rh_to_y_out):
+        raise ValueError("shuffle_tile: Y dims do not target the same set of buckets")
+
+    # y_dim_out_to_in[j] = the in-Y dim that shares out-Y dim j's bucket
+    # (shuffle_tile.hpp:52-61).
+    n_y = in_enc.num_Y
+    y_dim_out_to_in: List[int] = [0] * n_y
+    for bucket, y_out in rh_to_y_out.items():
+        y_dim_out_to_in[y_out] = rh_to_y_in[bucket]
+
+    if out_dt.num_elements != in_dt.num_elements:
+        raise ValueError(
+            "shuffle_tile: per-thread element count differs "
+            f"({out_dt.num_elements} vs {in_dt.num_elements})"
+        )
+    # Traverse the input Y-space in row-major (SFC) order; for each in
+    # position derive the matching out position by reordering the
+    # coordinate components new->old (container_reorder_given_new2old,
+    # shuffle_tile.hpp:139) and copy the scalar across.
+    for y_in in in_dt.distribution.iterate_ys():
+        y_out = tuple(y_in[y_dim_out_to_in[j]] for j in range(n_y))
+        out_dt.set(y_out, in_dt.get(y_in))
+
+
+# ---------------------------------------------------------------------
+# Reduce-distribution constructor + distribution-driven block reduce
+# ---------------------------------------------------------------------
+#
+# CK Tile drives its row reductions (norm mean/var, softmax row max/sum,
+# topk, dot_do_o) off a *reduce distribution*: the X tile distribution is
+# collapsed along the reduce axis by moving that X dim's entire H
+# decomposition into the R (replication) space, and the surviving Y dims
+# are the keep-axis register tile. The block reduce is then a two-stage
+# pass over R:
+#
+#   1. ``BlockReduce2dSync`` -- a warp-local XOR butterfly over the R
+#      levels the *lane* P owns. The XOR stride per stage is
+#      ``ps_over_rs_derivative << istage`` (block_reduce2d.hpp:238-274).
+#   2. ``BlockReduce2dCrossWarpSync`` -- an LDS round-trip over the R
+#      levels the *warp* P owns (block_reduce2d.hpp:303-484).
+#
+# This module ports (1) ``make_reduce_tile_distribution_encoding`` and
+# (2) ``block_tile_reduce_sync`` (the warp butterfly + optional cross-warp
+# LDS) so norm/reduce/softmax row reductions can be expressed over a
+# TileDistribution rather than the hand-built block_lds_reduce library.
+
+
+def make_reduce_tile_distribution_encoding(
+    encoding: TileDistributionEncoding,
+    reduce_dim_xs: Sequence[int],
+) -> TileDistributionEncoding:
+    """``detail::make_reduce_tile_distribution_encoding(enc, reduce_dims)``.
+
+    Faithful port of
+    ``tile_distribution_encoding.hpp::make_reduce_tile_distribution_encoding_impl``
+    (lines 562-744). Collapsing X dim ``d`` (an entry of ``reduce_dim_xs``):
+
+    * Every H level of X dim ``d`` that is **not** consumed by a Y dim is
+      appended to ``Rs`` (those become new replication levels -- the
+      cross-lane / cross-warp partition of the reduced axis).
+    * Y dims that targeted the reduced X dim are dropped (their values get
+      folded by the butterfly reduce).
+    * The surviving X dims keep their H decomposition; surviving Y dims and
+      every P dim are re-pointed at the relabelled (R or H) buckets.
+
+    The ``rh_major`` relabel is exactly the C++: reduced X dims fold into
+    ``major == 0`` (R), surviving X dims renumber densely from 1.
+
+    Returns a new :class:`TileDistributionEncoding` whose
+    :attr:`num_elements_per_thread` is the keep-axis register tile size and
+    whose R levels encode the reduce partition.
+    """
+    reduce_set = {int(d) for d in reduce_dim_xs}
+    num_x_in = encoding.num_X
+    for d in reduce_set:
+        if d < 0 or d >= num_x_in:
+            raise ValueError(f"reduce_dim {d} out of range (num_X={num_x_in})")
+
+    # rh_major space is [0 (=R)] + [1..num_X] (one per X dim).
+    # is_rh_major_in_for_reduce[rh_major]: True for reduced X dims.
+    is_rh_major_for_reduce = [False] * (num_x_in + 1)
+    for d in reduce_set:
+        is_rh_major_for_reduce[d + 1] = True
+
+    # is_y_in_for_reduce[i]: Y dim i targets a reduced X dim.
+    is_y_for_reduce: List[bool] = []
+    for maj in encoding.Ys2RHs_major:
+        is_y_for_reduce.append(is_rh_major_for_reduce[int(maj)])
+
+    # is_rh_minor_in_for_y_reduce[major][minor]: that H bucket is consumed
+    # by a reduced Y (so it stays a Y, not a new R level).
+    consumed_by_reduced_y: set[Tuple[int, int]] = set()
+    for y_idx, (maj, minor) in enumerate(
+        zip(encoding.Ys2RHs_major, encoding.Ys2RHs_minor)
+    ):
+        if is_y_for_reduce[y_idx]:
+            consumed_by_reduced_y.add((int(maj), int(minor)))
+
+    # in2out_rh_major: reduced X -> 0 (R); surviving X -> dense 1..K.
+    in2out_rh_major = [-1] * (num_x_in + 1)
+    cnt_major_out = 0
+    for i in range(num_x_in + 1):
+        if is_rh_major_for_reduce[i]:
+            in2out_rh_major[i] = 0
+        else:
+            in2out_rh_major[i] = cnt_major_out
+            cnt_major_out += 1
+
+    # rs_lengths_out + in2out_rh_minor.
+    rs_lengths_out: List[int] = []
+    # in2out_rh_minor[major][minor] -> new minor index in its out bucket.
+    in2out_rh_minor: dict[Tuple[int, int], int] = {}
+    # input R levels carry over unchanged.
+    for i, r_len in enumerate(encoding.Rs):
+        rs_lengths_out.append(int(r_len))
+        in2out_rh_minor[(0, i)] = i
+    cnt_r_out = len(encoding.Rs)
+    for rh_major in range(1, num_x_in + 1):
+        h = encoding.Hs[rh_major - 1]
+        if is_rh_major_for_reduce[rh_major]:
+            for rh_minor, h_len in enumerate(h):
+                if (rh_major, rh_minor) not in consumed_by_reduced_y:
+                    rs_lengths_out.append(int(h_len))
+                    in2out_rh_minor[(rh_major, rh_minor)] = cnt_r_out
+                    cnt_r_out += 1
+                # else: consumed by a reduced Y -> folded away entirely.
+        else:
+            for rh_minor in range(len(h)):
+                in2out_rh_minor[(rh_major, rh_minor)] = rh_minor
+
+    # Surviving X dims: keep H decomposition.
+    hs_out: List[Tuple[int, ...]] = []
+    for i in range(num_x_in):
+        if not is_rh_major_for_reduce[i + 1]:
+            hs_out.append(tuple(int(x) for x in encoding.Hs[i]))
+
+    # P dims: re-point every contribution.
+    ps_major_out: List[Tuple[int, ...]] = []
+    ps_minor_out: List[Tuple[int, ...]] = []
+    for maj_seq, min_seq in zip(encoding.Ps2RHs_major, encoding.Ps2RHs_minor):
+        nm: List[int] = []
+        nn: List[int] = []
+        for maj, minor in zip(maj_seq, min_seq):
+            nm.append(in2out_rh_major[int(maj)])
+            nn.append(in2out_rh_minor[(int(maj), int(minor))])
+        ps_major_out.append(tuple(nm))
+        ps_minor_out.append(tuple(nn))
+
+    # Surviving Y dims.
+    ys_major_out: List[int] = []
+    ys_minor_out: List[int] = []
+    for y_idx, (maj, minor) in enumerate(
+        zip(encoding.Ys2RHs_major, encoding.Ys2RHs_minor)
+    ):
+        if not is_y_for_reduce[y_idx]:
+            ys_major_out.append(in2out_rh_major[int(maj)])
+            ys_minor_out.append(in2out_rh_minor[(int(maj), int(minor))])
+
+    return TileDistributionEncoding(
+        Rs=tuple(rs_lengths_out),
+        Hs=tuple(hs_out),
+        Ps2RHs_major=tuple(ps_major_out),
+        Ps2RHs_minor=tuple(ps_minor_out),
+        Ys2RHs_major=tuple(ys_major_out),
+        Ys2RHs_minor=tuple(ys_minor_out),
+    )
+
+
+def _lane_p_index(encoding: TileDistributionEncoding) -> int:
+    """Index of the *lane* P dim (CK Tile ``idim_p_lane = NDimP - 1``)."""
+    return encoding.num_P - 1
+
+
+def _r_butterfly_plan(
+    encoding: TileDistributionEncoding, p_idx: int
+) -> List[Tuple[int, int]]:
+    """Per-R butterfly plan for the P dim ``p_idx`` of a reduce encoding.
+
+    Returns ``(r_length, lid_over_rid_derivative)`` for every R level the
+    P dim owns, in ascending R-level order. This mirrors
+    ``does_p_own_r_`` / ``ps_over_rs_derivative_`` (block_reduce2d.hpp):
+
+    * ``does_p_own_r_[p][r]`` -- P ``p_idx`` contributes to R level ``r``.
+    * ``ps_over_rs_derivative_[p][r]`` -- the stride of P's index with
+      respect to R level ``r``: the product of the lengths of the R levels
+      this same P owns that are *inner* (later in the contribution order)
+      than ``r``. For the canonical single-R-per-P reduce that derivative
+      is 1, so the XOR stride is just ``1 << istage``.
+
+    The XOR sequence to reduce one R level is, for stage ``istage`` in
+    ``[0, log2(r_length))``: ``src_lane = lane ^ (derivative << istage)``.
+    """
+    enc = encoding
+    owned = enc.p_feeds_r(p_idx)  # [(inner_idx, r_minor), ...] in order
+    if not owned:
+        return []
+    # ps_over_rs_derivative: product of inner-owned R lengths after each
+    # owned R, in the contribution order the P lists them.
+    plan: List[Tuple[int, int]] = []
+    # The C++ derivative is the stride of the lane index w.r.t. that R dim:
+    # R levels the lane owns form a mixed-radix number, most-significant
+    # first in contribution order, so the derivative of the k-th owned R is
+    # the product of the lengths of owned R levels *after* k.
+    lengths = [int(enc.Rs[r_minor]) for _inner, r_minor in owned]
+    r_minors = [r_minor for _inner, r_minor in owned]
+    for k in range(len(owned)):
+        deriv = 1
+        for j in range(k + 1, len(owned)):
+            deriv *= lengths[j]
+        plan.append((r_minors[k], deriv, lengths[k]))  # type: ignore[arg-type]
+    # Sort by r-level so the cross-warp / lane split is deterministic.
+    plan.sort(key=lambda t: t[0])
+    return [(length, deriv) for _r, deriv, length in plan]  # type: ignore[misc]
+
+
+def block_tile_reduce_sync(
+    b: IRBuilder,
+    reduced: StaticDistributedTensor,
+    *,
+    combine: str = "sum",
+    lds_buf: Optional[Value] = None,
+    tid: Optional[Value] = None,
+    wave_size: int = 64,
+) -> None:
+    """Distribution-driven block reduction (CK Tile ``BlockReduce2d``).
+
+    ``reduced`` is a :class:`StaticDistributedTensor` over a *reduce
+    distribution* (see :func:`make_reduce_tile_distribution_encoding`). Each
+    Y slot already holds the per-lane partial over its strided subset of
+    the reduce axis; this routine folds the partials across the R partition
+    so every lane ends with the fully reduced value, in place.
+
+    Two stages, exactly matching the C++:
+
+    * **Warp butterfly** (``BlockReduce2dSync``) over the R levels the
+      *lane* P (``idim_p_lane = NDimP - 1``) owns. For each owned R level
+      of length ``L`` it runs ``log2(L)`` XOR stages with stride
+      ``derivative << istage`` -- the same ``ds_swizzle_b32`` butterfly the
+      hand-written :func:`ck_dsl.helpers.attention.warp_xor_reduce_sum` /
+      ``_max`` emit. With the canonical 16-lane reduce R (length 16,
+      derivative 1) this is masks ``1,2,4,8`` -- byte-for-byte the existing
+      attention butterfly.
+
+    * **Cross-warp LDS** (``BlockReduce2dCrossWarpSync``) over the R levels
+      the *warp* P (``idim_p_warp = 0``) owns, if any. Needs ``lds_buf`` +
+      ``tid``; reuses the kernel's scratch. With a single-warp reduce (no
+      warp-owned R) this stage is skipped.
+
+    ``combine`` is ``"sum"`` (``fadd``) or ``"max"`` (``fmax``).
+    """
+    if combine not in ("sum", "max"):
+        raise ValueError(f"combine must be 'sum' or 'max' (got {combine!r})")
+    enc = reduced.distribution.encoding
+    if enc.num_P == 0:
+        raise ValueError("block_tile_reduce_sync requires at least one P dim")
+
+    def _fold(x: Value, y: Value) -> Value:
+        return b.fadd(x, y) if combine == "sum" else b.fmax(x, y)
+
+    # -- Stage 1: warp-local XOR butterfly over lane-owned R levels --------
+    lane_p = _lane_p_index(enc)
+    lane_plan = _r_butterfly_plan(enc, lane_p)
+    for off in range(reduced.num_elements):
+        v_local = reduced.storage[off]
+        if v_local is None:
+            raise KeyError(f"reduce slot {off} not initialised")
+        for r_length, derivative in lane_plan:
+            stages = int(r_length).bit_length() - 1
+            for istage in range(stages):
+                remote = b.warp_shuffle_xor(v_local, derivative << istage)
+                v_local = _fold(v_local, remote)
+        reduced.storage[off] = v_local
+
+    # -- Stage 2: cross-warp LDS over warp-owned R levels ------------------
+    warp_plan = _r_butterfly_plan(enc, 0) if enc.num_P >= 2 else []
+    num_reduce_warps = 1
+    for r_length, _deriv in warp_plan:
+        num_reduce_warps *= int(r_length)
+    if num_reduce_warps <= 1:
+        return
+    if lds_buf is None or tid is None:
+        raise ValueError(
+            "block_tile_reduce_sync needs lds_buf + tid for cross-warp reduce "
+            f"(num_reduce_warps={num_reduce_warps})"
+        )
+
+    c_wave = b.const_i32(wave_size)
+    lane = b.mod(tid, c_wave)
+    warp = b.div(tid, c_wave)
+    thread_buf_size = reduced.num_elements
+    # Each warp's lane 0 publishes its thread buffer (interleaved by warp,
+    # matching smem_ptr[warp + i*num_warps] in the C++).
+    with b.scf_if(b.cmp_eq(lane, b.const_i32(0))):
+        for i in range(thread_buf_size):
+            v = reduced.storage[i]
+            slot = b.add(warp, b.const_i32(i * num_reduce_warps))
+            b.smem_store_vN_f32(lds_buf, [slot], v, 1)
+    b.sync()
+    # local_warp_id groups num_reduce_warps consecutive warps; each reads
+    # its group's partials and tree-folds them.
+    local_warp_id = b.div(warp, b.const_i32(num_reduce_warps))
+    local_smem_os = b.mul(local_warp_id, b.const_i32(num_reduce_warps))
+    for i in range(thread_buf_size):
+        parts: List[Value] = []
+        for idx in range(num_reduce_warps):
+            slot = b.add(local_smem_os, b.const_i32(i * num_reduce_warps + idx))
+            vec = b.smem_load_vN_f32(lds_buf, slot, n=1)
+            parts.append(b.vec_extract(vec, 0))
+        # Pairwise power-of-two tree fold (matches the C++ stride doubling).
+        while len(parts) > 1:
+            nxt: List[Value] = []
+            for j in range(0, len(parts), 2):
+                nxt.append(_fold(parts[j], parts[j + 1]))
+            parts = nxt
+        reduced.storage[i] = parts[0]
+
+
+# ---------------------------------------------------------------------
+# Transposed distribution + transposed load (transpose2d phase-2)
+# ---------------------------------------------------------------------
+
+
+def make_transposed_distribution(
+    distribution: TileDistribution,
+) -> TileDistribution:
+    """2D transposed distribution (CK Tile transpose2d phase-2 traversal).
+
+    Swaps the two X dims of a rank-2 distribution -- the load then
+    traverses the tile in column-major order, which is the LDS->global
+    transposed read CK Tile's ``batched_transpose`` LDS pipeline performs
+    via ``load_tile_transpose`` (A6 idiom 8,
+    ``batched_transpose_lds_pipeline.hpp:61``).
+
+    Concretely: X0<->X1 are exchanged in ``Hs``, and every P / Y
+    contribution whose ``major`` was 1 becomes 2 and vice versa (R-major
+    contributions, ``major == 0``, are untouched). The result is a valid
+    :class:`TileDistribution` whose ``calculate_x`` yields the *transposed*
+    element mapping ``(x1, x0)`` for the same ``(P, Y)`` position.
+
+    Only the rank-2 X case is supported (the transpose2d / FMHA-trload
+    idiom); higher-rank transposes are out of scope.
+    """
+    enc = distribution.encoding
+    if enc.num_X != 2:
+        raise ValueError(
+            f"make_transposed_distribution supports 2 X dims (got {enc.num_X})"
+        )
+
+    def _swap_major(maj: int) -> int:
+        if maj == 1:
+            return 2
+        if maj == 2:
+            return 1
+        return maj  # R (0) untouched
+
+    new_hs = (tuple(int(x) for x in enc.Hs[1]), tuple(int(x) for x in enc.Hs[0]))
+    new_ps_major = tuple(
+        tuple(_swap_major(int(m)) for m in seq) for seq in enc.Ps2RHs_major
+    )
+    new_ys_major = tuple(_swap_major(int(m)) for m in enc.Ys2RHs_major)
+    new_enc = TileDistributionEncoding(
+        Rs=enc.Rs,
+        Hs=new_hs,
+        Ps2RHs_major=new_ps_major,
+        Ps2RHs_minor=enc.Ps2RHs_minor,
+        Ys2RHs_major=new_ys_major,
+        Ys2RHs_minor=enc.Ys2RHs_minor,
+    )
+    return make_static_tile_distribution(new_enc)
+
+
+def load_tile_transpose(
+    b: IRBuilder,
+    window: TileWindow,
+    *,
+    distribution: TileDistribution,
+    ps: Sequence[Sequence[Value]],
+    rows_per_lane: int = 4,
+    traits: Optional[LoadStoreTraits] = None,
+) -> StaticDistributedTensor:
+    """``load_tile_transpose(window)`` analogue (LDS transposed read).
+
+    Reads an LDS tile through the transposed-LDS path
+    (:meth:`TensorView.load_vec_tr_at`, ``ds_read_tr16_b{64,128}``) and
+    deposits the elements into the **transposed** distribution produced by
+    :func:`make_transposed_distribution`. This is the phase-2
+    LDS->register step of CK Tile's ``batched_transpose`` LDS pipeline
+    (``load_tile_transpose.hpp`` / ``batched_transpose_lds_pipeline.hpp``).
+
+    ``distribution`` is the *input* (pre-transpose) distribution; the
+    returned :class:`StaticDistributedTensor` carries the transposed
+    distribution. ``rows_per_lane`` selects b64 (4) vs b128 (8). The window
+    must be an LDS window (``load_vec_tr_at`` is LDS-only).
+    """
+    if window.view.addr_space != "lds":
+        raise ValueError(
+            "load_tile_transpose requires an LDS TileWindow; "
+            f"got addr_space={window.view.addr_space!r}"
+        )
+    out_dist = make_transposed_distribution(distribution)
+    if traits is None:
+        traits = make_load_store_traits(out_dist)
+    dt = make_static_distributed_tensor(out_dist, dtype=window.dtype)
+    n = traits.scalar_per_vector
+    for y_base in traits.iterate_accesses():
+        x_coords = out_dist.calculate_x(
+            b,
+            ys=[b.const_i32(int(yi)) for yi in y_base],
+            ps=ps,
+        )
+        global_idx = window._global_indices(b, x_coords)
+        vec = window.view.load_vec_tr_at(
+            b, base_indices=global_idx, rows_per_lane=rows_per_lane
+        )
+        for k in range(n):
+            scalar = b.vec_extract(vec, k)
+            if window.dtype.name != "f32":
+                scalar = b.cast_to_f32(scalar)
+            y_full = list(y_base)
+            y_full[traits.vector_dim_y] = k
+            dt.set(y_full, scalar)
+    return dt

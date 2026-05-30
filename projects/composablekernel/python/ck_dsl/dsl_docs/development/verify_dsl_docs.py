@@ -872,7 +872,7 @@ check("chiplet helpers emit IR", t_chiplet)
 
 section("transform DAG")
 
-from ck_dsl.transforms import (
+from ck_dsl.helpers.transforms import (
     TensorDescriptor,
     unmerge,
     embed,

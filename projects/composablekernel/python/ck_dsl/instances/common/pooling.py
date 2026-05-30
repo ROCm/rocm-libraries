@@ -61,6 +61,12 @@ from dataclasses import dataclass
 from typing import Literal, Tuple
 
 from ...core.ir import F16, I32, IRBuilder, KernelDef, PtrType, Value
+from ...helpers.distribution import (
+    TileDistributionEncoding,
+    make_static_distributed_tensor,
+    make_static_tile_distribution,
+    store_tile,
+)
 from ...helpers.spec import (
     IOSpecRule,
     SignatureBuilder,
@@ -68,7 +74,8 @@ from ...helpers.spec import (
     kernel_name_join,
     validate_io,
 )
-from ...transforms import TensorDescriptor, embed
+from ...helpers.tensor_view import make_buffer_resource, make_buffer_view
+from ...helpers.transforms import TensorDescriptor, embed, unmerge_magic
 
 
 DType = Literal["f16", "bf16"]
@@ -302,16 +309,10 @@ def build_pooling2d(spec: Pooling2DSpec, arch: str = "gfx950") -> KernelDef:
     # output address arithmetic and the per-thread work both collapse
     # back to the original scalar shape (one output per thread).
     C_v = p.C // VEC
-    HoWoC_v = p.Ho * p.Wo * C_v
-    WoC_v = p.Wo * C_v
-    total_out_v = p.N * HoWoC_v
+    total_out_v = p.N * p.Ho * p.Wo * C_v
 
     c0 = b.const_i32(0)
     c_elem_bytes = b.const_i32(2)  # f16 / bf16 both 2 bytes
-    c_total_v = b.const_i32(total_out_v)
-    c_HoWoC_v = b.const_i32(HoWoC_v)
-    c_WoC_v = b.const_i32(WoC_v)
-    c_C_v = b.const_i32(C_v)
     c_vec = b.const_i32(VEC)
     oob_sentinel = b.const_i32((1 << 31) - 1)
 
@@ -320,20 +321,36 @@ def build_pooling2d(spec: Pooling2DSpec, arch: str = "gfx950") -> KernelDef:
     out_idx_v = b.add(b.mul(bid, b.const_i32(spec.block_size)), tid)
 
     # Decompose the flat ``vec``-unit output index into
-    # ``(n, ho, wo, c_v)``; ``c_base = c_v * VEC`` is the C-axis
-    # starting position for this thread's ``vec``-wide slab.
-    n_val = b.div(out_idx_v, c_HoWoC_v)
-    rem_nhowoC = b.mod(out_idx_v, c_HoWoC_v)
-    ho_val = b.div(rem_nhowoC, c_WoC_v)
-    rem_howoC = b.mod(rem_nhowoC, c_WoC_v)
-    wo_val = b.div(rem_howoC, c_C_v)
-    c_v_val = b.mod(rem_howoC, c_C_v)
+    # ``(n, ho, wo, c_v)`` via the CK Tile ``make_merge_transform``'s
+    # default magic-division inverse (``merge_v2_magic_division`` ->
+    # :class:`UnmergeMagicDiv`). The output M axis is a
+    # ``merge((N, Ho, Wo, C_v))`` (``pool_kernel.hpp:168``); its
+    # block-id -> (n, ho, wo, c_v) split is exactly this unmerge. Driving
+    # it through the descriptor's :meth:`unmerge_lower` removes the
+    # hand-rolled four-level ``div``/``mod`` chain *and* the integer
+    # divisions themselves (the magic mul-hi sequence is what the AMDGPU
+    # backend would otherwise have to synthesise). ``c_base = c_v * VEC``
+    # is the C-axis start of this thread's ``vec``-wide slab.
+    out_unmerge_desc = TensorDescriptor.naive(
+        "pool_out_m",
+        lengths=[p.N, p.Ho, p.Wo, C_v],
+        dtype=F16,
+        coord_names=["n", "ho", "wo", "c_v"],
+    ).transform(
+        unmerge_magic(
+            "out_idx_v",
+            into=["n", "ho", "wo", "c_v"],
+            dims=[p.N, p.Ho, p.Wo, C_v],
+        ),
+    )
+    decoded = out_unmerge_desc.unmerge_lower(b, out_idx_v=out_idx_v)
+    n_val = decoded["n"]
+    ho_val = decoded["ho"]
+    wo_val = decoded["wo"]
+    c_v_val = decoded["c_v"]
     c_base = b.mul(c_v_val, c_vec) if VEC > 1 else c_v_val
 
-    in_bounds = b.cmp_lt(out_idx_v, c_total_v)
-
     x_rsrc = b.buffer_rsrc(X, X_bytes)
-    y_rsrc = b.buffer_rsrc(Y, Y_bytes)
 
     # Reduction over the (Y, X) window. Both dims are compile-time so
     # the Python-level loop unrolls cleanly; for typical pooling
@@ -417,18 +434,34 @@ def build_pooling2d(spec: Pooling2DSpec, arch: str = "gfx950") -> KernelDef:
         rcp_count = b.rcp(safe_count)
         acc_list = [b.fmul(acc, rcp_count) for acc in acc_list]
 
-    casted = [b.cast_f32_to(acc, io_ty) for acc in acc_list]
-
-    # Store: tail-of-grid threads (out_idx_v >= total_out_v) get their
-    # store masked off via the buffer-rsrc OOB sentinel. The output
-    # byte offset is ``out_idx_v * VEC * 2``.
-    out_off_elems = b.mul(out_idx_v, c_vec) if VEC > 1 else out_idx_v
-    safe_out_off = b.select(in_bounds, b.mul(out_off_elems, c_elem_bytes), oob_sentinel)
-    if VEC >= 2:
-        packed = b.vec_pack(casted, io_ty)
-        b.buffer_store_vN_f16(y_rsrc, safe_out_off, c0, packed, dwords=VEC // 2)
-    else:
-        b.buffer_store_f16(y_rsrc, safe_out_off, c0, casted[0])
+    # Store through a CK Tile ``store_tile`` + ``tile_distribution`` over the
+    # flat output ``[N*Ho*Wo*C]`` (idiom A6 #2 store side). The per-thread
+    # tile is the ``VEC``-wide C slab -- a single X dim of length ``VEC``
+    # consumed by one Y dim, so ``store_tile`` packs the ``VEC`` casted
+    # scalars and issues one coalesced ``buffer_store_vN_f16`` (or a scalar
+    # store for ``VEC == 1``). The window origin ``out_idx_v * VEC`` places
+    # this thread's slab; tail-of-grid threads (``out_idx_v >= total_out_v``)
+    # land past the buffer-resource byte bound, so the AMDGPU buffer rsrc
+    # silently drops the store -- the same OOB tail semantics the hand-rolled
+    # ``select(in_bounds, off, sentinel)`` provided, now sourced from the
+    # buffer descriptor itself.
+    out_total = total_out_v * VEC
+    out_rsrc = make_buffer_resource(b, Y, num_bytes=Y_bytes)
+    out_view = make_buffer_view(out_rsrc, [out_total], io_ty)
+    out_enc = TileDistributionEncoding(
+        Hs=((VEC,),),
+        Ys2RHs_major=(1,),
+        Ys2RHs_minor=(0,),
+    )
+    out_dist = make_static_tile_distribution(out_enc)
+    out_origin = b.mul(out_idx_v, c_vec) if VEC > 1 else out_idx_v
+    out_window = out_view.tile(lengths=[VEC], origin=[out_origin])
+    # ``store_tile`` for f16/bf16 expects f32 Y-slot scalars and performs
+    # the demote + pack itself, so we feed the f32 accumulators directly.
+    out_dt = make_static_distributed_tensor(out_dist, dtype=io_ty)
+    for k in range(VEC):
+        out_dt.set([k], acc_list[k])
+    store_tile(b, out_window, out_dt, ps=[])
 
     return b.kernel
 

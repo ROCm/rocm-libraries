@@ -6,7 +6,7 @@ Tests are organised mirror-of-layer:
 
   - `TestCoreIR`       : `ck_dsl.core.ir` - IR construction smoke tests
   - `TestLowering`     : `ck_dsl.core.lower_llvm` - LLVM IR text shape
-  - `TestTransforms`   : `ck_dsl.transforms` - coord-transform DAG
+  - `TestTransforms`   : `ck_dsl.helpers.transforms` - coord-transform DAG
   - `TestHelpers`      : `ck_dsl.helpers` - atoms, geometry, loads,
                           epilogues
   - `TestInstances`    : `ck_dsl.instances` - end-to-end build smoke
@@ -1497,7 +1497,7 @@ class TestTransformsBridge(unittest.TestCase):
             make_tile_window,
             view_from_transforms_descriptor,
         )
-        from ck_dsl.transforms import TensorDescriptor as RichTensorDescriptor
+        from ck_dsl.helpers.transforms import TensorDescriptor as RichTensorDescriptor
 
         b = IRBuilder("bridge_smoke")
         b.kernel.attrs["max_workgroup_size"] = 64
@@ -3787,7 +3787,7 @@ class TestTransformsRuntimeAware(unittest.TestCase):
         """``pad_dynamic`` with int bounds emits the same algebra as ``pad``."""
         from ck_dsl.core.ir import I32, IRBuilder
         from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
-        from ck_dsl.transforms import TensorDescriptor, pad, pad_dynamic
+        from ck_dsl.helpers.transforms import TensorDescriptor, pad, pad_dynamic
 
         def build_with(pad_fn):
             b = IRBuilder(f"pad_test_{pad_fn.__name__}")
@@ -3816,7 +3816,7 @@ class TestTransformsRuntimeAware(unittest.TestCase):
         """``pad_dynamic`` accepts a runtime SSA Value as the upper bound."""
         from ck_dsl.core.ir import I32, IRBuilder
         from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
-        from ck_dsl.transforms import TensorDescriptor, pad_dynamic
+        from ck_dsl.helpers.transforms import TensorDescriptor, pad_dynamic
 
         b = IRBuilder("pad_rt_test")
         b.kernel.attrs["max_workgroup_size"] = 64
@@ -3840,7 +3840,7 @@ class TestTransformsRuntimeAware(unittest.TestCase):
         """Passing ``hi=`` only emits a one-sided bounds check."""
         from ck_dsl.core.ir import I32, IRBuilder
         from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
-        from ck_dsl.transforms import TensorDescriptor, pad_dynamic
+        from ck_dsl.helpers.transforms import TensorDescriptor, pad_dynamic
 
         b = IRBuilder("pad_one_sided")
         b.kernel.attrs["max_workgroup_size"] = 64
@@ -3860,7 +3860,7 @@ class TestTransformsRuntimeAware(unittest.TestCase):
         """``indirect`` adds a real ``global_load_i32`` to the chain."""
         from ck_dsl.core.ir import I32, IRBuilder, PtrType
         from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
-        from ck_dsl.transforms import TensorDescriptor, indirect
+        from ck_dsl.helpers.transforms import TensorDescriptor, indirect
 
         b = IRBuilder("indirect_test")
         b.kernel.attrs["max_workgroup_size"] = 64

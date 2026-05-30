@@ -31,7 +31,7 @@ This v2 keeps the same semantics but routes everything through the
 DSL's tile / transform-DAG abstractions:
 
 * The "out_idx -> (o_0, ..., o_{n-1}) -> input flat offset" arithmetic
-  is expressed as a :class:`ck_dsl.transforms.TensorDescriptor` chain
+  is expressed as a :class:`ck_dsl.helpers.transforms.TensorDescriptor` chain
   (``naive`` + ``unmerge`` + ``pass_through``). This is the CK Tile
   ``transform_tensor_descriptor`` algebra: the kernel author writes
   *which* coords feed *which* coords, the descriptor emits the SSA.
@@ -83,8 +83,8 @@ from ...core.ir import BF16, F16, IRBuilder, KernelDef, PtrType
 from ...helpers.io import io_ir_type
 from ...helpers.spec import SignatureBuilder, ceil_div_grid, kernel_name_join
 from ...helpers.tensor_view import make_global_view
-from ...transforms import TensorDescriptor as RichTensorDescriptor
-from ...transforms import pass_through, unmerge
+from ...helpers.transforms import TensorDescriptor as RichTensorDescriptor
+from ...helpers.transforms import pass_through, unmerge
 
 
 DType = Literal["f16", "bf16"]

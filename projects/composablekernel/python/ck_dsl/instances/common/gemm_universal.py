@@ -623,6 +623,92 @@ def _emit_smem_load(
     return b.smem_load_vN(smem, row, col, dtype=dtype, n=n)
 
 
+def _hotloop_inst_list(spec: UniversalGemmSpec, load_vec: int):
+    """Build the per-K-tile :class:`HotLoopInstList` for ``spec``.
+
+    Pure arithmetic from the block tile geometry + the spec's MFMA atom
+    timing (``MfmaAtom.mfma_cycle`` / ``k_per_xdlops``), mirroring CK's
+    ``BlockwiseGemmXdlops_pipeline_hotloop_inst``. The global buffer-load
+    width is the kernel's coalesced ``load_vec`` (elements/lane/load); the
+    LDS read/write widths default to the atom K-pack inside
+    :meth:`HotLoopInstList.from_geometry` (the comp_v4 ``*_LDS_*_Width =
+    KPerXDL`` convention).
+    """
+    from ...helpers.atoms import mfma_atom
+    from ...helpers.schedule import HotLoopInstList
+
+    t = spec.tile
+    atom = mfma_atom(spec.data.dtype_a, t.warp_tile_m, t.warp_tile_n, t.warp_tile_k)
+    return HotLoopInstList.from_geometry(
+        atom=atom,
+        block_size=spec.block_size,
+        m_per_block=t.tile_m,
+        n_per_block=t.tile_n,
+        k_per_block=t.tile_k,
+        m_repeat=t.mfmas_per_warp_m,
+        n_repeat=t.mfmas_per_warp_n,
+        a_buffer_load_width=load_vec,
+        b_buffer_load_width=load_vec,
+    )
+
+
+def _hotloop_well_formed(il, pipeline: str) -> bool:
+    """Whether the v3/v4 schedule for ``il`` yields only non-negative counts.
+
+    The CK HotLoopScheduler is only instantiated for tiles large enough that
+    every emitted ``sched_group_barrier`` count is >= 0. For very small / K-
+    light tiles the integer-divided LDS counts collapse to 0 and the v4
+    trailing ``C_MFMA / num_issue - 3`` group can go negative, which is not a
+    legal hint. In those degenerate cases the caller keeps the flat hint
+    (still a pure scheduling choice -> numerically identical either way).
+    """
+    num_buffer_load = il.a_buffer_load_inst_num + il.b_buffer_load_inst_num
+    if num_buffer_load <= 0:
+        return False
+    if pipeline == "compv3":
+        num_mfma_stage1 = il.c_mfma_inst_num - (
+            il.num_dsread_a_mfma + il.num_dsread_b_mfma
+        )
+        if num_mfma_stage1 < 0:
+            return False
+        num_mfma_per_issue = num_mfma_stage1 // num_buffer_load
+        # Stage-1 groups emit (num_mfma_per_issue - num_dswrite_per_issue_*)
+        # MFMAs; that count must stay non-negative.
+        if il.a_buffer_load_inst_num <= 0 or il.b_buffer_load_inst_num <= 0:
+            return False
+        dswr_a = il.a_lds_write_inst_num // il.a_buffer_load_inst_num
+        dswr_b = il.b_lds_write_inst_num // il.b_buffer_load_inst_num
+        return (num_mfma_per_issue - dswr_a) >= 0 and (num_mfma_per_issue - dswr_b) >= 0
+    # compv4: the trailing MFMA group is C_MFMA / num_issue - 3.
+    return (il.c_mfma_inst_num // num_buffer_load - 3) >= 0
+
+
+def _emit_hotloop_schedule(b: IRBuilder, spec: UniversalGemmSpec, load_vec: int):
+    """Emit the comp_v3 / comp_v4 two-stage HotLoop schedule once per K-tile.
+
+    Replaces the old flat per-kk ``sched_group_barrier`` hint. Falls back to
+    the flat hint for degenerate small tiles whose derived counts would
+    produce an illegal (negative) group (see :func:`_hotloop_well_formed`).
+    WMMA never reaches here (gated to the ``mem`` pipeline upstream).
+    """
+    from ...helpers.schedule import SchedulePolicy
+
+    t = spec.tile
+    pipeline = spec.trait.pipeline
+    il = _hotloop_inst_list(spec, load_vec)
+    policy = SchedulePolicy.for_pipeline(pipeline)
+    if _hotloop_well_formed(il, pipeline):
+        if pipeline == "compv3":
+            policy.emit_compv3_hotloop(b, il)
+        else:
+            policy.emit_compv4_hotloop(b, il)
+        return
+    # Degenerate tile: keep the prior flat hint (numerically identical;
+    # both are pure scheduling hints).
+    b.sched_group_barrier(0x100, 1, 0)  # one DS read
+    b.sched_group_barrier(0x008, t.mfmas_per_warp_m * t.mfmas_per_warp_n, 0)
+
+
 # ---------------------------------------------------------------------
 # The kernel
 # ---------------------------------------------------------------------
@@ -1372,12 +1458,22 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                     new_accs[flat] = acc
                     flat += 1
 
-            # Scheduler hint inside the K-atom loop: encourages the
-            # backend to overlap one MFMA with the next set of ds_reads.
-            if spec.trait.pipeline in ("compv3", "compv4"):
-                # Modest hint: one DS-read group, one MFMA group per kk.
-                b.sched_group_barrier(0x100, 1, 0)  # one DS read
-                b.sched_group_barrier(0x008, mfmas_m * mfmas_n, 0)
+        # Quantitative two-stage HotLoop schedule (E3 #1/#6, E6 L1).
+        #
+        # The flat per-kk hint (one DS-read group + one all-MFMA group) left
+        # ds_write / buffer-load placement entirely to the backend. The
+        # comp_v3 / comp_v4 HotLoopScheduler instead pins the whole K-tile's
+        # MFMA / ds_read / ds_write / VMEM interleave to the measured MFMA
+        # shadow, derived purely from the tile geometry + dtype + the spec
+        # atom's timing (``MfmaAtom.mfma_cycle`` / ``k_per_xdlops``). It is
+        # issued ONCE per K-tile (matching the C++, which calls
+        # ``HotLoopScheduler()`` once per hot iteration) rather than per kk.
+        #
+        # ``sched_group_barrier`` is a pure scheduling hint -- changing only
+        # its operands cannot change the kernel's numeric result, so this is
+        # numerically identical to the flat-hint emission.
+        if spec.trait.pipeline in ("compv3", "compv4"):
+            _emit_hotloop_schedule(b, spec, load_vec)
 
         return new_accs
 
@@ -1641,40 +1737,64 @@ def _emit_mfma_acc_scatter(
     callback ``per_cell(c_m, c_n, acc_h, i)`` owns the actual write.
 
     ``n_base_first`` selects the column-offset association so each call site's
-    prior IR is reproduced byte-for-byte: the default epilogue grouped it as
+    prior IR is reproduced: the default epilogue grouped it as
     ``n_base + (ni*wtn + n_in_atom)`` (``False``); the cshuffle epilogue
     grouped it as ``(n_base + ni*wtn) + n_in_atom`` (``True``). Both are
-    arithmetically equal; the flag only preserves the SSA emission order.
-    Op emission order otherwise matches the prior open-coded blocks so the
-    CDNA IR is byte-identical.
+    arithmetically equal; the flag only chooses the column grouping.
+
+    The MFMA C-fragment ``(row_in_atom, col_in_atom)`` decode is now sourced
+    from the atom's CK-Tile ``CWarpDstrEncoding`` (a
+    :class:`~ck_dsl.helpers.distribution.TileDistribution`) instead of the
+    open-coded ``m_blk``/``lane_m``/``row_ramp`` lane arithmetic. The single
+    lane is split into the distribution's P sub-sequence ``[m_blk, n_in_atom]
+    = [lane // kCNLane, lane % kCNLane]`` and the per-lane accumulator slot
+    ``i`` into the two Y dims ``(i // kCM1PerLane, i % kCM1PerLane)``;
+    ``calculate_x`` then yields ``row_in_atom = lane_m + row_ramp`` and
+    ``col_in_atom = n_in_atom``, identical to the prior formulas for every
+    supported atom (16x16 and 32x32). This is Tier-2: the same div/mod and
+    add/mul values are produced, but the SSA emission order differs from the
+    hand-hoisted form.
     """
+    from ...helpers.atoms import c_warp_params, make_c_warp_dstr_encoding, mfma_atom
+    from ...helpers.distribution import make_static_tile_distribution
+
     t = spec.tile
     mfmas_m = t.mfmas_per_warp_m
     mfmas_n = t.mfmas_per_warp_n
-    c_atom_n = b.const_i32(t.warp_tile_n)
-    is_32x32 = (t.warp_tile_m, t.warp_tile_n) == (32, 32)
-    if is_32x32:
-        # 32x32: the lane-local M sub-block multiplier (``4``) is materialised
-        # inline at the ``mul`` below (after the mod/div), matching the prior
-        # open-coded order.
-        n_in_atom = b.mod(lane, c_atom_n)
-        m_blk = b.div(lane, c_atom_n)
-        lane_m = b.mul(m_blk, b.const_i32(4))
-    else:
-        # 16x16: the lane-local M base = ``m_blk * c_per_lane``; the
-        # ``c_per_lane`` constant is materialised *before* the mod/div (it was
-        # the hoisted ``c_clen`` in the prior open-coded form) so the SSA
-        # numbering is preserved.
-        c_clen = b.const_i32(c_per_lane)
-        n_in_atom = b.mod(lane, c_atom_n)
-        m_blk = b.div(lane, c_atom_n)
-        lane_m = b.mul(m_blk, c_clen)
+    # The CWarpDstrEncoding is keyed on the warp-tile (m, n) only (the lane/
+    # slot -> (row, col) layout is dtype-independent), so resolve the atom by
+    # the spec's input dtype + warp-tile shape.
+    atom = mfma_atom(
+        spec.data.dtype_a,
+        t.warp_tile_m,
+        t.warp_tile_n,
+        t.warp_tile_k,
+    )
+    _, _kc_mlane, kc_m1, kc_nlane = c_warp_params(atom)
+    c_dist = make_static_tile_distribution(make_c_warp_dstr_encoding(atom))
+
+    c_nlane = b.const_i32(kc_nlane)
+    # Single P (the lane) -> [m_blk, n_in_atom] = [lane // kCNLane, lane %
+    # kCNLane]. n_in_atom is also the column coordinate (col_in_atom).
+    n_in_atom = b.mod(lane, c_nlane)
+    m_blk = b.div(lane, c_nlane)
+    p_lane = [m_blk, n_in_atom]
+
+    # Per accumulator slot ``i`` the two Y dims decompose row-major over
+    # (kCM0PerLane, kCM1PerLane): y0 = i // kCM1PerLane, y1 = i % kCM1PerLane.
+    # calculate_x reconstructs the full row_in_atom (lane + slot) and the
+    # col_in_atom (= n_in_atom) from these.
+    row_in_atom: List[Value] = []
+    col_in_atom: Optional[Value] = None
+    for i in range(c_per_lane):
+        ys = [b.const_i32(i // kc_m1), b.const_i32(i % kc_m1)]
+        x_row, x_col = c_dist.calculate_x(b, ys=ys, ps=[p_lane])
+        row_in_atom.append(x_row)
+        col_in_atom = x_col  # constant across i (depends only on n_in_atom)
+
     flat = 0
     for mi in range(mfmas_m):
-        base_m = b.add(
-            b.add(m_base_off, b.const_i32(mi * t.warp_tile_m)),
-            lane_m,
-        )
+        base_m = b.add(m_base_off, b.const_i32(mi * t.warp_tile_m))
         for ni in range(mfmas_n):
             acc = accs[flat]
             flat += 1
@@ -1682,19 +1802,15 @@ def _emit_mfma_acc_scatter(
             if n_base_first:
                 c_n = b.add(
                     b.add(n_base_off, b.const_i32(ni * t.warp_tile_n)),
-                    n_in_atom,
+                    col_in_atom,
                 )
             else:
                 c_n = b.add(
                     n_base_off,
-                    b.add(b.const_i32(ni * t.warp_tile_n), n_in_atom),
+                    b.add(b.const_i32(ni * t.warp_tile_n), col_in_atom),
                 )
             for i in range(c_per_lane):
-                if is_32x32:
-                    row_ramp = (i // 4) * 8 + (i % 4)
-                else:
-                    row_ramp = i
-                c_m = b.add(base_m, b.const_i32(row_ramp))
+                c_m = b.add(base_m, row_in_atom[i])
                 per_cell(c_m, c_n, acc_h, i)
 
 

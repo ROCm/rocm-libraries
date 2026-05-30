@@ -39,7 +39,11 @@ from ...helpers.attention import (
     use_2d_kernel,
 )
 
-from ...transforms import TensorDescriptor
+from ...helpers.transforms import (
+    TensorDescriptor,
+    calculate_magic_numbers,
+    do_magic_division,
+)
 
 # Alias the promoted log2-domain softcap helper under the local name used by
 # the scalar reference kernels (matches the gfx950 tiled modules' convention).
@@ -168,6 +172,35 @@ class UnifiedAttentionProblem:
 
 def _next_power_of_2(x: int) -> int:
     return 1 if x <= 1 else 1 << (int(x) - 1).bit_length()
+
+
+def _magic_div(b: IRBuilder, dividend: Value, divisor: int) -> Value:
+    """``dividend // divisor`` via CK Tile's magic mul-hi division.
+
+    ``divisor`` is a loop-invariant compile-time constant so
+    ``(multiplier, shift)`` fold to immediates and the runtime cost is one
+    ``v_mul_hi_u32`` + add + shift instead of the AMDGPU integer divider's
+    ~20-cycle Newton-Raphson sequence. ``dividend`` is a non-negative i32
+    (a grid axis or a KV position), well inside the documented 31-bit
+    unsigned range of the magic sequence -- so the unsigned magic quotient
+    equals the signed ``b.div`` it replaces. This is the device lowering of
+    ``merge_v2_magic_division`` (``transforms.do_magic_division``).
+    """
+    mult, shift = calculate_magic_numbers(divisor)
+    return do_magic_division(b, dividend, mult, shift)
+
+
+def _magic_div_mod(b: IRBuilder, dividend: Value, divisor: int) -> Tuple[Value, Value]:
+    """Split ``dividend`` into ``(dividend // divisor, dividend % divisor)``.
+
+    The quotient is the magic-division mul-hi sequence (:func:`_magic_div`);
+    the remainder is reconstructed as ``dividend - quotient * divisor`` --
+    exactly how CK Tile's ``merge_v2_magic_division`` recovers the low
+    coordinate, dropping the hardware ``mod`` (a second integer divide).
+    """
+    quotient = _magic_div(b, dividend, divisor)
+    remainder = b.sub(dividend, b.mul(quotient, b.const_i32(divisor)))
+    return quotient, remainder
 
 
 def _resolve_attention_arch() -> str:
@@ -1845,7 +1878,7 @@ def build_unified_attention_2d(spec: UnifiedAttention2DSpec) -> KernelDef:
     query_pos = b.sub(q_tok, cu_start)
     kv_len = b.global_load_i32(seq_lens, seq_idx)
     context_len = b.sub(kv_len, q_len)
-    kv_head = b.div(q_head, b.const_i32(p.num_queries_per_kv))
+    kv_head = _magic_div(b, q_head, p.num_queries_per_kv)
 
     neg_inf = b.const_f32(float("-inf"))
     zero_f = b.const_f32(0.0)
@@ -1876,8 +1909,7 @@ def build_unified_attention_2d(spec: UnifiedAttention2DSpec) -> KernelDef:
         iv_name="kpos",
     )
     with loop as (kpos, (m_val, l_val, acc_val)):
-        block_idx = b.div(kpos, b.const_i32(p.block_size))
-        token_in_block = b.mod(kpos, b.const_i32(p.block_size))
+        block_idx, token_in_block = _magic_div_mod(b, kpos, p.block_size)
         physical = b.global_load_i32(
             block_tables,
             b.add(
@@ -2038,8 +2070,7 @@ def build_unified_attention_3d(spec: UnifiedAttention3DSpec) -> KernelDef:
     q_tok = b.block_id_x()
     q_head = b.block_id_y()
     zd = b.block_id_z()
-    segm_idx = b.div(zd, b.const_i32(p.head_size))
-    dim = b.mod(zd, b.const_i32(p.head_size))
+    segm_idx, dim = _magic_div_mod(b, zd, p.head_size)
     tid = b.thread_id_x()
     active = b.cmp_eq(tid, b.const_i32(0))
 
@@ -2050,10 +2081,11 @@ def build_unified_attention_3d(spec: UnifiedAttention3DSpec) -> KernelDef:
     query_pos = b.sub(q_tok, cu_start)
     kv_len = b.global_load_i32(seq_lens, seq_idx)
     context_len = b.sub(kv_len, q_len)
-    kv_head = b.div(q_head, b.const_i32(p.num_queries_per_kv))
-    tiles_per_segment = b.div(
+    kv_head = _magic_div(b, q_head, p.num_queries_per_kv)
+    tiles_per_segment = _magic_div(
+        b,
         b.add(kv_len, b.const_i32(spec.num_segments * p.block_size - 1)),
-        b.const_i32(spec.num_segments * p.block_size),
+        spec.num_segments * p.block_size,
     )
     seg_start = b.mul(segm_idx, b.mul(tiles_per_segment, b.const_i32(p.block_size)))
     seg_stop_i = b.mul(
@@ -2467,8 +2499,7 @@ def _physical_block_and_token(
     seq_idx: Value,
     kpos: Value,
 ) -> Tuple[Value, Value]:
-    block_idx = b.div(kpos, b.const_i32(p.block_size))
-    token_in_block = b.mod(kpos, b.const_i32(p.block_size))
+    block_idx, token_in_block = _magic_div_mod(b, kpos, p.block_size)
     max_blocks = (p.max_seqlen_k + p.block_size - 1) // p.block_size
     physical = b.global_load_i32(
         block_tables, b.add(b.mul(seq_idx, b.const_i32(max_blocks)), block_idx)

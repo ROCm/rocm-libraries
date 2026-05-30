@@ -1,6 +1,6 @@
 # TRANSFORM_DAG.md — Coordinate-Transform DAG over SSA Values
 
-The `ck_dsl.transforms` module is the Python counterpart of CK Tile's
+The `ck_dsl.helpers.transforms` module is the Python counterpart of CK Tile's
 `tensor_descriptor` + `transform_tensor_descriptor` machinery. It's
 the cleanest way to express convolution, attention, and reduction
 addressing — anything where the user-facing index space is *not* a
@@ -64,7 +64,7 @@ The simplest non-trivial conv addressing piece: NHWC with H/W
 padding.
 
 ```python
-from ck_dsl.transforms import TensorDescriptor, pad
+from ck_dsl.helpers.transforms import TensorDescriptor, pad
 
 # A is NHWC, shape (N, Hi, Wi, C), row-major
 desc = TensorDescriptor.naive(
@@ -115,7 +115,7 @@ wi = wo * stride_w - pad_w + s * dilation_w
 This is what `embed` is for:
 
 ```python
-from ck_dsl.transforms import embed
+from ck_dsl.helpers.transforms import embed
 
 desc = desc.transform(
     embed(upper=["ho", "r"], into="hi",
@@ -160,7 +160,7 @@ descriptor must split `m` into `(n, ho, wo)` and `k` into
 `(r, s, c)`.
 
 ```python
-from ck_dsl.transforms import unmerge
+from ck_dsl.helpers.transforms import unmerge
 
 desc = desc.transform(
     unmerge("m",  into=["n", "ho", "wo"],  dims=[N, Ho, Wo]),
@@ -243,7 +243,7 @@ chain, and `unmerge` splits a cooperative per-lane `linear_half`
 counter into `(token, dim)`:
 
 ```python
-from ck_dsl.transforms import TensorDescriptor, indirect, unmerge
+from ck_dsl.helpers.transforms import TensorDescriptor, indirect, unmerge
 
 seq_base = b.mul(seq_idx, block_table_stride)
 
@@ -292,7 +292,7 @@ When a bound is an SSA value rather than an `int`, use
 `pad_dynamic`:
 
 ```python
-from ck_dsl.transforms import TensorDescriptor, pad_dynamic
+from ck_dsl.helpers.transforms import TensorDescriptor, pad_dynamic
 
 q_desc = TensorDescriptor.naive(
     "Q",
@@ -387,7 +387,7 @@ kernel's caller can route the load to a safe sentinel address (the
 
 ## Mapping to CK Tile C++ concepts
 
-| Python (`ck_dsl.transforms`)        | C++ (CK Tile)                              |
+| Python (`ck_dsl.helpers.transforms`)        | C++ (CK Tile)                              |
 |---|---|
 | `TensorDescriptor.naive(...)`       | `make_naive_tensor_descriptor(...)`        |
 | `.transform(t1, t2, ...)`           | `transform_tensor_descriptor(...)`         |

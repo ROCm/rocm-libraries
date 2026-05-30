@@ -376,7 +376,7 @@ StreamK GEMM family (/ 5). Usage::
 
 See ``instances/streamk_gemm.py`` for the minimal end-to-end example.
 
-## `from ck_dsl.transforms import ...`
+## `from ck_dsl.helpers.transforms import ...`
 
 ```text
 CoordVar, Transform

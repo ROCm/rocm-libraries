@@ -55,15 +55,58 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
-from ..core.ir import F16, BF16, IRBuilder, Value
+from ..core.ir import F16, F32, BF16, IRBuilder, Value
 from .atoms import MfmaAtom
 from .attention import (
     apply_attention_mask,
     safe_inv_l,
-    wave_reduce_max,
     wave_reduce_stages,
-    wave_reduce_sum,
 )
+from .distribution import (
+    TileDistributionEncoding,
+    block_tile_reduce_sync,
+    make_static_distributed_tensor,
+    make_static_tile_distribution,
+)
+
+
+# --- Distribution-driven softmax row reduce (CK Tile BlockReduce2dSync) -------
+#
+# The online-softmax row max / row sum fold each lane's per-row scalar across
+# the 16 lanes that share that tile row. CK Tile expresses this as a
+# ``block_tile_reduce_sync`` over a *reduce distribution*: a single keep-row Y
+# (length 1) with the reduce axis collapsed into a lane-owned R level of length
+# 16, derivative 1. ``_r_butterfly_plan`` then emits XOR masks ``1,2,4,8`` --
+# byte-for-byte the historical ``wave_reduce_max/sum(lanes_per_row=16)``
+# 4-stage butterfly (verified via the subset IR digest gate). This single
+# encoding serves both the wave64 MFMA and the wave32 WMMA softmax: the lane
+# butterfly stride is wave-size-independent (the ``wave_size`` arg only drives
+# the cross-warp LDS stage, which a single-warp row reduce skips).
+_SOFTMAX_ROW_REDUCE_ENC = TileDistributionEncoding(
+    Rs=(16,),
+    Hs=((1,),),
+    Ps2RHs_major=((0,),),  # the single (lane) P feeds R (major 0)
+    Ps2RHs_minor=((0,),),
+    Ys2RHs_major=(1,),  # one keep-row Y on the M H-dim (length 1)
+    Ys2RHs_minor=(0,),
+)
+_SOFTMAX_ROW_REDUCE_DIST = make_static_tile_distribution(_SOFTMAX_ROW_REDUCE_ENC)
+
+
+def _softmax_row_reduce(b: IRBuilder, scalar: Value, *, combine: str) -> Value:
+    """Reduce ``scalar`` across the 16 lanes sharing one tile row.
+
+    Wraps the per-lane f32 ``scalar`` in a one-element
+    :class:`StaticDistributedTensor` over :data:`_SOFTMAX_ROW_REDUCE_DIST`
+    and folds it with :func:`block_tile_reduce_sync`. ``combine`` is
+    ``"max"`` (row max) or ``"sum"`` (row sum). The emitted op stream is the
+    same 4-stage XOR butterfly (masks ``1,2,4,8``) the legacy
+    ``wave_reduce_max/sum(lanes_per_row=16)`` produced.
+    """
+    dt = make_static_distributed_tensor(_SOFTMAX_ROW_REDUCE_DIST, F32)
+    dt.storage[0] = scalar
+    block_tile_reduce_sync(b, dt, combine=combine)
+    return dt.storage[0]
 
 
 __all__ = [
@@ -678,15 +721,17 @@ def mfma_attention_fwd_inner_body(
             # score to -inf so the softmax exponential collapses to 0.
             if keep_tile is not None:
                 s_r_scaled = b.select(keep_tile, s_r_scaled, neg_inf)
-            # 16-lane row-max reduce. ``wave_reduce_max`` with the wave64
-            # default (lanes_per_row=16) emits the exact same 4-stage XOR
-            # butterfly as the historical ``warp_xor_reduce_max(stages=4)``.
-            row_max = wave_reduce_max(b, s_r_scaled, wave_size=_WAVE, lanes_per_row=16)
+            # 16-lane row-max reduce via the distribution-driven
+            # ``block_tile_reduce_sync`` (CK Tile ``BlockReduce2dSync``). The
+            # reduce distribution's lane-owned R level (length 16, derivative 1)
+            # emits the exact 4-stage XOR butterfly (masks 1,2,4,8) the legacy
+            # ``wave_reduce_max(lanes_per_row=16)`` produced.
+            row_max = _softmax_row_reduce(b, s_r_scaled, combine="max")
             m_new_r = b.fmax(ms[r], row_max)
             alpha_r = b.exp2(b.fsub(ms[r], m_new_r))
             p_r = b.exp2(b.fsub(s_r_scaled, m_new_r))
             # Row-sum reduce of p.
-            row_psum = wave_reduce_sum(b, p_r, wave_size=_WAVE, lanes_per_row=16)
+            row_psum = _softmax_row_reduce(b, p_r, combine="sum")
             l_new_r = b.fadd(b.fmul(ls[r], alpha_r), row_psum)
 
             new_ms.append(m_new_r)
@@ -1029,12 +1074,15 @@ def _wmma_attention_fwd_inner_body(
             )
             if keep_tile is not None:
                 s_r = b.select(keep_tile, s_r, neg_inf)
-            # Per-row reduce across the 16 k-columns of this wave32 half.
-            row_max = wave_reduce_max(b, s_r, wave_size=wave, lanes_per_row=16)
+            # Per-row reduce across the 16 k-columns of this wave32 half. The
+            # distribution-driven ``block_tile_reduce_sync`` emits the same
+            # 4-stage in-half XOR butterfly as the legacy wave32
+            # ``wave_reduce_max(lanes_per_row=16)``.
+            row_max = _softmax_row_reduce(b, s_r, combine="max")
             m_new = b.fmax(ms[r], row_max)
             alpha = b.exp2(b.fsub(ms[r], m_new))
             p_r = b.exp2(b.fsub(s_r, m_new))
-            row_sum = wave_reduce_sum(b, p_r, wave_size=wave, lanes_per_row=16)
+            row_sum = _softmax_row_reduce(b, p_r, combine="sum")
             l_new = b.fadd(b.fmul(ls[r], alpha), row_sum)
             new_ms.append(m_new)
             new_ls.append(l_new)
