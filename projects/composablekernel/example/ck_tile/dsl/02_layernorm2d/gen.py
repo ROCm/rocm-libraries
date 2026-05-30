@@ -3,7 +3,7 @@
 """DSL example 02: layernorm2d forward (CK Tile parity).
 
 CK Tile counterpart: ``example/ck_tile/02_layernorm2d``. Builds the
-forward kernel from :mod:`ck_dsl.instances.layernorm2d` and emits the
+forward kernel from :mod:`ck_dsl.instances.common.layernorm2d` and emits the
 matching manifest. Kernel signature:
 
     (X: ptr, Gamma: ptr, Beta: ptr, Y: ptr, M: i32, N: i32, eps: f32)
@@ -24,7 +24,7 @@ from ck_dsl.helpers import (  # noqa: E402
     make_simple_op_manifest,
     write_artifact,
 )
-from ck_dsl.instances.layernorm2d import (  # noqa: E402
+from ck_dsl.instances.common.layernorm2d import (  # noqa: E402
     LayerNorm2DSpec,
     build_layernorm2d,
     layernorm2d_signature,

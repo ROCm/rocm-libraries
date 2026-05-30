@@ -16,7 +16,7 @@ CLI example (the shipped attention demo):
 Programmatic use:
 
     from probe_occupancy import probe_occupancy
-    from ck_dsl.instances.attention_tiled_2d import (
+    from ck_dsl.instances.gfx950.attention_tiled_2d import (
         UnifiedAttention2DTiledSpec, build_unified_attention_2d_tiled,
     )
     specs = [
@@ -355,7 +355,7 @@ def probe_occupancy(
 
 
 def _demo_attention_tiled_2d(arch: ArchCaps) -> None:
-    from ck_dsl.instances.attention_tiled_2d import (
+    from ck_dsl.instances.gfx950.attention_tiled_2d import (
         UnifiedAttention2DTiledSpec,
         build_unified_attention_2d_tiled,
     )
@@ -402,7 +402,7 @@ def _demo_attention_tiled_2d(arch: ArchCaps) -> None:
 
 
 def _demo_implicit_gemm(arch: ArchCaps) -> None:
-    from ck_dsl.instances.conv_implicit_gemm import (
+    from ck_dsl.instances.common.conv_implicit_gemm import (
         ConvProblem,
         ImplicitGemmConvSpec,
         build_implicit_gemm_conv,

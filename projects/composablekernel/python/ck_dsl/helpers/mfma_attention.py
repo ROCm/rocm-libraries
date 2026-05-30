@@ -4,7 +4,7 @@
 """MFMA-tiled FMHA forward inner-body (production attention loop).
 
 Replaces the warp-distributed scalar FMHA body
-(:mod:`ck_dsl.instances._fmha_warp_body`) with an MFMA-driven QK→
+(:mod:`ck_dsl.instances.common._fmha_warp_body`) with an MFMA-driven QK→
 softmax→PV pipeline. One wave64 warp processes ``BLOCK_M = 16`` Q
 rows per K-tile, ``BLOCK_K = 16`` K positions per iter. The MFMA
 atom is ``mfma_f32_16x16x16_f16`` (or ``mfma_f32_16x16x32_f16`` for
@@ -59,8 +59,9 @@ from ..core.ir import F16, BF16, IRBuilder, Value
 from .atoms import MfmaAtom
 from .attention import (
     apply_attention_mask,
-    warp_xor_reduce_max,
-    warp_xor_reduce_sum,
+    wave_reduce_max,
+    wave_reduce_stages,
+    wave_reduce_sum,
 )
 
 
@@ -82,6 +83,48 @@ def _ir_type_for_dtype(dtype: str):
     if dtype == "bf16":
         return BF16
     raise ValueError(f"mfma_attention currently supports f16/bf16; got {dtype!r}")
+
+
+# Map MfmaAtom.dtype_in -> the catalog dtype key consumed by
+# ``ArchTarget.mma`` (which normalises through ``normalize_dtype``).
+_ATOM_DTYPE_TO_CATALOG = {
+    "f16": "f16",
+    "fp16": "f16",
+    "bf16": "bf16",
+    "fp8e4m3": "fp8",
+    "bf8e5m2": "bf8",
+    "fp4": "fp4",
+    "fp6": "fp6",
+}
+
+
+def _validate_attention_atom(atom: "MfmaAtom", arch: str) -> None:
+    """Reject an attention MFMA atom that is not in ``arch``'s catalog.
+
+    Sources the legal atom set from :class:`ck_dsl.core.arch.ArchTarget`
+    (the SSOT in ``core/arch/data/arch_specs.json``) so the QK/PV atom
+    selected by this helper is guaranteed to exist on the target before
+    it reaches comgr. On the default ``arch="gfx950"`` every atom this
+    helper can select is in the catalog, so this is a pure guard with no
+    effect on the emitted IR.
+    """
+    from ..core.arch import ArchTarget
+
+    cat_dtype = _ATOM_DTYPE_TO_CATALOG.get(atom.dtype_in, atom.dtype_in)
+    target = ArchTarget.from_gfx(arch)
+    if not target.mma.has_shape(
+        a_dtype=cat_dtype,
+        b_dtype=cat_dtype,
+        c_dtype="fp32",
+        m=atom.m,
+        n=atom.n,
+        k=atom.k,
+    ):
+        raise ValueError(
+            f"mfma_attention: atom {atom.dtype_in} "
+            f"{atom.m}x{atom.n}x{atom.k} (op_id {atom.name}) is not in the "
+            f"{arch} MMA catalog; this kernel config is not legal on {arch}"
+        )
 
 
 def _load_kv_dequant_packed(
@@ -197,6 +240,7 @@ def mfma_attention_fwd_inner_body(
     native_fp8_path: bool = False,
     use_async_kv: bool = False,
     codebook_ptr: Optional[Value] = None,
+    arch: str = "gfx950",
 ) -> None:
     """One MFMA-tiled QK→softmax→PV pass for a ``BLOCK_M``-row Q tile.
 
@@ -332,6 +376,95 @@ def mfma_attention_fwd_inner_body(
         kv_dtype_ir = dtype_ir
 
     fp8_kv = kv_dtype_eff != dtype
+
+    # --- Arch / wave dispatch (MMA contract) ----------------------------------
+    # Resolve the target so the body can select the matmul *op* (MFMA on CDNA,
+    # WMMA on the RDNA wave32 targets) from the same catalog the GEMM
+    # unification uses. On a wave32 target (gfx1151) the QK/PV chain, the
+    # online-softmax row reduction, and the P fragment re-layout are all driven
+    # off the WMMA ``MmaOp`` layout maps via :func:`_wmma_attention_fwd_inner_body`
+    # -- the wave32 attention analogue of the unified GEMM's WMMA branch. On a
+    # wave64 CDNA target the body continues below unchanged (byte-identical to
+    # the historical MFMA emission); the only contract touch on that path is
+    # routing the matmul through the op's ``op_id`` (identical lowering to the
+    # ISA-named MFMA call) and the wave64 reduction helper (identical XOR
+    # butterfly).
+    #
+    # This dispatch precedes the MFMA-atom catalog guard below because the
+    # wave32 path does not use the MFMA ``atom`` object at all (it resolves its
+    # own WMMA op); validating the MFMA atom against the RDNA catalog would
+    # falsely reject the legal WMMA config.
+    from ..core.arch import ArchTarget
+
+    target = ArchTarget.from_gfx(arch)
+    wave_size = target.wave_size
+
+    if wave_size == 32:
+        # RDNA wave32 (WMMA). The fp8 / wider-atom / native-fp8 KV paths are
+        # CDNA-only (no RDNA atom); reject them explicitly rather than emitting
+        # an unbuildable kernel.
+        if fp8_kv or use_wider_atom or native_fp8_path:
+            raise ValueError(
+                "wave32 (WMMA) attention supports f16/bf16 KV only; "
+                "fp8 / wider-atom / native-fp8 paths are CDNA-only"
+            )
+        _wmma_attention_fwd_inner_body(
+            b,
+            Q=Q,
+            K=K,
+            V=V,
+            O=O,
+            head_size=head_size,
+            seqlen_k=seqlen_k,
+            q_tile_base=q_tile_base,
+            head_idx=head_idx,
+            kv_head_idx=kv_head_idx,
+            q_pos_base=q_pos_base,
+            stride_q_token=stride_q_token,
+            stride_q_head=stride_q_head,
+            stride_k_token=stride_k_token,
+            stride_k_head=stride_k_head,
+            stride_v_token=stride_v_token,
+            stride_v_head=stride_v_head,
+            stride_o_token=stride_o_token,
+            stride_o_head=stride_o_head,
+            scale_log2=scale_log2,
+            dtype=dtype,
+            mask_mode=mask_mode,
+            sliding_window=sliding_window,
+            causal_ctx_offset=causal_ctx_offset,
+            k_token_offset_elems=k_token_offset_elems,
+            v_token_offset_elems=v_token_offset_elems,
+            k_row_base_fn=k_row_base_fn,
+            v_row_base_fn=v_row_base_fn,
+            k_tile_start=k_tile_start,
+            k_tile_stop=k_tile_stop,
+            extra_score_transform=extra_score_transform,
+            extra_mask_predicate=extra_mask_predicate,
+            extra_skip_predicate=extra_skip_predicate,
+            k_block_iter_fn=k_block_iter_fn,
+            v_scale=v_scale,
+            arch=arch,
+            target=target,
+        )
+        return
+
+    # --- CDNA wave64 (MFMA) path ----------------------------------------------
+    # Arch guard: the QK/PV MFMA atom selected above must be in the target's MMA
+    # catalog. This is the machine-checkable hook that keeps gfx942 from
+    # selecting a gfx950-only atom (wide f16/bf16 16x16x32 / 32x32x16, or
+    # fp4/mx) -- comgr would otherwise HARD-CRASH with ``LLVM ERROR: Cannot
+    # select intrinsic`` on the missing op. The default arch is gfx950, and
+    # every atom this helper selects today exists on both gfx942 and gfx950, so
+    # for the default the selected atom is unchanged. The guard emits no IR, so
+    # it cannot perturb the byte-identical CDNA emission.
+    _validate_attention_atom(atom, arch)
+
+    # The matmul op_id sourced from the catalog; ``b.mma(op, ...)`` lowers
+    # identically to the historical ``atom.emit`` (the ISA-named MFMA call), so
+    # the emitted IR is byte-for-byte unchanged.
+    qk_op = target.mma.by_op_id(atom.name)
+
     n_qk_atoms = head_size // atom.k
     n_pv_atoms = head_size // atom.n  # also == head_size / 16
 
@@ -498,7 +631,7 @@ def mfma_attention_fwd_inner_body(
                     atom.a_per_lane,
                     align=atom.a_per_lane * 2,
                 )
-            score = atom.emit(b, q_vecs[k_blk_atom], k_vec, score)
+            score = b.mma(qk_op, q_vecs[k_blk_atom], k_vec, score)
 
         # ---- Scale + mask + softmax row update ----
         # Each lane has 4 score cells at (m_blk*4 + i, n_in_atom).
@@ -544,13 +677,15 @@ def mfma_attention_fwd_inner_body(
             # score to -inf so the softmax exponential collapses to 0.
             if keep_tile is not None:
                 s_r_scaled = b.select(keep_tile, s_r_scaled, neg_inf)
-            # 16-lane row-max reduce.
-            row_max = warp_xor_reduce_max(b, s_r_scaled, stages=4)
+            # 16-lane row-max reduce. ``wave_reduce_max`` with the wave64
+            # default (lanes_per_row=16) emits the exact same 4-stage XOR
+            # butterfly as the historical ``warp_xor_reduce_max(stages=4)``.
+            row_max = wave_reduce_max(b, s_r_scaled, wave_size=_WAVE, lanes_per_row=16)
             m_new_r = b.fmax(ms[r], row_max)
             alpha_r = b.exp2(b.fsub(ms[r], m_new_r))
             p_r = b.exp2(b.fsub(s_r_scaled, m_new_r))
             # Row-sum reduce of p.
-            row_psum = warp_xor_reduce_sum(b, p_r, stages=4)
+            row_psum = wave_reduce_sum(b, p_r, wave_size=_WAVE, lanes_per_row=16)
             l_new_r = b.fadd(b.fmul(ls[r], alpha_r), row_psum)
 
             new_ms.append(m_new_r)
@@ -630,8 +765,8 @@ def mfma_attention_fwd_inner_body(
                 else:
                     v_scalar = b.global_load(V, v_addr, dtype_ir, align=2)
                 v_a_vec = b.vec_insert(v_a_vec, v_scalar, j)
-            new_accs[n_blk_atom] = atom.emit(
-                b,
+            new_accs[n_blk_atom] = b.mma(
+                qk_op,
                 p_a_vec,
                 v_a_vec,
                 new_accs[n_blk_atom],
@@ -691,3 +826,294 @@ def mfma_attention_fwd_inner_body(
                 o_col,
             )
             b.global_store(O, addr, v_out, align=2)
+
+
+# ---------------------------------------------------------------------------
+# WMMA (RDNA wave32) FMHA-forward inner body -- the wave32 analogue of the
+# MFMA body above.
+# ---------------------------------------------------------------------------
+#
+# This is the *same* QK -> online-softmax -> PV pipeline as
+# :func:`mfma_attention_fwd_inner_body`, but every physical fragment fact (which
+# lane holds which (row, k) / (k, col) / (row, col) element, how many slots a
+# lane owns) is read from the verified gfx1151 ``wmma_f32_16x16x16_f16``
+# ``MmaOp`` layout maps, and the matmul is emitted through the target-neutral
+# :meth:`IRBuilder.mma`. The wave32 online softmax reuses the arch-parameterized
+# :func:`wave_reduce_max` / :func:`wave_reduce_sum` (wave_size=32), which lower
+# the in-half XOR butterfly to ``ds_swizzle``.
+#
+# The fundamental difference from the wave64 MFMA body is the fragment
+# distribution: a WMMA accumulator row spans the 16 lanes of one wave32 half and
+# each lane owns ``c_frag_len`` (=8) q-rows of one k-column; the A operand
+# carries the full ``a_frag_len`` (=16) K row per lane. The contract maps
+# abstract exactly this, so the body never hard-codes wave32 magic numbers.
+
+
+_WMMA_ATTN_OP_ID = "wmma_f32_16x16x16_f16"
+
+
+def _wmma_attention_fwd_inner_body(
+    b: IRBuilder,
+    *,
+    Q: Value,
+    K: Value,
+    V: Value,
+    O: Value,  # noqa: E741 - standard attention notation (Q,K,V,O)
+    head_size: int,
+    seqlen_k: Value,
+    q_tile_base: Value,
+    head_idx: Value,
+    kv_head_idx: Value,
+    q_pos_base: Optional[Value],
+    stride_q_token: Value,
+    stride_q_head: Value,
+    stride_k_token: Value,
+    stride_k_head: Value,
+    stride_v_token: Value,
+    stride_v_head: Value,
+    stride_o_token: Value,
+    stride_o_head: Value,
+    scale_log2: Value,
+    dtype: str,
+    mask_mode: str,
+    sliding_window: int,
+    causal_ctx_offset: Optional[Value],
+    k_token_offset_elems: Optional[Value],
+    v_token_offset_elems: Optional[Value],
+    k_row_base_fn: Optional[Callable[[IRBuilder, Value], Value]],
+    v_row_base_fn: Optional[Callable[[IRBuilder, Value], Value]],
+    k_tile_start: Optional[Value],
+    k_tile_stop: Optional[Value],
+    extra_score_transform: Optional[Callable[[IRBuilder, Value, Value, int], Value]],
+    extra_mask_predicate: Optional[Callable[[IRBuilder, Value], Value]],
+    extra_skip_predicate: Optional[Callable[[IRBuilder, Value], Value]],
+    k_block_iter_fn: Optional[Callable[[IRBuilder, Value], Value]],
+    v_scale: Optional[Value],
+    arch: str,
+    target,
+) -> None:
+    """One WMMA-tiled QK->softmax->PV pass for a ``BLOCK_M``-row Q tile (wave32).
+
+    Drives the QK^T and PV matmuls through the ``wmma_f32_16x16x16_f16``
+    ``MmaOp`` layout maps and :meth:`IRBuilder.mma`; the online softmax uses the
+    wave32 row reduction. Parameter semantics match
+    :func:`mfma_attention_fwd_inner_body`. The kernel must launch with
+    ``block_size == wave_size`` (one wave32 per CTA).
+    """
+    op = target.mma.by_op_id(_WMMA_ATTN_OP_ID)
+    if op is None or op.family != "wmma":
+        raise ValueError(f"WMMA attention atom {_WMMA_ATTN_OP_ID} absent on {arch}")
+    wave = op.wave_size  # 32
+    dtype_ir = _ir_type_for_dtype(dtype)
+
+    a_map = op.a_layout()  # (row, k): lane l -> (row l%16, k=slot)
+    c_map = op.c_layout()  # (row, col): slot i -> (2i + l//16, l%16)
+    a_frag = op.a_frag_len  # 16 -- full K row per lane for QK^T / PV-A
+    c_frag = op.c_frag_len  # 8  -- accumulator slots per lane
+
+    # Number of WMMA steps along the head-dim axis (QK K-dim == PV N-dim).
+    n_dk = head_size // 16
+
+    # Row reduction across the 16 lanes that share one accumulator row. The
+    # stage count is derived from the atom geometry (log2(16) = 4), not
+    # hard-coded; the XOR masks stay inside the 32-lane half on wave32.
+    reduce_stages = wave_reduce_stages(wave_size=wave, lanes_per_row=16)
+    assert reduce_stages == 4  # 16x16 tile -> 4-stage butterfly
+
+    lane = b.mod(b.thread_id_x(), b.const_i32(wave))
+    c16 = b.const_i32(16)
+
+    # A/B-operand row for this lane (== lane % 16 for both Q and K fragments).
+    a_row = a_map.coord(b, lane, 0)[0]
+    # Accumulator column == this lane's k-position in the QK score tile.
+    col = b.mod(lane, c16)
+
+    neg_inf = b.const_f32(-1e30)
+    zero_f = b.const_f32(0.0)
+
+    k_off = k_token_offset_elems if k_token_offset_elems is not None else b.const_i32(0)
+    v_off = v_token_offset_elems if v_token_offset_elems is not None else b.const_i32(0)
+
+    # ---- Pre-load Q fragments (constant across the K-loop) ----
+    # Lane l holds Q row (q_tile_base + a_row), full <a_frag x half> d-slice for
+    # each head-dim WMMA tile. Q is K-loop-invariant -> register-resident.
+    q_row = b.add(q_tile_base, a_row)
+    q_addr_row_base = b.add(
+        b.mul(q_row, stride_q_token),
+        b.mul(head_idx, stride_q_head),
+    )
+    q_frags = []
+    for d in range(n_dk):
+        q_addr = b.add(q_addr_row_base, b.const_i32(d * 16))
+        q_frags.append(b.global_load_vN(Q, q_addr, dtype_ir, a_frag, align=a_frag * 2))
+
+    # ---- LDS P-staging tile (transpose acc layout -> A-operand layout) ----
+    P_lds = b.smem_alloc(dtype_ir, [16, 16], name_hint="Pwmma")
+
+    # ---- Online-softmax + PV accumulator iter-args ----
+    iter_args = []
+    for r in range(c_frag):
+        iter_args.append((f"m{r}", neg_inf))
+        iter_args.append((f"l{r}", zero_f))
+    for d in range(n_dk):
+        iter_args.append((f"acc{d}", b.zero_vec_f32(c_frag)))
+
+    c_block_k = b.const_i32(MFMA_ATTN_BLOCK_K)
+    loop_start = k_tile_start if k_tile_start is not None else b.const_i32(0)
+    loop_stop = k_tile_stop if k_tile_stop is not None else b.div(seqlen_k, c_block_k)
+
+    kloop = b.scf_for_iter(
+        loop_start, loop_stop, b.const_i32(1), iter_args=iter_args, iv_name="kt"
+    )
+    with kloop as (kt, state):
+        ms = [state[2 * r] for r in range(c_frag)]
+        ls = [state[2 * r + 1] for r in range(c_frag)]
+        accs = list(state[2 * c_frag :])
+
+        if k_block_iter_fn is not None:
+            effective_kt = k_block_iter_fn(b, kt)
+        else:
+            effective_kt = kt
+
+        k_tile_base = b.mul(effective_kt, c_block_k)
+        k_row_for_lane = b.add(k_tile_base, a_row)  # k position for THIS lane
+
+        # Per-K-tile keep / skip predicates (block-sparse). Same semantics as
+        # the MFMA body: when false, the score collapses to -inf so the
+        # softmax exponential is zero (loads are still issued).
+        if extra_mask_predicate is not None:
+            keep_tile = extra_mask_predicate(b, kt)
+        else:
+            keep_tile = None
+        if extra_skip_predicate is not None:
+            skip_mask = extra_skip_predicate(b, kt)
+            keep_tile = (
+                b.land(keep_tile, skip_mask) if keep_tile is not None else skip_mask
+            )
+
+        if k_row_base_fn is not None:
+            k_addr_row_base = k_row_base_fn(b, k_row_for_lane)
+        else:
+            k_addr_row_base = b.add(
+                b.add(
+                    b.mul(k_row_for_lane, stride_k_token),
+                    b.mul(kv_head_idx, stride_k_head),
+                ),
+                k_off,
+            )
+
+        # ---- QK^T WMMA chain: score = sum_d Q[d-tile] (x) K[d-tile] ----
+        score = b.zero_vec_f32(c_frag)
+        for d in range(n_dk):
+            k_addr = b.add(k_addr_row_base, b.const_i32(d * 16))
+            k_frag = b.global_load_vN(K, k_addr, dtype_ir, a_frag, align=a_frag * 2)
+            score = b.mma(op, q_frags[d], k_frag, score)
+
+        # ---- Scale + mask + per-row online softmax ----
+        new_ms, new_ls, new_accs = [], [], list(accs)
+        ps = []  # per-slot scaled probabilities (acc layout)
+        q_pos_for_mask = q_pos_base if q_pos_base is not None else q_tile_base
+        for r in range(c_frag):
+            row_rel, col_k = c_map.coord(b, lane, r)  # (q-row in tile, k-col)
+            s_r = b.fmul(b.vec_extract(score, r), scale_log2)
+            row_q_pos = b.add(q_pos_for_mask, row_rel)
+            k_col_pos = b.add(k_tile_base, col_k)
+            if extra_score_transform is not None:
+                s_r = extra_score_transform(b, s_r, kt, r)
+            s_r = apply_attention_mask(
+                b,
+                s_r,
+                mask_mode=mask_mode,
+                k_idx=k_col_pos,
+                query_pos=row_q_pos,
+                sliding_window=sliding_window,
+                context_len=causal_ctx_offset,
+            )
+            if keep_tile is not None:
+                s_r = b.select(keep_tile, s_r, neg_inf)
+            # Per-row reduce across the 16 k-columns of this wave32 half.
+            row_max = wave_reduce_max(b, s_r, wave_size=wave, lanes_per_row=16)
+            m_new = b.fmax(ms[r], row_max)
+            alpha = b.exp2(b.fsub(ms[r], m_new))
+            p_r = b.exp2(b.fsub(s_r, m_new))
+            row_sum = wave_reduce_sum(b, p_r, wave_size=wave, lanes_per_row=16)
+            l_new = b.fadd(b.fmul(ls[r], alpha), row_sum)
+            new_ms.append(m_new)
+            new_ls.append(l_new)
+            ps.append(p_r)
+            for d in range(n_dk):
+                old = b.vec_extract(new_accs[d], r)
+                new_accs[d] = b.vec_insert(new_accs[d], b.fmul(old, alpha), r)
+
+        # ---- P staging through LDS: acc layout -> A-operand layout ----
+        for r in range(c_frag):
+            row_rel, col_k = c_map.coord(b, lane, r)
+            b.smem_store_vN(P_lds, [row_rel, col_k], b.cast_f32_to(ps[r], dtype_ir), 1)
+        b.sync()
+
+        # ---- V load + PV WMMA chain ----
+        # PV computes O = P @ V. WMMA evaluates A @ B^T, so B must be V in
+        # (d x k) = N x K layout: the B-operand for d-column c is the V *column*
+        # c gathered over k = 0..a_frag-1. P A-operand: lane l holds q-row a_row,
+        # fragment slot j = P[row, j].
+        p_a = b.zero_vec(dtype_ir, a_frag)
+        for j in range(a_frag):
+            # A-operand layout map gives slot j's (row, k); the row is the
+            # loop-invariant ``a_row`` (== lane % 16, hoisted above) so we only
+            # take the K coordinate from the map -- the P column to read.
+            a_k = a_map.coord(b, lane, j)[1]
+            p_v = b.vec_extract(
+                b.smem_load_vN(P_lds, a_row, a_k, dtype=dtype_ir, n=1), 0
+            )
+            p_a = b.vec_insert(p_a, p_v, j)
+
+        for d in range(n_dk):
+            d_col = b.add(b.const_i32(d * 16), col)  # this lane's V d-column
+            v_b = b.zero_vec(dtype_ir, a_frag)
+            for j in range(a_frag):
+                v_row_k = b.add(k_tile_base, b.const_i32(j))
+                if v_row_base_fn is not None:
+                    v_addr_row_base = v_row_base_fn(b, v_row_k)
+                else:
+                    v_addr_row_base = b.add(
+                        b.add(
+                            b.mul(v_row_k, stride_v_token),
+                            b.mul(kv_head_idx, stride_v_head),
+                        ),
+                        v_off,
+                    )
+                v_addr = b.add(v_addr_row_base, d_col)
+                v_b = b.vec_insert(v_b, b.global_load(V, v_addr, dtype_ir, align=2), j)
+            new_accs[d] = b.mma(op, p_a, v_b, new_accs[d])
+
+        yields = []
+        for r in range(c_frag):
+            yields.append(new_ms[r])
+            yields.append(new_ls[r])
+        yields.extend(new_accs)
+        b.scf_yield(*yields)
+
+    final = kloop.results
+    ls_final = [final[2 * r + 1] for r in range(c_frag)]
+    accs_final = list(final[2 * c_frag :])
+
+    # ---- Epilogue: O[q,d] = acc[q,d] / l[q] (zero-denominator guarded) ----
+    for d in range(n_dk):
+        for r in range(c_frag):
+            row_rel, col_n = c_map.coord(b, lane, r)  # (q-row in tile, d-col)
+            l_safe = ls_final[r]
+            zero_mask = b.fcmp("oeq", l_safe, zero_f)
+            inv_l = b.select(zero_mask, zero_f, b.rcp(l_safe))
+            v_f32 = b.fmul(b.vec_extract(accs_final[d], r), inv_l)
+            if v_scale is not None:
+                v_f32 = b.fmul(v_f32, v_scale)
+            o_row = b.add(q_tile_base, row_rel)
+            o_col = b.add(b.const_i32(d * 16), col_n)
+            o_addr = b.add(
+                b.add(
+                    b.mul(o_row, stride_o_token),
+                    b.mul(head_idx, stride_o_head),
+                ),
+                o_col,
+            )
+            b.global_store(O, o_addr, b.cast_f32_to(v_f32, dtype_ir), align=2)

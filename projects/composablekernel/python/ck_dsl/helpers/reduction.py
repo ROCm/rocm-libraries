@@ -16,12 +16,12 @@ The combine semantics are parameterised; today we support ``"sum"``
 attention online softmax). The wave-butterfly form via ``ds_bpermute``
 that the attention kernels use is a *different* algorithm (wave-only,
 no LDS round-trip) and intentionally lives in
-:mod:`ck_dsl.instances.attention_tiled_2d` next to the softmax it
+:mod:`ck_dsl.instances.gfx950.attention_tiled_2d` next to the softmax it
 serves.
 
 Why a separate module: every call site that needed a block reduction
 copied a 15-30 line ``_block_reduce_sum`` from
-:mod:`ck_dsl.instances.layernorm2d`. We now have one canonical
+:mod:`ck_dsl.instances.common.layernorm2d`. We now have one canonical
 implementation that the norm / reduce / pooling kernels share.
 """
 

@@ -229,6 +229,21 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "declare <8 x bfloat> @llvm.fmuladd.v8bf16("
         "<8 x bfloat>, <8 x bfloat>, <8 x bfloat>)"
     ),
+    # RDNA3/3.5 (gfx11) WMMA — wave32 16x16x16 f16. Hardware-verified ABI on
+    # gfx1151. Emission goes through Gfx11RdnaBackend.emit_wmma; this is just the
+    # declaration registered via _need("wmma.f32.16x16x16.f16").
+    "wmma.f32.16x16x16.f16": (
+        "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x16.f16.v8f32.v16f16("
+        "<16 x half>, <16 x half>, <8 x float>)"
+    ),
+    # RDNA3/3.5 (gfx11) WMMA — wave32 16x16x16 bf16. Hardware-verified ABI on
+    # gfx1151 (ROCm 7.0.2 clang 20): operands lower as <16 x i16> (bf16 bitcast),
+    # accumulator/result are <8 x float>. Emission goes through
+    # Gfx11RdnaBackend.emit_wmma, which bitcasts <16 x bfloat> -> <16 x i16>.
+    "wmma.f32.16x16x16.bf16": (
+        "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x16.bf16.v8f32.v16i16("
+        "<16 x i16>, <16 x i16>, <8 x float>)"
+    ),
     "mfma.f32.16x16x16f16": (
         "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x16f16("
         "<4 x half>, <4 x half>, <4 x float>, "
@@ -593,8 +608,15 @@ class _Lowerer:
         kernel: KernelDef,
         *,
         llvm_flavor: Optional[str] = None,
+        arch: Optional[str] = None,
     ) -> None:
         self.kernel = kernel
+        # ISA backend selects the gfx-keyed LLVM details (datalayout, triple,
+        # waitcnt encoding). Defaults to gfx950 so existing callers and the
+        # gfx950 byte-identical baseline are preserved.
+        from .isa.backend import backend_for
+
+        self._backend = backend_for(arch or "gfx950")
         flavor = llvm_flavor if llvm_flavor is not None else _resolve_llvm_flavor()
         if flavor not in (LLVM_FLAVOR_LLVM20, LLVM_FLAVOR_LLVM22):
             raise ValueError(f"unknown LLVM flavor {flavor!r}")
@@ -1668,6 +1690,23 @@ class _Lowerer:
                 f"align {align}"
             )
 
+    def _op_tile_wmma_f32_16x16x16_f16(self, op: Op) -> None:
+        # RDNA WMMA: emission is arch-specific, so it routes through the ISA
+        # backend (Gfx11RdnaBackend). CDNA backends raise NotImplementedError.
+        self._backend.emit_wmma(self, op)
+
+    def _op_tile_wmma_f32_16x16x16_bf16(self, op: Op) -> None:
+        # RDNA WMMA bf16: same routing as the f16 variant; the backend bitcasts
+        # the <16 x bfloat> operands to <16 x i16> for the intrinsic.
+        self._backend.emit_wmma(self, op)
+
+    def _op_tile_mma(self, op: Op) -> None:
+        # Target-neutral MMA: the ISA backend maps ``op.attrs["op_id"]`` to the
+        # matching MFMA (CDNA) or WMMA (RDNA) emission. CDNA backends reuse the
+        # existing ``_op_tile_<op_id>`` handler verbatim, so the output is
+        # byte-identical to the legacy ISA-named path.
+        self._backend.emit_mma(self, op)
+
     def _op_tile_mfma_f32_16x16x16_f16(self, op: Op) -> None:
         a, b, c = op.operands
         self._need("mfma.f32.16x16x16f16")
@@ -2464,7 +2503,7 @@ class _Lowerer:
         # barrier; that matches what CK Tile's ``block_sync_lds`` does.
         # ``_encode_waitcnt_gfx9_10(vmcnt=0, lgkmcnt=0)`` evaluates to
         # ``0x70`` (= 112) -- ``vmcnt(0) lgkmcnt(0) expcnt(<max>)``.
-        mask = _encode_waitcnt_gfx9_10(vmcnt=0, expcnt=-1, lgkmcnt=0)
+        mask = self._backend.encode_waitcnt(vmcnt=0, expcnt=-1, lgkmcnt=0)
         self._need("s.waitcnt")
         self._need("s.barrier")
         self._current().emit(f"  call void @llvm.amdgcn.s.waitcnt(i32 {mask})")
@@ -2508,7 +2547,7 @@ class _Lowerer:
         # streaming while we wait on the *previous* iter's ds_reads.
         # Draining vmcnt here would defeat the whole point of the
         # overlap. Matches CK Tile's ``block_sync_lds``.
-        mask = _encode_waitcnt_gfx9_10(vmcnt=-1, expcnt=-1, lgkmcnt=0)
+        mask = self._backend.encode_waitcnt(vmcnt=-1, expcnt=-1, lgkmcnt=0)
         self._need("s.waitcnt")
         self._need("s.barrier")
         self._current().emit(f"  call void @llvm.amdgcn.s.waitcnt(i32 {mask})")
@@ -2520,7 +2559,7 @@ class _Lowerer:
         vm = int(op.attrs.get("vmcnt", -1))
         lk = int(op.attrs.get("lgkmcnt", -1))
         ec = int(op.attrs.get("expcnt", -1))
-        mask = _encode_waitcnt_gfx9_10(vm, ec, lk)
+        mask = self._backend.encode_waitcnt(vmcnt=vm, expcnt=ec, lgkmcnt=lk)
         self._current().emit(f"  call void @llvm.amdgcn.s.waitcnt(i32 {mask})")
 
     def _op_tile_sched_barrier(self, op: Op) -> None:
@@ -3349,8 +3388,8 @@ class _Lowerer:
             self._current().terminated = True
 
         out: List[str] = []
-        out.append(f'target datalayout = "{_DATALAYOUT}"')
-        out.append(f'target triple = "{_TRIPLE}"')
+        out.append(f'target datalayout = "{self._backend.datalayout}"')
+        out.append(f'target triple = "{self._backend.triple}"')
         out.append("")
 
         # smem globals.
@@ -3536,6 +3575,47 @@ def _encode_waitcnt_gfx9_10(vmcnt: int, expcnt: int, lgkmcnt: int) -> int:
     return vm_lo | (ec_b << 4) | (lk_b << 8) | (vm_hi << 14)
 
 
+def _encode_waitcnt_gfx11(vmcnt: int, expcnt: int, lgkmcnt: int) -> int:
+    """Encode an AMDGPU ``s_waitcnt`` immediate for the RDNA3 (gfx11) ISA.
+
+    The gfx11 ``s_waitcnt`` field layout is *different* from the gfx9/gfx10
+    split that :func:`_encode_waitcnt_gfx9_10` produces. It was determined
+    empirically on a gfx1151 (Strix Halo) node by assembling each counter
+    in isolation with the ROCm 7.0.2 ``llvm-mc --show-encoding`` (LLVM's
+    own AMDGPU ``encodeWaitcnt``); the encoded 16-bit immediates were:
+
+    .. code-block:: text
+
+        s_waitcnt vmcnt(0)              -> 0x03F7   (= max with vmcnt cleared)
+        s_waitcnt vmcnt(1)              -> 0x07F7
+        s_waitcnt lgkmcnt(0)           -> 0xFC07
+        s_waitcnt lgkmcnt(1)           -> 0xFC17
+        s_waitcnt expcnt(0)            -> 0xFFF0
+        s_waitcnt expcnt(1)            -> 0xFFF1
+        s_waitcnt vmcnt(0) lgkmcnt(0)  -> 0x0007   (expcnt left at max 7)
+        s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0) -> 0x0000
+        all-max                        -> 0xFFF7
+
+    which decodes to the contiguous fields:
+
+    * ``expcnt``  -> bits ``[2:0]``  (3 bits, max 7)
+    * ``lgkmcnt`` -> bits ``[9:4]``  (6 bits, max 63)
+    * ``vmcnt``   -> bits ``[15:10]`` (6 bits, max 63)
+
+    Unlike gfx9/10, gfx11 has no split VMCNT and a 6-bit (not 4-bit)
+    LGKMCNT. ``-1`` means "no wait" and is encoded as the architectural
+    maximum for each counter; explicit values clamp to the field maximum
+    rather than wrapping (wrapping ``lgkmcnt`` would silently turn a
+    partial wait into a full LDS/scalar drain and corrupt LDS-ordered
+    reductions).
+    """
+
+    vm_b = 0x3F if vmcnt < 0 else min(max(vmcnt, 0), 0x3F)
+    ec_b = 0x7 if expcnt < 0 else min(max(expcnt, 0), 0x7)
+    lk_b = 0x3F if lgkmcnt < 0 else min(max(lgkmcnt, 0), 0x3F)
+    return (ec_b & 0x7) | ((lk_b & 0x3F) << 4) | ((vm_b & 0x3F) << 10)
+
+
 def _fp32_hex(x: float) -> str:
     import struct
 
@@ -3561,6 +3641,7 @@ def lower_kernel_to_llvm(
     kernel: KernelDef,
     *,
     llvm_flavor: Optional[str] = None,
+    arch: Optional[str] = None,
 ) -> str:
     """Return the AMDGPU LLVM IR text for the given kernel.
 
@@ -3568,8 +3649,12 @@ def lower_kernel_to_llvm(
     :data:`LLVM_FLAVOR_LLVM20` / :data:`LLVM_FLAVOR_LLVM22`). Useful
     for tests that want to pin a specific flavor regardless of the
     host ROCm install.
+
+    ``arch`` selects the ISA backend (e.g. ``"gfx942"``, ``"gfx950"``) that
+    owns the datalayout, triple, and waitcnt encoding. Defaults to ``gfx950``
+    so existing callers and the gfx950 byte-identical baseline are preserved.
     """
-    lowerer = _Lowerer(kernel, llvm_flavor=llvm_flavor)
+    lowerer = _Lowerer(kernel, llvm_flavor=llvm_flavor, arch=arch)
     lowerer._collect_smem(kernel.body)
     lowerer.lower_region(kernel.body)
     return lowerer.finalize()

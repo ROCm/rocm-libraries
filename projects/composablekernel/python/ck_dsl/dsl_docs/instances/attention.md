@@ -62,7 +62,7 @@ The runtime caches HSACO and launchers by semantic problem keys. This matters be
 
 ## Attention Features
 
-Current coverage (verified via `examples/attention/parity_unified_attention.py` `default` scenario set):
+Current coverage (verified via `examples/gfx950/attention/parity_unified_attention.py` `default` scenario set):
 
 - causal masking (`helpers/attention.py::causal_mask`);
 - sliding window (`sliding_window_mask`);

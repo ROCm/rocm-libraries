@@ -179,7 +179,7 @@ def vector_row_copy(
     """Vectorised row copy along a head / hidden dimension.
 
     Promotes the inline ``_copy_row_vec`` from
-    :mod:`ck_dsl.instances.fmha_appendkv` into a shared helper so the
+    :mod:`ck_dsl.instances.common.fmha_appendkv` into a shared helper so the
     same 16-byte-vector pattern can be reused by ``moe_gather`` and
     ``fmha_bwd`` postlude.
 
@@ -220,8 +220,8 @@ def pack_quant_chunk_f32(
     """Pack a list of 4 f32 scalars into a single packed quant vector.
 
     Promotes the inline ``_pack_quant_chunk_f32`` from
-    :mod:`ck_dsl.instances.smoothquant` (and the duplicate copy in
-    :mod:`ck_dsl.instances.moe_smoothquant`) into a shared helper.
+    :mod:`ck_dsl.instances.common.smoothquant` (and the duplicate copy in
+    :mod:`ck_dsl.instances.common.moe_smoothquant`) into a shared helper.
 
     Routes through the matching packed cvt primitive on the IR:
 

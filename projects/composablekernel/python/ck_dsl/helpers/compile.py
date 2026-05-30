@@ -79,19 +79,39 @@ class KernelArtifact:
 def compile_kernel(
     kernel: KernelDef,
     *,
+    arch: Optional[str] = None,
     isa: str = "amdgcn-amd-amdhsa--gfx950",
     capture_ir_text: bool = True,
     optimize_ir: bool = False,
 ) -> KernelArtifact:
     """Lower `kernel` to a `KernelArtifact` ready for HIP module load.
 
-    `isa` is the comgr target triple; `gfx950` is what every example
-    in this repo uses.
+    `arch` is the preferred way to select the target (e.g. ``"gfx942"``,
+    ``"gfx950"``): when given, the comgr ISA triple is derived from
+    :class:`ck_dsl.core.arch.ArchTarget`, so callers don't hand-spell the
+    triple. `arch` takes precedence over `isa`.
+
+    `isa` is the raw comgr target triple and stays accepted for backward
+    compatibility; `gfx950` is the historical default every example uses.
 
     `capture_ir_text` controls whether the MLIR-style textual dump is
     populated. Disable for tight sweep loops where the dump is
     discarded.
     """
+    if arch is not None:
+        from ..core.arch import ArchTarget
+
+        isa = ArchTarget.from_gfx(arch).isa_triple
+        _lower_arch = arch
+    else:
+        # Derive the lowering arch from the isa triple so the ISA backend
+        # (datalayout/triple/waitcnt) matches the comgr target even when a
+        # caller passes isa= directly.
+        from ..core.arch import arch_from_isa, known_arches
+
+        _gfx = arch_from_isa(isa)
+        _lower_arch = _gfx if _gfx in known_arches() else None
+
     timings: Dict[str, float] = {}
 
     t0 = time.perf_counter()
@@ -99,7 +119,7 @@ def compile_kernel(
     t_pass = time.perf_counter()
     ir_text = print_ir(kernel) if capture_ir_text else ""
     t1 = time.perf_counter()
-    llvm_text = lower_kernel_to_llvm(kernel)
+    llvm_text = lower_kernel_to_llvm(kernel, arch=_lower_arch)
     t2 = time.perf_counter()
     hsaco, comgr_t = build_hsaco_from_llvm_ir(
         llvm_text, isa=isa, options=_comgr_options_for_kernel(kernel)
@@ -187,7 +207,7 @@ def compile_kernel_via_hipcc(
     t0 = time.perf_counter()
     ir_text = print_ir(kernel)
     t1 = time.perf_counter()
-    hip_src = lower_kernel_to_hip(kernel)
+    hip_src = lower_kernel_to_hip(kernel, arch=arch)
     t2 = time.perf_counter()
     flags = ["-O3"]
     if extra_flags:

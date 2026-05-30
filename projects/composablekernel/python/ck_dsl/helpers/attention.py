@@ -301,7 +301,7 @@ def apply_softcap_scalar(b: IRBuilder, score: Value, softcap: Value) -> Value:
 
 
 def warp_xor_reduce_max(b: IRBuilder, v: Value, stages: int = 4) -> Value:
-    """Wave64 16-lane butterfly max reduction via ``ds_bpermute``.
+    """Wave64 16-lane butterfly max reduction via ``ds_swizzle_b32``.
 
     Reduces ``v`` across lanes whose ``lane % 16`` differ but
     ``lane / 16`` is fixed (each group of 16 lanes that share the same
@@ -309,9 +309,13 @@ def warp_xor_reduce_max(b: IRBuilder, v: Value, stages: int = 4) -> Value:
     reduction), every lane in the group holds the max of the 16
     inputs.
 
-    The XOR sequence ``addr = (lane ^ 2^k) << 2`` for ``k in 0..stages-1``
-    matches CK Tile's ``block_tile_reduce_xor_sync``. This helper used
-    to live in :mod:`ck_dsl.instances.attention_tiled_2d` as a private
+    The XOR sequence uses masks ``1, 2, 4, 8`` (all ``< 32``), so each
+    stage stays inside one 32-lane half and
+    :meth:`IRBuilder.warp_shuffle_xor` lowers it to a single
+    ``ds_swizzle_b32`` SWAP-mode op (NOT ``ds_bpermute`` — that path is
+    only taken for the cross-half ``mask >= 32`` case). This matches CK
+    Tile's ``block_tile_reduce_xor_sync``. This helper used to live in
+    :mod:`ck_dsl.instances.gfx950.attention_tiled_2d` as a private
     function; promoting it makes the same reduction available to the
     3D segment kernel, the future MFMA-based norm kernels, and any
     other op that needs an in-warp 16-lane butterfly.
@@ -324,10 +328,11 @@ def warp_xor_reduce_max(b: IRBuilder, v: Value, stages: int = 4) -> Value:
 
 
 def warp_xor_reduce_sum(b: IRBuilder, v: Value, stages: int = 4) -> Value:
-    """Wave64 16-lane butterfly sum reduction via ``ds_bpermute``.
+    """Wave64 16-lane butterfly sum reduction via ``ds_swizzle_b32``.
 
-    See :func:`warp_xor_reduce_max` for the lane-XOR rationale; the
-    only difference is the combiner is ``fadd`` instead of ``fmax``.
+    See :func:`warp_xor_reduce_max` for the lane-XOR rationale (masks
+    ``1, 2, 4, 8`` lower to ``ds_swizzle_b32``, not ``ds_bpermute``);
+    the only difference is the combiner is ``fadd`` instead of ``fmax``.
     """
     cur = v
     for k in range(stages):
@@ -365,6 +370,131 @@ def warp_xor_reduce_sum_32lane(b: IRBuilder, v: Value) -> Value:
     """Sum-reduction sibling of :func:`warp_xor_reduce_max_32lane`."""
     cur = v
     for k in range(5):
+        remote = b.warp_shuffle_xor(cur, 1 << k)
+        cur = b.fadd(cur, remote)
+    return cur
+
+
+def wave64_reduce_max(b: IRBuilder, v: Value) -> Value:
+    """Reduce ``v`` across all 64 lanes of a wave with an XOR butterfly.
+
+    Six XOR stages (masks ``1, 2, 4, 8, 16, 32``). The first five stay
+    inside one 32-lane half (``ds_swizzle_b32``); the last (mask 32) is
+    a cross-half swap, which :meth:`IRBuilder.warp_shuffle_xor` lowers
+    to ``ds_bpermute``. After the butterfly every lane in the wave
+    holds the max of all 64 inputs. Used by the split-KV reduce kernel
+    to fold the per-segment partial maxima that each lane accumulated
+    over its strided segment subset.
+    """
+    cur = v
+    for k in range(6):
+        remote = b.warp_shuffle_xor(cur, 1 << k)
+        cur = b.fmax(cur, remote)
+    return cur
+
+
+def wave64_reduce_sum(b: IRBuilder, v: Value) -> Value:
+    """Sum-reduction sibling of :func:`wave64_reduce_max` (``fadd``)."""
+    cur = v
+    for k in range(6):
+        remote = b.warp_shuffle_xor(cur, 1 << k)
+        cur = b.fadd(cur, remote)
+    return cur
+
+
+# ---------------------------------------------------------------------------
+# Arch-parameterized wave online-softmax row reduction (wave32 + wave64)
+# ---------------------------------------------------------------------------
+#
+# The FMHA online-softmax needs a *row* reduction: every lane that holds a
+# column of one score / probability row XOR-butterflies its partial across the
+# lanes that share that row so each lane ends with the row max / row sum.
+#
+# The two backends differ only in how many lanes a row spans, never in the
+# butterfly itself:
+#
+#   * wave64 MFMA 16x16x* : a C-row is contained in a 16-lane group
+#     (``lane // 16`` fixed) -> 4 XOR stages (masks 1,2,4,8). This is the
+#     long-standing CDNA path (``warp_xor_reduce_max/sum`` default stages=4).
+#   * wave32 WMMA 16x16x16 : a C-row spans the 16 lanes of one wave32 half
+#     (``lane // 16`` fixed) -> 4 XOR stages (masks 1,2,4,8) -- the masks
+#     stay inside the 32-lane half and lower to ``ds_swizzle`` (see
+#     ``instances/gfx1151/wmma_fmha_fwd.py::_half_reduce``).
+#
+# Both reduce one 16-lane row in 4 stages, so the wave32 path is *not* a
+# different algorithm -- only the wave_size context differs. These helpers give
+# the unify phase one entry point parameterized by ``wave_size`` whose
+# wave64 default reproduces the existing CDNA reduction byte-for-byte (same XOR
+# mask sequence, same combiner, same order), so routing CDNA through them does
+# not perturb numerics.
+
+
+def wave_reduce_stages(wave_size: int = 64, lanes_per_row: int = 16) -> int:
+    """Number of XOR butterfly stages to reduce a row across ``lanes_per_row``.
+
+    ``stages = log2(lanes_per_row)``. ``lanes_per_row`` must be a power of two
+    and must not exceed ``wave_size`` (the row cannot span more lanes than the
+    wave has). For the standard 16x16 MFMA / WMMA tile a row spans 16 lanes on
+    both wave64 and wave32, giving 4 stages.
+    """
+    if lanes_per_row <= 0 or (lanes_per_row & (lanes_per_row - 1)) != 0:
+        raise ValueError(f"lanes_per_row must be a power of two, got {lanes_per_row}")
+    if lanes_per_row > wave_size:
+        raise ValueError(
+            f"lanes_per_row ({lanes_per_row}) cannot exceed wave_size ({wave_size})"
+        )
+    return lanes_per_row.bit_length() - 1
+
+
+def wave_reduce_max(
+    b: IRBuilder,
+    v: Value,
+    *,
+    wave_size: int = 64,
+    lanes_per_row: int = 16,
+) -> Value:
+    """Arch-parameterized row-max reduction for the online softmax.
+
+    Reduces ``v`` across the ``lanes_per_row`` lanes that share one tile row
+    via an XOR butterfly, working identically on wave64 (CDNA / MFMA) and
+    wave32 (gfx1151 / WMMA). After the reduction every lane in the row group
+    holds the row max.
+
+    The wave64 default (``wave_size=64, lanes_per_row=16``) emits the exact
+    4-stage XOR sequence (masks 1,2,4,8) of :func:`warp_xor_reduce_max`, so
+    the long-standing CDNA path is reproduced byte-for-byte. The wave32 WMMA
+    softmax passes ``wave_size=32`` (still ``lanes_per_row=16``) and gets the
+    same 4-stage butterfly, matching the hand-written wave32 ``_half_reduce``.
+
+    The XOR masks (``< lanes_per_row``) always stay inside one wave half on
+    wave32, so :meth:`IRBuilder.warp_shuffle_xor` lowers them to the in-half
+    swizzle on both wave sizes.
+    """
+    stages = wave_reduce_stages(wave_size, lanes_per_row)
+    cur = v
+    for k in range(stages):
+        remote = b.warp_shuffle_xor(cur, 1 << k)
+        cur = b.fmax(cur, remote)
+    return cur
+
+
+def wave_reduce_sum(
+    b: IRBuilder,
+    v: Value,
+    *,
+    wave_size: int = 64,
+    lanes_per_row: int = 16,
+) -> Value:
+    """Arch-parameterized row-sum reduction; ``fadd`` sibling of
+    :func:`wave_reduce_max`.
+
+    Same lane geometry, stage count, default-wave64-byte-identical guarantee,
+    and wave32 compatibility as :func:`wave_reduce_max`; the only difference is
+    the combiner is ``fadd`` (the online-softmax denominator accumulation).
+    """
+    stages = wave_reduce_stages(wave_size, lanes_per_row)
+    cur = v
+    for k in range(stages):
         remote = b.warp_shuffle_xor(cur, 1 << k)
         cur = b.fadd(cur, remote)
     return cur

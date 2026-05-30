@@ -3,7 +3,7 @@
 """DSL example 16: batched GEMM (CK Tile parity).
 
 CK Tile counterpart: ``example/ck_tile/16_batched_gemm``. Builds the
-batched universal GEMM body from :mod:`ck_dsl.instances.batched_gemm`.
+batched universal GEMM body from :mod:`ck_dsl.instances.common.batched_gemm`.
 
 Layout is RCR:
 

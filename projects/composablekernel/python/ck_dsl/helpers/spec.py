@@ -29,7 +29,9 @@ from typing import List, Optional, Sequence, Tuple
 __all__ = [
     "IOSpecRule",
     "SignatureBuilder",
+    "WarpTileBlockSizeMixin",
     "ceil_div_grid",
+    "derive_block_size",
     "kernel_name_join",
     "ptr_type_str",
     "sig_param",
@@ -224,3 +226,57 @@ def ceil_div_grid(*dims: Tuple[int, int]) -> Tuple[int, int, int]:
     while len(out) < 3:
         out.append(1)
     return (out[0], out[1], out[2])
+
+
+# ---------------------------------------------------------------------
+# derive_block_size / WarpTileBlockSizeMixin
+# ---------------------------------------------------------------------
+
+
+def derive_block_size(tile: object, wave_size: int) -> int:
+    """Threads-per-block for a warp-tiled GEMM-family spec.
+
+    The canonical rule (CK's ``gemm_validation_utils.py``: ``BlockSize =
+    NumWarps * warp_size``) is::
+
+        block_size = warp_m * warp_n * warp_k * wave_size
+
+    where ``warp_m`` / ``warp_n`` / ``warp_k`` are the warp-grid counts on the
+    spec's :class:`TileSpec`. This is the single source of truth shared by
+    :class:`~ck_dsl.instances.common.gemm_universal.UniversalGemmSpec` and the
+    five wrapper specs (batched / grouped / flatmm / multi-d / multi-abd) that
+    previously each re-implemented it in ``__post_init__``.
+    """
+    return int(tile.warp_m) * int(tile.warp_n) * int(tile.warp_k) * int(wave_size)
+
+
+class WarpTileBlockSizeMixin:
+    """Mixin for frozen GEMM-family specs that lazily derive ``block_size``.
+
+    A spec opting in must expose a ``tile`` (with ``warp_m`` / ``warp_n`` /
+    ``warp_k`` ints), a ``wave_size`` int, and a ``block_size`` int field that
+    defaults to ``0`` ("derive me"). On a frozen dataclass the assignment goes
+    through ``object.__setattr__`` (the only legal write on a frozen instance),
+    exactly matching the hand-rolled ``__post_init__`` bodies it replaces — so
+    adopting it keeps the produced ``block_size`` (and therefore the kernel
+    name and the emitted IR) byte-identical.
+
+    Usage::
+
+        @dataclass(frozen=True)
+        class BatchedGemmSpec(WarpTileBlockSizeMixin):
+            tile: TileSpec
+            wave_size: int = 64
+            block_size: int = 0
+
+            def __post_init__(self) -> None:
+                self._init_block_size()
+    """
+
+    def _init_block_size(self) -> None:
+        if getattr(self, "block_size", 0) == 0:
+            object.__setattr__(
+                self,
+                "block_size",
+                derive_block_size(self.tile, self.wave_size),
+            )

@@ -230,6 +230,39 @@ def _check(s: int, where: str) -> None:
         raise HipError(f"{where}: hipError({s}) {msg.decode() if msg else ''}")
 
 
+def get_device_arch(device: int = 0) -> Optional[str]:
+    """Best-effort gfx string of a HIP device (e.g. ``"gfx942"``).
+
+    Returns ``None`` when it can't be determined (no GPU present, or the
+    properties symbol is unavailable). Launch paths use this to compile for
+    the device they will actually run on instead of defaulting to a fixed
+    arch — building a gfx950 code object and launching it on gfx942 yields
+    ``hipError(209) no kernel image``.
+
+    The ``hipDeviceProp_t`` struct layout changes across ROCm releases (and
+    the symbol was versioned to ``...R0600`` in ROCm 6.x), so rather than
+    mirroring the struct we allocate a generous zeroed buffer, fill it via
+    ``hipGetDeviceProperties*``, and scan it for the ``gfx<...>`` token that
+    ``gcnArchName`` carries. ``name`` (the marketing string) contains no
+    ``gfx`` token, so the first match is the architecture name.
+    """
+    import re
+
+    buf = ctypes.create_string_buffer(4096)
+    for sym in ("hipGetDevicePropertiesR0600", "hipGetDeviceProperties"):
+        fn = _b(sym, ctypes.c_void_p, ctypes.c_int)
+        try:
+            rc = fn(buf, int(device))
+        except (AttributeError, OSError):
+            continue
+        if rc != 0:
+            continue
+        m = re.search(rb"gfx[0-9a-z]+", buf.raw)
+        if m:
+            return m.group(0).decode("ascii")
+    return None
+
+
 @dataclass
 class Module:
     handle: _HipModuleHandle

@@ -306,7 +306,7 @@ class TestCkDslExamples(unittest.TestCase):
 class TestExtendedKernelParity(unittest.TestCase):
     """GPU end-to-end parity for the extended kernel family.
 
-    Drives :mod:`ck_dsl.examples.parity_extended_kernels` to validate the
+    Drives :mod:`ck_dsl.examples.common.parity_extended_kernels` to validate the
     fused-MoE, FMHA expansion, Sage, and sparse-attention kernels against
     torch references on the live GPU. Each case launches the kernel
     scalar-per-CTA (``block=(1, 1, 1)``) -- the v1 scalar-inner bodies
@@ -322,7 +322,7 @@ class TestExtendedKernelParity(unittest.TestCase):
         if not torch.cuda.is_available():
             self.skipTest("HIP / CUDA device not available")
 
-        from ck_dsl.examples.parity_extended_kernels import ALL_CASES
+        from ck_dsl.examples.common.parity_extended_kernels import ALL_CASES
 
         failures = []
         for name, fn in ALL_CASES.items():
@@ -373,7 +373,7 @@ class TestCkStyleLaunchKernelGpu(unittest.TestCase):
             launch_kernel,
             make_kernel,
         )
-        from ck_dsl.instances.elementwise import (
+        from ck_dsl.instances.common.elementwise import (
             ElementwiseSpec,
             build_elementwise,
             elementwise_grid,

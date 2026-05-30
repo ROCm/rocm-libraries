@@ -1132,7 +1132,7 @@ def _make_gemm_configs(
     """Build a small but representative tile/chiplet sweep, threading
     the fused epilogue through each spec.
     """
-    from ..instances.gemm_universal import (
+    from ..instances.common.gemm_universal import (
         DataSpec,
         TileSpec,
         TraitSpec,
@@ -1244,7 +1244,7 @@ def compile_fn(
         LaunchConfig,
         time_launches,
     )
-    from ..instances.gemm_universal import build_universal_gemm
+    from ..instances.common.gemm_universal import build_universal_gemm
     import functools
 
     _per_dtype: Dict[Any, Tuple[Autotuner, List[AutotuneConfig]]] = {}
