@@ -3,7 +3,7 @@
 """DSL example 05: row reduction (CK Tile parity).
 
 CK Tile counterpart: ``example/ck_tile/05_reduce``. Builds the
-row-reduction kernel from :mod:`ck_dsl.instances.reduce`: one CTA
+row-reduction kernel from :mod:`ck_dsl.instances.common.reduce`: one CTA
 per row, vec-wide chunks, LDS tree reduction, scalar write per row.
 The default op is ``sum``; pass ``--op`` for ``mean`` / ``max``.
 """
@@ -23,7 +23,7 @@ from ck_dsl.helpers import (  # noqa: E402
     make_simple_op_manifest,
     write_artifact,
 )
-from ck_dsl.instances.reduce import (  # noqa: E402
+from ck_dsl.instances.common.reduce import (  # noqa: E402
     Reduce2DSpec,
     build_reduce2d,
     reduce2d_signature,

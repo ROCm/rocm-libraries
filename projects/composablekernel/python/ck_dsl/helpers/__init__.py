@@ -113,6 +113,9 @@ from .attention import (
     use_2d_kernel,
     warp_xor_reduce_max,
     warp_xor_reduce_sum,
+    wave_reduce_max,
+    wave_reduce_stages,
+    wave_reduce_sum,
 )
 from .compile import KernelArtifact, compile_kernel
 from .mfma_attention import (
@@ -418,6 +421,9 @@ __all__ = [
     "use_2d_kernel",
     "warp_xor_reduce_max",
     "warp_xor_reduce_sum",
+    "wave_reduce_max",
+    "wave_reduce_stages",
+    "wave_reduce_sum",
     # Geometry
     "WarpGrid",
     # Autotuning

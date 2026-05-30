@@ -1,0 +1,489 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""Unit tests for ck_dsl multi-arch support (Phase F gates).
+
+Covers the polymorphic-core foundation (ArchTarget + MMA catalog + ISA backend),
+the GEMM family policy, the gfx950 byte-identical guarantee, the hybrid-layout
+back-compat shim, and the architectural isolation rules from
+``dsl_docs/architecture/multi_arch_data_layout.md`` ("Review Rules").
+
+Run:  PYTHONPATH=python python3 python/test/test_ck_dsl_multiarch.py
+These tests need no GPU.
+"""
+
+from __future__ import annotations
+
+import pathlib
+import unittest
+
+from ck_dsl.core.arch import ArchTarget, known_arches, normalize_dtype
+from ck_dsl.core.isa import Gfx9MfmaBackend, Gfx950Backend, backend_for
+
+_CKDSL_ROOT = pathlib.Path(__file__).resolve().parents[1] / "ck_dsl"
+
+
+class TestArchTarget(unittest.TestCase):
+    def test_known_arches(self):
+        # CDNA (gfx942/gfx950, MFMA) + RDNA3.5 (gfx1151, WMMA/wave32).
+        self.assertEqual(set(known_arches()), {"gfx942", "gfx950", "gfx1151"})
+
+    def test_gfx1151_rdna_facts(self):
+        t = ArchTarget.from_gfx("gfx1151")
+        self.assertEqual(t.wave_size, 32)
+        self.assertEqual(t.family, "rdna")
+        # WMMA catalog, not MFMA: no 'mma'-family atoms, has 'wmma' 16x16x16.
+        self.assertEqual(
+            t.mma.enumerate(a_dtype="fp16", b_dtype="fp16", c_dtype="fp32"), []
+        )
+        wmma = t.mma.enumerate(
+            family="wmma", a_dtype="fp16", b_dtype="fp16", c_dtype="fp32"
+        )
+        self.assertEqual([o.shape for o in wmma], [(16, 16, 16)])
+        from ck_dsl.core.isa import backend_for, Gfx11RdnaBackend
+
+        self.assertIsInstance(backend_for("gfx1151"), Gfx11RdnaBackend)
+
+    def test_unknown_arch_raises(self):
+        with self.assertRaises(KeyError):
+            ArchTarget.from_gfx("gfx999")
+
+    def test_facts(self):
+        t942 = ArchTarget.from_gfx("gfx942")
+        t950 = ArchTarget.from_gfx("gfx950")
+        self.assertEqual(t942.isa_triple, "amdgcn-amd-amdhsa--gfx942")
+        self.assertEqual(t942.wave_size, 64)
+        self.assertEqual(t942.lds_capacity_bytes, 65536)
+        self.assertEqual(t950.lds_capacity_bytes, 163840)
+        self.assertEqual(t942.vmcnt_bits, 4)
+        self.assertEqual(t950.vmcnt_bits, 6)
+        self.assertFalse(t942.memory.has_ds_read_tr)
+        self.assertTrue(t950.memory.has_ds_read_tr)
+
+    def test_predicates(self):
+        t942 = ArchTarget.from_gfx("gfx942")
+        self.assertTrue(t942.fits_lds(65536))
+        self.assertFalse(t942.fits_lds(65537))
+        self.assertTrue(t942.supports_dtype_combo("fp16", "fp16", "fp32"))
+        # gfx942 (CDNA3) ships fp8/bf8 MFMA, so the fp8 dtype combo IS
+        # supported on it. The fp4/MX MFMA family is the gfx950-only
+        # combo, so use it for the negative case.
+        self.assertTrue(t942.supports_dtype_combo("fp8", "fp8", "fp32"))
+        self.assertFalse(t942.supports_dtype_combo("fp4", "fp4", "fp32"))
+        self.assertTrue(
+            ArchTarget.from_gfx("gfx950").supports_dtype_combo("fp4", "fp4", "fp32")
+        )
+        self.assertEqual(t942.max_threads_per_block, 1024)
+
+    def test_dtype_normalization(self):
+        self.assertEqual(normalize_dtype("f16"), "fp16")
+        self.assertEqual(normalize_dtype("half"), "fp16")
+        self.assertEqual(normalize_dtype("bf16"), "bf16")
+        self.assertEqual(normalize_dtype("f32"), "fp32")
+
+
+class TestMmaCatalog(unittest.TestCase):
+    def test_f16_atom_divergence(self):
+        f = lambda gfx: sorted(  # noqa: E731
+            op.shape
+            for op in ArchTarget.from_gfx(gfx).mma.enumerate(
+                a_dtype="fp16", b_dtype="fp16", c_dtype="fp32"
+            )
+        )
+        # gfx942 narrow CDNA3 atoms only; gfx950 adds the wide CDNA4 atoms.
+        self.assertEqual(f("gfx942"), [(16, 16, 16), (32, 32, 8)])
+        self.assertEqual(
+            f("gfx950"), [(16, 16, 16), (16, 16, 32), (32, 32, 8), (32, 32, 16)]
+        )
+
+    def test_wide_atom_absent_on_gfx942(self):
+        t = ArchTarget.from_gfx("gfx942")
+        self.assertFalse(
+            t.mma.has_shape(
+                a_dtype="fp16", b_dtype="fp16", c_dtype="fp32", m=16, n=16, k=32
+            )
+        )
+        self.assertTrue(
+            ArchTarget.from_gfx("gfx950").mma.has_shape(
+                a_dtype="fp16", b_dtype="fp16", c_dtype="fp32", m=16, n=16, k=32
+            )
+        )
+
+    def test_select_largest_k(self):
+        op942 = ArchTarget.from_gfx("gfx942").mma.select_largest_k(
+            a_dtype="fp16", b_dtype="fp16", c_dtype="fp32", m=16, n=16
+        )
+        op950 = ArchTarget.from_gfx("gfx950").mma.select_largest_k(
+            a_dtype="fp16", b_dtype="fp16", c_dtype="fp32", m=16, n=16
+        )
+        self.assertEqual(op942.k, 16)  # gfx942 max is 16x16x16
+        self.assertEqual(op950.k, 32)  # gfx950 has the wide 16x16x32
+        self.assertEqual(op950.op_id, "mfma_f32_16x16x32_f16")
+
+    def test_select_returns_none_for_unsupported(self):
+        t = ArchTarget.from_gfx("gfx942")
+        # fp8 IS on gfx942 now (16x16x32 / 32x32x16); fp4/MX is the
+        # genuinely gfx950-only family, so it must select to None on gfx942.
+        self.assertIsNone(
+            t.mma.select_largest_k(
+                a_dtype="fp4", b_dtype="fp4", c_dtype="fp32", m=16, n=16
+            )
+        )
+        # ...and resolve to the fp8 hero atom on gfx942 (it's shipped).
+        op_fp8 = t.mma.select_largest_k(
+            a_dtype="fp8", b_dtype="fp8", c_dtype="fp32", m=16, n=16
+        )
+        self.assertIsNotNone(op_fp8)
+        self.assertEqual(op_fp8.op_id, "mfma_f32_16x16x32_fp8")
+
+
+class TestISABackend(unittest.TestCase):
+    def test_backend_selection(self):
+        self.assertIsInstance(backend_for("gfx942"), Gfx9MfmaBackend)
+        self.assertIsInstance(backend_for("gfx950"), Gfx950Backend)
+
+    def test_unknown_backend_raises(self):
+        with self.assertRaises(KeyError):
+            backend_for("gfx999")
+
+    def test_preamble_and_waitcnt_shared_for_cdna(self):
+        b942, b950 = backend_for("gfx942"), backend_for("gfx950")
+        # datalayout/triple/waitcnt are hardware-verified identical across these
+        # CDNA targets today (see multi_arch_data_layout.md "ISA Backend").
+        self.assertEqual(b942.module_preamble(), b950.module_preamble())
+        self.assertIn("target datalayout", b942.module_preamble())
+        self.assertIn("amdgcn-amd-amdhsa", b942.triple)
+        self.assertEqual(b942.encode_waitcnt(0, -1, 0), b950.encode_waitcnt(0, -1, 0))
+
+
+class TestGfx950ByteIdentical(unittest.TestCase):
+    def _kernel(self):
+        from ck_dsl.instances.common.gemm_universal import (
+            UniversalGemmSpec,
+            TileSpec,
+            TraitSpec,
+            DataSpec,
+            build_universal_gemm,
+        )
+
+        spec = UniversalGemmSpec(
+            name="byteid",
+            tile=TileSpec(
+                tile_m=128,
+                tile_n=128,
+                tile_k=32,
+                warp_m=2,
+                warp_n=2,
+                warp_k=1,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=16,
+            ),
+            trait=TraitSpec(
+                pipeline="compv4", scheduler="intrawave", epilogue="cshuffle"
+            ),
+            data=DataSpec(dtype_a="fp16", dtype_b="fp16", dtype_c="fp16"),
+        )
+        return build_universal_gemm(spec)
+
+    def test_legacy_equals_gfx950(self):
+        from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
+
+        k = self._kernel()
+        self.assertEqual(
+            lower_kernel_to_llvm(k), lower_kernel_to_llvm(k, arch="gfx950")
+        )
+
+    def test_arch_param_default_is_cdna_byte_identical(self):
+        # The new ``arch`` parameter on build_universal_gemm must default to the
+        # CDNA behaviour: building with arch="gfx950" (and the gfx942-legal
+        # 16x16x16 atom for gfx942) must produce byte-identical LLVM to the
+        # historical no-arg build, across the (pipeline, epilogue) matrix.
+        from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
+        from ck_dsl.instances.common.gemm_universal import (
+            UniversalGemmSpec,
+            TileSpec,
+            TraitSpec,
+            DataSpec,
+            build_universal_gemm,
+        )
+
+        for pl in ("mem", "compv3", "compv4"):
+            for ep in ("default", "cshuffle"):
+                spec = UniversalGemmSpec(
+                    name="archid",
+                    tile=TileSpec(
+                        tile_m=128,
+                        tile_n=128,
+                        tile_k=32,
+                        warp_m=2,
+                        warp_n=2,
+                        warp_k=1,
+                        warp_tile_m=16,
+                        warp_tile_n=16,
+                        warp_tile_k=16,
+                    ),
+                    trait=TraitSpec(pipeline=pl, scheduler="intrawave", epilogue=ep),
+                    data=DataSpec(dtype_a="fp16", dtype_b="fp16", dtype_c="fp16"),
+                )
+                legacy = lower_kernel_to_llvm(build_universal_gemm(spec), arch="gfx950")
+                explicit = lower_kernel_to_llvm(
+                    build_universal_gemm(spec, arch="gfx950"), arch="gfx950"
+                )
+                self.assertEqual(legacy, explicit, f"{pl}/{ep} drifted on gfx950")
+
+
+class TestUnifiedGfx1151Gemm(unittest.TestCase):
+    """The MMA-contract unification: the SAME GEMM body emits WMMA on gfx1151."""
+
+    def _spec(self, pipeline="mem", epilogue="default"):
+        from ck_dsl.instances.common.gemm_universal import (
+            UniversalGemmSpec,
+            TileSpec,
+            TraitSpec,
+            DataSpec,
+        )
+
+        return UniversalGemmSpec(
+            name="ugemm1151",
+            tile=TileSpec(
+                tile_m=32,
+                tile_n=32,
+                tile_k=16,
+                warp_m=2,
+                warp_n=2,
+                warp_k=1,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=16,
+            ),
+            trait=TraitSpec(
+                pipeline=pipeline,
+                scheduler="intrawave",
+                epilogue=epilogue,
+                pad_m=True,
+                pad_n=True,
+                pad_k=True,
+            ),
+            data=DataSpec(dtype_a="fp16", dtype_b="fp16", dtype_c="fp16"),
+            wave_size=32,
+        )
+
+    def test_unified_body_emits_wmma(self):
+        # build_universal_gemm(spec, arch="gfx1151") must produce a wave32 WMMA
+        # kernel (the same builder that emits MFMA on CDNA).
+        from ck_dsl.core.lower_llvm import lower_kernel_to_llvm
+        from ck_dsl.instances.common.gemm_universal import build_universal_gemm
+
+        ir = lower_kernel_to_llvm(
+            build_universal_gemm(self._spec(), arch="gfx1151"), arch="gfx1151"
+        )
+        self.assertIn("wmma.f32.16x16x16.f16", ir)
+        self.assertIn("<16 x half>", ir)  # WMMA operand fragment
+        self.assertIn("<8 x float>", ir)  # WMMA accumulator fragment
+
+    def test_unified_body_rejects_unsupported_wmma_configs(self):
+        # The WMMA path is gated to mem + default + 16x16x16; richer configs
+        # must reject cleanly (no silent wrong-ISA emission).
+        from ck_dsl.instances.common.gemm_universal import is_valid_spec
+
+        ok, why = is_valid_spec(self._spec(pipeline="compv4"), arch="gfx1151")
+        self.assertFalse(ok)
+        self.assertIn("WMMA", why)
+        ok, why = is_valid_spec(self._spec(epilogue="cshuffle"), arch="gfx1151")
+        self.assertFalse(ok)
+        self.assertIn("WMMA", why)
+
+    def test_wave64_spec_rejected_on_gfx1151(self):
+        # A wave64 spec must not build on the wave32 target.
+        from ck_dsl.instances.common.gemm_universal import (
+            UniversalGemmSpec,
+            TileSpec,
+            TraitSpec,
+            DataSpec,
+            is_valid_spec,
+        )
+
+        spec = UniversalGemmSpec(
+            name="w64",
+            wave_size=64,
+            tile=TileSpec(
+                tile_m=32,
+                tile_n=32,
+                tile_k=16,
+                warp_m=2,
+                warp_n=2,
+                warp_k=1,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=16,
+            ),
+            trait=TraitSpec(pipeline="mem", epilogue="default"),
+            data=DataSpec(dtype_a="fp16", dtype_b="fp16", dtype_c="fp16"),
+        )
+        ok, why = is_valid_spec(spec, arch="gfx1151")
+        self.assertFalse(ok)
+        self.assertIn("wave_size", why)
+
+
+class TestGemmPolicy(unittest.TestCase):
+    def _spec(self, wtm, wtn, wtk, dt="fp16"):
+        from ck_dsl.instances.common.gemm_universal import (
+            UniversalGemmSpec,
+            TileSpec,
+            TraitSpec,
+            DataSpec,
+        )
+
+        return UniversalGemmSpec(
+            name="p",
+            tile=TileSpec(
+                tile_m=4 * wtm,
+                tile_n=4 * wtn,
+                tile_k=max(32, wtk),
+                warp_m=2,
+                warp_n=2,
+                warp_k=1,
+                warp_tile_m=wtm,
+                warp_tile_n=wtn,
+                warp_tile_k=wtk,
+            ),
+            trait=TraitSpec(pipeline="mem", epilogue="default"),
+            data=DataSpec(dtype_a=dt, dtype_b=dt, dtype_c=dt),
+        )
+
+    def test_arch_aware_validate(self):
+        from ck_dsl.instances.common.gemm_policy import GemmPipelinePolicy
+
+        pol = GemmPipelinePolicy()
+        t942, t950 = ArchTarget.from_gfx("gfx942"), ArchTarget.from_gfx("gfx950")
+        # 16x16x16 legal on both; the wide 16x16x32 only on gfx950.
+        self.assertTrue(pol.validate(t942, self._spec(16, 16, 16)).ok)
+        self.assertTrue(pol.validate(t950, self._spec(16, 16, 16)).ok)
+        self.assertFalse(pol.validate(t942, self._spec(16, 16, 32)).ok)
+        self.assertTrue(pol.validate(t950, self._spec(16, 16, 32)).ok)
+
+    def test_valid_warp_tiles_from_catalog(self):
+        from ck_dsl.instances.common.gemm_policy import GemmPipelinePolicy
+
+        pol = GemmPipelinePolicy()
+        self.assertEqual(
+            pol.valid_warp_tiles(
+                ArchTarget.from_gfx("gfx942"), ("fp16", "fp16", "fp32")
+            ),
+            [(16, 16, 16), (32, 32, 8)],
+        )
+
+
+class TestHybridLayoutShim(unittest.TestCase):
+    def test_canonical_layout_public_api(self):
+        # The back-compat shims at the old flat paths have been removed; the
+        # canonical hybrid-layout module is the single source of truth and the
+        # public package API re-exports from it.
+        from ck_dsl.instances import build_universal_gemm as public_build
+        from ck_dsl.instances.common import gemm_universal as impl
+
+        self.assertIs(public_build, impl.build_universal_gemm)
+        # private helpers still live on the canonical module (sibling instances
+        # depend on them)
+        for name in ("_emit_mfma", "_choose_load_vec", "_storage_dtype"):
+            self.assertTrue(hasattr(impl, name))
+        # the old flat shim path must be gone
+        import importlib
+
+        with self.assertRaises(ModuleNotFoundError):
+            importlib.import_module("ck_dsl.instances.gemm_universal")
+
+
+class TestDeviceArchAndFusionTargeting(unittest.TestCase):
+    """The launch-path fix: device-arch detection + arch-aware fusion atoms."""
+
+    def test_get_device_arch_importable(self):
+        from ck_dsl.runtime.hip_module import get_device_arch
+
+        v = get_device_arch()  # None off-GPU, "gfxNNN" on a device — never raises
+        self.assertTrue(v is None or (isinstance(v, str) and v.startswith("gfx")))
+
+    def test_fusion_gemm_atoms_are_catalog_legal_per_arch(self):
+        # The GemmEpilogueLowerer must pick warp-tile K from the target's MMA
+        # catalog so it never emits a gfx950-only atom (e.g. 32x32x16 f16) on
+        # gfx942. Drive candidates() with the device resolved to each arch and
+        # assert every emitted spec validates on that arch.
+        import unittest.mock as mock
+        from ck_dsl.helpers import (
+            FusionOp,
+            FusionTensor,
+            GemmEpilogueLowerer,
+            GreedyFusionScheduler,
+            build_graph,
+        )
+        from ck_dsl.instances.common.gemm_universal import is_valid_spec
+
+        graph = build_graph(
+            tensors=[
+                FusionTensor("A", (256, 256), "fp16", is_input=True),
+                FusionTensor("B", (256, 256), "fp16", is_input=True),
+                FusionTensor("mm", (256, 256), "fp16", is_output=True),
+            ],
+            ops=[FusionOp("mm0", "matmul", ("A", "B"), ("mm",))],
+            inputs=("A", "B"),
+            outputs=("mm",),
+        )
+        region = GreedyFusionScheduler().schedule(graph).regions[0]
+        low = GemmEpilogueLowerer()
+        for gfx in ("gfx942", "gfx950"):
+            with mock.patch(
+                "ck_dsl.runtime.hip_module.get_device_arch", return_value=gfx
+            ):
+                cfgs = low.candidates(graph, region)
+            self.assertTrue(cfgs, f"no candidates for {gfx}")
+            for c in cfgs:
+                ok, why = is_valid_spec(c.spec, arch=gfx)
+                self.assertTrue(ok, f"{gfx}: illegal spec emitted: {why}")
+            # On gfx942 none may use the gfx950-only wide f16 atoms.
+            if gfx == "gfx942":
+                for c in cfgs:
+                    self.assertNotIn(
+                        (
+                            c.spec.tile.warp_tile_m,
+                            c.spec.tile.warp_tile_n,
+                            c.spec.tile.warp_tile_k,
+                        ),
+                        {(16, 16, 32), (32, 32, 16)},
+                    )
+
+
+class TestArchitecturalIsolation(unittest.TestCase):
+    """Review-rule gates from the design doc."""
+
+    def _read(self, rel):
+        return (_CKDSL_ROOT / rel).read_text()
+
+    def test_core_arch_no_dispatcher_import(self):
+        # Catch real imports of dispatcher, not the word in docstrings/comments.
+        import re
+
+        pat = re.compile(r"^\s*(from|import)\s+\S*dispatcher", re.MULTILINE)
+        for p in (_CKDSL_ROOT / "core" / "arch").rglob("*.py"):
+            self.assertIsNone(
+                pat.search(p.read_text()), f"{p} must not import from dispatcher/"
+            )
+
+    def test_core_arch_no_pipeline_vocabulary(self):
+        # Pipeline/scheduler names are instance-side policy, never in core/arch.
+        blob = "\n".join(
+            p.read_text() for p in (_CKDSL_ROOT / "core" / "arch").rglob("*.py")
+        )
+        for tok in ("compv4", "compv3", "intrawave", "interwave", "qr_ks_vs"):
+            self.assertNotIn(tok, blob, f"pipeline token {tok!r} leaked into core/arch")
+
+    def test_core_arch_no_llvm_intrinsic_text(self):
+        blob = "\n".join(
+            p.read_text() for p in (_CKDSL_ROOT / "core" / "arch").rglob("*.py")
+        )
+        self.assertNotIn(
+            "llvm.amdgcn", blob, "core/arch must not contain intrinsic text"
+        )
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

@@ -62,6 +62,59 @@ CACHE_STREAM = 2  # SLC set — streaming hint (don't evict useful lines).
 NON_TEMPORAL = 3  # GLC + SLC — bypass cache hierarchy entirely.
 
 
+# ----- target-neutral MMA metadata ---------------------------------------
+#
+# ``IRBuilder.mma`` emits a single ``tile.mma`` op keyed by ``op_id``; the ISA
+# backend lowers that op_id to the matching MFMA/WMMA call. To stay BYTE-
+# IDENTICAL with the historical ISA-named emission, ``mma`` must size the result
+# vector and pick the result-name hint exactly as the legacy method did. These
+# tables encode both, keyed by op_id.
+#
+# ``_MMA_C_FRAG_LEN`` is duplicated here (rather than imported from
+# ``core/arch``) so ``ir.py`` stays free of an ``arch`` import when a caller
+# passes a bare op_id string; an ``MmaOp`` object always supplies its own
+# ``c_frag_len`` and bypasses this table.
+_MMA_C_FRAG_LEN: Dict[str, int] = {
+    "mfma_f32_16x16x16_f16": 4,
+    "mfma_f32_16x16x32_f16": 4,
+    "mfma_f32_16x16x16_bf16": 4,
+    "mfma_f32_16x16x32_bf16": 4,
+    "mfma_f32_16x16x32_fp8": 4,
+    "mfma_f32_16x16x32_bf8": 4,
+    "mfma_f32_32x32x8_f16": 16,
+    "mfma_f32_32x32x16_f16": 16,
+    "mfma_f32_32x32x16_bf16": 16,
+    "mfma_f32_32x32x16_fp8": 16,
+    "mfma_f32_32x32x16_bf8": 16,
+    "mfma_f32_4x4x4_f16": 4,
+    "mfma_f32_16x16x128_fp4": 4,
+    "mfma_f32_16x16x96_fp6": 4,
+    "mfma_scale_f32_16x16x128_f8f6f4": 4,
+    "wmma_f32_16x16x16_f16": 8,
+    "wmma_f32_16x16x16_bf16": 8,
+}
+
+# op_id -> the ``result_name_hint`` the legacy ISA-named method used. Most atoms
+# used "acc"; a handful used distinct hints that must be preserved verbatim so
+# the SSA value numbering (and thus the emitted text) is unchanged.
+_MMA_RESULT_HINT: Dict[str, str] = {
+    "mfma_f32_32x32x16_bf16": "acc32",
+    "mfma_f32_16x16x128_fp4": "acc4",
+    "mfma_f32_16x16x96_fp6": "acc6",
+    "mfma_scale_f32_16x16x128_f8f6f4": "mxacc",
+}
+
+
+def _mma_c_frag_len(op_id: str) -> int:
+    try:
+        return _MMA_C_FRAG_LEN[op_id]
+    except KeyError:
+        raise ValueError(
+            f"unknown MMA op_id {op_id!r}; pass an MmaOp or one of "
+            f"{sorted(_MMA_C_FRAG_LEN)}"
+        )
+
+
 @dataclass(frozen=True)
 class VectorType(Type):
     elem: Type
@@ -1119,7 +1172,9 @@ class IRBuilder:
         """
         if dtype.name in ("f16", "bf16", "i16"):
             elem_bytes = 2
-            if n not in (2, 4, 8):
+            # n=16 (32-byte `global_load_dwordx8`) is needed for the RDNA WMMA
+            # <16 x half> operand fragment; AMDGPU coalesces it when aligned.
+            if n not in (2, 4, 8, 16):
                 raise ValueError(f"unsupported vector width for global_load_vN: {n}")
         elif dtype.name in ("f32", "i32"):
             elem_bytes = 4
@@ -1308,13 +1363,82 @@ class IRBuilder:
             result_name_hint=f"av{n}",
         ).result
 
-    def mfma_f32_16x16x16_f16(self, a: Value, b: Value, c: Value) -> Value:
+    # ----- target-neutral MMA -----
+
+    def mma(
+        self,
+        op: Any,
+        a: Value,
+        b: Value,
+        c: Value,
+        *extra: Value,
+    ) -> Value:
+        """Target-neutral matrix-multiply-accumulate: ``D = A * B + C``.
+
+        ``op`` is either an :class:`~ck_dsl.core.arch.MmaOp` (preferred — its
+        ``op_id`` and ``c_frag_len`` drive the lowering) or a raw ``op_id``
+        string. This emits a single ``tile.mma`` op carrying the ``op_id`` as an
+        attribute; the LLVM lowering dispatches that ``op_id`` through the ISA
+        backend (:meth:`ck_dsl.core.isa.ISABackend.emit_mma`), which emits the
+        matching MFMA call on CDNA or the WMMA call on RDNA. **One kernel body,
+        two ISAs.**
+
+        The result vector type is ``<c_frag_len x float>`` (the per-lane
+        accumulator length the atom produces). When ``op`` is an ``op_id``
+        string the frag length is resolved from the static MMA fragment table.
+
+        The ISA-named helpers (:meth:`mfma_f32_16x16x16_f16`,
+        :meth:`wmma_f32_16x16x16_f16`, …) are thin wrappers over this method,
+        kept for backward compatibility; they pass the ``op_id`` that reproduces
+        their historical emission byte-for-byte.
+
+        ``*extra`` carries the additional operands the scaled MX atoms need
+        (``a_scale``, ``b_scale``); ordinary atoms take exactly ``a, b, c``.
+        """
+        op_id = op.op_id if hasattr(op, "op_id") else str(op)
+        c_frag_len = (
+            op.c_frag_len
+            if hasattr(op, "c_frag_len") and op.c_frag_len
+            else _mma_c_frag_len(op_id)
+        )
+        hint = _MMA_RESULT_HINT.get(op_id, "acc")
         return self._op(
-            "tile.mfma_f32_16x16x16_f16",
-            [a, b, c],
-            [VectorType(F32, 4)],
-            result_name_hint="acc",
+            "tile.mma",
+            [a, b, c, *extra],
+            [VectorType(F32, c_frag_len)],
+            attrs={"op_id": op_id},
+            result_name_hint=hint,
         ).result
+
+    def wmma_f32_16x16x16_f16(self, a: Value, b: Value, c: Value) -> Value:
+        """RDNA3/3.5 (gfx11) WMMA: D[16x16] += A[16x16] * B[16x16], f16 in / f32 acc.
+
+        Wave32 ABI (hardware-verified on gfx1151): per lane ``a`` and ``b`` are
+        ``<16 x half>`` and the accumulator ``c`` / result are ``<8 x float>``.
+        Fragment layout (lane ``l``): ``a`` = row ``l%16`` (K=0..15), ``b`` =
+        col ``l%16`` (K=0..15); result slot ``i`` = ``(row 2i+l/16, col l%16)``.
+        Lowered via :meth:`ck_dsl.core.isa.Gfx11RdnaBackend.emit_wmma`; CDNA
+        targets reject this op. Thin wrapper over :meth:`mma`.
+        """
+        return self.mma("wmma_f32_16x16x16_f16", a, b, c)
+
+    def wmma_f32_16x16x16_bf16(self, a: Value, b: Value, c: Value) -> Value:
+        """RDNA3/3.5 (gfx11) WMMA: D[16x16] += A[16x16] * B[16x16], bf16 in / f32 acc.
+
+        Wave32 ABI (hardware-verified on gfx1151, ROCm 7.0.2 clang 20): per lane
+        ``a`` and ``b`` are ``<16 x bfloat>`` and the accumulator ``c`` / result
+        are ``<8 x float>``. The fragment layout matches the f16 WMMA (lane
+        ``l``: ``a`` = row ``l%16`` K=0..15, ``b`` = col ``l%16`` K=0..15;
+        result slot ``i`` = ``(row 2i+l/16, col l%16)``). The backend bitcasts
+        the ``<16 x bfloat>`` operands to ``<16 x i16>`` for the intrinsic
+        ``llvm.amdgcn.wmma.f32.16x16x16.bf16.v8f32.v16i16``. Lowered via
+        :meth:`ck_dsl.core.isa.Gfx11RdnaBackend.emit_wmma`; CDNA targets reject
+        this op. Thin wrapper over :meth:`mma`.
+        """
+        return self.mma("wmma_f32_16x16x16_bf16", a, b, c)
+
+    def mfma_f32_16x16x16_f16(self, a: Value, b: Value, c: Value) -> Value:
+        return self.mma("mfma_f32_16x16x16_f16", a, b, c)
 
     def mfma_f32_16x16x32_f16(self, a: Value, b: Value, c: Value) -> Value:
         """MFMA with K=32 per atom (gfx950 only).
@@ -1324,44 +1448,19 @@ class IRBuilder:
         K-loop trip count for the same per-warp tile, and the wider
         operand load amortises the address arithmetic per MFMA.
         """
-        return self._op(
-            "tile.mfma_f32_16x16x32_f16",
-            [a, b, c],
-            [VectorType(F32, 4)],
-            result_name_hint="acc",
-        ).result
+        return self.mma("mfma_f32_16x16x32_f16", a, b, c)
 
     def mfma_f32_16x16x16_bf16(self, a: Value, b: Value, c: Value) -> Value:
-        return self._op(
-            "tile.mfma_f32_16x16x16_bf16",
-            [a, b, c],
-            [VectorType(F32, 4)],
-            result_name_hint="acc",
-        ).result
+        return self.mma("mfma_f32_16x16x16_bf16", a, b, c)
 
     def mfma_f32_16x16x32_bf16(self, a: Value, b: Value, c: Value) -> Value:
-        return self._op(
-            "tile.mfma_f32_16x16x32_bf16",
-            [a, b, c],
-            [VectorType(F32, 4)],
-            result_name_hint="acc",
-        ).result
+        return self.mma("mfma_f32_16x16x32_bf16", a, b, c)
 
     def mfma_f32_16x16x32_fp8(self, a: Value, b: Value, c: Value) -> Value:
-        return self._op(
-            "tile.mfma_f32_16x16x32_fp8",
-            [a, b, c],
-            [VectorType(F32, 4)],
-            result_name_hint="acc",
-        ).result
+        return self.mma("mfma_f32_16x16x32_fp8", a, b, c)
 
     def mfma_f32_16x16x32_bf8(self, a: Value, b: Value, c: Value) -> Value:
-        return self._op(
-            "tile.mfma_f32_16x16x32_bf8",
-            [a, b, c],
-            [VectorType(F32, 4)],
-            result_name_hint="acc",
-        ).result
+        return self.mma("mfma_f32_16x16x32_bf8", a, b, c)
 
     def mfma_f32_32x32x16_bf16(self, a: Value, b: Value, c: Value) -> Value:
         """gfx950 wider MFMA shape — 32x32 output × 16 K-step per atom.
@@ -1385,12 +1484,7 @@ class IRBuilder:
         pressure, (b) keeps each lane's accumulator dense for in-lane
         reduce, (c) reduces total ds_read_b128 K-load count.
         """
-        return self._op(
-            "tile.mfma_f32_32x32x16_bf16",
-            [a, b, c],
-            [VectorType(F32, 16)],
-            result_name_hint="acc32",
-        ).result
+        return self.mma("mfma_f32_32x32x16_bf16", a, b, c)
 
     def mfma_f32_32x32x8_f16(self, a: Value, b: Value, c: Value) -> Value:
         """The 32x32x8 f16 MFMA atom — the default warp-tile every CK
@@ -1401,12 +1495,7 @@ class IRBuilder:
         64 lanes). One MFMA per K-step produces 16 floats per lane that
         we then truncate to f16 for the GEMM epilogue.
         """
-        return self._op(
-            "tile.mfma_f32_32x32x8_f16",
-            [a, b, c],
-            [VectorType(F32, 16)],
-            result_name_hint="acc",
-        ).result
+        return self.mma("mfma_f32_32x32x8_f16", a, b, c)
 
     def mfma_f32_32x32x16_f16(self, a: Value, b: Value, c: Value) -> Value:
         """The 32x32x16 f16 MFMA atom (gfx950 only).
@@ -1415,28 +1504,13 @@ class IRBuilder:
         Doubles K per atom over 32x32x8, halving the K-loop trip count
         for the same per-warp tile and the same accumulator footprint.
         """
-        return self._op(
-            "tile.mfma_f32_32x32x16_f16",
-            [a, b, c],
-            [VectorType(F32, 16)],
-            result_name_hint="acc",
-        ).result
+        return self.mma("mfma_f32_32x32x16_f16", a, b, c)
 
     def mfma_f32_32x32x16_fp8(self, a: Value, b: Value, c: Value) -> Value:
-        return self._op(
-            "tile.mfma_f32_32x32x16_fp8",
-            [a, b, c],
-            [VectorType(F32, 16)],
-            result_name_hint="acc",
-        ).result
+        return self.mma("mfma_f32_32x32x16_fp8", a, b, c)
 
     def mfma_f32_32x32x16_bf8(self, a: Value, b: Value, c: Value) -> Value:
-        return self._op(
-            "tile.mfma_f32_32x32x16_bf8",
-            [a, b, c],
-            [VectorType(F32, 16)],
-            result_name_hint="acc",
-        ).result
+        return self.mma("mfma_f32_32x32x16_bf8", a, b, c)
 
     def mfma_scale_f32_16x16x128_f8f6f4(
         self,
@@ -1458,12 +1532,7 @@ class IRBuilder:
 
         Lowers to ``llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4``.
         """
-        return self._op(
-            "tile.mfma_scale_f32_16x16x128_f8f6f4",
-            [a, b, c, a_scale, b_scale],
-            [VectorType(F32, 4)],
-            result_name_hint="mxacc",
-        ).result
+        return self.mma("mfma_scale_f32_16x16x128_f8f6f4", a, b, c, a_scale, b_scale)
 
     def mfma_f32_16x16x128_fp4(self, a: Value, b: Value, c: Value) -> Value:
         """fp4 MX MFMA (gfx950+, P52).
@@ -1473,21 +1542,11 @@ class IRBuilder:
         via :meth:`mfma_scale_f32_16x16x128_f8f6f4` for the
         production MX path.
         """
-        return self._op(
-            "tile.mfma_f32_16x16x128_fp4",
-            [a, b, c],
-            [VectorType(F32, 4)],
-            result_name_hint="acc4",
-        ).result
+        return self.mma("mfma_f32_16x16x128_fp4", a, b, c)
 
     def mfma_f32_16x16x96_fp6(self, a: Value, b: Value, c: Value) -> Value:
         """fp6 MX MFMA (gfx950+, P52)."""
-        return self._op(
-            "tile.mfma_f32_16x16x96_fp6",
-            [a, b, c],
-            [VectorType(F32, 4)],
-            result_name_hint="acc6",
-        ).result
+        return self.mma("mfma_f32_16x16x96_fp6", a, b, c)
 
     def register_p_from_qk_c(self, qk_c: Value, target_dtype: Type) -> Value:
         """Lane-XOR + bit-transpose to convert a `<16 x f32>` QK-MFMA
@@ -1576,12 +1635,7 @@ class IRBuilder:
 
         Lowers to `@llvm.amdgcn.mfma.f32.4x4x4f16` (3 immarg).
         """
-        return self._op(
-            "tile.mfma_f32_4x4x4_f16",
-            [a, b, c],
-            [VectorType(F32, 4)],
-            result_name_hint="acc",
-        ).result
+        return self.mma("mfma_f32_4x4x4_f16", a, b, c)
 
     # ----- vector type casts (for packed buffer-load + LDS reads) -----
 
@@ -1922,9 +1976,11 @@ class IRBuilder:
         bitcast to i32 via a 2-element vector first.
         """
         if 1 <= lane_xor <= 31:
-            # ds_swizzle XOR butterfly: 1 LDS op, no addr-compute. Used
-            # for the standard 16-lane MFMA row-group butterfly that the
-            # attention softmax reduction needs.
+            # Emits `ds_swizzle` (XOR pattern in the immediate offset), NOT
+            # `ds_bpermute`: 1 LDS op, no addr-compute. This is the path the
+            # attention softmax reduction's 16-lane MFMA row-group butterfly
+            # actually takes (lane_xor in 1..16). ds_bpermute is only the
+            # wave-wide (lane_xor >= 32) fallback below.
             if v.type.name == "f32":
                 v_i = self.bitcast(v, I32)
                 r = self.ds_swizzle_xor(v_i, int(lane_xor))

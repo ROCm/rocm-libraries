@@ -474,8 +474,8 @@ def _simple_op_problem(
         flop = float(M * N * 4)
         bytes_xfer = 2.0 * M * N * 2 + 2.0 * N * (2 if beta is not None else 1)
         # Argument order matches the existing instance signatures
-        # (see ``ck_dsl.instances.layernorm2d.layernorm2d_signature`` and
-        # ``ck_dsl.instances.rmsnorm2d.rmsnorm2d_signature``):
+        # (see ``ck_dsl.instances.common.layernorm2d.layernorm2d_signature`` and
+        # ``ck_dsl.instances.common.rmsnorm2d.rmsnorm2d_signature``):
         #   layernorm: (X, Gamma, Beta, Y, M, N, eps)
         #   rmsnorm  : (X, Gamma, Y, M, N, eps)
         is_layernorm = kind == "layernorm_fp16"

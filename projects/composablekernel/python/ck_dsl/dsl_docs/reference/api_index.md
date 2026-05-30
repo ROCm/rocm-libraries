@@ -390,6 +390,6 @@ pass_through, pad, pad_dynamic, embed, merge, unmerge, indirect
 ```text
 python -m ck_dsl # list discoverable entry points
 python -m ck_dsl.run_manifest # numpy + HIP manifest runner
-python -m ck_dsl.examples.bake_off_implicit_gemm # example generator
+python -m ck_dsl.examples.common.bake_off_implicit_gemm # example generator
 python -m ck_dsl.sweep_bench # benchmark a sweep manifest
 ```

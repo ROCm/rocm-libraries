@@ -20,13 +20,13 @@ abstractions:
 
 * **scatter-by-token-pair**: each ``(token, k_topk)`` pair has its own
  bucket position in the sorted output -- computed at sort time by
- :mod:`ck_dsl.instances.moe_sorting`. The launcher reads the sort
+ :mod:`ck_dsl.instances.common.moe_sorting`. The launcher reads the sort
  pass's ``SortedTokenIds`` / ``SortedTopkIds`` arrays back into
  metadata buffers for the gather / scatter steps.
 
 This module exposes the per-element address-calc helpers; the actual
 gather / scatter kernel bodies live in
-:mod:`ck_dsl.instances.fused_moe`.
+:mod:`ck_dsl.instances.common.fused_moe`.
 
 What v1 ships:
 

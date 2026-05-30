@@ -193,13 +193,64 @@ def _encode_waitcnt_gfx9_10(vmcnt: int, expcnt: int, lgkmcnt: int) -> int:
     return (vm_b & 0xF) | (ec_b << 4) | (lk_b << 8) | (((vm_b >> 4) & 0x3) << 14)
 
 
+def _encode_waitcnt_gfx11(vmcnt: int, expcnt: int, lgkmcnt: int) -> int:
+    """Encode `s_waitcnt` for the RDNA3 (gfx11) layout used by gfx1151.
+
+    The gfx11 ``s_waitcnt`` field layout differs from the gfx9/gfx10 split
+    that :func:`_encode_waitcnt_gfx9_10` produces: the counters are
+    contiguous, there is no split VMCNT, and LGKMCNT is 6 bits (not 4):
+
+    * ``expcnt``  -> bits ``[2:0]``  (3 bits, max 7)
+    * ``lgkmcnt`` -> bits ``[9:4]``  (6 bits, max 63)
+    * ``vmcnt``   -> bits ``[15:10]`` (6 bits, max 63)
+
+    This mirrors :func:`ck_dsl.core.lower_llvm._encode_waitcnt_gfx11` (the
+    layout was read off the ROCm AMDGPU assembler on a gfx1151 node). ``-1``
+    means "no wait" and is encoded as the architectural maximum; explicit
+    values clamp to the field maximum rather than wrapping, so a partial
+    wait never silently becomes a full LDS/VMEM drain on wave32.
+    """
+
+    vm_b = 0x3F if vmcnt < 0 else min(max(vmcnt, 0), 0x3F)
+    ec_b = 0x7 if expcnt < 0 else min(max(expcnt, 0), 0x7)
+    lk_b = 0x3F if lgkmcnt < 0 else min(max(lgkmcnt, 0), 0x3F)
+    return (ec_b & 0x7) | ((lk_b & 0x3F) << 4) | ((vm_b & 0x3F) << 10)
+
+
+# Default arch for the HIP path. gfx950 is the historical CDNA target whose
+# emitted source is the byte-identical baseline; callers that don't pass an
+# arch (e.g. the in-tree coverage tests) keep getting exactly that output.
+_DEFAULT_HIP_ARCH = "gfx950"
+
+
 class _Lowerer:
-    def __init__(self, kernel: KernelDef) -> None:
+    def __init__(self, kernel: KernelDef, *, arch: Optional[str] = None) -> None:
         self.kernel = kernel
         self.lines: List[str] = []
         self.smem_decls: List[str] = []
         self._indent = 1
         self._smem_counter = 0
+        # Resolve the architecture seam. The HIP path has no separate ISA
+        # backend class (it emits ``__builtin_amdgcn_*`` directly), so the
+        # ``ArchTarget`` hardware facts drive every arch-keyed decision:
+        # the ``s_waitcnt`` encoding, whether the MMA family is MFMA (CDNA)
+        # or WMMA (RDNA/wave32), and whether ``ds_read_*_tr_*`` is available.
+        from .arch import ArchTarget
+
+        self.arch = ArchTarget.from_gfx(arch or _DEFAULT_HIP_ARCH)
+
+    # -------------------- arch seam --------------------
+
+    def _encode_waitcnt(self, vmcnt: int, expcnt: int, lgkmcnt: int) -> int:
+        """Arch-aware ``s_waitcnt`` immediate.
+
+        CDNA (gfx9/gfx10) uses the split-VMCNT layout; RDNA gfx11 (gfx1151)
+        uses the contiguous layout. Selection keys off the resolved
+        :class:`ArchTarget` ``target_family`` so CDNA output is unchanged.
+        """
+        if self.arch.target_family == "gfx11_rdna":
+            return _encode_waitcnt_gfx11(vmcnt, expcnt, lgkmcnt)
+        return _encode_waitcnt_gfx9_10(vmcnt, expcnt, lgkmcnt)
 
     def _emit(self, text: str) -> None:
         self.lines.append(" " * self._indent + text)
@@ -392,6 +443,25 @@ class _Lowerer:
         for i in range(4):
             self._emit(f"{nice}[{i}] = {storage}[{_name(row)}][{_name(col)} + {i}];")
 
+    def _op_tile_mma(self, op: Op) -> None:
+        """Lower the target-neutral ``tile.mma`` op for the HIP backend.
+
+        The HIP source path has no ISA backend (it emits ``__builtin_amdgcn_*``
+        directly), so the ``op_id`` is mapped back to the concrete
+        ``tile.<op_id>`` op and dispatched through the existing per-op handler.
+        This keeps the HIP emission identical to the legacy ISA-named path while
+        the IRBuilder helpers route through :meth:`IRBuilder.mma`.
+        """
+        op_id = op.attrs["op_id"]
+        legacy = Op(
+            name=f"tile.{op_id}",
+            operands=list(op.operands),
+            results=list(op.results),
+            attrs={k: v for k, v in op.attrs.items() if k != "op_id"},
+            loc=op.loc,
+        )
+        self.lower_op(legacy)
+
     def _op_tile_mfma_f32_16x16x16_f16(self, op: Op) -> None:
         a, b, c = op.operands
         self._emit(
@@ -426,6 +496,58 @@ class _Lowerer:
             f"f32x4 {_name(op.result)} = __builtin_amdgcn_mfma_f32_4x4x4f16("
             f"{_name(a)}, {_name(b)}, {_name(c)}, 0, 0, 0);"
         )
+
+    # ---- WMMA f16 (RDNA3/3.5, gfx11, wave32) ----
+    #
+    # The RDNA half of the neutral-MMA contract. A WMMA ``op_id`` reaches this
+    # handler only through ``_op_tile_mma`` (it rebuilds ``tile.<op_id>``). The
+    # hardware-verified wave32 builtin on gfx1151 (Strix Halo) is
+    # ``__builtin_amdgcn_wmma_f32_16x16x16_f16_w32(<16 x half> a,
+    # <16 x half> b, <8 x float> c) -> <8 x float>`` -- the same fragment
+    # layout the LLVM WMMA path emits (A/B per-lane ``f16x16``, accumulator
+    # ``f32x8``). It is gated to RDNA targets: MFMA-only CDNA targets have no
+    # WMMA instruction, so emitting it there would mis-compile, and the
+    # historical CDNA HIP source must stay MFMA. The third ``w32`` argument is
+    # the wave-mode / opsel flag (false => no input/output modifiers), matching
+    # clang's two-operand-flag convention for the gfx11 WMMA builtin.
+
+    def _op_tile_wmma_f32_16x16x16_f16(self, op: Op) -> None:
+        self._require_wmma_arch("wmma_f32_16x16x16_f16")
+        a, b, c = op.operands
+        self._emit(
+            f"f32x8 {_name(op.result)} = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32("
+            f"{_name(a)}, {_name(b)}, {_name(c)});"
+        )
+
+    def _require_wmma_arch(self, op_id: str) -> None:
+        """Reject a WMMA op on a target whose ISA has no WMMA instruction.
+
+        WMMA is an RDNA/gfx11 instruction; CDNA/MFMA targets must never emit
+        it. We key off the resolved :class:`ArchTarget` MMA catalog so the
+        gate is data-driven (a future RDNA target with WMMA passes
+        automatically once its catalog row exists)."""
+        if self.arch.mma.by_op_id(op_id) is None:
+            raise NotImplementedError(
+                f"WMMA op {op_id!r} is not available on {self.arch.gfx} "
+                f"(WMMA is an RDNA/gfx11 instruction; this is a "
+                f"{self.arch.family.upper()} target). The MFMA atoms are the "
+                f"matrix path on CDNA."
+            )
+
+    def _require_ds_read_tr(self, op_id: str) -> None:
+        """Reject an LDS transpose-read on a target without ``ds_read_*_tr_*``.
+
+        ``ds_read_b{64,128}_tr_b16`` is a gfx950-class instruction; gfx942 and
+        the RDNA gfx1151 target do not have it (``memory.has_ds_read_tr`` is
+        False). Gating data-driven off the :class:`ArchTarget` keeps the
+        gfx950 emission unchanged while preventing a silent mis-compile on the
+        other targets."""
+        if not self.arch.memory.has_ds_read_tr:
+            raise NotImplementedError(
+                f"transpose LDS read {op_id!r} is not available on "
+                f"{self.arch.gfx} (no ds_read_*_tr_* on this target); it is a "
+                f"gfx950-class instruction."
+            )
 
     # ---- FP8 / BF8 MFMA (gfx940+) ----
     #
@@ -636,7 +758,7 @@ class _Lowerer:
         # ``ck_tile/core/arch/arch.hpp``. Used by the async-DMA
         # ping-pong pipeline so the next iter's ``buffer_load_lds``
         # keeps streaming across this barrier.
-        mask = _encode_waitcnt_gfx9_10(vmcnt=-1, expcnt=-1, lgkmcnt=0)
+        mask = self._encode_waitcnt(vmcnt=-1, expcnt=-1, lgkmcnt=0)
         self._emit(f"__builtin_amdgcn_s_waitcnt({mask});")
         self._emit("__syncthreads();")
 
@@ -644,7 +766,7 @@ class _Lowerer:
         vm = int(op.attrs.get("vmcnt", -1))
         lk = int(op.attrs.get("lgkmcnt", -1))
         ec = int(op.attrs.get("expcnt", -1))
-        mask = _encode_waitcnt_gfx9_10(vm, ec, lk)
+        mask = self._encode_waitcnt(vm, ec, lk)
         self._emit(f"__builtin_amdgcn_s_waitcnt({mask});")
 
     def _op_tile_sched_barrier(self, op: Op) -> None:
@@ -1444,6 +1566,7 @@ class _Lowerer:
         # AMD's HIP headers expose this as ``__builtin_amdgcn_ds_read_tr16_b64``
         # taking a ``__local`` pointer. We materialise that pointer from
         # the typed smem storage.
+        self._require_ds_read_tr("ds_read_tr16_b64")
         smem = op.operands[0]
         indices = op.operands[1:]
         storage = smem.op.attrs.get("_storage")
@@ -1467,6 +1590,7 @@ class _Lowerer:
     def _op_tile_ds_read_tr16_b128(self, op: Op) -> None:
         # ``ds_read_b128_tr_b16`` -- wide gfx950 transpose-read.
         # Same shape as the b64 variant, ``<8 x i16>`` per lane.
+        self._require_ds_read_tr("ds_read_tr16_b128")
         smem = op.operands[0]
         indices = op.operands[1:]
         storage = smem.op.attrs.get("_storage")
@@ -1730,6 +1854,7 @@ def lower_kernel_to_hip(
     *,
     launch_bounds: Optional[int] = None,
     include_prologue: bool = True,
+    arch: Optional[str] = None,
 ) -> str:
     """Return a compilable HIP source for ``kernel``.
 
@@ -1752,6 +1877,13 @@ def lower_kernel_to_hip(
     inline assembly / builtin calls. Useful for human inspection,
     diff-ing against a hand-written CK Tile kernel, and as a debug
     target for the ck_dsl IR.
+
+    ``arch`` selects the architecture seam that drives the arch-keyed
+    decisions: the ``s_waitcnt`` encoding (gfx9/10 split-VMCNT vs gfx11
+    contiguous), the MMA-builtin family (MFMA on CDNA, WMMA C++ builtins on
+    RDNA/wave32 gfx1151), and whether ``ds_read_*_tr_*`` is available. It
+    defaults to :data:`_DEFAULT_HIP_ARCH` (``gfx950``) so existing callers and
+    the byte-identical CDNA baseline are preserved.
     """
 
     if launch_bounds is None:
@@ -1775,7 +1907,7 @@ def lower_kernel_to_hip(
         f"void {kernel.name}({signature})\n{{"
     )
 
-    lowerer = _Lowerer(kernel)
+    lowerer = _Lowerer(kernel, arch=arch)
     lowerer.lower_region(kernel.body)
 
     smem_block = "\n".join(lowerer.smem_decls)
