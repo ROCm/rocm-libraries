@@ -185,3 +185,15 @@ this plugin is the first embedder).
 
 GPU-gated tests skip cleanly on hosts without a HIP-visible device;
 the integration test additionally skips on non-gfx950 hardware.
+
+## Design plan
+
+The provider's architecture, milestone scope, and resolved design
+questions are recorded in the implementation plan:
+
+- [CK DSL hipDNN Provider — Plan](../../projects/composablekernel/python/ck_dsl/dsl_docs/hipdnn_provider/plan.md)
+
+This document is the source of truth for the Milestone 1 goal and
+non-goals, the runtime embedded-Python architecture, and the rationale
+behind decisions such as the embedded interpreter, pybind11 binding,
+and provider-local compile service that are summarised above.
