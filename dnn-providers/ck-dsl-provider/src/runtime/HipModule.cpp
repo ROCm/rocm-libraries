@@ -33,7 +33,6 @@ void checkHip(hipError_t err, std::string_view context) {
 
 HipModule::HipModule(const KernelArtifact& artifact)
     : _kernelName(artifact.kernelName),
-      _kind(artifact.kind),
       _grid(artifact.grid),
       _block(artifact.block),
       _ldsBytes(artifact.ldsBytes),
@@ -112,7 +111,6 @@ HipModule::HipModule(HipModule&& other) noexcept
     : _module(other._module),
       _function(other._function),
       _kernelName(std::move(other._kernelName)),
-      _kind(std::move(other._kind)),
       _grid(other._grid),
       _block(other._block),
       _ldsBytes(other._ldsBytes),

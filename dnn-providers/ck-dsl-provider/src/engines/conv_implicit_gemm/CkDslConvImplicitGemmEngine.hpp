@@ -54,12 +54,6 @@ class CkDslConvImplicitGemmEngine
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
         CkDslContext& executionContext) const override;
 
-    /// Test-only accessor: lets the plan-builder test exercise the
-    /// same cache the engine uses for cache-hit verification.
-    ConvImplicitGemmPlanBuilder& planBuilderForTesting() const {
-        return *_planBuilder;
-    }
-
    private:
     std::int64_t _id;
     std::unique_ptr<ConvImplicitGemmPlanBuilder> _planBuilder;

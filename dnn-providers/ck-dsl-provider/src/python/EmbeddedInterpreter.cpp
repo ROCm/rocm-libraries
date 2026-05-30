@@ -78,10 +78,4 @@ unsigned EmbeddedInterpreter::initializationCount() noexcept {
     return _initializationCount.load(std::memory_order_relaxed);
 }
 
-py::object EmbeddedInterpreter::importCheck(std::string_view moduleName) {
-    ensureInitialized();
-    py::gil_scoped_acquire gil;
-    return py::module_::import(std::string(moduleName).c_str());
-}
-
 }  // namespace ck_dsl_provider
