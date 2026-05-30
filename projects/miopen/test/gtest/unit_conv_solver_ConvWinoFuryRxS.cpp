@@ -54,7 +54,7 @@ auto GetConvTestCasesWrw(miopenDataType_t datatype)
 
 const auto& GetTestParams()
 {
-    static const auto params = [] {
+    [[clang::no_destroy]] static const auto params = [] {
         auto p = miopen::unit_tests::UnitTestConvSolverParams(Gpu::gfx110X | Gpu::gfx115X |
                                                               Gpu::gfx120X);
         p.ExcludeDevice("gfx1103"); // WORKAROUND_ISSUE_3044

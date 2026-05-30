@@ -21,7 +21,7 @@ auto GetConvTestCases(miopenDataType_t datatype)
 
 const auto& GetTestParams()
 {
-    static const auto params = [] {
+    [[clang::no_destroy]] static const auto params = [] {
         Gpu supported_gpus = Gpu::gfx900 | Gpu::gfx906 | Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx94X |
                              Gpu::gfx950 | Gpu::gfx103X | Gpu::gfx110X | Gpu::gfx115X |
                              Gpu::gfx120X;

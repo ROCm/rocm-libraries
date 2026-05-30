@@ -28,14 +28,15 @@
 #include "gtest_common.hpp"
 
 namespace {
-std::vector<std::vector<size_t>> tensorALensArr = {{32, 16, 8, 4, 4}, // tensor A
+
+[[clang::no_destroy]] std::vector<std::vector<size_t>> tensorALensArr = {{32, 16, 8, 4, 4}, // tensor A
                                                    {16, 20, 16, 8},
                                                    {20, 16, 8},
                                                    {1, 16, 8},
                                                    {16, 8},
                                                    {8}};
 
-std::vector<std::vector<size_t>> tensorBLensArr = {{32, 16, 8, 4, 4}, // tensor B
+[[clang::no_destroy]] std::vector<std::vector<size_t>> tensorBLensArr = {{32, 16, 8, 4, 4}, // tensor B
                                                    {32, 16, 1, 1, 1},
                                                    {1, 16, 8, 1, 1},
                                                    {1, 1, 8, 4, 1},
@@ -59,17 +60,18 @@ std::vector<std::vector<size_t>> tensorBLensArr = {{32, 16, 8, 4, 4}, // tensor 
                                                    {8},
                                                    {1}};
 
-std::vector<std::vector<int64_t>> offsetsArr = {
+[[clang::no_destroy]] std::vector<std::vector<int64_t>> offsetsArr = {
     {0, 0, 0}, {64, 32, 16}, {32, 16, 32}, {32, 16, 32}};
 
-std::vector<std::vector<float>> alphabetaArr = {{1, 1, 0}, {-1, 1, 1}, {1.0, 0.5, 0.3}};
+[[clang::no_destroy]] std::vector<std::vector<float>> alphabetaArr = {{1, 1, 0}, {-1, 1, 1}, {1.0, 0.5, 0.3}};
 
-std::vector<std::vector<size_t>> stridesArr = {{8 * 16 * 20 * 16, 8 * 16 * 20, 8 * 16, 8, 1}};
+[[clang::no_destroy]] std::vector<std::vector<size_t>> stridesArr = {{8 * 16 * 20 * 16, 8 * 16 * 20, 8 * 16, 8, 1}};
 
-std::vector<bool> packedArr = {true, false};
+[[clang::no_destroy]] std::vector<bool> packedArr = {true, false};
 
-std::vector<miopenTensorOp_t> operationArr = {
+[[clang::no_destroy]] std::vector<miopenTensorOp_t> operationArr = {
     miopenTensorOpAdd, miopenTensorOpMul, miopenTensorOpMin, miopenTensorOpMax};
+
 } // namespace
 
 struct TestCase
@@ -363,9 +365,10 @@ std::vector<TestCase> GenCases()
 
 inline auto GetCases()
 {
-    static const auto cases = testing::ValuesIn(GenCases());
+    [[clang::no_destroy]] static const auto cases = testing::ValuesIn(GenCases());
     return cases;
 }
+
 } // namespace
 
 TEST_P(GPU_TernaryTensorOps_FP32, TestFloat) { this->Run(); }

@@ -15,7 +15,7 @@ using PoolingTestCase = pooling_gtest::PoolingTestCase;
 
 std::vector<PoolingTestCase> GetPooling3dTestCases()
 {
-    static std::vector<PoolingTestCase> cached_test_cases;
+    [[clang::no_destroy]] static std::vector<PoolingTestCase> cached_test_cases;
     static bool cached = false;
 
     if(cached)

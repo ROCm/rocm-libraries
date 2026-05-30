@@ -110,7 +110,7 @@ const std::multimap<Gpu, DevDescription>& GetAllKnownDevices()
     static_assert(Gpu::gfx120X == Gpu::gfxLast);
 
     // https://rocm.docs.amd.com/en/latest/reference/gpu-arch-specs.html
-    static const std::multimap<Gpu, DevDescription> known_devs = {
+    [[clang::no_destroy]] static const std::multimap<Gpu, DevDescription> known_devs = {
         // clang-format off
         {Gpu::gfx900,  {"gfx900",  64, 64}},
         {Gpu::gfx906,  {"gfx906",  60, 64}},

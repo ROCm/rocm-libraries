@@ -49,7 +49,7 @@ static const inline std::vector<PerformanceConfigAsmImplicitGemmGTCFwdDlopsNCHWC
 GetFwdDlopsNCHWCConfigList()
 {
     // clang-format off
-    static const  std::vector<PerformanceConfigAsmImplicitGemmGTCFwdDlopsNCHWC> kernel_param_list {
+    [[clang::no_destroy]] static const std::vector<PerformanceConfigAsmImplicitGemmGTCFwdDlopsNCHWC> kernel_param_list {
         //generated dictionary
         {"fwd", "nchwc_cyxkc", miopenHalf,  0, 1, 256, 128,  32,  8,  8, 4, 2, 2, 8, 4, { 1, 1, 1,32}, {  1,  8,  1, 32}, { 1, 1, 4, 4}, {  1,  8,  1, 32}},
         {"fwd", "nchwc_kcyxc", miopenHalf,  0, 1, 256, 128,  32,  8,  8, 4, 2, 2, 8, 4, { 1, 1, 1,32}, {  1,  8,  1, 32}, { 1, 1, 4, 4}, {  1,  8,  1, 32}},
@@ -304,8 +304,7 @@ GetImplicitGemmGtcDynamicFwdDlopsNCHWCKernel(
 void PerformanceConfigAsmImplicitGemmGTCFwdDlopsNCHWC::HeuristicInit(
     const ProblemDescription& problem)
 {
-
-    static const std::vector<std::tuple<int, int, int>> tile_list_Halfx4 = {
+    [[clang::no_destroy]] static const std::vector<std::tuple<int, int, int>> tile_list_Halfx4 = {
         std::make_tuple(256, 128, 32), std::make_tuple(128, 256, 32), std::make_tuple(224, 128, 32),
         std::make_tuple(128, 224, 32), std::make_tuple(192, 128, 32), std::make_tuple(128, 192, 32),
         std::make_tuple(192, 64, 32),  std::make_tuple(64, 192, 32),  std::make_tuple(160, 128, 32),
@@ -317,7 +316,7 @@ void PerformanceConfigAsmImplicitGemmGTCFwdDlopsNCHWC::HeuristicInit(
         std::make_tuple(32, 32, 32),
     };
 
-    static const std::vector<std::tuple<int, int, int>> tile_list_Halfx8 = {
+    [[clang::no_destroy]] static const std::vector<std::tuple<int, int, int>> tile_list_Halfx8 = {
         std::make_tuple(256, 128, 32), std::make_tuple(128, 256, 32), std::make_tuple(224, 128, 64),
         std::make_tuple(128, 224, 64), std::make_tuple(192, 128, 32), std::make_tuple(128, 192, 32),
         std::make_tuple(192, 64, 32),  std::make_tuple(64, 192, 32),  std::make_tuple(160, 128, 64),

@@ -49,7 +49,7 @@ GetImplicitGemmWrwGTCDynamicXdlopsKernelList()
 {
     // retrieve dynamic igemm wrw pass's possible kernel name
     // clang-format off
-    static const std::vector<TunableImplicitGemmGTCDynamic_t> kernel_param_list {
+    [[clang::no_destroy]] static const std::vector<TunableImplicitGemmGTCDynamic_t> kernel_param_list {
         { "wrw", miopenFloat,   4,   0, 256, 128,  16,  64,  32,   1,   1,   1,   2,   2,   {1,   4,   4,   1},   {1,   4,   1,  64},   {1,   4,   2,   1},   {1,   4,   1,  64},   0},
         { "wrw", miopenFloat,   4,   0, 256, 128,  16,  64,  32,   1,   1,   1,   2,   2,   {1,   4,   4,   1},   {1,   4,   1,  64},   {1,   4,   2,   1},   {1,   4,   1,  64},   1},
         { "wrw", miopenFloat,   4,   0, 256, 128,   8,  64,  32,   1,   1,   1,   2,   2,   {1,   4,   2,   1},   {1,   2,   1, 128},   {1,   4,   1,   1},   {1,   2,   1, 128},   0},

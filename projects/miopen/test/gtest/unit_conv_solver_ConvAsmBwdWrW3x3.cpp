@@ -43,7 +43,7 @@ auto GetConvTestCases(miopenDataType_t datatype)
 
 const auto& GetTestParams()
 {
-    static const auto params = [] {
+    [[clang::no_destroy]] static const auto params = [] {
         auto p = miopen::unit_tests::UnitTestConvSolverParams(Gpu::gfx900 | Gpu::gfx906 |
                                                               Gpu::gfx908 | Gpu::gfx90A);
         p.Tunable(5);
@@ -57,7 +57,7 @@ const auto& GetTestParams()
 #if WORKAROUND_SWDEV_330460
 const auto& GetTestParamsFp32()
 {
-    static const auto params = [] {
+    [[clang::no_destroy]] static const auto params = [] {
         auto p =
             miopen::unit_tests::UnitTestConvSolverParams(Gpu::gfx900 | Gpu::gfx906 | Gpu::gfx908);
         p.Tunable(5);

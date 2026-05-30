@@ -71,7 +71,7 @@ private:
 static fs::path& exe_path()
 {
     // NOLINTNEXTLINE (cppcoreguidelines-avoid-non-const-global-variables)
-    static fs::path exe_path;
+    [[clang::no_destroy]] static fs::path exe_path;
     return exe_path;
 }
 
@@ -82,7 +82,7 @@ static std::optional<fs::path>& thread_logs_root()
     std::lock_guard<std::mutex> lock(mutex);
 
     // NOLINTNEXTLINE (cppcoreguidelines-avoid-non-const-global-variables)
-    static std::optional<fs::path> path;
+    [[clang::no_destroy]] static std::optional<fs::path> path;
     return path;
 }
 
@@ -237,6 +237,7 @@ protected:
 
     static const std::array<std::pair<const std::string, TestData>, 2>& common_data()
     {
+        [[clang::no_destroy]]
         static const std::array<std::pair<const std::string, TestData>, 2> data{{
             {id1(), value1()},
             {id0(), value0()},
@@ -857,6 +858,7 @@ private:
     static const std::vector<TestData>& common_part_init()
     {
         // NOLINTNEXTLINE (cppcoreguidelines-avoid-non-const-global-variables)
+        [[clang::no_destroy]]
         static std::vector<TestData> data(common_part_size, TestData{TestData::NoInit{}});
 
         for(auto i = 0u; i < common_part_size; i++)
@@ -1179,6 +1181,7 @@ public:
 private:
     static const std::array<std::pair<const std::string, TestData>, 1>& single_item_data()
     {
+        [[clang::no_destroy]]
         static const std::array<std::pair<const std::string, TestData>, 1> data{
             {{id0(), value2()}}};
 
@@ -1190,6 +1193,7 @@ private:
         RawWrite(temp_file, key(), common_data());
         RawWrite(user_db_path, key(), single_item_data());
 
+        [[clang::no_destroy]]
         static const std::array<std::pair<const std::string, TestData>, 2> merged_data{{
             {id1(), value1()},
             {id0(), value2()},

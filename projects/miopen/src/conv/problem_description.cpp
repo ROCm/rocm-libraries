@@ -123,14 +123,14 @@ void ProblemDescription::HeuristicUpdateLayouts()
 {
     using LayoutValidationMode = TensorDescriptor::LayoutValidationMode;
 
-    static const std::vector<std::string> supported_layouts = {
+    [[clang::no_destroy]] static const std::vector<std::string> supported_layouts = {
         "NCHW", "NHWC", "CHWN", "NCDHW", "NDHWC"};
 
     static const auto strict = TensorDescriptor::LayoutValidationMode::StrictDecreasingStrides;
 
     // Note: The order here is important, as we want to try and find a match with strict decreasing
     // strides first.
-    static const std::vector<LayoutValidationMode> validation_modes = {
+    [[clang::no_destroy]] static const std::vector<LayoutValidationMode> validation_modes = {
         strict, LayoutValidationMode::IgnoreDegenerateStrides};
 
     // If we have preset layouts that are valid, and they are consistent with each other, then we do

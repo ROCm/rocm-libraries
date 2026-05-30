@@ -41,7 +41,7 @@ auto GetConvTestCases(miopenDataType_t datatype)
 
 const auto& GetTestParams()
 {
-    static const auto params = [] {
+    [[clang::no_destroy]] static const auto params = [] {
         Gpu supported_gpus = Gpu::gfx900 | Gpu::gfx906 | Gpu::gfx908;
         auto p             = miopen::unit_tests::UnitTestConvSolverParams(supported_gpus);
         p.CheckXnackDisabled();

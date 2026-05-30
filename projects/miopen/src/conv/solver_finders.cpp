@@ -183,7 +183,7 @@ protected:
 
 const std::vector<std::unique_ptr<ISolversFinder>>& GetConvSolverFinders()
 {
-    static const auto finders = []() {
+    [[clang::no_destroy]] static const auto finders = []() {
         auto tmp = std::vector<std::unique_ptr<ISolversFinder>>{};
         tmp.emplace_back(std::make_unique<ImplicitGemmSolverFinder>());
         tmp.emplace_back(std::make_unique<GemmSolverFinder>());

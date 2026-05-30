@@ -902,7 +902,7 @@ inline auto GenSmokeTestCases()
 
 inline auto GetSmokeTestCases()
 {
-    static const auto cases = GenSmokeTestCases();
+    [[clang::no_destroy]] static const auto cases = GenSmokeTestCases();
     return cases;
 }
 
@@ -922,7 +922,7 @@ inline auto GenFullTestCases()
 
 inline auto GetFullTestCases()
 {
-    static const auto cases = GenFullTestCases();
+    [[clang::no_destroy]] static const auto cases = GenFullTestCases();
     return cases;
 }
 

@@ -182,7 +182,7 @@ const auto& GetSolversInfo<ConvSolverInfo>()
     // correctly added to the solver registry. There is no need to keep it up to date by adding new
     // solvers as all new solvers will be added to the registry according to the existing template,
     // and it won't improve test coverage (and will only waste extra time).
-    static const std::unordered_map<std::string, ConvSolverInfo> solver_info = {
+    [[clang::no_destroy]] static const std::unordered_map<std::string, ConvSolverInfo> solver_info = {
         // clang-format off
         {"ConvAsm3x3U",                                         {1,     false,  true,   "miopenConvolutionFwdAlgoDirect"}},
         {"ConvAsm1x1U",                                         {2,     false,  true,   "miopenConvolutionFwdAlgoDirect"}},
@@ -284,7 +284,7 @@ template <>
 const auto& GetSolversInfo<BatchNormSolverInfo>()
 {
     /// \ref fin_interface_solver_info_coverage
-    static const std::unordered_map<std::string, BatchNormSolverInfo> solver_info = {
+    [[clang::no_destroy]] static const std::unordered_map<std::string, BatchNormSolverInfo> solver_info = {
         // clang-format off
         //   solver-name               id,  isDynamic, isTunable
         {"BnFwdTrainingSpatial",       {113,   false,  true}},
@@ -308,7 +308,7 @@ const auto& GetSolverConfigs<ConvSolverConfig>()
     // This list should include solvers that allow testing the core functionality, such as tunable
     // and non-tunable solvers. There's no need to add all solvers here, as it won't improve test
     // coverage (and will only waste extra time).
-    static const std::unordered_map<std::string, ConvSolverConfig> configs = {
+    [[clang::no_destroy]] static const std::unordered_map<std::string, ConvSolverConfig> configs = {
         // clang-format off
         // Non-tunable solvers
         {"ConvDirectNaiveConvFwd", {miopen::conv::Direction::Forward,           {miopenFloat, {1, 16, 14, 14}}, {miopenFloat, {48, 16, 5, 5}}, miopenFloat, {{2, 2}, {1, 1}, {1, 1}}}},
@@ -327,7 +327,7 @@ template <>
 const auto& GetSolverConfigs<BatchNormSolverConfig>()
 {
     /// \ref fin_interface_solver_config_coverage
-    static const std::unordered_map<std::string, BatchNormSolverConfig> configs = {
+    [[clang::no_destroy]] static const std::unordered_map<std::string, BatchNormSolverConfig> configs = {
         // clang-format off
         /// \todo add configs
         {"DummySolver", {42}},

@@ -199,10 +199,11 @@ protected:
 };
 
 template <typename DstType, typename SrcType>
-tensor<DstType> GPU_binaryTensorOps<DstType, SrcType>::dstSuperTensor;
+[[clang::no_destroy]] tensor<DstType> GPU_binaryTensorOps<DstType, SrcType>::dstSuperTensor;
 
 template <typename DstType, typename SrcType>
-tensor<SrcType> GPU_binaryTensorOps<DstType, SrcType>::srcSuperTensor;
+[[clang::no_destroy]] tensor<SrcType> GPU_binaryTensorOps<DstType, SrcType>::srcSuperTensor;
+
 } // namespace
 
 using float16 = half_float::half;

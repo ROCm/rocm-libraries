@@ -107,7 +107,7 @@ protected:
 };
 
 template <typename T>
-tensor<T> GPU_unaryTensorOps<T>::superTensor;
+[[clang::no_destroy]] tensor<T> GPU_unaryTensorOps<T>::superTensor;
 
 } // namespace
 

@@ -75,7 +75,7 @@ static inline const std::vector<TunableImplicitGemmV4R1Dynamic>&
 GetImplicitGemmV4R1DynamicTunables()
 {
     // clang-format off
-    static const std::vector<TunableImplicitGemmV4R1Dynamic> tunables = {
+    [[clang::no_destroy]] static const std::vector<TunableImplicitGemmV4R1Dynamic> tunables = {
         {  16, 128,  16,   2,   4,   4,   4,   4,   4,   4,  16,   1,  16,   1,   4,  64},
         {  16, 128,   8,   2,   4,   4,   4,   4,   4,   4,   8,   2,  16,   1,   2, 128},
         {   8, 128,   8,   2,   4,   4,   4,   4,   4,   2,   8,   1,   8,   2,   2,  64},

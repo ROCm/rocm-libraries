@@ -165,7 +165,7 @@ class TestPossibleLayout4D5D : public ::testing::TestWithParam<TestCasePossibleL
 {
     static auto& GetAllLayouts()
     {
-        static const auto layouts =
+        [[clang::no_destroy]] static const auto layouts =
             std::vector<std::string>{"NCHW", "NHWC", "CHWN", "NCDHW", "NDHWC", "NCHWc", "CHWNc"};
         return layouts;
     }

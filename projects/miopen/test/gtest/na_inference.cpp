@@ -187,13 +187,13 @@ auto GenCases(bool full = false)
 
 auto GetSmokeCases()
 {
-    static auto cases = GenCases();
+    [[clang::no_destroy]] static auto cases = GenCases();
     return cases;
 }
 
 auto GetFullCases()
 {
-    static auto cases = GenCases(true);
+    [[clang::no_destroy]] static auto cases = GenCases(true);
     return cases;
 }
 

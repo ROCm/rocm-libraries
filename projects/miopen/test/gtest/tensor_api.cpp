@@ -652,13 +652,13 @@ protected:
 public:
     static const std::vector<TestConfig>& GetValidConfigs()
     {
-        static const auto configs = GenerateValidConfigs();
+        [[clang::no_destroy]] static const auto configs = GenerateValidConfigs();
         return configs;
     }
 
     static const std::vector<TestConfig>& GetWrongConfigs()
     {
-        static const auto configs = GenerateWrongConfigs();
+        [[clang::no_destroy]] static const auto configs = GenerateWrongConfigs();
         return configs;
     }
 };

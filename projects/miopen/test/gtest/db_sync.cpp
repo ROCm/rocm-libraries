@@ -479,7 +479,7 @@ bool CheckKDBObjects(const fs::path& filename,
                      const fs::path& kernel_name,
                      const std::string& kernel_args)
 {
-    static const auto kdb_cache = LoadKDBObjects(filename);
+    [[clang::no_destroy]] static const auto kdb_cache = LoadKDBObjects(filename);
     return kdb_cache.find(KDBKey{kernel_name, kernel_args}) != kdb_cache.end();
 }
 
@@ -949,7 +949,7 @@ struct TestHandle : Handle
 static inline miopen::TestHandle& get_test_handle(size_t num_cu)
 {
     // NOLINTNEXTLINE (cppcoreguidelines-avoid-non-const-global-variables)
-    static miopen::TestHandle h{num_cu};
+    [[clang::no_destroy]] static miopen::TestHandle h{num_cu};
     static const std::thread::id id = std::this_thread::get_id();
     if(std::this_thread::get_id() != id)
     {

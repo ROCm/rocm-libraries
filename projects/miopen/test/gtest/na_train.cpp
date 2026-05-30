@@ -689,25 +689,25 @@ auto GenCases(int batchNormMode, bool full = false)
 
 auto GetSmokePeractCases()
 {
-    static auto cases = GenCases(0);
+    [[clang::no_destroy]] static auto cases = GenCases(0);
     return cases;
 }
 
 auto GetSmokeSpatialCases()
 {
-    static auto cases = GenCases(1);
+    [[clang::no_destroy]] static auto cases = GenCases(1);
     return cases;
 }
 
 auto GetFullPeractCases()
 {
-    static auto cases = GenCases(0, true);
+    [[clang::no_destroy]] static auto cases = GenCases(0, true);
     return cases;
 }
 
 auto GetFullSpatialCases()
 {
-    static auto cases = GenCases(1, true);
+    [[clang::no_destroy]] static auto cases = GenCases(1, true);
     return cases;
 }
 

@@ -117,7 +117,7 @@ std::vector<TestCase> GenCases()
 template <typename T>
 auto GetCases()
 {
-    static const auto cases = testing::ValuesIn(GenCases<T>());
+    [[clang::no_destroy]] static const auto cases = testing::ValuesIn(GenCases<T>());
     return cases;
 }
 

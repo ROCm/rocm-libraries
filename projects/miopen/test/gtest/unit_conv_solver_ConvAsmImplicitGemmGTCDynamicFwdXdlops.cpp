@@ -76,7 +76,7 @@ auto GetConvTestCasesFull(miopenDataType_t datatype)
 
 const auto& GetTestParams()
 {
-    static const auto params = [] {
+    [[clang::no_destroy]] static const auto params = [] {
         auto p = miopen::unit_tests::UnitTestConvSolverParams(Gpu::gfx908);
         p.CheckXnackDisabled();
         p.SetTolerance(Gpu::gfx908, miopenFloat, 2.0f);

@@ -2728,7 +2728,7 @@ TestCase ConvertParam(TestParam const& param)
                     batchSeq};
 }
 
-std::vector<TestParam> deepbench_cases = {
+[[clang::no_destroy]] std::vector<TestParam> deepbench_cases = {
     {32, 1500, 216, 216, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
     {32, 750, 286, 286, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
     {32, 375, 286, 286, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
@@ -2745,7 +2745,7 @@ std::vector<TestParam> deepbench_cases = {
     {32, 50, 1024, 1024, 1, 1, 0, 0, false, false, false, false, false, true, {0}},
     {64, 50, 1024, 1024, 1, 1, 0, 0, false, false, false, false, false, true, {0}}};
 
-std::vector<TestParam> extra_cases = {
+[[clang::no_destroy]] std::vector<TestParam> extra_cases = {
     {32, 3, 128, 128, 1, 0, 0, 0, false, true, false, false, false, false, {32, 32, 32}},
     {32, 3, 128, 128, 1, 0, 0, 0, false, false, true, false, false, false, {32, 32, 32}},
     {32, 3, 128, 128, 1, 0, 0, 0, false, true, true, false, false, false, {32, 32, 32}},
@@ -2829,7 +2829,7 @@ auto GetDropoutTests()
 
 auto const& GetDropoutSmokeTests()
 {
-    static auto cases = GenCases(true);
+    [[clang::no_destroy]] static auto cases = GenCases(true);
     return cases;
 }
 
@@ -2839,7 +2839,7 @@ auto const& GetExtraTests() { return extra_cases; }
 
 auto const& GetSmokeTests()
 {
-    static auto cases = GenCases(false);
+    [[clang::no_destroy]] static auto cases = GenCases(false);
     return cases;
 }
 

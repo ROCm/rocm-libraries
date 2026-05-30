@@ -173,7 +173,7 @@ struct verify_tensor_trans
 
 inline auto GenCases()
 {
-    static const std::vector<std::vector<int>> tensor_src{
+    [[clang::no_destroy]] static const std::vector<std::vector<int>> tensor_src{
         {64, 64, 56, 56},   {64, 64, 56, 56},  {64, 256, 56, 56},  {64, 64, 55, 55},
         {64, 64, 55, 55},   {64, 256, 55, 55}, {64, 128, 28, 28},  {64, 512, 28, 28},
         {64, 256, 28, 28},  {64, 128, 28, 28}, {64, 256, 28, 28},  {64, 512, 28, 28},
@@ -193,7 +193,7 @@ inline auto GenCases()
 
 inline auto GetCases()
 {
-    static const auto cases = GenCases();
+    [[clang::no_destroy]] static const auto cases = GenCases();
     return cases;
 }
 

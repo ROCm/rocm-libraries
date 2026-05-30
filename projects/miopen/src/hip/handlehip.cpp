@@ -807,7 +807,7 @@ SubBufferCheck GetSubBufferCheck()
 }
 
 // NOLINTNEXTLINE (cppcoreguidelines-avoid-non-const-global-variables)
-std::unordered_map<void*, void*> SubBuffersToMemMap;
+[[clang::no_destroy]] std::unordered_map<void*, void*> SubBuffersToMemMap;
 // NOLINTNEXTLINE (cppcoreguidelines-avoid-non-const-global-variables)
 std::mutex SubBuffersToMemMapMutex;
 

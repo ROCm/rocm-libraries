@@ -322,7 +322,7 @@ static inline auto GenCases() { return MakeNamedParameterValues<bool>("with_stre
 
 static inline auto GetCases()
 {
-    static const auto cases = GenCases();
+    [[clang::no_destroy]] static const auto cases = GenCases();
     return cases;
 }
 

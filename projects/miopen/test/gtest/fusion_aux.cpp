@@ -52,7 +52,7 @@ inline auto GenSmokeTestCases()
 
 inline auto GetSmokeTestCases()
 {
-    static const auto cases = GenSmokeTestCases();
+    [[clang::no_destroy]] static const auto cases = GenSmokeTestCases();
     return cases;
 }
 

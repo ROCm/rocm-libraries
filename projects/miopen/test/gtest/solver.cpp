@@ -168,7 +168,7 @@ auto GenCases()
 
 auto GetCases()
 {
-    static auto cases = GenCases();
+    [[clang::no_destroy]] static auto cases = GenCases();
     return cases;
 }
 

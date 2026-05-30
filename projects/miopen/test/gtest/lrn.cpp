@@ -324,13 +324,13 @@ inline auto GenCases(bool limit = false)
 
 inline auto GetCasesFull()
 {
-    static const auto cases = GenCases();
+    [[clang::no_destroy]] static const auto cases = GenCases();
     return cases;
 }
 
 inline auto GetCasesSmoke()
 {
-    static const auto cases = GenCases(true);
+    [[clang::no_destroy]] static const auto cases = GenCases(true);
     return cases;
 }
 

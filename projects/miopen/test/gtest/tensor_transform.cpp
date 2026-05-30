@@ -42,7 +42,7 @@ using TestCase = std::tuple<NamedContainer<std::vector<int>>,
                             NamedContainer<std::vector<int>>,
                             NamedParameter<int>>;
 
-#if(MIO_TRANSFORM_DEBUG)
+#if (MIO_TRANSFORM_DEBUG)
 template <class T>
 static void show_tensor(const tensor<T>& ten)
 {
@@ -244,7 +244,7 @@ struct verify_tensor_transform_scale
             dst_offset,
             src_offset);
 
-#if(MIO_TRANSFORM_DEBUG)
+#if (MIO_TRANSFORM_DEBUG)
         printf("\n CPU: \n");
         show_tensor(superCpu_dst);
         printf("\n");
@@ -273,7 +273,7 @@ struct verify_tensor_transform_scale
                                 dst_offset);
 
         superGpu_dst.data = handle.Read<T>(super_dev_dst, superGpu_dst.data.size());
-#if(MIO_TRANSFORM_DEBUG)
+#if (MIO_TRANSFORM_DEBUG)
         printf("\n GPU: \n");
         show_tensor(superGpu_dst);
         printf("\n");
@@ -291,34 +291,29 @@ struct verify_tensor_transform_scale
 
 inline auto GenSmokeTestCases()
 {
-    static const std::vector<std::vector<int>> all_lens{
+    [[clang::no_destroy]] static const std::vector<std::vector<int>> all_lens{
         {32, 11, 32, 16}, {16, 30, 16, 16}, {15, 1, 14, 14}, {10, 16, 7, 7}, {1, 1, 1, 1}};
 
-    static const std::vector<std::vector<float>> all_scales{{1.0f, 0.0f}, {0.5f, 0.5f}};
+    [[clang::no_destroy]] static const std::vector<std::vector<float>> all_scales{{1.0f, 0.0f},
+                                                                                  {0.5f, 0.5f}};
 
-#if(MIO_TRANSFORM_DEBUG)
+#if (MIO_TRANSFORM_DEBUG)
 #define NROWS 6
 #define NCOLS 6
 #define LENS_CONTENT NROWS, NCOLS
-#define SUBLENS_CONTENT      \
-    {                        \
-        NROWS - 2, NCOLS - 2 \
-    }
+#define SUBLENS_CONTENT {NROWS - 2, NCOLS - 2}
 #define OFFSET_CONTENT 0
 #else
 #define LENS_CONTENT 32, 32, 16, 16, 16
-#define SUBLENS_CONTENT \
-    {                   \
-        32, 8, 10       \
-    }
+#define SUBLENS_CONTENT {32, 8, 10}
 #define OFFSET_CONTENT 7
 #endif
 
-    static const std::vector<int> lens{LENS_CONTENT};
-    static const std::vector<std::vector<int>> all_superlens_src{lens};
-    static const std::vector<std::vector<int>> all_sublens{SUBLENS_CONTENT};
-    static const std::vector<std::vector<int>> all_superlens_dst{lens};
-    static const std::vector<int> tensor_offsets{OFFSET_CONTENT};
+    [[clang::no_destroy]] static const std::vector<int> lens{LENS_CONTENT};
+    [[clang::no_destroy]] static const std::vector<std::vector<int>> all_superlens_src{lens};
+    [[clang::no_destroy]] static const std::vector<std::vector<int>> all_sublens{SUBLENS_CONTENT};
+    [[clang::no_destroy]] static const std::vector<std::vector<int>> all_superlens_dst{lens};
+    [[clang::no_destroy]] static const std::vector<int> tensor_offsets{OFFSET_CONTENT};
 
     return testing::Combine(
         MakeNamedParameterCollectionValues<std::vector<int>>("srcLens", all_lens, "x"),
@@ -333,13 +328,13 @@ inline auto GenSmokeTestCases()
 
 inline auto GenFullTestCases()
 {
-    static const std::vector<std::vector<int>> all_lens{
+    [[clang::no_destroy]] static const std::vector<std::vector<int>> all_lens{
         {32, 11, 32, 16}, {16, 30, 16, 16}, {15, 1, 14, 14}, {10, 16, 7, 7}, {1, 1, 1, 1}};
 
-    static const std::vector<std::vector<float>> all_scales{
+    [[clang::no_destroy]] static const std::vector<std::vector<float>> all_scales{
         {1.0f, 0.0f}, {1.0f, 0.5f}, {0.5f, 0.0f}, {0.5f, 0.5f}};
 
-#if(MIO_TRANSFORM_DEBUG)
+#if (MIO_TRANSFORM_DEBUG)
 #define NROWS 6
 #define NCOLS 6
 #define LENS_CONTENT NROWS, NCOLS
@@ -347,11 +342,11 @@ inline auto GenFullTestCases()
 #define LENS_CONTENT 32, 32, 16, 16, 16
 #endif
 
-    static const std::vector<int> lens{LENS_CONTENT};
-    static const std::vector<std::vector<int>> all_superlens_src{lens};
-    static const std::vector<std::vector<int>> all_sublens{get_sub_tensor()};
-    static const std::vector<std::vector<int>> all_superlens_dst{lens};
-    static const std::vector<int> tensor_offsets{get_tensor_offset<int>()};
+    [[clang::no_destroy]] static const std::vector<int> lens{LENS_CONTENT};
+    [[clang::no_destroy]] static const std::vector<std::vector<int>> all_superlens_src{lens};
+    [[clang::no_destroy]] static const std::vector<std::vector<int>> all_sublens{get_sub_tensor()};
+    [[clang::no_destroy]] static const std::vector<std::vector<int>> all_superlens_dst{lens};
+    [[clang::no_destroy]] static const std::vector<int> tensor_offsets{get_tensor_offset<int>()};
 
     return testing::Combine(
         MakeNamedParameterCollectionValues<std::vector<int>>("srcLens", all_lens, "x"),
@@ -366,13 +361,13 @@ inline auto GenFullTestCases()
 
 inline auto GetSmokeTestCases()
 {
-    static const auto cases = GenSmokeTestCases();
+    [[clang::no_destroy]] static const auto cases = GenSmokeTestCases();
     return cases;
 }
 
 inline auto GetFullTestCases()
 {
-    static const auto cases = GenFullTestCases();
+    [[clang::no_destroy]] static const auto cases = GenFullTestCases();
     return cases;
 }
 
@@ -450,7 +445,7 @@ struct tensor_transform_test : public testing::TestWithParam<TestCase>
         super_src = tensor<T>{superLens_src}.generate(tensor_elem_gen_integer{max_value});
         super_dst = tensor<T>{superLens_dst}.generate(tensor_elem_gen_integer{max_value});
 
-#if(MIO_TRANSFORM_DEBUG)
+#if (MIO_TRANSFORM_DEBUG)
         printf("\n SRC: \n");
         show_tensor(super_src);
         printf("\n DST: \n");

@@ -407,7 +407,8 @@ inline std::string ParseBaseArg(int argc, char* argv[])
     std::string arg = argv[1];
 
     // List of valid base arguments
-    static const std::vector<std::string> valid_args = {"conv",
+    [[clang::no_destroy]] static const std::vector<std::string> valid_args = {
+                                                        "conv",
                                                         "convfp16",
                                                         "convfp32",
                                                         "convint8",

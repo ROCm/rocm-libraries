@@ -173,7 +173,7 @@ std::vector<TestCase2D> generate_conv_2d()
 
 auto GenCases2D()
 {
-    static const auto cases = generate_conv_2d();
+    [[clang::no_destroy]] static const auto cases = generate_conv_2d();
     return cases;
 }
 
@@ -243,7 +243,7 @@ std::vector<TestCase3D> generate_conv_3d()
 
 auto GenCases3D()
 {
-    static const auto cases = generate_conv_3d();
+    [[clang::no_destroy]] static const auto cases = generate_conv_3d();
     return cases;
 }
 

@@ -68,7 +68,7 @@ std::string GetHomeDir()
 
 fs::path ExpandUser(const fs::path& path)
 {
-    static const auto home_dir = GetHomeDir();
+    [[clang::no_destroy]] static const auto home_dir = GetHomeDir();
     return {ReplaceString(path.string(), "~", home_dir)};
 }
 

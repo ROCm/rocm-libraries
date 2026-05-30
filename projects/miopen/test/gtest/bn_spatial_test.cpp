@@ -35,7 +35,7 @@ auto GetCases(bool all_tests = true)
 {
     if(all_tests)
     {
-        static const auto cases = GenCases();
+        [[clang::no_destroy]] static const auto cases = GenCases();
         return cases;
     }
 

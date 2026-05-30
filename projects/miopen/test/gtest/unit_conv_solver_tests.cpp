@@ -35,7 +35,9 @@
 using Tol = miopen::unit_tests::Tolerances;
 
 namespace {
-std::vector<Gpu> gpus{Gpu::gfx900,
+
+[[clang::no_destroy]] std::vector<Gpu> gpus{
+                      Gpu::gfx900,
                       Gpu::gfx906,
                       Gpu::gfx908,
                       Gpu::gfx90A,
@@ -46,7 +48,8 @@ std::vector<Gpu> gpus{Gpu::gfx900,
                       Gpu::gfx115X,
                       Gpu::gfx120X};
 
-std::vector<miopenDataType_t> types{miopenHalf,
+[[clang::no_destroy]] std::vector<miopenDataType_t> types{
+                                    miopenHalf,
                                     miopenFloat,
                                     miopenInt32,
                                     miopenInt8,

@@ -61,7 +61,7 @@ auto GetConvTestCasesFull(miopenDataType_t datatype)
 
 const auto& GetTestParams()
 {
-    static const auto params = [] {
+    [[clang::no_destroy]] static const auto params = [] {
         auto p = miopen::unit_tests::UnitTestConvSolverParams(Gpu::All);
         return p;
     }();
@@ -74,7 +74,7 @@ const auto& GetTestParams()
 // TODO: Remove this exclusion once the rocBLAS bug is fixed.
 const auto& GetTestParamsNoGfx90A()
 {
-    static const auto params = [] {
+    [[clang::no_destroy]] static const auto params = [] {
         auto p = miopen::unit_tests::UnitTestConvSolverParams(Gpu::All & ~Gpu::gfx90A);
         return p;
     }();

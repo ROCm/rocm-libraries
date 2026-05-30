@@ -93,7 +93,7 @@ struct StubbedDeviceOps
     }
 };
 
-std::vector<std::string> StubbedDeviceOps::deviceOps = {};
+[[clang::no_destroy]] std::vector<std::string> StubbedDeviceOps::deviceOps = {};
 
 struct StubbedCKArgs
 {
@@ -215,8 +215,8 @@ struct StubbedCKArgsWithSplitKValidation
     }
 };
 
-std::map<std::string, std::set<int>> StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel =
-    {};
+[[clang::no_destroy]] std::map<std::string, std::set<int>>
+StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel = {};
 
 /**
  * @brief Test cases for IsCKSplitKSupportedGeneric

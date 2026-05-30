@@ -16,6 +16,7 @@ namespace {
 
 std::vector<pooling_gtest::PoolingTestCase> GetPooling2dTestCases()
 {
+    [[clang::no_destroy]]
     static std::vector<pooling_gtest::PoolingTestCase> cached_test_cases;
     static bool cached = false;
 

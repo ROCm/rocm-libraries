@@ -160,12 +160,12 @@ static inline void AdjustWorkspacesizeVariableFromEnv(std::size_t& sz)
 
 static inline miopenDataType_t DataTypeFromShortString(const std::string& type)
 {
-    static const std::unordered_map<std::string, miopenDataType_t> conv_map = {
-        {"fp32", miopenFloat},
-        {"fp16", miopenHalf},
-        {"bf16", miopenBFloat16},
-        {"fp8", miopenFloat8_fnuz},
-        {"bf8", miopenBFloat8_fnuz}};
+    [[clang::no_destroy]] static const std::unordered_map<std::string, miopenDataType_t> conv_map =
+        {{"fp32", miopenFloat},
+         {"fp16", miopenHalf},
+         {"bf16", miopenBFloat16},
+         {"fp8", miopenFloat8_fnuz},
+         {"bf8", miopenBFloat8_fnuz}};
 
     const auto res = conv_map.find(type);
     if(res != conv_map.end())

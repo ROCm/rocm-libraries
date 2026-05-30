@@ -31,7 +31,7 @@ namespace {
 
 std::vector<DriverMaker>& get_registry()
 {
-    static std::vector<DriverMaker> rv;
+    [[clang::no_destroy]] static std::vector<DriverMaker> rv;
     return rv;
 }
 

@@ -66,7 +66,7 @@ int LayoutStringToCode(const std::string& layout, bool is3d)
 }
 
 // Dummy kernels for testing
-const std::vector<std::string> dummy_kernels = {
+[[clang::no_destroy]] const std::vector<std::string> dummy_kernels = {
     "DeviceGroupedConvBwdWeight_Xdl_CShuffle<64,64,64,4,Default,4,2,2,1,4,1,4,1,1,1>",
     "DeviceGroupedConvBwdWeight_Xdl_CShuffle<128,128,32,4,Default,4,2,1,4,4,1,1,1,1,1>",
     "DeviceGroupedConvBwdWeight_Xdl_CShuffle<64,32,64,4,Default,4,1,2,1,2,4,4,1,1,4>",
@@ -74,7 +74,7 @@ const std::vector<std::string> dummy_kernels = {
 };
 
 // Dummy fill_valid_kernels for testing
-static std::function<std::vector<std::string>(const miopen::conv::ProblemDescription&)>
+[[clang::no_destroy]] static std::function<std::vector<std::string>(const miopen::conv::ProblemDescription&)>
     fill_valid_kernels = [](const miopen::conv::ProblemDescription&) { return dummy_kernels; };
 
 // Default validation function: accepts all kernel/split_k combinations

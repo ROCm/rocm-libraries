@@ -46,7 +46,7 @@ inline auto GenCases()
 
 inline auto GetCases()
 {
-    static const auto cases = GenCases();
+    [[clang::no_destroy]] static const auto cases = GenCases();
     return cases;
 }
 

@@ -799,25 +799,26 @@ inline auto GenCases()
 template <typename T>
 inline auto GetCases()
 {
-    static const auto cases = GenCases<T>();
+    [[clang::no_destroy]] static const auto cases = GenCases<T>();
     return cases;
 }
 
 inline auto GetCasesReduceCustomTestSet1()
 {
-    static TestCase test_case = std::make_tuple(std::vector<size_t>{1024, 30528, 1},
-                                                std::vector<int>{0, 1, 2},
-                                                MIOPEN_REDUCE_TENSOR_ADD,
-                                                MIOPEN_PROPAGATE_NAN,
-                                                MIOPEN_REDUCE_TENSOR_NO_INDICES,
-                                                std::vector<float>{1.0f, 0.0f});
+    [[clang::no_destroy]] static TestCase test_case =
+        std::make_tuple(std::vector<size_t>{1024, 30528, 1},
+                        std::vector<int>{0, 1, 2},
+                        MIOPEN_REDUCE_TENSOR_ADD,
+                        MIOPEN_PROPAGATE_NAN,
+                        MIOPEN_REDUCE_TENSOR_NO_INDICES,
+                        std::vector<float>{1.0f, 0.0f});
 
     return testing::Values(test_case);
 }
 
 inline auto GetCasesReduceCustomTestSet2()
 {
-    static std::vector<float> alphabeta = {1.0f, 0.0f};
+    [[clang::no_destroy]] static std::vector<float> alphabeta = {1.0f, 0.0f};
 
     constexpr miopenReduceTensorOp_t add = MIOPEN_REDUCE_TENSOR_ADD;
     constexpr miopenReduceTensorOp_t mul = MIOPEN_REDUCE_TENSOR_MUL;
@@ -831,7 +832,7 @@ inline auto GetCasesReduceCustomTestSet2()
     constexpr miopenReduceTensorIndices_t ind   = MIOPEN_REDUCE_TENSOR_FLATTENED_INDICES;
 
     // clang-format off
-    static std::vector<TestCase> test_cases = {
+    [[clang::no_destroy]] static std::vector<TestCase> test_cases = {
         std::make_tuple(std::vector<size_t>{8, 2, 1}, std::vector<int>{0, 1, 2}, add, nan, noind, alphabeta),
         std::make_tuple(std::vector<size_t>{160, 10, 1}, std::vector<int>{0, 1, 2}, add, nan, noind, alphabeta),
         std::make_tuple(std::vector<size_t>{7, 1024, 1}, std::vector<int>{0, 1, 2}, add, nan, noind, alphabeta),

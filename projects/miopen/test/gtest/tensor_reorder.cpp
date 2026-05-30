@@ -223,7 +223,7 @@ struct reorder_invoke_param : public miopen::InvokeParams
 
 inline auto GenCases()
 {
-    static const std::vector<std::vector<uint32_t>> all_possible_order{
+    [[clang::no_destroy]] static const std::vector<std::vector<uint32_t>> all_possible_order{
         {0, 1, 3, 2}, {0, 2, 1, 3}, {0, 2, 3, 1}, {0, 3, 1, 2}, {0, 3, 2, 1}, {1, 0, 2, 3},
         {1, 0, 3, 2}, {1, 2, 0, 3}, {1, 2, 3, 0}, {1, 3, 0, 2}, {1, 3, 2, 0}, {2, 0, 1, 3},
         {2, 0, 3, 1}, {2, 1, 0, 3}, {2, 1, 3, 0}, {2, 3, 0, 1}, {2, 3, 1, 0}, {3, 0, 1, 2},
@@ -243,7 +243,7 @@ inline auto GenCases()
 
 inline auto GetCases()
 {
-    static const auto cases = GenCases();
+    [[clang::no_destroy]] static const auto cases = GenCases();
     return cases;
 }
 

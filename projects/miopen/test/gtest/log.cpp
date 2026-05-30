@@ -49,19 +49,21 @@
 #define MDEXE "./bin/MIOpenDriver"
 #endif
 
-const std::string logConv =
+[[clang::no_destroy]] const std::string logConv =
     "MIOpen(" BKEND "): Command [LogCmdConvolution] " MDEXE " conv -n 128 -c 3 -H 32 -W 32 -k "
     "64 -y 3 -x 3 -p 1 -q 1 -u 1 -v 1 -l 1 -j 1 -m conv -g 1 -F 1 -t 1";
-const std::string logFindConv =
+
+[[clang::no_destroy]] const std::string logFindConv =
     "MIOpen(" BKEND "): Command [LogCmdFindConvolution] " MDEXE " conv -n 128 -c 3 -H 32 -W 32 "
     "-k 64 -y 3 -x 3 -p 1 -q 1 -u 1 -v 1 -l 1 -j 1 -m conv -g 1 -F 1 -t 1";
 
-const std::string logFusionConvBiasActiv =
+[[clang::no_destroy]] const std::string logFusionConvBiasActiv =
     "MIOpen(" BKEND "): Command [LogCmdFusion] " MDEXE " CBAInfer -J 4 -n 128 -c 3 -H 32 "
     "-W 32 -k 64 -y 3 -x 3 -p 1 -q 1 -u 1 -v 1 -l 1 -j 1";
 
-const std::string logBnormActiv = "MIOpen(" BKEND "): Command [LogCmdFusion] " MDEXE
-                                  " CBAInfer -J 2 -n 64 -c 64 -H 56 -W 56 -m 1";
+[[clang::no_destroy]] const std::string logBnormActiv =
+    "MIOpen(" BKEND "): Command [LogCmdFusion] " MDEXE
+    " CBAInfer -J 2 -n 64 -c 64 -H 56 -W 56 -m 1";
 
 // Captures the std::cerr buffer and store it to a string.
 struct CerrRedirect
