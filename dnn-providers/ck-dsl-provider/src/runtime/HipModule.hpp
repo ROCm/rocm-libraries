@@ -75,14 +75,6 @@ class HipModule {
     void launch(const std::byte* args, std::size_t argsSize, const KernelArtifact::GridSpec& grid,
                 const KernelArtifact::BlockSpec& block, std::uint32_t ldsBytes, hipStream_t stream);
 
-    /// Vector overload preserved for callers (mostly tests) that
-    /// already hold a ``std::vector`` from ``LaunchAbi::pack``.
-    void launch(const std::vector<std::byte>& packedArgs, const KernelArtifact::GridSpec& grid,
-                const KernelArtifact::BlockSpec& block, std::uint32_t ldsBytes,
-                hipStream_t stream) {
-        launch(packedArgs.data(), packedArgs.size(), grid, block, ldsBytes, stream);
-    }
-
     /// Convenience overload: pull grid / block / lds from the
     /// artifact's defaults. Used by smoke tests and by future per-op
     /// engines whose artifacts encode the canonical launch shape.
@@ -122,15 +114,11 @@ class HipModule {
     const std::vector<ArgSchema>& argSchema() const noexcept {
         return _argSchema;
     }
-    const std::string& kind() const noexcept {
-        return _kind;
-    }
 
    private:
     hipModule_t _module{nullptr};
     hipFunction_t _function{nullptr};
     std::string _kernelName;
-    std::string _kind;
     KernelArtifact::GridSpec _grid{};
     KernelArtifact::BlockSpec _block{};
     std::uint32_t _ldsBytes{0};

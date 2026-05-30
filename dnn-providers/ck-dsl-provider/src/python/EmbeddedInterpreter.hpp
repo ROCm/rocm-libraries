@@ -6,8 +6,6 @@
 #include <pybind11/embed.h>
 #include <pybind11/pybind11.h>
 
-#include <string_view>
-
 namespace ck_dsl_provider {
 
 /// Per-process embedded CPython interpreter wrapper.
@@ -47,13 +45,6 @@ class EmbeddedInterpreter {
     /// Returns how many times ensureInitialized() has actually performed
     /// initialization (always 0 or 1 in a healthy process). Test helper.
     static unsigned initializationCount() noexcept;
-
-    /// Convenience smoke helper: import a Python module by name with
-    /// the GIL held, returning the imported py::module_ as a py::object.
-    /// Throws py::error_already_set on failure (caller decides whether
-    /// to catch). Used by the unit tests; production code uses pybind11
-    /// directly.
-    static pybind11::object importCheck(std::string_view moduleName);
 
    private:
     EmbeddedInterpreter() = delete;

@@ -16,12 +16,24 @@
 
 namespace ck_dsl_provider {
 
-/// Opaque cache key. The key is a deterministic hash over
-/// ``(op_kind_string, dtype_tuple, shape_tuple, stride_tuple,
-/// layout_string, dsl_version_string)``. ``GraphSignature`` owns the
-/// derivation; ``JitCache`` is intentionally agnostic so a future
-/// on-disk cache can reuse the same key without inheriting any
-/// knowledge of how it was computed.
+/// Opaque cache key. The key is a deterministic hash over the op-kind
+/// string, every codegen-relevant field of the built
+/// ``ConvImplicitGemmSpec`` (the ConvProblem shape/stride/pad/dilation
+/// plus all tiling/pipeline/epilogue knobs), and the DSL version
+/// string. ``GraphSignature::computeForSpec`` owns the derivation and
+/// is the authoritative list of folded -- and intentionally omitted --
+/// inputs; ``JitCache`` is intentionally agnostic so a future on-disk
+/// cache can reuse the same key without inheriting any knowledge of how
+/// it was computed.
+///
+/// **Precondition for an on-disk cache.** The current key is only
+/// sufficient for the in-memory, single-process, single-GPU, FP16-only
+/// path. Several codegen inputs are constant today and therefore not
+/// folded -- dtype, target arch + toolchain version, and physical
+/// tensor layout (see ``GraphSignature``). A persisted cache outlives
+/// the process/GPU/build that produced it, so it MUST extend the key
+/// with those inputs before reusing entries, or it will hand back a
+/// module built for a different dtype/arch/layout.
 using SignatureHash = std::uint64_t;
 
 /// In-memory JIT cache mapping ``SignatureHash`` → loaded ``HipModule``.
