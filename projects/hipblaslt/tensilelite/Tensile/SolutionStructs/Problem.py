@@ -237,7 +237,7 @@ class ExactList(Problem):
 
 
 class ExactDict(Problem):
-  AllowedFields = [ 'count', 'sizes', 'stridesA', 'stridesB', 'stridesC', 'stridesD' ]
+  AllowedFields = [ 'count', 'sizes', 'stridesA', 'stridesB', 'stridesC', 'stridesD', 'stridesGate' ]
 
   def __init__(self, e, problemType):
     Problem.__init__(self)

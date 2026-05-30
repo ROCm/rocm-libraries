@@ -222,6 +222,12 @@ class StoreState:
         if kernel["StreamK"] > 0 and isWorkspace:
             self.useBias = DataDirection.NONE
 
+        # Gate Residual: D = gate * acc + gate (v1: GSU=1 only, no StreamK workspace).
+        # Gate reuses D's address/SRD, so only allocate data VGPRs here.
+        self.useGateResidual = kernelWriter.states.useGateResidual
+        if kernel["StreamK"] > 0 and isWorkspace:
+            self.useGateResidual = False
+
         isSingleKernel = ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel") or (kernel["StreamK"] > 0 and not isWorkspace)
         self.referenceVgprDim = [[], []]
         if self.useBias == DataDirection.READ:
@@ -252,6 +258,10 @@ class StoreState:
                 self.sharedColEVgprs = kernelWriter.vgprPool.checkOut(self.numAddrVgpr, "sharedColEVgprs for packed elements")
             else:
                 self.sharedColEVgprs = None
+            if self.useGateResidual and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
+                self.sharedColGateVgprs = kernelWriter.vgprPool.checkOut(self.numAddrVgpr, "sharedColGateVgprs for packed elements")
+            else:
+                self.sharedColGateVgprs = None
             if kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel:
                 if self.referenceVgprDim[self.factorDim] and self.referenceVgprDim[self.factorDim][0] == "ScaleAlpha":
                     self.sharedColScaleAlphaVecVgprs = kernelWriter.vgprPool.checkOut(self.numAddrVgpr, "sharedColScaleAlphaVecVgprs for packed elements")
@@ -283,6 +293,7 @@ class StoreState:
             self.singleColDAddrUpdated    = False
             self.singleColTDAddrUpdated   = False
             self.singleColCAddrUpdated    = False
+            self.singleColGateAddrUpdated = False
             if kernel["ProblemType"]["UseBeta"]:
                 self.sharedColCVgprs = kernelWriter.vgprPool.checkOut(1, "sharedColCVgprs")
             else:
@@ -295,6 +306,10 @@ class StoreState:
                 self.sharedColEVgprs = kernelWriter.vgprPool.checkOut(1, "sharedColEVgprs for packed elements")
             else:
                 self.sharedColEVgprs = None
+            if self.useGateResidual and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
+                self.sharedColGateVgprs = kernelWriter.vgprPool.checkOut(1, "sharedColGateVgprs")
+            else:
+                self.sharedColGateVgprs = None
             if kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel:
                 if self.referenceVgprDim[self.factorDim] and self.referenceVgprDim[self.factorDim][0] == "ScaleAlpha":
                     self.sharedColScaleAlphaVecVgprs = kernelWriter.vgprPool.checkOut(1, "sharedColScaleAlphaVecVgprs for packed elements")
@@ -321,6 +336,7 @@ class StoreState:
             self.sharedGSUSyncVgprs = None
             self.sharedColCVgprs    = None
             self.sharedColBiasVgprs = None
+            self.sharedColGateVgprs = None
             self.sharedColScaleAVecVgprs = None
             self.sharedColScaleBVecVgprs = None
             self.sharedColScaleAlphaVecVgprs = None
@@ -352,6 +368,10 @@ class StoreState:
             if (kernel["ProblemType"]["Gradient"] and kernel["ProblemType"]["ActivationType"] != 'none'):
                 numVgprs = int(ceil(kernel["ProblemType"]["ComputeDataType"].numRegisters()))
                 self.numVgprsPerElement += numVgprs * gwvw # Loaded data
+        if self.useGateResidual and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
+            # Gate reuses D's addr VGPR; data is cvt to f32 before the uniform FMA,
+            # so size it as f32 (gwvw dwords) regardless of the native gate dtype.
+            self.numVgprsPerElement += gwvw  # Loaded gate data (f32 after cvt)
         # We will use the same vgpr + ds_offset to load the vec addr
 
         if self.useBias != DataDirection.NONE:
@@ -479,6 +499,7 @@ class StoreState:
 
         self.elementAddr              = []
         self.elementDataE             = []
+        self.elementDataGate          = []
         self.elementData              = []  # VGPR to use for element data, needed for atomic or beta
         self.elementDataBias          = []
         self.elementDataScaleAVec     = []
@@ -665,6 +686,7 @@ class StoreState:
                 addrGSUSyncVgprs = self.sharedGSUSyncVgprs
                 addrCVgpr    = self.sharedColCVgprs
                 addrBiasVgpr = self.sharedColBiasVgprs
+                addrGateVgpr = self.sharedColGateVgprs
                 addrScaleAVecVgpr = self.sharedColScaleAVecVgprs
                 addrScaleBVecVgpr = self.sharedColScaleBVecVgprs
                 addrScaleAlphaVecVgpr = self.sharedColScaleAlphaVecVgprs
@@ -689,6 +711,10 @@ class StoreState:
                     addrEVgpr = self.sharedColEVgprs+elementCol
                 else:
                     addrEVgpr = None
+                if self.useGateResidual and (kernel["GlobalSplitU"] == 1):
+                    addrGateVgpr = self.sharedColGateVgprs+elementCol
+                else:
+                    addrGateVgpr = None
                 #print ("d0=", d0, "vc0=", vc0, "elementCol=", elementCol)
 
                 if kernel["ProblemType"]["UseScaleAlphaVec"] and (kernel["GlobalSplitU"] == 1):
@@ -737,6 +763,12 @@ class StoreState:
                 else:
                     addrEVgpr = None
 
+                if self.useGateResidual and (kernel["GlobalSplitU"] == 1):
+                    # No-opt path: reuse D's addr (see comment in setupStoreElementsForBatch).
+                    addrGateVgpr = addrDVgpr
+                else:
+                    addrGateVgpr = None
+
                 if kernel["ProblemType"]["UseScaleAlphaVec"] and ((kernel["GlobalSplitU"] == 1) or (kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel")):
                     if self.referenceVgprDim[self.factorDim] and self.referenceVgprDim[self.factorDim][0] == "ScaleAlpha":
                         addrScaleAlphaVecVgpr = kw.vgprPool.checkOutAligned(self.cfg.numVgprsPerAddr, \
@@ -761,7 +793,7 @@ class StoreState:
                     addrScaleAVecVgpr = None
                     addrScaleBVecVgpr = None
             self.elementAddr.append(AddrCalculation(kw, self, addrCVgpr, addrDVgpr, addrGSUSyncVgprs, addrEVgpr, addrBiasVgpr, addrScaleAVecVgpr, addrScaleBVecVgpr, addrScaleAlphaVecVgpr, element, coordOffset0, \
-              self.kernelWriter.vgprs.coord1, coordOffset1, coordOffset1 - self.lastCoordOffset1, newCoord1, self.vectorDataTypes))
+              self.kernelWriter.vgprs.coord1, coordOffset1, coordOffset1 - self.lastCoordOffset1, newCoord1, self.vectorDataTypes, addrGateVgpr=addrGateVgpr))
             self.lastCoordOffset1 = coordOffset1
 
         # reset flag
@@ -771,6 +803,7 @@ class StoreState:
 
         self.elementAddr              = []
         self.elementDataE             = []
+        self.elementDataGate          = []
         self.elementData              = []  # VGPR to use for element data, needed for atomic or beta
         self.elementDataBias          = []
         self.elementDataScaleAVec     = []
@@ -913,6 +946,15 @@ class StoreState:
                 dataE = 0
             self.elementDataE.append(dataE)
 
+            # Per-element gate data VGPR; sized as f32 (gwvw dwords) — native load is
+            # expanded to f32 in-place before the uniform FMA.
+            if self.useGateResidual and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
+                dataGate = kw.vgprPool.checkOutAligned(max(1, int(self.cfg.gwvw)), \
+                              max(1, int(self.cfg.gwvw)), "gate data for ei=%u"%elementIdx, preventOverflow=False)
+            else:
+                dataGate = 0
+            self.elementDataGate.append(dataGate)
+
             if (kernel["ProblemType"]["UseScaleAB"] == "Vector") and isSingleKernel:
                 if coordOffset0 in scaleAVecVgprMap:
                     dataScaleAVec = scaleAVecVgprMap[coordOffset0]
@@ -961,6 +1003,7 @@ class StoreState:
                 addrGSUSyncVgprs = self.sharedGSUSyncVgprs
                 addrCVgpr    = self.sharedColCVgprs
                 addrBiasVgpr = self.sharedColBiasVgprs
+                addrGateVgpr = self.sharedColGateVgprs
                 addrScaleAVecVgpr = self.sharedColScaleAVecVgprs
                 addrScaleBVecVgpr = self.sharedColScaleBVecVgprs
                 addrScaleAlphaVecVgpr = self.sharedColScaleAlphaVecVgprs
@@ -985,6 +1028,10 @@ class StoreState:
                     addrEVgpr = self.sharedColEVgprs+elementCol
                 else:
                     addrEVgpr = None
+                if self.useGateResidual and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
+                    addrGateVgpr = self.sharedColGateVgprs+elementCol
+                else:
+                    addrGateVgpr = None
                 #print ("d0=", d0, "vc0=", vc0, "elementCol=", elementCol)
 
                 if kernel["ProblemType"]["UseScaleAlphaVec"] and ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or (kernel["StreamK"] > 0 and not isWorkspace)):
@@ -1033,6 +1080,13 @@ class StoreState:
                 else:
                     addrEVgpr = None
 
+                if self.useGateResidual and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
+                    # No-opt path: Gate reuses D's per-element addr VGPR (same coord/OOB).
+                    # optSingleColVgpr (hot path) uses a dedicated sharedColGateVgprs instead.
+                    addrGateVgpr = addrDVgpr
+                else:
+                    addrGateVgpr = None
+
                 if kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel:
                     if self.referenceVgprDim[self.factorDim] and self.referenceVgprDim[self.factorDim][0] == "ScaleAlpha":
                         addrScaleAlphaVecVgpr = kw.vgprPool.checkOutAligned(self.cfg.numVgprsPerAddr, \
@@ -1057,7 +1111,7 @@ class StoreState:
                     addrScaleAVecVgpr = None
                     addrScaleBVecVgpr = None
             self.elementAddr.append(AddrCalculation(kw, self, addrCVgpr, addrDVgpr, addrGSUSyncVgprs, addrEVgpr, addrBiasVgpr, addrScaleAVecVgpr, addrScaleBVecVgpr, addrScaleAlphaVecVgpr, element, coordOffset0, \
-              self.kernelWriter.vgprs.coord1, coordOffset1, coordOffset1 - self.lastCoordOffset1, newCoord1, self.vectorDataTypes))
+              self.kernelWriter.vgprs.coord1, coordOffset1, coordOffset1 - self.lastCoordOffset1, newCoord1, self.vectorDataTypes, addrGateVgpr=addrGateVgpr))
             self.lastCoordOffset1 = coordOffset1
 
         # reset flag
@@ -1084,6 +1138,7 @@ class StoreState:
                 self.singleColDAddrUpdated    = False
                 self.singleColTDAddrUpdated    = False
                 self.singleColCAddrUpdated    = False
+                self.singleColGateAddrUpdated = False
             else:
                 pass # Nothing to reset
             # setup store element
@@ -1106,6 +1161,9 @@ class StoreState:
         if (self.sharedColBiasVgprs != None):
             self.kernelWriter.vgprPool.checkIn(self.sharedColBiasVgprs)
             self.sharedColBiasVgprs = None
+        if (getattr(self, 'sharedColGateVgprs', None) != None):
+            self.kernelWriter.vgprPool.checkIn(self.sharedColGateVgprs)
+            self.sharedColGateVgprs = None
         if (self.sharedColScaleAVecVgprs != None):
             self.kernelWriter.vgprPool.checkIn(self.sharedColScaleAVecVgprs)
             self.sharedColScaleAVecVgprs = None

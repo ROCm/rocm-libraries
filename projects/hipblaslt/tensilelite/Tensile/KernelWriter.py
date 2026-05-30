@@ -417,6 +417,7 @@ class StateVgprs:
   cinRowPtr: int  = -1
   coutRowPtrBias: int = -1
   coutRowPtrE: int = -1
+  coutRowPtrGate: int = -1
   coutRowPtrD: int = -1
 
   # FlatStore
@@ -6532,6 +6533,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.states.bpeA = self.states.bpr * kernel["ProblemType"]["MacDataTypeA"].numRegisters()
     self.states.bpeB = self.states.bpr * kernel["ProblemType"]["MacDataTypeB"].numRegisters()
     self.states.bpeE = int(self.states.bpr * kernel["ProblemType"]["DataTypeE"].numRegisters())
+    # bpeGate: prolog gate-load default bpe. Multi-dtype dispatcher unconditionally
+    # overrides per-branch (see GlobalWriteBatch FMA dispatcher), so the default only
+    # matters for single-dtype and the fallback path. Pick list[0] when set, else dest.
+    _useGate = kernel["ProblemType"].get("UseGateResidual", False)
+    _gateList = kernel["ProblemType"].get("GateResidualDataTypeList", []) if _useGate else []
+    _bpeGateDtype = _gateList[0] if _gateList else kernel["ProblemType"]["DestDataType"]
+    self.states.bpeGate = max(1, int(self.states.bpr * _bpeGateDtype.numRegisters()))
     self.states.bpeCinternal = int(self.states.bpr * kernel["ProblemType"]["ComputeDataType"].numRegisters())
 
     self.states.bpeCexternalGSU1 = int(self.states.bpr * kernel["ProblemType"]["DestDataType"].numRegisters())

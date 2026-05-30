@@ -153,6 +153,8 @@ class ComputeStoreVgprsMFMA(ComputeStoreVgprs):
                 writer.vgprs.coutRowPtrE = writer.vgprPool.checkOut(1, "coutRowPtrE")
             if writer.states.useBias == DataDirection.WRITE and (not kernel["WorkGroupReduction"]) and kernel["ProblemType"]["BiasSrc"] == "D":
                 writer.vgprs.coutRowPtrBias = writer.vgprPool.checkOut(1, "coutRowPtrBias")
+            if writer.states.useGateResidual:
+                writer.vgprs.coutRowPtrGate = writer.vgprPool.checkOut(1, "coutRowPtrGate")
         if kernel["LocalSplitU"] > 1:
             writer.vgprs.coord0InMT = writer.vgprPool.checkOut(1, "coord0InMT")
             writer.vgprs.coord1InMT = writer.vgprPool.checkOut(1, "coord1InMT")
@@ -204,6 +206,9 @@ class ComputeStoreVgprsMFMA(ComputeStoreVgprs):
             module.add(VMulLOU32(dst=vgpr(writer.vgprs.coutRowPtrD), src0=vgpr(lsuTid1), src1=sgpr(strideD1), comment=" offset 1"))
             if kernel["ProblemType"]["UseE"] and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
                 module.add(VMovB32(dst=vgpr(writer.vgprs.coutRowPtrE), src=vgpr(lsuTid1), comment=" save offset 1 for E"))
+            if writer.vgprs.coutRowPtrGate != -1:
+                # Save per-lane row index; *GateStride+0 happens later in endSummation (mirrors E).
+                module.add(VMovB32(dst=vgpr(writer.vgprs.coutRowPtrGate), src=vgpr(lsuTid1), comment=" save offset 1 for Gate (mul by GateStride later)"))
             if writer.vgprs.coutRowPtrBias != -1:
                 index = packedC1[0] - 1
                 strideW1 = "Size%s" % "I" if index == 0 else ("J" if index == 1 else (writer.states.indexChars[index]))
@@ -279,6 +284,8 @@ class ComputeStoreVgprsMFMASwap(ComputeStoreVgprs):
                 writer.vgprs.coutRowPtrE = writer.vgprPool.checkOut(1, "coutRowPtrE")
             if writer.states.useBias == DataDirection.WRITE and (not kernel["WorkGroupReduction"]) and kernel["ProblemType"]["BiasSrc"] == "D":
                 writer.vgprs.coutRowPtrBias = writer.vgprPool.checkOut(1, "coutRowPtrBias")
+            if writer.states.useGateResidual:
+                writer.vgprs.coutRowPtrGate = writer.vgprPool.checkOut(1, "coutRowPtrGate")
         if kernel["LocalSplitU"] > 1:
             writer.vgprs.coord0InMT = writer.vgprPool.checkOut(1, "coord0InMT")
             writer.vgprs.coord1InMT = writer.vgprPool.checkOut(1, "coord1InMT")
@@ -330,6 +337,10 @@ class ComputeStoreVgprsMFMASwap(ComputeStoreVgprs):
             module.add(VMulLOU32(dst=vgpr(writer.vgprs.coutRowPtrD), src0=vgpr(lsuTid1), src1=sgpr(strideD1), comment=" offset 1"))
             if kernel["ProblemType"]["UseE"] and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1):
                 module.add(VMovB32(dst=vgpr(writer.vgprs.coutRowPtrE), src=vgpr(lsuTid1), comment=" save offset 1 for E"))
+            if writer.vgprs.coutRowPtrGate != -1:
+                # See MFMA path above re: GateStride lazy load timing — save offset only,
+                # mul by GateStride+0 happens later in endSummation (mirrors E pattern).
+                module.add(VMovB32(dst=vgpr(writer.vgprs.coutRowPtrGate), src=vgpr(lsuTid1), comment=" save offset 1 for Gate (mul by GateStride later)"))
             if writer.vgprs.coutRowPtrBias != -1:
                 index = packedC1[0] - 1
                 strideW1 = "Size%s" % "I" if index == 0 else ("J" if index == 1 else (writer.states.indexChars[index]))
