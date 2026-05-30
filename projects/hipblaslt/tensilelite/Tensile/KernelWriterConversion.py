@@ -110,6 +110,11 @@ class KernelWriterConversion(KernelWriterBase):
     kStr += "  " + self.datatype + " * W;" + self.endLine
     kStr += "  " + ptrStr + " * " + bStr + "C;" + self.endLine
 
+    # Batch offsets for General Batched GEMM (SupportUserArgs kernels)
+    if self.state["ProblemType"]["SupportUserArgs"]:
+      kStr += "  int64_t batchOffsetD;" + self.endLine
+      kStr += "  int64_t batchOffsetC;" + self.endLine
+
     # bias
     if self.state["ProblemType"]["UseBias"]:
       if (not self.state["ProblemType"]["Gradient"]):
@@ -428,10 +433,16 @@ class KernelWriterConversion(KernelWriterBase):
         ptrStr = self.state["ProblemType"]["DataTypeE"].toDevice(self.language)
         kStr += "  " + ptrStr + " * arg.E = arg.BatchE[wg];" + self.endLine
       ptrStr = self.state["ProblemType"]["DestDataType"].toDevice(self.language)
-      kStr += "  " + ptrStr + " * arg.D = arg.BatchD[wg];" + self.endLine
+      if self.state["ProblemType"]["SupportUserArgs"]:
+        kStr += "  " + ptrStr + " * arg.D = arg.BatchD[wg] + arg.batchOffsetD;" + self.endLine
+      else:
+        kStr += "  " + ptrStr + " * arg.D = arg.BatchD[wg];" + self.endLine
       ptrStr = self.state["ProblemType"]["DestDataType"].toDevice(self.language)
       zeroStr = self.state["ProblemType"]["ComputeDataType"].zeroString(self.language, 1)
-      kStr += "  " + ptrStr + f" const* arg.C = (arg.beta == {zeroStr}) ? nullptr : arg.BatchC[wg];" + self.endLine
+      if self.state["ProblemType"]["SupportUserArgs"]:
+        kStr += "  " + ptrStr + f" const* arg.C = (arg.beta == {zeroStr}) ? nullptr : arg.BatchC[wg] + arg.batchOffsetC;" + self.endLine
+      else:
+        kStr += "  " + ptrStr + f" const* arg.C = (arg.beta == {zeroStr}) ? nullptr : arg.BatchC[wg];" + self.endLine
 
     ########################################
     # D index
