@@ -54,7 +54,17 @@ from typing import Callable, Optional, Sequence, Tuple
 
 from ..core.ir import F16, IRBuilder, Value
 from .atoms import MfmaAtom
+from .distribution import (
+    LoadStoreTraits,
+    TileDistribution,
+    TileDistributionEncoding,
+    make_static_distributed_tensor,
+    make_static_tile_distribution,
+    store_tile_cshuffle,
+)
 from .geometry import WarpGrid
+from .layouts import LdsLayout
+from .tensor_view import make_lds_view
 
 
 AddrFn = Callable[[IRBuilder, Value, Value], Tuple[Value, Optional[Value]]]
@@ -263,6 +273,26 @@ class DirectEpilogue:
         return b.land(m_ok, n_ok)
 
 
+def _cshuffle_acc_distribution(c_per_lane: int) -> TileDistribution:
+    """Register-container distribution for one warp tile's accumulator.
+
+    A single X dim is decomposed as ``(c_per_lane, 1)`` with one Y per
+    level: the outer Y (length ``c_per_lane``) enumerates the per-lane
+    accumulator register slots, and the inner Y (length 1) is the scalar
+    publish unit. ``y_to_linear((i, 0)) == i`` so slot ``i`` maps to
+    accumulator element ``i``. The distribution is used only as the
+    :class:`StaticDistributedTensor` shape / iteration order; the actual
+    LDS coordinate is supplied by the epilogue's ``coord_fn`` (the MFMA
+    output layout is not a clean ``unmerge`` of the lane id).
+    """
+    enc = TileDistributionEncoding(
+        Hs=((int(c_per_lane), 1),),
+        Ys2RHs_major=(1, 1),
+        Ys2RHs_minor=(0, 1),
+    )
+    return make_static_tile_distribution(enc)
+
+
 @dataclass(frozen=True)
 class CShuffleEpilogue:
     """LDS-staged C-shuffle epilogue (runbook §9.3).
@@ -342,43 +372,63 @@ class CShuffleEpilogue:
         warp_m_off = grid.warp_m_off(b)
         warp_n_off = grid.warp_n_off(b)
 
-        c_smem = b.smem_alloc(
-            F16, [grid.tile_m, grid.tile_n], name_hint=self.smem_name_hint
+        # ---- step 1: publish accs to LDS at the MFMA output layout. ----
+        #
+        # The LDS staging region is a plain ``[tile_m, tile_n]`` row-major
+        # buffer (``LdsLayout.cshuffle``); each lane writes its
+        # ``c_per_lane`` accumulator halves at the exact MFMA *output*
+        # coordinate the atom dictates, so the subsequent row-major
+        # stage-3 read reconstructs the global tile. The per-warp-tile
+        # accumulator is carried in a :class:`StaticDistributedTensor`
+        # and published through :func:`store_tile_cshuffle`.
+        #
+        # The MFMA output layout (``atom.lane_to_output``) is not a clean
+        # ``unmerge`` of the lane id (the 32x32 row formula interleaves
+        # register and lane bits), so the LDS coordinate is supplied via
+        # an explicit ``coord_fn`` rather than ``calculate_x``.
+        lds_layout = LdsLayout.cshuffle(tile_m=grid.tile_m, tile_n=grid.tile_n)
+        lds_layout.validate()
+        c_view = make_lds_view(
+            b,
+            dtype=F16,
+            shape=lds_layout.storage_shape(grid.tile_m),
+            name_hint=self.smem_name_hint,
+        )
+        c_smem = c_view.base
+        # A full-extent LDS window; per-(mi, ni) origins move within it.
+        c_window = c_view.tile(
+            list(lds_layout.storage_shape(grid.tile_m)),
+            [b.const_i32(0), b.const_i32(0)],
         )
 
-        # ---- step 1: write accs to LDS at the MFMA output layout. ----
-        is_32x32 = (atom.m, atom.n) == (32, 32)
-        c_atom_n = b.const_i32(atom.n)
-        n_in_atom = b.mod(grid.lane, c_atom_n)
-        m_blk = b.div(grid.lane, c_atom_n)
+        # One distributed-tensor container per warp tile: a single X dim
+        # decomposed as ``(c_per_lane, 1)`` with one Y per level, so the
+        # outer Y enumerates the ``c_per_lane`` register slots and the
+        # inner (vector) Y is the scalar publish unit. ``y_to_linear`` of
+        # ``(i, 0)`` is exactly the accumulator index ``i``.
+        dist = _cshuffle_acc_distribution(atom.c_per_lane)
+        traits = LoadStoreTraits(distribution=dist, vector_dim_y=1, scalar_per_vector=1)
 
         for mi in range(mfmas_m):
             for ni in range(mfmas_n):
                 acc = accs[mi * mfmas_n + ni]
                 acc_h = b.vec_trunc_f32_to_f16(acc)
-                ld_n = b.add(
-                    b.add(warp_n_off, b.const_i32(ni * atom.n)),
-                    n_in_atom,
-                )
+                dt = make_static_distributed_tensor(dist, dtype=F16)
                 for i in range(atom.c_per_lane):
-                    if is_32x32:
-                        rb = i // 4
-                        ri = i % 4
-                        m_off = b.add(
-                            b.add(b.const_i32(rb * 8), b.mul(m_blk, b.const_i32(4))),
-                            b.const_i32(ri),
-                        )
-                    else:
-                        m_off = b.add(
-                            b.mul(m_blk, b.const_i32(atom.c_per_lane)),
-                            b.const_i32(i),
-                        )
-                    ld_m = b.add(
-                        b.add(warp_m_off, b.const_i32(mi * atom.m)),
-                        m_off,
-                    )
-                    h = b.vec_extract(acc_h, i)
-                    b.smem_store_f16(c_smem, [ld_m, ld_n], h)
+                    dt.set([i, 0], b.vec_extract(acc_h, i))
+
+                tile_m_base = b.add(warp_m_off, b.const_i32(mi * atom.m))
+                tile_n_base = b.add(warp_n_off, b.const_i32(ni * atom.n))
+
+                def coord_fn(b_, y_base, k, *, _mb=tile_m_base, _nb=tile_n_base):
+                    # y_base = (i, 0); k = 0 (vector dim length 1).
+                    i = int(y_base[0])
+                    row_in_atom, col_in_atom = atom.lane_to_output(b_, grid.lane, i)
+                    ld_m = b_.add(_mb, row_in_atom)
+                    ld_n = b_.add(_nb, col_in_atom)
+                    return [ld_m, ld_n]
+
+                store_tile_cshuffle(b, c_window, dt, traits=traits, coord_fn=coord_fn)
 
         # ---- step 2: barrier. ----
         b.sync()

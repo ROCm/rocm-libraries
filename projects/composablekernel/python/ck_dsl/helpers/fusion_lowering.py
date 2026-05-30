@@ -160,6 +160,33 @@ class ExplainOnlyLowerer:
 # ---------------------------------------------------------------------
 
 
+def _build_region_hsaco(kernel, *, explicit_arch: Optional[str] = None) -> bytes:
+    """Lower + assemble a fusion-region kernel for the device it will run on.
+
+    Fusion regions are built to be launched immediately on the local device,
+    so this targets the active device's gfx (via
+    :func:`ck_dsl.runtime.hip_module.get_device_arch`) instead of defaulting
+    to a fixed architecture. Falls back to ``gfx950`` when no device/arch can
+    be detected (e.g. IR-only/no-GPU contexts), preserving the historical
+    default. Pass ``explicit_arch`` to override (reproducible builds).
+
+    The comgr ISA always matches the resolved arch; the LLVM lowering uses the
+    matching ISA backend when the arch is one ck_dsl models, else the gfx950
+    backend (the device still gets a code object built for its own ISA).
+    """
+    from ..core.arch import known_arches
+    from ..core.lower_llvm import lower_kernel_to_llvm
+    from ..runtime.comgr import build_hsaco_from_llvm_ir
+    from ..runtime.hip_module import get_device_arch
+
+    arch = explicit_arch or get_device_arch() or "gfx950"
+    isa = f"amdgcn-amd-amdhsa--{arch}"
+    lower_arch = arch if arch in known_arches() else "gfx950"
+    ir = lower_kernel_to_llvm(kernel, arch=lower_arch)
+    hsaco, _ = build_hsaco_from_llvm_ir(ir, isa=isa)
+    return hsaco
+
+
 def _dtype_str_for_tensor(graph: FusionGraph, name: str) -> str:
     """Canonicalize a graph tensor's dtype string ("fp16" vs "f16")."""
     t = graph.tensors[name]
@@ -209,6 +236,16 @@ class GemmEpilogueLowerer:
         ("t64x64x32", 64, 64, 32, 2, 2, 16, 16, 32),
         ("t128x64x32", 128, 64, 32, 4, 2, 16, 16, 32),
         ("t64x128x32", 64, 128, 32, 2, 4, 16, 16, 32),
+    )
+    # RDNA / WMMA (gfx11xx, wave32) tiles. The unified GEMM body only covers the
+    # single ``16x16x16`` WMMA atom with the ``mem`` pipeline + ``default``
+    # epilogue (see ``is_valid_spec``'s WMMA gate in ``gemm_universal``), so the
+    # warp tile is fixed at 16x16 and the block tiles are kept modest. Used for
+    # both fp16 and bf16 (the catalog carries the WMMA atom per dtype).
+    _WMMA_TILES: Tuple[Tuple[str, int, int, int, int, int, int, int, int], ...] = (
+        ("t32x32x16", 32, 32, 16, 2, 2, 16, 16, 16),
+        ("t64x64x16", 64, 64, 16, 2, 2, 16, 16, 16),
+        ("t64x32x16", 64, 32, 16, 2, 2, 16, 16, 16),
     )
 
     def can_lower(self, graph: FusionGraph, region: FusionRegion) -> LegalResult:
@@ -304,13 +341,17 @@ class GemmEpilogueLowerer:
     def candidates(
         self, graph: FusionGraph, region: FusionRegion
     ) -> List[AutotuneConfig]:
-        from ..instances.gemm_universal import (
+        from ..instances.common.gemm_universal import (
             DataSpec,
             TileSpec,
             TraitSpec,
             UniversalGemmSpec,
         )
         from .fuse import dtype_to_ir
+
+        from ..core.arch import ArchTarget, known_arches
+        from ..instances.common.gemm_universal import is_valid_spec
+        from ..runtime.hip_module import get_device_arch
 
         head = graph.ops[region.op_names[0]]
         a_name, b_name = head.inputs
@@ -319,9 +360,54 @@ class GemmEpilogueLowerer:
         epilogue, bias_name, residual_names = self._epilogue_for_region(graph, region)
         epilogue = epilogue.with_dtype(ir_dtype)
         data = DataSpec(dtype_a=dtype, dtype_b=dtype, dtype_c=dtype, dtype_acc="fp32")
+
+        # Target the device this region will launch on (fall back to gfx950 for
+        # IR-only/no-GPU). The MMA *family* is selected from the target's wave
+        # size: CDNA (wave64) uses MFMA, the RDNA wave32 targets (gfx11xx) use
+        # WMMA — exactly as the unified GEMM builder does (``_mma_family``). The
+        # warp-tile *K* is then selected from that target's MMA catalog so the
+        # fused GEMM uses a legal atom per arch (gfx950: 32x32x16 / 16x16x32;
+        # gfx942: 32x32x8 / 16x16x16; gfx1151: WMMA 16x16x16). Each candidate is
+        # filtered through the arch-aware ``is_valid_spec`` so configs that don't
+        # fit (e.g. an LDS tile too large for gfx942's 64 KB, or a non-WMMA-legal
+        # tile/pipeline on gfx1151) are dropped instead of crashing comgr.
+        arch = get_device_arch() or "gfx950"
+        target_gfx = arch if arch in known_arches() else "gfx950"
+        target = ArchTarget.from_gfx(target_gfx)
+        wmma = target.wave_size == 32
+        family = "wmma" if wmma else "mma"
+        wave_size = target.wave_size
+
+        # The unified WMMA body pairs the 16x16x16 atom with the ``mem``
+        # pipeline + ``default`` epilogue; the richer compv4/cshuffle path
+        # encodes MFMA-shaped assumptions and is gated off for WMMA. The
+        # ``default`` epilogue applies the fused pointwise chain per-lane
+        # (see ``_emit_epilogue_default``'s WMMA scatter), so fused regions
+        # emit real candidates on gfx1151 just like the matmul-only case.
+        if wmma:
+            tile_table = self._WMMA_TILES
+            pipeline = "mem"
+            epilogue_kind = "default"
+            wgm_choices: Tuple[int, ...] = (0,)
+        else:
+            tile_table = self._tile_choices(dtype)
+            pipeline = "compv4"
+            epilogue_kind = "cshuffle"
+            wgm_choices = (4, 8)
+
         configs: List[AutotuneConfig] = []
-        for tile_name, tm, tn, tk, wm, wn, wtm, wtn, wtk in self._tile_choices(dtype):
-            for wgm in (4, 8):
+        for tile_name, tm, tn, tk, wm, wn, wtm, wtn, _wtk in tile_table:
+            atom = target.mma.select_largest_k(
+                family=family,
+                a_dtype=dtype,
+                b_dtype=dtype,
+                c_dtype="fp32",
+                m=wtm,
+                n=wtn,
+            )
+            if atom is None:
+                continue
+            for wgm in wgm_choices:
                 spec = UniversalGemmSpec(
                     name=f"fused_{epilogue.kernel_name_suffix()}_{tile_name}_wgm{wgm}",
                     tile=TileSpec(
@@ -333,19 +419,22 @@ class GemmEpilogueLowerer:
                         warp_k=1,
                         warp_tile_m=wtm,
                         warp_tile_n=wtn,
-                        warp_tile_k=wtk,
+                        warp_tile_k=atom.k,
                     ),
                     trait=TraitSpec(
-                        pipeline="compv4",
-                        epilogue="cshuffle",
+                        pipeline=pipeline,
+                        epilogue=epilogue_kind,
                         chiplet_swizzle=wgm > 0,
                         chiplet_wgm=wgm,
                     ),
                     data=data,
+                    wave_size=wave_size,
                 )
                 object.__setattr__(spec, "_fused_epilogue", epilogue)
                 object.__setattr__(spec, "_bias_arg", bias_name)
                 object.__setattr__(spec, "_residual_args", residual_names)
+                if not is_valid_spec(spec, arch=target_gfx)[0]:
+                    continue
                 configs.append(
                     AutotuneConfig(
                         spec=spec,
@@ -356,9 +445,9 @@ class GemmEpilogueLowerer:
         return configs
 
     def build(self, config: AutotuneConfig) -> BuiltRegion:
-        from ..core.lower_llvm import lower_kernel_to_llvm
-        from ..instances.gemm_universal import build_universal_gemm
-        from ..runtime.comgr import build_hsaco_from_llvm_ir
+        from ..core.arch import ArchTarget, known_arches
+        from ..instances.common.gemm_universal import build_universal_gemm
+        from ..runtime.hip_module import get_device_arch
         from ..runtime.launcher import KernelLauncher
         from .fuse import dtype_to_ir
 
@@ -367,9 +456,22 @@ class GemmEpilogueLowerer:
         bias_name = getattr(spec, "_bias_arg", None)
         residual_names = getattr(spec, "_residual_args", ())
         ir_dtype = dtype_to_ir(spec.data.dtype_a)
-        kernel = build_universal_gemm(spec)
-        ir = lower_kernel_to_llvm(kernel)
-        hsaco, _ = build_hsaco_from_llvm_ir(ir)
+        # Resolve the target arch the candidate was specialised for. ``spec``
+        # carries the wave size (wave32 -> RDNA/WMMA, wave64 -> CDNA/MFMA); the
+        # GEMM body must be built for an arch whose wave size matches, else
+        # ``build_universal_gemm`` rejects the spec. Prefer the active device
+        # when it matches the spec's wave size (the common case); otherwise fall
+        # back to the first known arch with the matching wave size so a wave32
+        # WMMA candidate still builds on a wave64 host (and vice versa).
+        dev = get_device_arch() or "gfx950"
+        build_gfx = dev if dev in known_arches() else "gfx950"
+        if ArchTarget.from_gfx(build_gfx).wave_size != spec.wave_size:
+            for cand in known_arches():
+                if ArchTarget.from_gfx(cand).wave_size == spec.wave_size:
+                    build_gfx = cand
+                    break
+        kernel = build_universal_gemm(spec, arch=build_gfx)
+        hsaco = _build_region_hsaco(kernel, explicit_arch=build_gfx)
         ptr_ty = f"ptr<{ir_dtype.name}, global>"
         sig: List[Mapping[str, Any]] = [
             {"name": "A", "type": ptr_ty, "size_bytes": 8},
@@ -476,7 +578,7 @@ class ElementwiseLowerer:
     def candidates(
         self, graph: FusionGraph, region: FusionRegion
     ) -> List[AutotuneConfig]:
-        from ..instances.elementwise import ElementwiseSpec, is_valid_spec
+        from ..instances.common.elementwise import ElementwiseSpec, is_valid_spec
 
         op = graph.ops[region.op_names[0]]
         dtype = _dtype_str_for_tensor(graph, op.inputs[0])
@@ -501,18 +603,15 @@ class ElementwiseLowerer:
         return cfgs
 
     def build(self, config: AutotuneConfig) -> BuiltRegion:
-        from ..core.lower_llvm import lower_kernel_to_llvm
-        from ..instances.elementwise import (
+        from ..instances.common.elementwise import (
             build_elementwise,
             elementwise_signature,
         )
-        from ..runtime.comgr import build_hsaco_from_llvm_ir
         from ..runtime.launcher import KernelLauncher
 
         spec = config.spec
         kernel = build_elementwise(spec)
-        ir = lower_kernel_to_llvm(kernel)
-        hsaco, _ = build_hsaco_from_llvm_ir(ir)
+        hsaco = _build_region_hsaco(kernel)
         sig = elementwise_signature(spec)
         launcher = KernelLauncher(hsaco=hsaco, kernel_name=kernel.name, signature=sig)
         return BuiltRegion(launcher=launcher, spec=spec, block_size=spec.block_size)
@@ -580,7 +679,7 @@ class ReductionLowerer:
     def candidates(
         self, graph: FusionGraph, region: FusionRegion
     ) -> List[AutotuneConfig]:
-        from ..instances.reduce import Reduce2DSpec, is_valid_spec
+        from ..instances.common.reduce import Reduce2DSpec, is_valid_spec
 
         op = graph.ops[region.op_names[0]]
         in_t = graph.tensors[op.inputs[0]]
@@ -616,15 +715,12 @@ class ReductionLowerer:
         return cfgs
 
     def build(self, config: AutotuneConfig) -> BuiltRegion:
-        from ..core.lower_llvm import lower_kernel_to_llvm
-        from ..instances.reduce import build_reduce2d, reduce2d_signature
-        from ..runtime.comgr import build_hsaco_from_llvm_ir
+        from ..instances.common.reduce import build_reduce2d, reduce2d_signature
         from ..runtime.launcher import KernelLauncher
 
         spec = config.spec
         kernel = build_reduce2d(spec)
-        ir = lower_kernel_to_llvm(kernel)
-        hsaco, _ = build_hsaco_from_llvm_ir(ir)
+        hsaco = _build_region_hsaco(kernel)
         sig = reduce2d_signature(spec)
         launcher = KernelLauncher(hsaco=hsaco, kernel_name=kernel.name, signature=sig)
         return BuiltRegion(launcher=launcher, spec=spec, block_size=spec.block_size)

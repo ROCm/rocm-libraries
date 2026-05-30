@@ -40,7 +40,7 @@ scalar inner (1 MAC / cycle / lane) to MFMA (256 MACs / cycle / lane).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import Callable, Optional, Tuple
 
 from ..core.ir import F16, F32, BF16, IRBuilder, Value
 from .atoms import MfmaAtom
@@ -55,7 +55,73 @@ __all__ = [
     "mfma_k_loop",
     "mfma_k_loop_dynamic_K",
     "store_acc_to_global",
+    "validate_arch_and_block_size",
+    "validate_mfma_atom_in_catalog",
 ]
+
+
+def validate_arch_and_block_size(
+    arch: str, block_size: int
+) -> Tuple[bool, str, object]:
+    """Shared ``is_valid_spec`` prologue for MFMA scaled-GEMM kernels.
+
+    Resolves ``arch`` to its :class:`ck_dsl.core.arch.ArchTarget` (rejecting
+    unknown gfx names) and checks the per-WG thread cap. Returns
+    ``(ok, reason, target)``; on the failure path ``target`` is ``None``.
+
+    This factors the identical opening block of
+    :func:`ck_dsl.instances.common.block_scale_gemm.is_valid_spec` and
+    :func:`ck_dsl.instances.common.mx_gemm.is_valid_spec`. The returned
+    strings are surfaced only through ``ValueError`` messages (never into
+    IR), so adopting this helper is byte-identical for emitted code.
+    """
+    from ..core.arch import ArchTarget
+
+    try:
+        target = ArchTarget.from_gfx(arch)
+    except KeyError as e:
+        return False, str(e), None
+    if block_size > target.max_threads_per_block:
+        return (
+            False,
+            (
+                f"block_size {block_size} > {target.max_threads_per_block} "
+                f"(hardware cap) on {arch}"
+            ),
+            target,
+        )
+    return True, "ok", target
+
+
+def validate_mfma_atom_in_catalog(atom: MfmaAtom, arch: str, *, where: str) -> None:
+    """Guard the selected MFMA atom against the per-arch MMA catalog.
+
+    The fp8 / bf8 ``16x16x32`` atom the scaled-GEMM kernels use ships on both
+    gfx942 and gfx950, so this is a no-op on the supported mantissas. The guard
+    exists so any future atom that is gfx950-only raises a clean Python error
+    *before* IR/compile instead of letting a gfx950-only intrinsic reach comgr
+    (an uncatchable ``LLVM ERROR`` process abort).
+
+    ``where`` is the caller's kernel-name prefix (``"block_scale_gemm"`` /
+    ``"mx_gemm"``) used in the raised message.
+    """
+    from ..core.arch import ArchTarget
+
+    target = ArchTarget.from_gfx(arch)
+    if not target.mma.has_shape(
+        a_dtype=atom.dtype_in,
+        b_dtype=atom.dtype_in,
+        c_dtype=atom.dtype_out,
+        m=atom.m,
+        n=atom.n,
+        k=atom.k,
+    ):
+        raise NotImplementedError(
+            f"{where} MFMA atom {atom.name!r} "
+            f"({atom.dtype_in} {atom.m}x{atom.n}x{atom.k}) is not in the "
+            f"{arch} MMA catalog; this configuration requires a different "
+            f"target."
+        )
 
 
 @dataclass(frozen=True)

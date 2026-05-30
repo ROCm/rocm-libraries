@@ -211,7 +211,7 @@ from cheapest to most expensive:
    ops vs torch reference (20 cases, deterministic with seed=0).
 5. `python python/ck_dsl/examples/parity_extended_kernels.py --op all`
    — FMHA / Sparse / Sage / MoE / Block-scale / MX correctness.
-6. `python python/ck_dsl/examples/attention/parity_unified_attention.py`
+6. `python python/ck_dsl/examples/gfx950/attention/parity_unified_attention.py`
    — attention parity (Triton + ref vs CK DSL paths).
 7. `python python/ck_dsl/examples/hip_lowering_parity.py` — production
    LLVM lowering vs HIP-debug lowering audit across every shipped
@@ -220,7 +220,7 @@ from cheapest to most expensive:
 References do not have to be torch. The conv and GEMM bake-offs use
 NumPy fp32 accumulation in `run_manifest.py`. Attention has a
 deliberate per-shape `ref_paged_attn` in
-`examples/attention/parity_unified_attention.py`.
+`examples/gfx950/attention/parity_unified_attention.py`.
 
 ### 2.2 Performance Baselines
 
@@ -2355,7 +2355,7 @@ Round 11 ports the idea into the DSL kernels.
    HSACO for any combination of `(preshuffle_b, active_tile_skip)`
    on demand, so the four binary variants per kernel family share
    one cache.
-6. `examples/moe/test_active_tile_skip.py`: standalone parity +
+6. `examples/gfx950/moe/test_active_tile_skip.py`: standalone parity +
    perf harness. Confirms bitwise-equal output to baseline when
    all tiles active, zero output for inactive tiles, ~14× speedup
    when every tile is inactive.
@@ -2426,7 +2426,7 @@ decode_T1, and ~50 % on `decode_T1_E16`. Bitwise parity
 
 ### 17.5 Fused MoE Preshuffle-B Implementation
 
-The fused-MoE optimization pass (`examples/moe/`) ran 9 rounds of
+The fused-MoE optimization pass (`examples/gfx950/moe/`) ran 9 rounds of
 config-level tuning before stalling at the configuration ceiling.
 Round 9 named `preshuffle_b=True` as the genuinely-untried lever
 from §12.1.H but discovered the flag was a documented-but-silently-
@@ -2472,11 +2472,11 @@ pattern is unchanged.
    the preshuffled tensors inside `capture_graph` *before* the
    warmup loop so the one-time `torch.cat / permute / contiguous`
    cost stays out of the captured / replayed region.
-5. `examples/moe/test_preshuffle_b.py`: standalone batched-GEMM
+5. `examples/gfx950/moe/test_preshuffle_b.py`: standalone batched-GEMM
    parity + perf harness that flips `preshuffle_b` and confirms
    bitwise-equal kernel outputs (`max|delta|=0.0` between the
    two paths) plus per-shape timing.
-6. `examples/moe/test_fused_moe_preshuffle.py`: end-to-end harness
+6. `examples/gfx950/moe/test_fused_moe_preshuffle.py`: end-to-end harness
    that runs five FusedMoeForward configurations
    (`baseline_interleaved`, `baseline_packed`, `preshuf_down_only`,
    `preshuf_packed_full`, `preshuf_intl_full`) per scenario with
@@ -2773,7 +2773,7 @@ PYTHONDONTWRITEBYTECODE=1 python python/test/test_ck_dsl.py
 PYTHONDONTWRITEBYTECODE=1 python python/test/test_ck_dsl_examples.py
 
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
-python -m ck_dsl.examples.bake_off_implicit_gemm --output-dir "$OUT_DIR"
+python -m ck_dsl.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
 python -m ck_dsl.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 
 python python/ck_dsl/examples/distribution_reduce_demo.py --M 32 --N 4096
@@ -2782,7 +2782,7 @@ python python/ck_dsl/examples/ck_tile_parity.py --op all
 
 export AITER_PATH=<aiter-checkout>
 PYTHONPATH="python:${AITER_PATH}" python \
-  python/ck_dsl/examples/attention/parity_unified_attention.py \
+  python/ck_dsl/examples/gfx950/attention/parity_unified_attention.py \
   --scenario decode_d128_b16 --attempts 1 --warmup 0 --paths auto,2d,3d
 ```
 

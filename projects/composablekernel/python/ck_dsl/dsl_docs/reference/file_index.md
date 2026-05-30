@@ -90,6 +90,15 @@ A by-file map of the `ck_dsl` package. Symbols listed are the primary public exp
 
 ## `instances/` — Kernel Builders
 
+Under the hybrid layout, shared (arch-polymorphic) builders live in
+`instances/common/` and arch-divergent variants live in `instances/<gfx>/`
+(e.g. `instances/gfx950/`). Every spec/builder is re-exported from the
+`ck_dsl.instances` package `__init__`, so callers `from ck_dsl.instances import
+...` regardless of the file's home. There are **no** flat `instances/<file>.py`
+modules and no deprecation shims. Unless a row's `Path` says otherwise, the
+listed file lives under `instances/common/` (shown here without the `common/`
+prefix for brevity).
+
 | Path | Primary contents |
 |-----------------------------------------|---------------------------------------------------------------------------------------------|
 | `instances/gemm_universal.py` | `TileSpec`, `TraitSpec`, `DataSpec`, `UniversalGemmSpec`, `is_valid_spec`, `build_universal_gemm`, `all_dispatcher_configs`. |
@@ -131,8 +140,14 @@ A by-file map of the `ck_dsl` package. Symbols listed are the primary public exp
 | `instances/sage_attention.py` | `SageAttentionSpec`, `SageQuantMode`, `build_sage_attention`, `sage_attention_grid`, `sage_attention_signature`. Single builder that dispatches on `quant_mode` to cover four CK Tile parity variants: `fp16_bf16` (baseline), `fp8_bf16`, `i8_fp8_bf16`, `i4_fp8_bf16`. Per-block Q+K scales from `helpers.qk_scale`; codebook dequant from `helpers.codebook` for the int variants. v1 scalar inner; MFMA v2 reuses FP8 atoms. (CK Tile 49.) |
 | `instances/sparse_attention.py` | `JengaSparseSpec`, `VsaSparseSpec`, `build_jenga_sparse_attention`, `build_vsa_sparse_attention`, `*_grid`, `*_signature`. Block-sparse (Jenga; one-hot bitmap, skip zeroed K-blocks) and variable-size sparse (VSA; per-q LUT with `BlockCount[q_block]` bound). Both share a single scalar-inner per-K-block attention body factored within the file; the only difference is the K-iteration strategy from `helpers.sparse_iter`. (CK Tile 50.) |
 | `instances/attention_unified.py` | `UnifiedAttentionProblem`, `UnifiedAttention2DSpec`, `UnifiedAttention3DSpec`, `UnifiedAttentionReduceSpec`, scalar 2D/3D builders, `run_unified_attention_torch`, `supports_native_unified_attention`, `attention_3d_workspace_nbytes`. |
-| `instances/attention_tiled_2d.py` | `UnifiedAttention2DTiledSpec`, `build_unified_attention_2d_tiled`. |
-| `instances/attention_tiled_3d.py` | `UnifiedAttention3DTiledSpec`, `UnifiedAttentionReduceTiledSpec`, `build_unified_attention_3d_tiled`, `build_unified_attention_reduce_tiled`. |
+| `instances/gfx950/attention_tiled_2d.py` | `UnifiedAttention2DTiledSpec`, `build_unified_attention_2d_tiled`. gfx950-specific (transpose-LDS attention). |
+| `instances/gfx950/attention_tiled_3d.py` | `UnifiedAttention3DTiledSpec`, `UnifiedAttentionReduceTiledSpec`, `build_unified_attention_3d_tiled`, `build_unified_attention_reduce_tiled`. gfx950-specific. |
+| `instances/common/gemm_policy.py` | `GemmPipelinePolicy`, `ValidationResult`. Family-side validity surface: pipeline/scheduler/warp-tile/LDS-budget rules composed from `ArchTarget` predicates (the home of the policy formerly described as `instances/<family>/policy.py`). |
+| `instances/common/mfma_gemm.py` | `MfmaGemmSpec`, `build_mfma_gemm`, `is_valid_spec`, `mfma_gemm_grid`, `mfma_gemm_signature`. Production MFMA inner-loop GEMM. |
+| `instances/common/fmha_mfma.py` | `FmhaMfmaSpec`, `build_fmha_fwd_mfma`, `is_valid_spec`, `fmha_fwd_mfma_grid`, `fmha_fwd_mfma_signature`, `MFMA_ATTN_BLOCK_M/K`. Unified tiled FMHA forward: one body emits MFMA on CDNA (gfx942/gfx950) and WMMA on RDNA wave32 (gfx1151), selected by `arch`. The `_mfma` suffix is historical — the builder is not CDNA-only. |
+| `instances/common/fmha_arch.py` / `attention_arch.py` | `validate_fmha_mfma_atom`, `FMHA_MFMA_ATTN_BLOCK`; `validate_tiled_attention_arch`, `require_tiled_attention_arch`. Attention arch-validity gates. |
+| `instances/gfx1151/wmma_gemm.py` | `WmmaGemmSpec`, `build_wmma_gemm`, `is_valid_spec`, `wmma_gemm_grid`. RDNA wave32/WMMA GEMM. |
+| `instances/gfx1151/wmma_fmha_fwd.py` | `WmmaFmhaFwdSpec`, `build_wmma_fmha_fwd`, `is_valid_spec`, `wmma_fmha_fwd_grid`. RDNA wave32/WMMA FMHA-forward adapter. |
 
 ## `examples/`
 
@@ -144,7 +159,7 @@ A by-file map of the `ck_dsl` package. Symbols listed are the primary public exp
 | `examples/distribution_reduce_demo.py` | 1D distribution-driven reduce demo. |
 | `examples/distribution_2d_add_demo.py` | 2D distribution-driven add demo. |
 | `examples/ck_tile_parity.py` | Small-op parity harness vs torch reference. |
-| `examples/attention/parity_unified_attention.py` | Triton vs CK DSL attention parity harness (all paths). |
+| `examples/gfx950/attention/parity_unified_attention.py` | Triton vs CK DSL attention parity harness (all paths). |
 
 ## `example/ck_tile/dsl/<N>_*/gen.py`
 
@@ -173,5 +188,5 @@ Each `gen.py` wraps a generator from `ck_dsl.examples` or `ck_dsl.instances`. Th
 | `python/ck_dsl/TRANSFORM_DAG.md` | Coordinate-transform DAG walkthrough (conv, paged attention). |
 | `python/ck_dsl/dsl_docs/optimization/runbook_compliance.md` | Runbook section -> DSL primitive mapping, plus measured pass results. |
 | `python/ck_dsl/dsl_docs/` | This documentation tree. |
-| `python/ck_dsl/examples/attention/README.md` | Attention parity methodology and numbers. |
+| `python/ck_dsl/examples/gfx950/attention/README.md` | Attention parity methodology and numbers. |
 | `gpu-op-optimization-runbook` Cursor skill | Long-form GPU optimization runbook referenced throughout. |

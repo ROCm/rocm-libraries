@@ -3,7 +3,7 @@
 """DSL example 10: rmsnorm2d forward (CK Tile parity).
 
 CK Tile counterpart: ``example/ck_tile/10_rmsnorm2d``. Builds the
-forward kernel from :mod:`ck_dsl.instances.rmsnorm2d`. Kernel signature:
+forward kernel from :mod:`ck_dsl.instances.common.rmsnorm2d`. Kernel signature:
 
     (X: ptr, Gamma: ptr, Y: ptr, M: i32, N: i32, eps: f32)
 """
@@ -23,7 +23,7 @@ from ck_dsl.helpers import (  # noqa: E402
     make_simple_op_manifest,
     write_artifact,
 )
-from ck_dsl.instances.rmsnorm2d import (  # noqa: E402
+from ck_dsl.instances.common.rmsnorm2d import (  # noqa: E402
     RMSNorm2DSpec,
     build_rmsnorm2d,
     rmsnorm2d_signature,

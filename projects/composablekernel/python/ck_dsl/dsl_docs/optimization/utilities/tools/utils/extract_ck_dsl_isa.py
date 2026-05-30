@@ -12,7 +12,7 @@ if str(CKDSL_ROOT) not in sys.path:
     sys.path.insert(0, str(CKDSL_ROOT))
 
 from ck_dsl.helpers import compile_kernel  # noqa: E402
-from ck_dsl.instances.conv_implicit_gemm import (  # noqa: E402
+from ck_dsl.instances.common.conv_implicit_gemm import (  # noqa: E402
     ConvProblem,
     ImplicitGemmConvSpec,
     build_implicit_gemm_conv,

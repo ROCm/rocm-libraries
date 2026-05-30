@@ -163,7 +163,7 @@ def probe_intrinsic_counts(
 
 
 def _demo_attention_tiled_2d() -> None:
-    from ck_dsl.instances.attention_tiled_2d import (
+    from ck_dsl.instances.gfx950.attention_tiled_2d import (
         UnifiedAttention2DTiledSpec,
         build_unified_attention_2d_tiled,
     )

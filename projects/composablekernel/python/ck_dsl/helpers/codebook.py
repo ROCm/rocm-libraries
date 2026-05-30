@@ -49,6 +49,63 @@ def _validate_codebook_ptr(codebook_ptr: Value, *, expected_entries: int) -> Non
         )
 
 
+def _codebook_i8_f32(
+    b: IRBuilder,
+    codebook_ptr: Value,
+    i8_value_i32: Value,
+    *,
+    per_tensor_scale: Value | None = None,
+) -> Value:
+    """i8 -> f32 codebook core: ``idx = i + 128; load; optional scale``.
+
+    Shared body of the i8 lookups; the public ``_to_f32`` / ``_to_fp8``
+    / ``_to_bf8`` wrappers add only the trailing ``cvt`` (if any). Emits
+    the identical op stream the wrappers used to emit inline.
+    """
+    _validate_codebook_ptr(codebook_ptr, expected_entries=256)
+    if i8_value_i32.type.name != "i32":
+        raise ValueError(
+            f"codebook_lookup_i8 expects i32 (sign-extended i8) input, "
+            f"got {i8_value_i32.type.name}"
+        )
+    idx = b.add(i8_value_i32, b.const_i32(128))
+    f32_v = b.global_load_f32(codebook_ptr, idx)
+    if per_tensor_scale is not None:
+        f32_v = b.fmul(f32_v, per_tensor_scale)
+    return f32_v
+
+
+def _codebook_i4_pair_f32(
+    b: IRBuilder,
+    codebook_ptr: Value,
+    packed_byte_i8: Value,
+    *,
+    per_tensor_scale: Value | None = None,
+) -> Tuple[Value, Value]:
+    """i4-pair -> (f32, f32) codebook core: unpack + 2 loads + optional scale.
+
+    Shared body of the i4-pair lookups; the public ``_to_f32`` /
+    ``_to_fp8`` / ``_to_bf8`` wrappers add only the trailing ``cvt``
+    (if any). Emits the identical op stream the wrappers used inline.
+    """
+    _validate_codebook_ptr(codebook_ptr, expected_entries=16)
+    if packed_byte_i8.type.name != "i8":
+        raise ValueError(
+            f"codebook_lookup_i4_pair expects i8 input "
+            f"(load the packed byte via global_load(..., I8) first), "
+            f"got {packed_byte_i8.type.name}"
+        )
+    lo_i32, hi_i32 = unpack_i4_byte_to_pair_i32(b, packed_byte_i8)
+    lo_idx = b.add(lo_i32, b.const_i32(8))
+    hi_idx = b.add(hi_i32, b.const_i32(8))
+    lo_f = b.global_load_f32(codebook_ptr, lo_idx)
+    hi_f = b.global_load_f32(codebook_ptr, hi_idx)
+    if per_tensor_scale is not None:
+        lo_f = b.fmul(lo_f, per_tensor_scale)
+        hi_f = b.fmul(hi_f, per_tensor_scale)
+    return lo_f, hi_f
+
+
 def codebook_lookup_i8_to_f32(
     b: IRBuilder,
     codebook_ptr: Value,
@@ -64,17 +121,9 @@ def codebook_lookup_i8_to_f32(
     helper saves the ``cvt.f32.fp8`` per element while keeping the
     same codebook semantics.
     """
-    _validate_codebook_ptr(codebook_ptr, expected_entries=256)
-    if i8_value_i32.type.name != "i32":
-        raise ValueError(
-            f"codebook_lookup_i8_to_f32 expects i32 (sign-extended i8) input, "
-            f"got {i8_value_i32.type.name}"
-        )
-    idx = b.add(i8_value_i32, b.const_i32(128))
-    f32_v = b.global_load_f32(codebook_ptr, idx)
-    if per_tensor_scale is not None:
-        f32_v = b.fmul(f32_v, per_tensor_scale)
-    return f32_v
+    return _codebook_i8_f32(
+        b, codebook_ptr, i8_value_i32, per_tensor_scale=per_tensor_scale
+    )
 
 
 def codebook_lookup_i4_pair_to_f32(
@@ -89,22 +138,9 @@ def codebook_lookup_i4_pair_to_f32(
     Companion to :func:`codebook_lookup_i8_to_f32` for the 4-bit
     variant of the native MFMA i4 attention path (P30).
     """
-    _validate_codebook_ptr(codebook_ptr, expected_entries=16)
-    if packed_byte_i8.type.name != "i8":
-        raise ValueError(
-            f"codebook_lookup_i4_pair_to_f32 expects i8 input "
-            f"(load the packed byte via global_load(..., I8) first), "
-            f"got {packed_byte_i8.type.name}"
-        )
-    lo_i32, hi_i32 = unpack_i4_byte_to_pair_i32(b, packed_byte_i8)
-    lo_idx = b.add(lo_i32, b.const_i32(8))
-    hi_idx = b.add(hi_i32, b.const_i32(8))
-    lo_f = b.global_load_f32(codebook_ptr, lo_idx)
-    hi_f = b.global_load_f32(codebook_ptr, hi_idx)
-    if per_tensor_scale is not None:
-        lo_f = b.fmul(lo_f, per_tensor_scale)
-        hi_f = b.fmul(hi_f, per_tensor_scale)
-    return lo_f, hi_f
+    return _codebook_i4_pair_f32(
+        b, codebook_ptr, packed_byte_i8, per_tensor_scale=per_tensor_scale
+    )
 
 
 def codebook_lookup_i8_to_fp8(
@@ -123,16 +159,9 @@ def codebook_lookup_i8_to_fp8(
     per_tensor_scale: optional f32 -- if set, multiplies the
     f32 codebook output before the fp8 round.
     """
-    _validate_codebook_ptr(codebook_ptr, expected_entries=256)
-    if i8_value_i32.type.name != "i32":
-        raise ValueError(
-            f"codebook_lookup_i8 expects i32 (sign-extended i8) input, "
-            f"got {i8_value_i32.type.name}"
-        )
-    idx = b.add(i8_value_i32, b.const_i32(128))
-    f32_v = b.global_load_f32(codebook_ptr, idx)
-    if per_tensor_scale is not None:
-        f32_v = b.fmul(f32_v, per_tensor_scale)
+    f32_v = _codebook_i8_f32(
+        b, codebook_ptr, i8_value_i32, per_tensor_scale=per_tensor_scale
+    )
     return b.cvt_f32_to_fp8(f32_v)
 
 
@@ -144,15 +173,9 @@ def codebook_lookup_i8_to_bf8(
     per_tensor_scale: Value | None = None,
 ) -> Value:
     """Bf8e5m2 sibling of :func:`codebook_lookup_i8_to_fp8`."""
-    _validate_codebook_ptr(codebook_ptr, expected_entries=256)
-    if i8_value_i32.type.name != "i32":
-        raise ValueError(
-            f"codebook_lookup_i8 expects i32 input, got {i8_value_i32.type.name}"
-        )
-    idx = b.add(i8_value_i32, b.const_i32(128))
-    f32_v = b.global_load_f32(codebook_ptr, idx)
-    if per_tensor_scale is not None:
-        f32_v = b.fmul(f32_v, per_tensor_scale)
+    f32_v = _codebook_i8_f32(
+        b, codebook_ptr, i8_value_i32, per_tensor_scale=per_tensor_scale
+    )
     return b.cvt_f32_to_bf8(f32_v)
 
 
@@ -170,21 +193,9 @@ def codebook_lookup_i4_pair_to_fp8(
     packed_byte_i8: ``i8`` -- the byte holding two i4 nibbles.
     per_tensor_scale: optional f32 -- applied before the fp8 round.
     """
-    _validate_codebook_ptr(codebook_ptr, expected_entries=16)
-    if packed_byte_i8.type.name != "i8":
-        raise ValueError(
-            f"codebook_lookup_i4_pair expects i8 input "
-            f"(load the packed byte via global_load(..., I8) first), "
-            f"got {packed_byte_i8.type.name}"
-        )
-    lo_i32, hi_i32 = unpack_i4_byte_to_pair_i32(b, packed_byte_i8)
-    lo_idx = b.add(lo_i32, b.const_i32(8))
-    hi_idx = b.add(hi_i32, b.const_i32(8))
-    lo_f = b.global_load_f32(codebook_ptr, lo_idx)
-    hi_f = b.global_load_f32(codebook_ptr, hi_idx)
-    if per_tensor_scale is not None:
-        lo_f = b.fmul(lo_f, per_tensor_scale)
-        hi_f = b.fmul(hi_f, per_tensor_scale)
+    lo_f, hi_f = _codebook_i4_pair_f32(
+        b, codebook_ptr, packed_byte_i8, per_tensor_scale=per_tensor_scale
+    )
     return b.cvt_f32_to_fp8(lo_f), b.cvt_f32_to_fp8(hi_f)
 
 
@@ -196,19 +207,9 @@ def codebook_lookup_i4_pair_to_bf8(
     per_tensor_scale: Value | None = None,
 ) -> Tuple[Value, Value]:
     """Bf8e5m2 sibling of :func:`codebook_lookup_i4_pair_to_fp8`."""
-    _validate_codebook_ptr(codebook_ptr, expected_entries=16)
-    if packed_byte_i8.type.name != "i8":
-        raise ValueError(
-            f"codebook_lookup_i4_pair expects i8 input, got {packed_byte_i8.type.name}"
-        )
-    lo_i32, hi_i32 = unpack_i4_byte_to_pair_i32(b, packed_byte_i8)
-    lo_idx = b.add(lo_i32, b.const_i32(8))
-    hi_idx = b.add(hi_i32, b.const_i32(8))
-    lo_f = b.global_load_f32(codebook_ptr, lo_idx)
-    hi_f = b.global_load_f32(codebook_ptr, hi_idx)
-    if per_tensor_scale is not None:
-        lo_f = b.fmul(lo_f, per_tensor_scale)
-        hi_f = b.fmul(hi_f, per_tensor_scale)
+    lo_f, hi_f = _codebook_i4_pair_f32(
+        b, codebook_ptr, packed_byte_i8, per_tensor_scale=per_tensor_scale
+    )
     return b.cvt_f32_to_bf8(lo_f), b.cvt_f32_to_bf8(hi_f)
 
 

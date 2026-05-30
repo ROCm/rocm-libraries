@@ -11,13 +11,13 @@ Per the validation pass on this checkout, every shipped example builds and verif
 
 | File                                              | Purpose                                                          | Reproduction command |
 |---------------------------------------------------|------------------------------------------------------------------|----------------------|
-| `bake_off_implicit_gemm.py`                       | Implicit-GEMM conv generator.                                    | `python -m ck_dsl.examples.bake_off_implicit_gemm --output-dir "$OUT_DIR"` |
-| `bake_off_direct_conv_16c.py`                     | Direct grouped 16c conv generator.                               | `python -m ck_dsl.examples.bake_off_direct_conv_16c --output-dir "$OUT_DIR"` |
-| `bake_off_direct_conv_4c.py`                      | Direct grouped 4c conv generator.                                | `python -m ck_dsl.examples.bake_off_direct_conv_4c --output-dir "$OUT_DIR"` |
+| `bake_off_implicit_gemm.py`                       | Implicit-GEMM conv generator.                                    | `python -m ck_dsl.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"` |
+| `bake_off_direct_conv_16c.py`                     | Direct grouped 16c conv generator.                               | `python -m ck_dsl.examples.common.bake_off_direct_conv_16c --output-dir "$OUT_DIR"` |
+| `bake_off_direct_conv_4c.py`                      | Direct grouped 4c conv generator.                                | `python -m ck_dsl.examples.common.bake_off_direct_conv_4c --output-dir "$OUT_DIR"` |
 | `distribution_reduce_demo.py`                     | 1D distribution-driven row-reduce.                               | `python python/ck_dsl/examples/distribution_reduce_demo.py --M 32 --N 4096` |
 | `distribution_2d_add_demo.py`                     | 2D distribution-driven elementwise add.                          | `python python/ck_dsl/examples/distribution_2d_add_demo.py --H 64 --W 128` |
 | `ck_tile_parity.py`                               | Small-op parity harness vs torch reference. Returns non-zero if any op exceeds its tolerance gate. | `python python/ck_dsl/examples/ck_tile_parity.py --op all` |
-| `attention/parity_unified_attention.py`           | Triton vs CK DSL attention parity. All paths (`auto`, `2d`, `3d`) on the AITER unified-attention contract. | `python python/ck_dsl/examples/attention/parity_unified_attention.py --attempts 10 --warmup 5` |
+| `attention/parity_unified_attention.py`           | Triton vs CK DSL attention parity. All paths (`auto`, `2d`, `3d`) on the AITER unified-attention contract. | `python python/ck_dsl/examples/gfx950/attention/parity_unified_attention.py --attempts 10 --warmup 5` |
 
 The bake-offs build a HSACO and manifest; you launch / verify with `python -m ck_dsl.run_manifest <hsaco> manifest.json --verify`. The other examples are self-contained and verify in-process.
 
@@ -84,7 +84,7 @@ The benchmark writes a CSV with `(kernel, shape, median_tflops, min_tflops, max_
 
 ## Attention Parity Methodology
 
-`examples/attention/parity_unified_attention.py` is the canonical attention parity harness. It:
+`examples/gfx950/attention/parity_unified_attention.py` is the canonical attention parity harness. It:
 
 - forces Triton onto the 2D / 3D kernel per row by monkey-patching its `use_2d_kernel(...)` heuristic;
 - forces CK DSL onto the matching path via `run_unified_attention_torch(..., backend="tiled" / "3d" / "auto")`;
@@ -99,7 +99,7 @@ Scenario sets:
 - `fmha` — shapes adapted from CK FMHA testing matrix;
 - `all` — `default + creative`.
 
-The published 5-run mean numbers (`auto` geomean ~1.799x, `3D vs 3D` ~1.743x) come from `--attempts 10 --warmup 5` over the `default` set; see `examples/attention/README.md`.
+The published 5-run mean numbers (`auto` geomean ~1.799x, `3D vs 3D` ~1.743x) come from `--attempts 10 --warmup 5` over the `default` set; see `examples/gfx950/attention/README.md`.
 
 ## Running Everything In Order
 
@@ -118,7 +118,7 @@ python python/test/test_ck_dsl.py
 python python/test/test_ck_dsl_examples.py
 
 # 3. README-style implicit-GEMM conv build + verify.
-python -m ck_dsl.examples.bake_off_implicit_gemm --output-dir "$OUT_DIR"
+python -m ck_dsl.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
 python -m ck_dsl.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 
 # 4. Distribution demos.
@@ -131,7 +131,7 @@ python python/ck_dsl/examples/ck_tile_parity.py --op all
 # 6. Attention smoke.
 export AITER_PATH=<aiter-checkout>
 PYTHONPATH="python:${AITER_PATH}" python \
-  python/ck_dsl/examples/attention/parity_unified_attention.py \
+  python/ck_dsl/examples/gfx950/attention/parity_unified_attention.py \
   --scenario decode_d128_b16 --attempts 1 --warmup 0 --paths auto,2d,3d
 ```
 

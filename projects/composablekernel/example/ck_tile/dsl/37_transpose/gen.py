@@ -3,7 +3,7 @@
 """DSL example 37: 2D transpose (CK Tile parity).
 
 CK Tile counterpart: ``example/ck_tile/37_transpose``. Builds the
-LDS-staged 2D transpose kernel from :mod:`ck_dsl.instances.transpose`.
+LDS-staged 2D transpose kernel from :mod:`ck_dsl.instances.common.transpose`.
 Kernel signature:
 
     (X: ptr, Y: ptr, H: i32, W: i32)
@@ -28,7 +28,7 @@ from ck_dsl.helpers import (  # noqa: E402
     make_simple_op_manifest,
     write_artifact,
 )
-from ck_dsl.instances.transpose import (  # noqa: E402
+from ck_dsl.instances.common.transpose import (  # noqa: E402
     Transpose2DSpec,
     build_transpose2d,
     transpose2d_signature,
