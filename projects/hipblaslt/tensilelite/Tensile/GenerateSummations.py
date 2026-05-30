@@ -130,7 +130,7 @@ def GenerateSummations(userArgs):
         configFile = os.path.join(configFilePath, "ClientParameters.ini")
         scriptPath = ensurePath(os.path.join(outputPath, logicFileStem, "script"))
 
-        ClientWriter.CreateBenchmarkClientParametersForSizes(libraryPath, problemSizes, dataFilePath, configFile, problemTypeObj)
+        ClientWriter.CreateBenchmarkClientParametersForSizes(libraryPath, problemSizes, dataFilePath, configFile, 0, gfxName, problemTypeDict=problemTypeObj)
         ClientWriter.runNewClient(scriptPath, configFile, clientBuildDir, cxxCompiler, cCompiler)
 
         tensileLibraryFile = _singleArchDir(libPath) / "TensileLibrary.yaml"

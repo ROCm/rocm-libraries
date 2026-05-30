@@ -565,6 +565,10 @@ def pruneModeName(mode):
 def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs, activationArgs, icacheFlushArgs, problemType, sourceDir, codeObjectFiles, resultsFileName, parametersFilePath, deviceId: int, gfxName: str, libraryFile, probSolMap={}):
 
     assert os.path.exists(sourceDir), f"sourceDir={sourceDir} does not exist"
+    # libraryFile must point at the per-base TensileLibrary{,.yaml,.dat}; the
+    # previous flat default `<sourceDir>/library/TensileLibrary.{dat,yaml}`
+    # silently masked the per-base layout when callers forgot to compute it.
+    assert libraryFile, "libraryFile is required; pass the per-base TensileLibrary path"
 
     with open(parametersFilePath, "w") as f:
         def param(key, value):

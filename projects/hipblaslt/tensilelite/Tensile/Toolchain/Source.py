@@ -46,6 +46,28 @@ def makeSourceToolchain(compiler_path, bundler_path, asan_build=False, build_id_
    return SourceToolchain(compiler, bundler)
 
 
+def _archNamesFromBundlerTarget(rawArch: str):
+    """Split a bundler arch token into (filenameArch, baseArch).
+
+    The bundler emits gcn arch tokens of the form ``gfx942:sramecc+:xnack+``.
+    Per-base layout requires:
+
+      * The directory uses only the base arch (`gfx942`) so every target-feature
+        variant co-locates in one subdir. Splitting at the first ':' is the
+        single source of truth — callers that strip with `split("-xnack")[0]`
+        AFTER ':' -> '-' conversion leave `gfx942-sramecc+` as the directory
+        and silently place files in the wrong subdir.
+      * The filename keeps the full feature set so xnack+/xnack- code objects
+        don't collide, with ':' rewritten to '-' for filesystem safety.
+
+    Returns ``(filenameArch, baseArch)`` — both extracted from the same source
+    token so they cannot drift apart.
+    """
+    baseArch     = rawArch.split(":", 1)[0]
+    filenameArch = re.sub(":", "-", rawArch)
+    return filenameArch, baseArch
+
+
 def _computeSourceCodeObjectFilename(target: str, base: str, buildPath: Union[Path, str], arch: str) -> Union[Path, None]:
     """Generates a code object file path using the target, base, and build path.
 
@@ -125,13 +147,12 @@ def buildSourceCodeObjectFiles(
         for target in bundler.targets(objPath):
           match = re.search("gfx.*$", target)
           if match:
-            arch = re.sub(":", "-", match.group())
+            arch, baseArch = _archNamesFromBundlerTarget(match.group())
             coPathRaw = _computeSourceCodeObjectFilename(target, kernelPath.stem, tmpObjDir, arch)
             if not coPathRaw: continue
             bundler(target, objPath, str(coPathRaw))
 
-            # Route to the per-base subdir; xnack survives in the filename only.
-            destDir = Path(ensurePath(destRoot / arch.split("-xnack")[0]))
+            destDir = Path(ensurePath(destRoot / baseArch))
             coPath = str(destDir / coPathRaw.stem)
             coPathsRaw.append(coPathRaw)
             coPaths.append(coPath)
