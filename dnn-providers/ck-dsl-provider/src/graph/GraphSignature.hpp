@@ -3,12 +3,8 @@
 
 #pragma once
 
-#include <hipdnn_flatbuffers_sdk/data_objects/convolution_fwd_attributes_generated.h>
-#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
-
 #include <cstdint>
 #include <string_view>
-#include <unordered_map>
 
 #include "../adapters/conv_implicit_gemm/ConvImplicitGemmSpec.hpp"
 #include "../runtime/JitCache.hpp"
@@ -21,23 +17,47 @@ namespace ck_dsl_provider {
 ///   (op_kind_string, dtype_tuple, shape_tuple, stride_tuple,
 ///    layout_string, dsl_version_string).
 ///
-/// For M1 we only need conv-fwd. The signature inputs are:
+/// For M1 we only need conv-fwd. The signature is derived from the
+/// ``ConvImplicitGemmSpec`` the adapter already built, so the adapter
+/// stays the single FlatBuffer reader. The folded inputs are:
 ///
 ///   * ``opKind`` -- the per-op identifier
 ///     ("conv_implicit_gemm")
-///   * X/W/Y tensor data_type
-///   * 13 ConvProblem-equivalent fields lifted from X.dims, W.dims,
-///     and the conv attrs' stride/padding/dilation. The adapter does
-///     the same lift in I-6; we duplicate the read here so the
-///     signature derivation can run on the hot path without
-///     constructing a full ConvImplicitGemmSpec first.
-///   * ``CK_DSL_PROVIDER_VERSION_STRING`` -- folded into the hash via
-///     ``hashDslVersion()``. Bumping the provider version (which
+///   * the 13 ``ConvProblem`` fields (N, Hi, Wi, C, K, R, S + sH, sW,
+///     pH, pW, dH, dW) so any shape / stride / padding / dilation
+///     change produces a distinct key
+///   * every codegen knob on the spec (name, tile_*, warp_*,
+///     warp_tile_*, wave_size, pipeline, epilogue, async_dma,
+///     unroll_k, lds_k_pad, chiplet_*, waves_per_eu). These are
+///     constexpr defaults in M1, but folding them keeps the key
+///     correct once M2 autotuning starts varying them per shape/arch:
+///     a different kernel for the same shape must not alias.
+///   * ``CK_DSL_PROVIDER_VERSION_STRING`` -- folded into the hash.
+///     Bumping the provider version (which
 ///     embeds the git SHA of the DSL subtree, per
 ///     CkDslProviderVersion.cmake) invalidates every prior key, which
 ///     is the correct behaviour: a DSL change can silently produce a
 ///     different HSACO for the same logical shape, and we must not
 ///     hand a stale module back from the cache.
+///
+/// **Intentionally NOT folded** (each is constant for the lifetime of
+/// the current in-memory, single-process cache, so it carries no
+/// entropy today -- but each becomes a *required* key input the moment
+/// the noted feature lands, and the on-disk cache in particular cannot
+/// ship without all of them):
+///
+///   * dtype -- M1 is FP16-only and dtype is not yet a spec field;
+///     required when bf16/fp8 are added (alongside a dtype on the spec)
+///   * target arch + toolchain version (gfx942 vs gfx950, ROCm) -- the
+///     HSACO is arch-specific and the version string is the DSL SHA,
+///     not the build target; required for any cache that outlives a
+///     single-GPU process (i.e. the disk cache)
+///   * physical tensor layout / memory strides -- M1 assumes the
+///     canonical NHWC/KRSC/NHWK layouts; required if other layouts are
+///     accepted
+///   * Y output dims -- derived from the folded fields (Ho/Wo), so
+///     they add no entropy; a malformed Y is the adapter's job to
+///     reject, not the cache key's
 ///
 /// **Hash function:** FNV-1a 64-bit. Chosen for being well-understood,
 /// stdlib-free, and deterministic across compilers; we don't need
@@ -45,33 +65,21 @@ namespace ck_dsl_provider {
 /// signature input.
 class GraphSignature {
    public:
-    using ConvolutionFwdAttributes = hipdnn_flatbuffers_sdk::data_objects::ConvolutionFwdAttributes;
-    using TensorAttributes = hipdnn_flatbuffers_sdk::data_objects::TensorAttributes;
-    using TensorMap = std::unordered_map<std::int64_t, const TensorAttributes*>;
-
     /// Compute a cache key directly from a built spec. This is the
     /// production path: the adapter runs once to build the spec, then
     /// the spec is folded into the hash here. Folding the spec rather
-    /// than re-walking the FlatBuffer eliminates the second FB read
-    /// path that earlier versions of this class implemented (the
-    /// adapter is the single source of truth for what the spec
-    /// fields mean).
+    /// than re-walking the FlatBuffer keeps the adapter as the single
+    /// source of truth for what the spec fields mean.
     ///
     /// Folded inputs:
     ///   * ``CK_DSL_PROVIDER_VERSION_STRING`` (provider/DSL version)
     ///   * ``opKind``
     ///   * ``spec.problem`` fields (N, Hi, Wi, C, K, R, S + sH, sW,
     ///     pH, pW, dH, dW) so any shape / stride / padding / dilation
-    ///     change produces a distinct key.
+    ///     change produces a distinct key
+    ///   * every codegen knob on the spec -- see the class docstring
+    ///     for the full list and for what is intentionally omitted.
     static SignatureHash computeForSpec(std::string_view opKind, const ConvImplicitGemmSpec& spec);
-
-    /// Legacy FB-walking entry point. Retained for tests that exercise
-    /// signature sensitivity directly against raw FlatBuffer inputs;
-    /// production callers should prefer ``computeForSpec`` so the
-    /// adapter remains the single FB reader.
-    static SignatureHash computeForConvFwd(std::string_view opKind,
-                                           const ConvolutionFwdAttributes& convAttr,
-                                           const TensorMap& tensorMap);
 
    private:
     GraphSignature() = delete;
