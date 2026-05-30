@@ -6,11 +6,15 @@ backward kernels published by the AITER project.
 | Field | Value |
 |---|---|
 | Upstream repository | https://github.com/ROCm/aiter |
-| Source commit | `9522048dc10de20ba9dcda1c0a3f640867e7a586` |
+| Source tag | `v0.1.13` |
+| Source commit | `cdcfa833bdf554ca75594c90dde4316ea9b50199` |
 | Source path | `hsa/gfx950/fmha_v3_bwd/` |
 
-`fmha_bwd_dq_shuffle.csv` is intentionally omitted; in the upstream snapshot it
-contains only a header row and no kernel rows.
+`fmha_bwd_dq_shuffle.csv` is intentionally omitted. In this upstream snapshot it
+carries kernel rows, but the engine's backward dispatch has no dq_shuffle stage,
+so the CSV is left out to avoid generating an unused config map. The
+corresponding `bwd_*_dq_shuffle*.co` binaries are present in the snapshot but
+are not referenced by any retained CSV.
 
 All binaries in this directory are unmodified upstream AITER snapshots.
 There are no local overrides.
@@ -19,7 +23,7 @@ This file documents the provenance for the binary-versioning story tracked under
 ALMIOPEN-1828; future updates should refresh both the binaries and this record
 in lockstep.
 
-## SHA256 manifest — gfx950/fmha_v3_bwd (124 files, AITER commit 9522048)
+## SHA256 manifest — gfx950/fmha_v3_bwd (124 files, AITER commit cdcfa83)
 
 ```
 2803c89f9697954146de1d134aa0da2ad0790ed7acad017485d124d58877691f  bwd_hd128_bf16_a16_psskddv.co
@@ -56,10 +60,10 @@ b98fbf42ccb004b7ff932cf4a963e60b0cddc7423b2d4afff077cd2f116157d1  bwd_hd128_fp16
 98f9eb68da853427bf9c14f58371ce9c0f2cf596e2604e2476ba53e0519f91da  bwd_hd128_fp16_causal_br_a32_psskddv.co
 d4e7538038db02cf5dc52b7fc4dbd48c049b9135d19f469730512fc86f2aa216  bwd_hd128_fp16_causal_br_a32_psskddv_group.co
 33071e1b96541ce5b0b289d63310474fa2bd5388a8cda76aba3007056d80d07e  bwd_hd128_fp16_swa_a32_psskddv.co
-ab6bf4a50a613b10c8039eafeaa60f673950fa444c9c525ef37c5cb7bab1af9c  bwd_hd128_odo_bf16.co
-6f54fe2089990de254a1a28f388ebe313b716378db41955764aa3844cfb13835  bwd_hd128_odo_bf16_group.co
-9b7674022cac4e3233d96d4fb43ed2e9e25ac7d8e901241347432f7a31fa2043  bwd_hd128_odo_fp16.co
-8f03ff3822942f79adc405c792aafa2c397abacf97b2b37687cfb44dcf9c9525  bwd_hd128_odo_fp16_group.co
+250c13c903954242ef6f4c60e120ace01a29ac8edaa1979f499b560809f12f37  bwd_hd128_odo_bf16.co
+d8289a5c57681e133d5440ef49f2cb698110cdbe1c169b9d64000dc445c2db79  bwd_hd128_odo_bf16_group.co
+3145a2d98fa8b5be431d42213c78c1e39daf92675ae45b00618ba33ceab56993  bwd_hd128_odo_fp16.co
+d46a916264e2857244229725d971987fb48668949a1e9ef1684a8c5b5f54a6f2  bwd_hd128_odo_fp16_group.co
 d4664d1bfca053435a85fed760873a1c016a25555b2fd69b74edf006c0900897  bwd_hd192_128_bf16_a16_pssk.co
 d1e003af77a2ba4c11e82efc8b4327510ab62df4d6b2764b125e0ce022466e76  bwd_hd192_128_bf16_a32_pssk.co
 57bd5b98bc2508a79522e6da5fc860c95c7e534286680889af119e2727de62a0  bwd_hd192_128_bf16_causal_a16_pssk.co
@@ -102,10 +106,10 @@ d62566b4fc39f7dc8de584880052b3209ffe549e31689b3ced71a2b028b01da1  bwd_hd192_fp16
 0790de12d853f986bd0483ae2462ec3ba40f59aa1eb3baa21b0e8a90cf83ba81  bwd_hd192_fp16_causal_a32_psskddv_group.co
 a1f3c44c3e98b6f6fc7810757d8fc0ed26faffea7f52d4602c2e30f947a8cf97  bwd_hd192_fp16_causal_br_a32_psskddv.co
 cba92b810667da66d884177902664f3d62b5f4ac0cc27c86827b18fe2ed19a74  bwd_hd192_fp16_causal_br_a32_psskddv_group.co
-895e42dc3a5095e7fdce7eb0b74fc693d5fced46ba9c0206f339b35c196dd5ca  bwd_hd192_odo_bf16.co
-c5cad6474ec9b7e97f2d551f79930f0c8d8c3be128890ae1c3f6aaf55f68c924  bwd_hd192_odo_bf16_group.co
-c4971598db78c13e5306b64eceac9f4dd21d338775296733ec89f15cd19695d4  bwd_hd192_odo_fp16.co
-57e90fb37baaaae6b2a8622cce38e387c0f700ab7aa0e73deaff777a345a3805  bwd_hd192_odo_fp16_group.co
+56cdc3779c13267285addfb303ae024a6e7b24cdebf22e46409eb868ddbee6ce  bwd_hd192_odo_bf16.co
+e7b6f4f88765f49e4f5062438b533bfc586872e6dd9ad6b23af095c8360a0bba  bwd_hd192_odo_bf16_group.co
+98eb9a61d4bb8991177e68d86e34de03955f3d84b5e846a64674fc00359c2558  bwd_hd192_odo_fp16.co
+f702a91f484b0e980018f7dce3ee2f94cabd3f724ba9780360c0648be427346d  bwd_hd192_odo_fp16_group.co
 247aafbad2391816290161a5821e270cde6f640118b26a1666b758f28214d1b0  bwd_hd64_bf16_a16_rtna.co
 dcd88ec0436f21d4bd57e7a9d275342b07b55098deb224434b08eb80692b12ff  bwd_hd64_bf16_a16_rtne.co
 058e458502b97f25c564f82cec45e2cffad8b1cf2b26c0fa29485133b3686f30  bwd_hd64_bf16_a16_rtz.co
@@ -142,8 +146,8 @@ e415ba4ef00e524c1eabf54108adfd92406cabbb09bc2760120c8dc01917c3b0  bwd_hd64_fp16_
 b6ce6ac04d343bdc0602cdf1872006af5da8bff7c63903e461a3b61c78afbdd7  bwd_hd64_fp16_causal_a32_pssk_group.co
 b4757c19274dbe6529af1f0093a1c5248541130e908b1a7241299273a52b1d8c  bwd_hd64_fp16_causal_br_a32_pssk.co
 d11d24c213e61fb7c04a2d355ecbd3dc9df985df58558c434bdcca79137e1d96  bwd_hd64_fp16_causal_br_a32_pssk_group.co
-1878bf37b72ae3fee5bd4b66cf11b7a77a61e7c494a8397a67f29417dd658b6e  bwd_hd64_odo_bf16.co
-6230496614e0d7efa0a534f8de5cb64bfc5c9cc72f26c278974868303b849f58  bwd_hd64_odo_bf16_group.co
-af02a1048e3731ce8499079837a0669dc8f438c277a7e2e007cee450745472f7  bwd_hd64_odo_fp16.co
-28bd30d1711bcae45882725656d568c79be59a5d0ef53dc48d343b869fbcd2c0  bwd_hd64_odo_fp16_group.co
+3b93bfc6fea46d51a4a3200880b93f7bdb90c7f0455a49b6ef59cc4e76c51e71  bwd_hd64_odo_bf16.co
+fd8b5e3398805712fee7acc1950e1b8438e473e114893973edcf6a99359a6cf0  bwd_hd64_odo_bf16_group.co
+27f423b4eec302dbce45feb76959f49134d8a2bc344afd7cea624622a02ce2b4  bwd_hd64_odo_fp16.co
+60ea572e48bf187c44695c6726bc878d44f6e0e44ae789639a320c9202f51eef  bwd_hd64_odo_fp16_group.co
 ```
