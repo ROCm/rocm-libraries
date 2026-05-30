@@ -697,7 +697,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
     int pack_gqa_seqlen_q = shape_seqlen_q;
     if(pack_gqa && nhead_ratio > 1 && mask.type == mask_enum::no_mask &&
        bias.type == bias_enum::no_bias && i_perm && o_perm && mode == mode_enum::batch &&
-       q_eff_lens_per_batch.empty() && kv_eff_lens_per_batch.empty())
+       q_eff_lens_per_batch.empty() && kv_eff_lens_per_batch.empty() &&
+       qscale.type != quant_scale_enum::mx)
     {
         pack_gqa_nhead    = nhead_k;
         pack_gqa_seqlen_q = nhead_ratio * shape_seqlen_q;
