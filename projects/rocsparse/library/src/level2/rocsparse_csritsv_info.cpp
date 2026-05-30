@@ -45,6 +45,9 @@ void _rocsparse_csritsv_info::copy(const _rocsparse_csritsv_info* that, hipStrea
     //
     if(this->ptr_end != nullptr && this->is_submatrix)
     {
+        // Mirror the destructor: HIP 7.0 made hipFree of asynchronous allocations
+        // asynchronous, so synchronize before freeing a buffer that may still be in use.
+        THROW_IF_HIP_ERROR(hipDeviceSynchronize());
         THROW_IF_HIP_ERROR(rocsparse_hipFree(this->ptr_end));
         this->ptr_end = nullptr;
     }

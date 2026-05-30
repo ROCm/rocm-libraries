@@ -1228,6 +1228,8 @@ void testing_csritsv(const Arguments& arg)
         if(arg.matrix_type == rocsparse_matrix_type_general && *h_analysis_pivot == -1
            && *h_solve_pivot == -1 && host_iterative_convergence)
         {
+            rocsparse_pointer_mode pointer_mode_save;
+            CHECK_ROCSPARSE_ERROR(rocsparse_get_pointer_mode(handle, &pointer_mode_save));
             CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
 
             rocsparse_mat_info src_info  = nullptr;
@@ -1297,6 +1299,8 @@ void testing_csritsv(const Arguments& arg)
             //
             CHECK_ROCSPARSE_ERROR(rocsparse_destroy_mat_info(copy_info));
             CHECK_HIP_ERROR(hipDeviceSynchronize());
+
+            CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, pointer_mode_save));
         }
 
         if(device_iterative_convergence != host_iterative_convergence)
