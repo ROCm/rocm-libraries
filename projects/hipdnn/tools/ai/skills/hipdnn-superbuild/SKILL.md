@@ -1,171 +1,91 @@
 ---
 name: hipdnn-superbuild
 description: Build hipDNN with providers via the repository superbuild. Faster than standalone since providers build alongside hipDNN in a single CMake invocation. On Windows, auto-runs the wheel-based ROCm setup if not already prepared.
-argument-hint: "[preset] [clean] [jobs=<N>] [ROCM_PATH=<path>] [CLANG_PATH=<path>] [GPU_TARGETS=<arch>] [SHA=<commit>]"
+argument-hint: "[preset] [clean] [ROCM_PATH=<path>] [CLANG_PATH=<path>] [GPU_TARGETS=<arch>] [SHA=<commit>]"
 allowed-tools: Bash, Read, Grep, Glob
 ---
 
 # hipDNN Superbuild
 
-Build hipDNN with one or more providers using the repository-root superbuild system. The superbuild configures all components in a single CMake invocation from the repository root, eliminating the need for separate install steps between hipDNN and providers.
+Use this skill when the user asks to configure or build hipDNN through the rocm-libraries repository superbuild. It builds only; use `hipdnn-superbuild-test` for tests after a successful build.
 
-> To run tests after the build, use `/hipdnn-superbuild-test`. This skill builds only.
+## Inputs
 
-## Arguments
+Infer options from the user request:
 
-- **Preset** (default: `hipdnn-providers`) — Which CMake preset to use (see table below)
-- `clean` — Remove build directory before configuring
-- `jobs=<N>` — Parallel build jobs (default: ninja's auto-detect)
-- `ROCM_PATH=<path>` — Override the path to the ROCm SDK devel directory
-  - On Linux: optional, defaults to `/opt/rocm`
-  - On Windows: optional. If unset, auto-discovered or provisioned via the wheel setup script (see Step 1b)
-- `CLANG_PATH=<path>` — Windows only. Override the clang toolchain `bin` directory (default: `D:/develop/dist/clang/bin`). Maps to cmake's `CMAKE_PROGRAM_PATH`.
-- `GPU_TARGETS=<arch>` — GPU architecture (e.g., `gfx1151`, `gfx942`). Default on Windows wheel setup: `gfx1151`
-- `SHA=<commit>` — Windows only. Specific S3 staging build SHA to install via the wheel setup; otherwise uses ROCm nightlies
+- **Preset**: default `hipdnn-providers`
+- **Clean rebuild**: remove the build directory before configuring only when the user asks for a clean build and the active host policy permits deletion
+- **ROCm path**: optional `ROCM_PATH=<path>` override; Linux defaults to `/opt/rocm`
+- **Clang path**: optional Windows `CLANG_PATH=<path>` override; default `D:/develop/dist/clang/bin`
+- **GPU targets**: optional `GPU_TARGETS=<arch>` override; Windows wheel setup defaults to `gfx1151`
+- **Wheel SHA**: optional Windows `SHA=<commit>` to pin the wheel setup
+- **Jobs**: optional explicit parallelism only when the user requests it and active workspace instructions permit it; otherwise let Ninja auto-detect
 
-## Available Presets
+## Presets
 
-From the repository root `CMakePresets.json`:
+Read `CMakePresets.json` from the repository root if exact preset contents matter. Common hipDNN presets:
 
 | Preset | Components |
-|--------|-----------|
+|--------|------------|
 | `hipdnn` | hipDNN only |
-| `hipdnn-integration-tests` | hipDNN + integration tests |
-| `hipdnn-providers` | hipDNN + miopen-provider + hipblaslt-provider + integration tests |
-| `hipdnn-providers-all` | All providers including unsupported (+ hip-kernel-provider) |
-| `miopen-provider` | hipDNN + miopen-provider + integration tests |
-| `hipblaslt-provider` | hipDNN + hipblaslt-provider + integration tests |
-| `hip-kernel-provider` | hipDNN + hip-kernel-provider + integration tests |
-| `hipdnn-samples` | hipDNN + all supported providers + integration tests + samples |
+| `hipdnn-integration-tests` | hipDNN plus integration tests |
+| `hipdnn-providers` | hipDNN, miopen-provider, hipblaslt-provider, integration tests |
+| `hipdnn-providers-all` | All providers, including unsupported providers |
+| `miopen-provider` | hipDNN, miopen-provider, integration tests |
+| `hipblaslt-provider` | hipDNN, hipblaslt-provider, integration tests |
+| `hip-kernel-provider` | hipDNN, hip-kernel-provider, integration tests |
+| `hipdnn-samples` | hipDNN, supported providers, integration tests, samples |
 
-## Step 0: Detect Environment
+## Workflow
 
-Run these commands separately (never chain with `&&`):
+1. Determine the repository root:
+   ```bash
+   git rev-parse --show-toplevel
+   ```
 
-1. Detect the repository root:
-```bash
-git rev-parse --show-toplevel
-```
-Store the result as `REPO_ROOT`.
+2. Choose the build and log locations:
+   - First honor any active workspace or repository instructions for artifact directories and build output safety.
+   - If no such instructions exist, use `BUILD_DIR=<repo-root>/build`.
+   - Keep full configure/build output in a log file and show only a short tail on failure.
 
-2. Detect the platform:
-```bash
-[[ -f /etc/os-release ]] && echo "Linux" || echo "Windows"
-```
-Store the result as `PLATFORM`.
+3. Locate this skill's helper directory:
+   - Installed skill layout: `<skill-directory>/scripts`
+   - Source checkout fallback: `<repo-root>/projects/hipdnn/tools/ai/skills/hipdnn-superbuild/scripts`
 
-Derive these paths:
-- `BUILD_DIR` = `$REPO_ROOT/build`
-- `HELPERS` = `$REPO_ROOT/projects/hipdnn/tools/ai/skills/helpers`
+4. Resolve ROCm and Clang paths:
+   ```bash
+   python3 <scripts>/windows_rocm_setup.py --repo-root <repo-root> [--rocm-path <path>] [--clang-path <path>] [--gpu-targets <arch>] [--sha <commit>]
+   ```
+   On Linux this echoes only provided overrides. On Windows it detects or provisions the wheel-based ROCm install and prints `KEY=VALUE` lines for subsequent commands.
 
-## Step 1: Parse Arguments
+5. If a clean rebuild was requested, remove the selected build directory using the active host's normal approval/safety flow.
 
-Parse `$ARGUMENTS` for:
-- **Preset**: one of the preset names above (default: `hipdnn-providers`)
-- **Clean**: presence of `clean` keyword
-- **Jobs**: value after `jobs=`
-- **ROCM_PATH**: value after `ROCM_PATH=`
-- **CLANG_PATH**: value after `CLANG_PATH=`
-- **GPU_TARGETS**: value after `GPU_TARGETS=`
-- **SHA**: value after `SHA=`
+6. Configure from the repository root. Always bind the preset configure to the selected build directory so configure and build operate on the same tree:
+   ```bash
+   cmake --preset <preset> -B <build-dir> [extra -D options]
+   ```
+   Add `-DROCM_PATH=<path>` when a ROCm path is resolved or provided. On Windows also add `-DCMAKE_PROGRAM_PATH=<clang-path>` and `-DGPU_TARGETS=<arch>`.
 
-## Step 1b: Resolve ROCm and Clang Paths
+7. Build with output redirected to a log:
+   ```bash
+   cmake --build <build-dir> > <log> 2>&1
+   ```
+   If explicit jobs are allowed and requested, pass them through to CMake/Ninja. On failure, report the log path and tail the last relevant lines.
 
-Run the shared helper. It is a no-op on Linux unless overrides were provided. On Windows it checks for an existing wheel install at the default location, runs the wheel setup script if missing, and prints the resolved paths to stdout:
+8. If the build fails with a stale CMake cache error such as `does not match the source`, clean the selected build directory once, reconfigure with the same `-B <build-dir>` command, and retry once. Do not loop.
 
-```bash
-python $HELPERS/windows_rocm_setup.py --repo-root $REPO_ROOT [--rocm-path $ROCM_PATH] [--clang-path $CLANG_PATH] [--gpu-targets $GPU_TARGETS] [--sha $SHA]
-```
-
-Pass through whichever optional args the user provided. Parse the `KEY=VALUE` lines from the helper's stdout to set `ROCM_PATH`, `CLANG_PATH`, and `GPU_TARGETS` for the subsequent steps. If the helper exits non-zero, surface its stderr and stop.
-
-## Step 2: Clean (if requested)
-
-```bash
-rm -rf $BUILD_DIR
-```
-
-## Step 3: Configure
-
-Always run cmake configuration — it is incremental and fast when nothing changed, but skipping it after a rebase/merge causes stale cache failures.
-
-The superbuild uses `cmake/toolchains/rocm-clang.cmake`. On Windows it requires both `ROCM_PATH` (the toolchain enforces this with `FATAL_ERROR` if missing) and `CMAKE_PROGRAM_PATH` (so cmake can find `clang.exe` outside the ROCm devel tree).
-
-**Linux (no overrides):**
-```bash
-cd $REPO_ROOT
-cmake --preset <preset>
-```
-
-**Linux (with ROCM_PATH override):**
-```bash
-cd $REPO_ROOT
-cmake --preset <preset> -DROCM_PATH="$ROCM_PATH"
-```
-
-If `GPU_TARGETS` was provided on Linux, append `-DGPU_TARGETS="$GPU_TARGETS"`.
-
-**Windows (using paths from Step 1b):**
-```bash
-cd $REPO_ROOT
-cmake --preset <preset> -DROCM_PATH="$ROCM_PATH" -DCMAKE_PROGRAM_PATH="$CLANG_PATH" -DGPU_TARGETS="$GPU_TARGETS"
-```
-
-## Step 4: Build
-
-If a `jobs` value was specified, pass it via `-j`. Otherwise let ninja auto-detect.
-
-Run the build with stdout/stderr captured to a log; tail only on failure and propagate the exit code so PASS/FAIL is detectable from the bash exit status. Don't pipe directly to `tail` — bash without `pipefail` would mask the failing exit code.
-
-With explicit jobs:
-```bash
-LOG=$(mktemp)
-cmake --build $BUILD_DIR -- -j <jobs> > "$LOG" 2>&1
-RC=$?
-if [ $RC -ne 0 ]; then echo "BUILD FAILED (exit $RC). Full log: $LOG"; tail -200 "$LOG"; else rm -f "$LOG"; fi
-exit $RC
-```
-
-Without explicit jobs:
-```bash
-LOG=$(mktemp)
-cmake --build $BUILD_DIR > "$LOG" 2>&1
-RC=$?
-if [ $RC -ne 0 ]; then echo "BUILD FAILED (exit $RC). Full log: $LOG"; tail -200 "$LOG"; else rm -f "$LOG"; fi
-exit $RC
-```
-
-### Stale Cache Auto-Recovery
-
-If the build fails with `does not match the source` (flatbuffers cache mismatch — common after rebasing or merging), automatically recover:
-
-1. Detect the pattern in the failure tail (or `grep` the kept `$LOG` if the tail truncated it).
-2. Remove the build directory: `rm -rf $BUILD_DIR`
-3. Re-run Step 3 (configure) and Step 4 (build) once more.
-
-If the second attempt also fails, surface the error and stop — don't loop.
-
-## Step 5: Report
+## Report
 
 Summarize:
-- Preset used and components built
-- Build result (success/failure)
-- Build output directory: `$BUILD_DIR/`
-- For Windows: the ROCm and Clang paths used
 
-To run tests, invoke `/hipdnn-superbuild-test`.
+- Preset used and components expected from that preset
+- Build result
+- Build directory and log path
+- Windows ROCm, Clang, and GPU target values when applicable
+- Next step: run `hipdnn-superbuild-test` if tests are needed
 
-## Common Issues
+## Notes
 
-- **Stale cache after rebase** — Step 4 auto-recovers from the most common pattern. If a different cache failure appears, use `clean` argument or `rm -rf $BUILD_DIR` and rebuild.
-- **Windows ROCM_PATH** — The `rocm-clang.cmake` toolchain file enforces `ROCM_PATH` on Windows with a `FATAL_ERROR` if missing.
-- **Windows CMAKE_PROGRAM_PATH** — Required separately from `ROCM_PATH` since clang lives in its own toolchain location, not under the ROCm devel tree.
-- **Windows: wheel install failed** — Check the helper's stderr output for network errors when fetching ROCm wheels. Re-run with `SHA=<commit>` to pin to a known good build.
-- **Missing provider dependencies** — Some providers require additional ROCm libraries (MIOpen, hipBLASLt) to be installed.
-
-## Related Skills
-
-- `/hipdnn-superbuild-test` — Run tests against this superbuild
-- `/hipdnn-build` — Build hipDNN standalone (without providers)
-- `/hipdnn-build-test` — Full standalone build + test + install workflow
-- `/hipdnn-samples` — Build and run sample applications
+- `scripts/windows_rocm_setup.py` is bundled in this skill so linked and copied installs work independently.
+- Missing provider dependencies such as MIOpen or hipBLASLt still need to be installed or available through the selected ROCm environment.
+- Product test execution is intentionally out of scope for this skill.

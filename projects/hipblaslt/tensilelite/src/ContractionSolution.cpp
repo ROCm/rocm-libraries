@@ -894,11 +894,13 @@ namespace TensileLite
                 args.template append<uint32_t>("bias_type",
                                                static_cast<uint32_t>(problem.bias().dataType()));
                 if(problemType.useBias)
+                {
                     args.template append<uint32_t>(
                         "strideBias",
                         static_cast<uint32_t>(problem.useBias() && bias.dimensions()
                                                   ? bias.strides()[bias.dimensions() - 1]
                                                   : 0)); // reserved
+                }
             }
         }
 
@@ -3540,14 +3542,17 @@ namespace TensileLite
             skGrid = cuCount;
         }
 
-        // For tree-reduction there are some limits for divisions to avoid overflow
-        // If we hit one of the limits, fallback to DP
-        size_t itersPerTile = problem.getItersPerTile(sizeMapping);
-        size_t itersPerWG   = tiles * itersPerTile / skGrid;
-        if(itersPerTile >= 65536 || itersPerWG >= 65536 || (tiles * itersPerTile) >= 16777216)
+        // Tree-fixup uses scalarUInt24DivideAndRemainder (dividend < 2^24, divisor < 2^16).
+        // If we exceed those bounds, fall back to DP.
+        if(reductionStrat == origami::reduction_t::tree)
         {
-            reductionStrat = origami::reduction_t::tree;
-            skGrid         = tiles;
+            size_t itersPerTile = problem.getItersPerTile(sizeMapping);
+            size_t itersPerWG   = tiles * itersPerTile / skGrid;
+
+            if(itersPerTile >= 65536 || itersPerWG >= 65536 || (tiles * itersPerTile) >= 16777216)
+            {
+                skGrid = tiles;
+            }
         }
 
         return skGrid;
