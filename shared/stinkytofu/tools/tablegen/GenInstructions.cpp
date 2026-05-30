@@ -73,6 +73,12 @@ struct OperandSpec {
     }
 };
 
+// HWREG name table entry parsed from DEF_HWREG(NAME, ID) lines.
+struct HwRegEntry {
+    std::string name;  // e.g. "HW_REG_WAVE_MODE"
+    int id = 0;        // numeric slot, 0..63
+};
+
 // Architecture metadata (from DEF_ARCH in Formats.def)
 struct ArchDef {
     std::string name;
@@ -85,6 +91,7 @@ struct ArchDef {
     int maxAGPR = 0;
     int defaultCycle = 4;
     int defaultLatency = 4;
+    std::vector<HwRegEntry> hwRegs;
 };
 
 // Operand field description.
@@ -178,6 +185,20 @@ struct InstructionDef {
     std::vector<OperandFieldEntry> finalPromotedFields;  // Promoted encoding fields
     int encodingBits = 32;  // From format .encoding (bits); sizeInBytes = encodingBits/8
 };
+
+//==========================================================================
+// HELPERS
+//==========================================================================
+
+// Return indices into `v` sorted by `key(v[i])`. Lets a generator iterate the
+// input vector in sorted order without mutating it, then emit a sorted table.
+template <typename T, typename KeyFn>
+static std::vector<size_t> sortedIndices(const std::vector<T>& v, KeyFn key) {
+    std::vector<size_t> idx(v.size());
+    for (size_t i = 0; i < v.size(); ++i) idx[i] = i;
+    std::sort(idx.begin(), idx.end(), [&](size_t a, size_t b) { return key(v[a]) < key(v[b]); });
+    return idx;
+}
 
 //==========================================================================
 // PARSER
@@ -452,6 +473,49 @@ class DefTParser {
             arch_.maxAGPR = 0;
             arch_.defaultCycle = 4;
             arch_.defaultLatency = 4;
+        }
+
+        // Parse DEF_HWREG(NAME, ID) — one HWREG entry per line, terse form.
+        // Lookup table for s_setreg/s_getreg is emitted from these per arch.
+        {
+            size_t hwregPos = 0;
+            while ((hwregPos = content.find("DEF_HWREG(", hwregPos)) != std::string::npos) {
+                size_t argsStart = hwregPos + 10;  // After "DEF_HWREG("
+                size_t argsEnd = content.find(')', argsStart);
+                if (argsEnd == std::string::npos) {
+                    int line = getLineNumber(content, argsStart);
+                    if (!formatFile.empty()) std::cerr << formatFile << ":" << line << ": ";
+                    std::cerr << "Error: DEF_HWREG(...): missing closing ')'.\n";
+                    return false;
+                }
+                std::string args = content.substr(argsStart, argsEnd - argsStart);
+                size_t comma = args.find(',');
+                if (comma == std::string::npos) {
+                    int line = getLineNumber(content, argsStart);
+                    if (!formatFile.empty()) std::cerr << formatFile << ":" << line << ": ";
+                    std::cerr << "Error: DEF_HWREG(NAME, ID): missing ',' between name and id.\n";
+                    return false;
+                }
+                HwRegEntry entry;
+                entry.name = args.substr(0, comma);
+                entry.name.erase(0, entry.name.find_first_not_of(" \t\n\r"));
+                entry.name.erase(entry.name.find_last_not_of(" \t\n\r") + 1);
+                std::string idStr = args.substr(comma + 1);
+                idStr.erase(0, idStr.find_first_not_of(" \t\n\r"));
+                idStr.erase(idStr.find_last_not_of(" \t\n\r") + 1);
+                char* end = nullptr;
+                long parsed = std::strtol(idStr.c_str(), &end, 0);
+                if (idStr.empty() || end != idStr.c_str() + idStr.size()) {
+                    int line = getLineNumber(content, argsStart);
+                    if (!formatFile.empty()) std::cerr << formatFile << ":" << line << ": ";
+                    std::cerr << "Error: DEF_HWREG(" << entry.name << ", " << idStr
+                              << "): id is not a valid integer.\n";
+                    return false;
+                }
+                entry.id = static_cast<int>(parsed);
+                arch_.hwRegs.push_back(std::move(entry));
+                hwregPos = argsEnd + 1;
+            }
         }
 
         // Parse DEF_FORMAT(...) blocks
@@ -1448,6 +1512,83 @@ class InstructionCodeGen {
         return true;
     }
 
+    // Emit two per-arch sorted (name, id) tables and the two binary-search lookup
+    // functions that consume them. HwReg.cpp dispatches on arch to nameToId<Arch>
+    // / idToName<Arch>.
+    //
+    //   kHwregByName_<Arch>[]   — sorted by name; backs nameToId<Arch>
+    //   kHwregById_<Arch>[]     — sorted by id;   backs idToName<Arch>
+    //   nameToId<Arch>(name, out) — std::lower_bound + equality check
+    //   idToName<Arch>(id)        — std::lower_bound + equality check
+    //
+    // Each table is guarded by a static_assert(is_sorted) so any future drift fails to compile.
+    bool generateHwregTable(const std::string& outputPath) {
+        std::ofstream out(outputPath);
+        if (!out) {
+            std::cerr << "Error: Cannot write " << outputPath << "\n";
+            return false;
+        }
+        emitHeader(out, "HWREG Name Tables");
+        out << "// HWREG (name, id) rows + per-arch lookup functions for "
+               "s_setreg / s_getreg.\n"
+            << "// Included inside HwReg.cpp at namespace stinkytofu::HwReg scope.\n\n";
+
+        auto emitTable = [&](const std::string& suffix, const std::vector<size_t>& idx,
+                             const std::string& sortKey) {
+            const std::string symbol = "kHwreg" + suffix + "_" + arch_;
+            out << "static constexpr ::stinkytofu::HwReg::NamedId " << symbol << "[] = {\n";
+            for (size_t k : idx) {
+                const auto& e = archDef_.hwRegs[k];
+                out << "    {\"" << e.name << "\", static_cast<::stinkytofu::HwReg::Id>(" << e.id
+                    << ")},\n";
+            }
+            out << "};\n";
+            out << "static_assert(std::is_sorted(std::begin(" << symbol << "), std::end(" << symbol
+                << "),\n"
+                << "    [](const ::stinkytofu::HwReg::NamedId& a,\n"
+                << "       const ::stinkytofu::HwReg::NamedId& b) {\n"
+                << "        return " << sortKey << ";\n"
+                << "    }),\n"
+                << "    \"" << symbol << " must be sorted by " << suffix << "\");\n\n";
+        };
+
+        auto byName = sortedIndices(archDef_.hwRegs, [](const HwRegEntry& e) { return e.name; });
+        emitTable("ByName", byName, "a.name < b.name");
+
+        auto byId = sortedIndices(archDef_.hwRegs, [](const HwRegEntry& e) { return e.id; });
+        emitTable("ById", byId, "static_cast<uint16_t>(a.id) < static_cast<uint16_t>(b.id)");
+
+        // nameToId<Arch>: binary-search the by-name table.
+        out << "inline bool nameToId" << arch_
+            << "(std::string_view name, ::stinkytofu::HwReg::Id& out) {\n"
+            << "    const auto* end = std::end(kHwregByName_" << arch_ << ");\n"
+            << "    const auto* it = std::lower_bound(\n"
+            << "        std::begin(kHwregByName_" << arch_ << "), end, name,\n"
+            << "        [](const ::stinkytofu::HwReg::NamedId& e, std::string_view target) {\n"
+            << "            return e.name < target;\n"
+            << "        });\n"
+            << "    if (it != end && it->name == name) {\n"
+            << "        out = it->id;\n"
+            << "        return true;\n"
+            << "    }\n"
+            << "    return false;\n"
+            << "}\n\n";
+
+        // idToName<Arch>: binary-search the by-id table.
+        out << "inline std::string_view idToName" << arch_ << "(uint16_t id) {\n"
+            << "    const auto* end = std::end(kHwregById_" << arch_ << ");\n"
+            << "    const auto* it = std::lower_bound(\n"
+            << "        std::begin(kHwregById_" << arch_ << "), end, id,\n"
+            << "        [](const ::stinkytofu::HwReg::NamedId& e, uint16_t target) {\n"
+            << "            return static_cast<uint16_t>(e.id) < target;\n"
+            << "        });\n"
+            << "    if (it != end && static_cast<uint16_t>(it->id) == id) return it->name;\n"
+            << "    return {};\n"
+            << "}\n\n";
+
+        return true;
+    }
+
    private:
     static std::string flagsToInitArgs(const std::vector<std::string>& flags) {
         if (flags.empty()) return "";
@@ -1891,6 +2032,7 @@ bool genInstructions(const std::string& arch, const std::string& inputDir,
     success &= codegen.generateCostTable(outputBase + "_costs.inc");
     success &= codegen.generateOperandRequirements(outputBase + "_operands.inc");
     success &= codegen.generateInitFile(outputBase + "_init.inc");
+    success &= codegen.generateHwregTable(outputBase + "_hwreg.inc");
 
     if (success) {
         std::cout << "Successfully generated instruction metadata for " << normArch << "\n";
@@ -1965,6 +2107,7 @@ bool genAllInstructions(const std::string& inputDir, const std::string& outputDi
         success &=
             codegen.generateOperandRequirements((genDir / (arch + "_operands.inc")).string());
         success &= codegen.generateInitFile((genDir / (arch + "_init.inc")).string());
+        success &= codegen.generateHwregTable((genDir / (arch + "_hwreg.inc")).string());
         success &=
             emitArchIsaFile(arch, insts, unifiedOpcodeMap, (hwDir / (arch + "Isa.inc")).string());
         success &= emitArchHeader(ad, (archHdrDir / (arch + ".hpp")).string());
