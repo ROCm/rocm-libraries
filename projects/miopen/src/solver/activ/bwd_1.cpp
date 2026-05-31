@@ -251,7 +251,7 @@ ConvSolution ActivBwdSolver1::GetSolution(const ExecutionContext&,
 
     const auto element_size = (xDesc.GetType() == miopenHalf) ? 2 : 4;
     const size_t map_size   = size_t{wIn} * size_t{hIn} * size_t{nIn} * size_t{cIn};
-    const size read_unit    = (map_size % 8 == 0 && element_size == 2) ? 8
+    const size_t read_unit  = (map_size % 8 == 0 && element_size == 2) ? 8
                               : (map_size % 4 == 0)                    ? 4
                               : (map_size % 2 == 0)                    ? 2
                                                                        : 1;

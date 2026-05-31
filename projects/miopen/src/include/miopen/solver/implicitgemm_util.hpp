@@ -152,7 +152,7 @@ static inline size_t ComputeLDSRequiredSize(const miopen::conv::ProblemDescripti
 {
     // Extend lds size by to take into account alignment
     // See max_algin code inside kernel_aglorithm files
-    const std::size_t worst_case_alignment_adjustment =
+    const size_t worst_case_alignment_adjustment =
         (problem.IsBfp16() || problem.IsFp16())
             ? std::max(
                   {GetReadWriteVectorSize(static_cast<int>(InBlockCopySubLengths_B)), EPACKSize})
@@ -163,11 +163,12 @@ static inline size_t ComputeLDSRequiredSize(const miopen::conv::ProblemDescripti
 
     // Multiplied worst_case_alignment_adjustment by 2 as
     // Both A and B matrix LDS size is increased.
-    const auto lds_size = static_cast<unsigned>((BPerBlock + KPerBlock) * EPerBlock) * EPACKSize *
-                              GetTypeSize(problem.GetInDataType()) * 2 +
-                          2 * worst_case_alignment_adjustment;
+    const size_t lds_size = static_cast<size_t>(BPerBlock + KPerBlock) *
+                                static_cast<size_t>(EPerBlock) * EPACKSize *
+                                GetTypeSize(problem.GetInDataType()) * 2 +
+                            2 * worst_case_alignment_adjustment;
 
-    return static_cast<size_t>(lds_size);
+    return lds_size;
 }
 
 template <typename T>
