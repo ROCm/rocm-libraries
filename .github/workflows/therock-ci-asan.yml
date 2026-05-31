@@ -10,6 +10,24 @@ name: TheRock CI ASAN
 #   - non-blocking (continue-on-error). Promote to required after the
 #     suppression list stabilizes.
 #
+# Configuration mirrors TheRock's `linux-release-asan` CMakePreset
+# (CMakePresets.json @ pin 4e469b56) as closely as is meaningful for a
+# rocm-libraries hipblaslt-only smoke run. THEROCK_SANITIZER=ASAN is the
+# single source of truth for sanitizer flags; we no longer pass
+# HIPBLASLT_ENABLE_ASAN=ON because that combination duplicated
+# -fsanitize=address per-target on top of TheRock's global injection.
+# The per-target helper (cmake/hipblaslt_target_configure_sanitizers.cmake)
+# is now a no-op when THEROCK_SANITIZER is set, so callers can keep
+# their existing gates without producing double flags.
+#
+# Arch caveat (gfx90a host-only ASAN):
+# TheRock's cmake/therock_sanitizers.cmake REGEX only appends `:xnack+`
+# to gfx942 and gfx950 for device-side ASAN. gfx90a is not matched, so
+# this build runs HOST-side ASAN only — perfect for catching hipblaslt
+# host-runtime / Tensile-init UB and leaks fast, but it does NOT
+# substitute for device-side ASAN coverage on MI300/MI350. Use TheRock's
+# own multi_arch_ci_asan workflow for that.
+#
 # The build/test infrastructure is reused verbatim from therock-ci-linux:
 # the only delta is the cmake_options block and the artifact_group suffix
 # which carries the "asan" marker through to ARTIFACT_GROUP at test time,
@@ -59,7 +77,6 @@ jobs:
     outputs:
       therock_ref: ${{ steps.ci-env.outputs.therock-ref }}
       docker_image: ${{ steps.ci-env.outputs.docker-image }}
-      build_runs_on: ${{ steps.ci-env.outputs.linux-runner }}
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -87,16 +104,49 @@ jobs:
     with:
       therock_ref: ${{ needs.setup.outputs.therock_ref }}
       docker_image: ${{ needs.setup.outputs.docker_image }}
-      # Build flags:
-      #   THEROCK_ENABLE_BLAS=ON          — pulls hipblaslt into the build
-      #   THEROCK_SANITIZER=ASAN          — TheRock-side sanitizer preset
-      #                                     (sets -fsanitize=address,
-      #                                     -shared-libasan, -fuse-ld=lld
-      #                                     via therock_sanitizers.cmake)
-      #   HIPBLASLT_ENABLE_ASAN=ON        — hipblaslt-side opt-in (kept
-      #                                     explicit so the option does
-      #                                     not silently regress)
-      cmake_options: "-DTHEROCK_ENABLE_BLAS=ON -DTHEROCK_SANITIZER=ASAN -DHIPBLASLT_ENABLE_ASAN=ON"
+      # Mirrors TheRock's linux-release-asan CMakePreset (CMakePresets.json
+      # @ pin 4e469b56). The cacheVariables we replicate here are the ones
+      # that matter for an hipblaslt-only smoke run:
+      #
+      #   THEROCK_ENABLE_BLAS=ON                  — pulls hipblaslt into the build
+      #   THEROCK_SANITIZER=ASAN                  — single source of truth for
+      #                                             sanitizer flags; injects
+      #                                             -fsanitize=address,
+      #                                             -shared-libsan, -fuse-ld=lld
+      #                                             globally via TheRock's
+      #                                             cmake/therock_sanitizers.cmake
+      #   CMAKE_BUILD_TYPE=RelWithDebInfo         — preset default; needed so
+      #                                             ASAN stack frames carry
+      #                                             file:line info
+      #   THEROCK_FLAG_KPACK_SPLIT_ARTIFACTS=OFF  — preset default; avoids
+      #                                             extra link-time packaging
+      #                                             work that ASAN does not need
+      #
+      # Preset entries deliberately NOT replicated:
+      #   CMAKE_*_FLAGS_RELWITHDEBINFO="-O2 -g1" / CMAKE_*_FLAGS="-g1"
+      #     TheRock uses these to bound debug-info size across many
+      #     subprojects (full -g produces multi-GB binaries under ASAN).
+      #     Quoting nested space-separated values through GitHub
+      #     workflow_call -> env -> shell -> python -> cmake is brittle
+      #     (every layer wants to re-split on whitespace). For a single-
+      #     subproject (hipblaslt) build the default `-O2 -g -DNDEBUG`
+      #     from RelWithDebInfo is small enough to ship to S3 and we
+      #     avoid the quoting trap. Add the override back via a properly
+      #     escaped env var (CFLAGS / CXXFLAGS) at the build step if size
+      #     becomes a problem.
+      #   amd-llvm_SANITIZER=OFF, hipcc_SANITIZER=OFF, etc.
+      #     These prevent TheRock from sanitizing its compiler/tools
+      #     stack. We do not build those subprojects (TheRock superbuild
+      #     pulls them from cached artifacts under THEROCK_ENABLE_BLAS),
+      #     so the overrides have no targets to apply to.
+      #
+      # We do NOT pass HIPBLASLT_ENABLE_ASAN=ON. Keeping that flag while
+      # THEROCK_SANITIZER=ASAN is set duplicated -fsanitize=address per-
+      # target on top of TheRock's global injection. The per-target helper
+      # at projects/hipblaslt/cmake/hipblaslt_target_configure_sanitizers.cmake
+      # is now a no-op when THEROCK_SANITIZER is set, so this is the
+      # supported configuration.
+      cmake_options: "-DTHEROCK_ENABLE_BLAS=ON -DTHEROCK_SANITIZER=ASAN -DCMAKE_BUILD_TYPE=RelWithDebInfo -DTHEROCK_FLAG_KPACK_SPLIT_ARTIFACTS=OFF"
       projects_to_test: "hipblaslt"
       test_type: "full"
       amdgpu_families: "gfx90a"
@@ -105,7 +155,14 @@ jobs:
       # time via ARTIFACT_GROUP detection.
       artifact_group: "gfx90a-asan"
       test_runs_on: "linux-gfx90a-gpu-rocm"
-      build_runs_on: ${{ needs.setup.outputs.build_runs_on }}
+      # ASAN linker is memory-heavy (multi-GB working set during final
+      # links of libhipblaslt.so with sanitizer instrumentation). The
+      # default `azure-linux-scale-rocm` runner has been observed to OOM
+      # mid-link under sanitizer flags; TheRock routes its own sanitizer
+      # builds to `azure-linux-scale-rocm-heavy-ramdisk` for the same
+      # reason (see TheRock build_tools/github_actions/amdgpu_family_matrix.py
+      # BUILD_RUNNER_LABELS["linux"]["sanitizer"]). Reuse the same pool.
+      build_runs_on: "azure-linux-scale-rocm-heavy-ramdisk"
 
   summary:
     name: "TheRock CI ASAN Summary"
