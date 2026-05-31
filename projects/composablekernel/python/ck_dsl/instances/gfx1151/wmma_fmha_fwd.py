@@ -90,6 +90,14 @@ class WmmaFmhaFwdSpec:
     dtype: str = "fp16"
     mask_mode: str = "none"  # "none" | "causal"
     sliding_window: int = 0
+    # Opt lever (see examples/gfx1151/attention case study): staging the K-tile's
+    # V rows through LDS for the PV B-operand cuts global loads ~3.3x but is a
+    # consistent 1.5-1.8x *regression* on gfx1151 -- the PV B-operand is an
+    # inherently column-strided V[k, d_col] gather, so LDS only relocates the
+    # strided reads while adding a barrier this single-wave-per-CTA kernel has no
+    # occupancy to hide, whereas the baseline gather stays cache-resident.
+    # Default off (the measured winner); kept togglable for the A/B study.
+    v_lds_stage: bool = False
     name: str = "ck_dsl_wmma_fmha_fwd"
 
     def __post_init__(self) -> None:
@@ -126,6 +134,7 @@ class WmmaFmhaFwdSpec:
             f"HK{self.kv_heads}",
             "fp16",
             self.mask_mode,
+            "vlds" if self.v_lds_stage else "vgather",
         )
 
 
@@ -151,8 +160,11 @@ def is_valid_spec(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> Tuple[bool, s
         )
     if spec.head_size % 16 != 0:
         return False, f"head_size must be a multiple of 16 (got {spec.head_size})"
-    # LDS budget: one 16x16 f16 P-staging tile.
+    # LDS budget: one 16x16 f16 P-staging tile, plus (when V-LDS staging is on)
+    # one 16 x head_size f16 V tile.
     bytes_lds = _BLOCK_M * _BLOCK_K * 2
+    if spec.v_lds_stage:
+        bytes_lds += _BLOCK_M * spec.head_size * 2
     if not target.fits_lds(bytes_lds):
         return False, (
             f"LDS budget {bytes_lds} > {target.lds_capacity_bytes} cap on {arch}"
@@ -291,6 +303,7 @@ def build_wmma_fmha_fwd(spec: WmmaFmhaFwdSpec, arch: str = "gfx1151") -> KernelD
         causal_ctx_offset=b.const_i32(0),
         k_token_offset_elems=batch_off_k,
         v_token_offset_elems=batch_off_v,
+        wmma_v_lds_stage=spec.v_lds_stage,
         arch=arch,
     )
     b.ret()

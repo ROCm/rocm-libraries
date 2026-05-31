@@ -352,6 +352,163 @@ class TestHelpers(unittest.TestCase):
         a4 = mfma_atom("f16", 4, 4, 4)
         self.assertEqual((a4.a_per_lane, a4.b_per_lane, a4.c_per_lane), (4, 4, 4))
 
+    def test_wmma_atom_rdna_support(self):
+        """RDNA WMMA atom: wave32 metadata, layout delegated to the MmaOp SSOT,
+        a single packed (non-f32) fragment load, and a wave32 WarpGrid path."""
+        from ck_dsl.core.arch import ArchTarget
+        from ck_dsl.helpers import (
+            WmmaAtom,
+            load_wmma_fragment,
+            make_global_view,
+            store_wmma_acc,
+            wmma_atom,
+        )
+
+        atom = WmmaAtom.f16_16x16x16()
+        self.assertEqual(atom.family, "wmma")
+        self.assertEqual(atom.wave_size, 32)
+        self.assertEqual(
+            (atom.a_per_lane, atom.b_per_lane, atom.c_per_lane), (16, 16, 8)
+        )
+        self.assertEqual(wmma_atom("f16", 16, 16, 16), atom)
+
+        # The atom's lane layout is the SAME object the arch-target exposes
+        # (single source of truth — no duplicated lane math).
+        op = ArchTarget.from_gfx("gfx1151").mma.by_op_id("wmma_f32_16x16x16_f16")
+        self.assertIsNotNone(op)
+        self.assertEqual(atom.a_layout().frag_len, op.a_layout().frag_len)
+        self.assertEqual(atom.c_layout().wave_size, op.c_layout().wave_size)
+
+        # emit routes through b.mma -> a <8 x f32> accumulator result.
+        b = IRBuilder("wmma_emit")
+        af = b.zero_vec_f32(16)
+        bf = b.zero_vec_f32(16)
+        acc = atom.zero_acc(b)
+        res = atom.emit(b, af, bf, acc)
+        self.assertEqual(res.type.count, 8)
+        self.assertEqual(res.type.elem.name, "f32")
+
+        # Fragment load is ONE packed <16 x half> global_load_vN (align 32),
+        # NOT an f32-promoted load_tile — the issue-bound parity guarantee.
+        b2 = IRBuilder("wmma_frag")
+        q = b2.param("Q", PtrType(F16, "global"))
+        sq = b2.param("sq", I32)
+        view = make_global_view(q, shape=(256, 128), strides=(sq, 1), dtype=F16)
+        lane = b2.mod(b2.thread_id_x(), b2.const_i32(32))
+        win = view.tile(lengths=(16, 16), origin=(b2.const_i32(0), b2.const_i32(0)))
+        frag = load_wmma_fragment(b2, win, atom, lane, role="a", k_offset=32)
+        self.assertEqual(frag.type.count, 16)
+        self.assertEqual(frag.type.elem.name, "f16")
+        loads = [
+            o
+            for o in self._kernel_ops(b2.kernel)
+            if "global_load_vN" in o.name
+        ]
+        self.assertEqual(len(loads), 1)
+        self.assertEqual(loads[0].attrs["vec"], 16)
+        self.assertEqual(loads[0].attrs["align"], 32)
+
+        # store_wmma_acc scatters c_per_lane scalars via the c_layout map.
+        b3 = IRBuilder("wmma_store")
+        o = b3.param("O", PtrType(F16, "global"))
+        so = b3.param("so", I32)
+        oview = make_global_view(o, shape=(256, 128), strides=(so, 1), dtype=F16)
+        lane3 = b3.mod(b3.thread_id_x(), b3.const_i32(32))
+        owin = oview.tile(lengths=(16, 16), origin=(b3.const_i32(0), b3.const_i32(0)))
+        store_wmma_acc(b3, owin, atom, lane3, b3.zero_vec_f32(8), col_offset=16)
+        stores = [
+            o for o in self._kernel_ops(b3.kernel) if "global_store" in o.name
+        ]
+        self.assertEqual(len(stores), 8)
+
+        # WarpGrid takes the WMMA atom (wave32) via from_atom and from_wmma.
+        g = WarpGrid.from_wmma(
+            atom, tile_m=16, tile_n=16, tile_k=16, warp_m=1, warp_n=1
+        )
+        self.assertEqual(g.wave_size, 32)
+        self.assertEqual(g.block_size, 32)
+        self.assertEqual(
+            WarpGrid.from_atom(
+                atom, tile_m=16, tile_n=16, tile_k=16, warp_m=1, warp_n=1
+            ).wave_size,
+            32,
+        )
+
+    def test_wmma_tensor_tile_api(self):
+        """WmmaTensor + load_wmma_tile/wmma_mma/store_wmma_tile are 1:1 packed
+        wrappers: the tile API must emit the SAME single packed load / single
+        mma / single vector-mul as the raw fragment path (issue-bound parity)."""
+        from ck_dsl.helpers import (
+            WmmaAtom,
+            WmmaTensor,
+            load_wmma_tile,
+            make_global_view,
+            store_wmma_tile,
+            wmma_mma,
+        )
+
+        atom = WmmaAtom.f16_16x16x16()
+
+        # load_wmma_tile -> a WmmaTensor whose packed value is one <16 x half>
+        # global_load_vN (NOT an f32-promoted load), identical to the raw path.
+        b = IRBuilder("wmma_tile_load")
+        q = b.param("Q", PtrType(F16, "global"))
+        sq = b.param("sq", I32)
+        view = make_global_view(q, shape=(256, 128), strides=(sq, 1), dtype=F16)
+        lane = b.mod(b.thread_id_x(), b.const_i32(32))
+        win = view.tile(lengths=(16, 16), origin=(b.const_i32(0), b.const_i32(0)))
+        qt = load_wmma_tile(b, win, atom, lane, role="a", k_offset=32)
+        self.assertIsInstance(qt, WmmaTensor)
+        self.assertEqual(qt.role, "a")
+        self.assertEqual(qt.value.type.count, 16)
+        self.assertEqual(qt.value.type.elem.name, "f16")
+        loads = [o for o in self._kernel_ops(b.kernel) if "global_load_vN" in o.name]
+        self.assertEqual(len(loads), 1)
+        self.assertEqual(loads[0].attrs["vec"], 16)
+
+        # wmma_mma -> one b.mma; the result tile is a <8 x f32> accumulator.
+        b2 = IRBuilder("wmma_tile_mma")
+        at = WmmaTensor(atom, "a", b2.zero_vec_f32(16), "gfx1151")
+        bt = WmmaTensor(atom, "b", b2.zero_vec_f32(16), "gfx1151")
+        acc = WmmaTensor.zero_acc(b2, atom)
+        out = wmma_mma(b2, at, bt, acc)
+        self.assertEqual(out.role, "c")
+        self.assertEqual(out.value.type.count, 8)
+        self.assertEqual(out.value.type.elem.name, "f32")
+        mmas = [o for o in self._kernel_ops(b2.kernel) if o.name == "tile.mma"]
+        self.assertEqual(len(mmas), 1)
+
+        # scale -> exactly one vector mul (the online-softmax rescale).
+        b3 = IRBuilder("wmma_tile_scale")
+        acc3 = WmmaTensor.zero_acc(b3, atom)
+        alpha = b3.zero_vec_f32(8)
+        acc3.scale(b3, alpha)
+        muls = [o for o in self._kernel_ops(b3.kernel) if o.name == "vector.mul"]
+        self.assertEqual(len(muls), 1)
+
+        # store_wmma_tile -> c_per_lane scalar stores via the c_layout map.
+        b4 = IRBuilder("wmma_tile_store")
+        o = b4.param("O", PtrType(F16, "global"))
+        so = b4.param("so", I32)
+        oview = make_global_view(o, shape=(256, 128), strides=(so, 1), dtype=F16)
+        lane4 = b4.mod(b4.thread_id_x(), b4.const_i32(32))
+        owin = oview.tile(lengths=(16, 16), origin=(b4.const_i32(0), b4.const_i32(0)))
+        store_wmma_tile(
+            b4, owin, WmmaTensor.zero_acc(b4, atom), lane4, col_offset=16
+        )
+        stores = [o for o in self._kernel_ops(b4.kernel) if "global_store" in o.name]
+        self.assertEqual(len(stores), 8)
+
+    @staticmethod
+    def _kernel_ops(kernel):
+        """Flatten all ops in a kernel (best-effort across body/region attrs)."""
+        out = []
+        region = getattr(kernel, "body", None) or getattr(kernel, "region", None)
+        blocks = getattr(region, "blocks", [region]) if region is not None else []
+        for blk in blocks:
+            out.extend(getattr(blk, "ops", []))
+        return out
+
     def test_warp_grid_binding_emits_decomp(self):
         b = IRBuilder("check_grid")
         grid = WarpGrid(

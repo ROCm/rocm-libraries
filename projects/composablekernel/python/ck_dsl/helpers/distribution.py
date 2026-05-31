@@ -55,9 +55,12 @@ __all__ = [
     "StaticDistributedTensor",
     "TileDistribution",
     "TileDistributionEncoding",
+    "WmmaTensor",
     "block_tile_reduce_sync",
     "load_tile",
     "load_tile_transpose",
+    "load_wmma_fragment",
+    "load_wmma_tile",
     "make_load_store_traits",
     "make_reduce_tile_distribution_encoding",
     "make_static_distributed_tensor",
@@ -65,6 +68,10 @@ __all__ = [
     "make_transposed_distribution",
     "shuffle_tile",
     "store_tile",
+    "store_tile_cshuffle",
+    "store_wmma_acc",
+    "store_wmma_tile",
+    "wmma_mma",
 ]
 
 
@@ -1612,3 +1619,227 @@ def load_tile_transpose(
             y_full[traits.vector_dim_y] = k
             dt.set(y_full, scalar)
     return dt
+
+
+# ---------------------------------------------------------------------
+# WMMA fragment load / store (RDNA wave32, packed — issue-bound safe)
+# ---------------------------------------------------------------------
+#
+# These are the RDNA/WMMA siblings of load_tile / store_tile, but they do
+# NOT route through load_vec_as_f32: a WMMA input fragment must reach b.mma
+# as a single packed <a_per_lane x f16> vector, not a list of f32 scalars.
+# load_tile's f32 promotion would force a per-element cast + repack, adding
+# static instructions to an issue-bound kernel. So the WMMA path uses the
+# raw TileWindow.load_vec (== one global_load_dwordx8 for <16 x half>),
+# byte-identical to the hand-rolled global_load_vN the attention kernels
+# emit, while still expressing addressing/layout through the CK Tile
+# TileWindow + the atom's verified MmaOp LayoutMaps.
+
+
+def load_wmma_fragment(
+    b: IRBuilder,
+    window: TileWindow,
+    atom,  # WmmaAtom (duck-typed to avoid an atoms<->distribution import cycle)
+    lane: Value,
+    *,
+    role: str = "a",
+    k_offset: int = 0,
+    lead: Sequence[Value] = (),
+    arch: str = "gfx1151",
+) -> Value:
+    """Load one lane's packed WMMA input fragment with a SINGLE vector load.
+
+    ``window`` is a :class:`TileWindow` whose *last two* axes are the
+    lane-distributed axis (matrix rows for the A operand, columns for the B
+    operand) followed by the contiguous K axis (stride 1). Any leading axes
+    (e.g. a head axis with its own stride that cannot fold into the token
+    stride) are addressed by ``lead`` — a sequence of fixed local indices
+    prepended before the lane-derived ``(row|col, k)`` pair, so
+    ``len(lead) + 2 == window.rank``.
+
+    The fragment's intra-tile lane coordinate is taken from the atom's
+    hardware-verified ``MmaOp`` layout map (``a_layout``/``b_layout``), and the
+    K run is read with one ``window.load_vec(n=a_per_lane)`` — i.e. one
+    ``global_load_dwordx8`` for the ``<16 x half>`` RDNA fragment, identical to
+    the hand-rolled path. No f32 cast (cf. :func:`load_tile`), so the result is
+    directly ``b.mma``-able.
+
+    ``k_offset`` shifts the K origin (e.g. ``d * 16`` to select the d-th 16-wide
+    K block of a head_size>16 contraction). ``role`` selects which operand's
+    lane layout to honour: ``"a"`` -> ``(row, k)``, ``"b"`` -> ``(k, col)``.
+    """
+    if role == "a":
+        lmap = atom.a_layout(arch)
+        lane_idx = lmap.coord(b, lane, 0)[0]  # row = lane % 16
+    elif role == "b":
+        lmap = atom.b_layout(arch)
+        lane_idx = lmap.coord(b, lane, 0)[1]  # col = lane % 16
+    else:
+        raise ValueError(f"role must be 'a' or 'b', got {role!r}")
+    idx = list(lead) + [lane_idx, b.const_i32(k_offset)]
+    return window.load_vec(b, *idx, n=atom.a_per_lane)
+
+
+def store_wmma_acc(
+    b: IRBuilder,
+    window: TileWindow,
+    atom,  # WmmaAtom (duck-typed)
+    lane: Value,
+    acc: Value,
+    *,
+    arch: str = "gfx1151",
+    col_offset: int = 0,
+    lead: Sequence[Value] = (),
+    align: Optional[int] = None,
+    transform: Optional[Callable[[IRBuilder, Value, int, Value, Value], Value]] = None,
+) -> None:
+    """Scatter one lane's ``<c_per_lane x f32>`` WMMA accumulator to a window.
+
+    Walks the ``c_per_lane`` accumulator slots, resolves each slot's
+    ``(row, col)`` from the atom's verified ``c_layout`` map, optionally applies
+    ``transform(b, value_f32, slot, row, col)`` (e.g. the online-softmax
+    ``* inv_l[row]`` rescale), demotes f32 -> the window dtype, and issues one
+    scalar store per slot — the same per-element epilogue the hand-rolled
+    attention O-store emits, now driven by the CK Tile TileWindow + LayoutMap.
+
+    ``col_offset`` shifts the column origin (e.g. ``d * 16`` for the d-th output
+    block). The accumulator layout naturally places adjacent slots so the
+    AMDGPU backend coalesces neighbouring stores.
+    """
+    cmap = atom.c_layout(arch)
+    c_off = b.const_i32(col_offset)
+    lead = list(lead)
+    for r in range(atom.c_per_lane):
+        row, col = cmap.coord(b, lane, r)
+        val = b.vec_extract(acc, r)
+        if transform is not None:
+            val = transform(b, val, r, row, col)
+        window.store_scalar(
+            b, *lead, row, b.add(c_off, col),
+            value=b.cast_f32_to(val, window.dtype),
+            align=align,
+        )
+
+
+# ---------------------------------------------------------------------
+# WmmaTensor: a packed distributed tensor for WMMA fragments / accumulator
+# ---------------------------------------------------------------------
+#
+# StaticDistributedTensor stores per-Y-slot *scalars* and loads/stores through
+# the f32-promoting load_tile path. For an issue-bound RDNA WMMA kernel that is
+# the wrong shape: a fragment must reach b.mma as one packed vector and the
+# accumulator rescale must stay a single b.vector_mul. WmmaTensor is the
+# distributed-tensor analogue that keeps the payload PACKED -- one SSA vector
+# (A/B: <a_per_lane x f16>, C: <c_per_lane x f32>) -- so the kernel body reads
+# in tile terms (load_wmma_tile / wmma_mma / acc.scale / store_wmma_tile)
+# while every operation lowers to the exact same single instruction the raw
+# path emits. The per-slot lane coordinate is resolved through the atom's
+# verified MmaOp LayoutMap (the SSOT), not by hand in the kernel.
+
+
+@dataclass
+class WmmaTensor:
+    """Packed distributed tensor for one lane's WMMA fragment or accumulator.
+
+    ``role`` is ``"a"``/``"b"`` (a ``<a_per_lane x f16>`` input fragment) or
+    ``"c"`` (a ``<c_per_lane x f32>`` accumulator). ``value`` is the single
+    packed SSA vector — the form :meth:`WmmaAtom.emit` consumes and produces.
+    Carrying the packed vector (rather than a per-element list) is what keeps
+    the issue-bound kernel at one instruction per tile op.
+    """
+
+    atom: object  # WmmaAtom (duck-typed to avoid an atoms<->distribution cycle)
+    role: str
+    value: Value
+    arch: str = "gfx1151"
+
+    @classmethod
+    def zero_acc(cls, b: IRBuilder, atom, *, arch: str = "gfx1151") -> "WmmaTensor":
+        """A fresh zero accumulator tile (role ``"c"``)."""
+        return cls(atom=atom, role="c", value=atom.zero_acc(b), arch=arch)
+
+    @property
+    def num_slots(self) -> int:
+        return self.atom.c_per_lane if self.role == "c" else self.atom.a_per_lane
+
+    def _layout(self):
+        if self.role == "a":
+            return self.atom.a_layout(self.arch)
+        if self.role == "b":
+            return self.atom.b_layout(self.arch)
+        return self.atom.c_layout(self.arch)
+
+    def coord(self, b: IRBuilder, lane: Value, slot: int):
+        """``(row, col)`` of accumulator ``slot`` for ``lane`` (role ``"c"``)."""
+        return self._layout().coord(b, lane, slot)
+
+    def slot(self, b: IRBuilder, r: int) -> Value:
+        """Extract scalar accumulator slot ``r`` (one ``v_*`` extract)."""
+        return b.vec_extract(self.value, r)
+
+    def with_slot(self, b: IRBuilder, r: int, v: Value) -> "WmmaTensor":
+        """Return a new tile with slot ``r`` set to ``v`` (one vec_insert)."""
+        return WmmaTensor(
+            self.atom, self.role, b.vec_insert(self.value, v, r), self.arch
+        )
+
+    def scale(self, b: IRBuilder, vec: Value) -> "WmmaTensor":
+        """Elementwise ``acc *= vec`` via ONE ``b.vector_mul`` — the online-
+        softmax rescale, kept a single vector op (issue-bound safe)."""
+        return WmmaTensor(
+            self.atom, self.role, b.vector_mul(self.value, vec), self.arch
+        )
+
+
+def load_wmma_tile(
+    b: IRBuilder,
+    window: TileWindow,
+    atom,  # WmmaAtom (duck-typed)
+    lane: Value,
+    *,
+    role: str = "a",
+    k_offset: int = 0,
+    lead: Sequence[Value] = (),
+    arch: str = "gfx1151",
+) -> WmmaTensor:
+    """Tile-level wrapper over :func:`load_wmma_fragment` returning a
+    :class:`WmmaTensor`. Same single packed ``load_vec`` — no f32 cast."""
+    value = load_wmma_fragment(
+        b, window, atom, lane, role=role, k_offset=k_offset, lead=lead, arch=arch
+    )
+    return WmmaTensor(atom=atom, role=role, value=value, arch=arch)
+
+
+def wmma_mma(
+    b: IRBuilder,
+    a: WmmaTensor,
+    bb: WmmaTensor,
+    acc: WmmaTensor,
+) -> WmmaTensor:
+    """``acc += a · bᵀ`` at tile granularity — one :meth:`WmmaAtom.emit`
+    (== one ``b.mma``). Returns the updated accumulator tile."""
+    return WmmaTensor(
+        atom=acc.atom,
+        role="c",
+        value=acc.atom.emit(b, a.value, bb.value, acc.value),
+        arch=acc.arch,
+    )
+
+
+def store_wmma_tile(
+    b: IRBuilder,
+    window: TileWindow,
+    acc: WmmaTensor,
+    lane: Value,
+    *,
+    col_offset: int = 0,
+    lead: Sequence[Value] = (),
+    align: Optional[int] = None,
+    transform: Optional[Callable[[IRBuilder, Value, int, Value, Value], Value]] = None,
+) -> None:
+    """Tile-level wrapper over :func:`store_wmma_acc` for the O epilogue."""
+    store_wmma_acc(
+        b, window, acc.atom, lane, acc.value,
+        arch=acc.arch, col_offset=col_offset, lead=lead,
+        align=align, transform=transform,
+    )

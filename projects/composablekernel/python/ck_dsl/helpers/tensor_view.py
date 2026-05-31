@@ -374,9 +374,16 @@ class TensorView:
         return b.global_load(self.base, off, dtype=self.dtype)
 
     def store_scalar(
-        self, b: IRBuilder, indices: Sequence[Value], value: Value
+        self, b: IRBuilder, indices: Sequence[Value], value: Value,
+        *, align: Optional[int] = None,
     ) -> None:
-        """Scalar store. ``value.type`` must match ``self.dtype``."""
+        """Scalar store. ``value.type`` must match ``self.dtype``.
+
+        ``align`` (global address space only) sets the store's byte-alignment
+        hint; the default (``None``) lets the IR builder pick. Pass the element
+        size (2 for f16) to match a hand-rolled ``global_store(..., align=2)``
+        and let the backend coalesce neighbouring f16 stores.
+        """
         if self.addr_space == "lds":
             if self.dtype.name in ("f16", "bf16"):
                 b.smem_store_vN(self.base, list(indices), value, 1)
@@ -400,7 +407,10 @@ class TensorView:
                 f"buffer scalar store not yet wired for dtype {self.dtype.name}"
             )
         off = self.desc.offset(b, indices)
-        b.global_store(self.base, off, value)
+        if align is None:
+            b.global_store(self.base, off, value)
+        else:
+            b.global_store(self.base, off, value, align=align)
 
     # ---- vector ops ----
 
@@ -845,8 +855,13 @@ class TileWindow:
     def load_scalar(self, b: IRBuilder, *local_indices: Value) -> Value:
         return self.view.load_scalar(b, self._global_indices(b, local_indices))
 
-    def store_scalar(self, b: IRBuilder, *local_indices: Value, value: Value) -> None:
-        self.view.store_scalar(b, self._global_indices(b, local_indices), value=value)
+    def store_scalar(
+        self, b: IRBuilder, *local_indices: Value, value: Value,
+        align: Optional[int] = None,
+    ) -> None:
+        self.view.store_scalar(
+            b, self._global_indices(b, local_indices), value=value, align=align
+        )
 
     # ---- vector ops ----
 
