@@ -116,15 +116,8 @@ inline Tsize var_size(const fft_precision precision, const fft_array_type type)
         var_size = sizeof(double);
         break;
     }
-    switch(type)
-    {
-    case fft_array_type_complex_interleaved:
-    case fft_array_type_hermitian_interleaved:
+    if(array_type_is_interleaved(type))
         var_size *= 2;
-        break;
-    default:
-        break;
-    }
     return var_size;
 }
 
@@ -1922,21 +1915,11 @@ public:
     }
     bool is_interleaved() const
     {
-        if(itype == fft_array_type_complex_interleaved
-           || itype == fft_array_type_hermitian_interleaved)
-            return true;
-        if(otype == fft_array_type_complex_interleaved
-           || otype == fft_array_type_hermitian_interleaved)
-            return true;
-        return false;
+        return array_type_is_interleaved(itype) || array_type_is_interleaved(otype);
     }
     bool is_planar() const
     {
-        if(itype == fft_array_type_complex_planar || itype == fft_array_type_hermitian_planar)
-            return true;
-        if(otype == fft_array_type_complex_planar || otype == fft_array_type_hermitian_planar)
-            return true;
-        return false;
+        return array_type_is_planar(itype) || array_type_is_planar(otype);
     }
     bool is_real() const
     {
