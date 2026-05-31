@@ -13,6 +13,7 @@
 #include "../../CkDslContext.hpp"
 #include "../../CkDslHandle.hpp"
 #include "../../CkDslSettings.hpp"
+#include "SdpaBwdPlanBuilder.hpp"
 #include "SdpaFwdPlanBuilder.hpp"
 
 namespace ck_dsl_provider {
@@ -20,12 +21,16 @@ namespace ck_dsl_provider {
 class CompileServiceBridge;
 class JitCache;
 
-/// IEngine implementation for CK DSL FMHA-forward attention.
+/// IEngine implementation for CK DSL FMHA attention (forward + backward).
 ///
-/// One engine per CK DSL op kind. The engine owns exactly one plan
-/// builder. ``getDetails`` publishes an EngineDetails FlatBuffer (engine
-/// id + empty knob vector for now) via the handle's detached-buffer map
-/// so the SDK's plugin-API surface keeps working.
+/// One engine covers both SDPA passes: it owns a forward plan builder
+/// (``SdpaAttributes`` nodes) and a backward plan builder
+/// (``SdpaBackwardAttributes`` nodes). The two op kinds are disjoint --
+/// at most one builder is ever applicable to a given one-node graph -- so
+/// each query routes to whichever builder accepts the graph.
+/// ``getDetails`` publishes an EngineDetails FlatBuffer (engine id +
+/// empty knob vector for now) via the handle's detached-buffer map so the
+/// SDK's plugin-API surface keeps working.
 class CkDslSdpaEngine
     : public hipdnn_plugin_sdk::IEngine<::CkDslHandle, CkDslSettings, CkDslContext> {
    public:
@@ -55,7 +60,8 @@ class CkDslSdpaEngine
 
    private:
     std::int64_t _id;
-    std::unique_ptr<SdpaFwdPlanBuilder> _planBuilder;
+    std::unique_ptr<SdpaFwdPlanBuilder> _fwdPlanBuilder;
+    std::unique_ptr<SdpaBwdPlanBuilder> _bwdPlanBuilder;
 };
 
 }  // namespace ck_dsl_provider

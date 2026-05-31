@@ -1,7 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include "SdpaAdapter.hpp"
+#include "SdpaBwdAdapter.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -16,11 +16,11 @@ namespace {
 
 using DataType = hipdnn_flatbuffers_sdk::data_objects::DataType;
 using TensorAttributes = hipdnn_flatbuffers_sdk::data_objects::TensorAttributes;
-using TensorMap = SdpaAdapter::TensorMap;
+using TensorMap = SdpaBwdAdapter::TensorMap;
 
 [[noreturn]] void throwBadParam(const std::string& msg) {
     throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                                                   "SdpaAdapter: " + msg);
+                                                   "SdpaBwdAdapter: " + msg);
 }
 
 const TensorAttributes& lookupTensor(const TensorMap& tensorMap, std::int64_t uid,
@@ -45,9 +45,9 @@ std::int32_t narrowToI32(std::int64_t value, const char* fieldName) {
 }
 
 void checkDtypeHalf(const TensorAttributes& t, const char* role) {
-    // The DSL FMHA-forward kernel currently only emits FP16 I/O. Reject
-    // anything else at the adapter boundary so applicability + the
-    // engine selection layer can fall through cleanly to other engines.
+    // Q/K/V/O/dO are FP16 I/O for the bwd kernel; reject anything else at
+    // the adapter boundary so applicability + engine selection can fall
+    // through cleanly to other engines.
     if (t.data_type() != DataType::HALF) {
         std::ostringstream oss;
         oss << role << " data_type must be HALF (FP16); got " << static_cast<int>(t.data_type());
@@ -56,8 +56,9 @@ void checkDtypeHalf(const TensorAttributes& t, const char* role) {
 }
 
 void checkDtypeFloat(const TensorAttributes& t, const char* role) {
-    // The optional forward stats (LSE) output is natural-log values
-    // stored in f32; the kernel writes FLOAT for this tensor.
+    // The gradient outputs (dQ/dK/dV) are f32 accumulators and the LSE
+    // stats are natural-log values stored in f32; the bwd kernel emits
+    // and consumes FLOAT for these.
     if (t.data_type() != DataType::FLOAT) {
         std::ostringstream oss;
         oss << role << " data_type must be FLOAT (f32); got " << static_cast<int>(t.data_type());
@@ -93,17 +94,16 @@ std::int32_t getStride(const TensorAttributes& t, std::uint32_t idx, const char*
     return narrowToI32(raw, (std::string(role) + "." + fieldName).c_str());
 }
 
-// Enforce the two memory-layout invariants the FMHA-forward kernel
-// hard-assumes (BSHD-compatible layout). The kernel has no batch stride:
-// it folds the batch offset as ``batch_idx * seqlen * stride_token`` and
-// adds the head-dim index as a raw element offset with contiguous vector
-// loads, so:
+// Enforce the two memory-layout invariants the FMHA kernels hard-assume
+// (BSHD-compatible layout). The kernels have no batch stride: they fold
+// the batch offset as ``batch_idx * seqlen * stride_token`` and add the
+// head-dim index as a raw element offset with contiguous vector loads,
+// so:
 //   1. the head-dim (last axis) must be unit-stride for every tensor;
 //   2. for batch>1 the batch stride (strides[0]) must equal
 //      ``seqlen * sequence-dim stride`` (= S * strides[2]).
 // For batch==1 the batch term is multiplied by 0, so the batch-stride
-// check is skipped (a B==1 tensor of any compatible head/seq strides is
-// fine).
+// check is skipped.
 //
 // The comparison is done in int64_t using the RAW (un-narrowed) strides
 // and dims so a large-but-valid stride does not false-trip on the
@@ -140,94 +140,50 @@ void checkBshdLayout(const TensorAttributes& t, std::int32_t B, std::int32_t S, 
     }
 }
 
-// Validate the optional forward stats (LSE) output tensor. The kernel
-// writes natural-log LSE as a flat contiguous head-major [B, Hq, Sq]
-// f32 buffer, so:
-//   * dtype must be FLOAT (f32);
-//   * dims must be rank-3 [B, Hq, Sq] (canonical) or rank-4
-//     [B, Hq, Sq, 1] (some frontends carry a trailing unit axis);
-//   * the B/Hq/Sq prefix must match the Q-derived extents;
-//   * the [B, Hq, Sq] dims must be contiguous head-major: strides
-//     {Hq*Sq, Sq, 1} (innermost Sq unit-stride, head stride == Sq,
-//     batch stride == Hq*Sq).
-void checkStatsTensor(const TensorAttributes& stats, std::int32_t B, std::int32_t Hq,
-                      std::int32_t Sq) {
-    checkDtypeFloat(stats, "stats");
-
-    // Rank-3 [B, Hq, Sq] is canonical; rank-4 [B, Hq, Sq, 1] is accepted
-    // too. Validate the B/Hq/Sq prefix against Q either way.
-    if (stats.dims() == nullptr || (stats.dims()->size() != 3 && stats.dims()->size() != 4)) {
-        std::ostringstream oss;
-        oss << "stats dims must be rank-3 ([B, Hq, Sq]) or rank-4 ([B, Hq, Sq, 1]); got size "
-            << (stats.dims() == nullptr ? 0u : stats.dims()->size());
-        throwBadParam(oss.str());
-    }
-    const std::uint32_t statsRank = stats.dims()->size();
-    if (statsRank == 4) {
-        auto statsLast = getDim(stats, 3, "stats", "trailing");
-        if (statsLast != 1) {
-            std::ostringstream oss;
-            oss << "stats rank-4 trailing dim (" << statsLast << ") must be 1 ([B, Hq, Sq, 1])";
-            throwBadParam(oss.str());
-        }
-    }
-
-    auto Bs = getDim(stats, 0, "stats", "B");
-    auto Hq_s = getDim(stats, 1, "stats", "Hq");
-    auto Sq_s = getDim(stats, 2, "stats", "Sq");
-    if (Bs != B || Hq_s != Hq || Sq_s != Sq) {
-        std::ostringstream oss;
-        oss << "stats shape [B, Hq, Sq] must match Q; expected {" << B << ", " << Hq << ", " << Sq
-            << "}, got {" << Bs << ", " << Hq_s << ", " << Sq_s << "}";
-        throwBadParam(oss.str());
-    }
-
-    // Contiguous head-major: strides == {Hq*Sq, Sq, 1}. The kernel writes
-    // stats as a flat contiguous [B, Hq, Sq] buffer, so a non-contiguous
-    // layout is rejected.
-    if (stats.strides() == nullptr || stats.strides()->size() != statsRank) {
-        std::ostringstream oss;
-        oss << "stats strides must match its rank (" << statsRank << "); got size "
-            << (stats.strides() == nullptr ? 0u : stats.strides()->size());
-        throwBadParam(oss.str());
-    }
-    const std::int64_t statsStrideBatch = stats.strides()->Get(0);
-    const std::int64_t statsStrideHead = stats.strides()->Get(1);
-    const std::int64_t statsStrideSeq = stats.strides()->Get(2);
-    const std::int64_t expectedStatsStrideBatch = static_cast<std::int64_t>(Hq) * Sq;
-    if (statsStrideSeq != 1 || statsStrideHead != Sq ||
-        statsStrideBatch != expectedStatsStrideBatch) {
-        std::ostringstream oss;
-        oss << "stats must be contiguous head-major [B, Hq, Sq]; expected strides {" << Hq * Sq
-            << ", " << Sq << ", 1}, got {" << statsStrideBatch << ", " << statsStrideHead << ", "
-            << statsStrideSeq << "}";
-        throwBadParam(oss.str());
-    }
-}
-
 }  // namespace
 
-SdpaSpec SdpaAdapter::buildSpec(const SdpaAttributes& sdpaAttr, const TensorMap& tensorMap) {
+SdpaBwdSpec SdpaBwdAdapter::buildSpec(const SdpaBackwardAttributes& sdpaAttr,
+                                      const TensorMap& tensorMap) {
     const auto& Q = lookupTensor(tensorMap, sdpaAttr.q_tensor_uid(), "Q");
     const auto& K = lookupTensor(tensorMap, sdpaAttr.k_tensor_uid(), "K");
     const auto& V = lookupTensor(tensorMap, sdpaAttr.v_tensor_uid(), "V");
     const auto& O = lookupTensor(tensorMap, sdpaAttr.o_tensor_uid(), "O");
+    const auto& dO = lookupTensor(tensorMap, sdpaAttr.do_tensor_uid(), "dO");
+    const auto& stats = lookupTensor(tensorMap, sdpaAttr.stats_tensor_uid(), "stats");
+    const auto& dQ = lookupTensor(tensorMap, sdpaAttr.dq_tensor_uid(), "dQ");
+    const auto& dK = lookupTensor(tensorMap, sdpaAttr.dk_tensor_uid(), "dK");
+    const auto& dV = lookupTensor(tensorMap, sdpaAttr.dv_tensor_uid(), "dV");
 
     check4dDims(Q, "Q");
     check4dDims(K, "K");
     check4dDims(V, "V");
     check4dDims(O, "O");
+    check4dDims(dO, "dO");
+    check4dDims(dQ, "dQ");
+    check4dDims(dK, "dK");
+    check4dDims(dV, "dV");
 
+    // I/O tensors are FP16; gradient accumulators and the LSE stats are
+    // f32.
     checkDtypeHalf(Q, "Q");
     checkDtypeHalf(K, "K");
     checkDtypeHalf(V, "V");
     checkDtypeHalf(O, "O");
+    checkDtypeHalf(dO, "dO");
+    checkDtypeFloat(dQ, "dQ");
+    checkDtypeFloat(dK, "dK");
+    checkDtypeFloat(dV, "dV");
+    checkDtypeFloat(stats, "stats");
 
     // Tensor dim convention (rank-4): [B, H, S, D].
-    //   Q.dims = [B, Hq,  Sq,  D ]
-    //   K.dims = [B, Hkv, Skv, D ]
-    //   V.dims = [B, Hkv, Skv, Dv]
-    //   O.dims = [B, Hq,  Sq,  Dv]
+    //   Q.dims  = [B, Hq,  Sq,  D]
+    //   K.dims  = [B, Hkv, Skv, D]
+    //   V.dims  = [B, Hkv, Skv, D]
+    //   O.dims  = [B, Hq,  Sq,  D]
+    //   dO.dims = [B, Hq,  Sq,  D]
+    //   dQ.dims = [B, Hq,  Sq,  D]
+    //   dK.dims = [B, Hkv, Skv, D]
+    //   dV.dims = [B, Hkv, Skv, D]
     auto B = getDim(Q, 0, "Q", "B");
     auto Hq = getDim(Q, 1, "Q", "Hq");
     auto Sq = getDim(Q, 2, "Q", "Sq");
@@ -248,55 +204,93 @@ SdpaSpec SdpaAdapter::buildSpec(const SdpaAttributes& sdpaAttr, const TensorMap&
     auto Sq_o = getDim(O, 2, "O", "Sq");
     auto Dv_o = getDim(O, 3, "O", "Dv");
 
-    // Batch must agree across all four tensors.
-    if (Bk != B || Bv != B || Bo != B) {
+    auto Bdo = getDim(dO, 0, "dO", "B");
+    auto Hq_do = getDim(dO, 1, "dO", "Hq");
+    auto Sq_do = getDim(dO, 2, "dO", "Sq");
+    auto D_do = getDim(dO, 3, "dO", "D");
+
+    auto Bdq = getDim(dQ, 0, "dQ", "B");
+    auto Hq_dq = getDim(dQ, 1, "dQ", "Hq");
+    auto Sq_dq = getDim(dQ, 2, "dQ", "Sq");
+    auto D_dq = getDim(dQ, 3, "dQ", "D");
+
+    auto Bdk = getDim(dK, 0, "dK", "B");
+    auto Hkv_dk = getDim(dK, 1, "dK", "Hkv");
+    auto Skv_dk = getDim(dK, 2, "dK", "Skv");
+    auto D_dk = getDim(dK, 3, "dK", "D");
+
+    auto Bdv = getDim(dV, 0, "dV", "B");
+    auto Hkv_dv = getDim(dV, 1, "dV", "Hkv");
+    auto Skv_dv = getDim(dV, 2, "dV", "Skv");
+    auto D_dv = getDim(dV, 3, "dV", "D");
+
+    // stats: rank-3 [B, Hq, Sq] is the canonical shape, but a rank-4
+    // [B, Hq, Sq, 1] is accepted too (some frontends carry a trailing
+    // unit axis). Validate the B/Hq/Sq prefix against Q either way.
+    if (stats.dims() == nullptr || (stats.dims()->size() != 3 && stats.dims()->size() != 4)) {
         std::ostringstream oss;
-        oss << "batch dimension must match across Q/K/V/O; got Q.B=" << B << " K.B=" << Bk
-            << " V.B=" << Bv << " O.B=" << Bo;
+        oss << "stats dims must be rank-3 ([B, Hq, Sq]) or rank-4 ([B, Hq, Sq, 1]); got size "
+            << (stats.dims() == nullptr ? 0u : stats.dims()->size());
+        throwBadParam(oss.str());
+    }
+    const std::uint32_t statsRank = stats.dims()->size();
+    if (statsRank == 4) {
+        auto statsLast = getDim(stats, 3, "stats", "trailing");
+        if (statsLast != 1) {
+            std::ostringstream oss;
+            oss << "stats rank-4 trailing dim (" << statsLast << ") must be 1 ([B, Hq, Sq, 1])";
+            throwBadParam(oss.str());
+        }
+    }
+    auto Bs = getDim(stats, 0, "stats", "B");
+    auto Hq_s = getDim(stats, 1, "stats", "Hq");
+    auto Sq_s = getDim(stats, 2, "stats", "Sq");
+
+    // Batch must agree across all tensors.
+    if (Bk != B || Bv != B || Bo != B || Bdo != B || Bdq != B || Bdk != B || Bdv != B || Bs != B) {
+        std::ostringstream oss;
+        oss << "batch dimension must match across all tensors; got Q.B=" << B << " K.B=" << Bk
+            << " V.B=" << Bv << " O.B=" << Bo << " dO.B=" << Bdo << " dQ.B=" << Bdq
+            << " dK.B=" << Bdk << " dV.B=" << Bdv << " stats.B=" << Bs;
         throwBadParam(oss.str());
     }
 
-    // Single head_size kernel: Dqk == Dv == D.
-    if (Dk != D) {
+    // Single head_size kernel: Dqk == Dv == D across every tensor.
+    if (Dk != D || Dv != D || Dv_o != D || D_do != D || D_dq != D || D_dk != D || D_dv != D) {
         std::ostringstream oss;
-        oss << "K head_size (" << Dk << ") must equal Q head_size (" << D << ")";
-        throwBadParam(oss.str());
-    }
-    if (Dv != D) {
-        std::ostringstream oss;
-        oss << "V head_size Dv (" << Dv << ") must equal Q head_size D (" << D
-            << "); a single head_size is supported";
-        throwBadParam(oss.str());
-    }
-    if (Dv_o != D) {
-        std::ostringstream oss;
-        oss << "O head_size (" << Dv_o << ") must equal Q head_size D (" << D << ")";
+        oss << "head_size must match across all tensors; got Q.D=" << D << " K.D=" << Dk
+            << " V.D=" << Dv << " O.D=" << Dv_o << " dO.D=" << D_do << " dQ.D=" << D_dq
+            << " dK.D=" << D_dk << " dV.D=" << D_dv;
         throwBadParam(oss.str());
     }
 
-    // K and V share the kv sequence length.
-    if (Skv_v != Skv) {
+    // K/V/dK/dV share the kv sequence length.
+    if (Skv_v != Skv || Skv_dk != Skv || Skv_dv != Skv) {
         std::ostringstream oss;
-        oss << "V seqlen_k (" << Skv_v << ") must equal K seqlen_k (" << Skv << ")";
+        oss << "seqlen_k must match across K/V/dK/dV; got K.Skv=" << Skv << " V.Skv=" << Skv_v
+            << " dK.Skv=" << Skv_dk << " dV.Skv=" << Skv_dv;
         throwBadParam(oss.str());
     }
 
-    // O mirrors Q's query head + sequence layout.
-    if (Hq_o != Hq) {
+    // O/dO/dQ/stats mirror Q's query head + sequence layout.
+    if (Hq_o != Hq || Hq_do != Hq || Hq_dq != Hq || Hq_s != Hq) {
         std::ostringstream oss;
-        oss << "O num_query_heads (" << Hq_o << ") must equal Q num_query_heads (" << Hq << ")";
+        oss << "num_query_heads must match across Q/O/dO/dQ/stats; got Q.Hq=" << Hq
+            << " O.Hq=" << Hq_o << " dO.Hq=" << Hq_do << " dQ.Hq=" << Hq_dq << " stats.Hq=" << Hq_s;
         throwBadParam(oss.str());
     }
-    if (Sq_o != Sq) {
+    if (Sq_o != Sq || Sq_do != Sq || Sq_dq != Sq || Sq_s != Sq) {
         std::ostringstream oss;
-        oss << "O seqlen_q (" << Sq_o << ") must equal Q seqlen_q (" << Sq << ")";
+        oss << "seqlen_q must match across Q/O/dO/dQ/stats; got Q.Sq=" << Sq << " O.Sq=" << Sq_o
+            << " dO.Sq=" << Sq_do << " dQ.Sq=" << Sq_dq << " stats.Sq=" << Sq_s;
         throwBadParam(oss.str());
     }
 
-    // K and V share the kv head count.
-    if (Hkv_v != Hkv) {
+    // K/V/dK/dV share the kv head count.
+    if (Hkv_v != Hkv || Hkv_dk != Hkv || Hkv_dv != Hkv) {
         std::ostringstream oss;
-        oss << "V num_kv_heads (" << Hkv_v << ") must equal K num_kv_heads (" << Hkv << ")";
+        oss << "num_kv_heads must match across K/V/dK/dV; got K.Hkv=" << Hkv << " V.Hkv=" << Hkv_v
+            << " dK.Hkv=" << Hkv_dk << " dV.Hkv=" << Hkv_dv;
         throwBadParam(oss.str());
     }
 
@@ -308,11 +302,14 @@ SdpaSpec SdpaAdapter::buildSpec(const SdpaAttributes& sdpaAttr, const TensorMap&
         throwBadParam(oss.str());
     }
 
-    // head_size must be one of the kernel-supported values (matches the
-    // DSL's validate_common_spec).
-    if (D != 32 && D != 64 && D != 128 && D != 192 && D != 256) {
+    // head_size must be one of the kernel-supported values AND a multiple
+    // of 64: the bwd kernel needs head_size >= WARP_SIZE (64), so the
+    // forward path's head_size==32 case is rejected here.
+    if ((D != 64 && D != 128 && D != 192 && D != 256) || D % 64 != 0) {
         std::ostringstream oss;
-        oss << "head_size (" << D << ") must be one of {32, 64, 128, 192, 256}";
+        oss << "head_size (" << D
+            << ") must be one of {64, 128, 192, 256} (a multiple of 64); the bwd kernel "
+               "requires head_size >= WARP_SIZE";
         throwBadParam(oss.str());
     }
 
@@ -321,8 +318,8 @@ SdpaSpec SdpaAdapter::buildSpec(const SdpaAttributes& sdpaAttr, const TensorMap&
     // (``0 % 16 == 0``).
     if (B <= 0 || Hq <= 0 || Hkv <= 0 || Sq <= 0 || Skv <= 0 || D <= 0) {
         std::ostringstream oss;
-        oss << "Q/K/V/O dims must all be positive; got B/Hq/Hkv/Sq/Skv/D = " << B << "/" << Hq
-            << "/" << Hkv << "/" << Sq << "/" << Skv << "/" << D;
+        oss << "dims must all be positive; got B/Hq/Hkv/Sq/Skv/D = " << B << "/" << Hq << "/" << Hkv
+            << "/" << Sq << "/" << Skv << "/" << D;
         throwBadParam(oss.str());
     }
 
@@ -353,28 +350,12 @@ SdpaSpec SdpaAdapter::buildSpec(const SdpaAttributes& sdpaAttr, const TensorMap&
     }
     std::string maskMode = sdpaAttr.causal_mask() ? "causal" : "none";
 
-    // Reject every advanced feature the M1 forward kernel does not model.
+    // Reject every advanced feature the bwd kernel does not model.
     if (sdpaAttr.attn_mask_tensor_uid().has_value()) {
         throwBadParam("additive attn_mask tensor not supported");
     }
     if (sdpaAttr.scale_tensor_uid().has_value()) {
         throwBadParam("per-element scale tensor not supported");
-    }
-    // Opt-in forward stats (LSE) output. The request is signalled either
-    // by ``generate_stats() == true`` or by the presence of a
-    // ``stats_tensor_uid``; either way the output tensor must be provided
-    // so the kernel has somewhere to write. The single combined LSE
-    // output is supported (head-major [B, Hq, Sq] f32 contiguous); the
-    // separate max / sum_exp outputs are not (rejected below). The stats
-    // tensor itself is validated after the Q-derived B/Hq/Sq extents are
-    // known.
-    const bool wantStats =
-        (sdpaAttr.generate_stats().has_value() && sdpaAttr.generate_stats().value()) ||
-        sdpaAttr.stats_tensor_uid().has_value();
-    if (wantStats && !sdpaAttr.stats_tensor_uid().has_value()) {
-        throwBadParam(
-            "generate_stats requested but no stats_tensor_uid provided; the LSE output tensor "
-            "must be supplied");
     }
     if (sdpaAttr.seq_len_q_tensor_uid().has_value() ||
         sdpaAttr.seq_len_kv_tensor_uid().has_value()) {
@@ -382,35 +363,12 @@ SdpaSpec SdpaAdapter::buildSpec(const SdpaAttributes& sdpaAttr, const TensorMap&
     }
     if (sdpaAttr.seed_tensor_uid().has_value() || sdpaAttr.offset_tensor_uid().has_value() ||
         sdpaAttr.dropout_mask_tensor_uid().has_value() ||
-        sdpaAttr.dropout_scale_tensor_uid().has_value()) {
+        sdpaAttr.dropout_scale_tensor_uid().has_value() ||
+        sdpaAttr.dropout_scale_inv_tensor_uid().has_value()) {
         throwBadParam("dropout not supported");
     }
-    if (sdpaAttr.page_table_k_tensor_uid().has_value() ||
-        sdpaAttr.page_table_v_tensor_uid().has_value()) {
-        throwBadParam("paged KV not supported");
-    }
-    if (sdpaAttr.block_mask_tensor_uid().has_value()) {
-        throwBadParam("block mask not supported");
-    }
-    if (sdpaAttr.sink_token_tensor_uid().has_value()) {
-        throwBadParam("sink tokens not supported");
-    }
-    if (sdpaAttr.max_tensor_uid().has_value() || sdpaAttr.sum_exp_tensor_uid().has_value()) {
-        throwBadParam("max/sum_exp outputs not supported in M1 forward");
-    }
-    // FP8 quantization scales/descales -- FP16-only kernel cannot consume them.
-    if (sdpaAttr.descale_q_tensor_uid().has_value() ||
-        sdpaAttr.descale_k_tensor_uid().has_value() ||
-        sdpaAttr.descale_v_tensor_uid().has_value() ||
-        sdpaAttr.descale_s_tensor_uid().has_value() || sdpaAttr.scale_s_tensor_uid().has_value() ||
-        sdpaAttr.scale_o_tensor_uid().has_value()) {
-        throwBadParam("FP8 descale/scale tensors not supported (FP16 only in M1 forward)");
-    }
-    if (sdpaAttr.amax_s_tensor_uid().has_value() || sdpaAttr.amax_o_tensor_uid().has_value()) {
-        throwBadParam("amax_s/amax_o outputs not supported in M1 forward");
-    }
-    if (sdpaAttr.rng_dump_tensor_uid().has_value()) {
-        throwBadParam("rng_dump not supported");
+    if (sdpaAttr.dbias_tensor_uid().has_value()) {
+        throwBadParam("dbias output not supported");
     }
     // Dropout requested via probability (the dropout *tensors* are
     // already rejected above).
@@ -418,7 +376,7 @@ SdpaSpec SdpaAdapter::buildSpec(const SdpaAttributes& sdpaAttr, const TensorMap&
         throwBadParam("dropout not supported");
     }
 
-    SdpaSpec spec{};
+    SdpaBwdSpec spec{};
     spec.problem.B = B;
     spec.problem.Hq = Hq;
     spec.problem.Hkv = Hkv;
@@ -426,16 +384,20 @@ SdpaSpec SdpaAdapter::buildSpec(const SdpaAttributes& sdpaAttr, const TensorMap&
     spec.problem.Skv = Skv;
     spec.problem.D = D;
 
-    // Enforce the kernel's BSHD-compatible layout contract before
-    // recording the launch-time strides: head-dim unit-stride for all
-    // four tensors, and (for batch>1) batch stride == seqlen * sequence
-    // stride. Q/O use seqlen_q; K/V use seqlen_k.
+    // Enforce the kernels' BSHD-compatible layout contract before
+    // recording the launch-time strides: head-dim unit-stride for the
+    // FP16 I/O tensors and the f32 gradients, and (for batch>1) batch
+    // stride == seqlen * sequence stride. Q/O/dO/dQ use seqlen_q; K/V/
+    // dK/dV use seqlen_k.
     checkBshdLayout(Q, B, Sq, "Q");
     checkBshdLayout(K, B, Skv, "K");
     checkBshdLayout(V, B, Skv, "V");
-    checkBshdLayout(O, B, Sq, "O");
+    checkBshdLayout(dO, B, Sq, "dO");
+    checkBshdLayout(dQ, B, Sq, "dQ");
+    checkBshdLayout(dK, B, Skv, "dK");
+    checkBshdLayout(dV, B, Skv, "dV");
 
-    // Strides for the kernel ABI: token = sequence-dim stride
+    // Input strides for the kernel ABI: token = sequence-dim stride
     // (strides[2]); head = head-dim stride (strides[1]).
     spec.problem.stride_q_token = getStride(Q, 2, "Q", "stride_q_token");
     spec.problem.stride_q_head = getStride(Q, 1, "Q", "stride_q_head");
@@ -443,35 +405,75 @@ SdpaSpec SdpaAdapter::buildSpec(const SdpaAttributes& sdpaAttr, const TensorMap&
     spec.problem.stride_k_head = getStride(K, 1, "K", "stride_k_head");
     spec.problem.stride_v_token = getStride(V, 2, "V", "stride_v_token");
     spec.problem.stride_v_head = getStride(V, 1, "V", "stride_v_head");
-    spec.problem.stride_o_token = getStride(O, 2, "O", "stride_o_token");
-    spec.problem.stride_o_head = getStride(O, 1, "O", "stride_o_head");
+    spec.problem.stride_do_token = getStride(dO, 2, "dO", "stride_do_token");
+    spec.problem.stride_do_head = getStride(dO, 1, "dO", "stride_do_head");
+
+    // Gradient head strides must match the matching input head stride:
+    // the kernel reuses the input head stride when writing each gradient.
+    const std::int32_t stride_dq_head = getStride(dQ, 1, "dQ", "stride_dq_head");
+    const std::int32_t stride_dk_head = getStride(dK, 1, "dK", "stride_dk_head");
+    const std::int32_t stride_dv_head = getStride(dV, 1, "dV", "stride_dv_head");
+    if (stride_dq_head != spec.problem.stride_q_head) {
+        std::ostringstream oss;
+        oss << "dQ head stride (" << stride_dq_head << ") must equal Q head stride ("
+            << spec.problem.stride_q_head << "); the kernel reuses the input head stride for dQ";
+        throwBadParam(oss.str());
+    }
+    if (stride_dk_head != spec.problem.stride_k_head) {
+        std::ostringstream oss;
+        oss << "dK head stride (" << stride_dk_head << ") must equal K head stride ("
+            << spec.problem.stride_k_head << "); the kernel reuses the input head stride for dK";
+        throwBadParam(oss.str());
+    }
+    if (stride_dv_head != spec.problem.stride_v_head) {
+        std::ostringstream oss;
+        oss << "dV head stride (" << stride_dv_head << ") must equal V head stride ("
+            << spec.problem.stride_v_head << "); the kernel reuses the input head stride for dV";
+        throwBadParam(oss.str());
+    }
+
+    // Gradient token strides for the kernel ABI.
+    spec.problem.stride_dq_token = getStride(dQ, 2, "dQ", "stride_dq_token");
+    spec.problem.stride_dk_token = getStride(dK, 2, "dK", "stride_dk_token");
+    spec.problem.stride_dv_token = getStride(dV, 2, "dV", "stride_dv_token");
+
+    // stats must be contiguous head-major: strides == {Hq*Sq, Sq, 1}
+    // (innermost Sq unit-stride, head stride == Sq, batch stride ==
+    // Hq*Sq). The LSE-prep kernel reads stats as a flat contiguous
+    // [B, Hq, Sq] buffer, so a non-contiguous layout is rejected.
+    if (stats.strides() == nullptr || stats.strides()->size() != statsRank) {
+        std::ostringstream oss;
+        oss << "stats strides must match its rank (" << statsRank << "); got size "
+            << (stats.strides() == nullptr ? 0u : stats.strides()->size());
+        throwBadParam(oss.str());
+    }
+    const std::int64_t statsStrideBatch = stats.strides()->Get(0);
+    const std::int64_t statsStrideHead = stats.strides()->Get(1);
+    const std::int64_t statsStrideSeq = stats.strides()->Get(2);
+    const std::int64_t expectedStatsStrideBatch = static_cast<std::int64_t>(Hq) * Sq;
+    if (statsStrideSeq != 1 || statsStrideHead != Sq ||
+        statsStrideBatch != expectedStatsStrideBatch) {
+        std::ostringstream oss;
+        oss << "stats must be contiguous head-major [B, Hq, Sq]; expected strides {" << Hq * Sq
+            << ", " << Sq << ", 1}, got {" << statsStrideBatch << ", " << statsStrideHead << ", "
+            << statsStrideSeq << "}";
+        throwBadParam(oss.str());
+    }
 
     // Attention scale: explicit value when set, otherwise the standard
-    // 1/sqrt(head_size). The kernel consumes the scale in log2 space
-    // (it computes exp2 in the softmax), so fold log2(e) in here. The
-    // constant is spelled out locally to avoid the POSIX-only M_LOG2E
-    // macro.
+    // 1/sqrt(head_size). The kernel consumes the scale in log2 space for
+    // the softmax (scale_log2 = attn_scale * log2(e)) and the raw value
+    // (scale_inv) elsewhere. The log2(e) constant is spelled out locally
+    // to avoid the POSIX-only M_LOG2E macro.
     constexpr float kLog2E = 1.44269504088896340736f;
     float attn_scale = sdpaAttr.attn_scale_value().has_value()
                            ? sdpaAttr.attn_scale_value().value()
                            : (1.0f / std::sqrt(static_cast<float>(D)));
     spec.problem.scale_log2 = attn_scale * kLog2E;
+    spec.problem.scale_inv = attn_scale;
 
     spec.dtype = "f16";
     spec.mask_mode = maskMode;
-
-    // Opt-in forward stats (LSE) output. When requested, validate the
-    // supplied stats tensor (dtype FLOAT, head-major [B, Hq, Sq]
-    // contiguous) here so isApplicable declines a malformed stats request
-    // rather than failing at launch. The stats UID itself is not stored
-    // on the spec -- the plan builder reads it straight off the FB node;
-    // the spec only records that stats are enabled (codegen-relevant).
-    if (wantStats) {
-        const auto& stats = lookupTensor(tensorMap, sdpaAttr.stats_tensor_uid().value(), "stats");
-        checkStatsTensor(stats, B, Hq, Sq);
-    }
-    spec.generate_stats = wantStats;
-
     return spec;
 }
 

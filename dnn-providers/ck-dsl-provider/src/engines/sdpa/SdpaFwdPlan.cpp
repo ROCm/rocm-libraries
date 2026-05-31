@@ -44,7 +44,7 @@ SdpaFwdPlan::SdpaFwdPlan(std::shared_ptr<HipModule> module, std::int64_t qUid, s
                          std::int32_t strideQHead, std::int32_t strideKToken,
                          std::int32_t strideKHead, std::int32_t strideVToken,
                          std::int32_t strideVHead, std::int32_t strideOToken,
-                         std::int32_t strideOHead)
+                         std::int32_t strideOHead, bool hasStats, std::int64_t statsUid)
     : _module(std::move(module)),
       _qUid(qUid),
       _kUid(kUid),
@@ -60,30 +60,38 @@ SdpaFwdPlan::SdpaFwdPlan(std::shared_ptr<HipModule> module, std::int64_t qUid, s
       _strideVToken(strideVToken),
       _strideVHead(strideVHead),
       _strideOToken(strideOToken),
-      _strideOHead(strideOHead) {
+      _strideOHead(strideOHead),
+      _hasStats(hasStats),
+      _statsUid(statsUid) {
     if (_module == nullptr) {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
             "SdpaFwdPlan: refusing to construct with null HipModule");
     }
 
-    // Validate the kernel's argument schema is exactly the 15-slot ABI
-    // execute() packs against. If a future kernel variant grows or
-    // rearranges its parameter list, the plan must refuse to launch
-    // rather than pack values into wrong-typed slots. The schema arrives
-    // via KernelArtifact at JIT time, so this is fixed for the lifetime
-    // of each cached HipModule.
+    // Validate the kernel's argument schema matches the ABI execute()
+    // packs against: the 15-slot base layout (Pointer x4, F32, I32 x10),
+    // plus -- when opt-in stats are enabled -- a 16th Pointer slot
+    // (LSE_out). If a future kernel variant grows or rearranges its
+    // parameter list, the plan must refuse to launch rather than pack
+    // values into wrong-typed slots. The schema arrives via KernelArtifact
+    // at JIT time, so this is fixed for the lifetime of each cached
+    // HipModule. The stats flag and the schema width must agree: a 16-slot
+    // schema iff stats are enabled (otherwise the cache key and the loaded
+    // module have drifted).
     const auto& schema = _module->argSchema();
     auto rejectSlot = [&](const std::string& detail) {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
             "SdpaFwdPlan: kernel argSchema does not match the expected "
-            "(Pointer x4, F32, I32 x10) layout for the FMHA-forward kernel signature; " +
+            "(Pointer x4, F32, I32 x10[, Pointer]) layout for the FMHA-forward kernel signature; " +
                 detail);
     };
-    if (schema.size() != 15) {
+    const std::size_t expectedSlots = _hasStats ? 16u : 15u;
+    if (schema.size() != expectedSlots) {
         std::ostringstream oss;
-        oss << "got " << schema.size() << " slots, expected 15";
+        oss << "got " << schema.size() << " slots, expected " << expectedSlots << " (stats "
+            << (_hasStats ? "enabled" : "disabled") << ")";
         rejectSlot(oss.str());
     }
     for (std::size_t i = 0; i < 4; ++i) {
@@ -102,6 +110,9 @@ SdpaFwdPlan::SdpaFwdPlan(std::shared_ptr<HipModule> module, std::int64_t qUid, s
             oss << "slot " << i << " must be I32";
             rejectSlot(oss.str());
         }
+    }
+    if (_hasStats && schema[15].kind != ArgSchema::Kind::Pointer) {
+        rejectSlot("slot 15 must be Pointer (LSE_out)");
     }
 
     // One-shot launch-shape log: useful operator diagnostic at plan
@@ -146,6 +157,15 @@ void SdpaFwdPlan::execute(const ::CkDslHandle& handle,
         ArgValue::i32(_strideKToken), ArgValue::i32(_strideKHead),  ArgValue::i32(_strideVToken),
         ArgValue::i32(_strideVHead),  ArgValue::i32(_strideOToken), ArgValue::i32(_strideOHead),
     };
+
+    // Opt-in stats (LSE) output: resolve the head-major [B, Hq, Sq] f32
+    // buffer by uid and append it as the 16th arg (slot index 15), after
+    // the 15 base args -- matching the schema's conditional LSE_out slot.
+    if (_hasStats) {
+        const auto& lseBuf =
+            findDeviceBuffer(_statsUid, deviceBuffers, numDeviceBuffers, "LSE_out");
+        values.push_back(ArgValue::pointer(lseBuf.ptr));
+    }
 
     std::vector<std::byte> packed = LaunchAbi::pack(_module->argSchema(), values);
 

@@ -70,6 +70,14 @@ struct SdpaSpec {
     std::string name{"ck_dsl_fmha_fwd_mfma"};
     std::string dtype{"f16"};       // codegen-relevant
     std::string mask_mode{"none"};  // "none" | "causal"; codegen-relevant
+
+    // Opt-in forward-training stats (LSE) output. When true the kernel
+    // appends one f32 ``LSE_out`` pointer at ABI position 16 (after the
+    // 15 base args) and writes natural-log LSE in head-major [B, Hq, Sq]
+    // layout (consumed by the backward). Codegen-relevant: stats-on and
+    // stats-off emit distinct kernels, so this is folded into the cache
+    // signature.
+    bool generate_stats{false};
 };
 
 }  // namespace ck_dsl_provider

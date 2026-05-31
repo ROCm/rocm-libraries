@@ -22,6 +22,11 @@ py::dict sdpaSpecToPayload(const SdpaSpec& spec) {
     d["seqlen_q"] = spec.problem.Sq;
     d["seqlen_k"] = spec.problem.Skv;
 
+    // Opt-in forward stats (LSE) output. Codegen-relevant: stats-on emits
+    // the 16-arg kernel that appends the LSE_out pointer; stats-off keeps
+    // the byte-identical 15-arg kernel.
+    d["generate_stats"] = spec.generate_stats;
+
     // Deliberately NOT emitted: the eight stride_* scalars and
     // scale_log2. They are launch-time kernel arguments carried on the
     // spec for the plan builder, not codegen inputs -- the compiled

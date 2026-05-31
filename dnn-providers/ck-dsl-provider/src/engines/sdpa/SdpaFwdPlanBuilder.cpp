@@ -200,6 +200,15 @@ void SdpaFwdPlanBuilder::buildPlan(const ::CkDslHandle& handle,
 
     std::shared_ptr<HipModule> module = _cache.getOrLoad(key, loader);
 
+    // Opt-in stats (LSE) output. The adapter already validated the stats
+    // tensor (dtype / shape / contiguity) when it set spec.generate_stats;
+    // the UID is read straight off the FB node here (the spec carries only
+    // the enable flag, not the UID). The cache key already distinguishes
+    // stats-on / stats-off via the signature fold, so the loaded module's
+    // 16-slot schema matches hasStats.
+    const bool hasStats = spec.generate_stats;
+    const std::int64_t statsUid = hasStats ? sdpaAttr.stats_tensor_uid().value() : -1;
+
     // The plan needs the module + tensor UIDs + the launch-time scalars.
     // HipModule carries the launch metadata (grid, block, ldsBytes,
     // argSchema) captured from the artifact at load time, so execute()
@@ -209,7 +218,8 @@ void SdpaFwdPlanBuilder::buildPlan(const ::CkDslHandle& handle,
         sdpaAttr.v_tensor_uid(), sdpaAttr.o_tensor_uid(), spec.problem.scale_log2, spec.problem.Sq,
         spec.problem.Skv, spec.problem.stride_q_token, spec.problem.stride_q_head,
         spec.problem.stride_k_token, spec.problem.stride_k_head, spec.problem.stride_v_token,
-        spec.problem.stride_v_head, spec.problem.stride_o_token, spec.problem.stride_o_head);
+        spec.problem.stride_v_head, spec.problem.stride_o_token, spec.problem.stride_o_head,
+        hasStats, statsUid);
 
     executionContext.setPlan(std::move(plan));
 }
