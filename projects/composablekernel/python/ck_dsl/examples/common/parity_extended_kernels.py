@@ -2141,6 +2141,125 @@ def case_fmha_fwd_mfma() -> Result:
     return r
 
 
+def case_fmha_fwd_mfma_stats() -> Result:
+    """MFMA-tiled FMHA forward with opt-in softmax-stats (M / L) outputs.
+
+    Builds with ``generate_stats=True`` so the kernel stores the per-(query-
+    row, query-head) online-softmax max M and rescaled sum L into the flat
+    ``[seqlen_q, num_query_heads]`` (batch=1) f32 arrays the bwd kernel reads.
+    The O comparison is kept; M / L are compared against a torch log2-domain
+    reference at tol 1e-2.
+    """
+    from ck_dsl.instances import (
+        FmhaMfmaSpec,
+        build_fmha_fwd_mfma,
+        fmha_fwd_mfma_grid,
+        fmha_fwd_mfma_signature,
+    )
+
+    head_size = 64
+    HQ = HK = 2
+    seqlen_q = 16
+    seqlen_k = 16
+    batch = 1
+    spec = FmhaMfmaSpec(
+        common=FmhaCommonSpec(
+            shape=FmhaShape(head_size, HQ, HK),
+            dtype="f16",
+            mask_mode="none",
+            generate_stats=True,
+        ),
+        seqlen_q=seqlen_q,
+        seqlen_k=seqlen_k,
+    )
+    kernel = build_fmha_fwd_mfma(spec, arch=_ARCH)
+    art = _compile(kernel)
+    launcher = KernelLauncher(
+        hsaco=art.hsaco,
+        kernel_name=kernel.name,
+        signature=fmha_fwd_mfma_signature(spec),
+    )
+    torch.manual_seed(401)
+    Q = torch.randn(
+        batch * seqlen_q,
+        HQ,
+        head_size,
+        dtype=torch.float16,
+        device="cuda",
+    )
+    K = torch.randn(
+        batch * seqlen_k,
+        HK,
+        head_size,
+        dtype=torch.float16,
+        device="cuda",
+    )
+    V = torch.randn(
+        batch * seqlen_k,
+        HK,
+        head_size,
+        dtype=torch.float16,
+        device="cuda",
+    )
+    O = torch.zeros_like(Q)
+    # Flat [seqlen_q, HQ] f32 M / L (batch=1): ml_off = row * HQ + head.
+    M_out = torch.zeros(seqlen_q, HQ, dtype=torch.float32, device="cuda")
+    L_out = torch.zeros(seqlen_q, HQ, dtype=torch.float32, device="cuda")
+    _launch(
+        launcher,
+        {
+            "Q": Q,
+            "K": K,
+            "V": V,
+            "O": O,
+            "scale_log2": math.log2(math.e) / math.sqrt(head_size),
+            "seqlen_q": seqlen_q,
+            "seqlen_k": seqlen_k,
+            "stride_q_token": HQ * head_size,
+            "stride_q_head": head_size,
+            "stride_k_token": HK * head_size,
+            "stride_k_head": head_size,
+            "stride_v_token": HK * head_size,
+            "stride_v_head": head_size,
+            "stride_o_token": HQ * head_size,
+            "stride_o_head": head_size,
+            # Opt-in stats pointers append AFTER the strides, matching the
+            # tail-of-ABI order in fmha_mfma._declare_params.
+            "M_out": M_out,
+            "L_out": L_out,
+        },
+        grid=fmha_fwd_mfma_grid(spec, batch=batch),
+    )
+    # Per-head dense attention reference (O) plus a log2-domain M / L
+    # reference. scores_log2 = scores * log2(e) * (1/sqrt(D)); M = row max;
+    # L = sum exp2(scores_log2 - M).
+    O_ref = torch.zeros_like(O)
+    M_ref = torch.zeros_like(M_out)
+    L_ref = torch.zeros_like(L_out)
+    log2e = math.log2(math.e)
+    for h in range(HQ):
+        kh = h // (HQ // HK)
+        scores = (Q[:, h, :].float() @ K[:, kh, :].float().t()) / math.sqrt(head_size)
+        probs = torch.softmax(scores, dim=-1)
+        O_ref[:, h, :] = (probs @ V[:, kh, :].float()).to(torch.float16)
+        scores_log2 = scores * log2e
+        M_ref[:, h] = scores_log2.max(dim=-1).values
+        L_ref[:, h] = torch.exp2(scores_log2 - M_ref[:, h : h + 1]).sum(dim=-1)
+    m_abs = float((M_out - M_ref).abs().max().item())
+    l_abs = float((L_out - L_ref).abs().max().item())
+    stats_ok = (m_abs <= 1e-2) and (l_abs <= 1e-2)
+    print(f"    M max_abs={m_abs:.4g}  L max_abs={l_abs:.4g}")
+    r = _summarise(
+        O,
+        O_ref,
+        tol=5e-3,
+        note=f"stats M/L (M={m_abs:.3g} L={l_abs:.3g})",
+    )
+    r.passed = r.passed and stats_ok
+    r.name = "fmha_fwd_mfma_stats (M/L outputs)"
+    return r
+
+
 def case_mfma_gemm() -> Result:
     """f16 GEMM via mfma_f32_16x16x16_f16 atom (production density)."""
     from ck_dsl.instances import (
@@ -2439,6 +2558,7 @@ ALL_CASES: Dict[str, Callable[[], Result]] = {
     "fmha_fwd_paged_prefill": case_fmha_fwd_paged_prefill,
     "fmha_bwd": case_fmha_bwd,
     "fmha_fwd_mfma": case_fmha_fwd_mfma,
+    "fmha_fwd_mfma_stats": case_fmha_fwd_mfma_stats,
     "sage_attention_fp16": case_sage_attention_fp16,
     "sage_attention_fp8": case_sage_attention_fp8,
     "sage_attention_i8": case_sage_attention_i8,

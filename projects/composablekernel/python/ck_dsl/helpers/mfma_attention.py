@@ -241,6 +241,9 @@ def mfma_attention_fwd_inner_body(
     native_fp8_path: bool = False,
     use_async_kv: bool = False,
     codebook_ptr: Optional[Value] = None,
+    M_out: Optional[Value] = None,
+    L_out: Optional[Value] = None,
+    num_query_heads: Optional[int] = None,
     arch: str = "gfx950",
 ) -> None:
     """One MFMA-tiled QK→softmax→PV pass for a ``BLOCK_M``-row Q tile.
@@ -445,6 +448,9 @@ def mfma_attention_fwd_inner_body(
             extra_skip_predicate=extra_skip_predicate,
             k_block_iter_fn=k_block_iter_fn,
             v_scale=v_scale,
+            M_out=M_out,
+            L_out=L_out,
+            num_query_heads=num_query_heads,
             arch=arch,
             target=target,
         )
@@ -785,9 +791,11 @@ def mfma_attention_fwd_inner_body(
 
     # ---- Pull final state ----
     final = kloop.results
-    # ``ms_final`` is the per-lane row-max; the scaled-acc / l_final pair
-    # already encodes everything the epilogue needs, so we only consume
-    # the normalisation factors below.
+    # ``ms_final`` is the per-lane row-max (log2-space M); ``ls_final`` is
+    # the rescaled-accumulated sum (L). The scaled-acc / l_final pair
+    # encodes everything the O epilogue needs; M / L are consumed only by
+    # the opt-in stats store below (and discarded otherwise).
+    ms_final = [final[2 * r] for r in range(atom.c_per_lane)]
     ls_final = [final[2 * r + 1] for r in range(atom.c_per_lane)]
     accs_final = list(final[2 * atom.c_per_lane :])
 
@@ -824,6 +832,27 @@ def mfma_attention_fwd_inner_body(
                 o_col,
             )
             b.global_store(O, addr, v_out, align=2)
+
+    # ---- Opt-in softmax-stats store: M[row,head] / L[row,head] ----
+    # Flat [B*Sq, HQ] f32 layout: ml_off = o_row * num_query_heads +
+    # head_idx, where ``o_row`` already folds the batch (= batch_idx *
+    # seqlen_q + within-batch row). The bwd kernel reads M / L with this
+    # exact index. The running m / l are row-broadcast across the 16
+    # lanes of each m_blk group, so only lane ``m_in_atom == 0`` writes
+    # each row -- predicating avoids 16x duplicate stores. This loop is
+    # over the row slots ``r`` only (per-row, not per head-dim column).
+    if M_out is not None:
+        hq = b.const_i32(num_query_heads)
+        is_writer = b.cmp_eq(m_in_atom, b.const_i32(0))
+        with b.scf_if(is_writer):
+            for r in range(atom.c_per_lane):
+                o_row = b.add(
+                    b.add(q_tile_base, b.mul(m_blk, b.const_i32(4))),
+                    b.const_i32(r),
+                )
+                ml_off = b.add(b.mul(o_row, hq), head_idx)
+                b.global_store(M_out, ml_off, ms_final[r], align=4)
+                b.global_store(L_out, ml_off, ls_final[r], align=4)
 
 
 # ---------------------------------------------------------------------------
@@ -887,6 +916,9 @@ def _wmma_attention_fwd_inner_body(
     extra_skip_predicate: Optional[Callable[[IRBuilder, Value], Value]],
     k_block_iter_fn: Optional[Callable[[IRBuilder, Value], Value]],
     v_scale: Optional[Value],
+    M_out: Optional[Value],
+    L_out: Optional[Value],
+    num_query_heads: Optional[int],
     arch: str,
     target,
 ) -> None:
@@ -1092,6 +1124,7 @@ def _wmma_attention_fwd_inner_body(
         b.scf_yield(*yields)
 
     final = kloop.results
+    ms_final = [final[2 * r] for r in range(c_frag)]
     ls_final = [final[2 * r + 1] for r in range(c_frag)]
     accs_final = list(final[2 * c_frag :])
 
@@ -1115,3 +1148,21 @@ def _wmma_attention_fwd_inner_body(
                 o_col,
             )
             b.global_store(O, o_addr, b.cast_f32_to(v_f32, dtype_ir), align=2)
+
+    # ---- Opt-in softmax-stats store: M[row,head] / L[row,head] ----
+    # Flat [B*Sq, HQ] f32 layout (same definition + index the MFMA path
+    # writes and the bwd kernel reads): ml_off = o_row * num_query_heads +
+    # head_idx, with ``o_row`` folding the batch. The running m / l are
+    # row-broadcast across the 16 k-column lanes of each wave32 half, so
+    # only the lane at k-column 0 (``col == 0``) writes each row to avoid
+    # 16x duplicate stores. Per-row loop over slots ``r`` only.
+    if M_out is not None:
+        hq = b.const_i32(num_query_heads)
+        is_writer = b.cmp_eq(col, b.const_i32(0))
+        with b.scf_if(is_writer):
+            for r in range(c_frag):
+                row_rel, _col_n = c_map.coord(b, lane, r)
+                o_row = b.add(q_tile_base, row_rel)
+                ml_off = b.add(b.mul(o_row, hq), head_idx)
+                b.global_store(M_out, ml_off, ms_final[r], align=4)
+                b.global_store(L_out, ml_off, ls_final[r], align=4)
