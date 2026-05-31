@@ -26,7 +26,7 @@ namespace ck_dsl_provider {
 ///     the dtype (implicit -- M1 only handles FP16).
 ///
 /// The remaining 20 spec knobs (tile_*, warp_*, pipeline, epilogue,
-/// chiplet_*, etc.) keep their bake-off constexpr defaults from
+/// chiplet_*, etc.) keep their example constexpr defaults from
 /// ``ConvImplicitGemmSpec``. Autotuning is M2+ work.
 ///
 /// Validation (throws HipdnnPluginException on any failure -- callers

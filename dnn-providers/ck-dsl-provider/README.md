@@ -179,7 +179,7 @@ this plugin is the first embedder).
   round-trip, signature, cache, plan-builder, launch ABI, and
   perf-measurement helpers.
 - `ninja ck-dsl-provider-integration-check` — end-to-end conv-fwd at
-  the bake-off shape on a gfx950 device, comparing against
+  the example shape on a gfx950 device, comparing against
   `CpuFpReferenceConvolution::fprop` and logging kernel time +
   TFLOPS via the `PerfMeasurement` helper.
 

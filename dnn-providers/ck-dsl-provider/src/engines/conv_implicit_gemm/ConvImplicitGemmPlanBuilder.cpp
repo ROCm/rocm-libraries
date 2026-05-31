@@ -12,6 +12,7 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -21,6 +22,7 @@
 #include "../../adapters/conv_implicit_gemm/ConvImplicitGemmSpec.hpp"
 #include "../../graph/GraphSignature.hpp"
 #include "../../python/CompileServiceBridge.hpp"
+#include "../../runtime/DeviceArch.hpp"
 #include "ConvImplicitGemmPlan.hpp"
 
 namespace py = pybind11;
@@ -36,8 +38,9 @@ using TensorMap = ConvImplicitGemmAdapter::TensorMap;
 
 /// Pull the single ConvolutionFwdAttributes out of a one-node graph,
 /// or throw if the graph isn't shaped that way. Mirrors the
-/// miopen-provider pattern; throws are converted to a false return by
-/// the isApplicable caller.
+/// miopen-provider pattern. On the commit path (buildPlan) a failure
+/// here is exceptional; the applicability gate goes through the
+/// non-throwing tryBuildSpec below instead of catching this directly.
 const data_objects::ConvolutionFwdAttributes& getSingleConvFwdNode(
     const flatbuffer_utilities::IGraph& opGraph) {
     if (opGraph.nodeCount() != 1) {
@@ -57,25 +60,90 @@ const data_objects::ConvolutionFwdAttributes& getSingleConvFwdNode(
     return node.attributesAs<data_objects::ConvolutionFwdAttributes>();
 }
 
+/// Non-throwing structural + dtype + layout gate for ``isApplicable``.
+/// Returns the spec when the graph is a conv this provider can model, or
+/// ``std::nullopt`` (with ``reason`` set) when it is not -- a multi-node
+/// graph, a non-conv node, a non-FP16 / wrong-layout / wrong-rank tensor,
+/// etc. "Not for us" is the normal, expected answer to an applicability
+/// probe, so it is reported as a value rather than an exception: the
+/// adapter's throws are caught here, once, instead of at the call site.
+std::optional<ConvImplicitGemmSpec> tryBuildSpec(const flatbuffer_utilities::IGraph& opGraph,
+                                                 std::string& reason) {
+    try {
+        const auto& convAttr = getSingleConvFwdNode(opGraph);
+        return ConvImplicitGemmAdapter::buildSpec(convAttr, opGraph.getTensorMap());
+    } catch (const hipdnn_plugin_sdk::HipdnnPluginException& e) {
+        reason = e.what();
+        return std::nullopt;
+    }
+}
+
 }  // namespace
 
 ConvImplicitGemmPlanBuilder::ConvImplicitGemmPlanBuilder(CompileServiceBridge& bridge,
                                                          JitCache& cache)
     : _bridge(bridge), _cache(cache) {}
 
-bool ConvImplicitGemmPlanBuilder::isApplicable(const ::CkDslHandle& /*handle*/,
+bool ConvImplicitGemmPlanBuilder::isApplicable(const ::CkDslHandle& handle,
                                                const flatbuffer_utilities::IGraph& opGraph) const {
-    // Cheap structural check first so we don't pay for adapter
-    // validation on obviously-wrong graphs (multi-node, non-conv).
-    try {
-        const auto& convAttr = getSingleConvFwdNode(opGraph);
-        // Full adapter validation: dtype, dims, spatial size, etc.
-        // The adapter's reject paths cover everything M1 cares about.
-        (void)ConvImplicitGemmAdapter::buildSpec(convAttr, opGraph.getTensorMap());
-        return true;
-    } catch (const std::exception& e) {
+    // Structural + dtype + layout gate first: multi-node / non-conv /
+    // dtype / dims / layout rejects need neither a device nor the Python
+    // interpreter. "Not for us" is a normal verdict, returned as nullopt
+    // -- no exception drives this path.
+    std::string reason;
+    std::optional<ConvImplicitGemmSpec> spec = tryBuildSpec(opGraph, reason);
+    if (!spec.has_value()) {
         HIPDNN_PLUGIN_LOG_INFO(
-            "ConvImplicitGemmPlanBuilder::isApplicable rejected graph: " << e.what());
+            "ConvImplicitGemmPlanBuilder::isApplicable rejected graph: " << reason);
+        return false;
+    }
+
+    // Arch + DSL-validity gate. A spec valid on gfx950 can be invalid on
+    // another arch (a wave32 target rejects the wave64 MFMA path; an atom
+    // present on gfx950 may be absent on gfx942), so validate against the
+    // device arch via the DSL's is_valid_spec -- the SAME predicate
+    // build_implicit_gemm_conv enforces at compile time -- so isApplicable
+    // can never report a spec buildPlan would then reject.
+    //
+    // Unlike the structural gate, these steps touch the device and the
+    // embedded interpreter, which fail only in genuinely exceptional ways
+    // (a GPU present but unreadable, or a Python/bridge fault). This gate
+    // must answer only true/false and never propagate, so the backstop
+    // below converts any such fault into a logged decline.
+    try {
+        std::optional<std::string> arch = detectDeviceArch(handle.getStream());
+        if (!arch.has_value()) {
+            // No visible device: the kernel cannot run here, so we decline
+            // rather than claim a graph we never validated against a real arch.
+            HIPDNN_PLUGIN_LOG_INFO(
+                "ConvImplicitGemmPlanBuilder::isApplicable declining: no HIP device is visible");
+            return false;
+        }
+        // arch is an orthogonal compile target, passed alongside the
+        // spec payload (mirroring the DSL) rather than baked into it.
+        py::gil_scoped_acquire gil;
+        py::dict payload = convImplicitGemmSpecToPayload(*spec);
+        std::pair<bool, std::string> verdict = _bridge.isApplicable(opKind(), payload, *arch);
+        if (!verdict.first) {
+            HIPDNN_PLUGIN_LOG_INFO(
+                "ConvImplicitGemmPlanBuilder::isApplicable rejected graph for arch "
+                << *arch << ": " << verdict.second);
+        }
+        return verdict.first;
+    } catch (const DeviceArchDetectionError& e) {
+        // A device is present but its arch can't be read -- an environment
+        // fault. Surface it loudly; we still decline (fail closed).
+        HIPDNN_PLUGIN_LOG_ERROR(
+            "ConvImplicitGemmPlanBuilder::isApplicable could not determine the device "
+            "architecture; declining: "
+            << e.what());
+        return false;
+    } catch (const std::exception& e) {
+        // Unexpected bridge / interpreter fault. Honor the never-throw
+        // contract: log and decline.
+        HIPDNN_PLUGIN_LOG_ERROR(
+            "ConvImplicitGemmPlanBuilder::isApplicable declining after an unexpected error: "
+            << e.what());
         return false;
     }
 }
@@ -98,7 +166,7 @@ void ConvImplicitGemmPlanBuilder::initializeExecutionSettings(
 }
 
 void ConvImplicitGemmPlanBuilder::buildPlan(
-    const ::CkDslHandle& /*handle*/, const flatbuffer_utilities::IGraph& opGraph,
+    const ::CkDslHandle& handle, const flatbuffer_utilities::IGraph& opGraph,
     const flatbuffer_utilities::IEngineConfig& /*engineConfig*/,
     CkDslContext& executionContext) const {
     const auto& convAttr = getSingleConvFwdNode(opGraph);
@@ -111,12 +179,28 @@ void ConvImplicitGemmPlanBuilder::buildPlan(
     // spec on the compile path.
     ConvImplicitGemmSpec spec = ConvImplicitGemmAdapter::buildSpec(convAttr, tensorMap);
 
-    SignatureHash key = GraphSignature::computeForSpec(opKind(), spec);
+    // arch is an orthogonal compile target (not a spec field, mirroring
+    // the DSL), threaded separately into the cache key (different arches
+    // must not alias), the loader, and the bridge. Detection is
+    // mandatory: a plan exists only to launch a kernel on a real device,
+    // so we never guess a default (that would silently miscompile for
+    // the wrong target). detectDeviceArch already throws when a device
+    // is present but its arch can't be read; the check below covers the
+    // remaining case of no visible device.
+    std::optional<std::string> detectedArch = detectDeviceArch(handle.getStream());
+    if (!detectedArch.has_value()) {
+        throw DeviceArchDetectionError(
+            "ConvImplicitGemmPlanBuilder::buildPlan: no HIP device is visible, so the target "
+            "architecture cannot be determined; a GPU is required to build a plan");
+    }
+    const std::string arch = *detectedArch;
 
-    auto loader = [spec, this]() -> KernelArtifact {
+    SignatureHash key = GraphSignature::computeForSpec(opKind(), spec, arch);
+
+    auto loader = [spec, arch, this]() -> KernelArtifact {
         py::gil_scoped_acquire gil;
         py::dict payload = convImplicitGemmSpecToPayload(spec);
-        return _bridge.compile(opKind(), payload);
+        return _bridge.compile(opKind(), payload, arch);
     };
 
     std::shared_ptr<HipModule> module = _cache.getOrLoad(key, loader);
@@ -127,7 +211,7 @@ void ConvImplicitGemmPlanBuilder::buildPlan(
     //   X (NHWC fp16): N * Hi * Wi * C * 2
     //   W (KRSC fp16): K * R  * S  * C * 2
     //   Y (NHWK fp16): N * Ho * Wo * K * 2
-    // The kernel's signature is i32 for these; the bake-off shape
+    // The kernel's signature is i32 for these; the example shape
     // produces values well under 2^31 (~3.2 MB for X/Y, ~73 KB for W).
     // Only FP16 is supported today, so the byte multiplier is fixed;
     // when the adapter starts surfacing a dtype this will become a
