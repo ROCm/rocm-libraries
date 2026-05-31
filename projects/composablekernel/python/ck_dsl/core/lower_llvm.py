@@ -3569,7 +3569,7 @@ def _llvm_type_from_name(name: str) -> str:
         inner = name[4:-1]
         elem, _, count = inner.partition("x")
         count = int(count)
-        elem_map = {"f32": "float", "f16": "half", "i32": "i32"}
+        elem_map = {"f32": "float", "f16": "half", "bf16": "bfloat", "i32": "i32"}
         return f"<{count} x {elem_map[elem]}>"
     raise NotImplementedError(f"no LLVM type for {name!r}")
 
