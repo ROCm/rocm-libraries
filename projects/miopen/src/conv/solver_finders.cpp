@@ -1,34 +1,12 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2023 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <miopen/conv/solver_finders.hpp>
 
 #include <miopen/conv_algo_name.hpp>
 #include <miopen/config.h>
 #include <miopen/env.hpp>
+#include <miopen/kernel_tuning_mode.hpp>
 #include <miopen/mlo_internal.hpp>
 #include <miopen/perf_field.hpp>
 #include <miopen/conv/problem_description.hpp>
@@ -286,6 +264,29 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
 
         try
         {
+            // Log solution name for grouped kernel logging
+            const auto solver_id_obj = solver::Id{sol.solver_id};
+
+            if(IsLoggingKernel())
+            {
+                LogSolutionName(sol.solver_id, solver_id_obj.Value(), sol.workspace_sz);
+
+                // Extract kernel name from first kernel in solution (if available)
+                std::string kernel_name;
+                if(!sol.construction_params.empty() &&
+                   !sol.construction_params[0].kernel_name.empty())
+                {
+                    kernel_name = sol.construction_params[0].kernel_name;
+                }
+                else
+                {
+                    kernel_name = sol.solver_id; // Fallback to solver name
+                }
+
+                // Log performance config before timing runs. We don't have config descriptor so
+                // leave it blank.
+                AddPerformanceConfig(kernel_name, "");
+            }
             // Run invoker max 8 times, with ~5 sec time limit.
             using elapsed_t                 = decltype(handle.GetKernelTime());
             constexpr elapsed_t TIME_MS_MAX = 5000.0;
@@ -322,6 +323,11 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
 
             if(samples.size() > 0)
             {
+                if(IsLoggingKernel())
+                {
+                    // Update the performance config with the collected samples
+                    AddInvokerTimes(samples);
+                }
                 // Remove outliers that are more than 2 positive modified z-score's away, and get
                 // the mean.
                 elapsed = miopen::removeHighOutliersAndGetMean(samples, 2.0f);

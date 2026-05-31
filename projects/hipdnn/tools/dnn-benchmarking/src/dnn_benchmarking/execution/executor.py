@@ -78,6 +78,7 @@ class Executor:
         self._graph: Any = None
         self._workspace: Any = None
         self._workspace_ptr: int = 0
+        self._workspace_size: int = 0
         self._init_time_ms: float = 0.0
 
     def _build_through_operation_graph(
@@ -220,6 +221,7 @@ class Executor:
                 raise ExecutionError(f"Failed to build plans: {result.get_message()}")
 
             workspace_size = self._graph.get_workspace_size()
+            self._workspace_size = int(workspace_size)
             if workspace_size > 0:
                 self._workspace = hipdnn.DeviceBuffer(workspace_size)
                 self._workspace_ptr = self._workspace.ptr()
@@ -334,6 +336,16 @@ class Executor:
     def init_time_ms(self) -> float:
         """Get graph initialization time in milliseconds."""
         return self._init_time_ms
+
+    @property
+    def workspace_size(self) -> int:
+        """Bytes hipDNN reserved for the operation graph workspace.
+
+        Zero before :meth:`prepare` runs. Surfaced so the suite runner
+        can record it as an always-on metric without re-querying the
+        graph object.
+        """
+        return self._workspace_size
 
     @property
     def graph(self) -> Any:

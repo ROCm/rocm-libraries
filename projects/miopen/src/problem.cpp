@@ -1055,7 +1055,7 @@ void FusedProblem::AddProblemToPlan(FusionPlanDescriptor& plan, const Problem& p
 
 fusion::FusionInvokeParams FusedProblem::MakeInvokeParams(
     const std::function<Data_t(miopenTensorArgumentId_t, const TensorDescriptor&)>& buffer_getter,
-    const std::function<FindOptions::Workspace(void)>& workspace_getter,
+    const std::function<FindOptions::Workspace()>& workspace_getter,
     OperatorArgs& operator_args) const
 {
     auto buffers   = std::unordered_map<miopenTensorArgumentId_t, Data_t>{};

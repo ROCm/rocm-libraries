@@ -18,7 +18,8 @@ import pytest
 import numpy as np
 
 from gpu_test_helpers import (
-    HAS_HIP,
+    HAS_GFX950,
+    GFX_TARGET,
     TileConfig,
     BPE, WAVESIZE, NUM_THREADS,
     create_writer,
@@ -67,7 +68,19 @@ def fill_mma_tile_buffer(tileInfo, mt, du, stride):
     mma_k = tileInfo.mmaTileShape[1]
     nK = int(tileInfo.globalMMATileGrid[1])
 
-    buf = np.zeros(mt * stride, dtype=np.float16)
+    # Some GR shapes over-fetch a partial final subtile group. Keep that
+    # region zero-filled so the raw-buffer test does not read allocator data.
+    padded_mt = max(
+        mt,
+        int(
+            math.ceil(int(tileInfo.localSubtileGrid[0]) / tileInfo.loadRatioGR)
+            * tileInfo.loadRatioGR
+            * tileInfo.subtileShape[0]
+            * mma_m
+        ),
+    )
+
+    buf = np.zeros(padded_mt * stride, dtype=np.float16)
     for m in range(mt):
         for k in range(du):
             mma_r = m // mma_m
@@ -306,7 +319,7 @@ def verify_gr_output(output_bytes, ti, kernel, dest_vgprs, mt, stride, debug=Fal
 # Pytest tests
 # ---------------------------------------------------------------------------
 
-@pytest.mark.skipif(not HAS_HIP, reason="HIP Python bindings not available")
+@pytest.mark.skipif(not HAS_GFX950, reason=f"GPU tests require gfx950, found {GFX_TARGET}")
 class TestGrOffset:
 
     @pytest.fixture(params=CONFIGS, ids=lambda c: c.label)
@@ -340,10 +353,6 @@ if __name__ == "__main__":
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--config", type=int, default=None, help="Config index")
     args = parser.parse_args()
-
-    if not HAS_HIP:
-        print("HIP not available")
-        sys.exit(1)
 
     config_list = CONFIGS if args.config is None else [CONFIGS[args.config]]
 
