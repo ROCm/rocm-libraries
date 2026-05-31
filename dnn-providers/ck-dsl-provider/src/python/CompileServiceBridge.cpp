@@ -239,19 +239,20 @@ KernelArtifact dictToArtifact(const py::dict& resultDict, const char* contextTag
 
 }  // namespace
 
-KernelArtifact CompileServiceBridge::compileSmoke() {
+KernelArtifact CompileServiceBridge::compileSmoke(std::string_view arch) {
     try {
         py::gil_scoped_acquire gil;
-        py::object result = _module.attr("compile_smoke")();
+        py::str archStr(arch.data(), arch.size());
+        py::object result = _module.attr("compile_smoke")(archStr);
         KernelArtifact artifact =
             dictToArtifact(result.cast<py::dict>(), "CompileServiceBridge::compileSmoke");
 
-        HIPDNN_PLUGIN_LOG_INFO("CompileServiceBridge::compileSmoke produced kernel='"
-                               << artifact.kernelName << "' kind='" << artifact.kind
-                               << "' hsaco_bytes=" << artifact.hsaco.size() << " grid=("
-                               << artifact.grid.x << "," << artifact.grid.y << ","
-                               << artifact.grid.z << ") block=(" << artifact.block.x << ","
-                               << artifact.block.y << "," << artifact.block.z << ")");
+        HIPDNN_PLUGIN_LOG_INFO(
+            "CompileServiceBridge::compileSmoke arch='"
+            << std::string(arch) << "' kernel='" << artifact.kernelName << "' kind='"
+            << artifact.kind << "' hsaco_bytes=" << artifact.hsaco.size() << " grid=("
+            << artifact.grid.x << "," << artifact.grid.y << "," << artifact.grid.z << ") block=("
+            << artifact.block.x << "," << artifact.block.y << "," << artifact.block.z << ")");
 
         return artifact;
     } catch (const py::error_already_set& error) {

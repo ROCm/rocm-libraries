@@ -55,17 +55,19 @@ class CompileServiceBridge {
     /// any Python error into a HipdnnPluginException.
     pybind11::dict noopSmoke();
 
-    /// Invoke ck_dsl_provider.compile_service.compile_smoke() and
+    /// Invoke ck_dsl_provider.compile_service.compile_smoke(arch) and
     /// translate the returned dict into a KernelArtifact ready to hand
     /// to HipModule. Acquires the GIL internally; any
     /// py::error_already_set is translated via PythonError::raise.
     ///
-    /// The smoke artifact is a gfx950 elementwise-copy HSACO (see
-    /// the Python side's compile_smoke docstring) -- enough to prove
-    /// the round-trip from compile-service to hipModuleLaunchKernel
-    /// without depending on any per-op adapter logic. Production
-    /// compiles go through :func:`compile`.
-    KernelArtifact compileSmoke();
+    /// The smoke artifact is an elementwise-copy HSACO built for
+    /// ``arch`` (the target gfx token, e.g. ``"gfx950"``), threaded to
+    /// the Python ``compile_smoke`` exactly as ``compile`` threads its
+    /// ``arch`` argument -- enough to prove the round-trip from
+    /// compile-service to hipModuleLaunchKernel without depending on
+    /// any per-op adapter logic. Production compiles go through
+    /// :func:`compile`.
+    KernelArtifact compileSmoke(std::string_view arch);
 
     /// Production compile entry point. Invokes
     /// ck_dsl_provider.compile_service.compile(op_kind, payload, arch),
