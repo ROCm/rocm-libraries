@@ -236,7 +236,8 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, CK_MIN_BLOCK_PER_CU)
 
     const IndexType num_blocks_per_batch =
         __builtin_amdgcn_readfirstlane(get_grid_size() / batch_count);
-    const IndexType g_idx = __builtin_amdgcn_readfirstlane(get_block_1d_id() / num_blocks_per_batch);
+    const IndexType g_idx =
+        __builtin_amdgcn_readfirstlane(get_block_1d_id() / num_blocks_per_batch);
 
     InDataTypePointerTuple p_in_global_with_offset_tuple;
     OutDataTypePointerTuple p_out_global_with_offset_tuple;
@@ -325,18 +326,18 @@ struct GridwiseElementwise
         const auto in_global_buf_tuple = generate_tuple(
             [&](auto I) {
                 return make_dynamic_buffer<AddressSpaceEnum::Global,
-                                              AmdBufferCoherenceEnum::DefaultCoherence,
-                                              IndexType>(
-                    p_in_global_tuple[I], in_grid_desc_tuple[I].GetElementSpaceSize());
+                                           AmdBufferCoherenceEnum::DefaultCoherence,
+                                           IndexType>(p_in_global_tuple[I],
+                                                      in_grid_desc_tuple[I].GetElementSpaceSize());
             },
             Number<NumInput>{});
 
         auto out_global_buf_tuple = generate_tuple(
             [&](auto I) {
                 return make_dynamic_buffer<AddressSpaceEnum::Global,
-                                              AmdBufferCoherenceEnum::DefaultCoherence,
-                                              IndexType>(
-                    p_out_global_tuple[I], out_grid_desc_tuple[I].GetElementSpaceSize());
+                                           AmdBufferCoherenceEnum::DefaultCoherence,
+                                           IndexType>(p_out_global_tuple[I],
+                                                      out_grid_desc_tuple[I].GetElementSpaceSize());
             },
             Number<NumOutput>{});
 
@@ -392,12 +393,13 @@ struct GridwiseElementwise
             uniform_sequence_gen_t<NumInput, 1>,
             uniform_sequence_gen_t<NumOutput, 1>,
             uniform_sequence_gen_t<NumInput, false>,
-            uniform_sequence_gen_t<NumOutput, false>, 1, 
+            uniform_sequence_gen_t<NumOutput, false>,
+            1,
             IndexType>{in_grid_desc_tuple,
-                                                      input_thread_grid_offset,
-                                                      out_grid_desc_tuple,
-                                                      output_thread_grid_offset,
-                                                      elementwise_op};
+                       input_thread_grid_offset,
+                       out_grid_desc_tuple,
+                       output_thread_grid_offset,
+                       elementwise_op};
         global_to_global_transfer.Run(
             in_grid_desc_tuple, in_global_buf_tuple, out_grid_desc_tuple, out_global_buf_tuple, I0);
     }

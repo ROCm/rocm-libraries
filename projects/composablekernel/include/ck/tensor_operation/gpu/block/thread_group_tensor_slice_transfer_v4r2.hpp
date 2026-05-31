@@ -41,7 +41,7 @@ template <typename ThreadGroup,
           typename ThreadTransferSrcsResetCoordinateAfterRun, // Sequence
           typename ThreadTransferDstsResetCoordinateAfterRun, // Sequence
           index_t NumThreadScratch = 1,
-          typename IndexType = index_t>
+          typename IndexType       = index_t>
 struct ThreadGroupTensorSliceTransfer_v4r2
 {
     static constexpr index_t nDim =

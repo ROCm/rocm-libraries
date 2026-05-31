@@ -529,7 +529,8 @@ struct DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle
                             Sequence<CBlockTransferScalarPerVector_NWaveNPerXdl>,
                             Sequence<CBlockTransferScalarPerVector_NWaveNPerXdl>,
                             I1,
-                            I1, IndexType>;
+                            I1,
+                            IndexType>;
     // NPerBlock is used for the first dim which is store dimension
     // (with CBlockTransferScalarPerVector_NWaveNPerXdl scalar per vector).
     // CBlockTransferScalarPerVector_NWaveNPerXdl is aligned to NPerBlock so
@@ -734,8 +735,9 @@ struct DeviceGroupedConvBwdWeightTwoStage_Xdl_CShuffle
 
                 // Ensure that k_batch_ does not exceed the maximum value
                 // for the GEMM pipeline.
-                const auto k_batch_max = static_cast<index_t>(math::integer_divide_ceil(gemmK, KPerBlock));
-                k_batch_               = std::max(std::min(k_batch_, k_batch_max), 1);
+                const auto k_batch_max =
+                    static_cast<index_t>(math::integer_divide_ceil(gemmK, KPerBlock));
+                k_batch_ = std::max(std::min(k_batch_, k_batch_max), 1);
 
                 if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
                 {
