@@ -227,6 +227,7 @@ TEST(TestConvBwdParams, ThrowsOnInvalidDilationVectorSize)
 
 TEST_F(TestGpuConvBwdPlan, CreatesPlanWithValidGraph)
 {
+    SKIP_IF_ASAN(); // MIOpen Bwd plan creation can hang under ASAN on gfx942 (xnack+)
     // Create a valid convolution graph
     auto builder = hipdnn_test_sdk::utilities::createValidConvBwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(

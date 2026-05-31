@@ -6,6 +6,7 @@
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
@@ -81,10 +82,35 @@ protected:
             }
         }
 
+#ifdef ADDRESS_SANITIZER
+        try
+        {
+            plan.execute(*_handle,
+                         deviceBuffers.data(),
+                         static_cast<uint32_t>(deviceBuffers.size()),
+                         workspace.get());
+        }
+        catch(const std::exception& e)
+        {
+            const auto hsaXnack = hipdnn_data_sdk::utilities::getEnv("HSA_XNACK");
+            const auto tensileLibPath
+                = hipdnn_data_sdk::utilities::getEnv("ROCBLAS_TENSILE_LIBPATH");
+
+            FAIL() << "Plan execution failed under ASAN: " << e.what()
+                   << "\nThis may be caused by TensileLibrary.dat not being "
+                      "loadable. ASAN builds install Tensile libraries to "
+                      "gfx<arch>-xnack+/ but the GPU reports xnack- unless "
+                      "HSA_XNACK=1 is set. Current env var values::"
+                   << "\n  HSA_XNACK=" << (hsaXnack.empty() ? "<not set>" : hsaXnack)
+                   << "\n  ROCBLAS_TENSILE_LIBPATH="
+                   << (tensileLibPath.empty() ? "<not set>" : tensileLibPath);
+        }
+#else
         EXPECT_NO_THROW(plan.execute(*_handle,
                                      deviceBuffers.data(),
                                      static_cast<uint32_t>(deviceBuffers.size()),
                                      workspace.get()));
+#endif
     }
 
     std::unique_ptr<HipdnnMiopenHandle> _handle;
@@ -376,6 +402,7 @@ TEST_F(TestGpuMiopenConvPlanBuilder, ActualWorkspaceSizeIsWithinRangeWrw)
 
 TEST_P(TestGpuMiopenConvPlanBuilderShapes, WorkspaceRangeIsConsistentAndExecutableFwd)
 {
+    SKIP_IF_ASAN(); // CK/MIOpen Fwd convolution hangs under ASAN on gfx942 (xnack+)
     const auto& tc = GetParam();
     auto xStrides = hipdnn_data_sdk::utilities::generateStrides(tc.xDims);
     auto wStrides = hipdnn_data_sdk::utilities::generateStrides(tc.wDims);
