@@ -31,7 +31,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
-from ...core.ir import F32, I32, IRBuilder, KernelDef, PtrType, Value
+from ...core.ir import F32, I32, I64, IRBuilder, KernelDef, PtrType, Value
 from ...helpers.atoms import make_c_warp_dstr_encoding, mfma_atom
 from ...helpers.distribution import (
     make_static_distributed_tensor,
@@ -670,6 +670,7 @@ class FusedGateUpSiluGemmSpec:
     wave_size: int = 64
     block_size: int = 0
     dtype: str = "fp16"
+    grouped: bool = False
 
     def __post_init__(self) -> None:
         if self.block_size == 0:
@@ -700,7 +701,10 @@ class FusedGateUpSiluGemmSpec:
         )
 
     def kernel_name(self) -> str:
-        return self.to_universal_spec().kernel_name() + "_gate_up_silu"
+        suffix = "_gate_up_silu"
+        if self.grouped:
+            suffix += "_grouped"
+        return self.to_universal_spec().kernel_name() + suffix
 
 
 def build_moe_gate_up_silu_gemm(
@@ -750,6 +754,15 @@ def build_moe_gate_up_silu_gemm(
     stride_a = b.param("stride_a", I32)
     stride_b = b.param("stride_b", I32)
     stride_c = b.param("stride_c", I32)
+    grouped = bool(getattr(spec, "grouped", False))
+    if grouped:
+        block_expert_ids = b.param(
+            "BlockExpertIds",
+            PtrType(I32, "global"),
+            noalias=True,
+            readonly=True,
+            align=4,
+        )
 
     t = spec.tile
     _, _, c_per_lane = _mfma_atom_widths(u)
@@ -762,6 +775,7 @@ def build_moe_gate_up_silu_gemm(
     c_warps_n = b.const_i32(t.warp_n)
     c_block_m = b.const_i32(block_m)
     c_block_n = b.const_i32(block_n)
+    c0 = b.const_i32(0)
 
     tid = b.thread_id_x()
     warp_id = b.div(tid, c_wave)
@@ -769,12 +783,31 @@ def build_moe_gate_up_silu_gemm(
     warp_n_idx = b.mod(warp_id, c_warps_n)
     lane = b.mod(tid, c_wave)
 
-    batch_idx = b.block_id_z()
-    batch_off_a = b.mul(batch_idx, stride_a)
-    batch_off_b = b.mul(batch_idx, stride_b)
-    batch_off_c = b.mul(batch_idx, stride_c)
-
-    block_m_off = b.mul(b.block_id_y(), c_block_m)
+    if grouped:
+        # Flat M-block grid: block_id_y -> packed sorted-token block; the
+        # expert (gate / up B slabs) is looked up per block, A / Hidden
+        # are dense. The per-expert B base ``expert * stride_b`` overflows
+        # i32 for large weights, so fold it into each B base pointer as a
+        # 64-bit byte offset (global_ptr_add) and keep in-window batch
+        # offsets at 0.
+        m_block_idx = b.block_id_y()
+        expert_idx = b.global_load_i32(block_expert_ids, m_block_idx)
+        elem_bytes_b = b.const_i64(2)  # f16 / bf16
+        b_base_bytes = b.mul(
+            b.mul(b.sext(expert_idx, I64), b.sext(stride_b, I64)), elem_bytes_b
+        )
+        WGate = b.global_ptr_add(WGate, b_base_bytes)
+        WUp = b.global_ptr_add(WUp, b_base_bytes)
+        batch_off_a = c0
+        batch_off_b = c0
+        batch_off_c = c0
+        block_m_off = b.mul(m_block_idx, c_block_m)
+    else:
+        batch_idx = b.block_id_z()
+        batch_off_a = b.mul(batch_idx, stride_a)
+        batch_off_b = b.mul(batch_idx, stride_b)
+        batch_off_c = b.mul(batch_idx, stride_c)
+        block_m_off = b.mul(b.block_id_y(), c_block_m)
     block_n_off = b.mul(b.block_id_x(), c_block_n)
 
     A_smem = b.smem_alloc(storage_dtype, [block_m, block_k], name_hint="A_smem")
@@ -831,38 +864,47 @@ def build_moe_gate_up_silu_gemm(
     ]
     a_mn_origin = (batch_off_a, block_m_off)
     b_mn_origin = (batch_off_b, block_n_off)
-    gate_res, up_res = _emit_moe_prefetch_kloop(
-        plan,
-        a_view,
-        a_lds_view,
-        A_smem,
-        a_mn_origin,
-        operands,
-        b_mn_origin,
-        [gate_accs, up_accs],
-        K,
-        warp_m_idx,
-        warp_n_idx,
-        lane,
-        sched_groups=2 * mfmas_m * mfmas_n,
-    )
 
-    _emit_gate_up_silu_epilogue_default(
-        b,
-        u,
-        gate_res,
-        up_res,
-        warp_m_idx,
-        warp_n_idx,
-        lane,
-        block_m_off,
-        block_n_off,
-        M,
-        N,
-        Hidden,
-        c_per_lane,
-        batch_off_c=batch_off_c,
-    )
+    def _emit_gate_up_compute() -> None:
+        gate_res, up_res = _emit_moe_prefetch_kloop(
+            plan,
+            a_view,
+            a_lds_view,
+            A_smem,
+            a_mn_origin,
+            operands,
+            b_mn_origin,
+            [gate_accs, up_accs],
+            K,
+            warp_m_idx,
+            warp_n_idx,
+            lane,
+            sched_groups=2 * mfmas_m * mfmas_n,
+        )
+
+        _emit_gate_up_silu_epilogue_default(
+            b,
+            u,
+            gate_res,
+            up_res,
+            warp_m_idx,
+            warp_n_idx,
+            lane,
+            block_m_off,
+            block_n_off,
+            M,
+            N,
+            Hidden,
+            c_per_lane,
+            batch_off_c=batch_off_c,
+        )
+
+    if grouped:
+        # Empty tail block (BlockExpertIds == -1) skips all work.
+        with b.scf_if(b.cmp_ge(expert_idx, c0)):
+            _emit_gate_up_compute()
+    else:
+        _emit_gate_up_compute()
 
     return b.kernel
 
@@ -978,7 +1020,7 @@ def moe_gate_up_silu_gemm_signature(spec: FusedGateUpSiluGemmSpec):
     from ...helpers.spec import SignatureBuilder
 
     dt = spec.dtype if spec.dtype in ("f16", "fp16", "bf16") else "f16"
-    return (
+    sig = (
         SignatureBuilder()
         .ptr("A", dt)
         .ptr("WGate", dt)
@@ -990,8 +1032,10 @@ def moe_gate_up_silu_gemm_signature(spec: FusedGateUpSiluGemmSpec):
         .scalar("stride_a", "i32")
         .scalar("stride_b", "i32")
         .scalar("stride_c", "i32")
-        .build()
     )
+    if getattr(spec, "grouped", False):
+        sig = sig.ptr("BlockExpertIds", "i32")
+    return sig.build()
 
 
 def moe_gate_up_silu_gemm_grid(
@@ -1002,6 +1046,22 @@ def moe_gate_up_silu_gemm_grid(
         (n + t.tile_n - 1) // t.tile_n,
         (m + t.tile_m - 1) // t.tile_m,
         batch,
+    )
+
+
+def moe_gate_up_silu_gemm_grouped_grid(
+    num_m_blocks: int, n: int, spec: FusedGateUpSiluGemmSpec
+) -> Tuple[int, int, int]:
+    """Flat M-block grid for the grouped dual-B gate+up+silu dispatch.
+
+    ``n`` is the intermediate size ``I`` (GEMM N = ``I`` per gate/up
+    accumulator). Grid is ``(ceil(n / tile_n), num_m_blocks, 1)``.
+    """
+    t = spec.tile
+    return (
+        (n + t.tile_n - 1) // t.tile_n,
+        num_m_blocks,
+        1,
     )
 
 
@@ -1021,6 +1081,25 @@ class FusedInterleavedGateUpSiluGemmSpec:
     real "cross the activation barrier" optimization: same single-B
     MFMA schedule as the fast packed path, no GateUpPacked HBM
     intermediate, no separate silu kernel.
+
+    Grouped sorted-token dispatch (``grouped=True``)
+    -----------------------------------------------
+    The default (batched) dispatch maps ``block_id_z`` to the expert and
+    pads every expert's GEMM slot to a uniform ``MAX_PADDED_M`` so the
+    grid is ``(N_tiles, MAX_PADDED_M/tile_m, E)``. For sparse routing
+    (E >> routed-tokens-per-expert) that wastes ``MAX_PADDED_M -
+    count[e]`` rows of MFMA work per expert.
+
+    With ``grouped=True`` the kernel instead processes the *packed*
+    sorted-token layout (CK Tile ``fused_moegemm`` structure): the grid
+    is flat over M-blocks ``(N_tiles, num_m_blocks, 1)`` where
+    ``num_m_blocks = sum_e ceil(count[e]/tile_m)``. Each M-block reads
+    its expert from ``BlockExpertIds[block_id_y]`` (which selects the B
+    weight slab ``e * stride_b``) and addresses ``A`` / ``Hidden``
+    densely at ``block_id_y * tile_m``. Total GEMM rows collapse from
+    ``E * MAX_PADDED_M`` to ``num_m_blocks * tile_m`` (~total routed
+    tokens rounded to ``tile_m``). An empty tail block carries
+    ``BlockExpertIds == -1`` and skips all work (active-tile gate).
     """
 
     name: str
@@ -1029,6 +1108,7 @@ class FusedInterleavedGateUpSiluGemmSpec:
     wave_size: int = 64
     block_size: int = 0
     dtype: str = "fp16"
+    grouped: bool = False
 
     def __post_init__(self) -> None:
         if self.block_size == 0:
@@ -1055,7 +1135,10 @@ class FusedInterleavedGateUpSiluGemmSpec:
         )
 
     def kernel_name(self) -> str:
-        return self.to_universal_spec().kernel_name() + "_interleaved_gate_up_silu"
+        suffix = "_interleaved_gate_up_silu"
+        if self.grouped:
+            suffix += "_grouped"
+        return self.to_universal_spec().kernel_name() + suffix
 
 
 def build_moe_interleaved_gate_up_silu_gemm(
@@ -1102,7 +1185,21 @@ def build_moe_interleaved_gate_up_silu_gemm(
     stride_a = b.param("stride_a", I32)
     stride_b = b.param("stride_b", I32)  # per expert = 2*N*K
     stride_c = b.param("stride_c", I32)  # per expert = M*N
-    if u.trait.active_tile_skip:
+    grouped = bool(getattr(spec, "grouped", False))
+    if grouped:
+        # Grouped sorted-token dispatch. ``BlockExpertIds[block_id_y]``
+        # gives the expert that owns this packed M-block (or -1 for an
+        # empty tail block). The B weight slab is ``expert * stride_b``;
+        # ``A`` / ``Hidden`` are addressed densely at ``block_id_y *
+        # tile_m`` (no per-expert padding).
+        block_expert_ids = b.param(
+            "BlockExpertIds",
+            PtrType(I32, "global"),
+            noalias=True,
+            readonly=True,
+            align=4,
+        )
+    if u.trait.active_tile_skip and not grouped:
         # MoE active-tile gate. ``SortedTokenIds`` carries the
         # bucket -> token-id map produced by ``moe_sorting``; -1
         # marks an inactive padded row. ``slot_size`` is the
@@ -1137,11 +1234,32 @@ def build_moe_interleaved_gate_up_silu_gemm(
     warp_n_idx = b.mod(warp_id, c_warps_n)
     lane = b.mod(tid, c_wave)
 
-    batch_idx = b.block_id_z()
-    batch_off_a = b.mul(batch_idx, stride_a)
-    batch_off_b = b.mul(batch_idx, stride_b)
-    batch_off_c = b.mul(batch_idx, stride_c)
-    block_m_off = b.mul(b.block_id_y(), c_block_m)
+    if grouped:
+        # Flat M-block grid: block_id_y indexes the packed sorted-token
+        # blocks; the expert (B slab) is looked up per block, A/C are
+        # dense. block_id_z is unused (grid z = 1).
+        m_block_idx = b.block_id_y()
+        expert_idx = b.global_load_i32(block_expert_ids, m_block_idx)
+        batch_off_a = c0  # A is the dense packed buffer (no per-expert stride)
+        # The per-expert B base ``expert * stride_b`` overflows i32 for
+        # large weights (e.g. datacenter 2*I*H = 1.3e8 elements * 31
+        # experts > 2^31). Fold it into the B base pointer as a 64-bit
+        # BYTE offset (global_ptr_add zero/sign-extends to i64) and keep
+        # the in-window batch offset at 0.
+        elem_bytes_b = b.const_i64(2)  # f16 / bf16
+        stride_b_i64 = b.sext(stride_b, I64)
+        expert_i64 = b.sext(expert_idx, I64)
+        b_base_bytes = b.mul(b.mul(expert_i64, stride_b_i64), elem_bytes_b)
+        WGateUp = b.global_ptr_add(WGateUp, b_base_bytes)
+        batch_off_b = c0
+        batch_off_c = c0  # Hidden is dense packed
+        block_m_off = b.mul(m_block_idx, c_block_m)
+    else:
+        batch_idx = b.block_id_z()
+        batch_off_a = b.mul(batch_idx, stride_a)
+        batch_off_b = b.mul(batch_idx, stride_b)
+        batch_off_c = b.mul(batch_idx, stride_c)
+        block_m_off = b.mul(b.block_id_y(), c_block_m)
     block_n_off = b.mul(b.block_id_x(), c_block_n)
 
     A_smem = b.smem_alloc(storage_dtype, [block_m, block_k], name_hint="A_smem")
@@ -1222,7 +1340,10 @@ def build_moe_interleaved_gate_up_silu_gemm(
     # ``block_m_off == block_id_y * tile_m`` here, but the form
     # mirrors the universal kernel's gate.
     do_work_cond: Optional[Value] = None
-    if u.trait.active_tile_skip:
+    if grouped:
+        # Empty tail block sentinel: BlockExpertIds == -1 -> skip.
+        do_work_cond = b.cmp_ge(expert_idx, c0)
+    elif u.trait.active_tile_skip:
         bucket_head = b.add(b.mul(b.block_id_z(), slot_size_p), block_m_off)
         first_token = b.global_load_i32(sorted_token_ids, bucket_head)
         do_work_cond = b.cmp_ge(first_token, c0)
@@ -1424,9 +1545,28 @@ def moe_interleaved_gate_up_silu_gemm_signature(
         .scalar("stride_b", "i32")
         .scalar("stride_c", "i32")
     )
-    if spec.trait.active_tile_skip:
+    if getattr(spec, "grouped", False):
+        sig = sig.ptr("BlockExpertIds", "i32")
+    elif spec.trait.active_tile_skip:
         sig = sig.ptr("SortedTokenIds", "i32").scalar("slot_size", "i32")
     return sig.build()
+
+
+def moe_interleaved_gate_up_silu_gemm_grouped_grid(
+    num_m_blocks: int, n: int, spec: FusedInterleavedGateUpSiluGemmSpec
+) -> Tuple[int, int, int]:
+    """Flat M-block grid for the grouped sorted-token dispatch.
+
+    ``num_m_blocks`` = ``sum_e ceil(count[e]/tile_m)`` (plus any padding
+    to a fixed bound for graph capture). Grid is
+    ``(ceil(2*n / tile_n), num_m_blocks, 1)``.
+    """
+    t = spec.tile
+    return (
+        ((2 * n) + t.tile_n - 1) // t.tile_n,
+        num_m_blocks,
+        1,
+    )
 
 
 def moe_interleaved_gate_up_silu_gemm_grid(
@@ -1461,6 +1601,7 @@ class FusedDownReduceGemmSpec:
     wave_size: int = 64
     block_size: int = 0
     dtype: str = "fp16"
+    grouped: bool = False
 
     def __post_init__(self) -> None:
         if self.block_size == 0:
@@ -1487,7 +1628,10 @@ class FusedDownReduceGemmSpec:
         )
 
     def kernel_name(self) -> str:
-        return self.to_universal_spec().kernel_name() + "_down_reduce"
+        suffix = "_down_reduce"
+        if self.grouped:
+            suffix += "_grouped"
+        return self.to_universal_spec().kernel_name() + suffix
 
 
 def build_moe_down_reduce_gemm(
@@ -1531,6 +1675,18 @@ def build_moe_down_reduce_gemm(
     stride_b = b.param("stride_b", I32)
     slot_size = b.param("slot_size", I32)
     tokens = b.param("tokens", I32)
+    grouped = bool(getattr(spec, "grouped", False))
+    if grouped:
+        # Grouped sorted-token dispatch: BlockExpertIds[block_id_y] gives
+        # the expert (B slab); A is dense; the bucket index for the
+        # token/weight lookup is the dense global row ``c_m``.
+        block_expert_ids = b.param(
+            "BlockExpertIds",
+            PtrType(I32, "global"),
+            noalias=True,
+            readonly=True,
+            align=4,
+        )
 
     t = spec.tile
     _, _, c_per_lane = _mfma_atom_widths(u)
@@ -1550,14 +1706,33 @@ def build_moe_down_reduce_gemm(
     warp_n_idx = b.mod(warp_id, c_warps_n)
     lane = b.mod(tid, c_wave)
 
-    batch_idx = b.block_id_z()
-    batch_off_a = b.mul(batch_idx, stride_a)
-    batch_off_b = b.mul(batch_idx, stride_b)
-    # Offset into flattened padded bucket arrays (SortedTokenIds /
-    # SortedWeights). ``slot_size`` is M and is tile-m aligned.
-    batch_bucket_off = b.mul(batch_idx, slot_size)
-
-    block_m_off = b.mul(b.block_id_y(), c_block_m)
+    c0_dr = b.const_i32(0)
+    if grouped:
+        m_block_idx = b.block_id_y()
+        expert_idx = b.global_load_i32(block_expert_ids, m_block_idx)
+        batch_off_a = c0_dr  # dense packed Hidden
+        # Fold the per-expert W_down base ``expert * stride_b`` (H*I; for
+        # the datacenter shape 6.7e7 * 31 > 2^31) into the B base pointer
+        # as a 64-bit byte offset to avoid i32 voffset overflow.
+        elem_bytes_b = b.const_i64(2)  # f16 / bf16
+        b_base_bytes = b.mul(
+            b.mul(b.sext(expert_idx, I64), b.sext(stride_b, I64)), elem_bytes_b
+        )
+        WDown = b.global_ptr_add(WDown, b_base_bytes)
+        batch_off_b = c0_dr
+        # SortedTokenIds / SortedWeights are in the same dense packed
+        # order as the rows, so the bucket base is 0 (the epilogue adds
+        # the dense row ``c_m`` directly).
+        batch_bucket_off = c0_dr
+        block_m_off = b.mul(m_block_idx, c_block_m)
+    else:
+        batch_idx = b.block_id_z()
+        batch_off_a = b.mul(batch_idx, stride_a)
+        batch_off_b = b.mul(batch_idx, stride_b)
+        # Offset into flattened padded bucket arrays (SortedTokenIds /
+        # SortedWeights). ``slot_size`` is M and is tile-m aligned.
+        batch_bucket_off = b.mul(batch_idx, slot_size)
+        block_m_off = b.mul(b.block_id_y(), c_block_m)
     block_n_off = b.mul(b.block_id_x(), c_block_n)
 
     A_smem = b.smem_alloc(storage_dtype, [block_m, block_k], name_hint="A_smem")
@@ -1600,40 +1775,49 @@ def build_moe_down_reduce_gemm(
     operand = _MoeOperand(global_view=b_view, lds_view=b_lds_view, smem=B_smem)
     a_mn_origin = (batch_off_a, block_m_off)
     b_mn_origin = (batch_off_b, block_n_off)
-    (acc_res,) = _emit_moe_prefetch_kloop(
-        plan,
-        a_view,
-        a_lds_view,
-        A_smem,
-        a_mn_origin,
-        [operand],
-        b_mn_origin,
-        [accs],
-        K,
-        warp_m_idx,
-        warp_n_idx,
-        lane,
-        sched_groups=mfmas_m * mfmas_n,
-    )
 
-    _emit_down_reduce_epilogue_atomic(
-        b,
-        u,
-        acc_res,
-        warp_m_idx,
-        warp_n_idx,
-        lane,
-        block_m_off,
-        block_n_off,
-        M,
-        N,
-        SortedTokenIds,
-        SortedWeights,
-        Y,
-        c_per_lane,
-        batch_bucket_off=batch_bucket_off,
-        tokens=tokens,
-    )
+    def _emit_down_compute() -> None:
+        (acc_res,) = _emit_moe_prefetch_kloop(
+            plan,
+            a_view,
+            a_lds_view,
+            A_smem,
+            a_mn_origin,
+            [operand],
+            b_mn_origin,
+            [accs],
+            K,
+            warp_m_idx,
+            warp_n_idx,
+            lane,
+            sched_groups=mfmas_m * mfmas_n,
+        )
+
+        _emit_down_reduce_epilogue_atomic(
+            b,
+            u,
+            acc_res,
+            warp_m_idx,
+            warp_n_idx,
+            lane,
+            block_m_off,
+            block_n_off,
+            M,
+            N,
+            SortedTokenIds,
+            SortedWeights,
+            Y,
+            c_per_lane,
+            batch_bucket_off=batch_bucket_off,
+            tokens=tokens,
+        )
+
+    if grouped:
+        # Empty tail block (BlockExpertIds == -1) skips all work.
+        with b.scf_if(b.cmp_ge(expert_idx, c0_dr)):
+            _emit_down_compute()
+    else:
+        _emit_down_compute()
     return b.kernel
 
 
@@ -1723,7 +1907,7 @@ def moe_down_reduce_gemm_signature(spec: FusedDownReduceGemmSpec):
     from ...helpers.spec import SignatureBuilder
 
     dt = spec.dtype if spec.dtype in ("f16", "fp16", "bf16") else "f16"
-    return (
+    sig = (
         SignatureBuilder()
         .ptr("A", dt)
         .ptr("WDown", dt)
@@ -1737,8 +1921,10 @@ def moe_down_reduce_gemm_signature(spec: FusedDownReduceGemmSpec):
         .scalar("stride_b", "i32")
         .scalar("slot_size", "i32")
         .scalar("tokens", "i32")
-        .build()
     )
+    if getattr(spec, "grouped", False):
+        sig = sig.ptr("BlockExpertIds", "i32")
+    return sig.build()
 
 
 def moe_down_reduce_gemm_grid(
@@ -1749,6 +1935,22 @@ def moe_down_reduce_gemm_grid(
         (n + t.tile_n - 1) // t.tile_n,
         (m + t.tile_m - 1) // t.tile_m,
         batch,
+    )
+
+
+def moe_down_reduce_gemm_grouped_grid(
+    num_m_blocks: int, n: int, spec: FusedDownReduceGemmSpec
+) -> Tuple[int, int, int]:
+    """Flat M-block grid for the grouped down-reduce dispatch.
+
+    ``num_m_blocks`` = number of packed sorted-token M-blocks; grid is
+    ``(ceil(n / tile_n), num_m_blocks, 1)``.
+    """
+    t = spec.tile
+    return (
+        (n + t.tile_n - 1) // t.tile_n,
+        num_m_blocks,
+        1,
     )
 
 

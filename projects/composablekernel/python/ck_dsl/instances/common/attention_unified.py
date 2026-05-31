@@ -552,6 +552,29 @@ def _select_2d_num_warps(problem: UnifiedAttentionProblem) -> int:
         # takes over (4-16% faster than nw=2 from n=2 up to bench-cap n=16).
         # Single-seq prefill is the only production regime where nw=2 wins.
         target = 2
+    elif (
+        problem.num_queries_per_kv == 1
+        and problem.head_size == 64
+        and not _enable_combo_2d(problem)
+    ):
+        # MHA (num_queries_per_kv == 1) d64 prefill is a DIFFERENT family
+        # than the GQA-8 cluster-A sweep that set the generic nw=4 rule
+        # below (that sweep is BLOCK_Q=8 => 8 q-rows per kv, a GQA shape).
+        # The perf_attn2d_sweep (B2 H8 d64 fp16, gfx950) measured the plain
+        # ``fallback`` geometry at both num_warps and nw=2 (BLOCK_M=32) wins
+        # at the short and long ends, nw=4 (BLOCK_M=64) only in the middle:
+        #   s512 : nw2 72.1 vs nw4 67.7  -> nw2  (+6%, more CTAs fill the
+        #          small grid)
+        #   s1024: nw2 130  vs nw4 148   -> nw4  (mid grid already saturates;
+        #          BLOCK_M=64 halves dispatch overhead)
+        #   s2048: nw2 272  vs nw4 219   -> nw2  (+25%, the long KV loop wants
+        #          the doubled CTA count for latency hiding)
+        # Encode that U-shape: nw=2 at the short (<=512) and long (>=1536)
+        # ends, nw=4 in the middle. Verified via direct-launch (no harness
+        # overhead) on gfx950.
+        target = (
+            2 if (problem.max_seqlen_q <= 512 or problem.max_seqlen_q >= 1536) else 4
+        )
     else:
         # Long prefill (q > 256) with num_seqs >= 2: nw=4 wins.
         # Round-1 cluster-A sweep
@@ -1519,6 +1542,21 @@ def _select_2d_compile_backend(problem: UnifiedAttentionProblem) -> str:
     # hipcc's heavier scheduler measurably wins. FP8 stays on LLVM
     # until the HIP path is exercised on the dequant-loader kernels.
     if problem.use_fp8:
+        return "llvm"
+    # MHA (num_queries_per_kv == 1) head_size-64 prefill REGRESSES under
+    # hipcc: the perf_attn2d sweep (B2 H8 d64 fp16, gfx950) measured the
+    # hipcc auto path at 95/186 TFLOPS for s1024/s2048 vs 131/218 on the
+    # LLVM-direct path (the byte-identical fallback geometry), i.e. hipcc
+    # is 17-27% SLOWER here, not the ~5% faster the b4 GQA shape showed.
+    # The fast-path 16x16 MHA loop body does not benefit from clang's
+    # heavier unrolled-loop scheduler the way the GQA-8 / combo geometry
+    # does, so pin this family to LLVM-direct. (The combo / GQA path below
+    # keeps its hipcc eligibility.)
+    if (
+        problem.num_queries_per_kv == 1
+        and problem.head_size == 64
+        and not _enable_combo_2d(problem)
+    ):
         return "llvm"
     total_work = problem.num_seqs * max(problem.max_seqlen_q, 1)
     if problem.max_seqlen_q > 512 and total_work > 1024:
