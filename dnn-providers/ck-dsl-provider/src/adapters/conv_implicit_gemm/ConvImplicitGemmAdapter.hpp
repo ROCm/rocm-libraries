@@ -25,7 +25,7 @@ namespace ck_dsl_provider {
 ///     cache-key stability comes from the GraphSignature in I-7) and
 ///     the dtype (implicit -- M1 only handles FP16).
 ///
-/// The remaining 20 spec knobs (tile_*, warp_*, pipeline, epilogue,
+/// The remaining spec knobs (tile_*, warp_*, pipeline, epilogue,
 /// chiplet_*, etc.) keep their example constexpr defaults from
 /// ``ConvImplicitGemmSpec``. Autotuning is M2+ work.
 ///

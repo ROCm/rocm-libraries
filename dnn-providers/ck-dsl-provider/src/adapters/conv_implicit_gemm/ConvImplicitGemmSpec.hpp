@@ -69,18 +69,22 @@ struct ConvProblem {
 
 /// C++ mirror of ``ck_dsl.instances.conv_implicit_gemm.ImplicitGemmConvSpec``.
 ///
-/// Field-for-field with the Python dataclass except for ``lds_layout``,
-/// which is a complex object on the Python side and is always ``None``
-/// for the M1 path; we omit it here and rely on the dataclass default
-/// (re-derived from ``async_dma``/``lds_k_pad``/``tile_k``) when the
-/// payload reaches Python.
+/// Mirrors the Python dataclass for the knobs this struct carries, and
+/// their defaults match the dataclass defaults -- so a spec the adapter
+/// builds without overrides matches what the DSL constructs from its own
+/// defaults. Three dataclass fields are intentionally omitted because
+/// the M1 path always leaves them at their dataclass defaults: those
+/// defaults are reconstructed on the Python side when the payload
+/// arrives:
+///   * ``lds_layout`` -- a complex object, always ``None`` for M1
+///     (re-derived from ``async_dma``/``lds_k_pad``/``tile_k``);
+///   * ``k0_k1_split`` -- defaults ``False``;
+///   * ``groups`` -- defaults ``1``.
 ///
-/// **Knob defaults mirror the Python ``ImplicitGemmConvSpec`` dataclass
-/// field-for-field** so a spec the adapter builds without overrides
-/// matches what the DSL constructs from its own defaults. The DSL's
-/// default is the gfx950-tuned config (tile 64x64x64, warp 2x2, MFMA
-/// atom 32x32x16, ``mem`` pipeline, ``default`` epilogue, wave64): valid
-/// on gfx950, but gfx942/gfx1151 need a different atom and/or wave size.
+/// The DSL's default is the gfx950-tuned config (tile 64x64x64, warp
+/// 2x2, MFMA atom 32x32x16, ``mem`` pipeline, ``default`` epilogue,
+/// wave64): valid on gfx950, but gfx942/gfx1151 need a different atom
+/// and/or wave size.
 /// The provider tests supply those per-arch example configs explicitly
 /// rather than relying on these defaults (the cross-arch example config
 /// is a test concern, not a production one). ``name`` keeps a

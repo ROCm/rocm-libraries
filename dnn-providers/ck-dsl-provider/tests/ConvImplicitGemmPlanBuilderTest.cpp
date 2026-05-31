@@ -93,11 +93,12 @@ ck_dsl_provider::ConvImplicitGemmSpec makeExampleSpec() {
 /// lives here rather than leaking into the provider.
 ck_dsl_provider::ConvImplicitGemmSpec makeExampleSpecForArch(const std::string& arch) {
     ck_dsl_provider::ConvImplicitGemmSpec spec = makeExampleSpec();
+    // Only the atom and wave size differ from the defaults; ``pipeline``
+    // (``mem``) and ``epilogue`` (``default``) are already the spec
+    // defaults inherited from makeExampleSpec().
     spec.warp_tile_m = 16;
     spec.warp_tile_n = 16;
     spec.warp_tile_k = 16;
-    spec.pipeline = "mem";
-    spec.epilogue = "default";
     spec.wave_size = (arch == "gfx1151") ? 32 : 64;
     return spec;
 }

@@ -67,6 +67,14 @@ const data_objects::ConvolutionFwdAttributes& getSingleConvFwdNode(
 /// etc. "Not for us" is the normal, expected answer to an applicability
 /// probe, so it is reported as a value rather than an exception: the
 /// adapter's throws are caught here, once, instead of at the call site.
+///
+/// The non-throwing guarantee is scoped to ``HipdnnPluginException``,
+/// which is the only type the adapter raises (``buildSpec`` rejects
+/// solely via ``throwBadParam``). Should the adapter ever throw another
+/// type (``std::bad_alloc``, a future validation path), it escapes here
+/// rather than being misclassified as "not for us"; on the applicability
+/// path ``isApplicable``'s ``std::exception`` backstop still catches it
+/// and fails closed.
 std::optional<ConvImplicitGemmSpec> tryBuildSpec(const flatbuffer_utilities::IGraph& opGraph,
                                                  std::string& reason) {
     try {
