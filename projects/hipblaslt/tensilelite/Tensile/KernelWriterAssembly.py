@@ -283,6 +283,20 @@ class KernelWriterAssembly(KernelWriter):
         return False
       return stride.startswith("const")
 
+  def useConstSgprGlobalReadIncsForTc(self, tc: str) -> bool:
+    if tc == "A":
+      return self.states.a.useConstSgprGlobalReadIncs
+    if tc == "B":
+      return self.states.b.useConstSgprGlobalReadIncs
+    if tc == "MXSA":
+      return self.states.mxsa.useConstSgprGlobalReadIncs
+    if tc == "MXSB":
+      return self.states.mxsb.useConstSgprGlobalReadIncs
+    return False
+
+  def isTdmWaveSeparated(self, kernel) -> bool:
+    return kernel["enableTDMA"] and kernel["enableTDMB"] and prod(kernel["MIWaveGroup"]) > 1
+
   ########################################
   def strideRef(self, tc, dim):
     """
@@ -428,9 +442,15 @@ class KernelWriterAssembly(KernelWriter):
       elif tChar == "B":
         localReadWidth = (self.states.lrvwUnrollB * tP["bpeDS"]) / bpr
       elif tChar == "MXSA":
-        localReadWidth = (self.states.lrvwUnrollMXSA * tP["bpeDS"]) / bpr
+        if self.states.asmCaps["HasWMMA_V3"] and kernel["MXScaleFormat"] == "InMemorySwizzle":
+          localReadWidth = (self.states.lrvwUnrollMXSA * kernel["VectorWidthA"] * tP["bpeDS"]) / bpr
+        else:
+          localReadWidth = (self.states.lrvwUnrollMXSA * tP["bpeDS"]) / bpr
       elif tChar == "MXSB":
-        localReadWidth = (self.states.lrvwUnrollMXSB * tP["bpeDS"]) / bpr
+        if self.states.asmCaps["HasWMMA_V3"] and kernel["MXScaleFormat"] == "InMemorySwizzle":
+          localReadWidth = (self.states.lrvwUnrollMXSB * kernel["VectorWidthB"] * tP["bpeDS"]) / bpr
+        else:
+          localReadWidth = (self.states.lrvwUnrollMXSB * tP["bpeDS"]) / bpr
       elif tChar == "Metadata":
         localReadWidth = (self.states.lrvwUnrollMetadata * tP["bpeDS"]) / bpr
       else:
@@ -611,13 +631,31 @@ class KernelWriterAssembly(KernelWriter):
   def removeGROffsetsVariableSgprsFromPool(self, kernel):
     module = Module("RemoveGROffsetSgprsFromPool")
 
-    self.removeSgprVarFromPool("GlobalReadIncsA")
-    self.removeSgprVarFromPool("GlobalReadIncsB")
-    if kernel["ProblemType"]["MXBlockA"]:
-      self.removeSgprVarFromPool("GlobalReadIncsMXSA")
-    if kernel["ProblemType"]["MXBlockB"]:
-      self.removeSgprVarFromPool("GlobalReadIncsMXSB")
+    # Wave-separated TDM copies A/B (and MX) incs into tdm*Incs during setup; main loop
+    # uses tdm*Incs only. GlobalReadIncs* are released afterward — do not pin them here.
+    if not self.isTdmWaveSeparated(kernel):
+      self.removeSgprVarFromPool("GlobalReadIncsA")
+      self.removeSgprVarFromPool("GlobalReadIncsB")
+      if kernel["ProblemType"]["MXBlockA"]:
+        self.removeSgprVarFromPool("GlobalReadIncsMXSA")
+      if kernel["ProblemType"]["MXBlockB"]:
+        self.removeSgprVarFromPool("GlobalReadIncsMXSB")
 
+    return module
+
+  def releaseGlobalReadIncsSgprsAfterTdmWaveSep(self, kernel):
+    """Return GlobalReadIncs* SGPRs to the pool after tdmSetupIncrementWaveSeparated."""
+    module = Module("ReleaseGlobalReadIncsAfterTdmWaveSep")
+    if not self.isTdmWaveSeparated(kernel):
+      return module
+    if self.states.a.numSgprGlobalReadIncs > 0:
+      module.add(self.addSgprVarToPool("GlobalReadIncsA"))
+    if self.states.b.numSgprGlobalReadIncs > 0:
+      module.add(self.addSgprVarToPool("GlobalReadIncsB"))
+    if kernel["ProblemType"]["MXBlockA"] and self.states.mxsa.numSgprGlobalReadIncs > 0:
+      module.add(self.addSgprVarToPool("GlobalReadIncsMXSA"))
+    if kernel["ProblemType"]["MXBlockB"] and self.states.mxsb.numSgprGlobalReadIncs > 0:
+      module.add(self.addSgprVarToPool("GlobalReadIncsMXSB"))
     return module
 
   def defineVariableSgprs(self, kernel):
@@ -730,12 +768,16 @@ class KernelWriterAssembly(KernelWriter):
         self.addSgprVarToPool("GlobalReadIncsA")
     if kernel["ProblemType"]["MXBlockA"] and self.states.mxsa.numSgprGlobalReadIncs > 0:
       module.add(self.defineSgpr("GlobalReadIncsMXSA", self.states.mxsa.numSgprGlobalReadIncs))
+      if prod(kernel["MIWaveGroup"]) < 2:
+        self.addSgprVarToPool("GlobalReadIncsMXSA")
     if self.states.b.numSgprGlobalReadIncs > 0:
       module.add(self.defineSgpr("GlobalReadIncsB", self.states.b.numSgprGlobalReadIncs))
       if prod(kernel["MIWaveGroup"]) < 2:
         self.addSgprVarToPool("GlobalReadIncsB")
     if kernel["ProblemType"]["MXBlockB"] and self.states.mxsb.numSgprGlobalReadIncs > 0:
       module.add(self.defineSgpr("GlobalReadIncsMXSB", self.states.mxsb.numSgprGlobalReadIncs))
+      if prod(kernel["MIWaveGroup"]) < 2:
+        self.addSgprVarToPool("GlobalReadIncsMXSB")
     if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
       module.add(self.defineSgpr("GlobalReadIncsMetadata", self.states.m.numSgprGlobalReadIncs))
     if self.states.IncLdsBufSwitch:
@@ -1447,6 +1489,8 @@ class KernelWriterAssembly(KernelWriter):
       module.addSpaceLine()
       module.addComment0("StreamK Parallel Reduction Assignments")
       module.add(RegSet("s", "sgprSkSplit", "sgprskTiles", 0))
+      module.add(RegSet("s", "sgprSkPartialIdx", "sgprBeta", 0))
+    elif kernel["StreamK"] == 4:
       module.add(RegSet("s", "sgprSkPartialIdx", "sgprBeta", 0))
 
     module.addSpaceLine()
@@ -4869,7 +4913,7 @@ class KernelWriterAssembly(KernelWriter):
           "padding %u per block %u" % (int(kernel["LdsPad%s"%tc] * tP["bpeDS"]), kernel["LdsBlockSizePerPad%s"%tc])))
       self.vgprPool.checkIn(tmpVgpr)
 
-    if tc in ("B", "MXSA", "MXSB", "Metadata"):
+    if tc in ("A", "B", "MXSA", "MXSB", "Metadata"):
       if kernel["LdsOffset%s" % tc] != 0:
         module.add(VAddCOU32(
             dst=vgpr(destVgpr), \
@@ -4955,9 +4999,9 @@ class KernelWriterAssembly(KernelWriter):
           comment="Copy lds write address VGPR to SGPR"))
         module.add(SMulI32(dst=sgpr("LocalWriteAddr%s"%tc), src0=sgpr("LocalWriteAddr%s"%tc), \
                          src1=int((kernel["WavefrontSize"] * kernel["GlobalReadVectorWidth%s"%tc]+kernel["LdsPad%s"%tc]) * tP["bpeGR"]) ))
-        if tc == 'B':
+        if tc in ('A', 'B') and kernel["LdsOffset%s" % tc] != 0:
           module.add(SAddU32(dst=sgpr("LocalWriteAddr%s"%tc), src0=sgpr("LocalWriteAddr%s"%tc), \
-                         src1=kernel["LdsOffsetB"] ))
+                         src1=kernel["LdsOffset%s" % tc] ))
         self.vgprPool.checkIn(tmpv)
       self.vgprPool.checkIn(destVgpr)
 
@@ -6012,7 +6056,11 @@ class KernelWriterAssembly(KernelWriter):
 
     tagList = ["AddressA", "AddressB", "WrapUA", "WrapUB", "StaggerU", "WGM", \
                "StaggerUIter", "GlobalReadIncsA", "GlobalReadIncsB", \
-               "sgprStridesA", "sgprStridesB", "sgprShadowLimitA", "sgprShadowLimitB"]
+               "StridesA", "StridesB", "ShadowLimitA", "ShadowLimitB"]
+    if kernel["ProblemType"]["MXBlockA"]:
+      tagList += ["GlobalReadIncsMXSA", "ShadowLimitMXSA"]
+    if kernel["ProblemType"]["MXBlockB"]:
+      tagList += ["GlobalReadIncsMXSB", "ShadowLimitMXSB"]
     lastRegTag = None
     spool = self.sgprPool.getPool()
     imod.addComment1("release sgprs that will not be used")
@@ -8582,6 +8630,9 @@ class KernelWriterAssembly(KernelWriter):
           idx1 = idxOuter
           if loopSwap:
             idx0, idx1 = idx1, idx0
+          # Effective inner/outer indices after optional loopSwap (HalfPLRA).
+          idxI = idx1 if loopSwap else idx0  # inner dimension index
+          idxO = idx0 if loopSwap else idx1  # outer dimension index
           accIdx   = idx1 * kernel["MIWaveTile"][0] + idx0
           accStart = accIdx * accs_per_wave
           accEnd   = accStart + accs_per_wave - 1
@@ -8592,6 +8643,39 @@ class KernelWriterAssembly(KernelWriter):
           bStr_base = self.generateSrcStrForMFMA(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInputB, m, u, iui, idxB, unrollLoopIdx)
           aStr     = vgpr(aStr_base, vgprPerInputA)
           bStr     = vgpr(bStr_base, vgprPerInputB)
+          # Precisely setting reuse bit (index-driven, but robust to loopSwap):
+          # - A can be reused iff its idxA stays constant across the next MMA.
+          # - B can be reused iff its idxB stays constant across the next MMA.
+          # For inner-loop progression, the varying index is:
+          #   - idx0 when loopSwap is False
+          #   - idx1 when loopSwap is True
+          # For outer-loop progression (when inner==1), the varying index is:
+          #   - idx1 when loopSwap is False
+          #   - idx0 when loopSwap is True
+          reuseA = False
+          reuseB = False
+          if kernel["MIWaveTile"][outer] == 1 and kernel["MIWaveTile"][inner] == 1:
+            pass
+          elif kernel["MIWaveTile"][outer] > 1 and kernel["MIWaveTile"][inner] == 1:
+            # Only outer loop advances between MMAs.
+            varying_is_idx0 = bool(loopSwap)  # when loopSwap, idx0==idxOuter
+            # A uses idx0 when tile01Idx=True; else uses idx1
+            a_uses_varying = (tPB["tile01Idx"] and varying_is_idx0) or ((not tPB["tile01Idx"]) and (not varying_is_idx0))
+            b_uses_varying = ((not tPB["tile01Idx"]) and varying_is_idx0) or (tPB["tile01Idx"] and (not varying_is_idx0))
+            # If operand does NOT use the varying index, it's constant across outer progression.
+            a_const = not a_uses_varying
+            b_const = not b_uses_varying
+            reuseA = a_const and (idxO < (kernel["MIWaveTile"][outer] - 1))
+            reuseB = b_const and (idxO < (kernel["MIWaveTile"][outer] - 1))
+          else:
+            # Inner loop advances between consecutive MMAs.
+            varying_is_idx0 = (not loopSwap)  # when not loopSwap, idx0==idxInner
+            a_uses_varying = (tPB["tile01Idx"] and varying_is_idx0) or ((not tPB["tile01Idx"]) and (not varying_is_idx0))
+            b_uses_varying = ((not tPB["tile01Idx"]) and varying_is_idx0) or (tPB["tile01Idx"] and (not varying_is_idx0))
+            a_const = not a_uses_varying
+            b_const = not b_uses_varying
+            reuseA = a_const and (idxI < (kernel["MIWaveTile"][inner] - 1))
+            reuseB = b_const and (idxI < (kernel["MIWaveTile"][inner] - 1))
 
           if not tail and tPA["bpe"] == 0.75 and kernel["enableLDSTrA"]:
             if idxInner not in shiftedIndicesA:
@@ -8717,6 +8801,11 @@ class KernelWriterAssembly(KernelWriter):
               miInScale0InstType = miInScaleAInstType
               miInScale1InstType = miInScaleBInstType
 
+            # matrix_a_reuse / matrix_b_reuse apply to MFMA src0/src1, not logical A/B tensors.
+            swapReuse = tPB["tile01Idx"] == kernel["SourceSwap"]
+            mfmaReuseA = reuseB if swapReuse else reuseA
+            mfmaReuseB = reuseA if swapReuse else reuseB
+
             variant = [kernel["MatrixInstM"], kernel["MatrixInstN"], kernel["MatrixInstK"], kernel["MatrixInstB"]]
 
             waits = self.mfmaIter_waitCount(kernel)
@@ -8778,12 +8867,12 @@ class KernelWriterAssembly(KernelWriter):
                                        mxScaleAType=miInScale0InstType, mxScaleBType=miInScale1InstType, variant=variant, \
                                        acc=self.accVgprReadWriteIndex(kernel, (accStart+accStoreCIdx), (accEnd-accStart+1)), \
                                        a=src0, b=src1, acc2=self.accVgprReadWriteIndex(kernel, accStart, (accEnd-accStart+1)), \
-                                       mxsa=srcMX0, mxsb=srcMX1, block=block,
+                                       mxsa=srcMX0, mxsb=srcMX1, block=block, reuseA=mfmaReuseA, reuseB=mfmaReuseB, \
                                        comment="left value = %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)))
               else:
                 imod.add(MFMAInstruction(instType=miInInstType, accType=miOutInstType, variant=variant, mfma1k=mfma_1k, \
                                        acc=self.accVgprReadWriteIndex(kernel, (accStart+accStoreCIdx), (accEnd-accStart+1)), \
-                                       a=src0, b=src1, acc2=self.accVgprReadWriteIndex(kernel, accStart, (accEnd-accStart+1)), neg=neg_flag,\
+                                       a=src0, b=src1, acc2=self.accVgprReadWriteIndex(kernel, accStart, (accEnd-accStart+1)), neg=neg_flag, reuseA=mfmaReuseA, reuseB=mfmaReuseB, \
                                        comment="left value = %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)))
             prevAccIdx = accIdx
 
@@ -9251,7 +9340,8 @@ class KernelWriterAssembly(KernelWriter):
                 imod.addModuleAsFlatItems(self.incrementSrd(tP["tpsMetadata"], sgpr(incLower), sgpr(incUpper)))
 
       else:
-        if loopIdx != self.states.unrollIdx or (tc in ('A', 'B') and kernel["ProblemType"]["IndicesSummation"][self.states.unrollIdx] in kernel["ProblemType"]["MirrorDims%s"%tc]):
+        grIncTcs = ('A', 'B', 'MXSA', 'MXSB')
+        if loopIdx != self.states.unrollIdx or (tc in grIncTcs and kernel["ProblemType"]["IndicesSummation"][self.states.unrollIdx] in kernel["ProblemType"]["MirrorDims%s"%tc]):
           with self.allocTmpSgpr(1) as tmpSgprInfo:
             incUpper = tmpSgprInfo.idx
             # GRO may be negative for other summation if stride-other < stride-unroll or if mirror dim.
@@ -9260,10 +9350,8 @@ class KernelWriterAssembly(KernelWriter):
         else:
           incUpper = 0 # GRO is positive for loop unroll
           srcGRInc = sgpr("GlobalReadIncs%s+%u"%(tc,loopIdx))
-          if tc in ('A', 'B'):
-            useConstSgprGlobalReadIncs = self.states.a.useConstSgprGlobalReadIncs if tc == 'A' else self.states.b.useConstSgprGlobalReadIncs
-            if useConstSgprGlobalReadIncs:
-              srcGRInc = "GlobalReadIncs%s"%tc
+          if tc in grIncTcs and self.useConstSgprGlobalReadIncsForTc(tc):
+            srcGRInc = "GlobalReadIncs%s"%tc
           imod.addModuleAsFlatItems(self.incrementSrd(tP, srcGRInc, hex(incUpper)))
 
         if kernel["ProblemType"]["Sparse"]:
@@ -13240,7 +13328,7 @@ class KernelWriterAssembly(KernelWriter):
 
     (fullVws, elements, fullVws_1, elements_1) = self.notLocalFullTileElements(kernel)
     # print("len(elements)= ", len(elements_1))
-    noGSUBranch = (kernel["GlobalSplitU"] == 0 and kernel["StreamK"] != 3)
+    noGSUBranch = (kernel["GlobalSplitU"] == 0 and kernel["StreamK"] != 3 and kernel["StreamK"] != 4)
     module = Module("notLocalSplitUGlobalWrite")
     storeModule, deferredGSU0 = self.globalWriteElements(kernel, tPA, tPB, fullVws, fullVws_1, elements, elements_1, noGSUBranch=noGSUBranch)
     module.add(storeModule)
@@ -13287,7 +13375,7 @@ class KernelWriterAssembly(KernelWriter):
     vectorWidths   = [fullVw, edgeVw]
     vectorWidths_1 = [fullVw_1, edgeVw_1]
 
-    noGSUBranch = (kernel["GlobalSplitU"] == 0 and kernel["StreamK"] != 3)
+    noGSUBranch = (kernel["GlobalSplitU"] == 0 and kernel["StreamK"] != 3 and kernel["StreamK"] != 4)
     module = Module("localSplitUGlobalWrite")
     storeModule, _ = self.globalWriteElements(kernel, tPA, tPB, vectorWidths, vectorWidths_1, elements_f0, elements_f1, noGSUBranch=noGSUBranch)
     module.add(storeModule)
@@ -16733,6 +16821,9 @@ class KernelWriterAssembly(KernelWriter):
     if addLabel:
       imod.add(Label("KernelEnd", ""))
 
+      skComponent = Component.StreamK.find(self)
+      imod.add(skComponent.kernelEnd(self, kernel))
+
       # TODO- refine this part, put outside of this function
       if kernel["ProblemType"]["OutputAmaxD"]:
         imod.add(self.insertAmaxD(kernel))
@@ -17461,13 +17552,18 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["Multicast"] and enableCluster:
       mod.add(comp.setMulticastMask(descSgprName(1), maskSgprName(tc), self))
 
-    with self.allocTmpSgpr(1) as tmpSgprRes:
+    with self.allocTmpSgpr(2) as tmpSgprRes:
       waveOffsetSgprIdx: int = tmpSgprRes.idx
+      tmpPadSgprIdx: int = tmpSgprRes.idx + 1
+      dataBytes = mt // numWaves * du * int(bpe * 4) // (4 * dim1Divisor)
+      mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr("WaveIdx"), dataBytes, f"woffset = WaveIdx * (mt // numWaves * du * bpe // dim1Divisor)"))
       if ldsBlockSizePerPad != 0 and ldsPadSize != 0:
-        mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr("WaveIdx"), round(mt // numWaves * du * bpe // dim1Divisor) + round(mt // numWaves * du * bpe // dim1Divisor) // ldsBlockSizePerPad * ldsPadSize, \
-                "woffset = WaveIdx * (mt // numWaves * du * bpe // dim1Divisor) + (mt // numWaves * du * bpe // dim1Divisor) // ldsBlockSizePerPad * ldsPadSize)"))
-      else:
-        mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr("WaveIdx"), round(mt // numWaves * du * bpe // dim1Divisor), "woffset = WaveIdx * (mt // numWaves * du * bpe // dim1Divisor)"))
+        mod.add(SLShiftRightB32(sgpr(tmpPadSgprIdx), int(log2(ldsBlockSizePerPad)), sgpr(waveOffsetSgprIdx), \
+                f"numPadBlocks = woffset >> log2({ldsBlockSizePerPad=})"))
+        mod.add(SMulI32(sgpr(tmpPadSgprIdx), sgpr(tmpPadSgprIdx), ldsPadSize, \
+                f"padBytes = numPadBlocks * ({ldsPadSize=})"))
+        mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), sgpr(tmpPadSgprIdx), \
+                "woffset += padBytes"))
       mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), ldsConstOffset, "ldsOffset = woffset + ldsConstOffset"))
       mod.add(comp.setLdsAddr(descSgprName(0), sgpr(waveOffsetSgprIdx)))
 
@@ -17587,15 +17683,19 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["Multicast"] and enableCluster:
       mod.add(comp.setMulticastMask(descSgprName(1), maskSgprName(tc), self))
 
-    with self.allocTmpSgpr(1) as tmpSgprRes:
+    with self.allocTmpSgpr(2) as tmpSgprRes:
       waveOffsetSgprIdx: int = tmpSgprRes.idx
+      tmpPadSgprIdx: int = tmpSgprRes.idx + 1
       mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), 1, sgpr("WaveIdx"), "wId=WaveIdx // 2 (each component covers 2 waves: numComp = numWaves // 2)"))
+      dataBytes = mt // numComp * du * int(bpe * 4) // (4 * dim1Divisor)
+      mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), dataBytes, f"woffset = wId * (mt // numComp * du * bpe // dim1Divisor)"))
       if ldsBlockSizePerPad != 0 and ldsPadSize != 0:
-        mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numComp * du * bpe // dim1Divisor) + round(mt // numComp * du * bpe // dim1Divisor) // ldsBlockSizePerPad * ldsPadSize, \
-                "woffset = wId * (mt // numComp * du * bpe + mt // numComp * du * bpe // ldsBlockSizePerPad * ldsPadSize)"))
-      else:
-        mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numComp * du * bpe // dim1Divisor), "woffset = wId * (mt // numComp * du * bpe)"))
-
+        mod.add(SLShiftRightB32(sgpr(tmpPadSgprIdx), int(log2(ldsBlockSizePerPad)), sgpr(waveOffsetSgprIdx), \
+                f"numPadBlocks = woffset >> log2({ldsBlockSizePerPad=})"))
+        mod.add(SMulI32(sgpr(tmpPadSgprIdx), sgpr(tmpPadSgprIdx), ldsPadSize, \
+                f"padBytes = numPadBlocks * ({ldsPadSize=})"))
+        mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), sgpr(tmpPadSgprIdx), \
+                "woffset += padBytes"))
       mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), ldsConstOffset, "ldsOffset = woffset + ldsConstOffset"))
       mod.add(comp.setLdsAddr(descSgprName(0), sgpr(waveOffsetSgprIdx)))
 

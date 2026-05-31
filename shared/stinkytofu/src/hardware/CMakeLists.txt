@@ -6,5 +6,6 @@
 target_sources(stinkytofu PRIVATE
     ArchHelper.cpp
     ComgrProbe.cpp
+    HwReg.cpp
     ToolchainCaps.cpp
 )
