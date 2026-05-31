@@ -54,7 +54,8 @@ inline std::uint64_t fnv1aOptI32(std::uint64_t h, const std::optional<std::int32
 }  // namespace
 
 SignatureHash GraphSignature::computeForSpec(std::string_view opKind,
-                                             const ConvImplicitGemmSpec& spec) {
+                                             const ConvImplicitGemmSpec& spec,
+                                             std::string_view arch) {
     std::uint64_t h = kFnv1aOffset;
 
     // Provider/DSL version string. Folding the macro contents
@@ -64,6 +65,16 @@ SignatureHash GraphSignature::computeForSpec(std::string_view opKind,
     h = fnv1aFold(h, 0x00);
 
     h = fnv1aString(h, opKind);
+    h = fnv1aFold(h, 0x00);
+
+    // Target GPU arch. The HSACO is arch-specific (a gfx950 code object
+    // launched on gfx942 yields hipError 209 "no kernel image"), so the
+    // key MUST distinguish builds for different arches -- otherwise a
+    // multi-arch process (or a persisted disk cache) would alias them
+    // and hand back the wrong module. arch is an orthogonal compile
+    // target (not a spec field, mirroring the DSL), passed in by the
+    // plan builder from the detected device.
+    h = fnv1aString(h, arch);
     h = fnv1aFold(h, 0x00);
 
     // ConvProblem fields, in declaration order so a future field

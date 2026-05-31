@@ -259,11 +259,13 @@ KernelArtifact CompileServiceBridge::compileSmoke() {
     }
 }
 
-KernelArtifact CompileServiceBridge::compile(std::string_view opKind, const py::dict& payload) {
+KernelArtifact CompileServiceBridge::compile(std::string_view opKind, const py::dict& payload,
+                                             std::string_view arch) {
     try {
         py::gil_scoped_acquire gil;
         py::str opKindStr(opKind.data(), opKind.size());
-        py::object result = _module.attr("compile")(opKindStr, payload);
+        py::str archStr(arch.data(), arch.size());
+        py::object result = _module.attr("compile")(opKindStr, payload, archStr);
         KernelArtifact artifact =
             dictToArtifact(result.cast<py::dict>(), "CompileServiceBridge::compile");
 
@@ -277,6 +279,33 @@ KernelArtifact CompileServiceBridge::compile(std::string_view opKind, const py::
         return artifact;
     } catch (const py::error_already_set& error) {
         PythonError::raise(error, "CompileServiceBridge::compile");
+    }
+}
+
+std::pair<bool, std::string> CompileServiceBridge::isApplicable(std::string_view opKind,
+                                                                const py::dict& payload,
+                                                                std::string_view arch) {
+    try {
+        py::gil_scoped_acquire gil;
+        py::str opKindStr(opKind.data(), opKind.size());
+        py::str archStr(arch.data(), arch.size());
+        py::object result = _module.attr("is_applicable")(opKindStr, payload, archStr);
+
+        // The Python side returns a (bool, reason) 2-tuple. Translate
+        // defensively so a contract drift surfaces as a clear provider
+        // error rather than a confusing cast failure deeper in.
+        auto seq = result.cast<py::sequence>();
+        if (seq.size() != 2) {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                "CompileServiceBridge::isApplicable: is_applicable must return a "
+                "(bool, reason) 2-tuple");
+        }
+        bool ok = seq[0].cast<bool>();
+        std::string reason = seq[1].cast<std::string>();
+        return {ok, std::move(reason)};
+    } catch (const py::error_already_set& error) {
+        PythonError::raise(error, "CompileServiceBridge::isApplicable");
     }
 }
 

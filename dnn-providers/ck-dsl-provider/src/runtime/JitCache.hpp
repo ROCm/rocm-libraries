@@ -27,13 +27,14 @@ namespace ck_dsl_provider {
 /// it was computed.
 ///
 /// **Precondition for an on-disk cache.** The current key is only
-/// sufficient for the in-memory, single-process, single-GPU, FP16-only
-/// path. Several codegen inputs are constant today and therefore not
-/// folded -- dtype, target arch + toolchain version, and physical
-/// tensor layout (see ``GraphSignature``). A persisted cache outlives
-/// the process/GPU/build that produced it, so it MUST extend the key
-/// with those inputs before reusing entries, or it will hand back a
-/// module built for a different dtype/arch/layout.
+/// sufficient for the in-memory, single-process, FP16-only path. The
+/// target arch IS folded (so the key is multi-GPU safe), but several
+/// codegen inputs are still constant today and therefore not folded --
+/// dtype, toolchain version, and physical tensor layout (see
+/// ``GraphSignature``). A persisted cache outlives the process/build
+/// that produced it, so it MUST extend the key with those inputs before
+/// reusing entries, or it will hand back a module built for a different
+/// dtype/toolchain/layout.
 using SignatureHash = std::uint64_t;
 
 /// In-memory JIT cache mapping ``SignatureHash`` → loaded ``HipModule``.

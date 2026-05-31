@@ -75,43 +75,41 @@ struct ConvProblem {
 /// (re-derived from ``async_dma``/``lds_k_pad``/``tile_k``) when the
 /// payload reaches Python.
 ///
-/// **Constexpr defaults follow the bake-off values, NOT the dataclass
-/// defaults** -- per PREP_FINDINGS P-5 the bake-off overrides several
-/// dataclass defaults and those overrides are the values we want at
-/// JIT time. The deltas (dataclass -> bake-off):
-///
-///   tile_k:       128 -> 64
-///   warp_tile_m:  16  -> 32
-///   warp_tile_n:  16  -> 32
-///   warp_tile_k:  32  -> 16
-///   epilogue:     "default" -> "cshuffle"  (largest single perf lever)
-///
-/// All other fields keep their dataclass defaults.
+/// **Knob defaults mirror the Python ``ImplicitGemmConvSpec`` dataclass
+/// field-for-field** so a spec the adapter builds without overrides
+/// matches what the DSL constructs from its own defaults. The DSL's
+/// default is the gfx950-tuned config (tile 64x64x64, warp 2x2, MFMA
+/// atom 32x32x16, ``mem`` pipeline, ``default`` epilogue, wave64): valid
+/// on gfx950, but gfx942/gfx1151 need a different atom and/or wave size.
+/// The provider tests supply those per-arch example configs explicitly
+/// rather than relying on these defaults (the cross-arch example config
+/// is a test concern, not a production one). ``name`` keeps a
+/// provider-specific prefix for kernel identification in profiles.
 struct ConvImplicitGemmSpec {
     ConvProblem problem;
 
     std::string name{"ck_dsl_conv_igemm"};
 
-    // Block tile -- dataclass defaults 64/64/128. Bake-off: tile_k=64.
+    // Block tile (mirrors the dataclass defaults).
     std::int32_t tile_m{64};
     std::int32_t tile_n{64};
     std::int32_t tile_k{64};
 
-    // Warp grid (within block).
+    // Warp grid within the block (mirrors the dataclass defaults).
     std::int32_t warp_m{2};
     std::int32_t warp_n{2};
 
-    // MFMA atom -- dataclass defaults 16/16/32. Bake-off: 32/32/16
-    // (uses the 32x32x16 MFMA atom rather than 16x16x32).
+    // MFMA atom (mirrors the dataclass default: 32x32x16 f16). This is
+    // gfx950-valid; gfx942/gfx1151 require the 16x16x16 atom instead.
     std::int32_t warp_tile_m{32};
     std::int32_t warp_tile_n{32};
     std::int32_t warp_tile_k{16};
 
     std::int32_t wave_size{64};
 
-    // Pipeline / epilogue knobs.
+    // Pipeline / epilogue knobs (mirror the dataclass defaults).
     std::string pipeline{"mem"};
-    std::string epilogue{"cshuffle"};  // dataclass default is "default"
+    std::string epilogue{"default"};
     bool async_dma{false};
     bool unroll_k{false};
 

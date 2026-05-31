@@ -23,6 +23,10 @@ namespace ck_dsl_provider {
 ///
 ///   * ``opKind`` -- the per-op identifier
 ///     ("conv_implicit_gemm")
+///   * ``arch`` -- the target gfx token, passed as a separate argument
+///     (an orthogonal compile target, not a spec field -- mirrors the
+///     DSL). The HSACO is arch-specific, so builds for different arches
+///     must not alias (a gfx950 module on gfx942 fails hipModuleLoadData)
 ///   * the 13 ``ConvProblem`` fields (N, Hi, Wi, C, K, R, S + sH, sW,
 ///     pH, pW, dH, dW) so any shape / stride / padding / dilation
 ///     change produces a distinct key
@@ -48,10 +52,11 @@ namespace ck_dsl_provider {
 ///
 ///   * dtype -- M1 is FP16-only and dtype is not yet a spec field;
 ///     required when bf16/fp8 are added (alongside a dtype on the spec)
-///   * target arch + toolchain version (gfx942 vs gfx950, ROCm) -- the
-///     HSACO is arch-specific and the version string is the DSL SHA,
-///     not the build target; required for any cache that outlives a
-///     single-GPU process (i.e. the disk cache)
+///   * toolchain version (ROCm / comgr) -- the folded version string is
+///     the DSL SHA, not the build toolchain; a disk cache that outlives
+///     the ROCm install that produced it must also fold the toolchain
+///     version. (Target arch IS folded now -- see the ``arch`` argument
+///     above.)
 ///   * physical tensor layout / memory strides -- M1 assumes the
 ///     canonical NHWC/KRSC/NHWK layouts; required if other layouts are
 ///     accepted
@@ -74,12 +79,17 @@ class GraphSignature {
     /// Folded inputs:
     ///   * ``CK_DSL_PROVIDER_VERSION_STRING`` (provider/DSL version)
     ///   * ``opKind``
+    ///   * ``arch`` (target gfx token -- the HSACO is arch-specific)
     ///   * ``spec.problem`` fields (N, Hi, Wi, C, K, R, S + sH, sW,
     ///     pH, pW, dH, dW) so any shape / stride / padding / dilation
     ///     change produces a distinct key
     ///   * every codegen knob on the spec -- see the class docstring
     ///     for the full list and for what is intentionally omitted.
-    static SignatureHash computeForSpec(std::string_view opKind, const ConvImplicitGemmSpec& spec);
+    ///
+    /// ``arch`` is a separate argument rather than a spec field,
+    /// mirroring the DSL where arch is an orthogonal compile target.
+    static SignatureHash computeForSpec(std::string_view opKind, const ConvImplicitGemmSpec& spec,
+                                        std::string_view arch);
 
    private:
     GraphSignature() = delete;

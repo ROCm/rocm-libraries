@@ -21,6 +21,7 @@ add_library(
     python/CompileServiceBridge.cpp
     python/EmbeddedInterpreter.cpp
     python/PythonError.cpp
+    runtime/DeviceArch.cpp
     runtime/HipModule.cpp
     runtime/JitCache.cpp
     runtime/KernelArtifact.cpp
