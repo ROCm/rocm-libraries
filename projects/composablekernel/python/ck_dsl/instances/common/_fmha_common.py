@@ -86,6 +86,7 @@ class FmhaCommonSpec:
     use_rotary: bool = False
     use_dropout: bool = False
     use_sinks: bool = False
+    generate_stats: bool = False
 
     @property
     def head_size(self) -> int:

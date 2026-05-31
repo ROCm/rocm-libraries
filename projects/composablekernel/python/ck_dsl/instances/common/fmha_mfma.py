@@ -71,7 +71,7 @@ class FmhaMfmaSpec:
 
     def kernel_name(self) -> str:
         s = self.common.shape
-        return kernel_name_join(
+        tokens = [
             self.name,
             f"H{s.head_size}",
             f"HQ{s.num_query_heads}",
@@ -80,7 +80,10 @@ class FmhaMfmaSpec:
             f"Q{self.seqlen_q}",
             f"K{self.seqlen_k}",
             self.common.mask_mode,
-        )
+        ]
+        if self.common.generate_stats:
+            tokens.append("stats")
+        return kernel_name_join(*tokens)
 
 
 def _mma_family(arch: str) -> str:
@@ -185,6 +188,12 @@ def _declare_params(kb: FmhaKernelBuilder) -> None:
     kb.add_scalar("seqlen_q", "i32")
     kb.add_scalar("seqlen_k", "i32")
     kb.add_strides("q", "k", "v", "o")
+    # Opt-in softmax-stats outputs land at the tail of the ABI so the
+    # default (generate_stats=False) signature is byte-identical to the
+    # historical kernel. The bwd kernel reads these as f32 [B*Sq, HQ].
+    if kb.common.generate_stats:
+        kb.add_ptr("M_out", dtype="f32", readonly=False)
+        kb.add_ptr("L_out", dtype="f32", readonly=False)
 
 
 def build_fmha_fwd_mfma(spec: FmhaMfmaSpec, arch: str = "gfx950") -> KernelDef:
@@ -310,6 +319,13 @@ def build_fmha_fwd_mfma(spec: FmhaMfmaSpec, arch: str = "gfx950") -> KernelDef:
         causal_ctx_offset=causal_ctx,
         k_token_offset_elems=k_batch_offset,
         v_token_offset_elems=v_batch_offset,
+        # Opt-in softmax-stats: store the per-(query-row, query-head)
+        # online-softmax max M and rescaled sum L for the bwd kernel.
+        # ``num_query_heads`` is the compile-time row-stride of the flat
+        # [B*Sq, HQ] M/L arrays. None keeps the default IR unchanged.
+        M_out=kb.ptr("M_out") if s.generate_stats else None,
+        L_out=kb.ptr("L_out") if s.generate_stats else None,
+        num_query_heads=s.shape.num_query_heads,
         arch=arch,
     )
     b.ret()
