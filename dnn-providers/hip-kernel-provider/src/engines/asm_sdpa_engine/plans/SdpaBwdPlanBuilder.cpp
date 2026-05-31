@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <hip/hip_runtime.h>
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
+#include <hip_kernel_provider_common/SdpaConfigEnumerations.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_backward_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
@@ -34,25 +35,15 @@ namespace asm_sdpa_engine
 namespace
 {
 
-// Mask classification is shared with the forward path via
-// plan_utils::MaskType. The remaining dispatch enums below stay backward-local
-// so fwd and bwd dispatch can evolve independently.
+// Dispatch enums shared with the forward path: MaskType via plan_utils;
+// RoundingMode and BatchMode via hip_kernel_provider_common (the same header the
+// forward builder consumes). AccumulatorMode stays backward-local because the
+// forward dispatch has no 16/32-bit accumulator axis.
+using hip_kernel_provider_common::BatchMode;
+using hip_kernel_provider_common::RoundingMode;
 using plan_utils::MaskType;
 
-enum class RoundingMode : int
-{
-    RTNE = 0, // Round to Nearest Even (IEEE default)
-    RTNA = 1, // Round to Nearest Away from zero
-    RTZ = 2 // Round toward Zero
-};
-
 using bwd_dispatch::BF16_CVT_FP16_SENTINEL;
-
-enum class BatchMode : int
-{
-    BATCH = 0, // All sequences have same length
-    GROUP = 1 // Variable sequence lengths
-};
 
 enum class AccumulatorMode : int
 {
@@ -69,7 +60,9 @@ struct BwdDispatchTuple
     int pssk;
     int pddv;
     int bf16Cvt;
-    bool verified; // see Verified Kernel Matrix; true only for calibrated (dtype, hdim)
+    // See "Verified Kernel Matrix" in asm/asm_kernels/README.md; true only for
+    // calibrated (dtype, hdim).
+    bool verified;
 };
 
 // Output of resolveStage: the .co file path, kernel symbol name, and tile
