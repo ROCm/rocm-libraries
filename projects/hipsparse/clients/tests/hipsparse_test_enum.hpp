@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -126,6 +126,7 @@ static constexpr std::size_t countof2(T (&)[N])
     TRANSFORM_HIPSPARSE_TEST_ENUM(spmv_coo_aos) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spmv_coo) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spmv_csr) \
+    TRANSFORM_HIPSPARSE_TEST_ENUM(spmv_csr_reuse_descr) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spmv_sell) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spsm_coo) \
     TRANSFORM_HIPSPARSE_TEST_ENUM(spsm_csr) \
