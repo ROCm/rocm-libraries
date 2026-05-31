@@ -2202,8 +2202,9 @@ def case_fmha_fwd_mfma_stats() -> Result:
         device="cuda",
     )
     O = torch.zeros_like(Q)
-    # Flat [seqlen_q, HQ] f32 natural-log LSE (batch=1): off = row*HQ + head.
-    LSE_out = torch.zeros(seqlen_q, HQ, dtype=torch.float32, device="cuda")
+    # Head-major [HQ, seqlen_q] f32 natural-log LSE (batch=1, so the kernel's
+    # ((b*Hq + h)*Sq + q) store reduces to h*Sq + q == LSE_out[h, q]).
+    LSE_out = torch.zeros(HQ, seqlen_q, dtype=torch.float32, device="cuda")
     _launch(
         launcher,
         {
@@ -2230,6 +2231,7 @@ def case_fmha_fwd_mfma_stats() -> Result:
     )
     # Per-head dense attention reference (O) plus a natural-log LSE
     # reference: scores_nat = scores * (1/sqrt(D)); LSE = logsumexp_k.
+    # LSE_ref is head-major [HQ, seqlen_q] to match LSE_out[h, q].
     O_ref = torch.zeros_like(O)
     LSE_ref = torch.zeros_like(LSE_out)
     for h in range(HQ):
@@ -2237,7 +2239,7 @@ def case_fmha_fwd_mfma_stats() -> Result:
         scores = (Q[:, h, :].float() @ K[:, kh, :].float().t()) / math.sqrt(head_size)
         probs = torch.softmax(scores, dim=-1)
         O_ref[:, h, :] = (probs @ V[:, kh, :].float()).to(torch.float16)
-        LSE_ref[:, h] = torch.logsumexp(scores, dim=-1)
+        LSE_ref[h, :] = torch.logsumexp(scores, dim=-1)
     lse_abs = float((LSE_out - LSE_ref).abs().max().item())
     stats_ok = lse_abs <= 1e-2
     print(f"    LSE max_abs={lse_abs:.4g}")

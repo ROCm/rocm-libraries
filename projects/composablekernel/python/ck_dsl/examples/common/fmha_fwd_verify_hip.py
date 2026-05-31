@@ -198,11 +198,11 @@ def main() -> int:
     rt.memcpy_h2d(vd, u8(V), V.nbytes)
     rt.memset(od, 0, Out.nbytes)
 
-    # Opt-in softmax-stats: a single flat [B*Sq, HQ] f32 natural-log LSE
-    # array, indexed ((b*Sq + row)*Hq + head). The kernel folds the batch
-    # into o_row, so the host array is the global-batched [B*Sq, HQ] layout
-    # the bwd graph's ``stats`` tensor uses.
-    LSE = np.zeros((B * Sq * Hq,), dtype=np.float32)
+    # Opt-in softmax-stats: a single f32 natural-log LSE array in the
+    # contract-standard head-major [B, Hq, Sq] layout, indexed
+    # ((b*Hq + h)*Sq + q) -- matching the hipDNN stats descriptor that the
+    # bwd graph's ``stats`` tensor uses.
+    LSE = np.zeros((B * Hq * Sq,), dtype=np.float32)
     if args.stats:
         lse_d = rt.alloc(LSE.nbytes)
         rt.memset(lse_d, 0, LSE.nbytes)
@@ -261,10 +261,12 @@ def main() -> int:
     # LSE against a numpy reference computed with the SAME mask as the run.
     #   scores_nat = (Q @ K^T) * (1/sqrt(D))            [natural domain, post-mask]
     #   LSE_nat = logsumexp_j scores_nat = max + ln(sum(exp(s - max)))
-    # flattened to ((b*Sq + row)*Hq + head). Absolute compare at tol 1e-2.
+    # flattened head-major to ((b*Hq + h)*Sq + q). Absolute compare at tol 1e-2.
     stats_ok = True
     if args.stats:
-        LSE_ref = np.empty((B, Sq, Hq), dtype=np.float32)
+        # Head-major [B, Hq, Sq] so the flatten matches the kernel's
+        # ((b*Hq + h)*Sq + q) store layout.
+        LSE_ref = np.empty((B, Hq, Sq), dtype=np.float32)
         for bi in range(B):
             if Hk != Hq:  # GQA: expand kv heads to query heads for the ref.
                 rep = Hq // Hk
@@ -281,8 +283,10 @@ def main() -> int:
                 k_pos = np.arange(Sk)[None, None, :]
                 scores = np.where(k_pos <= q_pos, scores, -1e30)
             mx = scores.max(axis=-1)
-            LSE_ref[bi] = mx + np.log(np.exp(scores - mx[..., None]).sum(axis=-1))
-        LSE_ref_flat = LSE_ref.reshape(B * Sq, Hq).reshape(-1)
+            # lse_q_major: (Sq, Hq) -> transpose to (Hq, Sq) for head-major.
+            lse_q_major = mx + np.log(np.exp(scores - mx[..., None]).sum(axis=-1))
+            LSE_ref[bi] = lse_q_major.T
+        LSE_ref_flat = LSE_ref.reshape(B * Hq * Sq)
         lse_abs = float(np.abs(LSE - LSE_ref_flat).max())
         stats_ok = lse_abs <= 1e-2
         print(
