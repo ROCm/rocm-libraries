@@ -13,6 +13,7 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceConvolution.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/TensorDiff.hpp>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -75,6 +76,12 @@ std::int64_t convOutputDim(std::int64_t in, std::int64_t pad, std::int64_t dil, 
 /// multiple of 64 -- the latter directly exercise the last-tile
 /// boundary handling the tile-aligned example shape never touches.
 ///
+/// Runs on whatever DSL-supported device is present (gfx942 / gfx950 /
+/// gfx1151): the production plan builder detects the device arch and the
+/// adapter's ``applyArchCodegenConfig`` selects a valid per-arch codegen
+/// config, so the same graph compiles and runs on each. The test skips
+/// cleanly on a host with no supported device.
+///
 /// **Adaptation from plan §1:** the test bypasses the hipDNN frontend
 /// API and the backend's .so-loading plugin path. Both surfaces are
 /// architecturally additive on top of what the unit-test suite
@@ -91,7 +98,7 @@ std::int64_t convOutputDim(std::int64_t in, std::int64_t pad, std::int64_t dil, 
 class IntegrationGpuCkDslConvFp16Gpu : public ::testing::TestWithParam<ConvCase> {
    protected:
     void SetUp() override {
-        CK_DSL_PROVIDER_SKIP_IF_NOT_GFX950("IntegrationGpuCkDslConvFp16Gpu");
+        CK_DSL_PROVIDER_SKIP_IF_UNSUPPORTED_ARCH("IntegrationGpuCkDslConvFp16Gpu", _arch);
 
         _container = std::make_unique<CkDslContainer>();
         _handle = std::make_unique<::CkDslHandle>();
@@ -99,6 +106,7 @@ class IntegrationGpuCkDslConvFp16Gpu : public ::testing::TestWithParam<ConvCase>
             _container->compileServiceBridge(), _container->jitCache());
     }
 
+    std::string _arch;
     std::unique_ptr<CkDslContainer> _container;
     std::unique_ptr<::CkDslHandle> _handle;
     std::unique_ptr<ConvImplicitGemmPlanBuilder> _planBuilder;
@@ -192,13 +200,13 @@ TEST_P(IntegrationGpuCkDslConvFp16Gpu, Conv) {
         /*dilations=*/{cse.dilH, cse.dilW},
         /*padding=*/{cse.padH, cse.padW});
 
-    // Force D->H on the GPU output so subsequent host reads see the
-    // kernel's writes. markDeviceModified is what tells the migration
-    // layer "device has the canonical version, copy when hostData is
-    // requested next."
+    // Force D->H on the GPU output so the comparison below sees the
+    // kernel's writes. markDeviceModified tells the migration layer
+    // "device has the canonical version, copy when hostData is requested
+    // next"; reading hostData() once forces that copy before the tensor
+    // diff walks the buffer via its host view.
     tensorYGpu.memory().markDeviceModified();
-    const half* gpuOut = tensorYGpu.memory().hostData();
-    const half* cpuOut = tensorYCpu.memory().hostData();
+    (void)tensorYGpu.memory().hostData();
 
     // Tolerance bound (per plan §1 + PREP_FINDINGS): expected error
     // for K_gemm random-uniform fp16 accumulations is roughly
@@ -206,42 +214,26 @@ TEST_P(IntegrationGpuCkDslConvFp16Gpu, Conv) {
     // shapes here stays well under 1e-3. We use a generous 5e-2
     // absolute tolerance to accommodate accumulation tail behaviour
     // without making the test brittle to minor codegen reshufflings.
+    //
+    // computeTensorDiff (hipdnn_test_sdk) is the shared comparison
+    // oracle: it walks both tensors over their logical dims via host
+    // TensorViews and reports the mismatch count + worst offenders, so
+    // the provider does not hand-roll its own element loop.
     constexpr float kAbsTol = 5.0e-2f;
-    std::size_t mismatches = 0;
-    std::size_t firstMismatchIdx = 0;
-    float worstError = 0.0f;
-    float worstGpu = 0.0f;
-    float worstCpu = 0.0f;
+    constexpr float kRelTol = 0.0f;
+    auto diff = hipdnn_test_sdk::utilities::computeTensorDiff<half>(tensorYCpu, tensorYGpu, kAbsTol,
+                                                                    kRelTol);
 
-    // ``memory().count()`` is the element span -- packed NHWC is
-    // exactly N*K*Ho*Wo elements with no gap. Both tensors share the
-    // same layout so a linear walk visits matching logical positions
-    // in matching order.
-    const std::size_t numElements = tensorYGpu.memory().count();
-    for (std::size_t i = 0; i < numElements; ++i) {
-        const float gpu = static_cast<float>(gpuOut[i]);
-        const float cpu = static_cast<float>(cpuOut[i]);
-        const float diff = std::fabs(gpu - cpu);
-        if (diff > worstError) {
-            worstError = diff;
-            worstGpu = gpu;
-            worstCpu = cpu;
-        }
-        if (diff > kAbsTol) {
-            if (mismatches == 0) {
-                firstMismatchIdx = i;
-            }
-            ++mismatches;
-        }
+    if (diff.mismatchCount != 0u) {
+        std::ostringstream diffMsg;
+        hipdnn_test_sdk::utilities::printTensorDiffSummary(diffMsg, std::string("Y/") + cse.name,
+                                                           diff);
+        ADD_FAILURE() << "shape '" << cse.name << "' on " << _arch << ": " << diff.mismatchCount
+                      << " of " << diff.totalElements
+                      << " elements outside tolerance (atol=" << kAbsTol << ")\n"
+                      << diffMsg.str();
     }
-
-    EXPECT_EQ(mismatches, 0u) << "shape '" << cse.name << "': found " << mismatches
-                              << " elements outside the " << kAbsTol << " tolerance ("
-                              << static_cast<double>(mismatches) /
-                                     static_cast<double>(numElements) * 100.0
-                              << "%); first mismatch at linear index " << firstMismatchIdx
-                              << "; worst diff " << worstError << " (gpu=" << worstGpu
-                              << ", cpu=" << worstCpu << ")";
+    const float worstError = diff.maxAbsDiff;
 
     // Perf measurement (no perf-target assertion, log only per Q9).
     // FLOPS formula from plan §4: 2 * N * Ho * Wo * K * C * R * S.

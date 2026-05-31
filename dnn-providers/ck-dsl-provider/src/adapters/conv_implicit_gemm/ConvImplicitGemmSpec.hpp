@@ -81,13 +81,14 @@ struct ConvProblem {
 ///   * ``k0_k1_split`` -- defaults ``False``;
 ///   * ``groups`` -- defaults ``1``.
 ///
-/// The DSL's default is the gfx950-tuned config (tile 64x64x64, warp
+/// The struct defaults are the gfx950-tuned config (tile 64x64x64, warp
 /// 2x2, MFMA atom 32x32x16, ``mem`` pipeline, ``default`` epilogue,
 /// wave64): valid on gfx950, but gfx942/gfx1151 need a different atom
-/// and/or wave size.
-/// The provider tests supply those per-arch example configs explicitly
-/// rather than relying on these defaults (the cross-arch example config
-/// is a test concern, not a production one). ``name`` keeps a
+/// and/or wave size. The arch-dependent knobs (the warp-tile atom +
+/// wave size) are not consumed straight from these defaults in
+/// production: ``ConvImplicitGemmAdapter::applyArchCodegenConfig`` over-
+/// writes them with the per-arch config once the device arch is known,
+/// so the same provider runs on gfx942/gfx950/gfx1151. ``name`` keeps a
 /// provider-specific prefix for kernel identification in profiles.
 struct ConvImplicitGemmSpec {
     ConvProblem problem;

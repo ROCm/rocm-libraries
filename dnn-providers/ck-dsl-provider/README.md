@@ -178,13 +178,17 @@ this plugin is the first embedder).
   suite covering the interpreter, bridge, adapter, payload
   round-trip, signature, cache, plan-builder, launch ABI, and
   perf-measurement helpers.
-- `ninja ck-dsl-provider-integration-check` — end-to-end conv-fwd at
-  the example shape on a gfx950 device, comparing against
-  `CpuFpReferenceConvolution::fprop` and logging kernel time +
-  TFLOPS via the `PerfMeasurement` helper.
+- `ninja ck-dsl-provider-integration-check` — end-to-end conv-fwd
+  across a set of shapes on whatever DSL-supported device is present
+  (gfx942 / gfx950 / gfx1151), comparing against
+  `CpuFpReferenceConvolution::fprop` (via the `computeTensorDiff` test
+  helper) and logging kernel time + TFLOPS via the `PerfMeasurement`
+  helper. The production plan builder detects the device arch and the
+  adapter's `applyArchCodegenConfig` selects a valid per-arch codegen
+  config, so the same graph runs on each supported arch.
 
-GPU-gated tests skip cleanly on hosts without a HIP-visible device;
-the integration test additionally skips on non-gfx950 hardware.
+GPU-gated tests skip cleanly on hosts without a HIP-visible device or
+on an arch outside the DSL-supported set.
 
 ## Design plan
 
