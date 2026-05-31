@@ -772,7 +772,7 @@ validParameters = { # we need to make sure this matches develop
     #   1 = 1 WG per CU (default), for example. 2 will launch WGs = 2 x CU count.
     # The priority of these environment variables is defined as follows:
     # TENSILE_STREAMK_FIXED_GRID > TENSILE_STREAMK_DYNAMIC_GRID > TENSILE_STREAMK_MAX_CUS > TENSILE_STREAMK_GRID_MULTIPLIER
-    "StreamK": [0, 1, 2, 3],
+    "StreamK": [0, 1, 2, 3, 4],
     # Determines if StreamK kernel uses atomics
     # 0: uses workspace to store partial tiles, accumulate in deterministic fix-up step
     # 1: uses atomics to accumulate partial tiles
@@ -795,6 +795,10 @@ validParameters = { # we need to make sure this matches develop
     #   2 = No partials
     #   3 = Nofixup and no partials
     "DebugStreamK": [0, 1, 2, 3],
+    # Persistent-kernel debug: when True, the persistent loop never exits.
+    # Used as a co-tenant load kernel for contended-perf benchmarking.
+    # Termination is via process death. Requires StreamK = 1, 2, or 3.
+    "DebugPersistentKernelLoopForever": [False, True],
     # Controls desired width (#elements) for loads from global memory -> LDS.
     # and eliminates the pointer unshift logic
     # -1 : Set GlobalReadVectorWidth =  VectorWidth
@@ -825,7 +829,7 @@ validParameters = { # we need to make sure this matches develop
     # Typically matching 16 bytes is good choice since the stores will be optimally coalesced with 16 bytes/WI.
     # Using a VW too large which results in >16bytes/thread isn't supported
     # For MFMA non SourceSwap: this parameter didn't take effect
-    # -1 means set vw to largest localReadWidth according to MIWaveTile
+    # -1 means set vw to largest localReadWidth according to MIWaveTile, LDS padding and LDS capacity
     "VectorWidthA": [-1, 1, 2, 3, 4, 6, 8],
     "VectorWidthB": [-1, 1, 2, 3, 4, 6, 8],
     # If 0, store 1 element per instruction.
@@ -1026,6 +1030,8 @@ validParameters = { # we need to make sure this matches develop
     #   "Auto":        triggers defaulting in Solution.assignDerivedParameters. The default is
     #                  TDM iff TDMInst != 0, otherwise BufferLoad.
     "MXLoadInst": ["Auto", "TDM", "BufferLoad", "GlobalLoad"],
+    # Enable cluster barrier.
+    "ClusterBarrier": [False, True],
     # Cluster dimension. Clusters have up to 16 work-groups in a cluster, but each work-group in a
     # cluster runs on a separate WGP.
     "ClusterDim": validClusterDimensions,
