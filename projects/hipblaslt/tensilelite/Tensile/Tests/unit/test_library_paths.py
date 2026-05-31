@@ -42,6 +42,7 @@ from Tensile.TensileCreateLibrary.Run import (
     _singleArchDir,
     libraryDir,
     libraryRoot,
+    tensileLibraryFile,
 )
 
 # The path-based auto-marker in Tensile/Tests/conftest.py only fires when
@@ -154,3 +155,46 @@ def test_singleArchDir_raisesOnMultipleGfxSubdirs(tmp_path):
     (lib / "gfx950").mkdir()
     with pytest.raises(RuntimeError, match="Caller must pass the arch explicitly"):
         _singleArchDir(tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# tensileLibraryFile: canonical "library/<base>/TensileLibrary.<ext>" path
+# ---------------------------------------------------------------------------
+# This is the file writeClientConfigIni's libraryFile argument must point
+# at under the per-base layout. BenchmarkProblems' cache-hit branch and
+# (historically) ClientWriter both composed this string by hand; the
+# helper makes it a single source of truth so a future format/extension
+# change touches one site instead of many.
+def test_tensileLibraryFile_msgpack_extension(tmp_path):
+    # Default format (None / "msgpack" / anything not "yaml") -> .dat
+    assert tensileLibraryFile(tmp_path, "gfx942") == tmp_path / "library" / "gfx942" / "TensileLibrary.dat"
+
+
+def test_tensileLibraryFile_yaml_extension(tmp_path):
+    assert tensileLibraryFile(tmp_path, "gfx942", "yaml") == tmp_path / "library" / "gfx942" / "TensileLibrary.yaml"
+
+
+def test_tensileLibraryFile_msgpack_explicit(tmp_path):
+    # An explicit "msgpack" must produce the same .dat path as the default.
+    assert tensileLibraryFile(tmp_path, "gfx942", "msgpack") == tensileLibraryFile(tmp_path, "gfx942")
+
+
+@pytest.mark.parametrize(
+    "cooked",
+    ["gfx942:xnack+", "gfx942:xnack-", "gfx942:sramecc+:xnack+"],
+)
+def test_tensileLibraryFile_stripsTargetFeatures(tmp_path, cooked):
+    # Cooked variants must collapse to the same base directory -- the
+    # runtime probe strips at the first colon, so the writer must too.
+    assert tensileLibraryFile(tmp_path, cooked) == tmp_path / "library" / "gfx942" / "TensileLibrary.dat"
+
+
+def test_tensileLibraryFile_acceptsStringPath(tmp_path):
+    assert tensileLibraryFile(str(tmp_path), "gfx950", "yaml") == tmp_path / "library" / "gfx950" / "TensileLibrary.yaml"
+
+
+def test_tensileLibraryFile_unknownFormatFallsBackToMsgpack(tmp_path):
+    # We treat any non-"yaml" value as msgpack so callers can pass the raw
+    # globalParameters["LibraryFormat"] without pre-validating. Catching
+    # an unknown value here would surprise a caller mid-pipeline.
+    assert tensileLibraryFile(tmp_path, "gfx942", "weird-format-name") == tmp_path / "library" / "gfx942" / "TensileLibrary.dat"
