@@ -50,7 +50,7 @@ from .BenchmarkStructs import BenchmarkProcess, constructForkPermutations
 from .Contractions import ProblemType as ContractionsProblemType
 from .ClientWriter import runClient, writeClientConfig, writeClientConfigIni, getClientExecutablePath
 from .KernelWriterAssembly import KernelWriterAssembly
-from .TensileCreateLibrary import copyStaticFiles, libraryDir, writeSolutionsAndKernels
+from .TensileCreateLibrary import copyStaticFiles, libraryDir, tensileLibraryFile, writeSolutionsAndKernels
 from .CustomKernels import getCustomKernelConfig
 from .Toolchain.Assembly import AssemblyToolchain
 from .Toolchain.Source import SourceToolchain
@@ -617,8 +617,7 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
             conProblemType = ContractionsProblemType.FromOriginalState(ssProblemType)
             outFile = os.path.join(sourcePath, "ClientParameters.ini")
 
-            libraryExt = ".yaml" if globalParameters["LibraryFormat"] == "yaml" else ".dat"
-            cachedLibraryFile = os.path.join(libraryDir(sourcePath, gfxName), "TensileLibrary" + libraryExt)
+            cachedLibraryFile = tensileLibraryFile(sourcePath, gfxName, globalParameters["LibraryFormat"])
             if not os.path.isfile(cachedLibraryFile):
                 printExit(
                     f"cache.yaml refers to a library file that no longer "
