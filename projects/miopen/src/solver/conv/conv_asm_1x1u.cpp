@@ -349,10 +349,11 @@ bool PerformanceConfigConvAsm1x1U::IsValidImpl(const ProblemDescription& problem
     }
     if(sequence_length > 6)
     {
-        if(!(waves_c_in_group <= problem.GetInChannels()))
+        auto inChannels = int{problem.GetInChannels()};
+        if(!(waves_c_in_group <= inChannels))
             return false;
-        const int c_per_wave = (problem.GetInChannels() + waves_c_in_group - 1) / waves_c_in_group;
-        const int c_per_last_wave = problem.GetInChannels() - c_per_wave * (waves_c_in_group - 1);
+        const int c_per_wave = (inChannels + waves_c_in_group - 1) / waves_c_in_group;
+        const int c_per_last_wave = inChannels - c_per_wave * (waves_c_in_group - 1);
         if(c_per_wave % c_mult != 0 || c_per_last_wave % c_mult != 0)
             return false;
     }
