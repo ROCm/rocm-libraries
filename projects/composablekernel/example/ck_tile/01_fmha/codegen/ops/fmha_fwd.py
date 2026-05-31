@@ -399,10 +399,13 @@ class FmhaFwdApiTrait:
 
     @property
     def block_mask_check(self) -> str:
-        # hdim=256 + trload dispatches to operator_impl_hdim256 which lacks block sparsity skip
-        if self.bm0 == 128 and self.bn0 == 128 and not (int(self.hdim) == 256 and self.tr_load == "t"):
+        # hdim=256 pipelines are disabled: the QR non-trload path has correct source but is
+        # miscompiled (AMDGPU AsmPrinter drops an S_AND_B64 whose SCC side-effect is live),
+        # and the trload path lacks block sparsity skip logic entirely.
+        if self.bm0 == 128 and self.bn0 == 128 and int(self.hdim) != 256:
             return "true"
         return "a.block_mask_ptr == nullptr"
+
 
 @dataclass
 class FmhaFwdPipeline:
@@ -1343,6 +1346,7 @@ class KernelComponentFactoryGfx12(CompatibilityRuleFactory):
                 pipelines.append(FmhaFwdPipeline("qr", "row", "t", "t", "t", "t", logits, bias, "f", "f", qscale, mask, "f", "f", "f"))  # fmt: skip
         return pipelines
 
+
 class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
     arch = ArchTrait("gfx125")
 
@@ -1406,6 +1410,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 pipelines.append(FmhaFwdPipeline("qr", "row", "f", "f", "f", "f", logits, bias, "f", "f", qscale, mask, "f", "f", "f"))  # fmt: skip
                 pipelines.append(FmhaFwdPipeline("qr", "row", "t", "t", "t", "t", logits, bias, "f", "f", qscale, mask, "f", "f", "f"))  # fmt: skip
         return pipelines
+
 
 class CustomFactory(KernelComponentFactoryGfx9, CompatibilityRuleFactoryGfx9):
     @classmethod
