@@ -627,6 +627,12 @@ class _Lowerer:
         if flavor == LLVM_FLAVOR_LLVM22:
             self._decls.update(_INTRINSIC_DECLS_LLVM22_OVERRIDES)
         self._needs_intrin: Dict[str, bool] = {}
+        # Set when an f32 global atomic-add is lowered with the
+        # native-hardware-fadd metadata (no.fine.grained / no.remote
+        # memory). Lets the AMDGPU backend emit a single
+        # ``global_atomic_add_f32`` instruction instead of a
+        # compare-and-swap retry loop.
+        self._needs_fp_atomic_md: bool = False
         self._smem_globals: List[Tuple[str, SmemType]] = []
         self._smem_storage_name: Dict[str, str] = {}  # IR value name -> @global name
         self._blocks: List[_Block] = [_Block("entry")]
@@ -1488,10 +1494,29 @@ class _Lowerer:
         # Float atomicrmw needs an explicit ``fadd`` op on AMDGPU; int
         # atomicrmw uses ``add``. Both compile down to the right
         # ``global_atomic_*`` instruction.
-        rmw_op = "fadd" if val.type.name == "f32" else "add"
+        is_f32 = val.type.name == "f32"
+        rmw_op = "fadd" if is_f32 else "add"
+        # For f32 fadd on gfx9/CDNA, a bare ``atomicrmw fadd`` lowers to a
+        # compare-and-swap retry loop (``global_atomic_cmpswap``) because
+        # the native ``global_atomic_add_f32`` is only safe on coarse-
+        # grained, device-local memory. Attach the AMDGPU memory-model
+        # metadata (``!amdgpu.no.fine.grained.memory`` /
+        # ``!amdgpu.no.remote.memory`` / ``!amdgpu.ignore.denormal.mode``)
+        # so the backend emits the single-instruction hardware FP atomic.
+        # Our atomic-reduce epilogues (MoE down+reduce, split-K) target
+        # device-local HBM with fp32 accumulators, which satisfies this
+        # contract. See HEATMAP MoE fuse-down-reduce lever.
+        md = ""
+        if is_f32:
+            self._needs_fp_atomic_md = True
+            md = (
+                ", !amdgpu.no.fine.grained.memory !1"
+                ", !amdgpu.no.remote.memory !1"
+                ", !amdgpu.ignore.denormal.mode !1"
+            )
         self._current().emit(
             f"  {op.result.name} = atomicrmw {rmw_op} ptr addrspace(1) {gep}, "
-            f"{elem_ty} {self._operand(val)} {ordering}"
+            f"{elem_ty} {self._operand(val)} {ordering}{md}"
         )
 
     def _op_memref_global_atomic_add_pk_bf16(self, op: Op) -> None:
@@ -2880,9 +2905,13 @@ class _Lowerer:
             f"{self._operand(ptr)}, i32 {self._operand(idx)}"
         )
         tmp = self._fresh("a")
+        self._needs_fp_atomic_md = True
         self._current().emit(
             f"  {tmp} = atomicrmw fadd ptr addrspace(1) {gep}, "
             f'float {self._operand(val)} syncscope("agent") monotonic, align 4'
+            ", !amdgpu.no.fine.grained.memory !1"
+            ", !amdgpu.no.remote.memory !1"
+            ", !amdgpu.ignore.denormal.mode !1"
         )
 
     def _op_vector_extract(self, op: Op) -> None:
@@ -3477,6 +3506,12 @@ class _Lowerer:
             "attributes #0 = { " + " ".join(attr_parts) + " norecurse nounwind }"
         )
         out.append("")
+        # Empty metadata node referenced by f32 ``atomicrmw fadd`` to opt
+        # into the native hardware FP atomic (see
+        # ``_op_memref_global_atomic_add``).
+        if self._needs_fp_atomic_md:
+            out.append("!1 = !{}")
+            out.append("")
         return "\n".join(out)
 
 

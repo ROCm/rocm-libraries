@@ -119,8 +119,10 @@ from .moe_gemm_fused import (
     build_moe_gate_up_silu_gemm,
     build_moe_interleaved_gate_up_silu_gemm,
     moe_down_reduce_gemm_grid,
+    moe_down_reduce_gemm_grouped_grid,
     moe_down_reduce_gemm_signature,
     moe_gate_up_silu_gemm_grid,
+    moe_gate_up_silu_gemm_grouped_grid,
     moe_gate_up_silu_gemm_signature,
     moe_interleaved_gate_up_silu_gemm_grid,
     moe_interleaved_gate_up_silu_gemm_signature,
@@ -258,6 +260,60 @@ def _large_batch_gemm_tile() -> TileSpec:
     )
 
 
+def _sparse_batch_gemm_tile() -> TileSpec:
+    """Measured winner for sparse-routing large-hidden shapes (E >> T*K/E).
+
+    For sparse MoE (datacenter T128/E32/K5/H8192/I8192: ~20 routed tokens
+    per expert) the per-expert padded GEMM rounds each expert's token
+    count up to ``tile_m``. With the dense ``_large_batch_gemm_tile``
+    ``tile_m=64`` that means ~20 real rows in a 64-row tile -> 3.2x of the
+    MFMA work is on padded zero rows. Halving ``tile_m`` to 32 (and
+    widening ``tile_n`` to 256 / ``warp_n`` to 4 to keep the warp tiling
+    full) cuts the per-expert row rounding 64 -> 32 and roughly halves the
+    padded GEMM work.
+
+    Sweep result (perf_moe, best-of-5, datacenter T128/E32/K5/H8192/I8192,
+    dynamic path on gfx950 / MI355X):
+
+    * ``_large_batch_gemm_tile`` (t64n128k64 w2x2): 3.91 ms
+    * t32n256k64 w1x4:                              3.48 ms
+    * t32n128k128 w1x2 (this tile):                ~3.24 ms (deeper
+      ``tile_k=128`` lifts the dominant gate+up GEMM's arithmetic
+      intensity over the t32n256k64 variant)
+
+    The wide ``32x32x16`` f16 atom is gfx950-only; gfx942 callers fall
+    back to the narrow-K atom in :class:`FusedMoeForward.__init__`.
+    """
+    return TileSpec(
+        tile_m=32,
+        tile_n=128,
+        tile_k=128,
+        warp_m=1,
+        warp_n=2,
+        warp_tile_m=32,
+        warp_tile_n=32,
+        warp_tile_k=16,
+    )
+
+
+def _sparse_batch_gemm_tile_gfx942() -> TileSpec:
+    """gfx942 (CDNA3) variant of :func:`_sparse_batch_gemm_tile`.
+
+    gfx942 lacks the wide f16 ``32x32x16`` atom; use the narrow
+    ``32x32x8`` atom (same outer geometry).
+    """
+    return TileSpec(
+        tile_m=32,
+        tile_n=128,
+        tile_k=128,
+        warp_m=1,
+        warp_n=2,
+        warp_tile_m=32,
+        warp_tile_n=32,
+        warp_tile_k=8,
+    )
+
+
 def _resolve_launch_arch(arch: "str | None") -> str:
     """Resolve a launch-path target arch.
 
@@ -376,13 +432,27 @@ class FusedMoeForwardSpec:
     False. The dual-B experimental path (``use_experimental_fused_*``)
     takes precedence if both flags are set.
     """
-    use_experimental_fused_down_reduce: bool = False
-    """Use experimental down-GEMM + topk-reduce fused kernel.
+    use_experimental_fused_down_reduce: bool = True
+    """Use the down-GEMM + topk-reduce fused kernel (default on).
 
     Computes down GEMM and performs the weighted f32 atomic-add into
     ``Y`` directly from the MFMA accumulator, removing ``DownOut`` and
-    the separate ``topk_reduce`` launch. Kept opt-in until tuned and
-    proven faster than the graph-captured default.
+    the separate ``topk_reduce`` launch.
+
+    Now default-on after tuning: the atomic epilogue's f32 ``atomicrmw
+    fadd`` is lowered with the AMDGPU native-FP-atomic memory-model
+    metadata (``core/lower_llvm.py``), so each weighted reduce is a
+    single ``global_atomic_add_f32`` instruction rather than a
+    ``global_atomic_cmpswap`` retry loop. Measured on gfx950 (perf_moe,
+    best-of-N, graph-replay):
+
+    * decode  T8 E8 K2 H4096 I7168 : 0.369 ms -> 0.329 ms  (~10.5% faster)
+    * decode  T1/T16 (same H/I)    : same ~10-12% win
+    * datacenter T128 E32 K5 H8192 I8192 : neutral (3.93 -> 3.92 ms,
+      compute-bound down GEMM; fusion savings amortized)
+
+    Parity is byte-identical to the two-kernel path (max_abs unchanged).
+    Set False to restore the legacy DownOut + separate topk_reduce path.
     """
     use_experimental_static_scatter_gather: bool = False
     """Fuse static scatter and gather into one streaming kernel.
@@ -433,8 +503,50 @@ class FusedMoeForwardSpec:
     weight tensor ``WGateUp[e, 2*i, :] = W_gate[e, i, :];
     WGateUp[e, 2*i+1, :] = W_up[e, i, :]``.
     """
-    active_tile_skip_gemms: bool = False
+    use_grouped_gemm: bool = True
+    """Use the grouped sorted-token GEMM dispatch for the dynamic path.
+
+    The default (batched) dynamic path pads every expert's GEMM slot to a
+    uniform ``MAX_PADDED_M`` and dispatches one launch over ``E`` batches
+    (``block_id_z = expert``). For sparse routing (E >> routed tokens per
+    expert -- e.g. the datacenter shape T128/E32/K5: ~20 tokens/expert)
+    that runs full ``MAX_PADDED_M``-row MFMA tiles per expert, of which
+    most rows are padded zeros.
+
+    With this flag on, the dynamic path instead packs the routed tokens
+    into a dense tile-aligned layout (each expert's ``count[e]`` rows
+    rounded up to ``tile_m``, concatenated) and dispatches the
+    ``grouped=True`` interleaved-gate-up-silu + down-reduce kernels over a
+    flat M-block grid where each block looks up its expert from a
+    host-built ``BlockExpertIds`` array. Total GEMM rows collapse from
+    ``E * MAX_PADDED_M`` to ``sum_e ceil(count[e]/tile_m) * tile_m``
+    (~total routed tokens rounded to ``tile_m``).
+
+    Measured on gfx950 / MI355X (perf_moe, best-of-5, datacenter
+    T128/E32/K5/H8192/I8192): the GEMM row count drops ~2x and the
+    forward speeds up correspondingly. Numerically parity-clean
+    (max_abs unchanged). Strict win for sparse routing; for dense
+    routing (every expert fills its tile) it degenerates to the same
+    row count as the batched path.
+
+    Only affects the dynamic (host-roundtrip) path; the static / decode
+    path is unchanged.
+    """
+    active_tile_skip_gemms: bool = True
     """Use ``trait.active_tile_skip=True`` MoE GEMM kernels.
+
+    Default-on after tuning on MI355X (gfx950): inactive expert slots
+    (``-1`` sentinel rows in the over-padded static-offset layout) skip
+    all MFMAs / LDS reads / HBM stores via one ``scf.if`` at CTA entry.
+    Measured (perf_moe, best-of-5, graph-replay):
+
+    * decode  T8 E8 K2 H4096 I7168  : 0.369 -> 0.325 ms  (1.14x)
+    * sparse  T8 E32 K2 H4096 I7168 : 1.070 -> 0.473 ms  (2.26x)
+    * datacenter T128 E32 K5 H8192 I8192 : 3.938 -> 3.929 ms (neutral;
+      dense routing, no static offsets, compute-bound)
+
+    Parity byte-identical (max_abs unchanged). Strict no-op for
+    fully-active calls. Set False to restore the dense GEMM path.
 
     The kernel takes the existing ``sorted_token_ids_padded`` buffer
     plus the ``slot_size`` constant, and at CTA entry checks whether
@@ -598,11 +710,37 @@ class FusedMoeForward:
             and spec.hidden >= 1024
             and spec.tokens >= 32
         ):
-            # _large_batch_gemm_tile uses the wide f16 32x32x16 atom
-            # (gfx950-only); fall back to the narrow f16 tile on gfx942.
-            spec.gemm_tile = (
-                _default_gemm_tile_gfx942() if is_gfx942 else _large_batch_gemm_tile()
-            )
+            # Large-hidden, multi-token regime. Pick the tile by routing
+            # DENSITY (average routed tokens per expert = T*K/E):
+            #
+            # * dense (avg_per_expert > 24, e.g. E=8 T128 K2 -> 32): the
+            #   per-expert GEMM slot fills a 64-row tile, so the wide
+            #   ``_large_batch_gemm_tile`` (tile_m=64) wins (measured
+            #   0.82 vs 0.92 ms on T128/E8/K2/H4096/I7168).
+            # * sparse (avg_per_expert <= 24, e.g. datacenter E=32 T128
+            #   K5 -> 20): each expert's ~20 real rows sit in an
+            #   otherwise-padded tile. ``tile_m=64`` does 3.2x of its
+            #   MFMA work on padded zero rows; the
+            #   ``_sparse_batch_gemm_tile`` (tile_m=32) halves the
+            #   per-expert row rounding and is ~11% faster on the
+            #   datacenter shape (3.91 -> 3.48 ms).
+            #
+            # Both tiles use the wide gfx950-only ``32x32x16`` f16 atom;
+            # gfx942 falls back to the narrow-K atom variants.
+            avg_per_expert = (spec.tokens * spec.topk) / max(1, spec.experts)
+            sparse = avg_per_expert <= 24
+            if sparse:
+                spec.gemm_tile = (
+                    _sparse_batch_gemm_tile_gfx942()
+                    if is_gfx942
+                    else _sparse_batch_gemm_tile()
+                )
+            else:
+                spec.gemm_tile = (
+                    _default_gemm_tile_gfx942()
+                    if is_gfx942
+                    else _large_batch_gemm_tile()
+                )
         elif is_gfx942 and spec.gemm_tile == _default_gemm_tile():
             # f16 decode/small default uses the wide 32x32x16 atom;
             # gfx942 needs the narrow 32x32x8 atom.
@@ -741,6 +879,70 @@ class FusedMoeForward:
                 cache_key=("batched_gemm", spec.kernel_name()),
             )
         return self._batched_gemm_launcher
+
+    def _grouped_gate_up_silu_launcher(self) -> KernelLauncher:
+        """Compile + cache the grouped dual-B gate+up+silu kernel.
+
+        Uses the dual-B kernel (separate ``W_gate`` / ``W_up`` pointers)
+        rather than the interleaved single-B kernel so the grouped path
+        needs no host-built ``(E, 2I, H)`` interleaved weight tensor (an
+        extra ~8 GiB at the datacenter shape); it reads the caller's
+        ``W_gate`` / ``W_up`` slabs directly.
+        """
+        key = ("grouped_gate_up_silu",)
+        cached = self._moe_gemm_launcher_cache.get(key)
+        if cached is not None:
+            return cached
+        spec = self._grouped_gate_up_spec()
+        artifact = compile_kernel(
+            build_moe_gate_up_silu_gemm(spec, arch=self.arch),
+            arch=self.arch,
+            capture_ir_text=False,
+        )
+        launcher = KernelLauncher(
+            hsaco=artifact.hsaco,
+            kernel_name=artifact.kernel_name,
+            signature=moe_gate_up_silu_gemm_signature(spec),
+            cache_key=("moe_grouped_gate_up_silu", spec.kernel_name()),
+        )
+        self._moe_gemm_launcher_cache[key] = launcher
+        return launcher
+
+    def _grouped_gate_up_spec(self) -> FusedGateUpSiluGemmSpec:
+        return FusedGateUpSiluGemmSpec(
+            name=f"{self.spec.name}_gate_up_silu",
+            tile=self.spec.gemm_tile,
+            trait=TraitSpec(pad_m=True, pad_n=True, epilogue="default"),
+            dtype=_gemm_dtype_to_universal(self.spec.dtype),
+            grouped=True,
+        )
+
+    def _grouped_down_reduce_launcher(self) -> KernelLauncher:
+        """Compile + cache the grouped down-reduce kernel."""
+        key = ("grouped_down_reduce",)
+        cached = self._moe_gemm_launcher_cache.get(key)
+        if cached is not None:
+            return cached
+        spec = FusedDownReduceGemmSpec(
+            name=f"{self.spec.name}_down_reduce",
+            tile=self.spec.gemm_tile,
+            trait=TraitSpec(pad_m=True, pad_n=True, epilogue="default"),
+            dtype=_gemm_dtype_to_universal(self.spec.dtype),
+            grouped=True,
+        )
+        artifact = compile_kernel(
+            build_moe_down_reduce_gemm(spec, arch=self.arch),
+            arch=self.arch,
+            capture_ir_text=False,
+        )
+        launcher = KernelLauncher(
+            hsaco=artifact.hsaco,
+            kernel_name=artifact.kernel_name,
+            signature=moe_down_reduce_gemm_signature(spec),
+            cache_key=("moe_grouped_down_reduce", spec.kernel_name()),
+        )
+        self._moe_gemm_launcher_cache[key] = launcher
+        return launcher
 
     def _moe_batched_gemm_launcher(
         self, *, preshuffle_b: bool, active_tile_skip: bool
@@ -1217,6 +1419,177 @@ class FusedMoeForward:
         return problems
 
     # ------------------------------------------------------------------
+    # Grouped sorted-token GEMM dispatch (de-padded dynamic path)
+    # ------------------------------------------------------------------
+
+    def _dispatch_grouped_gemm(
+        self,
+        *,
+        counts_cpu: Any,
+        offsets_cpu: Any,
+        grouped_input: Any,
+        sorted_token_ids: Any,
+        sorted_weights: Any,
+        y_f32: Any,
+        W_gate: Any,
+        W_up: Any,
+        W_down: Any,
+        Y: Any,
+        device: Any,
+        stream: int,
+    ) -> bool:
+        """De-padded grouped GEMM for the dynamic path.
+
+        Packs the routed tokens into a dense, ``tile_m``-aligned per-expert
+        layout (each expert's ``count[e]`` rows rounded up to ``tile_m``,
+        concatenated) and dispatches the ``grouped=True`` interleaved
+        gate+up+silu and down-reduce kernels over a flat M-block grid. Each
+        M-block looks up its expert from a host-built ``BlockExpertIds``
+        array; total GEMM rows = ``num_m_blocks * tile_m`` (~total routed
+        tokens rounded to ``tile_m``) instead of ``E * MAX_PADDED_M``.
+
+        Returns True when it handled the forward (the caller returns),
+        False to fall back to the batched padded path (e.g. degenerate
+        empty routing).
+        """
+        import torch
+
+        from ...runtime.launcher import WorkspaceSpec as _WS
+
+        s = self.spec
+        tile_m = s.gemm_tile.tile_m
+        # Only the M (token) axis is packed here; the N axis (hidden /
+        # intermediate columns) is tiled inside the GEMM kernel's grid, so
+        # tile_n is not needed in this host-side de-padding packer.
+
+        # Per-expert block counts + dense packed block layout.
+        blocks_per_expert = [
+            (int(counts_cpu[e]) + tile_m - 1) // tile_m for e in range(s.experts)
+        ]
+        num_m_blocks = sum(blocks_per_expert)
+        if num_m_blocks == 0:
+            # No tokens routed anywhere; output stays zero.
+            Y.copy_(y_f32.to(Y.dtype))
+            return True
+        total_packed = num_m_blocks * tile_m
+
+        act_dtype = grouped_input.dtype
+        grouped_input_packed = self._pool.get_spec(
+            _WS("GroupedInputPacked", (total_packed, s.hidden), act_dtype, device)
+        )
+        hidden_packed = self._pool.get_spec(
+            _WS("HiddenPacked", (total_packed, s.intermediate), act_dtype, device)
+        )
+        sorted_token_ids_packed = self._pool.get_spec(
+            _WS("SortedTokenIdsPacked", (total_packed,), torch.int32, device)
+        )
+        sorted_weights_packed = self._pool.get_spec(
+            _WS("SortedWeightsPacked", (total_packed,), torch.float32, device)
+        )
+        block_expert_ids = self._pool.get_spec(
+            _WS("BlockExpertIds", (num_m_blocks,), torch.int32, device)
+        )
+
+        # Padded tail rows of partial tiles must read zero A (so their
+        # gate/up GEMM contributes nothing) and carry token id -1 (so the
+        # down-reduce skips their atomic write). ``hidden_packed`` is fully
+        # overwritten by the gate-up kernel, so it needs no pre-zero.
+        grouped_input_packed.zero_()
+        sorted_token_ids_packed.fill_(-1)
+        sorted_weights_packed.zero_()
+
+        # Host-build BlockExpertIds and the dense per-expert copies. The
+        # copies reuse the existing per-expert host loop pattern (one
+        # contiguous slice copy per non-empty expert).
+        block_expert_cpu = torch.empty(num_m_blocks, dtype=torch.int32)
+        blk = 0
+        for e in range(s.experts):
+            be = blocks_per_expert[e]
+            if be == 0:
+                continue
+            block_expert_cpu[blk : blk + be] = e
+            ce = int(counts_cpu[e])
+            uoff = int(offsets_cpu[e])
+            poff = blk * tile_m
+            grouped_input_packed[poff : poff + ce].copy_(
+                grouped_input[uoff : uoff + ce]
+            )
+            sorted_token_ids_packed[poff : poff + ce].copy_(
+                sorted_token_ids[uoff : uoff + ce]
+            )
+            sorted_weights_packed[poff : poff + ce].copy_(
+                sorted_weights[uoff : uoff + ce]
+            )
+            blk += be
+        block_expert_ids.copy_(block_expert_cpu)
+
+        gate_up_launcher = self._grouped_gate_up_silu_launcher()
+        down_launcher = self._grouped_down_reduce_launcher()
+
+        gate_up_grid = moe_gate_up_silu_gemm_grouped_grid(
+            num_m_blocks, s.intermediate, self._grouped_gate_up_spec()
+        )
+        down_grid = moe_down_reduce_gemm_grouped_grid(
+            num_m_blocks, s.hidden, self._grouped_down_spec()
+        )
+        gemm_block = (self.spec.to_batched_gemm_spec().block_size, 1, 1)
+
+        gate_up_callable = make_kernel(
+            gate_up_launcher,
+            {
+                "A": grouped_input_packed,
+                "WGate": W_gate,
+                "WUp": W_up,
+                "Hidden": hidden_packed,
+                "M": total_packed,
+                "N": s.intermediate,
+                "K": s.hidden,
+                "stride_a": 0,  # dense packed A (no per-expert stride)
+                "stride_b": s.intermediate * s.hidden,
+                "stride_c": 0,  # dense packed Hidden
+                "BlockExpertIds": block_expert_ids,
+            },
+            gate_up_grid,
+            gemm_block,
+        )
+        down_callable = make_kernel(
+            down_launcher,
+            {
+                "A": hidden_packed,
+                "WDown": W_down,
+                "SortedTokenIds": sorted_token_ids_packed,
+                "SortedWeights": sorted_weights_packed,
+                "Y": y_f32,
+                "M": total_packed,
+                "N": s.hidden,
+                "K": s.intermediate,
+                "stride_a": 0,  # dense packed Hidden
+                "stride_b": s.hidden * s.intermediate,
+                "slot_size": 0,  # unused in grouped mode
+                "tokens": s.tokens,
+                "BlockExpertIds": block_expert_ids,
+            },
+            down_grid,
+            gemm_block,
+        )
+        launch_kernel(
+            StreamConfig(stream_id=int(stream)),
+            gate_up_callable,
+            down_callable,
+        )
+        Y.copy_(y_f32.to(Y.dtype))
+        return True
+
+    def _grouped_down_spec(self) -> FusedDownReduceGemmSpec:
+        return FusedDownReduceGemmSpec(
+            name=f"{self.spec.name}_down_reduce",
+            tile=self.spec.gemm_tile,
+            trait=TraitSpec(pad_m=True, pad_n=True, epilogue="default"),
+            dtype=_gemm_dtype_to_universal(self.spec.dtype),
+            grouped=True,
+        )
+
+    # ------------------------------------------------------------------
     # Forward
     # ------------------------------------------------------------------
 
@@ -1422,6 +1795,24 @@ class FusedMoeForward:
         counts_cpu = counts.cpu()
         offsets_cpu = offsets.cpu()
         torch.cuda.synchronize()
+
+        if self.spec.use_grouped_gemm:
+            done = self._dispatch_grouped_gemm(
+                counts_cpu=counts_cpu,
+                offsets_cpu=offsets_cpu,
+                grouped_input=grouped_input,
+                sorted_token_ids=sorted_token_ids,
+                sorted_weights=sorted_weights,
+                y_f32=y_f32,
+                W_gate=W_gate,
+                W_up=W_up,
+                W_down=W_down,
+                Y=Y,
+                device=device,
+                stream=stream,
+            )
+            if done:
+                return
 
         # ---------------- Uniform per-expert padded layout ----------------
         # Each expert's GEMM slot has a uniform ``MAX_PADDED_M`` rows
