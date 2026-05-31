@@ -2023,6 +2023,17 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
     {
         auto str = std::stringstream();
 
+        std::map<BlockGemmPipelineScheduler, std::string> BlkGemmPipelineSchedulerToString{
+            {BlockGemmPipelineScheduler::Intrawave, "Intrawave"},
+            {BlockGemmPipelineScheduler::Interwave, "Interwave"}};
+
+        std::map<BlockGemmPipelineVersion, std::string> BlkGemmPipelineVersionToString{
+            {BlockGemmPipelineVersion::v1, "v1"},
+            {BlockGemmPipelineVersion::v2, "v2"},
+            {BlockGemmPipelineVersion::v3, "v3"},
+            {BlockGemmPipelineVersion::v4, "v4"},
+            {BlockGemmPipelineVersion::v5, "v5"}};
+
         // clang-format off
         str << "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3";
 
@@ -2056,6 +2067,15 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
             << CBlockTransferScalarPerVector_NWaveNPerXdl;
             if constexpr(NumGroupsToMerge > 1) 
                 str << ", " << NumGroupsToMerge;
+            if constexpr(LargeTensors) {
+                // Should be added for all instances but due to backward compatiblity,
+                // there is a lack of this information for other instances than Large
+                // Tensors.
+                str << ", BlkGemmPipelineScheduler: "
+                << BlkGemmPipelineSchedulerToString[BlkGemmPipeSched] << ", "
+                << "BlkGemmPipelineVersion: "
+                << BlkGemmPipelineVersionToString[BlkGemmPipelineVer];
+            }
             str << ">";
         // clang-format on
 
