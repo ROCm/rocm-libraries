@@ -45,10 +45,10 @@ question. They are integers (compile-time), not IR values.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Union
 
 from ..core.ir import IRBuilder, Value
-from .atoms import MfmaAtom
+from .atoms import MfmaAtom, WmmaAtom
 
 
 @dataclass(frozen=True)
@@ -121,7 +121,7 @@ class WarpGrid:
     @classmethod
     def from_atom(
         cls,
-        atom: MfmaAtom,
+        atom: Union[MfmaAtom, WmmaAtom],
         *,
         tile_m: int,
         tile_n: int,
@@ -129,12 +129,20 @@ class WarpGrid:
         warp_m: int,
         warp_n: int,
         warp_k: int = 1,
-        wave_size: int = 64,
+        wave_size: Optional[int] = None,
     ) -> "WarpGrid":
-        """Build an unbound grid from an MFMA atom + block tile + warp grid.
+        """Build an unbound grid from an MMA atom + block tile + warp grid.
+
+        Accepts either an :class:`~ck_dsl.helpers.atoms.MfmaAtom` (CDNA,
+        wave64) or a :class:`~ck_dsl.helpers.atoms.WmmaAtom` (RDNA, wave32);
+        only the atom's ``m``/``n``/``k`` warp-tile shape is consumed here.
+        ``wave_size`` defaults to the atom's own ``wave_size`` when the atom
+        exposes one (``WmmaAtom`` -> 32), else 64 for the MFMA atoms.
 
         Use `bind(b, ...)` to materialise the IR values.
         """
+        if wave_size is None:
+            wave_size = getattr(atom, "wave_size", 64)
         return cls(
             tile_m=tile_m,
             tile_n=tile_n,
@@ -146,6 +154,39 @@ class WarpGrid:
             warp_tile_n=atom.n,
             warp_tile_k=atom.k,
             wave_size=wave_size,
+        )
+
+    @classmethod
+    def from_wmma(
+        cls,
+        atom: WmmaAtom,
+        *,
+        tile_m: int,
+        tile_n: int,
+        tile_k: int,
+        warp_m: int,
+        warp_n: int,
+        warp_k: int = 1,
+    ) -> "WarpGrid":
+        """RDNA convenience: :meth:`from_atom` pinned to the WMMA wave32 ABI.
+
+        Equivalent to ``from_atom(atom, ..., wave_size=32)`` but documents the
+        RDNA intent and rejects a non-WMMA atom early.
+        """
+        if getattr(atom, "family", None) != "wmma":
+            raise ValueError(
+                f"from_wmma expects a WMMA atom (family='wmma'); got "
+                f"{getattr(atom, 'name', atom)!r}"
+            )
+        return cls.from_atom(
+            atom,
+            tile_m=tile_m,
+            tile_n=tile_n,
+            tile_k=tile_k,
+            warp_m=warp_m,
+            warp_n=warp_n,
+            warp_k=warp_k,
+            wave_size=32,
         )
 
     # ---- binding ----

@@ -138,7 +138,7 @@ from .analysis import (
 from .benchmark import BenchmarkSummary, benchmark_manifest, summarize_runs
 
 # ---- transforms ----
-from .transforms import (
+from .helpers.transforms import (
     CoordVar,
     Indirect,
     PadDynamic,

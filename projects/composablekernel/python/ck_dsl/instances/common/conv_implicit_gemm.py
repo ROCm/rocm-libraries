@@ -74,7 +74,7 @@ from ...helpers.spec import choose_load_vec
 from ...helpers.tensor_view import (
     make_buffer_resource,
 )
-from ...transforms import TensorDescriptor, embed, pad, unmerge
+from ...helpers.transforms import TensorDescriptor, embed, pad, unmerge_magic
 
 
 # ---------------------------------------------------------------------
@@ -364,8 +364,7 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
     family = "wmma" if target.wave_size == 32 else "mma"
     if spec.wave_size != target.wave_size:
         return False, (
-            f"spec wave_size {spec.wave_size} != {arch} wave_size "
-            f"{target.wave_size}"
+            f"spec wave_size {spec.wave_size} != {arch} wave_size {target.wave_size}"
         )
 
     # MMA atom must be in the target's catalog (f16 in/out fp32 acc).
@@ -475,7 +474,7 @@ def make_a_descriptor(p: ConvProblem) -> TensorDescriptor:
     blend wrong weights into the accumulator.
     """
     transforms = [
-        unmerge(upper="m", into=["n", "ho", "wo"], dims=[p.N, p.Ho, p.Wo]),
+        unmerge_magic(upper="m", into=["n", "ho", "wo"], dims=[p.N, p.Ho, p.Wo]),
         embed(
             upper=["ho", "r"],
             into="hi",
@@ -492,7 +491,7 @@ def make_a_descriptor(p: ConvProblem) -> TensorDescriptor:
             lo=0,
             hi=p.Wi,
         ),
-        unmerge(upper="k", into=["r", "s", "c"], dims=[p.R, p.S, p.C]),
+        unmerge_magic(upper="k", into=["r", "s", "c"], dims=[p.R, p.S, p.C]),
     ]
     # Only add r/s pads if K_gemm doesn't cleanly divide expected tile_k
     # multiples; today we always include them for safety. They are cheap
@@ -540,7 +539,7 @@ def make_b_descriptor(p: ConvProblem) -> TensorDescriptor:
         dtype=F16,
         coord_names=["k_out", "r", "s", "c"],
     ).transform(
-        unmerge(upper="k_gemm", into=["r", "s", "c"], dims=[p.R, p.S, p.C]),
+        unmerge_magic(upper="k_gemm", into=["r", "s", "c"], dims=[p.R, p.S, p.C]),
         pad("r", lo=0, hi=p.R),
         pad("s", lo=0, hi=p.S),
     )
@@ -558,7 +557,7 @@ def make_d_descriptor(p: ConvProblem) -> TensorDescriptor:
         dtype=F16,
         coord_names=["n", "ho", "wo", "k_out"],
     ).transform(
-        unmerge(upper="m", into=["n", "ho", "wo"], dims=[p.N, p.Ho, p.Wo]),
+        unmerge_magic(upper="m", into=["n", "ho", "wo"], dims=[p.N, p.Ho, p.Wo]),
     )
 
 
@@ -966,8 +965,13 @@ def build_implicit_gemm_conv(
                 atom_row = b.add(warp_m_off, b.const_i32(mi * spec.warp_tile_m))
                 a_rows.append(
                     _emit_frag_smem_load(
-                        b, A_src, a_row_in_atom, a_k_in_atom,
-                        atom_row, k_tile_base, a_per_lane,
+                        b,
+                        A_src,
+                        a_row_in_atom,
+                        a_k_in_atom,
+                        atom_row,
+                        k_tile_base,
+                        a_per_lane,
                     )
                 )
             b_cols = []
@@ -975,8 +979,13 @@ def build_implicit_gemm_conv(
                 atom_row = b.add(warp_n_off, b.const_i32(ni * spec.warp_tile_n))
                 b_cols.append(
                     _emit_frag_smem_load(
-                        b, B_src, b_col_in_atom, b_k_in_atom,
-                        atom_row, k_tile_base, b_per_lane,
+                        b,
+                        B_src,
+                        b_col_in_atom,
+                        b_k_in_atom,
+                        atom_row,
+                        k_tile_base,
+                        b_per_lane,
                     )
                 )
             flat = 0

@@ -34,6 +34,26 @@ from typing import Optional
 
 from ..analysis.ir import LlvmIrStats
 from ..core.ir import IRBuilder
+from .atoms import MfmaAtom
+
+
+# Element storage size in bytes, used by the ds_read2 16-byte heuristic and the
+# ds_read issue-cycle pick. Mirrors ``sizeof(ADataType)`` in the CK schedulers.
+_DTYPE_BYTES = {
+    "f16": 2,
+    "bf16": 2,
+    "fp8e4m3": 1,
+    "bf8e5m2": 1,
+    "fp4": 1,  # nibble-packed; CK treats the packed storage element as 1 byte
+    "fp6": 1,
+    "f32": 4,
+}
+
+
+def _dtype_bytes(dtype: str) -> int:
+    if dtype not in _DTYPE_BYTES:
+        raise ValueError(f"no element byte-size for dtype {dtype!r}")
+    return _DTYPE_BYTES[dtype]
 
 
 # AMDGPU ``sched_group_barrier`` instruction-class masks, matching the
@@ -50,6 +70,225 @@ VMEM_WRITE = 0x040
 DS_READ = 0x100  # LDS load
 DS_WRITE = 0x200  # LDS store
 TRANS = 0x400  # transcendentals (v_exp_f32, v_log_f32, v_rcp_f32, ...)
+
+
+@dataclass(frozen=True)
+class HotLoopInstList:
+    """Per-iteration instruction counts for the XDLOPS GEMM hot loop.
+
+    Pure-arithmetic port of CK's
+    ``BlockwiseGemmXdlops_pipeline_hotloop_inst``
+    (``ck/utility/blkgemmpipe_scheduler.hpp:20-107``) plus the ck_tile
+    ``HotLoopScheduler`` derivations
+    (``gemm_pipeline_ag_bg_cr_comp_v3.hpp:269-318``). Given the block tile
+    geometry, the per-buffer vector / LDS widths, the operand dtypes and the
+    :class:`~ck_dsl.helpers.atoms.MfmaAtom` timing, it computes every count the
+    two-stage scheduler needs: A/B buffer-load, A/B LDS write/read, the C MFMA
+    count, and the derived ds_read rates.
+
+    All widths are in **elements** (e.g. ``a_buffer_load_width=8`` = an
+    8-element global load, ``a_lds_read_width=8`` = AK1). ``a_repeat`` /
+    ``b_repeat`` are MRepeat / NRepeat (how many XDL tiles one wave covers along
+    M / N). The MFMA M/N/K and per-shape cycle come from ``atom``.
+
+    Constructed via :meth:`from_geometry` which fills the derived fields.
+    """
+
+    # --- raw geometry inputs (mirrors the C++ template params) ---
+    block_size: int
+    m_per_block: int
+    n_per_block: int
+    k_per_block: int
+    a_buffer_load_width: int
+    b_buffer_load_width: int
+    a_lds_write_width: int
+    b_lds_write_width: int
+    a_lds_read_width: int
+    b_lds_read_width: int
+    m_repeat: int
+    n_repeat: int
+    m_per_xdl: int
+    n_per_xdl: int
+    k_per_xdl: int
+    a_dtype_bytes: int
+    b_dtype_bytes: int
+    a_packed_size: int
+    b_packed_size: int
+    mfma_cycle: int
+    is_f4f6: bool
+
+    # --- derived instruction counts (filled by from_geometry) ---
+    wave_num_m: int
+    wave_num_n: int
+    wave_size: int
+    a_buffer_load_inst_num: int
+    b_buffer_load_inst_num: int
+    a_lds_write_inst_num: int
+    b_lds_write_inst_num: int
+    a_lds_read_inst_num: int
+    b_lds_read_inst_num: int
+    c_mfma_inst_num: int
+
+    @classmethod
+    def from_geometry(
+        cls,
+        *,
+        atom: MfmaAtom,
+        block_size: int,
+        m_per_block: int,
+        n_per_block: int,
+        k_per_block: int,
+        m_repeat: int,
+        n_repeat: int,
+        a_buffer_load_width: int,
+        b_buffer_load_width: int,
+        a_lds_write_width: Optional[int] = None,
+        b_lds_write_width: Optional[int] = None,
+        a_lds_read_width: Optional[int] = None,
+        b_lds_read_width: Optional[int] = None,
+        a_dtype: Optional[str] = None,
+        b_dtype: Optional[str] = None,
+        a_packed_size: int = 1,
+        b_packed_size: int = 1,
+    ) -> "HotLoopInstList":
+        """Build the inst list from tile geometry + dtype + ``atom`` timing.
+
+        The LDS read/write widths default to the atom's K-pack
+        (``a_lds_read_width=atom.k_per_xdlops`` etc., matching the comp_v4
+        ``A_LDS_Read_Width = KPerXDL`` convention and the common AK1==KPerXDL
+        case); pass explicit widths to model a different AK1/BK1. The operand
+        dtypes default to ``atom.dtype_in``.
+        """
+        a_dtype = a_dtype or atom.dtype_in
+        b_dtype = b_dtype or atom.dtype_in
+        k_pack = atom.k_per_xdlops
+        a_lds_write_width = k_pack if a_lds_write_width is None else a_lds_write_width
+        b_lds_write_width = k_pack if b_lds_write_width is None else b_lds_write_width
+        a_lds_read_width = k_pack if a_lds_read_width is None else a_lds_read_width
+        b_lds_read_width = k_pack if b_lds_read_width is None else b_lds_read_width
+
+        m_per_xdl = atom.m
+        n_per_xdl = atom.n
+        k_per_xdl = atom.k_per_xdlops
+
+        wave_num_m = m_per_block // (m_repeat * m_per_xdl)
+        wave_num_n = n_per_block // (n_repeat * n_per_xdl)
+        wave_size = block_size // wave_num_m // wave_num_n
+
+        a_buffer_load_inst_num = (
+            m_per_block * k_per_block // (block_size * a_buffer_load_width)
+        )
+        b_buffer_load_inst_num = (
+            n_per_block * k_per_block // (block_size * b_buffer_load_width)
+        )
+        a_lds_write_inst_num = (
+            m_per_block * k_per_block // (block_size * a_lds_write_width)
+        )
+        b_lds_write_inst_num = (
+            n_per_block * k_per_block // (block_size * b_lds_write_width)
+        )
+        a_lds_read_inst_num = (
+            wave_num_n * m_per_block * k_per_block // (block_size * a_lds_read_width)
+        )
+        b_lds_read_inst_num = (
+            wave_num_m * n_per_block * k_per_block // (block_size * b_lds_read_width)
+        )
+        c_mfma_inst_num = (
+            m_per_block
+            * n_per_block
+            * k_per_block
+            // (block_size // wave_size)
+            // (m_per_xdl * n_per_xdl * k_per_xdl)
+        )
+
+        return cls(
+            block_size=block_size,
+            m_per_block=m_per_block,
+            n_per_block=n_per_block,
+            k_per_block=k_per_block,
+            a_buffer_load_width=a_buffer_load_width,
+            b_buffer_load_width=b_buffer_load_width,
+            a_lds_write_width=a_lds_write_width,
+            b_lds_write_width=b_lds_write_width,
+            a_lds_read_width=a_lds_read_width,
+            b_lds_read_width=b_lds_read_width,
+            m_repeat=m_repeat,
+            n_repeat=n_repeat,
+            m_per_xdl=m_per_xdl,
+            n_per_xdl=n_per_xdl,
+            k_per_xdl=k_per_xdl,
+            a_dtype_bytes=_dtype_bytes(a_dtype),
+            b_dtype_bytes=_dtype_bytes(b_dtype),
+            a_packed_size=a_packed_size,
+            b_packed_size=b_packed_size,
+            mfma_cycle=atom.mfma_cycle,
+            is_f4f6=atom.is_f4f6,
+            wave_num_m=wave_num_m,
+            wave_num_n=wave_num_n,
+            wave_size=wave_size,
+            a_buffer_load_inst_num=a_buffer_load_inst_num,
+            b_buffer_load_inst_num=b_buffer_load_inst_num,
+            a_lds_write_inst_num=a_lds_write_inst_num,
+            b_lds_write_inst_num=b_lds_write_inst_num,
+            a_lds_read_inst_num=a_lds_read_inst_num,
+            b_lds_read_inst_num=b_lds_read_inst_num,
+            c_mfma_inst_num=c_mfma_inst_num,
+        )
+
+    # ---- ds_read2 16-byte heuristic + issue/rate derivations ----
+
+    def _a_read16(self) -> bool:
+        return self.a_lds_read_width * self.a_dtype_bytes // self.a_packed_size == 16
+
+    def _b_read16(self) -> bool:
+        return self.b_lds_read_width * self.b_dtype_bytes // self.b_packed_size == 16
+
+    @property
+    def num_ds_read_inst_a(self) -> int:
+        """A ds_read count after the ds_read2 halving (CK v3:167-170)."""
+        return (
+            self.a_lds_read_inst_num
+            if self._a_read16()
+            else self.a_lds_read_inst_num // 2
+        )
+
+    @property
+    def num_ds_read_inst_b(self) -> int:
+        return (
+            self.b_lds_read_inst_num
+            if self._b_read16()
+            else self.b_lds_read_inst_num // 2
+        )
+
+    @property
+    def ds_read_a_issue_cycle(self) -> int:
+        """8 cycles for a 16-byte ds_read, else 4 (CK v3:185-186)."""
+        return 8 if self._a_read16() else 4
+
+    @property
+    def ds_read_b_issue_cycle(self) -> int:
+        return 8 if self._b_read16() else 4
+
+    @property
+    def ds_read_a_mfma_rate(self) -> int:
+        """ds_reads that fit in one MFMA's shadow (CK v3:189-190)."""
+        c = self.ds_read_a_issue_cycle
+        return (self.mfma_cycle - 4 + 2 * c - 1) // (2 * c)
+
+    @property
+    def ds_read_b_mfma_rate(self) -> int:
+        c = self.ds_read_b_issue_cycle
+        return (self.mfma_cycle - 4 + 2 * c - 1) // (2 * c)
+
+    @property
+    def num_dsread_a_mfma(self) -> int:
+        rate = self.ds_read_a_mfma_rate
+        return (self.num_ds_read_inst_a + rate - 1) // rate
+
+    @property
+    def num_dsread_b_mfma(self) -> int:
+        rate = self.ds_read_b_mfma_rate
+        return (self.num_ds_read_inst_b + rate - 1) // rate
 
 
 @dataclass(frozen=True)
@@ -212,6 +451,135 @@ class SchedulePolicy:
             b.s_setprio(self.compute_low_prio)
         else:
             emit_mfma_fn()
+
+    def emit_hotloop_v3(
+        self,
+        b: IRBuilder,
+        inst_list: HotLoopInstList,
+        *,
+        force: bool = False,
+    ) -> None:
+        """Emit the v3 two-stage ``sched_group_barrier`` HotLoop schedule.
+
+        Exact reproduction of the classic-CK
+        ``blockwise_gemm_pipeline_xdlops_v3.hpp:162-267`` HotLoopScheduler
+        (identical to ck_tile ``gemm_pipeline_ag_bg_cr_comp_v3.hpp:335-389``):
+
+        * **Stage 1** — for each A buffer-load, emit ``num_dswrite_per_issue_a``
+          ``(DS-write, MFMA)`` pairs, then one VMEM read, then
+          ``num_mfma_per_issue - num_dswrite_per_issue_a`` MFMAs; repeat for B.
+        * **Stage 2** — drain the remaining A then B ds_reads at
+          ``ds_read_mfma_rate`` per MFMA, with the final group carrying the
+          remainder.
+
+        Issued once per K-tile (matching the C++, which calls it once per hot
+        iteration). No-op unless ``emit_hints`` (or ``force``). Uses only the
+        existing ``b.sched_group_barrier`` op — no new IR.
+        """
+        if not (self.emit_hints or force):
+            return
+
+        il = inst_list
+        num_buffer_load_inst_a = il.a_buffer_load_inst_num
+        num_buffer_load_inst_b = il.b_buffer_load_inst_num
+        num_ds_write_inst_a = il.a_lds_write_inst_num
+        num_ds_write_inst_b = il.b_lds_write_inst_num
+        num_mfma_inst = il.c_mfma_inst_num
+        num_dsread_a_mfma = il.num_dsread_a_mfma
+        num_dsread_b_mfma = il.num_dsread_b_mfma
+        ds_read_a_mfma_rate = il.ds_read_a_mfma_rate
+        ds_read_b_mfma_rate = il.ds_read_b_mfma_rate
+        num_ds_read_inst_a = il.num_ds_read_inst_a
+        num_ds_read_inst_b = il.num_ds_read_inst_b
+
+        # stage 1
+        num_mfma_stage1 = num_mfma_inst - (num_dsread_a_mfma + num_dsread_b_mfma)
+        num_mfma_per_issue = num_mfma_stage1 // (
+            num_buffer_load_inst_a + num_buffer_load_inst_b
+        )
+        num_dswrite_per_issue_a = num_ds_write_inst_a // num_buffer_load_inst_a
+        num_dswrite_per_issue_b = num_ds_write_inst_b // num_buffer_load_inst_b
+
+        for _ in range(num_buffer_load_inst_a):
+            for _ in range(num_dswrite_per_issue_a):
+                b.sched_group_barrier(DS_WRITE, 1, 0)
+                b.sched_group_barrier(MFMA, 1, 0)
+            b.sched_group_barrier(VMEM_READ, 1, 0)
+            b.sched_group_barrier(MFMA, num_mfma_per_issue - num_dswrite_per_issue_a, 0)
+        for _ in range(num_buffer_load_inst_b):
+            for _ in range(num_dswrite_per_issue_b):
+                b.sched_group_barrier(DS_WRITE, 1, 0)
+                b.sched_group_barrier(MFMA, 1, 0)
+            b.sched_group_barrier(VMEM_READ, 1, 0)
+            b.sched_group_barrier(MFMA, num_mfma_per_issue - num_dswrite_per_issue_b, 0)
+
+        # stage 2
+        for i in range(num_dsread_a_mfma):
+            if (num_ds_read_inst_a - (i + 1) * ds_read_a_mfma_rate) >= (
+                ds_read_a_mfma_rate
+            ):
+                b.sched_group_barrier(DS_READ, ds_read_a_mfma_rate, 0)
+            else:
+                b.sched_group_barrier(
+                    DS_READ,
+                    num_ds_read_inst_a - (num_dsread_a_mfma - 1) * ds_read_a_mfma_rate,
+                    0,
+                )
+            b.sched_group_barrier(MFMA, 1, 0)
+
+        for i in range(num_dsread_b_mfma):
+            if (num_ds_read_inst_b - (i + 1) * ds_read_b_mfma_rate) >= (
+                ds_read_b_mfma_rate
+            ):
+                b.sched_group_barrier(DS_READ, ds_read_b_mfma_rate, 0)
+            else:
+                b.sched_group_barrier(
+                    DS_READ,
+                    num_ds_read_inst_b - (num_dsread_b_mfma - 1) * ds_read_b_mfma_rate,
+                    0,
+                )
+            b.sched_group_barrier(MFMA, 1, 0)
+
+    # ck_tile spells this the same; keep the comp_v3 name as an alias so call
+    # sites can use either vocabulary.
+    emit_compv3_hotloop = emit_hotloop_v3
+
+    def emit_compv4_hotloop(
+        self,
+        b: IRBuilder,
+        inst_list: HotLoopInstList,
+        *,
+        force: bool = False,
+    ) -> None:
+        """Emit the comp_v4 single-issue HotLoop schedule.
+
+        Port of ck_tile ``gemm_pipeline_ag_bg_cr_comp_v4.hpp:259-277``. Unlike
+        v3's two-stage split, v4 issues one combined per-buffer-load group:
+        ``MFMA,1 / DSread,(reads/issue) / MFMA,1 / DSwrite,(writes/issue) /
+        MFMA,1 / VMEM,1 / MFMA,(C_MFMA/issue - 3)`` then a trailing
+        ``sched_barrier(0)`` fence. Counts come from the same
+        :class:`HotLoopInstList` (v4 sets the LDS read/write width to KPerXDL,
+        which is the ``from_geometry`` default). No-op unless ``emit_hints`` (or
+        ``force``).
+        """
+        if not (self.emit_hints or force):
+            return
+
+        il = inst_list
+        num_ds_read_inst = il.num_ds_read_inst_a + il.num_ds_read_inst_b
+        num_ds_write_inst = il.a_lds_write_inst_num + il.b_lds_write_inst_num
+        num_buffer_load_inst = il.a_buffer_load_inst_num + il.b_buffer_load_inst_num
+        num_issue = num_buffer_load_inst
+
+        for _ in range(num_buffer_load_inst):
+            b.sched_group_barrier(MFMA, 1, 0)
+            b.sched_group_barrier(DS_READ, num_ds_read_inst // num_issue, 0)
+            b.sched_group_barrier(MFMA, 1, 0)
+            b.sched_group_barrier(DS_WRITE, num_ds_write_inst // num_issue, 0)
+            b.sched_group_barrier(MFMA, 1, 0)
+            b.sched_group_barrier(VMEM_READ, 1, 0)
+            b.sched_group_barrier(MFMA, il.c_mfma_inst_num // num_issue - 3, 0)
+        b.sched_barrier(0)
 
     def assert_expected_ir(self, stats: LlvmIrStats) -> None:
         """Lightweight sanity check against lowered LLVM IR stats."""

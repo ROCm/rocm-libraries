@@ -55,15 +55,58 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
-from ..core.ir import F16, BF16, IRBuilder, Value
+from ..core.ir import F16, F32, BF16, IRBuilder, Value
 from .atoms import MfmaAtom
 from .attention import (
     apply_attention_mask,
     safe_inv_l,
-    wave_reduce_max,
     wave_reduce_stages,
-    wave_reduce_sum,
 )
+from .distribution import (
+    TileDistributionEncoding,
+    block_tile_reduce_sync,
+    make_static_distributed_tensor,
+    make_static_tile_distribution,
+)
+
+
+# --- Distribution-driven softmax row reduce (CK Tile BlockReduce2dSync) -------
+#
+# The online-softmax row max / row sum fold each lane's per-row scalar across
+# the 16 lanes that share that tile row. CK Tile expresses this as a
+# ``block_tile_reduce_sync`` over a *reduce distribution*: a single keep-row Y
+# (length 1) with the reduce axis collapsed into a lane-owned R level of length
+# 16, derivative 1. ``_r_butterfly_plan`` then emits XOR masks ``1,2,4,8`` --
+# byte-for-byte the historical ``wave_reduce_max/sum(lanes_per_row=16)``
+# 4-stage butterfly (verified via the subset IR digest gate). This single
+# encoding serves both the wave64 MFMA and the wave32 WMMA softmax: the lane
+# butterfly stride is wave-size-independent (the ``wave_size`` arg only drives
+# the cross-warp LDS stage, which a single-warp row reduce skips).
+_SOFTMAX_ROW_REDUCE_ENC = TileDistributionEncoding(
+    Rs=(16,),
+    Hs=((1,),),
+    Ps2RHs_major=((0,),),  # the single (lane) P feeds R (major 0)
+    Ps2RHs_minor=((0,),),
+    Ys2RHs_major=(1,),  # one keep-row Y on the M H-dim (length 1)
+    Ys2RHs_minor=(0,),
+)
+_SOFTMAX_ROW_REDUCE_DIST = make_static_tile_distribution(_SOFTMAX_ROW_REDUCE_ENC)
+
+
+def _softmax_row_reduce(b: IRBuilder, scalar: Value, *, combine: str) -> Value:
+    """Reduce ``scalar`` across the 16 lanes sharing one tile row.
+
+    Wraps the per-lane f32 ``scalar`` in a one-element
+    :class:`StaticDistributedTensor` over :data:`_SOFTMAX_ROW_REDUCE_DIST`
+    and folds it with :func:`block_tile_reduce_sync`. ``combine`` is
+    ``"max"`` (row max) or ``"sum"`` (row sum). The emitted op stream is the
+    same 4-stage XOR butterfly (masks ``1,2,4,8``) the legacy
+    ``wave_reduce_max/sum(lanes_per_row=16)`` produced.
+    """
+    dt = make_static_distributed_tensor(_SOFTMAX_ROW_REDUCE_DIST, F32)
+    dt.storage[0] = scalar
+    block_tile_reduce_sync(b, dt, combine=combine)
+    return dt.storage[0]
 
 
 __all__ = [
@@ -241,6 +284,7 @@ def mfma_attention_fwd_inner_body(
     native_fp8_path: bool = False,
     use_async_kv: bool = False,
     codebook_ptr: Optional[Value] = None,
+    wmma_v_lds_stage: bool = False,
     arch: str = "gfx950",
 ) -> None:
     """One MFMA-tiled QK→softmax→PV pass for a ``BLOCK_M``-row Q tile.
@@ -445,6 +489,7 @@ def mfma_attention_fwd_inner_body(
             extra_skip_predicate=extra_skip_predicate,
             k_block_iter_fn=k_block_iter_fn,
             v_scale=v_scale,
+            v_lds_stage=wmma_v_lds_stage,
             arch=arch,
             target=target,
         )
@@ -678,15 +723,17 @@ def mfma_attention_fwd_inner_body(
             # score to -inf so the softmax exponential collapses to 0.
             if keep_tile is not None:
                 s_r_scaled = b.select(keep_tile, s_r_scaled, neg_inf)
-            # 16-lane row-max reduce. ``wave_reduce_max`` with the wave64
-            # default (lanes_per_row=16) emits the exact same 4-stage XOR
-            # butterfly as the historical ``warp_xor_reduce_max(stages=4)``.
-            row_max = wave_reduce_max(b, s_r_scaled, wave_size=_WAVE, lanes_per_row=16)
+            # 16-lane row-max reduce via the distribution-driven
+            # ``block_tile_reduce_sync`` (CK Tile ``BlockReduce2dSync``). The
+            # reduce distribution's lane-owned R level (length 16, derivative 1)
+            # emits the exact 4-stage XOR butterfly (masks 1,2,4,8) the legacy
+            # ``wave_reduce_max(lanes_per_row=16)`` produced.
+            row_max = _softmax_row_reduce(b, s_r_scaled, combine="max")
             m_new_r = b.fmax(ms[r], row_max)
             alpha_r = b.exp2(b.fsub(ms[r], m_new_r))
             p_r = b.exp2(b.fsub(s_r_scaled, m_new_r))
             # Row-sum reduce of p.
-            row_psum = wave_reduce_sum(b, p_r, wave_size=_WAVE, lanes_per_row=16)
+            row_psum = _softmax_row_reduce(b, p_r, combine="sum")
             l_new_r = b.fadd(b.fmul(ls[r], alpha_r), row_psum)
 
             new_ms.append(m_new_r)
@@ -887,6 +934,7 @@ def _wmma_attention_fwd_inner_body(
     extra_skip_predicate: Optional[Callable[[IRBuilder, Value], Value]],
     k_block_iter_fn: Optional[Callable[[IRBuilder, Value], Value]],
     v_scale: Optional[Value],
+    v_lds_stage: bool = False,
     arch: str,
     target,
 ) -> None:
@@ -945,8 +993,13 @@ def _wmma_attention_fwd_inner_body(
         q_addr = b.add(q_addr_row_base, b.const_i32(d * 16))
         q_frags.append(b.global_load_vN(Q, q_addr, dtype_ir, a_frag, align=a_frag * 2))
 
-    # ---- LDS P-staging tile (transpose acc layout -> A-operand layout) ----
+    # ---- LDS staging tiles ----
+    # P_lds transposes the score acc layout -> the PV A-operand layout.
+    # V_lds stages the K-tile's V rows once per iteration so the PV B-operand
+    # (V in d x k layout) is read from LDS instead of a per-(d,k) scalar
+    # global gather.
     P_lds = b.smem_alloc(dtype_ir, [16, 16], name_hint="Pwmma")
+    V_lds = b.smem_alloc(dtype_ir, [16, head_size], name_hint="Vwmma") if v_lds_stage else None
 
     # ---- Online-softmax + PV accumulator iter-args ----
     iter_args = []
@@ -1029,12 +1082,15 @@ def _wmma_attention_fwd_inner_body(
             )
             if keep_tile is not None:
                 s_r = b.select(keep_tile, s_r, neg_inf)
-            # Per-row reduce across the 16 k-columns of this wave32 half.
-            row_max = wave_reduce_max(b, s_r, wave_size=wave, lanes_per_row=16)
+            # Per-row reduce across the 16 k-columns of this wave32 half. The
+            # distribution-driven ``block_tile_reduce_sync`` emits the same
+            # 4-stage in-half XOR butterfly as the legacy wave32
+            # ``wave_reduce_max(lanes_per_row=16)``.
+            row_max = _softmax_row_reduce(b, s_r, combine="max")
             m_new = b.fmax(ms[r], row_max)
             alpha = b.exp2(b.fsub(ms[r], m_new))
             p_r = b.exp2(b.fsub(s_r, m_new))
-            row_sum = wave_reduce_sum(b, p_r, wave_size=wave, lanes_per_row=16)
+            row_sum = _softmax_row_reduce(b, p_r, combine="sum")
             l_new = b.fadd(b.fmul(ls[r], alpha), row_sum)
             new_ms.append(m_new)
             new_ls.append(l_new)
@@ -1042,6 +1098,32 @@ def _wmma_attention_fwd_inner_body(
             for d in range(n_dk):
                 old = b.vec_extract(new_accs[d], r)
                 new_accs[d] = b.vec_insert(new_accs[d], b.fmul(old, alpha), r)
+
+        # ---- V staging into LDS (vectorized load; transposed PV reads) ----
+        # Each lane loads its own k-row's full head_size d-slice as 8-wide
+        # vector global loads and writes it row-major into ``V_lds``. The PV
+        # B-operand (V in d x k layout) is then a strided *LDS* read, replacing
+        # the per-(d,k) scalar global gather the correctness-first version did
+        # (it issued ``n_dk * a_frag`` scalar global loads per lane per K-tile).
+        # Both wave32 halves map to the same 16 rows (a_row == lane % 16), so
+        # the store is redundant across halves but writes identical data.
+        if v_lds_stage:
+            v_stage_row = b.add(k_tile_base, a_row)
+            if v_row_base_fn is not None:
+                v_stage_base = v_row_base_fn(b, v_stage_row)
+            else:
+                v_stage_base = b.add(
+                    b.add(
+                        b.mul(v_stage_row, stride_v_token),
+                        b.mul(kv_head_idx, stride_v_head),
+                    ),
+                    v_off,
+                )
+            for e in range(head_size // 8):
+                v_g = b.global_load_vN(
+                    V, b.add(v_stage_base, b.const_i32(e * 8)), dtype_ir, 8, align=16
+                )
+                b.smem_store_vN(V_lds, [a_row, b.const_i32(e * 8)], v_g, 8)
 
         # ---- P staging through LDS: acc layout -> A-operand layout ----
         for r in range(c_frag):
@@ -1069,19 +1151,32 @@ def _wmma_attention_fwd_inner_body(
             d_col = b.add(b.const_i32(d * 16), col)  # this lane's V d-column
             v_b = b.zero_vec(dtype_ir, a_frag)
             for j in range(a_frag):
-                v_row_k = b.add(k_tile_base, b.const_i32(j))
-                if v_row_base_fn is not None:
-                    v_addr_row_base = v_row_base_fn(b, v_row_k)
-                else:
-                    v_addr_row_base = b.add(
-                        b.add(
-                            b.mul(v_row_k, stride_v_token),
-                            b.mul(kv_head_idx, stride_v_head),
+                # B-operand for d-column ``d_col`` is V[k, d_col] for k = 0..15.
+                if v_lds_stage:
+                    # Optimized: read from the staged LDS tile (V_lds[k, d_col]).
+                    v_elem = b.vec_extract(
+                        b.smem_load_vN(
+                            V_lds, b.const_i32(j), d_col, dtype=dtype_ir, n=1
                         ),
-                        v_off,
+                        0,
                     )
-                v_addr = b.add(v_addr_row_base, d_col)
-                v_b = b.vec_insert(v_b, b.global_load(V, v_addr, dtype_ir, align=2), j)
+                else:
+                    # Baseline: per-(d,k) scalar global gather of V[k, d_col].
+                    v_row = b.add(k_tile_base, b.const_i32(j))
+                    if v_row_base_fn is not None:
+                        v_row_base = v_row_base_fn(b, v_row)
+                    else:
+                        v_row_base = b.add(
+                            b.add(
+                                b.mul(v_row, stride_v_token),
+                                b.mul(kv_head_idx, stride_v_head),
+                            ),
+                            v_off,
+                        )
+                    v_elem = b.global_load(
+                        V, b.add(v_row_base, d_col), dtype_ir, align=2
+                    )
+                v_b = b.vec_insert(v_b, v_elem, j)
             new_accs[d] = b.mma(op, p_a, v_b, new_accs[d])
 
         yields = []

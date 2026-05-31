@@ -14,7 +14,7 @@ A DSL-native implicit-GEMM convolution targeting the bake-off problem
 Authoring style:
   - CK Tile-style transform DAG: every offset arithmetic step is
     expressed as `unmerge(...)`, `embed(...)`, `pad(...)`, or `merge(...)`
-    over `ck_dsl.transforms.TensorDescriptor`. The kernel author never
+    over `ck_dsl.helpers.transforms.TensorDescriptor`. The kernel author never
     writes `gm // (Ho * Wo)` by hand; the same SSA gets generated, but
     via the algebra.
   - The kernel emits straight to AMDGPU LLVM IR + HSACO in-process
@@ -144,7 +144,7 @@ def main() -> int:
         atoms=[f"tile.mfma_f32_32x32x{warp_tile_k}_f16"],
         notes=(
             "Bake-off 1: implicit-GEMM conv via the coord-transform "
-            "DAG (ck_dsl.transforms.TensorDescriptor). A's address is "
+            "DAG (ck_dsl.helpers.transforms.TensorDescriptor). A's address is "
             "computed as (m, k) -> unmerge -> (n, ho, wo, r, s, c) -> "
             "embed -> (n, hi, wi, c) -> naive NHWC offset, with the "
             "conv boundary check baked into the descriptor's validity "

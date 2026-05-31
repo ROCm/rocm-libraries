@@ -31,7 +31,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
-from ...core.ir import F32, I32, IRBuilder, KernelDef, PtrType, Value
+from ...core.ir import F32, I32, I64, IRBuilder, KernelDef, PtrType, Value
+from ...helpers.atoms import make_c_warp_dstr_encoding, mfma_atom
+from ...helpers.distribution import (
+    make_static_distributed_tensor,
+    make_static_tile_distribution,
+    store_tile_cshuffle,
+)
 from ...helpers.spec import choose_load_vec
 from ...helpers.tensor_view import (
     TensorDescriptor,
@@ -39,6 +45,7 @@ from ...helpers.tensor_view import (
     make_global_view,
     make_tile_window,
 )
+from ...helpers.transforms import calculate_magic_numbers, do_magic_division
 from .gemm_universal import (
     DataSpec,
     TileSpec,
@@ -71,23 +78,41 @@ __all__ = [
 ]
 
 
+def _magic_div_mod(b: IRBuilder, dividend: Value, divisor: int) -> Tuple[Value, Value]:
+    """Return ``(dividend // divisor, dividend % divisor)`` via magic division.
+
+    CK Tile ``merge_v2_magic_division`` split: the quotient comes from the
+    mul-hi :func:`do_magic_division` sequence (no hardware integer divide)
+    and the remainder is ``dividend - quot * divisor``. The divisor is a
+    compile-time constant so the magic ``(multiplier, shift)`` are baked in.
+    Numerically identical to ``b.div`` / ``b.mod`` over the 31-bit unsigned
+    range CK Tile documents.
+    """
+    if divisor == 1:
+        return dividend, b.const_i32(0)
+    mult, shift = calculate_magic_numbers(divisor)
+    quot = do_magic_division(b, dividend, mult, shift)
+    rem = b.sub(dividend, b.mul(quot, b.const_i32(divisor)))
+    return quot, rem
+
+
 def _vec_rowcol(
     b: IRBuilder,
     e: int,
     tid: Value,
     c_threads: Value,
-    c_block_k_div_vec: Value,
+    block_k_div_vec: int,
     c_load_vec: Value,
     load_vec: int,
 ) -> Tuple[Value, Value]:
     """Decode the per-thread (row, col) for vec-load element ``e``.
 
-    Emits the same 3-4 ops in the same order as every inline copy of the
-    global-load / LDS-store vec-index decode in the three GEMM builders.
+    Replaces the hardware ``div`` / ``mod`` of the global-load / LDS-store
+    vec-index decode with the CK-Tile magic-division unmerge
+    (``block_k_div_vec`` is the compile-time inner extent).
     """
     vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-    row = b.div(vec_idx, c_block_k_div_vec)
-    col_v = b.mod(vec_idx, c_block_k_div_vec)
+    row, col_v = _magic_div_mod(b, vec_idx, block_k_div_vec)
     col = b.mul(col_v, c_load_vec) if load_vec > 1 else col_v
     return row, col
 
@@ -141,6 +166,137 @@ def _pad_in_bounds(
             c_n_last = b.add(c_n, b.const_i32(vec - 1))
             checks.append(b.cmp_lt(c_n_last, N))
     return checks[0] if len(checks) == 1 else b.land(checks[0], checks[1])
+
+
+class _CWarpDecode:
+    """MFMA C-accumulator lane -> (row, col) decode via ``CWarpDstrEncoding``.
+
+    Replaces the hand-rolled per-element MFMA-output decode (the 32x32
+    ``m_off = 8*rb + 4*m_blk + ri`` branch and the 16x16 ``m_off = m_base
+    + i`` branch) with CK Tile's C-warp tile distribution. Built once per
+    epilogue from the spec's warp-tile atom; :meth:`coords` returns the
+    global ``(ld_m, ld_n)`` for accumulator slot ``i`` of warp atom
+    ``(mi, ni)``.
+
+    The lane decomposes as ``(m_blk, n) = (lane // kCNLane, lane %
+    kCNLane)`` (the single P sub-sequence) and the per-lane slot ``i``
+    decomposes row-major over the two Y lengths ``(kCM0PerLane,
+    kCM1PerLane)``; ``calculate_x`` then yields ``(row_in_atom,
+    col_in_atom)`` identical -- verified element-by-element against the
+    SSA both paths emit -- to the prior inline decode for every supported
+    16x16 / 32x32 atom.
+    """
+
+    def __init__(
+        self,
+        b: IRBuilder,
+        spec: UniversalGemmSpec,
+        warp_m_off: Value,
+        warp_n_off: Value,
+        lane: Value,
+    ) -> None:
+        t = spec.tile
+        dtype_in = spec.data.dtype_a
+        atom = mfma_atom(dtype_in, t.warp_tile_m, t.warp_tile_n, t.warp_tile_k)
+        self.b = b
+        self.t = t
+        self.dist = make_static_tile_distribution(make_c_warp_dstr_encoding(atom))
+        # kCM1PerLane is Hs[0][2]; kCNLane is Hs[1][0]. The per-lane slot
+        # ``i`` splits row-major over (kCM0PerLane, kCM1PerLane), so the
+        # trailing Y length kCM1PerLane is the inner stride.
+        self._m1 = int(self.dist.encoding.Hs[0][2])
+        n_lane = int(self.dist.encoding.Hs[1][0])
+        c_n_lane = b.const_i32(n_lane)
+        self.n_in_atom = b.mod(lane, c_n_lane)
+        self.m_blk = b.div(lane, c_n_lane)
+        self.warp_m_off = warp_m_off
+        self.warp_n_off = warp_n_off
+
+    def _row_col_in_atom(self, i: int) -> Tuple[Value, Value]:
+        b = self.b
+        y0 = b.const_i32(i // self._m1)
+        y1 = b.const_i32(i % self._m1)
+        return self.dist.calculate_x(b, ys=[y0, y1], ps=[[self.m_blk, self.n_in_atom]])
+
+    def coords(self, mi: int, ni: int, i: int) -> Tuple[Value, Value]:
+        b = self.b
+        t = self.t
+        row_in_atom, col_in_atom = self._row_col_in_atom(i)
+        ld_m = b.add(
+            self.warp_m_off, b.add(b.const_i32(mi * t.warp_tile_m), row_in_atom)
+        )
+        ld_n = b.add(
+            self.warp_n_off, b.add(b.const_i32(ni * t.warp_tile_n), col_in_atom)
+        )
+        return ld_m, ld_n
+
+    def warp_row(self, mi: int, i: int) -> Value:
+        """``warp_m_off + mi*warp_tile_m + row_in_atom`` for slot ``i``."""
+        b = self.b
+        row_in_atom, _ = self._row_col_in_atom(i)
+        return b.add(
+            self.warp_m_off,
+            b.add(b.const_i32(mi * self.t.warp_tile_m), row_in_atom),
+        )
+
+    def warp_col(self, ni: int) -> Value:
+        """``warp_n_off + ni*warp_tile_n + col_in_atom`` (i-independent)."""
+        b = self.b
+        _, col_in_atom = self._row_col_in_atom(0)
+        return b.add(
+            self.warp_n_off,
+            b.add(b.const_i32(ni * self.t.warp_tile_n), col_in_atom),
+        )
+
+
+def _emit_cshuffle_stage(
+    b: IRBuilder,
+    spec: UniversalGemmSpec,
+    cdec: "_CWarpDecode",
+    smem: Value,
+    storage_dtype,
+    c_per_lane: int,
+    cell_value,
+) -> None:
+    """Stage one warp's MFMA accumulators into LDS via ``store_tile_cshuffle``.
+
+    Replaces the hand-rolled per-(mi, ni, i) ``b.smem_store_vN(smem, [ld_m,
+    ld_n], h, n=1)`` scatter with CK Tile's :func:`store_tile_cshuffle` +
+    :class:`StaticDistributedTensor` over the C-warp tile distribution
+    (``CWarpDstrEncoding``). For each warp atom ``(mi, ni)`` we materialise the
+    per-lane slot results into a distributed tensor (Y-space ``(kCM0PerLane,
+    kCM1PerLane)``) and let ``store_tile_cshuffle`` walk the space-filling
+    curve, emitting the same ``ds_write`` stream into ``smem`` at the MFMA
+    output layout (``cdec.coords``).
+
+    ``cell_value(mi, ni, i) -> Value`` produces the already-cast storage-dtype
+    scalar for slot ``i`` of atom ``(mi, ni)`` (the SiLU-mul result for the
+    gate+up path, or a plain accumulator cast for the interleaved path). The
+    slot order ``i = y0 * m1 + y1`` matches the C-warp distribution's row-major
+    ``(y0, y1)`` decode, so the per-element values and LDS addresses are
+    identical to the prior inline scatter.
+    """
+    t = spec.tile
+    dist = cdec.dist
+    m1 = cdec._m1
+    lds_view = TensorView(
+        base=smem,
+        desc=TensorDescriptor.packed([t.tile_m, t.tile_n], storage_dtype),
+        addr_space="lds",
+    )
+    z = (b.const_i32(0), b.const_i32(0))
+    lds_window = make_tile_window(lds_view, lengths=(t.tile_m, t.tile_n), origin=z)
+    for mi in range(t.mfmas_per_warp_m):
+        for ni in range(t.mfmas_per_warp_n):
+            dt = make_static_distributed_tensor(dist, dtype=storage_dtype)
+            for i in range(c_per_lane):
+                dt.set([i // m1, i % m1], cell_value(mi, ni, i))
+
+            def _coord(_b, y_base, k, _mi=mi, _ni=ni):
+                slot = y_base[0] * m1 + k
+                return cdec.coords(_mi, _ni, slot)
+
+            store_tile_cshuffle(b, lds_window, dt, coord_fn=_coord)
 
 
 # ---------------------------------------------------------------------
@@ -222,7 +378,7 @@ class _MoeKloopPlan:
         self.b_vecs_per_thread = (self.block_n * self.block_k) // load_vec // threads
         self.c_threads = b.const_i32(threads)
         self.c_load_vec = b.const_i32(load_vec)
-        self.c_block_k_div_vec = b.const_i32(self.block_k // load_vec)
+        self.block_k_div_vec = self.block_k // load_vec
 
     def _rowcol(self, e: int) -> Tuple[Value, Value]:
         return _vec_rowcol(
@@ -230,7 +386,7 @@ class _MoeKloopPlan:
             e,
             self.tid,
             self.c_threads,
-            self.c_block_k_div_vec,
+            self.block_k_div_vec,
             self.c_load_vec,
             self.load_vec,
         )
@@ -514,6 +670,7 @@ class FusedGateUpSiluGemmSpec:
     wave_size: int = 64
     block_size: int = 0
     dtype: str = "fp16"
+    grouped: bool = False
 
     def __post_init__(self) -> None:
         if self.block_size == 0:
@@ -544,7 +701,10 @@ class FusedGateUpSiluGemmSpec:
         )
 
     def kernel_name(self) -> str:
-        return self.to_universal_spec().kernel_name() + "_gate_up_silu"
+        suffix = "_gate_up_silu"
+        if self.grouped:
+            suffix += "_grouped"
+        return self.to_universal_spec().kernel_name() + suffix
 
 
 def build_moe_gate_up_silu_gemm(
@@ -594,6 +754,15 @@ def build_moe_gate_up_silu_gemm(
     stride_a = b.param("stride_a", I32)
     stride_b = b.param("stride_b", I32)
     stride_c = b.param("stride_c", I32)
+    grouped = bool(getattr(spec, "grouped", False))
+    if grouped:
+        block_expert_ids = b.param(
+            "BlockExpertIds",
+            PtrType(I32, "global"),
+            noalias=True,
+            readonly=True,
+            align=4,
+        )
 
     t = spec.tile
     _, _, c_per_lane = _mfma_atom_widths(u)
@@ -606,6 +775,7 @@ def build_moe_gate_up_silu_gemm(
     c_warps_n = b.const_i32(t.warp_n)
     c_block_m = b.const_i32(block_m)
     c_block_n = b.const_i32(block_n)
+    c0 = b.const_i32(0)
 
     tid = b.thread_id_x()
     warp_id = b.div(tid, c_wave)
@@ -613,12 +783,31 @@ def build_moe_gate_up_silu_gemm(
     warp_n_idx = b.mod(warp_id, c_warps_n)
     lane = b.mod(tid, c_wave)
 
-    batch_idx = b.block_id_z()
-    batch_off_a = b.mul(batch_idx, stride_a)
-    batch_off_b = b.mul(batch_idx, stride_b)
-    batch_off_c = b.mul(batch_idx, stride_c)
-
-    block_m_off = b.mul(b.block_id_y(), c_block_m)
+    if grouped:
+        # Flat M-block grid: block_id_y -> packed sorted-token block; the
+        # expert (gate / up B slabs) is looked up per block, A / Hidden
+        # are dense. The per-expert B base ``expert * stride_b`` overflows
+        # i32 for large weights, so fold it into each B base pointer as a
+        # 64-bit byte offset (global_ptr_add) and keep in-window batch
+        # offsets at 0.
+        m_block_idx = b.block_id_y()
+        expert_idx = b.global_load_i32(block_expert_ids, m_block_idx)
+        elem_bytes_b = b.const_i64(2)  # f16 / bf16
+        b_base_bytes = b.mul(
+            b.mul(b.sext(expert_idx, I64), b.sext(stride_b, I64)), elem_bytes_b
+        )
+        WGate = b.global_ptr_add(WGate, b_base_bytes)
+        WUp = b.global_ptr_add(WUp, b_base_bytes)
+        batch_off_a = c0
+        batch_off_b = c0
+        batch_off_c = c0
+        block_m_off = b.mul(m_block_idx, c_block_m)
+    else:
+        batch_idx = b.block_id_z()
+        batch_off_a = b.mul(batch_idx, stride_a)
+        batch_off_b = b.mul(batch_idx, stride_b)
+        batch_off_c = b.mul(batch_idx, stride_c)
+        block_m_off = b.mul(b.block_id_y(), c_block_m)
     block_n_off = b.mul(b.block_id_x(), c_block_n)
 
     A_smem = b.smem_alloc(storage_dtype, [block_m, block_k], name_hint="A_smem")
@@ -675,38 +864,47 @@ def build_moe_gate_up_silu_gemm(
     ]
     a_mn_origin = (batch_off_a, block_m_off)
     b_mn_origin = (batch_off_b, block_n_off)
-    gate_res, up_res = _emit_moe_prefetch_kloop(
-        plan,
-        a_view,
-        a_lds_view,
-        A_smem,
-        a_mn_origin,
-        operands,
-        b_mn_origin,
-        [gate_accs, up_accs],
-        K,
-        warp_m_idx,
-        warp_n_idx,
-        lane,
-        sched_groups=2 * mfmas_m * mfmas_n,
-    )
 
-    _emit_gate_up_silu_epilogue_default(
-        b,
-        u,
-        gate_res,
-        up_res,
-        warp_m_idx,
-        warp_n_idx,
-        lane,
-        block_m_off,
-        block_n_off,
-        M,
-        N,
-        Hidden,
-        c_per_lane,
-        batch_off_c=batch_off_c,
-    )
+    def _emit_gate_up_compute() -> None:
+        gate_res, up_res = _emit_moe_prefetch_kloop(
+            plan,
+            a_view,
+            a_lds_view,
+            A_smem,
+            a_mn_origin,
+            operands,
+            b_mn_origin,
+            [gate_accs, up_accs],
+            K,
+            warp_m_idx,
+            warp_n_idx,
+            lane,
+            sched_groups=2 * mfmas_m * mfmas_n,
+        )
+
+        _emit_gate_up_silu_epilogue_default(
+            b,
+            u,
+            gate_res,
+            up_res,
+            warp_m_idx,
+            warp_n_idx,
+            lane,
+            block_m_off,
+            block_n_off,
+            M,
+            N,
+            Hidden,
+            c_per_lane,
+            batch_off_c=batch_off_c,
+        )
+
+    if grouped:
+        # Empty tail block (BlockExpertIds == -1) skips all work.
+        with b.scf_if(b.cmp_ge(expert_idx, c0)):
+            _emit_gate_up_compute()
+    else:
+        _emit_gate_up_compute()
 
     return b.kernel
 
@@ -743,7 +941,6 @@ def _emit_gate_up_silu_epilogue_default(
     storage_dtype = _storage_dtype(spec)
     mfmas_m = t.mfmas_per_warp_m
     mfmas_n = t.mfmas_per_warp_n
-    is_32x32 = (t.warp_tile_m, t.warp_tile_n) == (32, 32)
     c_neg_log2e = b.const_f32(-1.4426950408889634)
     one_f32 = b.const_f32(1.0)
     pad_m = bool(spec.trait.pad_m)
@@ -754,70 +951,23 @@ def _emit_gate_up_silu_epilogue_default(
 
     Cs = b.smem_alloc(storage_dtype, [t.tile_m, t.tile_n], name_hint="Hidden_smem")
 
-    if is_32x32:
-        c_atom_n = b.const_i32(t.warp_tile_n)
-        n_in_atom = b.mod(lane, c_atom_n)
-        m_blk = b.div(lane, c_atom_n)
-        flat = 0
-        for mi in range(mfmas_m):
-            for ni in range(mfmas_n):
-                gate_acc = gate_accs[flat]
-                up_acc = up_accs[flat]
-                flat += 1
-                ld_n = b.add(
-                    warp_n_off, b.add(b.const_i32(ni * t.warp_tile_n), n_in_atom)
-                )
-                for i in range(c_per_lane):
-                    rb = i // 4
-                    ri = i % 4
-                    m_off = b.add(
-                        b.add(
-                            b.mul(b.const_i32(8), b.const_i32(rb)),
-                            b.mul(b.const_i32(4), m_blk),
-                        ),
-                        b.const_i32(ri),
-                    )
-                    ld_m = b.add(
-                        warp_m_off, b.add(b.const_i32(mi * t.warp_tile_m), m_off)
-                    )
-                    g = b.vec_extract(gate_acc, i)
-                    up = b.vec_extract(up_acc, i)
-                    h = b.cast_f32_to(
-                        _silu_mul_f32(
-                            b, g, up, one_f32=one_f32, c_neg_log2e=c_neg_log2e
-                        ),
-                        storage_dtype,
-                    )
-                    b.smem_store_vN(Cs, [ld_m, ld_n], h, n=1)
-    else:
-        c_atom_n = b.const_i32(t.warp_tile_n)
-        c_clen = b.const_i32(c_per_lane)
-        n_in_atom = b.mod(lane, c_atom_n)
-        m_blk = b.div(lane, c_atom_n)
-        m_base = b.mul(m_blk, c_clen)
-        flat = 0
-        for mi in range(mfmas_m):
-            for ni in range(mfmas_n):
-                gate_acc = gate_accs[flat]
-                up_acc = up_accs[flat]
-                flat += 1
-                ld_n = b.add(
-                    warp_n_off, b.add(b.const_i32(ni * t.warp_tile_n), n_in_atom)
-                )
-                for i in range(c_per_lane):
-                    m_off = b.add(m_base, b.const_i32(i))
-                    ld_m = b.add(
-                        warp_m_off, b.add(b.const_i32(mi * t.warp_tile_m), m_off)
-                    )
-                    g = b.vec_extract(gate_acc, i)
-                    up = b.vec_extract(up_acc, i)
-                    h = b.cast_f32_to(
-                        _silu_mul_f32(
-                            b, g, up, one_f32=one_f32, c_neg_log2e=c_neg_log2e
-                        ),
-                        storage_dtype,
-                    )
-                    b.smem_store_vN(Cs, [ld_m, ld_n], h, n=1)
+    # MFMA-output (lane, slot) -> (ld_m, ld_n) via the C-warp tile
+    # distribution (CWarpDstrEncoding), unifying the 16x16 / 32x32 decode
+    # that was previously two hand-rolled branches. The accumulator-pair
+    # SiLU-mul results stage into LDS via store_tile_cshuffle +
+    # StaticDistributedTensor (CK Tile cshuffle epilogue).
+    cdec = _CWarpDecode(b, spec, warp_m_off, warp_n_off, lane)
+
+    def _silu_cell(mi: int, ni: int, i: int) -> Value:
+        flat = mi * mfmas_n + ni
+        g = b.vec_extract(gate_accs[flat], i)
+        up = b.vec_extract(up_accs[flat], i)
+        return b.cast_f32_to(
+            _silu_mul_f32(b, g, up, one_f32=one_f32, c_neg_log2e=c_neg_log2e),
+            storage_dtype,
+        )
+
+    _emit_cshuffle_stage(b, spec, cdec, Cs, storage_dtype, c_per_lane, _silu_cell)
 
     b.sync()
 
@@ -833,12 +983,13 @@ def _emit_gate_up_silu_epilogue_default(
 
     tid = b.thread_id_x()
     c_threads = b.const_i32(threads)
-    c_tile_n_div_vec = b.const_i32(t.tile_n // store_vec)
+    tile_n_div_vec = t.tile_n // store_vec
     vecs_per_thread = (t.tile_m * t.tile_n // store_vec) // threads
     for e in range(vecs_per_thread):
         vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
-        row = b.div(vec_idx, c_tile_n_div_vec)
-        col_v = b.mod(vec_idx, c_tile_n_div_vec)
+        # vec_idx -> (row, col_v) via magic-division unmerge (tile_n_div_vec
+        # is the compile-time inner extent).
+        row, col_v = _magic_div_mod(b, vec_idx, tile_n_div_vec)
         col = b.mul(col_v, b.const_i32(store_vec)) if store_vec > 1 else col_v
 
         c_m = b.add(block_m_off, row)
@@ -869,7 +1020,7 @@ def moe_gate_up_silu_gemm_signature(spec: FusedGateUpSiluGemmSpec):
     from ...helpers.spec import SignatureBuilder
 
     dt = spec.dtype if spec.dtype in ("f16", "fp16", "bf16") else "f16"
-    return (
+    sig = (
         SignatureBuilder()
         .ptr("A", dt)
         .ptr("WGate", dt)
@@ -881,8 +1032,10 @@ def moe_gate_up_silu_gemm_signature(spec: FusedGateUpSiluGemmSpec):
         .scalar("stride_a", "i32")
         .scalar("stride_b", "i32")
         .scalar("stride_c", "i32")
-        .build()
     )
+    if getattr(spec, "grouped", False):
+        sig = sig.ptr("BlockExpertIds", "i32")
+    return sig.build()
 
 
 def moe_gate_up_silu_gemm_grid(
@@ -893,6 +1046,22 @@ def moe_gate_up_silu_gemm_grid(
         (n + t.tile_n - 1) // t.tile_n,
         (m + t.tile_m - 1) // t.tile_m,
         batch,
+    )
+
+
+def moe_gate_up_silu_gemm_grouped_grid(
+    num_m_blocks: int, n: int, spec: FusedGateUpSiluGemmSpec
+) -> Tuple[int, int, int]:
+    """Flat M-block grid for the grouped dual-B gate+up+silu dispatch.
+
+    ``n`` is the intermediate size ``I`` (GEMM N = ``I`` per gate/up
+    accumulator). Grid is ``(ceil(n / tile_n), num_m_blocks, 1)``.
+    """
+    t = spec.tile
+    return (
+        (n + t.tile_n - 1) // t.tile_n,
+        num_m_blocks,
+        1,
     )
 
 
@@ -912,6 +1081,25 @@ class FusedInterleavedGateUpSiluGemmSpec:
     real "cross the activation barrier" optimization: same single-B
     MFMA schedule as the fast packed path, no GateUpPacked HBM
     intermediate, no separate silu kernel.
+
+    Grouped sorted-token dispatch (``grouped=True``)
+    -----------------------------------------------
+    The default (batched) dispatch maps ``block_id_z`` to the expert and
+    pads every expert's GEMM slot to a uniform ``MAX_PADDED_M`` so the
+    grid is ``(N_tiles, MAX_PADDED_M/tile_m, E)``. For sparse routing
+    (E >> routed-tokens-per-expert) that wastes ``MAX_PADDED_M -
+    count[e]`` rows of MFMA work per expert.
+
+    With ``grouped=True`` the kernel instead processes the *packed*
+    sorted-token layout (CK Tile ``fused_moegemm`` structure): the grid
+    is flat over M-blocks ``(N_tiles, num_m_blocks, 1)`` where
+    ``num_m_blocks = sum_e ceil(count[e]/tile_m)``. Each M-block reads
+    its expert from ``BlockExpertIds[block_id_y]`` (which selects the B
+    weight slab ``e * stride_b``) and addresses ``A`` / ``Hidden``
+    densely at ``block_id_y * tile_m``. Total GEMM rows collapse from
+    ``E * MAX_PADDED_M`` to ``num_m_blocks * tile_m`` (~total routed
+    tokens rounded to ``tile_m``). An empty tail block carries
+    ``BlockExpertIds == -1`` and skips all work (active-tile gate).
     """
 
     name: str
@@ -920,6 +1108,7 @@ class FusedInterleavedGateUpSiluGemmSpec:
     wave_size: int = 64
     block_size: int = 0
     dtype: str = "fp16"
+    grouped: bool = False
 
     def __post_init__(self) -> None:
         if self.block_size == 0:
@@ -946,7 +1135,10 @@ class FusedInterleavedGateUpSiluGemmSpec:
         )
 
     def kernel_name(self) -> str:
-        return self.to_universal_spec().kernel_name() + "_interleaved_gate_up_silu"
+        suffix = "_interleaved_gate_up_silu"
+        if self.grouped:
+            suffix += "_grouped"
+        return self.to_universal_spec().kernel_name() + suffix
 
 
 def build_moe_interleaved_gate_up_silu_gemm(
@@ -993,7 +1185,21 @@ def build_moe_interleaved_gate_up_silu_gemm(
     stride_a = b.param("stride_a", I32)
     stride_b = b.param("stride_b", I32)  # per expert = 2*N*K
     stride_c = b.param("stride_c", I32)  # per expert = M*N
-    if u.trait.active_tile_skip:
+    grouped = bool(getattr(spec, "grouped", False))
+    if grouped:
+        # Grouped sorted-token dispatch. ``BlockExpertIds[block_id_y]``
+        # gives the expert that owns this packed M-block (or -1 for an
+        # empty tail block). The B weight slab is ``expert * stride_b``;
+        # ``A`` / ``Hidden`` are addressed densely at ``block_id_y *
+        # tile_m`` (no per-expert padding).
+        block_expert_ids = b.param(
+            "BlockExpertIds",
+            PtrType(I32, "global"),
+            noalias=True,
+            readonly=True,
+            align=4,
+        )
+    if u.trait.active_tile_skip and not grouped:
         # MoE active-tile gate. ``SortedTokenIds`` carries the
         # bucket -> token-id map produced by ``moe_sorting``; -1
         # marks an inactive padded row. ``slot_size`` is the
@@ -1028,11 +1234,32 @@ def build_moe_interleaved_gate_up_silu_gemm(
     warp_n_idx = b.mod(warp_id, c_warps_n)
     lane = b.mod(tid, c_wave)
 
-    batch_idx = b.block_id_z()
-    batch_off_a = b.mul(batch_idx, stride_a)
-    batch_off_b = b.mul(batch_idx, stride_b)
-    batch_off_c = b.mul(batch_idx, stride_c)
-    block_m_off = b.mul(b.block_id_y(), c_block_m)
+    if grouped:
+        # Flat M-block grid: block_id_y indexes the packed sorted-token
+        # blocks; the expert (B slab) is looked up per block, A/C are
+        # dense. block_id_z is unused (grid z = 1).
+        m_block_idx = b.block_id_y()
+        expert_idx = b.global_load_i32(block_expert_ids, m_block_idx)
+        batch_off_a = c0  # A is the dense packed buffer (no per-expert stride)
+        # The per-expert B base ``expert * stride_b`` overflows i32 for
+        # large weights (e.g. datacenter 2*I*H = 1.3e8 elements * 31
+        # experts > 2^31). Fold it into the B base pointer as a 64-bit
+        # BYTE offset (global_ptr_add zero/sign-extends to i64) and keep
+        # the in-window batch offset at 0.
+        elem_bytes_b = b.const_i64(2)  # f16 / bf16
+        stride_b_i64 = b.sext(stride_b, I64)
+        expert_i64 = b.sext(expert_idx, I64)
+        b_base_bytes = b.mul(b.mul(expert_i64, stride_b_i64), elem_bytes_b)
+        WGateUp = b.global_ptr_add(WGateUp, b_base_bytes)
+        batch_off_b = c0
+        batch_off_c = c0  # Hidden is dense packed
+        block_m_off = b.mul(m_block_idx, c_block_m)
+    else:
+        batch_idx = b.block_id_z()
+        batch_off_a = b.mul(batch_idx, stride_a)
+        batch_off_b = b.mul(batch_idx, stride_b)
+        batch_off_c = b.mul(batch_idx, stride_c)
+        block_m_off = b.mul(b.block_id_y(), c_block_m)
     block_n_off = b.mul(b.block_id_x(), c_block_n)
 
     A_smem = b.smem_alloc(storage_dtype, [block_m, block_k], name_hint="A_smem")
@@ -1113,7 +1340,10 @@ def build_moe_interleaved_gate_up_silu_gemm(
     # ``block_m_off == block_id_y * tile_m`` here, but the form
     # mirrors the universal kernel's gate.
     do_work_cond: Optional[Value] = None
-    if u.trait.active_tile_skip:
+    if grouped:
+        # Empty tail block sentinel: BlockExpertIds == -1 -> skip.
+        do_work_cond = b.cmp_ge(expert_idx, c0)
+    elif u.trait.active_tile_skip:
         bucket_head = b.add(b.mul(b.block_id_z(), slot_size_p), block_m_off)
         first_token = b.global_load_i32(sorted_token_ids, bucket_head)
         do_work_cond = b.cmp_ge(first_token, c0)
@@ -1184,64 +1414,22 @@ def _emit_interleaved_silu_epilogue(
     storage_dtype = _storage_dtype(spec)
     mfmas_m = t.mfmas_per_warp_m
     mfmas_n = t.mfmas_per_warp_n
-    is_32x32 = (t.warp_tile_m, t.warp_tile_n) == (32, 32)
     c_neg_log2e = b.const_f32(-1.4426950408889634)
     one_f32 = b.const_f32(1.0)
     warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * t.warp_tile_m))
     warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * t.warp_tile_n))
 
-    # 1) Accumulator -> LDS in normal output layout (M x 2I tile).
-    if is_32x32:
-        c_atom_n = b.const_i32(t.warp_tile_n)
-        n_in_atom = b.mod(lane, c_atom_n)
-        m_blk = b.div(lane, c_atom_n)
-        flat = 0
-        for mi in range(mfmas_m):
-            for ni in range(mfmas_n):
-                acc = accs[flat]
-                flat += 1
-                ld_n = b.add(
-                    warp_n_off, b.add(b.const_i32(ni * t.warp_tile_n), n_in_atom)
-                )
-                for i in range(c_per_lane):
-                    rb = i // 4
-                    ri = i % 4
-                    m_off = b.add(
-                        b.add(
-                            b.mul(b.const_i32(8), b.const_i32(rb)),
-                            b.mul(b.const_i32(4), m_blk),
-                        ),
-                        b.const_i32(ri),
-                    )
-                    ld_m = b.add(
-                        warp_m_off, b.add(b.const_i32(mi * t.warp_tile_m), m_off)
-                    )
-                    h = b.cast_f32_to(b.vec_extract(acc, i), storage_dtype)
-                    b.smem_store_vN(C_smem, [ld_m, ld_n], h, n=1)
-    else:
-        c_atom_n = b.const_i32(t.warp_tile_n)
-        c_clen = b.const_i32(c_per_lane)
-        n_in_atom = b.mod(lane, c_atom_n)
-        m_blk = b.div(lane, c_atom_n)
-        m_base = b.mul(m_blk, c_clen)
-        flat = 0
-        for mi in range(mfmas_m):
-            for ni in range(mfmas_n):
-                acc = accs[flat]
-                flat += 1
-                ld_n = b.add(
-                    warp_n_off, b.add(b.const_i32(ni * t.warp_tile_n), n_in_atom)
-                )
-                for i in range(c_per_lane):
-                    ld_m = b.add(
-                        warp_m_off,
-                        b.add(
-                            b.const_i32(mi * t.warp_tile_m),
-                            b.add(m_base, b.const_i32(i)),
-                        ),
-                    )
-                    h = b.cast_f32_to(b.vec_extract(acc, i), storage_dtype)
-                    b.smem_store_vN(C_smem, [ld_m, ld_n], h, n=1)
+    # 1) Accumulator -> LDS in normal output layout (M x 2I tile). The
+    # MFMA-output (lane, slot) -> (ld_m, ld_n) decode is the C-warp tile
+    # distribution (CWarpDstrEncoding), unifying the 16x16 / 32x32 paths;
+    # the staging goes through store_tile_cshuffle + StaticDistributedTensor.
+    cdec = _CWarpDecode(b, spec, warp_m_off, warp_n_off, lane)
+
+    def _acc_cell(mi: int, ni: int, i: int) -> Value:
+        acc = accs[mi * mfmas_n + ni]
+        return b.cast_f32_to(b.vec_extract(acc, i), storage_dtype)
+
+    _emit_cshuffle_stage(b, spec, cdec, C_smem, storage_dtype, c_per_lane, _acc_cell)
 
     b.sync()
 
@@ -1275,15 +1463,15 @@ def _emit_interleaved_silu_epilogue(
 
     units_per_thread = total_hidden // (threads * vec_h)
     c_vec_h = b.const_i32(vec_h)
-    c_hidden_cols = b.const_i32(hidden_cols_per_tile)
-    n_base = b.div(block_n_off, b.const_i32(2))
+    n_base, _ = _magic_div_mod(b, block_n_off, 2)
     for u in range(units_per_thread):
         linear_h = b.add(
             b.const_i32(u * threads * vec_h),
             b.mul(b.thread_id_x(), c_vec_h),
         )
-        row = b.div(linear_h, c_hidden_cols)
-        hcol_local = b.mod(linear_h, c_hidden_cols)
+        # linear_h -> (row, hcol_local) via magic-division unmerge
+        # (hidden_cols_per_tile is the compile-time inner extent).
+        row, hcol_local = _magic_div_mod(b, linear_h, hidden_cols_per_tile)
         pair_col = b.mul(hcol_local, b.const_i32(2))
         c_m = b.add(block_m_off, row)
         c_n_start = b.add(n_base, hcol_local)
@@ -1357,9 +1545,28 @@ def moe_interleaved_gate_up_silu_gemm_signature(
         .scalar("stride_b", "i32")
         .scalar("stride_c", "i32")
     )
-    if spec.trait.active_tile_skip:
+    if getattr(spec, "grouped", False):
+        sig = sig.ptr("BlockExpertIds", "i32")
+    elif spec.trait.active_tile_skip:
         sig = sig.ptr("SortedTokenIds", "i32").scalar("slot_size", "i32")
     return sig.build()
+
+
+def moe_interleaved_gate_up_silu_gemm_grouped_grid(
+    num_m_blocks: int, n: int, spec: FusedInterleavedGateUpSiluGemmSpec
+) -> Tuple[int, int, int]:
+    """Flat M-block grid for the grouped sorted-token dispatch.
+
+    ``num_m_blocks`` = ``sum_e ceil(count[e]/tile_m)`` (plus any padding
+    to a fixed bound for graph capture). Grid is
+    ``(ceil(2*n / tile_n), num_m_blocks, 1)``.
+    """
+    t = spec.tile
+    return (
+        ((2 * n) + t.tile_n - 1) // t.tile_n,
+        num_m_blocks,
+        1,
+    )
 
 
 def moe_interleaved_gate_up_silu_gemm_grid(
@@ -1394,6 +1601,7 @@ class FusedDownReduceGemmSpec:
     wave_size: int = 64
     block_size: int = 0
     dtype: str = "fp16"
+    grouped: bool = False
 
     def __post_init__(self) -> None:
         if self.block_size == 0:
@@ -1420,7 +1628,10 @@ class FusedDownReduceGemmSpec:
         )
 
     def kernel_name(self) -> str:
-        return self.to_universal_spec().kernel_name() + "_down_reduce"
+        suffix = "_down_reduce"
+        if self.grouped:
+            suffix += "_grouped"
+        return self.to_universal_spec().kernel_name() + suffix
 
 
 def build_moe_down_reduce_gemm(
@@ -1464,6 +1675,18 @@ def build_moe_down_reduce_gemm(
     stride_b = b.param("stride_b", I32)
     slot_size = b.param("slot_size", I32)
     tokens = b.param("tokens", I32)
+    grouped = bool(getattr(spec, "grouped", False))
+    if grouped:
+        # Grouped sorted-token dispatch: BlockExpertIds[block_id_y] gives
+        # the expert (B slab); A is dense; the bucket index for the
+        # token/weight lookup is the dense global row ``c_m``.
+        block_expert_ids = b.param(
+            "BlockExpertIds",
+            PtrType(I32, "global"),
+            noalias=True,
+            readonly=True,
+            align=4,
+        )
 
     t = spec.tile
     _, _, c_per_lane = _mfma_atom_widths(u)
@@ -1483,14 +1706,33 @@ def build_moe_down_reduce_gemm(
     warp_n_idx = b.mod(warp_id, c_warps_n)
     lane = b.mod(tid, c_wave)
 
-    batch_idx = b.block_id_z()
-    batch_off_a = b.mul(batch_idx, stride_a)
-    batch_off_b = b.mul(batch_idx, stride_b)
-    # Offset into flattened padded bucket arrays (SortedTokenIds /
-    # SortedWeights). ``slot_size`` is M and is tile-m aligned.
-    batch_bucket_off = b.mul(batch_idx, slot_size)
-
-    block_m_off = b.mul(b.block_id_y(), c_block_m)
+    c0_dr = b.const_i32(0)
+    if grouped:
+        m_block_idx = b.block_id_y()
+        expert_idx = b.global_load_i32(block_expert_ids, m_block_idx)
+        batch_off_a = c0_dr  # dense packed Hidden
+        # Fold the per-expert W_down base ``expert * stride_b`` (H*I; for
+        # the datacenter shape 6.7e7 * 31 > 2^31) into the B base pointer
+        # as a 64-bit byte offset to avoid i32 voffset overflow.
+        elem_bytes_b = b.const_i64(2)  # f16 / bf16
+        b_base_bytes = b.mul(
+            b.mul(b.sext(expert_idx, I64), b.sext(stride_b, I64)), elem_bytes_b
+        )
+        WDown = b.global_ptr_add(WDown, b_base_bytes)
+        batch_off_b = c0_dr
+        # SortedTokenIds / SortedWeights are in the same dense packed
+        # order as the rows, so the bucket base is 0 (the epilogue adds
+        # the dense row ``c_m`` directly).
+        batch_bucket_off = c0_dr
+        block_m_off = b.mul(m_block_idx, c_block_m)
+    else:
+        batch_idx = b.block_id_z()
+        batch_off_a = b.mul(batch_idx, stride_a)
+        batch_off_b = b.mul(batch_idx, stride_b)
+        # Offset into flattened padded bucket arrays (SortedTokenIds /
+        # SortedWeights). ``slot_size`` is M and is tile-m aligned.
+        batch_bucket_off = b.mul(batch_idx, slot_size)
+        block_m_off = b.mul(b.block_id_y(), c_block_m)
     block_n_off = b.mul(b.block_id_x(), c_block_n)
 
     A_smem = b.smem_alloc(storage_dtype, [block_m, block_k], name_hint="A_smem")
@@ -1533,40 +1775,49 @@ def build_moe_down_reduce_gemm(
     operand = _MoeOperand(global_view=b_view, lds_view=b_lds_view, smem=B_smem)
     a_mn_origin = (batch_off_a, block_m_off)
     b_mn_origin = (batch_off_b, block_n_off)
-    (acc_res,) = _emit_moe_prefetch_kloop(
-        plan,
-        a_view,
-        a_lds_view,
-        A_smem,
-        a_mn_origin,
-        [operand],
-        b_mn_origin,
-        [accs],
-        K,
-        warp_m_idx,
-        warp_n_idx,
-        lane,
-        sched_groups=mfmas_m * mfmas_n,
-    )
 
-    _emit_down_reduce_epilogue_atomic(
-        b,
-        u,
-        acc_res,
-        warp_m_idx,
-        warp_n_idx,
-        lane,
-        block_m_off,
-        block_n_off,
-        M,
-        N,
-        SortedTokenIds,
-        SortedWeights,
-        Y,
-        c_per_lane,
-        batch_bucket_off=batch_bucket_off,
-        tokens=tokens,
-    )
+    def _emit_down_compute() -> None:
+        (acc_res,) = _emit_moe_prefetch_kloop(
+            plan,
+            a_view,
+            a_lds_view,
+            A_smem,
+            a_mn_origin,
+            [operand],
+            b_mn_origin,
+            [accs],
+            K,
+            warp_m_idx,
+            warp_n_idx,
+            lane,
+            sched_groups=mfmas_m * mfmas_n,
+        )
+
+        _emit_down_reduce_epilogue_atomic(
+            b,
+            u,
+            acc_res,
+            warp_m_idx,
+            warp_n_idx,
+            lane,
+            block_m_off,
+            block_n_off,
+            M,
+            N,
+            SortedTokenIds,
+            SortedWeights,
+            Y,
+            c_per_lane,
+            batch_bucket_off=batch_bucket_off,
+            tokens=tokens,
+        )
+
+    if grouped:
+        # Empty tail block (BlockExpertIds == -1) skips all work.
+        with b.scf_if(b.cmp_ge(expert_idx, c0_dr)):
+            _emit_down_compute()
+    else:
+        _emit_down_compute()
     return b.kernel
 
 
@@ -1594,7 +1845,6 @@ def _emit_down_reduce_epilogue_atomic(
     t = spec.tile
     mfmas_m = t.mfmas_per_warp_m
     mfmas_n = t.mfmas_per_warp_n
-    is_32x32 = (t.warp_tile_m, t.warp_tile_n) == (32, 32)
     warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * t.warp_tile_m))
     warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * t.warp_tile_n))
     pad_m = bool(spec.trait.pad_m)
@@ -1640,63 +1890,24 @@ def _emit_down_reduce_epilogue_atomic(
         else:
             inner()
 
-    if is_32x32:
-        c_atom_n = b.const_i32(t.warp_tile_n)
-        n_in_atom = b.mod(lane, c_atom_n)
-        m_blk = b.div(lane, c_atom_n)
-        # Per-mi c_n list (one per ni); shared across all i in the
-        # mi-row so the inner ni loop only multiplies the acc element.
-        for mi in range(mfmas_m):
-            c_ns = [
-                b.add(
-                    b.add(block_n_off, warp_n_off),
-                    b.add(b.const_i32(ni * t.warp_tile_n), n_in_atom),
-                )
-                for ni in range(mfmas_n)
-            ]
-            for i in range(c_per_lane):
-                rb = i // 4
-                ri = i % 4
-                m_off = b.add(
-                    b.add(
-                        b.mul(b.const_i32(8), b.const_i32(rb)),
-                        b.mul(b.const_i32(4), m_blk),
-                    ),
-                    b.const_i32(ri),
-                )
-                c_m = b.add(
-                    b.add(block_m_off, warp_m_off),
-                    b.add(b.const_i32(mi * t.warp_tile_m), m_off),
-                )
-                emit_one_row(c_m, c_ns, i, mi)
-    else:
-        c_atom_n = b.const_i32(t.warp_tile_n)
-        c_clen = b.const_i32(c_per_lane)
-        n_in_atom = b.mod(lane, c_atom_n)
-        m_blk = b.div(lane, c_atom_n)
-        m_base = b.mul(m_blk, c_clen)
-        for mi in range(mfmas_m):
-            c_ns = [
-                b.add(
-                    b.add(block_n_off, warp_n_off),
-                    b.add(b.const_i32(ni * t.warp_tile_n), n_in_atom),
-                )
-                for ni in range(mfmas_n)
-            ]
-            for i in range(c_per_lane):
-                m_off = b.add(m_base, b.const_i32(i))
-                c_m = b.add(
-                    b.add(block_m_off, warp_m_off),
-                    b.add(b.const_i32(mi * t.warp_tile_m), m_off),
-                )
-                emit_one_row(c_m, c_ns, i, mi)
+    # MFMA-output (lane, slot) -> (row, col) decode via the C-warp tile
+    # distribution (CWarpDstrEncoding), unifying the 16x16 / 32x32 paths.
+    cdec = _CWarpDecode(b, spec, warp_m_off, warp_n_off, lane)
+    for mi in range(mfmas_m):
+        # Per-mi c_n list (one per ni); shared across all i in the mi-row
+        # so the inner ni loop only multiplies the acc element. ``warp_col``
+        # is i-independent, so this is hoisted out of the slot loop.
+        c_ns = [b.add(block_n_off, cdec.warp_col(ni)) for ni in range(mfmas_n)]
+        for i in range(c_per_lane):
+            c_m = b.add(block_m_off, cdec.warp_row(mi, i))
+            emit_one_row(c_m, c_ns, i, mi)
 
 
 def moe_down_reduce_gemm_signature(spec: FusedDownReduceGemmSpec):
     from ...helpers.spec import SignatureBuilder
 
     dt = spec.dtype if spec.dtype in ("f16", "fp16", "bf16") else "f16"
-    return (
+    sig = (
         SignatureBuilder()
         .ptr("A", dt)
         .ptr("WDown", dt)
@@ -1710,8 +1921,10 @@ def moe_down_reduce_gemm_signature(spec: FusedDownReduceGemmSpec):
         .scalar("stride_b", "i32")
         .scalar("slot_size", "i32")
         .scalar("tokens", "i32")
-        .build()
     )
+    if getattr(spec, "grouped", False):
+        sig = sig.ptr("BlockExpertIds", "i32")
+    return sig.build()
 
 
 def moe_down_reduce_gemm_grid(
@@ -1722,6 +1935,22 @@ def moe_down_reduce_gemm_grid(
         (n + t.tile_n - 1) // t.tile_n,
         (m + t.tile_m - 1) // t.tile_m,
         batch,
+    )
+
+
+def moe_down_reduce_gemm_grouped_grid(
+    num_m_blocks: int, n: int, spec: FusedDownReduceGemmSpec
+) -> Tuple[int, int, int]:
+    """Flat M-block grid for the grouped down-reduce dispatch.
+
+    ``num_m_blocks`` = number of packed sorted-token M-blocks; grid is
+    ``(ceil(n / tile_n), num_m_blocks, 1)``.
+    """
+    t = spec.tile
+    return (
+        (n + t.tile_n - 1) // t.tile_n,
+        num_m_blocks,
+        1,
     )
 
 

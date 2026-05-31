@@ -357,7 +357,9 @@ def run_ck_dsl(
     pre_gu_interleaved = (
         os.environ.get("CK_DSL_PRESHUFFLE_W_GATE_UP_INTERLEAVED", "0") == "1"
     )
-    active_tile_skip = os.environ.get("CK_DSL_ACTIVE_TILE_SKIP_GEMMS", "0") == "1"
+    # Default-on (matches FusedMoeForwardSpec.active_tile_skip_gemms=True);
+    # set CK_DSL_ACTIVE_TILE_SKIP_GEMMS=0 to force the dense GEMM path.
+    active_tile_skip = os.environ.get("CK_DSL_ACTIVE_TILE_SKIP_GEMMS", "1") == "1"
     # When the gate-up packed preshuffle is requested, force the
     # packed kernel path (the only one that uses the BatchedGemm
     # launcher). When the interleaved preshuffle is requested, keep

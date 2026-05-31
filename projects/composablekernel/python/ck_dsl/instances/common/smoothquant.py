@@ -41,10 +41,12 @@ What we cover today:
 
 Implementation notes:
 
-* Pass 1 caches the f32-promoted ``x`` scalars via
- :func:`sweep_row_chunks`, so pass 2 does not re-read HBM. SmScale
- is re-loaded in pass 2 — it lives in L1 by the second pass and the
- re-load costs ~free.
+* Pass 1 reads the activation X tile through the canonical CK-Tile
+ ``MakeXBlockTileDistribution`` + :func:`load_tile` triad
+ (:func:`make_row_x_distribution`) and caches the f32-promoted ``x``
+ scalars in the returned :class:`StaticDistributedTensor`, so pass 2
+ does not re-read HBM. SmScale is re-loaded in pass 2 — it lives in
+ L1 by the second pass and the re-load costs ~free.
 * The amax reduction reuses :func:`block_lds_reduce` with the existing
  ``"max"`` combiner (no new IR primitive needed). Per-chunk we build a
  *tree* of pairwise ``fmax`` so the per-element ``|y| = fmax(y, -y)``
@@ -84,14 +86,20 @@ from dataclasses import dataclass
 from typing import List, Literal, Tuple
 
 from ...core.ir import F32, I32, IRBuilder, KernelDef, PtrType, Value
+from ...helpers.distribution import (
+    TileDistribution,
+    TileDistributionEncoding,
+    load_tile,
+    make_static_distributed_tensor,
+    make_static_tile_distribution,
+    store_tile,
+)
 from ...helpers.io import io_ir_type
 from ...helpers.quant import (
     QDType,
-    pack_quant_chunk_local_f32,
     quant_ir_type,
     quant_max_abs,
     quantize_scalar_f32,
-    store_packed_chunk_local,
 )
 from ...helpers.reduction import block_lds_reduce
 from ...helpers.spec import (
@@ -101,7 +109,6 @@ from ...helpers.spec import (
     kernel_name_join,
     validate_io,
 )
-from ...helpers.sweep import sweep_row_chunks
 from ...helpers.tensor_view import (
     make_global_view,
     make_lds_view,
@@ -137,6 +144,41 @@ def _tree_fmax(b: IRBuilder, values: List[Value]) -> Value:
             nxt.append(cur[-1])
         cur = nxt
     return cur[0]
+
+
+def make_row_x_distribution(
+    *, block_size: int, vec: int, elems_per_thread: int
+) -> TileDistribution:
+    """Build the per-row activation X tile distribution (CK Tile
+    ``MakeXBlockTileDistribution``, the canonical 2D row distribution).
+
+    The DSL kernels launch one CTA per row, so the M tile is a single
+    element (``Hs[X0] = (1,)``); the N axis is decomposed
+    ``(Repeat_N, ThreadPerWarp_N=block_size, Vector_N=vec)`` with the
+    lane id (P0) owning the ``block_size`` level and the Repeat / Vector
+    levels living in the per-thread Y tile. The resulting
+    :meth:`TileDistribution.calculate_x` reconstruction is exactly the
+    legacy hand-rolled ``n_off = k*BS*VEC + tid*VEC`` plus ``+i`` chunk
+    addressing, and the Y-space row-major linear order
+    (``y = k*VEC + i``) matches the legacy ``cached[k*VEC + i]`` layout
+    one-for-one, so the load addresses and the per-thread register
+    cache are byte-for-byte the same as the previous
+    :func:`sweep_row_chunks` path.
+    """
+    chunks = elems_per_thread // vec
+    encoding = TileDistributionEncoding(
+        # X0 = M (one row per CTA), X1 = N = (Repeat, block_size, vec).
+        Hs=((1,), (chunks, block_size, vec)),
+        # P0 = lane id -> X1 level 1 (the block_size / ThreadPerWarp dim).
+        Ps2RHs_major=((2,),),
+        Ps2RHs_minor=((1,),),
+        # Y0 -> X0 level 0 (the length-1 M dim); Y1 -> X1 level 0
+        # (Repeat); Y2 -> X1 level 2 (Vector). Row-major Y order gives
+        # storage index (0*chunks + k)*vec + i = k*vec + i.
+        Ys2RHs_major=(1, 2, 2),
+        Ys2RHs_minor=(0, 0, 2),
+    )
+    return make_static_tile_distribution(encoding)
 
 
 DType = Literal["f16", "bf16"]
@@ -296,9 +338,9 @@ def build_smoothquant(spec: SmoothQuantSpec, arch: str = "gfx950") -> KernelDef:
     # pattern layernorm/rmsnorm use: one ``block_size``-sized f32 buffer.
     lds = make_lds_view(b, dtype=F32, shape=(BS,), name_hint="lds_amax").base
 
-    # Pass 1: stream x through ``sweep_row_chunks``; accumulate the
-    # per-thread amax of ``y = x * smscale`` (in f32). Cache the f32
-    # x scalars so pass 2 doesn't re-read HBM.
+    # Pass 1: load x through the CK-Tile X distribution; accumulate the
+    # per-thread amax of ``y = x * smscale`` (in f32). The distributed
+    # tensor caches the f32 x scalars so pass 2 doesn't re-read HBM.
     #
     # Per chunk we build the chunk's amax via a balanced
     # ``fmax``-tree (helper :func:`_tree_fmax`) rather than the
@@ -311,6 +353,20 @@ def build_smoothquant(spec: SmoothQuantSpec, arch: str = "gfx950") -> KernelDef:
     # automatic ``v_max3_f32`` pattern-match on ``fmax(fmax(a, -a),
     # fmax(b, -b))`` this matches CK Tile's hand-rolled inline-asm
     # ``UseMax3`` path.
+    #
+    # CK-Tile adoption: the activation X tile is read via the canonical
+    # ``MakeXBlockTileDistribution`` + ``load_tile`` triad
+    # (:func:`make_row_x_distribution` / :func:`load_tile`) instead of
+    # the bespoke ``sweep_row_chunks`` chunk addressing. The distribution
+    # reconstructs the same per-element X coordinates and the returned
+    # :class:`StaticDistributedTensor` holds the f32-promoted scalars in
+    # the same row-major (``k*VEC + i``) order, so the load addresses and
+    # the per-thread register cache are unchanged.
+    x_dist = make_row_x_distribution(
+        block_size=BS, vec=VEC, elems_per_thread=spec.elems_per_thread
+    )
+    x_dt = load_tile(b, x_tile, distribution=x_dist, ps=[[tid]])
+
     s_amax = b.const_f32(0.0)
 
     def pass1_body(n_off, x_scalars):
@@ -325,16 +381,15 @@ def build_smoothquant(spec: SmoothQuantSpec, arch: str = "gfx950") -> KernelDef:
         chunk_amax = _tree_fmax(b, abs_ys)
         s_amax = b.fmax(s_amax, chunk_amax)
 
-    sweep_res = sweep_row_chunks(
-        b,
-        x_tile,
-        tid=tid,
-        block_size=BS,
-        vec=VEC,
-        elems_per_thread=spec.elems_per_thread,
-        body=pass1_body,
-        cache=True,
-    )
+    # Sweep the distributed X tile chunk-by-chunk (``elems_per_thread /
+    # VEC`` chunks); each chunk re-derives its ``n_off`` exactly as the
+    # legacy path did so the SmScale gather addresses are identical.
+    cached = list(x_dt.storage)
+    chunks_p1 = spec.elems_per_thread // VEC
+    c_vec_p1 = b.const_i32(VEC)
+    for k in range(chunks_p1):
+        n_off = b.add(b.mul(b.const_i32(k * BS), c_vec_p1), b.mul(tid, c_vec_p1))
+        pass1_body(n_off, cached[k * VEC : (k + 1) * VEC])
 
     total_amax = block_lds_reduce(b, s_amax, lds, tid, block_size=BS, combine="max")
 
@@ -353,39 +408,44 @@ def build_smoothquant(spec: SmoothQuantSpec, arch: str = "gfx950") -> KernelDef:
     # Pass 2: re-load SmScale, fuse the multiply with the quantise +
     # packed store.
     #
-    # The previous formulation issued ``VEC`` scalar
-    # ``quantize_scalar_f32`` calls and ``VEC`` scalar 8-bit
-    # ``global_store``\\s per chunk. That is bandwidth-bound (every
-    # lane pays the address-arithmetic overhead and the AMDGPU backend
-    # only sometimes folds adjacent byte stores into a wave-wide
-    # dword). The packed path packs ``y * inv_yscale`` into a
-    # ``<VEC x f32>``, applies the dtype-specific saturating cast
-    # (``v_cvt_pk_fp8_f32`` for fp8/bf8 via :func:`pack_quant_chunk_local_f32`,
-    # or scalar ``v_cvt_f32_to_i8_sat`` + :func:`IRBuilder.vec_pack`
-    # for i8), and emits one i32 (or i64) ``global_store`` per chunk.
-    cached = sweep_res.cached
+    # CK-Tile adoption (D2c): the quantised QY output is written through
+    # the canonical ``store_tile`` triad now that ``store_tile`` handles
+    # the i8 / fp8e4m3 / bf8e5m2 dtypes. We build a QY tile distribution
+    # identical to the X distribution (so ``calculate_x`` reconstructs the
+    # same ``n_off = k*BS*VEC + tid*VEC (+i)`` column addressing), populate
+    # a :class:`StaticDistributedTensor` of dtype ``q_ty`` with the
+    # already-scaled f32 chunk values, and let :func:`store_tile` do the
+    # saturating cvt + ``vec_pack`` + one coalesced ``global_store_vN``
+    # per access. This reproduces the same QY bytes as the previous
+    # :func:`pack_quant_chunk_local_f32` + :func:`store_packed_chunk_local`
+    # path while removing the hand-rolled ``byte_off`` arithmetic.
+    #
+    # ``VEC == 2`` keeps the per-element scalar fallback (no packed store):
+    # the backend already coalesces adjacent lanes' byte stores into a
+    # dword across the wave for this VEC.
     chunks = spec.elems_per_thread // VEC
     c_vec = b.const_i32(VEC)
     use_packed_store = VEC in (4, 8)
-    row_base_byte_off = b.mul(row, b.const_i32(N))
-    for k in range(chunks):
-        n_off = b.add(b.mul(b.const_i32(k * BS), c_vec), b.mul(tid, c_vec))
-        sm_scalars = sm_view.load_vec_as_f32(b, [n_off], n=VEC)
-        if use_packed_store:
-            scaled_f32: List[Value] = []
+    if use_packed_store:
+        qy_dist = make_row_x_distribution(
+            block_size=BS, vec=VEC, elems_per_thread=spec.elems_per_thread
+        )
+        qy_dt = make_static_distributed_tensor(qy_dist, dtype=q_ty)
+        for k in range(chunks):
+            n_off = b.add(b.mul(b.const_i32(k * BS), c_vec), b.mul(tid, c_vec))
+            sm_scalars = sm_view.load_vec_as_f32(b, [n_off], n=VEC)
             for i in range(VEC):
                 x_f32 = cached[k * VEC + i]
                 y_f32 = b.fmul(x_f32, sm_scalars[i])
-                scaled_f32.append(b.fmul(y_f32, inv_yscale))
-            packed = pack_quant_chunk_local_f32(
-                b, scaled_f32, q_ty=q_ty, out_dtype=spec.out_dtype
-            )
-            byte_off = b.add(row_base_byte_off, n_off)
-            store_packed_chunk_local(b, QY, byte_off, packed, n=VEC)
-        else:
-            # VEC == 2: keep the per-element scalar path. The backend
-            # already coalesces adjacent lanes' byte stores into a
-            # dword across the wave for this VEC.
+                # Y slots hold the already-scaled f32 chunk; store_tile
+                # applies the dtype-specific saturating cvt + pack.
+                qy_dt.set([0, k, i], b.fmul(y_f32, inv_yscale))
+        store_tile(b, qy_tile, qy_dt, ps=[[tid]])
+    else:
+        # VEC == 2: per-element scalar quant + store fallback.
+        for k in range(chunks):
+            n_off = b.add(b.mul(b.const_i32(k * BS), c_vec), b.mul(tid, c_vec))
+            sm_scalars = sm_view.load_vec_as_f32(b, [n_off], n=VEC)
             for i in range(VEC):
                 x_f32 = cached[k * VEC + i]
                 y_f32 = b.fmul(x_f32, sm_scalars[i])

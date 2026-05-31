@@ -72,7 +72,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from .core.ir import F16, I32, I64, IRBuilder, Type, Value
+from ..core.ir import F16, I32, I64, IRBuilder, Type, Value
 
 
 # ---------------------------------------------------------------------
@@ -113,6 +113,64 @@ def _lt(b: IRBuilder, lhs: Value, rhs: Value) -> Value:
 
 
 # ---------------------------------------------------------------------
+# Magic-number division (mirrors ck_tile/core/utility/magic_div.hpp)
+# ---------------------------------------------------------------------
+
+
+def calculate_magic_numbers(divisor: int) -> Tuple[int, int]:
+    """Compute the ``(multiplier, shift)`` pair for unsigned magic division.
+
+    Direct port of CK Tile's
+    ``magic_division32_bit_range::calculate_magic_numbers`` (the
+    ``magic_division`` alias used by ``merge_v2_magic_division``). The
+    returned constants reproduce ``dividend // divisor`` via the mul-hi
+    sequence in :func:`do_magic_division` for any ``dividend`` that fits
+    in the 31-bit unsigned range (the same restriction CK Tile documents).
+
+    The math:
+
+    .. code-block:: text
+
+        shift      = ceil(log2(divisor))           (smallest s with 2**s >= divisor)
+        multiplier = ((2**shift - divisor) << 32) // divisor + 1
+
+    Both values are plain Python ``int`` (compile-time constants); they are
+    baked into the emitted IR as ``const_i32`` operands, exactly like the
+    C++ constexpr path.
+    """
+    if divisor < 1:
+        raise ValueError(f"magic division requires divisor >= 1, got {divisor}")
+    shift = 0
+    while (1 << shift) < divisor:
+        shift += 1
+    multiplier = (((1 << shift) - divisor) << 32) // divisor + 1
+    return multiplier, shift
+
+
+def do_magic_division(
+    b: IRBuilder, dividend: Value, multiplier: int, shift: int
+) -> Value:
+    """Emit ``dividend // divisor`` using the magic ``(multiplier, shift)``.
+
+    Mirrors CK Tile's ``do_magic_division`` device path
+    (``tmp = __umulhi(dividend, multiplier); (tmp + dividend) >> shift``),
+    which the AMDGPU backend lowers without an integer-division instruction.
+    ``dividend`` is an i32 SSA value interpreted as unsigned; the result is
+    the i32 quotient. ``multiplier`` / ``shift`` come from
+    :func:`calculate_magic_numbers`.
+    """
+    # ``multiplier`` is a uint32 that may exceed the i32 signed range; bake
+    # it into the i32 constant as its two's-complement bit pattern so the
+    # unsigned ``umul_hi`` sees the right bits (matches the C++ uint32 path).
+    mult_i32 = multiplier - (1 << 32) if multiplier >= (1 << 31) else multiplier
+    tmp = b.umul_hi_i32(dividend, b.const_i32(mult_i32))
+    summed = b.add(tmp, dividend)
+    if shift == 0:
+        return summed
+    return b.lshr(summed, b.const_i32(shift))
+
+
+# ---------------------------------------------------------------------
 # Transforms
 # ---------------------------------------------------------------------
 
@@ -144,6 +202,41 @@ class Transform:
     ) -> Dict[str, CoordVar]:
         raise NotImplementedError
 
+    # -- incremental (delta) lowering -------------------------------------
+    #
+    # ``is_linear`` marks transforms whose ``update_lower_index`` produces a
+    # lower-index delta that is a function of the *upper* deltas alone (not
+    # the absolute position) -- exactly CK Tile's ``IsLinearTransform`` set.
+    # For those, :meth:`TensorDescriptor.move` can propagate deltas through
+    # the chain and never re-touch the absolute index (so a loop-invariant
+    # delta folds to a constant offset add). Non-linear transforms
+    # (``Unmerge*``/``Modulo``/``XorT``) recompute their lowers from the new
+    # absolute upper coords, mirroring the C++ ``update_lower_index`` for
+    # those primitives.
+    is_linear: bool = False
+
+    def update_lower(
+        self,
+        b: IRBuilder,
+        old: Dict[str, CoordVar],
+        delta: Dict[str, CoordVar],
+        new: Dict[str, CoordVar],
+    ) -> Dict[str, CoordVar]:
+        """Return the lower-coord deltas for this transform.
+
+        Default (non-linear) path: ``new_lower - old_lower`` where each is
+        obtained by :meth:`apply`. Linear transforms override this to derive
+        the lower delta straight from the upper deltas, matching the C++
+        ``update_lower_index`` of the corresponding primitive.
+        """
+        new_low = self.apply(b, new)
+        old_low = self.apply(b, old)
+        out: Dict[str, CoordVar] = {}
+        for name in self.lower:
+            d = b.sub(new_low[name].value, old_low[name].value)
+            out[name] = CoordVar(name, d, new_low[name].valid)
+        return out
+
 
 @dataclass(frozen=True)
 class PassThrough(Transform):
@@ -161,9 +254,15 @@ class PassThrough(Transform):
         object.__setattr__(self, "upper", (upper_name,))
         object.__setattr__(self, "lower", (lower_name or upper_name,))
 
+    is_linear = True
+
     def apply(self, b: IRBuilder, coords: Dict[str, CoordVar]) -> Dict[str, CoordVar]:
         u = coords[self.upper[0]]
         return {self.lower[0]: replace(u, name=self.lower[0])}
+
+    def update_lower(self, b, old, delta, new):
+        d = delta[self.upper[0]]
+        return {self.lower[0]: CoordVar(self.lower[0], d.value, None)}
 
 
 @dataclass(frozen=True)
@@ -191,6 +290,8 @@ class Pad(Transform):
         object.__setattr__(self, "lo", int(lo))
         object.__setattr__(self, "hi", int(hi))
 
+    is_linear = True
+
     def apply(self, b: IRBuilder, coords: Dict[str, CoordVar]) -> Dict[str, CoordVar]:
         u = coords[self.upper[0]]
         c_lo = b.const_i32(self.lo)
@@ -198,6 +299,13 @@ class Pad(Transform):
         valid = _and(b, _ge(b, u.value, c_lo), _lt(b, u.value, c_hi))
         merged_valid = _and(b, u.valid, valid)
         return {self.lower[0]: CoordVar(self.lower[0], u.value, merged_valid)}
+
+    def update_lower(self, b, old, delta, new):
+        # value delta passes straight through; validity is re-checked at the
+        # new absolute position (validity is not a delta quantity).
+        d = delta[self.upper[0]]
+        valid = self.apply(b, new)[self.lower[0]].valid
+        return {self.lower[0]: CoordVar(self.lower[0], d.value, valid)}
 
 
 @dataclass(frozen=True)
@@ -269,6 +377,20 @@ class Embed(Transform):
         valid = _and(b, valid_acc, bounds)
         return {self.lower[0]: CoordVar(self.lower[0], acc, valid)}
 
+    is_linear = True
+
+    def update_lower(self, b, old, delta, new):
+        # delta_low = sum(strides[i] * delta_up[i]); constant offset drops out.
+        acc: Optional[Value] = None
+        for name, s in zip(self.upper, self.strides):
+            d = delta[name].value
+            term = d if s == 1 else b.mul(d, b.const_i32(s))
+            acc = term if acc is None else b.add(acc, term)
+        if acc is None:
+            acc = b.const_i32(0)
+        valid = self.apply(b, new)[self.lower[0]].valid
+        return {self.lower[0]: CoordVar(self.lower[0], acc, valid)}
+
 
 @dataclass(frozen=True)
 class Merge(Transform):
@@ -318,6 +440,22 @@ class Merge(Transform):
         if acc is None:
             acc = b.const_i32(0)
         return {self.lower[0]: CoordVar(self.lower[0], acc, valid)}
+
+    is_linear = True
+
+    def update_lower(self, b, old, delta, new):
+        # delta_low = sum(stride_i * delta_up_i); same linear map as apply.
+        acc: Optional[Value] = None
+        for i, name in enumerate(self.upper):
+            stride = 1
+            for d in self.dims[i + 1 :]:
+                stride *= d
+            dv = delta[name].value
+            term = dv if stride == 1 else b.mul(dv, b.const_i32(stride))
+            acc = term if acc is None else b.add(acc, term)
+        if acc is None:
+            acc = b.const_i32(0)
+        return {self.lower[0]: CoordVar(self.lower[0], acc, None)}
 
 
 @dataclass(frozen=True)
@@ -369,6 +507,436 @@ class Unmerge(Transform):
         return out
 
 
+@dataclass(frozen=True)
+class UnmergeMagicDiv(Transform):
+    """``Unmerge`` that splits via magic-number division (no hardware div).
+
+    Numerically identical to :class:`Unmerge` -- it splits one flat upper
+    coord into ``N`` lower coords -- but emits the mul-hi magic-division
+    sequence (:func:`do_magic_division`) instead of literal ``b.div`` /
+    ``b.mod``. This mirrors CK Tile's ``merge_v2_magic_division`` (the
+    default ``make_merge_transform``), whose ``calculate_lower_index`` is
+    exactly this flat-to-multi split. It removes the integer-division /
+    modulo ops from the runtime addressing path (the single biggest source
+    of div/mod assembly in conv ``m -> (n, ho, wo)`` / ``k -> (r, s, c)``
+    decodes).
+
+    Following the C++ algorithm, the split walks from the *last* lower coord
+    to the first: ``tmp = idx_up``; for ``i`` from ``N-1`` down to ``1``,
+    ``q = tmp // dims[i]`` (magic), ``lower[i] = tmp - q*dims[i]``,
+    ``tmp = q``; finally ``lower[0] = tmp``. The dividend must stay within
+    the documented 31-bit unsigned range.
+    """
+
+    upper: Tuple[str, ...]
+    lower: Tuple[str, ...]
+    dims: Tuple[int, ...]
+
+    def __init__(
+        self, upper_name: str, lowers: Sequence[str], dims: Sequence[int]
+    ) -> None:
+        if len(lowers) != len(dims):
+            raise ValueError(
+                f"UnmergeMagicDiv expects len(lowers) == len(dims) "
+                f"(got {lowers!r}, {dims!r})"
+            )
+        object.__setattr__(self, "upper", (upper_name,))
+        object.__setattr__(self, "lower", tuple(lowers))
+        object.__setattr__(self, "dims", tuple(int(d) for d in dims))
+
+    def apply(self, b: IRBuilder, coords: Dict[str, CoordVar]) -> Dict[str, CoordVar]:
+        u = coords[self.upper[0]]
+        n = len(self.lower)
+        out: Dict[str, CoordVar] = {}
+        tmp = u.value
+        # Walk last -> 1, peeling off the remainder against each dim.
+        for i in range(n - 1, 0, -1):
+            d = self.dims[i]
+            if d == 1:
+                # x // 1 == x, x % 1 == 0; no magic needed.
+                rem = b.const_i32(0)
+                quot = tmp
+            else:
+                mult, shift = calculate_magic_numbers(d)
+                quot = do_magic_division(b, tmp, mult, shift)
+                rem = b.sub(tmp, b.mul(quot, b.const_i32(d)))
+            name = self.lower[i]
+            out[name] = CoordVar(name, rem, u.valid)
+            tmp = quot
+        out[self.lower[0]] = CoordVar(self.lower[0], tmp, u.valid)
+        return out
+
+
+@dataclass(frozen=True)
+class UnmergeDivMod(Transform):
+    """``Unmerge`` variant emitting the pow-2 division/mod scan.
+
+    Mirrors CK Tile's ``merge_v3_division_mod`` (the literal ``/`` and
+    ``%`` variant intended for compile-time, power-of-two ``low_lengths``).
+    It uses the *reverse-exclusive-scan* of the dims (the product of all
+    dims to the right of ``i``) as the divisor, walking the lowers from
+    first to last:
+
+    .. code-block:: text
+
+        tmp = idx_up
+        for i in 0 .. N-2:   lower[i] = tmp // scan[i]; tmp %= scan[i]
+        lower[N-1] = tmp
+
+    Numerically identical to :class:`Unmerge`, just expressed in the
+    scan form the C++ ``merge_v3`` uses; provided for parity with the
+    cshuffle-epilogue LDS descriptor chain, which names this transform.
+    """
+
+    upper: Tuple[str, ...]
+    lower: Tuple[str, ...]
+    dims: Tuple[int, ...]
+
+    def __init__(
+        self, upper_name: str, lowers: Sequence[str], dims: Sequence[int]
+    ) -> None:
+        if len(lowers) != len(dims):
+            raise ValueError(
+                f"UnmergeDivMod expects len(lowers) == len(dims) "
+                f"(got {lowers!r}, {dims!r})"
+            )
+        object.__setattr__(self, "upper", (upper_name,))
+        object.__setattr__(self, "lower", tuple(lowers))
+        object.__setattr__(self, "dims", tuple(int(d) for d in dims))
+
+    def apply(self, b: IRBuilder, coords: Dict[str, CoordVar]) -> Dict[str, CoordVar]:
+        u = coords[self.upper[0]]
+        n = len(self.lower)
+        out: Dict[str, CoordVar] = {}
+        tmp = u.value
+        for i in range(n - 1):
+            scan = 1
+            for d in self.dims[i + 1 :]:
+                scan *= d
+            name = self.lower[i]
+            if scan == 1:
+                out[name] = CoordVar(name, tmp, u.valid)
+                # tmp %= 1 == 0
+                tmp = b.const_i32(0)
+            else:
+                c_scan = b.const_i32(scan)
+                out[name] = CoordVar(name, b.div(tmp, c_scan), u.valid)
+                tmp = b.mod(tmp, c_scan)
+        out[self.lower[-1]] = CoordVar(self.lower[-1], tmp, u.valid)
+        return out
+
+
+@dataclass(frozen=True)
+class XorT(Transform):
+    """2-D XOR swizzle: ``lower[1] = upper[1] ^ (upper[0] % length1)``.
+
+    Composable port of CK Tile's ``xor_t`` transform
+    (``coordinate_transform.hpp``). The first coord passes through
+    (``lower[0] = upper[0]``); the second is XOR-ed with the first taken
+    modulo ``length1`` (the lower length of the second dim). With
+    ``apply_modulo=False`` the raw ``upper[0]`` is used (the C++
+    ``ApplyModulo=false`` branch). This is the LDS bank-conflict-avoidance
+    swizzle expressed inside the descriptor chain, the general counterpart
+    of the closed-form byte table in ``helpers/layouts.py``.
+    """
+
+    upper: Tuple[str, ...]
+    lower: Tuple[str, ...]
+    length1: int
+    apply_modulo: bool
+
+    def __init__(
+        self,
+        upper: Sequence[str],
+        lowers: Sequence[str],
+        *,
+        length1: int,
+        apply_modulo: bool = True,
+    ) -> None:
+        if len(upper) != 2 or len(lowers) != 2:
+            raise ValueError(f"XorT is 2->2 (got upper={upper!r}, lowers={lowers!r})")
+        object.__setattr__(self, "upper", tuple(upper))
+        object.__setattr__(self, "lower", tuple(lowers))
+        object.__setattr__(self, "length1", int(length1))
+        object.__setattr__(self, "apply_modulo", bool(apply_modulo))
+
+    def apply(self, b: IRBuilder, coords: Dict[str, CoordVar]) -> Dict[str, CoordVar]:
+        u0 = coords[self.upper[0]]
+        u1 = coords[self.upper[1]]
+        valid = _and(b, u0.valid, u1.valid)
+        if self.apply_modulo and self.length1 != 1:
+            swz = b.mod(u0.value, b.const_i32(self.length1))
+        elif self.apply_modulo:
+            # x % 1 == 0 -> xor by 0 is identity
+            swz = b.const_i32(0)
+        else:
+            swz = u0.value
+        low1 = b.xor(u1.value, swz)
+        return {
+            self.lower[0]: CoordVar(self.lower[0], u0.value, u0.valid),
+            self.lower[1]: CoordVar(self.lower[1], low1, valid),
+        }
+
+
+@dataclass(frozen=True)
+class Slice(Transform):
+    """Window into a dim: ``lower = upper + begin`` (``begin <= lower < end``).
+
+    Port of CK Tile's ``slice`` transform: the upper coord ranges over
+    ``[0, end - begin)`` and maps to ``[begin, end)`` in the lower space by
+    adding the compile-time ``begin``. Use for conv group/batch slicing
+    that today is done with ad-hoc offset adds. (CK Tile's ``slice`` carries
+    no boundary check on its own; the enclosing tile window bounds it.)
+    """
+
+    upper: Tuple[str, ...]
+    lower: Tuple[str, ...]
+    begin: int
+    end: int
+
+    def __init__(
+        self, coord_name: str, *, begin: int, end: int, into: Optional[str] = None
+    ) -> None:
+        object.__setattr__(self, "upper", (coord_name,))
+        object.__setattr__(self, "lower", (into or coord_name,))
+        object.__setattr__(self, "begin", int(begin))
+        object.__setattr__(self, "end", int(end))
+
+    is_linear = True
+
+    def apply(self, b: IRBuilder, coords: Dict[str, CoordVar]) -> Dict[str, CoordVar]:
+        u = coords[self.upper[0]]
+        val = u.value if self.begin == 0 else b.add(u.value, b.const_i32(self.begin))
+        return {self.lower[0]: CoordVar(self.lower[0], val, u.valid)}
+
+    def update_lower(self, b, old, delta, new):
+        d = delta[self.upper[0]]
+        return {self.lower[0]: CoordVar(self.lower[0], d.value, None)}
+
+
+@dataclass(frozen=True)
+class Freeze(Transform):
+    """Pin a lower dim to a constant, consuming no upper coord.
+
+    Port of CK Tile's ``freeze`` (1 lower, 0 upper): the lower coord is set
+    to a fixed compile-time index ``low_idx`` regardless of any upper coord.
+    Use to nail a batch/group dimension to a constant inside a descriptor
+    chain (the "pin a dim to a constant" idiom done with offset adds today).
+    """
+
+    upper: Tuple[str, ...]
+    lower: Tuple[str, ...]
+    low_idx: int
+
+    def __init__(self, into: str, *, low_idx: int) -> None:
+        object.__setattr__(self, "upper", ())
+        object.__setattr__(self, "lower", (into,))
+        object.__setattr__(self, "low_idx", int(low_idx))
+
+    is_linear = True
+
+    def apply(self, b: IRBuilder, coords: Dict[str, CoordVar]) -> Dict[str, CoordVar]:
+        return {self.lower[0]: CoordVar(self.lower[0], b.const_i32(self.low_idx), None)}
+
+    def update_lower(self, b, old, delta, new):
+        # frozen: lower never moves -> zero delta.
+        return {self.lower[0]: CoordVar(self.lower[0], b.const_i32(0), None)}
+
+
+@dataclass(frozen=True)
+class Insert(Transform):
+    """Add a dangling upper dim with no lower dim (consumes the coord).
+
+    Port of CK Tile's ``insert`` (0 lower, 1 upper): the upper coord exists
+    in the upper space (it has a length) but contributes nothing to the
+    lower addressing. Used to introduce a broadcast / iteration dim that the
+    naive layout does not see.
+    """
+
+    upper: Tuple[str, ...]
+    lower: Tuple[str, ...]
+    length: int
+
+    def __init__(self, coord_name: str, *, length: int) -> None:
+        object.__setattr__(self, "upper", (coord_name,))
+        object.__setattr__(self, "lower", ())
+        object.__setattr__(self, "length", int(length))
+
+    is_linear = True
+
+    def apply(self, b: IRBuilder, coords: Dict[str, CoordVar]) -> Dict[str, CoordVar]:
+        # 0 lower dims: the upper coord is consumed but produces nothing.
+        return {}
+
+
+@dataclass(frozen=True)
+class Replicate(Transform):
+    """Add N dangling upper dims with no lower dim (broadcast).
+
+    Port of CK Tile's ``replicate`` (0 lower, N upper): every upper coord
+    exists for iteration but contributes nothing to lower addressing, so
+    the same lower element is read for each value -- the descriptor-level
+    broadcast. Used for paged-KV / norm broadcast dims.
+    """
+
+    upper: Tuple[str, ...]
+    lower: Tuple[str, ...]
+    lengths: Tuple[int, ...]
+
+    def __init__(self, uppers: Sequence[str], *, lengths: Sequence[int]) -> None:
+        if len(uppers) != len(lengths):
+            raise ValueError(
+                f"Replicate expects len(uppers) == len(lengths) "
+                f"(got {uppers!r}, {lengths!r})"
+            )
+        object.__setattr__(self, "upper", tuple(uppers))
+        object.__setattr__(self, "lower", ())
+        object.__setattr__(self, "lengths", tuple(int(x) for x in lengths))
+
+    is_linear = True
+
+    def apply(self, b: IRBuilder, coords: Dict[str, CoordVar]) -> Dict[str, CoordVar]:
+        return {}
+
+
+@dataclass(frozen=True)
+class Modulo(Transform):
+    """Wrap a dim: ``lower = upper % modulus``.
+
+    Port of CK Tile's ``modulo`` transform. Use for ring-buffer / circular
+    addressing (paged-KV slot wrap). The upper coord ranges over
+    ``[0, up_length)`` and the lower is its residue mod ``modulus``.
+    """
+
+    upper: Tuple[str, ...]
+    lower: Tuple[str, ...]
+    modulus: int
+
+    def __init__(
+        self, coord_name: str, *, modulus: int, into: Optional[str] = None
+    ) -> None:
+        object.__setattr__(self, "upper", (coord_name,))
+        object.__setattr__(self, "lower", (into or coord_name,))
+        object.__setattr__(self, "modulus", int(modulus))
+
+    def apply(self, b: IRBuilder, coords: Dict[str, CoordVar]) -> Dict[str, CoordVar]:
+        u = coords[self.upper[0]]
+        if self.modulus == 1:
+            val = b.const_i32(0)
+        else:
+            val = b.mod(u.value, b.const_i32(self.modulus))
+        return {self.lower[0]: CoordVar(self.lower[0], val, u.valid)}
+
+
+@dataclass(frozen=True)
+class Offset(Transform):
+    """Shift a dim by a constant: ``lower = upper + offset_length``.
+
+    Port of CK Tile's ``offset`` transform (the index-shifting cousin of
+    the ck_dsl validity-only :class:`Pad`). Unlike :class:`Slice` (whose
+    upper length shrinks to ``end - begin``), ``offset`` keeps the same
+    length and merely biases the index, as CK Tile's ``offset`` does.
+    """
+
+    upper: Tuple[str, ...]
+    lower: Tuple[str, ...]
+    offset_length: int
+
+    def __init__(
+        self, coord_name: str, *, offset_length: int, into: Optional[str] = None
+    ) -> None:
+        object.__setattr__(self, "upper", (coord_name,))
+        object.__setattr__(self, "lower", (into or coord_name,))
+        object.__setattr__(self, "offset_length", int(offset_length))
+
+    is_linear = True
+
+    def apply(self, b: IRBuilder, coords: Dict[str, CoordVar]) -> Dict[str, CoordVar]:
+        u = coords[self.upper[0]]
+        val = (
+            u.value
+            if self.offset_length == 0
+            else b.add(u.value, b.const_i32(self.offset_length))
+        )
+        return {self.lower[0]: CoordVar(self.lower[0], val, u.valid)}
+
+    def update_lower(self, b, old, delta, new):
+        d = delta[self.upper[0]]
+        return {self.lower[0]: CoordVar(self.lower[0], d.value, None)}
+
+
+@dataclass(frozen=True)
+class RightPad(Transform):
+    """Index-shifting right pad: value passes through, valid iff ``< low_length``.
+
+    Port of CK Tile's ``right_pad`` transform. The lower index equals the
+    upper index (``calculate_lower_index`` is identity); the validity check
+    is ``idx_up < low_length`` (the unpadded extent). The upper extent is
+    ``low_length + right_pad_length`` and indices in the pad region are the
+    out-of-range ones. This is the index-shifting pad CK Tile uses (the
+    ck_dsl :class:`Pad` is validity-only with explicit ``lo``/``hi``).
+    """
+
+    upper: Tuple[str, ...]
+    lower: Tuple[str, ...]
+    low_length: int
+
+    def __init__(self, coord_name: str, *, low_length: int) -> None:
+        object.__setattr__(self, "upper", (coord_name,))
+        object.__setattr__(self, "lower", (coord_name,))
+        object.__setattr__(self, "low_length", int(low_length))
+
+    is_linear = True
+
+    def apply(self, b: IRBuilder, coords: Dict[str, CoordVar]) -> Dict[str, CoordVar]:
+        u = coords[self.upper[0]]
+        valid = _and(b, u.valid, _lt(b, u.value, b.const_i32(self.low_length)))
+        return {self.lower[0]: CoordVar(self.lower[0], u.value, valid)}
+
+    def update_lower(self, b, old, delta, new):
+        d = delta[self.upper[0]]
+        valid = self.apply(b, new)[self.lower[0]].valid
+        return {self.lower[0]: CoordVar(self.lower[0], d.value, valid)}
+
+
+@dataclass(frozen=True)
+class LeftPad(Transform):
+    """Index-shifting left pad: ``lower = upper - left_pad``, valid iff ``>= left_pad``.
+
+    Port of CK Tile's ``left_pad`` transform: the lower index is shifted
+    down by ``left_pad_length`` (``calculate_lower_index`` subtracts it),
+    and the validity check is ``idx_up >= left_pad_length``. The upper
+    extent is ``low_length + left_pad_length``. This is the value-shifting
+    pad variant CK Tile uses, distinct from the validity-only :class:`Pad`.
+    """
+
+    upper: Tuple[str, ...]
+    lower: Tuple[str, ...]
+    left_pad: int
+
+    def __init__(
+        self, coord_name: str, *, left_pad: int, into: Optional[str] = None
+    ) -> None:
+        object.__setattr__(self, "upper", (coord_name,))
+        object.__setattr__(self, "lower", (into or coord_name,))
+        object.__setattr__(self, "left_pad", int(left_pad))
+
+    is_linear = True
+
+    def apply(self, b: IRBuilder, coords: Dict[str, CoordVar]) -> Dict[str, CoordVar]:
+        u = coords[self.upper[0]]
+        c_lp = b.const_i32(self.left_pad)
+        val = u.value if self.left_pad == 0 else b.sub(u.value, c_lp)
+        valid = _and(b, u.valid, _ge(b, u.value, c_lp))
+        return {self.lower[0]: CoordVar(self.lower[0], val, valid)}
+
+    def update_lower(self, b, old, delta, new):
+        # lower shifts by a constant -> value delta == upper delta.
+        d = delta[self.upper[0]]
+        valid = self.apply(b, new)[self.lower[0]].valid
+        return {self.lower[0]: CoordVar(self.lower[0], d.value, valid)}
+
+
 # Convenience constructors so user code reads like the C++ DSL.
 
 
@@ -398,6 +966,90 @@ def merge(upper: Sequence[str], *, into: str, dims: Sequence[int]) -> Merge:
 
 def unmerge(upper: str, into: Sequence[str], *, dims: Sequence[int]) -> Unmerge:
     return Unmerge(upper, into, dims)
+
+
+def merge_magic(upper: Sequence[str], *, into: str, dims: Sequence[int]) -> Merge:
+    """``merge`` (flatten N coords -> 1).
+
+    CK Tile's ``merge`` (the flatten direction) is a pure linear
+    combination -- ``merge_v2_magic_division`` only differs from the literal
+    ``merge`` in the *lowering* (split) direction, which in ck_dsl is
+    :func:`unmerge_magic`. So ``merge_magic`` is the same arithmetic as
+    :func:`merge` and is provided as the symmetric name; the magic-division
+    win lives entirely in :func:`unmerge_magic`.
+    """
+    return Merge(upper, into, dims)
+
+
+def unmerge_magic(
+    upper: str, into: Sequence[str], *, dims: Sequence[int]
+) -> UnmergeMagicDiv:
+    """``unmerge`` (split 1 -> N) via magic-number division.
+
+    Drop-in replacement for :func:`unmerge` that emits the mul-hi
+    magic-division sequence instead of literal ``div``/``mod`` (CK Tile's
+    ``merge_v2_magic_division``). Use in any K-looping / sliding addressing
+    decode where the divisors are loop-invariant compile-time constants.
+    """
+    return UnmergeMagicDiv(upper, into, dims)
+
+
+def unmerge_div_mod(
+    upper: str, into: Sequence[str], *, dims: Sequence[int]
+) -> UnmergeDivMod:
+    """``unmerge`` via the pow-2 division/mod scan (CK Tile ``merge_v3``)."""
+    return UnmergeDivMod(upper, into, dims)
+
+
+def xor_t(
+    upper: Sequence[str],
+    into: Sequence[str],
+    *,
+    length1: int,
+    apply_modulo: bool = True,
+) -> XorT:
+    """2-D XOR swizzle ``lower[1] = upper[1] ^ (upper[0] % length1)``."""
+    return XorT(upper, into, length1=length1, apply_modulo=apply_modulo)
+
+
+def slice_(coord: str, *, begin: int, end: int, into: Optional[str] = None) -> Slice:
+    """Window a dim to ``[begin, end)`` (``lower = upper + begin``)."""
+    return Slice(coord, begin=begin, end=end, into=into)
+
+
+def freeze(into: str, *, low_idx: int) -> Freeze:
+    """Pin a lower dim to the constant ``low_idx`` (consumes no upper coord)."""
+    return Freeze(into, low_idx=low_idx)
+
+
+def insert(coord: str, *, length: int) -> Insert:
+    """Add a dangling upper dim with no lower dim."""
+    return Insert(coord, length=length)
+
+
+def replicate(uppers: Sequence[str], *, lengths: Sequence[int]) -> Replicate:
+    """Add N dangling upper dims (broadcast: no lower contribution)."""
+    return Replicate(uppers, lengths=lengths)
+
+
+def modulo(coord: str, *, modulus: int, into: Optional[str] = None) -> Modulo:
+    """Wrap a dim: ``lower = upper % modulus``."""
+    return Modulo(coord, modulus=modulus, into=into)
+
+
+def offset(coord: str, *, offset_length: int, into: Optional[str] = None) -> Offset:
+    """Shift a dim by a constant ``lower = upper + offset_length``."""
+    return Offset(coord, offset_length=offset_length, into=into)
+
+
+def right_pad(coord: str, *, low_length: int) -> RightPad:
+    """Index-shifting right pad: valid iff ``upper < low_length``."""
+    return RightPad(coord, low_length=low_length)
+
+
+def left_pad(coord: str, *, left_pad: int, into: Optional[str] = None) -> LeftPad:
+    """Index-shifting left pad: ``lower = upper - left_pad``, valid iff ``>=``."""
+    return LeftPad(coord, left_pad=left_pad, into=into)
 
 
 # ---------------------------------------------------------------------
@@ -886,23 +1538,146 @@ class TensorDescriptor:
             off = b.const_i64(0)
         return off, valid
 
+    def _run_chain_delta(
+        self,
+        b: IRBuilder,
+        old_values: Dict[str, Value],
+        delta_values: Dict[str, Value],
+    ) -> Tuple[Dict[str, CoordVar], Dict[str, CoordVar]]:
+        """Topologically lower a *delta* through the chain.
+
+        Returns ``(delta_coords, new_coords)`` for every coord down to the
+        base level. ``delta_coords[name].value`` is the i32 change of coord
+        ``name``; ``new_coords[name]`` is the new absolute coord (value +
+        validity). Linear transforms derive their lower deltas straight from
+        the upper deltas (so a loop-invariant delta folds to a constant);
+        non-linear transforms (``Unmerge*``/``Modulo``/``XorT``) recompute
+        their lowers from the new absolute upper coords, exactly mirroring
+        each C++ transform's ``update_lower_index``.
+        """
+        missing = set(self.upper_names) - set(old_values.keys())
+        if missing:
+            raise ValueError(
+                f"move() missing upper coords for descriptor {self.name!r}: "
+                f"{sorted(missing)}"
+            )
+        old: Dict[str, CoordVar] = {n: CoordVar(n, v) for n, v in old_values.items()}
+        new: Dict[str, CoordVar] = {}
+        delta: Dict[str, CoordVar] = {}
+        for n in self.upper_names:
+            d = delta_values.get(n)
+            if d is None:
+                d = b.const_i32(0)
+            delta[n] = CoordVar(n, d)
+            new[n] = CoordVar(n, b.add(old_values[n], d))
+        remaining: List[Transform] = list(self.chain)
+        while remaining:
+            progress = False
+            next_remaining: List[Transform] = []
+            for t in remaining:
+                if all(name in old for name in t.upper):
+                    old_low = t.apply(b, old)
+                    new_low = t.apply(b, new)
+                    diff_low = t.update_lower(b, old, delta, new)
+                    for n in t.lower:
+                        old[n] = old_low[n]
+                        new[n] = new_low[n]
+                        delta[n] = CoordVar(n, diff_low[n].value)
+                    progress = True
+                else:
+                    next_remaining.append(t)
+            if not progress:
+                names = [t.upper for t in next_remaining]
+                avail = sorted(old.keys())
+                raise ValueError(
+                    f"move chain has unresolved deps: pending uppers "
+                    f"= {names}; available coords = {avail}"
+                )
+            remaining = next_remaining
+        return delta, new
+
+    def move(
+        self,
+        b: IRBuilder,
+        prev_offset: Value,
+        old_values: Dict[str, Value],
+        delta_values: Dict[str, Value],
+    ) -> Tuple[Value, Optional[Value]]:
+        """Incrementally update a cached offset by a coordinate *delta*.
+
+        Mirrors CK Tile's ``move_tensor_coordinate``: instead of re-running
+        the whole transform chain from scratch (as :meth:`offset` does), this
+        propagates the per-coord deltas through each transform's
+        ``update_lower_index`` and adds the resulting base-level offset delta
+        to ``prev_offset``. For a loop-invariant ``delta_values`` (the GEMM
+        K-loop / sliding-window step) the delta folds to a single constant
+        add, so the K-loop body emits no div/mod and no full address recompute.
+
+        ``prev_offset`` is the offset returned by the previous :meth:`offset`
+        / :meth:`move`. ``old_values`` are the upper coords that produced it;
+        ``delta_values`` maps a subset of ``upper_names`` to their i32 change
+        (omitted coords are treated as unchanged). Returns the new
+        ``(offset, valid)`` -- ``valid`` is recomputed at the new absolute
+        position so boundary checks stay correct.
+        """
+        delta, new = self._run_chain_delta(b, old_values, delta_values)
+        off_delta: Optional[Value] = None
+        valid: Optional[Value] = None
+        for name, stride in zip(self.base_names, self.base_strides):
+            if name not in delta:
+                raise ValueError(
+                    f"after chain, base coord {name!r} not in {sorted(delta.keys())}"
+                )
+            valid = _and(b, valid, new[name].valid)
+            dv = delta[name].value
+            term = dv if stride == 1 else b.mul(dv, b.const_i32(stride))
+            off_delta = term if off_delta is None else b.add(off_delta, term)
+        if off_delta is None:
+            return prev_offset, valid
+        return b.add(prev_offset, off_delta), valid
+
 
 __all__ = [
     "CoordVar",
     "Embed",
+    "Freeze",
     "Indirect",
+    "Insert",
+    "LeftPad",
     "Merge",
+    "Modulo",
+    "Offset",
     "Pad",
     "PadDynamic",
     "PassThrough",
+    "Replicate",
+    "RightPad",
+    "Slice",
     "TensorDescriptor",
     "Transform",
     "Unmerge",
+    "UnmergeDivMod",
+    "UnmergeMagicDiv",
+    "XorT",
+    "calculate_magic_numbers",
+    "do_magic_division",
     "embed",
+    "freeze",
     "indirect",
+    "insert",
+    "left_pad",
     "merge",
+    "merge_magic",
+    "modulo",
+    "offset",
     "pad",
     "pad_dynamic",
     "pass_through",
+    "replicate",
+    "right_pad",
+    "slice_",
     "unmerge",
+    "unmerge_div_mod",
+    "unmerge_magic",
+    "xor_t",
 ]
