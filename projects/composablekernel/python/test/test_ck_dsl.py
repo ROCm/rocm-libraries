@@ -2095,6 +2095,36 @@ class TestGroupedGemmInstance(unittest.TestCase):
         # so there's no block_id_z dependency.
         self.assertIn("define amdgpu_kernel void", ll)
 
+    def test_bf16_dtype_drives_signature_and_lowering(self):
+        from ck_dsl.instances import GroupedGemmSpec, build_grouped_gemm
+        from ck_dsl.instances.common.grouped_gemm import grouped_gemm_signature
+
+        spec = GroupedGemmSpec(
+            name="ggemm_bf16_smoke",
+            tile=TileSpec(
+                tile_m=32,
+                tile_n=32,
+                tile_k=32,
+                warp_m=2,
+                warp_n=2,
+                warp_k=1,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=32,
+            ),
+            trait=TraitSpec(pipeline="mem", epilogue="cshuffle", pad_m=True, pad_n=True),
+            dtype="bf16",
+        )
+        sig = grouped_gemm_signature(spec)
+        self.assertEqual(sig[0]["type"], "ptr<bf16, global>")
+        self.assertEqual(sig[1]["type"], "ptr<bf16, global>")
+        self.assertEqual(sig[2]["type"], "ptr<bf16, global>")
+
+        ll = lower_kernel_to_llvm(build_grouped_gemm(spec))
+        self.assertIn("@llvm.amdgcn.mfma.f32.16x16x32.bf16", ll)
+        self.assertIn("load <8 x bfloat>", ll)
+        self.assertIn("store <4 x bfloat>", ll)
+
 
 class TestCdnaPrimitives(unittest.TestCase):
     """Coverage for the AMDGPU/CDNA-specific primitives added in

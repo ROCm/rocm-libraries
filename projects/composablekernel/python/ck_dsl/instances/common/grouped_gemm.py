@@ -80,6 +80,7 @@ from ...core.ir import KernelDef
 from ...helpers.spec import WarpTileBlockSizeMixin, ceil_div_grid
 from ...runtime.launcher import KernelLauncher, LaunchConfig, LaunchSummary
 from .gemm_universal import (
+    DataSpec,
     TileSpec,
     TraitSpec,
     UniversalGemmSpec,
@@ -120,15 +121,21 @@ class GroupedGemmSpec(WarpTileBlockSizeMixin):
     trait: TraitSpec
     wave_size: int = 64
     block_size: int = 0
+    dtype: str = "fp16"
 
     def __post_init__(self) -> None:
         self._init_block_size()
+
+    def _data_spec(self) -> DataSpec:
+        dt = "fp16" if self.dtype in ("f16", "fp16") else self.dtype
+        return DataSpec(dtype_a=dt, dtype_b=dt, dtype_c=dt)
 
     def to_universal_spec(self) -> UniversalGemmSpec:
         return UniversalGemmSpec(
             name=self.name,
             tile=self.tile,
             trait=self.trait,
+            data=self._data_spec(),
             wave_size=self.wave_size,
             block_size=self.block_size,
             batched=False,
@@ -170,11 +177,12 @@ def build_grouped_gemm(spec: GroupedGemmSpec, arch: str = "gfx950") -> KernelDef
 def grouped_gemm_signature(spec: GroupedGemmSpec):
     from ...helpers.spec import SignatureBuilder
 
+    ptr_dt = spec.dtype if spec.dtype in ("f16", "fp16", "bf16") else "f16"
     return (
         SignatureBuilder()
-        .ptr("A", "f16")
-        .ptr("B", "f16")
-        .ptr("C", "f16")
+        .ptr("A", ptr_dt)
+        .ptr("B", ptr_dt)
+        .ptr("C", ptr_dt)
         .scalar("M", "i32")
         .scalar("N", "i32")
         .scalar("K", "i32")
@@ -309,11 +317,12 @@ def grouped_gemm_single_launch_signature(spec: GroupedGemmSpec):
     """
     from ...helpers.spec import SignatureBuilder
 
+    ptr_dt = spec.dtype if spec.dtype in ("f16", "fp16", "bf16") else "f16"
     return (
         SignatureBuilder()
-        .ptr("A", "f16")
-        .ptr("B", "f16")
-        .ptr("C", "f16")
+        .ptr("A", ptr_dt)
+        .ptr("B", ptr_dt)
+        .ptr("C", ptr_dt)
         .scalar("M", "i32")
         .scalar("N", "i32")
         .scalar("K", "i32")
