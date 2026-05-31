@@ -50,11 +50,15 @@ enum class MaskType : int
 
 // Classify the mask requested by an SDPA (forward or backward) attribute set.
 //
-// The modern source of truth is the left_bound / right_bound / diagonal_alignment
-// trio; the causal_mask / causal_mask_bottom_right booleans are deprecated. When
-// both sources are present they must agree — this template enforces a canonical
-// policy and throws HipdnnPluginException(INVALID_VALUE) on any contradiction so
-// a graph cannot silently round to a permissive interpretation.
+// Two sources can describe the mask: the modern left_bound / right_bound /
+// diagonal_alignment trio, and the deprecated causal_mask /
+// causal_mask_bottom_right booleans. When a deprecated boolean is set it takes
+// precedence and the modern trio is ignored; otherwise the trio is
+// authoritative. The two deprecated booleans are mutually exclusive, so setting
+// both throws HipdnnPluginException(INVALID_VALUE).
+//
+// Guaranteeing the two parameter sets agree belongs in the hipDNN frontend; this
+// helper only resolves which source wins for dispatch.
 //
 // Absence-awareness limitation: the generated flatbuffer accessors expose the
 // causal_mask* fields as plain bool defaulting to false, with no has_*()
@@ -69,79 +73,46 @@ MaskType getMaskType(const SdpaAttrsT& attrs)
     const bool causalDeprecated = attrs.causal_mask();
     const bool bottomRightDeprecated = attrs.causal_mask_bottom_right();
 
-    const bool leftAndRightBoundsSet
-        = attrs.left_bound().has_value() && attrs.right_bound().has_value();
+    // The two deprecated booleans are mutually exclusive.
+    if(causalDeprecated && bottomRightDeprecated)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+            "SDPA: causal_mask and causal_mask_bottom_right are mutually exclusive "
+            "but both are set");
+    }
 
-    // Derive the MaskType implied purely by the modern bounds trio. When the
-    // bounds are not both set the trio is silent and this stays NO_MASK; the
-    // deprecated booleans (if any) then decide the result below.
-    MaskType boundsDerived = MaskType::NO_MASK;
-    if(leftAndRightBoundsSet)
+    // Deprecated booleans take precedence: when either is set, defer to it and
+    // ignore the modern bounds trio.
+    if(causalDeprecated)
+    {
+        return MaskType::TOP_LEFT_CAUSAL;
+    }
+    if(bottomRightDeprecated)
+    {
+        return MaskType::BOTTOM_RIGHT_CAUSAL;
+    }
+
+    // No deprecated boolean set: the modern bounds trio is authoritative. When
+    // the bounds are not both set the trio is silent and the mask is NO_MASK.
+    if(attrs.left_bound().has_value() && attrs.right_bound().has_value())
     {
         const int64_t left = attrs.left_bound().value();
         const int64_t right = attrs.right_bound().value();
         if(left == -1 && right == -1) // both unbounded
         {
-            boundsDerived = MaskType::NO_MASK;
+            return MaskType::NO_MASK;
         }
-        else if(left == -1 && right == 0) // causal: attend up to the diagonal
+        if(left == -1 && right == 0) // causal: attend up to the diagonal
         {
-            boundsDerived = attrs.diagonal_alignment() == DiagonalAlignment::BOTTOM_RIGHT
-                                ? MaskType::BOTTOM_RIGHT_CAUSAL
-                                : MaskType::TOP_LEFT_CAUSAL;
+            return attrs.diagonal_alignment() == DiagonalAlignment::BOTTOM_RIGHT
+                       ? MaskType::BOTTOM_RIGHT_CAUSAL
+                       : MaskType::TOP_LEFT_CAUSAL;
         }
-        else // anything else is a sliding window
-        {
-            boundsDerived = MaskType::WINDOW_GENERIC;
-        }
+        return MaskType::WINDOW_GENERIC; // anything else is a sliding window
     }
 
-    auto throwContradiction = [&]() {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
-            std::string("SDPA: contradictory mask attributes - causal_mask=")
-                + (causalDeprecated ? "true" : "false") + ", causal_mask_bottom_right="
-                + (bottomRightDeprecated ? "true" : "false") + ", left_bound="
-                + (attrs.left_bound().has_value() ? std::to_string(attrs.left_bound().value())
-                                                  : std::string("unset"))
-                + ", right_bound="
-                + (attrs.right_bound().has_value() ? std::to_string(attrs.right_bound().value())
-                                                   : std::string("unset"))
-                + ", diagonal_alignment=" + EnumNameDiagonalAlignment(attrs.diagonal_alignment()));
-    };
-
-    // The two deprecated booleans are mutually exclusive.
-    if(causalDeprecated && bottomRightDeprecated)
-    {
-        throwContradiction();
-    }
-
-    // A deprecated boolean set alongside an inconsistent modern bounds trio is a
-    // contradiction. When the bounds trio is silent (NO_MASK and not set) the
-    // deprecated boolean is the sole source and is honored unchanged.
-    if(causalDeprecated)
-    {
-        if(leftAndRightBoundsSet && boundsDerived != MaskType::TOP_LEFT_CAUSAL)
-        {
-            throwContradiction();
-        }
-        return MaskType::TOP_LEFT_CAUSAL;
-    }
-
-    if(bottomRightDeprecated)
-    {
-        if(leftAndRightBoundsSet
-           && (boundsDerived != MaskType::BOTTOM_RIGHT_CAUSAL
-               || attrs.diagonal_alignment() != DiagonalAlignment::BOTTOM_RIGHT))
-        {
-            throwContradiction();
-        }
-        return MaskType::BOTTOM_RIGHT_CAUSAL;
-    }
-
-    // No deprecated boolean set: the modern bounds trio (or its NO_MASK default)
-    // is authoritative.
-    return boundsDerived;
+    return MaskType::NO_MASK;
 }
 
 // =============================================================================
