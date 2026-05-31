@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "engines/conv_implicit_gemm/CkDslConvImplicitGemmEngine.hpp"
+#include "engines/sdpa/CkDslSdpaEngine.hpp"
 #include "python/CompileServiceBridge.hpp"
 #include "python/EmbeddedInterpreter.hpp"
 #include "runtime/JitCache.hpp"
@@ -25,6 +26,7 @@ namespace ck_dsl_provider {
 // and any rename produces a different engine ID, breaking selection
 // in any host already configured to pick this engine.
 HIPDNN_REGISTER_ENGINE(CK_DSL_CONV_IMPLICIT_GEMM_ENGINE, "ck_dsl_conv_implicit_gemm_engine")
+HIPDNN_REGISTER_ENGINE(CK_DSL_SDPA_ENGINE, "ck_dsl_sdpa_engine")
 
 namespace {
 
@@ -49,6 +51,10 @@ const std::vector<EngineDefinition>& engineDefinitions() {
         {CK_DSL_CONV_IMPLICIT_GEMM_ENGINE_ID,
          [](std::int64_t id, CompileServiceBridge& bridge, JitCache& cache) -> CkDslEnginePtr {
              return std::make_unique<CkDslConvImplicitGemmEngine>(id, bridge, cache);
+         }},
+        {CK_DSL_SDPA_ENGINE_ID,
+         [](std::int64_t id, CompileServiceBridge& bridge, JitCache& cache) -> CkDslEnginePtr {
+             return std::make_unique<CkDslSdpaEngine>(id, bridge, cache);
          }},
     };
     return defs;

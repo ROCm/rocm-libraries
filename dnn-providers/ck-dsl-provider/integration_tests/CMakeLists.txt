@@ -14,6 +14,7 @@ add_executable(
     ck_dsl_provider_integration_tests
     main.cpp
     IntegrationGpuCkDslConvFp16.cpp
+    IntegrationGpuCkDslSdpaFwdFp16.cpp
 )
 
 target_link_libraries(

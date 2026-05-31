@@ -49,6 +49,8 @@ _PTR_SIZE = 8
 _PTR_ALIGN = 8
 _I32_SIZE = 4
 _I32_ALIGN = 4
+_F32_SIZE = 4
+_F32_ALIGN = 4
 
 
 def _smoke_arg_schema() -> List[Dict[str, Any]]:
@@ -172,6 +174,93 @@ def _conv_implicit_gemm_arg_schema() -> List[Dict[str, Any]]:
     ]
 
 
+def _sdpa_fwd_arg_schema() -> List[Dict[str, Any]]:
+    """Schema for the tiled FMHA forward kernel signature.
+
+    From ``ck_dsl.instances.common.fmha_mfma._declare_params`` the kernel
+    takes fifteen positional parameters in this order:
+
+      Q: ptr<f16> global            (query  -- one BLOCK_M Q tile / CTA)
+      K: ptr<f16> global            (key)
+      V: ptr<f16> global            (value)
+      O: ptr<f16> global            (output)
+      scale_log2: f32               (softmax log2 scale; launch-time value)
+      seqlen_q: i32
+      seqlen_k: i32
+      stride_q_token: i32           (Q / K / V / O strides, token then head
+      stride_q_head:  i32            for each tensor, per ``add_strides``)
+      stride_k_token: i32
+      stride_k_head:  i32
+      stride_v_token: i32
+      stride_v_head:  i32
+      stride_o_token: i32
+      stride_o_head:  i32
+
+    The host packs these back-to-back at natural alignment, matching the
+    ``<QQQQfiiiiiiiiii`` struct format the C++ launch path packs: four
+    8-byte pointers, one 4-byte f32, then ten 4-byte i32 scalars. The
+    pointer / scale / stride values are all supplied at launch time -- the
+    schema describes the slot layout, not baked-in data.
+    """
+    return [
+        {"name": "Q", "kind": "Pointer", "size": _PTR_SIZE, "align": _PTR_ALIGN},
+        {"name": "K", "kind": "Pointer", "size": _PTR_SIZE, "align": _PTR_ALIGN},
+        {"name": "V", "kind": "Pointer", "size": _PTR_SIZE, "align": _PTR_ALIGN},
+        {"name": "O", "kind": "Pointer", "size": _PTR_SIZE, "align": _PTR_ALIGN},
+        {"name": "scale_log2", "kind": "F32", "size": _F32_SIZE, "align": _F32_ALIGN},
+        {"name": "seqlen_q", "kind": "I32", "size": _I32_SIZE, "align": _I32_ALIGN},
+        {"name": "seqlen_k", "kind": "I32", "size": _I32_SIZE, "align": _I32_ALIGN},
+        {
+            "name": "stride_q_token",
+            "kind": "I32",
+            "size": _I32_SIZE,
+            "align": _I32_ALIGN,
+        },
+        {
+            "name": "stride_q_head",
+            "kind": "I32",
+            "size": _I32_SIZE,
+            "align": _I32_ALIGN,
+        },
+        {
+            "name": "stride_k_token",
+            "kind": "I32",
+            "size": _I32_SIZE,
+            "align": _I32_ALIGN,
+        },
+        {
+            "name": "stride_k_head",
+            "kind": "I32",
+            "size": _I32_SIZE,
+            "align": _I32_ALIGN,
+        },
+        {
+            "name": "stride_v_token",
+            "kind": "I32",
+            "size": _I32_SIZE,
+            "align": _I32_ALIGN,
+        },
+        {
+            "name": "stride_v_head",
+            "kind": "I32",
+            "size": _I32_SIZE,
+            "align": _I32_ALIGN,
+        },
+        {
+            "name": "stride_o_token",
+            "kind": "I32",
+            "size": _I32_SIZE,
+            "align": _I32_ALIGN,
+        },
+        {
+            "name": "stride_o_head",
+            "kind": "I32",
+            "size": _I32_SIZE,
+            "align": _I32_ALIGN,
+        },
+    ]
+
+
 # Whitelisted keys that the C++ ConvImplicitGemmPayload may set. Any
 # other key surfaced through the wire dict is rejected before we let
 # `**kwargs` reach the dataclass: a future C++ regression that leaks
@@ -205,6 +294,17 @@ _CONV_IMPLICIT_GEMM_SPEC_TOP_KEYS = frozenset(
         "chiplet_chunk_size",
         "waves_per_eu",
     }
+)
+
+# Whitelisted keys that the C++ ``sdpaSpecToPayload`` may set. Mirrors the
+# conv whitelist rationale: an unexpected field (a leaked debugging tag, an
+# unsanitised FlatBuffer attribute) fails closed before any value reaches
+# the dataclass construction rather than silently configuring the compile.
+# ``batch`` is grid-only (not a ``FmhaMfmaSpec`` field); strides and scale
+# are launch-time args, so they are absent here by design.
+_SDPA_FWD_SHAPE_KEYS = frozenset({"head_size", "num_query_heads", "num_kv_heads"})
+_SDPA_FWD_TOP_KEYS = frozenset(
+    {"batch", "shape", "dtype", "mask_mode", "seqlen_q", "seqlen_k"}
 )
 
 
@@ -257,6 +357,57 @@ def _conv_spec_from_payload(payload: dict):
     return ImplicitGemmConvSpec(problem=problem, **spec_kwargs)
 
 
+def _sdpa_fwd_spec_from_payload(payload: dict):
+    """Deserialize the wire payload into a ``(FmhaMfmaSpec, batch)`` pair.
+
+    Shared by the compile and applicability paths so both honour one
+    deserialization contract -- the whitelist and the dataclass
+    construction can't drift between them.
+
+    Caller contract: ``payload`` is the dict ``sdpaSpecToPayload`` emits --
+    a nested ``"shape"`` dict (head_size / num_query_heads / num_kv_heads)
+    plus the top-level ``dtype`` / ``mask_mode`` / ``seqlen_q`` /
+    ``seqlen_k`` codegen inputs and the ``batch`` grid extent. Keys are
+    whitelisted against ``_SDPA_FWD_TOP_KEYS`` / ``_SDPA_FWD_SHAPE_KEYS`` so
+    an unexpected field fails closed rather than being silently forwarded
+    into a dataclass via ``**kwargs``.
+
+    ``batch`` is returned alongside the spec because it sizes the launch
+    grid (the z axis) but is not a :class:`FmhaMfmaSpec` field -- the spec
+    carries only the per-CTA codegen shape. ``scale_log2`` and the Q/K/V/O
+    strides are likewise absent from the payload: they are launch-time args
+    the host supplies via the arg buffer, not values baked into the kernel,
+    so the common spec keeps its default ``scale_log2`` and the strides
+    never enter codegen at all.
+
+    The target arch is NOT part of the payload: it is an orthogonal compile
+    target threaded as a separate argument (mirroring the DSL, whose
+    ``FmhaMfmaSpec`` likewise has no arch field).
+    """
+    from ck_dsl.instances import FmhaCommonSpec, FmhaShape
+    from ck_dsl.instances.common.fmha_mfma import FmhaMfmaSpec
+
+    _reject_unexpected(payload.keys(), _SDPA_FWD_TOP_KEYS, "sdpa_fmha_fwd")
+
+    shape_payload = dict(payload["shape"])
+    _reject_unexpected(
+        shape_payload.keys(), _SDPA_FWD_SHAPE_KEYS, "sdpa_fmha_fwd.shape"
+    )
+    shape = FmhaShape(**shape_payload)
+
+    common = FmhaCommonSpec(
+        shape=shape,
+        dtype=payload["dtype"],
+        mask_mode=payload["mask_mode"],
+    )
+    spec = FmhaMfmaSpec(
+        common=common,
+        seqlen_q=payload["seqlen_q"],
+        seqlen_k=payload["seqlen_k"],
+    )
+    return spec, int(payload["batch"])
+
+
 def _compile_conv_implicit_gemm(payload: dict, arch: str) -> dict:
     """Build + compile an implicit-GEMM conv kernel from the payload.
 
@@ -303,12 +454,63 @@ def _compile_conv_implicit_gemm(payload: dict, arch: str) -> dict:
     }
 
 
+def _compile_sdpa_fwd(payload: dict, arch: str) -> dict:
+    """Build + compile a tiled FMHA forward kernel from the payload.
+
+    ``arch`` is threaded to BOTH ``build_fmha_fwd_mfma`` (which resolves the
+    per-arch f16 ``16x16x16`` MMA/WMMA atom, sizes the block to the target
+    wave, and validates the spec) and ``compile_kernel`` (which selects the
+    ISA triple + lowering backend). Passing it to only one would mis-build
+    the kernel on any non-default arch.
+
+    ``scale_log2`` and the Q/K/V/O strides are launch-time arguments the
+    host packs into the arg buffer per :func:`_sdpa_fwd_arg_schema`; they
+    are not codegen inputs, so they are absent from the payload and never
+    baked into the kernel. The block dim is one wave (``wave_size`` from the
+    target -- 64 on CDNA, 32 on RDNA), matching the one-wave-per-CTA grid the
+    DSL builder emits.
+    """
+    from ck_dsl.core.arch import ArchTarget
+    from ck_dsl.helpers.compile import compile_kernel
+    from ck_dsl.instances.common.fmha_mfma import (
+        build_fmha_fwd_mfma,
+        fmha_fwd_mfma_grid,
+    )
+
+    spec, batch = _sdpa_fwd_spec_from_payload(payload)
+
+    kernel_def = build_fmha_fwd_mfma(spec, arch=arch)
+    artifact = compile_kernel(kernel_def, arch=arch)
+
+    # Grid: (seqlen_q // BLOCK_M, num_query_heads, batch) -- one wave64/32
+    # CTA per (q_tile, head, batch) triple. Block is one wave; the inner
+    # body assumes a single wave per CTA.
+    grid = fmha_fwd_mfma_grid(spec, batch=batch)
+    wave_size = ArchTarget.from_gfx(arch).wave_size
+    block = (wave_size, 1, 1)
+
+    return {
+        "hsaco": artifact.hsaco,
+        "kernel_name": artifact.kernel_name,
+        "kind": "sdpa_fmha_fwd",
+        "grid": tuple(grid),
+        "block": block,
+        # The FMHA body stages a single BLOCK_M x BLOCK_K f16 P buffer via
+        # smem_alloc with statically-known shapes, so the dynamic-LDS arg to
+        # hipModuleLaunchKernel is zero -- static LDS lives in the HSACO's
+        # kernarg descriptor.
+        "lds_bytes": 0,
+        "arg_schema": _sdpa_fwd_arg_schema(),
+        "isa": artifact.isa,
+    }
+
+
 def compile(op_kind: str, payload: dict, arch: str) -> dict:
     """Compile one DSL kernel from a typed payload dict for ``arch``.
 
     Called by the C++ ``CompileServiceBridge::compile`` on a
-    ``JitCache`` miss. Dispatches on ``op_kind``; the only kind in M1
-    is ``"conv_implicit_gemm"``. Unknown kinds raise ``ValueError``,
+    ``JitCache`` miss. Dispatches on ``op_kind`` (``"conv_implicit_gemm"``
+    or ``"sdpa_fmha_fwd"``). Unknown kinds raise ``ValueError``,
     which the bridge surfaces as a ``HipdnnPluginException``.
 
     ``arch`` is the target gfx token, passed separately from ``payload``
@@ -321,6 +523,8 @@ def compile(op_kind: str, payload: dict, arch: str) -> dict:
     """
     if op_kind == "conv_implicit_gemm":
         return _compile_conv_implicit_gemm(payload, arch)
+    elif op_kind == "sdpa_fmha_fwd":
+        return _compile_sdpa_fwd(payload, arch)
     raise ValueError(
         f"ck_dsl_provider.compile_service: unsupported op_kind {op_kind!r}"
     )
@@ -345,6 +549,26 @@ def _is_applicable_conv_implicit_gemm(payload: dict, arch: str):
     return bool(ok), str(reason)
 
 
+def _is_applicable_sdpa_fwd(payload: dict, arch: str):
+    """Arch-aware applicability for a tiled FMHA forward spec.
+
+    Consults the DSL's ``is_valid_spec`` for ``arch`` -- the exact predicate
+    ``build_fmha_fwd_mfma`` enforces internally -- so the C++ ``isApplicable``
+    gate matches the compile path. No kernel is built and comgr is never
+    invoked; this is a pure data-driven check against the target's
+    :class:`ck_dsl.core.arch.ArchTarget` (f16 16x16x16 atom presence, wave
+    size, LDS capacity). ``is_valid_spec`` also returns ``(False, ...)`` for
+    an unknown arch, so this single call covers both "arch unsupported" and
+    "shape / mask invalid for this arch". ``batch`` is grid-only and does not
+    affect applicability, so the unpacked value is discarded.
+    """
+    from ck_dsl.instances.common.fmha_mfma import is_valid_spec
+
+    spec, _batch = _sdpa_fwd_spec_from_payload(payload)
+    ok, reason = is_valid_spec(spec, arch)
+    return bool(ok), str(reason)
+
+
 def is_applicable(op_kind: str, payload: dict, arch: str):
     """Return ``(ok, reason)`` for running ``op_kind`` on ``arch``.
 
@@ -360,6 +584,8 @@ def is_applicable(op_kind: str, payload: dict, arch: str):
     """
     if op_kind == "conv_implicit_gemm":
         return _is_applicable_conv_implicit_gemm(payload, arch)
+    elif op_kind == "sdpa_fmha_fwd":
+        return _is_applicable_sdpa_fwd(payload, arch)
     raise ValueError(
         f"ck_dsl_provider.compile_service: unsupported op_kind {op_kind!r}"
     )
