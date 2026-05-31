@@ -387,6 +387,7 @@ typedef enum rocblaslt_matmul_desc_attributes_
     ROCBLASLT_MATMUL_DESC_POINTER_MODE               = 13,
     ROCBLASLT_MATMUL_DESC_AMAX_D_POINTER             = 14,
     ROCBLASLT_MATMUL_DESC_EPILOGUE_AUX_DATA_TYPE     = 22,
+    ROCBLASLT_MATMUL_DESC_BIAS_BATCH_STRIDE          = 23,
     ROCBLASLT_MATMUL_DESC_A_SCALE_MODE               = 31,
     ROCBLASLT_MATMUL_DESC_B_SCALE_MODE               = 32,
     ROCBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT   = 100,
@@ -580,7 +581,8 @@ struct RocblasltContractionProblem
     void*       Synchronizer;
     bool        swizzleA;
     bool        swizzleB;
-    hipblasLtBatchMode_t batchMode;    
+    hipblasLtBatchMode_t batchMode;   
+    int32_t bias_stride; 
 
     // gemm_ex
     // gemm_strided_batched_ex
@@ -642,7 +644,8 @@ struct RocblasltContractionProblem
                                 void*                  Synchronizer,
                                 bool                   swizzleA,
                                 bool                   swizzleB,
-                                hipblasLtBatchMode_t   batchMode);
+                                hipblasLtBatchMode_t   batchMode,
+                                int32_t                bias_stride);
 };
 
 namespace rocblaslt

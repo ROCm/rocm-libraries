@@ -1917,6 +1917,23 @@ Tests:
   unit_check: 1
   gpu_arch_exclude: '11\d\d|12[^5]\d'
 
+- name: matmul_bias_stride
+  category: pre_checkin
+  function:
+    matmul: *real_precisions
+  matrix_size:
+    - {M: 128, N: 128, K: 128, bias_stride: 128}
+    - {M: 128, N: 128, K: 128, bias_stride: 150}
+    - {M: 129, N: 129, K: 129, bias_stride: 129}
+    - {M: 129, N: 129, K: 129, bias_stride: 250}
+  transA_transB: *transA_transB_range
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  bias_vector: [0, 1]
+  activation_type: [relu, none]
+  batch_count: [1, 5]
+  gpu_arch_exclude: '11\d\d|12[^5]\d'
+
 - name: matmul_dgelu_bias
   category: pre_checkin
   function:
