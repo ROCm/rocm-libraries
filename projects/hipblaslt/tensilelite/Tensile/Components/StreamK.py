@@ -445,6 +445,8 @@ class StreamK(Component):
 
     def computeStoreSrdStartCommon(self, writer, kernel):
         module = Module("StreamK Common computeStoreSrdStart")
+        if kernel["StreamKForceFullTiles"]:
+            return module
         skConstsInVgprs = writer.isStreamKConstantsToVgprEnabled(kernel)
 
         # Check for parallel reduction
@@ -618,8 +620,8 @@ class StreamK(Component):
     def storeBranchesCommon(self, writer, kernel, skPartialsLabel, vectorWidths, elements, tmpVgpr, cvtVgprStruct):
         module = Module("StreamK Common storeBranches")
 
-        # No branches for atomic mode
-        if kernel["StreamKAtomic"]:
+        # No branches when no StreamK partial/fixup path can be reached.
+        if kernel["StreamKAtomic"] or kernel["StreamKForceFullTiles"]:
             return module
 
         memOrder = Component.StreamKMemoryOrdering.find(writer)
@@ -925,8 +927,8 @@ class StreamK(Component):
     def writePartialsCommon(self, writer, kernel, skPartialsLabel, vectorWidths, elements, tmpVgpr, cvtVgprStruct, endLabel):
         module = Module("StreamK Common writePartials")
 
-        # No partials for atomic mode
-        if kernel["StreamKAtomic"]:
+        # No partial writes for atomic or full-tile-only StreamK.
+        if kernel["StreamKAtomic"] or kernel["StreamKForceFullTiles"]:
             return module
 
         module.add(skPartialsLabel)
@@ -2553,8 +2555,11 @@ class StreamKTwoTileDPFirst(StreamK):
         # If synchronizer buffer exists, then do single-kernel stream-k fixup step with tree reduction
         # If there's no synchronizer, parallel reduction is done in a post-kernel
         skSplitInit = Label("SK_SplitInit", "")
-        module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
-        module.add(SCBranchSCC0(labelName=skSplitInit.getLabelName(), comment="Jump to single kernel init"))
+        if kernel["StreamKForceFullTiles"]:
+            module.add(SBranch(labelName=skSplitInit.getLabelName(), comment="No partial tiles: use full-tile StreamK init"))
+        else:
+            module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
+            module.add(SCBranchSCC0(labelName=skSplitInit.getLabelName(), comment="Jump to single kernel init"))
 
         ################
         # Parallel reduction init
@@ -2721,8 +2726,11 @@ class StreamKTwoTileDPFirst(StreamK):
 
         # Choose reduction strategy
         skSplitUpdate = Label("SK_SplitUpdate", "")
-        module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
-        module.add(SCBranchSCC0(labelName=skSplitUpdate.getLabelName(), comment="Jump to single kernel update"))
+        if kernel["StreamKForceFullTiles"]:
+            module.add(SBranch(labelName=skSplitUpdate.getLabelName(), comment="No partial tiles: use full-tile StreamK update"))
+        else:
+            module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
+            module.add(SCBranchSCC0(labelName=skSplitUpdate.getLabelName(), comment="Jump to single kernel update"))
         # Parallel reduction doesn't cross tile boundaries, move to end
         module.add(SMovB32(dst=sgpr(sTmp+1), src=sgpr("StreamKIterEnd"), comment="Parallel reduction, work contained to single partial tile"))
         # Done update

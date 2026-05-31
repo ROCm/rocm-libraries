@@ -1517,6 +1517,11 @@ class Solution(collections.abc.Mapping):
         and state["PrefetchGlobalRead"] in (1, 2)
       if state["_ScheduleIterAlg"] not in (2, 3) and not isSia0TdmPgr:
         reject(state, printRejectionReason, "ScheduleIterAlg not supported with Stream-K")
+      if state["StreamKForceFullTiles"]:
+        if state["StreamK"] < 2:
+          reject(state, printRejectionReason, "StreamKForceFullTiles requires two-tile Stream-K")
+        if state["StreamKAtomic"] == 1:
+          reject(state, printRejectionReason, "StreamKForceFullTiles does not support atomic Stream-K")
       if state["StreamKAtomic"] == 1:
         if not state["ProblemType"]["DataType"].isSingle():
           reject(state, printRejectionReason, "Atomic Stream-K currently only tested for SGEMM")
@@ -1529,6 +1534,7 @@ class Solution(collections.abc.Mapping):
         return
     else:
       # If not using StreamK, clear other stream-k settings to avoid duplicate kernels
+      state["StreamKForceFullTiles"] = 0
       state["StreamKAtomic"] = 0
       state["StreamKXCCMapping"] = 0
       state["StreamKFixupTreeReduction"] = 0

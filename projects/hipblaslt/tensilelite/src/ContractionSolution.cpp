@@ -811,12 +811,17 @@ namespace TensileLite
                     // If total tiles is evenly divisble by grid size,
                     // then no Stream-K tiles are needed, all data-parallel
                     uint32_t skTiles = sk.grid;
+                    bool forceFullTiles = sizeMapping.streamKForceFullTiles != 0;
                     // If not evenly divisible, determine number of Stream-K tiles
                     if(tiles % sk.grid != 0)
                     {
                         // Number of data-parallel tiles on each workgroup would be:
                         // dpTilesPerWG = bigEnough ? (tiles - skTiles) / skGrid : 0;
                         skTiles = bigEnough ? sk.grid * fullTiles + tiles % sk.grid : tiles;
+                        // Force-full mode keeps only complete grid rounds in StreamK. Any remainder
+                        // output tiles are left for the DP section instead of using partial/fixup work.
+                        if(forceFullTiles)
+                            skTiles = bigEnough ? tiles - (tiles % sk.grid) : 0;
                         // Cap Stream-K tiles at total number of tiles in case of large multiplier
                         skTiles = std::min(skTiles, static_cast<uint32_t>(tiles));
                     }
@@ -2840,9 +2845,10 @@ namespace TensileLite
             auto tiles           = problem.getNumTiles(sizeMapping, 1);
             sk.grid              = getSKGrid(problem, hardware, tiles, sk.reduction);
             const bool streamKDP = Debug::Instance().useStreamKDataParrallel();
+            const bool forceFullTiles = sizeMapping.streamKForceFullTiles != 0;
             if(sk.grid > 0
                && (sk.reduction == origami::reduction_t::parallel
-                   || (tiles % sk.grid != 0 && !streamKDP)))
+                   || (tiles % sk.grid != 0 && !streamKDP && !forceFullTiles)))
             {
                 // Check ideal amount of workspace for optimal performance
                 size_t idealWorkspace = partialTileSize(sk.grid);
@@ -3247,6 +3253,7 @@ namespace TensileLite
                 gsu = 1;
             }
             const bool streamKDP = Debug::Instance().useStreamKDataParrallel();
+            const bool forceFullTiles = sizeMapping.streamKForceFullTiles != 0;
             auto       tiles     = problem.getNumTiles(sizeMapping, 1);
             if(tiles > 0) // Grouped GEMM reports 0 tiles
             {
@@ -3260,7 +3267,7 @@ namespace TensileLite
                     if(idealWorkspace <= problem.workspaceSize())
                         size += idealWorkspace;
                 }
-                else if(skGrid > 0 && (tiles % skGrid != 0 && !streamKDP))
+                else if(skGrid > 0 && (tiles % skGrid != 0 && !streamKDP && !forceFullTiles))
                 {
                     // Check ideal amount of workspace for optimal performance
                     size_t idealWorkspace = partialTileSize(skGrid);
@@ -3393,8 +3400,18 @@ namespace TensileLite
             // Custom kernel currently only supports single-kernel reduction
             reductionStrat = origami::reduction_t::tree;
         }
-        else if(pAMDGPU->skDynamicGrid > 0)
+        else if(sizeMapping.streamKForceFullTiles != 0)
         {
+            reductionStrat = origami::reduction_t::tree;
+        }
+        else
+        {
+            if(static_cast<origami::grid_selection_t>(pAMDGPU->skDynamicGrid)
+               != origami::grid_selection_t::k_split_aware)
+            {
+                return reductionStrat;
+            }
+
             size_t x     = 1;
             size_t y     = 1;
             size_t z     = 1;
@@ -3468,6 +3485,10 @@ namespace TensileLite
         if(pAMDGPU->skFixedGrid > 0)
         {
             skGrid = pAMDGPU->skFixedGrid;
+        }
+        else if(sizeMapping.streamKForceFullTiles != 0)
+        {
+            skGrid = cuCount;
         }
         else if(pAMDGPU->skDynamicGrid > 0)
         {
