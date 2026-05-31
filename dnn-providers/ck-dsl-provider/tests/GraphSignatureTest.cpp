@@ -15,6 +15,7 @@
 
 #include "adapters/conv_implicit_gemm/ConvImplicitGemmAdapter.hpp"
 #include "adapters/conv_implicit_gemm/ConvImplicitGemmSpec.hpp"
+#include "adapters/sdpa/SdpaSpec.hpp"
 #include "graph/GraphSignature.hpp"
 
 namespace {
@@ -23,6 +24,7 @@ using ck_dsl_provider::ConvImplicitGemmAdapter;
 using ck_dsl_provider::ConvImplicitGemmSpec;
 using ck_dsl_provider::ConvProblem;
 using ck_dsl_provider::GraphSignature;
+using ck_dsl_provider::SdpaSpec;
 
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
@@ -218,6 +220,106 @@ TEST(TestGraphSignature, MatchesAdapterBuiltSpecForExampleShape) {
     ConvImplicitGemmSpec built = ConvImplicitGemmAdapter::buildSpec(*fx.convAttr, fx.tensorMap);
     EXPECT_EQ(GraphSignature::computeForSpec(kOpKind, built, kArch),
               GraphSignature::computeForSpec(kOpKind, makeSpec(), kArch));
+}
+
+// ---- SDPA signature coverage --------------------------------------------
+
+constexpr const char* kSdpaOpKind = "sdpa_fmha_fwd";
+
+/// Baseline FMHA-forward spec [B=2, Hq=Hkv=8, Sq=Skv=16, D=64], FP16, no
+/// mask, with non-trivial stride/scale launch-time scalars so the
+/// "do-not-fold" test below has something to perturb. The contract is
+/// that the shape fields plus dtype/mask_mode/name move the hash while
+/// the eight stride_* scalars and scale_log2 do NOT.
+SdpaSpec makeSdpaSpec() {
+    SdpaSpec spec;
+    spec.problem.B = 2;
+    spec.problem.Hq = 8;
+    spec.problem.Hkv = 8;
+    spec.problem.Sq = 16;
+    spec.problem.Skv = 16;
+    spec.problem.D = 64;
+    spec.problem.stride_q_token = 512;
+    spec.problem.stride_q_head = 64;
+    spec.problem.stride_k_token = 512;
+    spec.problem.stride_k_head = 64;
+    spec.problem.stride_v_token = 512;
+    spec.problem.stride_v_head = 64;
+    spec.problem.stride_o_token = 512;
+    spec.problem.stride_o_head = 64;
+    spec.problem.scale_log2 = 0.18033688f;  // (1/sqrt(64)) * log2(e)
+    return spec;
+}
+
+TEST(TestGraphSignature, SdpaDeterministicForSameSpec) {
+    EXPECT_EQ(GraphSignature::computeForSpec(kSdpaOpKind, makeSdpaSpec(), kArch),
+              GraphSignature::computeForSpec(kSdpaOpKind, makeSdpaSpec(), kArch));
+}
+
+// Every codegen-relevant field -- the six shape ints plus dtype,
+// mask_mode, and name -- must move the hash. A fold that drops one would
+// let two distinct kernels collide on the same cache key.
+TEST(TestGraphSignature, SdpaChangesWithEachShapeField) {
+    const auto baseline = GraphSignature::computeForSpec(kSdpaOpKind, makeSdpaSpec(), kArch);
+
+    const std::vector<std::pair<const char*, std::function<void(SdpaSpec&)>>> mutators = {
+        {"B", [](SdpaSpec& s) { s.problem.B += 1; }},
+        {"Hq", [](SdpaSpec& s) { s.problem.Hq += 1; }},
+        {"Hkv", [](SdpaSpec& s) { s.problem.Hkv += 1; }},
+        {"Sq", [](SdpaSpec& s) { s.problem.Sq += 1; }},
+        {"Skv", [](SdpaSpec& s) { s.problem.Skv += 1; }},
+        {"D", [](SdpaSpec& s) { s.problem.D += 1; }},
+        {"dtype", [](SdpaSpec& s) { s.dtype = "bf16"; }},
+        {"mask_mode", [](SdpaSpec& s) { s.mask_mode = "causal"; }},
+        {"name", [](SdpaSpec& s) { s.name = "other_kernel"; }},
+    };
+
+    for (const auto& [name, mutate] : mutators) {
+        auto spec = makeSdpaSpec();
+        mutate(spec);
+        EXPECT_NE(GraphSignature::computeForSpec(kSdpaOpKind, spec, kArch), baseline)
+            << "SdpaSpec field '" << name << "' did not affect the signature";
+    }
+}
+
+// The eight stride_* scalars and scale_log2 are launch-time kernel
+// arguments, NOT codegen inputs: the compiled kernel + grid are identical
+// regardless of stride or scale. They must be DELIBERATELY excluded from
+// the signature (folding them would thrash the cache with redundant
+// recompiles of a byte-identical kernel). This test pins that non-fold
+// contract.
+TEST(TestGraphSignature, SdpaStrideAndScaleDoNotChangeSignature) {
+    const auto baseline = GraphSignature::computeForSpec(kSdpaOpKind, makeSdpaSpec(), kArch);
+
+    const std::vector<std::pair<const char*, std::function<void(SdpaSpec&)>>> mutators = {
+        {"stride_q_token", [](SdpaSpec& s) { s.problem.stride_q_token += 1; }},
+        {"stride_q_head", [](SdpaSpec& s) { s.problem.stride_q_head += 1; }},
+        {"stride_k_token", [](SdpaSpec& s) { s.problem.stride_k_token += 1; }},
+        {"stride_k_head", [](SdpaSpec& s) { s.problem.stride_k_head += 1; }},
+        {"stride_v_token", [](SdpaSpec& s) { s.problem.stride_v_token += 1; }},
+        {"stride_v_head", [](SdpaSpec& s) { s.problem.stride_v_head += 1; }},
+        {"stride_o_token", [](SdpaSpec& s) { s.problem.stride_o_token += 1; }},
+        {"stride_o_head", [](SdpaSpec& s) { s.problem.stride_o_head += 1; }},
+        {"scale_log2", [](SdpaSpec& s) { s.problem.scale_log2 += 0.5f; }},
+    };
+
+    for (const auto& [name, mutate] : mutators) {
+        auto spec = makeSdpaSpec();
+        mutate(spec);
+        EXPECT_EQ(GraphSignature::computeForSpec(kSdpaOpKind, spec, kArch), baseline)
+            << "launch-time scalar '" << name << "' must NOT affect the signature";
+    }
+}
+
+// op_kind partitions the cache and arch is a separate compile target;
+// either changing must move the hash so cross-op / cross-arch lookups
+// never alias.
+TEST(TestGraphSignature, SdpaOpKindAndArchChangeSignature) {
+    const auto baseline = GraphSignature::computeForSpec(kSdpaOpKind, makeSdpaSpec(), kArch);
+    EXPECT_NE(GraphSignature::computeForSpec("sdpa_other_op", makeSdpaSpec(), kArch), baseline)
+        << "op_kind did not affect the signature";
+    EXPECT_NE(GraphSignature::computeForSpec(kSdpaOpKind, makeSdpaSpec(), "gfx942"), baseline)
+        << "arch did not affect the signature";
 }
 
 }  // namespace

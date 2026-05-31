@@ -17,6 +17,8 @@ add_executable(
     EmbeddedInterpreterTest.cpp
     ConvImplicitGemmAdapterTest.cpp
     ConvImplicitGemmPlanBuilderTest.cpp
+    SdpaAdapterTest.cpp
+    SdpaFwdPlanBuilderTest.cpp
     GraphSignatureTest.cpp
     HipModuleSmokeTest.cpp
     JitCacheTest.cpp

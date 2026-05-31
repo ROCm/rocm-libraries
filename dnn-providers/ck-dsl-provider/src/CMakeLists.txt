@@ -13,9 +13,14 @@ add_library(
     CkDslPluginPublic.cpp
     adapters/conv_implicit_gemm/ConvImplicitGemmAdapter.cpp
     adapters/conv_implicit_gemm/ConvImplicitGemmPayload.cpp
+    adapters/sdpa/SdpaAdapter.cpp
+    adapters/sdpa/SdpaPayload.cpp
     engines/conv_implicit_gemm/CkDslConvImplicitGemmEngine.cpp
     engines/conv_implicit_gemm/ConvImplicitGemmPlan.cpp
     engines/conv_implicit_gemm/ConvImplicitGemmPlanBuilder.cpp
+    engines/sdpa/CkDslSdpaEngine.cpp
+    engines/sdpa/SdpaFwdPlan.cpp
+    engines/sdpa/SdpaFwdPlanBuilder.cpp
     graph/GraphSignature.cpp
     perf/PerfMeasurement.cpp
     python/CompileServiceBridge.cpp

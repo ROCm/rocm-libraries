@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include "../adapters/conv_implicit_gemm/ConvImplicitGemmSpec.hpp"
+#include "../adapters/sdpa/SdpaSpec.hpp"
 #include "../runtime/JitCache.hpp"
 
 namespace ck_dsl_provider {
@@ -89,6 +90,22 @@ class GraphSignature {
     /// ``arch`` is a separate argument rather than a spec field,
     /// mirroring the DSL where arch is an orthogonal compile target.
     static SignatureHash computeForSpec(std::string_view opKind, const ConvImplicitGemmSpec& spec,
+                                        std::string_view arch);
+
+    /// Compute a cache key directly from a built ``SdpaSpec``. Mirrors
+    /// the conv overload's prologue (version string, opKind, arch) and
+    /// then folds ONLY the codegen-relevant fields: the problem shape
+    /// (B, Hq, Hkv, Sq, Skv, D), the dtype, the mask mode, and the
+    /// kernel-name stem.
+    ///
+    /// The eight stride_* scalars and scale_log2 are NOT folded: they
+    /// are launch-time kernel arguments and the compiled kernel + grid
+    /// are identical across stride/scale changes, so folding them would
+    /// thrash the cache without distinguishing any real codegen output.
+    ///
+    /// ``arch`` is a separate argument rather than a spec field,
+    /// mirroring the DSL where arch is an orthogonal compile target.
+    static SignatureHash computeForSpec(std::string_view opKind, const SdpaSpec& spec,
                                         std::string_view arch);
 
    private:
