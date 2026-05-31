@@ -498,6 +498,7 @@ class FusedMoeForwardSpec:
             name=f"{self.name}_{name_suffix}",
             tile=self.gemm_tile,
             trait=trait,
+            dtype=_gemm_dtype_to_universal(self.dtype),
         )
 
     def to_batched_gemm_spec_preshuffle_b(self) -> BatchedGemmSpec:
