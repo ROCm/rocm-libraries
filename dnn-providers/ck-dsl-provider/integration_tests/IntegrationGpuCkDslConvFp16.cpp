@@ -73,7 +73,7 @@ std::int64_t convOutputDim(std::int64_t in, std::int64_t pad, std::int64_t dil, 
 /// and GEMM-K = C*R*S each a multiple of the kernel's 64-wide tile) and
 /// partial-tile probes where one or more of those dimensions is not a
 /// multiple of 64 -- the latter directly exercise the last-tile
-/// boundary handling the tile-aligned bake-off shape never touches.
+/// boundary handling the tile-aligned example shape never touches.
 ///
 /// **Adaptation from plan §1:** the test bypasses the hipDNN frontend
 /// API and the backend's .so-loading plugin path. Both surfaces are
@@ -277,10 +277,10 @@ TEST_P(IntegrationGpuCkDslConvFp16Gpu, Conv) {
 // Shape set. Cases 1-6 keep M = N*Ho*Wo, GEMM-N = K, and GEMM-K = C*R*S
 // each a multiple of the kernel's 64-wide tile (expected to pass). Cases
 // 7-10 leave one or more of those dimensions partial to probe last-tile
-// boundary handling the tile-aligned bake-off shape never exercises.
+// boundary handling the tile-aligned example shape never exercises.
 const std::vector<ConvCase> kConvCases = {
     // name                  N   C  Hi  Wi    K  R  S   sH sW  pH pW  dH dW
-    {"BakeOff", 8, 64, 56, 56, 64, 3, 3, 1, 1, 1, 1, 1, 1},
+    {"Example", 8, 64, 56, 56, 64, 3, 3, 1, 1, 1, 1, 1, 1},
     {"Stride2", 8, 64, 56, 56, 64, 3, 3, 2, 2, 1, 1, 1, 1},
     {"OneByOne", 8, 64, 56, 56, 64, 1, 1, 1, 1, 0, 0, 1, 1},
     {"BigChannels128", 8, 128, 56, 56, 128, 3, 3, 1, 1, 1, 1, 1, 1},

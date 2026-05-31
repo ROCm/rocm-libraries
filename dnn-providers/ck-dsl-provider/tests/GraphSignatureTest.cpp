@@ -28,9 +28,14 @@ namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
 constexpr const char* kOpKind = "conv_implicit_gemm";
 
-/// Baseline spec for the bake-off conv shape (N=8, H=W=56, C=64, K=64,
+// Baseline target arch for the signature tests that don't vary it. arch
+// is a separate computeForSpec argument (an orthogonal compile target,
+// mirroring the DSL), so the field-perturbation tests below pin it here.
+constexpr const char* kArch = "gfx950";
+
+/// Baseline spec for the example conv shape (N=8, H=W=56, C=64, K=64,
 /// R=S=3, stride=1, pad=1, dilation=1). Only ``problem`` is set; the
-/// codegen knobs keep their bake-off constexpr defaults. The
+/// codegen knobs keep their example constexpr defaults. The
 /// ``computeForSpec`` contract is that *any* field here -- problem or
 /// knob -- changes the hash, so the tests below perturb one at a time.
 ConvImplicitGemmSpec makeSpec() {
@@ -53,21 +58,32 @@ ConvImplicitGemmSpec makeSpec() {
 }
 
 TEST(TestGraphSignature, DeterministicForSameSpec) {
-    EXPECT_EQ(GraphSignature::computeForSpec(kOpKind, makeSpec()),
-              GraphSignature::computeForSpec(kOpKind, makeSpec()));
+    EXPECT_EQ(GraphSignature::computeForSpec(kOpKind, makeSpec(), kArch),
+              GraphSignature::computeForSpec(kOpKind, makeSpec(), kArch));
 }
 
 TEST(TestGraphSignature, ChangesWithOpKind) {
     auto spec = makeSpec();
-    EXPECT_NE(GraphSignature::computeForSpec(kOpKind, spec),
-              GraphSignature::computeForSpec("conv_other_op", spec));
+    EXPECT_NE(GraphSignature::computeForSpec(kOpKind, spec, kArch),
+              GraphSignature::computeForSpec("conv_other_op", spec, kArch));
+}
+
+// The target arch must move the hash: the HSACO is arch-specific, so a
+// gfx942 build and a gfx950 build of the same shape must land on
+// distinct keys (otherwise a multi-arch process would alias them and
+// hand back a module for the wrong device). arch is a separate argument
+// to computeForSpec, not a spec field (mirroring the DSL).
+TEST(TestGraphSignature, ChangesWithArch) {
+    EXPECT_NE(GraphSignature::computeForSpec(kOpKind, makeSpec(), "gfx942"),
+              GraphSignature::computeForSpec(kOpKind, makeSpec(), "gfx950"))
+        << "arch did not affect the signature";
 }
 
 // Every one of the 13 ConvProblem fields must move the hash. This is
 // the load-bearing coverage: a fold that drops or mis-orders a field
 // would let two distinct shapes collide on the same cache key.
 TEST(TestGraphSignature, ChangesWithEachProblemField) {
-    const auto baseline = GraphSignature::computeForSpec(kOpKind, makeSpec());
+    const auto baseline = GraphSignature::computeForSpec(kOpKind, makeSpec(), kArch);
 
     const std::vector<std::pair<const char*, std::function<void(ConvProblem&)>>> mutators = {
         {"N", [](ConvProblem& p) { p.N += 1; }},   {"Hi", [](ConvProblem& p) { p.Hi += 1; }},
@@ -82,7 +98,7 @@ TEST(TestGraphSignature, ChangesWithEachProblemField) {
     for (const auto& [name, mutate] : mutators) {
         auto spec = makeSpec();
         mutate(spec.problem);
-        EXPECT_NE(GraphSignature::computeForSpec(kOpKind, spec), baseline)
+        EXPECT_NE(GraphSignature::computeForSpec(kOpKind, spec, kArch), baseline)
             << "ConvProblem field '" << name << "' did not affect the signature";
     }
 }
@@ -94,8 +110,8 @@ TEST(TestGraphSignature, ChangesWithEachProblemField) {
 TEST(TestGraphSignature, ProblemFieldsAreNotPositionAliased) {
     auto swapped = makeSpec();
     std::swap(swapped.problem.N, swapped.problem.K);
-    EXPECT_NE(GraphSignature::computeForSpec(kOpKind, swapped),
-              GraphSignature::computeForSpec(kOpKind, makeSpec()));
+    EXPECT_NE(GraphSignature::computeForSpec(kOpKind, swapped, kArch),
+              GraphSignature::computeForSpec(kOpKind, makeSpec(), kArch));
 }
 
 // Every codegen knob must move the hash. M1 never varies these (they
@@ -104,7 +120,7 @@ TEST(TestGraphSignature, ProblemFieldsAreNotPositionAliased) {
 // would silently load the wrong module. This test pins that contract;
 // when autotuning lands it should keep passing, not be deleted.
 TEST(TestGraphSignature, ChangesWithEachCodegenKnob) {
-    const auto baseline = GraphSignature::computeForSpec(kOpKind, makeSpec());
+    const auto baseline = GraphSignature::computeForSpec(kOpKind, makeSpec(), kArch);
 
     const std::vector<std::pair<const char*, std::function<void(ConvImplicitGemmSpec&)>>> mutators =
         {
@@ -119,7 +135,7 @@ TEST(TestGraphSignature, ChangesWithEachCodegenKnob) {
             {"warp_tile_k", [](ConvImplicitGemmSpec& s) { s.warp_tile_k += 1; }},
             {"wave_size", [](ConvImplicitGemmSpec& s) { s.wave_size += 1; }},
             {"pipeline", [](ConvImplicitGemmSpec& s) { s.pipeline = "other_pipeline"; }},
-            {"epilogue", [](ConvImplicitGemmSpec& s) { s.epilogue = "default"; }},
+            {"epilogue", [](ConvImplicitGemmSpec& s) { s.epilogue = "cshuffle"; }},
             {"async_dma", [](ConvImplicitGemmSpec& s) { s.async_dma = !s.async_dma; }},
             {"unroll_k", [](ConvImplicitGemmSpec& s) { s.unroll_k = !s.unroll_k; }},
             {"lds_k_pad", [](ConvImplicitGemmSpec& s) { s.lds_k_pad = 8; }},
@@ -134,7 +150,7 @@ TEST(TestGraphSignature, ChangesWithEachCodegenKnob) {
     for (const auto& [name, mutate] : mutators) {
         auto spec = makeSpec();
         mutate(spec);
-        EXPECT_NE(GraphSignature::computeForSpec(kOpKind, spec), baseline)
+        EXPECT_NE(GraphSignature::computeForSpec(kOpKind, spec, kArch), baseline)
             << "codegen knob '" << name << "' did not affect the signature";
     }
 }
@@ -146,11 +162,11 @@ TEST(TestGraphSignature, OptionalKnobPresenceIsDistinctFromZero) {
     auto unset = makeSpec();  // lds_k_pad / waves_per_eu default to nullopt
     auto setZero = makeSpec();
     setZero.lds_k_pad = 0;
-    EXPECT_NE(GraphSignature::computeForSpec(kOpKind, setZero),
-              GraphSignature::computeForSpec(kOpKind, unset));
+    EXPECT_NE(GraphSignature::computeForSpec(kOpKind, setZero, kArch),
+              GraphSignature::computeForSpec(kOpKind, unset, kArch));
 }
 
-/// Minimal FlatBuffer graph for the bake-off shape so the integration
+/// Minimal FlatBuffer graph for the example shape so the integration
 /// test can drive the real adapter -> signature path. Logical NCHW dims
 /// for X/Y and KCRS for W, HALF dtype; strides are required by the
 /// schema but unused by the adapter/signature.
@@ -192,16 +208,16 @@ struct ConvGraphFixture {
     }
 };
 
-// End-to-end: the spec the adapter lifts from the bake-off FlatBuffer
+// End-to-end: the spec the adapter lifts from the example FlatBuffer
 // must hash identically to the hand-built ``makeSpec``. This ties the
 // adapter's field mapping to the signature through the production path
 // and catches drift between the two without an interpreter (buildSpec
 // is pure C++).
-TEST(TestGraphSignature, MatchesAdapterBuiltSpecForBakeOffShape) {
+TEST(TestGraphSignature, MatchesAdapterBuiltSpecForExampleShape) {
     ConvGraphFixture fx;
     ConvImplicitGemmSpec built = ConvImplicitGemmAdapter::buildSpec(*fx.convAttr, fx.tensorMap);
-    EXPECT_EQ(GraphSignature::computeForSpec(kOpKind, built),
-              GraphSignature::computeForSpec(kOpKind, makeSpec()));
+    EXPECT_EQ(GraphSignature::computeForSpec(kOpKind, built, kArch),
+              GraphSignature::computeForSpec(kOpKind, makeSpec(), kArch));
 }
 
 }  // namespace
