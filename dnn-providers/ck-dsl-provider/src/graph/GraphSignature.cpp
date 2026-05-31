@@ -182,12 +182,98 @@ SignatureHash GraphSignature::computeForSpec(std::string_view opKind, const Sdpa
     h = fnv1aString(h, spec.mask_mode);
     h = fnv1aFold(h, 0x00);
     h = fnv1aString(h, spec.name);
+    h = fnv1aFold(h, 0x00);
+
+    // Opt-in forward stats (LSE) output. Codegen-relevant: stats-on emits
+    // the 16-arg kernel (appends the LSE_out pointer) while stats-off
+    // keeps the 15-arg kernel, so the two must get distinct cache keys.
+    // Appended after the name so existing stats-off keys keep their
+    // prefix (the version-string fold ultimately bumps stale entries).
+    h = fnv1aBool(h, spec.generate_stats);
 
     // Intentionally NOT folded: the eight stride_* scalars and
     // scale_log2. They are launch-time kernel arguments -- the compiled
     // kernel + grid are identical across stride/scale changes, so
     // folding them would thrash the cache without distinguishing any
     // real codegen output.
+
+    return static_cast<SignatureHash>(h);
+}
+
+SignatureHash GraphSignature::computeForSpec(std::string_view opKind, const SdpaBwdSpec& spec,
+                                             std::string_view arch) {
+    std::uint64_t h = kFnv1aOffset;
+
+    // Same prologue as the conv/fwd overloads: provider/DSL version
+    // string, opKind, arch -- each terminated by a 0x00 separator so
+    // adjacent fields cannot run together and alias.
+    h = fnv1aString(h, CK_DSL_PROVIDER_VERSION_STRING);
+    h = fnv1aFold(h, 0x00);
+
+    h = fnv1aString(h, opKind);
+    h = fnv1aFold(h, 0x00);
+
+    h = fnv1aString(h, arch);
+    h = fnv1aFold(h, 0x00);
+
+    // SdpaBwdProblem shape fields. These are the codegen inputs: any
+    // change to batch / head counts / sequence lengths / head_size
+    // produces a distinct kernel binary and grid.
+    const auto& p = spec.problem;
+    h = fnv1aI32(h, p.B);
+    h = fnv1aFold(h, 0x00);
+    h = fnv1aI32(h, p.Hq);
+    h = fnv1aI32(h, p.Hkv);
+    h = fnv1aFold(h, 0x00);
+    h = fnv1aI32(h, p.Sq);
+    h = fnv1aI32(h, p.Skv);
+    h = fnv1aFold(h, 0x00);
+    h = fnv1aI32(h, p.D);
+    h = fnv1aFold(h, 0x00);
+
+    // dtype, mask mode, and the kernel-name stem all change the emitted
+    // HSACO; fold them after the shape block.
+    h = fnv1aString(h, spec.dtype);
+    h = fnv1aFold(h, 0x00);
+    h = fnv1aString(h, spec.mask_mode);
+    h = fnv1aFold(h, 0x00);
+    h = fnv1aString(h, spec.name);
+
+    // Intentionally NOT folded: the stride_* scalars and the scale_*
+    // values. They are launch-time kernel arguments -- the compiled
+    // kernel + grid are identical across stride/scale changes, so
+    // folding them would thrash the cache without distinguishing any
+    // real codegen output.
+
+    return static_cast<SignatureHash>(h);
+}
+
+SignatureHash GraphSignature::computeForSdpaLsePrep(std::string_view opKind,
+                                                    const SdpaBwdSpec& spec,
+                                                    std::string_view arch) {
+    std::uint64_t h = kFnv1aOffset;
+
+    // Same prologue as the other overloads.
+    h = fnv1aString(h, CK_DSL_PROVIDER_VERSION_STRING);
+    h = fnv1aFold(h, 0x00);
+
+    h = fnv1aString(h, opKind);
+    h = fnv1aFold(h, 0x00);
+
+    h = fnv1aString(h, arch);
+    h = fnv1aFold(h, 0x00);
+
+    // The LSE-prep kernel only depends on B, Hq, and Sq -- it reads the
+    // contiguous [B, Hq, Sq] stats buffer and writes the M/L scratch, and
+    // is independent of head_size and the kv sequence length. Folding
+    // only these three fields keeps the prep module cached independently
+    // of the bwd module (which folds the full shape).
+    const auto& p = spec.problem;
+    h = fnv1aI32(h, p.B);
+    h = fnv1aFold(h, 0x00);
+    h = fnv1aI32(h, p.Hq);
+    h = fnv1aFold(h, 0x00);
+    h = fnv1aI32(h, p.Sq);
 
     return static_cast<SignatureHash>(h);
 }

@@ -14,11 +14,15 @@ add_library(
     adapters/conv_implicit_gemm/ConvImplicitGemmAdapter.cpp
     adapters/conv_implicit_gemm/ConvImplicitGemmPayload.cpp
     adapters/sdpa/SdpaAdapter.cpp
+    adapters/sdpa/SdpaBwdAdapter.cpp
+    adapters/sdpa/SdpaBwdPayload.cpp
     adapters/sdpa/SdpaPayload.cpp
     engines/conv_implicit_gemm/CkDslConvImplicitGemmEngine.cpp
     engines/conv_implicit_gemm/ConvImplicitGemmPlan.cpp
     engines/conv_implicit_gemm/ConvImplicitGemmPlanBuilder.cpp
     engines/sdpa/CkDslSdpaEngine.cpp
+    engines/sdpa/SdpaBwdPlan.cpp
+    engines/sdpa/SdpaBwdPlanBuilder.cpp
     engines/sdpa/SdpaFwdPlan.cpp
     engines/sdpa/SdpaFwdPlanBuilder.cpp
     graph/GraphSignature.cpp

@@ -13,7 +13,9 @@
 namespace ck_dsl_provider {
 
 CkDslSdpaEngine::CkDslSdpaEngine(std::int64_t id, CompileServiceBridge& bridge, JitCache& cache)
-    : _id(id), _planBuilder(std::make_unique<SdpaFwdPlanBuilder>(bridge, cache)) {}
+    : _id(id),
+      _fwdPlanBuilder(std::make_unique<SdpaFwdPlanBuilder>(bridge, cache)),
+      _bwdPlanBuilder(std::make_unique<SdpaBwdPlanBuilder>(bridge, cache)) {}
 
 std::int64_t CkDslSdpaEngine::id() const {
     return _id;
@@ -22,7 +24,10 @@ std::int64_t CkDslSdpaEngine::id() const {
 bool CkDslSdpaEngine::isApplicable(
     ::CkDslHandle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const {
-    return _planBuilder->isApplicable(handle, opGraph);
+    // The two op kinds are disjoint, so at most one builder accepts the
+    // graph; the engine is applicable if either does.
+    return _fwdPlanBuilder->isApplicable(handle, opGraph) ||
+           _bwdPlanBuilder->isApplicable(handle, opGraph);
 }
 
 void CkDslSdpaEngine::getDetails(
@@ -51,11 +56,14 @@ std::size_t CkDslSdpaEngine::getMaxWorkspaceSize(
     const ::CkDslHandle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /*engineConfig*/) const {
-    if (!_planBuilder->isApplicable(handle, opGraph)) {
-        return 0;
-    }
     CkDslSettings settings;
-    return _planBuilder->getMaxWorkspaceSize(handle, opGraph, settings);
+    if (_fwdPlanBuilder->isApplicable(handle, opGraph)) {
+        return _fwdPlanBuilder->getMaxWorkspaceSize(handle, opGraph, settings);
+    }
+    if (_bwdPlanBuilder->isApplicable(handle, opGraph)) {
+        return _bwdPlanBuilder->getMaxWorkspaceSize(handle, opGraph, settings);
+    }
+    return 0;
 }
 
 void CkDslSdpaEngine::initializeExecutionContext(
@@ -63,17 +71,28 @@ void CkDslSdpaEngine::initializeExecutionContext(
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
     CkDslContext& executionContext) const {
-    if (!_planBuilder->isApplicable(handle, opGraph)) {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "CkDslSdpaEngine::initializeExecutionContext called on a graph "
-            "the plan builder reports as not applicable; the SDK should have skipped this "
-            "engine after isApplicable returned false.");
-    }
+    // Route to whichever builder accepts the graph. The two op kinds are
+    // disjoint, so the forward check is tried first and the backward
+    // second; if neither applies the SDK called us on a graph it should
+    // have skipped after isApplicable returned false.
     CkDslSettings settings;
-    _planBuilder->initializeExecutionSettings(handle, opGraph, engineConfig, settings);
-    executionContext.setExecutionSettings(settings);
-    _planBuilder->buildPlan(handle, opGraph, engineConfig, executionContext);
+    if (_fwdPlanBuilder->isApplicable(handle, opGraph)) {
+        _fwdPlanBuilder->initializeExecutionSettings(handle, opGraph, engineConfig, settings);
+        executionContext.setExecutionSettings(settings);
+        _fwdPlanBuilder->buildPlan(handle, opGraph, engineConfig, executionContext);
+        return;
+    }
+    if (_bwdPlanBuilder->isApplicable(handle, opGraph)) {
+        _bwdPlanBuilder->initializeExecutionSettings(handle, opGraph, engineConfig, settings);
+        executionContext.setExecutionSettings(settings);
+        _bwdPlanBuilder->buildPlan(handle, opGraph, engineConfig, executionContext);
+        return;
+    }
+    throw hipdnn_plugin_sdk::HipdnnPluginException(
+        HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+        "CkDslSdpaEngine::initializeExecutionContext called on a graph "
+        "neither the forward nor backward plan builder reports as applicable; the SDK "
+        "should have skipped this engine after isApplicable returned false.");
 }
 
 }  // namespace ck_dsl_provider

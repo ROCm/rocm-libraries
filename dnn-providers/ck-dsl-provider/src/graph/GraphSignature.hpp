@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include "../adapters/conv_implicit_gemm/ConvImplicitGemmSpec.hpp"
+#include "../adapters/sdpa/SdpaBwdSpec.hpp"
 #include "../adapters/sdpa/SdpaSpec.hpp"
 #include "../runtime/JitCache.hpp"
 
@@ -107,6 +108,31 @@ class GraphSignature {
     /// mirroring the DSL where arch is an orthogonal compile target.
     static SignatureHash computeForSpec(std::string_view opKind, const SdpaSpec& spec,
                                         std::string_view arch);
+
+    /// Compute a cache key directly from a built ``SdpaBwdSpec`` for the
+    /// FMHA-backward kernel. Mirrors the conv/fwd overloads' prologue
+    /// (version string, opKind, arch) and then folds ONLY the
+    /// codegen-relevant fields: the problem shape (B, Hq, Hkv, Sq, Skv,
+    /// D), the dtype, the mask mode, and the kernel-name stem.
+    ///
+    /// The stride_* scalars and the scale_* values are NOT folded: they
+    /// are launch-time kernel arguments and the compiled kernel + grid
+    /// are identical across stride/scale changes, so folding them would
+    /// thrash the cache without distinguishing any real codegen output.
+    ///
+    /// ``arch`` is a separate argument rather than a spec field,
+    /// mirroring the DSL where arch is an orthogonal compile target.
+    static SignatureHash computeForSpec(std::string_view opKind, const SdpaBwdSpec& spec,
+                                        std::string_view arch);
+
+    /// Compute a cache key for the LSE-prep kernel that precedes the
+    /// FMHA-backward launch. The prep kernel depends ONLY on the
+    /// version/opKind/arch prologue plus B, Hq, and Sq -- it neither
+    /// reads K/V nor varies with head_size or the kv sequence length --
+    /// so folding only those three shape fields keeps the prep module
+    /// cached independently of the bwd module.
+    static SignatureHash computeForSdpaLsePrep(std::string_view opKind, const SdpaBwdSpec& spec,
+                                               std::string_view arch);
 
    private:
     GraphSignature() = delete;

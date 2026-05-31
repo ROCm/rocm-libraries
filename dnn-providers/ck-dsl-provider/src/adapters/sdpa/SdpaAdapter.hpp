@@ -49,13 +49,20 @@ namespace ck_dsl_provider {
 ///   * mask: alibi, padding, bottom-right causal, and sliding-window
 ///     (left_bound/right_bound) are all rejected; mask_mode is
 ///     "causal" when causal_mask is set, otherwise "none"
-///   * every advanced feature is rejected when present: additive
-///     attn_mask, per-element scale, stats/LSE outputs, generate_stats,
-///     variable-length sequences (seq_len_q / seq_len_kv), dropout
-///     (mask / scale / seed / offset tensors AND dropout_probability),
-///     paged KV (page_table_k/v), block mask, sink tokens, the max /
-///     sum_exp outputs, FP8 descale/scale tensors (descale_q/k/v/s,
-///     scale_s/o), the amax_s / amax_o outputs, and rng_dump
+///   * the optional forward stats (LSE) output is SUPPORTED: a request
+///     via generate_stats() == true or a present stats_tensor_uid enables
+///     the single combined LSE output (natural-log, f32, head-major
+///     [B, Hq, Sq] -- rank-3 or rank-4 [B, Hq, Sq, 1] -- contiguous,
+///     strides {Hq*Sq, Sq, 1}); the output tensor must be supplied. Only
+///     this single combined stats output is modelled -- the separate
+///     max / sum_exp outputs are still rejected.
+///   * every other advanced feature is rejected when present: additive
+///     attn_mask, per-element scale, variable-length sequences (seq_len_q
+///     / seq_len_kv), dropout (mask / scale / seed / offset tensors AND
+///     dropout_probability), paged KV (page_table_k/v), block mask, sink
+///     tokens, the max / sum_exp outputs, FP8 descale/scale tensors
+///     (descale_q/k/v/s, scale_s/o), the amax_s / amax_o outputs, and
+///     rng_dump
 ///
 /// All extracted scalars are narrowed from int64_t to int32_t via
 /// ``narrowToI32``, which first checks the value fits (the DSL's

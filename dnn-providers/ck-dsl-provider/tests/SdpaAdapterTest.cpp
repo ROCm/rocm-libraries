@@ -241,7 +241,11 @@ TEST(TestSdpaAdapter, RejectsScaleTensor) {
     EXPECT_THROW(buildSpecFromGraph(graph), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
-TEST(TestSdpaAdapter, RejectsStatsOutput) {
+TEST(TestSdpaAdapter, AcceptsStatsOutput) {
+    // A forward graph requesting the LSE stats output (training) is
+    // supported: the helper's stats tensor is FLOAT [B, Hq, Sq, 1] with
+    // head-major contiguous strides, which the adapter accepts and flags
+    // via generate_stats. The kernel then emits the natural-log LSE.
     const auto qkvoStrides = bshdStrides(/*H=*/8, /*S=*/16, /*D=*/64);
     auto fbBuilder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
         /*qDims=*/{2, 8, 16, 64}, /*qStrides=*/qkvoStrides,
@@ -251,7 +255,8 @@ TEST(TestSdpaAdapter, RejectsStatsOutput) {
         /*dataType=*/DataType::HALF, /*withAttnMask=*/false, /*withScale=*/false,
         /*withStats=*/true);
     flatbuffer_utilities::GraphWrapper graph(fbBuilder.GetBufferPointer(), fbBuilder.GetSize());
-    EXPECT_THROW(buildSpecFromGraph(graph), hipdnn_plugin_sdk::HipdnnPluginException);
+    SdpaSpec spec = buildSpecFromGraph(graph);
+    EXPECT_TRUE(spec.generate_stats);
 }
 
 TEST(TestSdpaAdapter, RejectsAlibiMask) {
