@@ -12,8 +12,7 @@ emits the two backward chains:
 
 2. :func:`mfma_attention_bwd_dq_dk_dv_inner_body` — the QK / dS / PV
    chain that produces (dQ via atomic), dK, dV. Mirrors CK Tile's
-   ``BlockFmhaBwdDQDKDV*`` pipelines and HipKittens'
-   ``gqa_backwards/attn_bkwd_non_causal.cpp``.
+   ``BlockFmhaBwdDQDKDV*`` pipelines.
 
 The bodies are minimum-viable promotions of the per-lane warp-scalar
 backward inner that ``instances/fmha_bwd.py`` ships today. They use
@@ -25,7 +24,6 @@ and stops materialising the per-element scalar dot product.
 
 Reference paths:
 - CK Tile ``include/ck_tile/ops/fmha/pipeline/block_fmha_bwd_dq_dk_dv_pipeline*.hpp``
-- HipKittens ``examples/attention/gqa_backwards/attn_bkwd_non_causal.cpp``
 - AITER ``aiter/ops/triton/attention_backward.py``
 """
 

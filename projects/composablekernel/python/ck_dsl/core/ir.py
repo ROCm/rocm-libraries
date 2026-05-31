@@ -2167,6 +2167,22 @@ class IRBuilder:
     def sync(self) -> None:
         self._op("tile.sync")
 
+    def s_barrier_bare(self) -> None:
+        """Bare workgroup barrier: ``s_barrier`` with NO implicit waitcnt.
+
+        Unlike :meth:`sync` (which prepends ``s_waitcnt vmcnt(0) lgkmcnt(0)``)
+        and :meth:`sync_lds_only` (which prepends ``lgkmcnt(0)``), this emits
+        ONLY ``llvm.amdgcn.s.barrier()``. The caller controls the wait
+        counters explicitly. This is required by the warp-specialized
+        producer/consumer pipeline (``wsp3``), where the per-iteration
+        rendezvous must NOT drain the producers' in-flight async global->LDS
+        loads (those are gated by an explicit ``s_waitcnt(vmcnt=0)`` placed
+        by the caller just before this barrier). Named/split barriers
+        (``s.barrier.signal``/``wait``) ICE the gfx950 backend, so a bare
+        full-CTA barrier is the mechanism (the warp-specialized reference pattern).
+        """
+        self._op("tile.s_barrier_bare")
+
     def sync_half_block(self, half_selector: Value) -> None:
         """Half-block barrier: only the waves where ``half_selector``
         is non-zero participate in the workgroup barrier.

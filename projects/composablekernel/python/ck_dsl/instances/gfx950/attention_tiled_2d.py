@@ -3193,12 +3193,12 @@ def build_unified_attention_2d_tiled(
         # accumulator + per-reg alpha.
         #
         # NOTE: an ``s_setprio(1)`` wrap around this cluster was tested
-        # (HipKittens-style, see `kernels/attn/gqa_causal/kernel_d64.cpp`),
+        # (a warp-specialized design),
         # which raises this wave's instruction-issue priority so the SIMD
         # scheduler favours us through the MFMA-dominated PV section. On
         # multi-seq bf16 prefill (n>=100 q=1000) this caused CATASTROPHIC
         # regressions (up to +1282% / 12.8x slower) — priority inversion
-        # starved the other waves competing for the same SIMD. HipKittens
+        # starved the other waves competing for the same SIMD. That reference
         # gets away with this on its hand-unrolled single-batch kernel
         # because it tightly controls inter-wave interleaving via the
         # cluster pattern + stagger barriers; our DSL-lowered loop has
