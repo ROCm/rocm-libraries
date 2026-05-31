@@ -4,7 +4,7 @@
 """Convert MIOpen driver shape files to hipDNN JSON graph files.
 
 Usage:
-    python -m dnn_benchmarking.tools.convert_miopen_shapes graphs/shapes.txt
+    python -m dnn_convert_shapes graphs/shapes.txt
     dnn-convert-shapes shapes.txt --outdir graphs/generic_convolutions/
 """
 
