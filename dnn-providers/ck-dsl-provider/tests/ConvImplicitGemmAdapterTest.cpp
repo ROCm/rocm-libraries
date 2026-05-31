@@ -29,10 +29,10 @@ using ck_dsl_provider::convImplicitGemmSpecToPayload;
 
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
-/// Bake-off conv shape from plan §4: N=8, H=W=56, C=64, K=64, R=S=3,
+/// Example conv shape from plan §4: N=8, H=W=56, C=64, K=64, R=S=3,
 /// stride=1, pad=1, dilation=1. FP16. NHWC physical layout; logical
 /// NCHW dims per the hipDNN convention (see PREP_FINDINGS P-6).
-struct BakeOffShape {
+struct ExampleShape {
     static constexpr std::int64_t N = 8;
     static constexpr std::int64_t C = 64;
     static constexpr std::int64_t Hi = 56;
@@ -45,7 +45,7 @@ struct BakeOffShape {
 };
 
 /// Build a FlatBuffer with one ConvolutionFwdAttributes + three
-/// TensorAttributes (X / W / Y) for the bake-off shape and return the
+/// TensorAttributes (X / W / Y) for the example shape and return the
 /// builder + the parsed tables + the tensor map the adapter expects.
 struct ConvGraphFixture {
     flatbuffers::FlatBufferBuilder convBuilder;
@@ -72,26 +72,26 @@ struct ConvGraphFixture {
         // strides [C*Hi*Wi, 1, Wi*C, C]. We don't actually use the
         // strides in the adapter, but populate them realistically for
         // documentation value.
-        std::vector<std::int64_t> xDims{BakeOffShape::N, BakeOffShape::C, BakeOffShape::Hi,
-                                        BakeOffShape::Wi};
-        std::vector<std::int64_t> xStrides{BakeOffShape::C * BakeOffShape::Hi * BakeOffShape::Wi, 1,
-                                           BakeOffShape::Wi * BakeOffShape::C, BakeOffShape::C};
+        std::vector<std::int64_t> xDims{ExampleShape::N, ExampleShape::C, ExampleShape::Hi,
+                                        ExampleShape::Wi};
+        std::vector<std::int64_t> xStrides{ExampleShape::C * ExampleShape::Hi * ExampleShape::Wi, 1,
+                                           ExampleShape::Wi * ExampleShape::C, ExampleShape::C};
         finishTensor(xBuilder, /*uid=*/1, "X", data_objects::DataType::HALF, xDims, xStrides);
         x = flatbuffers::GetRoot<data_objects::TensorAttributes>(xBuilder.GetBufferPointer());
 
         // W tensor: KRSC physical, logical dims [K, C, R, S].
-        std::vector<std::int64_t> wDims{BakeOffShape::K, BakeOffShape::C, BakeOffShape::R,
-                                        BakeOffShape::S};
-        std::vector<std::int64_t> wStrides{BakeOffShape::R * BakeOffShape::S * BakeOffShape::C, 1,
-                                           BakeOffShape::S * BakeOffShape::C, BakeOffShape::C};
+        std::vector<std::int64_t> wDims{ExampleShape::K, ExampleShape::C, ExampleShape::R,
+                                        ExampleShape::S};
+        std::vector<std::int64_t> wStrides{ExampleShape::R * ExampleShape::S * ExampleShape::C, 1,
+                                           ExampleShape::S * ExampleShape::C, ExampleShape::C};
         finishTensor(wBuilder, /*uid=*/2, "W", data_objects::DataType::HALF, wDims, wStrides);
         w = flatbuffers::GetRoot<data_objects::TensorAttributes>(wBuilder.GetBufferPointer());
 
         // Y tensor: NHWK physical, logical dims [N, K, Ho, Wo].
-        std::vector<std::int64_t> yDims{BakeOffShape::N, BakeOffShape::K, BakeOffShape::Ho,
-                                        BakeOffShape::Wo};
-        std::vector<std::int64_t> yStrides{BakeOffShape::K * BakeOffShape::Ho * BakeOffShape::Wo, 1,
-                                           BakeOffShape::Wo * BakeOffShape::K, BakeOffShape::K};
+        std::vector<std::int64_t> yDims{ExampleShape::N, ExampleShape::K, ExampleShape::Ho,
+                                        ExampleShape::Wo};
+        std::vector<std::int64_t> yStrides{ExampleShape::K * ExampleShape::Ho * ExampleShape::Wo, 1,
+                                           ExampleShape::Wo * ExampleShape::K, ExampleShape::K};
         finishTensor(yBuilder, /*uid=*/3, "Y", data_objects::DataType::HALF, yDims, yStrides);
         y = flatbuffers::GetRoot<data_objects::TensorAttributes>(yBuilder.GetBufferPointer());
 
@@ -113,7 +113,7 @@ struct ConvGraphFixture {
     }
 };
 
-TEST(TestConvImplicitGemmAdapter, BuildSpecForBakeOffShape) {
+TEST(TestConvImplicitGemmAdapter, BuildSpecForExampleShape) {
     ConvGraphFixture fx;
 
     ConvImplicitGemmSpec spec = ConvImplicitGemmAdapter::buildSpec(*fx.convAttr, fx.tensorMap);
@@ -133,7 +133,7 @@ TEST(TestConvImplicitGemmAdapter, BuildSpecForBakeOffShape) {
     EXPECT_EQ(spec.problem.dH, 1);
     EXPECT_EQ(spec.problem.dW, 1);
 
-    // Derived geometry (cross-check the helpers match the bake-off
+    // Derived geometry (cross-check the helpers match the example
     // shape's expected output dims).
     EXPECT_EQ(spec.problem.Ho(), 56);
     EXPECT_EQ(spec.problem.Wo(), 56);
@@ -141,20 +141,19 @@ TEST(TestConvImplicitGemmAdapter, BuildSpecForBakeOffShape) {
     EXPECT_EQ(spec.problem.Ngemm(), 64);
     EXPECT_EQ(spec.problem.Kgemm(), 3 * 3 * 64);
 
-    // Bake-off constexpr defaults (deltas vs the dataclass defaults
-    // are the load-bearing checks; see ConvImplicitGemmSpec.hpp
-    // header comment for the full delta list).
+    // Codegen knob defaults -- these mirror the DSL ImplicitGemmConvSpec
+    // dataclass defaults field-for-field (see ConvImplicitGemmSpec.hpp).
     EXPECT_EQ(spec.tile_m, 64);
     EXPECT_EQ(spec.tile_n, 64);
-    EXPECT_EQ(spec.tile_k, 64);  // bake-off override (dataclass: 128)
+    EXPECT_EQ(spec.tile_k, 64);
     EXPECT_EQ(spec.warp_m, 2);
     EXPECT_EQ(spec.warp_n, 2);
-    EXPECT_EQ(spec.warp_tile_m, 32);  // bake-off override (dataclass: 16)
-    EXPECT_EQ(spec.warp_tile_n, 32);  // bake-off override (dataclass: 16)
-    EXPECT_EQ(spec.warp_tile_k, 16);  // bake-off override (dataclass: 32)
+    EXPECT_EQ(spec.warp_tile_m, 32);  // mirrors dataclass default
+    EXPECT_EQ(spec.warp_tile_n, 32);  // mirrors dataclass default
+    EXPECT_EQ(spec.warp_tile_k, 16);  // mirrors dataclass default
     EXPECT_EQ(spec.wave_size, 64);
     EXPECT_EQ(spec.pipeline, "mem");
-    EXPECT_EQ(spec.epilogue, "cshuffle");  // bake-off override (dataclass: "default")
+    EXPECT_EQ(spec.epilogue, "default");  // mirrors dataclass default
     EXPECT_FALSE(spec.async_dma);
     EXPECT_FALSE(spec.unroll_k);
     EXPECT_FALSE(spec.lds_k_pad.has_value());
@@ -226,10 +225,10 @@ TEST(TestConvImplicitGemmAdapter, RejectsMissingTensor) {
 TEST(TestConvImplicitGemmAdapter, RejectsNonHalfDtype) {
     // Build an X tensor with FLOAT instead of HALF; keep W/Y as HALF.
     flatbuffers::FlatBufferBuilder xBuilder;
-    std::vector<std::int64_t> dims{BakeOffShape::N, BakeOffShape::C, BakeOffShape::Hi,
-                                   BakeOffShape::Wi};
-    std::vector<std::int64_t> strides{BakeOffShape::C * BakeOffShape::Hi * BakeOffShape::Wi, 1,
-                                      BakeOffShape::Wi * BakeOffShape::C, BakeOffShape::C};
+    std::vector<std::int64_t> dims{ExampleShape::N, ExampleShape::C, ExampleShape::Hi,
+                                   ExampleShape::Wi};
+    std::vector<std::int64_t> strides{ExampleShape::C * ExampleShape::Hi * ExampleShape::Wi, 1,
+                                      ExampleShape::Wi * ExampleShape::C, ExampleShape::C};
     auto attrOffset = data_objects::CreateTensorAttributesDirect(
         xBuilder, 1, "X", data_objects::DataType::FLOAT, &strides, &dims, /*virtual=*/false);
     xBuilder.Finish(attrOffset);
@@ -255,7 +254,7 @@ class TestConvImplicitGemmPayload : public ::testing::Test {
     std::unique_ptr<CkDslContainer> _container;
 };
 
-TEST_F(TestConvImplicitGemmPayload, PayloadDictForBakeOffShape) {
+TEST_F(TestConvImplicitGemmPayload, PayloadDictForExampleShape) {
     ConvGraphFixture fx;
     auto spec = ConvImplicitGemmAdapter::buildSpec(*fx.convAttr, fx.tensorMap);
 
@@ -282,7 +281,7 @@ TEST_F(TestConvImplicitGemmPayload, PayloadDictForBakeOffShape) {
     EXPECT_EQ(payload["tile_k"].cast<int>(), 64);
     EXPECT_EQ(payload["warp_tile_m"].cast<int>(), 32);
     EXPECT_EQ(payload["warp_tile_k"].cast<int>(), 16);
-    EXPECT_EQ(payload["epilogue"].cast<std::string>(), "cshuffle");
+    EXPECT_EQ(payload["epilogue"].cast<std::string>(), "default");
     EXPECT_EQ(payload["pipeline"].cast<std::string>(), "mem");
     EXPECT_EQ(payload["name"].cast<std::string>(), "ck_dsl_conv_igemm");
     EXPECT_FALSE(payload["async_dma"].cast<bool>());
@@ -317,7 +316,7 @@ TEST_F(TestConvImplicitGemmPayload, RoundTripsThroughPythonDataclass) {
 
     // The container already injected ck_dsl onto sys.path via the
     // compile-service bridge, so this import succeeds.
-    py::module_ conv = py::module_::import("ck_dsl.instances.conv_implicit_gemm");
+    py::module_ conv = py::module_::import("ck_dsl.instances.common.conv_implicit_gemm");
     py::object ConvProblem = conv.attr("ConvProblem");
     py::object ImplicitGemmConvSpec = conv.attr("ImplicitGemmConvSpec");
 
@@ -336,7 +335,7 @@ TEST_F(TestConvImplicitGemmPayload, RoundTripsThroughPythonDataclass) {
 
     EXPECT_EQ(specInst.attr("tile_k").cast<int>(), 64);
     EXPECT_EQ(specInst.attr("warp_tile_m").cast<int>(), 32);
-    EXPECT_EQ(specInst.attr("epilogue").cast<std::string>(), "cshuffle");
+    EXPECT_EQ(specInst.attr("epilogue").cast<std::string>(), "default");
     EXPECT_EQ(specInst.attr("block_size").cast<int>(), 256);
     EXPECT_EQ(specInst.attr("problem").attr("Ho").cast<int>(), 56);
 }

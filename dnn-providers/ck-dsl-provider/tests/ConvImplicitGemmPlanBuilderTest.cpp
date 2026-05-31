@@ -3,24 +3,34 @@
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
+#include <pybind11/embed.h>
 
 #include <chrono>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <memory>
+#include <optional>
+#include <string>
 
 #include "CkDslContainer.hpp"
 #include "CkDslContext.hpp"
 #include "CkDslHandle.hpp"
 #include "TestUtils.hpp"
+#include "adapters/conv_implicit_gemm/ConvImplicitGemmPayload.hpp"
+#include "adapters/conv_implicit_gemm/ConvImplicitGemmSpec.hpp"
 #include "engines/conv_implicit_gemm/CkDslConvImplicitGemmEngine.hpp"
 #include "engines/conv_implicit_gemm/ConvImplicitGemmPlan.hpp"
 #include "engines/conv_implicit_gemm/ConvImplicitGemmPlanBuilder.hpp"
 #include "python/CompileServiceBridge.hpp"
+#include "runtime/DeviceArch.hpp"
+#include "runtime/HipModule.hpp"
 #include "runtime/JitCache.hpp"
+#include "runtime/KernelArtifact.hpp"
 
 namespace {
+
+namespace py = pybind11;
 
 using ck_dsl_provider::CkDslContainer;
 using ck_dsl_provider::CkDslContext;
@@ -29,11 +39,11 @@ using ck_dsl_provider::ConvImplicitGemmPlanBuilder;
 namespace flatbuffer_utilities = hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
-/// Build the bake-off conv-fwd graph via the test SDK helper, plus
+/// Build the example conv-fwd graph via the test SDK helper, plus
 /// the handful of supporting tensors with HALF dtype and NHWC strides.
 /// The plan-builder consumes the same GraphWrapper the SDK produces
 /// at runtime so we exercise the real IGraph traversal path.
-flatbuffers::FlatBufferBuilder makeBakeOffConvFwdGraph() {
+flatbuffers::FlatBufferBuilder makeExampleConvFwdGraph() {
     return hipdnn_test_sdk::utilities::createValidConvFwdGraph(
         /*xDims=*/{8, 64, 56, 56},
         /*xStrides=*/{64 * 56 * 56, 1, 56 * 64, 64},
@@ -46,6 +56,50 @@ flatbuffers::FlatBufferBuilder makeBakeOffConvFwdGraph() {
         /*convStrides=*/{1, 1},
         /*convDilation=*/{1, 1},
         /*dataType=*/data_objects::DataType::HALF);
+}
+
+/// Hand-built spec matching the example graph shape (N8 C64 H56 W56,
+/// K64 R3 S3, stride/pad/dilation 1). Codegen knobs keep their example
+/// constexpr defaults -- the same spec ``buildSpec`` produces from the
+/// example graph. Used by the arch-gate tests, which only need the
+/// spec (not the FlatBuffer graph) to drive the bridge validator.
+ck_dsl_provider::ConvImplicitGemmSpec makeExampleSpec() {
+    ck_dsl_provider::ConvImplicitGemmSpec spec;
+    ck_dsl_provider::ConvProblem& p = spec.problem;
+    p.N = 8;
+    p.Hi = 56;
+    p.Wi = 56;
+    p.C = 64;
+    p.K = 64;
+    p.R = 3;
+    p.S = 3;
+    p.sH = 1;
+    p.sW = 1;
+    p.pH = 1;
+    p.pW = 1;
+    p.dH = 1;
+    p.dW = 1;
+    return spec;
+}
+
+/// The example shape with the **cross-arch example config**: the
+/// 16x16x16 atom (an MFMA op on gfx942/gfx950, a WMMA op on gfx1151)
+/// with the ``mem`` pipeline and ``default`` epilogue -- the one config
+/// the DSL validates on all three M1 targets. ``wave_size`` is the only
+/// field that must track the hardware (32 on the wave32 RDNA target
+/// gfx1151, 64 on the CDNA targets gfx942/gfx950). This config is a
+/// TEST concern: production keeps the gfx950-tuned DSL dataclass default
+/// (see ConvImplicitGemmSpec), so the example we exercise across arches
+/// lives here rather than leaking into the provider.
+ck_dsl_provider::ConvImplicitGemmSpec makeExampleSpecForArch(const std::string& arch) {
+    ck_dsl_provider::ConvImplicitGemmSpec spec = makeExampleSpec();
+    spec.warp_tile_m = 16;
+    spec.warp_tile_n = 16;
+    spec.warp_tile_k = 16;
+    spec.pipeline = "mem";
+    spec.epilogue = "default";
+    spec.wave_size = (arch == "gfx1151") ? 32 : 64;
+    return spec;
 }
 
 /// Build an unsupported graph (FLOAT dtype) for the host-only
@@ -86,10 +140,35 @@ class ConvImplicitGemmPlanBuilderHost : public ::testing::Test {
     std::unique_ptr<ConvImplicitGemmPlanBuilder> _planBuilder;
 };
 
-TEST_F(ConvImplicitGemmPlanBuilderHost, IsApplicableReturnsTrueForSupportedGraph) {
-    auto fbBuilder = makeBakeOffConvFwdGraph();
+TEST_F(ConvImplicitGemmPlanBuilderHost, IsApplicableReflectsDeviceArch) {
+    // isApplicable is arch-aware: a structurally-valid FP16 conv is only
+    // applicable if the M1 default (example) knobs are valid on the
+    // device's arch. Rather than hardcode a per-arch expectation, assert
+    // the builder's end-to-end verdict (graph -> adapter -> device-arch
+    // detection -> bridge) agrees with the authoritative validator for
+    // the detected arch -- proving it keys off the real device.
+    auto fbBuilder = makeExampleConvFwdGraph();
     flatbuffer_utilities::GraphWrapper graph(fbBuilder.GetBufferPointer(), fbBuilder.GetSize());
-    EXPECT_TRUE(builder().isApplicable(*_handle, graph));
+
+    const bool got = builder().isApplicable(*_handle, graph);
+
+    std::optional<std::string> arch = ck_dsl_provider::detectDeviceArch(_handle->getStream());
+    if (!arch.has_value()) {
+        // No HIP device visible (host-only CI): the conv kernel cannot
+        // run here, so isApplicable declines rather than claiming a graph
+        // it could never validate against a real device arch.
+        EXPECT_FALSE(got) << "with no visible device, isApplicable should decline";
+        return;
+    }
+
+    ck_dsl_provider::ConvImplicitGemmSpec spec = makeExampleSpec();
+    py::gil_scoped_acquire gil;
+    py::dict payload = ck_dsl_provider::convImplicitGemmSpecToPayload(spec);
+    const bool expected = _container->compileServiceBridge()
+                              .isApplicable(ConvImplicitGemmPlanBuilder::opKind(), payload, *arch)
+                              .first;
+
+    EXPECT_EQ(got, expected) << "isApplicable must match is_valid_spec for device arch " << *arch;
 }
 
 TEST_F(ConvImplicitGemmPlanBuilderHost, IsApplicableReturnsFalseForFloatDtype) {
@@ -99,16 +178,142 @@ TEST_F(ConvImplicitGemmPlanBuilderHost, IsApplicableReturnsFalseForFloatDtype) {
 }
 
 TEST_F(ConvImplicitGemmPlanBuilderHost, GetMaxWorkspaceSizeIsZero) {
-    auto fbBuilder = makeBakeOffConvFwdGraph();
+    auto fbBuilder = makeExampleConvFwdGraph();
     flatbuffer_utilities::GraphWrapper graph(fbBuilder.GetBufferPointer(), fbBuilder.GetSize());
     ck_dsl_provider::CkDslSettings settings;
     EXPECT_EQ(builder().getMaxWorkspaceSize(*_handle, graph, settings), 0u);
 }
 
 TEST_F(ConvImplicitGemmPlanBuilderHost, GetCustomKnobsIsEmpty) {
-    auto fbBuilder = makeBakeOffConvFwdGraph();
+    auto fbBuilder = makeExampleConvFwdGraph();
     flatbuffer_utilities::GraphWrapper graph(fbBuilder.GetBufferPointer(), fbBuilder.GetSize());
     EXPECT_TRUE(builder().getCustomKnobs(*_handle, graph).empty());
+}
+
+// The arch gate that isApplicable consults runs through the bridge into
+// the DSL's is_valid_spec -- a pure data predicate (no GPU, no comgr),
+// so this is host-only. It proves the target arch is threaded into the
+// applicability decision and that the gate matches the validator the
+// compile path enforces: the example conv spec is valid on gfx950 but
+// not on gfx1151 (wave32 rejects the wave64 MFMA path), not on gfx942
+// (the 32x32x16 f16 atom is absent there), and not on an unknown arch.
+TEST_F(ConvImplicitGemmPlanBuilderHost, BridgeIsApplicableIsArchAware) {
+    ck_dsl_provider::ConvImplicitGemmSpec spec = makeExampleSpec();
+
+    auto& bridge = _container->compileServiceBridge();
+    const char* op = ConvImplicitGemmPlanBuilder::opKind();
+
+    // arch is a separate argument (an orthogonal compile target, not a
+    // spec field) -- the same shape the plan builder uses in production.
+    py::gil_scoped_acquire gil;
+    py::dict payload = ck_dsl_provider::convImplicitGemmSpecToPayload(spec);
+    auto verdictForArch = [&](const char* arch) { return bridge.isApplicable(op, payload, arch); };
+
+    auto onGfx950 = verdictForArch("gfx950");
+    EXPECT_TRUE(onGfx950.first) << "expected applicable on gfx950; reason: " << onGfx950.second;
+    EXPECT_FALSE(verdictForArch("gfx1151").first)
+        << "example spec should be inapplicable on gfx1151";
+    EXPECT_FALSE(verdictForArch("gfx942").first) << "example spec should be inapplicable on gfx942";
+    EXPECT_FALSE(verdictForArch("gfx777").first) << "unknown arch must be inapplicable";
+}
+
+// M1 multi-arch goal (compile coverage): the example shape compiles for
+// every target arch with the cross-arch example config. comgr
+// cross-compiles without the matching device, so this runs on any box
+// (no GPU needed) and gives real gfx942/gfx950/gfx1151 coverage from a
+// single machine. One instantiation per arch (via TEST_P) so each gets
+// its own name and pass/fail -- a failure on one arch doesn't mask the
+// others.
+class ConvImplicitGemmExampleCompile : public ConvImplicitGemmPlanBuilderHost,
+                                       public ::testing::WithParamInterface<std::string> {};
+
+TEST_P(ConvImplicitGemmExampleCompile, CompilesExampleShape) {
+    const std::string arch = GetParam();
+    ck_dsl_provider::ConvImplicitGemmSpec spec = makeExampleSpecForArch(arch);
+
+    auto& bridge = _container->compileServiceBridge();
+    const char* op = ConvImplicitGemmPlanBuilder::opKind();
+
+    py::gil_scoped_acquire gil;
+    py::dict payload = ck_dsl_provider::convImplicitGemmSpecToPayload(spec);
+
+    auto verdict = bridge.isApplicable(op, payload, arch);
+    EXPECT_TRUE(verdict.first) << arch << " applicability: " << verdict.second;
+
+    ck_dsl_provider::KernelArtifact artifact = bridge.compile(op, payload, arch);
+    EXPECT_NE(artifact.isa.find(arch), std::string::npos)
+        << "compiled ISA '" << artifact.isa << "' does not target " << arch;
+    EXPECT_FALSE(artifact.hsaco.empty()) << arch << ": empty HSACO";
+}
+
+INSTANTIATE_TEST_SUITE_P(Arches, ConvImplicitGemmExampleCompile,
+                         ::testing::Values("gfx942", "gfx950", "gfx1151"),
+                         [](const ::testing::TestParamInfo<std::string>& info) {
+                             return info.param;  // gfx token is a valid test-name suffix
+                         });
+
+// M1 multi-arch goal (execution coverage): run the example shape on
+// WHATEVER supported device is present, compiling the cross-arch example
+// config for that device's arch (a test-owned config, bypassing the
+// production gfx950-only default). Skips cleanly with no GPU or on an
+// arch outside the M1 set -- the "tests that skip on unsupported
+// platforms" half of the multi-arch coverage. With zero input and zero
+// weight the convolution output is zero everywhere.
+TEST_F(ConvImplicitGemmPlanBuilderHost, ExecutesExampleShapeOnPresentDevice) {
+    CK_DSL_PROVIDER_SKIP_IF_NO_GPU("ExecutesExampleShapeOnPresentDevice");
+    std::optional<std::string> arch = ck_dsl_provider::detectDeviceArch(_handle->getStream());
+    ASSERT_TRUE(arch.has_value());
+    if (*arch != "gfx942" && *arch != "gfx950" && *arch != "gfx1151") {
+        GTEST_SKIP() << "device arch '" << *arch << "' is outside the M1 supported set";
+    }
+
+    ck_dsl_provider::ConvImplicitGemmSpec spec = makeExampleSpecForArch(*arch);
+
+    ck_dsl_provider::KernelArtifact artifact;
+    {
+        py::gil_scoped_acquire gil;
+        py::dict payload = ck_dsl_provider::convImplicitGemmSpecToPayload(spec);
+        artifact = _container->compileServiceBridge().compile(ConvImplicitGemmPlanBuilder::opKind(),
+                                                              payload, *arch);
+    }
+    ASSERT_NE(artifact.isa.find(*arch), std::string::npos) << "isa=" << artifact.isa;
+
+    auto module = std::make_shared<ck_dsl_provider::HipModule>(artifact);
+
+    // Buffer-rsrc byte sizes from the example geometry (FP16).
+    const auto& p = spec.problem;
+    constexpr std::int64_t kFp16 = 2;
+    const auto xBytes = static_cast<std::int32_t>(std::int64_t(p.N) * p.Hi * p.Wi * p.C * kFp16);
+    const auto wBytes = static_cast<std::int32_t>(std::int64_t(p.K) * p.R * p.S * p.C * kFp16);
+    const auto yBytes =
+        static_cast<std::int32_t>(std::int64_t(p.N) * p.Ho() * p.Wo() * p.K * kFp16);
+
+    ConvImplicitGemmPlan plan(module, /*xUid=*/1, /*wUid=*/2, /*yUid=*/3, xBytes, wBytes, yBytes);
+
+    void* dX = nullptr;
+    void* dW = nullptr;
+    void* dY = nullptr;
+    ASSERT_EQ(hipMalloc(&dX, static_cast<std::size_t>(xBytes)), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dW, static_cast<std::size_t>(wBytes)), hipSuccess);
+    ASSERT_EQ(hipMalloc(&dY, static_cast<std::size_t>(yBytes)), hipSuccess);
+    ASSERT_EQ(hipMemset(dX, 0, static_cast<std::size_t>(xBytes)), hipSuccess);
+    ASSERT_EQ(hipMemset(dW, 0, static_cast<std::size_t>(wBytes)), hipSuccess);
+    ASSERT_EQ(hipMemset(dY, 0xab, static_cast<std::size_t>(yBytes)),
+              hipSuccess);  // launch sentinel
+
+    std::vector<hipdnnPluginDeviceBuffer_t> buffers = {{1, dX}, {2, dW}, {3, dY}};
+    EXPECT_NO_THROW(plan.execute(*_handle, buffers.data(),
+                                 static_cast<std::uint32_t>(buffers.size()),
+                                 /*workspace=*/nullptr));
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+    std::uint16_t firstHalf = 0xffff;
+    ASSERT_EQ(hipMemcpy(&firstHalf, dY, sizeof(firstHalf), hipMemcpyDeviceToHost), hipSuccess);
+    EXPECT_EQ(firstHalf, 0u) << "expected zero output for zero input + zero weight on " << *arch;
+
+    EXPECT_EQ(hipFree(dX), hipSuccess);
+    EXPECT_EQ(hipFree(dW), hipSuccess);
+    EXPECT_EQ(hipFree(dY), hipSuccess);
 }
 
 /// GPU-gated: buildPlan triggers the JitCache loader, which compiles
@@ -123,7 +328,7 @@ class ConvImplicitGemmPlanBuilderGpu : public ConvImplicitGemmPlanBuilderHost {
 };
 
 TEST_F(ConvImplicitGemmPlanBuilderGpu, BuildPlanCachesOnSecondCall) {
-    auto fbBuilder = makeBakeOffConvFwdGraph();
+    auto fbBuilder = makeExampleConvFwdGraph();
     flatbuffer_utilities::GraphWrapper graph(fbBuilder.GetBufferPointer(), fbBuilder.GetSize());
     flatbuffer_utilities::EngineConfigWrapper engineConfig(nullptr, 0);  // empty config
 
@@ -141,13 +346,13 @@ TEST_F(ConvImplicitGemmPlanBuilderGpu, BuildPlanCachesOnSecondCall) {
     ASSERT_NE(concretePlan1, nullptr) << "plan must be a ConvImplicitGemmPlan";
     EXPECT_EQ(planBuilder.cacheForTesting().size(), 1u);
 
-    // Confirm the loaded kernel matches the bake-off naming convention
+    // Confirm the loaded kernel matches the example naming convention
     // emitted by build_implicit_gemm_conv (see PREP_FINDINGS P-5).
     auto kernelName = concretePlan1->moduleForTesting().kernelName();
     EXPECT_NE(kernelName.find("ck_dsl_conv_igemm"), std::string::npos)
         << "unexpected kernel name: " << kernelName;
     EXPECT_NE(kernelName.find("N8H56W56C64"), std::string::npos)
-        << "kernel name missing bake-off shape token: " << kernelName;
+        << "kernel name missing example shape token: " << kernelName;
 
     // Tensor UIDs from createValidConvFwdGraph: x=1, w=2, y=3.
     EXPECT_EQ(concretePlan1->xUidForTesting(), 1);
@@ -190,11 +395,11 @@ TEST_F(ConvImplicitGemmPlanBuilderGpu, BuildPlanCachesOnSecondCall) {
 TEST_F(ConvImplicitGemmPlanBuilderGpu, PlanExecuteLaunches) {
     // I-8: plan.execute() now packs args and launches the real conv
     // kernel against device buffers. This test allocates X/W/Y at the
-    // bake-off shape, zero-initialises them, runs execute() on the
+    // example shape, zero-initialises them, runs execute() on the
     // default stream, and synchronises. Output correctness against
     // CpuFpReferenceConvolution is the I-10 integration test; for I-8
     // we only verify the launch path returns hipSuccess.
-    auto fbBuilder = makeBakeOffConvFwdGraph();
+    auto fbBuilder = makeExampleConvFwdGraph();
     flatbuffer_utilities::GraphWrapper graph(fbBuilder.GetBufferPointer(), fbBuilder.GetSize());
     flatbuffer_utilities::EngineConfigWrapper engineConfig(nullptr, 0);
 
@@ -204,7 +409,7 @@ TEST_F(ConvImplicitGemmPlanBuilderGpu, PlanExecuteLaunches) {
     auto* concretePlan = dynamic_cast<ConvImplicitGemmPlan*>(&ctx.plan());
     ASSERT_NE(concretePlan, nullptr);
 
-    // Bake-off shape: X = 8*64*56*56 fp16 = 3.21 MB, W = 64*64*3*3
+    // Example shape: X = 8*64*56*56 fp16 = 3.21 MB, W = 64*64*3*3
     // fp16 = 73.7 KB, Y = 8*64*56*56 fp16 = 3.21 MB. The plan-builder
     // computed these same byte counts and embedded them in the plan
     // (xBytesForTesting cross-checks one of them).
@@ -255,7 +460,7 @@ TEST_F(ConvImplicitGemmPlanBuilderHost, ExecuteRejectsMissingDeviceBuffer) {
     CK_DSL_PROVIDER_SKIP_IF_NOT_GFX950(
         "ConvImplicitGemmPlanBuilderHost.ExecuteRejectsMissingDeviceBuffer");
 
-    auto fbBuilder = makeBakeOffConvFwdGraph();
+    auto fbBuilder = makeExampleConvFwdGraph();
     flatbuffer_utilities::GraphWrapper graph(fbBuilder.GetBufferPointer(), fbBuilder.GetSize());
     flatbuffer_utilities::EngineConfigWrapper engineConfig(nullptr, 0);
 

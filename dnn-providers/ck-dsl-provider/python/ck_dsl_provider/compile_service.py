@@ -219,22 +219,28 @@ def _reject_unexpected(payload_keys, expected, context: str) -> None:
         )
 
 
-def _compile_conv_implicit_gemm(payload: dict) -> dict:
-    """Build + compile an implicit-GEMM conv kernel from the payload.
+def _conv_spec_from_payload(payload: dict):
+    """Deserialize the wire payload into an ``ImplicitGemmConvSpec``.
+
+    Shared by the compile and applicability paths so both honour one
+    deserialization contract -- the whitelist and the dataclass
+    construction can't drift between them.
 
     Caller contract: ``payload`` is the dict
     ``ConvImplicitGemmPayload::convImplicitGemmSpecToPayload`` emits --
-    a nested ``"problem"`` dict plus the top-level
-    ``ImplicitGemmConvSpec`` kwargs. The payload keys are whitelisted
-    against ``_CONV_IMPLICIT_GEMM_SPEC_TOP_KEYS`` /
-    ``_CONV_PROBLEM_KEYS`` so an unexpected field fails closed rather
-    than being silently forwarded into the dataclass via ``**kwargs``.
+    a nested ``"problem"`` dict plus the top-level ``ImplicitGemmConvSpec``
+    kwargs, field-for-field with the dataclass. The payload keys are
+    whitelisted against ``_CONV_IMPLICIT_GEMM_SPEC_TOP_KEYS`` /
+    ``_CONV_PROBLEM_KEYS`` so an unexpected field fails closed rather than
+    being silently forwarded into the dataclass via ``**kwargs``.
+
+    The target arch is NOT part of the payload: it is an orthogonal
+    compile target threaded as a separate argument (mirroring the DSL,
+    whose ``ImplicitGemmConvSpec`` likewise has no arch field).
     """
-    from ck_dsl.helpers.compile import compile_kernel
-    from ck_dsl.instances.conv_implicit_gemm import (
+    from ck_dsl.instances.common.conv_implicit_gemm import (
         ConvProblem,
         ImplicitGemmConvSpec,
-        build_implicit_gemm_conv,
     )
 
     _reject_unexpected(
@@ -248,10 +254,25 @@ def _compile_conv_implicit_gemm(payload: dict) -> dict:
     problem = ConvProblem(**problem_payload)
 
     spec_kwargs = {k: v for k, v in payload.items() if k != "problem"}
-    spec = ImplicitGemmConvSpec(problem=problem, **spec_kwargs)
+    return ImplicitGemmConvSpec(problem=problem, **spec_kwargs)
 
-    kernel_def = build_implicit_gemm_conv(spec)
-    artifact = compile_kernel(kernel_def)
+
+def _compile_conv_implicit_gemm(payload: dict, arch: str) -> dict:
+    """Build + compile an implicit-GEMM conv kernel from the payload.
+
+    ``arch`` is threaded to BOTH ``build_implicit_gemm_conv`` (which
+    resolves per-arch MMA/WMMA atoms and validates the spec) and
+    ``compile_kernel`` (which selects the ISA triple + lowering
+    backend). Passing it to only one would mis-build the kernel on any
+    non-default arch.
+    """
+    from ck_dsl.helpers.compile import compile_kernel
+    from ck_dsl.instances.common.conv_implicit_gemm import build_implicit_gemm_conv
+
+    spec = _conv_spec_from_payload(payload)
+
+    kernel_def = build_implicit_gemm_conv(spec, arch=arch)
+    artifact = compile_kernel(kernel_def, arch=arch)
 
     # Grid derivation:
     #   M = N*Ho*Wo, num_pid_m = ceil(M / tile_m)
@@ -261,6 +282,7 @@ def _compile_conv_implicit_gemm(payload: dict) -> dict:
     #     and block.y indexes M tiles (set in
     #     ``build_implicit_gemm_conv``).
     #   block = (block_size, 1, 1)
+    problem = spec.problem
     M = problem.M
     num_pid_m = (M + spec.tile_m - 1) // spec.tile_m
     num_pid_n = (problem.N_gemm + spec.tile_n - 1) // spec.tile_n
@@ -281,20 +303,63 @@ def _compile_conv_implicit_gemm(payload: dict) -> dict:
     }
 
 
-def compile(op_kind: str, payload: dict) -> dict:
-    """Compile one DSL kernel from a typed payload dict.
+def compile(op_kind: str, payload: dict, arch: str) -> dict:
+    """Compile one DSL kernel from a typed payload dict for ``arch``.
 
     Called by the C++ ``CompileServiceBridge::compile`` on a
     ``JitCache`` miss. Dispatches on ``op_kind``; the only kind in M1
     is ``"conv_implicit_gemm"``. Unknown kinds raise ``ValueError``,
     which the bridge surfaces as a ``HipdnnPluginException``.
 
+    ``arch`` is the target gfx token, passed separately from ``payload``
+    (an orthogonal compile target, not a spec field -- mirroring the DSL
+    entry points).
+
     The returned dict shape matches :func:`compile_smoke` so the C++
     side can use the same translation path for both smoke and
     production compiles.
     """
     if op_kind == "conv_implicit_gemm":
-        return _compile_conv_implicit_gemm(payload)
+        return _compile_conv_implicit_gemm(payload, arch)
+    raise ValueError(
+        f"ck_dsl_provider.compile_service: unsupported op_kind {op_kind!r}"
+    )
+
+
+def _is_applicable_conv_implicit_gemm(payload: dict, arch: str):
+    """Arch-aware applicability for an implicit-GEMM conv spec.
+
+    Consults the DSL's ``is_valid_spec`` for ``arch`` -- the exact
+    predicate ``build_implicit_gemm_conv`` enforces internally -- so the
+    C++ ``isApplicable`` gate matches the compile path. No kernel is
+    built and comgr is never invoked; this is a pure data-driven check
+    against the target's :class:`ck_dsl.core.arch.ArchTarget` (atom
+    catalog, wave size, LDS caps). ``is_valid_spec`` also returns
+    ``(False, ...)`` for an unknown arch, so this single call covers both
+    "arch unsupported" and "knobs invalid for this arch".
+    """
+    from ck_dsl.instances.common.conv_implicit_gemm import is_valid_spec
+
+    spec = _conv_spec_from_payload(payload)
+    ok, reason = is_valid_spec(spec, arch)
+    return bool(ok), str(reason)
+
+
+def is_applicable(op_kind: str, payload: dict, arch: str):
+    """Return ``(ok, reason)`` for running ``op_kind`` on ``arch``.
+
+    Called by the C++ ``CompileServiceBridge::isApplicable`` from the
+    plan builder's ``isApplicable``. Dispatches on ``op_kind`` (mirroring
+    :func:`compile`); ``arch`` is the target gfx token, passed separately
+    from ``payload`` exactly as for :func:`compile`. Each op exposes its
+    own DSL validator. Unknown kinds raise ``ValueError``, which the
+    bridge surfaces as a ``HipdnnPluginException``.
+
+    Unlike :func:`compile` this never compiles -- it is a fast predicate
+    safe to call on the plan-finding hot path.
+    """
+    if op_kind == "conv_implicit_gemm":
+        return _is_applicable_conv_implicit_gemm(payload, arch)
     raise ValueError(
         f"ck_dsl_provider.compile_service: unsupported op_kind {op_kind!r}"
     )

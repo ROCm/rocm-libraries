@@ -170,9 +170,9 @@ ConvImplicitGemmSpec ConvImplicitGemmAdapter::buildSpec(const ConvolutionFwdAttr
     spec.problem.dW = narrowToI32(convAttr.dilation()->Get(1), "dilation[1]");
 
     // All other spec knobs (tile_*, warp_*, pipeline, epilogue, etc.)
-    // keep their bake-off constexpr defaults from
+    // keep their example constexpr defaults from
     // ConvImplicitGemmSpec. Autotuning is M2+ work; M1 ships the
-    // bake-off configuration verbatim per plan §4.
+    // example configuration verbatim per plan §4.
     return spec;
 }
 

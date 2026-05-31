@@ -6,7 +6,9 @@
 #include <pybind11/embed.h>
 #include <pybind11/pybind11.h>
 
+#include <string>
 #include <string_view>
+#include <utility>
 
 #include "../runtime/KernelArtifact.hpp"
 
@@ -66,11 +68,17 @@ class CompileServiceBridge {
     KernelArtifact compileSmoke();
 
     /// Production compile entry point. Invokes
-    /// ck_dsl_provider.compile_service.compile(op_kind, payload),
+    /// ck_dsl_provider.compile_service.compile(op_kind, payload, arch),
     /// translates the returned dict into a ``KernelArtifact``, and
     /// returns it. The payload is the on-wire dict emitted by the
     /// matching per-op ``*Payload::*SpecToPayload`` translator (for
     /// M1: ``convImplicitGemmSpecToPayload``).
+    ///
+    /// ``arch`` is the target gfx token (e.g. ``"gfx950"``), passed
+    /// separately from the payload because it is an orthogonal compile
+    /// target, not a spec field -- mirroring the DSL entry points
+    /// (``build_implicit_gemm_conv(spec, arch)`` /
+    /// ``compile_kernel(kernel, arch)``).
     ///
     /// Acquires the GIL internally; the caller must NOT already hold
     /// it. Any ``py::error_already_set`` from the Python side is
@@ -78,7 +86,33 @@ class CompileServiceBridge {
     ///
     /// The ``opKind`` string is the same identifier the JitCache key
     /// derivation uses; pick a stable value per op and never rename.
-    KernelArtifact compile(std::string_view opKind, const pybind11::dict& payload);
+    KernelArtifact compile(std::string_view opKind, const pybind11::dict& payload,
+                           std::string_view arch);
+
+    /// Arch-aware applicability predicate. Invokes
+    /// ck_dsl_provider.compile_service.is_applicable(op_kind, payload,
+    /// arch), which builds the op's spec from the payload and consults
+    /// the DSL's ``is_valid_spec`` for ``arch`` WITHOUT compiling.
+    /// ``arch`` is passed separately from the payload -- the same shape
+    /// as :func:`compile` -- because it is an orthogonal compile target,
+    /// not a spec field.
+    ///
+    /// Returns ``{ok, reason}``: ``ok`` is the verdict, ``reason`` is a
+    /// human-readable explanation when the spec is not valid for the
+    /// arch (e.g. an MMA atom absent on the target, a wave-size
+    /// mismatch, or an unknown arch).
+    ///
+    /// This is the authoritative gate the plan builder calls from
+    /// ``isApplicable`` so a false positive (applicable here, fails at
+    /// ``buildPlan`` compile time) cannot occur: it shares the exact
+    /// validator ``build_implicit_gemm_conv`` runs internally.
+    ///
+    /// Acquires the GIL internally; the caller must NOT already hold it
+    /// when entering, though holding it (e.g. to build ``payload``) is
+    /// safe -- the acquire is reentrant. Any ``py::error_already_set``
+    /// is translated via ``PythonError::raise``.
+    std::pair<bool, std::string> isApplicable(std::string_view opKind,
+                                              const pybind11::dict& payload, std::string_view arch);
 
     /// Test-only access to the imported compile_service module. Allows
     /// the unit suite to exercise the PythonError translation path by
