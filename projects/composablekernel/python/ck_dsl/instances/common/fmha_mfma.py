@@ -321,11 +321,29 @@ def build_fmha_fwd_mfma(spec: FmhaMfmaSpec, arch: str = "gfx950") -> KernelDef:
         k_token_offset_elems=k_batch_offset,
         v_token_offset_elems=v_batch_offset,
         # Opt-in softmax-stats: store the per-(query-row, query-head)
-        # natural-log LSE for the bwd graph's single ``stats`` tensor.
-        # ``num_query_heads`` is the compile-time row-stride of the flat
-        # [B*Sq, HQ] LSE array. None keeps the default IR unchanged.
+        # natural-log LSE for the bwd graph's single ``stats`` tensor in the
+        # contract-standard head-major [B, Hq, Sq] layout. The helper
+        # computes ``ml_off = lse_head_major_base + (o_row -
+        # lse_batch_row_base)``; ``lse_batch_row_base = batch_idx * seqlen_q``
+        # recovers the within-batch query row from the global-batched
+        # ``o_row``, and ``lse_head_major_base = (batch_idx * Hq + head_idx)
+        # * seqlen_q`` is the per-(batch, head) plane base. These are
+        # precomputed here because ``batch_idx`` / ``seqlen_q`` live at this
+        # call site, not in the body. None keeps the default IR unchanged.
         LSE_out=kb.ptr("LSE_out") if s.generate_stats else None,
         num_query_heads=s.shape.num_query_heads,
+        lse_batch_row_base=batch_row_q if s.generate_stats else None,
+        lse_head_major_base=(
+            b.mul(
+                b.add(
+                    b.mul(batch_idx, b.const_i32(s.shape.num_query_heads)),
+                    head_idx,
+                ),
+                seqlen_q,
+            )
+            if s.generate_stats
+            else None
+        ),
         arch=arch,
     )
     b.ret()

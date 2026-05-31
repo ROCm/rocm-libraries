@@ -243,6 +243,8 @@ def mfma_attention_fwd_inner_body(
     codebook_ptr: Optional[Value] = None,
     LSE_out: Optional[Value] = None,
     num_query_heads: Optional[int] = None,
+    lse_batch_row_base: Optional[Value] = None,
+    lse_head_major_base: Optional[Value] = None,
     arch: str = "gfx950",
 ) -> None:
     """One MFMA-tiled QK→softmax→PV pass for a ``BLOCK_M``-row Q tile.
@@ -449,6 +451,8 @@ def mfma_attention_fwd_inner_body(
             v_scale=v_scale,
             LSE_out=LSE_out,
             num_query_heads=num_query_heads,
+            lse_batch_row_base=lse_batch_row_base,
+            lse_head_major_base=lse_head_major_base,
             arch=arch,
             target=target,
         )
@@ -831,19 +835,22 @@ def mfma_attention_fwd_inner_body(
             )
             b.global_store(O, addr, v_out, align=2)
 
-    # ---- Opt-in softmax-stats store: natural-log LSE[row,head] ----
-    # Flat [B*Sq, HQ] f32 layout: ml_off = o_row * num_query_heads +
-    # head_idx, where ``o_row`` already folds the batch (= batch_idx *
-    # seqlen_q + within-batch row). The kernel carries the log2-domain
-    # stats M = max_j(score*scale_log2) and L = sum_j exp2(score*scale_log2
-    # - M); the boundary contract is a single natural-log LSE, so combine
-    # them: LSE_nat = (M + log2(L)) * ln(2). The running m / l are
-    # row-broadcast across the 16 lanes of each m_blk group, so only lane
-    # ``m_in_atom == 0`` writes each row -- predicating avoids 16x
-    # duplicate stores. This loop is over the row slots ``r`` only
-    # (per-row, not per head-dim column).
+    # ---- Opt-in softmax-stats store: natural-log LSE, head-major ----
+    # Contract-standard head-major [B, Hq, Sq] layout matching the hipDNN
+    # stats descriptor: ml_off = (batch_idx*Hq + head_idx)*Sq + within_row,
+    # where ``within_row`` is the per-batch query row (``o_row`` minus the
+    # per-batch row shift). ``o_row`` is the global-batched query row, so
+    # ``within_row = o_row - lse_batch_row_base`` and the per-(batch,head)
+    # base ``lse_head_major_base = (batch_idx*Hq + head_idx)*Sq`` are
+    # precomputed by the caller (which has ``batch_idx`` / ``seqlen_q`` in
+    # scope). The kernel carries the log2-domain stats M = max_j(score*
+    # scale_log2) and L = sum_j exp2(score*scale_log2 - M); the boundary
+    # contract is a single natural-log LSE, so combine them: LSE_nat =
+    # (M + log2(L)) * ln(2). The running m / l are row-broadcast across the
+    # 16 lanes of each m_blk group, so only lane ``m_in_atom == 0`` writes
+    # each row -- predicating avoids 16x duplicate stores. This loop is over
+    # the row slots ``r`` only (per-row, not per head-dim column).
     if LSE_out is not None:
-        hq = b.const_i32(num_query_heads)
         ln2 = b.const_f32(0.6931471805599453)
         is_writer = b.cmp_eq(m_in_atom, b.const_i32(0))
         with b.scf_if(is_writer):
@@ -852,7 +859,8 @@ def mfma_attention_fwd_inner_body(
                     b.add(q_tile_base, b.mul(m_blk, b.const_i32(4))),
                     b.const_i32(r),
                 )
-                ml_off = b.add(b.mul(o_row, hq), head_idx)
+                within_row = b.sub(o_row, lse_batch_row_base)
+                ml_off = b.add(lse_head_major_base, within_row)
                 lse2 = b.fadd(ms_final[r], b.log2(ls_final[r]))
                 lse_nat = b.fmul(lse2, ln2)
                 b.global_store(LSE_out, ml_off, lse_nat, align=4)
@@ -921,6 +929,8 @@ def _wmma_attention_fwd_inner_body(
     v_scale: Optional[Value],
     LSE_out: Optional[Value],
     num_query_heads: Optional[int],
+    lse_batch_row_base: Optional[Value],
+    lse_head_major_base: Optional[Value],
     arch: str,
     target,
 ) -> None:
@@ -1151,23 +1161,26 @@ def _wmma_attention_fwd_inner_body(
             )
             b.global_store(O, o_addr, b.cast_f32_to(v_f32, dtype_ir), align=2)
 
-    # ---- Opt-in softmax-stats store: natural-log LSE[row,head] ----
-    # Flat [B*Sq, HQ] f32 layout (same definition + index the MFMA path
-    # writes): ml_off = o_row * num_query_heads + head_idx, with ``o_row``
-    # folding the batch. Combine the log2-domain stats into a single
-    # natural-log LSE: LSE_nat = (M + log2(L)) * ln(2). The running m / l
-    # are row-broadcast across the 16 k-column lanes of each wave32 half,
-    # so only the lane at k-column 0 (``col == 0``) writes each row to
-    # avoid 16x duplicate stores. Per-row loop over slots ``r`` only.
+    # ---- Opt-in softmax-stats store: natural-log LSE, head-major ----
+    # Contract-standard head-major [B, Hq, Sq] layout (same definition +
+    # index the MFMA path writes): ml_off = (batch_idx*Hq + head_idx)*Sq +
+    # within_row, where ``within_row = o_row - lse_batch_row_base`` is the
+    # per-batch query row and ``lse_head_major_base = (batch_idx*Hq +
+    # head_idx)*Sq`` is precomputed by the caller. Combine the log2-domain
+    # stats into a single natural-log LSE: LSE_nat = (M + log2(L)) * ln(2).
+    # The running m / l are row-broadcast across the 16 k-column lanes of
+    # each wave32 half, so only the lane at k-column 0 (``col == 0``) writes
+    # each row to avoid 16x duplicate stores. Per-row loop over slots ``r``
+    # only.
     if LSE_out is not None:
-        hq = b.const_i32(num_query_heads)
         ln2 = b.const_f32(0.6931471805599453)
         is_writer = b.cmp_eq(col, b.const_i32(0))
         with b.scf_if(is_writer):
             for r in range(c_frag):
                 row_rel, _col_n = c_map.coord(b, lane, r)
                 o_row = b.add(q_tile_base, row_rel)
-                ml_off = b.add(b.mul(o_row, hq), head_idx)
+                within_row = b.sub(o_row, lse_batch_row_base)
+                ml_off = b.add(lse_head_major_base, within_row)
                 lse2 = b.fadd(ms_final[r], b.log2(ls_final[r]))
                 lse_nat = b.fmul(lse2, ln2)
                 b.global_store(LSE_out, ml_off, lse_nat, align=4)
