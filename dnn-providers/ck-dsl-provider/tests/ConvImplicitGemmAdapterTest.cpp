@@ -162,6 +162,59 @@ TEST(TestConvImplicitGemmAdapter, BuildSpecForExampleShape) {
     EXPECT_EQ(spec.block_size(), 256);
 }
 
+TEST(TestConvImplicitGemmAdapter, ApplyArchCodegenConfigSelectsPerArchKnobs) {
+    ConvGraphFixture fx;
+
+    // gfx950 keeps the wide 32x32x16 f16 MFMA atom + wave64 (the
+    // historical default), so its kernel selection is unchanged.
+    {
+        ConvImplicitGemmSpec spec = ConvImplicitGemmAdapter::buildSpec(*fx.convAttr, fx.tensorMap);
+        EXPECT_TRUE(ConvImplicitGemmAdapter::applyArchCodegenConfig(spec, "gfx950"));
+        EXPECT_EQ(spec.warp_tile_m, 32);
+        EXPECT_EQ(spec.warp_tile_n, 32);
+        EXPECT_EQ(spec.warp_tile_k, 16);
+        EXPECT_EQ(spec.wave_size, 64);
+        EXPECT_EQ(spec.block_size(), 256);  // warp_m * warp_n * wave_size
+        // Problem geometry must be left untouched by the codegen knobs.
+        EXPECT_EQ(spec.problem.N, 8);
+        EXPECT_EQ(spec.problem.K, 64);
+    }
+
+    // gfx942 lacks the 32x32x16 f16 atom -> 16x16x16 atom, still wave64.
+    {
+        ConvImplicitGemmSpec spec = ConvImplicitGemmAdapter::buildSpec(*fx.convAttr, fx.tensorMap);
+        EXPECT_TRUE(ConvImplicitGemmAdapter::applyArchCodegenConfig(spec, "gfx942"));
+        EXPECT_EQ(spec.warp_tile_m, 16);
+        EXPECT_EQ(spec.warp_tile_n, 16);
+        EXPECT_EQ(spec.warp_tile_k, 16);
+        EXPECT_EQ(spec.wave_size, 64);
+        EXPECT_EQ(spec.block_size(), 256);
+    }
+
+    // gfx1151 is wave32 RDNA with the 16x16x16 WMMA atom.
+    {
+        ConvImplicitGemmSpec spec = ConvImplicitGemmAdapter::buildSpec(*fx.convAttr, fx.tensorMap);
+        EXPECT_TRUE(ConvImplicitGemmAdapter::applyArchCodegenConfig(spec, "gfx1151"));
+        EXPECT_EQ(spec.warp_tile_m, 16);
+        EXPECT_EQ(spec.warp_tile_n, 16);
+        EXPECT_EQ(spec.warp_tile_k, 16);
+        EXPECT_EQ(spec.wave_size, 32);
+        EXPECT_EQ(spec.block_size(), 128);
+    }
+
+    // An arch with no known config is reported as unsupported and the
+    // spec is left unchanged (the caller declines / fails closed).
+    {
+        ConvImplicitGemmSpec spec = ConvImplicitGemmAdapter::buildSpec(*fx.convAttr, fx.tensorMap);
+        const ConvImplicitGemmSpec before = spec;
+        EXPECT_FALSE(ConvImplicitGemmAdapter::applyArchCodegenConfig(spec, "gfx777"));
+        EXPECT_EQ(spec.warp_tile_m, before.warp_tile_m);
+        EXPECT_EQ(spec.warp_tile_n, before.warp_tile_n);
+        EXPECT_EQ(spec.warp_tile_k, before.warp_tile_k);
+        EXPECT_EQ(spec.wave_size, before.wave_size);
+    }
+}
+
 TEST(TestConvImplicitGemmAdapter, RejectsAsymmetricPadding) {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<std::int64_t> prePadding{1, 1};

@@ -169,11 +169,49 @@ ConvImplicitGemmSpec ConvImplicitGemmAdapter::buildSpec(const ConvolutionFwdAttr
     spec.problem.dH = narrowToI32(convAttr.dilation()->Get(0), "dilation[0]");
     spec.problem.dW = narrowToI32(convAttr.dilation()->Get(1), "dilation[1]");
 
-    // All other spec knobs (tile_*, warp_*, pipeline, epilogue, etc.)
-    // keep their example constexpr defaults from
-    // ConvImplicitGemmSpec. Autotuning is M2+ work; M1 ships the
-    // example configuration verbatim per plan §4.
+    // The arch-dependent codegen knobs (warp-tile atom + wave size) are
+    // left at the struct defaults here and overwritten per-arch by
+    // applyArchCodegenConfig once the device arch is known. Every other
+    // knob (tile_*, warp_*, pipeline, epilogue, etc.) keeps its example
+    // constexpr default from ConvImplicitGemmSpec. Autotuning is M2+ work.
     return spec;
+}
+
+bool ConvImplicitGemmAdapter::applyArchCodegenConfig(ConvImplicitGemmSpec& spec,
+                                                     const std::string& arch) {
+    // 16x16x16 is the f16 MMA/WMMA atom the DSL validates on all three
+    // M1 targets (an MFMA op on the CDNA targets gfx942/gfx950, a WMMA
+    // op on the RDNA target gfx1151). gfx950 additionally supports the
+    // wider 32x32x16 f16 MFMA atom and keeps it as its historical
+    // default so gfx950 kernel selection is unchanged by arch-awareness.
+    // wave_size tracks the hardware: 64 on the wave64 CDNA targets, 32
+    // on the wave32 RDNA target gfx1151. These are the same per-arch
+    // example configs the provider's cross-arch tests exercise; the DSL
+    // rejects a mismatched atom/wave at compile time (is_valid_spec), so
+    // an unrecognised arch here means "the provider cannot target this
+    // device" -- report it as false rather than guessing knobs.
+    if (arch == "gfx950") {
+        spec.warp_tile_m = 32;
+        spec.warp_tile_n = 32;
+        spec.warp_tile_k = 16;
+        spec.wave_size = 64;
+        return true;
+    }
+    if (arch == "gfx942") {
+        spec.warp_tile_m = 16;
+        spec.warp_tile_n = 16;
+        spec.warp_tile_k = 16;
+        spec.wave_size = 64;
+        return true;
+    }
+    if (arch == "gfx1151") {
+        spec.warp_tile_m = 16;
+        spec.warp_tile_n = 16;
+        spec.warp_tile_k = 16;
+        spec.wave_size = 32;
+        return true;
+    }
+    return false;
 }
 
 }  // namespace ck_dsl_provider

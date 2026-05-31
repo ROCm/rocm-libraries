@@ -17,6 +17,7 @@
 #include "CkDslContext.hpp"
 #include "CkDslHandle.hpp"
 #include "TestUtils.hpp"
+#include "adapters/conv_implicit_gemm/ConvImplicitGemmAdapter.hpp"
 #include "adapters/conv_implicit_gemm/ConvImplicitGemmPayload.hpp"
 #include "adapters/conv_implicit_gemm/ConvImplicitGemmSpec.hpp"
 #include "engines/conv_implicit_gemm/CkDslConvImplicitGemmEngine.hpp"
@@ -162,7 +163,16 @@ TEST_F(ConvImplicitGemmPlanBuilderHost, IsApplicableReflectsDeviceArch) {
         return;
     }
 
+    // Mirror what the builder does internally: select the per-arch
+    // codegen config for the detected device, then ask the authoritative
+    // validator about that exact spec. An arch the adapter has no config
+    // for is one the builder declines outright.
     ck_dsl_provider::ConvImplicitGemmSpec spec = makeExampleSpec();
+    if (!ck_dsl_provider::ConvImplicitGemmAdapter::applyArchCodegenConfig(spec, *arch)) {
+        EXPECT_FALSE(got) << "no codegen config for arch " << *arch
+                          << "; isApplicable should decline";
+        return;
+    }
     py::gil_scoped_acquire gil;
     py::dict payload = ck_dsl_provider::convImplicitGemmSpecToPayload(spec);
     const bool expected = _container->compileServiceBridge()
@@ -255,11 +265,12 @@ INSTANTIATE_TEST_SUITE_P(Arches, ConvImplicitGemmExampleCompile,
 
 // M1 multi-arch goal (execution coverage): run the example shape on
 // WHATEVER supported device is present, compiling the cross-arch example
-// config for that device's arch (a test-owned config, bypassing the
-// production gfx950-only default). Skips cleanly with no GPU or on an
-// arch outside the M1 set -- the "tests that skip on unsupported
-// platforms" half of the multi-arch coverage. With zero input and zero
-// weight the convolution output is zero everywhere.
+// config for that device's arch. This drives the bridge + HipModule +
+// plan directly with a test-owned config (the production buildPlan path
+// is covered by ConvImplicitGemmPlanBuilderGpu). Skips cleanly with no
+// GPU or on an arch outside the M1 set -- the "tests that skip on
+// unsupported platforms" half of the multi-arch coverage. With zero
+// input and zero weight the convolution output is zero everywhere.
 TEST_F(ConvImplicitGemmPlanBuilderHost, ExecutesExampleShapeOnPresentDevice) {
     std::string arch;
     CK_DSL_PROVIDER_SKIP_IF_UNSUPPORTED_ARCH("ExecutesExampleShapeOnPresentDevice", arch);
@@ -316,12 +327,20 @@ TEST_F(ConvImplicitGemmPlanBuilderHost, ExecutesExampleShapeOnPresentDevice) {
 /// GPU-gated: buildPlan triggers the JitCache loader, which compiles
 /// the implicit-GEMM conv kernel via the bridge + Python compile
 /// service. Second buildPlan on the same graph must hit the cache.
+///
+/// Runs on any DSL-supported device (gfx942/gfx950/gfx1151): buildPlan
+/// goes through the production adapter, which now selects a valid
+/// per-arch codegen config via applyArchCodegenConfig. The detected
+/// arch is captured in ``_arch`` so the launch-metadata assertions can
+/// account for the per-arch wave size.
 class ConvImplicitGemmPlanBuilderGpu : public ConvImplicitGemmPlanBuilderHost {
    protected:
     void SetUp() override {
-        CK_DSL_PROVIDER_SKIP_IF_NOT_GFX950("ConvImplicitGemmPlanBuilderGpu");
+        CK_DSL_PROVIDER_SKIP_IF_UNSUPPORTED_ARCH("ConvImplicitGemmPlanBuilderGpu", _arch);
         ConvImplicitGemmPlanBuilderHost::SetUp();
     }
+
+    std::string _arch;
 };
 
 TEST_F(ConvImplicitGemmPlanBuilderGpu, BuildPlanCachesOnSecondCall) {
@@ -355,13 +374,18 @@ TEST_F(ConvImplicitGemmPlanBuilderGpu, BuildPlanCachesOnSecondCall) {
     EXPECT_EQ(concretePlan1->xUidForTesting(), 1);
     EXPECT_EQ(concretePlan1->yUidForTesting(), 3);
 
-    // Launch metadata cross-check against plan §4:
+    // Launch metadata cross-check against plan §4. The grid is
+    // arch-independent (tiles are 64x64 regardless of the MMA atom):
     //   grid = (num_pid_n, num_pid_m, 1) = (ceil(64/64), ceil(8*56*56/64), 1) = (1, 392, 1)
-    //   block = (warp_m * warp_n * wave_size, 1, 1) = (256, 1, 1)
+    // The block size tracks the per-arch wave size the adapter selects:
+    //   block.x = warp_m * warp_n * wave_size = 4 * wave_size
+    //           = 256 on the wave64 CDNA targets, 128 on wave32 gfx1151.
+    const std::uint32_t waveSize = (_arch == "gfx1151") ? 32u : 64u;
+    const std::uint32_t expectedBlockX = 4u * waveSize;
     EXPECT_EQ(concretePlan1->moduleForTesting().grid().x, 1u);
     EXPECT_EQ(concretePlan1->moduleForTesting().grid().y, 392u);
     EXPECT_EQ(concretePlan1->moduleForTesting().grid().z, 1u);
-    EXPECT_EQ(concretePlan1->moduleForTesting().block().x, 256u);
+    EXPECT_EQ(concretePlan1->moduleForTesting().block().x, expectedBlockX);
     EXPECT_EQ(concretePlan1->moduleForTesting().argSchema().size(), 6u);
 
     // Second call: cache hit. The cost should drop by orders of
@@ -451,14 +475,14 @@ TEST_F(ConvImplicitGemmPlanBuilderGpu, PlanExecuteLaunches) {
 }
 
 TEST_F(ConvImplicitGemmPlanBuilderHost, ExecuteRejectsMissingDeviceBuffer) {
-    // The uid-lookup throws before any HIP call, but the buildPlan
-    // step goes through the production adapter's gfx950-tuned default
-    // config (32x32x16 atom, wave64), which validates and loads only
-    // on gfx950. This is not a DSL ISA limitation -- the DSL compiles
-    // gfx942/gfx950/gfx1151 -- but a consequence of the production
-    // adapter emitting fixed gfx950 knobs until M2.
-    CK_DSL_PROVIDER_SKIP_IF_NOT_GFX950(
-        "ConvImplicitGemmPlanBuilderHost.ExecuteRejectsMissingDeviceBuffer");
+    // The uid-lookup throws before any HIP call, but buildPlan still
+    // compiles the kernel for the present device first, so this needs a
+    // DSL-supported device. The production adapter selects a valid
+    // per-arch codegen config (applyArchCodegenConfig), so the path runs
+    // on any of gfx942/gfx950/gfx1151.
+    std::string arch;
+    CK_DSL_PROVIDER_SKIP_IF_UNSUPPORTED_ARCH(
+        "ConvImplicitGemmPlanBuilderHost.ExecuteRejectsMissingDeviceBuffer", arch);
 
     auto fbBuilder = makeExampleConvFwdGraph();
     flatbuffer_utilities::GraphWrapper graph(fbBuilder.GetBufferPointer(), fbBuilder.GetSize());

@@ -7,6 +7,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 
 #include <cstdint>
+#include <string>
 #include <unordered_map>
 
 #include "ConvImplicitGemmSpec.hpp"
@@ -25,9 +26,13 @@ namespace ck_dsl_provider {
 ///     cache-key stability comes from the GraphSignature in I-7) and
 ///     the dtype (implicit -- M1 only handles FP16).
 ///
-/// The remaining spec knobs (tile_*, warp_*, pipeline, epilogue,
-/// chiplet_*, etc.) keep their example constexpr defaults from
-/// ``ConvImplicitGemmSpec``. Autotuning is M2+ work.
+/// The codegen knobs that depend on the target arch (the warp-tile MMA
+/// atom + wave size) are NOT fixed by ``buildSpec``: they are selected
+/// per-arch by ``applyArchCodegenConfig`` once the device arch is known
+/// (the plan builder detects the arch and applies the config before the
+/// signature/compile step). The remaining knobs (tile_*, warp_*,
+/// pipeline, epilogue, chiplet_*, etc.) keep their example constexpr
+/// defaults from ``ConvImplicitGemmSpec``. Autotuning is M2+ work.
 ///
 /// Validation (throws HipdnnPluginException on any failure -- callers
 /// can catch + return ``false`` from ``isApplicable``):
@@ -56,6 +61,27 @@ class ConvImplicitGemmAdapter {
     /// validation failure listed in the class docstring.
     static ConvImplicitGemmSpec buildSpec(const ConvolutionFwdAttributes& convAttr,
                                           const TensorMap& tensorMap);
+
+    /// Overwrite the spec's arch-dependent codegen knobs -- the
+    /// warp-tile MMA atom (``warp_tile_m/n/k``) and ``wave_size`` -- with
+    /// the provider's per-arch default config for ``arch``. The problem
+    /// geometry and every other knob (tile_*, warp_*, pipeline,
+    /// epilogue, ...) are left untouched.
+    ///
+    /// Returns ``true`` when ``arch`` has a known config (the spec is
+    /// updated), ``false`` when it does not (the spec is left unchanged
+    /// and the caller should treat the graph as inapplicable on that
+    /// device). ``arch`` is the bare gfx token from ``detectDeviceArch``
+    /// (feature suffixes already stripped).
+    ///
+    /// Per-arch config (the minimal correct config the DSL validates per
+    /// target; tuning is M2+):
+    ///   * gfx950  -> 32x32x16 f16 MFMA atom, wave64 -- the historical
+    ///     default, kept so gfx950 kernel selection is unchanged.
+    ///   * gfx942  -> 16x16x16 f16 MFMA atom, wave64 (gfx942 lacks the
+    ///     wider 32x32x16 f16 atom).
+    ///   * gfx1151 -> 16x16x16 f16 WMMA atom, wave32 (wave32 RDNA).
+    static bool applyArchCodegenConfig(ConvImplicitGemmSpec& spec, const std::string& arch);
 
    private:
     ConvImplicitGemmAdapter() = delete;

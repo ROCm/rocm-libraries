@@ -13,7 +13,7 @@
 
 #include "runtime/DeviceArch.hpp"
 
-// Tests in this suite share two kinds of device gate:
+// Tests in this suite share a device gate:
 //
 //   CK_DSL_PROVIDER_SKIP_IF_UNSUPPORTED_ARCH  -- for tests that compile a
 //     kernel for whatever DSL-supported device is present and run it.
@@ -21,11 +21,10 @@
 //     build for). On success the bare gfx token is written to the caller's
 //     ``outArch`` lvalue so the test can pass it to arch-aware entry
 //     points such as compileSmoke(arch) or compile(opKind, payload, arch).
-//
-//   CK_DSL_PROVIDER_SKIP_IF_NOT_GFX950  -- for tests that build the
-//     gfx950-tuned production-default config (the conv plan-builder path).
-//     The default adapter knobs (32x32x16 atom, wave64) are only valid on
-//     gfx950; use this gate ONLY for those tests.
+//     The production conv plan-builder path uses this gate too: the
+//     adapter selects a valid per-arch codegen config for the detected
+//     device (applyArchCodegenConfig), so buildPlan runs on any of the
+//     three supported arches.
 //
 // The helpers are macros rather than free functions so the embedded
 // GTEST_SKIP() / ASSERT_* short-circuit out of the calling test's body --
@@ -75,28 +74,4 @@ inline bool ckDslIsSupportedArch(std::string_view arch) {
                          << "' is outside the DSL-supported set (gfx942/gfx950/gfx1151)";    \
         }                                                                                    \
         (outArch) = *_ckdsl_supported_arch;                                                  \
-    } while (0)
-
-// Skip unless a HIP device is present AND that device is gfx950. Use
-// ONLY for tests that build the gfx950-tuned production-default config:
-// the conv plan-builder path whose adapter emits the DSL dataclass
-// defaults (32x32x16 atom, wave64) that are valid only on gfx950.
-// buildPlan with those knobs correctly declines or throws on other arches
-// until the adapter is arch-aware in M2.
-//
-// This is NOT a DSL limitation -- the DSL compiles gfx942/gfx950/gfx1151.
-// Tests that select a per-arch config (e.g. cross-arch example compile,
-// compileSmoke) should use CK_DSL_PROVIDER_SKIP_IF_UNSUPPORTED_ARCH
-// instead.
-#define CK_DSL_PROVIDER_SKIP_IF_NOT_GFX950(testName)                                          \
-    do {                                                                                      \
-        CK_DSL_PROVIDER_SKIP_IF_NO_GPU(testName);                                             \
-        hipDeviceProp_t _ckdsl_props{};                                                       \
-        ASSERT_EQ(hipGetDeviceProperties(&_ckdsl_props, 0), hipSuccess);                      \
-        std::string _ckdsl_arch_name = _ckdsl_props.gcnArchName;                              \
-        if (_ckdsl_arch_name.find("gfx950") == std::string::npos) {                           \
-            GTEST_SKIP() << (testName) << ": requires gfx950 (production-default conv knobs " \
-                         << "are gfx950-tuned); " << "device 0 reports gcnArchName='"         \
-                         << _ckdsl_arch_name << "'";                                          \
-        }                                                                                     \
     } while (0)

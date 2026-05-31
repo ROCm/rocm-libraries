@@ -127,6 +127,18 @@ bool ConvImplicitGemmPlanBuilder::isApplicable(const ::CkDslHandle& handle,
                 "ConvImplicitGemmPlanBuilder::isApplicable declining: no HIP device is visible");
             return false;
         }
+        // Select the arch-dependent codegen knobs (warp-tile atom + wave
+        // size) for the detected device before asking the validator: the
+        // same config the compile path will use, so the applicability
+        // verdict matches what buildPlan would produce. An arch with no
+        // known config means the provider cannot target this device.
+        if (!ConvImplicitGemmAdapter::applyArchCodegenConfig(*spec, *arch)) {
+            HIPDNN_PLUGIN_LOG_INFO(
+                "ConvImplicitGemmPlanBuilder::isApplicable declining: no codegen config for arch "
+                << *arch);
+            return false;
+        }
+
         // arch is an orthogonal compile target, passed alongside the
         // spec payload (mirroring the DSL) rather than baked into it.
         py::gil_scoped_acquire gil;
@@ -202,6 +214,20 @@ void ConvImplicitGemmPlanBuilder::buildPlan(
             "architecture cannot be determined; a GPU is required to build a plan");
     }
     const std::string arch = *detectedArch;
+
+    // Select the arch-dependent codegen knobs (warp-tile atom + wave
+    // size) for the detected device. buildSpec leaves these at the
+    // struct defaults; this picks the per-arch config the DSL validates
+    // for ``arch`` so the kernel is built for the device it will run on.
+    // An unknown arch is fatal here -- isApplicable should already have
+    // declined, so reaching buildPlan on an untargetable device is an
+    // exceptional, fail-closed condition.
+    if (!ConvImplicitGemmAdapter::applyArchCodegenConfig(spec, arch)) {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "ConvImplicitGemmPlanBuilder::buildPlan: no codegen config for device arch '" + arch +
+                "'; the CK DSL provider cannot target this device");
+    }
 
     SignatureHash key = GraphSignature::computeForSpec(opKind(), spec, arch);
 
