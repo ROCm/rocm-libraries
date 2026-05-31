@@ -40,7 +40,8 @@ namespace TensileLite
 
             variables_map parse_command_line(int                        argc,
                                              char const* const          argv[],
-                                             options_description const& desc)
+                                             options_description const& desc,
+                                             bool includeDefaults)
             {
                 variables_map m_vm;
                 auto const&   options = desc.options();
@@ -113,20 +114,23 @@ namespace TensileLite
                     }
                 }
 
-                for(size_t i = 0; i < options.size(); i++)
+                if(includeDefaults)
                 {
-                    if(!options[i].value_semantic)
-                        continue;
-                    std::string canonical = get_canonical_option_name(options[i].opts);
-                    if(canonical == "help")
-                        continue;
-                    // Only set default for options that explicitly have one; otherwise
-                    // unspecified options (e.g. convolution-identifier) would get empty
-                    // string and count() would be true with an incomplete value.
-                    if((!m_vm.count(canonical) || m_vm[canonical].empty())
-                       && options[i].value_semantic->has_explicit_default())
+                    for(size_t i = 0; i < options.size(); i++)
                     {
-                        m_vm[canonical].value() = options[i].value_semantic->get_default();
+                        if(!options[i].value_semantic)
+                            continue;
+                        std::string canonical = get_canonical_option_name(options[i].opts);
+                        if(canonical == "help")
+                            continue;
+                        // Only set default for options that explicitly have one; otherwise
+                        // unspecified options (e.g. convolution-identifier) would get empty
+                        // string and count() would be true with an incomplete value.
+                        if((!m_vm.count(canonical) || m_vm[canonical].empty())
+                           && options[i].value_semantic->has_explicit_default())
+                        {
+                            m_vm[canonical].value() = options[i].value_semantic->get_default();
+                        }
                     }
                 }
                 return m_vm;

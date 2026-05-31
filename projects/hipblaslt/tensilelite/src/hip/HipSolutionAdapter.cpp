@@ -406,7 +406,8 @@ namespace TensileLite
                                                  hipStream_t             stream,
                                                  hipEvent_t              startEvent,
                                                  hipEvent_t              stopEvent,
-                                                 bool                    isKernelLoaded)
+                                                 bool                    isKernelLoaded,
+                                                 bool                    useKernelStartStopEvents)
         {
             if(!isKernelLoaded && !kernel.codeObjectFile.empty())
             {
@@ -450,7 +451,7 @@ namespace TensileLite
                                        &argsSize,
                                        HIP_LAUNCH_PARAM_END};
 
-            if(startEvent != nullptr)
+            if(startEvent != nullptr && !useKernelStartStopEvents)
                 HIP_CHECK_RETURN(hipEventRecord(startEvent, stream));
             HIP_CHECK_RETURN_WITH_LOG(hipExtModuleLaunchKernel(function,
                                                       kernel.numWorkItems.x,
@@ -463,9 +464,9 @@ namespace TensileLite
                                                       stream, // stream
                                                       nullptr,
                                                       (void**)&hipLaunchParams,
-                                                      nullptr, // event
-                                                      nullptr // event
-                                                      ),
+                                                      useKernelStartStopEvents ? startEvent : nullptr,
+                                                      useKernelStartStopEvents ? stopEvent : nullptr,
+                                                      0),
                 [&](hipError_t error) {
                     std::cerr << "hipExtModuleLaunchKernel failed: " << kernel.kernelName << std::endl
                             << " with workgroup size: " << kernel.workGroupSize << std::endl
@@ -475,7 +476,7 @@ namespace TensileLite
                 }
             );
 
-            if(stopEvent != nullptr)
+            if(stopEvent != nullptr && !useKernelStartStopEvents)
                 HIP_CHECK_RETURN(hipEventRecord(stopEvent, stream));
             return hipSuccess;
         }
@@ -501,7 +502,8 @@ namespace TensileLite
                                                   hipStream_t                          stream,
                                                   hipEvent_t                           startEvent,
                                                   hipEvent_t                           stopEvent,
-                                                  bool                                 isKernelLoaded)
+                                                  bool                                 isKernelLoaded,
+                                                  bool                                 useKernelStartStopEvents)
         {
             auto first = kernels.begin();
             auto last  = kernels.end() - 1;
@@ -516,7 +518,12 @@ namespace TensileLite
                 if(iter == last)
                     kStop = stopEvent;
 
-                HIP_CHECK_RETURN_WITH_LOG(launchKernel(*iter, stream, kStart, kStop, isKernelLoaded),
+                HIP_CHECK_RETURN_WITH_LOG(launchKernel(*iter,
+                                                       stream,
+                                                       kStart,
+                                                       kStop,
+                                                       isKernelLoaded,
+                                                       useKernelStartStopEvents),
                     [&](hipError_t error) {
                         std::cerr << "launchKernel failed: " << iter->kernelName << std::endl
                                 << " with workgroup size: " << iter->workGroupSize << std::endl
@@ -532,7 +539,8 @@ namespace TensileLite
         hipError_t SolutionAdapter::launchKernels(std::vector<KernelInvocation> const& kernels,
                                                   hipStream_t                          stream,
                                                   std::vector<hipEvent_t> const&       startEvents,
-                                                  std::vector<hipEvent_t> const&       stopEvents)
+                                                  std::vector<hipEvent_t> const&       stopEvents,
+                                                  bool                                 useKernelStartStopEvents)
         {
             if(kernels.size() != startEvents.size() || kernels.size() != stopEvents.size())
                 throw std::runtime_error(concatenate("Must have an equal number of kernels (",
@@ -545,7 +553,12 @@ namespace TensileLite
 
             for(size_t i = 0; i < kernels.size(); i++)
             {
-                HIP_CHECK_RETURN_WITH_LOG(launchKernel(kernels[i], stream, startEvents[i], stopEvents[i]),
+                HIP_CHECK_RETURN_WITH_LOG(launchKernel(kernels[i],
+                                                       stream,
+                                                       startEvents[i],
+                                                       stopEvents[i],
+                                                       false,
+                                                       useKernelStartStopEvents),
                     [&](hipError_t error) {
                         std::cerr << "launchKernel failed: " << kernels[i].kernelName << std::endl
                                 << " with workgroup size: " << kernels[i].workGroupSize << std::endl

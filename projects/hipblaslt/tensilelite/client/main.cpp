@@ -836,8 +836,9 @@ namespace TensileLite
             auto options = all_options();
 
             po::variables_map args;
-            po::store(po::parse_command_line(argc, argv, options), args);
-            po::notify(args);
+            po::store(po::parse_command_line(1, argv, options), args);
+            auto explicitArgs = po::parse_command_line(argc, argv, options, false);
+            po::store(explicitArgs, args);
 
             if(args.count("help"))
             {
@@ -856,7 +857,10 @@ namespace TensileLite
                         throw std::runtime_error(concatenate("Could not open ", filename));
                     po::store(po::parse_config_file(file, options), args);
                 }
+                po::store(explicitArgs, args);
             }
+
+            po::notify(args);
 
             validate_skip_slow_solution_args(args);
 
@@ -1154,8 +1158,20 @@ int main(int argc, const char* argv[])
                                     }
                                 }
 
+                                size_t kernelInvocationCount = kernels[0].size();
+                                for(size_t kIdx = 1; kIdx < kernels.size(); ++kIdx)
+                                {
+                                    if(kernels[kIdx].size() != kernelInvocationCount)
+                                        throw std::runtime_error(concatenate(
+                                            "Inconsistent kernel invocation count across rotating inputs: expected ",
+                                            kernelInvocationCount,
+                                            ", got ",
+                                            kernels[kIdx].size(),
+                                            "."));
+                                }
+
                                 size_t       warmupInvocations = listeners.numWarmupRuns();
-                                size_t       warmupEventCount  = kernels[0].size();
+                                size_t       warmupEventCount  = kernelInvocationCount;
                                 TimingEvents warmupStartEvents(warmupInvocations, warmupEventCount);
                                 TimingEvents warmupStopEvents(warmupInvocations, warmupEventCount);
 
@@ -1167,14 +1183,16 @@ int main(int argc, const char* argv[])
                                         HIP_CHECK_EXC(adapter.launchKernels(kernels[0],
                                                                             stream,
                                                                             warmupStartEvents[0],
-                                                                            warmupStopEvents[0]));
+                                                                            warmupStopEvents[0],
+                                                                            true));
                                         for(int i = 1; i < warmupInvocations; i++)
                                         {
                                             size_t kIdx = i % kernels.size();
                                             HIP_CHECK_EXC(adapter.launchKernels(kernels[kIdx],
                                                                                 stream,
                                                                                 warmupStartEvents[i],
-                                                                                warmupStopEvents[i]));
+                                                                                warmupStopEvents[i],
+                                                                                true));
                                         }
                                     }
 
@@ -1198,13 +1216,14 @@ int main(int argc, const char* argv[])
                                 HIP_CHECK_EXC(adapter.launchKernels(kernels[warmupInvocations % kernels.size()],
                                                                     stream,
                                                                     ProfilerStartEvents[0],
-                                                                    ProfilerStopEvents[0]));
+                                                                    ProfilerStopEvents[0],
+                                                                    true));
                                 listeners.postProfiler();
 #endif
 
                                 size_t syncs      = listeners.numSyncs();
                                 size_t enq        = listeners.numEnqueuesPerSync();
-                                size_t eventCount = gpuTimer ? 1 : 0;
+                                size_t eventCount = gpuTimer ? kernelInvocationCount : 0;
 
                                 {
                                     ScopedTimer timer("benchmark_runs");
@@ -1212,12 +1231,9 @@ int main(int argc, const char* argv[])
                                     if(enq)
                                         for(int i = 0; i < syncs; i++)
                                         {
-                                            // Bench-topology alignment: one hipEvent pair per sync
-                                            // wraps all `enq` kernels, so event overhead 2X is
-                                            // amortized across every kernel, matching hipblaslt-bench's
-                                            // single-event-pair-around-hot_iters timing window.
-                                            TimingEvents startEvents(1, eventCount);
-                                            TimingEvents stopEvents(1, eventCount);
+                                            size_t timedInvocations = gpuTimer ? enq : 1;
+                                            TimingEvents startEvents(timedInvocations, eventCount);
+                                            TimingEvents stopEvents(timedInvocations, eventCount);
 
                                             listeners.preEnqueues(stream);
 
@@ -1225,25 +1241,24 @@ int main(int argc, const char* argv[])
                                             {
                                                 size_t kIdx
                                                     = (static_cast<size_t>(i) * enq + j) % kernels.size();
-                                                bool isLastEnqueue = (j + 1 == enq);
-                                                hipEvent_t startEvent
-                                                    = (eventCount && j == 0)
-                                                          ? startEvents[0].front()
-                                                          : nullptr;
-                                                hipEvent_t stopEvent
-                                                    = (eventCount && isLastEnqueue && !icacheFlush)
-                                                          ? stopEvents[0].front()
-                                                          : nullptr;
-                                                HIP_CHECK_EXC(adapter.launchKernels(
-                                                    kernels[kIdx], stream, startEvent, stopEvent));
+                                                if(gpuTimer)
+                                                {
+                                                    HIP_CHECK_EXC(adapter.launchKernels(kernels[kIdx],
+                                                                                        stream,
+                                                                                        startEvents[j],
+                                                                                        stopEvents[j],
+                                                                                        true));
+                                                }
+                                                else
+                                                {
+                                                    HIP_CHECK_EXC(adapter.launchKernels(
+                                                        kernels[kIdx], stream, nullptr, nullptr));
+                                                }
 
                                                 if(icacheFlush)
                                                 {
                                                     hipLaunchKernelGGL(
                                                         flush_icache, flushGridSize, 64, 0, stream);
-                                                    if(eventCount && isLastEnqueue)
-                                                        HIP_CHECK_EXC(
-                                                            hipEventRecord(stopEvents[0].front(), stream));
                                                 }
                                             }
 

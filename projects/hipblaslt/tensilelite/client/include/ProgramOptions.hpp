@@ -597,7 +597,8 @@ namespace TensileLite
 
             variables_map parse_command_line(int                        argc,
                                              char const* const          argv[],
-                                             options_description const& desc);
+                                             options_description const& desc,
+                                             bool includeDefaults = true);
 
             variables_map parse_config_file(std::istream& is, options_description const& desc);
 

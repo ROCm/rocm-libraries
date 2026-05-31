@@ -68,7 +68,8 @@ namespace TensileLite
                                     hipStream_t             stream,
                                     hipEvent_t              startEvent,
                                     hipEvent_t              stopEvent,
-                                    bool                    isKernelLoaded = false);
+                                    bool                    isKernelLoaded = false,
+                                    bool                    useKernelStartStopEvents = false);
 
             hipError_t launchKernels(std::vector<KernelInvocation> const& kernels);
 
@@ -76,12 +77,14 @@ namespace TensileLite
                                      hipStream_t                          stream,
                                      hipEvent_t                           startEvent,
                                      hipEvent_t                           stopEvent,
-                                     bool                                 isKernelLoaded = false);
+                                     bool                                 isKernelLoaded = false,
+                                     bool                                 useKernelStartStopEvents = false);
 
             hipError_t launchKernels(std::vector<KernelInvocation> const& kernels,
                                      hipStream_t                          stream,
                                      std::vector<hipEvent_t> const&       startEvents,
-                                     std::vector<hipEvent_t> const&       stopEvents);
+                                     std::vector<hipEvent_t> const&       stopEvents,
+                                     bool                                 useKernelStartStopEvents = false);
 
             bool FindCodeObject(std::string const& codeObjectFile);
 

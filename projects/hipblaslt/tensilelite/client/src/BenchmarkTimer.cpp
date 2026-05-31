@@ -426,11 +426,6 @@ namespace TensileLite
                                               TimingEvents const&            startEvents,
                                               TimingEvents const&            stopEvents)
         {
-            // Bench-topology alignment: main.cpp emits exactly ONE hipEvent pair per
-            // sync that wraps all `num-enqueues-per-sync` kernels. Each sync therefore
-            // contributes one elapsed-time sample covering `num-enqueues-per-sync`
-            // kernels, so `timeInSolution / numEnqueuesInSolution` yields per-kernel
-            // time, matching bench's `gpu_time_used / hot_iters`.
             double_millis totalTime(0.0);
 
             if(m_curNumEnqueuesPerSync == 0)
@@ -448,23 +443,36 @@ namespace TensileLite
 
                 HIP_CHECK_EXC(hipEventSynchronize(stopEvents->back().back()));
 
-                for(size_t logicalIdx = 0; logicalIdx < startEvents->size(); ++logicalIdx)
+                size_t kernelEventCount = 0;
+
+                for(size_t enqueueIdx = 0; enqueueIdx < startEvents->size(); ++enqueueIdx)
                 {
-                    auto const& iterationStarts = startEvents[logicalIdx];
-                    auto const& iterationStops  = stopEvents[logicalIdx];
+                    auto const& iterationStarts = startEvents[enqueueIdx];
+                    auto const& iterationStops  = stopEvents[enqueueIdx];
 
                     if(iterationStarts.empty() || iterationStops.empty())
                         throw std::runtime_error(
-                            "[BenchmarkTimer] Missing bench-like timing events for a sync window.");
+                            "[BenchmarkTimer] Missing precise timing events for a sync window.");
+                    if(iterationStarts.size() != iterationStops.size())
+                        throw std::runtime_error(
+                            "[BenchmarkTimer] Precise timing event count mismatch.");
 
-                    float eventMs = 0.0f;
-                    HIP_CHECK_EXC(hipEventElapsedTime(
-                        &eventMs, iterationStarts.front(), iterationStops.back()));
-                    totalTime += double_millis(eventMs);
-                    const double rawSampleUs
-                        = (static_cast<double>(eventMs) * 1000.0) / m_curNumEnqueuesPerSync;
-                    m_hotWindowTimeSamplesUS.push_back(rawSampleUs);
+                    for(size_t eventIdx = 0; eventIdx < iterationStarts.size(); ++eventIdx)
+                    {
+                        float eventMs = 0.0f;
+                        HIP_CHECK_EXC(hipEventElapsedTime(
+                            &eventMs, iterationStarts[eventIdx], iterationStops[eventIdx]));
+                        totalTime += double_millis(eventMs);
+                        ++kernelEventCount;
+                    }
                 }
+
+                if(kernelEventCount == 0)
+                    throw std::runtime_error(
+                        "[BenchmarkTimer] Precise GPU timing requires at least one kernel event pair.");
+
+                m_hotWindowTimeSamplesUS.push_back(double_micros(totalTime).count()
+                                                   / m_curNumEnqueuesPerSync);
             }
             else
             {
