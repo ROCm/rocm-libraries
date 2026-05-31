@@ -119,7 +119,7 @@ class TileSpec:
         return out
 
 
-Pipeline = Literal["mem", "compv3", "compv4"]
+Pipeline = Literal["mem", "compv3", "compv4", "wsp3"]
 Scheduler = Literal["intrawave", "interwave"]
 Epilogue = Literal["default", "cshuffle"]
 
@@ -740,6 +740,15 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     epilogue + 16x16x16 atom subset (see :func:`is_valid_spec`); the richer
     pipelines/epilogues remain CDNA-only until ported.
     """
+
+    # Warp-specialized producer/consumer 3-stage pipeline.
+    # Lives in a SEPARATE emitter (gemm_wsp3.py) and produces new kernel
+    # names, so the byte-identical golden gate over the existing
+    # mem/compv3/compv4 paths is untouched (no existing emission edited).
+    if spec.trait.pipeline == "wsp3":
+        from .gemm_wsp3 import build_wsp3_gemm
+
+        return build_wsp3_gemm(spec, arch=arch)
 
     ok, why = is_valid_spec(spec, arch=arch)
     if not ok:

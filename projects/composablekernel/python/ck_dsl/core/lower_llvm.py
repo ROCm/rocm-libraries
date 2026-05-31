@@ -2534,6 +2534,15 @@ class _Lowerer:
         self._current().emit(f"  call void @llvm.amdgcn.s.waitcnt(i32 {mask})")
         self._current().emit(" call void @llvm.amdgcn.s.barrier()")
 
+    def _op_tile_s_barrier_bare(self, op: Op) -> None:
+        # Bare full-CTA barrier: emit ONLY s_barrier, no implicit s_waitcnt.
+        # The caller is responsible for any preceding waitcnt (the wsp3
+        # producer/consumer loop issues s_waitcnt(vmcnt=0) explicitly so
+        # the producers' async LDS writes are drained but NOT serialized
+        # against the next iteration's in-flight loads).
+        self._need("s.barrier")
+        self._current().emit(" call void @llvm.amdgcn.s.barrier()")
+
     def _op_tile_sync_half_block(self, op: Op) -> None:
         # Half-block barrier: branch on the i32 selector; only the
         # ``then`` branch hits the s_barrier. This emits the AMDGPU pattern
