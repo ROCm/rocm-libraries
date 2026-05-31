@@ -96,15 +96,6 @@ class TestParserGlobAndFilters:
         )
         assert args.plugin_path == [Path("/plugins/a"), Path("/plugins/b")]
 
-    def test_compare_engines_default_false(self) -> None:
-        parser = create_parser()
-        args = parser.parse_args(["--graph", "g.json"])
-        assert args.compare_engines is False
-
-    def test_compare_engines_flag_sets_true(self) -> None:
-        parser = create_parser()
-        args = parser.parse_args(["--graph", "g.json", "--compare-engines"])
-        assert args.compare_engines is True
 
     def test_verbose_flag_default_false(self) -> None:
         """No -v / --verbose => args.verbose is False."""
@@ -233,7 +224,7 @@ class TestMainRouting:
 
     @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
     @patch("dnn_benchmarking.cli.suite_runner_cli.run_suite_benchmark")
-    def test_compare_and_plugin_paths_propagate_to_suite_config(
+    def test_plugin_paths_propagate_to_suite_config(
         self, mock_benchmark: MagicMock, mock_gpu: MagicMock
     ) -> None:
         mock_benchmark.return_value = 0
@@ -253,7 +244,6 @@ class TestMainRouting:
                     "2,1",
                     "--plugin-path",
                     "/plugins/b,/plugins/a",
-                    "--compare-engines",
                 ],
             ):
                 main()
@@ -261,7 +251,6 @@ class TestMainRouting:
         suite_config = mock_benchmark.call_args.kwargs["config"]
         assert suite_config.engine_filter == [2, 1]
         assert suite_config.plugin_paths == [Path("/plugins/b"), Path("/plugins/a")]
-        assert suite_config.compare_engines is True
 
     @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
     @patch("dnn_benchmarking.cli.suite_runner_cli.run_suite_benchmark")
@@ -285,7 +274,6 @@ class TestMainRouting:
                     "1,1",
                     "--plugin-path",
                     "/plugins/a,/plugins/b",
-                    "--compare-engines",
                 ],
             ):
                 main()
@@ -297,7 +285,6 @@ class TestMainRouting:
             Path("/plugins/a"),
             Path("/plugins/b"),
         ]
-        assert suite_config.compare_engines is True
 
     def test_plugin_path_count_mismatch_rejected_at_cli_layer(self) -> None:
         from dnn_benchmarking.cli.suite_runner_cli import run_suite_cli

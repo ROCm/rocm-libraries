@@ -13,7 +13,6 @@ from dnn_benchmarking.execution.suite_runner import (
     _resolve_engine_name,
     _get_reference_provider,
     _check_correctness,
-    _attach_engine_comparisons,
 )
 from dnn_benchmarking.config.benchmark_config import MetricsConfig, SuiteConfig
 from dnn_benchmarking.common.exceptions import ExecutionError, UnsupportedGraphError
@@ -773,55 +772,6 @@ class TestCheckCorrectnessOutputCount:
         assert "No output tensors to compare" in (result.error_message or "")
 
 
-class TestEngineComparisonDeltas:
-    """Tests for comparison deltas attached to engine rows."""
-
-    @staticmethod
-    def _stats(mean: float, median: float) -> BenchmarkStats:
-        return BenchmarkStats(
-            mean_ms=mean,
-            median_ms=median,
-            std_ms=0.0,
-            min_ms=mean,
-            max_ms=mean,
-            p95_ms=mean,
-            p99_ms=mean,
-        )
-
-    def test_first_success_is_baseline_and_all_four_deltas_are_set(self):
-        results = [
-            ProviderEngineResult(
-                provider="engine_2",
-                engine_id=2,
-                status="success",
-                gpu_kernel_stats=self._stats(mean=10.0, median=8.0),
-                e2e_stats=self._stats(mean=20.0, median=16.0),
-            ),
-            ProviderEngineResult(
-                provider="engine_1",
-                engine_id=1,
-                status="success",
-                gpu_kernel_stats=self._stats(mean=5.0, median=12.0),
-                e2e_stats=self._stats(mean=30.0, median=16.0),
-            ),
-        ]
-
-        _attach_engine_comparisons(results)
-
-        baseline = results[0].comparison
-        compared = results[1].comparison
-        assert baseline is not None
-        assert compared is not None
-        assert baseline.baseline_engine_id == 2
-        assert baseline.kernel_mean_delta_pct == 0.0
-        assert baseline.kernel_median_delta_pct == 0.0
-        assert baseline.e2e_mean_delta_pct == 0.0
-        assert baseline.e2e_median_delta_pct == 0.0
-        assert compared.baseline_engine_id == 2
-        assert compared.kernel_mean_delta_pct == -50.0
-        assert compared.kernel_median_delta_pct == 50.0
-        assert compared.e2e_mean_delta_pct == 50.0
-        assert compared.e2e_median_delta_pct == 0.0
 
 class TestResolveEngineName:
     """Tests for _resolve_engine_name fallback behavior."""

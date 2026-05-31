@@ -8,11 +8,7 @@ from pathlib import Path
 
 from dnn_benchmarking.config import BenchmarkConfig
 from dnn_benchmarking.reporting import BenchmarkStats, Reporter
-from dnn_benchmarking.reporting.suite_results import (
-    EngineComparison,
-    GraphResult,
-    ProviderEngineResult,
-)
+from dnn_benchmarking.reporting.suite_results import GraphResult, ProviderEngineResult
 
 
 class TestReporter:
@@ -173,7 +169,7 @@ class TestReporterEngineTable:
         assert "e2e_median_ms" in result
         assert "delta_pct" not in result
 
-    def test_print_graph_result_table_with_comparison_columns(self) -> None:
+    def test_print_graph_result_table_with_plugin_path_column(self) -> None:
         output = io.StringIO()
         reporter = Reporter(output=output)
         graph = GraphResult(
@@ -203,58 +199,14 @@ class TestReporterEngineTable:
                         p95_ms=2.2,
                         p99_ms=2.4,
                     ),
-                    comparison=EngineComparison(
-                        baseline_engine_id=2,
-                        kernel_mean_delta_pct=0.0,
-                        kernel_median_delta_pct=0.0,
-                        e2e_mean_delta_pct=0.0,
-                        e2e_median_delta_pct=0.0,
-                    ),
-                ),
-                ProviderEngineResult(
-                    provider="engine_1",
-                    engine_id=1,
-                    status="success",
-                    plugin_path="/plugins/a",
-                    gpu_kernel_stats=BenchmarkStats(
-                        mean_ms=1.25,
-                        median_ms=0.81,
-                        std_ms=0.1,
-                        min_ms=0.8,
-                        max_ms=1.4,
-                        p95_ms=1.3,
-                        p99_ms=1.4,
-                    ),
-                    e2e_stats=BenchmarkStats(
-                        mean_ms=1.5,
-                        median_ms=2.16,
-                        std_ms=0.2,
-                        min_ms=1.2,
-                        max_ms=2.4,
-                        p95_ms=2.2,
-                        p99_ms=2.4,
-                    ),
-                    comparison=EngineComparison(
-                        baseline_engine_id=2,
-                        kernel_mean_delta_pct=25.0,
-                        kernel_median_delta_pct=-10.0,
-                        e2e_mean_delta_pct=-25.0,
-                        e2e_median_delta_pct=20.0,
-                    ),
                 )
             ],
         )
 
-        reporter.print_graph_result_table(graph, compare_engines=True)
+        reporter.print_graph_result_table(graph)
 
         result = output.getvalue()
         assert "plugin_path" in result
-        assert "kernel_mean_delta_pct" in result
-        assert "kernel_median_delta_pct" in result
-        assert "e2e_mean_delta_pct" in result
-        assert "e2e_median_delta_pct" in result
-        assert "0.00%" in result
-        assert "25.00%" in result
-        assert "-10.00%" in result
-        assert "-25.00%" in result
-        assert "20.00%" in result
+        assert "/plugins/b" in result
+        assert "delta_pct" not in result
+        assert "%" not in result

@@ -63,7 +63,7 @@ Examples:
   dnn-benchmark --graph ./graphs/conv1_fwd.json --warmup 20 --iters 200
   dnn-benchmark -g ./graphs/conv1_fwd.json -e 1
   dnn-benchmark -g ./graphs/conv1_fwd.json -v        # verbose per-engine output
-  dnn-benchmark -g ./graphs/conv1_fwd.json -e 1,2 --compare-engines
+  dnn-benchmark -g ./graphs/conv1_fwd.json -e 1,2
 
 PyTorch Backend (GPU via PyTorch):
   dnn-benchmark -g ./graph.json --backend pytorch
@@ -74,8 +74,8 @@ Reference Validation:
   dnn-benchmark -g ./graph.json --validate pytorch --rtol 1e-3
 
 Engine Comparison:
-  dnn-benchmark -g ./graph.json --engine 1,2,3 --compare-engines
-  dnn-benchmark -g ./graph.json --engine 1,2 --plugin-path /path/pluginA,/path/pluginB --compare-engines
+  dnn-benchmark -g ./graph.json --engine 1,2,3
+  dnn-benchmark -g ./graph.json --engine 1,2 --plugin-path /path/pluginA,/path/pluginB
 
 Suite Mode (multiple graphs):
   dnn-benchmark -g graphs/                           # all .json/.tar.gz files in directory
@@ -168,18 +168,8 @@ Tarball Input:
         "(default: summary table)",
     )
 
-    # Comparison controls
-    comparison_group = parser.add_argument_group("Comparison")
-    comparison_group.add_argument(
-        "--compare-engines",
-        action="store_true",
-        default=False,
-        help=(
-            "Add per-engine comparison columns. The first engine selected by "
-            "--engine is the baseline; when --engine is omitted, the backend's "
-            "first ranked engine is the baseline."
-        ),
-    )
+    # Reference comparison tolerances
+    comparison_group = parser.add_argument_group("Reference Comparison")
     comparison_group.add_argument(
         "--rtol",
         type=float,

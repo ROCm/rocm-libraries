@@ -368,9 +368,7 @@ class Reporter:
         return "errored"
 
 
-    def print_graph_result_table(
-        self, graph_result: GraphResult, compare_engines: bool = False
-    ) -> None:
+    def print_graph_result_table(self, graph_result: GraphResult) -> None:
         """Render one compact summary row per engine for a graph."""
         if not graph_result.results:
             return
@@ -387,16 +385,6 @@ class Reporter:
                 "e2e_median_ms",
             ]
         )
-        if compare_engines:
-            headers.extend(
-                [
-                    "kernel_mean_delta_pct",
-                    "kernel_median_delta_pct",
-                    "e2e_mean_delta_pct",
-                    "e2e_median_delta_pct",
-                ]
-            )
-
         rows: List[List[str]] = []
         for pe in graph_result.results:
             row = [pe.provider, self._pe_status(pe)]
@@ -410,24 +398,6 @@ class Reporter:
                     self._fmt_stat(pe.e2e_stats, "median_ms"),
                 ]
             )
-            if compare_engines:
-                comparison = pe.comparison
-                row.extend(
-                    [
-                        self._fmt_pct(
-                            comparison.kernel_mean_delta_pct if comparison else None
-                        ),
-                        self._fmt_pct(
-                            comparison.kernel_median_delta_pct if comparison else None
-                        ),
-                        self._fmt_pct(
-                            comparison.e2e_mean_delta_pct if comparison else None
-                        ),
-                        self._fmt_pct(
-                            comparison.e2e_median_delta_pct if comparison else None
-                        ),
-                    ]
-                )
             rows.append(row)
 
         widths = [
@@ -461,11 +431,6 @@ class Reporter:
         value = getattr(stats, name)
         return f"{value:.3f}"
 
-    @staticmethod
-    def _fmt_pct(value: Optional[float]) -> str:
-        if value is None:
-            return "n/a"
-        return f"{value:.2f}%"
 
     def print_verbose_graph_result(
         self, graph_result: GraphResult, suite_config: SuiteConfig

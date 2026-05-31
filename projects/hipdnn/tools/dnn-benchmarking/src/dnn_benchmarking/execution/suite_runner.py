@@ -32,7 +32,6 @@ from ..reporting.reporter import Reporter
 from ..reporting.statistics import BenchmarkStats
 from ..reporting.suite_results import (
     CorrectnessResult,
-    EngineComparison,
     GraphResult,
     ProviderEngineResult,
 )
@@ -110,48 +109,6 @@ def _engine_setup_error_result(
             rtol=config.rtol, atol=config.atol, error_message=error_message
         ),
     )
-
-
-def _delta_pct(value: Optional[float], baseline: Optional[float]) -> Optional[float]:
-    """Return percent delta from baseline, or None when comparison is undefined."""
-    if value is None or baseline is None or baseline == 0:
-        return None
-    return (value - baseline) / baseline * 100.0
-
-
-def _attach_engine_comparisons(results: List[ProviderEngineResult]) -> None:
-    """Attach comparison deltas using the first successful engine as baseline."""
-    baseline = next((r for r in results if r.status == "success"), None)
-    if baseline is None:
-        return
-
-    baseline_kernel = baseline.gpu_kernel_stats
-    baseline_e2e = baseline.e2e_stats
-    baseline_kernel_mean = baseline_kernel.mean_ms if baseline_kernel else None
-    baseline_kernel_median = baseline_kernel.median_ms if baseline_kernel else None
-    baseline_e2e_mean = baseline_e2e.mean_ms if baseline_e2e else None
-    baseline_e2e_median = baseline_e2e.median_ms if baseline_e2e else None
-
-    for result in results:
-        if result.status != "success":
-            continue
-        kernel = result.gpu_kernel_stats
-        e2e = result.e2e_stats
-        result.comparison = EngineComparison(
-            baseline_engine_id=baseline.engine_id,
-            kernel_mean_delta_pct=_delta_pct(
-                kernel.mean_ms if kernel else None, baseline_kernel_mean
-            ),
-            kernel_median_delta_pct=_delta_pct(
-                kernel.median_ms if kernel else None, baseline_kernel_median
-            ),
-            e2e_mean_delta_pct=_delta_pct(
-                e2e.mean_ms if e2e else None, baseline_e2e_mean
-            ),
-            e2e_median_delta_pct=_delta_pct(
-                e2e.median_ms if e2e else None, baseline_e2e_median
-            ),
-        )
 
 
 def _get_reference_provider(
@@ -329,8 +286,7 @@ def run_graph_all_providers(
 
     if config.engine_filter is not None:
         # Explicit --engine is a selection, not a post-discovery filter. Keep the
-        # caller's order so comparison baselines and per-engine plugin paths are
-        # deterministic.
+        # caller's order so per-engine plugin paths are deterministic.
         engine_ids = list(config.engine_filter)
     else:
         # Discover engines via real backend heuristics. A discovery failure is a
@@ -483,8 +439,6 @@ def run_graph_all_providers(
             reporter.print_engine_result(pe_result)
         pe_results.append(pe_result)
 
-    if config.compare_engines:
-        _attach_engine_comparisons(pe_results)
 
     return GraphResult(
         graph_name=graph_name,

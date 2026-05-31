@@ -128,8 +128,6 @@ class TestSuiteConfigPluginPaths:
                 plugin_paths=[Path("/plugins/a"), Path("/plugins/b")],
             )
 
-    def test_compare_engines_default_false(self) -> None:
-        assert SuiteConfig().compare_engines is False
 
 
 class TestValidationConfig:

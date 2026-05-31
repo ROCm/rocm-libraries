@@ -156,9 +156,7 @@ def run_suite_benchmark(
         if config.verbose:
             reporter.print_verbose_graph_result(gr, config)
         else:
-            reporter.print_graph_result_table(
-                gr, compare_engines=getattr(config, "compare_engines", False)
-            )
+            reporter.print_graph_result_table(gr)
         graph_results.append(gr)
 
     suite_result = SuiteResult.from_graph_results(graph_results, total_graphs=total)
@@ -220,7 +218,6 @@ def run_suite_cli(
             verbose=args.verbose,
             metrics=metrics_config,
             plugin_paths=plugin_paths,
-            compare_engines=args.compare_engines,
         )
     except ValueError as e:
         reporter.print_error(f"Suite configuration error: {e}")

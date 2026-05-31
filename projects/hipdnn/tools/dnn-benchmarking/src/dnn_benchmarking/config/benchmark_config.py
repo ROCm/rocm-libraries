@@ -268,7 +268,6 @@ class SuiteConfig:
     # outside of the opt-in profiling path.
     plugin_path: Optional[Path] = None
     plugin_paths: Optional[List[Path]] = None
-    compare_engines: bool = False
 
     def __post_init__(self) -> None:
         """Validate configuration values."""
