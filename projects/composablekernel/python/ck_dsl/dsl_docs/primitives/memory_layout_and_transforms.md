@@ -3,7 +3,7 @@
 The DSL has two related but distinct memory-description layers. Use the transform DAG when the logical index space is not a simple linear layout. Use tensor views and tile windows when the access pattern is a regular tile over a known view. They can be bridged: transform descriptors can produce offsets and validity predicates consumed by loaders or views.
 
 ```text
-ck_dsl.transforms                  # algebraic coordinate-transform DAG over SSA values
+ck_dsl.helpers.transforms                  # algebraic coordinate-transform DAG over SSA values
 ck_dsl.helpers.tensor_view         # CK Tile-like TensorDescriptor / TensorView / TileWindow
 ck_dsl.helpers.distribution        # TileDistributionEncoding / StaticDistributedTensor
 ck_dsl.helpers.layouts             # LdsLayout, TransposeLdsReader

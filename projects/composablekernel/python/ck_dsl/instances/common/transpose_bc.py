@@ -153,6 +153,8 @@ from ...helpers.tensor_view import (
     make_tensor_coordinate,
     move_tensor_coordinate,
 )
+from ...helpers.transforms import TensorDescriptor as RichTensorDescriptor
+from ...helpers.transforms import unmerge_magic
 
 
 DType = Literal["f16", "bf16"]
@@ -309,6 +311,7 @@ def build_transpose_bc(spec: TransposeBcSpec, arch: str = "gfx950") -> KernelDef
     # number of lanes laid out along the N axis (a square wave64
     # requires ``LANES_M == LANES_N`` which the validator enforces).
     LANES_N = spec.lanes_per_row  # TN // VEC
+    LANES_M = spec.lanes_per_col  # TM // VEC
 
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = BS
@@ -350,15 +353,25 @@ def build_transpose_bc(spec: TransposeBcSpec, arch: str = "gfx950") -> KernelDef
         y_view = make_global_view(Y, shape=(1, 1), dtype=io_ty, strides=(M, 1))
 
     tid = b.thread_id_x()
-    c_lanes_n = b.const_i32(LANES_N)
     c_vec = b.const_i32(VEC)
 
     # Lane (lr, lc) inside the wave: lr = tid / LANES_N, lc = tid % LANES_N.
     # Lane (lr, lc) owns input X[block_m + lr*VEC + i, block_n + lc*VEC + j]
     # for i, j in 0..VEC-1, and writes the transposed tile
     # Y[block_n + lc*VEC + i, block_m + lr*VEC + j].
-    lr = b.div(tid, c_lanes_n)
-    lc = b.mod(tid, c_lanes_n)
+    #
+    # The wave's lanes form a row-major (LANES_M, LANES_N) grid; the flat
+    # ``tid`` -> (lr, lc) split is CK Tile's ``make_merge_transform``
+    # lowering (``merge_v2_magic_division``) phrased through the transform
+    # DAG rather than a hand-rolled div/mod. ``unmerge_magic`` emits the
+    # mul-hi magic-division sequence, which is byte-for-byte the same coord
+    # pair as ``tid // LANES_N`` / ``tid % LANES_N`` for every in-range lane.
+    _lane_desc = RichTensorDescriptor.naive(
+        "lane", lengths=[LANES_M, LANES_N], coord_names=["lr", "lc"]
+    ).transform(unmerge_magic("tid", ["lr", "lc"], dims=[LANES_M, LANES_N]))
+    _lane = _lane_desc.unmerge_lower(b, tid=tid)
+    lr = _lane["lr"]
+    lc = _lane["lc"]
 
     # Grid axis order: ``block_id_x`` -> N (columns), ``block_id_y`` -> M
     # (rows). This matches CK Tile's ``BatchedTransposeKernel::GridSize``

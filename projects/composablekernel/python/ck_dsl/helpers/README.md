@@ -37,7 +37,7 @@ ck_dsl/helpers/
 │ # Also: TensorCoordinate + move_tensor_coordinate
 │ # (incremental (index, offset) updates) and
 │ # view_from_transforms_descriptor (bridge to
-│ # ck_dsl.transforms).
+│ # ck_dsl.helpers.transforms).
 ├── distribution.py # TileDistributionEncoding + make_static_tile_distribution
 │ # (Rs/Hs/Ps/Ys mapping; v1 = no R, 1D-2D X, flexible P/Y).
 │ # StaticDistributedTensor: thread-local register
@@ -164,7 +164,7 @@ methods with the `mask=` OOB-sentinel idiom). Attention still
 intentionally uses raw IR for its per-warp `ds_bpermute` softmax
 butterfly; that pattern is not a memory access and so doesn't fit
 the `TensorView` surface. Attention addressing itself is now expressed
-through `ck_dsl.transforms` where it is a real coordinate problem:
+through `ck_dsl.helpers.transforms` where it is a real coordinate problem:
 Q/output descriptors, workspace descriptors, and paged-KV cache
 addressing through `indirect(...) + unmerge(...)`.
 
@@ -209,7 +209,7 @@ CK Tile parity (which C++ name maps to which Python helper):
 | `tile_window.set_window_origin(origin)` | `tile.move_to(*origin)` / `tile.shift_by(b, *deltas)` |
 | `tensor_coordinate<Desc>(idx)` | `make_tensor_coordinate(b, desc, idx)` |
 | `move_tensor_coordinate(desc, coord, step)` | `move_tensor_coordinate(b, coord, step)` |
-| `transform_tensor_descriptor(...)` + `make_*_transform` | `ck_dsl.transforms.TensorDescriptor.naive(...).transform(...)`; supports `pad`, `pad_dynamic`, `embed`, `merge`, `unmerge`, and `indirect`; wrap with `view_from_transforms_descriptor(ptr, rich_desc)` |
+| `transform_tensor_descriptor(...)` + `make_*_transform` | `ck_dsl.helpers.transforms.TensorDescriptor.naive(...).transform(...)`; supports `pad`, `pad_dynamic`, `embed`, `merge`, `unmerge`, and `indirect`; wrap with `view_from_transforms_descriptor(ptr, rich_desc)` |
 | `tile_distribution_encoding<Rs, Hs, Ps2RHs..., Ys2RHs...>` | `TileDistributionEncoding(Rs=..., Hs=..., Ps2RHs_major=..., Ps2RHs_minor=..., Ys2RHs_major=..., Ys2RHs_minor=...)` |
 | `make_static_tile_distribution(encoding)` | `make_static_tile_distribution(encoding)` |
 | `make_static_distributed_tensor<T, Distribution>()` | `make_static_distributed_tensor(distribution, dtype=...)` |

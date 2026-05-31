@@ -29,20 +29,64 @@ from __future__ import annotations
 
 from typing import Callable, List, Literal, Tuple
 
-from ..core.ir import IRBuilder, Value
+from ..core.ir import F32, I32, IRBuilder, Value
 
 
 __all__ = [
     "ReduceCombine",
+    "IndexCombine",
+    "REGISTER_TILE_MAX_ELEMS_PER_THREAD",
+    "row_norm_needs_two_pass",
     "block_lds_reduce",
     "block_lds_reduce_pair",
+    "block_lds_reduce_with_index",
     "block_lds_reduce_with_wave_prologue",
     "tree_reduce",
     "welford_block_reduce",
+    "welford_block_reduce_stable",
 ]
 
 
 ReduceCombine = Literal["sum", "max", "min", "prod"]
+IndexCombine = Literal["argmax", "argmin"]
+
+
+# Per-thread register-tile capacity for the row-norm family. The
+# single-pass norm kernels cache the whole row in the per-thread f32
+# register file so pass 2 (normalise / scale) never re-reads X from HBM;
+# that cache costs ``elems_per_thread`` VGPRs per lane, so it is bounded.
+# Legacy CK makes the same call through its ``isSweepOnce`` selector
+# (:file:`include/ck/tensor_operation/gpu/grid/normalization/
+# gridwise_normalization_selector.hpp:78,181-226`): a row whose K fits in
+# registers takes the one-pass ``SweepOnce`` kernel, anything wider takes
+# the streaming kernel that re-reads X for pass 2
+# (``gridwise_normalization_welford_variance.hpp:311`` vs ``:427``).
+#
+# 64 mirrors the ``max_elems_per_thread=64`` cap the row-norm
+# ``is_valid_spec`` predicates already enforce for the cached path.
+REGISTER_TILE_MAX_ELEMS_PER_THREAD = 64
+
+
+def row_norm_needs_two_pass(
+    elems_per_thread: int,
+    *,
+    max_cached: int = REGISTER_TILE_MAX_ELEMS_PER_THREAD,
+) -> bool:
+    """Select the streaming two-pass row-norm path at BUILD time.
+
+    Returns ``True`` when ``elems_per_thread`` exceeds the per-thread
+    register-tile capacity ``max_cached`` (so caching the whole row in
+    VGPRs would overflow the budget) and the kernel must re-stream X from
+    HBM in pass 2 instead — the DSL analogue of legacy CK's
+    ``isSweepOnce`` selection. Returns ``False`` for rows that fit, which
+    keeps the cached single-pass path (byte-identical IR) as the default
+    for every in-budget config.
+
+    Shared by :mod:`ck_dsl.instances.common.layernorm2d` and
+    :mod:`ck_dsl.instances.common.rmsnorm2d` so the single-vs-two-pass
+    cutover is defined in exactly one place.
+    """
+    return elems_per_thread > max_cached
 
 
 def _emit_combine(b: IRBuilder, combine: ReduceCombine, a: Value, c: Value) -> Value:
@@ -362,3 +406,224 @@ def welford_block_reduce(
     sq_mean = b.fmul(total_sumsq, inv_n)
     var = b.fsub(sq_mean, b.fmul(mean, mean))
     return mean, var
+
+
+def welford_block_reduce_stable(
+    b: IRBuilder,
+    mean_val: Value,
+    m2_val: Value,
+    count_val: Value,
+    lds_mean: Value,
+    lds_m2: Value,
+    lds_count: Value,
+    tid: Value,
+    *,
+    block_size: int,
+) -> Tuple[Value, Value]:
+    """Numerically-stable Welford block reduction over the full triple.
+
+    This is the count-weighted ``(mean, M2, count)`` parallel merge from
+    legacy CK's ``BlockwiseWelford::Merge``
+    (:file:`include/ck/tensor_operation/gpu/block/blockwise_welford.hpp`
+    lines 40-48) and ``ThreadwiseWelfordMerge::Merge``
+    (:file:`include/ck/tensor_operation/gpu/thread/threadwise_welford.hpp`
+    lines 90-100). Unlike :func:`welford_block_reduce` (which falls back
+    to the unstable ``var = E[X²] − E[X]²`` two-pass shape), this carries
+    the real Welford triple so there is no catastrophic cancellation when
+    ``|mean| ≫ σ`` — the post-residual activations LayerNorm sees in
+    transformer blocks.
+
+    Each thread supplies its *own partial* Welford triple:
+
+    * ``mean_val``  — f32 mean of this thread's elements,
+    * ``m2_val``    — f32 sum-of-squared-deviations (M2 = Σ(x−mean)²),
+    * ``count_val`` — f32 number of elements this thread accumulated
+      (passed as an f32 :class:`Value`; partial threads may carry a
+      different count, exactly as the reference's per-lane ``count``).
+
+    The merge of two partials ``a``/``b`` (CK ``Merge``) is::
+
+        count            = count_a + count_b
+        count_b_over_cnt = count_b / count            (0 when count == 0)
+        delta            = mean_b - mean_a
+        mean_a          += delta * count_b_over_cnt
+        M2_a            += M2_b + delta*delta * count_a * count_b_over_cnt
+        count_a          = count
+
+    Because this combiner is *not* a plain associative add, it cannot
+    ride the generic ``combine=`` path of :func:`block_lds_reduce`; it
+    needs a dedicated three-channel (mean / M2 / count) LDS tree, which
+    is what this helper emits. The tree mirrors the halving schedule of
+    :func:`block_lds_reduce` (``block_size`` → 1) so the barrier count is
+    identical to the value-only reduction.
+
+    Returns ``(mean_block, var_block)`` broadcast to every lane, where
+    ``var_block = M2_total / count_total`` — the ``GetActualVariance``
+    divide at ``blockwise_welford.hpp:104-107``. The caller can use a
+    biased (population) variance directly or rescale to the unbiased
+    form; the reference returns the biased ``M2 / count``.
+
+    The caller owns ``lds_mean`` / ``lds_m2`` / ``lds_count`` — three
+    ``block_size``-wide f32 LDS allocations (``count`` is stored in f32,
+    matching the reference's ``T count_b_over_count`` f32 divide).
+    """
+    if mean_val.type.name != "f32":
+        raise ValueError("welford_block_reduce_stable expects f32 mean_val")
+    if m2_val.type.name != "f32":
+        raise ValueError("welford_block_reduce_stable expects f32 m2_val")
+    if count_val.type.name != "f32":
+        raise ValueError("welford_block_reduce_stable expects f32 count_val")
+
+    b.smem_store_vN_f32(lds_mean, [tid], mean_val, 1)
+    b.smem_store_vN_f32(lds_m2, [tid], m2_val, 1)
+    b.smem_store_vN_f32(lds_count, [tid], count_val, 1)
+    b.sync()
+
+    zero = b.const_f32(0.0)
+
+    n = block_size
+    while n > 1:
+        half = n // 2
+        c_half = b.const_i32(half)
+        in_first = b.cmp_lt(tid, c_half)
+        with b.scf_if(in_first):
+            j = b.add(tid, c_half)
+            mean_a = b.vec_extract(b.smem_load_vN_f32(lds_mean, tid, n=1), 0)
+            m2_a = b.vec_extract(b.smem_load_vN_f32(lds_m2, tid, n=1), 0)
+            cnt_a = b.vec_extract(b.smem_load_vN_f32(lds_count, tid, n=1), 0)
+            mean_b = b.vec_extract(b.smem_load_vN_f32(lds_mean, j, n=1), 0)
+            m2_b = b.vec_extract(b.smem_load_vN_f32(lds_m2, j, n=1), 0)
+            cnt_b = b.vec_extract(b.smem_load_vN_f32(lds_count, j, n=1), 0)
+
+            # count = count_a + count_b
+            count = b.fadd(cnt_a, cnt_b)
+            # count_b_over_count = count == 0 ? 0 : count_b / count
+            is_empty = b.fcmp("oeq", count, zero)
+            ratio = b.fmul(cnt_b, b.rcp(count))
+            count_b_over_count = b.select(is_empty, zero, ratio)
+            # delta = mean_b - mean_a
+            delta = b.fsub(mean_b, mean_a)
+            # mean_a += delta * count_b_over_count
+            new_mean = b.fadd(mean_a, b.fmul(delta, count_b_over_count))
+            # M2_a += M2_b + delta*delta * count_a * count_b_over_count
+            dd = b.fmul(delta, delta)
+            cross = b.fmul(b.fmul(dd, cnt_a), count_b_over_count)
+            new_m2 = b.fadd(m2_a, b.fadd(m2_b, cross))
+
+            b.smem_store_vN_f32(lds_mean, [tid], new_mean, 1)
+            b.smem_store_vN_f32(lds_m2, [tid], new_m2, 1)
+            b.smem_store_vN_f32(lds_count, [tid], count, 1)
+        b.sync()
+        n = half
+
+    mean_out = b.vec_extract(b.smem_load_vN_f32(lds_mean, b.const_i32(0), n=1), 0)
+    m2_out = b.vec_extract(b.smem_load_vN_f32(lds_m2, b.const_i32(0), n=1), 0)
+    count_out = b.vec_extract(b.smem_load_vN_f32(lds_count, b.const_i32(0), n=1), 0)
+    var_out = b.fmul(m2_out, b.rcp(count_out))
+    return mean_out, var_out
+
+
+def block_lds_reduce_with_index(
+    b: IRBuilder,
+    val: Value,
+    idx: Value,
+    lds_val: Value,
+    lds_idx: Value,
+    tid: Value,
+    *,
+    block_size: int,
+    combine: IndexCombine = "argmax",
+) -> Tuple[Value, Value]:
+    """LDS tree reduction carrying both value and index (argmax / argmin).
+
+    Mirrors legacy CK's
+    ``PartitionedBlockwiseReductionWithIndex::Reduce``
+    (:file:`include/ck/tensor_operation/gpu/block/reduction_functions_blockwise.hpp`
+    lines 164-242) with the ``AccumulateWithIndexAndNanCheck<false, …>``
+    combiner
+    (:file:`include/ck/utility/reduction_functions_accumulate.hpp`
+    lines 67-84): the index is overwritten **only on a strict
+    improvement** (the ``changed`` flag of the indexable Max/Min
+    operator, ``reduction_operator.hpp:233-245``). That makes the
+    tie-break deterministic — on equal values the *lower* index wins,
+    because the accumulator is always the lower-offset slot and the
+    higher-offset value only displaces it when strictly better.
+
+    Each thread supplies its per-thread partial ``val`` (f32) and the
+    candidate ``idx`` (i32, e.g. the column the partial came from). The
+    reduced ``(value, index)`` pair is broadcast back to every lane.
+
+    The twin LDS transfer stores the i32 index into an f32-typed LDS
+    buffer via :meth:`IRBuilder.bitcast` (i32 → f32 is a no-op
+    reinterpret of the 32 bits), matching the reference's parallel
+    ``work_val_buffer`` / ``work_idx_buffer`` pair. The caller owns both
+    ``lds_val`` / ``lds_idx`` (``block_size``-wide f32 LDS each).
+
+    NaN policy is the non-propagating ``false`` arm (no NaN check); a NaN
+    candidate never sets ``changed`` so it is effectively ignored, which
+    is the legacy default for the no-NaN-check selector.
+    """
+    if combine not in ("argmax", "argmin"):
+        raise ValueError(
+            f"unknown index combine {combine!r}; expected 'argmax' or 'argmin'"
+        )
+    if val.type.name != "f32":
+        raise ValueError("block_lds_reduce_with_index expects f32 val")
+    if idx.type.name != "i32":
+        raise ValueError("block_lds_reduce_with_index expects i32 idx")
+
+    if block_size & (block_size - 1):
+        raise ValueError(
+            f"block_lds_reduce_with_index needs power-of-two block_size, got {block_size}"
+        )
+
+    b.smem_store_vN_f32(lds_val, [tid], val, 1)
+    b.smem_store_vN_f32(lds_idx, [tid], b.bitcast(idx, F32), 1)
+    b.sync()
+
+    # CK doubling tree (reduction_functions_blockwise.hpp:215-235):
+    # ``indOffset = 1 << I`` and only lanes with
+    # ``tid % (indOffset*2) == 0`` merge slot ``tid`` (accumulator, the
+    # lower offset) with slot ``tid + indOffset`` (candidate). This is
+    # deliberately NOT the power-of-two halving the value-only tree uses
+    # (block_lds_reduce): the accumulator always sits at the lower
+    # original index, so the strict-improvement tie-break resolves ties
+    # to the LOWEST index, matching numpy.argmax / numpy.argmin. A naive
+    # halving tree gives a non-deterministic argmax under ties.
+    cluster_len_shift = block_size.bit_length() - 1
+    for shift in range(cluster_len_shift):
+        ind_offset = 1 << shift
+        c_off = b.const_i32(ind_offset)
+        c_mod = b.const_i32(ind_offset * 2)
+        participates = b.cmp_eq(b.mod(tid, c_mod), b.const_i32(0))
+        with b.scf_if(participates):
+            j = b.add(tid, c_off)
+            v_a = b.vec_extract(b.smem_load_vN_f32(lds_val, tid, n=1), 0)
+            v_b = b.vec_extract(b.smem_load_vN_f32(lds_val, j, n=1), 0)
+            i_a = b.bitcast(
+                b.vec_extract(b.smem_load_vN_f32(lds_idx, tid, n=1), 0), I32
+            )
+            i_b = b.bitcast(b.vec_extract(b.smem_load_vN_f32(lds_idx, j, n=1), 0), I32)
+
+            # strict-improvement test (the `changed` flag of the
+            # indexable Max/Min operator, reduction_operator.hpp:233-245).
+            # argmax: changed when a < b; argmin: changed when a > b.
+            # Ties never change -> the lower-offset accumulator (lower
+            # original index) is retained.
+            if combine == "argmax":
+                changed = b.fcmp("olt", v_a, v_b)
+            else:
+                changed = b.fcmp("ogt", v_a, v_b)
+
+            new_val = b.select(changed, v_b, v_a)
+            new_idx = b.select(changed, i_b, i_a)
+
+            b.smem_store_vN_f32(lds_val, [tid], new_val, 1)
+            b.smem_store_vN_f32(lds_idx, [tid], b.bitcast(new_idx, F32), 1)
+        b.sync()
+
+    out_val = b.vec_extract(b.smem_load_vN_f32(lds_val, b.const_i32(0), n=1), 0)
+    out_idx = b.bitcast(
+        b.vec_extract(b.smem_load_vN_f32(lds_idx, b.const_i32(0), n=1), 0), I32
+    )
+    return out_val, out_idx

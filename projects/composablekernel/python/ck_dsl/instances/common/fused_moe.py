@@ -67,6 +67,11 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Literal, Mapping, Tuple
 
 from ...core.ir import F32, I32, IRBuilder, KernelDef, PtrType
+from ...helpers.distribution import (
+    TileDistributionEncoding,
+    make_static_distributed_tensor,
+    make_static_tile_distribution,
+)
 from ...helpers.gather_scatter import (
     load_sorted_token_id,
     load_sorted_topk_weight,
@@ -76,6 +81,7 @@ from ...helpers.spec import (
     SignatureBuilder,
     kernel_name_join,
 )
+from ...helpers.tensor_view import make_global_view, make_tile_window
 
 
 def _resolve_launch_arch(arch: "str | None") -> str:
@@ -122,6 +128,35 @@ def _effective_vec(spec_vec: int, block_size: int, n: int) -> int:
     while ev > 1 and (n % (block_size * ev) != 0):
         ev //= 2
     return ev
+
+
+def _chunk_distribution(block_size: int, vec: int):
+    """CK Tile distribution of one ``block_size * vec`` interleaved chunk.
+
+    The MoE streaming kernels process one row per CTA over
+    ``chunks = EPT // VEC`` consecutive ``block_size * vec`` slabs of the
+    row. Each slab is the same fast tile the elementwise instance uses: a
+    single 1D X dim split as ``Hs = ((block_size, vec),)`` with
+
+      * level 0 (``block_size``) the lane axis -> P0
+      * level 1 (``vec``)        the per-thread vector -> Y0
+
+    so ``calculate_x`` reconstructs the in-chunk column ``tid*vec + y`` --
+    exactly the ``k*BS*VEC + tid*VEC + i`` decode the hand-rolled chunk
+    loop emits, now expressed through ``TileDistribution`` +
+    ``StaticDistributedTensor`` (the same surface ``elementwise.py``
+    drives). One ``load_tile`` / ``store_tile`` per chunk from a window
+    anchored at ``row_base + k*BS*VEC`` keeps the emitted addresses
+    identical.
+    """
+    encoding = TileDistributionEncoding(
+        Hs=((block_size, vec),),
+        Ps2RHs_major=((1,),),
+        Ps2RHs_minor=((0,),),
+        Ys2RHs_major=(1,),
+        Ys2RHs_minor=(1,),
+    )
+    return make_static_tile_distribution(encoding)
 
 
 def _silu_mul_f32(b, g, u, *, one_f32, c_neg_log2e):
@@ -488,31 +523,52 @@ def build_moe_silu_mul(spec: FusedMoeSpec) -> KernelDef:
     c_vec = b.const_i32(VEC)
 
     chunks = EPT // VEC
-    for k in range(chunks):
-        i_col = b.add(b.const_i32(k * BS * VEC), b.mul(tid, c_vec))
-        off = b.add(row_base, i_col)
-        if VEC == 1:
+    if VEC == 1:
+        # Fallback for shapes where BS * 2 > intermediate: scalar
+        # load / op / store per column (LoadStoreTraits would also
+        # pick scalar here, but the inline path avoids the tile
+        # plumbing on a degenerate vec width).
+        for k in range(chunks):
+            i_col = b.add(b.const_i32(k * BS * VEC), b.mul(tid, c_vec))
+            off = b.add(row_base, i_col)
             g = load_scalar_as_f32(b, GateOut, off, dtype=dtype)
             u = load_scalar_as_f32(b, UpOut, off, dtype=dtype)
             h = _silu_mul_f32(b, g, u, one_f32=one_f32, c_neg_log2e=c_neg_log2e)
             store_scalar_from_f32(b, Hidden, off, h, dtype=dtype)
-        else:
-            g_vec = b.global_load_vN(GateOut, off, ty, VEC)
-            u_vec = b.global_load_vN(UpOut, off, ty, VEC)
-            h_scalars = []
-            for i in range(VEC):
-                g = b.cast_to_f32(b.vec_extract(g_vec, i))
-                u = b.cast_to_f32(b.vec_extract(u_vec, i))
-                h_scalars.append(
-                    b.cast_f32_to(
-                        _silu_mul_f32(
-                            b, g, u, one_f32=one_f32, c_neg_log2e=c_neg_log2e
-                        ),
-                        ty,
-                    )
-                )
-            h_packed = b.vec_pack(h_scalars, ty)
-            b.global_store_vN(Hidden, off, h_packed, VEC)
+        return b.kernel
+
+    # CK Tile distribution path: one (BS, VEC) chunk per load_tile /
+    # store_tile, the lane P feeding level 0 of the H decomposition.
+    distribution = _chunk_distribution(BS, VEC)
+    chunk_elems = BS * VEC
+    gate_view = make_global_view(GateOut, shape=(chunk_elems,), dtype=ty)
+    up_view = make_global_view(UpOut, shape=(chunk_elems,), dtype=ty)
+    out_view = make_global_view(Hidden, shape=(chunk_elems,), dtype=ty)
+    ps = [[tid]]
+    for k in range(chunks):
+        chunk_origin = (b.add(row_base, b.const_i32(k * BS * VEC)),)
+        gate_tile = make_tile_window(
+            gate_view, lengths=(chunk_elems,), origin=chunk_origin
+        )
+        up_tile = make_tile_window(up_view, lengths=(chunk_elems,), origin=chunk_origin)
+        out_tile = make_tile_window(
+            out_view, lengths=(chunk_elems,), origin=chunk_origin
+        )
+        g_dt = gate_tile.load(b, distribution=distribution, ps=ps)
+        u_dt = up_tile.load(b, distribution=distribution, ps=ps)
+        out_dt = make_static_distributed_tensor(distribution, dtype=ty)
+        for y in distribution.iterate_ys():
+            out_dt.set(
+                y,
+                _silu_mul_f32(
+                    b,
+                    g_dt.get(y),
+                    u_dt.get(y),
+                    one_f32=one_f32,
+                    c_neg_log2e=c_neg_log2e,
+                ),
+            )
+        out_tile.store(b, out_dt, ps=ps)
 
     return b.kernel
 
@@ -599,33 +655,55 @@ def build_moe_silu_mul_packed(spec: FusedMoeSpec) -> KernelDef:
     # both reads into one ``s_load_dwordx{N}`` + a pair of paired
     # VMEM transactions.
     chunks = EPT // VEC
-    for k in range(chunks):
-        i_col = b.add(b.const_i32(k * BS * VEC), b.mul(tid, c_vec))
-        g_off = b.add(gate_base, i_col)
-        u_off = b.add(up_base, i_col)
-        o_off = b.add(out_base, i_col)
-        if VEC == 1:
+    if VEC == 1:
+        # Scalar fallback (BS * 2 > intermediate): read gate / up from
+        # their fixed-offset slabs of the packed buffer per column.
+        for k in range(chunks):
+            i_col = b.add(b.const_i32(k * BS * VEC), b.mul(tid, c_vec))
+            g_off = b.add(gate_base, i_col)
+            u_off = b.add(up_base, i_col)
+            o_off = b.add(out_base, i_col)
             g = load_scalar_as_f32(b, GateUp, g_off, dtype=dtype)
             u = load_scalar_as_f32(b, GateUp, u_off, dtype=dtype)
             h = _silu_mul_f32(b, g, u, one_f32=one_f32, c_neg_log2e=c_neg_log2e)
             store_scalar_from_f32(b, Hidden, o_off, h, dtype=dtype)
-        else:
-            g_vec = b.global_load_vN(GateUp, g_off, ty, VEC)
-            u_vec = b.global_load_vN(GateUp, u_off, ty, VEC)
-            h_scalars = []
-            for i in range(VEC):
-                g = b.cast_to_f32(b.vec_extract(g_vec, i))
-                u = b.cast_to_f32(b.vec_extract(u_vec, i))
-                h_scalars.append(
-                    b.cast_f32_to(
-                        _silu_mul_f32(
-                            b, g, u, one_f32=one_f32, c_neg_log2e=c_neg_log2e
-                        ),
-                        ty,
-                    )
-                )
-            h_packed = b.vec_pack(h_scalars, ty)
-            b.global_store_vN(Hidden, o_off, h_packed, VEC)
+        return b.kernel
+
+    # CK Tile distribution path: gate and up windows index the same
+    # GateUp view at the two G1U1 slab origins (gate_base, up_base);
+    # one load_tile per slab per chunk, one store_tile into Hidden.
+    distribution = _chunk_distribution(BS, VEC)
+    chunk_elems = BS * VEC
+    gateup_view = make_global_view(GateUp, shape=(chunk_elems,), dtype=ty)
+    out_view = make_global_view(Hidden, shape=(chunk_elems,), dtype=ty)
+    ps = [[tid]]
+    for k in range(chunks):
+        col_off = b.const_i32(k * BS * VEC)
+        gate_origin = (b.add(gate_base, col_off),)
+        up_origin = (b.add(up_base, col_off),)
+        out_origin = (b.add(out_base, col_off),)
+        gate_tile = make_tile_window(
+            gateup_view, lengths=(chunk_elems,), origin=gate_origin
+        )
+        up_tile = make_tile_window(
+            gateup_view, lengths=(chunk_elems,), origin=up_origin
+        )
+        out_tile = make_tile_window(out_view, lengths=(chunk_elems,), origin=out_origin)
+        g_dt = gate_tile.load(b, distribution=distribution, ps=ps)
+        u_dt = up_tile.load(b, distribution=distribution, ps=ps)
+        out_dt = make_static_distributed_tensor(distribution, dtype=ty)
+        for y in distribution.iterate_ys():
+            out_dt.set(
+                y,
+                _silu_mul_f32(
+                    b,
+                    g_dt.get(y),
+                    u_dt.get(y),
+                    one_f32=one_f32,
+                    c_neg_log2e=c_neg_log2e,
+                ),
+            )
+        out_tile.store(b, out_dt, ps=ps)
 
     return b.kernel
 

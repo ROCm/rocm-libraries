@@ -44,7 +44,15 @@ from dataclasses import dataclass
 from typing import Literal, Tuple
 
 from ...core.ir import F16, I32, IRBuilder, KernelDef, PtrType
+from ...helpers.distribution import (
+    TileDistributionEncoding,
+    load_tile,
+    make_load_store_traits,
+    make_static_tile_distribution,
+)
 from ...helpers.spec import SignatureBuilder, ceil_div_grid, kernel_name_join
+from ...helpers.tensor_view import make_buffer_resource, view_from_transforms_descriptor
+from ...helpers.transforms import TensorDescriptor, unmerge_magic
 from .conv_implicit_gemm import ConvProblem, make_a_descriptor
 
 
@@ -193,54 +201,113 @@ def build_img2col(spec: Img2ColSpec, arch: str = "gfx950") -> KernelDef:
     # Per-thread decomposition: tid -> (m_local, k_chunk_local). Each
     # thread owns one (m, k_base..k_base+V-1) chunk along K. With
     # cols_per_row = block_tile_k // V, the chunks tile the block in
-    # row-major (m, k_chunk) order.
+    # row-major (m, k_chunk) order. This is the block tile's
+    # ``tile_distribution`` decode -- CK Tile's img2col
+    # ``MakeBlockTileDistribution`` (``image_to_column_kernel.hpp:158``)
+    # splits the flat thread id into (M, K) sub-coords. We express it as
+    # a ``merge((block_tile_m, cols_per_row))`` whose inverse is the
+    # default magic-division unmerge (``merge_v2_magic_division`` ->
+    # :class:`UnmergeMagicDiv`), so the per-thread div/mod becomes the
+    # mul-hi sequence the backend would otherwise have to synthesise.
     cols_per_row = spec.block_tile_k // V
-    c_cols_per_row = b.const_i32(cols_per_row)
     c_V = b.const_i32(V)
 
     tid = b.thread_id_x()
-    m_local = b.div(tid, c_cols_per_row)
-    k_chunk_local = b.mod(tid, c_cols_per_row)
+    tid_unmerge_desc = TensorDescriptor.naive(
+        "img2col_tid",
+        lengths=[spec.block_tile_m, cols_per_row],
+        dtype=F16,
+        coord_names=["m_local", "k_chunk_local"],
+    ).transform(
+        unmerge_magic(
+            "tid",
+            into=["m_local", "k_chunk_local"],
+            dims=[spec.block_tile_m, cols_per_row],
+        ),
+    )
+    decoded = tid_unmerge_desc.unmerge_lower(b, tid=tid)
+    m_local = decoded["m_local"]
+    k_chunk_local = decoded["k_chunk_local"]
     k_local_base = b.mul(k_chunk_local, c_V) if V > 1 else k_chunk_local
     m_val = b.add(b.mul(b.block_id_y(), c_block_m), m_local)
     k_val_base = b.add(b.mul(b.block_id_x(), c_block_k), k_local_base)
 
-    x_rsrc = b.buffer_rsrc(X, X_bytes)
     y_rsrc = b.buffer_rsrc(Y, Y_bytes)
 
-    # Input load. Two paths:
+    # Input load via CK Tile ``load_tile`` + a 2D tile_distribution over the
+    # ``(block_tile_m, block_tile_k)`` block (A6 idiom #2 load side). This is
+    # the DSL counterpart of ``image_to_column_kernel.hpp::
+    # MakeBlockTileDistribution`` (`:158`) feeding the body's bare
+    # ``load_tile(image_tile)`` (`:203`): the thread's ``(m_local,
+    # k_chunk_local)`` partition (computed above by the unmerge_magic decode,
+    # i.e. the distribution's lane->partition index) drives ``P``, and the
+    # ``V``-wide K vector is the single ``Y`` dim.
     #
-    # (a) ``can_vector_load`` (C % V == 0, V > 1): the V K-slots of this
-    #     chunk live in one NHWC ``(r, s, c0..c0+V-1)`` block, so the
-    #     leading offset from ``A_desc.offset(m, k_base)`` is the start
-    #     of V contiguous halves and one ``buffer_load_vN_f16`` covers
-    #     the chunk. Validity is uniform across the chunk (same h, w
-    #     pad mask + same r/s indices), so the single ``valid`` from
-    #     the descriptor is the right OOB-routing predicate.
+    # The input window is the conv address-transform descriptor wrapped as a
+    # buffer ``TensorView`` (``view_from_transforms_descriptor`` over
+    # ``A_desc``), so ``window.view.desc.offset((m, k))`` reproduces the same
+    # implicit-GEMM NHWC offset the hand-rolled ``A_desc.offset`` produced.
+    # The padded / out-of-image K-tail zero-fill is driven by ``mask_fn``:
+    # it re-derives the descriptor's ``valid`` predicate and routes masked
+    # lanes through the buffer-OOB-zero path (INT32_MAX byte offset) -- the
+    # ``pad_tensor_view(..., sequence<false, true>)`` tail idiom, with
+    # identical buffer-OOB zero semantics to the previous explicit sentinel.
     #
-    # (b) Scalar fallback: V independent ``A_desc.offset(m, k_base+i)``
-    #     queries, V scalar buffer loads (each with its own OOB
-    #     routing), packed into a ``<V x f16>`` vector for the wide
-    #     store. This handles ``C`` not divisible by V and the
-    #     ``V == 1`` recovery case.
-    if V == 1:
-        offset, valid = A_desc.offset(b, m=m_val, k=k_val_base)
-        off_bytes = b.mul(offset, c_half_bytes)
-        safe_in_off = (
-            b.select(valid, off_bytes, oob_sentinel) if valid is not None else off_bytes
+    # Load shape (a) -- ``can_vector_load`` (C % V == 0) or ``V == 1``: the V
+    # K-slots share one NHWC ``(r, s, c0..c0+V-1)`` block and one uniform
+    # ``valid``, so the distribution keeps a single ``V``-wide masked vector
+    # load (one ``buffer_load_vN_f16``). The K-tail / padding zero-fill comes
+    # from ``mask_fn`` (descriptor ``valid`` -> buffer OOB-zero).
+    #
+    # Load shape (b) -- ``V > 1`` but ``C % V != 0``: the V K-slots are *not*
+    # contiguous in NHWC (they straddle an ``(r, s)`` boundary), so they are a
+    # genuine non-contiguous gather rather than a vector load. ``load_tile``
+    # models contiguous vector accesses, so this fallback keeps the
+    # per-element ``A_desc.offset(m, k_base+i)`` gather + ``vec_pack`` (still
+    # followed by one wide store below), with the same buffer-OOB sentinel
+    # zero-fill semantics.
+    x_rsrc_view = make_buffer_resource(b, X, num_bytes=X_bytes)
+    if V == 1 or spec.can_vector_load:
+        in_view = view_from_transforms_descriptor(
+            x_rsrc_view, A_desc, addr_space="buffer", coord_order=["m", "k"]
         )
-        loaded = b.buffer_load_f16(x_rsrc, safe_in_off, c0)
-    elif spec.can_vector_load:
-        offset, valid = A_desc.offset(b, m=m_val, k=k_val_base)
-        off_bytes = b.mul(offset, c_half_bytes)
-        safe_in_off = (
-            b.select(valid, off_bytes, oob_sentinel) if valid is not None else off_bytes
+        in_enc = TileDistributionEncoding(
+            Hs=((spec.block_tile_m,), (cols_per_row, V)),
+            Ps2RHs_major=((1, 2),),
+            Ps2RHs_minor=((0, 0),),
+            Ys2RHs_major=(2,),
+            Ys2RHs_minor=(1,),
         )
-        loaded = b.buffer_load_vN_f16(x_rsrc, safe_in_off, c0, dwords=V // 2)
+        in_dist = make_static_tile_distribution(in_enc)
+        m_base = b.mul(b.block_id_y(), c_block_m)
+        k_base = b.mul(b.block_id_x(), c_block_k)
+        in_window = in_view.tile(
+            lengths=[spec.block_tile_m, spec.block_tile_k], origin=[m_base, k_base]
+        )
+
+        def _conv_valid(bb, glob):
+            # ``glob`` is (m, k) in the GEMM index space; re-derive the conv
+            # descriptor's in-bounds predicate so the OOB / padding zone
+            # routes to the buffer zero-fill. ``valid is None`` (no boundary
+            # check) means always-in-bounds.
+            _off, valid = A_desc.offset(bb, m=glob[0], k=glob[1])
+            return valid if valid is not None else bb.cmp_eq(c0, c0)
+
+        in_traits = make_load_store_traits(in_dist, max_vec=V)
+        in_dt = load_tile(
+            b,
+            in_window,
+            distribution=in_dist,
+            ps=[[m_local, k_chunk_local]],
+            traits=in_traits,
+            mask_fn=_conv_valid,
+        )
+        # Reassemble the per-thread V-wide chunk (f32 -> f16) for the store.
+        halves = [b.cast_f32_to(in_dt.get([i]), F16) for i in range(V)]
+        loaded = halves[0] if V == 1 else b.vec_pack(halves, F16)
     else:
-        # V > 1 but C % V != 0: fall back to per-element scalar gather.
-        # We still get a wide store, just not a wide load.
-        halves: list = []
+        x_rsrc = x_rsrc_view.rsrc
+        gathered: list = []
         for i in range(V):
             k_i = k_val_base if i == 0 else b.add(k_val_base, b.const_i32(i))
             off_i, valid_i = A_desc.offset(b, m=m_val, k=k_i)
@@ -250,8 +317,8 @@ def build_img2col(spec: Img2ColSpec, arch: str = "gfx950") -> KernelDef:
                 if valid_i is not None
                 else off_i_bytes
             )
-            halves.append(b.buffer_load_f16(x_rsrc, safe_i, c0))
-        loaded = b.vec_pack(halves, F16)
+            gathered.append(b.buffer_load_f16(x_rsrc, safe_i, c0))
+        loaded = b.vec_pack(gathered, F16)
 
     # Output store: row-major ``[M, K_gemm]`` so consecutive K halves
     # are consecutive in memory and one ``buffer_store_vN_f16`` writes
