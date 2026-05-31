@@ -510,6 +510,9 @@ class IRBuilder:
     def exp2(self, a: Value) -> Value:
         return self._op("math.exp2", [a], [a.type], result_name_hint="exp2").result
 
+    def log2(self, a: Value) -> Value:
+        return self._op("math.log2", [a], [a.type], result_name_hint="log2").result
+
     def rcp(self, a: Value) -> Value:
         return self._op("math.rcp", [a], [a.type], result_name_hint="rcp").result
 
@@ -2747,6 +2750,7 @@ PURE_OP_NAMES = {
     "arith.sitofp_f32",
     "arith.cvt_fp8_to_f32",
     "math.exp2",
+    "math.log2",
     "math.rcp",
     "math.sqrt",
     "math.rsqrt",

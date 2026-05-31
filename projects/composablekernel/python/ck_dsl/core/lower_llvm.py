@@ -178,6 +178,7 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "workgroup.z": "declare i32 @llvm.amdgcn.workgroup.id.z()",
     "s.barrier": "declare void @llvm.amdgcn.s.barrier()",
     "exp2.f32": "declare float @llvm.exp2.f32(float)",
+    "log2.f32": "declare float @llvm.log2.f32(float)",
     "sqrt.f32": "declare float @llvm.sqrt.f32(float)",
     "rsqrt.f32": "declare float @llvm.amdgcn.rsq.f32(float)",
     "tanh.f32": "declare float @llvm.tanh.f32(float)",
@@ -1356,6 +1357,15 @@ class _Lowerer:
         self._need("exp2.f32")
         self._current().emit(
             f"  {op.result.name} = call float @llvm.exp2.f32(float {self._operand(v)})"
+        )
+
+    def _op_math_log2(self, op: Op) -> None:
+        (v,) = op.operands
+        if v.type.name != "f32":
+            raise NotImplementedError("math.log2 currently supports f32")
+        self._need("log2.f32")
+        self._current().emit(
+            f"  {op.result.name} = call float @llvm.log2.f32(float {self._operand(v)})"
         )
 
     def _op_math_rcp(self, op: Op) -> None:

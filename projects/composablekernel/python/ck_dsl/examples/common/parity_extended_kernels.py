@@ -2142,13 +2142,13 @@ def case_fmha_fwd_mfma() -> Result:
 
 
 def case_fmha_fwd_mfma_stats() -> Result:
-    """MFMA-tiled FMHA forward with opt-in softmax-stats (M / L) outputs.
+    """MFMA-tiled FMHA forward with opt-in softmax-stats (natural-log LSE).
 
     Builds with ``generate_stats=True`` so the kernel stores the per-(query-
-    row, query-head) online-softmax max M and rescaled sum L into the flat
-    ``[seqlen_q, num_query_heads]`` (batch=1) f32 arrays the bwd kernel reads.
-    The O comparison is kept; M / L are compared against a torch log2-domain
-    reference at tol 1e-2.
+    row, query-head) natural-log LSE into a single flat
+    ``[seqlen_q, num_query_heads]`` (batch=1) f32 tensor -- the bwd graph's
+    ``stats`` tensor at the boundary. The O comparison is kept; LSE is
+    compared against ``torch.logsumexp(scores_nat, dim=-1)`` at tol 1e-2.
     """
     from ck_dsl.instances import (
         FmhaMfmaSpec,
@@ -2202,9 +2202,8 @@ def case_fmha_fwd_mfma_stats() -> Result:
         device="cuda",
     )
     O = torch.zeros_like(Q)
-    # Flat [seqlen_q, HQ] f32 M / L (batch=1): ml_off = row * HQ + head.
-    M_out = torch.zeros(seqlen_q, HQ, dtype=torch.float32, device="cuda")
-    L_out = torch.zeros(seqlen_q, HQ, dtype=torch.float32, device="cuda")
+    # Flat [seqlen_q, HQ] f32 natural-log LSE (batch=1): off = row*HQ + head.
+    LSE_out = torch.zeros(seqlen_q, HQ, dtype=torch.float32, device="cuda")
     _launch(
         launcher,
         {
@@ -2223,40 +2222,33 @@ def case_fmha_fwd_mfma_stats() -> Result:
             "stride_v_head": head_size,
             "stride_o_token": HQ * head_size,
             "stride_o_head": head_size,
-            # Opt-in stats pointers append AFTER the strides, matching the
+            # Opt-in stats pointer appends AFTER the strides, matching the
             # tail-of-ABI order in fmha_mfma._declare_params.
-            "M_out": M_out,
-            "L_out": L_out,
+            "LSE_out": LSE_out,
         },
         grid=fmha_fwd_mfma_grid(spec, batch=batch),
     )
-    # Per-head dense attention reference (O) plus a log2-domain M / L
-    # reference. scores_log2 = scores * log2(e) * (1/sqrt(D)); M = row max;
-    # L = sum exp2(scores_log2 - M).
+    # Per-head dense attention reference (O) plus a natural-log LSE
+    # reference: scores_nat = scores * (1/sqrt(D)); LSE = logsumexp_k.
     O_ref = torch.zeros_like(O)
-    M_ref = torch.zeros_like(M_out)
-    L_ref = torch.zeros_like(L_out)
-    log2e = math.log2(math.e)
+    LSE_ref = torch.zeros_like(LSE_out)
     for h in range(HQ):
         kh = h // (HQ // HK)
         scores = (Q[:, h, :].float() @ K[:, kh, :].float().t()) / math.sqrt(head_size)
         probs = torch.softmax(scores, dim=-1)
         O_ref[:, h, :] = (probs @ V[:, kh, :].float()).to(torch.float16)
-        scores_log2 = scores * log2e
-        M_ref[:, h] = scores_log2.max(dim=-1).values
-        L_ref[:, h] = torch.exp2(scores_log2 - M_ref[:, h : h + 1]).sum(dim=-1)
-    m_abs = float((M_out - M_ref).abs().max().item())
-    l_abs = float((L_out - L_ref).abs().max().item())
-    stats_ok = (m_abs <= 1e-2) and (l_abs <= 1e-2)
-    print(f"    M max_abs={m_abs:.4g}  L max_abs={l_abs:.4g}")
+        LSE_ref[:, h] = torch.logsumexp(scores, dim=-1)
+    lse_abs = float((LSE_out - LSE_ref).abs().max().item())
+    stats_ok = lse_abs <= 1e-2
+    print(f"    LSE max_abs={lse_abs:.4g}")
     r = _summarise(
         O,
         O_ref,
         tol=5e-3,
-        note=f"stats M/L (M={m_abs:.3g} L={l_abs:.3g})",
+        note=f"stats LSE (max_abs={lse_abs:.3g})",
     )
     r.passed = r.passed and stats_ok
-    r.name = "fmha_fwd_mfma_stats (M/L outputs)"
+    r.name = "fmha_fwd_mfma_stats (LSE output)"
     return r
 
 

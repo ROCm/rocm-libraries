@@ -188,12 +188,13 @@ def _declare_params(kb: FmhaKernelBuilder) -> None:
     kb.add_scalar("seqlen_q", "i32")
     kb.add_scalar("seqlen_k", "i32")
     kb.add_strides("q", "k", "v", "o")
-    # Opt-in softmax-stats outputs land at the tail of the ABI so the
+    # Opt-in softmax-stats output lands at the tail of the ABI so the
     # default (generate_stats=False) signature is byte-identical to the
-    # historical kernel. The bwd kernel reads these as f32 [B*Sq, HQ].
+    # historical kernel. A single f32 natural-log LSE tensor [B*Sq, HQ]
+    # is emitted at the boundary; the bwd provider converts it
+    # (M_saved = LSE*log2(e), L_saved = ones).
     if kb.common.generate_stats:
-        kb.add_ptr("M_out", dtype="f32", readonly=False)
-        kb.add_ptr("L_out", dtype="f32", readonly=False)
+        kb.add_ptr("LSE_out", dtype="f32", readonly=False)
 
 
 def build_fmha_fwd_mfma(spec: FmhaMfmaSpec, arch: str = "gfx950") -> KernelDef:
@@ -320,11 +321,10 @@ def build_fmha_fwd_mfma(spec: FmhaMfmaSpec, arch: str = "gfx950") -> KernelDef:
         k_token_offset_elems=k_batch_offset,
         v_token_offset_elems=v_batch_offset,
         # Opt-in softmax-stats: store the per-(query-row, query-head)
-        # online-softmax max M and rescaled sum L for the bwd kernel.
+        # natural-log LSE for the bwd graph's single ``stats`` tensor.
         # ``num_query_heads`` is the compile-time row-stride of the flat
-        # [B*Sq, HQ] M/L arrays. None keeps the default IR unchanged.
-        M_out=kb.ptr("M_out") if s.generate_stats else None,
-        L_out=kb.ptr("L_out") if s.generate_stats else None,
+        # [B*Sq, HQ] LSE array. None keeps the default IR unchanged.
+        LSE_out=kb.ptr("LSE_out") if s.generate_stats else None,
         num_query_heads=s.shape.num_query_heads,
         arch=arch,
     )

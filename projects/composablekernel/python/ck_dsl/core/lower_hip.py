@@ -962,6 +962,12 @@ class _Lowerer:
         # we promote to f32 first.
         self._math1(op, "exp2f")
 
+    def _op_math_log2(self, op: Op) -> None:
+        # ``log2f`` is HIP's device runtime base-2 log entry point; for
+        # fp16/bf16 we promote to f32 first (same promote-compute-demote
+        # shape as exp2 above).
+        self._math1(op, "log2f")
+
     def _op_math_rcp(self, op: Op) -> None:
         # AMDGPU has a hardware reciprocal; emit the builtin directly for
         # f32, promote-compute-demote for f16/bf16.

@@ -198,18 +198,16 @@ def main() -> int:
     rt.memcpy_h2d(vd, u8(V), V.nbytes)
     rt.memset(od, 0, Out.nbytes)
 
-    # Opt-in softmax-stats: flat [B*Sq, HQ] f32 M / L arrays, indexed
-    # ((b*Sq + row)*Hq + head). The kernel folds the batch into o_row, so
-    # the host array is the global-batched [B*Sq, HQ] layout the bwd reads.
-    Mout = np.zeros((B * Sq * Hq,), dtype=np.float32)
-    Lout = np.zeros((B * Sq * Hq,), dtype=np.float32)
+    # Opt-in softmax-stats: a single flat [B*Sq, HQ] f32 natural-log LSE
+    # array, indexed ((b*Sq + row)*Hq + head). The kernel folds the batch
+    # into o_row, so the host array is the global-batched [B*Sq, HQ] layout
+    # the bwd graph's ``stats`` tensor uses.
+    LSE = np.zeros((B * Sq * Hq,), dtype=np.float32)
     if args.stats:
-        md = rt.alloc(Mout.nbytes)
-        ld = rt.alloc(Lout.nbytes)
-        rt.memset(md, 0, Mout.nbytes)
-        rt.memset(ld, 0, Lout.nbytes)
+        lse_d = rt.alloc(LSE.nbytes)
+        rt.memset(lse_d, 0, LSE.nbytes)
 
-    # The opt-in stats pointers append AFTER the 8 strides, matching the
+    # The opt-in stats pointer appends AFTER the 8 strides, matching the
     # tail-of-ABI declaration order in fmha_mfma._declare_params.
     pack_fmt = "<QQQQfiiiiiiiiii"
     pack_args = [
@@ -230,20 +228,19 @@ def main() -> int:
         stride_o_head,
     ]
     if args.stats:
-        # The two f32 stats pointers are 8-byte-aligned kernargs. The
-        # preceding 10 i32 scalars end at byte 76, so 4 pad bytes are
-        # needed to reach the pointer's natural offset 80 (the kernarg
-        # layout aligns each pointer to 8; the provider's LaunchAbi packer
-        # does this automatically).
-        pack_fmt += "4xQQ"
-        pack_args += [md, ld]
+        # The f32 LSE pointer is an 8-byte-aligned kernarg. The preceding
+        # 10 i32 scalars end at byte 76, so 4 pad bytes are needed to reach
+        # the pointer's natural offset 80 (the kernarg layout aligns each
+        # pointer to 8; the provider's LaunchAbi packer does this
+        # automatically).
+        pack_fmt += "4xQ"
+        pack_args += [lse_d]
     packed = struct.pack(pack_fmt, *pack_args)
     rt.launch(fn, grid, block, packed)
     rt.sync()
     rt.memcpy_d2h(u8(Out), od, Out.nbytes)
     if args.stats:
-        rt.memcpy_d2h(u8(Mout), md, Mout.nbytes)
-        rt.memcpy_d2h(u8(Lout), ld, Lout.nbytes)
+        rt.memcpy_d2h(u8(LSE), lse_d, LSE.nbytes)
 
     # Reference per batch.
     ref = np.empty_like(Out)
@@ -260,51 +257,42 @@ def main() -> int:
     max_abs = float(diff.max())
     bad = int(np.count_nonzero(diff > args.tol))
 
-    # Opt-in softmax-stats verify: compare the kernel's stored M / L against
-    # a log2-domain numpy reference computed with the SAME mask as the run.
-    #   scores_log2 = (Q @ K^T) * (1/sqrt(D)) * log2(e)   [post-mask]
-    #   M = max_j scores_log2     (log2-space row max)
-    #   L = sum_j exp2(scores_log2 - M)   (rescaled-accumulated sum)
-    # flattened to ((b*Sq + row)*Hq + head). M is an absolute compare; L is
-    # relative (it spans a wide dynamic range with the K count).
+    # Opt-in softmax-stats verify: compare the kernel's stored natural-log
+    # LSE against a numpy reference computed with the SAME mask as the run.
+    #   scores_nat = (Q @ K^T) * (1/sqrt(D))            [natural domain, post-mask]
+    #   LSE_nat = logsumexp_j scores_nat = max + ln(sum(exp(s - max)))
+    # flattened to ((b*Sq + row)*Hq + head). Absolute compare at tol 1e-2.
     stats_ok = True
     if args.stats:
-        log2e = math.log2(math.e)
-        M_ref = np.empty((B, Sq, Hq), dtype=np.float32)
-        L_ref = np.empty((B, Sq, Hq), dtype=np.float32)
+        LSE_ref = np.empty((B, Sq, Hq), dtype=np.float32)
         for bi in range(B):
             if Hk != Hq:  # GQA: expand kv heads to query heads for the ref.
                 rep = Hq // Hk
                 Kb = np.repeat(K[bi], rep, axis=1)
             else:
                 Kb = K[bi]
-            # scores: (Sq, Hq, Sk) in log2 domain.
+            # scores: (Sq, Hq, Sk) in the natural domain.
             scores = np.einsum(
                 "ihd,jhd->ihj", Q[bi].astype(np.float32), Kb.astype(np.float32)
             )
-            scores = scores * (1.0 / math.sqrt(D)) * log2e
+            scores = scores * (1.0 / math.sqrt(D))
             if args.causal:
                 q_pos = np.arange(Sq)[:, None, None]
                 k_pos = np.arange(Sk)[None, None, :]
                 scores = np.where(k_pos <= q_pos, scores, -1e30)
-            M_ref[bi] = scores.max(axis=-1)
-            L_ref[bi] = np.exp2(scores - M_ref[bi][..., None]).sum(axis=-1)
-        M_ref_flat = M_ref.reshape(B * Sq, Hq).reshape(-1)
-        L_ref_flat = L_ref.reshape(B * Sq, Hq).reshape(-1)
-        m_abs = float(np.abs(Mout - M_ref_flat).max())
-        l_rel = float((np.abs(Lout - L_ref_flat) / np.maximum(L_ref_flat, 1e-6)).max())
-        m_ok = m_abs <= 1e-2
-        l_ok = l_rel <= 1e-2
-        stats_ok = m_ok and l_ok
+            mx = scores.max(axis=-1)
+            LSE_ref[bi] = mx + np.log(np.exp(scores - mx[..., None]).sum(axis=-1))
+        LSE_ref_flat = LSE_ref.reshape(B * Sq, Hq).reshape(-1)
+        lse_abs = float(np.abs(LSE - LSE_ref_flat).max())
+        stats_ok = lse_abs <= 1e-2
         print(
-            f"[{args.arch}] HIP-path {family} FMHA stats: M_max_abs_diff="
-            f"{m_abs:.3e} (tol 1e-2 -> {'PASS' if m_ok else 'FAIL'}) "
-            f"L_max_rel_diff={l_rel:.3e} (tol 1e-2 -> {'PASS' if l_ok else 'FAIL'})"
+            f"[{args.arch}] HIP-path {family} FMHA stats: LSE_max_abs_diff="
+            f"{lse_abs:.3e} (tol 1e-2 -> {'PASS' if stats_ok else 'FAIL'})"
         )
 
     free_ptrs = [qd, kd, vd, od]
     if args.stats:
-        free_ptrs += [md, ld]
+        free_ptrs += [lse_d]
     for ptr in free_ptrs:
         rt.free(ptr)
     module.unload()
