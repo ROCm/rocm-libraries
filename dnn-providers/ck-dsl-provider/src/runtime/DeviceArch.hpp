@@ -24,10 +24,39 @@ class DeviceArchDetectionError : public std::runtime_error {
     explicit DeviceArchDetectionError(const std::string& message) : std::runtime_error(message) {}
 };
 
+/// Strip the ROCm feature suffix from a raw ``gcnArchName``, returning
+/// the bare gfx token: ``"gfx950:sramecc+:xnack-"`` -> ``"gfx950"``,
+/// ``"gfx942"`` -> ``"gfx942"``. The DSL's ``known_arches()`` keys are
+/// bare tokens and ``ArchTarget.from_gfx()`` rejects the suffixed form.
+/// Everything from the first ``':'`` onward is removed; an empty input
+/// stays empty. Exposed (rather than kept internal) so the pure string
+/// behaviour can be unit-tested without a HIP device.
+std::string stripArchFeatureSuffix(std::string archName);
+
 /// Best-effort detection of the target GPU architecture as a bare gfx
 /// token (e.g. ``"gfx950"``), suitable for passing to the CK DSL's
 /// arch-aware entry points (``ck_dsl.core.arch.known_arches()`` keys
 /// are bare gfx tokens).
+///
+/// **Security invariant**: the returned token originates from the HIP
+/// runtime's device-reported ``gcnArchName`` (trusted hardware), never
+/// from a graph payload field or an external caller. The provider's
+/// injection-free posture (the token only becomes a comgr API argument,
+/// an in-memory cache key, and a log string) depends on this. If a
+/// future milestone lets a caller name an arbitrary target arch, that
+/// path must be re-evaluated separately -- do not route caller-supplied
+/// arch strings through here.
+///
+/// TODO(arch-detection-consolidation): this is the fourth in-tree copy
+/// of "stream -> bare gfx token". The others are
+/// ``hip-kernel-provider/include/hip_kernel_provider_common/HipDeviceUtils.hpp``
+/// (``getDeviceString``),
+/// ``hip-kernel-provider/src/CurrentDevicePropertyProvider.hpp``, and
+/// ``integration-tests/src/harness/DeviceArch.hpp``. The plugin SDK has
+/// no shared device helper, so each provider rolls its own and the
+/// strip/fallback/fail-policy conventions can drift. This (the only copy
+/// that distinguishes nullopt-vs-throw) is the natural seed for a shared
+/// ``hipdnn_plugin_sdk`` helper; consolidate when one is introduced.
 ///
 /// Resolution order:
 ///   * the device backing ``stream`` (via ``hipStreamGetDevice``) when
@@ -50,6 +79,15 @@ class DeviceArchDetectionError : public std::runtime_error {
 /// GPU in hand we must get an arch; guessing a default would silently
 /// miscompile for the wrong target or fail the later module load
 /// confusingly, so this fails loudly instead.
+///
+/// A device's architecture is immutable for the process lifetime, so a
+/// successful lookup is memoized per device ordinal: the expensive
+/// ``hipGetDeviceProperties`` query runs once per device, and the
+/// repeated calls down the plan-resolution path (``isApplicable`` runs
+/// several times per finalize, then ``buildPlan``) reuse the cached
+/// token. The cheap ordinal-resolution queries still run each call. The
+/// cache is process-wide and mutex-guarded; only successful detections
+/// are cached (nullopt and the throwing faults are re-evaluated).
 std::optional<std::string> detectDeviceArch(hipStream_t stream);
 
 }  // namespace ck_dsl_provider

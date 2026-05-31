@@ -3,7 +3,11 @@
 
 #include "DeviceArch.hpp"
 
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
+#include <mutex>
 #include <string>
+#include <unordered_map>
+#include <utility>
 
 namespace ck_dsl_provider {
 
@@ -21,7 +25,13 @@ std::optional<int> resolveDevice(hipStream_t stream) {
         }
         // Stream query failed -- fall through to the current device
         // rather than giving up; the current device is the right answer
-        // in the common single-GPU case.
+        // in the common single-GPU case. Warn so that a silent
+        // resolve-to-current-device is observable: in a multi-GPU
+        // process where the stream is bound to a non-default device,
+        // this would target the current device's arch instead.
+        HIPDNN_PLUGIN_LOG_WARN(
+            "detectDeviceArch: hipStreamGetDevice failed for the supplied stream; "
+            "falling back to the current default device for arch detection");
     }
 
     int currentDevice = -1;
@@ -31,7 +41,47 @@ std::optional<int> resolveDevice(hipStream_t stream) {
     return std::nullopt;
 }
 
+/// Process-wide memo of device ordinal -> bare gfx token. A device's
+/// arch is immutable for the process lifetime, so a successful detection
+/// is cached and the expensive hipGetDeviceProperties query runs at most
+/// once per device. Mutex-guarded for the multi-threaded plan-finding
+/// path. The two accessors share one cache via this single instance.
+struct ArchCache {
+    std::mutex mutex;
+    std::unordered_map<int, std::string> map;
+};
+
+ArchCache& archCache() {
+    static ArchCache cache;
+    return cache;
+}
+
+/// Cached bare gfx token for ``device``, or nullopt on a miss.
+std::optional<std::string> cachedArchForDevice(int device) {
+    ArchCache& cache = archCache();
+    const std::lock_guard<std::mutex> lock(cache.mutex);
+    const auto it = cache.map.find(device);
+    if (it != cache.map.end()) {
+        return it->second;
+    }
+    return std::nullopt;
+}
+
+void storeArchForDevice(int device, const std::string& arch) {
+    ArchCache& cache = archCache();
+    const std::lock_guard<std::mutex> lock(cache.mutex);
+    cache.map[device] = arch;
+}
+
 }  // namespace
+
+std::string stripArchFeatureSuffix(std::string archName) {
+    const std::string::size_type colon = archName.find(':');
+    if (colon != std::string::npos) {
+        archName.resize(colon);
+    }
+    return archName;
+}
 
 std::optional<std::string> detectDeviceArch(hipStream_t stream) {
     int deviceCount = 0;
@@ -57,6 +107,13 @@ std::optional<std::string> detectDeviceArch(hipStream_t stream) {
             ") but the active device ordinal could not be resolved (hipGetDevice failed)");
     }
 
+    // The device's arch is immutable, so reuse a prior successful
+    // detection for this ordinal instead of re-running the expensive
+    // hipGetDeviceProperties query on every plan-resolution call.
+    if (std::optional<std::string> cached = cachedArchForDevice(*device)) {
+        return cached;
+    }
+
     hipDeviceProp_t props{};
     const hipError_t propsErr = hipGetDeviceProperties(&props, *device);
     if (propsErr != hipSuccess) {
@@ -65,18 +122,16 @@ std::optional<std::string> detectDeviceArch(hipStream_t stream) {
             std::to_string(*device) + " (" + hipGetErrorString(propsErr) + ")");
     }
 
-    std::string arch = props.gcnArchName;  // e.g. "gfx950:sramecc+:xnack-"
-    if (arch.empty()) {
+    std::string archName = props.gcnArchName;  // e.g. "gfx950:sramecc+:xnack-"
+    if (archName.empty()) {
         throw DeviceArchDetectionError("detectDeviceArch: device " + std::to_string(*device) +
                                        " reported an empty gcnArchName");
     }
 
     // Strip the ROCm feature suffix: the DSL's known_arches() are bare
     // gfx tokens, and ArchTarget.from_gfx() rejects the suffixed form.
-    const std::string::size_type colon = arch.find(':');
-    if (colon != std::string::npos) {
-        arch.resize(colon);
-    }
+    std::string arch = stripArchFeatureSuffix(std::move(archName));
+    storeArchForDevice(*device, arch);
     return arch;
 }
 

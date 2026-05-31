@@ -29,7 +29,10 @@ returns the artifact plus the launch metadata derived from the spec
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import TYPE_CHECKING, Any, Dict, List, Tuple
+
+if TYPE_CHECKING:
+    from ck_dsl.instances.common.conv_implicit_gemm import ImplicitGemmConvSpec
 
 
 def noop_smoke() -> dict:
@@ -219,7 +222,7 @@ def _reject_unexpected(payload_keys, expected, context: str) -> None:
         )
 
 
-def _conv_spec_from_payload(payload: dict):
+def _conv_spec_from_payload(payload: dict) -> "ImplicitGemmConvSpec":
     """Deserialize the wire payload into an ``ImplicitGemmConvSpec``.
 
     Shared by the compile and applicability paths so both honour one
@@ -326,7 +329,7 @@ def compile(op_kind: str, payload: dict, arch: str) -> dict:
     )
 
 
-def _is_applicable_conv_implicit_gemm(payload: dict, arch: str):
+def _is_applicable_conv_implicit_gemm(payload: dict, arch: str) -> Tuple[bool, str]:
     """Arch-aware applicability for an implicit-GEMM conv spec.
 
     Consults the DSL's ``is_valid_spec`` for ``arch`` -- the exact
@@ -345,7 +348,7 @@ def _is_applicable_conv_implicit_gemm(payload: dict, arch: str):
     return bool(ok), str(reason)
 
 
-def is_applicable(op_kind: str, payload: dict, arch: str):
+def is_applicable(op_kind: str, payload: dict, arch: str) -> Tuple[bool, str]:
     """Return ``(ok, reason)`` for running ``op_kind`` on ``arch``.
 
     Called by the C++ ``CompileServiceBridge::isApplicable`` from the
@@ -355,8 +358,13 @@ def is_applicable(op_kind: str, payload: dict, arch: str):
     own DSL validator. Unknown kinds raise ``ValueError``, which the
     bridge surfaces as a ``HipdnnPluginException``.
 
-    Unlike :func:`compile` this never compiles -- it is a fast predicate
-    safe to call on the plan-finding hot path.
+    Unlike :func:`compile` this never compiles: the check itself is a
+    cheap, data-driven ``is_valid_spec`` against the cached
+    :class:`ck_dsl.core.arch.ArchTarget` (the catalog is ``lru_cache``d,
+    so no per-call file I/O). Note, though, that *reaching* it from C++
+    still costs a GIL acquire and a pybind round-trip per call, and the
+    plan builder invokes ``isApplicable`` several times per finalize --
+    so it is cheap, not free.
     """
     if op_kind == "conv_implicit_gemm":
         return _is_applicable_conv_implicit_gemm(payload, arch)

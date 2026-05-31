@@ -14,6 +14,7 @@ add_executable(
     ck_dsl_provider_unit_tests
     main.cpp
     CompileServiceBridgeTest.cpp
+    DeviceArchTest.cpp
     EmbeddedInterpreterTest.cpp
     ConvImplicitGemmAdapterTest.cpp
     ConvImplicitGemmPlanBuilderTest.cpp
