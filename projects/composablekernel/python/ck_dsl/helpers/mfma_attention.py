@@ -284,6 +284,7 @@ def mfma_attention_fwd_inner_body(
     native_fp8_path: bool = False,
     use_async_kv: bool = False,
     codebook_ptr: Optional[Value] = None,
+    wmma_v_lds_stage: bool = False,
     arch: str = "gfx950",
 ) -> None:
     """One MFMA-tiled QK→softmax→PV pass for a ``BLOCK_M``-row Q tile.
@@ -488,6 +489,7 @@ def mfma_attention_fwd_inner_body(
             extra_skip_predicate=extra_skip_predicate,
             k_block_iter_fn=k_block_iter_fn,
             v_scale=v_scale,
+            v_lds_stage=wmma_v_lds_stage,
             arch=arch,
             target=target,
         )
@@ -932,6 +934,7 @@ def _wmma_attention_fwd_inner_body(
     extra_skip_predicate: Optional[Callable[[IRBuilder, Value], Value]],
     k_block_iter_fn: Optional[Callable[[IRBuilder, Value], Value]],
     v_scale: Optional[Value],
+    v_lds_stage: bool = False,
     arch: str,
     target,
 ) -> None:
@@ -990,8 +993,13 @@ def _wmma_attention_fwd_inner_body(
         q_addr = b.add(q_addr_row_base, b.const_i32(d * 16))
         q_frags.append(b.global_load_vN(Q, q_addr, dtype_ir, a_frag, align=a_frag * 2))
 
-    # ---- LDS P-staging tile (transpose acc layout -> A-operand layout) ----
+    # ---- LDS staging tiles ----
+    # P_lds transposes the score acc layout -> the PV A-operand layout.
+    # V_lds stages the K-tile's V rows once per iteration so the PV B-operand
+    # (V in d x k layout) is read from LDS instead of a per-(d,k) scalar
+    # global gather.
     P_lds = b.smem_alloc(dtype_ir, [16, 16], name_hint="Pwmma")
+    V_lds = b.smem_alloc(dtype_ir, [16, head_size], name_hint="Vwmma") if v_lds_stage else None
 
     # ---- Online-softmax + PV accumulator iter-args ----
     iter_args = []
@@ -1091,6 +1099,32 @@ def _wmma_attention_fwd_inner_body(
                 old = b.vec_extract(new_accs[d], r)
                 new_accs[d] = b.vec_insert(new_accs[d], b.fmul(old, alpha), r)
 
+        # ---- V staging into LDS (vectorized load; transposed PV reads) ----
+        # Each lane loads its own k-row's full head_size d-slice as 8-wide
+        # vector global loads and writes it row-major into ``V_lds``. The PV
+        # B-operand (V in d x k layout) is then a strided *LDS* read, replacing
+        # the per-(d,k) scalar global gather the correctness-first version did
+        # (it issued ``n_dk * a_frag`` scalar global loads per lane per K-tile).
+        # Both wave32 halves map to the same 16 rows (a_row == lane % 16), so
+        # the store is redundant across halves but writes identical data.
+        if v_lds_stage:
+            v_stage_row = b.add(k_tile_base, a_row)
+            if v_row_base_fn is not None:
+                v_stage_base = v_row_base_fn(b, v_stage_row)
+            else:
+                v_stage_base = b.add(
+                    b.add(
+                        b.mul(v_stage_row, stride_v_token),
+                        b.mul(kv_head_idx, stride_v_head),
+                    ),
+                    v_off,
+                )
+            for e in range(head_size // 8):
+                v_g = b.global_load_vN(
+                    V, b.add(v_stage_base, b.const_i32(e * 8)), dtype_ir, 8, align=16
+                )
+                b.smem_store_vN(V_lds, [a_row, b.const_i32(e * 8)], v_g, 8)
+
         # ---- P staging through LDS: acc layout -> A-operand layout ----
         for r in range(c_frag):
             row_rel, col_k = c_map.coord(b, lane, r)
@@ -1117,19 +1151,32 @@ def _wmma_attention_fwd_inner_body(
             d_col = b.add(b.const_i32(d * 16), col)  # this lane's V d-column
             v_b = b.zero_vec(dtype_ir, a_frag)
             for j in range(a_frag):
-                v_row_k = b.add(k_tile_base, b.const_i32(j))
-                if v_row_base_fn is not None:
-                    v_addr_row_base = v_row_base_fn(b, v_row_k)
-                else:
-                    v_addr_row_base = b.add(
-                        b.add(
-                            b.mul(v_row_k, stride_v_token),
-                            b.mul(kv_head_idx, stride_v_head),
+                # B-operand for d-column ``d_col`` is V[k, d_col] for k = 0..15.
+                if v_lds_stage:
+                    # Optimized: read from the staged LDS tile (V_lds[k, d_col]).
+                    v_elem = b.vec_extract(
+                        b.smem_load_vN(
+                            V_lds, b.const_i32(j), d_col, dtype=dtype_ir, n=1
                         ),
-                        v_off,
+                        0,
                     )
-                v_addr = b.add(v_addr_row_base, d_col)
-                v_b = b.vec_insert(v_b, b.global_load(V, v_addr, dtype_ir, align=2), j)
+                else:
+                    # Baseline: per-(d,k) scalar global gather of V[k, d_col].
+                    v_row = b.add(k_tile_base, b.const_i32(j))
+                    if v_row_base_fn is not None:
+                        v_row_base = v_row_base_fn(b, v_row)
+                    else:
+                        v_row_base = b.add(
+                            b.add(
+                                b.mul(v_row, stride_v_token),
+                                b.mul(kv_head_idx, stride_v_head),
+                            ),
+                            v_off,
+                        )
+                    v_elem = b.global_load(
+                        V, b.add(v_row_base, d_col), dtype_ir, align=2
+                    )
+                v_b = b.vec_insert(v_b, v_elem, j)
             new_accs[d] = b.mma(op, p_a, v_b, new_accs[d])
 
         yields = []

@@ -32,8 +32,9 @@ reworking the kernel builders.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
+from ..core.arch import ArchTarget, LayoutMap, MmaOp
 from ..core.ir import (
     IRBuilder,
     Value,
@@ -554,6 +555,126 @@ class MfmaAtom:
         )
 
 
+@dataclass(frozen=True)
+class WmmaAtom:
+    """One WMMA intrinsic (RDNA3/3.5 ``gfx11``, wave32) — the RDNA sibling of
+    :class:`MfmaAtom`.
+
+    WMMA's wave32 fragment layout differs fundamentally from MFMA's wave64
+    layout: both A and B operands are ``<16 x half>`` covering the *full* ``K=16``
+    on every lane (no ``k_blk`` split), and the accumulator is ``<8 x float>``.
+    Rather than duplicate that lane math here, the layout accessors delegate to
+    the arch-target's hardware-verified :class:`~ck_dsl.core.arch.MmaOp` layout
+    maps (the SSOT in ``core/arch/target.py``), so there is exactly one source of
+    truth for the fragment layout. Like ``MfmaAtom``, :attr:`name` *is* the
+    backend ``op_id``, so :meth:`emit` routes straight through
+    :meth:`IRBuilder.mma`.
+    """
+
+    m: int
+    n: int
+    k: int
+    a_per_lane: int
+    b_per_lane: int
+    c_per_lane: int
+    dtype_in: str
+    dtype_out: str
+    name: str
+    family: str = "wmma"
+    wave_size: int = 32
+
+    # ---- factory class methods ----
+
+    @classmethod
+    def f16_16x16x16(cls) -> "WmmaAtom":
+        """The gfx11 f16 WMMA atom. K=16/atom, c_per_lane=8 floats.
+
+        Per-lane layout on wave32 (hardware-verified gfx1151):
+        A: ``<16 x half>`` (row ``lane % 16``, K = 0..15),
+        B: ``<16 x half>`` (col ``lane % 16``, K = 0..15),
+        C: ``<8 x float>`` (slot ``i`` -> row ``2*i + lane // 16``, col
+        ``lane % 16``).
+        """
+        return cls(
+            m=16,
+            n=16,
+            k=16,
+            a_per_lane=16,
+            b_per_lane=16,
+            c_per_lane=8,
+            dtype_in="f16",
+            dtype_out="f32",
+            name="wmma_f32_16x16x16_f16",
+        )
+
+    @classmethod
+    def bf16_16x16x16(cls) -> "WmmaAtom":
+        """BF16 sibling of :meth:`f16_16x16x16` (same wave32 fragment layout;
+        only the element type / intrinsic mangling differ)."""
+        return cls(
+            m=16,
+            n=16,
+            k=16,
+            a_per_lane=16,
+            b_per_lane=16,
+            c_per_lane=8,
+            dtype_in="bf16",
+            dtype_out="f32",
+            name="wmma_f32_16x16x16_bf16",
+        )
+
+    # ---- emit ----
+
+    def emit(self, b: IRBuilder, a: Value, bb: Value, c: Value) -> Value:
+        """Issue one WMMA at this atom's shape via the unified MMA contract.
+
+        Byte-identical to the hand-rolled ``b.mma(op_id, a, b, c)`` the gfx1151
+        attention kernels already emit: same ``op_id`` attribute, same
+        ``c_per_lane``-sized ``<8 x float>`` result. The LLVM lowering dispatches
+        the ``op_id`` to ``Gfx11RdnaBackend.emit_wmma`` on RDNA.
+        """
+        if self.name not in _WMMA_OP_ID_NAMES:
+            raise NotImplementedError(
+                f"no WMMA dispatch for atom {self.dtype_in} "
+                f"{self.m}x{self.n}x{self.k}"
+            )
+        return b.mma(self.name, a, bb, c)
+
+    def zero_acc(self, b: IRBuilder) -> Value:
+        """Allocate a fresh ``<c_per_lane x float>`` accumulator (all zeros) for
+        the K-loop ``iter_args``."""
+        return b.zero_vec_f32(self.c_per_lane)
+
+    # ---- physical lane layout (delegated to the arch-target SSOT) ----
+
+    def mma_op(self, arch: str = "gfx1151") -> MmaOp:
+        """The arch-target :class:`MmaOp` backing this atom (the layout-map
+        SSOT). ``arch`` selects which gfx target's verified maps to use."""
+        op = ArchTarget.from_gfx(arch).mma.by_op_id(self.name)
+        if op is None:
+            raise ValueError(
+                f"arch {arch!r} has no WMMA op {self.name!r}; "
+                f"WMMA needs an RDNA3/3.5 (gfx11) target"
+            )
+        return op
+
+    def a_layout(self, arch: str = "gfx1151") -> LayoutMap:
+        """The A-operand ``(row, k)`` lane/slot -> coordinate map."""
+        return self.mma_op(arch).a_layout()
+
+    def b_layout(self, arch: str = "gfx1151") -> LayoutMap:
+        """The B-operand ``(k, col)`` lane/slot -> coordinate map."""
+        return self.mma_op(arch).b_layout()
+
+    def c_layout(self, arch: str = "gfx1151") -> LayoutMap:
+        """The accumulator (C/D) ``(row, col)`` lane/slot -> coordinate map."""
+        return self.mma_op(arch).c_layout()
+
+    # Convenience alias mirroring ``MmaOp.acc_layout``.
+    def acc_layout(self, arch: str = "gfx1151") -> LayoutMap:
+        return self.c_layout(arch)
+
+
 # ---------------------------------------------------------------------
 # C-accumulator warp distribution (CWarpDstrEncoding)
 # ---------------------------------------------------------------------
@@ -735,3 +856,33 @@ def mfma_atom(dtype: str, m: int, n: int, k: int) -> MfmaAtom:
         valid = sorted((a.dtype_in, a.m, a.n, a.k) for a in MFMA_ATOMS)
         raise ValueError(f"no MFMA atom for {key}; valid: {valid}")
     return _BY_SHAPE[key]
+
+
+# ---------------------------------------------------------------------
+# WMMA catalog (RDNA3/3.5, wave32)
+# ---------------------------------------------------------------------
+
+WMMA_F16_ATOMS: Tuple[WmmaAtom, ...] = (WmmaAtom.f16_16x16x16(),)
+WMMA_BF16_ATOMS: Tuple[WmmaAtom, ...] = (WmmaAtom.bf16_16x16x16(),)
+WMMA_ATOMS: Tuple[WmmaAtom, ...] = WMMA_F16_ATOMS + WMMA_BF16_ATOMS
+
+# Backend ``op_id`` strings (== ``WmmaAtom.name``) that :meth:`WmmaAtom.emit`
+# knows how to issue through :meth:`IRBuilder.mma`.
+_WMMA_OP_ID_NAMES: frozenset = frozenset(a.name for a in WMMA_ATOMS)
+
+_WMMA_BY_SHAPE: Dict[Tuple[str, int, int, int], WmmaAtom] = {
+    (a.dtype_in, a.m, a.n, a.k): a for a in WMMA_ATOMS
+}
+
+
+def wmma_atom(dtype: str, m: int, n: int, k: int) -> WmmaAtom:
+    """Lookup a WMMA atom by (dtype_in, m, n, k). Raises if unknown.
+
+    Accepts ``f16`` / ``fp16`` and ``bf16`` aliases on the dtype key.
+    """
+    canon = _DTYPE_ALIAS.get(dtype, dtype)
+    key = (canon, m, n, k)
+    if key not in _WMMA_BY_SHAPE:
+        valid = sorted((a.dtype_in, a.m, a.n, a.k) for a in WMMA_ATOMS)
+        raise ValueError(f"no WMMA atom for {key}; valid: {valid}")
+    return _WMMA_BY_SHAPE[key]
