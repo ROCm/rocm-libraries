@@ -13,9 +13,11 @@ the C++ side needs to load and launch it via ``hipModuleLoadData`` +
 ``hipModuleLaunchKernel``. The smoke kernel is the simplest cleanly-
 compiling instance in ``ck_dsl.instances``: an FP16 copy elementwise
 with ``block_size=64`` and ``vec=2`` (no MFMA, no LDS, no scaled
-converts -- but still gfx950 ISA since the DSL is gfx950-only). The
-resulting kernel signature is ``(A: ptr, C: ptr, N: i32)`` so launching
-over a one-element buffer copies a single FP16 value.
+converts). Because the smoke kernel uses no arch-specific MFMA atom
+the DSL compiles it for any supported arch (gfx942/gfx950/gfx1151);
+the caller supplies the target gfx token via the ``arch`` parameter.
+The resulting kernel signature is ``(A: ptr, C: ptr, N: i32)`` so
+launching over a one-element buffer copies a single FP16 value.
 
 M1 step I-7 adds :func:`compile`, the production entry the C++
 ``CompileServiceBridge::compile`` calls on a JitCache miss. It
@@ -58,9 +60,9 @@ def _smoke_arg_schema() -> List[Dict[str, Any]]:
     """Schema for the elementwise-copy smoke kernel signature.
 
     Kernel ABI is ``(A: ptr<f16>, C: ptr<f16>, N: i32)`` as built by
-    ``ck_dsl.instances.elementwise.build_elementwise`` for a unary op
-    (see ``ElementwiseSpec`` docstring + ``build_elementwise`` body in
-    ``ck_dsl/instances/elementwise.py``). The C++ ``LaunchAbi`` packs
+    ``ck_dsl.instances.common.elementwise.build_elementwise`` for a unary
+    op (see ``ElementwiseSpec`` docstring + ``build_elementwise`` body in
+    ``ck_dsl/instances/common/elementwise.py``). The C++ ``LaunchAbi`` packs
     args back-to-back honouring each slot's ``align`` -- exactly the
     layout the AMDGPU calling convention expects when args are handed
     to ``hipModuleLaunchKernel`` via ``HIP_LAUNCH_PARAM_BUFFER_*``.
@@ -72,14 +74,19 @@ def _smoke_arg_schema() -> List[Dict[str, Any]]:
     ]
 
 
-def compile_smoke() -> dict:
-    """Compile a trivial gfx950 HSACO and return the launch metadata.
+def compile_smoke(arch: str) -> dict:
+    """Compile the trivial elementwise-copy kernel for ``arch``.
 
     Used by I-4 to prove the C++ ``KernelArtifact`` / ``HipModule`` /
     ``LaunchAbi`` round-trip. The returned dict is the on-wire shape the
     C++ ``CompileServiceBridge::compileSmoke`` translates into a
     ``KernelArtifact``; keep the field names stable -- the C++ side
     looks them up by string.
+
+    Args:
+        arch: Target gfx token (e.g. ``"gfx950"``). Threaded to
+            ``compile_kernel`` exactly as ``_compile_conv_implicit_gemm``
+            does, so the resulting HSACO targets the requested arch.
 
     Returned fields:
 
@@ -113,11 +120,12 @@ def compile_smoke() -> dict:
         ``{"name": str, "kind": str, "size": int, "align": int}``.
 
     ``isa`` (str)
-        The comgr ISA triple the artifact was built for. Returned for
-        logging only; gfx950 is the only target the DSL supports today.
+        The comgr ISA triple the artifact was built for, recording which
+        arch this artifact targets (e.g. ``"amdgcn-amd-amdhsa--gfx950"``
+        when ``arch="gfx950"``).
     """
     from ck_dsl.helpers.compile import compile_kernel
-    from ck_dsl.instances.elementwise import ElementwiseSpec, build_elementwise
+    from ck_dsl.instances.common.elementwise import ElementwiseSpec, build_elementwise
 
     # The simplest cleanly-compiling instance: FP16 copy, single warp.
     # Keeping block_size small (one wave) and vec small (one 32-bit
@@ -131,7 +139,7 @@ def compile_smoke() -> dict:
         name="ck_dsl_provider_smoke_copy",
     )
     kernel_def = build_elementwise(spec)
-    artifact = compile_kernel(kernel_def)
+    artifact = compile_kernel(kernel_def, arch=arch)
 
     return {
         "hsaco": artifact.hsaco,
@@ -140,7 +148,7 @@ def compile_smoke() -> dict:
         # One-element launch: one block, one wave. The kernel's scalar
         # fallback path handles the N < block*vec tail; for N=1 all
         # threads except the lane-0 path are masked out by its in-bounds
-        # check (see emit_scalar_path in instances/elementwise.py).
+        # check (see emit_scalar_path in instances/common/elementwise.py).
         "grid": (1, 1, 1),
         "block": (spec.block_size, 1, 1),
         "lds_bytes": 0,

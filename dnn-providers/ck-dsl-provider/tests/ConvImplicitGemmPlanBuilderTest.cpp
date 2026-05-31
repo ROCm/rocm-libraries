@@ -261,23 +261,19 @@ INSTANTIATE_TEST_SUITE_P(Arches, ConvImplicitGemmExampleCompile,
 // platforms" half of the multi-arch coverage. With zero input and zero
 // weight the convolution output is zero everywhere.
 TEST_F(ConvImplicitGemmPlanBuilderHost, ExecutesExampleShapeOnPresentDevice) {
-    CK_DSL_PROVIDER_SKIP_IF_NO_GPU("ExecutesExampleShapeOnPresentDevice");
-    std::optional<std::string> arch = ck_dsl_provider::detectDeviceArch(_handle->getStream());
-    ASSERT_TRUE(arch.has_value());
-    if (*arch != "gfx942" && *arch != "gfx950" && *arch != "gfx1151") {
-        GTEST_SKIP() << "device arch '" << *arch << "' is outside the M1 supported set";
-    }
+    std::string arch;
+    CK_DSL_PROVIDER_SKIP_IF_UNSUPPORTED_ARCH("ExecutesExampleShapeOnPresentDevice", arch);
 
-    ck_dsl_provider::ConvImplicitGemmSpec spec = makeExampleSpecForArch(*arch);
+    ck_dsl_provider::ConvImplicitGemmSpec spec = makeExampleSpecForArch(arch);
 
     ck_dsl_provider::KernelArtifact artifact;
     {
         py::gil_scoped_acquire gil;
         py::dict payload = ck_dsl_provider::convImplicitGemmSpecToPayload(spec);
         artifact = _container->compileServiceBridge().compile(ConvImplicitGemmPlanBuilder::opKind(),
-                                                              payload, *arch);
+                                                              payload, arch);
     }
-    ASSERT_NE(artifact.isa.find(*arch), std::string::npos) << "isa=" << artifact.isa;
+    ASSERT_NE(artifact.isa.find(arch), std::string::npos) << "isa=" << artifact.isa;
 
     auto module = std::make_shared<ck_dsl_provider::HipModule>(artifact);
 
@@ -310,7 +306,7 @@ TEST_F(ConvImplicitGemmPlanBuilderHost, ExecutesExampleShapeOnPresentDevice) {
 
     std::uint16_t firstHalf = 0xffff;
     ASSERT_EQ(hipMemcpy(&firstHalf, dY, sizeof(firstHalf), hipMemcpyDeviceToHost), hipSuccess);
-    EXPECT_EQ(firstHalf, 0u) << "expected zero output for zero input + zero weight on " << *arch;
+    EXPECT_EQ(firstHalf, 0u) << "expected zero output for zero input + zero weight on " << arch;
 
     EXPECT_EQ(hipFree(dX), hipSuccess);
     EXPECT_EQ(hipFree(dW), hipSuccess);
@@ -456,8 +452,11 @@ TEST_F(ConvImplicitGemmPlanBuilderGpu, PlanExecuteLaunches) {
 
 TEST_F(ConvImplicitGemmPlanBuilderHost, ExecuteRejectsMissingDeviceBuffer) {
     // The uid-lookup throws before any HIP call, but the buildPlan
-    // step still needs to load a real HSACO via hipModuleLoadData,
-    // which requires a gfx950 device for the DSL's emitted ISA.
+    // step goes through the production adapter's gfx950-tuned default
+    // config (32x32x16 atom, wave64), which validates and loads only
+    // on gfx950. This is not a DSL ISA limitation -- the DSL compiles
+    // gfx942/gfx950/gfx1151 -- but a consequence of the production
+    // adapter emitting fixed gfx950 knobs until M2.
     CK_DSL_PROVIDER_SKIP_IF_NOT_GFX950(
         "ConvImplicitGemmPlanBuilderHost.ExecuteRejectsMissingDeviceBuffer");
 

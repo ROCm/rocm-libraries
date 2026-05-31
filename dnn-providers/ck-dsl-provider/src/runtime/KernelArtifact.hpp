@@ -129,9 +129,9 @@ struct KernelArtifact {
     std::vector<ArgSchema> argSchema;
 
     /// Comgr ISA triple the artifact was built for. Stored for
-    /// diagnostics / cache-key composition. The DSL is gfx950-only
-    /// today (see STATUS.md), so this is always
-    /// ``"amdgcn-amd-amdhsa--gfx950"`` for M1 artifacts.
+    /// diagnostics / cache-key composition. The DSL targets
+    /// gfx942/gfx950/gfx1151, so this records whichever arch was
+    /// requested (e.g. ``"amdgcn-amd-amdhsa--gfx942"``).
     std::string isa;
 };
 

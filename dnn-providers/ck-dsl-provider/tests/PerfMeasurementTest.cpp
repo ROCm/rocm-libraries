@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "CkDslContainer.hpp"
@@ -75,11 +76,11 @@ TEST(TestPerfMeasurement, DefaultsMatchP7) {
 class PerfMeasurementGpu : public ::testing::Test {
    protected:
     void SetUp() override {
-        CK_DSL_PROVIDER_SKIP_IF_NOT_GFX950("PerfMeasurementGpu");
+        CK_DSL_PROVIDER_SKIP_IF_UNSUPPORTED_ARCH("PerfMeasurementGpu", _arch);
 
         _container = std::make_unique<CkDslContainer>();
-        _artifact =
-            std::make_unique<KernelArtifact>(_container->compileServiceBridge().compileSmoke());
+        _artifact = std::make_unique<KernelArtifact>(
+            _container->compileServiceBridge().compileSmoke(_arch));
         _module = std::make_unique<HipModule>(*_artifact);
 
         ASSERT_EQ(hipMalloc(&_dA, sizeof(std::uint16_t)), hipSuccess);
@@ -102,6 +103,7 @@ class PerfMeasurementGpu : public ::testing::Test {
         }
     }
 
+    std::string _arch;
     std::unique_ptr<CkDslContainer> _container;
     std::unique_ptr<KernelArtifact> _artifact;
     std::unique_ptr<HipModule> _module;

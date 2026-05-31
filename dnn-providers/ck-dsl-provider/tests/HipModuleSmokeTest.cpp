@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <string>
 #include <vector>
 
 #include "CkDslContainer.hpp"
@@ -26,25 +27,28 @@ using ck_dsl_provider::LaunchAbi;
 /// I-4 smoke test: drive a real HSACO from the embedded compile service
 /// through hipModuleLoadData + hipModuleLaunchKernel against a real GPU.
 ///
-/// Gated on hipGetDeviceCount() > 0 so the host-only CI lane stays
-/// green; this is the same gating pattern other providers use for
-/// HIP-dependent unit tests.
+/// Gated on hipGetDeviceCount() > 0 and a DSL-supported arch
+/// (gfx942/gfx950/gfx1151) so the host-only CI lane and unsupported
+/// devices stay green; this is the same gating pattern other providers
+/// use for HIP-dependent unit tests.
 class HipModuleSmoke : public ::testing::Test {
    protected:
     void SetUp() override {
-        CK_DSL_PROVIDER_SKIP_IF_NOT_GFX950("HipModuleSmoke");
+        CK_DSL_PROVIDER_SKIP_IF_UNSUPPORTED_ARCH("HipModuleSmoke", _arch);
     }
+
+    std::string _arch;
 };
 
 TEST_F(HipModuleSmoke, CompileServiceSmokeRoundTrip) {
     CkDslContainer container;
     auto& bridge = container.compileServiceBridge();
 
-    KernelArtifact artifact = bridge.compileSmoke();
+    KernelArtifact artifact = bridge.compileSmoke(_arch);
 
     // Sanity-check the artifact matches the compile_smoke contract
-    // (gfx950 elementwise copy: kernel name suffix, non-empty HSACO,
-    // exactly three args, one-block grid, single-wave block).
+    // (elementwise copy built for the present arch: kernel name suffix,
+    // non-empty HSACO, exactly three args, one-block grid, single-wave block).
     EXPECT_FALSE(artifact.hsaco.empty()) << "compileSmoke returned empty HSACO";
     EXPECT_FALSE(artifact.kernelName.empty()) << "compileSmoke returned empty kernel name";
     EXPECT_EQ(artifact.kind, "elementwise_copy_smoke");
@@ -62,7 +66,7 @@ TEST_F(HipModuleSmoke, LoadAndLaunchSucceeds) {
     CkDslContainer container;
     auto& bridge = container.compileServiceBridge();
 
-    KernelArtifact artifact = bridge.compileSmoke();
+    KernelArtifact artifact = bridge.compileSmoke(_arch);
 
     // Load the HSACO into a real HIP module. The ctor throws on any
     // hipModuleLoadData / hipModuleGetFunction failure with the HIP
@@ -115,5 +119,27 @@ TEST_F(HipModuleSmoke, LoadAndLaunchSucceeds) {
     EXPECT_EQ(hipFree(dA), hipSuccess);
     EXPECT_EQ(hipFree(dC), hipSuccess);
 }
+
+// Device-free coverage that the arch-aware smoke compile threads its
+// target through to comgr for every supported arch. comgr cross-compiles
+// without the matching device, so this runs on any box -- the
+// verification that compileSmoke(arch) is genuinely multi-arch (the GPU
+// smoke tests above only exercise whatever device is present).
+class CompileSmokeHost : public ::testing::TestWithParam<std::string> {};
+
+TEST_P(CompileSmokeHost, CompilesForArch) {
+    const std::string arch = GetParam();
+    CkDslContainer container;
+    KernelArtifact artifact = container.compileServiceBridge().compileSmoke(arch);
+    EXPECT_FALSE(artifact.hsaco.empty()) << arch << ": empty HSACO";
+    EXPECT_NE(artifact.isa.find(arch), std::string::npos)
+        << "compiled ISA '" << artifact.isa << "' does not target " << arch;
+    EXPECT_EQ(artifact.kind, "elementwise_copy_smoke");
+}
+
+INSTANTIATE_TEST_SUITE_P(Arches, CompileSmokeHost, ::testing::Values("gfx942", "gfx950", "gfx1151"),
+                         [](const ::testing::TestParamInfo<std::string>& info) {
+                             return info.param;
+                         });
 
 }  // namespace

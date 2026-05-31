@@ -9,6 +9,7 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <memory>
 #include <stdexcept>
+#include <string>
 
 #include "CkDslContainer.hpp"
 #include "TestUtils.hpp"
@@ -37,8 +38,10 @@ using ck_dsl_provider::SignatureHash;
 class JitCacheSmoke : public ::testing::Test {
    protected:
     void SetUp() override {
-        CK_DSL_PROVIDER_SKIP_IF_NOT_GFX950("JitCacheSmoke");
+        CK_DSL_PROVIDER_SKIP_IF_UNSUPPORTED_ARCH("JitCacheSmoke", _arch);
     }
+
+    std::string _arch;
 };
 
 TEST_F(JitCacheSmoke, MissThenHit) {
@@ -51,7 +54,7 @@ TEST_F(JitCacheSmoke, MissThenHit) {
     std::atomic<int> loaderInvocations{0};
     auto loader = [&]() {
         loaderInvocations.fetch_add(1, std::memory_order_relaxed);
-        return bridge.compileSmoke();
+        return bridge.compileSmoke(_arch);
     };
 
     auto firstStart = std::chrono::steady_clock::now();
@@ -82,7 +85,7 @@ TEST_F(JitCacheSmoke, DistinctKeysProduceDistinctModules) {
     auto& bridge = container.compileServiceBridge();
 
     JitCache cache;
-    auto loader = [&]() { return bridge.compileSmoke(); };
+    auto loader = [&]() { return bridge.compileSmoke(_arch); };
 
     auto a = cache.getOrLoad(SignatureHash{0xAAAA}, loader);
     auto b = cache.getOrLoad(SignatureHash{0xBBBB}, loader);
