@@ -19,6 +19,7 @@ jobs:
     outputs:
       therock_ref: ${{ steps.ci-env.outputs.therock-ref }}
       docker_image: ${{ steps.ci-env.outputs.docker-image }}
+      rocm_package_version: ${{ steps.rocm_package_version.outputs.rocm_package_version }}
       linux_projects: ${{ steps.linux_projects.outputs.linux_projects }}
       linux_build_runs_on: ${{ steps.linux_projects.outputs.build_runs_on }}
       windows_projects: ${{ steps.windows_projects.outputs.windows_projects }}
@@ -43,7 +44,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           path: TheRock
-          ref: e44b42bbcc7452328ccf12bcac319bda5ede4a6a # 2026-05-20 commit
+          ref: ${{ steps.ci-env.outputs.therock-ref }}
 
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
@@ -54,6 +55,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pydantic requests
+
+      - name: Compute package version
+        id: rocm_package_version
+        run: |
+          python TheRock/build_tools/compute_rocm_package_version.py --release-type=dev
 
       - name: Determine Linux projects to run
         id: linux_projects
@@ -106,6 +112,7 @@ jobs:
     with:
       therock_ref: ${{ needs.setup.outputs.therock_ref }}
       docker_image: ${{ needs.setup.outputs.docker_image }}
+      rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
       cmake_options: ${{ matrix.projects.cmake_options }}
       projects_to_test: ${{ matrix.projects.projects_to_test }}
       test_type: ${{ needs.setup.outputs.test_type }}
@@ -129,6 +136,7 @@ jobs:
     secrets: inherit
     with:
       therock_ref: ${{ needs.setup.outputs.therock_ref }}
+      rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
       cmake_options: ${{ matrix.projects.cmake_options }}
       projects_to_test: ${{ matrix.projects.projects_to_test }}
       test_type: ${{ needs.setup.outputs.test_type }}

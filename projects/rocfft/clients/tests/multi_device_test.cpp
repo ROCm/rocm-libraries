@@ -320,6 +320,12 @@ INSTANTIATE_TEST_SUITE_P(multi_gpu_different_io_devices,
 
 TEST(multi_gpu_validate, catch_validation_errors)
 {
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > test_prob)
+    {
+        GTEST_SKIP();
+    }
+
     const auto all_split_types
         = {SLOW_INOUT, SLOW_IN, SLOW_OUT, SLOW_IN_FAST_OUT, PENCIL_3D, IMPLICIT_HIPFFT};
 
