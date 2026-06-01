@@ -84,13 +84,27 @@ TestOutcome testOutcomeFor(const std::string& testName)
     return TestOutcome::UNKNOWN;
 }
 
-// Format a record's dtype field for display in the always-pairs schema:
-// "in->out" regardless of whether the pair is symmetric. Matches the
-// io_dtype_pairs entry an engineer would edit in the sidecar.
+// Format a record's full dtype signature for display in the
+// named-field schema:
+//   {io=fp16, compute=fp32}                 (symmetric, no intermediate)
+//   {io=fp16, output=fp32, compute=fp32}    (asymmetric)
+//   {io=fp16, compute=fp32, intermediate=fp32}
+// Matches the dtype_combos inline-table entry an engineer would edit
+// in the sidecar.
 std::string formatDtypeForDisplay(const GraphSupportRecord& record)
 {
-    const std::string out = record.outputDtype.empty() ? record.ioDtype : record.outputDtype;
-    return record.ioDtype + "->" + out;
+    std::string s = "{io=" + record.ioDtype;
+    if(!record.outputDtype.empty() && record.outputDtype != record.ioDtype)
+    {
+        s += ", output=" + record.outputDtype;
+    }
+    s += ", compute=" + record.computeDtype;
+    if(!record.intermediateDtype.empty())
+    {
+        s += ", intermediate=" + record.intermediateDtype;
+    }
+    s += "}";
+    return s;
 }
 
 SupportClaimFinding buildRuleA(const GraphSupportRecord& record, const SupportMatcher& matcher)
@@ -99,7 +113,7 @@ SupportClaimFinding buildRuleA(const GraphSupportRecord& record, const SupportMa
     body << "  CLAIM BROKEN (Rule A):\n"
          << "    " << record.testName << "\n"
          << "      observed: op_chain=\"" << record.opChain << "\"\n"
-         << "                " << "io_dtype_pair" << "=\"" << formatDtypeForDisplay(record)
+         << "                " << "dtype_combo" << "=\"" << formatDtypeForDisplay(record)
          << "\" layout=\"" << record.layout << "\"\n"
          << "      claim source: " << matcher.sourceLocation << "\n"
          << "      engine returned no support for this graph\n"
@@ -163,7 +177,7 @@ SupportClaimFinding buildRuleD(const GraphSupportRecord& record, const std::stri
          << "    " << record.testName << "\n"
          << "      test FAILED; engine '" << engineName
          << "' returned support; no matcher covers this graph.\n"
-         << "      observed: op_chain=\"" << record.opChain << "\" " << "io_dtype_pair" << "=\""
+         << "      observed: op_chain=\"" << record.opChain << "\" " << "dtype_combo" << "=\""
          << formatDtypeForDisplay(record) << "\" layout=\"" << record.layout << "\"\n"
          << "      Action: tighten the engine's get_ranked_engine_ids logic, or add a "
             "[[test_skips]]\n"
@@ -307,8 +321,12 @@ bool SupportClaimsVerifier::runAndReport()
         {
             for(const auto& matcher : block->matchers)
             {
-                if(matcher.contains(
-                       record.opChain, record.ioDtype, record.outputDtype, record.layout))
+                if(matcher.contains(record.opChain,
+                                    record.ioDtype,
+                                    record.outputDtype,
+                                    record.computeDtype,
+                                    record.intermediateDtype,
+                                    record.layout))
                 {
                     matchingMatcher = &matcher;
                     break;
@@ -387,11 +405,13 @@ bool SupportClaimsVerifier::runAndReport()
     // simply have been filtered out.
     if(block != nullptr)
     {
-        // Observed 4-tuples: (opChain, inputDtype, outputDtype, layout).
-        // outputDtype is normalized to inputDtype when the record was
-        // symmetric — gives one canonical form that forEachTuple's
-        // visitor compares against.
-        std::set<std::tuple<std::string, std::string, std::string, std::string>> observedTuples;
+        // Observed 6-tuples: (opChain, io, output, compute, intermediate,
+        // layout). output is normalized to io for symmetric records so
+        // forEachTuple's visitor compares against one canonical form.
+        std::set<
+            std::
+                tuple<std::string, std::string, std::string, std::string, std::string, std::string>>
+            observedTuples;
         for(const auto& record : records)
         {
             if(record.opChain.empty())
@@ -400,17 +420,25 @@ bool SupportClaimsVerifier::runAndReport()
             }
             const std::string outDtype
                 = record.outputDtype.empty() ? record.ioDtype : record.outputDtype;
-            observedTuples.emplace(record.opChain, record.ioDtype, outDtype, record.layout);
+            observedTuples.emplace(record.opChain,
+                                   record.ioDtype,
+                                   outDtype,
+                                   record.computeDtype,
+                                   record.intermediateDtype,
+                                   record.layout);
         }
 
         for(const auto& matcher : block->matchers)
         {
             bool covered = false;
             matcher.forEachTuple([&](const std::string& op,
-                                     const std::string& in,
+                                     const std::string& io,
                                      const std::string& out,
+                                     const std::string& compute,
+                                     const std::string& intermediate,
                                      const std::string& layout) {
-                if(observedTuples.find({op, in, out, layout}) != observedTuples.end())
+                if(observedTuples.find({op, io, out, compute, intermediate, layout})
+                   != observedTuples.end())
                 {
                     covered = true;
                     return false;

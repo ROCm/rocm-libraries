@@ -26,11 +26,30 @@ struct GraphSupportRecord; // forward decl; full type in SupportMatrixCollector.
 struct CondensedSupportData
 {
     std::vector<SupportMatcher> matchers;
-    // (opChain, inputDtype, outputDtype, layout) — outputDtype is the
-    // string the record was observed with (== inputDtype for symmetric
-    // graphs).
-    std::set<std::tuple<std::string, std::string, std::string, std::string>>
-        unsupportedObservations;
+    // One unsupported observation. Carries the full dispatch signature
+    // so the diagnostic prints what the schema would express.
+    struct UnsupportedObservation
+    {
+        std::string opChain;
+        std::string io;
+        std::string output; // == io for symmetric (we don't elide)
+        std::string compute;
+        std::string intermediate; // empty when graph didn't set it
+        std::string layout;
+
+        bool operator<(const UnsupportedObservation& other) const
+        {
+            const auto a = std::tie(opChain, io, output, compute, intermediate, layout);
+            const auto b = std::tie(other.opChain,
+                                    other.io,
+                                    other.output,
+                                    other.compute,
+                                    other.intermediate,
+                                    other.layout);
+            return a < b;
+        }
+    };
+    std::set<UnsupportedObservation> unsupportedObservations;
     // Per-conflict diagnostic: (op, io, layout) -> { supportedBy, unsupportedBy }
     // populated only when a tuple landed in both S and U during the run.
     // Non-empty here means the caller MUST refuse to write the sidecar
@@ -41,9 +60,11 @@ struct CondensedSupportData
     {
         std::string opChain;
         std::string inputDtype;
-        // Empty when the conflict involves symmetric records only; populated
-        // (and may differ from inputDtype) when asymmetric I/O is in play.
+        // Always populated with the observed value (== inputDtype for
+        // symmetric records). Diagnostic displays the full pair always.
         std::string outputDtype;
+        std::string computeDtype;
+        std::string intermediateDtype; // empty when graph didn't set it
         std::string layout;
         std::vector<std::string> supportedBy; // test names reporting support
         std::vector<std::string> unsupportedBy; // test names reporting no support

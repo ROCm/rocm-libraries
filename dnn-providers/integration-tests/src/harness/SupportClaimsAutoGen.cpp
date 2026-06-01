@@ -40,65 +40,61 @@ namespace hipdnn_integration_tests
 namespace
 {
 
-// (input_dtype, output_dtype) pair — the dtype axis of the rectangle
-// cover model. Symmetric records use a pair where in == out.
-using DtypePair = std::pair<std::string, std::string>;
-// (pair, layout) cell — the unit of the cover problem.
-using Cell = std::pair<DtypePair, std::string>;
+// (DtypeCombo, layout) cell — the unit of the rectangle-cover problem.
+// DtypeCombo carries io/output/compute/intermediate; the layout is the
+// orthogonal axis. Symmetric records and asymmetric records both fit
+// the same cell type — the combo's output equals io for symmetric.
+using Cell = std::pair<DtypeCombo, std::string>;
 
-// One axis-aligned rectangle in (pair, layout) space. Note that the
-// dtype dimension is a flat set of (in, out) pairs rather than two
-// independent dtype axes — this keeps the schema mapping clean:
-//   - if every pair has in == out, emit as io_dtypes shorthand
-//   - if every pair has in != out, emit as io_dtype_pairs
-//   - mixed: emit both fields
-// Two independent axes (input_set × output_set) would conflate all
-// cross-combinations and force claims of asymmetric pairs whenever
-// multiple symmetric dtypes were claimed in one rectangle.
+// One axis-aligned rectangle in (combo, layout) space. The dtype
+// dimension is a flat set of DtypeCombos rather than independent
+// io/output/compute axes — keeps the schema mapping clean (each combo
+// is one emitted inline-table entry) and avoids forcing cross-product
+// claims of unobserved combos whenever multiple combos share a layout.
 struct Rect
 {
-    std::vector<DtypePair> pairs;
+    std::vector<DtypeCombo> combos;
     std::vector<std::string> layouts;
 
     bool operator<(const Rect& other) const
     {
-        return std::tie(pairs, layouts) < std::tie(other.pairs, other.layouts);
+        return std::tie(combos, layouts) < std::tie(other.combos, other.layouts);
     }
 };
 
-// Find the largest safe rectangle: the (pair_subset × layout_subset)
+// Find the largest safe rectangle: the (combo_subset × layout_subset)
 // that covers the most cells in `targets` while containing zero cells
 // in `forbidden`. Brute-force over the power set of each axis — fine
-// because cardinalities are small in practice (≤9 pairs from 3 dtypes
-// observed asymmetrically, ≤6 layouts → ~32k candidate combinations).
+// because cardinalities are small in practice (a handful of distinct
+// dtype combos per op_chain, ≤6 layouts).
 //
 // Tie-break order (deterministic so two engineers on the same hardware
 // produce identical sidecars):
 //   1. Most target cells covered (greedy gain).
 //   2. Smallest rect size (fewer unobserved cells claimed — reduces
 //      Rule A risk on first run).
-//   3. Lexicographic order on (pairs, layouts) — stable tiebreaker.
+//   3. Lexicographic order on (combos, layouts) — stable tiebreaker.
 //
 // Returns an empty rect if no candidate covers any target cell.
 Rect findLargestSafeRectangle(const std::set<Cell>& targets,
                               const std::set<Cell>& forbidden,
-                              const std::vector<DtypePair>& allPairs,
+                              const std::vector<DtypeCombo>& allCombos,
                               const std::vector<std::string>& allLayouts)
 {
     Rect best;
     size_t bestScore = 0;
     size_t bestSize = SIZE_MAX;
 
-    const size_t pairN = allPairs.size();
+    const size_t comboN = allCombos.size();
     const size_t layoutN = allLayouts.size();
-    for(size_t pairMask = 1; pairMask < (size_t{1} << pairN); ++pairMask)
+    for(size_t comboMask = 1; comboMask < (size_t{1} << comboN); ++comboMask)
     {
-        std::vector<DtypePair> pairs;
-        for(size_t i = 0; i < pairN; ++i)
+        std::vector<DtypeCombo> combos;
+        for(size_t i = 0; i < comboN; ++i)
         {
-            if((pairMask >> i) & size_t{1})
+            if((comboMask >> i) & size_t{1})
             {
-                pairs.push_back(allPairs[i]);
+                combos.push_back(allCombos[i]);
             }
         }
         for(size_t layoutMask = 1; layoutMask < (size_t{1} << layoutN); ++layoutMask)
@@ -114,11 +110,11 @@ Rect findLargestSafeRectangle(const std::set<Cell>& targets,
 
             // Safety: reject if any cell in the cross-product is forbidden.
             bool safe = true;
-            for(const auto& pair : pairs)
+            for(const auto& combo : combos)
             {
                 for(const auto& layout : layouts)
                 {
-                    if(forbidden.find({pair, layout}) != forbidden.end())
+                    if(forbidden.find({combo, layout}) != forbidden.end())
                     {
                         safe = false;
                         break;
@@ -135,11 +131,11 @@ Rect findLargestSafeRectangle(const std::set<Cell>& targets,
             }
 
             size_t score = 0;
-            for(const auto& pair : pairs)
+            for(const auto& combo : combos)
             {
                 for(const auto& layout : layouts)
                 {
-                    if(targets.find({pair, layout}) != targets.end())
+                    if(targets.find({combo, layout}) != targets.end())
                     {
                         ++score;
                     }
@@ -150,16 +146,16 @@ Rect findLargestSafeRectangle(const std::set<Cell>& targets,
                 continue;
             }
 
-            const size_t size = pairs.size() * layouts.size();
+            const size_t size = combos.size() * layouts.size();
             const bool better
                 = score > bestScore || (score == bestScore && size < bestSize)
                   || (score == bestScore && size == bestSize
-                      && std::tie(pairs, layouts) < std::tie(best.pairs, best.layouts));
+                      && std::tie(combos, layouts) < std::tie(best.combos, best.layouts));
             if(better)
             {
                 bestScore = score;
                 bestSize = size;
-                best.pairs = pairs;
+                best.combos = combos;
                 best.layouts = layouts;
             }
         }
@@ -167,26 +163,26 @@ Rect findLargestSafeRectangle(const std::set<Cell>& targets,
     return best;
 }
 
-// Greedy rectangle cover. Same shape as before; key axis is now a flat
-// dtype-pair set instead of two independent dtype axes.
+// Greedy rectangle cover. Same shape as before; cell axis is now
+// (DtypeCombo, layout).
 std::vector<Rect> findRectangleCover(std::set<Cell> targets,
                                      const std::set<Cell>& forbidden,
-                                     const std::vector<DtypePair>& allPairs,
+                                     const std::vector<DtypeCombo>& allCombos,
                                      const std::vector<std::string>& allLayouts)
 {
     std::vector<Rect> result;
     while(!targets.empty())
     {
-        Rect r = findLargestSafeRectangle(targets, forbidden, allPairs, allLayouts);
-        if(r.pairs.empty() || r.layouts.empty())
+        Rect r = findLargestSafeRectangle(targets, forbidden, allCombos, allLayouts);
+        if(r.combos.empty() || r.layouts.empty())
         {
             break;
         }
-        for(const auto& pair : r.pairs)
+        for(const auto& combo : r.combos)
         {
             for(const auto& layout : r.layouts)
             {
-                targets.erase({pair, layout});
+                targets.erase({combo, layout});
             }
         }
         result.push_back(std::move(r));
@@ -199,18 +195,29 @@ std::vector<Rect> findRectangleCover(std::set<Cell> targets,
 CondensedSupportData condenseSupportClaims(const std::vector<GraphSupportRecord>& records,
                                            std::string_view engineName)
 {
-    // 4-tuple: (opChain, inputDtype, outputDtype, layout). outputDtype is
-    // normalized to inputDtype for symmetric records so the key is stable.
-    using Tuple = std::tuple<std::string, std::string, std::string, std::string>;
+    // Per-record key: (opChain, DtypeCombo, layout). DtypeCombo carries
+    // io/output/compute/intermediate. outputDtype is normalized to io
+    // for symmetric records so the keyspace doesn't double-count.
+    struct Key
+    {
+        std::string opChain;
+        DtypeCombo combo;
+        std::string layout;
+        bool operator<(const Key& other) const
+        {
+            return std::tie(opChain, combo, layout)
+                   < std::tie(other.opChain, other.combo, other.layout);
+        }
+    };
 
-    std::set<Tuple> S;
-    std::set<Tuple> U;
+    std::set<Key> S;
+    std::set<Key> U;
     std::set<std::string> opsInS;
-    std::set<DtypePair> allPairsSet;
+    std::set<DtypeCombo> allCombosSet;
     std::set<std::string> allLayoutsSet;
 
-    std::map<Tuple, std::vector<std::string>> supportedBy;
-    std::map<Tuple, std::vector<std::string>> unsupportedBy;
+    std::map<Key, std::vector<std::string>> supportedBy;
+    std::map<Key, std::vector<std::string>> unsupportedBy;
 
     for(const auto& record : records)
     {
@@ -218,52 +225,60 @@ CondensedSupportData condenseSupportClaims(const std::vector<GraphSupportRecord>
         {
             continue;
         }
-        // Normalize: empty outputDtype means symmetric; canonicalize to
-        // inputDtype so the keyspace doesn't double-count fp16/'' vs
-        // fp16/fp16.
-        const std::string outDtype
-            = record.outputDtype.empty() ? record.ioDtype : record.outputDtype;
-        const Tuple tuple{record.opChain, record.ioDtype, outDtype, record.layout};
+        DtypeCombo combo;
+        combo.io = record.ioDtype;
+        combo.output = record.outputDtype; // empty == symmetric
+        combo.compute = record.computeDtype;
+        combo.intermediate = record.intermediateDtype; // empty == not set
+        // Canonicalize symmetric: drop the empty output so two records
+        // that only differ in "absent vs same-as-io" don't split the key.
+        if(!combo.output.empty() && combo.output == combo.io)
+        {
+            combo.output.clear();
+        }
+        const Key key{record.opChain, combo, record.layout};
         const bool engineSupports = record.supportingEngines.find(std::string(engineName))
                                     != record.supportingEngines.end();
         if(engineSupports)
         {
-            S.insert(tuple);
+            S.insert(key);
             opsInS.insert(record.opChain);
-            supportedBy[tuple].push_back(record.testName);
+            supportedBy[key].push_back(record.testName);
         }
         else
         {
-            U.insert(tuple);
-            unsupportedBy[tuple].push_back(record.testName);
+            U.insert(key);
+            unsupportedBy[key].push_back(record.testName);
         }
-        allPairsSet.insert({record.ioDtype, outDtype});
+        allCombosSet.insert(combo);
         allLayoutsSet.insert(record.layout);
     }
 
     // Detect S∩U conflicts before condensation. RFC §7 safety invariant.
     CondensedSupportData out;
-    for(const auto& tuple : S)
+    for(const auto& key : S)
     {
-        if(U.find(tuple) == U.end())
+        if(U.find(key) == U.end())
         {
             continue;
         }
         CondensedSupportData::ConflictDetail detail;
-        detail.opChain = std::get<0>(tuple);
-        detail.inputDtype = std::get<1>(tuple);
-        // Always populate outputDtype with the observed value — display
-        // logic shows the explicit "in->out" form regardless of whether
-        // it's symmetric, so the schema and diagnostics match exactly.
-        detail.outputDtype = std::get<2>(tuple);
-        detail.layout = std::get<3>(tuple);
-        auto sIt = supportedBy.find(tuple);
+        detail.opChain = key.opChain;
+        detail.inputDtype = key.combo.io;
+        // Always populate outputDtype with the effective value — display
+        // logic shows the full signature regardless of whether it's
+        // symmetric, so the schema and diagnostics match exactly.
+        detail.outputDtype = key.combo.effectiveOutput();
+        detail.computeDtype = key.combo.compute;
+        detail.intermediateDtype = key.combo.intermediate;
+        detail.layout = key.layout;
+        auto sIt = supportedBy.find(key);
         if(sIt != supportedBy.end())
         {
             detail.supportedBy = sIt->second;
             std::sort(detail.supportedBy.begin(), detail.supportedBy.end());
         }
-        auto uIt = unsupportedBy.find(tuple);
+        auto uIt = unsupportedBy.find(key);
         if(uIt != unsupportedBy.end())
         {
             detail.unsupportedBy = uIt->second;
@@ -271,38 +286,53 @@ CondensedSupportData condenseSupportClaims(const std::vector<GraphSupportRecord>
         }
         out.conflictingObservations.push_back(std::move(detail));
     }
+    auto buildUnsupportedFromKeys = [](const std::set<Key>& keys) {
+        std::set<CondensedSupportData::UnsupportedObservation> result;
+        for(const auto& k : keys)
+        {
+            CondensedSupportData::UnsupportedObservation u;
+            u.opChain = k.opChain;
+            u.io = k.combo.io;
+            u.output = k.combo.effectiveOutput();
+            u.compute = k.combo.compute;
+            u.intermediate = k.combo.intermediate;
+            u.layout = k.layout;
+            result.insert(std::move(u));
+        }
+        return result;
+    };
     if(!out.conflictingObservations.empty())
     {
-        out.unsupportedObservations = std::move(U);
+        out.unsupportedObservations = buildUnsupportedFromKeys(U);
         return out;
     }
 
     // Sort axes for deterministic bitmask enumeration.
-    const std::vector<DtypePair> allPairs(allPairsSet.begin(), allPairsSet.end());
+    const std::vector<DtypeCombo> allCombos(allCombosSet.begin(), allCombosSet.end());
     const std::vector<std::string> allLayouts(allLayoutsSet.begin(), allLayoutsSet.end());
 
-    // Per-op rectangle cover over (pair, layout) cells.
+    // Per-op rectangle cover over (DtypeCombo, layout) cells.
     std::map<std::string, std::vector<Rect>> opToRects;
     for(const auto& op : opsInS)
     {
         std::set<Cell> S_op;
         std::set<Cell> U_op;
-        for(const auto& [tupleOp, tupleIn, tupleOut, tupleLayout] : S)
+        for(const auto& k : S)
         {
-            if(tupleOp == op)
+            if(k.opChain == op)
             {
-                S_op.insert({{tupleIn, tupleOut}, tupleLayout});
+                S_op.insert({k.combo, k.layout});
             }
         }
-        for(const auto& [tupleOp, tupleIn, tupleOut, tupleLayout] : U)
+        for(const auto& k : U)
         {
-            if(tupleOp == op)
+            if(k.opChain == op)
             {
-                U_op.insert({{tupleIn, tupleOut}, tupleLayout});
+                U_op.insert({k.combo, k.layout});
             }
         }
 
-        auto cover = findRectangleCover(S_op, U_op, allPairs, allLayouts);
+        auto cover = findRectangleCover(S_op, U_op, allCombos, allLayouts);
         if(!cover.empty())
         {
             opToRects.emplace(op, std::move(cover));
@@ -324,15 +354,7 @@ CondensedSupportData condenseSupportClaims(const std::vector<GraphSupportRecord>
     {
         SupportMatcher matcher;
         matcher.opChains.assign(ops.begin(), ops.end());
-        // All pairs (symmetric and asymmetric alike) go into the
-        // single io_dtype_pairs list. Sorted alphabetically for
-        // deterministic output across runs.
-        std::set<std::string> pairStrings;
-        for(const auto& [pairIn, pairOut] : rect.pairs)
-        {
-            pairStrings.insert(pairIn + "->" + pairOut);
-        }
-        matcher.ioDtypePairs.assign(pairStrings.begin(), pairStrings.end());
+        matcher.dtypeCombos = rect.combos;
         matcher.layouts = rect.layouts;
         out.matchers.push_back(std::move(matcher));
     }
@@ -341,7 +363,7 @@ CondensedSupportData condenseSupportClaims(const std::vector<GraphSupportRecord>
         out.matchers.end(),
         [](const SupportMatcher& a, const SupportMatcher& b) { return a.opChains < b.opChains; });
 
-    out.unsupportedObservations = std::move(U);
+    out.unsupportedObservations = buildUnsupportedFromKeys(U);
     return out;
 }
 
@@ -368,14 +390,23 @@ std::string renderSupportBlockToml(const CondensedSupportData& condensed,
         }
         out << "]\n";
 
-        out << "io_dtype_pairs = [";
-        for(size_t i = 0; i < matcher.ioDtypePairs.size(); ++i)
+        // dtype_combos inline tables. Each entry lists io + compute
+        // (always) plus output / intermediate (only when set, keeping
+        // the schema mirror-of-display compact for the common cases).
+        out << "dtype_combos = [\n";
+        for(const auto& combo : matcher.dtypeCombos)
         {
-            if(i > 0)
+            out << "    {io=\"" << combo.io << "\"";
+            if(!combo.output.empty() && combo.output != combo.io)
             {
-                out << ", ";
+                out << ", output=\"" << combo.output << "\"";
             }
-            out << "\"" << matcher.ioDtypePairs[i] << "\"";
+            out << ", compute=\"" << combo.compute << "\"";
+            if(!combo.intermediate.empty())
+            {
+                out << ", intermediate=\"" << combo.intermediate << "\"";
+            }
+            out << "},\n";
         }
         out << "]\n";
 
@@ -406,7 +437,7 @@ std::string defaultHeader(const std::string& engineName)
            "support-claims-schema.md\n"
         << "\n"
         << "[meta]\n"
-        << "version = 4\n"
+        << "version = 5\n"
         << "engine  = \"" << engineName << "\"\n"
         << "\n";
     return out.str();
@@ -727,9 +758,12 @@ bool checkShrinkagePrecondition(const std::filesystem::path& sidecarPath,
         return true;
     }
 
-    // Build the observed 4-tuple set: (op, inputDtype, outputDtype, layout).
-    // outputDtype is normalized to inputDtype for symmetric records.
-    std::set<std::tuple<std::string, std::string, std::string, std::string>> observed;
+    // Build the observed 6-tuple set: (op, io, output, compute,
+    // intermediate, layout). output is normalized to io for symmetric
+    // records so the keyspace stays canonical.
+    std::set<
+        std::tuple<std::string, std::string, std::string, std::string, std::string, std::string>>
+        observed;
     for(const auto& r : records)
     {
         if(r.opChain.empty())
@@ -737,7 +771,8 @@ bool checkShrinkagePrecondition(const std::filesystem::path& sidecarPath,
             continue;
         }
         const std::string outDtype = r.outputDtype.empty() ? r.ioDtype : r.outputDtype;
-        observed.emplace(r.opChain, r.ioDtype, outDtype, r.layout);
+        observed.emplace(
+            r.opChain, r.ioDtype, outDtype, r.computeDtype, r.intermediateDtype, r.layout);
     }
 
     // Collect any matchers whose cross-product has zero overlap with the
@@ -748,10 +783,12 @@ bool checkShrinkagePrecondition(const std::filesystem::path& sidecarPath,
     {
         bool anyObserved = false;
         matcher.forEachTuple([&](const std::string& op,
-                                 const std::string& in,
+                                 const std::string& io,
                                  const std::string& out,
+                                 const std::string& compute,
+                                 const std::string& intermediate,
                                  const std::string& layout) {
-            if(observed.find({op, in, out, layout}) != observed.end())
+            if(observed.find({op, io, out, compute, intermediate, layout}) != observed.end())
             {
                 anyObserved = true;
                 return false;
@@ -779,7 +816,7 @@ bool checkShrinkagePrecondition(const std::filesystem::path& sidecarPath,
         std::cerr << "  - " << matcher->sourceLocation << "\n"
                   << "    op_chains[0] = \""
                   << (matcher->opChains.empty() ? "" : matcher->opChains.front())
-                  << "\"  io_dtype_pairs=" << matcher->ioDtypePairs.size()
+                  << "\"  dtype_combos=" << matcher->dtypeCombos.size()
                   << "  layouts=" << matcher->layouts.size() << "\n";
     }
     std::cerr << "  This usually means a partial run (--gtest_filter set, or the suite ran on "
@@ -826,10 +863,22 @@ bool generateSupportClaimsForCurrentArch(const std::filesystem::path& sidecarPat
                      "[[test_skips]] for the unsupported variant.\n\n";
         constexpr size_t maxTuplesShown = 25;
         constexpr size_t maxTestsPerSide = 3;
-        // Always-pairs schema: show "in->out" even when symmetric so the
-        // diagnostic matches what the engineer would type into a matcher.
+        // Show the full dispatch signature that the schema would record:
+        // {io=..., output=... (if asymmetric), compute=..., intermediate=...
+        // (if set)}. Engineer sees the same shape the matcher entry uses.
         const auto formatDtype = [](const CondensedSupportData::ConflictDetail& c) {
-            return c.inputDtype + "->" + c.outputDtype;
+            std::string s = "{io=" + c.inputDtype;
+            if(c.outputDtype != c.inputDtype)
+            {
+                s += ", output=" + c.outputDtype;
+            }
+            s += ", compute=" + c.computeDtype;
+            if(!c.intermediateDtype.empty())
+            {
+                s += ", intermediate=" + c.intermediateDtype;
+            }
+            s += "}";
+            return s;
         };
         size_t shown = 0;
         for(const auto& conflict : condensed.conflictingObservations)
@@ -874,8 +923,8 @@ bool generateSupportClaimsForCurrentArch(const std::filesystem::path& sidecarPat
                      << "\n\n";
             for(const auto& conflict : condensed.conflictingObservations)
             {
-                artifact << "(\"" << conflict.opChain << "\", \"" << conflict.inputDtype << "->"
-                         << conflict.outputDtype << "\", \"" << conflict.layout << "\")\n";
+                artifact << "(\"" << conflict.opChain << "\", " << formatDtype(conflict) << ", \""
+                         << conflict.layout << "\")\n";
                 artifact << "  supported by:\n";
                 for(const auto& t : conflict.supportedBy)
                 {
@@ -912,11 +961,11 @@ bool generateSupportClaimsForCurrentArch(const std::filesystem::path& sidecarPat
     if(!condensed.unsupportedObservations.empty())
     {
         std::cerr << "[--write-support-claims] " << condensed.unsupportedObservations.size()
-                  << " observed (op_chain, io_dtype, layout) tuples were in U (engine returned "
-                     "no support); they are NOT included in any matcher. Review the sidecar "
-                     "diff to confirm the carve-outs are intentional. Examples:\n";
+                  << " observed (op_chain, dtype_combo, layout) tuples were in U (engine "
+                     "returned no support); they are NOT included in any matcher. Review the "
+                     "sidecar diff to confirm the carve-outs are intentional. Examples:\n";
         size_t shown = 0;
-        for(const auto& [op, in, out, layout] : condensed.unsupportedObservations)
+        for(const auto& u : condensed.unsupportedObservations)
         {
             if(shown++ >= 10)
             {
@@ -924,8 +973,17 @@ bool generateSupportClaimsForCurrentArch(const std::filesystem::path& sidecarPat
                           << " more)\n";
                 break;
             }
-            std::cerr << "    (\"" << op << "\", \"" << in << "->" << out << "\", \"" << layout
-                      << "\")\n";
+            std::cerr << "    (\"" << u.opChain << "\", {io=" << u.io;
+            if(u.output != u.io)
+            {
+                std::cerr << ", output=" << u.output;
+            }
+            std::cerr << ", compute=" << u.compute;
+            if(!u.intermediate.empty())
+            {
+                std::cerr << ", intermediate=" << u.intermediate;
+            }
+            std::cerr << "}, \"" << u.layout << "\")\n";
         }
     }
     return true;

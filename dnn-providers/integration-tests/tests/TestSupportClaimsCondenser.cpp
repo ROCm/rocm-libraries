@@ -17,21 +17,33 @@ namespace
 
 using hipdnn_integration_tests::CondensedSupportData;
 using hipdnn_integration_tests::condenseSupportClaims;
+using hipdnn_integration_tests::DtypeCombo;
 using hipdnn_integration_tests::GraphSupportRecord;
 using hipdnn_integration_tests::SupportMatcher;
 
-// Build a record with just the fields the condenser reads: opChain,
-// ioDtype, layout, testName, and supportingEngines.
+// Convenience: build a symmetric DtypeCombo with default fp32 compute.
+DtypeCombo sym(std::string io, std::string compute = "fp32")
+{
+    DtypeCombo c;
+    c.io = std::move(io);
+    c.compute = std::move(compute);
+    return c;
+}
+
+// Build a record with the fields the condenser reads. Defaults to
+// symmetric I/O and fp32 compute — the common case in current tests.
 GraphSupportRecord makeRecord(std::string op,
                               std::string io,
                               std::string layout,
                               bool engineSupports,
                               std::string testName = "TestSuite.TestCase",
-                              std::string engineName = "TEST_ENGINE")
+                              std::string engineName = "TEST_ENGINE",
+                              std::string compute = "fp32")
 {
     GraphSupportRecord r;
     r.opChain = std::move(op);
     r.ioDtype = std::move(io);
+    r.computeDtype = std::move(compute);
     r.layout = std::move(layout);
     r.testName = std::move(testName);
     if(engineSupports)
@@ -47,13 +59,13 @@ GraphSupportRecord makeRecord(std::string op,
 struct ExpectedMatcher
 {
     std::vector<std::string> opChains;
-    std::vector<std::string> ioDtypePairs; // "in->out" form
+    std::vector<DtypeCombo> dtypeCombos;
     std::vector<std::string> layouts;
 };
 
 bool matcherEquals(const SupportMatcher& actual, const ExpectedMatcher& expected)
 {
-    return actual.opChains == expected.opChains && actual.ioDtypePairs == expected.ioDtypePairs
+    return actual.opChains == expected.opChains && actual.dtypeCombos == expected.dtypeCombos
            && actual.layouts == expected.layouts;
 }
 
@@ -88,7 +100,7 @@ TEST(TestSupportClaimsCondenser, SingleSupportedRecordEmitsSingleCellMatcher)
     };
     auto result = condenseSupportClaims(records, "TEST_ENGINE");
     ASSERT_EQ(result.matchers.size(), 1u);
-    EXPECT_TRUE(matcherEquals(result.matchers[0], {{"ConvFprop"}, {"fp32->fp32"}, {"NCHW"}}));
+    EXPECT_TRUE(matcherEquals(result.matchers[0], {{"ConvFprop"}, {sym("fp32")}, {"NCHW"}}));
 }
 
 TEST(TestSupportClaimsCondenser, FullRectangleCondensesToSingleMatcher)
@@ -103,7 +115,7 @@ TEST(TestSupportClaimsCondenser, FullRectangleCondensesToSingleMatcher)
     auto result = condenseSupportClaims(records, "TEST_ENGINE");
     ASSERT_EQ(result.matchers.size(), 1u);
     EXPECT_TRUE(matcherEquals(result.matchers[0],
-                              {{"ConvFprop"}, {"fp16->fp16", "fp32->fp32"}, {"NCHW", "NHWC"}}));
+                              {{"ConvFprop"}, {sym("fp16"), sym("fp32")}, {"NCHW", "NHWC"}}));
 }
 
 // -- The reviewer's counterexample (RFC 0012 §7 correctness) -----------
@@ -127,23 +139,27 @@ TEST(TestSupportClaimsCondenser, AntiDiagonalForbiddenCellsRequireTwoRectangles)
     ASSERT_EQ(result.matchers.size(), 2u);
 
     // Order in result is sorted by opChains; for a single op_chain that
-    // means matchers are sorted by their ios/layouts content. We check
+    // means matchers are sorted by their combos/layouts content. Check
     // set membership rather than position to keep the test resilient to
-    // tiebreak ordering changes.
+    // tiebreak ordering changes. Signatures encode (combo, "|", layouts)
+    // as a flat string vector for cheap set comparison.
     std::set<std::vector<std::string>> matcherSignatures;
     for(const auto& m : result.matchers)
     {
         EXPECT_EQ(m.opChains, (std::vector<std::string>{"ConvFprop"}));
         std::vector<std::string> sig;
-        sig.insert(sig.end(), m.ioDtypePairs.begin(), m.ioDtypePairs.end());
+        for(const auto& combo : m.dtypeCombos)
+        {
+            sig.push_back("io=" + combo.io + ",compute=" + combo.compute);
+        }
         sig.push_back("|");
         sig.insert(sig.end(), m.layouts.begin(), m.layouts.end());
         matcherSignatures.insert(std::move(sig));
     }
-    EXPECT_TRUE(matcherSignatures.count({"fp16->fp16", "|", "NHWC"}))
-        << "Expected matcher {fp16->fp16}×{NHWC} in cover";
-    EXPECT_TRUE(matcherSignatures.count({"fp32->fp32", "|", "NCHW"}))
-        << "Expected matcher {fp32->fp32}×{NCHW} in cover";
+    EXPECT_TRUE(matcherSignatures.count({"io=fp16,compute=fp32", "|", "NHWC"}))
+        << "Expected matcher {io=fp16,compute=fp32}×{NHWC} in cover";
+    EXPECT_TRUE(matcherSignatures.count({"io=fp32,compute=fp32", "|", "NCHW"}))
+        << "Expected matcher {io=fp32,compute=fp32}×{NCHW} in cover";
 }
 
 // -- Grouping across op_chains -----------------------------------------
@@ -158,8 +174,8 @@ TEST(TestSupportClaimsCondenser, OpChainsSharingRectangleGroupIntoOneMatcher)
     };
     auto result = condenseSupportClaims(records, "TEST_ENGINE");
     ASSERT_EQ(result.matchers.size(), 1u);
-    EXPECT_TRUE(matcherEquals(
-        result.matchers[0], {{"ConvDgrad", "ConvFprop"}, {"fp16->fp16", "fp32->fp32"}, {"NCHW"}}));
+    EXPECT_TRUE(matcherEquals(result.matchers[0],
+                              {{"ConvDgrad", "ConvFprop"}, {sym("fp16"), sym("fp32")}, {"NCHW"}}));
 }
 
 TEST(TestSupportClaimsCondenser, OpChainsWithDifferentSafeRectanglesGetSeparateMatchers)
@@ -195,9 +211,9 @@ TEST(TestSupportClaimsCondenser, OpChainsWithDifferentSafeRectanglesGetSeparateM
     }
     ASSERT_NE(fpropMatcher, nullptr);
     ASSERT_NE(dgradMatcher, nullptr);
-    EXPECT_EQ(fpropMatcher->ioDtypePairs, (std::vector<std::string>{"fp16->fp16", "fp32->fp32"}));
+    EXPECT_EQ(fpropMatcher->dtypeCombos, (std::vector<DtypeCombo>{sym("fp16"), sym("fp32")}));
     EXPECT_EQ(fpropMatcher->layouts, (std::vector<std::string>{"NCHW", "NHWC"}));
-    EXPECT_EQ(dgradMatcher->ioDtypePairs, (std::vector<std::string>{"fp16->fp16"}));
+    EXPECT_EQ(dgradMatcher->dtypeCombos, (std::vector<DtypeCombo>{sym("fp16")}));
     EXPECT_EQ(dgradMatcher->layouts, (std::vector<std::string>{"NCHW"}));
 }
 
@@ -256,7 +272,7 @@ TEST(TestSupportClaimsCondenser, OutputIsDeterministicAcrossInputOrder)
     for(size_t i = 0; i < a.matchers.size(); ++i)
     {
         EXPECT_EQ(a.matchers[i].opChains, b.matchers[i].opChains);
-        EXPECT_EQ(a.matchers[i].ioDtypePairs, b.matchers[i].ioDtypePairs);
+        EXPECT_EQ(a.matchers[i].dtypeCombos, b.matchers[i].dtypeCombos);
         EXPECT_EQ(a.matchers[i].layouts, b.matchers[i].layouts);
     }
 }
@@ -362,6 +378,5 @@ TEST(TestSupportClaimsCondenser, UnobservedCellsArePreferredOutOfRectangle)
     auto result = condenseSupportClaims(records, "TEST_ENGINE");
     ASSERT_EQ(result.matchers.size(), 1u);
     EXPECT_EQ(result.matchers[0].layouts, (std::vector<std::string>{"NCHW"}));
-    EXPECT_EQ(result.matchers[0].ioDtypePairs,
-              (std::vector<std::string>{"fp16->fp16", "fp32->fp32"}));
+    EXPECT_EQ(result.matchers[0].dtypeCombos, (std::vector<DtypeCombo>{sym("fp16"), sym("fp32")}));
 }

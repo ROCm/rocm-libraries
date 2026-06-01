@@ -4,7 +4,7 @@
 # Schema reference: dnn-providers/integration-tests/docs/support-claims-schema.md
 
 [meta]
-version = 4
+version = 5
 engine  = "MIOPEN_ENGINE"
 [[supported]]
 arch = "gfx1151"
@@ -23,7 +23,11 @@ op_chains = [
     "BatchnormInferenceVarianceExt",
     "BatchnormInferenceVarianceExt + Pointwise:RELU_FWD",
 ]
-io_dtype_pairs = ["bf16->bf16", "fp16->fp16", "fp32->fp32"]
+dtype_combos = [
+    {io="bf16", compute="fp32", intermediate="fp32"},
+    {io="fp16", compute="fp32", intermediate="fp32"},
+    {io="fp32", compute="fp32", intermediate="fp32"},
+]
 layouts = ["NCDHW", "NCHW", "NCL", "NDHWC", "NHWC", "NLC"]
 
 [[supported.matchers]]
@@ -35,7 +39,11 @@ op_chains = [
     "BatchnormInferenceVarianceExt + Pointwise:RELU_FWD[lower_clip]",
     "BatchnormInferenceVarianceExt + Pointwise:RELU_FWD[upper_clip]",
 ]
-io_dtype_pairs = ["bf16->bf16", "fp16->fp16", "fp32->fp32"]
+dtype_combos = [
+    {io="bf16", compute="fp32", intermediate="fp32"},
+    {io="fp16", compute="fp32", intermediate="fp32"},
+    {io="fp32", compute="fp32", intermediate="fp32"},
+]
 layouts = ["NCHW", "NCL", "NHWC", "NLC"]
 
 [[supported.matchers]]
@@ -44,5 +52,9 @@ op_chains = [
     "ConvFprop",
     "ConvWgrad",
 ]
-io_dtype_pairs = ["bf16->bf16", "fp16->fp16", "fp32->fp32"]
+dtype_combos = [
+    {io="bf16", compute="fp32", intermediate="bf16"},
+    {io="fp16", compute="fp32", intermediate="fp16"},
+    {io="fp32", compute="fp32", intermediate="fp32"},
+]
 layouts = ["NCDHW", "NCHW", "NDHWC", "NHWC"]

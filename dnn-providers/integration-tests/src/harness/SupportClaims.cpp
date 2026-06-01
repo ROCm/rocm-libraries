@@ -58,28 +58,6 @@ std::vector<std::string>
     return result;
 }
 
-// Validate "in->out" pair strings: arrow present, both sides non-empty,
-// neither side contains another arrow. Cheap; runs at load time only.
-void validateDtypePair(const std::string& pair, const std::string& label)
-{
-    const auto arrow = pair.find("->");
-    if(arrow == std::string::npos)
-    {
-        throw std::runtime_error("SupportClaims: " + label + " io_dtype_pairs entry '" + pair
-                                 + "' missing '->' separator (expected 'in->out')");
-    }
-    if(arrow == 0 || arrow + 2 == pair.size())
-    {
-        throw std::runtime_error("SupportClaims: " + label + " io_dtype_pairs entry '" + pair
-                                 + "' has empty input or output dtype");
-    }
-    if(pair.find("->", arrow + 2) != std::string::npos)
-    {
-        throw std::runtime_error("SupportClaims: " + label + " io_dtype_pairs entry '" + pair
-                                 + "' contains multiple '->' separators");
-    }
-}
-
 void rejectWildcards(const std::vector<std::string>& values,
                      const char* key,
                      const std::string& label)
@@ -94,6 +72,67 @@ void rejectWildcards(const std::vector<std::string>& values,
                                        "only (RFC 0012 §11.4)");
         }
     }
+}
+
+// Parse one dtype_combos inline table:
+//   {io="fp16", output="fp32", compute="fp32", intermediate="fp32"}
+// `io` and `compute` are required; `output` and `intermediate` are
+// optional. Any wildcard character in a value, or any unknown key, is
+// rejected — schema drift is loud rather than silent.
+DtypeCombo
+    parseDtypeCombo(const toml::table& comboTable, const std::string& label, size_t comboIndex)
+{
+    const std::string entryLabel = label + " dtype_combos[" + std::to_string(comboIndex) + "]";
+
+    const auto readRequired = [&](const char* key) {
+        auto value = comboTable[key].value<std::string>();
+        if(!value.has_value() || value->empty())
+        {
+            throw std::runtime_error("SupportClaims: " + entryLabel + " missing required '"
+                                     + std::string(key) + "'");
+        }
+        if(value->find('*') != std::string::npos || value->find('?') != std::string::npos)
+        {
+            throw std::runtime_error("SupportClaims: " + entryLabel + " '" + std::string(key)
+                                     + "' value '" + *value
+                                     + "' contains a wildcard (RFC 0012 §11.4)");
+        }
+        return *value;
+    };
+    const auto readOptional = [&](const char* key) {
+        auto value = comboTable[key].value<std::string>();
+        if(!value.has_value())
+        {
+            return std::string{};
+        }
+        if(value->find('*') != std::string::npos || value->find('?') != std::string::npos)
+        {
+            throw std::runtime_error("SupportClaims: " + entryLabel + " '" + std::string(key)
+                                     + "' value '" + *value
+                                     + "' contains a wildcard (RFC 0012 §11.4)");
+        }
+        return *value;
+    };
+
+    DtypeCombo combo;
+    combo.io = readRequired("io");
+    combo.compute = readRequired("compute");
+    combo.output = readOptional("output");
+    combo.intermediate = readOptional("intermediate");
+
+    // Catch typos: any key outside the known set means either the
+    // schema is being extended without a version bump or the engineer
+    // typo'd a field name. Either way it's not safe to silently ignore.
+    for(const auto& [keyNode, _] : comboTable)
+    {
+        const std::string keyStr(keyNode.str());
+        if(keyStr != "io" && keyStr != "output" && keyStr != "compute" && keyStr != "intermediate")
+        {
+            throw std::runtime_error("SupportClaims: " + entryLabel + " unknown key '" + keyStr
+                                     + "' (expected io / output / compute / intermediate)");
+        }
+    }
+    return combo;
 }
 
 SupportMatcher parseMatcher(const toml::node& node,
@@ -115,25 +154,54 @@ SupportMatcher parseMatcher(const toml::node& node,
     matcher.sourceLocation = label;
     matcher.opChains = parseRequiredStringArray(*table, "op_chains", label);
     matcher.layouts = parseRequiredStringArray(*table, "layouts", label);
-    matcher.ioDtypePairs = parseRequiredStringArray(*table, "io_dtype_pairs", label);
-    // The old io_dtypes shorthand was removed in favor of always-pairs
-    // (see SupportMatcher comment). Catch sidecars still using it so
-    // the engineer gets a clear "regenerate" message instead of a
-    // confusing "missing io_dtype_pairs" one.
-    if((*table)["io_dtypes"].as_array() != nullptr)
+
+    // Catch older schemas with their previous fields so the engineer
+    // gets a clear "regenerate" message instead of a confusing "missing
+    // dtype_combos" one.
+    for(const char* obsoleteKey : {"io_dtypes", "io_dtype_pairs"})
+    {
+        if((*table)[obsoleteKey].as_array() != nullptr)
+        {
+            throw std::runtime_error(
+                "SupportClaims: " + label + " uses the obsolete '" + std::string(obsoleteKey)
+                + "' field. The sidecar predates the named-field dtype_combos format — "
+                  "regenerate via --write-support-claims to produce dtype_combos inline-table "
+                  "entries.");
+        }
+    }
+
+    const auto* combosArray = (*table)["dtype_combos"].as_array();
+    if(combosArray == nullptr)
     {
         throw std::runtime_error("SupportClaims: " + label
-                                 + " uses the obsolete 'io_dtypes' field. The sidecar predates "
-                                   "the always-pairs format — regenerate via "
-                                   "--write-support-claims to produce io_dtype_pairs entries.");
+                                 + " missing required 'dtype_combos' array of inline tables "
+                                   "(e.g. dtype_combos = [{io=\"fp16\", compute=\"fp32\"}, ...])");
     }
-    rejectWildcards(matcher.opChains, "op_chains", label);
-    rejectWildcards(matcher.ioDtypePairs, "io_dtype_pairs", label);
-    rejectWildcards(matcher.layouts, "layouts", label);
-    for(const auto& pair : matcher.ioDtypePairs)
+    if(combosArray->empty())
     {
-        validateDtypePair(pair, label);
+        throw std::runtime_error("SupportClaims: " + label + " 'dtype_combos' must not be empty");
     }
+    std::set<DtypeCombo> seenCombos;
+    for(size_t i = 0; i < combosArray->size(); ++i)
+    {
+        const auto* comboTable = combosArray->at(i).as_table();
+        if(comboTable == nullptr)
+        {
+            throw std::runtime_error("SupportClaims: " + label + " dtype_combos["
+                                     + std::to_string(i) + "] must be an inline table");
+        }
+        auto combo = parseDtypeCombo(*comboTable, label, i);
+        if(!seenCombos.insert(combo).second)
+        {
+            throw std::runtime_error(
+                "SupportClaims: " + label + " dtype_combos[" + std::to_string(i)
+                + "] duplicates an earlier entry (compared by io/output/compute/intermediate)");
+        }
+        matcher.dtypeCombos.push_back(std::move(combo));
+    }
+
+    rejectWildcards(matcher.opChains, "op_chains", label);
+    rejectWildcards(matcher.layouts, "layouts", label);
     return matcher;
 }
 
@@ -211,20 +279,23 @@ SupportClaims::SupportClaims(const std::filesystem::path& sidecarPath,
     //   v2 — extended op_chain with per-node :variant tags (e.g.
     //        Pointwise:RELU_FWD[lower_clip]).
     //   v3 — added asymmetric io_dtype_pairs alongside symmetric
-    //        io_dtypes shorthand; matchers could use either form.
-    //   v4 — dropped io_dtypes shorthand. Pairs are the single
-    //        canonical form: "fp16->fp16" for symmetric, "fp16->fp32"
-    //        for asymmetric. Eliminates the two-code-path matching
-    //        logic and makes symmetric/asymmetric distinction always
-    //        visible at review time.
+    //        io_dtypes shorthand.
+    //   v4 — collapsed to io_dtype_pairs string form ("in->out").
+    //   v5 — replaced io_dtype_pairs strings with dtype_combos
+    //        inline-table arrays carrying named fields:
+    //          { io, output?, compute, intermediate? }
+    //        Schema mirrors the support-matrix markdown display, can
+    //        in fact serve as the source of truth that renders it,
+    //        and gives compute/intermediate first-class matcher key
+    //        status (the engine actually dispatches on them).
     // Older readers can't tell that the format changed and would
     // silently miss matchers, so the safe contract is refuse-and-regen.
-    if(*version != 4)
+    if(*version != 5)
     {
         throw std::runtime_error("SupportClaims: unsupported version " + std::to_string(*version)
                                  + " in " + sidecarPath.string()
-                                 + " (expected 4; older sidecars predate the always-pairs "
-                                   "io_dtype_pairs schema and need regeneration via "
+                                 + " (expected 5; older sidecars predate the named-field "
+                                   "dtype_combos schema and need regeneration via "
                                    "--write-support-claims)");
     }
 
@@ -274,6 +345,8 @@ bool SupportClaims::isClaimed(std::string_view archToken,
                               std::string_view opChain,
                               std::string_view inputDtype,
                               std::string_view outputDtype,
+                              std::string_view computeDtype,
+                              std::string_view intermediateDtype,
                               std::string_view layout) const
 {
     const auto* block = blockFor(archToken, platform);
@@ -283,7 +356,8 @@ bool SupportClaims::isClaimed(std::string_view archToken,
     }
     return std::any_of(
         block->matchers.begin(), block->matchers.end(), [&](const SupportMatcher& matcher) {
-            return matcher.contains(opChain, inputDtype, outputDtype, layout);
+            return matcher.contains(
+                opChain, inputDtype, outputDtype, computeDtype, intermediateDtype, layout);
         });
 }
 
