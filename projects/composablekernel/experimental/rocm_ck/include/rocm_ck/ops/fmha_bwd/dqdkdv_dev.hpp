@@ -337,10 +337,8 @@ __device__ void runFmhaBwdDQDKDV(Args args)
     const index_t stride_do       = static_cast<index_t>(t_do.strides[0]);
     const index_t nhead_stride_do = static_cast<index_t>(t_do.strides[1]);
 
-    // DQ_ACC: strides[0]=stride_dq_acc, [1]=nhead_stride_dq_acc (int64!),
-    //         [2]=batch_stride_dq_acc (int64!), [3]=split_stride_dq_acc
-    const index_t stride_dq_acc            = static_cast<index_t>(t_dq_acc.strides[0]);
-    const long_index_t nhead_stride_dq_acc = t_dq_acc.strides[1];
+    // DQ_ACC: the dq_acc layout is implied by the workspace
+    // Host-side: t_dq_acc.ptr = workspace + GetDqAccDataOffset(batch_size).
 
     // DK: strides[0]=stride_dk, [1]=nhead_stride_dk, [2]=batch_stride_dk
     const index_t stride_dk       = static_cast<index_t>(t_dk.strides[0]);
@@ -370,24 +368,21 @@ __device__ void runFmhaBwdDQDKDV(Args args)
     // fragility flagged by the W7 finding.
 
     typename T::Kargs kargs{
-        // FmhaBwdCommonKargs (32 positional fields)
+        // FmhaBwdCommonKargs (30 positional fields; stride_dq_acc and
         {t_q.ptr,                         // q_ptr
          t_k.ptr,                         // k_ptr
          t_v.ptr,                         // v_ptr
          t_lse.ptr,                       // lse_ptr
          t_do.ptr,                        // do_ptr
          t_d.ptr,                         // d_ptr (input: const void*)
-         const_cast<void*>(t_dq_acc.ptr), // dq_acc_ptr (output)
+         const_cast<void*>(t_dq_acc.ptr), // dq_acc_ptr (workspace, output)
          const_cast<void*>(t_dk.ptr),     // dk_ptr (output)
          const_cast<void*>(t_dv.ptr),     // dv_ptr (output)
-         // Group mode passes -1 for both seqlens; CK Tile reads per-batch
-         // lengths from seqstart/seqlen pointers below. Batch mode passes
-         // the fixed sequence dimensions.
          (K.mode == FmhaMode::GROUP) ? index_t{-1} : seqlen_q, // seqlen_q
          (K.mode == FmhaMode::GROUP) ? index_t{-1} : seqlen_k, // seqlen_k
          hdim_q,                                               // hdim_q
          hdim_v,                                               // hdim_v
-         num_head_q,                                           // num_head_q
+         num_head_q,                                           // nhead_q
          nhead_ratio_qk,                                       // nhead_ratio_qk
          raw_scale,                                            // raw_scale
          scale,                                                // scale
@@ -395,7 +390,6 @@ __device__ void runFmhaBwdDQDKDV(Args args)
          stride_k,                                             // stride_k
          stride_v,                                             // stride_v
          stride_do,                                            // stride_do
-         stride_dq_acc,                                        // stride_dq_acc
          stride_dk,                                            // stride_dk
          stride_dv,                                            // stride_dv
          nhead_stride_q,                                       // nhead_stride_q
@@ -403,14 +397,14 @@ __device__ void runFmhaBwdDQDKDV(Args args)
          nhead_stride_v,                                       // nhead_stride_v
          nhead_stride_do,                                      // nhead_stride_do
          nhead_stride_lsed,                                    // nhead_stride_lsed
-         nhead_stride_dq_acc,                                  // nhead_stride_dq_acc
          nhead_stride_dk,                                      // nhead_stride_dk
          nhead_stride_dv},                                     // nhead_stride_dv
         {}, // bias placeholder    (EmptyKargs<0> or BiasKargs)
         {}, // dbias placeholder   (EmptyKargs<1> or BiasGradKargs)
         {}, // mask placeholder    (EmptyKargs<2> or MaskKargs)
         {}, // dropout placeholder (EmptyKargs<3> or DropoutKargs)
-        {}, // determ placeholder  (EmptyKargs<4> or DetermKargs)
+        {}, // determ placeholder  (EmptyKargs<4> or DetermKargs; assigned below)
+        {}, // qrqtrdor placeholder (EmptyKargs<5> or QrQtrDorKargs;)
         // Mode-specific tail fields are value-initialized (zero) here and
         // assigned by name in the per-mode block below.
     };
@@ -429,18 +423,27 @@ __device__ void runFmhaBwdDQDKDV(Args args)
         kargs.seqlen_k_ptr    = reinterpret_cast<const int32_t*>(args.tensors[S::SEQLEN_K].ptr);
         kargs.cu_seqlen_q_ptr = nullptr;
         kargs.cu_seqlen_k_ptr = nullptr;
+        // Per-batch element offsets into compact dq_acc, supplied
+        // via workspace. nullptr when !is_deterministic (host won't populate
+        // the slot and DqDkDv kernel doesn't read it).
+        if constexpr(K.is_deterministic)
+            kargs.dq_acc_batch_offset_ptr =
+                reinterpret_cast<const long_index_t*>(
+                    args.tensors[S::DQ_ACC_BATCH_OFFSET].ptr);
+        else
+            kargs.dq_acc_batch_offset_ptr = nullptr;
     }
     else
     {
         // Fixed-length sequences: per-batch strides for every tensor.
-        kargs.batch_stride_q      = static_cast<index_t>(t_q.strides[2]);
-        kargs.batch_stride_k      = static_cast<index_t>(t_k.strides[2]);
-        kargs.batch_stride_v      = static_cast<index_t>(t_v.strides[2]);
-        kargs.batch_stride_do     = static_cast<index_t>(t_do.strides[2]);
-        kargs.batch_stride_lsed   = static_cast<index_t>(t_lse.strides[1]);
-        kargs.batch_stride_dq_acc = t_dq_acc.strides[2]; // long_index_t
-        kargs.batch_stride_dk     = static_cast<index_t>(t_dk.strides[2]);
-        kargs.batch_stride_dv     = static_cast<index_t>(t_dv.strides[2]);
+        // dq_acc layout derived from workspace via nsplits_ptr
+        kargs.batch_stride_q    = static_cast<index_t>(t_q.strides[2]);
+        kargs.batch_stride_k    = static_cast<index_t>(t_k.strides[2]);
+        kargs.batch_stride_v    = static_cast<index_t>(t_v.strides[2]);
+        kargs.batch_stride_do   = static_cast<index_t>(t_do.strides[2]);
+        kargs.batch_stride_lsed = static_cast<index_t>(t_lse.strides[1]);
+        kargs.batch_stride_dk   = static_cast<index_t>(t_dk.strides[2]);
+        kargs.batch_stride_dv   = static_cast<index_t>(t_dv.strides[2]);
     }
 
     // --- Optional feature fields (single set of if-constexpr branches) ---
@@ -518,14 +521,20 @@ __device__ void runFmhaBwdDQDKDV(Args args)
 
     if constexpr(K.is_deterministic)
     {
-        kargs.split_stride_dq_acc = static_cast<index_t>(t_dq_acc.strides[3]);
-        // Newer CK Tile upstream gained a persistent kernel for the
-        // deterministic+BATCH path that requires kargs.batch to be set. The
-        // CK Tile shipped with this build (rocm7.1.1) does not have that
-        // FmhaBwdDeterministicKargs::batch field yet, so we cannot assign
-        // it here. usesBatchSizeSlot()/BATCH_SIZE remain wired through the
-        // host API in anticipation of the upstream bump, and the validator
-        // will exercise that path via the host-only tests.
+        // FmhaBwdDeterministicKargs = {batch, nsplits_ptr}.
+        // Replaces the old single-field {split_stride_dq_acc}.
+        // - batch: only used by the persistent batch-mode kernel (computes
+        //   total_heads = batch * nhead_q). In group mode the value is
+        //   ignored. Sourced from S::BATCH_SIZE scalar (always wired by
+        //   host for deterministic batch mode; safe to default to 0 in
+        //   group mode).
+        // - nsplits_ptr: workspace + GetDqAccSplitsOffset, pre-filled by
+        //   PrepareWorkspaceHost.
+        kargs.batch       = (K.mode == FmhaMode::BATCH)
+                                ? args.scalars[S::BATCH_SIZE].i32
+                                : index_t{0};
+        kargs.nsplits_ptr = reinterpret_cast<const index_t*>(
+            args.tensors[S::NSPLITS].ptr);
     }
 
     typename T::Kernel{}(kargs);

@@ -123,6 +123,12 @@ constexpr int SEQSTART_K = 13; // const int32_t*: K-sequence start offsets [batc
 constexpr int SEQLEN_Q   = 14; // const int32_t*: per-batch actual Q-lengths [batch]
 constexpr int SEQLEN_K   = 15; // const int32_t*: per-batch actual K-lengths [batch]
 
+// Workspace-derived slots
+// Host fills ptr from workspace base + WorkspaceManager offset
+constexpr int NSPLITS             = 16; // const index_t* nsplits_ptr
+constexpr int DQ_ACC_BATCH_OFFSET = 17; // group-deterministic only:
+                                        // const long_index_t* per-batch offsets
+
 /// Minimum tensor slot count (max_used_index + 1) for a given config.
 /// Slot indices are fixed (BIAS=9, DBIAS=10, RANDVAL=11) regardless of
 /// which features are enabled -- unused slots are simply not populated.
@@ -139,7 +145,16 @@ constexpr int requiredTensors(FmhaBwdDQDKDVSpec k)
 
     // Group mode adds seqstart/seqlen slots after all feature slots
     if(k.mode == FmhaMode::GROUP)
-        n = SEQLEN_K + 1; // 16 (always the highest slot)
+        n = SEQLEN_K + 1; // 16
+
+    // Workspace slots, Deterministic group mode also uses
+    // DQ_ACC_BATCH_OFFSET; deterministic batch mode uses only NSPLITS.
+    if(k.is_deterministic)
+    {
+        n = NSPLITS + 1; // 17
+        if(k.mode == FmhaMode::GROUP)
+            n = DQ_ACC_BATCH_OFFSET + 1; // 18
+    }
 
     return n;
 }
