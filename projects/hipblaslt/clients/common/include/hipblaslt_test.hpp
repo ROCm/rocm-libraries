@@ -280,7 +280,7 @@ void launch_test_on_streams(std::function<void()> test, size_t numStreams, size_
             {                                                                                \
                 int flag = 0;                                                                \
                 CHECK_HIP_ERROR(hipDeviceGetAttribute(                                       \
-                    &flag, hipDeviceAttribute_t(hipDeviceAttributeManagedMemory), devices)); \
+                    &flag, hipDeviceAttribute_t(hipDeviceAttributeManagedMemory), i)); \
                 if(!flag)                                                                    \
                 {                                                                            \
                     SUCCEED() << HMM_NOT_SUPPORTED;                                          \
