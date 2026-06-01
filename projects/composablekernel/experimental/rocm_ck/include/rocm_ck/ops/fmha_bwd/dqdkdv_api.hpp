@@ -89,10 +89,8 @@ inline void validateArgs([[maybe_unused]] const Args& args, [[maybe_unused]] Fmh
             continue;
         if(i == S::DBIAS && !k.has_bias_grad)
             continue;
-        // RANDVAL is never populated by the host: the device bridge always
-        // assigns rand_val_ptr=nullptr (backward pass never stores randval).
-        // Skip unconditionally.
-        if(i == S::RANDVAL)
+        // RANDVAL is populated only for dropout-enabled variants.
+        if(i == S::RANDVAL && !k.has_dropout)
             continue;
         // SEQLEN_Q/SEQLEN_K may be left null in group mode -- CK Tile derives
         // per-batch lengths from SEQSTART_Q/SEQSTART_K when these are absent.

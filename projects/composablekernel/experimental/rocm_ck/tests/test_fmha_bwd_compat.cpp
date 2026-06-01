@@ -7,8 +7,9 @@
 // registry and asserts ALL fields. If a schema change breaks a test,
 // the change is not backwards-compatible.
 //
-// NOTE: DqDkDv block_size and block_n0 are selected from CK Tile's
-// architecture-dependent non-trload tile tables.
+// NOTE: block_size and block_n0 in DqDkDv are demo constants
+// (dqdkdv_spec.hpp:200-204). Update when architecture-dependent tile
+// selection is implemented.
 //
 // The findVariant() tests require the registry header from the example
 // directory, which is added to the include path by CMakeLists.txt.
@@ -28,7 +29,6 @@ using ::rocm_ck::ALL_DQDKDV_VARIANTS_COUNT;
 using ::rocm_ck::ALL_OGRAD_DOT_O_VARIANTS_COUNT;
 using ::rocm_ck::DataType;
 using ::rocm_ck::findVariant;
-using ::rocm_ck::FmhaArch;
 using ::rocm_ck::FmhaBiasType;
 using ::rocm_ck::FmhaBwdConvertDQConfig;
 using ::rocm_ck::FmhaBwdDQDKDVConfig;
@@ -39,6 +39,21 @@ using ::rocm_ck::makeSpec;
 // ============================================================================
 // OGradDotO frozen baselines
 // ============================================================================
+
+TEST(FmhaBwdCompat, OGradDotO_FP16_D32_Batch)
+{
+    constexpr auto k = makeSpec(FmhaBwdOGradDotOConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_v = 32, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_seqlen_q = true, .pad_hdim_v = true}});
+
+    EXPECT_EQ(k.dtype, DataType::FP16);
+    EXPECT_EQ(k.hdim_v, 32);
+    EXPECT_EQ(k.mode, FmhaMode::BATCH);
+    EXPECT_TRUE(k.pad_seqlen_q);
+    EXPECT_TRUE(k.pad_hdim_v);
+    EXPECT_EQ(k.block_per_cu, 2);
+    EXPECT_EQ(k.block_size, 64);
+}
 
 TEST(FmhaBwdCompat, OGradDotO_FP16_D128_Batch)
 {
@@ -78,6 +93,36 @@ TEST(FmhaBwdCompat, OGradDotO_FP16_D64_Batch)
 
     EXPECT_EQ(k.dtype, DataType::FP16);
     EXPECT_EQ(k.hdim_v, 64);
+    EXPECT_EQ(k.mode, FmhaMode::BATCH);
+    EXPECT_TRUE(k.pad_seqlen_q);
+    EXPECT_TRUE(k.pad_hdim_v);
+    EXPECT_EQ(k.block_per_cu, 2);
+    EXPECT_EQ(k.block_size, 64);
+}
+
+TEST(FmhaBwdCompat, OGradDotO_FP16_D96_Batch)
+{
+    constexpr auto k = makeSpec(FmhaBwdOGradDotOConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_v = 96, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_seqlen_q = true, .pad_hdim_v = true}});
+
+    EXPECT_EQ(k.dtype, DataType::FP16);
+    EXPECT_EQ(k.hdim_v, 96);
+    EXPECT_EQ(k.mode, FmhaMode::BATCH);
+    EXPECT_TRUE(k.pad_seqlen_q);
+    EXPECT_TRUE(k.pad_hdim_v);
+    EXPECT_EQ(k.block_per_cu, 2);
+    EXPECT_EQ(k.block_size, 64);
+}
+
+TEST(FmhaBwdCompat, OGradDotO_FP16_D256_Batch)
+{
+    constexpr auto k = makeSpec(FmhaBwdOGradDotOConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_v = 256, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_seqlen_q = true, .pad_hdim_v = true}});
+
+    EXPECT_EQ(k.dtype, DataType::FP16);
+    EXPECT_EQ(k.hdim_v, 256);
     EXPECT_EQ(k.mode, FmhaMode::BATCH);
     EXPECT_TRUE(k.pad_seqlen_q);
     EXPECT_TRUE(k.pad_hdim_v);
@@ -132,7 +177,6 @@ TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch)
     EXPECT_EQ(k.hdim_q, 128);
     EXPECT_EQ(k.hdim_v, 128);
     EXPECT_EQ(k.mode, FmhaMode::BATCH);
-    EXPECT_EQ(k.arch, FmhaArch::GFX9);
     EXPECT_EQ(k.bias_type, FmhaBiasType::NONE);
     EXPECT_FALSE(k.has_bias_grad);
     EXPECT_FALSE(k.has_mask);
@@ -250,6 +294,93 @@ TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Group)
     EXPECT_EQ(k.block_per_cu, 1);
 }
 
+TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Group_CMask)
+{
+    constexpr auto k = makeSpec(FmhaBwdDQDKDVConfig{
+        .signature =
+            {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::GROUP},
+        .algorithm = {.has_mask = true, .pad_hdim_q = 8, .pad_hdim_v = 8}});
+
+    EXPECT_EQ(k.mode, FmhaMode::GROUP);
+    EXPECT_TRUE(k.has_mask);
+    EXPECT_FALSE(k.has_dropout);
+    EXPECT_FALSE(k.is_deterministic);
+}
+
+TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Group_Det)
+{
+    constexpr auto k = makeSpec(FmhaBwdDQDKDVConfig{
+        .signature =
+            {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::GROUP},
+        .algorithm = {.is_deterministic = true, .pad_hdim_q = 8, .pad_hdim_v = 8}});
+
+    EXPECT_EQ(k.mode, FmhaMode::GROUP);
+    EXPECT_FALSE(k.has_mask);
+    EXPECT_FALSE(k.has_dropout);
+    EXPECT_TRUE(k.is_deterministic);
+}
+
+TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Group_Dropout)
+{
+    constexpr auto k = makeSpec(FmhaBwdDQDKDVConfig{
+        .signature =
+            {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::GROUP},
+        .algorithm = {.has_dropout = true, .pad_hdim_q = 8, .pad_hdim_v = 8}});
+
+    EXPECT_EQ(k.mode, FmhaMode::GROUP);
+    EXPECT_FALSE(k.has_mask);
+    EXPECT_TRUE(k.has_dropout);
+    EXPECT_FALSE(k.is_deterministic);
+}
+
+TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Group_EBias)
+{
+    constexpr auto k = makeSpec(FmhaBwdDQDKDVConfig{
+        .signature =
+            {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::GROUP},
+        .algorithm = {.bias_type = FmhaBiasType::ELEMENTWISE, .pad_hdim_q = 8, .pad_hdim_v = 8}});
+
+    EXPECT_EQ(k.mode, FmhaMode::GROUP);
+    EXPECT_EQ(k.bias_type, FmhaBiasType::ELEMENTWISE);
+    EXPECT_FALSE(k.has_mask);
+    EXPECT_FALSE(k.has_dropout);
+    EXPECT_FALSE(k.is_deterministic);
+}
+
+TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Group_ALiBi)
+{
+    constexpr auto k = makeSpec(FmhaBwdDQDKDVConfig{
+        .signature =
+            {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::GROUP},
+        .algorithm = {.bias_type = FmhaBiasType::ALIBI, .pad_hdim_q = 8, .pad_hdim_v = 8}});
+
+    EXPECT_EQ(k.mode, FmhaMode::GROUP);
+    EXPECT_EQ(k.bias_type, FmhaBiasType::ALIBI);
+    EXPECT_FALSE(k.has_mask);
+    EXPECT_FALSE(k.has_dropout);
+    EXPECT_FALSE(k.is_deterministic);
+}
+
+TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Group_EBias_DBias)
+{
+    constexpr auto k =
+        makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
+                                                   .hdim_q = 128,
+                                                   .hdim_v = 128,
+                                                   .mode   = FmhaMode::GROUP},
+                                     .algorithm = {.bias_type     = FmhaBiasType::ELEMENTWISE,
+                                                   .has_bias_grad = true,
+                                                   .pad_hdim_q    = 8,
+                                                   .pad_hdim_v    = 8}});
+
+    EXPECT_EQ(k.mode, FmhaMode::GROUP);
+    EXPECT_EQ(k.bias_type, FmhaBiasType::ELEMENTWISE);
+    EXPECT_TRUE(k.has_bias_grad);
+    EXPECT_FALSE(k.has_mask);
+    EXPECT_FALSE(k.has_dropout);
+    EXPECT_FALSE(k.is_deterministic);
+}
+
 TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_EBias)
 {
     constexpr auto k = makeSpec(FmhaBwdDQDKDVConfig{
@@ -261,7 +392,6 @@ TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_EBias)
     EXPECT_EQ(k.hdim_q, 128);
     EXPECT_EQ(k.hdim_v, 128);
     EXPECT_EQ(k.mode, FmhaMode::BATCH);
-    EXPECT_EQ(k.arch, FmhaArch::GFX9);
     EXPECT_EQ(k.bias_type, FmhaBiasType::ELEMENTWISE);
     EXPECT_FALSE(k.has_bias_grad);
     EXPECT_FALSE(k.has_mask);
@@ -285,7 +415,6 @@ TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_ALiBi)
     EXPECT_EQ(k.hdim_q, 128);
     EXPECT_EQ(k.hdim_v, 128);
     EXPECT_EQ(k.mode, FmhaMode::BATCH);
-    EXPECT_EQ(k.arch, FmhaArch::GFX9);
     EXPECT_EQ(k.bias_type, FmhaBiasType::ALIBI);
     EXPECT_FALSE(k.has_bias_grad);
     EXPECT_FALSE(k.has_mask);
@@ -314,7 +443,6 @@ TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_EBias_DBias)
     EXPECT_EQ(k.hdim_q, 128);
     EXPECT_EQ(k.hdim_v, 128);
     EXPECT_EQ(k.mode, FmhaMode::BATCH);
-    EXPECT_EQ(k.arch, FmhaArch::GFX9);
     EXPECT_EQ(k.bias_type, FmhaBiasType::ELEMENTWISE);
     EXPECT_TRUE(k.has_bias_grad);
     EXPECT_FALSE(k.has_mask);
@@ -338,7 +466,6 @@ TEST(FmhaBwdCompat, DqDkDv_BF16_D128_Batch_EBias)
     EXPECT_EQ(k.hdim_q, 128);
     EXPECT_EQ(k.hdim_v, 128);
     EXPECT_EQ(k.mode, FmhaMode::BATCH);
-    EXPECT_EQ(k.arch, FmhaArch::GFX9);
     EXPECT_EQ(k.bias_type, FmhaBiasType::ELEMENTWISE);
     EXPECT_FALSE(k.has_bias_grad);
     EXPECT_FALSE(k.has_mask);
@@ -362,7 +489,6 @@ TEST(FmhaBwdCompat, DqDkDv_BF16_D128_Batch_ALiBi)
     EXPECT_EQ(k.hdim_q, 128);
     EXPECT_EQ(k.hdim_v, 128);
     EXPECT_EQ(k.mode, FmhaMode::BATCH);
-    EXPECT_EQ(k.arch, FmhaArch::GFX9);
     EXPECT_EQ(k.bias_type, FmhaBiasType::ALIBI);
     EXPECT_FALSE(k.has_bias_grad);
     EXPECT_FALSE(k.has_mask);
@@ -391,7 +517,6 @@ TEST(FmhaBwdCompat, DqDkDv_BF16_D128_Batch_EBias_DBias)
     EXPECT_EQ(k.hdim_q, 128);
     EXPECT_EQ(k.hdim_v, 128);
     EXPECT_EQ(k.mode, FmhaMode::BATCH);
-    EXPECT_EQ(k.arch, FmhaArch::GFX9);
     EXPECT_EQ(k.bias_type, FmhaBiasType::ELEMENTWISE);
     EXPECT_TRUE(k.has_bias_grad);
     EXPECT_FALSE(k.has_mask);
@@ -415,7 +540,6 @@ TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_Dropout)
     EXPECT_EQ(k.hdim_q, 128);
     EXPECT_EQ(k.hdim_v, 128);
     EXPECT_EQ(k.mode, FmhaMode::BATCH);
-    EXPECT_EQ(k.arch, FmhaArch::GFX9);
     EXPECT_EQ(k.bias_type, FmhaBiasType::NONE);
     EXPECT_FALSE(k.has_bias_grad);
     EXPECT_FALSE(k.has_mask);
@@ -440,7 +564,6 @@ TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_CMask_Det)
     EXPECT_EQ(k.hdim_q, 128);
     EXPECT_EQ(k.hdim_v, 128);
     EXPECT_EQ(k.mode, FmhaMode::BATCH);
-    EXPECT_EQ(k.arch, FmhaArch::GFX9);
     EXPECT_EQ(k.bias_type, FmhaBiasType::NONE);
     EXPECT_FALSE(k.has_bias_grad);
     EXPECT_TRUE(k.has_mask);
@@ -453,9 +576,72 @@ TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_CMask_Det)
     EXPECT_EQ(k.block_n0, 128);
 }
 
+// Bottom-right causal and sliding-window variants share the compiled spec
+// with _cmask. They are separate registry entries, reachable only via
+// fmha_bwd_dqdkdv_variant_spec("<exact name>") (consteval name lookup).
+// mask_type and window_size_left/right are runtime-parametrized via scalar slots.
+
+TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_CMaskBR)
+{
+    constexpr auto k =
+        ::rocm_ck::fmha_bwd_dqdkdv_variant_spec("fmha_bwd_dqdkdv_fp16_d128_batch_cmask_br");
+
+    EXPECT_EQ(k.dtype, DataType::FP16);
+    EXPECT_EQ(k.hdim_q, 128);
+    EXPECT_EQ(k.hdim_v, 128);
+    EXPECT_EQ(k.mode, FmhaMode::BATCH);
+    EXPECT_EQ(k.bias_type, FmhaBiasType::NONE);
+    EXPECT_FALSE(k.has_bias_grad);
+    EXPECT_TRUE(k.has_mask);
+    EXPECT_FALSE(k.has_dropout);
+    EXPECT_FALSE(k.is_deterministic);
+    EXPECT_EQ(k.pad_hdim_q, 8);
+    EXPECT_EQ(k.pad_hdim_v, 8);
+    EXPECT_EQ(k.block_per_cu, 1);
+    EXPECT_EQ(k.block_size, 256);
+    EXPECT_EQ(k.block_n0, 128);
+}
+
+TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_SWA)
+{
+    constexpr auto k =
+        ::rocm_ck::fmha_bwd_dqdkdv_variant_spec("fmha_bwd_dqdkdv_fp16_d128_batch_swa");
+
+    EXPECT_EQ(k.dtype, DataType::FP16);
+    EXPECT_EQ(k.hdim_q, 128);
+    EXPECT_EQ(k.hdim_v, 128);
+    EXPECT_EQ(k.mode, FmhaMode::BATCH);
+    EXPECT_EQ(k.bias_type, FmhaBiasType::NONE);
+    EXPECT_FALSE(k.has_bias_grad);
+    EXPECT_TRUE(k.has_mask);
+    EXPECT_FALSE(k.has_dropout);
+    EXPECT_FALSE(k.is_deterministic);
+    EXPECT_EQ(k.pad_hdim_q, 8);
+    EXPECT_EQ(k.pad_hdim_v, 8);
+    EXPECT_EQ(k.block_per_cu, 1);
+    EXPECT_EQ(k.block_size, 256);
+    EXPECT_EQ(k.block_n0, 128);
+}
+
 // ============================================================================
 // ConvertDQ frozen baselines
 // ============================================================================
+
+TEST(FmhaBwdCompat, ConvertDQ_FP16_D64_Batch)
+{
+    constexpr auto k = makeSpec(FmhaBwdConvertDQConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 64, .mode = FmhaMode::BATCH},
+        .algorithm = {}});
+
+    EXPECT_EQ(k.dtype, DataType::FP16);
+    EXPECT_EQ(k.hdim_q, 64);
+    EXPECT_EQ(k.mode, FmhaMode::BATCH);
+    EXPECT_TRUE(k.is_deterministic);
+    EXPECT_TRUE(k.pad_seqlen_q);
+    EXPECT_TRUE(k.pad_hdim_q);
+    EXPECT_EQ(k.block_per_cu, 2);
+    EXPECT_EQ(k.block_size, 256);
+}
 
 TEST(FmhaBwdCompat, ConvertDQ_FP16_D128_Batch)
 {
@@ -481,6 +667,54 @@ TEST(FmhaBwdCompat, ConvertDQ_FP16_D128_Group)
 
     EXPECT_EQ(k.dtype, DataType::FP16);
     EXPECT_EQ(k.hdim_q, 128);
+    EXPECT_EQ(k.mode, FmhaMode::GROUP);
+    EXPECT_TRUE(k.is_deterministic);
+    EXPECT_TRUE(k.pad_seqlen_q);
+    EXPECT_TRUE(k.pad_hdim_q);
+    EXPECT_EQ(k.block_per_cu, 2);
+    EXPECT_EQ(k.block_size, 256);
+}
+
+TEST(FmhaBwdCompat, ConvertDQ_FP16_D256_Batch)
+{
+    constexpr auto k = makeSpec(FmhaBwdConvertDQConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 256, .mode = FmhaMode::BATCH},
+        .algorithm = {}});
+
+    EXPECT_EQ(k.dtype, DataType::FP16);
+    EXPECT_EQ(k.hdim_q, 256);
+    EXPECT_EQ(k.mode, FmhaMode::BATCH);
+    EXPECT_TRUE(k.is_deterministic);
+    EXPECT_TRUE(k.pad_seqlen_q);
+    EXPECT_TRUE(k.pad_hdim_q);
+    EXPECT_EQ(k.block_per_cu, 2);
+    EXPECT_EQ(k.block_size, 256);
+}
+
+TEST(FmhaBwdCompat, ConvertDQ_FP16_D64_Group)
+{
+    constexpr auto k = makeSpec(FmhaBwdConvertDQConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 64, .mode = FmhaMode::GROUP},
+        .algorithm = {}});
+
+    EXPECT_EQ(k.dtype, DataType::FP16);
+    EXPECT_EQ(k.hdim_q, 64);
+    EXPECT_EQ(k.mode, FmhaMode::GROUP);
+    EXPECT_TRUE(k.is_deterministic);
+    EXPECT_TRUE(k.pad_seqlen_q);
+    EXPECT_TRUE(k.pad_hdim_q);
+    EXPECT_EQ(k.block_per_cu, 2);
+    EXPECT_EQ(k.block_size, 256);
+}
+
+TEST(FmhaBwdCompat, ConvertDQ_FP16_D256_Group)
+{
+    constexpr auto k = makeSpec(FmhaBwdConvertDQConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 256, .mode = FmhaMode::GROUP},
+        .algorithm = {}});
+
+    EXPECT_EQ(k.dtype, DataType::FP16);
+    EXPECT_EQ(k.hdim_q, 256);
     EXPECT_EQ(k.mode, FmhaMode::GROUP);
     EXPECT_TRUE(k.is_deterministic);
     EXPECT_TRUE(k.pad_seqlen_q);
@@ -521,17 +755,53 @@ TEST(FmhaBwdCompat, Registry_OGradDotO_FallsToPaddedWhenNoPadMissing)
     EXPECT_STREQ(v->name, "fmha_bwd_ograd_dot_o_bf16_d128_batch");
 }
 
-TEST(FmhaBwdCompat, Registry_OGradDotO_ReturnsNullForUnregistered)
+TEST(FmhaBwdCompat, Registry_OGradDotO_FindsBF16Group)
+{
+    const auto* v = findVariant(FmhaBwdOGradDotOConfig{
+        .signature = {.dtype = DataType::BF16, .hdim_v = 128, .mode = FmhaMode::GROUP},
+        .algorithm = {.pad_seqlen_q = true, .pad_hdim_v = true}});
+    ASSERT_NE(v, nullptr);
+    EXPECT_STREQ(v->name, "fmha_bwd_ograd_dot_o_bf16_d128_group");
+}
+
+TEST(FmhaBwdCompat, Registry_OGradDotO_FindsD32)
+{
+    const auto* v = findVariant(FmhaBwdOGradDotOConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_v = 32, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_seqlen_q = true, .pad_hdim_v = true}});
+    ASSERT_NE(v, nullptr);
+    EXPECT_STREQ(v->name, "fmha_bwd_ograd_dot_o_fp16_d32_batch");
+}
+
+TEST(FmhaBwdCompat, Registry_OGradDotO_FindsD96)
+{
+    const auto* v = findVariant(FmhaBwdOGradDotOConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_v = 96, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_seqlen_q = true, .pad_hdim_v = true}});
+    ASSERT_NE(v, nullptr);
+    EXPECT_STREQ(v->name, "fmha_bwd_ograd_dot_o_fp16_d96_batch");
+}
+
+TEST(FmhaBwdCompat, Registry_OGradDotO_FindsD256)
 {
     const auto* v = findVariant(FmhaBwdOGradDotOConfig{
         .signature = {.dtype = DataType::FP16, .hdim_v = 256, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_seqlen_q = true, .pad_hdim_v = true}});
+    ASSERT_NE(v, nullptr);
+    EXPECT_STREQ(v->name, "fmha_bwd_ograd_dot_o_fp16_d256_batch");
+}
+
+TEST(FmhaBwdCompat, Registry_OGradDotO_ReturnsNullForUnregistered)
+{
+    const auto* v = findVariant(FmhaBwdOGradDotOConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_v = 160, .mode = FmhaMode::BATCH},
         .algorithm = {.pad_seqlen_q = true, .pad_hdim_v = true}});
     EXPECT_EQ(v, nullptr);
 }
 
 TEST(FmhaBwdCompat, Registry_OGradDotO_VariantCount)
 {
-    EXPECT_EQ(ALL_OGRAD_DOT_O_VARIANTS_COUNT, 5);
+    EXPECT_EQ(ALL_OGRAD_DOT_O_VARIANTS_COUNT, 9);
 }
 
 // ============================================================================
@@ -560,6 +830,18 @@ TEST(FmhaBwdCompat, Registry_DqDkDv_FindsBF16Batch)
                                         .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
     ASSERT_NE(v, nullptr);
     EXPECT_STREQ(v->name, "fmha_bwd_dqdkdv_bf16_d128_batch");
+}
+
+TEST(FmhaBwdCompat, Registry_DqDkDv_FindsBF16Group)
+{
+    const auto* v =
+        findVariant(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::BF16,
+                                                      .hdim_q = 128,
+                                                      .hdim_v = 128,
+                                                      .mode   = FmhaMode::GROUP},
+                                        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+    ASSERT_NE(v, nullptr);
+    EXPECT_STREQ(v->name, "fmha_bwd_dqdkdv_bf16_d128_group");
 }
 
 TEST(FmhaBwdCompat, Registry_DqDkDv_FindsFP16D64Batch)
@@ -604,6 +886,83 @@ TEST(FmhaBwdCompat, Registry_DqDkDv_FindsDeterministic)
         .algorithm = {.is_deterministic = true, .pad_hdim_q = 8, .pad_hdim_v = 8}});
     ASSERT_NE(v, nullptr);
     EXPECT_STREQ(v->name, "fmha_bwd_dqdkdv_fp16_d128_batch_det");
+}
+
+TEST(FmhaBwdCompat, Registry_DqDkDv_FindsGroup)
+{
+    const auto* v =
+        findVariant(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
+                                                      .hdim_q = 128,
+                                                      .hdim_v = 128,
+                                                      .mode   = FmhaMode::GROUP},
+                                        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+    ASSERT_NE(v, nullptr);
+    EXPECT_STREQ(v->name, "fmha_bwd_dqdkdv_fp16_d128_group");
+}
+
+TEST(FmhaBwdCompat, Registry_DqDkDv_FindsGroupMask)
+{
+    const auto* v = findVariant(FmhaBwdDQDKDVConfig{
+        .signature =
+            {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::GROUP},
+        .algorithm = {.has_mask = true, .pad_hdim_q = 8, .pad_hdim_v = 8}});
+    ASSERT_NE(v, nullptr);
+    EXPECT_STREQ(v->name, "fmha_bwd_dqdkdv_fp16_d128_group_cmask");
+}
+
+TEST(FmhaBwdCompat, Registry_DqDkDv_FindsGroupDeterministic)
+{
+    const auto* v = findVariant(FmhaBwdDQDKDVConfig{
+        .signature =
+            {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::GROUP},
+        .algorithm = {.is_deterministic = true, .pad_hdim_q = 8, .pad_hdim_v = 8}});
+    ASSERT_NE(v, nullptr);
+    EXPECT_STREQ(v->name, "fmha_bwd_dqdkdv_fp16_d128_group_det");
+}
+
+TEST(FmhaBwdCompat, Registry_DqDkDv_FindsGroupDropout)
+{
+    const auto* v = findVariant(FmhaBwdDQDKDVConfig{
+        .signature =
+            {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::GROUP},
+        .algorithm = {.has_dropout = true, .pad_hdim_q = 8, .pad_hdim_v = 8}});
+    ASSERT_NE(v, nullptr);
+    EXPECT_STREQ(v->name, "fmha_bwd_dqdkdv_fp16_d128_group_dropout");
+}
+
+TEST(FmhaBwdCompat, Registry_DqDkDv_FindsGroupEBias)
+{
+    const auto* v = findVariant(FmhaBwdDQDKDVConfig{
+        .signature =
+            {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::GROUP},
+        .algorithm = {.bias_type = FmhaBiasType::ELEMENTWISE, .pad_hdim_q = 8, .pad_hdim_v = 8}});
+    ASSERT_NE(v, nullptr);
+    EXPECT_STREQ(v->name, "fmha_bwd_dqdkdv_fp16_d128_group_ebias");
+}
+
+TEST(FmhaBwdCompat, Registry_DqDkDv_FindsGroupALiBi)
+{
+    const auto* v = findVariant(FmhaBwdDQDKDVConfig{
+        .signature =
+            {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::GROUP},
+        .algorithm = {.bias_type = FmhaBiasType::ALIBI, .pad_hdim_q = 8, .pad_hdim_v = 8}});
+    ASSERT_NE(v, nullptr);
+    EXPECT_STREQ(v->name, "fmha_bwd_dqdkdv_fp16_d128_group_alibi");
+}
+
+TEST(FmhaBwdCompat, Registry_DqDkDv_FindsGroupEBiasDBias)
+{
+    const auto* v =
+        findVariant(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
+                                                      .hdim_q = 128,
+                                                      .hdim_v = 128,
+                                                      .mode   = FmhaMode::GROUP},
+                                        .algorithm = {.bias_type     = FmhaBiasType::ELEMENTWISE,
+                                                      .has_bias_grad = true,
+                                                      .pad_hdim_q    = 8,
+                                                      .pad_hdim_v    = 8}});
+    ASSERT_NE(v, nullptr);
+    EXPECT_STREQ(v->name, "fmha_bwd_dqdkdv_fp16_d128_group_ebias_dbias");
 }
 
 TEST(FmhaBwdCompat, Registry_DqDkDv_FindsCMaskDet)
@@ -718,7 +1077,7 @@ TEST(FmhaBwdCompat, Registry_DqDkDv_ReturnsNullForUnregisteredArch)
     EXPECT_EQ(v, nullptr);
 }
 
-TEST(FmhaBwdCompat, Registry_DqDkDv_VariantCount) { EXPECT_EQ(ALL_DQDKDV_VARIANTS_COUNT, 17); }
+TEST(FmhaBwdCompat, Registry_DqDkDv_VariantCount) { EXPECT_EQ(ALL_DQDKDV_VARIANTS_COUNT, 25); }
 
 // _cmask_br and _swa share the compiled spec with _cmask. findVariant() matches
 // by spec features alone, so it returns _cmask first for any has_mask=true
@@ -732,7 +1091,6 @@ TEST(FmhaBwdCompat, Registry_DqDkDv_NameLookup_CMaskBR)
     EXPECT_EQ(k.hdim_q, 128);
     EXPECT_EQ(k.hdim_v, 128);
     EXPECT_EQ(k.mode, FmhaMode::BATCH);
-    EXPECT_EQ(k.arch, FmhaArch::GFX9);
 }
 
 TEST(FmhaBwdCompat, Registry_DqDkDv_NameLookup_SWA)
@@ -744,7 +1102,6 @@ TEST(FmhaBwdCompat, Registry_DqDkDv_NameLookup_SWA)
     EXPECT_EQ(k.hdim_q, 128);
     EXPECT_EQ(k.hdim_v, 128);
     EXPECT_EQ(k.mode, FmhaMode::BATCH);
-    EXPECT_EQ(k.arch, FmhaArch::GFX9);
 }
 
 TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_CMaskBR_SharesSpecWithCMask)
@@ -758,7 +1115,6 @@ TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_CMaskBR_SharesSpecWithCMask)
     EXPECT_EQ(k_br.hdim_q, k_cmask.hdim_q);
     EXPECT_EQ(k_br.hdim_v, k_cmask.hdim_v);
     EXPECT_EQ(k_br.mode, k_cmask.mode);
-    EXPECT_EQ(k_br.arch, k_cmask.arch);
     EXPECT_EQ(k_br.has_mask, k_cmask.has_mask);
     EXPECT_EQ(k_br.pad_hdim_q, k_cmask.pad_hdim_q);
     EXPECT_EQ(k_br.pad_hdim_v, k_cmask.pad_hdim_v);
@@ -775,7 +1131,6 @@ TEST(FmhaBwdCompat, DqDkDv_FP16_D128_Batch_SWA_SharesSpecWithCMask)
     EXPECT_EQ(k_swa.hdim_q, k_cmask.hdim_q);
     EXPECT_EQ(k_swa.hdim_v, k_cmask.hdim_v);
     EXPECT_EQ(k_swa.mode, k_cmask.mode);
-    EXPECT_EQ(k_swa.arch, k_cmask.arch);
     EXPECT_EQ(k_swa.has_mask, k_cmask.has_mask);
     EXPECT_EQ(k_swa.pad_hdim_q, k_cmask.pad_hdim_q);
     EXPECT_EQ(k_swa.pad_hdim_v, k_cmask.pad_hdim_v);
@@ -821,7 +1176,79 @@ TEST(FmhaBwdCompat, Registry_ConvertDQ_FindsBF16Group)
     EXPECT_STREQ(v->name, "fmha_bwd_convert_dq_bf16_d128_group_det");
 }
 
+TEST(FmhaBwdCompat, Registry_ConvertDQ_FindsD64Batch)
+{
+    const auto* v = findVariant(FmhaBwdConvertDQConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 64, .mode = FmhaMode::BATCH},
+        .algorithm = {}});
+    ASSERT_NE(v, nullptr);
+    EXPECT_STREQ(v->name, "fmha_bwd_convert_dq_fp16_d64_batch_det");
+}
+
+TEST(FmhaBwdCompat, Registry_ConvertDQ_FindsD64Group)
+{
+    const auto* v = findVariant(FmhaBwdConvertDQConfig{
+        .signature = {.dtype = DataType::BF16, .hdim_q = 64, .mode = FmhaMode::GROUP},
+        .algorithm = {}});
+    ASSERT_NE(v, nullptr);
+    EXPECT_STREQ(v->name, "fmha_bwd_convert_dq_bf16_d64_group_det");
+}
+
+TEST(FmhaBwdCompat, Registry_ConvertDQ_FindsD256Batch)
+{
+    const auto* v = findVariant(FmhaBwdConvertDQConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 256, .mode = FmhaMode::BATCH},
+        .algorithm = {}});
+    ASSERT_NE(v, nullptr);
+    EXPECT_STREQ(v->name, "fmha_bwd_convert_dq_fp16_d256_batch_det");
+}
+
+TEST(FmhaBwdCompat, Registry_ConvertDQ_FindsD256Group)
+{
+    const auto* v = findVariant(FmhaBwdConvertDQConfig{
+        .signature = {.dtype = DataType::BF16, .hdim_q = 256, .mode = FmhaMode::GROUP},
+        .algorithm = {}});
+    ASSERT_NE(v, nullptr);
+    EXPECT_STREQ(v->name, "fmha_bwd_convert_dq_bf16_d256_group_det");
+}
+
+TEST(FmhaBwdCompat, Registry_ConvertDQ_FindsBF16D64Batch)
+{
+    const auto* v = findVariant(FmhaBwdConvertDQConfig{
+        .signature = {.dtype = DataType::BF16, .hdim_q = 64, .mode = FmhaMode::BATCH},
+        .algorithm = {}});
+    ASSERT_NE(v, nullptr);
+    EXPECT_STREQ(v->name, "fmha_bwd_convert_dq_bf16_d64_batch_det");
+}
+
+TEST(FmhaBwdCompat, Registry_ConvertDQ_FindsFP16D64Group)
+{
+    const auto* v = findVariant(FmhaBwdConvertDQConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 64, .mode = FmhaMode::GROUP},
+        .algorithm = {}});
+    ASSERT_NE(v, nullptr);
+    EXPECT_STREQ(v->name, "fmha_bwd_convert_dq_fp16_d64_group_det");
+}
+
+TEST(FmhaBwdCompat, Registry_ConvertDQ_FindsBF16D256Batch)
+{
+    const auto* v = findVariant(FmhaBwdConvertDQConfig{
+        .signature = {.dtype = DataType::BF16, .hdim_q = 256, .mode = FmhaMode::BATCH},
+        .algorithm = {}});
+    ASSERT_NE(v, nullptr);
+    EXPECT_STREQ(v->name, "fmha_bwd_convert_dq_bf16_d256_batch_det");
+}
+
+TEST(FmhaBwdCompat, Registry_ConvertDQ_FindsFP16D256Group)
+{
+    const auto* v = findVariant(FmhaBwdConvertDQConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 256, .mode = FmhaMode::GROUP},
+        .algorithm = {}});
+    ASSERT_NE(v, nullptr);
+    EXPECT_STREQ(v->name, "fmha_bwd_convert_dq_fp16_d256_group_det");
+}
+
 TEST(FmhaBwdCompat, Registry_ConvertDQ_VariantCount)
 {
-    EXPECT_EQ(ALL_CONVERT_DQ_VARIANTS_COUNT, 4);
+    EXPECT_EQ(ALL_CONVERT_DQ_VARIANTS_COUNT, 12);
 }
