@@ -36,7 +36,6 @@ struct FmhaBwdDQDKDVSignature
     int hdim_q;     // Q/K head dimension: 32, 64, 96, 128, 256
     int hdim_v;     // V head dimension: 32, 64, 96, 128, 256
     FmhaMode mode;  // batch or group
-    FmhaArch arch;  // CK Tile architecture dispatch family
 };
 
 /// Algorithm: describes HOW the kernel executes (feature flags + tuning).
@@ -71,7 +70,6 @@ struct FmhaBwdDQDKDVSpec
     int hdim_q;
     int hdim_v;
     FmhaMode mode;
-    FmhaArch arch;
 
     // From Algorithm -- feature flags
     FmhaBiasType bias_type;
@@ -89,50 +87,6 @@ struct FmhaBwdDQDKDVSpec
     int block_size; // num_warps * warp_size (e.g. 4 * 64 = 256)
     int block_n0;   // kN0: K-sequence tile size (for grid calculation)
 };
-
-struct FmhaBwdDQDKDVTileGeometry
-{
-    int block_size;
-    int block_n0;
-};
-
-constexpr int fmhaBwdDQDKDVDispatchHdim(int hdim_q, int hdim_v)
-{
-    return hdim_q > hdim_v ? hdim_q : hdim_v;
-}
-
-consteval FmhaBwdDQDKDVTileGeometry
-selectFmhaBwdDQDKDVTileGeometry(FmhaArch arch, int hdim_q, int hdim_v)
-{
-    const int hdim = fmhaBwdDQDKDVDispatchHdim(hdim_q, hdim_v);
-
-    switch(arch)
-    {
-    case FmhaArch::GFX9:
-    case FmhaArch::GFX950:
-        switch(hdim)
-        {
-        case 32:
-        case 64:
-        case 96:
-        case 128: return {.block_size = 256, .block_n0 = 128};
-        case 256: return {.block_size = 256, .block_n0 = 64};
-        }
-        break;
-    case FmhaArch::GFX11:
-    case FmhaArch::GFX12:
-        switch(hdim)
-        {
-        case 32:
-        case 64:
-        case 128:
-        case 256: return {.block_size = 128, .block_n0 = 64};
-        }
-        break;
-    }
-
-    throw "unsupported FMHA BWD DqDkDv architecture/head-dimension tile geometry";
-}
 
 // ---------------------------------------------------------------------------
 // Named slot constants for generic rocm_ck::Args
@@ -195,8 +149,8 @@ constexpr int RAW_SCALE      = 0; // f32: attention scale (1/sqrt(hdim))
 constexpr int SCALE          = 1; // f32: raw_scale * log2(e)
 constexpr int NUM_HEAD_Q     = 2; // i32: number of Q heads
 constexpr int NHEAD_RATIO_QK = 3; // i32: Q heads / K heads (for GQA/MQA)
-constexpr int P_UNDROP       = 4; // f32: 1/(1-dropout_rate)
-constexpr int RP_UNDROP      = 5; // f32: 1/p_undrop
+constexpr int P_UNDROP       = 4; // f32: 1/(1-dropout_rate), passed to CK Tile as rp_undrop
+constexpr int RP_UNDROP      = 5; // f32: 1-dropout_rate (keep_prob), used for p_undrop_in_uint8_t
 constexpr int DROP_SEED      = 6; // u64: dropout RNG seed
 constexpr int DROP_OFFSET    = 7; // u64: dropout RNG offset
 // Mask scalar slots -- present only when has_mask=true.
@@ -287,8 +241,11 @@ consteval FmhaBwdDQDKDVSpec makeSpec(FmhaBwdDQDKDVConfig cfg)
     if(algo.pad_hdim_v != 0 && algo.pad_hdim_v != 1 && algo.pad_hdim_v != 8)
         throw "pad_hdim_v must be 0, 1, or 8";
 
-    // --- tile geometry (architecture-dependent) ---
-    const auto tile = selectFmhaBwdDQDKDVTileGeometry(sig.arch, sig.hdim_q, sig.hdim_v);
+    // --- tile geometry (hardcoded for d128 gfx9 demo) ---
+    // Config 4 from fmha_bwd.py: num_warps=4, warp_size=64, bn0=128.
+    // Production would derive these from architecture + hdim.
+    constexpr int demo_block_size = 256; // 4 warps * 64
+    constexpr int demo_block_n0   = 128; // kN0 = bn0
 
     // --- block_per_cu default ---
     int resolved_block_per_cu = algo.block_per_cu;
@@ -304,7 +261,6 @@ consteval FmhaBwdDQDKDVSpec makeSpec(FmhaBwdDQDKDVConfig cfg)
         .hdim_q           = sig.hdim_q,
         .hdim_v           = sig.hdim_v,
         .mode             = sig.mode,
-        .arch             = sig.arch,
         .bias_type        = algo.bias_type,
         .has_bias_grad    = algo.has_bias_grad,
         .has_mask         = algo.has_mask,
@@ -313,8 +269,8 @@ consteval FmhaBwdDQDKDVSpec makeSpec(FmhaBwdDQDKDVConfig cfg)
         .pad_hdim_q       = algo.pad_hdim_q,
         .pad_hdim_v       = algo.pad_hdim_v,
         .block_per_cu     = resolved_block_per_cu,
-        .block_size       = tile.block_size,
-        .block_n0         = tile.block_n0,
+        .block_size       = demo_block_size,
+        .block_n0         = demo_block_n0,
     };
 
     return k;

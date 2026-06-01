@@ -276,8 +276,8 @@ struct FmhaBwdDQDKDVTypes
 ///   scalars[S::SCALE].f32     = raw_scale * log2(e)
 ///
 ///   (dropout only):
-///   scalars[S::P_UNDROP].f32    = 1/(1-dropout_rate)
-///   scalars[S::RP_UNDROP].f32   = 1/p_undrop  (== 1 - dropout_rate)
+///   scalars[S::P_UNDROP].f32    = 1/(1-dropout_rate) (CK Tile rp_undrop)
+///   scalars[S::RP_UNDROP].f32   = 1 - dropout_rate   (keep_prob)
 ///   scalars[S::DROP_SEED].u64   = dropout RNG seed
 ///   scalars[S::DROP_OFFSET].u64 = dropout RNG offset
 ///
@@ -448,14 +448,10 @@ __device__ void runFmhaBwdDQDKDV(Args args)
     // Bias / dbias batch_stride_* and dropout batch_stride_randval fields
     // exist only on the BATCH-mode arms of the optional kargs. Guarding by
     // K.mode prevents referencing absent members in GROUP mode. CK Tile's
-    // GROUP-mode bias/dbias kargs derive batch offsets from seqstart_q_ptr,
-    // so the host-supplied batch_stride is unused there.
-    //
-    // The GROUP path here is exercised only by the plain-feature variant
-    // shipped today (fmha_bwd_dqdkdv_fp16_d128_group). The compile-time
-    // branches below are correct for any future GROUP variant that enables
-    // an optional feature, but those combinations are not numerically
-    // verified by the current example -- they remain compilation-only.
+    // GROUP-mode optional kargs use the common forms instead: bias/dbias are
+    // addressed through stride + nhead_stride without batch_stride, dropout
+    // uses randval stride + nhead_stride without batch_stride_randval, and
+    // batch offsets come from seqstart_q_ptr / seqstart_k_ptr.
 
     if constexpr(K.bias_type == FmhaBiasType::ELEMENTWISE)
     {
@@ -464,7 +460,9 @@ __device__ void runFmhaBwdDQDKDV(Args args)
         kargs.stride_bias       = static_cast<index_t>(t_bias.strides[0]);
         kargs.nhead_stride_bias = static_cast<index_t>(t_bias.strides[1]);
         if constexpr(K.mode == FmhaMode::BATCH)
+        {
             kargs.batch_stride_bias = static_cast<index_t>(t_bias.strides[2]);
+        }
     }
     else if constexpr(K.bias_type == FmhaBiasType::ALIBI)
     {
@@ -480,7 +478,9 @@ __device__ void runFmhaBwdDQDKDV(Args args)
         kargs.stride_dbias       = static_cast<index_t>(t_dbias.strides[0]);
         kargs.nhead_stride_dbias = static_cast<index_t>(t_dbias.strides[1]);
         if constexpr(K.mode == FmhaMode::BATCH)
+        {
             kargs.batch_stride_dbias = static_cast<index_t>(t_dbias.strides[2]);
+        }
     }
 
     if constexpr(K.has_mask)
@@ -493,8 +493,18 @@ __device__ void runFmhaBwdDQDKDV(Args args)
 
     if constexpr(K.has_dropout)
     {
-        const float p_undrop  = args.scalars[S::P_UNDROP].f32;
-        const float rp_undrop = args.scalars[S::RP_UNDROP].f32;
+        const TensorArg& t_randval = args.tensors[S::RANDVAL];
+        // rocm_ck's historical slot names are inverted relative to CK Tile's
+        // kargs naming: P_UNDROP stores the reciprocal keep probability used
+        // as CK Tile's rp_undrop, while RP_UNDROP stores the keep probability
+        // used for the uint8 dropout threshold. (Prior to PR #7534 these two
+        // slots were assigned reversed -- kargs.rp_undrop received the keep
+        // probability instead of its reciprocal -- which produced incorrect
+        // gradient scaling for any non-trivial dropout rate. The bug was
+        // masked because every landed host caller wrote 1.0 to both slots,
+        // making the swap unobservable in tests.)
+        const float rp_undrop = args.scalars[S::P_UNDROP].f32;
+        const float p_undrop  = args.scalars[S::RP_UNDROP].f32;
         kargs.rp_undrop       = rp_undrop;
         kargs.scale_rp_undrop = rp_undrop * raw_scale;
         // Clamp before the uint8_t cast: out-of-range float-to-int
@@ -508,12 +518,13 @@ __device__ void runFmhaBwdDQDKDV(Args args)
         kargs.drop_offset.val               = args.scalars[S::DROP_OFFSET].u64;
         kargs.is_drop_seed_offset_from_host = true;
 
-        // randval is never stored in the backward pass.
-        kargs.rand_val_ptr         = nullptr;
-        kargs.stride_randval       = 0;
-        kargs.nhead_stride_randval = 0;
+        kargs.rand_val_ptr         = t_randval.ptr;
+        kargs.stride_randval       = static_cast<index_t>(t_randval.strides[0]);
+        kargs.nhead_stride_randval = static_cast<index_t>(t_randval.strides[1]);
         if constexpr(K.mode == FmhaMode::BATCH)
-            kargs.batch_stride_randval = 0;
+        {
+            kargs.batch_stride_randval = static_cast<index_t>(t_randval.strides[2]);
+        }
     }
 
     if constexpr(K.is_deterministic)

@@ -7,7 +7,7 @@
 
 // FP16, hdim_q=128, group, deterministic. Paired with det dQ/dK/dV.
 // All modes use generic rocm_ck::Args (no per-mode Args type).
-// Compilation proof only — numerical verification deferred.
+// Compilation proof only -- numerical verification deferred.
 static constexpr rocm_ck::FmhaBwdConvertDQSpec spec =
     rocm_ck::fmha_bwd_convert_dq_variant_spec("fmha_bwd_convert_dq_fp16_d128_group_det");
 
