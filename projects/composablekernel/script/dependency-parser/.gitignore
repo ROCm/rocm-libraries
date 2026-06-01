@@ -1,0 +1,10 @@
+# uv-managed virtual environment (recreated per host; do not track)
+.venv/
+
+# Python caches
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/

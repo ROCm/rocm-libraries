@@ -1,0 +1,31 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+[project]
+name = "ck-dependency-parser"
+version = "0.0.0"
+description = "Smart-build dependency analysis and selective testing tooling for Composable Kernel CI"
+requires-python = ">=3.8"
+# Runtime is pure standard library; no third-party packages are imported.
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pytest>=7",
+    "pytest-cov>=4",
+    "ruff>=0.6",
+]
+
+[tool.uv]
+# This directory is a tooling workspace, not an installable package, so uv must
+# not attempt to build/install it as the root project during `uv sync`.
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 100
+target-version = "py38"
