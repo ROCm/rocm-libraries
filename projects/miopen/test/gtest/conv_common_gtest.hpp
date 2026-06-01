@@ -89,27 +89,22 @@ StringToLayoutType(std::string layout_str, int tensor_vect, int vector_length)
     miopenTensorLayout_t default_layout = miopenTensorNCHW;
     if(tensor_vect == 0)
     {
-        if(layout_str == "NCHW")
+        static const std::map<std::string, miopenTensorLayout_t> layout_map{
+            {"NCHW", miopenTensorNCHW},
+            {"NHWC", miopenTensorNHWC},
+            {"NDHWC", miopenTensorNDHWC},
+            {"NCDHW", miopenTensorNCDHW}};
+
+        auto iter = layout_map.find(layout_str);
+        if(iter != layout_map.end())
         {
-            return miopenTensorNCHW;
+            return iter->second;
         }
-        else if(layout_str == "NHWC")
-        {
-            return miopenTensorNHWC;
-        }
-        else if(layout_str == "NDHWC")
-        {
-            return miopenTensorNDHWC;
-        }
-        else if(layout_str == "NCDHW")
-        {
-            return miopenTensorNCDHW;
-        }
-        else
-        {
-            MIOPEN_THROW("Non-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC");
-            return default_layout;
-        }
+
+        MIOPEN_THROW("Unsupported layout string: " + layout_str +
+                     "\nNon-vectorized tensor only support layout NCHW, NHWC, NCDHW and NDHWC");
+
+        return default_layout;
     }
     else if(tensor_vect == 1)
     {
@@ -121,17 +116,13 @@ StringToLayoutType(std::string layout_str, int tensor_vect, int vector_length)
         {
             return layout_str == "CHWN" ? miopenTensorCHWNc8 : miopenTensorNCHWc8;
         }
-        else
-        {
-            MIOPEN_THROW("C-vectorized tensor only support vector length 4 and 8");
-            return default_layout;
-        }
-    }
-    else
-    {
-        MIOPEN_THROW("MIOpen only support Non-vectorized and C-vectorized tensor");
+
+        MIOPEN_THROW("C-vectorized tensor only support vector length 4 and 8");
         return default_layout;
     }
+
+    MIOPEN_THROW("MIOpen only support Non-vectorized and C-vectorized tensor");
+    return default_layout;
 }
 
 struct conv_stats
@@ -224,7 +215,7 @@ protected:
         constexpr const auto find_limit = 1;
         std::size_t found;
 
-        auto solutions = std::vector<miopenSolution_t>{};
+        std::vector<miopenSolution_t> solutions;
         solutions.resize(find_limit);
 
         {
