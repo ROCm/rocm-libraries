@@ -21,6 +21,32 @@
 
 namespace test_helpers
 {
+
+/// Query total device VRAM in megabytes for device 0.
+/// Returns 0 if the device cannot be queried (e.g. no GPU present).
+inline std::size_t getDeviceTotalVramMb()
+{
+    std::size_t freeMem = 0;
+    std::size_t totalMem = 0;
+    if(hipMemGetInfo(&freeMem, &totalMem) == hipSuccess)
+    {
+        return totalMem / (1024 * 1024);
+    }
+    return 0;
+}
+
+/// Query the raw gcnArchName string for device 0 (e.g. "gfx942:sramecc+:xnack-").
+/// Returns an empty string if the device cannot be queried.
+inline std::string getDeviceArchName()
+{
+    hipDeviceProp_t props{};
+    if(hipGetDeviceProperties(&props, 0) == hipSuccess)
+    {
+        return props.gcnArchName;
+    }
+    return {};
+}
+
 class TestGoldenReferenceGpu : public testing::TestWithParam<std::filesystem::path>
 {
 protected:
@@ -49,29 +75,14 @@ protected:
         _bundleMetadata = hipdnn_test_sdk::utilities::loadBundleMetadata(path);
         if(_bundleMetadata)
         {
-            std::size_t freeMem = 0;
-            std::size_t totalMem = 0;
-            std::size_t vramMb = 0;
-            if(hipMemGetInfo(&freeMem, &totalMem) == hipSuccess)
-            {
-                vramMb = totalMem / (1024 * 1024);
-            }
-
             if(auto reason = hipdnn_test_sdk::utilities::checkVramRequirement(
-                   *_bundleMetadata, vramMb))
+                   *_bundleMetadata, getDeviceTotalVramMb()))
             {
                 GTEST_SKIP() << *reason;
             }
 
-            hipDeviceProp_t props{};
-            std::string arch;
-            if(hipGetDeviceProperties(&props, 0) == hipSuccess)
-            {
-                arch = props.gcnArchName;
-            }
-
             if(auto reason = hipdnn_test_sdk::utilities::checkArchCompatibility(
-                   *_bundleMetadata, arch))
+                   *_bundleMetadata, getDeviceArchName()))
             {
                 GTEST_SKIP() << *reason;
             }
