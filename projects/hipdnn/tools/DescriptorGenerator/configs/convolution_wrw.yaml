@@ -5,9 +5,9 @@ operation:
   fbs_generated_header: "convolution_wrw_attributes_generated.h"
 
   descriptor_type:
-    enum_name: "HIPDNN_BACKEND_OPERATION_CONVOLUTION_WRW_DESCRIPTOR"
+    enum_name: "HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR"
 
-  operation_attr_prefix: "HIPDNN_ATTR_OPERATION_CONVOLUTION_WRW"
+  operation_attr_prefix: "HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_FILTER"
 
   frontend:
     packer_function: "createConvWgradOperation"
@@ -41,25 +41,24 @@ operation:
     graph_return_type: "single"
     graph_return_outputs:
       - "dw"
+    node_type_enum: "NodeType::CONVOLUTION_WGRAD"
+    attributes_filename: "ConvolutionWgrad"
 
   tensor_fields:
     - name: "x"
       fbs_field: "x_tensor_uid"
       attr_suffix: "X"
       required: true
-      frontend_getter: "get_x()"
 
     - name: "dy"
       fbs_field: "dy_tensor_uid"
       attr_suffix: "DY"
       required: true
-      frontend_getter: "get_dy()"
 
     - name: "dw"
       fbs_field: "dw_tensor_uid"
       attr_suffix: "DW"
       required: true
-      frontend_getter: "get_dw()"
 
   data_fields:
     - name: "pre_padding"
@@ -103,6 +102,7 @@ operation:
       attr_name: "HIPDNN_ATTR_CONVOLUTION_CONV_MODE"
       type: "mode"
       cpp_enum: "hipdnn_flatbuffers_sdk::data_objects::ConvMode"
+      frontend_type: "ConvolutionMode"
       required: false
       frontend_getter: "get_convolution_mode()"
       backend_setter: "setConvMode"

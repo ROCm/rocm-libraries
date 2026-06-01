@@ -38,14 +38,14 @@ extern "C" {
 *  the user.
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  \note
 *  This routine supports execution in a hipGraph context.
 *
 *  @param[in]
-*  handle          handle to the rocsparse library context queue.
+*  handle          handle to the rocSPARSE library context queue.
 *  @param[in]
 *  m               number of rows of the sparse CSC matrix.
 *  @param[in]
@@ -64,8 +64,8 @@ extern "C" {
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval     rocsparse_status_invalid_size \p m, \p n or \p nnz is invalid.
-*  \retval     rocsparse_status_invalid_pointer \p csc_col_ptr, \p csc_row_ind or
+*  \retval     rocsparse_status_invalid_size \p m, \p n, or \p nnz is invalid.
+*  \retval     rocsparse_status_invalid_pointer \p csc_col_ptr, \p csc_row_ind, or
 *              \p buffer_size pointer is invalid.
 */
 ROCSPARSE_EXPORT
@@ -78,28 +78,28 @@ rocsparse_status rocsparse_cscsort_buffer_size(rocsparse_handle     handle,
                                                size_t*              buffer_size);
 
 /*! \ingroup conv_module
-*  \brief Sort a sparse CSC matrix
+*  \brief Sort a sparse CSC matrix.
 *
 *  \details
 *  \p rocsparse_cscsort sorts a matrix in CSC format. The sorted permutation vector
-*  \p perm can be used to obtain sorted \p csc_val array. In this case, \p perm must be
-*  initialized as the identity permutation, see \ref rocsparse_create_identity_permutation().
+*  \p perm can be used to obtain the sorted \p csc_val array. In this case, \p perm must be
+*  initialized as the identity permutation. For more information, see \ref rocsparse_create_identity_permutation().
 *
-*  \p rocsparse_cscsort requires extra temporary storage buffer that has to be allocated by
-*  the user. Storage buffer size can be determined by \ref rocsparse_cscsort_buffer_size().
+*  \p rocsparse_cscsort requires an extra temporary storage buffer that has to be allocated by
+*  the user. The storage buffer size can be determined by \ref rocsparse_cscsort_buffer_size().
 *
 *  \note
 *  \p perm can be \p NULL if a sorted permutation vector is not required.
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  \note
 *  This routine does not support execution in a hipGraph context.
 *
 *  @param[in]
-*  handle          handle to the rocsparse library context queue.
+*  handle          handle to the rocSPARSE library context queue.
 *  @param[in]
 *  m               number of rows of the sparse CSC matrix.
 *  @param[in]
@@ -116,16 +116,16 @@ rocsparse_status rocsparse_cscsort_buffer_size(rocsparse_handle     handle,
 *  csc_row_ind     array of \p nnz elements containing the row indices of the sparse
 *                  CSC matrix.
 *  @param[inout]
-*  perm            array of \p nnz integers containing the unsorted map indices, can be
+*  perm            array of \p nnz integers containing the unsorted map indices, which can be
 *                  \p NULL.
 *  @param[in]
-*  temp_buffer     temporary storage buffer allocated by the user, size is returned by
+*  temp_buffer     temporary storage buffer allocated by the user. The size is returned by
 *                  \ref rocsparse_cscsort_buffer_size().
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval     rocsparse_status_invalid_size \p m, \p n or \p nnz is invalid.
-*  \retval     rocsparse_status_invalid_pointer \p descr, \p csc_col_ptr, \p csc_row_ind
+*  \retval     rocsparse_status_invalid_size \p m, \p n, or \p nnz is invalid.
+*  \retval     rocsparse_status_invalid_pointer \p descr, \p csc_col_ptr, \p csc_row_ind,
 *              or \p temp_buffer pointer is invalid.
 *  \retval     rocsparse_status_internal_error an internal error occurred.
 *  \retval     rocsparse_status_not_implemented

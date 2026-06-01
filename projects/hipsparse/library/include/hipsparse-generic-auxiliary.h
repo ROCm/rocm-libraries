@@ -392,6 +392,54 @@ hipsparseStatus_t hipsparseCreateConstSlicedEll(hipsparseConstSpMatDescr_t* spMa
 #endif
 
 /*! \ingroup generic_module
+*  \brief Create a sparse BSR matrix descriptor.
+*  \details
+*  \p hipsparseCreateBsr creates a sparse BSR matrix descriptor. It should be
+*  destroyed at the end using \p hipsparseDestroySpMat.
+*/
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12011)
+HIPSPARSE_EXPORT
+hipsparseStatus_t hipsparseCreateBsr(hipsparseSpMatDescr_t* spMatDescr,
+                                     int64_t                mb,
+                                     int64_t                nb,
+                                     int64_t                nnzb,
+                                     int64_t                rowBlockDim,
+                                     int64_t                colBlockDim,
+                                     void*                  bsrRowPtr,
+                                     void*                  bsrColInd,
+                                     void*                  bsrValues,
+                                     hipsparseIndexType_t   bsrRowPtrType,
+                                     hipsparseIndexType_t   bsrColIndType,
+                                     hipsparseIndexBase_t   idxBase,
+                                     hipDataType            valueType,
+                                     hipsparseOrder_t       order);
+#endif
+
+/*! \ingroup generic_module
+*  \brief Create a sparse BSR matrix descriptor.
+*  \details
+*  \p hipsparseCreateConstBsr creates a sparse BSR matrix descriptor. It should be
+*  destroyed at the end using \p hipsparseDestroySpMat.
+*/
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12011)
+HIPSPARSE_EXPORT
+hipsparseStatus_t hipsparseCreateConstBsr(hipsparseConstSpMatDescr_t* spMatDescr,
+                                          int64_t                     mb,
+                                          int64_t                     nb,
+                                          int64_t                     nnzb,
+                                          int64_t                     rowBlockDim,
+                                          int64_t                     colBlockDim,
+                                          const void*                 bsrRowPtr,
+                                          const void*                 bsrColInd,
+                                          const void*                 bsrValues,
+                                          hipsparseIndexType_t        bsrRowPtrType,
+                                          hipsparseIndexType_t        bsrColIndType,
+                                          hipsparseIndexBase_t        idxBase,
+                                          hipDataType                 valueType,
+                                          hipsparseOrder_t            order);
+#endif
+
+/*! \ingroup generic_module
 *  \brief Destroy a sparse matrix descriptor.
 *  \details
 *  \p hipsparseDestroySpMat destroys a sparse matrix descriptor and releases all
