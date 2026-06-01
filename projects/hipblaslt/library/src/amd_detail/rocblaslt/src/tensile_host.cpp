@@ -136,7 +136,8 @@ RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     
                                                          bool                   swizzleA,
                                                          bool                   swizzleB,
                                                          hipblasLtBatchMode_t   batchMode,
-                                                         int32_t                bias_stride)
+                                                         int32_t                bias_stride,
+                                                         int32_t                dyn_persistent_tile_ext)
     : trans_a(trans_a)
     , trans_b(trans_b)
     , m(m)
@@ -202,6 +203,7 @@ RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     
     , swizzleB(swizzleB)
     , batchMode(batchMode)
     , bias_stride(bias_stride)
+    , dyn_persistent_tile_ext(dyn_persistent_tile_ext)
 {
     if(this->bias_type == HIPBLASLT_DATATYPE_INVALID)
     {
@@ -1997,6 +1999,13 @@ namespace
         // set use gradient
         tensileProblem.setUseGradient(is_grad_enabled(prob.epilogue));
 
+        // Forward HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT. When the
+        // chosen solution is a StreamK=5 hybrid kernel, this bit is OR'd
+        // into the MSB of MagicShiftItersPerTile at arg-pack time to
+        // select the dynamic per-XCD work-queue path (1) versus the
+        // static path (0). Non-StreamK=5 solutions ignore it.
+        tensileProblem.setParams().setDynPersistentTile(prob.dyn_persistent_tile_ext != 0);
+
         // set AmaxD
         tensileProblem.setOutputAmaxD(prob.amaxD != nullptr);
         tensileProblem.setAmaxD(compute_type, true);
@@ -2291,6 +2300,10 @@ namespace
                                              : TensileLite::ActivationType::None);
         tensileProblem.setActivationComputeType(compute_type);
         tensileProblem.setParams().setActivationEnum(getTensileActivationType(prob.epilogue));
+
+        // Forward HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT. See
+        // companion block in ConstructTensileProblem for details.
+        tensileProblem.setParams().setDynPersistentTile(prob.dyn_persistent_tile_ext != 0);
 
         // set E
         if(is_e_enabled(prob.epilogue))

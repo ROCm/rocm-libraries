@@ -48,6 +48,7 @@ namespace TensileLite
             , m_activationType(ActivationType::None)
             , m_activationNoGuard(false)
             , m_activationEnumArg(std::vector<ActivationType>(1, ActivationType::None))
+            , m_streamKHybridMode(std::vector<int>(1, 0))
             , m_computeInputTypeA(rocisa::DataType::Float)
             , m_computeInputTypeB(rocisa::DataType::Float)
             , m_f32XdlMathOp(rocisa::DataType::Float)
@@ -196,6 +197,12 @@ namespace TensileLite
             if(args.count("activation-enum-args"))
                 m_activationEnumArg
                     = args["activation-enum-args"].as<std::vector<ActivationType>>();
+            if(args.count("streamk-hybrid-mode"))
+            {
+                auto raw = args["streamk-hybrid-mode"].as<std::vector<int>>();
+                if(!raw.empty())
+                    m_streamKHybridMode = std::move(raw);
+            }
             if(args.count("use-bias"))
                 m_useBias = args["use-bias"].as<int>();
             if(args.count("bias-source"))
@@ -275,7 +282,13 @@ namespace TensileLite
             int activationSize = std::max(1, (int)m_activationEnumArg.size());
             int factorDimSize  = std::max(
                 1, m_useScaleAlphaVec == 3 || m_useBias == 3 ? (int)m_factorDimArgs.size() : 1);
-            rv.reserve(m_problemSizes.size() * activationSize * biasSize * factorDimSize);
+            // StreamK=5 hybrid-mode toggle variants. When the YAML sets
+            // StreamKHybridMode: [0, 1] each base problem is replayed
+            // twice (one static pass, one dynamic pass) so a single
+            // tlrun invocation covers both code paths of an SK5 kernel.
+            int streamKHybridModeSize = std::max(1, (int)m_streamKHybridMode.size());
+            rv.reserve(m_problemSizes.size() * activationSize * biasSize * factorDimSize
+                       * streamKHybridModeSize);
 
             std::vector<size_t> aStrides, bStrides, cStrides, dStrides, eStrides, biasStrides;
 
@@ -292,6 +305,11 @@ namespace TensileLite
             if(m_tensorStrides[ContractionProblemGemm::TENSOR::BIAS].size() == 1)
                 biasStrides = m_tensorStrides[ContractionProblemGemm::TENSOR::BIAS][0];
 
+            // Outer loop is intentionally kept at the same indentation
+            // as the inner factor/bias/activation/problem-size loops to
+            // avoid re-indenting ~200 lines of unrelated body code.
+            for(int m = 0; m < streamKHybridModeSize; m++)
+            {
             for(int l = 0; l < factorDimSize; l++)
             {
                 for(int k = 0; k < biasSize; k++)
@@ -466,10 +484,19 @@ namespace TensileLite
                             {
                                 rv.back().setMXScaleB(m_tensorTypes[ContractionProblemGemm::TENSOR::MXSB], m_mxBlockB, {}, m_padMXScaleTensor);
                             }
+                            // StreamK=5 hybrid-mode toggle. See
+                            // ContractionSolution::solve, which OR's bit 31
+                            // into MagicShiftItersPerTile based on this.
+                            if(m < (int)m_streamKHybridMode.size())
+                            {
+                                rv.back().setParams().setDynPersistentTile(
+                                    m_streamKHybridMode[m] != 0);
+                            }
                         }
                     }
                 }
             }
+            } // streamk-hybrid-mode outer loop
         }
     } // namespace Client
 } // namespace TensileLite

@@ -222,6 +222,25 @@ class SignatureDefault(Signature):
             signature.addArg("SKItersPerWI",                       SVK.SIG_VALUE, "u32")
             signature.addArg("SKGrid",                             SVK.SIG_VALUE, "u32")
             userArgumentsInfo.gemmArgumentSize += 24
+        elif kernel["StreamK"] == 5:
+            # Hybrid SK3+SK4. Per Alex's review (PR 7953 ContractionSolution.cpp:868)
+            # we push only the 6 args of the mode the host actually selected at
+            # launch time, and use RegSet aliases (KernelWriterAssembly.py SK5
+            # block) so the SK4 reader names (TotalItems, SKTiles, SKSplit,
+            # SKItersPerWI, SKGrid) resolve to the same physical SGPRs as the
+            # SK3 names (MagicNumberItersPerTile, MagicShiftItersPerTile,
+            # SKItersPerWG, skGrid, skTiles) respectively.
+            #
+            # The mode bit (bit 31 of slot 2) selects the active path. Signature
+            # metadata uses SK3 names as the primary kernarg labels because they
+            # are what defineSgpr() declares; SK4 names exist only as aliases.
+            signature.addArg("ItersPerTile",                       SVK.SIG_VALUE, "u32")
+            signature.addArg("MagicNumberItersPerTile",            SVK.SIG_VALUE, "u32")
+            signature.addArg("MagicShiftItersPerTile",             SVK.SIG_VALUE, "u32")
+            signature.addArg("SKItersPerWG",                       SVK.SIG_VALUE, "u32")
+            signature.addArg("skGrid",                             SVK.SIG_VALUE, "u32")
+            signature.addArg("skTiles",                            SVK.SIG_VALUE, "u32")
+            userArgumentsInfo.gemmArgumentSize += 24
         elif kernel["StreamK"]:
             # StreamK args
             signature.addArg("ItersPerTile",                       SVK.SIG_VALUE, "u32")

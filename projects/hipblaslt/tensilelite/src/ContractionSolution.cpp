@@ -783,6 +783,128 @@ namespace TensileLite
                 args.template append<uint32_t>("SKItersPerWI", skItersPerWI);
                 args.template append<uint32_t>("SKGrid", sk.grid);
             }
+            else if(sizeMapping.streamK == 5)
+            {
+                // SK5 hybrid: per Alex's review on PR 7953 (this file, original
+                // line 868) we push only the 6 args matching the runtime mode
+                // the host has selected for this launch. The kernel's SK3 and
+                // SK4 code paths read via different symbolic names that are
+                // RegSet-aliased onto the same 6 SGPRs (see
+                // Tensile/KernelWriterAssembly.py SK5 alias block and
+                // Tensile/Components/Signature.py SK5 branch).
+                //
+                // The mode bit lives in bit 31 of slot 2:
+                //   SK3 mode -> slot 2 = magicShiftItersPerTile (5 bits, MSB=0)
+                //   SK4 mode -> slot 2 = sk4_skTiles | 0x80000000u
+                // The kernel extracts the bit at preLoop, then masks bit 31
+                // off in place so the SK4 alias 'SKTiles' reads a clean count.
+
+                AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(hardware);
+                assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
+
+                // ---- Shared (mode-independent) ----
+                auto sk3_tiles = problem.getNumTiles(sizeMapping, 1);
+                auto sk3_itersPerTile
+                    = std::max(size_t{1}, problem.getItersPerTile(sizeMapping));
+
+                // ---- Decide active mode FIRST, so we only do the work that
+                // matches the mode being packed (and only push 6 args). ----
+                int sk5DebugMode = Debug::Instance().streamK5ForceMode();
+                bool effectiveDyn = sk.dynPersistentTile;
+                if(sk5DebugMode == 0)
+                    effectiveDyn = false;
+                else if(sk5DebugMode == 1)
+                    effectiveDyn = true;
+
+                if(effectiveDyn)
+                {
+                    // ---- SK4 (dynamic) arg values ----
+                    int overrideTiles = pAMDGPU->skTiles;
+                    int overrideSplit = pAMDGPU->skSplit;
+                    uint32_t sk4_skTiles = 0;
+                    uint32_t sk4_skSplit = 2;
+                    if(overrideTiles > -1)
+                        sk4_skTiles = overrideTiles;
+                    if(overrideSplit > -1)
+                        sk4_skSplit = overrideSplit;
+                    uint32_t sk4_skItersPerWI
+                        = CeilDivide(static_cast<uint32_t>(sk3_itersPerTile),
+                                     sk4_skSplit);
+                    sk4_skSplit
+                        = CeilDivide(static_cast<uint32_t>(sk3_itersPerTile),
+                                     sk4_skItersPerWI);
+                    uint32_t sk4_totalItems
+                        = (sk3_tiles - sk4_skTiles) + sk4_skTiles * sk4_skSplit;
+
+                    // SK4 stores the tile count in slot 2. We OR in the mode
+                    // bit (bit 31). SKTiles is bounded by the total tile
+                    // count of the GEMM, which is many orders of magnitude
+                    // below 2^31 in practice; fail loudly if a pathological
+                    // problem ever hits the bound so the kernel-side mask
+                    // does not silently corrupt the count.
+                    assert((sk4_skTiles & 0x80000000u) == 0u
+                           && "SK5 SK4 skTiles must not collide with mode bit (bit 31)");
+                    uint32_t packedSkTiles = sk4_skTiles | 0x80000000u;
+
+                    // 6 args in canonical (SK3-named) slot order. The
+                    // kernarg labels here are the SK3 *primary* names — the
+                    // values are SK4 quantities; the kernel reads via SK4
+                    // RegSet aliases. KernelArguments::append's `name`
+                    // parameter is logging-only (see
+                    // include/Tensile/KernelArguments.hpp), so the label
+                    // mismatch is harmless. We still use intuitive SK4-ish
+                    // labels in T_Debug logs.
+                    args.template append<uint32_t>("ItersPerTile",
+                                                   sk3_itersPerTile);
+                    args.template append<uint32_t>("TotalItems",
+                                                   sk4_totalItems);
+                    args.template append<uint32_t>("SKTiles|ModeBit",
+                                                   packedSkTiles);
+                    args.template append<uint32_t>("SKSplit", sk4_skSplit);
+                    args.template append<uint32_t>("SKItersPerWI",
+                                                   sk4_skItersPerWI);
+                    args.template append<uint32_t>("SKGrid", sk.grid);
+                }
+                else
+                {
+                    // ---- SK3 (static) arg values ----
+                    uint32_t magicNumberItersPerTile;
+                    uint32_t magicShiftItersPerTile;
+                    magicNumberItersPerTile = magicNumber(
+                        2, sk3_itersPerTile, &magicShiftItersPerTile);
+                    assert((magicShiftItersPerTile & 0x1Fu)
+                               == magicShiftItersPerTile
+                           && "magicShiftItersPerTile must fit in 5 bits for SK5 hybrid");
+
+                    int sk3_fullTiles = pAMDGPU->skFullTiles;
+                    bool sk3_bigEnough = sk3_tiles > sk.grid;
+                    uint32_t sk3_skTiles = sk.grid;
+                    if(sk3_tiles % sk.grid != 0)
+                    {
+                        sk3_skTiles
+                            = sk3_bigEnough
+                                  ? sk.grid * sk3_fullTiles + sk3_tiles % sk.grid
+                                  : sk3_tiles;
+                        sk3_skTiles = std::min(
+                            sk3_skTiles, static_cast<uint32_t>(sk3_tiles));
+                    }
+                    uint32_t sk3_skItersPerWG
+                        = sk3_skTiles * sk3_itersPerTile / sk.grid;
+
+                    // SK3 mode -> bit 31 of slot 2 is 0 (mode bit clear). The
+                    // value is already a 5-bit magic shift, so no OR needed.
+                    args.template append<uint32_t>("ItersPerTile",
+                                                   sk3_itersPerTile);
+                    args.template append<uint32_t>("MagicNumberItersPerTile",
+                                                   magicNumberItersPerTile);
+                    args.template append<uint32_t>("MagicShiftItersPerTile",
+                                                   magicShiftItersPerTile);
+                    args.template append<uint32_t>("SKItersPerWG",
+                                                   sk3_skItersPerWG);
+                    args.template append<uint32_t>("skGrid", sk.grid);
+                    args.template append<uint32_t>("skTiles", sk3_skTiles);
+                }
+            }
             else
             {
                 auto tiles = problem.getNumTiles(sizeMapping, 1);
@@ -2873,10 +2995,15 @@ namespace TensileLite
         if(sizeMapping.streamK > 0)
         {
             auto tiles           = problem.getNumTiles(sizeMapping, 1);
-            if (sizeMapping.streamK == 4)
+            if (sizeMapping.streamK == 4 || sizeMapping.streamK == 5)
                 sk.reduction = origami::reduction_t::tree;
             else
                 sk.reduction = getSKReduction(problem, hardware);
+            // Propagate the StreamK=5 hybrid-mode bit from the problem
+            // (set by the host from the HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT
+            // matmul-descriptor attribute) into the StreamKSettings used
+            // by the kernel-arg packing path below.
+            sk.dynPersistentTile = problem.getParams().dynPersistentTile();
             sk.grid = getSKGrid(problem, hardware, tiles, sk.reduction);
             const bool streamKDP = Debug::Instance().useStreamKDataParrallel();
             if(sk.grid > 0
@@ -2885,6 +3012,9 @@ namespace TensileLite
             {
                 // Check ideal amount of workspace for optimal performance
                 size_t idealWorkspace = partialTileSize(sk.grid);
+                // SK4/SK5 also need the 256*8 byte work-queue base region.
+                if(sizeMapping.streamK == 4 || sizeMapping.streamK == 5)
+                    idealWorkspace += 256 * 8;
                 // If given workspace is less than ideal, we can fall back to DP mode
                 // Performance will likely be lower, but the kernel can run if workspace is unavailable
                 if(idealWorkspace > problem.workspaceSize())
@@ -3303,6 +3433,12 @@ namespace TensileLite
                 {
                     // Check ideal amount of workspace for optimal performance
                     size_t idealWorkspace = partialTileSize(skGrid);
+                    // SK4 (dynamic) and SK5 (hybrid which may run the SK4
+                    // path at runtime) additionally require a per-XCD work
+                    // queue buffer (256 entries * 8 bytes = 2048 bytes,
+                    // see StreamK.py partialsWriteProcedure flag offset).
+                    if(sizeMapping.streamK == 4 || sizeMapping.streamK == 5)
+                        idealWorkspace += 256 * 8;
                     // If given workspace is less than ideal, we can fall back to DP mode
                     // Performance will likely be lower, but the kernel can run if workspace is unavailable
                     if(idealWorkspace <= problem.workspaceSize())
@@ -3510,9 +3646,11 @@ namespace TensileLite
         }
         else if(pAMDGPU->skDynamicGrid > 0)
         {
-            if(sizeMapping.streamK == 4)
+            if(sizeMapping.streamK == 4 || sizeMapping.streamK == 5)
             {
-                // Grid for dynamic kernel
+                // Grid for dynamic kernel (SK4) and hybrid kernel (SK5).
+                // SK5 must satisfy the SK4 grid constraint (persistent), so
+                // we share the SK4 sizing rule here.
                 // Limit workgroups per CU to 3
                 // TODO Verify this limit is best
                 auto kernelOccupancy = std::min(sizeMapping.CUOccupancy, 3);

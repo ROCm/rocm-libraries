@@ -125,6 +125,11 @@ namespace TensileLite
         return m_dataParallel;
     }
 
+    int Debug::streamK5ForceMode() const
+    {
+        return m_streamK5ForceMode;
+    }
+
     int Debug::useExperimentalSelection() const
     {
         return m_experimentSelection;
@@ -199,6 +204,19 @@ namespace TensileLite
         const char* exp_streamkDP = std::getenv("TENSILE_STREAMK_DATA_PARALLEL");
         if(exp_streamkDP)
             m_dataParallel = strtol(exp_streamkDP, nullptr, 0) != 0;
+
+        // StreamK=5 hybrid-mode debug override. strtol returns 0 on
+        // non-numeric input (which would silently force the static
+        // path), so the variable is intentionally a tri-state int where
+        // -1 means "respect the matmul descriptor attribute" and only 0
+        // or 1 should be passed explicitly.
+        //   unset / -1 -> use the value forwarded from the matmul
+        //                 descriptor attribute
+        //   0          -> force the static path
+        //   1          -> force the dynamic per-XCD work-queue path
+        const char* sk5Force = std::getenv("TENSILE_STREAMK5_FORCE_MODE");
+        if(sk5Force)
+            m_streamK5ForceMode = static_cast<int>(strtol(sk5Force, nullptr, 0));
 
         const char* exp_select = std::getenv("TENSILE_SOLUTION_SELECTION_METHOD");
         if(exp_select)

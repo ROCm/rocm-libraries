@@ -367,6 +367,7 @@ namespace TensileLite
                 ("activation-no-guard",          po::value<bool>()->default_value(false), "Use activation guard to deall with nan outputs.")
                 ("activation-additional-args",vector_default_empty<std::string>(), "Activation additional floating-point number arguments.")
                 ("activation-enum-args",      po::value<std::vector<ActivationType>>()->default_value(std::vector<ActivationType>(1, ActivationType::None), "[]"), "Activation enum argument.")
+                ("streamk-hybrid-mode",       po::value<std::vector<int>>()->default_value(std::vector<int>(1, 0), "[0]"), "StreamK=5 hybrid-mode toggle values. Each element runs the problem once with setParams().setDynPersistentTile(value != 0); use [0, 1] to exercise both the static and dynamic paths of an SK5 kernel in a single run.")
                 ("use-bias",                  po::value<int>()->default_value(0), "Use bias.")
                 ("bias-source",               po::value<int>()->default_value(3), "Bias source.")
                 ("use-scaleAB",               po::value<std::string>()->default_value(""), "Use scaleAB.")
@@ -608,6 +609,7 @@ namespace TensileLite
                 }
             }
             DUMP_VEC("activation-enum-args", ActivationType);
+            DUMP_VEC("streamk-hybrid-mode", int);
             DUMP_OPT("use-bias", int);
             DUMP_OPT("bias-source", int);
             DUMP_OPT("use-scaleAB", std::string);
