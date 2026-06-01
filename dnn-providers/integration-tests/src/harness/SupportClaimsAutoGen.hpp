@@ -26,7 +26,11 @@ struct GraphSupportRecord; // forward decl; full type in SupportMatrixCollector.
 struct CondensedSupportData
 {
     std::vector<SupportMatcher> matchers;
-    std::set<std::tuple<std::string, std::string, std::string>> unsupportedObservations;
+    // (opChain, inputDtype, outputDtype, layout) — outputDtype is the
+    // string the record was observed with (== inputDtype for symmetric
+    // graphs).
+    std::set<std::tuple<std::string, std::string, std::string, std::string>>
+        unsupportedObservations;
     // Per-conflict diagnostic: (op, io, layout) -> { supportedBy, unsupportedBy }
     // populated only when a tuple landed in both S and U during the run.
     // Non-empty here means the caller MUST refuse to write the sidecar
@@ -35,7 +39,12 @@ struct CondensedSupportData
     // permit a tuple to be both targetable and forbidden.
     struct ConflictDetail
     {
-        std::tuple<std::string, std::string, std::string> tuple;
+        std::string opChain;
+        std::string inputDtype;
+        // Empty when the conflict involves symmetric records only; populated
+        // (and may differ from inputDtype) when asymmetric I/O is in play.
+        std::string outputDtype;
+        std::string layout;
         std::vector<std::string> supportedBy; // test names reporting support
         std::vector<std::string> unsupportedBy; // test names reporting no support
     };

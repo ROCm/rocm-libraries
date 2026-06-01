@@ -40,54 +40,65 @@ namespace hipdnn_integration_tests
 namespace
 {
 
-using Cell = std::pair<std::string, std::string>; // (io_dtype, layout)
+// (input_dtype, output_dtype) pair — the dtype axis of the rectangle
+// cover model. Symmetric records use a pair where in == out.
+using DtypePair = std::pair<std::string, std::string>;
+// (pair, layout) cell — the unit of the cover problem.
+using Cell = std::pair<DtypePair, std::string>;
 
-// One axis-aligned rectangle in (io, layout) space, defined as the
-// cross-product of two axis subsets. Sortable for deterministic grouping.
+// One axis-aligned rectangle in (pair, layout) space. Note that the
+// dtype dimension is a flat set of (in, out) pairs rather than two
+// independent dtype axes — this keeps the schema mapping clean:
+//   - if every pair has in == out, emit as io_dtypes shorthand
+//   - if every pair has in != out, emit as io_dtype_pairs
+//   - mixed: emit both fields
+// Two independent axes (input_set × output_set) would conflate all
+// cross-combinations and force claims of asymmetric pairs whenever
+// multiple symmetric dtypes were claimed in one rectangle.
 struct Rect
 {
-    std::vector<std::string> ios;
+    std::vector<DtypePair> pairs;
     std::vector<std::string> layouts;
 
     bool operator<(const Rect& other) const
     {
-        return std::tie(ios, layouts) < std::tie(other.ios, other.layouts);
+        return std::tie(pairs, layouts) < std::tie(other.pairs, other.layouts);
     }
 };
 
-// Find the largest safe rectangle: the (io_subset × layout_subset) that
-// covers the most cells in `targets` while containing zero cells in
-// `forbidden`. Brute-force over the power set of each axis — fine because
-// axis cardinalities are ≤8 in practice (3 dtypes × 6 layouts = 18
-// candidate values total, 2^18 worst case ≈ 256k iterations).
+// Find the largest safe rectangle: the (pair_subset × layout_subset)
+// that covers the most cells in `targets` while containing zero cells
+// in `forbidden`. Brute-force over the power set of each axis — fine
+// because cardinalities are small in practice (≤9 pairs from 3 dtypes
+// observed asymmetrically, ≤6 layouts → ~32k candidate combinations).
 //
 // Tie-break order (deterministic so two engineers on the same hardware
 // produce identical sidecars):
 //   1. Most target cells covered (greedy gain).
 //   2. Smallest rect size (fewer unobserved cells claimed — reduces
 //      Rule A risk on first run).
-//   3. Lexicographic order on (ios, layouts) — stable tiebreaker.
+//   3. Lexicographic order on (pairs, layouts) — stable tiebreaker.
 //
 // Returns an empty rect if no candidate covers any target cell.
 Rect findLargestSafeRectangle(const std::set<Cell>& targets,
                               const std::set<Cell>& forbidden,
-                              const std::vector<std::string>& allIos,
+                              const std::vector<DtypePair>& allPairs,
                               const std::vector<std::string>& allLayouts)
 {
     Rect best;
     size_t bestScore = 0;
     size_t bestSize = SIZE_MAX;
 
-    const size_t ioN = allIos.size();
+    const size_t pairN = allPairs.size();
     const size_t layoutN = allLayouts.size();
-    for(size_t ioMask = 1; ioMask < (size_t{1} << ioN); ++ioMask)
+    for(size_t pairMask = 1; pairMask < (size_t{1} << pairN); ++pairMask)
     {
-        std::vector<std::string> ios;
-        for(size_t i = 0; i < ioN; ++i)
+        std::vector<DtypePair> pairs;
+        for(size_t i = 0; i < pairN; ++i)
         {
-            if((ioMask >> i) & size_t{1})
+            if((pairMask >> i) & size_t{1})
             {
-                ios.push_back(allIos[i]);
+                pairs.push_back(allPairs[i]);
             }
         }
         for(size_t layoutMask = 1; layoutMask < (size_t{1} << layoutN); ++layoutMask)
@@ -103,11 +114,11 @@ Rect findLargestSafeRectangle(const std::set<Cell>& targets,
 
             // Safety: reject if any cell in the cross-product is forbidden.
             bool safe = true;
-            for(const auto& io : ios)
+            for(const auto& pair : pairs)
             {
                 for(const auto& layout : layouts)
                 {
-                    if(forbidden.find({io, layout}) != forbidden.end())
+                    if(forbidden.find({pair, layout}) != forbidden.end())
                     {
                         safe = false;
                         break;
@@ -124,11 +135,11 @@ Rect findLargestSafeRectangle(const std::set<Cell>& targets,
             }
 
             size_t score = 0;
-            for(const auto& io : ios)
+            for(const auto& pair : pairs)
             {
                 for(const auto& layout : layouts)
                 {
-                    if(targets.find({io, layout}) != targets.end())
+                    if(targets.find({pair, layout}) != targets.end())
                     {
                         ++score;
                     }
@@ -139,15 +150,16 @@ Rect findLargestSafeRectangle(const std::set<Cell>& targets,
                 continue;
             }
 
-            const size_t size = ios.size() * layouts.size();
-            const bool better = score > bestScore || (score == bestScore && size < bestSize)
-                                || (score == bestScore && size == bestSize
-                                    && std::tie(ios, layouts) < std::tie(best.ios, best.layouts));
+            const size_t size = pairs.size() * layouts.size();
+            const bool better
+                = score > bestScore || (score == bestScore && size < bestSize)
+                  || (score == bestScore && size == bestSize
+                      && std::tie(pairs, layouts) < std::tie(best.pairs, best.layouts));
             if(better)
             {
                 bestScore = score;
                 bestSize = size;
-                best.ios = ios;
+                best.pairs = pairs;
                 best.layouts = layouts;
             }
         }
@@ -155,39 +167,26 @@ Rect findLargestSafeRectangle(const std::set<Cell>& targets,
     return best;
 }
 
-// Greedy rectangle cover: repeatedly pick the largest safe rectangle and
-// remove the covered targets, until none remain. RFC 0012 §7's
-// Coverage+Safety contract requires the result to cover every cell in
-// `targets` without touching `forbidden`; the loop terminates because
-// each iteration removes ≥1 target cell (or bails on empty result).
-//
-// Note: a single op_chain may need multiple rectangles when its S cells
-// are interleaved with U cells — the previous greedy axis-shrink
-// implementation couldn't emit more than one rectangle per op_chain and
-// silently dropped coverage. Reviewer's counterexample:
-//   U = {(fp16,NCHW), (fp32,NHWC)}, S = {(fp16,NHWC), (fp32,NCHW)}
-//   → correct cover is {fp16}×{NHWC} ∪ {fp32}×{NCHW} (two rectangles).
+// Greedy rectangle cover. Same shape as before; key axis is now a flat
+// dtype-pair set instead of two independent dtype axes.
 std::vector<Rect> findRectangleCover(std::set<Cell> targets,
                                      const std::set<Cell>& forbidden,
-                                     const std::vector<std::string>& allIos,
+                                     const std::vector<DtypePair>& allPairs,
                                      const std::vector<std::string>& allLayouts)
 {
     std::vector<Rect> result;
     while(!targets.empty())
     {
-        Rect r = findLargestSafeRectangle(targets, forbidden, allIos, allLayouts);
-        if(r.ios.empty() || r.layouts.empty())
+        Rect r = findLargestSafeRectangle(targets, forbidden, allPairs, allLayouts);
+        if(r.pairs.empty() || r.layouts.empty())
         {
-            // No safe rectangle exists that covers any remaining target.
-            // The leftover targets are isolated between forbidden cells —
-            // surface them in the diagnostic stream and bail.
             break;
         }
-        for(const auto& io : r.ios)
+        for(const auto& pair : r.pairs)
         {
             for(const auto& layout : r.layouts)
             {
-                targets.erase({io, layout});
+                targets.erase({pair, layout});
             }
         }
         result.push_back(std::move(r));
@@ -200,19 +199,16 @@ std::vector<Rect> findRectangleCover(std::set<Cell> targets,
 CondensedSupportData condenseSupportClaims(const std::vector<GraphSupportRecord>& records,
                                            std::string_view engineName)
 {
-    using Tuple = std::tuple<std::string, std::string, std::string>; // op, io, layout
+    // 4-tuple: (opChain, inputDtype, outputDtype, layout). outputDtype is
+    // normalized to inputDtype for symmetric records so the key is stable.
+    using Tuple = std::tuple<std::string, std::string, std::string, std::string>;
 
     std::set<Tuple> S;
     std::set<Tuple> U;
     std::set<std::string> opsInS;
-    std::set<std::string> allIosSet;
+    std::set<DtypePair> allPairsSet;
     std::set<std::string> allLayoutsSet;
 
-    // Track per-tuple which test cases voted S or U so we can produce a
-    // useful diagnostic when both sides have entries (S∩U≠∅). RFC §7's
-    // Safety invariant says a tuple can be in S xor U, never both — if
-    // it's both, the op_chain string isn't fine-grained enough to
-    // partition graphs MIOpen dispatches differently.
     std::map<Tuple, std::vector<std::string>> supportedBy;
     std::map<Tuple, std::vector<std::string>> unsupportedBy;
 
@@ -222,7 +218,12 @@ CondensedSupportData condenseSupportClaims(const std::vector<GraphSupportRecord>
         {
             continue;
         }
-        const Tuple tuple{record.opChain, record.ioDtype, record.layout};
+        // Normalize: empty outputDtype means symmetric; canonicalize to
+        // inputDtype so the keyspace doesn't double-count fp16/'' vs
+        // fp16/fp16.
+        const std::string outDtype
+            = record.outputDtype.empty() ? record.ioDtype : record.outputDtype;
+        const Tuple tuple{record.opChain, record.ioDtype, outDtype, record.layout};
         const bool engineSupports = record.supportingEngines.find(std::string(engineName))
                                     != record.supportingEngines.end();
         if(engineSupports)
@@ -236,14 +237,11 @@ CondensedSupportData condenseSupportClaims(const std::vector<GraphSupportRecord>
             U.insert(tuple);
             unsupportedBy[tuple].push_back(record.testName);
         }
-        allIosSet.insert(record.ioDtype);
+        allPairsSet.insert({record.ioDtype, outDtype});
         allLayoutsSet.insert(record.layout);
     }
 
-    // Detect S∩U conflicts before condensation. Walking S is cheap and
-    // deterministic; we surface every conflict (not just the first) so
-    // the engineer's variant-tag PR can address them in one pass rather
-    // than rediscovering them iteratively.
+    // Detect S∩U conflicts before condensation. RFC §7 safety invariant.
     CondensedSupportData out;
     for(const auto& tuple : S)
     {
@@ -252,7 +250,16 @@ CondensedSupportData condenseSupportClaims(const std::vector<GraphSupportRecord>
             continue;
         }
         CondensedSupportData::ConflictDetail detail;
-        detail.tuple = tuple;
+        detail.opChain = std::get<0>(tuple);
+        detail.inputDtype = std::get<1>(tuple);
+        const auto& outDtype = std::get<2>(tuple);
+        // Hide outputDtype when it equals inputDtype — keeps the
+        // diagnostic terse for the common symmetric case.
+        if(outDtype != detail.inputDtype)
+        {
+            detail.outputDtype = outDtype;
+        }
+        detail.layout = std::get<3>(tuple);
         auto sIt = supportedBy.find(tuple);
         if(sIt != supportedBy.end())
         {
@@ -269,51 +276,44 @@ CondensedSupportData condenseSupportClaims(const std::vector<GraphSupportRecord>
     }
     if(!out.conflictingObservations.empty())
     {
-        // Caller refuses to write; don't bother running the condensation
-        // pass — its output would be misleading anyway since the safety
-        // invariant is violated.
         out.unsupportedObservations = std::move(U);
         return out;
     }
 
-    // Sort axis values once; rectangle enumeration uses these as the
-    // bitmask alphabet so output order is deterministic across runs.
-    const std::vector<std::string> allIos(allIosSet.begin(), allIosSet.end());
+    // Sort axes for deterministic bitmask enumeration.
+    const std::vector<DtypePair> allPairs(allPairsSet.begin(), allPairsSet.end());
     const std::vector<std::string> allLayouts(allLayoutsSet.begin(), allLayoutsSet.end());
 
-    // For each op_chain in S, compute its rectangle cover. Iterate ops
-    // in sorted order — keeps emit order stable for identical inputs.
+    // Per-op rectangle cover over (pair, layout) cells.
     std::map<std::string, std::vector<Rect>> opToRects;
     for(const auto& op : opsInS)
     {
         std::set<Cell> S_op;
         std::set<Cell> U_op;
-        for(const auto& [tupleOp, tupleIo, tupleLayout] : S)
+        for(const auto& [tupleOp, tupleIn, tupleOut, tupleLayout] : S)
         {
             if(tupleOp == op)
             {
-                S_op.emplace(tupleIo, tupleLayout);
+                S_op.insert({{tupleIn, tupleOut}, tupleLayout});
             }
         }
-        for(const auto& [tupleOp, tupleIo, tupleLayout] : U)
+        for(const auto& [tupleOp, tupleIn, tupleOut, tupleLayout] : U)
         {
             if(tupleOp == op)
             {
-                U_op.emplace(tupleIo, tupleLayout);
+                U_op.insert({{tupleIn, tupleOut}, tupleLayout});
             }
         }
 
-        auto cover = findRectangleCover(S_op, U_op, allIos, allLayouts);
+        auto cover = findRectangleCover(S_op, U_op, allPairs, allLayouts);
         if(!cover.empty())
         {
             opToRects.emplace(op, std::move(cover));
         }
     }
 
-    // Group by rectangle: each emitted matcher is one rectangle plus the
-    // set of op_chains whose cover includes it. Two ops sharing a
-    // rectangle land in the same matcher; ops with disjoint covers land
-    // in separate matchers.
+    // Group ops by identical rectangle so shared coverage compresses
+    // into one matcher.
     std::map<Rect, std::set<std::string>> rectToOps;
     for(const auto& [op, rects] : opToRects)
     {
@@ -327,7 +327,24 @@ CondensedSupportData condenseSupportClaims(const std::vector<GraphSupportRecord>
     {
         SupportMatcher matcher;
         matcher.opChains.assign(ops.begin(), ops.end());
-        matcher.ioDtypes = rect.ios;
+        // Split the rectangle's pair-set into the two schema shapes:
+        // symmetric pairs become io_dtypes shorthand (just the dtype),
+        // asymmetric pairs become io_dtype_pairs ("in->out").
+        std::set<std::string> symmetricDtypes;
+        std::set<std::string> asymmetricPairStrings;
+        for(const auto& [pairIn, pairOut] : rect.pairs)
+        {
+            if(pairIn == pairOut)
+            {
+                symmetricDtypes.insert(pairIn);
+            }
+            else
+            {
+                asymmetricPairStrings.insert(pairIn + "->" + pairOut);
+            }
+        }
+        matcher.ioDtypes.assign(symmetricDtypes.begin(), symmetricDtypes.end());
+        matcher.ioDtypePairs.assign(asymmetricPairStrings.begin(), asymmetricPairStrings.end());
         matcher.layouts = rect.layouts;
         out.matchers.push_back(std::move(matcher));
     }
@@ -363,16 +380,34 @@ std::string renderSupportBlockToml(const CondensedSupportData& condensed,
         }
         out << "]\n";
 
-        out << "io_dtypes = [";
-        for(size_t i = 0; i < matcher.ioDtypes.size(); ++i)
+        // Emit io_dtypes only when there's symmetric coverage to express;
+        // pure-asymmetric matchers skip the line. Likewise io_dtype_pairs.
+        if(!matcher.ioDtypes.empty())
         {
-            if(i > 0)
+            out << "io_dtypes = [";
+            for(size_t i = 0; i < matcher.ioDtypes.size(); ++i)
             {
-                out << ", ";
+                if(i > 0)
+                {
+                    out << ", ";
+                }
+                out << "\"" << matcher.ioDtypes[i] << "\"";
             }
-            out << "\"" << matcher.ioDtypes[i] << "\"";
+            out << "]\n";
         }
-        out << "]\n";
+        if(!matcher.ioDtypePairs.empty())
+        {
+            out << "io_dtype_pairs = [";
+            for(size_t i = 0; i < matcher.ioDtypePairs.size(); ++i)
+            {
+                if(i > 0)
+                {
+                    out << ", ";
+                }
+                out << "\"" << matcher.ioDtypePairs[i] << "\"";
+            }
+            out << "]\n";
+        }
 
         out << "layouts = [";
         for(size_t i = 0; i < matcher.layouts.size(); ++i)
@@ -401,7 +436,7 @@ std::string defaultHeader(const std::string& engineName)
            "support-claims-schema.md\n"
         << "\n"
         << "[meta]\n"
-        << "version = 2\n"
+        << "version = 3\n"
         << "engine  = \"" << engineName << "\"\n"
         << "\n";
     return out.str();
@@ -722,15 +757,17 @@ bool checkShrinkagePrecondition(const std::filesystem::path& sidecarPath,
         return true;
     }
 
-    // Build the observed-tuple set from the current run.
-    std::set<std::tuple<std::string, std::string, std::string>> observed;
+    // Build the observed 4-tuple set: (op, inputDtype, outputDtype, layout).
+    // outputDtype is normalized to inputDtype for symmetric records.
+    std::set<std::tuple<std::string, std::string, std::string, std::string>> observed;
     for(const auto& r : records)
     {
         if(r.opChain.empty())
         {
             continue;
         }
-        observed.emplace(r.opChain, r.ioDtype, r.layout);
+        const std::string outDtype = r.outputDtype.empty() ? r.ioDtype : r.outputDtype;
+        observed.emplace(r.opChain, r.ioDtype, outDtype, r.layout);
     }
 
     // Collect any matchers whose cross-product has zero overlap with the
@@ -740,15 +777,17 @@ bool checkShrinkagePrecondition(const std::filesystem::path& sidecarPath,
     for(const auto& matcher : existingBlock->matchers)
     {
         bool anyObserved = false;
-        matcher.forEachTuple(
-            [&](const std::string& op, const std::string& io, const std::string& layout) {
-                if(observed.find({op, io, layout}) != observed.end())
-                {
-                    anyObserved = true;
-                    return false;
-                }
-                return true;
-            });
+        matcher.forEachTuple([&](const std::string& op,
+                                 const std::string& in,
+                                 const std::string& out,
+                                 const std::string& layout) {
+            if(observed.find({op, in, out, layout}) != observed.end())
+            {
+                anyObserved = true;
+                return false;
+            }
+            return true;
+        });
         if(!anyObserved)
         {
             zeroCoverage.push_back(&matcher);
@@ -817,6 +856,15 @@ bool generateSupportClaimsForCurrentArch(const std::filesystem::path& sidecarPat
                      "[[test_skips]] for the unsupported variant.\n\n";
         constexpr size_t maxTuplesShown = 25;
         constexpr size_t maxTestsPerSide = 3;
+        // Format the dtype part as "fp16" for symmetric, "fp16->fp32"
+        // for asymmetric — matches how the matcher schema expresses each.
+        const auto formatDtype = [](const CondensedSupportData::ConflictDetail& c) {
+            if(c.outputDtype.empty() || c.outputDtype == c.inputDtype)
+            {
+                return c.inputDtype;
+            }
+            return c.inputDtype + "->" + c.outputDtype;
+        };
         size_t shown = 0;
         for(const auto& conflict : condensed.conflictingObservations)
         {
@@ -826,8 +874,8 @@ bool generateSupportClaimsForCurrentArch(const std::filesystem::path& sidecarPat
                           << " more conflicts in support_claim_conflicts.txt)\n";
                 break;
             }
-            const auto& [op, io, layout] = conflict.tuple;
-            std::cerr << "  (\"" << op << "\", \"" << io << "\", \"" << layout << "\")\n";
+            std::cerr << "  (\"" << conflict.opChain << "\", \"" << formatDtype(conflict)
+                      << "\", \"" << conflict.layout << "\")\n";
             std::cerr << "    supported by:";
             for(size_t i = 0; i < std::min(conflict.supportedBy.size(), maxTestsPerSide); ++i)
             {
@@ -860,8 +908,12 @@ bool generateSupportClaimsForCurrentArch(const std::filesystem::path& sidecarPat
                      << "\n\n";
             for(const auto& conflict : condensed.conflictingObservations)
             {
-                const auto& [op, io, layout] = conflict.tuple;
-                artifact << "(\"" << op << "\", \"" << io << "\", \"" << layout << "\")\n";
+                const std::string dtypeDisplay
+                    = (conflict.outputDtype.empty() || conflict.outputDtype == conflict.inputDtype)
+                          ? conflict.inputDtype
+                          : conflict.inputDtype + "->" + conflict.outputDtype;
+                artifact << "(\"" << conflict.opChain << "\", \"" << dtypeDisplay << "\", \""
+                         << conflict.layout << "\")\n";
                 artifact << "  supported by:\n";
                 for(const auto& t : conflict.supportedBy)
                 {
@@ -902,7 +954,7 @@ bool generateSupportClaimsForCurrentArch(const std::filesystem::path& sidecarPat
                      "no support); they are NOT included in any matcher. Review the sidecar "
                      "diff to confirm the carve-outs are intentional. Examples:\n";
         size_t shown = 0;
-        for(const auto& [op, io, layout] : condensed.unsupportedObservations)
+        for(const auto& [op, in, out, layout] : condensed.unsupportedObservations)
         {
             if(shown++ >= 10)
             {
@@ -910,7 +962,9 @@ bool generateSupportClaimsForCurrentArch(const std::filesystem::path& sidecarPat
                           << " more)\n";
                 break;
             }
-            std::cerr << "    (\"" << op << "\", \"" << io << "\", \"" << layout << "\")\n";
+            const std::string dtypeDisplay = (in == out) ? in : in + "->" + out;
+            std::cerr << "    (\"" << op << "\", \"" << dtypeDisplay << "\", \"" << layout
+                      << "\")\n";
         }
     }
     return true;

@@ -29,16 +29,23 @@ The sidecar is discovered automatically — `TestSettings` looks for
 
 ```toml
 [meta]
-version = 2
+version = 3
 engine  = "MIOPEN_ENGINE"
 ```
 
-- `version` — sidecar schema version. Currently `2`. v2 extended the
-  `op_chain` string format to include per-node variant tags (see
-  `op_chains` below). v1 sidecars are refused at load — regenerate via
+- `version` — sidecar schema version. Currently `3`. History:
+  - **v1** — initial schema with bare-node-name op_chains.
+  - **v2** — op_chain extended with per-node `:variant[flags]` tags so
+    Pointwise modes / params, Reduction modes, etc. partition graphs
+    MIOpen dispatches differently.
+  - **v3** — matcher schema gains `io_dtype_pairs = ["in->out", ...]`
+    alongside the existing `io_dtypes = ["..."]` shorthand. Captures
+    mixed-precision graphs (e.g. fp16 input → fp32 output) that
+    previously collapsed into the symmetric io_dtype field.
+
+  Older-version sidecars are refused at load — regenerate via
   `--write-support-claims`. The main TOML's `[meta].version` is a
-  separate, unrelated version stream (the main file's schema is
-  tolerance overrides + test skips and hasn't changed).
+  separate, unrelated version stream.
 - `engine` — required in the sidecar. Optional in the main file but
   must match the sidecar's value if present. Cross-checked at load
   against `--test-engine` so the same TOML can't be misapplied to a
@@ -65,9 +72,10 @@ platform = "linux"            # optional, exact match against "windows" or "linu
 
 ## `[[supported.matchers]]`
 
-Each matcher claims that the cross-product of `op_chains × io_dtypes ×
-layouts` is fully supported by the engine on the owning block's
-`(arch, platform)`.
+Each matcher claims that the cross-product of `op_chains × (dtype
+dimension) × layouts` is fully supported by the engine on the owning
+block's `(arch, platform)`. The dtype dimension can be expressed
+two ways and the matcher can use either or both:
 
 ```toml
 [[supported.matchers]]
@@ -75,17 +83,25 @@ op_chains = [
     "ConvFprop + Pointwise:ADD + Pointwise:RELU_FWD",
     "ConvFprop + Pointwise:ADD + Pointwise:SIGMOID",
 ]
+# Symmetric-shorthand: "fp16" covers the pair fp16->fp16.
 io_dtypes = ["fp16", "fp32", "bf16"]
+# Asymmetric pairs in "in->out" form. Optional.
+io_dtype_pairs = ["fp16->fp32", "bf16->fp32"]
 layouts   = ["NCHW", "NHWC"]
 ```
 
-- All three arrays are required and non-empty.
+- `op_chains` and `layouts` are required and non-empty.
+- At least one of `io_dtypes` and `io_dtype_pairs` must be present;
+  both may appear on the same matcher and their effects union.
 - All values are matched exact-string. No `*`, no `?`, no fnmatch.
-- Duplicates in any array are rejected by the loader (silent
-  duplicates would otherwise allow a matcher to "match more than
-  itself" — a subtle source of false positives).
-- A test **matches** a matcher iff its observed `(op_chain, io_dtype,
-  layout)` tuple is in the matcher's cross-product.
+- `io_dtype_pairs` entries must contain exactly one `->` separator
+  with non-empty input and output sides.
+- Duplicates in any array are rejected by the loader.
+- A test **matches** a matcher iff its observed `(op_chain,
+  input_dtype, output_dtype, layout)` tuple lies in the matcher's
+  cross-product. Symmetric observations (`input == output`) match
+  against `io_dtypes` first, then `io_dtype_pairs`; asymmetric
+  observations match only against `io_dtype_pairs`.
 
 ### Value spaces
 

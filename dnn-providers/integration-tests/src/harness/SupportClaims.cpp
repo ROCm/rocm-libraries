@@ -23,14 +23,20 @@ namespace hipdnn_integration_tests
 namespace
 {
 
-std::vector<std::string>
-    parseRequiredStringArray(const toml::table& table, const char* key, const std::string& label)
+std::vector<std::string> parseStringArrayImpl(const toml::table& table,
+                                              const char* key,
+                                              const std::string& label,
+                                              bool required)
 {
     const auto* arr = table[key].as_array();
     if(arr == nullptr)
     {
-        throw std::runtime_error("SupportClaims: " + label + " missing required '"
-                                 + std::string(key) + "' array");
+        if(required)
+        {
+            throw std::runtime_error("SupportClaims: " + label + " missing required '"
+                                     + std::string(key) + "' array");
+        }
+        return {};
     }
     std::vector<std::string> result;
     result.reserve(arr->size());
@@ -50,12 +56,46 @@ std::vector<std::string>
         }
         result.push_back(std::move(*value));
     }
-    if(result.empty())
+    if(required && result.empty())
     {
         throw std::runtime_error("SupportClaims: " + label + " '" + std::string(key)
                                  + "' must not be empty");
     }
     return result;
+}
+
+std::vector<std::string>
+    parseRequiredStringArray(const toml::table& table, const char* key, const std::string& label)
+{
+    return parseStringArrayImpl(table, key, label, /*required=*/true);
+}
+
+std::vector<std::string>
+    parseOptionalStringArray(const toml::table& table, const char* key, const std::string& label)
+{
+    return parseStringArrayImpl(table, key, label, /*required=*/false);
+}
+
+// Validate "in->out" pair strings: arrow present, both sides non-empty,
+// neither side contains another arrow. Cheap; runs at load time only.
+void validateDtypePair(const std::string& pair, const std::string& label)
+{
+    const auto arrow = pair.find("->");
+    if(arrow == std::string::npos)
+    {
+        throw std::runtime_error("SupportClaims: " + label + " io_dtype_pairs entry '" + pair
+                                 + "' missing '->' separator (expected 'in->out')");
+    }
+    if(arrow == 0 || arrow + 2 == pair.size())
+    {
+        throw std::runtime_error("SupportClaims: " + label + " io_dtype_pairs entry '" + pair
+                                 + "' has empty input or output dtype");
+    }
+    if(pair.find("->", arrow + 2) != std::string::npos)
+    {
+        throw std::runtime_error("SupportClaims: " + label + " io_dtype_pairs entry '" + pair
+                                 + "' contains multiple '->' separators");
+    }
 }
 
 void rejectWildcards(const std::vector<std::string>& values,
@@ -92,11 +132,26 @@ SupportMatcher parseMatcher(const toml::node& node,
     SupportMatcher matcher;
     matcher.sourceLocation = label;
     matcher.opChains = parseRequiredStringArray(*table, "op_chains", label);
-    matcher.ioDtypes = parseRequiredStringArray(*table, "io_dtypes", label);
     matcher.layouts = parseRequiredStringArray(*table, "layouts", label);
+    // Either io_dtypes or io_dtype_pairs (or both) must be present.
+    // Loader accepts the union; matching uses the appropriate side
+    // based on whether the observation is symmetric or asymmetric.
+    matcher.ioDtypes = parseOptionalStringArray(*table, "io_dtypes", label);
+    matcher.ioDtypePairs = parseOptionalStringArray(*table, "io_dtype_pairs", label);
+    if(matcher.ioDtypes.empty() && matcher.ioDtypePairs.empty())
+    {
+        throw std::runtime_error("SupportClaims: " + label
+                                 + " must specify at least one of 'io_dtypes' or "
+                                   "'io_dtype_pairs'");
+    }
     rejectWildcards(matcher.opChains, "op_chains", label);
     rejectWildcards(matcher.ioDtypes, "io_dtypes", label);
+    rejectWildcards(matcher.ioDtypePairs, "io_dtype_pairs", label);
     rejectWildcards(matcher.layouts, "layouts", label);
+    for(const auto& pair : matcher.ioDtypePairs)
+    {
+        validateDtypePair(pair, label);
+    }
     return matcher;
 }
 
@@ -169,16 +224,21 @@ SupportClaims::SupportClaims(const std::filesystem::path& sidecarPath,
                                  + sidecarPath.string());
     }
     // RFC 0012 §5: sidecar version is decoupled from the main TOML's
-    // version. v2 bumped the op_chain string format to include per-node
-    // variant tags (describeGraph extension) — v1 sidecars are stale
-    // because their op_chain strings no longer match what verifyGraph
-    // records. Refuse loudly rather than silently mis-evaluate.
-    if(*version != 2)
+    // version. Version history:
+    //   v1 — initial schema with op_chain bare node names.
+    //   v2 — extended op_chain with per-node :variant tags (e.g.
+    //        Pointwise:RELU_FWD[lower_clip]).
+    //   v3 — added asymmetric io_dtype_pairs alongside symmetric
+    //        io_dtypes shorthand; matchers can express in!=out dispatch.
+    // Older readers can't tell that io_dtype_pairs is meaningful and
+    // would silently miss asymmetric claims if they "forward-compat
+    // ignored" the field, so the safe contract is refuse-and-regen.
+    if(*version != 3)
     {
         throw std::runtime_error("SupportClaims: unsupported version " + std::to_string(*version)
                                  + " in " + sidecarPath.string()
-                                 + " (expected 2; v1 sidecars predate the op_chain variant tag "
-                                   "and need regeneration via --write-support-claims)");
+                                 + " (expected 3; older sidecars predate the io_dtype_pairs "
+                                   "extension and need regeneration via --write-support-claims)");
     }
 
     auto engine = table["meta"]["engine"].value<std::string>();
@@ -225,7 +285,8 @@ const SupportBlock* SupportClaims::blockFor(std::string_view archToken,
 bool SupportClaims::isClaimed(std::string_view archToken,
                               std::string_view platform,
                               std::string_view opChain,
-                              std::string_view ioDtype,
+                              std::string_view inputDtype,
+                              std::string_view outputDtype,
                               std::string_view layout) const
 {
     const auto* block = blockFor(archToken, platform);
@@ -235,7 +296,7 @@ bool SupportClaims::isClaimed(std::string_view archToken,
     }
     return std::any_of(
         block->matchers.begin(), block->matchers.end(), [&](const SupportMatcher& matcher) {
-            return matcher.contains(opChain, ioDtype, layout);
+            return matcher.contains(opChain, inputDtype, outputDtype, layout);
         });
 }
 

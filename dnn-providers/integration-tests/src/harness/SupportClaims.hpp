@@ -14,13 +14,26 @@ namespace hipdnn_integration_tests
 {
 
 // One [[supported.matchers]] entry. Claims the cross-product of
-// opChains x ioDtypes x layouts is fully supported by the engine on the
-// owning block's (arch, platform). Exact-string matching only — see
-// RFC 0012 §11.4 for why wildcards are intentionally rejected.
+// opChains × (io dtype pairs) × layouts is fully supported by the
+// engine on the owning block's (arch, platform). Exact-string matching
+// only — see RFC 0012 §11.4 for why wildcards are intentionally rejected.
+//
+// The dtype dimension supports two equivalent forms in TOML for
+// engineer convenience:
+//   io_dtypes      = ["fp16", "fp32"]              (symmetric shorthand)
+//   io_dtype_pairs = ["fp16->fp32", "bf16->fp32"]  (explicit asymmetric)
+// Loader keeps both lists for round-trip readability. Matching checks
+// io_dtypes for symmetric pairs and io_dtype_pairs for asymmetric ones;
+// a single matcher may use either, both, or neither.
 struct SupportMatcher
 {
     std::vector<std::string> opChains;
+    // Symmetric-shorthand dtypes. "fp16" covers the pair fp16->fp16.
+    // May be empty when the matcher exclusively uses io_dtype_pairs.
     std::vector<std::string> ioDtypes;
+    // Explicit asymmetric pairs in "in->out" form. May be empty when
+    // the matcher is purely symmetric.
+    std::vector<std::string> ioDtypePairs;
     std::vector<std::string> layouts;
 
     // Stable identity used in failure messages so a CI log points back at
@@ -28,16 +41,26 @@ struct SupportMatcher
     // "<sidecar>:[[supported]]#<blockIndex>/[[supported.matchers]]#<idx>".
     std::string sourceLocation;
 
-    bool contains(std::string_view opChain, std::string_view ioDtype, std::string_view layout) const
+    // Match an observation. outputDtype may be empty — treated as
+    // symmetric (output == input).
+    bool contains(std::string_view opChain,
+                  std::string_view inputDtype,
+                  std::string_view outputDtype,
+                  std::string_view layout) const
     {
-        return memberOf(opChains, opChain) && memberOf(ioDtypes, ioDtype)
-               && memberOf(layouts, layout);
+        if(!memberOf(opChains, opChain) || !memberOf(layouts, layout))
+        {
+            return false;
+        }
+        const std::string effectiveOutput
+            = outputDtype.empty() ? std::string(inputDtype) : std::string(outputDtype);
+        return pairMatches(inputDtype, effectiveOutput);
     }
 
-    // Iterate the matcher's full (opChain, ioDtype, layout) cross-product.
-    // Cheap for hand-written matchers; the auto-gen tool's safety check
-    // calls this too. Visitor returns false to stop early. Stays in the
-    // header so the verifier's tuple-coverage loop can inline the body.
+    // Iterate the matcher's full (opChain, inputDtype, outputDtype,
+    // layout) cross-product. ioDtypes contributes symmetric pairs
+    // (in == out); ioDtypePairs contributes explicit pairs. Visitor
+    // returns false to stop early.
     template <typename Fn>
     void forEachTuple(Fn&& fn) const
     {
@@ -47,7 +70,18 @@ struct SupportMatcher
             {
                 for(const auto& layout : layouts)
                 {
-                    if(!fn(op, io, layout))
+                    if(!fn(op, io, io, layout))
+                    {
+                        return;
+                    }
+                }
+            }
+            for(const auto& pair : ioDtypePairs)
+            {
+                const auto [in, out] = splitDtypePair(pair);
+                for(const auto& layout : layouts)
+                {
+                    if(!fn(op, in, out, layout))
                     {
                         return;
                     }
@@ -56,12 +90,38 @@ struct SupportMatcher
         }
     }
 
+    // Split "in->out" into (in, out). For malformed strings (no arrow),
+    // returns (s, s) so the caller still gets something usable — the
+    // loader validates the format up front, so this only matters for
+    // defensive code paths.
+    static std::pair<std::string, std::string> splitDtypePair(std::string_view pair)
+    {
+        const auto arrow = pair.find("->");
+        if(arrow == std::string_view::npos)
+        {
+            return {std::string(pair), std::string(pair)};
+        }
+        return {std::string(pair.substr(0, arrow)), std::string(pair.substr(arrow + 2))};
+    }
+
 private:
     static bool memberOf(const std::vector<std::string>& haystack, std::string_view needle)
     {
         return std::any_of(haystack.begin(), haystack.end(), [&](const std::string& candidate) {
             return candidate == needle;
         });
+    }
+
+    bool pairMatches(std::string_view in, std::string_view out) const
+    {
+        // Symmetric shorthand: io_dtypes entry "X" covers pair X->X.
+        if(in == out && memberOf(ioDtypes, in))
+        {
+            return true;
+        }
+        // Explicit pair: io_dtype_pairs entry "X->Y" covers pair X->Y.
+        const std::string needle = std::string(in) + "->" + std::string(out);
+        return memberOf(ioDtypePairs, needle);
     }
 };
 
@@ -133,10 +193,12 @@ public:
     const SupportBlock* blockFor(std::string_view archToken, std::string_view platform) const;
 
     // True iff some matcher in the active block covers the observation.
+    // outputDtype may be empty for symmetric I/O (output == input).
     bool isClaimed(std::string_view archToken,
                    std::string_view platform,
                    std::string_view opChain,
-                   std::string_view ioDtype,
+                   std::string_view inputDtype,
+                   std::string_view outputDtype,
                    std::string_view layout) const;
 
 private:

@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <set>
 #include <sstream>
 #include <string>
 
@@ -26,8 +27,21 @@ struct StructuredGraphDescription
     // Op chain only — e.g., "ConvFprop + Pointwise:ADD + Pointwise:RELU_FWD".
     // No dtype suffix.
     std::string opChain;
-    // IO dtype string from to_string(DataType) — e.g., "fp16", "fp32", "bf16".
+    // Input dtype string from to_string(DataType) — e.g., "fp16", "fp32", "bf16".
+    // Sourced from graph_attributes.get_io_data_type() (the graph-level
+    // default for inputs).
     std::string ioDtype;
+    // Output dtype — populated when the graph's output tensor dtype
+    // differs from ioDtype (mixed-precision graphs). Empty when output
+    // dtype matches input dtype (the symmetric case, also the common
+    // case). Sourced from walking node output tensors marked
+    // non-virtual; if a single distinct dtype is found and it differs
+    // from ioDtype, that's outputDtype.
+    //
+    // The matcher schema's io_dtype_pairs field consumes (ioDtype,
+    // outputDtype) as "in->out"; io_dtypes shorthand consumes ioDtype
+    // alone when outputDtype is empty (symmetric).
+    std::string outputDtype;
     // Compute dtype — same value space as ioDtype.
     std::string computeDtype;
     // Intermediate dtype, or empty if graph_attributes has NOT_SET.
@@ -166,6 +180,50 @@ inline StructuredGraphDescription
         result.intermediateDtype = to_string(graph.graph_attributes.get_intermediate_data_type());
     }
 
+    // Derive outputDtype by walking the graph's non-virtual output
+    // tensors. For mixed-precision graphs (e.g. BNInferenceActiv sets
+    // its Y tensor's dtype to intermediateDataType=fp32 while
+    // io_data_type is fp16) the output dtype genuinely differs from
+    // the graph-level io_data_type. Collapsing them as the schema's
+    // old single-io_dtype model did would silently misrepresent the
+    // engine's actual dispatch surface — fp16->fp32 conv goes to a
+    // different MIOpen solver than fp16->fp16 conv.
+    //
+    // Policy:
+    //   - Walk all node output tensor attributes; collect dtypes of
+    //     the non-virtual ones (these are the graph-level outputs).
+    //   - If a single distinct dtype is observed AND it differs from
+    //     ioDtype: that's outputDtype.
+    //   - Otherwise (no outputs found, single dtype matching ioDtype,
+    //     or multiple distinct dtypes) leave outputDtype empty and the
+    //     symmetric io_dtypes path handles the record.
+    //
+    // Multi-output-dtype graphs are rare today; fall-back to symmetric
+    // is the safe option. If they become common, this is the place to
+    // extend (per-output dtype set, multi-pair matcher, etc.).
+    std::set<DataType> outputDtypes;
+    graph.visit([&](const INode& node) {
+        if(dynamic_cast<const Graph*>(&node) != nullptr)
+        {
+            return;
+        }
+        for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
+        {
+            if(!tensorAttr->get_is_virtual())
+            {
+                outputDtypes.insert(tensorAttr->get_data_type());
+            }
+        }
+    });
+    if(outputDtypes.size() == 1)
+    {
+        const auto onlyOutputDtype = *outputDtypes.begin();
+        if(onlyOutputDtype != graph.graph_attributes.get_io_data_type())
+        {
+            result.outputDtype = to_string(onlyOutputDtype);
+        }
+    }
+
     return result;
 }
 
@@ -175,7 +233,21 @@ inline StructuredGraphDescription
 inline std::string describeGraph(const StructuredGraphDescription& desc)
 {
     std::ostringstream out;
-    out << desc.opChain << " [io=" << desc.ioDtype << ", compute=" << desc.computeDtype;
+    out << desc.opChain;
+    if(desc.outputDtype.empty())
+    {
+        // Symmetric input/output dtype — preserve the historical
+        // "io=..." display so existing support-matrix consumers stay
+        // unchanged.
+        out << " [io=" << desc.ioDtype;
+    }
+    else
+    {
+        // Asymmetric — surface both sides for human readers of the
+        // support matrix.
+        out << " [in=" << desc.ioDtype << ", out=" << desc.outputDtype;
+    }
+    out << ", compute=" << desc.computeDtype;
     if(!desc.intermediateDtype.empty())
     {
         out << ", intermediate=" << desc.intermediateDtype;

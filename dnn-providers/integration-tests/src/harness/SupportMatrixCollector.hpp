@@ -35,6 +35,10 @@ struct GraphSupportRecord
     // matching never has to re-parse the human-readable description.
     std::string opChain;
     std::string ioDtype;
+    // Populated when the graph's output dtype differs from ioDtype
+    // (mixed-precision graphs). Empty for the symmetric case — see
+    // StructuredGraphDescription::outputDtype.
+    std::string outputDtype;
     std::string computeDtype;
     std::string intermediateDtype;
 };
@@ -114,6 +118,7 @@ public:
         record.layout = layout;
         record.opChain = description.opChain;
         record.ioDtype = description.ioDtype;
+        record.outputDtype = description.outputDtype;
         record.computeDtype = description.computeDtype;
         record.intermediateDtype = description.intermediateDtype;
 

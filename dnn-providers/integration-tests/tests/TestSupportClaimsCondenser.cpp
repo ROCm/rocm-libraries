@@ -294,9 +294,11 @@ TEST(TestSupportClaimsCondenser, TupleInBothSAndUProducesConflict)
     auto result = condenseSupportClaims(records, "TEST_ENGINE");
     ASSERT_EQ(result.conflictingObservations.size(), 1u);
     const auto& conflict = result.conflictingObservations[0];
-    EXPECT_EQ(std::get<0>(conflict.tuple), "Batchnorm + Pointwise:RELU_FWD");
-    EXPECT_EQ(std::get<1>(conflict.tuple), "fp32");
-    EXPECT_EQ(std::get<2>(conflict.tuple), "NCHW");
+    EXPECT_EQ(conflict.opChain, "Batchnorm + Pointwise:RELU_FWD");
+    EXPECT_EQ(conflict.inputDtype, "fp32");
+    // Symmetric — outputDtype left empty in the diagnostic.
+    EXPECT_TRUE(conflict.outputDtype.empty());
+    EXPECT_EQ(conflict.layout, "NCHW");
     ASSERT_EQ(conflict.supportedBy.size(), 1u);
     EXPECT_EQ(conflict.supportedBy[0], "BNTrainingActiv2dFp32.Correctness/0");
     ASSERT_EQ(conflict.unsupportedBy.size(), 1u);
