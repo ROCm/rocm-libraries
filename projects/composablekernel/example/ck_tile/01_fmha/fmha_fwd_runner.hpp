@@ -165,12 +165,8 @@ int override_num_splits_if_necessary(
 
     if(num_splits < 1 && p_drop == 0.0f)
     {
-        int num_blocks_per_SM = 2;
-        if(props.warpSize == 32)
-        {
-            // props.multiProcessorCount for >=gfx10 is the number of WGPs (each has 2 CUs)
-            num_blocks_per_SM *= 2;
-        }
+        // props.multiProcessorCount for >=gfx10 is the number of WGPs (each has 2 CUs)
+        const int num_blocks_per_SM = props.warpSize == 32 ? 4 : 2;
         return num_splits_heuristic(
             batch * nhead * num_m_blocks, props.multiProcessorCount * num_blocks_per_SM, 128);
     }
