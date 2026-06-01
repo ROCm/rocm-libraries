@@ -150,9 +150,46 @@ static constexpr FmhaBwdDQDKDVVariant ALL_DQDKDV_VARIANTS[] = {
          .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}})},
     {"fmha_bwd_dqdkdv_bf16_d128_group", makeSpec(FmhaBwdDQDKDVConfig{
          .signature = {.dtype = DataType::BF16,
-                    .hdim_q = 128, .hdim_v = 128,
-                    .mode = FmhaMode::GROUP},
+                       .hdim_q = 128, .hdim_v = 128,
+                       .mode = FmhaMode::GROUP},
          .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}})},
+    {"fmha_bwd_dqdkdv_fp16_d128_group_cmask", makeSpec(FmhaBwdDQDKDVConfig{
+         .signature = {.dtype = DataType::FP16,
+                       .hdim_q = 128, .hdim_v = 128,
+                       .mode = FmhaMode::GROUP},
+         .algorithm = {.has_mask = true,
+                       .pad_hdim_q = 8, .pad_hdim_v = 8}})},
+    {"fmha_bwd_dqdkdv_fp16_d128_group_det", makeSpec(FmhaBwdDQDKDVConfig{
+         .signature = {.dtype = DataType::FP16,
+                       .hdim_q = 128, .hdim_v = 128,
+                       .mode = FmhaMode::GROUP},
+         .algorithm = {.is_deterministic = true,
+                       .pad_hdim_q = 8, .pad_hdim_v = 8}})},
+    {"fmha_bwd_dqdkdv_fp16_d128_group_dropout", makeSpec(FmhaBwdDQDKDVConfig{
+         .signature = {.dtype = DataType::FP16,
+                       .hdim_q = 128, .hdim_v = 128,
+                       .mode = FmhaMode::GROUP},
+         .algorithm = {.has_dropout = true,
+                       .pad_hdim_q = 8, .pad_hdim_v = 8}})},
+    {"fmha_bwd_dqdkdv_fp16_d128_group_ebias", makeSpec(FmhaBwdDQDKDVConfig{
+         .signature = {.dtype = DataType::FP16,
+                       .hdim_q = 128, .hdim_v = 128,
+                       .mode = FmhaMode::GROUP},
+         .algorithm = {.bias_type = FmhaBiasType::ELEMENTWISE,
+                       .pad_hdim_q = 8, .pad_hdim_v = 8}})},
+    {"fmha_bwd_dqdkdv_fp16_d128_group_alibi", makeSpec(FmhaBwdDQDKDVConfig{
+         .signature = {.dtype = DataType::FP16,
+                       .hdim_q = 128, .hdim_v = 128,
+                       .mode = FmhaMode::GROUP},
+         .algorithm = {.bias_type = FmhaBiasType::ALIBI,
+                       .pad_hdim_q = 8, .pad_hdim_v = 8}})},
+    {"fmha_bwd_dqdkdv_fp16_d128_group_ebias_dbias", makeSpec(FmhaBwdDQDKDVConfig{
+         .signature = {.dtype = DataType::FP16,
+                       .hdim_q = 128, .hdim_v = 128,
+                       .mode = FmhaMode::GROUP},
+         .algorithm = {.bias_type = FmhaBiasType::ELEMENTWISE,
+                       .has_bias_grad = true,
+                       .pad_hdim_q = 8, .pad_hdim_v = 8}})},
     {"fmha_bwd_dqdkdv_fp16_d128_batch_ebias", makeSpec(FmhaBwdDQDKDVConfig{
          .signature = {.dtype = DataType::FP16,
                        .hdim_q = 128, .hdim_v = 128,
@@ -246,6 +283,22 @@ struct FmhaBwdConvertDQVariant
 
 // clang-format off
 static constexpr FmhaBwdConvertDQVariant ALL_CONVERT_DQ_VARIANTS[] = {
+    {"fmha_bwd_convert_dq_fp16_d64_batch_det", makeSpec(FmhaBwdConvertDQConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 64,
+                   .mode = FmhaMode::BATCH},
+        .algorithm = {}})},
+    {"fmha_bwd_convert_dq_fp16_d64_group_det", makeSpec(FmhaBwdConvertDQConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 64,
+                   .mode = FmhaMode::GROUP},
+        .algorithm = {}})},
+    {"fmha_bwd_convert_dq_bf16_d64_batch_det", makeSpec(FmhaBwdConvertDQConfig{
+        .signature = {.dtype = DataType::BF16, .hdim_q = 64,
+                   .mode = FmhaMode::BATCH},
+        .algorithm = {}})},
+    {"fmha_bwd_convert_dq_bf16_d64_group_det", makeSpec(FmhaBwdConvertDQConfig{
+        .signature = {.dtype = DataType::BF16, .hdim_q = 64,
+                   .mode = FmhaMode::GROUP},
+        .algorithm = {}})},
     {"fmha_bwd_convert_dq_fp16_d128_batch_det", makeSpec(FmhaBwdConvertDQConfig{
          .signature = {.dtype = DataType::FP16, .hdim_q = 128,
                        .mode = FmhaMode::BATCH},
@@ -262,6 +315,22 @@ static constexpr FmhaBwdConvertDQVariant ALL_CONVERT_DQ_VARIANTS[] = {
          .signature = {.dtype = DataType::BF16, .hdim_q = 128,
                        .mode = FmhaMode::GROUP},
          .algorithm = {}})},
+    {"fmha_bwd_convert_dq_fp16_d256_batch_det", makeSpec(FmhaBwdConvertDQConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 256,
+                    .mode = FmhaMode::BATCH},
+        .algorithm = {}})},
+    {"fmha_bwd_convert_dq_fp16_d256_group_det", makeSpec(FmhaBwdConvertDQConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 256,
+                    .mode = FmhaMode::GROUP},
+        .algorithm = {}})},
+    {"fmha_bwd_convert_dq_bf16_d256_batch_det", makeSpec(FmhaBwdConvertDQConfig{
+        .signature = {.dtype = DataType::BF16, .hdim_q = 256,
+                    .mode = FmhaMode::BATCH},
+        .algorithm = {}})},
+    {"fmha_bwd_convert_dq_bf16_d256_group_det", makeSpec(FmhaBwdConvertDQConfig{
+        .signature = {.dtype = DataType::BF16, .hdim_q = 256,
+                    .mode = FmhaMode::GROUP},
+        .algorithm = {}})},
 };
 // clang-format on
 

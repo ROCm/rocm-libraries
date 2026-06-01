@@ -143,10 +143,8 @@ TEST(FmhaBwdValidateArgs, SkipsBiasSlotWhenBiasDisabled)
     validateArgs(args, test_spec);
 }
 
-TEST(FmhaBwdValidateArgs, SkipsRandvalSlotUnconditionally)
+TEST(FmhaBwdValidateArgsDeathTest, AbortsOnNullRandvalWhenDropoutEnabled)
 {
-    // RANDVAL is never populated by the host -- even with dropout enabled the
-    // device bridge writes nullptr. Verify the validator skips it.
     constexpr auto dropout_spec = makeSpec(FmhaBwdDQDKDVConfig{
         .signature =
             {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::BATCH},
@@ -157,7 +155,27 @@ TEST(FmhaBwdValidateArgs, SkipsRandvalSlotUnconditionally)
     args.scalars[S::DROP_OFFSET].u64 = 0;
     args.scalars[S::P_UNDROP].f32    = 1.0f;
     args.scalars[S::RP_UNDROP].f32   = 1.0f;
-    // RANDVAL slot 11 left null -- must not abort.
+    args.tensors[S::RANDVAL].ptr     = nullptr;
+
+    EXPECT_DEATH(validateArgs(args, dropout_spec), "tensor \\\"RANDVAL\\\" \\(slot 11\\)");
+}
+
+TEST(FmhaBwdValidateArgs, PassesWhenRandvalPresentForDropout)
+{
+    constexpr auto dropout_spec = makeSpec(FmhaBwdDQDKDVConfig{
+        .signature =
+            {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::BATCH},
+        .algorithm = {.has_dropout = true, .pad_hdim_q = 8, .pad_hdim_v = 8}});
+
+    static int dummy = 1;
+
+    Args args                        = makeValidArgs();
+    args.scalars[S::DROP_SEED].u64   = 1;
+    args.scalars[S::DROP_OFFSET].u64 = 0;
+    args.scalars[S::P_UNDROP].f32    = 1.0f;
+    args.scalars[S::RP_UNDROP].f32   = 1.0f;
+    args.tensors[S::RANDVAL]         = {&dummy, makeShape(1), makeStrides(1)};
+
     validateArgs(args, dropout_spec);
 }
 
