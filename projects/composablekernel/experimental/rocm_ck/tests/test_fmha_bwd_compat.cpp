@@ -641,7 +641,6 @@ TEST(FmhaBwdCompat, Registry_DqDkDv_ReturnsNullForUnregistered)
     EXPECT_EQ(v, nullptr);
 }
 
-
 TEST(FmhaBwdCompat, Registry_DqDkDv_VariantCount) { EXPECT_EQ(ALL_DQDKDV_VARIANTS_COUNT, 16); }
 
 // _cmask_br and _swa share the compiled spec with _cmask. findVariant() matches

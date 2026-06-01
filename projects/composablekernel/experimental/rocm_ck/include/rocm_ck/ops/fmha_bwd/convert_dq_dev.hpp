@@ -136,8 +136,7 @@ __device__ void runFmhaBwdConvertDQ(Args args)
     const index_t stride_dq       = static_cast<index_t>(t_dq.strides[0]);
     const index_t nhead_stride_dq = static_cast<index_t>(t_dq.strides[1]);
 
-    const index_t* nsplits_ptr =
-        reinterpret_cast<const index_t*>(t_nsplits.ptr);
+    const index_t* nsplits_ptr = reinterpret_cast<const index_t*>(t_nsplits.ptr);
 
     // --- Construct CK Tile Kargs via aggregate initialization ---
     if constexpr(K.mode == FmhaMode::GROUP)
@@ -149,8 +148,7 @@ __device__ void runFmhaBwdConvertDQ(Args args)
         const TensorArg& t_seqlen_q            = args.tensors[S::SEQLEN_Q];
         const TensorArg& t_seqstart_k          = args.tensors[S::SEQSTART_K];
         const TensorArg& t_seqlen_k            = args.tensors[S::SEQLEN_K];
-        const TensorArg& t_dq_acc_batch_offset =
-            args.tensors[S::DQ_ACC_BATCH_OFFSET_GROUP];
+        const TensorArg& t_dq_acc_batch_offset = args.tensors[S::DQ_ACC_BATCH_OFFSET_GROUP];
 
         const long_index_t* dq_acc_batch_offset_ptr =
             reinterpret_cast<const long_index_t*>(t_dq_acc_batch_offset.ptr);
@@ -175,8 +173,7 @@ __device__ void runFmhaBwdConvertDQ(Args args)
             reinterpret_cast<const int32_t*>(t_seqlen_k.ptr),
             nullptr, // cu_seqlen_q_ptr (unused)
             nullptr, // cu_seqlen_k_ptr (unused)
-            dq_acc_batch_offset_ptr
-        };
+            dq_acc_batch_offset_ptr};
         (void)seqlen_q;
         (void)seqlen_k;
         typename T::Kernel{}(kargs);

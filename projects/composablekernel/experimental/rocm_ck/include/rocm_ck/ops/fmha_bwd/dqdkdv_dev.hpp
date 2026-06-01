@@ -369,15 +369,15 @@ __device__ void runFmhaBwdDQDKDV(Args args)
 
     typename T::Kargs kargs{
         // FmhaBwdCommonKargs (30 positional fields; stride_dq_acc and
-        {t_q.ptr,                         // q_ptr
-         t_k.ptr,                         // k_ptr
-         t_v.ptr,                         // v_ptr
-         t_lse.ptr,                       // lse_ptr
-         t_do.ptr,                        // do_ptr
-         t_d.ptr,                         // d_ptr (input: const void*)
-         const_cast<void*>(t_dq_acc.ptr), // dq_acc_ptr (workspace, output)
-         const_cast<void*>(t_dk.ptr),     // dk_ptr (output)
-         const_cast<void*>(t_dv.ptr),     // dv_ptr (output)
+        {t_q.ptr,                                              // q_ptr
+         t_k.ptr,                                              // k_ptr
+         t_v.ptr,                                              // v_ptr
+         t_lse.ptr,                                            // lse_ptr
+         t_do.ptr,                                             // do_ptr
+         t_d.ptr,                                              // d_ptr (input: const void*)
+         const_cast<void*>(t_dq_acc.ptr),                      // dq_acc_ptr (workspace, output)
+         const_cast<void*>(t_dk.ptr),                          // dk_ptr (output)
+         const_cast<void*>(t_dv.ptr),                          // dv_ptr (output)
          (K.mode == FmhaMode::GROUP) ? index_t{-1} : seqlen_q, // seqlen_q
          (K.mode == FmhaMode::GROUP) ? index_t{-1} : seqlen_k, // seqlen_k
          hdim_q,                                               // hdim_q
@@ -428,8 +428,7 @@ __device__ void runFmhaBwdDQDKDV(Args args)
         // the slot and DqDkDv kernel doesn't read it).
         if constexpr(K.is_deterministic)
             kargs.dq_acc_batch_offset_ptr =
-                reinterpret_cast<const long_index_t*>(
-                    args.tensors[S::DQ_ACC_BATCH_OFFSET].ptr);
+                reinterpret_cast<const long_index_t*>(args.tensors[S::DQ_ACC_BATCH_OFFSET].ptr);
         else
             kargs.dq_acc_batch_offset_ptr = nullptr;
     }
@@ -530,11 +529,8 @@ __device__ void runFmhaBwdDQDKDV(Args args)
         //   group mode).
         // - nsplits_ptr: workspace + GetDqAccSplitsOffset, pre-filled by
         //   PrepareWorkspaceHost.
-        kargs.batch       = (K.mode == FmhaMode::BATCH)
-                                ? args.scalars[S::BATCH_SIZE].i32
-                                : index_t{0};
-        kargs.nsplits_ptr = reinterpret_cast<const index_t*>(
-            args.tensors[S::NSPLITS].ptr);
+        kargs.batch = (K.mode == FmhaMode::BATCH) ? args.scalars[S::BATCH_SIZE].i32 : index_t{0};
+        kargs.nsplits_ptr = reinterpret_cast<const index_t*>(args.tensors[S::NSPLITS].ptr);
     }
 
     typename T::Kernel{}(kargs);
