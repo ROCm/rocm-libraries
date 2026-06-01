@@ -287,8 +287,9 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
             // Only absmax computed during reduction; range scaling applied later
             auto reduce_func = ReduceOp::AbsMax{};
 
-            const AQDataType fp8_range = type_convert<AQDataType>(numeric<fp8_t>::max()) -
-                                         type_convert<AQDataType>(numeric<fp8_t>::min());
+            const AQDataType fp8_inv_range =
+                1.f / (type_convert<AQDataType>(numeric<fp8_t>::max()) -
+                       type_convert<AQDataType>(numeric<fp8_t>::min()));
 
             auto aq_reduce = blockreduce.template MakeYBlockTile<decltype(a_reduce)>();
 
