@@ -2576,6 +2576,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
     ####################################
     module.addComment2("Begin setupNewTile")
 
+    # Subtile computes wave offsets from vgpr("Serial") inline, so WaveIdx
+    # is only needed during kernel-arg init.  Free it before graWorkGroup
+    # to reduce SGPR pressure for StreamK temp allocations.
+    if kernel.get("UseSubtileImpl") and (kernel["enableTDMA"] or kernel["enableTDMB"]) \
+        and "WaveIdx" in self.sgprs and not kernel.get("ClusterBarrier"):
+      module.add(self.undefineSgpr("WaveIdx"))
+
     # work-group assignments
     module.addComment1("global read addresses: work-group") # is this comment needed?
     if not forceNoTileCode:
@@ -2609,8 +2616,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     # tile assignments
     if not kernel["UseSubtileImpl"]:
-      #TODO: TDM wave separated
-      if tdmA and tdmB and prod(kernel["MIWaveGroup"]) > 1:
+      # Wave-separated TDM increment: subtile uses per-wave descriptors and
+      # does not need parity-based increment selection.
+      if tdmA and tdmB and prod(kernel["MIWaveGroup"]) > 1 and not kernel["UseSubtileImpl"]:
         module.add(self.initTDMDescriptorWaveSeparated(kernel, tensorParametersA, tensorParametersB))
         if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
           module.add(self.initTDMDescriptorWaveSeparated(kernel, tensorParametersA["MX"], tensorParametersB["MX"]))
@@ -2876,7 +2884,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
           if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
             module.add(self.tdmApplyStreamKOffsetWaveSeparated(kernel, tensorParametersA["MX"], tensorParametersB["MX"]))
 
-      if (kernel["enableTDMA"] or kernel["enableTDMB"]) and not kernel["ClusterBarrier"]:
+      # WaveIdx already freed for subtile (before graWorkGroup above)
+      if (kernel["enableTDMA"] or kernel["enableTDMB"]) and not kernel["ClusterBarrier"] \
+          and not kernel.get("UseSubtileImpl"):
         module.add(self.undefineSgpr("WaveIdx"))
 
       ###########################################################################
