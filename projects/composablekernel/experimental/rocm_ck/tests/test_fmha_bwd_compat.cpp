@@ -199,7 +199,6 @@ TEST(FmhaBwdCompat, DqDkDv_BF16_D128_Batch)
                                      .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
 
     EXPECT_EQ(k.dtype, DataType::BF16);
-    EXPECT_EQ(k.arch, FmhaArch::GFX9);
     EXPECT_EQ(k.block_per_cu, 1);
     EXPECT_EQ(k.block_size, 256);
     EXPECT_EQ(k.block_n0, 128);
@@ -218,7 +217,6 @@ TEST(FmhaBwdCompat, DqDkDv_FP16_D64_Batch)
     EXPECT_EQ(k.hdim_q, 64);
     EXPECT_EQ(k.hdim_v, 64);
     EXPECT_EQ(k.mode, FmhaMode::BATCH);
-    EXPECT_EQ(k.arch, FmhaArch::GFX9);
     EXPECT_EQ(k.bias_type, FmhaBiasType::NONE);
     EXPECT_FALSE(k.has_bias_grad);
     EXPECT_FALSE(k.has_mask);
@@ -244,7 +242,6 @@ TEST(FmhaBwdCompat, DqDkDv_BF16_D64_Batch)
     EXPECT_EQ(k.hdim_q, 64);
     EXPECT_EQ(k.hdim_v, 64);
     EXPECT_EQ(k.mode, FmhaMode::BATCH);
-    EXPECT_EQ(k.arch, FmhaArch::GFX9);
     EXPECT_EQ(k.bias_type, FmhaBiasType::NONE);
     EXPECT_FALSE(k.has_bias_grad);
     EXPECT_FALSE(k.has_mask);
@@ -1065,19 +1062,7 @@ TEST(FmhaBwdCompat, Registry_DqDkDv_ReturnsNullForUnregistered)
     EXPECT_EQ(v, nullptr);
 }
 
-TEST(FmhaBwdCompat, Registry_DqDkDv_ReturnsNullForUnregisteredArch)
-{
-    const auto* v =
-        findVariant(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
-                                                      .hdim_q = 128,
-                                                      .hdim_v = 128,
-                                                      .mode   = FmhaMode::BATCH,
-                                                      .arch   = FmhaArch::GFX11},
-                                        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
-    EXPECT_EQ(v, nullptr);
-}
-
-TEST(FmhaBwdCompat, Registry_DqDkDv_VariantCount) { EXPECT_EQ(ALL_DQDKDV_VARIANTS_COUNT, 25); }
+TEST(FmhaBwdCompat, Registry_DqDkDv_VariantCount) { EXPECT_EQ(ALL_DQDKDV_VARIANTS_COUNT, 24); }
 
 // _cmask_br and _swa share the compiled spec with _cmask. findVariant() matches
 // by spec features alone, so it returns _cmask first for any has_mask=true
