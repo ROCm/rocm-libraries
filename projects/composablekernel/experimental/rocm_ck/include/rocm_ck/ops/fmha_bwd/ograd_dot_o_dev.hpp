@@ -37,15 +37,19 @@ namespace rocm_ck {
 /// Template chain (matches dispatcher codegen):
 ///   FmhaBwdOGradDotOSpec<Pipeline>
 ///     -> BlockFmhaBwdOGradDotO<PipelineProblem>
-///       -> BlockFmhaBwdOGradDotOPipelineProblem<OType, dOType, DType,
+///       -> BlockFmhaBwdOGradDotOPipelineProblem<OType, dOType, DType, LSEType,
 ///              bm0, hdim_v, is_group, Traits>
 ///         -> TileFmhaBwdOGradDotOTraits<spad, dvpad, block_per_cu>
+///
+/// LSEDataType is fixed to float to satisfy the sink-gradient atomicAdd
+/// static_assert in block_fmha_bwd_dot_do_o.hpp
 template <FmhaBwdOGradDotOSpec K>
 struct FmhaBwdOGradDotOTypes
 {
     using ODataType     = typename CkTypeMap<K.dtype>::type;
     using OGradDataType = ODataType;
     using DDataType     = float;
+    using LSEDataType   = float;
 
     using Traits =
         ck_tile::TileFmhaBwdOGradDotOTraits<K.pad_seqlen_q, K.pad_hdim_v, K.block_per_cu>;
@@ -54,6 +58,7 @@ struct FmhaBwdOGradDotOTypes
         ck_tile::BlockFmhaBwdOGradDotOPipelineProblem<ODataType,
                                                       OGradDataType,
                                                       DDataType,
+                                                      LSEDataType,
                                                       K.block_size,
                                                       K.hdim_v,
                                                       (K.mode == FmhaMode::GROUP),
@@ -123,14 +128,18 @@ __device__ void runFmhaBwdOGradDotO(Args args)
             {t_o.ptr,                    // o_ptr
              t_do.ptr,                   // do_ptr
              const_cast<void*>(t_d.ptr), // d_ptr (output: TensorArg::ptr is const void*)
+             nullptr,                    // lse_ptr
+             nullptr,                    // sink_ptr
+             nullptr,                    // d_sink_ptr
              p_undrop,                   // p_undrop
              -1,                         // seqlen_q (updated per-batch)
              hdim_v,                     // hdim_v
+             0,                          // nhead (only indexes sink_ptr -- 0 when disabled)
              stride_do,                  // stride_do
              stride_o,                   // stride_o
              nhead_stride_do,            // nhead_stride_do
              nhead_stride_o,             // nhead_stride_o
-             nhead_stride_d},            // nhead_stride_d
+             nhead_stride_d},            // nhead_stride_lsed (was nhead_stride_d; same value)
             // FmhaBwdOGradDotOGroupModeKargs extension
             reinterpret_cast<const int32_t*>( // seqstart_q_ptr
                 t_seqstart_q.ptr),
@@ -152,18 +161,22 @@ __device__ void runFmhaBwdOGradDotO(Args args)
             {t_o.ptr,                    // o_ptr
              t_do.ptr,                   // do_ptr
              const_cast<void*>(t_d.ptr), // d_ptr (output: TensorArg::ptr is const void*)
+             nullptr,                    // lse_ptr
+             nullptr,                    // sink_ptr
+             nullptr,                    // d_sink_ptr
              p_undrop,                   // p_undrop
              seqlen_q,                   // seqlen_q
              hdim_v,                     // hdim_v
+             0,                          // nhead (only indexes sink_ptr -- 0 when disabled)
              stride_do,                  // stride_do
              stride_o,                   // stride_o
              nhead_stride_do,            // nhead_stride_do
              nhead_stride_o,             // nhead_stride_o
-             nhead_stride_d},            // nhead_stride_d
+             nhead_stride_d},            // nhead_stride_lsed (was nhead_stride_d; same value)
             // FmhaBwdOGradDotOBatchModeKargs extension
             batch_stride_do, // batch_stride_do
             batch_stride_o,  // batch_stride_o
-            batch_stride_d   // batch_stride_d
+            batch_stride_d   // batch_stride_lsed (was batch_stride_d; same value)
         };
         typename T::Kernel{}(kargs);
     }
