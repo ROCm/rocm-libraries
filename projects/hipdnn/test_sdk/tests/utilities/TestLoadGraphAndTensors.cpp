@@ -113,6 +113,80 @@ TEST(TestFillTensorFromFile, NonPackedTensor)
     }
 }
 
+// --- Tests for scanBundleJsonFiles ---
+
+namespace
+{
+void touchFile(const std::filesystem::path& p)
+{
+    std::ofstream f(p);
+    ASSERT_TRUE(f.good()) << "Failed to create " << p;
+}
+} // namespace
+
+TEST(TestScanBundleJsonFiles, NonexistentDirectory)
+{
+    auto results = scanBundleJsonFiles("/tmp/nonexistent_dir_xyzzy_42");
+    EXPECT_TRUE(results.empty());
+}
+
+TEST(TestScanBundleJsonFiles, EmptyDirectory)
+{
+    const ScopedDirectory dir(std::filesystem::temp_directory_path() / "test_scan_empty");
+
+    auto results = scanBundleJsonFiles(dir.path());
+    EXPECT_TRUE(results.empty());
+}
+
+TEST(TestScanBundleJsonFiles, DiscoversJsonRecursively)
+{
+    const ScopedDirectory dir(std::filesystem::temp_directory_path() / "test_scan_recursive");
+    const auto nested = dir.path() / "sub1" / "sub2";
+    std::filesystem::create_directories(nested);
+
+    touchFile(dir.path() / "top.json");
+    touchFile(nested / "deep.json");
+    touchFile(nested / "data.bin"); // non-json, excluded
+
+    auto results = scanBundleJsonFiles(dir.path());
+    ASSERT_EQ(results.size(), 2u);
+
+    std::vector<std::string> filenames;
+    for(const auto& p : results)
+        filenames.push_back(p.filename().string());
+    EXPECT_NE(std::find(filenames.begin(), filenames.end(), "top.json"), filenames.end());
+    EXPECT_NE(std::find(filenames.begin(), filenames.end(), "deep.json"), filenames.end());
+}
+
+TEST(TestScanBundleJsonFiles, ExcludesMetaJson)
+{
+    const ScopedDirectory dir(std::filesystem::temp_directory_path() / "test_scan_meta");
+
+    touchFile(dir.path() / "bundle.json");
+    touchFile(dir.path() / "meta.json");
+
+    auto results = scanBundleJsonFiles(dir.path());
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_EQ(results[0].filename(), "bundle.json");
+}
+
+TEST(TestScanBundleJsonFiles, ReturnsSortedPaths)
+{
+    const ScopedDirectory dir(std::filesystem::temp_directory_path() / "test_scan_sorted");
+    const auto subC = dir.path() / "c_dir";
+    const auto subA = dir.path() / "a_dir";
+    std::filesystem::create_directory(subC);
+    std::filesystem::create_directory(subA);
+
+    touchFile(subC / "zebra.json");
+    touchFile(subA / "alpha.json");
+    touchFile(dir.path() / "middle.json");
+
+    auto results = scanBundleJsonFiles(dir.path());
+    ASSERT_EQ(results.size(), 3u);
+    EXPECT_TRUE(std::is_sorted(results.begin(), results.end()));
+}
+
 #ifndef HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
 
 TEST(TestLoadGraphAndTensors, Valid)

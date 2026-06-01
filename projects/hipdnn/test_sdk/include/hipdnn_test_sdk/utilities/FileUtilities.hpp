@@ -49,20 +49,16 @@ public:
     }
 };
 
-/// Scan golden reference data directory for bundle JSON files.
-/// Returns a gtest parameter generator. On failure or empty directory, returns
-/// a sentinel empty-path so SetUp() can GTEST_SKIP() gracefully.
-/// Bundle JSON files are discovered recursively (bundles live in per-bundle
-/// subdirectories). Non-bundle JSON files like meta.json are excluded.
-inline auto getGoldenReferenceParams(const std::filesystem::path& subDirectory)
+/// Recursively scan a directory for bundle JSON files.
+/// Returns sorted paths. Excludes meta.json. Returns empty vector on error or
+/// if no bundles are found.
+inline std::vector<std::filesystem::path> scanBundleJsonFiles(
+    const std::filesystem::path& directory)
 {
-    auto dir = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory()
-               / "../lib/golden_reference_data" / subDirectory;
-
     std::vector<std::filesystem::path> paths;
     try
     {
-        for(const auto& entry : std::filesystem::recursive_directory_iterator(dir))
+        for(const auto& entry : std::filesystem::recursive_directory_iterator(directory))
         {
             if(entry.path().extension() == ".json" && entry.path().filename() != "meta.json")
             {
@@ -72,18 +68,29 @@ inline auto getGoldenReferenceParams(const std::filesystem::path& subDirectory)
     }
     catch(const std::exception& e)
     {
-        std::cerr << "Warning: failed to scan golden reference data in " << dir << ": " << e.what()
-                  << '\n';
-        return testing::ValuesIn(std::vector<std::filesystem::path>{""});
+        std::cerr << "Warning: failed to scan golden reference data in " << directory << ": "
+                  << e.what() << '\n';
+        return {};
     }
 
+    std::sort(paths.begin(), paths.end());
+    return paths;
+}
+
+/// Scan golden reference data directory for bundle JSON files.
+/// Returns a gtest parameter generator. On failure or empty directory, returns
+/// a sentinel empty-path so SetUp() can GTEST_SKIP() gracefully.
+inline auto getGoldenReferenceParams(const std::filesystem::path& subDirectory)
+{
+    auto dir = hipdnn_data_sdk::utilities::getCurrentExecutableDirectory()
+               / "../lib/golden_reference_data" / subDirectory;
+
+    auto paths = scanBundleJsonFiles(dir);
     if(paths.empty())
     {
         return testing::ValuesIn(std::vector<std::filesystem::path>{""});
     }
-
-    std::sort(paths.begin(), paths.end());
-    return testing::ValuesIn(paths);
+    return testing::ValuesIn(std::move(paths));
 }
 
 }
