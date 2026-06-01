@@ -19,14 +19,18 @@
 
 using namespace ck_tile;
 
-template <index_t NumScales>
+// Distribution that stages one scale row per lane: NumRows rows mapped across the
+// NumRows lanes of the wave (lane L holds row L's NumScales e8m0 K-scales = one int64).
+// For a 32-row tile this yields lanes 0..15 -> rows 0..15, lanes 16..31 -> rows 16..31,
+// which is exactly the layout the hardware selects between via SCL_OPSEL (OpSel).
+template <index_t NumRows, index_t NumScales>
 CK_TILE_DEVICE static constexpr auto MakeScaleDistribution()
 {
     return make_static_tile_distribution(
-        tile_distribution_encoding<sequence<2>,
-                                   tuple<sequence<16>, sequence<NumScales>>,
-                                   tuple<sequence<0, 1>>,
-                                   tuple<sequence<0, 0>>,
+        tile_distribution_encoding<sequence<1>,
+                                   tuple<sequence<NumRows>, sequence<NumScales>>,
+                                   tuple<sequence<1>>,
+                                   tuple<sequence<0>>,
                                    sequence<2>,
                                    sequence<0>>{});
 }
@@ -100,12 +104,13 @@ struct WarpGemmScale16BlockLoopKernel
         constexpr auto a_dstr     = typename WarpGemm::AWarpDstr{};
         constexpr auto b_dstr     = typename WarpGemm::BWarpDstr{};
         constexpr auto c_dstr     = typename WarpGemm::CWarpDstr{};
-        constexpr auto scale_dstr = MakeScaleDistribution<NumScales>();
+        constexpr auto scale_dstr = MakeScaleDistribution<M, NumScales>();
 
         // ---- Preload phase ----
-        // Stage every A/B sub-tile and its per-block K-scales into registers before
-        // the compute loop, mirroring how the MX GEMM pipelines pre-stage scales
-        // (each int64 holds one 16-row block's 8 e8m0 K-scales).
+        // A/B sub-tiles for the 2x2 block loop. Scales are staged ONCE across all 32
+        // lanes (not per-block arrays): a single int64 A-scale and B-scale carry every
+        // row's/col's K-scales, and the per-block selection is done in hardware by
+        // OpSelA/OpSelB (SCL_OPSEL) -- lanes 0..15 for block 0, lanes 16..31 for block 1.
         statically_indexed_array<decltype(load_tile(
                                      make_tile_window(a_view,
                                                       make_tuple(number<MPerWarp>{}, number<K>{}),
@@ -113,21 +118,12 @@ struct WarpGemmScale16BlockLoopKernel
                                                       a_dstr))),
                                  MIter>
             a_tiles;
-        statically_indexed_array<int64_t, MIter> scale_a;
         static_for<0, MIter, 1>{}([&](auto mIter) {
             auto a_win     = make_tile_window(a_view,
                                           make_tuple(number<MPerWarp>{}, number<K>{}),
                                           make_multi_index(mIter.value * MPerWarp, 0),
                                           a_dstr);
-            auto sa_win    = make_tile_window(sa_view,
-                                           make_tuple(number<MPerWarp>{}, number<NumScales>{}),
-                                           make_multi_index(mIter.value * MPerWarp, 0),
-                                           scale_dstr);
             a_tiles(mIter) = load_tile(a_win);
-            auto sa_tile   = load_tile(sa_win);
-            scale_a(mIter) = bit_cast<int64_t>(
-                sa_tile.get_thread_buffer()
-                    .template get_as<ext_vector_t<e8m0_t, NumScales>>()[number<0>{}]);
         });
 
         statically_indexed_array<decltype(load_tile(
@@ -137,29 +133,36 @@ struct WarpGemmScale16BlockLoopKernel
                                                       b_dstr))),
                                  NIter>
             b_tiles;
-        statically_indexed_array<int64_t, NIter> scale_b;
         static_for<0, NIter, 1>{}([&](auto nIter) {
             auto b_win     = make_tile_window(b_view,
                                           make_tuple(number<NPerWarp>{}, number<K>{}),
                                           make_multi_index(nIter.value * NPerWarp, 0),
                                           b_dstr);
-            auto sb_win    = make_tile_window(sb_view,
-                                           make_tuple(number<NPerWarp>{}, number<NumScales>{}),
-                                           make_multi_index(nIter.value * NPerWarp, 0),
-                                           scale_dstr);
             b_tiles(nIter) = load_tile(b_win);
-            auto sb_tile   = load_tile(sb_win);
-            scale_b(nIter) = bit_cast<int64_t>(
-                sb_tile.get_thread_buffer()
-                    .template get_as<ext_vector_t<e8m0_t, NumScales>>()[number<0>{}]);
         });
 
+        // Single 64-bit scale scalars: all M rows / N cols staged across the 32 lanes.
+        auto sa_win = make_tile_window(sa_view,
+                                       make_tuple(number<M>{}, number<NumScales>{}),
+                                       make_multi_index(0, 0),
+                                       scale_dstr);
+        const int64_t scale_a =
+            bit_cast<int64_t>(load_tile(sa_win)
+                                  .get_thread_buffer()
+                                  .template get_as<ext_vector_t<e8m0_t, NumScales>>()[number<0>{}]);
+        auto sb_win = make_tile_window(sb_view,
+                                       make_tuple(number<N>{}, number<NumScales>{}),
+                                       make_multi_index(0, 0),
+                                       scale_dstr);
+        const int64_t scale_b =
+            bit_cast<int64_t>(load_tile(sb_win)
+                                  .get_thread_buffer()
+                                  .template get_as<ext_vector_t<e8m0_t, NumScales>>()[number<0>{}]);
+
         // ---- Compute phase ----
-        // 2x2 block-level loop, mimicking BlockGemmARegBRegCRegV1. All scales are
-        // already register-resident. The proper per-M/per-N-block scale set is
-        // selected by indexing the preloaded scale_a / scale_b. OpSelA/OpSelB (the
-        // hardware A/B sub-block index) are 0 for a 16x16 tile, i.e. the warp-gemm
-        // default -- the int64 scale itself fully specifies the block's K-scales.
+        // 2x2 block-level loop. The same int64 scale scalars are passed to every call;
+        // the correct per-block K-scales are fetched in hardware via OpSelA/OpSelB, which
+        // select lanes 0..15 (block 0) vs lanes 16..31 (block 1) of the scale register.
         static_for<0, MIter, 1>{}([&](auto mIter) {
             static_for<0, NIter, 1>{}([&](auto nIter) {
                 auto c_win = make_tile_window(
@@ -169,7 +172,8 @@ struct WarpGemmScale16BlockLoopKernel
                     c_dstr);
 
                 auto c_tile =
-                    WarpGemm{}(a_tiles(mIter), b_tiles(nIter), scale_a(mIter), scale_b(nIter));
+                    WarpGemm{}.template operator()<OpSelA<mIter.value>, OpSelB<nIter.value>>(
+                        a_tiles(mIter), b_tiles(nIter), scale_a, scale_b);
                 store_tile(c_win, c_tile);
             });
         });

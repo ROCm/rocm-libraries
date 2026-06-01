@@ -605,14 +605,12 @@ struct WmmaTraits<gfx125_t, fp8_t, fp8_t, float, 16, 16, 128, WmmaScale16Tag>
         return CVecType{0};
     }
 
-    template <typename... Params, index_t OpselA = 0, index_t OpselB = 0>
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType wmma_intrinsic(const AVecType& a_vec,
                                                   const int64_t& a_scale,
                                                   const BVecType& b_vec,
                                                   const int64_t& b_scale,
-                                                  const CVecType& c_vec,
-                                                  number<OpselA> = {},
-                                                  number<OpselB> = {})
+                                                  const CVecType& c_vec)
     {
 #ifdef __gfx125__
         using P       = WarpGemmParamsParser<Params...>;
@@ -625,10 +623,10 @@ struct WmmaTraits<gfx125_t, fp8_t, fp8_t, float, 16, 16, 128, WmmaScale16Tag>
             BTraits::to_wmma_vec(bit_cast<typename BTraits::VecType>(b_vec)),
             0,
             bit_cast<fp32x8_t>(c_vec),
-            OpselA,
+            P::op_sel_a,
             P::scale_a,
             a_scale,
-            OpselB,
+            P::op_sel_b,
             P::scale_b,
             b_scale,
             0,
@@ -663,14 +661,12 @@ struct WmmaTraits<gfx125_t, bf8_t, bf8_t, float, 16, 16, 128, WmmaScale16Tag>
         return CVecType{0};
     }
 
-    template <typename... Params, index_t OpselA = 0, index_t OpselB = 0>
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType wmma_intrinsic(const AVecType& a_vec,
                                                   const int64_t& a_scale,
                                                   const BVecType& b_vec,
                                                   const int64_t& b_scale,
-                                                  const CVecType& c_vec,
-                                                  number<OpselA> = {},
-                                                  number<OpselB> = {})
+                                                  const CVecType& c_vec)
     {
 #ifdef __gfx125__
         using P       = WarpGemmParamsParser<Params...>;
@@ -683,10 +679,10 @@ struct WmmaTraits<gfx125_t, bf8_t, bf8_t, float, 16, 16, 128, WmmaScale16Tag>
             BTraits::to_wmma_vec(bit_cast<typename BTraits::VecType>(b_vec)),
             0,
             bit_cast<fp32x8_t>(c_vec),
-            OpselA,
+            P::op_sel_a,
             P::scale_a,
             a_scale,
-            OpselB,
+            P::op_sel_b,
             P::scale_b,
             b_scale,
             0,
@@ -721,14 +717,12 @@ struct WmmaTraits<gfx125_t, fp8_t, bf8_t, float, 16, 16, 128, WmmaScale16Tag>
         return CVecType{0};
     }
 
-    template <typename... Params, index_t OpselA = 0, index_t OpselB = 0>
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType wmma_intrinsic(const AVecType& a_vec,
                                                   const int64_t& a_scale,
                                                   const BVecType& b_vec,
                                                   const int64_t& b_scale,
-                                                  const CVecType& c_vec,
-                                                  number<OpselA> = {},
-                                                  number<OpselB> = {})
+                                                  const CVecType& c_vec)
     {
 #ifdef __gfx125__
         using P       = WarpGemmParamsParser<Params...>;
@@ -741,10 +735,10 @@ struct WmmaTraits<gfx125_t, fp8_t, bf8_t, float, 16, 16, 128, WmmaScale16Tag>
             BTraits::to_wmma_vec(bit_cast<typename BTraits::VecType>(b_vec)),
             0,
             bit_cast<fp32x8_t>(c_vec),
-            OpselA,
+            P::op_sel_a,
             P::scale_a,
             a_scale,
-            OpselB,
+            P::op_sel_b,
             P::scale_b,
             b_scale,
             0,
@@ -779,14 +773,12 @@ struct WmmaTraits<gfx125_t, bf8_t, fp8_t, float, 16, 16, 128, WmmaScale16Tag>
         return CVecType{0};
     }
 
-    template <typename... Params, index_t OpselA = 0, index_t OpselB = 0>
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType wmma_intrinsic(const AVecType& a_vec,
                                                   const int64_t& a_scale,
                                                   const BVecType& b_vec,
                                                   const int64_t& b_scale,
-                                                  const CVecType& c_vec,
-                                                  number<OpselA> = {},
-                                                  number<OpselB> = {})
+                                                  const CVecType& c_vec)
     {
 #ifdef __gfx125__
         using P       = WarpGemmParamsParser<Params...>;
@@ -799,10 +791,10 @@ struct WmmaTraits<gfx125_t, bf8_t, fp8_t, float, 16, 16, 128, WmmaScale16Tag>
             BTraits::to_wmma_vec(bit_cast<typename BTraits::VecType>(b_vec)),
             0,
             bit_cast<fp32x8_t>(c_vec),
-            OpselA,
+            P::op_sel_a,
             P::scale_a,
             a_scale,
-            OpselB,
+            P::op_sel_b,
             P::scale_b,
             b_scale,
             0,
@@ -926,22 +918,6 @@ struct WmmaTraitsGfx125PkFp4F32_32x32x128
         ck_tile::ignore = c_vec;
         return CVecType{0};
 #endif
-    }
-
-    // The shared scale16 operator() (warp_gemm_attribute_wmma_impl.hpp) forwards external
-    // OPSEL selectors for single-block ops (e.g. f8f6f4 16x16x128). fp4 32x32x128 derives
-    // OPSEL internally per kCNBlock iteration (OPSEL[0]=1, OPSEL[1]=block index), so the
-    // external selectors do not apply -- accept and ignore them, forwarding to the 5-arg form.
-    template <typename... Params, index_t OpselA = 0, index_t OpselB = 0>
-    CK_TILE_DEVICE static CVecType wmma_intrinsic(const AVecType& a_vec,
-                                                  const ScaleType& a_scale,
-                                                  const BVecType& b_vec,
-                                                  const ScaleType& b_scale,
-                                                  const CVecType& c_vec,
-                                                  number<OpselA>,
-                                                  number<OpselB>)
-    {
-        return wmma_intrinsic<Params...>(a_vec, a_scale, b_vec, b_scale, c_vec);
     }
 
     template <typename... Params>
