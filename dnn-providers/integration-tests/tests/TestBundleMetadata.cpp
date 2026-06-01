@@ -308,7 +308,7 @@ TEST(TestLoadBundleMetadata, HandlesEmptyStringFields)
 
 TEST(TestCheckVramRequirement, PassesWhenVramNotSet)
 {
-    BundleMetadata meta;
+    const BundleMetadata meta;
     // minimumVramMb is nullopt
     EXPECT_FALSE(checkVramRequirement(meta, 8192).has_value());
 }
@@ -365,7 +365,7 @@ TEST(TestCheckVramRequirement, SkipsWhenDeviceHasInsufficientVram)
 
 TEST(TestCheckArchCompatibility, PassesWhenExecutorNotSet)
 {
-    BundleMetadata meta;
+    const BundleMetadata meta;
     // referenceExecutor is nullopt
     EXPECT_FALSE(checkArchCompatibility(meta, "gfx942:sramecc+:xnack-").has_value());
 }

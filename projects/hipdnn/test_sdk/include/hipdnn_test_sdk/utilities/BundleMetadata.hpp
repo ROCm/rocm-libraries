@@ -85,7 +85,7 @@ inline std::optional<BundleMetadata> loadBundleMetadata(
             return std::nullopt;
         }
 
-        int version = json["format_version"].get<int>();
+        const int version = json["format_version"].get<int>();
         if(version != 1)
         {
             HIPDNN_SDK_LOG_WARN(path << " has unsupported format_version " << version);
