@@ -809,6 +809,7 @@ enable_clang_tidy(
     EXTRA_ARGS
         -DMIOPEN_USE_CLANG_TIDY
         -D__builtin_elementwise_exp10=__builtin_elementwise_exp
+        -nogpulib
 )
 
 include(CppCheck)
