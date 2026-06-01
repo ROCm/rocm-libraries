@@ -16916,7 +16916,7 @@ class KernelWriterAssembly(KernelWriter):
     numbits = 1 if numCodePath == 2 else 2
     module.add(SGetRegB32(dst=sgpr(tmpSgpr), src="hwreg(HW_REG_HW_ID, 4, %u)"%numbits))
 
-    tmpSgpr1 = self.sgprPool.checkOutAligned(3, 2)
+    tmpSgpr1 = self.sgprPool.checkOutAligned(3, 2, tag="simdSpecDispatch_tmpSgpr1", preventOverflow=False)
     sgprPC = ContinuousRegister(tmpSgpr1, 3)
     for l in range(numCodePath):
       module.addComment0("Branch to code-path %u logic"%l)
