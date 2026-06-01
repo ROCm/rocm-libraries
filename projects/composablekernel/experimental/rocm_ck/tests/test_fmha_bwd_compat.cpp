@@ -7,9 +7,16 @@
 // registry and asserts ALL fields. If a schema change breaks a test,
 // the change is not backwards-compatible.
 //
-// NOTE: block_size and block_n0 in DqDkDv come from the consteval tile
-// config table (GFX9_FP16_DQDKDV_TILES in dqdkdv_spec.hpp). Values
-// differ by hdim (e.g. block_n0=128 for d128, block_n0=64 for d256).
+// NOTE: For DqDkDv, block_size and block_n0 come from the consteval tile
+// config table (GFX9_FP16_DQDKDV_BASE_TILES in dqdkdv_spec.hpp); block_n0
+// differs by hdim (e.g. block_n0=128 for d128, block_n0=64 for d256). For
+// OGradDotO and ConvertDQ, block_size and block_per_cu are hdim-invariant
+// algorithm defaults (no tile-table lookup), so their multi-hdim cases below
+// verify hdim acceptance + signature plumbing, not per-hdim geometry.
+//
+// All baselines are compile-time spec-factory checks (makeSpec() output), NOT
+// runtime numerical validation: no kernel is launched, and only the d128
+// variants are compiled into the registry today.
 //
 // The findVariant() tests require the registry header from the example
 // directory, which is added to the include path by CMakeLists.txt.
@@ -118,6 +125,8 @@ TEST(FmhaBwdCompat, OGradDotO_FP16_D128_Batch_NoPad)
 // ============================================================================
 // OGradDotO multi-hdim frozen baselines
 // (d64 is covered by OGradDotO_FP16_D64_Batch above)
+// block_size (64) and block_per_cu (2) are hdim-invariant defaults, so these
+// cases verify hdim acceptance + signature plumbing, not per-hdim geometry.
 // ============================================================================
 
 TEST(FmhaBwdCompat, OGradDotO_FP16_D32_Batch)
@@ -547,6 +556,51 @@ TEST(FmhaBwdCompat, DqDkDv_FP16_D64_Group)
 }
 
 // ============================================================================
+// DqDkDv asymmetric head dimensions (hdim_q != hdim_v)
+// ============================================================================
+// The base tile is looked up by effective_hdim = max(hdim_q, hdim_v)
+// (dqdkdv_spec.hpp getTileConfig). These cases exercise that max() path, which
+// the symmetric baselines above never do. The (64, 256) case is the discriminator:
+// it fails if the lookup ever regresses to keying on hdim_q alone, since that
+// would select the d64 tile (block_n0=128) instead of the d256 tile (block_n0=64).
+
+TEST(FmhaBwdCompat, DqDkDv_FP16_D64Q_D256V_Batch)
+{
+    constexpr auto k =
+        makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
+                                                   .hdim_q = 64,
+                                                   .hdim_v = 256,
+                                                   .mode   = FmhaMode::BATCH},
+                                     .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+
+    EXPECT_EQ(k.dtype, DataType::FP16);
+    EXPECT_EQ(k.hdim_q, 64);
+    EXPECT_EQ(k.hdim_v, 256);
+    EXPECT_EQ(k.mode, FmhaMode::BATCH);
+    EXPECT_EQ(k.block_per_cu, 1);
+    EXPECT_EQ(k.block_size, 256);
+    EXPECT_EQ(k.block_n0, 64); // effective_hdim = max(64, 256) = 256 -> bn0 = 64
+}
+
+TEST(FmhaBwdCompat, DqDkDv_FP16_D256Q_D64V_Batch)
+{
+    constexpr auto k =
+        makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
+                                                   .hdim_q = 256,
+                                                   .hdim_v = 64,
+                                                   .mode   = FmhaMode::BATCH},
+                                     .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+
+    EXPECT_EQ(k.dtype, DataType::FP16);
+    EXPECT_EQ(k.hdim_q, 256);
+    EXPECT_EQ(k.hdim_v, 64);
+    EXPECT_EQ(k.mode, FmhaMode::BATCH);
+    EXPECT_EQ(k.block_per_cu, 1);
+    EXPECT_EQ(k.block_size, 256);
+    EXPECT_EQ(k.block_n0, 64); // effective_hdim = max(256, 64) = 256 -> bn0 = 64
+}
+
+// ============================================================================
 // ConvertDQ frozen baselines
 // ============================================================================
 
@@ -584,6 +638,8 @@ TEST(FmhaBwdCompat, ConvertDQ_FP16_D128_Group)
 
 // ============================================================================
 // ConvertDQ multi-hdim frozen baselines
+// block_size (256) and block_per_cu (2) are hdim-invariant constants, so these
+// cases verify hdim acceptance + signature plumbing, not per-hdim geometry.
 // ============================================================================
 
 TEST(FmhaBwdCompat, ConvertDQ_FP16_D32_Batch)
