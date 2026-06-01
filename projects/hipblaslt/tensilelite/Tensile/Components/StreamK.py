@@ -2570,6 +2570,25 @@ class StreamKTwoTileDPFirst(StreamK):
         else:
             module.add(SMovB32(dst=sgpr("StreamKIdx"), src=sgpr("WorkGroup0"),
                                comment="Save original StreamK index"))
+
+        if kernel["StreamKForceFullTiles"]:
+            sIdx = writer.acquireStreamKConstSgpr(kernel, "StreamKIdx")
+            sIpt = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")
+            if skConstsInVgprs:
+                module.add(VReadfirstlaneB32(dst=sgpr(sIdx), src=vgpr(writer.states.skConstVgprs["StreamKIdx"])))
+                module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.skConstVgprs["ItersPerTile"])))
+            module.add(SMulI32(dst=sgpr("StreamKIter"), src0=sgpr(sIdx), src1=sgpr(sIpt), comment="DP starting iteration"))
+            writer.releaseStreamKConstSgpr(sIdx)
+            with writer.allocTmpSgpr(1, tag="TotalIters") as sTmpRes:
+                sTmp = sTmpRes.idx
+                module.add(self.computeTotalTiles(writer, kernel, sTmp))
+                module.add(SMulI32(dst=sgpr(sTmp), src0=sgpr(sTmp), src1=sgpr(sIpt), comment="totalIters = totalTiles * itersPerTile"))
+                module.add(SMovB32(dst=sgpr("StreamKIterEnd"), src=sgpr(sTmp), comment="DP ending iteration"))
+                module.add(SCmpLtU32(src0=sgpr("StreamKIter"), src1=sgpr(sTmp), comment="Make sure there's work to do"))
+            writer.releaseStreamKConstSgpr(sIpt)
+            module.add(writer.longBranchScc0(Label("KernelEnd", ""), posNeg=1))
+            return module
+
         # Two-tile SK (DP first)
         # Do DP tiles before SK
         skInitDone = Label("SK_InitDone", "")
@@ -2578,11 +2597,8 @@ class StreamKTwoTileDPFirst(StreamK):
         # If synchronizer buffer exists, then do single-kernel stream-k fixup step with tree reduction
         # If there's no synchronizer, parallel reduction is done in a post-kernel
         skSplitInit = Label("SK_SplitInit", "")
-        if kernel["StreamKForceFullTiles"]:
-            module.add(SBranch(labelName=skSplitInit.getLabelName(), comment="No partial tiles: use full-tile StreamK init"))
-        else:
-            module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
-            module.add(SCBranchSCC0(labelName=skSplitInit.getLabelName(), comment="Jump to single kernel init"))
+        module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
+        module.add(SCBranchSCC0(labelName=skSplitInit.getLabelName(), comment="Jump to single kernel init"))
 
         ################
         # Parallel reduction init
@@ -2743,17 +2759,54 @@ class StreamKTwoTileDPFirst(StreamK):
         # StreamK workgroup mapping
         sTmp = writer.sgprPool.checkOutAligned(4, 2, "SKMappingTemp")
 
+        if kernel["StreamKForceFullTiles"]:
+            sIpt = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")
+            if skConstsInVgprs:
+                module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.skConstVgprs["ItersPerTile"])))
+            module.add(self.computeTotalTiles(writer, kernel, sTmp+3))
+            module.add(SMulI32(dst=sgpr(sTmp+3), src0=sgpr(sTmp+3), src1=sgpr(sIpt), comment="dpSectionSize = totalTiles * ItersPerTile"))
+            module.add(SCmpLtU32(src0=sgpr("StreamKIter"), src1=sgpr(sTmp+3), comment="Make sure there's DP work to do"))
+            module.add(writer.longBranchScc0(Label("KernelEnd", ""), posNeg=1))
+            writer.releaseStreamKConstSgpr(sIpt)
+
+            module.add(self.skTileIndex(writer, kernel, sTmp, tPA, tPB))
+
+            sIpt = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")
+            sGrid = writer.acquireStreamKConstSgpr(kernel, "skGrid")
+            if skConstsInVgprs:
+                module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.skConstVgprs["ItersPerTile"])))
+                module.add(VReadfirstlaneB32(dst=sgpr(sGrid), src=vgpr(writer.states.skConstVgprs["skGrid"])))
+            module.add(SMulI32(dst=sgpr(sTmp+1), src0=sgpr(sGrid), src1=sgpr(sIpt), comment="DP iterations shift"))
+            writer.releaseStreamKConstSgpr(sGrid)
+            writer.releaseStreamKConstSgpr(sIpt)
+            module.add(SAddU32(dst=sgpr(sTmp+1), src0=sgpr(sTmp+1), src1=sgpr("StreamKIter"), comment="Add DP shift"))
+            module.add(SMovB32(dst=sgpr("StreamKIter"), src=sgpr(sTmp+1), comment="Store next DP iteration"))
+
+            module.add(self.skIndexToWG(writer, kernel, sTmp))
+
+            alphaLabel = Label("SKAlphaCheck", "")
+            module.add(BranchIfNotZero("Alpha", kernel["ProblemType"]["ComputeDataType"].toEnum(), alphaLabel))
+            module.add(SCmpEQU32(src0=sgpr("StreamKLocalStart"), src1=0, comment="does wg start tile?"))
+            skCloseLoopLabel = Label("SK_CloseLoop", "")
+            module.add(writer.longBranchScc0(skCloseLoopLabel, posNeg=1))
+            sIpt = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")
+            if writer.isStreamKConstantsToVgprEnabled(kernel):
+                module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.skConstVgprs["ItersPerTile"])))
+            module.add(SMovB32(dst=sgpr("StreamKLocalEnd"), src=sgpr(sIpt), comment="Skip iterations"))
+            writer.releaseStreamKConstSgpr(sIpt)
+            module.add(alphaLabel)
+
+            writer.sgprPool.checkIn(sTmp)
+            return module
+
         module.add(self.skTileIndex(writer, kernel, sTmp, tPA, tPB))
 
         skUpdateDone = Label("SK_UpdateDone", "")
 
         # Choose reduction strategy
         skSplitUpdate = Label("SK_SplitUpdate", "")
-        if kernel["StreamKForceFullTiles"]:
-            module.add(SBranch(labelName=skSplitUpdate.getLabelName(), comment="No partial tiles: use full-tile StreamK update"))
-        else:
-            module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
-            module.add(SCBranchSCC0(labelName=skSplitUpdate.getLabelName(), comment="Jump to single kernel update"))
+        module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
+        module.add(SCBranchSCC0(labelName=skSplitUpdate.getLabelName(), comment="Jump to single kernel update"))
         # Parallel reduction doesn't cross tile boundaries, move to end
         module.add(SMovB32(dst=sgpr(sTmp+1), src=sgpr("StreamKIterEnd"), comment="Parallel reduction, work contained to single partial tile"))
         # Done update

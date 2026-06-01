@@ -843,18 +843,16 @@ namespace TensileLite
                         // followed by an even number of data-parllel tiles.
                         // If total tiles is evenly divisble by grid size,
                         // then no Stream-K tiles are needed, all data-parallel
-                        uint32_t skTiles = sk.grid;
+                        // Force-full mode is a persistent DP-only use of StreamK=3. Setting
+                        // skTiles to zero makes every output tile stay in the DP region.
                         bool forceFullTiles = sizeMapping.streamKForceFullTiles != 0;
+                        uint32_t skTiles = forceFullTiles ? 0 : sk.grid;
                         // If not evenly divisible, determine number of Stream-K tiles
-                        if(tiles % sk.grid != 0)
+                        if(!forceFullTiles && tiles % sk.grid != 0)
                         {
                             // Number of data-parallel tiles on each workgroup would be:
                             // dpTilesPerWG = bigEnough ? (tiles - skTiles) / skGrid : 0;
                             skTiles = bigEnough ? sk.grid * fullTiles + tiles % sk.grid : tiles;
-                            // Force-full mode keeps only complete grid rounds in StreamK. Any remainder
-                            // output tiles are left for the DP section instead of using partial/fixup work.
-                            if(forceFullTiles)
-                                skTiles = bigEnough ? tiles - (tiles % sk.grid) : 0;
                             // Cap Stream-K tiles at total number of tiles in case of large multiplier
                             skTiles = std::min(skTiles, static_cast<uint32_t>(tiles));
                         }

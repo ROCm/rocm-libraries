@@ -26,7 +26,7 @@ from Tensile.Common.GlobalParameters import defaultSolution
 from Tensile.Common.RequiredParameters import getRequiredParametersMin
 from Tensile.Common.ValidParameters import validParameters
 from Tensile.Contractions import SizeMapping
-from Tensile.SolutionStructs.Solution import validateParameterTypes
+from Tensile.SolutionStructs.Solution import _validateStreamKForceFullTiles, validateParameterTypes
 
 
 def minimal_size_mapping_state():
@@ -119,3 +119,45 @@ def test_streamk_force_full_tiles_round_trips_to_size_mapping():
     size_mapping = SizeMapping.FromOriginalState(state)
 
     assert size_mapping.streamKForceFullTiles == 1
+
+
+def test_streamk_force_full_tiles_requires_streamk3():
+    state = {
+        "StreamK": 2,
+        "StreamKAtomic": 0,
+        "StreamKForceFullTiles": 1,
+        "Valid": True,
+    }
+
+    valid = _validateStreamKForceFullTiles(state, False)
+
+    assert valid is False
+    assert state["Valid"] is False
+
+
+def test_streamk_force_full_tiles_rejects_atomic_streamk():
+    state = {
+        "StreamK": 3,
+        "StreamKAtomic": 1,
+        "StreamKForceFullTiles": 1,
+        "Valid": True,
+    }
+
+    valid = _validateStreamKForceFullTiles(state, False)
+
+    assert valid is False
+    assert state["Valid"] is False
+
+
+def test_streamk_force_full_tiles_accepts_streamk3_tree_path():
+    state = {
+        "StreamK": 3,
+        "StreamKAtomic": 0,
+        "StreamKForceFullTiles": 1,
+        "Valid": True,
+    }
+
+    valid = _validateStreamKForceFullTiles(state, False)
+
+    assert valid is True
+    assert state["Valid"] is True

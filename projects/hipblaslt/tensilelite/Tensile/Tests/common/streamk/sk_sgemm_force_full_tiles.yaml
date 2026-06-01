@@ -18,7 +18,7 @@ GlobalParameters:
 
 BenchmarkProblems:
 
-  - # SGEMM NT, StreamK force full-tile mode
+  - # SGEMM NT, StreamK force full-tile persistent DP mode
     - # ProblemType
       OperationType: GEMM
       DataType: s
@@ -27,7 +27,7 @@ BenchmarkProblems:
       UseBeta: True
       Batched: True
 
-    - # Force StreamK to use full output tiles only
+    - # Force StreamK to use persistent DP only, with no partial-tile SK region
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]

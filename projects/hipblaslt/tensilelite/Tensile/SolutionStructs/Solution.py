@@ -162,6 +162,17 @@ def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printR
   return True
 
 
+def _validateStreamKForceFullTiles(state, printRejectionReason):
+  if state["StreamKForceFullTiles"]:
+    if state["StreamK"] != 3:
+      reject(state, printRejectionReason, "StreamKForceFullTiles requires DP-first two-tile Stream-K")
+      return False
+    if state["StreamKAtomic"] == 1:
+      reject(state, printRejectionReason, "StreamKForceFullTiles does not support atomic Stream-K")
+      return False
+  return True
+
+
 def _getExpectedTypes(validParams):
   """Build a map from parameter name to the set of allowed Python types.
 
@@ -1518,11 +1529,7 @@ class Solution(collections.abc.Mapping):
         and state["PrefetchGlobalRead"] in (1, 2)
       if state["_ScheduleIterAlg"] not in (2, 3) and not isSia0TdmPgr:
         reject(state, printRejectionReason, "ScheduleIterAlg not supported with Stream-K")
-      if state["StreamKForceFullTiles"]:
-        if state["StreamK"] not in (2, 3):
-          reject(state, printRejectionReason, "StreamKForceFullTiles requires two-tile Stream-K")
-        if state["StreamKAtomic"] == 1:
-          reject(state, printRejectionReason, "StreamKForceFullTiles does not support atomic Stream-K")
+      _validateStreamKForceFullTiles(state, printRejectionReason)
       if state["StreamKAtomic"] == 1:
         if state["StreamK"] == 4:
           reject(state, printRejectionReason, "Atomic Stream-K is not supported with dynamic work queue mode")

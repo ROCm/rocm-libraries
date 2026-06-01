@@ -773,12 +773,12 @@ validParameters = { # we need to make sure this matches develop
     # The priority of these environment variables is defined as follows:
     # TENSILE_STREAMK_FIXED_GRID > TENSILE_STREAMK_DYNAMIC_GRID > TENSILE_STREAMK_MAX_CUS > TENSILE_STREAMK_GRID_MULTIPLIER
     "StreamK": [0, 1, 2, 3, 4],
-    # Force two-tile StreamK to run full output tiles only.
-    # When enabled, StreamK uses tree reduction, skips the K-split partial/fixup path, and
+    # Force StreamK=3 to run all output tiles through the persistent DP path.
+    # When enabled, StreamK uses tree reduction, sets skTiles=0 to skip the SK region, and
     # uses SK_grid = CU count unless TENSILE_STREAMK_FIXED_GRID is explicitly set.
-    # Other StreamK env grid knobs are bypassed in this mode. Leftover full output tiles
-    # may still run through the DP section; the invariant is no partial output tile fixup.
-    # Valid only with two-tile, non-atomic StreamK modes 2 and 3.
+    # Other StreamK env grid knobs are bypassed in this mode. The invariant is no partial
+    # output tile fixup and no SK-region processing.
+    # Valid only with DP-first, non-atomic StreamK mode 3.
     "StreamKForceFullTiles": [0, 1],
     # Determines if StreamK kernel uses atomics
     # 0: uses workspace to store partial tiles, accumulate in deterministic fix-up step
