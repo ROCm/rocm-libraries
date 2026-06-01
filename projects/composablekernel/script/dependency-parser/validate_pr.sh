@@ -19,7 +19,9 @@ NC='\033[0m' # No Color
 # Configuration
 PR_NUMBER=""
 BASE_BRANCH="origin/develop"
-SMART_BUILD_BRANCH="users/yraparti/ck/dependency-parser-smart-build"
+# The smart-build tooling now lives on develop, so rebasing the PR onto
+# origin/develop is the default. Override with -s for a feature branch.
+SMART_BUILD_BRANCH="origin/develop"
 BUILD_DIR="../../build"
 SKIP_BUILD=false
 SKIP_LEGACY=false
@@ -133,6 +135,22 @@ exec > >(tee "$OUTPUT_FILE") 2>&1
 log_section "Step 1: Fetch PR $PR_NUMBER"
 cd "$PROJECT_ROOT" || exit 1
 
+# This script checks out and rebases in place. Refuse to run on a dirty tree
+# (those changes would be lost) and restore the caller's original branch on exit.
+if ! git diff --quiet || ! git diff --cached --quiet; then
+    log_error "Working tree has uncommitted changes; refusing to run (checkout/rebase would discard them)."
+    exit 1
+fi
+
+ORIG_REF="$(git symbolic-ref -q --short HEAD || git rev-parse HEAD)"
+restore_git() {
+    log_info "Restoring original git state (${ORIG_REF})..."
+    git rebase --abort 2>/dev/null || true
+    git checkout -q "$ORIG_REF" 2>/dev/null || true
+    git branch -D "pr-${PR_NUMBER}" 2>/dev/null || true
+}
+trap restore_git EXIT
+
 log_info "Fetching PR #$PR_NUMBER..."
 git fetch origin pull/${PR_NUMBER}/head:pr-${PR_NUMBER}
 
@@ -193,7 +211,12 @@ git log --oneline -5
 log_section "Step 3: Analyze Changed Files"
 log_info "Files changed vs $BASE_BRANCH:"
 CHANGED_FILES=$(git diff --name-only ${BASE_BRANCH}...HEAD -- projects/composablekernel)
-NUM_FILES=$(echo "$CHANGED_FILES" | wc -l)
+# `echo "" | wc -l` is 1, so count non-empty lines to report 0 for an empty diff.
+if [ -z "$CHANGED_FILES" ]; then
+    NUM_FILES=0
+else
+    NUM_FILES=$(printf '%s\n' "$CHANGED_FILES" | grep -c .)
+fi
 echo "$CHANGED_FILES" | head -20
 if [ "$NUM_FILES" -gt 20 ]; then
     echo "... (showing first 20 of $NUM_FILES files)"
@@ -205,7 +228,9 @@ log_section "Step 4: Generate Fresh Dependency Map"
 cd "$BUILD_DIR" || exit 1
 
 log_info "Configuring CMake to generate compile_commands.json..."
-cmake .. -GNinja -DCMAKE_EXPORT_COMPILE_COMMANDS=ON 2>&1 | grep -v "^-- " || true
+# CMAKE_EXTRA_ARGS lets callers inject environment-specific flags, e.g. a CPU-only
+# cluster node: CMAKE_EXTRA_ARGS="-DCMAKE_CXX_COMPILER=amdclang++ -DGPU_TARGETS=gfx942"
+cmake .. -GNinja -DCMAKE_EXPORT_COMPILE_COMMANDS=ON ${CMAKE_EXTRA_ARGS:-} 2>&1 | grep -v "^-- " || true
 
 if [ ! -f "compile_commands.json" ]; then
     log_error "CMake configuration failed - compile_commands.json not generated"
@@ -322,44 +347,36 @@ echo "║ Smart Build Tests:  $SMART_TESTS                               "
 echo "║ Legacy Tests:       $LEGACY_TESTS                              "
 echo "╠════════════════════════════════════════════════════════════════╣"
 
-if [ "$SMART_TESTS" -eq "$LEGACY_TESTS" ]; then
-    echo "║ Result:             ✅ MATCH                                   "
+# Verdict is by SET equality, not count. Equal counts with different members is
+# a real selection bug, not a pass - comparing counts only would hide it.
+SMART_LIST=$(jq -r '.tests_to_run | sort | .[]' pr${PR_NUMBER}_smart_build.json)
+LEGACY_LIST=$(jq -r '.tests_to_run | sort | .[]' pr${PR_NUMBER}_legacy_tests.json)
+
+if [ "$SMART_LIST" = "$LEGACY_LIST" ]; then
+    echo "║ Result:             ✅ MATCH (identical test sets)            "
     echo "╚════════════════════════════════════════════════════════════════╝"
     echo ""
-    log_info "VALIDATION PASSED: Both methods selected $SMART_TESTS tests"
-    
-    # Detailed comparison
-    if [ "$SMART_TESTS" -gt 0 ]; then
-        log_info "Comparing test lists..."
-        SMART_LIST=$(jq -r '.tests_to_run | sort | .[]' pr${PR_NUMBER}_smart_build.json)
-        LEGACY_LIST=$(jq -r '.tests_to_run | sort | .[]' pr${PR_NUMBER}_legacy_tests.json)
-        
-        if [ "$SMART_LIST" = "$LEGACY_LIST" ]; then
-            log_info "Test lists are identical ✓"
-        else
-            log_warn "Test counts match but lists differ!"
-            diff <(echo "$SMART_LIST") <(echo "$LEGACY_LIST") || true
-        fi
-    fi
-    
+    log_info "VALIDATION PASSED: both methods selected the same $SMART_TESTS tests"
     EXIT_CODE=0
 else
     echo "║ Result:             ❌ MISMATCH                                "
     echo "╚════════════════════════════════════════════════════════════════╝"
     echo ""
-    log_error "VALIDATION FAILED: Smart build selected $SMART_TESTS tests, Legacy selected $LEGACY_TESTS tests"
-    
-    # Show differences
+    log_error "VALIDATION FAILED: smart build and legacy selected different test sets"
+    if [ "$SMART_TESTS" -eq "$LEGACY_TESTS" ]; then
+        log_warn "Counts are equal ($SMART_TESTS) but the SETS differ - a count-only check would have falsely PASSED this."
+    else
+        log_warn "Counts differ: smart=$SMART_TESTS legacy=$LEGACY_TESTS"
+    fi
+
     log_warn "Analyzing differences..."
-    
-    SMART_ONLY=$(comm -23 <(jq -r '.tests_to_run | sort | .[]' pr${PR_NUMBER}_smart_build.json) \
-                          <(jq -r '.tests_to_run | sort | .[]' pr${PR_NUMBER}_legacy_tests.json) | wc -l)
-    LEGACY_ONLY=$(comm -13 <(jq -r '.tests_to_run | sort | .[]' pr${PR_NUMBER}_smart_build.json) \
-                           <(jq -r '.tests_to_run | sort | .[]' pr${PR_NUMBER}_legacy_tests.json) | wc -l)
-    
+    SMART_ONLY=$(comm -23 <(printf '%s\n' "$SMART_LIST") <(printf '%s\n' "$LEGACY_LIST") | grep -c . || true)
+    LEGACY_ONLY=$(comm -13 <(printf '%s\n' "$SMART_LIST") <(printf '%s\n' "$LEGACY_LIST") | grep -c . || true)
     echo "Tests only in smart build: $SMART_ONLY"
     echo "Tests only in legacy: $LEGACY_ONLY"
-    
+    echo "--- unified diff (smart vs legacy) ---"
+    diff <(printf '%s\n' "$SMART_LIST") <(printf '%s\n' "$LEGACY_LIST") || true
+
     EXIT_CODE=1
 fi
 
