@@ -114,9 +114,13 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
     static constexpr index_t GetVectorSizeB() { return Policy::template GetVectorSizeB<Problem>(); }
     static constexpr index_t GetVectorSizeC() { return Policy::template GetVectorSizeC<Problem>(); }
     static constexpr index_t GetVectorSizeAQ()
-    { return Policy::template GetVectorSizeAQ<Problem>(); }
+    {
+        return Policy::template GetVectorSizeAQ<Problem>();
+    }
     static constexpr index_t GetVectorSizeBQ()
-    { return Policy::template GetVectorSizeBQ<Problem>(); }
+    {
+        return Policy::template GetVectorSizeBQ<Problem>();
+    }
 
     static constexpr index_t GetSmemPackA() { return Policy::template GetSmemPackA<Problem>(); }
     static constexpr index_t GetSmemPackB() { return Policy::template GetSmemPackB<Problem>(); }
