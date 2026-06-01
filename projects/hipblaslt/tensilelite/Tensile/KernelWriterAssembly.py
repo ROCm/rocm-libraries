@@ -4514,6 +4514,13 @@ class KernelWriterAssembly(KernelWriter):
       return module
     if self.states.groOffsetInMacroTile != 1:
       return module
+    # TDM uses tensor_load_to_lds descriptors, not SRD buffer loads
+    hasTDM = kernel.get("enableTDMA") and kernel.get("enableTDMB")
+    # Filter out A/B tensors when TDM is active (SrdA/SrdB not allocated)
+    if hasTDM:
+      tPs = [tP for tP in tPs if tP["tensorChar"] not in ("A", "B")]
+      if not tPs:
+        return module
 
     MX_PAD_K = 256
     depthU = int(kernel["DepthU"])
@@ -4621,6 +4628,8 @@ class KernelWriterAssembly(KernelWriter):
       if self.isConstUnitStride(strideF):
         return False
       tileInfo = self.states.a.tileInfo if tc == 'A' else self.states.b.tileInfo
+      if not tileInfo.localSubtilesRegister:
+        return False  # TDM path: no per-lane GR offset registers allocated
       regList = tileInfo.localSubtilesRegister[0]
       if len(regList) > 0 and not regList.is_sgpr:
         return False
