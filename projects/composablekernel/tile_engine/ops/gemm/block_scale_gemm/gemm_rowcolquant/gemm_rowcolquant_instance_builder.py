@@ -6,7 +6,7 @@ import os
 import argparse
 import importlib.util
 
-import concurrent
+import concurrent.futures
 
 
 def _import_gemm_kernel_builder():
@@ -109,7 +109,7 @@ class GemmRowColQuantKernelBuilder(GemmKernelBuilder):
                     (
                         tile_config,
                         trait_combo,
-                        self._build_kernel_name,
+                        self.kernel_name_prefix,
                         self.working_path,
                         self.gpu_targets,
                         self.datatype,
@@ -455,7 +455,7 @@ def _generate_single_kernel_individual(work_item):
         config_json,
     ) = work_item
 
-    # Create a temprorary builder instance for this worker
+    # Create a temporary builder instance for this worker
     builder = GemmRowColQuantKernelBuilder(
         kernel_name_prefix, working_path, gpu_target, datatype, layout, config_json
     )
@@ -471,7 +471,9 @@ def _generate_single_kernel_individual(work_item):
             simplified_name = simplified_name[len(kernel_name_prefix) + 1 :]
 
         # Write individual header file
-        header_file = working_path / f"{kernel_name_prefix}_{simplified_name}.hpp"
+        header_file = (
+            working_path / f"{kernel_name_prefix}_single_{simplified_name}.hpp"
+        )
         with open(header_file, "w") as f:
             f.write(instance_code)
 
