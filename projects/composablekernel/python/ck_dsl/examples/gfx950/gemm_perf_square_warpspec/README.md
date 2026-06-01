@@ -10,19 +10,32 @@ The headline result is a single, reproducible **ladder** at one fixed geometry
 
 | # | technique layered on | TF/s | % of matrix peak† | what it removes |
 |---|---|---:|---:|---|
-| A | plain tile pipeline (VGPR-staged double buffer) | 589 | 21% | — (starting point) |
-| B | + direct-to-LDS load | 647 | 23% | the global→VGPR→LDS round-trip |
-| C | + depth-2 prefetch, **single-barrier** mainloop | 1026 | 36% | the per-tile barrier bubble |
-| D | + 4-way LDS swizzle | 1448 | 51% | 52% → 25% bank conflict |
-| E | + **element-granular swizzle** | **1522** | **54%** | 25% → **0%** bank conflict |
+| A | plain tile pipeline (VGPR-staged double buffer) | 584 | 21% | — (starting point) |
+| B | + direct-to-LDS load | 645 | 23% | the global→VGPR→LDS round-trip |
+| C | + depth-2 prefetch, **single-barrier** mainloop | 1023 | 36% | the per-tile barrier bubble |
+| D | + 4-way LDS swizzle | 1397 | 50% | 52% → 25% bank conflict |
+| E | + **element-granular swizzle** | 1434 | 51% | 25% → **0%** bank conflict |
+| F | + **`dtl_cache_b=CACHE_ALL`** | **1549** | **55%** | B L2 eviction on reuse |
 
 †"Matrix peak" is the matrix-issue ceiling the `MfmaUtil` counter measures
 against — i.e. the rate at which the MFMA unit can retire `v_mfma_f32_16x16x32`
 back-to-back. % of peak is `MfmaUtil` read directly; on this part it implies a
-ceiling of ≈2.8 PF/s `fp16`. **2.6× from baseline to E, every rung bit-exact.**
+ceiling of ≈2.8 PF/s `fp16`. **2.7× from baseline to F, every rung bit-exact.**
+Absolute TF/s varies ±5–10% with GPU clock state; ratios measured same-session
+are stable. Run `scripts/ladder.py` to reproduce with the current clock.
 
 The rest of this document is how each rung was found and proven, the things that
 *looked* like levers but weren't, and exactly what stands between 54% and 100%.
+
+## Reproducing the results
+
+```
+HIP_VISIBLE_DEVICES=0 python scripts/ladder.py
+```
+
+Builds and measures all six rungs A–F in a single interleaved session (same GPU
+clock state throughout), prints TF/s and ratio vs rocBLAS for each, verifies
+correctness before benching. Takes ~5 minutes.
 
 ## Tools
 
@@ -33,6 +46,8 @@ The whole study is counter- and ISA-driven, never guessed:
 * **ISA inspection** — `KernelDef` → LLVM IR → `libamd_comgr` HSACO →
   `llvm-objdump` (via `ck_dsl.analysis.analyze_hsaco`); opcode histogram +
   resource counts so the emitted mainloop can be read instruction-for-instruction.
+  To diff against a hand-written C++/HIP reference, use
+  `dsl_docs/optimization/utilities/tools/utils/reference_isa_diff.py`.
 * **Isolated-subprocess sweeps** — every config benched in its own process, so a
   single bad geometry that GPU-faults can't poison the rest of a sweep.
 * **LDS round-trip dump** — write a tile through the real load path, read it back
