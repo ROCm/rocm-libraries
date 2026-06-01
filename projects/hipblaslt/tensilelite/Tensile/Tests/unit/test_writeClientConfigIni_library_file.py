@@ -10,7 +10,6 @@ to library/TensileLibrary.yaml (flat) and the client crashed in LLVM.
 """
 
 import inspect
-import pytest
 
 from Tensile.ClientWriter import writeClientConfigIni
 

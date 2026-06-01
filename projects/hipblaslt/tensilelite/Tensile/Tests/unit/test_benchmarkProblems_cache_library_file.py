@@ -9,9 +9,7 @@ the compiled .co files (CodeObjectFiles) AND the library descriptor
 gfx1201 SIGSEGV regression; persisting it eliminates the bug class.
 """
 
-import os
 import inspect
-import pytest
 
 import Tensile.BenchmarkProblems as bp
 
@@ -55,15 +53,8 @@ def test_readCacheIfValid_returns_both_CodeObjectFiles_and_LibraryFile(tmp_path)
 
     result = _readCacheIfValid(cachePath, StubBenchmarkStep, "ignored {path}")
     assert result is not None, "valid cache yaml should match"
-    # Accept either a dict or a (codeObjectFiles, libraryFile) tuple — the
-    # important contract is that LibraryFile flows back to the caller.
-    if isinstance(result, dict):
-        assert result["CodeObjectFiles"] == ["library/gfx1201/TensileLibrary_gfx1201.co"]
-        assert result["LibraryFile"] == "library/gfx1201/TensileLibrary.yaml"
-    else:
-        codeObjectFiles, libraryFile = result
-        assert codeObjectFiles == ["library/gfx1201/TensileLibrary_gfx1201.co"]
-        assert libraryFile == "library/gfx1201/TensileLibrary.yaml"
+    assert result["CodeObjectFiles"] == ["library/gfx1201/TensileLibrary_gfx1201.co"]
+    assert result["LibraryFile"] == "library/gfx1201/TensileLibrary.yaml"
 
 
 def test_cache_yaml_without_LibraryFile_is_invalid(tmp_path):

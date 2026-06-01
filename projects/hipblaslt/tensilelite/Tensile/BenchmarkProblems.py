@@ -34,7 +34,7 @@ import itertools
 from copy import deepcopy
 from joblib import Parallel, delayed
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List, Optional, TypedDict
 
 from Tensile import CUSTOM_KERNEL_PATH, SolutionLibrary, LibraryIO
 from Tensile.KernelWriter import DebugConfig
@@ -89,9 +89,13 @@ def _computeCacheKey(benchmarkStep):
     return hashlib.sha256(canonical.encode()).hexdigest()[:_CACHE_KEY_LEN]
 
 
-def _readCacheIfValid(cachePath, benchmarkStep, mismatchMessage):
-    """Return {'CodeObjectFiles': [...], 'LibraryFile': '...'} from cachePath iff
-    its params match benchmarkStep, else None.
+class CacheEntry(TypedDict):
+    CodeObjectFiles: List[str]
+    LibraryFile: str
+
+
+def _readCacheIfValid(cachePath, benchmarkStep, mismatchMessage) -> Optional[CacheEntry]:
+    """Return the cache entry from cachePath iff its params match benchmarkStep, else None.
 
     Returning None triggers a recompile, which is the right thing for any
     cache.yaml that doesn't contain everything --use-cache needs (including
@@ -114,9 +118,8 @@ def _readCacheIfValid(cachePath, benchmarkStep, mismatchMessage):
     return None
 
 
-def _loadCacheIfMatches(cacheDir, benchmarkStep):
-    """Return {'CodeObjectFiles': [...], 'LibraryFile': '...'} from the
-    hash-keyed cacheDir/cache.yaml iff matching, else None."""
+def _loadCacheIfMatches(cacheDir, benchmarkStep) -> Optional[CacheEntry]:
+    """Return the cache entry from the hash-keyed cacheDir/cache.yaml iff matching, else None."""
     cachePath = os.path.join(cacheDir, "cache.yaml")
     # Hash matched but content didn't: collision. Loser will be overwritten on the next write.
     return _readCacheIfValid(
@@ -129,11 +132,10 @@ def _loadCacheIfMatches(cacheDir, benchmarkStep):
 # period of ~3 months (i.e. on/after 2026-08-04). It exists only so users with
 # pre-multi-cache output dirs from develop don't pay one extra recompile after
 # upgrading. See PR #6583.
-def _loadLegacyCacheIfMatches(stepBaseDir, benchmarkStep):
-    """Return {'CodeObjectFiles': [...], 'LibraryFile': '...'} from the
-    pre-multi-cache stepBaseDir/cache.yaml iff matching. Legacy caches
-    written before LibraryFile was persisted are treated as invalid
-    (KeyError → None → recompile)."""
+def _loadLegacyCacheIfMatches(stepBaseDir, benchmarkStep) -> Optional[CacheEntry]:
+    """Return the cache entry from the pre-multi-cache stepBaseDir/cache.yaml
+    iff matching. Legacy caches written before LibraryFile was persisted are
+    treated as invalid (KeyError → None → recompile)."""
     cachePath = os.path.join(stepBaseDir, "cache.yaml")
     return _readCacheIfValid(
         cachePath, benchmarkStep,
@@ -614,15 +616,7 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
             conProblemType = ContractionsProblemType.FromOriginalState(ssProblemType)
             outFile = os.path.join(sourcePath, "ClientParameters.ini")
 
-            # cachedLibraryFile was persisted by the build phase and is the
-            # source of truth for where the .yaml/.dat lives. _readCacheIfValid
-            # guarantees a non-None value: if cache.yaml lacks the LibraryFile
-            # key, the dict-construction at line 109 raises KeyError which is
-            # caught one frame up, returning None and forcing a recompile.
             libraryFile = os.path.join(str(sourcePath), cachedLibraryFile)
-            # Also sanity-check that the file the cache claims exists actually
-            # does — gives a friendlier Python-side error than an LLVM open
-            # failure (or, before Task 6, a C++ SIGSEGV).
             if not os.path.isfile(libraryFile):
                 printExit(
                     f"cache.yaml refers to a library file that no longer "

@@ -192,7 +192,7 @@ def TensileClientConfig(userArgs):
     # here would emit `library-file=` and produce an unusable .ini.
     outputDir = os.path.dirname(args.OutputConfig) or "."
     libraryFile = os.path.join(outputDir, "library", "TensileLibrary.yaml")
-    ClientWriter.writeClientConfigIni(True, sizes, "", "", "", "", conProblemType, "", [], "", args.OutputConfig, 0, "", libraryFile=libraryFile)
+    ClientWriter.writeClientConfigIni(True, sizes, "", "", "", "", conProblemType, outputDir, [], "", args.OutputConfig, 0, "", libraryFile=libraryFile)
 
 
 def main():
