@@ -57,12 +57,12 @@ TEST_F(TestLayernormBpropPlan, ExecutePlan)
     LayernormBpropParams params(*tensorMap.at(attributes.dy_tensor_uid()),
                                 *tensorMap.at(attributes.x_tensor_uid()),
                                 *tensorMap.at(attributes.scale_tensor_uid()),
-                                *tensorMap.at(attributes.mean_tensor_uid().value()),
-                                *tensorMap.at(attributes.inv_variance_tensor_uid().value()),
                                 *tensorMap.at(attributes.dx_tensor_uid()),
                                 *tensorMap.at(attributes.dscale_tensor_uid()),
                                 *tensorMap.at(attributes.dbias_tensor_uid()),
                                 normalizedDimCount,
+                                tensorMap.at(attributes.mean_tensor_uid().value()),
+                                tensorMap.at(attributes.inv_variance_tensor_uid().value()),
                                 attributes.epsilon_tensor_uid().has_value()
                                     ? tensorMap.at(attributes.epsilon_tensor_uid().value())
                                     : nullptr);
@@ -77,10 +77,10 @@ TEST_F(TestLayernormBpropPlan, ExecutePlan)
         params.scaleTensor,
         directTensorBundle.getTensor(attributes.scale_tensor_uid()).rawHostData());
     auto shallowMeanTensor = createShallowTensor<float>(
-        params.meanTensor,
+        params.meanTensor.value(),
         directTensorBundle.getTensor(attributes.mean_tensor_uid().value()).rawHostData());
     auto shallowInvVarianceTensor = createShallowTensor<float>(
-        params.invVarianceTensor,
+        params.invVarianceTensor.value(),
         directTensorBundle.getTensor(attributes.inv_variance_tensor_uid().value()).rawHostData());
     auto shallowDxTensor = createShallowTensor<float>(
         params.dxTensor, directTensorBundle.getTensor(attributes.dx_tensor_uid()).rawHostData());
@@ -94,13 +94,99 @@ TEST_F(TestLayernormBpropPlan, ExecutePlan)
     CpuFpReferenceLayernorm::bprop(*shallowDyTensor,
                                    *shallowXTensor,
                                    *shallowScaleTensor,
-                                   *shallowMeanTensor,
-                                   *shallowInvVarianceTensor,
                                    *shallowDxTensor,
                                    *shallowDscaleTensor,
                                    *shallowDbiasTensor,
                                    hipdnn_data_sdk::utilities::LAYERNORM_DEFAULT_EPSILON,
+                                   shallowMeanTensor.get(),
+                                   shallowInvVarianceTensor.get(),
                                    normalizedDimCount);
+
+    LayernormBpropPlan<float, float, float, float, float> bpropPlan(std::move(params));
+    bpropPlan.execute(variantPack);
+
+    const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
+    EXPECT_TRUE(
+        cpuRefOutputValidation.allClose(directTensorBundle.getTensor(attributes.dx_tensor_uid()),
+                                        planTensorBundle.getTensor(attributes.dx_tensor_uid())));
+    EXPECT_TRUE(cpuRefOutputValidation.allClose(
+        directTensorBundle.getTensor(attributes.dscale_tensor_uid()),
+        planTensorBundle.getTensor(attributes.dscale_tensor_uid())));
+    EXPECT_TRUE(
+        cpuRefOutputValidation.allClose(directTensorBundle.getTensor(attributes.dbias_tensor_uid()),
+                                        planTensorBundle.getTensor(attributes.dbias_tensor_uid())));
+}
+
+TEST_F(TestLayernormBpropPlan, ExecutePlanWithoutOptionals)
+{
+    auto tolerance = layernorm::getTolerance<float>();
+    const std::vector<int64_t> dims = {6, 3, 32, 32};
+    const int64_t normalizedDimCount = 3;
+    const unsigned int seed = getGlobalTestSeed();
+    auto graph = buildLayernormBpropGraph(DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          DataType::FLOAT,
+                                          dims,
+                                          normalizedDimCount,
+                                          TensorLayout::NHWC,
+                                          false);
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
+    const INodeWrapper& node = graphWrapper.getNodeWrapper(0);
+    LayernormBpropTensorBundle planTensorBundle(node, graphWrapper.getTensorMap(), seed);
+    LayernormBpropTensorBundle directTensorBundle(node, graphWrapper.getTensorMap(), seed);
+
+    const auto& attributes
+        = node.attributesAs<hipdnn_flatbuffers_sdk::data_objects::LayernormBackwardAttributes>();
+
+    EXPECT_FALSE(attributes.mean_tensor_uid().has_value());
+    EXPECT_FALSE(attributes.inv_variance_tensor_uid().has_value());
+
+    const auto& tensorMap = graphWrapper.getTensorMap();
+    LayernormBpropParams params(*tensorMap.at(attributes.dy_tensor_uid()),
+                                *tensorMap.at(attributes.x_tensor_uid()),
+                                *tensorMap.at(attributes.scale_tensor_uid()),
+                                *tensorMap.at(attributes.dx_tensor_uid()),
+                                *tensorMap.at(attributes.dscale_tensor_uid()),
+                                *tensorMap.at(attributes.dbias_tensor_uid()),
+                                normalizedDimCount,
+                                nullptr,
+                                nullptr,
+                                attributes.epsilon_tensor_uid().has_value()
+                                    ? tensorMap.at(attributes.epsilon_tensor_uid().value())
+                                    : nullptr);
+
+    const std::unordered_map<int64_t, void*> variantPack = planTensorBundle.toHostVariantPack();
+
+    auto shallowDyTensor = createShallowTensor<float>(
+        params.dyTensor, directTensorBundle.getTensor(attributes.dy_tensor_uid()).rawHostData());
+    auto shallowXTensor = createShallowTensor<float>(
+        params.xTensor, directTensorBundle.getTensor(attributes.x_tensor_uid()).rawHostData());
+    auto shallowScaleTensor = createShallowTensor<float>(
+        params.scaleTensor,
+        directTensorBundle.getTensor(attributes.scale_tensor_uid()).rawHostData());
+    auto shallowDxTensor = createShallowTensor<float>(
+        params.dxTensor, directTensorBundle.getTensor(attributes.dx_tensor_uid()).rawHostData());
+    auto shallowDscaleTensor = createShallowTensor<float>(
+        params.dscaleTensor,
+        directTensorBundle.getTensor(attributes.dscale_tensor_uid()).rawHostData());
+    auto shallowDbiasTensor = createShallowTensor<float>(
+        params.dbiasTensor,
+        directTensorBundle.getTensor(attributes.dbias_tensor_uid()).rawHostData());
+
+    CpuFpReferenceLayernorm::bprop(
+        *shallowDyTensor,
+        *shallowXTensor,
+        *shallowScaleTensor,
+        *shallowDxTensor,
+        *shallowDscaleTensor,
+        *shallowDbiasTensor,
+        hipdnn_data_sdk::utilities::LAYERNORM_DEFAULT_EPSILON,
+        static_cast<const hipdnn_data_sdk::utilities::TensorBase<float>*>(nullptr),
+        static_cast<const hipdnn_data_sdk::utilities::TensorBase<float>*>(nullptr),
+        normalizedDimCount);
 
     LayernormBpropPlan<float, float, float, float, float> bpropPlan(std::move(params));
     bpropPlan.execute(variantPack);
@@ -149,12 +235,12 @@ TEST_F(TestLayernormBpropPlan, ExecutePlanOnePaddedNormalizedDimCount2)
     LayernormBpropParams params(*tensorMap.at(attributes.dy_tensor_uid()),
                                 *tensorMap.at(attributes.x_tensor_uid()),
                                 *tensorMap.at(attributes.scale_tensor_uid()),
-                                *tensorMap.at(attributes.mean_tensor_uid().value()),
-                                *tensorMap.at(attributes.inv_variance_tensor_uid().value()),
                                 *tensorMap.at(attributes.dx_tensor_uid()),
                                 *tensorMap.at(attributes.dscale_tensor_uid()),
                                 *tensorMap.at(attributes.dbias_tensor_uid()),
                                 normalizedDimCount,
+                                tensorMap.at(attributes.mean_tensor_uid().value()),
+                                tensorMap.at(attributes.inv_variance_tensor_uid().value()),
                                 attributes.epsilon_tensor_uid().has_value()
                                     ? tensorMap.at(attributes.epsilon_tensor_uid().value())
                                     : nullptr);
@@ -169,10 +255,10 @@ TEST_F(TestLayernormBpropPlan, ExecutePlanOnePaddedNormalizedDimCount2)
         params.scaleTensor,
         directTensorBundle.getTensor(attributes.scale_tensor_uid()).rawHostData());
     auto shallowMeanTensor = createShallowTensor<float>(
-        params.meanTensor,
+        params.meanTensor.value(),
         directTensorBundle.getTensor(attributes.mean_tensor_uid().value()).rawHostData());
     auto shallowInvVarianceTensor = createShallowTensor<float>(
-        params.invVarianceTensor,
+        params.invVarianceTensor.value(),
         directTensorBundle.getTensor(attributes.inv_variance_tensor_uid().value()).rawHostData());
     auto shallowDxTensor = createShallowTensor<float>(
         params.dxTensor, directTensorBundle.getTensor(attributes.dx_tensor_uid()).rawHostData());
@@ -186,12 +272,12 @@ TEST_F(TestLayernormBpropPlan, ExecutePlanOnePaddedNormalizedDimCount2)
     CpuFpReferenceLayernorm::bprop(*shallowDyTensor,
                                    *shallowXTensor,
                                    *shallowScaleTensor,
-                                   *shallowMeanTensor,
-                                   *shallowInvVarianceTensor,
                                    *shallowDxTensor,
                                    *shallowDscaleTensor,
                                    *shallowDbiasTensor,
                                    hipdnn_data_sdk::utilities::LAYERNORM_DEFAULT_EPSILON,
+                                   shallowMeanTensor.get(),
+                                   shallowInvVarianceTensor.get(),
                                    normalizedDimCount);
 
     LayernormBpropPlan<float, float, float, float, float> bpropPlan(std::move(params));
@@ -240,12 +326,12 @@ TEST_F(TestLayernormBpropPlan, ExecutePlanTrainingPhase)
     LayernormBpropParams params(*tensorMap.at(attributes.dy_tensor_uid()),
                                 *tensorMap.at(attributes.x_tensor_uid()),
                                 *tensorMap.at(attributes.scale_tensor_uid()),
-                                *tensorMap.at(attributes.mean_tensor_uid().value()),
-                                *tensorMap.at(attributes.inv_variance_tensor_uid().value()),
                                 *tensorMap.at(attributes.dx_tensor_uid()),
                                 *tensorMap.at(attributes.dscale_tensor_uid()),
                                 *tensorMap.at(attributes.dbias_tensor_uid()),
                                 normalizedDimCount,
+                                tensorMap.at(attributes.mean_tensor_uid().value()),
+                                tensorMap.at(attributes.inv_variance_tensor_uid().value()),
                                 attributes.epsilon_tensor_uid().has_value()
                                     ? tensorMap.at(attributes.epsilon_tensor_uid().value())
                                     : nullptr);
@@ -260,10 +346,10 @@ TEST_F(TestLayernormBpropPlan, ExecutePlanTrainingPhase)
         params.scaleTensor,
         directTensorBundle.getTensor(attributes.scale_tensor_uid()).rawHostData());
     auto shallowMeanTensor = createShallowTensor<float>(
-        params.meanTensor,
+        params.meanTensor.value(),
         directTensorBundle.getTensor(attributes.mean_tensor_uid().value()).rawHostData());
     auto shallowInvVarianceTensor = createShallowTensor<float>(
-        params.invVarianceTensor,
+        params.invVarianceTensor.value(),
         directTensorBundle.getTensor(attributes.inv_variance_tensor_uid().value()).rawHostData());
     auto shallowDxTensor = createShallowTensor<float>(
         params.dxTensor, directTensorBundle.getTensor(attributes.dx_tensor_uid()).rawHostData());
@@ -277,12 +363,12 @@ TEST_F(TestLayernormBpropPlan, ExecutePlanTrainingPhase)
     CpuFpReferenceLayernorm::bprop(*shallowDyTensor,
                                    *shallowXTensor,
                                    *shallowScaleTensor,
-                                   *shallowMeanTensor,
-                                   *shallowInvVarianceTensor,
                                    *shallowDxTensor,
                                    *shallowDscaleTensor,
                                    *shallowDbiasTensor,
                                    hipdnn_data_sdk::utilities::LAYERNORM_DEFAULT_EPSILON,
+                                   shallowMeanTensor.get(),
+                                   shallowInvVarianceTensor.get(),
                                    normalizedDimCount);
 
     LayernormBpropPlan<float, float, float, float, float> bpropPlan(std::move(params));

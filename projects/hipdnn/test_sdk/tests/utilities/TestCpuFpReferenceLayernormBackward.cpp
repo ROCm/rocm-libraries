@@ -43,6 +43,84 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropSanityValidation2D)
     Tensor<double> dy({2, 4});
     Tensor<double> x({2, 4});
     Tensor<double> scale({4});
+    Tensor<double> dx({2, 4});
+    Tensor<double> dscale({4});
+    Tensor<double> dbias({4});
+
+    dy.setHostValue(-1.0, 0, 0);
+    dy.setHostValue(2.0, 0, 1);
+    dy.setHostValue(-3.0, 0, 2);
+    dy.setHostValue(4.0, 0, 3);
+    dy.setHostValue(2.0, 1, 0);
+    dy.setHostValue(-4.0, 1, 1);
+    dy.setHostValue(6.0, 1, 2);
+    dy.setHostValue(-8.0, 1, 3);
+
+    x.setHostValue(1.0, 0, 0);
+    x.setHostValue(2.0, 0, 1);
+    x.setHostValue(3.0, 0, 2);
+    x.setHostValue(4.0, 0, 3);
+    x.setHostValue(2.0, 1, 0);
+    x.setHostValue(4.0, 1, 1);
+    x.setHostValue(6.0, 1, 2);
+    x.setHostValue(8.0, 1, 3);
+
+    scale.fillWithValue(2.0);
+
+    CpuFpReferenceLayernorm::bprop<double, double, double, double, double>(
+        dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, nullptr, nullptr, 1);
+
+    auto tolerance = layernorm::getTolerance<double>();
+
+    // Sample 0 outputs
+    EXPECT_NEAR(dx.getHostValue(0, 0), -2.1465994991753945e-05, tolerance);
+    EXPECT_NEAR(dx.getHostValue(0, 1), 3.577687297918808, tolerance);
+    EXPECT_NEAR(dx.getHostValue(0, 2), -7.15538175116928, tolerance);
+    EXPECT_NEAR(dx.getHostValue(0, 3), 3.5777159192454633, tolerance);
+
+    // Sample 1 outputs
+    EXPECT_NEAR(dx.getHostValue(1, 0), 5.366547046303793e-06, tolerance);
+    EXPECT_NEAR(dx.getHostValue(1, 1), -3.5777033974472507, tolerance);
+    EXPECT_NEAR(dx.getHostValue(1, 2), 7.155408583743517, tolerance);
+    EXPECT_NEAR(dx.getHostValue(1, 3), -3.577710552843312, tolerance);
+
+    // dscale
+    EXPECT_NEAR(dscale.getHostValue(0), -1.3416434697532726, tolerance);
+    EXPECT_NEAR(dscale.getHostValue(1), 0.8944289798355152, tolerance);
+    EXPECT_NEAR(dscale.getHostValue(2), 1.3416434697532726, tolerance);
+    EXPECT_NEAR(dscale.getHostValue(3), -5.366573879013091, tolerance);
+
+    // dbias
+    EXPECT_NEAR(dbias.getHostValue(0), 1.0, tolerance);
+    EXPECT_NEAR(dbias.getHostValue(1), -2.0, tolerance);
+    EXPECT_NEAR(dbias.getHostValue(2), 3.0, tolerance);
+    EXPECT_NEAR(dbias.getHostValue(3), -4.0, tolerance);
+}
+
+TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropSanityValidationWithOptional2D)
+{
+    // Input shape: [2, 4] — normalize over last dim (4 features per sample)
+    // dy = [[-1, 2, -3, 4],
+    //       [2, -4, 6, -8]]
+    // x  = [[1, 2, 3, 4],
+    //       [2, 4, 6, 8]]
+    //
+    // Sample 0: mean=2.5, var=1.25, rstd=1/sqrt(1.25+1e-5)=0.894423613312618
+    //   a      = 1.7888329159619083
+    //   b      = -3.5776586765921525
+    //   dx     = [-4.7998926705705713e-05, 3.577687297918808, -7.15538175116928, 3.5777159192454633]
+    //
+    // Sample 1: mean=5.0, var=5.0, rstd=1/sqrt(5.0+1e-5)=0.4472131482870333
+    //   a      = -0.8944245077250512
+    //   b      = 3.5776962420511893
+    //   dx     = [2.3999731674440028e-05, -3.5777033974472507, 7.155408583743517, -3.577710552843312]
+    //
+    // dscale = [-1.341640786446209, 0.8944271909641394, 1.341640786446209, -5.366563145784836]
+    // dbias  = [1, -2, 3, -4]
+
+    Tensor<double> dy({2, 4});
+    Tensor<double> x({2, 4});
+    Tensor<double> scale({4});
     Tensor<double> mean({2});
     Tensor<double> rstd({2});
     Tensor<double> dx({2, 4});
@@ -76,7 +154,7 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropSanityValidation2D)
     scale.fillWithValue(2.0);
 
     CpuFpReferenceLayernorm::bprop<double, double, double, double, double>(
-        dy, x, scale, mean, rstd, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, 1);
+        dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, &mean, &rstd, 1);
 
     auto tolerance = layernorm::getTolerance<double>();
 
@@ -126,6 +204,89 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropSanityValidation3D)
     Tensor<double> dy({1, 2, 3});
     Tensor<double> x({1, 2, 3});
     Tensor<double> scale({2, 3});
+    Tensor<double> dx({1, 2, 3});
+    Tensor<double> dscale({2, 3});
+    Tensor<double> dbias({2, 3});
+
+    dy.setHostValue(-1.0, 0, 0, 0);
+    dy.setHostValue(2.0, 0, 0, 1);
+    dy.setHostValue(-3.0, 0, 0, 2);
+    dy.setHostValue(4.0, 0, 1, 0);
+    dy.setHostValue(-5.0, 0, 1, 1);
+    dy.setHostValue(6.0, 0, 1, 2);
+
+    x.setHostValue(1.0, 0, 0, 0);
+    x.setHostValue(2.0, 0, 0, 1);
+    x.setHostValue(3.0, 0, 0, 2);
+    x.setHostValue(4.0, 0, 1, 0);
+    x.setHostValue(5.0, 0, 1, 1);
+    x.setHostValue(6.0, 0, 1, 2);
+
+    scale.fillWithValue(1.0);
+
+    CpuFpReferenceLayernorm::bprop<double, double, double, double, double>(
+        dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, nullptr, nullptr, 2);
+
+    Tensor<double> dxRef({1, 2, 3});
+    Tensor<double> dscaleRef({2, 3});
+    Tensor<double> dbiasRef({2, 3});
+
+    dxRef.setHostValue(-3.0113333097103734e-06, 0, 0, 0);
+    dxRef.setHostValue(1.4052918891730595, 0, 0, 1);
+    dxRef.setHostValue(-1.8737255302307223, 0, 0, 2);
+    dxRef.setHostValue(1.8737255302307223, 0, 1, 0);
+    dxRef.setHostValue(-3.7474480491281357, 0, 1, 1);
+    dxRef.setHostValue(2.342159171288385, 0, 1, 2);
+
+    dscaleRef.setHostValue(1.4638475999719223, 0, 0);
+    dscaleRef.setHostValue(-1.7566171199663065, 0, 1);
+    dscaleRef.setHostValue(0.8783085599831533, 0, 2);
+    dscaleRef.setHostValue(1.1710780799775378, 1, 0);
+    dscaleRef.setHostValue(-4.391542799915767, 1, 1);
+    dscaleRef.setHostValue(8.783085599831534, 1, 2);
+
+    dbiasRef.setHostValue(-1.0, 0, 0);
+    dbiasRef.setHostValue(2.0, 0, 1);
+    dbiasRef.setHostValue(-3.0, 0, 2);
+    dbiasRef.setHostValue(4.0, 1, 0);
+    dbiasRef.setHostValue(-5.0, 1, 1);
+    dbiasRef.setHostValue(6.0, 1, 2);
+
+    auto tolerance = layernorm::getTolerance<double>();
+
+    // Verify each output element: y = (x - mean) * rstd
+    for(int i = 0; i < 2; i++)
+    {
+        for(int j = 0; j < 3; j++)
+        {
+            EXPECT_NEAR(dx.getHostValue(0, i, j), dxRef.getHostValue(0, i, j), tolerance);
+            EXPECT_NEAR(dscale.getHostValue(i, j), dscaleRef.getHostValue(i, j), tolerance);
+            EXPECT_NEAR(dbias.getHostValue(i, j), dbiasRef.getHostValue(i, j), tolerance);
+        }
+    }
+}
+
+TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropSanityValidationWithOptional3D)
+{
+    // Input shape: [1, 2, 3] — normalize over last 2 dims (2x3 = 6 features)
+    // dy = [[[-1, 2, -3], [4, -5, 6]]]
+    // x  = [[[1, 2, 3], [4, 5, 6]]]
+    //
+    // mean = (1+2+3+4+5+6)/6 = 3.5
+    // var = ((1-3.5)^2 + (2-3.5)^2 + (3-3.5)^2 + (4-3.5)^2 + (5-3.5)^2 + (6-3.5)^2) / 6
+    //     = (6.25 + 2.25 + 0.25 + 0.25 + 2.25 + 6.25) / 6 = 17.5 / 6 = 2.9166666666666665
+    // rstd = 1/sqrt(2.9166666666666665 + 1e-5) = 0.5855390399887689
+    //
+    // With scale=1, bias=0 (identity affine):
+    //   a      = rstd³ * (sum(dy * scale * x) - sum(dy * scale) * mean) / 6
+    //   b      = rstd * sum(dy * scale) / 6 - a * mean
+    //   dx     = rstd * dy * scale - a * x - b
+    //   dscale = sum(dy * (x - mean) * rstd)
+    //   dbias  = sum(dy)
+
+    Tensor<double> dy({1, 2, 3});
+    Tensor<double> x({1, 2, 3});
+    Tensor<double> scale({2, 3});
     Tensor<double> mean({1});
     Tensor<double> rstd({1});
     Tensor<double> dx({1, 2, 3});
@@ -152,7 +313,7 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropSanityValidation3D)
     rstd.setHostValue(0.5855390399887689, 0);
 
     CpuFpReferenceLayernorm::bprop<double, double, double, double, double>(
-        dy, x, scale, mean, rstd, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, 2);
+        dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, &mean, &rstd, 2);
 
     Tensor<double> dxRef({1, 2, 3});
     Tensor<double> dscaleRef({2, 3});
@@ -226,7 +387,7 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropAllZeros)
     }
 
     CpuFpReferenceLayernorm::bprop<double, double, double, double, double>(
-        dy, x, scale, mean, rstd, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, 1);
+        dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, &mean, &rstd, 1);
 
     auto tolerance = layernorm::getTolerance<double>();
 
@@ -270,7 +431,7 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropAllOnes)
     rstd.fillWithValue(1.0 / std::sqrt(LAYERNORM_DEFAULT_EPSILON));
 
     CpuFpReferenceLayernorm::bprop<double, double, double, double, double>(
-        dy, x, scale, mean, rstd, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, 1);
+        dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, &mean, &rstd, 1);
 
     auto tolerance = layernorm::getTolerance<double>();
 
@@ -314,7 +475,7 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropConstantInput)
     rstd.fillWithValue(1.0 / std::sqrt(LAYERNORM_DEFAULT_EPSILON));
 
     CpuFpReferenceLayernorm::bprop<double, double, double, double, double>(
-        dy, x, scale, mean, rstd, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, 1);
+        dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, &mean, &rstd, 1);
 
     auto tolerance = layernorm::getTolerance<double>();
 
@@ -369,7 +530,7 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropSingleFeature)
     rstd.fillWithValue(1.0 / std::sqrt(LAYERNORM_DEFAULT_EPSILON));
 
     CpuFpReferenceLayernorm::bprop<double, double, double, double, double>(
-        dy, x, scale, mean, rstd, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, 1);
+        dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, &mean, &rstd, 1);
 
     auto tolerance = layernorm::getTolerance<double>();
 
@@ -424,7 +585,7 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropNegativeAndMixedValues)
     rstd.fillWithValue(1.0 / std::sqrt(5.0 + LAYERNORM_DEFAULT_EPSILON));
 
     CpuFpReferenceLayernorm::bprop<double, double, double, double, double>(
-        dy, x, scale, mean, rstd, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, 1);
+        dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, &mean, &rstd, 1);
 
     auto tolerance = layernorm::getTolerance<double>();
 
@@ -502,7 +663,7 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropLargeValueNumericalStability)
     rstd.fillWithValue(1.0 / std::sqrt(1.25 + LAYERNORM_DEFAULT_EPSILON));
 
     CpuFpReferenceLayernorm::bprop<double, double, double, double, double>(
-        dy, x, scale, mean, rstd, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, 1);
+        dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, &mean, &rstd, 1);
 
     auto tolerance = layernorm::getTolerance<double>();
 
@@ -568,7 +729,7 @@ TEST(TestCpuFpReferenceLayernormBackwardFp32, BpropTypicalTransformerShape)
     }
 
     CpuFpReferenceLayernorm::bprop(
-        dy, x, scale, mean, rstd, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, 1);
+        dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, &mean, &rstd, 1);
 
     auto tolerance = layernorm::getTolerance<float>();
 
@@ -660,7 +821,7 @@ TYPED_TEST(CpuFpReferenceLayernormBpropTyped, BpropRunsWithoutError)
 
     // Should not throw
     CpuFpReferenceLayernorm::bprop(
-        dy, x, scale, mean, rstd, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, 1);
+        dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, &mean, &rstd, 1);
 
     auto tolerance = layernorm::getTolerance<double>();
 
@@ -730,7 +891,7 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropNormalizeLastTwoDims)
     scale.fillWithValue(1.0);
 
     CpuFpReferenceLayernorm::bprop<double, double, double, double, double>(
-        dy, x, scale, mean, rstd, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, 2);
+        dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, &mean, &rstd, 2);
 
     auto tolerance = layernorm::getTolerance<double>();
 
@@ -818,7 +979,7 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropOneHotRows)
     rstd.fillWithValue(1.0 / std::sqrt(2.0 / 9.0 + LAYERNORM_DEFAULT_EPSILON));
 
     CpuFpReferenceLayernorm::bprop<double, double, double, double, double>(
-        dy, x, scale, mean, rstd, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, 1);
+        dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, &mean, &rstd, 1);
 
     auto tolerance = layernorm::getTolerance<double>();
 
@@ -872,7 +1033,7 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropPerFeatureScale)
     rstd.setHostValue(1.0 / std::sqrt(1.25 + LAYERNORM_DEFAULT_EPSILON), 0);
 
     CpuFpReferenceLayernorm::bprop<double, double, double, double, double>(
-        dy, x, scale, mean, rstd, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, 1);
+        dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, &mean, &rstd, 1);
 
     auto tolerance = layernorm::getTolerance<double>();
 
@@ -926,12 +1087,12 @@ TEST(TestCpuFpReferenceLayernormBackwardFp32, BpropThrowsOnInvalidNormalizedDimC
 
     // normalizedDimCount = 0 is invalid
     EXPECT_THROW(CpuFpReferenceLayernorm::bprop(
-                     dy, x, scale, mean, rstd, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, 0),
+                     dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, &mean, &rstd, 0),
                  std::runtime_error);
 
     // normalizedDimCount > ndim is invalid
     EXPECT_THROW(CpuFpReferenceLayernorm::bprop(
-                     dy, x, scale, mean, rstd, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, 3),
+                     dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, &mean, &rstd, 3),
                  std::runtime_error);
 }
 
@@ -951,7 +1112,7 @@ TEST(TestCpuFpReferenceLayernormBackwardFp32, BpropThrowsOnScalarTensor)
     Tensor<float> dbias({});
 
     EXPECT_THROW(CpuFpReferenceLayernorm::bprop(
-                     dy, x, scale, mean, rstd, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, 1),
+                     dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, &mean, &rstd, 1),
                  std::runtime_error);
 }
 
@@ -993,7 +1154,7 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, Bprop1D)
     rstd.fillWithValue(1.0 / std::sqrt(8.0 + LAYERNORM_DEFAULT_EPSILON));
 
     CpuFpReferenceLayernorm::bprop<double, double, double, double, double>(
-        dy, x, scale, mean, rstd, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, 1);
+        dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, &mean, &rstd, 1);
 
     auto tolerance = layernorm::getTolerance<double>();
 
@@ -1065,7 +1226,7 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, Bprop4DNormalizeLast1)
     rstd.fillWithValue(1.0 / std::sqrt(1.25 + LAYERNORM_DEFAULT_EPSILON));
 
     CpuFpReferenceLayernorm::bprop<double, double, double, double, double>(
-        dy, x, scale, mean, rstd, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, 1);
+        dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, &mean, &rstd, 1);
 
     auto tolerance = layernorm::getTolerance<double>();
 
@@ -1156,7 +1317,7 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, Bprop4DNormalizeLast3)
     rstd.fillWithValue(1.0 / std::sqrt(47.91666666667 + LAYERNORM_DEFAULT_EPSILON));
 
     CpuFpReferenceLayernorm::bprop<double, double, double, double, double>(
-        dy, x, scale, mean, rstd, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, 3);
+        dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, &mean, &rstd, 3);
 
     auto tolerance = layernorm::getTolerance<double>();
 
@@ -1256,7 +1417,7 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, BpropFullTensorNormalization)
     rstd.fillWithValue(1.0 / std::sqrt(2.916666667 + LAYERNORM_DEFAULT_EPSILON));
 
     CpuFpReferenceLayernorm::bprop<double, double, double, double, double>(
-        dy, x, scale, mean, rstd, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, 2);
+        dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, &mean, &rstd, 2);
 
     auto tolerance = layernorm::getTolerance<double>();
 
@@ -1351,7 +1512,7 @@ TEST(TestCpuFpReferenceLayernormBackwardFp64, Bprop5DNormalizeLast2)
     }
 
     CpuFpReferenceLayernorm::bprop<double, double, double, double, double>(
-        dy, x, scale, mean, rstd, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, 2);
+        dy, x, scale, dx, dscale, dbias, LAYERNORM_DEFAULT_EPSILON, &mean, &rstd, 2);
 
     auto tolerance = layernorm::getTolerance<double>();
 

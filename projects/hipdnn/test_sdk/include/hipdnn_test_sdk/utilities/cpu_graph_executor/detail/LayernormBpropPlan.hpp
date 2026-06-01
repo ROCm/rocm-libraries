@@ -26,22 +26,27 @@ struct LayernormBpropParams
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dyAttributes,
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& xAttributes,
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& scaleAttributes,
-        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& meanAttributes,
-        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& invVarianceAttributes,
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dxAttributes,
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dscaleAttributes,
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dbiasAttributes,
         const int64_t normalizedDimCount,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* meanAttributes = nullptr,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* invVarianceAttributes
+        = nullptr,
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* epsilonAttributes = nullptr)
         : dyTensor(unpackTensorAttributes(dyAttributes))
         , xTensor(unpackTensorAttributes(xAttributes))
         , scaleTensor(unpackTensorAttributes(scaleAttributes))
-        , meanTensor(unpackTensorAttributes(meanAttributes))
-        , invVarianceTensor(unpackTensorAttributes(invVarianceAttributes))
         , dxTensor(unpackTensorAttributes(dxAttributes))
         , dscaleTensor(unpackTensorAttributes(dscaleAttributes))
         , dbiasTensor(unpackTensorAttributes(dbiasAttributes))
         , normalizedDimCount(normalizedDimCount)
+        , meanTensor(meanAttributes != nullptr
+                         ? std::make_optional(unpackTensorAttributes(*meanAttributes))
+                         : std::nullopt)
+        , invVarianceTensor(invVarianceAttributes != nullptr
+                                ? std::make_optional(unpackTensorAttributes(*invVarianceAttributes))
+                                : std::nullopt)
         , epsilonTensor(epsilonAttributes != nullptr
                             ? std::make_optional(unpackTensorAttributes(*epsilonAttributes))
                             : std::nullopt)
@@ -51,12 +56,12 @@ struct LayernormBpropParams
     hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT dyTensor;
     hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT xTensor;
     hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT scaleTensor;
-    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT meanTensor;
-    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT invVarianceTensor;
     hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT dxTensor;
     hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT dscaleTensor;
     hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT dbiasTensor;
     int64_t normalizedDimCount;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> meanTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> invVarianceTensor;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> epsilonTensor;
 };
 
@@ -89,11 +94,20 @@ public:
         auto shallowScaleTensor = createShallowTensor<ScaleBiasDataType>(
             _params.scaleTensor, variantPack.at(_params.scaleTensor.uid));
 
-        auto shallowMeanTensor = createShallowTensor<MeanInvVarianceDataType>(
-            _params.meanTensor, variantPack.at(_params.meanTensor.uid));
+        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<MeanInvVarianceDataType>>
+            shallowMeanTensor;
+        std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<MeanInvVarianceDataType>>
+            shallowInvVarianceTensor;
 
-        auto shallowInvVarianceTensor = createShallowTensor<MeanInvVarianceDataType>(
-            _params.invVarianceTensor, variantPack.at(_params.invVarianceTensor.uid));
+        if(_params.meanTensor.has_value() && _params.invVarianceTensor.has_value())
+        {
+            shallowMeanTensor = createShallowTensor<MeanInvVarianceDataType>(
+                _params.meanTensor.value(), variantPack.at(_params.meanTensor.value().uid));
+
+            shallowInvVarianceTensor = createShallowTensor<MeanInvVarianceDataType>(
+                _params.invVarianceTensor.value(),
+                variantPack.at(_params.invVarianceTensor.value().uid));
+        }
 
         auto shallowDxTensor = createShallowTensor<OutputDataType>(
             _params.dxTensor, variantPack.at(_params.dxTensor.uid));
@@ -115,12 +129,12 @@ public:
         utilities::CpuFpReferenceLayernorm::bprop(*shallowDyTensor,
                                                   *shallowXTensor,
                                                   *shallowScaleTensor,
-                                                  *shallowMeanTensor,
-                                                  *shallowInvVarianceTensor,
                                                   *shallowDxTensor,
                                                   *shallowDscaleTensor,
                                                   *shallowDbiasTensor,
                                                   epsilon,
+                                                  shallowMeanTensor.get(),
+                                                  shallowInvVarianceTensor.get(),
                                                   _params.normalizedDimCount);
     }
 
@@ -163,16 +177,6 @@ public:
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->dy_tensor_uid());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->x_tensor_uid());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->scale_tensor_uid());
-        if(!nodeAttributes->mean_tensor_uid().has_value())
-        {
-            return false;
-        }
-        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->mean_tensor_uid().value());
-        if(!nodeAttributes->inv_variance_tensor_uid().has_value())
-        {
-            return false;
-        }
-        CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->inv_variance_tensor_uid().value());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->dx_tensor_uid());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->dscale_tensor_uid());
         CHECK_TENSOR_EXISTS(tensorMap, nodeAttributes->dbias_tensor_uid());
@@ -180,14 +184,26 @@ public:
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dy_tensor_uid(), DyDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->x_tensor_uid(), DyDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->scale_tensor_uid(), ScaleBiasDataTypeEnum);
-        CHECK_TENSOR_TYPE(
-            tensorMap, nodeAttributes->mean_tensor_uid().value(), MeanInvVarianceDataTypeEnum);
-        CHECK_TENSOR_TYPE(tensorMap,
-                          nodeAttributes->inv_variance_tensor_uid().value(),
-                          MeanInvVarianceDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dx_tensor_uid(), OutputDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dscale_tensor_uid(), OutputDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dbias_tensor_uid(), OutputDataTypeEnum);
+
+        const bool hasMean = nodeAttributes->mean_tensor_uid().has_value();
+        const bool hasInvVariance = nodeAttributes->inv_variance_tensor_uid().has_value();
+        if(hasMean != hasInvVariance)
+        {
+            return false;
+        }
+
+        if(hasMean)
+        {
+            CHECK_OPTIONAL_TENSOR_EXISTS(tensorMap, nodeAttributes->mean_tensor_uid());
+            CHECK_OPTIONAL_TENSOR_TYPE(
+                tensorMap, nodeAttributes->mean_tensor_uid(), MeanInvVarianceDataTypeEnum);
+            CHECK_OPTIONAL_TENSOR_EXISTS(tensorMap, nodeAttributes->inv_variance_tensor_uid());
+            CHECK_OPTIONAL_TENSOR_TYPE(
+                tensorMap, nodeAttributes->inv_variance_tensor_uid(), MeanInvVarianceDataTypeEnum);
+        }
 
         // Optional epsilon tensor
         if(nodeAttributes->epsilon_tensor_uid().has_value())
@@ -207,16 +223,19 @@ public:
         {
             throw std::runtime_error("Node attributes are not of type LayernormBackwardAttributes");
         }
-        if(!nodeAttributes->mean_tensor_uid().has_value())
-        {
-            throw std::runtime_error("Node attributes are missing mean tensor UID");
-        }
-        if(!nodeAttributes->inv_variance_tensor_uid().has_value())
-        {
-            throw std::runtime_error("Node attributes are missing inv variance tensor UID");
-        }
 
         const auto& tensorMap = graph.getTensorMap();
+
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* meanAttr = nullptr;
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* invVarAttr = nullptr;
+
+        const bool hasMean = nodeAttributes->mean_tensor_uid().has_value();
+        const bool hasInvVariance = nodeAttributes->inv_variance_tensor_uid().has_value();
+        if(hasMean && hasInvVariance)
+        {
+            meanAttr = tensorMap.at(nodeAttributes->mean_tensor_uid().value());
+            invVarAttr = tensorMap.at(nodeAttributes->inv_variance_tensor_uid().value());
+        }
 
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* epsilon = nullptr;
 
@@ -225,17 +244,16 @@ public:
             epsilon = tensorMap.at(nodeAttributes->epsilon_tensor_uid().value());
         }
 
-        LayernormBpropParams params(
-            *tensorMap.at(nodeAttributes->dy_tensor_uid()),
-            *tensorMap.at(nodeAttributes->x_tensor_uid()),
-            *tensorMap.at(nodeAttributes->scale_tensor_uid()),
-            *tensorMap.at(nodeAttributes->mean_tensor_uid().value()),
-            *tensorMap.at(nodeAttributes->inv_variance_tensor_uid().value()),
-            *tensorMap.at(nodeAttributes->dx_tensor_uid()),
-            *tensorMap.at(nodeAttributes->dscale_tensor_uid()),
-            *tensorMap.at(nodeAttributes->dbias_tensor_uid()),
-            nodeAttributes->normalized_dim_count(),
-            epsilon);
+        LayernormBpropParams params(*tensorMap.at(nodeAttributes->dy_tensor_uid()),
+                                    *tensorMap.at(nodeAttributes->x_tensor_uid()),
+                                    *tensorMap.at(nodeAttributes->scale_tensor_uid()),
+                                    *tensorMap.at(nodeAttributes->dx_tensor_uid()),
+                                    *tensorMap.at(nodeAttributes->dscale_tensor_uid()),
+                                    *tensorMap.at(nodeAttributes->dbias_tensor_uid()),
+                                    nodeAttributes->normalized_dim_count(),
+                                    meanAttr,
+                                    invVarAttr,
+                                    epsilon);
 
         return std::make_unique<LayernormBpropPlan<DyDataType,
                                                    ScaleBiasDataType,

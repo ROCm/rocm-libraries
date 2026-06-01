@@ -222,12 +222,12 @@ public:
     static void bprop(const hipdnn_data_sdk::utilities::TensorBase<DyDataType>& dy,
                       const hipdnn_data_sdk::utilities::TensorBase<DyDataType>& x,
                       const hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>& scale,
-                      const hipdnn_data_sdk::utilities::TensorBase<MeanRstdDataType>& mean,
-                      const hipdnn_data_sdk::utilities::TensorBase<MeanRstdDataType>& rstd,
                       hipdnn_data_sdk::utilities::TensorBase<DxDataType>& dx,
                       hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>& dscale,
                       hipdnn_data_sdk::utilities::TensorBase<ScaleBiasDataType>& dbias,
                       [[maybe_unused]] const double epsilon,
+                      const hipdnn_data_sdk::utilities::TensorBase<MeanRstdDataType>* mean,
+                      const hipdnn_data_sdk::utilities::TensorBase<MeanRstdDataType>* rstd,
                       const int64_t normalizedDimCount)
     {
         const auto& dims = dy.dims();
@@ -250,7 +250,13 @@ public:
             throw std::runtime_error("Scale, dscale and dbias tensors must have the same rank.");
         }
 
-        if(mean.dims().size() != rstd.dims().size())
+        if((mean == nullptr) != (rstd == nullptr))
+        {
+            throw std::runtime_error(
+                "Layernorm backward requires both mean and rstd to be provided, or neither.");
+        }
+
+        if(mean != nullptr && mean->dims().size() != rstd->dims().size())
         {
             throw std::runtime_error("Mean and rstd tensors must have the same rank.");
         }
@@ -265,42 +271,44 @@ public:
         }
 
         // Split dimensions into batch dims and normalized dims
+        auto normalizedDims = scale.dims();
+        const int64_t normalizedDimsSize = std::accumulate(
+            normalizedDims.begin(), normalizedDims.end(), int64_t{1}, std::multiplies<int64_t>{});
         std::vector<int64_t> batchDims;
-        int64_t batchDimsSize = 1;
-        std::vector<int64_t> normalizedDims;
-        int64_t normalizedDimsSize = 1;
-        if(scale.dims().size() == dims.size() && mean.dims().size() == dims.size()) // Pad with ones
+        if(mean != nullptr)
+        {
+            batchDims = mean->dims();
+        }
+        else if(dims.size() == normalizedDims.size())
         {
             batchDims = std::vector<int64_t>(dims.size(), 1);
-            normalizedDims = std::vector<int64_t>(dims.size(), 1);
             for(size_t i = 0; i < dims.size(); ++i)
             {
-                if(static_cast<int64_t>(i) < ndim - normalizedDimCount)
+                if(dims[i] != normalizedDims[i])
                 {
                     batchDims[i] = dims[i];
-                    batchDimsSize *= dims[i];
-                }
-                else
-                {
-                    normalizedDims[i] = dims[i];
-                    normalizedDimsSize *= dims[i];
                 }
             }
         }
-        else // Don't pad with ones
+        else
         {
-            batchDims
-                = std::vector<int64_t>(dims.begin(), dims.begin() + (ndim - normalizedDimCount));
-            for(auto d : batchDims)
+            batchDims = std::vector<int64_t>(static_cast<size_t>(ndim - normalizedDimCount), 1);
+            for(size_t i = 0; i < static_cast<size_t>(ndim - normalizedDimCount); ++i)
             {
-                batchDimsSize *= d;
+                batchDims[i] = dims[i];
             }
-            normalizedDims
-                = std::vector<int64_t>(dims.begin() + (ndim - normalizedDimCount), dims.end());
-            for(auto d : normalizedDims)
-            {
-                normalizedDimsSize *= d;
-            }
+        }
+        auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(x.strides());
+        auto batchStrides = hipdnn_data_sdk::utilities::generateStrides(batchDims, strideOrder);
+        const int64_t batchDimsSize = std::accumulate(
+            batchDims.begin(), batchDims.end(), int64_t{1}, std::multiplies<int64_t>{});
+
+        std::vector<ComputeDataType> tmpMean;
+        std::vector<ComputeDataType> tmpRstd;
+        if(mean == nullptr || rstd == nullptr)
+        {
+            tmpMean = std::vector<ComputeDataType>(static_cast<size_t>(batchDimsSize));
+            tmpRstd = std::vector<ComputeDataType>(static_cast<size_t>(batchDimsSize));
         }
 
         // If batchDims is empty (entire tensor is normalized), use a single scalar iteration
@@ -324,8 +332,44 @@ public:
                     sumDyScaleX += dyVal * scaleVal * xVal;
                     sumDyScale += dyVal * scaleVal;
                 });
-            auto meanVal = static_cast<ComputeDataType>(mean.getHostValue(batchIndices));
-            auto rstdVal = static_cast<ComputeDataType>(rstd.getHostValue(batchIndices));
+
+            ComputeDataType meanVal;
+            ComputeDataType rstdVal;
+            if(mean == nullptr || rstd == nullptr)
+            {
+                int64_t count = 0;
+                meanVal = static_cast<ComputeDataType>(0.0);
+                auto m2 = static_cast<ComputeDataType>(0.0);
+
+                hipdnn_data_sdk::utilities::iterateAlongDimensions(
+                    normalizedDims, [&](const std::vector<int64_t>& normIndices) {
+                        auto fullIndices
+                            = buildFullIndices(batchIndices, normIndices, ndim, normalizedDimCount);
+                        auto xVal = static_cast<ComputeDataType>(x.getHostValue(fullIndices));
+
+                        count++;
+                        auto delta = xVal - meanVal;
+                        meanVal += delta / static_cast<ComputeDataType>(count);
+                        auto delta2 = xVal - meanVal;
+                        m2 += delta * delta2;
+                    });
+
+                auto batchVariance = m2 / static_cast<ComputeDataType>(count);
+                rstdVal = static_cast<ComputeDataType>(1.0)
+                          / hipdnn_data_sdk::types::sqrt(batchVariance
+                                                         + static_cast<ComputeDataType>(epsilon));
+
+                auto idx = static_cast<size_t>(std::inner_product(
+                    batchIndices.begin(), batchIndices.end(), batchStrides.begin(), int64_t{0}));
+                tmpMean[idx] = meanVal;
+                tmpRstd[idx] = rstdVal;
+            }
+            else
+            {
+                meanVal = static_cast<ComputeDataType>(mean->getHostValue(batchIndices));
+                rstdVal = static_cast<ComputeDataType>(rstd->getHostValue(batchIndices));
+            }
+
             auto a = rstdVal * rstdVal * rstdVal * (sumDyScaleX - sumDyScale * meanVal)
                      / static_cast<ComputeDataType>(normalizedDimsSize);
             auto b = rstdVal * sumDyScale / static_cast<ComputeDataType>(normalizedDimsSize)
@@ -352,8 +396,22 @@ public:
                         = buildFullIndices(batchIndices, normIndices, ndim, normalizedDimCount);
                     auto dyVal = static_cast<ComputeDataType>(dy.getHostValue(fullIndices));
                     auto xVal = static_cast<ComputeDataType>(x.getHostValue(fullIndices));
-                    auto meanVal = static_cast<ComputeDataType>(mean.getHostValue(batchIndices));
-                    auto rstdVal = static_cast<ComputeDataType>(rstd.getHostValue(batchIndices));
+                    ComputeDataType meanVal;
+                    ComputeDataType rstdVal;
+                    if(mean == nullptr || rstd == nullptr)
+                    {
+                        auto idx = static_cast<size_t>(std::inner_product(batchIndices.begin(),
+                                                                          batchIndices.end(),
+                                                                          batchStrides.begin(),
+                                                                          int64_t{0}));
+                        meanVal = tmpMean[idx];
+                        rstdVal = tmpRstd[idx];
+                    }
+                    else
+                    {
+                        meanVal = static_cast<ComputeDataType>(mean->getHostValue(batchIndices));
+                        rstdVal = static_cast<ComputeDataType>(rstd->getHostValue(batchIndices));
+                    }
                     dscaleVal += dyVal * (xVal - meanVal) * rstdVal;
                     dbiasVal += dyVal;
                 });
