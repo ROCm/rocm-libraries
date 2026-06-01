@@ -95,7 +95,7 @@ struct WarpGemmScale16BlockLoopKernel
                                             false,
                                             WGAttrNumAccessEnum::Default,
                                             WGAttrNumAccessEnum::Default,
-                                            scale16_tag>;
+                                            true>;
 
         constexpr auto a_dstr     = typename WarpGemm::AWarpDstr{};
         constexpr auto b_dstr     = typename WarpGemm::BWarpDstr{};
@@ -106,50 +106,50 @@ struct WarpGemmScale16BlockLoopKernel
         // Stage every A/B sub-tile and its per-block K-scales into registers before
         // the compute loop, mirroring how the MX GEMM pipelines pre-stage scales
         // (each int64 holds one 16-row block's 8 e8m0 K-scales).
-        statically_indexed_array<decltype(load_tile(make_tile_window(
-                                     a_view,
-                                     make_tuple(number<MPerWarp>{}, number<K>{}),
-                                     make_multi_index(0, 0),
-                                     a_dstr))),
+        statically_indexed_array<decltype(load_tile(
+                                     make_tile_window(a_view,
+                                                      make_tuple(number<MPerWarp>{}, number<K>{}),
+                                                      make_multi_index(0, 0),
+                                                      a_dstr))),
                                  MIter>
             a_tiles;
         statically_indexed_array<int64_t, MIter> scale_a;
         static_for<0, MIter, 1>{}([&](auto mIter) {
-            auto a_win  = make_tile_window(a_view,
+            auto a_win     = make_tile_window(a_view,
                                           make_tuple(number<MPerWarp>{}, number<K>{}),
                                           make_multi_index(mIter.value * MPerWarp, 0),
                                           a_dstr);
-            auto sa_win = make_tile_window(sa_view,
+            auto sa_win    = make_tile_window(sa_view,
                                            make_tuple(number<MPerWarp>{}, number<NumScales>{}),
                                            make_multi_index(mIter.value * MPerWarp, 0),
                                            scale_dstr);
-            a_tiles(mIter)   = load_tile(a_win);
-            auto sa_tile     = load_tile(sa_win);
-            scale_a(mIter)   = bit_cast<int64_t>(
+            a_tiles(mIter) = load_tile(a_win);
+            auto sa_tile   = load_tile(sa_win);
+            scale_a(mIter) = bit_cast<int64_t>(
                 sa_tile.get_thread_buffer()
                     .template get_as<ext_vector_t<e8m0_t, NumScales>>()[number<0>{}]);
         });
 
-        statically_indexed_array<decltype(load_tile(make_tile_window(
-                                     b_view,
-                                     make_tuple(number<NPerWarp>{}, number<K>{}),
-                                     make_multi_index(0, 0),
-                                     b_dstr))),
+        statically_indexed_array<decltype(load_tile(
+                                     make_tile_window(b_view,
+                                                      make_tuple(number<NPerWarp>{}, number<K>{}),
+                                                      make_multi_index(0, 0),
+                                                      b_dstr))),
                                  NIter>
             b_tiles;
         statically_indexed_array<int64_t, NIter> scale_b;
         static_for<0, NIter, 1>{}([&](auto nIter) {
-            auto b_win  = make_tile_window(b_view,
+            auto b_win     = make_tile_window(b_view,
                                           make_tuple(number<NPerWarp>{}, number<K>{}),
                                           make_multi_index(nIter.value * NPerWarp, 0),
                                           b_dstr);
-            auto sb_win = make_tile_window(sb_view,
+            auto sb_win    = make_tile_window(sb_view,
                                            make_tuple(number<NPerWarp>{}, number<NumScales>{}),
                                            make_multi_index(nIter.value * NPerWarp, 0),
                                            scale_dstr);
-            b_tiles(nIter)   = load_tile(b_win);
-            auto sb_tile     = load_tile(sb_win);
-            scale_b(nIter)   = bit_cast<int64_t>(
+            b_tiles(nIter) = load_tile(b_win);
+            auto sb_tile   = load_tile(sb_win);
+            scale_b(nIter) = bit_cast<int64_t>(
                 sb_tile.get_thread_buffer()
                     .template get_as<ext_vector_t<e8m0_t, NumScales>>()[number<0>{}]);
         });

@@ -81,7 +81,7 @@ struct WarpGemmScale16Kernel
                                                        false,
                                                        WGAttrNumAccessEnum::Default,
                                                        WGAttrNumAccessEnum::Default,
-                                                       scale16_tag>;
+                                                       true>;
         constexpr auto a_dstr     = typename WarpGemm::AWarpDstr{};
         constexpr auto b_dstr     = typename WarpGemm::BWarpDstr{};
         constexpr auto c_dstr     = typename WarpGemm::CWarpDstr{};

@@ -6,6 +6,9 @@
 #include "warp_gemm_attribute_wmma_impl_base_traits.hpp"
 #include "warp_gemm_params.hpp"
 namespace ck_tile {
+
+struct WmmaScale16Tag;
+
 // int8 specialization - GFX11
 template <>
 struct WmmaTraits<gfx11_t, int8_t, int8_t, int32_t, 16, 16, 16>
@@ -584,11 +587,11 @@ struct WmmaTraits<gfx125_t, bf8_t, fp8_t, float, 16, 16, 128>
 // scale16 specializations: fp8xfp8, bf8xbf8, fp8xbf8, bf8xfp8
 // Override kAK1PerLane/kBK1PerLane to 16 for scale16 register layout -> sequence<4,2,16>
 template <>
-struct WmmaTraits<gfx125_t, fp8_t, fp8_t, float, 16, 16, 128, scale16_tag>
+struct WmmaTraits<gfx125_t, fp8_t, fp8_t, float, 16, 16, 128, WmmaScale16Tag>
     : WmmaTraitsBase<gfx12_t, fp8_t, fp8_t, float, 128>
 {
     using ArchType         = gfx125_t;
-    using MXTypeEnableType = scale16_tag;
+    using MXTypeEnableType = WmmaScale16Tag;
 
     static constexpr index_t kAK1PerLane = 16;
     static constexpr index_t kAK0PerLane = kK / (kAK1PerLane * kABKLane);
@@ -642,11 +645,11 @@ struct WmmaTraits<gfx125_t, fp8_t, fp8_t, float, 16, 16, 128, scale16_tag>
 };
 
 template <>
-struct WmmaTraits<gfx125_t, bf8_t, bf8_t, float, 16, 16, 128, scale16_tag>
+struct WmmaTraits<gfx125_t, bf8_t, bf8_t, float, 16, 16, 128, WmmaScale16Tag>
     : WmmaTraitsBase<gfx12_t, bf8_t, bf8_t, float, 128>
 {
     using ArchType         = gfx125_t;
-    using MXTypeEnableType = scale16_tag;
+    using MXTypeEnableType = WmmaScale16Tag;
 
     static constexpr index_t kAK1PerLane = 16;
     static constexpr index_t kAK0PerLane = kK / (kAK1PerLane * kABKLane);
@@ -700,11 +703,11 @@ struct WmmaTraits<gfx125_t, bf8_t, bf8_t, float, 16, 16, 128, scale16_tag>
 };
 
 template <>
-struct WmmaTraits<gfx125_t, fp8_t, bf8_t, float, 16, 16, 128, scale16_tag>
+struct WmmaTraits<gfx125_t, fp8_t, bf8_t, float, 16, 16, 128, WmmaScale16Tag>
     : WmmaTraitsBase<gfx12_t, fp8_t, bf8_t, float, 128>
 {
     using ArchType         = gfx125_t;
-    using MXTypeEnableType = scale16_tag;
+    using MXTypeEnableType = WmmaScale16Tag;
 
     static constexpr index_t kAK1PerLane = 16;
     static constexpr index_t kAK0PerLane = kK / (kAK1PerLane * kABKLane);
@@ -758,11 +761,11 @@ struct WmmaTraits<gfx125_t, fp8_t, bf8_t, float, 16, 16, 128, scale16_tag>
 };
 
 template <>
-struct WmmaTraits<gfx125_t, bf8_t, fp8_t, float, 16, 16, 128, scale16_tag>
+struct WmmaTraits<gfx125_t, bf8_t, fp8_t, float, 16, 16, 128, WmmaScale16Tag>
     : WmmaTraitsBase<gfx12_t, bf8_t, fp8_t, float, 128>
 {
     using ArchType         = gfx125_t;
-    using MXTypeEnableType = scale16_tag;
+    using MXTypeEnableType = WmmaScale16Tag;
 
     static constexpr index_t kAK1PerLane = 16;
     static constexpr index_t kAK0PerLane = kK / (kAK1PerLane * kABKLane);
@@ -838,17 +841,18 @@ struct WmmaTraits<gfx125_t, pk_fp4_t, pk_fp4_t, float, 32, 16, 128>
     }
 };
 
-template <>
-struct WmmaTraits<gfx125_t, pk_fp4_t, pk_fp4_t, float, 32, 32, 128>
+template <bool IsScale16>
+struct WmmaTraitsGfx125PkFp4F32_32x32x128
     : WmmaTraitsBase<gfx12_t, pk_fp4_t, pk_fp4_t, float, 128, false, 32, 32>
 {
-    using ArchType = gfx125_t;
+    using ArchType  = gfx125_t;
+    using ScaleType = std::conditional_t<IsScale16, int64_t, int32_t>;
 
     template <typename... Params>
     CK_TILE_DEVICE static CVecType wmma_intrinsic(const AVecType& a_vec,
-                                                  const int32_t& a_scale,
+                                                  const ScaleType& a_scale,
                                                   const BVecType& b_vec,
-                                                  const int32_t& b_scale,
+                                                  const ScaleType& b_scale,
                                                   const CVecType& c_vec)
     {
 #ifdef __gfx125__
@@ -879,19 +883,38 @@ struct WmmaTraits<gfx125_t, pk_fp4_t, pk_fp4_t, float, 32, 32, 128>
             const auto& b_slice = b_buffer.template get_as<BSliceType>()[n];
             auto& c_slice       = c_result.template get_as<CSliceType>()[n];
 
-            c_slice = __builtin_amdgcn_wmma_scale_f32_32x16x128_f4(
-                bit_cast<int32x16_t>(a_slice),
-                bit_cast<int32x8_t>(b_slice),
-                0,
-                c_slice,
-                1,          // OPSEL[0] - fixed to 1 for F4
-                P::scale_a, // OPSEL_HI[0] - scale data type for A
-                a_scale,
-                n.value,    // OPSEL[1] - select B scale (iterates over N blocks)
-                P::scale_b, // OPSEL_HI[1] - scale data type for B
-                b_scale,
-                0,  // NEG
-                0); // NEG_HI
+            if constexpr(IsScale16)
+            {
+                c_slice = __builtin_amdgcn_wmma_scale16_f32_32x16x128_f4(
+                    bit_cast<int32x16_t>(a_slice),
+                    bit_cast<int32x8_t>(b_slice),
+                    0,
+                    c_slice,
+                    1,          // OPSEL[0] - fixed to 1 for F4
+                    P::scale_a, // OPSEL_HI[0] - scale data type for A
+                    a_scale,
+                    n.value,    // OPSEL[1] - select B scale (iterates over N blocks)
+                    P::scale_b, // OPSEL_HI[1] - scale data type for B
+                    b_scale,
+                    0,  // NEG
+                    0); // NEG_HI
+            }
+            else
+            {
+                c_slice = __builtin_amdgcn_wmma_scale_f32_32x16x128_f4(
+                    bit_cast<int32x16_t>(a_slice),
+                    bit_cast<int32x8_t>(b_slice),
+                    0,
+                    c_slice,
+                    1,          // OPSEL[0] - fixed to 1 for F4
+                    P::scale_a, // OPSEL_HI[0] - scale data type for A
+                    a_scale,
+                    n.value,    // OPSEL[1] - select B scale (iterates over N blocks)
+                    P::scale_b, // OPSEL_HI[1] - scale data type for B
+                    b_scale,
+                    0,  // NEG
+                    0); // NEG_HI
+            }
         });
 
         return bit_cast<CVecType>(c_result);
@@ -905,6 +928,22 @@ struct WmmaTraits<gfx125_t, pk_fp4_t, pk_fp4_t, float, 32, 32, 128>
 #endif
     }
 
+    // The shared scale16 operator() (warp_gemm_attribute_wmma_impl.hpp) forwards external
+    // OPSEL selectors for single-block ops (e.g. f8f6f4 16x16x128). fp4 32x32x128 derives
+    // OPSEL internally per kCNBlock iteration (OPSEL[0]=1, OPSEL[1]=block index), so the
+    // external selectors do not apply -- accept and ignore them, forwarding to the 5-arg form.
+    template <typename... Params, index_t OpselA = 0, index_t OpselB = 0>
+    CK_TILE_DEVICE static CVecType wmma_intrinsic(const AVecType& a_vec,
+                                                  const ScaleType& a_scale,
+                                                  const BVecType& b_vec,
+                                                  const ScaleType& b_scale,
+                                                  const CVecType& c_vec,
+                                                  number<OpselA>,
+                                                  number<OpselB>)
+    {
+        return wmma_intrinsic<Params...>(a_vec, a_scale, b_vec, b_scale, c_vec);
+    }
+
     template <typename... Params>
     CK_TILE_DEVICE static CVecType
     wmma_intrinsic(const AVecType& a_vec, const BVecType& b_vec, const CVecType& c_vec)
@@ -912,7 +951,8 @@ struct WmmaTraits<gfx125_t, pk_fp4_t, pk_fp4_t, float, 32, 32, 128>
 #ifdef __gfx125__
         // Pass default scale values 1.0f
         Packed4Scale_E8M0 pkscale(1.0f, 1.0f, 1.0f, 1.0f);
-        return wmma_intrinsic(a_vec, pkscale, b_vec, pkscale, c_vec);
+        const auto default_scale = static_cast<ScaleType>(pkscale);
+        return wmma_intrinsic(a_vec, default_scale, b_vec, default_scale, c_vec);
 #else
         ck_tile::ignore = a_vec;
         ck_tile::ignore = b_vec;
@@ -922,6 +962,17 @@ struct WmmaTraits<gfx125_t, pk_fp4_t, pk_fp4_t, float, 32, 32, 128>
     }
 };
 
+template <>
+struct WmmaTraits<gfx125_t, pk_fp4_t, pk_fp4_t, float, 32, 32, 128>
+    : WmmaTraitsGfx125PkFp4F32_32x32x128<false>
+{
+};
+
+template <>
+struct WmmaTraits<gfx125_t, pk_fp4_t, pk_fp4_t, float, 32, 32, 128, WmmaScale16Tag>
+    : WmmaTraitsGfx125PkFp4F32_32x32x128<true>
+{
+};
 
 // Unified WmmaTraits for f8f6f4 combinations
 template <typename AType, typename BType>

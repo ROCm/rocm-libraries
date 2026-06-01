@@ -20,8 +20,7 @@ def _run_cli(*args: str) -> subprocess.CompletedProcess:
         cmd = [
             sys.executable,
             "-c",
-            "from dnn_benchmarking.tools.convert_miopen_shapes import main; "
-            "import sys; sys.exit(main())",
+            "from dnn_convert_shapes import main; import sys; sys.exit(main())",
             *args,
         ]
     return subprocess.run(cmd, capture_output=True, text=True)
