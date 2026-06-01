@@ -6,7 +6,8 @@
 import numpy as np
 import pytest
 
-from . import helpers
+import hipdnn_frontend as hipdnn
+
 from .helpers import build_all_plans, build_conv_dgrad_graph, execute_graph
 
 
@@ -29,7 +30,7 @@ class TestConvDgrad:
         result = graph.validate()
         assert result.is_good(), f"Validation failed: {result.get_message()}"
 
-        handle = helpers.create_handle()
+        handle = hipdnn.create_handle()
         result = graph.build_operation_graph(handle)
         assert result.is_good(), f"Build operation graph failed: {result.get_message()}"
 

@@ -8,12 +8,7 @@ import numpy as np
 import hipdnn_frontend as hipdnn
 
 
-def create_handle():
-    """Create a hipDNN handle for GPU operations."""
-    return hipdnn.create_handle()
-
-
-def create_graph():
+def create_float_graph():
     """Create a hipDNN Graph configured with FLOAT data types."""
     graph = hipdnn.Graph()
     graph.set_io_data_type(hipdnn.DataType.FLOAT)
@@ -26,7 +21,7 @@ def build_conv_fprop_graph(
     n=16, c=16, h=16, w=16, k=16, r=3, s=3, stride=1, pad=1, dil=1
 ):
     """Build a conv_fprop graph returning (graph, x, weight, y)."""
-    graph = create_graph()
+    graph = create_float_graph()
     graph.set_name("conv_fprop_test")
 
     x = hipdnn.Tensor.create([n, c, h, w], hipdnn.DataType.FLOAT)
@@ -55,7 +50,7 @@ def build_conv_dgrad_graph(
     out_h = (h + 2 * pad - dil * (r - 1) - 1) // stride + 1
     out_w = (w + 2 * pad - dil * (s - 1) - 1) // stride + 1
 
-    graph = create_graph()
+    graph = create_float_graph()
     graph.set_name("conv_dgrad_test")
 
     dy = hipdnn.Tensor.create([n, k, out_h, out_w], hipdnn.DataType.FLOAT)
@@ -85,7 +80,7 @@ def build_conv_wgrad_graph(
     out_h = (h + 2 * pad - dil * (r - 1) - 1) // stride + 1
     out_w = (w + 2 * pad - dil * (s - 1) - 1) // stride + 1
 
-    graph = create_graph()
+    graph = create_float_graph()
     graph.set_name("conv_wgrad_test")
 
     dy = hipdnn.Tensor.create([n, k, out_h, out_w], hipdnn.DataType.FLOAT)
@@ -114,7 +109,7 @@ def build_matmul_graph(m=4, k=3, n=5):
     Returns:
         Tuple of (graph, a, b, c).
     """
-    graph = create_graph()
+    graph = create_float_graph()
     graph.set_name("matmul_test")
 
     a = hipdnn.Tensor.create([m, k], hipdnn.DataType.FLOAT)
@@ -139,7 +134,7 @@ def build_all_plans(graph, handle=None):
     Creates a handle if one is not supplied and returns it for reuse.
     """
     if handle is None:
-        handle = create_handle()
+        handle = hipdnn.create_handle()
     assert graph.validate().is_good()
     assert graph.build_operation_graph(handle).is_good()
     assert graph.create_execution_plans().is_good()
@@ -161,7 +156,7 @@ def execute_graph(graph, tensor_uid_to_data, handle=None):
         Dict mapping tensor UIDs to result numpy arrays (copied from device).
     """
     if handle is None:
-        handle = create_handle()
+        handle = hipdnn.create_handle()
     buffers = {}
     variant_pack = {}
     for uid, data in tensor_uid_to_data.items():

@@ -5,7 +5,9 @@
 
 import pytest
 
-from .helpers import build_matmul_graph, create_handle
+import hipdnn_frontend as hipdnn
+
+from .helpers import build_matmul_graph
 
 
 @pytest.mark.gpu
@@ -26,6 +28,6 @@ class TestMatmul:
         result = graph.validate()
         assert result.is_good(), f"Validation failed: {result.get_message()}"
 
-        handle = create_handle()
+        handle = hipdnn.create_handle()
         result = graph.build_operation_graph(handle)
         assert result.is_good(), f"Build operation graph failed: {result.get_message()}"
