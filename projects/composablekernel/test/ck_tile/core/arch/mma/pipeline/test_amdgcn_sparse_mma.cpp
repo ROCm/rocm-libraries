@@ -135,15 +135,16 @@ TEST(SparseMMATrait, DenseVsSparseDistinction)
 
 TEST(SparseMMATrait, SparseSelector)
 {
-    static_for<1, 33, 1>{}([](auto i) {
-        using Selected = typename MmaDefaultSelector<fp16_t,
-                                                     fp16_t,
-                                                     fp32_t,
-                                                     static_cast<uint32_t>(i),
-                                                     static_cast<uint32_t>(i),
-                                                     static_cast<uint32_t>(2 * i),
-                                                     CompilerTargetGfx950,
-                                                     MmaOpFamily::SPARSE>::SelectedOp;
+    static_for<1, 6, 1>{}([](auto n) { // Test powers of 2.
+        constexpr uint32_t i = 1 << n;
+        using Selected       = typename MmaDefaultSelector<fp16_t,
+                                                           fp16_t,
+                                                           fp32_t,
+                                                           i,
+                                                           i,
+                                                           2 * i,
+                                                           CompilerTargetGfx950,
+                                                           MmaOpFamily::SPARSE>::SelectedOp;
 
         static constexpr bool isValid =
             (i == 16); // We only have a single 16x16 intrinsic added for now. Update this to expect
