@@ -312,6 +312,7 @@ inline constexpr bool is_transpose_output_compatible_v =
 template <typename DataType>
 struct DefaultTranspose
 {
+#if defined(__gfx950__)
     template <index_t LaneGroupSize, index_t NumBitType>
     struct Quad
     {
@@ -367,7 +368,98 @@ struct DefaultTranspose
 
     template <index_t LaneGroupSize>
     using QuadOutputEncoding = typename Quad<LaneGroupSize, NumBitsDataType>::OutputEncoding;
+#else // now this branch just for gfx1250
+    template <index_t LaneGroupSize, index_t NumBitType>
+    struct Quad
+    {
+        static_assert(LaneGroupSize == 16 || LaneGroupSize == 32 || LaneGroupSize == 64,
+                      "LaneGroupSize must be 16, 32, or 64");
 
+        // gfx1250 load transpose instructions use 128 bits for 16-bit types, 64 bits for 8-bit
+        static constexpr index_t InstructionBits = (NumBitType >= 16) ? 128 : 64;
+        // Subtile major dimension is fixed
+        static constexpr index_t SubtileMajorDimension = 16;
+        // Number of subtile major
+        static constexpr index_t NumSubtilesMajor = LaneGroupSize / 16;
+        // number of elements loaded by each lane with single instruction, but also number
+        // of consecutive lanes in a subtile. Subtile is squared (NLanes x NElementsPerLane)
+        static constexpr index_t SubtileMinorDimension = InstructionBits / NumBitType;
+        // Number of subtiles minor inside each subtile major
+        static constexpr index_t NumSubtilesMinor = 16 / SubtileMinorDimension;
+
+        static constexpr auto make_input_encoding()
+        {
+            if constexpr(NumBitType >= 16)
+            {
+                return tile_distribution_encoding<
+                    sequence<>,
+                    tuple<sequence<SubtileMinorDimension>,
+                          sequence<NumSubtilesMajor, NumSubtilesMinor, SubtileMinorDimension>>,
+                    tuple<sequence<2, 2, 1>>,
+                    tuple<sequence<0, 1, 0>>,
+                    sequence<2>,
+                    sequence<2>>{};
+            }
+            else if constexpr(NumBitType == 8)
+            {
+                return tile_distribution_encoding<
+                    sequence<>,
+                    tuple<sequence<NumSubtilesMinor, SubtileMinorDimension / NumSubtilesMinor>,
+                          sequence<NumSubtilesMajor, NumSubtilesMinor, SubtileMinorDimension>>,
+                    tuple<sequence<2, 1, 2, 1>>,
+                    tuple<sequence<0, 0, 1, 1>>,
+                    sequence<2>,
+                    sequence<2>>{};
+            }
+            else
+            {
+                return tile_distribution_encoding<
+                    sequence<>,
+                    tuple<sequence<2, NumSubtilesMajor, 2, 8>, sequence<16>>,
+                    tuple<sequence<1, 1, 1>>,
+                    tuple<sequence<2, 0, 3>>,
+                    sequence<1, 2>,
+                    sequence<1, 0>>{};
+            }
+        }
+        using InputEncoding = decltype(make_input_encoding());
+
+        static constexpr auto make_output_encoding()
+        {
+            if constexpr(NumBitType >= 8)
+            {
+                return tile_distribution_encoding<
+                    sequence<>,
+                    tuple<sequence<LaneGroupSize>, sequence<SubtileMinorDimension>>,
+                    tuple<sequence<1>>,
+                    tuple<sequence<0>>,
+                    sequence<2>,
+                    sequence<0>>{};
+            }
+            else
+            {
+                return tile_distribution_encoding<
+                    sequence<>,
+                    tuple<sequence<16>, sequence<2, NumSubtilesMajor, 16>>,
+                    tuple<sequence<2, 1>>,
+                    tuple<sequence<0, 0>>,
+                    sequence<2, 2>,
+                    sequence<1, 2>>{};
+            }
+        }
+        using OutputEncoding = decltype(make_output_encoding());
+    };
+
+    static constexpr index_t PackedSize      = numeric_traits<remove_cvref_t<DataType>>::PackedSize;
+    static constexpr index_t NumBitsDataType = (sizeof(DataType) * 8) / PackedSize;
+
+    // Select based on data size
+    template <index_t LaneGroupSize>
+    using QuadInputEncoding = typename Quad<LaneGroupSize, NumBitsDataType>::InputEncoding;
+
+    template <index_t LaneGroupSize>
+    using QuadOutputEncoding = typename Quad<LaneGroupSize, NumBitsDataType>::OutputEncoding;
+#endif
     // Always swap last two dimensions
     static constexpr auto transpose_dims = sequence<1, 0>{};
 
@@ -394,7 +486,7 @@ struct DefaultTranspose
         static constexpr bool suffix_valid_dim1 =
             util::is_sequence_suffix_v<decltype(quad_hs[I1]), decltype(input_hs[I1])>;
 
-        // 3. PS→RHS mapping constraints
+        // 3. PS->RHS mapping constraints
         static constexpr auto input_ps_major = InDstrEncode::ps_to_rhss_major_;
         static constexpr auto input_ps_minor = InDstrEncode::ps_to_rhss_minor_;
 
@@ -419,14 +511,12 @@ struct DefaultTranspose
             util::is_sequence_suffix_v<decltype(shifted_quad_ps_minor0),
                                        decltype(input_ps_minor_last)>;
 
-        // 4. YS→RHS mapping constraints
+        // 4. YS->RHS mapping constraints
         static constexpr auto input_ys_major = InDstrEncode::ys_to_rhs_major_;
         static constexpr auto input_ys_minor = InDstrEncode::ys_to_rhs_minor_;
         static constexpr auto quad_ys_major  = QuadEncoding::ys_to_rhs_major_;
         static constexpr auto quad_ys_minor  = QuadEncoding::ys_to_rhs_minor_;
 
-        static_assert(quad_ys_major.size() == 1 && quad_ys_minor.size() == 1,
-                      "YS->RHS mapping must be single dimension");
         static_assert(quad_ys_major.back() == 2 && quad_ys_minor.back() == quad_hs[I1].size() - 1,
                       "YS->RHS mapping must be the last dimension");
         static constexpr bool ys_mapping_valid =
@@ -625,7 +715,7 @@ struct TransposeTileDistributionTraits
         },
         number<InDstrEncode::NDimX>{});
 
-    // for PS→RHS mapping(both major and minor), we need to modify the last element (which is for
+    // for PS->RHS mapping(both major and minor), we need to modify the last element (which is for
     // thread distr) of the major sequence
     static constexpr auto dst_ps_to_rhss_major = generate_tuple(
         // for major because of dst_out_hs_lengthss is reversed, this index also need to be reversed
@@ -676,14 +766,25 @@ struct TransposeTileDistributionTraits
         },
         number<input_ps_to_rhss_minor.size()>{});
 
-    static constexpr auto outer_input_ys_to_rhs_major = input_ys_to_rhs_major.pop_back();
+    static constexpr auto outer_input_ys_to_rhs_major = input_ys_to_rhs_major.extract(
+        typename arithmetic_sequence_gen<0,
+                                         input_ys_to_rhs_major.size() -
+                                             QuadInputEncoding::ys_to_rhs_major_.size(),
+                                         1>::type{});
 
     // for major because of dst_out_hs_lengthss is reversed, this index also need to be reversed
     static constexpr auto dst_ys_to_rhs_major =
-        outer_input_ys_to_rhs_major.transform(swap_one_and_two).push_back(number<2>{});
+        outer_input_ys_to_rhs_major.transform(swap_one_and_two)
+            .push_back(QuadOutputEncoding::ys_to_rhs_major_);
 
-    static constexpr auto dst_ys_to_rhs_minor = input_ys_to_rhs_minor.pop_back().push_back(
-        number<(quad_output_ys_minor_offset + quad_output_ys_to_rhs_minor)[I0]>{});
+    static constexpr auto outer_input_ys_to_rhs_minor = input_ys_to_rhs_minor.extract(
+        typename arithmetic_sequence_gen<0,
+                                         input_ys_to_rhs_minor.size() -
+                                             QuadInputEncoding::ys_to_rhs_minor_.size(),
+                                         1>::type{});
+
+    static constexpr auto dst_ys_to_rhs_minor = outer_input_ys_to_rhs_minor.push_back(
+        quad_output_ys_minor_offset + QuadOutputEncoding::ys_to_rhs_minor_);
 
     using TransposedDstrEncode =
         tile_distribution_encoding<typename InDstrEncode::RsLengths,
@@ -806,6 +907,7 @@ CK_TILE_DEVICE void load_tile_transpose_with_offset(
     constexpr auto y_out_element_space_size = y_out_desc.get_element_space_size();
     static_assert(y_in_element_space_size == y_out_element_space_size,
                   "the element space size is not the same!");
+
     constexpr index_t vecLoadSize = y_in_lengths[NDimYIn - 1];
     constexpr index_t num_of_access =
         reduce_on_sequence(y_in_lengths, multiplies<>{}, number<1>{}) / vecLoadSize;

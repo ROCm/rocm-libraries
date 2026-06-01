@@ -455,12 +455,29 @@ inline void post_gpu_time(bool         use_gpu_timer,
 template <typename Tout>
 Tout cast_from_type(void* in, hipDataType type, size_t index)
 {
+    constexpr bool tout_is_real = !is_std_complex_v<Tout>;
     switch(type)
     {
     case HIP_R_32F:
         return static_cast<Tout>((static_cast<float*>(in))[index]);
     case HIP_R_64F:
         return static_cast<Tout>((static_cast<double*>(in))[index]);
+    case HIP_C_32F:
+    {
+        auto val = (static_cast<std::complex<float>*>(in))[index];
+        if constexpr(tout_is_real)
+            return static_cast<Tout>(val.real()); // Extract real part
+        else
+            return static_cast<Tout>(val); // Cast complex-to-complex
+    }
+    case HIP_C_64F:
+    {
+        auto val = (static_cast<std::complex<double>*>(in))[index];
+        if constexpr(tout_is_real)
+            return static_cast<Tout>(val.real()); // Extract real part
+        else
+            return static_cast<Tout>(val); // Cast complex-to-complex
+    }
     case HIP_R_16F:
         return static_cast<Tout>((static_cast<hipblasLtHalf*>(in))[index]);
     case HIP_R_16BF:
@@ -575,7 +592,7 @@ void epilogue_func(int64_t     m,
     auto in_Tact = static_cast<Tact>(in[pos]) + bias_data;                                    \
     if(e && !gradient)                                                                        \
     {                                                                                         \
-        saturate_cast_to_type(e, in_Tact* scaleE, aux_type, pos);                             \
+        saturate_cast_to_type(e, in_Tact * scaleE, aux_type, pos);                            \
     }                                                                                         \
     Tact in_Tact_act = 0;                                                                     \
     if(gradient)                                                                              \
@@ -721,12 +738,12 @@ void epilogue_func(int64_t     m,
                    bool        gradient,
                    hipDataType To)
 {
-#define CALCULATE_EPILOGUE_BASIC                               \
-    auto pos  = j * ld + i;                                    \
-    Tc   temp = static_cast<Ti>(*(in + pos)) + bias_data;      \
-    if(e)                                                      \
-    {                                                          \
-        saturate_cast_to_type(e, temp* scaleE, aux_type, pos); \
+#define CALCULATE_EPILOGUE_BASIC                                \
+    auto pos  = j * ld + i;                                     \
+    Tc   temp = static_cast<Ti>(*(in + pos)) + bias_data;       \
+    if(e)                                                       \
+    {                                                           \
+        saturate_cast_to_type(e, temp * scaleE, aux_type, pos); \
     }
 
     for(int i = 0; i < m; i++)
@@ -1351,7 +1368,7 @@ hipDataType derive_unset_bias_type(const Arguments& arg)
 {
     // TODO: confirm if HIP_R_64F, HIP_R_32I are neccessary for biastype
     static const std::set<hipDataType> supported_bias_types
-        = {HIP_R_32F, HIP_R_16F, HIP_R_16BF, HIP_R_64F, HIP_R_32I};
+        = {HIP_R_32F, HIP_R_16F, HIP_R_16BF, HIP_R_64F, HIP_R_32I, HIP_C_32F, HIP_C_64F};
 
     hipDataType real_bias_type = arg.bias_type;
 
@@ -1753,7 +1770,8 @@ void testing_matmul(const Arguments& arg)
                 arg_revised, tiA, tiB, to, tc, tciA, tciB, HIP_R_32F, real_aux_type);
         }
     }
-    else if(to == HIP_R_32F || to == HIP_R_32I || to == HIP_R_8I || to == HIP_R_64F)
+    else if(to == HIP_R_32F || to == HIP_R_32I || to == HIP_R_8I || to == HIP_R_64F
+            || to == HIP_C_32F || to == HIP_C_64F)
     {
         //set Tbias to To
         return testing_matmul_with_bias(
@@ -1788,7 +1806,8 @@ void testing_matmul_with_bias(const Arguments& arg,
     hipblasOperation_t transA(char_to_hipblas_operation(arg.transA));
     hipblasOperation_t transB(char_to_hipblas_operation(arg.transB));
 
-    hipDataType Talpha = Tc;
+    // If input type is complex then alpha is set to complex datatype else compute type 
+    hipDataType Talpha = (TiA == HIP_C_32F || TiA == HIP_C_64F) ?  TiA : Tc;
 
     bool    do_grouped_gemm = arg.grouped_gemm > 0;
     int32_t gemm_count      = std::max(1, arg.grouped_gemm);
@@ -1799,7 +1818,8 @@ void testing_matmul_with_bias(const Arguments& arg,
 
     std::vector<int64_t> M(gemm_count), N(gemm_count), K(gemm_count), lda(gemm_count),
         ldb(gemm_count), ldc(gemm_count), ldd(gemm_count), lde(gemm_count);
-    std::vector<computeTypeInterface> h_alpha(gemm_count), h_beta(gemm_count);
+    std::vector<computeTypeInterface> h_alpha(gemm_count, computeTypeInterface{}),
+        h_beta(gemm_count, computeTypeInterface{});
     std::vector<int64_t> A_row(gemm_count), A_col(gemm_count), B_row(gemm_count), B_col(gemm_count);
     std::vector<int64_t> stride_a(gemm_count), stride_da(gemm_count), stride_b(gemm_count),
         stride_db(gemm_count), stride_c(gemm_count), stride_d(gemm_count), stride_e(gemm_count);
@@ -1844,8 +1864,8 @@ void testing_matmul_with_bias(const Arguments& arg,
         M[i] = arg.M[i];
         N[i] = arg.N[i];
         K[i] = arg.K[i];
-        set_alpha_type(h_alpha[i], arg, Tc);
-        set_beta_type(h_beta[i], arg, Tc);
+        set_alpha_type(h_alpha[i], arg, Tc, TiA);
+        set_beta_type(h_beta[i], arg, Tc, TiA);
         lda[i] = arg.lda[i];
         ldb[i] = arg.ldb[i];
         ldc[i] = arg.ldc[i];
@@ -2051,6 +2071,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                     size_bias[i] = M[i];
                 else if(arg.bias_source == hipblaslt_bias_source::b)
                     size_bias[i] = N[i];
+
+                if(arg.bias_stride > 0)
+                {
+                    size_bias[i] = arg.bias_stride * num_batches[i];
+                }
             }
             else
             {
@@ -2207,7 +2232,6 @@ void testing_matmul_with_bias(const Arguments& arg,
             hipblasLtMatmulDescSetAttribute(
                 matmul[0][i], HIPBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_B_EXT, &TciB, sizeof(void*)),
             HIPBLAS_STATUS_SUCCESS);
-
         CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
             matmul[0][i], HIPBLASLT_MATMUL_DESC_TRANSA, &transA, sizeof(int32_t)));
         CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
@@ -2959,27 +2983,29 @@ void testing_matmul_with_bias(const Arguments& arg,
 
                 if(arg.dump_matrix)
                 {
-                    hipblasltDispatchValuesToFile(transA,
-                                                  TiA,
-                                                  M[i],
-                                                  K[i],
-                                                  lda[i],
-                                                  hA[i].buf(),
-                                                  "batch_" + std::to_string(i) + "_A_input.txt");
-                    hipblasltDispatchValuesToFile(transB,
-                                                  TiB,
-                                                  K[i],
-                                                  N[i],
-                                                  ldb[i],
-                                                  hB[i].buf(),
-                                                  "batch_" + std::to_string(i) + "_B_input.txt");
-                    hipblasltDispatchValuesToFile(HIPBLAS_OP_N,
-                                                  To,
-                                                  M[i],
-                                                  N[i],
-                                                  ldc[i],
-                                                  hC[i].buf(),
-                                                  "batch_" + std::to_string(i) + "_C_input.txt");
+                    for(int batchId = 0; batchId < num_batches[i]; batchId++){
+                        hipblasltDispatchValuesToFile(transA,
+                                                    TiA,
+                                                    M[i],
+                                                    K[i],
+                                                    lda[i],
+                                                    hA[i].buf(),
+                                                    "batch_" + std::to_string(batchId) + "_" + std::to_string(i) + "_A_input.txt");
+                        hipblasltDispatchValuesToFile(transB,
+                                                    TiB,
+                                                    K[i],
+                                                    N[i],
+                                                    ldb[i],
+                                                    hB[i].buf(),
+                                                    "batch_" + std::to_string(batchId) + "_" + std::to_string(i) + "_B_input.txt");
+                        hipblasltDispatchValuesToFile(HIPBLAS_OP_N,
+                                                    To,
+                                                    M[i],
+                                                    N[i],
+                                                    ldc[i],
+                                                    hC[i].buf(),
+                                                    "batch_" + std::to_string(batchId) + "_" + std::to_string(i) + "_C_input.txt");
+                    }
                 }
             }
 
@@ -3006,7 +3032,11 @@ void testing_matmul_with_bias(const Arguments& arg,
 
             if(arg.bias_vector)
             {
-                hipblaslt_init(hBias[i].buf(), size_bias[i], 1, size_bias[i], Tbias);
+                // Filling up unique bias values for each batch in Strided Batch
+                if(arg.bias_stride > 0)
+                    hipblaslt_init(hBias[i].buf(), arg.bias_stride, 1, arg.bias_stride, Tbias, arg.bias_stride, num_batches[i]);
+                else
+                    hipblaslt_init(hBias[i].buf(), size_bias[i], 1, size_bias[i], Tbias);
             }
 
             if(arg.scaleA == hipblaslt_scaling_format::Scalar
@@ -3080,7 +3110,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                 set_computeInterface(
                     h_alpha[i],
                     1.0,
-                    Tc); // use dScaleAlphaVec instead, original alpha = 1.0 for verify
+                    Tc, 
+                    TiA); // use dScaleAlphaVec instead, original alpha = 1.0 for verify
             }
             else
                 alpha_in[i] = &(h_alpha[i]);
@@ -3188,6 +3219,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             if(arg.bias_vector)
             {
                 const void* bias_addr;
+                int32_t bias_stride = arg.bias_stride;
                 EXPECT_HIPBLAS_STATUS(
                     hipblasLtMatmulDescSetAttribute(matmul[0][i],
                                                     HIPBLASLT_MATMUL_DESC_BIAS_DATA_TYPE,
@@ -3202,6 +3234,14 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                     &bias_addr,
                                                     sizeof(void*)),
                     HIPBLAS_STATUS_SUCCESS);
+                
+                if(bias_stride > 0)
+                    EXPECT_HIPBLAS_STATUS(
+                        hipblasLtMatmulDescSetAttribute(matmul[0][i],
+                                                        HIPBLASLT_MATMUL_DESC_BIAS_BATCH_STRIDE,
+                                                        &bias_stride,
+                                                        sizeof(bias_stride)),
+                        HIPBLAS_STATUS_SUCCESS);
             }
 
             if(arg.scaleA != hipblaslt_scaling_format::none)
@@ -4559,6 +4599,7 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             else
             {
+
                 std::vector<hipblasLtMatmulHeuristicResult_t> tmpAlgo(requestAlgoCount);
                 EXPECT_HIPBLAS_STATUS((hipblasLtMatmulAlgoGetHeuristic(handle,
                                                                        matmul[0][0],
@@ -4699,16 +4740,16 @@ void testing_matmul_with_bias(const Arguments& arg,
         {
             auto                 alpha    = h_alpha[gemmIdx];
             auto                 betaTemp = h_beta[gemmIdx];
-            computeTypeInterface tempSC;
+            computeTypeInterface tempSC{};
             if(arg.scaleC)
             {
                 // betaTemp *= hScaleC[gemmIdx][0];
-                set_computeInterface(tempSC, hScaleC[gemmIdx].buf(), Tc);
-                mul_computeInterface(betaTemp, tempSC, Tc);
+                set_computeInterface(tempSC, hScaleC[gemmIdx].buf(), Tc, TiA);
+                mul_computeInterface(betaTemp, tempSC, Tc, TiA);
             }
 
-            computeTypeInterface scale;
-            set_computeInterface(scale, 1, Talpha);
+            computeTypeInterface scale{};
+            set_computeInterface(scale, 1, Talpha, TiA);
             void* scaleAVec   = (arg.scaleA == hipblaslt_scaling_format::Scalar
                                || arg.scaleA == hipblaslt_scaling_format::Vector)
                                     ? hScaleA[gemmIdx].buf()
@@ -4776,93 +4817,102 @@ void testing_matmul_with_bias(const Arguments& arg,
                               : ((*hEInst)[gemmIdx].as<char>() + pos * realDataTypeSize(Taux));
                     auto  applyBias = arg.gradient ? false : arg.bias_vector;
                     void* hBias_buf = ((hBias).size() <= gemmIdx) ? nullptr : hBias[gemmIdx].buf();
-
+                    if(applyBias && arg.bias_stride > 0)
+                    {
+                        hBias_buf = ((char*)hBias_buf) + (arg.bias_stride * batchIdx * realDataTypeSize(Tbias));
+                    }
                     switch(arg.activation_type)
                     {
-                    case hipblaslt_activation_type::gelu:
-                        if(arg.gradient)
+                        case hipblaslt_activation_type::gelu:
+                            if(arg.gradient)
+                                epilogue_func(epilogue_param,
+                                            hBias_buf,
+                                            Tbias,
+                                            arg.activation_arg1,
+                                            arg.activation_arg2,
+                                            ::_dgelu,
+                                            true,
+                                            To,
+                                            Talpha);
+                            else
+                            {
+                                epilogue_func(epilogue_param,
+                                            hBias_buf,
+                                            Tbias,
+                                            arg.activation_arg1,
+                                            arg.activation_arg2,
+                                            ::_gelu,
+                                            false,
+                                            To,
+                                            Talpha);
+                            }
+                            break;
+                        case hipblaslt_activation_type::relu:
+                            if(arg.gradient)
+                            {
+                                epilogue_func(epilogue_param,
+                                            hBias_buf,
+                                            Tbias,
+                                            arg.activation_arg1,
+                                            arg.activation_arg2,
+                                            ::_drelu,
+                                            true,
+                                            To,
+                                            Talpha);
+                            }
+                            else
+                            {
+                                epilogue_func(epilogue_param,
+                                            hBias_buf,
+                                            Tbias,
+                                            arg.activation_arg1,
+                                            arg.activation_arg2,
+                                            ::_relu,
+                                            false,
+                                            To,
+                                            Talpha);
+                            }
+                            break;
+                        case hipblaslt_activation_type::swish:
                             epilogue_func(epilogue_param,
-                                          hBias_buf,
-                                          Tbias,
-                                          arg.activation_arg1,
-                                          arg.activation_arg2,
-                                          ::_dgelu,
-                                          true,
-                                          To,
-                                          Talpha);
-                        else
-                        {
+                                        hBias_buf,
+                                        Tbias,
+                                        arg.activation_arg1,
+                                        arg.activation_arg2,
+                                        ::_silu,
+                                        arg.gradient,
+                                        To,
+                                        Talpha);
+                            break;
+                        case hipblaslt_activation_type::clamp:
                             epilogue_func(epilogue_param,
-                                          hBias_buf,
-                                          Tbias,
-                                          arg.activation_arg1,
-                                          arg.activation_arg2,
-                                          ::_gelu,
-                                          false,
-                                          To,
-                                          Talpha);
-                        }
-                        break;
-                    case hipblaslt_activation_type::relu:
-                        if(arg.gradient)
-                        {
-                            epilogue_func(epilogue_param,
-                                          hBias_buf,
-                                          Tbias,
-                                          arg.activation_arg1,
-                                          arg.activation_arg2,
-                                          ::_drelu,
-                                          true,
-                                          To,
-                                          Talpha);
-                        }
-                        else
-                        {
-                            epilogue_func(epilogue_param,
-                                          hBias_buf,
-                                          Tbias,
-                                          arg.activation_arg1,
-                                          arg.activation_arg2,
-                                          ::_relu,
-                                          false,
-                                          To,
-                                          Talpha);
-                        }
-                        break;
-                    case hipblaslt_activation_type::swish:
-                        epilogue_func(epilogue_param,
-                                      hBias_buf,
-                                      Tbias,
-                                      arg.activation_arg1,
-                                      arg.activation_arg2,
-                                      ::_silu,
-                                      arg.gradient,
-                                      To,
-                                      Talpha);
-                        break;
-                    case hipblaslt_activation_type::clamp:
-                        epilogue_func(epilogue_param,
-                                      hBias_buf,
-                                      Tbias,
-                                      arg.activation_arg1,
-                                      arg.activation_arg2,
-                                      ::_clamp,
-                                      arg.gradient,
-                                      To,
-                                      Talpha);
-                        break;
-                    default:
-                        epilogue_func(epilogue_param, hBias_buf, Tbias, false, To, Talpha);
-                        break;
+                                        hBias_buf,
+                                        Tbias,
+                                        arg.activation_arg1,
+                                        arg.activation_arg2,
+                                        ::_clamp,
+                                        arg.gradient,
+                                        To,
+                                        Talpha);
+                            break;
+                        default:
+                            epilogue_func(epilogue_param, hBias_buf, Tbias, false, To, Talpha);
+                            break;
                     }
+
                     if(arg.gradient && arg.bias_vector && batchIdx == num_batches[gemmIdx] - 1)
                     {
+                        auto *hBias_gold_buf = hBias_gold[gemmIdx].buf();
+                        if(arg.bias_stride > 0 && hBias_gold_buf != nullptr)
+                        {
+                            hBias_gold_buf = (char*)hBias_gold_buf + arg.bias_stride * batchIdx * realDataTypeSize(Tbias);
+                        }
                         if(arg.bias_source == hipblaslt_bias_source::d)
                         {
                             reduction_func<false, float>(hBias_gold_epl[gemmIdx].as<char>()
                                                              + pos * realDataTypeSize(Talpha),
                                                          Talpha,
-                                                         hBias_gold[gemmIdx].buf(),
+                                                         hBias_gold_buf,
                                                          Tbias,
                                                          M[gemmIdx],
                                                          N[gemmIdx],
@@ -4879,7 +4929,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                           &s1,
                                           &s2,
                                           &s3,
-                                          &hBias_gold,
+                                          &hBias_gold_buf,
                                           &Tbias,
                                           &size_bias,
                                           &K,
@@ -4890,7 +4940,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                 {
                                     reduction_func<true, float>(ptr,
                                                                 Ti,
-                                                                hBias_gold[gemmIdx].buf(),
+                                                                hBias_gold_buf,
                                                                 Tbias,
                                                                 size_bias[gemmIdx],
                                                                 K[gemmIdx],
@@ -4903,7 +4953,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                 {
                                     reduction_func<false, float>(ptr,
                                                                  Ti,
-                                                                 hBias_gold[gemmIdx].buf(),
+                                                                 hBias_gold_buf,
                                                                  Tbias,
                                                                  size_bias[gemmIdx],
                                                                  K[gemmIdx],
@@ -5016,7 +5066,59 @@ void testing_matmul_with_bias(const Arguments& arg,
             cpu_time_used = get_time_us_no_sync() - cpu_time_used;
         }
     }
+    void* alpha_ptr = nullptr;
+    void* beta_ptr  = nullptr;
 
+    if(gemm_count > 0)
+    {
+        if(TiA == HIP_C_32F || TiA == HIP_C_64F)
+        {
+            if(TiA == HIP_C_32F)
+            {
+                alpha_ptr = arg.scaleAlpha_vector ? (void*)dScaleAlphaVec[0].buf()
+                                                  : (void*)&(h_alpha[0].cf);
+                beta_ptr  = (void*)&(h_beta[0].cf);
+            }
+            else if(TiA == HIP_C_64F)
+            {
+
+                alpha_ptr = arg.scaleAlpha_vector ? (void*)dScaleAlphaVec[0].buf()
+                                                  : (void*)&(h_alpha[0].cd);
+                beta_ptr  = (void*)&(h_beta[0].cd);
+            }
+        }
+        else
+        {
+            switch(Tc)
+            {
+            case HIP_R_32F:
+                alpha_ptr = arg.scaleAlpha_vector ? (void*)dScaleAlphaVec[0].buf()
+                                                  : (void*)&(h_alpha[0].f32);
+                beta_ptr  = (void*)&(h_beta[0].f32);
+                break;
+            case HIP_R_64F:
+                alpha_ptr = arg.scaleAlpha_vector ? (void*)dScaleAlphaVec[0].buf()
+                                                  : (void*)&(h_alpha[0].f64);
+                beta_ptr  = (void*)&(h_beta[0].f64);
+                break;
+            case HIP_R_16F:
+                alpha_ptr = arg.scaleAlpha_vector ? (void*)dScaleAlphaVec[0].buf()
+                                                  : (void*)&(h_alpha[0].f16);
+                beta_ptr  = (void*)&(h_beta[0].f16);
+                break;
+            case HIP_R_32I:
+                alpha_ptr = arg.scaleAlpha_vector ? (void*)dScaleAlphaVec[0].buf()
+                                                  : (void*)&(h_alpha[0].i32);
+                beta_ptr  = (void*)&(h_beta[0].i32);
+                break;
+            default:
+                hipblaslt_cerr << "FATAL: Unsupported type in pointer setup for hipblasLtMatmul"
+                               << std::endl;
+                alpha_ptr = nullptr;
+                beta_ptr  = nullptr;
+            }
+        }
+    }
     if(!arg.timing)
     {
         for(size_t sol = 0; sol < heuristicResult.size(); sol++)
@@ -5075,12 +5177,12 @@ void testing_matmul_with_bias(const Arguments& arg,
                     CHECK_HIP_ERROR(hipStreamSynchronize(stream));
                     EXPECT_HIPBLAS_STATUS(hipblasLtMatmul(handle,
                                                           matmul[0][0],
-                                                          alpha_in[0],
+                                                          alpha_ptr,
                                                           dA[0].buf(),
                                                           matA[0],
                                                           dB[0].buf(),
                                                           matB[0],
-                                                          &(h_beta[0]),
+                                                          beta_ptr,
                                                           dC[0].buf(),
                                                           matC[0],
                                                           (*dDp)[0].buf(),
@@ -5144,6 +5246,13 @@ void testing_matmul_with_bias(const Arguments& arg,
             }
             else if(arg.initialization == hipblaslt_initialization::fp16_accumulator_probe)
             {
+                for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
+                    tol[gemmIdx] = 1e-2;
+            }
+            else if(arg.initialization == hipblaslt_initialization::norm_dist_one_special)
+            {
+                // Gaussian-filled inputs + batched GEMM: use near_check like fp16_accumulator_probe
+                // (CPU ref vs GPU are not always bit-identical for f32/f16 accumulations).
                 for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
                     tol[gemmIdx] = 1e-2;
             }
@@ -5416,14 +5525,14 @@ void testing_matmul_with_bias(const Arguments& arg,
                             hipblasLtMatmul(
                                 handle,
                                 ptr_matmul,
-                                ptr_alpha,
+                                alpha_ptr,
                                 dA[0].as<char>()
                                     + (i % block_count) * size_dA[0] * realDataTypeSize(TiA),
                                 matA[0],
                                 dB[0].as<char>()
                                     + (i % block_count) * size_dB[0] * realDataTypeSize(TiB),
                                 matB[0],
-                                &(h_beta[0]),
+                                beta_ptr,
                                 dC[0].as<char>()
                                     + (i % block_count) * size_C[0] * realDataTypeSize(To),
                                 matC[0],
@@ -5472,14 +5581,14 @@ void testing_matmul_with_bias(const Arguments& arg,
                             hipblasLtMatmul(
                                 handle,
                                 ptr_matmul,
-                                ptr_alpha,
+                                alpha_ptr,
                                 dA[0].as<char>()
                                     + (i % block_count) * size_dA[0] * realDataTypeSize(TiA),
                                 matA[0],
                                 dB[0].as<char>()
                                     + (i % block_count) * size_dB[0] * realDataTypeSize(TiB),
                                 matB[0],
-                                &(h_beta[0]),
+                                beta_ptr,
                                 dC[0].as<char>()
                                     + (i % block_count) * size_C[0] * realDataTypeSize(To),
                                 matC[0],
@@ -5676,24 +5785,32 @@ void testing_matmul_with_bias(const Arguments& arg,
                 for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
                     tol[gemmIdx] = 1e-2;
             }
+            else if(arg.initialization == hipblaslt_initialization::norm_dist_one_special)
+            {
+                for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
+                    tol[gemmIdx] = 1e-2;
+            }
             if(arg.unit_check || arg.norm_check || arg.allclose_check)
             {
                 if(arg.dump_matrix)
                 {
-                    hipblasltDispatchValuesToFile(HIPBLAS_OP_N,
-                                                  To,
-                                                  M[0],
-                                                  N[0],
-                                                  ldd[0],
-                                                  hD_1[0].buf(),
-                                                  "batch_0_D_output.txt");
-                    hipblasltDispatchValuesToFile(HIPBLAS_OP_N,
-                                                  To,
-                                                  M[0],
-                                                  N[0],
-                                                  ldd[0],
-                                                  hD_gold[0].buf(),
-                                                  "batch_0_D_Gold_output.txt");
+                    for(int batchId = 0; batchId < num_batches[0]; batchId++)
+                    {
+                        hipblasltDispatchValuesToFile(HIPBLAS_OP_N,
+                                                    To,
+                                                    M[0],
+                                                    N[0],
+                                                    ldd[0],
+                                                    hD_1[0].as<char>() + batchId * stride_d[0] * realDataTypeSize(To),
+                                                    "batch_" + std::to_string(batchId) + "_D_output.txt");
+                        hipblasltDispatchValuesToFile(HIPBLAS_OP_N,
+                                                    To,
+                                                    M[0],
+                                                    N[0],
+                                                    ldd[0],
+                                                    hD_gold[0].as<char>() + batchId * stride_d[0] * realDataTypeSize(To),
+                                                    "batch_" + std::to_string(batchId) + "_D_Gold_output.txt");
+                    }
                 }
                 check(stream,
                       arg,

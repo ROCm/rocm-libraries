@@ -499,6 +499,15 @@ reference_gemm(const HostTensor<if_select_t<ADataType_, tf32_t, float, ADataType
                 const float unpacked    = (flat_off % 2 == 1) ? fp32_val.hi : fp32_val.lo;
                 v_a = ck_tile::type_convert<AccDataType>(a_element_op(unpacked));
             }
+            else if constexpr(std::is_same_v<ADataTypeBuf, pk_fp4_t>)
+            {
+                const pk_fp4_t pk_val   = a_element_op(a_m_k(m, k));
+                const fp32x2_t fp32_val = pk_fp4_to_fp32x2(pk_val, 1.f);
+                if(k % 2 == 1)
+                    v_a = fp32_val.hi;
+                else
+                    v_a = fp32_val.lo;
+            }
             else
             {
                 v_a = ck_tile::type_convert<AccDataType>(a_element_op(a_m_k(m, k)));
@@ -518,6 +527,15 @@ reference_gemm(const HostTensor<if_select_t<ADataType_, tf32_t, float, ADataType
                 std::size_t flat_off    = b_k_n.mDesc.GetOffsetFromMultiIndex(k, n);
                 const float unpacked    = (flat_off % 2 == 1) ? fp32_val.hi : fp32_val.lo;
                 v_b = ck_tile::type_convert<AccDataType>(b_element_op(unpacked));
+            }
+            else if constexpr(std::is_same_v<BDataTypeBuf, pk_fp4_t>)
+            {
+                const pk_fp4_t pk_val   = b_element_op(b_k_n(k, n));
+                const fp32x2_t fp32_val = pk_fp4_to_fp32x2(pk_val, 1.f);
+                if(k % 2 == 1)
+                    v_b = fp32_val.hi;
+                else
+                    v_b = fp32_val.lo;
             }
             else
             {
@@ -638,7 +656,8 @@ reference_gemm_multiple_abd(const std::array<HostTensor<ADataType>, AsDataType::
 
 template <typename ADataType,
           typename BDataType,
-          typename ScaleDataType,
+          typename AScaleDataType,
+          typename BScaleDataType,
           typename AccDataType,
           typename CDataType,
           typename AElementOp   = ck_tile::identity,
@@ -647,8 +666,8 @@ template <typename ADataType,
 CK_TILE_HOST void reference_mx_gemm(const HostTensor<ADataType>& a_m_k,
                                     const HostTensor<BDataType>& b_k_n,
                                     HostTensor<CDataType>& c_m_n,
-                                    const HostTensor<ScaleDataType>& scale_a,
-                                    const HostTensor<ScaleDataType>& scale_b,
+                                    const HostTensor<AScaleDataType>& scale_a,
+                                    const HostTensor<BScaleDataType>& scale_b,
                                     const AElementOp&   = {},
                                     const BElementOp&   = {},
                                     const ACCElementOp& = {})
@@ -685,14 +704,11 @@ CK_TILE_HOST void reference_mx_gemm(const HostTensor<ADataType>& a_m_k,
             }
             else if constexpr(std::is_same_v<ADataType, pk_fp6x16_t>)
             {
-                if(k % pk_fp6x16_t::packed_size != 0)
-                    continue;
+                std::size_t raw_off = m * a_m_k.get_stride(0) + k * a_m_k.get_stride(1);
+                std::size_t idx     = raw_off % pk_fp6x16_t::packed_size;
                 auto a_scale = ck_tile::type_convert<AccDataType>(scale_a(m, k / ScaleBlockSize));
-                for(std::size_t k_ = 0; k_ < pk_fp6x16_t::packed_size; k_++)
-                {
-                    a_m_k_scaled(m, k + k_) =
-                        pk_fp6x16_t::fp6_e2m3_to_float(a_m_k(m, k).unpack(k_)) * a_scale;
-                }
+                a_m_k_scaled(m, k) =
+                    pk_fp6x16_t::fp6_e2m3_to_float(a_m_k(m, k).unpack(idx)) * a_scale;
             }
             else
             {
@@ -720,14 +736,11 @@ CK_TILE_HOST void reference_mx_gemm(const HostTensor<ADataType>& a_m_k,
             }
             else if constexpr(std::is_same_v<BDataType, pk_fp6x16_t>)
             {
-                if(k % pk_fp6x16_t::packed_size != 0)
-                    continue;
+                std::size_t raw_off = k * b_k_n.get_stride(0) + n * b_k_n.get_stride(1);
+                std::size_t idx     = raw_off % pk_fp6x16_t::packed_size;
                 auto b_scale = ck_tile::type_convert<AccDataType>(scale_b(k / ScaleBlockSize, n));
-                for(std::size_t k_ = 0; k_ < pk_fp6x16_t::packed_size; k_++)
-                {
-                    b_k_n_scaled(k + k_, n) =
-                        pk_fp6x16_t::fp6_e2m3_to_float(b_k_n(k, n).unpack(k_)) * b_scale;
-                }
+                b_k_n_scaled(k, n) =
+                    pk_fp6x16_t::fp6_e2m3_to_float(b_k_n(k, n).unpack(idx)) * b_scale;
             }
             else
             {
