@@ -1,0 +1,137 @@
+# Race detection CI: run Tensile GEMM kernels through the rocjitsu
+# emulator with race detection enabled.
+#
+# How it works:
+#   1. Checkout rocm-libraries (sparse: tensilelite + deps)
+#   2. Checkout rocm-systems (sparse: emulation/rocjitsu)
+#   3. Fetch TheRock nightly tarball (amdclang++, HIP runtime)
+#   4. Build rocjitsu (produces librocjitsu_kmd.so with race detector)
+#   5. Build tensilelite (produces tensilelite-client + rocisa)
+#   6. Generate and run small GEMM kernels under race detection
+#   7. Fail if any race is detected or validation fails
+#
+# No GPU hardware is needed. The rocjitsu emulator simulates AMD GPU
+# execution on CPU. Kernels are compiled for gfx950 by amdclang++,
+# then loaded and executed by the emulator at test time.
+
+name: TensileLite race detection
+
+on:
+  pull_request:
+    paths:
+      - "projects/hipblaslt/tensilelite/**"
+      - ".github/workflows/tensilelite-race-detection.yml"
+      - "shared/stinkytofu/**"
+      - "shared/origami/**"
+  push:
+    branches: [develop]
+    paths:
+      - "projects/hipblaslt/tensilelite/**"
+      - ".github/workflows/tensilelite-race-detection.yml"
+      - "shared/stinkytofu/**"
+      - "shared/origami/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  race-detection:
+    name: GEMM race detection (rocjitsu emulator)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout rocm-libraries (sparse)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            projects/hipblaslt/tensilelite
+            projects/hipblaslt/cmake
+            projects/hipblaslt/clients/common
+            projects/hipblaslt/library/include
+            shared/stinkytofu
+            shared/origami
+            shared/mxdatagenerator
+            cmake/modules
+
+      - name: Checkout rocm-systems (sparse)
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: newling/rocm-systems
+          ref: race-detection-11
+          path: rocm-systems
+          sparse-checkout: emulation/rocjitsu
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libdrm-dev
+
+      - name: Find latest TheRock tarball
+        id: therock
+        run: |
+          python3 -m pip install -U awscli
+          export PATH=~/.local/bin:$PATH
+          KEY=$(aws s3api list-objects-v2 \
+                --bucket therock-nightly-tarball \
+                --no-sign-request \
+                --output json \
+                --query "sort_by(Contents[?contains(Key, 'linux-multiarch')], &LastModified)[-1].Key")
+          KEY=${KEY//\"/}
+          test -n "$KEY" || { echo "No multiarch tarball found"; exit 1; }
+          echo "tarball=${KEY}" >> $GITHUB_OUTPUT
+
+      - name: Install ROCm (TheRock tarball)
+        run: |
+          wget -q "https://therock-nightly-tarball.s3.us-east-2.amazonaws.com/${{ steps.therock.outputs.tarball }}"
+          TARBALL=$(basename "${{ steps.therock.outputs.tarball }}")
+          mkdir rocm && tar xf "$TARBALL" -C rocm
+          echo "ROCM_PATH=$PWD/rocm" >> $GITHUB_ENV
+          echo "LD_LIBRARY_PATH=$PWD/rocm/lib" >> $GITHUB_ENV
+
+          # Sanity check
+          rocm/bin/amdclang++ --version
+
+      - name: Build rocjitsu
+        run: |
+          cmake -B build-rocjitsu -G Ninja \
+            -S rocm-systems/emulation/rocjitsu \
+            -DCMAKE_C_COMPILER="$ROCM_PATH/lib/llvm/bin/clang" \
+            -DCMAKE_CXX_COMPILER="$ROCM_PATH/lib/llvm/bin/clang++" \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-rocjitsu
+
+      - name: Set up Python environment
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install --quiet \
+            -r projects/hipblaslt/tensilelite/requirements.txt
+          .venv/bin/pip install --quiet memory_profiler invoke
+
+      - name: Build tensilelite
+        run: |
+          source .venv/bin/activate
+          cmake -B build-tensilelite -G Ninja \
+            -S projects/hipblaslt \
+            --preset tensilelite \
+            -DGPU_TARGETS=gfx950 \
+            -DCMAKE_CXX_COMPILER="$ROCM_PATH/lib/llvm/bin/clang++" \
+            -DCMAKE_C_COMPILER="$ROCM_PATH/lib/llvm/bin/clang" \
+            -DCMAKE_PREFIX_PATH="$ROCM_PATH"
+          cmake --build build-tensilelite
+
+      - name: Run GEMM under race detection
+        run: |
+          source .venv/bin/activate
+          export PYTHONPATH="$GITHUB_WORKSPACE/build-tensilelite/tensilelite/rocisa:$GITHUB_WORKSPACE/build-tensilelite/tensilelite:$GITHUB_WORKSPACE/projects/hipblaslt/tensilelite"
+          export RACE_OUTPUT_DIR="$GITHUB_WORKSPACE/race-output"
+
+          projects/hipblaslt/tensilelite/Tensile/Tests/race_detection/run_race_detection.sh \
+            build-rocjitsu/lib/rocjitsu/src/rocjitsu/kmd/librocjitsu_kmd.so \
+            build-tensilelite/tensilelite/client/tensilelite-client \
+            rocm-systems/emulation/rocjitsu/configs/amdgpu_cdna4_kmd.json
+
+      - name: Upload race reports
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: race-reports
+          path: race-output/
