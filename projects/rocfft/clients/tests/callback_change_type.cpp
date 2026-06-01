@@ -91,7 +91,7 @@ INSTANTIATE_TEST_SUITE_P(DISABLED_callback,
 TEST_P(change_type, DISABLED_short_to_float)
 {
     rocfft_params params(GetParam());
-    params.run_callbacks = fft_callback_type_legacy;
+    params.run_callbacks = fft_callback_type_funcptr;
 
     ASSERT_EQ(params.create_plan(), fft_status_success);
 
@@ -147,7 +147,7 @@ TEST_P(change_type, DISABLED_short_to_float)
                       hipSuccess);
         }
         std::vector<void*> callback_host_vec{callback_host};
-        ASSERT_EQ(params.set_legacy_callbacks(&callback_host_vec, nullptr, nullptr, nullptr),
+        ASSERT_EQ(params.set_funcptr_callbacks(&callback_host_vec, nullptr, nullptr, nullptr),
                   fft_status_success);
 
         // run rocFFT

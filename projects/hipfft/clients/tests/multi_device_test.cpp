@@ -1,4 +1,4 @@
-// Copyright (C) 2024 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2024 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -81,9 +81,9 @@ std::vector<fft_params> param_generator_multi_gpu(const std::optional<SplitType>
     // to multiple GPUs
     std::vector<fft_params> params_single;
 
-    // legacy callbacks need -fgpu-rdc, but that causes build
+    // function pointer callbacks need -fgpu-rdc, but that causes build
     // nondeterminism in kpack
-    auto multi_device_callbacks = {fft_callback_type_none, /*fft_callback_type_legacy, */};
+    auto multi_device_callbacks = {fft_callback_type_none, /*fft_callback_type_funcptr, */};
 
     {
         auto params = param_generator_complex(test_prob,

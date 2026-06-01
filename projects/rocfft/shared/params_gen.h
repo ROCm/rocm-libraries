@@ -49,7 +49,7 @@ const static std::vector<fft_transform_type> trans_type_range_real
     = {fft_transform_type_real_forward};
 
 const static std::vector<fft_callback_type> callbacks_none = {fft_callback_type_none};
-const static std::vector<fft_callback_type> callbacks_full = {fft_callback_type_legacy};
+const static std::vector<fft_callback_type> callbacks_full = {fft_callback_type_funcptr};
 
 // Take a string (in particular the token from a test) and return a uniform random variable in [0,1]
 // using the seed and hash of the string.

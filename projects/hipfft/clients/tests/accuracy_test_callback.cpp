@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -121,7 +121,7 @@ INSTANTIATE_TEST_SUITE_P(DISABLED_callback_no_offset,
                                                                   callbacks_full)),
                          accuracy_test::TestName);
 
-// legacy callbacks need -fgpu-rdc, but that causes build
+// function pointer callbacks need -fgpu-rdc, but that causes build
 // nondeterminism in kpack
 INSTANTIATE_TEST_SUITE_P(DISABLED_callback,
                          accuracy_test,

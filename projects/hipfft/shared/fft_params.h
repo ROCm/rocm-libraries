@@ -1079,7 +1079,7 @@ public:
 
         switch(run_callbacks)
         {
-        case fft_callback_type_legacy:
+        case fft_callback_type_funcptr:
             ret += "_CB";
             break;
         case fft_callback_type_none:
@@ -1244,7 +1244,7 @@ public:
 
         if(pos < vals.size() && vals[pos] == "CB")
         {
-            run_callbacks = fft_callback_type_legacy;
+            run_callbacks = fft_callback_type_funcptr;
             ++pos;
         }
 
@@ -2278,18 +2278,18 @@ public:
         }
     }
 
-    // A legacy callback is expressed as a pair of device function
-    // pointer + device function data.
+    // A function pointer callback is expressed as a pair of device
+    // function pointer + device function data.
     //
     // Load and store callbacks are provided as vectors of those
     // pointers, as we need a separate function+data for each device
     // being loaded from or stored to.
-    virtual fft_status set_legacy_callbacks(std::vector<void*>* load_cb_func,
-                                            std::vector<void*>* load_cb_data,
-                                            std::vector<void*>* store_cb_func,
-                                            std::vector<void*>* store_cb_data,
-                                            size_t              load_cb_shared_mem_bytes,
-                                            size_t              store_cb_shared_mem_bytes)
+    virtual fft_status set_funcptr_callbacks(std::vector<void*>* load_cb_func,
+                                             std::vector<void*>* load_cb_data,
+                                             std::vector<void*>* store_cb_func,
+                                             std::vector<void*>* store_cb_data,
+                                             size_t              load_cb_shared_mem_bytes,
+                                             size_t              store_cb_shared_mem_bytes)
     {
         return fft_status_success;
     }
@@ -2847,8 +2847,8 @@ static bool lexical_cast(const std::string& word, fft_callback_type& cbtype)
 {
     if(word == "none")
         cbtype = fft_callback_type_none;
-    else if(word == "legacy")
-        cbtype = fft_callback_type_legacy;
+    else if(word == "funcptr")
+        cbtype = fft_callback_type_funcptr;
     else
         throw std::runtime_error("Invalid callback type specified");
     return true;

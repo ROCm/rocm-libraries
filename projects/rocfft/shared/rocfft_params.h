@@ -387,14 +387,14 @@ public:
         return expected_callbacks;
     }
 
-    fft_status set_legacy_callbacks(std::vector<void*>* load_cb_func,
-                                    std::vector<void*>* load_cb_data,
-                                    std::vector<void*>* store_cb_func,
-                                    std::vector<void*>* store_cb_data,
-                                    size_t              load_cb_shared_mem_bytes  = 0,
-                                    size_t              store_cb_shared_mem_bytes = 0) override
+    fft_status set_funcptr_callbacks(std::vector<void*>* load_cb_func,
+                                     std::vector<void*>* load_cb_data,
+                                     std::vector<void*>* store_cb_func,
+                                     std::vector<void*>* store_cb_data,
+                                     size_t              load_cb_shared_mem_bytes  = 0,
+                                     size_t              store_cb_shared_mem_bytes = 0) override
     {
-        if(run_callbacks == fft_callback_type_legacy)
+        if(run_callbacks == fft_callback_type_funcptr)
         {
             auto expected_load_cb_count  = expected_callback_count(ifields);
             auto expected_store_cb_count = expected_callback_count(ofields);

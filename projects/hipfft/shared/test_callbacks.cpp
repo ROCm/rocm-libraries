@@ -1,4 +1,4 @@
-// Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2025 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -66,9 +66,9 @@ __device__ auto load_callback_round_trip_inverse_dev_double
 __device__ auto load_callback_round_trip_inverse_dev_complex_double
     = load_callback_round_trip_inverse<rocfft_complex<double>>;
 
-void* get_load_callback_legacy(fft_array_type itype,
-                               fft_precision  precision,
-                               bool           round_trip_inverse)
+void* get_load_callback_funcptr(fft_array_type itype,
+                                fft_precision  precision,
+                                bool           round_trip_inverse)
 {
     void*      load_callback_host = nullptr;
     hipError_t hip_status         = hipErrorUnknown;
@@ -240,9 +240,9 @@ __device__ auto store_callback_round_trip_inverse_dev_double
 __device__ auto store_callback_round_trip_inverse_dev_complex_double
     = store_callback_round_trip_inverse<rocfft_complex<double>>;
 
-void* get_store_callback_legacy(fft_array_type otype,
-                                fft_precision  precision,
-                                bool           round_trip_inverse)
+void* get_store_callback_funcptr(fft_array_type otype,
+                                 fft_precision  precision,
+                                 bool           round_trip_inverse)
 {
     void*      store_callback_host = nullptr;
     hipError_t hip_status          = hipErrorUnknown;
@@ -606,11 +606,11 @@ void apply_load_callback(const fft_params& params, std::vector<hostbuf>& input)
 // fields+bricks were specified to the FFT plan.  Pointers need to be
 // copied to the host from the device specified by the respective
 // brick.
-void get_rank_load_callbacks_legacy(const fft_params&                          params,
-                                    std::vector<void*>&                        load_cb_func,
-                                    std::vector<void*>&                        load_cb_data,
-                                    bool                                       round_trip_inverse,
-                                    std::vector<gpubuf_t<callback_test_data>>& all_cb_data)
+void get_rank_load_callbacks_funcptr(const fft_params&                          params,
+                                     std::vector<void*>&                        load_cb_func,
+                                     std::vector<void*>&                        load_cb_data,
+                                     bool                                       round_trip_inverse,
+                                     std::vector<gpubuf_t<callback_test_data>>& all_cb_data)
 {
     int mpi_rank = 0;
 #ifdef ROCFFT_MPI_ENABLE
@@ -623,7 +623,7 @@ void get_rank_load_callbacks_legacy(const fft_params&                          p
     // Copy callback pointer from current device and add to output vec
     auto add_load_cb = [&]() {
         void* load_cb_host
-            = get_load_callback_legacy(params.itype, params.precision, round_trip_inverse);
+            = get_load_callback_funcptr(params.itype, params.precision, round_trip_inverse);
 
         callback_test_data load_cb_data_host;
 
@@ -694,11 +694,11 @@ void get_rank_load_callbacks_legacy(const fft_params&                          p
 // fields+bricks were specified to the FFT plan.  Pointers need to be
 // copied to the host from the device specified by the respective
 // brick.
-void get_rank_store_callbacks_legacy(const fft_params&                          params,
-                                     std::vector<void*>&                        store_cb_func,
-                                     std::vector<void*>&                        store_cb_data,
-                                     bool                                       round_trip_inverse,
-                                     std::vector<gpubuf_t<callback_test_data>>& all_cb_data)
+void get_rank_store_callbacks_funcptr(const fft_params&                          params,
+                                      std::vector<void*>&                        store_cb_func,
+                                      std::vector<void*>&                        store_cb_data,
+                                      bool                                       round_trip_inverse,
+                                      std::vector<gpubuf_t<callback_test_data>>& all_cb_data)
 {
     int mpi_rank = 0;
 #ifdef ROCFFT_MPI_ENABLE
@@ -711,7 +711,7 @@ void get_rank_store_callbacks_legacy(const fft_params&                          
     // Copy callback pointer from current device and add to output vec
     auto add_store_cb = [&]() {
         void* store_cb_host
-            = get_store_callback_legacy(params.otype, params.precision, round_trip_inverse);
+            = get_store_callback_funcptr(params.otype, params.precision, round_trip_inverse);
 
         callback_test_data store_cb_data_host;
 

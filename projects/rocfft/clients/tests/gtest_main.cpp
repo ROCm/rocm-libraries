@@ -452,7 +452,7 @@ int main(int argc, char* argv[])
         });
 
     app.add_flag(
-           "--callback", manual_params.run_callbacks, "Inject load/store callbacks: none, legacy")
+           "--callback", manual_params.run_callbacks, "Inject load/store callbacks: none, funcptr")
         ->default_val("none");
 
     app.add_option("--seed", random_seed, "Random seed; if unset, use an actual random seed")

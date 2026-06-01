@@ -275,7 +275,7 @@ enum fft_result_placement
 enum fft_callback_type
 {
     fft_callback_type_none, // don't run callbacks
-    fft_callback_type_legacy, // run legacy callbacks, where users provide a device function pointer
+    fft_callback_type_funcptr, // run callbacks specified via device function pointer
 };
 
 inline void validate_or_throw(fft_result_placement placement, const std::string& func_name)
