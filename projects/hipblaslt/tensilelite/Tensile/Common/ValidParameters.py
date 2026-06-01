@@ -779,7 +779,7 @@ validParameters = { # we need to make sure this matches develop
     # Other StreamK env grid knobs are bypassed in this mode. The invariant is no partial
     # output tile fixup and no SK-region processing.
     # Valid only with DP-first, non-atomic StreamK mode 3.
-    "StreamKForceFullTiles": [0, 1],
+    "StreamKForceDPOnly": [0, 1],
     # Determines if StreamK kernel uses atomics
     # 0: uses workspace to store partial tiles, accumulate in deterministic fix-up step
     # 1: uses atomics to accumulate partial tiles

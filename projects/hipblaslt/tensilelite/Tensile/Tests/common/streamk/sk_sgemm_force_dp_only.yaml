@@ -18,7 +18,7 @@ GlobalParameters:
 
 BenchmarkProblems:
 
-  - # SGEMM NT, StreamK force full-tile persistent DP mode
+  - # SGEMM NT, StreamK force DP-only persistent mode
     - # ProblemType
       OperationType: GEMM
       DataType: s
@@ -27,7 +27,7 @@ BenchmarkProblems:
       UseBeta: True
       Batched: True
 
-    - # Force StreamK to use persistent DP only, with no partial-tile SK region
+    - # Force StreamK to use persistent DP only, with no SK region
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
@@ -49,7 +49,7 @@ BenchmarkProblems:
         - SourceSwap: [True]
         - StoreRemapVectorWidth: [0]
         - StreamK: [3]
-        - StreamKForceFullTiles: [1]
+        - StreamKForceDPOnly: [1]
         - TransposeLDS: [0]
         - VectorWidthA: [1]
         - VectorWidthB: [1]

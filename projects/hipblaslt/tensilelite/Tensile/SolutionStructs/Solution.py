@@ -162,13 +162,13 @@ def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printR
   return True
 
 
-def _validateStreamKForceFullTiles(state, printRejectionReason):
-  if state["StreamKForceFullTiles"]:
+def _validateStreamKForceDPOnly(state, printRejectionReason):
+  if state["StreamKForceDPOnly"]:
     if state["StreamK"] != 3:
-      reject(state, printRejectionReason, "StreamKForceFullTiles requires DP-first two-tile Stream-K")
+      reject(state, printRejectionReason, "StreamKForceDPOnly requires DP-first two-tile Stream-K")
       return False
     if state["StreamKAtomic"] == 1:
-      reject(state, printRejectionReason, "StreamKForceFullTiles does not support atomic Stream-K")
+      reject(state, printRejectionReason, "StreamKForceDPOnly does not support atomic Stream-K")
       return False
   return True
 
@@ -1529,7 +1529,7 @@ class Solution(collections.abc.Mapping):
         and state["PrefetchGlobalRead"] in (1, 2)
       if state["_ScheduleIterAlg"] not in (2, 3) and not isSia0TdmPgr:
         reject(state, printRejectionReason, "ScheduleIterAlg not supported with Stream-K")
-      _validateStreamKForceFullTiles(state, printRejectionReason)
+      _validateStreamKForceDPOnly(state, printRejectionReason)
       if state["StreamKAtomic"] == 1:
         if state["StreamK"] == 4:
           reject(state, printRejectionReason, "Atomic Stream-K is not supported with dynamic work queue mode")
@@ -1549,7 +1549,7 @@ class Solution(collections.abc.Mapping):
         return
     else:
       # If not using StreamK, clear other stream-k settings to avoid duplicate kernels
-      state["StreamKForceFullTiles"] = 0
+      state["StreamKForceDPOnly"] = 0
       state["StreamKAtomic"] = 0
       state["StreamKXCCMapping"] = 0
       state["StreamKFixupTreeReduction"] = 0

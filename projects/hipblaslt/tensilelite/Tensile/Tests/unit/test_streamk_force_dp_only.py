@@ -26,7 +26,7 @@ from Tensile.Common.GlobalParameters import defaultSolution
 from Tensile.Common.RequiredParameters import getRequiredParametersMin
 from Tensile.Common.ValidParameters import validParameters
 from Tensile.Contractions import SizeMapping
-from Tensile.SolutionStructs.Solution import _validateStreamKForceFullTiles, validateParameterTypes
+from Tensile.SolutionStructs.Solution import _validateStreamKForceDPOnly, validateParameterTypes
 
 
 def minimal_size_mapping_state():
@@ -93,71 +93,71 @@ def minimal_size_mapping_state():
     }
 
 
-def test_streamk_force_full_tiles_is_valid_tuning_parameter():
-    assert validParameters["StreamKForceFullTiles"] == [0, 1]
-    assert defaultSolution["StreamKForceFullTiles"] == 0
-    assert "StreamKForceFullTiles" in getRequiredParametersMin()
+def test_streamk_force_dp_only_is_valid_tuning_parameter():
+    assert validParameters["StreamKForceDPOnly"] == [0, 1]
+    assert defaultSolution["StreamKForceDPOnly"] == 0
+    assert "StreamKForceDPOnly" in getRequiredParametersMin()
 
 
-def test_streamk_force_full_tiles_type_is_checked_as_int():
-    state = {"StreamKForceFullTiles": 1}
+def test_streamk_force_dp_only_type_is_checked_as_int():
+    state = {"StreamKForceDPOnly": 1}
     validateParameterTypes(state)
 
 
-def test_streamk_force_full_tiles_defaults_in_size_mapping():
+def test_streamk_force_dp_only_defaults_in_size_mapping():
     state = minimal_size_mapping_state()
     size_mapping = SizeMapping.FromOriginalState(state)
 
-    assert "streamKForceFullTiles" in SizeMapping.StateKeys
-    assert size_mapping.streamKForceFullTiles == 0
+    assert "streamKForceDPOnly" in SizeMapping.StateKeys
+    assert size_mapping.streamKForceDPOnly == 0
 
 
-def test_streamk_force_full_tiles_round_trips_to_size_mapping():
+def test_streamk_force_dp_only_round_trips_to_size_mapping():
     state = minimal_size_mapping_state()
-    state["StreamKForceFullTiles"] = 1
+    state["StreamKForceDPOnly"] = 1
 
     size_mapping = SizeMapping.FromOriginalState(state)
 
-    assert size_mapping.streamKForceFullTiles == 1
+    assert size_mapping.streamKForceDPOnly == 1
 
 
-def test_streamk_force_full_tiles_requires_streamk3():
+def test_streamk_force_dp_only_requires_streamk3():
     state = {
         "StreamK": 2,
         "StreamKAtomic": 0,
-        "StreamKForceFullTiles": 1,
+        "StreamKForceDPOnly": 1,
         "Valid": True,
     }
 
-    valid = _validateStreamKForceFullTiles(state, False)
+    valid = _validateStreamKForceDPOnly(state, False)
 
     assert valid is False
     assert state["Valid"] is False
 
 
-def test_streamk_force_full_tiles_rejects_atomic_streamk():
+def test_streamk_force_dp_only_rejects_atomic_streamk():
     state = {
         "StreamK": 3,
         "StreamKAtomic": 1,
-        "StreamKForceFullTiles": 1,
+        "StreamKForceDPOnly": 1,
         "Valid": True,
     }
 
-    valid = _validateStreamKForceFullTiles(state, False)
+    valid = _validateStreamKForceDPOnly(state, False)
 
     assert valid is False
     assert state["Valid"] is False
 
 
-def test_streamk_force_full_tiles_accepts_streamk3_tree_path():
+def test_streamk_force_dp_only_accepts_streamk3_tree_path():
     state = {
         "StreamK": 3,
         "StreamKAtomic": 0,
-        "StreamKForceFullTiles": 1,
+        "StreamKForceDPOnly": 1,
         "Valid": True,
     }
 
-    valid = _validateStreamKForceFullTiles(state, False)
+    valid = _validateStreamKForceDPOnly(state, False)
 
     assert valid is True
     assert state["Valid"] is True

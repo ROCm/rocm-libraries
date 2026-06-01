@@ -22,7 +22,7 @@ GlobalParameters:
   MXScaleFormat: 1
 
 BenchmarkProblems:
-  - # MXFP4 SGEMM, StreamK force full-tile persistent DP mode
+  - # MXFP4 SGEMM, StreamK force DP-only persistent mode
     - # ProblemType
       OperationType: GEMM
       DataType: F4
@@ -41,7 +41,7 @@ BenchmarkProblems:
       UseBias: 1
       BiasDataTypeList: [s]
 
-    - # Force StreamK to use persistent DP only, with no partial-tile SK region
+    - # Force StreamK to use persistent DP only, with no SK region
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
@@ -74,7 +74,7 @@ BenchmarkProblems:
         - StoreVectorWidth: [-1]
         - SourceSwap: [True]
         - StreamK: [3]
-        - StreamKForceFullTiles: [1]
+        - StreamKForceDPOnly: [1]
         - UseSubtileImpl: [1]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:

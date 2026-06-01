@@ -99,7 +99,7 @@ def getRequiredParametersMin() -> set:
         'StoreSyncOpt',
         'StoreVectorWidth',
         'StreamK',
-        'StreamKForceFullTiles',
+        'StreamKForceDPOnly',
         'StreamKXCCMapping',
         'StreamKFixupTreeReduction',
         'SwapGlobalReadOrder',

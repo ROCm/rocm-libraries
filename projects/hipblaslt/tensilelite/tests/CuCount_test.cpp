@@ -234,11 +234,11 @@ TEST_F(CuCountFallbackTest, CpxAndSpxIndependent)
         << "SPX and CPX should select different solutions";
 }
 
-TEST(StreamKForceFullTilesTest, UsesHardwareCuCount)
+TEST(StreamKForceDPOnlyTest, UsesHardwareCuCount)
 {
     ContractionSolution solution;
     solution.sizeMapping.streamK               = 3;
-    solution.sizeMapping.streamKForceFullTiles = 1;
+    solution.sizeMapping.streamKForceDPOnly     = 1;
     solution.sizeMapping.macroTile             = dim3(128, 128, 1);
     solution.sizeMapping.depthU                = 64;
     solution.sizeMapping.matrixInstruction     = {16, 16, 32, 1};
@@ -252,11 +252,11 @@ TEST(StreamKForceFullTilesTest, UsesHardwareCuCount)
     EXPECT_EQ(solution.getSKGrid(problem, device, tiles, origami::reduction_t::tree), _CPX_CU);
 }
 
-TEST(StreamKForceFullTilesTest, FixedGridOverridesForceFullTileGrid)
+TEST(StreamKForceDPOnlyTest, FixedGridOverridesForceDPOnlyGrid)
 {
     ContractionSolution solution;
     solution.sizeMapping.streamK               = 3;
-    solution.sizeMapping.streamKForceFullTiles = 1;
+    solution.sizeMapping.streamKForceDPOnly     = 1;
     solution.sizeMapping.macroTile             = dim3(128, 128, 1);
     solution.sizeMapping.depthU                = 64;
     solution.sizeMapping.matrixInstruction     = {16, 16, 32, 1};
@@ -271,11 +271,11 @@ TEST(StreamKForceFullTilesTest, FixedGridOverridesForceFullTileGrid)
               device.skFixedGrid);
 }
 
-TEST(StreamKForceFullTilesTest, DoesNotRequestPartialWorkspace)
+TEST(StreamKForceDPOnlyTest, DoesNotRequestPartialWorkspace)
 {
     ContractionSolution solution;
     solution.sizeMapping.streamK               = 3;
-    solution.sizeMapping.streamKForceFullTiles = 1;
+    solution.sizeMapping.streamKForceDPOnly     = 1;
     solution.sizeMapping.streamKAtomic         = 0;
     solution.sizeMapping.macroTile             = dim3(256, 256, 1);
     solution.sizeMapping.depthU                = 64;

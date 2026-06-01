@@ -20,7 +20,7 @@ GlobalParameters:
   ISA: [[12, 5, 0]]
 
 BenchmarkProblems:
-  - # gfx1250 MXFP4, StreamK force full-tile persistent DP mode
+  - # gfx1250 MXFP4, StreamK force DP-only persistent mode
     - # ProblemType, TN
       OperationType: GEMM
       DataType: F4
@@ -37,7 +37,7 @@ BenchmarkProblems:
       MXBlockA: 32
       MXBlockB: 32
 
-    - # Force StreamK to use persistent DP only, with no partial-tile SK region
+    - # Force StreamK to use persistent DP only, with no SK region
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
@@ -75,7 +75,7 @@ BenchmarkProblems:
         - DirectToVgprSparseMetadata: [0]
         - StoreVectorWidth: [-1]
         - StreamK: [3]
-        - StreamKForceFullTiles: [1]
+        - StreamKForceDPOnly: [1]
         - StaggerU: [0]
         - DirectToVgprA: [False]
         - DirectToVgprB: [False]

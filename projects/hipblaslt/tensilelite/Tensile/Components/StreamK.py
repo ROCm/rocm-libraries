@@ -445,7 +445,7 @@ class StreamK(Component):
 
     def computeStoreSrdStartCommon(self, writer, kernel):
         module = Module("StreamK Common computeStoreSrdStart")
-        if kernel["StreamKForceFullTiles"]:
+        if kernel["StreamKForceDPOnly"]:
             return module
         skConstsInVgprs = writer.isStreamKConstantsToVgprEnabled(kernel)
 
@@ -621,7 +621,7 @@ class StreamK(Component):
         module = Module("StreamK Common storeBranches")
 
         # No branches when no StreamK partial/fixup path can be reached.
-        if kernel["StreamKAtomic"] or kernel["StreamKForceFullTiles"]:
+        if kernel["StreamKAtomic"] or kernel["StreamKForceDPOnly"]:
             return module
 
         memOrder = Component.StreamKMemoryOrdering.find(writer)
@@ -927,8 +927,8 @@ class StreamK(Component):
     def writePartialsCommon(self, writer, kernel, skPartialsLabel, vectorWidths, elements, tmpVgpr, cvtVgprStruct, endLabel):
         module = Module("StreamK Common writePartials")
 
-        # No partial writes for atomic or full-tile-only StreamK.
-        if kernel["StreamKAtomic"] or kernel["StreamKForceFullTiles"]:
+        # No partial writes for atomic or DP-only StreamK.
+        if kernel["StreamKAtomic"] or kernel["StreamKForceDPOnly"]:
             return module
 
         module.add(skPartialsLabel)
@@ -2571,7 +2571,7 @@ class StreamKTwoTileDPFirst(StreamK):
             module.add(SMovB32(dst=sgpr("StreamKIdx"), src=sgpr("WorkGroup0"),
                                comment="Save original StreamK index"))
 
-        if kernel["StreamKForceFullTiles"]:
+        if kernel["StreamKForceDPOnly"]:
             sIdx = writer.acquireStreamKConstSgpr(kernel, "StreamKIdx")
             sIpt = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")
             if skConstsInVgprs:
@@ -2759,7 +2759,7 @@ class StreamKTwoTileDPFirst(StreamK):
         # StreamK workgroup mapping
         sTmp = writer.sgprPool.checkOutAligned(4, 2, "SKMappingTemp")
 
-        if kernel["StreamKForceFullTiles"]:
+        if kernel["StreamKForceDPOnly"]:
             sIpt = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")
             if skConstsInVgprs:
                 module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.skConstVgprs["ItersPerTile"])))
