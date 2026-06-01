@@ -23,8 +23,8 @@
 #ifndef ROCFFT_HIP_OBJ_WRAPPER_H
 #define ROCFFT_HIP_OBJ_WRAPPER_H
 
-#include <type_traits>
 #include "rocfft_hip.h"
+#include <type_traits>
 
 // RAII wrapper around HIP objects (or rocfft objects if TSuccess == rocfft_status_success)
 template <typename T, auto TCreate, auto TDestroy, auto TSuccess = hipSuccess>
