@@ -956,11 +956,18 @@ namespace TensileLite
             , m_mxScaleFormat(args["mx-scale-format"].as<int>())
 
         {
-            if(args.count("mx-scale-pad-byte"))
             {
                 int padByte = args["mx-scale-pad-byte"].as<int>();
                 m_mxScalePadByte
                     = static_cast<uint8_t>(std::max(0, std::min(255, padByte)));
+            }
+            // MXScalePadByte is only meaningful when MXScaleFormat > 0 (the host
+            // pre-swizzle path is the only place the padding bytes ever reach the
+            // device). Force-zero it otherwise so the documentation's
+            // "Only consumed when MXScaleFormat == 1" claim holds at runtime.
+            if(m_mxScaleFormat == 0)
+            {
+                m_mxScalePadByte = 0x00;
             }
             if(m_mxScaleFormat > 0)
             {
