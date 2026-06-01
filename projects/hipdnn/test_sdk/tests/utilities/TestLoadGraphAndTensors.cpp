@@ -119,7 +119,7 @@ namespace
 {
 void touchFile(const std::filesystem::path& p)
 {
-    std::ofstream f(p);
+    const std::ofstream f(p);
     ASSERT_TRUE(f.good()) << "Failed to create " << p;
 }
 } // namespace
@@ -152,8 +152,11 @@ TEST(TestScanBundleJsonFiles, DiscoversJsonRecursively)
     ASSERT_EQ(results.size(), 2u);
 
     std::vector<std::string> filenames;
+    filenames.reserve(results.size());
     for(const auto& p : results)
+    {
         filenames.push_back(p.filename().string());
+    }
     EXPECT_NE(std::find(filenames.begin(), filenames.end(), "top.json"), filenames.end());
     EXPECT_NE(std::find(filenames.begin(), filenames.end(), "deep.json"), filenames.end());
 }
