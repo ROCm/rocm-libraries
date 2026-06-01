@@ -14,13 +14,23 @@ name: hipblaslt ASAN CI
 # component-specific one-off workflows. Build + test steps are inlined
 # so this workflow does not touch any shared infrastructure.
 #
-# Configuration mirrors TheRock's `linux-release-asan` CMakePreset
-# (CMakePresets.json @ pin 4e469b56). THEROCK_SANITIZER=ASAN is the
-# single source of truth for sanitizer flags. The per-target helper at
+# ASAN is scoped to the hipBLASLt subproject via TheRock's per-subproject
+# override `hipBLASLt_SANITIZER=ASAN`, NOT the global `THEROCK_SANITIZER`.
+# This is the whole point of this workflow's cost model: the global switch
+# instruments all ~30 subprojects, changing every compile command so ccache
+# misses across the board and the first run cold-rebuilds the entire stack.
+# The per-subproject override leaves every other subproject on regular flags
+# (ccache hits from the shared S3 cache) and instruments only hipBLASLt — so
+# we build & rebuild just the one component we own. See the Configure step
+# for the full rationale and the TheRock code path.
+#
+# Inside hipBLASLt's own sub-build, the generated toolchain stanza still does
+# `set(THEROCK_SANITIZER "ASAN")`, so hipblaslt's own ASAN gates and
+# TheRock's dlopen-validation skip fire correctly. That also keeps the
+# per-target helper at
 # projects/hipblaslt/cmake/hipblaslt_target_configure_sanitizers.cmake
-# is now a no-op when THEROCK_SANITIZER is set, so we do not pass
-# HIPBLASLT_ENABLE_ASAN=ON (would duplicate -fsanitize=address flags
-# globally injected by TheRock's cmake/therock_sanitizers.cmake).
+# a no-op (no duplicate -fsanitize=address flags), so we do not pass
+# HIPBLASLT_ENABLE_ASAN=ON.
 #
 # Arch caveat (gfx90a host-only ASAN):
 # TheRock's cmake/therock_sanitizers.cmake REGEX only appends `:xnack+`
@@ -156,15 +166,30 @@ jobs:
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
           package_version: ADHOCBUILD
-          # Match the regular TheRock CI's blas config plus a single
-          # ASAN flag. Extra preset options (CMAKE_BUILD_TYPE=RelWithDebInfo,
+          # Scope ASAN to the hipBLASLt subproject only.
+          #
+          # TheRock's cmake/therock_sanitizers.cmake selects the sanitizer per
+          # subproject as:
+          #     set(_sanitizer "${THEROCK_SANITIZER}")          # global default
+          #     if(DEFINED "${subproject_name}_SANITIZER")       # per-subproject
+          #       set(_sanitizer "${${subproject_name}_SANITIZER}")
+          #     endif()
+          # `subproject_name` is the therock_cmake_subproject_declare() target,
+          # which for hipblaslt is "hipBLASLt" (note casing) in
+          # math-libs/BLAS/CMakeLists.txt. By leaving the global
+          # THEROCK_SANITIZER unset and passing hipBLASLt_SANITIZER=ASAN, every
+          # OTHER subproject resolves to _sanitizer="" -> no instrumentation ->
+          # identical compile commands to the regular non-ASAN CI -> ccache hits
+          # from the shared S3 cache. Only hipBLASLt is instrumented and rebuilt
+          # cold; the ~30-subproject stack is NOT rebuilt under ASAN flags.
+          #
+          # Otherwise match the regular TheRock CI blas config. Extra preset
+          # options (CMAKE_BUILD_TYPE=RelWithDebInfo,
           # THEROCK_FLAG_KPACK_SPLIT_ARTIFACTS=OFF) caused build_configure.py
           # at TheRock pin 4e469b56 to produce a configure that did not
           # register the `therock-archives` target — the build step then
           # failed with `ninja: error: unknown target 'therock-archives'`.
-          # Sticking to the regular blas config + THEROCK_SANITIZER=ASAN
-          # keeps the configure path identical to the proven CI flow.
-          extra_cmake_options: "-DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ -DTHEROCK_ENABLE_BLAS=ON -DTHEROCK_SANITIZER=ASAN"
+          extra_cmake_options: "-DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ -DTHEROCK_ENABLE_BLAS=ON -DhipBLASLt_SANITIZER=ASAN"
           BUILD_DIR: build
         run: |
           python3 TheRock/build_tools/github_actions/build_configure.py
