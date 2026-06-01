@@ -45,9 +45,11 @@ from enum import Enum
 from functools import reduce
 
 import collections
+import json
 import math
 import operator
 import sys
+import time
 
 ########################################
 # Print a reject message :
@@ -2401,7 +2403,7 @@ class Solution(collections.abc.Mapping):
       isa = tuple(state["ISA"])
       state['MIInputPerThread'] = state["MatrixInstruction"][0] * state["MatrixInstruction"][2] * state["MatrixInstruction"][3] // state["WavefrontSize"]
       if (not globalParameters["AsmCaps"][isa]['HasMFMA']) and globalParameters["AsmCaps"][isa]['HasWMMA']:
-        state['MIInputPerThread'] = state["MatrixInstruction"][2]
+        state['MIInputPerThread'] = state["MatrixInstruction"][2] // 2 if isa[0] >= 12 else state["MatrixInstruction"][2]
 
     else:
       state["EnableMatrixInstruction"] = False
@@ -3037,21 +3039,38 @@ class Solution(collections.abc.Mapping):
 
       return True, ""
 
+    pkaRequested = state["PreloadKernelArguments"]
     pkaSupported, pkaMsg = supportsPreloadKernelArguments()
-    if state["PreloadKernelArguments"] == -1:
+    pkaForcedOff = False
+    if pkaRequested == -1:
       if pkaSupported:
         state["PreloadKernelArguments"] = 1
       else:
         state["PreloadKernelArguments"] = 0
-    elif state["PreloadKernelArguments"] == 1:
+    elif pkaRequested == 1:
       if not pkaSupported:
-        reject(state, pkaMsg)
+        if not globalParameters["AsmCaps"][isa]["KernargPreloading"]:
+          state["PreloadKernelArguments"] = 0
+          pkaForcedOff = True
+        else:
+          reject(state, pkaMsg)
 
     if "DelayRemainingArguments" in state:
       if state["DelayRemainingArguments"] and state["PreloadKernelArguments"] != 1:
+        if pkaForcedOff:
+          state["DelayRemainingArguments"] = False
+        else:
           reject(state, "Delayed kernel arguments only supported when preloading.")
     else:
       state["DelayRemainingArguments"] = False
+
+    #region agent log
+    try:
+      with open("/home/bstefanu/dev/rocm-libraries/.cursor/debug-1f3213.log", "a", encoding="utf-8") as f:
+        f.write(json.dumps({"sessionId":"1f3213","runId":"post-pka-fix","hypothesisId":"H1","location":"Tensile/SolutionStructs.py:PreloadKernelArguments","message":"Normalized preload kernel arguments","data":{"isa":isa,"requestedPreloadKernelArguments":pkaRequested,"preloadSupported":pkaSupported,"preloadMessage":pkaMsg,"forcedOff":pkaForcedOff,"finalPreloadKernelArguments":state["PreloadKernelArguments"],"finalDelayRemainingArguments":state["DelayRemainingArguments"]},"timestamp":int(time.time()*1000)}) + "\n")
+    except Exception:
+      pass
+    #endregion
 
     if state["VectorStore"] == -1:
         state["_VectorStore"] = 1 # default, may be changed if needed to generate a valid kernel

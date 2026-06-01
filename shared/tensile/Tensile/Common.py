@@ -39,6 +39,7 @@ import sys
 import time
 import warnings
 import re
+import json
 
 startTime = time.time()
 
@@ -1987,6 +1988,13 @@ def printWarning(message: str, category=UserWarning):
   sys.stdout.flush()
 
 def printExit(message):
+  #region agent log
+  try:
+    with open("/home/bstefanu/dev/rocm-libraries/.cursor/debug-1f3213.log", "a", encoding="utf-8") as f:
+      f.write(json.dumps({"sessionId":"1f3213","runId":"initial","hypothesisId":"H1,H2,H3,H4","location":"Tensile/Common.py:printExit","message":"Tensile fatal exit","data":{"fatalMessage":str(message),"argv":sys.argv,"cwd":os.getcwd()},"timestamp":int(time.time()*1000)}) + "\n")
+  except Exception:
+    pass
+  #endregion
   if TENSILE_TERM_COLORS:
         message = f"[bold red]{message}[/bold red]"
   print(message)
@@ -2031,7 +2039,10 @@ def GetAsmCaps(isaVersion: IsaVersion, hipVersion: SemanticVersion, cachedAsmCap
     derivedAsmCaps["HasLshlOr"]             = tryAssembler(isaVersion, "v_lshl_or_b32 v47, v36, 0x2, v34")
     derivedAsmCaps["HasSMulHi"]             = tryAssembler(isaVersion, "s_mul_hi_u32 s47, s36, s34")
 
-    derivedAsmCaps["HasWMMA"]               = tryAssembler(isaVersion, "v_wmma_f32_16x16x16_f16 v[0:3], v[8:15], v[16:23], v[0:3]")
+    if isaVersion[0] >= 12:
+      derivedAsmCaps["HasWMMA"]             = tryAssembler(isaVersion, "v_wmma_f32_16x16x16_f16 v[0:7], v[8:11], v[12:15], v[0:7]", False, "-mno-wavefrontsize64", "-mno-cumode")
+    else:
+      derivedAsmCaps["HasWMMA"]             = tryAssembler(isaVersion, "v_wmma_f32_16x16x16_f16 v[0:3], v[8:15], v[16:23], v[0:3]")
     derivedAsmCaps["HasMFMA"]               = tryAssembler(isaVersion, "v_mfma_f32_32x32x2bf16 a[0:31], v32, v33, a[0:31]") \
                                            or tryAssembler(isaVersion, "v_mfma_f32_32x32x1_2b_f32 a[0:31], v0, v1, a[0:31]")
     derivedAsmCaps["HasMFMA_constSrc"]      = tryAssembler(isaVersion, "v_mfma_f32_32x32x2bf16 a[0:31], v32, v33, 0") \
@@ -2165,7 +2176,7 @@ def tryAssembler(isaVersion, asmString, debug=False, *options):
   if globalParameters["PrintLevel"] >= 3:
     debug = True
 
-  if isaVersion[0] >= 10:
+  if isaVersion[0] >= 10 and '-mno-wavefrontsize64' not in options:
     options += ['-mwavefrontsize64']
 
   assembler = globalParameters['AssemblerPath']

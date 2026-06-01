@@ -14150,6 +14150,8 @@ class KernelWriterAssembly(KernelWriter):
             "attempt write", self.endLine )
       else:
         # not BufferStore case
+        if self.version[0] >= 12:
+          memoryBit = self.gfx12AtomicCmpswapMemoryModifier(memoryBit)
         kStr += "_global_atomic_cmpswap_b%u %s, %s, %s, %s, %s, %s    // %s%s" % \
             (bits, vgpr(addDst,atomicOpW), vgpr(addrCalc.addrDVgpr,2), \
             vgpr(addDst,atomicOpW*2), "off", "offset:%u"%offset, memoryBit, "attempt write", self.endLine )
