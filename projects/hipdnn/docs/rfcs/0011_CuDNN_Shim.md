@@ -910,9 +910,12 @@ Source that mixes v9 and v0.x types is out of scope (§4.7, §9).
   samples use it), all **four** `execute` overloads (shared_ptr-keyed
   pack; uid-keyed pack; uid-keyed-with-shape-overrides; flat-pointer-array
   form), `get_workspace_size`, `serialize`, `deserialize`.
-- Implement the no-op-with-debug-log Graph setters (`set_dynamic_shape_enabled`,
-  `set_override_shape_enabled`, `set_sm_count`, `set_sm_version`,
-  `set_kernel_cache`, `set_device_properties`) per §4.4.
+- Implement the graph-level configuration setters per the §4.4 triage table:
+  `set_override_shape_enabled` forwards (hipDNN supports it);
+  `set_dynamic_shape_enabled` forwards if supported, else no-op + debug log;
+  `set_kernel_cache` logs and ignores; `set_sm_count` and
+  `set_device_properties` error (via the recorded-error mechanism, §4.4.2);
+  `set_sm_version` is TBD pending investigation.
 - Add `Graph::tensor()` returning `std::shared_ptr<Tensor_attributes>`,
   including the scalar convenience overloads (`tensor(int64_t)`,
   `tensor(float)`, …).
