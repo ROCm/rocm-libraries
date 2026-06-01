@@ -1172,11 +1172,21 @@ struct GridwiseMoeGemmBlockScale
                                                  ScaleBlockM),
                        math::integer_divide_ceil(problem.K, ScaleBlockK)),
             make_tuple(math::integer_divide_ceil(problem.K, ScaleBlockK), 1));
-        const auto b_scale_grid_desc_bn_ak = make_naive_tensor_descriptor(
-            make_tuple(math::integer_divide_ceil(problem.N * (IsInputGemm && IsSplitK ? 2 : 1),
-                                                 ScaleBlockN),
-                       math::integer_divide_ceil(problem.K, ScaleBlockK)),
-            make_tuple(math::integer_divide_ceil(problem.K, ScaleBlockK), 1));
+        // [m1quad_joint_fix_wave / 2026-05-14 patch L2]
+        const auto b_scale_grid_desc_bn_ak = [&]() {
+            if constexpr (NPerBlock < ScaleBlockN) {
+                return make_naive_tensor_descriptor(
+                    make_tuple((IsInputGemm ? 2 : 1) * math::integer_divide_ceil(problem.N, ScaleBlockN),
+                               math::integer_divide_ceil(problem.K, ScaleBlockK)),
+                    make_tuple(math::integer_divide_ceil(problem.K, ScaleBlockK), 1));
+            } else {
+                return make_naive_tensor_descriptor(
+                    make_tuple(math::integer_divide_ceil(problem.N * (IsInputGemm && IsSplitK ? 2 : 1),
+                                                         ScaleBlockN),
+                               math::integer_divide_ceil(problem.K, ScaleBlockK)),
+                    make_tuple(math::integer_divide_ceil(problem.K, ScaleBlockK), 1));
+            }
+        }();
 
         const auto c_grid_desc_mblock_mperblock_nblock_nperblock =
             MakeCGridDescriptor_MBlock_MPerBlock_NBlock_NPerBlock(
@@ -1235,9 +1245,24 @@ struct GridwiseMoeGemmBlockScale
         });
         const long_index_t expert_stride = __builtin_amdgcn_readfirstlane(
             static_cast<long_index_t>(problem.N) * problem.K * (IsInputGemm ? 2 : 1));
+        // [m1quad_joint_fix_wave / 2026-05-14 patch L1]
+        // NPerBlock=64 path: caller passes per-N-tile quant layout
+        //   shape (E, ceil(2*N, NPerBlock), ceil(K, SBK)) = (E, 10, 56) for N=320
+        //   per-expert stride = 10 * 56 = 560 fp32
+        // NPerBlock>=128 path: unchanged
         const long_index_t expert_scale_stride = __builtin_amdgcn_readfirstlane(
-            static_cast<long_index_t>(math::integer_divide_ceil(problem.N, ScaleBlockN)) *
-            (IsInputGemm ? 2 : 1) * math::integer_divide_ceil(problem.K, ScaleBlockK));
+            [&]() {
+                if constexpr (NPerBlock < ScaleBlockN) {
+                    return static_cast<long_index_t>(
+                        (IsInputGemm ? 2 : 1) * math::integer_divide_ceil(problem.N, ScaleBlockN)) *
+                        math::integer_divide_ceil(problem.K, ScaleBlockK);
+                } else {
+                    return static_cast<long_index_t>(
+                        math::integer_divide_ceil(problem.N, ScaleBlockN)) *
+                        (IsInputGemm ? 2 : 1) *
+                        math::integer_divide_ceil(problem.K, ScaleBlockK);
+                }
+            }());
 
         // N0, K0, Blocksize*KPack
         const index_t n_block_data_idx_on_grid =
@@ -1426,7 +1451,16 @@ struct GridwiseMoeGemmBlockScale
                                              ScaleSliceSizeK,
                                              1,
                                              false>(
-                b_scale_grid_desc_bn_ak, make_multi_index(block_n_id * NPerBlock / ScaleBlockN, 0));
+                b_scale_grid_desc_bn_ak,
+                make_multi_index(
+                    [&]() {
+                        if constexpr (NPerBlock < ScaleBlockN) {
+                            return block_n_id * NPerBlock / ScaleBlockN;
+                        } else {
+                            return block_n_id * NPerBlock / ScaleBlockN;
+                        }
+                    }(),
+                    0));
 
         // constexpr auto a_scale_thread_slice_copy_step = make_multi_index(0, 1);
         constexpr auto a_scale_thread_slice_copy_step =
@@ -1457,8 +1491,14 @@ struct GridwiseMoeGemmBlockScale
                                        get_warp_local_1d_id() % NWave,
                                        0,
                                        KPack / KGroup * (get_thread_local_1d_id() % WarpSize)));
+            // [m1quad_joint_fix_wave / 2026-05-14 patch L3-alt]
+            // NPerBlock=64 path: scale buf_up shares same per-expert offset as buf;
+            //   up rows start at block_n_id = ceil(2N, NPerBlock)/2 inside full desc
+            // NPerBlock>=128 path: unchanged dual-pointer offset
             const BScaleType* p_b_scale_grid_up =
-                p_b_scale_grid + expert_scale_stride / 2 / BPackedSize;
+                (NPerBlock < ScaleBlockN)
+                    ? p_b_scale_grid
+                    : p_b_scale_grid + expert_scale_stride / 2 / BPackedSize;
             const auto b_scale_grid_buf_up =
                 make_dynamic_buffer<AddressSpaceEnum::Global, b_coherence_flag>(
                     p_b_scale_grid_up + static_cast<long_index_t>(expert_id) * expert_scale_stride,
@@ -1475,7 +1515,17 @@ struct GridwiseMoeGemmBlockScale
                                                  1,
                                                  false>(
                     b_scale_grid_desc_bn_ak,
-                    make_multi_index(block_n_id * NPerBlock / ScaleBlockN, 0));
+                    make_multi_index(
+                        [&]() {
+                            if constexpr (NPerBlock < ScaleBlockN) {
+                                // NPerBlock=64 path: up rows start at ceil(2N,NPerBlock)/2
+                                return block_n_id * NPerBlock / ScaleBlockN +
+                                    math::integer_divide_ceil(problem.N, ScaleBlockN);
+                            } else {
+                                return block_n_id * NPerBlock / ScaleBlockN;
+                            }
+                        }(),
+                        0));
 
             blockwise_gemm_pipeline.template Run<HasMainKBlockLoop, NumKBlockPerScale, TailNum>(
                 a_grid_desc_ak0_m_ak1,
@@ -1788,9 +1838,24 @@ struct GridwiseMoeGemmBlockScale
         });
         const long_index_t expert_stride = __builtin_amdgcn_readfirstlane(
             static_cast<long_index_t>(problem.N) * problem.K * (IsInputGemm ? 2 : 1));
+        // [m1quad_joint_fix_wave / 2026-05-14 patch L1]
+        // NPerBlock=64 path: caller passes per-N-tile quant layout
+        //   shape (E, ceil(2*N, NPerBlock), ceil(K, SBK)) = (E, 10, 56) for N=320
+        //   per-expert stride = 10 * 56 = 560 fp32
+        // NPerBlock>=128 path: unchanged
         const long_index_t expert_scale_stride = __builtin_amdgcn_readfirstlane(
-            static_cast<long_index_t>(math::integer_divide_ceil(problem.N, ScaleBlockN)) *
-            (IsInputGemm ? 2 : 1) * math::integer_divide_ceil(problem.K, ScaleBlockK));
+            [&]() {
+                if constexpr (NPerBlock < ScaleBlockN) {
+                    return static_cast<long_index_t>(
+                        math::integer_divide_ceil(problem.N * (IsInputGemm ? 2 : 1), ScaleBlockN)) *
+                        math::integer_divide_ceil(problem.K, ScaleBlockK);
+                } else {
+                    return static_cast<long_index_t>(
+                        math::integer_divide_ceil(problem.N, ScaleBlockN)) *
+                        (IsInputGemm ? 2 : 1) *
+                        math::integer_divide_ceil(problem.K, ScaleBlockK);
+                }
+            }());
         // N0, K0, Blocksize*KPack
         const index_t n_block_data_idx_on_grid =
             __builtin_amdgcn_readfirstlane(block_n_id * NXdlPerWave);
@@ -1982,7 +2047,16 @@ struct GridwiseMoeGemmBlockScale
                                              ScaleSliceSizeK,
                                              1,
                                              false>(
-                b_scale_grid_desc_bn_ak, make_multi_index(block_n_id * NPerBlock / ScaleBlockN, 0));
+                b_scale_grid_desc_bn_ak,
+                make_multi_index(
+                    [&]() {
+                        if constexpr (NPerBlock < ScaleBlockN) {
+                            return block_n_id * NPerBlock / ScaleBlockN;
+                        } else {
+                            return block_n_id * NPerBlock / ScaleBlockN;
+                        }
+                    }(),
+                    0));
 
         // constexpr auto a_scale_thread_slice_copy_step = make_multi_index(0, 1);
         constexpr auto a_scale_thread_slice_copy_step =
@@ -2013,8 +2087,14 @@ struct GridwiseMoeGemmBlockScale
                                        get_warp_local_1d_id() % NWave,
                                        0,
                                        KPack / KGroup * (get_thread_local_1d_id() % WarpSize)));
+            // [m1quad_joint_fix_wave / 2026-05-14 patch L3-alt]
+            // NPerBlock=64 path: scale buf_up shares same per-expert offset as buf;
+            //   up rows start at block_n_id = ceil(2N, NPerBlock)/2 inside full desc
+            // NPerBlock>=128 path: unchanged dual-pointer offset
             const BScaleType* p_b_scale_grid_up =
-                p_b_scale_grid + expert_scale_stride / 2 / BPackedSize;
+                (NPerBlock < ScaleBlockN)
+                    ? p_b_scale_grid
+                    : p_b_scale_grid + expert_scale_stride / 2 / BPackedSize;
             const auto b_scale_grid_buf_up =
                 make_dynamic_buffer<AddressSpaceEnum::Global, b_coherence_flag>(
                     p_b_scale_grid_up +
@@ -2032,7 +2112,16 @@ struct GridwiseMoeGemmBlockScale
                                                  1,
                                                  false>(
                     b_scale_grid_desc_bn_ak,
-                    make_multi_index(block_n_id * NPerBlock / ScaleBlockN, 0));
+                    make_multi_index(
+                        [&]() {
+                            if constexpr (NPerBlock < ScaleBlockN) {
+                                return block_n_id * NPerBlock / ScaleBlockN +
+                                    math::integer_divide_ceil(problem.N * (IsInputGemm ? 2 : 1), ScaleBlockN) / 2;
+                            } else {
+                                return block_n_id * NPerBlock / ScaleBlockN;
+                            }
+                        }(),
+                        0));
 
             blockwise_gemm_pipeline.template Run<HasMainKBlockLoop, NumKBlockPerScale, TailNum>(
                 a_grid_desc_ak0_m_ak1,
