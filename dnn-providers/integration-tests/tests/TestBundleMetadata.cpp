@@ -433,4 +433,79 @@ TEST(TestCheckArchCompatibility, PassesWhenArchIsEmptyString)
     EXPECT_FALSE(checkArchCompatibility(meta, "gfx942:sramecc+:xnack-").has_value());
 }
 
+TEST(TestCheckArchCompatibility, CpuCheckIsCaseSensitive)
+{
+    // "CPU" (uppercase) is NOT treated as cpu — the arch guard activates.
+    // This documents the current behavior: case-sensitive comparison.
+    BundleMetadata meta;
+    meta.referenceExecutor = "CPU";
+    meta.gpuArchitecture = "gfx1100";
+    // "CPU" != "cpu" → not treated as CPU executor → arch guard runs → mismatch
+    EXPECT_TRUE(checkArchCompatibility(meta, "gfx942:sramecc+:xnack-").has_value());
+}
+
+TEST(TestCheckArchCompatibility, NonCpuExecutorTriggersArchGuard)
+{
+    // Any executor name that is not "cpu" triggers the arch guard.
+    BundleMetadata meta;
+    meta.referenceExecutor = "miopen";
+    meta.gpuArchitecture = "gfx942";
+    // "miopen" is not "cpu" → arch guard runs → gfx942 matches → passes
+    EXPECT_FALSE(checkArchCompatibility(meta, "gfx942:sramecc+:xnack-").has_value());
+}
+
+// ---------------------------------------------------------------------------
+// loadBundleMetadata — additional corner cases
+// ---------------------------------------------------------------------------
+
+TEST(TestLoadBundleMetadata, IgnoresIntegerWhereStringExpected)
+{
+    // gpu_architecture is 42 (integer, not string) — readString skips it
+    const TempBundle bundle(R"({
+        "format_version": 1,
+        "metadata": {"gpu_architecture": 42, "operation": 100}
+    })");
+
+    auto meta = loadBundleMetadata(bundle.bundleJsonPath());
+    ASSERT_TRUE(meta.has_value());
+    EXPECT_FALSE(meta->gpuArchitecture.has_value());
+    EXPECT_FALSE(meta->operation.has_value());
+}
+
+TEST(TestLoadBundleMetadata, IgnoresNullFieldValues)
+{
+    // JSON null is not a string or integer — fields become nullopt
+    const TempBundle bundle(R"({
+        "format_version": 1,
+        "metadata": {"seed": null, "gpu_architecture": null}
+    })");
+
+    auto meta = loadBundleMetadata(bundle.bundleJsonPath());
+    ASSERT_TRUE(meta.has_value());
+    EXPECT_FALSE(meta->seed.has_value());
+    EXPECT_FALSE(meta->gpuArchitecture.has_value());
+}
+
+TEST(TestLoadBundleMetadata, ReturnsNulloptOnEmptyFile)
+{
+    const TempBundle bundle(" ");
+    auto meta = loadBundleMetadata(bundle.bundleJsonPath());
+    EXPECT_FALSE(meta.has_value());
+}
+
+TEST(TestLoadBundleMetadata, ReturnsNulloptOnJsonArray)
+{
+    // Valid JSON but not an object — format_version check fails
+    const TempBundle bundle("[1, 2, 3]");
+    auto meta = loadBundleMetadata(bundle.bundleJsonPath());
+    EXPECT_FALSE(meta.has_value());
+}
+
+TEST(TestLoadBundleMetadata, RejectsFormatVersionZero)
+{
+    const TempBundle bundle(R"({"format_version": 0})");
+    auto meta = loadBundleMetadata(bundle.bundleJsonPath());
+    EXPECT_FALSE(meta.has_value());
+}
+
 // NOLINTEND(readability-identifier-naming)
