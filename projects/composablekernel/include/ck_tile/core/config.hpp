@@ -209,7 +209,7 @@
 #endif
 
 #if(defined(__gfx125__))
-#define CK_TILE_ENABLE_TDM_FEATURE 1
+#define CK_TILE_ENABLE_TDM_FEATURE 0
 #else
 #define CK_TILE_ENABLE_TDM_FEATURE 0
 #endif

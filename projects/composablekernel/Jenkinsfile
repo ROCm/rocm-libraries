@@ -2136,7 +2136,7 @@ pipeline {
                     }
                     steps{
                         deleteDir()
-                        Build_CK_and_Reboot(setup_args: setup_args, docker_name: "${env.CK_DOCKERHUB_PRIVATE}:npi-mi450-latest", config_targets: "install", no_reboot:true, build_type: 'Release', prefixpath: '/usr/local')
+                        Build_CK_and_Reboot(setup_args: setup_args, docker_name: "${env.CK_DOCKERHUB_PRIVATE}:ck_ub24.04_gfx1250", config_targets: "install", no_reboot:true, build_type: 'Release', prefixpath: '/usr/local')
                         cleanWs()
                     }
                 }
