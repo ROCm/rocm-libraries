@@ -35,9 +35,12 @@ endif()
 
 # --- Kernel variants ---
 set(OGRAD_DOT_O_VARIANTS
+    fmha_bwd_ograd_dot_o_fp16_d32_batch
     fmha_bwd_ograd_dot_o_fp16_d128_batch
     fmha_bwd_ograd_dot_o_bf16_d128_batch
     fmha_bwd_ograd_dot_o_fp16_d64_batch
+    fmha_bwd_ograd_dot_o_fp16_d96_batch
+    fmha_bwd_ograd_dot_o_fp16_d256_batch
     fmha_bwd_ograd_dot_o_fp16_d128_group
     fmha_bwd_ograd_dot_o_bf16_d128_group
     fmha_bwd_ograd_dot_o_fp16_d128_batch_npad
@@ -52,6 +55,12 @@ set(DQDKDV_VARIANTS
     fmha_bwd_dqdkdv_fp16_d128_batch_det
     fmha_bwd_dqdkdv_fp16_d128_group
     fmha_bwd_dqdkdv_bf16_d128_group
+    fmha_bwd_dqdkdv_fp16_d128_group_cmask
+    fmha_bwd_dqdkdv_fp16_d128_group_det
+    fmha_bwd_dqdkdv_fp16_d128_group_dropout
+    fmha_bwd_dqdkdv_fp16_d128_group_ebias
+    fmha_bwd_dqdkdv_fp16_d128_group_alibi
+    fmha_bwd_dqdkdv_fp16_d128_group_ebias_dbias
     fmha_bwd_dqdkdv_fp16_d128_batch_ebias
     fmha_bwd_dqdkdv_bf16_d128_batch_ebias
     fmha_bwd_dqdkdv_fp16_d128_batch_alibi
@@ -63,10 +72,18 @@ set(DQDKDV_VARIANTS
 )
 
 set(CONVERT_DQ_VARIANTS
+    fmha_bwd_convert_dq_fp16_d64_batch_det
+    fmha_bwd_convert_dq_fp16_d64_group_det
+    fmha_bwd_convert_dq_bf16_d64_batch_det
+    fmha_bwd_convert_dq_bf16_d64_group_det
     fmha_bwd_convert_dq_fp16_d128_batch_det
     fmha_bwd_convert_dq_fp16_d128_group_det
     fmha_bwd_convert_dq_bf16_d128_batch_det
     fmha_bwd_convert_dq_bf16_d128_group_det
+    fmha_bwd_convert_dq_fp16_d256_batch_det
+    fmha_bwd_convert_dq_fp16_d256_group_det
+    fmha_bwd_convert_dq_bf16_d256_batch_det
+    fmha_bwd_convert_dq_bf16_d256_group_det
 )
 
 set(KERNEL_VARIANTS
