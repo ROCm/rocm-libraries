@@ -1,6 +1,6 @@
 # RFC: cuDNN shim for hipDNN
 
-- **Status**: Draft
+- **Status**: Accepted
 - **Authors**: Mitch Ousdahl
 
 ## Table of Contents
