@@ -785,7 +785,8 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
     }
 
     // Prefill, double lds
-    template <typename QDramBlockWindowTmp,
+    template <bool kHasBlockMask = false,
+              typename QDramBlockWindowTmp,
               typename KDramBlockWindowTmp,
               typename VDramBlockWindowTmp,
               typename BiasDramBlockWindowTmp,
@@ -804,7 +805,8 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
                void* __restrict__ smem_ptrk0,
                void* __restrict__ smem_ptrk1,
                void* __restrict__ smem_ptrv0,
-               void* __restrict__ smem_ptrv1) const
+               void* __restrict__ smem_ptrv1,
+               const int32_t* block_mask_row_ptr = nullptr) const
     {
         static_assert(
             std::is_same_v<QDataType, remove_cvref_t<typename QDramBlockWindowTmp::DataType>> &&
@@ -823,6 +825,7 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
                       "wrong!");
         ignore = bias_dram_block_window_tmp;
         ignore = position_encoding;
+        (void)block_mask_row_ptr;
 
         // Block GEMM
         constexpr auto gemm_0 = Policy::template GetQKBlockGemm<Problem>();
@@ -1395,7 +1398,8 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
 
 #if defined(__gfx950__)
     // Hdim256 implementation - single buffer, hdim == 256 (gfx950 only)
-    template <typename QDramBlockWindowTmp,
+    template <bool kHasBlockMask_ = false,
+              typename QDramBlockWindowTmp,
               typename KDramBlockWindowTmp,
               typename VDramBlockWindowTmp,
               typename BiasDramBlockWindowTmp,
@@ -1411,7 +1415,8 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
                           PositionEncoding position_encoding,
                           float scale_s,
                           void* smem_ptr,
-                          float sink_v) const
+                          float sink_v,
+                          const int32_t* block_mask_row_ptr = nullptr) const
     {
         static_assert(
             std::is_same_v<QDataType, remove_cvref_t<typename QDramBlockWindowTmp::DataType>> &&
@@ -1430,6 +1435,7 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
                       "wrong!");
         ignore = bias_dram_block_window_tmp;
         ignore = position_encoding;
+        (void)block_mask_row_ptr;
         // Block GEMM
         constexpr auto gemm_0 = Policy::template GetQKBlockGemm<Problem>();
         constexpr auto gemm_1 = Policy::template GetPVBlockGemm<Problem>();
