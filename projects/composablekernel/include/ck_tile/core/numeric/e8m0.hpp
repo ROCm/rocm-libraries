@@ -4,12 +4,13 @@
 #pragma once
 
 #include "ck_tile/core/config.hpp"
+#include "ck_tile/core/numeric/integer.hpp"
 #include "ck_tile/core/numeric/mxfp_convert.hpp"
+#include "ck_tile/core/numeric/numeric.hpp"
+#include "ck_tile/core/utility/bit_cast.hpp"
 
-#if __clang_major__ >= 23
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-#endif
+#include <limits>
+
 namespace ck_tile {
 
 /**
@@ -41,7 +42,7 @@ struct e8m0_bexp_t
     {
     }
     CK_TILE_HOST_DEVICE constexpr operator type() const { return data; }
-    CK_TILE_HOST_DEVICE constexpr raw_type& get() { return data; }
+    CK_TILE_HOST_DEVICE constexpr raw_type& get() [[clang::lifetimebound]] { return data; }
     CK_TILE_HOST_DEVICE constexpr raw_type get() const { return data; }
     CK_TILE_HOST_DEVICE constexpr operator float() const;
 
@@ -104,6 +105,3 @@ CK_TILE_HOST_DEVICE constexpr e8m0_bexp_t::operator float() const
 }
 
 } // namespace ck_tile
-#if __clang_major__ >= 23
-#pragma clang diagnostic pop
-#endif

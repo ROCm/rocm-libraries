@@ -9,8 +9,7 @@
 #include "hip/hip_runtime.h"
 #endif
 
-#include "ck_tile/core/numeric/integer.hpp"
-
+#include <cstdint>
 #include <type_traits>
 
 #if defined(__gfx908__) || defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__) || \
@@ -610,13 +609,13 @@ struct amdgcn_compiler_target_state
 template <typename T, typename... Ts>
 // TODO: c++20 concept    requires((std::is_convertible<Ts, T>::value && ...) && (sizeof...(Ts) >=
 // 1))
-CK_TILE_HOST_DEVICE static constexpr uint32_t count_values_of(T search, Ts... searchList)
+CK_TILE_HOST_DEVICE static constexpr std::uint32_t count_values_of(T search, Ts... searchList)
 {
     static_assert((std::is_convertible<Ts, T>::value && ...),
                   "All search list values must be convertible to the search value type");
     static_assert(sizeof...(Ts) >= 1, "At least one value must be provided to search in");
 
-    return (static_cast<uint32_t>(search == static_cast<T>(searchList)) + ...);
+    return (static_cast<std::uint32_t>(search == static_cast<T>(searchList)) + ...);
 }
 
 #define CK_TILE_COMPILER_TARGETS_LIST                               \

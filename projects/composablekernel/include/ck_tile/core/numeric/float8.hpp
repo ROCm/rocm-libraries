@@ -1,18 +1,20 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "ck_tile/core/config.hpp"
-#include "ck_tile/core/utility/bit_cast.hpp"
-#include "ck_tile/core/numeric/numeric.hpp"
-#include "ck_tile/core/utility/random.hpp"
-#include "ck_tile/core/numeric/half.hpp"
-#include "ck_tile/core/numeric/bfloat16.hpp"
-#include "ck_tile/core/numeric/integral_constant.hpp"
-#include <stdint.h>
-#include <type_traits>
-#include "ck_tile/core/numeric/math.hpp"
-
 #pragma once
+
+#include "ck_tile/core/config.hpp"
+#include "ck_tile/core/numeric/bfloat16.hpp"
+#include "ck_tile/core/numeric/half.hpp"
+#include "ck_tile/core/numeric/integer.hpp"
+#include "ck_tile/core/numeric/integral_constant.hpp"
+#include "ck_tile/core/numeric/math.hpp"
+#include "ck_tile/core/numeric/numeric.hpp"
+#include "ck_tile/core/numeric/type_convert.hpp"
+#include "ck_tile/core/utility/bit_cast.hpp"
+#include "ck_tile/core/utility/random.hpp"
+
+#include <type_traits>
 
 #if(defined(__gfx94__) || defined(__gfx950__) || defined(__gfx12__)) && __HIP_DEVICE_COMPILE__
 #define CK_TILE_FP8_CVT_DEVICE 1
@@ -1332,6 +1334,27 @@ bf8_t exp2(bf8_t x) { return static_cast<bf8_t>(exp2f(static_cast<float>(x))); }
 
 CK_TILE_DEVICE
 bf8_t log(bf8_t x) { return static_cast<bf8_t>(__logf(static_cast<float>(x))); };
+
+#else
+
+#define CK_TILE_TYPE_CONVERT(dtype_, dname_, stype_, sname_)                    \
+    template <>                                                                 \
+    CK_TILE_HOST_DEVICE constexpr dtype_ type_convert<dtype_, stype_>(stype_ x) \
+    {                                                                           \
+        return sname_##_to_##dname_(x);                                         \
+    }
+
+CK_TILE_TYPE_CONVERT(float, float, fp8_t, fp8)
+CK_TILE_TYPE_CONVERT(float, float, bf8_t, bf8)
+CK_TILE_TYPE_CONVERT(fp8_t, fp8, float, float)
+CK_TILE_TYPE_CONVERT(bf8_t, bf8, float, float)
+CK_TILE_TYPE_CONVERT(fp8_t, fp8, fp16_t, fp16)
+CK_TILE_TYPE_CONVERT(bf8_t, bf8, fp16_t, fp16)
+CK_TILE_TYPE_CONVERT(fp16_t, fp16, fp8_t, fp8)
+CK_TILE_TYPE_CONVERT(fp16_t, fp16, bf8_t, bf8)
+
+#undef CK_TILE_TYPE_CONVERT
+
 #endif
 
 } // namespace ck_tile

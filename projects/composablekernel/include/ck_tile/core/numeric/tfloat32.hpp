@@ -234,4 +234,43 @@ struct [[deprecated(
     using bitwise_type                  = uint32_t;
 };
 
+#if !CK_TILE_USE_CUSTOM_DATA_TYPE
+[[deprecated("Use (ck_tile::numeric_traits<ck_tile::tf32_t>::exp_mask << 23) "
+             "instead")]] static constexpr uint32_t float32_exponent_mask = 0x7F800000u;
+
+template <tf32_rounding_mode rounding = tf32_rounding_mode::trunc>
+[[deprecated(
+    "Use ck_tile::type_convert<ck_tile::tf32_t> instead")]] CK_TILE_HOST_DEVICE constexpr float
+float_to_tf32(float x)
+{
+    uint32_t i = bit_cast<uint32_t>(x);
+    if constexpr(rounding == tf32_rounding_mode::rne)
+    {
+        // RTNE rounding.
+        if((i & float32_exponent_mask) != float32_exponent_mask)
+        {
+            // Add rounding bias for round-to-nearest-even (RTNE) before truncating:
+            //  - 0xFFFu is the rounding bias corresponding to the 13 fraction bits that
+            //    will be discarded.
+            //  - (i >> 13) & 1u extracts the least significant of those discarded bits and
+            //    adding it implements "ties to even" (round half-way cases to even).
+            i += 0xFFFu + ((i >> 13) & 1u);
+        }
+    }
+    // Zero out the lowest 13 fraction bits to form the TF32-like value.
+    i &= 0xFFFFE000u;
+    return bit_cast<float>(i);
+}
+
+template <typename Y,
+          tf32_rounding_mode rounding                              = tf32_rounding_mode::trunc,
+          std::enable_if_t<std::is_same_v<Y, tf32_legacy_t>, bool> = false>
+[[deprecated(
+    "Use ck_tile::type_convert<ck_tile::tf32_t> instead")]] CK_TILE_HOST_DEVICE constexpr float
+type_convert(float x)
+{
+    return float_to_tf32<rounding>(x);
+}
+#endif
+
 } // namespace ck_tile
