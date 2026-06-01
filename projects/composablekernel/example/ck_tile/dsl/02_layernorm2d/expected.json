@@ -1,0 +1,5 @@
+{
+  "kind": "layernorm_fp16",
+  "min_tflops": 0.0,
+  "notes": "Layernorm is memory-bound; we report GB/s. The verify gate enforces correctness within fp16/bf16 ULP vs a fp32 numpy reference."
+}

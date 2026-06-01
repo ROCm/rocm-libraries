@@ -1,0 +1,12 @@
+{
+  "shapes": [
+    {
+      "M": 3328,
+      "N": 4096,
+      "K": 4096,
+      "tflops_lower_bound": 200.0
+    }
+  ],
+  "max_codegen_ms": 20000.0,
+  "notes": "Lower bound is conservative — this kernel is the *representative* of the sweep (first OK build), not the sweep winner. The sweep finds the winner separately; gating that is done by tools/dsl_sweep_run."
+}

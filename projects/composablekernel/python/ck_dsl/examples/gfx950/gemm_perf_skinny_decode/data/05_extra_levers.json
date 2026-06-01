@@ -1,0 +1,316 @@
+{
+  "shape": {
+    "M": 2,
+    "N": 4096,
+    "K": 4096
+  },
+  "base_tile": {
+    "tile_m": 16,
+    "tile_n": 64,
+    "tile_k": 32,
+    "warp_m": 1,
+    "warp_n": 2,
+    "warp_k": 1,
+    "warp_tile_m": 16,
+    "warp_tile_n": 16,
+    "warp_tile_k": 32
+  },
+  "results": [
+    {
+      "label": "baseline_winner",
+      "hypothesis": "sweep winner reference",
+      "ms_median": 0.0483054,
+      "ms_best": 0.0482554,
+      "ms_spread_pct": 0.1854865087547193,
+      "tflops_best": 1.3907,
+      "gbs_best": 696.03,
+      "pct_hbm": 8.700375,
+      "samples": [
+        {
+          "ms": 0.0483054,
+          "tflops": 1.38926,
+          "gbs": 695.31
+        },
+        {
+          "ms": 0.0482554,
+          "tflops": 1.3907,
+          "gbs": 696.03
+        },
+        {
+          "ms": 0.0482744,
+          "tflops": 1.39015,
+          "gbs": 695.756
+        },
+        {
+          "ms": 0.048345,
+          "tflops": 1.38812,
+          "gbs": 694.74
+        },
+        {
+          "ms": 0.0483214,
+          "tflops": 1.3888,
+          "gbs": 695.079
+        }
+      ]
+    },
+    {
+      "label": "waves_per_eu_2",
+      "hypothesis": "lower VGPR target \u2192 more waves/CU",
+      "ms_median": 0.0497582,
+      "ms_best": 0.0497316,
+      "ms_spread_pct": 0.1836883166995559,
+      "tflops_best": 1.34942,
+      "gbs_best": 675.369,
+      "pct_hbm": 8.4421125,
+      "samples": [
+        {
+          "ms": 0.0497582,
+          "tflops": 1.3487,
+          "gbs": 675.009
+        },
+        {
+          "ms": 0.049823,
+          "tflops": 1.34695,
+          "gbs": 674.131
+        },
+        {
+          "ms": 0.0497316,
+          "tflops": 1.34942,
+          "gbs": 675.369
+        },
+        {
+          "ms": 0.0497806,
+          "tflops": 1.34809,
+          "gbs": 674.705
+        },
+        {
+          "ms": 0.049749,
+          "tflops": 1.34895,
+          "gbs": 675.133
+        }
+      ]
+    },
+    {
+      "label": "waves_per_eu_3",
+      "hypothesis": "even-lower VGPR target",
+      "ms_median": 0.0497808,
+      "ms_best": 0.0497214,
+      "ms_spread_pct": 0.2137370231093103,
+      "tflops_best": 1.3497,
+      "gbs_best": 675.508,
+      "pct_hbm": 8.44385,
+      "samples": [
+        {
+          "ms": 0.0497808,
+          "tflops": 1.34809,
+          "gbs": 674.702
+        },
+        {
+          "ms": 0.0498278,
+          "tflops": 1.34682,
+          "gbs": 674.065
+        },
+        {
+          "ms": 0.0497252,
+          "tflops": 1.34959,
+          "gbs": 675.456
+        },
+        {
+          "ms": 0.0497214,
+          "tflops": 1.3497,
+          "gbs": 675.508
+        },
+        {
+          "ms": 0.049787,
+          "tflops": 1.34792,
+          "gbs": 674.618
+        }
+      ]
+    },
+    {
+      "label": "persistent",
+      "hypothesis": "persistent CTAs: amortise launch",
+      "ms_median": 0.0483274,
+      "ms_best": 0.048319,
+      "ms_spread_pct": 0.052558176107139656,
+      "tflops_best": 1.38887,
+      "gbs_best": 695.113,
+      "pct_hbm": 8.6889125,
+      "samples": [
+        {
+          "ms": 0.0483444,
+          "tflops": 1.38814,
+          "gbs": 694.748
+        },
+        {
+          "ms": 0.048319,
+          "tflops": 1.38887,
+          "gbs": 695.113
+        },
+        {
+          "ms": 0.048337,
+          "tflops": 1.38835,
+          "gbs": 694.854
+        },
+        {
+          "ms": 0.0483206,
+          "tflops": 1.38882,
+          "gbs": 695.09
+        },
+        {
+          "ms": 0.0483274,
+          "tflops": 1.38863,
+          "gbs": 694.992
+        }
+      ]
+    },
+    {
+      "label": "chiplet_swizzle",
+      "hypothesis": "XCD-aware grid swizzle (MI355X 8 XCDs)",
+      "ms_median": 0.0489216,
+      "ms_best": 0.0489161,
+      "ms_spread_pct": 0.08074143118786958,
+      "tflops_best": 1.37192,
+      "gbs_best": 686.629,
+      "pct_hbm": 8.582862500000001,
+      "samples": [
+        {
+          "ms": 0.0489556,
+          "tflops": 1.37081,
+          "gbs": 686.074
+        },
+        {
+          "ms": 0.048923,
+          "tflops": 1.37172,
+          "gbs": 686.531
+        },
+        {
+          "ms": 0.0489216,
+          "tflops": 1.37176,
+          "gbs": 686.551
+        },
+        {
+          "ms": 0.0489165,
+          "tflops": 1.37191,
+          "gbs": 686.624
+        },
+        {
+          "ms": 0.0489161,
+          "tflops": 1.37192,
+          "gbs": 686.629
+        }
+      ]
+    },
+    {
+      "label": "persistent_chiplet",
+      "hypothesis": "stack: persistent + chiplet",
+      "ms_median": 0.0489255,
+      "ms_best": 0.0488991,
+      "ms_spread_pct": 0.15206794003127663,
+      "tflops_best": 1.3724,
+      "gbs_best": 686.868,
+      "pct_hbm": 8.58585,
+      "samples": [
+        {
+          "ms": 0.0489255,
+          "tflops": 1.37166,
+          "gbs": 686.497
+        },
+        {
+          "ms": 0.0489259,
+          "tflops": 1.37164,
+          "gbs": 686.492
+        },
+        {
+          "ms": 0.0488991,
+          "tflops": 1.3724,
+          "gbs": 686.868
+        },
+        {
+          "ms": 0.0489039,
+          "tflops": 1.37226,
+          "gbs": 686.8
+        },
+        {
+          "ms": 0.0489735,
+          "tflops": 1.37031,
+          "gbs": 685.824
+        }
+      ]
+    },
+    {
+      "label": "compv4_persistent",
+      "hypothesis": "co-evolve: pipeline + persistent (\u00a717.4)",
+      "ms_median": 0.0483061,
+      "ms_best": 0.0482759,
+      "ms_spread_pct": 0.1594001585721072,
+      "tflops_best": 1.39011,
+      "gbs_best": 695.734,
+      "pct_hbm": 8.696675,
+      "samples": [
+        {
+          "ms": 0.0482887,
+          "tflops": 1.38974,
+          "gbs": 695.55
+        },
+        {
+          "ms": 0.0483463,
+          "tflops": 1.38809,
+          "gbs": 694.721
+        },
+        {
+          "ms": 0.0483529,
+          "tflops": 1.3879,
+          "gbs": 694.627
+        },
+        {
+          "ms": 0.0483061,
+          "tflops": 1.38924,
+          "gbs": 695.3
+        },
+        {
+          "ms": 0.0482759,
+          "tflops": 1.39011,
+          "gbs": 695.734
+        }
+      ]
+    },
+    {
+      "label": "compv4_persistent_chiplet",
+      "hypothesis": "full stack",
+      "ms_median": 0.0488989,
+      "ms_best": 0.0488515,
+      "ms_spread_pct": 0.1856892486334089,
+      "tflops_best": 1.37373,
+      "gbs_best": 687.537,
+      "pct_hbm": 8.594212500000001,
+      "samples": [
+        {
+          "ms": 0.0488825,
+          "tflops": 1.37286,
+          "gbs": 687.101
+        },
+        {
+          "ms": 0.0489423,
+          "tflops": 1.37118,
+          "gbs": 686.261
+        },
+        {
+          "ms": 0.0488515,
+          "tflops": 1.37373,
+          "gbs": 687.537
+        },
+        {
+          "ms": 0.0489181,
+          "tflops": 1.37186,
+          "gbs": 686.6
+        },
+        {
+          "ms": 0.0488989,
+          "tflops": 1.3724,
+          "gbs": 686.87
+        }
+      ]
+    }
+  ]
+}
