@@ -24,7 +24,7 @@ namespace
 {
 
 /// Helper: create a temporary directory with a fake bundle JSON and optional
-/// .meta.json companion. Auto-cleans on destruction.
+/// .meta.json companion. Auto-cleans on destruction via ScopedDirectory.
 class TempBundle
 {
 public:
@@ -32,38 +32,26 @@ public:
         : _dir(std::filesystem::temp_directory_path()
                / ("test_bundle_" + std::to_string(std::rand())))
     {
-        std::filesystem::create_directories(_dir);
-
         // Create a minimal bundle JSON (enough for path derivation)
-        std::ofstream bundleFile(_dir / "Bundle.json");
+        std::ofstream bundleFile(_dir.path() / "Bundle.json");
         bundleFile << "{}";
         bundleFile.close();
 
         if(!metaJsonContent.empty())
         {
-            std::ofstream metaFile(_dir / "Bundle.meta.json");
+            std::ofstream metaFile(_dir.path() / "Bundle.meta.json");
             metaFile << metaJsonContent;
             metaFile.close();
         }
     }
 
-    ~TempBundle()
-    {
-        std::filesystem::remove_all(_dir);
-    }
-
-    TempBundle(const TempBundle&) = delete;
-    TempBundle& operator=(const TempBundle&) = delete;
-    TempBundle(TempBundle&&) = delete;
-    TempBundle& operator=(TempBundle&&) = delete;
-
     std::filesystem::path bundleJsonPath() const
     {
-        return _dir / "Bundle.json";
+        return _dir.path() / "Bundle.json";
     }
 
 private:
-    std::filesystem::path _dir;
+    hipdnn_test_sdk::utilities::ScopedDirectory _dir;
 };
 
 } // namespace
