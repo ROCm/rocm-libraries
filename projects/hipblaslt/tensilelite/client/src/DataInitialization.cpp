@@ -956,6 +956,12 @@ namespace TensileLite
             , m_mxScaleFormat(args["mx-scale-format"].as<int>())
 
         {
+            if(args.count("mx-scale-pad-byte"))
+            {
+                int padByte = args["mx-scale-pad-byte"].as<int>();
+                m_mxScalePadByte
+                    = static_cast<uint8_t>(std::max(0, std::min(255, padByte)));
+            }
             if(m_mxScaleFormat > 0)
             {
                 hipDeviceProp_t prop;
@@ -1931,7 +1937,8 @@ namespace TensileLite
                                                size_t   compactFreeDim,
                                                size_t   compactKBlocks,
                                                size_t   paddedKBlocks,
-                                               size_t   elemBytes)
+                                               size_t   elemBytes,
+                                               uint8_t  padByte = 0x00)
         {
             if(compactKBlocks == paddedKBlocks || compactFreeDim == 0)
                 return;
@@ -1941,9 +1948,9 @@ namespace TensileLite
             for(size_t f = compactFreeDim; f-- > 1;)
             {
                 std::memmove(buffer + f * paddedRow, buffer + f * compactRow, compactRow);
-                std::memset(buffer + f * paddedRow + compactRow, 0x00, padTail);
+                std::memset(buffer + f * paddedRow + compactRow, padByte, padTail);
             }
-            std::memset(buffer + compactRow, 0x00, padTail);
+            std::memset(buffer + compactRow, padByte, padTail);
         }
 
         void DataInitialization::initializeMXData(ContractionProblemGemm const& problem)
@@ -2048,9 +2055,12 @@ namespace TensileLite
 
                 auto initA = m_vdata[ContractionProblemGemm::TENSOR::A].init;
 
-                // Zero the scale buffer; padding beyond the valid region stays 0x00
+                // Fill the scale buffer with m_mxScalePadByte. DGen overwrites
+                // the valid region; padding bytes beyond it stay at the poison
+                // value so a kernel-side mask leak surfaces at validation
+                // instead of multiplying by 0 silently.
                 std::memset(pristineE8A.cpuInput.valid.get(),
-                            0x00,
+                            m_mxScalePadByte,
                             problem.mxsa().totalAllocatedElements());
 
                 // cpuInput.valid always holds canonical (non-preswizzled) scale so the CPU
@@ -2088,7 +2098,7 @@ namespace TensileLite
                                     1.0f);
                     if(kFastA)
                         restrideMXScaleBufferKFast(
-                            scalePtr, compactFreeA, compactKA, paddedKA, scaleElemA);
+                            scalePtr, compactFreeA, compactKA, paddedKA, scaleElemA, m_mxScalePadByte);
                 }
 
                 // For preswizzle-arch (gfx950): when the preswizzle condition fires,
@@ -2099,7 +2109,10 @@ namespace TensileLite
                 {
                     size_t gpuScaleBytes = problem.mxsa().totalAllocatedElements()
                                           * DataTypeInfo::Get(problem.mxsa().dataType()).elementSize;
-                    std::vector<uint8_t> gpuScaleBuf(gpuScaleBytes, 0);
+                    // Seed with the poison byte; DGen overwrites the swizzled
+                    // valid region and any remaining padding stays poisoned so
+                    // GPU mask leaks show up at validation.
+                    std::vector<uint8_t> gpuScaleBuf(gpuScaleBytes, m_mxScalePadByte);
                     for(size_t b = 0; b < batchCount; b++)
                     {
                         auto* dataPtr  = static_cast<uint8_t*>(pristineA.cpuInput.valid.get())
@@ -2167,9 +2180,9 @@ namespace TensileLite
 
                 auto initB = m_vdata[ContractionProblemGemm::TENSOR::B].init;
 
-                // Zero the scale buffer; padding beyond the valid region stays 0x00
+                // Same padding-fill semantics as the A side; see comment there.
                 std::memset(pristineE8B.cpuInput.valid.get(),
-                            0x00,
+                            m_mxScalePadByte,
                             problem.mxsb().totalAllocatedElements());
 
                 // cpuInput.valid holds canonical scale for the CPU reference.
@@ -2206,7 +2219,7 @@ namespace TensileLite
                                     1.0f);
                     if(kFastB)
                         restrideMXScaleBufferKFast(
-                            scalePtr, compactFreeB, compactKB, paddedKB, scaleElemB);
+                            scalePtr, compactFreeB, compactKB, paddedKB, scaleElemB, m_mxScalePadByte);
                 }
 
                 // For preswizzle-arch (gfx950): upload preswizzled scale directly to gpuInput.valid.
@@ -2214,7 +2227,8 @@ namespace TensileLite
                 {
                     size_t gpuScaleBytes = problem.mxsb().totalAllocatedElements()
                                           * DataTypeInfo::Get(problem.mxsb().dataType()).elementSize;
-                    std::vector<uint8_t> gpuScaleBuf(gpuScaleBytes, 0);
+                    // Same poison-fill semantics as the A side.
+                    std::vector<uint8_t> gpuScaleBuf(gpuScaleBytes, m_mxScalePadByte);
                     for(size_t b = 0; b < batchCount; b++)
                     {
                         auto* dataPtr  = static_cast<uint8_t*>(pristineB.cpuInput.valid.get())
