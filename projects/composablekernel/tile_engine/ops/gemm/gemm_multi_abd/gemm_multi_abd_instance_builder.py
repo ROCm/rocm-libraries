@@ -140,6 +140,9 @@ class GemmMultiABDKernelBuilder(GemmKernelBuilder):
         for i in range(self.num_d_tensors):
             lines.append(f"using D{i}DataType = {dtype_str};")
         lines.append(f"using EDataType = {e_dtype_str};")
+        lines.append(
+            "using CDataType = EDataType;"
+        )  # alias required by GemmProfiler base
         lines.append(f"using AccDataType = {acc_type};")
         lines.append("")
 
