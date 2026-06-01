@@ -10,13 +10,6 @@ on:
         type: string
       amdgpu_families:
         type: string
-      # Override for ARTIFACT_GROUP / S3 fetch path. Defaults to
-      # amdgpu_families. Variant builds (ASAN) supply a suffixed value so
-      # the test side fetches the right artifacts and so is_asan() detects
-      # the variant via the ARTIFACT_GROUP env.
-      artifact_group:
-        type: string
-        default: ""
       test_runs_on:
         type: string
       platform:
@@ -82,7 +75,6 @@ jobs:
       artifact_run_id: ${{  github.run_id }}
       therock_ref: ${{ inputs.therock_ref }}
       amdgpu_families: ${{ inputs.amdgpu_families }}
-      artifact_group: ${{ inputs.artifact_group }}
       test_runs_on: ${{ inputs.test_runs_on }}
       platform: ${{ inputs.platform }}
       component: ${{ toJSON(matrix.components) }}

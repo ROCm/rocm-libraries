@@ -1,0 +1,314 @@
+name: hipblaslt ASAN CI
+
+# Standalone hipblaslt ASAN smoke build. Opt-in via `ci:asan` label so we
+# do not burn the limited gfx90a runner pool on every PR. Scope:
+#
+#   - gfx90a only (cheap arch, small Tensile kernel set, fast TCL)
+#   - hipblaslt only (no rocblas/rocroller/hipblas/etc — their own ASAN
+#     issues we do not own)
+#   - full hipblaslt-test sharded 6 ways (gfx90a is fast enough)
+#   - non-blocking until suppression set stabilizes
+#
+# Self-contained (no `uses:` of therock-ci-linux / therock-test-packages),
+# mirroring the rocisa-ci.yml / stinkytofu-ci.yml conventions for
+# component-specific one-off workflows. Build + test steps are inlined
+# so this workflow does not touch any shared infrastructure.
+#
+# Configuration mirrors TheRock's `linux-release-asan` CMakePreset
+# (CMakePresets.json @ pin 4e469b56). THEROCK_SANITIZER=ASAN is the
+# single source of truth for sanitizer flags. The per-target helper at
+# projects/hipblaslt/cmake/hipblaslt_target_configure_sanitizers.cmake
+# is now a no-op when THEROCK_SANITIZER is set, so we do not pass
+# HIPBLASLT_ENABLE_ASAN=ON (would duplicate -fsanitize=address flags
+# globally injected by TheRock's cmake/therock_sanitizers.cmake).
+#
+# Arch caveat (gfx90a host-only ASAN):
+# TheRock's cmake/therock_sanitizers.cmake REGEX only appends `:xnack+`
+# to gfx942 and gfx950 for device-side ASAN. gfx90a is not matched, so
+# this build runs HOST-side ASAN only — good for hipblaslt host-runtime
+# / Tensile-init UB and leaks, not a substitute for device-side ASAN
+# coverage on MI300/MI350. Use the post-merge multi-arch ASAN workflow
+# (PR 7906) for device-side coverage.
+
+on:
+  pull_request:
+    types:
+      - labeled
+      - synchronize
+      - reopened
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  # The `labeled` event fires for every label add/remove; this gate keeps
+  # the rest of the workflow inert unless ci:asan is actually present.
+  # workflow_dispatch (manual run) bypasses the gate.
+  check_label:
+    name: "Check ci:asan label"
+    runs-on: ubuntu-24.04
+    outputs:
+      run: ${{ steps.gate.outputs.run }}
+    steps:
+      - id: gate
+        env:
+          IS_DISPATCH: ${{ github.event_name == 'workflow_dispatch' }}
+          HAS_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'ci:asan') }}
+        run: |
+          if [[ "$IS_DISPATCH" == "true" || "$HAS_LABEL" == "true" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  setup:
+    name: "Setup"
+    needs: check_label
+    if: needs.check_label.outputs.run == 'true'
+    runs-on: ubuntu-24.04
+    outputs:
+      therock_ref: ${{ steps.ci-env.outputs.therock-ref }}
+      docker_image: ${{ steps.ci-env.outputs.docker-image }}
+      build_runs_on: ${{ steps.ci-env.outputs.linux-runner }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github
+          sparse-checkout-cone-mode: true
+          fetch-depth: 1
+
+      - name: Load CI environment
+        id: ci-env
+        uses: ./.github/actions/ci-env
+
+  build:
+    name: "Build (hipblaslt | gfx90a | ASAN)"
+    needs: setup
+    runs-on: ${{ needs.setup.outputs.build_runs_on }}
+    permissions:
+      id-token: write
+    container:
+      image: ${{ needs.setup.outputs.docker_image }}
+      options: -v /runner/config:/home/awsconfig/
+    env:
+      CACHE_DIR: ${{ github.workspace }}/.container-cache
+      CCACHE_CONFIGPATH: ${{ github.workspace }}/.ccache/ccache.conf
+      AMDGPU_FAMILIES: gfx90a
+      TEATIME_FORCE_INTERACTIVE: 0
+      AWS_SHARED_CREDENTIALS_FILE: /home/awsconfig/credentials.ini
+      # Suffix routes S3 artifacts into their own path so this build does
+      # not collide with any non-ASAN gfx90a run and so the test side's
+      # is_asan() check (TheRock's github_actions_api.py) trips by
+      # detecting "asan" in ARTIFACT_GROUP.
+      ARTIFACT_GROUP: gfx90a-asan
+    steps:
+      - name: "Check out rocm-libraries"
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Checkout TheRock repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: "ROCm/TheRock"
+          path: TheRock
+          ref: ${{ needs.setup.outputs.therock_ref }}
+
+      - name: Install python deps
+        run: |
+          pip install -r TheRock/requirements.txt
+
+      - name: Adjust git config
+        run: |
+          git config --global --add safe.directory $PWD
+          git config fetch.parallel 10
+
+      - name: Setup ccache
+        run: |
+          ./TheRock/build_tools/setup_ccache.py \
+            --config-preset "github-oss-dev" \
+            --dir "$(dirname $CCACHE_CONFIGPATH)" \
+            --local-path "$CACHE_DIR/ccache"
+
+      - name: Runner health status
+        run: |
+          ./TheRock/build_tools/health_status.py
+
+      - name: Pull DVC files for rocm-libraries
+        run: |
+          if command -v dvc &> /dev/null; then
+            echo "dvc detected"
+          else
+            echo "Warning, dvc not detected!"
+          fi
+          LOGNAME=github-runner dvc pull -v
+
+      - name: Fetch sources
+        timeout-minutes: 30
+        run: |
+          ./TheRock/build_tools/fetch_sources.py --jobs 12 --no-include-rocm-libraries --no-include-ml-frameworks
+
+      - name: Configure Projects
+        env:
+          amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
+          package_version: ADHOCBUILD
+          # Mirrors TheRock's linux-release-asan preset cacheVariables.
+          # - THEROCK_ENABLE_BLAS=ON              : pulls hipblaslt
+          # - THEROCK_SANITIZER=ASAN              : single sanitizer-flag source
+          # - CMAKE_BUILD_TYPE=RelWithDebInfo     : ASAN frames need file:line
+          # - THEROCK_FLAG_KPACK_SPLIT_ARTIFACTS  : preset default; skip extra
+          #                                         link-time packaging
+          extra_cmake_options: "-DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ -DTHEROCK_ENABLE_BLAS=ON -DTHEROCK_SANITIZER=ASAN -DCMAKE_BUILD_TYPE=RelWithDebInfo -DTHEROCK_FLAG_KPACK_SPLIT_ARTIFACTS=OFF"
+          BUILD_DIR: build
+        run: |
+          python3 TheRock/build_tools/github_actions/build_configure.py
+
+      - name: Build therock-archives and therock-dist
+        run: cmake --build TheRock/build --target therock-archives therock-dist -- -k 0
+
+      - name: Report
+        if: ${{ !cancelled() }}
+        run: |
+          echo "Full SDK du:"
+          echo "------------"
+          du -h -d 1 TheRock/build/dist/rocm
+          echo "Artifact Archives:"
+          echo "------------------"
+          ls -lh TheRock/build/artifacts/*.tar.xz
+          echo "Artifacts:"
+          echo "----------"
+          du -h -d 1 TheRock/build/artifacts
+          echo "CCache Stats:"
+          echo "-------------"
+          ccache -s -v
+          tail -v -n +1 .ccache/compiler_check_cache/* > TheRock/build/logs/ccache_compiler_check_cache.log
+
+      - name: Configure AWS Credentials for non-forked repos
+        if: ${{ always() && !github.event.pull_request.head.repo.fork }}
+        uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7 # v6.0.0
+        with:
+          aws-region: us-east-2
+          role-to-assume: arn:aws:iam::692859939525:role/therock-ci-external
+
+      - name: Post Build Upload
+        if: always()
+        run: |
+          python3 TheRock/build_tools/github_actions/post_build_upload.py \
+            --run-id ${{ github.run_id }} \
+            --artifact-group ${ARTIFACT_GROUP} \
+            --build-dir TheRock/build \
+            --upload
+
+  test:
+    name: "Test hipblaslt ASAN (shard ${{ matrix.shard }} of 6)"
+    needs: [setup, build]
+    runs-on: linux-gfx90a-gpu-rocm
+    timeout-minutes: 210
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      options: --ipc host
+        --group-add video
+        --device /dev/kfd
+        --device /dev/dri
+        --group-add 993
+        --group-add 992
+        --group-add 110
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    defaults:
+      run:
+        shell: bash
+    env:
+      VENV_DIR: ${{ github.workspace }}/.venv
+      ARTIFACT_RUN_ID: ${{ github.run_id }}
+      OUTPUT_ARTIFACTS_DIR: "./build"
+      THEROCK_BIN_DIR: "./build/bin"
+      AMDGPU_FAMILIES: gfx90a
+      # is_asan() in TheRock's github_actions_api.py keys off "asan" in
+      # ARTIFACT_GROUP; the suffix here trips it for the test driver.
+      ARTIFACT_GROUP: gfx90a-asan
+      TEST_COMPONENT: hipblaslt
+    steps:
+      - name: Checkout TheRock repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: "ROCm/TheRock"
+          ref: ${{ needs.setup.outputs.therock_ref }}
+
+      - name: Checkout rocm-libraries repository for scripts
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          path: rocm-libraries
+
+      - name: Run setup test environment workflow
+        timeout-minutes: 15
+        uses: './.github/actions/setup_test_environment'
+        with:
+          ARTIFACT_RUN_ID: ${{ env.ARTIFACT_RUN_ID }}
+          ARTIFACT_GROUP: ${{ env.ARTIFACT_GROUP }}
+          OUTPUT_ARTIFACTS_DIR: ${{ env.OUTPUT_ARTIFACTS_DIR }}
+          VENV_DIR: ${{ env.VENV_DIR }}
+          # Mirrors fetch_test_configurations.py's hipblaslt entry.
+          FETCH_ARTIFACT_ARGS: "--blas --tests"
+          IS_PR_FROM_FORK: ${{ github.event.pull_request.head.repo.fork }}
+
+      - name: Driver / GPU sanity check
+        timeout-minutes: 3
+        run: |
+          python ./build_tools/print_driver_gpu_info.py
+
+      - name: ASAN runtime environment
+        # Mirrors TheRock's test_component.yml ASAN env block so downstream
+        # test scripts see the same options. detect_leaks=1 is strict (we
+        # want leaks surfaced); first runs will be noisy until suppression
+        # set stabilizes. The summary job absorbs the failure.
+        run: |
+          {
+            echo "ASAN_OPTIONS=detect_odr_violation=0:quarantine_size_mb=600:detect_leaks=1"
+            echo "LSAN_OPTIONS=print_suppressions=0"
+            echo "HSA_XNACK=1"
+            echo "ASAN_SYMBOLIZER_PATH=${{ env.OUTPUT_ARTIFACTS_DIR }}/lib/llvm/bin/llvm-symbolizer"
+          } >> "$GITHUB_ENV"
+
+      - name: Test hipblaslt
+        timeout-minutes: 180
+        env:
+          SHARD_INDEX: ${{ matrix.shard }}
+          TOTAL_SHARDS: 6
+          TEST_TYPE: full
+        run: |
+          mkdir -p ./test_logs
+          python rocm-libraries/test/therock/test_hipblaslt.py 2>&1 | tee ./test_logs/test_output.log
+
+  summary:
+    name: "hipblaslt ASAN CI Summary"
+    if: always()
+    needs:
+      - check_label
+      - build
+      - test
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Report
+        env:
+          GATE: ${{ needs.check_label.outputs.run }}
+          BUILD: ${{ needs.build.result }}
+          TEST: ${{ needs.test.result }}
+        run: |
+          if [[ "$GATE" != "true" ]]; then
+            echo "Skipped (ci:asan label not set)."
+            exit 0
+          fi
+          echo "Build:  ${BUILD}"
+          echo "Test:   ${TEST}"
+          # Intentionally do not fail; ASAN is non-blocking until the
+          # suppression set stabilizes. Promote to required by changing
+          # this to:
+          #   [[ "$BUILD" == "success" && "$TEST" == "success" ]] || exit 1
