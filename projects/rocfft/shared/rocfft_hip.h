@@ -21,8 +21,31 @@
 #ifndef __ROCFFT_HIP_H__
 #define __ROCFFT_HIP_H__
 
+#include <atomic>
+#include <cstddef>
 #include <hip/hip_runtime_api.h>
 #include <stdexcept>
+#include <string>
+
+// exception for hip runtime error(s) specifically
+struct hip_runtime_error : public std::runtime_error
+{
+    const hipError_t hip_error;
+    hip_runtime_error(const std::string& info, hipError_t hip_status)
+        : std::runtime_error::runtime_error(info)
+        , hip_error(hip_status)
+    {
+        n_hip_failures++;
+    }
+
+    static inline size_t get_count()
+    {
+        return n_hip_failures;
+    }
+
+private:
+    static inline std::atomic<size_t> n_hip_failures = 0;
+};
 
 class rocfft_scoped_device
 {
@@ -30,18 +53,24 @@ public:
     static int device_count()
     {
         static int count = 0;
-        if(count == 0 && hipGetDeviceCount(&count) != hipSuccess)
-            throw std::runtime_error("failed to get device count");
+        if(count == 0)
+        {
+            const auto ret = hipGetDeviceCount(&count);
+            if(ret != hipSuccess)
+                throw hip_runtime_error("failed to get device count", ret);
+        }
         return count;
     }
 
     rocfft_scoped_device(int device)
     {
-        if(hipGetDevice(&orig_device) != hipSuccess)
-            throw std::runtime_error("hipGetDevice failure");
+        auto ret = hipGetDevice(&orig_device);
+        if(ret != hipSuccess)
+            throw hip_runtime_error("hipGetDevice failure", ret);
 
-        if(hipSetDevice(device) != hipSuccess)
-            throw std::runtime_error("hipSetDevice failure");
+        ret = hipSetDevice(device);
+        if(ret != hipSuccess)
+            throw hip_runtime_error("hipSetDevice failure", ret);
     }
     ~rocfft_scoped_device()
     {
