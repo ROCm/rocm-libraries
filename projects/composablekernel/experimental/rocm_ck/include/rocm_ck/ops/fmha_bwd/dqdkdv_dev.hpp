@@ -22,6 +22,8 @@
        " Host code should include <rocm_ck/ops/fmha_bwd/dqdkdv_api.hpp>."
 #endif
 
+#include <type_traits>
+
 #include <rocm_ck/ops/fmha_bwd/dqdkdv_spec.hpp>
 
 #include <rocm_ck/args.hpp>
