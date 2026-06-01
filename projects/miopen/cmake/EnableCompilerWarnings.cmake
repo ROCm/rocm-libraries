@@ -35,6 +35,15 @@ set(__cxx_compile_options
     -Wshadow
     -Wsuggest-override
     -Wold-style-cast
+    -Wcast-align
+    -Wcast-qual
+    -Wformat-nonliteral
+    -Wunknown-attributes
+    -Woption-ignored
+    -Wunknown-warning-option
+    -Wdeprecated
+    -Wdeprecated-builtins
+    -Wzero-as-null-pointer-constant
     # TODO: Working to enable these warnings. Each requires code cleanup first.
     # -Wconversion            # ~1000+ implicit narrowing/sign conversions to fix
     # -Wdouble-promotion      # implicit float-to-double promotions
@@ -47,6 +56,16 @@ set(__cxx_compile_options
 
 set(__clang_cxx_compile_options
     -Wno-unused-command-line-argument
+    -Wthread-safety
+    -Wshift-sign-overflow
+    -Winconsistent-missing-destructor-override
+    -Wcomma
+    -Wmicrosoft-enum-value
+    -Wmicrosoft-cpp-macro
+    -Wnested-anon-types
+    -Wlanguage-extension-token
+    -Wunused-template
+    -Wnrvo
 )
 
 if(WIN32)
