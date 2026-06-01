@@ -513,5 +513,17 @@ rocsparse_status rocsparse::csrsv_analysis(rocsparse_handle            handle,
                                                    A->const_col_data,
                                                    temp_buffer));
 
+    //
+    // Allocate the numeric (exact) singular-pivot buffer here, during analysis,
+    // rather than in solve. The solve routine may be executed inside a HIP graph
+    // capture region, in which case a stream-ordered allocation performed there is
+    // graph-owned and becomes invalid once the captured graph is torn down. The
+    // buffer persists in the info object and is read later by csrsv_zero_pivot
+    // (outside of capture), so it must be created in the (non-captured) analysis
+    // phase and synchronized, exactly like the symbolic zero-pivot buffer above.
+    //
+    csrsv_info->create_singularity_numeric_exact(1, A->col_type, handle->stream);
+    RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+
     return rocsparse_status_success;
 }

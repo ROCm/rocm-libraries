@@ -88,6 +88,18 @@ rocsparse_status rocsparse::csrilu0_analysis(rocsparse_handle          handle,
 
         if(trm != nullptr)
         {
+            //
+            // The numeric singular-pivot buffers are read after compute (which may run
+            // inside a HIP graph capture). They must be allocated here, in the
+            // (non-captured) analysis phase, otherwise a stream-ordered allocation made
+            // during a captured compute becomes graph-owned and invalid once the graph
+            // is torn down. See rocsparse_csrsv_analysis.cpp for the detailed rationale.
+            //
+            csrilu0_info->create_singularity_numeric_exact(
+                A->batch_count, A->col_type, handle->stream);
+            csrilu0_info->create_singularity_numeric_near(
+                A->batch_count, A->col_type, handle->stream);
+            RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
             return rocsparse_status_success;
         }
     }
@@ -113,6 +125,15 @@ rocsparse_status rocsparse::csrilu0_analysis(rocsparse_handle          handle,
                                                      A->col_type,
                                                      A->const_col_data,
                                                      temp_buffer));
+
+    //
+    // Allocate the numeric singular-pivot buffers here, during (non-captured) analysis,
+    // rather than in csrilu0 compute which may run inside a HIP graph capture region.
+    // See rocsparse_csrsv_analysis.cpp for the detailed rationale.
+    //
+    csrilu0_info->create_singularity_numeric_exact(A->batch_count, A->col_type, handle->stream);
+    csrilu0_info->create_singularity_numeric_near(A->batch_count, A->col_type, handle->stream);
+    RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
 
     return rocsparse_status_success;
 }
