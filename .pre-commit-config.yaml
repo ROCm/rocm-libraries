@@ -68,6 +68,9 @@ repos:
           ^dnn-providers/hip-kernel-provider/\.clang-format$|
           ^dnn-providers/integration-tests/\.clang-format$
       - id: check-added-large-files
+        exclude: |
+          (?x)
+          ^projects/composablekernel/dispatcher/heuristics/models/fmha_fwd_gfx950/model_tflops\.lgbm$
 
   - repo: https://github.com/psf/black
     rev: 25.12.0

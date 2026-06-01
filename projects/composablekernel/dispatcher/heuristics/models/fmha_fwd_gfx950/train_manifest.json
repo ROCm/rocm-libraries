@@ -1,0 +1,11 @@
+{
+  "op": "fmha_fwd",
+  "arch": "gfx950",
+  "n_samples": 190607,
+  "n_groups": 244,
+  "n_features": 68,
+  "cv_mean_efficiency": 95.29854344771616,
+  "cv_std_efficiency": 0.35625314067957226,
+  "n_estimators": 500,
+  "log_transform": true
+}
