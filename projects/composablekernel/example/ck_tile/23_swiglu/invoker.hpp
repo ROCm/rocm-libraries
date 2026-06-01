@@ -1,5 +1,7 @@
 #pragma once
 
+#include "config.hpp"
+
 #include "ck_tile/host/stream_config.hpp"
 #include "ck_tile/ops/epilogue/cshuffle_epilogue.hpp"
 #include "ck_tile/ops/gemm/kernel/gemm_tile_partitioner.hpp"
@@ -8,8 +10,6 @@
 #include "ck_tile/ops/gemm/pipeline/tile_gemm_traits.hpp"
 #include "ck_tile/ops/swiglu/swiglu_kernel.hpp"
 #include "ck_tile/ops/swiglu/act_and_mul.hpp"
-
-#include "config.hpp"
 
 namespace ck_tile::swiglu_example {
 

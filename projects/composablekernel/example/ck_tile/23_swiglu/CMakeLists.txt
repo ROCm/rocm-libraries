@@ -14,4 +14,5 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx90a|gfx125")
         PRIVATE
         main.cpp
     )
+    target_compile_options(example_swiglu PRIVATE -mllvm -enable-noalias-to-md-conversion=0)
 endif()

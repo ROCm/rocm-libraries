@@ -448,25 +448,22 @@ int run_with_prec(std::string a_layout, std::string b_layout, ck_tile::ArgParser
 template <template <class> typename Pipeline>
 auto run_with_pipeline(ck_tile::ArgParser& arg_parser) -> int
 {
+    using namespace ck_tile;
     std::string data_type = arg_parser.get_str("prec");
     std::string a_layout  = arg_parser.get_str("a_layout");
     std::string b_layout  = arg_parser.get_str("b_layout");
 
     if(data_type == "fp16")
-        return run_with_prec<Pipeline<ck_tile::fp16_t>, ck_tile::fp16_t>(
-            a_layout, b_layout, arg_parser);
+        return run_with_prec<Pipeline<fp16_t>, fp16_t>(a_layout, b_layout, arg_parser);
 
     if(data_type == "bf16")
-        return run_with_prec<Pipeline<ck_tile::bf16_t>, ck_tile::bf16_t>(
-            a_layout, b_layout, arg_parser);
+        return run_with_prec<Pipeline<bf16_t>, bf16_t>(a_layout, b_layout, arg_parser);
 
     if(data_type == "fp8")
-        return run_with_prec<Pipeline<ck_tile::fp8_t>, ck_tile::fp8_t>(
-            a_layout, b_layout, arg_parser);
+        return run_with_prec<Pipeline<fp8_t>, fp8_t, fp8_t, half_t>(a_layout, b_layout, arg_parser);
 
     if(data_type == "bf8")
-        return run_with_prec<Pipeline<ck_tile::bf8_t>, ck_tile::bf8_t>(
-            a_layout, b_layout, arg_parser);
+        return run_with_prec<Pipeline<bf8_t>, bf8_t, bf8_t, half_t>(a_layout, b_layout, arg_parser);
 
     throw std::runtime_error(std::format("Invalid datatype! \n\t{}", data_type));
 }

@@ -1,9 +1,7 @@
 #pragma once
 
-#include "ck_tile/core.hpp"
-#include "ck_tile/core/numeric/pk_fp4.hpp"
-#include "ck_tile/host/kernel_launch.hpp"
-#include "ck_tile/ops/epilogue.hpp"
+#include "ck_tile/core/config.hpp"
+#include "ck_tile/core/numeric/numeric.hpp"
 #include "ck_tile/ops/gemm.hpp"
 
 namespace ck_tile::swiglu_example {
