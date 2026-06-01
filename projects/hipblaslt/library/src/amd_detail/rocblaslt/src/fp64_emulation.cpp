@@ -30,8 +30,8 @@
  *                                              + beta * C[i,j]
  *
  * The number of moduli s (= number of INT8 GEMMs) is configurable at runtime via
- * HIPBLASLT_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT (default: s=14, ~110 bits of CRT
- * capacity, sufficient for guaranteed FP64-equivalent results on HPL-like inputs).
+ * HIPBLASLT_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT (default: s=20, ~155 bits of CRT
+ * capacity, sufficient for guaranteed FP64-equivalent results on all inputs).
  *
  * Constants (tables) are taken verbatim from the open-source GEMMul8 implementation
  * (Y. Uchino, RIKEN R-CCS, https://github.com/RIKEN-RCCS/GEMMul8).
@@ -56,7 +56,7 @@ static constexpr double FP64_EMUL_AI_THRESHOLD = 32.0;
 
 /* Maximum number of moduli supported (s = 2..OZ2_S_MAX).
  * Constant memory and table arrays are sized for the maximum. */
-static constexpr unsigned OZ2_S_MAX = 14;
+static constexpr unsigned OZ2_S_MAX = 20;
 
 /* Alignment for INT8 arrays (128 bytes = 128 INT8 elements) */
 static constexpr size_t OZ2_ALIGN = 128;
@@ -83,15 +83,17 @@ static __constant__ double cInvP;               /* 1/M                  */
  * Host-side tables (source: GEMMul8/GEMMul8/src/table.hpp)
  *
  * Moduli in order: 256 (implicit), 255, 253, 251, 247, 241, 239, 233,
- *                  229, 227, 223, 217, 211, 199  (OZ2_S_MAX = 14 total)
+ *                  229, 227, 223, 217, 211, 199, 197, 193, 191, 181, 179, 173
+ *                  (OZ2_S_MAX = 20 total)
  *
- * All arrays indexed by table_idx = s - 2  (s = number of moduli, 2..14).
+ * All arrays indexed by table_idx = s - 2  (s = number of moduli, 2..20).
  * ========================================================================= */
 
 /* Per-modulus constants — same for all s, only first s entries used */
 static const double h_neg_mod[OZ2_S_MAX] = {
     -256.0, -255.0, -253.0, -251.0, -247.0, -241.0, -239.0,
-    -233.0, -229.0, -227.0, -223.0, -217.0, -211.0, -199.0
+    -233.0, -229.0, -227.0, -223.0, -217.0, -211.0, -199.0,
+    -197.0, -193.0, -191.0, -181.0, -179.0, -173.0
 };
 static const double h_inv_mod[OZ2_S_MAX] = {
     0x1.0000000000000p-8,   /* 1/256 */
@@ -107,7 +109,13 @@ static const double h_inv_mod[OZ2_S_MAX] = {
     0x1.25e22708092f1p-8,   /* 1/223 */
     0x1.2e025c04b8097p-8,   /* 1/217 */
     0x1.3698df3de0748p-8,   /* 1/211 */
-    0x1.49539e3b2d067p-8    /* 1/199 */
+    0x1.49539e3b2d067p-8,   /* 1/199 */
+    0x1.4cab88725af6ep-8,   /* 1/197 */
+    0x1.5390948f40febp-8,   /* 1/193 */
+    0x1.571ed3c506b3ap-8,   /* 1/191 */
+    0x1.6a13cd1537290p-8,   /* 1/181 */
+    0x1.6e1f76b4337c7p-8,   /* 1/179 */
+    0x1.7ad2208e0ecc3p-8    /* 1/173 */
 };
 /* Float versions of 1/m_t — used in the 2nd-pass FMA refinement.
  * Values taken verbatim from GEMMul8/GEMMul8/src/table.hpp (moduli_f[].y),
@@ -126,10 +134,16 @@ static const float h_inv_mod_f[OZ2_S_MAX] = {
     0x1.25e228p-8F,   /* 1/223  */
     0x1.2e025cp-8F,   /* 1/217  */
     0x1.3698e0p-8F,   /* 1/211  */
-    0x1.49539ep-8F    /* 1/199  */
+    0x1.49539ep-8F,   /* 1/199  */
+    0x1.4cab88p-8F,   /* 1/197  */
+    0x1.539094p-8F,   /* 1/193  */
+    0x1.571ed4p-8F,   /* 1/191  */
+    0x1.6a13cep-8F,   /* 1/181  */
+    0x1.6e1f76p-8F,   /* 1/179  */
+    0x1.7ad220p-8F    /* 1/173  */
 };
 
-/* -M (high part) for s = 2..14 */
+/* -M (high part) for s = 2..20 */
 static const double h_P_hi_all[OZ2_S_MAX - 1] = {
     -6.5280000000000000e+04,     /* s=2  */
     -1.6515840000000000e+07,     /* s=3  */
@@ -144,6 +158,12 @@ static const double h_P_hi_all[OZ2_S_MAX - 1] = {
     -3.4567513620616985e+28,     /* s=12 */
     -7.2937453739501847e+30,     /* s=13 */
     -1.4514553294160867e+33,     /* s=14 */
+    -2.8593669989496909e+35,     /* s=15 */
+    -5.5185783079729035e+37,     /* s=16 */
+    -1.0540484568228245e+40,     /* s=17 */
+    -1.9078277068493124e+42,     /* s=18 */
+    -3.4150115952602691e+44,     /* s=19 */
+    -5.9079700598002656e+46,     /* s=20 */
 };
 /* -M (low part) — 0 for s <= 7 (P fits in one double) */
 static const double h_P_lo_all[OZ2_S_MAX - 1] = {
@@ -160,8 +180,14 @@ static const double h_P_lo_all[OZ2_S_MAX - 1] = {
     -2.0448164928000000e+12,     /* s=12 */
      3.3380381295129600e+14,     /* s=13 */
      1.0131963435176704e+16,     /* s=14 */
+     1.7272206732770533e+19,     /* s=15 */
+     3.2597489231298749e+21,     /* s=16 */
+    -2.5574812149594794e+23,     /* s=17 */
+     4.6796878119559867e+25,     /* s=18 */
+     6.3951593786758970e+26,     /* s=19 */
+     4.2754890730815036e+29,     /* s=20 */
 };
-/* 1/M for s = 2..14 */
+/* 1/M for s = 2..20 */
 static const double h_inv_P_all[OZ2_S_MAX - 1] = {
     1.5318627450980392e-05,      /* s=2  */
     6.0547934588855299e-08,      /* s=3  */
@@ -176,8 +202,14 @@ static const double h_inv_P_all[OZ2_S_MAX - 1] = {
     2.8928895811689891e-29,      /* s=12 */
     1.3710377161938337e-31,      /* s=13 */
     6.8896367647931339e-34,      /* s=14 */
+    3.4972775455802713e-36,      /* s=15 */
+    1.8120609044457363e-38,      /* s=16 */
+    9.4872298662080431e-41,      /* s=17 */
+    5.2415634619933945e-43,      /* s=18 */
+    2.9282477441303881e-45,      /* s=19 */
+    1.6926287538325940e-47,      /* s=20 */
 };
-/* accu::log2P = log2(P-1)/2 - 0.5 for s = 2..14 (used for shift refinement) */
+/* accu::log2P = log2(P-1)/2 - 0.5 for s = 2..20 (used for shift refinement) */
 static const float h_accu_log2P_all[OZ2_S_MAX - 1] = {
     7.49716566e+00F,   /* s=2  */
     1.14886734e+01F,   /* s=3  */
@@ -192,6 +224,12 @@ static const float h_accu_log2P_all[OZ2_S_MAX - 1] = {
     4.69017017e+01F,   /* s=12 */
     5.07622513e+01F,   /* s=13 */
     5.45805636e+01F,   /* s=14 */
+    5.83915895e+01F,   /* s=15 */
+    6.21878180e+01F,   /* s=16 */
+    6.59765324e+01F,   /* s=17 */
+    6.97264554e+01F,   /* s=18 */
+    7.34683633e+01F,   /* s=19 */
+    7.71856774e+01F,   /* s=20 */
 };
 
 /* qPi high parts for each s (row = table_idx = s-2, col = modulus index t).
@@ -261,6 +299,49 @@ static const double h_qpi_hi_all[OZ2_S_MAX - 1][OZ2_S_MAX] = {
      0x1.c71fc39610000p+108, 0x1.6e1a9ef495000p+109, 0x1.067fc962e0800p+110,
      0x1.81de6aed04000p+109, 0x1.086d6ad9bc800p+110, 0x1.66ccfaf43f000p+109,
      0x1.d2ae54e567000p+109, 0x1.98842ba66f000p+109},
+    /* s=15 (qPi_2[7]) */
+    {0x1.8334edf0c0800p+117, 0x1.d9618469e1000p+116, 0x1.4c97d49af8800p+117,
+     0x1.3db0f47816800p+117, 0x1.ac11e30d56000p+116, 0x1.d3f9c70000000p+109,
+     0x1.0210da6024000p+117, 0x1.2e86f6e52b000p+116, 0x1.f43197eee2000p+115,
+     0x1.e913152bf0000p+115, 0x1.775c686f24000p+116, 0x1.44d556f611000p+116,
+     0x1.90e2677038000p+115, 0x1.1b5f498bca000p+117, 0x1.9702ab51fa000p+116},
+    /* s=16 (qPi_2[8]) */
+    {0x1.568442b104000p+122, 0x1.23c286bfdb000p+125, 0x1.fffd89ae2f000p+124,
+     0x1.9f80a3facf000p+124, 0x1.6b10abb2b0000p+124, 0x1.b90322c900000p+119,
+     0x1.ff687bb9b9000p+124, 0x1.494950989a000p+125, 0x1.5c176f9414000p+122,
+     0x1.6dca3fa2e7000p+124, 0x1.951e4290e0000p+122, 0x1.a671255128000p+123,
+     0x1.b2745cf9ae000p+124, 0x1.2c6cfd90da000p+123, 0x1.a57e7d4e8e000p+124,
+     0x1.8f40d0ef24000p+124},
+    /* s=17 (qPi_2[9]) */
+    {0x1.e01f9407c4000p+129, 0x1.e201959d63000p+131, 0x1.31982160c4000p+132,
+     0x1.7f0fe22eef000p+132, 0x1.00d5bf9f80000p+126, 0x1.8ad801f1a0000p+129,
+     0x1.2a9c662802000p+130, 0x1.d836977997000p+131, 0x1.85903a5f3c000p+132,
+     0x1.a3320451ba800p+132, 0x1.ce462d2242000p+132, 0x1.d67cf11ca9800p+132,
+     0x1.add7c7ba40000p+132, 0x1.57b0afae95000p+131, 0x1.e30840c0e8000p+128,
+     0x1.5aabc9d4bf800p+132, 0x1.82a0ee308b800p+132},
+    /* s=18 (qPi_2[10]) */
+    {0x1.06cf388320000p+134, 0x1.a1bf2dfdc0000p+136, 0x1.bb35a9d83c000p+137,
+     0x1.b0c7cfa209000p+139, 0x1.4921eae073800p+140, 0x1.172ab95fd6000p+139,
+     0x1.68acfd38e8000p+139, 0x1.f34ce4f4e8000p+138, 0x1.01123dfc72000p+140,
+     0x1.9db3f73893000p+139, 0x1.f6d5907a7e000p+138, 0x1.e7abc6d98b000p+139,
+     0x1.8e92d65018000p+136, 0x1.1d42b11e83800p+140, 0x1.0579b3ad70800p+140,
+     0x1.0cb5cec87c000p+138, 0x1.2009162ca2800p+140, 0x1.3d803cbad1800p+140},
+    /* s=19 (qPi_2[11]) */
+    {0x1.b09acf4b80000p+146, 0x1.6f0acc1cea000p+147, 0x1.d8992594f0000p+145,
+     0x1.4be496434a000p+146, 0x1.8cc9189a96000p+147, 0x1.c776b470b0000p+143,
+     0x1.cd534fe2dc000p+147, 0x1.82fa017336000p+147, 0x1.946f7304e8000p+147,
+     0x1.551407a0b7000p+147, 0x1.034c6790f6000p+146, 0x1.452e68b9f4000p+145,
+     0x1.407e5f3ab7000p+147, 0x1.a514c77360000p+147, 0x1.840b4e6816000p+147,
+     0x1.7a503c2406000p+147, 0x1.9fa0adbac0000p+147, 0x1.0c070c3e0c000p+147,
+     0x1.952a21ca4c000p+145},
+    /* s=20 (qPi_2[12]) */
+    {0x1.b7d0145780000p+153, 0x1.22e534dde0000p+150, 0x1.157cefeb34000p+153,
+     0x1.3ca3f6e300000p+151, 0x1.016a241f28000p+152, 0x1.e66c961dd0000p+154,
+     0x1.1945b982ed000p+155, 0x1.3e5ca23c80000p+152, 0x1.1ce0e51379000p+155,
+     0x1.98788b5ce0000p+154, 0x1.b19e1bb310000p+154, 0x1.df2e1fa0ce000p+154,
+     0x1.8b801f14e4000p+153, 0x1.38d9254eb8000p+153, 0x1.354ce8cdbc000p+154,
+     0x1.94eef4587e000p+154, 0x1.3b8c91b979000p+155, 0x1.0b1e374058000p+155,
+     0x1.088d7305d7000p+155, 0x1.67ddaa2cae000p+154},
 };
 
 /* qPi low parts: 0 for s <= 7 (single-double is exact), double-double lo for s >= 8 */
@@ -312,6 +393,49 @@ static const double h_qpi_lo_all[OZ2_S_MAX - 1][OZ2_S_MAX] = {
      0x1.3e7351822d438p+66, 0x1.1ebdf25941f8bp+67, 0x1.89ef93ae85687p+67,
      0x1.84d8fc60d93d4p+68, 0x1.1340b8f1c34bfp+67, 0x1.590ded2a35e12p+68,
      0x1.34cf70f07ae33p+67, 0x1.d80e799d28f38p+68},
+    /* s=15 (qPi_2[7]) */
+    {0x1.a4b62a6fdb1e1p+75, 0x1.c75bd2f612d0fp+75, 0x1.3f90fd4ad5142p+74,
+     0x1.9e3c7f45d92bfp+75, 0x1.c9413fbd969ffp+75, 0x1.6550132900769p+75,
+     0x1.a05bb4379a4c1p+75, 0x1.dae820f5ffc00p+74, 0x1.6405781ac87d9p+75,
+     0x1.175dbeffba9cdp+75, 0x1.fe04b43a93e73p+71, 0x1.67335f8e813b8p+73,
+     0x1.1bfe09769edb0p+75, 0x1.f1ee6037f1f5dp+71, 0x1.0c08e68bbfe9cp+75},
+    /* s=16 (qPi_2[8]) */
+    {0x1.195bce21a4a4cp+82, 0x1.d368142940c54p+83, 0x1.6961d82d67d29p+81,
+     0x1.19861fe645aefp+78, 0x1.4aa2ee5f58c0cp+82, 0x1.42e6d8398ebf0p+83,
+     0x1.09590940ec246p+83, 0x1.4ed69939f54a5p+83, 0x1.bccd986816af6p+83,
+     0x1.38fff5b887f40p+83, 0x1.8c2bed86953acp+81, 0x1.2544a485cce86p+81,
+     0x1.c88c3ec2fb90fp+83, 0x1.a84f9682c93f7p+83, 0x1.0beb05e6abcdfp+81,
+     0x1.aeb1b1661a570p+81},
+    /* s=17 (qPi_2[9]) */
+    {0x1.1e87e3b708c22p+90, 0x1.4160efcbeef78p+90, 0x1.4480003b19f81p+89,
+     0x1.0b25d1ed6a121p+87, 0x1.747bf6c0d8b31p+90, 0x1.bcbc193dd346cp+88,
+     0x1.fddf745f1ee5ap+88, 0x1.d1f525311dabfp+90, 0x1.1660b883eb1a4p+90,
+     0x1.41dedd270b797p+88, 0x1.79125e4f2418ap+90, 0x1.0272e6220fc37p+90,
+     0x1.d2e0f92de9773p+87, 0x1.ea083b704edc0p+90, 0x1.eba48f8e2a378p+90,
+     0x1.a977e531befa8p+90, 0x1.2ed72602864a3p+88},
+    /* s=18 (qPi_2[10]) */
+    {0x1.928222f7c81d9p+98, 0x1.7691a1e475ec2p+97, 0x1.50297632195fep+97,
+     0x1.08e60e4fc6baep+96, 0x1.3586f9a06cbf4p+98, 0x1.7a70fdd8b6610p+98,
+     0x1.5e172302320e2p+98, 0x1.1c4557a753b6cp+98, 0x1.4622df275a365p+95,
+     0x1.cf7c96f698830p+95, 0x1.ebd8e9c0e37a5p+97, 0x1.f1a79e989b457p+97,
+     0x1.1c8ffe978c39ep+98, 0x1.c0c39f95f19abp+92, 0x1.f55e10b41e4a2p+97,
+     0x1.a546c43a54205p+98, 0x1.c22d132ce1471p+97, 0x1.6f3d636bc541bp+95},
+    /* s=19 (qPi_2[11]) */
+    {0x1.e0958b3fc5a41p+105, 0x1.586ae0321d89fp+104, 0x1.fd46b49aa2b42p+106,
+     0x1.846cf4df36408p+106, 0x1.479c156f25f6cp+106, 0x1.020640df24636p+104,
+     0x1.ddd5bd56c8a86p+106, 0x1.9e0161aac9805p+105, 0x1.a622eb926525ap+105,
+     0x1.78923f9483982p+106, 0x1.cb97659eca409p+106, 0x1.e91af6550ad66p+105,
+     0x1.58efe3be140c5p+106, 0x1.ef9fd35ae1d32p+103, 0x1.a8df1a86177b9p+106,
+     0x1.a20f1e945f461p+105, 0x1.03cca141443f9p+106, 0x1.71f2fcf80933dp+106,
+     0x1.7334b3dff2d8bp+105},
+    /* s=20 (qPi_2[12]) */
+    {0x1.4ca65aa6e2e69p+113, 0x1.3e4218a70dc2fp+114, 0x1.3349341ba5ba9p+114,
+     0x1.a8a4cf94c4963p+113, 0x1.a9ef27a2e8284p+113, 0x1.f9453ff49eeb9p+114,
+     0x1.54038a5103c5fp+114, 0x1.7e6af65bdb8e7p+114, 0x1.feec500f6cd99p+110,
+     0x1.ccccb6fa6a5aep+113, 0x1.e8165d05819c5p+114, 0x1.481a67408850bp+111,
+     0x1.d767562c372cdp+112, 0x1.c6ebbea0ef5f4p+113, 0x1.d062d71a7af94p+112,
+     0x1.4a1e8a895454cp+111, 0x1.77cf77e873cd7p+114, 0x1.d1d5597316f21p+111,
+     0x1.ed07530f9a7fap+114, 0x1.3929cf709cf74p+114},
 };
 
 /* =========================================================================
@@ -425,7 +549,7 @@ size_t fp64EmulationWorkspaceSize(int64_t m, int64_t n, int64_t k, unsigned num_
  * specifies the total CRT capacity in bits: minimum s such that
  *   log2(prod(moduli 0..s-1)) >= target_bits.
  *
- * Default (env var absent or 0): use all OZ2_S_MAX=14 moduli (~110 bits).
+ * Default (env var absent or 0): use all OZ2_S_MAX=20 moduli (~155 bits).
  *
  * Notable values (from design document §2.5):
  *   55 bits → s=7  ("fixed-mode default")
@@ -442,7 +566,7 @@ unsigned fp64EmulationNumModuli()
 
         /* Cumulative log2 of the product of the first s moduli, for s=2..OZ2_S_MAX.
          * Derived from the exact moduli: 256, 255, 253, 251, 247, 241, 239, 233,
-         * 229, 227, 223, 217, 211, 199. */
+         * 229, 227, 223, 217, 211, 199, 197, 193, 191, 181, 179, 173. */
         static constexpr double cum_bits[OZ2_S_MAX - 1] = {
             15.994,   /* s=2  */
             23.976,   /* s=3  */
@@ -457,6 +581,12 @@ unsigned fp64EmulationNumModuli()
             94.801,   /* s=12 */
            102.522,   /* s=13 */
            110.160,   /* s=14 */
+           117.782,   /* s=15 */
+           125.374,   /* s=16 */
+           132.949,   /* s=17 */
+           140.448,   /* s=18 */
+           147.931,   /* s=19 */
+           155.365,   /* s=20 */
         };
 
         for(unsigned s = 2u; s <= OZ2_S_MAX; ++s) {
@@ -560,7 +690,11 @@ oz2_accu_prelim_A_kernel(const double* __restrict__ A,
     __shared__ int16_t s_sft;
     if(threadIdx.x == 0) {
         if(local_max < 1e-300) local_max = 1.0;
-        int sft = 5 - static_cast<int>(floor(log2(local_max)));
+        /* Use 6 bits (maxUFP<INT8>=6 in GEMMul8): sft = 6 - floor(log2(amax)).
+         * Ceiling extraction (matching GEMMul8's trunc_scalbn_8i) ensures the
+         * preliminary GEMM amax is an upper bound on the true scaled inner product,
+         * giving the same refined sft as GEMMul8. */
+        int sft = 6 - static_cast<int>(floor(log2(local_max)));
         if(sft < 0) sft = 0;
         s_sft     = static_cast<int16_t>(sft);
         sftA[row] = s_sft;
@@ -570,9 +704,10 @@ oz2_accu_prelim_A_kernel(const double* __restrict__ A,
 
     for(int64_t j = threadIdx.x; j < k; j += blockDim.x) {
         double val    = transA ? A[row * lda + j] : A[j * lda + row];
-        /* Use fabs(val): the prelim GEMM computes Σ|A8|·|B8| ≥ |D|·2^(sftA+sftB),
-         * which is a valid upper bound for the refinement (matches GEMMul8 T2int_8i). */
-        double scaled = trunc(ldexp(fabs(val), static_cast<int>(sft)));
+        /* Ceiling extraction (GEMMul8 uses trunc_scalbn_8i = ceil of |val|*2^sft).
+         * ceil gives an upper bound so the prelim GEMM result bounds the true inner
+         * product, making the sft refinement conservative and more accurate. */
+        double scaled = ceil(ldexp(fabs(val), static_cast<int>(sft)));
         A8i_high[static_cast<size_t>(j) + static_cast<size_t>(row) * lda8i] =
             static_cast<int8_t>(static_cast<int32_t>(scaled));
     }
@@ -608,7 +743,8 @@ oz2_accu_prelim_B_kernel(const double* __restrict__ B,
     __shared__ int16_t s_sft;
     if(threadIdx.x == 0) {
         if(local_max < 1e-300) local_max = 1.0;
-        int sft = 5 - static_cast<int>(floor(log2(local_max)));
+        /* 6-bit ceiling extraction, matching GEMMul8 (maxUFP<INT8>=6). */
+        int sft = 6 - static_cast<int>(floor(log2(local_max)));
         if(sft < 0) sft = 0;
         s_sft     = static_cast<int16_t>(sft);
         sftB[col] = s_sft;
@@ -618,8 +754,8 @@ oz2_accu_prelim_B_kernel(const double* __restrict__ B,
 
     for(int64_t j = threadIdx.x; j < k; j += blockDim.x) {
         double val    = transB ? B[col + j * ldb] : B[j + col * ldb];
-        /* Same abs-value extraction as the A prelim kernel. */
-        double scaled = trunc(ldexp(fabs(val), static_cast<int>(sft)));
+        /* Ceiling extraction matching GEMMul8's trunc_scalbn_8i. */
+        double scaled = ceil(ldexp(fabs(val), static_cast<int>(sft)));
         B8i_high[static_cast<size_t>(j) + static_cast<size_t>(col) * ldb8i] =
             static_cast<int8_t>(static_cast<int32_t>(scaled));
     }
@@ -726,8 +862,16 @@ oz2_scaleA_kernel(const double* __restrict__ A,
         /* Pass 2 – float-precision refinement (GEMMul8 ITER=2):
          *          corrects any off-by-m_t error from pass 1.                  */
         const float   rf  = static_cast<float>(r);
-        const float   rf2 = fmaf(rintf(rf * cInvModF[t]),
-                                 static_cast<float>(cNegMod[t]), rf);
+        float rf2 = fmaf(rintf(rf * cInvModF[t]),
+                         static_cast<float>(cNegMod[t]), rf);
+        /* Pass 3 – second float correction (GEMMul8 ITER=3, needed for s≥19):
+         *          for large sft values the scaled integer ival can exceed 2^60,
+         *          making pass-2 residuals too large for float to correct in one
+         *          step.  num_moduli is warp-uniform so this branch is free.   */
+        if(num_moduli >= 19u) {
+            rf2 = fmaf(rintf(rf2 * cInvModF[t]),
+                       static_cast<float>(cNegMod[t]), rf2);
+        }
         A8i[t * stride + offset] = static_cast<int8_t>(static_cast<int32_t>(rf2));
     }
 }
@@ -760,8 +904,13 @@ oz2_scaleB_kernel(const double* __restrict__ B,
         const double  r   = fma(cNegMod[t], rint(ival * cInvMod[t]), ival);
         /* Pass 2 – float-precision refinement. */
         const float   rf  = static_cast<float>(r);
-        const float   rf2 = fmaf(rintf(rf * cInvModF[t]),
-                                 static_cast<float>(cNegMod[t]), rf);
+        float rf2 = fmaf(rintf(rf * cInvModF[t]),
+                         static_cast<float>(cNegMod[t]), rf);
+        /* Pass 3 – second float correction for s≥19 (see oz2_scaleA_kernel). */
+        if(num_moduli >= 19u) {
+            rf2 = fmaf(rintf(rf2 * cInvModF[t]),
+                       static_cast<float>(cNegMod[t]), rf2);
+        }
         B8i[t * stride + offset] = static_cast<int8_t>(static_cast<int32_t>(rf2));
     }
 }
@@ -784,7 +933,17 @@ oz2_accum_kernel(const int32_t* __restrict__ C32i,
     if(i >= m || l >= n) return;
 
     const size_t idx = static_cast<size_t>(i) + static_cast<size_t>(l) * ldc32i;
-    const double dc  = static_cast<double>(C32i[idx]);
+
+    /* Reduce C32i to the symmetric residue mod m_t before multiplying by qPi.
+     * The qPi_hi constants are designed with only (53 - ceil(log2(rho))) significant
+     * bits (where rho = sum(floor(m_i/2))) so that  dc * qPi_hi  is computed EXACTLY
+     * in double precision — but only when |dc| ≤ floor(m_t/2) ≤ 128.  Using the raw
+     * INT32 GEMM result (which can be as large as k*(m_t/2)^2) would make the product
+     * inexact, corrupting the CRT accumulation.  One double-precision FMA pass is
+     * always sufficient here because |C32i| << 2^53 * m_t for all practical k.    */
+    const double dc_raw = static_cast<double>(C32i[idx]);
+    const double dc     = fma(cNegMod[t], rint(dc_raw * cInvMod[t]), dc_raw);
+    /* |dc| ≤ m_t/2 ≤ 128; dc * cQpiHi[t] is now exact in double. */
 
     const double hi = dc * cQpiHi[t];
     const double lo = dc * cQpiLo[t];
