@@ -5,7 +5,7 @@
 
 import pytest
 
-from dnn_benchmarking.tools.convert_miopen_shapes import (
+from dnn_convert_shapes import (
     BNORM_FLAG_ALIASES,
     CONV_FLAG_ALIASES,
     ConvMode,
@@ -24,7 +24,7 @@ from dnn_benchmarking.tools.convert_miopen_shapes import (
     parse_args,
     parse_line,
 )
-from dnn_benchmarking.tools.convert_miopen_shapes.strides import Layout
+from dnn_convert_shapes.strides import Layout
 
 
 class TestStrideHelpers:
@@ -57,13 +57,13 @@ class TestLayoutValidation:
             Layout("HWCN")
 
     def test_valid_2d_layouts_accepted(self) -> None:
-        from dnn_benchmarking.tools.convert_miopen_shapes.strides import _input_strides
+        from dnn_convert_shapes.strides import _input_strides
 
         _input_strides(Layout.NCHW, 2, 3, 4, 5)
         _input_strides(Layout.NHWC, 2, 3, 4, 5)
 
     def test_valid_3d_layouts_accepted(self) -> None:
-        from dnn_benchmarking.tools.convert_miopen_shapes.strides import _input_strides
+        from dnn_convert_shapes.strides import _input_strides
 
         _input_strides(Layout.NCDHW, 2, 3, 4, 5, D=4)
         _input_strides(Layout.NDHWC, 2, 3, 4, 5, D=4)
@@ -553,14 +553,14 @@ class TestBuildBnormJson:
         assert scale["dims"] == [1, 64, 14, 14]
 
     def test_3d_default_layout_is_ncdhw(self) -> None:
-        from dnn_benchmarking.tools.convert_miopen_shapes.bnorm import BnormParams
+        from dnn_convert_shapes.bnorm import BnormParams
 
         args = {"-n": "2", "-c": "16", "-H": "8", "-W": "8", "-D": "4"}
         p = BnormParams.from_args(args)
         assert p.layout is Layout.NCDHW
 
     def test_2d_default_layout_is_nchw(self) -> None:
-        from dnn_benchmarking.tools.convert_miopen_shapes.bnorm import BnormParams
+        from dnn_convert_shapes.bnorm import BnormParams
 
         args = {"-n": "2", "-c": "16", "-H": "8", "-W": "8"}
         p = BnormParams.from_args(args)
