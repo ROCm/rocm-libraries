@@ -41,6 +41,7 @@ from ...core.ir import (
     Type,
     Value,
 )
+from ...helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
 from ...helpers.attention import (
     apply_softcap_log2 as _apply_softcap,
     binary_search_seq_idx as _binary_search_seq_idx_helper,
@@ -52,12 +53,47 @@ from ...helpers.attention import (
     wave64_reduce_max as _wave64_reduce_max,
     wave64_reduce_sum as _wave64_reduce_sum,
 )
+from ...helpers.distribution import make_static_tile_distribution
 from ...helpers.layouts import TransposeLdsReader
-from ...transforms import TensorDescriptor, indirect, unmerge
+from ...helpers.transforms import TensorDescriptor, indirect, unmerge
 
 
 MFMA_M = 16
 MFMA_N = 16
+
+
+# CK-Tile C-accumulator warp distribution for the 16x16x16 MFMA atom. This
+# segment kernel is single-warp (lane == tid), and every accumulator output
+# row decode it does is the same ``row = (lane // 16) * 4 + reg`` mapping that
+# CK Tile's ``CWarpDstrEncoding`` (``warp_gemm_attribute_mfma.hpp``) expresses
+# as a ``tile_distribution_encoding``: for one wavefront the lane splits as
+# ``(m_blk, n) = (lane // 16, lane % 16)`` and the per-lane ``<4 x f32>``
+# accumulator slot ``reg`` is the inner M Y dim (``kCM1PerLane = 4``), so
+# ``calculate_x`` returns ``row = m_blk * 4 + reg`` (and ``col = n``). Driving
+# the row decode through ``calculate_x`` replaces the open-coded ``mul``/``add``
+# lane math with the tile-distribution algebra (Phase-C adoption; the C layout
+# is dtype-independent so the f16 atom drives it for fp16 and bf16).
+_C16_DIST = make_static_tile_distribution(
+    make_c_warp_dstr_encoding(MfmaAtom.f16_16x16x16())
+)
+
+
+def _mfma_16x16_c_row(b, lane, reg: int):
+    """MFMA-local output row for a ``16x16`` C element ``reg`` (0..3).
+
+    Drives CK Tile's C-warp ``TileDistribution.calculate_x`` instead of the
+    hand-rolled ``row = (lane // 16) * 4 + reg`` lane arithmetic. The 16x16 C
+    layout has a single inner M Y dim of length 4 (``kCM0PerLane = 1``), so the
+    outer Y is always 0 and ``reg`` is the inner Y.
+    """
+    if not (0 <= reg < 4):
+        raise ValueError(f"mfma_16x16 reg must be 0..3, got {reg}")
+    m_blk = b.div(lane, b.const_i32(16))
+    n = b.mod(lane, b.const_i32(16))
+    row, _col = _C16_DIST.calculate_x(
+        b, ys=[b.const_i32(0), b.const_i32(reg)], ps=[[m_blk, n]]
+    )
+    return row
 
 
 @dataclass(frozen=True)
@@ -373,9 +409,7 @@ def build_unified_attention_3d_tiled(
         zero_local = b.const_f32(0.0)
         lane_writes_ml_e = b.cmp_eq(b.mod(tid, b.const_i32(16)), b.const_i32(0))
         for reg in range(4):
-            row = b.add(
-                b.mul(b.div(tid, b.const_i32(16)), b.const_i32(4)), b.const_i32(reg)
-            )
+            row = _mfma_16x16_c_row(b, tid, reg)
             qp_r = b.add(qb_start_pos, b.div(row, b.const_i32(NQK)))
             qh_r = b.add(
                 b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK))
@@ -392,11 +426,10 @@ def build_unified_attention_3d_tiled(
                 b.global_store(segm_expsum_ptr, ml_idx, zero_local, align=4)
         # Zero acc for this segment across all (n, lane_col) entries
         # belonging to this CTA. Each lane writes its slot.
-        lane_rg_e = b.div(tid, b.const_i32(16))
         lane_col_e = b.mod(tid, b.const_i32(16))
         for n in range(PV_N_TILES):
             for reg in range(4):
-                row = b.add(b.mul(lane_rg_e, b.const_i32(4)), b.const_i32(reg))
+                row = _mfma_16x16_c_row(b, tid, reg)
                 col = b.add(b.mul(b.const_i32(n), b.const_i32(16)), lane_col_e)
                 qp_r = b.add(qb_start_pos, b.div(row, b.const_i32(NQK)))
                 qh_r = b.add(
@@ -496,7 +529,7 @@ def build_unified_attention_3d_tiled(
         seg0 = b.cmp_eq(seg_idx, b.const_i32(0))
         m_inits = []
         for r in range(4):
-            row = b.add(b.mul(lane_rg, b.const_i32(4)), b.const_i32(r))
+            row = _mfma_16x16_c_row(b, tid, r)
             qh = b.add(
                 b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK))
             )
@@ -718,7 +751,7 @@ def build_unified_attention_3d_tiled(
         if USE_ALIBI:
             alibi_per_row = []
             for reg in range(4):
-                row = b.add(b.mul(lane_rg, b.const_i32(4)), b.const_i32(reg))
+                row = _mfma_16x16_c_row(b, tid, reg)
                 qh_r = b.add(
                     b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK))
                 )
@@ -729,7 +762,7 @@ def build_unified_attention_3d_tiled(
                 alibi_per_row.append(slope)
         masked = {}
         for reg in range(4):
-            row = b.add(b.mul(lane_rg, b.const_i32(4)), b.const_i32(reg))
+            row = _mfma_16x16_c_row(b, tid, reg)
             qp_r = b.add(qb_start_pos, b.div(row, b.const_i32(NQK)))
             qh_r = b.add(
                 b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK))
@@ -791,7 +824,7 @@ def build_unified_attention_3d_tiled(
 
         l_local = []
         for reg in range(4):
-            row = b.add(b.mul(lane_rg, b.const_i32(4)), b.const_i32(reg))
+            row = _mfma_16x16_c_row(b, tid, reg)
             sum_p = zero_f
             for n in range(QK_N_TILES):
                 p = b.exp2(b.fsub(s_local[(reg, n)], m_new[reg]))
@@ -869,7 +902,7 @@ def build_unified_attention_3d_tiled(
     # the top of this function.
     for n in range(PV_N_TILES):
         for reg in range(4):
-            row = b.add(b.mul(lane_rg, b.const_i32(4)), b.const_i32(reg))
+            row = _mfma_16x16_c_row(b, tid, reg)
             col = b.add(b.mul(b.const_i32(n), b.const_i32(16)), lane_col)
             qp_r = b.add(qb_start_pos, b.div(row, b.const_i32(NQK)))
             qh_r = b.add(
@@ -892,7 +925,7 @@ def build_unified_attention_3d_tiled(
 
     lane_writes_ml = b.cmp_eq(b.mod(tid, b.const_i32(16)), b.const_i32(0))
     for reg in range(4):
-        row = b.add(b.mul(lane_rg, b.const_i32(4)), b.const_i32(reg))
+        row = _mfma_16x16_c_row(b, tid, reg)
         qp_r = b.add(qb_start_pos, b.div(row, b.const_i32(NQK)))
         qh_r = b.add(b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK)))
         row_ok = b.land(

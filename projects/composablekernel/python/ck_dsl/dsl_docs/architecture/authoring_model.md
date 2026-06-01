@@ -143,7 +143,7 @@ Prefer descriptors and views over raw arithmetic:
 ```text
 plain contiguous tensors    -> TensorView, make_global_view, make_naive_tensor_view_packed
 buffer-resource guarded     -> make_buffer_resource, make_buffer_view
-non-bijective addressing    -> ck_dsl.transforms.TensorDescriptor (transform DAG)
+non-bijective addressing    -> ck_dsl.helpers.transforms.TensorDescriptor (transform DAG)
 tile-local movement         -> TileWindow
 distributed register tiles  -> TileDistributionEncoding + StaticDistributedTensor
 ```

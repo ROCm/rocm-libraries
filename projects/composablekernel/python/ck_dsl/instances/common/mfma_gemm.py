@@ -21,9 +21,8 @@ Why it matters
 * CK Tile's GEMM hero kernels (``03_gemm`` Preshuffle config,
   ``18_flatmm`` ``FlatmmConfig32``) all bottom out on the K-packed
   16x16x32 / 32x32x16 atoms when ``DataType`` is f16 / bf16;
-  HipKittens' ``mfma161632`` / ``mfma323216`` (see
-  ``HipKittens/include/ops/warp/register/tile/mma.cuh``) wraps the
-  same intrinsics. Matching them is the "beat CK Tile" baseline.
+  Warp-specialized register-tile MMA wrappers (``mfma161632`` /
+  ``mfma323216``) wrap the same intrinsics. Matching them is the "beat CK Tile" baseline.
 
 What the kernel does per CTA
 ============================
@@ -106,8 +105,8 @@ DType = Literal["f16", "bf16"]
 
 # The two atom shapes shipped by v1. 16x16 keeps the small-CTA layout
 # the v1 parity tests were written against; 32x32 is the canonical
-# hero shape and matches CK Tile's ``FlatmmConfig32`` / HipKittens'
-# ``mfma323216`` reference. Both shapes K-pack on gfx950+.
+# hero shape and matches CK Tile's ``FlatmmConfig32`` K-packed
+# atom reference. Both shapes K-pack on gfx950+.
 _SUPPORTED_ATOM_MN: Tuple[Tuple[int, int], ...] = ((16, 16), (32, 32))
 
 

@@ -36,7 +36,7 @@ from typing import Dict, List, Literal, Optional, Tuple
 from ...core.ir import F32, I32, IRBuilder, KernelDef, PtrType, Value
 from ...helpers.io import io_ir_type
 from ...helpers.spec import SignatureBuilder
-from ...transforms import (
+from ...helpers.transforms import (
     TensorDescriptor,
 )
 

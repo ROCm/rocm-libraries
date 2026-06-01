@@ -1,6 +1,6 @@
 # Coordinate Transform To Physical Address Planning
 
-This document proposes a planning layer between `ck_dsl.transforms` and
+This document proposes a planning layer between `ck_dsl.helpers.transforms` and
 `IRBuilder` emission. The goal is to keep CK-style coordinate transforms as the
 semantic source of truth while preventing complex convolution and attention
 descriptors from lowering into repeated hot-loop VALU address arithmetic.

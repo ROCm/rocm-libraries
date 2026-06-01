@@ -41,6 +41,13 @@ from dataclasses import dataclass
 from typing import Literal, Tuple
 
 from ...core.ir import F32, I32, IRBuilder, KernelDef, PtrType, Value
+from ...helpers.distribution import (
+    TileDistributionEncoding,
+    block_tile_reduce_sync,
+    make_reduce_tile_distribution_encoding,
+    make_static_distributed_tensor,
+    make_static_tile_distribution,
+)
 from ...helpers.io import io_ir_type, store_scalar_from_f32
 from ...helpers.reduction import (
     block_lds_reduce,
@@ -138,6 +145,41 @@ def _combine_scalar(
     raise ValueError(f"unsupported combine {combine!r}")
 
 
+def _make_row_reduce_distribution(spec: Reduce2DSpec):
+    """Reduce distribution for the per-row N collapse (CK Tile reduce2d).
+
+    Builds the rank-4 hierarchical X encoding for the reduce axis,
+    ``Hs = (Repeat, WarpPerBlock, ThreadPerWarp, Vector)``, then folds the
+    reduce dim via :func:`make_reduce_tile_distribution_encoding`. The two
+    kept Y dims (Repeat + Vector) are consumed by the reduce, so they
+    disappear and the per-thread register tile is a single keep-axis slot;
+    the ``WarpPerBlock`` and ``ThreadPerWarp`` levels become R replication
+    levels driving the cross-warp LDS and warp-XOR butterfly respectively.
+
+    Only ``WarpPerBlock`` (= ``num_warps``) and ``ThreadPerWarp``
+    (= ``wave_size``) feed the butterfly plan; ``Repeat`` / ``Vector`` are
+    set to 1 because the per-thread partial is already folded into the seed
+    slot and :func:`block_tile_reduce_sync` never reconstructs the X
+    coordinate.
+    """
+    nwarp = spec.block_size // spec.wave_size
+    tpw = spec.wave_size
+    encoding = TileDistributionEncoding(
+        # (Repeat, WarpPerBlock, ThreadPerWarp, Vector)
+        Hs=((1, nwarp, tpw, 1),),
+        # P0 = warp id -> WarpPerBlock (level 1); P1 = lane id -> ThreadPerWarp
+        # (level 2). idim_p_lane = NDimP - 1 = P1 (lane), idim_p_warp = 0.
+        Ps2RHs_major=((1,), (1,)),
+        Ps2RHs_minor=((1,), (2,)),
+        # Y dims target the Repeat (level 0) and Vector (level 3) of X0 -- both
+        # part of the reduced axis, so they fold away.
+        Ys2RHs_major=(1, 1),
+        Ys2RHs_minor=(0, 3),
+    )
+    reduce_enc = make_reduce_tile_distribution_encoding(encoding, [0])
+    return make_static_tile_distribution(reduce_enc)
+
+
 def build_reduce2d(spec: Reduce2DSpec) -> KernelDef:
     """Build the IR for one row-reduction instance.
 
@@ -208,11 +250,40 @@ def build_reduce2d(spec: Reduce2DSpec) -> KernelDef:
         body=body,
     )
 
-    # Cross-thread reduction. The wave-aligned path is the CK Tile
-    # ``BlockReduce2dSync`` + ``CrossWarpSync`` shape; the fallback is
-    # the canonical full LDS tree (kept for any future BS that isn't a
-    # clean multiple of ``wave_size``).
-    if spec.block_size % spec.wave_size == 0:
+    # Cross-thread reduction. The wave-aligned path drives the CK Tile
+    # ``BlockReduce2d{Sync,CrossWarpSync}`` distribution collapse directly:
+    # we build the X distribution for the reduce axis (rank-4 hierarchical
+    # ``Hs = (Repeat, WarpPerBlock, ThreadPerWarp, Vector)``), fold it into a
+    # *reduce distribution* via
+    # :func:`make_reduce_tile_distribution_encoding` (every H level not
+    # consumed by a kept Y becomes an R replication level), and let
+    # :func:`block_tile_reduce_sync` run the warp XOR butterfly over the
+    # lane-owned R (``ThreadPerWarp``) followed by the cross-warp LDS over
+    # the warp-owned R (``WarpPerBlock``). The per-thread ``acc`` is already
+    # the fold over this thread's ``Repeat``/``Vector`` slots, so it seeds
+    # the single keep-axis register slot. This emits the exact same six
+    # shuffle stages + one ``sync`` the hand-rolled
+    # ``block_lds_reduce_with_wave_prologue`` did, but the lane/warp split is
+    # now derived from the encoding rather than spelled out by hand.
+    #
+    # The fallback is the canonical full LDS tree (kept for any future BS
+    # that isn't a clean multiple of ``wave_size``).
+    if spec.block_size % spec.wave_size == 0 and combine in ("sum", "max"):
+        red_dist = _make_row_reduce_distribution(spec)
+        reduced = make_static_distributed_tensor(red_dist, dtype=F32)
+        reduced.storage[0] = acc
+        block_tile_reduce_sync(
+            b,
+            reduced,
+            combine=combine,
+            lds_buf=lds,
+            tid=tid,
+            wave_size=spec.wave_size,
+        )
+        total = reduced.storage[0]
+    elif spec.block_size % spec.wave_size == 0:
+        # min / prod aren't expressible by block_tile_reduce_sync (sum / max
+        # only). Keep the hand-built wave-XOR prologue for those combiners.
         total = block_lds_reduce_with_wave_prologue(
             b,
             acc,

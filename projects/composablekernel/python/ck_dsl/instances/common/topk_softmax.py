@@ -51,6 +51,11 @@ from dataclasses import dataclass
 from typing import Literal, Tuple
 
 from ...core.ir import F32, I32, IRBuilder, KernelDef, PtrType, Value
+from ...helpers.distribution import (
+    TileDistribution,
+    TileDistributionEncoding,
+    make_static_tile_distribution,
+)
 from ...helpers.io import io_ir_type
 from ...helpers.reduction import block_lds_reduce
 from ...helpers.spec import SignatureBuilder, ceil_div_grid, kernel_name_join
@@ -113,6 +118,35 @@ def _wave_argmax_butterfly(
         cur_val = b.select(is_remote_better, remote_val, cur_val)
         cur_idx = b.select(is_remote_better, remote_idx, cur_idx)
     return cur_val, cur_idx
+
+
+def make_input_distribution(
+    *, block_size: int, elems_per_thread: int
+) -> TileDistribution:
+    """Warp-per-row input tile distribution (CK Tile topk_softmax
+    ``MakeInputDistribution``).
+
+    The row's ``N`` logits are decomposed ``(IssuesPerThread, block_size)``
+    over a single X dim: the lane id (P0) owns the ``block_size``
+    (ThreadPerWarp + WarpPerBlock collapsed) level and the per-thread
+    issue count lives in the Y tile. :meth:`TileDistribution.calculate_x`
+    then reconstructs ``local_idx = e * block_size + tid`` -- exactly the
+    legacy hand-rolled ``tid + BS*e`` lane decode -- so the cache element
+    order and the global addresses (still gated by the explicit
+    :func:`IRBuilder.masked_global_load` OOB mask for ``N`` not a clean
+    multiple of ``block_size``) are unchanged.
+    """
+    encoding = TileDistributionEncoding(
+        # X0 = N = (IssuesPerThread, block_size).
+        Hs=((elems_per_thread, block_size),),
+        # P0 = lane id -> X0 level 1 (the block_size dim).
+        Ps2RHs_major=((1,),),
+        Ps2RHs_minor=((1,),),
+        # Y0 -> X0 level 0 (the per-thread issue / Repeat dim).
+        Ys2RHs_major=(1,),
+        Ys2RHs_minor=(0,),
+    )
+    return make_static_tile_distribution(encoding)
 
 
 DType = Literal["f16", "bf16", "f32"]
@@ -272,17 +306,26 @@ def build_topk_softmax(spec: TopkSoftmaxSpec, arch: str = "gfx950") -> KernelDef
     # Compute the base offset for this row's slice of X: ``row * N``.
     c_N = b.const_i32(N)
     row_base = b.mul(row, c_N)
-    c_BS = b.const_i32(BS)
     c_neg_inf = b.const_f32(_NEG_INF_F32)
 
     # Per-thread cache: load this thread's slice of the row into f32
     # registers (one register per element). We pre-fill the tail with
     # ``-inf`` so any out-of-bounds index never wins an argmax, even
     # before the explicit mask sequence below kicks in.
+    #
+    # CK-Tile adoption: the per-element column index ``local_idx`` is
+    # reconstructed from the warp-per-row input distribution
+    # (:func:`make_input_distribution`) instead of the hand-rolled
+    # ``tid + BS*e`` lane decode. ``calculate_x`` emits
+    # ``e*block_size + tid`` (integer add is commutative, so the address
+    # is identical); the explicit OOB mask below is retained because
+    # ``load_tile`` has no masked path and ``N`` need not divide
+    # ``block_size``.
+    in_dist = make_input_distribution(block_size=BS, elems_per_thread=epot)
     cache: list = []  # f32 values
     cache_idx: list = []  # i32 indices into the row (for argmax write-back)
     for e in range(epot):
-        local_idx = b.add(tid, b.mul(c_BS, b.const_i32(e)))
+        (local_idx,) = in_dist.calculate_x(b, ys=[b.const_i32(e)], ps=[[tid]])
         in_bounds = b.cmp_lt(local_idx, c_N)
         # ``masked_global_load`` clamps the index when the mask is
         # false and substitutes ``-inf`` for the result. Avoids a
