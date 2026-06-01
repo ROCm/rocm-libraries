@@ -3,6 +3,9 @@
 
 #include <miopen/conv/solver_finders.hpp>
 
+#include <algorithm>
+#include <numeric>
+
 #include <miopen/conv_algo_name.hpp>
 #include <miopen/config.h>
 #include <miopen/env.hpp>
@@ -23,6 +26,7 @@ MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_COMPILE_ONLY)
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_FIND_CONV_INSUFFICIENT_WORKSPACE_ALLOW_FINDDB_UPDATE)
 
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_NAIVE_DISABLE_IF_ALT, true)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_SEARCH_CUTOFF, false)
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_FIND_SKIP_PCT, 130)
 MIOPEN_DECLARE_ENV_VAR_UINT64(MIOPEN_CONV_DIRECT_MAX_SIZE, 0)
@@ -213,14 +217,46 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
     if(!arch.empty())
         return ret;
 
+    bool naive_disable       = env::value(MIOPEN_NAIVE_DISABLE_IF_ALT);
     bool using_search_cutoff = env::value(MIOPEN_SEARCH_CUTOFF);
-    auto selected            = miopen::solver::ConvSolution{miopenStatusUnknownError};
-    auto best                = std::numeric_limits<float>::max();
-    auto best_invoker        = Invoker{};
+    // Defer Naive only when a non-Naive alternative exists in the candidate list.
+    const bool defer_naive =
+        naive_disable && std::any_of(solutions.begin(), solutions.end(), [](const auto& s) {
+            return s.solver_id.find("Naive") == std::string::npos;
+        });
+    auto selected             = miopen::solver::ConvSolution{miopenStatusUnknownError};
+    auto best                 = std::numeric_limits<float>::max();
+    auto best_invoker         = Invoker{};
+    bool non_naive_succeeded  = false;
     std::vector<float> samples;
 
-    for(const auto& sol : solutions)
+    // Iterate non-Naive solutions first, Naive last
+    std::vector<std::size_t> order(solutions.size());
+    std::iota(order.begin(), order.end(), 0);
+    if(defer_naive)
     {
+        std::stable_partition(order.begin(), order.end(), [&](std::size_t i) {
+            return solutions[i].solver_id.find("Naive") == std::string::npos;
+        });
+    }
+
+    for(std::size_t i : order)
+    {
+        const auto& sol = solutions[i];
+
+        const bool is_naive = sol.solver_id.find("Naive") != std::string::npos;
+        if(naive_disable && is_naive)
+        {
+            if(defer_naive && non_naive_succeeded)
+            {
+                MIOPEN_LOG_I("Skipping Naive Solver: " << algorithm_name.ToString() << ":"
+                                                       << sol.solver_id);
+                continue;
+            }
+            MIOPEN_LOG_I("Unable to Skip Naive Solver: " << algorithm_name.ToString() << ":"
+                                                         << sol.solver_id);
+        }
+
         if(!conv::IsEnoughWorkspace(
                "EvaluateInvokers", solver::Id{sol.solver_id}, sol.workspace_sz, &invoke_ctx))
         {
@@ -245,14 +281,6 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
         float skip_time = core_result.find_search_best_time;
         if(skip_time < std::numeric_limits<float>::max())
         {
-            // skip Naive if another solver has been timed and solution took more than 5ms.
-            if(using_search_cutoff && sol.solver_id.find("Naive") != std::string::npos &&
-               skip_time > 5.0f)
-            {
-                MIOPEN_LOG_I("Skipping Naive Solver: " << algorithm_name.ToString() << ":"
-                                                       << sol.solver_id);
-                continue;
-            }
             skip_time *= env::value(MIOPEN_FIND_SKIP_PCT) / 100.0f;
         }
         MIOPEN_LOG_I("Evaluating Solver: " << algorithm_name.ToString() << ":" << sol.solver_id);
@@ -356,6 +384,8 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
             else
                 solution.SetInvoker(invoker, {}, {});
             ret.emplace_back(std::move(solution));
+            if(!is_naive)
+                non_naive_succeeded = true;
         }
         catch(const miopen::Exception& ex)
         {
