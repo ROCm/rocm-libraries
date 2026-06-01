@@ -30,6 +30,7 @@ __all__ = [
     "MAC_F16",
     "MAC_F16_HPA",
     "MAC_F32",
+    "MAC_F32_VOPD",
     "MAC_F32C",
     "MAC_F64",
     "MAC_F64C",

@@ -293,6 +293,11 @@ inline std::map<std::string, int>
         = tryAssembler(isaVersion, assemblerPath, "v_fma_f32 v20, v21, v22, v23", isDebug);
     rv["v_fmac_f32"] = tryAssembler(isaVersion, assemblerPath, "v_fmac_f32 v20, v21, v22", isDebug);
 
+    // VOPD dual-issue FMAC (RDNA3+, wave32 only)
+    rv["v_dual_fmac_f32"] = tryAssembler(isaVersion, assemblerPath,
+        "v_dual_fmac_f32 v0, v4, v8 :: v_dual_fmac_f32 v1, v5, v9",
+        isDebug, /*isWave32=*/true);
+
     rv["v_fma_f64"] = tryAssembler(
         isaVersion, assemblerPath, "v_fma_f64 v[20:21], v[22:23], v[24:25], v[20:21]", isDebug);
 

@@ -38,7 +38,8 @@ class MAC_F32_Plain(MAC):
         return caps["v_mac_f32"] or caps["v_fma_f32"]
 
     kernel = {"ProblemType": {"MacDataTypeA": DataType(DataTypeEnum.Float),
-                              "MacDataTypeB": DataType(DataTypeEnum.Float),}}
+                              "MacDataTypeB": DataType(DataTypeEnum.Float)},
+              "EnableVOPD": lambda x: x != 1}
 
     def __call__(self, writer, tPA, tPB, m, innerUnroll):
         kernel = writer.states.kernel

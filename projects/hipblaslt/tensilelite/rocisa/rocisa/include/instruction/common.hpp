@@ -3833,6 +3833,103 @@ namespace rocisa
         bool addDstToSrc;
     };
 
+
+    struct VDualFmacF32 : public Instruction
+    {
+        std::shared_ptr<Container> dstX;
+        InstructionInput           src0X;
+        InstructionInput           src1X;
+        std::shared_ptr<Container> dstY;
+        InstructionInput           src0Y;
+        InstructionInput           src1Y;
+
+        VDualFmacF32(const std::shared_ptr<Container>& dstX,
+                     const InstructionInput&           src0X,
+                     const InstructionInput&           src1X,
+                     const std::shared_ptr<Container>& dstY,
+                     const InstructionInput&           src0Y,
+                     const InstructionInput&           src1Y,
+                     const std::string&                comment = "")
+            : Instruction(InstType::INST_F32, comment)
+            , dstX(dstX)
+            , src0X(src0X)
+            , src1X(src1X)
+            , dstY(dstY)
+            , src0Y(src0Y)
+            , src1Y(src1Y)
+        {
+            setInst("v_dual_fmac_f32");
+        }
+
+        VDualFmacF32(const VDualFmacF32& other)
+            : Instruction(other)
+            , dstX(other.dstX ? other.dstX->clone() : nullptr)
+            , src0X(copyInstructionInput(other.src0X))
+            , src1X(copyInstructionInput(other.src1X))
+            , dstY(other.dstY ? other.dstY->clone() : nullptr)
+            , src0Y(copyInstructionInput(other.src0Y))
+            , src1Y(copyInstructionInput(other.src1Y))
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<VDualFmacF32>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            std::vector<InstructionInput> l;
+            if(dstX) l.push_back(dstX);
+            l.push_back(src0X);
+            l.push_back(src1X);
+            if(dstY) l.push_back(dstY);
+            l.push_back(src0Y);
+            l.push_back(src1Y);
+            return l;
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            std::vector<InstructionInput> dsts;
+            if(dstX) dsts.push_back(dstX);
+            if(dstY) dsts.push_back(dstY);
+            return dsts;
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            std::vector<InstructionInput> params;
+            params.push_back(src0X);
+            params.push_back(src1X);
+            params.push_back(src0Y);
+            params.push_back(src1Y);
+            // fmac accumulates: dst = src0 * src1 + dst
+            if(dstX) params.push_back(dstX);
+            if(dstY) params.push_back(dstY);
+            return params;
+        }
+
+        std::string toString() const override
+        {
+            std::string kStr = "v_dual_fmac_f32 ";
+            if(dstX) kStr += dstX->toString();
+            kStr += ", " + InstructionInputToString(src0X);
+            kStr += ", " + InstructionInputToString(src1X);
+            kStr += " :: v_dual_fmac_f32 ";
+            if(dstY) kStr += dstY->toString();
+            kStr += ", " + InstructionInputToString(src0Y);
+            kStr += ", " + InstructionInputToString(src1Y);
+
+            kStr = formatWithComment(kStr);
+
+            std::vector<InstructionInput> srcsX = {src0X, src1X};
+            setMsb(kStr, srcsX, dstX);
+
+            return kStr;
+        }
+    };
+
     struct VDot2CF32F16 : public CommonInstruction
     {
         VDot2CF32F16(const std::shared_ptr<Container>& dst,

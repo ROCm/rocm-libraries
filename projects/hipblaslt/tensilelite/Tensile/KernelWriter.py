@@ -951,16 +951,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
     elif scheduleIterAlg == 1:
       iterCode.add(waitLWCode)
       iterCode.add(syncCode)
-      #import pdb
-      #pdb.set_trace()
+
       # simple algorithm - do half the reads first:
-      # TODO: remove this half logic after stinkytofu works.
       readsToSchedule = countLocalRead(localReadCode) / 2
-      #localReadCode.prettyPrint()
       readItems = localReadCode.flatitems()
       while readItems:
         item = readItems.pop(0)
-        #print "readsToSchedule=", readsToSchedule, "item=", item
         item.name += " iter%s"%(iteration)  # tag for group
         iterCode.add(item)
         readsThisItem = countLocalRead(item)

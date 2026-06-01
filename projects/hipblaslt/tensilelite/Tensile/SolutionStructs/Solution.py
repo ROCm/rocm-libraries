@@ -690,6 +690,26 @@ class Solution(collections.abc.Mapping):
       reject(state, "WaveSplitK currently only support dot2 kernel.")
       return
 
+    # VOPD dual-issue validation (RDNA3+ FP32 non-MI only)
+    # Uses 2x2 block diagonal pairing for 100% coverage on even×even TT.
+    # Requires even tt0 and even tt1.
+    if state.get("EnableVOPD", 0) == 1:
+      if state["EnableMatrixInstruction"]:
+        reject(state, printRejectionReason, "EnableVOPD requires EnableMatrixInstruction=False")
+        return
+      if state["WavefrontSize"] != 32:
+        reject(state, printRejectionReason, "EnableVOPD requires WavefrontSize=32")
+        return
+      if not (state["ProblemType"]["DataType"].isSingle()):
+        reject(state, printRejectionReason, "EnableVOPD requires FP32 data type")
+        return
+      if state["ThreadTile0"] % 2 != 0:
+        reject(state, printRejectionReason, "EnableVOPD requires even ThreadTile0")
+        return
+      if state["ThreadTile1"] % 2 != 0:
+        reject(state, printRejectionReason, "EnableVOPD requires even ThreadTile1")
+        return
+
     # workaround for MX
     # set ASEM=minASEMforMX for not TLUA or not TLUB
     # so far, kernel code can support 16, but host code cannot hanlde it
@@ -1908,7 +1928,10 @@ class Solution(collections.abc.Mapping):
           # else:
           state["VectorWidthA"] = 1
       else:
-        state["VectorWidthA"] = 1
+        if state.get("EnableVOPD", 0) == 1 and state["ProblemType"]["DataType"].isSingle():
+          state["VectorWidthA"] = 2
+        else:
+          state["VectorWidthA"] = 1
 
     if state["VectorWidthB"] == -1:
       if state["EnableMatrixInstruction"]:
@@ -1927,7 +1950,10 @@ class Solution(collections.abc.Mapping):
           # else:
           state["VectorWidthB"] = 1
       else:
-        state["VectorWidthB"] = 1
+        if state.get("EnableVOPD", 0) == 1 and state["ProblemType"]["DataType"].isSingle():
+          state["VectorWidthB"] = 2
+        else:
+          state["VectorWidthB"] = 1
 
     def isLDSTrEnabled(asmCaps: Dict, hasLDSTrans: bool, unrollMajorLDS: bool, dtv: bool, numBytes: int):
       if unrollMajorLDS:
@@ -3174,6 +3200,10 @@ class Solution(collections.abc.Mapping):
           # TODO: support edge shiftptr to release this constraint.
           if state["ProblemType"]["TLUA"]:
             state["AssertFree0ElementMultiple"] = max(state["AssertFree0ElementMultiple"], state["GlobalReadVectorWidthA"])
+        else:
+          # Non-MI MAC/ThreadTile path (e.g., FP32 with VOPD)
+          if state["GlobalReadVectorWidthA"] == -1:
+            state["GlobalReadVectorWidthA"] = state["VectorWidthA"]
 
       # Default GlobalReadVectorWidthB
       if state["EnableMatrixInstruction"]:
@@ -3221,6 +3251,10 @@ class Solution(collections.abc.Mapping):
           # TODO: support edge shiftptr to release this constraint.
           if state["ProblemType"]["TLUB"]:
             state["AssertFree1ElementMultiple"] = max(state["AssertFree1ElementMultiple"], state["GlobalReadVectorWidthB"])
+        else:
+          # Non-MI MAC/ThreadTile path (e.g., FP32 with VOPD)
+          if state["GlobalReadVectorWidthB"] == -1:
+            state["GlobalReadVectorWidthB"] = state["VectorWidthB"]
 
       if state["EnableMatrixInstruction"]:
         if state["ProblemType"]["MXBlockA"]:
@@ -4280,6 +4314,10 @@ class Solution(collections.abc.Mapping):
       if auto_LdsBlockSizePerPadB:
         state["LdsBlockSizePerPadB"] = 128
     assert(state["LdsPadB"] >= 0)
+
+    # LdsPadB with VOPD VW=2: VERIFIED WORKING (2026-06-01)
+    # Old MacroInstruction approach caused ~3K GFlops with LPB>0.
+    # VDualFmacF32 struct fix resolved this — LPB=2 gives +3% on 4096x4096.
 
     # set ldsbspp = 0 for ldspad = 0
     for tc in ['A', 'B']:

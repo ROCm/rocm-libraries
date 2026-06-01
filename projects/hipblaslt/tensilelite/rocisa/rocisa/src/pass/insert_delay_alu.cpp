@@ -108,6 +108,34 @@ namespace rocisa
             instInputs = &compositeInst->srcs;
         }
 
+        auto vdualInst = std::dynamic_pointer_cast<VDualFmacF32>(inst);
+        if(vdualInst)
+        {
+            if(auto dst = std::dynamic_pointer_cast<RegisterContainer>(vdualInst->dstX))
+                dsts.insert(dst);
+            if(auto dst = std::dynamic_pointer_cast<RegisterContainer>(vdualInst->dstY))
+                dsts.insert(dst);
+
+            std::vector<InstructionInput> vdualSrcs = {
+                vdualInst->src0X, vdualInst->src1X,
+                vdualInst->src0Y, vdualInst->src1Y};
+            for(const auto& src : vdualSrcs)
+            {
+                if(auto ptr = std::get_if<std::shared_ptr<Container>>(&src))
+                {
+                    if(auto reg = std::dynamic_pointer_cast<RegisterContainer>(*ptr))
+                        srcs.insert(reg);
+                }
+            }
+            // v_dual_fmac_f32: dst is also read as accumulator
+            if(auto dst = std::dynamic_pointer_cast<RegisterContainer>(vdualInst->dstX))
+                srcs.insert(dst);
+            if(auto dst = std::dynamic_pointer_cast<RegisterContainer>(vdualInst->dstY))
+                srcs.insert(dst);
+
+            return std::make_pair(dsts, srcs);
+        }
+
         if(!instInputs)
         {
             return std::make_pair(dsts, srcs);

@@ -347,6 +347,9 @@ validParameters = { # we need to make sure this matches develop
     # 0 = minimal/no scheduling.  Global Read and increments, followed by local reads,
     # followed by local writes, followed by MACs
     "ScheduleIterAlg": [0, 1, 2, 3, 4],
+    # Enable VOPD dual-issue for FP32 non-MI kernels (RDNA3+, wave32 only)
+    # Pairs consecutive v_fmac_f32 into v_dual_fmac_f32 for ~2x MAC throughput
+    "EnableVOPD": [0, 1],
     # For MatrixInstruction and SIA3, number of GlobalReadInstruction between mfma
     # the purpose of this parameter is to control density of global read instruction scheduling
     # Scheduling global read back to back can have better memory efficiency
