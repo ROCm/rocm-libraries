@@ -107,7 +107,7 @@ struct warp_load_benchmark : public primbench::benchmark_interface
                         .add("data_type", primbench::name<T>())
                         .add("block_size", BlockSize)
                         .add("items_per_thread", ItemsPerThread)
-                        .add("ws", LogicalWarpSize)
+                        .add("warp_size", LogicalWarpSize)
                         .add("algo", "warp_load")
                         .add("lvl", "warp")
                         .add("subalgo", getAlgorithmName(Algorithm));
