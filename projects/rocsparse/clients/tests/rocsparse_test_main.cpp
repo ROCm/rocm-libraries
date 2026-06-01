@@ -316,11 +316,12 @@ int main(int argc, char** argv)
     auto& hip_debug = rocsparse_clients_test::hip_debug_t::instance();
     if(hip_debug.enabled())
     {
-        std::cout << "hip debug api history report " << hip_debug.get_filename() << std::endl;
+        std::cout << "// " << argv[0] << ": hip debug api history report "
+                  << hip_debug.get_filename() << std::endl;
         std::ofstream out(hip_debug.get_filename());
         hip_debug.report(nullptr, out);
 
-        std::cout << "hip debug api history check " << std::endl;
+        std::cout << "// " << argv[0] << ": hip debug api history check " << std::endl;
         auto status_info_prop = hip_debug.check(nullptr, hip_debug.get_non_permissive(), std::cerr);
 
         if(status_info_prop != rocsparse_status_success)
@@ -328,7 +329,6 @@ int main(int argc, char** argv)
             ADD_FAILURE() << argv[0] << ": hip_debug_t::check failed " << std::endl;
             return -1;
         }
-        std::cout << "hhhhhh " << std::endl;
         return ret;
     }
 

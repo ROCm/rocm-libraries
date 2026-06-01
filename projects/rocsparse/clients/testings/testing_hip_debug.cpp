@@ -23,28 +23,7 @@
  * ************************************************************************ */
 
 #include "testing.hpp"
-
-#include <pthread.h>
-#include <stdio.h>
-#include <stdlib.h>
-
-#include <pthread.h>
-#include <shared_mutex>
-#include <stdio.h>
-#include <stdlib.h>
 #include <thread>
-
-#include <map>
-
-static std::shared_mutex                  s_shared_mutex{};
-static std::map<std::thread::id, int32_t> s_tid2local_id{};
-static int32_t                            get_local_id()
-{
-    std::unique_lock lock(s_shared_mutex);
-    const int32_t    size                      = s_tid2local_id.size();
-    s_tid2local_id[std::this_thread::get_id()] = size;
-    return size;
-}
 
 template <typename T>
 void testing_hip_debug_task_thread(void* usr)
@@ -52,10 +31,8 @@ void testing_hip_debug_task_thread(void* usr)
     static constexpr bool verbose = false;
     if(verbose)
     {
-        int32_t           local_id = get_local_id();
         std::stringstream s;
-        s << "// rocsparse_clients: " << __FUNCTION__ << ", local_id = " << local_id
-          << ", tid = " << std::this_thread::get_id();
+        s << "// rocsparse_clients: " << __FUNCTION__ << ", tid = " << std::this_thread::get_id();
         std::cout << s.str() << std::endl;
     }
 
@@ -126,10 +103,9 @@ void testing_hip_debug_task_thread(void* usr)
 }
 
 template <typename T>
-void* testing_hip_debug_task(void* usr)
+void testing_hip_debug_task(void* usr)
 {
     testing_hip_debug_task_thread<T>(usr);
-    pthread_exit(NULL);
 }
 
 template <typename T>
@@ -140,19 +116,18 @@ void testing_hip_debug_bad_arg(const Arguments& arg)
 template <typename T>
 void testing_hip_debug(const Arguments& arg)
 {
-    const int32_t          num_threads = 8;
-    std::vector<pthread_t> threads(num_threads);
+    const int32_t            num_threads = 32;
+    std::vector<std::thread> threads(num_threads);
 
     // 1. Create threads in a loop
     for(int32_t t = 0; t < num_threads; t++)
     {
-        const auto rc = pthread_create(&threads[t], NULL, testing_hip_debug_task<T>, ((void*)&arg));
-        CHECK_ROCSPARSE_ERROR((rc) ? rocsparse_status_internal_error : rocsparse_status_success);
+        threads[t] = std::thread(testing_hip_debug_task<T>, ((void*)&arg));
     }
     // 2. Join threads in a loop
     for(int32_t t = 0; t < num_threads; t++)
     {
-        pthread_join(threads[t], NULL);
+        threads[t].join();
     }
 }
 
