@@ -691,11 +691,12 @@ oz2_accu_prelim_A_kernel(const double* __restrict__ A,
     if(threadIdx.x == 0) {
         if(local_max < 1e-300) local_max = 1.0;
         /* Use 6 bits (maxUFP<INT8>=6 in GEMMul8): sft = 6 - floor(log2(amax)).
-         * Ceiling extraction (matching GEMMul8's trunc_scalbn_8i) ensures the
-         * preliminary GEMM amax is an upper bound on the true scaled inner product,
-         * giving the same refined sft as GEMMul8. */
+         * Negative sft values are valid and necessary for large amax (phi=2,4
+         * distributions): they scale the amax element into [33,64] as INT8
+         * while smaller elements get 0 or 1.  GEMMul8 never clamps sft to 0.
+         * Clamping sft to 0 would overflow INT8 for amax > 127 and corrupt the
+         * preliminary GEMM, causing wrong shift refinement for all elements. */
         int sft = 6 - static_cast<int>(floor(log2(local_max)));
-        if(sft < 0) sft = 0;
         s_sft     = static_cast<int16_t>(sft);
         sftA[row] = s_sft;
     }
@@ -743,9 +744,9 @@ oz2_accu_prelim_B_kernel(const double* __restrict__ B,
     __shared__ int16_t s_sft;
     if(threadIdx.x == 0) {
         if(local_max < 1e-300) local_max = 1.0;
-        /* 6-bit ceiling extraction, matching GEMMul8 (maxUFP<INT8>=6). */
+        /* 6-bit ceiling extraction, matching GEMMul8 (maxUFP<INT8>=6).
+         * Negative sft is valid for large amax — see oz2_accu_prelim_A_kernel. */
         int sft = 6 - static_cast<int>(floor(log2(local_max)));
-        if(sft < 0) sft = 0;
         s_sft     = static_cast<int16_t>(sft);
         sftB[col] = s_sft;
     }
