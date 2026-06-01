@@ -59,6 +59,7 @@ def getRequiredParametersMin() -> set:
         'GlobalSplitUAlgorithm',
         'GroupLoadStore',
         'ISA',
+        'InitCIterWmma',
         'InnerUnroll',
         'Kernel',
         'LdsBlockSizePerPadA',
