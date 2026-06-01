@@ -1,0 +1,259 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# hipDNN benchmark presubmit (ALMIOPEN-1848).
+#
+# Smoke/health gate for the dnn_benchmarking tool: on each PR touching the tool
+# or the hipDNN python bindings, fetch PREBUILT TheRock ROCm artifacts (pinned by
+# run-id, never built from source), build+install the hipdnn_frontend binding
+# wheel in-job, run the benchmark over the committed sample graphs on a gfx942
+# GPU runner, and fail ONLY if the tool itself breaks (non-zero exit, zero passes,
+# or any errored combination). It does NOT validate performance or correctness.
+#
+# Fork policy: triggered via `pull_request` (NOT `pull_request_target`) so
+# untrusted fork code never runs with write-scoped secrets on a GPU runner.
+# Fork PRs may lack GPU-runner/secret access; treat this as advisory / non-required
+# for forks. Trusted in-repo branch PRs get the full gate.
+
+name: hipDNN Benchmark CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - "projects/hipdnn/tools/dnn-benchmarking/**"
+      - "projects/hipdnn/python/**"
+      - ".github/workflows/hipdnn-benchmark-ci.yml"
+  workflow_dispatch:
+    inputs:
+      graph_glob:
+        description: "Graph file/dir/glob passed to --graph. NOTE: the ticket's graphs/fremont_convs/*.json is not in a clean checkout; the committed sample_*.json glob is the supported default."
+        type: string
+        default: "projects/hipdnn/tools/dnn-benchmarking/graphs/sample_*.json"
+      amdgpu_family:
+        description: "TheRock artifact family for install_rocm_from_artifacts.py."
+        type: string
+        default: "gfx94X-dcgpu"
+      amdgpu_targets:
+        description: "GPU target arch."
+        type: string
+        default: "gfx942"
+      therock_ref:
+        description: "TheRock build_tools commit to check out (script version). Empty -> resolved from .github/actions/ci-env."
+        type: string
+        default: ""
+      artifact_run_id:
+        description: "TheRock GitHub run-id whose prebuilt artifacts to install (deterministic pin). Empty -> the workflow default below."
+        type: string
+        default: ""
+      run_github_repo:
+        description: "Repo that owns artifact_run_id."
+        type: string
+        default: "ROCm/TheRock"
+      runs_on:
+        description: "GPU runner label."
+        type: string
+        default: "linux-gfx942-2gpu-core42-ossci-rocm"
+      warmup:
+        description: "Benchmark warmup iterations."
+        type: string
+        default: "1"
+      iters:
+        description: "Benchmark timed iterations."
+        type: string
+        default: "1"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    name: hipDNN benchmark smoke (gfx942)
+    # GPU runner label. Overridable via workflow_dispatch; the literal default
+    # mirrors the gfx942 test_machine in therock-ci-nightly.yml.
+    runs-on: ${{ inputs.runs_on || 'linux-gfx942-2gpu-core42-ossci-rocm' }}
+    timeout-minutes: 60
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      options: --ipc host
+        --group-add video
+        --device /dev/kfd
+        --device /dev/dri
+        --group-add 993
+        --group-add 992
+        --group-add 110
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
+    defaults:
+      run:
+        shell: bash
+    env:
+      AMDGPU_FAMILY: ${{ inputs.amdgpu_family || 'gfx94X-dcgpu' }}
+      AMDGPU_TARGETS: ${{ inputs.amdgpu_targets || 'gfx942' }}
+      RUN_GITHUB_REPO: ${{ inputs.run_github_repo || 'ROCm/TheRock' }}
+      GRAPH_GLOB: ${{ inputs.graph_glob || 'projects/hipdnn/tools/dnn-benchmarking/graphs/sample_*.json' }}
+      WARMUP: ${{ inputs.warmup || '1' }}
+      ITERS: ${{ inputs.iters || '1' }}
+      VENV_DIR: ${{ github.workspace }}/.venv
+      # Deterministic prebuilt-artifact pin. workflow_dispatch may override via
+      # the artifact_run_id input; otherwise this hardcoded TheRock run-id is the
+      # PR default. STALENESS LIABILITY: artifacts age out / are GC'd; bump this
+      # periodically (mirror the ci-env therock-ref cadence). Empty -> fail fast
+      # in "Resolve pins" below (do NOT fall back to github.run_id — that is a
+      # rocm-libraries run id, wrong for TheRock artifacts).
+      ARTIFACT_RUN_ID_DEFAULT: ""
+      LD_LIBRARY_PATH: /opt/rocm/lib
+    steps:
+      - name: Fetch TheRock build_tools for pre-job cleanup
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: "ROCm/TheRock"
+          sparse-checkout: build_tools
+          path: prejob
+
+      - name: Pre-job GPU process cleanup
+        timeout-minutes: 5
+        run: bash ./prejob/build_tools/github_actions/cleanup_processes.sh
+
+      - name: Checkout rocm-libraries
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          path: rocm-libraries
+
+      - name: Resolve TheRock ref (ci-env)
+        id: ci_env
+        uses: ./rocm-libraries/.github/actions/ci-env
+
+      - name: Resolve pins
+        id: pins
+        run: |
+          THEROCK_REF="${{ inputs.therock_ref }}"
+          if [ -z "${THEROCK_REF}" ]; then
+            THEROCK_REF="${{ steps.ci_env.outputs.therock-ref }}"
+          fi
+          echo "therock_ref=${THEROCK_REF}" >> "$GITHUB_OUTPUT"
+          echo "THEROCK_REF=${THEROCK_REF}" >> "$GITHUB_ENV"
+
+          ARTIFACT_RUN_ID="${{ inputs.artifact_run_id }}"
+          if [ -z "${ARTIFACT_RUN_ID}" ]; then
+            ARTIFACT_RUN_ID="${ARTIFACT_RUN_ID_DEFAULT}"
+          fi
+          if [ -z "${ARTIFACT_RUN_ID}" ]; then
+            echo "::error::ARTIFACT_RUN_ID is empty. Set a known-good TheRock run-id via the artifact_run_id input or the ARTIFACT_RUN_ID_DEFAULT workflow env. Refusing to fall back to github.run_id (wrong repo)."
+            exit 1
+          fi
+          echo "artifact_run_id=${ARTIFACT_RUN_ID}" >> "$GITHUB_OUTPUT"
+          echo "ARTIFACT_RUN_ID=${ARTIFACT_RUN_ID}" >> "$GITHUB_ENV"
+
+      - name: Checkout TheRock build_tools at pinned ref
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: "ROCm/TheRock"
+          ref: ${{ steps.pins.outputs.therock_ref }}
+          sparse-checkout: build_tools
+          path: TheRock
+
+      - name: Set up Python venv + base deps
+        run: |
+          python3 -m venv "$VENV_DIR"
+          # shellcheck disable=SC1091
+          source "$VENV_DIR/bin/activate"
+          echo "$VENV_DIR/bin" >> "$GITHUB_PATH"
+          echo "VIRTUAL_ENV=$VENV_DIR" >> "$GITHUB_ENV"
+          pip install --upgrade pip
+          pip install boto3 cmake ninja
+
+      - name: Fetch prebuilt ROCm by run-id (deterministic)
+        run: |
+          python3 TheRock/build_tools/install_rocm_from_artifacts.py \
+            --run-id "${ARTIFACT_RUN_ID}" \
+            --run-github-repo "${RUN_GITHUB_REPO}" \
+            --amdgpu-family "${AMDGPU_FAMILY}" \
+            --amdgpu-targets "${AMDGPU_TARGETS}" \
+            --output-dir /opt/rocm \
+            --hipdnn --tests
+          echo "ROCM_PATH=/opt/rocm" >> "$GITHUB_ENV"
+
+      - name: Driver / GPU sanity check
+        timeout-minutes: 3
+        run: python3 TheRock/build_tools/print_driver_gpu_info.py
+
+      - name: Install torch (ROCm nightly)
+        run: |
+          pip install --pre torch \
+            --index-url "https://rocm.nightlies.amd.com/v2-staging/${AMDGPU_FAMILY}/"
+
+      - name: Build + install hipdnn_frontend wheel
+        run: |
+          export CXX=/opt/rocm/llvm/bin/amdclang++
+          export CMAKE_PREFIX_PATH=/opt/rocm
+          pip wheel rocm-libraries/projects/hipdnn/python --no-deps -w wheelhouse \
+            --config-settings=cmake.define.HIP_PLATFORM=amd
+          pip install --no-deps wheelhouse/hipdnn_frontend-*.whl
+
+      - name: Patch torch's bundled libhipdnn_backend.so
+        # torch's ROCm wheel bundles libhipdnn_backend.so in its _rocm_sdk_libraries_*
+        # companion package. With RTLD_GLOBAL the frontend can bind to that stale
+        # copy instead of the prebuilt-TheRock backend it was built against ->
+        # ABI mismatch crash. Overwrite it with the /opt/rocm backend. Mirrors
+        # dnn-benchmarking/setup.sh. Guarded so it no-ops if either path is absent.
+        run: |
+          WHEEL_BACKEND=$(find "$VENV_DIR" -path '*/_rocm_sdk_libraries_*/lib/libhipdnn_backend.so' 2>/dev/null | head -1)
+          if [ -n "${WHEEL_BACKEND}" ] && [ -f /opt/rocm/lib/libhipdnn_backend.so ]; then
+            echo "Patching ${WHEEL_BACKEND}"
+            cp /opt/rocm/lib/libhipdnn_backend.so "${WHEEL_BACKEND}"
+          else
+            echo "No bundled backend to patch (wheel_backend='${WHEEL_BACKEND}'); skipping."
+          fi
+
+      - name: Install benchmark tool deps
+        run: pip install -e rocm-libraries/projects/hipdnn/tools/dnn-benchmarking
+
+      - name: Run benchmark smoke
+        working-directory: rocm-libraries
+        run: |
+          test -d /opt/rocm/lib/hipdnn_plugins/engines || {
+            echo "::error::plugin engine dir /opt/rocm/lib/hipdnn_plugins/engines missing — prebuilt artifact layout changed"; exit 1; }
+          python -m dnn_benchmarking \
+            --graph "${GRAPH_GLOB}" \
+            --warmup "${WARMUP}" --iters "${ITERS}" \
+            --plugin-path /opt/rocm/lib/hipdnn_plugins/engines \
+            --output results.json
+
+      - name: Gate-check results.json
+        working-directory: rocm-libraries
+        run: python3 projects/hipdnn/tools/dnn-benchmarking/ci/check_results.py results.json
+
+      - name: Emit provenance sidecar
+        if: always()
+        working-directory: rocm-libraries
+        env:
+          GH_PR_NUMBER: ${{ github.event.pull_request.number }}
+          AMDGPU_FAMILY: ${{ env.AMDGPU_FAMILY }}
+          AMDGPU_TARGETS: ${{ env.AMDGPU_TARGETS }}
+          GRAPH_GLOB: ${{ env.GRAPH_GLOB }}
+          WARMUP: ${{ env.WARMUP }}
+          ITERS: ${{ env.ITERS }}
+          THEROCK_REF: ${{ steps.pins.outputs.therock_ref }}
+          ARTIFACT_RUN_ID: ${{ steps.pins.outputs.artifact_run_id }}
+          RUN_GITHUB_REPO: ${{ env.RUN_GITHUB_REPO }}
+        run: python3 projects/hipdnn/tools/dnn-benchmarking/ci/emit_provenance.py provenance.json
+
+      - name: Upload benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: hipdnn-benchmark-results
+          path: |
+            rocm-libraries/results.json
+            rocm-libraries/provenance.json
+            wheelhouse/*.whl
+          if-no-files-found: warn
+
+      - name: Post-job GPU process cleanup
+        if: always()
+        timeout-minutes: 5
+        run: bash ./TheRock/build_tools/github_actions/cleanup_processes.sh
