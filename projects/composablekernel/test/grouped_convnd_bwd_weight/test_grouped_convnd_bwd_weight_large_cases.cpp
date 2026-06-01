@@ -15,9 +15,6 @@
 
 #include "profiler/profile_grouped_conv_bwd_weight_impl.hpp"
 
-static ck::index_t param_mask     = 0xffff;
-static ck::index_t instance_index = -1;
-
 using namespace ck::tensor_layout::convolution;
 
 template <typename Tuple>
@@ -57,10 +54,6 @@ class TestGroupedConvndBwdWeight : public ::testing::Test
         {
             for(size_t i = 0; i < conv_params.size(); i++)
             {
-                if((param_mask & (1 << i)) == 0)
-                {
-                    continue;
-                }
                 auto& param = conv_params[i];
                 if(!skip_case(split_k))
                 {
@@ -78,7 +71,7 @@ class TestGroupedConvndBwdWeight : public ::testing::Test
                             false, // time_kernel
                             param,
                             std::to_string(split_k),
-                            instance_index);
+                            -1);
                     pass = pass && success;
                     if(!success)
                         std::cout << "Case " << param << " failed!" << std::endl;
@@ -168,21 +161,4 @@ TYPED_TEST(TestGroupedConvndBwdWeight3d, Test3D)
                                  {1, 1, 1},
                                  {1, 1, 1}});
     this->template Run<3>();
-}
-
-int main(int argc, char** argv)
-{
-    testing::InitGoogleTest(&argc, argv);
-    if(argc == 1) {}
-    else if(argc == 3)
-    {
-        param_mask     = strtol(argv[1], nullptr, 0);
-        instance_index = atoi(argv[2]);
-    }
-    else
-    {
-        std::cout << "Usage of " << argv[0] << std::endl;
-        std::cout << "Arg1,2: param_mask instance_index(-1 means all)" << std::endl;
-    }
-    return RUN_ALL_TESTS();
 }
