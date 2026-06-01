@@ -68,12 +68,6 @@ project_map = {
         ],
         "projects_to_test": ["hipkernelprovider"],
     },
-    "dnn-provider-integration-tests": {
-        "cmake_options": [
-            "-DTHEROCK_ENABLE_HIPDNN_INTEGRATION_TESTS=ON",
-        ],
-        "projects_to_test": ["hipdnn-integration-tests"],
-    },
 }
 
 # For certain math components, they are optional during building and testing.
@@ -121,8 +115,18 @@ additional_options = {
         "cmake_options": [
             "-DTHEROCK_ENABLE_MIOPENPROVIDER=ON",
             "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
+            "-DTHEROCK_ENABLE_HIPDNN_INTEGRATION_TESTS=ON",
         ],
         "projects_to_test": ["miopenprovider"],
+        "project_to_add": "miopen",
+    },
+    "dnn-provider-integration-tests": {
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_HIPDNN_INTEGRATION_TESTS=ON",
+            "-DTHEROCK_ENABLE_MIOPENPROVIDER=ON",
+            "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
+        ],
+        "projects_to_test": ["hipdnn-integration-tests", "miopenprovider"],
         "project_to_add": "miopen",
     },
     "hipblaslt-provider": {
