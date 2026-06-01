@@ -36,6 +36,14 @@ HEADER_SIZE = 16  # 4 (magic) + 4 (version) + 8 (toc_offset)
 VARIANTS = [
     # --- OGradDotO variants ---
     {
+        "name": "fmha_bwd_ograd_dot_o_fp16_d32_batch",
+        "family": "ograd_dot_o",
+        "dtype": "fp16",
+        "hdim_v": 32,
+        "mode": "batch",
+        "block_size": 64,
+    },
+    {
         "name": "fmha_bwd_ograd_dot_o_fp16_d128_batch",
         "family": "ograd_dot_o",
         "dtype": "fp16",
@@ -56,6 +64,22 @@ VARIANTS = [
         "family": "ograd_dot_o",
         "dtype": "fp16",
         "hdim_v": 64,
+        "mode": "batch",
+        "block_size": 64,
+    },
+    {
+        "name": "fmha_bwd_ograd_dot_o_fp16_d96_batch",
+        "family": "ograd_dot_o",
+        "dtype": "fp16",
+        "hdim_v": 96,
+        "mode": "batch",
+        "block_size": 64,
+    },
+    {
+        "name": "fmha_bwd_ograd_dot_o_fp16_d256_batch",
+        "family": "ograd_dot_o",
+        "dtype": "fp16",
+        "hdim_v": 256,
         "mode": "batch",
         "block_size": 64,
     },
