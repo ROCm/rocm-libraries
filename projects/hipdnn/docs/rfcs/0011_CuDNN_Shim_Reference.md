@@ -53,6 +53,10 @@ public:
     std::shared_ptr<Tensor_attributes> tensor(Tensor_attributes const&);
     std::shared_ptr<Tensor_attributes> tensor_like(
         std::shared_ptr<Tensor_attributes> const&, std::string const& name = "");
+    // Scalar tensor() convenience overloads (int64_t / float / double / etc.)
+    // that wrap a pass-by-value constant — also exposed.
+    std::shared_ptr<Tensor_attributes> tensor(int64_t value);
+    std::shared_ptr<Tensor_attributes> tensor(float value);
     error_t query_tensor_attributes_of_uid(
         int64_t uid, Tensor_attributes&) const;           // :1737
 
@@ -85,6 +89,41 @@ public:
                         bool do_multithreaded_builds = false);  // :2229
     error_t build_plan_at_index(int64_t index);           // :2242
     int64_t get_execution_plan_count() const;             // :1982
+    // Convenience one-shot build (validate + build_operation_graph +
+    // create_execution_plans + check_support + build_plans). MOST upstream
+    // samples drive the graph through build(); high priority to support.
+    error_t build(cudnnHandle_t, std::vector<HeurMode_t> const&,
+                  BuildPlanPolicy_t = BuildPlanPolicy_t::HEURISTICS_CHOICE);
+
+    // Engine / knob query + targeted plan construction
+    error_t get_engine_count(int64_t& count);
+    error_t get_knobs_for_engine(int64_t engine,
+                                 std::vector<Knob>& knobs);
+    error_t create_execution_plan(int64_t engine_id,
+                                  std::unordered_map<KnobType_t, int64_t> const& knobs);
+    Graph&  deselect_engines(std::vector<std::string> const& engine_names);
+    // Plan-name introspection
+    error_t get_plan_name(std::string&) const;
+    error_t get_plan_name_at_index(int64_t index, std::string&) const;
+    // Per-plan workspace
+    error_t get_workspace_size_plan_at_index(int64_t index, int64_t&) const;
+    // Targeted execution
+    error_t execute_plan_at_index(cudnnHandle_t,
+        std::unordered_map<int64_t, void*>&, void* workspace, int64_t index) const;
+    // (shared_ptr-keyed execute_plan_at_index overload also exists)
+
+    // Autotuning / warmup (relates to hipDNN auto-tuning work, PR #7217)
+    error_t autotune(cudnnHandle_t,
+                     std::unordered_map<int64_t, void*>&, void* workspace);
+    error_t warmup(cudnnHandle_t,
+                   std::unordered_map<int64_t, void*>&, void* workspace);
+
+    // CUDA-graph capture — no in-scope HIP-graph analogue; Tier-2
+    // error-wrappers (compile, fail at use) per RFC §4.3.1.
+    error_t populate_cuda_graph(cudnnHandle_t,
+        std::unordered_map<int64_t, void*>&, void* workspace, cudaGraph_t&);
+    error_t update_cuda_graph(cudnnHandle_t,
+        std::unordered_map<int64_t, void*>&, void* workspace, cudaGraph_t&);
 
     // Plan filtering (chained — return *this)
     Graph& select_numeric_notes(std::vector<NumericalNote_t> const&);   // :2272
@@ -125,18 +164,36 @@ public:
 
 private:
     hipdnn_frontend::graph::Graph _inner;
-    // … any auxiliary maps needed to preserve cuDNN-FE-style identity for
-    //   shared_ptr<Tensor_attributes> across calls (see RFC §4.4.1).
+    // No auxiliary identity map is needed: hipdnn_frontend already honors
+    //   set UIDs, auto-assigns unset UIDs uniquely at build time, and ships
+    //   a shared_ptr<Tensor_attributes>-keyed execute() overload that lowers
+    //   to the UID variant pack internally (see RFC §4.4.1). The Graph
+    //   wrapper only holds composition state for non-1:1 surface such as
+    //   notes / knobs / heuristics.
 };
 
 } // namespace
 ```
 
-Each `*_attributes` class is a thin wrapper holding the corresponding hipDNN
-attribute object plus any cuDNN-only fields that hipDNN doesn't model
-natively. The wrapper's setters perform the enum/type translation on the way
-in; on calls into hipDNN, the wrapper materializes the inner hipDNN attribute
-object.
+The `build()`, engine/knob-query, plan-name, per-index workspace,
+`execute_plan_at_index`, `autotune`/`warmup`, `populate_cuda_graph` /
+`update_cuda_graph`, `deselect_engines`, and scalar `tensor()` members above
+were surfaced by review as missing from an earlier draft of this signature.
+Disposition: `build()` and the scalar `tensor()` overloads are
+high-priority forwards (samples rely on them); the engine/knob/autotune
+surface forwards to hipDNN where supported and ties into the auto-tuning
+work (PR #7217, see §4); the CUDA-graph-capture methods are Tier-2
+error-wrappers (no in-scope HIP-graph analogue); the rest forward or
+error per the three-tier rule.
+
+`Graph` is a Tier-3 composition wrapper (RFC §4.3.1) because its
+plan-filtering / notes / knobs / heuristics surface is not 1:1 with hipDNN.
+The `*_attributes` classes, by contrast, follow the three-tier rule: those
+that are exactly 1:1 with their hipDNN counterpart (most of them — see §2)
+are **aliased** with a `using` declaration, not wrapped; only the
+non-matching or unsupported ones get a wrapper. Where a Tier-3 wrapper *is*
+needed, its setters perform the enum/type translation on the way in and
+materialize the inner hipDNN attribute object on calls into hipDNN.
 
 ## 2. Full `*_attributes` coverage table
 
@@ -155,7 +212,7 @@ object.
 | `Matmul_attributes` | 973 | `MatmulAttributes` |
 | `Pointwise_attributes` | 1032 | `PointwiseAttributes` |
 | `Instancenorm_backward_attributes` | 1133 | (none) |
-| `Layernorm_backward_attributes` | 1154 | (none — bwd combined with fwd in hipDNN?) |
+| `Layernorm_backward_attributes` | 1154 | ⚠️ **investigate** — marked "(none)" but hipDNN has `LayernormAttributes` (fwd) and this row looks like it may have drifted incorrectly (cf. RMSNorm, which has a distinct `RMSNormBackwardAttributes`). File an issue to confirm whether a hipDNN LayerNorm-backward attribute exists / is planned before treating this as unsupported. |
 | `Layernorm_attributes` | 1175 | `LayernormAttributes` |
 | `AdaLayernorm_attributes` | 1208 | (none — adaptive layernorm) |
 | `AdaLayernorm_backward_attributes` | 1235 | (none) |
@@ -188,20 +245,32 @@ object.
 (Plus `CustomOpAttributes` on the hipDNN side, which has no cuDNN
 equivalent.)
 
-For each `*_attributes` class with a hipDNN equivalent, the shim provides a
-wrapper that forwards setters and materializes the inner hipDNN attribute
-object. For each class **without** a hipDNN equivalent, the shim will:
+Disposition follows the three-tier strategy (RFC §4.3.1):
 
-1. Declare the attribute class and `Graph::*` method with the cuDNN FE
-   signature, so source compiles.
-2. Return `error_code_t::GRAPH_NOT_SUPPORTED` at runtime when the user
-   attempts to add the node to a graph.
-3. Document the omission in the shim header's Doxygen.
+- For each `*_attributes` class that is **exactly 1:1** with its hipDNN
+  equivalent, the shim **aliases** the hipDNN type into `<shim_ns>::graph`
+  (`using hipdnn_frontend::graph::Conv_fprop_attributes;`) — no wrapper.
+  Each row above with a named hipDNN equivalent is an alias candidate
+  pending a per-type 1:1 confirmation against
+  `frontend/include/hipdnn_frontend/attributes/` (any field/setter mismatch
+  demotes that single type to a Tier-3 composition wrapper).
+- For each class **without** a hipDNN equivalent (the "(none)" rows), the
+  shim ships a Tier-2 error-stub:
+  1. Declare the attribute class and `Graph::*` method with the cuDNN FE
+     signature, so source compiles.
+  2. Surface `error_code_t::GRAPH_NOT_SUPPORTED` at build/validate time
+     (node-adding methods return tensors, not `error_t`, so the error is
+     recorded on the graph and returned from the next
+     `validate()` / `build_operation_graph()` — see RFC §4.4.2), with a
+     message pointing the user to file a GitHub issue.
+  3. Document the omission in the shim header's Doxygen.
 
 ## 3. Verified PyTorch consumer surface
 
-Verified by direct inspection of `D:\develop\src\pytorch` against the v9
-graph API namespace (`fe::graph::*`, `cudnn_frontend::graph::*`):
+Verified by direct inspection of the PyTorch source tree
+([github.com/pytorch/pytorch](https://github.com/pytorch/pytorch),
+`aten/src/ATen/native/cudnn/`) against the v9 graph API namespace
+(`fe::graph::*`, `cudnn_frontend::graph::*`):
 
 - **`aten/src/ATen/native/cudnn/MHA.cpp` is the only file in PyTorch that
   uses the v9 graph API.** All other cuDNN consumers in PyTorch
@@ -231,8 +300,9 @@ Notably PyTorch's MHA path does **not** use:
 - Serialize / deserialize on `Graph`
 - The `shared_ptr<Tensor_attributes>`-keyed `execute()` overload — PyTorch
   assigns UIDs explicitly and uses the `unordered_map<int64_t, void*>`
-  variant pack throughout. This sidesteps the tensor-identity problem
-  (RFC §4.4.1) entirely for PyTorch.
+  variant pack throughout. (Note: per RFC §4.4.1 there is no tensor-identity
+  problem to sidestep — hipDNN handles both keying styles natively — but
+  PyTorch's explicit-UID usage is the simplest path regardless.)
 - Any of `cudnn_frontend::graph::{Conv_fprop,Conv_dgrad,Conv_wgrad,Matmul,
   Pointwise,Batchnorm,Layernorm,RMSNorm,Reduction,Resample,Slice,Reshape,
   Rng,Softmax}_attributes` or their `Graph::*` methods
@@ -261,31 +331,48 @@ Internally these forward to a `plans` member of type `Execution_plan_list`
 the user-facing API.
 
 hipDNN's current selection model (see RFC 0007) is engine-knob driven and
-does not present heuristic modes to the user. The shim will:
+does not present heuristic modes to the user. Part of this surface is being
+added by the hipDNN auto-tuning work (**PR #7217**) — `build`, autotune, and
+the engine/knob plumbing — which the shim builds on as it lands. The shim
+will:
 
 - Accept all `HeurMode_t` values without error in
-  `create_execution_plans()`. Map `A`, `B`, `FALLBACK`, `OPENSOURCE` to
-  hipDNN's default engine-selection behavior.
-- Log (at `Logging::DEBUG`) the requested mode and the actual hipDNN
-  behavior, so users debugging a perf regression can see that their
-  heuristic choice was effectively ignored.
+  `create_execution_plans()`. **Interim**: map `A`, `B`, `FALLBACK`,
+  `OPENSOURCE` all to hipDNN's fallback/default selection, and **WARN on
+  first use per process** that the requested mode was not honored. Remap as
+  real hipDNN heuristics arrive.
 
-For `deselect_workspace_greater_than` and `deselect_shared_mem_greater_than`
-(both confirmed present in v1.24 upstream), the shim must wrap them in a
-form that's enforceable against hipDNN's plan list:
+**Per-note triage.** `select_*` / `deselect_*` notes are not blanket
+no-ops; each note is classified by how it can be honored. The full table
+must be filled in note-by-note before Phase 4, but the handling buckets are:
 
-- The workspace-size cap can be enforced post-hoc by filtering out plans
-  whose `get_workspace_size()` exceeds the limit before `build_plans()`.
+| Handling | When | Examples |
+|----------|------|----------|
+| Map to engine capability | hipDNN can express the constraint via engine/knob metadata | deterministic (non-deterministic filter) — wire through now that the note system exists |
+| Warn and ignore | advisory note, safe to drop | informational numerical notes with no correctness impact |
+| **Error** | correctness-critical and hipDNN cannot honor it | requesting deterministic when it cannot be guaranteed — running anyway is wrong |
+
+The principle: a note that exists to *exclude unsafe plans* must never be
+silently dropped — if the shim can't apply the filter, it errors
+(recorded-error mechanism, RFC §4.4.2) rather than returning a plan the user
+asked to avoid.
+
+**Resource caps.** For `deselect_workspace_greater_than` and
+`deselect_shared_mem_greater_than` (both confirmed present in v1.24
+upstream):
+
+- The workspace-size cap is enforced post-hoc by filtering out plans whose
+  `get_workspace_size()` exceeds the limit before `build_plans()`. The
+  workspace *knobs* still need a concrete mapping plan (tracked with the
+  auto-tuning work, PR #7217).
 - The shared-memory cap requires per-plan shared-memory-usage metadata from
   hipDNN, which is **not** currently exposed.
 
-⚠️ **OPEN QUESTION**: Does
-`hipdnn_frontend::graph::Graph::create_execution_plans()` expose per-plan
-shared-memory-usage metadata? If not, the
-`deselect_shared_mem_greater_than` filter has the same hipDNN-side
-extension dependency as the note filters above; pending that, it must
-either no-op (with a debug log) or unconditionally reject if `shared_mem`
-is non-zero.
+**RESOLVED** (was: does `create_execution_plans()` expose per-plan
+shared-memory metadata?): pending hipDNN exposing that metadata, the shim
+**rejects a non-zero `deselect_shared_mem_greater_than`** (errors via the
+recorded-error mechanism) rather than silently no-op'ing — silently ignoring
+a resource cap could let an over-budget plan run. A zero argument is a no-op.
 
 ## 5. Error handling and logging — verified API
 
@@ -382,14 +469,30 @@ include-everything pattern. The shim's `cudnn_frontend.h` is hand-curated:
 it pulls in only the v9 graph API surface, the FE-namespace enums, the
 error / logging machinery, and the stub `cudnn.h` for C-API types.
 
-The stub `cudnn.h` covers only what v9 method signatures reference:
+The stub `cudnn.h` covers the C-API **types** the v9 method signatures
+reference:
 
-- `cudnnHandle_t` (typedef'd to a hipdnn-derived opaque pointer)
+- `cudnnHandle_t` — aliased: `using cudnnHandle_t =
+  hipdnn_frontend::hipdnnHandle_t;`
 - `cudnnStatus_t` enum (mapped to `hipdnnStatus_t`)
 - `cudnnDataType_t`, `cudnnTensorFormat_t`, `cudnnConvolutionMode_t`,
   `cudnnReduceTensorOp_t`, `cudnnNormFwdPhase_t`, `cudnnBackendHeurMode_t`,
   `cudnnBackendNumericalNote_t`, `cudnnBackendBehaviorNote_t`,
   `cudnnBackendDescriptorType_t`
+
+It additionally ships a small set of C **entry points** (revised from the
+earlier "all C entry points out of scope" position), each forwarding to the
+hipDNN equivalent — required for init / error-handling / version checks
+outside the frontend and to build the mirrored samples (§8.3):
+
+- `cudnnCreate`, `cudnnDestroy`, `cudnnSetStream`, `cudnnGetStream`
+- `cudnnGetErrorString`
+- `cudnnGetVersion`
+- `create_cudnn_handle()` helper (mirrors cuDNN FE's convenience helper)
+
+The remainder of the cuDNN C library (convolution descriptor APIs, etc.)
+stays out of scope. Open implementation item: confirm which of the above
+hipDNN C-API entry points already exist and add any that are missing.
 
 If implementation finds that any v9 surface item refers to a v0.x C++
 type by name (e.g., `cudnn_frontend::Tensor` appearing in some

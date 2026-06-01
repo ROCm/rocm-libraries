@@ -42,34 +42,32 @@ be created in hipDNN to match or provide an adequate error.
 
 ### Not
 
-This RFC supports cuDNN frontend **v9 translation units only**. We do not
-attempt to reconstruct any v0.x / v8 interface, not even as compile-only
-stubs. The shim's `cudnn_frontend.h` is a hand-curated v9-only umbrella;
-it does not mirror upstream's pattern of unconditionally including the
-v0.x descriptor headers. Consumer source that uses v0.x types
-(`TensorBuilder`, `OperationBuilder`, `EngineConfigGenerator`,
-`ExecutionPlanBuilder`, `VariantPackBuilder`, `cudnnException`, etc.) —
-e.g. PyTorch's `aten/src/ATen/native/cudnn/Conv_v8.cpp` and
-`aten/src/ATen/native/quantized/cudnn/*` — will **not** compile against
-this shim. Adding compile-only stubs for the v0.x surface (or a fuller
-v0.x shim) is a candidate follow-up RFC; see §9.
+This RFC supports cuDNN frontend **v9 translation units only**. The shim's
+`cudnn_frontend.h` is a hand-curated v9-only umbrella; it does **not**
+reconstruct the v0.x / v8 interface (not even as compile-only stubs), so
+source using v0.x types (`TensorBuilder`, `OperationBuilder`,
+`cudnnException`, etc. — e.g. PyTorch's `Conv_v8.cpp` and the quantized
+cuDNN ops) will not compile against it. The only carve-out is where a v9
+signature itself names a v0.x symbol: the shim provides just enough to keep
+v9 TUs compiling — chiefly the small C-API stub `cudnn.h`
+(`cudnnHandle_t`, `cudnnStatus_t`, etc.; see §4.7). A v0.x stub layer is a
+candidate follow-up RFC (§9).
 
-The one carve-out: where the v9 graph API surface *itself* refers to a
-v0.x-defined symbol by name, the shim provides only what's needed to
-keep v9 TUs compiling. In practice this means the small C-API stub
-`cudnn.h` for types like `cudnnHandle_t`, `cudnnStatus_t`, etc., which
-v9 method signatures use (see §4.7).
-
-We are also not attempting to provide binary (ABI) compatibility with
-cuDNN-compiled binaries — consumers must recompile against the shim
-headers.
+Also out of scope: **ABI** compatibility (consumers must recompile) and
+**Python bindings** — this is a C++-only shim, and the motivating consumer
+(PyTorch) uses the C++ API directly. A Python-binding layer would be a
+separate future RFC (§9).
 
 ## 2. Requirements
 
 - **Header-Only**: The interface must be entirely header-only.
-- **Interface parity**: Must supply 100% of cuDNN frontend v9's public C++
-  interface surface area.
-    - Perhaps some small wiggle-room for things that don't quite make sense
+- **Interface parity**: Must supply the cuDNN frontend **v9 graph API**
+  surface, **plus all additional API needed to use it** (the C-API types and
+  the handful of handle/error/version entry points it depends on — §4.7).
+  This is intentionally phrased as "the V9 API and what it needs to run"
+  rather than "100% of everything cuDNN FE ships", since the v0.x surface is
+  explicitly out of scope (§1).
+    - Some small wiggle-room is expected for things that don't map cleanly
       (heuristic mode enums, for example).
 - **Functional parity**: Must supply as much of cuDNN's functionality as
   possible.
@@ -78,7 +76,9 @@ headers.
       reachable at runtime for hipification to compile, with a runtime error
       that maps to a documented `HIPDNN_FRONTEND_*` status code).
     - No extension methods from hipDNN will be extended into this interface.
-    - At the time of writing, we will be targetting the 1.24 release.
+    - We target the **cuDNN frontend v1.24 release** (the upstream
+      NVIDIA/cudnn-frontend library version — *not* a hipDNN release
+      version; the two are independent, see §4.8). Pin details below.
 - **Performance parity**: Must minimally add overhead above-and-beyond
   hipDNN's existing overhead. Concrete budget: **< 1% additional
   `build()` time, < 1 µs added per `execute()`**, both measured against
@@ -175,6 +175,15 @@ projects/hipdnn/frontend/include/compatibility/cudnn/
         logging_bridge.h
 ```
 
+Per the aliasing-first strategy (§4.3.1), much of the `detail/` wrapper set
+above is expected to be **small**: most public headers
+(`cudnn_frontend/*.h`) reduce to thin umbrellas of `using` declarations
+that re-export 1:1 hipDNN types, and `detail/` carries real code only for
+the composition wrapper (`graph_wrapper.h`), the residual non-aliasable
+enum mappings (`type_mapping.h`), and the error/logging bridges. The
+`node_wrappers/` directory holds Tier-2 error-stubs and Tier-3 composition
+wrappers only — not one file per node.
+
 A separate, **opt-in** header,
 `<compatibility/cudnn/cuda_runtime_compat.h>`, will provide `#define`
 overrides for the small fixed set of CUDA runtime symbols that frequently
@@ -261,7 +270,7 @@ cuDNN FE uses two parallel type families. **C-API types** (`cudnnHandle_t`,
 
 | Family | Symbol | Shim mapping |
 |--------|--------|--------------|
-| C-API (`<cudnn.h>`) | `cudnnHandle_t` | Typedef for `hipdnnHandle_t` (re-exported). Source comes from a shim-provided stub `cudnn.h` — see §4.7. |
+| C-API (`<cudnn.h>`) | `cudnnHandle_t` | Alias declared in the shim's stub `cudnn.h`: `using cudnnHandle_t = hipdnn_frontend::hipdnnHandle_t;` — see §4.7. |
 | C-API | `cudnnStatus_t`, `cudnnTensorFormat_t`, `cudnnConvolutionMode_t`, `cudnnDataType_t`, `cudnnBackend*_t` | Defined in the shim's stub `cudnn.h` (see §4.7), mapped to hipDNN equivalents on the way through |
 | FE namespace | `cudnn_frontend::DataType_t` | Enum mirrored 1:1 (20 values incl. FP8/FP4/INT4 variants), mapped to `hipdnn_frontend::DataType`; values without hipDNN equivalents follow §4.3 unsupported-value rules |
 | FE namespace | `cudnn_frontend::HeurMode_t` | Enum mirrored 1:1 — values are `A`, `B`, `FALLBACK`, `OPENSOURCE`. See §4.5 for behavior |
@@ -271,32 +280,109 @@ cuDNN FE uses two parallel type families. **C-API types** (`cudnnHandle_t`,
 | FE namespace | `cudnn_frontend::NumericalNote_t` | Enum mirrored 1:1 — values: `NOT_SET`, `TENSOR_CORE`, `DOWN_CONVERT_INPUTS`, `REDUCED_PRECISION_REDUCTION`, `FFT`, `NONDETERMINISTIC`, `WINOGRAD`, `WINOGRAD_TILE_4x4`, `WINOGRAD_TILE_6x6`, `WINOGRAD_TILE_13x13`, `STRICT_NAN_PROP`. Most have no hipDNN analogue; see §4.5 |
 | FE namespace | `cudnn_frontend::BehaviorNote_t` | Enum mirrored 1:1 — values: `NOT_SET`, `RUNTIME_COMPILATION`, `REQUIRES_FILTER_INT8x32_REORDER`, `REQUIRES_BIAS_INT8x32_REORDER`, `SUPPORTS_CUDA_GRAPH_NATIVE_API`, `CUBLASLT_DEPENDENCY`. All are CUDA-specific; the shim accepts them but `Graph::*_behavior_notes()` filters log-and-no-op (see §4.5) |
 | FE namespace | `cudnn_frontend::error_code_t` | Enum mirrored 1:1 — 16 values incl. `OK`, `ATTRIBUTE_NOT_SET`, `SHAPE_DEDUCTION_FAILED`, `INVALID_TENSOR_NAME`, `INVALID_VARIANT_PACK`, `GRAPH_NOT_SUPPORTED`, `GRAPH_EXECUTION_PLAN_CREATION_FAILED`, `GRAPH_EXECUTION_FAILED`, `HEURISTIC_QUERY_FAILED`, `UNSUPPORTED_GRAPH_FORMAT`, `CUDA_API_FAILED`, `CUDNN_BACKEND_API_FAILED`, `INVALID_CUDA_DEVICE`, `HANDLE_ERROR`, `INVALID_VALUE`, `NVRTC_COMPILATION_FAILED` (verified at `graph_helpers.h:36`) |
-| FE namespace | `cudnn_frontend::error_object` (struct) | Adapts `hipdnn_frontend::Error`. Public members: `code` (field), `err_msg` (field), `get_code()`, `get_message()`, `is_good()`, `is_bad()`, `operator==(error_code_t)`, `operator!=(error_code_t)`. Verified at `graph_helpers.h:55`. |
-| FE namespace | `cudnn_frontend::error_t` | Typedef for `error_object` in the same header. Both names must be exposed by the shim. |
+| FE namespace | `cudnn_frontend::error_object` (struct) | **Aliased** to `hipdnn_frontend::error_object` once the missing `error_code_t` values are added on the hipDNN side (§4.6), making it 1:1. Public members: `code` (field), `err_msg` (field), `get_code()`, `get_message()`, `is_good()`, `is_bad()`, `operator==(error_code_t)`, `operator!=(error_code_t)`. Verified at `graph_helpers.h:55`. (Until the enum values land, a thin wrapper is the interim fallback.) |
+| FE namespace | `cudnn_frontend::error_t` | **Aliased** to `hipdnn_frontend::error_t` (typedef for `error_object`). Both names must be exposed by the shim. |
 | `cudnn_frontend::graph` | `Graph` | Class wrapping `hipdnn_frontend::graph::Graph` (see §4.4) |
 | `cudnn_frontend::graph` | `Tensor_attributes` | Wraps `hipdnn_frontend::TensorAttributes`. Verified at `graph_properties.h:49` |
 | `cudnn_frontend::graph` | All `*_attributes` classes | Wrappers; defined in upstream `graph_properties.h`. Full list verified there — see §4.4.2 |
-| `cudnn_frontend::graph` | `*Node` / `INode` / `NodeCRTP` (`graph_properties.h:455`, `node_interface.h:45`) | Internal; nominally in the public namespace but not user-facing (verified — no sample / consumer constructs them directly). Not wrapped. |
+| `cudnn_frontend::graph` | `*Node` / `INode` / `NodeCRTP` (`graph_properties.h:455`, `node_interface.h:45`) | Internal; nominally in the public namespace but not user-facing (verified — no sample / consumer constructs them directly). Not wrapped initially. Since hipDNN has matching internals, these *could* be aliased for completeness later, but that is not required for any known consumer. |
 | FE namespace, v0.x | `ConvDesc`, `ConvDescBuilder`, `EngineHeuristics`, `EngineConfig`, `EngineFallbackList`, `ResampleDesc`, ... | `using` aliases for `*_v8` legacy types (verified at `cudnn_frontend.h:137-152`). These are pulled into the umbrella header unconditionally. See §4.7 for the v0.x compatibility problem. |
 
-For every cuDNN enum value, the shim's translation header
-(`detail/type_mapping.h`) will provide bidirectional `static constexpr`
-mapping functions (`to_hipdnn()` / `from_hipdnn()`). Values with no hipDNN
-equivalent will:
+Many of these enums are **not** re-declared by the shim at all. hipDNN
+already publishes cuDNN-named `_t` typedefs for them
+(`hipdnn_frontend::DataType_t`, `HeurMode_t`, `ConvolutionMode_t`,
+`PointwiseMode_t`, `ReductionMode_t`, `BehaviorNote_t`, `BuildPlanPolicy_t`,
+`NormFwdPhase_t`, …, several carrying an explicit "Matches the
+cudnn-frontend … for API compatibility" comment in
+`frontend/include/hipdnn_frontend/Types.hpp`). Where the enum and its values
+are already 1:1, the shim **aliases** the hipDNN type into `<shim_ns>`
+(`using hipdnn_frontend::DataType_t;`) rather than re-declaring it. See
+§4.3.1.
+
+For the remaining enums — those hipDNN does not already provide 1:1 — the
+shim's translation header (`detail/type_mapping.h`) provides bidirectional
+`static constexpr` mapping functions (`to_hipdnn()` / `from_hipdnn()`).
+Values with no hipDNN equivalent will:
 - Either be accepted at compile time and rejected at runtime with a clear
   `Error::ErrorCode::NOT_SUPPORTED` (when the call site is templated and the
   enum value is dynamic), or
 - Be marked with `static_assert(..., "Not supported by hipDNN")` when the value
   is a non-type template parameter.
 
+The shim **never** `static_cast`s between the cuDNN and hipDNN enum families.
+Even where the integer values happen to coincide, the equivalence is only
+nominal; a cast like `static_cast<HeurMode_t>(1)` is forbidden because it
+silently breaks the moment either side reorders or inserts a value. Identity
+is established either by aliasing (the values *are* the same type) or by a
+named mapping function — never by a numeric cast.
+
+#### 4.3.1 Three-tier mapping strategy
+
+A recurring goal, driven by review feedback, is to **minimize wrappers**.
+For every cuDNN FE symbol the shim picks the lowest tier that is correct:
+
+1. **Alias (preferred).** The symbol is exactly 1:1 with a hipDNN type
+   (same shape, same values, same semantics). Expose it with a `using`
+   declaration in the matching shim namespace — no wrapper class, no
+   conversion, zero overhead:
+   ```cpp
+   namespace hipdnn_frontend::compatibility::cudnn_frontend {
+       using hipdnn_frontend::ConvolutionMode_t;
+       using hipdnn_frontend::DataType_t;
+       using hipdnn_frontend::HeurMode_t;
+       using hipdnn_frontend::error_t;
+   }
+   namespace hipdnn_frontend::compatibility::cudnn_frontend::graph {
+       using hipdnn_frontend::graph::Tensor_attributes;
+       using hipdnn_frontend::graph::Conv_fprop_attributes;
+       // …one per 1:1 type
+   }
+   ```
+   Most FE-namespace enums (those hipDNN already publishes as `_t`
+   typedefs), `error_t`/`error_object` (once the missing `error_code_t`
+   values are added on the hipDNN side — see §4.6), and every
+   `*_attributes` class that maps 1:1 (Reference §2) fall here.
+
+2. **Error-wrapper.** The symbol exists in cuDNN FE but hipDNN has no
+   support yet. Declare a minimal type/method with the exact cuDNN FE
+   signature so consumer source compiles, but any use returns
+   `error_code_t::GRAPH_NOT_SUPPORTED` at runtime (or `static_assert`s for
+   non-type template parameters), with a message pointing the user to file
+   a GitHub issue for the missing feature. To keep this cheap at scale, the
+   shim provides a small macro / generator that stamps out a fail-stub from
+   the upstream signature (see Risk §6.5). Every "(none)" row in Reference
+   §2 is an error-wrapper.
+
+3. **Composition-wrapper (fallback only).** The symbol exists on both
+   sides but the surfaces genuinely don't line up, so neither aliasing nor
+   a pure forward is possible. Contain the hipDNN object by value and
+   forward method-by-method. In practice the principal case is
+   `graph::Graph`, whose plan-filtering, notes, knobs, and heuristics
+   surface has no clean hipDNN counterpart (§4.5, §5.2).
+
+The default is to climb to the *lowest* applicable tier; a wrapper is a
+signal that the underlying surface isn't yet 1:1, and closing that gap on
+the hipDNN side (so the type can be demoted to an alias) is preferred over
+carrying the wrapper indefinitely.
+
 ### 4.4 Graph and node wrapping
 
-The principal class is `<shim_ns>::graph::Graph`. It contains a
-`hipdnn_frontend::graph::Graph` by value and forwards calls. Each
-`*_attributes` class is a thin wrapper holding the corresponding hipDNN
-attribute object plus any cuDNN-only fields that hipDNN doesn't model
-natively; setters perform enum/type translation on the way in, and the
-inner hipDNN attribute object is materialised on calls into hipDNN.
+The principal class is `<shim_ns>::graph::Graph`. It is the main Tier-3
+composition wrapper (§4.3.1): it contains a `hipdnn_frontend::graph::Graph`
+by value and forwards calls, holding extra state only for the surface that
+isn't 1:1 (notes, knobs, heuristics — §4.5).
+
+The `*_attributes` classes follow the three-tier rule (§4.3.1), not a
+blanket "wrap everything" policy:
+- Where a `*_attributes` class is exactly 1:1 with its hipDNN counterpart
+  (the majority — see Reference §2), the shim **aliases** the hipDNN type
+  into `<shim_ns>::graph` with a `using` declaration. No wrapper, no
+  per-setter translation.
+- Where hipDNN has **no** equivalent ("(none)" rows in Reference §2), the
+  shim ships a Tier-2 error-wrapper that compiles but fails at use.
+- Only a class whose surface exists on both sides but doesn't line up gets
+  a Tier-3 composition wrapper that translates on the way in and
+  materialises the inner hipDNN attribute object on calls into hipDNN.
 
 Three surface details that drive the wrapper implementation:
 
@@ -307,13 +393,25 @@ Three surface details that drive the wrapper implementation:
   variant-pack map is passed by **non-const reference**. The shim wraps
   all four; internally they all funnel through the same hipDNN execute
   path after key-type / pointer-form translation.
-- `Graph` setters that have no hipDNN analogue
-  (`set_dynamic_shape_enabled`, `set_override_shape_enabled`,
-  `set_sm_count`, `set_sm_version`, `set_kernel_cache`,
-  `set_device_properties`) are wrapped as **no-ops that log at debug
-  level** and return `*this`. Same policy as `HeurMode_t` (§4.5).
-  Breaking the fluent chain with a runtime error would force consumers
-  to special-case the shim in code that's otherwise portable.
+- The graph-level configuration setters are **triaged individually** —
+  the earlier blanket "no-op + debug log" policy was too permissive,
+  because ignoring some of them silently changes correctness or resource
+  behavior. Disposition (per review):
+
+  | Setter | Disposition |
+  |--------|-------------|
+  | `set_override_shape_enabled` | **Forward** — hipDNN supports it now (matching) |
+  | `set_dynamic_shape_enabled` | Forward if supported; else no-op + debug log (re-confirm during impl) |
+  | `set_kernel_cache` | **Log and ignore** — kernel reuse is still valid without it |
+  | `set_sm_count` | **Error** — ignoring partial-device allocation can cause runtime issues; not safe to silently drop |
+  | `set_device_properties` | **Error** until AOT / deviceless compilation support lands (its primary use) |
+  | `set_sm_version` | **Investigate** — disposition TBD; lean toward error if it affects codegen target |
+
+  Where a setter errors, it does so via the recorded-error mechanism so the
+  fluent chain isn't broken mid-expression (the error surfaces at the next
+  `validate()` / `build_operation_graph()`; see §4.4.2). Where it is a
+  benign no-op, it logs at debug level and returns `*this`. This keeps
+  portable consumer code compiling while refusing to silently mis-execute.
 
 For the full upstream `Graph` signature with line-number citations against
 `include/cudnn_frontend/graph_interface.h`, see
@@ -323,54 +421,55 @@ For the full upstream `Graph` signature with line-number citations against
 
 cuDNN FE uses `std::shared_ptr<Tensor_attributes>` as the stable identity for
 a tensor across a graph. hipDNN uses a `uid` (`int64_t`) and a node's
-input/output role to identify a tensor in the variant pack. The shim must
-preserve the cuDNN-style identity:
+input/output role to identify a tensor in the variant pack.
 
-- Assign a unique `uid` per shim `Tensor_attributes` instance at construction
-  time (monotonically increasing, scoped to the owning `Graph`).
-- Maintain a map from `Tensor_attributes*` → `uid` inside the `Graph` wrapper
-  so the `execute(..., map<shared_ptr<Tensor_attributes>, void*>, ...)`
-  overload can translate to hipDNN's `map<int64_t, void*>` variant-pack form.
-- Honor the cuDNN FE behavior where calling `set_uid()` on a tensor forces a
-  specific UID, and where omitting `set_uid()` lets the library assign one.
+**This requires no special handling in the shim: `hipdnn_frontend`
+already replicates cuDNN FE's identity semantics 1:1.** Specifically:
 
-⚠️ **OPEN QUESTION**: cuDNN FE allows tensor objects to be reused across
-multiple graphs and across multiple operations within a graph. Does our UID
-allocation scheme need to be `Graph`-scoped, or process-scoped? hipDNN's
-existing variant-pack semantics are per-graph, so per-graph seems safest, but
-this requires careful handling if a user constructs a `Tensor_attributes`
-before any `Graph` exists.
+- A UID the user sets via `set_uid()` is honored; a tensor left without a
+  UID is auto-assigned a unique one at **build** time — never overlapping a
+  pre-set UID — by `hipdnn_frontend::graph::Graph::assignUnsetTensorUids()`
+  (verified at `Graph.hpp:293`). This matches cuDNN FE, which is also
+  late-bound: `set_uid()` only records the request, and uniqueness is
+  enforced during build, not at the call site.
+- Duplicate UIDs are detected at build/validation time (UIDs determine
+  graph edges, so a collision yields a validation failure), again matching
+  cuDNN FE's behavior of failing during `build_operation_graph` on
+  duplicate UIDs.
+- hipDNN already exposes a `shared_ptr<TensorAttributes>`-keyed `execute()`
+  overload that internally lowers to the `map<int64_t, void*>` variant
+  pack (verified at `Graph.hpp:1760`), so the shim does **not** need to
+  maintain its own `Tensor_attributes*` → `uid` map.
 
-⚠️ **OPEN QUESTION**: What is the collision semantics when a user calls
-`set_uid(N)` and `N` matches a value the shim has already auto-assigned
-to another tensor? Candidate behaviors:
-- **Hard error**: `set_uid` returns `error_code_t::INVALID_VALUE` if `N`
-  is already taken. Most defensive; requires the shim to track all
-  assigned UIDs.
-- **Disjoint ranges**: auto-assignment starts at e.g. `INT64_MAX/2` so
-  user-set IDs in the normal range never collide. Zero runtime cost;
-  silent if a user happens to pick a UID above the threshold.
-- **Late assignment**: don't auto-assign at construction; walk the graph
-  at `validate()` / first `execute()` and only assign UIDs to tensors
-  the user didn't already set. Preserves user choices implicitly.
-- **Process-scoped monotonic counter**: simpler than per-Graph, but
-  still needs a collision policy on top.
-
-PyTorch sidesteps this entirely by calling `set_uid` on every tensor and
-using the UID-keyed variant pack (§4.4.3); the question is binding only
-for consumers that mix auto-assigned and explicit UIDs (cuDNN's own
-samples, etc.). Resolve before Phase 2's tensor-identity work lands.
+Consequently there is no shim-side UID allocator, no construction-time
+assignment, and no auxiliary identity map. UIDs need not be `Graph`-scoped —
+a `Tensor_attributes` may be shared across graphs, and the only error
+condition is a duplicate UID *within* a single graph, which both libraries
+already reject at build time. The shim's `Tensor_attributes` setters
+(`set_uid`, `set_output`, etc.) forward directly to the aliased/wrapped
+hipDNN type.
 
 #### 4.4.2 Node coverage
 
 Upstream `graph_properties.h` defines 39 `*_attributes` classes for the v9
 graph API; roughly half have a current `hipdnn_frontend` equivalent and
-half do not. For each class **with** a hipDNN equivalent, the shim
-provides a forwarding wrapper. For each class **without** one, the shim
-declares the attribute class and `Graph::*` method with the cuDNN FE
-signature (so source compiles) but returns
-`error_code_t::GRAPH_NOT_SUPPORTED` at runtime, and the omission is noted
-in the shim header's Doxygen.
+half do not. For each class **with** a 1:1 hipDNN equivalent, the shim
+**aliases** the hipDNN type (§4.3.1) — no wrapper. For each class
+**without** one, the shim declares the attribute class and `Graph::*`
+method with the cuDNN FE signature (so source compiles) but reports
+`error_code_t::GRAPH_NOT_SUPPORTED`, and the omission is noted in the shim
+header's Doxygen.
+
+**Where the error surfaces.** Node-adding methods return
+`std::shared_ptr<Tensor_attributes>`, not `error_t`, so an unsupported node
+cannot return the error code directly from the method call. Instead, adding
+an unsupported node (or using an errored setter, §4.4) **records an error on
+the composition `Graph`**, and that error is returned from the next
+`validate()` / `build_operation_graph()` call. This matches how a consumer
+already checks graph construction (PyTorch wraps these in
+`AT_CUDNN_FRONTEND_CHECK`), so no special-casing is needed on the consumer
+side. The error message points the user to file a GitHub issue for the
+missing node.
 
 The full class-by-class table (39 entries, with line numbers in
 `graph_properties.h` and the matching hipDNN attribute type — or "none" —
@@ -386,20 +485,23 @@ descriptor API and are out of scope per §1 "Not". The v9 surface that
 `MHA.cpp` actually exercises is narrow: SDPA forward and backward; a small
 set of `Graph` lifecycle, `Tensor_attributes`, `SDPA_attributes`, and
 `SDPA_backward_attributes` methods; a handful of `DataType_t` values; and
-`HeurMode_t::A`. PyTorch also uses the UID-keyed variant pack throughout,
-sidestepping §4.4.1's pointer-identity question entirely.
+`HeurMode_t::A`. PyTorch also uses the UID-keyed variant pack throughout —
+the simplest path, though per §4.4.1 the shim needs no special tensor-identity
+handling for either keying style.
 
 For the precise symbol-by-symbol table with line-number citations, plus
 the explicit list of cuDNN FE features PyTorch does **not** use, see
 [Supporting Reference §3](./0011_CuDNN_Shim_Reference.md#3-verified-pytorch-consumer-surface).
 
-⚠️ **OPEN QUESTION**: Should we instead file hipDNN feature requests / RFCs
-for each missing node up front and only ship the shim with a node implemented
-once hipDNN supports it natively? The trade-off is between "shim is complete
-but mostly broken at runtime" vs. "shim is permanently a strict subset until
-hipDNN catches up". My current preference: ship the surface for hipification
-to compile, fail loudly at runtime, and prioritize hipDNN node work
-separately.
+**RESOLVED** (was: should we ship the full surface and fail at runtime, or
+only ship nodes once hipDNN supports them natively?). Decision, with reviewer
+agreement: **ship the full v9 surface so hipified source compiles, and fail
+loudly at use** (build/validate time, §4.4.2), prioritizing hipDNN node work
+separately. Rationale: waiting for full engine support would block otherwise
+valid use cases, and adding the frontend surface without engines would become
+a hidden runtime error either way — surfacing it as an explicit, documented
+`GRAPH_NOT_SUPPORTED` (pointing at a GitHub issue) is strictly better than a
+silent gap.
 
 ### 4.5 Heuristics and plan selection
 
@@ -412,13 +514,45 @@ notes filters, the `deselect_workspace_greater_than` /
 `Plans` class (an internal `Execution_plan_list` holds the data but is
 not part of the API).
 
-hipDNN's current selection model (RFC 0007) is engine-knob driven and
-does not present heuristic modes. The shim will accept all `HeurMode_t`
-values, map them onto hipDNN's default selection, and log the requested
-mode at debug level. The workspace-size cap can be enforced post-hoc
-against hipDNN's existing `get_workspace_size()`; the shared-memory cap
-and the note filters depend on hipDNN-side metadata that is **not**
-currently exposed.
+hipDNN's current selection model (RFC 0007) is engine-knob driven and does
+not present heuristic modes. Some of this surface is being filled in by the
+hipDNN auto-tuning work (PR #7217), which the shim should build on as it
+lands.
+
+**HeurMode (interim).** Accept all `HeurMode_t` values; for now map every
+mode (`A`, `B`, `FALLBACK`, `OPENSOURCE`) to hipDNN's fallback/default
+selection and **log a WARN on first use per process** so a user debugging a
+perf regression sees that their heuristic choice was not honored. As real
+hipDNN heuristics arrive, remap the modes properly. (Both reviewers accept
+this stopgap; the benchmarking and auto-tuning paths are explicit user
+choices and are handled separately.)
+
+**Notes — per-note triage, not blanket no-op.** A blanket "accept and
+ignore" is unsafe: silently running without a requested filter can be
+*wrong*, not merely slower. Each `NumericalNote_t` / `BehaviorNote_t` is
+triaged into one of three handlings:
+
+- **Map to engine capability** — when hipDNN can honor the constraint
+  through its engine/knob system. The deterministic ("non-deterministic"
+  filter) case is the worked example: now that the note system exists,
+  hipDNN can likely express it, and the shim should wire it through.
+- **Warn and ignore** — for notes that are advisory and safe to drop
+  (logged at WARN on first use).
+- **Error** — for correctness-critical notes hipDNN cannot honor. If a user
+  requests deterministic behavior and the shim cannot guarantee it, it is
+  **wrong** to run anyway; the shim must error rather than silently produce
+  non-deterministic results. (Recorded-error mechanism, §4.4.2.)
+
+The per-note classification table lives in
+[Supporting Reference §4](./0011_CuDNN_Shim_Reference.md#4-heuristics-and-plan-selection--verified-api)
+and must be reviewed note-by-note before Phase 4 lands.
+
+**Resource caps.** The workspace-size cap is enforced post-hoc against
+hipDNN's existing `get_workspace_size()` (and the workspace *knobs* need a
+concrete mapping plan — Reference §4). The shared-memory cap depends on
+per-plan shared-memory metadata hipDNN does not yet expose; until it does,
+the shim **rejects a non-zero `deselect_shared_mem_greater_than`** rather
+than silently ignoring it (Reference §4).
 
 For the full upstream method enumeration (with `graph_interface.h` line
 numbers), behaviour table, and the open question about hipDNN-side
@@ -427,13 +561,18 @@ metadata extensions, see
 
 ### 4.6 Error handling and logging
 
-The shim's `error_object` is a transparent wrapper around
-`hipdnn_frontend::Error`, preserving cuDNN FE's full public surface
-(public fields `code` and `err_msg`; methods `get_code`, `get_message`,
-`is_good`, `is_bad`, `operator==/!=`). `error_t` is exposed as a typedef
-for `error_object`, matching upstream. The 16-value `error_code_t` enum
-is mirrored 1:1; codes without an exact hipDNN counterpart collapse to
-the nearest equivalent. The cuDNN FE error/log macros
+Per the aliasing-first strategy (§4.3.1), the preferred outcome is to make
+`hipdnn_frontend`'s error type exactly 1:1 with cuDNN FE's and **alias** it,
+rather than ship a wrapper. cuDNN FE's `error_object` exposes public fields
+`code` and `err_msg` and methods `get_code`, `get_message`, `is_good`,
+`is_bad`, `operator==/!=`, with `error_t` a typedef for it; hipDNN's `Error`
+is structurally the same. The one gap is the `error_code_t` enum: cuDNN FE
+has 16 values, a few of which (e.g. `NVRTC_COMPILATION_FAILED`,
+`INVALID_CUDA_DEVICE`, `CUDNN_BACKEND_API_FAILED`) have no hipDNN
+counterpart. **The plan is to add the missing values to hipDNN's error-code
+enum** so the whole error type becomes aliasable; until that lands, a thin
+interim wrapper maps the cuDNN-only codes to the nearest hipDNN equivalent.
+The cuDNN FE error/log macros
 (`CHECK_CUDNN_FRONTEND_ERROR`, `RETURN_CUDNN_FRONTEND_ERROR_IF`,
 `CUDNN_FE_LOG*`) are also re-exported, since PyTorch's
 `AT_CUDNN_FRONTEND_CHECK` expands to them.
@@ -442,7 +581,13 @@ Logging in cuDNN FE is **off by default** (controlled by the integer env
 var `CUDNN_FRONTEND_LOG_INFO`; output target via `CUDNN_FRONTEND_LOG_FILE`;
 compile-time disable via `NV_CUDNN_FRONTEND_DISABLE_LOGGING`). The shim
 re-exports these names and delegates to `hipdnn_frontend::Logging`,
-preserving the off-by-default behaviour.
+preserving the off-by-default behaviour. Concretely, the shim **reads the
+cuDNN FE env vars and forwards them into the equivalent hipDNN Logging API**
+(level and output target), rather than only re-exporting the names — so
+setting `CUDNN_FRONTEND_LOG_INFO` actually drives hipDNN's logger.
+(Alternatively, hipDNN's own env-var handling could be extended to recognize
+the cuDNN names directly; the forward-into-API approach is preferred as it
+keeps the bridge in the shim.)
 
 For the verified `error_object` structure, the full macro list, and the
 detailed logging API surface (with `cudnn_frontend_Logging.h` references),
@@ -465,23 +610,46 @@ or not.
 **Decision (per §1)**: the shim's `cudnn_frontend.h` is a hand-curated
 **v9-only umbrella**. It does not mirror upstream's include pattern, does
 not pull in any v0.x descriptor header, and does not declare the v0.x
-classes or `using` aliases. The only v0.x-adjacent code the shim ships
-is a minimal stub `cudnn.h` covering the C-API types that the v9 graph
-API surface refers to in its own method signatures:
+classes or `using` aliases. The stub `cudnn.h` it ships covers the C-API
+**types** that the v9 graph API surface refers to in its own method
+signatures:
 
 - `cudnnHandle_t` (used by `Graph::execute`, `build_operation_graph`,
-  `check_support`, etc.)
+  `check_support`, etc.), declared as an alias:
+  `using cudnnHandle_t = hipdnn_frontend::hipdnnHandle_t;`
 - `cudnnStatus_t`
 - `cudnnDataType_t`, `cudnnTensorFormat_t`, `cudnnConvolutionMode_t`,
   `cudnnReduceTensorOp_t`, `cudnnNormFwdPhase_t`,
   `cudnnBackendHeurMode_t`, `cudnnBackendNumericalNote_t`,
   `cudnnBackendBehaviorNote_t`, `cudnnBackendDescriptorType_t`
 
+**The stub also ships a small set of C-API entry points** (revised from an
+earlier draft that placed all C entry points out of scope). Review feedback
+established that these are used outside the frontend — for handle init,
+stream binding, error handling, and version checks — and are needed to build
+and run the cuDNN-mirrored samples (§8.3):
+
+- Handle lifecycle: `cudnnCreate`, `cudnnDestroy`, `cudnnSetStream`,
+  `cudnnGetStream` — forwarding to the corresponding hipDNN handle API.
+- `cudnnGetErrorString` — forwarding to hipDNN's error-string lookup.
+- `cudnnGetVersion` — returning the version the shim claims compatibility
+  with (§4.8).
+
+cuDNN FE also provides a `create_cudnn_handle()` helper that calls directly
+into the handle API; the shim re-exports an equivalent so sample code that
+uses it works unchanged. (Implementation note / open item: confirm which of
+these hipDNN C-API entry points already exist to forward to, and add any
+that are missing. The full cuDNN C library beyond this set — convolution
+descriptor APIs, etc. — remains out of scope.)
+
 If, during implementation, the v9 graph API surface is found to refer to
 a v0.x C++ type by name (e.g., `cudnn_frontend::Tensor` as used by some
-internal-but-public `INode` signatures), the shim will provide a minimal
-stub for *only that type*, scoped to make v9 TUs compile. The full v0.x
-C++ surface (`TensorBuilder`, `OperationBuilder`,
+internal-but-public `INode` signatures), the shim will expose *only that
+type*, scoped to make v9 TUs compile. Where that legacy name was simply
+reused by the new API and corresponds to a v9 type the shim already
+supports, **alias** it to the matching hipDNN type (per §4.3.1) rather than
+stubbing it; in practice `Tensor` is the likely — possibly only — case. The
+full v0.x C++ surface (`TensorBuilder`, `OperationBuilder`,
 `EngineConfigGenerator`, `ExecutionPlanBuilder`, `VariantPackBuilder`,
 `EngineHeuristicsBuilder`, `EngineFallbackListBuilder`,
 `EngineConfigBuilder`, `ConvDescBuilder`, `MatMulDescBuilder`,
@@ -546,6 +714,12 @@ That implies:
   already done in `hipdnn_frontend`; we lose any future improvements to
   `hipdnn_frontend` for free.
 
+Note: once the shim's aliases and wrappers exist, a **direct (non-hipify)
+source-conversion path** for the supported API becomes nearly free — the
+mapping is already encoded in the shim. This does not compete with the
+hipify path; the two can coexist, and offering both is a reasonable future
+option for consumers who prefer one workflow over the other.
+
 ## 5. Key Design Decisions
 
 ### 5.1 Header file extension and naming
@@ -555,31 +729,40 @@ convention.  Match cuDNN filenames precisely.
 
 ### 5.2 Forwarding strategy
 
-**Decision (proposed)**: The shim's `Graph` *contains* a
-`hipdnn_frontend::graph::Graph` by value (composition), rather than
-inheriting from it.
+**Decision**: Aliasing is the default; composition is the fallback for
+types that are not 1:1 (§4.3.1). Composition is used for the shim's `Graph`,
+which *contains* a `hipdnn_frontend::graph::Graph` by value rather than
+inheriting from or aliasing it.
 
 **Rationale**: cuDNN FE's `Graph` has a different surface area than hipDNN's
-(different method names, different return types, different validation flow).
-Composition gives us complete control over the surface and avoids accidental
-exposure of hipDNN methods through the cuDNN-shaped class.
+(plan filtering, notes, knobs, heuristics — different method names, return
+types, and validation flow), so it cannot be aliased. Composition gives
+complete control over that surface and avoids accidentally exposing hipDNN
+methods through the cuDNN-shaped class. For the many *other* types that are
+already 1:1 (most enums, `error_t`, and the matching `*_attributes`
+classes), no wrapper is written at all — they are aliased, which is cheaper
+and removes per-call overhead.
 
-**Drawbacks**: Slightly more verbose; we must explicitly forward each method
-we want to expose.
+**Drawbacks**: The composition path is slightly more verbose — each exposed
+method must be forwarded explicitly — but it applies to only the small set
+of genuinely non-matching types rather than the whole surface.
 
-### 5.3 Tensor identity via UID indirection
+### 5.3 Tensor identity — rely on hipDNN's native UID handling
 
-**Decision (proposed)**: Auto-assign UIDs on tensor construction; maintain an
-internal map from cuDNN-FE-style `shared_ptr<Tensor_attributes>` to UID per
-`Graph`.
+**Decision**: No shim-side UID allocator and no shim-side identity map.
+`hipdnn_frontend` already matches cuDNN FE's identity semantics — set UIDs
+are honored, unset UIDs are auto-assigned uniquely at build time, duplicates
+fail at build, and a `shared_ptr`-keyed `execute()` overload already lowers
+to the UID-indexed variant pack internally (see §4.4.1 for the verified
+`Graph.hpp` references). The shim simply forwards.
 
-**Rationale**: hipDNN's variant pack is UID-indexed; cuDNN FE's is
-pointer-indexed. Auto-assigning UIDs lets users continue to write
-`shared_ptr`-keyed variant packs while letting hipDNN see UID-keyed ones.
+**Rationale**: An earlier draft proposed auto-assigning UIDs on tensor
+construction and maintaining a `shared_ptr<Tensor_attributes>` → UID map per
+`Graph`. Inspection of `hipdnn_frontend::graph::Graph` showed this is
+redundant: the behavior the map would have provided already exists natively.
 
-**Drawbacks**: Adds a per-tensor map lookup at every `execute()`. The
-collision semantics between auto-assigned and user-set UIDs is not yet
-decided — see the OPEN QUESTION in §4.4.1.
+**Drawbacks**: None relative to the prior proposal — this removes the
+per-execute map lookup and the undecided collision semantics entirely.
 
 ### 5.4 Failure mode for unimplemented cuDNN features
 
@@ -613,12 +796,16 @@ graph-construction-heavy workloads (e.g., PyTorch eager mode building a fresh
 graph per kernel launch).
 
 **Mitigation**:
-- All forwarding methods `inline` and header-only.
+- Prefer aliasing (§4.3.1): aliased types add **zero** overhead — they are
+  the hipDNN type. This removes most of the surface from the perf budget,
+  including the per-execute tensor-identity map that an earlier draft
+  proposed (now eliminated — §4.4.1, §5.3).
+- All forwarding methods on the residual composition wrappers `inline` and
+  header-only.
 - Benchmark `Graph::build()` and `Graph::execute()` overhead against native
   `hipdnn_frontend` calls; gate merges on no-regression.
-- Avoid heap allocations in the hot path (the tensor-identity map is the main
-  risk; consider `std::unordered_map` with reserved buckets, or
-  small-map / flat-map).
+- Avoid heap allocations in the hot path of the composition `Graph`
+  wrapper.
 
 ### 6.3 Silent behavioral divergence
 
@@ -654,11 +841,17 @@ must also be wrapped; each cuDNN FE release must be evaluated; each PyTorch
 upgrade tests the shim's adequacy.
 
 **Mitigation**:
+- Aliasing-first (§4.3.1) keeps the hand-written surface small: every 1:1
+  type is a one-line `using` that needs no per-release maintenance, so the
+  ongoing burden concentrates on the few composition wrappers and the
+  error-stubs.
 - **Owner: the hipDNN team (collective)**, with Mitch Ousdahl leading
   the initial implementation. The shim is treated as a first-class
   component of `hipdnn_frontend`, not a side project.
-- Tooling: a generator that takes a cuDNN FE header and emits a "stub shim
-  skeleton" the maintainer fills in, reducing per-node boilerplate.
+- Tooling: a generator/macro that takes a cuDNN FE signature and emits a
+  Tier-2 fail-stub (returns `GRAPH_NOT_SUPPORTED`, points the user at a
+  GitHub issue) for any newly-added upstream symbol we don't yet support,
+  reducing per-node boilerplate.
 - Out-of-tree consumer integration tests run on PR.
 
 ### 6.6 Encouraging hipDNN-native adoption is undermined
@@ -683,15 +876,18 @@ hipDNN-native PyTorch that ships in 2027.
   (`cudnnStatus_t`, `cudnnDataType_t`, `cudnnTensorFormat_t`,
   `cudnnPointwiseMode_t`, `cudnnReduceTensorOp_t`).
 - Implement `detail/status_translation.h` and `error_object`.
-- Ship the stub `cudnn.h` (per §4.7) covering only the C-API types
-  referenced by the v9 graph API (`cudnnHandle_t`, `cudnnStatus_t`,
-  `cudnnDataType_t`, `cudnnTensorFormat_t`, `cudnnConvolutionMode_t`,
-  `cudnnReduceTensorOp_t`, `cudnnNormFwdPhase_t`,
-  `cudnnBackendHeurMode_t`, `cudnnBackendNumericalNote_t`,
-  `cudnnBackendBehaviorNote_t`, `cudnnBackendDescriptorType_t`). The C
-  entry points (`cudnnCreate()`, `cudnnDestroy()`, etc.) are part of the
-  full cuDNN C library, not cuDNN FE itself, and are out of scope for
-  this RFC.
+- Ship the stub `cudnn.h` (per §4.7) covering the C-API types referenced by
+  the v9 graph API (`cudnnHandle_t`, `cudnnStatus_t`, `cudnnDataType_t`,
+  `cudnnTensorFormat_t`, `cudnnConvolutionMode_t`, `cudnnReduceTensorOp_t`,
+  `cudnnNormFwdPhase_t`, `cudnnBackendHeurMode_t`,
+  `cudnnBackendNumericalNote_t`, `cudnnBackendBehaviorNote_t`,
+  `cudnnBackendDescriptorType_t`) **and** the small set of C entry points
+  needed for init / error handling / version checks and for building the
+  mirrored samples: `cudnnCreate`, `cudnnDestroy`, `cudnnSetStream`,
+  `cudnnGetStream`, `cudnnGetErrorString`, `cudnnGetVersion`, and a
+  `create_cudnn_handle()` helper (each forwarding to the hipDNN equivalent —
+  see §4.7). The remainder of the cuDNN C library (convolution descriptor
+  APIs, etc.) stays out of scope.
 - Unit tests for the type mapping and status translation (round-trip every
   enum value).
 
@@ -711,15 +907,20 @@ Source that mixes v9 and v0.x types is out of scope (§4.7, §9).
   `set_compute_data_type`, `set_intermediate_data_type`, `set_name`,
   `validate`, `build_operation_graph`, `create_execution_plans`,
   `check_support` (both overloads), `build_plans` (both overloads),
-  `build_plan_at_index`, `get_execution_plan_count`, all **four**
-  `execute` overloads (shared_ptr-keyed pack; uid-keyed pack;
-  uid-keyed-with-shape-overrides; flat-pointer-array form),
-  `get_workspace_size`, `serialize`, `deserialize`.
+  `build_plan_at_index`, `get_execution_plan_count`, the convenience
+  `build()` one-shot (validate → build_operation_graph →
+  create_execution_plans → check_support → build_plans; most upstream
+  samples use it), all **four** `execute` overloads (shared_ptr-keyed
+  pack; uid-keyed pack; uid-keyed-with-shape-overrides; flat-pointer-array
+  form), `get_workspace_size`, `serialize`, `deserialize`.
 - Implement the no-op-with-debug-log Graph setters (`set_dynamic_shape_enabled`,
   `set_override_shape_enabled`, `set_sm_count`, `set_sm_version`,
   `set_kernel_cache`, `set_device_properties`) per §4.4.
-- Add `Graph::tensor()` returning `std::shared_ptr<Tensor_attributes>`.
-- Tensor-identity map and per-Graph UID allocator.
+- Add `Graph::tensor()` returning `std::shared_ptr<Tensor_attributes>`,
+  including the scalar convenience overloads (`tensor(int64_t)`,
+  `tensor(float)`, …).
+- No tensor-identity map or UID allocator is needed — hipDNN handles UID
+  assignment natively (§4.4.1).
 - Unit tests covering: building an empty graph, an invalid graph,
   serializing and deserializing the empty graph.
 
@@ -773,16 +974,30 @@ the corresponding cuDNN FE sample.
 ### 7.4 Phase 4 — Heuristics surface, logging, and polish
 
 - Implement `HeurMode_t`, `NumericalNote_t`, `BehaviorNote_t` enum mapping.
-- Wire the plan-filter methods on the shim's `Graph`:
-  - `select_*` / `deselect_*` notes — filter hipDNN's plan list locally
-    if hipDNN exposes the needed per-plan metadata; otherwise no-op with
-    a debug log (see [Supporting Reference §4 OPEN QUESTION](./0011_CuDNN_Shim_Reference.md#4-heuristics-and-plan-selection--verified-api)).
+- Wire the plan-filter methods on the shim's `Graph`, applying the
+  per-note triage (§4.5; classification table in
+  [Supporting Reference §4](./0011_CuDNN_Shim_Reference.md#4-heuristics-and-plan-selection--verified-api)):
+  - `select_*` / `deselect_*` notes — map to engine capability where
+    hipDNN can honor it, warn-and-ignore where advisory, **error** where
+    correctness-critical and unsupported (e.g. deterministic). No blanket
+    no-op.
   - `deselect_workspace_greater_than` — filter hipDNN plans by
     workspace size before `build_plans()` (hipDNN's
     `get_workspace_size()` is sufficient).
-  - `deselect_shared_mem_greater_than` — pending hipDNN exposure of
-    per-plan shared-memory metadata (see [Supporting Reference §4 OPEN QUESTION](./0011_CuDNN_Shim_Reference.md#4-heuristics-and-plan-selection--verified-api)).
-- Implement environment-variable bridge for cuDNN FE logging vars.
+  - `deselect_shared_mem_greater_than` — **reject a non-zero value** until
+    hipDNN exposes per-plan shared-memory metadata (resolved in
+    [Supporting Reference §4](./0011_CuDNN_Shim_Reference.md#4-heuristics-and-plan-selection--verified-api)).
+- Wire the plan/engine introspection surface (Reference §1): `build()`,
+  `get_engine_count`, `get_knobs_for_engine`, `create_execution_plan(engine_id,
+  knobs)`, `get_plan_name` / `get_plan_name_at_index`,
+  `get_workspace_size_plan_at_index`, `execute_plan_at_index`, and
+  `deselect_engines` — forwarding to hipDNN where supported (much of this
+  arrives with auto-tuning PR #7217), error-wrapper otherwise.
+- `autotune` / `warmup` — forward to hipDNN's auto-tuning path (PR #7217).
+- `populate_cuda_graph` / `update_cuda_graph` — Tier-2 error-wrappers (no
+  in-scope HIP-graph capture analogue).
+- Implement environment-variable bridge for cuDNN FE logging vars
+  (forward the cuDNN env vars into hipDNN's Logging API — §4.6).
 - `KNOWN_DIVERGENCES.md` document.
 - Performance benchmarks vs. native `hipdnn_frontend`.
 
@@ -847,24 +1062,35 @@ gtest framework as the rest of the frontend tests; same naming convention
 - `TestCudnnShimError` — error_object construction, code mapping, message
   preservation through `hipdnn_frontend::Error`.
 
-### 8.2 Integration tests
+### 8.2 Integration tests (AMD-authored)
 
 Location: `projects/hipdnn/samples/cudnn_shim/` (or under
 `projects/hipdnn/samples/` next to the existing `convolution`, `sdpa`, etc.
 samples).
 
-- Per-node sample mirroring the corresponding upstream cuDNN FE sample,
-  built and run against a real provider (miopen-provider or
-  hipblaslt-provider as applicable).
-- "Full pipeline" sample: build → validate → check_support → build_plans →
+These are **AMD-authored** integration tests, distinct from the
+upstream-sample compatibility check in §8.3 (which compiles NVIDIA's own
+sources). They should resemble the existing hipDNN frontend integration
+tests — driving the shim end-to-end against the in-tree test plugins /
+providers — so they exercise our wrapper/alias layer specifically rather
+than re-proving upstream's samples.
+
+- Per-node test driving the shim API, built and run against a real provider
+  (miopen-provider or hipblaslt-provider as applicable) or the in-tree
+  `fake_backend`.
+- "Full pipeline" test: build → validate → check_support → build_plans →
   execute against real tensor data, asserting numerical correctness against
   a hipDNN-native reference.
 
 ### 8.3 Compatibility / "build the cuDNN FE samples" test
 
-The strongest evidence of source compatibility is that NVIDIA's own
-`samples/cpp/` programs from the pinned cuDNN FE version build and pass
-when their includes are repointed at the shim.
+This is the **source-compatibility proof** and is deliberately separate
+from the AMD-authored integration tests in §8.2: here we compile and run
+NVIDIA's *unmodified* sources (only the includes repointed) to demonstrate
+the shim is genuinely drop-in. The strongest evidence of source
+compatibility is that NVIDIA's own `samples/cpp/` programs from the pinned
+cuDNN FE version build and pass when their includes are repointed at the
+shim.
 
 - Vendor (as a git submodule or fetched at configure time) a pinned cuDNN
   FE tag.
@@ -890,6 +1116,10 @@ when their includes are repointed at the shim.
   live) that `#include`s the shim umbrella header and compiles a trivial
   Graph.
 
+Python bindings are out of scope (§1, §9); a hipDNN benchmarking/bindings
+project would be the natural host for shim-level perf or Python-side testing
+*if* such bindings are ever built.
+
 ### 8.6 PyTorch end-to-end smoke test
 
 A small set of PyTorch tests run on a nightly schedule against a PyTorch
@@ -906,6 +1136,11 @@ PyTorch in, or (c) the test is run on-demand by the shim's named owners
 
 ## 9. Future Considerations
 
+- **Python bindings (out of scope, possible future RFC)**: cuDNN frontend
+  ships Python bindings; this RFC is C++-only (§1). A Python-binding
+  compatibility layer — if a consumer materializes a concrete ask — would be
+  a separate RFC, and a hipDNN benchmarking/bindings project would be its
+  natural home (see §8).
 - **v0.x compile-only stub layer (deferred)**: a follow-up RFC covering
   compile-only stubs for the upstream v0.x / v8 C++ surface
   (`TensorBuilder`, `OperationBuilder`, `EngineConfigGenerator`,
