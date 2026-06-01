@@ -33,8 +33,8 @@
  * **E[G_0,G_1,...,M_0,M_1,...,N_0,N_1,...] = epilogue_op(C, D_0, D_1, D_2, ...)**
  *
  * Where:
- * **C[G_0,G_1,...,M_0,M_1,...,N_0,N_1,...] = Sum_{K_0,K_1,...} A[G_0,G_1,...,M_0,M_1,...,K_0,K_1,...] x
- * B[G_0,G_1,...,N_0,N_1,...,K_0,K_1,...]**
+ * **C[G_0,G_1,...,M_0,M_1,...,N_0,N_1,...] = Sum_{K_0,K_1,...}
+ * A[G_0,G_1,...,M_0,M_1,...,K_0,K_1,...] x B[G_0,G_1,...,N_0,N_1,...,K_0,K_1,...]**
  *
  * Where:
  * - **G dimensions**: Batch dimensions (shared across A, B, and output E)
