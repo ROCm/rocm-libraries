@@ -217,8 +217,6 @@ def runNewClient(scriptPath, clientParametersPath, cxxCompiler: str, cCompiler: 
   # Add MX scale format if set
   if globalParameters["MXScaleFormat"]:
     args.extend(["--mx-scale-format", str(globalParameters["MXScaleFormat"])])
-  if globalParameters.get("MXScalePadByte", 0):
-    args.extend(["--mx-scale-pad-byte", str(globalParameters["MXScalePadByte"])])
 
   try:
     subprocess.run(args, check=True)
@@ -336,9 +334,8 @@ def writeRunScript(path, forBenchmark, enableTileSelection, cxxCompiler: str, cC
     clientExe = getClientExecutablePath()
     timingFlag = " --timing-instrumentation" if globalParameters["TimingInstrumentation"] else ""
     mxScaleFormatFlag = " --mx-scale-format {}".format(globalParameters["MXScaleFormat"]) if globalParameters["MXScaleFormat"] else ""
-    mxScalePadByteFlag = " --mx-scale-pad-byte {}".format(globalParameters["MXScalePadByte"]) if globalParameters.get("MXScalePadByte", 0) else ""
     for configFile in configPaths:
-      runScriptFile.write("{} --config-file {}{}{}{}\n".format(clientExe, configFile, timingFlag, mxScaleFormatFlag, mxScalePadByteFlag))
+      runScriptFile.write("{} --config-file {}{}{}\n".format(clientExe, configFile, timingFlag, mxScaleFormatFlag))
     runScriptFile.write("ERR2=$?\n\n")
 
     runScriptFile.write("""
@@ -361,9 +358,8 @@ fi
         runScriptFile.write("%s -d 0 --setfan 50\n" % globalParameters["ROCmSMIPath"])
   else:
     mxScaleFormatFlag = " --mx-scale-format {}".format(globalParameters["MXScaleFormat"]) if globalParameters["MXScaleFormat"] else ""
-    mxScalePadByteFlag = " --mx-scale-pad-byte {}".format(globalParameters["MXScalePadByte"]) if globalParameters.get("MXScalePadByte", 0) else ""
     for configFile in configPaths:
-      runScriptFile.write("{} --config-file {} --best-solution{}{}\n".format(getClientExecutablePath(), configFile, mxScaleFormatFlag, mxScalePadByteFlag))
+      runScriptFile.write("{} --config-file {} --best-solution{}\n".format(getClientExecutablePath(), configFile, mxScaleFormatFlag))
 
   if os.name != "nt":
     runScriptFile.write("exit $ERR\n")
@@ -680,6 +676,7 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
 
         param('prune-mode',               pruneModeName(int(globalParameters["PruneSparseMode"])))
         param("bounds-check",             boundsCheckName(int(globalParameters["BoundsCheck"])))
+        param("mx-scale-pad-byte",        globalParameters["MXScalePadByte"])
         param("print-valids",             globalParameters["ValidationPrintValids"])
         param("print-max",                globalParameters["ValidationMaxToPrint"])
         param("num-benchmarks",           globalParameters["NumBenchmarks"])
