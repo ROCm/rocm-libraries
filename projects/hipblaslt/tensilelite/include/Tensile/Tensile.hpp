@@ -127,6 +127,8 @@ namespace TensileLite
 
         bool isSingleCall = false;
 
+        dim3 clusterDim{1, 1, 1};
+
         dim3   workGroupSize;
         dim3   numWorkGroups;
         dim3   numWorkItems;

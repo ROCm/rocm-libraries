@@ -6,7 +6,6 @@
 #include <string>
 #include <utility>
 
-#include <flatbuffers/base.h>
 #include <hipdnn_data_sdk/utilities/Constants.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
@@ -17,21 +16,6 @@
 
 namespace hip_kernel_provider::batchnorm
 {
-
-namespace
-{
-int64_t getRequiredOptionalUid(const flatbuffers::Optional<int64_t>& opt,
-                               const std::string& fieldName)
-{
-    if(!opt.has_value())
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            fieldName + std::string{" tensor uid is required but not set"});
-    }
-    return *opt;
-}
-} // namespace
 
 struct ProblemDims
 {
@@ -139,9 +123,7 @@ BatchnormBwdParams::BatchnormBwdParams(
         tensorMap)
     : _x(&hip_kernel_utils::findTensorAttributes(tensorMap,
                                                  batchnormBackwardAttributes.x_tensor_uid()))
-    , _dy(&hip_kernel_utils::findTensorAttributes(
-          tensorMap,
-          getRequiredOptionalUid(pointwiseAttributes.in_1_tensor_uid(), "Pointwise in_1")))
+    , _dy(&hip_kernel_utils::findTensorAttributes(tensorMap, pointwiseAttributes.in_0_tensor_uid()))
     , _dx(&hip_kernel_utils::findTensorAttributes(tensorMap,
                                                   batchnormBackwardAttributes.dx_tensor_uid()))
     , _scale(&hip_kernel_utils::findTensorAttributes(
