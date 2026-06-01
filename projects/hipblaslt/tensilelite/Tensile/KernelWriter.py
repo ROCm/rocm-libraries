@@ -4598,7 +4598,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.add(self.functionEnd(kernel, addLabel=False))
 
     #module.add(preLoop(self, kernel))
-    module.add(mainLoop(self, kernel))
+    module.add(mainLoop(self, kernel, tensorParametersA, tensorParametersB))
 
     # Deallocate offset registers
     for tileInfo in [atileInfo, btileInfo, mxsatileInfo, mxsbtileInfo]:
