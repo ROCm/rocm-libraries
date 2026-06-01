@@ -151,49 +151,6 @@ cast_tile_mx(DstTensor& dst_tensor, DstScaleTensor& dst_scale_tensor, const SrcT
             dst_scale_tensor.get_thread_buffer()(i) = type_convert<DstScaleDataType>(scale);
         });
     }
-    else if constexpr(std::is_same_v<DstDataType, pk_fp6x16_t>)
-    {
-        static_for<0, size / 32, 1>{}([&](auto i) {
-            // Maximum of consecutive ScaleGranularity values
-            // (1 lane, 32 per lane for fp6)
-            float max_abs = 0;
-            static_for<0, 32, 1>{}([&](auto j) {
-                max_abs = max(max_abs, abs(src_thread_buffer[number<i * 32 + j>{}]));
-            });
-
-            static_assert(std::is_same_v<DstScaleDataType, e8m0_t>);
-            // Use literal because type_convert<float>(numeric<DstDataType>::max()) is not constexpr
-            // causing the result of div to be stored in a VGPR
-            constexpr float rcp_dst_max = 1.0f / 7.5f;
-            // For e8m0 scales round up to the next power of 2, equivalent of exp2(ceil(log2(x)))
-            float scale = bit_cast<float>(
-                (bit_cast<uint32_t>(max_abs * rcp_dst_max) + numeric_traits<float>::mant_mask) &
-                numeric_traits<float>::head_mask);
-
-            // Convert using scales
-
-            // This instruction interleaves two 16-component vectors, so src_thread_buffer must be
-            // deinterleaved first
-            fp32x16_t src0, src1;
-            static_for<0, 16, 1>{}([&](auto j) {
-                src0[j()] = src_thread_buffer[number<i * 32 + j * 2 + 0>{}];
-                src1[j()] = src_thread_buffer[number<i * 32 + j * 2 + 1>{}];
-            });
-            const auto x = __builtin_amdgcn_cvt_scalef32_2xpk16_fp6_f32(src0, src1, scale);
-            // Workaround for a compiler issue (LCOMPILER-561) with v_cvt_scalef32_2xpk16_fp6_f32:
-            // src registers can be incorrectly used as dst registers
-            asm(";" ::"v"(x), "v"(src0), "v"(src1), "v"(scale));
-            static_for<0, 6, 1>{}([&](auto j) {
-                dst_tensor.get_thread_buffer().template set_as<uint32_t>(number<i * 6 + j>{},
-                                                                         x[j()]);
-            });
-
-            // Save scale for the corresponding lane
-            // No additional processing is needed because each lane computes scale based only on its
-            // own values.
-            dst_scale_tensor.get_thread_buffer()(i) = type_convert<DstScaleDataType>(scale);
-        });
-    }
     else
     {
         constexpr index_t values_per_lane = ScaleGranularity / 2;
