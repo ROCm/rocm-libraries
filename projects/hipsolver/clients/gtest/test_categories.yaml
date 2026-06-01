@@ -57,7 +57,7 @@ _common_excludes: &common_excludes
 
 test_categories:
   quick:
-    description: "Fast sanity checks (target: < 5 min) - subset of checkin tests"
+    description: "Fast sanity checks (target: < 5 min) - checkin tests"
     test_patterns:
       - "checkin_*"
     exclude: *common_excludes
