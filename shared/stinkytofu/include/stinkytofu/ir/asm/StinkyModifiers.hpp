@@ -171,6 +171,17 @@ enum class DppCtrl : uint16_t {
     // clang-format on
 };
 
+// All asm-form key names for DPP `dpp_ctrl` (no `:N` suffix). Keep in sync with DppCtrl above.
+// clang-format off
+inline constexpr std::array<std::string_view, 13> kDppCtrlKeys{
+    "quad_perm",
+    "row_shl",    "row_shr",    "row_ror",
+    "wave_shl",   "wave_shr",   "wave_rol",   "wave_ror",
+    "row_bcast",  "row_share",  "row_xmask",
+    "row_mirror", "row_half_mirror",
+};
+// clang-format on
+
 // Classify a DppCtrl value into a human-readable assembly string.
 // E.g. DppCtrl(0x113) -> "row_shr:3", DppCtrl(0x140) -> "row_mirror".
 STINKYTOFU_EXPORT std::string dppCtrlToAsmStr(DppCtrl ctrl);

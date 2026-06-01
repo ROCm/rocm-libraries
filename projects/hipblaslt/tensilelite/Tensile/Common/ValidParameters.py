@@ -412,6 +412,10 @@ validParameters = { # we need to make sure this matches develop
     #  2: DirectToLds A only (no DTLB)
     #  3: DirectToLds B only (no DTLA)
     "DirectToLds": [0, 1, 2, 3],
+    # DirectToLds for sparse metadata.
+    # Requires DirectToLds on the dense side (B if Sparse==2 else A),
+    # and GlobalReadVectorWidthMetadata ∈ {4, 16} (16 needs HasDirectToLdsx4).
+    "DirectToLdsMetadata": [0, 1],
     # Enable subtile-based kernel implementation for MX FP4 (gfx950 only).
     # When True, uses a subtile scheduling strategy with DTL global reads and
     # an optimized storeD path. Automatically forced False on non-gfx950.
@@ -768,7 +772,7 @@ validParameters = { # we need to make sure this matches develop
     #   1 = 1 WG per CU (default), for example. 2 will launch WGs = 2 x CU count.
     # The priority of these environment variables is defined as follows:
     # TENSILE_STREAMK_FIXED_GRID > TENSILE_STREAMK_DYNAMIC_GRID > TENSILE_STREAMK_MAX_CUS > TENSILE_STREAMK_GRID_MULTIPLIER
-    "StreamK": [0, 1, 2, 3],
+    "StreamK": [0, 1, 2, 3, 4],
     # Determines if StreamK kernel uses atomics
     # 0: uses workspace to store partial tiles, accumulate in deterministic fix-up step
     # 1: uses atomics to accumulate partial tiles
@@ -791,6 +795,10 @@ validParameters = { # we need to make sure this matches develop
     #   2 = No partials
     #   3 = Nofixup and no partials
     "DebugStreamK": [0, 1, 2, 3],
+    # Persistent-kernel debug: when True, the persistent loop never exits.
+    # Used as a co-tenant load kernel for contended-perf benchmarking.
+    # Termination is via process death. Requires StreamK = 1, 2, or 3.
+    "DebugPersistentKernelLoopForever": [False, True],
     # Controls desired width (#elements) for loads from global memory -> LDS.
     # and eliminates the pointer unshift logic
     # -1 : Set GlobalReadVectorWidth =  VectorWidth
@@ -940,6 +948,11 @@ validParameters = { # we need to make sure this matches develop
     "ConvertAfterDS": [False, True],
     # Force disable shadow init to release more sgpr in preloop
     "ForceDisableShadowInit": [False, True],
+    # Use WMMA/MFMA with src C=0 to initialize C accumulators (skipping v_mov initC).
+    # -1: auto-detect
+    #  0: force disable
+    #  1: force enable (rejected if the auto-disable conditions are met)
+    "InitCIterWmma": [-1, 0, 1],
     # Enable LDS Transpose Instruction
     "LDSTrInst": [False, True],
     # False: Use LocalSplitU. Number of WorkGroup[2] WorkItems (wave or thread) will compute the same output elements (matrix D) along different
@@ -960,8 +973,8 @@ validParameters = { # we need to make sure this matches develop
     # 1  : enable  CMS, is set to 0 if not supported
     "UseCustomMainLoopSchedule" : [-1, 0, 1],
     "AdaptiveGemm": [0, 1],
-    # 0  : MB and MBSK generate different assembly code
-    # 1  : MB and MBSK generate same assembly code
+    # 0  : disable
+    # 1  : merge MB and MBSK assembly code and select best GW path in runtime
     "AdaptiveGemmGSUA": [0, 1],
     # Add extra latency to calculate number of MFMA to insert between local read and wait
     # Negative value means reduce interval between local read and wait (for DirectToVgpr only)
@@ -1022,9 +1035,17 @@ validParameters = { # we need to make sure this matches develop
     #   "Auto":        triggers defaulting in Solution.assignDerivedParameters. The default is
     #                  TDM iff TDMInst != 0, otherwise BufferLoad.
     "MXLoadInst": ["Auto", "TDM", "BufferLoad", "GlobalLoad"],
+    # Enable cluster barrier.
+    "ClusterBarrier": [False, True],
     # Cluster dimension. Clusters have up to 16 work-groups in a cluster, but each work-group in a
     # cluster runs on a separate WGP.
     "ClusterDim": validClusterDimensions,
+    # Enable PLR 0.5 to save vgprs
+    # 0: Disabled
+    # 1: Use PLR 0.5 for A
+    # 2: Use PLR 0.5 for B
+    # 3: Use PLR 0.5 for both A and B
+    "HalfPLR": [0, 1, 2, 3]
 }
 
 newMIValidParameters = {
