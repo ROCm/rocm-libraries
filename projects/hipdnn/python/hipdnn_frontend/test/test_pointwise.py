@@ -6,7 +6,31 @@
 import numpy as np
 import pytest
 
-from .helpers import build_all_plans, build_pointwise_add_graph, execute_graph
+import hipdnn_frontend as hipdnn
+
+from .helpers import build_all_plans, create_float_graph, execute_graph
+
+
+def build_pointwise_add_graph(n=16, c=16, h=16, w=16):
+    """Build an elementwise-add pointwise graph returning (graph, a, b, out)."""
+    graph = create_float_graph()
+    graph.set_name("pointwise_add_test")
+
+    a = hipdnn.Tensor.create([n, c, h, w], hipdnn.DataType.FLOAT)
+    a.set_name("a")
+
+    b = hipdnn.Tensor.create([n, c, h, w], hipdnn.DataType.FLOAT)
+    b.set_name("b")
+
+    attrs = hipdnn.PointwiseAttributes()
+    attrs.set_name("pointwise_add_node")
+    attrs.set_mode(hipdnn.PointwiseMode.ADD)
+
+    out = graph.pointwise(a, b, attrs)
+    out.set_name("out")
+    out.set_output(True)
+
+    return graph, a, b, out
 
 
 @pytest.mark.gpu

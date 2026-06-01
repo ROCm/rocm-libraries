@@ -6,7 +6,39 @@
 import numpy as np
 import pytest
 
-from .helpers import build_all_plans, build_conv_dgrad_graph, execute_graph
+import hipdnn_frontend as hipdnn
+
+from .helpers import build_all_plans, create_float_graph, execute_graph
+
+
+def build_conv_dgrad_graph(
+    n=16, c=16, h=16, w=16, k=16, r=3, s=3, stride=1, pad=1, dil=1
+):
+    """Build a conv_dgrad graph returning (graph, dy, weight, dx)."""
+    out_h = (h + 2 * pad - dil * (r - 1) - 1) // stride + 1
+    out_w = (w + 2 * pad - dil * (s - 1) - 1) // stride + 1
+
+    graph = create_float_graph()
+    graph.set_name("conv_dgrad_test")
+
+    dy = hipdnn.Tensor.create([n, k, out_h, out_w], hipdnn.DataType.FLOAT)
+    dy.set_name("output_gradient_dy")
+
+    weight = hipdnn.Tensor.create([k, c, r, s], hipdnn.DataType.FLOAT)
+    weight.set_name("weight")
+
+    conv_attrs = hipdnn.ConvDgradAttributes()
+    conv_attrs.set_name("conv_dgrad_node")
+    conv_attrs.set_pre_padding([pad, pad])
+    conv_attrs.set_post_padding([pad, pad])
+    conv_attrs.set_stride([stride, stride])
+    conv_attrs.set_dilation([dil, dil])
+
+    dx = graph.conv_dgrad(dy, weight, conv_attrs)
+    dx.set_name("input_gradient_dx")
+    dx.set_output(True)
+
+    return graph, dy, weight, dx
 
 
 @pytest.mark.gpu
