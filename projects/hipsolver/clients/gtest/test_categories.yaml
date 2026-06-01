@@ -25,7 +25,7 @@
 #
 # hipSOLVER uses a two-tier naming convention:
 #   checkin_* - Fast tests for precheckin validation (e.g. checkin_lapack, checkin_misc)
-#   daily_*   - Comprehensive tests for nightly/extended runs (e.g. daily_lapack)
+#   daily_*   - Comprehensive tests for nightly runs (currently commented out)
 #
 # Note: hipSOLVER does not currently define weekly_* tests, so no weekly
 # tier is included here. Add one if/when weekly_* INSTANTIATE_TEST_SUITE_P
@@ -80,6 +80,7 @@ test_categories:
     description: "Nightly comprehensive tests (target: < 7 hours) - same as Jenkins extended"
     test_patterns:
       - "daily_*"
+      - "checkin_*" #daily_* is commented out for now
     exclude: *common_excludes
     labels:
       - "comprehensive"
