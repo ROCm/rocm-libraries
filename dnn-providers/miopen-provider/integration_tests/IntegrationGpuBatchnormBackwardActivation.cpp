@@ -69,8 +69,6 @@ protected:
         // dims (e.g. [2,3,1,1], [32,3,1,14]): exhaustive search selects a kernel with numerical
         // accuracy issues on 1-element spatial dimensions. Not an ASAN error. Root cause is in
         // MIOpen kernel selection for degenerate shapes.
-        namespace fe = hipdnn_frontend;
-
         const auto& [bnTestCase, activTestCase] = this->GetParam();
         auto dims = bnTestCase.dims;
 
@@ -80,9 +78,9 @@ protected:
         graphObj.set_name("BatchnormBackwardActivationTest");
 
         auto dataType = getDataTypeEnumFromType<DataType>();
-        auto intermediateDataType = fe::DataType::FLOAT;
+        auto intermediateDataType = hipdnn_frontend::DataType::FLOAT;
         graphObj.set_intermediate_data_type(intermediateDataType)
-            .set_compute_data_type(fe::DataType::FLOAT)
+            .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_io_data_type(dataType);
 
         auto xAttr = makeTensorAttributes("x", dims, generateStrides(dims, layout.strideOrder));
