@@ -17,7 +17,6 @@ using hipdnn_test_sdk::utilities::checkVramRequirement;
 using hipdnn_test_sdk::utilities::isMetaJsonFile;
 using hipdnn_test_sdk::utilities::loadBundleMetadata;
 using hipdnn_test_sdk::utilities::metaJsonPath;
-using hipdnn_test_sdk::utilities::writeBundleMetadata;
 
 // NOLINTBEGIN(readability-identifier-naming) -- gtest macro-generated names
 
@@ -301,88 +300,6 @@ TEST(TestLoadBundleMetadata, HandlesEmptyStringFields)
     EXPECT_EQ(*meta->gpuArchitecture, "");
     ASSERT_TRUE(meta->referenceExecutor.has_value());
     EXPECT_EQ(*meta->referenceExecutor, "");
-}
-
-// ---------------------------------------------------------------------------
-// writeBundleMetadata — writer
-// ---------------------------------------------------------------------------
-
-TEST(TestWriteBundleMetadata, WritesFullMetadataRoundTrip)
-{
-    const TempBundle bundle;
-
-    BundleMetadata meta;
-    meta.formatVersion = 1;
-    meta.generatorVersion = "2.0.0";
-    meta.createdAt = "2026-05-31T12:00:00Z";
-    meta.gpuArchitecture = "gfx1100";
-    meta.rocmVersion = "6.5.0";
-    meta.referenceExecutor = "gpu";
-    meta.referenceExecutorHash = "deadbeef";
-    meta.operation = "matmul";
-    meta.seed = 99;
-    meta.minimumVramMb = 16384;
-
-    writeBundleMetadata(bundle.bundleJsonPath(), meta);
-
-    auto loaded = loadBundleMetadata(bundle.bundleJsonPath());
-    ASSERT_TRUE(loaded.has_value());
-    EXPECT_EQ(loaded->formatVersion, 1);
-    EXPECT_EQ(loaded->generatorVersion, "2.0.0");
-    EXPECT_EQ(loaded->createdAt, "2026-05-31T12:00:00Z");
-    EXPECT_EQ(loaded->gpuArchitecture, "gfx1100");
-    EXPECT_EQ(loaded->rocmVersion, "6.5.0");
-    EXPECT_EQ(loaded->referenceExecutor, "gpu");
-    EXPECT_EQ(loaded->referenceExecutorHash, "deadbeef");
-    EXPECT_EQ(loaded->operation, "matmul");
-    EXPECT_EQ(loaded->seed, 99);
-    EXPECT_EQ(loaded->minimumVramMb, 16384);
-}
-
-TEST(TestWriteBundleMetadata, WritesMinimalMetadata)
-{
-    const TempBundle bundle;
-
-    BundleMetadata meta;
-    // All optional fields are nullopt by default
-    writeBundleMetadata(bundle.bundleJsonPath(), meta);
-
-    auto loaded = loadBundleMetadata(bundle.bundleJsonPath());
-    ASSERT_TRUE(loaded.has_value());
-    EXPECT_EQ(loaded->formatVersion, 1);
-    EXPECT_FALSE(loaded->generatorVersion.has_value());
-    EXPECT_FALSE(loaded->operation.has_value());
-    EXPECT_FALSE(loaded->minimumVramMb.has_value());
-}
-
-TEST(TestWriteBundleMetadata, OmitsNulloptFields)
-{
-    const TempBundle bundle;
-
-    BundleMetadata meta;
-    meta.operation = "conv_fwd";
-    // All other optional fields left as nullopt
-
-    writeBundleMetadata(bundle.bundleJsonPath(), meta);
-
-    // Read raw JSON to verify absent keys
-    auto metaPath = hipdnn_test_sdk::utilities::metaJsonPath(bundle.bundleJsonPath());
-    std::ifstream file(metaPath);
-    auto json = nlohmann::json::parse(file);
-
-    EXPECT_TRUE(json.contains("format_version"));
-    EXPECT_TRUE(json.contains("metadata"));
-    EXPECT_TRUE(json["metadata"].contains("operation"));
-    EXPECT_FALSE(json["metadata"].contains("generator_version"));
-    EXPECT_FALSE(json["metadata"].contains("seed"));
-    EXPECT_FALSE(json["metadata"].contains("minimum_vram_mb"));
-}
-
-TEST(TestWriteBundleMetadata, ThrowsOnInvalidPath)
-{
-    BundleMetadata meta;
-    EXPECT_THROW(writeBundleMetadata("/nonexistent_directory/Bundle.json", meta),
-                 std::runtime_error);
 }
 
 // ---------------------------------------------------------------------------

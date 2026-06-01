@@ -136,62 +136,6 @@ inline std::optional<BundleMetadata> loadBundleMetadata(
 }
 
 // ---------------------------------------------------------------------------
-// Writer
-// ---------------------------------------------------------------------------
-
-/// Write metadata to a .meta.json companion file.
-///
-/// Only writes fields that have values — nullopt fields are omitted from the
-/// JSON output. Throws std::runtime_error if the file cannot be written.
-inline void writeBundleMetadata(const std::filesystem::path& bundleJsonPath,
-                                const BundleMetadata& meta)
-{
-    auto path = metaJsonPath(bundleJsonPath);
-
-    nlohmann::json json;
-    json["format_version"] = meta.formatVersion;
-
-    nlohmann::json metadataObj;
-
-    auto writeString
-        = [&](const char* key, const std::optional<std::string>& value) {
-              if(value)
-              {
-                  metadataObj[key] = *value;
-              }
-          };
-
-    auto writeInt64 = [&](const char* key, const std::optional<int64_t>& value) {
-        if(value)
-        {
-            metadataObj[key] = *value;
-        }
-    };
-
-    writeString("generator_version", meta.generatorVersion);
-    writeString("created_at", meta.createdAt);
-    writeString("gpu_architecture", meta.gpuArchitecture);
-    writeString("rocm_version", meta.rocmVersion);
-    writeString("reference_executor", meta.referenceExecutor);
-    writeString("reference_executor_hash", meta.referenceExecutorHash);
-    writeString("operation", meta.operation);
-    writeInt64("seed", meta.seed);
-    writeInt64("minimum_vram_mb", meta.minimumVramMb);
-
-    if(!metadataObj.empty())
-    {
-        json["metadata"] = metadataObj;
-    }
-
-    std::ofstream file(path);
-    if(!file)
-    {
-        throw std::runtime_error("Failed to write metadata file: " + path.string());
-    }
-    file << json.dump(2) << '\n';
-}
-
-// ---------------------------------------------------------------------------
 // Guard check functions (pure — no HIP, no system calls)
 //
 // Each function takes metadata + a device-provided value and returns:
