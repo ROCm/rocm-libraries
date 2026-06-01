@@ -1,0 +1,209 @@
+{
+    "name": "sample_sdpa_backward_bf16_b1_h1_s16_d128",
+    "compute_data_type": "bfloat16",
+    "io_data_type": "bfloat16",
+    "intermediate_data_type": "bfloat16",
+    "tensors": [
+        {
+            "uid": 1,
+            "name": "query",
+            "dims": [
+                1,
+                1,
+                16,
+                128
+            ],
+            "strides": [
+                2048,
+                2048,
+                128,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false
+        },
+        {
+            "uid": 2,
+            "name": "key",
+            "dims": [
+                1,
+                1,
+                16,
+                128
+            ],
+            "strides": [
+                2048,
+                2048,
+                128,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false
+        },
+        {
+            "uid": 3,
+            "name": "value",
+            "dims": [
+                1,
+                1,
+                16,
+                128
+            ],
+            "strides": [
+                2048,
+                2048,
+                128,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false
+        },
+        {
+            "uid": 4,
+            "name": "output",
+            "dims": [
+                1,
+                1,
+                16,
+                128
+            ],
+            "strides": [
+                2048,
+                2048,
+                128,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false
+        },
+        {
+            "uid": 5,
+            "name": "grad_output",
+            "dims": [
+                1,
+                1,
+                16,
+                128
+            ],
+            "strides": [
+                2048,
+                2048,
+                128,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false
+        },
+        {
+            "uid": 6,
+            "name": "stats",
+            "dims": [
+                1,
+                1,
+                16
+            ],
+            "strides": [
+                16,
+                16,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 7,
+            "name": "grad_query",
+            "dims": [
+                1,
+                1,
+                16,
+                128
+            ],
+            "strides": [
+                2048,
+                2048,
+                128,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false
+        },
+        {
+            "uid": 8,
+            "name": "grad_key",
+            "dims": [
+                1,
+                1,
+                16,
+                128
+            ],
+            "strides": [
+                2048,
+                2048,
+                128,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false
+        },
+        {
+            "uid": 9,
+            "name": "grad_value",
+            "dims": [
+                1,
+                1,
+                16,
+                128
+            ],
+            "strides": [
+                2048,
+                2048,
+                128,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false
+        }
+    ],
+    "nodes": [
+        {
+            "name": "sdpa_backward_node",
+            "type": "SdpaBackwardAttributes",
+            "compute_data_type": "float",
+            "inputs": {
+                "q_tensor_uid": 1,
+                "k_tensor_uid": 2,
+                "v_tensor_uid": 3,
+                "o_tensor_uid": 4,
+                "do_tensor_uid": 5,
+                "stats_tensor_uid": 6,
+                "scale_tensor_uid": null,
+                "attn_mask_tensor_uid": null,
+                "seq_len_q_tensor_uid": null,
+                "seq_len_kv_tensor_uid": null,
+                "seed_tensor_uid": null,
+                "offset_tensor_uid": null,
+                "dropout_mask_tensor_uid": null,
+                "dropout_scale_tensor_uid": null,
+                "dropout_scale_inv_tensor_uid": null
+            },
+            "outputs": {
+                "dq_tensor_uid": 7,
+                "dk_tensor_uid": 8,
+                "dv_tensor_uid": 9,
+                "dbias_tensor_uid": null
+            },
+            "parameters": {
+                "alibi_mask": false,
+                "padding_mask": false,
+                "causal_mask": false,
+                "causal_mask_bottom_right": false,
+                "dropout_probability": null,
+                "attn_scale_value": null,
+                "left_bound": null,
+                "right_bound": null,
+                "diagonal_alignment": "TOP_LEFT"
+            }
+        }
+    ]
+}

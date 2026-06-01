@@ -171,7 +171,9 @@ def _find_plugin_path() -> str:
     Returns the path as a string, or None if not found.
     """
     project_root = Path(__file__).parent.parent
+    local_install = project_root / ".venv" / "rocm-install" / "lib" / "hipdnn_plugins" / "engines"
     candidates = [
+        local_install,
         # Worktree/superbuild: relative to dnn-benchmarking tool
         project_root.parent.parent.parent.parent
         / "dnn-providers"

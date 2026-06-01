@@ -31,7 +31,9 @@ def _require_gpu():
 def _find_plugin_path():
     """Find the hipDNN engine plugin directory."""
     project_root = Path(__file__).parent.parent.parent
+    local_install = project_root / ".venv" / "rocm-install" / "lib" / "hipdnn_plugins" / "engines"
     candidates = [
+        local_install,
         project_root.parent.parent.parent.parent
         / "dnn-providers"
         / "miopen-provider"

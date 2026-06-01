@@ -13,19 +13,21 @@ export DNN_BENCH_WORKSPACE
 VENV_DIR="$DNN_BENCH_WORKSPACE/.venv"
 MIOPEN_PROVIDER_DIR="$WORKSPACE_ROOT/dnn-providers/miopen-provider"
 MIOPEN_BUILD_DIR="$MIOPEN_PROVIDER_DIR/build"
+HIP_KERNEL_PROVIDER_DIR="$WORKSPACE_ROOT/dnn-providers/hip-kernel-provider"
+HIP_KERNEL_BUILD_DIR="$HIP_KERNEL_PROVIDER_DIR/build"
 
 FORCE_BUILD=0
 AUTO_YES=0
 usage() {
     echo "Usage: $0 [--force-build] [--install-dir <path>] [-y]"
     echo ""
-    echo "  --force-build        Force rebuild of hipDNN and the MIOpen provider,"
+    echo "  --force-build        Force rebuild of hipDNN and provider plugins,"
     echo "                           overwriting existing artifacts."
-    echo "  --install-dir <path> Install prefix for hipDNN and the MIOpen provider."
+    echo "  --install-dir <path> Install prefix for hipDNN and provider plugins."
     echo "                           Default: $INSTALL_DIR"
     echo "  -y                   Skip confirmation prompts."
     echo ""
-    echo "  The installed plugin will be at:"
+    echo "  The installed plugins will be at:"
     echo "    <install-dir>/lib/hipdnn_plugins/engines/"
     echo "  Pass that path to --plugin-path when benchmarking."
 }
@@ -125,7 +127,7 @@ if ! python -c "import amdsmi" >/dev/null 2>&1; then
     fi
 fi
 
-# 3. Build and install hipDNN + MIOpen
+# 3. Build and install hipDNN + provider plugins
 # The installed cmake configs use install-tree paths; pointing CMAKE_PREFIX_PATH at
 # the raw build dir causes "non-existent path" errors in hipdnn_data_sdkConfig.cmake.
 if [ "$FORCE_BUILD" -eq 1 ] || [ ! -f "$HIPDNN_CONFIG" ]; then
@@ -150,8 +152,24 @@ if [ "$FORCE_BUILD" -eq 1 ] || [ ! -f "$HIPDNN_CONFIG" ]; then
         -DMIOPENPROVIDER_SKIP_TESTS=ON
     cmake --build "$MIOPEN_BUILD_DIR"
     cmake --install "$MIOPEN_BUILD_DIR"
+
+    if [ ! -d "$HIP_KERNEL_PROVIDER_DIR" ]; then
+        echo "Error: hip-kernel-provider not found at $HIP_KERNEL_PROVIDER_DIR"
+        exit 1
+    fi
+    echo "Building and installing hip-kernel-provider..."
+    rm -rf "$HIP_KERNEL_BUILD_DIR"
+    cmake -S "$HIP_KERNEL_PROVIDER_DIR" -B "$HIP_KERNEL_BUILD_DIR" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
+        -DCMAKE_PREFIX_PATH="$INSTALL_DIR" \
+        -DHIPKERNELPROVIDER_ENABLE_TESTS=OFF \
+        -DENABLE_ASM_SDPA_ENGINE=ON
+    cmake --build "$HIP_KERNEL_BUILD_DIR"
+    cmake --install "$HIP_KERNEL_BUILD_DIR"
+
     echo ""
-    echo "MIOpen plugin installed to: $INSTALL_DIR/lib/hipdnn_plugins/engines/"
+    echo "hipDNN plugins installed to: $INSTALL_DIR/lib/hipdnn_plugins/engines/"
 fi
 
 # 5. Install hipdnn Python bindings

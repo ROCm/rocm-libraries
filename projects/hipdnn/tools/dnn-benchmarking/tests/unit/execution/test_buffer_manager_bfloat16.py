@@ -245,3 +245,64 @@ class TestFillInputsRandomReproducibility:
         bytes_a = mock_a.copy_from_host.call_args[0][0]
         bytes_b = mock_b.copy_from_host.call_args[0][0]
         assert bytes_a == bytes_b
+
+class TestStridedTensorStorage:
+    """Stride-aware storage footprint and host-copy tests."""
+
+    def test_size_bytes_uses_last_addressed_element(self) -> None:
+        tensor = TensorInfo(
+            uid=11,
+            name="strided",
+            dims=[2, 3],
+            strides=[4, 1],
+            data_type="float",
+            is_virtual=False,
+        )
+
+        # Addresses touched: (0,0)..(1,2) => max offset 1*4 + 2*1 = 6.
+        assert tensor.storage_elements == 7
+        assert tensor.size_bytes == 28
+
+    def test_fill_inputs_random_copies_full_strided_storage(self) -> None:
+        tensor = TensorInfo(
+            uid=12,
+            name="padded",
+            dims=[2, 3],
+            strides=[4, 1],
+            data_type="float",
+            is_virtual=False,
+        )
+        buffer_manager = BufferManager([tensor])
+        mock_buffer = MagicMock()
+        buffer_manager._buffers[tensor.uid] = mock_buffer
+
+        buffer_manager.fill_inputs_random(seed=123)
+
+        host = buffer_manager.get_input_data(tensor.uid)
+        raw = mock_buffer.copy_from_host.call_args[0][0]
+        storage = np.frombuffer(raw, dtype=np.float32)
+
+        assert len(raw) == tensor.size_bytes
+        np.testing.assert_array_equal(storage[0:3], host[0])
+        np.testing.assert_array_equal(storage[4:7], host[1])
+
+    def test_pass_by_value_tensor_uses_embedded_scalar(self) -> None:
+        tensor = TensorInfo(
+            uid=13,
+            name="epsilon",
+            dims=[1],
+            strides=[1],
+            data_type="double",
+            is_virtual=False,
+            value=1e-5,
+        )
+        buffer_manager = BufferManager([tensor])
+        buffer_manager._buffers[99] = MagicMock()
+
+        buffer_manager.fill_inputs_random(seed=123)
+
+        np.testing.assert_array_equal(
+            buffer_manager.get_input_data(tensor.uid),
+            np.asarray([1e-5], dtype=np.float64),
+        )
+        assert tensor.uid not in buffer_manager._buffers

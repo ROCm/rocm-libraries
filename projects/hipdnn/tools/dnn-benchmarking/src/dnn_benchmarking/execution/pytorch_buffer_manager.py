@@ -66,11 +66,25 @@ class PyTorchCudaBufferManager:
                 continue
 
             dtype = TORCH_DTYPE_MAP.get(tensor_info.data_type.lower(), torch.float32)
-            tensor = torch.empty(
-                tensor_info.dims,
-                dtype=dtype,
-                device=self._device,
-            )
+            if tensor_info.is_pass_by_value:
+                value = torch.tensor([tensor_info.value], dtype=dtype, device=self._device)
+                self._tensors[tensor_info.uid] = value
+                self._host_data[tensor_info.uid] = np.asarray([tensor_info.value])
+                continue
+
+            if tensor_info.strides:
+                tensor = torch.empty_strided(
+                    tensor_info.dims,
+                    tensor_info.strides,
+                    dtype=dtype,
+                    device=self._device,
+                )
+            else:
+                tensor = torch.empty(
+                    tensor_info.dims,
+                    dtype=dtype,
+                    device=self._device,
+                )
             self._tensors[tensor_info.uid] = tensor
 
     def fill_inputs_random(self, seed: Optional[int] = None) -> None:
@@ -85,6 +99,9 @@ class PyTorchCudaBufferManager:
 
         for tensor_info in self._tensor_infos:
             if tensor_info.is_output or tensor_info.is_virtual:
+                continue
+
+            if tensor_info.is_pass_by_value:
                 continue
 
             tensor = self._tensors.get(tensor_info.uid)
