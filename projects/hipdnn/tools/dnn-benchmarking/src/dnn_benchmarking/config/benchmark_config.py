@@ -42,52 +42,6 @@ class BenchmarkConfig:
 
 
 @dataclass
-class ABTestConfig:
-    """Configuration for A/B testing mode.
-
-    Attributes:
-        a_path: Plugin path for configuration A (None = default).
-        a_id: Engine ID for configuration A.
-        b_path: Plugin path for configuration B (None = default).
-        b_id: Engine ID for configuration B.
-        rtol: Relative tolerance for np.allclose comparison.
-        atol: Absolute tolerance for np.allclose comparison.
-    """
-
-    a_path: Optional[Path] = None
-    a_id: int = 1
-    b_path: Optional[Path] = None
-    b_id: int = 1
-    rtol: float = 1e-5
-    atol: float = 1e-8
-
-    def __post_init__(self) -> None:
-        """Validate configuration values."""
-        if isinstance(self.a_path, str):
-            self.a_path = Path(self.a_path)
-        if isinstance(self.b_path, str):
-            self.b_path = Path(self.b_path)
-
-        # a_id / b_id are FNV-1a engine ID hashes that may be negative when
-        # interpreted as signed int64; do not bound-check them.
-        if self.rtol < 0:
-            raise ValueError("rtol must be non-negative")
-        if self.atol < 0:
-            raise ValueError("atol must be non-negative")
-
-    def validate_paths(self) -> None:
-        """Validate that plugin paths exist if specified.
-
-        Raises:
-            ValueError: If a specified path does not exist.
-        """
-        if self.a_path is not None and not self.a_path.exists():
-            raise ValueError(f"Plugin path A does not exist: {self.a_path}")
-        if self.b_path is not None and not self.b_path.exists():
-            raise ValueError(f"Plugin path B does not exist: {self.b_path}")
-
-
-@dataclass
 class ValidationConfig:
     """Configuration for reference validation.
 
@@ -266,6 +220,19 @@ class MetricsConfig:
         )
 
 
+@dataclass(frozen=True)
+class EngineSelection:
+    """One ordered engine execution selection.
+
+    The plugin path is attached to the selection row rather than looked up by
+    engine ID so repeated engine IDs can be benchmarked against different
+    plugin builds.
+    """
+
+    engine_id: int
+    plugin_path: Optional[Path] = None
+
+
 @dataclass
 class SuiteConfig:
     """Configuration for suite execution mode.
@@ -277,7 +244,7 @@ class SuiteConfig:
         warmup_iters: Number of warmup iterations per provider/engine.
         benchmark_iters: Number of benchmark iterations for timing.
         seed: Optional random seed for reproducible inputs.
-        engine_filter: If set, only iterate engine IDs in this list.
+        engine_filter: If set, ordered engine selections to run.
         rtol: Relative tolerance for correctness comparison.
         atol: Absolute tolerance for correctness comparison.
         gpu_backend: GPU timer backend to use.
@@ -297,10 +264,7 @@ class SuiteConfig:
     reference_provider: str = "none"
     verbose: bool = False
     metrics: MetricsConfig = field(default_factory=MetricsConfig)
-    # Forwarded to the orchestrator's inner subprocess so the child
-    # picks up the same plugin .so directory the parent loaded. Not used
-    # outside of the opt-in profiling path.
-    plugin_path: Optional[Path] = None
+    plugin_paths: Optional[List[Path]] = None
 
     def __post_init__(self) -> None:
         """Validate configuration values."""
@@ -316,6 +280,20 @@ class SuiteConfig:
             if len(self.engine_filter) == 0:
                 raise ValueError("engine_filter must be non-empty when set")
             # engine IDs are FNV-1a hashes -- may be negative as signed int64.
+        if self.plugin_paths is not None:
+            if len(self.plugin_paths) == 0:
+                raise ValueError("plugin_paths must be non-empty when set")
+            self.plugin_paths = [Path(p) for p in self.plugin_paths]
+
+            if len(self.plugin_paths) > 1:
+                if self.engine_filter is None:
+                    raise ValueError(
+                        "--plugin-path with multiple entries requires --engine"
+                    )
+                if len(self.plugin_paths) != len(self.engine_filter):
+                    raise ValueError(
+                        "--plugin-path entry count must be 1 or match --engine count"
+                    )
         valid_gpu_backends = {"torch", "auto", "none"}
         if self.gpu_backend not in valid_gpu_backends:
             raise ValueError(
@@ -328,3 +306,38 @@ class SuiteConfig:
                 f"Invalid reference_provider: '{self.reference_provider}'. "
                 f"Valid options: {valid_reference_providers}"
             )
+
+    @property
+    def plugin_path(self) -> Optional[Path]:
+        """Return the shared plugin path when exactly one path is configured."""
+        if self.plugin_paths is None or len(self.plugin_paths) != 1:
+            return None
+        return self.plugin_paths[0]
+
+    def engine_selections_for(self, engine_ids: List[int]) -> List[EngineSelection]:
+        """Return ordered engine selections for the provided engine IDs.
+
+        ``engine_ids`` is either the explicit ``--engine`` list, where duplicate
+        IDs are meaningful selections, or the backend-discovered engine list.
+        Multiple plugin paths are only valid with an explicit engine list and
+        are associated positionally with that list.
+        """
+        if self.plugin_paths is None:
+            return [EngineSelection(engine_id) for engine_id in engine_ids]
+
+        if len(self.plugin_paths) == 1:
+            plugin_path = self.plugin_paths[0]
+            return [
+                EngineSelection(engine_id, plugin_path=plugin_path)
+                for engine_id in engine_ids
+            ]
+
+        if self.engine_filter is None or len(engine_ids) != len(self.plugin_paths):
+            raise ValueError(
+                "--plugin-path entry count must be 1 or match --engine count"
+            )
+
+        return [
+            EngineSelection(engine_id, plugin_path=plugin_path)
+            for engine_id, plugin_path in zip(engine_ids, self.plugin_paths)
+        ]
