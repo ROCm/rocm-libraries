@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include <set>
+#include <unordered_map>
 
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
@@ -91,20 +92,20 @@ void checkPointwiseTensorsSupported(
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Pointwise plan builder: tensor rank must be between 1 and 4, got "
+            std::string("Pointwise plan builder: tensor rank must be between 1 and 4, got ")
                 + std::to_string(rank));
     }
 
     int64_t inputElementCount = 1;
-    for(flatbuffers::uoffset_t i = 0; i < inputDims->size(); ++i)
+    for(const auto inputDim : *inputDims)
     {
-        inputElementCount *= static_cast<int64_t>((*inputDims)[i]);
+        inputElementCount *= static_cast<int64_t>(inputDim);
     }
 
     int64_t outputElementCount = 1;
-    for(flatbuffers::uoffset_t i = 0; i < outputDims->size(); ++i)
+    for(const auto outputDim : *outputDims)
     {
-        outputElementCount *= static_cast<int64_t>((*outputDims)[i]);
+        outputElementCount *= static_cast<int64_t>(outputDim);
     }
 
     if(inputElementCount != outputElementCount)
