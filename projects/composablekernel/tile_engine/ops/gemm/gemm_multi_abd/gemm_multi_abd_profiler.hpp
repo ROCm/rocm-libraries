@@ -15,45 +15,28 @@
 
 #include "ck_tile/host/device_prop.hpp"
 #include "ck_tile/ops/gemm.hpp"
+#include "gemm/gemm_profiler.hpp"
 #include "common/utils.hpp"
 #include "gemm_multi_abd_benchmark.hpp"
 
 class GemmMultiABDProfiler
+    : public GemmProfiler<GemmMultiABDProfiler,
+                          GemmMultiABDProblem,
+                          ck_tile::GemmMultiABDHostArgs<NumATensors, NumBTensors, NumDTensors>>
 {
     public:
-    static GemmMultiABDProfiler& instance(Settings setting)
-    {
-        static GemmMultiABDProfiler inst{setting};
-        return inst;
-    }
+    using BaseGemm =
+        GemmProfiler<GemmMultiABDProfiler,
+                     GemmMultiABDProblem,
+                     ck_tile::GemmMultiABDHostArgs<NumATensors, NumBTensors, NumDTensors>>;
+    using BaseGemm::benchmark;
 
-    // Single kernel benchmarking (used by benchmark_single.cpp)
-    void benchmark(GemmMultiABDProblem& problem,
-                   std::function<float(
-                       const ck_tile::GemmMultiABDHostArgs<NumATensors, NumBTensors, NumDTensors>&,
-                       const ck_tile::stream_config&)> kernel_func)
-    {
-        std::vector<std::function<std::tuple<std::string, float>(
-            ck_tile::GemmMultiABDHostArgs<NumATensors, NumBTensors, NumDTensors>&,
-            const ck_tile::stream_config&)>>
-            callables;
+    GemmMultiABDProfiler(Settings setting) : BaseGemm(setting) {}
 
-        callables.push_back(
-            [kernel_func](
-                ck_tile::GemmMultiABDHostArgs<NumATensors, NumBTensors, NumDTensors>& args,
-                const ck_tile::stream_config& stream) {
-                float time = kernel_func(args, stream);
-                return std::make_tuple(std::string(KERNEL_NAME), time);
-            });
-
-        benchmark(problem, callables);
-    }
-
-    // Multi-callable benchmarking
     void benchmark(GemmMultiABDProblem& problem,
                    std::vector<std::function<std::tuple<std::string, float>(
                        ck_tile::GemmMultiABDHostArgs<NumATensors, NumBTensors, NumDTensors>&,
-                       const ck_tile::stream_config&)>>& callables)
+                       const ck_tile::stream_config&)>>& callables) override
     {
         const ALayout a_layout{};
         const BLayout b_layout{};
@@ -88,7 +71,7 @@ class GemmMultiABDProfiler
         ck_tile::HostTensor<EDataType> e_dev_result(
             ck_tile::host_tensor_descriptor(M, N, problem.stride_e_, is_row_major(e_layout)));
 
-        // Fill with data based on init method
+        // Fill with data
         for(auto& t : a_tensors)
             ck_tile::FillUniformDistribution<ADataType>{-5.f, 5.f}(t);
         for(auto& t : b_tensors)
@@ -168,7 +151,6 @@ class GemmMultiABDProfiler
                 setting_.verify, a_tensors, b_tensors, d_tensors, e_host_result);
         }
 
-        // Run each kernel callable
         for(auto& callable : callables)
         {
             auto kernel_run_result = callable(args,
@@ -185,6 +167,8 @@ class GemmMultiABDProfiler
         }
     }
 
+    // Override process_result: multi-abd has NumA A-tensors and NumB B-tensors contributing
+    // to bandwidth, and uses EDataType (aliased as CDataType) for the output buffer.
     void process_result(const GemmMultiABDProblem& problem,
                         ck_tile::DeviceMem& e_device_buf,
                         ck_tile::HostTensor<EDataType>& e_host_result,
@@ -209,11 +193,11 @@ class GemmMultiABDProfiler
             using BType = ck_tile::remove_cvref_t<std::tuple_element_t<i, BsDataType>>;
             num_byte += sizeof(BType) * problem.k_ * problem.n_;
         });
-        // D tensor bytes + flops
+        // D tensor bytes + one elementwise flop per element
         ck_tile::static_for<0, NumDTensors, 1>{}([&](auto i) {
             using DType = ck_tile::remove_cvref_t<std::tuple_element_t<i, DsDataType>>;
             num_byte += sizeof(DType) * problem.m_ * problem.n_;
-            flop += sizeof(DType) * problem.m_ * problem.n_;
+            flop += problem.m_ * problem.n_;
         });
         // E tensor bytes
         num_byte += sizeof(EDataType) * problem.m_ * problem.n_;
@@ -252,6 +236,8 @@ class GemmMultiABDProfiler
         e_dev_result.SetZero();
     }
 
+    // Shadow base select_best_instance to write the multi-abd CSV schema
+    // (variable-count tensor columns instead of the base's fixed stride_a/b/c columns).
     KernelInstance<GemmMultiABDProblem> select_best_instance(Metric metric)
     {
         if(kernel_instances_.empty())
@@ -288,7 +274,7 @@ class GemmMultiABDProfiler
             {
                 if(file.tellp() == 0)
                 {
-                    file << "rocm_version,device_name," << "split_k,m,n,k,";
+                    file << "rocm_version,device_name,split_k,m,n,k,";
                     for(std::size_t i = 0; i < NumATensors; i++)
                         file << "stride_a" << i << ",";
                     for(std::size_t i = 0; i < NumBTensors; i++)
@@ -309,8 +295,8 @@ class GemmMultiABDProfiler
                         file << "layout_b" << i << ",";
                     for(std::size_t i = 0; i < NumDTensors; i++)
                         file << "layout_d" << i << ",";
-                    file << "layout_e," << "a_elementwise,b_elementwise,cde_elementwise," << "name,"
-                         << "latency(ms),tflops(TFlops),bandwidth(GB/s),metric\n";
+                    file << "layout_e,a_elementwise,b_elementwise,cde_elementwise,"
+                         << "name,latency(ms),tflops(TFlops),bandwidth(GB/s),metric\n";
                 }
 
                 const auto& prob = kernel_instance.problem_;
@@ -355,14 +341,4 @@ class GemmMultiABDProfiler
 
         return kernel_instance;
     }
-
-    GemmMultiABDProfiler(const GemmMultiABDProfiler&)            = delete;
-    GemmMultiABDProfiler& operator=(const GemmMultiABDProfiler&) = delete;
-
-    private:
-    ~GemmMultiABDProfiler() { kernel_instances_.clear(); }
-    GemmMultiABDProfiler(Settings setting) : setting_(setting) {}
-
-    Settings setting_;
-    std::vector<KernelInstance<GemmMultiABDProblem>> kernel_instances_;
 };
