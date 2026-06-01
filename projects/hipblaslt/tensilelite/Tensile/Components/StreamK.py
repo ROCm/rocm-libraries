@@ -75,7 +75,8 @@ class XCCMappingOn(XCCMapping):
             sqTmp = writer.sgprPool.checkOut(1, "sqTmp")
             divisor = kernel["StreamKXCCMapping"]
             if ((divisor & (divisor - 1)) != 0): # Need temp registers if not power of 2
-                sTmp = writer.sgprPool.checkOutAligned(2, 2, "sTmp", preventOverflow=False)
+                allowOverflow = kernel.get("UseSubtileImpl", False)
+                sTmp = writer.sgprPool.checkOutAligned(2, 2, "sTmp", preventOverflow=not allowOverflow)
                 sTmpRes  = ContinuousRegister(idx=sTmp, size=2)
 
             # sGridC = ceil(grid / xccm)
@@ -2322,7 +2323,7 @@ class StreamKBasic(StreamK):
         module = Module("StreamK Basic graWorkGroup")
 
         # StreamK workgroup mapping
-        sTmp = writer.sgprPool.checkOutAligned(4, 2, "SKMappingTemp", preventOverflow=False)
+        sTmp = writer.sgprPool.checkOutAligned(4, 2, "SKMappingTemp", preventOverflow=not kernel.get("UseSubtileImpl", False))
 
         module.add(self.skTileIndex(writer, kernel, sTmp, tPA, tPB))
 
@@ -2451,7 +2452,7 @@ class StreamKTwoTileOriginal(StreamK):
         skConstsInVgprs = writer.isStreamKConstantsToVgprEnabled(kernel)
 
         # StreamK workgroup mapping
-        sTmp = writer.sgprPool.checkOutAligned(4, 2, "SKMappingTemp", preventOverflow=False)
+        sTmp = writer.sgprPool.checkOutAligned(4, 2, "SKMappingTemp", preventOverflow=not kernel.get("UseSubtileImpl", False))
 
         module.add(self.skTileIndex(writer, kernel, sTmp, tPA, tPB))
 
@@ -2736,7 +2737,7 @@ class StreamKTwoTileDPFirst(StreamK):
         skConstsInVgprs = writer.isStreamKConstantsToVgprEnabled(kernel)
 
         # StreamK workgroup mapping
-        sTmp = writer.sgprPool.checkOutAligned(4, 2, "SKMappingTemp", preventOverflow=False)
+        sTmp = writer.sgprPool.checkOutAligned(4, 2, "SKMappingTemp", preventOverflow=not kernel.get("UseSubtileImpl", False))
 
         module.add(self.skTileIndex(writer, kernel, sTmp, tPA, tPB))
 
