@@ -1,0 +1,637 @@
+label_LoopBeginL:
+
+/******************************************/
+/* Unrolled Loop 1/1 - Begin              */
+/******************************************/
+
+/* Begin Each Unroll: Check VGPR.checkin for INT8 LW */
+
+/* iter 0 (reset local read pointers iteration)  (swap local read pointers iteration)  */
+/*  grEndMfmaIndex:6, lwStartMfmaIndex:26, lwEndMfmaIndex:97  */
+/*  numMfmaForLR:22, syncPlrMfmaIndex:97 , sync1LdsMfmaIndex:25 */
+/*  mfmaIndex:0  */
+s_waitcnt lgkmcnt(0)                               // wait for prior local read local write old=0, new=0 newLW=0 newLR=0 for iteration == 0
+/* pack scheduling: packAIdx:0, packBIdx:0 */
+v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+0], v[vgprValuA_T0_I0+0], v[vgprValuA_T0_I0+1]
+v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+1], v[vgprValuA_T0_I0+2], v[vgprValuA_T0_I0+3]
+v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+2], v[vgprValuA_X0_I0+4], v[vgprValuA_X0_I0+5]
+v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+3], v[vgprValuA_X0_I0+6], v[vgprValuA_X0_I0+7]
+v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T0_I0+0:vgprValuA_T0_I0+0+3], v[166:167], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+1], v[vgprValuA_T0_I0+0:vgprValuA_T0_I0+0+3] // Calculate low bits for TF32 emulation
+v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_X0_I0+4:vgprValuA_X0_I0+4+3], v[166:167], v[vgprValuA_X0_I0+2:vgprValuA_X0_I0+2+1], v[vgprValuA_X0_I0+4:vgprValuA_X0_I0+4+3] // Calculate low bits for TF32 emulation__TF32_1_A_0: 
+v_mov_b64 v[202:203], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+1]
+v_mov_b64 v[204:205], v[vgprValuB_X0_I0+2:vgprValuB_X0_I0+2+1]
+v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+0], v[vgprValuB_X0_I0+0], v[vgprValuB_X0_I0+1]
+v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+1], v[vgprValuB_X0_I0+2], v[vgprValuB_X0_I0+3]
+v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+2], v[vgprValuB_X0_I0+4], v[vgprValuB_X0_I0+5]
+v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+3], v[vgprValuB_X0_I0+6], v[vgprValuB_X0_I0+7]
+v_mfma_f32_4x4x4_16b_bf16 v[202:205], v[166:167], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+1], v[202:205] // Calculate low bits for TF32 emulation
+v_mfma_f32_4x4x4_16b_bf16 v[vgprValuB_X0_I0+4:vgprValuB_X0_I0+4+3], v[166:167], v[vgprValuB_X0_I0+2:vgprValuB_X0_I0+2+1], v[vgprValuB_X0_I0+4:vgprValuB_X0_I0+4+3] // Calculate low bits for TF32 emulation__TF32_1_B_0: 
+s_nop 0                                            // nop for x32f emulation
+v_mfma_f32_16x16x32_bf16 acc[0:3], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+3], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+3], acc[0:3] // src0_h*src1_h, left value = acc[0+0:3+0]
+/*  mfmaIndex:1  */
+ds_read_b128 v[vgprValuA_T1_I0+0:vgprValuA_T1_I0+0+3], v[vgprLocalReadAddrA+0] offset:128 // L -> Reg lro=32 swapByteOffset=0 ti=128 vIdx=0 eIdx=0 rIdx=0 oIdx=0 buffer=1 iui=0 sync LDS0
+
+/* global read inc A loopL */
+s_cmp_eq_u32 s[sgprLoopCounterL], s[sgprStaggerUIter] // Is this the wrapIter?
+s_cselect_b32 s64, s[sgprWrapUA+0], s[sgprGlobalReadIncsA+0] // incLower <- ?
+s_cselect_b32 s65, s[sgprWrapUA+1], 0              // incUpper <- ?
+/* pack scheduling: packAIdx:0, packBIdx:0 */
+v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+7], v[vgprValuA_X0_I0+6], v[vgprValuA_X0_I0+7] // pack final begin
+v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+6], v[vgprValuA_X0_I0+4], v[vgprValuA_X0_I0+5]
+v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+5], v[vgprValuA_T0_I0+2], v[vgprValuA_T0_I0+3]
+v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+4], v[vgprValuA_T0_I0+0], v[vgprValuA_T0_I0+1] // __TF32_2_A_0 pack final end
+v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+7], v[vgprValuB_X0_I0+6], v[vgprValuB_X0_I0+7] // pack final begin
+v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+6], v[vgprValuB_X0_I0+4], v[vgprValuB_X0_I0+5]
+v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+5], v204, v205
+v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+4], v202, v203 // __TF32_2_B_0 pack final end
+s_nop 0                                            // VALU packing writes to be consumed by matrix instruction (HACK)
+v_mfma_f32_16x16x32_bf16 acc[0:3], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+3], v[vgprValuA_X0_I0+0+4:vgprValuA_X0_I0+0+4+3], acc[0:3] // src0_h*src1_l, left value = acc[0+0:3+0]
+/*  mfmaIndex:2  */
+ds_read_b128 v[vgprValuA_X1_I0+4:vgprValuA_X1_I0+4+3], v[vgprLocalReadAddrA+0] offset:192 // L -> Reg lro=32 swapByteOffset=0 ti=128 vIdx=0 eIdx=0 rIdx=1 oIdx=0 buffer=1 iui=0 sync LDS0
+s_add_u32 s[sgprSrdA+0], s[sgprSrdA+0], s64        // gra SRD += inc(lower)
+s_addc_u32 s[sgprSrdA+1], s[sgprSrdA+1], s65       // gra SRD += inc(upper)
+s_sub_u32 s[sgprShadowLimitA+0], s[sgprShadowLimitA+0], s64 // limit -= inc)
+/* pack scheduling: packAIdx:0, packBIdx:0 */
+v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+8], v[vgprValuA_T0_I0+4], v[vgprValuA_T0_I0+5]
+v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+9], v[vgprValuA_T0_I0+6], v[vgprValuA_T0_I0+7]
+v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+10], v[vgprValuA_X0_I0+12], v[vgprValuA_X0_I0+13]
+v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+11], v[vgprValuA_X0_I0+14], v[vgprValuA_X0_I0+15]
+v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T0_I0+4:vgprValuA_T0_I0+4+3], v[166:167], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+1], v[vgprValuA_T0_I0+4:vgprValuA_T0_I0+4+3] // Calculate low bits for TF32 emulation
+v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_X0_I0+12:vgprValuA_X0_I0+12+3], v[166:167], v[vgprValuA_X0_I0+10:vgprValuA_X0_I0+10+1], v[vgprValuA_X0_I0+12:vgprValuA_X0_I0+12+3] // Calculate low bits for TF32 emulation__TF32_1_A_1: 
+v_mov_b64 v[202:203], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+1]
+v_mov_b64 v[204:205], v[vgprValuB_X0_I0+10:vgprValuB_X0_I0+10+1]
+v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+8], v[vgprValuB_X0_I0+8], v[vgprValuB_X0_I0+9]
+v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+9], v[vgprValuB_X0_I0+10], v[vgprValuB_X0_I0+11]
+v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+10], v[vgprValuB_X0_I0+12], v[vgprValuB_X0_I0+13]
+v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+11], v[vgprValuB_X0_I0+14], v[vgprValuB_X0_I0+15]
+v_mfma_f32_4x4x4_16b_bf16 v[202:205], v[166:167], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+1], v[202:205] // Calculate low bits for TF32 emulation
+v_mfma_f32_4x4x4_16b_bf16 v[vgprValuB_X0_I0+12:vgprValuB_X0_I0+12+3], v[166:167], v[vgprValuB_X0_I0+10:vgprValuB_X0_I0+10+1], v[vgprValuB_X0_I0+12:vgprValuB_X0_I0+12+3] // Calculate low bits for TF32 emulation__TF32_1_B_1: 
+s_nop 0                                            // nop for x32f emulation
+v_mfma_f32_16x16x32_bf16 acc[0:3], v[vgprValuB_X0_I0+0+4:vgprValuB_X0_I0+0+4+3], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+3], acc[0:3] // src0_l*src1_h, left value = acc[0+0:3+0]
+/*  mfmaIndex:3  */
+ds_read_b128 v[vgprValuB_X1_I0+0:vgprValuB_X1_I0+0+3], v[vgprLocalReadAddrB+0] offset:128 // L -> Reg lro=32 swapByteOffset=0 ti=32 vIdx=0 eIdx=0 rIdx=0 oIdx=0 buffer=1 iui=0 sync LDS0
+s_subb_u32 s[sgprShadowLimitA+1], s[sgprShadowLimitA+1], s65 // limit -= inc)
+s_cmp_eq_u32 s[sgprShadowLimitA+1], 0              // are we within 2^32?
+s_cselect_b32 s[sgprSrdA+2], s[sgprShadowLimitA+0], BufferLimit // Move shadow to real if we are within 2^32
+/* pack scheduling: packAIdx:0, packBIdx:0 */
+v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+15], v[vgprValuA_X0_I0+14], v[vgprValuA_X0_I0+15] // pack final begin
+v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+14], v[vgprValuA_X0_I0+12], v[vgprValuA_X0_I0+13]
+v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+13], v[vgprValuA_T0_I0+6], v[vgprValuA_T0_I0+7]
+v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+12], v[vgprValuA_T0_I0+4], v[vgprValuA_T0_I0+5] // __TF32_2_A_1 pack final end
+v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+15], v[vgprValuB_X0_I0+14], v[vgprValuB_X0_I0+15] // pack final begin
+v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+14], v[vgprValuB_X0_I0+12], v[vgprValuB_X0_I0+13]
+v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+13], v204, v205
+v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+12], v202, v203 // __TF32_2_B_1 pack final end
+s_nop 0                                            // VALU packing writes to be consumed by matrix instruction (HACK)
+v_mfma_f32_16x16x32_bf16 acc[4:7], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+3], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+3], acc[4:7] // src0_h*src1_h, left value = acc[4+0:7+0]
+/*  mfmaIndex:4  */
+ds_read_b128 v[vgprValuB_X1_I0+4:vgprValuB_X1_I0+4+3], v[vgprLocalReadAddrB+0] offset:192 // L -> Reg lro=32 swapByteOffset=0 ti=32 vIdx=0 eIdx=0 rIdx=1 oIdx=0 buffer=1 iui=0 sync LDS0
+
+/* global read inc B loopL */
+s_cmp_eq_u32 s[sgprLoopCounterL], s[sgprStaggerUIter] // Is this the wrapIter?
+s_cselect_b32 s64, s[sgprWrapUB+0], s[sgprGlobalReadIncsB+0] // incLower <- ?
+s_cselect_b32 s65, s[sgprWrapUB+1], 0              // incUpper <- ?
+/* pack scheduling: packAIdx:0, packBIdx:0 */
+v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+16], v[vgprValuA_T0_I0+8], v[vgprValuA_T0_I0+9]
+v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+17], v[vgprValuA_T0_I0+10], v[vgprValuA_T0_I0+11]
+v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+18], v[vgprValuA_X0_I0+20], v[vgprValuA_X0_I0+21]
+v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+19], v[vgprValuA_X0_I0+22], v[vgprValuA_X0_I0+23]
+v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T0_I0+8:vgprValuA_T0_I0+8+3], v[166:167], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+1], v[vgprValuA_T0_I0+8:vgprValuA_T0_I0+8+3] // Calculate low bits for TF32 emulation
+v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_X0_I0+20:vgprValuA_X0_I0+20+3], v[166:167], v[vgprValuA_X0_I0+18:vgprValuA_X0_I0+18+1], v[vgprValuA_X0_I0+20:vgprValuA_X0_I0+20+3] // Calculate low bits for TF32 emulation__TF32_1_A_2: 
+v_mov_b64 v[202:203], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+1]
+v_mov_b64 v[204:205], v[vgprValuB_X0_I0+18:vgprValuB_X0_I0+18+1]
+v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+16], v[vgprValuB_X0_I0+16], v[vgprValuB_X0_I0+17]
+v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+17], v[vgprValuB_X0_I0+18], v[vgprValuB_X0_I0+19]
+v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+18], v[vgprValuB_X0_I0+20], v[vgprValuB_X0_I0+21]
+v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+19], v[vgprValuB_X0_I0+22], v[vgprValuB_X0_I0+23]
+v_mfma_f32_4x4x4_16b_bf16 v[202:205], v[166:167], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+1], v[202:205] // Calculate low bits for TF32 emulation
+v_mfma_f32_4x4x4_16b_bf16 v[vgprValuB_X0_I0+20:vgprValuB_X0_I0+20+3], v[166:167], v[vgprValuB_X0_I0+18:vgprValuB_X0_I0+18+1], v[vgprValuB_X0_I0+20:vgprValuB_X0_I0+20+3] // Calculate low bits for TF32 emulation__TF32_1_B_2: 
+s_nop 0                                            // nop for x32f emulation
+v_mfma_f32_16x16x32_bf16 acc[4:7], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+3], v[vgprValuA_X0_I0+8+4:vgprValuA_X0_I0+8+4+3], acc[4:7] // src0_h*src1_l, left value = acc[4+0:7+0]
+/*  mfmaIndex:5  */
+ds_read_b128 v[vgprValuA_T1_I0+4:vgprValuA_T1_I0+4+3], v[vgprLocalReadAddrA+0] offset:384 // L -> Reg lro=32 swapByteOffset=0 ti=128 vIdx=0 eIdx=1 rIdx=0 oIdx=0 buffer=1 iui=0 sync LDS0
+s_add_u32 s[sgprSrdB+0], s[sgprSrdB+0], s64        // gra SRD += inc(lower)
+s_addc_u32 s[sgprSrdB+1], s[sgprSrdB+1], s65       // gra SRD += inc(upper)
+s_sub_u32 s[sgprShadowLimitB+0], s[sgprShadowLimitB+0], s64 // limit -= inc)
+/* pack scheduling: packAIdx:0, packBIdx:0 */
+v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+23], v[vgprValuA_X0_I0+22], v[vgprValuA_X0_I0+23] // pack final begin
+v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+22], v[vgprValuA_X0_I0+20], v[vgprValuA_X0_I0+21]
+v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+21], v[vgprValuA_T0_I0+10], v[vgprValuA_T0_I0+11]
+v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+20], v[vgprValuA_T0_I0+8], v[vgprValuA_T0_I0+9] // __TF32_2_A_2 pack final end
+v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+23], v[vgprValuB_X0_I0+22], v[vgprValuB_X0_I0+23] // pack final begin
+v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+22], v[vgprValuB_X0_I0+20], v[vgprValuB_X0_I0+21]
+v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+21], v204, v205
+v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+20], v202, v203 // __TF32_2_B_2 pack final end
+s_nop 0                                            // VALU packing writes to be consumed by matrix instruction (HACK)
+v_mfma_f32_16x16x32_bf16 acc[4:7], v[vgprValuB_X0_I0+0+4:vgprValuB_X0_I0+0+4+3], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+3], acc[4:7] // src0_l*src1_h, left value = acc[4+0:7+0]
+/*  mfmaIndex:6  */
+ds_read_b128 v[vgprValuA_X1_I0+12:vgprValuA_X1_I0+12+3], v[vgprLocalReadAddrA+0] offset:448 // L -> Reg lro=32 swapByteOffset=0 ti=128 vIdx=0 eIdx=1 rIdx=1 oIdx=0 buffer=1 iui=0 sync LDS0
+s_subb_u32 s[sgprShadowLimitB+1], s[sgprShadowLimitB+1], s65 // limit -= inc)
+s_cmp_eq_u32 s[sgprShadowLimitB+1], 0              // are we within 2^32?
+s_cselect_b32 s[sgprSrdB+2], s[sgprShadowLimitB+0], BufferLimit // Move shadow to real if we are within 2^32
+/* pack scheduling: packAIdx:0, packBIdx:0 */
+v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+24], v[vgprValuA_T0_I0+12], v[vgprValuA_T0_I0+13]
+v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+25], v[vgprValuA_T0_I0+14], v[vgprValuA_T0_I0+15]
+v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+26], v[vgprValuA_X0_I0+28], v[vgprValuA_X0_I0+29]
+v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+27], v[vgprValuA_X0_I0+30], v[vgprValuA_X0_I0+31]
+v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T0_I0+12:vgprValuA_T0_I0+12+3], v[166:167], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+1], v[vgprValuA_T0_I0+12:vgprValuA_T0_I0+12+3] // Calculate low bits for TF32 emulation
+v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_X0_I0+28:vgprValuA_X0_I0+28+3], v[166:167], v[vgprValuA_X0_I0+26:vgprValuA_X0_I0+26+1], v[vgprValuA_X0_I0+28:vgprValuA_X0_I0+28+3] // Calculate low bits for TF32 emulation__TF32_1_A_3: 
+v_mov_b64 v[202:203], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+1]
+v_mov_b64 v[204:205], v[vgprValuB_X0_I0+26:vgprValuB_X0_I0+26+1]
+v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+24], v[vgprValuB_X0_I0+24], v[vgprValuB_X0_I0+25]
+v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+25], v[vgprValuB_X0_I0+26], v[vgprValuB_X0_I0+27]
+v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+26], v[vgprValuB_X0_I0+28], v[vgprValuB_X0_I0+29]
+v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+27], v[vgprValuB_X0_I0+30], v[vgprValuB_X0_I0+31]
+v_mfma_f32_4x4x4_16b_bf16 v[202:205], v[166:167], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+1], v[202:205] // Calculate low bits for TF32 emulation
+v_mfma_f32_4x4x4_16b_bf16 v[vgprValuB_X0_I0+28:vgprValuB_X0_I0+28+3], v[166:167], v[vgprValuB_X0_I0+26:vgprValuB_X0_I0+26+1], v[vgprValuB_X0_I0+28:vgprValuB_X0_I0+28+3] // Calculate low bits for TF32 emulation__TF32_1_B_3: 
+s_nop 0                                            // nop for x32f emulation
+v_mfma_f32_16x16x32_bf16 acc[8:11], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+3], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+3], acc[8:11] // src0_h*src1_h, left value = acc[8+0:11+0]
+/*  mfmaIndex:7  */
+ds_read_b128 v[vgprValuA_T1_I0+8:vgprValuA_T1_I0+8+3], v[vgprLocalReadAddrA+0] offset:640 // L -> Reg lro=32 swapByteOffset=0 ti=128 vIdx=0 eIdx=2 rIdx=0 oIdx=0 buffer=1 iui=0 sync LDS0
+/* pack scheduling: packAIdx:0, packBIdx:0 */
+v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+31], v[vgprValuA_X0_I0+30], v[vgprValuA_X0_I0+31] // pack final begin
+v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+30], v[vgprValuA_X0_I0+28], v[vgprValuA_X0_I0+29]
+v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+29], v[vgprValuA_T0_I0+14], v[vgprValuA_T0_I0+15]
+v_cvt_pk_bf16_f32 v[vgprValuA_X0_I0+28], v[vgprValuA_T0_I0+12], v[vgprValuA_T0_I0+13] // __TF32_2_A_3 pack final end
+v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+31], v[vgprValuB_X0_I0+30], v[vgprValuB_X0_I0+31] // pack final begin
+v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+30], v[vgprValuB_X0_I0+28], v[vgprValuB_X0_I0+29]
+v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+29], v204, v205
+v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+28], v202, v203 // __TF32_2_B_3 pack final end
+s_nop 0                                            // VALU packing writes to be consumed by matrix instruction (HACK)
+v_mfma_f32_16x16x32_bf16 acc[8:11], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+3], v[vgprValuA_X0_I0+16+4:vgprValuA_X0_I0+16+4+3], acc[8:11] // src0_h*src1_l, left value = acc[8+0:11+0]
+/*  mfmaIndex:8  */
+ds_read_b128 v[vgprValuA_X1_I0+20:vgprValuA_X1_I0+20+3], v[vgprLocalReadAddrA+0] offset:704 // L -> Reg lro=32 swapByteOffset=0 ti=128 vIdx=0 eIdx=2 rIdx=1 oIdx=0 buffer=1 iui=0 sync LDS0
+/* pack scheduling: packAIdx:0, packBIdx:0 */
+v_mov_b64 v[202:203], v[vgprValuB_X0_I0+32:vgprValuB_X0_I0+32+1]
+v_mov_b64 v[204:205], v[vgprValuB_X0_I0+34:vgprValuB_X0_I0+34+1]
+v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+32], v[vgprValuB_X0_I0+32], v[vgprValuB_X0_I0+33]
+v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+33], v[vgprValuB_X0_I0+34], v[vgprValuB_X0_I0+35]
+v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+34], v[vgprValuB_X0_I0+36], v[vgprValuB_X0_I0+37]
+v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+35], v[vgprValuB_X0_I0+38], v[vgprValuB_X0_I0+39]
+v_mfma_f32_4x4x4_16b_bf16 v[202:205], v[166:167], v[vgprValuB_X0_I0+32:vgprValuB_X0_I0+32+1], v[202:205] // Calculate low bits for TF32 emulation
+v_mfma_f32_4x4x4_16b_bf16 v[vgprValuB_X0_I0+36:vgprValuB_X0_I0+36+3], v[166:167], v[vgprValuB_X0_I0+34:vgprValuB_X0_I0+34+1], v[vgprValuB_X0_I0+36:vgprValuB_X0_I0+36+3] // Calculate low bits for TF32 emulation__TF32_1_B_4: 
+s_nop 4                                            // nop for x32f emulation
+v_mfma_f32_16x16x32_bf16 acc[8:11], v[vgprValuB_X0_I0+0+4:vgprValuB_X0_I0+0+4+3], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+3], acc[8:11] // src0_l*src1_h, left value = acc[8+0:11+0]
+/*  mfmaIndex:9  */
+ds_read_b128 v[vgprValuA_T1_I0+12:vgprValuA_T1_I0+12+3], v[vgprLocalReadAddrA+0] offset:896 // L -> Reg lro=32 swapByteOffset=0 ti=128 vIdx=0 eIdx=3 rIdx=0 oIdx=0 buffer=1 iui=0 sync LDS0
+/* pack scheduling: packAIdx:0, packBIdx:0 */
+v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+39], v[vgprValuB_X0_I0+38], v[vgprValuB_X0_I0+39] // pack final begin
+v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+38], v[vgprValuB_X0_I0+36], v[vgprValuB_X0_I0+37]
+v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+37], v204, v205
+v_cvt_pk_bf16_f32 v[vgprValuB_X0_I0+36], v202, v203 // __TF32_2_B_4 pack final end
+s_nop 0                                            // VALU packing writes to be consumed by matrix instruction (HACK)
+v_mfma_f32_16x16x32_bf16 acc[12:15], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+3], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+3], acc[12:15] // src0_h*src1_h, left value = acc[12+0:15+0]
+/*  mfmaIndex:10  */
+ds_read_b128 v[vgprValuA_X1_I0+28:vgprValuA_X1_I0+28+3], v[vgprLocalReadAddrA+0] offset:960 // L -> Reg lro=32 swapByteOffset=0 ti=128 vIdx=0 eIdx=3 rIdx=1 oIdx=0 buffer=1 iui=0 sync LDS0
+v_mfma_f32_16x16x32_bf16 acc[12:15], v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+3], v[vgprValuA_X0_I0+24+4:vgprValuA_X0_I0+24+4+3], acc[12:15] // src0_h*src1_l, left value = acc[12+0:15+0]
+/*  mfmaIndex:11  */
+ds_read_b128 v[vgprValuB_X1_I0+8:vgprValuB_X1_I0+8+3], v[vgprLocalReadAddrB+0] offset:8576 // L -> Reg lro=32 swapByteOffset=0 ti=32 vIdx=1 eIdx=0 rIdx=0 oIdx=0 buffer=1 iui=0 sync LDS0
+v_mfma_f32_16x16x32_bf16 acc[12:15], v[vgprValuB_X0_I0+0+4:vgprValuB_X0_I0+0+4+3], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+3], acc[12:15] // src0_l*src1_h, left value = acc[12+0:15+0]
+/*  mfmaIndex:12  */
+ds_read_b128 v[vgprValuB_X1_I0+12:vgprValuB_X1_I0+12+3], v[vgprLocalReadAddrB+0] offset:8640 // L -> Reg lro=32 swapByteOffset=0 ti=32 vIdx=1 eIdx=0 rIdx=1 oIdx=0 buffer=1 iui=0 sync LDS0
+v_mfma_f32_16x16x32_bf16 acc[16:19], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+3], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+3], acc[16:19] // src0_h*src1_h, left value = acc[16+0:19+0]
+/*  mfmaIndex:13  */
+ds_read_b128 v[vgprValuB_X1_I0+16:vgprValuB_X1_I0+16+3], v[vgprLocalReadAddrB+0] offset:17024 // L -> Reg lro=32 swapByteOffset=0 ti=32 vIdx=2 eIdx=0 rIdx=0 oIdx=0 buffer=1 iui=0 sync LDS0
+v_mfma_f32_16x16x32_bf16 acc[16:19], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+3], v[vgprValuA_X0_I0+0+4:vgprValuA_X0_I0+0+4+3], acc[16:19] // src0_h*src1_l, left value = acc[16+0:19+0]
+/*  mfmaIndex:14  */
+ds_read_b128 v[vgprValuB_X1_I0+20:vgprValuB_X1_I0+20+3], v[vgprLocalReadAddrB+0] offset:17088 // L -> Reg lro=32 swapByteOffset=0 ti=32 vIdx=2 eIdx=0 rIdx=1 oIdx=0 buffer=1 iui=0 sync LDS0
+v_mfma_f32_16x16x32_bf16 acc[16:19], v[vgprValuB_X0_I0+8+4:vgprValuB_X0_I0+8+4+3], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+3], acc[16:19] // src0_l*src1_h, left value = acc[16+0:19+0]
+/*  mfmaIndex:15  */
+ds_read_b128 v[vgprValuB_X1_I0+24:vgprValuB_X1_I0+24+3], v[vgprLocalReadAddrB+0] offset:25472 // L -> Reg lro=32 swapByteOffset=0 ti=32 vIdx=3 eIdx=0 rIdx=0 oIdx=0 buffer=1 iui=0 sync LDS0
+v_mfma_f32_16x16x32_bf16 acc[20:23], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+3], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+3], acc[20:23] // src0_h*src1_h, left value = acc[20+0:23+0]
+/*  mfmaIndex:16  */
+ds_read_b128 v[vgprValuB_X1_I0+28:vgprValuB_X1_I0+28+3], v[vgprLocalReadAddrB+0] offset:25536 // L -> Reg lro=32 swapByteOffset=0 ti=32 vIdx=3 eIdx=0 rIdx=1 oIdx=0 buffer=1 iui=0 sync LDS0
+v_mfma_f32_16x16x32_bf16 acc[20:23], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+3], v[vgprValuA_X0_I0+8+4:vgprValuA_X0_I0+8+4+3], acc[20:23] // src0_h*src1_l, left value = acc[20+0:23+0]
+/*  mfmaIndex:17  */
+ds_read_b128 v[vgprValuB_X1_I0+32:vgprValuB_X1_I0+32+3], v[vgprLocalReadAddrB+0] offset:33920 // L -> Reg lro=32 swapByteOffset=0 ti=32 vIdx=4 eIdx=0 rIdx=0 oIdx=0 buffer=1 iui=0 sync LDS0
+v_mfma_f32_16x16x32_bf16 acc[20:23], v[vgprValuB_X0_I0+8+4:vgprValuB_X0_I0+8+4+3], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+3], acc[20:23] // src0_l*src1_h, left value = acc[20+0:23+0]
+/*  mfmaIndex:18  */
+ds_read_b128 v[vgprValuB_X1_I0+36:vgprValuB_X1_I0+36+3], v[vgprLocalReadAddrB+0] offset:33984 // L -> Reg lro=32 swapByteOffset=0 ti=32 vIdx=4 eIdx=0 rIdx=1 oIdx=0 buffer=1 iui=0 sync LDS0
+/* localReadsVacancy: latencyLeft 1 */
+v_mfma_f32_16x16x32_bf16 acc[24:27], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+3], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+3], acc[24:27] // src0_h*src1_h, left value = acc[24+0:27+0]
+/*  mfmaIndex:19  */
+/* localReadsVacancy: latencyLeft 5 */
+v_mfma_f32_16x16x32_bf16 acc[24:27], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+3], v[vgprValuA_X0_I0+16+4:vgprValuA_X0_I0+16+4+3], acc[24:27] // src0_h*src1_l, left value = acc[24+0:27+0]
+/*  mfmaIndex:20  */
+/* localReadsVacancy: latencyLeft 5 */
+v_mfma_f32_16x16x32_bf16 acc[24:27], v[vgprValuB_X0_I0+8+4:vgprValuB_X0_I0+8+4+3], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+3], acc[24:27] // src0_l*src1_h, left value = acc[24+0:27+0]
+/*  mfmaIndex:21  */
+/* localReadsVacancy: latencyLeft 5 */
+v_mfma_f32_16x16x32_bf16 acc[28:31], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+3], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+3], acc[28:31] // src0_h*src1_h, left value = acc[28+0:31+0]
+/*  mfmaIndex:22  */
+/* localReadsVacancy: latencyLeft 5 */
+v_mfma_f32_16x16x32_bf16 acc[28:31], v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+3], v[vgprValuA_X0_I0+24+4:vgprValuA_X0_I0+24+4+3], acc[28:31] // src0_h*src1_l, left value = acc[28+0:31+0]
+/*  mfmaIndex:23  */
+/* localReadsVacancy: latencyLeft 5 */
+v_mfma_f32_16x16x32_bf16 acc[28:31], v[vgprValuB_X0_I0+8+4:vgprValuB_X0_I0+8+4+3], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+3], acc[28:31] // src0_l*src1_h, left value = acc[28+0:31+0]
+/*  mfmaIndex:24  */
+/* localReadsVacancy: latencyLeft 5 */
+v_mfma_f32_16x16x32_bf16 acc[32:35], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+3], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+3], acc[32:35] // src0_h*src1_h, left value = acc[32+0:35+0]
+/*  mfmaIndex:25  */
+/* schedule remaining localreads for one buffer scheduling */
+/* localReadsVacancy: latencyLeft 5 */
+v_mfma_f32_16x16x32_bf16 acc[32:35], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+3], v[vgprValuA_X0_I0+0+4:vgprValuA_X0_I0+0+4+3], acc[32:35] // src0_h*src1_l, left value = acc[32+0:35+0]
+/*  mfmaIndex:26  */
+v_mfma_f32_16x16x32_bf16 acc[32:35], v[vgprValuB_X0_I0+16+4:vgprValuB_X0_I0+16+4+3], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+3], acc[32:35] // src0_l*src1_h, left value = acc[32+0:35+0]
+/*  mfmaIndex:27  */
+s_mov_b32 m0, s[sgprLocalWriteAddrA]               // m0 <- LDS write address
+/* before DirectToLds load, ensure prior ds_reads have finished */
+s_waitcnt lgkmcnt(0)
+s_barrier
+buffer_load_dwordx4 v[vgprGlobalReadOffsetA+0], s[sgprSrdA:sgprSrdA+3], 0 offen offset:0 lds // G -> Reg 0_0_0_0
+v_mfma_f32_16x16x32_bf16 acc[36:39], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+3], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+3], acc[36:39] // src0_h*src1_h, left value = acc[36+0:39+0]
+/*  mfmaIndex:28  */
+v_mfma_f32_16x16x32_bf16 acc[36:39], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+3], v[vgprValuA_X0_I0+8+4:vgprValuA_X0_I0+8+4+3], acc[36:39] // src0_h*src1_l, left value = acc[36+0:39+0]
+/*  mfmaIndex:29  */
+v_mfma_f32_16x16x32_bf16 acc[36:39], v[vgprValuB_X0_I0+16+4:vgprValuB_X0_I0+16+4+3], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+3], acc[36:39] // src0_l*src1_h, left value = acc[36+0:39+0]
+/*  mfmaIndex:30  */
+v_mfma_f32_16x16x32_bf16 acc[40:43], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+3], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+3], acc[40:43] // src0_h*src1_h, left value = acc[40+0:43+0]
+/*  mfmaIndex:31  */
+s_add_u32 m0, m0, 4224                             // Move LDS write address to next line
+buffer_load_dwordx4 v[vgprGlobalReadOffsetA+1], s[sgprSrdA:sgprSrdA+3], 0 offen offset:0 lds // G -> Reg 0_0_1_0
+v_mfma_f32_16x16x32_bf16 acc[40:43], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+3], v[vgprValuA_X0_I0+16+4:vgprValuA_X0_I0+16+4+3], acc[40:43] // src0_h*src1_l, left value = acc[40+0:43+0]
+/*  mfmaIndex:32  */
+v_mfma_f32_16x16x32_bf16 acc[40:43], v[vgprValuB_X0_I0+16+4:vgprValuB_X0_I0+16+4+3], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+3], acc[40:43] // src0_l*src1_h, left value = acc[40+0:43+0]
+/*  mfmaIndex:33  */
+v_mfma_f32_16x16x32_bf16 acc[44:47], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+3], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+3], acc[44:47] // src0_h*src1_h, left value = acc[44+0:47+0]
+/*  mfmaIndex:34  */
+v_mfma_f32_16x16x32_bf16 acc[44:47], v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+3], v[vgprValuA_X0_I0+24+4:vgprValuA_X0_I0+24+4+3], acc[44:47] // src0_h*src1_l, left value = acc[44+0:47+0]
+/*  mfmaIndex:35  */
+s_add_u32 m0, m0, 4224                             // Move LDS write address to next line
+buffer_load_dwordx4 v[vgprGlobalReadOffsetA+2], s[sgprSrdA:sgprSrdA+3], 0 offen offset:0 lds // G -> Reg 0_0_2_0
+v_mfma_f32_16x16x32_bf16 acc[44:47], v[vgprValuB_X0_I0+16+4:vgprValuB_X0_I0+16+4+3], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+3], acc[44:47] // src0_l*src1_h, left value = acc[44+0:47+0]
+/*  mfmaIndex:36  */
+v_mfma_f32_16x16x32_bf16 acc[48:51], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+3], acc[48:51] // src0_h*src1_h, left value = acc[48+0:51+0]
+/*  mfmaIndex:37  */
+v_mfma_f32_16x16x32_bf16 acc[48:51], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprValuA_X0_I0+0+4:vgprValuA_X0_I0+0+4+3], acc[48:51] // src0_h*src1_l, left value = acc[48+0:51+0]
+/*  mfmaIndex:38  */
+v_mfma_f32_16x16x32_bf16 acc[48:51], v[vgprValuB_X0_I0+24+4:vgprValuB_X0_I0+24+4+3], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+3], acc[48:51] // src0_l*src1_h, left value = acc[48+0:51+0]
+/*  mfmaIndex:39  */
+s_add_u32 m0, m0, 4224                             // Move LDS write address to next line
+buffer_load_dwordx4 v[vgprGlobalReadOffsetA+3], s[sgprSrdA:sgprSrdA+3], 0 offen offset:0 lds // G -> Reg 0_0_3_0
+v_mfma_f32_16x16x32_bf16 acc[52:55], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+3], acc[52:55] // src0_h*src1_h, left value = acc[52+0:55+0]
+/*  mfmaIndex:40  */
+v_mfma_f32_16x16x32_bf16 acc[52:55], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprValuA_X0_I0+8+4:vgprValuA_X0_I0+8+4+3], acc[52:55] // src0_h*src1_l, left value = acc[52+0:55+0]
+/*  mfmaIndex:41  */
+v_mfma_f32_16x16x32_bf16 acc[52:55], v[vgprValuB_X0_I0+24+4:vgprValuB_X0_I0+24+4+3], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+3], acc[52:55] // src0_l*src1_h, left value = acc[52+0:55+0]
+/*  mfmaIndex:42  */
+v_mfma_f32_16x16x32_bf16 acc[56:59], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+3], acc[56:59] // src0_h*src1_h, left value = acc[56+0:59+0]
+/*  mfmaIndex:43  */
+s_add_u32 m0, m0, 4224                             // Move LDS write address to next line
+buffer_load_dwordx4 v[vgprGlobalReadOffsetA+4], s[sgprSrdA:sgprSrdA+3], 0 offen offset:0 lds // G -> Reg 0_0_4_0
+v_mfma_f32_16x16x32_bf16 acc[56:59], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprValuA_X0_I0+16+4:vgprValuA_X0_I0+16+4+3], acc[56:59] // src0_h*src1_l, left value = acc[56+0:59+0]
+/*  mfmaIndex:44  */
+v_mfma_f32_16x16x32_bf16 acc[56:59], v[vgprValuB_X0_I0+24+4:vgprValuB_X0_I0+24+4+3], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+3], acc[56:59] // src0_l*src1_h, left value = acc[56+0:59+0]
+/*  mfmaIndex:45  */
+v_mfma_f32_16x16x32_bf16 acc[60:63], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+3], acc[60:63] // src0_h*src1_h, left value = acc[60+0:63+0]
+/*  mfmaIndex:46  */
+v_mfma_f32_16x16x32_bf16 acc[60:63], v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprValuA_X0_I0+24+4:vgprValuA_X0_I0+24+4+3], acc[60:63] // src0_h*src1_l, left value = acc[60+0:63+0]
+/*  mfmaIndex:47  */
+s_add_u32 m0, m0, 4224                             // Move LDS write address to next line
+buffer_load_dwordx4 v[vgprGlobalReadOffsetA+5], s[sgprSrdA:sgprSrdA+3], 0 offen offset:0 lds // G -> Reg 0_0_5_0
+v_mfma_f32_16x16x32_bf16 acc[60:63], v[vgprValuB_X0_I0+24+4:vgprValuB_X0_I0+24+4+3], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+3], acc[60:63] // src0_l*src1_h, left value = acc[60+0:63+0]
+/*  mfmaIndex:48  */
+v_mfma_f32_16x16x32_bf16 acc[64:67], v[vgprValuB_X0_I0+32:vgprValuB_X0_I0+32+3], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+3], acc[64:67] // src0_h*src1_h, left value = acc[64+0:67+0]
+/*  mfmaIndex:49  */
+v_mfma_f32_16x16x32_bf16 acc[64:67], v[vgprValuB_X0_I0+32:vgprValuB_X0_I0+32+3], v[vgprValuA_X0_I0+0+4:vgprValuA_X0_I0+0+4+3], acc[64:67] // src0_h*src1_l, left value = acc[64+0:67+0]
+/*  mfmaIndex:50  */
+v_mfma_f32_16x16x32_bf16 acc[64:67], v[vgprValuB_X0_I0+32+4:vgprValuB_X0_I0+32+4+3], v[vgprValuA_X0_I0+0:vgprValuA_X0_I0+0+3], acc[64:67] // src0_l*src1_h, left value = acc[64+0:67+0]
+/*  mfmaIndex:51  */
+v_mfma_f32_16x16x32_bf16 acc[68:71], v[vgprValuB_X0_I0+32:vgprValuB_X0_I0+32+3], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+3], acc[68:71] // src0_h*src1_h, left value = acc[68+0:71+0]
+/*  mfmaIndex:52  */
+s_add_u32 m0, m0, 4224                             // Move LDS write address to next line
+buffer_load_dwordx4 v[vgprGlobalReadOffsetA+6], s[sgprSrdA:sgprSrdA+3], 0 offen offset:0 lds // G -> Reg 0_0_6_0
+v_mfma_f32_16x16x32_bf16 acc[68:71], v[vgprValuB_X0_I0+32:vgprValuB_X0_I0+32+3], v[vgprValuA_X0_I0+8+4:vgprValuA_X0_I0+8+4+3], acc[68:71] // src0_h*src1_l, left value = acc[68+0:71+0]
+/*  mfmaIndex:53  */
+v_mfma_f32_16x16x32_bf16 acc[68:71], v[vgprValuB_X0_I0+32+4:vgprValuB_X0_I0+32+4+3], v[vgprValuA_X0_I0+8:vgprValuA_X0_I0+8+3], acc[68:71] // src0_l*src1_h, left value = acc[68+0:71+0]
+/*  mfmaIndex:54  */
+v_mfma_f32_16x16x32_bf16 acc[72:75], v[vgprValuB_X0_I0+32:vgprValuB_X0_I0+32+3], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+3], acc[72:75] // src0_h*src1_h, left value = acc[72+0:75+0]
+/*  mfmaIndex:55  */
+v_mfma_f32_16x16x32_bf16 acc[72:75], v[vgprValuB_X0_I0+32:vgprValuB_X0_I0+32+3], v[vgprValuA_X0_I0+16+4:vgprValuA_X0_I0+16+4+3], acc[72:75] // src0_h*src1_l, left value = acc[72+0:75+0]
+/*  mfmaIndex:56  */
+s_add_u32 m0, m0, 4224                             // Move LDS write address to next line
+buffer_load_dwordx4 v[vgprGlobalReadOffsetA+7], s[sgprSrdA:sgprSrdA+3], 0 offen offset:0 lds // G -> Reg 0_0_7_0
+v_mfma_f32_16x16x32_bf16 acc[72:75], v[vgprValuB_X0_I0+32+4:vgprValuB_X0_I0+32+4+3], v[vgprValuA_X0_I0+16:vgprValuA_X0_I0+16+3], acc[72:75] // src0_l*src1_h, left value = acc[72+0:75+0]
+/*  mfmaIndex:57  */
+v_mfma_f32_16x16x32_bf16 acc[76:79], v[vgprValuB_X0_I0+32:vgprValuB_X0_I0+32+3], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+3], acc[76:79] // src0_h*src1_h, left value = acc[76+0:79+0]
+/*  mfmaIndex:58  */
+v_mfma_f32_16x16x32_bf16 acc[76:79], v[vgprValuB_X0_I0+32:vgprValuB_X0_I0+32+3], v[vgprValuA_X0_I0+24+4:vgprValuA_X0_I0+24+4+3], acc[76:79] // src0_h*src1_l, left value = acc[76+0:79+0]
+/*  mfmaIndex:59  */
+
+/* local read swap offsets a */
+v_xor_b32 v[vgprLocalReadAddrA], v[vgprLocalReadSwapAddrA], v[vgprLocalReadAddrA] // swap Red Blk
+
+/* local read swap offsets b */
+v_xor_b32 v[vgprLocalReadAddrB], v[vgprLocalReadSwapAddrB], v[vgprLocalReadAddrB] // swap Red Blk
+
+/* local read init pointers a */
+
+/* localReadInitPointers */
+
+/* local read init pointers b */
+
+/* localReadInitPointers */
+v_mfma_f32_16x16x32_bf16 acc[76:79], v[vgprValuB_X0_I0+32+4:vgprValuB_X0_I0+32+4+3], v[vgprValuA_X0_I0+24:vgprValuA_X0_I0+24+3], acc[76:79] // src0_l*src1_h, left value = acc[76+0:79+0]
+/* numPrefetchIter=0 */
+/* dataAtIterA=-1 numReadsIterA=1 skipReadsIterA=1 readsPerIterA=8 */
+/* dataAtIterB=-1 numReadsIterB=1 skipReadsIterB=1 readsPerIterB=10 */
+
+/* iter 1 (swap and reset local write pointers iteration)  */
+/*  grEndMfmaIndex:6, lwStartMfmaIndex:26, lwEndMfmaIndex:97  */
+/*  numMfmaForLR:22, syncPlrMfmaIndex:97 , sync1LdsMfmaIndex:25 */
+/*  mfmaIndex:60  */
+s_mov_b32 m0, s[sgprLocalWriteAddrB]               // m0 <- LDS write address
+buffer_load_dwordx4 v[vgprGlobalReadOffsetB+0], s[sgprSrdB:sgprSrdB+3], 0 offen offset:0 lds // G -> Reg 0_0_0_0
+/* pack scheduling: packAIdx:0, packBIdx:0 */
+v_cvt_pk_bf16_f32 v[vgprValuA_X1_I0+0], v[vgprValuA_T1_I0+0], v[vgprValuA_T1_I0+1]
+v_cvt_pk_bf16_f32 v[vgprValuA_X1_I0+1], v[vgprValuA_T1_I0+2], v[vgprValuA_T1_I0+3]
+v_cvt_pk_bf16_f32 v[vgprValuA_X1_I0+2], v[vgprValuA_X1_I0+4], v[vgprValuA_X1_I0+5]
+v_cvt_pk_bf16_f32 v[vgprValuA_X1_I0+3], v[vgprValuA_X1_I0+6], v[vgprValuA_X1_I0+7]
+v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T1_I0+0:vgprValuA_T1_I0+0+3], v[166:167], v[vgprValuA_X1_I0+0:vgprValuA_X1_I0+0+1], v[vgprValuA_T1_I0+0:vgprValuA_T1_I0+0+3] // Calculate low bits for TF32 emulation
+v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_X1_I0+4:vgprValuA_X1_I0+4+3], v[166:167], v[vgprValuA_X1_I0+2:vgprValuA_X1_I0+2+1], v[vgprValuA_X1_I0+4:vgprValuA_X1_I0+4+3] // Calculate low bits for TF32 emulation__TF32_1_A_0: 
+v_mov_b64 v[202:203], v[vgprValuB_X1_I0+0:vgprValuB_X1_I0+0+1]
+v_mov_b64 v[204:205], v[vgprValuB_X1_I0+2:vgprValuB_X1_I0+2+1]
+v_cvt_pk_bf16_f32 v[vgprValuB_X1_I0+0], v[vgprValuB_X1_I0+0], v[vgprValuB_X1_I0+1]
+v_cvt_pk_bf16_f32 v[vgprValuB_X1_I0+1], v[vgprValuB_X1_I0+2], v[vgprValuB_X1_I0+3]
+v_cvt_pk_bf16_f32 v[vgprValuB_X1_I0+2], v[vgprValuB_X1_I0+4], v[vgprValuB_X1_I0+5]
+v_cvt_pk_bf16_f32 v[vgprValuB_X1_I0+3], v[vgprValuB_X1_I0+6], v[vgprValuB_X1_I0+7]
+v_mfma_f32_4x4x4_16b_bf16 v[202:205], v[166:167], v[vgprValuB_X1_I0+0:vgprValuB_X1_I0+0+1], v[202:205] // Calculate low bits for TF32 emulation
+v_mfma_f32_4x4x4_16b_bf16 v[vgprValuB_X1_I0+4:vgprValuB_X1_I0+4+3], v[166:167], v[vgprValuB_X1_I0+2:vgprValuB_X1_I0+2+1], v[vgprValuB_X1_I0+4:vgprValuB_X1_I0+4+3] // Calculate low bits for TF32 emulation__TF32_1_B_0: 
+s_nop 0                                            // nop for x32f emulation
+v_mfma_f32_16x16x32_bf16 acc[0:3], v[vgprValuB_X1_I0+0:vgprValuB_X1_I0+0+3], v[vgprValuA_X1_I0+0:vgprValuA_X1_I0+0+3], acc[0:3] // src0_h*src1_h, left value = acc[0+0:3+0]
+/*  mfmaIndex:61  */
+/* pack scheduling: packAIdx:0, packBIdx:0 */
+v_cvt_pk_bf16_f32 v[vgprValuA_X1_I0+7], v[vgprValuA_X1_I0+6], v[vgprValuA_X1_I0+7] // pack final begin
+v_cvt_pk_bf16_f32 v[vgprValuA_X1_I0+6], v[vgprValuA_X1_I0+4], v[vgprValuA_X1_I0+5]
+v_cvt_pk_bf16_f32 v[vgprValuA_X1_I0+5], v[vgprValuA_T1_I0+2], v[vgprValuA_T1_I0+3]
+v_cvt_pk_bf16_f32 v[vgprValuA_X1_I0+4], v[vgprValuA_T1_I0+0], v[vgprValuA_T1_I0+1] // __TF32_2_A_0 pack final end
+v_cvt_pk_bf16_f32 v[vgprValuB_X1_I0+7], v[vgprValuB_X1_I0+6], v[vgprValuB_X1_I0+7] // pack final begin
+v_cvt_pk_bf16_f32 v[vgprValuB_X1_I0+6], v[vgprValuB_X1_I0+4], v[vgprValuB_X1_I0+5]
+v_cvt_pk_bf16_f32 v[vgprValuB_X1_I0+5], v204, v205
+v_cvt_pk_bf16_f32 v[vgprValuB_X1_I0+4], v202, v203 // __TF32_2_B_0 pack final end
+s_nop 0                                            // VALU packing writes to be consumed by matrix instruction (HACK)
+v_mfma_f32_16x16x32_bf16 acc[0:3], v[vgprValuB_X1_I0+0:vgprValuB_X1_I0+0+3], v[vgprValuA_X1_I0+0+4:vgprValuA_X1_I0+0+4+3], acc[0:3] // src0_h*src1_l, left value = acc[0+0:3+0]
+/*  mfmaIndex:62  */
+/* pack scheduling: packAIdx:0, packBIdx:0 */
+v_cvt_pk_bf16_f32 v[vgprValuA_X1_I0+8], v[vgprValuA_T1_I0+4], v[vgprValuA_T1_I0+5]
+v_cvt_pk_bf16_f32 v[vgprValuA_X1_I0+9], v[vgprValuA_T1_I0+6], v[vgprValuA_T1_I0+7]
+v_cvt_pk_bf16_f32 v[vgprValuA_X1_I0+10], v[vgprValuA_X1_I0+12], v[vgprValuA_X1_I0+13]
+v_cvt_pk_bf16_f32 v[vgprValuA_X1_I0+11], v[vgprValuA_X1_I0+14], v[vgprValuA_X1_I0+15]
+v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T1_I0+4:vgprValuA_T1_I0+4+3], v[166:167], v[vgprValuA_X1_I0+8:vgprValuA_X1_I0+8+1], v[vgprValuA_T1_I0+4:vgprValuA_T1_I0+4+3] // Calculate low bits for TF32 emulation
+v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_X1_I0+12:vgprValuA_X1_I0+12+3], v[166:167], v[vgprValuA_X1_I0+10:vgprValuA_X1_I0+10+1], v[vgprValuA_X1_I0+12:vgprValuA_X1_I0+12+3] // Calculate low bits for TF32 emulation__TF32_1_A_1: 
+v_mov_b64 v[202:203], v[vgprValuB_X1_I0+8:vgprValuB_X1_I0+8+1]
+v_mov_b64 v[204:205], v[vgprValuB_X1_I0+10:vgprValuB_X1_I0+10+1]
+v_cvt_pk_bf16_f32 v[vgprValuB_X1_I0+8], v[vgprValuB_X1_I0+8], v[vgprValuB_X1_I0+9]
+v_cvt_pk_bf16_f32 v[vgprValuB_X1_I0+9], v[vgprValuB_X1_I0+10], v[vgprValuB_X1_I0+11]
+v_cvt_pk_bf16_f32 v[vgprValuB_X1_I0+10], v[vgprValuB_X1_I0+12], v[vgprValuB_X1_I0+13]
+v_cvt_pk_bf16_f32 v[vgprValuB_X1_I0+11], v[vgprValuB_X1_I0+14], v[vgprValuB_X1_I0+15]
+v_mfma_f32_4x4x4_16b_bf16 v[202:205], v[166:167], v[vgprValuB_X1_I0+8:vgprValuB_X1_I0+8+1], v[202:205] // Calculate low bits for TF32 emulation
+v_mfma_f32_4x4x4_16b_bf16 v[vgprValuB_X1_I0+12:vgprValuB_X1_I0+12+3], v[166:167], v[vgprValuB_X1_I0+10:vgprValuB_X1_I0+10+1], v[vgprValuB_X1_I0+12:vgprValuB_X1_I0+12+3] // Calculate low bits for TF32 emulation__TF32_1_B_1: 
+s_nop 0                                            // nop for x32f emulation
+v_mfma_f32_16x16x32_bf16 acc[0:3], v[vgprValuB_X1_I0+0+4:vgprValuB_X1_I0+0+4+3], v[vgprValuA_X1_I0+0:vgprValuA_X1_I0+0+3], acc[0:3] // src0_l*src1_h, left value = acc[0+0:3+0]
+/*  mfmaIndex:63  */
+/* pack scheduling: packAIdx:0, packBIdx:0 */
+v_cvt_pk_bf16_f32 v[vgprValuA_X1_I0+15], v[vgprValuA_X1_I0+14], v[vgprValuA_X1_I0+15] // pack final begin
+v_cvt_pk_bf16_f32 v[vgprValuA_X1_I0+14], v[vgprValuA_X1_I0+12], v[vgprValuA_X1_I0+13]
+v_cvt_pk_bf16_f32 v[vgprValuA_X1_I0+13], v[vgprValuA_T1_I0+6], v[vgprValuA_T1_I0+7]
+v_cvt_pk_bf16_f32 v[vgprValuA_X1_I0+12], v[vgprValuA_T1_I0+4], v[vgprValuA_T1_I0+5] // __TF32_2_A_1 pack final end
+v_cvt_pk_bf16_f32 v[vgprValuB_X1_I0+15], v[vgprValuB_X1_I0+14], v[vgprValuB_X1_I0+15] // pack final begin
+v_cvt_pk_bf16_f32 v[vgprValuB_X1_I0+14], v[vgprValuB_X1_I0+12], v[vgprValuB_X1_I0+13]
+v_cvt_pk_bf16_f32 v[vgprValuB_X1_I0+13], v204, v205
+v_cvt_pk_bf16_f32 v[vgprValuB_X1_I0+12], v202, v203 // __TF32_2_B_1 pack final end
+s_nop 0                                            // VALU packing writes to be consumed by matrix instruction (HACK)
+v_mfma_f32_16x16x32_bf16 acc[4:7], v[vgprValuB_X1_I0+0:vgprValuB_X1_I0+0+3], v[vgprValuA_X1_I0+8:vgprValuA_X1_I0+8+3], acc[4:7] // src0_h*src1_h, left value = acc[4+0:7+0]
+/*  mfmaIndex:64  */
+s_add_u32 m0, m0, 4224                             // Move LDS write address to next line
+buffer_load_dwordx4 v[vgprGlobalReadOffsetB+1], s[sgprSrdB:sgprSrdB+3], 0 offen offset:0 lds // G -> Reg 0_0_1_0
+/* pack scheduling: packAIdx:0, packBIdx:0 */
+v_cvt_pk_bf16_f32 v[vgprValuA_X1_I0+16], v[vgprValuA_T1_I0+8], v[vgprValuA_T1_I0+9]
+v_cvt_pk_bf16_f32 v[vgprValuA_X1_I0+17], v[vgprValuA_T1_I0+10], v[vgprValuA_T1_I0+11]
+v_cvt_pk_bf16_f32 v[vgprValuA_X1_I0+18], v[vgprValuA_X1_I0+20], v[vgprValuA_X1_I0+21]
+v_cvt_pk_bf16_f32 v[vgprValuA_X1_I0+19], v[vgprValuA_X1_I0+22], v[vgprValuA_X1_I0+23]
+v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T1_I0+8:vgprValuA_T1_I0+8+3], v[166:167], v[vgprValuA_X1_I0+16:vgprValuA_X1_I0+16+1], v[vgprValuA_T1_I0+8:vgprValuA_T1_I0+8+3] // Calculate low bits for TF32 emulation
+v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_X1_I0+20:vgprValuA_X1_I0+20+3], v[166:167], v[vgprValuA_X1_I0+18:vgprValuA_X1_I0+18+1], v[vgprValuA_X1_I0+20:vgprValuA_X1_I0+20+3] // Calculate low bits for TF32 emulation__TF32_1_A_2: 
+v_mov_b64 v[202:203], v[vgprValuB_X1_I0+16:vgprValuB_X1_I0+16+1]
+v_mov_b64 v[204:205], v[vgprValuB_X1_I0+18:vgprValuB_X1_I0+18+1]
+v_cvt_pk_bf16_f32 v[vgprValuB_X1_I0+16], v[vgprValuB_X1_I0+16], v[vgprValuB_X1_I0+17]
+v_cvt_pk_bf16_f32 v[vgprValuB_X1_I0+17], v[vgprValuB_X1_I0+18], v[vgprValuB_X1_I0+19]
+v_cvt_pk_bf16_f32 v[vgprValuB_X1_I0+18], v[vgprValuB_X1_I0+20], v[vgprValuB_X1_I0+21]
+v_cvt_pk_bf16_f32 v[vgprValuB_X1_I0+19], v[vgprValuB_X1_I0+22], v[vgprValuB_X1_I0+23]
+v_mfma_f32_4x4x4_16b_bf16 v[202:205], v[166:167], v[vgprValuB_X1_I0+16:vgprValuB_X1_I0+16+1], v[202:205] // Calculate low bits for TF32 emulation
+v_mfma_f32_4x4x4_16b_bf16 v[vgprValuB_X1_I0+20:vgprValuB_X1_I0+20+3], v[166:167], v[vgprValuB_X1_I0+18:vgprValuB_X1_I0+18+1], v[vgprValuB_X1_I0+20:vgprValuB_X1_I0+20+3] // Calculate low bits for TF32 emulation__TF32_1_B_2: 
+s_nop 0                                            // nop for x32f emulation
+v_mfma_f32_16x16x32_bf16 acc[4:7], v[vgprValuB_X1_I0+0:vgprValuB_X1_I0+0+3], v[vgprValuA_X1_I0+8+4:vgprValuA_X1_I0+8+4+3], acc[4:7] // src0_h*src1_l, left value = acc[4+0:7+0]
+/*  mfmaIndex:65  */
+/* pack scheduling: packAIdx:0, packBIdx:0 */
+v_cvt_pk_bf16_f32 v[vgprValuA_X1_I0+23], v[vgprValuA_X1_I0+22], v[vgprValuA_X1_I0+23] // pack final begin
+v_cvt_pk_bf16_f32 v[vgprValuA_X1_I0+22], v[vgprValuA_X1_I0+20], v[vgprValuA_X1_I0+21]
+v_cvt_pk_bf16_f32 v[vgprValuA_X1_I0+21], v[vgprValuA_T1_I0+10], v[vgprValuA_T1_I0+11]
+v_cvt_pk_bf16_f32 v[vgprValuA_X1_I0+20], v[vgprValuA_T1_I0+8], v[vgprValuA_T1_I0+9] // __TF32_2_A_2 pack final end
+v_cvt_pk_bf16_f32 v[vgprValuB_X1_I0+23], v[vgprValuB_X1_I0+22], v[vgprValuB_X1_I0+23] // pack final begin
+v_cvt_pk_bf16_f32 v[vgprValuB_X1_I0+22], v[vgprValuB_X1_I0+20], v[vgprValuB_X1_I0+21]
+v_cvt_pk_bf16_f32 v[vgprValuB_X1_I0+21], v204, v205
+v_cvt_pk_bf16_f32 v[vgprValuB_X1_I0+20], v202, v203 // __TF32_2_B_2 pack final end
+s_nop 0                                            // VALU packing writes to be consumed by matrix instruction (HACK)
+v_mfma_f32_16x16x32_bf16 acc[4:7], v[vgprValuB_X1_I0+0+4:vgprValuB_X1_I0+0+4+3], v[vgprValuA_X1_I0+8:vgprValuA_X1_I0+8+3], acc[4:7] // src0_l*src1_h, left value = acc[4+0:7+0]
+/*  mfmaIndex:66  */
+/* pack scheduling: packAIdx:0, packBIdx:0 */
+v_cvt_pk_bf16_f32 v[vgprValuA_X1_I0+24], v[vgprValuA_T1_I0+12], v[vgprValuA_T1_I0+13]
+v_cvt_pk_bf16_f32 v[vgprValuA_X1_I0+25], v[vgprValuA_T1_I0+14], v[vgprValuA_T1_I0+15]
+v_cvt_pk_bf16_f32 v[vgprValuA_X1_I0+26], v[vgprValuA_X1_I0+28], v[vgprValuA_X1_I0+29]
+v_cvt_pk_bf16_f32 v[vgprValuA_X1_I0+27], v[vgprValuA_X1_I0+30], v[vgprValuA_X1_I0+31]
+v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_T1_I0+12:vgprValuA_T1_I0+12+3], v[166:167], v[vgprValuA_X1_I0+24:vgprValuA_X1_I0+24+1], v[vgprValuA_T1_I0+12:vgprValuA_T1_I0+12+3] // Calculate low bits for TF32 emulation
+v_mfma_f32_4x4x4_16b_bf16 v[vgprValuA_X1_I0+28:vgprValuA_X1_I0+28+3], v[166:167], v[vgprValuA_X1_I0+26:vgprValuA_X1_I0+26+1], v[vgprValuA_X1_I0+28:vgprValuA_X1_I0+28+3] // Calculate low bits for TF32 emulation__TF32_1_A_3: 
+v_mov_b64 v[202:203], v[vgprValuB_X1_I0+24:vgprValuB_X1_I0+24+1]
+v_mov_b64 v[204:205], v[vgprValuB_X1_I0+26:vgprValuB_X1_I0+26+1]
+v_cvt_pk_bf16_f32 v[vgprValuB_X1_I0+24], v[vgprValuB_X1_I0+24], v[vgprValuB_X1_I0+25]
+v_cvt_pk_bf16_f32 v[vgprValuB_X1_I0+25], v[vgprValuB_X1_I0+26], v[vgprValuB_X1_I0+27]
+v_cvt_pk_bf16_f32 v[vgprValuB_X1_I0+26], v[vgprValuB_X1_I0+28], v[vgprValuB_X1_I0+29]
+v_cvt_pk_bf16_f32 v[vgprValuB_X1_I0+27], v[vgprValuB_X1_I0+30], v[vgprValuB_X1_I0+31]
+v_mfma_f32_4x4x4_16b_bf16 v[202:205], v[166:167], v[vgprValuB_X1_I0+24:vgprValuB_X1_I0+24+1], v[202:205] // Calculate low bits for TF32 emulation
+v_mfma_f32_4x4x4_16b_bf16 v[vgprValuB_X1_I0+28:vgprValuB_X1_I0+28+3], v[166:167], v[vgprValuB_X1_I0+26:vgprValuB_X1_I0+26+1], v[vgprValuB_X1_I0+28:vgprValuB_X1_I0+28+3] // Calculate low bits for TF32 emulation__TF32_1_B_3: 
+s_nop 0                                            // nop for x32f emulation
+v_mfma_f32_16x16x32_bf16 acc[8:11], v[vgprValuB_X1_I0+0:vgprValuB_X1_I0+0+3], v[vgprValuA_X1_I0+16:vgprValuA_X1_I0+16+3], acc[8:11] // src0_h*src1_h, left value = acc[8+0:11+0]
+/*  mfmaIndex:67  */
+/* pack scheduling: packAIdx:0, packBIdx:0 */
+v_cvt_pk_bf16_f32 v[vgprValuA_X1_I0+31], v[vgprValuA_X1_I0+30], v[vgprValuA_X1_I0+31] // pack final begin
+v_cvt_pk_bf16_f32 v[vgprValuA_X1_I0+30], v[vgprValuA_X1_I0+28], v[vgprValuA_X1_I0+29]
+v_cvt_pk_bf16_f32 v[vgprValuA_X1_I0+29], v[vgprValuA_T1_I0+14], v[vgprValuA_T1_I0+15]
+v_cvt_pk_bf16_f32 v[vgprValuA_X1_I0+28], v[vgprValuA_T1_I0+12], v[vgprValuA_T1_I0+13] // __TF32_2_A_3 pack final end
+v_cvt_pk_bf16_f32 v[vgprValuB_X1_I0+31], v[vgprValuB_X1_I0+30], v[vgprValuB_X1_I0+31] // pack final begin
+v_cvt_pk_bf16_f32 v[vgprValuB_X1_I0+30], v[vgprValuB_X1_I0+28], v[vgprValuB_X1_I0+29]
+v_cvt_pk_bf16_f32 v[vgprValuB_X1_I0+29], v204, v205
+v_cvt_pk_bf16_f32 v[vgprValuB_X1_I0+28], v202, v203 // __TF32_2_B_3 pack final end
+s_nop 0                                            // VALU packing writes to be consumed by matrix instruction (HACK)
+v_mfma_f32_16x16x32_bf16 acc[8:11], v[vgprValuB_X1_I0+0:vgprValuB_X1_I0+0+3], v[vgprValuA_X1_I0+16+4:vgprValuA_X1_I0+16+4+3], acc[8:11] // src0_h*src1_l, left value = acc[8+0:11+0]
+/*  mfmaIndex:68  */
+s_add_u32 m0, m0, 4224                             // Move LDS write address to next line
+buffer_load_dwordx4 v[vgprGlobalReadOffsetB+2], s[sgprSrdB:sgprSrdB+3], 0 offen offset:0 lds // G -> Reg 0_0_2_0
+/* pack scheduling: packAIdx:0, packBIdx:0 */
+v_mov_b64 v[202:203], v[vgprValuB_X1_I0+32:vgprValuB_X1_I0+32+1]
+v_mov_b64 v[204:205], v[vgprValuB_X1_I0+34:vgprValuB_X1_I0+34+1]
+v_cvt_pk_bf16_f32 v[vgprValuB_X1_I0+32], v[vgprValuB_X1_I0+32], v[vgprValuB_X1_I0+33]
+v_cvt_pk_bf16_f32 v[vgprValuB_X1_I0+33], v[vgprValuB_X1_I0+34], v[vgprValuB_X1_I0+35]
+v_cvt_pk_bf16_f32 v[vgprValuB_X1_I0+34], v[vgprValuB_X1_I0+36], v[vgprValuB_X1_I0+37]
+v_cvt_pk_bf16_f32 v[vgprValuB_X1_I0+35], v[vgprValuB_X1_I0+38], v[vgprValuB_X1_I0+39]
+v_mfma_f32_4x4x4_16b_bf16 v[202:205], v[166:167], v[vgprValuB_X1_I0+32:vgprValuB_X1_I0+32+1], v[202:205] // Calculate low bits for TF32 emulation
+v_mfma_f32_4x4x4_16b_bf16 v[vgprValuB_X1_I0+36:vgprValuB_X1_I0+36+3], v[166:167], v[vgprValuB_X1_I0+34:vgprValuB_X1_I0+34+1], v[vgprValuB_X1_I0+36:vgprValuB_X1_I0+36+3] // Calculate low bits for TF32 emulation__TF32_1_B_4: 
+s_nop 4                                            // nop for x32f emulation
+v_mfma_f32_16x16x32_bf16 acc[8:11], v[vgprValuB_X1_I0+0+4:vgprValuB_X1_I0+0+4+3], v[vgprValuA_X1_I0+16:vgprValuA_X1_I0+16+3], acc[8:11] // src0_l*src1_h, left value = acc[8+0:11+0]
+/*  mfmaIndex:69  */
+/* pack scheduling: packAIdx:0, packBIdx:0 */
+v_cvt_pk_bf16_f32 v[vgprValuB_X1_I0+39], v[vgprValuB_X1_I0+38], v[vgprValuB_X1_I0+39] // pack final begin
+v_cvt_pk_bf16_f32 v[vgprValuB_X1_I0+38], v[vgprValuB_X1_I0+36], v[vgprValuB_X1_I0+37]
+v_cvt_pk_bf16_f32 v[vgprValuB_X1_I0+37], v204, v205
+v_cvt_pk_bf16_f32 v[vgprValuB_X1_I0+36], v202, v203 // __TF32_2_B_4 pack final end
+s_nop 0                                            // VALU packing writes to be consumed by matrix instruction (HACK)
+v_mfma_f32_16x16x32_bf16 acc[12:15], v[vgprValuB_X1_I0+0:vgprValuB_X1_I0+0+3], v[vgprValuA_X1_I0+24:vgprValuA_X1_I0+24+3], acc[12:15] // src0_h*src1_h, left value = acc[12+0:15+0]
+/*  mfmaIndex:70  */
+v_mfma_f32_16x16x32_bf16 acc[12:15], v[vgprValuB_X1_I0+0:vgprValuB_X1_I0+0+3], v[vgprValuA_X1_I0+24+4:vgprValuA_X1_I0+24+4+3], acc[12:15] // src0_h*src1_l, left value = acc[12+0:15+0]
+/*  mfmaIndex:71  */
+v_mfma_f32_16x16x32_bf16 acc[12:15], v[vgprValuB_X1_I0+0+4:vgprValuB_X1_I0+0+4+3], v[vgprValuA_X1_I0+24:vgprValuA_X1_I0+24+3], acc[12:15] // src0_l*src1_h, left value = acc[12+0:15+0]
+/*  mfmaIndex:72  */
+s_add_u32 m0, m0, 4224                             // Move LDS write address to next line
+buffer_load_dwordx4 v[vgprGlobalReadOffsetB+3], s[sgprSrdB:sgprSrdB+3], 0 offen offset:0 lds // G -> Reg 0_0_3_0
+v_mfma_f32_16x16x32_bf16 acc[16:19], v[vgprValuB_X1_I0+8:vgprValuB_X1_I0+8+3], v[vgprValuA_X1_I0+0:vgprValuA_X1_I0+0+3], acc[16:19] // src0_h*src1_h, left value = acc[16+0:19+0]
+/*  mfmaIndex:73  */
+v_mfma_f32_16x16x32_bf16 acc[16:19], v[vgprValuB_X1_I0+8:vgprValuB_X1_I0+8+3], v[vgprValuA_X1_I0+0+4:vgprValuA_X1_I0+0+4+3], acc[16:19] // src0_h*src1_l, left value = acc[16+0:19+0]
+/*  mfmaIndex:74  */
+v_mfma_f32_16x16x32_bf16 acc[16:19], v[vgprValuB_X1_I0+8+4:vgprValuB_X1_I0+8+4+3], v[vgprValuA_X1_I0+0:vgprValuA_X1_I0+0+3], acc[16:19] // src0_l*src1_h, left value = acc[16+0:19+0]
+/*  mfmaIndex:75  */
+v_mfma_f32_16x16x32_bf16 acc[20:23], v[vgprValuB_X1_I0+8:vgprValuB_X1_I0+8+3], v[vgprValuA_X1_I0+8:vgprValuA_X1_I0+8+3], acc[20:23] // src0_h*src1_h, left value = acc[20+0:23+0]
+/*  mfmaIndex:76  */
+v_mfma_f32_16x16x32_bf16 acc[20:23], v[vgprValuB_X1_I0+8:vgprValuB_X1_I0+8+3], v[vgprValuA_X1_I0+8+4:vgprValuA_X1_I0+8+4+3], acc[20:23] // src0_h*src1_l, left value = acc[20+0:23+0]
+/*  mfmaIndex:77  */
+s_add_u32 m0, m0, 4224                             // Move LDS write address to next line
+buffer_load_dwordx4 v[vgprGlobalReadOffsetB+4], s[sgprSrdB:sgprSrdB+3], 0 offen offset:0 lds // G -> Reg 0_0_4_0
+v_mfma_f32_16x16x32_bf16 acc[20:23], v[vgprValuB_X1_I0+8+4:vgprValuB_X1_I0+8+4+3], v[vgprValuA_X1_I0+8:vgprValuA_X1_I0+8+3], acc[20:23] // src0_l*src1_h, left value = acc[20+0:23+0]
+/*  mfmaIndex:78  */
+v_mfma_f32_16x16x32_bf16 acc[24:27], v[vgprValuB_X1_I0+8:vgprValuB_X1_I0+8+3], v[vgprValuA_X1_I0+16:vgprValuA_X1_I0+16+3], acc[24:27] // src0_h*src1_h, left value = acc[24+0:27+0]
+/*  mfmaIndex:79  */
+v_mfma_f32_16x16x32_bf16 acc[24:27], v[vgprValuB_X1_I0+8:vgprValuB_X1_I0+8+3], v[vgprValuA_X1_I0+16+4:vgprValuA_X1_I0+16+4+3], acc[24:27] // src0_h*src1_l, left value = acc[24+0:27+0]
+/*  mfmaIndex:80  */
+v_mfma_f32_16x16x32_bf16 acc[24:27], v[vgprValuB_X1_I0+8+4:vgprValuB_X1_I0+8+4+3], v[vgprValuA_X1_I0+16:vgprValuA_X1_I0+16+3], acc[24:27] // src0_l*src1_h, left value = acc[24+0:27+0]
+/*  mfmaIndex:81  */
+s_add_u32 m0, m0, 4224                             // Move LDS write address to next line
+buffer_load_dwordx4 v[vgprGlobalReadOffsetB+5], s[sgprSrdB:sgprSrdB+3], 0 offen offset:0 lds // G -> Reg 0_0_5_0
+v_mfma_f32_16x16x32_bf16 acc[28:31], v[vgprValuB_X1_I0+8:vgprValuB_X1_I0+8+3], v[vgprValuA_X1_I0+24:vgprValuA_X1_I0+24+3], acc[28:31] // src0_h*src1_h, left value = acc[28+0:31+0]
+/*  mfmaIndex:82  */
+v_mfma_f32_16x16x32_bf16 acc[28:31], v[vgprValuB_X1_I0+8:vgprValuB_X1_I0+8+3], v[vgprValuA_X1_I0+24+4:vgprValuA_X1_I0+24+4+3], acc[28:31] // src0_h*src1_l, left value = acc[28+0:31+0]
+/*  mfmaIndex:83  */
+v_mfma_f32_16x16x32_bf16 acc[28:31], v[vgprValuB_X1_I0+8+4:vgprValuB_X1_I0+8+4+3], v[vgprValuA_X1_I0+24:vgprValuA_X1_I0+24+3], acc[28:31] // src0_l*src1_h, left value = acc[28+0:31+0]
+/*  mfmaIndex:84  */
+v_mfma_f32_16x16x32_bf16 acc[32:35], v[vgprValuB_X1_I0+16:vgprValuB_X1_I0+16+3], v[vgprValuA_X1_I0+0:vgprValuA_X1_I0+0+3], acc[32:35] // src0_h*src1_h, left value = acc[32+0:35+0]
+/*  mfmaIndex:85  */
+s_add_u32 m0, m0, 4224                             // Move LDS write address to next line
+buffer_load_dwordx4 v[vgprGlobalReadOffsetB+6], s[sgprSrdB:sgprSrdB+3], 0 offen offset:0 lds // G -> Reg 0_0_6_0
+v_mfma_f32_16x16x32_bf16 acc[32:35], v[vgprValuB_X1_I0+16:vgprValuB_X1_I0+16+3], v[vgprValuA_X1_I0+0+4:vgprValuA_X1_I0+0+4+3], acc[32:35] // src0_h*src1_l, left value = acc[32+0:35+0]
+/*  mfmaIndex:86  */
+v_mfma_f32_16x16x32_bf16 acc[32:35], v[vgprValuB_X1_I0+16+4:vgprValuB_X1_I0+16+4+3], v[vgprValuA_X1_I0+0:vgprValuA_X1_I0+0+3], acc[32:35] // src0_l*src1_h, left value = acc[32+0:35+0]
+/*  mfmaIndex:87  */
+v_mfma_f32_16x16x32_bf16 acc[36:39], v[vgprValuB_X1_I0+16:vgprValuB_X1_I0+16+3], v[vgprValuA_X1_I0+8:vgprValuA_X1_I0+8+3], acc[36:39] // src0_h*src1_h, left value = acc[36+0:39+0]
+/*  mfmaIndex:88  */
+v_mfma_f32_16x16x32_bf16 acc[36:39], v[vgprValuB_X1_I0+16:vgprValuB_X1_I0+16+3], v[vgprValuA_X1_I0+8+4:vgprValuA_X1_I0+8+4+3], acc[36:39] // src0_h*src1_l, left value = acc[36+0:39+0]
+/*  mfmaIndex:89  */
+s_add_u32 m0, m0, 4224                             // Move LDS write address to next line
+buffer_load_dwordx4 v[vgprGlobalReadOffsetB+7], s[sgprSrdB:sgprSrdB+3], 0 offen offset:0 lds // G -> Reg 0_0_7_0
+v_mfma_f32_16x16x32_bf16 acc[36:39], v[vgprValuB_X1_I0+16+4:vgprValuB_X1_I0+16+4+3], v[vgprValuA_X1_I0+8:vgprValuA_X1_I0+8+3], acc[36:39] // src0_l*src1_h, left value = acc[36+0:39+0]
+/*  mfmaIndex:90  */
+v_mfma_f32_16x16x32_bf16 acc[40:43], v[vgprValuB_X1_I0+16:vgprValuB_X1_I0+16+3], v[vgprValuA_X1_I0+16:vgprValuA_X1_I0+16+3], acc[40:43] // src0_h*src1_h, left value = acc[40+0:43+0]
+/*  mfmaIndex:91  */
+v_mfma_f32_16x16x32_bf16 acc[40:43], v[vgprValuB_X1_I0+16:vgprValuB_X1_I0+16+3], v[vgprValuA_X1_I0+16+4:vgprValuA_X1_I0+16+4+3], acc[40:43] // src0_h*src1_l, left value = acc[40+0:43+0]
+/*  mfmaIndex:92  */
+v_mfma_f32_16x16x32_bf16 acc[40:43], v[vgprValuB_X1_I0+16+4:vgprValuB_X1_I0+16+4+3], v[vgprValuA_X1_I0+16:vgprValuA_X1_I0+16+3], acc[40:43] // src0_l*src1_h, left value = acc[40+0:43+0]
+/*  mfmaIndex:93  */
+s_add_u32 m0, m0, 4224                             // Move LDS write address to next line
+buffer_load_dwordx4 v[vgprGlobalReadOffsetB+8], s[sgprSrdB:sgprSrdB+3], 0 offen offset:0 lds // G -> Reg 0_0_8_0
+v_mfma_f32_16x16x32_bf16 acc[44:47], v[vgprValuB_X1_I0+16:vgprValuB_X1_I0+16+3], v[vgprValuA_X1_I0+24:vgprValuA_X1_I0+24+3], acc[44:47] // src0_h*src1_h, left value = acc[44+0:47+0]
+/*  mfmaIndex:94  */
+v_mfma_f32_16x16x32_bf16 acc[44:47], v[vgprValuB_X1_I0+16:vgprValuB_X1_I0+16+3], v[vgprValuA_X1_I0+24+4:vgprValuA_X1_I0+24+4+3], acc[44:47] // src0_h*src1_l, left value = acc[44+0:47+0]
+/*  mfmaIndex:95  */
+v_mfma_f32_16x16x32_bf16 acc[44:47], v[vgprValuB_X1_I0+16+4:vgprValuB_X1_I0+16+4+3], v[vgprValuA_X1_I0+24:vgprValuA_X1_I0+24+3], acc[44:47] // src0_l*src1_h, left value = acc[44+0:47+0]
+/*  mfmaIndex:96  */
+v_mfma_f32_16x16x32_bf16 acc[48:51], v[vgprValuB_X1_I0+24:vgprValuB_X1_I0+24+3], v[vgprValuA_X1_I0+0:vgprValuA_X1_I0+0+3], acc[48:51] // src0_h*src1_h, left value = acc[48+0:51+0]
+/*  mfmaIndex:97  */
+s_add_u32 m0, m0, 4224                             // Move LDS write address to next line
+buffer_load_dwordx4 v[vgprGlobalReadOffsetB+9], s[sgprSrdB:sgprSrdB+3], 0 offen offset:0 lds // G -> Reg 0_0_9_0
+
+/* local write swap offsets a */
+s_xor_b32 s[sgprLocalWriteAddrA], s[sgprSwapA], s[sgprLocalWriteAddrA] // swap Red Blk SGPR
+
+/* local write swap offsets b */
+s_xor_b32 s[sgprLocalWriteAddrB], s[sgprSwapB], s[sgprLocalWriteAddrB] // swap Red Blk SGPR
+s_waitcnt vmcnt(18)                                // wait for previous set of global reads
+// Skip force waitcnt0
+s_barrier                                          // PGR, and wait until LW done to sync LDS1
+v_mfma_f32_16x16x32_bf16 acc[48:51], v[vgprValuB_X1_I0+24:vgprValuB_X1_I0+24+3], v[vgprValuA_X1_I0+0+4:vgprValuA_X1_I0+0+4+3], acc[48:51] // src0_h*src1_l, left value = acc[48+0:51+0]
+/*  mfmaIndex:98  */
+ds_read_b128 v[vgprValuA_T0_I0+0:vgprValuA_T0_I0+0+3], v[vgprLocalReadAddrA+0] offset:0 // L -> Reg lro=0 swapByteOffset=0 ti=128 vIdx=0 eIdx=0 rIdx=0 oIdx=0 buffer=0 iui=0 sync LDS1
+v_mfma_f32_16x16x32_bf16 acc[48:51], v[vgprValuB_X1_I0+24+4:vgprValuB_X1_I0+24+4+3], v[vgprValuA_X1_I0+0:vgprValuA_X1_I0+0+3], acc[48:51] // src0_l*src1_h, left value = acc[48+0:51+0]
+/*  mfmaIndex:99  */
+ds_read_b128 v[vgprValuA_X0_I0+4:vgprValuA_X0_I0+4+3], v[vgprLocalReadAddrA+0] offset:64 // L -> Reg lro=0 swapByteOffset=0 ti=128 vIdx=0 eIdx=0 rIdx=1 oIdx=0 buffer=0 iui=0 sync LDS1
+v_mfma_f32_16x16x32_bf16 acc[52:55], v[vgprValuB_X1_I0+24:vgprValuB_X1_I0+24+3], v[vgprValuA_X1_I0+8:vgprValuA_X1_I0+8+3], acc[52:55] // src0_h*src1_h, left value = acc[52+0:55+0]
+/*  mfmaIndex:100  */
+ds_read_b128 v[vgprValuB_X0_I0+0:vgprValuB_X0_I0+0+3], v[vgprLocalReadAddrB+0] offset:0 // L -> Reg lro=0 swapByteOffset=0 ti=32 vIdx=0 eIdx=0 rIdx=0 oIdx=0 buffer=0 iui=0 sync LDS1
+v_mfma_f32_16x16x32_bf16 acc[52:55], v[vgprValuB_X1_I0+24:vgprValuB_X1_I0+24+3], v[vgprValuA_X1_I0+8+4:vgprValuA_X1_I0+8+4+3], acc[52:55] // src0_h*src1_l, left value = acc[52+0:55+0]
+/*  mfmaIndex:101  */
+ds_read_b128 v[vgprValuB_X0_I0+4:vgprValuB_X0_I0+4+3], v[vgprLocalReadAddrB+0] offset:64 // L -> Reg lro=0 swapByteOffset=0 ti=32 vIdx=0 eIdx=0 rIdx=1 oIdx=0 buffer=0 iui=0 sync LDS1
+v_mfma_f32_16x16x32_bf16 acc[52:55], v[vgprValuB_X1_I0+24+4:vgprValuB_X1_I0+24+4+3], v[vgprValuA_X1_I0+8:vgprValuA_X1_I0+8+3], acc[52:55] // src0_l*src1_h, left value = acc[52+0:55+0]
+/*  mfmaIndex:102  */
+ds_read_b128 v[vgprValuA_T0_I0+4:vgprValuA_T0_I0+4+3], v[vgprLocalReadAddrA+0] offset:256 // L -> Reg lro=0 swapByteOffset=0 ti=128 vIdx=0 eIdx=1 rIdx=0 oIdx=0 buffer=0 iui=0 sync LDS1
+v_mfma_f32_16x16x32_bf16 acc[56:59], v[vgprValuB_X1_I0+24:vgprValuB_X1_I0+24+3], v[vgprValuA_X1_I0+16:vgprValuA_X1_I0+16+3], acc[56:59] // src0_h*src1_h, left value = acc[56+0:59+0]
+/*  mfmaIndex:103  */
+ds_read_b128 v[vgprValuA_X0_I0+12:vgprValuA_X0_I0+12+3], v[vgprLocalReadAddrA+0] offset:320 // L -> Reg lro=0 swapByteOffset=0 ti=128 vIdx=0 eIdx=1 rIdx=1 oIdx=0 buffer=0 iui=0 sync LDS1
+v_mfma_f32_16x16x32_bf16 acc[56:59], v[vgprValuB_X1_I0+24:vgprValuB_X1_I0+24+3], v[vgprValuA_X1_I0+16+4:vgprValuA_X1_I0+16+4+3], acc[56:59] // src0_h*src1_l, left value = acc[56+0:59+0]
+/*  mfmaIndex:104  */
+ds_read_b128 v[vgprValuA_T0_I0+8:vgprValuA_T0_I0+8+3], v[vgprLocalReadAddrA+0] offset:512 // L -> Reg lro=0 swapByteOffset=0 ti=128 vIdx=0 eIdx=2 rIdx=0 oIdx=0 buffer=0 iui=0 sync LDS1
+v_mfma_f32_16x16x32_bf16 acc[56:59], v[vgprValuB_X1_I0+24+4:vgprValuB_X1_I0+24+4+3], v[vgprValuA_X1_I0+16:vgprValuA_X1_I0+16+3], acc[56:59] // src0_l*src1_h, left value = acc[56+0:59+0]
+/*  mfmaIndex:105  */
+ds_read_b128 v[vgprValuA_X0_I0+20:vgprValuA_X0_I0+20+3], v[vgprLocalReadAddrA+0] offset:576 // L -> Reg lro=0 swapByteOffset=0 ti=128 vIdx=0 eIdx=2 rIdx=1 oIdx=0 buffer=0 iui=0 sync LDS1
+v_mfma_f32_16x16x32_bf16 acc[60:63], v[vgprValuB_X1_I0+24:vgprValuB_X1_I0+24+3], v[vgprValuA_X1_I0+24:vgprValuA_X1_I0+24+3], acc[60:63] // src0_h*src1_h, left value = acc[60+0:63+0]
+/*  mfmaIndex:106  */
+ds_read_b128 v[vgprValuA_T0_I0+12:vgprValuA_T0_I0+12+3], v[vgprLocalReadAddrA+0] offset:768 // L -> Reg lro=0 swapByteOffset=0 ti=128 vIdx=0 eIdx=3 rIdx=0 oIdx=0 buffer=0 iui=0 sync LDS1
+v_mfma_f32_16x16x32_bf16 acc[60:63], v[vgprValuB_X1_I0+24:vgprValuB_X1_I0+24+3], v[vgprValuA_X1_I0+24+4:vgprValuA_X1_I0+24+4+3], acc[60:63] // src0_h*src1_l, left value = acc[60+0:63+0]
+/*  mfmaIndex:107  */
+ds_read_b128 v[vgprValuA_X0_I0+28:vgprValuA_X0_I0+28+3], v[vgprLocalReadAddrA+0] offset:832 // L -> Reg lro=0 swapByteOffset=0 ti=128 vIdx=0 eIdx=3 rIdx=1 oIdx=0 buffer=0 iui=0 sync LDS1
+v_mfma_f32_16x16x32_bf16 acc[60:63], v[vgprValuB_X1_I0+24+4:vgprValuB_X1_I0+24+4+3], v[vgprValuA_X1_I0+24:vgprValuA_X1_I0+24+3], acc[60:63] // src0_l*src1_h, left value = acc[60+0:63+0]
+/*  mfmaIndex:108  */
+ds_read_b128 v[vgprValuB_X0_I0+8:vgprValuB_X0_I0+8+3], v[vgprLocalReadAddrB+0] offset:8448 // L -> Reg lro=0 swapByteOffset=0 ti=32 vIdx=1 eIdx=0 rIdx=0 oIdx=0 buffer=0 iui=0 sync LDS1
+v_mfma_f32_16x16x32_bf16 acc[64:67], v[vgprValuB_X1_I0+32:vgprValuB_X1_I0+32+3], v[vgprValuA_X1_I0+0:vgprValuA_X1_I0+0+3], acc[64:67] // src0_h*src1_h, left value = acc[64+0:67+0]
+/*  mfmaIndex:109  */
+ds_read_b128 v[vgprValuB_X0_I0+12:vgprValuB_X0_I0+12+3], v[vgprLocalReadAddrB+0] offset:8512 // L -> Reg lro=0 swapByteOffset=0 ti=32 vIdx=1 eIdx=0 rIdx=1 oIdx=0 buffer=0 iui=0 sync LDS1
+v_mfma_f32_16x16x32_bf16 acc[64:67], v[vgprValuB_X1_I0+32:vgprValuB_X1_I0+32+3], v[vgprValuA_X1_I0+0+4:vgprValuA_X1_I0+0+4+3], acc[64:67] // src0_h*src1_l, left value = acc[64+0:67+0]
+/*  mfmaIndex:110  */
+ds_read_b128 v[vgprValuB_X0_I0+16:vgprValuB_X0_I0+16+3], v[vgprLocalReadAddrB+0] offset:16896 // L -> Reg lro=0 swapByteOffset=0 ti=32 vIdx=2 eIdx=0 rIdx=0 oIdx=0 buffer=0 iui=0 sync LDS1
+v_mfma_f32_16x16x32_bf16 acc[64:67], v[vgprValuB_X1_I0+32+4:vgprValuB_X1_I0+32+4+3], v[vgprValuA_X1_I0+0:vgprValuA_X1_I0+0+3], acc[64:67] // src0_l*src1_h, left value = acc[64+0:67+0]
+/*  mfmaIndex:111  */
+ds_read_b128 v[vgprValuB_X0_I0+20:vgprValuB_X0_I0+20+3], v[vgprLocalReadAddrB+0] offset:16960 // L -> Reg lro=0 swapByteOffset=0 ti=32 vIdx=2 eIdx=0 rIdx=1 oIdx=0 buffer=0 iui=0 sync LDS1
+v_mfma_f32_16x16x32_bf16 acc[68:71], v[vgprValuB_X1_I0+32:vgprValuB_X1_I0+32+3], v[vgprValuA_X1_I0+8:vgprValuA_X1_I0+8+3], acc[68:71] // src0_h*src1_h, left value = acc[68+0:71+0]
+/*  mfmaIndex:112  */
+ds_read_b128 v[vgprValuB_X0_I0+24:vgprValuB_X0_I0+24+3], v[vgprLocalReadAddrB+0] offset:25344 // L -> Reg lro=0 swapByteOffset=0 ti=32 vIdx=3 eIdx=0 rIdx=0 oIdx=0 buffer=0 iui=0 sync LDS1
+v_mfma_f32_16x16x32_bf16 acc[68:71], v[vgprValuB_X1_I0+32:vgprValuB_X1_I0+32+3], v[vgprValuA_X1_I0+8+4:vgprValuA_X1_I0+8+4+3], acc[68:71] // src0_h*src1_l, left value = acc[68+0:71+0]
+/*  mfmaIndex:113  */
+ds_read_b128 v[vgprValuB_X0_I0+28:vgprValuB_X0_I0+28+3], v[vgprLocalReadAddrB+0] offset:25408 // L -> Reg lro=0 swapByteOffset=0 ti=32 vIdx=3 eIdx=0 rIdx=1 oIdx=0 buffer=0 iui=0 sync LDS1
+v_mfma_f32_16x16x32_bf16 acc[68:71], v[vgprValuB_X1_I0+32+4:vgprValuB_X1_I0+32+4+3], v[vgprValuA_X1_I0+8:vgprValuA_X1_I0+8+3], acc[68:71] // src0_l*src1_h, left value = acc[68+0:71+0]
+/*  mfmaIndex:114  */
+ds_read_b128 v[vgprValuB_X0_I0+32:vgprValuB_X0_I0+32+3], v[vgprLocalReadAddrB+0] offset:33792 // L -> Reg lro=0 swapByteOffset=0 ti=32 vIdx=4 eIdx=0 rIdx=0 oIdx=0 buffer=0 iui=0 sync LDS1
+v_mfma_f32_16x16x32_bf16 acc[72:75], v[vgprValuB_X1_I0+32:vgprValuB_X1_I0+32+3], v[vgprValuA_X1_I0+16:vgprValuA_X1_I0+16+3], acc[72:75] // src0_h*src1_h, left value = acc[72+0:75+0]
+/*  mfmaIndex:115  */
+ds_read_b128 v[vgprValuB_X0_I0+36:vgprValuB_X0_I0+36+3], v[vgprLocalReadAddrB+0] offset:33856 // L -> Reg lro=0 swapByteOffset=0 ti=32 vIdx=4 eIdx=0 rIdx=1 oIdx=0 buffer=0 iui=0 sync LDS1
+v_mfma_f32_16x16x32_bf16 acc[72:75], v[vgprValuB_X1_I0+32:vgprValuB_X1_I0+32+3], v[vgprValuA_X1_I0+16+4:vgprValuA_X1_I0+16+4+3], acc[72:75] // src0_h*src1_l, left value = acc[72+0:75+0]
+/*  mfmaIndex:116  */
+v_mfma_f32_16x16x32_bf16 acc[72:75], v[vgprValuB_X1_I0+32+4:vgprValuB_X1_I0+32+4+3], v[vgprValuA_X1_I0+16:vgprValuA_X1_I0+16+3], acc[72:75] // src0_l*src1_h, left value = acc[72+0:75+0]
+/*  mfmaIndex:117  */
+v_mfma_f32_16x16x32_bf16 acc[76:79], v[vgprValuB_X1_I0+32:vgprValuB_X1_I0+32+3], v[vgprValuA_X1_I0+24:vgprValuA_X1_I0+24+3], acc[76:79] // src0_h*src1_h, left value = acc[76+0:79+0]
+/*  mfmaIndex:118  */
+v_mfma_f32_16x16x32_bf16 acc[76:79], v[vgprValuB_X1_I0+32:vgprValuB_X1_I0+32+3], v[vgprValuA_X1_I0+24+4:vgprValuA_X1_I0+24+4+3], acc[76:79] // src0_h*src1_l, left value = acc[76+0:79+0]
+/*  mfmaIndex:119  */
+v_mfma_f32_16x16x32_bf16 acc[76:79], v[vgprValuB_X1_I0+32+4:vgprValuB_X1_I0+32+4+3], v[vgprValuA_X1_I0+24:vgprValuA_X1_I0+24+3], acc[76:79] // src0_l*src1_h, left value = acc[76+0:79+0]
+
+/******************************************/
+/* Unrolled Loop - End                    */
+/******************************************/
+
+/* closeLoop loopL finalLoop=1 tailLoop=0 */
+s_sub_u32 s[sgprLoopCounterL], s[sgprLoopCounterL], 1 // dec counterL
+s_cmp_eq_i32 s[sgprLoopCounterL], 0x2              // counterL==2
+s_cbranch_scc0 label_LoopBeginL                    // restart LoopL

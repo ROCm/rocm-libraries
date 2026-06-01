@@ -1,0 +1,242 @@
+
+################################################################################
+#
+#  Tensile v5.0.0
+#  OutputPath: /tmp/6hk3_simpler_out
+#  Config: /home/alvasile/rocm-libraries/.claude/worktrees/agent-a6cf69172d8397f93/projects/hipblaslt/tensilelite/Tensile/Components/CustomSchedule/gfx950/test_yamls/6hk3_tf32_128x160x64_tn.yaml
+#  Date & Time: 28/05/2026 05:13:55
+#
+################################################################################
+
+# Restoring default globalParameters
+# Code Object Version: 4
+Tensile::WARNING: HardwareMonitor currently disabled for gfx950 and gfx1250
+Capability           gfx950
+HasMFMA_bf16_1k      1     
+HasAddLshl           1     
+HasAtomicAdd         1     
+HasBF16CVT           1     
+HasCvtFP8toF16       -     
+HasDLCModifier       -     
+HasDirectToLds       1     
+HasDirectToLdsx4     1     
+HasExplicitCO        1     
+HasExplicitNC        -     
+HasGLCModifier       -     
+HasGLTr16B128        -     
+HasGLTr8B64          -     
+HasLDSTr             1     
+HasLDSTrB128B16      -     
+HasLDSTrB64B16       1     
+HasLDSTrB64B4        -     
+HasLDSTrB64B8        -     
+HasLDSTrB96B6        -     
+HasLshlOr            1     
+HasMFMA              1     
+HasMUBUFConst        1     
+HasNTModifier        1     
+HasNewBarrier        -     
+HasPartialOOB        1     
+HasPkF16CVT          1     
+HasSC0Modifier       1     
+HasSCMPK             1     
+HasSCOPEModifier     -     
+HasSMFMA             1     
+HasSMulHi            1     
+HasSWMMAC            -     
+HasScalarStore       1     
+HasTDM               -     
+HasVgprMSB           -     
+HasVgprMSB16         -     
+HasWMMA              -     
+MaxLgkmcnt           1     
+MaxVmcnt             1     
+SeparateLGKMcnt      -     
+SeparateVMcnt        -     
+SeparateVscnt        -     
+ShortBranchMaxLength 1     
+SupportedISA         1     
+SupportedSource      1     
+HasWMMA_V1           -     
+HasWMMA_V2           -     
+HasWMMA_V3           -     
+s_delay_alu          -     
+v_prng_b32           1     
+v_mov_b64            1     
+HasMFMA_b8           1     
+v_dot2_f32_bf16      1     
+v_dot2c_f32_bf16     1     
+HasMFMA_explictB     1     
+Hascvtfp8_f16        1     
+v_dot2_f32_f16       1     
+v_dot2c_f32_f16      1     
+v_fma_f16            1     
+v_fmac_f16           -     
+v_mac_f16            1     
+v_pk_fma_f16         1     
+v_pk_fmac_f16        -     
+v_fma_f32            1     
+v_fma_mix_f32        1     
+v_fmac_f32           1     
+v_mac_f32            -     
+v_mad_mix_f32        -     
+v_pk_add_f32         1     
+v_pk_mul_f32         1     
+HasMFMA_f64          1     
+HasWMMA_V3_f64       -     
+v_fma_f64            1     
+HasMFMA_f8           1     
+HasMFMA_f8f6f4       1     
+HasWMMA_f8f6f4       -     
+HasSWMMAC_gfx1250    -     
+HasAdd_PC_i64        -     
+VOP3v_dot4_i32_i8    1     
+v_dot4_i32_i8        -     
+v_dot4c_i32_i8       1     
+Hascvtf16_fp8_sf32   1     
+s_sub_u64            -     
+HasMFMA_xf32         -     
+ArchAccUnifiedRegs   1     
+CMPXWritesSGPR       1     
+CrosslaneWait        1     
+DSLow16NotPreserve   -     
+DeviceLDS            1     
+HasAccCD             1     
+HasEccHalf           1     
+HasF32XEmulation     1     
+HasFP8_OCP           -     
+HasSchedMode         -     
+HasWave32            -     
+HasWmmaArbStallBit   -     
+NoSDWA               -     
+SDWAWait             1     
+TransOpWait          1     
+VOP3ByteSel          -     
+VgprBank             -     
+Waitcnt0Disabled     1     
+WorkGroupIdFromTTM   -     
+vL1DCacheLineBytes   1     
+# Found hipcc version 7.2.53211-e1a6bc5663
+Tensile::WARNING: Global parameter NewClient = 2 unrecognised.
+Tensile::WARNING: Global parameter PrintSolutionRejectionReason = True unrecognised.
+# Command-line override: CodeObjectVersion
+Overriding CodeObjectVersion=4
+Overriding PrebuiltClient=/home/alvasile/rocm-libraries/.claude/worktrees/agent-a6cf69172d8397f93/projects/hipblaslt/tensilelite/build_tmp/tensilelite/client/tensilelite-client
+
+################################################################################
+# Converting Config to BenchmarkProcess Object
+################################################################################
+
+# Filling in Parameters With Defaults
+# Convert Parameters to Benchmark Step(s)
+# Benchmark Final
+# NumBenchmarkSteps: 1
+
+################################################################################
+# Done Creating BenchmarkProcess Object
+################################################################################
+
+
+################################################################################
+# Benchmark Step: Cijk_Alik_Bljk_S_MX_B_UserArgs_00 - 00_Final 4.019s
+# Num Sizes: 72
+# Factor Dim steps: 0
+# Bias Type steps: 0
+# Activation steps: 0
+# ICacheFlush steps: 1
+# Fork Parameters:
+#     UseCustomMainLoopSchedule: [0, 1]
+# Enumerating Solutions (Parallel)
+fork solutions: Launching 96 threads...
+fork solutions: Done. (0.8 secs elapsed)
+[||||||||||||||||||||||||||||||||||||                                     ]  50%[|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||] 100% (0.0 secs elapsed)
+# Actual Solutions: 2 / 2 after SolutionStructs
+
+[||||||||||||||||||||||||||||||||||||                                     ]  50%[|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||] 100% (0.0 secs elapsed)
+Number of duplicate kernels: 0
+Generating assembly kernels: Launching 96 threads...
+joblib.externals.loky.process_executor._RemoteTraceback: 
+"""
+Traceback (most recent call last):
+  File "/home/alvasile/rocm-libraries/.claude/worktrees/agent-a6cf69172d8397f93/projects/hipblaslt/tensilelite/Tensile/Components/CMSValidator.py", line 1990, in build_dataflow_graph
+    node = _make_node(
+           ^^^^^^^^^^^
+  File "/home/alvasile/rocm-libraries/.claude/worktrees/agent-a6cf69172d8397f93/projects/hipblaslt/tensilelite/Tensile/Components/CMSValidator.py", line 1766, in _make_node
+    raise CaptureUnknownInstructionError(
+Tensile.Components.ScheduleCapture.CaptureUnknownInstructionError: _make_node: cannot classify instruction 'VMovB64' (category='UNKNOWN') in body 'ML-1'.
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/alvasile/venv/lib/python3.11/site-packages/joblib/externals/loky/process_executor.py", line 490, in _process_worker
+    r = call_item()
+        ^^^^^^^^^^^
+  File "/home/alvasile/venv/lib/python3.11/site-packages/joblib/externals/loky/process_executor.py", line 291, in __call__
+    return self.fn(*self.args, **self.kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alvasile/venv/lib/python3.11/site-packages/joblib/parallel.py", line 607, in __call__
+    return [func(*args, **kwargs) for func, args, kwargs in self.items]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alvasile/venv/lib/python3.11/site-packages/joblib/parallel.py", line 607, in <listcomp>
+    return [func(*args, **kwargs) for func, args, kwargs in self.items]
+            ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alvasile/rocm-libraries/.claude/worktrees/agent-a6cf69172d8397f93/projects/hipblaslt/tensilelite/Tensile/Common/Parallel.py", line 66, in pcallWithGlobalParamsMultiArg
+    return f(*args)
+           ^^^^^^^^
+  File "/home/alvasile/rocm-libraries/.claude/worktrees/agent-a6cf69172d8397f93/projects/hipblaslt/tensilelite/Tensile/TensileCreateLibrary/Run.py", line 130, in processKernelSource
+    err, src = kernelWriter.getSourceFileString(kernel)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alvasile/rocm-libraries/.claude/worktrees/agent-a6cf69172d8397f93/projects/hipblaslt/tensilelite/Tensile/KernelWriterAssembly.py", line 169, in getSourceFileString
+    code = self._getCustomKernelSource(kernel, CUSTOM_KERNEL_PATH) if isCustomKernelConfig(kernel) else self._getKernelSource(kernel)
+                                                                                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alvasile/rocm-libraries/.claude/worktrees/agent-a6cf69172d8397f93/projects/hipblaslt/tensilelite/Tensile/KernelWriter.py", line 9860, in _getKernelSource
+    (error, kb) = self.kernelBody(kernel, tensorParametersA, tensorParametersB)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alvasile/rocm-libraries/.claude/worktrees/agent-a6cf69172d8397f93/projects/hipblaslt/tensilelite/Tensile/KernelWriter.py", line 5839, in kernelBody
+    ref_graph = build_dataflow_graph(ctx.default)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alvasile/rocm-libraries/.claude/worktrees/agent-a6cf69172d8397f93/projects/hipblaslt/tensilelite/Tensile/Components/CMSValidator.py", line 1997, in build_dataflow_graph
+    raise CaptureUnknownInstructionError(
+Tensile.Components.ScheduleCapture.CaptureUnknownInstructionError: build_dataflow_graph: cannot classify instruction 'VMovB64' (category='UNKNOWN') in body 'ML-1'. The capture pipeline must assign a recognized category, or the instruction's class must be one of LR/LW/GR/MFMA/SWait/SBarrier. Inner: _make_node: cannot classify instruction 'VMovB64' (category='UNKNOWN') in body 'ML-1'.
+"""
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/alvasile/rocm-libraries/.claude/worktrees/agent-a6cf69172d8397f93/projects/hipblaslt/tensilelite/Tensile/bin/Tensile", line 39, in <module>
+    Tensile.main()
+  File "/home/alvasile/rocm-libraries/.claude/worktrees/agent-a6cf69172d8397f93/projects/hipblaslt/tensilelite/Tensile/Tensile.py", line 706, in main
+    Tensile(sys.argv[1:])
+  File "/home/alvasile/rocm-libraries/.claude/worktrees/agent-a6cf69172d8397f93/projects/hipblaslt/tensilelite/Tensile/Tensile.py", line 663, in Tensile
+    executeStepsInConfig(config, outputPath, asmToolchain, srcToolchain, isaInfoMap, cCompiler, debugConfig, device_id, prob_sol_map, buildOnly)
+  File "/home/alvasile/rocm-libraries/.claude/worktrees/agent-a6cf69172d8397f93/projects/hipblaslt/tensilelite/Tensile/Tensile.py", line 108, in executeStepsInConfig
+    BenchmarkProblems.main(
+  File "/home/alvasile/rocm-libraries/.claude/worktrees/agent-a6cf69172d8397f93/projects/hipblaslt/tensilelite/Tensile/BenchmarkProblems.py", line 602, in main
+    _benchmarkProblemType(
+  File "/home/alvasile/rocm-libraries/.claude/worktrees/agent-a6cf69172d8397f93/projects/hipblaslt/tensilelite/Tensile/BenchmarkProblems.py", line 473, in _benchmarkProblemType
+    codeObjectFiles = writeBenchmarkFiles(stepBaseDir, solutions, \
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alvasile/rocm-libraries/.claude/worktrees/agent-a6cf69172d8397f93/projects/hipblaslt/tensilelite/Tensile/BenchmarkProblems.py", line 263, in writeBenchmarkFiles
+    codeObjectFiles, _= writeSolutionsAndKernels( \
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alvasile/rocm-libraries/.claude/worktrees/agent-a6cf69172d8397f93/projects/hipblaslt/tensilelite/Tensile/TensileCreateLibrary/Run.py", line 381, in writeSolutionsAndKernels
+    asmResults = ParallelMap2(functools.partial(processKernelSource, compress=memcompress), asmIter, "Generating assembly kernels", return_as="list")
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alvasile/rocm-libraries/.claude/worktrees/agent-a6cf69172d8397f93/projects/hipblaslt/tensilelite/Tensile/Common/Parallel.py", line 240, in ParallelMap2
+    rv = Parallel(n_jobs=threadCount, timeout=99999, return_as=return_as)(
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alvasile/venv/lib/python3.11/site-packages/joblib/parallel.py", line 2072, in __call__
+    return output if self.return_generator else list(output)
+                                                ^^^^^^^^^^^^
+  File "/home/alvasile/venv/lib/python3.11/site-packages/joblib/parallel.py", line 1682, in _get_outputs
+    yield from self._retrieve()
+  File "/home/alvasile/venv/lib/python3.11/site-packages/joblib/parallel.py", line 1784, in _retrieve
+    self._raise_error_fast()
+  File "/home/alvasile/venv/lib/python3.11/site-packages/joblib/parallel.py", line 1859, in _raise_error_fast
+    error_job.get_result(self.timeout)
+  File "/home/alvasile/venv/lib/python3.11/site-packages/joblib/parallel.py", line 758, in get_result
+    return self._return_or_raise()
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/alvasile/venv/lib/python3.11/site-packages/joblib/parallel.py", line 773, in _return_or_raise
+    raise self._result
+Tensile.Components.ScheduleCapture.CaptureUnknownInstructionError: build_dataflow_graph: cannot classify instruction 'VMovB64' (category='UNKNOWN') in body 'ML-1'. The capture pipeline must assign a recognized category, or the instruction's class must be one of LR/LW/GR/MFMA/SWait/SBarrier. Inner: _make_node: cannot classify instruction 'VMovB64' (category='UNKNOWN') in body 'ML-1'.

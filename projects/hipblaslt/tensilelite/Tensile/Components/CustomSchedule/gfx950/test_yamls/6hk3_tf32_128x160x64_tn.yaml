@@ -1,0 +1,70 @@
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  SleepPercent: 0
+  NumElementsToValidate: 0
+  NumWarmups: 0
+  EnqueuesPerSync: 1
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  NewClient: 2
+  CSVExportWinner: 1
+  CSVMergeSameProblemID: 1
+  Device: 0
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  ########################################
+  # TF32 TN - 128x160x64 CMS vs non-CMS comparison
+  # rocm-libraries-6hk3: BPG#11 from custom_mainloop_scheduling_tf32.yaml,
+  # both UseCustomMainLoopSchedule variants
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: S
+      DestDataType: S
+      F32XdlMathOp: X
+      TransposeA: 1
+      TransposeB: 0
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup - Standard - All problem
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 4, 5,  2,2 ]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [64]
+        - ScheduleIterAlg: [3]
+        - TransposeLDS: [1]
+        - LocalReadVectorWidth: [4]
+        - GlobalReadVectorWidthA: [4]
+        - GlobalReadVectorWidthB: [4]
+        - DirectToLds: [1]
+        - StreamK: [3]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - StaggerU: [0]
+        - 1LDSBuffer: [0]
+        - NonTemporalA: [0]
+        - NonTemporalB: [0]
+        - NonTemporalD: [4]
+        - SourceSwap: [1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - UseSgprForGRO: [0]
+        - UseCustomMainLoopSchedule: [0, 1]
+        - UsePLRPack: [1]  # rocm-libraries-2bww (strict): TN
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[128], [160], [1], [64, 64, 256]]
+          - Range: [[128], [160], [1], [1,1,64]]
+          - Range: [[128], [160], [1], [32, 64, 256]]
+        - BiasTypeArgs: ['s']

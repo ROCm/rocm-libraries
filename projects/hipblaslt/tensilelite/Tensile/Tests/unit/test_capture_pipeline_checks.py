@@ -250,6 +250,72 @@ class TestIdMapCompleteness:
 
 
 # =============================================================================
+# optSchedule ↔ idMap consistency — pure function
+# =============================================================================
+# rocm-libraries-6hk3: port of develop's `verify_correct_number_of_instructions`.
+# Compares per-(category × codepath) optSchedule slot-row sizes to idMap
+# leaf counts via bare `len()`. Skips SYNC / SNOP. idMap entries are flat
+# Python lists by construction (removeComments output) — see the helper
+# docstring and dispatch.py:92-122.
+
+
+class _FakeScheduleInfo:
+    """Minimal stand-in for ScheduleInfo carrying only what the check reads."""
+
+    def __init__(self, optSchedule):
+        self.optSchedule = optSchedule
+
+
+class TestVerifyCorrectNumberOfInstructions:
+    def test_matching_counts_pass(self):
+        from Tensile.Components.CMSValidator import (
+            verify_correct_number_of_instructions,
+        )
+        sched = _FakeScheduleInfo({
+            "LRA0": [[0, 1, 2], [3, 4, 5]],
+            "LWA":  [[7]],
+        })
+        idmap = {
+            "LRA0": [object()] * 3,
+            "LWA":  [object()],
+        }
+        verify_correct_number_of_instructions(sched, idmap)  # no raise
+
+    def test_slot_count_mismatch_raises(self):
+        from Tensile.Components.CMSValidator import (
+            verify_correct_number_of_instructions, ValidationError,
+        )
+        sched = _FakeScheduleInfo({
+            "LRA0": [[0, 1, 2], [3, 4]],  # cp1 short by one
+        })
+        idmap = {"LRA0": [object()] * 3}
+        with pytest.raises(ValidationError) as exc:
+            verify_correct_number_of_instructions(sched, idmap)
+        msg = str(exc.value)
+        assert "LRA0" in msg
+        assert "codepath 1" in msg
+        assert "optSchedule has 2" in msg
+        assert "idMap has 3" in msg
+
+    def test_sync_and_snop_skipped(self):
+        from Tensile.Components.CMSValidator import (
+            verify_correct_number_of_instructions,
+        )
+        # Intentional count divergence on SYNC/SNOP — must not raise.
+        sched = _FakeScheduleInfo({
+            "SYNC": [[0, 1, 2, 3, 4]],
+            "SNOP": [[0]],
+            "LRA0": [[7, 8]],
+        })
+        idmap = {
+            "SYNC": [object()] * 2,   # 2 vs 5 — ignored
+            "SNOP": [],               # 0 vs 1 — ignored
+            "LRA0": [object()] * 2,   # match
+        }
+        verify_correct_number_of_instructions(sched, idmap)
+
+
+# =============================================================================
 # rocm-libraries-vybd (F3) — capture-pipeline body invariants
 # =============================================================================
 # After F3 deletes the default-side leftover pack[*] / packPre[*] walk in

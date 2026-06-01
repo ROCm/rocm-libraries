@@ -1,0 +1,196 @@
+
+################################################################################
+#
+#  Tensile v5.0.0
+#  OutputPath: /tmp/6hk3_out
+#  Config: /home/alvasile/rocm-libraries/.claude/worktrees/agent-a6cf69172d8397f93/projects/hipblaslt/tensilelite/Tensile/Components/CustomSchedule/gfx950/test_yamls/6hk3_tf32_128x160x64_tn.yaml
+#  Date & Time: 27/05/2026 13:36:10
+#
+################################################################################
+
+# Restoring default globalParameters
+# Code Object Version: 4
+Tensile::WARNING: HardwareMonitor currently disabled for gfx950 and gfx1250
+Capability           gfx950
+HasMFMA_bf16_1k      1     
+HasAddLshl           1     
+HasAtomicAdd         1     
+HasBF16CVT           1     
+HasCvtFP8toF16       -     
+HasDLCModifier       -     
+HasDirectToLds       1     
+HasDirectToLdsx4     1     
+HasExplicitCO        1     
+HasExplicitNC        -     
+HasGLCModifier       -     
+HasGLTr16B128        -     
+HasGLTr8B64          -     
+HasLDSTr             1     
+HasLDSTrB128B16      -     
+HasLDSTrB64B16       1     
+HasLDSTrB64B4        -     
+HasLDSTrB64B8        -     
+HasLDSTrB96B6        -     
+HasLshlOr            1     
+HasMFMA              1     
+HasMUBUFConst        1     
+HasNTModifier        1     
+HasNewBarrier        -     
+HasPartialOOB        1     
+HasPkF16CVT          1     
+HasSC0Modifier       1     
+HasSCMPK             1     
+HasSCOPEModifier     -     
+HasSMFMA             1     
+HasSMulHi            1     
+HasSWMMAC            -     
+HasScalarStore       1     
+HasTDM               -     
+HasVgprMSB           -     
+HasVgprMSB16         -     
+HasWMMA              -     
+MaxLgkmcnt           1     
+MaxVmcnt             1     
+SeparateLGKMcnt      -     
+SeparateVMcnt        -     
+SeparateVscnt        -     
+ShortBranchMaxLength 1     
+SupportedISA         1     
+SupportedSource      1     
+HasWMMA_V1           -     
+HasWMMA_V2           -     
+HasWMMA_V3           -     
+s_delay_alu          -     
+v_prng_b32           1     
+v_mov_b64            1     
+HasMFMA_b8           1     
+v_dot2_f32_bf16      1     
+v_dot2c_f32_bf16     1     
+HasMFMA_explictB     1     
+Hascvtfp8_f16        1     
+v_dot2_f32_f16       1     
+v_dot2c_f32_f16      1     
+v_fma_f16            1     
+v_fmac_f16           -     
+v_mac_f16            1     
+v_pk_fma_f16         1     
+v_pk_fmac_f16        -     
+v_fma_f32            1     
+v_fma_mix_f32        1     
+v_fmac_f32           1     
+v_mac_f32            -     
+v_mad_mix_f32        -     
+v_pk_add_f32         1     
+v_pk_mul_f32         1     
+HasMFMA_f64          1     
+HasWMMA_V3_f64       -     
+v_fma_f64            1     
+HasMFMA_f8           1     
+HasMFMA_f8f6f4       1     
+HasWMMA_f8f6f4       -     
+HasSWMMAC_gfx1250    -     
+HasAdd_PC_i64        -     
+VOP3v_dot4_i32_i8    1     
+v_dot4_i32_i8        -     
+v_dot4c_i32_i8       1     
+Hascvtf16_fp8_sf32   1     
+s_sub_u64            -     
+HasMFMA_xf32         -     
+ArchAccUnifiedRegs   1     
+CMPXWritesSGPR       1     
+CrosslaneWait        1     
+DSLow16NotPreserve   -     
+DeviceLDS            1     
+HasAccCD             1     
+HasEccHalf           1     
+HasF32XEmulation     1     
+HasFP8_OCP           -     
+HasSchedMode         -     
+HasWave32            -     
+HasWmmaArbStallBit   -     
+NoSDWA               -     
+SDWAWait             1     
+TransOpWait          1     
+VOP3ByteSel          -     
+VgprBank             -     
+Waitcnt0Disabled     1     
+WorkGroupIdFromTTM   -     
+vL1DCacheLineBytes   1     
+# Found hipcc version 7.2.53211-e1a6bc5663
+Tensile::WARNING: Global parameter NewClient = 2 unrecognised.
+Tensile::WARNING: Global parameter PrintSolutionRejectionReason = True unrecognised.
+# Command-line override: CodeObjectVersion
+Overriding CodeObjectVersion=4
+Overriding PrebuiltClient=/home/alvasile/rocm-libraries/.claude/worktrees/agent-a6cf69172d8397f93/projects/hipblaslt/tensilelite/build_tmp/tensilelite/client/tensilelite-client
+
+################################################################################
+# Converting Config to BenchmarkProcess Object
+################################################################################
+
+# Filling in Parameters With Defaults
+# Convert Parameters to Benchmark Step(s)
+# Benchmark Final
+# NumBenchmarkSteps: 1
+
+################################################################################
+# Done Creating BenchmarkProcess Object
+################################################################################
+
+
+################################################################################
+# Benchmark Step: Cijk_Alik_Bljk_S_MX_B_UserArgs_00 - 00_Final 3.867s
+# Num Sizes: 72
+# Factor Dim steps: 0
+# Bias Type steps: 0
+# Activation steps: 0
+# ICacheFlush steps: 1
+# Fork Parameters:
+#     UseCustomMainLoopSchedule: [0, 1]
+# Enumerating Solutions (Parallel)
+fork solutions: Launching 96 threads...
+fork solutions: Done. (0.8 secs elapsed)
+[||||||||||||||||||||||||||||||||||||                                     ]  50%[|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||] 100% (0.0 secs elapsed)
+# Actual Solutions: 2 / 2 after SolutionStructs
+
+[||||||||||||||||||||||||||||||||||||                                     ]  50%[|||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||||] 100% (0.0 secs elapsed)
+Number of duplicate kernels: 0
+Generating assembly kernels: Launching 96 threads...
+Generating assembly kernels: Done. (0.4 secs elapsed)
+check invalid kernels and results: Launching 96 threads...
+check invalid kernels and results: Done. (0.2 secs elapsed)
+Writing assembly kernels: Launching 96 threads for 2 tasks...
+Writing assembly kernels: Done. (0.3 secs elapsed)
+buildSourceCodeObjectFile time (s): 0.00  [cache hit]
+
+********************************************************************************
+* WARNING: Logic file has invalid or unsupported chip IDs
+*   File: <unknown>
+*   Architecture: gfx950
+*   Found chip IDs: <none>
+*   Supported chip IDs: 75a0, 75b0, 75a2, 75b2, 75a3, 75b3, 75a8, 75b8
+* No supported chip IDs found; using this file as fallback for all gfx950 devices
+* For optimal kernel selection, specify IDs like: `[Device 75a0]`
+********************************************************************************
+
+
+********************************************************************************
+* WARNING: Logic file has invalid or unsupported chip IDs
+*   File: <unknown>
+*   Architecture: gfx950
+*   Found chip IDs: <none>
+*   Supported chip IDs: 75a0, 75b0, 75a2, 75b2, 75a3, 75b3, 75a8, 75b8
+* No supported chip IDs found; using this file as fallback for all gfx950 devices
+* For optimal kernel selection, specify IDs like: `[Device 75a0]`
+********************************************************************************
+
+# Actual Solutions: 2 / 2 after KernelWriter
+
+# Build-only mode: skipping benchmark.
+################################################################################
+# Cijk_Alik_Bljk_S_MX_B_UserArgs_00
+# 00_Final: End - 5.568s
+################################################################################
+
+# Build-only mode: skipping result collection.
+
+# Build-only mode: skipping LibraryLogic and LibraryClient.

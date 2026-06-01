@@ -4621,6 +4621,54 @@ class ValidationContext:
         return self.kernel.get("Use64bShadowLimit", True)
 
 
+# SYNC and SNOP are user-arbitrary in CMS schedules — writers can place any
+# number of waits / snops, so per-category count parity isn't a coverage
+# property for those buckets. Every other category in optSchedule must have
+# the same per-codepath instance count as the leaf count its idMap entry
+# declares.
+_OPTSCHEDULE_IDMAP_SKIP_CATEGORIES = frozenset({"SYNC", "SNOP"})
+
+
+def verify_correct_number_of_instructions(scheduleInfo, idMap):
+    """Verify per-(category × codepath) optSchedule rows match idMap leaf counts.
+
+    rocm-libraries-6hk3: ported from develop's helper of the same name
+    (`CMSValidator.py:2360` on `develop`). Every value in `idMap` reaching
+    `isValid` is already a flat Python list — `removeComments` in
+    `Tensile/Components/CustomSchedule/dispatch.py:92-122` strips
+    TextBlock + SCBranchSCC1 + SNop and returns
+    `retModule.flatitems()`, exactly the schedulable-instruction set that
+    `scheduleInst` sizes `optSchedule[cat][cp]` against. So
+    `len(idMap[cat]) == len(optSchedule[cat][cp])` by construction on a
+    healthy build, and a bare `len()` is all this gate needs.
+
+    SYNC and SNOP are skipped because CMS lets writers specify arbitrary
+    numbers of waits and snops, so count parity isn't a coverage property
+    for those buckets.
+
+    Catches scheduler ↔ idMap drift at the scheduler-build boundary —
+    before `build_dataflow_graph` consumes the capture — so misalignment
+    surfaces with a precise "category X codepath Y: optSchedule=N
+    idMap=M" message instead of as a confusing downstream
+    UNKNOWN-instruction / missing-edge / count-mismatch error several
+    layers deeper.
+
+    Raises:
+        ValidationError: on the first category/codepath mismatch.
+    """
+    for cat, codepath_rows in scheduleInfo.optSchedule.items():
+        if cat in _OPTSCHEDULE_IDMAP_SKIP_CATEGORIES:
+            continue
+        expected = len(idMap[cat])
+        for cp, slots in enumerate(codepath_rows):
+            if len(slots) != expected:
+                raise ValidationError(message=(
+                    f"optSchedule/idMap mismatch — category {cat!r} "
+                    f"codepath {cp}: optSchedule has {len(slots)} slot(s), "
+                    f"idMap has {expected}"
+                ))
+
+
 def isValid(scheduleInfo: 'ScheduleInfo', context: 'ValidationContext') -> None:
     """Validate the schedule. Returns ``None`` on success.
 
@@ -4643,6 +4691,15 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: 'ValidationContext') -> None:
     kernel = context.kernel
 
     context.mfma_reorder = scheduleInfo.mfmaReorder or []
+
+    # rocm-libraries-6hk3 (early-catch gate): structural per-codepath count
+    # parity between optSchedule slot rows and idMap source-list leaves.
+    # Runs before the dataflow-graph block so scheduler/idmap drift surfaces
+    # with a clean message at the source, rather than propagating into the
+    # graph builder and re-emerging as a downstream UNKNOWN or missing-edge
+    # failure. Port of develop's `verify_correct_number_of_instructions`.
+    if context.id_map is not None:
+        verify_correct_number_of_instructions(scheduleInfo, context.id_map)
 
     # Cross-scheduler comparison rule. Only fires when both default and CMS
     # captures are present in the context (i.e. capture was enabled when
