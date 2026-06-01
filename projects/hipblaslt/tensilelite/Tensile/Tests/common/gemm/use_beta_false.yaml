@@ -1,6 +1,8 @@
 # Test for UseBeta=False functionality
 # Verifies that kernels correctly handle the case where beta=0 and tensor C is not used
 
+TestParameters:
+  marks: [skip-gfx1250]
 GlobalParameters:
   MinimumRequiredVersion: 5.0.0
   PrintLevel: 1

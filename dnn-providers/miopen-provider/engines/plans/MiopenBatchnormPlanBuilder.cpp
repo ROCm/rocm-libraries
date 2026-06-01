@@ -84,20 +84,19 @@ void batchnormBwdFusionCheckTensors(
             "Batchnorm fusion currently only supports RELU_BWD activation");
     }
 
-    // in_0 must be the batchnorm inference output (forward path)
-    if(actAttr.in_0_tensor_uid() != bnInfAttr.y_tensor_uid())
+    const auto actIn1Uid = actAttr.in_1_tensor_uid();
+    if(!actIn1Uid.has_value())
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Activation in_0 must be the batchnorm inference output tensor (y)");
+            "Activation backward requires in_1 tensor (forward activation input)");
     }
 
-    // in_1 must be the dy (gradient from downstream)
-    if(!actAttr.in_1_tensor_uid().has_value())
+    if(actIn1Uid.value() != bnInfAttr.y_tensor_uid())
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Activation backward requires in_1 tensor (dy gradient)");
+            "Activation in_1 must be the batchnorm inference output tensor (y)");
     }
 
     // Verify activation backwards output is BN backward dy input
@@ -161,21 +160,20 @@ void batchnormBwdFusionCheckTensors(
             "Batchnorm inference input tensors must be non-virtual, output tensor must be virtual");
     }
 
-    const auto& actTensorIn1
-        = miopen_utils::findTensorAttributes(tensorMap, actAttr.in_1_tensor_uid().value());
-
-    if(actTensorIn1.virtual_())
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Activation in_1 (dy gradient) must be non-virtual");
-    }
-
     const auto& actTensorIn0
         = miopen_utils::findTensorAttributes(tensorMap, actAttr.in_0_tensor_uid());
+
+    if(actTensorIn0.virtual_())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Activation in_0 (dy gradient) must be non-virtual");
+    }
+
+    const auto& actTensorIn1 = miopen_utils::findTensorAttributes(tensorMap, actIn1Uid.value());
     const auto& actTensorOut
         = miopen_utils::findTensorAttributes(tensorMap, actAttr.out_0_tensor_uid());
 
-    if(!actTensorIn0.virtual_() || !actTensorOut.virtual_())
+    if(!actTensorIn1.virtual_() || !actTensorOut.virtual_())
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,

@@ -3,7 +3,9 @@
 
 #pragma once
 
+#ifndef __HIPCC_RTC__
 #include <hip/hip_fp16.h>
+#endif
 
 namespace hip_kernel_provider::batchnorm
 {

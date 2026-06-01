@@ -135,7 +135,8 @@ RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     
                                                          void*                  Synchronizer,
                                                          bool                   swizzleA,
                                                          bool                   swizzleB,
-                                                         hipblasLtBatchMode_t   batchMode)
+                                                         hipblasLtBatchMode_t   batchMode,
+                                                         int32_t                bias_stride)
     : trans_a(trans_a)
     , trans_b(trans_b)
     , m(m)
@@ -200,6 +201,7 @@ RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     
     , swizzleA(swizzleA)
     , swizzleB(swizzleB)
     , batchMode(batchMode)
+    , bias_stride(bias_stride)
 {
     if(this->bias_type == HIPBLASLT_DATATYPE_INVALID)
     {
@@ -975,6 +977,8 @@ namespace
             problem.transB() ? "T" : "N",
             "--batch_count",
             problem.batchSize(0),
+			"--batch_mode",
+			problem.batchMode(),
             "--scaleA",
             problem.useScaleAB().empty() ? 0 : (problem.useScaleAB() == "Vector" ? 2 : 1),
             "--scaleB",
@@ -989,6 +993,8 @@ namespace
             problem.useBias() ? "--bias_vector" : "",
             problem.useBias() ? "--bias_source" : "",
             problem.useBias() ? problem.tensor(problem.biasSrc()).getName() : "",
+			problem.useBias() ? "--bias_stride" : "",
+			problem.useBias() ? std::to_string((problem.bias().strides())[2]) : "",
             "--a_type",
             hipDataType_to_bench_string(tensile2HipType(problem.a().dataType())),
             "--b_type",
@@ -1092,6 +1098,8 @@ namespace
                     problem.transB() ? "T" : "N",
                     "batch_count",
                     problem.batchSize(0),
+					"batch_mode",
+					problem.batchMode(),
                     "scaleA",
                     problem.useScaleAB().empty() ? 0 : (problem.useScaleAB() == "Vector" ? 2 : 1),
                     "scaleB",
@@ -1114,6 +1122,8 @@ namespace
                     problem.useBias() ? "true" : "false",
                     "bias_source",
                     problem.useBias() ? problem.tensor(problem.biasSrc()).getName() : "d",
+					"bias_stride",
+					problem.useBias() ? (problem.bias().strides())[2] : 0,
                     "a_type",
                     hipDataType_to_bench_string(tensile2HipType(problem.a().dataType())),
                     "b_type",
@@ -1205,6 +1215,8 @@ namespace
                     problem.transB() ? "T" : "N",
                     "batch_count",
                     problem.batchSize(0),
+					"batch_mode",
+					problem.batchMode(),
                     "scaleA",
                     problem.useScaleAB().empty() ? 0 : (problem.useScaleAB() == "Vector" ? 2 : 1),
                     "scaleB",
@@ -1227,6 +1239,8 @@ namespace
                     problem.useBias() ? "true" : "false",
                     "bias_source",
                     problem.useBias() ? problem.tensor(problem.biasSrc()).getName() : "d",
+					"bias_stride",
+					problem.useBias() ? (problem.bias().strides())[2] : 0,
                     "a_type",
                     hipDataType_to_bench_string(tensile2HipType(problem.a().dataType())),
                     "b_type",
@@ -1895,7 +1909,7 @@ namespace
                                                                                     : d.sizes()[0];
         tensileProblem.setUseBias(prob.bias != nullptr);
         auto biasType = hipDataType_to_tensile_type(prob.bias_type);
-        tensileProblem.setBias(biasType, biasSize, 0, prob.gradient, biasSrc);
+        tensileProblem.setBias(biasType, biasSize, prob.bias_stride, prob.gradient, biasSrc);
         tensileProblem.setParams().setBiasEnum(
             tensileUseBias(prob.epilogue) ? biasType : rocisa::DataType::None);
 
@@ -2194,7 +2208,7 @@ namespace
 
         tensileProblem.setUseBias(prob.bias != nullptr);
         auto biasType = hipDataType_to_tensile_type(prob.bias_type);
-        tensileProblem.setBias(biasType, biasSize, 0, prob.gradient, biasSrc);
+        tensileProblem.setBias(biasType, biasSize, prob.bias_stride, prob.gradient, biasSrc);
         tensileProblem.setParams().setBiasEnum(
             tensileUseBias(prob.epilogue) ? biasType : rocisa::DataType::None);
 
