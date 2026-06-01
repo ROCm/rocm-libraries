@@ -3,7 +3,9 @@
 
 # Expected tool versions
 set(EXPECTED_CLANG_FORMAT_VERSION "18")
-set(EXPECTED_CLANG_TIDY_VERSION "20")
+if(NOT EXPECTED_CLANG_TIDY_VERSION)
+    set(EXPECTED_CLANG_TIDY_VERSION "20")
+endif()
 set(EXPECTED_LLVM_VERSION "20")
 
 # Helper function to generate version-specific search paths hints by concatenating the base path

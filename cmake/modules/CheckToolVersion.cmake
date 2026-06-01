@@ -5,7 +5,9 @@
 # Generalized from dnn-providers/cmake/CheckToolVersion.cmake.
 
 set(EXPECTED_CLANG_FORMAT_VERSION "18")
-set(EXPECTED_CLANG_TIDY_VERSION "20")
+if(NOT EXPECTED_CLANG_TIDY_VERSION)
+    set(EXPECTED_CLANG_TIDY_VERSION "20")
+endif()
 set(EXPECTED_LLVM_VERSION "20")
 
 # Build a list of versioned tool search paths from a base directory.
