@@ -4,7 +4,7 @@
 # Schema reference: dnn-providers/integration-tests/docs/support-claims-schema.md
 
 [meta]
-version = 2
+version = 3
 engine  = "MIOPEN_ENGINE"
 
 [[supported]]
