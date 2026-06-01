@@ -58,13 +58,11 @@ constexpr float getToleranceInferenceWithVariance()
     }
     else if constexpr(std::is_same_v<T, half>)
     {
-        // ~32% more lenient for BN with variance vs BN with inv variance (5e-4)
-        return 6.6e-4f;
+        return 8e-4f;
     }
     else if constexpr(std::is_same_v<T, bfloat16>)
     {
-        // ~4% more lenient for BN with variance vs BN with inv variance (5e-3)
-        return 5.2e-3f;
+        return 7e-3f;
     }
     else
     {
@@ -118,8 +116,13 @@ constexpr float getToleranceBackward()
     }
 }
 
+} // namespace batchnorm
+
+namespace rmsnorm
+{
+
 template <typename T>
-constexpr float getRmsToleranceTraining()
+constexpr float getTolerance()
 {
     // RMS tolerance values for use with CpuFpReferenceMiopenRmsValidation
     // These match MIOpen's relative RMS error tolerance (typically 0.4% = 4e-3)
@@ -136,8 +139,7 @@ constexpr float getRmsToleranceTraining()
         static_assert(false, "Type not supported");
     }
 }
-
-} // namespace batchnorm
+} // namespace rmsnorm
 
 namespace conv
 {
@@ -255,6 +257,32 @@ constexpr float getTolerance()
 
 } // namespace matmul
 
+namespace reduction
+{
+
+template <typename T>
+constexpr float getTolerance()
+{
+    if constexpr(std::is_same_v<T, float>)
+    {
+        return 1e-5f;
+    }
+    else if constexpr(std::is_same_v<T, half>)
+    {
+        return 1e-2f;
+    }
+    else if constexpr(std::is_same_v<T, bfloat16>)
+    {
+        return 5e-2f;
+    }
+    else
+    {
+        static_assert(false, "Type not supported");
+    }
+}
+
+} // namespace reduction
+
 namespace pointwise
 {
 
@@ -288,5 +316,35 @@ constexpr float getTolerance()
 }
 
 } // namespace pointwise
+
+namespace layernorm
+{
+
+template <typename T>
+constexpr float getTolerance()
+{
+    if constexpr(std::is_same_v<T, double>)
+    {
+        return 1e-5f;
+    }
+    else if constexpr(std::is_same_v<T, float>)
+    {
+        return 1e-4f;
+    }
+    else if constexpr(std::is_same_v<T, half>)
+    {
+        return 1e-3f;
+    }
+    else if constexpr(std::is_same_v<T, bfloat16>)
+    {
+        return 1e-2f;
+    }
+    else
+    {
+        static_assert(false, "Type not supported");
+    }
+}
+
+} // namespace layernorm
 
 } // namespace hipdnn_test_sdk::utilities

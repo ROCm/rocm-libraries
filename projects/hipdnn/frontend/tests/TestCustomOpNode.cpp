@@ -36,7 +36,7 @@ TEST(TestCustomOpNode, GetNodeName)
     CustomOpAttributes attr;
     attr.set_name("my_custom_op");
 
-    CustomOpNode node(std::move(attr), graphAttrs);
+    const CustomOpNode node(std::move(attr), graphAttrs);
     EXPECT_EQ(node.getNodeName(), "my_custom_op");
 }
 
@@ -51,7 +51,7 @@ TEST(TestCustomOpNode, GatherTensors)
     CustomOpAttributes attr;
     attr.set_name("test_op").set_inputs({input}).set_outputs({output});
 
-    CustomOpNode node(std::move(attr), graphAttrs);
+    const CustomOpNode node(std::move(attr), graphAttrs);
 
     std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
     node.gather_hipdnn_tensors(allTensors);
@@ -73,7 +73,7 @@ TEST(TestCustomOpNode, GetInputOutputTensorAttributes)
     CustomOpAttributes attr;
     attr.set_name("test_op").set_inputs({inputA, inputB}).set_outputs({output});
 
-    CustomOpNode node(std::move(attr), graphAttrs);
+    const CustomOpNode node(std::move(attr), graphAttrs);
 
     auto inputs = node.getNodeInputTensorAttributes();
     auto outputs = node.getNodeOutputTensorAttributes();
@@ -96,7 +96,7 @@ TEST(TestCustomOpNode, PreValidateSucceeds)
         .set_inputs({input})
         .set_outputs({output});
 
-    CustomOpNode node(std::move(attr), graphAttrs);
+    const CustomOpNode node(std::move(attr), graphAttrs);
 
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, ErrorCode::OK);
@@ -119,7 +119,7 @@ TEST(TestCustomOpNode, PreValidateSucceedsWithMultipleInputsAndOutputs)
         .set_inputs({inputA, inputB, inputC})
         .set_outputs({outputA, outputB});
 
-    CustomOpNode node(std::move(attr), graphAttrs);
+    const CustomOpNode node(std::move(attr), graphAttrs);
 
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, ErrorCode::OK);
@@ -135,7 +135,7 @@ TEST(TestCustomOpNode, PreValidateSucceedsWithNoInputs)
     CustomOpAttributes attr;
     attr.set_name("test_op").set_custom_op_id("example.generator").set_outputs({output});
 
-    CustomOpNode node(std::move(attr), graphAttrs);
+    const CustomOpNode node(std::move(attr), graphAttrs);
 
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, ErrorCode::OK);
@@ -154,7 +154,7 @@ TEST(TestCustomOpNode, PreValidateFailsWithNullInput)
         .set_inputs({nullptr})
         .set_outputs({output});
 
-    CustomOpNode node(std::move(attr), graphAttrs);
+    const CustomOpNode node(std::move(attr), graphAttrs);
 
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE);
@@ -173,7 +173,7 @@ TEST(TestCustomOpNode, PreValidateFailsWithNullOutput)
         .set_inputs({input})
         .set_outputs({nullptr});
 
-    CustomOpNode node(std::move(attr), graphAttrs);
+    const CustomOpNode node(std::move(attr), graphAttrs);
 
     auto err = node.pre_validate_node();
     EXPECT_EQ(err.code, ErrorCode::INVALID_VALUE);
@@ -194,7 +194,7 @@ TEST(TestCustomOpNode, PostValidateSucceeds)
         .set_inputs({input})
         .set_outputs({output});
 
-    CustomOpNode node(std::move(attr), graphAttrs);
+    const CustomOpNode node(std::move(attr), graphAttrs);
 
     auto err = node.post_validate_node();
     EXPECT_EQ(err.code, ErrorCode::OK);
@@ -214,7 +214,7 @@ TEST(TestCustomOpNode, PostValidateFailsWithoutCustomOpId)
         .set_inputs({input})
         .set_outputs({output});
 
-    CustomOpNode node(std::move(attr), graphAttrs);
+    const CustomOpNode node(std::move(attr), graphAttrs);
 
     auto err = node.post_validate_node();
     EXPECT_EQ(err.code, ErrorCode::ATTRIBUTE_NOT_SET);
@@ -222,7 +222,7 @@ TEST(TestCustomOpNode, PostValidateFailsWithoutCustomOpId)
 
 TEST(TestCustomOpNode, PostValidateFailsWithoutComputeDataType)
 {
-    GraphAttributes graphAttrs;
+    const GraphAttributes graphAttrs;
 
     auto input = makeTensor("input", 1, {2, 3}, DataType::FLOAT);
     auto output = makeTensor("output", 2, {2, 3}, DataType::FLOAT);
@@ -233,7 +233,7 @@ TEST(TestCustomOpNode, PostValidateFailsWithoutComputeDataType)
         .set_inputs({input})
         .set_outputs({output});
 
-    CustomOpNode node(std::move(attr), graphAttrs);
+    const CustomOpNode node(std::move(attr), graphAttrs);
 
     auto err = node.post_validate_node();
     EXPECT_EQ(err.code, ErrorCode::ATTRIBUTE_NOT_SET);
@@ -262,112 +262,9 @@ TEST(TestCustomOpNode, InferPropertiesPropagatesContext)
     EXPECT_EQ(output->get_data_type(), DataType::HALF);
 }
 
-TEST(TestCustomOpNode, PackNode)
-{
-    GraphAttributes graphAttrs;
-    graphAttrs.set_compute_data_type(DataType::FLOAT);
-
-    auto input = makeTensor("input", 1, {2, 3}, DataType::FLOAT);
-    auto output = makeTensor("output", 2, {2, 3}, DataType::FLOAT);
-
-    std::vector<uint8_t> payload = {0xCA, 0xFE};
-
-    CustomOpAttributes attr;
-    attr.set_name("test_op")
-        .set_custom_op_id("example.my_add")
-        .set_compute_data_type(DataType::FLOAT)
-        .set_inputs({input})
-        .set_outputs({output})
-        .set_data(payload);
-
-    CustomOpNode node(std::move(attr), graphAttrs);
-
-    flatbuffers::FlatBufferBuilder builder;
-    auto nodeOffset = node.pack_node(builder);
-    builder.Finish(nodeOffset);
-
-    auto buf = builder.GetBufferPointer();
-    auto fbNode = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Node>(buf);
-
-    EXPECT_EQ(fbNode->attributes_type(),
-              hipdnn_data_sdk::data_objects::NodeAttributes::CustomOpAttributes);
-    EXPECT_STREQ(fbNode->name()->c_str(), "test_op");
-
-    auto fbCustomOp = fbNode->attributes_as_CustomOpAttributes();
-    ASSERT_NE(fbCustomOp, nullptr);
-    EXPECT_STREQ(fbCustomOp->custom_op_id()->c_str(), "example.my_add");
-    EXPECT_EQ(fbCustomOp->input_tensor_uids()->size(), 1u);
-    EXPECT_EQ(fbCustomOp->input_tensor_uids()->Get(0), 1);
-    EXPECT_EQ(fbCustomOp->output_tensor_uids()->size(), 1u);
-    EXPECT_EQ(fbCustomOp->output_tensor_uids()->Get(0), 2);
-    EXPECT_EQ(fbCustomOp->data()->size(), 2u);
-    EXPECT_EQ(fbCustomOp->data()->Get(0), 0xCA);
-    EXPECT_EQ(fbCustomOp->data()->Get(1), 0xFE);
-}
-
-TEST(TestCustomOpNode, PackNodeWithEmptyPayload)
-{
-    GraphAttributes graphAttrs;
-    graphAttrs.set_compute_data_type(DataType::FLOAT);
-
-    auto input = makeTensor("input", 1, {2, 3}, DataType::FLOAT);
-    auto output = makeTensor("output", 2, {2, 3}, DataType::FLOAT);
-
-    CustomOpAttributes attr;
-    attr.set_name("test_op")
-        .set_custom_op_id("example.my_add")
-        .set_compute_data_type(DataType::FLOAT)
-        .set_inputs({input})
-        .set_outputs({output});
-
-    CustomOpNode node(std::move(attr), graphAttrs);
-
-    flatbuffers::FlatBufferBuilder builder;
-    auto nodeOffset = node.pack_node(builder);
-    builder.Finish(nodeOffset);
-
-    auto buf = builder.GetBufferPointer();
-    auto fbNode = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Node>(buf);
-    auto fbCustomOp = fbNode->attributes_as_CustomOpAttributes();
-    ASSERT_NE(fbCustomOp, nullptr);
-    EXPECT_EQ(fbCustomOp->data()->size(), 0u);
-}
-
-TEST(TestCustomOpNode, PackNodeWithMultipleOutputs)
-{
-    GraphAttributes graphAttrs;
-    graphAttrs.set_compute_data_type(DataType::FLOAT);
-
-    auto input = makeTensor("input", 1, {4, 8}, DataType::FLOAT);
-    auto outputA = makeTensor("output_a", 2, {4, 4}, DataType::FLOAT);
-    auto outputB = makeTensor("output_b", 3, {4, 4}, DataType::FLOAT);
-
-    CustomOpAttributes attr;
-    attr.set_name("test_split")
-        .set_custom_op_id("example.split")
-        .set_compute_data_type(DataType::FLOAT)
-        .set_inputs({input})
-        .set_outputs({outputA, outputB});
-
-    CustomOpNode node(std::move(attr), graphAttrs);
-
-    flatbuffers::FlatBufferBuilder builder;
-    auto nodeOffset = node.pack_node(builder);
-    builder.Finish(nodeOffset);
-
-    auto buf = builder.GetBufferPointer();
-    auto fbNode = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Node>(buf);
-    auto fbCustomOp = fbNode->attributes_as_CustomOpAttributes();
-    ASSERT_NE(fbCustomOp, nullptr);
-    EXPECT_EQ(fbCustomOp->input_tensor_uids()->size(), 1u);
-    EXPECT_EQ(fbCustomOp->output_tensor_uids()->size(), 2u);
-    EXPECT_EQ(fbCustomOp->output_tensor_uids()->Get(0), 2);
-    EXPECT_EQ(fbCustomOp->output_tensor_uids()->Get(1), 3);
-}
-
 TEST(TestCustomOpNode, GetNodeTypeReturnsCustomOp)
 {
-    GraphAttributes graphAttrs;
-    CustomOpNode node(CustomOpAttributes{}, graphAttrs);
+    const GraphAttributes graphAttrs;
+    const CustomOpNode node(CustomOpAttributes{}, graphAttrs);
     EXPECT_EQ(node.getNodeType(), NodeType::CUSTOM_OP);
 }

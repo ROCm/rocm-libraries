@@ -8,11 +8,14 @@
 #include <unordered_set>
 #include <vector>
 
-#include <hipdnn_data_sdk/data_objects/block_scale_quantize_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/block_scale_quantize_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/constants/BlockScaleQuantizeConstants.hpp>
+#include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
+#include <hipdnn_test_sdk/utilities/LoweringTestHelpers.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/TestableGraph.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
 #include "test_plugins/TestPluginConstants.hpp"
@@ -20,50 +23,21 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 using namespace hipdnn_tests::constants;
+using hipdnn_tests::IntegrationTestFixture;
 using hipdnn_tests::toVec;
-using DataTypeSdk = hipdnn_data_sdk::data_objects::DataType;
-using NodeAttrType = hipdnn_data_sdk::data_objects::NodeAttributes;
+using DataTypeSdk = hipdnn_flatbuffers_sdk::data_objects::DataType;
+using NodeAttrType = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
+using hipdnn_tests::buildTensorMap;
+using hipdnn_tests::lowerAndDeserialize;
+using hipdnn_tests::TestableGraphLowering;
 
 namespace
 {
 
-// Exposes protected Graph methods for testing
-class TestableGraph : public Graph
-{
-public:
-    using Graph::build_operation_graph_via_descriptors;
-    using Graph::get_raw_graph_descriptor;
-};
-
 // Lowers a frontend graph via build_operation_graph_via_descriptors, then
 // retrieves the serialized graph and deserializes it for verification.
-class IntegrationBlockScaleQuantizeDescriptorLowering : public ::testing::Test
+class IntegrationBlockScaleQuantizeDescriptorLowering : public IntegrationTestFixture
 {
-protected:
-    void SetUp() override
-    {
-        SKIP_IF_NO_DEVICES();
-
-        ASSERT_EQ(hipInit(0), hipSuccess);
-
-        const std::array<const char*, 1> paths
-            = {hipdnn_tests::plugin_constants::testGoodPluginPath().c_str()};
-        ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
-                      paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
-                  HIPDNN_STATUS_SUCCESS);
-
-        ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
-    }
-
-    void TearDown() override
-    {
-        if(_handle != nullptr)
-        {
-            hipdnnDestroy(_handle);
-        }
-    }
-
-    hipdnnHandle_t _handle = nullptr;
 };
 
 // Builds a block scale quantize graph via the frontend API, lowers it to the
@@ -72,7 +46,7 @@ protected:
 // in the frontend.
 TEST_F(IntegrationBlockScaleQuantizeDescriptorLowering, BlockScaleQuantizeGraphRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraph>();
+    auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("TestBlockScaleQuantizeGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
@@ -90,32 +64,7 @@ TEST_F(IntegrationBlockScaleQuantizeDescriptorLowering, BlockScaleQuantizeGraphR
     y->set_uid(K_BSQ_TENSOR_Y_UID).set_output(true).set_name("Y");
     scale->set_uid(K_BSQ_TENSOR_SCALE_UID).set_output(true).set_name("Scale");
 
-    // -- Validate and lower --
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_operation_graph_via_descriptors(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    // -- Retrieve serialized graph --
-    auto rawDesc = graph->get_raw_graph_descriptor();
-    ASSERT_NE(rawDesc, nullptr);
-
-    size_t serializedSize = 0;
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(rawDesc, 0, &serializedSize, nullptr),
-              HIPDNN_STATUS_SUCCESS);
-    ASSERT_GT(serializedSize, 0u);
-
-    std::vector<uint8_t> serializedData(serializedSize);
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(
-                  rawDesc, serializedSize, &serializedSize, serializedData.data()),
-              HIPDNN_STATUS_SUCCESS);
-
-    // -- Deserialize into GraphT --
-    auto graphFb = hipdnn_data_sdk::data_objects::GetGraph(serializedData.data());
-    ASSERT_NE(graphFb, nullptr);
-    hipdnn_data_sdk::data_objects::GraphT graphT;
-    graphFb->UnPackTo(&graphT);
+    auto graphT = lowerAndDeserialize(*graph, _handle);
 
     // -- Verify graph-level attributes --
     EXPECT_EQ(graphT.compute_data_type, DataTypeSdk::FLOAT);
@@ -125,11 +74,7 @@ TEST_F(IntegrationBlockScaleQuantizeDescriptorLowering, BlockScaleQuantizeGraphR
     // -- Verify tensors --
     ASSERT_EQ(graphT.tensors.size(), 3u);
 
-    std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributesT*> tensorMap;
-    for(const auto& t : graphT.tensors)
-    {
-        tensorMap[t->uid] = t.get();
-    }
+    auto tensorMap = buildTensorMap(graphT);
 
     // Verify X tensor
     ASSERT_NE(tensorMap.count(K_BSQ_TENSOR_X_UID), 0u);
@@ -178,7 +123,7 @@ TEST_F(IntegrationBlockScaleQuantizeDescriptorLowering, BlockScaleQuantizeGraphR
 TEST_F(IntegrationBlockScaleQuantizeDescriptorLowering,
        BlockScaleQuantizeGraphRoundTripWithAxisAndTranspose)
 {
-    auto graph = std::make_shared<TestableGraph>();
+    auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("TestBsqAxisTransposeGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
@@ -206,41 +151,12 @@ TEST_F(IntegrationBlockScaleQuantizeDescriptorLowering,
     y->set_uid(Y_UID).set_output(true).set_name("Y");
     scale->set_uid(SCALE_UID).set_output(true).set_name("Scale");
 
-    // -- Validate and lower --
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_operation_graph_via_descriptors(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    // -- Retrieve serialized graph --
-    auto rawDesc = graph->get_raw_graph_descriptor();
-    ASSERT_NE(rawDesc, nullptr);
-
-    size_t serializedSize = 0;
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(rawDesc, 0, &serializedSize, nullptr),
-              HIPDNN_STATUS_SUCCESS);
-    ASSERT_GT(serializedSize, 0u);
-
-    std::vector<uint8_t> serializedData(serializedSize);
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(
-                  rawDesc, serializedSize, &serializedSize, serializedData.data()),
-              HIPDNN_STATUS_SUCCESS);
-
-    // -- Deserialize into GraphT --
-    auto graphFb = hipdnn_data_sdk::data_objects::GetGraph(serializedData.data());
-    ASSERT_NE(graphFb, nullptr);
-    hipdnn_data_sdk::data_objects::GraphT graphT;
-    graphFb->UnPackTo(&graphT);
+    auto graphT = lowerAndDeserialize(*graph, _handle);
 
     // -- Verify tensors --
     ASSERT_EQ(graphT.tensors.size(), 3u);
 
-    std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributesT*> tensorMap;
-    for(const auto& t : graphT.tensors)
-    {
-        tensorMap[t->uid] = t.get();
-    }
+    auto tensorMap = buildTensorMap(graphT);
 
     // Y dims match X dims; strides are reordered by transpose
     ASSERT_NE(tensorMap.count(Y_UID), 0u);
@@ -265,7 +181,7 @@ TEST_F(IntegrationBlockScaleQuantizeDescriptorLowering,
 // through the lowering round-trip.
 TEST_F(IntegrationBlockScaleQuantizeDescriptorLowering, AutoAssignedUidsPreservedInRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraph>();
+    auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("AutoUidBsqGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
@@ -282,26 +198,7 @@ TEST_F(IntegrationBlockScaleQuantizeDescriptorLowering, AutoAssignedUidsPreserve
     y->set_output(true);
     scale->set_output(true);
 
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_operation_graph_via_descriptors(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    // Retrieve serialized graph
-    auto rawDesc = graph->get_raw_graph_descriptor();
-    size_t serializedSize = 0;
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(rawDesc, 0, &serializedSize, nullptr),
-              HIPDNN_STATUS_SUCCESS);
-    ASSERT_GT(serializedSize, 0u);
-
-    std::vector<uint8_t> serializedData(serializedSize);
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(
-                  rawDesc, serializedSize, &serializedSize, serializedData.data()),
-              HIPDNN_STATUS_SUCCESS);
-
-    hipdnn_data_sdk::data_objects::GraphT graphT;
-    hipdnn_data_sdk::data_objects::GetGraph(serializedData.data())->UnPackTo(&graphT);
+    auto graphT = lowerAndDeserialize(*graph, _handle);
 
     // All tensors should have been auto-assigned unique UIDs
     ASSERT_EQ(graphT.tensors.size(), 3u);
@@ -310,7 +207,8 @@ TEST_F(IntegrationBlockScaleQuantizeDescriptorLowering, AutoAssignedUidsPreserve
     {
         uids.insert(t->uid);
     }
-    EXPECT_EQ(uids.size(), 3u) << "Tensor UIDs are not unique";
+    EXPECT_EQ(uids.size(), 3u)
+        << "Tensor UIDs are not unique"; // NOLINT(readability-implicit-bool-conversion)
 
     // The block scale quantize operation should reference the auto-assigned UIDs
     ASSERT_EQ(graphT.nodes.size(), 1u);
@@ -319,16 +217,20 @@ TEST_F(IntegrationBlockScaleQuantizeDescriptorLowering, AutoAssignedUidsPreserve
 
     // Tensor UIDs in the node should match tensors in the graph
     EXPECT_TRUE(uids.count(bsq->x_tensor_uid) > 0)
-        << "X tensor UID " << bsq->x_tensor_uid << " not found in graph tensors";
+        << "X tensor UID " << bsq->x_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(bsq->y_tensor_uid) > 0)
-        << "Y tensor UID " << bsq->y_tensor_uid << " not found in graph tensors";
+        << "Y tensor UID " << bsq->y_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(bsq->scale_tensor_uid) > 0)
-        << "Scale tensor UID " << bsq->scale_tensor_uid << " not found in graph tensors";
+        << "Scale tensor UID " << bsq->scale_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
 
     // All three tensor UIDs referenced by the node should be distinct
-    std::unordered_set<int64_t> nodeUids
+    const std::unordered_set<int64_t> nodeUids
         = {bsq->x_tensor_uid, bsq->y_tensor_uid, bsq->scale_tensor_uid};
-    EXPECT_EQ(nodeUids.size(), 3u) << "Block scale quantize node tensor UIDs are not distinct";
+    EXPECT_EQ(nodeUids.size(), 3u)
+        << "Block scale quantize node tensor UIDs are not distinct"; // NOLINT(readability-implicit-bool-conversion)
 }
 
 } // namespace

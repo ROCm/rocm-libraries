@@ -1,4 +1,4 @@
-// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
 #include <miopen/activ/solvers.hpp>
@@ -301,8 +301,8 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
     RegisterWithSolver(registry, ++id, conv::ConvAsm5x10u2v2b1{}, miopenConvolutionAlgoDirect);
     RegisterWithSolver(
         registry, ++id, conv::ConvAsm7x7c3h224w224k64u2v2p3q3f1{}, miopenConvolutionAlgoDirect);
-    RegisterWithSolver(registry, ++id, conv::ConvOclDirectFwd11x11{}, miopenConvolutionAlgoDirect);
-    RegisterWithSolver(registry, ++id, conv::ConvOclDirectFwdGen{}, miopenConvolutionAlgoDirect);
+    RegisterWithSolver(registry, ++id, conv::ConvHipDirectFwd11x11{}, miopenConvolutionAlgoDirect);
+    ++id; // removed ConvOclDirectFwdGen
     ++id; // removed ConvOclDirectFwd3x3
     RegisterWithSolver(registry, ++id, conv::ConvOclDirectFwd{}, miopenConvolutionAlgoDirect);
     Register(registry,
@@ -310,20 +310,19 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
              Primitive::Fusion,
              fusion::ConvOclDirectFwdFused{}.SolverDbId(),
              miopenConvolutionAlgoDirect);
-    RegisterWithSolver(registry, ++id, conv::ConvOclDirectFwd1x1{}, miopenConvolutionAlgoDirect);
+    ++id; // removed ConvOclDirectFwd1x1
     RegisterWithSolver(registry, ++id, conv::ConvBinWinograd3x3U{}, miopenConvolutionAlgoWinograd);
     RegisterWithSolver(registry, ++id, conv::ConvBinWinogradRxS{}, miopenConvolutionAlgoWinograd);
     RegisterWithSolver(registry, ++id, conv::ConvAsmBwdWrW3x3{}, miopenConvolutionAlgoDirect);
     RegisterWithSolver(registry, ++id, conv::ConvAsmBwdWrW1x1{}, miopenConvolutionAlgoDirect);
-    RegisterWithSolver(registry, ++id, conv::ConvOclBwdWrW2<1>{}, miopenConvolutionAlgoDirect);
-    RegisterWithSolver(registry, ++id, conv::ConvOclBwdWrW2<2>{}, miopenConvolutionAlgoDirect);
-    RegisterWithSolver(registry, ++id, conv::ConvOclBwdWrW2<4>{}, miopenConvolutionAlgoDirect);
-    RegisterWithSolver(registry, ++id, conv::ConvOclBwdWrW2<8>{}, miopenConvolutionAlgoDirect);
-    RegisterWithSolver(registry, ++id, conv::ConvOclBwdWrW2<16>{}, miopenConvolutionAlgoDirect);
-    RegisterWithSolver(
-        registry, ++id, conv::ConvOclBwdWrW2NonTunable{}, miopenConvolutionAlgoDirect);
-    RegisterWithSolver(registry, ++id, conv::ConvOclBwdWrW53{}, miopenConvolutionAlgoDirect);
-    RegisterWithSolver(registry, ++id, conv::ConvOclBwdWrW1x1{}, miopenConvolutionAlgoDirect);
+    ++id; // removed solver ConvOclBwdWrW2<1>
+    ++id; // removed solver ConvOclBwdWrW2<2>
+    ++id; // removed solver ConvOclBwdWrW2<4>
+    ++id; // removed solver ConvOclBwdWrW2<8>
+    ++id; // removed solver ConvOclBwdWrW2<16>
+    ++id; // removed solver ConvOclBwdWrW2NonTunable
+    RegisterWithSolver(registry, ++id, conv::ConvHipBwdWrW53{}, miopenConvolutionAlgoDirect);
+    ++id; // removed solver ConvOclBwdWrW1x1
     RegisterWithSolver(
         registry, ++id, conv::ConvHipImplicitGemmV4R1Fwd{}, miopenConvolutionAlgoImplicitGEMM);
     ++id; // removed solver ConvHipImplicitGemmV4Fwd
@@ -568,10 +567,8 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
                        ++id,
                        conv::ConvAsmImplicitGemmGTCDynamicFwdDlopsNCHWC{},
                        miopenConvolutionAlgoImplicitGEMM);
-    RegisterWithSolver(
-        registry, ++id, conv::ConvHipImplicitGemmFwdXdlops{}, miopenConvolutionAlgoImplicitGEMM);
-    RegisterWithSolver(
-        registry, ++id, conv::ConvHipImplicitGemmBwdXdlops{}, miopenConvolutionAlgoImplicitGEMM);
+    ++id; // removed solver ConvHipImplicitGemmFwdXdlops
+    ++id; // removed solver ConvHipImplicitGemmBwdXdlops
     Register(registry,
              ++id,
              Primitive::Fusion,
@@ -684,7 +681,11 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
 
     RegisterWithSolver(
         registry, ++id, conv::ConvWinoRageRxS<2, 3>{}, miopenConvolutionAlgoWinograd);
-    ++id; // Removed ConvWinoRageRxSFused solver
+    Register(registry,
+             ++id,
+             Primitive::Fusion,
+             fusion::ConvWinoRageRxSFused<2, 3>{}.SolverDbId(),
+             miopenConvolutionAlgoWinograd);
     Register(registry,
              ++id,
              Primitive::Fusion,
@@ -703,18 +704,16 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
     // Transposed Winograd solvers for NHWC layout support
     RegisterWithSolver(
         registry, ++id, conv::TransposedConvBinWinograd3x3U{}, miopenConvolutionAlgoWinograd);
-    MIOPEN_LOG_I("Registering TransposedConvBinWinograd3x3U with id=" << id);
     RegisterWithSolver(
         registry, ++id, conv::TransposedConvBinWinogradRxS{}, miopenConvolutionAlgoWinograd);
-    MIOPEN_LOG_I("Registering TransposedConvBinWinogradRxS with id=" << id);
     RegisterWithSolver(
         registry, ++id, conv::TransposedConvBinWinogradRxSf2x3g1{}, miopenConvolutionAlgoWinograd);
-    MIOPEN_LOG_I("Registering TransposedConvBinWinogradRxSf2x3g1 with id=" << id);
     // Transposed non-tunable Winograd solvers
     RegisterWithSolver(
         registry, ++id, conv::TransposedConvWinoFuryRxS<2, 3>{}, miopenConvolutionAlgoWinograd);
-    RegisterWithSolver(
-        registry, ++id, conv::TransposedConvWinoRageRxS<2, 3>{}, miopenConvolutionAlgoWinograd);
+    ++id; // RegisterWithSolver(
+          //     registry, ++id, conv::TransposedConvWinoRageRxS<2, 3>{},
+          //     miopenConvolutionAlgoWinograd);
     RegisterWithSolver(registry,
                        ++id,
                        conv::TransposedConvMPBidirectWinograd<2, 3>{},
@@ -812,6 +811,8 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
                        ++id,
                        conv::TransposedConvMPBidirectWinograd_xdlops<6, 3>{},
                        miopenConvolutionAlgoWinograd);
+
+    RegisterWithSolver(registry, ++id, conv::ConvDepthwiseFwd3D{}, miopenConvolutionAlgoDirect);
     //  IMPORTANT: New solvers should be added to the end of the function, and don't leave a white
     //  space between this comment and the newly registered solver(s)!
 }

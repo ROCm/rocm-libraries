@@ -58,73 +58,9 @@ TEST(TestMatmulAttributes, CreateMatmulAttributes)
     EXPECT_EQ(cTensor->get_stride(), (std::vector<int64_t>{16, 1}));
 }
 
-TEST(TestMatmulAttributes, PackAttributes)
-{
-    hipdnn_frontend::graph::MatmulAttributes matmulAttributes;
-
-    // Set tensors with UIDs
-    auto aTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    aTensor->set_uid(1);
-    matmulAttributes.set_a(aTensor);
-
-    auto bTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    bTensor->set_uid(2);
-    matmulAttributes.set_b(bTensor);
-
-    auto cTensor = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    cTensor->set_uid(3);
-    matmulAttributes.set_c(cTensor);
-
-    // Also set tensor properties and validate getters alias same objects
-    aTensor->set_name("A")
-        .set_data_type(hipdnn_frontend::DataType::FLOAT)
-        .set_dim({2, 3})
-        .set_stride({3, 1});
-    bTensor->set_name("B")
-        .set_data_type(hipdnn_frontend::DataType::FLOAT)
-        .set_dim({3, 4})
-        .set_stride({4, 1});
-    cTensor->set_name("C")
-        .set_data_type(hipdnn_frontend::DataType::FLOAT)
-        .set_dim({2, 4})
-        .set_stride({4, 1});
-
-    EXPECT_EQ(matmulAttributes.get_a(), aTensor);
-    EXPECT_EQ(matmulAttributes.get_b(), bTensor);
-    EXPECT_EQ(matmulAttributes.get_c(), cTensor);
-
-    EXPECT_EQ(aTensor->get_name(), "A");
-    EXPECT_EQ(aTensor->get_data_type(), hipdnn_frontend::DataType::FLOAT);
-    EXPECT_EQ(aTensor->get_dim(), (std::vector<int64_t>{2, 3}));
-    EXPECT_EQ(aTensor->get_stride(), (std::vector<int64_t>{3, 1}));
-
-    EXPECT_EQ(bTensor->get_name(), "B");
-    EXPECT_EQ(bTensor->get_data_type(), hipdnn_frontend::DataType::FLOAT);
-    EXPECT_EQ(bTensor->get_dim(), (std::vector<int64_t>{3, 4}));
-    EXPECT_EQ(bTensor->get_stride(), (std::vector<int64_t>{4, 1}));
-
-    EXPECT_EQ(cTensor->get_name(), "C");
-    EXPECT_EQ(cTensor->get_data_type(), hipdnn_frontend::DataType::FLOAT);
-    EXPECT_EQ(cTensor->get_dim(), (std::vector<int64_t>{2, 4}));
-    EXPECT_EQ(cTensor->get_stride(), (std::vector<int64_t>{4, 1}));
-
-    // Pack attributes
-    flatbuffers::FlatBufferBuilder builder;
-    auto packedAttributes = matmulAttributes.pack_attributes(builder);
-    builder.Finish(packedAttributes);
-
-    auto buffer = builder.GetBufferPointer();
-    auto matmulFb = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::MatmulAttributes>(buffer);
-
-    // Verify packed tensor UIDs
-    EXPECT_EQ(matmulFb->a_tensor_uid(), 1);
-    EXPECT_EQ(matmulFb->b_tensor_uid(), 2);
-    EXPECT_EQ(matmulFb->c_tensor_uid(), 3);
-}
-
 TEST(TestMatmulAttributes, DefaultValues)
 {
-    hipdnn_frontend::graph::MatmulAttributes matmulAttributes;
+    const hipdnn_frontend::graph::MatmulAttributes matmulAttributes;
 
     // Check that tensors are null by default
     EXPECT_EQ(matmulAttributes.get_a(), nullptr);

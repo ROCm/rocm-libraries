@@ -3,13 +3,13 @@
 
 #pragma once
 
-#include <flatbuffers/flatbuffers.h>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <variant>
@@ -37,10 +37,11 @@ inline Error setDescriptorAttrString(hipdnnBackendDescriptor_t desc,
 }
 
 // Sets a vector-valued attribute on a backend descriptor.
+template <typename T>
 inline Error setDescriptorAttrVec(hipdnnBackendDescriptor_t desc,
                                   hipdnnBackendAttributeName_t attrName,
                                   hipdnnBackendAttributeType_t attrType,
-                                  const std::vector<int64_t>& values,
+                                  const std::vector<T>& values,
                                   const std::string& errorContext)
 {
     HIPDNN_RETURN_ON_BACKEND_FAILURE(
@@ -59,7 +60,8 @@ inline Error setDescriptorAttrScalar(hipdnnBackendDescriptor_t desc,
                                      const std::string& errorContext)
 {
     HIPDNN_RETURN_ON_BACKEND_FAILURE(
-        hipdnnBackend()->backendSetAttribute(desc, attrName, attrType, 1, &value),
+        hipdnnBackend()->backendSetAttribute(
+            desc, attrName, attrType, 1, static_cast<const void*>(&value)),
         "Failed to set " + errorContext);
     return {};
 }
@@ -113,7 +115,7 @@ template <typename T>
 inline Error setDescriptorAttrOptionalScalar(hipdnnBackendDescriptor_t desc,
                                              hipdnnBackendAttributeName_t attrName,
                                              hipdnnBackendAttributeType_t attrType,
-                                             const flatbuffers::Optional<T>& value,
+                                             const std::optional<T>& value,
                                              const std::string& errorContext)
 {
     if(!value.has_value())
@@ -139,7 +141,7 @@ inline Error setDescriptorAttrTensorRef(
                 "Tensor UID " + std::to_string(tensorUid) + " not found when setting "
                     + errorContext};
     }
-    auto descPtr = it->second.get();
+    const auto descPtr = it->second.get();
     HIPDNN_RETURN_ON_BACKEND_FAILURE(
         hipdnnBackend()->backendSetAttribute(
             desc, attrName, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, static_cast<const void*>(&descPtr)),
@@ -202,7 +204,7 @@ inline Error
                                             tensor->get_stride(),
                                             "tensor strides"));
 
-    bool isVirtual = tensor->get_is_virtual();
+    const bool isVirtual = tensor->get_is_virtual();
     HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(desc.get(),
                                                HIPDNN_ATTR_TENSOR_IS_VIRTUAL,
                                                HIPDNN_TYPE_BOOLEAN,

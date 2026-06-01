@@ -3,7 +3,6 @@
 #pragma once
 
 #include "Node.hpp"
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
@@ -214,7 +213,7 @@ public:
                                         + std::to_string(kernelSize) + ") and dilation ("
                                         + std::to_string(dilationVal) + ")");
 
-                int64_t expectedOutputSize = (numerator / strideVal) + 1;
+                const int64_t expectedOutputSize = (numerator / strideVal) + 1;
 
                 HIPDNN_RETURN_IF_NE(
                     outputSize,
@@ -366,17 +365,6 @@ public:
         }
 
         return {};
-    }
-
-    flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>
-        pack_node(flatbuffers::FlatBufferBuilder& builder) const override
-    {
-        return hipdnn_data_sdk::data_objects::CreateNodeDirect(
-            builder,
-            attributes.get_name().c_str(),
-            toSdkType(attributes.compute_data_type),
-            hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionFwdAttributes,
-            attributes.pack_attributes(builder).Union());
     }
 
     Error create_operation(

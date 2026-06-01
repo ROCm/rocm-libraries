@@ -49,6 +49,10 @@ namespace rocsparse
                                                   double               boost_tol,
                                                   T                    boost_val)
     {
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
+        static_assert(HASH > 0 && (HASH & (HASH - 1)) == 0, "HASH must be a power of two.");
         const auto lid = hipThreadIdx_x & (WFSIZE - 1);
         const auto wid = hipThreadIdx_x / WFSIZE;
 
@@ -287,8 +291,10 @@ namespace rocsparse
     {
         const auto batch_index = hipBlockIdx_y;
 
-        ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(enable_boost, is_tol_host_mode, boost_tol_32);
-        ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(enable_boost, is_tol_host_mode, boost_tol_64);
+        ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(
+            enable_boost && (size_boost_tol == sizeof(float)), is_tol_host_mode, boost_tol_32);
+        ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(
+            enable_boost && (size_boost_tol == sizeof(double)), is_tol_host_mode, boost_tol_64);
         ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(enable_boost, is_val_host_mode, boost_val);
 
         const double boost_tol = (size_boost_tol == sizeof(double)) ? boost_tol_64 : boost_tol_32;
@@ -341,8 +347,12 @@ namespace rocsparse
         const auto boost_tol_pointer_mode = boost->get_tol_pointer_mode();
         const auto boost_val_pointer_mode = boost->get_val_pointer_mode();
 
-        const float*  boost_tol_32 = reinterpret_cast<const float*>(boost->get_tol());
-        const double* boost_tol_64 = reinterpret_cast<const double*>(boost->get_tol());
+        const float*  boost_tol_32 = (boost_tol_size == sizeof(float))
+                                         ? reinterpret_cast<const float*>(boost->get_tol())
+                                         : nullptr;
+        const double* boost_tol_64 = (boost_tol_size == sizeof(double))
+                                         ? reinterpret_cast<const double*>(boost->get_tol())
+                                         : nullptr;
         const T*      boost_val    = reinterpret_cast<const T*>(boost->get_val());
 
         int64_t stride = A->columns_values_batch_stride;

@@ -6,8 +6,8 @@
 #include <array>
 #include <filesystem>
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <vector>
 
@@ -19,7 +19,7 @@ TEST(IntegrationSetPluginPathsExt, ValidInputs)
 {
     std::array<const char*, 3> paths = {getTestPluginCustomDir().c_str(), "./", "../directory/"};
 
-    hipdnnStatus_t status = hipdnnSetEnginePluginPaths_ext(
+    const hipdnnStatus_t status = hipdnnSetEnginePluginPaths_ext(
         paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE);
 
     EXPECT_EQ(status, HIPDNN_STATUS_SUCCESS);
@@ -49,7 +49,7 @@ TEST(IntegrationSetPluginPathsExt, NullStringInList)
 {
     std::array<const char*, 2> paths = {"./valid/path.so", nullptr};
 
-    hipdnnStatus_t status = hipdnnSetEnginePluginPaths_ext(
+    const hipdnnStatus_t status = hipdnnSetEnginePluginPaths_ext(
         paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE);
 
     EXPECT_EQ(status, HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
@@ -78,7 +78,7 @@ TEST(IntegrationSetPluginPathsExt, IneligibleHandle)
 
 TEST(IntegrationSetPluginPathsExt, GetLoadedPluginPathsLoadsDefault)
 {
-    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter envSetter(
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter envSetter(
         "HIPDNN_PLUGIN_DIR", getTestPluginDefaultDir());
 
     hipdnnStatus_t status
@@ -92,7 +92,7 @@ TEST(IntegrationSetPluginPathsExt, GetLoadedPluginPathsLoadsDefault)
 
     auto loadedPlugins = test_util::getLoadedPlugins(handle);
 
-    std::string expectedPluginPath = testDefaultGoodPluginPath();
+    const std::string expectedPluginPath = testDefaultGoodPluginPath();
 
     EXPECT_EQ(loadedPlugins.size(), 1);
     EXPECT_TRUE(test_util::isPluginLoadedByRelativePath(loadedPlugins, expectedPluginPath));
@@ -101,7 +101,7 @@ TEST(IntegrationSetPluginPathsExt, GetLoadedPluginPathsLoadsDefault)
 
 TEST(IntegrationSetPluginPathsExt, GetLoadedPluginPathsAdditiveLoadsBothDefaultAndCustom)
 {
-    hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter envSetter(
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter envSetter(
         "HIPDNN_PLUGIN_DIR", getTestPluginDefaultDir());
 
     const std::array<const char*, 1> paths = {getTestPluginCustomDir().c_str()};

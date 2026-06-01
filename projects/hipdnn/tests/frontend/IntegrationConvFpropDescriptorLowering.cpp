@@ -8,49 +8,32 @@
 #include <unordered_set>
 #include <vector>
 
-#include <hipdnn_data_sdk/data_objects/convolution_fwd_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/convolution_fwd_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_frontend.hpp>
+#include <hipdnn_test_sdk/constants/ConvFpropConstants.hpp>
+#include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
+#include <hipdnn_test_sdk/utilities/LoweringTestHelpers.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/TestableGraph.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
 #include "test_plugins/TestPluginConstants.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
+using hipdnn_tests::IntegrationTestFixture;
 using hipdnn_tests::toVec;
-using DataTypeSdk = hipdnn_data_sdk::data_objects::DataType;
-using ConvModeSdk = hipdnn_data_sdk::data_objects::ConvMode;
-using NodeAttrType = hipdnn_data_sdk::data_objects::NodeAttributes;
+using namespace hipdnn_tests::constants;
+using DataTypeSdk = hipdnn_flatbuffers_sdk::data_objects::DataType;
+using ConvModeSdk = hipdnn_flatbuffers_sdk::data_objects::ConvMode;
+using NodeAttrType = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
+using hipdnn_tests::buildTensorMap;
+using hipdnn_tests::lowerAndDeserialize;
+using hipdnn_tests::TestableGraphLowering;
 
 namespace
 {
-
-// Exposes protected Graph methods for testing
-class TestableGraph : public Graph
-{
-public:
-    using Graph::build_operation_graph_via_descriptors;
-    using Graph::get_raw_graph_descriptor;
-};
-
-// -- Test constants for ConvFpropGraphRoundTrip --
-// These use different values from the shared constants (different dims/strides/UIDs)
-// and are specific to the conv fprop lowering tests.
-
-constexpr int64_t K_TENSOR_X_UID = 10;
-constexpr int64_t K_TENSOR_W_UID = 20;
-constexpr int64_t K_TENSOR_Y_UID = 30;
-
-constexpr std::array<int64_t, 4> K_TENSOR_X_DIMS = {2, 3, 14, 14};
-constexpr std::array<int64_t, 4> K_TENSOR_X_STRIDES = {588, 196, 14, 1};
-constexpr std::array<int64_t, 4> K_TENSOR_W_DIMS = {8, 3, 3, 3};
-constexpr std::array<int64_t, 4> K_TENSOR_W_STRIDES = {27, 9, 3, 1};
-
-constexpr std::array<int64_t, 2> K_CONV_PRE_PADDING = {1, 1};
-constexpr std::array<int64_t, 2> K_CONV_POST_PADDING = {1, 1};
-constexpr std::array<int64_t, 2> K_CONV_STRIDE = {2, 2};
-constexpr std::array<int64_t, 2> K_CONV_DILATION = {1, 1};
 
 // -- Test constants for AutoAssignedUidsPreservedInRoundTrip --
 
@@ -65,33 +48,8 @@ constexpr std::array<int64_t, 2> K_AUTO_DILATION = {1, 1};
 
 // Lowers a frontend graph via build_operation_graph_via_descriptors, then
 // retrieves the serialized graph and deserializes it for verification.
-class IntegrationConvFpropDescriptorLowering : public ::testing::Test
+class IntegrationConvFpropDescriptorLowering : public IntegrationTestFixture
 {
-protected:
-    void SetUp() override
-    {
-        SKIP_IF_NO_DEVICES();
-
-        ASSERT_EQ(hipInit(0), hipSuccess);
-
-        const std::array<const char*, 1> paths
-            = {hipdnn_tests::plugin_constants::testGoodPluginPath().c_str()};
-        ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
-                      paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
-                  HIPDNN_STATUS_SUCCESS);
-
-        ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
-    }
-
-    void TearDown() override
-    {
-        if(_handle != nullptr)
-        {
-            hipdnnDestroy(_handle);
-        }
-    }
-
-    hipdnnHandle_t _handle = nullptr;
 };
 
 // Builds a conv_fprop graph via the frontend API, lowers it to the backend
@@ -100,57 +58,32 @@ protected:
 // in the frontend.
 TEST_F(IntegrationConvFpropDescriptorLowering, ConvFpropGraphRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraph>();
+    auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("TestConvGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
         .set_compute_data_type(DataType::FLOAT);
 
     auto x = std::make_shared<TensorAttributes>();
-    x->set_uid(K_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
-    x->set_dim(toVec(K_TENSOR_X_DIMS)).set_stride(toVec(K_TENSOR_X_STRIDES));
+    x->set_uid(K_FPROP_TENSOR_X_UID).set_name("X").set_data_type(DataType::FLOAT);
+    x->set_dim(toVec(K_FPROP_TENSOR_X_DIMS)).set_stride(toVec(K_FPROP_TENSOR_X_STRIDES));
 
     auto w = std::make_shared<TensorAttributes>();
-    w->set_uid(K_TENSOR_W_UID).set_name("W").set_data_type(DataType::FLOAT);
-    w->set_dim(toVec(K_TENSOR_W_DIMS)).set_stride(toVec(K_TENSOR_W_STRIDES));
+    w->set_uid(K_FPROP_TENSOR_W_UID).set_name("W").set_data_type(DataType::FLOAT);
+    w->set_dim(toVec(K_FPROP_TENSOR_W_DIMS)).set_stride(toVec(K_FPROP_TENSOR_W_STRIDES));
 
     ConvFpropAttributes convAttrs;
     convAttrs.set_name("conv_fprop_op");
-    convAttrs.set_pre_padding(toVec(K_CONV_PRE_PADDING));
-    convAttrs.set_post_padding(toVec(K_CONV_POST_PADDING));
-    convAttrs.set_stride(toVec(K_CONV_STRIDE));
-    convAttrs.set_dilation(toVec(K_CONV_DILATION));
+    convAttrs.set_pre_padding(toVec(K_FPROP_CONV_PADDING));
+    convAttrs.set_post_padding(toVec(K_FPROP_CONV_PADDING));
+    convAttrs.set_stride(toVec(K_FPROP_CONV_STRIDE));
+    convAttrs.set_dilation(toVec(K_FPROP_CONV_DILATION));
     convAttrs.set_convolution_mode(ConvolutionMode::CROSS_CORRELATION);
 
     auto y = graph->conv_fprop(x, w, convAttrs);
-    y->set_uid(K_TENSOR_Y_UID).set_output(true).set_name("Y");
+    y->set_uid(K_FPROP_TENSOR_Y_UID).set_output(true).set_name("Y");
 
-    // -- Validate and lower --
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_operation_graph_via_descriptors(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    // -- Retrieve serialized graph --
-    auto rawDesc = graph->get_raw_graph_descriptor();
-    ASSERT_NE(rawDesc, nullptr);
-
-    size_t serializedSize = 0;
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(rawDesc, 0, &serializedSize, nullptr),
-              HIPDNN_STATUS_SUCCESS);
-    ASSERT_GT(serializedSize, 0u);
-
-    std::vector<uint8_t> serializedData(serializedSize);
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(
-                  rawDesc, serializedSize, &serializedSize, serializedData.data()),
-              HIPDNN_STATUS_SUCCESS);
-
-    // -- Deserialize into GraphT --
-    auto graphFb = hipdnn_data_sdk::data_objects::GetGraph(serializedData.data());
-    ASSERT_NE(graphFb, nullptr);
-    hipdnn_data_sdk::data_objects::GraphT graphT;
-    graphFb->UnPackTo(&graphT);
+    auto graphT = lowerAndDeserialize(*graph, _handle);
 
     // -- Verify graph-level attributes --
     EXPECT_EQ(graphT.compute_data_type, DataTypeSdk::FLOAT);
@@ -160,33 +93,29 @@ TEST_F(IntegrationConvFpropDescriptorLowering, ConvFpropGraphRoundTrip)
     // -- Verify tensors --
     ASSERT_EQ(graphT.tensors.size(), 3u);
 
-    std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributesT*> tensorMap;
-    for(const auto& t : graphT.tensors)
-    {
-        tensorMap[t->uid] = t.get();
-    }
+    auto tensorMap = buildTensorMap(graphT);
 
     // Verify X tensor
-    ASSERT_NE(tensorMap.count(K_TENSOR_X_UID), 0u);
-    auto* xT = tensorMap[K_TENSOR_X_UID];
+    ASSERT_NE(tensorMap.count(K_FPROP_TENSOR_X_UID), 0u);
+    auto* xT = tensorMap[K_FPROP_TENSOR_X_UID];
     EXPECT_EQ(xT->name, "X");
     EXPECT_EQ(xT->data_type, DataTypeSdk::FLOAT);
-    EXPECT_EQ(xT->dims, toVec(K_TENSOR_X_DIMS));
-    EXPECT_EQ(xT->strides, toVec(K_TENSOR_X_STRIDES));
+    EXPECT_EQ(xT->dims, toVec(K_FPROP_TENSOR_X_DIMS));
+    EXPECT_EQ(xT->strides, toVec(K_FPROP_TENSOR_X_STRIDES));
     EXPECT_FALSE(xT->virtual_);
 
     // Verify W tensor
-    ASSERT_NE(tensorMap.count(K_TENSOR_W_UID), 0u);
-    auto* wT = tensorMap[K_TENSOR_W_UID];
+    ASSERT_NE(tensorMap.count(K_FPROP_TENSOR_W_UID), 0u);
+    auto* wT = tensorMap[K_FPROP_TENSOR_W_UID];
     EXPECT_EQ(wT->name, "W");
     EXPECT_EQ(wT->data_type, DataTypeSdk::FLOAT);
-    EXPECT_EQ(wT->dims, toVec(K_TENSOR_W_DIMS));
-    EXPECT_EQ(wT->strides, toVec(K_TENSOR_W_STRIDES));
+    EXPECT_EQ(wT->dims, toVec(K_FPROP_TENSOR_W_DIMS));
+    EXPECT_EQ(wT->strides, toVec(K_FPROP_TENSOR_W_STRIDES));
     EXPECT_FALSE(wT->virtual_);
 
     // Verify Y tensor
-    ASSERT_NE(tensorMap.count(K_TENSOR_Y_UID), 0u);
-    auto* yT = tensorMap[K_TENSOR_Y_UID];
+    ASSERT_NE(tensorMap.count(K_FPROP_TENSOR_Y_UID), 0u);
+    auto* yT = tensorMap[K_FPROP_TENSOR_Y_UID];
     EXPECT_EQ(yT->name, "Y");
     EXPECT_EQ(yT->data_type, DataTypeSdk::FLOAT);
     EXPECT_FALSE(yT->virtual_);
@@ -201,13 +130,13 @@ TEST_F(IntegrationConvFpropDescriptorLowering, ConvFpropGraphRoundTrip)
     auto* convFwd = node->attributes.AsConvolutionFwdAttributes();
     ASSERT_NE(convFwd, nullptr);
 
-    EXPECT_EQ(convFwd->x_tensor_uid, K_TENSOR_X_UID);
-    EXPECT_EQ(convFwd->w_tensor_uid, K_TENSOR_W_UID);
-    EXPECT_EQ(convFwd->y_tensor_uid, K_TENSOR_Y_UID);
-    EXPECT_EQ(convFwd->pre_padding, toVec(K_CONV_PRE_PADDING));
-    EXPECT_EQ(convFwd->post_padding, toVec(K_CONV_POST_PADDING));
-    EXPECT_EQ(convFwd->stride, toVec(K_CONV_STRIDE));
-    EXPECT_EQ(convFwd->dilation, toVec(K_CONV_DILATION));
+    EXPECT_EQ(convFwd->x_tensor_uid, K_FPROP_TENSOR_X_UID);
+    EXPECT_EQ(convFwd->w_tensor_uid, K_FPROP_TENSOR_W_UID);
+    EXPECT_EQ(convFwd->y_tensor_uid, K_FPROP_TENSOR_Y_UID);
+    EXPECT_EQ(convFwd->pre_padding, toVec(K_FPROP_CONV_PADDING));
+    EXPECT_EQ(convFwd->post_padding, toVec(K_FPROP_CONV_PADDING));
+    EXPECT_EQ(convFwd->stride, toVec(K_FPROP_CONV_STRIDE));
+    EXPECT_EQ(convFwd->dilation, toVec(K_FPROP_CONV_DILATION));
     EXPECT_EQ(convFwd->conv_mode, ConvModeSdk::CROSS_CORRELATION);
 }
 
@@ -215,7 +144,7 @@ TEST_F(IntegrationConvFpropDescriptorLowering, ConvFpropGraphRoundTrip)
 // through the lowering round-trip.
 TEST_F(IntegrationConvFpropDescriptorLowering, AutoAssignedUidsPreservedInRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraph>();
+    auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("AutoUidGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
@@ -237,26 +166,7 @@ TEST_F(IntegrationConvFpropDescriptorLowering, AutoAssignedUidsPreservedInRoundT
     auto y = graph->conv_fprop(x, w, convAttrs);
     y->set_output(true);
 
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_operation_graph_via_descriptors(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    // Retrieve serialized graph
-    auto rawDesc = graph->get_raw_graph_descriptor();
-    size_t serializedSize = 0;
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(rawDesc, 0, &serializedSize, nullptr),
-              HIPDNN_STATUS_SUCCESS);
-    ASSERT_GT(serializedSize, 0u);
-
-    std::vector<uint8_t> serializedData(serializedSize);
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(
-                  rawDesc, serializedSize, &serializedSize, serializedData.data()),
-              HIPDNN_STATUS_SUCCESS);
-
-    hipdnn_data_sdk::data_objects::GraphT graphT;
-    hipdnn_data_sdk::data_objects::GetGraph(serializedData.data())->UnPackTo(&graphT);
+    auto graphT = lowerAndDeserialize(*graph, _handle);
 
     // All tensors should have been auto-assigned unique UIDs
     // (auto-assignment starts from 0, so UID 0 is valid)
@@ -266,7 +176,8 @@ TEST_F(IntegrationConvFpropDescriptorLowering, AutoAssignedUidsPreservedInRoundT
     {
         uids.insert(t->uid);
     }
-    EXPECT_EQ(uids.size(), 3u) << "Tensor UIDs are not unique";
+    EXPECT_EQ(uids.size(), 3u)
+        << "Tensor UIDs are not unique"; // NOLINT(readability-implicit-bool-conversion)
 
     // The conv operation should reference the auto-assigned UIDs
     ASSERT_EQ(graphT.nodes.size(), 1u);
@@ -275,16 +186,20 @@ TEST_F(IntegrationConvFpropDescriptorLowering, AutoAssignedUidsPreservedInRoundT
 
     // Tensor UIDs in the node should match tensors in the graph
     EXPECT_TRUE(uids.count(convFwd->x_tensor_uid) > 0)
-        << "X tensor UID " << convFwd->x_tensor_uid << " not found in graph tensors";
+        << "X tensor UID " << convFwd->x_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(convFwd->w_tensor_uid) > 0)
-        << "W tensor UID " << convFwd->w_tensor_uid << " not found in graph tensors";
+        << "W tensor UID " << convFwd->w_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(convFwd->y_tensor_uid) > 0)
-        << "Y tensor UID " << convFwd->y_tensor_uid << " not found in graph tensors";
+        << "Y tensor UID " << convFwd->y_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
 
     // All three tensor UIDs referenced by the node should be distinct
-    std::unordered_set<int64_t> nodeUids
+    const std::unordered_set<int64_t> nodeUids
         = {convFwd->x_tensor_uid, convFwd->w_tensor_uid, convFwd->y_tensor_uid};
-    EXPECT_EQ(nodeUids.size(), 3u) << "Conv node tensor UIDs are not distinct";
+    EXPECT_EQ(nodeUids.size(), 3u)
+        << "Conv node tensor UIDs are not distinct"; // NOLINT(readability-implicit-bool-conversion)
 }
 
 } // namespace

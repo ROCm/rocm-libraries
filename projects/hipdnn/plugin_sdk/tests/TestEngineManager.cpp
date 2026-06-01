@@ -4,7 +4,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-#include <hipdnn_data_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_plugin_sdk/EngineManager.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
@@ -49,29 +49,30 @@ public:
 
     bool isApplicable(
         TestHandle& /*handle*/,
-        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /*opGraph*/) const override
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /*opGraph*/) const override
     {
         return _applicable;
     }
 
     void getDetails(TestHandle& /*handle*/,
-                    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
+                    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
                     hipdnnPluginConstData_t& /*detailsOut*/) const override
     {
     }
 
     size_t getMaxWorkspaceSize(
         const TestHandle& /*handle*/,
-        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
-        const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& /*engineConfig*/) const override
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /*engineConfig*/)
+        const override
     {
         return _workspaceSize;
     }
 
     void initializeExecutionContext(
         const TestHandle& /*handle*/,
-        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
-        const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& /*engineConfig*/,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /*engineConfig*/,
         TestContext& /*executionContext*/) const override
     {
     }
@@ -95,7 +96,7 @@ std::unique_ptr<TestEngine>
 
 TEST(TestEngineManager, InitiallyHasNoEngines)
 {
-    TestEngineManager manager;
+    const TestEngineManager manager;
     auto engineIds = manager.getAllEngineIds();
     EXPECT_TRUE(engineIds.empty());
 }
@@ -129,7 +130,7 @@ TEST(TestEngineManager, GetApplicableEngineIdsFiltersCorrectly)
     manager.addEngine(createTestEngine(3, true));
 
     TestHandle handle;
-    NiceMock<MockGraph> mockGraph;
+    const NiceMock<MockGraph> mockGraph;
     auto applicableIds = manager.getApplicableEngineIds(handle, mockGraph);
 
     EXPECT_EQ(applicableIds.size(), 2u);
@@ -143,9 +144,9 @@ TEST(TestEngineManager, GetWorkspaceSizeReturnsEngineWorkspace)
     TestEngineManager manager;
     manager.addEngine(createTestEngine(1, true, 2048));
 
-    TestHandle handle;
-    NiceMock<MockGraph> mockGraph;
-    NiceMock<MockEngineConfig> mockConfig;
+    const TestHandle handle;
+    const NiceMock<MockGraph> mockGraph;
+    const NiceMock<MockEngineConfig> mockConfig;
     ON_CALL(mockConfig, engineId()).WillByDefault(Return(1));
 
     auto workspaceSize = manager.getMaxWorkspaceSize(handle, mockGraph, mockConfig);
@@ -157,9 +158,9 @@ TEST(TestEngineManager, GetWorkspaceSizeThrowsForUnknownEngine)
     TestEngineManager manager;
     manager.addEngine(createTestEngine(1, true));
 
-    TestHandle handle;
-    NiceMock<MockGraph> mockGraph;
-    NiceMock<MockEngineConfig> mockConfig;
+    const TestHandle handle;
+    const NiceMock<MockGraph> mockGraph;
+    const NiceMock<MockEngineConfig> mockConfig;
     ON_CALL(mockConfig, engineId()).WillByDefault(Return(999));
 
     EXPECT_THROW(manager.getMaxWorkspaceSize(handle, mockGraph, mockConfig), HipdnnPluginException);

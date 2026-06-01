@@ -3,8 +3,10 @@
 #pragma once
 
 #include <algorithm>
+#include <cassert>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
+#include <iterator>
 #include <numeric>
 #include <optional>
 #include <stdexcept>
@@ -68,7 +70,7 @@ inline bool areDimensionsBroadcastCompatible(const std::vector<int64_t>& inputDi
 inline std::vector<int64_t> generateStrides(const std::vector<int64_t>& dim,
                                             const std::vector<int64_t>& strideOrder)
 {
-    size_t numDims = dim.size();
+    const size_t numDims = dim.size();
 
     if(numDims > strideOrder.size())
     {
@@ -143,7 +145,7 @@ inline std::vector<int64_t> strideOrderNhwc(size_t numDims)
 // This is the inverse operation of generateStrides.
 inline std::vector<int64_t> extractStrideOrder(const std::vector<int64_t>& strides)
 {
-    size_t numDims = strides.size();
+    const size_t numDims = strides.size();
     std::vector<size_t> indices(numDims);
     std::vector<int64_t> strideOrder(numDims);
     std::iota(indices.begin(), indices.end(), 0);
@@ -251,7 +253,7 @@ inline std::vector<int64_t>
                                   const std::vector<int64_t>& targetDims,
                                   std::optional<int64_t> axis = std::nullopt)
 {
-    size_t numDims = referenceStrides.size();
+    const size_t numDims = referenceStrides.size();
 
     // Sort dimension indices by reference strides ascending,
     // with singleton-dimension tiebreaker (singletons sort first)

@@ -15,7 +15,6 @@
 #include "Attributes.hpp"
 #include "TensorAttributes.hpp"
 #include <cstdint>
-#include <hipdnn_data_sdk/data_objects/block_scale_quantize_attributes_generated.h>
 #include <memory>
 #include <optional>
 #include <unordered_map>
@@ -55,6 +54,8 @@ namespace hipdnn_frontend::graph
 class BlockScaleQuantizeAttributes : public Attributes<BlockScaleQuantizeAttributes>
 {
 public:
+    BlockScaleQuantizeAttributes() = default;
+
     enum class InputNames
     {
         X = 0
@@ -155,46 +156,6 @@ public:
     {
         transpose = value;
         return *this;
-    }
-
-    flatbuffers::Offset<hipdnn_data_sdk::data_objects::BlockScaleQuantizeAttributes>
-        pack_attributes(flatbuffers::FlatBufferBuilder& builder) const // NOLINT
-    {
-        flatbuffers::Optional<int64_t> fbAxis = axis;
-
-        return hipdnn_data_sdk::data_objects::CreateBlockScaleQuantizeAttributes(
-            builder,
-            get_x()->get_uid(),
-            get_y()->get_uid(),
-            get_scale()->get_uid(),
-            block_size.value(), // Throws if block_size not set; requires prior validation
-            fbAxis,
-            transpose);
-    }
-
-    static BlockScaleQuantizeAttributes fromFlatBuffer(
-        const hipdnn_data_sdk::data_objects::BlockScaleQuantizeAttributes* fb,
-        const std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>>& tensorMap)
-    {
-        BlockScaleQuantizeAttributes attr;
-
-        attr.set_x(tensorMap.at(fb->x_tensor_uid()));
-        attr.set_y(tensorMap.at(fb->y_tensor_uid()));
-        attr.set_scale(tensorMap.at(fb->scale_tensor_uid()));
-
-        if(fb->block_size() != 0)
-        {
-            attr.set_block_size(fb->block_size());
-        }
-
-        if(fb->axis().has_value())
-        {
-            attr.set_axis(fb->axis().value());
-        }
-
-        attr.set_transpose(fb->transpose());
-
-        return attr;
     }
 
 private:

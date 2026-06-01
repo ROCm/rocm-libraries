@@ -627,6 +627,10 @@ TEST_P(multiStreamTest, impulseSignalOnOutput)
     {
         GTEST_SKIP() << e.what();
     }
+    catch(const DEVICEBUF_MEM_USAGE& e)
+    {
+        GTEST_SKIP() << e.what();
+    }
 
     std::vector<size_t> expected_harmonic(parameters.dim());
     for(size_t i = 0; i < parameters.dim(); i++)

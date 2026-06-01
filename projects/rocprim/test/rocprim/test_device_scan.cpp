@@ -101,7 +101,7 @@ struct DeviceScanParams
 template<bool Deterministic, typename Config = rocprim::default_config, typename... Args>
 constexpr hipError_t invoke_inclusive_scan(Args&&... args)
 {
-    if(Deterministic)
+    if constexpr(Deterministic)
     {
         return rocprim::deterministic_inclusive_scan<Config>(std::forward<Args>(args)...);
     }
@@ -114,7 +114,7 @@ constexpr hipError_t invoke_inclusive_scan(Args&&... args)
 template<bool Deterministic, typename Config = rocprim::default_config, typename... Args>
 constexpr hipError_t invoke_exclusive_scan(Args&&... args)
 {
-    if(Deterministic)
+    if constexpr(Deterministic)
     {
         return rocprim::deterministic_exclusive_scan<Config>(std::forward<Args>(args)...);
     }
@@ -1282,41 +1282,33 @@ void testLargeIndicesInclusiveScan()
 
 TEST(RocprimDeviceScanTests, LargeIndicesInclusiveScan)
 {
-#if HAS_VALGRIND_H
-    //Disable large tests to reduce valgrind run time
-    if(RUNNING_ON_VALGRIND)
-        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
-#endif // HAS_VALGRIND_H
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
+
     testLargeIndicesInclusiveScan();
 }
 
 TEST(RocprimDeviceScanTests, LargeIndicesInclusiveScanWithGraphs)
 {
-#if HAS_VALGRIND_H
-    //Disable large tests to reduce valgrind run time
-    if(RUNNING_ON_VALGRIND)
-        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
-#endif // HAS_VALGRIND_H
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
+
     testLargeIndicesInclusiveScan<true>();
 }
 
 TEST(RocprimDeviceScanTests, LargeIndicesInclusiveScanWithInitialValue)
 {
-#if HAS_VALGRIND_H
-    //Disable large tests to reduce valgrind run time
-    if(RUNNING_ON_VALGRIND)
-        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
-#endif // HAS_VALGRIND_H
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
+
     testLargeIndicesInclusiveScan<false, true>();
 }
 
 TEST(RocprimDeviceScanTests, LargeIndicesInclusiveScanWithInitialValueAndGraphs)
 {
-#if HAS_VALGRIND_H
-    //Disable large tests to reduce valgrind run time
-    if(RUNNING_ON_VALGRIND)
-        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
-#endif // HAS_VALGRIND_H
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
+
     testLargeIndicesInclusiveScan<true, true>();
 }
 
@@ -1402,21 +1394,17 @@ void testLargeIndicesExclusiveScan()
 
 TEST(RocprimDeviceScanTests, LargeIndicesExclusiveScan)
 {
-#if HAS_VALGRIND_H
-    //Disable large tests to reduce valgrind run time
-    if(RUNNING_ON_VALGRIND)
-        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
-#endif // HAS_VALGRIND_H
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
+
     testLargeIndicesExclusiveScan();
 }
 
 TEST(RocprimDeviceScanTests, LargeIndicesExclusiveScanWithGraphs)
 {
-#if HAS_VALGRIND_H
-    //Disable large tests to reduce valgrind run time
-    if(RUNNING_ON_VALGRIND)
-        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
-#endif // HAS_VALGRIND_H
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
+
     testLargeIndicesExclusiveScan<true>();
 }
 

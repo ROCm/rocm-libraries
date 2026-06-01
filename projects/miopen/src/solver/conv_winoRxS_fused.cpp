@@ -155,13 +155,13 @@ bool ConvBinWinogradRxSf2x3g1Fused::IsApplicable(const FusionContext& context,
 
     const std::string name = conv_ctx.GetStream().GetDeviceName();
     if(!(StartsWith(name, "gfx9") || StartsWith(name, "gfx10") || StartsWith(name, "gfx11") ||
-         StartsWith(name, "gfx12")))
+         StartsWith(name, "gfx120")))
         return false;
 
     if(conv_problem.IsFp16() &&
        !(StartsWith(name, "gfx906") || StartsWith(name, "gfx908") || StartsWith(name, "gfx90a") ||
          StartsWith(name, "gfx942") || StartsWith(name, "gfx1011") || StartsWith(name, "gfx1012") ||
-         StartsWith(name, "gfx103") || StartsWith(name, "gfx11") || StartsWith(name, "gfx12")))
+         StartsWith(name, "gfx103") || StartsWith(name, "gfx11") || StartsWith(name, "gfx120")))
         return false;
 
     // clang-format off
@@ -208,7 +208,7 @@ ConvSolution ConvBinWinogradRxSf2x3g1Fused::GetSolution(const FusionContext& con
     const auto is_gfx9  = StartsWith(name, "gfx9");
     const auto is_gfx10 = StartsWith(name, "gfx10");
     const auto is_gfx11 = StartsWith(name, "gfx11");
-    const auto is_gfx12 = StartsWith(name, "gfx12");
+    const auto is_gfx12 = StartsWith(name, "gfx120");
     const auto is_v21   = IsWinogradV21Preferred<2, 3>(name, conv_problem);
     size_t wg_size      = is_gfx9 ? 512 : 256;
     kernel.g_wk.push_back(wg_size * n_groups);

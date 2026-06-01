@@ -45,7 +45,7 @@
 
 #### Third-Party Libraries
 The following libraries are automatically managed by CMake (see [Dependencies.cmake](../cmake/Dependencies.cmake)):
-- [FlatBuffers](https://github.com/google/flatbuffers) - Serialization library
+- [FlatBuffers](https://github.com/google/flatbuffers) - Serialization library (used by backend and data_sdk)
 - [Google Test](https://github.com/google/googletest) - Unit testing framework
 - [spdlog](https://github.com/gabime/spdlog) - Logging library
 - [nlohmann_json](https://github.com/nlohmann/json) - JSON serialization (optional, see [Disabling JSON Support](#disabling-json-support))
@@ -165,7 +165,7 @@ By default, hipDNN includes JSON serialization support via [nlohmann_json](https
 ```bash
 cmake -GNinja -DHIPDNN_FRONTEND_SKIP_JSON_LIB=ON ..
 ```
-This disables JSON-based graph serialization and deserialization. FlatBuffer-based serialization remains available.
+This disables JSON-based graph serialization and deserialization. Binary serialization remains available.
 
 ### ROCM_PATH, ROCM_CMAKE_PATH, and CMAKE_INSTALL_PREFIX
 
@@ -237,7 +237,7 @@ All targets support parallel builds with ninja.
 | `current-coverage` | Generate test coverage reports using coverage data already on disk (does not automatically run `check`; requires `-DHIPDNN_ENABLE_COVERAGE=ON`) |
 | `clean` | Clean build artifacts |
 | `validate_test_names` | Validates test names conform to naming rules |
-| `generate_hipdnn_data_sdk_headers` | Generate C++ headers from schema (`.fbs`) files |
+| `generate_hipdnn_flatbuffers_sdk_headers` | Generate C++ headers from schema (`.fbs`) files |
 
 The following example build commands are equivalent (depending on which generator was used) and will build the `check` target, to build and run all tests.
 

@@ -67,19 +67,67 @@
             }
         },
         {
-            "name": "miopen-provider",
-            "description": "Build hipdnn and miopen-provider",
+            "name": "hipdnn-integration-tests",
+            "description": "Build hipdnn and hipdnn-integration-tests",
             "inherits": ["default:release"],
             "cacheVariables": {
-                "ROCM_LIBS_ENABLE_COMPONENTS": "hipdnn;miopen-provider"
+                "ROCM_LIBS_ENABLE_COMPONENTS": "hipdnn;hipdnn-integration-tests"
+            }
+        },
+        {
+            "name": "hipdnn-providers",
+            "description": "Build hipdnn, all supported providers, and integration tests",
+            "inherits": ["default:release"],
+            "cacheVariables": {
+                "ROCM_LIBS_ENABLE_COMPONENTS": "hipdnn;hipdnn-integration-tests;miopen-provider;hipblaslt-provider"
+            }
+        },
+        {
+            "name": "hipdnn-providers-all",
+            "description": "Build hipdnn, all providers including some unsupported providers, and integration tests",
+            "inherits": ["default:release"],
+            "cacheVariables": {
+                "ROCM_LIBS_ENABLE_COMPONENTS": "hipdnn;hipdnn-integration-tests;miopen-provider;hipblaslt-provider;hip-kernel-provider"
+            }
+        },
+        {
+            "name": "miopen-provider",
+            "description": "Build hipdnn, miopen-provider and integration tests",
+            "inherits": ["default:release"],
+            "cacheVariables": {
+                "ROCM_LIBS_ENABLE_COMPONENTS": "hipdnn;hipdnn-integration-tests;miopen-provider"
             }
         },
         {
             "name": "hipblaslt-provider",
-            "description": "Build hipdnn and hipblaslt-provider",
+            "description": "Build hipdnn, hipblaslt-provider and integration tests",
             "inherits": ["default:release"],
             "cacheVariables": {
-                "ROCM_LIBS_ENABLE_COMPONENTS": "hipdnn;hipblaslt-provider"
+                "ROCM_LIBS_ENABLE_COMPONENTS": "hipdnn;hipdnn-integration-tests;hipblaslt-provider"
+            }
+        },
+        {
+            "name": "hip-kernel-provider",
+            "description": "Build hipdnn, hip-kernel-provider and integration tests",
+            "inherits": ["default:release"],
+            "cacheVariables": {
+                "ROCM_LIBS_ENABLE_COMPONENTS": "hipdnn;hipdnn-integration-tests;hip-kernel-provider"
+            }
+        },
+        {
+            "name": "hipdnn-samples",
+            "description": "Build hipdnn, all supported providers, integration tests, and samples",
+            "inherits": ["default:release"],
+            "cacheVariables": {
+                "ROCM_LIBS_ENABLE_COMPONENTS": "hipdnn;hipdnn-integration-tests;miopen-provider;hipblaslt-provider;hipdnn-samples"
+            }
+        },
+        {
+            "name": "hipdnn-dev-all",
+            "description": "Build hipdnn, all providers (including some unsupported), integration tests, and samples",
+            "inherits": ["default:release"],
+            "cacheVariables": {
+                "ROCM_LIBS_ENABLE_COMPONENTS": "hipdnn;hipdnn-integration-tests;miopen-provider;hipblaslt-provider;hip-kernel-provider;hipdnn-samples"
             }
         }
     ],

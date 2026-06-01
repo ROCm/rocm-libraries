@@ -8,17 +8,24 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
-#include <dirent.h>
 #include <fstream>
 #include <iostream>
 #include <limits>
 #include <optional>
 #include <string>
 
+#ifdef __linux__
+#include <dirent.h>
+#endif
+
 #ifndef CK_TILE_FMHA_ENABLE_HEAD_GROUPING
 #define CK_TILE_FMHA_ENABLE_HEAD_GROUPING 1
 #endif
 
+#if __clang_major__ >= 23
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+#endif
 #if CK_TILE_FMHA_ENABLE_HEAD_GROUPING
 CK_TILE_DECLARE_ENV_VAR_BOOL(CK_TILE_FMHA_HEAD_GROUP_LOG)
 CK_TILE_DECLARE_ENV_VAR_BOOL(CK_TILE_FMHA_DISABLE_HEAD_GROUPING)
@@ -69,6 +76,8 @@ inline std::optional<long long> read_property_value(const std::string& filepath,
     }
     return std::nullopt;
 }
+
+#if defined(__linux__)
 
 struct kfd_device_location
 {
@@ -175,6 +184,12 @@ inline size_t get_kfd_sysfs_llc_cache_bytes()
 
     return read_kfd_node_l3_bytes(*node);
 }
+
+#else
+
+inline size_t get_kfd_sysfs_llc_cache_bytes() { return 0; }
+
+#endif
 
 inline size_t get_default_llc_cache_bytes_for_arch(const std::string& arch);
 
@@ -416,3 +431,6 @@ float run_fwd_head_grouped(const ck_tile::stream_config& sc,
 
 } // namespace fmha_fwd_head_grouping
 #endif // CK_TILE_FMHA_ENABLE_HEAD_GROUPING
+#if __clang_major__ >= 23
+#pragma clang diagnostic pop
+#endif

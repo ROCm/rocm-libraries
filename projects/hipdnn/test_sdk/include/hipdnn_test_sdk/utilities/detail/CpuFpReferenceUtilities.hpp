@@ -19,12 +19,25 @@
 namespace hipdnn_test_sdk::detail
 {
 using hipdnn_data_sdk::types::bfloat16;
+using hipdnn_data_sdk::types::fp4_e2m1;
+using hipdnn_data_sdk::types::fp6_e2m3;
+using hipdnn_data_sdk::types::fp6_e3m2;
+using hipdnn_data_sdk::types::fp8_e4m3;
+using hipdnn_data_sdk::types::fp8_e5m2;
+using hipdnn_data_sdk::types::fp8_e8m0;
 using hipdnn_data_sdk::types::half;
 
-// Type trait to validate tensor types (arithmetic types + half + bfloat16)
+// Type trait to validate tensor types (arithmetic types + half + bfloat16 + fp8 types)
 template <typename T>
-constexpr bool IS_VALID_TENSOR_TYPE_V
-    = std::disjunction_v<std::is_arithmetic<T>, std::is_same<T, half>, std::is_same<T, bfloat16>>;
+constexpr bool IS_VALID_TENSOR_TYPE_V = std::disjunction_v<std::is_arithmetic<T>,
+                                                           std::is_same<T, half>,
+                                                           std::is_same<T, bfloat16>,
+                                                           std::is_same<T, fp4_e2m1>,
+                                                           std::is_same<T, fp6_e2m3>,
+                                                           std::is_same<T, fp6_e3m2>,
+                                                           std::is_same<T, fp8_e4m3>,
+                                                           std::is_same<T, fp8_e5m2>,
+                                                           std::is_same<T, fp8_e8m0>>;
 
 /**
  * @brief Safely convert between types while avoiding implicit precision loss warnings
@@ -46,6 +59,15 @@ inline TargetType safeConvert(const SourceType& value)
         // For bfloat16/half, explicitly convert through float to avoid precision warnings
         // These types lack direct constructors from double, only from float
         return static_cast<TargetType>(static_cast<float>(value));
+    }
+    else if constexpr(std::is_same_v<TargetType, fp4_e2m1> || std::is_same_v<TargetType, fp6_e2m3>
+                      || std::is_same_v<TargetType, fp6_e3m2>
+                      || std::is_same_v<TargetType, fp8_e4m3>
+                      || std::is_same_v<TargetType, fp8_e5m2>
+                      || std::is_same_v<TargetType, fp8_e8m0>)
+    {
+        // For FP8 types, convert through float
+        return TargetType(static_cast<float>(value));
     }
     else
     {
@@ -172,14 +194,14 @@ struct ParallelTensorFunctorDynamic
             return;
         }
 
-        std::size_t workPerThread = (totalElements + numThreads - 1) / numThreads;
+        const std::size_t workPerThread = (totalElements + numThreads - 1) / numThreads;
 
         std::vector<JoinableThread> threads(numThreads);
 
         for(std::size_t threadIdx = 0; threadIdx < numThreads; ++threadIdx)
         {
-            std::size_t workBegin = threadIdx * workPerThread;
-            std::size_t workEnd = std::min((threadIdx + 1) * workPerThread, totalElements);
+            const std::size_t workBegin = threadIdx * workPerThread;
+            const std::size_t workEnd = std::min((threadIdx + 1) * workPerThread, totalElements);
 
             auto threadFunc = [=, *this] {
                 for(std::size_t workIdx = workBegin; workIdx < workEnd; ++workIdx)

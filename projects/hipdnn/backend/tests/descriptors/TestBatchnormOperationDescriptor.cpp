@@ -12,9 +12,9 @@
 
 #include <algorithm>
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/batchnorm_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/batchnorm_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/BatchnormConstants.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
@@ -24,7 +24,7 @@
 
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_tests::constants;
 using hipdnn_tests::toVec;
 
@@ -53,11 +53,11 @@ public:
         setIf(HIPDNN_ATTR_OPERATION_BATCHNORM_BIAS_EXT, _biasDesc);
         setIf(HIPDNN_ATTR_OPERATION_BATCHNORM_EPSILON_EXT, _epsilonDesc);
         setIf(HIPDNN_ATTR_OPERATION_BATCHNORM_Y_EXT, _yDesc);
-        if(std::find(skip.begin(), skip.end(), HIPDNN_ATTR_BATCHNORM_MATH_PREC_EXT) == skip.end())
+        if(std::find(skip.begin(), skip.end(), HIPDNN_ATTR_BATCHNORM_COMP_TYPE_EXT) == skip.end())
         {
             auto computeType = HIPDNN_DATA_FLOAT;
             desc->setAttribute(
-                HIPDNN_ATTR_BATCHNORM_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+                HIPDNN_ATTR_BATCHNORM_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
         }
     }
 
@@ -262,7 +262,7 @@ INSTANTIATE_TEST_SUITE_P(RequiredAttributes,
                                            HIPDNN_ATTR_OPERATION_BATCHNORM_BIAS_EXT,
                                            HIPDNN_ATTR_OPERATION_BATCHNORM_EPSILON_EXT,
                                            HIPDNN_ATTR_OPERATION_BATCHNORM_Y_EXT,
-                                           HIPDNN_ATTR_BATCHNORM_MATH_PREC_EXT));
+                                           HIPDNN_ATTR_BATCHNORM_COMP_TYPE_EXT));
 
 // =============================================================================
 // Finalize Failure Tests - Optional Tensor Pairing (mean + inv_variance)
@@ -490,7 +490,7 @@ TEST_F(TestBatchnormOperationDescriptor, SetMathPrec)
     auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_FLOAT;
     ASSERT_NO_THROW(desc->setAttribute(
-        HIPDNN_ATTR_BATCHNORM_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType));
+        HIPDNN_ATTR_BATCHNORM_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType));
     ASSERT_EQ(desc->getComputeDataType(), DataType::FLOAT);
 }
 
@@ -655,13 +655,13 @@ TEST_F(TestBatchnormOperationDescriptor, GetAttributeComputeType)
     setAllAttributesExcept();
     auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_HALF;
-    desc->setAttribute(HIPDNN_ATTR_BATCHNORM_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    desc->setAttribute(HIPDNN_ATTR_BATCHNORM_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
     hipdnnDataType_t retrieved = HIPDNN_DATA_FLOAT;
     int64_t elementCount = 0;
     ASSERT_NO_THROW(desc->getAttribute(
-        HIPDNN_ATTR_BATCHNORM_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &elementCount, &retrieved));
+        HIPDNN_ATTR_BATCHNORM_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &elementCount, &retrieved));
 
     ASSERT_EQ(retrieved, HIPDNN_DATA_HALF);
     ASSERT_EQ(elementCount, 1);
@@ -678,7 +678,7 @@ TEST_F(TestBatchnormOperationDescriptor, GetAttributeMathPrecQueryReturnsOne)
 
     int64_t elementCount = 0;
     ASSERT_NO_THROW(getDescriptor()->getAttribute(
-        HIPDNN_ATTR_BATCHNORM_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 0, &elementCount, nullptr));
+        HIPDNN_ATTR_BATCHNORM_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 0, &elementCount, nullptr));
     ASSERT_EQ(elementCount, 1);
 }
 
@@ -862,7 +862,7 @@ TEST_F(TestBatchnormOperationDescriptor, BuildNodeWithHalfComputeType)
 
     auto desc = getDescriptor();
     auto computeType = HIPDNN_DATA_HALF;
-    desc->setAttribute(HIPDNN_ATTR_BATCHNORM_MATH_PREC_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
+    desc->setAttribute(HIPDNN_ATTR_BATCHNORM_COMP_TYPE_EXT, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
     desc->finalize();
 
     auto node = desc->buildNode();
@@ -968,7 +968,7 @@ TEST_F(TestBatchnormOperationDescriptor, ToStringContainsExpectedInfo)
     setAllAttributesExcept();
     setOptionalMeanInvVariance();
     auto desc = getDescriptor();
-    std::string str = desc->toString();
+    const std::string str = desc->toString();
     ASSERT_NE(str.find("BatchnormOperationDescriptor"), std::string::npos);
     ASSERT_NE(str.find("x_uid=" + std::to_string(K_BATCHNORM_TENSOR_X_UID)), std::string::npos);
     ASSERT_NE(str.find("scale_uid=" + std::to_string(K_BATCHNORM_TENSOR_SCALE_UID)),

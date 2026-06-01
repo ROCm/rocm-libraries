@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,6 +28,7 @@
 #include <string>
 
 #include "testing_gebrd.hpp"
+#include "testing_geev.hpp"
 #include "testing_gels.hpp"
 #include "testing_geqrf.hpp"
 #include "testing_gesv.hpp"
@@ -44,6 +45,7 @@
 #include "testing_potrf.hpp"
 #include "testing_potri.hpp"
 #include "testing_potrs.hpp"
+#include "testing_syev_heev.hpp"
 #include "testing_syevd_heevd.hpp"
 #include "testing_syevdx_heevdx.hpp"
 #include "testing_syevj_heevj.hpp"
@@ -52,6 +54,7 @@
 #include "testing_sygvj_hegvj.hpp"
 #include "testing_sytrd_hetrd.hpp"
 #include "testing_sytrf.hpp"
+#include "testing_sytrs.hpp"
 
 #ifdef HAVE_HIPSPARSE
 #include "testing_csrlsvchol.hpp"
@@ -78,6 +81,7 @@ class hipsolver_dispatcher
         // Map for functions that support all precisions
         static const func_map map = {
             {"gebrd", testing_gebrd<API_NORMAL, false, false, T>},
+            {"geev_64", testing_geev<API_COMPAT, false, false, T, T, int64_t, size_t>},
             {"gels", testing_gels<API_NORMAL, false, false, false, T>},
             {"geqrf", testing_geqrf<API_NORMAL, false, false, T, int, int>},
             {"geqrf_64", testing_geqrf<API_COMPAT, false, false, T, int64_t, size_t>},
@@ -96,6 +100,7 @@ class hipsolver_dispatcher
             {"potrs", testing_potrs<API_NORMAL, false, false, T>},
             {"potrs_batched", testing_potrs<API_NORMAL, true, false, T>},
             {"sytrf", testing_sytrf<API_NORMAL, false, false, T>},
+            {"sytrs_64", testing_sytrs<API_COMPAT, false, false, T, int64_t, size_t>},
         };
 
         // Grab function from the map and execute
@@ -120,9 +125,23 @@ class hipsolver_dispatcher
             {"ormqr", testing_ormqr_unmqr<API_NORMAL, T>},
             {"ormtr", testing_ormtr_unmtr<API_NORMAL, T>},
             {"syevd", testing_syevd_heevd<API_NORMAL, false, false, T>},
+            {"syevd_64", testing_syevd_heevd<API_COMPAT, false, false, T, int64_t, size_t>},
             {"syevdx", testing_syevdx_heevdx<API_NORMAL, false, false, T>},
             {"syevj", testing_syevj_heevj<API_NORMAL, false, false, T>},
-            {"syevj_batched", testing_syevj_heevj<API_NORMAL, false, true, T>},
+            {"syev_batched_64",
+             testing_syev_heev<
+                 API_COMPAT,
+                 false,
+                 true,
+                 T,
+                 int64_t,
+                 size_t>}, // NOTE: batched boolean set to false and strided boolean set to true, since syev batched is actually strided batched
+            {"syevj_batched",
+             testing_syevj_heevj<
+                 API_NORMAL,
+                 false,
+                 true,
+                 T>}, // NOTE: batched boolean set to false and strided boolean set to true, since syevj batched is actually strided batched
             {"sygvd", testing_sygvd_hegvd<API_NORMAL, false, false, T>},
             {"sygvdx", testing_sygvdx_hegvdx<API_NORMAL, false, false, T>},
             {"sygvj", testing_sygvj_hegvj<API_NORMAL, false, false, T>},
@@ -157,9 +176,23 @@ class hipsolver_dispatcher
             {"unmqr", testing_ormqr_unmqr<API_NORMAL, T>},
             {"unmtr", testing_ormtr_unmtr<API_NORMAL, T>},
             {"heevd", testing_syevd_heevd<API_NORMAL, false, false, T>},
+            {"heevd_64", testing_syevd_heevd<API_COMPAT, false, false, T, int64_t, size_t>},
             {"heevdx", testing_syevdx_heevdx<API_NORMAL, false, false, T>},
             {"heevj", testing_syevj_heevj<API_NORMAL, false, false, T>},
-            {"heevj_batched", testing_syevj_heevj<API_NORMAL, false, true, T>},
+            {"heev_batched_64",
+             testing_syev_heev<
+                 API_COMPAT,
+                 false,
+                 true,
+                 T,
+                 int64_t,
+                 size_t>}, // NOTE: batched boolean set to false and strided boolean set to true, since heev batched is actually strided batched
+            {"heevj_batched",
+             testing_syevj_heevj<
+                 API_NORMAL,
+                 false,
+                 true,
+                 T>}, // NOTE: batched boolean set to false and strided boolean set to true, since heevj batched is actually strided batched
             {"hegvd", testing_sygvd_hegvd<API_NORMAL, false, false, T>},
             {"hegvdx", testing_sygvdx_hegvdx<API_NORMAL, false, false, T>},
             {"hegvj", testing_sygvj_hegvj<API_NORMAL, false, false, T>},

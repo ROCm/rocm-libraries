@@ -148,23 +148,29 @@ private:
     h_memory buffer;
 };
 
-inline hipError_t
-    synchronize(HipDeviceBuffer& dBuf, const HipHostBuffer& hBuf, std::size_t block_count = 1)
+inline hipError_t synchronize(HipDeviceBuffer&    dBuf,
+                              const HipHostBuffer& hBuf,
+                              std::size_t          block_count = 1,
+                              hipStream_t          stream      = nullptr)
 {
     hipError_t hip_err;
+
+    // Perform async copy for all blocks
     for(size_t i_block = 0; i_block < block_count; i_block++)
     {
-        hip_err = hipMemcpy(dBuf.as<char>() + i_block * dBuf.getNumBytes() / block_count,
-                            hBuf.as<char>(),
-                            dBuf.getNumBytes() / block_count,
-                            dBuf.use_HMM ? hipMemcpyHostToHost : hipMemcpyHostToDevice);
+        hip_err = hipMemcpyAsync(dBuf.as<char>() + i_block * dBuf.getNumBytes() / block_count,
+                                 hBuf.as<char>(),
+                                 dBuf.getNumBytes() / block_count,
+                                 dBuf.use_HMM ? hipMemcpyHostToHost : hipMemcpyHostToDevice,
+                                 stream);
 
         if(hip_err != hipSuccess)
         {
             return hip_err;
         }
     }
-    return hip_err;
+
+    return hipStreamSynchronize(stream);
 }
 
 inline hipError_t broadcast(HipDeviceBuffer& dBuf, std::size_t repeats)
@@ -192,30 +198,40 @@ inline hipError_t synchronize(HipHostBuffer&         hBuf,
                               size_t                 col         = 0,
                               size_t                 lda         = 0,
                               size_t                 elementSize = 1,
-                              bool                   needSwizzle = false)
+                              bool                   needSwizzle = false,
+                              hipStream_t            stream      = nullptr)
 {
     if(row > lda)
         hipblaslt_cerr << "invalid values of lda in synchronize()" << std::endl;
     hipError_t hip_err;
-    if(hipSuccess != (hip_err = hipDeviceSynchronize()))
+
+    // Synchronize to ensure prior work is complete
+    hip_err = hipStreamSynchronize(stream);
+    if(hip_err != hipSuccess)
         return hip_err;
 
     if(!needSwizzle)
-        return hipMemcpy(
-            hBuf.as<char>(), dBuf.as<char>(), hBuf.getNumBytes(), hipMemcpyDeviceToHost);
+    {
+        hip_err = hipMemcpyAsync(
+            hBuf.as<char>(), dBuf.as<char>(), hBuf.getNumBytes(), hipMemcpyDeviceToHost, stream);
+        if(hip_err != hipSuccess)
+            return hip_err;
+        return hipStreamSynchronize(stream);
+    }
 
     for(size_t j = 0; j < batch * col; j++)
     {
-        hip_err = hipMemcpy(hBuf.as<char>() + (j * lda * elementSize),
-                            dBuf.as<char>() + (j * row * elementSize),
-                            row * elementSize,
-                            hipMemcpyDeviceToHost);
+        hip_err = hipMemcpyAsync(hBuf.as<char>() + (j * lda * elementSize),
+                                 dBuf.as<char>() + (j * row * elementSize),
+                                 row * elementSize,
+                                 hipMemcpyDeviceToHost,
+                                 stream);
 
         if(hip_err != hipSuccess)
             return hip_err;
     }
 
-    return hipSuccess;
+    return hipStreamSynchronize(stream);
 }
 
 template <typename T1>
@@ -234,6 +250,12 @@ inline void copy_buf(HipHostBuffer& src, HipHostBuffer& dst, hipDataType type)
         break;
     case HIP_R_64F:
         copy_buf<double>(src, dst);
+        break;
+    case HIP_C_32F:
+        copy_buf<std::complex<float>>(src, dst);
+        break;
+    case HIP_C_64F:
+        copy_buf<std::complex<double>>(src, dst);
         break;
     case HIP_R_16F:
         copy_buf<hipblasLtHalf>(src, dst);
@@ -260,7 +282,7 @@ inline void copy_buf(HipHostBuffer& src, HipHostBuffer& dst, hipDataType type)
         copy_buf<hipblasLtInt8>(src, dst);
         break;
     default:
-        hipblaslt_cerr << "Error type in copy_buf" << std::endl;
+        hipblaslt_cerr << "Error type in copy_buf "<< std::endl;
         break;
     }
 }
@@ -268,6 +290,7 @@ inline void copy_buf(HipHostBuffer& src, HipHostBuffer& dst, hipDataType type)
 template <typename T1, typename Tc>
 inline void transform_buf(HipHostBuffer& src, HipHostBuffer& dst)
 {
+    constexpr bool requires_real_extraction = !is_std_complex_v<Tc> && is_std_complex_v<T1>;
     if constexpr(std::is_same<Tc, float>::value
                  || !(std::is_same<T1, hipblaslt_bf8_fnuz>::value
                       || std::is_same<T1, hipblaslt_f8_fnuz>::value))
@@ -275,10 +298,24 @@ inline void transform_buf(HipHostBuffer& src, HipHostBuffer& dst)
         if constexpr(std::is_same<Tc, float>::value
                      || !(std::is_same<T1, hipblaslt_bf8>::value
                           || std::is_same<T1, hipblaslt_f8>::value))
+        {
             std::transform(static_cast<T1*>(src.buf()),
                            static_cast<T1*>(src.end()),
                            static_cast<Tc*>(dst.buf()),
-                           [](T1 c) -> Tc { return static_cast<Tc>(c); });
+
+                           [](T1 c) -> Tc {
+                               if constexpr(requires_real_extraction)
+                               {
+                                   // If T1 is complex and Tc is real, cast the real part
+                                   return static_cast<Tc>(c.real()); 
+                               }
+                               else
+                               {
+                                   // Standard cast (complex->complex, real->real, or custom)
+                                   return static_cast<Tc>(c);
+                               }
+                           });
+        }
     }
 }
 
@@ -292,6 +329,12 @@ inline void _transform_buf(HipHostBuffer& src, HipHostBuffer& dst, hipDataType t
         break;
     case HIP_R_64F:
         transform_buf<T1, double>(src, dst);
+        break;
+    case HIP_C_32F:
+        transform_buf<T1, std::complex<float>>(src, dst);
+        break;
+    case HIP_C_64F:
+        transform_buf<T1, std::complex<double>>(src, dst);
         break;
     case HIP_R_16F:
         transform_buf<T1, hipblasLtHalf>(src, dst);
@@ -315,6 +358,12 @@ inline void
         break;
     case HIP_R_64F:
         _transform_buf<double>(src, dst, typeTc);
+        break;
+    case HIP_C_32F:
+        _transform_buf<std::complex<float>>(src, dst, typeTc);
+        break;
+    case HIP_C_64F:
+        _transform_buf<std::complex<double>>(src, dst, typeTc);
         break;
     case HIP_R_16F:
         _transform_buf<hipblasLtHalf>(src, dst, typeTc);

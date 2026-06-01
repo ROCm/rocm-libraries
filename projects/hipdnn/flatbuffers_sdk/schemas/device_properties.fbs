@@ -1,0 +1,38 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+namespace hipdnn_flatbuffers_sdk.data_objects;
+
+/// @brief Device properties for heuristic plugin selection.
+///
+/// This table carries device facts needed for engine selection heuristics.
+/// It is serialized by the backend and passed to heuristic plugins via
+/// hipdnnHeuristicHandleSetDeviceProperties.
+///
+/// Evolution: New optional fields can be added without breaking compatibility.
+/// Plugins verify and parse this buffer using flatbuffers::Verifier.
+table DeviceProperties {
+    /// Device ID from hipGetDevice
+    device_id: int = -1;
+
+    /// Number of multiprocessors (compute units)
+    multi_processor_count: int = 0;
+
+    /// Total global memory in bytes
+    total_global_mem: ulong = 0;
+
+    /// GPU architecture name (e.g., "gfx90a", "gfx942")
+    architecture_name: string;
+
+    // Future optional fields (additive evolution):
+    // wavefront_size: int;
+    // max_threads_per_block: int;
+    // warp_size: int;
+    // compute_capability_major: int;
+    // compute_capability_minor: int;
+}
+
+root_type DeviceProperties;
+
+// File identifier for schema versioning
+file_identifier "HDDP";  // HipDNN Device Properties

@@ -13,9 +13,10 @@
 
 #include <flatbuffers/flatbuffers.h>
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/data_objects/pointwise_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_test_sdk/constants/PointwiseConstants.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
 #include <array>
@@ -25,9 +26,9 @@
 
 using namespace hipdnn_backend;
 using namespace hipdnn_backend::test_utilities;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
+using namespace hipdnn_tests::constants;
 using hipdnn_tests::toVec;
-
 namespace
 {
 
@@ -102,10 +103,12 @@ protected:
 
 TEST_F(TestGraphDescriptorPointwise, BuildFromSingleOperation)
 {
-    auto in0Desc = createFinalizedTensor(40, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-    auto out0Desc = createFinalizedTensor(41, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-    auto in1Desc = createFinalizedTensor(3);
-    auto in2Desc = createFinalizedTensor(4);
+    auto in0Desc = createFinalizedTensor(
+        K_PW_TENSOR_IN0_UID, toVec(K_PW_TENSOR_DIMS), toVec(K_PW_TENSOR_STRIDES));
+    auto out0Desc = createFinalizedTensor(
+        K_PW_TENSOR_OUT0_UID, toVec(K_PW_TENSOR_DIMS), toVec(K_PW_TENSOR_STRIDES));
+    auto in1Desc = createFinalizedTensor(K_PW_TENSOR_IN1_UID);
+    auto in2Desc = createFinalizedTensor(K_PW_TENSOR_IN2_UID);
     auto opDesc
         = createFinalizedPointwiseOp(in0Desc.get(), out0Desc.get(), in1Desc.get(), in2Desc.get());
 
@@ -139,19 +142,21 @@ TEST_F(TestGraphDescriptorPointwise, BuildFromSingleOperation)
     ASSERT_NE(attrs, nullptr);
 
     // Verify tensor UID references
-    EXPECT_EQ(attrs->in_0_tensor_uid, 40);
-    EXPECT_EQ(attrs->out_0_tensor_uid, 41);
-    EXPECT_EQ(attrs->in_1_tensor_uid, 3);
-    EXPECT_EQ(attrs->in_2_tensor_uid, 4);
+    EXPECT_EQ(attrs->in_0_tensor_uid, K_PW_TENSOR_IN0_UID);
+    EXPECT_EQ(attrs->out_0_tensor_uid, K_PW_TENSOR_OUT0_UID);
+    EXPECT_EQ(attrs->in_1_tensor_uid, K_PW_TENSOR_IN1_UID);
+    EXPECT_EQ(attrs->in_2_tensor_uid, K_PW_TENSOR_IN2_UID);
     EXPECT_FALSE(attrs->axis_tensor_uid.has_value());
 }
 
 TEST_F(TestGraphDescriptorPointwise, ComputeDataTypePreserved)
 {
-    auto in0Desc = createFinalizedTensor(40, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-    auto out0Desc = createFinalizedTensor(41, {1, 64, 32, 32}, {65536, 1024, 32, 1});
-    auto in1Desc = createFinalizedTensor(3);
-    auto in2Desc = createFinalizedTensor(4);
+    auto in0Desc = createFinalizedTensor(
+        K_PW_TENSOR_IN0_UID, toVec(K_PW_TENSOR_DIMS), toVec(K_PW_TENSOR_STRIDES));
+    auto out0Desc = createFinalizedTensor(
+        K_PW_TENSOR_OUT0_UID, toVec(K_PW_TENSOR_DIMS), toVec(K_PW_TENSOR_STRIDES));
+    auto in1Desc = createFinalizedTensor(K_PW_TENSOR_IN1_UID);
+    auto in2Desc = createFinalizedTensor(K_PW_TENSOR_IN2_UID);
     auto opDesc = createFinalizedPointwiseOp(
         in0Desc.get(), out0Desc.get(), in1Desc.get(), in2Desc.get(), HIPDNN_DATA_HALF);
 

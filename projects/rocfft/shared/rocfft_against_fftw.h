@@ -1,4 +1,4 @@
-// Copyright (C) 2016 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -26,6 +26,7 @@
 #include <stdexcept>
 #include <vector>
 
+#include "fft_enums.h"
 #include "fftw_transform.h"
 
 // Return the precision enum for rocFFT based upon the type.
@@ -48,7 +49,7 @@ extern bool use_fftw_wisdom;
 // precision, and dimensions.  cpu_out is required if we're using
 // wisdom, which runs actual FFTs to work out the best plan.
 template <typename Tfloat>
-static typename fftw_trait<Tfloat>::fftw_plan_type
+static fftw_plan_wrapper_t<Tfloat>
     fftw_plan_with_precision(const std::vector<fftw_iodim64>& dims,
                              const std::vector<fftw_iodim64>& howmany_dims,
                              const fft_transform_type         transformType,
@@ -56,8 +57,6 @@ static typename fftw_trait<Tfloat>::fftw_plan_type
                              void*                            cpu_in,
                              void*                            cpu_out)
 {
-    using fftw_complex_type = typename fftw_trait<Tfloat>::fftw_complex_type;
-
     // NB: Using FFTW_MEASURE implies that the input buffer's data
     // may be destroyed during plan creation.  But if we're wanting
     // to run FFTW in the first place, we must have just created an
@@ -70,8 +69,8 @@ static typename fftw_trait<Tfloat>::fftw_plan_type
                                             dims.data(),
                                             howmany_dims.size(),
                                             howmany_dims.data(),
-                                            reinterpret_cast<fftw_complex_type*>(cpu_in),
-                                            reinterpret_cast<fftw_complex_type*>(cpu_out),
+                                            reinterpret_cast<fftw_complex_t<Tfloat>*>(cpu_in),
+                                            reinterpret_cast<fftw_complex_t<Tfloat>*>(cpu_out),
                                             -1,
                                             use_fftw_wisdom ? FFTW_MEASURE : FFTW_ESTIMATE);
     case fft_transform_type_complex_inverse:
@@ -79,8 +78,8 @@ static typename fftw_trait<Tfloat>::fftw_plan_type
                                             dims.data(),
                                             howmany_dims.size(),
                                             howmany_dims.data(),
-                                            reinterpret_cast<fftw_complex_type*>(cpu_in),
-                                            reinterpret_cast<fftw_complex_type*>(cpu_out),
+                                            reinterpret_cast<fftw_complex_t<Tfloat>*>(cpu_in),
+                                            reinterpret_cast<fftw_complex_t<Tfloat>*>(cpu_out),
                                             1,
                                             use_fftw_wisdom ? FFTW_MEASURE : FFTW_ESTIMATE);
     case fft_transform_type_real_forward:
@@ -89,14 +88,14 @@ static typename fftw_trait<Tfloat>::fftw_plan_type
                                             howmany_dims.size(),
                                             howmany_dims.data(),
                                             reinterpret_cast<Tfloat*>(cpu_in),
-                                            reinterpret_cast<fftw_complex_type*>(cpu_out),
+                                            reinterpret_cast<fftw_complex_t<Tfloat>*>(cpu_out),
                                             use_fftw_wisdom ? FFTW_MEASURE : FFTW_ESTIMATE);
     case fft_transform_type_real_inverse:
         return fftw_plan_guru64_c2r<Tfloat>(dims.size(),
                                             dims.data(),
                                             howmany_dims.size(),
                                             howmany_dims.data(),
-                                            reinterpret_cast<fftw_complex_type*>(cpu_in),
+                                            reinterpret_cast<fftw_complex_t<Tfloat>*>(cpu_in),
                                             reinterpret_cast<Tfloat*>(cpu_out),
                                             use_fftw_wisdom ? FFTW_MEASURE : FFTW_ESTIMATE);
     default:
@@ -107,16 +106,15 @@ static typename fftw_trait<Tfloat>::fftw_plan_type
 // construct an FFTW plan, given rocFFT parameters.  output is
 // required if planning with wisdom.
 template <typename Tfloat>
-static typename fftw_trait<Tfloat>::fftw_plan_type
-    fftw_plan_via_rocfft(const std::vector<size_t>& length,
-                         const std::vector<size_t>& istride,
-                         const std::vector<size_t>& ostride,
-                         const size_t               nbatch,
-                         const size_t               idist,
-                         const size_t               odist,
-                         const fft_transform_type   transformType,
-                         std::vector<hostbuf>&      input,
-                         std::vector<hostbuf>&      output)
+static fftw_plan_wrapper_t<Tfloat> fftw_plan_via_rocfft(const std::vector<size_t>& length,
+                                                        const std::vector<size_t>& istride,
+                                                        const std::vector<size_t>& ostride,
+                                                        const size_t               nbatch,
+                                                        const size_t               idist,
+                                                        const size_t               odist,
+                                                        const fft_transform_type   transformType,
+                                                        std::vector<hostbuf>&      input,
+                                                        std::vector<hostbuf>&      output)
 {
     // Dimension configuration:
     std::vector<fftw_iodim64> dims(length.size());
@@ -142,10 +140,10 @@ static typename fftw_trait<Tfloat>::fftw_plan_type
 }
 
 template <typename Tfloat>
-void fftw_run(fft_transform_type                          transformType,
-              typename fftw_trait<Tfloat>::fftw_plan_type cpu_plan,
-              std::vector<hostbuf>&                       cpu_in,
-              std::vector<hostbuf>&                       cpu_out)
+void fftw_run(fft_transform_type                 transformType,
+              const fftw_plan_wrapper_t<Tfloat>& cpu_plan,
+              std::vector<hostbuf>&              cpu_in,
+              std::vector<hostbuf>&              cpu_out)
 {
     switch(transformType)
     {

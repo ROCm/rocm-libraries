@@ -14,6 +14,7 @@
 #include <miopen/solver/gemm_common.hpp>
 
 #include <ranges>
+#include <set>
 
 namespace miopen {
 namespace solver {
@@ -141,6 +142,13 @@ float GemmFwdBase::GetWti(const ExecutionContext&, const ProblemDescription& pro
         if(wDesc.GetType() == miopenInt8 && yDesc.GetType() != miopenInt32)
             n_CastTensor = 1;
     }
+    // 3D point-output fwd path with stride==filter can run one strided-batched GEMM.
+    else if(miopen::conv::IsFwdDataPointOutput3dStrideEqFilter(problem) &&
+            wDesc.GetType() != miopenInt8)
+    {
+        n_gemm_runs            = 1;
+        n_gemm_strided_batched = static_cast<int>(in_n);
+    }
     else // not 1x1
     {
         n_Im2ColGPU = in_n;
@@ -199,6 +207,37 @@ size_t GemmFwd1x1_0_2::GetWorkspaceSize(const ExecutionContext& context,
     std::ignore = problem;
     return 0;
 #endif
+}
+
+bool GemmFwd1x1_0_2::IsSlow(const ExecutionContext& context,
+                            const ProblemDescription& problem) const
+{
+    const std::string& arch        = context.GetStream().GetDeviceName();
+    const std::set<std::string> mi = {"gfx942", "gfx955"};
+    const bool is_mi               = mi.find(arch) != mi.end();
+    const bool is_gfx11            = StartsWith(arch, "gfx11");
+    const bool is_gfx12            = StartsWith(arch, "gfx12");
+
+    auto s                      = problem.GetOutHeight() * problem.GetOutWidth();
+    auto c                      = problem.GetInChannels() + problem.GetOutChannels();
+    auto g                      = problem.GetGroupCount();
+    auto channels_per_group     = c / g;
+    auto spatial_work_per_group = s * channels_per_group;
+
+    if(is_gfx11 || is_gfx12)
+    {
+        return false;
+    }
+    else if(is_mi)
+    {
+        // PRIMARY: Extreme low CPG detection
+        // SWPG < 150k: Low spatial-channel work
+        // CPG < 48: Extremely low channels per group (critical discriminator)
+        if(spatial_work_per_group < 150000 && channels_per_group < 48)
+            return true;
+    }
+
+    return false;
 }
 
 bool GemmFwd1x1_0_2::IsApplicable(const ExecutionContext& context,
@@ -620,6 +659,37 @@ size_t GemmFwd1x1_0_1::GetWorkspaceSize(const ExecutionContext&, const ProblemDe
     return 0;
 }
 
+bool GemmFwd1x1_0_1::IsSlow(const ExecutionContext& context,
+                            const ProblemDescription& problem) const
+{
+    const std::string& arch        = context.GetStream().GetDeviceName();
+    const std::set<std::string> mi = {"gfx942", "gfx955"};
+    const bool is_mi               = mi.find(arch) != mi.end();
+    const bool is_gfx11            = StartsWith(arch, "gfx11");
+    const bool is_gfx12            = StartsWith(arch, "gfx12");
+
+    auto s                      = problem.GetOutHeight() * problem.GetOutWidth();
+    auto c                      = problem.GetInChannels() + problem.GetOutChannels();
+    auto g                      = problem.GetGroupCount();
+    auto channels_per_group     = c / g;
+    auto spatial_work_per_group = s * channels_per_group;
+
+    if(is_gfx11 || is_gfx12)
+    {
+        return false;
+    }
+    else if(is_mi)
+    {
+        // PRIMARY: Memory-bound small problem detection
+        // SWPG < 200k: Low spatial-channel work (memory-bound)
+        // CPG < 704: Moderate channels (poor reuse)
+        if(spatial_work_per_group < 200000 && channels_per_group < 704)
+            return true;
+    }
+
+    return false;
+}
+
 bool GemmFwd1x1_0_1::IsApplicable(const ExecutionContext& context,
                                   const ProblemDescription& problem) const
 {
@@ -773,8 +843,6 @@ ConvSolution GemmFwd1x1_0_1::GetSolution(const ExecutionContext& context,
                 const auto& w       = tensors.w;
                 const auto& y       = tensors.out;
 
-                MIOPEN_LOG_FUNCTION("convolution, 1x1");
-
                 // tensors.y = tensors.w * tensors.x
                 miopenStatus_t gemm_status;
                 const auto gemm_desc = [&]() {
@@ -809,6 +877,9 @@ size_t GemmFwdRest::GetWorkspaceSize(const ExecutionContext& context,
     decltype(auto) wDesc  = problem.GetWeights();
     decltype(auto) yDesc  = problem.GetOut();
 
+    if(miopen::conv::IsFwdDataPointOutput3dStrideEqFilter(problem) && wDesc.GetType() != miopenInt8)
+        return 0;
+
     const auto spatial_dim = conv.GetSpatialDimension();
     const auto wei_spatial =
         wDesc.GetLengths() | std::views::drop(2) | std::views::take(spatial_dim);
@@ -842,6 +913,51 @@ size_t GemmFwdRest::GetWorkspaceSize(const ExecutionContext& context,
 #endif
 }
 
+bool GemmFwdRest::IsSlow(const ExecutionContext& context, const ProblemDescription& problem) const
+{
+    const std::string& arch        = context.GetStream().GetDeviceName();
+    const std::set<std::string> mi = {"gfx942", "gfx955"};
+    const bool is_mi               = mi.find(arch) != mi.end();
+    const bool is_gfx11            = StartsWith(arch, "gfx11");
+    const bool is_gfx12            = StartsWith(arch, "gfx12");
+
+    auto b                      = problem.GetBatchSize();
+    auto s                      = problem.GetOutHeight() * problem.GetOutWidth();
+    auto c                      = problem.GetInChannels() + problem.GetOutChannels();
+    auto g                      = problem.GetGroupCount();
+    auto spatial_per_batch      = s / b;
+    auto channels_per_group     = c / g;
+    auto spatial_work_per_group = s * channels_per_group;
+
+    if(is_gfx11 || is_gfx12)
+    {
+        // GemmFwdRest - SPB-only filtering
+        // Analysis: 63.8% terrible cases - batch fragmentation dominant
+        //
+        // Terrible cases have high batch (32x) but low SPB (0.07x)
+        // This indicates batch fragmentation → poor GPU utilization
+        //
+        // SPB < 50: Low spatial-per-batch = batch fragmentation
+        // Performance: FPR=11-25%, TPR=61-76%, Score=1.37-1.60
+        if(spatial_per_batch < 50)
+            return true;
+    }
+    else if(is_mi)
+    {
+        // PRIMARY: Memory-bound small problem detection
+        // SWPG < 2.5M: Low spatial-channel work (memory-bound)
+        // CPG < 56: Very low channels (minimal reuse)
+        if(spatial_work_per_group < 2500000 && channels_per_group < 56)
+            return true;
+
+        // SECONDARY: Batch fragmentation detection
+        if(spatial_per_batch < 24.0)
+            return true;
+    }
+
+    return false;
+}
+
 bool GemmFwdRest::IsApplicable(const ExecutionContext& context,
                                const ProblemDescription& problem) const
 {
@@ -856,6 +972,10 @@ bool GemmFwdRest::IsApplicable(const ExecutionContext& context,
         return false;
     if(GemmFwd1x1_0_2{}.IsApplicable(context, problem))
         return false;
+
+    if(miopen::conv::IsFwdDataPointOutput3dStrideEqFilter(problem) &&
+       problem.GetWeights().GetType() != miopenInt8)
+        return true;
 
     return GetWorkspaceSize(context, problem) > 0;
 #else
@@ -881,9 +1001,70 @@ ConvSolution GemmFwdRest::GetSolution(const ExecutionContext& context,
     const auto spatial_dim = conv.GetSpatialDimension();
 
     const auto workspace_req = GetWorkspaceSize(context, problem);
+    const auto use_batched_fwd_point_output =
+        miopen::conv::IsFwdDataPointOutput3dStrideEqFilter(problem) &&
+        wDesc.GetType() != miopenInt8;
 
     auto solution         = ConvSolution{miopenStatusSuccess};
     solution.workspace_sz = workspace_req;
+
+    if(use_batched_fwd_point_output)
+    {
+        const auto tmp_gemm_desc = [&]() {
+            auto tmp            = CreateGemmDescriptorConvFwd(wDesc, xDesc, yDesc);
+            tmp.deterministic   = problem.GetConv().attribute.deterministic;
+            tmp.conv_attributes = problem.GetConv().attribute;
+            if(problem.IsTensorsCasted())
+            {
+                if(xDesc.GetCastType())
+                    tmp.a_cast_type = *wDesc.GetCastType();
+                if(wDesc.GetCastType())
+                    tmp.b_cast_type = *xDesc.GetCastType();
+            }
+            return tmp;
+        }();
+
+        solution.invoker_factory = [=](const std::vector<Kernel>&) {
+            MIOPEN_LOG_FUNCTION("convolution, non 1x1 point-output 3d");
+            return [=](const Handle& handle, const AnyInvokeParams& primitive_params) {
+                const auto& conv_params = primitive_params.CastTo<miopen::conv::DataInvokeParams>();
+                const auto x            = conv_params.tensors.in;
+                const auto w            = conv_params.tensors.w;
+                const auto y            = conv_params.tensors.out;
+
+                auto gemm_desc = [&]() {
+                    auto tmp            = tmp_gemm_desc;
+                    tmp.gfx90a_alt_impl = conv_params.gfx90aFp16alt;
+                    return tmp;
+                }();
+
+                constexpr auto batched_backend =
+#if MIOPEN_USE_HIPBLASLT
+                    GemmBackend_t::hipblaslt;
+#else
+                    GemmBackend_t::rocblas;
+#endif
+
+                // C[N, K] = A[N, CZYX] * B^T[CZYX, K], where B stores W[K, CZYX].
+                gemm_desc.batch_count = 1;
+                gemm_desc.strideA     = 0;
+                gemm_desc.strideB     = 0;
+                gemm_desc.strideC     = 0;
+                gemm_desc.m           = static_cast<int>(in_n);
+                gemm_desc.n           = static_cast<int>(wei_k);
+                gemm_desc.transA      = false;
+                gemm_desc.transB      = true;
+                gemm_desc.lda         = gemm_desc.k;
+                gemm_desc.ldb         = gemm_desc.k;
+                gemm_desc.ldc         = gemm_desc.n;
+                const auto gemm_status =
+                    CallGemm(handle, gemm_desc, x, 0, w, 0, y, 0, batched_backend);
+                if(gemm_status != miopenStatusSuccess)
+                    MIOPEN_THROW("GEMM execution failure");
+            };
+        };
+        return solution;
+    }
 
     solution.invoker_factory = [=](const std::vector<Kernel>&) {
         const auto tmp_gemm_desc = [&]() {

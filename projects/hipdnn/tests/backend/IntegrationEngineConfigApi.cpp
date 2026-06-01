@@ -51,7 +51,7 @@ protected:
 
 TEST_F(IntegrationEngineConfigApi, SetEngineConfigEngine)
 {
-    int64_t gidx = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
+    const int64_t gidx = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
 
     EXPECT_EQ(hipdnnBackendSetAttribute(_engineConfig,
                                         HIPDNN_ATTR_ENGINECFG_ENGINE,
@@ -71,7 +71,7 @@ TEST_F(IntegrationEngineConfigApi, SetEngineConfigEngine)
 
 TEST_F(IntegrationEngineConfigApi, Finalize)
 {
-    int64_t gidx = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
+    const int64_t gidx = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
 
     EXPECT_EQ(hipdnnBackendFinalize(_engineConfig), HIPDNN_STATUS_BAD_PARAM);
     test_util::populateTestEngineConfig(&_engineConfig, &_engine, &_graph, _handle, gidx);
@@ -80,7 +80,7 @@ TEST_F(IntegrationEngineConfigApi, Finalize)
 
 TEST_F(IntegrationEngineConfigApi, GetMaxWorkspaceSize)
 {
-    int64_t gidx = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
+    const int64_t gidx = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
     int64_t maxWorkspaceSize = 0;
 
     test_util::populateTestEngineConfig(&_engineConfig, &_engine, &_graph, _handle, gidx, true);
@@ -96,7 +96,7 @@ TEST_F(IntegrationEngineConfigApi, GetMaxWorkspaceSize)
 
 TEST_F(IntegrationEngineConfigApi, GetAttributeBeforeFinalization)
 {
-    int64_t gidx = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
+    const int64_t gidx = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
     int64_t maxWorkspaceSize = 0;
 
     test_util::populateTestEngineConfig(&_engineConfig, &_engine, &_graph, _handle, gidx, false);
@@ -112,7 +112,7 @@ TEST_F(IntegrationEngineConfigApi, GetAttributeBeforeFinalization)
 
 TEST_F(IntegrationEngineConfigApi, GetMaxWorkspaceSizeInvalidType)
 {
-    int64_t gidx = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
+    const int64_t gidx = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
     int32_t maxWorkspaceSize = 0;
 
     test_util::populateTestEngineConfig(&_engineConfig, &_engine, &_graph, _handle, gidx, true);
@@ -128,7 +128,7 @@ TEST_F(IntegrationEngineConfigApi, GetMaxWorkspaceSizeInvalidType)
 
 TEST_F(IntegrationEngineConfigApi, GetMaxWorkspaceSizeInvalidCount)
 {
-    int64_t gidx = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
+    const int64_t gidx = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
     int64_t maxWorkspaceSize = 0;
 
     test_util::populateTestEngineConfig(&_engineConfig, &_engine, &_graph, _handle, gidx, true);
@@ -144,7 +144,7 @@ TEST_F(IntegrationEngineConfigApi, GetMaxWorkspaceSizeInvalidCount)
 
 TEST_F(IntegrationEngineConfigApi, GetMaxWorkspaceSizeNullPointer)
 {
-    int64_t gidx = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
+    const int64_t gidx = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
 
     test_util::populateTestEngineConfig(&_engineConfig, &_engine, &_graph, _handle, gidx, true);
 
@@ -159,7 +159,7 @@ TEST_F(IntegrationEngineConfigApi, GetMaxWorkspaceSizeNullPointer)
 
 TEST_F(IntegrationEngineConfigApi, DoubleFinalization)
 {
-    int64_t gidx = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
+    const int64_t gidx = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
 
     test_util::populateTestEngineConfig(&_engineConfig, &_engine, &_graph, _handle, gidx, true);
 
@@ -168,7 +168,7 @@ TEST_F(IntegrationEngineConfigApi, DoubleFinalization)
 
 TEST_F(IntegrationEngineConfigApi, SetAttributeAfterFinalization)
 {
-    int64_t gidx = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
+    const int64_t gidx = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
 
     test_util::populateTestEngineConfig(&_engineConfig, &_engine, &_graph, _handle, gidx, true);
 
