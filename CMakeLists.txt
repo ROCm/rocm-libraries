@@ -28,6 +28,13 @@ include(GNUInstallDirs)
 include(add_subdirectory_with_message)
 include(fetch_rocm_cmake)
 
+if(NOT DEFINED LLVM_HOST_TRIPLE)
+    execute_process(
+        COMMAND ${CMAKE_CXX_COMPILER} --print-target-triple
+        OUTPUT_VARIABLE LLVM_HOST_TRIPLE OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET)
+endif()
+
 # --- Options and cache variables ---
 option(ROCM_LIBS_SUPERBUILD "Enable superbuild mode" ON)
 

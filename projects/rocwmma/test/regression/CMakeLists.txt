@@ -53,7 +53,7 @@ if(REGRESSION_TEST_SOURCES)
     target_link_libraries(${TEST_TARGET} rocwmma GTest::gtest GTest::gtest_main hiprtc::hiprtc)
     target_link_libraries(${TEST_TARGET} ${ROCWMMA_OPENMP_LIBRARY})
     if(UNIX)
-        set_target_properties(${TEST_TARGET} PROPERTIES INSTALL_RPATH "\$ORIGIN/../llvm/lib")
+        set_target_properties(${TEST_TARGET} PROPERTIES INSTALL_RPATH "\$ORIGIN/../llvm/lib;\$ORIGIN/../llvm/lib/${LLVM_HOST_TRIPLE}")
         target_link_libraries(${TEST_TARGET} "-fno-rtlib-add-rpath")
     endif()
 

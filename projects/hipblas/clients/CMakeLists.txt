@@ -119,17 +119,17 @@ endfunction( )
 function( apply_omp_settings lib_target_ )
   if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND TARGET OpenMP::OpenMP_CXX)
     set_target_properties( ${lib_target_} PROPERTIES
-      BUILD_RPATH "${HIP_CLANG_ROOT}/lib"
+      BUILD_RPATH "${HIP_CLANG_ROOT}/lib;${HIP_CLANG_ROOT}/lib/${LLVM_HOST_TRIPLE}"
     )
     set_target_properties( ${lib_target_} PROPERTIES
-      INSTALL_RPATH "$ORIGIN/../llvm/lib"
+      INSTALL_RPATH "$ORIGIN/../llvm/lib;$ORIGIN/../llvm/lib/${LLVM_HOST_TRIPLE}"
     )
   elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND TARGET OpenMP::omp)
     set_target_properties( ${lib_target_} PROPERTIES
-      BUILD_RPATH "${HIP_CLANG_ROOT}/${openmp_LIB_DIR}"
+      BUILD_RPATH "${HIP_CLANG_ROOT}/${openmp_LIB_DIR};${HIP_CLANG_ROOT}/lib/${LLVM_HOST_TRIPLE}"
     )
     set_target_properties( ${lib_target_} PROPERTIES
-      INSTALL_RPATH "$ORIGIN/../llvm/${openmp_LIB_DIR}"
+      INSTALL_RPATH "$ORIGIN/../llvm/${openmp_LIB_DIR};$ORIGIN/../llvm/lib/${LLVM_HOST_TRIPLE}"
     )
   endif()
 endfunction()
