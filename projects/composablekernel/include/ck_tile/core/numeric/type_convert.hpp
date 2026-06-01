@@ -86,12 +86,6 @@ CK_TILE_TYPE_CONVERT(bf16x2_t, bf16x2, fp32x2_t, fp32x2)
 [[deprecated("Use (ck_tile::numeric_traits<ck_tile::tf32_t>::exp_mask << 23) "
              "instead")]] static constexpr uint32_t float32_exponent_mask = 0x7f800000u;
 
-enum class [[deprecated]] tf32_rounding_mode
-{
-    trunc = 0, // truncate
-    rne   = 1, // round to nearest even (RTNE)
-};
-
 template <tf32_rounding_mode rounding>
 [[deprecated(
     "Use ck_tile::type_convert<ck_tile::tf32_t> instead")]] CK_TILE_HOST_DEVICE constexpr float

@@ -11,6 +11,15 @@ static ck_tile::uint32_t to_bits(T x)
     return ck_tile::bit_cast<ck_tile::uint32_t>(x);
 }
 
+#if CK_TILE_FLOAT_TO_TF32_DEFAULT == CK_TILE_FLOAT_TO_TF32_RNE
+
+static ck_tile::tf32_t from_bits(ck_tile::uint32_t i)
+{
+    return ck_tile::type_convert<ck_tile::tf32_t>(ck_tile::bit_cast<float>(i));
+}
+
+#endif
+
 TEST(ConvertTest, NumericTraits)
 {
     using ck_tile::numeric_traits;
@@ -21,6 +30,8 @@ TEST(ConvertTest, NumericTraits)
     EXPECT_EQ(numeric_traits<tf32_t>::bias, 127);
     EXPECT_EQ(numeric_traits<tf32_t>::PackedSize, 1);
 }
+
+#if CK_TILE_FLOAT_TO_TF32_DEFAULT == CK_TILE_FLOAT_TO_TF32_TRUNC
 
 TEST(ConvertTest, ToTf32Trunc)
 {
@@ -62,3 +73,33 @@ TEST(ConvertTest, ToTf32Trunc)
         EXPECT_EQ(orig & 0xFFFFE000u, tf32) << "val=" << val;
     }
 }
+
+#elif CK_TILE_FLOAT_TO_TF32_DEFAULT == CK_TILE_FLOAT_TO_TF32_RNE
+
+TEST(ConvertTest, ToTf32Rne)
+{
+    using ck_tile::isnan;
+    using ck_tile::numeric;
+    using ck_tile::tf32_t;
+    using ck_tile::type_convert;
+
+    // exact values (low 13 bits already zero)
+    EXPECT_EQ(to_bits(type_convert<tf32_t>(1.0f)),
+              0x3F800000u); // 1.0f
+    EXPECT_EQ(to_bits(type_convert<tf32_t>(-1.0f)),
+              0xBF800000u); // -1.0f
+    EXPECT_EQ(to_bits(type_convert<tf32_t>(0.0f)),
+              0x00000000u); // +0.0f
+
+    // past midpoint (bit12 + bit11 set) -> rounds up
+    EXPECT_EQ(to_bits(from_bits(0x3F801800u)), 0x3F802000u);
+
+    // special values (keep the same as float)
+    EXPECT_EQ(to_bits(numeric<tf32_t>::infinity()),
+              0x7F800000u); // infinity in float is 0x7F800000
+    EXPECT_EQ(to_bits(-numeric<tf32_t>::infinity()),
+              0xFF800000u);                           // negative infinity in float is 0xFF800000
+    EXPECT_TRUE(isnan(numeric<tf32_t>::quiet_NaN())); // quiet NaN in float is 0x7FC00000
+}
+
+#endif

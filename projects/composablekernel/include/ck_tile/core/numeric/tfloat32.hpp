@@ -13,6 +13,12 @@
 
 namespace ck_tile {
 
+enum class tf32_rounding_mode
+{
+    trunc = 0, // truncate
+    rne   = 1  // round to nearest even (RNE)
+};
+
 class alignas(4) tfloat32_t
 {
     public:
@@ -31,12 +37,27 @@ class alignas(4) tfloat32_t
     CK_TILE_HOST_DEVICE constexpr operator float() const { return bit_cast<float>(data); }
 
     private:
+    template <tf32_rounding_mode rounding =
+                  static_cast<tf32_rounding_mode>(CK_TILE_FLOAT_TO_TF32_DEFAULT)>
     static CK_TILE_HOST_DEVICE constexpr raw_type to_raw_type(float x)
     {
-        constexpr raw_type bit_mask = 0xFFFFE000u;
+        constexpr raw_type f32_exp_mask = 0x7F800000u;
+        constexpr raw_type bit_mask     = 0xFFFFE000u;
 
         raw_type i = bit_cast<raw_type>(x);
-
+        if constexpr(rounding == tf32_rounding_mode::rne)
+        {
+            // RNE rounding.
+            if((i & f32_exp_mask) != f32_exp_mask)
+            {
+                // Add rounding bias for round-to-nearest-even (RNE) before truncating:
+                //  - 0xFFFu is the rounding bias corresponding to the 13 fraction bits that
+                //    will be discarded.
+                //  - (i >> 13) & 1u extracts the least significant of those discarded bits and
+                //    adding it implements "ties to even" (round half-way cases to even).
+                i += 0xFFFu + ((i >> 13) & 1u);
+            }
+        }
         // Zero out the lowest 13 fraction bits to form the TF32-like value.
         i &= bit_mask;
         return i;
