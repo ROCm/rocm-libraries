@@ -30,7 +30,7 @@
  *                                              + beta * C[i,j]
  *
  * The number of moduli s (= number of INT8 GEMMs) is configurable at runtime via
- * HIPBLASLT_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT (default: s=20, ~155 bits of CRT
+ * HIPBLASLT_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT (default: s=16, ~125 bits of CRT
  * capacity, sufficient for guaranteed FP64-equivalent results on all inputs).
  *
  * Constants (tables) are taken verbatim from the open-source GEMMul8 implementation
@@ -64,6 +64,27 @@ static constexpr size_t OZ2_ALIGN = 128;
 static __host__ __device__ size_t oz2_pad(size_t n)
 {
     return (n + OZ2_ALIGN - 1) / OZ2_ALIGN * OZ2_ALIGN;
+}
+
+/* oz2_compute_chunk_size — automatic chunked-accumulation parameter.
+ *
+ * Divides the s moduli into chunks of this size.  For each chunk, all
+ * chunk_size GEMMs run back-to-back (storing separate C32i slices), then ONE
+ * oz2_chunk_accum_kernel folds them into Zhi/Zlo in a single register loop.
+ * This reduces kernel launches from (s+1) to (ceil(s/k)+1), which matters
+ * most for small N where GEMM latency is low relative to launch overhead.
+ *
+ * The target keeps the C32i batch (chunk_size × ldc32i × n × 4 B) below
+ * OZ2_CHUNK_TARGET_BYTES.  For large N this naturally falls back to k=1
+ * (current behaviour, no extra memory); for small N it picks larger k.     */
+static constexpr size_t OZ2_CHUNK_TARGET_BYTES = 2ull << 30;   /* 2 GiB    */
+
+static unsigned oz2_compute_chunk_size(int64_t m, int64_t n, unsigned num_moduli)
+{
+    const size_t mn4 = static_cast<size_t>(m) * static_cast<size_t>(n) * 4u;
+    if(mn4 == 0u) return num_moduli;
+    const size_t k = std::max(size_t(1), OZ2_CHUNK_TARGET_BYTES / mn4);
+    return static_cast<unsigned>(std::min(static_cast<size_t>(num_moduli), k));
 }
 
 /* =========================================================================
@@ -525,19 +546,20 @@ uint32_t fp64EmulationSpecialValuesMask()
  * ========================================================================= */
 size_t fp64EmulationWorkspaceSize(int64_t m, int64_t n, int64_t k, unsigned num_moduli)
 {
-    const size_t lda8i  = oz2_pad(static_cast<size_t>(k));
-    const size_t cola8i = oz2_pad(static_cast<size_t>(m));
-    const size_t ldb8i  = lda8i;
-    const size_t ldc32i = cola8i;
-    const size_t padn   = oz2_pad(static_cast<size_t>(n));
+    const size_t lda8i      = oz2_pad(static_cast<size_t>(k));
+    const size_t cola8i     = oz2_pad(static_cast<size_t>(m));
+    const size_t ldb8i      = lda8i;
+    const size_t ldc32i     = cola8i;
+    const size_t padn       = oz2_pad(static_cast<size_t>(n));
+    const unsigned chunk_sz = oz2_compute_chunk_size(m, n, num_moduli);
 
     return   num_moduli * lda8i * cola8i * sizeof(int8_t)
            + num_moduli * ldb8i * static_cast<size_t>(n) * sizeof(int8_t)
-           + ldc32i * static_cast<size_t>(n) * sizeof(int32_t)
-           + ldc32i * static_cast<size_t>(n) * sizeof(double) * 2   /* Zhi + Zlo */
-           + cola8i * sizeof(int16_t)                               /* sftA */
-           + padn   * sizeof(int16_t)                               /* sftB */
-           + sizeof(uint32_t);                                       /* nan_flag */
+           + chunk_sz * ldc32i * static_cast<size_t>(n) * sizeof(int32_t)  /* C32i batch */
+           + ldc32i * static_cast<size_t>(n) * sizeof(double) * 2          /* Zhi + Zlo */
+           + cola8i * sizeof(int16_t)                                       /* sftA */
+           + padn   * sizeof(int16_t)                                       /* sftB */
+           + sizeof(uint32_t);                                               /* nan_flag */
 }
 
 /**
@@ -549,7 +571,8 @@ size_t fp64EmulationWorkspaceSize(int64_t m, int64_t n, int64_t k, unsigned num_
  * specifies the total CRT capacity in bits: minimum s such that
  *   log2(prod(moduli 0..s-1)) >= target_bits.
  *
- * Default (env var absent or 0): use all OZ2_S_MAX=20 moduli (~155 bits).
+ * Default (env var absent or 0): 16 moduli (~125 bits of CRT capacity).
+ * The full range [2, 20] is still reachable via the env var.
  *
  * Notable values (from design document §2.5):
  *   55 bits → s=7  ("fixed-mode default")
@@ -559,7 +582,7 @@ unsigned fp64EmulationNumModuli()
 {
     static const unsigned num_moduli = []() -> unsigned {
         const char* v = std::getenv("HIPBLASLT_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT");
-        if(v == nullptr) return OZ2_S_MAX;
+        if(v == nullptr) return 16u;   /* default: 16 moduli (~125 bits) */
 
         const unsigned target = static_cast<unsigned>(std::strtoul(v, nullptr, 0));
         if(target == 0u) return OZ2_S_MAX;
@@ -917,47 +940,66 @@ oz2_scaleB_kernel(const double* __restrict__ B,
 }
 
 /* =========================================================================
- * GPU kernels — Part 2d: CRT accumulation
+ * GPU kernels — Part 2d: chunked CRT accumulation
+ *
+ * oz2_chunk_accum_kernel processes a batch of `chunk_size` consecutive
+ * moduli in a single kernel launch.  For each output element [i,l] it:
+ *   1. Reads chunk_size C32i slices from the batch (stored back-to-back).
+ *   2. Reduces each slice to its symmetric residue mod m_t (one FMA pass).
+ *   3. Accumulates dc * qPi_t into a local double-double — entirely in
+ *      registers, with no intermediate global-memory writes.
+ *   4. Merges the local double-double into the global Zhi/Zlo.
+ *
+ * Compared to launching one kernel per modulus (old approach), this reduces
+ * the number of Zhi/Zlo read-modify-write round-trips from chunk_size to 1
+ * per chunk, and cuts kernel launches from (s+1) to (ceil(s/k)+1).
  * ========================================================================= */
-
 __global__ static void
-oz2_accum_kernel(const int32_t* __restrict__ C32i,
-                 double*        __restrict__ Zhi,
-                 double*        __restrict__ Zlo,
-                 int64_t                     m,
-                 int64_t                     n,
-                 size_t                      ldc32i,
-                 unsigned                    t)
+oz2_chunk_accum_kernel(const int32_t* __restrict__ C32i_batch,
+                       double*        __restrict__ Zhi,
+                       double*        __restrict__ Zlo,
+                       int64_t                     m,
+                       int64_t                     n,
+                       size_t                      ldc32i,
+                       unsigned                    chunk_start,
+                       unsigned                    chunk_size,
+                       bool                        is_first_chunk)
 {
     const int64_t i = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
     const int64_t l = static_cast<int64_t>(blockIdx.y) * blockDim.y + threadIdx.y;
     if(i >= m || l >= n) return;
 
-    const size_t idx = static_cast<size_t>(i) + static_cast<size_t>(l) * ldc32i;
+    const size_t idx          = static_cast<size_t>(i) + static_cast<size_t>(l) * ldc32i;
+    const size_t slice_stride = ldc32i * static_cast<size_t>(n);
 
-    /* Reduce C32i to the symmetric residue mod m_t before multiplying by qPi.
-     * The qPi_hi constants are designed with only (53 - ceil(log2(rho))) significant
-     * bits (where rho = sum(floor(m_i/2))) so that  dc * qPi_hi  is computed EXACTLY
-     * in double precision — but only when |dc| ≤ floor(m_t/2) ≤ 128.  Using the raw
-     * INT32 GEMM result (which can be as large as k*(m_t/2)^2) would make the product
-     * inexact, corrupting the CRT accumulation.  One double-precision FMA pass is
-     * always sufficient here because |C32i| << 2^53 * m_t for all practical k.    */
-    const double dc_raw = static_cast<double>(C32i[idx]);
-    const double dc     = fma(cNegMod[t], rint(dc_raw * cInvMod[t]), dc_raw);
-    /* |dc| ≤ m_t/2 ≤ 128; dc * cQpiHi[t] is now exact in double. */
+    /* Register-level double-double accumulator for this chunk */
+    double local_hi = 0.0;
+    double local_lo = 0.0;
 
-    const double hi = dc * cQpiHi[t];
-    const double lo = dc * cQpiLo[t];
+    for(unsigned t_local = 0; t_local < chunk_size; ++t_local) {
+        const unsigned t     = chunk_start + t_local;
+        const double dc_raw  = static_cast<double>(C32i_batch[t_local * slice_stride + idx]);
+        /* Reduce to symmetric residue mod m_t (exact dc * qPiHi[t] in double) */
+        const double dc      = fma(cNegMod[t], rint(dc_raw * cInvMod[t]), dc_raw);
+        const double hi      = dc * cQpiHi[t];
+        const double lo      = dc * cQpiLo[t];
+        /* 2Sum accumulation into local registers */
+        const double new_hi  = local_hi + hi;
+        const double err     = hi - (new_hi - local_hi);
+        local_hi = new_hi;
+        local_lo += err + lo;
+    }
 
-    if(t == 0) {
-        Zhi[idx] = hi;
-        Zlo[idx] = lo;
+    /* Merge local double-double into global Zhi/Zlo */
+    if(is_first_chunk) {
+        Zhi[idx] = local_hi;
+        Zlo[idx] = local_lo;
     } else {
         const double old_hi = Zhi[idx];
-        const double s_hi   = old_hi + hi;
-        const double err    = hi - (s_hi - old_hi);   /* standard 2Sum round-off */
+        const double s_hi   = old_hi + local_hi;
+        const double err    = local_hi - (s_hi - old_hi);
         Zhi[idx] = s_hi;
-        Zlo[idx] += err + lo;
+        Zlo[idx] += err + local_lo;
     }
 }
 
@@ -1033,22 +1075,30 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
         return rocblaslt_status_internal_error;
 
     /* ------------------------------------------------------------------
+     * Chunk size: number of consecutive moduli batched into one
+     * oz2_chunk_accum_kernel call.  Reduces non-GEMM kernel launches from
+     * (s+1) to (ceil(s/chunk_size)+1) while keeping C32i batch ≤ 256 MiB.
+     * ------------------------------------------------------------------ */
+    const unsigned chunk_size = oz2_compute_chunk_size(m, n, num_moduli);
+
+    /* ------------------------------------------------------------------
      * Workspace layout
      *
-     *   lda8i  = padding(k)        — INT8 leading dim for A slices
-     *   cola8i = padding(m)        — INT8 col count for A slices
-     *   ldb8i  = lda8i             — INT8 leading dim for B slices
-     *   ldc32i = cola8i            — INT32 leading dim for GEMM output
-     *   padn   = padding(n)        — padded n for sftB alignment
+     *   lda8i      = padding(k)           — INT8 leading dim for A slices
+     *   cola8i     = padding(m)           — INT8 col count for A slices
+     *   ldb8i      = lda8i               — INT8 leading dim for B slices
+     *   ldc32i     = cola8i              — INT32 leading dim for GEMM output
+     *   padn       = padding(n)          — padded n for sftB alignment
+     *   chunk_size = oz2_compute_chunk_size(m,n,s) — number of C32i slices
      *
-     *   A8i  [num_moduli × lda8i × cola8i]  INT8  (pos 0 = A8i_high)
-     *   B8i  [num_moduli × ldb8i × n]       INT8  (pos 0 = B8i_high)
-     *   C32i [ldc32i × n]                   INT32 (reused)
-     *   Zhi  [ldc32i × n]                   FP64  CRT accumulator hi
-     *   Zlo  [ldc32i × n]                   FP64  CRT accumulator lo
-     *   sftA [cola8i]                        INT16 per-row shifts for A
-     *   sftB [padn]                          INT16 per-col shifts for B
-     *   nan_flag [1]                         UINT32 Inf/NaN detection
+     *   A8i        [num_moduli × lda8i × cola8i]  INT8  (pos 0 = A8i_high)
+     *   B8i        [num_moduli × ldb8i × n]       INT8  (pos 0 = B8i_high)
+     *   C32i_batch [chunk_size × ldc32i × n]      INT32 (batch, re-used each chunk)
+     *   Zhi        [ldc32i × n]                   FP64  CRT accumulator hi
+     *   Zlo        [ldc32i × n]                   FP64  CRT accumulator lo
+     *   sftA       [cola8i]                        INT16 per-row shifts for A
+     *   sftB       [padn]                          INT16 per-col shifts for B
+     *   nan_flag   [1]                             UINT32 Inf/NaN detection
      * ------------------------------------------------------------------ */
     const size_t lda8i  = oz2_pad(static_cast<size_t>(k));
     const size_t cola8i = oz2_pad(static_cast<size_t>(m));
@@ -1058,7 +1108,7 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
 
     const size_t szA8i    = num_moduli * lda8i * cola8i;
     const size_t szB8i    = num_moduli * ldb8i * static_cast<size_t>(n);
-    const size_t szC32i   = ldc32i * static_cast<size_t>(n);
+    const size_t szC32i   = ldc32i * static_cast<size_t>(n);  /* one slice */
     const size_t szZhi    = szC32i;
     const size_t szZlo    = szC32i;
     const size_t szSftA   = cola8i;
@@ -1066,14 +1116,14 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
     const size_t szNanFlag = 1;
 
     const size_t wsBytes =
-          szA8i    * sizeof(int8_t)
-        + szB8i    * sizeof(int8_t)
-        + szC32i   * sizeof(int32_t)
-        + szZhi    * sizeof(double)
-        + szZlo    * sizeof(double)
-        + szSftA   * sizeof(int16_t)
-        + szSftB   * sizeof(int16_t)
-        + szNanFlag * sizeof(uint32_t);
+          szA8i           * sizeof(int8_t)
+        + szB8i           * sizeof(int8_t)
+        + chunk_size * szC32i * sizeof(int32_t)   /* C32i batch */
+        + szZhi           * sizeof(double)
+        + szZlo           * sizeof(double)
+        + szSftA          * sizeof(int16_t)
+        + szSftB          * sizeof(int16_t)
+        + szNanFlag       * sizeof(uint32_t);
 
     /* Use caller-provided workspace if large enough; otherwise allocate. */
     bool   ws_owned = false;
@@ -1086,14 +1136,16 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
             return rocblaslt_status_memory_error;
     }
 
-    int8_t*   const A8i      = reinterpret_cast<int8_t*>(ws);
-    int8_t*   const B8i      = A8i + szA8i;
-    int32_t*  const C32i     = reinterpret_cast<int32_t*>(B8i + szB8i);
-    double*   const Zhi      = reinterpret_cast<double*>(C32i + szC32i);
-    double*   const Zlo      = Zhi + szZhi;
-    int16_t*  const sftA     = reinterpret_cast<int16_t*>(Zlo + szZlo);
-    int16_t*  const sftB     = sftA + szSftA;
-    uint32_t* const nan_flag = reinterpret_cast<uint32_t*>(sftB + szSftB);
+    int8_t*   const A8i        = reinterpret_cast<int8_t*>(ws);
+    int8_t*   const B8i        = A8i + szA8i;
+    int32_t*  const C32i_batch = reinterpret_cast<int32_t*>(B8i + szB8i);  /* chunk_size slices */
+    double*   const Zhi        = reinterpret_cast<double*>(C32i_batch + chunk_size * szC32i);
+    double*   const Zlo        = Zhi + szZhi;
+    int16_t*  const sftA       = reinterpret_cast<int16_t*>(Zlo + szZlo);
+    int16_t*  const sftB       = sftA + szSftA;
+    uint32_t* const nan_flag   = reinterpret_cast<uint32_t*>(sftB + szSftB);
+    /* First C32i slice (used by preliminary GEMM and shift refinement) */
+    int32_t*  const C32i       = C32i_batch;
 
     if(hipMemsetAsync(nan_flag, 0, sizeof(uint32_t), stream) != hipSuccess) {
         (void)hipFreeAsync(ws, stream);
@@ -1199,23 +1251,40 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
                            B, k, n, ldb, tB, B8i, ldb8i, sftB, num_moduli);
     }
 
-    /* Parts 2a-d: for each modulus — INT8 GEMM + CRT accumulation */
+    /* Parts 2a-d: chunked INT8 GEMMs + CRT accumulation.
+     * For each chunk of chunk_size consecutive moduli:
+     *   1. Run chunk_size GEMMs, storing each C32i into its own slice in
+     *      C32i_batch (back-to-back in memory).
+     *   2. Call one oz2_chunk_accum_kernel that reads all chunk_size slices
+     *      in a register loop and writes the result into Zhi/Zlo once.
+     * This reduces non-GEMM kernel launches from (s+1) to (ceil(s/k)+1). */
     const dim3 blk_acc(16, 16);
     const dim3 grid_acc((m + 15) / 16, (n + 15) / 16);
     const size_t strideA8i = lda8i * cola8i;
     const size_t strideB8i = ldb8i * static_cast<size_t>(n);
 
-    for(unsigned t = 0; t < num_moduli; ++t) {
-        const int8_t* At = A8i + t * strideA8i;
-        const int8_t* Bt = B8i + t * strideB8i;
+    for(unsigned chunk_start = 0; chunk_start < num_moduli; chunk_start += chunk_size) {
+        const unsigned actual = (chunk_start + chunk_size <= num_moduli)
+                                ? chunk_size : (num_moduli - chunk_start);
 
-        hipblasLtMatmul(t_ltHandle, matmulDesc,
-                        &one_i, At, layoutA, Bt, layoutB,
-                        &zero_i, C32i, layoutCD, C32i, layoutCD,
-                        nullptr, nullptr, 0, stream);
+        /* Run 'actual' GEMMs for this chunk, each into its own C32i slice */
+        for(unsigned t_local = 0; t_local < actual; ++t_local) {
+            const unsigned  t  = chunk_start + t_local;
+            const int8_t*   At = A8i + t * strideA8i;
+            const int8_t*   Bt = B8i + t * strideB8i;
+            int32_t*        Ct = C32i_batch + t_local * static_cast<ptrdiff_t>(szC32i);
 
-        hipLaunchKernelGGL(oz2_accum_kernel, grid_acc, blk_acc, 0, stream,
-                           C32i, Zhi, Zlo, m, n, ldc32i, t);
+            hipblasLtMatmul(t_ltHandle, matmulDesc,
+                            &one_i, At, layoutA, Bt, layoutB,
+                            &zero_i, Ct, layoutCD, Ct, layoutCD,
+                            nullptr, nullptr, 0, stream);
+        }
+
+        /* Accumulate all 'actual' slices into Zhi/Zlo in one kernel call */
+        const bool is_first = (chunk_start == 0);
+        hipLaunchKernelGGL(oz2_chunk_accum_kernel, grid_acc, blk_acc, 0, stream,
+                           C32i_batch, Zhi, Zlo, m, n, ldc32i,
+                           chunk_start, actual, is_first);
     }
 
     /* Parts 3+4: collapse, range-reduce, per-element inverse scale */
