@@ -3,6 +3,7 @@ This dictionary is used to map specific file directory changes to the correspond
 """
 
 import os
+from copy import deepcopy
 
 subtree_to_project_map = {
     "dnn-providers/hipblaslt-provider": "hipblaslt-provider",
@@ -34,6 +35,11 @@ subtree_to_project_map = {
     "shared/rocroller": "blas",
     "shared/stinkytofu": "blas",
     "shared/tensile": "blas",
+}
+
+clang_tidy_project_map = {
+    "projects/hipdnn": {"hipdnn"},
+    "shared/stinkytofu": {"stinkytofu"},
 }
 
 project_map = {
@@ -154,11 +160,19 @@ dependency_graph = {
 
 def collect_projects_to_run(subtrees):
     platform = os.getenv("PLATFORM")
+    project_data = deepcopy(project_map)
     projects = set()
+    clang_tidy_projects_by_project = {}
+
     # collect the associated subtree to project
     for subtree in subtrees:
         if subtree in subtree_to_project_map:
-            projects.add(subtree_to_project_map.get(subtree))
+            project = subtree_to_project_map.get(subtree)
+            projects.add(project)
+            if subtree in clang_tidy_project_map:
+                clang_tidy_projects_by_project.setdefault(project, set()).update(
+                    clang_tidy_project_map[subtree]
+                )
 
     for project in list(projects):
         # Check if an optional math component was included.
@@ -166,21 +180,24 @@ def collect_projects_to_run(subtrees):
             project_options_to_add = additional_options[project]
 
             project_to_add = project_options_to_add["project_to_add"]
+            clang_tidy_projects_by_project.setdefault(project_to_add, set()).update(
+                clang_tidy_projects_by_project.pop(project, set())
+            )
             # If `project_to_add` is in included, add options to the existing `project_map` entry
             if project_to_add in projects:
-                project_map[project_to_add]["cmake_options"].extend(
+                project_data[project_to_add]["cmake_options"].extend(
                     project_options_to_add["cmake_options"]
                 )
-                project_map[project_to_add]["projects_to_test"].extend(
+                project_data[project_to_add]["projects_to_test"].extend(
                     project_options_to_add["projects_to_test"]
                 )
             # If `project_to_add` is not included, only run build and tests for the optional project
             else:
                 projects.add(project_to_add)
-                project_map[project_to_add]["cmake_options"] = project_options_to_add[
-                    "cmake_options"
-                ]
-                project_map[project_to_add]["projects_to_test"] = (
+                project_data[project_to_add]["cmake_options"] = list(
+                    project_options_to_add["cmake_options"]
+                )
+                project_data[project_to_add]["projects_to_test"] = list(
                     project_options_to_add["projects_to_test"]
                 )
 
@@ -192,24 +209,28 @@ def collect_projects_to_run(subtrees):
             for dependency in dependency_graph[project]:
                 # If the dependency is also included, let's combine to avoid overlap
                 if dependency in projects:
-                    project_map[project]["cmake_options"].extend(
-                        project_map[dependency]["cmake_options"]
+                    project_data[project]["cmake_options"].extend(
+                        project_data[dependency]["cmake_options"]
                     )
-                    project_map[project]["projects_to_test"].extend(
-                        project_map[dependency]["projects_to_test"]
+                    project_data[project]["projects_to_test"].extend(
+                        project_data[dependency]["projects_to_test"]
+                    )
+                    clang_tidy_projects_by_project.setdefault(project, set()).update(
+                        clang_tidy_projects_by_project.get(dependency, set())
                     )
                     to_remove_from_project_map.append(dependency)
 
     # if dependency is included in projects and parent is found, we delete the dependency as the parent will build and test
     for to_remove_item in to_remove_from_project_map:
         projects.remove(to_remove_item)
-        del project_map[to_remove_item]
+        del project_data[to_remove_item]
+        clang_tidy_projects_by_project.pop(to_remove_item, None)
 
     # retrieve the subtrees to checkout, cmake options to build, and projects to test
     project_to_run = []
     for project in projects:
-        if project in project_map:
-            project_map_data = project_map.get(project)
+        if project in project_data:
+            project_map_data = project_data.get(project)
 
             # Check if platform-based additional flags are needed
             if (
@@ -223,17 +244,21 @@ def collect_projects_to_run(subtrees):
             # To save time, only build what is needed
             project_map_data["cmake_options"].extend(["-DTHEROCK_ENABLE_ALL=OFF"])
             # To ensure uniqueness of flags and tests
-            project_map_data["cmake_options"] = list(
+            project_map_data["cmake_options"] = sorted(
                 set(project_map_data["cmake_options"])
             )
-            project_map_data["projects_to_test"] = list(
+            project_map_data["projects_to_test"] = sorted(
                 set(project_map_data["projects_to_test"])
             )
 
             cmake_flag_options = " ".join(project_map_data["cmake_options"])
             projects_to_test_options = ",".join(project_map_data["projects_to_test"])
+            clang_tidy_projects = ",".join(
+                sorted(clang_tidy_projects_by_project.get(project, set()))
+            )
             project_map_data["cmake_options"] = cmake_flag_options
             project_map_data["projects_to_test"] = projects_to_test_options
+            project_map_data["clang_tidy_projects"] = clang_tidy_projects
             project_to_run.append(project_map_data)
 
     return project_to_run

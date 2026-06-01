@@ -135,6 +135,25 @@ GITHUB_WORKFLOWS_CI_PATTERNS = [
     "therock*",
 ]
 
+CLANG_TIDY_ALL_SUBTREES = [
+    "projects/hipdnn",
+    "shared/stinkytofu",
+]
+
+CLANG_TIDY_STINKYTOFU_SUBTREES = [
+    "shared/stinkytofu",
+]
+
+CLANG_TIDY_ALL_PATH_PATTERNS = [
+    ".github/workflows/clang-tidy.yml",
+    ".github/scripts/therock_matrix.py",
+]
+
+CLANG_TIDY_STINKYTOFU_PATH_PATTERNS = [
+    "cmake/modules/ClangTidy.cmake",
+    "cmake/modules/CheckToolVersion.cmake",
+]
+
 
 def is_path_workflow_file_related_to_ci(path: str) -> bool:
     return any(
@@ -150,6 +169,25 @@ def check_for_workflow_file_related_to_ci(paths: Optional[Iterable[str]]) -> boo
     if paths is None:
         return False
     return any(is_path_workflow_file_related_to_ci(p) for p in paths)
+
+
+def get_clang_tidy_subtrees(paths: Optional[Iterable[str]]) -> List[str]:
+    if paths is None:
+        return []
+
+    subtrees = []
+    for path in paths:
+        if any(
+            fnmatch.fnmatch(path, pattern) for pattern in CLANG_TIDY_ALL_PATH_PATTERNS
+        ):
+            subtrees.extend(CLANG_TIDY_ALL_SUBTREES)
+        if any(
+            fnmatch.fnmatch(path, pattern)
+            for pattern in CLANG_TIDY_STINKYTOFU_PATH_PATTERNS
+        ):
+            subtrees.extend(CLANG_TIDY_STINKYTOFU_SUBTREES)
+
+    return subtrees
 
 
 def get_changed_path_projects(paths: Optional[Iterable[str]]) -> Iterable[str]:
@@ -200,6 +238,8 @@ def retrieve_projects(args):
             return [], test_type
 
     subtrees = get_changed_path_projects(modified_paths)
+
+    subtrees.extend(get_clang_tidy_subtrees(modified_paths))
 
     if args.get("is_workflow_dispatch"):
         if args.get("input_projects") == "all":

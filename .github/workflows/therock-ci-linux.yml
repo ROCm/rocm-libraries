@@ -16,6 +16,9 @@ on:
         type: string
       projects_to_test:
         type: string
+      clang_tidy_projects:
+        type: string
+        default: ""
       test_type:
         type: string
       amdgpu_families:
@@ -156,6 +159,21 @@ jobs:
             --pr-number "${{ github.event.pull_request.number }}" \
             --pr-title "${{ github.event.pull_request.title }}" \
             --component-name "${{ inputs.projects_to_test }}"
+
+  clang-tidy-linux:
+    name: clang-tidy (${{ inputs.amdgpu_families }})
+    needs: [therock-build-linux]
+    if: >-
+      ${{ inputs.clang_tidy_projects != '' &&
+          inputs.amdgpu_families == 'gfx94X-dcgpu' }}
+    uses: ./.github/workflows/clang-tidy.yml
+    with:
+      therock_ref: ${{ inputs.therock_ref }}
+      docker_image: ${{ inputs.docker_image }}
+      clang_tidy_projects: ${{ inputs.clang_tidy_projects }}
+      amdgpu_families: ${{ inputs.amdgpu_families }}
+      build_runs_on: ${{ inputs.build_runs_on }}
+    secrets: inherit
 
   therock-test-linux:
     name: Test (${{ inputs.amdgpu_families }})

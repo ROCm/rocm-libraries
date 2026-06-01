@@ -23,7 +23,7 @@ class ConfigureCITest(unittest.TestCase):
         self.assertIn("rocprim", str(project_to_run))
         self.assertIn("hipcub", str(project_to_run))
         self.assertIn("rocwmma", str(project_to_run))
-        self.assertEqual(test_type, "full")
+        self.assertEqual(test_type, "standard")
 
     @patch("subprocess.run")
     def test_pull_request_empty(self, mock_run):
@@ -50,7 +50,7 @@ class ConfigureCITest(unittest.TestCase):
         project_to_run, test_type = therock_configure_ci.retrieve_projects(args)
         self.assertIn("rocprim", str(project_to_run))
         self.assertIn("hipcub", str(project_to_run))
-        self.assertEqual(test_type, "full")
+        self.assertEqual(test_type, "standard")
 
     @patch("subprocess.run")
     def test_workflow_dispatch_bad_input(self, mock_run):
@@ -75,8 +75,8 @@ class ConfigureCITest(unittest.TestCase):
         mock_run.return_value = mock_process
 
         project_to_run, test_type = therock_configure_ci.retrieve_projects(args)
-        self.assertGreaterEqual(len(project_to_run), 5)
-        self.assertEqual(test_type, "full")
+        self.assertGreaterEqual(len(project_to_run), 4)
+        self.assertEqual(test_type, "standard")
 
     @patch("subprocess.run")
     def test_workflow_dispatch_empty(self, mock_run):
@@ -101,7 +101,7 @@ class ConfigureCITest(unittest.TestCase):
 
         project_to_run, test_type = therock_configure_ci.retrieve_projects(args)
         self.assertIn("rocprim", str(project_to_run))
-        self.assertEqual(test_type, "full")
+        self.assertEqual(test_type, "standard")
 
     def test_is_path_workflow_file_related_to_ci(self):
         workflow_path = ".github/workflows/therocktest.yml"
@@ -201,7 +201,7 @@ class ConfigureCITest(unittest.TestCase):
         )
 
         self.assertEqual(projects, [])
-        self.assertEqual(test_type, "full")
+        self.assertEqual(test_type, "standard")
 
     @patch("therock_configure_ci.get_modified_paths")
     def test_retrieve_projects_runs_ci_for_non_skippable_paths(self, mock_get_modified):
@@ -212,7 +212,7 @@ class ConfigureCITest(unittest.TestCase):
         )
 
         self.assertIn("rocprim", str(projects))
-        self.assertEqual(test_type, "full")
+        self.assertEqual(test_type, "standard")
 
     @patch("therock_configure_ci.get_modified_paths")
     def test_retrieve_projects_runs_ci_for_two_projects(self, mock_get_modified):
@@ -228,7 +228,7 @@ class ConfigureCITest(unittest.TestCase):
 
         self.assertIn("rocprim", str(projects))
         self.assertIn("hipcub", str(projects))
-        self.assertEqual(test_type, "full")
+        self.assertEqual(test_type, "standard")
 
     @patch("therock_configure_ci.get_modified_paths")
     def test_retrieve_projects_skips_ci_for_ai_config_files(self, mock_get_modified):
@@ -244,7 +244,7 @@ class ConfigureCITest(unittest.TestCase):
         )
 
         self.assertEqual(projects, [])
-        self.assertEqual(test_type, "full")
+        self.assertEqual(test_type, "standard")
 
     @patch("therock_configure_ci.get_modified_paths")
     def test_retrieve_projects_runs_ci_for_workflow_paths(self, mock_get_modified):
@@ -255,8 +255,34 @@ class ConfigureCITest(unittest.TestCase):
         )
 
         # All projects should be tested with smoke tests.. make sure we get at least 4 projects
-        self.assertGreaterEqual(len(projects), 5)
+        self.assertGreaterEqual(len(projects), 4)
         self.assertEqual(test_type, "smoke")
+
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_retrieve_projects_runs_ci_for_clang_tidy_workflow(self, mock_get_modified):
+        mock_get_modified.return_value = [".github/workflows/clang-tidy.yml"]
+
+        projects, test_type = therock_configure_ci.retrieve_projects(
+            {"is_pull_request": True, "base_ref": "HEAD^"}
+        )
+
+        self.assertIn("hipdnn", str(projects))
+        self.assertIn("stinkytofu", str(projects))
+        self.assertEqual(test_type, "standard")
+
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_retrieve_projects_runs_ci_for_stinkytofu_tidy_module(
+        self, mock_get_modified
+    ):
+        mock_get_modified.return_value = ["cmake/modules/ClangTidy.cmake"]
+
+        projects, test_type = therock_configure_ci.retrieve_projects(
+            {"is_pull_request": True, "base_ref": "HEAD^"}
+        )
+
+        self.assertIn("stinkytofu", str(projects))
+        self.assertNotIn("hipdnn", str(projects))
+        self.assertEqual(test_type, "standard")
 
 
 if __name__ == "__main__":
