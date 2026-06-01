@@ -262,6 +262,11 @@ HeaderFilterRegex: '.'
 ExcludeHeaderFilterRegex: '^(.*(data_objects|python3\.[0-9]+|nanobind|_deps).*)$'
 
 CheckOptions:
+  # Disable type analysis for misc-use-internal-linkage to maintain consistent
+  # behavior across clang-tidy versions. AnalyzeTypes was introduced after
+  # LLVM 20 and defaults to true, which flags classes/structs in .cpp files.
+  # Older clang-tidy versions silently ignore this option.
+  - { key: misc-use-internal-linkage.AnalyzeTypes,                value: 'false' }
   - { key: readability-identifier-naming.NamespaceCase,           value: lower_case }
   - { key: readability-identifier-naming.ClassCase,               value: CamelCase }
   - { key: readability-identifier-naming.StructCase,              value: CamelCase }
