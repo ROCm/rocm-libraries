@@ -156,6 +156,22 @@ namespace TensileLite
             return m_fallbackStatus;
         }
 
+        // StreamK=5 hybrid-mode toggle. Forwarded by the host into
+        // StreamKSettings::dynPersistentTile at solve time and OR'd into
+        // bit 31 of MagicShiftItersPerTile so the kernel branches to the
+        // dynamic per-XCD work-queue path when true and the static path
+        // when false. Ignored when the chosen solution is not a
+        // StreamK=5 hybrid kernel.
+        void setDynPersistentTile(bool dynPersistentTile)
+        {
+            m_dynPersistentTile = dynPersistentTile;
+        }
+
+        bool dynPersistentTile() const
+        {
+            return m_dynPersistentTile;
+        }
+
     private:
         int16_t          m_gsu            = 0; // default value
         bool             m_gsuc           = false; // default value
@@ -167,6 +183,7 @@ namespace TensileLite
         int              m_factorDim      = 0;
         ActivationType   m_activationType = ActivationType::None;
         bool             m_fallbackStatus = false; // default value
+        bool             m_dynPersistentTile = false; // SK5 hybrid mode bit
     };
 
     /**

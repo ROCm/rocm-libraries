@@ -586,6 +586,13 @@ struct RocblasltContractionProblem
     bool        swizzleB;
     hipblasLtBatchMode_t batchMode;   
     int32_t bias_stride; 
+    // Mirrors HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT. Forwarded
+    // into ContractionProblemParameters::setDynPersistentTile by
+    // tensile_host.cpp so that ContractionSolution::solve can populate
+    // StreamKSettings::dynPersistentTile. Selects the dynamic per-XCD
+    // work-queue path of a StreamK=5 hybrid kernel when non-zero;
+    // ignored for non-StreamK=5 solutions.
+    int32_t dyn_persistent_tile_ext = 0;
 
     // gemm_ex
     // gemm_strided_batched_ex
@@ -648,7 +655,8 @@ struct RocblasltContractionProblem
                                 bool                   swizzleA,
                                 bool                   swizzleB,
                                 hipblasLtBatchMode_t   batchMode,
-                                int32_t                bias_stride);
+                                int32_t                bias_stride,
+                                int32_t                dyn_persistent_tile_ext = 0);
 };
 
 namespace rocblaslt

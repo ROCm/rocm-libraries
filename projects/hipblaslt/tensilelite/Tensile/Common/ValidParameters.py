@@ -748,6 +748,15 @@ validParameters = { # we need to make sure this matches develop
     # 1 : Basic StreamK
     # 2 : Two-Tile StreamK (each WG completes an even number of sk iterations, followed by an even number of dp tiles)
     # 3 : Two-Tile StreamK with DP before SK tiles
+    # 4 : Dynamic StreamK using per-XCD work queues
+    # 5 : Hybrid SK3 + SK4: emits BOTH the static (mode 3) and dynamic (mode 4)
+    #     code paths in a single kernel. A runtime mode bit packed into the MSB
+    #     of MagicShiftItersPerTile (set by the host from the
+    #     HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT matmul descriptor
+    #     attribute, or the TENSILE_STREAMK5_FORCE_MODE debug env override)
+    #     selects which path runs end-to-end. The bit is loaded once at kernel
+    #     entry into the StreamKHybridMode SGPR and consulted at each SK3/SK4
+    #     codegen fork point.
     # StreamK kernels can adjust the number of CUs being used.
     # Using fewer sometimes increases overall throughput by allowing other kernels to run in parallel.
     # StreamK grid is controlled by setting these enviornment variables:
@@ -772,7 +781,7 @@ validParameters = { # we need to make sure this matches develop
     #   1 = 1 WG per CU (default), for example. 2 will launch WGs = 2 x CU count.
     # The priority of these environment variables is defined as follows:
     # TENSILE_STREAMK_FIXED_GRID > TENSILE_STREAMK_DYNAMIC_GRID > TENSILE_STREAMK_MAX_CUS > TENSILE_STREAMK_GRID_MULTIPLIER
-    "StreamK": [0, 1, 2, 3, 4],
+    "StreamK": [0, 1, 2, 3, 4, 5],
     # Determines if StreamK kernel uses atomics
     # 0: uses workspace to store partial tiles, accumulate in deterministic fix-up step
     # 1: uses atomics to accumulate partial tiles

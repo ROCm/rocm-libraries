@@ -222,7 +222,8 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
                                         swizzleA,
                                         swizzleB,
                                         batch_mode,
-                                        matmul_descr->bias_stride};
+                                        matmul_descr->bias_stride,
+                                        matmul_descr->dyn_persistent_tile_ext};
 
     rocblaslt_status st = runContractionProblem(handle, algo, problem, gemmData);
 
@@ -404,7 +405,8 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle          
                                         swizzleA,
                                         swizzleB,
                                         batch_mode,
-                                        matmul_descr->bias_stride};
+                                        matmul_descr->bias_stride,
+                                        matmul_descr->dyn_persistent_tile_ext};
     return gemmCreate(problem, gemmData, gemmCount);
 }
 
@@ -696,7 +698,8 @@ rocblaslt_status
                                         swizzleA,
                                         swizzleB,
                                         hipblasLtBatchMode_t::HIPBLASLT_BATCH_MODE_STRIDED,
-                                        matmul_descr[i]->bias_stride});
+                                        matmul_descr[i]->bias_stride,
+                                        matmul_descr[i]->dyn_persistent_tile_ext});
     }
     return groupedGemmCreate(problems, gemmData, gemmCount);
 }

@@ -197,6 +197,13 @@ namespace TensileLite
     {
         origami::reduction_t reduction = origami::reduction_t::tree;
         size_t               grid      = 0;
+        // StreamK=5 hybrid-mode toggle: when true, the SK5 kernel runs
+        // the dynamic per-XCD work-queue path; when false it runs the
+        // static path. Sourced from the hipblasLtMatmulDesc attribute
+        // HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT (or the
+        // TENSILE_STREAMK5_FORCE_MODE debug env override). Ignored when
+        // the selected solution has sizeMapping.streamK != 5.
+        bool                 dynPersistentTile = false;
     };
 
     struct GSUSettings
