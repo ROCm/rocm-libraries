@@ -278,6 +278,8 @@ const char* rocblaslt_matmul_desc_attributes_to_string(rocblaslt_matmul_desc_att
         return "MATMUL_DESC_DYN_PERSISTENT_TILE_EXT";
     case ROCBLASLT_MATMUL_DESC_MAX:
         return "MATMUL_DESC_MAX";
+    case ROCBLASLT_MATMUL_DESC_BIAS_BATCH_STRIDE:
+        return "MATMUL_DESC_BIAS_BATCH_STRIDE";
     default:
         return "Invalid";
     }

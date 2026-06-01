@@ -218,37 +218,42 @@ struct _rocblaslt_matmul_desc
     // persistent tile path.
     int32_t dyn_persistent_tile_ext = 0;
 
+    // Added this new bias_stride parameter to capture the stride in bias vector to get unique bias vector for each batch in strided batch case. 
+    // Default value is 0 which means same bias vector will be used across all batches (broadcast).
+    int32_t bias_stride = 0;
+
     std::shared_ptr<void> m_data; // Tensile data
 
     void copy(const _rocblaslt_matmul_desc& src)
     {
-        this->op_A                  = src.op_A;
-        this->op_B                  = src.op_B;
-        this->epilogue              = src.epilogue;
-        this->bias                  = src.bias;
-        this->scaleA                = src.scaleA;
-        this->scaleB                = src.scaleB;
-        this->scaleC                = src.scaleC;
-        this->scaleD                = src.scaleD;
-        this->scaleE                = src.scaleE;
-        this->scaleAType            = src.scaleAType;
-        this->scaleBType            = src.scaleBType;
-        this->pointermode           = src.pointermode;
-        this->amaxD                 = src.amaxD;
-        this->bias_type             = src.bias_type;
-        this->e                     = src.e;
-        this->aux_type              = src.aux_type;
-        this->lde                   = src.lde;
-        this->stride_e              = src.stride_e;
-        this->compute_type          = src.compute_type;
-        this->compute_type_original = src.compute_type_original;
-        this->compute_input_typeA   = src.compute_input_typeA;
-        this->compute_input_typeB   = src.compute_input_typeB;
-        this->scale_type            = src.scale_type;
-        this->act0                  = src.act0;
-        this->act1                  = src.act1;
-        this->sm_count_target       = src.sm_count_target;
+        this->op_A                    = src.op_A;
+        this->op_B                    = src.op_B;
+        this->epilogue                = src.epilogue;
+        this->bias                    = src.bias;
+        this->scaleA                  = src.scaleA;
+        this->scaleB                  = src.scaleB;
+        this->scaleC                  = src.scaleC;
+        this->scaleD                  = src.scaleD;
+        this->scaleE                  = src.scaleE;
+        this->scaleAType              = src.scaleAType;
+        this->scaleBType              = src.scaleBType;
+        this->pointermode             = src.pointermode;
+        this->amaxD                   = src.amaxD;
+        this->bias_type               = src.bias_type;
+        this->e                       = src.e;
+        this->aux_type                = src.aux_type;
+        this->lde                     = src.lde;
+        this->stride_e                = src.stride_e;
+        this->compute_type            = src.compute_type;
+        this->compute_type_original   = src.compute_type_original;
+        this->compute_input_typeA     = src.compute_input_typeA;
+        this->compute_input_typeB     = src.compute_input_typeB;
+        this->scale_type              = src.scale_type;
+        this->act0                    = src.act0;
+        this->act1                    = src.act1;
+        this->sm_count_target         = src.sm_count_target;
         this->dyn_persistent_tile_ext = src.dyn_persistent_tile_ext;
+        this->bias_stride             = src.bias_stride;
     }
 };
 
