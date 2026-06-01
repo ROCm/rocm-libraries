@@ -58,23 +58,25 @@
 # CHECK: s_delay_alu instid0(VALU_DEP_1) | instskip(NEXT) | instid1(SALU_CYCLE_3)
 #
 # tensor_load_to_lds carries gfx12+ memory-hint modifiers like `th:TH_LOAD_NT`
-# (temporal hint, identifier-valued) that none of the existing modifier
-# structs (DSModifiers/FLATModifiers/...) model. parseModifiers signals
-# "unrepresentable" for `key:Identifier` and for any modifier on a microcode
-# format with no namespace mapping (TENSOR has none), so parseInstLine
-# bails out and the line is routed through TEXTBLOCK pass-through, keeping
+# (temporal hint, identifier-valued). parseModifiers stores `key:Identifier`
+# values in its generic fields collection, but TENSOR-format instructions
+# have no modKey mapping at all — so the existing `modKey.empty() &&
+# sawAnyModifier` check still routes them to TEXTBLOCK pass-through, keeping
 # the modifier text intact instead of silently dropping it.
 #
-# Same TEXTBLOCK fallback applies to:
-#   * arithmetic-expression modifier values like `offset:2*8704*2+32` —
-#     downstream consumers parse the value via atoi which would silently
-#     truncate to `2`, so we route the line verbatim instead;
-#   * `key:Identifier` modifiers on VOP3-style instructions like
-#     `v_wmma_scale_f32_*` (`matrix_a_fmt:MATRIX_FMT_FP8`,
-#     `matrix_b_fmt:MATRIX_FMT_FP4`, `matrix_b_reuse`).
+# Arithmetic-expression modifier values like `offset:2*8704*2+32` are
+# evaluated to a single integer via the symbol table; the offset
+# round-trips as `offset:34848`. The evaluator supports literal-only
+# chains and symbol-bearing chains using `+ - * /` with standard precedence.
+#
+# `v_wmma_scale_f32_*` matrix_*_fmt / matrix_*_reuse parse into typed
+# MatrixFmtModifiers + MFMAModifiers. The round-trip preserves the
+# modifier emission order from the input text: matrix_a_fmt /
+# matrix_b_fmt come first, then matrix_b_reuse — exactly as the source
+# asm wrote them.
 #
 # CHECK: tensor_load_to_lds s[12:15], s[16:23] th:TH_LOAD_NT
-# CHECK: ds_load_b128 v[0:3], v[4] offset:2*8704*2+32
+# CHECK: ds_load_b128 v[0:3], v[4] offset:34848
 # CHECK: v_wmma_scale_f32_16x16x128_f8f6f4 v[0:7], v[8:23], v[24:31], 0, v[32], v[33] matrix_a_fmt:MATRIX_FMT_FP8 matrix_b_fmt:MATRIX_FMT_FP4 matrix_b_reuse
 # CHECK: s_endpgm
 
