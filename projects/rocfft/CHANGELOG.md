@@ -6,6 +6,7 @@ Documentation for rocFFT is available at
 ## Since last release (ROCm 7.13)
 
 ### Added
+
 * Generalized multi-device computations for transforms such that each of the length dimension is fully covered either in all the input field's bricks or in all the output field's bricks, regardless of the type and placement of the transform. Note specifically for real transforms: the innermost length dimension must be fully covered in all the input (resp. output) field's bricks for real forward (resp. inverse) transforms.
 
 ### Changed
@@ -13,6 +14,9 @@ Documentation for rocFFT is available at
 * Modified the `rocfft_plan_get_work_buffer_size` and `rocfft_execution_info_set_work_buffer` functions to get and set work memory for the current HIP device.
   * Multi-device transforms can require work memory on any of the devices used for input or output bricks, and the current device set at plan creation.  Users should loop over the set of devices used by the input/output of the transform and check the work memory requirements for each device.
 
+### Resolved issues
+
+* Fixed possible incorrect results for multi-dimensional real transforms with small lengths (e.g., smaller than 128) along the two fastest-varying dimensions.
 
 ## rocFFT 1.0.37 for ROCm 7.13
 
