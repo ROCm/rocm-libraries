@@ -46,6 +46,10 @@
 #include "origami/origami.hpp"
 #include "origami/streamk.hpp"
 
+#include <Tensile/Macros.hpp>
+
+TENSILE_HIDDEN_BEGIN
+
 #define TENSILE_COMMON_KERNEL_ARGS_SIZE 16
 
 namespace TensileLite
@@ -115,6 +119,8 @@ namespace TensileLite
     {
         size_t waveNum;
 
+        dim3 clusterDim{1, 1, 1};
+
         dim3 workGroupSize;
         dim3 threadTile;
         dim3 macroTile;
@@ -181,6 +187,8 @@ namespace TensileLite
         int LocalSplitU = 1;
         bool DirectToLdsA = false;
         bool DirectToLdsB = false;
+
+        int expertSchedulingMode = 0;
 
         std::array<int, 2> waveGroup;
     };
@@ -485,7 +493,8 @@ namespace TensileLite
                                       uint32_t const&          workspaceOffsetInByte,
                                       KA&                      args,
                                       StreamKSettings const&   sk,
-                                      uint32_t                 autoGsuVal) const;
+                                      uint32_t                 autoGsuVal,
+                                      uint32_t                 additionalPaddingPerBatchGeneralBatch=0) const;                                      
 
         template <typename KA>
         inline void calculateConversionCallWorkGroupItems(
@@ -585,6 +594,17 @@ namespace TensileLite
             int  mxBlockB                   = 0;
             rocisa::DataType mxTypeA        = rocisa::DataType::E8;
             rocisa::DataType mxTypeB        = rocisa::DataType::E8;
+
+            // In-device MX scale layout expected by the kernel. Mirrors the
+            // MXScaleFormat solution parameter (see Tensile/Common/ValidParameters.py).
+            // Encoded as a small int so it round-trips through msgpack and YAML
+            // logic files without an explicit enum schema:
+            //   0 = NoSwizzle       (default; canonical row/column layout)
+            //   1 = HostPreSwizzle  (gfx950 subtile host-preswizzled layout)
+            //   2 = InMemorySwizzle (gfx1250 TDM-populated swizzled layout)
+            // The host (DataInitialization) consults this to decide whether to
+            // apply the K-dimension swizzle on the MX scale tensor before upload.
+            int mxScaleFormat = 0;
         };
 
         struct LinearModel
@@ -661,3 +681,5 @@ namespace TensileLite
                              ContractionSolution::ProjectedPerformance const& spm);
     std::ostream& operator<<(std::ostream& stream, BufferLoadCheckPacket const& st);
 } // namespace TensileLite
+
+TENSILE_HIDDEN_END

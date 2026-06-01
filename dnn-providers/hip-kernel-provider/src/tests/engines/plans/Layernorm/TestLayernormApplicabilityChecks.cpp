@@ -13,8 +13,8 @@ using namespace hip_kernel_provider::layernorm;
 TEST(TestLayernormValidator, ValidFprop)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph();
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_LayernormAttributes();
 
@@ -26,8 +26,8 @@ TEST(TestLayernormValidator, UnsupportedDim)
 {
     auto builder
         = hipdnn_test_sdk::utilities::createValidLayernormFpropGraph({12, 4, 1}, {1, 3, 4});
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_LayernormAttributes();
 
@@ -59,8 +59,9 @@ flatbuffers::FlatBufferBuilder createInvalidTypeLayernormFpropGraph(
     const std::vector<int64_t> affineStrides
         = hipdnn_data_sdk::utilities::generateStrides(affineDims);
 
-    std::vector<int64_t> statsDims = {ioDims[0], 1, 1, 1};
-    std::vector<int64_t> statsStrides = hipdnn_data_sdk::utilities::generateStrides(statsDims);
+    const std::vector<int64_t> statsDims = {ioDims[0], 1, 1, 1};
+    const std::vector<int64_t> statsStrides
+        = hipdnn_data_sdk::utilities::generateStrides(statsDims);
 
     // Required tensors
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
@@ -140,8 +141,8 @@ TEST(TestLayernormValidator, MismatchIOTypes)
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
 
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_LayernormAttributes();
@@ -162,8 +163,8 @@ TEST(TestLayernormValidator, InvalidEpsilonType)
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
         hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
 
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_LayernormAttributes();
@@ -320,8 +321,8 @@ TEST(TestLayernormValidator, MismatchIOShapes)
                                                          statsDims,
                                                          statsStrides);
     // NOLINTEND(readability-suspicious-call-argument)
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_LayernormAttributes();
@@ -365,8 +366,8 @@ TEST(TestLayernormValidator, MismatchAffineShapes)
                                                          statsDims,
                                                          statsStrides);
     // NOLINTEND(readability-suspicious-call-argument)
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_LayernormAttributes();
@@ -410,8 +411,8 @@ TEST(TestLayernormValidator, MismatchStatsShapes)
                                                          invVarDims,
                                                          invVarStrides);
     // NOLINTEND(readability-suspicious-call-argument)
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_LayernormAttributes();
@@ -451,8 +452,8 @@ TEST(TestLayernormValidator, InvalidNormalization)
                                                          statsDims,
                                                          statsStrides);
     // NOLINTEND(readability-suspicious-call-argument)
-    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(builder.GetBufferPointer(),
-                                                                     builder.GetSize());
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     const auto& attr = *node.attributes_as_LayernormAttributes();

@@ -8,6 +8,7 @@ subtree_to_project_map = {
     "dnn-providers/hipblaslt-provider": "hipblaslt-provider",
     "dnn-providers/hip-kernel-provider": "hip-kernel-provider",
     "dnn-providers/miopen-provider": "miopen-provider",
+    "dnn-providers/integration-tests": "dnn-provider-integration-tests",
     "projects/composablekernel": "miopen",
     "projects/hipblas": "blas",
     "projects/hipblas-common": "blas",
@@ -31,6 +32,7 @@ subtree_to_project_map = {
     "shared/mxdatagenerator": "blas",
     "shared/origami": "blas",
     "shared/rocroller": "blas",
+    "shared/stinkytofu": "blas",
     "shared/tensile": "blas",
 }
 
@@ -96,6 +98,7 @@ additional_options = {
             "-DTHEROCK_ENABLE_MIOPENPROVIDER=ON",
             "-DTHEROCK_ENABLE_HIPDNN_SAMPLES=ON",
             "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
+            "-DTHEROCK_ENABLE_HIPDNN_INTEGRATION_TESTS=ON",
         ],
         "projects_to_test": [
             "hipdnn",
@@ -104,6 +107,7 @@ additional_options = {
             "miopenprovider",
             "hipblasltprovider",
             "hipkernelprovider",
+            "hipdnn-integration-tests",
         ],
         "project_to_add": "miopen",
     },
@@ -111,8 +115,18 @@ additional_options = {
         "cmake_options": [
             "-DTHEROCK_ENABLE_MIOPENPROVIDER=ON",
             "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
+            "-DTHEROCK_ENABLE_HIPDNN_INTEGRATION_TESTS=ON",
         ],
         "projects_to_test": ["miopenprovider"],
+        "project_to_add": "miopen",
+    },
+    "dnn-provider-integration-tests": {
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_HIPDNN_INTEGRATION_TESTS=ON",
+            "-DTHEROCK_ENABLE_MIOPENPROVIDER=ON",
+            "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
+        ],
+        "projects_to_test": ["hipdnn-integration-tests", "miopenprovider"],
         "project_to_add": "miopen",
     },
     "hipblaslt-provider": {

@@ -1,5 +1,5 @@
 /* ************************************************************************
-* Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -755,7 +755,32 @@ namespace hipsparse
     }
 #endif
 
-#if(CUDART_VERSION >= 12011)
+#if(CUDART_VERSION >= 13001)
+    inline cusparseSpMVAlg_t hipSpMVAlgToCudaSpMVAlg(hipsparseSpMVAlg_t alg)
+    {
+        switch(alg)
+        {
+        case HIPSPARSE_SPMV_ALG_DEFAULT:
+            return CUSPARSE_SPMV_ALG_DEFAULT;
+        case HIPSPARSE_SPMV_COO_ALG1:
+            return CUSPARSE_SPMV_COO_ALG1;
+        case HIPSPARSE_SPMV_COO_ALG2:
+            return CUSPARSE_SPMV_COO_ALG2;
+        case HIPSPARSE_SPMV_CSR_ALG1:
+            return CUSPARSE_SPMV_CSR_ALG1;
+        case HIPSPARSE_SPMV_CSR_ALG2:
+            return CUSPARSE_SPMV_CSR_ALG2;
+        case HIPSPARSE_SPMV_SELL_ALG1:
+            return CUSPARSE_SPMV_SELL_ALG1;
+#ifdef HIPSPARSE_WITH_SPMV_BSR
+        case HIPSPARSE_SPMV_BSR_ALG1:
+            return CUSPARSE_SPMV_BSR_ALG1;
+#endif
+        default:
+            throw "Non existant hipsparseSpMVAlg_t";
+        }
+    }
+#elif(CUDART_VERSION >= 12011 && CUDART_VERSION < 13001)
     inline cusparseSpMVAlg_t hipSpMVAlgToCudaSpMVAlg(hipsparseSpMVAlg_t alg)
     {
         switch(alg)

@@ -24,6 +24,7 @@
 
 #include <iosfwd>
 
+#include "stinkytofu/Export.hpp"
 #include "stinkytofu/support/IntrusiveList.hpp"
 
 namespace stinkytofu {
@@ -31,7 +32,7 @@ class BasicBlock;
 
 /// IRBase is in an IntrusiveList<IRBase, BasicBlock>; getParent() comes from IntrusiveListNode and
 /// returns the owning BasicBlock.
-class IRBase : public IntrusiveListNode<IRBase, BasicBlock> {
+class STINKYTOFU_EXPORT IRBase : public IntrusiveListNode<IRBase, BasicBlock> {
    public:
     // Stinky framework could support multiple IR types in the future,
     // conceptually similar to MLIR but in much simpler framework.

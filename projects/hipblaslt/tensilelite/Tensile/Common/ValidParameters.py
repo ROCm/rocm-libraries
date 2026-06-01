@@ -26,6 +26,7 @@ import math
 from functools import lru_cache
 
 from .Architectures import SUPPORTED_ISA
+from .Types import IsaVersion
 
 ################################################################################
 # Enumerate Valid Solution Parameters
@@ -63,12 +64,20 @@ validMacroTileSides = [
     768,
 ]
 validMacroTiles = []
-validISA = [(0, 0, 0)]
+validISA = [IsaVersion(0, 0, 0)]
 validISA.extend(SUPPORTED_ISA)
 for i in validMacroTileSides:
     for j in validMacroTileSides:
         validMacroTiles.append([i, j])
 validTT = 32
+
+maxWGsInCluster = 16
+# 2D [x, y] only — z is always 1 (hardcoded in HipSolutionAdapter); C++ uses dim3 for HIP API compat.
+validClusterDimensions = []
+for i in range(1, maxWGsInCluster + 1):
+  for j in range(1, maxWGsInCluster + 1):
+    if i * j <= maxWGsInCluster:
+      validClusterDimensions.append([i, j])
 
 @lru_cache
 def makeValidWorkGroups():
@@ -91,10 +100,10 @@ def makeValidSWMMAC():
 @lru_cache
 def makeValidMFMA():
     validMFMA = {}
-    validMFMA["H"] = [[32, 32, 16, 1], [32, 32, 4, 2], [32, 32, 8, 1], [16, 16, 32, 1], [16, 16, 4, 4], [16, 16, 16, 1], [4, 4, 4, 16]]
-    validMFMA["S"] = [[32, 32, 1, 2], [32, 32, 2, 1], [16, 16, 1, 4], [16, 16, 4, 1], [4, 4, 1, 16], [16, 16, 32, 1], [32, 32, 16, 1]]
-    validMFMA["B"] = [[32, 32, 16, 1], [32, 32, 2, 2], [32, 32, 4, 1], [16, 16, 32, 1], [16, 16, 2, 4], [16, 16, 8, 1], [4, 4, 2, 16]]
-    validMFMA["4xi8"] = [
+    validMFMA["HH"] = [[32, 32, 16, 1], [32, 32, 4, 2], [32, 32, 8, 1], [16, 16, 32, 1], [16, 16, 4, 4], [16, 16, 16, 1], [4, 4, 4, 16]]
+    validMFMA["SS"] = [[32, 32, 1, 2], [32, 32, 2, 1], [16, 16, 1, 4], [16, 16, 4, 1], [4, 4, 1, 16], [16, 16, 32, 1], [32, 32, 16, 1]]
+    validMFMA["BB"] = [[32, 32, 16, 1], [32, 32, 2, 2], [32, 32, 4, 1], [16, 16, 32, 1], [16, 16, 2, 4], [16, 16, 8, 1], [4, 4, 2, 16]]
+    validMFMA["4xi84xi8"] = [
         [32, 32, 4, 2],
         [32, 32, 8, 1],
         [16, 16, 4, 4],
@@ -103,35 +112,53 @@ def makeValidMFMA():
         [32, 32, 16, 1],
         [16, 16, 32, 1],
     ]
-    validMFMA["D"] = [[16, 16, 4, 1], [4, 4, 4, 4]]
+    validMFMA["DD"] = [[16, 16, 4, 1], [4, 4, 4, 4]]
     validMFMA["B1k"] = [[32, 32, 4, 2], [32, 32, 8, 1], [16, 16, 4, 4], [16, 16, 16, 1], [4, 4, 4, 16]]
-    validMFMA["C"] = validMFMA["S"]
-    validMFMA["Z"] = validMFMA["D"]
-    validMFMA["I8"] = [
+    validMFMA["CC"] = validMFMA["SS"]
+    validMFMA["ZZ"] = validMFMA["DD"]
+    validMFMA["I8I8"] = [
         [32, 32, 4, 2],
         [32, 32, 8, 1],
         [16, 16, 4, 4],
         [16, 16, 16, 1],
         [4, 4, 4, 16],
     ] + [[32, 32, 16, 1], [16, 16, 32, 1],] + [[16, 16, 64, 1],[32, 32, 32, 1]]
-    validMFMA["X"] = [[32, 32, 4, 1], [16, 16, 8, 1], [16, 16, 16, 1], [16, 16, 32, 1], [32, 32, 16, 1]]
-    validMFMA["F8"] = [[32, 32, 16, 1], [16, 16, 32, 1], [32, 32, 64, 1], [16, 16, 128, 1]]
-    validMFMA["B8"] = validMFMA["F8"]
-    validMFMA["F8B8"] = validMFMA["F8"]
-    validMFMA["B8F8"] = validMFMA["F8"]
-    validMFMA["F8N"] = [[32, 32, 16, 1], [16, 16, 32, 1]]
-    validMFMA["B8N"] = validMFMA["F8N"]
-    validMFMA["F8B8N"] = validMFMA["F8N"]
-    validMFMA["B8F8N"] = validMFMA["F8N"]
+    validMFMA["XX"] = [[32, 32, 4, 1], [16, 16, 8, 1], [16, 16, 16, 1], [16, 16, 32, 1], [32, 32, 16, 1]]
+    validMFMA["F8F8"] = [[32, 32, 16, 1], [16, 16, 32, 1], [32, 32, 64, 1], [16, 16, 128, 1]]
+    validMFMA["B8B8"] = validMFMA["F8F8"]
+    validMFMA["F8B8"] = validMFMA["F8F8"]
+    validMFMA["B8F8"] = validMFMA["F8F8"]
+    validMFMA["F8NF8N"] = [[32, 32, 16, 1], [16, 16, 32, 1]]
+    validMFMA["B8NB8N"] = validMFMA["F8NF8N"]
+    validMFMA["F8NB8N"] = validMFMA["F8NF8N"]
+    validMFMA["B8NF8N"] = validMFMA["F8NF8N"]
+    # fnuz (NANOO) OCP pairings: DataType *_fnuz uses *N suffix; same MFMA sets as F8B8 / B8F8.
+    validMFMA["F8B8NF8B8N"] = validMFMA["F8B8"]
+    validMFMA["B8F8NB8F8N"] = validMFMA["B8F8"]
+    validMFMA["F8B8NB8F8N"] = validMFMA["F8B8"]
+    validMFMA["B8F8NF8B8N"] = validMFMA["F8B8"]
+    validMFMA["F6F6"] = [[16,16,128,1], [32,32,64,1]]
+    validMFMA["B6B6"] = [[16,16,128,1], [32,32,64,1]]
+    validMFMA["F6B6"] = [[16,16,128,1], [32,32,64,1]]
+    validMFMA["B6F6"] = [[16,16,128,1], [32,32,64,1]]
+    validMFMA["F8F6"] = [[16,16,128,1], [32,32,64,1]]
+    validMFMA["F6F8"] = [[16,16,128,1], [32,32,64,1]]
+    validMFMA["F8F4"] = [[16,16,128,1], [32,32,64,1]]
+    validMFMA["F4F8"] = [[16,16,128,1], [32,32,64,1]]
+    validMFMA["F6F4"] = [[16,16,128,1], [32,32,64,1]]
+    validMFMA["F4F6"] = [[16,16,128,1], [32,32,64,1]]
+    validMFMA["B6F4"] = [[16,16,128,1], [32,32,64,1]]
+    validMFMA["F4B6"] = [[16,16,128,1], [32,32,64,1]]
+    validMFMA["F4F4"] = [[16,16,128,1], [32,32,64,1]]
     validMFMA["_format9"] = []
 
     for MFMA in [
-        validMFMA["H"],
-        validMFMA["S"],
-        validMFMA["B"],
-        validMFMA["D"],
-        validMFMA["X"],
-        validMFMA["F8N"],
+        validMFMA["HH"],
+        validMFMA["SS"],
+        validMFMA["BB"],
+        validMFMA["DD"],
+        validMFMA["XX"],
+        validMFMA["F8F8"],
         makeValidWMMA(),
     ]:
         for MI in MFMA:
@@ -148,20 +175,24 @@ def makeValidMFMA():
 @lru_cache
 def makeValidSMFMA():
     validSMFMA = {}
-    validSMFMA["H"] = [[32, 32, 16, 1], [16, 16, 32, 1], [16, 16, 64, 1], [32, 32, 32, 1]]
-    validSMFMA["B"] = [[32, 32, 16, 1], [16, 16, 32, 1], [16, 16, 64, 1], [32, 32, 32, 1]]
-    validSMFMA["4xi8"] = [[32, 32, 32, 1], [16, 16, 64, 1], [16, 16, 128, 1], [32, 32, 64, 1]]
-    validSMFMA["I8"] = validSMFMA["4xi8"]
-    validSMFMA["F8"] = [[32, 32, 32, 1], [16, 16, 64, 1], [16, 16, 128, 1], [32, 32, 64, 1]]
-    validSMFMA["B8"] = validSMFMA["F8"]
-    validSMFMA["F8B8"] = validSMFMA["F8"]
-    validSMFMA["B8F8"] = validSMFMA["F8"]
-    validSMFMA["F8N"] = validSMFMA["F8"]
-    validSMFMA["B8N"] = validSMFMA["F8"]
-    validSMFMA["F8B8N"] = validSMFMA["F8N"]
-    validSMFMA["B8F8N"] = validSMFMA["F8N"]
+    validSMFMA["HH"] = [[32, 32, 16, 1], [16, 16, 32, 1], [16, 16, 64, 1], [32, 32, 32, 1]]
+    validSMFMA["BB"] = [[32, 32, 16, 1], [16, 16, 32, 1], [16, 16, 64, 1], [32, 32, 32, 1]]
+    validSMFMA["4xi84xi8"] = [[32, 32, 32, 1], [16, 16, 64, 1], [16, 16, 128, 1], [32, 32, 64, 1]]
+    validSMFMA["I8I8"] = validSMFMA["4xi84xi8"]
+    validSMFMA["F8F8"] = [[32, 32, 32, 1], [16, 16, 64, 1], [16, 16, 128, 1], [32, 32, 64, 1]]
+    validSMFMA["B8B8"] = validSMFMA["F8F8"]
+    validSMFMA["F8B8"] = validSMFMA["F8F8"]
+    validSMFMA["B8F8"] = validSMFMA["F8F8"]
+    validSMFMA["F8NF8N"] = validSMFMA["F8F8"]
+    validSMFMA["B8NB8N"] = validSMFMA["F8F8"]
+    validSMFMA["F8NB8N"] = validSMFMA["F8NF8N"]
+    validSMFMA["B8NF8N"] = validSMFMA["F8NF8N"]
+    validSMFMA["F8B8NF8B8N"] = validSMFMA["F8B8"]
+    validSMFMA["B8F8NB8F8N"] = validSMFMA["B8F8"]
+    validSMFMA["F8B8NB8F8N"] = validSMFMA["F8B8"]
+    validSMFMA["B8F8NF8B8N"] = validSMFMA["F8B8"]
     validSMFMA["_format9"] = []
-    for SMFMA in [validSMFMA["H"], validSMFMA["B"], validSMFMA["4xi8"], validSMFMA["F8N"], makeValidSWMMAC()]:
+    for SMFMA in [validSMFMA["HH"], validSMFMA["BB"], validSMFMA["4xi84xi8"], validSMFMA["F8NF8N"], makeValidSWMMAC()]:
         for MI in SMFMA:
             for bm in range(int(math.log(MI[3], 2)) + 1):
                 for tt0 in range(1, validTT + 1):
@@ -180,15 +211,15 @@ def makeValidMatrixInstructions():
     wmma = makeValidWMMA()
     validMatrixInstructions = (
         [[], [-1]]
-        + mfma["H"]
-        + mfma["S"]
-        + mfma["B"]
-        + mfma["D"]
+        + mfma["HH"]
+        + mfma["SS"]
+        + mfma["BB"]
+        + mfma["DD"]
         + mfma["B1k"]
-        + mfma["X"]
-        + smfma["H"]
-        + smfma["B"]
-        + smfma["4xi8"]
+        + mfma["XX"]
+        + smfma["HH"]
+        + smfma["BB"]
+        + smfma["4xi84xi8"]
         + wmma
     )
     return validMatrixInstructions + mfma["_format9"] + smfma["_format9"]
@@ -290,6 +321,16 @@ validParameters = { # we need to make sure this matches develop
     # don't create a whole copy of the Unroll loop with loads removed - instead
     # use buffer limits to suppress global loads and ignore unnecessary ds_reads
     "SuppressNoLoadLoop": [False, True],
+    # StinkyTofu: whether SwPrefetchInsertionPass may insert software instruction prefetch.
+    # True: Turn on StinkyTofu instruction prefetch for this solution (extra SGPR on supported ISAs only).
+    # False: no prefetch SGPR, prefetch pass disabled for this kernel.
+    #
+    # Purpose: command-processor (CP) prefetch only covers a bounded amount of code. When
+    # the kernel's assembly footprint is large enough to exceed that window, the front of the
+    # kernel can fall out of the I-cache before execution reaches it, causing misses. Software
+    # prefetch instructions bring hot code back under software control so execution stays ahead of
+    # the fetch pointer and avoids those misses.
+    "SwInstructionPrefetch": [False, True],
     # For PrefetchGlobalRead=1, create a second copy of the unroll loop with
     # the LDS pointer swaps expanded into inline constants for LDS read and write instructions
     # This eliminates 4 vector XOR instructions used for pointer swap
@@ -305,7 +346,7 @@ validParameters = { # we need to make sure this matches develop
     # Scheduling algorithm to use for each iteration:
     # 0 = minimal/no scheduling.  Global Read and increments, followed by local reads,
     # followed by local writes, followed by MACs
-    "ScheduleIterAlg": [0, 1, 2, 3],
+    "ScheduleIterAlg": [0, 1, 2, 3, 4],
     # For MatrixInstruction and SIA3, number of GlobalReadInstruction between mfma
     # the purpose of this parameter is to control density of global read instruction scheduling
     # Scheduling global read back to back can have better memory efficiency
@@ -353,14 +394,6 @@ validParameters = { # we need to make sure this matches develop
     "DirectToVgprMXSA": [False, True],
     "DirectToVgprMXSB": [False, True],
     "DirectToVgprSparseMetadata": [False, True],
-    # B address interleave (restricted): non-contiguous tile columns for TN/NN-like B (TLUB == False),
-    # with runtime G chosen as the largest power-of-two factor of (N/MT1), capped by LVCB.
-    # Requires SizeJ % MT1 == 0 at runtime; otherwise falls back to original mapping.
-    "BAddrInterleave": [False, True],
-    # K ring-shift (restricted): apply a per-WG shift along the summation (K) dimension so that
-    # the B-side base K address for each workgroup is cacheline-aligned/congruent, while preserving
-    # correctness via tail-loop ring wrap. Intended for TN/NN-like B (TLUB == False).
-    "KRingShift": [False, True],
     # Attempt to load directly from global memory into LDS.
     # Assembly only
     # Requires BufferLoad, assembler support for lds modifier on buffer
@@ -379,6 +412,14 @@ validParameters = { # we need to make sure this matches develop
     #  2: DirectToLds A only (no DTLB)
     #  3: DirectToLds B only (no DTLA)
     "DirectToLds": [0, 1, 2, 3],
+    # DirectToLds for sparse metadata.
+    # Requires DirectToLds on the dense side (B if Sparse==2 else A),
+    # and GlobalReadVectorWidthMetadata ∈ {4, 16} (16 needs HasDirectToLdsx4).
+    "DirectToLdsMetadata": [0, 1],
+    # Enable subtile-based kernel implementation for MX FP4 (gfx950 only).
+    # When True, uses a subtile scheduling strategy with DTL global reads and
+    # an optimized storeD path. Automatically forced False on non-gfx950.
+    "UseSubtileImpl": [False, True],
     # Load options:
     # (GRO = Global Read Offset)
     # BufferLoad=0:
@@ -423,6 +464,8 @@ validParameters = { # we need to make sure this matches develop
     "UseSgprForGRO": [-1, 0, 1],
     # Use a 64-bit shadow limit register to allow buffers larger than 2^32 bytes
     "Use64bShadowLimit": [True, False],
+    # Use a 64-bit shadow limit register for MXSA/B to allow buffers larger than 2^32 bytes
+    "Use64bShadowLimitMX": [True, False],
     # Assertion properties
     # These provide information or assertions that the problem size meets certain requirements
     # for sizes or alignments.  The kernel generator can use this information to produce
@@ -470,16 +513,6 @@ validParameters = { # we need to make sure this matches develop
     #  - See above AssertFree0ElementMultiple "Load optimizations"
     # 1 indicates no assertion (since all sizes are multiples of 1)
     "AssertFree1ElementMultiple": [1, 2, 4, 8, 16, 32],
-    # Address-interleave restriction:
-    # If >0, require tiles1=(Free1Size / MT1) to have lowbit(tiles1)>1 (i.e. G>1).
-    # This matches the kernel's initBInterleaveG logic:
-    #   - require Free1Size % MT1 == 0
-    #   - compute lowbit(tiles1)
-    #   - enable only if min(lowbit, LVCB) > 1
-    "AssertFree1DivByMT1LowbitGT1": -1,
-    # KRingShift wrap restriction (packed integer; see Solution.py for encoding):
-    # If >0, require any (k + KRingShift) wrap to occur only in tail loop (no main-loop wrap).
-    "AssertKRingShiftTailWrapOnly": -1,
     # Assertions that require arithmetic intensity to be specified value.
     # Arithmetic intensity measures the ratio of computation to memory bandwidth required for a problem.
     # These predicates can be used to adjust solution selection compute-bound or memory-bound problems.
@@ -626,7 +659,7 @@ validParameters = { # we need to make sure this matches develop
     # Generally, the VW determines the consecutive a WI will work on, then it will skip ahead SG0*VW elements to get to the next row of VGPR inputs
     "ThreadTile": validThreadTiles,
     "MacroTile": validMacroTiles,  # MT0 = wg0*tt0, MT1 = wg1*tt1
-    "WavefrontSize": [32, 64],
+    "WavefrontSize": [-1, 32, 64],  # -1 = auto-detect from ISA archCaps["HasWave32"]
     # MatrixInstruction: (M x N x K x B)
     # XDLOPS tile definition, only valid for gfx908, gfx90a
     # MxNxKxB specifies matrix instruction variants
@@ -739,7 +772,7 @@ validParameters = { # we need to make sure this matches develop
     #   1 = 1 WG per CU (default), for example. 2 will launch WGs = 2 x CU count.
     # The priority of these environment variables is defined as follows:
     # TENSILE_STREAMK_FIXED_GRID > TENSILE_STREAMK_DYNAMIC_GRID > TENSILE_STREAMK_MAX_CUS > TENSILE_STREAMK_GRID_MULTIPLIER
-    "StreamK": [0, 1, 2, 3],
+    "StreamK": [0, 1, 2, 3, 4],
     # Determines if StreamK kernel uses atomics
     # 0: uses workspace to store partial tiles, accumulate in deterministic fix-up step
     # 1: uses atomics to accumulate partial tiles
@@ -762,6 +795,10 @@ validParameters = { # we need to make sure this matches develop
     #   2 = No partials
     #   3 = Nofixup and no partials
     "DebugStreamK": [0, 1, 2, 3],
+    # Persistent-kernel debug: when True, the persistent loop never exits.
+    # Used as a co-tenant load kernel for contended-perf benchmarking.
+    # Termination is via process death. Requires StreamK = 1, 2, or 3.
+    "DebugPersistentKernelLoopForever": [False, True],
     # Controls desired width (#elements) for loads from global memory -> LDS.
     # and eliminates the pointer unshift logic
     # -1 : Set GlobalReadVectorWidth =  VectorWidth
@@ -792,7 +829,7 @@ validParameters = { # we need to make sure this matches develop
     # Typically matching 16 bytes is good choice since the stores will be optimally coalesced with 16 bytes/WI.
     # Using a VW too large which results in >16bytes/thread isn't supported
     # For MFMA non SourceSwap: this parameter didn't take effect
-    # -1 means set vw to largest localReadWidth according to MIWaveTile
+    # -1 means set vw to largest localReadWidth according to MIWaveTile, LDS padding and LDS capacity
     "VectorWidthA": [-1, 1, 2, 3, 4, 6, 8],
     "VectorWidthB": [-1, 1, 2, 3, 4, 6, 8],
     # If 0, store 1 element per instruction.
@@ -911,6 +948,11 @@ validParameters = { # we need to make sure this matches develop
     "ConvertAfterDS": [False, True],
     # Force disable shadow init to release more sgpr in preloop
     "ForceDisableShadowInit": [False, True],
+    # Use WMMA/MFMA with src C=0 to initialize C accumulators (skipping v_mov initC).
+    # -1: auto-detect
+    #  0: force disable
+    #  1: force enable (rejected if the auto-disable conditions are met)
+    "InitCIterWmma": [-1, 0, 1],
     # Enable LDS Transpose Instruction
     "LDSTrInst": [False, True],
     # False: Use LocalSplitU. Number of WorkGroup[2] WorkItems (wave or thread) will compute the same output elements (matrix D) along different
@@ -931,8 +973,8 @@ validParameters = { # we need to make sure this matches develop
     # 1  : enable  CMS, is set to 0 if not supported
     "UseCustomMainLoopSchedule" : [-1, 0, 1],
     "AdaptiveGemm": [0, 1],
-    # 0  : MB and MBSK generate different assembly code
-    # 1  : MB and MBSK generate same assembly code
+    # 0  : disable
+    # 1  : merge MB and MBSK assembly code and select best GW path in runtime
     "AdaptiveGemmGSUA": [0, 1],
     # Add extra latency to calculate number of MFMA to insert between local read and wait
     # Negative value means reduce interval between local read and wait (for DirectToVgpr only)
@@ -962,7 +1004,48 @@ validParameters = { # we need to make sure this matches develop
     # 1: Use TDM for A
     # 2: Use TDM for B
     # 3: Use TDM for both A and B
-    "TDMInst": [0, 1, 2, 3]
+    "TDMInst": [0, 1, 2, 3],
+    # Split each TDM data tensor (A or B) load across two tensor_load_to_lds instructions,
+    # each covering half the macro-tile in the M/N dimension. MX scale tensors (MXSA/MXSB)
+    # are not split regardless of this flag. When True, two extra SGPRs are allocated to
+    # hold the per-iteration LDS and global address increments for the split loads.
+    "TDMSplit": [False, True],
+    # In-device layout of the MX scale tensors (MXSA/MXSB).
+    # User-facing values:
+    #   "NoSwizzle":       no swizzling; plain row/column layout (this is the default
+    #                      unless TDMInst != 0, in which case InMemorySwizzle is the default).
+    #   "HostPreSwizzle":  scales pre-swizzled on the host (gfx950 subtile pipeline);
+    #                      requires MXLoadInst="BufferLoad" and gfx950 host pipeline.
+    #   "InMemorySwizzle": scales swizzled in device memory by TDM;
+    #                      requires MXLoadInst="TDM".
+    # Internal sentinel (do NOT use in yamls):
+    #   "Auto":            triggers conditional defaulting in Solution.assignDerivedParameters.
+    #                      The defaultBenchmarkCommonParameters entry is "Auto" so the
+    #                      derivation fires; users should write one of the concrete values above.
+    # Codegen + rejection logic combine MXScaleFormat with MXLoadInst and
+    # archCaps["HasMXScaleSwizzle"].
+    "MXScaleFormat": ["Auto", "NoSwizzle", "HostPreSwizzle", "InMemorySwizzle"],
+    # How A/MXSA and B/MXSB are loaded from VRAM to LDS.
+    # User-facing values:
+    #   "TDM":         tensor_load_to_lds (requires asmCaps["HasTDM"]; today always implies
+    #                  InMemorySwizzle MX scale layout).
+    #   "BufferLoad":  buffer_load_* (compatible with NoSwizzle or HostPreSwizzle MX scale layouts).
+    #   "GlobalLoad":  reserved for a future flat/global_load MX path; rejected for now.
+    # Internal sentinel (do NOT use in yamls):
+    #   "Auto":        triggers defaulting in Solution.assignDerivedParameters. The default is
+    #                  TDM iff TDMInst != 0, otherwise BufferLoad.
+    "MXLoadInst": ["Auto", "TDM", "BufferLoad", "GlobalLoad"],
+    # Enable cluster barrier.
+    "ClusterBarrier": [False, True],
+    # Cluster dimension. Clusters have up to 16 work-groups in a cluster, but each work-group in a
+    # cluster runs on a separate WGP.
+    "ClusterDim": validClusterDimensions,
+    # Enable PLR 0.5 to save vgprs
+    # 0: Disabled
+    # 1: Use PLR 0.5 for A
+    # 2: Use PLR 0.5 for B
+    # 3: Use PLR 0.5 for both A and B
+    "HalfPLR": [0, 1, 2, 3]
 }
 
 newMIValidParameters = {

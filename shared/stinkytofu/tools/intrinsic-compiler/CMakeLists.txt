@@ -8,12 +8,10 @@
 
 set(SOURCES
     intrinsic-compiler.cpp
-    ../../src/serialization/asm/IRLexer.cpp
-    ../../src/serialization/asm/PatternParser.cpp
-    ../../src/serialization/logical/IRSerializer.cpp
 )
 
 add_executable(intrinsic-compiler "${SOURCES}")
+target_link_libraries(intrinsic-compiler PRIVATE stinkytofu-warnings)
 
 # Link against the main stinkytofu library (for CodeGenerator, passes, etc.)
 target_link_libraries(intrinsic-compiler PRIVATE stinkytofu)
@@ -64,6 +62,7 @@ set(TEST_LOADER_SOURCES
 )
 
 add_executable(test_loader "${TEST_LOADER_SOURCES}")
+target_link_libraries(test_loader PRIVATE stinkytofu-warnings)
 
 # Link against the main stinkytofu library
 target_link_libraries(test_loader PRIVATE stinkytofu)
@@ -84,6 +83,7 @@ set(DEMO_AUTO_LOAD_SOURCES
 )
 
 add_executable(demo_auto_load "${DEMO_AUTO_LOAD_SOURCES}")
+target_link_libraries(demo_auto_load PRIVATE stinkytofu-warnings)
 
 # Link against the main stinkytofu library
 target_link_libraries(demo_auto_load PRIVATE stinkytofu)

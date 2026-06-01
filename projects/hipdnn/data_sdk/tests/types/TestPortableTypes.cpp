@@ -165,6 +165,27 @@ struct PortableTypeTraits<fp8_e4m3>
 };
 
 template <>
+struct PortableTypeTraits<fp8_e4m3_fnuz>
+{
+    // Note: fp8_e4m3_fnuz has no infinity and no negative zero
+    static constexpr bool HAS_INFINITY = false;
+    static constexpr bool HAS_NAN = true;
+    static constexpr uint8_t ONE_BITS = 0x40;
+    static constexpr uint8_t NEG_ONE_BITS = 0xC0;
+    static constexpr uint8_t ZERO_BITS = 0x00;
+    static constexpr uint8_t NAN_BITS = 0x80;
+
+    static fp8_e4m3_fnuz fromBits(uint8_t bits)
+    {
+        return fp8_e4m3_fnuz::from_bits(bits);
+    }
+    static uint8_t toBits(fp8_e4m3_fnuz val)
+    {
+        return val.data;
+    }
+};
+
+template <>
 struct PortableTypeTraits<fp8_e5m2>
 {
     static constexpr bool HAS_INFINITY = true;
@@ -182,6 +203,27 @@ struct PortableTypeTraits<fp8_e5m2>
         return fp8_e5m2::from_bits(bits);
     }
     static uint8_t toBits(fp8_e5m2 val)
+    {
+        return val.data;
+    }
+};
+
+template <>
+struct PortableTypeTraits<fp8_e5m2_fnuz>
+{
+    // Note: fp8_e5m2_fnuz has no infinity and no negative zero
+    static constexpr bool HAS_INFINITY = false;
+    static constexpr bool HAS_NAN = true;
+    static constexpr uint8_t ONE_BITS = 0x40;
+    static constexpr uint8_t NEG_ONE_BITS = 0xC0;
+    static constexpr uint8_t ZERO_BITS = 0x00;
+    static constexpr uint8_t NAN_BITS = 0x80;
+
+    static fp8_e5m2_fnuz fromBits(uint8_t bits)
+    {
+        return fp8_e5m2_fnuz::from_bits(bits);
+    }
+    static uint8_t toBits(fp8_e5m2_fnuz val)
     {
         return val.data;
     }
@@ -216,8 +258,16 @@ class PortableFloatTypes : public ::testing::Test
 {
 };
 
-using PortableTypes
-    = ::testing::Types<bfloat16, half, fp4_e2m1, fp6_e2m3, fp6_e3m2, fp8_e4m3, fp8_e5m2, fp8_e8m0>;
+using PortableTypes = ::testing::Types<bfloat16,
+                                       half,
+                                       fp4_e2m1,
+                                       fp6_e2m3,
+                                       fp6_e3m2,
+                                       fp8_e4m3,
+                                       fp8_e4m3_fnuz,
+                                       fp8_e5m2,
+                                       fp8_e5m2_fnuz,
+                                       fp8_e8m0>;
 TYPED_TEST_SUITE(PortableFloatTypes, PortableTypes, );
 
 // ============================================================================
@@ -618,8 +668,10 @@ TYPED_TEST(PortableFloatTypes, NegativeZero)
     using T = TypeParam;
     using Traits = PortableTypeTraits<T>;
 
-    // fp8_e8m0 has no negative zero - it's unsigned
-    if constexpr(!std::is_same_v<T, fp8_e8m0>)
+    // fp8_e8m0 has no negative zero (unsigned).
+    // fp8_e4m3_fnuz / fp8_e5m2_fnuz have no negative zero (FNUZ format collapses both zeros to 0x00).
+    if constexpr(!std::is_same_v<T, fp8_e8m0> && !std::is_same_v<T, fp8_e4m3_fnuz>
+                 && !std::is_same_v<T, fp8_e5m2_fnuz>)
     {
         const T negZero = Traits::fromBits(Traits::NEG_ZERO_BITS);
         EXPECT_EQ(static_cast<float>(negZero), -0.0f);

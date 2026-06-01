@@ -13,8 +13,6 @@ namespace hip_kernel_provider::rmsnorm
 class RMSnormValidator : public IValidator
 {
 private:
-    void validateSupportedLayout(const std::vector<int64_t>& strideOrder, size_t numDims) override;
-
     void checkTensorLayoutsAndDimsSupported() override;
 
     void checkTensorDataTypesSupported(const std::vector<int64_t>& ioTensorIds,
@@ -24,6 +22,9 @@ private:
     void checkTensorShapesSupported(const std::vector<int64_t>& ioTensorIds,
                                     const std::vector<int64_t>& affineTensorIds,
                                     const std::vector<int64_t>& statTensorIds);
+
+    static void checkAffineNormalizedShape(const std::vector<int64_t>& affineDims,
+                                           const std::vector<int64_t>& ioDims);
 
 public:
     RMSnormValidator(
