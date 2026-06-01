@@ -13,14 +13,16 @@ def _parse_engine_list(s: str) -> List[int]:
 
     Engine IDs are deterministic FNV-1a hashes of the engine name and may
     be negative when interpreted as signed int64, so we accept any int.
-    Duplicates are removed while preserving first-seen order.
+    Duplicate IDs are preserved because each comma-delimited entry is an
+    ordered execution selection; this allows comparing the same engine ID
+    from different plugin paths.
 
     Examples:
       "1"                      -> [1]
       "1,2,3"                  -> [1, 2, 3]
       "1, 2"                   -> [1, 2]
-      "1,1,2"                  -> [1, 2]
-      "3,1,3,2"                -> [3, 1, 2]
+      "1,1,2"                  -> [1, 1, 2]
+      "3,1,3,2"                -> [3, 1, 3, 2]
       "-4567890123456789012"   -> [-4567890123456789012]
     """
     parts = [p.strip() for p in s.split(",")]
@@ -31,14 +33,16 @@ def _parse_engine_list(s: str) -> List[int]:
         ids = [int(p) for p in parts]
     except ValueError:
         raise argparse.ArgumentTypeError(f"--engine expects integer ID(s), got {s!r}")
-    # Deduplicate while preserving first-seen order
-    seen: set = set()
-    deduped: List[int] = []
-    for i in ids:
-        if i not in seen:
-            seen.add(i)
-            deduped.append(i)
-    return deduped
+    return ids
+
+
+def _parse_plugin_path_list(s: str) -> List[Path]:
+    """Parse --plugin-path as a comma-separated list of plugin directories."""
+    parts = [p.strip() for p in s.split(",")]
+    parts = [p for p in parts if p]
+    if not parts:
+        raise argparse.ArgumentTypeError("--plugin-path requires at least one path")
+    return [Path(p) for p in parts]
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -61,7 +65,7 @@ Examples:
   dnn-benchmark --graph ./graphs/conv1_fwd.json --warmup 20 --iters 200
   dnn-benchmark -g ./graphs/conv1_fwd.json -e 1
   dnn-benchmark -g ./graphs/conv1_fwd.json -v        # verbose per-engine output
-  dnn-benchmark -g ./graphs/conv1_fwd.json -e 1,2    # compare engines 1 and 2
+  dnn-benchmark -g ./graphs/conv1_fwd.json -e 1,2
 
 PyTorch Backend (GPU via PyTorch):
   dnn-benchmark -g ./graph.json --backend pytorch
@@ -71,9 +75,13 @@ Reference Validation:
   dnn-benchmark -g ./graph.json --validate pytorch
   dnn-benchmark -g ./graph.json --validate pytorch --rtol 1e-3
 
-A/B Testing:
-  dnn-benchmark -g ./graph.json --AId 1 --BId 2
-  dnn-benchmark -g ./graph.json --APath /path/pluginA --AId 1 --BPath /path/pluginB --BId 2
+Engine Comparison:
+  dnn-benchmark -g ./graph.json --engine 1,2,3
+  dnn-benchmark -g ./graph.json --engine 1,2 --plugin-path /path/pluginA,/path/pluginB
+
+Engine IDs:
+  hipdnn_list_engines --plugin-dir /path/to/hipdnn_plugins/engines
+  (shipped with hipDNN tools, e.g. /opt/rocm/bin/hipdnn_list_engines)
 
 Suite Mode (multiple graphs):
   dnn-benchmark -g graphs/                           # all .json/.tar.gz files in directory
@@ -166,38 +174,8 @@ Tarball Input:
         "(default: summary table)",
     )
 
-    # A/B Testing arguments
-    ab_group = parser.add_argument_group("A/B Testing")
-    ab_group.add_argument(
-        "--APath",
-        type=Path,
-        default=None,
-        metavar="PATH",
-        help="Plugin path for configuration A (default: use system default)",
-    )
-    ab_group.add_argument(
-        "--AId",
-        type=int,
-        default=None,
-        metavar="ID",
-        help="Engine ID for configuration A",
-    )
-    ab_group.add_argument(
-        "--BPath",
-        type=Path,
-        default=None,
-        metavar="PATH",
-        help="Plugin path for configuration B (default: use system default)",
-    )
-    ab_group.add_argument(
-        "--BId",
-        type=int,
-        default=None,
-        metavar="ID",
-        help="Engine ID for configuration B",
-    )
-    # Comparison tolerances (used by A/B testing, validation, and suite mode)
-    comparison_group = parser.add_argument_group("Comparison")
+    # Reference comparison tolerances
+    comparison_group = parser.add_argument_group("Reference Comparison")
     comparison_group.add_argument(
         "--rtol",
         type=float,
@@ -229,10 +207,14 @@ Tarball Input:
     suite_group = parser.add_argument_group("Suite Options")
     suite_group.add_argument(
         "--plugin-path",
-        type=Path,
+        type=_parse_plugin_path_list,
         default=None,
-        metavar="DIR",
-        help="Path to directory containing hipDNN engine plugin .so files",
+        metavar="PATHS",
+        help=(
+            "Directory containing hipDNN engine plugin .so files, or a "
+            "comma-separated list matching --engine order. A single path is "
+            "shared by all selected engines."
+        ),
     )
 
     # Metrics options
