@@ -7,13 +7,6 @@ import numpy as np
 
 import hipdnn_frontend as hipdnn
 
-# Shared convolution dimensions
-N, C, H, W = 16, 16, 16, 16
-K, R, S = 16, 3, 3
-STRIDE, PAD, DIL = 1, 1, 1
-OUT_H = (H + 2 * PAD - DIL * (R - 1) - 1) // STRIDE + 1
-OUT_W = (W + 2 * PAD - DIL * (S - 1) - 1) // STRIDE + 1
-
 
 def create_handle():
     """Create a hipDNN handle for GPU operations."""
@@ -29,22 +22,24 @@ def create_graph():
     return graph
 
 
-def build_conv_fprop_graph():
+def build_conv_fprop_graph(
+    n=16, c=16, h=16, w=16, k=16, r=3, s=3, stride=1, pad=1, dil=1
+):
     """Build a conv_fprop graph returning (graph, x, weight, y)."""
     graph = create_graph()
     graph.set_name("conv_fprop_test")
 
-    x = hipdnn.Tensor.create([N, C, H, W], hipdnn.DataType.FLOAT)
+    x = hipdnn.Tensor.create([n, c, h, w], hipdnn.DataType.FLOAT)
     x.set_name("input_x")
 
-    weight = hipdnn.Tensor.create([K, C, R, S], hipdnn.DataType.FLOAT)
+    weight = hipdnn.Tensor.create([k, c, r, s], hipdnn.DataType.FLOAT)
     weight.set_name("weight")
 
     conv_attrs = hipdnn.ConvFpropAttributes()
     conv_attrs.set_name("conv_fprop_node")
-    conv_attrs.set_padding([PAD, PAD])
-    conv_attrs.set_stride([STRIDE, STRIDE])
-    conv_attrs.set_dilation([DIL, DIL])
+    conv_attrs.set_padding([pad, pad])
+    conv_attrs.set_stride([stride, stride])
+    conv_attrs.set_dilation([dil, dil])
 
     y = graph.conv_fprop(x, weight, conv_attrs)
     y.set_name("output_y")
@@ -53,23 +48,28 @@ def build_conv_fprop_graph():
     return graph, x, weight, y
 
 
-def build_conv_dgrad_graph():
+def build_conv_dgrad_graph(
+    n=16, c=16, h=16, w=16, k=16, r=3, s=3, stride=1, pad=1, dil=1
+):
     """Build a conv_dgrad graph returning (graph, dy, weight, dx)."""
+    out_h = (h + 2 * pad - dil * (r - 1) - 1) // stride + 1
+    out_w = (w + 2 * pad - dil * (s - 1) - 1) // stride + 1
+
     graph = create_graph()
     graph.set_name("conv_dgrad_test")
 
-    dy = hipdnn.Tensor.create([N, K, OUT_H, OUT_W], hipdnn.DataType.FLOAT)
+    dy = hipdnn.Tensor.create([n, k, out_h, out_w], hipdnn.DataType.FLOAT)
     dy.set_name("output_gradient_dy")
 
-    weight = hipdnn.Tensor.create([K, C, R, S], hipdnn.DataType.FLOAT)
+    weight = hipdnn.Tensor.create([k, c, r, s], hipdnn.DataType.FLOAT)
     weight.set_name("weight")
 
     conv_attrs = hipdnn.ConvDgradAttributes()
     conv_attrs.set_name("conv_dgrad_node")
-    conv_attrs.set_pre_padding([PAD, PAD])
-    conv_attrs.set_post_padding([PAD, PAD])
-    conv_attrs.set_stride([STRIDE, STRIDE])
-    conv_attrs.set_dilation([DIL, DIL])
+    conv_attrs.set_pre_padding([pad, pad])
+    conv_attrs.set_post_padding([pad, pad])
+    conv_attrs.set_stride([stride, stride])
+    conv_attrs.set_dilation([dil, dil])
 
     dx = graph.conv_dgrad(dy, weight, conv_attrs)
     dx.set_name("input_gradient_dx")
@@ -78,23 +78,28 @@ def build_conv_dgrad_graph():
     return graph, dy, weight, dx
 
 
-def build_conv_wgrad_graph():
+def build_conv_wgrad_graph(
+    n=16, c=16, h=16, w=16, k=16, r=3, s=3, stride=1, pad=1, dil=1
+):
     """Build a conv_wgrad graph returning (graph, dy, x, dw)."""
+    out_h = (h + 2 * pad - dil * (r - 1) - 1) // stride + 1
+    out_w = (w + 2 * pad - dil * (s - 1) - 1) // stride + 1
+
     graph = create_graph()
     graph.set_name("conv_wgrad_test")
 
-    dy = hipdnn.Tensor.create([N, K, OUT_H, OUT_W], hipdnn.DataType.FLOAT)
+    dy = hipdnn.Tensor.create([n, k, out_h, out_w], hipdnn.DataType.FLOAT)
     dy.set_name("output_gradient_dy")
 
-    x = hipdnn.Tensor.create([N, C, H, W], hipdnn.DataType.FLOAT)
+    x = hipdnn.Tensor.create([n, c, h, w], hipdnn.DataType.FLOAT)
     x.set_name("input_x")
 
     conv_attrs = hipdnn.ConvWgradAttributes()
     conv_attrs.set_name("conv_wgrad_node")
-    conv_attrs.set_pre_padding([PAD, PAD])
-    conv_attrs.set_post_padding([PAD, PAD])
-    conv_attrs.set_stride([STRIDE, STRIDE])
-    conv_attrs.set_dilation([DIL, DIL])
+    conv_attrs.set_pre_padding([pad, pad])
+    conv_attrs.set_post_padding([pad, pad])
+    conv_attrs.set_stride([stride, stride])
+    conv_attrs.set_dilation([dil, dil])
 
     dw = graph.conv_wgrad(dy, x, conv_attrs)
     dw.set_name("weight_gradient_dw")
@@ -103,13 +108,12 @@ def build_conv_wgrad_graph():
     return graph, dy, x, dw
 
 
-def build_matmul_graph():
+def build_matmul_graph(m=4, k=3, n=5):
     """Build a matmul graph (A [M, K] x B [K, N] -> C [M, N]).
 
     Returns:
         Tuple of (graph, a, b, c).
     """
-    m, k, n = 4, 3, 5
     graph = create_graph()
     graph.set_name("matmul_test")
 

@@ -45,15 +45,9 @@ class TestConvWgrad:
 
         handle = build_all_plans(graph)
 
-        dy_data = np.random.uniform(
-            0.0, 1.0, [helpers.N, helpers.K, helpers.OUT_H, helpers.OUT_W]
-        ).astype(np.float32)
-        x_data = np.random.uniform(
-            0.0, 1.0, [helpers.N, helpers.C, helpers.H, helpers.W]
-        ).astype(np.float32)
-        dw_data = np.zeros(
-            [helpers.K, helpers.C, helpers.R, helpers.S], dtype=np.float32
-        )
+        dy_data = np.random.uniform(0.0, 1.0, dy.get_dim()).astype(np.float32)
+        x_data = np.random.uniform(0.0, 1.0, x.get_dim()).astype(np.float32)
+        dw_data = np.zeros(dw.get_dim(), dtype=np.float32)
 
         tensor_data = {
             dy.get_uid(): dy_data,

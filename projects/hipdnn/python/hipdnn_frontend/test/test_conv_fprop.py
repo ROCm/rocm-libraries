@@ -45,15 +45,9 @@ class TestConvFprop:
 
         handle = build_all_plans(graph)
 
-        x_data = np.random.uniform(
-            0.0, 1.0, [helpers.N, helpers.C, helpers.H, helpers.W]
-        ).astype(np.float32)
-        w_data = np.random.uniform(
-            0.0, 1.0, [helpers.K, helpers.C, helpers.R, helpers.S]
-        ).astype(np.float32)
-        y_data = np.zeros(
-            [helpers.N, helpers.K, helpers.OUT_H, helpers.OUT_W], dtype=np.float32
-        )
+        x_data = np.random.uniform(0.0, 1.0, x.get_dim()).astype(np.float32)
+        w_data = np.random.uniform(0.0, 1.0, weight.get_dim()).astype(np.float32)
+        y_data = np.zeros(y.get_dim(), dtype=np.float32)
 
         tensor_data = {
             x.get_uid(): x_data,
