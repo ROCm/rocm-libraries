@@ -5,6 +5,7 @@
 
 #ifndef HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
 
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -177,18 +178,31 @@ inline std::optional<std::string> checkVramRequirement(const BundleMetadata& met
 /// always passes this check.
 ///
 /// Passes (returns nullopt) when:
-///   - referenceExecutor is not set or is "cpu"
-///   - gpuArchitecture is not set in metadata
+///   - referenceExecutor is not set or is "cpu" (case-insensitive)
+///   - gpuArchitecture is not set or is empty in metadata
 ///   - currentArch is empty (device could not be queried — skip disabled)
-///   - currentArch contains gpuArchitecture as a substring
+///   - currentArch matches gpuArchitecture at the base level (before ':' suffix)
 inline std::optional<std::string> checkArchCompatibility(const BundleMetadata& meta,
                                                          const std::string& currentArch)
 {
-    if(!meta.referenceExecutor || *meta.referenceExecutor == "cpu")
+    if(!meta.referenceExecutor)
     {
         return std::nullopt;
     }
-    if(!meta.gpuArchitecture)
+    // Case-insensitive: "cpu", "CPU", "Cpu" etc. are all treated as CPU reference.
+    // CPU-generated golden data is architecture-independent.
+    {
+        std::string execLower = *meta.referenceExecutor;
+        for(auto& c : execLower)
+        {
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        }
+        if(execLower == "cpu")
+        {
+            return std::nullopt;
+        }
+    }
+    if(!meta.gpuArchitecture || meta.gpuArchitecture->empty())
     {
         return std::nullopt;
     }
@@ -196,7 +210,13 @@ inline std::optional<std::string> checkArchCompatibility(const BundleMetadata& m
     {
         return std::nullopt;
     }
-    if(currentArch.find(*meta.gpuArchitecture) == std::string::npos)
+    // Match if currentArch starts with gpuArchitecture followed by ':' or end-of-string.
+    // e.g., metadata "gfx942" matches device "gfx942:sramecc+:xnack-".
+    const auto& metaArch = *meta.gpuArchitecture;
+    const bool archMatches = currentArch.size() >= metaArch.size()
+        && currentArch.compare(0, metaArch.size(), metaArch) == 0
+        && (currentArch.size() == metaArch.size() || currentArch[metaArch.size()] == ':');
+    if(!archMatches)
     {
         return "Golden data generated on " + *meta.gpuArchitecture + " but current GPU is "
                + currentArch;

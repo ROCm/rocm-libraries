@@ -413,35 +413,34 @@ TEST(TestCheckArchCompatibility, SkipsWhenArchSubstringNotFound)
     ASSERT_TRUE(result.has_value());
 }
 
-TEST(TestCheckArchCompatibility, SubstringMatchIsPermissive)
+TEST(TestCheckArchCompatibility, RejectsPartialArchName)
 {
-    // "gfx94" matches inside "gfx942:..." — this is by design, matching the
-    // substring convention used by TestSettings::findSkip for arch matching.
+    // "gfx94" is a prefix of "gfx942" but not a complete base arch.
+    // The guard requires an exact base-arch match (up to the ':' delimiter).
     BundleMetadata meta;
     meta.referenceExecutor = "gpu";
     meta.gpuArchitecture = "gfx94";
-    EXPECT_FALSE(checkArchCompatibility(meta, "gfx942:sramecc+:xnack-").has_value());
+    EXPECT_TRUE(checkArchCompatibility(meta, "gfx942:sramecc+:xnack-").has_value());
 }
 
 TEST(TestCheckArchCompatibility, PassesWhenArchIsEmptyString)
 {
-    // Empty gpu_architecture in metadata means "not recorded" — guard is disabled
+    // Empty gpu_architecture is treated as "not recorded" — guard is disabled
     BundleMetadata meta;
     meta.referenceExecutor = "gpu";
     meta.gpuArchitecture = "";
-    // currentArch.find("") always returns 0 → match → passes
+    // Empty string is treated same as nullopt — guard disabled
     EXPECT_FALSE(checkArchCompatibility(meta, "gfx942:sramecc+:xnack-").has_value());
 }
 
-TEST(TestCheckArchCompatibility, CpuCheckIsCaseSensitive)
+TEST(TestCheckArchCompatibility, CpuCheckIsCaseInsensitive)
 {
-    // "CPU" (uppercase) is NOT treated as cpu — the arch guard activates.
-    // This documents the current behavior: case-sensitive comparison.
+    // "CPU" (uppercase) IS treated as cpu — arch guard is disabled.
     BundleMetadata meta;
     meta.referenceExecutor = "CPU";
     meta.gpuArchitecture = "gfx1100";
-    // "CPU" != "cpu" → not treated as CPU executor → arch guard runs → mismatch
-    EXPECT_TRUE(checkArchCompatibility(meta, "gfx942:sramecc+:xnack-").has_value());
+    // "CPU" is case-insensitively "cpu" → treated as CPU executor → arch guard skipped
+    EXPECT_FALSE(checkArchCompatibility(meta, "gfx942:sramecc+:xnack-").has_value());
 }
 
 TEST(TestCheckArchCompatibility, NonCpuExecutorTriggersArchGuard)
@@ -452,6 +451,34 @@ TEST(TestCheckArchCompatibility, NonCpuExecutorTriggersArchGuard)
     meta.gpuArchitecture = "gfx942";
     // "miopen" is not "cpu" → arch guard runs → gfx942 matches → passes
     EXPECT_FALSE(checkArchCompatibility(meta, "gfx942:sramecc+:xnack-").has_value());
+}
+
+TEST(TestCheckArchCompatibility, PassesWhenBareArchMatchesExactly)
+{
+    // Device reports bare arch without feature flags
+    BundleMetadata meta;
+    meta.referenceExecutor = "gpu";
+    meta.gpuArchitecture = "gfx942";
+    EXPECT_FALSE(checkArchCompatibility(meta, "gfx942").has_value());
+}
+
+TEST(TestCheckArchCompatibility, PassesWhenFullArchStringMatchesDevice)
+{
+    // If metadata stores the full arch string (with feature flags),
+    // it matches the same full string from the device.
+    BundleMetadata meta;
+    meta.referenceExecutor = "gpu";
+    meta.gpuArchitecture = "gfx942:sramecc+:xnack-";
+    EXPECT_FALSE(checkArchCompatibility(meta, "gfx942:sramecc+:xnack-").has_value());
+}
+
+TEST(TestCheckArchCompatibility, RejectsWhenFeatureFlagsDiffer)
+{
+    // Full arch string in metadata with different feature flags on device
+    BundleMetadata meta;
+    meta.referenceExecutor = "gpu";
+    meta.gpuArchitecture = "gfx942:sramecc+:xnack-";
+    EXPECT_TRUE(checkArchCompatibility(meta, "gfx942:sramecc-:xnack-").has_value());
 }
 
 // ---------------------------------------------------------------------------
