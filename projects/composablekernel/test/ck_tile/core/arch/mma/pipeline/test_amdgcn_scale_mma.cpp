@@ -63,17 +63,17 @@ void ScaleMfmaGfx950Specialization_impl()
 
 TEST(ScaleMMATrait, ScaleMfmaGfx950Specialization)
 {
-    // Test fp8 → fp32 scale MFMA for GFX950 (16x16x128)
+    // Test fp8 -> fp32 scale MFMA for GFX950 (16x16x128)
     ScaleMfmaGfx950Specialization_impl<fp8_t, fp8_t, fp32_t, 16u, 16u, 128u>();
-    // Test bf8 → fp32 scale MFMA for GFX950 (16x16x128)
+    // Test bf8 -> fp32 scale MFMA for GFX950 (16x16x128)
     ScaleMfmaGfx950Specialization_impl<bf8_t, bf8_t, fp32_t, 16u, 16u, 128u>();
-    // Test fp4 → fp32 scale MFMA for GFX950 (16x16x128)
+    // Test fp4 -> fp32 scale MFMA for GFX950 (16x16x128)
     ScaleMfmaGfx950Specialization_impl<pk_fp4_t, pk_fp4_t, fp32_t, 16u, 16u, 128u>();
-    // Test fp8 → fp32 scale MFMA for GFX950 (32x32x64)
+    // Test fp8 -> fp32 scale MFMA for GFX950 (32x32x64)
     ScaleMfmaGfx950Specialization_impl<fp8_t, fp8_t, fp32_t, 32u, 32u, 64u>();
-    // Test bf8 → fp32 scale MFMA for GFX950 (32x32x64)
+    // Test bf8 -> fp32 scale MFMA for GFX950 (32x32x64)
     ScaleMfmaGfx950Specialization_impl<bf8_t, bf8_t, fp32_t, 32u, 32u, 64u>();
-    // Test fp4 → fp32 scale MFMA for GFX950 (32x32x64)
+    // Test fp4 -> fp32 scale MFMA for GFX950 (32x32x64)
     ScaleMfmaGfx950Specialization_impl<pk_fp4_t, pk_fp4_t, fp32_t, 32u, 32u, 64u>();
 
     std::cout << "GFX950 scale MFMA specialization is correct" << std::endl;
@@ -203,8 +203,8 @@ struct ScalePipelineKernel
             // Each int32_t packs 4 E8M0 scale bytes, one per K-group.
             // Replicate the scale byte across all 4 positions so every K-group
             // receives the same scaling factor.
-            // scale_a byte = 126 → 2^(126-127) = 2^-1 = 0.5
-            // scale_b byte = 129 → 2^(129-127) = 2^2  = 4.0
+            // scale_a byte = 126 -> 2^(126-127) = 2^-1 = 0.5
+            // scale_b byte = 129 -> 2^(129-127) = 2^2  = 4.0
             // Combined scale factor = 0.5 * 4.0 = 2.0
             constexpr int32_t replicate_byte = 0x01010101;
             ScaleAType scale_a               = 126u * replicate_byte;
@@ -270,7 +270,7 @@ void MmaSelector_Scale_Real_impl()
                                         WaveTileN,
                                         WaveTileK>;
 
-    // scale_a=126 → 2^-1=0.5, scale_b=129 → 2^2=4.0 → combined = 2.0
+    // scale_a=126 -> 2^-1=0.5, scale_b=129 -> 2^2=4.0 -> combined = 2.0
     constexpr float reference_scale = 2.0f;
 
     mma_pipeline_test::
@@ -384,8 +384,8 @@ TEST(ScaleMMATrait, MmaSelector_Scale_BF8_BF8_F32_32x32x64_Real)
 //             // Each int32_t packs 4 E8M0 scale bytes, one per K-group.
 //             // Replicate the scale byte across all 4 positions so every K-group
 //             // receives the same scaling factor.
-//             // scale_a byte = 126 → 2^(126-127) = 2^-1 = 0.5
-//             // scale_b byte = 129 → 2^(129-127) = 2^2  = 4.0
+//             // scale_a byte = 126 -> 2^(126-127) = 2^-1 = 0.5
+//             // scale_b byte = 129 -> 2^(129-127) = 2^2  = 4.0
 //             // Combined scale factor = 0.5 * 4.0 = 2.0
 //             constexpr int32_t replicate_byte = 0x01010101;
 //             ScaleAType scale_a               = 126u * replicate_byte;
@@ -460,7 +460,7 @@ TEST(ScaleMMATrait, MmaSelector_Scale_BF8_BF8_F32_32x32x64_Real)
 //                                                 WaveTileK,
 //                                                 AccumPolicy>;
 
-//     // scale_a=126 → 2^-1=0.5, scale_b=129 → 2^2=4.0 → combined = 2.0
+//     // scale_a=126 -> 2^-1=0.5, scale_b=129 -> 2^2=4.0 -> combined = 2.0
 //     constexpr float reference_scale = 2.0f;
 
 //     mma_pipeline_test::
@@ -475,7 +475,7 @@ TEST(ScaleMMATrait, MmaSelector_Scale_BF8_BF8_F32_32x32x64_Real)
 //             reference_scale);
 // }
 
-// Multi-fragment tests: 64x64x64 uses 32x32x64 op → FragsM=2, FragsN=2, FragsK=1
+// Multi-fragment tests: 64x64x64 uses 32x32x64 op -> FragsM=2, FragsN=2, FragsK=1
 // TEST(ScaleMMATrait, MmaSelector_Scale_F8_F8_F32_64x64x64_WaveWise_RowMajor_Real)
 // {
 //     MmaSelector_Scale_WaveWise_Real_impl<fp8_t,
@@ -509,7 +509,7 @@ TEST(ScaleMMATrait, MmaSelector_Scale_BF8_BF8_F32_32x32x64_Real)
 //                                          MmaAccumPolicy::ROW_MAJOR>();
 // }
 
-// Multi-fragment tests: 32x32x128 uses 32x32x64 op → FragsM=1, FragsN=1, FragsK=2
+// Multi-fragment tests: 32x32x128 uses 32x32x64 op -> FragsM=1, FragsN=1, FragsK=2
 // TEST(ScaleMMATrait, MmaSelector_Scale_F8_F8_F32_32x32x128_WaveWise_RowMajor_Real)
 // {
 //     MmaSelector_Scale_WaveWise_Real_impl<fp8_t, fp8_t, fp32_t, 32u, 32u, 128u>();
@@ -520,7 +520,7 @@ TEST(ScaleMMATrait, MmaSelector_Scale_BF8_BF8_F32_32x32x64_Real)
 //     MmaSelector_Scale_WaveWise_Real_impl<bf8_t, bf8_t, fp32_t, 32u, 32u, 128u>();
 // }
 
-// Multi-fragment tests: 64x64x128 uses 32x32x64 op → FragsM=2, FragsN=2, FragsK=2
+// Multi-fragment tests: 64x64x128 uses 32x32x64 op -> FragsM=2, FragsN=2, FragsK=2
 // TEST(ScaleMMATrait, MmaSelector_Scale_F8_F8_F32_64x64x128_WaveWise_RowMajor_Real)
 // {
 //     MmaSelector_Scale_WaveWise_Real_impl<fp8_t, fp8_t, fp32_t, 64u, 64u, 128u>();
@@ -537,13 +537,13 @@ TEST(ScaleMMATrait, MmaSelector_Scale_BF8_BF8_F32_32x32x64_Real)
 //                                          MmaAccumPolicy::COL_MAJOR>();
 // }
 
-// Multi-fragment tests with 16x16x128 op: 32x16x128 → FragsM=2, FragsN=1, FragsK=1
+// Multi-fragment tests with 16x16x128 op: 32x16x128 -> FragsM=2, FragsN=1, FragsK=1
 // TEST(ScaleMMATrait, MmaSelector_Scale_F8_F8_F32_32x16x128_WaveWise_RowMajor_Real)
 // {
 //     MmaSelector_Scale_WaveWise_Real_impl<fp8_t, fp8_t, fp32_t, 32u, 16u, 128u>();
 // }
 
-// Multi-fragment tests with 16x16x128 op: 16x32x128 → FragsM=1, FragsN=2, FragsK=1
+// Multi-fragment tests with 16x16x128 op: 16x32x128 -> FragsM=1, FragsN=2, FragsK=1
 // TEST(ScaleMMATrait, MmaSelector_Scale_F8_F8_F32_16x32x128_WaveWise_RowMajor_Real)
 // {
 //     MmaSelector_Scale_WaveWise_Real_impl<fp8_t, fp8_t, fp32_t, 16u, 32u, 128u>();
