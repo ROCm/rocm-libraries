@@ -51,6 +51,7 @@ from Tensile.Components.CustomSchedule import hasCustomSchedule
 from ..Component import TensorDataMover
 from ..Components.TensorDataMover import TensorDataMoverLoad
 from .Utilities import reject, roundupRatio, pvar
+from .Validators.MXScaleFormat import validateMXScaleFormatCombination
 
 
 def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printRejectionReason):
@@ -694,8 +695,7 @@ class Solution(collections.abc.Mapping):
     # set ASEM=minASEMforMX for not TLUA or not TLUB
     # so far, kernel code can support 16, but host code cannot hanlde it
     # TODO: enable 16 (or less)
-    # TODO: enable less than 256 for Subtile
-    minASEMforMX = 32 if not state["UseSubtileImpl"] else 256
+    minASEMforMX = 32
     if (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]) and \
        ((not state["ProblemType"]["TLUA"]) or (not state["ProblemType"]["TLUB"])):
       if state["AssertSummationElementMultiple"] % minASEMforMX != 0:
@@ -880,7 +880,7 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "UseSubtileImpl=1 does not support ScheduleIterAlg")
       if state["StreamK"] == 0:
         reject(state, printRejectionReason, "UseSubtileImpl=1 supports StreamK only (no support for GSU)")
-      if state["StreamK"] != 3:
+      if state["StreamK"] != 3 and state["StreamK"] != 4:
         reject(state, printRejectionReason, "UseSubtileImpl=1 requires StreamK=3 (DP-before-SK mode)")
       if state["DebugStreamK"] != 0:
         reject(state, printRejectionReason, "UseSubtileImpl=1 does not support DebugStreamK (must be 0)")
@@ -1522,12 +1522,19 @@ class Solution(collections.abc.Mapping):
       if state["_ScheduleIterAlg"] not in (2, 3) and not isSia0TdmPgr:
         reject(state, printRejectionReason, "ScheduleIterAlg not supported with Stream-K")
       if state["StreamKAtomic"] == 1:
+        if state["StreamK"] == 4:
+          reject(state, printRejectionReason, "Atomic Stream-K is not supported with dynamic work queue mode")
         if not state["ProblemType"]["DataType"].isSingle():
           reject(state, printRejectionReason, "Atomic Stream-K currently only tested for SGEMM")
         if not state["BufferStore"]:
           reject(state, printRejectionReason, "Atomic Stream-K requires BufferStore")
         if state["LocalSplitU"] > 1:
           reject(state, printRejectionReason, "Atomic Stream-K not working with LocalSplitU")
+      if state["DebugPersistentKernelLoopForever"] and state["StreamK"] not in (1, 2, 3):
+        # Mode 4 exits via KernelEnd in graWorkGroup, so the flag would no-op.
+        reject(state, printRejectionReason,
+               "DebugPersistentKernelLoopForever requires StreamK in {1,2,3} (got %d)"
+               % state["StreamK"])
       if not state["Valid"]:
         print2("in assignDerivedParameters, state['Valid'] = False")
         return
@@ -1537,6 +1544,7 @@ class Solution(collections.abc.Mapping):
       state["StreamKXCCMapping"] = 0
       state["StreamKFixupTreeReduction"] = 0
       state["DebugStreamK"] = 0
+      state["DebugPersistentKernelLoopForever"] = False
 
     computeBytes = int(state["ProblemType"]["ComputeDataType"].numBytes())
     state["_WorkspaceSizePerElemC"] = computeBytes
@@ -2193,6 +2201,17 @@ class Solution(collections.abc.Mapping):
         state,
         isaInfoMap[isa].asmCaps,
         isaInfoMap[isa].archCaps,
+        printRejectionReason):
+      return
+
+    # MX scale-format combination validation. Rejects candidates whose joint
+    # (A type, A scale, B type, B scale) tuple is not legal on gfx1250's
+    # WMMA_V3 MX path (see `Validators.MXScaleFormat.validateMXScaleFormatCombination`
+    # / ROCm/llvm-project#2634). Gated on HasWMMA_V3 so non-gfx1250 arches
+    # are unaffected.
+    if not validateMXScaleFormatCombination(
+        state,
+        isaInfoMap[isa].asmCaps,
         printRejectionReason):
       return
 
@@ -4596,6 +4615,19 @@ class Solution(collections.abc.Mapping):
          state["EnableMatrixInstruction"] and state["StorePriorityOpt"] and \
          state["ProblemType"]["DataType"].isDouble():
       state["LdsInitCVgprs"] = True
+
+    # Resolve InitCIterWmma (-1=auto, 0=disable, 1=force enable).
+    autoInitCIterWmma = state["EnableMatrixInstruction"] and not state["LdsInitCVgprs"] \
+                        and not state["ForceUnrollSubIter"] \
+                        and not state["ProblemType"]["DataType"].isComplex() \
+                        and not state["ProblemType"]["Sparse"] \
+                        and isaInfoMap[isa].asmCaps.get("HasWMMA_AccImmZero", False)
+    if state["InitCIterWmma"] == -1:
+      state["InitCIterWmma"] = 1 if autoInitCIterWmma else 0
+    elif state["InitCIterWmma"] == 1 and not autoInitCIterWmma:
+      reject(state, printRejectionReason,
+             "InitCIterWmma=1 requires EnableMatrixInstruction/HasWMMA_AccImmZero, and not LdsInitCVgprs/ForceUnrollSubIter/Complex/Sparse")
+      return
 
     # force MIArchVgpr when using WMMA
     if state["EnableMatrixInstruction"] and isaInfoMap[isa].asmCaps["HasWMMA"]:
