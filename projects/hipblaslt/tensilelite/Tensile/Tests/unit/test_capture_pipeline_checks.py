@@ -30,6 +30,7 @@ classes (defined inline) trigger the SMEM/flat/store guards.
 """
 
 from dataclasses import dataclass
+import os
 
 import pytest
 
@@ -44,6 +45,44 @@ from Tensile.Components.ScheduleCapture import (
     CaptureIdmapMismatchError,
     assert_idmap_completeness,
 )
+
+# rocm-libraries-g9fi (round-3 review): guard against the cwd-pollution trap
+# that misled the round-2 plan-adherence verifier. When pytest is invoked from
+# a directory containing a sibling `Tensile/` package (e.g. the main repo's
+# tree), `import Tensile.KernelWriter` resolves to THAT tree's KernelWriter.py
+# rather than the worktree's — even when PYTHONPATH points at the worktree.
+# The test file itself loads from the worktree (pytest used the explicit
+# path), but the production code under test loads from the wrong tree. The
+# resulting SHADOW capture is then built from a different KernelWriter, so
+# count-parity vs CMS spuriously fails on categories the wrong-tree code
+# doesn't yet implement (nmsx Fix 1/2/3 / g9fi).
+#
+# Defense: cross-check that `Tensile.KernelWriter`'s file lives in the same
+# tree as this test file. If not, fail loud with a one-line directive on how
+# to fix the invocation. This eliminates a class of false-positive bug
+# reports that look like real divergences but are caused by import-path
+# leakage.
+def _assert_tensile_tree_matches_test_tree():
+    import Tensile.KernelWriter as _kw
+    test_tree = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "..")
+    )
+    kw_tree = os.path.abspath(
+        os.path.join(os.path.dirname(_kw.__file__), "..")
+    )
+    if test_tree != kw_tree:
+        raise RuntimeError(
+            f"Tensile package loaded from a different tree than this test "
+            f"file. test_tree={test_tree!r}, kw_tree={kw_tree!r}. This "
+            f"usually means pytest was invoked from a directory containing "
+            f"a sibling `Tensile/` package that shadows the intended one — "
+            f"`import Tensile.*` resolves to the cwd's tree, not the one "
+            f"PYTHONPATH points at. Fix: `cd {test_tree}` before invoking "
+            f"pytest. See the round-3 review note on the g9fi commit."
+        )
+
+
+_assert_tensile_tree_matches_test_tree()
 
 
 # =============================================================================
@@ -811,35 +850,30 @@ class TestShadowCaptureNmsxFixes:
     def test_shadow_main_capture_categories_match_cms_subject(self):
         """Cross-side count parity on the categories CMS uses (per-side
         LRA/LRB, PackA/PackB, GRA/GRB/GRIncA/GRIncB, LRSA/LRSB/LWSA/LWSB,
-        LWA/LWB, LCC). SHADOW must match CMS on these.
+        LWA/LWB, LCC, MFMA). SHADOW must match CMS on these.
 
         Excluded from parity:
           - SYNC/SNOP/SSETPRIO/SBARRIER: scheduler-inserted, legitimately
             differ (per DEFAULT_SCHEDULER_REFERENCE_DESIGN.md §3).
-          - MFMA: structural shape divergence. On CMS side, the entire
-            mfmaIter Module is a single MFMA-tagged item in the MAINLOOP
-            macro (CustomSchedule/dispatch.py:239-240) and
-            `expand_cms_macro` walks `macro.items()` (immediate children),
-            so the mfmaIter's interior never expands — one MFMA entry per
-            mfmaIter. On SHADOW side, `_captureSubIterToBuilder` walks
-            `iterCode.flatitems()`, so every interior leaf (including the
-            TF32-emulation VCvtPkF32toBF16 / VMovB64 sub-leaves from
-            `localReadDo`'s `initTmpVregForPack`, plus tail-loop / ShiftK
-            VCndMaskB32 / SAndB32 / VSubU32 control instructions added
-            via `shiftK.add(...)` inside mfmaIter) becomes its own MFMA-
-            tagged entry. KernelWriter.py registers every macIterCode
-            leaf id as MFMA in the SHADOW idmap (so the fail-loud
-            contract stays strict — no UNKNOWN slip-through), but the
-            per-leaf-vs-per-Module count divergence remains. Closing the
-            divergence requires teaching `_captureSubIterToBuilder` to
-            atomic-treat the mfmaIter Module (skip flatitems for that
-            wrapper) — out of scope for nmsx Phase 1's three
-            capture-window/scope/walk-coverage fixes.
+
+        rocm-libraries-g9fi: MFMA is REMOVED from the exclusion set. The
+        prior comment here claimed a per-leaf-SHADOW vs per-Module-CMS
+        structural divergence. Empirical inspection (g9fi probe on BPG#11)
+        disproved that: CMS's `customMainLoopSchedule` calls
+        `removeComments(MfmaCodeAllIters)` which is `.flatitems()`-based
+        (`CustomSchedule/dispatch.py:73-78`), then iterates `for miIndex
+        in range(-1, len(mfmaCode))` over the FLAT leaf list and tags
+        each `mfmaItem = mfmaCode[miIndex]` per-leaf with
+        `tag_by_origin_id[id(mfmaItem)] = "MFMA"` (dispatch.py:235-240).
+        The mfmaIter Module wrapper is destroyed BEFORE CMS's dispatch
+        loop runs, so CMS is per-leaf — not per-Module — for MFMA tags.
+        SHADOW is also per-leaf (the explicit registration walk at
+        KernelWriter.py around the `_captureDefaultSchedule` branch tags
+        every macIterCode leaf as MFMA). Both sides agree: 48 MFMAs on
+        BPG#11. No exclusion required.
 
         The legitimate exclusion set is therefore exactly SYNC / SNOP /
-        SSETPRIO / SBARRIER per design §3, plus MFMA for the structural
-        shape divergence above. After Phase 1 lands cleanly, every other
-        data-flow category's per-side count must match.
+        SSETPRIO / SBARRIER per design §3. Do not grow this exclusion set.
 
         rocm-libraries-nmsx Bug 1/Bug 2 fix status (post-merge): the LCC
         and PLR1-pack-split divergences originally documented as needing
@@ -849,12 +883,6 @@ class TestShadowCaptureNmsxFixes:
         same isinstance-filter site), and SHADOW's leftover walk applies
         split_for_plr on LoopIters==1 to match dispatch.py's idmap
         construction (KernelWriter.py:_loopBody leftover-walk site).
-        MFMA remains the ONLY legitimate exclusion still pending — it
-        is tracked as rocm-libraries-g9fi (P0, blocks
-        rocm-libraries-dm4p). Do not grow this exclusion set further;
-        the explicit instruction in the nmsx-impl branch task spec is
-        that reducing it (by fixing the underlying defect so it no
-        longer needs exclusion) is the only acceptable direction.
         """
         result = _build_bpg11_writer_and_capture()
         if result is None:
@@ -868,7 +896,7 @@ class TestShadowCaptureNmsxFixes:
                 "downstream Phase 2/4 path failed before count parity."
             )
 
-        excluded = {"SYNC", "SNOP", "SSETPRIO", "SBARRIER", "MFMA"}
+        excluded = {"SYNC", "SNOP", "SSETPRIO", "SBARRIER"}
 
         def _per_cat_counts(body):
             counts = {}
@@ -894,6 +922,72 @@ class TestShadowCaptureNmsxFixes:
             f"Per-category count mismatches on non-mfmaIter-sub-leaf "
             f"data-flow categories: {mismatches}. "
             f"SHADOW={shadow_counts}, CMS={cms_counts}."
+        )
+
+    def test_shadow_mfma_count_matches_cms_subject_on_bpg11(self):
+        """rocm-libraries-g9fi: explicit MFMA count parity on BPG#11.
+
+        Locks in the invariant that the prior nmsx-revision exclusion was
+        masking. Both SHADOW and CMS treat MFMA per-leaf:
+
+          - CMS: `customMainLoopSchedule` flattens MfmaCodeAllIters via
+            `removeComments(...)` (which calls `.flatitems()`,
+            CustomSchedule/dispatch.py:73-78), then the dispatch loop at
+            dispatch.py:235-240 tags every leaf as MFMA via
+            `tag_by_origin_id[id(mfmaItem)] = "MFMA"`. The mfmaIter
+            Module wrapper is destroyed before the tag loop runs.
+
+          - SHADOW: the explicit per-leaf registration walk at
+            KernelWriter.py (around the `_captureDefaultSchedule` branch
+            in `_loopBody`) walks `macIterCode.flatitems()` and tags
+            each leaf as MFMA. The walk MUST exist for fail-loud
+            coverage of non-MFMAInstruction sub-leaves that mfmaIter
+            may emit (SNop at KernelWriterAssembly.py:8367, SWaitAlu
+            at 8622, tail-loop / shiftK control ops).
+
+        BPG#11 ground truth: 48 MFMAs per main loop (4 MI per subiter ×
+        2 subiters × 6 wave-tile elements, matching the bf16 16x16x32
+        MFMA grid). This test pins both sides to 48 and additionally
+        asserts they match each other. A regression of either the CMS
+        dispatch loop (e.g. someone re-introducing per-Module tagging
+        and breaking the assumption that mfmaCode is a flat leaf list)
+        or the SHADOW per-leaf walk (e.g. someone deleting it under
+        the false belief that an atomic-Module mechanism replaces it,
+        which was the g9fi bead's prescribed-but-incorrect fix) will
+        fail this test loudly.
+        """
+        result = _build_bpg11_writer_and_capture()
+        if result is None:
+            pytest.skip("amdclang/clang not available for isa_infrastructure")
+        writer, ctx = result
+        main = _shadow_main_body(writer)
+        cms_main = _cms_main_body(writer)
+        if main is None or cms_main is None:
+            pytest.skip(
+                "SHADOW or CMS capture missing; "
+                "downstream Phase 2/4 path failed before MFMA count check."
+            )
+
+        shadow_mfma = sum(1 for ti in main.instructions if ti.category == "MFMA")
+        cms_mfma = sum(1 for ti in cms_main.instructions if ti.category == "MFMA")
+
+        assert shadow_mfma == 48, (
+            f"SHADOW MFMA count on BPG#11 is {shadow_mfma}; expected 48. "
+            f"Either the per-leaf MFMA registration walk in "
+            f"KernelWriter.py (around the _captureDefaultSchedule branch) "
+            f"was removed, or mfmaIter's emit shape changed."
+        )
+        assert cms_mfma == 48, (
+            f"CMS MFMA count on BPG#11 is {cms_mfma}; expected 48. "
+            f"Either dispatch.py's per-leaf MFMA tag loop was restructured "
+            f"to per-Module (which would break SHADOW-vs-CMS count parity), "
+            f"or removeComments / mfmaIter's emit shape changed."
+        )
+        assert shadow_mfma == cms_mfma, (
+            f"MFMA count parity broken: SHADOW={shadow_mfma}, "
+            f"CMS={cms_mfma}. The two sides must remain per-leaf-symmetric; "
+            f"do not introduce atomic-Module MFMA treatment on either side "
+            f"without restructuring both."
         )
 
 

@@ -5273,21 +5273,26 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # Use a deepcopy so MfmaCodeAllIters' reference is unaffected by
           # any later mutation a SIA3-style consumer might apply to macIterCode.
           #
-          # rocm-libraries-nmsx Phase 1 categorization: the deepcopy creates
-          # NEW Python ids for every sub-leaf inside mfmaIter (TF32-emulation
-          # VCvtPkF32toBF16/VMovB64 sub-leaves interleaved by `localReadDo`'s
-          # `initTmpVregForPack`, plus tail-loop / ShiftK VCndMaskB32/SAndB32/…
-          # control instructions added via `shiftK.add(...)` inside mfmaIter).
-          # Those new ids cannot match the SHADOW idmap built from
-          # PackCodeAAllIters etc. — they are NEW objects, not the ones that
-          # entered PackCodeAAllIters. The post-deepcopy categorization walk
-          # at the SHADOW idmap-build site (below, around the
-          # `_captureDefaultSchedule` branch's idmap construction) explicitly
-          # registers every macIterCode leaf as "MFMA", mirroring the CMS-
-          # side semantics where the entire mfmaIter Module is one MFMA-
-          # tagged entry. The fail-loud contract in `_captureSubIterToBuilder`
-          # therefore does not fire on these leaves: they have a SHADOW
-          # idmap entry by the time SIA3's flattening exposes them.
+          # rocm-libraries-nmsx Phase 1 categorization (corrected by g9fi):
+          # the deepcopy creates NEW Python ids for every sub-leaf inside
+          # mfmaIter (the MFMAInstruction / SMFMAInstruction / MXMFMAInstruction
+          # leaves, plus any SNop emitted at KernelWriterAssembly.py:8367 when
+          # `s_nop != 0`, SWaitAlu at 8622, or tail-loop / shiftK control
+          # instructions added via `shiftK.add(...)`). Those new ids cannot
+          # match the SHADOW idmap built from PackCodeAAllIters etc. — they
+          # are NEW objects, not the ones that entered the source modules.
+          # The post-deepcopy categorization walk at the SHADOW idmap-build
+          # site (below, around the `_captureDefaultSchedule` branch's idmap
+          # construction) explicitly registers every macIterCode leaf as
+          # "MFMA", mirroring the CMS-side per-leaf MFMA tagging at
+          # CustomSchedule/dispatch.py:235-240 (CMS iterates the FLATTENED
+          # `mfmaCode = removeComments(MfmaCodeAllIters)` and tags each
+          # leaf individually). The fail-loud contract in
+          # `_captureSubIterToBuilder` therefore does not fire on these
+          # leaves: they have a SHADOW idmap entry by the time SIA3's
+          # flattening exposes them, AND both sides produce equal per-
+          # category MFMA counts by construction (verified empirically on
+          # BPG#11: SHADOW MFMA=48, CMS MFMA=48).
           if getattr(self.states, "_captureDefaultSchedule", False):
             macIterCode.add(deepcopy(mfmaIter))
         else:
@@ -5487,38 +5492,53 @@ class KernelWriter(metaclass=abc.ABCMeta):
         # _makeSubIterSchedule via per-side leaf-id sets recorded at the
         # production call sites in _loopBody (rocm-libraries-nmsx Fix 3).
         #
-        # rocm-libraries-nmsx revision: register every leaf inside the
-        # SHADOW-side macIterCode (which holds the deepcopied mfmaIter at
-        # line ~4909) into the SHADOW idmap under the "MFMA" tag. This
-        # mirrors the CMS-side semantics: CMS adds the entire mfmaItem
-        # (the Module returned by `mfmaIter()`) as a single item to the
-        # MAINLOOP macro and tags `tag_by_origin_id[id(mfmaItem)] =
-        # "MFMA"` (CustomSchedule/dispatch.py:239-240). `expand_cms_macro`
-        # walks `macro.items()` (immediate children) — it never flattens
-        # mfmaItem's interior, so all of mfmaIter's interior leaves
-        # (TF32-emulation VCvtPkF32toBF16/VMovB64 from `initTmpVregForPack`,
-        # plus tail-loop / ShiftK control instructions like VCndMaskB32,
-        # VSubU32, SAndB32 added via `shiftK.add(...)`) collapse into the
-        # single MFMA-tagged entry. The SHADOW path walks via `flatitems()`
-        # inside `_captureSubIterToBuilder`, so every interior leaf is
-        # visited individually — without explicit MFMA tagging here they
-        # would fall through to the fail-loud branch (no idMap entry,
-        # registry recognizes them as CVT_PACK/MIDDLE_PACK/LR but those
-        # have no canonical SHADOW tag). Tagging them MFMA mirrors the
-        # CMS attribution and lets the fail-loud contract stay strict.
+        # rocm-libraries-g9fi: register every leaf inside the SHADOW-side
+        # macIterCode (which holds the deepcopied mfmaIter at line ~4976)
+        # into the SHADOW idmap under the "MFMA" tag. This MIRRORS — at
+        # the per-leaf grain — the CMS-side semantics:
         #
-        # Asymmetry note: this still produces SHADOW MFMA counts ≫ CMS
-        # MFMA counts (one tagged leaf per interior instruction vs one
-        # tagged Module on CMS). The per-category count parity test must
-        # therefore continue to exclude MFMA from its comparison. The
-        # fundamental shape difference (per-leaf SHADOW vs per-Module CMS)
-        # would require restructuring `_captureSubIterToBuilder` to
-        # recognize and atomic-treat the mfmaIter Module — out of scope
-        # for nmsx Phase 1 (a single Fix-2-equivalent walk-coverage fix
-        # would not address it). Documented at the count-parity test
-        # exclusion site.
+        #   CMS-side (CustomSchedule/dispatch.py:235-240): the dispatch
+        #   loop iterates `for miIndex in range(-1, len(mfmaCode))` over
+        #   the FLATTENED leaf list `mfmaCode = removeComments(
+        #   MfmaCodeAllIters)` (removeComments calls `.flatitems()`, see
+        #   dispatch.py:73-78). Each `mfmaItem = mfmaCode[miIndex]` is a
+        #   single leaf instruction, and CMS tags every one as
+        #   `tag_by_origin_id[id(mfmaItem)] = "MFMA"` before
+        #   `macro.add(mfmaItem)`. `expand_cms_macro`'s `macro.items()`
+        #   walk then sees those leaves directly — there is NO per-Module
+        #   collapsing on the CMS side (the mfmaIter Module wrapper is
+        #   destroyed by `removeComments`'s `.flatitems()` call BEFORE
+        #   the dispatch loop runs).
+        #
+        # The earlier nmsx-revision comment here mis-described CMS as
+        # "per-Module" — empirical inspection (g9fi probe on BPG#11)
+        # confirms CMS emits 48 per-leaf MFMA tags, matching SHADOW's 48.
+        # Both sides are per-leaf by construction; the per-category count
+        # parity test therefore needs NO MFMA exclusion (g9fi cleanup).
+        #
+        # Why this walk still exists: macIterCode is a `deepcopy(mfmaIter)`
+        # (KernelWriter.py:4976), so every interior leaf has a NEW Python
+        # `id()` that the SHADOW idmap (built from the original
+        # PackCodeAAllIters / LRCodeAAllIters / ... source modules) cannot
+        # match. Without this explicit tagging, the fail-loud branch in
+        # `_captureSubIterToBuilder` would fire on the first non-
+        # MFMAInstruction sub-leaf — e.g. an SNop emitted at
+        # KernelWriterAssembly.py:8367 (`imod.add(SNop(...))`) when
+        # `s_nop != 0`, an SWaitAlu at 8622, or any tail-loop / shiftK
+        # control instructions added via `shiftK.add(...)` for the
+        # InstType paths that need them. CMS handles those via
+        # `removeComments` (SNop is filtered); we tag them MFMA on SHADOW
+        # so the surface symmetry holds at the slot-kind boundary (every
+        # leaf consumed inside the per-iter mfma compute region carries
+        # the MFMA tag).
+        #
+        # `[id(_leaf)] = "MFMA"` rather than `.setdefault(...)`: every
+        # leaf is a fresh deepcopy id with no prior idmap entry. The
+        # direct assignment makes that intent explicit (no silent
+        # fall-through to a prior tag) and removes the setdefault red
+        # flag flagged in the standing rule.
         for _leaf in macIterCode.flatitems():
-          capture_id_to_cat.setdefault(id(_leaf), "MFMA")
+          capture_id_to_cat[id(_leaf)] = "MFMA"
         self._makeSubIterSchedule(
           kernel, tensorParametersA, tensorParametersB,
           structural_clone(localReads),
