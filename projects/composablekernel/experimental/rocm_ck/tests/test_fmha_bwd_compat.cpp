@@ -555,50 +555,9 @@ TEST(FmhaBwdCompat, DqDkDv_FP16_D64_Group)
     EXPECT_EQ(k.block_n0, 128);
 }
 
-// ============================================================================
-// DqDkDv asymmetric head dimensions (hdim_q != hdim_v)
-// ============================================================================
-// The base tile is looked up by effective_hdim = max(hdim_q, hdim_v)
-// (dqdkdv_spec.hpp getTileConfig). These cases exercise that max() path, which
-// the symmetric baselines above never do. The (64, 256) case is the discriminator:
-// it fails if the lookup ever regresses to keying on hdim_q alone, since that
-// would select the d64 tile (block_n0=128) instead of the d256 tile (block_n0=64).
-
-TEST(FmhaBwdCompat, DqDkDv_FP16_D64Q_D256V_Batch)
-{
-    constexpr auto k =
-        makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
-                                                   .hdim_q = 64,
-                                                   .hdim_v = 256,
-                                                   .mode   = FmhaMode::BATCH},
-                                     .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
-
-    EXPECT_EQ(k.dtype, DataType::FP16);
-    EXPECT_EQ(k.hdim_q, 64);
-    EXPECT_EQ(k.hdim_v, 256);
-    EXPECT_EQ(k.mode, FmhaMode::BATCH);
-    EXPECT_EQ(k.block_per_cu, 1);
-    EXPECT_EQ(k.block_size, 256);
-    EXPECT_EQ(k.block_n0, 64); // effective_hdim = max(64, 256) = 256 -> bn0 = 64
-}
-
-TEST(FmhaBwdCompat, DqDkDv_FP16_D256Q_D64V_Batch)
-{
-    constexpr auto k =
-        makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
-                                                   .hdim_q = 256,
-                                                   .hdim_v = 64,
-                                                   .mode   = FmhaMode::BATCH},
-                                     .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
-
-    EXPECT_EQ(k.dtype, DataType::FP16);
-    EXPECT_EQ(k.hdim_q, 256);
-    EXPECT_EQ(k.hdim_v, 64);
-    EXPECT_EQ(k.mode, FmhaMode::BATCH);
-    EXPECT_EQ(k.block_per_cu, 1);
-    EXPECT_EQ(k.block_size, 256);
-    EXPECT_EQ(k.block_n0, 64); // effective_hdim = max(256, 64) = 256 -> bn0 = 64
-}
+// Note: asymmetric head dimensions (hdim_q != hdim_v) are unsupported and
+// rejected at compile time by getTileConfig(); see the compile_fail/ negative
+// tests. The DqDkDv baselines above are therefore all symmetric.
 
 // ============================================================================
 // ConvertDQ frozen baselines

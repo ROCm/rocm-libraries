@@ -21,7 +21,6 @@
 #include <rocm_ck/arch_properties.hpp>
 #include <rocm_ck/datatype_utils.hpp>
 
-#include <algorithm>
 #include <cstdint>
 #include <iterator>
 
@@ -55,7 +54,7 @@ struct FmhaBwdDQDKDVTileConfig
     int rm2, rn2, rk2;
 
     // Tuning
-    int occupancy; // target occupancy (-1 = auto)
+    int occupancy; // target occupancy (always >= 1; tuned per config)
     int max_seq_q; // maximum Q sequence length (0 = unlimited)
 
     // Derived quantities
@@ -75,11 +74,11 @@ struct FmhaBwdBaseTile
     int bm0;       // M-dimension block tile
     int bn0;       // N-dimension block tile
     int bk4;       // GEMM4 K-unroll (must divide bn0)
-    int occupancy; // target occupancy (-1 = auto)
+    int occupancy; // target occupancy (always >= 1; tuned per config)
     int max_seq_q; // maximum Q sequence length (0 = unlimited)
 };
 
-/// Entry in the base tile table: maps an effective head dimension to its
+/// Entry in the base tile table: maps a (symmetric) head dimension to its
 /// empirically tuned base tile geometry.
 struct FmhaBwdBaseTileEntry
 {
@@ -87,10 +86,11 @@ struct FmhaBwdBaseTileEntry
     FmhaBwdBaseTile tile;
 };
 
-/// GFX9 fp16/bf16 base tiles, indexed by effective head dimension.
-/// The effective hdim for a (hdim_q, hdim_v) pair is max(hdim_q, hdim_v),
-/// because both GEMM0 (K-unroll=hdim_q) and GEMM2 (K-unroll=hdim_v) share
-/// the same bm0 and bn0, so the resource constraint is the larger dimension.
+/// GFX9 fp16/bf16 base tiles, indexed by head dimension.
+/// Only symmetric head dims (hdim_q == hdim_v) are supported, so the table is
+/// keyed by that single head dimension; GEMM0 and GEMM2 share the same bm0/bn0
+/// and the same K-unroll (= hdim). Asymmetric pairs are rejected in
+/// getTileConfig and never reach this table.
 // clang-format off
 inline constexpr FmhaBwdBaseTileEntry
 GFX9_FP16_DQDKDV_BASE_TILES[] = {
@@ -122,82 +122,95 @@ static_assert(
     "GFX9_FP16_DQDKDV_BASE_TILES: every entry must satisfy bn0 % bk4 == 0"
     " (bk4 divides bn0 — see FmhaBwdBaseTile::bk4 doc)");
 
+// Invariant (see FmhaBwdBaseTile::occupancy doc): the table stores concrete
+// tuned occupancies, never the -1/auto sentinel. The auto path lives in
+// makeSpec (algorithm.block_per_cu == -1 resolves to tile.occupancy), so a
+// stored occupancy must be a usable positive value or that resolution would
+// hand makeSpec a non-positive block_per_cu and trip its positivity guard.
+static_assert(
+    []() consteval {
+        for(int i = 0; i < GFX9_FP16_DQDKDV_BASE_TILES_COUNT; ++i)
+        {
+            if(GFX9_FP16_DQDKDV_BASE_TILES[i].tile.occupancy <= 0)
+                return false;
+        }
+        return true;
+    }(),
+    "GFX9_FP16_DQDKDV_BASE_TILES: every entry must have occupancy >= 1"
+    " (the table stores concrete tuned occupancies; -1/auto is resolved from"
+    " algorithm.block_per_cu in makeSpec, not stored here)");
+
 // ---------------------------------------------------------------------------
 // Tile config generation (consteval derivation)
 // ---------------------------------------------------------------------------
 
-/// Compute GEMM4 block warp distribution (rm2, rn2) from (bm0, hdim_q).
+/// Compute the GEMM4 block-warp distribution (rm2, rn2) from (bm0, hdim).
 ///
-/// GEMM4 computes dQ = dS @ K with output shape (bm0 × hdim_q).
-/// The 4 warps (rm2 * rn2 * rk2, rk2=1) must tile this output such that:
-///   rm2 * wm0(=16) divides bm0
-///   rn2 * wn0(=16) divides hdim_q
+/// GEMM4 computes dQ = dS @ K with output shape (bm0 x hdim). The 4 warps
+/// (rm2 * rn2, with rk2 = 1) tile that output with a 16x16 warp tile, so the
+/// split is fixed purely by divisibility -- how many 16-wide blocks divide
+/// each output dimension:
+///   (1,4): all four warps along N -- requires hdim % (4*wn0) == 0, i.e. hdim % 64 == 0
+///   (2,2): balanced 2x2 split    -- requires bm0 % (2*wm0) == 0 and hdim % (2*wn0) == 0
 ///
-/// Preference: (1,4) > (2,2) > (4,1) — maximise N-parallelism for
-/// large head dimensions, fall back to balanced or M-heavy splits.
+/// These are the only distributions reachable for the supported gfx9 base
+/// tiles (bm0 in {16, 32}); any other (bm0, hdim) is rejected at compile time.
+/// Note this is a divisibility rule, not a head-dimension-size heuristic:
+/// e.g. hdim=64 selects (1,4) while hdim=96 selects (2,2).
 struct Gemm4Warps
 {
     int rm2;
     int rn2;
 };
 
-consteval Gemm4Warps computeGemm4Warps(int bm0, int hdim_q)
+consteval Gemm4Warps computeGemm4Warps(int bm0, int hdim)
 {
     if(bm0 <= 0)
         throw "computeGemm4Warps: bm0 must be positive";
-    if(hdim_q <= 0)
-        throw "computeGemm4Warps: hdim_q must be positive";
+    if(hdim <= 0)
+        throw "computeGemm4Warps: hdim must be positive";
 
     constexpr int wm0 = 16;
     constexpr int wn0 = 16;
 
-    // (1,4): best N-parallelism — when hdim_q is divisible by 64
-    if(bm0 % (1 * wm0) == 0 && hdim_q % (4 * wn0) == 0)
+    // (1,4): all warps along N -- hdim must be divisible by 4*wn0 (= 64).
+    if(bm0 % (1 * wm0) == 0 && hdim % (4 * wn0) == 0)
         return {1, 4};
-    // (2,2): balanced — when hdim_q is divisible by 32 but not 64
-    if(bm0 % (2 * wm0) == 0 && hdim_q % (2 * wn0) == 0)
+    // (2,2): balanced split -- bm0 divisible by 2*wm0 (= 32), hdim by 2*wn0 (= 32).
+    if(bm0 % (2 * wm0) == 0 && hdim % (2 * wn0) == 0)
         return {2, 2};
-    // (4,1): M-heavy fallback
-    if(bm0 % (4 * wm0) == 0 && hdim_q % (1 * wn0) == 0)
-        return {4, 1};
 
-    // Each branch above failed for a specific reason; report which precondition
-    // bm0 violated so the compile-time message points at the actual cause.
-    if(bm0 % wm0 != 0)
-        throw "computeGemm4Warps: bm0 is not a multiple of wm0(=16);"
-              " no GEMM4 warp distribution (1,4)/(2,2)/(4,1) tiles bm0";
-    // bm0 is a multiple of 16 but too small for the (2,2)/(4,1) branches
-    // AND hdim_q is not divisible by 64. This is the asymmetric-tuple
-    // failure surfaced to makeSpec (see early-throw guard there).
-    throw "computeGemm4Warps: no valid GEMM4 warp distribution"
-          " — bm0 too small for (2,2)/(4,1) and hdim_q not divisible by 64 for (1,4)";
+    throw "computeGemm4Warps: no valid GEMM4 warp distribution for (bm0, hdim)"
+          " -- need hdim % 64 == 0 for (1,4), or both bm0 % 32 == 0 and"
+          " hdim % 32 == 0 for (2,2)";
 }
 
-/// Generate a complete tile config from (hdim_q, hdim_v) and a base tile.
+/// Generate a complete tile config from a (symmetric) head dimension and a
+/// base tile. Only symmetric head dimensions are supported (see getTileConfig),
+/// so a single hdim drives both the Q and V head-dim fields and bk0 == bk2.
 ///
-/// Invariant derivation rules (from CK Tile pipeline — always true):
-///   bk0 = hdim_q  — GEMM0 (Q@K^T) K-unroll = QK head dim
-///   bk1 = bm0     — GEMM1 (P^T@dO) K-unroll = M-dim
-///   bk2 = hdim_v  — GEMM2 (dO@V^T) K-unroll = V head dim
-///   bk3 = bm0     — GEMM3 (dS^T@Q) K-unroll = M-dim
+/// Invariant derivation rules (from CK Tile pipeline -- always true):
+///   bk0 = hdim    -- GEMM0 (Q@K^T)  K-unroll = QK head dim
+///   bk1 = bm0     -- GEMM1 (P^T@dO) K-unroll = M-dim
+///   bk2 = hdim    -- GEMM2 (dO@V^T) K-unroll = V head dim
+///   bk3 = bm0     -- GEMM3 (dS^T@Q) K-unroll = M-dim
 ///
 /// GFX9 fp16/bf16 constants (invariant across all head dims):
 ///   GEMM0/2: rm0=1, rn0=4, rk0=1, wm0=16, wn0=16, wk0=32
 ///   GEMM1/3: rm1=4, rn1=1, rk1=1, wm1=16, wn1=16, wk1=16
 ///   GEMM4:   rk2=1, warp tile = (wm0, wn0, min(wk0, bk4))
-consteval FmhaBwdDQDKDVTileConfig
-generateTileConfig(int hdim_q, int hdim_v, const FmhaBwdBaseTile base)
+consteval FmhaBwdDQDKDVTileConfig generateTileConfig(int hdim, const FmhaBwdBaseTile base)
 {
-    auto warps = computeGemm4Warps(base.bm0, hdim_q);
+    auto warps = computeGemm4Warps(base.bm0, hdim);
 
     return FmhaBwdDQDKDVTileConfig{
-        .hdim_q = hdim_q,
-        .hdim_v = hdim_v,
+        .hdim_q = hdim,
+        .hdim_v = hdim,
         .bm0    = base.bm0,
         .bn0    = base.bn0,
-        .bk0    = hdim_q,   // Rule: GEMM0 K-unroll = hdim_q
+        .bk0    = hdim,     // Rule: GEMM0 K-unroll = hdim
         .bk1    = base.bm0, // Rule: GEMM1 K-unroll = bm0
-        .bk2    = hdim_v,   // Rule: GEMM2 K-unroll = hdim_v
+        .bk2    = hdim,     // Rule: GEMM2 K-unroll = hdim
         .bk3    = base.bm0, // Rule: GEMM3 K-unroll = bm0
         .bk4    = base.bk4,
         // GEMM0/2 warps (constant for GFX9 fp16/bf16)
@@ -214,7 +227,7 @@ generateTileConfig(int hdim_q, int hdim_v, const FmhaBwdBaseTile base)
         .wm1 = 16,
         .wn1 = 16,
         .wk1 = 16,
-        // GEMM4 warps (computed from bm0 and hdim_q)
+        // GEMM4 warps (computed from bm0 and hdim)
         .rm2       = warps.rm2,
         .rn2       = warps.rn2,
         .rk2       = 1,
@@ -223,8 +236,8 @@ generateTileConfig(int hdim_q, int hdim_v, const FmhaBwdBaseTile base)
     };
 }
 
-/// Look up base tile for a given effective head dimension.
-consteval FmhaBwdBaseTile getBaseTile(int effective_hdim, DataType dtype, GpuTarget target)
+/// Look up base tile for a given (symmetric) head dimension.
+consteval FmhaBwdBaseTile getBaseTile(int hdim, DataType dtype, GpuTarget target)
 {
     // Narrow the failure mode before scanning the table so the compile-time
     // error string identifies which precondition was violated.
@@ -239,26 +252,54 @@ consteval FmhaBwdBaseTile getBaseTile(int effective_hdim, DataType dtype, GpuTar
 
     for(int i = 0; i < GFX9_FP16_DQDKDV_BASE_TILES_COUNT; ++i)
     {
-        if(GFX9_FP16_DQDKDV_BASE_TILES[i].hdim == effective_hdim)
+        if(GFX9_FP16_DQDKDV_BASE_TILES[i].hdim == hdim)
             return GFX9_FP16_DQDKDV_BASE_TILES[i].tile;
     }
-    throw "getBaseTile: no GFX9 FP16/BF16 base-tile entry for this effective head dimension"
-          " (max(hdim_q, hdim_v) must be one of {32, 64, 96, 128, 256})";
+    throw "getBaseTile: no GFX9 FP16/BF16 base-tile entry for this head dimension"
+          " (hdim must be one of {32, 64, 96, 128, 256})";
+}
+
+/// Validate that every GEMM warp tile in `t` maps to a real MFMA/WMMA
+/// instruction shape for (dtype, target). The warp-tile constants are tuned
+/// for the shipped gfx9 fp16/bf16 configs; this guard ensures a future
+/// base-tile edit (e.g. a bk4 < 16 that shrinks GEMM4's k-dim below a legal
+/// MFMA shape) fails the build instead of silently selecting an invalid
+/// instruction. Uses isValidWaveTile() from arch_properties.hpp as the single
+/// source of truth for legal wave shapes.
+consteval void validateWaveTiles(const FmhaBwdDQDKDVTileConfig& t, DataType dtype, GpuTarget target)
+{
+    const int wk4 = (t.wk0 < t.bk4) ? t.wk0 : t.bk4; // GEMM4 k = min(wk0, bk4)
+
+    if(!isValidWaveTile(dtype, t.wm0, t.wn0, t.wk0, target))
+        throw "getTileConfig: GEMM0/2 warp tile (wm0, wn0, wk0) is not a valid"
+              " MFMA/WMMA shape for this dtype/target";
+    if(!isValidWaveTile(dtype, t.wm1, t.wn1, t.wk1, target))
+        throw "getTileConfig: GEMM1/3 warp tile (wm1, wn1, wk1) is not a valid"
+              " MFMA/WMMA shape for this dtype/target";
+    if(!isValidWaveTile(dtype, t.wm0, t.wn0, wk4, target))
+        throw "getTileConfig: GEMM4 warp tile (wm0, wn0, min(wk0, bk4)) is not a"
+              " valid MFMA/WMMA shape for this dtype/target";
 }
 
 /// Look up tile geometry for dQ/dK/dV given problem shape and target arch.
 /// Returns the matching tile config. Throws at compile time if no config exists.
 ///
-/// Supports both symmetric (hdim_q == hdim_v) and asymmetric head dimensions.
-/// Base tile is looked up by max(hdim_q, hdim_v); remaining fields are derived
-/// via invariant rules. Some asymmetric combinations may fail at compile time
-/// if no valid GEMM4 warp distribution exists (see computeGemm4Warps).
+/// Only symmetric head dimensions (hdim_q == hdim_v) are supported: CK Tile's
+/// fmha_bwd.py get_dq_dk_dv_tiles() defines tuned configs exclusively for
+/// symmetric head dims, so asymmetric combinations have no validated tile and
+/// are rejected here rather than synthesized from an unvalidated extrapolation.
 consteval FmhaBwdDQDKDVTileConfig
 getTileConfig(int hdim_q, int hdim_v, DataType dtype, GpuTarget target)
 {
-    int effective_hdim = std::max(hdim_q, hdim_v);
-    auto base          = getBaseTile(effective_hdim, dtype, target);
-    return generateTileConfig(hdim_q, hdim_v, base);
+    if(hdim_q != hdim_v)
+        throw "FmhaBwdDQDKDV requires hdim_q == hdim_v"
+              " (asymmetric head dimensions are unsupported: CK Tile defines"
+              " tuned dQ/dK/dV tile configs only for symmetric head dims)";
+
+    auto base = getBaseTile(hdim_q, dtype, target);
+    auto cfg  = generateTileConfig(hdim_q, base);
+    validateWaveTiles(cfg, dtype, target);
+    return cfg;
 }
 
 // ---------------------------------------------------------------------------
@@ -458,19 +499,10 @@ consteval FmhaBwdDQDKDVSpec makeSpec(FmhaBwdDQDKDVConfig cfg)
        sig.hdim_v != 256)
         throw "hdim_v must be one of {32, 64, 96, 128, 256}";
 
-    // --- asymmetric (hdim_q, hdim_v) early reject ---
-    // When max(hdim_q, hdim_v) >= 128 the base-tile table picks bm0=16, which
-    // is too small for the (2,2) or (4,1) GEMM4 warp branches. The remaining
-    // (1,4) branch requires hdim_q divisible by 64, so hdim_q in {32, 96}
-    // leaves computeGemm4Warps with no valid distribution. Reject these
-    // tuples here so the failure names the asymmetric case rather than
-    // bubbling up as an opaque "no valid GEMM4 warp distribution" message
-    // from a consteval helper several layers down.
-    if((sig.hdim_q == 32 || sig.hdim_q == 96) && (sig.hdim_v == 128 || sig.hdim_v == 256))
-        throw "asymmetric (hdim_q, hdim_v) unsupported:"
-              " hdim_q in {32, 96} combined with hdim_v in {128, 256}"
-              " has no valid GEMM4 warp distribution"
-              " (max(hdim_q, hdim_v) forces bm0=16, and hdim_q is not divisible by 64)";
+    // Note: hdim_q == hdim_v is enforced (with a descriptive message) by
+    // getTileConfig() below -- the single source of truth for which head-dim
+    // combinations have a tuned tile. Asymmetric configs are rejected there;
+    // we deliberately do not duplicate that predicate here.
 
     // --- mode validation ---
     // Group mode uses variable-length sequences, which requires padding.
