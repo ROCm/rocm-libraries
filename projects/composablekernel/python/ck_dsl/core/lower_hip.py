@@ -762,12 +762,21 @@ class _Lowerer:
         self._emit(f"__builtin_amdgcn_s_waitcnt({mask});")
         self._emit("__syncthreads();")
 
+    def _op_tile_s_barrier_bare(self, op: Op) -> None:
+        # Bare workgroup rendezvous, NO implicit waitcnt -- the caller
+        # issues the explicit s_waitcnt counters. Mirrors the LLVM-direct
+        # ``call void @llvm.amdgcn.s.barrier()`` (no preceding waitcnt).
+        self._emit("__builtin_amdgcn_s_barrier();")
+
     def _op_tile_s_waitcnt(self, op: Op) -> None:
         vm = int(op.attrs.get("vmcnt", -1))
         lk = int(op.attrs.get("lgkmcnt", -1))
         ec = int(op.attrs.get("expcnt", -1))
         mask = self._encode_waitcnt(vm, ec, lk)
         self._emit(f"__builtin_amdgcn_s_waitcnt({mask});")
+
+    def _op_tile_iglp_opt(self, op: Op) -> None:
+        self._emit(f"__builtin_amdgcn_iglp_opt({int(op.attrs.get('level', 0))});")
 
     def _op_tile_sched_barrier(self, op: Op) -> None:
         self._emit(f"__builtin_amdgcn_sched_barrier({int(op.attrs.get('mask', 0))});")

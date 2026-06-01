@@ -345,6 +345,7 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "ds.read.tr16.b128": (
         "declare <8 x i16> @llvm.amdgcn.ds.read.tr16.b128(ptr addrspace(3))"
     ),
+    "iglp.opt": ("declare void @llvm.amdgcn.iglp.opt(i32 immarg)"),
     "sched.barrier": ("declare void @llvm.amdgcn.sched.barrier(i32 immarg)"),
     "sched.group.barrier": (
         "declare void @llvm.amdgcn.sched.group.barrier("
@@ -2595,6 +2596,11 @@ class _Lowerer:
         ec = int(op.attrs.get("expcnt", -1))
         mask = self._backend.encode_waitcnt(vmcnt=vm, expcnt=ec, lgkmcnt=lk)
         self._current().emit(f"  call void @llvm.amdgcn.s.waitcnt(i32 {mask})")
+
+    def _op_tile_iglp_opt(self, op: Op) -> None:
+        self._need("iglp.opt")
+        level = int(op.attrs.get("level", 0))
+        self._current().emit(f"  call void @llvm.amdgcn.iglp.opt(i32 {level})")
 
     def _op_tile_sched_barrier(self, op: Op) -> None:
         self._need("sched.barrier")

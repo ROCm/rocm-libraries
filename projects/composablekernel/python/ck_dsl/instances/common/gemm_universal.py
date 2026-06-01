@@ -198,6 +198,25 @@ class TraitSpec:
     # "expert-by-expert" MoE dispatch over a static grid that's
     # padded to the worst-case ``experts`` size.
     active_tile_skip: bool = False
+    # LDS K-padding: extra columns added to each AB LDS row so the per-row
+    # byte stride is not a power-of-two multiple of the bank count, breaking
+    # the stride-based bank-conflict pattern on the MFMA ds_reads (gfx950 has
+    # 64 banks; an unpadded block_k=32 f16 row = 64 B stride aliases banks
+    # every 4 rows). Default 0 = no change (golden-gate-safe). Use a multiple
+    # of the load vector width (e.g. 16 halves) so the wide vector ds_read /
+    # ds_write stay naturally aligned -- pad=4 breaks 16-byte alignment and
+    # regresses hard. Measured NEUTRAL-to-NEGATIVE on square fp16 (the extra
+    # LDS costs occupancy and outweighs the conflict reduction) -- prefer
+    # ``lds_swizzle`` (zero LDS cost). Kept as an opt-in knob for shapes/dtypes
+    # where the trade may pay. Non-DTL only (the direct-to-LDS path computes
+    # flat byte offsets that assume a contiguous block_k stride).
+    lds_k_pad: int = 0
+    # LDS XOR swizzle (st_16x32-style): toggle the 32-byte column group on
+    # rows with bit 3 set so consecutive-row MFMA ds_reads hit different banks.
+    # ZERO LDS overhead (unlike lds_k_pad). Applied identically to the LDS
+    # store and ds_read columns -> bit-exact. Measured ~+3% on square fp16/bf16.
+    # Default off (golden-gate-safe). Non-DTL only; 2-byte dtypes.
+    lds_swizzle: bool = False
 
 
 @dataclass(frozen=True)
@@ -823,6 +842,61 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     warp_n_idx = b.mod(warp_id, c_warps_n)
     lane = b.mod(tid, c_wave)
 
+    # LDS XOR swizzle (st_16x32-style, zero LDS overhead). For 2-byte
+    # elements the 32-byte (16-half) column group is toggled on rows whose
+    # bit 3 is set: ``col ^= ((row>>3)&1)<<4``. Applied identically to the
+    # LDS store column and the MFMA ds_read column, so the physical address
+    # for any logical (row,col) agrees on both sides (correctness preserved)
+    # while consecutive rows hit different banks. Opt-in via CK_SWIZZLE; the
+    # 16-half toggle preserves the 8-half load-vector alignment.
+    _SWZ = spec.trait.lds_swizzle
+    # LDS XOR swizzle: ``col ^= ((row >> R) % 2^W) << L``. XOR of any
+    # deterministic function of ``row`` into ``col`` is correctness-preserving
+    # as long as it is applied identically to the LDS store-source + ds_read
+    # columns (it is) and stays in [0, block_k).
+    #
+    # The optimal (measured 0.0% LDSBankConflict) parameters are derived from
+    # the geometry, not guessed:
+    #   * L = log2(elem)  -- swizzle whole ``elem``-half (b128) vector slots so
+    #                        every target is naturally 16B-aligned.
+    #   * W = log2(block_k/elem) -- use ALL element slots in the row.
+    #   * R = 0           -- key the swizzle on the LOW row bits, i.e. the
+    #                        ``m_in_atom`` (0..warp_tile_m-1) that actually
+    #                        aliases (every M-row of an atom reads the same col,
+    #                        and the row*stride term vanishes mod 32 banks, so
+    #                        only a low-bit element permutation decorrelates them).
+    # The earlier default (R=3,W=1,L=4) keyed on HIGH row bits / 2 slots and so
+    # floored at 25% (4-way). Env vars override for sweeps; geometry fallback to
+    # the 2-slot toggle if elem/slots aren't a clean power-of-2 split.
+    import os as _os
+
+    def _ilog2(x):
+        return x.bit_length() - 1 if x and (x & (x - 1)) == 0 else None
+
+    _swz_elem = a_per_lane if a_per_lane == b_per_lane else 0
+    _swz_slots = (
+        (block_k // _swz_elem) if (_swz_elem and block_k % _swz_elem == 0) else 0
+    )
+    _auto_l = _ilog2(_swz_elem)
+    _auto_w = _ilog2(_swz_slots)
+    if _auto_l is not None and _auto_w is not None and _auto_w >= 1:
+        _def_r, _def_w, _def_l = 0, _auto_w, _auto_l
+    else:
+        _def_r, _def_w, _def_l = 3, 1, 4
+    _swz_r = int(_os.environ.get("CK_SWZ_R", str(_def_r)))
+    _swz_w = int(_os.environ.get("CK_SWZ_W", str(_def_w)))
+    _swz_l = int(_os.environ.get("CK_SWZ_L", str(_def_l)))
+    _c_swr, _c_swmod, _c_swl = (
+        b.const_i32(_swz_r),
+        b.const_i32(1 << _swz_w),
+        b.const_i32(_swz_l),
+    )
+
+    def _swz_col(col, row):
+        if not _SWZ:
+            return col
+        return b.xor(col, b.shl(b.mod(b.lshr(row, _c_swr), _c_swmod), _c_swl))
+
     if spec.batched:
         # P57: every wave-uniform i32 derived from the batch axis is
         # pinned into an SGPR via ``to_sgpr_u32`` so the per-tile
@@ -917,8 +991,14 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     _, _db, _two_buf = _ab_lds_plan(spec, arch)
     _A_LDS_M = 2 * block_m if _two_buf else block_m
     _B_LDS_N = 2 * block_n if _two_buf else block_n
-    A_smem = b.smem_alloc(storage_dtype, [_A_LDS_M, block_k], name_hint="A_smem")
-    B_smem = b.smem_alloc(storage_dtype, [_B_LDS_N, block_k], name_hint="B_smem")
+    # LDS K-padding (non-DTL only): widen each row's stride to break the
+    # bank-conflict alias. The logical column range stays [0, block_k); only
+    # the row stride grows, so the read GEP (alloc shape[1]) and the
+    # store_vec TensorView (with_strides below) both pick up the padded stride.
+    _lds_pad = spec.trait.lds_k_pad if not spec.trait.direct_to_lds else 0
+    _lds_k = block_k + _lds_pad
+    A_smem = b.smem_alloc(storage_dtype, [_A_LDS_M, _lds_k], name_hint="A_smem")
+    B_smem = b.smem_alloc(storage_dtype, [_B_LDS_N, _lds_k], name_hint="B_smem")
     # When ``_two_buf`` (compv4 DB or dtl_prefetch) the two halves share
     # this one ``2*block_m``/``2*block_n``-tall region; the K-loop's
     # ``lds_parity`` shifts the load-store and MFMA-read row origin by
@@ -971,16 +1051,21 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     # LDS views are 2D packed (block_m, block_k) / (block_n, block_k).
     from ...helpers.tensor_view import TensorDescriptor, TensorView
 
-    a_lds_view = TensorView(
-        base=A_smem,
-        desc=TensorDescriptor.packed((block_m, block_k), storage_dtype),
-        addr_space="lds",
-    )
-    b_lds_view = TensorView(
-        base=B_smem,
-        desc=TensorDescriptor.packed((block_n, block_k), storage_dtype),
-        addr_space="lds",
-    )
+    # When LDS K-padding is on, the logical shape stays (block_*, block_k) but
+    # the row stride is the padded ``_lds_k`` so the store_vec addressing
+    # agrees with the read GEP (which uses the padded alloc shape).
+    if _lds_pad:
+        _a_lds_desc = TensorDescriptor.with_strides(
+            (block_m, block_k), (_lds_k, 1), storage_dtype
+        )
+        _b_lds_desc = TensorDescriptor.with_strides(
+            (block_n, block_k), (_lds_k, 1), storage_dtype
+        )
+    else:
+        _a_lds_desc = TensorDescriptor.packed((block_m, block_k), storage_dtype)
+        _b_lds_desc = TensorDescriptor.packed((block_n, block_k), storage_dtype)
+    a_lds_view = TensorView(base=A_smem, desc=_a_lds_desc, addr_space="lds")
+    b_lds_view = TensorView(base=B_smem, desc=_b_lds_desc, addr_space="lds")
 
     # DirectToLDS (DTLA/DTLB) plumbing. We issue
     # ``async_buffer_load_lds_addr`` directly because
@@ -1105,10 +1190,16 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 row = b.div(chunk_idx, _dtl_c_chunks_per_row)
                 col_v = b.mod(chunk_idx, _dtl_c_chunks_per_row)
                 col = b.mul(col_v, _dtl_c_halves_per_chunk)
-                # element offset for A row in halves
+                # element offset for A row in halves. With lds_swizzle, load the
+                # global element at col^f(row) into the lane-linear LDS slot so
+                # the swizzled ds_read (col_base^f(row)) fetches it back (XOR is
+                # its own inverse) -- the LDS dest stays wave-contiguous.
                 off_elems = b.add(
                     batch_off_a,
-                    b.add(b.mul(b.add(block_m_off, row), K), b.add(k_off, col)),
+                    b.add(
+                        b.mul(b.add(block_m_off, row), K),
+                        b.add(k_off, _swz_col(col, row)),
+                    ),
                 )
                 off_bytes = b.mul(off_elems, c2)
                 b.async_buffer_load_lds_addr(
@@ -1134,7 +1225,10 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 col = b.mul(col_v, _dtl_c_halves_per_chunk)
                 off_elems = b.add(
                     batch_off_b,
-                    b.add(b.mul(b.add(block_n_off, row), K), b.add(k_off, col)),
+                    b.add(
+                        b.mul(b.add(block_n_off, row), K),
+                        b.add(k_off, _swz_col(col, row)),
+                    ),
                 )
                 off_bytes = b.mul(off_elems, c2)
                 b.async_buffer_load_lds_addr(
@@ -1208,10 +1302,14 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             row, col_v, col = _vec_rc(vec_idx)
             if load_vec == 1:
                 a_val = a_global_tile.load_scalar(b, b.const_i32(0), row, col)
-                a_lds_tile.store_scalar(b, _ld_a_row(row), col, value=a_val)
+                a_lds_tile.store_scalar(
+                    b, _ld_a_row(row), _swz_col(col, row), value=a_val
+                )
             else:
                 a_val = a_global_tile.load_vec(b, b.const_i32(0), row, col, n=load_vec)
-                a_lds_tile.store_vec(b, _ld_a_row(row), col, value=a_val, n=load_vec)
+                a_lds_tile.store_vec(
+                    b, _ld_a_row(row), _swz_col(col, row), value=a_val, n=load_vec
+                )
         # B-load branch.
         #
         # Canonical (row-major B): each lane reads ``load_vec`` halves at
@@ -1246,11 +1344,13 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 row, col_v, col = _vec_rc(vec_idx)
                 if load_vec == 1:
                     b_val = b.global_load(Bp, glob_off, storage_dtype)
-                    b_lds_tile.store_scalar(b, _ld_b_row(row), col, value=b_val)
+                    b_lds_tile.store_scalar(
+                        b, _ld_b_row(row), _swz_col(col, row), value=b_val
+                    )
                 else:
                     b_val = b.global_load_vN(Bp, glob_off, storage_dtype, load_vec)
                     b_lds_tile.store_vec(
-                        b, _ld_b_row(row), col, value=b_val, n=load_vec
+                        b, _ld_b_row(row), _swz_col(col, row), value=b_val, n=load_vec
                     )
         else:
             for e in range(b_vecs_per_thread):
@@ -1258,13 +1358,15 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 row, col_v, col = _vec_rc(vec_idx)
                 if load_vec == 1:
                     b_val = b_global_tile.load_scalar(b, b.const_i32(0), row, col)
-                    b_lds_tile.store_scalar(b, _ld_b_row(row), col, value=b_val)
+                    b_lds_tile.store_scalar(
+                        b, _ld_b_row(row), _swz_col(col, row), value=b_val
+                    )
                 else:
                     b_val = b_global_tile.load_vec(
                         b, b.const_i32(0), row, col, n=load_vec
                     )
                     b_lds_tile.store_vec(
-                        b, _ld_b_row(row), col, value=b_val, n=load_vec
+                        b, _ld_b_row(row), _swz_col(col, row), value=b_val, n=load_vec
                     )
 
     def _emit_frag_smem_load(
@@ -1425,48 +1527,58 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
 
         new_accs: List[Value] = list(iter_vars)
 
-        for kk in range(k_atoms):
+        # ---- per-fragment LDS read helpers (shared by the legacy and PLR
+        # emission paths). Each returns one ds_read'd operand fragment for the
+        # given K-atom step ``kk`` and atom-row/col index. Pure address arith +
+        # one ``_emit_smem_load``; identical math to the inlined legacy form. ----
+        def _read_a(kk: int, mi: int) -> Value:
             col_base = b.add(k_blk_kbase, b.const_i32(kk * t.warp_tile_k))
-            # We compute one A load per atom-row and reuse across N.
-            a_rows = []
-            for mi in range(mfmas_m):
-                a_row = b.add(
-                    warp_m_off,
-                    b.add(
-                        b.const_i32(mi * t.warp_tile_m + a_row_parity_off), m_in_atom
-                    ),
-                )
-                if a_par_row_v is not None:
-                    a_row = b.add(a_row, a_par_row_v)
-                a_rows.append(
-                    _emit_smem_load(
-                        b, A_src, a_row, col_base, a_per_lane, storage_dtype
-                    )
-                )
+            a_row = b.add(
+                warp_m_off,
+                b.add(b.const_i32(mi * t.warp_tile_m + a_row_parity_off), m_in_atom),
+            )
+            if a_par_row_v is not None:
+                a_row = b.add(a_row, a_par_row_v)
+            return _emit_smem_load(
+                b, A_src, a_row, _swz_col(col_base, a_row), a_per_lane, storage_dtype
+            )
 
-            # B load per atom-col, reused across M.
-            b_cols = []
-            for ni in range(mfmas_n):
-                b_row = b.add(
-                    warp_n_off,
-                    b.add(
-                        b.const_i32(ni * t.warp_tile_n + b_row_parity_off), n_in_atom
-                    ),
-                )
-                if b_par_row_v is not None:
-                    b_row = b.add(b_row, b_par_row_v)
-                b_cols.append(
-                    _emit_smem_load(
-                        b, B_src, b_row, col_base, b_per_lane, storage_dtype
-                    )
-                )
+        def _read_b(kk: int, ni: int) -> Value:
+            col_base = b.add(k_blk_kbase, b.const_i32(kk * t.warp_tile_k))
+            b_row = b.add(
+                warp_n_off,
+                b.add(b.const_i32(ni * t.warp_tile_n + b_row_parity_off), n_in_atom),
+            )
+            if b_par_row_v is not None:
+                b_row = b.add(b_row, b_par_row_v)
+            return _emit_smem_load(
+                b, B_src, b_row, _swz_col(col_base, b_row), b_per_lane, storage_dtype
+            )
 
-            flat = 0
+        def _mma_cluster(a_rows, b_cols) -> None:
+            # Reference-faithful MFMA clusters: bracket each m-row's MFMA
+            # cluster with s_setprio(1)/(0) + a sched_barrier(0) fence so the
+            # post-RA scheduler keeps the matrix pipe at high priority through
+            # the cluster and cannot float the surrounding ds_read/buffer_load
+            # across it. Enabled with lds_swizzle (the reference-faithful mode).
             for mi in range(mfmas_m):
+                if _SWZ:
+                    b.s_setprio(1)
                 for ni in range(mfmas_n):
-                    acc = _emit_mma(b, op, a_rows[mi], b_cols[ni], new_accs[flat])
-                    new_accs[flat] = acc
-                    flat += 1
+                    flat = mi * mfmas_n + ni
+                    new_accs[flat] = _emit_mma(
+                        b, op, a_rows[mi], b_cols[ni], new_accs[flat]
+                    )
+                if _SWZ:
+                    b.s_setprio(0)
+                    b.sched_barrier(0)
+
+        for kk in range(k_atoms):
+            # We compute one A load per atom-row and reuse across N.
+            a_rows = [_read_a(kk, mi) for mi in range(mfmas_m)]
+            # B load per atom-col, reused across M.
+            b_cols = [_read_b(kk, ni) for ni in range(mfmas_n)]
+            _mma_cluster(a_rows, b_cols)
 
         # Quantitative two-stage HotLoop schedule (E3 #1/#6, E6 L1).
         #
@@ -1635,20 +1747,31 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             acc_iter = iter_vars[1:]
             next_parity = b.sub(c1_i32, parity)  # 1 - parity (0/1 only)
             k_next = b.add(k0, c_block_k)
-            # Issue next-tile loads into the other half (will be drained
-            # at the start of *next* iter via vmcnt(loads_per_tile)).
+            # Single-barrier software pipeline: ONE s_waitcnt + ONE WG barrier
+            # per K-tile (vs the prior WAR+RAW two-barrier form, which halved
+            # the available MFMA-shadow time at 1 WG/CU). The single barrier
+            # serves both hazards because we issue the next-tile write AFTER it:
+            #   * vmcnt(0)  -> the current tile's DTL loads (issued last iter
+            #                  into half(parity)) have landed: RAW-safe to read.
+            #   * lgkmcnt(0)-> the previous iter's ds_reads of half(next_parity)
+            #                  have drained: WAR-safe to overwrite that half.
+            #   * s_barrier -> WG rendezvous so the freshly-loaded current half
+            #                  is visible to every wave before any MFMA reads it.
+            # The async next-tile load is issued AFTER the barrier (cannot race
+            # the just-drained reads -> no second barrier needed) but BEFORE the
+            # MFMAs (its HBM transfer overlaps the matrix work). The prior
+            # structure issued that write BEFORE draining, which both raced and
+            # forced the extra barrier this collapses away.
+            b.s_waitcnt(vmcnt=0, lgkmcnt=0)
+            b.s_barrier_bare()
             emit_load_phase(A_smem, B_smem, k_next, lds_parity=next_parity)
-            # Wait until only the next tile's loads remain — i.e., the
-            # *current* tile's loads have all completed.
-            b.s_waitcnt(vmcnt=loads_per_tile, lgkmcnt=0)
-            b.sync_lds_only()  # WG barrier; LDS visible to all waves
             new_accs = emit_mfma_phase(A_smem, B_smem, acc_iter, lds_parity=parity)
             b.scf_yield(next_parity, *new_accs)
 
-        # Epilogue: drain remaining loads, MFMA last tile.
+        # Epilogue: drain the final tile's loads, rendezvous, MFMA last tile.
         final_parity = for_op.results[0]
         b.s_waitcnt(vmcnt=0, lgkmcnt=0)
-        b.sync_lds_only()
+        b.s_barrier_bare()
         epi_accs = emit_mfma_phase(
             A_smem, B_smem, for_op.results[1:], lds_parity=final_parity
         )
