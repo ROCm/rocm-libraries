@@ -15,6 +15,7 @@
 #include "ck_tile/builder/testing/conv/ck_tile.hpp"
 #include "ck_tile/builder/testing/conv/reference.hpp"
 #include "ck_tile/builder/conv_builder.hpp"
+#include "tile_profiler_common.hpp"
 #include "direct_conv_instance_registry.hpp"
 
 #define ENABLE_BUILDER_VALIDATE 1
@@ -73,8 +74,11 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
                                    const index_t instance_index,
                                    const ckt::Inputs<SIGNATURE>& inputs,
                                    const ckt::Outputs<SIGNATURE>& outputs,
-                                   const ck_tile::stream_config& s_conf)
+                                   const ck_tile::stream_config& s_conf,
+                                   bool do_verification = true)
 {
+    using DataType = DeduceDataType<SIGNATURE>;
+
     // Run first instance as dummy to get proper time from the first instance
     bool dummy_run_executed = false;
     float best_avg_time             = std::numeric_limits<float>::max();
@@ -94,12 +98,15 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
                                               ck_tile::bfloat16_t>>;
 
     auto reference = ckt::alloc_outputs(args);
-    using ReferenceInstance =
-        typename ckb::ConvBuilder<SIGNATURE, ckt::ConvAlgorithm_Reference{}>::Instance;
-    auto ref_conv   = ReferenceInstance{};
-    auto ref_result = ckt::run(ref_conv, args, inputs, reference.get());
+    if(do_verification)
+    {
+        using ReferenceInstance =
+            typename ckb::ConvBuilder<SIGNATURE, ckt::ConvAlgorithm_Reference{}>::Instance;
+        auto ref_conv                    = ReferenceInstance{};
+        [[maybe_unused]] auto ref_result = ckt::run(ref_conv, args, inputs, reference.get());
+    }
     index_t num_kernel = 0;
-    auto run_alg       = [&](auto&& run_alg_func) {
+    auto run_alg    = [&](auto&& run_alg_func) {
         num_kernel++;
         // Skip if a specific instance was requested and this isn't it
         const bool running_specific_instance = (instance_index != -1);
@@ -120,17 +127,21 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
                 dummy_run_executed = true;
             }
 
-            ckt::ValidationReport report;
-            ckt::Outputs<SIGNATURE>::reflect(
-                args,
-                [&](std::string_view name, const auto& desc, void* ckt::Outputs<SIGNATURE>::*ptr) {
-                    report.check(name,
-                                 desc,
-                                 outputs.*ptr,
-                                 reference.get().*ptr,
-                                 ck::profiler::get_rtol<DataType>(),
-                                 ck::profiler::get_atol<DataType>());
-                });
+            if(do_verification)
+            {
+                ckt::ValidationReport report;
+                ckt::Outputs<SIGNATURE>::reflect(args,
+                                                 [&](std::string_view name,
+                                                     const auto& desc,
+                                                     void* ckt::Outputs<SIGNATURE>::*ptr) {
+                                                     report.check(
+                                                         name,
+                                                         desc,
+                                                         outputs.*ptr,
+                                                         reference.get().*ptr,
+                                                         ck::profiler::get_rtol<DataType>(),
+                                                         ck::profiler::get_atol<DataType>());
+                                                 });
 
             const bool instance_valid = report.get_errors().empty();
             if(instance_valid)

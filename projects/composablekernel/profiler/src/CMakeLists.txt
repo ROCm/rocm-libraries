@@ -43,7 +43,7 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx9")
   #   list(APPEND PROFILER_OPS profile_contraction_bilinear.cpp)
   #   list(APPEND PROFILER_OPS profile_contraction_scale.cpp)
   # endif()
-  if(CK_EXPERIMENTAL_BUILDER)
+  if(CK_EXPERIMENTAL_BUILDER OR CK_TILE_DISPATCHER)
     list(APPEND PROFILER_OPS profile_grouped_conv_fwd_tile.cpp)
     list(APPEND PROFILER_OPS profile_grouped_conv_bwd_weight_tile.cpp)
     list(APPEND PROFILER_OPS profile_grouped_conv_bwd_data_tile.cpp)
@@ -182,6 +182,110 @@ if(NOT WIN32 AND ${hip_VERSION_FLAT} GREATER 600241132)
   target_compile_options(${PROFILER_EXECUTABLE} PRIVATE --offload-compress)
 endif()
 
+# =============================================================================
+# CK Tile Dispatcher: Generate and compile CK Tile conv kernels
+# =============================================================================
+if(CK_TILE_DISPATCHER AND SUPPORTED_GPU_TARGETS MATCHES "gfx9")
+  find_package(Python3 COMPONENTS Interpreter REQUIRED)
+
+  # Build dispatcher instance libraries (defines ck_dispatcher_grouped_conv_* targets)
+  add_subdirectory(
+    ${PROJECT_SOURCE_DIR}/dispatcher/library
+    ${CMAKE_CURRENT_BINARY_DIR}/dispatcher_library
+  )
+
+  # Profiler needs dispatcher API headers and builder test infrastructure
+  target_include_directories(${PROFILER_EXECUTABLE} PRIVATE
+    ${PROJECT_SOURCE_DIR}/dispatcher/include
+    ${PROJECT_SOURCE_DIR}/experimental/builder/include
+  )
+  target_compile_options(${PROFILER_EXECUTABLE} PRIVATE
+    -Wno-undefined-func-template
+    -Wno-float-equal
+    -Wno-ctad-maybe-unsupported
+    -Wno-old-style-cast
+  )
+
+  # Link all available dispatcher instance libraries
+  foreach(_VARIANT fwd bwd_weight bwd_data)
+    set(_TARGET "ck_dispatcher_grouped_conv_${_VARIANT}")
+    if(TARGET ${_TARGET})
+      target_link_libraries(${PROFILER_EXECUTABLE} PRIVATE ${_TARGET})
+    endif()
+  endforeach()
+endif()
+
+set(DEVICE_INSTANCES "")
+# list(APPEND DEVICE_INSTANCES device_gemm_instance)
+# list(APPEND DEVICE_INSTANCES device_normalization_fwd_instance)
+# list(APPEND DEVICE_INSTANCES device_normalization_bwd_data_instance)
+# list(APPEND DEVICE_INSTANCES device_normalization_bwd_gamma_beta_instance)
+# list(APPEND DEVICE_INSTANCES device_softmax_instance)
+# list(APPEND DEVICE_INSTANCES device_reduce_instance)
+# list(APPEND DEVICE_INSTANCES device_batchnorm_instance)
+# list(APPEND DEVICE_INSTANCES device_pool2d_fwd_instance)
+# list(APPEND DEVICE_INSTANCES device_pool3d_fwd_instance)
+# list(APPEND DEVICE_INSTANCES device_avg_pool2d_bwd_instance)
+# list(APPEND DEVICE_INSTANCES device_avg_pool3d_bwd_instance)
+# list(APPEND DEVICE_INSTANCES device_max_pool_bwd_instance)
+# list(APPEND DEVICE_INSTANCES device_image_to_column_instance)
+# list(APPEND DEVICE_INSTANCES device_column_to_image_instance)
+# list(APPEND DEVICE_INSTANCES device_transpose_instance)
+# list(APPEND DEVICE_INSTANCES device_permute_scale_instance)
+
+# if(SUPPORTED_GPU_TARGETS MATCHES "gfx9|gfx1[12]")
+#   if(DTYPES MATCHES "fp32" OR DTYPES MATCHES "fp64" OR NOT DEFINED DTYPES)
+#     list(APPEND DEVICE_INSTANCES device_contraction_bilinear_instance)
+#     list(APPEND DEVICE_INSTANCES device_contraction_scale_instance)
+#   endif()
+#   if(DTYPES MATCHES "fp16" OR NOT DEFINED DTYPES)
+#     list(APPEND DEVICE_INSTANCES device_gemm_add_instance)
+#     list(APPEND DEVICE_INSTANCES device_batched_gemm_gemm_instance)
+#     list(APPEND DEVICE_INSTANCES device_gemm_add_add_fastgelu_instance)
+#     list(APPEND DEVICE_INSTANCES device_gemm_fastgelu_instance)
+#     list(APPEND DEVICE_INSTANCES device_batched_gemm_add_relu_gemm_add_instance)
+#     list(APPEND DEVICE_INSTANCES device_grouped_gemm_instance)
+#     list(APPEND DEVICE_INSTANCES device_gemm_streamk_instance)
+#     list(APPEND DEVICE_INSTANCES device_gemm_add_relu_instance)
+#     list(APPEND DEVICE_INSTANCES device_gemm_add_relu_add_layernorm_instance)
+#     list(APPEND DEVICE_INSTANCES device_grouped_gemm_fixed_nk_instance)
+#     list(APPEND DEVICE_INSTANCES device_grouped_gemm_fastgelu_instance)
+#     list(APPEND DEVICE_INSTANCES device_grouped_gemm_tile_loop_instance)
+#   endif()
+#   list(APPEND DEVICE_INSTANCES device_batched_gemm_reduce_instance)
+#   if(SUPPORTED_GPU_TARGETS MATCHES "gfx9[45]|gfx12")
+#     list(APPEND DEVICE_INSTANCES device_gemm_multiply_multiply_wp_instance)
+#     list(APPEND DEVICE_INSTANCES device_gemm_universal_preshuffle_instance)
+#   endif()
+#     if(SUPPORTED_GPU_TARGETS MATCHES "gfx9[45]|gfx1[12]")
+#     list(APPEND DEVICE_INSTANCES device_gemm_ab_scale_instance)
+#     list(APPEND DEVICE_INSTANCES device_gemm_blockscale_wp_instance)
+#   endif()
+#   if(SUPPORTED_GPU_TARGETS MATCHES "gfx95")
+#     list(APPEND DEVICE_INSTANCES device_gemm_mx_instance)
+#   endif()
+#   list(APPEND DEVICE_INSTANCES device_gemm_splitk_instance)
+#   list(APPEND DEVICE_INSTANCES device_gemm_universal_batched_instance)
+#   list(APPEND DEVICE_INSTANCES device_gemm_universal_streamk_instance)
+#   list(APPEND DEVICE_INSTANCES device_gemm_add_multiply_instance)
+#   list(APPEND DEVICE_INSTANCES device_gemm_add_instance)
+#   list(APPEND DEVICE_INSTANCES device_gemm_reduce_instance)
+#   list(APPEND DEVICE_INSTANCES device_gemm_bias_add_reduce_instance)
+#   list(APPEND DEVICE_INSTANCES device_conv2d_fwd_instance)
+#   list(APPEND DEVICE_INSTANCES device_conv2d_fwd_bias_relu_instance)
+#   list(APPEND DEVICE_INSTANCES device_conv2d_fwd_bias_relu_add_instance)
+#   list(APPEND DEVICE_INSTANCES device_conv1d_bwd_data_instance)
+#   list(APPEND DEVICE_INSTANCES device_conv3d_bwd_data_instance)
+#   list(APPEND DEVICE_INSTANCES device_conv2d_bwd_data_instance)
+# endif()
+
+# if((SUPPORTED_GPU_TARGETS MATCHES "gfx9" AND (DTYPES MATCHES "fp16" OR NOT DEFINED DTYPES)) OR
+#    (SUPPORTED_GPU_TARGETS MATCHES "gfx1[12]" ))
+#   list(APPEND DEVICE_INSTANCES device_gemm_bilinear_instance)
+# endif()
+# if(SUPPORTED_GPU_TARGETS MATCHES "gfx(9[45]|1[12])")
+#   list(APPEND DEVICE_INSTANCES device_gemm_multiply_multiply_instance)
+# endif()
 
 set(DEVICE_INSTANCES "")
 # list(APPEND DEVICE_INSTANCES device_gemm_instance)
@@ -301,9 +405,11 @@ set(DEVICE_INSTANCES "")
 
 if(SUPPORTED_GPU_TARGETS MATCHES "gfx9")
   if(CK_EXPERIMENTAL_BUILDER)
-    list(APPEND DEVICE_INSTANCES device_grouped_conv_fwd_tile_instances)
-    list(APPEND DEVICE_INSTANCES device_grouped_conv_bwd_weight_tile_instances)
-    list(APPEND DEVICE_INSTANCES device_grouped_conv_bwd_data_tile_instances)
+    if(NOT CK_TILE_DISPATCHER)
+      list(APPEND DEVICE_INSTANCES device_grouped_conv_fwd_tile_instances)
+      list(APPEND DEVICE_INSTANCES device_grouped_conv_bwd_weight_tile_instances)
+      list(APPEND DEVICE_INSTANCES device_grouped_conv_bwd_data_tile_instances)
+    endif()
   endif()
 endif()
 

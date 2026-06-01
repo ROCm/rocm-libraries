@@ -75,6 +75,8 @@ namespace rocisa
         std::shared_ptr<RegisterContainer> b;
         std::optional<InstructionInput>    acc2;
         bool                               neg;
+        bool                               reuseA;
+        bool                               reuseB;
 
         MFMAInstruction(InstType                                  instType,
                         InstType                                  accType,
@@ -85,6 +87,8 @@ namespace rocisa
                         const std::shared_ptr<RegisterContainer>& b,
                         const std::optional<InstructionInput>&     acc2    = std::nullopt,
                         bool                                      neg     = false,
+                        bool                                      reuseA  = false,
+                        bool                                      reuseB  = false,
                         const std::string&                        comment = "")
             : Instruction(instType, comment)
             , accType(accType)
@@ -95,6 +99,8 @@ namespace rocisa
             , b(b)
             , acc2(acc2.has_value() ? acc2.value() : InstructionInput(acc))
             , neg(neg)
+            , reuseA(reuseA)
+            , reuseB(reuseB)
         {
         }
 
@@ -108,6 +114,8 @@ namespace rocisa
             , b(other.b ? other.b->clone2() : nullptr)
             , acc2(other.acc2.has_value() ? copyInstructionInput(other.acc2.value()) : std::optional<InstructionInput>(std::nullopt))
             , neg(other.neg)
+            , reuseA(other.reuseA)
+            , reuseB(other.reuseB)
         {
         }
 
@@ -244,6 +252,9 @@ namespace rocisa
             size_t      f4_t = getAsmCaps()["HasWMMA_V3"] ? 32 : 0;
             std::string negStr
                 = !neg ? "" : (getAsmCaps()["HasWMMA_V1"] ? " neg_lo:[1,1,1]" : " neg_lo:[1,1]");
+            // Conditions for reuseA(B)Str setting
+            std::string reuseAStr       = typeConvert(instType) == "f8f6f4" || !getAsmCaps()["HasWMMA_V3"]? "": (!reuseA ? "" : " matrix_a_reuse");
+            std::string reuseBStr       = typeConvert(instType) == "f8f6f4" || !getAsmCaps()["HasWMMA_V3"]? "": (!reuseB ? "" : " matrix_b_reuse");
             std::string inputPermuteStr = "";
             std::string scaleStr        = "";
             if(getAsmCaps()["HasMFMA_f8f6f4"])
@@ -470,7 +481,7 @@ namespace rocisa
                 }
             }
             return acc->toString() + ", " + a->toString() + ", " + b->toString() + ", "
-                   + InstructionInputToString(acc2.value()) + scaleStr + negStr + inputPermuteStr;
+                   + InstructionInputToString(acc2.value()) + scaleStr + negStr + inputPermuteStr + reuseAStr + reuseBStr;
         }
 
         std::string toString() const override
@@ -505,6 +516,8 @@ namespace rocisa
         std::shared_ptr<RegisterContainer> mxsb;
         std::optional<VOP3PModifiers>      vop3;
         int                                block;
+        bool                               reuseA;
+        bool                               reuseB;
 
         MXMFMAInstruction(InstType                                  instType,
                           InstType                                  accType,
@@ -519,6 +532,8 @@ namespace rocisa
                           InstType                                  mxScaleAType = InstType::INST_F32,
                           InstType                                  mxScaleBType = InstType::INST_F32,
                           int                                       block        = 0,
+                          bool                                      reuseA       = false,
+                          bool                                      reuseB       = false,
                           const std::string&                        comment      = "")
             : Instruction(instType, comment)
             , accType(accType)
@@ -533,6 +548,8 @@ namespace rocisa
             , mxsb(mxsb)
             , vop3(vop3)
             , block(block)
+            , reuseA(reuseA)
+            , reuseB(reuseB)
         {
         }
 
@@ -550,6 +567,8 @@ namespace rocisa
             , mxsb(other.mxsb ? other.mxsb->clone2() : nullptr)
             , vop3(other.vop3)
             , block(other.block)
+            , reuseA(other.reuseA)
+            , reuseB(other.reuseB)
         {
         }
 
@@ -651,6 +670,11 @@ namespace rocisa
         std::string wmmaInputPermuteStr() const
         {
             constexpr size_t f4_t = 32;
+            // Conditions for reuseA(B)Str setting (typeConvert() is member: "f4" vs "f8f6f4")
+            std::string reuseAStr       = typeConvert() == "f4" || !getAsmCaps()["HasWMMA_V3"] ? ""
+                                                                                              : (!reuseA ? "" : " matrix_a_reuse");
+            std::string reuseBStr       = typeConvert() == "f4" || !getAsmCaps()["HasWMMA_V3"] ? ""
+                                                                                              : (!reuseB ? "" : " matrix_b_reuse");
             std::string inputPermuteStr = "";
             switch(instType)
             {
@@ -809,7 +833,7 @@ namespace rocisa
                 break;
             }
 
-            return inputPermuteStr;
+            return inputPermuteStr + reuseAStr + reuseBStr;
         }
 
         std::string getArgStr() const
