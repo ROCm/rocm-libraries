@@ -25,12 +25,66 @@ and 3D conv.
 
 ## Architecture
 
-### Component view
+### At a glance
+
+The plugin embeds a CPython interpreter and turns a hipDNN conv graph
+into a launchable GPU kernel by calling the `ck_dsl` Python DSL. The
+expensive compile happens **once per (shape, arch)**; a process-wide
+`JitCache` short-circuits every repeat request to a ready `HipModule`.
+
+```mermaid
+flowchart LR
+    SDK["hipDNN SDK"]
+
+    subgraph plugin["ck_dsl_provider plugin (.so)"]
+        direction TB
+        Front["Engine + Adapter<br/>validate graph,<br/>build spec, detect arch"]
+        Cache["JitCache<br/>key = shape + arch"]
+        Py["Embedded Python<br/>ck_dsl → HSACO"]
+        Mod["HipModule"]
+    end
+
+    SDK <-->|isApplicable / build / execute| Front
+    Front -->|look up| Cache
+    Cache -.->|miss: compile once| Py
+    Py -.->|HSACO + launch meta| Mod
+    Cache --> Mod
+    Mod -->|launch| GPU["GPU"]
+```
+
+The request lifecycle, abstracted to the one decision that matters —
+cache hit vs. miss:
+
+```mermaid
+flowchart TB
+    Start["conv request<br/>(graph + HIP stream)"]
+    Arch["detect arch from stream<br/>→ gfx token"]
+    Spec["build spec +<br/>arch-validate (DSL)"]
+    Key["key = shape + arch"]
+    Q{"in JitCache?"}
+    Compile["embedded Python:<br/>ck_dsl compiles HSACO<br/>(once per shape + arch)"]
+    Mod["HipModule"]
+    Exec["execute → launch on GPU"]
+
+    Start --> Arch --> Spec --> Key --> Q
+    Q -->|miss| Compile --> Mod
+    Q -->|hit| Mod
+    Mod --> Exec
+```
+
+The two diagrams below expand these into the full class-level component
+graph and the precise call sequence.
+
+<details>
+<summary><b>Detailed component view</b></summary>
 
 The plugin is organised into layers. The container is created once per
 handle generation and owns the long-lived collaborators (the embedded
 interpreter, the Python compile bridge, and the process-wide JIT
-cache); the engine, adapter, and plan are per-request.
+cache); the engine, adapter, and plan are per-request. The target
+`arch` is detected from the request's HIP stream and threaded — as an
+orthogonal compile target, not a spec field — into codegen-config
+selection, the cache key, and the compile/applicability calls.
 
 ```mermaid
 flowchart TB
@@ -56,11 +110,13 @@ flowchart TB
         subgraph adapt["Adapter layer"]
             Adapter["ConvImplicitGemmAdapter<br/>validate + buildSpec()"]
             Spec["ConvImplicitGemmSpec"]
+            ArchCfg["applyArchCodegenConfig<br/>(spec, arch)"]
             Payload["convImplicitGemmSpecToPayload()"]
-            Sig["GraphSignature<br/>→ SignatureHash key"]
+            Sig["GraphSignature<br/>computeForSpec(opKind, spec, arch)<br/>→ SignatureHash key"]
         end
 
         subgraph runtime["Runtime layer"]
+            Arch["DeviceArch<br/>detectDeviceArch(stream)<br/>→ gfx token (memoized)"]
             Cache["JitCache<br/>key → shared_ptr&lt;HipModule&gt;"]
             Module["HipModule<br/>(hipModule_t + hipFunction_t)"]
             Artifact["KernelArtifact<br/>(HSACO + launch metadata)"]
@@ -69,7 +125,7 @@ flowchart TB
 
         subgraph pybound["Python boundary"]
             Interp["EmbeddedInterpreter<br/>(isolated CPython)"]
-            Bridge["CompileServiceBridge<br/>compile(opKind, payload)"]
+            Bridge["CompileServiceBridge<br/>isApplicable / compile<br/>(opKind, payload, arch)"]
         end
     end
 
@@ -86,11 +142,16 @@ flowchart TB
     Container --> Bridge
     Container --> Cache
     Engine --> Builder
+    Builder -->|detect| Arch
     Builder --> Adapter
-    Adapter --> Spec --> Payload
+    Adapter --> Spec --> ArchCfg
+    Arch -.arch.-> ArchCfg
+    ArchCfg --> Payload
     Builder --> Sig
+    Arch -.arch.-> Sig
     Builder -->|getOrLoad key, loader| Cache
     Cache -->|miss| Bridge
+    Arch -.arch.-> Bridge
     Payload -.payload dict.-> Bridge
     Bridge --> Interp
     Bridge -->|GIL| Service
@@ -104,11 +165,15 @@ flowchart TB
     Plan --> Context
 ```
 
-### End-to-end sequence
+</details>
 
-The compile step (heavy, Python/DSL) runs once per logical shape; the
-`JitCache` short-circuits every subsequent request with the same
-`GraphSignature` to a cached `HipModule`.
+<details>
+<summary><b>Detailed end-to-end sequence</b></summary>
+
+The compile step (heavy, Python/DSL) runs once per logical shape *and*
+target arch; the `JitCache` short-circuits every subsequent request
+with the same `GraphSignature` (which folds in the arch) to a cached
+`HipModule`.
 
 ```mermaid
 sequenceDiagram
@@ -117,26 +182,35 @@ sequenceDiagram
     participant Eng as Engine
     participant Bld as PlanBuilder
     participant Adp as Adapter
+    participant Arch as DeviceArch
     participant Cache as JitCache
     participant Br as CompileServiceBridge
     participant Py as compile_service.py / ck_dsl
     participant Mod as HipModule
     participant Plan as ConvImplicitGemmPlan
 
-    SDK->>Eng: isApplicable(graph)
-    Eng->>Bld: isApplicable(graph)
+    SDK->>Eng: isApplicable(handle, graph)
+    Eng->>Bld: isApplicable(handle, graph)
     Bld->>Adp: buildSpec(convAttr, tensors)
     Adp-->>Bld: Spec (or reject)
+    Bld->>Arch: detectDeviceArch(stream)
+    Arch-->>Bld: gfx token (nullopt → decline)
+    Bld->>Adp: applyArchCodegenConfig(spec, arch)
+    Bld->>Br: isApplicable(opKind, payload, arch)  [GIL]
+    Br-->>Bld: applicable? (DSL is_valid_spec)
 
     SDK->>Eng: initializeExecutionContext(graph)
-    Eng->>Bld: buildPlan(graph, context)
+    Eng->>Bld: buildPlan(handle, graph, context)
     Bld->>Adp: buildSpec(...)
-    Bld->>Bld: GraphSignature::computeForSpec → key
+    Bld->>Arch: detectDeviceArch(stream)
+    Arch-->>Bld: gfx token
+    Bld->>Adp: applyArchCodegenConfig(spec, arch)
+    Bld->>Bld: GraphSignature::computeForSpec(opKind, spec, arch) → key
     Bld->>Cache: getOrLoad(key, loader)
 
     alt cache miss
-        Cache->>Br: compile(opKind, payload)  [GIL]
-        Br->>Py: compile(op_kind, payload)
+        Cache->>Br: compile(opKind, payload, arch)  [GIL]
+        Br->>Py: compile(op_kind, payload, arch)
         Py-->>Br: dict{hsaco, kernel_name, grid, block, arg_schema, ...}
         Br-->>Cache: KernelArtifact
         Cache->>Mod: HipModule(artifact)<br/>hipModuleLoadData + GetFunction
@@ -153,6 +227,8 @@ sequenceDiagram
     Plan->>Mod: launch(args, grid, block, stream)
     Mod-->>SDK: hipModuleLaunchKernel
 ```
+
+</details>
 
 ## Trust boundary
 
