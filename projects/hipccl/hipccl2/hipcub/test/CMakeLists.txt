@@ -62,6 +62,9 @@ function(add_relative_test test_name test_target resource_group)
     file(APPEND "${INSTALL_TEST_FILE}" "add_test(${test_name} \"../${EXE_NAME}\")\n")
     # Set the resource group for the test. This must correspond to a gfxID present in resources.json.
     file(APPEND "${INSTALL_TEST_FILE}" "set_tests_properties([=[${test_name}]=] PROPERTIES RESOURCE_GROUPS \"1,${resource_group}:1\")\n")
+    # Track every hipCUB test target so the shared CTest categorization can
+    # later attach --gtest_filter category suites to each one.
+    set_property(GLOBAL APPEND PROPERTY HIPCUB_TEST_TARGETS "${test_target}")
 endfunction()
 
 # We'll use this small program to detect available GPUs and build the resource JSON file.
@@ -111,6 +114,55 @@ if(BUILD_CODE_COVERAGE)
     COMMAND ${LLVM_COV} export ${LLVM_COV_OBJECT_ARGS} --ignore-filename-regex="test_*" -instr-profile=./coverage-report/hipcub.profdata -format=lcov > ./coverage-report/coverage.info
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
+endif()
+
+
+# ****************************************************************************
+# Test Filter Standardization
+# ****************************************************************************
+#
+# Wires every hipCUB test binary into the shared rocm-libraries CTest
+# categorization (see ${ROCM_LIBRARIES_ROOT}/shared/ctest/). For each tracked
+# test target we register one extra CTest entry per category defined in
+# test_categories.yaml. Each entry invokes the binary with a
+# `--gtest_filter=...` derived from the YAML, and is tagged with the category
+# labels and timeout. This lets users select tiers via standard ctest labels:
+#
+#   ctest -L quick       # fast sanity checks (mirrors TheRock test_hipcub.py)
+#   ctest -L standard    # full gtest run
+#
+# The original per-binary tests added by add_relative_test() above are kept
+# untouched, so existing workflows are not affected.
+if(EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+    include("${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+
+    set(HIPCUB_TEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
+    if(EXISTS "${HIPCUB_TEST_CATEGORIES_YAML}")
+        message(STATUS "Applying test categories for hipCUB")
+        get_property(_hc_test_targets GLOBAL PROPERTY HIPCUB_TEST_TARGETS)
+        list(REMOVE_DUPLICATES _hc_test_targets)
+        foreach(_hc_t IN LISTS _hc_test_targets)
+            get_target_property(_hc_dir ${_hc_t} RUNTIME_OUTPUT_DIRECTORY)
+            if(NOT _hc_dir OR _hc_dir STREQUAL "_hc_dir-NOTFOUND")
+                set(_hc_dir "${CMAKE_BINARY_DIR}/test/hipcub")
+            endif()
+            apply_test_category_labels(
+                ${_hc_t}
+                "${HIPCUB_TEST_CATEGORIES_YAML}"
+                "${_hc_dir}"
+                "${INSTALL_TEST_FILE}"
+            )
+        endforeach()
+    else()
+        message(STATUS
+            "hipCUB test_categories.yaml not found at "
+            "${HIPCUB_TEST_CATEGORIES_YAML} - skipping test category labels")
+    endif()
+else()
+    message(STATUS
+        "Shared CTest categories not found at "
+        "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake - "
+        "skipping hipCUB test category labels")
 endif()
 
 
