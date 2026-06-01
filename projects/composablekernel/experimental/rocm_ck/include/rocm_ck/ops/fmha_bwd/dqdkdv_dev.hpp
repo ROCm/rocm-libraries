@@ -368,7 +368,7 @@ __device__ void runFmhaBwdDQDKDV(Args args)
     // fragility flagged by the W7 finding.
 
     typename T::Kargs kargs{
-        // FmhaBwdCommonKargs (30 positional fields; stride_dq_acc and
+        // FmhaBwdCommonKargs (30 positional fields; dq_acc strides are now workspace-derived)
         {t_q.ptr,                                              // q_ptr
          t_k.ptr,                                              // k_ptr
          t_v.ptr,                                              // v_ptr
