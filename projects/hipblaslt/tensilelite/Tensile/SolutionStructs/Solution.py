@@ -695,8 +695,7 @@ class Solution(collections.abc.Mapping):
     # set ASEM=minASEMforMX for not TLUA or not TLUB
     # so far, kernel code can support 16, but host code cannot hanlde it
     # TODO: enable 16 (or less)
-    # TODO: enable less than 256 for Subtile
-    minASEMforMX = 32 if not state["UseSubtileImpl"] else 256
+    minASEMforMX = 32
     if (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]) and \
        ((not state["ProblemType"]["TLUA"]) or (not state["ProblemType"]["TLUB"])):
       if state["AssertSummationElementMultiple"] % minASEMforMX != 0:
@@ -4612,6 +4611,19 @@ class Solution(collections.abc.Mapping):
          state["EnableMatrixInstruction"] and state["StorePriorityOpt"] and \
          state["ProblemType"]["DataType"].isDouble():
       state["LdsInitCVgprs"] = True
+
+    # Resolve InitCIterWmma (-1=auto, 0=disable, 1=force enable).
+    autoInitCIterWmma = state["EnableMatrixInstruction"] and not state["LdsInitCVgprs"] \
+                        and not state["ForceUnrollSubIter"] \
+                        and not state["ProblemType"]["DataType"].isComplex() \
+                        and not state["ProblemType"]["Sparse"] \
+                        and isaInfoMap[isa].asmCaps.get("HasWMMA_AccImmZero", False)
+    if state["InitCIterWmma"] == -1:
+      state["InitCIterWmma"] = 1 if autoInitCIterWmma else 0
+    elif state["InitCIterWmma"] == 1 and not autoInitCIterWmma:
+      reject(state, printRejectionReason,
+             "InitCIterWmma=1 requires EnableMatrixInstruction/HasWMMA_AccImmZero, and not LdsInitCVgprs/ForceUnrollSubIter/Complex/Sparse")
+      return
 
     # force MIArchVgpr when using WMMA
     if state["EnableMatrixInstruction"] and isaInfoMap[isa].asmCaps["HasWMMA"]:
