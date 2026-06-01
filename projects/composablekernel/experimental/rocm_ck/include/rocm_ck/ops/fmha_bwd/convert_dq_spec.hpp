@@ -64,7 +64,7 @@ struct FmhaBwdConvertDQSpec
     bool pad_seqlen_q;
     bool pad_hdim_q;
     int block_per_cu;
-    int block_size; // computed: 256 for d128
+    int block_size; // computed: 256 (4 warps x 64 threads)
 };
 
 // ---------------------------------------------------------------------------
@@ -137,7 +137,7 @@ consteval FmhaBwdConvertDQSpec makeSpec(FmhaBwdConvertDQConfig cfg)
         throw "block_per_cu must be positive";
 
     // Block size: 256 threads (4 warps x 64 threads/warp).
-    // Matches the CK Tile ConvertQGrad kernel configuration for d128.
+    // Matches the CK Tile ConvertQGrad kernel configuration.
     constexpr int block_size = 256;
 
     FmhaBwdConvertDQSpec k{sig.dtype,

@@ -608,6 +608,43 @@ static_assert(fmha_bwd_dqdkdv_slots::requiredTensors(makeSpec(
                       .hdim_q = 128, .hdim_v = 128,
                       .mode = FmhaMode::GROUP},
         .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}})) == 16);
+
+// Multi-hdim build-time canaries: verify makeSpec() compiles for every
+// supported head dimension and selects the correct block_n0 (= base-tile bn0
+// from GFX9_FP16_DQDKDV_BASE_TILES). These guard the BUILD itself -- a tile
+// table drift fails compilation of every TU that includes this shared header,
+// not just the gtest binary. The runtime DqDkDv_FP16_D*_Batch tests cover the
+// same configs with richer diagnostics and also check block_size/block_per_cu.
+static_assert(makeSpec(
+    FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16,
+                      .hdim_q = 32, .hdim_v = 32,
+                      .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}}).block_n0 == 128);
+static_assert(makeSpec(
+    FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16,
+                      .hdim_q = 64, .hdim_v = 64,
+                      .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}}).block_n0 == 128);
+static_assert(makeSpec(
+    FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16,
+                      .hdim_q = 96, .hdim_v = 96,
+                      .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}}).block_n0 == 128);
+static_assert(makeSpec(
+    FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16,
+                      .hdim_q = 128, .hdim_v = 128,
+                      .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}}).block_n0 == 128);
+static_assert(makeSpec(
+    FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16,
+                      .hdim_q = 256, .hdim_v = 256,
+                      .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}}).block_n0 == 64);
 // clang-format on
 
 } // namespace rocm_ck
