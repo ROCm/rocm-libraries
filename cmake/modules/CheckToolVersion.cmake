@@ -4,11 +4,15 @@
 # Shared helpers for finding and version-checking LLVM/Clang tools.
 # Generalized from dnn-providers/cmake/CheckToolVersion.cmake.
 
-set(EXPECTED_CLANG_FORMAT_VERSION "18")
+if(NOT EXPECTED_CLANG_FORMAT_VERSION)
+    set(EXPECTED_CLANG_FORMAT_VERSION "18")
+endif()
 if(NOT EXPECTED_CLANG_TIDY_VERSION)
     set(EXPECTED_CLANG_TIDY_VERSION "20")
 endif()
-set(EXPECTED_LLVM_VERSION "20")
+if(NOT EXPECTED_LLVM_VERSION)
+    set(EXPECTED_LLVM_VERSION "20")
+endif()
 
 # Build a list of versioned tool search paths from a base directory.
 function(get_versioned_search_paths OUTPUT_VAR BASE_PATH VERSION)

@@ -2,11 +2,15 @@
 # SPDX-License-Identifier:  MIT
 
 # Expected tool versions
-set(EXPECTED_CLANG_FORMAT_VERSION "18")
+if(NOT EXPECTED_CLANG_FORMAT_VERSION)
+    set(EXPECTED_CLANG_FORMAT_VERSION "18")
+endif()
 if(NOT EXPECTED_CLANG_TIDY_VERSION)
     set(EXPECTED_CLANG_TIDY_VERSION "20")
 endif()
-set(EXPECTED_LLVM_VERSION "20")
+if(NOT EXPECTED_LLVM_VERSION)
+    set(EXPECTED_LLVM_VERSION "20")
+endif()
 
 # Helper function to generate version-specific search paths hints by concatenating the base path
 # with a list of versioned path names.
