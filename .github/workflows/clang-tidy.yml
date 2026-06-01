@@ -77,7 +77,7 @@ jobs:
           LIBS+=($(jq -cn '{
             name:           "miopen",
             path_filters:   [
-              "projects/miopen/**/*.[ch]p?p?",
+              "projects/miopen/**/*.{c,h,cpp,hpp,cxx,hxx}",
               "projects/miopen/cmake/ClangTidy.cmake",
               "projects/miopen/.clang-tidy"
             ],
