@@ -52,8 +52,8 @@ public:
 /// Recursively scan a directory for bundle JSON files.
 /// Returns sorted paths. Excludes meta.json. Returns empty vector on error or
 /// if no bundles are found.
-inline std::vector<std::filesystem::path> scanBundleJsonFiles(
-    const std::filesystem::path& directory)
+inline std::vector<std::filesystem::path>
+    scanBundleJsonFiles(const std::filesystem::path& directory)
 {
     std::vector<std::filesystem::path> paths;
     try
