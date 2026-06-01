@@ -127,7 +127,11 @@ namespace
                                      "--incy",
                                      incy,
                                      "--batch_count",
-                                     batch_count);
+                                     batch_count,
+                                     "--alpha_stride",
+                                     handle->get_stride_alpha(),
+                                     "--beta_stride",
+                                     handle->get_stride_beta());
                 }
                 else
                 {
@@ -149,7 +153,11 @@ namespace
                                      "--incy",
                                      incy,
                                      "--batch_count",
-                                     batch_count);
+                                     batch_count,
+                                     "--alpha_stride",
+                                     handle->get_stride_alpha(),
+                                     "--beta_stride",
+                                     handle->get_stride_beta());
                 }
             }
 

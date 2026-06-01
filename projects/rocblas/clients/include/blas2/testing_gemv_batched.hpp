@@ -364,8 +364,8 @@ void testing_gemv_batched(const Arguments& arg)
     rocblas_init_vector(hx, arg, rocblas_client_alpha_sets_nan, false, true);
     rocblas_init_vector(hy, arg, rocblas_client_beta_sets_nan);
 
-    rocblas_init_vector_alternating_zero(halpha, h_alpha);
-    rocblas_init_vector_alternating_zero(hbeta, h_beta);
+    rocblas_init_vector_alternating_sign(halpha, h_alpha);
+    rocblas_init_vector_alternating_sign(hbeta, h_beta);
 
     hy_gold.copy_from(hy);
 
@@ -548,6 +548,18 @@ void testing_gemv_batched(const Arguments& arg)
 
         CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host));
 
+        Tex* alpha = &h_alpha;
+        Tex* beta  = &h_beta;
+        if(arg.alpha_beta_stride)
+        {
+            CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device));
+            CHECK_HIP_ERROR(d_alpha.transfer_from(halpha));
+            CHECK_HIP_ERROR(d_beta.transfer_from(hbeta));
+            alpha = d_alpha;
+            beta  = d_beta;
+            handle.pre_test(arg);
+        }
+
         hipStream_t stream;
         CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
 
@@ -561,18 +573,23 @@ void testing_gemv_batched(const Arguments& arg)
                            transA,
                            M,
                            N,
-                           &h_alpha,
+                           alpha,
                            dA.ptr_on_device(),
                            lda,
                            dx.ptr_on_device(),
                            incx,
-                           &h_beta,
+                           beta,
                            dy.ptr_on_device(),
                            incy,
                            batch_count));
         }
 
         gpu_time_used = get_time_us_sync(stream) - gpu_time_used;
+
+        if(arg.alpha_beta_stride)
+        {
+            handle.post_test(arg);
+        }
 
         ArgumentModel<e_transA, e_M, e_N, e_alpha, e_lda, e_incx, e_beta, e_incy, e_batch_count>{}
             .log_args<Tex>(rocblas_cout,
