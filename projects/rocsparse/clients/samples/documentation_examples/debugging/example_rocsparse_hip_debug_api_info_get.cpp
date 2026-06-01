@@ -58,11 +58,11 @@ int main()
 
     float *        dx, *dy;
     rocsparse_int* dx_ind;
-    hipMalloc((void**)&dx, sizeof(float));
-    hipMalloc((void**)&dy, sizeof(float));
-    hipMalloc((void**)&dx_ind, sizeof(rocsparse_int));
-    hipMemset(dx, 0, sizeof(float));
-    hipMemset(dx_ind, 0, sizeof(rocsparse_int));
+    HIP_CHECK(hipMalloc((void**)&dx, sizeof(float)));
+    HIP_CHECK(hipMalloc((void**)&dy, sizeof(float)));
+    HIP_CHECK(hipMalloc((void**)&dx_ind, sizeof(rocsparse_int)));
+    HIP_CHECK(hipMemset(dx, 0, sizeof(float)));
+    HIP_CHECK(hipMemset(dx_ind, 0, sizeof(rocsparse_int)));
 
     ROCSPARSE_CHECK(rocsparse_hip_debug_start(handle, p_error));
     ROCSPARSE_CHECK(rocsparse_sgthr(handle, 1, dy, dx, dx_ind, rocsparse_index_base_zero));
