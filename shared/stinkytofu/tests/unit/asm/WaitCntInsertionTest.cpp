@@ -207,23 +207,29 @@ class WaitCntInsertionTest : public ::testing::Test {
 // Tests that barriers do NOT trigger waitcnts when there are no def-use
 // dependencies through the barrier (StinkyWaitCntInsertionPass uses
 // def-use chain analysis, not config-based barrier policies).
+//
+// MemTokenData is intentionally attached with disjoint token IDs so that
+// the conservative-fallback drain (which fires when either the barrier or
+// a pending DS op lacks MemTokenData) does not trigger; that fallback is
+// covered separately by the ConservativeFallback_* tests in Test Suite 6.
 // ============================================================================
 
 /**
  * @brief ds_load with no consumer followed by barrier -> no waitcnt.
  *
  * IR:
- *   ds_load_b64 v[0:1], v10
- *   s_barrier
+ *   ds_load_b64 v[0:1], v10     tokens=[100]
+ *   s_barrier                    tokens=[200]
  *
  * The ds_load result v[0:1] is never consumed, so the pass inserts no waitcnt.
+ * Tokens are disjoint so the barrier-vs-DS conflict path stays silent.
  */
 TEST_F(WaitCntInsertionTest, BarrierWithDSRead) {
     std::string irString = R"(
 st.func @test_barrier_ds_read() {
 ^entry:
-  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52 }
-  "st.s_barrier"() { issueCycles = 1, latencyCycles = 1 }
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.memtoken = { tokens = [100] } }
+  "st.s_barrier"() { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [200] } }
 }
 )";
 
@@ -242,20 +248,21 @@ st.func @test_barrier_ds_read() {
  * @brief tensor_load + ds_load with no consumer followed by barrier -> no waitcnt.
  *
  * IR:
- *   tensor_load_to_lds s[0:3], s[10:17]
- *   ds_load_b64 v[0:1], v10
- *   s_barrier
+ *   tensor_load_to_lds s[0:3], s[10:17]   tokens=[100]
+ *   ds_load_b64 v[0:1], v10                tokens=[200]
+ *   s_barrier                               tokens=[300]
  *
  * Neither the tensor_load nor the ds_load results are consumed by any
- * subsequent instruction, so no waitcnts are inserted.
+ * subsequent instruction. Tokens are disjoint so neither the DS-barrier
+ * conflict path nor the tensor-barrier matching path fires.
  */
 TEST_F(WaitCntInsertionTest, BarrierWithDSReadTensorLoad) {
     std::string irString = R"(
 st.func @test_barrier_tensor_ds() {
 ^entry:
-  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { issueCycles = 1, latencyCycles = 1 }
-  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52 }
-  "st.s_barrier"() { issueCycles = 1, latencyCycles = 1 }
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [100] } }
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.memtoken = { tokens = [200] } }
+  "st.s_barrier"() { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [300] } }
 }
 )";
 
@@ -268,7 +275,7 @@ st.func @test_barrier_tensor_ds() {
     BasicBlock& entryBB = *func->begin();
     EXPECT_EQ(countWaitCnt(entryBB), 0) << "No consumer of ds_load/tensor_load, no waitcnt needed";
     EXPECT_EQ(countTensorWaitCnt(entryBB), 0)
-        << "No MemTokenData on tensor_load/barrier, no tensor waitcnt";
+        << "Disjoint tokens on tensor_load/barrier, no tensor waitcnt";
 }
 
 // ============================================================================
@@ -379,26 +386,29 @@ st.func @test_ds_read_wmma() {
  *   No waitcnt before barriers (no MemTokenData, no def-use dependency)
  */
 TEST_F(WaitCntInsertionTest, CompleteTest) {
+    // Disjoint tokens per phase so neither the barrier-vs-DS conflict path nor
+    // the WAR-on-LDS path fires; this isolates the test to the def-use-driven
+    // DS wait insertion before each WMMA consumer.
     std::string irString = R"(
 st.func @test_complete() {
 ^entry:
-  v[0:3] = "st.ds_load_b128"(v40) { issueCycles = 1, latencyCycles = 56 }
-  v[4:7] = "st.ds_load_b128"(v40) { issueCycles = 1, latencyCycles = 56 }
-  v[8:11] = "st.ds_load_b128"(v40) { issueCycles = 1, latencyCycles = 56 }
-  v[12:15] = "st.ds_load_b128"(v40) { issueCycles = 1, latencyCycles = 56 }
-  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { issueCycles = 1, latencyCycles = 1 }
-  v[16:19] = "st.ds_load_b128"(v40) { issueCycles = 1, latencyCycles = 56 }
-  v[20:23] = "st.ds_load_b128"(v40) { issueCycles = 1, latencyCycles = 56 }
-  v[24:27] = "st.ds_load_b128"(v40) { issueCycles = 1, latencyCycles = 56 }
-  v[28:31] = "st.ds_load_b128"(v40) { issueCycles = 1, latencyCycles = 56 }
+  v[0:3] = "st.ds_load_b128"(v40) { issueCycles = 1, latencyCycles = 56, mod.memtoken = { tokens = [100] } }
+  v[4:7] = "st.ds_load_b128"(v40) { issueCycles = 1, latencyCycles = 56, mod.memtoken = { tokens = [100] } }
+  v[8:11] = "st.ds_load_b128"(v40) { issueCycles = 1, latencyCycles = 56, mod.memtoken = { tokens = [100] } }
+  v[12:15] = "st.ds_load_b128"(v40) { issueCycles = 1, latencyCycles = 56, mod.memtoken = { tokens = [100] } }
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [200] } }
+  v[16:19] = "st.ds_load_b128"(v40) { issueCycles = 1, latencyCycles = 56, mod.memtoken = { tokens = [300] } }
+  v[20:23] = "st.ds_load_b128"(v40) { issueCycles = 1, latencyCycles = 56, mod.memtoken = { tokens = [300] } }
+  v[24:27] = "st.ds_load_b128"(v40) { issueCycles = 1, latencyCycles = 56, mod.memtoken = { tokens = [300] } }
+  v[28:31] = "st.ds_load_b128"(v40) { issueCycles = 1, latencyCycles = 56, mod.memtoken = { tokens = [300] } }
   a[50:57] = "st.v_wmma_f32_16x16x32_bf16"(v[0:7], v[8:15], a[50:57]) { issueCycles = 4, latencyCycles = 8 }
-  "st.s_barrier"() { issueCycles = 1, latencyCycles = 1 }
-  v[0:3] = "st.ds_load_b128"(v40) { issueCycles = 1, latencyCycles = 56 }
-  v[4:7] = "st.ds_load_b128"(v40) { issueCycles = 1, latencyCycles = 56 }
-  v[8:11] = "st.ds_load_b128"(v40) { issueCycles = 1, latencyCycles = 56 }
-  v[12:15] = "st.ds_load_b128"(v40) { issueCycles = 1, latencyCycles = 56 }
+  "st.s_barrier"() { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [400] } }
+  v[0:3] = "st.ds_load_b128"(v40) { issueCycles = 1, latencyCycles = 56, mod.memtoken = { tokens = [500] } }
+  v[4:7] = "st.ds_load_b128"(v40) { issueCycles = 1, latencyCycles = 56, mod.memtoken = { tokens = [500] } }
+  v[8:11] = "st.ds_load_b128"(v40) { issueCycles = 1, latencyCycles = 56, mod.memtoken = { tokens = [500] } }
+  v[12:15] = "st.ds_load_b128"(v40) { issueCycles = 1, latencyCycles = 56, mod.memtoken = { tokens = [500] } }
   a[50:57] = "st.v_wmma_f32_16x16x32_bf16"(v[16:23], v[24:31], a[50:57]) { issueCycles = 4, latencyCycles = 8 }
-  "st.s_barrier"() { issueCycles = 1, latencyCycles = 1 }
+  "st.s_barrier"() { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [600] } }
 }
 )";
 
@@ -957,4 +967,480 @@ st.func @test_multi_pred2() {
         << "Should insert waitcnt before fmac2 in block4 (uses v0,v1)";
     EXPECT_EQ(waitBeforeFmac2->dlcnt, 1)
         << "Per-path analysis: Path1 needs dlcnt=1, Path2 needs none -> min=1";
+}
+
+// ============================================================================
+// Test Suite 5: LDS Write-After-Read Hazard
+//
+// Tests that an LDS writer (tensor_load_to_lds / ds_store) carrying
+// MemTokenData triggers a synthesized WAR dependency against any prior
+// DS read whose tokens overlap. The SSA def-use chain does not encode
+// these hazards; the pass detects them via the in-flight DS-read queue
+// and the writer's MemTokenData modifier.
+//
+// collectLdsWarDependencies applies a per-pair same-pipeline filter
+// (isOnSameDSPipeline): if the writer and a candidate reader share the same
+// hardware memory pipeline, the pair is dropped because FIFO retirement on
+// the shared counter already orders them. In practice this means a ds_store
+// writer skips prior ds_load / ds_atomic readers (both on dlcnt), while
+// tensor_load_to_lds (on tlcnt) still synthesizes WAR against DS readers.
+// ============================================================================
+
+/**
+ * @brief Token-overlapping ds_loads followed by tensor_load_to_lds -> drain all.
+ *
+ * IR (single block):
+ *   v[0:1] = ds_load_b64 v10  tokens=[0]    (read 0)
+ *   v[2:3] = ds_load_b64 v10  tokens=[0]    (read 1)
+ *   v[4:5] = ds_load_b64 v10  tokens=[0]    (read 2)
+ *   v[6:7] = ds_load_b64 v10  tokens=[0]    (read 3)
+ *   tensor_load_to_lds        tokens=[0]    (LDS writer)
+ *
+ * All four reads overlap with the writer's token. tensor_load_to_lds is not
+ * a DS op (it lives on tlcnt), so the queue at the writer is exactly the
+ * four reads. The youngest conflicting read sits at position 1 from end, so
+ * the algorithm picks min(count - 1) = 0 and emits s_wait_dscnt 0.
+ */
+TEST_F(WaitCntInsertionTest, LdsWarBeforeTensorLoad) {
+    std::string irString = R"(
+st.func @test_lds_war_tensor_load() {
+^entry:
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[2:3] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[4:5] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[6:7] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 48, gds = false }, mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+}
+)";
+
+    StinkyIRConverter converter(getArch());
+    auto* func = parseIR(irString, converter);
+    ASSERT_NE(func, nullptr);
+
+    runInsertionPass(*func);
+
+    BasicBlock& entryBB = *func->begin();
+    StinkyInstruction* tensorLoad = findNthInst(entryBB, GFX::tensor_load_to_lds, 0);
+    ASSERT_NE(tensorLoad, nullptr);
+
+    SWaitCntData* waitBeforeWriter = findWaitCntBefore(entryBB, tensorLoad);
+    ASSERT_NE(waitBeforeWriter, nullptr)
+        << "Pass must insert s_wait_dscnt before tensor_load_to_lds (WAR-on-LDS)";
+    EXPECT_EQ(waitBeforeWriter->dlcnt, 0)
+        << "All four token-0 ds_loads must drain before the LDS writer -> dlcnt=0";
+    EXPECT_EQ(waitBeforeWriter->vlcnt, -1);
+    EXPECT_EQ(waitBeforeWriter->vscnt, -1);
+    EXPECT_EQ(waitBeforeWriter->dscnt, -1);
+    EXPECT_EQ(waitBeforeWriter->kmcnt, -1);
+
+    EXPECT_EQ(countWaitCnt(entryBB), 1)
+        << "Exactly one waitcnt should be inserted (before tensor_load_to_lds)";
+    EXPECT_EQ(countTensorWaitCnt(entryBB), 0);
+}
+
+/**
+ * @brief Mixed-token ds_loads -> only token-overlapping reads form the WAR set.
+ *
+ * IR (single block):
+ *   v[0:1] = ds_load_b64 v10  tokens=[0]    (read 0, conflict)
+ *   v[2:3] = ds_load_b64 v10  tokens=[0]    (read 1, conflict)
+ *   v[4:5] = ds_load_b64 v10  tokens=[1]    (read 2, NOT a conflict)
+ *   v[6:7] = ds_load_b64 v10  tokens=[1]    (read 3, NOT a conflict)
+ *   tensor_load_to_lds        tokens=[0]    (LDS writer)
+ *
+ * Queue at writer: [r0, r1, r2, r3]. WAR set picks {r0, r1} only.
+ * pendingDSCountFrom(r1) = 3, so wait = 3 - 1 = 2: drain r0, r1; leave r2, r3.
+ */
+TEST_F(WaitCntInsertionTest, LdsWarMixedTokens) {
+    std::string irString = R"(
+st.func @test_lds_war_mixed_tokens() {
+^entry:
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[2:3] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[4:5] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [1] } }
+  v[6:7] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 48, gds = false }, mod.memtoken = { tokens = [1] } }
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+}
+)";
+
+    StinkyIRConverter converter(getArch());
+    auto* func = parseIR(irString, converter);
+    ASSERT_NE(func, nullptr);
+
+    runInsertionPass(*func);
+
+    BasicBlock& entryBB = *func->begin();
+    StinkyInstruction* tensorLoad = findNthInst(entryBB, GFX::tensor_load_to_lds, 0);
+    ASSERT_NE(tensorLoad, nullptr);
+
+    SWaitCntData* waitBeforeWriter = findWaitCntBefore(entryBB, tensorLoad);
+    ASSERT_NE(waitBeforeWriter, nullptr)
+        << "Pass must insert s_wait_dscnt before tensor_load_to_lds";
+    EXPECT_EQ(waitBeforeWriter->dlcnt, 2)
+        << "Drain 2 token-0 reads, leave 2 token-1 reads outstanding -> dlcnt=2";
+    EXPECT_EQ(waitBeforeWriter->vlcnt, -1);
+    EXPECT_EQ(waitBeforeWriter->vscnt, -1);
+    EXPECT_EQ(waitBeforeWriter->dscnt, -1);
+    EXPECT_EQ(waitBeforeWriter->kmcnt, -1);
+
+    EXPECT_EQ(countWaitCnt(entryBB), 1);
+    EXPECT_EQ(countTensorWaitCnt(entryBB), 0);
+}
+
+/**
+ * @brief Disjoint tokens -> no WAR wait inserted.
+ *
+ * IR (single block):
+ *   v[0:1] = ds_load_b64 v10  tokens=[1]
+ *   v[2:3] = ds_load_b64 v10  tokens=[1]
+ *   tensor_load_to_lds        tokens=[0]
+ *
+ * No reads share a token with the writer, so the WAR set is empty and
+ * memOpDependencies stays empty. The pass should not insert any waitcnt.
+ */
+TEST_F(WaitCntInsertionTest, LdsWarDisjointTokens) {
+    std::string irString = R"(
+st.func @test_lds_war_disjoint_tokens() {
+^entry:
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [1] } }
+  v[2:3] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [1] } }
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+}
+)";
+
+    StinkyIRConverter converter(getArch());
+    auto* func = parseIR(irString, converter);
+    ASSERT_NE(func, nullptr);
+
+    runInsertionPass(*func);
+
+    BasicBlock& entryBB = *func->begin();
+    EXPECT_EQ(countWaitCnt(entryBB), 0)
+        << "No token overlap with the writer -> no WAR wait should be emitted";
+    EXPECT_EQ(countTensorWaitCnt(entryBB), 0);
+}
+
+/**
+ * @brief Same-pipeline filter: ds_store with token-overlapping prior reads
+ *        emits NO synthetic WAR wait.
+ *
+ * IR (single block):
+ *   v[0:1] = ds_load_b64 v10           tokens=[0]
+ *   v[2:3] = ds_load_b64 v10           tokens=[0]
+ *   v[4:5] = ds_load_b64 v10           tokens=[0]
+ *   ds_store_b64 v100, v[20:21]        tokens=[0]    (LDS writer, same DS pipe)
+ *
+ * collectLdsWarDependencies runs the per-pair isOnSameDSPipeline filter:
+ * writer (ds_store) and each candidate reader (ds_load) are both DS memory
+ * ops, so every (writer, reader) pair is dropped from the WAR set. The
+ * hardware retires them FIFO on dlcnt, so no synthetic s_wait_dscnt is
+ * required. The data operand v[20:21] is independent of the prior reads,
+ * so there is also no RAW dependency to emit.
+ */
+TEST_F(WaitCntInsertionTest, DsStoreWithPriorDsLoadsNoExplicitWar) {
+    std::string irString = R"(
+st.func @test_ds_store_no_war() {
+^entry:
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[2:3] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[4:5] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [0] } }
+  "st.ds_store_b64"(v100, v[20:21]) { issueCycles = 1, latencyCycles = 1, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+}
+)";
+
+    StinkyIRConverter converter(getArch());
+    auto* func = parseIR(irString, converter);
+    ASSERT_NE(func, nullptr);
+
+    runInsertionPass(*func);
+
+    BasicBlock& entryBB = *func->begin();
+    StinkyInstruction* dsStore = findNthInst(entryBB, GFX::ds_store_b64, 0);
+    ASSERT_NE(dsStore, nullptr);
+
+    SWaitCntData* waitBeforeWriter = findWaitCntBefore(entryBB, dsStore);
+    EXPECT_EQ(waitBeforeWriter, nullptr)
+        << "isOnSameDSPipeline filters every (ds_store, ds_load) pair out of the "
+           "WAR set; hardware FIFO on dlcnt already enforces ordering, so no "
+           "synthetic s_wait_dscnt should be emitted";
+
+    EXPECT_EQ(countWaitCnt(entryBB), 0);
+    EXPECT_EQ(countTensorWaitCnt(entryBB), 0);
+}
+
+/**
+ * @brief ds_store with a regular RAW DS dep -> wait drains the producer.
+ *
+ * IR (single block):
+ *   v[0:1] = ds_load_b64 v10
+ *   ds_store_b64 v100, v[0:1]   (data sourced from the prior ds_load via def-use)
+ *
+ * Locks in the side-benefit of deferring DS recording: ds_store is itself a DS
+ * op, but its wait should still drain the prior ds_load that produced v[0:1].
+ * With the recording deferral, pendingDSCountFrom(ds_load) = 1 at wait time, so
+ * the algorithm emits s_wait_dscnt 0 (was 1 before the fix).
+ */
+TEST_F(WaitCntInsertionTest, DsStoreWithRawDsLoadDep) {
+    std::string irString = R"(
+st.func @test_ds_store_raw_ds_load() {
+^entry:
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  "st.ds_store_b64"(v100, v[0:1]) { issueCycles = 1, latencyCycles = 1, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+)";
+
+    StinkyIRConverter converter(getArch());
+    auto* func = parseIR(irString, converter);
+    ASSERT_NE(func, nullptr);
+
+    runInsertionPass(*func);
+
+    BasicBlock& entryBB = *func->begin();
+    StinkyInstruction* dsStore = findNthInst(entryBB, GFX::ds_store_b64, 0);
+    ASSERT_NE(dsStore, nullptr);
+
+    SWaitCntData* waitBeforeWriter = findWaitCntBefore(entryBB, dsStore);
+    ASSERT_NE(waitBeforeWriter, nullptr)
+        << "Pass must insert s_wait_dscnt before ds_store that consumes ds_load data";
+    EXPECT_EQ(waitBeforeWriter->dlcnt, 0)
+        << "Recording deferral: queue at wait time = [ds_load]; count-1 = 0";
+    EXPECT_EQ(waitBeforeWriter->vlcnt, -1);
+    EXPECT_EQ(waitBeforeWriter->vscnt, -1);
+    EXPECT_EQ(waitBeforeWriter->dscnt, -1);
+    EXPECT_EQ(waitBeforeWriter->kmcnt, -1);
+
+    EXPECT_EQ(countWaitCnt(entryBB), 1);
+}
+
+// ============================================================================
+// Test Suite 6: Conservative Fallback for Missing MemTokenData
+//
+// The pass uses MemTokenData for three LDS-related decisions: barrier-vs-DS
+// conflict, WAR-on-LDS synthesis, and tensor-load/barrier matching. When the
+// upstream StinkyBuildImplicitDependencyPass is configured to skip token
+// annotation (e.g. unrollMovableBarrier=false) or any specific op is missing
+// MemTokenData, a hybrid conservative policy fires:
+//
+//   * Anchor missing tokens (writer / barrier) -> full drain on the relevant
+//     counter (s_wait_dscnt 0 or s_wait_tensorcnt 0).
+//   * Candidate missing tokens (reader / pending DS op / pending tensor load)
+//     -> widen the dep set; normal min(count-1) algorithm picks the value.
+//
+// These tests exercise each branch in isolation.
+// ============================================================================
+
+/**
+ * @brief LDS writer (tensor_load_to_lds) without MemTokenData triggers
+ *        s_wait_dscnt 0 before issue.
+ *
+ * IR (single block):
+ *   v[0:1] = ds_load_b64 v10   tokens=[0]    (read 0)
+ *   v[2:3] = ds_load_b64 v10   tokens=[0]    (read 1)
+ *   tensor_load_to_lds                        (LDS writer, NO MemTokenData)
+ *
+ * Writer-anchor-missing-tokens branch of collectLdsWarDependencies:
+ * forceDsDrain becomes true because there are non-same-pipeline DS read
+ * candidates pending; computeRequiredWaits emits s_wait_dscnt 0 and clears
+ * the DS state before the tensor_load_to_lds issues.
+ */
+TEST_F(WaitCntInsertionTest, ConservativeFallback_WarOnLds_WriterMissingTokens_ForcesDscntZero) {
+    std::string irString = R"(
+st.func @test_war_writer_missing_tokens() {
+^entry:
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[2:3] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { issueCycles = 1, latencyCycles = 1 }
+}
+)";
+
+    StinkyIRConverter converter(getArch());
+    auto* func = parseIR(irString, converter);
+    ASSERT_NE(func, nullptr);
+
+    runInsertionPass(*func);
+
+    BasicBlock& entryBB = *func->begin();
+    StinkyInstruction* tensorLoad = findNthInst(entryBB, GFX::tensor_load_to_lds, 0);
+    ASSERT_NE(tensorLoad, nullptr);
+
+    SWaitCntData* waitBeforeWriter = findWaitCntBefore(entryBB, tensorLoad);
+    ASSERT_NE(waitBeforeWriter, nullptr)
+        << "Writer without MemTokenData must conservatively drain DS counter";
+    EXPECT_EQ(waitBeforeWriter->dlcnt, 0)
+        << "Conservative drain emits s_wait_dscnt 0 because token disjointness "
+           "cannot be proven";
+    EXPECT_EQ(waitBeforeWriter->vlcnt, -1);
+    EXPECT_EQ(waitBeforeWriter->vscnt, -1);
+    EXPECT_EQ(waitBeforeWriter->dscnt, -1);
+    EXPECT_EQ(waitBeforeWriter->kmcnt, -1);
+
+    EXPECT_EQ(countWaitCnt(entryBB), 1);
+    EXPECT_EQ(countTensorWaitCnt(entryBB), 0);
+}
+
+/**
+ * @brief Same-pipeline filter still applies when the writer is a ds_store
+ *        without MemTokenData: no conservative wait is emitted because the
+ *        hardware FIFO already orders the pair.
+ *
+ * IR (single block):
+ *   v[0:1] = ds_load_b64 v10   tokens=[0]
+ *   v[2:3] = ds_load_b64 v10   tokens=[0]
+ *   ds_store_b64 v100, v[20:21]                 (LDS writer, NO MemTokenData)
+ *
+ * collectLdsWarDependencies: writerLacksTokens is true, but the candidate
+ * isOnSameDSPipeline check filters every ds_load out. anyCandidate stays
+ * false, forceDsDrain stays false, no conservative wait is emitted. The
+ * data operand v[20:21] is independent of the prior reads, so the SSA path
+ * also yields no wait.
+ */
+TEST_F(WaitCntInsertionTest,
+       ConservativeFallback_WarOnLds_DsStoreMissingTokens_SamePipelineSkipsDrain) {
+    std::string irString = R"(
+st.func @test_war_ds_store_missing_tokens_same_pipeline() {
+^entry:
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[2:3] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] } }
+  "st.ds_store_b64"(v100, v[20:21]) { issueCycles = 1, latencyCycles = 1, mod.ds = { na = 1, offset = 0, gds = false } }
+}
+)";
+
+    StinkyIRConverter converter(getArch());
+    auto* func = parseIR(irString, converter);
+    ASSERT_NE(func, nullptr);
+
+    runInsertionPass(*func);
+
+    BasicBlock& entryBB = *func->begin();
+    StinkyInstruction* dsStore = findNthInst(entryBB, GFX::ds_store_b64, 0);
+    ASSERT_NE(dsStore, nullptr);
+
+    SWaitCntData* waitBeforeWriter = findWaitCntBefore(entryBB, dsStore);
+    EXPECT_EQ(waitBeforeWriter, nullptr)
+        << "Same-pipeline (ds_store + ds_load) pairs are FIFO-ordered by hardware; "
+           "no conservative drain should fire even when the writer lacks tokens";
+
+    EXPECT_EQ(countWaitCnt(entryBB), 0);
+}
+
+/**
+ * @brief Candidate-missing-tokens widening: writer carries MemTokenData but
+ *        a prior ds_load does not. The reader is treated as conflicting and
+ *        the normal min(count-1) algorithm computes the wait value.
+ *
+ * IR (single block):
+ *   v[0:1] = ds_load_b64 v10   tokens=[0]      (read 0)
+ *   v[2:3] = ds_load_b64 v10   (NO MemTokenData) (read 1)
+ *   v[4:5] = ds_load_b64 v10   tokens=[0]      (read 2)
+ *   tensor_load_to_lds         tokens=[0]      (LDS writer)
+ *
+ * Queue at writer: [r0, r1, r2]. r0 overlaps; r1 lacks tokens so is widened
+ * in; r2 overlaps. All three become conflicting. The youngest is r2 at
+ * position 1 from end -> wait = 1 - 1 = 0. Emit s_wait_dscnt 0.
+ */
+TEST_F(WaitCntInsertionTest, ConservativeFallback_WarOnLds_CandidateMissingTokens_WidensDepSet) {
+    std::string irString = R"(
+st.func @test_war_candidate_missing_tokens() {
+^entry:
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[2:3] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 16, gds = false } }
+  v[4:5] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+}
+)";
+
+    StinkyIRConverter converter(getArch());
+    auto* func = parseIR(irString, converter);
+    ASSERT_NE(func, nullptr);
+
+    runInsertionPass(*func);
+
+    BasicBlock& entryBB = *func->begin();
+    StinkyInstruction* tensorLoad = findNthInst(entryBB, GFX::tensor_load_to_lds, 0);
+    ASSERT_NE(tensorLoad, nullptr);
+
+    SWaitCntData* waitBeforeWriter = findWaitCntBefore(entryBB, tensorLoad);
+    ASSERT_NE(waitBeforeWriter, nullptr)
+        << "Untagged reader must be conservatively widened into the WAR set";
+    EXPECT_EQ(waitBeforeWriter->dlcnt, 0)
+        << "Youngest conflicting read is r2 at position 1; wait = 1 - 1 = 0";
+
+    EXPECT_EQ(countWaitCnt(entryBB), 1);
+}
+
+/**
+ * @brief Barrier path conservative fallback: an untagged pending DS op forces
+ *        a drain even when the barrier itself carries MemTokenData and no
+ *        token overlap exists with activeDSTokens.
+ *
+ * IR (single block):
+ *   v[0:1] = ds_load_b64 v10   (NO MemTokenData)   (untagged candidate)
+ *   s_barrier                   tokens=[42]
+ *
+ * PendingMemOpTracker::hasUntaggedDSOp() returns true at the barrier;
+ * needsDrain becomes true; emit s_wait_dscnt 0.
+ */
+TEST_F(WaitCntInsertionTest, ConservativeFallback_Barrier_UntaggedPendingDSOp_ForcesDscntZero) {
+    std::string irString = R"(
+st.func @test_barrier_candidate_missing_tokens() {
+^entry:
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false } }
+  "st.s_barrier"() { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [42] } }
+}
+)";
+
+    StinkyIRConverter converter(getArch());
+    auto* func = parseIR(irString, converter);
+    ASSERT_NE(func, nullptr);
+
+    runInsertionPass(*func);
+
+    BasicBlock& entryBB = *func->begin();
+    StinkyInstruction* barrier = findNthInst(entryBB, GFX::s_barrier, 0);
+    ASSERT_NE(barrier, nullptr);
+
+    SWaitCntData* waitBeforeBarrier = findWaitCntBefore(entryBB, barrier);
+    ASSERT_NE(waitBeforeBarrier, nullptr)
+        << "Untagged pending DS op forces a conservative drain on a tagged barrier";
+    EXPECT_EQ(waitBeforeBarrier->dlcnt, 0);
+
+    EXPECT_EQ(countWaitCnt(entryBB), 1);
+}
+
+/**
+ * @brief Barrier path conservative fallback: untagged barrier with a tagged
+ *        pending DS op also forces a drain.
+ *
+ * IR (single block):
+ *   v[0:1] = ds_load_b64 v10   tokens=[7]
+ *   s_barrier                   (NO MemTokenData)
+ *
+ * barrierLacksTokens is true; needsDrain becomes true because pendingDSOps
+ * is non-empty; emit s_wait_dscnt 0.
+ */
+TEST_F(WaitCntInsertionTest, ConservativeFallback_Barrier_AnchorMissingTokens_ForcesDscntZero) {
+    std::string irString = R"(
+st.func @test_barrier_anchor_missing_tokens() {
+^entry:
+  v[0:1] = "st.ds_load_b64"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [7] } }
+  "st.s_barrier"() { issueCycles = 1, latencyCycles = 1 }
+}
+)";
+
+    StinkyIRConverter converter(getArch());
+    auto* func = parseIR(irString, converter);
+    ASSERT_NE(func, nullptr);
+
+    runInsertionPass(*func);
+
+    BasicBlock& entryBB = *func->begin();
+    StinkyInstruction* barrier = findNthInst(entryBB, GFX::s_barrier, 0);
+    ASSERT_NE(barrier, nullptr);
+
+    SWaitCntData* waitBeforeBarrier = findWaitCntBefore(entryBB, barrier);
+    ASSERT_NE(waitBeforeBarrier, nullptr)
+        << "Untagged barrier with pending DS op must conservatively drain";
+    EXPECT_EQ(waitBeforeBarrier->dlcnt, 0);
+
+    EXPECT_EQ(countWaitCnt(entryBB), 1);
 }

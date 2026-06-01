@@ -40,10 +40,13 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/DeadCodeEliminationPassTest.cpp
     unit/asm/DefUseChainTest.cpp
     unit/asm/InsertPhiTest.cpp
+    unit/asm/EstimateAsmCyclesTest.cpp
     unit/asm/RedundantMovEliminationPassTest.cpp
     unit/asm/OptimizationPipelineTest.cpp
     unit/asm/ScopeAdaptorTest.cpp
     unit/asm/PeepholeOptimizationPassTest.cpp
+    unit/asm/AccumulateInstructionSizePassTest.cpp
+    unit/asm/SwPrefetchInsertionPassTest.cpp
     unit/asm/StinkyAsmEmitterTest.cpp
     unit/asm/VirtualRegisterTest.cpp
     # Parser/Lexer Tests (added for critical testing gaps)
@@ -54,6 +57,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/HwInstDescTest.cpp
     unit/asm/ReadWriteOperandTest.cpp
     unit/asm/BarrierTest.cpp
+    unit/asm/LoopRegionRemarkPassTest.cpp
 )
 
 # High-Level IR Tests
@@ -74,6 +78,7 @@ set(UNIT_LOGICAL_TEST_FILES
 set(UNIT_CORE_TEST_FILES
     unit/core/AnalysisManagerTest.cpp
     unit/core/BackendRegistryTest.cpp
+    unit/core/ComgrProbeTest.cpp
 )
 
 # Common/Shared Tests
@@ -95,6 +100,7 @@ set(UNIT_TEST_FILES
 list(TRANSFORM UNIT_TEST_FILES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 
 add_executable(unit_tests ${TEST_MAIN} ${UNIT_TEST_FILES})
+target_link_libraries(unit_tests PRIVATE stinkytofu-warnings)
 target_link_libraries(unit_tests PUBLIC ${TEST_LINK_LIBS})
 target_include_directories(unit_tests PRIVATE ${TEST_INCLUDE_DIRS})
 add_dependencies(unit_tests tablegen_generated)
@@ -122,6 +128,7 @@ add_executable(test_gen_instructions
     ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tablegen/test_gen_instructions.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tablegen/GenInstructions.cpp
 )
+target_link_libraries(test_gen_instructions PRIVATE stinkytofu-warnings)
 
 target_link_libraries(test_gen_instructions PRIVATE gfxisa)
 

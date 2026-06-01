@@ -57,7 +57,7 @@ ActivationParams
     case PM::ELU_FWD:
     case PM::ELU_BWD:
     {
-        double alpha = attrs.elu_alpha() ? static_cast<double>(*attrs.elu_alpha()) : 1.0;
+        const double alpha = attrs.elu_alpha() ? static_cast<double>(*attrs.elu_alpha()) : 1.0;
         return ActivationParams{ActivationMode::ELU, alpha, 0.0, 0.0};
     }
     case PM::SOFTPLUS_FWD:
@@ -122,8 +122,9 @@ bool isChannelLastLayout(const hipdnn_flatbuffers_sdk::data_objects::TensorAttri
     const size_t numDims = dims->size();
 
     // Extract stride order from strides
-    std::vector<int64_t> stridesVec(strides->begin(), strides->end());
-    std::vector<int64_t> strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(stridesVec);
+    const std::vector<int64_t> stridesVec(strides->begin(), strides->end());
+    const std::vector<int64_t> strideOrder
+        = hipdnn_data_sdk::utilities::extractStrideOrder(stridesVec);
 
     // Compare against known layouts
     if(numDims == 4)

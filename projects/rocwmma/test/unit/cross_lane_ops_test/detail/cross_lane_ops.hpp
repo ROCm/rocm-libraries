@@ -83,7 +83,8 @@ namespace rocwmma
                             || deviceArch == Base::DeviceInfo::GFX1153);
 
             bool isGfx12 = (deviceArch == Base::DeviceInfo::GFX1200)
-                           || (deviceArch == Base::DeviceInfo::GFX1201);
+                           || (deviceArch == Base::DeviceInfo::GFX1201)
+                           || (deviceArch == Base::DeviceInfo::GFX1250);
 
             bool dppWaveShiftCheck
                 = !((isGfx11 || isGfx12)
@@ -258,12 +259,12 @@ namespace rocwmma
             // Map GTest params to Kernel params
             using TestParamsT = std::tuple<Ts...>;
             using KernelT     = DppOpsKernel<
-                    std::tuple_element_t<DataT, TestParamsT>, // DataT
-                    std::tuple_element_t<CrossLaneOp, TestParamsT>, // CrossLaneOp
-                    std::tuple_element_t<WriteRowMask, TestParamsT>::value, // WriteRowMask
-                    std::tuple_element_t<WriteBankMask, TestParamsT>::value, // WriteBankMask
-                    std::tuple_element_t<BoundCtrl, TestParamsT>::value // BoundCtrl
-                    >;
+                std::tuple_element_t<DataT, TestParamsT>, // DataT
+                std::tuple_element_t<CrossLaneOp, TestParamsT>, // CrossLaneOp
+                std::tuple_element_t<WriteRowMask, TestParamsT>::value, // WriteRowMask
+                std::tuple_element_t<WriteBankMask, TestParamsT>::value, // WriteBankMask
+                std::tuple_element_t<BoundCtrl, TestParamsT>::value // BoundCtrl
+                >;
 
             return std::make_shared<KernelT>();
         }
