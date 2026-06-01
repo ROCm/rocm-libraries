@@ -128,6 +128,28 @@ def build_matmul_graph(m=4, k=3, n=5):
     return graph, a, b, c
 
 
+def build_pointwise_add_graph(n=16, c=16, h=16, w=16):
+    """Build an elementwise-add pointwise graph returning (graph, a, b, out)."""
+    graph = create_float_graph()
+    graph.set_name("pointwise_add_test")
+
+    a = hipdnn.Tensor.create([n, c, h, w], hipdnn.DataType.FLOAT)
+    a.set_name("a")
+
+    b = hipdnn.Tensor.create([n, c, h, w], hipdnn.DataType.FLOAT)
+    b.set_name("b")
+
+    attrs = hipdnn.PointwiseAttributes()
+    attrs.set_name("pointwise_add_node")
+    attrs.set_mode(hipdnn.PointwiseMode.ADD)
+
+    out = graph.pointwise(a, b, attrs)
+    out.set_name("out")
+    out.set_output(True)
+
+    return graph, a, b, out
+
+
 def build_all_plans(graph, handle=None):
     """Validate, build the operation graph, and create/check/build execution plans.
 

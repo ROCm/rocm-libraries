@@ -6,8 +6,6 @@
 import numpy as np
 import pytest
 
-import hipdnn_frontend as hipdnn
-
 from .helpers import build_all_plans, build_conv_dgrad_graph, execute_graph
 
 
@@ -22,23 +20,6 @@ class TestConvDgrad:
 
         result = graph.validate()
         assert result.is_good(), f"Validation failed: {result.get_message()}"
-
-    def test_operation_graph_builds(self):
-        """Build a conv_dgrad operation graph with backend handle."""
-        graph, dy, weight, dx = build_conv_dgrad_graph()
-
-        result = graph.validate()
-        assert result.is_good(), f"Validation failed: {result.get_message()}"
-
-        handle = hipdnn.create_handle()
-        result = graph.build_operation_graph(handle)
-        assert result.is_good(), f"Build operation graph failed: {result.get_message()}"
-
-    def test_execution_plans_created(self):
-        """Build execution plans for conv_dgrad."""
-        graph, dy, weight, dx = build_conv_dgrad_graph()
-
-        build_all_plans(graph)
 
     def test_execution_produces_nonzero_output(self):
         """Full end-to-end conv_dgrad: execute and verify non-zero output."""
