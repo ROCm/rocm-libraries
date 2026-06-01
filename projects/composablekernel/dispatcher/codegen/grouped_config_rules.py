@@ -23,6 +23,11 @@ Tile data is extracted from:
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
+from tile_math import (
+    get_valid_wave_warp_pairs,
+    get_vec_sizes_for_wave_warp,
+)
+
 # =============================================================================
 # TileVariantContainer — backward-compatible container for mapping dict values
 # =============================================================================
@@ -116,79 +121,49 @@ def get_tiles_for_variant(variant: str) -> List[Tuple[int, int, int]]:
 
 
 # =============================================================================
-# TILE_TO_WAVE_WARP — single source of truth for (wave, warp) pairs per tile
+# TILE_TO_WAVE_WARP — computed from tile_math.get_valid_wave_warp_pairs()
 # =============================================================================
 # Key: (tile_m, tile_n, tile_k)
 # Value: list of ((wave_m, wave_n, wave_k), (warp_tile_m, warp_tile_n, warp_tile_k)) pairs
 #
-# This is the authoritative data structure. TILE_TO_WAVE and TILE_TO_WARP below
-# are backward-compat views derived from this dict (first pair = default).
-#
-# Extracted from JSON profiler configs (nhwgc, all dtypes, all variants).
-#
-TILE_TO_WAVE_WARP: Dict[Tuple[int, int, int], List[Tuple[Tuple, Tuple]]] = {
-    (16, 16, 32):  [((1, 1, 1), (16, 16, 8)),  ((1, 1, 1), (16, 16, 16))],
-    (16, 16, 64):  [((1, 1, 1), (16, 16, 8)),  ((1, 1, 1), (16, 16, 16))],
-    (16, 16, 128): [((1, 1, 1), (16, 16, 8)),  ((1, 1, 1), (16, 16, 16))],
-    (16, 32, 64):  [((1, 2, 1), (16, 16, 8)),  ((1, 2, 1), (16, 16, 16))],
-    (16, 64, 32):  [((1, 1, 1), (16, 16, 8)),  ((1, 1, 1), (16, 16, 16))],
-    (16, 64, 64):  [((1, 2, 1), (16, 16, 8)),  ((1, 2, 1), (16, 16, 16))],
-    (16, 128, 32): [((1, 1, 1), (16, 16, 16))],
-    (16, 128, 64): [((1, 2, 1), (16, 16, 8)),  ((1, 2, 1), (16, 16, 16))],
-    (16, 256, 32): [((1, 1, 1), (16, 16, 16))],
-    (16, 256, 64): [((1, 4, 1), (16, 16, 16))],
-    (32, 16, 64):  [((2, 1, 1), (16, 16, 8)),  ((2, 1, 1), (16, 16, 16))],
-    (32, 32, 32):  [((1, 1, 1), (32, 32, 8))],
-    (32, 64, 16):  [((1, 1, 1), (32, 32, 4))],
-    (32, 64, 32):  [((1, 1, 1), (32, 32, 8))],
-    (32, 64, 64):  [((1, 2, 1), (32, 32, 8))],
-    (32, 128, 16): [((1, 2, 1), (32, 32, 4))],
-    (32, 128, 32): [((1, 1, 1), (32, 32, 8)), ((1, 2, 1), (32, 32, 8))],
-    (32, 128, 64): [((1, 2, 1), (32, 32, 8))],
-    (32, 256, 64): [((1, 4, 1), (32, 32, 8))],
-    (64, 16, 16):  [((1, 1, 1), (16, 16, 4)), ((1, 1, 1), (16, 16, 16)),
-                    ((4, 1, 1), (16, 16, 4)), ((4, 1, 1), (16, 16, 16))],
-    (64, 16, 32):  [((1, 1, 1), (16, 16, 8)), ((1, 1, 1), (16, 16, 16)),
-                    ((4, 1, 1), (16, 16, 8)), ((4, 1, 1), (16, 16, 16))],
-    (64, 16, 64):  [((2, 1, 1), (16, 16, 8)), ((2, 1, 1), (16, 16, 16)),
-                    ((4, 1, 1), (16, 16, 16))],
-    (64, 32, 16):  [((1, 1, 1), (32, 32, 4))],
-    (64, 32, 32):  [((1, 1, 1), (32, 32, 8))],
-    (64, 32, 64):  [((2, 1, 1), (32, 32, 8))],
-    (64, 64, 8):   [((2, 1, 1), (32, 32, 8))],
-    (64, 64, 16):  [((1, 1, 1), (32, 32, 4))],
-    (64, 64, 32):  [((1, 1, 1), (32, 32, 8)), ((2, 2, 1), (16, 16, 8)),
-                    ((2, 2, 1), (16, 16, 16))],
-    (64, 64, 64):  [((2, 2, 1), (16, 16, 16)), ((2, 2, 1), (32, 32, 8))],
-    (64, 128, 16): [((1, 2, 1), (32, 32, 4)), ((2, 2, 1), (32, 32, 4))],
-    (64, 128, 32): [((1, 2, 1), (32, 32, 8)), ((2, 2, 1), (32, 32, 8))],
-    (64, 128, 64): [((2, 2, 1), (32, 32, 8))],
-    (128, 16, 64): [((2, 1, 1), (16, 16, 8)), ((2, 1, 1), (16, 16, 16))],
-    (128, 32, 16): [((2, 1, 1), (32, 32, 4)), ((4, 1, 1), (32, 32, 4)),
-                    ((4, 1, 1), (32, 32, 8))],
-    (128, 32, 32): [((1, 1, 1), (32, 32, 8)), ((2, 1, 1), (32, 32, 8)),
-                    ((2, 1, 2), (32, 32, 8)), ((4, 1, 1), (32, 32, 8))],
-    (128, 32, 64): [((2, 1, 1), (32, 32, 8)), ((4, 1, 1), (32, 32, 16))],
-    (128, 64, 8):  [((2, 1, 1), (32, 32, 8)), ((2, 2, 1), (32, 32, 8))],
-    (128, 64, 16): [((2, 1, 1), (32, 32, 4)), ((2, 2, 1), (32, 32, 4)),
-                    ((2, 2, 1), (32, 32, 8))],
-    (128, 64, 32): [((2, 1, 1), (32, 32, 8)), ((2, 2, 1), (32, 32, 8))],
-    (128, 64, 64): [((2, 2, 1), (32, 32, 8))],
-    (128, 128, 16):[((1, 2, 1), (32, 32, 4)), ((2, 2, 1), (32, 32, 4))],
-    (128, 128, 32):[((1, 2, 1), (32, 32, 8)), ((2, 2, 1), (32, 32, 8))],
-    (128, 128, 64):[((2, 2, 1), (32, 32, 8))],
-    (128, 192, 16):[((2, 2, 1), (32, 32, 4))],
-    (128, 256, 16):[((2, 2, 1), (32, 32, 4))],
-    (128, 256, 32):[((2, 2, 1), (32, 32, 8))],
-    (224, 256, 64):[((2, 2, 1), (16, 16, 16))],
-    (256, 16, 64): [((4, 1, 1), (16, 16, 16))],
-    (256, 32, 64): [((4, 1, 1), (32, 32, 8))],
-    (256, 64, 8):  [((2, 2, 1), (32, 32, 8))],
-    (256, 128, 16):[((2, 2, 1), (32, 32, 4))],
-    (256, 128, 32):[((2, 2, 1), (32, 32, 8))],
-    (256, 224, 64):[((2, 2, 1), (16, 16, 16))],
-    (256, 256, 32):[((2, 2, 1), (16, 16, 16)), ((2, 2, 1), (32, 32, 8))],
-}
+# Built by taking the union of get_valid_wave_warp_pairs() across all supported
+# dtype_keys and all tiles from COMMON_TILES ∪ FWD_TILES ∪ BWD_DATA_TILES ∪ BWD_WEIGHT_TILES.
+# TILE_TO_WAVE and TILE_TO_WARP below are backward-compat views (first pair = default).
+
+_ALL_DTYPE_KEYS = [
+    "bf16_bf16_fp32",
+    "fp16_fp16_fp32",
+    "fp32_fp32_fp32",
+    "fp8_fp8_fp32",
+    "fp8_bf8_fp32",
+    "bf8_fp8_fp32",
+    "bf8_bf8_fp32",
+    "int8_int8_int32",
+]
+
+
+def _build_tile_to_wave_warp() -> Dict[Tuple[int, int, int], List[Tuple[Tuple, Tuple]]]:
+    """Compute TILE_TO_WAVE_WARP from tile_math for all tiles and dtype_keys."""
+    all_tiles = sorted(
+        set(COMMON_TILES) | set(FWD_TILES) | set(BWD_DATA_TILES) | set(BWD_WEIGHT_TILES)
+    )
+    result: Dict[Tuple[int, int, int], List[Tuple[Tuple, Tuple]]] = {}
+    for tile in all_tiles:
+        pairs: list = []
+        seen = set()
+        for dk in _ALL_DTYPE_KEYS:
+            for pair in get_valid_wave_warp_pairs(*tile, dk):
+                if pair not in seen:
+                    seen.add(pair)
+                    pairs.append(pair)
+        if pairs:
+            result[tile] = pairs
+    return result
+
+
+TILE_TO_WAVE_WARP: Dict[Tuple[int, int, int], List[Tuple[Tuple, Tuple]]] = (
+    _build_tile_to_wave_warp()
+)
 
 # Also expose under the old name for any external code that imports it by name.
 TILE_TO_WAVE_WARP_PAIRS = TILE_TO_WAVE_WARP
@@ -220,89 +195,11 @@ TILE_TO_WAVE, TILE_TO_WARP = _build_wave_warp_compat_views()
 
 
 # =============================================================================
-# Vector sizes: full table extracted from JSON profiler configs (nhwgc, all dtypes)
+# Vector sizes: computed from tile_math.get_vec_sizes_for_wave_warp()
 # =============================================================================
-# Key: (tile_m, tile_n, tile_k, warp_tile_k) -> list of (vec_a, vec_b, vec_c)
-# warp_tile_k distinguishes dtype variants:
-#   bf16 warp_tile_k = 8 or 16   (depending on warp_tile shape)
-#   fp32 warp_tile_k = 4 or 8
-#
-# Used by get_vector_sizes_for_tile() for exhaustive generation.
-_TILE_WTILK_TO_VECS: Dict[Tuple[int, int, int, int], List[Tuple[int, int, int]]] = {
-    (16, 16, 32, 8):   [(1, 1, 2)],
-    (16, 16, 32, 16):  [(1, 1, 1), (1, 1, 2)],
-    (16, 16, 64, 8):   [(4, 4, 4)],
-    (16, 16, 64, 16):  [(1, 1, 1), (1, 4, 4), (4, 1, 1), (4, 4, 4), (8, 8, 4)],
-    (16, 16, 128, 8):  [(4, 4, 4)],
-    (16, 16, 128, 16): [(8, 8, 4)],
-    (16, 32, 64, 8):   [(4, 4, 4)],
-    (16, 32, 64, 16):  [(1, 1, 1), (1, 2, 4), (1, 4, 4), (2, 1, 1), (2, 2, 4), (2, 4, 4), (8, 8, 4)],
-    (16, 64, 32, 8):   [(1, 4, 4), (4, 1, 1), (4, 4, 4)],
-    (16, 64, 32, 16):  [(1, 8, 4), (8, 1, 1), (8, 8, 4)],
-    (16, 64, 64, 8):   [(4, 4, 4)],
-    (16, 64, 64, 16):  [(1, 1, 1), (1, 8, 4), (2, 1, 1), (2, 8, 4), (8, 8, 4)],
-    (16, 128, 32, 16): [(4, 4, 1)],
-    (16, 128, 64, 8):  [(4, 4, 4)],
-    (16, 128, 64, 16): [(1, 8, 4), (2, 8, 4), (8, 8, 4)],
-    (16, 256, 32, 16): [(8, 8, 1)],
-    (16, 256, 64, 16): [(1, 8, 4), (2, 8, 4), (8, 8, 4)],
-    (32, 16, 64, 8):   [(4, 4, 2)],
-    (32, 16, 64, 16):  [(1, 1, 1), (1, 2, 2), (2, 1, 1), (2, 2, 2), (4, 1, 1), (4, 2, 2), (8, 8, 2)],
-    (32, 32, 32, 8):   [(2, 2, 1), (2, 2, 2)],
-    (32, 64, 16, 4):   [(1, 4, 4), (4, 4, 4)],
-    (32, 64, 32, 8):   [(1, 1, 8), (2, 2, 1), (2, 8, 8), (4, 4, 1), (4, 4, 2), (4, 4, 4), (8, 8, 8)],
-    (32, 64, 64, 8):   [(4, 4, 8), (8, 8, 8)],
-    (32, 128, 16, 4):  [(4, 4, 4)],
-    (32, 128, 32, 8):  [(1, 1, 8), (4, 4, 4), (8, 8, 1), (8, 8, 2), (8, 8, 8)],
-    (32, 128, 64, 8):  [(4, 4, 8), (8, 8, 8)],
-    (32, 256, 64, 8):  [(8, 8, 8)],
-    (64, 16, 16, 4):   [(4, 1, 1)],
-    (64, 16, 16, 16):  [(4, 1, 1)],
-    (64, 16, 32, 8):   [(1, 4, 4), (4, 1, 1), (4, 4, 4), (8, 1, 1), (8, 2, 2)],
-    (64, 16, 32, 16):  [(1, 8, 4), (8, 1, 1), (8, 2, 2), (8, 8, 4)],
-    (64, 16, 64, 8):   [(4, 4, 2)],
-    (64, 16, 64, 16):  [(1, 1, 1), (1, 2, 2), (8, 1, 1), (8, 2, 2), (8, 8, 2), (16, 1, 1), (16, 2, 2)],
-    (64, 32, 16, 4):   [(4, 4, 1), (4, 4, 4)],
-    (64, 32, 32, 8):   [(1, 1, 8), (4, 4, 1), (4, 4, 2), (4, 4, 4), (8, 8, 1), (8, 8, 8)],
-    (64, 32, 64, 8):   [(4, 4, 4), (8, 8, 4)],
-    (64, 64, 8, 8):    [(1, 1, 8)],
-    (64, 64, 16, 4):   [(1, 1, 1), (4, 4, 4)],
-    (64, 64, 32, 8):   [(1, 1, 1), (1, 1, 8), (1, 2, 1), (2, 1, 2), (2, 2, 2), (4, 4, 4), (8, 8, 8)],
-    (64, 64, 32, 16):  [(1, 2, 1), (2, 1, 2), (4, 4, 4), (8, 8, 8)],
-    (64, 64, 64, 8):   [(1, 1, 1), (1, 4, 4), (2, 2, 2), (4, 1, 1), (4, 4, 4), (8, 8, 4), (8, 8, 8)],
-    (64, 64, 64, 16):  [(2, 2, 4), (4, 1, 1), (8, 8, 2), (8, 8, 8)],
-    (64, 128, 16, 4):  [(4, 4, 4)],
-    (64, 128, 32, 8):  [(1, 1, 8), (1, 4, 4), (1, 8, 8), (4, 4, 4), (8, 8, 8)],
-    (64, 128, 64, 8):  [(8, 8, 8)],
-    (128, 16, 64, 8):  [(4, 4, 2)],
-    (128, 16, 64, 16): [(8, 1, 1), (8, 2, 2), (8, 8, 2)],
-    (128, 32, 16, 4):  [(4, 1, 1), (4, 2, 2), (4, 4, 4)],
-    (128, 32, 16, 8):  [(4, 1, 1), (4, 2, 2)],
-    (128, 32, 32, 8):  [(1, 1, 8), (4, 1, 1), (4, 4, 4), (8, 1, 1), (8, 2, 2), (8, 8, 1), (8, 8, 2), (8, 8, 8)],
-    (128, 32, 64, 8):  [(4, 4, 4), (8, 8, 4)],
-    (128, 32, 64, 16): [(16, 1, 1), (16, 2, 2), (16, 8, 8)],
-    (128, 64, 8, 8):   [(1, 1, 8)],
-    (128, 64, 16, 4):  [(4, 4, 4)],
-    (128, 64, 16, 8):  [(1, 1, 8)],
-    (128, 64, 32, 8):  [(1, 1, 8), (4, 4, 4), (8, 8, 8)],
-    (128, 64, 64, 8):  [(8, 8, 8)],
-    (128, 128, 16, 4): [(1, 1, 4), (4, 4, 4)],
-    (128, 128, 32, 8): [(1, 1, 8), (4, 4, 4), (4, 4, 8), (8, 8, 8)],
-    (128, 128, 64, 8): [(4, 4, 4), (4, 4, 8), (8, 8, 4), (8, 8, 8)],
-    (128, 192, 16, 4): [(4, 4, 4)],
-    (128, 256, 16, 4): [(4, 4, 4)],
-    (128, 256, 32, 8): [(1, 1, 8), (4, 4, 4), (8, 4, 8), (8, 8, 8)],
-    (224, 256, 64, 16):[(8, 8, 8)],
-    (256, 16, 64, 16): [(8, 1, 1), (8, 2, 2), (8, 8, 2)],
-    (256, 32, 64, 8):  [(8, 8, 4), (8, 8, 8)],
-    (256, 64, 8, 8):   [(1, 1, 8)],
-    (256, 128, 16, 4): [(4, 4, 4)],
-    (256, 128, 32, 8): [(1, 1, 8), (2, 2, 2), (4, 4, 4), (8, 8, 8)],
-    (256, 224, 64, 16):[(8, 8, 8)],
-    (256, 256, 32, 8): [(4, 4, 4), (8, 8, 4), (8, 8, 8)],
-    (256, 256, 32, 16):[(8, 8, 8)],
-}
-
+# get_vector_sizes_for_tile(tile_m, tile_n, tile_k, warp_tile_k) returns the
+# union of valid (vec_a, vec_b, vec_c) across all wave/warp pairs and all
+# dtype_keys that map to the given warp_tile_k.
 
 def get_vector_sizes_for_tile(
     tile_m: int, tile_n: int, tile_k: int,
@@ -310,11 +207,16 @@ def get_vector_sizes_for_tile(
 ) -> List[Tuple[int, int, int]]:
     """Return list of valid (vec_a, vec_b, vec_c) for a tile+warp_tile_k combo.
 
-    Looks up the precomputed table extracted from JSON profiler configs.
-    Falls back to (4, 8, 8) if not found.
+    Delegates to tile_math.get_vec_sizes_for_wave_warp(), taking the union
+    across all plausible dtype_keys for the given warp_tile_k.
+    Falls back to [(4, 8, 8)] if no valid combinations are found.
     """
-    key = (tile_m, tile_n, tile_k, warp_tile_k)
-    return _TILE_WTILK_TO_VECS.get(key, [(4, 8, 8)])
+    from tile_math import dtype_keys_for_warp_tile_k
+    dtype_keys = dtype_keys_for_warp_tile_k(warp_tile_k) or _ALL_DTYPE_KEYS
+    result: set = set()
+    for dk in dtype_keys:
+        result.update(get_vec_sizes_for_wave_warp(tile_m, tile_n, tile_k, warp_tile_k, dk))
+    return sorted(result) if result else [(4, 8, 8)]
 
 
 # Vector sizes per tile (backward-compat dict, 3-tuple keys)
@@ -322,12 +224,19 @@ def get_vector_sizes_for_tile(
 # Default = bf16 vec config (highest warp_tile_k in the table for that tile).
 # For exhaustive generation, call get_vector_sizes_for_tile() instead.
 def _build_tile_to_vector() -> Dict[Tuple[int, int, int], "TileVariantContainer"]:
-    """Build TILE_TO_VECTOR from _TILE_WTILK_TO_VECS."""
+    """Build TILE_TO_VECTOR from tile_math for all tiles."""
     from collections import defaultdict
+    from tile_math import get_valid_vec_sizes, get_valid_wave_warp_pairs
     tile_to_all: Dict = defaultdict(set)
-    for (tm, tn, tk, wtk), vecs in _TILE_WTILK_TO_VECS.items():
-        for v in vecs:
-            tile_to_all[(tm, tn, tk)].add(v)
+    all_tiles = sorted(
+        set(COMMON_TILES) | set(FWD_TILES) | set(BWD_DATA_TILES) | set(BWD_WEIGHT_TILES)
+    )
+    for tile in all_tiles:
+        tm, tn, tk = tile
+        for dk in _ALL_DTYPE_KEYS:
+            for (wm, wn, wk), (wt_m, wt_n, wt_k) in get_valid_wave_warp_pairs(*tile, dk):
+                for v in get_valid_vec_sizes(tm, tn, tk, wm, wn, wk, wt_m, wt_n, wt_k, dk):
+                    tile_to_all[tile].add(v)
 
     result = {}
     for tile, vecs in tile_to_all.items():
