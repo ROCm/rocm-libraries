@@ -749,27 +749,8 @@ class TestRunSuiteWorkflow:
         assert result == 1
 
 
-class TestRemovedABFlags:
-    """Old A/B flags are no longer part of the CLI."""
-
-    def test_old_ab_engine_flags_are_unknown(self) -> None:
-        parser = create_parser()
-        with pytest.raises(SystemExit):
-            parser.parse_args(["--graph", "g.json", "--AId", "1", "--BId", "2"])
-
-    def test_old_ab_plugin_flags_are_unknown(self) -> None:
-        parser = create_parser()
-        with pytest.raises(SystemExit):
-            parser.parse_args(
-                [
-                    "--graph",
-                    "g.json",
-                    "--APath",
-                    "/path/pluginA",
-                    "--BPath",
-                    "/path/pluginB",
-                ]
-            )
+class TestBackendEngineRouting:
+    """Tests for engine selection rules across execution backends."""
 
     def _create_graph(self, tmpdir: Path) -> Path:
         p = tmpdir / "g.json"

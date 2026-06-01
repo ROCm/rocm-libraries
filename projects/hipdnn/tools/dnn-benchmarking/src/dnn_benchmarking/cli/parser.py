@@ -81,6 +81,7 @@ Engine Comparison:
 
 Engine IDs:
   hipdnn_list_engines --plugin-dir /path/to/hipdnn_plugins/engines
+  (shipped with hipDNN tools, e.g. /opt/rocm/bin/hipdnn_list_engines)
 
 Suite Mode (multiple graphs):
   dnn-benchmark -g graphs/                           # all .json/.tar.gz files in directory
