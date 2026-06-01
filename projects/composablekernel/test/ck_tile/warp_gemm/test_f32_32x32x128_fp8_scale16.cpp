@@ -88,18 +88,19 @@ struct WarpGemmScale16BlockLoopKernel
                                                                number<NumScales>{},
                                                                number<1>{});
 
-        using WarpGemm = WarpGemmDispatcher<AType,
-                                            BType,
-                                            float,
-                                            MPerWarp,
-                                            NPerWarp,
-                                            K,
-                                            TransposeC,
-                                            false,
-                                            false,
-                                            WGAttrNumAccessEnum::Default,
-                                            WGAttrNumAccessEnum::Default,
-                                            true>;
+        using WarpGemm = WarpGemmDispatcher<
+            AType,                        // ADataType: A element type (fp8_t / bf8_t)
+            BType,                        // BDataType: B element type (fp8_t / bf8_t)
+            float,                        // AccDataType: accumulator type (F32)
+            MPerWarp,                     // MPerWave: warp-tile M (16 - native op size)
+            NPerWarp,                     // NPerWave: warp-tile N (16 - native op size)
+            K,                            // KPerWave: warp-tile K (128)
+            TransposeC,                   // TransposeC: use transposed-C distribution
+            false,                        // SwizzleA: A LDS swizzle layout (off)
+            false,                        // UseStructuredSparsity: 2:4 sparsity (off)
+            WGAttrNumAccessEnum::Default, // AttrNumAccessA: A num-access attribute
+            WGAttrNumAccessEnum::Default, // AttrNumAccessB: B num-access attribute
+            true>;                        // IsScale16: select the scale16 WMMA variant
 
         constexpr auto a_dstr     = typename WarpGemm::AWarpDstr{};
         constexpr auto b_dstr     = typename WarpGemm::BWarpDstr{};
