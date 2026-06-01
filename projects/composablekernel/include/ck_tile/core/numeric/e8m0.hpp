@@ -54,6 +54,15 @@ struct e8m0_bexp_t
 using e8m0_t     = e8m0_bexp_t;
 using e8m0_raw_t = typename e8m0_t::raw_type;
 
+template <typename>
+struct native_t;
+
+template <>
+struct native_t<e8m0_t>
+{
+    using type = e8m0_t::type;
+};
+
 template <>
 struct numeric_traits<e8m0_t>
 {

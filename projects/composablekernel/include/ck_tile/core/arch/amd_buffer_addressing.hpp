@@ -22,6 +22,7 @@
 #include "ck_tile/core/numeric/integral_constant.hpp"
 #include "ck_tile/core/numeric/pk_fp4.hpp"
 #include "ck_tile/core/numeric/pk_int4.hpp"
+#include "ck_tile/core/numeric/tfloat32.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
 #include "ck_tile/core/utility/bit_cast.hpp"
 #include "ck_tile/core/utility/functional.hpp"
@@ -1521,6 +1522,7 @@ CK_TILE_DEVICE thread_buffer<T, N> amd_buffer_load_impl(int32x4_t src_wave_buffe
     static_assert(
         (std::is_same<T, double>::value && (N == 1 || N == 2 || N == 4 || N == 8)) ||
             (std::is_same<T, float>::value && (N == 1 || N == 2 || N == 4 || N == 8 || N == 16)) ||
+            (std::is_same<T, tf32_t>::value && (N == 1 || N == 2 || N == 4 || N == 8 || N == 16)) ||
             (std::is_same<T, fp16_t>::value &&
              (N == 1 || N == 2 || N == 4 || N == 6 || N == 8 || N == 16 || N == 32)) ||
             (std::is_same<T, bf16_t>::value &&
@@ -1541,7 +1543,7 @@ CK_TILE_DEVICE thread_buffer<T, N> amd_buffer_load_impl(int32x4_t src_wave_buffe
 
     using rtn_type = thread_buffer<T, N>;
 
-    if constexpr(std::is_same<T, float>::value) // fp32
+    if constexpr(std::is_same<T, float>::value || std::is_same<T, tf32_t>::value) // fp32 or tf32
     {
         if constexpr(N == 1)
         {
@@ -2613,7 +2615,7 @@ amd_buffer_load_invalid_element_return_zero(const T* p_src_wave,
             {
                 // Use vector_t for not valid elements to avoid permute instructions.
                 // Get raw type from structure
-                using vector_t = typename T::type __attribute__((ext_vector_type(N)));
+                using vector_t = typename native_t<T>::type __attribute__((ext_vector_type(N)));
                 if constexpr(sizeof(vector_t) != sizeof(typename T::type) * N)
                 {
                     // Not possible to use set_as

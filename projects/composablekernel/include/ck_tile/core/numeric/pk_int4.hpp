@@ -30,6 +30,15 @@ struct pk_int4_t
     CK_TILE_HOST_DEVICE constexpr operator fp32x2_t() const { return to_fp32x2(); }
 };
 
+template <typename>
+struct native_t;
+
+template <>
+struct native_t<pk_int4_t>
+{
+    using type = pk_int4_t::type;
+};
+
 // limits
 template <class T>
 struct numeric;

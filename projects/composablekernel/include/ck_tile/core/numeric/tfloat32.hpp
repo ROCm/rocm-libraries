@@ -22,6 +22,7 @@ enum class tf32_rounding_mode
 class alignas(4) tfloat32_t
 {
     public:
+    using type     = tfloat32_t;
     using raw_type = uint32_t;
 
     raw_type data;

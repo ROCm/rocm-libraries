@@ -192,6 +192,15 @@ struct pk_float4_e2m1_t
 using pk_fp4_t     = pk_float4_e2m1_t;
 using pk_fp4_raw_t = typename pk_fp4_t::type;
 
+template <typename>
+struct native_t;
+
+template <>
+struct native_t<pk_fp4_t>
+{
+    using type = pk_fp4_t::type;
+};
+
 template <>
 struct numeric_traits<pk_fp4_t>
 {
