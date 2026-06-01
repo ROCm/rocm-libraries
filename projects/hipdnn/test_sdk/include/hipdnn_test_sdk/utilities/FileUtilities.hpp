@@ -90,7 +90,7 @@ inline auto getGoldenReferenceParams(const std::filesystem::path& subDirectory)
     {
         return testing::ValuesIn(std::vector<std::filesystem::path>{""});
     }
-    return testing::ValuesIn(std::move(paths));
+    return testing::ValuesIn(paths);
 }
 
 }
