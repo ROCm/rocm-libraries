@@ -210,7 +210,7 @@ class ProviderEngineResult:
                 f"extra_metrics is set on status={self.status!r}; "
                 "the orchestrator only runs on success today, so this "
                 "indicates either a new caller or a regression in the "
-                "success-gating in suite_runner._run_single_provider_engine"
+                "success-gating in suite_runner.run_single_provider_engine"
             )
         if self.status == "success":
             d["cpu_build_time_ms"] = self.cpu_build_time_ms

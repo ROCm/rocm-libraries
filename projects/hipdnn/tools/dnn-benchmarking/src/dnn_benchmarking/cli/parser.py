@@ -79,6 +79,9 @@ Engine Comparison:
   dnn-benchmark -g ./graph.json --engine 1,2,3
   dnn-benchmark -g ./graph.json --engine 1,2 --plugin-path /path/pluginA,/path/pluginB
 
+Engine IDs:
+  hipdnn_list_engines --plugin-dir /path/to/hipdnn_plugins/engines
+
 Suite Mode (multiple graphs):
   dnn-benchmark -g graphs/                           # all .json/.tar.gz files in directory
   dnn-benchmark --graph 'graphs/*.json' --warmup 10 --iters 100

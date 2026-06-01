@@ -9,7 +9,7 @@ from typing import Any, List, Optional
 
 from ..common.exceptions import ExecutionError, GraphLoadError
 from ..config.benchmark_config import MetricsConfig, SuiteConfig
-from ..execution.suite_runner import _set_plugin_path, run_graph_all_providers
+from ..execution.suite_runner import run_graph_all_providers, set_plugin_path
 from ..graph.loader import GraphLoader
 from ..reporting.reporter import Reporter
 from ..reporting.suite_results import (
@@ -34,21 +34,6 @@ def _error_graph_result(graph_path: Path, error_message: str) -> GraphResult:
             )
         ],
     )
-
-
-def _validate_plugin_paths(
-    plugin_paths: Optional[List[Path]], engine_filter: Optional[List[int]]
-) -> Optional[List[Path]]:
-    """Validate and normalize CLI plugin path selection."""
-    if plugin_paths is None:
-        return None
-    if len(plugin_paths) == 1:
-        return plugin_paths
-    if engine_filter is None:
-        raise ValueError("--plugin-path with multiple entries requires --engine")
-    if len(plugin_paths) != len(engine_filter):
-        raise ValueError("--plugin-path entry count must be 1 or match --engine count")
-    return plugin_paths
 
 
 def _run_one_graph(
@@ -76,7 +61,6 @@ def run_suite_benchmark(
     graph_paths: List[Path],
     config: SuiteConfig,
     output_path: Optional[Path],
-    plugin_path: Optional[List[Path]],
     reporter: Reporter,
     tarball_source: Optional[str] = None,
 ) -> int:
@@ -86,7 +70,6 @@ def run_suite_benchmark(
         graph_paths: List of resolved graph file paths to benchmark.
         config: Suite configuration.
         output_path: Optional path to export results as JSON.
-        plugin_path: Optional plugin .so directory list.
         reporter: Reporter instance for console output.
         tarball_source: Optional tarball source path for display.
 
@@ -94,8 +77,6 @@ def run_suite_benchmark(
         Exit code (0 for success, 1 for error, 2 for correctness failure).
     """
     total = len(graph_paths)
-    if not hasattr(config, "metrics"):
-        config.metrics = MetricsConfig()
 
     if config.reference_provider != "none":
         try:
@@ -122,15 +103,11 @@ def run_suite_benchmark(
     try:
         import hipdnn_frontend as hipdnn
 
-        plugin_paths = getattr(config, "plugin_paths", None)
-        if plugin_paths is None and plugin_path is not None:
-            plugin_paths = (
-                plugin_path if isinstance(plugin_path, list) else [plugin_path]
-            )
+        plugin_paths = config.plugin_paths
         per_engine_plugin_paths = plugin_paths is not None and len(plugin_paths) > 1
 
         if not per_engine_plugin_paths:
-            _set_plugin_path(hipdnn, plugin_paths[0] if plugin_paths else None)
+            set_plugin_path(hipdnn, config.plugin_path)
             handle = hipdnn.Handle()
         else:
             handle = None
@@ -207,7 +184,7 @@ def run_suite_cli(
                 "source requested (--pmc, --emit-trace, --perf, "
                 "--roofline); the directory will not be written to"
             )
-        plugin_paths = _validate_plugin_paths(args.plugin_path, args.engine)
+        plugin_paths = args.plugin_path
         config = SuiteConfig(
             warmup_iters=args.warmup,
             benchmark_iters=args.iters,
@@ -229,7 +206,6 @@ def run_suite_cli(
         graph_paths=graph_paths,
         config=config,
         output_path=args.output,
-        plugin_path=args.plugin_path,
         reporter=reporter,
         tarball_source=tarball_source,
     )

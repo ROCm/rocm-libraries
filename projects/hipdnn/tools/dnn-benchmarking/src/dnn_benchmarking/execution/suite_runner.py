@@ -78,7 +78,7 @@ def _resolve_engine_name(engine_id: int) -> str:
     return f"engine_{engine_id:#x}"
 
 
-def _set_plugin_path(
+def set_plugin_path(
     hipdnn: Any, plugin_path: Optional[Path], loading_mode: Optional[Any] = None
 ) -> None:
     """Set the process-wide hipDNN plugin search path for the next handle."""
@@ -391,7 +391,7 @@ def run_graph_all_providers(
                 try:
                     import hipdnn_frontend as hipdnn
 
-                    _set_plugin_path(
+                    set_plugin_path(
                         hipdnn,
                         engine_plugin_path,
                         hipdnn.PluginLoadingMode.ABSOLUTE,
@@ -415,7 +415,7 @@ def run_graph_all_providers(
             if reporter is not None:
                 reporter.print_engine_start(engine_name)
 
-            pe_result = _run_single_provider_engine(
+            pe_result = run_single_provider_engine(
                 graph_path=graph_path,
                 graph_json_str=graph_json_str,
                 graph_name=graph_name,
@@ -458,7 +458,7 @@ def _collect_basic_metrics_post_loop(
     """Populate the basic always-on metric fields on ``result``.
 
     Called once after the timed loop when ``metrics.tier == "basic"``.
-    Pulled out of :func:`_run_single_provider_engine` to keep that
+    Pulled out of :func:`run_single_provider_engine` to keep that
     function focused on the timed loop itself; the basic-tier book
     keeping is otherwise just a long sequence of conditionals on
     intermediate results.
@@ -507,7 +507,7 @@ def _collect_basic_metrics_post_loop(
         warn_once("gpu_smi", f"vram snapshot failed: {e}")
 
 
-def _run_single_provider_engine(
+def run_single_provider_engine(
     graph_path: Path,
     graph_json_str: str,
     graph_name: str,

@@ -264,10 +264,6 @@ class SuiteConfig:
     reference_provider: str = "none"
     verbose: bool = False
     metrics: MetricsConfig = field(default_factory=MetricsConfig)
-    # Forwarded to the orchestrator's inner subprocess so the child
-    # picks up the same plugin .so directory the parent loaded. Not used
-    # outside of the opt-in profiling path.
-    plugin_path: Optional[Path] = None
     plugin_paths: Optional[List[Path]] = None
 
     def __post_init__(self) -> None:
@@ -284,12 +280,11 @@ class SuiteConfig:
             if len(self.engine_filter) == 0:
                 raise ValueError("engine_filter must be non-empty when set")
             # engine IDs are FNV-1a hashes -- may be negative as signed int64.
-        if self.plugin_paths is None and self.plugin_path is not None:
-            self.plugin_paths = [self.plugin_path]
         if self.plugin_paths is not None:
             if len(self.plugin_paths) == 0:
                 raise ValueError("plugin_paths must be non-empty when set")
             self.plugin_paths = [Path(p) for p in self.plugin_paths]
+
             if len(self.plugin_paths) > 1:
                 if self.engine_filter is None:
                     raise ValueError(
@@ -299,9 +294,6 @@ class SuiteConfig:
                     raise ValueError(
                         "--plugin-path entry count must be 1 or match --engine count"
                     )
-            self.plugin_path = (
-                self.plugin_paths[0] if len(self.plugin_paths) == 1 else None
-            )
         valid_gpu_backends = {"torch", "auto", "none"}
         if self.gpu_backend not in valid_gpu_backends:
             raise ValueError(
@@ -314,6 +306,13 @@ class SuiteConfig:
                 f"Invalid reference_provider: '{self.reference_provider}'. "
                 f"Valid options: {valid_reference_providers}"
             )
+
+    @property
+    def plugin_path(self) -> Optional[Path]:
+        """Return the shared plugin path when exactly one path is configured."""
+        if self.plugin_paths is None or len(self.plugin_paths) != 1:
+            return None
+        return self.plugin_paths[0]
 
     def engine_selections_for(self, engine_ids: List[int]) -> List[EngineSelection]:
         """Return ordered engine selections for the provided engine IDs.

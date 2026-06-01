@@ -507,7 +507,6 @@ class TestRunSuiteWorkflow:
                 graph_paths=paths,
                 config=config,
                 output_path=None,
-                plugin_path=None,
                 reporter=Reporter(),
             )
 
@@ -538,7 +537,6 @@ class TestRunSuiteWorkflow:
                 graph_paths=paths,
                 config=config,
                 output_path=None,
-                plugin_path=None,
                 reporter=Reporter(),
             )
 
@@ -584,7 +582,6 @@ class TestRunSuiteWorkflow:
                 graph_paths=paths,
                 config=config,
                 output_path=None,
-                plugin_path=None,
                 reporter=Reporter(),
             )
 
@@ -613,7 +610,6 @@ class TestRunSuiteWorkflow:
                 graph_paths=paths,
                 config=config,
                 output_path=output_file,
-                plugin_path=None,
                 reporter=Reporter(),
             )
 
@@ -647,7 +643,6 @@ class TestRunSuiteWorkflow:
                 graph_paths=paths,
                 config=config,
                 output_path=None,
-                plugin_path=None,
                 reporter=Reporter(),
             )
 
@@ -677,7 +672,6 @@ class TestRunSuiteWorkflow:
                 graph_paths=paths,
                 config=config,
                 output_path=None,
-                plugin_path=None,
                 reporter=Reporter(),
             )
 
@@ -716,7 +710,6 @@ class TestRunSuiteWorkflow:
                 graph_paths=paths,
                 config=config,
                 output_path=None,
-                plugin_path=None,
                 reporter=Reporter(),
             )
 
@@ -749,7 +742,6 @@ class TestRunSuiteWorkflow:
                 graph_paths=paths,
                 config=config,
                 output_path=None,
-                plugin_path=None,
                 reporter=Reporter(),
             )
 
@@ -866,7 +858,6 @@ class TestValidationStartupGate:
                 graph_paths=[graph],
                 config=config,
                 output_path=None,
-                plugin_path=None,
                 reporter=Reporter(),
             )
 
@@ -893,7 +884,6 @@ class TestValidationStartupGate:
                 graph_paths=[graph],
                 config=config,
                 output_path=None,
-                plugin_path=None,
                 reporter=Reporter(),
             )
 
@@ -994,7 +984,6 @@ class TestValidationStartupGate:
                 graph_paths=[graph],
                 config=config,
                 output_path=None,
-                plugin_path=None,
                 reporter=Reporter(),
             )
 
