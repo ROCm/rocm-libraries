@@ -15,24 +15,41 @@
 
 namespace hip_kernel_provider::resample
 {
+
+namespace
+{
+
+std::vector<int64_t> toVector(const flatbuffers::Vector<int64_t>* values)
+{
+    if(values == nullptr)
+    {
+        return {};
+    }
+    return {values->begin(), values->end()};
+}
+
+} // namespace
+
 ResampleBwdParams::ResampleBwdParams(
     const hipdnn_flatbuffers_sdk::data_objects::ResampleBwdAttributes& attributes,
     const std::unordered_map<int64_t,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
-        tensorMap)
+        tensorMap,
+    hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType)
     : _dy(tensorMap.at(attributes.dy_tensor_uid()))
     , _dx(tensorMap.at(attributes.dx_tensor_uid()))
     , _index(attributes.index_tensor_uid().has_value()
                  ? tensorMap.at(attributes.index_tensor_uid().value())
                  : nullptr)
-    , _prePadding(attributes.pre_padding())
-    , _postPadding(attributes.post_padding())
-    , _stride(attributes.stride())
-    , _window(attributes.window())
+    , _prePadding(toVector(attributes.pre_padding()))
+    , _postPadding(toVector(attributes.post_padding()))
+    , _stride(toVector(attributes.stride()))
+    , _window(toVector(attributes.window()))
     , _resampleMode(attributes.resample_mode())
     , _paddingMode(attributes.padding_mode())
     , _generateIndex(attributes.generate_index().has_value() ? attributes.generate_index().value()
                                                              : false)
+    , _computeDataType(computeDataType)
 {
 }
 
@@ -51,22 +68,22 @@ const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* ResampleBwdParams:
     return _index;
 }
 
-const flatbuffers::Vector<int64_t>* ResampleBwdParams::prePadding() const
+const std::vector<int64_t>& ResampleBwdParams::prePadding() const
 {
     return _prePadding;
 }
 
-const flatbuffers::Vector<int64_t>* ResampleBwdParams::postPadding() const
+const std::vector<int64_t>& ResampleBwdParams::postPadding() const
 {
     return _postPadding;
 }
 
-const flatbuffers::Vector<int64_t>* ResampleBwdParams::stride() const
+const std::vector<int64_t>& ResampleBwdParams::stride() const
 {
     return _stride;
 }
 
-const flatbuffers::Vector<int64_t>* ResampleBwdParams::window() const
+const std::vector<int64_t>& ResampleBwdParams::window() const
 {
     return _window;
 }
@@ -86,6 +103,11 @@ bool ResampleBwdParams::generateIndex() const
     return _generateIndex;
 }
 
+hipdnn_flatbuffers_sdk::data_objects::DataType ResampleBwdParams::computeDataType() const
+{
+    return _computeDataType;
+}
+
 ResampleBwdPlan::ResampleBwdPlan(ResampleBwdParams&& params)
     : _params(std::move(params))
 {
@@ -97,6 +119,7 @@ size_t ResampleBwdPlan::getWorkspaceSize([[maybe_unused]] const HipKernelHandle&
     return 0;
 }
 
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 void ResampleBwdPlan::compile([[maybe_unused]] const IKernelCompiler& kernelCompiler,
                               [[maybe_unused]] const hipDeviceProp_t& deviceProperties)
 {
@@ -104,6 +127,7 @@ void ResampleBwdPlan::compile([[maybe_unused]] const IKernelCompiler& kernelComp
                                                    "Resample backward compile not yet implemented");
 }
 
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 void ResampleBwdPlan::execute([[maybe_unused]] const HipKernelHandle& handle,
                               [[maybe_unused]] const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                               [[maybe_unused]] uint32_t numDeviceBuffers,

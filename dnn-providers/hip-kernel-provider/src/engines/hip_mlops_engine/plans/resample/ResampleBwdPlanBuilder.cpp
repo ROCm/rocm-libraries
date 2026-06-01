@@ -112,7 +112,7 @@ void buildPlanSingleNode(
     const auto& attr
         = nodeWrapper.attributesAs<hipdnn_flatbuffers_sdk::data_objects::ResampleBwdAttributes>();
 
-    ResampleBwdParams params(attr, opGraph.getTensorMap());
+    ResampleBwdParams params(attr, opGraph.getTensorMap(), nodeWrapper.computeDataType());
     auto plan = std::make_unique<ResampleBwdPlan>(std::move(params));
     plan->compile(kernelCompiler, devicePropertyProvider.getDeviceProperties());
     executionContext.setPlan(std::move(plan));
