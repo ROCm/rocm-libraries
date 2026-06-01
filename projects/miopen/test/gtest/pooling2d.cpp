@@ -1,15 +1,11 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <gtest/gtest.h>
-#include <half/half.hpp>
-#include <vector>
-#include "../network_data.hpp"
-#include "pooling2d_common.hpp"
+#include "pooling_common.hpp"
 
 // Configuration define matching the original ctest behavior
 // These can be overridden at compile time via -D flags
-// TEST_GET_INPUT_TENSOR: When 0, uses all 18 predefined input shapes (matching ctest with --all).
+// TEST_GET_INPUT_TENSOR: When 0, uses all predefined input shapes.
 //                        When 1, uses get_inputs() function to generate input shapes from
 //                        network_data.
 #ifndef TEST_GET_INPUT_TENSOR
@@ -18,9 +14,9 @@
 
 namespace {
 
-std::vector<pooling2d_gtest::PoolingTestCase> GetPooling2dTestCases()
+std::vector<pooling_gtest::PoolingTestCase> GetPooling2dTestCases()
 {
-    static std::vector<pooling2d_gtest::PoolingTestCase> cached_test_cases;
+    static std::vector<pooling_gtest::PoolingTestCase> cached_test_cases;
     static bool cached = false;
 
     if(cached)
@@ -28,7 +24,7 @@ std::vector<pooling2d_gtest::PoolingTestCase> GetPooling2dTestCases()
         return cached_test_cases;
     }
 
-    std::vector<pooling2d_gtest::PoolingTestCase> test_cases;
+    std::vector<pooling_gtest::PoolingTestCase> test_cases;
 
     // Dataset 0: Default dataset (various tensor sizes)
     std::vector<std::vector<int>> dataset0_inputs;
@@ -68,21 +64,22 @@ std::vector<pooling2d_gtest::PoolingTestCase> GetPooling2dTestCases()
 
     for(const auto& in_shape : dataset0_inputs)
     {
-        AddTestCasesForInput(in_shape,
-                             dataset0_lens,
-                             dataset0_strides,
-                             dataset0_pads,
-                             dataset0_index_types,
-                             modes,
-                             wsidx_values,
-                             test_cases,
-                             num_uint16_case,
-                             num_uint32_case,
-                             num_uint32_case_imgidx,
-                             num_uint64_case,
-                             num_uint64_case_imgidx,
-                             false, // skip_wide_check=false for Dataset 0
-                             true); // apply_index_type_limits=true for Dataset 0
+        pooling_gtest::AddTestCasesForInput(in_shape,
+                                            dataset0_lens,
+                                            dataset0_strides,
+                                            dataset0_pads,
+                                            dataset0_index_types,
+                                            modes,
+                                            wsidx_values,
+                                            test_cases,
+                                            num_uint16_case,
+                                            num_uint32_case,
+                                            num_uint32_case_imgidx,
+                                            num_uint64_case,
+                                            num_uint64_case_imgidx,
+                                            true,
+                                            false, // skip_wide_check=false for Dataset 0
+                                            "NCHW");
     }
 
     // Note: Dataset 1 (asymmetric) and Dataset 2 (wide window) are tested separately
@@ -99,15 +96,15 @@ std::vector<pooling2d_gtest::PoolingTestCase> GetPooling2dTestCases()
 } // anonymous namespace
 
 // Derived classes for Dataset 0 (standard pooling)
-class GPU_Pooling2d_FP32 : public pooling2d_gtest::Pooling2dCommon<float>
+class GPU_Pooling2d_FP32 : public pooling_gtest::PoolingCommon<float>
 {
 };
 
-class GPU_Pooling2d_FP16 : public pooling2d_gtest::Pooling2dCommon<half_float::half>
+class GPU_Pooling2d_FP16 : public pooling_gtest::PoolingCommon<half_float::half>
 {
 };
 
-class GPU_Pooling2d_BFP16 : public pooling2d_gtest::Pooling2dCommon<bfloat16>
+class GPU_Pooling2d_BFP16 : public pooling_gtest::PoolingCommon<bfloat16>
 {
 };
 
@@ -120,14 +117,14 @@ TEST_P(GPU_Pooling2d_BFP16, BFloat16Test_pooling2d) { RunTest(); }
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_Pooling2d_FP32,
                          testing::ValuesIn(GetPooling2dTestCases()),
-                         pooling2d_gtest::GetPoolingTestCaseName);
+                         pooling_gtest::GetPoolingTestCaseName);
 
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_Pooling2d_FP16,
                          testing::ValuesIn(GetPooling2dTestCases()),
-                         pooling2d_gtest::GetPoolingTestCaseName);
+                         pooling_gtest::GetPoolingTestCaseName);
 
 INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_Pooling2d_BFP16,
                          testing::ValuesIn(GetPooling2dTestCases()),
-                         pooling2d_gtest::GetPoolingTestCaseName);
+                         pooling_gtest::GetPoolingTestCaseName);

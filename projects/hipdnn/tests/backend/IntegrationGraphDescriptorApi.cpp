@@ -40,6 +40,35 @@ TEST_F(IntegrationGraphDescriptorApi, CreateAndDeserializeGraphExtWithNullGraph)
     EXPECT_EQ(descriptor, nullptr);
 }
 
+TEST_F(IntegrationGraphDescriptorApi, OverrideShapeEnabledSetGetRoundTrip)
+{
+    hipdnnBackendDescriptor_t descriptor = nullptr;
+    ASSERT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR, &descriptor),
+              HIPDNN_STATUS_SUCCESS);
+
+    bool enabled = true;
+    EXPECT_EQ(hipdnnBackendSetAttribute(descriptor,
+                                        HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT,
+                                        HIPDNN_TYPE_BOOLEAN,
+                                        1,
+                                        &enabled),
+              HIPDNN_STATUS_SUCCESS);
+
+    bool retrieved = false;
+    int64_t elementCount = 0;
+    EXPECT_EQ(hipdnnBackendGetAttribute(descriptor,
+                                        HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT,
+                                        HIPDNN_TYPE_BOOLEAN,
+                                        1,
+                                        &elementCount,
+                                        &retrieved),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(elementCount, 1);
+    EXPECT_TRUE(retrieved);
+
+    EXPECT_EQ(hipdnnBackendDestroyDescriptor(descriptor), HIPDNN_STATUS_SUCCESS);
+}
+
 TEST_F(IntegrationGraphDescriptorApi, SetOperationGraph)
 {
     SKIP_IF_NO_DEVICES();

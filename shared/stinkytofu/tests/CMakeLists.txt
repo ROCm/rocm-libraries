@@ -45,6 +45,8 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/OptimizationPipelineTest.cpp
     unit/asm/ScopeAdaptorTest.cpp
     unit/asm/PeepholeOptimizationPassTest.cpp
+    unit/asm/AccumulateInstructionSizePassTest.cpp
+    unit/asm/SwPrefetchInsertionPassTest.cpp
     unit/asm/StinkyAsmEmitterTest.cpp
     unit/asm/VirtualRegisterTest.cpp
     # Parser/Lexer Tests (added for critical testing gaps)
@@ -55,6 +57,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/HwInstDescTest.cpp
     unit/asm/ReadWriteOperandTest.cpp
     unit/asm/BarrierTest.cpp
+    unit/asm/LoopRegionRemarkPassTest.cpp
 )
 
 # High-Level IR Tests
@@ -75,6 +78,7 @@ set(UNIT_LOGICAL_TEST_FILES
 set(UNIT_CORE_TEST_FILES
     unit/core/AnalysisManagerTest.cpp
     unit/core/BackendRegistryTest.cpp
+    unit/core/ComgrProbeTest.cpp
 )
 
 # Common/Shared Tests

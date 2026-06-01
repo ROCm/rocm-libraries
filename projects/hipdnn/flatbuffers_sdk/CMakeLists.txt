@@ -166,6 +166,7 @@ if(HIPDNN_GENERATE_SDK_HEADERS)
             schemas/graph.fbs
             schemas/knob_value.fbs
             schemas/layernorm_attributes.fbs
+            schemas/layernorm_backward_attributes.fbs
             schemas/matmul_attributes.fbs
             schemas/norm_common.fbs
             schemas/pointwise_attributes.fbs

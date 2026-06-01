@@ -131,8 +131,8 @@ Tests:
   function: bsrsm
   precision: *single_double_precisions_complex_real
   M_N: *M_N_range_quick
-  K: [65, 153]
-  block_dim: [2, 12, 71]
+  K: [65]
+  block_dim: [12]
   alpha_alphai: *alpha_range_quick
   direction: [rocsparse_direction_row]
   transA: [rocsparse_operation_none, rocsparse_operation_transpose]
@@ -165,7 +165,7 @@ Tests:
 - name: bsrsm
   category: quick
   function: bsrsm
-  precision: *single_double_precisions_complex_real
+  precision: *single_only_precisions_complex
   M_N: *M_N_range_quick
   K: [65]
   block_dim: [2]
@@ -183,7 +183,7 @@ Tests:
 - name: bsrsm_file
   category: quick
   function: bsrsm
-  precision: *single_double_precisions
+  precision: *single_only_precisions
   M: 1
   K: [63, 316]
   block_dim: [4, 27, 52]
@@ -203,7 +203,7 @@ Tests:
 - name: bsrsm_file
   category: quick
   function: bsrsm
-  precision: *single_double_precisions
+  precision: *double_only_precisions
   M: 1
   K: [63, 316]
   block_dim: [4, 27, 52]
@@ -327,7 +327,7 @@ Tests:
   M_N: *M_N_range_checkin
   K: [65, 153, 280]
   block_dim: [2, 14, 71]
-  alpha_alphai: *alpha_range_quick
+  alpha_alphai: *alpha_range_checkin
   direction: [rocsparse_direction_row]
   transA: [rocsparse_operation_none, rocsparse_operation_transpose]
   transB: [rocsparse_operation_none]

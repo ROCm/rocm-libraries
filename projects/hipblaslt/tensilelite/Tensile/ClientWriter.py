@@ -77,6 +77,7 @@ class DataInitName(Enum):
   TrigIndCos = 24
   TrigIndAbsSin = 25
   TrigIndAbsCos = 26
+  UniformLowPrecision = 27
 
 class ClientLogLevel(Enum):
   Error = 0
@@ -358,7 +359,7 @@ fi
   else:
     mxScaleFormatFlag = " --mx-scale-format {}".format(globalParameters["MXScaleFormat"]) if globalParameters["MXScaleFormat"] else ""
     for configFile in configPaths:
-      runScriptFile.write("{} --config-file {} --best-solution 1{}\n".format(getClientExecutablePath(), configFile, mxScaleFormatFlag))
+      runScriptFile.write("{} --config-file {} --best-solution{}\n".format(getClientExecutablePath(), configFile, mxScaleFormatFlag))
 
   if os.name != "nt":
     runScriptFile.write("exit $ERR\n")

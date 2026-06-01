@@ -14,7 +14,8 @@ enum StreamKTilePartitionerBaseMethodId
     GET_TILE_INDEX,
     GET_ITER_BOUNDARIES,
     GET_OUTPUT_TILE_INDEX,
-    GET_TILE_LOCAL_CTA_INDEX
+    GET_TILE_LOCAL_CTA_INDEX,
+    GET_K_SIZE,
 };
 
 // Base kernel wrapper class to facilitate testing class device functions.
@@ -109,6 +110,20 @@ struct KernelWrapperSpecialized<TilePartitioner,
 };
 
 template <typename TilePartitioner>
+struct KernelWrapperSpecialized<TilePartitioner, StreamKTilePartitionerBaseMethodId::GET_K_SIZE>
+    : public KernelWrapper<TilePartitioner>
+{
+
+    using Base = KernelWrapper<TilePartitioner>;
+
+    CK_TILE_DEVICE void operator()(typename Base::KernelArgs kargs)
+    {
+        *(static_cast<ck_tile::index_t*>(kargs.result1)) =
+            kargs.tile_partitioner.get_k_size(kargs.arg1, kargs.arg2);
+    }
+};
+
+template <typename TilePartitioner>
 struct KernelWrapperSpecialized<TilePartitioner, StreamKTilePartitionerBaseMethodId::GET_TILE_INDEX>
     : public KernelWrapper<TilePartitioner>
 {
@@ -167,6 +182,8 @@ struct StreamKTilePartitionerBaseExpected
     ck_tile::index_t num_tiles_;
     ck_tile::index_t max_active_wgs_;
     ck_tile::index_t n_;
+    ck_tile::index_t k_;
+    ck_tile::index_t remainder_along_k_;
 };
 
 template <typename GemmShape>
@@ -185,6 +202,8 @@ void validate_streamk_base_constructor(
     EXPECT_EQ(tile_partitioner.get_num_tiles(), expected_values.num_tiles_);
     EXPECT_EQ(tile_partitioner.get_max_active_wgs(), expected_values.max_active_wgs_);
     EXPECT_EQ(tile_partitioner.get_n(), expected_values.n_);
+    EXPECT_EQ(tile_partitioner.get_k(), expected_values.k_);
+    EXPECT_EQ(tile_partitioner.get_remainder_along_k(), expected_values.remainder_along_k_);
 }
 
 struct StreamKTilePartitionerBaseConfig
@@ -318,6 +337,37 @@ struct StreamKTilePartitionerBaseConfigSKOnlyLargeK : public StreamKTilePartitio
                                              ck_tile::sequence<UNUSED, UNUSED, UNUSED>>;
 };
 
+struct StreamKTilePartitionerBaseConfigRemainderAlongK : public StreamKTilePartitionerBaseConfig
+{
+    /*
+    Since K % K_Tile <=> 5 % 2 = 1, there will be 2 full macro tiles along K of size MPerBlock x
+    KPerBlock for A and KPerBlock x NPerBlock for B. The final macro tile along K will be of size
+    (K % K_Tile) along the K dimension.
+
+    Consider the A tensor as an example: Let R = K % K_TILE
+               -------------------------------------
+               |             |             |       |
+    MPerBlock  |    WG0      |     WG0     |  WG1  |
+               |             |             |       |
+               -------------------------------------
+               |<-KPerBlock->|<-KPerBlock->|<--R-->|
+
+    */
+
+    static constexpr ck_tile::index_t M              = 2;
+    static constexpr ck_tile::index_t N              = 2;
+    static constexpr ck_tile::index_t K              = 5;
+    static constexpr ck_tile::index_t MAX_ACTIVE_WGS = 2;
+
+    static constexpr ck_tile::index_t M_TILE = 2;
+    static constexpr ck_tile::index_t N_TILE = 2;
+    static constexpr ck_tile::index_t K_TILE = 2;
+
+    using GemmShape = ck_tile::TileGemmShape<ck_tile::sequence<M_TILE, N_TILE, K_TILE>,
+                                             ck_tile::sequence<UNUSED, UNUSED, UNUSED>,
+                                             ck_tile::sequence<UNUSED, UNUSED, UNUSED>>;
+};
+
 struct StreamKTilePartitionerBaseConfigEdgeCase : public StreamKTilePartitionerBaseConfig
 {
 
@@ -419,6 +469,24 @@ void test_get_tile_local_cta_idx(ck_tile::index_t tile_iter_start,
     ck_tile::index_t tile_local_cta_idx;
     tile_local_cta_idx_dev.FromDevice(&tile_local_cta_idx);
     EXPECT_EQ(tile_local_cta_idx, expected_tile_local_cta_idx);
+}
+
+template <typename GemmShape>
+void test_remap_xcd(
+    const std::vector<ck_tile::index_t>& initial_values,
+    const std::vector<ck_tile::index_t>& expected_values,
+    ck_tile::StreamKTilePartitioner<GemmShape, ck_tile::StreamKReductionStrategy::Atomic, true>&
+        tile_partitioner,
+    const int num_xcds = 8)
+{
+    std::vector<ck_tile::index_t> remapped_values(initial_values.size());
+    for(std::size_t i = 0; i < initial_values.size(); ++i)
+    {
+        remapped_values[i] =
+            tile_partitioner.remap_xcd(initial_values[i], initial_values.size(), num_xcds);
+    }
+
+    EXPECT_EQ(remapped_values, expected_values);
 }
 
 // Configs for TilePartitioner Child structs
