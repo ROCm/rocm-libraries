@@ -51,6 +51,4 @@ extern double max_l2_eps_single;
 extern double max_linf_eps_half;
 extern double max_l2_eps_half;
 
-extern int n_hip_failures;
-
 #endif
