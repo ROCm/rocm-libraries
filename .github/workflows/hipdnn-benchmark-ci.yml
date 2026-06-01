@@ -27,9 +27,9 @@ on:
   workflow_dispatch:
     inputs:
       graph_glob:
-        description: "Graph file/dir/glob passed to --graph. NOTE: the ticket's graphs/fremont_convs/*.json is not in a clean checkout; the committed sample_*.json glob is the supported default."
+        description: "Graph file/dir/glob/tarball passed to --graph. Default is the DVC-tracked benchmark suite (Workloads/*.tar.gz) materialized by `dvc pull`; --graph natively extracts JSON graphs from the tarballs."
         type: string
-        default: "projects/hipdnn/tools/dnn-benchmarking/graphs/sample_*.json"
+        default: "projects/hipdnn/tools/dnn-benchmarking/Workloads/*.tar.gz"
       amdgpu_family:
         description: "TheRock artifact family for install_rocm_from_artifacts.py."
         type: string
@@ -43,13 +43,13 @@ on:
         type: string
         default: ""
       artifact_run_id:
-        description: "TheRock GitHub run-id whose prebuilt artifacts to install (deterministic pin). Empty -> the workflow default below."
+        description: "GitHub run-id (ROCm/rocm-libraries therock-ci build) whose prebuilt artifacts to install (deterministic pin). Empty -> the workflow default below."
         type: string
         default: ""
       run_github_repo:
-        description: "Repo that owns artifact_run_id."
+        description: "Repo that owns artifact_run_id (the rocm-libraries CI build that uploaded the artifacts)."
         type: string
-        default: "ROCm/TheRock"
+        default: "ROCm/rocm-libraries"
       runs_on:
         description: "GPU runner label."
         type: string
@@ -93,18 +93,33 @@ jobs:
     env:
       AMDGPU_FAMILY: ${{ inputs.amdgpu_family || 'gfx94X-dcgpu' }}
       AMDGPU_TARGETS: ${{ inputs.amdgpu_targets || 'gfx942' }}
-      RUN_GITHUB_REPO: ${{ inputs.run_github_repo || 'ROCm/TheRock' }}
-      GRAPH_GLOB: ${{ inputs.graph_glob || 'projects/hipdnn/tools/dnn-benchmarking/graphs/sample_*.json' }}
+      RUN_GITHUB_REPO: ${{ inputs.run_github_repo || 'ROCm/rocm-libraries' }}
+      GRAPH_GLOB: ${{ inputs.graph_glob || 'projects/hipdnn/tools/dnn-benchmarking/Workloads/*.tar.gz' }}
       WARMUP: ${{ inputs.warmup || '1' }}
       ITERS: ${{ inputs.iters || '1' }}
       VENV_DIR: ${{ github.workspace }}/.venv
       # Deterministic prebuilt-artifact pin. workflow_dispatch may override via
-      # the artifact_run_id input; otherwise this hardcoded TheRock run-id is the
-      # PR default. STALENESS LIABILITY: artifacts age out / are GC'd; bump this
-      # periodically (mirror the ci-env therock-ref cadence). Empty -> fail fast
-      # in "Resolve pins" below (do NOT fall back to github.run_id — that is a
-      # rocm-libraries run id, wrong for TheRock artifacts).
-      ARTIFACT_RUN_ID_DEFAULT: ""
+      # the artifact_run_id input; otherwise this hardcoded run-id is the PR
+      # default. The artifacts come from a GREEN ROCm/rocm-libraries `therock-ci`
+      # build on develop (it builds TheRock + rocm-libraries and uploads the
+      # per-component slices — hipdnn, miopenprovider, base/runtime, blas, miopen
+      # — to s3://therock-ci-artifacts-external/ROCm-rocm-libraries/<run-id>-linux,
+      # public-read/anonymous, no auth needed). RUN_GITHUB_REPO must therefore be
+      # ROCm/rocm-libraries, not ROCm/TheRock.
+      #
+      # Verified run 26747247912 (develop, push "Layernorm optimization (#4888)",
+      # 2026-06-01, conclusion=success): install_rocm_from_artifacts.py --dry-run
+      # resolves all base + hipdnn_lib/hipdnn_test + miopenprovider_lib slices.
+      #
+      # STALENESS LIABILITY: external CI artifacts age out / are GC'd (retention
+      # is days-to-weeks, much shorter than a TheRock nightly tarball). Re-pin to
+      # a fresh green develop `therock-ci` run-id periodically; verify with
+      # `install_rocm_from_artifacts.py --run-id <id> --run-github-repo
+      # ROCm/rocm-libraries --amdgpu-family gfx94X-dcgpu --hipdnn --miopenprovider
+      # --tests --dry-run` before committing. Empty -> fail fast in "Resolve pins"
+      # below (do NOT fall back to github.run_id — a fork/PR rocm-libraries run
+      # rarely has uploaded artifacts).
+      ARTIFACT_RUN_ID_DEFAULT: "26747247912"
       LD_LIBRARY_PATH: /opt/rocm/lib
     steps:
       - name: Fetch TheRock build_tools for pre-job cleanup
@@ -142,7 +157,7 @@ jobs:
             ARTIFACT_RUN_ID="${ARTIFACT_RUN_ID_DEFAULT}"
           fi
           if [ -z "${ARTIFACT_RUN_ID}" ]; then
-            echo "::error::ARTIFACT_RUN_ID is empty. Set a known-good TheRock run-id via the artifact_run_id input or the ARTIFACT_RUN_ID_DEFAULT workflow env. Refusing to fall back to github.run_id (wrong repo)."
+            echo "::error::ARTIFACT_RUN_ID is empty. Set a known-good ROCm/rocm-libraries therock-ci run-id (green, develop) via the artifact_run_id input or the ARTIFACT_RUN_ID_DEFAULT workflow env. Refusing to fall back to github.run_id (a fork/PR run rarely has uploaded artifacts)."
             exit 1
           fi
           echo "artifact_run_id=${ARTIFACT_RUN_ID}" >> "$GITHUB_OUTPUT"
@@ -164,17 +179,27 @@ jobs:
           echo "$VENV_DIR/bin" >> "$GITHUB_PATH"
           echo "VIRTUAL_ENV=$VENV_DIR" >> "$GITHUB_ENV"
           pip install --upgrade pip
-          pip install boto3 cmake ninja
+          # dvc[s3] pulls the DVC-tracked benchmark graph suite from the anonymous
+          # public-read remote (s3://therock-dvc/rocm-libraries); it brings its own
+          # boto3/s3fs. boto3 is also needed by install_rocm_from_artifacts.py.
+          pip install boto3 cmake ninja "dvc[s3]"
 
       - name: Fetch prebuilt ROCm by run-id (deterministic)
         run: |
+          # --miopenprovider is REQUIRED: the MIOpen engine plugin
+          # (lib/hipdnn_plugins/engines/libmiopen_plugin.so) ships in the
+          # miopenprovider slice, NOT in hipdnn_lib. Without it the plugin dir is
+          # empty and every benchmark combination is skipped -> the gate fails
+          # with pass_combinations=0. --flatten (set by install_rocm_from_artifacts
+          # for run-id installs) strips the ml-libs/<comp>/stage prefix so the
+          # engine lands at /opt/rocm/lib/hipdnn_plugins/engines/.
           python3 TheRock/build_tools/install_rocm_from_artifacts.py \
             --run-id "${ARTIFACT_RUN_ID}" \
             --run-github-repo "${RUN_GITHUB_REPO}" \
             --amdgpu-family "${AMDGPU_FAMILY}" \
             --amdgpu-targets "${AMDGPU_TARGETS}" \
             --output-dir /opt/rocm \
-            --hipdnn --tests
+            --hipdnn --miopenprovider --tests
           echo "ROCM_PATH=/opt/rocm" >> "$GITHUB_ENV"
 
       - name: Driver / GPU sanity check
@@ -211,6 +236,29 @@ jobs:
 
       - name: Install benchmark tool deps
         run: pip install -e rocm-libraries/projects/hipdnn/tools/dnn-benchmarking
+
+      - name: Pull DVC benchmark graph suite
+        working-directory: rocm-libraries
+        # The benchmark suite (Workloads/*.tar.gz) is DVC-tracked, not committed —
+        # only the *.tar.gz.dvc pointer files are in git. The remote
+        # (s3://therock-dvc/rocm-libraries) is anonymous public-read
+        # (allow_anonymous_login=true in .dvc/config), so no secrets/auth are
+        # needed on the runner. Pull the Workloads pointers explicitly (targeted,
+        # so an unrelated .dvc elsewhere in the repo can't drag in extra data),
+        # then assert at least one tarball materialized before benchmarking.
+        run: |
+          dvc pull \
+            projects/hipdnn/tools/dnn-benchmarking/Workloads/bnorm_backward.tar.gz.dvc \
+            projects/hipdnn/tools/dnn-benchmarking/Workloads/bnorm_fwd.tar.gz.dvc \
+            projects/hipdnn/tools/dnn-benchmarking/Workloads/conv_dgrad.tar.gz.dvc \
+            projects/hipdnn/tools/dnn-benchmarking/Workloads/conv_fwd.tar.gz.dvc \
+            projects/hipdnn/tools/dnn-benchmarking/Workloads/conv_wgrad.tar.gz.dvc
+          shopt -s nullglob
+          tarballs=(projects/hipdnn/tools/dnn-benchmarking/Workloads/*.tar.gz)
+          if [ ${#tarballs[@]} -eq 0 ]; then
+            echo "::error::dvc pull produced no Workloads/*.tar.gz — DVC remote layout or auth changed"; exit 1
+          fi
+          echo "Materialized ${#tarballs[@]} workload tarball(s): ${tarballs[*]}"
 
       - name: Run benchmark smoke
         working-directory: rocm-libraries
