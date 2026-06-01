@@ -6,10 +6,6 @@
 """
 Mathematical functions for deriving valid tile/warp/vector configurations.
 
-Replaces the hand-maintained lookup tables TILE_TO_WAVE_WARP and
-_TILE_WTILK_TO_VECS in grouped_config_rules.py with functions derived
-from the static asserts in the C++ kernel and pipeline implementation.
-
 Key source files this is derived from:
   - block_universal_gemm_as_bs_cr.hpp   (tile divisibility by warps)
   - gemm_pipeline_agmem_bgmem_creg_v1_default_policy.hpp  (vec/LDS formulas)
@@ -19,9 +15,8 @@ Key source files this is derived from:
 """
 
 import sys
-import os
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import List, Optional, Set, Tuple
 
 # ---------------------------------------------------------------------------
 # Path setup — allow running from any directory
@@ -61,8 +56,7 @@ def _pos_divisors(n: int) -> List[int]:
 def _lds_valid(vec: int, sizeof_dtype: float) -> bool:
     """LDS vector load/store must be a power-of-2 multiple of 8 bits, up to 256 bits.
 
-    Source: conv_algorithm_limits.hpp IsLDSVectorSizeValid (8–128 bits for standard LDS).
-    In practice some bwd_data configs use larger global-load vectors (e.g. fp32×8=256 bits)
+    Some bwd_data configs use larger global-load vectors (e.g. fp32×8=256 bits)
     where the global load is split across DWORD pairs rather than going through LDS.
     We therefore accept up to 256 bits and require the width to be a power of 2 in bytes.
     """
@@ -202,10 +196,6 @@ def get_valid_vec_sizes(
 ) -> List[Tuple[int, int, int]]:
     """Return all valid (vec_a, vec_b, vec_c) triples for a fully-specified config.
 
-    Derived from:
-      - gemm_pipeline_agmem_bgmem_creg_v1_default_policy.hpp  (thread-pixel budget)
-      - conv_algorithm_limits.hpp  IsVmemVectorSizeValid / IsLDSVectorSizeValid
-
     The thread-pixel budget formula:
         block_size = WARP_SIZE * wave_m * wave_n * wave_k
         pixels_a   = tile_m * tile_k / block_size   (elements per thread, A tile)
@@ -220,7 +210,7 @@ def get_valid_vec_sizes(
         wave_m, wave_n, wave_k: wave counts
         warp_tile_m, warp_tile_n, warp_tile_k: XDL warp tile dimensions
         dtype_key: e.g. "bf16_bf16_fp32"
-        pipeline: optional, currently unused (reserved for future per-pipeline tuning)
+        pipeline: optional, currently unused
 
     Returns:
         Sorted list of (vec_a, vec_b, vec_c) tuples.
@@ -238,7 +228,7 @@ def get_valid_vec_sizes(
 
     # Maximum vector width per element type.
     # Standard VMEM load limit is 16 bytes (128 bits), which gives:
-    #   fp32 (4 bytes) → 4 elements;  bf16/fp16 (2 bytes) → 8;  fp8 (1 byte) → 16
+    #   fp32 (4 bytes) -> 4 elements;  bf16/fp16 (2 bytes) -> 8;  fp8 (1 byte) -> 16
     # However, some bwd_data configurations use vec_a=8 for fp32 (32-byte loads via
     # 2×16-byte split), which compiles and runs on hardware.  To avoid false negatives
     # the cap is relaxed to 16 bytes × 2 = the hardware dword-per-lane pair limit.
@@ -267,8 +257,6 @@ def get_valid_vec_sizes(
     # vec_c constraint: the C accumulator is stored contiguously along N per thread.
     # The output shuffle in the XDL block gemm only requires tile_n to be divisible
     # by vec_c (not by wave_n * warp_tile_n * vec_c as the input tiles).
-    # Source: ThreadsCoverCTile in conv_algorithm_limits.hpp:
-    #   tile_n % (thread_cluster_dims[3] * vec_c) == 0
     # thread_cluster_dims[3] = 1 because each thread writes one N-element per shuffle step;
     # the n_xdl_per_wave repeats are handled by the outer loop, not the vector width.
     valid_c = [
@@ -350,20 +338,3 @@ def dtype_keys_for_warp_tile_k(warp_tile_k: int) -> List[str]:
     if warp_tile_k in {16, 32, 64, 128}:
         candidates.append("fp8_fp8_fp32")
     return candidates
-
-
-if __name__ == "__main__":
-    # Quick smoke test
-    print("Wave/warp pairs for (128, 64, 32) bf16:")
-    for wave, warp in get_valid_wave_warp_pairs(128, 64, 32, "bf16_bf16_fp32"):
-        print(f"  wave={wave}  warp_tile={warp}")
-
-    print()
-    print("Vec sizes for (128, 64, 32) wave=(2,2,1) warp_tile=(32,32,8) bf16:")
-    for v in get_valid_vec_sizes(128, 64, 32, 2, 2, 1, 32, 32, 8, "bf16_bf16_fp32"):
-        print(f"  {v}")
-
-    print()
-    print("Vec sizes via get_vec_sizes_for_wave_warp (128,64,32,wt_k=8) bf16:")
-    for v in get_vec_sizes_for_wave_warp(128, 64, 32, 8, "bf16_bf16_fp32"):
-        print(f"  {v}")
