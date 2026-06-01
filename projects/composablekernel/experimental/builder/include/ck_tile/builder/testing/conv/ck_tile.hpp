@@ -100,7 +100,11 @@ template <auto SIGNATURE, typename InDataType, typename WeiDataType, typename Ou
     if constexpr(ConvDirectionIsBackwardWeight<SIGNATURE>)
         Conv::SetWorkSpacePointer(kargs, workspace_dev.GetDeviceBuffer());
 
-    const dim3 grids  = Conv::GridSize(kargs);
+    dim3 grids = Conv::GridSize(kargs);
+    if constexpr(ck_tile::has_split_image_v<Conv>)
+    {
+        grids = ck_tile::PopulateSplitImageKargs<Conv>(kargs, host_args);
+    }
     const dim3 blocks = Conv::BlockSize();
 
     using Types = ck_tile::builder::factory::internal::TileConvTensorTypes<SIGNATURE.data_type>;

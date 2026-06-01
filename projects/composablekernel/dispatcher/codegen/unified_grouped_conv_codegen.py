@@ -822,7 +822,10 @@ struct {kernel_name}_Launcher {{
                 throw std::runtime_error("Arguments not supported for grouped conv kernel");
             }}
 
-            const dim3 grids = Kernel::GridSize(kargs);
+            dim3 grids = Kernel::GridSize(kargs);
+            if constexpr (has_split_image_v<Kernel>) {{
+                grids = PopulateSplitImageKargs<Kernel>(kargs, args);
+            }}
             const dim3 blocks = Kernel::BlockSize();
 
             {self._get_launch_code()}

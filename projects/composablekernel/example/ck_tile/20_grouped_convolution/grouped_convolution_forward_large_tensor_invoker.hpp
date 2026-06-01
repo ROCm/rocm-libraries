@@ -96,9 +96,8 @@ struct GroupedConvolutionForwardInvoker
             std::is_same<InLayout, ck_tile::tensor_layout::convolution::NDHWGC>::value;
 
         // =====================================================================
-        // Step 2: Calculate split-image info (if layout supports it)
+        // Step 2: Determine if split-image is needed
         // =====================================================================
-        // Extract output spatial dimensions
         const ck_tile::index_t total_d =
             (NDimSpatial == 3) ? args.output_spatial_lengths_[NDimSpatial - 3] : 1;
         const ck_tile::index_t total_h =
@@ -108,9 +107,6 @@ struct GroupedConvolutionForwardInvoker
         auto split_info = TransformType::GetSplitImageInfo(
             args.G_, args.N_, args.C_, args.K_, total_d, total_h, total_w);
 
-        // =====================================================================
-        // Decide: Split-image or regular kernel?
-        // =====================================================================
         const bool use_split_image = is_supported_layout && split_info.should_split;
 
         if(s.log_level_ > 0)
@@ -126,85 +122,14 @@ struct GroupedConvolutionForwardInvoker
                           << "), split-image not necessary.\n";
                 std::cout << "[INVOKER] Using regular kernel (Kernel<false>).\n";
             }
-        }
-
-        // =====================================================================
-        // Step 3: Calculate split-image pieces (only if using split-image)
-        // =====================================================================
-        ck_tile::index_t num_d_pieces = 1;
-        ck_tile::index_t num_h_pieces = 1;
-        ck_tile::index_t num_w_pieces = 1;
-        ck_tile::index_t total_pieces = 1;
-        ck_tile::index_t base_piece_d = total_d;
-        ck_tile::index_t base_piece_h = total_h;
-        ck_tile::index_t base_piece_w = total_w;
-        std::array<ck_tile::SplitImagePieceInfo, 64> temp_pieces{};
-        ck_tile::index_t total_blocks = 0;
-
-        if(use_split_image)
-        {
-            num_d_pieces = split_info.num_d_pieces;
-            num_h_pieces = split_info.num_h_pieces;
-            num_w_pieces = split_info.num_w_pieces;
-            total_pieces = num_d_pieces * num_h_pieces * num_w_pieces;
-
-            if(s.log_level_ > 0)
+            else
             {
                 std::cout << "\n========================================\n";
                 std::cout << "[SPLIT-IMAGE ENABLED] Large tensor detected\n";
-                std::cout << "========================================\n";
-                if(NDimSpatial == 3)
-                {
-                    std::cout << "Total dimensions: D=" << total_d << " H=" << total_h
-                              << " W=" << total_w << "\n";
-                    std::cout << "Split into pieces: D=" << num_d_pieces << " × H=" << num_h_pieces
-                              << " × W=" << num_w_pieces << " = " << total_pieces
-                              << " total pieces\n";
-                    std::cout << "Base piece size: D=" << (total_d / num_d_pieces)
-                              << " H=" << (total_h / num_h_pieces)
-                              << " W=" << (total_w / num_w_pieces) << "\n";
-                }
-                else if(NDimSpatial == 2)
-                {
-                    std::cout << "Total dimensions: H=" << total_h << " W=" << total_w << "\n";
-                    std::cout << "Split into pieces: H=" << num_h_pieces << " × W=" << num_w_pieces
-                              << " = " << total_pieces << " total pieces\n";
-                    std::cout << "Base piece size: H=" << (total_h / num_h_pieces)
-                              << " W=" << (total_w / num_w_pieces) << "\n";
-                }
-                else
-                {
-                    std::cout << "Total dimensions: W=" << total_w << "\n";
-                    std::cout << "Split into pieces: W=" << num_w_pieces << " = " << total_pieces
-                              << " total pieces\n";
-                    std::cout << "Base piece size: W=" << (total_w / num_w_pieces) << "\n";
-                }
+                std::cout << "Split factors: D=" << split_info.num_d_pieces
+                          << " H=" << split_info.num_h_pieces
+                          << " W=" << split_info.num_w_pieces << "\n";
                 std::cout << "========================================\n\n";
-            }
-
-            // Base piece size (non-overlapping division)
-            base_piece_d = total_d / num_d_pieces;
-            base_piece_h = total_h / num_h_pieces;
-            base_piece_w = total_w / num_w_pieces;
-
-            // Calculate piece info for all pieces using library utility function
-            for(ck_tile::index_t piece = 0; piece < total_pieces; piece++)
-            {
-                temp_pieces[piece] =
-                    ck_tile::calculate_spatial_piece<TilePartitioner>(piece,
-                                                                      num_d_pieces,
-                                                                      num_h_pieces,
-                                                                      num_w_pieces,
-                                                                      base_piece_d,
-                                                                      base_piece_h,
-                                                                      base_piece_w,
-                                                                      total_d,
-                                                                      total_h,
-                                                                      total_w,
-                                                                      args.N_,
-                                                                      args.K_,
-                                                                      total_blocks);
-                total_blocks = temp_pieces[piece].block_end;
             }
         }
 
@@ -272,41 +197,14 @@ struct GroupedConvolutionForwardInvoker
                                                                     GemmPipeline,
                                                                     ConvEpilogue>;
 
-            // Create kargs
+            // Create kargs and populate split-image metadata if needed
             auto kargs = Kernel::MakeKernelArgs(args);
 
-            // Populate split-image metadata ONLY if using split-image kernel
+            dim3 grids = Kernel::GridSize(kargs);
             if constexpr(EnableSplitImage)
             {
-                kargs.num_spatial_pieces        = total_pieces;
-                kargs.split_image.total_d       = total_d;
-                kargs.split_image.total_h       = total_h;
-                kargs.split_image.total_w       = total_w;
-                kargs.split_image.total_spatial = total_d * total_h * total_w; // Pre-calculate
-                kargs.split_image.num_d_pieces  = num_d_pieces;
-                kargs.split_image.num_h_pieces  = num_h_pieces;
-                kargs.split_image.num_w_pieces  = num_w_pieces;
-
-                for(ck_tile::index_t i = 0; i < total_pieces; i++)
-                {
-                    kargs.split_image.pieces[i] = {temp_pieces[i].block_start,
-                                                   temp_pieces[i].block_end,
-                                                   temp_pieces[i].d_start,
-                                                   temp_pieces[i].h_start,
-                                                   temp_pieces[i].w_start,
-                                                   temp_pieces[i].d_size,
-                                                   temp_pieces[i].h_size,
-                                                   temp_pieces[i].w_size};
-                }
+                grids = ck_tile::PopulateSplitImageKargs<Kernel>(kargs, args);
             }
-
-            // Calculate grid: use total_blocks for split-image, or normal GridSize for regular
-            const dim3 grids = [&]() {
-                if constexpr(EnableSplitImage)
-                    return dim3(total_blocks, kargs.GemmBatch, kargs.n_splits);
-                else
-                    return Kernel::GridSize(kargs);
-            }();
             const dim3 blocks = Kernel::BlockSize();
 
             if(!Kernel::IsSupportedArgument(kargs))

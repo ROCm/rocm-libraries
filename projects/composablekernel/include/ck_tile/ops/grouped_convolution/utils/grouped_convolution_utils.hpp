@@ -375,6 +375,131 @@ CK_TILE_HOST SplitImagePieceInfo calculate_spatial_piece(ck_tile::index_t piece_
         total_blocks, total_blocks + piece_grid, d_start, h_start, w_start, d_size, h_size, w_size};
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// SFINAE trait: detect if a kernel type has EnableSplitImage == true
+// ═══════════════════════════════════════════════════════════════════════
+template <typename T, typename = void>
+struct has_split_image : std::false_type
+{
+};
+
+template <typename T>
+struct has_split_image<T, std::void_t<decltype(T::EnableSplitImage)>>
+    : std::bool_constant<T::EnableSplitImage>
+{
+};
+
+template <typename T>
+inline constexpr bool has_split_image_v = has_split_image<T>::value;
+
+/// @brief Populate split-image metadata in kargs and return adjusted grid dimensions.
+///
+/// @par Overview
+///      This is the shared host-side function for multi-piece split-image convolution.
+///      It extracts output spatial dims from host_args, calls GetSplitImageInfo to decide
+///      whether splitting is needed, and if so populates kargs.split_image.pieces[].
+///      Returns the grid dim3 to use for kernel launch.
+///
+/// @tparam Kernel  The convolution kernel type (must have TilePartitioner, NDimSpatial,
+///                 EnableSplitImage, and GridSize())
+/// @tparam KargsType  The kernel arguments type (has ConvToGemmFwdTransformer_t, split_image, etc.)
+/// @tparam HostArgsType  The host arguments type (has G_, N_, C_, K_, output_spatial_lengths_)
+///
+/// @param kargs  Kernel arguments to populate with split-image metadata (modified in-place)
+/// @param host_args  Host arguments containing tensor dimensions
+/// @param memory_threshold  Memory limit to force split-image (default 2GB).
+///                          Pass a smaller value to force splitting on small test tensors.
+///
+/// @return dim3 grid dimensions for kernel launch
+template <typename Kernel, typename KargsType, typename HostArgsType>
+CK_TILE_HOST dim3 PopulateSplitImageKargs(KargsType& kargs,
+                                           const HostArgsType& host_args,
+                                           long_index_t memory_threshold = (long_index_t{1} << 31))
+{
+    static_assert(Kernel::EnableSplitImage,
+                  "PopulateSplitImageKargs should only be called for split-image kernels");
+
+    using TilePartitioner = typename Kernel::TilePartitioner;
+    using TransformType   = typename KargsType::ConvToGemmFwdTransformer_t;
+    constexpr index_t NDimSpatial = Kernel::NDimSpatial;
+
+    // Extract output spatial dimensions from host args
+    const index_t total_d =
+        (NDimSpatial == 3) ? host_args.output_spatial_lengths_[NDimSpatial - 3] : 1;
+    const index_t total_h =
+        (NDimSpatial >= 2) ? host_args.output_spatial_lengths_[NDimSpatial - 2] : 1;
+    const index_t total_w = host_args.output_spatial_lengths_[NDimSpatial - 1];
+
+    // Get split-image info with configurable threshold
+    auto split_info = TransformType::GetSplitImageInfo(
+        host_args.G_, host_args.N_, host_args.C_, host_args.K_,
+        total_d, total_h, total_w, memory_threshold);
+
+    if(!split_info.should_split)
+    {
+        return Kernel::GridSize(kargs);
+    }
+
+    // Calculate pieces
+    const index_t num_d_pieces = split_info.num_d_pieces;
+    const index_t num_h_pieces = split_info.num_h_pieces;
+    const index_t num_w_pieces = split_info.num_w_pieces;
+    const index_t total_pieces = num_d_pieces * num_h_pieces * num_w_pieces;
+
+    const index_t base_piece_d = total_d / num_d_pieces;
+    const index_t base_piece_h = total_h / num_h_pieces;
+    const index_t base_piece_w = total_w / num_w_pieces;
+
+    index_t total_blocks = 0;
+
+    if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+    {
+        CK_TILE_INFO("Splitting image into ", std::to_string(total_pieces), " pieces (",
+                     num_d_pieces, " D pieces, ", num_h_pieces, " H pieces, ", num_w_pieces,
+                     " W pieces) with base piece size (", base_piece_d, " D, ", base_piece_h,
+                     " H, ", base_piece_w, " W) to fit within memory threshold of ",
+                     memory_threshold / (1024 * 1024), " MB");
+    }
+
+    for(index_t piece = 0; piece < total_pieces; piece++)
+    {
+        auto piece_info = calculate_spatial_piece<TilePartitioner>(piece,
+                                                                    num_d_pieces,
+                                                                    num_h_pieces,
+                                                                    num_w_pieces,
+                                                                    base_piece_d,
+                                                                    base_piece_h,
+                                                                    base_piece_w,
+                                                                    total_d,
+                                                                    total_h,
+                                                                    total_w,
+                                                                    host_args.N_,
+                                                                    host_args.K_,
+                                                                    total_blocks);
+
+        kargs.split_image.pieces[piece] = {piece_info.block_start,
+                                           piece_info.block_end,
+                                           piece_info.d_start,
+                                           piece_info.h_start,
+                                           piece_info.w_start,
+                                           piece_info.d_size,
+                                           piece_info.h_size,
+                                           piece_info.w_size};
+        total_blocks = piece_info.block_end;
+    }
+
+    kargs.num_spatial_pieces        = total_pieces;
+    kargs.split_image.total_d       = total_d;
+    kargs.split_image.total_h       = total_h;
+    kargs.split_image.total_w       = total_w;
+    kargs.split_image.total_spatial = total_d * total_h * total_w;
+    kargs.split_image.num_d_pieces  = num_d_pieces;
+    kargs.split_image.num_h_pieces  = num_h_pieces;
+    kargs.split_image.num_w_pieces  = num_w_pieces;
+
+    return dim3(total_blocks, kargs.GemmBatch, kargs.n_splits);
+}
+
 } // namespace ck_tile
 
 #if __clang_major__ >= 23

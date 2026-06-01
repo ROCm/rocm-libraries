@@ -140,7 +140,14 @@ struct TransformConvFwdToGemm
     //       2D: NHWGC (input), GKYXC (weight), NHWGK (output)
     //       3D: NDHWGC (input), GKZYXC (weight), NDHWGK (output)
     CK_TILE_HOST static SplitImageInfo GetSplitImageInfo(
-        index_t G, index_t N, index_t C, index_t K, index_t D_out, index_t H_out, index_t W_out)
+        index_t G,
+        index_t N,
+        index_t C,
+        index_t K,
+        index_t D_out,
+        index_t H_out,
+        index_t W_out,
+        long_index_t memory_threshold = TwoGB)
     {
         SplitImageInfo info{false, 1, 1, 1};
 
@@ -158,7 +165,7 @@ struct TransformConvFwdToGemm
 
         // Calculate effective N after split-N (simplified - assume worst case N=1)
         index_t effective_N = 1;
-        if(max_tensor_bytes > TwoGB && N > 1)
+        if(max_tensor_bytes > memory_threshold && N > 1)
         {
             // Split-N will reduce to approximately N=1 per launch
             effective_N = 1;
@@ -182,7 +189,7 @@ struct TransformConvFwdToGemm
         const long_index_t memory_after_split_n = calc_memory(1, 1, 1);
 
         // Check if split-image is needed
-        if(memory_after_split_n <= TwoGB)
+        if(memory_after_split_n <= memory_threshold)
         {
             info.should_split = false;
             return info;
@@ -211,7 +218,7 @@ struct TransformConvFwdToGemm
             for(index_t d_split = 2; d_split <= max_d_split; d_split++)
             {
                 info.num_d_pieces = d_split;
-                if(calc_memory(d_split, 1, 1) <= TwoGB)
+                if(calc_memory(d_split, 1, 1) <= memory_threshold)
                 {
                     return info; // D split alone is sufficient
                 }
@@ -228,7 +235,7 @@ struct TransformConvFwdToGemm
             for(index_t h_split = 2; h_split <= max_h_split; h_split++)
             {
                 info.num_h_pieces = h_split;
-                if(calc_memory(info.num_d_pieces, h_split, 1) <= TwoGB)
+                if(calc_memory(info.num_d_pieces, h_split, 1) <= memory_threshold)
                 {
                     return info; // D+H split is sufficient
                 }
@@ -243,7 +250,7 @@ struct TransformConvFwdToGemm
         for(index_t w_split = 2; w_split <= max_w_split; w_split++)
         {
             info.num_w_pieces = w_split;
-            if(calc_memory(info.num_d_pieces, info.num_h_pieces, w_split) <= TwoGB)
+            if(calc_memory(info.num_d_pieces, info.num_h_pieces, w_split) <= memory_threshold)
             {
                 return info; // D+H+W split is sufficient
             }
