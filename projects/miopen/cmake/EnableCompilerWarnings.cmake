@@ -39,7 +39,6 @@ set(__cxx_compile_options
     -Wcast-qual
     -Wformat-nonliteral
     -Wunknown-attributes
-    -Woption-ignored
     -Wunknown-warning-option
     -Wdeprecated
     -Wdeprecated-builtins
