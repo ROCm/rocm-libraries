@@ -4,18 +4,14 @@
 #pragma once
 
 #include "ck_tile/core/config.hpp"
-#include "ck_tile/core/utility/bit_cast.hpp"
-#include "ck_tile/core/utility/type_traits.hpp"
-#include "ck_tile/core/numeric/half.hpp"
 #include "ck_tile/core/numeric/float8.hpp"
+#include "ck_tile/core/numeric/half.hpp"
 #include "ck_tile/core/numeric/mxfp_convert.hpp"
 #include "ck_tile/core/numeric/mxfp_scale.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
+#include "ck_tile/core/utility/bit_cast.hpp"
+#include "ck_tile/core/utility/type_traits.hpp"
 
-#if __clang_major__ >= 23
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-#endif
 #if defined(__gfx950__) || defined(__gfx125__)
 #define CK_TILE_FP4_CVT_DEVICE 1
 #else
@@ -77,7 +73,7 @@ struct pk_float4_e2m1_t
     {
     }
     CK_TILE_HOST_DEVICE constexpr operator type() const { return data; }
-    CK_TILE_HOST_DEVICE constexpr type& get() { return data; }
+    CK_TILE_HOST_DEVICE constexpr type& get() [[clang::lifetimebound]] { return data; }
     CK_TILE_HOST_DEVICE constexpr type get() const { return data; }
 
     CK_TILE_HOST_DEVICE constexpr float to_float(float scale = 1.f) const;
@@ -733,6 +729,3 @@ CK_TILE_HOST_DEVICE constexpr bf8x2_t pk_fp4_t::to_bf8x2(float scale) const
 }
 
 } // namespace ck_tile
-#if __clang_major__ >= 23
-#pragma clang diagnostic pop
-#endif

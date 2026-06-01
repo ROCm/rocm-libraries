@@ -3,15 +3,20 @@
 
 #pragma once
 
-#include <stdint.h>
-#include <tuple>
-#include <type_traits>
 #include "ck_tile/core/config.hpp"
-#include "ck_tile/core/numeric/half.hpp"
+#if CK_TILE_USE_CUSTOM_DATA_TYPE
+#include "ck_tile/core/utility/type_traits.hpp"
+#else
 #include "ck_tile/core/numeric/bfloat16.hpp"
 #include "ck_tile/core/numeric/float8.hpp"
+#include "ck_tile/core/numeric/half.hpp"
 #include "ck_tile/core/numeric/int8.hpp"
-#include "ck_tile/core/numeric/mxfp_convert.hpp"
+#include "ck_tile/core/numeric/integer.hpp"
+#include "ck_tile/core/numeric/tfloat32.hpp"
+#include "ck_tile/core/utility/bit_cast.hpp"
+
+#include <type_traits>
+#endif
 
 #if __clang_major__ >= 23
 #pragma clang diagnostic push
@@ -61,16 +66,36 @@ CK_TILE_TYPE_CONVERT(float, float, bf16_t, bf16)
 CK_TILE_TYPE_CONVERT(float, float, fp8_t, fp8)
 CK_TILE_TYPE_CONVERT(float, float, bf8_t, bf8)
 
-static constexpr uint32_t float32_exponent_mask = 0x7f800000u;
+CK_TILE_TYPE_CONVERT(fp16_t, fp16, float, float)
+CK_TILE_TYPE_CONVERT(bf16_t, bf16, float, float)
+CK_TILE_TYPE_CONVERT(fp8_t, fp8, float, float)
+CK_TILE_TYPE_CONVERT(bf8_t, bf8, float, float)
 
-enum class tf32_rounding_mode
+CK_TILE_TYPE_CONVERT(float, float, int8_t, int8)
+CK_TILE_TYPE_CONVERT(int8_t, int8, float, float)
+
+CK_TILE_TYPE_CONVERT(fp8_t, fp8, fp16_t, fp16)
+CK_TILE_TYPE_CONVERT(bf8_t, bf8, fp16_t, fp16)
+CK_TILE_TYPE_CONVERT(fp16_t, fp16, fp8_t, fp8)
+CK_TILE_TYPE_CONVERT(fp16_t, fp16, bf8_t, bf8)
+
+CK_TILE_TYPE_CONVERT(fp16x2_t, fp16x2, fp32x2_t, fp32x2)
+CK_TILE_TYPE_CONVERT(bf16x2_t, bf16x2, fp32x2_t, fp32x2)
+#undef CK_TILE_TYPE_CONVERT
+
+[[deprecated("Use (ck_tile::numeric_traits<ck_tile::tf32_t>::exp_mask << 23) "
+             "instead")]] static constexpr uint32_t float32_exponent_mask = 0x7f800000u;
+
+enum class [[deprecated]] tf32_rounding_mode
 {
     trunc = 0, // truncate
     rne   = 1, // round to nearest even (RTNE)
 };
 
-template <tf32_rounding_mode rounding = tf32_rounding_mode::trunc>
-CK_TILE_HOST_DEVICE constexpr float float_to_tf32(float x)
+template <tf32_rounding_mode rounding>
+[[deprecated(
+    "Use ck_tile::type_convert<ck_tile::tf32_t> instead")]] CK_TILE_HOST_DEVICE constexpr float
+float_to_tf32(float x)
 {
     uint32_t i = bit_cast<uint32_t>(x);
     if constexpr(rounding == tf32_rounding_mode::rne)
@@ -92,35 +117,20 @@ CK_TILE_HOST_DEVICE constexpr float float_to_tf32(float x)
 }
 
 template <typename Y,
-          tf32_rounding_mode rounding                       = tf32_rounding_mode::trunc,
-          std::enable_if_t<std::is_same_v<Y, tf32_t>, bool> = false>
-CK_TILE_HOST_DEVICE constexpr float type_convert(float x)
+          tf32_rounding_mode rounding                              = tf32_rounding_mode::trunc,
+          std::enable_if_t<std::is_same_v<Y, tf32_legacy_t>, bool> = false>
+[[deprecated(
+    "Use ck_tile::type_convert<ck_tile::tf32_t> instead")]] CK_TILE_HOST_DEVICE constexpr float
+type_convert(float x)
 {
     return float_to_tf32<rounding>(x);
 }
 
-CK_TILE_TYPE_CONVERT(fp16_t, fp16, float, float)
-CK_TILE_TYPE_CONVERT(bf16_t, bf16, float, float)
-CK_TILE_TYPE_CONVERT(fp8_t, fp8, float, float)
-CK_TILE_TYPE_CONVERT(bf8_t, bf8, float, float)
-
-CK_TILE_TYPE_CONVERT(float, float, int8_t, int8)
-CK_TILE_TYPE_CONVERT(int8_t, int8, float, float)
-
-CK_TILE_TYPE_CONVERT(fp8_t, fp8, fp16_t, fp16)
-CK_TILE_TYPE_CONVERT(bf8_t, bf8, fp16_t, fp16)
-CK_TILE_TYPE_CONVERT(fp16_t, fp16, fp8_t, fp8)
-CK_TILE_TYPE_CONVERT(fp16_t, fp16, bf8_t, bf8)
-
-CK_TILE_TYPE_CONVERT(fp16x2_t, fp16x2, fp32x2_t, fp32x2)
-CK_TILE_TYPE_CONVERT(bf16x2_t, bf16x2, fp32x2_t, fp32x2)
-#undef CK_TILE_TYPE_CONVERT
-
 } // namespace ck_tile
 
-#include "ck_tile/core/numeric/pk_fp4.hpp"
-#include "ck_tile/core/numeric/pk_f6.hpp"
 #include "ck_tile/core/numeric/float8_ext.hpp"
+#include "ck_tile/core/numeric/pk_f6.hpp"
+#include "ck_tile/core/numeric/pk_fp4.hpp"
 
 namespace ck_tile {
 
