@@ -91,8 +91,8 @@ private:
     hipblasLtMatmulHeuristicResult_t _heuristicResult;
     size_t _workspaceSize = 0;
 
-    static constexpr float _alpha = 1.f;
-    static constexpr float _beta = 0.f;
+    static constexpr float ALPHA = 1.f;
+    static constexpr float BETA = 0.f;
 };
 
 } // namespace hipblaslt_plugin
