@@ -7186,39 +7186,27 @@ class KernelWriter(metaclass=abc.ABCMeta):
       try:
         ctx = self._capture_context
         if is_cms_callsite:
-          # rocm-libraries-xj16 shape (a): drive Build #2 inline. The
-          # host writer is mid-CMS-build; we need a real non-CMS
-          # FourPartCapture to compare ctx.cms against. We invoke the
-          # canonical helper rather than re-implementing the second
-          # writer here so all callers (this site + tests) share the
-          # same code path.
-          from Tensile.Components.CustomSchedule.approach_a import (
-            build_non_cms_reference,
-          )
-          # `build_non_cms_reference` forces UseCustomMainLoopSchedule=0
-          # on its config copy (approach_a.py:_prepare_non_cms_config),
-          # so the recursion guard via `is_cms_callsite` is structural —
-          # Build #2 cannot re-enter shape (a).
-          # rocm-libraries-l1l6: pass the Solution itself (not
-          # `dict(kernel)`); `build_non_cms_reference` reads the pre-CMS
-          # snapshot via `solution.pre_cms_state()`.
-          isaInfoMap = getattr(kernel, "isaInfoMap", None)
-          if isaInfoMap is None:
-            # If the Solution wasn't built with an isaInfoMap, we
-            # cannot drive Build #2. Fail loud rather than silently
-            # skipping the gate — per 2026-05-26 directive, validation
-            # must always assert on CMS builds.
-            raise AssertionError(
-              f"rocm-libraries-xj16: real-vs-real assertion cannot run "
-              f"because kernel.isaInfoMap is unavailable. The CMS build "
-              f"path must propagate isaInfoMap through Solution "
-              f"construction. kernel macroTile="
-              f"{kernel.get('MacroTile0')}x{kernel.get('MacroTile1')}x"
-              f"{kernel.get('DepthU')}."
-            )
-          ctx.default = build_non_cms_reference(
-            kernel, self.assembler, isaInfoMap,
-          )
+          # rocm-libraries-dm4p Phase 2: SHADOW-as-canonical-reference.
+          # The SHADOW capture machinery (_captureDefaultSchedule, see
+          # KernelWriter.py:6170-6318) has already populated
+          # `ctx.default` with a FourPartCapture earlier in this method.
+          # `ctx.default` survives `_capture_context.reset()` (see
+          # ScheduleCapture.CaptureContext.reset — `default`/`cms` are
+          # consumer-facing and intentionally preserved). After the
+          # nmsx + g9fi capture-quality fixes (Phase 1), the SHADOW
+          # capture's per-category counts match CMS subject's, so the
+          # xj16 inline real-vs-real assertion below consumes it
+          # directly — no second writer required.
+          #
+          # Approach A's `build_non_cms_reference(kernel, assembler,
+          # isaInfoMap)` is no longer driven from this site; that
+          # helper remains importable for tests (Phase 4
+          # `rocm-libraries-u89e` will retire it). The
+          # `is_cms_callsite` branch is preserved here because the
+          # `else` clause (shape b — non-CMS-only Build #2 capture
+          # used by `enable_capture_non_cms_build`-driven tests) is a
+          # legitimate separate consumer of this block.
+          ctx.default = self._last_default_capture
         else:
           # rocm-libraries-nyb5 shape (b): consume the natural non-CMS
           # captures the inner _loopBody / noLoadLoop branches stashed.

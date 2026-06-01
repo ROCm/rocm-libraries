@@ -121,20 +121,22 @@ m7o5's `_CMS_FRAMEWORK_DERIVED_DEFAULTS` was a centralized enumeration of CMS-de
 
 These three fixes target three structurally distinct sites: capture-window scope (`:4747`), per-iter count parameterization (`:4736`), and one site of hand-rolled tag emission (`:1040-1045`). They are not a list of patches over a single drifting parallel walk — they are three independent locations each with its own principled justification. Adding a new SHADOW defect later (which the third reviewer warned about) would surface as a separate architectural issue, not as growth of this list.
 
-### Phase 2 — Wire SHADOW as `ctx.default`
+### Phase 2 — Wire SHADOW as `ctx.default` — **LANDED** (`rocm-libraries-dm4p`)
 
-At `Tensile/KernelWriter.py:5772` (the inline CMS-assertion site), replace:
+At the inline CMS-assertion site in `kernelBody`'s `_captureNonCmsBuild` block (the `if is_cms_callsite:` branch), the prior Approach-A call:
 ```python
 ctx.default = build_non_cms_reference(kernel, self.assembler, isaInfoMap)
 ```
-with the SHADOW capture, which is already populated by this point in the build:
+is replaced with consumption of the SHADOW capture, which is already populated by this point in the build (`_captureDefaultSchedule` ran earlier in the same method and assigned `ctx.default = FourPartCapture(...)`; `CaptureContext.reset()` preserves `default` and `cms` across the SHADOW block's `finally`):
 ```python
 ctx.default = self._last_default_capture
 ```
 
 `isValid` and `verify_correct_number_of_instructions` already run earlier. No other validator-layer changes needed.
 
-**Acceptance:** the BPG#11 reproducer (`6hk3_tf32_128x160x64_tn.yaml`) builds successfully and the validator runs to completion. Expected outcome: zero residuals (the j4qm-style asymmetry vanishes because instructions are identical on both sides).
+**Acceptance (verified 2026-06-01):** BPG#11 reproducer (`6hk3_tf32_128x160x64_tn.yaml`) builds successfully end-to-end (`Tensile/bin/Tensile ... --build-only --gpu-targets gfx950`). The xj16 inline `compare_graphs` and `validate_edge_wait_coverage` assertions both pass — zero residuals.
+
+**Scaffolding deferred to Phase 4:** the `is_cms_callsite` predicate and the `else` branch (Approach-A's shape-(b) non-CMS-only Build #2 capture) remain in place at this site. Phase 4 (`rocm-libraries-u89e`) is responsible for retiring `build_non_cms_reference` and its consumers; this Phase-2 swap was scoped to one line to keep the diff minimal and avoid touching unaudited dependents.
 
 ### Phase 3 — Validate against the CMS test surface, HARD GO/NO-GO GATE
 
