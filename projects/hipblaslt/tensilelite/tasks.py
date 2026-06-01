@@ -4,6 +4,7 @@
 from invoke.tasks import task
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 
@@ -21,7 +22,6 @@ def _detect_rocm():
     if env_path:
         return env_path
 
-    import shutil
     if shutil.which("rocm-sdk"):
         try:
             result = subprocess.check_output(
@@ -76,8 +76,11 @@ def rocisa(c, rocisa_dir=None):
     src = pathlib.Path(rocisa_dir).resolve() if rocisa_dir else pathlib.Path(__file__).parent / "rocisa"
     rocm = _detect_rocm()
     cmake_args = f"-DROCM_PATH={rocm} -DROCISA_INCLUDE_BUILD_INFO=ON"
+    if shutil.which("ccache"):
+        cmake_args += " -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
     env = dict(os.environ, CMAKE_ARGS=cmake_args)
-    c.run(f"pip install -e {shlex.quote(str(src))}", env=env)
+    env.setdefault("CMAKE_BUILD_PARALLEL_LEVEL", str(os.cpu_count() or 1))
+    c.run(f"pip install --no-build-isolation -e {shlex.quote(str(src))}", env=env)
 
 
 @task(
@@ -154,6 +157,9 @@ def build_client(
         if rocm_path:
             cmake_cmd.append(f"-DCMAKE_C_COMPILER={cmake_c_compiler}")
             cmake_cmd.append(f"-DCMAKE_CXX_COMPILER={cmake_cxx_compiler}")
+        if shutil.which("ccache"):
+            cmake_cmd.append("-DCMAKE_C_COMPILER_LAUNCHER=ccache")
+            cmake_cmd.append("-DCMAKE_CXX_COMPILER_LAUNCHER=ccache")
         if export_compile_commands:
             cmake_cmd.append("-DCMAKE_EXPORT_COMPILE_COMMANDS=ON")
         if bundle_python_deps:

@@ -351,16 +351,6 @@ struct MIOPEN_INTERNALS_EXPORT ConvHipDirectFwd11x11 final : ConvSolver
                              const miopen::conv::ProblemDescription&) const override;
 };
 
-struct MIOPEN_INTERNALS_EXPORT ConvOclDirectFwdGen final : ConvSolver
-{
-    const std::string& SolverDbId() const override { return GetSolverDbId<ConvOclDirectFwdGen>(); }
-
-    bool IsApplicable(const ExecutionContext&,
-                      const miopen::conv::ProblemDescription&) const override;
-    ConvSolution GetSolution(const ExecutionContext&,
-                             const miopen::conv::ProblemDescription&) const override;
-};
-
 struct PerformanceImplicitGemm : PerfConfigBase<PerformanceImplicitGemm>
 {
     int BPerBlock; // 2^n[8..16]
@@ -2274,9 +2264,14 @@ struct ConvAsmBwdWrW1x1 final : ConvTunableSolver<PerformanceConfigConvAsmBwdWrW
                              const PerformanceConfigConvAsmBwdWrW1x1&) const override;
 };
 
-struct MIOPEN_INTERNALS_EXPORT ConvOclBwdWrW53 final : ConvSolver
+struct MIOPEN_INTERNALS_EXPORT ConvHipBwdWrW53 final : ConvSolver
 {
-    const std::string& SolverDbId() const override { return GetSolverDbId<ConvOclBwdWrW53>(); }
+    // Preserve legacy perf-db key after class rename from ConvOclBwdWrW53.
+    const std::string& SolverDbId() const override
+    {
+        static const std::string id{"ConvOclBwdWrW53"};
+        return id;
+    }
 
     bool IsApplicable(const ExecutionContext&,
                       const miopen::conv::ProblemDescription&) const override;

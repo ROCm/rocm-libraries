@@ -65,6 +65,7 @@ TEST_P(MXDataGenFP4Test, ZeroFrequencyWithinBounds)
     std::vector<size_t> emptyTile;
 
     generateMXInput((hipDataType)HIP_R_4F_E2M1,
+                    HIP_R_8F_UE8M0,
                     dataBuffer.data(),
                     scaleBuffer.data(),
                     rows,
@@ -131,13 +132,13 @@ TEST_P(MXGeneratorDeterminismTest, GeneratorOutputIsDeterministic)
 
     std::vector<size_t> emptySwizzle, emptyTile;
 
-    generateMXInput((hipDataType)HIP_R_4F_E2M1,
+    generateMXInput((hipDataType)HIP_R_4F_E2M1, HIP_R_8F_UE8M0,
                     data1.data(), scale1.data(),
                     rows, cols, rows, isTranspose,
                     emptySwizzle, emptyTile,
                     mxBlock, 1, isMatrixA, "Bounded", -1.f, 1.f);
 
-    generateMXInput((hipDataType)HIP_R_4F_E2M1,
+    generateMXInput((hipDataType)HIP_R_4F_E2M1, HIP_R_8F_UE8M0,
                     data2.data(), scale2.data(),
                     rows, cols, rows, isTranspose,
                     emptySwizzle, emptyTile,
@@ -200,7 +201,7 @@ TEST_P(MXPreSwizzleTest, ScaleIsPermutationOfUnswizzled)
     std::vector<uint8_t> scaleShuf(numScales, 0);
 
     // Generate without preSwizzle
-    generateMXInput((hipDataType)HIP_R_4F_E2M1,
+    generateMXInput((hipDataType)HIP_R_4F_E2M1, HIP_R_8F_UE8M0,
                     dataNoShuf.data(),
                     scaleNoShuf.data(),
                     rows, cols, rows,
@@ -210,7 +211,7 @@ TEST_P(MXPreSwizzleTest, ScaleIsPermutationOfUnswizzled)
                     "Bounded", -1.0f, 1.0f);
 
     // Generate with preSwizzle
-    generateMXInput((hipDataType)HIP_R_4F_E2M1,
+    generateMXInput((hipDataType)HIP_R_4F_E2M1, HIP_R_8F_UE8M0,
                     dataShuf.data(),
                     scaleShuf.data(),
                     rows, cols, rows,

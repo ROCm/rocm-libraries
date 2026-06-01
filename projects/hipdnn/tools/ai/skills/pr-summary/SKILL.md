@@ -1,6 +1,8 @@
 ---
 name: pr-summary
 description: "Draft or revise pull request titles and bodies with a concise standard format: summary, risk assessment, testing summary, testing checklist, and technical changes. Use when preparing a new draft or ready-for-review PR, opening a PR from a branch, updating an existing draft/open PR, reopening a PR, or when the user provides a GitHub PR URL/branch and asks for PR summary, risk, testing, or description text. New PRs should be draft by default unless the user explicitly asks to open them ready for review."
+argument-hint: "[PR URL | branch:<name> | local] [risk:<1-5>] [testing:<summary>]"
+allowed-tools: Bash, Read, Grep, Glob
 ---
 
 # PR Summary

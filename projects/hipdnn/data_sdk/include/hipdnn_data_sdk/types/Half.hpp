@@ -22,7 +22,9 @@ struct fp4_e2m1;
 struct fp6_e2m3;
 struct fp6_e3m2;
 struct fp8_e4m3;
+struct fp8_e4m3_fnuz;
 struct fp8_e5m2;
+struct fp8_e5m2_fnuz;
 struct fp8_e8m0;
 // NOLINTEND(readability-identifier-naming)
 
@@ -270,7 +272,9 @@ struct half
     inline explicit half(fp6_e2m3 f) noexcept;
     inline explicit half(fp6_e3m2 f) noexcept;
     inline explicit half(fp8_e4m3 f) noexcept;
+    inline explicit half(fp8_e4m3_fnuz f) noexcept;
     inline explicit half(fp8_e5m2 f) noexcept;
+    inline explicit half(fp8_e5m2_fnuz f) noexcept;
     inline explicit half(fp8_e8m0 f) noexcept;
 
     // Factory for raw bits

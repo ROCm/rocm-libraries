@@ -17,7 +17,7 @@ template <typename DataType>
 class IntegrationGpuMatmulBias : public IntegrationGpuMatmulBase<DataType, MatmulTestCase>
 {
 protected:
-    virtual std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>
+    std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>
         initGraph(const MatmulTestCase& testParams,
                   hipdnn_frontend::graph::Graph& graphObj) const override
     {
@@ -33,7 +33,7 @@ protected:
             this->generateInputStrideOrder(testParams.bDims, testParams.transB));
         auto bTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(bAttr));
 
-        graph::MatmulAttributes matmulAttrs;
+        graph::MatmulAttributes const matmulAttrs;
 
         auto cAttr = graphObj.matmul(aTensorAttr, bTensorAttr, matmulAttrs);
 
@@ -50,12 +50,12 @@ protected:
         return graphObj.pointwise(cAttr, biasTensorAttr, biasAttrs);
     }
 
-    virtual std::string getGraphName() const override
+    std::string getGraphName() const override
     {
         return "MatmulBiasTest";
     }
 
-    virtual unsigned int getSeed(const MatmulTestCase& testParams) const override
+    unsigned int getSeed(const MatmulTestCase& testParams) const override
     {
         return testParams.seed;
     }
