@@ -227,6 +227,13 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
                 MakeAReduceTileDistribution());
         }
 
+        template <index_t... I>
+        CK_TILE_DEVICE static constexpr auto getIdx(tile_distributed_index<I...>)
+        {
+            constexpr auto idxs = make_tuple(I...);
+            return idxs[number<0>{}];
+        }
+
         template <typename ADstStaticTileDist,
                   typename AQDstStaticTileDistribution,
                   typename ADramWindow>
@@ -267,6 +274,8 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
             constexpr index_t MWarp = BlockGemmShape::BlockWarps::at(number<0>{});
             constexpr index_t KWarp = BlockGemmShape::BlockWarps::at(number<2>{});
 
+            static_assert(KWarp == 1, "Only single KWarp supported!");
+
             using BlockWarps = ck_tile::sequence<MWarp, KWarp>;
             using BlockTile  = ck_tile::sequence<MPerBlock, KPerBlockAQ>;
             using WarpTile   = ck_tile::sequence<MPerBlock / MWarp, KPerBlockAQ / KWarp>;
@@ -303,26 +312,26 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
             // the MFMA the full scale data needs to be available for each thread
             constexpr auto thread_buf_size = aq_reduce.get_thread_buffer_size();
 
-            // AQDataType wave_reduce[thread_buf_size] = {};
-
             static_for<0, thread_buf_size, 1>{}([&](auto i) {
                 // Copy the first lanes values to all threads
                 aq_block_tile.get_thread_buffer()[i] =
-                    amd_wave_read_first_lane(aq_reduce.get_thread_buffer()[i]) / fp8_range;
+                    amd_wave_read_first_lane(aq_reduce.get_thread_buffer()[i]) * fp8_inv_range;
             });
 
-            // Copy computed scales to aq_block_tile
-            // sweep_tile<decltype(aq_reduce)>([&](auto... idx_) {
-            //     // TODO: Implement copy
-            // });
+            // Apply scales and convert data to the original block tile distribution
+            sweep_tile(a_block_tile, [&](auto idx) {
+                // auto full_idx    = make_tuple(idx_...);
+                constexpr auto m_idx = idx[number<0>{}];
+                constexpr auto k_idx = idx[number<1>{}];
+                constexpr auto k     = getIdx(k_idx);
+                constexpr auto grouped_k_idx =
+                    tile_distributed_index<k % number<AQuantGroupSize::kK>{}>{};
+                constexpr auto k_group_idx =
+                    tile_distributed_index<k / number<AQuantGroupSize::kK>{}>{};
 
-            // Apply scales and copy data
-            // TODO: Fix indexing from the reduce shape to the actual a_block_tile shape
-            sweep_tile<decltype(a_reduce)>([&](auto... idx_) {
-                constexpr auto idx_0 = make_tuple(make_tuple(idx_[number<0>{}]...)[number<0>{}]);
-                (..., [&](auto idx) {
-                    a_block_tile(idx) = type_convert<fp8_t>(a_reduce(idx) / aq_block_tile(idx_0));
-                }(idx_));
+                auto raw_a_value  = a_reduce(make_tuple(m_idx, grouped_k_idx));
+                auto scale_value  = aq_block_tile(make_tuple(m_idx, k_group_idx));
+                a_block_tile(idx) = type_convert<fp8_t>(raw_a_value / scale_value);
             });
         }
 
@@ -420,42 +429,25 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
                 Base::GetAWindows(a_dram_block_window_tmp, a_lds_block, a_lds_load_tile_distr);
             auto&& [b_copy_dram_window, b_copy_lds_window, b_lds_gemm_window] =
                 Base::GetBWindows(b_dram_block_window_tmp, b_lds_block, b_lds_load_tile_distr);
+            // auto aq_copy_dram_window = Base::GetAQDramLoadWindow(aq_dram_block_window_tmp);
             auto bq_copy_dram_window = Base::GetBQDramLoadWindow(bq_dram_block_window_tmp);
 
-            using ABlockTileDistr  = decltype(a_copy_dram_window.get_tile_distribution());
-            using BBlockTileDistr  = decltype(b_copy_dram_window.get_tile_distribution());
+            using ABlockTileDistr = decltype(a_copy_dram_window.get_tile_distribution());
+            using BBlockTileDistr = decltype(b_copy_dram_window.get_tile_distribution());
+            using AQBlockTileDistr =
+                decltype(Policy::template MakeAQDramTileDistribution<Problem>());
             using BQBlockTileDistr = decltype(bq_copy_dram_window.get_tile_distribution());
 
             using ABlockTile =
                 decltype(make_static_distributed_tensor<OverrideADataType>(ABlockTileDistr{}));
+            using AQBlockTile =
+                decltype(make_static_distributed_tensor<AQDataType>(AQBlockTileDistr{}));
             using BBlockTile =
                 decltype(make_static_distributed_tensor<OverrideBDataType>(BBlockTileDistr{}));
             using BQBlockTile =
                 decltype(make_static_distributed_tensor<BQDataType>(BQBlockTileDistr{}));
 
             auto block_gemm = BlockGemm();
-            // Define the reduce problem for quantization
-            constexpr index_t MWarp = BlockGemmShape::BlockWarps::at(number<0>{});
-            constexpr index_t KWarp = BlockGemmShape::BlockWarps::at(number<2>{});
-
-            static_assert(KWarp == 1, "Only single KWarp supported!");
-
-            using BlockWarps = ck_tile::sequence<MWarp, KWarp>;
-            using BlockTile  = ck_tile::sequence<MPerBlock, KPerBlockAQ>;
-            using WarpTile   = ck_tile::sequence<MPerBlock / MWarp, KPerBlockAQ / KWarp>;
-            using ThreadTile =
-                ck_tile::sequence<BlockGemm::MIterPerWarp, BlockGemm::WarpGemm::kKPerThread>;
-            using ReduceShape = Reduce2dShape<BlockWarps, BlockTile, WarpTile, ThreadTile>;
-
-            // TODO: Computedatatype float?
-            using ReduceProblem = BlockReduce2dProblem<ADataType, AQDataType, ReduceShape>;
-
-            using ReducePolicy = Reduce2dDefaultPolicy;
-
-            constexpr auto blockreduce = ReducePolicy::template GetBlockReduce2d<ReduceProblem>();
-
-            using AQBlockTile = decltype(blockreduce.template MakeYBlockTile<
-                                         static_distributed_tensor<AQDataType, ABlockTileDistr>>());
 
             ABlockTile a_block_tile;
             BBlockTile b_block_tile;
