@@ -752,7 +752,13 @@ namespace TensileLite
         // in General Batched GEMM
         if(sizeMapping.streamK != 0)
         {
-            // Dynamic Stream-K uses a different kernel argument layout from Stream-K 1/2/3.
+            if(sizeMapping.streamK != 3 && sizeMapping.streamK != 4)
+            {
+                throw std::runtime_error("Stream-K modes 1 and 2 are no longer supported; "
+                                         "use StreamK=3 or StreamK=4");
+            }
+
+            // Dynamic Stream-K uses a different kernel argument layout from Stream-K 3.
             if(sizeMapping.streamK == 4)
             {
                 AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(hardware);
@@ -806,60 +812,52 @@ namespace TensileLite
                     args.template append<uint32_t>("totalIters", totalIters);
                 }
 
-                if(sizeMapping.streamK == 1) // Basic SK
+                // Stream-K 3 uses the two-tile ABI.
+                if(sk.reduction == origami::reduction_t::parallel)
                 {
-                    uint32_t itersPerWave = CeilDivide(static_cast<uint32_t>(totalIters),
-                                                       static_cast<uint32_t>(numWorkGroups.x));
-                    args.template append<uint32_t>("SKItersPerWG", itersPerWave);
+                    std::cerr << "Warning: Stream-K Data Parallel does not support GSU > 1, "
+                              << "setting GSU to 1." << std::endl;
+                    gsu = 1;
                 }
-                else if(sizeMapping.streamK >= 2) // Two-tile SK
+
+                if(sk.reduction == origami::reduction_t::parallel)
                 {
-                    if(sk.reduction == origami::reduction_t::parallel)
+                    uint32_t skSplit
+                        = sk.grid / tiles; // skTiles is skSplit in parallel reduction path
+                    uint32_t skItersPerWG = itersPerTile / skSplit;
+
+                    args.template append<uint32_t>("SKItersPerWG", skItersPerWG);
+                    args.template append<uint32_t>("skGrid", sk.grid);
+                    args.template append<uint32_t>("skTiles", skSplit);
+                }
+                else
+                {
+                    AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(hardware);
+                    assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
+                    int fullTiles = pAMDGPU->skFullTiles;
+
+                    bool bigEnough = tiles > sk.grid;
+                    // skTiles is number of Stream-K tiles to complete
+                    // Two-tile algorithm causes each WG to run an even number of Stream-K iterations,
+                    // followed by an even number of data-parllel tiles.
+                    // If total tiles is evenly divisble by grid size,
+                    // then no Stream-K tiles are needed, all data-parallel
+                    uint32_t skTiles = sk.grid;
+                    // If not evenly divisible, determine number of Stream-K tiles
+                    if(tiles % sk.grid != 0)
                     {
-                        std::cerr << "Warning: Stream-K Data Parallel does not support GSU > 1, "
-                                  << "setting GSU to 1." << std::endl;
-                        gsu = 1;
+                        // Number of data-parallel tiles on each workgroup would be:
+                        // dpTilesPerWG = bigEnough ? (tiles - skTiles) / skGrid : 0;
+                        skTiles = bigEnough ? sk.grid * fullTiles + tiles % sk.grid : tiles;
+                        // Cap Stream-K tiles at total number of tiles in case of large multiplier
+                        skTiles = std::min(skTiles, static_cast<uint32_t>(tiles));
                     }
 
-                    if(sk.reduction == origami::reduction_t::parallel)
-                    {
-                        uint32_t skSplit
-                            = sk.grid / tiles; // skTiles is skSplit in parallel reduction path
-                        uint32_t skItersPerWG = itersPerTile / skSplit;
+                    uint32_t skItersPerWG = skTiles * itersPerTile / sk.grid;
 
-                        args.template append<uint32_t>("SKItersPerWG", skItersPerWG);
-                        args.template append<uint32_t>("skGrid", sk.grid);
-                        args.template append<uint32_t>("skTiles", skSplit);
-                    }
-                    else
-                    {
-                        AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(hardware);
-                        assert(pAMDGPU != nullptr && pAMDGPU->computeUnitCount != 0);
-                        int fullTiles = pAMDGPU->skFullTiles;
-
-                        bool bigEnough = tiles > sk.grid;
-                        // skTiles is number of Stream-K tiles to complete
-                        // Two-tile algorithm causes each WG to run an even number of Stream-K iterations,
-                        // followed by an even number of data-parllel tiles.
-                        // If total tiles is evenly divisble by grid size,
-                        // then no Stream-K tiles are needed, all data-parallel
-                        uint32_t skTiles = sk.grid;
-                        // If not evenly divisible, determine number of Stream-K tiles
-                        if(tiles % sk.grid != 0)
-                        {
-                            // Number of data-parallel tiles on each workgroup would be:
-                            // dpTilesPerWG = bigEnough ? (tiles - skTiles) / skGrid : 0;
-                            skTiles = bigEnough ? sk.grid * fullTiles + tiles % sk.grid : tiles;
-                            // Cap Stream-K tiles at total number of tiles in case of large multiplier
-                            skTiles = std::min(skTiles, static_cast<uint32_t>(tiles));
-                        }
-
-                        uint32_t skItersPerWG = skTiles * itersPerTile / sk.grid;
-
-                        args.template append<uint32_t>("SKItersPerWG", skItersPerWG);
-                        args.template append<uint32_t>("skGrid", sk.grid);
-                        args.template append<uint32_t>("skTiles", skTiles);
-                    }
+                    args.template append<uint32_t>("SKItersPerWG", skItersPerWG);
+                    args.template append<uint32_t>("skGrid", sk.grid);
+                    args.template append<uint32_t>("skTiles", skTiles);
                 }
             }
         }

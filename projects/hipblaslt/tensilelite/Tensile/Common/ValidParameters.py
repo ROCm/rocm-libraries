@@ -745,9 +745,8 @@ validParameters = { # we need to make sure this matches develop
     # Total work units are calculated as (#MTs x #LoopIters) and divided among workgroups.
     # In most cases each workgroup will calculate a partial tile that are accumulated in a fixup step in the same kernel
     # 0 : Standard data-parallel kernel
-    # 1 : Basic StreamK
-    # 2 : Two-Tile StreamK (each WG completes an even number of sk iterations, followed by an even number of dp tiles)
     # 3 : Two-Tile StreamK with DP before SK tiles
+    # 4 : Dynamic StreamK work queue
     # StreamK kernels can adjust the number of CUs being used.
     # Using fewer sometimes increases overall throughput by allowing other kernels to run in parallel.
     # StreamK grid is controlled by setting these enviornment variables:
@@ -772,7 +771,7 @@ validParameters = { # we need to make sure this matches develop
     #   1 = 1 WG per CU (default), for example. 2 will launch WGs = 2 x CU count.
     # The priority of these environment variables is defined as follows:
     # TENSILE_STREAMK_FIXED_GRID > TENSILE_STREAMK_DYNAMIC_GRID > TENSILE_STREAMK_MAX_CUS > TENSILE_STREAMK_GRID_MULTIPLIER
-    "StreamK": [0, 1, 2, 3, 4],
+    "StreamK": [0, 3, 4],
     # Determines if StreamK kernel uses atomics
     # 0: uses workspace to store partial tiles, accumulate in deterministic fix-up step
     # 1: uses atomics to accumulate partial tiles
@@ -797,7 +796,7 @@ validParameters = { # we need to make sure this matches develop
     "DebugStreamK": [0, 1, 2, 3],
     # Persistent-kernel debug: when True, the persistent loop never exits.
     # Used as a co-tenant load kernel for contended-perf benchmarking.
-    # Termination is via process death. Requires StreamK = 1, 2, or 3.
+    # Termination is via process death. Requires StreamK = 3.
     "DebugPersistentKernelLoopForever": [False, True],
     # Controls desired width (#elements) for loads from global memory -> LDS.
     # and eliminates the pointer unshift logic

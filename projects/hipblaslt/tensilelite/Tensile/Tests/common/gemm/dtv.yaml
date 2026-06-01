@@ -182,7 +182,7 @@ BenchmarkProblems:
         - DirectToVgprA: [1]
         - UseSgprForGRO: [0,1]
         - TransposeLDS: [0,1]
-        - StreamK: [0,2]
+        - StreamK: [0]
         - Groups:
           -
             - MatrixInstruction: [16, 16, 16, 1,  1,   2, 1,  4,1 ]
@@ -278,7 +278,7 @@ BenchmarkProblems:
         #- SourceSwap: [0, 1]
         - DirectToVgprB: [1]
         - UseSgprForGRO: [0,1]
-        - StreamK: [0,1]
+        - StreamK: [0]
         - Groups:
           -
             - MatrixInstruction: [16, 16, 16, 1,  1,   1, 2,  1,4 ]
@@ -732,7 +732,7 @@ BenchmarkProblems:
         #- SourceSwap: [0, 1]
         - DirectToVgprB: [1]
         - UseSgprForGRO: [0,1]
-        - StreamK: [0,2]
+        - StreamK: [0]
         - Groups:
           -
             - MatrixInstruction: [16, 16, 16, 1,  1,   1, 2,  1,4 ]
@@ -824,7 +824,7 @@ BenchmarkProblems:
         - DirectToVgprA: [1]
         - UseSgprForGRO: [0,1]
         - TransposeLDS: [0,1]
-        - StreamK: [0,1]
+        - StreamK: [0]
         - Groups:
           -
             - MatrixInstruction: [16, 16,  4, 1,  1,   1, 1,  4,1 ]
@@ -995,7 +995,7 @@ BenchmarkProblems:
         - DirectToVgprA: [1]
         - UseSgprForGRO: [0,1]
         - TransposeLDS: [0,1]
-        - StreamK: [0,2]
+        - StreamK: [0]
         - Groups:
           -
             - MatrixInstruction: [16, 16,  4, 1,  1,   1, 1,  4,1 ]
@@ -1165,7 +1165,7 @@ BenchmarkProblems:
         - DirectToVgprA: [1]
         - UseSgprForGRO: [0,1]
         - TransposeLDS: [0,1]
-        #- StreamK: [0,1]
+        #- StreamK: [0,3]
         - Groups:
           -
             - MatrixInstruction: [16, 16,  4, 1,  1,   1, 1,  4,1 ]
@@ -1671,7 +1671,7 @@ BenchmarkProblems:
         - UseSgprForGRO: [0,1]
         - TransposeLDS: [0,1]
         - ConvertAfterDS: [1]
-        #- StreamK: [0,2]
+        #- StreamK: [0,3]
         - Groups:
           -
             - MatrixInstruction: [16, 16, 16, 1,  1,   2, 1,  4,1 ]
@@ -1759,7 +1759,7 @@ BenchmarkProblems:
         - DirectToVgprB: [1]
         - UseSgprForGRO: [0,1]
         - ConvertAfterDS: [1]
-        #- StreamK: [0,1]
+        #- StreamK: [0,3]
         - Groups:
           -
             - MatrixInstruction: [16, 16, 16, 1,  1,   1, 2,  1,4 ]

@@ -229,7 +229,7 @@ class SignatureDefault(Signature):
             signature.addArg("MagicShiftItersPerTile",             SVK.SIG_VALUE, "u32")
             signature.addArg("SKItersPerWG",                       SVK.SIG_VALUE, "u32")
             userArgumentsInfo.gemmArgumentSize += 16
-            if kernel["StreamK"] >= 2: # Two-tile SK
+            if kernel["StreamK"] == 3: # SK3 two-tile ABI
                 signature.addArg("skGrid",                         SVK.SIG_VALUE, "u32")
                 signature.addArg("skTiles",                        SVK.SIG_VALUE, "u32")
                 userArgumentsInfo.gemmArgumentSize += 8
