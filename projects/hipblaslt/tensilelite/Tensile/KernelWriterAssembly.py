@@ -632,8 +632,10 @@ class KernelWriterAssembly(KernelWriter):
     module = Module("RemoveGROffsetSgprsFromPool")
 
     # Wave-separated TDM copies A/B (and MX) incs into tdm*Incs during setup; main loop
-    # uses tdm*Incs only. GlobalReadIncs* are released afterward — do not pin them here.
-    if not self.isTdmWaveSeparated(kernel):
+    # uses tdm*Incs only. GlobalReadIncs* are released afterward — do not pin them here,
+    # UNLESS stagger code needs them (calculateStagger references GlobalReadIncs for all tensors).
+    needsStaggerSgprs = kernel["StaggerU"] > 0 or kernel["InternalSupportParams"]["SupportCustomStaggerU"]
+    if not self.isTdmWaveSeparated(kernel) or needsStaggerSgprs:
       self.removeSgprVarFromPool("GlobalReadIncsA")
       self.removeSgprVarFromPool("GlobalReadIncsB")
       if kernel["ProblemType"]["MXBlockA"]:
@@ -646,7 +648,9 @@ class KernelWriterAssembly(KernelWriter):
   def releaseGlobalReadIncsSgprsAfterTdmWaveSep(self, kernel):
     """Return GlobalReadIncs* SGPRs to the pool after tdmSetupIncrementWaveSeparated."""
     module = Module("ReleaseGlobalReadIncsAfterTdmWaveSep")
-    if not self.isTdmWaveSeparated(kernel):
+    needsStaggerSgprs = kernel["StaggerU"] > 0 or kernel["InternalSupportParams"]["SupportCustomStaggerU"]
+    if not self.isTdmWaveSeparated(kernel) or needsStaggerSgprs:
+      # Already pinned in removeGROffsetsVariableSgprsFromPool; nothing to release.
       return module
     if self.states.a.numSgprGlobalReadIncs > 0:
       module.add(self.addSgprVarToPool("GlobalReadIncsA"))
