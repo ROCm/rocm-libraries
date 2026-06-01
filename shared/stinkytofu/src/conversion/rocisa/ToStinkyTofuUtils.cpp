@@ -47,6 +47,7 @@
 #include "instruction/mfma.hpp"
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
+#include "stinkytofu/hardware/HwRegHelpers.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkySignature.hpp"
@@ -60,8 +61,8 @@ namespace {
 using namespace rocisa;
 using namespace stinkytofu;
 
-StinkyRegister toStinkyRegister(const Container* container, bool hasVgprMsb);
-StinkyRegister toStinkyRegister(const InstructionInput& input, bool hasVgprMsb);
+StinkyRegister toStinkyRegister(const Container* container, bool hasVgprMsb, GfxArchID arch);
+StinkyRegister toStinkyRegister(const InstructionInput& input, bool hasVgprMsb, GfxArchID arch);
 
 std::string itemToString(const rocisa::Item* item) {
     return item->toString();
@@ -316,7 +317,7 @@ void addRegistersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
 
     // Add destination registers
     for (const InstructionInput& dst : inst->getDstParams()) {
-        StinkyRegister reg = toStinkyRegister(dst, hasVgprMsb);
+        StinkyRegister reg = toStinkyRegister(dst, hasVgprMsb, archId);
         if (reg.isValid()) {
             stinkyInst->addDestReg(reg);
         }
@@ -340,7 +341,7 @@ void addRegistersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
     }
 
     for (size_t i = 0; i < srcParams.size(); ++i) {
-        StinkyRegister reg = toStinkyRegister(srcParams[i], hasVgprMsb);
+        StinkyRegister reg = toStinkyRegister(srcParams[i], hasVgprMsb, archId);
         if (reg.isValid()) {
             stinkyInst->addSrcReg(reg);
         }
@@ -456,12 +457,20 @@ static MatrixFmtModifiers extractMatrixFormats(std::string_view instString) {
     return fmts;
 }
 
+/// WMMA/MFMA matrix operand reuse hints from rocisa toString() (matrix_a_reuse / matrix_b_reuse).
+static void applyMfmaReuseFromAsmString(MFMAModifiers& mod, const std::string& instString) {
+    mod.reuseA = instString.find("matrix_a_reuse") != std::string::npos;
+    mod.reuseB = instString.find("matrix_b_reuse") != std::string::npos;
+}
+
 /// Helper to handle MXMFMA instruction modifiers
 void handleMXMFMAModifiers(StinkyInstruction* stinkyInst, const std::string& instString) {
     // MXMFMA does not support neg_lo/neg_hi modifiers; only matrix formats.
     auto fmts = extractMatrixFormats(instString);
     if (!fmts.empty()) stinkyInst->addModifier<MatrixFmtModifiers>(fmts);
-    stinkyInst->addModifier<MFMAModifiers>(MFMAModifiers{});
+    MFMAModifiers mod;
+    applyMfmaReuseFromAsmString(mod, instString);
+    stinkyInst->addModifier<MFMAModifiers>(mod);
 }
 
 /// Helper to handle MFMA instruction modifiers
@@ -471,6 +480,7 @@ void handleMFMAModifiers(StinkyInstruction* stinkyInst, const std::string& instS
 
     MFMAModifiers mod;
     mod.negBits = extractNegModifiers(instString);
+    applyMfmaReuseFromAsmString(mod, instString);
     stinkyInst->addModifier<MFMAModifiers>(mod);
 }
 
@@ -478,6 +488,7 @@ void handleMFMAModifiers(StinkyInstruction* stinkyInst, const std::string& instS
 void handleSMFMAModifiers(StinkyInstruction* stinkyInst, const std::string& instString) {
     MFMAModifiers mod;
     mod.negBits = extractNegModifiers(instString);
+    applyMfmaReuseFromAsmString(mod, instString);
     stinkyInst->addModifier<MFMAModifiers>(mod);
 }
 
@@ -664,7 +675,8 @@ int getMsbOffsetFromStinkyVgpr(const StinkyRegister& reg) {
 /// \param container Pointer to rocisa::Container to convert
 /// \param hasVgprMsb Whether VGPR MSB is supported (affects register offset for VGPRs > 255)
 /// \return StinkyRegister representing the container, or invalid register if conversion fails
-StinkyRegister toStinkyRegister(const rocisa::Container* container, bool hasVgprMsb) {
+StinkyRegister toStinkyRegister(const rocisa::Container* container, bool hasVgprMsb,
+                                GfxArchID arch) {
     if (const rocisa::RegisterContainer* regCont =
             dynamic_cast<const rocisa::RegisterContainer*>(container)) {
         // isOff=true signals the MUBUF "off" keyword (no address register).
@@ -712,9 +724,12 @@ StinkyRegister toStinkyRegister(const rocisa::Container* container, bool hasVgpr
     }
     if (const rocisa::HWRegContainer* hwregContainer =
             dynamic_cast<const rocisa::HWRegContainer*>(container)) {
-        // Handle hardware register containers like hwreg(26,4,1)
-        // These should be emitted as literal strings in the assembly
-        return StinkyRegister(hwregContainer->toString());
+        uint16_t id = HwReg::parseId(arch, hwregContainer->reg).value_or(0);
+        uint16_t offset =
+            hwregContainer->value.size() > 0 ? static_cast<uint16_t>(hwregContainer->value[0]) : 0;
+        uint16_t size =
+            hwregContainer->value.size() > 1 ? static_cast<uint16_t>(hwregContainer->value[1]) : 32;
+        return StinkyRegister::Hwreg(id, offset, size);
     }
     return StinkyRegister{};
 }
@@ -730,9 +745,9 @@ StinkyRegister toStinkyRegister(const rocisa::Container* container, bool hasVgpr
 /// \param input The InstructionInput variant to convert
 /// \param hasVgprMsb Whether VGPR MSB is supported
 /// \return StinkyRegister representing the input value
-StinkyRegister toStinkyRegister(const InstructionInput& input, bool hasVgprMsb) {
+StinkyRegister toStinkyRegister(const InstructionInput& input, bool hasVgprMsb, GfxArchID arch) {
     if (auto pptr = std::get_if<std::shared_ptr<rocisa::Container>>(&input)) {
-        return toStinkyRegister(pptr->get(), hasVgprMsb);
+        return toStinkyRegister(pptr->get(), hasVgprMsb, arch);
     } else if (const int* literalInt = std::get_if<int>(&input)) {
         return StinkyRegister(*literalInt);
     } else if (const double* literalDouble = std::get_if<double>(&input)) {
