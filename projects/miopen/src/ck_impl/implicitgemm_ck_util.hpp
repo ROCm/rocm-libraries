@@ -672,8 +672,7 @@ ConvSolution InitAnyInvokerFactory(const ProblemDescriptionType& problem,
 }
 
 template <typename DataType, typename OutElemOp>
-OutElemOp
-GetOutElementOp(const miopen::fusion::ActivationOpInvokeParam& activationOp)
+OutElemOp GetOutElementOp(const miopen::fusion::ActivationOpInvokeParam& activationOp)
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     auto activationMode = activationOp.activMode;
@@ -1281,11 +1280,11 @@ ConvSolution InitInvokerFactoryWrwNCHW(const ExecutionContext& ctx,
 }
 
 template <typename InvokerFactoryMakerNCHW, typename InvokerFactoryMakerNHWC>
-ConvSolution MakeSolutionGroupConvImplicitGemmXdlops(
-    const miopen::conv::ProblemDescription& problem,
-    InvokerFactoryMakerNCHW&& invoker_factory_maker_ncdhw,
-    InvokerFactoryMakerNHWC&& invoker_factory_maker_ndhwc,
-    const bool use_tf32 = false)
+ConvSolution
+MakeSolutionGroupConvImplicitGemmXdlops(const miopen::conv::ProblemDescription& problem,
+                                        InvokerFactoryMakerNCHW&& invoker_factory_maker_ncdhw,
+                                        InvokerFactoryMakerNHWC&& invoker_factory_maker_ndhwc,
+                                        const bool use_tf32 = false)
 {
 
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
