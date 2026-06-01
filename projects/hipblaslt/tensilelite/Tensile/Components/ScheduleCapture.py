@@ -114,6 +114,31 @@ class UnexplainedMissingEdgeError(Exception):
     """diagnose_missing_edge couldn't classify a missing edge — classifier or pipeline bug."""
 
 
+class CaptureCategoryMissingError(Exception):
+    """A leaf reached the SHADOW capture walk with no idMap entry AND no
+    registered class-name in ``InstructionCategory._CLASS_NAME_TO_CATEGORY``.
+
+    Phase 1 fail-loud contract per
+    ``DEFAULT_SCHEDULER_REFERENCE_DESIGN.md`` §4 Phase 1: SIA3 adding a new
+    control-op class (or a producer site emitting an instruction the idMap
+    doesn't cover) must fail the build immediately. Silent "default to
+    UNKNOWN" categorization would let scheduler-quality defects slip through
+    as downstream comparison anomalies that mis-diagnose as validator bugs.
+
+    Raised by ``KernelWriter._captureSubIterToBuilder`` when both
+    ``id_to_category.get(id(item))`` returns ``None`` AND
+    ``category_of_class_name(type(item).__name__)`` returns ``None``.
+
+    Message names:
+      - the rocisa class of the offending leaf
+      - the body-label (e.g. ``"main_loop"``)
+      - the surrounding subiter and slot context
+
+    so the operator can grep ``_CLASS_NAME_TO_CATEGORY`` or the producer-site
+    idMap definition without spelunking.
+    """
+
+
 SLOT_KIND_PRE_LOOP = "pre_loop"
 SLOT_KIND_MFMA = "mfma"
 SLOT_KIND_POST_LOOP = "post_loop"

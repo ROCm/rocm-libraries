@@ -1012,7 +1012,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
   def _makeSubIterSchedule(self, kernel, tPA, tPB, localReadCode, iteration, pointerLWCode, pointerLRCode, waitCode, macIterCode, \
       waitLWCode = Module(), syncCode = Module(), packCode = Module(), packPreCode = Module(), prevIterCode = Module(), localReadCodeSecondHalf = Module(), NLLlast = False, \
                    tailloopInNll = False, isNLLorNGLL=False, capture=None, capture_id_to_category=None,
-                   capture_id_to_source_module=None):
+                   capture_id_to_source_module=None,
+                   capture_pointer_side_map=None,
+                   capture_body_label="main_loop",
+                   capture_fail_loud_on_missing_category=True):
 
     iterCode = Module()
     if capture is not None:
@@ -1059,19 +1062,54 @@ class KernelWriter(metaclass=abc.ABCMeta):
         "ScheduleCapture.build_idmap + invert_idmap_to_id_to_category, "
         "or build_id_to_category_per_iter, depending on input shape."
       )
+      # rocm-libraries-nmsx Phase 1 / Fix 3 (per
+      # DEFAULT_SCHEDULER_REFERENCE_DESIGN.md §4 Phase 1 Fix 3):
+      #
       # Pointer-math items (VXorB32/SXorB32 from local{Read,Write}SwapOffsets,
       # SAdd/SAddC/SSub/SSubB from address increments) are SEPARATE Python
-      # objects from the LRSwap*/LWSwap*AllIters items CMS sees — separate
-      # function calls in _loopBody (lines 4244, 4258 etc.). Tag any
-      # uncategorized item from the pointer modules here so they don't land
-      # in UNKNOWN. Generic 'LRS'/'LWS' since the pointer modules combine
-      # both A and B in the SIA3 view.
+      # objects from the LRSwap*/LWSwap*AllIters items CMS sees (different
+      # function-call returns; see ScheduleCapture.py:1033-1039 comment).
+      # CMS's idMap canonically uses per-side `LRSA`/`LRSB`/`LWSA`/`LWSB`
+      # tags (ScheduleCapture.py:1045-1048); the previous hand-rolled
+      # generic `"LRS"`/`"LWS"` tagging here produced a per-side-vs-unsided
+      # schema mismatch between SHADOW and CMS captures.
+      #
+      # `capture_pointer_side_map` (when provided) carries the per-side
+      # leaf-id sets recorded at the production call sites in _loopBody
+      # (`pointer_lrs_leaf_ids_A`/`_B`, `pointer_lws_leaf_ids_A`/`_B`).
+      # Look each leaf up to determine its side; fail loud (rather than
+      # default to unsided `"LRS"`/`"LWS"`) when a pointer-math leaf
+      # appears that the production site didn't classify — that's a
+      # producer-site / scope bug, not a downstream defect.
+      if capture_pointer_side_map is None:
+        capture_pointer_side_map = {}
+      lrs_ids_a = capture_pointer_side_map.get("lrs_a", frozenset())
+      lrs_ids_b = capture_pointer_side_map.get("lrs_b", frozenset())
+      lws_ids_a = capture_pointer_side_map.get("lws_a", frozenset())
+      lws_ids_b = capture_pointer_side_map.get("lws_b", frozenset())
       if pointerLRCode is not None:
         for item in pointerLRCode.flatitems():
-          capture_id_to_category.setdefault(id(item), "LRS")
+          if id(item) in capture_id_to_category:
+            continue
+          if id(item) in lrs_ids_a:
+            capture_id_to_category[id(item)] = "LRSA"
+          elif id(item) in lrs_ids_b:
+            capture_id_to_category[id(item)] = "LRSB"
+          # else: leaf wasn't recorded by the production site. Leave
+          # untagged — the leaf-fallback at _captureSubIterToBuilder
+          # will use the InstructionCategory class-name registry first
+          # (covers SWaitAlu/SBarrier/comments) and raise
+          # CaptureCategoryMissingError if even that doesn't match. No
+          # silent unsided "LRS" fallback.
       if pointerLWCode is not None:
         for item in pointerLWCode.flatitems():
-          capture_id_to_category.setdefault(id(item), "LWS")
+          if id(item) in capture_id_to_category:
+            continue
+          if id(item) in lws_ids_a:
+            capture_id_to_category[id(item)] = "LWSA"
+          elif id(item) in lws_ids_b:
+            capture_id_to_category[id(item)] = "LWSB"
+          # Same fallback policy as LRS above; see comment there.
     # Default schedule is other, local reads, then local writes:
     if scheduleIterAlg == 0:
       # simple schedule, just add the modules in-order
@@ -2766,13 +2804,17 @@ class KernelWriter(metaclass=abc.ABCMeta):
         numMfmaPerIter=self.states.numMfmaPerIter,
         id_to_category=capture_id_to_category,
         id_to_source_module=capture_id_to_source_module,
+        body_label=capture_body_label,
+        fail_loud_on_missing_category=capture_fail_loud_on_missing_category,
       )
 
     return iterCode
 
   def _captureSubIterToBuilder(self, iterCode, capture, subiter,
                                  numMfmaPerIter, id_to_category,
-                                 id_to_source_module=None):
+                                 id_to_source_module=None,
+                                 body_label="main_loop",
+                                 fail_loud_on_missing_category=True):
     """Walk iterCode.flatitems() and append TaggedInstructions to capture.
 
     mfma_index assignment:
@@ -2808,8 +2850,41 @@ class KernelWriter(metaclass=abc.ABCMeta):
       mfma_classes = (MFMAInstruction, SMFMAInstruction)
 
     from Tensile.Components.ScheduleCapture import (
-      SLOT_KIND_PRE_LOOP, SLOT_KIND_MFMA,
+      SLOT_KIND_PRE_LOOP, SLOT_KIND_MFMA, CaptureCategoryMissingError,
     )
+    from Tensile.Components.InstructionCategory import (
+      category_of_class_name, InstructionCategory,
+    )
+
+    # rocm-libraries-nmsx Phase 1 fail-loud contract (per
+    # DEFAULT_SCHEDULER_REFERENCE_DESIGN.md §4 Phase 1 "Fail-loud contract"):
+    # SIA3 adding a new control-op class — or a producer site emitting an
+    # instruction the idMap doesn't cover — must fail the build IMMEDIATELY
+    # rather than slipping through as a downstream comparison defect via a
+    # silent UNKNOWN fallback.
+    #
+    # The registry's `_registry_category_to_tag` maps the SMALL set of
+    # control-op categories whose canonical SHADOW tag is fixed (MFMA /
+    # SYNC / SNOP / SSETPRIO). For every other class — including
+    # CVT_PACK / MIDDLE_PACK / LR / LW / GR — the leaf MUST be in the
+    # caller-supplied `id_to_category` (idMap inversion), because those
+    # are precisely the data-flow categories whose CMS-side schema is
+    # per-iter (PackA{u} / PackB{u} / LRA{u} / LRB{u}) or per-side (LRSA /
+    # LRSB / LWSA / LWSB / LWA / LWB / GRA / GRB). The bare enum names
+    # provably cannot match CMS-side schema, so falling back to them
+    # captures bytes under tags that are guaranteed to mismatch — exactly
+    # the SHADOW-as-reference-defeating outcome the fail-loud contract
+    # exists to prevent. If a leaf reaches the fallback branch, that's a
+    # producer-site / scope bug (e.g. the mfmaIter deepcopy producing
+    # new ids that bypass the idMap inversion) and the build must fail
+    # so the producer site is fixed.
+    _registry_category_to_tag = {
+      InstructionCategory.MFMA: "MFMA",
+      InstructionCategory.SWAIT: "SYNC",
+      InstructionCategory.SBARRIER: "SYNC",
+      InstructionCategory.SNOP: "SNOP",
+      InstructionCategory.SSETPRIO: "SSETPRIO",
+    }
 
     local_mfma_idx = -1
 
@@ -2819,6 +2894,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       category = id_to_category.get(id(item))
       if category is None:
+        # Direct isinstance fast-paths kept for the registry-equivalent
+        # classes that are most common in the SIA3 walk (MFMA, SWaitCnt,
+        # SBarrier, SNop, SSetPrior). These are equivalent to the
+        # registry lookup below for their classes; isinstance handles
+        # subclass relationships the class-name registry doesn't.
         if isinstance(item, mfma_classes):
           category = "MFMA"
         elif isinstance(item, (SWaitCnt, SBarrier)):
@@ -2834,7 +2914,67 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # cross-graph data-flow identity set, mirroring SNop).
           category = "SSETPRIO"
         else:
-          category = "UNKNOWN"
+          # Last-resort: class-name registry lookup. This catches subclasses
+          # rocisa added since the isinstance fast-paths above (e.g.
+          # SMFMAInstruction variants, new scalar-control families).
+          inst_cat = category_of_class_name(type(item).__name__)
+          if inst_cat in _registry_category_to_tag:
+            # Registry maps this class to a canonical SHADOW control-op tag
+            # (MFMA / SYNC / SNOP / SSETPRIO) — safe to use.
+            category = _registry_category_to_tag[inst_cat]
+          else:
+            # Either:
+            #   - No registry entry at all (inst_cat is None) — SIA3 added
+            #     a new control-op class the producer side didn't bless.
+            #   - Registry recognizes the class but its enum has no
+            #     canonical SHADOW tag (e.g. CVT_PACK, MIDDLE_PACK, LR,
+            #     LW, GR). For these, the CMS-side schema is per-iter
+            #     (PackA{u}, LRA{u}, PackB{u}, LRB{u}) or per-side (GRA,
+            #     LWA, …). Using the bare enum name as the SHADOW tag
+            #     would create tags that provably cannot match CMS — see
+            #     `_registry_category_to_tag` doc above.
+            #
+            # In both subcases, the right answer for the SHADOW path is
+            # the same: the leaf MUST have been pre-registered into
+            # `id_to_category` by the producer's `build_idmap` (or by a
+            # per-side bookkeeping walk like Fix 3's
+            # `capture_pointer_side_map`). If we got here, that
+            # registration didn't happen — fail-loud.
+            if fail_loud_on_missing_category:
+              raise CaptureCategoryMissingError(
+                f"Leaf class {type(item).__name__!r} has no idMap entry "
+                f"(in this iter's `id_to_category`) AND no entry in "
+                f"`InstructionCategory._CLASS_NAME_TO_CATEGORY` mapping "
+                f"to a canonical SHADOW tag. inst_cat="
+                f"{inst_cat.name if inst_cat is not None else None}. "
+                f"body={body_label!r}, subiter={subiter}. "
+                f"Leaf-repr={item!r}. This is the fail-loud contract from "
+                f"DEFAULT_SCHEDULER_REFERENCE_DESIGN.md §4 Phase 1: SIA3 "
+                f"adding a new control-op class — or an existing producer "
+                f"site emitting an instruction the idMap doesn't cover — "
+                f"must fail the build here, NOT slip through as a downstream "
+                f"category-mismatch validator defect. If the leaf is a "
+                f"data-flow leaf (CVT_PACK/MIDDLE_PACK/LR/LW/GR), the "
+                f"producer's `build_idmap` must register its id() under "
+                f"the per-iter or per-side category that CMS uses."
+              )
+            # Approach-A silent path
+            # (fail_loud_on_missing_category=False). Approach-A is
+            # scheduled for deletion in Phase 4; until then the
+            # downstream compare_graphs assertion at kernelBody compares
+            # this Approach-A capture against the CMS capture and the
+            # tags that historically reached this branch (LR/LW/GR via
+            # the prefix-recognized fallback, plus CVT_PACK/MIDDLE_PACK
+            # which fail recognition but produce a stable tag string
+            # across both Approach-A and CMS sides) are load-bearing for
+            # that comparison passing. Fall back to the registry enum's
+            # name (when present) so Approach-A keeps the legacy
+            # tagging that pre-fail-loud existed; otherwise UNKNOWN.
+            # When Phase 4 deletes Approach-A and the single explicit
+            # `fail_loud_on_missing_category=False` call site at the
+            # `_captureNonCmsBuild` branch goes away, this entire else
+            # arm is dead code and can be removed.
+            category = inst_cat.name if inst_cat is not None else "UNKNOWN"
 
       if category == "MFMA":
         local_mfma_idx += 1
@@ -2873,11 +3013,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
     """Walk a closeLoop Module and append loop-counter code to ``capture``.
 
     On the non-CMS reference build (rocm-libraries-nyb5, Approach A),
-    closeLoop emits SSubU32 + SCmpEQI32 (the loop-counter code, LCC) at
-    the END of the loop body, after all subiter scheduling has run.
-    Without this hook, the SHADOW capture pipeline (which finalizes
-    BEFORE closeLoop runs at ``KernelWriter.py:4633``) would leave LCC
-    out of the captured body — exactly the d3zj defect.
+    closeLoop emits the loop-counter code at the END of the loop body,
+    after all subiter scheduling has run. Without this hook, the SHADOW
+    capture pipeline (which finalizes BEFORE closeLoop runs at
+    ``KernelWriter.py:4633``) would leave LCC out of the captured body —
+    exactly the d3zj defect.
 
     Slot assignment: LCC sits between the last subiter's MFMAs and the
     end of the body. We tag with ``slot_kind=SLOT_KIND_MFMA``,
@@ -2885,18 +3025,45 @@ class KernelWriter(metaclass=abc.ABCMeta):
     after all MFMAs in canonical-render order. ``subiter`` is the
     final subiter index (LoopIters - 1).
 
-    Other instructions in closeLoop (branches, labels, comments) are
-    NOT appended — only SSubU32 and SCmpEQI32 (the LCC pair). Branches
-    are scheduler-control; the dataflow validator excludes them via
-    ``data_flow_instructions`` regardless.
+    Schema source-of-truth (rocm-libraries-nmsx Bug 1 fix): the CMS
+    side's ``build_idmap`` tags EVERY leaf of ``loopCounterCode``
+    (the same Module instance we receive here, AFTER ``removeComments``)
+    as "LCC" regardless of rocisa class (see
+    ``ScheduleCapture.py:1074``). To match that, this helper
+
+      (1) restricts to real rocisa ``Instruction`` instances — skipping
+          ``Label`` / ``TextBlock`` and other non-Instruction ``Item``
+          subclasses that the LoopBodyCaptureBuilder's wrapper population
+          cannot handle (they lack ``reads_scc``/``writes_scc``); these
+          never appear in CMS's idMap as LCC anyway, and
+      (2) mirrors ``customMainLoopSchedule``'s ``removeComments`` step
+          (``dispatch.py:73-78``) — additionally filtering out
+          ``SCBranchSCC1`` and ``SNop`` even though they ARE rocisa
+          Instructions — these are scheduler-control that CMS strips
+          before LCC tagging.
+
+    The previous implementation hard-filtered to
+    ``(SSubU32, SCmpEQI32)`` and silently dropped the additional
+    control leaves (``SCmpEQU32`` + ``SCSelectB32``) that ``closeLoop``
+    emits when ``PrefetchGlobalRead==2`` AND
+    ``AssertSummationElementMultiple % (DepthU*2) == 0``
+    (see ``KernelWriterAssembly.closeLoop`` lines ~6845-6859),
+    causing SHADOW LCC=2 vs CMS LCC=4 count divergence on those
+    kernels.
+
+    The non-Instruction skip step is load-bearing for the Approach-A
+    call site (``KernelWriter.py:5476``) where ``closeLoop`` is called
+    with ``finalLoop=True`` and emits ``Label`` leaves
+    (``oddIterPreCode``/``evenIterPreCode`` at
+    ``KernelWriterAssembly.py:6907-6913``). The CMS / SHADOW call site
+    uses ``finalLoop=False`` and never has Labels in ``closeLoopMod``.
     """
-    from rocisa.code import TextBlock
-    from rocisa.instruction import SSubU32, SCmpEQI32
+    from rocisa.instruction import Instruction, SCBranchSCC1, SNop
     from Tensile.Components.ScheduleCapture import SLOT_KIND_MFMA
 
     # Compute the slot position. LoopIters * numMfmaPerIter is the
     # absolute mfma_index just past the last MFMA of the last subiter;
-    # use that for both LCC instructions to keep them adjacent in
+    # use that for all LCC instructions to keep them adjacent in
     # canonical sort order.
     loop_iters = kernel.get("LoopIters")
     num_mfma_per_iter = getattr(self.states, "numMfmaPerIter", 0) or 0
@@ -2911,13 +3078,18 @@ class KernelWriter(metaclass=abc.ABCMeta):
       lcc_mfma_index = loop_iters * max(num_mfma_per_iter, 1)
 
     for item in closeLoopModule.flatitems():
-      if isinstance(item, TextBlock):
+      # Non-Instruction items (Label, TextBlock, etc.) carry no SCC
+      # flags and aren't part of CMS's LCC categorization; skip them.
+      if not isinstance(item, Instruction):
         continue
-      if isinstance(item, (SSubU32, SCmpEQI32)):
-        capture.append(
-            inst=item, category="LCC", subiter=lcc_subiter,
-            slot_kind=SLOT_KIND_MFMA, mfma_index=lcc_mfma_index,
-        )
+      # Mirror dispatch.py:removeComments — CMS strips these from
+      # loopCounterCode before tagging the surviving leaves as LCC.
+      if isinstance(item, (SCBranchSCC1, SNop)):
+        continue
+      capture.append(
+          inst=item, category="LCC", subiter=lcc_subiter,
+          slot_kind=SLOT_KIND_MFMA, mfma_index=lcc_mfma_index,
+      )
 
   ##############################################################################
   # returns list of modules or text
@@ -3482,6 +3654,18 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if isNGLL:
       self.codes.perIterGlobalRead = [ Module() for i in range (kernel["LoopIters"]) ]
 
+    # rocm-libraries-nmsx Fix 3: per-side pointer-math leaf-id tracking for
+    # SHADOW capture's NLL/NGL bodies. Mirrors the equivalent tracking in
+    # `_loopBody` mainloop, with the same `LRSA/LRSB/LWSA/LWSB` per-side
+    # tagging schema. Without this, pointer-math leaves emitted by
+    # `localReadSwapOffsets()`/`localWriteSwapOffsets()` calls below land in
+    # the SHADOW capture path's idMap-miss branch and trigger the fail-loud
+    # `CaptureCategoryMissingError` per the Phase 1 fail-loud contract.
+    pointer_lrs_leaf_ids_A = set()
+    pointer_lrs_leaf_ids_B = set()
+    pointer_lws_leaf_ids_A = set()
+    pointer_lws_leaf_ids_B = set()
+
     for uIdx in range(0, kernel["LoopIters"]):
       u = uIdx % kernel["LoopIters"]    #   u: index in compute loop (in contrast to the notion of global read loop)
       isLastLoop = not isNGLL
@@ -3799,35 +3983,61 @@ class KernelWriter(metaclass=abc.ABCMeta):
           if isSwapAndResetLwoIter:
             # local write for next iter, used to have local writes here
             # Swap offsets A(MXSA)
+            # rocm-libraries-nmsx Fix 3: per-side pointer-math tagging in
+            # NLL/NGL (mirrors mainloop tracking).
             if kernel["enableTDMA"]:
               pointerLWCode.addComment1("tdm swap offsets a")
-              pointerLWCode.add(self.tdmSwapLdsOffset(kernel, tensorParametersA))
+              _lws_a_mod = self.tdmSwapLdsOffset(kernel, tensorParametersA)
+              pointerLWCode.add(_lws_a_mod)
+              for _leaf in _lws_a_mod.flatitems():
+                pointer_lws_leaf_ids_A.add(id(_leaf))
             elif not kernel["NoLdsWriteCode"]:
               pointerLWCode.addComment1("local write swap offsets a")
-              pointerLWCode.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersA))
+              _lws_a_mod = self.localWriteSwapOffsets(kernel, expand, tensorParametersA)
+              pointerLWCode.add(_lws_a_mod)
+              for _leaf in _lws_a_mod.flatitems():
+                pointer_lws_leaf_ids_A.add(id(_leaf))
 
             if "MX" in tensorParametersA:
               pointerLWCode.addComment1("local write swap offsets mxsa")
               if kernel["enableTDMA"]:
-                pointerLWCode.add(self.tdmSwapLdsOffset(kernel, tensorParametersA["MX"]))
+                _lws_mxsa_mod = self.tdmSwapLdsOffset(kernel, tensorParametersA["MX"])
+                pointerLWCode.add(_lws_mxsa_mod)
+                for _leaf in _lws_mxsa_mod.flatitems():
+                  pointer_lws_leaf_ids_A.add(id(_leaf))
               elif not kernel["NoLdsWriteCode"]:
-                pointerLWCode.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersA["MX"]))
+                _lws_mxsa_mod = self.localWriteSwapOffsets(kernel, expand, tensorParametersA["MX"])
+                pointerLWCode.add(_lws_mxsa_mod)
+                for _leaf in _lws_mxsa_mod.flatitems():
+                  pointer_lws_leaf_ids_A.add(id(_leaf))
             # Swap offsets B(MXSB)
             if "MX" in tensorParametersB:
               pointerLWCode.addComment1("local write swap offsets mxsb")
               #TODO: TDM refactor
               if kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["NumWaves"] == 1:
-                pointerLWCode.add(self.tdmSwapLdsOffset(kernel, tensorParametersB["MX"]))
+                _lws_mxsb_mod = self.tdmSwapLdsOffset(kernel, tensorParametersB["MX"])
+                pointerLWCode.add(_lws_mxsb_mod)
+                for _leaf in _lws_mxsb_mod.flatitems():
+                  pointer_lws_leaf_ids_B.add(id(_leaf))
               elif not kernel["enableTDMB"] and not kernel["NoLdsWriteCode"]:
-                pointerLWCode.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersB["MX"]))
+                _lws_mxsb_mod = self.localWriteSwapOffsets(kernel, expand, tensorParametersB["MX"])
+                pointerLWCode.add(_lws_mxsb_mod)
+                for _leaf in _lws_mxsb_mod.flatitems():
+                  pointer_lws_leaf_ids_B.add(id(_leaf))
             if kernel["enableTDMB"]:
               #TODO: TDM refactor
               if kernel["NumWaves"] == 1:
                 pointerLWCode.addComment1("tdm swap offsets b")
-                pointerLWCode.add(self.tdmSwapLdsOffset(kernel, tensorParametersB))
+                _lws_b_mod = self.tdmSwapLdsOffset(kernel, tensorParametersB)
+                pointerLWCode.add(_lws_b_mod)
+                for _leaf in _lws_b_mod.flatitems():
+                  pointer_lws_leaf_ids_B.add(id(_leaf))
             elif not kernel["NoLdsWriteCode"]:
               pointerLWCode.addComment1("local write swap offsets b")
-              pointerLWCode.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersB))
+              _lws_b_mod = self.localWriteSwapOffsets(kernel, expand, tensorParametersB)
+              pointerLWCode.add(_lws_b_mod)
+              for _leaf in _lws_b_mod.flatitems():
+                pointer_lws_leaf_ids_B.add(id(_leaf))
             # Swap offsets Metadata
             if kernel["enableTDMMetadata"] and not kernel["DirectToVgprSparseMetadata"]:
                 pointerLWCode.addComment1("tdm swap offsets metadata")
@@ -3840,37 +4050,89 @@ class KernelWriter(metaclass=abc.ABCMeta):
             # Swap, reset, or increment the LRO:
             # force internalPointerSwap = False in NGLL case
             internalPointerSwap = expand and not isNGLL
+            # rocm-libraries-nmsx Fix 3: per-side LR pointer-math tagging.
             if not kernel["ForceUnrollSubIter"] or (doReadA and (u<localWriteEndIter)):
               pointerLRCode.addComment1("local read swap offsets a")
-              pointerLRCode.add(self.localReadSwapOffsets(kernel, internalPointerSwap, tensorParametersA))
+              _lrs_a_mod = self.localReadSwapOffsets(kernel, internalPointerSwap, tensorParametersA)
+              pointerLRCode.add(_lrs_a_mod)
+              for _leaf in _lrs_a_mod.flatitems():
+                pointer_lrs_leaf_ids_A.add(id(_leaf))
             if kernel["ProblemType"]["MXBlockA"] and ((not kernel["ForceUnrollSubIter"]) or (doReadMXSA and (u<localWriteEndIter))):
               pointerLRCode.addComment1("local read swap offsets mxsa")
-              pointerLRCode.add(self.localReadSwapOffsets(kernel, internalPointerSwap, tensorParametersA["MX"]))
+              _lrs_mxsa_mod = self.localReadSwapOffsets(kernel, internalPointerSwap, tensorParametersA["MX"])
+              pointerLRCode.add(_lrs_mxsa_mod)
+              for _leaf in _lrs_mxsa_mod.flatitems():
+                pointer_lrs_leaf_ids_A.add(id(_leaf))
             if kernel["ProblemType"]["MXBlockB"] and ((not kernel["ForceUnrollSubIter"]) or (doReadMXSB and (u<localWriteEndIter))):
               pointerLRCode.addComment1("local read swap offsets mxsb")
-              pointerLRCode.add(self.localReadSwapOffsets(kernel, internalPointerSwap, tensorParametersB["MX"]))
+              _lrs_mxsb_mod = self.localReadSwapOffsets(kernel, internalPointerSwap, tensorParametersB["MX"])
+              pointerLRCode.add(_lrs_mxsb_mod)
+              for _leaf in _lrs_mxsb_mod.flatitems():
+                pointer_lrs_leaf_ids_B.add(id(_leaf))
             if not kernel["ForceUnrollSubIter"] or (doReadB and (u<localWriteEndIter)):
               pointerLRCode.addComment1("local read swap offsets b")
-              pointerLRCode.add(self.localReadSwapOffsets(kernel, internalPointerSwap, tensorParametersB))
+              _lrs_b_mod = self.localReadSwapOffsets(kernel, internalPointerSwap, tensorParametersB)
+              pointerLRCode.add(_lrs_b_mod)
+              for _leaf in _lrs_b_mod.flatitems():
+                pointer_lrs_leaf_ids_B.add(id(_leaf))
             if (kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]) and\
                (not kernel["ForceUnrollSubIter"] or (doReadM and (u<localWriteEndIter))):
               pointerLRCode.addComment1("local read swap offsets metadata")
-              pointerLRCode.add(self.localReadSwapOffsets(kernel, internalPointerSwap, tPM))
+              # rocm-libraries-nmsx revision: do NOT classify sparse-MX
+              # metadata leaves under LRSB. The canonical CMS schema in
+              # `build_idmap` (ScheduleCapture.py around the LRSwapMetadata
+              # branch) produces a distinct `LRMetadata`/`LWMetadata`
+              # category for these — guessing LRSB here would silently
+              # mis-tag SHADOW metadata leaves and (a) inflate LRSB counts
+              # on sparse-MX builds, (b) cause false-positive parity
+              # mismatches once a sparse-MX fixture lands in Phase 3.
+              # Per design v5 §4 Phase 1 fail-loud contract: surface
+              # un-bucketed leaves via CaptureCategoryMissingError instead
+              # of defaulting them. When a sparse-MX fixture surfaces a
+              # real categorization here, add a proper per-side
+              # `pointer_lrs_leaf_ids_Metadata` set (or
+              # `_lrm_leaf_ids_A`/`_B` per metadata-with-A vs metadata-
+              # with-B convention) and a matching `LRMetadata{u}`
+              # `capture_pointer_side_map` key. Until then: emit the
+              # producer-side Module, but do NOT pre-register its ids.
+              _lrs_meta_mod = self.localReadSwapOffsets(kernel, internalPointerSwap, tPM)
+              pointerLRCode.add(_lrs_meta_mod)
 
         if isResetLroIter: # ResetLroIter
+          # rocm-libraries-nmsx Fix 3: per-side LR init-pointer tagging.
           pointerLRCode.addComment1("local read init pointers a")
-          pointerLRCode.add(self.localReadInitPointers(kernel, tensorParametersA, tensorParametersA))
+          _lrip_a_mod = self.localReadInitPointers(kernel, tensorParametersA, tensorParametersA)
+          pointerLRCode.add(_lrip_a_mod)
+          for _leaf in _lrip_a_mod.flatitems():
+            pointer_lrs_leaf_ids_A.add(id(_leaf))
           if kernel["ProblemType"]["MXBlockA"]:
             pointerLRCode.addComment1("local read init pointers mxsa")
-            pointerLRCode.add(self.localReadInitPointers(kernel, tensorParametersA, tensorParametersA["MX"]))
+            _lrip_mxsa_mod = self.localReadInitPointers(kernel, tensorParametersA, tensorParametersA["MX"])
+            pointerLRCode.add(_lrip_mxsa_mod)
+            for _leaf in _lrip_mxsa_mod.flatitems():
+              pointer_lrs_leaf_ids_A.add(id(_leaf))
           if kernel["ProblemType"]["MXBlockB"]:
             pointerLRCode.addComment1("local read init pointers mxsb")
-            pointerLRCode.add(self.localReadInitPointers(kernel, tensorParametersA, tensorParametersB["MX"]))
+            _lrip_mxsb_mod = self.localReadInitPointers(kernel, tensorParametersA, tensorParametersB["MX"])
+            pointerLRCode.add(_lrip_mxsb_mod)
+            for _leaf in _lrip_mxsb_mod.flatitems():
+              pointer_lrs_leaf_ids_B.add(id(_leaf))
           pointerLRCode.addComment1("local read init pointers b")
-          pointerLRCode.add(self.localReadInitPointers(kernel, tensorParametersA, tensorParametersB))
+          _lrip_b_mod = self.localReadInitPointers(kernel, tensorParametersA, tensorParametersB)
+          pointerLRCode.add(_lrip_b_mod)
+          for _leaf in _lrip_b_mod.flatitems():
+            pointer_lrs_leaf_ids_B.add(id(_leaf))
           if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
             pointerLRCode.addComment1("local read init pointers metadata")
-            pointerLRCode.add(self.localReadInitPointers(kernel, tensorParametersA, tPM))
+            # rocm-libraries-nmsx revision: do NOT pre-register sparse-MX
+            # metadata leaves into pointer_lrs_leaf_ids_B (the previous
+            # defensive convention). See the matching
+            # `local read swap offsets metadata` block above for the
+            # rationale — un-bucketed leaves surface via the fail-loud
+            # contract until a sparse-MX fixture introduces a proper
+            # per-side metadata classification.
+            _lrip_meta_mod = self.localReadInitPointers(kernel, tensorParametersA, tPM)
+            pointerLRCode.add(_lrip_meta_mod)
 
       elif kernel["enableTDMA"] and kernel["enableTDMB"]:
         if isSwapLroIter: # ResetLroIter
@@ -3992,7 +4254,20 @@ class KernelWriter(metaclass=abc.ABCMeta):
                       u, pointerLWCode, pointerLRCode, waitCode, macIterCode, waitLWCode, syncCode, pack[packIdx], packPre[packPreIdx], \
                       module, NLLlast=NLLlast, tailloopInNll=useTailloopInNll, isNLLorNGLL=True, capture=capture,
                       capture_id_to_category=capture_id_to_cat,
-                      capture_id_to_source_module=capture_id_to_src)
+                      capture_id_to_source_module=capture_id_to_src,
+                      # rocm-libraries-nmsx Fix 3: feed NLL/NGL per-side
+                      # pointer-math sets into the SHADOW capture's split.
+                      capture_pointer_side_map={
+                        "lrs_a": pointer_lrs_leaf_ids_A,
+                        "lrs_b": pointer_lrs_leaf_ids_B,
+                        "lws_a": pointer_lws_leaf_ids_A,
+                        "lws_b": pointer_lws_leaf_ids_B,
+                      },
+                      # rocm-libraries-nmsx Phase 1 fail-loud contract:
+                      # SHADOW NLL/NGL bodies are part of the canonical
+                      # reference too; fail loud on uncategorized leaves.
+                      capture_body_label=("n_gl" if isNGLL else "n_ll"),
+                      capture_fail_loud_on_missing_category=True)
       module.add(subIterCode)
       self.states.SubTileIdx = (self.states.SubTileIdx + 1) % kernel["numSubTiles"]
       pack[packIdx] = Module()
@@ -4456,6 +4731,33 @@ class KernelWriter(metaclass=abc.ABCMeta):
     PackCodeAAllIters = []
     PackCodeBAllIters = []
 
+    # rocm-libraries-nmsx Phase 1 / Fix 3 (per-side LRS/LWS pointer-math
+    # tagging, per DEFAULT_SCHEDULER_REFERENCE_DESIGN.md §4 Phase 1 Fix 3):
+    #
+    # `pointerLRCode` / `pointerLWCode` are the swap-offset Modules walked
+    # by `_makeSubIterSchedule`. Their leaves come from per-side
+    # `self.localReadSwapOffsets(... tensorParametersA/B)` and
+    # `self.localWriteSwapOffsets(... tensorParametersA/B)` calls, each of
+    # which returns a SEPARATE Python Module object distinct from what
+    # CMS's `customMainLoopSchedule` sees via `LRSwapA/B`/`LWSwapA/B`AllIters
+    # (those are independent `localReadSwapOffsets()` calls; see
+    # ScheduleCapture.py:1033-1039 comment). So the CMS-side idMap's
+    # per-side `LRSA`/`LRSB`/`LWSA`/`LWSB` categories DON'T cover the
+    # SHADOW-walked pointer-math leaves; without per-side tagging here
+    # SHADOW falls back to the unsided "LRS"/"LWS" tags hand-rolled at
+    # `_makeSubIterSchedule:1040-1045`, which mismatches CMS's per-side
+    # schema and produces a downstream count divergence.
+    #
+    # Fix: record per-side leaf-id sets at the production call sites so
+    # `_makeSubIterSchedule` can split the pointer-math walk into LRSA /
+    # LRSB / LWSA / LWSB. This is the principled side-determination —
+    # done at the producer where we definitively know which side the
+    # call belongs to, not by parsing comment text downstream.
+    pointer_lrs_leaf_ids_A = set()
+    pointer_lrs_leaf_ids_B = set()
+    pointer_lws_leaf_ids_A = set()
+    pointer_lws_leaf_ids_B = set()
+
     ############################################################################
     # unrolled loop: mac iterations
     ############################################################################
@@ -4812,32 +5114,52 @@ class KernelWriter(metaclass=abc.ABCMeta):
               "Waiting current LR finish for next GR(TDM), sync"))
           # local write for next iter, used to have local writes here
           # Swap offsets A(MXSA)
+          # rocm-libraries-nmsx Fix 3: capture per-side leaf ids for the
+          # SHADOW capture's pointer-math walk; see set declarations above.
           if kernel["enableTDMA"]:
             pointerLWCode.addComment1("tdm swap offsets a")
-            pointerLWCode.add(self.tdmSwapLdsOffset(kernel, tensorParametersA))
+            _lws_a_mod = self.tdmSwapLdsOffset(kernel, tensorParametersA)
+            pointerLWCode.add(_lws_a_mod)
+            for _leaf in _lws_a_mod.flatitems():
+              pointer_lws_leaf_ids_A.add(id(_leaf))
           else:
             pointerLWCode.addComment1("local write swap offsets a")
-            pointerLWCode.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersA))
+            _lws_a_mod = self.localWriteSwapOffsets(kernel, expand, tensorParametersA)
+            pointerLWCode.add(_lws_a_mod)
+            for _leaf in _lws_a_mod.flatitems():
+              pointer_lws_leaf_ids_A.add(id(_leaf))
           if kernel["ProblemType"]["MXBlockA"]:
             pointerLWCode.addComment1("local write swap offsets mxsa")
             if kernel["enableTDMA"]:
-              pointerLWCode.add(self.tdmSwapLdsOffset(kernel, tensorParametersA["MX"]))
+              _lws_mxsa_mod = self.tdmSwapLdsOffset(kernel, tensorParametersA["MX"])
             else:
-              pointerLWCode.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersA["MX"]))
+              _lws_mxsa_mod = self.localWriteSwapOffsets(kernel, expand, tensorParametersA["MX"])
+            pointerLWCode.add(_lws_mxsa_mod)
+            for _leaf in _lws_mxsa_mod.flatitems():
+              pointer_lws_leaf_ids_A.add(id(_leaf))
           # Swap offsets B(MXSB)
           if kernel["ProblemType"]["MXBlockB"]:
             if kernel["enableTDMA"] and kernel["enableTDMB"] and kernel["NumWaves"] == 1:
               pointerLWCode.addComment1("local write swap offsets mxsb")
             elif not kernel["enableTDMB"]:
-              pointerLWCode.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersB["MX"]))
+              _lws_mxsb_mod = self.localWriteSwapOffsets(kernel, expand, tensorParametersB["MX"])
+              pointerLWCode.add(_lws_mxsb_mod)
+              for _leaf in _lws_mxsb_mod.flatitems():
+                pointer_lws_leaf_ids_B.add(id(_leaf))
           if kernel["enableTDMB"]:
             #TODO: TDM refactor
             if kernel["NumWaves"] == 1:
               pointerLWCode.addComment1("tdm swap offsets b")
-              pointerLWCode.add(self.tdmSwapLdsOffset(kernel, tensorParametersB))
+              _lws_b_mod = self.tdmSwapLdsOffset(kernel, tensorParametersB)
+              pointerLWCode.add(_lws_b_mod)
+              for _leaf in _lws_b_mod.flatitems():
+                pointer_lws_leaf_ids_B.add(id(_leaf))
           else:
             pointerLWCode.addComment1("local write swap offsets b")
-            pointerLWCode.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersB))
+            _lws_b_mod = self.localWriteSwapOffsets(kernel, expand, tensorParametersB)
+            pointerLWCode.add(_lws_b_mod)
+            for _leaf in _lws_b_mod.flatitems():
+              pointer_lws_leaf_ids_B.add(id(_leaf))
             if kernel["UseCustomMainLoopSchedule"]:
               LWSwapAAllIters.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersA))
               LWSwapBAllIters.add(self.localWriteSwapOffsets(kernel, expand, tensorParametersB))
@@ -4853,41 +5175,87 @@ class KernelWriter(metaclass=abc.ABCMeta):
           if kernel["ExpertSchedulingMode"] > 0:
             pointerLRCode.add(SWaitAlu(vm_vsrc=0, comment="wait for local read to vgpr complete"))
           # Swap, reset, or increment the LRO:
+          # rocm-libraries-nmsx Fix 3: capture per-side leaf ids; see set
+          # declarations earlier in _loopBody.
           if not kernel["ForceUnrollSubIter"] or (doReadA and (u<localWriteEndIter)):
             pointerLRCode.addComment1("local read swap offsets a")
-            pointerLRCode.add(self.localReadSwapOffsets(kernel, expand, tensorParametersA))
+            _lrs_a_mod = self.localReadSwapOffsets(kernel, expand, tensorParametersA)
+            pointerLRCode.add(_lrs_a_mod)
+            for _leaf in _lrs_a_mod.flatitems():
+              pointer_lrs_leaf_ids_A.add(id(_leaf))
             if kernel["UseCustomMainLoopSchedule"]:
               LRSwapAAllIters.add(self.localReadSwapOffsets(kernel, expand, tensorParametersA))
           if kernel["ProblemType"]["MXBlockA"] and (not kernel["ForceUnrollSubIter"] or (doReadMXSA and (u<localWriteEndIter))):
             pointerLRCode.addComment1("local read swap offsets mxsa")
-            pointerLRCode.add(self.localReadSwapOffsets(kernel, expand, tensorParametersA["MX"]))
+            _lrs_mxsa_mod = self.localReadSwapOffsets(kernel, expand, tensorParametersA["MX"])
+            pointerLRCode.add(_lrs_mxsa_mod)
+            for _leaf in _lrs_mxsa_mod.flatitems():
+              pointer_lrs_leaf_ids_A.add(id(_leaf))
           if kernel["ProblemType"]["MXBlockB"] and (not kernel["ForceUnrollSubIter"] or (doReadMXSB and (u<localWriteEndIter))):
             pointerLRCode.addComment1("local read swap offsets mxsb")
-            pointerLRCode.add(self.localReadSwapOffsets(kernel, expand, tensorParametersB["MX"]))
+            _lrs_mxsb_mod = self.localReadSwapOffsets(kernel, expand, tensorParametersB["MX"])
+            pointerLRCode.add(_lrs_mxsb_mod)
+            for _leaf in _lrs_mxsb_mod.flatitems():
+              pointer_lrs_leaf_ids_B.add(id(_leaf))
           if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"] and\
              (not kernel["ForceUnrollSubIter"] or (doReadM and (u<localWriteEndIter))):
             pointerLRCode.addComment1("local read swap offsets metadata")
-            pointerLRCode.add(self.localReadSwapOffsets(kernel, expand, tPM))
+            # rocm-libraries-nmsx revision: do NOT classify sparse-MX
+            # metadata leaves under LRSB. See the NLL/NGL site for the
+            # full rationale: the canonical CMS schema produces a
+            # distinct `LRMetadata` category for these and a defensive
+            # LRSB classification would silently inflate LRSB counts and
+            # cause false-positive parity mismatches once a sparse-MX
+            # fixture lands. Until that fixture exists, un-bucketed
+            # metadata leaves surface via the fail-loud contract.
+            _lrs_meta_mod = self.localReadSwapOffsets(kernel, expand, tPM)
+            pointerLRCode.add(_lrs_meta_mod)
           if not kernel["ForceUnrollSubIter"] or (doReadB and (u<localWriteEndIter)):
             pointerLRCode.addComment1("local read swap offsets b")
-            pointerLRCode.add(self.localReadSwapOffsets(kernel, expand, tensorParametersB))
+            _lrs_b_mod = self.localReadSwapOffsets(kernel, expand, tensorParametersB)
+            pointerLRCode.add(_lrs_b_mod)
+            for _leaf in _lrs_b_mod.flatitems():
+              pointer_lrs_leaf_ids_B.add(id(_leaf))
             if kernel["UseCustomMainLoopSchedule"]:
               LRSwapBAllIters.add(self.localReadSwapOffsets(kernel, expand, tensorParametersB))
 
       if isResetLroIter: # ResetLroIter
+        # rocm-libraries-nmsx Fix 3: the localReadInitPointers calls are
+        # side-specific in the same way as the swap-offsets above. They
+        # are pointer-math too; classify under LRSA/LRSB so the SHADOW
+        # capture's per-side schema mirrors the CMS-side LRSA/LRSB
+        # idMap categories from ScheduleCapture.py:1045-1048.
         pointerLRCode.addComment1("local read init pointers a")
-        pointerLRCode.add(self.localReadInitPointers(kernel, tensorParametersA, tensorParametersA))
+        _lrip_a_mod = self.localReadInitPointers(kernel, tensorParametersA, tensorParametersA)
+        pointerLRCode.add(_lrip_a_mod)
+        for _leaf in _lrip_a_mod.flatitems():
+          pointer_lrs_leaf_ids_A.add(id(_leaf))
         if kernel["ProblemType"]["MXBlockA"]:
           pointerLRCode.addComment1("local read init pointers mxsa")
-          pointerLRCode.add(self.localReadInitPointers(kernel, tensorParametersA, tensorParametersA["MX"]))
+          _lrip_mxsa_mod = self.localReadInitPointers(kernel, tensorParametersA, tensorParametersA["MX"])
+          pointerLRCode.add(_lrip_mxsa_mod)
+          for _leaf in _lrip_mxsa_mod.flatitems():
+            pointer_lrs_leaf_ids_A.add(id(_leaf))
         if kernel["ProblemType"]["MXBlockB"]:
           pointerLRCode.addComment1("local read init pointers mxsb")
-          pointerLRCode.add(self.localReadInitPointers(kernel, tensorParametersA, tensorParametersB["MX"]))
+          _lrip_mxsb_mod = self.localReadInitPointers(kernel, tensorParametersA, tensorParametersB["MX"])
+          pointerLRCode.add(_lrip_mxsb_mod)
+          for _leaf in _lrip_mxsb_mod.flatitems():
+            pointer_lrs_leaf_ids_B.add(id(_leaf))
         if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
           pointerLRCode.addComment1("local read init pointers metadata")
-          pointerLRCode.add(self.localReadInitPointers(kernel, tensorParametersA, tPM))
+          # rocm-libraries-nmsx revision: do NOT pre-register sparse-MX
+          # metadata leaves into pointer_lrs_leaf_ids_B. See the matching
+          # `local read swap offsets metadata` block above for the
+          # rationale.
+          _lrip_meta_mod = self.localReadInitPointers(kernel, tensorParametersA, tPM)
+          pointerLRCode.add(_lrip_meta_mod)
         pointerLRCode.addComment1("local read init pointers b")
-        pointerLRCode.add(self.localReadInitPointers(kernel, tensorParametersA, tensorParametersB))
+        _lrip_b_mod = self.localReadInitPointers(kernel, tensorParametersA, tensorParametersB)
+        pointerLRCode.add(_lrip_b_mod)
+        for _leaf in _lrip_b_mod.flatitems():
+          pointer_lrs_leaf_ids_B.add(id(_leaf))
+
       if self.getConditionToSkipLocalReadWriteWait(kernel, u):
         waitCode = self._wait(kernel, tensorParametersA, tensorParametersB, \
             -1, 0, 0, \
@@ -4902,8 +5270,24 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # side capture is enabled, the shadow _makeSubIterSchedule call needs
           # macIterCode populated with this iteration's MFMAs (the non-CMS path
           # populates it; CMS otherwise routes MFMAs only to MfmaCodeAllIters).
-          # Use a deepcopy so MfmaCodeAllIters' reference is unaffected by SIA3
-          # consuming macIterCode via macIterItems.pop.
+          # Use a deepcopy so MfmaCodeAllIters' reference is unaffected by
+          # any later mutation a SIA3-style consumer might apply to macIterCode.
+          #
+          # rocm-libraries-nmsx Phase 1 categorization: the deepcopy creates
+          # NEW Python ids for every sub-leaf inside mfmaIter (TF32-emulation
+          # VCvtPkF32toBF16/VMovB64 sub-leaves interleaved by `localReadDo`'s
+          # `initTmpVregForPack`, plus tail-loop / ShiftK VCndMaskB32/SAndB32/…
+          # control instructions added via `shiftK.add(...)` inside mfmaIter).
+          # Those new ids cannot match the SHADOW idmap built from
+          # PackCodeAAllIters etc. — they are NEW objects, not the ones that
+          # entered PackCodeAAllIters. The post-deepcopy categorization walk
+          # at the SHADOW idmap-build site (below, around the
+          # `_captureDefaultSchedule` branch's idmap construction) explicitly
+          # registers every macIterCode leaf as "MFMA", mirroring the CMS-
+          # side semantics where the entire mfmaIter Module is one MFMA-
+          # tagged entry. The fail-loud contract in `_captureSubIterToBuilder`
+          # therefore does not fire on these leaves: they have a SHADOW
+          # idmap entry by the time SIA3's flattening exposes them.
           if getattr(self.states, "_captureDefaultSchedule", False):
             macIterCode.add(deepcopy(mfmaIter))
         else:
@@ -5001,6 +5385,27 @@ class KernelWriter(metaclass=abc.ABCMeta):
             capture=self._capture_context.builder,
             capture_id_to_category=capture_id_to_cat,
             capture_id_to_source_module=capture_id_to_src,
+            # rocm-libraries-nmsx Fix 3: per-side pointer-math tags also
+            # apply on the Approach-A non-CMS capture path; same
+            # producer-recorded side sets feed both consumers.
+            capture_pointer_side_map={
+              "lrs_a": pointer_lrs_leaf_ids_A,
+              "lrs_b": pointer_lrs_leaf_ids_B,
+              "lws_a": pointer_lws_leaf_ids_A,
+              "lws_b": pointer_lws_leaf_ids_B,
+            },
+            # rocm-libraries-nmsx revision: explicit opt-OUT of fail-loud
+            # on this Approach-A call site. Approach-A (the non-CMS
+            # reference build at `_captureNonCmsBuild`) is scheduled for
+            # deletion in Phase 4 per DEFAULT_SCHEDULER_REFERENCE_DESIGN.md
+            # §4 Phase 4 ("Retire Approach A"). Until then it tolerates
+            # the silent UNKNOWN fallback so its existing tests do not
+            # immediately regress; the function-level default elsewhere
+            # is True so SHADOW / Phase 1 fail-loud is the canonical
+            # path. TODO(Phase 4): delete this call site entirely when
+            # Approach-A is retired; the explicit kwarg disappears with
+            # it.
+            capture_fail_loud_on_missing_category=False,
           )
         else:
           subIterCode = self._makeSubIterSchedule(kernel, tensorParametersA, tensorParametersB, localReads, \
@@ -5078,9 +5483,42 @@ class KernelWriter(metaclass=abc.ABCMeta):
         for _plrIdx, _prefetch_mod in enumerate(self._capture_context.prefetch_pack_b):
           for _leaf in _prefetch_mod.flatitems():
             capture_id_to_cat.setdefault(id(_leaf), f"PackB{_plrIdx}")
-        # Pointer-math items (LRS/LWS) are tagged inside _makeSubIterSchedule
-        # via the pointerLRCode/pointerLWCode walk, so callers don't need to
-        # do it themselves.
+        # Pointer-math items (LRSA/LRSB/LWSA/LWSB) are tagged inside
+        # _makeSubIterSchedule via per-side leaf-id sets recorded at the
+        # production call sites in _loopBody (rocm-libraries-nmsx Fix 3).
+        #
+        # rocm-libraries-nmsx revision: register every leaf inside the
+        # SHADOW-side macIterCode (which holds the deepcopied mfmaIter at
+        # line ~4909) into the SHADOW idmap under the "MFMA" tag. This
+        # mirrors the CMS-side semantics: CMS adds the entire mfmaItem
+        # (the Module returned by `mfmaIter()`) as a single item to the
+        # MAINLOOP macro and tags `tag_by_origin_id[id(mfmaItem)] =
+        # "MFMA"` (CustomSchedule/dispatch.py:239-240). `expand_cms_macro`
+        # walks `macro.items()` (immediate children) — it never flattens
+        # mfmaItem's interior, so all of mfmaIter's interior leaves
+        # (TF32-emulation VCvtPkF32toBF16/VMovB64 from `initTmpVregForPack`,
+        # plus tail-loop / ShiftK control instructions like VCndMaskB32,
+        # VSubU32, SAndB32 added via `shiftK.add(...)`) collapse into the
+        # single MFMA-tagged entry. The SHADOW path walks via `flatitems()`
+        # inside `_captureSubIterToBuilder`, so every interior leaf is
+        # visited individually — without explicit MFMA tagging here they
+        # would fall through to the fail-loud branch (no idMap entry,
+        # registry recognizes them as CVT_PACK/MIDDLE_PACK/LR but those
+        # have no canonical SHADOW tag). Tagging them MFMA mirrors the
+        # CMS attribution and lets the fail-loud contract stay strict.
+        #
+        # Asymmetry note: this still produces SHADOW MFMA counts ≫ CMS
+        # MFMA counts (one tagged leaf per interior instruction vs one
+        # tagged Module on CMS). The per-category count parity test must
+        # therefore continue to exclude MFMA from its comparison. The
+        # fundamental shape difference (per-leaf SHADOW vs per-Module CMS)
+        # would require restructuring `_captureSubIterToBuilder` to
+        # recognize and atomic-treat the mfmaIter Module — out of scope
+        # for nmsx Phase 1 (a single Fix-2-equivalent walk-coverage fix
+        # would not address it). Documented at the count-parity test
+        # exclusion site.
+        for _leaf in macIterCode.flatitems():
+          capture_id_to_cat.setdefault(id(_leaf), "MFMA")
         self._makeSubIterSchedule(
           kernel, tensorParametersA, tensorParametersB,
           structural_clone(localReads),
@@ -5093,6 +5531,18 @@ class KernelWriter(metaclass=abc.ABCMeta):
           capture=self._capture_context.builder,
           capture_id_to_category=capture_id_to_cat,
           capture_id_to_source_module=capture_id_to_src,
+          capture_pointer_side_map={
+            "lrs_a": pointer_lrs_leaf_ids_A,
+            "lrs_b": pointer_lrs_leaf_ids_B,
+            "lws_a": pointer_lws_leaf_ids_A,
+            "lws_b": pointer_lws_leaf_ids_B,
+          },
+          # rocm-libraries-nmsx Phase 1 fail-loud contract: SHADOW
+          # main_loop is the canonical reference; missing categorization
+          # surfaces here as CaptureCategoryMissingError rather than
+          # silent UNKNOWN downstream.
+          capture_body_label="main_loop",
+          capture_fail_loud_on_missing_category=True,
         )
 
       self.states.SubTileIdx = (self.states.SubTileIdx + 1) % kernel["numSubTiles"]
@@ -5129,6 +5579,41 @@ class KernelWriter(metaclass=abc.ABCMeta):
             "support."
           )
 
+      # rocm-libraries-nmsx Phase 1 Fix 1 (LCC) + Fix 2 (PLR1 leftover packs)
+      # per DEFAULT_SCHEDULER_REFERENCE_DESIGN.md §4 Phase 1.
+      #
+      # The SHADOW capture has been per-iter-driven inside the for-uIdx loop
+      # above. Two structural defects remain that this block must fix before
+      # finalizing the SHADOW capture:
+      #
+      # Fix 1 — LCC absence: the CMS-side `customMainLoopSchedule` (called
+      # below at line ~5034) emits LCC (`s_sub_u32` + `s_cmp_eq_i32`) into
+      # its scheduled stream via `self.closeLoop()` (the trailing arg to
+      # customMainLoopSchedule). Without an explicit harvest, SHADOW's
+      # capture would lack those two instructions entirely. Compute
+      # `closeLoopMod` once here and pass the SAME instance through to
+      # customMainLoopSchedule (so closeLoop's potential side-effects don't
+      # run twice).
+      #
+      # Fix 2 — PLR1 leftover packs: per-iter SHADOW capture only sees
+      # leaves the iter's `iterCode` actually consumes. Pack/packPre leaves
+      # added at iter `u` for consumption at iter `u+pflr` (where
+      # `u+pflr >= LoopIters`, i.e. the last `pflr` iters' contributions)
+      # are placed in `pack[(u+pflr)%numPackBuffer]` for the NoLoadLoop to
+      # consume — they never enter any mainloop iter's iterCode. CMS-side
+      # aggregates ALL PackCodeAAllIters[*] / PackCodeBAllIters[*] content
+      # into its main_loop macro via the FULL build_idmap, so the SHADOW
+      # main_loop must include the same leftover content under the same
+      # `PackA{u}`/`PackB{u}` tags. (Pre-vybd-F3 deletion this walk
+      # produced the xbi0 same-id-double-capture and flpk canonical-text-
+      # cross-tagging defects; the guards below restore the walk WITHOUT
+      # those defects — skip leaves already captured per-iter AND skip
+      # leaves whose canonical text was already captured under a different
+      # category in the same builder.)
+      closeLoopMod = None
+      if kernel["UseCustomMainLoopSchedule"]:
+        closeLoopMod = self.closeLoop(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, False, nta=nta, ntb=ntb)
+
       # Finalize default-side main_loop capture (Phase 4) before
       # Phase 5 of plans/then-let-s-work-on-jaunty-reddy.md: stash the
       # main-loop builder so kernelBody can assemble the full FourPartCapture
@@ -5136,25 +5621,153 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # _defaultNLLCapture. Cross-scheduler comparison moved to kernelBody for
       # the same reason.
       if getattr(self.states, "_captureDefaultSchedule", False):
-        # rocm-libraries-vybd (F3): the previous leftover pack[*] / packPre[*]
-        # walk that ran here was scaffolding to make the SHADOW capture's
-        # main_loop comparable to CMS's main_loop (CMS aggregates all iters'
-        # pack content into its main_loop macro, so a SHADOW-vs-CMS framing
-        # required leftover content on the shadow side). Under
-        # rocm-libraries-71hw Approach A, the default-side build is a true
-        # non-CMS reference kernel (UseCustomMainLoopSchedule=0), not a
-        # shadow — both sides of compare_graphs are real emittable+runnable
-        # kernels with their own naturally-emitted main-loop body. The
-        # leftover walk became dead scaffolding that also caused
-        # canonical-text cross-tagging defects (rocm-libraries-flpk) and
-        # double-capture aliasing (rocm-libraries-xbi0). Deleting the walk
-        # is the architectural fix that supersedes both.
-        #
-        # The finalize/handoff below is preserved: ctx.default_main is
-        # consumed downstream in kernelBody (see line ~5274) to assemble
-        # the FourPartCapture for cross-scheduler validation.
         builder = self._capture_context.builder
         if builder is not None:
+          # rocm-libraries-nmsx Fix 2: leftover walk over pack[*] / packPre[*]
+          # with a build_idmap using the FULL per-iter range (not the
+          # populated-so-far range). The same builder.finalize() guards
+          # against double-capture; we additionally pre-skip ids/canonical
+          # texts already captured per-iter to keep the xbi0/flpk
+          # invariants from regressing.
+          from Tensile.Components.ScheduleCapture import (
+            build_idmap, invert_idmap_to_id_to_category,
+            invert_idmap_to_id_to_source_module,
+            split_for_plr,
+            SLOT_KIND_POST_LOOP, WrappedInstruction,
+          )
+
+          # rocm-libraries-nmsx Bug 2 fix: mirror dispatch.py's
+          # numLoopIter==1 split_for_plr step (CustomSchedule/dispatch.py
+          # lines 103-111). When the kernel has LoopIters==1, CMS replaces
+          # each single per-iter source list with the result of
+          # `split_for_plr(...)` (returning 2 halves) and builds its idMap
+          # with `num_loop_iter=2`, so pack/LR leaves get tagged
+          # `PackA0/PackA1/PackB0/PackB1` (and `LRA0/LRA1/LRB0/LRB1`).
+          # Without applying the same split here, SHADOW's `leftover_idmap`
+          # would tag the same leaves as `PackA0/PackB0` only, causing
+          # per-category count divergence on the parity test.
+          # `split_for_plr` does not clone — it splits the source list's
+          # items into two halves, preserving Python `id()` — so the
+          # post-split lists share leaf identity with the original lists
+          # that the per-iter SHADOW walk also references. This keeps
+          # `id()`-keyed lookups in `leftover_id_to_cat` aligned with the
+          # CMS side.
+          _LRCodeA_for_idmap = LRCodeAAllIters
+          _LRCodeB_for_idmap = LRCodeBAllIters
+          _PackCodeA_for_idmap = PackCodeAAllIters
+          _PackCodeB_for_idmap = PackCodeBAllIters
+          _num_loop_iter_for_idmap = len(LRCodeAAllIters)
+          if _num_loop_iter_for_idmap == 1:
+            _LRCodeA_for_idmap = split_for_plr(LRCodeAAllIters[0])
+            _LRCodeB_for_idmap = split_for_plr(LRCodeBAllIters[0])
+            _PackCodeA_for_idmap = split_for_plr(PackCodeAAllIters[0])
+            _PackCodeB_for_idmap = split_for_plr(PackCodeBAllIters[0])
+            _num_loop_iter_for_idmap = 2
+
+          leftover_idmap = build_idmap(
+            num_loop_iter=_num_loop_iter_for_idmap,
+            LRCodeA=_LRCodeA_for_idmap, PackCodeA=_PackCodeA_for_idmap,
+            LRCodeB=_LRCodeB_for_idmap, PackCodeB=_PackCodeB_for_idmap,
+            globalReadA=self.codes.globalReadA,
+            globalReadB=self.codes.globalReadB,
+            globalReadIncACode=globalReadIncACode,
+            globalReadIncBCode=globalReadIncBCode,
+            localWriteA=self.codes.localWriteA,
+            localWriteB=self.codes.localWriteB,
+            LRSwapA=LRSwapAAllIters, LRSwapB=LRSwapBAllIters,
+            LWSwapA=LWSwapAAllIters, LWSwapB=LWSwapBAllIters,
+            # Fix 1: feed the just-computed closeLoopMod so LCC items get
+            # categorized via the canonical idMap rather than the
+            # isinstance fallback.
+            loopCounterCode=closeLoopMod if closeLoopMod is not None else Module(),
+            syncCode=Module(),
+            snopCode=Module(),
+          )
+          leftover_id_to_cat = invert_idmap_to_id_to_category(leftover_idmap)
+          leftover_id_to_src = invert_idmap_to_id_to_source_module(leftover_idmap)
+          # Mirror the per-iter prefetch-pack tagging so leftover leaves still
+          # in pack[*] from the prefetch phase get categorized correctly.
+          for _plrIdx, _prefetch_mod in enumerate(self._capture_context.prefetch_pack_a):
+            for _leaf in _prefetch_mod.flatitems():
+              leftover_id_to_cat.setdefault(id(_leaf), f"PackA{_plrIdx}")
+          for _plrIdx, _prefetch_mod in enumerate(self._capture_context.prefetch_pack_b):
+            for _leaf in _prefetch_mod.flatitems():
+              leftover_id_to_cat.setdefault(id(_leaf), f"PackB{_plrIdx}")
+
+          # Compute what the per-iter SHADOW capture already emitted so the
+          # leftover walk skips them (xbi0 same-id invariant + flpk
+          # canonical-text-under-different-category invariant). Read directly
+          # from the builder's internal accumulator — there's no public
+          # accessor and adding one isn't load-bearing here.
+          already_captured_ids = set()
+          canonical_to_category = {}
+          for _ti in builder._instructions:
+            _ri = _ti.wrapped.rocisa_inst
+            if _ri is None:
+              continue
+            already_captured_ids.add(id(_ri))
+            _canon = WrappedInstruction.canonical_str(_ri)
+            canonical_to_category.setdefault(_canon, _ti.category)
+
+          # Pack/packPre leftover walk. Skip leaves not in the idmap (no
+          # silent UNKNOWN — that would re-introduce the very defect Phase
+          # 1's fail-loud contract guards against; pack[*] contents should
+          # always be covered by PackCodeAAllIters in build_idmap, and any
+          # gap is a producer-site bug that should surface as a test
+          # failure not silent capture truncation).
+          from Tensile.Components.ScheduleCapture import CaptureCategoryMissingError
+          from rocisa.code import TextBlock
+          for _buf in list(pack) + list(packPre):
+            if _buf is None:
+              continue
+            for _leaf in _buf.flatitems():
+              if isinstance(_leaf, TextBlock):
+                continue
+              if id(_leaf) in already_captured_ids:
+                continue
+              _cat = leftover_id_to_cat.get(id(_leaf))
+              if _cat is None:
+                # Producer-site / scope bug: leaf is in pack[*] but not in
+                # any PackCodeAAllIters[u] (or the prefetch_pack snapshots).
+                # Fail loud per the design — see _captureSubIterToBuilder's
+                # similar guard above.
+                raise CaptureCategoryMissingError(
+                  f"Leftover pack[*]/packPre[*] leaf "
+                  f"{type(_leaf).__name__!r} (repr={_leaf!r}) has no "
+                  f"entry in the full-range build_idmap derived from "
+                  f"PackCodeAAllIters / prefetch_pack snapshots. This "
+                  f"is a producer-site / scope bug: the leaf was added "
+                  f"to pack[*] but never to any PackCodeAAllIters[u]. "
+                  f"Fix the producer at KernelWriter.py:_loopBody "
+                  f"(pack[*].add() sites around lines 4505-4540) or "
+                  f"update build_idmap's source coverage. No silent "
+                  f"UNKNOWN per DEFAULT_SCHEDULER_REFERENCE_DESIGN.md "
+                  f"§4 Phase 1 fail-loud contract."
+                )
+              # flpk invariant pre-check: if this leaf's canonical text
+              # already appears under a DIFFERENT category, skipping it
+              # avoids the cross-tagging shape rocm-libraries-flpk pinned.
+              # Same canonical text under SAME category is fine.
+              _canon = WrappedInstruction.canonical_str(_leaf)
+              _prev_cat = canonical_to_category.get(_canon)
+              if _prev_cat is not None and _prev_cat != _cat:
+                continue
+              builder.append(
+                inst=_leaf, category=_cat,
+                subiter=kernel["LoopIters"],
+                slot_kind=SLOT_KIND_POST_LOOP, mfma_index=-1,
+                source_module_id=leftover_id_to_src.get(id(_leaf)),
+              )
+              already_captured_ids.add(id(_leaf))
+              canonical_to_category.setdefault(_canon, _cat)
+
+          # Fix 1: harvest LCC instructions from closeLoopMod into the
+          # SHADOW builder before finalize. Mirrors the Approach-A
+          # `_appendCloseLoopLCCToBuilder` harvest (KernelWriter.py:2767)
+          # which exists exactly for this reason on the non-CMS path.
+          if closeLoopMod is not None:
+            self._appendCloseLoopLCCToBuilder(closeLoopMod, builder, kernel)
+
           self._capture_context.default_main = builder.finalize()
           self._capture_context.builder = None
 
@@ -5162,7 +5775,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                                    LRCodeAAllIters, PackCodeAAllIters, LRCodeBAllIters, PackCodeBAllIters, \
                                                    LRSwapAAllIters, LRSwapBAllIters, self.codes.globalReadA, self.codes.globalReadB, \
                                                    LWSwapAAllIters, LWSwapBAllIters, MfmaCodeAllIters, \
-                                                   self.closeLoop(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, False, nta=nta, ntb=ntb), nta=nta, ntb=ntb)
+                                                   closeLoopMod if closeLoopMod is not None else self.closeLoop(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, False, nta=nta, ntb=ntb), nta=nta, ntb=ntb)
       module.add(optSchedule)
       module.add(self.simdSpecDispatch(kernel, numCodePath, nta=nta, ntb=ntb))
 
