@@ -748,7 +748,7 @@ TEST(FmhaBwdCompat, Registry_OGradDotO_ReturnsNullForUnregistered)
 
 TEST(FmhaBwdCompat, Registry_OGradDotO_VariantCount)
 {
-    EXPECT_EQ(ALL_OGRAD_DOT_O_VARIANTS_COUNT, 8);
+    EXPECT_EQ(ALL_OGRAD_DOT_O_VARIANTS_COUNT, 9);
 }
 
 // ============================================================================
@@ -989,11 +989,6 @@ TEST(FmhaBwdCompat, Registry_DqDkDv_ReturnsNullForUnregistered)
 }
 
 TEST(FmhaBwdCompat, Registry_DqDkDv_VariantCount) { EXPECT_EQ(ALL_DQDKDV_VARIANTS_COUNT, 22); }
-        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
-    EXPECT_EQ(v, nullptr);
-}
-
-TEST(FmhaBwdCompat, Registry_DqDkDv_VariantCount) { EXPECT_EQ(ALL_DQDKDV_VARIANTS_COUNT, 15); }
 
 // _cmask_br and _swa share the compiled spec with _cmask. findVariant() matches
 // by spec features alone, so it returns _cmask first for any has_mask=true
