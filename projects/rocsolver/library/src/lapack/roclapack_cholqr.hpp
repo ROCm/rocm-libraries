@@ -236,7 +236,7 @@ static __global__ void cal_gnorm_sq_kernel(const I m,
     I const bid_inc = nbz;
 
     extern __shared__ double lmem[];
-    double* const gnorm_block = (double*)lmem;
+    S* const gnorm_block = (S*)lmem;
 
     for(I bid = bid_start; bid < batch_count; bid += bid_inc)
     {

@@ -57,7 +57,7 @@ const vector<int> singular_range = {
     3, // test with rocsolver_cholqr_shift_computed, cholnum = 2,3
     5 // test with rocsolver_cholqr_shift_none, cholnum = 1,2
     // cases 3 and 5 are tested with different cholnum values to verify that
-    // the orthogonallity error improved.
+    // the orthogonality error improved.
 };
 
 const vector<vector<int>> matrix_size_range = {

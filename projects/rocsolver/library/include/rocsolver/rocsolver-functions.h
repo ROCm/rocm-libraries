@@ -30583,9 +30583,9 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zhegvdx_strided_batched(rocblas_handle
     then sigma is not referenced and could be null.
 
     Additionally, an iterative refinement process could be used to improve the orthonormality of the columns (or rows) in Q.
-    If \f$A=Q_1R_1\f$ (or \f$A=L_1Q_1\f$) is an intial factorization of A, one can always re-apply the CholeskyQR
+    If \f$A=Q_1R_1\f$ (or \f$A=L_1Q_1\f$) is an initial factorization of A, one can always re-apply the CholeskyQR
     process to \f$Q_1\f$ to produce \f$Q_1=Q_2R_2\f$ (or \f$Q_1=L_2Q_2\f$). This would yield a new factorization \f$A=QR\f$ (or \f$A=LQ\f$), with
-    \f$R=R_2R_1\f$ (\f$L=L_1L_2)\f$, and \f$Q=Q_2\f$. The columns (rows) of Q are now expected to be closer to be orthonormal than
+    \f$R=R_2R_1\f$ (\f$L=L_1L_2\f$), and \f$Q=Q_2\f$. The columns (rows) of Q are now expected to be closer to be orthonormal than
     the columns (rows) of the initial \f$Q_1\f$. CHOLQR will execute cholnum - 1 extra Cholesky factorizations
     to refine the factor Q.
 
@@ -30808,10 +30808,10 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zcholqr_64(rocblas_handle handle,
     then sigma is not referenced and could be null.
 
     Additionally, an iterative refinement process could be used to improve the orthonormality of the columns (or rows) in \f$Q_l\f$.
-    If \f$A_l=Q_{l_1}R_{l_1}\f$ (or \f$A_l=L_{l_1}Q_{l_1}\f$) is an intial factorization of \f$A_l\f$, one can always re-apply the CholeskyQR
+    If \f$A_l=Q_{l_1}R_{l_1}\f$ (or \f$A_l=L_{l_1}Q_{l_1}\f$) is an initial factorization of \f$A_l\f$, one can always re-apply the CholeskyQR
     process to \f$Q_{l_1}\f$ to produce \f$Q_{l_1}=Q_{l_2}R_{l_2}\f$ (or \f$Q_{l_1}=L_{l_2}Q_{l_2}\f$).
     This would yield a new factorization \f$A_l=Q_lR_l\f$ (or \f$A_l=L_lQ_l\f$), with
-    \f$R_l=R_{l_2}R_{l_1}\f$ (\f$L_l=L_{l_1}L_{l_2})\f$, and \f$Q_l=Q_{l_2}\f$. The columns (rows) of \f$Q_l\f$ are now
+    \f$R_l=R_{l_2}R_{l_1}\f$ (\f$L_l=L_{l_1}L_{l_2}\f$), and \f$Q_l=Q_{l_2}\f$. The columns (rows) of \f$Q_l\f$ are now
     expected to be closer to be orthonormal than the columns (rows) of the initial \f$Q_{l_1}\f$.
     CHOLQR will execute cholnum - 1 extra Cholesky factorizations to refine the factor \f$Q_l\f$.
 
@@ -31056,10 +31056,10 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zcholqr_batched_64(rocblas_handle hand
     then sigma is not referenced and could be null.
 
     Additionally, an iterative refinement process could be used to improve the orthonormality of the columns (or rows) in \f$Q_l\f$.
-    If \f$A_l=Q_{l_1}R_{l_1}\f$ (or \f$A_l=L_{l_1}Q_{l_1}\f$) is an intial factorization of \f$A_l\f$, one can always re-apply the CholeskyQR
+    If \f$A_l=Q_{l_1}R_{l_1}\f$ (or \f$A_l=L_{l_1}Q_{l_1}\f$) is an initial factorization of \f$A_l\f$, one can always re-apply the CholeskyQR
     process to \f$Q_{l_1}\f$ to produce \f$Q_{l_1}=Q_{l_2}R_{l_2}\f$ (or \f$Q_{l_1}=L_{l_2}Q_{l_2}\f$).
     This would yield a new factorization \f$A_l=Q_lR_l\f$ (or \f$A_l=L_lQ_l\f$), with
-    \f$R_l=R_{l_2}R_{l_1}\f$ (\f$L_l=L_{l_1}L_{l_2})\f$, and \f$Q_l=Q_{l_2}\f$. The columns (rows) of \f$Q_l\f$ are now
+    \f$R_l=R_{l_2}R_{l_1}\f$ (\f$L_l=L_{l_1}L_{l_2}\f$), and \f$Q_l=Q_{l_2}\f$. The columns (rows) of \f$Q_l\f$ are now
     expected to be closer to be orthonormal than the columns (rows) of the initial \f$Q_{l_1}\f$.
     CHOLQR will execute cholnum - 1 extra Cholesky factorizations to refine the factor \f$Q_l\f$.
 
