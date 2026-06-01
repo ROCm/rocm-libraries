@@ -69,7 +69,7 @@ public:
         return problem.stride == 1;
     }
     static constexpr auto start_vectorized        = false;
-    static constexpr auto default_separate_stride = true;
+    static constexpr auto default_separate_stride = false;
     static constexpr auto start_separate_stride   = false;
 };
 

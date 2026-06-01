@@ -8,7 +8,6 @@
 #include <miopen/names.hpp>
 
 #include <sstream>
-#include <string_view>
 
 namespace miopen {
 
