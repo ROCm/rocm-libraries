@@ -63,8 +63,8 @@ These emit generic AMDGPU IR; arch only sets the comgr target triple.
 
 | Instance | gfx942 | gfx950 | gfx1151 | Notes |
 |---|:--:|:--:|:--:|---|
-| `conv_implicit_gemm` | ✅ | ✅ | ❌ | warp-tile validated vs MFMA catalog; WMMA wiring pending |
-| `conv_implicit_gemm_auto` | ✅ | ✅ | ❌ | same |
+| `conv_implicit_gemm` | ✅ | ✅ | ✅ | gfx1151: WMMA 16x16x16, `mem`+`default`, `wave_size=32`, `groups=1` |
+| `conv_implicit_gemm_auto` | ✅ | ✅ | ❌ | MFMA-specialized autotuned path (raw `MfmaAtom`, K=32 kpack); not ported to WMMA |
 | `direct_conv_16c` | ❌ | ✅ | ❌ | `fold_k32` needs 16x16x32 atom (CDNA4) |
 | `direct_conv_4c` | ✅ | ✅ | ❌ | 4x4x4 MFMA atom not in WMMA catalog |
 
@@ -106,15 +106,17 @@ These emit generic AMDGPU IR; arch only sets the comgr target triple.
   GEMM family. The `compv3`/`compv4` pipelines and the `cshuffle` epilogue are
   MFMA-only paths, so any instance that mandates them (e.g. `gemm_multi_d`,
   `gemm_multi_abd`) is rejected on gfx1151.
-- **Convolution does not yet run on gfx1151:** `conv_implicit_gemm` validates
-  its warp-tile against the MFMA atom catalog only. Wiring the WMMA atom in is
-  the planned follow-on so the conv rows can flip to ✅.
+- **Convolution on gfx1151:** `conv_implicit_gemm` runs on WMMA
+  (16x16x16, `mem` pipeline, `default` epilogue, `wave_size=32`, `groups=1`).
+  `conv_implicit_gemm_auto` is a separate MFMA-specialized autotuned path
+  (raw `MfmaAtom`, K=32 kpack) that has not been ported to the WMMA atom
+  contract, so it stays MFMA-only.
 - **GPU-numeric verification on gfx1151** (launched on the Radeon 8060S,
   output compared against a numpy reference). **Verified PASS:**
   `elementwise`, `reduce2d`, `rmsnorm2d`, `layernorm2d`, `transpose2d`,
   `batched_transpose2d`, `transpose_bc`, `permute_nd`, `pooling2d`,
   `img2col`, `batched_gemm`, `universal_gemm`,
-  `grouped_gemm`, `flatmm`, `add_rmsnorm2d_bf16`,
+  `grouped_gemm`, `flatmm`, `conv_implicit_gemm`, `add_rmsnorm2d_bf16`,
   `add_rmsnorm2d_rdquant` (i8 out only on RDNA), `smoothquant`,
   `moe_smoothquant`, `topk_softmax`, `moe_sorting` (all 4 phases),
   `fmha_fwd_mfma`, `fmha_appendkv`, `unified_attention_2d/3d/reduce`,

@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Sequence, Tuple
+from typing import Any, Callable, Optional, Sequence, Tuple, Union
 
 from ..core.ir import IRBuilder
 from .schedule import SchedulePolicy
@@ -15,6 +15,108 @@ from .schedule import SchedulePolicy
 BufferPair = Tuple[Any, Any]
 LoadFn = Callable[[int, BufferPair], None]
 ComputeFn = Callable[[int, BufferPair, Any], Any]
+
+
+# Byte size per element for the dtype names ck_dsl uses elsewhere
+# (matches the map in core/lower_llvm.py plus the 8-bit fp variants).
+_DTYPE_BYTES = {
+    "i8": 1,
+    "fp8e4m3": 1,
+    "bf8e5m2": 1,
+    "f8": 1,
+    "bf8": 1,
+    "f16": 2,
+    "bf16": 2,
+    "i32": 4,
+    "f32": 4,
+    "i64": 8,
+    "f64": 8,
+}
+
+
+def _dtype_bytes(dtype: Union[str, int]) -> int:
+    """Element byte size from a dtype name (``"f16"``) or an explicit int."""
+    if isinstance(dtype, int):
+        if dtype <= 0:
+            raise ValueError(f"dtype byte size must be positive, got {dtype}")
+        return dtype
+    try:
+        return _DTYPE_BYTES[dtype]
+    except KeyError as exc:  # pragma: no cover - defensive
+        raise ValueError(
+            f"unknown dtype {dtype!r}; pass one of {sorted(_DTYPE_BYTES)} "
+            f"or an explicit byte-size int"
+        ) from exc
+
+
+def recommend_prefetch_stages(
+    tile_m: int,
+    tile_n: int,
+    kper: int,
+    dtype_a: Union[str, int],
+    dtype_b: Union[str, int],
+    block_size: int,
+    *,
+    wave_size: int = 64,
+    lds_budget: int = 32768,
+) -> int:
+    """Bandwidth-derived prefetch depth, clamped to ``[2, 8]``.
+
+    Closed-form port of CK's classic-XDLOPS auto-tuner
+    (``blockwise_gemm_pipeline_xdlops_v2.hpp:147-154``)::
+
+        WgpPerCU = max(4 * WaveSize / BlockSize, 1)
+        FullMemBandPrefetchStages =
+            ceil( (32768 / WgpPerCU)
+                  / ((MPerBlock*sizeof(A) + NPerBlock*sizeof(B)) * KPerBlock) )
+        PrefetchStages = clamp(FullMemBandPrefetchStages, 2, 8)
+
+    All inner divisions follow CK's C++ semantics exactly: ``4*WaveSize/BlockSize``
+    and ``32768/WgpPerCU`` are integer (floor) divisions, and the outer division is
+    ``math::integer_divide_ceil`` (``(x + y - 1) // y``). The result keeps the full
+    HBM->LDS bandwidth in flight given the per-CU LDS budget (32 KB) and the
+    per-tile byte footprint.
+
+    Parameters
+    ----------
+    tile_m, tile_n
+        Block tile extents (``MPerBlock`` / ``NPerBlock``).
+    kper
+        ``KPerBlock`` reduction tile.
+    dtype_a, dtype_b
+        Operand dtypes, as a ck_dsl name (``"f16"``, ``"f8"``, ...) or an explicit
+        element byte size.
+    block_size
+        Threads per block.
+    wave_size
+        Hardware wave size (64 for CDNA / gfx9xx; defaulted so existing callers
+        need not supply it).
+    lds_budget
+        Per-CU LDS budget in bytes (32768 on CDNA; exposed for completeness).
+
+    Returns
+    -------
+    int
+        Prefetch depth in ``[2, 8]``, usable as ``SoftwarePipeline.num_buffers``.
+    """
+    if min(tile_m, tile_n, kper, block_size, wave_size, lds_budget) <= 0:
+        raise ValueError("all sizes must be positive")
+    bytes_a = _dtype_bytes(dtype_a)
+    bytes_b = _dtype_bytes(dtype_b)
+
+    wgp_per_cu = (4 * wave_size) // block_size
+    if wgp_per_cu < 1:
+        wgp_per_cu = 1
+
+    numer = lds_budget // wgp_per_cu  # integer (floor) division, as in CK
+    denom = (tile_m * bytes_a + tile_n * bytes_b) * kper
+    full_mem_band = (numer + denom - 1) // denom  # math::integer_divide_ceil
+
+    if full_mem_band < 2:
+        return 2
+    if full_mem_band > 8:
+        return 8
+    return full_mem_band
 
 
 @dataclass(frozen=True)

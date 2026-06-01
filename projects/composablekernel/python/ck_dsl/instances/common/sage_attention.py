@@ -79,6 +79,7 @@ from ...helpers.qk_scale import (
     load_q_scale_for_block,
 )
 from ...helpers.spec import kernel_name_join
+from ...helpers.transforms import calculate_magic_numbers, do_magic_division
 from ._fmha_common import FmhaCommonSpec, FmhaKernelBuilder, validate_common_spec
 from ._fmha_warp_body import WARP_SIZE, fmha_warp_fwd_inner_body
 from .fmha_arch import validate_fmha_mfma_atom
@@ -98,6 +99,22 @@ SageQuantMode = Literal["fp16_bf16", "fp8_bf16", "i8_fp8_bf16", "i4_fp8_bf16"]
 
 _MFMA_QUANT_MODES = ("fp16_bf16", "fp8_bf16")
 _CODEBOOK_QUANT_MODES = ("i8_fp8_bf16", "i4_fp8_bf16")
+
+
+def _magic_div(b: IRBuilder, dividend: Value, divisor: int) -> Value:
+    """``dividend // divisor`` via CK Tile's magic mul-hi division.
+
+    Used for the per-block scale-index decode (``pos // scale_block``) and
+    the i4 packed-byte offset (``lane_d_base // 2``). The divisor is a
+    compile-time constant so ``(multiplier, shift)`` fold to immediates and
+    the runtime cost is one ``v_mul_hi_u32`` + add + shift instead of the
+    AMDGPU integer divider. The dividend is a non-negative i32 (a Q/K
+    position or a lane-derived offset), inside the magic sequence's 31-bit
+    unsigned range, so the unsigned magic quotient equals the ``b.div`` it
+    replaces (device lowering of ``merge_v2_magic_division``).
+    """
+    mult, shift = calculate_magic_numbers(divisor)
+    return do_magic_division(b, dividend, mult, shift)
 
 
 @dataclass(frozen=True)
@@ -482,7 +499,7 @@ def _build_sage_mfma(spec: SageAttentionSpec, arch: str = "gfx950") -> KernelDef
     # BLOCK_M == 0`` (enforced in is_valid_spec) the same scale covers
     # every row of the BLOCK_M Q-tile.
     if spec.q_scale.layout == "per_block":
-        q_block_idx = b.div(q_tile_base, b.const_i32(spec.q_scale.scale_block))
+        q_block_idx = _magic_div(b, q_tile_base, spec.q_scale.scale_block)
     else:
         q_block_idx = b.const_i32(0)
     q_scale_v = load_q_scale_for_block(
@@ -513,7 +530,6 @@ def _build_sage_mfma(spec: SageAttentionSpec, arch: str = "gfx950") -> KernelDef
         scale_log2 = b.fmul(scale_log2_raw, q_scale_v)
 
         c_block_k = b.const_i32(MFMA_ATTN_BLOCK_K)
-        c_scale_block = b.const_i32(spec.k_scale.scale_block)
 
         def _k_block_scale_transform(
             b: IRBuilder, score: Value, kt: Value, _row_in_atom: int
@@ -525,7 +541,7 @@ def _build_sage_mfma(spec: SageAttentionSpec, arch: str = "gfx950") -> KernelDef
             ``k_descale = k_descale_ptr[(seqlen_k_start + i_total_loops * kN0) / kBlockScaleSizeK]``.
             """
             k_pos = b.mul(kt, c_block_k)
-            k_block_idx = b.div(k_pos, c_scale_block)
+            k_block_idx = _magic_div(b, k_pos, spec.k_scale.scale_block)
             k_scale_v = load_k_scale_for_block(
                 b,
                 k_scale_ptr,
@@ -682,7 +698,7 @@ def _build_sage_warp(spec: SageAttentionSpec) -> KernelDef:
     # Per-Q-block scale (loaded once for the whole CTA -- q_token is
     # the same across the wave).
     q_block_idx = (
-        b.div(q_token, b.const_i32(spec.q_scale.scale_block))
+        _magic_div(b, q_token, spec.q_scale.scale_block)
         if spec.q_scale.layout == "per_block"
         else b.const_i32(0)
     )
@@ -709,7 +725,7 @@ def _build_sage_warp(spec: SageAttentionSpec) -> KernelDef:
         via :func:`_load_kv_lane_f32`.
         """
         if is_i4:
-            byte_off = b.div(lane_d_base, b.const_i32(2))  # = tid
+            byte_off = _magic_div(b, lane_d_base, 2)  # = tid
             packed_k = b.global_load(K, b.add(k_row_base, byte_off), I8)
             lo_k, hi_k = _codebook_i4_pair_to_f32(b, cb_k, packed_k)
             packed_v = b.global_load(V, b.add(v_row_base, byte_off), I8)
@@ -747,7 +763,7 @@ def _build_sage_warp(spec: SageAttentionSpec) -> KernelDef:
         K-iter for per_block layout.
         """
         k_block_idx = (
-            b.div(k_idx, b.const_i32(spec.k_scale.scale_block))
+            _magic_div(b, k_idx, spec.k_scale.scale_block)
             if spec.k_scale.layout == "per_block"
             else b.const_i32(0)
         )

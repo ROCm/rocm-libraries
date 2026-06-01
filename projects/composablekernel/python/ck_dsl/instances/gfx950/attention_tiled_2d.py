@@ -57,14 +57,13 @@ from ...core.ir import (
     Type,
     Value,
 )
+from ...helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
 from ...helpers.attention import (
     apply_softcap_log2,
     binary_search_seq_idx,
     dequant_fp8x8_to_dtype,
     mfma_16x16x16_for_dtype,
     mfma_16x16x32_for_dtype,
-    mfma_32x32x16_c_col,
-    mfma_32x32x16_c_row,
     mfma_32x32x16_for_dtype,
     pv32_v_load_paired,
     warp_xor_reduce_max,
@@ -72,12 +71,66 @@ from ...helpers.attention import (
     warp_xor_reduce_sum,
     warp_xor_reduce_sum_32lane,
 )
+from ...helpers.distribution import make_static_tile_distribution
 from ...helpers.layouts import TransposeLdsReader
-from ...transforms import TensorDescriptor, embed, indirect, unmerge
+from ...helpers.transforms import TensorDescriptor, embed, indirect, unmerge
 
 
 MFMA_M = 16
 MFMA_N = 16
+
+
+# CK-Tile C-accumulator warp distribution for the 32x32x16 MFMA atom. The
+# hand-rolled ``mfma_32x32x16_c_row/col`` lane arithmetic (in
+# ``helpers/attention.py``) is exactly the ``calculate_x`` of CK Tile's
+# ``CWarpDstrEncoding`` (``warp_gemm_attribute_mfma.hpp``): for one wavefront
+# the lane splits as ``(m_blk, n) = (lane // 32, lane % 32)`` and the per-lane
+# ``<16 x f32>`` accumulator slot ``i`` splits row-major over the two M Y dims
+# ``(kCM0PerLane, kCM1PerLane) = (4, 4)``. The distribution's ``calculate_x``
+# then yields ``row = (i // 4) * 8 + m_blk * 4 + (i % 4)`` and ``col = n`` --
+# the same mapping the scalar helpers produce, but emitted by the tile-
+# distribution algebra instead of open-coded ``div``/``mul``/``add`` (Phase-C
+# "adopt the vocabulary" adoption; the C layout is dtype-independent so the
+# f16 atom drives it for both fp16 and bf16). The 3D tiled kernel still imports
+# the scalar helpers from ``helpers/attention.py`` directly; this distribution-
+# driven form is local to the 2D kernel.
+_C32_DIST = make_static_tile_distribution(
+    make_c_warp_dstr_encoding(MfmaAtom.f16_32x32x16())
+)
+
+
+def _mfma_32x32_c_row(b, lane, elem_idx: int):
+    """MFMA-local output row for a ``32x32x16`` C element ``elem_idx`` (0..15).
+
+    Drives CK Tile's C-warp ``TileDistribution.calculate_x`` instead of the
+    hand-rolled ``row = (i//4)*8 + (lane//32)*4 + (i%4)`` lane arithmetic.
+    """
+    if not (0 <= elem_idx < 16):
+        raise ValueError(f"mfma_32x32x16 elem_idx must be 0..15, got {elem_idx}")
+    m_blk = b.div(lane, b.const_i32(32))
+    n = b.mod(lane, b.const_i32(32))
+    y0 = b.const_i32(elem_idx // 4)
+    y1 = b.const_i32(elem_idx % 4)
+    row, _col = _C32_DIST.calculate_x(b, ys=[y0, y1], ps=[[m_blk, n]])
+    return row
+
+
+def _mfma_32x32_c_col(b, lane, n_tile32: int = 0):
+    """MFMA-local output col for ``32x32x16`` C elements in N-tile ``n_tile32``.
+
+    The per-lane column is the N coordinate of CK Tile's C-warp distribution
+    (``lane % 32``); ``n_tile32 * 32`` is the 32-column tile base added on top.
+    Every per-lane accumulator slot shares this column, so the element index
+    does not enter the formula.
+    """
+    m_blk = b.div(lane, b.const_i32(32))
+    n = b.mod(lane, b.const_i32(32))
+    _row, col = _C32_DIST.calculate_x(
+        b, ys=[b.const_i32(0), b.const_i32(0)], ps=[[m_blk, n]]
+    )
+    if n_tile32 == 0:
+        return col
+    return b.add(b.const_i32(n_tile32 * 32), col)
 
 
 # Backwards-compatible aliases. The 3D tiled kernel currently imports these
@@ -88,8 +141,6 @@ _binary_search_seq_idx = binary_search_seq_idx
 _mfma_16x16x16 = mfma_16x16x16_for_dtype
 _mfma_16x16x32 = mfma_16x16x32_for_dtype
 _mfma_32x32x16 = mfma_32x32x16_for_dtype
-_mfma_32x32_c_col = mfma_32x32x16_c_col
-_mfma_32x32_c_row = mfma_32x32x16_c_row
 _warp_xor_reduce_max = warp_xor_reduce_max
 _warp_xor_reduce_max_32lane = warp_xor_reduce_max_32lane
 _warp_xor_reduce_sum = warp_xor_reduce_sum
@@ -3142,12 +3193,12 @@ def build_unified_attention_2d_tiled(
         # accumulator + per-reg alpha.
         #
         # NOTE: an ``s_setprio(1)`` wrap around this cluster was tested
-        # (HipKittens-style, see `kernels/attn/gqa_causal/kernel_d64.cpp`),
+        # (a warp-specialized design),
         # which raises this wave's instruction-issue priority so the SIMD
         # scheduler favours us through the MFMA-dominated PV section. On
         # multi-seq bf16 prefill (n>=100 q=1000) this caused CATASTROPHIC
         # regressions (up to +1282% / 12.8x slower) — priority inversion
-        # starved the other waves competing for the same SIMD. HipKittens
+        # starved the other waves competing for the same SIMD. That reference
         # gets away with this on its hand-unrolled single-batch kernel
         # because it tightly controls inter-wave interleaving via the
         # cluster pattern + stagger barriers; our DSL-lowered loop has

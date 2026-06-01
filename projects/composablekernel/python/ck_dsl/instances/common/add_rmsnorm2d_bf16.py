@@ -35,7 +35,11 @@ from typing import List, Literal, Tuple
 
 from ...core.ir import F32, I32, IRBuilder, KernelDef, PtrType, Value
 from ...helpers.io import io_ir_type
-from ...helpers.reduction import block_lds_reduce, tree_reduce
+from ...helpers.reduction import (
+    block_lds_reduce,
+    block_lds_reduce_with_wave_prologue,
+    tree_reduce,
+)
 from ...helpers.spec import (
     IOSpecRule,
     SignatureBuilder,
@@ -225,7 +229,32 @@ def build_add_rmsnorm2d_bf16(
             # re-computing.
             x_tile.store_vec_from_f32(b, b.const_i32(0), n_off, values=chunk_x)
 
-    total_sq = block_lds_reduce(b, s_sq, lds, tid, block_size=BS, combine="sum")
+    # Cross-thread reduction. On a wave64 target whose ``wave_size``
+    # matches the spec and a block size that is a clean multiple of it,
+    # use the CK Tile ``BlockReduce2dSync`` (warp XOR butterfly) +
+    # ``CrossWarpSync`` (one ``num_warps``-slot LDS round) shape, the
+    # same path ``instances/common/reduce.py`` and ``rmsnorm2d.py``
+    # adopt: for BS=256 / wave64 this replaces the 8-round LDS tree
+    # (8 syncs) with six cross-lane shuffles + one ``sync``. The butterfly
+    # uses ``wave_size``-stride cross-lane ops, so we only take it when the
+    # hardware wave actually matches; otherwise (e.g. the wave32 gfx1151
+    # target the docstring guarantees) we keep the wave-agnostic full LDS
+    # tree, leaving that correctness path byte-for-byte unchanged.
+    from ...core.arch import ArchTarget
+
+    hw_wave = ArchTarget.from_gfx(arch).wave_size
+    if hw_wave == spec.wave_size and spec.block_size % spec.wave_size == 0:
+        total_sq = block_lds_reduce_with_wave_prologue(
+            b,
+            s_sq,
+            lds,
+            tid,
+            block_size=spec.block_size,
+            combine="sum",
+            wave_size=spec.wave_size,
+        )
+    else:
+        total_sq = block_lds_reduce(b, s_sq, lds, tid, block_size=BS, combine="sum")
 
     rcp_n = b.rcp(b.const_f32(float(N)))
     mean_sq = b.fmul(total_sq, rcp_n)

@@ -63,6 +63,28 @@ from ...helpers.spec import (
     ceil_div_grid,
     kernel_name_join,
 )
+from ...helpers.transforms import CoordVar, UnmergeMagicDiv
+
+
+def _decode_pair_token_topk(
+    b: IRBuilder, pair_idx: Value, topk: int
+) -> Tuple[Value, Value]:
+    """Split a flat ``pair_idx = t * topk + k`` into ``(t_idx, k_idx)``.
+
+    CK-Tile ``Unmerge`` of the packed ``token | topk`` pair index
+    (``MOE_SORTING_MOCK_ID`` decode in ``moe_sorting_kernel.hpp``):
+    ``UnmergeMagicDiv("pair", ("t_idx", "k_idx"), dims=(_, topk))`` emits
+    the ``merge_v2_magic_division`` mul-hi split instead of the hardware
+    ``b.div`` / ``b.mod`` pair. ``topk`` is the compile-time
+    ``spec.topk`` so the magic ``(multiplier, shift)`` are baked as
+    constants; the leading dim is unused by the split (it only divides
+    the trailing one) so any placeholder bound works. Numerically
+    identical to ``(pair_idx // topk, pair_idx % topk)`` for every
+    ``pair_idx`` in the 31-bit unsigned range CK Tile documents.
+    """
+    split = UnmergeMagicDiv("pair", ("t_idx", "k_idx"), dims=(1, topk))
+    lowered = split.apply(b, {"pair": CoordVar("pair", pair_idx)})
+    return lowered["t_idx"].value, lowered["k_idx"].value
 
 
 def _decode_expert_load(
@@ -495,9 +517,9 @@ def build_moe_sort_scatter(spec: MoeSortingSpec, arch: str = "gfx950") -> Kernel
     pair_idx = b.add(b.mul(bid, b.const_i32(spec.block_size)), tid)
 
     # Decode (t, k) from the flat pair index. ``topk`` is the inner
-    # dim (so ``pair_idx = t * topk + k``).
-    t_idx = b.div(pair_idx, topk)
-    k_idx = b.mod(pair_idx, topk)
+    # dim (so ``pair_idx = t * topk + k``). Magic-division unmerge
+    # (compile-time ``spec.topk``) replaces the hardware div/mod.
+    t_idx, k_idx = _decode_pair_token_topk(b, pair_idx, spec.topk)
 
     num_pairs = b.mul(tokens, topk)
     in_bounds = b.cmp_lt(pair_idx, num_pairs)
@@ -649,7 +671,7 @@ def build_moe_sort_persistent(spec: MoeSortingSpec, arch: str = "gfx950") -> Ker
         "SortedWeights", PtrType(F32, "global"), writeonly=True, align=4
     )
     _tokens = b.param("tokens", I32)  # noqa: F841 — ABI
-    topk = b.param("topk", I32)
+    _topk = b.param("topk", I32)  # noqa: F841 — ABI; split uses spec.topk
     num_experts = b.param("num_experts", I32)
 
     tid = b.thread_id_x()
@@ -709,8 +731,7 @@ def build_moe_sort_persistent(spec: MoeSortingSpec, arch: str = "gfx950") -> Ker
                 base = b.vec_extract(b.smem_load_vN(lds_hist, eid, dtype=I32, n=1), 0)
                 global_off = b.add(base, local_off)
 
-                t_idx = b.div(pair_idx, topk)
-                k_idx = b.mod(pair_idx, topk)
+                t_idx, k_idx = _decode_pair_token_topk(b, pair_idx, spec.topk)
                 w = b.global_load_f32(TopkWeights, pair_idx)
 
                 b.global_store(SortedTokenIds, global_off, t_idx, align=4)

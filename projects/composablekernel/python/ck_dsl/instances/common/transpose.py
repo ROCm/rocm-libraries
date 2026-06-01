@@ -92,6 +92,10 @@ from dataclasses import dataclass
 from typing import Literal, Tuple
 
 from ...core.ir import I32, IRBuilder, KernelDef, PtrType
+from ...helpers.distribution import (
+    TileDistributionEncoding,
+    make_static_tile_distribution,
+)
 from ...helpers.io import io_ir_type
 from ...helpers.spec import (
     IOSpecRule,
@@ -104,6 +108,30 @@ from ...helpers.tensor_view import (
     make_global_view,
     make_lds_view,
 )
+from ...helpers.transforms import TensorDescriptor as RichTensorDescriptor
+from ...helpers.transforms import unmerge_magic
+
+
+def _decode_thread_layout(b, tid, *, major: str, minor: str, dims):
+    """Decode the flat ``tid`` into a (major, minor) thread coord pair.
+
+    The two transpose phases each lay the ``block_size`` lanes out as a
+    row-major ``(dims[0], dims[1])`` grid -- ``major = tid // dims[1]`` and
+    ``minor = tid % dims[1]``. That split is exactly CK Tile's
+    ``make_merge_transform`` lowering (``merge_v2_magic_division``): one flat
+    coord unmerged into two via magic-number division. We phrase it as the
+    transform DAG ``naive(major, minor) + unmerge_magic(tid -> [major, minor])``
+    and let :meth:`TensorDescriptor.unmerge_lower` emit the mul-hi sequence,
+    removing the hand-rolled ``b.div`` / ``b.mod`` integer-division ops from
+    the thread-decode (the divisors are loop-invariant compile-time
+    constants, so the magic split is byte-for-byte the same coords as the
+    literal div/mod for every in-range ``tid``).
+    """
+    desc = RichTensorDescriptor.naive(
+        "thread", lengths=list(dims), coord_names=[major, minor]
+    ).transform(unmerge_magic("tid", [major, minor], dims=list(dims)))
+    coords = desc.unmerge_lower(b, tid=tid)
+    return coords[major], coords[minor]
 
 
 DType = Literal["f16", "bf16"]
@@ -238,8 +266,6 @@ def build_transpose2d(spec: Transpose2DSpec) -> KernelDef:
     tid = b.thread_id_x()
 
     c_vec = b.const_i32(vec)
-    c_TN_chunks = b.const_i32(TN // vec)
-    c_TM_chunks = b.const_i32(TM // vec)
 
     # Decode logical (tile_x, tile_y) from block_id according to the
     # chosen grid order. For ``"row"`` we just use the launched 2D
@@ -272,19 +298,43 @@ def build_transpose2d(spec: Transpose2DSpec) -> KernelDef:
     )
     lds_tile = lds_view.tile(lengths=(TM, TN), origin=(b.const_i32(0), b.const_i32(0)))
 
-    # Phase 1 thread layout: (row1, col1_chunk).
-    row1 = b.div(tid, c_TN_chunks)
-    col1_chunk = b.mod(tid, c_TN_chunks)
-    col1 = b.mul(col1_chunk, c_vec)
+    # Phase 1 thread layout: (row1, col1_chunk). The block_size lanes form
+    # a row-major (TM, TN/vec) grid; the flat-to-2D split is CK Tile's
+    # ``make_merge_transform`` lowering driven through the transform DAG
+    # (``unmerge_magic``) instead of a hand-rolled div/mod. These two
+    # coords are the P (partition) values of the phase-1 TileDistribution.
+    row1, col1_chunk = _decode_thread_layout(
+        b, tid, major="row1", minor="col1_chunk", dims=(TM, TN // vec)
+    )
 
-    # Phase 1: coalesced global -> LDS.
-    x_vec = x_tile.load_vec(b, row1, col1, n=vec)
-    lds_tile.store_vec(b, row1, col1, value=x_vec, n=vec)
+    # Phase 1: coalesced global -> LDS via a full ``TileDistribution`` +
+    # ``load_tile`` / ``store_tile`` (CK Tile ``image_to_column`` /
+    # ``batched_transpose`` LDS-store idiom, A6 idiom 8). The (TM, TN)
+    # tile is split as ``Hs = ((TM,), (TN//vec, vec))``: X0 (rows) is the
+    # row partition P0; X1 (cols) is the (col-chunk partition P1, vec Y0)
+    # pair. ``load_tile`` ingests the coalesced ``vec``-wide read into a
+    # StaticDistributedTensor and ``store_tile`` writes it to the LDS
+    # window -- the same ``(row1, col1_chunk*vec + y)`` element mapping
+    # the hand-rolled ``load_vec`` / ``store_vec`` produced, now expressed
+    # through the idiomatic distribution surface.
+    p1_enc = TileDistributionEncoding(
+        Hs=((TM,), (TN // vec, vec)),
+        Ps2RHs_major=((1,), (2,)),
+        Ps2RHs_minor=((0,), (0,)),
+        Ys2RHs_major=(2,),
+        Ys2RHs_minor=(1,),
+    )
+    p1_dist = make_static_tile_distribution(p1_enc)
+    p1_ps = [[row1], [col1_chunk]]
+    x_dt = x_tile.load(b, distribution=p1_dist, ps=p1_ps)
+    lds_tile.store(b, x_dt, ps=p1_ps)
     b.sync()
 
-    # Phase 2 thread layout: (col2, row2_chunk).
-    col2 = b.div(tid, c_TM_chunks)
-    row2_chunk = b.mod(tid, c_TM_chunks)
+    # Phase 2 thread layout: (col2, row2_chunk). Same magic-division unmerge
+    # as phase 1, transposed: the lanes form a row-major (TN, TM/vec) grid.
+    col2, row2_chunk = _decode_thread_layout(
+        b, tid, major="col2", minor="row2_chunk", dims=(TN, TM // vec)
+    )
     row2_base = b.mul(row2_chunk, c_vec)
 
     # Column-strided LDS reads pack into one output vector, then a

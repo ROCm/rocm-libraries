@@ -1163,6 +1163,25 @@ On gfx950 the LLVM backend silently removes explicit
 or `probe_intrinsic_counts.py` (`sched.barrier` / `sched.group.barrier`
 should be 0 after lowering on gfx950).
 
+**`iglp_opt` — the canned backend GEMM scheduler (the one that survives).**
+`b.iglp_opt(n)` lowers to `__builtin_amdgcn_iglp_opt(n)` (LLVM
+`llvm.amdgcn.iglp.opt`) — a *different* mechanism from `sched_barrier`: instead
+of capping reordering, it asks the AMDGPU post-RA scheduler to apply a canned
+MFMA / ds_read / ds_write / VMEM interleave for the enclosing loop (the IR-level
+analogue of Tensile's `ScheduleIterAlg=3`). It is what CK's own C++ uses
+(`gridwise_gemm_pipeline_v2.hpp`, attention pipelines). Place it **once at the
+top of the main-loop body**, and when you use it **suppress the manual
+`sched_barrier` / `sched_group_barrier` hints** — mixing them fights.
+- It only helps when there is **`ds_write` traffic to interleave** against the
+  MFMAs. On a **direct-to-LDS path (0 `ds_write`)** or a loop bounded by the
+  **barrier rendezvous** rather than in-loop instruction order, it is **neutral**
+  (measured exactly neutral on the square fp16 DTL kernel — §17.5 case study). So
+  before reaching for it, classify the bound (§8.6): it moves *schedule-bound*
+  loops, not *barrier-bound* ones.
+- Verify it actually took effect via `probe_isa_inspect.py` (the mainloop
+  ds/MFMA interleave should change), not perf alone — a no-op and an
+  applied-but-useless directive both read as "no change".
+
 ### 8.5 Instruction-Level Balance
 
 - Interleave MFMA, LDS reads, and global loads.
@@ -1173,6 +1192,50 @@ should be 0 after lowering on gfx950).
 - Group enough MFMA between waits.
 - Watch scalar ALU address arithmetic (`probe_isa_inspect.py`'s
   `salu` sub-bucket grows if the address math is not hoisted).
+
+### 8.6 Diagnosing the bound: barrier-bound vs schedule-bound
+
+Before spending effort on scheduling hints (§8.4) or deeper pipelines, classify
+*what* the MFMA unit is waiting on — the lever depends entirely on this. Profile
+with `rocprofv3` (`MfmaUtil`, `LDSBankConflict`, `MemUnitStalled`,
+`OccupancyPercent`):
+
+- **Schedule-bound**: `ds_write`/`ds_read` and MFMA are present but poorly
+  interleaved (bank conflict > 0, or visible read→MFMA stalls). → `iglp_opt`
+  (§8.4), `s_setprio` clusters, operand prefetch help here.
+- **Barrier-bound**: bank conflict ≈ 0, `MemUnitStalled` ≈ 0, but `MfmaUtil`
+  still ~50% at **1 WG/CU**. The MFMA idles at the per-K-tile `s_barrier`
+  rendezvous with nothing to overlap it. Scheduling hints do **nothing** here
+  (proven: `iglp_opt` exactly neutral). The only levers are *fewer/cheaper
+  barriers* or *more independent work spanning each barrier* — and on a fused
+  direct-to-LDS path those need an assembly-grade `ds_write`/MFMA interleave the
+  IR→comgr path cannot place (see §17.5 square-GEMM case study).
+
+**Validated GEMM levers from that case study (gfx950, square fp16):**
+- **Single-barrier depth-2 prefetch** — a double-buffer needs only *one*
+  `s_barrier_bare` per K-tile if the next-tile async write is issued *after* the
+  barrier (one `s_waitcnt(vmcnt=0,lgkmcnt=0)` serves both RAW and WAR). Collapsing
+  the naive two-barrier form was the single biggest win (+59%). At 1 WG/CU a
+  second barrier directly halves the MFMA shadow.
+- **Element-granular LDS swizzle → 0 bank conflicts** — `col ^= ((row>>R)&(2^W-1))<<L`
+  with `L=log2(elem)`, `W=log2(block_k/elem)`, `R=0` (key on the *low* `m_in_atom`
+  bits, swizzle whole b128 slots). The row·stride term vanishes mod 32 banks, so
+  only a low-bit element permutation decorrelates the M-rows; high-bit/2-slot
+  swizzles floor at 25%. Applied identically to store-source + ds_read (XOR is
+  self-inverse → bit-exact).
+- **`dtl_cache_b=CACHE_ALL` for reuse-heavy GEMM** (+9%) — the default
+  `CACHE_STREAM` on B is right for one-shot (skinny/MoE) but wrong for square,
+  which reuses all of B across M-tiles (corroborates the §17.2 item-14 cache sweep).
+
+**Validated *negatives* (don't re-try without new information):** in-phase
+prefetch-local-read (neutral / spills); smaller tiles for 2 WG/CU occupancy (the
+big tile at 1 WG/CU wins — reuse beats the barrier-hiding); single-buffer at
+2 WG/CU (loses the prefetch, 0.5×); LDS k-padding (occupancy loss); non-DTL
+register-staged depth-2 prefetch / PGR2 (correct but 0.42× — the `ds_write` it
+requires can't be hidden without assembly scheduling); `iglp_opt` (neutral, see
+above). Measurement discipline: this box auto-clocks ±25–30%, so **only
+same-session interleaved ratios are valid** — bench the candidate and the
+reference back-to-back in one process.
 
 ---
 
@@ -1326,6 +1389,42 @@ bottleneck class, and the kernel structure (§3, §11).
 - Use buffer descriptors with proper bounds when possible.
 - Avoid hidden aliasing between input / output / workspace.
 
+### 10.5 Known limitations vs hand-written assembly
+
+The DSL emits LLVM IR and hands scheduling + register allocation to the AMDGPU
+backend (`libamd_comgr`). That boundary is the source of the residual gap against
+hand-tuned assembly (Tensile/rocBLAS, or a hand-written tile kernel). Know what
+it *cannot* express so you don't burn cycles trying:
+
+- **No per-instruction placement.** You declare ops + dependencies; the backend
+  orders them. `iglp_opt` / `s_setprio` / `sched_group_barrier` are *hints* (and
+  `sched_barrier`/`sched_group_barrier` are dropped entirely on gfx950). You
+  cannot say "this `ds_write` issues in *this* MFMA slot" — which is exactly how
+  assembly (Tensile `ScheduleIterAlg=3`) hides LDS-write cost under the matrix
+  pipe. Net effect measured: a fused direct-to-LDS GEMM tops out ~0.82× rocBLAS
+  and is barrier-bound, with the last ~18% needing this placement (§8.6, §17.5).
+- **No register-double-buffered operand staging across the backend's will.** You
+  can carry fragments as `scf.for` iter-args (depth-N global prefetch *is*
+  expressible — §17.5 built PGR2), but the backend still schedules the resulting
+  `ds_write`s; without slot-level placement they cost full time, so the
+  register-staged path lost (0.42×) to the fused 0-`ds_write` path that can't go
+  past depth-1. Assembly gets *both*; IR gets one or the other.
+- **No named/split barriers on gfx950** (`s.barrier.signal/wait` ICE the
+  backend). Only the bare full-CTA `s_barrier` (`b.s_barrier_bare`) — so
+  fine-grained warp-specialization handoff is unavailable on this target.
+- **The backend owns the final waitcnt placement.** `b.s_waitcnt(...)` is a
+  request; comgr may over-wait (observed on some DTL paths). You can shape it
+  with phase separation but not pin it.
+
+**Escape hatches when the gap actually matters** (in increasing effort): (1) try
+`iglp_opt` — the one sanctioned, surviving scheduler directive (but neutral
+unless there is `ds_write` traffic to interleave); (2) emit the hot loop as LLVM
+inline `asm` for assembly-grade placement of the critical ~20 instructions while
+keeping the rest in the DSL; (3) add a scheduled-assembly backend / custom
+post-RA pass (this is what Tensile *is* — a multi-month compiler effort). The
+front-end being Python is **not** the limiter — a Python→IR framework can reach
+near-assembly results (cf. Triton); the work is always in the backend/scheduler.
+
 ---
 
 ## 11. ISA And Resource Inspection
@@ -1349,6 +1448,14 @@ probe_intrinsic_counts.py   → analyze_llvm_ir-like, with custom intrinsic tabl
 probe_isa_inspect.py        → analyze_hsaco-like, with VALU/SALU sub-buckets
 probe_occupancy.py          → readelf notes + occupancy estimate
 ```
+
+To diff a DSL kernel against a **hand-written C++/HIP reference** (a tile-library
+or research kernel you want to match), use
+`utilities/tools/utils/reference_isa_diff.py`: it compiles the reference with
+`hipcc`, extracts the `gfx950` code object from the fatbin (`roc-obj-ls`),
+disassembles both sides, and prints a semantic histogram + run-length diff
+(`reference_isa()` / `ckdsl_isa()` / `diff_report()`). This is the only tool that
+introspects a non-DSL reference — the rest of the layer only sees `KernelDef`s.
 
 ### 11.1 What To Count
 
@@ -1474,11 +1581,14 @@ matches → zero re-pack. See §17.4 for the quantitative reduction.
 | `prefetch distance` (implicit) | `pipeline` choice | — | More stages ⇒ better latency hiding but more LDS |
 | `helpers/pipeline.py::SoftwarePipeline.run_ping_pong` | helper | — | Manual prologue / steady / epilogue staging when you author your own kernel |
 | `helpers/schedule.py::SchedulePolicy` | helper | — | Emit `sched_group_barrier(mask, count, sync_id)` + `s_setprio` hints |
+| `b.iglp_opt(n)` | IR primitive | `0` / `1` / `2` | Canned backend GEMM MFMA/memory interleave (`llvm.amdgcn.iglp.opt`). *Survives* on gfx950. Place once at loop-body top; suppress manual sched hints when used. Helps schedule-bound loops w/ `ds_write` traffic; **neutral on direct-to-LDS / barrier-bound** (§8.4, §8.6, §17.5) |
+| `b.s_barrier_bare()` | IR primitive | — | Bare WG rendezvous, no implicit waitcnt — enables single-barrier ping-pong loops (§8.6, §17.5) |
 
 Caveat: explicit `s_sched_barrier` / `s_sched_group_barrier`
 intrinsics are silently dropped by the LLVM backend on gfx950
-(§3.1a / §8.4). Verify with `probe_isa_inspect.py` (`sched_barrier`
-sub-bucket should be 0).
+(§3.1a / §8.4) — but `iglp_opt` and `s_barrier_bare` (above) survive.
+Verify with `probe_isa_inspect.py` (`sched_barrier` sub-bucket should
+be 0).
 
 #### 12.1.E Epilogue
 
@@ -2635,6 +2745,33 @@ python scripts/21_chiplet.py    # the 2.6 % win
 python scripts/22_confirm_winner.py    # 20 × 1000 paired vs rocBLAS
 ```
 
+### 17.5 Square fp16 GEMM toward matrix peak (gfx950)
+
+Full study: `examples/gfx950/gemm_perf_square_warpspec/README.md`. The compute-
+bound counterpart to §17.4. Climbed a stock `compv4` kernel to **~0.82× rocBLAS**
+(same tile geometry, **0 LDS bank conflicts**) one measured lever at a time, and
+characterized the residual gap down to a single missing capability.
+
+Distilled rules (also folded into §8.6):
+- **Collapse to one barrier per K-tile.** A direct-to-LDS depth-2 ping-pong only
+  needs one `s_barrier_bare` if the next-tile async write is issued *after* the
+  barrier (one `s_waitcnt(vmcnt=0,lgkmcnt=0)` covers RAW+WAR). Biggest single win
+  (+59%); the naive two-barrier form halves the MFMA shadow at 1 WG/CU.
+- **Element-granular swizzle for 0 bank conflicts** — `col ^= ((row>>R)&(2^W-1))<<L`,
+  `L=log2(elem)`, `W=log2(block_k/elem)`, `R=0`. Key on the low `m_in_atom` bits
+  (the row·stride term vanishes mod 32 banks); high-bit/2-slot swizzles floor at
+  25%. Bit-exact (same XOR on store-source + ds_read).
+- **`dtl_cache_b=CACHE_ALL` for reuse-heavy GEMM** (+9%) — corroborates the §17.2
+  item-14 cache sweep; the `CACHE_STREAM` default is for one-shot operands only.
+- **Diagnose the bound first (§8.6).** At 1 WG/CU with 0 bank conflict the kernel
+  is *barrier-bound*: `iglp_opt` and every IR-level scheduling hint are neutral.
+  Built the rocBLAS register-staged PGR2 path to test the bound directly — it is
+  *correct but 0.42×* (the `ds_write` it requires can't be hidden without
+  assembly-grade scheduling). That pins the IR-path ceiling: ~0.82× rocBLAS, the
+  rest needing instruction placement comgr cannot do.
+- **Measure same-session.** Auto-clock swings ±25–30%; only candidate-vs-reference
+  ratios benched back-to-back in one process are meaningful.
+
 ---
 
 ## 18. DSL Probe Workflow
@@ -2935,6 +3072,8 @@ in the empirical studies for the full opcode × phase table.
 | `ds_read_tr_b8` | gfx950 | `b.ds_read_tr_b8` | Transposed i8/fp8/bf8 tile reader |
 | `s_setprio` | gfx9* and gfx95* | `b.s_setprio` | Wave priority hint |
 | `s_sched_barrier`, `s_sched_group_barrier` | available in ISA | `b.sched_barrier`, `b.sched_group_barrier` | **Silently dropped by LLVM backend on gfx950** — verify with `probe_isa_inspect.py` that the `sched_barrier` sub-bucket is 0 |
+| `s_barrier` (bare, no implicit waitcnt) | gfx9* and gfx95* | `b.s_barrier_bare` | Pure WG rendezvous; caller issues the explicit `s_waitcnt`. Use for single-barrier ping-pong loops (§8.6). Named/split barriers (`s.barrier.signal/wait`) **ICE the gfx950 backend** — do not emit. |
+| `iglp_opt` | gfx9* and gfx95* | `b.iglp_opt(n)` | Canned backend GEMM MFMA/memory interleave (`llvm.amdgcn.iglp.opt`). *Survives* on gfx950 (unlike `sched_barrier`). Helps schedule-bound loops with `ds_write` traffic; neutral on direct-to-LDS / barrier-bound loops (§8.4, §8.6). |
 
 ### 21.4 Register / occupancy
 
