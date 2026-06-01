@@ -75,6 +75,7 @@ if(BUILD_CK_TILE_ENGINE_TESTS)
 # or moved to the appropriate location in future work.
 #   add_subdirectory(gemm_tile_engine)
     add_subdirectory(pooling_tile_engine)
+    add_subdirectory(grouped_gemm_tile_engine)
 endif()
 add_subdirectory(pooling)
 add_subdirectory(grouped_conv)
