@@ -51,6 +51,8 @@ set(__cxx_compile_options
     -Wno-c++11-narrowing
     -Wno-sign-compare           # ~1000+ instances: signed/unsigned comparisons throughout codebase
     -Wno-deprecated-declarations # 2 deprecated MIOpen APIs still have callers
+    -Wno-deprecated-copy-with-dtor           # SolverBase needs Rule-of-5 refactoring
+    -Wno-deprecated-copy-with-user-provided-dtor  # TuningIterationScopedLimiter needs refactoring
 )
 
 set(__clang_cxx_compile_options
