@@ -175,11 +175,10 @@ private:
 } // namespace
 ```
 
-The `build()`, engine/knob-query, plan-name, per-index workspace,
-`execute_plan_at_index`, `autotune`/`warmup`, `populate_cuda_graph` /
-`update_cuda_graph`, `deselect_engines`, and scalar `tensor()` members above
-were surfaced by review as missing from an earlier draft of this signature.
-Disposition: `build()` and the scalar `tensor()` overloads are
+Disposition of the `build()`, engine/knob-query, plan-name, per-index
+workspace, `execute_plan_at_index`, `autotune`/`warmup`,
+`populate_cuda_graph` / `update_cuda_graph`, `deselect_engines`, and scalar
+`tensor()` members above: `build()` and the scalar `tensor()` overloads are
 high-priority forwards (samples rely on them); the engine/knob/autotune
 surface forwards to hipDNN where supported and ties into the auto-tuning
 work (PR #7217, see §4); the CUDA-graph-capture methods are Tier-2
@@ -212,7 +211,7 @@ materialize the inner hipDNN attribute object on calls into hipDNN.
 | `Matmul_attributes` | 973 | `MatmulAttributes` |
 | `Pointwise_attributes` | 1032 | `PointwiseAttributes` |
 | `Instancenorm_backward_attributes` | 1133 | (none) |
-| `Layernorm_backward_attributes` | 1154 | ⚠️ **investigate** — marked "(none)" but hipDNN has `LayernormAttributes` (fwd) and this row looks like it may have drifted incorrectly (cf. RMSNorm, which has a distinct `RMSNormBackwardAttributes`). File an issue to confirm whether a hipDNN LayerNorm-backward attribute exists / is planned before treating this as unsupported. |
+| `Layernorm_backward_attributes` | 1154 | ⚠️ **confirm** — hipDNN has `LayernormAttributes` (fwd); whether a distinct LayerNorm-backward attribute exists or is planned needs confirmation (cf. RMSNorm, which has a distinct `RMSNormBackwardAttributes`) before treating this as unsupported. |
 | `Layernorm_attributes` | 1175 | `LayernormAttributes` |
 | `AdaLayernorm_attributes` | 1208 | (none — adaptive layernorm) |
 | `AdaLayernorm_backward_attributes` | 1235 | (none) |
@@ -366,13 +365,11 @@ upstream):
   workspace *knobs* still need a concrete mapping plan (tracked with the
   auto-tuning work, PR #7217).
 - The shared-memory cap requires per-plan shared-memory-usage metadata from
-  hipDNN, which is **not** currently exposed.
-
-**RESOLVED** (was: does `create_execution_plans()` expose per-plan
-shared-memory metadata?): pending hipDNN exposing that metadata, the shim
-**rejects a non-zero `deselect_shared_mem_greater_than`** (errors via the
-recorded-error mechanism) rather than silently no-op'ing — silently ignoring
-a resource cap could let an over-budget plan run. A zero argument is a no-op.
+  hipDNN, which is **not** currently exposed. Pending hipDNN exposing that
+  metadata, the shim **rejects a non-zero
+  `deselect_shared_mem_greater_than`** (errors via the recorded-error
+  mechanism) rather than silently no-op'ing — silently ignoring a resource
+  cap could let an over-budget plan run. A zero argument is a no-op.
 
 ## 5. Error handling and logging — verified API
 
@@ -427,7 +424,7 @@ Explicitly out of scope:
   swapped for the shim; user code must recompile.
 
 However, the upstream `cudnn_frontend.h` (verified at lines 106–152) creates
-a structural problem the original RFC understated:
+a structural problem:
 
 ```cpp
 // Verbatim from upstream include/cudnn_frontend.h:
@@ -480,9 +477,8 @@ reference:
   `cudnnBackendNumericalNote_t`, `cudnnBackendBehaviorNote_t`,
   `cudnnBackendDescriptorType_t`
 
-It additionally ships a small set of C **entry points** (revised from the
-earlier "all C entry points out of scope" position), each forwarding to the
-hipDNN equivalent — required for init / error-handling / version checks
+It additionally ships a small set of C **entry points**, each forwarding to
+the hipDNN equivalent — required for init / error-handling / version checks
 outside the frontend and to build the mirrored samples (§8.3):
 
 - `cudnnCreate`, `cudnnDestroy`, `cudnnSetStream`, `cudnnGetStream`

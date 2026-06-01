@@ -144,11 +144,6 @@ hipdnn_frontend::compatibility::cudnn_frontend;` and have nested namespaces
 internal details will be placed in a `detail/` subdirectory and additionally
 namespaced as `<shim_ns>::detail`.
 
-The path drops the previously-considered `v9/` segment: a future v0.x stub
-layer (§9) targets the same upstream library and would be entirely additive
-to the same headers and namespace, so an extra version directory would only
-add churn at the v0.x add-in.
-
 Proposed source layout (filenames mirror upstream cuDNN FE exactly, all
 `.h` per §5.1):
 
@@ -272,15 +267,15 @@ cuDNN FE uses two parallel type families. **C-API types** (`cudnnHandle_t`,
 |--------|--------|--------------|
 | C-API (`<cudnn.h>`) | `cudnnHandle_t` | Alias declared in the shim's stub `cudnn.h`: `using cudnnHandle_t = hipdnn_frontend::hipdnnHandle_t;` — see §4.7. |
 | C-API | `cudnnStatus_t`, `cudnnTensorFormat_t`, `cudnnConvolutionMode_t`, `cudnnDataType_t`, `cudnnBackend*_t` | Defined in the shim's stub `cudnn.h` (see §4.7), mapped to hipDNN equivalents on the way through |
-| FE namespace | `cudnn_frontend::DataType_t` | Enum mirrored 1:1 (20 values incl. FP8/FP4/INT4 variants), mapped to `hipdnn_frontend::DataType`; values without hipDNN equivalents follow §4.3 unsupported-value rules |
-| FE namespace | `cudnn_frontend::HeurMode_t` | Enum mirrored 1:1 — values are `A`, `B`, `FALLBACK`, `OPENSOURCE`. See §4.5 for behavior |
-| FE namespace | `cudnn_frontend::PointwiseMode_t` | Enum mirrored 1:1, mapped to `hipdnn_frontend::PointwiseMode` |
-| FE namespace | `cudnn_frontend::ReductionMode_t` | Enum mirrored 1:1, mapped to `hipdnn_frontend::ReductionMode` |
-| FE namespace | `cudnn_frontend::ResampleMode_t`, `PaddingMode_t`, `ConvolutionMode_t`, `NormFwdPhase_t`, `NormMode_t`, `RngDistribution_t`, `DiagonalAlignment_t`, `AttentionImplementation_t`, `MoeGroupedMatmulMode_t`, `BuildPlanPolicy_t`, `TensorReordering_t`, `ReshapeMode_t`, `DescriptorType_t` | Enum mirrored 1:1; mapped to hipDNN equivalents where they exist |
-| FE namespace | `cudnn_frontend::NumericalNote_t` | Enum mirrored 1:1 — values: `NOT_SET`, `TENSOR_CORE`, `DOWN_CONVERT_INPUTS`, `REDUCED_PRECISION_REDUCTION`, `FFT`, `NONDETERMINISTIC`, `WINOGRAD`, `WINOGRAD_TILE_4x4`, `WINOGRAD_TILE_6x6`, `WINOGRAD_TILE_13x13`, `STRICT_NAN_PROP`. Most have no hipDNN analogue; see §4.5 |
-| FE namespace | `cudnn_frontend::BehaviorNote_t` | Enum mirrored 1:1 — values: `NOT_SET`, `RUNTIME_COMPILATION`, `REQUIRES_FILTER_INT8x32_REORDER`, `REQUIRES_BIAS_INT8x32_REORDER`, `SUPPORTS_CUDA_GRAPH_NATIVE_API`, `CUBLASLT_DEPENDENCY`. All are CUDA-specific; the shim accepts them but `Graph::*_behavior_notes()` filters log-and-no-op (see §4.5) |
-| FE namespace | `cudnn_frontend::error_code_t` | Enum mirrored 1:1 — 16 values incl. `OK`, `ATTRIBUTE_NOT_SET`, `SHAPE_DEDUCTION_FAILED`, `INVALID_TENSOR_NAME`, `INVALID_VARIANT_PACK`, `GRAPH_NOT_SUPPORTED`, `GRAPH_EXECUTION_PLAN_CREATION_FAILED`, `GRAPH_EXECUTION_FAILED`, `HEURISTIC_QUERY_FAILED`, `UNSUPPORTED_GRAPH_FORMAT`, `CUDA_API_FAILED`, `CUDNN_BACKEND_API_FAILED`, `INVALID_CUDA_DEVICE`, `HANDLE_ERROR`, `INVALID_VALUE`, `NVRTC_COMPILATION_FAILED` (verified at `graph_helpers.h:36`) |
-| FE namespace | `cudnn_frontend::error_object` (struct) | **Aliased** to `hipdnn_frontend::error_object` once the missing `error_code_t` values are added on the hipDNN side (§4.6), making it 1:1. Public members: `code` (field), `err_msg` (field), `get_code()`, `get_message()`, `is_good()`, `is_bad()`, `operator==(error_code_t)`, `operator!=(error_code_t)`. Verified at `graph_helpers.h:55`. (Until the enum values land, a thin wrapper is the interim fallback.) |
+| FE namespace | `cudnn_frontend::DataType_t` | **Aliased** to `hipdnn_frontend::DataType_t`. cuDNN has 20 values incl. FP8/FP4/INT4 variants; any the hipDNN enum is missing are added to it so the alias stays a name-superset (§4.3) |
+| FE namespace | `cudnn_frontend::HeurMode_t` | **Aliased** to `hipdnn_frontend::HeurMode_t` — values `A`, `B`, `FALLBACK`, `OPENSOURCE` (added on the hipDNN side if missing). See §4.5 for runtime behavior |
+| FE namespace | `cudnn_frontend::PointwiseMode_t` | **Aliased** to `hipdnn_frontend::PointwiseMode_t` |
+| FE namespace | `cudnn_frontend::ReductionMode_t` | **Aliased** to `hipdnn_frontend::ReductionMode_t` |
+| FE namespace | `cudnn_frontend::ResampleMode_t`, `PaddingMode_t`, `ConvolutionMode_t`, `NormFwdPhase_t`, `NormMode_t`, `RngDistribution_t`, `DiagonalAlignment_t`, `AttentionImplementation_t`, `MoeGroupedMatmulMode_t`, `BuildPlanPolicy_t`, `TensorReordering_t`, `ReshapeMode_t`, `DescriptorType_t` | **Aliased** to the hipDNN `_t` equivalents; missing values added on the hipDNN side to keep each a name-superset |
+| FE namespace | `cudnn_frontend::NumericalNote_t` | **Aliased** to `hipdnn_frontend::NumericalNote_t` — values: `NOT_SET`, `TENSOR_CORE`, `DOWN_CONVERT_INPUTS`, `REDUCED_PRECISION_REDUCTION`, `FFT`, `NONDETERMINISTIC`, `WINOGRAD`, `WINOGRAD_TILE_4x4`, `WINOGRAD_TILE_6x6`, `WINOGRAD_TILE_13x13`, `STRICT_NAN_PROP` (added on the hipDNN side as needed). Per-note *handling* is triaged in §4.5 |
+| FE namespace | `cudnn_frontend::BehaviorNote_t` | **Aliased** to `hipdnn_frontend::BehaviorNote_t` — values: `NOT_SET`, `RUNTIME_COMPILATION`, `REQUIRES_FILTER_INT8x32_REORDER`, `REQUIRES_BIAS_INT8x32_REORDER`, `SUPPORTS_CUDA_GRAPH_NATIVE_API`, `CUBLASLT_DEPENDENCY` (added on the hipDNN side as needed). These are CUDA-specific; per-note handling is triaged in §4.5 |
+| FE namespace | `cudnn_frontend::error_code_t` | **Aliased** to `hipdnn_frontend::error_code_t`; the cuDNN-only values are added to hipDNN's enum so it is a name-superset (§4.6). 16 values incl. `OK`, `ATTRIBUTE_NOT_SET`, `SHAPE_DEDUCTION_FAILED`, `INVALID_TENSOR_NAME`, `INVALID_VARIANT_PACK`, `GRAPH_NOT_SUPPORTED`, `GRAPH_EXECUTION_PLAN_CREATION_FAILED`, `GRAPH_EXECUTION_FAILED`, `HEURISTIC_QUERY_FAILED`, `UNSUPPORTED_GRAPH_FORMAT`, `CUDA_API_FAILED`, `CUDNN_BACKEND_API_FAILED`, `INVALID_CUDA_DEVICE`, `HANDLE_ERROR`, `INVALID_VALUE`, `NVRTC_COMPILATION_FAILED` (verified at `graph_helpers.h:36`) |
+| FE namespace | `cudnn_frontend::error_object` (struct) | **Aliased** to `hipdnn_frontend::error_object`, with the full `error_code_t` value set present on the hipDNN side (§4.6) so the type is 1:1. Public members: `code` (field), `err_msg` (field), `get_code()`, `get_message()`, `is_good()`, `is_bad()`, `operator==(error_code_t)`, `operator!=(error_code_t)`. Verified at `graph_helpers.h:55`. |
 | FE namespace | `cudnn_frontend::error_t` | **Aliased** to `hipdnn_frontend::error_t` (typedef for `error_object`). Both names must be exposed by the shim. |
 | `cudnn_frontend::graph` | `Graph` | Class wrapping `hipdnn_frontend::graph::Graph` (see §4.4) |
 | `cudnn_frontend::graph` | `Tensor_attributes` | Wraps `hipdnn_frontend::TensorAttributes`. Verified at `graph_properties.h:49` |
@@ -288,26 +283,32 @@ cuDNN FE uses two parallel type families. **C-API types** (`cudnnHandle_t`,
 | `cudnn_frontend::graph` | `*Node` / `INode` / `NodeCRTP` (`graph_properties.h:455`, `node_interface.h:45`) | Internal; nominally in the public namespace but not user-facing (verified — no sample / consumer constructs them directly). Not wrapped initially. Since hipDNN has matching internals, these *could* be aliased for completeness later, but that is not required for any known consumer. |
 | FE namespace, v0.x | `ConvDesc`, `ConvDescBuilder`, `EngineHeuristics`, `EngineConfig`, `EngineFallbackList`, `ResampleDesc`, ... | `using` aliases for `*_v8` legacy types (verified at `cudnn_frontend.h:137-152`). These are pulled into the umbrella header unconditionally. See §4.7 for the v0.x compatibility problem. |
 
-Many of these enums are **not** re-declared by the shim at all. hipDNN
-already publishes cuDNN-named `_t` typedefs for them
+These FE-namespace enums are **not** re-declared by the shim at all — they
+are **aliased**. hipDNN already publishes cuDNN-named `_t` typedefs for them
 (`hipdnn_frontend::DataType_t`, `HeurMode_t`, `ConvolutionMode_t`,
 `PointwiseMode_t`, `ReductionMode_t`, `BehaviorNote_t`, `BuildPlanPolicy_t`,
 `NormFwdPhase_t`, …, several carrying an explicit "Matches the
 cudnn-frontend … for API compatibility" comment in
-`frontend/include/hipdnn_frontend/Types.hpp`). Where the enum and its values
-are already 1:1, the shim **aliases** the hipDNN type into `<shim_ns>`
-(`using hipdnn_frontend::DataType_t;`) rather than re-declaring it. See
-§4.3.1.
+`frontend/include/hipdnn_frontend/Types.hpp`). The shim aliases each hipDNN
+type into `<shim_ns>` (`using hipdnn_frontend::DataType_t;`) rather than
+re-declaring it. See §4.3.1.
 
-For the remaining enums — those hipDNN does not already provide 1:1 — the
-shim's translation header (`detail/type_mapping.h`) provides bidirectional
-`static constexpr` mapping functions (`to_hipdnn()` / `from_hipdnn()`).
-Values with no hipDNN equivalent will:
-- Either be accepted at compile time and rejected at runtime with a clear
-  `Error::ErrorCode::NOT_SUPPORTED` (when the call site is templated and the
-  enum value is dynamic), or
-- Be marked with `static_assert(..., "Not supported by hipDNN")` when the value
-  is a non-type template parameter.
+Aliasing requires hipDNN's enum to be a **name-superset** of the cuDNN one —
+every enumerator a consumer can name must exist on the hipDNN side, with
+matching semantics. Where hipDNN is currently missing values (for example
+`DataType_t`'s FP8 / FP4 / INT4 variants), **the go-forward is to add the
+missing values to the hipDNN enum** so it becomes a strict superset and the
+alias holds. This is the same pattern as the error-code enum (§4.6): close
+the gap on the hipDNN side and alias, rather than re-declare a parallel enum
+and translate. A value that hipDNN's enum carries but no engine yet supports
+is a *runtime* `GRAPH_NOT_SUPPORTED` at build time (§4.4.2), not an
+enum-mapping concern.
+
+Bidirectional `static constexpr` mapping (`to_hipdnn()` / `from_hipdnn()` in
+`detail/type_mapping.h`) is therefore needed only for the **C-API enum
+family** — the `<cudnn.h>` stub types (`cudnnDataType_t`, etc., §4.7) that
+map to their hipDNN C equivalents — not for the FE-namespace enums, which are
+aliases.
 
 The shim **never** `static_cast`s between the cuDNN and hipDNN enum families.
 Even where the integer values happen to coincide, the equivalence is only
@@ -318,8 +319,8 @@ named mapping function — never by a numeric cast.
 
 #### 4.3.1 Three-tier mapping strategy
 
-A recurring goal, driven by review feedback, is to **minimize wrappers**.
-For every cuDNN FE symbol the shim picks the lowest tier that is correct:
+A central goal is to **minimize wrappers**. For every cuDNN FE symbol the
+shim picks the lowest tier that is correct:
 
 1. **Alias (preferred).** The symbol is exactly 1:1 with a hipDNN type
    (same shape, same values, same semantics). Expose it with a `using`
@@ -338,10 +339,13 @@ For every cuDNN FE symbol the shim picks the lowest tier that is correct:
        // …one per 1:1 type
    }
    ```
-   Most FE-namespace enums (those hipDNN already publishes as `_t`
-   typedefs), `error_t`/`error_object` (once the missing `error_code_t`
-   values are added on the hipDNN side — see §4.6), and every
-   `*_attributes` class that maps 1:1 (Reference §2) fall here.
+   All FE-namespace enums (hipDNN already publishes them as `_t` typedefs;
+   where it is missing values, those values are added to the hipDNN enum so
+   it stays a name-superset — §4.3, §4.6), `error_t`/`error_object`, and
+   every `*_attributes` class that maps 1:1 (Reference §2) fall here. The
+   guiding move when a type is *almost* 1:1 is to close the gap on the
+   hipDNN side so it can be aliased, rather than to introduce a parallel
+   re-declared type.
 
 2. **Error-wrapper.** The symbol exists in cuDNN FE but hipDNN has no
    support yet. Declare a minimal type/method with the exact cuDNN FE
@@ -393,10 +397,9 @@ Three surface details that drive the wrapper implementation:
   variant-pack map is passed by **non-const reference**. The shim wraps
   all four; internally they all funnel through the same hipDNN execute
   path after key-type / pointer-form translation.
-- The graph-level configuration setters are **triaged individually** —
-  the earlier blanket "no-op + debug log" policy was too permissive,
-  because ignoring some of them silently changes correctness or resource
-  behavior. Disposition (per review):
+- The graph-level configuration setters are **triaged individually**,
+  because silently ignoring some of them would change correctness or
+  resource behavior. Disposition:
 
   | Setter | Disposition |
   |--------|-------------|
@@ -493,15 +496,13 @@ For the precise symbol-by-symbol table with line-number citations, plus
 the explicit list of cuDNN FE features PyTorch does **not** use, see
 [Supporting Reference §3](./0011_CuDNN_Shim_Reference.md#3-verified-pytorch-consumer-surface).
 
-**RESOLVED** (was: should we ship the full surface and fail at runtime, or
-only ship nodes once hipDNN supports them natively?). Decision, with reviewer
-agreement: **ship the full v9 surface so hipified source compiles, and fail
-loudly at use** (build/validate time, §4.4.2), prioritizing hipDNN node work
-separately. Rationale: waiting for full engine support would block otherwise
-valid use cases, and adding the frontend surface without engines would become
-a hidden runtime error either way — surfacing it as an explicit, documented
-`GRAPH_NOT_SUPPORTED` (pointing at a GitHub issue) is strictly better than a
-silent gap.
+The shim **ships the full v9 surface so hipified source compiles, and fails
+loudly at use** (build/validate time, §4.4.2), with hipDNN node work
+prioritized separately. Waiting for full engine support would block
+otherwise valid use cases, and adding the frontend surface without engines
+would become a hidden runtime error either way — surfacing it as an
+explicit, documented `GRAPH_NOT_SUPPORTED` (pointing at a GitHub issue) is
+strictly better than a silent gap.
 
 ### 4.5 Heuristics and plan selection
 
@@ -519,13 +520,13 @@ not present heuristic modes. Some of this surface is being filled in by the
 hipDNN auto-tuning work (PR #7217), which the shim should build on as it
 lands.
 
-**HeurMode (interim).** Accept all `HeurMode_t` values; for now map every
-mode (`A`, `B`, `FALLBACK`, `OPENSOURCE`) to hipDNN's fallback/default
-selection and **log a WARN on first use per process** so a user debugging a
-perf regression sees that their heuristic choice was not honored. As real
-hipDNN heuristics arrive, remap the modes properly. (Both reviewers accept
-this stopgap; the benchmarking and auto-tuning paths are explicit user
-choices and are handled separately.)
+**HeurMode.** Accept all `HeurMode_t` values; until real hipDNN heuristics
+exist, map every mode (`A`, `B`, `FALLBACK`, `OPENSOURCE`) to hipDNN's
+fallback/default selection and **log a WARN on first use per process** so a
+user debugging a perf regression sees that their heuristic choice was not
+honored. As hipDNN heuristics arrive, remap the modes properly. The
+benchmarking and auto-tuning paths are explicit user choices and are handled
+separately.
 
 **Notes — per-note triage, not blanket no-op.** A blanket "accept and
 ignore" is unsafe: silently running without a requested filter can be
@@ -569,10 +570,9 @@ rather than ship a wrapper. cuDNN FE's `error_object` exposes public fields
 is structurally the same. The one gap is the `error_code_t` enum: cuDNN FE
 has 16 values, a few of which (e.g. `NVRTC_COMPILATION_FAILED`,
 `INVALID_CUDA_DEVICE`, `CUDNN_BACKEND_API_FAILED`) have no hipDNN
-counterpart. **The plan is to add the missing values to hipDNN's error-code
-enum** so the whole error type becomes aliasable; until that lands, a thin
-interim wrapper maps the cuDNN-only codes to the nearest hipDNN equivalent.
-The cuDNN FE error/log macros
+counterpart. **The missing values are added to hipDNN's error-code enum** so
+the whole error type is aliasable rather than wrapped. The cuDNN FE
+error/log macros
 (`CHECK_CUDNN_FRONTEND_ERROR`, `RETURN_CUDNN_FRONTEND_ERROR_IF`,
 `CUDNN_FE_LOG*`) are also re-exported, since PyTorch's
 `AT_CUDNN_FRONTEND_CHECK` expands to them.
@@ -623,11 +623,10 @@ signatures:
   `cudnnBackendHeurMode_t`, `cudnnBackendNumericalNote_t`,
   `cudnnBackendBehaviorNote_t`, `cudnnBackendDescriptorType_t`
 
-**The stub also ships a small set of C-API entry points** (revised from an
-earlier draft that placed all C entry points out of scope). Review feedback
-established that these are used outside the frontend — for handle init,
-stream binding, error handling, and version checks — and are needed to build
-and run the cuDNN-mirrored samples (§8.3):
+**The stub also ships a small set of C-API entry points.** These are used
+outside the frontend — for handle init, stream binding, error handling, and
+version checks — and are needed to build and run the cuDNN-mirrored samples
+(§8.3):
 
 - Handle lifecycle: `cudnnCreate`, `cudnnDestroy`, `cudnnSetStream`,
   `cudnnGetStream` — forwarding to the corresponding hipDNN handle API.
@@ -756,13 +755,12 @@ fail at build, and a `shared_ptr`-keyed `execute()` overload already lowers
 to the UID-indexed variant pack internally (see §4.4.1 for the verified
 `Graph.hpp` references). The shim simply forwards.
 
-**Rationale**: An earlier draft proposed auto-assigning UIDs on tensor
-construction and maintaining a `shared_ptr<Tensor_attributes>` → UID map per
-`Graph`. Inspection of `hipdnn_frontend::graph::Graph` showed this is
-redundant: the behavior the map would have provided already exists natively.
+**Rationale**: `hipdnn_frontend::graph::Graph` already provides
+cuDNN-equivalent identity natively, so a shim-side UID allocator or
+`shared_ptr<Tensor_attributes>` → UID map would be redundant.
 
-**Drawbacks**: None relative to the prior proposal — this removes the
-per-execute map lookup and the undecided collision semantics entirely.
+**Drawbacks**: None — there is no per-execute map lookup and no collision
+semantics for the shim to define.
 
 ### 5.4 Failure mode for unimplemented cuDNN features
 
@@ -797,9 +795,8 @@ graph per kernel launch).
 
 **Mitigation**:
 - Prefer aliasing (§4.3.1): aliased types add **zero** overhead — they are
-  the hipDNN type. This removes most of the surface from the perf budget,
-  including the per-execute tensor-identity map that an earlier draft
-  proposed (now eliminated — §4.4.1, §5.3).
+  the hipDNN type. This keeps most of the surface out of the perf budget,
+  and the shim carries no per-execute tensor-identity map (§4.4.1, §5.3).
 - All forwarding methods on the residual composition wrappers `inline` and
   header-only.
 - Benchmark `Graph::build()` and `Graph::execute()` overhead against native
@@ -985,7 +982,7 @@ the corresponding cuDNN FE sample.
     workspace size before `build_plans()` (hipDNN's
     `get_workspace_size()` is sufficient).
   - `deselect_shared_mem_greater_than` — **reject a non-zero value** until
-    hipDNN exposes per-plan shared-memory metadata (resolved in
+    hipDNN exposes per-plan shared-memory metadata (see
     [Supporting Reference §4](./0011_CuDNN_Shim_Reference.md#4-heuristics-and-plan-selection--verified-api)).
 - Wire the plan/engine introspection surface (Reference §1): `build()`,
   `get_engine_count`, `get_knobs_for_engine`, `create_execution_plan(engine_id,
