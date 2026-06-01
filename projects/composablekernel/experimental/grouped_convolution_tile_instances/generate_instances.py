@@ -267,6 +267,7 @@ PIPELINE_NAME_TO_VERSION = {
     "COMPUTE_V6": "V6",
     "BASIC_ASYNC_V1": "ASYNC_V1",
     "COMPUTE_ASYNC": "ASYNC_V4",
+    "WAVELET": "WAVELET",
 }
 
 # Maps ck_tile StreamKReductionStrategy int values (from static_cast<int> in instance string)
