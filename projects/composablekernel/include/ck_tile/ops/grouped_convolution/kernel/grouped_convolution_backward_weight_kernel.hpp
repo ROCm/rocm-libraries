@@ -694,10 +694,13 @@ struct GroupedConvolutionBackwardWeightKernel
         {
             const index_t num_loop =
                 integer_divide_ceil(kargs.GemmK, kargs.k_batch * TilePartitioner::KPerBlock);
-            if(num_loop < 4)
+            constexpr int num_loop_threashold = GemmPipeline_::PrefetchStages + 1;
+            if(num_loop < num_loop_threashold)
             {
                 LogInfo(
-                    "For V6 pipeline, GemmK / (k_batch * KPerBlock) must be >= 4. Now GemmK is ",
+                    "For V6 pipeline, GemmK / (k_batch * KPerBlock) must be >= ",
+                    num_loop_threashold,
+                    ". Now GemmK is ",
                     kargs.GemmK,
                     ", k_batch is ",
                     kargs.k_batch,
