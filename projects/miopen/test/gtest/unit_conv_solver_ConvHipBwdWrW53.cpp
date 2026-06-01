@@ -51,54 +51,54 @@ const auto& GetTestParams()
 
 } // namespace
 
-using GPU_UnitTestConvSolverOclBwdWrW53_FP16  = GPU_UnitTestConvSolverWrw_FP16;
-using GPU_UnitTestConvSolverOclBwdWrW53_BFP16 = GPU_UnitTestConvSolverWrw_BFP16;
-using GPU_UnitTestConvSolverOclBwdWrW53_FP32  = GPU_UnitTestConvSolverWrw_FP32;
+using GPU_UnitTestConvSolverHipBwdWrW53_FP16  = GPU_UnitTestConvSolverWrw_FP16;
+using GPU_UnitTestConvSolverHipBwdWrW53_BFP16 = GPU_UnitTestConvSolverWrw_BFP16;
+using GPU_UnitTestConvSolverHipBwdWrW53_FP32  = GPU_UnitTestConvSolverWrw_FP32;
 
-using CPU_UnitTestConvSolverOclBwdWrW53DevApplicability_NONE =
+using CPU_UnitTestConvSolverHipBwdWrW53DevApplicability_NONE =
     CPU_UnitTestConvSolverDevApplicabilityWrw_NONE;
 
-TEST_P(GPU_UnitTestConvSolverOclBwdWrW53_FP16, ConvOclBwdWrW53)
+TEST_P(GPU_UnitTestConvSolverHipBwdWrW53_FP16, ConvHipBwdWrW53)
 {
-    this->RunTest(miopen::solver::conv::ConvOclBwdWrW53{});
+    this->RunTest(miopen::solver::conv::ConvHipBwdWrW53{});
 };
 
-TEST_P(GPU_UnitTestConvSolverOclBwdWrW53_BFP16, ConvOclBwdWrW53)
+TEST_P(GPU_UnitTestConvSolverHipBwdWrW53_BFP16, ConvHipBwdWrW53)
 {
-    this->RunTest(miopen::solver::conv::ConvOclBwdWrW53{});
+    this->RunTest(miopen::solver::conv::ConvHipBwdWrW53{});
 };
 
-TEST_P(GPU_UnitTestConvSolverOclBwdWrW53_FP32, ConvOclBwdWrW53)
+TEST_P(GPU_UnitTestConvSolverHipBwdWrW53_FP32, ConvHipBwdWrW53)
 {
-    this->RunTest(miopen::solver::conv::ConvOclBwdWrW53{});
+    this->RunTest(miopen::solver::conv::ConvHipBwdWrW53{});
 };
 
-TEST_P(CPU_UnitTestConvSolverOclBwdWrW53DevApplicability_NONE, ConvOclBwdWrW53)
+TEST_P(CPU_UnitTestConvSolverHipBwdWrW53DevApplicability_NONE, ConvHipBwdWrW53)
 {
-    this->RunTest(miopen::solver::conv::ConvOclBwdWrW53{});
+    this->RunTest(miopen::solver::conv::ConvHipBwdWrW53{});
 };
 
 // Smoke tests
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_UnitTestConvSolverOclBwdWrW53_FP16,
+                         GPU_UnitTestConvSolverHipBwdWrW53_FP16,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvTestCases(miopenHalf))));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_UnitTestConvSolverOclBwdWrW53_BFP16,
+                         GPU_UnitTestConvSolverHipBwdWrW53_BFP16,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvTestCases(miopenBFloat16))));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         GPU_UnitTestConvSolverOclBwdWrW53_FP32,
+                         GPU_UnitTestConvSolverHipBwdWrW53_FP32,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvTestCases(miopenFloat))));
 
 // Device applicability test
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         CPU_UnitTestConvSolverOclBwdWrW53DevApplicability_NONE,
+                         CPU_UnitTestConvSolverHipBwdWrW53DevApplicability_NONE,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(GetConvTestCases(miopenFloat)[0])));

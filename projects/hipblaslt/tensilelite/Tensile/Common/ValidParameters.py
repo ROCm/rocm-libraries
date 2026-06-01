@@ -772,7 +772,7 @@ validParameters = { # we need to make sure this matches develop
     #   1 = 1 WG per CU (default), for example. 2 will launch WGs = 2 x CU count.
     # The priority of these environment variables is defined as follows:
     # TENSILE_STREAMK_FIXED_GRID > TENSILE_STREAMK_DYNAMIC_GRID > TENSILE_STREAMK_MAX_CUS > TENSILE_STREAMK_GRID_MULTIPLIER
-    "StreamK": [0, 1, 2, 3],
+    "StreamK": [0, 1, 2, 3, 4],
     # Determines if StreamK kernel uses atomics
     # 0: uses workspace to store partial tiles, accumulate in deterministic fix-up step
     # 1: uses atomics to accumulate partial tiles
@@ -795,6 +795,10 @@ validParameters = { # we need to make sure this matches develop
     #   2 = No partials
     #   3 = Nofixup and no partials
     "DebugStreamK": [0, 1, 2, 3],
+    # Persistent-kernel debug: when True, the persistent loop never exits.
+    # Used as a co-tenant load kernel for contended-perf benchmarking.
+    # Termination is via process death. Requires StreamK = 1, 2, or 3.
+    "DebugPersistentKernelLoopForever": [False, True],
     # Controls desired width (#elements) for loads from global memory -> LDS.
     # and eliminates the pointer unshift logic
     # -1 : Set GlobalReadVectorWidth =  VectorWidth
@@ -944,6 +948,11 @@ validParameters = { # we need to make sure this matches develop
     "ConvertAfterDS": [False, True],
     # Force disable shadow init to release more sgpr in preloop
     "ForceDisableShadowInit": [False, True],
+    # Use WMMA/MFMA with src C=0 to initialize C accumulators (skipping v_mov initC).
+    # -1: auto-detect
+    #  0: force disable
+    #  1: force enable (rejected if the auto-disable conditions are met)
+    "InitCIterWmma": [-1, 0, 1],
     # Enable LDS Transpose Instruction
     "LDSTrInst": [False, True],
     # False: Use LocalSplitU. Number of WorkGroup[2] WorkItems (wave or thread) will compute the same output elements (matrix D) along different
