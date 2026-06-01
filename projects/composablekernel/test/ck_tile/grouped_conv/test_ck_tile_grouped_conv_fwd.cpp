@@ -86,23 +86,22 @@ struct BuildFwdKernel
         sequence<ConvConfig::M_Warp, ConvConfig::N_Warp, ConvConfig::K_Warp>,
         sequence<ConvConfig::M_Warp_Tile, ConvConfig::N_Warp_Tile, ConvConfig::K_Warp_Tile>>;
 
-    using ConvTraits =
-        GroupedConvTraits<NDimSpatial,
-                          ConvolutionSpecialization::Default,
-                          InLayout,
-                          WeiLayout,
-                          tuple<>,
-                          OutLayout,
-                          ConvConfig::VectorSizeA,
-                          ConvConfig::VectorSizeB,
-                          ConvConfig::VectorSizeC,
-                          ConvConfig::NumGroupsToMerge,
-                          EnableSplitImage>;
+    using ConvTraits = GroupedConvTraits<NDimSpatial,
+                                         ConvolutionSpecialization::Default,
+                                         InLayout,
+                                         WeiLayout,
+                                         tuple<>,
+                                         OutLayout,
+                                         ConvConfig::VectorSizeA,
+                                         ConvConfig::VectorSizeB,
+                                         ConvConfig::VectorSizeC,
+                                         ConvConfig::NumGroupsToMerge,
+                                         EnableSplitImage>;
 
-    using TilePartitioner = GemmSpatiallyLocalTilePartitioner<
-        GemmShape,
-        ConvTraits::FixedGemmParams::TilePartitionerGroupNum,
-        ConvTraits::FixedGemmParams::TilePartitionerM01>;
+    using TilePartitioner =
+        GemmSpatiallyLocalTilePartitioner<GemmShape,
+                                          ConvTraits::FixedGemmParams::TilePartitionerGroupNum,
+                                          ConvTraits::FixedGemmParams::TilePartitionerM01>;
 
     using GemmUniversalTraits =
         TileGemmUniversalTraits<ConvTraits::FixedGemmParams::kPadM,
@@ -132,9 +131,8 @@ struct BuildFwdKernel
                                      ConvTraits::VectorSizeA,
                                      ConvTraits::VectorSizeB>;
 
-    using GemmPipeline =
-        GemmPipelineAGmemBGmemCRegV1<UniversalGemmProblem,
-                                     GroupedConvUniversalPipelineAgBgCrPolicy>;
+    using GemmPipeline = GemmPipelineAGmemBGmemCRegV1<UniversalGemmProblem,
+                                                      GroupedConvUniversalPipelineAgBgCrPolicy>;
 
     using EpilogueProblem = CShuffleEpilogueProblem<PrecType,
                                                     PrecType,
@@ -158,7 +156,8 @@ struct BuildFwdKernel
 
     using Epilogue = CShuffleEpilogue<EpilogueProblem>;
 
-    using type = GroupedConvolutionForwardKernel<ConvTraits, TilePartitioner, GemmPipeline, Epilogue>;
+    using type =
+        GroupedConvolutionForwardKernel<ConvTraits, TilePartitioner, GemmPipeline, Epilogue>;
 };
 
 // ============================================================================
@@ -172,15 +171,15 @@ static GroupedConvFwdHostArgs<> create_2d_fwd_host_args(index_t G,
                                                         index_t X,
                                                         index_t Hi,
                                                         index_t Wi,
-                                                        index_t stride_y  = 1,
-                                                        index_t stride_x  = 1,
+                                                        index_t stride_y   = 1,
+                                                        index_t stride_x   = 1,
                                                         index_t dilation_y = 1,
                                                         index_t dilation_x = 1,
-                                                        index_t lpad_y    = 0,
-                                                        index_t lpad_x    = 0,
-                                                        index_t rpad_y    = 0,
-                                                        index_t rpad_x    = 0,
-                                                        index_t k_batch   = 1)
+                                                        index_t lpad_y     = 0,
+                                                        index_t lpad_x     = 0,
+                                                        index_t rpad_y     = 0,
+                                                        index_t rpad_x     = 0,
+                                                        index_t k_batch    = 1)
 {
     auto conv_param = conv::ConvParam{2,
                                       G,
@@ -297,19 +296,19 @@ TEST_F(GroupedConvFwdIsSupportedArgumentTest, SplitImageFullImageLargeK)
 // ---------------------------------------------------------------------------
 // Multi-piece split-image path (large-tensor invoker)
 // ---------------------------------------------------------------------------
-// The large-tensor invoker (grouped_convolution_forward_large_tensor_invoker.hpp in the examples code)
-// calls MakeKernelArgs() first, then overrides split_image.pieces[] with
-// multi-piece data computed by calculate_spatial_piece<TilePartitioner>().
+// The large-tensor invoker (grouped_convolution_forward_large_tensor_invoker.hpp in the examples
+// code) calls MakeKernelArgs() first, then overrides split_image.pieces[] with multi-piece data
+// computed by calculate_spatial_piece<TilePartitioner>().
 
 TEST_F(GroupedConvFwdIsSupportedArgumentTest, SplitImageMultiPieceInvokerOverride)
 {
-    using Build = BuildFwdKernel<half_t,
-                                 TestFwdConvConfigBasicV1UnitVec,
-                                 tensor_layout::convolution::NHWGC,
-                                 tensor_layout::convolution::GKYXC,
-                                 tensor_layout::convolution::NHWGK,
-                                 2,
-                                 true /*EnableSplitImage*/>;
+    using Build           = BuildFwdKernel<half_t,
+                                           TestFwdConvConfigBasicV1UnitVec,
+                                           tensor_layout::convolution::NHWGC,
+                                           tensor_layout::convolution::GKYXC,
+                                           tensor_layout::convolution::NHWGK,
+                                           2,
+                                           true /*EnableSplitImage*/>;
     using Kernel          = typename Build::type;
     using TilePartitioner = typename Build::TilePartitioner;
 
@@ -339,28 +338,27 @@ TEST_F(GroupedConvFwdIsSupportedArgumentTest, SplitImageMultiPieceInvokerOverrid
     std::array<SplitImagePieceInfo, 64> temp_pieces{};
     for(index_t piece = 0; piece < total_pieces; piece++)
     {
-        temp_pieces[piece] =
-            calculate_spatial_piece<TilePartitioner>(piece,
-                                                     num_d_pieces,
-                                                     num_h_pieces,
-                                                     num_w_pieces,
-                                                     base_piece_d,
-                                                     base_piece_h,
-                                                     base_piece_w,
-                                                     1,   // total_d
-                                                     Ho,
-                                                     Wo,
-                                                     N,
-                                                     K,
-                                                     total_blocks);
-        total_blocks = temp_pieces[piece].block_end;
+        temp_pieces[piece] = calculate_spatial_piece<TilePartitioner>(piece,
+                                                                      num_d_pieces,
+                                                                      num_h_pieces,
+                                                                      num_w_pieces,
+                                                                      base_piece_d,
+                                                                      base_piece_h,
+                                                                      base_piece_w,
+                                                                      1, // total_d
+                                                                      Ho,
+                                                                      Wo,
+                                                                      N,
+                                                                      K,
+                                                                      total_blocks);
+        total_blocks       = temp_pieces[piece].block_end;
     }
 
     // Override kargs with multi-piece data.
-    kargs.num_spatial_pieces        = total_pieces;
-    kargs.split_image.num_h_pieces  = num_h_pieces;
-    kargs.split_image.num_w_pieces  = num_w_pieces;
-    kargs.split_image.num_d_pieces  = num_d_pieces;
+    kargs.num_spatial_pieces       = total_pieces;
+    kargs.split_image.num_h_pieces = num_h_pieces;
+    kargs.split_image.num_w_pieces = num_w_pieces;
+    kargs.split_image.num_d_pieces = num_d_pieces;
     for(index_t i = 0; i < total_pieces; i++)
     {
         kargs.split_image.pieces[i] = {temp_pieces[i].block_start,
@@ -390,8 +388,7 @@ TEST_F(GroupedConvFwdIsSupportedArgumentTest, SplitImageMultiPieceInvokerOverrid
     EXPECT_EQ(kargs.split_image.pieces[1].w_size, 128);
 
     // Pieces must be contiguous: piece1.block_start == piece0.block_end
-    EXPECT_EQ(kargs.split_image.pieces[1].block_start,
-              kargs.split_image.pieces[0].block_end);
+    EXPECT_EQ(kargs.split_image.pieces[1].block_start, kargs.split_image.pieces[0].block_end);
 
     // Total blocks across pieces must equal the full grid size.
     const index_t full_grid = TilePartitioner::GridSize(kargs.GemmM, kargs.GemmN);

@@ -147,8 +147,8 @@ struct BuildKernel
                                      ConvTraits::VectorSizeB>;
 
     using GemmPipeline = std::conditional_t<ConvConfig::Pipeline == GemmPipeline::COMPUTE_V6,
-                                              GemmPipelineAgBgCrCompV6<UniversalGemmProblem>,
-                                              GemmPipelineAgBgCrCompV3<UniversalGemmProblem>>;
+                                            GemmPipelineAgBgCrCompV6<UniversalGemmProblem>,
+                                            GemmPipelineAgBgCrCompV3<UniversalGemmProblem>>;
 
     using EpilogueProblem = CShuffleEpilogueProblem<PrecType,
                                                     PrecType,
@@ -308,10 +308,10 @@ class GroupedConvBwdWeightV6PipelineTest : public ::testing::Test
 TEST_F(GroupedConvBwdWeightV6PipelineTest, AcceptsWhenNumLoopAtLeast4)
 {
     using Kernel = typename BuildKernel<half_t,
-                                          TestConvConfigV6,
-                                          tensor_layout::convolution::NHWGC,
-                                          tensor_layout::convolution::GKYXC,
-                                          tensor_layout::convolution::NHWGK>::type;
+                                        TestConvConfigV6,
+                                        tensor_layout::convolution::NHWGC,
+                                        tensor_layout::convolution::GKYXC,
+                                        tensor_layout::convolution::NHWGK>::type;
 
     // k_batch=1: num_loop=ceil(98/32)=4.  Exactly on the boundary -> must pass.
     auto host_args = create_2d_host_args(1);
@@ -323,10 +323,10 @@ TEST_F(GroupedConvBwdWeightV6PipelineTest, AcceptsWhenNumLoopAtLeast4)
 TEST_F(GroupedConvBwdWeightV6PipelineTest, RejectsWhenNumLoopIs2)
 {
     using Kernel = typename BuildKernel<half_t,
-                                          TestConvConfigV6,
-                                          tensor_layout::convolution::NHWGC,
-                                          tensor_layout::convolution::GKYXC,
-                                          tensor_layout::convolution::NHWGK>::type;
+                                        TestConvConfigV6,
+                                        tensor_layout::convolution::NHWGC,
+                                        tensor_layout::convolution::GKYXC,
+                                        tensor_layout::convolution::NHWGK>::type;
 
     // k_batch=2: num_loop=ceil(98/64)=2 < 4. Must be rejected.
     auto host_args = create_2d_host_args(2);
@@ -339,10 +339,10 @@ TEST_F(GroupedConvBwdWeightV6PipelineTest, RejectsWhenNumLoopIs2)
 TEST_F(GroupedConvBwdWeightV6PipelineTest, RejectsWhenNumLoopIs1)
 {
     using Kernel = typename BuildKernel<half_t,
-                                          TestConvConfigV6,
-                                          tensor_layout::convolution::NHWGC,
-                                          tensor_layout::convolution::GKYXC,
-                                          tensor_layout::convolution::NHWGK>::type;
+                                        TestConvConfigV6,
+                                        tensor_layout::convolution::NHWGC,
+                                        tensor_layout::convolution::GKYXC,
+                                        tensor_layout::convolution::NHWGK>::type;
 
     // k_batch=4: num_loop=ceil(98/128)=1 < 4. Must be rejected.
     auto host_args = create_2d_host_args(4);
@@ -354,10 +354,10 @@ TEST_F(GroupedConvBwdWeightV6PipelineTest, RejectsWhenNumLoopIs1)
 TEST_F(GroupedConvBwdWeightV6PipelineTest, AcceptsLargeSpatialWithSmallKBatch)
 {
     using Kernel = typename BuildKernel<half_t,
-                                          TestConvConfigV6,
-                                          tensor_layout::convolution::NHWGC,
-                                          tensor_layout::convolution::GKYXC,
-                                          tensor_layout::convolution::NHWGK>::type;
+                                        TestConvConfigV6,
+                                        tensor_layout::convolution::NHWGC,
+                                        tensor_layout::convolution::GKYXC,
+                                        tensor_layout::convolution::NHWGK>::type;
 
     // Large spatial: N=2, Hi=Wi=70 -> Ho=Wo=70, GemmK=2*70*70=9800.
     // k_batch=1: num_loop=ceil(9800/32)=307 >= 4 -> accepted.
@@ -370,22 +370,20 @@ TEST_F(GroupedConvBwdWeightV6PipelineTest, AcceptsLargeSpatialWithSmallKBatch)
 TEST_F(GroupedConvBwdWeightV6PipelineTest, RejectsLargeSpatialWithLargeKBatch)
 {
     using Kernel = typename BuildKernel<half_t,
-                                          TestConvConfigV6,
-                                          tensor_layout::convolution::NHWGC,
-                                          tensor_layout::convolution::GKYXC,
-                                          tensor_layout::convolution::NHWGK>::type;
+                                        TestConvConfigV6,
+                                        tensor_layout::convolution::NHWGC,
+                                        tensor_layout::convolution::GKYXC,
+                                        tensor_layout::convolution::NHWGK>::type;
 
     // GemmK=9800. With k_batch=64: num_loop=ceil(9800/(64*32))=ceil(9800/2048)=5 >= 4 -> pass.
     // With k_batch=128: num_loop=ceil(9800/4096)=3 < 4 -> rejected.
     auto host_args_pass = create_large_2d_host_args(64);
-    auto kargs_pass =
-        typename Kernel::GroupedConvBwdWeightKernelArgsSpecialized(host_args_pass);
+    auto kargs_pass = typename Kernel::GroupedConvBwdWeightKernelArgsSpecialized(host_args_pass);
     EXPECT_TRUE(Kernel::IsSupportedArgument(kargs_pass))
         << "V6 kernel must accept k_batch=64 (num_loop=5 >= 4)";
 
     auto host_args_fail = create_large_2d_host_args(128);
-    auto kargs_fail =
-        typename Kernel::GroupedConvBwdWeightKernelArgsSpecialized(host_args_fail);
+    auto kargs_fail = typename Kernel::GroupedConvBwdWeightKernelArgsSpecialized(host_args_fail);
     EXPECT_FALSE(Kernel::IsSupportedArgument(kargs_fail))
         << "V6 kernel must reject k_batch=128 (num_loop=3 < 4)";
 }

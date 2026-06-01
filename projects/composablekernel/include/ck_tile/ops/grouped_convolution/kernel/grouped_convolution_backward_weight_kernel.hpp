@@ -688,20 +688,23 @@ struct GroupedConvolutionBackwardWeightKernel
         }
 
         // V6 pipeline requires num_loop >= PrefetchStages + 1 = 4
-        // Otherwise it produces incorrect results (num_loop=1) or is just inefficient (num_loop=2 or 3).
+        // Otherwise it produces incorrect results (num_loop=1) or is just inefficient (num_loop=2
+        // or 3).
         if constexpr(IsComputeV6Pipeline)
         {
-            const index_t num_loop = integer_divide_ceil(kargs.GemmK, kargs.k_batch * TilePartitioner::KPerBlock);
-            if (num_loop < 4)
+            const index_t num_loop =
+                integer_divide_ceil(kargs.GemmK, kargs.k_batch * TilePartitioner::KPerBlock);
+            if(num_loop < 4)
             {
-                LogInfo("For V6 pipeline, GemmK / (k_batch * KPerBlock) must be >= 4. Now GemmK is ",
-                        kargs.GemmK,
-                        ", k_batch is ",
-                        kargs.k_batch,
-                        ", KPerBlock is ",
-                        number<TilePartitioner::KPerBlock>{},
-                        ", num_loop is ",
-                        num_loop);
+                LogInfo(
+                    "For V6 pipeline, GemmK / (k_batch * KPerBlock) must be >= 4. Now GemmK is ",
+                    kargs.GemmK,
+                    ", k_batch is ",
+                    kargs.k_batch,
+                    ", KPerBlock is ",
+                    number<TilePartitioner::KPerBlock>{},
+                    ", num_loop is ",
+                    num_loop);
                 return false;
             }
         }

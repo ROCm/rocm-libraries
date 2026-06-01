@@ -442,10 +442,11 @@ struct GroupedConvFwdKernelArgs
         // (the invoker sets these after MakeKernelArgs).
         struct PieceInfo
         {
-            index_t block_start = -1;               // Starting block index for this piece
-            index_t block_end   = -1;               // Ending block index (exclusive)
-            index_t d_start = -1, h_start = -1, w_start = -1; // Piece starting position in OUTPUT space
-            index_t d_size  = -1, h_size  = -1, w_size  = -1; // Piece size in OUTPUT space
+            index_t block_start = -1; // Starting block index for this piece
+            index_t block_end   = -1; // Ending block index (exclusive)
+            index_t d_start = -1, h_start = -1,
+                    w_start = -1; // Piece starting position in OUTPUT space
+            index_t d_size = -1, h_size = -1, w_size = -1; // Piece size in OUTPUT space
         };
 
         static constexpr index_t MaxPieces = 64; // Max pieces: 4 (1D), 16 (2D), 64 (3D)
@@ -788,9 +789,9 @@ struct GroupedConvolutionForwardKernel
             kargs.split_image.total_w       = total_w;
             kargs.split_image.total_spatial = total_d * total_h * total_w;
 
-            kargs.num_spatial_pieces            = 1;
+            kargs.num_spatial_pieces                = 1;
             kargs.split_image.pieces[0].block_start = 0;
-            kargs.split_image.pieces[0].block_end   =
+            kargs.split_image.pieces[0].block_end =
                 TilePartitioner::GridSize(kargs.GemmM, kargs.GemmN);
             kargs.split_image.pieces[0].d_start = 0;
             kargs.split_image.pieces[0].h_start = 0;
