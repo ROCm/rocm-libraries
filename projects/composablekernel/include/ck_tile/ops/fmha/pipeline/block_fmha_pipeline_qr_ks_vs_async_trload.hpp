@@ -438,7 +438,6 @@ struct BlockFmhaPipelineQRKSVSAsyncTrload
                         async_load_tile(k_lds_write_window, k_dram_window);
                     }
                     move_tile_window(v_dram_window, {kN0, 0});
-                    move_tile_window(bias_dram_window, {0, kN0});
                     continue;
                 }
             }
