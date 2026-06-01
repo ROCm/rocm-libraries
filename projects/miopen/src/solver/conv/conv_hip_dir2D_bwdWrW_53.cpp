@@ -31,7 +31,7 @@
 #include <miopen/stringutils.hpp>
 #include <miopen/env.hpp>
 
-MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_DIRECT_OCL_WRW53)
+MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_CONV_DIRECT_HIP_WRW53)
 
 namespace miopen {
 namespace solver {
@@ -39,20 +39,15 @@ namespace conv {
 
 using ProblemDescription = miopen::conv::ProblemDescription;
 
-// Once the compiler fix (SWDEV-168168) is available, that version of compiler needs to be
-// checked to skip workarounds. Till then, true is returned in all cases so as to skip
-// problematic configs.
-static bool WorkaroundSwdev168168() { return true; }
-
-bool ConvOclBwdWrW53::IsApplicable(const ExecutionContext& ctx,
+bool ConvHipBwdWrW53::IsApplicable(const ExecutionContext& ctx,
                                    const ProblemDescription& problem) const
 {
-    if(env::disabled(MIOPEN_DEBUG_CONV_DIRECT_OCL_WRW53))
+    if(env::disabled(MIOPEN_DEBUG_CONV_DIRECT_HIP_WRW53))
         return false;
     const std::string name = ctx.GetStream().GetDeviceName();
     if(!(StartsWith(name, "gfx8") || StartsWith(name, "gfx90") || StartsWith(name, "gfx103")))
         return false;
-    if(!ctx.use_opencl_convolutions)
+    if(!ctx.use_hip_kernels)
         return false;
     if(!problem.Is2d())
         return false;
@@ -71,54 +66,6 @@ bool ConvOclBwdWrW53::IsApplicable(const ExecutionContext& ctx,
         return false;
     if(!problem.IsLayoutDefault())
         return false;
-
-    bool workaround = false;
-
-    if(WorkaroundSwdev168168())
-    {
-        // Workaround for issue 1173. These FP16 configs would cause clang-ocl compiler to crash
-        // during kernel compilation, due to compiler bug
-        workaround = workaround || (problem.GetOutDataType() == miopenHalf &&
-                                    ((problem.GetWeightsWidth() == 7 &&
-                                      problem.GetWeightsHeight() == 7 && problem.GetPadW() == 3) ||
-                                     (problem.GetWeightsWidth() == 7 &&
-                                      problem.GetWeightsHeight() == 7 && problem.GetPadW() == 2) ||
-                                     (problem.GetWeightsWidth() == 11 &&
-                                      problem.GetWeightsHeight() == 11 && problem.GetPadW() == 5) ||
-                                     (problem.GetWeightsWidth() == 11 &&
-                                      problem.GetWeightsHeight() == 11 && problem.GetPadW() == 2) ||
-                                     (problem.GetWeightsWidth() == 11 &&
-                                      problem.GetWeightsHeight() == 11 && problem.GetPadW() == 1)));
-
-        // Workaround for issue 1242. These FP32 configs produce wrong result if compiled with
-        // OpenCL 1.2.0-2018090737 that comes with rocm 1.9, using -O2 flag or higher.
-        // However, when compiled with older OpenCL that comes with rocm 1.8, this config
-        // would pass
-        workaround =
-            workaround || (problem.GetOutDataType() == miopenFloat &&
-                           ((problem.GetWeightsWidth() == 7 && problem.GetWeightsHeight() == 7 &&
-                             problem.GetPadW() == 3) ||
-                            (problem.GetWeightsWidth() == 7 && problem.GetWeightsHeight() == 7 &&
-                             problem.GetPadW() == 1)) &&
-                           (problem.GetOutHeight() % 112 == 0 || problem.GetOutWidth() % 112 == 0));
-
-        // Workaround for issue 1479
-        // The compiler issue causes the correctness failure of particular config
-        // --input 1, 64, n, 1024 --weights 1, 64, 3, 3 -filter 2 2 1 1 1 1 --group-count 1
-        // Disabling compiler optimization i.e. #pragma unroll in MIOpenConvBwdWrW_LxG_P53.cl
-        // restores the correctness. Until, the compiler issue is fixed, all configs with width 1024
-        // is skipped
-        workaround = workaround || (problem.IsFp32() && problem.GetWeightsWidth() == 3 &&
-                                    problem.GetWeightsHeight() == 3 && problem.GetPadH() == 2 &&
-                                    problem.GetPadW() == 2 && problem.GetOutWidth() == 1024);
-    }
-
-    /// Resolve NaN issue on gfx908, manifested on Jenkins.
-    /// Note that there is another solver, ConvOclBwdWrW2, that has very similar
-    /// performance and applicable for the affected "popular" configs (7x7 filter, 1x1 padding).
-    workaround =
-        workaround || (problem.IsFp16() && (name == "gfx908") && problem.GetWeightsWidth() == 7 &&
-                       problem.GetWeightsHeight() == 7 && problem.GetPadW() == 1);
 
     return (problem.GetDilationW() == 1 && problem.GetDilationH() == 1) &&
            (problem.GetKernelStrideW() == 1 && problem.GetKernelStrideH() == 1) &&
@@ -148,7 +95,7 @@ bool ConvOclBwdWrW53::IsApplicable(const ExecutionContext& ctx,
                                         static_cast<int>(problem.GetWeightsWidth()) + 1) &&
 
            // Avoid LDS over-allocation
-           GetSolution(ctx, problem).Succeeded() && !workaround;
+           GetSolution(ctx, problem).Succeeded();
 }
 
 /*! @brief ComputeInputParams
@@ -322,7 +269,7 @@ static inline void ComputeNumInputWidthLoops(
     }
 }
 
-size_t ConvOclBwdWrW53::GetWorkspaceSize(const ExecutionContext&,
+size_t ConvHipBwdWrW53::GetWorkspaceSize(const ExecutionContext&,
                                          const ProblemDescription& problem) const
 {
     std::size_t n_stacks = std::min(problem.GetBatchSize(), static_cast<std::size_t>(1));
@@ -345,13 +292,17 @@ size_t ConvOclBwdWrW53::GetWorkspaceSize(const ExecutionContext&,
         return 0;
 }
 
-ConvSolution ConvOclBwdWrW53::GetSolution(const ExecutionContext& ctx,
+ConvSolution ConvHipBwdWrW53::GetSolution(const ExecutionContext& ctx,
                                           const ProblemDescription& problem) const
 {
     ConvSolution result;
 
+    // This solver targets the HIP backend exclusively. The kernel source files use a
+    // "Hip" suffix on the basename so the embedded kernel symbols (generated by
+    // add_kernels() from the basename) do not collide with any other kernels.
+
     const auto hw_wave_sz = 64;
-    // inpout are outputs
+    // inputs are outputs
     int wei_cstride = problem.GetWeightsWidth() * problem.GetWeightsHeight();
 
     // At convolutionocl level, the assertion is present to ensure output channels are
@@ -586,14 +537,6 @@ ConvSolution ConvOclBwdWrW53::GetSolution(const ExecutionContext& ctx,
         //		+ std::string(" -limit-vector-registers=64 ")
         + ctx.general_compile_options;
 
-    // On gfx908 hardware, the compiler doesn't seem to support #pragma unroll correctly
-    // References: PR: #1962 and SWDEV-200074
-    const auto name = ctx.GetStream().GetDeviceName();
-    if(StartsWith(name, "gfx908"))
-    {
-        comp_options += " -DMLO_DISABLE_PRAGMA_UNROLL_COMPILER_SWDEV_200074_WORKAROUND=1";
-    }
-
     // wrt to W
     {
         KernelInfo kernel;
@@ -613,7 +556,7 @@ ConvSolution ConvOclBwdWrW53::GetSolution(const ExecutionContext& ctx,
                          result.n_in_data_tiles - 1) /
                         result.n_in_data_tiles);
 
-            kernel.kernel_file = "MIOpenGroupConvBwdWrW_LxG_P53.cl";
+            kernel.kernel_file = "MIOpenGroupConvBwdWrW_LxG_P53Hip.cpp";
             kernel.kernel_name = "MIOpenCvBwdWrW";
         }
         else
@@ -621,7 +564,7 @@ ConvSolution ConvOclBwdWrW53::GetSolution(const ExecutionContext& ctx,
             gbl_wk0 *=
                 ((problem.GetOutChannels() + result.n_in_data_tiles - 1) / result.n_in_data_tiles);
 
-            kernel.kernel_file = "MIOpenConvBwdWrW_LxG_P53.cl";
+            kernel.kernel_file = "MIOpenConvBwdWrW_LxG_P53Hip.cpp";
             kernel.kernel_name = "MIOpenCvBwdWrW";
         }
 
@@ -638,7 +581,7 @@ ConvSolution ConvOclBwdWrW53::GetSolution(const ExecutionContext& ctx,
     {
         KernelInfo kernel;
 
-        kernel.kernel_file  = "MIOpenConvBwdWrW_LxG_P53.cl";
+        kernel.kernel_file  = "MIOpenConvBwdWrW_LxG_P53Hip.cpp";
         kernel.kernel_name  = "MIOpenCvBwdWrW_rdc";
         kernel.comp_options = comp_options;
 
@@ -647,6 +590,7 @@ ConvSolution ConvOclBwdWrW53::GetSolution(const ExecutionContext& ctx,
         kernel.l_wk.push_back(1);
 
         int gbl_ut_wk0 = wei_bstride * problem.GetInChannels() / ut_read_unit;
+        gbl_ut_wk0     = ((gbl_ut_wk0 + UT_GRP_SZ0 - 1) / UT_GRP_SZ0) * UT_GRP_SZ0;
 
         kernel.g_wk.push_back(gbl_ut_wk0);
         kernel.g_wk.push_back(1);
