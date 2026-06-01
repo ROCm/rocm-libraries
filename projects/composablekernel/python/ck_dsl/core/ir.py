@@ -2252,6 +2252,18 @@ class IRBuilder:
             attrs={"vmcnt": int(vmcnt), "lgkmcnt": int(lgkmcnt), "expcnt": int(expcnt)},
         )
 
+    def iglp_opt(self, level: int = 0) -> None:
+        """`__builtin_amdgcn_iglp_opt(level)`.
+
+        Asks the AMDGPU post-RA scheduler to apply a canned instruction
+        interleaving for the enclosing loop (MFMA / ds_read / ds_write /
+        VMEM). ``level`` selects the pattern (0 = GEMM MFMA-interleave,
+        1 = attention-style). Placed once at the top of the main loop body;
+        it owns the loop schedule, so manual ``sched_barrier`` /
+        ``sched_group_barrier`` hints should be suppressed when it is used.
+        """
+        self._op("tile.iglp_opt", attrs={"level": int(level)})
+
     def sched_barrier(self, mask: int = 0) -> None:
         """`__builtin_amdgcn_sched_barrier(mask)`.
 
