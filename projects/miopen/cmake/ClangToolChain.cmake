@@ -37,8 +37,10 @@
 if(WIN32)
     set(DEFAULT_ROCM_COMPILER_EXTENSION ".exe")
     set(CMAKE_RC_COMPILER "CMAKE_RC_COMPILER-NOTREQUIRED")
-    # No suitable default on windows, use this as a possible example.
-    set(DEFAULT_ROCM_CMAKE_PATH "c:/dist/therock")
+    # No canonical ROCm install location exists on Windows, so leave the default
+    # empty. Users must either supply -DROCM_CMAKE_PATH=... explicitly or have
+    # hipconfig discoverable on PATH.
+    set(DEFAULT_ROCM_CMAKE_PATH "")
 else()
     # Can use /opt/rocm as the typical default install path on Linux
     set(DEFAULT_ROCM_CMAKE_PATH "/opt/rocm")
@@ -56,7 +58,7 @@ if(NOT _ROCM_CLANG_TOOLCHAIN_FIRST_RUN_COMPLETED)
     if(DEFINED ROCM_PATH)
         message(STATUS "ROCM_PATH provided: ${ROCM_PATH}")
     elseif(DEFINED ROCM_CMAKE_HIPCONFIG_PATH)
-        set(TRY_TO_FIND_ROCM_PATH_USING_HIPCONFIG "TRUE")
+        set(TRY_TO_FIND_ROCM_PATH_USING_HIPCONFIG TRUE)
         message(STATUS "ROCM_CMAKE_HIPCONFIG_PATH provided: ${ROCM_CMAKE_HIPCONFIG_PATH}")
     elseif(DEFINED ROCM_CMAKE_PATH)
         message(STATUS "ROCM_CMAKE_PATH provided: ${ROCM_CMAKE_PATH}")
@@ -64,7 +66,7 @@ if(NOT _ROCM_CLANG_TOOLCHAIN_FIRST_RUN_COMPLETED)
         set(ROCM_CMAKE_PATH $ENV{ROCM_CMAKE_PATH})
         message(STATUS "ROCM_CMAKE_PATH set from environment: ${ROCM_CMAKE_PATH}")
     else()
-        set(TRY_TO_FIND_ROCM_PATH_USING_HIPCONFIG "TRUE")
+        set(TRY_TO_FIND_ROCM_PATH_USING_HIPCONFIG TRUE)
         message(
             STATUS
                 "No helper variables provided; attempting to detect ROCm path and hip package using system PATH and CMAKE_PREFIX_PATH."
@@ -77,7 +79,7 @@ set(CMAKE_CXX_COMPILER_NAMES clang++)
 set(CMAKE_C_COMPILER_NAMES clang)
 
 # Warn if ROCM_PATH is set in environment (can interfere with toolchain discovery).
-if(DEFINED ENV{ROCM_PATH})
+if(DEFINED ENV{ROCM_PATH} AND NOT _ROCM_CLANG_TOOLCHAIN_FIRST_RUN_COMPLETED)
     message(
         WARNING "\nROCM_PATH is set in the environment and may interfere with toolchain detection. "
                 "Remove ROCM_PATH from the environment and use the following instead:\n"
@@ -189,6 +191,13 @@ if(DEFINED ROCM_CMAKE_PATH)
         unset(_normalized_env_path)
     else()
         message(FATAL_ERROR "ROCm LLVM bin directory does not exist: ${ROCM_LLVM_BIN_DIR}")
+    endif()
+
+    # Make the ROCm install discoverable by find_package() / find_path() consumers
+    # (e.g. find_package(hip), find_path(HALF_INCLUDE_DIR half/half.hpp)).
+    if(NOT "${ROCM_CMAKE_PATH}" IN_LIST CMAKE_PREFIX_PATH)
+        list(PREPEND CMAKE_PREFIX_PATH "${ROCM_CMAKE_PATH}")
+        message(STATUS "Added ${ROCM_CMAKE_PATH} to CMAKE_PREFIX_PATH for ROCm package discovery")
     endif()
 endif()
 
