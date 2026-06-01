@@ -15,8 +15,23 @@ OUT_H = (H + 2 * PAD - DIL * (R - 1) - 1) // STRIDE + 1
 OUT_W = (W + 2 * PAD - DIL * (S - 1) - 1) // STRIDE + 1
 
 
-def build_conv_fprop_graph(graph):
+def create_handle():
+    """Create a hipDNN handle for GPU operations."""
+    return hipdnn.create_handle()
+
+
+def create_graph():
+    """Create a hipDNN Graph configured with FLOAT data types."""
+    graph = hipdnn.Graph()
+    graph.set_io_data_type(hipdnn.DataType.FLOAT)
+    graph.set_intermediate_data_type(hipdnn.DataType.FLOAT)
+    graph.set_compute_data_type(hipdnn.DataType.FLOAT)
+    return graph
+
+
+def build_conv_fprop_graph():
     """Build a conv_fprop graph returning (graph, x, weight, y)."""
+    graph = create_graph()
     graph.set_name("conv_fprop_test")
 
     x = hipdnn.Tensor.create([N, C, H, W], hipdnn.DataType.FLOAT)
@@ -38,8 +53,9 @@ def build_conv_fprop_graph(graph):
     return graph, x, weight, y
 
 
-def build_conv_dgrad_graph(graph):
+def build_conv_dgrad_graph():
     """Build a conv_dgrad graph returning (graph, dy, weight, dx)."""
+    graph = create_graph()
     graph.set_name("conv_dgrad_test")
 
     dy = hipdnn.Tensor.create([N, K, OUT_H, OUT_W], hipdnn.DataType.FLOAT)
@@ -62,8 +78,9 @@ def build_conv_dgrad_graph(graph):
     return graph, dy, weight, dx
 
 
-def build_conv_wgrad_graph(graph):
+def build_conv_wgrad_graph():
     """Build a conv_wgrad graph returning (graph, dy, x, dw)."""
+    graph = create_graph()
     graph.set_name("conv_wgrad_test")
 
     dy = hipdnn.Tensor.create([N, K, OUT_H, OUT_W], hipdnn.DataType.FLOAT)
@@ -86,13 +103,14 @@ def build_conv_wgrad_graph(graph):
     return graph, dy, x, dw
 
 
-def build_matmul_graph(graph):
+def build_matmul_graph():
     """Build a matmul graph (A [M, K] x B [K, N] -> C [M, N]).
 
     Returns:
         Tuple of (graph, a, b, c).
     """
     m, k, n = 4, 3, 5
+    graph = create_graph()
     graph.set_name("matmul_test")
 
     a = hipdnn.Tensor.create([m, k], hipdnn.DataType.FLOAT)
@@ -111,27 +129,35 @@ def build_matmul_graph(graph):
     return graph, a, b, c
 
 
-def build_all_plans(graph, handle):
-    """Validate, build the operation graph, and create/check/build execution plans."""
+def build_all_plans(graph, handle=None):
+    """Validate, build the operation graph, and create/check/build execution plans.
+
+    Creates a handle if one is not supplied and returns it for reuse.
+    """
+    if handle is None:
+        handle = create_handle()
     assert graph.validate().is_good()
     assert graph.build_operation_graph(handle).is_good()
     assert graph.create_execution_plans().is_good()
     assert graph.check_support().is_good()
     assert graph.build_plans().is_good()
+    return handle
 
 
-def execute_graph(graph, handle, tensor_uid_to_data):
+def execute_graph(graph, tensor_uid_to_data, handle=None):
     """Execute a graph with the given tensor data.
 
     Args:
         graph: A fully-built hipDNN graph (validated, built, plans created).
-        handle: A hipDNN handle.
         tensor_uid_to_data: Dict mapping tensor UIDs to numpy arrays.
             Output tensors should have zero-initialized arrays.
+        handle: A hipDNN handle. Created if not supplied.
 
     Returns:
         Dict mapping tensor UIDs to result numpy arrays (copied from device).
     """
+    if handle is None:
+        handle = create_handle()
     buffers = {}
     variant_pack = {}
     for uid, data in tensor_uid_to_data.items():

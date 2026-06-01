@@ -15,34 +15,35 @@ from .helpers import build_all_plans, build_conv_fprop_graph, execute_graph
 class TestConvFprop:
     """Tests for convolution forward propagation end-to-end pipeline."""
 
-    def test_graph_validates_successfully(self, graph):
+    def test_graph_validates_successfully(self):
         """Build a conv_fprop graph and verify validation passes."""
-        graph, x, weight, y = build_conv_fprop_graph(graph)
+        graph, x, weight, y = build_conv_fprop_graph()
 
         result = graph.validate()
         assert result.is_good(), f"Validation failed: {result.get_message()}"
 
-    def test_operation_graph_builds(self, graph, handle):
+    def test_operation_graph_builds(self):
         """Build a conv_fprop operation graph with backend handle."""
-        graph, x, weight, y = build_conv_fprop_graph(graph)
+        graph, x, weight, y = build_conv_fprop_graph()
 
         result = graph.validate()
         assert result.is_good(), f"Validation failed: {result.get_message()}"
 
+        handle = helpers.create_handle()
         result = graph.build_operation_graph(handle)
         assert result.is_good(), f"Build operation graph failed: {result.get_message()}"
 
-    def test_execution_plans_created(self, graph, handle):
+    def test_execution_plans_created(self):
         """Build execution plans for conv_fprop."""
-        graph, x, weight, y = build_conv_fprop_graph(graph)
+        graph, x, weight, y = build_conv_fprop_graph()
 
-        build_all_plans(graph, handle)
+        build_all_plans(graph)
 
-    def test_execution_produces_nonzero_output(self, graph, handle):
+    def test_execution_produces_nonzero_output(self):
         """Full end-to-end conv_fprop: execute and verify non-zero output."""
-        graph, x, weight, y = build_conv_fprop_graph(graph)
+        graph, x, weight, y = build_conv_fprop_graph()
 
-        build_all_plans(graph, handle)
+        handle = build_all_plans(graph)
 
         x_data = np.random.uniform(
             0.0, 1.0, [helpers.N, helpers.C, helpers.H, helpers.W]
@@ -60,7 +61,7 @@ class TestConvFprop:
             y.get_uid(): y_data,
         }
 
-        results = execute_graph(graph, handle, tensor_data)
+        results = execute_graph(graph, tensor_data, handle)
         y_result = results[y.get_uid()]
 
         assert not np.all(y_result == 0), "Conv fprop output is all zeros"

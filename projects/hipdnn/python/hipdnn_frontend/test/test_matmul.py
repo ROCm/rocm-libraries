@@ -5,26 +5,27 @@
 
 import pytest
 
-from .helpers import build_matmul_graph
+from .helpers import build_matmul_graph, create_handle
 
 
 @pytest.mark.gpu
 class TestMatmul:
     """Tests for matrix multiplication graph building."""
 
-    def test_graph_validates(self, graph):
+    def test_graph_validates(self):
         """Create a matmul graph and verify validation passes."""
-        graph, a, b, c = build_matmul_graph(graph)
+        graph, a, b, c = build_matmul_graph()
 
         result = graph.validate()
         assert result.is_good(), f"Validation failed: {result.get_message()}"
 
-    def test_operation_graph_builds(self, graph, handle):
+    def test_operation_graph_builds(self):
         """Validate and build matmul operation graph."""
-        graph, a, b, c = build_matmul_graph(graph)
+        graph, a, b, c = build_matmul_graph()
 
         result = graph.validate()
         assert result.is_good(), f"Validation failed: {result.get_message()}"
 
+        handle = create_handle()
         result = graph.build_operation_graph(handle)
         assert result.is_good(), f"Build operation graph failed: {result.get_message()}"
