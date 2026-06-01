@@ -833,7 +833,7 @@ ConvHipImplicitGemmBwdDataV4R1::GetSolution(const ExecutionContext& ctx,
     assert(config.IsValid(problem));
 
     // a series of kernels
-    for(std::size_t gemm_id = 0; gemm_id < static_cast<size_t>(CalculateNumberOfGemm(problem));
+    for(std::size_t gemm_id = 0U; gemm_id < static_cast<size_t>(CalculateNumberOfGemm(problem));
         ++gemm_id)
     {
         KernelInfo construction_parameters;

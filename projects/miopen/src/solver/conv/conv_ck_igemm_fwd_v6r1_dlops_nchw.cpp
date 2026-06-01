@@ -133,7 +133,7 @@ PerformanceConvCkIgemmFwdV6r1DlopsNchw
 ConvCkIgemmFwdV6r1DlopsNchw::GetDefaultPerformanceConfig(const ExecutionContext& ctx,
                                                          const ProblemDescription& problem) const
 {
-    for(int i = 0; static_cast<size_t>(i) <
+    for(size_t i = 0U; i <
                    ck::driver::ConvIgemmFwdV6r1DlopsNchwKcyxNkhw::GetTunableList().size();
         ++i)
     {

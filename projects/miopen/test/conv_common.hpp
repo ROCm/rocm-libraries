@@ -283,7 +283,7 @@ protected:
                     handle, problem, options.get(), solutions.data(), &found, solutions.size()));
         }
 
-        EXPECT_OP(found, >=, 0ULL);
+        EXPECT_OP(found, >=, 0U);
 
         solutions.resize(found);
 
@@ -1934,10 +1934,10 @@ struct conv_driver : test_driver
 
     int get_spatial_dim() const
     {
-        for(auto i = 2ULL; i < 4ULL; i++)
+        for(auto i = 2U; i < 4U; i++)
         {
-            if(input_dims.size() == i + 2ULL and weight_tensor_dims.size() == i + 2ULL and
-               pads_strides_dilations.size() == i * 3ULL and trans_output_pads.size() == i)
+            if(input_dims.size() == i + 2U and weight_tensor_dims.size() == i + 2U and
+               pads_strides_dilations.size() == i * 3U and trans_output_pads.size() == i)
                 return i;
         }
         std::cout << "FAILED: get_spatial_dim() can't calculate dims count." << std::endl;
