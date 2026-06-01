@@ -112,7 +112,7 @@ if (ADDRESS_SANITIZER_ENABLED)
         TARGETS "gfx90a:xnack+;gfx942:xnack+;gfx950:xnack+" )
 else()
     rocm_check_target_ids(DEFAULT_GPU_TARGETS
-        TARGETS "gfx908;gfx90a;gfx942;gfx950;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201" )
+        TARGETS "gfx908;gfx90a;gfx942;gfx950;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201;gfx1250" )
 endif()
 
 # check if ROCm supports `__hip_fp8_e5m2` and `__hip_fp8_e4m3`

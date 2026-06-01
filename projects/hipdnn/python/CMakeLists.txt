@@ -59,4 +59,7 @@ else()
     install(TARGETS hipdnn_frontend_python DESTINATION "${_staging}")
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/hipdnn_frontend/__init__.py"
             DESTINATION "${_staging}")
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/hipdnn_frontend/test/"
+            DESTINATION "share/hipdnn/tests/python"
+            FILES_MATCHING PATTERN "*.py")
 endif()
