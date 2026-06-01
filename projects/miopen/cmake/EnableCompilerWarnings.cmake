@@ -59,7 +59,6 @@ set(__clang_cxx_compile_options
     -Wshift-sign-overflow
     -Winconsistent-missing-destructor-override
     -Wcomma
-    -Wmicrosoft-enum-value
     -Wmicrosoft-cpp-macro
     -Wnested-anon-types
     -Wlanguage-extension-token
