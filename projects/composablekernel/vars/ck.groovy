@@ -790,6 +790,10 @@ def cmake_build(Map conf=[:]){
                         export NINJA_FTIME_TRACE=false
                         bash ../script/dependency-parser/smart_build_and_test.sh
                     """
+                    // Observability: persist the smart-build selection decision and
+                    // its validation verdict (non-fatal; files may be absent).
+                    archiveArtifacts artifacts: "tests_to_run.json,build_targets.txt,build_mode.env,smoke_result.json", allowEmptyArchive: true
+                    junit testResults: "smoke_result.xml", allowEmptyResults: true
                 }
                 else{ //run all tests
                     if(!setup_args.contains("gfx1250")){
