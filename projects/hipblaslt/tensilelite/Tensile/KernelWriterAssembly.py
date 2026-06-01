@@ -5368,6 +5368,7 @@ class KernelWriterAssembly(KernelWriter):
     module.addComment1("after InitC, skip to end of prefetch last iter if numIter==0")
     # use positive offset only long jump
     with self.allocTmpSgpr(3) as tmpSgprInfo:
+      module.addComment1(lastIterEnd.getLabelName())
       module.add(self.longBranchScc1(lastIterEnd, posNeg=1, tmpSgprInfo=tmpSgprInfo))
 
     return module
@@ -5375,11 +5376,28 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # Initialize C
   ##############################################################################
-  def initC(self, kernel):
+  def initC(self, kernel, initCIterWmma=False, waitForPGRLabel=None):
     module = Module("initC")
+
+    skipInitCVmovLabel = None
+    if initCIterWmma and not kernel["LdsInitCVgprs"]:
+      loopIdx = 0
+      EndCounter = kernel["PrefetchGlobalRead"] if not kernel["SuppressNoLoadLoop"] else kernel["PrefetchGlobalRead"]-1
+      loopCounter = self.loopCounter(kernel, loopIdx)
+      loopChar = self.states.indexChars[ \
+          kernel["ProblemType"]["IndicesSummation"][loopIdx]]
+      skipInitCVmovLabel = Label(self.labels.getNameInc("skipInitCVmov"), "")
+      module.add(SCmpLeU32(
+              src0=loopCounter, \
+              src1=hex(EndCounter), \
+              comment="LoopCounter%s < EndCounter"%(loopChar) ))
+      module.add(SCBranchSCC0(labelName=skipInitCVmovLabel.getLabelName(), \
+          comment="skip v_mov initC (WMMA initC will run in main loop)"))
+
     if self.states.lastValuMXSAB:
       self.vgprPool.remove(0 , self.states.lastValuMXSAB, "ValuMXSAB")
       module.addComment1("initC: remove ValuMXSA/B vgpr buffer [%u...%u) from pool"%(self.states.mxsa.startVgprValu, self.states.lastValuMXSAB))
+
     self.vgprPool.remove(self.states.c.startVgprValu, self.states.c.numVgprValu, "ValuC")
     module.addComment1("initC: remove ValuC vgpr buffer [%u...%u) from pool"%(self.states.c.startVgprValu, self.states.c.startVgprValu+self.states.c.numVgprValu))
     numAccvgprs = self.states.totalAgprs
@@ -5429,6 +5447,9 @@ class KernelWriterAssembly(KernelWriter):
 
       if kernel["LdsInitCVgprs"]:
         self.vgprPool.checkIn(tmpAddr)
+
+    if skipInitCVmovLabel is not None:
+      module.add(skipInitCVmovLabel)
 
     return module
 
@@ -6831,7 +6852,7 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # Open Loop
   ##############################################################################
-  def openLoop(self, kernel, tPA, tPB, loopIdx, noLabelGen=False, beginLabelOnly=False):
+  def openLoop(self, kernel, tPA, tPB, loopIdx, noLabelGen=False, beginLabelOnly=False, beforeInitCIter=False):
     module = Module("openLoop")
 
     if bool(kernel["ProblemType"]["MXBlockA"]) ^ bool(kernel["ProblemType"]["MXBlockB"]):
@@ -6851,12 +6872,12 @@ class KernelWriterAssembly(KernelWriter):
       self.states.inTailLoop = True
     loopChar = self.states.indexChars[ \
         kernel["ProblemType"]["IndicesSummation"][loopIdx]]
-    if not tailLoop and not noLabelGen:
+    if not tailLoop and not noLabelGen and not beginLabelOnly:
       module.add(Label("openLoop%s"%loopChar, ""))
     loopLabelBegin = Label("%sLoopBegin%s"%("Tail" if tailLoop else "", loopChar), "", alignment=16 )
     loopLabelEnd = Label("%sLoopEnd%s"%("Tail" if tailLoop else "", loopChar), "" )
 
-    if beginLabelOnly:
+    if beginLabelOnly and not beforeInitCIter:
       # generate only beginLabel, then, return
       module.add(loopLabelBegin)
       return module
@@ -6882,7 +6903,7 @@ class KernelWriterAssembly(KernelWriter):
 
     if tailLoop:
       # begin loop
-      if not noLabelGen:
+      if not noLabelGen and not beforeInitCIter:
         module.add(loopLabelBegin)
 
     else: # not tailloop:
@@ -6929,10 +6950,23 @@ class KernelWriterAssembly(KernelWriter):
             jumpLabel = Label("LoopEnd%s_evenexit"%(loopChar), "" )
 
         if kernel["ClusterBarrier"]:
-          module.add(SCBranchSCC0(loopLabelBegin.getLabelName(), "skip cluster wait if LoopCounterL > 1"))
-          module.add(SBarrier(True, True, True, "cluster_barrier wait"))
-          module.add(SBranch(labelName=jumpLabel.getLabelName(), \
-                    comment="do not enter Loop%s"%loopChar ))
+          # jump to label_skipClusterWaitInitC not label_LoopBeginL
+          # label_skipClusterWaitInitC:
+          # /* initC wmma section */
+          # label_LoopBeginL:
+          # /* unrolled loop section */
+          if beforeInitCIter:
+            skipClusterWaitLabel = Label(self.labels.getNameInc("skipClusterWaitInitC"), "")
+            module.add(SCBranchSCC0(skipClusterWaitLabel.getLabelName(), "skip cluster wait if LoopCounterL > endCounter"))
+            module.add(SBarrier(True, True, True, "cluster_barrier wait"))
+            module.add(SBranch(labelName=jumpLabel.getLabelName(), \
+                      comment="do not enter Loop%s"%loopChar ))
+            module.add(skipClusterWaitLabel)
+          else:
+            module.add(SCBranchSCC0(loopLabelBegin.getLabelName(), "skip cluster wait if LoopCounterL > 1"))
+            module.add(SBarrier(True, True, True, "cluster_barrier wait"))
+            module.add(SBranch(labelName=jumpLabel.getLabelName(), \
+                      comment="do not enter Loop%s"%loopChar ))
         else:
           module.add(SCBranchSCC1(labelName=jumpLabel.getLabelName(), \
                     comment="do not enter Loop%s"%loopChar ))
@@ -6949,7 +6983,7 @@ class KernelWriterAssembly(KernelWriter):
         else:
           module.add(enableESMInstr)
 
-      if not noLabelGen:
+      if not noLabelGen and not beforeInitCIter:
         module.add(loopLabelBegin)
 
       if loopIdx != self.states.unrollIdx:
@@ -6966,6 +7000,23 @@ class KernelWriterAssembly(KernelWriter):
             tPM = tPA["tpsMetadata"] if tPA["is_sparse"] else tPB["tpsMetadata"]
             module.add(self.localReadResetOffsets(kernel, tPM))
 
+    return module
+
+  def decCounter(self, kernel):
+    loopIdx=0
+    module = Module("decCounter")
+    loopChar = self.states.indexChars[ \
+    kernel["ProblemType"]["IndicesSummation"][loopIdx]]
+    loopCounter = self.loopCounter(kernel, loopIdx)
+    module.add(SSubU32(dst=loopCounter, src0=loopCounter, src1=1, \
+    comment="dec counter%s"%(loopChar)))
+    module.add(SCmpLeU32(
+      src0=loopCounter, \
+      src1=hex(2), \
+      comment="LoopCounter%s < EndCounter"%(loopChar) ))
+    loopLabelEnd = Label("%sLoopEnd%s"%("", loopChar), "" )
+    module.add(SCBranchSCC1(labelName=loopLabelEnd.getLabelName(), \
+              comment="do not enter Loop%s"%loopChar ))
     return module
 
   ##############################################################################
@@ -7906,7 +7957,7 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # MFMA Iteration
   ##############################################################################
-  def mfmaIter(self, kernel, tPA, tPB, u, innerUnroll, vregSetIdx, unrollLoopIdx = 0, unrollIdx = 0, tail = False, firstIter = False, postShiftK = Module()):
+  def mfmaIter(self, kernel, tPA, tPB, u, innerUnroll, vregSetIdx, unrollLoopIdx = 0, unrollIdx = 0, initCIterWmma = False, tail = False, firstIter = False, postShiftK = Module()):
     imod = Module("mi")
     shiftK = Module("shiftK")
     m = (u) % (self.states.numVgprBuffer) # local to use for MACs
@@ -8912,6 +8963,15 @@ class KernelWriterAssembly(KernelWriter):
                            a=src0, b=src1, metadata=mStr, neg=neg_flag, \
                            comment="left value = %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)))
             else:
+              acc2_args = {}
+              if initCIterWmma and unrollIdx == 0:
+                  acc2_args["acc2_imm"] = 0
+              else:
+                  acc2_args["acc2"] = self.accVgprReadWriteIndex(kernel, accStart, (accEnd-accStart+1))
+              # F32X expansion accumulates within the 3-MFMA chain: only the first sub-MFMA may
+              # zero src C (via acc2_args); the rest must read the partial sum from accStart.
+              acc2_rest = {"acc2": self.accVgprReadWriteIndex(kernel, accStart, (accEnd-accStart+1))}
+
               if kernel["UseF32XEmulation"]:
                 abOffsetStr = "+" + str(vgprPerInputA // 2)
                 if kernel["SourceSwap"]:
@@ -8927,39 +8987,39 @@ class KernelWriterAssembly(KernelWriter):
 
                 imod.add(MFMAInstruction(instType=InstType.INST_BF16, accType=miOutInstType, variant=variant, mfma1k=mfma_1k, \
                                        acc=self.accVgprReadWriteIndex(kernel, (accStart+accStoreCIdx), (accEnd-accStart+1)), \
-                                       a=src0_0, b=src1_0, acc2=self.accVgprReadWriteIndex(kernel, accStart, (accEnd-accStart+1)), neg=neg_flag,\
+                                       a=src0_0, b=src1_0, **acc2_args, neg=neg_flag,\
                                        comment="src0_h*src1_h, left value = %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)))
                 if kernel["SourceSwap"]:
                   imod.add(MFMAInstruction(instType=InstType.INST_BF16, accType=miOutInstType, variant=variant, mfma1k=mfma_1k, \
                                         acc=self.accVgprReadWriteIndex(kernel, (accStart+accStoreCIdx), (accEnd-accStart+1)), \
-                                        a=src0_0, b=src1_1, acc2=self.accVgprReadWriteIndex(kernel, accStart, (accEnd-accStart+1)), neg=neg_flag,\
+                                        a=src0_0, b=src1_1, **acc2_rest, neg=neg_flag,\
                                         comment="src0_h*src1_l, left value = %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)))
                   imod.add(MFMAInstruction(instType=InstType.INST_BF16, accType=miOutInstType, variant=variant, mfma1k=mfma_1k, \
                                         acc=self.accVgprReadWriteIndex(kernel, (accStart+accStoreCIdx), (accEnd-accStart+1)), \
-                                        a=src0_1, b=src1_0, acc2=self.accVgprReadWriteIndex(kernel, accStart, (accEnd-accStart+1)), neg=neg_flag,\
+                                        a=src0_1, b=src1_0, **acc2_rest, neg=neg_flag,\
                                         comment="src0_l*src1_h, left value = %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)))
                 else:
                   imod.add(MFMAInstruction(instType=InstType.INST_BF16, accType=miOutInstType, variant=variant, mfma1k=mfma_1k, \
                                         acc=self.accVgprReadWriteIndex(kernel, (accStart+accStoreCIdx), (accEnd-accStart+1)), \
-                                        a=src0_1, b=src1_0, acc2=self.accVgprReadWriteIndex(kernel, accStart, (accEnd-accStart+1)), neg=neg_flag,\
+                                        a=src0_1, b=src1_0, **acc2_rest, neg=neg_flag,\
                                         comment="src0_l*src1_h, left value = %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)))
                   imod.add(MFMAInstruction(instType=InstType.INST_BF16, accType=miOutInstType, variant=variant, mfma1k=mfma_1k, \
                                         acc=self.accVgprReadWriteIndex(kernel, (accStart+accStoreCIdx), (accEnd-accStart+1)), \
-                                        a=src0_0, b=src1_1, acc2=self.accVgprReadWriteIndex(kernel, accStart, (accEnd-accStart+1)), neg=neg_flag,\
+                                        a=src0_0, b=src1_1, **acc2_rest, neg=neg_flag,\
                                         comment="src0_h*src1_l, left value = %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)))
               elif kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]:
                 block = max(kernel["ProblemType"]["MXBlockA"], kernel["ProblemType"]["MXBlockB"])
                 imod.add(MXMFMAInstruction(instType=miInInstType, accType=miOutInstType, \
-                                       mxScaleAType=miInScale0InstType, mxScaleBType=miInScale1InstType, variant=variant, \
-                                       acc=self.accVgprReadWriteIndex(kernel, (accStart+accStoreCIdx), (accEnd-accStart+1)), \
-                                       a=src0, b=src1, acc2=self.accVgprReadWriteIndex(kernel, accStart, (accEnd-accStart+1)), \
-                                       mxsa=srcMX0, mxsb=srcMX1, block=block, reuseA=mfmaReuseA, reuseB=mfmaReuseB, \
-                                       comment="left value = %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)))
+                                      mxScaleAType=miInScale0InstType, mxScaleBType=miInScale1InstType, variant=variant, \
+                                      acc=self.accVgprReadWriteIndex(kernel, (accStart+accStoreCIdx), (accEnd-accStart+1)), \
+                                      a=src0, b=src1, **acc2_args, \
+                                      mxsa=srcMX0, mxsb=srcMX1, block=block, reuseA=mfmaReuseA, reuseB=mfmaReuseB, \
+                                      comment="left value = %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)))
               else:
                 imod.add(MFMAInstruction(instType=miInInstType, accType=miOutInstType, variant=variant, mfma1k=mfma_1k, \
-                                       acc=self.accVgprReadWriteIndex(kernel, (accStart+accStoreCIdx), (accEnd-accStart+1)), \
-                                       a=src0, b=src1, acc2=self.accVgprReadWriteIndex(kernel, accStart, (accEnd-accStart+1)), neg=neg_flag, reuseA=mfmaReuseA, reuseB=mfmaReuseB, \
-                                       comment="left value = %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)))
+                                      acc=self.accVgprReadWriteIndex(kernel, (accStart+accStoreCIdx), (accEnd-accStart+1)), \
+                                      a=src0, b=src1, **acc2_args, neg=neg_flag, reuseA=mfmaReuseA, reuseB=mfmaReuseB,\
+                                      comment="left value = %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)))
             prevAccIdx = accIdx
 
       if kernel["ExpertSchedulingMode"] > 0:
