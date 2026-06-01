@@ -3452,6 +3452,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
             pointerLRCode.add(self.localReadInitPointers(kernel, tensorParametersA, tPM))
 
       elif kernel["enableTDMA"] and kernel["enableTDMB"]:
+        if u == 0 and not self.states.numItersPLR:
+          syncCode.add(self._syncThreads(kernel, "NLL PLR0 sync LDS%u"%(self.states.ldsReadTokenIdx), memoryToken=[self.states.ldsReadTokenIdx]))
         if isSwapLroIter: # ResetLroIter
           # Swap, reset, or increment the LRO:
           # force internalPointerSwap = False in NGLL case
