@@ -224,10 +224,9 @@ def make_writer_and_tileinfos(kernel, fp4=False):
     from Tensile.Common.RegisterPool import allocTmpGpr
 
     ri = rocIsa.getInstance()
-    if not ri.isInit():
-        import shutil
-        asmpath = shutil.which('amdclang++') or '/usr/bin/amdclang++'
-        ri.init((9, 5, 0), asmpath)
+    import shutil
+    asmpath = shutil.which('amdclang++') or '/usr/bin/amdclang++'
+    ri.init((9, 5, 0), asmpath)
     ri.setKernel((9, 5, 0), 64)
 
     tiA = makeTileInfo('A', kernel)
