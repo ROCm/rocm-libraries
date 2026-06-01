@@ -2475,11 +2475,12 @@ namespace TensileLite
             args.template append<void const* const*>("batchC", inputs.batchC);
 
         // Pass batch offsets when kernel expects them (SupportUserArgs=true, not GroupedGemm)
-        if(problemType.supportDeviceUserArguments && !problemType.groupedGemm)
-        {
-            args.template append<int64_t>("batchOffsetD", inputs.batchOffsetD);
-            args.template append<int64_t>("batchOffsetC", inputs.batchOffsetC);
-        }
+        //if(problemType.supportDeviceUserArguments && !problemType.groupedGemm)
+//        if(!problemType.groupedGemm)
+//        {
+//            args.template append<int64_t>("batchOffsetD", inputs.batchOffsetD);
+//            args.template append<int64_t>("batchOffsetC", inputs.batchOffsetC);
+//        }
 
         bool useBias = false;
         if(problemType.useBias)
@@ -2648,6 +2649,9 @@ namespace TensileLite
             ContractionProblemGemm::BATCHMODE batchMode = problem.batchMode();
             args.template append<uint32_t>("batchMode", static_cast<uint32_t>(batchMode));
             args.template append<uint32_t>("additionalPaddingPerBatch", additionalPaddingPerBatchGeneralBatch);        
+
+            args.template append<int64_t>("batchOffsetD", inputs.batchOffsetD);
+            args.template append<int64_t>("batchOffsetC", inputs.batchOffsetC);
         }
 
     }

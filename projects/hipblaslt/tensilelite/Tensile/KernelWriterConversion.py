@@ -111,7 +111,8 @@ class KernelWriterConversion(KernelWriterBase):
     kStr += "  " + ptrStr + " * " + bStr + "C;" + self.endLine
 
     # Batch offsets for General Batched GEMM (SupportUserArgs kernels)
-    if self.state["ProblemType"]["SupportUserArgs"]:
+    #if self.state["ProblemType"]["SupportUserArgs"]:
+    if not self.state["ProblemType"]["GroupedGemm"]:
       kStr += "  int64_t batchOffsetD;" + self.endLine
       kStr += "  int64_t batchOffsetC;" + self.endLine
 
@@ -219,7 +220,7 @@ class KernelWriterConversion(KernelWriterBase):
       # Additional argument batch_mode is added to distinguish between Strided Batch and General Batched GEMM
       # batch_mode will dictate how the GLOBAL_C and GLOBAL_D macros are defined and used in the kernel body
       # since the index calculation for Strided Batch and General Batch GEMM are different.
-      kStr += "  argument_%s arg, uint32_t batch_mode, uint32_t additionalPaddingPerBatch)" % ( self.kernelName ) + self.endLine
+      kStr += "  argument_%s arg, uint32_t batch_mode, uint32_t additionalPaddingPerBatch, int64_t batchOffsetD, int64_t batchOffsetC)" % ( self.kernelName ) + self.endLine
 
     return kStr
 
@@ -433,16 +434,18 @@ class KernelWriterConversion(KernelWriterBase):
         ptrStr = self.state["ProblemType"]["DataTypeE"].toDevice(self.language)
         kStr += "  " + ptrStr + " * arg.E = arg.BatchE[wg];" + self.endLine
       ptrStr = self.state["ProblemType"]["DestDataType"].toDevice(self.language)
-      if self.state["ProblemType"]["SupportUserArgs"]:
-        kStr += "  " + ptrStr + " * arg.D = arg.BatchD[wg] + arg.batchOffsetD;" + self.endLine
-      else:
-        kStr += "  " + ptrStr + " * arg.D = arg.BatchD[wg];" + self.endLine
+      kStr += "  " + ptrStr + " * arg.D = arg.BatchD[wg];" + self.endLine
+#      if self.state["ProblemType"]["SupportUserArgs"]:
+#        kStr += "  " + ptrStr + " * arg.D = arg.BatchD[wg] + arg.batchOffsetD;" + self.endLine
+#      else:
+#        kStr += "  " + ptrStr + " * arg.D = arg.BatchD[wg];" + self.endLine
       ptrStr = self.state["ProblemType"]["DestDataType"].toDevice(self.language)
       zeroStr = self.state["ProblemType"]["ComputeDataType"].zeroString(self.language, 1)
-      if self.state["ProblemType"]["SupportUserArgs"]:
-        kStr += "  " + ptrStr + f" const* arg.C = (arg.beta == {zeroStr}) ? nullptr : arg.BatchC[wg] + arg.batchOffsetC;" + self.endLine
-      else:
-        kStr += "  " + ptrStr + f" const* arg.C = (arg.beta == {zeroStr}) ? nullptr : arg.BatchC[wg];" + self.endLine
+      kStr += "  " + ptrStr + f" const* arg.C = (arg.beta == {zeroStr}) ? nullptr : arg.BatchC[wg];" + self.endLine
+#      if self.state["ProblemType"]["SupportUserArgs"]:
+#        kStr += "  " + ptrStr + f" const* arg.C = (arg.beta == {zeroStr}) ? nullptr : arg.BatchC[wg] + arg.batchOffsetC;" + self.endLine
+#      else:
+#        kStr += "  " + ptrStr + f" const* arg.C = (arg.beta == {zeroStr}) ? nullptr : arg.BatchC[wg];" + self.endLine
 
     ########################################
     # D index
