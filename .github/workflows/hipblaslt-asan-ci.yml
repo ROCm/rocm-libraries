@@ -156,13 +156,15 @@ jobs:
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
           package_version: ADHOCBUILD
-          # Mirrors TheRock's linux-release-asan preset cacheVariables.
-          # - THEROCK_ENABLE_BLAS=ON              : pulls hipblaslt
-          # - THEROCK_SANITIZER=ASAN              : single sanitizer-flag source
-          # - CMAKE_BUILD_TYPE=RelWithDebInfo     : ASAN frames need file:line
-          # - THEROCK_FLAG_KPACK_SPLIT_ARTIFACTS  : preset default; skip extra
-          #                                         link-time packaging
-          extra_cmake_options: "-DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ -DTHEROCK_ENABLE_BLAS=ON -DTHEROCK_SANITIZER=ASAN -DCMAKE_BUILD_TYPE=RelWithDebInfo -DTHEROCK_FLAG_KPACK_SPLIT_ARTIFACTS=OFF"
+          # Match the regular TheRock CI's blas config plus a single
+          # ASAN flag. Extra preset options (CMAKE_BUILD_TYPE=RelWithDebInfo,
+          # THEROCK_FLAG_KPACK_SPLIT_ARTIFACTS=OFF) caused build_configure.py
+          # at TheRock pin 4e469b56 to produce a configure that did not
+          # register the `therock-archives` target — the build step then
+          # failed with `ninja: error: unknown target 'therock-archives'`.
+          # Sticking to the regular blas config + THEROCK_SANITIZER=ASAN
+          # keeps the configure path identical to the proven CI flow.
+          extra_cmake_options: "-DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ -DTHEROCK_ENABLE_BLAS=ON -DTHEROCK_SANITIZER=ASAN"
           BUILD_DIR: build
         run: |
           python3 TheRock/build_tools/github_actions/build_configure.py
