@@ -7,6 +7,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 ### Added
 
+* Support added for the gfx1250 architecture.
 * Cholesky QR methods for computing the QR factorization of a tall rectangular matrix
     - CHOLQR (with batched and strided\_batched versions)
     - CHOLQR_64 (with batched and strided\_batched versions)

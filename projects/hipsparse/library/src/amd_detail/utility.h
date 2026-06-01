@@ -21,6 +21,8 @@
 *
 * ************************************************************************ */
 
+#include <vector>
+
 #define TO_STR2(x) #x
 #define TO_STR(x) TO_STR2(x)
 
@@ -502,8 +504,10 @@ namespace hipsparse
             return rocsparse_spmv_alg_csr_rowsplit;
         case HIPSPARSE_SPMV_SELL_ALG1:
             return rocsparse_spmv_alg_sell;
+#ifdef HIPSPARSE_WITH_SPMV_BSR
         case HIPSPARSE_SPMV_BSR_ALG1:
             return rocsparse_spmv_alg_bsr;
+#endif
         default:
             throw "Non existent hipsparseSpMVAlg_t";
         }
@@ -652,8 +656,10 @@ namespace hipsparse
             return rocsparse_format_bell;
         case HIPSPARSE_FORMAT_SLICED_ELL:
             return rocsparse_format_sell;
+#ifdef HIPSPARSE_WITH_SPMV_BSR
         case HIPSPARSE_FORMAT_BSR:
             return rocsparse_format_bsr;
+#endif
         default:
             throw "Non existent hipsparseFormat_t";
         }
@@ -675,8 +681,10 @@ namespace hipsparse
             return HIPSPARSE_FORMAT_BLOCKED_ELL;
         case rocsparse_format_sell:
             return HIPSPARSE_FORMAT_SLICED_ELL;
+#ifdef HIPSPARSE_WITH_SPMV_BSR
         case rocsparse_format_bsr:
             return HIPSPARSE_FORMAT_BSR;
+#endif
         default:
             throw "Non existent rocsparse_format";
         }
@@ -685,45 +693,61 @@ namespace hipsparse
 
 struct hipsparseSpMVDescr_st
 {
+public:
+    // Per-configuration cache entry. Each entry holds the rocsparse_spmv_descr,
+    // analysis state, and compute-stage buffer for one unique combination of
+    // (operation, algorithm, scalar datatype, compute datatype). Callers that
+    // alternate among several configurations (e.g. NON_TRANSPOSE and TRANSPOSE
+    // in an iterative solver) get a separate entry per configuration, so
+    // switching back and forth does not invalidate any analysis or force any
+    // buffer reallocation.
+    struct Entry
+    {
+        rocsparse_operation  operation{};
+        rocsparse_spmv_alg   alg{};
+        rocsparse_datatype   scalar_datatype{};
+        rocsparse_datatype   compute_datatype{};
+        rocsparse_spmv_descr spmv_descr{};
+        size_t               buffer_size_stage_analysis{};
+        size_t               buffer_size_stage_compute{};
+        void*                compute_buffer{};
+        bool                 is_buffer_size_called{};
+        bool                 is_stage_analysis_called{};
+        bool                 is_implicit_stage_analysis_called{};
+        bool                 is_stage_compute_subsequent{};
+
+        Entry()             = default;
+        Entry(const Entry&) = delete;
+        Entry& operator=(const Entry&) = delete;
+        Entry(Entry&& other) noexcept;
+        Entry& operator=(Entry&&) = delete;
+        ~Entry();
+    };
+
 protected:
-    rocsparse_spmv_descr m_spmv_descr{};
-    bool                 m_is_stage_analysis_called{};
-    bool                 m_is_implicit_stage_analysis_called{};
-    size_t               m_buffer_size_stage_analysis{};
-    size_t               m_buffer_size_stage_compute{};
-    void*                m_buffer{};
-    bool                 m_is_stage_compute_subsequent{};
-    bool                 m_is_buffer_size_called{};
+    std::vector<Entry> m_entries;
 
 public:
-    rocsparse_spmv_descr get_spmv_descr();
-    void                 set_spmv_descr(rocsparse_spmv_descr value);
+    // Look up an entry matching (operation, alg, scalar_datatype,
+    // compute_datatype); returns nullptr if none exists.
+    Entry* find_entry(rocsparse_operation operation,
+                      rocsparse_spmv_alg  alg,
+                      rocsparse_datatype  scalar_datatype,
+                      rocsparse_datatype  compute_datatype);
 
-    bool is_stage_analysis_called() const;
-    void stage_analysis_called();
+    // Create a new entry for (operation, alg, scalar_datatype,
+    // compute_datatype), allocate its rocsparse_spmv_descr, push the four
+    // set_input values, and store it in m_entries. Returns the new entry via
+    // *out_entry.
+    hipsparseStatus_t add_entry(hipsparseHandle_t   handle,
+                                rocsparse_operation operation,
+                                rocsparse_spmv_alg  alg,
+                                rocsparse_datatype  scalar_datatype,
+                                rocsparse_datatype  compute_datatype,
+                                Entry**             out_entry);
 
-    bool is_implicit_stage_analysis_called() const;
-    void implicit_stage_analysis_called();
-
-    bool is_stage_compute_subsequent() const;
-    void stage_compute_subsequent();
-
-    bool is_buffer_size_called() const;
-    void buffer_size_called();
-
-    size_t get_buffer_size_stage_analysis() const;
-    void   set_buffer_size_stage_analysis(size_t value);
-
-    size_t get_buffer_size_stage_compute() const;
-    void   set_buffer_size_stage_compute(size_t value);
-
-    void* get_buffer();
-    void  set_buffer(void* value);
-
-    void** get_buffer_reference();
-
-    hipsparseSpMVDescr_st() = default;
-    ~hipsparseSpMVDescr_st();
+    hipsparseSpMVDescr_st()  = default;
+    ~hipsparseSpMVDescr_st() = default;
 };
 
 struct hipsparseSpMatDescr_st
