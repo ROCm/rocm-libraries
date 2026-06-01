@@ -439,7 +439,6 @@ def run_graph_all_providers(
             reporter.print_engine_result(pe_result)
         pe_results.append(pe_result)
 
-
     return GraphResult(
         graph_name=graph_name,
         graph_path=str(graph_path),

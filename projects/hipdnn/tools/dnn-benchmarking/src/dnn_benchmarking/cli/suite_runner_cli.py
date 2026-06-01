@@ -124,7 +124,9 @@ def run_suite_benchmark(
 
         plugin_paths = getattr(config, "plugin_paths", None)
         if plugin_paths is None and plugin_path is not None:
-            plugin_paths = plugin_path if isinstance(plugin_path, list) else [plugin_path]
+            plugin_paths = (
+                plugin_path if isinstance(plugin_path, list) else [plugin_path]
+            )
         per_engine_plugin_paths = plugin_paths is not None and len(plugin_paths) > 1
 
         if not per_engine_plugin_paths:

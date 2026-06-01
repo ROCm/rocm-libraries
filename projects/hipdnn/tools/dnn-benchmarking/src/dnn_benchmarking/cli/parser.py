@@ -35,6 +35,7 @@ def _parse_engine_list(s: str) -> List[int]:
         raise argparse.ArgumentTypeError(f"--engine expects integer ID(s), got {s!r}")
     return ids
 
+
 def _parse_plugin_path_list(s: str) -> List[Path]:
     """Parse --plugin-path as a comma-separated list of plugin directories."""
     parts = [p.strip() for p in s.split(",")]
@@ -42,6 +43,7 @@ def _parse_plugin_path_list(s: str) -> List[Path]:
     if not parts:
         raise argparse.ArgumentTypeError("--plugin-path requires at least one path")
     return [Path(p) for p in parts]
+
 
 def create_parser() -> argparse.ArgumentParser:
     """Create the argument parser for dnn-benchmark CLI.

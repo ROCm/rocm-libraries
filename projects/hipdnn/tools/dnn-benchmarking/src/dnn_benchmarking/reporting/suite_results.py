@@ -92,7 +92,6 @@ class CorrectnessResult:
         return d
 
 
-
 @dataclass
 class ProviderEngineResult:
     """Result for one provider/engine combination on one graph.

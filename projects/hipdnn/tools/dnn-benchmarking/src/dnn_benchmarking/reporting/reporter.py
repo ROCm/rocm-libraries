@@ -367,7 +367,6 @@ class Reporter:
             return "skipped"
         return "errored"
 
-
     def print_graph_result_table(self, graph_result: GraphResult) -> None:
         """Render one compact summary row per engine for a graph."""
         if not graph_result.results:
@@ -405,16 +404,13 @@ class Reporter:
             for i in range(len(headers))
         ]
         self._print("Results:")
-        self._print(
-            "  " + "  ".join(h.ljust(widths[i]) for i, h in enumerate(headers))
-        )
+        self._print("  " + "  ".join(h.ljust(widths[i]) for i, h in enumerate(headers)))
         self._print("  " + "  ".join("-" * width for width in widths))
         for row in rows:
             self._print(
                 "  " + "  ".join(row[i].ljust(widths[i]) for i in range(len(row)))
             )
         self._print("")
-
 
     @staticmethod
     def _pe_status(pe: ProviderEngineResult) -> str:
@@ -430,7 +426,6 @@ class Reporter:
             return "n/a"
         value = getattr(stats, name)
         return f"{value:.3f}"
-
 
     def print_verbose_graph_result(
         self, graph_result: GraphResult, suite_config: SuiteConfig

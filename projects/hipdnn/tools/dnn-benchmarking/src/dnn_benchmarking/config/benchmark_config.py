@@ -41,7 +41,6 @@ class BenchmarkConfig:
             raise ValueError("benchmark_iters must be positive")
 
 
-
 @dataclass
 class ValidationConfig:
     """Configuration for reference validation.
@@ -220,6 +219,7 @@ class MetricsConfig:
             + int(self.roofline)
         )
 
+
 @dataclass(frozen=True)
 class EngineSelection:
     """One ordered engine execution selection.
@@ -231,6 +231,7 @@ class EngineSelection:
 
     engine_id: int
     plugin_path: Optional[Path] = None
+
 
 @dataclass
 class SuiteConfig:

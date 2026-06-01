@@ -129,7 +129,6 @@ class TestSuiteConfigPluginPaths:
             )
 
 
-
 class TestValidationConfig:
     """Tests for ValidationConfig dataclass."""
 

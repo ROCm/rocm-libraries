@@ -772,7 +772,6 @@ class TestCheckCorrectnessOutputCount:
         assert "No output tensors to compare" in (result.error_message or "")
 
 
-
 class TestResolveEngineName:
     """Tests for _resolve_engine_name fallback behavior."""
 

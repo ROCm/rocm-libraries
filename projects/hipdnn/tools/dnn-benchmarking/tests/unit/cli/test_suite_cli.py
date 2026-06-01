@@ -96,7 +96,6 @@ class TestParserGlobAndFilters:
         )
         assert args.plugin_path == [Path("/plugins/a"), Path("/plugins/b")]
 
-
     def test_verbose_flag_default_false(self) -> None:
         """No -v / --verbose => args.verbose is False."""
         parser = create_parser()
@@ -780,11 +779,11 @@ class TestRemovedABFlags:
                 ]
             )
 
-
     def _create_graph(self, tmpdir: Path) -> Path:
         p = tmpdir / "g.json"
         p.write_text(json.dumps({"name": "g", "nodes": [], "tensors": []}))
         return p
+
     @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
     def test_engine_list_with_pytorch_backend_rejected(
         self, mock_gpu: MagicMock
