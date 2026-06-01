@@ -42,7 +42,7 @@ from rocisa.enum import InstType, SelectBit, CacheScope, HighBitSel
 from rocisa.macro import MacroVMagicDiv, PseudoRandomGenerator
 from . import CUSTOM_KERNEL_PATH
 from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32, \
-  BufferLoadB64, BufferLoadB96, BufferLoadD16B16, BufferLoadD16HIB16, BufferLoadD16HIU8, \
+  BufferLoadB16, BufferLoadU16, BufferLoadB64, BufferLoadB96, BufferLoadD16B16, BufferLoadD16HIB16, BufferLoadD16HIU8, \
   BufferLoadD16U8, BufferStoreB128, BufferStoreB16, BufferStoreB32, BufferStoreB64, \
   BufferStoreB8, BufferStoreD16HIB16, CommonInstruction, DSBPermuteB32, DSLoadB128, \
   DSLoadB16, DSLoadB32, DSLoadB64, DSLoadU16, DSStoreB128, DSStoreB16, DSStoreB32, \
@@ -51,7 +51,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
   FlatStoreD16B16, FlatStoreD16HIB16, MXMFMAInstruction, MFMAInstruction, MUBUFReadInstruction, \
   MacroInstruction, SAShiftRightI32, SAbsI32, SAddCU32, SAddI32, SAddU32, SAndB32, \
   SAndB64, SAndN2B32, SAtomicDec, SBarrier, SBfmB32, SBitcmp1B32, SBranch, SCBranchSCC0, \
-  SCBranchSCC1, SCBranchVCCNZ, SCBranchVCCZ, SCMovB32, SCSelectB32, SCmpEQI32, \
+  SCBranchSCC1, SCBranchVCCNZ, SCBranchVCCZ, SCMovB32, SCSelectB32, SCSelectB64, SCmpEQI32, \
   SCmpEQU32, SCmpEQU64, SCmpGeI32, SCmpGeU32, SCmpGtI32, SCmpGtU32, SCmpKEQU32, \
   SCmpKGeU32, SCmpKGtU32, SCmpKLGU32, SCmpLeI32, SCmpLeU32, SCmpLgU32, SCmpLtU32, SCmpLtI32, \
   SEndpgm, SFf1B32, SGetRegB32, SFlbitI32B32, SLShiftLeft2AddU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, \
@@ -67,7 +67,7 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32,
   VCvtScalePkF16toBF8, VCvtScalePkF16toFP8, VCvtScalePkFP8toF16, VLShiftLeftB32, \
   VLShiftLeftB64, VLShiftRightB32, VLShiftRightB64, VMadU32U24, VMaxF32, VMinI32, VMovB32, VMovB64, VMulF32, \
   VMulHIU32, VMulLOU32, VMulPKF32S, VMulU32U24, VNotB32, VOrB32, VPackF16toB32, \
-  VPrngB32, VReadfirstlaneB32, VSubF32, VSubI32, VSubU32, VXorB32, GlobalLoadTR8B64, GlobalLoadTR16B128
+  VPrngB32, VReadfirstlaneB32, VReadlaneB32, VSubF32, VSubI32, VSubU32, VXorB32, GlobalLoadTR8B64, GlobalLoadTR16B128
 
 from .Component import Component, TensorDataMover
 from .Components.TensorDataMover import TensorDataMoverLoad
@@ -4486,6 +4486,440 @@ class KernelWriterAssembly(KernelWriter):
     #if tP["isB"]:
     #  module.add(self.getCmpAssert(self.asmAssert.ne, sgpr("WorkGroup1"), 0xA))
 
+    return module
+
+  ##############################################################################
+  # Tighten Srd{A,B,MXSA,MXSB}+2 (OOB limit) before the tail loop:
+  #   Srd+2 -= (DepthU - roundUp(K_rem, K_pad)) * bpe_K_byteStride
+  # K_pad = 1 for A/B, 256 for MX scale (matches host rearrangePaddedMXScaleLayout).
+  # Precondition: upstream Srd+2 is computeLoadSrd's tile-boundary limit
+  # (useFixedSrd2 + non-isConstUnitStride); PGR/mainloop GR_INC only touch Srd+0/+1.
+  # tPs must share kPad and bpe_K_byteStride (delta emitted once, reused).
+  ##############################################################################
+  def computeTailLoopSrdLimit(self, kernel, tPs):
+    module = Module("computeTailLoopSrdLimit")
+
+    if not tPs:
+      return module
+    if not kernel.get("UseSubtileImpl"):
+      return module
+    if self.states.groOffsetInMacroTile != 1:
+      return module
+
+    MX_PAD_K = 256
+    depthU = int(kernel["DepthU"])
+
+    # Gather per-tc (kPad, bpeForLimit). All tPs must agree, otherwise bail.
+    tcKpadBpeList = []
+    for tP in tPs:
+      tc = tP["tensorChar"]
+      if tc not in ("A", "B", "MXSA", "MXSB"):
+        return module
+      strideF = self.strideRef(tc, tP['tileIdx'])
+      if self.isConstUnitStride(strideF):
+        return module
+      isMx = tc in ("MXSA", "MXSB")
+      if isMx:
+        tcab = "A" if tc == "MXSA" else "B"
+        mxBlock = int(kernel["ProblemType"].get("MXBlock%s" % tcab, 0))
+        if mxBlock <= 0:
+          return module
+        # When DepthU <= MX_PAD_K, roundUp(K_rem, 256) >= DepthU so delta <= 0
+        # always; host padding alone already covers the over-read.
+        if depthU <= MX_PAD_K:
+          return module
+        mxScaleFormat = kernel.get("MXScaleFormat", "NoSwizzle")
+        isMxSwizzledScale = mxScaleFormat in ("InMemorySwizzle", "HostPreSwizzle")
+        swizzleSize0 = 32 if isMxSwizzledScale else 1
+        if swizzleSize0 % mxBlock != 0:
+          return module
+        bytesPerKElement = swizzleSize0 // mxBlock  # 1 for gauntlet mxBlock=32
+        kPad = MX_PAD_K
+        bpeForLimit = float(bytesPerKElement)
+      else:
+        kPad = 1
+        bpeForLimit = float(tP["bpeGR"])
+      tcKpadBpeList.append((tc, kPad, bpeForLimit))
+
+    # Joint emission requires uniform kPad/bpe across all tPs (true for A/B
+    # symmetric configs and for MXSA/MXSB scale pairs in the gauntlet).
+    kPad = tcKpadBpeList[0][1]
+    bpeForLimit = tcKpadBpeList[0][2]
+    if any(kp != kPad or bp != bpeForLimit for _, kp, bp in tcKpadBpeList):
+      return module
+    tcs = [t for t, _, _ in tcKpadBpeList]
+    isMx = tcs[0] in ("MXSA", "MXSB")
+    loopCounterName = self.loopCounterName(kernel, self.states.unrollIdx)
+
+    with self.allocTmpSgpr(1) as tmpSgprInfo:
+      stmp = tmpSgprInfo.idx
+      module.addComment1(
+        "Tighten Srd{%s}+2 for tail loop: -= (DepthU - roundUp(K_rem,%u)) * %s"
+        % (",".join(tcs), kPad,
+           "bpe" if not isMx else ("bpkE=%u" % int(bpeForLimit))))
+
+      if kPad > 1:
+        padMaskInv = (~(kPad - 1)) & 0xffffffff
+        module.add(SAddU32(dst=sgpr(stmp), src0=sgpr(loopCounterName),
+                           src1=(kPad - 1),
+                           comment="K_rem + (K_pad-1) for roundUp"))
+        module.add(SAndB32(dst=sgpr(stmp), src0=sgpr(stmp), src1=hex(padMaskInv),
+                           comment="K_rem_aligned = roundUp(K_rem, %u)" % kPad))
+        module.add(SSubU32(dst=sgpr(stmp), src0=depthU, src1=sgpr(stmp),
+                           comment="delta_K = DepthU - K_rem_aligned (>= 0)"))
+      else:
+        # delta_K = DepthU - K_rem (full tail, including odd trailing element
+        # so the boundary DTL load doesn't need to bump Srd+2).
+        module.add(SSubU32(dst=sgpr(stmp), src0=depthU, src1=sgpr(loopCounterName),
+                           comment="delta_K = DepthU - K_rem"))
+
+      # delta_bytes = delta_K * bpe_K_byteStride (handles bpe=0.5 via SShr 1)
+      module.add(scalarMultiplyBpe(stmp, stmp, bpeForLimit,
+                                   comment="delta_bytes"))
+      for tc in tcs:
+        module.add(SSubU32(dst=sgpr("Srd%s+2" % tc), src0=sgpr("Srd%s+2" % tc),
+                           src1=sgpr(stmp),
+                           comment="Srd%s+2 -= delta_bytes (tail-loop tight)" % tc))
+
+    return module
+
+  ##############################################################################
+  # Combined A+B tail-loop boundary DTL load.
+  #
+  # For bf16 + subtile + odd K_rem, the regular dwordx4 GR at the K-boundary
+  # straddles an OOB dword; HW zeroes the dword and the trailing 16-bit K
+  # element is lost. This helper discovers the lane that owns that element
+  # (per-lane swizzled vaddrs live in sharedVgprGROffset[i]) and issues a
+  # single-lane buffer_load_ushort lds:1 into the correct LDS slot for both
+  # A and B back-to-back under a single skip label.
+  ##############################################################################
+  def tailLoopBoundaryDtlLoadAB(self, kernel, tPA, tPB):
+    module = Module("tailLoopBoundaryDtlLoadAB")
+
+    # Gate: both tensors must be eligible. If not, fall back to per-tensor
+    # emission (preserves the existing per-tensor early-out semantics).
+    def _eligible(tP):
+      tc = tP["tensorChar"]
+      if not kernel.get("UseSubtileImpl"):
+        return False
+      if tc not in ("A", "B"):
+        return False
+      if not kernel["ProblemType"]["DataType"].isBFloat16():
+        return False
+      if self.states.groOffsetInMacroTile != 1:
+        return False
+      strideF = self.strideRef(tc, tP['tileIdx'])
+      if self.isConstUnitStride(strideF):
+        return False
+      tileInfo = self.states.a.tileInfo if tc == 'A' else self.states.b.tileInfo
+      regList = tileInfo.localSubtilesRegister[0]
+      if len(regList) > 0 and not regList.is_sgpr:
+        return False
+      return True
+
+    assert _eligible(tPA) and _eligible(tPB), \
+      "tailLoopBoundaryDtlLoadAB requires bf16/subtile eligibility for both A and B"
+
+    # Both eligible — emit shared K math once, then per-tensor M/load blocks.
+    loopCounterName = self.loopCounterName(kernel, self.states.unrollIdx)
+    waveSize        = kernel["WavefrontSize"]
+    depthU          = kernel["DepthU"]
+    laneMaskCount   = self.states.laneSGPRCount
+
+    # K-side geometry is identical for A and B in the bf16 subtile path.
+    bpe          = int(tPA["bpeGR"])
+    elemsPerLane = 16 // bpe  # bf16 -> 8
+    tileInfoA       = self.states.a.tileInfo
+    subtileKElems   = int(tileInfoA.subtileShape[1]) * int(tileInfoA.mmaTileShape[1])
+    def _isPow2(n): return n > 0 and (n & (n - 1)) == 0
+    assert _isPow2(subtileKElems)
+
+    skipLabel = Label(self.labels.getNameInc("tailBoundarySkipAB"), "")
+
+    module.addComment1("Tail-loop boundary DTL load (A+B)")
+
+    # ── Shared block: parity gate + K-derived values ──────────────────────────
+    # Reserve sgprs that must outlive the per-tensor block.
+    #   sIntra : intra_K_byte    (shared by A and B)
+    #   sOffK  : offsetK_bytes   (shared by A and B)
+    #   sKm1   : K_rem - 1       (consumed per-tensor for alignedK_within_subtile)
+    # Parity scratch is short-lived and goes into the per-tensor inner alloc
+    # below, so SCC is set in the same allocation as the skip target.
+    with self.allocTmpSgpr(3) as kHoldInfo:
+      sIntra = kHoldInfo.idx + 0
+      sOffK  = kHoldInfo.idx + 1
+      sKm1   = kHoldInfo.idx + 2
+
+      # Parity gate (uses sKm1 as throwaway scratch before its real value).
+      module.add(SAndB32(dst=sgpr(sKm1), src0=sgpr(loopCounterName), src1=hex(1),
+                         comment="K_rem & 1 (SCC=1 if odd)"))
+      module.add(SCBranchSCC0(labelName=skipLabel.getLabelName(),
+                              comment="K_rem even -> skip boundary load"))
+
+      # K_rem_m1, intra_K_byte, offsetK_bytes (shared for A and B)
+      module.add(SSubU32(dst=sgpr(sKm1), src0=sgpr(loopCounterName), src1=1,
+                         comment="K_rem_m1 = K_rem - 1"))
+      module.add(SAndB32(dst=sgpr(sIntra), src0=sgpr(sKm1), src1=hex(elemsPerLane - 1),
+                         comment="K_rem_m1 & (elemsPerLane-1)"))
+      module.add(SLShiftLeftB32(dst=sgpr(sIntra), shiftHex=log2(bpe), src=sgpr(sIntra),
+                                comment="intra_K_byte"))
+      module.add(SAndB32(dst=sgpr(sOffK), src0=sgpr(sKm1),
+                         src1=hex(0xFFFFFFFF & ~(subtileKElems - 1)),
+                         comment="K_rem_m1 & ~(subtileKElems-1)"))
+      module.add(SLShiftLeftB32(dst=sgpr(sOffK), shiftHex=log2(bpe), src=sgpr(sOffK),
+                                comment="offsetK_bytes"))
+      # alignedK_within_subtile = (K_rem_m1 & withinSubMask) * bpe.
+      # withinSubMask = (subtileKElems-1) & ~(elemsPerLane-1) ==
+      # (K_rem_m1 & (subtileKElems-1)) with the low elemsPerLane bits dropped.
+      # That equals (K_rem_m1 - K_subtile_floor) with low intra bits dropped,
+      # i.e. sIntra is the dropped part. So:
+      #   alignedK_within_subtile = (K_rem_m1 mod subtileKElems) * bpe - sIntra
+      # which is exactly the value used in sTarget — but to keep this change
+      # mechanically equivalent to the prior code we just compute it inline
+      # per-tensor when we build sTarget.
+
+      # ── Per-tensor block ────────────────────────────────────────────────
+      for tP in (tPA, tPB):
+        tc       = tP["tensorChar"]
+        tileInfo = self.states.a.tileInfo if tc == 'A' else self.states.b.tileInfo
+        regList  = tileInfo.localSubtilesRegister[0]
+        hasSoffsetSgpr  = (len(regList) > 0)
+        soffsetSgprIdx  = regList.indices[0] if hasSoffsetSgpr else None
+
+        strideF             = self.strideRef(tc, tP['tileIdx'])
+        mt                  = kernel[tP["mt"]]
+        tileIdx             = tP["tileIdx"]
+        mElemsPerSubtileRow = int(tileInfo.subtileShape[0]) * int(tileInfo.mmaTileShape[0])
+        assert _isPow2(mElemsPerSubtileRow)
+        withinSubMask       = (subtileKElems - 1) & ~(elemsPerLane - 1)
+        numGR               = int(tileInfo.numGRPerSubtile)
+        assert numGR >= 1 and _isPow2(numGR) and (mElemsPerSubtileRow % numGR == 0)
+        mPerGRLoad          = mElemsPerSubtileRow // numGR
+        subtileSizeBytes    = mElemsPerSubtileRow * subtileKElems * bpe
+        subtileOffsetBytes  = subtileSizeBytes // numGR
+
+        with self.allocTmpSgpr(11, 2) as tmpSgprInfo:
+          stmp = tmpSgprInfo.idx
+          # stmp+0 : sTarget -> sLaneId
+          # stmp+1 : alignedK_within_subtile / scratch / m0 base
+          # stmp+2 : numLine / numLine_within_subtile
+          # stmp+4..5 : v_cmp result pair (also sMask reuse before clobber)
+          # stmp+7 : offsetM_glb_bytes
+          # stmp+8 : offsetM_lds_bytes
+          # stmp+9 : offsetM_floor / sChunkSel / sM0Step
+          # stmp+10: sAnyMatch
+
+          # numLine = min(SizeI/J - WG*MT, MT) - 1
+          module.add(SMulI32(dst=sgpr(stmp+2), src0=sgpr(tP["wg"]), src1=mt,
+                             comment="WG%s * MT(%u)" % (tP["wg"][-1], mt)))
+          module.add(SSubU32(dst=sgpr(stmp+2), src0=self.sizeRef(tileIdx), src1=sgpr(stmp+2),
+                             comment="numToEnd = Size%s - WG*MT" % self.states.indexChars[tileIdx]))
+          module.add(SMinU32(dst=sgpr(stmp+2), src0=sgpr(stmp+2), src1=mt,
+                             comment="min(numToEnd, MT)"))
+          module.add(SSubU32(dst=sgpr(stmp+2), src0=sgpr(stmp+2), src1=1,
+                             comment="numLine = min - 1 (0-based)"))
+
+          # alignedK_within_subtile = (K_rem_m1 & withinSubMask) * bpe
+          # We re-derive it from the shared sIntra + sOffK chain:
+          #   K_rem_m1 = sOffK/bpe (high) + (alignedK)/bpe + sIntra/bpe (low)
+          # but cheapest is to just compute it fresh from sKm1 — sKm1 is dead
+          # outside this inner block. Reuse stmp+1.
+          module.add(SAndB32(dst=sgpr(stmp+1), src0=sgpr(sKm1),
+                             src1=hex(withinSubMask),
+                             comment="K_rem_m1 & withinSubMask (=%d)" % withinSubMask))
+          module.add(SLShiftLeftB32(dst=sgpr(stmp+1), shiftHex=log2(bpe), src=sgpr(stmp+1),
+                                    comment="alignedK_within_subtile"))
+
+          # offsetM_floor = numLine & ~(mEPSR-1)
+          module.add(SAndB32(dst=sgpr(stmp+9), src0=sgpr(stmp+2),
+                             src1=hex(0xFFFFFFFF & ~(mElemsPerSubtileRow - 1)),
+                             comment="offsetM_floor = numLine & ~(mEPSR-1)"))
+          # offsetM_glb_bytes = offsetM_floor * strideF * bpe
+          module.add(SMulI32(dst=sgpr(stmp+7), src0=sgpr(stmp+9), src1=strideF,
+                             comment="offsetM_floor * strideF (elements)"))
+          module.add(scalarMultiplyBpe(stmp+7, stmp+7, float(bpe),
+                                       comment="offsetM_glb_bytes = * bpe"))
+          # LDS layout (matches emitSingleBufferLoad):
+          #   m0_subtile_base = (sId0 + sId1*globalSubtileGrid[0]) * subtileSize
+          # where sId0 = offsetM_floor/mEPSR, sId1 = K_floor/subtileKElems,
+          # and subtileSize = mEPSR * subtileKElems * bpe.
+          # Therefore:
+          #   M-row part : offsetM_floor * subtileKElems * bpe
+          #   K-band part: kSubtileIdx  * globalSubtileGrid[0] * subtileSizeBytes
+          mRowStrideBytes  = subtileKElems * bpe
+          kBandStrideBytes = int(tileInfo.globalSubtileGrid[0]) * subtileSizeBytes
+          # offsetM_lds_bytes (M-row part) = offsetM_floor * subtileKElems * bpe
+          if _isPow2(mRowStrideBytes):
+            module.add(SLShiftLeftB32(dst=sgpr(stmp+8),
+                                      shiftHex=log2(mRowStrideBytes),
+                                      src=sgpr(stmp+9),
+                                      comment="offsetM_lds (M-row) = offsetM_floor * subtileKElems*bpe"))
+          else:
+            module.add(SMulI32(dst=sgpr(stmp+8), src0=sgpr(stmp+9),
+                               src1=hex(mRowStrideBytes),
+                               comment="offsetM_lds (M-row) = offsetM_floor * subtileKElems*bpe"))
+          # Add K-band contribution: kSubtileIdx * globalSubtileGrid[0] * subtileSize.
+          # kSubtileIdx = sOffK / (subtileKElems*bpe); stmp+9 is free here
+          # (chunkSel overwrites it below).
+          if kBandStrideBytes != 0:
+            module.add(SLShiftRightB32(dst=sgpr(stmp+9),
+                                       shiftHex=log2(subtileKElems * bpe),
+                                       src=sgpr(sOffK),
+                                       comment="kSubtileIdx = offsetK_bytes >> log2(subtileKElems*bpe)"))
+            if _isPow2(kBandStrideBytes):
+              module.add(SLShiftLeftB32(dst=sgpr(stmp+9),
+                                        shiftHex=log2(kBandStrideBytes),
+                                        src=sgpr(stmp+9),
+                                        comment="kBand_bytes = kSubtileIdx * GSG[0] * subtileSize"))
+            else:
+              module.add(SMulI32(dst=sgpr(stmp+9), src0=sgpr(stmp+9),
+                                 src1=hex(kBandStrideBytes),
+                                 comment="kBand_bytes = kSubtileIdx * GSG[0] * subtileSize"))
+            module.add(SAddU32(dst=sgpr(stmp+8), src0=sgpr(stmp+8), src1=sgpr(stmp+9),
+                               comment="offsetM_lds_bytes += kBand_bytes"))
+
+          # numLine_within_subtile = numLine & (mEPSR - 1)
+          module.add(SAndB32(dst=sgpr(stmp+2), src0=sgpr(stmp+2),
+                             src1=hex(mElemsPerSubtileRow - 1),
+                             comment="numLine_within_subtile"))
+
+          sChunkSel = stmp + 9
+          if numGR > 1:
+            module.add(SLShiftRightB32(dst=sgpr(sChunkSel),
+                                       shiftHex=log2(mPerGRLoad),
+                                       src=sgpr(stmp+2),
+                                       comment="chunkSel = numLine_ws >> log2(mPerGRLoad)"))
+            module.add(SAndB32(dst=sgpr(sChunkSel), src0=sgpr(sChunkSel),
+                               src1=hex(numGR - 1),
+                               comment="chunkSel &= (numGR-1)"))
+
+          # sTarget = numLine_ws * stride * bpe + alignedK - soffset
+          module.add(SMulI32(dst=sgpr(stmp+0), src0=sgpr(stmp+2), src1=strideF,
+                             comment="numLine_ws * stride (elements)"))
+          module.add(scalarMultiplyBpe(stmp+0, stmp+0, float(bpe), comment="-> bytes"))
+          module.add(SAddU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=sgpr(stmp+1),
+                             comment="+ alignedK_within_subtile"))
+          if hasSoffsetSgpr:
+            module.add(SSubU32(dst=sgpr(stmp+0), src0=sgpr(stmp+0), src1=sgpr(soffsetSgprIdx),
+                               comment="- soffset (per-lane vaddr space)"))
+
+          # Precompute the m0/vaddr add-bases shared across all chunks.
+          #   sM0Base    = intra + offsetK + offsetM_lds
+          #   sVaddrBase = intra + offsetK + offsetM_glb
+          # Reuse stmp+1 / stmp+7 to avoid extra sgprs (alignedK is dead now;
+          # offsetM_glb_bytes folds into sVaddrBase in place).
+          sM0Base    = stmp + 1
+          sVaddrBase = stmp + 7
+          # sM0Base = intra + offsetM_lds_bytes
+          # (offsetM_lds_bytes already includes the K-band term;
+          # sOffK belongs only in sVaddrBase — m0 encodes K-bands via the
+          # GSG[0]*subtileSize stride, not via sId1*subtileKElems*bpe.)
+          module.add(SAddU32(dst=sgpr(sM0Base), src0=sgpr(sIntra), src1=sgpr(stmp+8),
+                             comment="sM0Base = intra + offsetM_lds_bytes"))
+          module.add(SAddU32(dst=sgpr(sVaddrBase), src0=sgpr(sVaddrBase), src1=sgpr(sIntra),
+                             comment="sVaddrBase = offsetM_glb + intra"))
+          module.add(SAddU32(dst=sgpr(sVaddrBase), src0=sgpr(sVaddrBase), src1=sgpr(sOffK),
+                             comment="              + offsetK"))
+
+          sCmpLo    = stmp + 4
+          sCmpHi    = stmp + 5
+          sLaneId   = stmp + 0
+          sAnyMatch = stmp + 10
+          sMask     = stmp + 4
+          sM0Step   = stmp + 9
+          mubuf     = MUBUFModifiers(offen=True, offset12=0, glc=False, slc=False, nt=False, lds=True)
+          ldSoffset = sgpr(soffsetSgprIdx) if hasSoffsetSgpr else 0
+
+          vTmp = self.vgprPool.checkOut(1, "tailBoundaryVTmp%s" % tc)
+
+          if numGR == 1:
+            vaddrVgpr = tileInfo.sharedVgprGROffset[0]
+          else:
+            vMerged = self.vgprPool.checkOut(1, "tailBoundaryVMerged%s" % tc)
+            module.add(VMovB32(dst=vgpr(vMerged),
+                               src=vgpr(tileInfo.sharedVgprGROffset[0]),
+                               comment="vMerged = chunk-0 vaddrs"))
+            for i in range(1, numGR):
+              module.add(SCmpEQU32(src0=sgpr(sChunkSel), src1=hex(i),
+                                   comment="chunkSel == %d ?" % i))
+              module.add(SCSelectB64(dst=sgpr(sMask, laneMaskCount), src0=-1, src1=0,
+                                     comment="sMask = all-ones if chunk %d" % i))
+              module.add(VCndMaskB32(dst=vgpr(vMerged),
+                                     src0=vgpr(vMerged),
+                                     src1=vgpr(tileInfo.sharedVgprGROffset[i]),
+                                     src2=sgpr(sMask, laneMaskCount),
+                                     comment="vMerged = chunk %d vaddrs" % i))
+            vaddrVgpr = vMerged
+
+          sM0StepIsZero = (numGR == 1)
+          if not sM0StepIsZero:
+            module.add(SLShiftLeftB32(dst=sgpr(sM0Step),
+                                      shiftHex=log2(subtileOffsetBytes),
+                                      src=sgpr(sChunkSel),
+                                      comment="sM0Step = chunkSel * subtileOffsetBytes"))
+
+          # v_cmp + ff1 -> sLaneId (wave64 only for now).
+          assert waveSize == 64
+          module.add(VCmpEQU32(dst=sgpr(sCmpLo, 2), src0=sgpr(stmp+0),
+                               src1=vgpr(vaddrVgpr),
+                               comment="find lane whose vaddr == sTarget"))
+          module.add(SOrB32(dst=sgpr(sAnyMatch), src0=sgpr(sCmpLo), src1=sgpr(sCmpHi),
+                            comment="sAnyMatch = vcc_lo | vcc_hi"))
+          # Use stmp+2 as scratch for ff1(hi)+32 (numLine_ws is dead).
+          module.add(SFf1B32(dst=sgpr(stmp+2), src=sgpr(sCmpHi), comment="ff1(vcc_hi)"))
+          module.add(SAddU32(dst=sgpr(stmp+2), src0=sgpr(stmp+2), src1=32,
+                             comment="+ 32 (hi-half lane offset)"))
+          module.add(SFf1B32(dst=sgpr(sLaneId), src=sgpr(sCmpLo),
+                             comment="ff1(vcc_lo)"))
+          module.add(SCmpEQI32(src0=sgpr(sLaneId), src1=-1,
+                               comment="SCC=1 if lo had no match"))
+          module.add(SCSelectB32(dst=sgpr(sLaneId), src0=sgpr(stmp+2), src1=sgpr(sLaneId),
+                                 comment="sLaneId = lo==-1 ? hi+32 : lo"))
+
+          # m0 = LocalWriteBaseAddr + sLaneId*16 + sM0Base (+ sM0Step)
+          #
+          # sM0Base already holds intra + offsetK + offsetM_lds; one add for
+          # sLaneId*16, optional add for sM0Step, then fold LWBA into m0.
+          # We do sLaneId<<4 into a scratch (stmp+4 is now dead — sCmpLo).
+          sShifted = stmp + 4
+          module.add(SLShiftLeftB32(dst=sgpr(sShifted), shiftHex=log2(16), src=sgpr(sLaneId),
+                                    comment="sLaneId * 16 (per-lane LDS stride)"))
+          module.add(SAddU32(dst=sgpr(sShifted), src0=sgpr(sShifted), src1=sgpr(sM0Base),
+                             comment="+ sM0Base (intra + offsetK + offsetM_lds)"))
+          if not sM0StepIsZero:
+            module.add(SAddU32(dst=sgpr(sShifted), src0=sgpr(sShifted), src1=sgpr(sM0Step),
+                               comment="+ sM0Step"))
+          module.add(SAddU32(dst=mgpr(0), src0=sgpr("LocalWriteBaseAddr%s" % tc),
+                             src1=sgpr(sShifted),
+                             comment="m0 = LocalWriteBaseAddr%s + ..." % tc))
+
+          # vaddr = v[vaddrVgpr][sLaneId] + sVaddrBase
+          sVaddrTmp = stmp + 4  # reused (sShifted dead)
+          module.add(VReadlaneB32(dst=sgpr(sVaddrTmp), src0=vgpr(vaddrVgpr),
+                                  src1=sgpr(sLaneId),
+                                  comment="sTarget = v[vaddr][sLaneId]"))
+          module.add(SAddU32(dst=sgpr(sVaddrTmp), src0=sgpr(sVaddrTmp), src1=sgpr(sVaddrBase),
+                             comment="+ sVaddrBase (intra + offsetK + offsetM_glb)"))
+          module.add(VMovB32(dst=vgpr(vTmp), src=sgpr(sVaddrTmp), comment="vaddr"))
+
+          # EXEC gate, DTL load, wait, restore EXEC
+          module.add(SCmpEQU32(src0=sgpr(sAnyMatch), src1=0,
+                               comment="SCC=1 if no matching lane on this wave"))
+          module.add(SCSelectB64(dst=EXEC(), src0=0, src1=1,
+                                 comment="EXEC = match ? 1 : 0"))
+          module.add(BufferLoadU16(dst=None, vaddr=vgpr(vTmp),
+                                   saddr=sgpr("Srd%s" % tc, 4),
+                                   soffset=ldSoffset, mubuf=mubuf,
+                                   comment="boundary 16-bit DTL load -> LDS@m0"))
+          
+          module.add(SMovB64(dst=EXEC(), src=-1, comment="restore EXEC = full"))
+          
+
+          if numGR > 1:
+            self.vgprPool.checkIn(vMerged)
+          self.vgprPool.checkIn(vTmp)
+
+    module.add(skipLabel)
     return module
 
   ##############################################################################
