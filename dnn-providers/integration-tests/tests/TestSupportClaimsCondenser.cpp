@@ -41,19 +41,19 @@ GraphSupportRecord makeRecord(std::string op,
     return r;
 }
 
-// Sugar: a matcher containing exactly these (op, io, layout) cross
-// products. Used for set-equality assertions where insertion order
-// shouldn't matter.
+// Sugar: a matcher containing exactly these (op, in->out pair, layout)
+// cross products. Used for set-equality assertions where insertion
+// order shouldn't matter.
 struct ExpectedMatcher
 {
     std::vector<std::string> opChains;
-    std::vector<std::string> ioDtypes;
+    std::vector<std::string> ioDtypePairs; // "in->out" form
     std::vector<std::string> layouts;
 };
 
 bool matcherEquals(const SupportMatcher& actual, const ExpectedMatcher& expected)
 {
-    return actual.opChains == expected.opChains && actual.ioDtypes == expected.ioDtypes
+    return actual.opChains == expected.opChains && actual.ioDtypePairs == expected.ioDtypePairs
            && actual.layouts == expected.layouts;
 }
 
@@ -88,7 +88,7 @@ TEST(TestSupportClaimsCondenser, SingleSupportedRecordEmitsSingleCellMatcher)
     };
     auto result = condenseSupportClaims(records, "TEST_ENGINE");
     ASSERT_EQ(result.matchers.size(), 1u);
-    EXPECT_TRUE(matcherEquals(result.matchers[0], {{"ConvFprop"}, {"fp32"}, {"NCHW"}}));
+    EXPECT_TRUE(matcherEquals(result.matchers[0], {{"ConvFprop"}, {"fp32->fp32"}, {"NCHW"}}));
 }
 
 TEST(TestSupportClaimsCondenser, FullRectangleCondensesToSingleMatcher)
@@ -102,8 +102,8 @@ TEST(TestSupportClaimsCondenser, FullRectangleCondensesToSingleMatcher)
     };
     auto result = condenseSupportClaims(records, "TEST_ENGINE");
     ASSERT_EQ(result.matchers.size(), 1u);
-    EXPECT_TRUE(
-        matcherEquals(result.matchers[0], {{"ConvFprop"}, {"fp16", "fp32"}, {"NCHW", "NHWC"}}));
+    EXPECT_TRUE(matcherEquals(result.matchers[0],
+                              {{"ConvFprop"}, {"fp16->fp16", "fp32->fp32"}, {"NCHW", "NHWC"}}));
 }
 
 // -- The reviewer's counterexample (RFC 0012 §7 correctness) -----------
@@ -135,15 +135,15 @@ TEST(TestSupportClaimsCondenser, AntiDiagonalForbiddenCellsRequireTwoRectangles)
     {
         EXPECT_EQ(m.opChains, (std::vector<std::string>{"ConvFprop"}));
         std::vector<std::string> sig;
-        sig.insert(sig.end(), m.ioDtypes.begin(), m.ioDtypes.end());
+        sig.insert(sig.end(), m.ioDtypePairs.begin(), m.ioDtypePairs.end());
         sig.push_back("|");
         sig.insert(sig.end(), m.layouts.begin(), m.layouts.end());
         matcherSignatures.insert(std::move(sig));
     }
-    EXPECT_TRUE(matcherSignatures.count({"fp16", "|", "NHWC"}))
-        << "Expected matcher {fp16}×{NHWC} in cover";
-    EXPECT_TRUE(matcherSignatures.count({"fp32", "|", "NCHW"}))
-        << "Expected matcher {fp32}×{NCHW} in cover";
+    EXPECT_TRUE(matcherSignatures.count({"fp16->fp16", "|", "NHWC"}))
+        << "Expected matcher {fp16->fp16}×{NHWC} in cover";
+    EXPECT_TRUE(matcherSignatures.count({"fp32->fp32", "|", "NCHW"}))
+        << "Expected matcher {fp32->fp32}×{NCHW} in cover";
 }
 
 // -- Grouping across op_chains -----------------------------------------
@@ -158,8 +158,8 @@ TEST(TestSupportClaimsCondenser, OpChainsSharingRectangleGroupIntoOneMatcher)
     };
     auto result = condenseSupportClaims(records, "TEST_ENGINE");
     ASSERT_EQ(result.matchers.size(), 1u);
-    EXPECT_TRUE(matcherEquals(result.matchers[0],
-                              {{"ConvDgrad", "ConvFprop"}, {"fp16", "fp32"}, {"NCHW"}}));
+    EXPECT_TRUE(matcherEquals(
+        result.matchers[0], {{"ConvDgrad", "ConvFprop"}, {"fp16->fp16", "fp32->fp32"}, {"NCHW"}}));
 }
 
 TEST(TestSupportClaimsCondenser, OpChainsWithDifferentSafeRectanglesGetSeparateMatchers)
@@ -195,9 +195,9 @@ TEST(TestSupportClaimsCondenser, OpChainsWithDifferentSafeRectanglesGetSeparateM
     }
     ASSERT_NE(fpropMatcher, nullptr);
     ASSERT_NE(dgradMatcher, nullptr);
-    EXPECT_EQ(fpropMatcher->ioDtypes, (std::vector<std::string>{"fp16", "fp32"}));
+    EXPECT_EQ(fpropMatcher->ioDtypePairs, (std::vector<std::string>{"fp16->fp16", "fp32->fp32"}));
     EXPECT_EQ(fpropMatcher->layouts, (std::vector<std::string>{"NCHW", "NHWC"}));
-    EXPECT_EQ(dgradMatcher->ioDtypes, (std::vector<std::string>{"fp16"}));
+    EXPECT_EQ(dgradMatcher->ioDtypePairs, (std::vector<std::string>{"fp16->fp16"}));
     EXPECT_EQ(dgradMatcher->layouts, (std::vector<std::string>{"NCHW"}));
 }
 
@@ -256,7 +256,7 @@ TEST(TestSupportClaimsCondenser, OutputIsDeterministicAcrossInputOrder)
     for(size_t i = 0; i < a.matchers.size(); ++i)
     {
         EXPECT_EQ(a.matchers[i].opChains, b.matchers[i].opChains);
-        EXPECT_EQ(a.matchers[i].ioDtypes, b.matchers[i].ioDtypes);
+        EXPECT_EQ(a.matchers[i].ioDtypePairs, b.matchers[i].ioDtypePairs);
         EXPECT_EQ(a.matchers[i].layouts, b.matchers[i].layouts);
     }
 }
@@ -296,8 +296,9 @@ TEST(TestSupportClaimsCondenser, TupleInBothSAndUProducesConflict)
     const auto& conflict = result.conflictingObservations[0];
     EXPECT_EQ(conflict.opChain, "Batchnorm + Pointwise:RELU_FWD");
     EXPECT_EQ(conflict.inputDtype, "fp32");
-    // Symmetric — outputDtype left empty in the diagnostic.
-    EXPECT_TRUE(conflict.outputDtype.empty());
+    // Always-pairs schema: even symmetric conflicts carry an explicit
+    // outputDtype so the diagnostic always names the full pair.
+    EXPECT_EQ(conflict.outputDtype, "fp32");
     EXPECT_EQ(conflict.layout, "NCHW");
     ASSERT_EQ(conflict.supportedBy.size(), 1u);
     EXPECT_EQ(conflict.supportedBy[0], "BNTrainingActiv2dFp32.Correctness/0");
@@ -361,5 +362,6 @@ TEST(TestSupportClaimsCondenser, UnobservedCellsArePreferredOutOfRectangle)
     auto result = condenseSupportClaims(records, "TEST_ENGINE");
     ASSERT_EQ(result.matchers.size(), 1u);
     EXPECT_EQ(result.matchers[0].layouts, (std::vector<std::string>{"NCHW"}));
-    EXPECT_EQ(result.matchers[0].ioDtypes, (std::vector<std::string>{"fp16", "fp32"}));
+    EXPECT_EQ(result.matchers[0].ioDtypePairs,
+              (std::vector<std::string>{"fp16->fp16", "fp32->fp32"}));
 }

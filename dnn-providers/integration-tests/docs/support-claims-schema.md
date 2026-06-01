@@ -29,19 +29,22 @@ The sidecar is discovered automatically — `TestSettings` looks for
 
 ```toml
 [meta]
-version = 3
+version = 4
 engine  = "MIOPEN_ENGINE"
 ```
 
-- `version` — sidecar schema version. Currently `3`. History:
+- `version` — sidecar schema version. Currently `4`. History:
   - **v1** — initial schema with bare-node-name op_chains.
   - **v2** — op_chain extended with per-node `:variant[flags]` tags so
     Pointwise modes / params, Reduction modes, etc. partition graphs
     MIOpen dispatches differently.
-  - **v3** — matcher schema gains `io_dtype_pairs = ["in->out", ...]`
-    alongside the existing `io_dtypes = ["..."]` shorthand. Captures
-    mixed-precision graphs (e.g. fp16 input → fp32 output) that
-    previously collapsed into the symmetric io_dtype field.
+  - **v3** — added `io_dtype_pairs = ["in->out", ...]` alongside an
+    `io_dtypes` shorthand for the symmetric case.
+  - **v4** — dropped the `io_dtypes` shorthand. `io_dtype_pairs` is the
+    single canonical form: symmetric pairs are written as `"fp16->fp16"`,
+    asymmetric pairs as `"fp16->fp32"`. One way to express claims, the
+    symmetric/asymmetric distinction is always visible at review time,
+    and matching/condensation/emission code has one path instead of two.
 
   Older-version sidecars are refused at load — regenerate via
   `--write-support-claims`. The main TOML's `[meta].version` is a
@@ -72,10 +75,10 @@ platform = "linux"            # optional, exact match against "windows" or "linu
 
 ## `[[supported.matchers]]`
 
-Each matcher claims that the cross-product of `op_chains × (dtype
-dimension) × layouts` is fully supported by the engine on the owning
-block's `(arch, platform)`. The dtype dimension can be expressed
-two ways and the matcher can use either or both:
+Each matcher claims that the cross-product of `op_chains × io_dtype_pairs
+× layouts` is fully supported by the engine on the owning block's
+`(arch, platform)`. Dtype is always expressed as `"in->out"` pairs —
+symmetric and asymmetric alike.
 
 ```toml
 [[supported.matchers]]
@@ -83,33 +86,35 @@ op_chains = [
     "ConvFprop + Pointwise:ADD + Pointwise:RELU_FWD",
     "ConvFprop + Pointwise:ADD + Pointwise:SIGMOID",
 ]
-# Symmetric-shorthand: "fp16" covers the pair fp16->fp16.
-io_dtypes = ["fp16", "fp32", "bf16"]
-# Asymmetric pairs in "in->out" form. Optional.
-io_dtype_pairs = ["fp16->fp32", "bf16->fp32"]
-layouts   = ["NCHW", "NHWC"]
+io_dtype_pairs = [
+    "fp16->fp16",   # symmetric
+    "fp32->fp32",   # symmetric
+    "bf16->bf16",   # symmetric
+    "fp16->fp32",   # asymmetric (mixed-precision)
+]
+layouts = ["NCHW", "NHWC"]
 ```
 
-- `op_chains` and `layouts` are required and non-empty.
-- At least one of `io_dtypes` and `io_dtype_pairs` must be present;
-  both may appear on the same matcher and their effects union.
+- All three arrays are required and non-empty.
 - All values are matched exact-string. No `*`, no `?`, no fnmatch.
 - `io_dtype_pairs` entries must contain exactly one `->` separator
   with non-empty input and output sides.
 - Duplicates in any array are rejected by the loader.
 - A test **matches** a matcher iff its observed `(op_chain,
-  input_dtype, output_dtype, layout)` tuple lies in the matcher's
-  cross-product. Symmetric observations (`input == output`) match
-  against `io_dtypes` first, then `io_dtype_pairs`; asymmetric
-  observations match only against `io_dtype_pairs`.
+  input_dtype, output_dtype, layout)` tuple has a corresponding
+  `"input_dtype->output_dtype"` entry in `io_dtype_pairs` AND its
+  op_chain is in `op_chains` AND its layout is in `layouts`.
+- Symmetric graphs (the common case) produce `"X->X"` entries; the
+  engineer scanning the sidecar can immediately see at a glance which
+  pairs are symmetric and which encode mixed-precision dispatch.
 
 ### Value spaces
 
-| Field      | Source                                                  | Example values |
-|------------|---------------------------------------------------------|----------------|
-| `op_chains`| `describeGraphStructured(graph).opChain` — visit order + `to_string(NodeType)` joined by ` + `, with a `:VARIANT` suffix per node when the node's attributes affect MIOpen solver dispatch | `"ConvFprop"`, `"ConvFprop + Pointwise:RELU_FWD"`, `"BatchnormInference + Pointwise:RELU_FWD[upper_clip]"` |
-| `io_dtypes`| `to_string(graph.graph_attributes.get_io_data_type())`  | `"fp16"`, `"fp32"`, `"bf16"`, `"fp64"` |
-| `layouts`  | Fixtures call `setTestCaseLayout("NCHW"|"NHWC"|...)`    | `"NCHW"`, `"NHWC"`, `"NCDHW"`, `"NDHWC"` |
+| Field            | Source                                                  | Example values |
+|------------------|---------------------------------------------------------|----------------|
+| `op_chains`      | `describeGraphStructured(graph).opChain` — visit order + `to_string(NodeType)` joined by ` + `, with a `:VARIANT` suffix per node when the node's attributes affect MIOpen solver dispatch | `"ConvFprop"`, `"ConvFprop + Pointwise:RELU_FWD"`, `"BatchnormInference + Pointwise:RELU_FWD[upper_clip]"` |
+| `io_dtype_pairs` | `to_string(input_dtype) + "->" + to_string(output_dtype)`. Input is `graph.graph_attributes.get_io_data_type()`; output is derived from the actual graph output tensor dtypes. | `"fp16->fp16"`, `"fp32->fp32"`, `"bf16->bf16"`, `"fp16->fp32"` (mixed-precision) |
+| `layouts`        | Fixtures call `setTestCaseLayout("NCHW"|"NHWC"|...)`    | `"NCHW"`, `"NHWC"`, `"NCDHW"`, `"NDHWC"` |
 
 ### Per-node variant tags (v2)
 
@@ -140,7 +145,7 @@ triggers coordinated regeneration of every sidecar.
 # MIOPEN_ENGINE.supported.toml
 
 [meta]
-version = 1
+version = 4
 engine  = "MIOPEN_ENGINE"
 
 [[supported]]
@@ -149,17 +154,23 @@ arch = "gfx942"
 # Plain Conv across all observed dtypes and layouts
 [[supported.matchers]]
 op_chains = ["ConvFprop", "ConvDgrad", "ConvWgrad"]
-io_dtypes = ["fp16", "fp32", "bf16"]
-layouts   = ["NCHW", "NHWC"]
+io_dtype_pairs = ["fp16->fp16", "fp32->fp32", "bf16->bf16"]
+layouts = ["NCHW", "NHWC"]
 
-# Conv + Bias + Activation
+# Conv + Bias + Activation, including a mixed-precision fp16->fp32
+# variant some solvers expose for high-precision accumulation
 [[supported.matchers]]
 op_chains = [
     "ConvFprop + Pointwise:ADD + Pointwise:RELU_FWD",
     "ConvFprop + Pointwise:ADD + Pointwise:SIGMOID",
 ]
-io_dtypes = ["fp16", "fp32", "bf16"]
-layouts   = ["NCHW", "NHWC"]
+io_dtype_pairs = [
+    "fp16->fp16",
+    "fp32->fp32",
+    "bf16->bf16",
+    "fp16->fp32",   # asymmetric
+]
+layouts = ["NCHW", "NHWC"]
 
 # gfx10 has no CK fusion kernels — list only plain Conv here
 [[supported]]
@@ -167,8 +178,8 @@ arch = "gfx10"
 
 [[supported.matchers]]
 op_chains = ["ConvFprop", "ConvDgrad", "ConvWgrad"]
-io_dtypes = ["fp16", "fp32", "bf16"]
-layouts   = ["NCHW", "NHWC"]
+io_dtype_pairs = ["fp16->fp16", "fp32->fp32", "bf16->bf16"]
+layouts = ["NCHW", "NHWC"]
 ```
 
 ## What's deliberately *not* in the schema

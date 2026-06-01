@@ -23,20 +23,14 @@ namespace hipdnn_integration_tests
 namespace
 {
 
-std::vector<std::string> parseStringArrayImpl(const toml::table& table,
-                                              const char* key,
-                                              const std::string& label,
-                                              bool required)
+std::vector<std::string>
+    parseRequiredStringArray(const toml::table& table, const char* key, const std::string& label)
 {
     const auto* arr = table[key].as_array();
     if(arr == nullptr)
     {
-        if(required)
-        {
-            throw std::runtime_error("SupportClaims: " + label + " missing required '"
-                                     + std::string(key) + "' array");
-        }
-        return {};
+        throw std::runtime_error("SupportClaims: " + label + " missing required '"
+                                 + std::string(key) + "' array");
     }
     std::vector<std::string> result;
     result.reserve(arr->size());
@@ -56,24 +50,12 @@ std::vector<std::string> parseStringArrayImpl(const toml::table& table,
         }
         result.push_back(std::move(*value));
     }
-    if(required && result.empty())
+    if(result.empty())
     {
         throw std::runtime_error("SupportClaims: " + label + " '" + std::string(key)
                                  + "' must not be empty");
     }
     return result;
-}
-
-std::vector<std::string>
-    parseRequiredStringArray(const toml::table& table, const char* key, const std::string& label)
-{
-    return parseStringArrayImpl(table, key, label, /*required=*/true);
-}
-
-std::vector<std::string>
-    parseOptionalStringArray(const toml::table& table, const char* key, const std::string& label)
-{
-    return parseStringArrayImpl(table, key, label, /*required=*/false);
 }
 
 // Validate "in->out" pair strings: arrow present, both sides non-empty,
@@ -133,19 +115,19 @@ SupportMatcher parseMatcher(const toml::node& node,
     matcher.sourceLocation = label;
     matcher.opChains = parseRequiredStringArray(*table, "op_chains", label);
     matcher.layouts = parseRequiredStringArray(*table, "layouts", label);
-    // Either io_dtypes or io_dtype_pairs (or both) must be present.
-    // Loader accepts the union; matching uses the appropriate side
-    // based on whether the observation is symmetric or asymmetric.
-    matcher.ioDtypes = parseOptionalStringArray(*table, "io_dtypes", label);
-    matcher.ioDtypePairs = parseOptionalStringArray(*table, "io_dtype_pairs", label);
-    if(matcher.ioDtypes.empty() && matcher.ioDtypePairs.empty())
+    matcher.ioDtypePairs = parseRequiredStringArray(*table, "io_dtype_pairs", label);
+    // The old io_dtypes shorthand was removed in favor of always-pairs
+    // (see SupportMatcher comment). Catch sidecars still using it so
+    // the engineer gets a clear "regenerate" message instead of a
+    // confusing "missing io_dtype_pairs" one.
+    if((*table)["io_dtypes"].as_array() != nullptr)
     {
         throw std::runtime_error("SupportClaims: " + label
-                                 + " must specify at least one of 'io_dtypes' or "
-                                   "'io_dtype_pairs'");
+                                 + " uses the obsolete 'io_dtypes' field. The sidecar predates "
+                                   "the always-pairs format — regenerate via "
+                                   "--write-support-claims to produce io_dtype_pairs entries.");
     }
     rejectWildcards(matcher.opChains, "op_chains", label);
-    rejectWildcards(matcher.ioDtypes, "io_dtypes", label);
     rejectWildcards(matcher.ioDtypePairs, "io_dtype_pairs", label);
     rejectWildcards(matcher.layouts, "layouts", label);
     for(const auto& pair : matcher.ioDtypePairs)
@@ -229,16 +211,21 @@ SupportClaims::SupportClaims(const std::filesystem::path& sidecarPath,
     //   v2 — extended op_chain with per-node :variant tags (e.g.
     //        Pointwise:RELU_FWD[lower_clip]).
     //   v3 — added asymmetric io_dtype_pairs alongside symmetric
-    //        io_dtypes shorthand; matchers can express in!=out dispatch.
-    // Older readers can't tell that io_dtype_pairs is meaningful and
-    // would silently miss asymmetric claims if they "forward-compat
-    // ignored" the field, so the safe contract is refuse-and-regen.
-    if(*version != 3)
+    //        io_dtypes shorthand; matchers could use either form.
+    //   v4 — dropped io_dtypes shorthand. Pairs are the single
+    //        canonical form: "fp16->fp16" for symmetric, "fp16->fp32"
+    //        for asymmetric. Eliminates the two-code-path matching
+    //        logic and makes symmetric/asymmetric distinction always
+    //        visible at review time.
+    // Older readers can't tell that the format changed and would
+    // silently miss matchers, so the safe contract is refuse-and-regen.
+    if(*version != 4)
     {
         throw std::runtime_error("SupportClaims: unsupported version " + std::to_string(*version)
                                  + " in " + sidecarPath.string()
-                                 + " (expected 3; older sidecars predate the io_dtype_pairs "
-                                   "extension and need regeneration via --write-support-claims)");
+                                 + " (expected 4; older sidecars predate the always-pairs "
+                                   "io_dtype_pairs schema and need regeneration via "
+                                   "--write-support-claims)");
     }
 
     auto engine = table["meta"]["engine"].value<std::string>();

@@ -14,25 +14,24 @@ namespace hipdnn_integration_tests
 {
 
 // One [[supported.matchers]] entry. Claims the cross-product of
-// opChains × (io dtype pairs) × layouts is fully supported by the
-// engine on the owning block's (arch, platform). Exact-string matching
-// only — see RFC 0012 §11.4 for why wildcards are intentionally rejected.
+// opChains × ioDtypePairs × layouts is fully supported by the engine
+// on the owning block's (arch, platform). Exact-string matching only —
+// see RFC 0012 §11.4 for why wildcards are intentionally rejected.
 //
-// The dtype dimension supports two equivalent forms in TOML for
-// engineer convenience:
-//   io_dtypes      = ["fp16", "fp32"]              (symmetric shorthand)
-//   io_dtype_pairs = ["fp16->fp32", "bf16->fp32"]  (explicit asymmetric)
-// Loader keeps both lists for round-trip readability. Matching checks
-// io_dtypes for symmetric pairs and io_dtype_pairs for asymmetric ones;
-// a single matcher may use either, both, or neither.
+// Dtype is always expressed as (input -> output) pairs in TOML:
+//   io_dtype_pairs = ["fp16->fp16", "fp16->fp32", "bf16->bf16"]
+// Symmetric graphs use the same dtype on both sides ("fp16->fp16");
+// asymmetric mixed-precision graphs use distinct sides ("fp16->fp32").
+// Earlier drafts had an `io_dtypes` shorthand for the symmetric case;
+// that turned out to obscure the symmetric/asymmetric distinction at
+// review time and added two code paths in matching, condensation, and
+// emission for no win — sidecars are machine-generated and not hand-
+// edited, so verbosity isn't a real cost.
 struct SupportMatcher
 {
     std::vector<std::string> opChains;
-    // Symmetric-shorthand dtypes. "fp16" covers the pair fp16->fp16.
-    // May be empty when the matcher exclusively uses io_dtype_pairs.
-    std::vector<std::string> ioDtypes;
-    // Explicit asymmetric pairs in "in->out" form. May be empty when
-    // the matcher is purely symmetric.
+    // All claimed (input -> output) dtype pairs, sorted alphabetically.
+    // Format: "in->out" strings, validated at load.
     std::vector<std::string> ioDtypePairs;
     std::vector<std::string> layouts;
 
@@ -42,7 +41,7 @@ struct SupportMatcher
     std::string sourceLocation;
 
     // Match an observation. outputDtype may be empty — treated as
-    // symmetric (output == input).
+    // symmetric (output == input) so the lookup hits "input->input".
     bool contains(std::string_view opChain,
                   std::string_view inputDtype,
                   std::string_view outputDtype,
@@ -54,28 +53,17 @@ struct SupportMatcher
         }
         const std::string effectiveOutput
             = outputDtype.empty() ? std::string(inputDtype) : std::string(outputDtype);
-        return pairMatches(inputDtype, effectiveOutput);
+        const std::string needle = std::string(inputDtype) + "->" + effectiveOutput;
+        return memberOf(ioDtypePairs, needle);
     }
 
     // Iterate the matcher's full (opChain, inputDtype, outputDtype,
-    // layout) cross-product. ioDtypes contributes symmetric pairs
-    // (in == out); ioDtypePairs contributes explicit pairs. Visitor
-    // returns false to stop early.
+    // layout) cross-product. Visitor returns false to stop early.
     template <typename Fn>
     void forEachTuple(Fn&& fn) const
     {
         for(const auto& op : opChains)
         {
-            for(const auto& io : ioDtypes)
-            {
-                for(const auto& layout : layouts)
-                {
-                    if(!fn(op, io, io, layout))
-                    {
-                        return;
-                    }
-                }
-            }
             for(const auto& pair : ioDtypePairs)
             {
                 const auto [in, out] = splitDtypePair(pair);
@@ -110,18 +98,6 @@ private:
         return std::any_of(haystack.begin(), haystack.end(), [&](const std::string& candidate) {
             return candidate == needle;
         });
-    }
-
-    bool pairMatches(std::string_view in, std::string_view out) const
-    {
-        // Symmetric shorthand: io_dtypes entry "X" covers pair X->X.
-        if(in == out && memberOf(ioDtypes, in))
-        {
-            return true;
-        }
-        // Explicit pair: io_dtype_pairs entry "X->Y" covers pair X->Y.
-        const std::string needle = std::string(in) + "->" + std::string(out);
-        return memberOf(ioDtypePairs, needle);
     }
 };
 

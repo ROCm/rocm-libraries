@@ -84,26 +84,13 @@ TestOutcome testOutcomeFor(const std::string& testName)
     return TestOutcome::UNKNOWN;
 }
 
-// Format a record's dtype field for human display: either "fp16"
-// (symmetric) or "fp16->fp32" (asymmetric, when outputDtype is set).
+// Format a record's dtype field for display in the always-pairs schema:
+// "in->out" regardless of whether the pair is symmetric. Matches the
+// io_dtype_pairs entry an engineer would edit in the sidecar.
 std::string formatDtypeForDisplay(const GraphSupportRecord& record)
 {
-    if(record.outputDtype.empty() || record.outputDtype == record.ioDtype)
-    {
-        return record.ioDtype;
-    }
-    return record.ioDtype + "->" + record.outputDtype;
-}
-
-// Pick the io_dtype field label that matches how the matcher schema
-// would express this record — "io_dtype" for symmetric, "io_dtype_pair"
-// for asymmetric. Lets the failure message tell the engineer which
-// schema field to edit.
-std::string dtypeFieldLabelFor(const GraphSupportRecord& record)
-{
-    return record.outputDtype.empty() || record.outputDtype == record.ioDtype
-               ? std::string("io_dtype")
-               : std::string("io_dtype_pair");
+    const std::string out = record.outputDtype.empty() ? record.ioDtype : record.outputDtype;
+    return record.ioDtype + "->" + out;
 }
 
 SupportClaimFinding buildRuleA(const GraphSupportRecord& record, const SupportMatcher& matcher)
@@ -112,8 +99,8 @@ SupportClaimFinding buildRuleA(const GraphSupportRecord& record, const SupportMa
     body << "  CLAIM BROKEN (Rule A):\n"
          << "    " << record.testName << "\n"
          << "      observed: op_chain=\"" << record.opChain << "\"\n"
-         << "                " << dtypeFieldLabelFor(record) << "=\""
-         << formatDtypeForDisplay(record) << "\" layout=\"" << record.layout << "\"\n"
+         << "                " << "io_dtype_pair" << "=\"" << formatDtypeForDisplay(record)
+         << "\" layout=\"" << record.layout << "\"\n"
          << "      claim source: " << matcher.sourceLocation << "\n"
          << "      engine returned no support for this graph\n"
          << "      Action: narrow op_chains/io_dtypes/layouts to exclude this tuple, "
@@ -176,8 +163,8 @@ SupportClaimFinding buildRuleD(const GraphSupportRecord& record, const std::stri
          << "    " << record.testName << "\n"
          << "      test FAILED; engine '" << engineName
          << "' returned support; no matcher covers this graph.\n"
-         << "      observed: op_chain=\"" << record.opChain << "\" " << dtypeFieldLabelFor(record)
-         << "=\"" << formatDtypeForDisplay(record) << "\" layout=\"" << record.layout << "\"\n"
+         << "      observed: op_chain=\"" << record.opChain << "\" " << "io_dtype_pair" << "=\""
+         << formatDtypeForDisplay(record) << "\" layout=\"" << record.layout << "\"\n"
          << "      Action: tighten the engine's get_ranked_engine_ids logic, or add a "
             "[[test_skips]]\n"
          << "              entry with a reason if the engine should claim then skip.\n"

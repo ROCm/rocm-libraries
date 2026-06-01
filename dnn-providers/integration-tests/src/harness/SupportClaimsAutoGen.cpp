@@ -252,13 +252,10 @@ CondensedSupportData condenseSupportClaims(const std::vector<GraphSupportRecord>
         CondensedSupportData::ConflictDetail detail;
         detail.opChain = std::get<0>(tuple);
         detail.inputDtype = std::get<1>(tuple);
-        const auto& outDtype = std::get<2>(tuple);
-        // Hide outputDtype when it equals inputDtype — keeps the
-        // diagnostic terse for the common symmetric case.
-        if(outDtype != detail.inputDtype)
-        {
-            detail.outputDtype = outDtype;
-        }
+        // Always populate outputDtype with the observed value — display
+        // logic shows the explicit "in->out" form regardless of whether
+        // it's symmetric, so the schema and diagnostics match exactly.
+        detail.outputDtype = std::get<2>(tuple);
         detail.layout = std::get<3>(tuple);
         auto sIt = supportedBy.find(tuple);
         if(sIt != supportedBy.end())
@@ -327,24 +324,15 @@ CondensedSupportData condenseSupportClaims(const std::vector<GraphSupportRecord>
     {
         SupportMatcher matcher;
         matcher.opChains.assign(ops.begin(), ops.end());
-        // Split the rectangle's pair-set into the two schema shapes:
-        // symmetric pairs become io_dtypes shorthand (just the dtype),
-        // asymmetric pairs become io_dtype_pairs ("in->out").
-        std::set<std::string> symmetricDtypes;
-        std::set<std::string> asymmetricPairStrings;
+        // All pairs (symmetric and asymmetric alike) go into the
+        // single io_dtype_pairs list. Sorted alphabetically for
+        // deterministic output across runs.
+        std::set<std::string> pairStrings;
         for(const auto& [pairIn, pairOut] : rect.pairs)
         {
-            if(pairIn == pairOut)
-            {
-                symmetricDtypes.insert(pairIn);
-            }
-            else
-            {
-                asymmetricPairStrings.insert(pairIn + "->" + pairOut);
-            }
+            pairStrings.insert(pairIn + "->" + pairOut);
         }
-        matcher.ioDtypes.assign(symmetricDtypes.begin(), symmetricDtypes.end());
-        matcher.ioDtypePairs.assign(asymmetricPairStrings.begin(), asymmetricPairStrings.end());
+        matcher.ioDtypePairs.assign(pairStrings.begin(), pairStrings.end());
         matcher.layouts = rect.layouts;
         out.matchers.push_back(std::move(matcher));
     }
@@ -380,34 +368,16 @@ std::string renderSupportBlockToml(const CondensedSupportData& condensed,
         }
         out << "]\n";
 
-        // Emit io_dtypes only when there's symmetric coverage to express;
-        // pure-asymmetric matchers skip the line. Likewise io_dtype_pairs.
-        if(!matcher.ioDtypes.empty())
+        out << "io_dtype_pairs = [";
+        for(size_t i = 0; i < matcher.ioDtypePairs.size(); ++i)
         {
-            out << "io_dtypes = [";
-            for(size_t i = 0; i < matcher.ioDtypes.size(); ++i)
+            if(i > 0)
             {
-                if(i > 0)
-                {
-                    out << ", ";
-                }
-                out << "\"" << matcher.ioDtypes[i] << "\"";
+                out << ", ";
             }
-            out << "]\n";
+            out << "\"" << matcher.ioDtypePairs[i] << "\"";
         }
-        if(!matcher.ioDtypePairs.empty())
-        {
-            out << "io_dtype_pairs = [";
-            for(size_t i = 0; i < matcher.ioDtypePairs.size(); ++i)
-            {
-                if(i > 0)
-                {
-                    out << ", ";
-                }
-                out << "\"" << matcher.ioDtypePairs[i] << "\"";
-            }
-            out << "]\n";
-        }
+        out << "]\n";
 
         out << "layouts = [";
         for(size_t i = 0; i < matcher.layouts.size(); ++i)
@@ -436,7 +406,7 @@ std::string defaultHeader(const std::string& engineName)
            "support-claims-schema.md\n"
         << "\n"
         << "[meta]\n"
-        << "version = 3\n"
+        << "version = 4\n"
         << "engine  = \"" << engineName << "\"\n"
         << "\n";
     return out.str();
@@ -809,7 +779,7 @@ bool checkShrinkagePrecondition(const std::filesystem::path& sidecarPath,
         std::cerr << "  - " << matcher->sourceLocation << "\n"
                   << "    op_chains[0] = \""
                   << (matcher->opChains.empty() ? "" : matcher->opChains.front())
-                  << "\"  io_dtypes=" << matcher->ioDtypes.size()
+                  << "\"  io_dtype_pairs=" << matcher->ioDtypePairs.size()
                   << "  layouts=" << matcher->layouts.size() << "\n";
     }
     std::cerr << "  This usually means a partial run (--gtest_filter set, or the suite ran on "
@@ -856,13 +826,9 @@ bool generateSupportClaimsForCurrentArch(const std::filesystem::path& sidecarPat
                      "[[test_skips]] for the unsupported variant.\n\n";
         constexpr size_t maxTuplesShown = 25;
         constexpr size_t maxTestsPerSide = 3;
-        // Format the dtype part as "fp16" for symmetric, "fp16->fp32"
-        // for asymmetric — matches how the matcher schema expresses each.
+        // Always-pairs schema: show "in->out" even when symmetric so the
+        // diagnostic matches what the engineer would type into a matcher.
         const auto formatDtype = [](const CondensedSupportData::ConflictDetail& c) {
-            if(c.outputDtype.empty() || c.outputDtype == c.inputDtype)
-            {
-                return c.inputDtype;
-            }
             return c.inputDtype + "->" + c.outputDtype;
         };
         size_t shown = 0;
@@ -908,12 +874,8 @@ bool generateSupportClaimsForCurrentArch(const std::filesystem::path& sidecarPat
                      << "\n\n";
             for(const auto& conflict : condensed.conflictingObservations)
             {
-                const std::string dtypeDisplay
-                    = (conflict.outputDtype.empty() || conflict.outputDtype == conflict.inputDtype)
-                          ? conflict.inputDtype
-                          : conflict.inputDtype + "->" + conflict.outputDtype;
-                artifact << "(\"" << conflict.opChain << "\", \"" << dtypeDisplay << "\", \""
-                         << conflict.layout << "\")\n";
+                artifact << "(\"" << conflict.opChain << "\", \"" << conflict.inputDtype << "->"
+                         << conflict.outputDtype << "\", \"" << conflict.layout << "\")\n";
                 artifact << "  supported by:\n";
                 for(const auto& t : conflict.supportedBy)
                 {
@@ -962,8 +924,7 @@ bool generateSupportClaimsForCurrentArch(const std::filesystem::path& sidecarPat
                           << " more)\n";
                 break;
             }
-            const std::string dtypeDisplay = (in == out) ? in : in + "->" + out;
-            std::cerr << "    (\"" << op << "\", \"" << dtypeDisplay << "\", \"" << layout
+            std::cerr << "    (\"" << op << "\", \"" << in << "->" << out << "\", \"" << layout
                       << "\")\n";
         }
     }

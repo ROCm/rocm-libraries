@@ -4,9 +4,8 @@
 # Schema reference: dnn-providers/integration-tests/docs/support-claims-schema.md
 
 [meta]
-version = 3
+version = 4
 engine  = "MIOPEN_ENGINE"
-
 [[supported]]
 arch = "gfx1151"
 platform = "windows"
@@ -24,7 +23,7 @@ op_chains = [
     "BatchnormInferenceVarianceExt",
     "BatchnormInferenceVarianceExt + Pointwise:RELU_FWD",
 ]
-io_dtypes = ["bf16", "fp16", "fp32"]
+io_dtype_pairs = ["bf16->bf16", "fp16->fp16", "fp32->fp32"]
 layouts = ["NCDHW", "NCHW", "NCL", "NDHWC", "NHWC", "NLC"]
 
 [[supported.matchers]]
@@ -36,7 +35,7 @@ op_chains = [
     "BatchnormInferenceVarianceExt + Pointwise:RELU_FWD[lower_clip]",
     "BatchnormInferenceVarianceExt + Pointwise:RELU_FWD[upper_clip]",
 ]
-io_dtypes = ["bf16", "fp16", "fp32"]
+io_dtype_pairs = ["bf16->bf16", "fp16->fp16", "fp32->fp32"]
 layouts = ["NCHW", "NCL", "NHWC", "NLC"]
 
 [[supported.matchers]]
@@ -45,5 +44,5 @@ op_chains = [
     "ConvFprop",
     "ConvWgrad",
 ]
-io_dtypes = ["bf16", "fp16", "fp32"]
+io_dtype_pairs = ["bf16->bf16", "fp16->fp16", "fp32->fp32"]
 layouts = ["NCDHW", "NCHW", "NDHWC", "NHWC"]
