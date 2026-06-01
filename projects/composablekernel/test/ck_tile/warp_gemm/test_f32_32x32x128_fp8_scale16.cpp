@@ -354,10 +354,9 @@ TYPED_TEST(WGScale16Test, Scale16_32x32x128_TransposeC)
     C_ref.SetZero();
     reference_mx_gemm<AType, BType, e8m0_t, e8m0_t, CType, CType>(
         A, B.transpose(), C_ref, sA, sB.transpose());
-    auto C_ref_T = C_ref.transpose();
 
     const float max_acc = *std::max_element(C_ref.mData.begin(), C_ref.mData.end());
     const auto rtol     = ck_tile::get_relative_threshold<AType, CType, CType>(K);
     const auto atol     = ck_tile::get_absolute_threshold<AType, CType, CType>(max_acc, K);
-    EXPECT_TRUE(check_err(C, C_ref_T, "Scale16 32x32x128 TransposeC error.", rtol, atol));
+    EXPECT_TRUE(check_err(C, C_ref, "Scale16 32x32x128 TransposeC error.", rtol, atol));
 }
