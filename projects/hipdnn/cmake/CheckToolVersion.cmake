@@ -56,20 +56,27 @@ function(checkToolVersion TOOL_BINARY TOOL_NAME EXPECTED_VERSION VERSION_REGEX
         if(NOT TOOL_MAJOR_VERSION STREQUAL EXPECTED_VERSION)
             message(
                 WARNING
-                    "${TOOL_NAME} version mismatch! Expected: ${EXPECTED_VERSION}, Found: ${TOOL_MAJOR_VERSION}, Full version: ${VERSION_OUTPUT}"
+                    "${TOOL_NAME} version mismatch! Expected: ${EXPECTED_VERSION}, "
+                    "Found: ${TOOL_MAJOR_VERSION}, "
+                    "Path: ${TOOL_BINARY}, "
+                    "Full version: ${VERSION_OUTPUT}"
             )
+            set(${TOOL_NAME}_VERSION_MATCHED FALSE PARENT_SCOPE)
         else()
             string(REPLACE "{VERSION}" "${TOOL_MAJOR_VERSION}" SUCCESS_MSG
                            "${SUCCESS_MESSAGE_FORMAT}"
             )
             string(REPLACE "{PATH}" "${TOOL_BINARY}" SUCCESS_MSG "${SUCCESS_MSG}")
+            string(APPEND SUCCESS_MSG " -- ${VERSION_OUTPUT}")
             message(STATUS "${SUCCESS_MSG}")
+            set(${TOOL_NAME}_VERSION_MATCHED TRUE PARENT_SCOPE)
         endif()
         # Set the major version in parent scope for potential use
         set(${TOOL_NAME}_MAJOR_VERSION ${TOOL_MAJOR_VERSION} PARENT_SCOPE)
     else()
         message(WARNING "Could not determine ${TOOL_NAME} version from: ${VERSION_OUTPUT}")
         set(${TOOL_NAME}_MAJOR_VERSION "unknown" PARENT_SCOPE)
+        set(${TOOL_NAME}_VERSION_MATCHED FALSE PARENT_SCOPE)
     endif()
 endfunction()
 
@@ -130,6 +137,14 @@ function(findAndCheckTool OUTPUT_VAR TOOL_NAME EXPECTED_VERSION VERSION_REGEX ER
             ${${OUTPUT_VAR}} "${TOOL_NAME}" ${EXPECTED_VERSION} "${VERSION_REGEX}"
             "Found ${TOOL_NAME} version {VERSION} at {PATH}"
         )
+        if(NOT ${TOOL_NAME}_VERSION_MATCHED)
+            message(WARNING "${TOOL_NAME} disabled due to version mismatch "
+                "(expected ${EXPECTED_VERSION}). Update your environment and perform "
+                "a fresh cmake configure to set ${OUTPUT_VAR} to the needed version."
+            )
+            unset(${OUTPUT_VAR} CACHE)
+            return()
+        endif()
     endif()
 
     # Export to parent scope
