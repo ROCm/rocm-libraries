@@ -753,26 +753,18 @@ class KernelWriterAssembly(KernelWriter):
       module.add(self.defineSgpr("WrapUB", 2, wrapAlignment))  # Bytes to add to SrdB to reset address from N-1 iter to AddressB
       if kernel["ProblemType"]["MXBlockA"]:
         module.add(self.defineSgpr("WrapUMXSA", 2, wrapAlignment))  # Bytes to add to SrdA to reset address from N-1 iter to AddressMXSA
-      if kernel["ProblemType"]["MXBlockB"]:
-        module.add(self.defineSgpr("WrapUMXSB", 2, wrapAlignment))  # Bytes to add to SrdA to reset address from N-1 iter to AddressMXSB
-      if kernel["ProblemType"]["Sparse"]:
-        module.add(self.defineSgpr("WrapUMetadata", 2, wrapAlignment))  # Bytes to add to SrdMetadata to reset address from N-1 iter to AddressMetadata
-
-    isTDM = kernel["enableTDMA"] or kernel["enableTDMB"]
-    isWaveSeparated = prod(kernel["MIWaveGroup"]) >= 2
-    keepStaggerSgprsAlive = self.states.staggerUCode and isTDM
-
-    if self.states.staggerUCode and not keepStaggerSgprsAlive:
-      self.addSgprVarToPool("WrapUA")
-      self.addSgprVarToPool("WrapUB")
-      if kernel["ProblemType"]["MXBlockA"]:
         self.addSgprVarToPool("WrapUMXSA")
       if kernel["ProblemType"]["MXBlockB"]:
+        module.add(self.defineSgpr("WrapUMXSB", 2, wrapAlignment))  # Bytes to add to SrdA to reset address from N-1 iter to AddressMXSB
         self.addSgprVarToPool("WrapUMXSB")
+      if kernel["ProblemType"]["Sparse"]:
+        module.add(self.defineSgpr("WrapUMetadata", 2, wrapAlignment))  # Bytes to add to SrdMetadata to reset address from N-1 iter to AddressMetadata
+      self.addSgprVarToPool("WrapUA")
+      self.addSgprVarToPool("WrapUB")
 
     if self.states.a.numSgprGlobalReadIncs > 0:
       module.add(self.defineSgpr("GlobalReadIncsA", self.states.a.numSgprGlobalReadIncs))
-      if not (keepStaggerSgprsAlive or isWaveSeparated):
+      if prod(kernel["MIWaveGroup"]) < 2:
         self.addSgprVarToPool("GlobalReadIncsA")
     if kernel["ProblemType"]["MXBlockA"] and self.states.mxsa.numSgprGlobalReadIncs > 0:
       module.add(self.defineSgpr("GlobalReadIncsMXSA", self.states.mxsa.numSgprGlobalReadIncs))
@@ -780,7 +772,7 @@ class KernelWriterAssembly(KernelWriter):
         self.addSgprVarToPool("GlobalReadIncsMXSA")
     if self.states.b.numSgprGlobalReadIncs > 0:
       module.add(self.defineSgpr("GlobalReadIncsB", self.states.b.numSgprGlobalReadIncs))
-      if not (keepStaggerSgprsAlive or isWaveSeparated):
+      if prod(kernel["MIWaveGroup"]) < 2:
         self.addSgprVarToPool("GlobalReadIncsB")
     if kernel["ProblemType"]["MXBlockB"] and self.states.mxsb.numSgprGlobalReadIncs > 0:
       module.add(self.defineSgpr("GlobalReadIncsMXSB", self.states.mxsb.numSgprGlobalReadIncs))
@@ -5977,42 +5969,24 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # Calculate and apply stagger offsets and edge
   ##############################################################################
-  @staticmethod
-  def _isTdmTensor(kernel, tc):
-    # Explicit tc set so future tensor chars do not get classified by accident.
-    # Metadata is intentionally absent: TDM metadata uses tdmMetadataGroup0 directly
-    # instead of passing tc=="Metadata" through this A/B tensor helper.
-    if tc in ("A", "MXSA"):
-      return kernel.get("enableTDMA", False)
-    if tc in ("B", "MXSB"):
-      return kernel.get("enableTDMB", False)
-    return False
-
   def calculateStagger(self, kernel, tP):
     imod = Module("calculateStagger")
     tc = tP["tensorChar"]
-    isTDM = self._isTdmTensor(kernel, tc)
 
-    if not isTDM:
-      assert (kernel["BufferLoad"])
+    assert (kernel["BufferLoad"])
 
     with self.allocTmpSgpr(3) as tmpSgprInfo:
       staggerTmp    = tmpSgprInfo.idx
       incSparseSgpr = tmpSgprInfo.idx + 2
 
       #---
-      imod.addComment1("addr += (StaggerUIter) * GlobalReadIncs%s+%u"% (tc, self.states.unrollIdx))
+      imod.addComment1("SRDs += (StaggerUIter) * GlobalReadIncs%s+%u"% (tc, self.states.unrollIdx))
 
       # Calculate the stagger byte offset
       imod.addModuleAsFlatItems(self.s_mul_i64_i32(
                 sgpr(staggerTmp), sgpr(staggerTmp+1), \
                 sgpr("StaggerUIter"), sgpr("GlobalReadIncs%s+%u"%(tc, self.states.unrollIdx)), \
                 " stagger byte offset"))
-
-      # Apply TDM stagger now while staggerTmp still holds StaggerUIter * GlobalReadIncs.
-      # The Sparse and PGR>=3 paths below both reuse staggerTmp for other computations.
-      if isTDM:
-        self._applyStaggerTDM(imod, kernel, tP, staggerTmp)
 
       # Amount of bytes to add to get back to start.
       # on the llop iteration which matches StaggerUIter, this offset added instead of GlobalReadInc
@@ -6036,18 +6010,9 @@ class KernelWriterAssembly(KernelWriter):
                   src1=sgpr("WrapU%s+1"%tc), \
                   comment="remove one iteration"))
 
-      # Apply stagger offset to A/B SRD (TDM A/B is handled separately above)
-      if not isTDM:
-        imod.add(self.incrementSrd(tP, sgpr(staggerTmp), sgpr(staggerTmp+1)))
+      imod.add(self.incrementSrd(tP, sgpr(staggerTmp), sgpr(staggerTmp+1)))
 
-      # Sparse metadata SRD stagger. Three mutually exclusive metadata storage modes:
-      #   - DirectToVgprSparseMetadata: metadata lives in VGPR (incrementMetadataSrd)
-      #   - enableTDMMetadata: metadata SRD is tdmMetadataGroup0 (TDM hardware path)
-      #   - regular global: metadata SRD is tP["tpsMetadata"]
-      # DTV and TDM both plumb WrapUMetadata + GlobalReadIncsMetadata through; the regular
-      # global path is left to upstream semantics (unchanged from prior behavior).
-      if kernel["ProblemType"]["Sparse"] and \
-         (kernel["DirectToVgprSparseMetadata"] or kernel["enableTDMMetadata"]) and \
+      if kernel["ProblemType"]["Sparse"] and kernel["DirectToVgprSparseMetadata"] and \
          ((kernel["ProblemType"]["Sparse"] == 2 and tP["isB"]) or (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"])):
         imod.addComment1("SRDs += (StaggerUIter) * GlobalReadIncsMetadata")
 
@@ -6072,10 +6037,6 @@ class KernelWriterAssembly(KernelWriter):
 
         if kernel["DirectToVgprSparseMetadata"]:
           imod.add(self.incrementMetadataSrd(sgpr(staggerTmp), sgpr(staggerTmp+1)))
-        elif kernel["enableTDMMetadata"]:
-          self._applyStaggerTDM(imod, kernel, tP, staggerTmp,
-                                labelName="SkipStaggerMetadata", commentTag="stagger metadata",
-                                tdmGroupName="tdmMetadataGroup0")
         else:
           imod.add(self.incrementSrd(tP["tpsMetadata"], sgpr(staggerTmp), sgpr(staggerTmp+1)))
 
@@ -6102,52 +6063,6 @@ class KernelWriterAssembly(KernelWriter):
                 src1=(pf), \
                 comment="Subtract (PGR-1); StaggerUIter now contains target iteration to wrap"))
     return imod
-
-  ##############################################################################
-  # TDM: apply stagger offset to TDM descriptor.
-  # Wave-separated (numWaves > 1): descriptors are aliased, so only the
-  #   matching-parity waves should apply the offset (even=A, odd=B).
-  # Non-wave-separated (numWaves == 1): A and B have independent descriptors,
-  #   all waves apply unconditionally.
-  ##############################################################################
-  def _applyStaggerTDM(self, imod, kernel, tP, offsetSgpr, labelName="SkipStagger", commentTag="stagger", tdmGroupName=None):
-    # tdmGroupName=None: derive SRD from tP and wave-parity-gate the add. In wave-separated
-    #   mode A and B share tdm{tc}Group0 SGPR but hold different per-wave values; the parity
-    #   gate ensures only the owning waves update.
-    # tdmGroupName set (e.g. "tdmMetadataGroup0" for the sparse metadata SRD): wave-uniform
-    #   add. Metadata is single-sided, but all waves run this function; non-sparse-side waves
-    #   harmlessly advance a SRD copy they never read from.
-    if tdmGroupName is None:
-      tc = tP["tensorChar"]
-      tdmGroup0 = f"tdm{tc}Group0"
-      useParityGate = prod(kernel["MIWaveGroup"]) > 1
-    else:
-      tc = "Metadata"
-      tdmGroup0 = tdmGroupName
-      useParityGate = False
-
-    skipLabel = None
-    if useParityGate:
-      wavelen = kernel["WavefrontSize"]
-      skipLabel = Label(label=f"{labelName}{tc}", comment="")
-
-      with self.allocTmpSgpr(1) as waveIdTmp:
-        imod.add(VReadfirstlaneB32(dst=sgpr(waveIdTmp.idx), src=vgpr("Serial"), comment="get tId"))
-        imod.add(SLShiftRightB32(dst=sgpr(waveIdTmp.idx), shiftHex=ceil(log2(wavelen)), src=sgpr(waveIdTmp.idx), comment="waveId"))
-        imod.add(SBitcmp1B32(src0=sgpr(waveIdTmp.idx), src1=0, comment="check wave parity"))
-
-      if "A" in tc:
-        imod.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment="skip: odd waves handle B"))
-      else:
-        imod.add(SCBranchSCC0(labelName=skipLabel.getLabelName(), comment="skip: even waves handle A"))
-
-    imod.add(SAddU32(dst=sgpr(f"{tdmGroup0}+2"), src0=sgpr(f"{tdmGroup0}+2"), \
-              src1=sgpr(offsetSgpr), comment=f"TDM addr += {commentTag} offset (lo)"))
-    imod.add(SAddCU32(dst=sgpr(f"{tdmGroup0}+3"), src0=sgpr(f"{tdmGroup0}+3"), \
-              src1=sgpr(offsetSgpr+1), comment=f"TDM addr += {commentTag} offset (hi)"))
-
-    if skipLabel is not None:
-      imod.add(skipLabel)
 
   ##############################################################################
   # Remove stagger offset (before tail loop)
@@ -6182,14 +6097,24 @@ class KernelWriterAssembly(KernelWriter):
       imod.add(SCmpEQU32(src0=sgpr("StaggerUIter"), src1=0, comment="if StaggerUIter is 0 (means StaggerU is 0), skip remove stagger"))
       imod.add(SCBranchSCC1(labelName=labelRemoveSUEnd.getLabelName(), comment="skip remove stagger"))
     # Remove stagger A(MXSA)
-    imod.add(self.removeStagger(kernel, tPA))
+    if not kernel["enableTDMA"]:
+      imod.add(self.removeStagger(kernel, tPA))
+    else:
+      #TODO: TDM
+      pass
     if "MX" in tPA:
-      imod.add(self.removeStagger(kernel, tPA["MX"]))
+      if not kernel["enableTDMA"]:
+        imod.add(self.removeStagger(kernel, tPA["MX"]))
     # Remove stagger B(MXSB)
     if "MX" in tPB:
-      imod.add(self.removeStagger(kernel, tPB["MX"]))
+      if not kernel["enableTDMB"]:
+        imod.add(self.removeStagger(kernel, tPB["MX"]))
 
-    imod.add(self.removeStagger(kernel, tPB))
+    if not kernel["enableTDMB"]:
+      imod.add(self.removeStagger(kernel, tPB))
+    else:
+      #TODO: TDM
+      pass
 
     if kernel["PrefetchGlobalRead"] >= 3:
       imod.add(labelRemoveSUEnd)
@@ -6198,7 +6123,6 @@ class KernelWriterAssembly(KernelWriter):
   def removeStagger(self, kernel, tP):
     imod = Module("removeStagger")
     tc = tP["tensorChar"]
-    isTDM = self._isTdmTensor(kernel, tc)
     imod.addComment(f" removeStagger {tc}")
     with self.allocTmpSgpr(3) as tmpSgprInfo:
       tmp = tmpSgprInfo.idx
@@ -6219,14 +6143,8 @@ class KernelWriterAssembly(KernelWriter):
         imod.add(SSubU32(dst=sgpr(tmp), src0=sgpr(tmp), src1=sgpr("WrapU%s"%tc), comment="S - WrapU"))
         imod.add(SSubBU32(dst=sgpr(tmp+1), src0=sgpr(tmp+1), src1=sgpr("WrapU%s+1"%(tc)), comment="S - WrapU"))
 
-      # Apply remove-stagger offset to A/B (TDM goes through _applyStaggerTDM)
-      if isTDM:
-        self._applyStaggerTDM(imod, kernel, tP, tmp, labelName="SkipRemoveStagger", commentTag="removeStagger")
-      else:
-        imod.add(self.incrementSrd(tP, sgpr(tmp), sgpr(tmp+1)))
+      imod.add(self.incrementSrd(tP, sgpr(tmp), sgpr(tmp+1)))
 
-      # Sparse metadata SRD remove-stagger. Mirrors calculateStagger's three metadata
-      # storage modes (DTV / TDM / regular global).
       if kernel["ProblemType"]["Sparse"] and \
          ((kernel["ProblemType"]["Sparse"] == 2 and tP["isB"]) or (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"])):
         tc = "Metadata"
@@ -6247,10 +6165,6 @@ class KernelWriterAssembly(KernelWriter):
 
         if kernel["DirectToVgprSparseMetadata"]:
           imod.add(self.incrementMetadataSrd(sgpr(tmp), sgpr(tmp+1)))
-        elif kernel["enableTDMMetadata"]:
-          self._applyStaggerTDM(imod, kernel, tP, tmp,
-                                labelName="SkipRemoveStaggerMetadata", commentTag="removeStagger metadata",
-                                tdmGroupName="tdmMetadataGroup0")
         else:
           imod.add(self.incrementSrd(tP["tpsMetadata"], sgpr(tmp), sgpr(tmp+1)))
 
@@ -10001,15 +9915,18 @@ class KernelWriterAssembly(KernelWriter):
 
     #TDM Wave Separated
     if tdmA and tdmB and tPA and tPB and numWaves > 1:
+      #TODO: TDM refactor, empty module is not required
       incCodeA = imod.add(Module("globalReadIncrementA"))
       if kernel["HalfPLR"] and prefetchIndex == 0:
         incCodeA.add(self.graIncrementMask(kernel, tPA, tPB))
-      incCodeA.add(self.tdmIncrementABWaveSperated(kernel, tPA, tPB, loopIdx, prefetchIndex))
-      # makeSchedule expects both increment modules to exist. For non-MX wave-separated
-      # TDM, B is intentionally empty because the A module advances the aliased A/B SRD.
+      incCodeA.add(self.tdmIncrementABWaveSperated(kernel, tPA, tPB))
       incCodeB = imod.add(Module("globalReadIncrementB"))
+      # if "MX" in tPA:
+      #   self.globalReadIncrement(kernel, incCodeA, loopIdx, tPA["MX"], prefetchIndex)
+      # if "MX" in tPB:
+      #   self.globalReadIncrement(kernel, incCodeB, loopIdx, tPB["MX"], prefetchIndex)
       if "MX" in tPA and "MX" in tPB:
-        incCodeB.add(self.tdmIncrementABWaveSperated(kernel, tPA["MX"], tPB["MX"], loopIdx, prefetchIndex))
+        incCodeB.add(self.tdmIncrementABWaveSperated(kernel, tPA["MX"], tPB["MX"]))
       return imod
 
     incCodeA = imod.add(Module("globalReadIncrementA"))
@@ -10019,7 +9936,7 @@ class KernelWriterAssembly(KernelWriter):
       else:
         if kernel["HalfPLR"] and prefetchIndex == 0:
           incCodeA.add(self.graIncrementMask(kernel, tPA, tPB))
-        incCodeA.add(self.tdmIncrementAB(kernel, tPA, loopIdx, prefetchIndex))
+        incCodeA.add(self.tdmIncrementAB(kernel, tPA))
       if "MX" in tPA and not tdmA:
         self.globalReadIncrement(kernel, incCodeA, loopIdx, tPA["MX"], prefetchIndex)
     incCodeB = imod.add(Module("globalReadIncrementB"))
@@ -10027,7 +9944,7 @@ class KernelWriterAssembly(KernelWriter):
       if not tdmB:
         self.globalReadIncrement(kernel, incCodeB, loopIdx, tPB, prefetchIndex)
       else:
-        incCodeB.add(self.tdmIncrementAB(kernel, tPB, loopIdx, prefetchIndex))
+        incCodeB.add(self.tdmIncrementAB(kernel, tPB))
       if "MX" in tPB and not tdmB:
         self.globalReadIncrement(kernel, incCodeB, loopIdx, tPB["MX"], prefetchIndex)
     return imod
@@ -18433,149 +18350,34 @@ class KernelWriterAssembly(KernelWriter):
 
     return mod
 
-  def tdmIncrementAB(self, kernel, tP, loopIdx=None, prefetchIndex=0) -> Module:
-    assert prod(kernel["MIWaveGroup"]) == 1
+  def tdmIncrementAB(self, kernel, tP) -> Module:
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     tc: str = tP['tensorChar']
     mod = Module("TDM increment")
-    tdmGroup0 = f"tdm{tc}Group0"
-    incSgprName = f"GlobalReadIncs{tc}"
-
-    if loopIdx is not None and loopIdx == self.states.unrollIdx and self.states.staggerUCode:
-      with self.allocTmpSgpr(2) as tmpSgprInfo:
-        incTmpLo = tmpSgprInfo.idx
-        incTmpHi = tmpSgprInfo.idx + 1
-
-        if prefetchIndex:
-          mod.add(SAddU32(dst=sgpr(incTmpLo), src0=self.loopCounter(kernel, self.states.unrollIdx), \
-                  src1=prefetchIndex, comment="remove pf(%u)"%prefetchIndex))
-          mod.add(SCmpEQU32(src0=sgpr("StaggerUIter"), src1=sgpr(incTmpLo), comment="Is this wrapIter? (pf)"))
-        else:
-          mod.add(SCmpEQU32(src0=self.loopCounter(kernel, self.states.unrollIdx), \
-                    src1=sgpr("StaggerUIter"), comment="Is this the wrapIter?"))
-        mod.add(SCSelectB32(dst=sgpr(incTmpLo), src0=sgpr(f"WrapU{tc}+0"), src1=sgpr(incSgprName), \
-                comment="select WrapU or normal inc (lo)"))
-        mod.add(SCSelectB32(dst=sgpr(incTmpHi), src0=sgpr(f"WrapU{tc}+1"), src1=0, \
-                comment="select WrapU or normal inc (hi)"))
-
-        mod.add(SAddU32(dst=sgpr(f"{tdmGroup0}+2"), src0=sgpr(f"{tdmGroup0}+2"), \
-                src1=sgpr(incTmpLo), comment="TDM addr += inc (with wrap, lo)"))
-        mod.add(SAddCU32(dst=sgpr(f"{tdmGroup0}+3"), src0=sgpr(f"{tdmGroup0}+3"), \
-                src1=sgpr(incTmpHi), comment="TDM addr += inc (with wrap, hi)"))
-    else:
-      mod.add(comp.incrementGlobalAddr(tdmGroup0, incSgprName))
-
-    if kernel["TDMSplit"] and not ("MXS" in tc) and not kernel["ProblemType"]["Sparse"]:
-      mod.add(SSubU32(sgpr(f"{tdmGroup0}+2"), sgpr(f"{tdmGroup0}+2"), sgpr(f"tdm{tc}GlobalSplitIncs"), f"tdm{tc} Global Split Incs sub"))
-      mod.add(SSubU32(sgpr(f"{tdmGroup0}+1"), sgpr(f"{tdmGroup0}+1"), sgpr(f"tdm{tc}LdsSplitIncs"), f"tdm{tc} Lds Split Incs sub"))
-
-    if (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"]) or \
+    mod.add(comp.incrementGlobalAddr(f"tdm{tc}Group0", f"GlobalReadIncs{tc}"))
+    if (kernel["TDMSplit"] and not ("MXS" in tc) and not kernel["ProblemType"]["Sparse"]):
+      mod.add(SSubU32(sgpr(f"tdm{tc}Group0+2"), sgpr(f"tdm{tc}Group0+2"), sgpr(f"tdm{tc}GlobalSplitIncs"), f"tdm{tc} Global Split Incs sub"))
+      mod.add(SSubU32(sgpr(f"tdm{tc}Group0+1"), sgpr(f"tdm{tc}Group0+1"), sgpr(f"tdm{tc}LdsSplitIncs"), f"tdm{tc} Lds Split Incs sub"))
+    if kernel["ProblemType"]["Sparse"] == 1 and tP["isA"] or \
        (kernel["ProblemType"]["Sparse"] == 2 and tP["isB"]):
-      if loopIdx is not None and loopIdx == self.states.unrollIdx and self.states.staggerUCode:
-        with self.allocTmpSgpr(2) as tmpSgprInfo:
-          incTmpLo = tmpSgprInfo.idx
-          incTmpHi = tmpSgprInfo.idx + 1
-
-          if prefetchIndex:
-            mod.add(SAddU32(dst=sgpr(incTmpLo), src0=self.loopCounter(kernel, self.states.unrollIdx), \
-                    src1=prefetchIndex, comment="remove pf(%u)"%prefetchIndex))
-            mod.add(SCmpEQU32(src0=sgpr("StaggerUIter"), src1=sgpr(incTmpLo), comment="Is this wrapIter? (metadata pf)"))
-          else:
-            mod.add(SCmpEQU32(src0=self.loopCounter(kernel, self.states.unrollIdx), \
-                      src1=sgpr("StaggerUIter"), comment="Is this the wrapIter? (metadata)"))
-          mod.add(SCSelectB32(dst=sgpr(incTmpLo), src0=sgpr("WrapUMetadata+0"), src1=sgpr("GlobalReadIncsMetadata"), \
-                  comment="select WrapUMetadata or normal inc (lo)"))
-          mod.add(SCSelectB32(dst=sgpr(incTmpHi), src0=sgpr("WrapUMetadata+1"), src1=0, \
-                  comment="select WrapUMetadata or normal inc (hi)"))
-
-          mod.add(SAddU32(dst=sgpr("tdmMetadataGroup0+2"), src0=sgpr("tdmMetadataGroup0+2"), \
-                  src1=sgpr(incTmpLo), comment="TDM metadata addr += inc (with wrap, lo)"))
-          mod.add(SAddCU32(dst=sgpr("tdmMetadataGroup0+3"), src0=sgpr("tdmMetadataGroup0+3"), \
-                  src1=sgpr(incTmpHi), comment="TDM metadata addr += inc (with wrap, hi)"))
-      else:
-        mod.add(comp.incrementGlobalAddr("tdmMetadataGroup0", "GlobalReadIncsMetadata"))
-
+      mod.add(comp.incrementGlobalAddr("tdmMetadataGroup0", "GlobalReadIncsMetadata"))
     return mod
 
-  def tdmIncrementABWaveSperated(self, kernel, tPA, tPB, loopIdx=None, prefetchIndex=0) -> Module:
+  def tdmIncrementABWaveSperated(self, kernel, tPA, tPB) -> Module:
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     #TODO: TDM replace by universal tdm group sgpr
     tcA: str = tPA['tensorChar']
     tcB: str = tPB['tensorChar']
     mod = Module("TDMGlobalIncrementsWaveSeparated")
-    tdmGroup0 = f"tdm{tcA}Group0"
-    incSgprName = f"tdm{tcA}{tcB}Incs"
+    mod.add(comp.incrementGlobalAddr(f"tdm{tcA}Group0", f"tdm{tcA}{tcB}Incs"))
 
-    if loopIdx is not None and loopIdx == self.states.unrollIdx and self.states.staggerUCode:
-      wavelen = kernel["WavefrontSize"]
-      with self.allocTmpSgpr(4) as tmpSgprInfo:
-        incTmpLo = tmpSgprInfo.idx
-        incTmpHi = tmpSgprInfo.idx + 1
-        wrapTmpLo = tmpSgprInfo.idx + 2
-        wrapTmpHi = tmpSgprInfo.idx + 3
-
-        with self.allocTmpSgpr(1) as waveIdTmp:
-          mod.add(VReadfirstlaneB32(dst=sgpr(waveIdTmp.idx), src=vgpr("Serial"), comment="get tId"))
-          mod.add(SLShiftRightB32(dst=sgpr(waveIdTmp.idx), shiftHex=ceil(log2(wavelen)), \
-                  src=sgpr(waveIdTmp.idx), comment="waveId"))
-          mod.add(SBitcmp1B32(src0=sgpr(waveIdTmp.idx), src1=0, comment="check wave parity"))
-        mod.add(SCSelectB32(dst=sgpr(wrapTmpLo), src0=sgpr(f"WrapU{tcB}+0"), src1=sgpr(f"WrapU{tcA}+0"), \
-                comment="select WrapU based on wave parity (lo)"))
-        mod.add(SCSelectB32(dst=sgpr(wrapTmpHi), src0=sgpr(f"WrapU{tcB}+1"), src1=sgpr(f"WrapU{tcA}+1"), \
-                comment="select WrapU based on wave parity (hi)"))
-
-        if prefetchIndex:
-          mod.add(SAddU32(dst=sgpr(incTmpLo), src0=self.loopCounter(kernel, self.states.unrollIdx), \
-                  src1=prefetchIndex, comment="remove pf(%u)"%prefetchIndex))
-          mod.add(SCmpEQU32(src0=sgpr("StaggerUIter"), src1=sgpr(incTmpLo), comment="Is this wrapIter? (pf)"))
-        else:
-          mod.add(SCmpEQU32(src0=self.loopCounter(kernel, self.states.unrollIdx), \
-                    src1=sgpr("StaggerUIter"), comment="Is this the wrapIter?"))
-        mod.add(SCSelectB32(dst=sgpr(incTmpLo), src0=sgpr(wrapTmpLo), src1=sgpr(incSgprName), \
-                comment="select WrapU or normal inc (lo)"))
-        mod.add(SCSelectB32(dst=sgpr(incTmpHi), src0=sgpr(wrapTmpHi), src1=0, \
-                comment="select WrapU or normal inc (hi)"))
-
-        mod.add(SAddU32(dst=sgpr(f"{tdmGroup0}+2"), src0=sgpr(f"{tdmGroup0}+2"), \
-                src1=sgpr(incTmpLo), comment="TDM addr += inc (with wrap, lo)"))
-        mod.add(SAddCU32(dst=sgpr(f"{tdmGroup0}+3"), src0=sgpr(f"{tdmGroup0}+3"), \
-                src1=sgpr(incTmpHi), comment="TDM addr += inc (with wrap, hi)"))
-    else:
-      mod.add(comp.incrementGlobalAddr(tdmGroup0, incSgprName))
-
-    if kernel["TDMSplit"] and not (("MXS" in tcA) or ("MXS" in tcB)) and not kernel["ProblemType"]["Sparse"]:
-      mod.add(SSubU32(sgpr(f"{tdmGroup0}+2"), sgpr(f"{tdmGroup0}+2"), sgpr("tdmABGlobalSplitIncs"), "tdmAB Global Split Incs sub"))
-      mod.add(SSubU32(sgpr(f"{tdmGroup0}+1"), sgpr(f"{tdmGroup0}+1"), sgpr("tdmABLdsSplitIncs"), "tdmAB Lds Split Incs sub"))
+    if (kernel["TDMSplit"] and not (("MXS" in tcA) or ("MXS" in tcB)) and not kernel["ProblemType"]["Sparse"]):
+      mod.add(SSubU32(sgpr(f"tdm{tcA}Group0+2"), sgpr(f"tdm{tcA}Group0+2"), sgpr("tdmABGlobalSplitIncs"), "tdmAB Global Split Incs sub"))
+      mod.add(SSubU32(sgpr(f"tdm{tcA}Group0+1"), sgpr(f"tdm{tcA}Group0+1"), sgpr("tdmABLdsSplitIncs"), "tdmAB Lds Split Incs sub"))
 
     if kernel["ProblemType"]["Sparse"] == 1 and tPA["is_sparse"] \
       or kernel["ProblemType"]["Sparse"] == 2 and tPB["is_sparse"]:
-      if loopIdx is not None and loopIdx == self.states.unrollIdx and self.states.staggerUCode:
-        # Wave-uniform: all waves update tdmMetadataGroup0; only sparse-side waves actually
-        # issue loads via this SRD. Mirrors the non-stagger metadata path above which is also
-        # emitted wave-uniformly.
-        with self.allocTmpSgpr(2) as tmpSgprInfo:
-          incTmpLo = tmpSgprInfo.idx
-          incTmpHi = tmpSgprInfo.idx + 1
-
-          if prefetchIndex:
-            mod.add(SAddU32(dst=sgpr(incTmpLo), src0=self.loopCounter(kernel, self.states.unrollIdx), \
-                    src1=prefetchIndex, comment="remove pf(%u)"%prefetchIndex))
-            mod.add(SCmpEQU32(src0=sgpr("StaggerUIter"), src1=sgpr(incTmpLo), comment="Is this wrapIter? (metadata pf)"))
-          else:
-            mod.add(SCmpEQU32(src0=self.loopCounter(kernel, self.states.unrollIdx), \
-                      src1=sgpr("StaggerUIter"), comment="Is this the wrapIter? (metadata)"))
-          mod.add(SCSelectB32(dst=sgpr(incTmpLo), src0=sgpr("WrapUMetadata+0"), src1=sgpr("GlobalReadIncsMetadata"), \
-                  comment="select WrapUMetadata or normal inc (lo)"))
-          mod.add(SCSelectB32(dst=sgpr(incTmpHi), src0=sgpr("WrapUMetadata+1"), src1=0, \
-                  comment="select WrapUMetadata or normal inc (hi)"))
-
-          mod.add(SAddU32(dst=sgpr("tdmMetadataGroup0+2"), src0=sgpr("tdmMetadataGroup0+2"), \
-                  src1=sgpr(incTmpLo), comment="TDM metadata addr += inc (with wrap, lo)"))
-          mod.add(SAddCU32(dst=sgpr("tdmMetadataGroup0+3"), src0=sgpr("tdmMetadataGroup0+3"), \
-                  src1=sgpr(incTmpHi), comment="TDM metadata addr += inc (with wrap, hi)"))
-      else:
-        mod.add(comp.incrementGlobalAddr("tdmMetadataGroup0", "GlobalReadIncsMetadata"))
-
+      mod.add(comp.incrementGlobalAddr("tdmMetadataGroup0", "GlobalReadIncsMetadata"))
     return mod
 
   def tdmSetupIncrementWaveSeparated(self, kernel, tpA, tpB) -> Module:

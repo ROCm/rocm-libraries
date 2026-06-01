@@ -78,8 +78,6 @@ BenchmarkProblems:
         - SourceSwap: [1]
         - WavefrontSize: [32]
         - TDMInst: [3]
-        - StaggerU: [0, 4, 16]
-        - StaggerUMapping: [0, 1]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -142,8 +140,6 @@ BenchmarkProblems:
         - SourceSwap: [1]
         - WavefrontSize: [32]
         - TDMInst: [3]
-        - StaggerU: [0, 4, 16]
-        - StaggerUMapping: [0, 1]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -206,8 +202,6 @@ BenchmarkProblems:
         - SourceSwap: [1]
         - WavefrontSize: [32]
         - TDMInst: [3]
-        - StaggerU: [0, 4, 16]
-        - StaggerUMapping: [0, 1]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -270,8 +264,6 @@ BenchmarkProblems:
         - SourceSwap: [1]
         - WavefrontSize: [32]
         - TDMInst: [3]
-        - StaggerU: [0, 4, 16]
-        - StaggerUMapping: [0, 1]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
