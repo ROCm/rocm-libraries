@@ -1619,7 +1619,7 @@ try
         return 0;
     }
 
-    if(vm.count("alpha_stride") || vm.count("beta_stride"))
+    if((vm.count("alpha_stride") || vm.count("beta_stride")) && (arg.stride_c || arg.stride_d))
     {
         arg.alpha_beta_stride   = true;
         arg.pointer_mode_host   = false;
