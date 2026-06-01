@@ -576,7 +576,8 @@ namespace rocsparse
                                                                      analysis_policy,
                                                                      rocsparse_solve_policy_auto,
                                                                      &csrsv_info,
-                                                                     buffer)));
+                                                                     buffer,
+                                                                     sptrsv_descr->m_batch_count)));
                 sptrsv_descr->set_stage(rocsparse_sptrsv_stage_analysis);
                 switch(analysis_policy)
                 {
@@ -618,7 +619,8 @@ namespace rocsparse
                                                                      analysis_policy,
                                                                      rocsparse_solve_policy_auto,
                                                                      &csrsv_info,
-                                                                     buffer)));
+                                                                     buffer,
+                                                                     sptrsv_descr->m_batch_count)));
 
                 switch(analysis_policy)
                 {

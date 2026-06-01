@@ -39,7 +39,8 @@ namespace rocsparse
                                     rocsparse_analysis_policy   analysis,
                                     rocsparse_solve_policy      solve,
                                     rocsparse_csrsv_info*       p_csrsv_info,
-                                    void*                       temp_buffer);
+                                    void*                       temp_buffer,
+                                    int64_t                     batch_count = 1);
 
     rocsparse_status coosv_solve_buffer_size(rocsparse_handle            handle,
                                              rocsparse_operation         trans,

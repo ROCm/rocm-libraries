@@ -447,7 +447,8 @@ rocsparse_status rocsparse::csrsv_analysis(rocsparse_handle            handle,
                                            rocsparse_analysis_policy   analysis_policy,
                                            rocsparse_solve_policy      solve_policy,
                                            rocsparse_csrsv_info*       p_csrsv_info,
-                                           void*                       temp_buffer)
+                                           void*                       temp_buffer,
+                                           int64_t                     batch_count)
 {
     ROCSPARSE_ROUTINE_TRACE;
     // Quick return if possible
@@ -514,15 +515,27 @@ rocsparse_status rocsparse::csrsv_analysis(rocsparse_handle            handle,
                                                    temp_buffer));
 
     //
-    // Allocate the numeric (exact) singular-pivot buffer here, during analysis,
-    // rather than in solve. The solve routine may be executed inside a HIP graph
-    // capture region, in which case a stream-ordered allocation performed there is
-    // graph-owned and becomes invalid once the captured graph is torn down. The
-    // buffer persists in the info object and is read later by csrsv_zero_pivot
-    // (outside of capture), so it must be created in the (non-captured) analysis
-    // phase and synchronized, exactly like the symbolic zero-pivot buffer above.
+    // Pre-allocate the numeric (exact) singular-pivot buffer here, in the
+    // (non-captured) analysis phase. The solve routine still requests this buffer,
+    // but when it already exists with the right size that request only
+    // re-initializes it instead of allocating it (see position_t::
+    // create_position_async). This matters because solve may run inside a HIP graph
+    // capture region: a stream-ordered allocation performed there is graph-owned and
+    // is freed once the captured graph is torn down, while the buffer pointer
+    // persists in the info object and is read afterwards by csrsv_zero_pivot
+    // (outside of capture), causing a use of unmapped device memory.
     //
-    csrsv_info->create_singularity_numeric_exact(1, A->col_type, handle->stream);
+    // The buffer is sized per right-hand-side batch, so it must be pre-allocated
+    // with the same batch_count that solve will use (1 for the legacy csrsv API, the
+    // batched right-hand-side count for sptrsv); a mismatch would make the later
+    // singularity query reject the buffer.
+    //
+    csrsv_info->create_singularity_numeric_exact(batch_count, A->col_type, handle->stream);
+
+    // Synchronize so the allocation and its initialization are complete before
+    // returning: solve may consume this buffer from a different stream (the capture
+    // stream), and stream-ordered (hipMallocAsync) memory is only safe to access
+    // from another stream once the allocating stream has been synchronized.
     RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
 
     return rocsparse_status_success;
