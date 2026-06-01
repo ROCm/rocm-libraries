@@ -1,0 +1,88 @@
+{
+  "version": 1,
+  "_comment": "CK_DSL-owned architecture SSOT. Hardware facts only (no pipeline/scheduler vocabulary). MFMA atom sets are hardware-verified on alola (see dsl_docs/architecture/multi_arch_data_layout.md). Each MMA row: {family,a,b,c,m,n,k,op_id}; op_id is the opaque backend handle (matches IRBuilder.mfma_* today).",
+  "arches": {
+    "gfx942": {
+      "family": "cdna",
+      "target_family": "gfx9_mfma",
+      "wave_size": 64,
+      "lds_capacity_bytes": 65536,
+      "vmcnt_bits": 4,
+      "memory": {
+        "has_async_lds": true,
+        "has_ds_read_tr": false,
+        "buffer_load_max_dwords": 4
+      },
+      "limits": {
+        "max_threads_per_block": 1024,
+        "vgprs": 512,
+        "agprs": 256,
+        "sgprs": 102
+      },
+      "mma": [
+        {"family": "mma", "a": "fp16", "b": "fp16", "c": "fp32", "m": 16, "n": 16, "k": 16, "op_id": "mfma_f32_16x16x16_f16"},
+        {"family": "mma", "a": "fp16", "b": "fp16", "c": "fp32", "m": 32, "n": 32, "k": 8,  "op_id": "mfma_f32_32x32x8_f16"},
+        {"family": "mma", "a": "bf16", "b": "bf16", "c": "fp32", "m": 16, "n": 16, "k": 16, "op_id": "mfma_f32_16x16x16_bf16"},
+        {"family": "mma", "a": "fp8",  "b": "fp8",  "c": "fp32", "m": 16, "n": 16, "k": 32, "op_id": "mfma_f32_16x16x32_fp8"},
+        {"family": "mma", "a": "fp8",  "b": "fp8",  "c": "fp32", "m": 32, "n": 32, "k": 16, "op_id": "mfma_f32_32x32x16_fp8"},
+        {"family": "mma", "a": "bf8",  "b": "bf8",  "c": "fp32", "m": 16, "n": 16, "k": 32, "op_id": "mfma_f32_16x16x32_bf8"},
+        {"family": "mma", "a": "bf8",  "b": "bf8",  "c": "fp32", "m": 32, "n": 32, "k": 16, "op_id": "mfma_f32_32x32x16_bf8"}
+      ]
+    },
+    "gfx950": {
+      "family": "cdna",
+      "target_family": "gfx950",
+      "wave_size": 64,
+      "lds_capacity_bytes": 163840,
+      "vmcnt_bits": 6,
+      "memory": {
+        "has_async_lds": true,
+        "has_ds_read_tr": true,
+        "buffer_load_max_dwords": 4
+      },
+      "limits": {
+        "max_threads_per_block": 1024,
+        "vgprs": 512,
+        "agprs": 256,
+        "sgprs": 102
+      },
+      "mma": [
+        {"family": "mma", "a": "fp16", "b": "fp16", "c": "fp32", "m": 16, "n": 16, "k": 16, "op_id": "mfma_f32_16x16x16_f16"},
+        {"family": "mma", "a": "fp16", "b": "fp16", "c": "fp32", "m": 16, "n": 16, "k": 32, "op_id": "mfma_f32_16x16x32_f16"},
+        {"family": "mma", "a": "fp16", "b": "fp16", "c": "fp32", "m": 32, "n": 32, "k": 8,  "op_id": "mfma_f32_32x32x8_f16"},
+        {"family": "mma", "a": "fp16", "b": "fp16", "c": "fp32", "m": 32, "n": 32, "k": 16, "op_id": "mfma_f32_32x32x16_f16"},
+        {"family": "mma", "a": "bf16", "b": "bf16", "c": "fp32", "m": 16, "n": 16, "k": 16, "op_id": "mfma_f32_16x16x16_bf16"},
+        {"family": "mma", "a": "bf16", "b": "bf16", "c": "fp32", "m": 16, "n": 16, "k": 32, "op_id": "mfma_f32_16x16x32_bf16"},
+        {"family": "mma", "a": "fp8",  "b": "fp8",  "c": "fp32", "m": 16, "n": 16, "k": 32,  "op_id": "mfma_f32_16x16x32_fp8"},
+        {"family": "mma", "a": "fp8",  "b": "fp8",  "c": "fp32", "m": 32, "n": 32, "k": 16,  "op_id": "mfma_f32_32x32x16_fp8"},
+        {"family": "mma", "a": "bf8",  "b": "bf8",  "c": "fp32", "m": 16, "n": 16, "k": 32,  "op_id": "mfma_f32_16x16x32_bf8"},
+        {"family": "mma", "a": "bf8",  "b": "bf8",  "c": "fp32", "m": 32, "n": 32, "k": 16,  "op_id": "mfma_f32_32x32x16_bf8"},
+        {"family": "mma", "a": "fp4",  "b": "fp4",  "c": "fp32", "m": 16, "n": 16, "k": 128, "op_id": "mfma_f32_16x16x128_fp4"},
+        {"family": "mma", "a": "fp6",  "b": "fp6",  "c": "fp32", "m": 16, "n": 16, "k": 96,  "op_id": "mfma_f32_16x16x96_fp6"}
+      ]
+    },
+    "gfx1151": {
+      "_comment": "RDNA3.5 (Strix Halo APU). WAVE32, WMMA not MFMA. Datalayout/triple identical to CDNA on this ROCm (clang-verified on ctr-halo). WMMA f16/bf16 16x16x16 ABI hardware-verified: llvm.amdgcn.wmma.f32.16x16x16.f16.v8f32.v16f16(<16 x half>,<16 x half>,<8 x float>)->-<8 x float>; A frag lane l=row l%16 (K=0..15), B frag lane l=col l%16 (K=0..15), D lane l slot i=(row 2i+l/16, col l%16).",
+      "family": "rdna",
+      "target_family": "gfx11_rdna",
+      "wave_size": 32,
+      "lds_capacity_bytes": 65536,
+      "vmcnt_bits": 6,
+      "memory": {
+        "has_async_lds": false,
+        "has_ds_read_tr": false,
+        "buffer_load_max_dwords": 4
+      },
+      "limits": {
+        "max_threads_per_block": 1024,
+        "vgprs": 256,
+        "agprs": 0,
+        "sgprs": 106
+      },
+      "mma": [
+        {"family": "wmma", "a": "fp16", "b": "fp16", "c": "fp32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_f32_16x16x16_f16"},
+        {"family": "wmma", "a": "bf16", "b": "bf16", "c": "fp32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_f32_16x16x16_bf16"}
+      ]
+    }
+  }
+}

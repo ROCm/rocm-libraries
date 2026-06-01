@@ -1,0 +1,17 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+#ifndef CK_DSL_PROVIDER_VERSION_H
+#define CK_DSL_PROVIDER_VERSION_H
+
+// clang-format off
+// NOLINTBEGIN(modernize-macro-to-enum)
+#define CK_DSL_PROVIDER_VERSION_MAJOR @CK_DSL_PROVIDER_VERSION_MAJOR@
+#define CK_DSL_PROVIDER_VERSION_MINOR @CK_DSL_PROVIDER_VERSION_MINOR@
+#define CK_DSL_PROVIDER_VERSION_PATCH @CK_DSL_PROVIDER_VERSION_PATCH@
+#define CK_DSL_PROVIDER_VERSION_TWEAK "@CK_DSL_PROVIDER_VERSION_TWEAK@"
+#define CK_DSL_PROVIDER_VERSION_STRING "@CK_DSL_PROVIDER_VERSION_STRING@"
+// NOLINTEND(modernize-macro-to-enum)
+// clang-format on
+
+#endif // CK_DSL_PROVIDER_VERSION_H

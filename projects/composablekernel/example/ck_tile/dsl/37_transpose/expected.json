@@ -1,0 +1,5 @@
+{
+  "kind": "transpose_fp16",
+  "min_tflops": 0.0,
+  "notes": "Transpose is memory-bound; the verify gate requires bit-exact output (``bad=0``)."
+}

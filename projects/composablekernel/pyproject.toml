@@ -22,16 +22,32 @@ dependencies = []
 
 [tool.setuptools]
 packages = [
-    "ck4inductor", 
-    "ck4inductor.include", 
-    "ck4inductor.library", 
-    "ck4inductor.universal_gemm", 
-    "ck4inductor.batched_universal_gemm", 
+    "ck_dsl",
+    "ck_dsl.core",
+    "ck_dsl.runtime",
+    "ck_dsl.helpers",
+    "ck_dsl.analysis",
+    "ck_dsl.benchmark",
+    "ck_dsl.instances",
+    "ck_dsl.examples",
+    "ck4inductor",
+    "ck4inductor.include",
+    "ck4inductor.library",
+    "ck4inductor.universal_gemm",
+    "ck4inductor.batched_universal_gemm",
     "ck4inductor.grouped_conv_fwd",
     "ck4inductor.ck_tile_universal_gemm",
 ]
 
 [tool.setuptools.package-dir]
+ck_dsl = "python/ck_dsl"
+"ck_dsl.core" = "python/ck_dsl/core"
+"ck_dsl.runtime" = "python/ck_dsl/runtime"
+"ck_dsl.helpers" = "python/ck_dsl/helpers"
+"ck_dsl.analysis" = "python/ck_dsl/analysis"
+"ck_dsl.benchmark" = "python/ck_dsl/benchmark"
+"ck_dsl.instances" = "python/ck_dsl/instances"
+"ck_dsl.examples" = "python/ck_dsl/examples"
 ck4inductor = "python/ck4inductor"
 "ck4inductor.universal_gemm" = "python/ck4inductor/universal_gemm"
 "ck4inductor.batched_universal_gemm" = "python/ck4inductor/batched_universal_gemm"
