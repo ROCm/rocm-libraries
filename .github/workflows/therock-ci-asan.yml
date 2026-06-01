@@ -160,14 +160,13 @@ jobs:
       # time via ARTIFACT_GROUP detection.
       artifact_group: "gfx90a-asan"
       test_runs_on: "linux-gfx90a-gpu-rocm"
-      # ASAN linker is memory-heavy (multi-GB working set during final
-      # links of libhipblaslt.so with sanitizer instrumentation). The
-      # default `azure-linux-scale-rocm` runner has been observed to OOM
-      # mid-link under sanitizer flags; TheRock routes its own sanitizer
-      # builds to `azure-linux-scale-rocm-heavy-ramdisk` for the same
-      # reason (see TheRock build_tools/github_actions/amdgpu_family_matrix.py
-      # BUILD_RUNNER_LABELS["linux"]["sanitizer"]). Reuse the same pool.
-      build_runs_on: "azure-linux-scale-rocm-heavy-ramdisk"
+      # Default azure-linux-scale-rocm pool. TheRock routes its full
+      # sanitizer builds (~30 subprojects) to heavy-ramdisk because the
+      # final link aggregates multi-GB working sets and the SSD-backed
+      # default OOMs. We build ONE subproject (hipblaslt), so the default
+      # pool is sized fine and the smaller heavy-ramdisk pool's longer
+      # queue is wasted wait. Reassess if libhipblaslt.so link OOMs.
+      build_runs_on: "azure-linux-scale-rocm"
 
   summary:
     name: "TheRock CI ASAN Summary"
