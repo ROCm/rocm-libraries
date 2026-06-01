@@ -1092,6 +1092,24 @@ struct GroupedConvolutionForwardKernel
                 }
             }
 
+            // The split-image instance is designed for large tensors. If GemmN < NPerBlock
+            // the weight tile covers more output channels than exist (K < NPerBlock), which
+            // means the split_image piece setup was never done by the invoker. The resulting
+            // division-by-zero in the piece index computation causes every workgroup to write
+            // to tile (0,0), leaving the rest of the output zeroed.
+            if constexpr(EnableSplitImage)
+            {
+                if(kargs.GemmN < TilePartitioner::NPerBlock)
+                {
+                    LogInfo("Split-image instance requires GemmN (=ConvK=",
+                            kargs.GemmN,
+                            ") >= NPerBlock (=",
+                            number<TilePartitioner::NPerBlock>{},
+                            ").");
+                    return false;
+                }
+            }
+
             return true;
 
         } // else (GEMM path)
