@@ -34,24 +34,17 @@ struct callback_test_data
     double scalar;
 };
 
-// Function that's called when a HIP runtime error happens during
-// setup of callback functions.  The string describes what went
-// wrong.
-typedef std::function<void(const std::string&)> callback_hip_error_handler;
-
 // Get a pointer (on the host) to a load callback device function for
 // the current device
-void* get_load_callback_host(fft_array_type             itype,
-                             fft_precision              precision,
-                             callback_hip_error_handler runtime_err_handler,
-                             bool                       round_trip_inverse = false);
+void* get_load_callback_host(fft_array_type itype,
+                             fft_precision  precision,
+                             bool           round_trip_inverse = false);
 
 // Get a pointer (on the host) to a store callback device function for
 // the current device
-void* get_store_callback_host(fft_array_type             otype,
-                              fft_precision              precision,
-                              callback_hip_error_handler runtime_err_handler,
-                              bool                       round_trip_inverse = false);
+void* get_store_callback_host(fft_array_type otype,
+                              fft_precision  precision,
+                              bool           round_trip_inverse = false);
 
 // Collect load callback function and data pointers for the given
 // params.  We'd expect N pointers for N input bricks on the current
@@ -61,7 +54,6 @@ void* get_store_callback_host(fft_array_type             otype,
 void get_rank_load_callbacks(const fft_params&                          params,
                              std::vector<void*>&                        load_cb_func,
                              std::vector<void*>&                        load_cb_data,
-                             callback_hip_error_handler                 runtime_err_handler,
                              bool                                       round_trip_inverse,
                              std::vector<gpubuf_t<callback_test_data>>& all_cb_data);
 
@@ -73,7 +65,6 @@ void get_rank_load_callbacks(const fft_params&                          params,
 void get_rank_store_callbacks(const fft_params&                          params,
                               std::vector<void*>&                        store_cb_func,
                               std::vector<void*>&                        store_cb_data,
-                              callback_hip_error_handler                 runtime_err_handler,
                               bool                                       round_trip_inverse,
                               std::vector<gpubuf_t<callback_test_data>>& all_cb_data);
 

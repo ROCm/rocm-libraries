@@ -39,6 +39,7 @@
 #include "../shared/arithmetic.h"
 #include "../shared/array_validator.h"
 #include "../shared/client_data_layout_helpers.h"
+#include "../shared/client_except.h"
 #include "../shared/data_gen_device.h"
 #include "../shared/data_gen_host.h"
 #include "../shared/device_properties.h"
@@ -115,15 +116,8 @@ inline Tsize var_size(const fft_precision precision, const fft_array_type type)
         var_size = sizeof(double);
         break;
     }
-    switch(type)
-    {
-    case fft_array_type_complex_interleaved:
-    case fft_array_type_hermitian_interleaved:
+    if(array_type_is_interleaved(type))
         var_size *= 2;
-        break;
-    default:
-        break;
-    }
     return var_size;
 }
 
@@ -1921,21 +1915,11 @@ public:
     }
     bool is_interleaved() const
     {
-        if(itype == fft_array_type_complex_interleaved
-           || itype == fft_array_type_hermitian_interleaved)
-            return true;
-        if(otype == fft_array_type_complex_interleaved
-           || otype == fft_array_type_hermitian_interleaved)
-            return true;
-        return false;
+        return array_type_is_interleaved(itype) || array_type_is_interleaved(otype);
     }
     bool is_planar() const
     {
-        if(itype == fft_array_type_complex_planar || itype == fft_array_type_hermitian_planar)
-            return true;
-        if(otype == fft_array_type_complex_planar || otype == fft_array_type_hermitian_planar)
-            return true;
-        return false;
+        return array_type_is_planar(itype) || array_type_is_planar(otype);
     }
     bool is_real() const
     {
@@ -2369,11 +2353,13 @@ public:
 
     // Specific exception type for work buffer allocation failure.
     // Tests that hit this can't fit on the GPU and should be skipped.
-    struct work_buffer_alloc_failure : public std::runtime_error
+    struct work_buffer_alloc_failure : public hip_runtime_error
     {
         const size_t attempted_size;
-        work_buffer_alloc_failure(const std::string& s, size_t _attempted_size = 0)
-            : std::runtime_error(s)
+        work_buffer_alloc_failure(const std::string& s,
+                                  size_t             _attempted_size = 0,
+                                  hipError_t         hip_status      = hipErrorUnknown)
+            : hip_runtime_error(s, hip_status)
             , attempted_size(_attempted_size)
         {
         }
