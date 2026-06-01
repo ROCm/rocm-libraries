@@ -78,7 +78,7 @@ private:
 
     // Populated by compile()
     std::unique_ptr<ICompiledProgram> _compiledProgram;
-    std::unique_ptr<IRunnableKernel> _runnableKernel;
+    std::vector<std::unique_ptr<IRunnableKernel>> _runnableKernels;
 };
 
 } // namespace hip_kernel_provider::rmsnorm

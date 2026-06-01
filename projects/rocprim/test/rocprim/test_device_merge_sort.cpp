@@ -498,8 +498,8 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
 
 TEST(RocprimDeviceSortTests, LargeIndices)
 {
-    if (should_skip(true))
-        GTEST_SKIP() << "Skipping large test under Valgrind";
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
 
     using key_type = uint8_t;
 
