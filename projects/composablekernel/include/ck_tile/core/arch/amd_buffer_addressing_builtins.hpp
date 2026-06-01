@@ -2005,6 +2005,7 @@ CK_TILE_DEVICE void amd_async_buffer_load(CK_TILE_LDS_ADDR T* smem,
                                              static_cast<index_t>(coherence));
 #ifdef __clang__
 #pragma clang diagnostic pop
+#endif
 #else
     // Suppress unused parameter warnings
     (void)smem;

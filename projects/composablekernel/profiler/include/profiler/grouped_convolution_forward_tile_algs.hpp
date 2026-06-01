@@ -90,13 +90,6 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
     float avg_time;
     bool valid = true;
 
-    using DataType =
-        std::conditional_t<SIGNATURE.data_type == ckb::DataType::FP32,
-                           float,
-                           std::conditional_t<SIGNATURE.data_type == ckb::DataType::FP16,
-                                              ck_tile::half_t,
-                                              ck_tile::bfloat16_t>>;
-
     auto reference = ckt::alloc_outputs(args);
     if(do_verification)
     {
@@ -181,6 +174,7 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
                     // Check with cpu verification to get a values
                     run_cpu_validation<SIGNATURE>(args, outputs, reference.get());
                 }
+            }
             }
         }
         else
