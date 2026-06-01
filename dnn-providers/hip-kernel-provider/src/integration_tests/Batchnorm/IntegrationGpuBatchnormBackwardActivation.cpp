@@ -92,7 +92,7 @@ protected:
 
         graph::PointwiseAttributes activBwdAttrs;
         activBwdAttrs.set_mode(PointwiseMode::RELU_BWD);
-        auto dxDrelu = graphObj.pointwise(bnY, dyTensorAttr, activBwdAttrs);
+        auto dxDrelu = graphObj.pointwise(dyTensorAttr, bnY, activBwdAttrs);
 
         graph::BatchnormBackwardAttributes bnBwdAttrs;
         bnBwdAttrs.set_saved_mean_and_inv_variance(meanTensorAttr, invVarianceTensorAttr);

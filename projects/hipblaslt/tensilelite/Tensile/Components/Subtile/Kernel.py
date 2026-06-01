@@ -75,8 +75,8 @@ from .SubtileGeometry import (
   ABInputGeometry,
   ABGRGeometry,
   ABLRGeometry,
-  GRTag_1x2, GRTag_2x2, GRTag_TLU1,
-  LRTag_1x2, LRTag_TLU1,
+  GRTag_1x1, GRTag_1x2, GRTag_2x2, GRTag_TLU1,
+  LRTag_1x1, LRTag_1x2, LRTag_TLU1,
   ABTilePair,
   CDTileGeometry,
   MXScaleInputGeometry,
@@ -289,8 +289,8 @@ AB_B4 = ABTilePair(
     lr=ABLRGeometry(tag=LRTag_1x2(), **_B4, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=32)), # 128-bit LR: 32 fp4 along K
 )
 AB_B8 = ABTilePair(
-    gr=ABGRGeometry(tag=GRTag_1x2(), **_B8, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=16)),                  # 128-bit GR: 16 fp8 along K
-    lr=ABLRGeometry(tag=LRTag_1x2(), **_B8, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=32), loadWidth=32), # 256-bit LR: 32 fp8 along K
+    gr=ABGRGeometry(tag=GRTag_1x1(), **_B8, subtileShape=(1, 1), loadShape=LoadShape(m=1, k=16)),  # 128-bit GR: 16 fp8 along K
+    lr=ABLRGeometry(tag=LRTag_1x1(), **_B8, subtileShape=(1, 1), loadShape=LoadShape(m=1, k=16)), # 128-bit LR: 16 fp8 along K
 )
 
 AB_B4_2x2 = ABTilePair(
@@ -1223,11 +1223,13 @@ def mainLoop(writer, kernel):
   vgprBudget = writer.states.regCaps["MaxVgpr"]
   vgprUsed = writer.vgprPool.size() - writer.vgprPool.available()
 
-  candidates = [(1, 1)] if pgr == 0 else MFMASchedulerConfig.get_partition_candidates(tiA, tiB)
-  for numPartM, numPartN in candidates:
+  M = tiA.localMMATileGrid[0]
+  N = tiB.localMMATileGrid[0]
+  candidates = [(M, N)] if pgr == 0 else MFMASchedulerConfig.get_partition_candidates(tiA, tiB)
+  for partSizeM, partSizeN in candidates:
       cfg = MFMASchedulerConfig(
-          numMFMATilesM=tiA.localMMATileGrid[0],
-          numMFMATilesN=tiB.localMMATileGrid[0],
+          numMFMATilesM=M,
+          numMFMATilesN=N,
           numSubIterK=tiA.localMMATileGrid[1],
           lrA=lrAGran,
           lrB=lrBGran,
@@ -1237,17 +1239,17 @@ def mainLoop(writer, kernel):
           lrSB=lrSBGran,
           grSA=grSAGran,
           grSB=grSBGran,
-          numPartitionsM=numPartM,
-          numPartitionsN=numPartN,
+          partitionSizeM=partSizeM,
+          partitionSizeN=partSizeN,
           pgr=schedulerPgr
       )
+      
       scheduler = LogicalScheduler(cfg)
       scheduler.build()
 
       numVgpr = scheduler.getNumVgpr(tiA, tiB, scaleTiA, scaleTiB)
       if vgprUsed + numVgpr <= vgprBudget:
           break
-
   scheduler.allocVgprTiles(writer, tiA, tiB,
                            scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
   dtileInfo = writer.states.d.tileInfo

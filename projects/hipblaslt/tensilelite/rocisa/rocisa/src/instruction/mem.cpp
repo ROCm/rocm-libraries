@@ -261,6 +261,23 @@ void mem_inst(nb::module_ m_mem)
              nb::arg("srcs"),
              nb::arg("comment") = "");
 
+    nb::class_<rocisa::SMemAtomicIncInstruction, rocisa::AtomicReadWriteInstruction>(
+        m_mem, "SMemAtomicIncInstruction")
+        .def(nb::init<rocisa::InstType,
+                      const std::shared_ptr<rocisa::Container>&,
+                      const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      std::optional<rocisa::SMEMModifiers>,
+                      const std::string&>(),
+             nb::arg("instType"),
+             nb::arg("dst"),
+             nb::arg("base"),
+             nb::arg("soffset"),
+             nb::arg("smem")    = std::nullopt,
+             nb::arg("comment") = "")
+        .def("getParams", &rocisa::SMemAtomicIncInstruction::getParams)
+        .def("__str__", &rocisa::SMemAtomicIncInstruction::toString);
+
     nb::class_<rocisa::SMemAtomicDecInstruction, rocisa::AtomicReadWriteInstruction>(
         m_mem, "SMemAtomicDecInstruction")
         .def(nb::init<rocisa::InstType,
@@ -1417,6 +1434,21 @@ void mem_inst(nb::module_ m_mem)
              nb::arg("comment") = "")
         .def("__deepcopy__", [](const rocisa::DSBPermuteB32& self, const nb::dict&) {
             return new rocisa::DSBPermuteB32(self);
+        });
+
+    nb::class_<rocisa::SAtomicInc, rocisa::SMemAtomicIncInstruction>(m_mem, "SAtomicInc")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      std::optional<rocisa::SMEMModifiers>,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("base"),
+             nb::arg("soffset"),
+             nb::arg("smem")    = std::nullopt,
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::SAtomicInc& self, nb::dict&) {
+            return new rocisa::SAtomicInc(self);
         });
 
     nb::class_<rocisa::SAtomicDec, rocisa::SMemAtomicDecInstruction>(m_mem, "SAtomicDec")

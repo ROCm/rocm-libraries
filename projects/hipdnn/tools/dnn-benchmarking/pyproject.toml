@@ -34,8 +34,7 @@ dependencies = [
 ]
 
 [project.scripts]
-dnn-benchmark       = "dnn_benchmarking.cli.main:main"
-dnn-convert-shapes  = "dnn_benchmarking.tools.convert_miopen_shapes:main"
+dnn-benchmark = "dnn_benchmarking.cli.main:main"
 
 [build-system]
 requires = ["setuptools>=61.0"]
@@ -53,4 +52,6 @@ markers = [
     "slow: marks slow integration tests",
     "rocprofv3: requires rocprofv3 binary on PATH",
     "perf: requires Linux perf binary on PATH and perf_event_paranoid <= 1",
+    "rocprof_compute: requires rocprof-compute binary on PATH",
+    "profiling_strict: stricter profiling assertions (requires the slice to carry real payload, not just round-trip a skip)",
 ]

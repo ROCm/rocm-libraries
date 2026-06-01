@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2020 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <miopen/convolution.hpp>
 
@@ -39,6 +16,7 @@
 #include <miopen/generic_search_controls.hpp>
 #include <miopen/invoker.hpp>
 #include <miopen/kernel.hpp>
+#include <miopen/kernel_tuning_mode.hpp>
 #include <miopen/solution.hpp>
 #include <miopen/tensor.hpp>
 #include <miopen/visit_float.hpp>
@@ -282,6 +260,9 @@ std::vector<Solution> EvaluateConvSolutions(const ExecutionContext& ctx,
                                             const std::vector<solver::ConvSolution> solutions,
                                             bool model_result = false)
 {
+    // Set verification phase for kernel logging
+    ScopedKernelPhase phase_scope(KernelPhase::SolverTuning);
+
     std::vector<Solution> eval_sols;
 
     // test timing of solver reported by system db
@@ -300,7 +281,15 @@ std::vector<Solution> EvaluateConvSolutions(const ExecutionContext& ctx,
     {
         const auto id      = solver::Id{conv_sol->solver_id};
         const auto& solver = id.GetSolver();
+
+        // Log the solver being benchmarked during tuning/Find phase
         CompileSolution(id, ctx, problem);
+
+        if(IsLoggingKernel())
+        {
+            std::string solution_name = id.ToString();
+            LogSolutionName(solution_name, id.Value(), conv_sol->workspace_sz);
+        }
 
         std::vector<solver::ConvSolution> conv_sols;
         conv_sols.emplace_back(*conv_sol);
@@ -1121,6 +1110,13 @@ void ConvolutionDescriptor::ConvolutionForwardImmediate(const Handle& handle,
         const auto invoker    = LoadOrPrepareInvoker(ctx, problem, solver_id);
         const auto invoke_ctx = conv::DataInvokeParams{
             tensors, workSpace, workSpaceSize, this->attribute.gfx90aFp16alt.GetFwd()};
+        if(IsLoggingKernel())
+        {
+            // Log the selected solver for execution phase kernel tracking
+            std::string solution_name =
+                (solver_id.Value() != 0) ? solver_id.ToString() : std::string("UNKNOWN");
+            LogSolutionName(solution_name, solver_id.Value(), workSpaceSize);
+        }
         invoker(handle, invoke_ctx);
     });
 }
@@ -1333,6 +1329,13 @@ void ConvolutionDescriptor::ConvolutionBackwardImmediate(const Handle& handle,
         const auto invoker    = LoadOrPrepareInvoker(ctx, problem, solver_id);
         const auto invoke_ctx = conv::DataInvokeParams{
             tensors, workSpace, workSpaceSize, this->attribute.gfx90aFp16alt.GetBwd()};
+        if(IsLoggingKernel())
+        {
+            // Log the selected solver for execution phase kernel tracking
+            std::string solution_name =
+                (solver_id.Value() != 0) ? solver_id.ToString() : std::string("UNKNOWN");
+            LogSolutionName(solution_name, solver_id.Value(), workSpaceSize);
+        }
         invoker(handle, invoke_ctx);
     });
 }
@@ -1540,6 +1543,10 @@ void ConvolutionDescriptor::ConvolutionWrwImmediate(const Handle& handle,
         const auto invoker    = LoadOrPrepareInvoker(ctx, problem, solver_id);
         const auto invoke_ctx = conv::WrWInvokeParams{
             tensors, workSpace, workSpaceSize, this->attribute.gfx90aFp16alt.GetWrW()};
+        if(IsLoggingKernel())
+        {
+            LogSolutionName(solver_id.ToString(), solver_id.Value(), workSpaceSize);
+        }
         invoker(handle, invoke_ctx);
     });
 }
