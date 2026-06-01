@@ -95,10 +95,15 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    # Non-blocking: ASAN findings are surfaced but do not fail the PR
-    # check until the suppression set is established. Flip to false when
-    # the run is stable.
-    continue-on-error: true
+    # NOTE on non-blocking behavior:
+    # `continue-on-error` is NOT valid on a reusable-workflow-call job
+    # (it is a `runs-on` job key). Setting it here makes the workflow
+    # YAML invalid — GitHub then demands `runs-on` and flags `uses`,
+    # `secrets`, `with` as foreign. The non-blocking signal is delivered
+    # instead by the `summary` job below, which inspects this job's
+    # `result` and never re-raises a failure of its own. Promote to
+    # required by flipping the summary job to fail on
+    # `needs.asan.result != 'success'`.
     uses: ./.github/workflows/therock-ci-linux.yml
     secrets: inherit
     with:
@@ -182,4 +187,9 @@ jobs:
             exit 0
           fi
           echo "ASAN job result: ${ASAN}"
-          # Intentionally do not fail; the asan job is continue-on-error.
+          # Intentionally do not fail. The asan reusable-workflow-call job
+          # cannot carry `continue-on-error` itself (invalid YAML key for
+          # that job type), so non-blocking semantics are delivered here:
+          # this summary job always exits 0 regardless of the asan result.
+          # Promote to required by changing this to:
+          #   [[ "$ASAN" == "success" ]] || exit 1
