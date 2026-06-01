@@ -10,18 +10,29 @@
 # 3. Runs affected tests using ctest with regex filtering
 # 4. Optionally processes ninja build traces
 #
+# Dry-run / smoke mode (DRY_RUN=true or --dry-run/--smoke):
+#   Instead of compiling and testing, validates the selected executables against
+#   ninja's real target namespace (`ninja -t targets all`) via main.py validate,
+#   writing a structured smoke_result.json verdict. This proves every selected
+#   target is one ninja actually knows about - without invoking the compiler or a
+#   GPU - a fast, GPU-free gate that catches test-selection bugs (e.g. a target
+#   name ninja does not know) before committing to a real build.
+#   (`ninja -n` is deliberately NOT used: CK's GLOB CONFIGURE_DEPENDS makes every
+#   ninja call regenerate build.ninja, so `ninja -n` exits 0 for any target.)
+#
 # Exit codes:
 #   0 = Success
-#   1 = Build or test failure
+#   1 = Build or test failure (or, in dry-run, an unresolvable target)
 #
 # Environment variables:
 #   WORKSPACE_ROOT - Path to workspace root
 #   BUILD_DIR - Build directory (defaults to current directory)
 #   PARALLEL - Number of parallel jobs for dependency analysis (default: 32)
-#   NINJA_JOBS - Number of ninja parallel jobs (required)
+#   NINJA_JOBS - Number of ninja parallel jobs (required unless DRY_RUN=true)
 #   ARCH_NAME - Architecture name for trace files (required if PROCESS_NINJA_TRACE=true)
 #   PROCESS_NINJA_TRACE - Set to "true" to process ninja build traces (default: false)
 #   NINJA_FTIME_TRACE - Set to "true" to run ClangBuildAnalyzer (default: false)
+#   DRY_RUN - Set to "true" to validate the build graph without building/testing (default: false)
 
 set -e
 
@@ -31,9 +42,18 @@ WORKSPACE_ROOT="${WORKSPACE_ROOT:-$(cd ${BUILD_DIR}/.. && pwd)}"
 PARALLEL="${PARALLEL:-32}"
 PROCESS_NINJA_TRACE="${PROCESS_NINJA_TRACE:-false}"
 NINJA_FTIME_TRACE="${NINJA_FTIME_TRACE:-false}"
+DRY_RUN="${DRY_RUN:-false}"
+
+# Allow --dry-run / --smoke as a CLI alternative to DRY_RUN=true
+for arg in "$@"; do
+    case "$arg" in
+        --dry-run|--smoke) DRY_RUN=true ;;
+    esac
+done
 
 # Validate required parameters
-if [ -z "$NINJA_JOBS" ]; then
+# NINJA_JOBS is not needed in dry-run mode (ninja -n does not compile).
+if [ "$DRY_RUN" != "true" ] && [ -z "$NINJA_JOBS" ]; then
     echo "Error: NINJA_JOBS environment variable is required"
     exit 1
 fi
@@ -51,6 +71,7 @@ echo "WORKSPACE_ROOT: ${WORKSPACE_ROOT}"
 echo "NINJA_JOBS: ${NINJA_JOBS}"
 echo "PROCESS_NINJA_TRACE: ${PROCESS_NINJA_TRACE}"
 echo "NINJA_FTIME_TRACE: ${NINJA_FTIME_TRACE}"
+echo "DRY_RUN: ${DRY_RUN}"
 echo "-----------------------------------------"
 
 cd "${BUILD_DIR}"
@@ -64,6 +85,12 @@ export PARALLEL
 
 if ! bash "${SCRIPT_DIR}/smart_build_ci.sh"; then
     # Full build required (exit code 1 from smart_build_ci.sh)
+    if [ "$DRY_RUN" = "true" ]; then
+        echo "🧪 DRY RUN - full build mode: no selection to validate (everything is built)"
+        echo "✓ Dry run complete (full build mode)"
+        exit 0
+    fi
+
     echo "⚠ Full build mode - building and testing everything"
     ninja -j${NINJA_JOBS} check
 
@@ -93,6 +120,37 @@ if [ "$BUILD_TARGETS" = "none" ]; then
 fi
 
 # Step 3: Build only affected targets
+if [ "$DRY_RUN" = "true" ]; then
+    NUM_TARGETS=$(echo ${BUILD_TARGETS} | wc -w)
+    echo "🧪 DRY RUN - validating ${NUM_TARGETS} selected target(s), no compilation, no tests"
+    # Validate the selection against ninja's real target namespace.
+    # NOTE: `ninja -n <target>` is NOT used as the oracle: CK uses CMake GLOB
+    # CONFIGURE_DEPENDS, so every ninja call regenerates build.ninja and
+    # `ninja -n` then exits 0 for any target (real or bogus). The reliable
+    # oracle is the target list from `ninja -t targets all`.
+    ninja -t targets all > ninja_targets.txt
+    python3 "${SCRIPT_DIR}/main.py" validate \
+        tests_to_run.json \
+        --ninja-targets ninja_targets.txt \
+        --output smoke_result.json
+    echo "✓ Dry run complete - selection validated against ninja target namespace"
+    exit 0
+fi
+
+# Observability (non-fatal): record a structured verdict on whether the selection
+# maps to real ninja targets. This does NOT change build/test behavior - it only
+# emits smoke_result.json / smoke_result.xml for CI to archive. The real build
+# below proceeds regardless of the verdict.
+echo ""
+echo "Recording selection validation (observability, non-fatal)..."
+ninja -t targets all > ninja_targets.txt 2>/dev/null || true
+python3 "${SCRIPT_DIR}/main.py" validate \
+    tests_to_run.json \
+    --ninja-targets ninja_targets.txt \
+    --output smoke_result.json \
+    --junit smoke_result.xml \
+    || echo "⚠ selection validation flagged issues (see smoke_result.json) - continuing with build"
+
 echo "✓ Selective build - building only affected targets"
 echo "Building targets: ${BUILD_TARGETS}"
 ninja -j${NINJA_JOBS} ${BUILD_TARGETS}

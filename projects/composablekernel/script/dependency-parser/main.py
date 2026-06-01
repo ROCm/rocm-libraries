@@ -38,6 +38,13 @@ def run_selective_test_filter(args):
     filter_main()
 
 
+def run_validate_selection(args):
+    from src.validate_selection import main as validate_main
+
+    sys.argv = ["validate_selection.py"] + args
+    validate_main()
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Unified Dependency Analysis & Selective Testing Tool"
@@ -124,6 +131,32 @@ def main():
         "--output", help="Output JSON file", default="tests_to_run.json"
     )
 
+    # Selection validation (pre-build smoke gate)
+    parser_validate = subparsers.add_parser(
+        "validate",
+        help="Validate a selection (tests_to_run.json) against ninja's real target namespace",
+    )
+    parser_validate.add_argument(
+        "tests_json", help="Path to tests_to_run.json from select"
+    )
+    parser_validate.add_argument(
+        "--ninja-targets",
+        required=True,
+        help="Path to `ninja -t targets all` output",
+    )
+    parser_validate.add_argument(
+        "--ctest",
+        help="Optional path to `ctest -N` output for a secondary test-name check",
+    )
+    parser_validate.add_argument(
+        "--output",
+        default="smoke_result.json",
+        help="Output JSON verdict file (default: smoke_result.json)",
+    )
+    parser_validate.add_argument(
+        "--junit", help="Optional path to write a JUnit XML report"
+    )
+
     # Code auditing
     parser_audit = subparsers.add_parser(
         "audit", help="List all files and their dependent executables"
@@ -167,6 +200,14 @@ def main():
         if args.output:
             filter_args += ["--output", args.output]
         run_selective_test_filter(filter_args)
+    elif args.command == "validate":
+        validate_args = [args.tests_json, "--ninja-targets", args.ninja_targets]
+        if args.ctest:
+            validate_args += ["--ctest", args.ctest]
+        validate_args += ["--output", args.output]
+        if args.junit:
+            validate_args += ["--junit", args.junit]
+        run_validate_selection(validate_args)
     elif args.command == "audit":
         run_selective_test_filter([args.depmap_json, "--audit"])
     elif args.command == "optimize":
