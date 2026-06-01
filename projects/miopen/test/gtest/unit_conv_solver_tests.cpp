@@ -36,28 +36,26 @@ using Tol = miopen::unit_tests::Tolerances;
 
 namespace {
 
-[[clang::no_destroy]] std::vector<Gpu> gpus{
-                      Gpu::gfx900,
-                      Gpu::gfx906,
-                      Gpu::gfx908,
-                      Gpu::gfx90A,
-                      Gpu::gfx94X,
-                      Gpu::gfx950,
-                      Gpu::gfx103X,
-                      Gpu::gfx110X,
-                      Gpu::gfx115X,
-                      Gpu::gfx120X};
+[[clang::no_destroy]] std::vector<Gpu> gpus{Gpu::gfx900,
+                                            Gpu::gfx906,
+                                            Gpu::gfx908,
+                                            Gpu::gfx90A,
+                                            Gpu::gfx94X,
+                                            Gpu::gfx950,
+                                            Gpu::gfx103X,
+                                            Gpu::gfx110X,
+                                            Gpu::gfx115X,
+                                            Gpu::gfx120X};
 
-[[clang::no_destroy]] std::vector<miopenDataType_t> types{
-                                    miopenHalf,
-                                    miopenFloat,
-                                    miopenInt32,
-                                    miopenInt8,
-                                    miopenBFloat16,
-                                    miopenDouble,
-                                    miopenFloat8_fnuz,
-                                    miopenBFloat8_fnuz,
-                                    miopenInt64};
+[[clang::no_destroy]] std::vector<miopenDataType_t> types{miopenHalf,
+                                                          miopenFloat,
+                                                          miopenInt32,
+                                                          miopenInt8,
+                                                          miopenBFloat16,
+                                                          miopenDouble,
+                                                          miopenFloat8_fnuz,
+                                                          miopenBFloat8_fnuz,
+                                                          miopenInt64};
 
 float GetValue(Gpu gpu, miopenDataType_t type)
 {

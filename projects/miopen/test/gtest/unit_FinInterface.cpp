@@ -182,7 +182,8 @@ const auto& GetSolversInfo<ConvSolverInfo>()
     // correctly added to the solver registry. There is no need to keep it up to date by adding new
     // solvers as all new solvers will be added to the registry according to the existing template,
     // and it won't improve test coverage (and will only waste extra time).
-    [[clang::no_destroy]] static const std::unordered_map<std::string, ConvSolverInfo> solver_info = {
+    [[clang::no_destroy]] static const std::unordered_map<std::string,
+                                                          ConvSolverInfo> solver_info = {
         // clang-format off
         {"ConvAsm3x3U",                                         {1,     false,  true,   "miopenConvolutionFwdAlgoDirect"}},
         {"ConvAsm1x1U",                                         {2,     false,  true,   "miopenConvolutionFwdAlgoDirect"}},
@@ -284,16 +285,17 @@ template <>
 const auto& GetSolversInfo<BatchNormSolverInfo>()
 {
     /// \ref fin_interface_solver_info_coverage
-    [[clang::no_destroy]] static const std::unordered_map<std::string, BatchNormSolverInfo> solver_info = {
-        // clang-format off
+    [[clang::no_destroy]] static const std::unordered_map<std::string, BatchNormSolverInfo>
+        solver_info = {
+            // clang-format off
         //   solver-name               id,  isDynamic, isTunable
         {"BnFwdTrainingSpatial",       {113,   false,  true}},
         {"BnFwdTrainingPerActivation", {116,   false,  false}},
         {"BnBwdTrainingSpatial",       {117,   false,  true}},
         {"BnBwdTrainingPerActivation", {119,   false,  false}},
         {"BnFwdInference",             {120,   true,  false}},
-        // clang-format on
-    };
+            // clang-format on
+        };
 
     return solver_info;
 }
@@ -327,12 +329,13 @@ template <>
 const auto& GetSolverConfigs<BatchNormSolverConfig>()
 {
     /// \ref fin_interface_solver_config_coverage
-    [[clang::no_destroy]] static const std::unordered_map<std::string, BatchNormSolverConfig> configs = {
-        // clang-format off
+    [[clang::no_destroy]] static const std::unordered_map<std::string, BatchNormSolverConfig>
+        configs = {
+            // clang-format off
         /// \todo add configs
         {"DummySolver", {42}},
-        // clang-format on
-    };
+            // clang-format on
+        };
 
     return configs;
 }

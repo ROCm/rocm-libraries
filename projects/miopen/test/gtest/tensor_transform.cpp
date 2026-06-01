@@ -42,7 +42,7 @@ using TestCase = std::tuple<NamedContainer<std::vector<int>>,
                             NamedContainer<std::vector<int>>,
                             NamedParameter<int>>;
 
-#if (MIO_TRANSFORM_DEBUG)
+#if(MIO_TRANSFORM_DEBUG)
 template <class T>
 static void show_tensor(const tensor<T>& ten)
 {
@@ -244,7 +244,7 @@ struct verify_tensor_transform_scale
             dst_offset,
             src_offset);
 
-#if (MIO_TRANSFORM_DEBUG)
+#if(MIO_TRANSFORM_DEBUG)
         printf("\n CPU: \n");
         show_tensor(superCpu_dst);
         printf("\n");
@@ -273,7 +273,7 @@ struct verify_tensor_transform_scale
                                 dst_offset);
 
         superGpu_dst.data = handle.Read<T>(super_dev_dst, superGpu_dst.data.size());
-#if (MIO_TRANSFORM_DEBUG)
+#if(MIO_TRANSFORM_DEBUG)
         printf("\n GPU: \n");
         show_tensor(superGpu_dst);
         printf("\n");
@@ -297,7 +297,7 @@ inline auto GenSmokeTestCases()
     [[clang::no_destroy]] static const std::vector<std::vector<float>> all_scales{{1.0f, 0.0f},
                                                                                   {0.5f, 0.5f}};
 
-#if (MIO_TRANSFORM_DEBUG)
+#if(MIO_TRANSFORM_DEBUG)
 #define NROWS 6
 #define NCOLS 6
 #define LENS_CONTENT NROWS, NCOLS
@@ -334,7 +334,7 @@ inline auto GenFullTestCases()
     [[clang::no_destroy]] static const std::vector<std::vector<float>> all_scales{
         {1.0f, 0.0f}, {1.0f, 0.5f}, {0.5f, 0.0f}, {0.5f, 0.5f}};
 
-#if (MIO_TRANSFORM_DEBUG)
+#if(MIO_TRANSFORM_DEBUG)
 #define NROWS 6
 #define NCOLS 6
 #define LENS_CONTENT NROWS, NCOLS
@@ -445,7 +445,7 @@ struct tensor_transform_test : public testing::TestWithParam<TestCase>
         super_src = tensor<T>{superLens_src}.generate(tensor_elem_gen_integer{max_value});
         super_dst = tensor<T>{superLens_dst}.generate(tensor_elem_gen_integer{max_value});
 
-#if (MIO_TRANSFORM_DEBUG)
+#if(MIO_TRANSFORM_DEBUG)
         printf("\n SRC: \n");
         show_tensor(super_src);
         printf("\n DST: \n");

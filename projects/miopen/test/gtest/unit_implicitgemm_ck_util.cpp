@@ -216,7 +216,7 @@ struct StubbedCKArgsWithSplitKValidation
 };
 
 [[clang::no_destroy]] std::map<std::string, std::set<int>>
-StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel = {};
+    StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel = {};
 
 /**
  * @brief Test cases for IsCKSplitKSupportedGeneric

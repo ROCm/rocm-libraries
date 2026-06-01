@@ -74,8 +74,9 @@ int LayoutStringToCode(const std::string& layout, bool is3d)
 };
 
 // Dummy fill_valid_kernels for testing
-[[clang::no_destroy]] static std::function<std::vector<std::string>(const miopen::conv::ProblemDescription&)>
-    fill_valid_kernels = [](const miopen::conv::ProblemDescription&) { return dummy_kernels; };
+[[clang::no_destroy]] static std::function<std::vector<std::string>(
+    const miopen::conv::ProblemDescription&)> fill_valid_kernels =
+    [](const miopen::conv::ProblemDescription&) { return dummy_kernels; };
 
 // Default validation function: accepts all kernel/split_k combinations
 inline constexpr auto accept_all_combinations = [](int, int) { return true; };

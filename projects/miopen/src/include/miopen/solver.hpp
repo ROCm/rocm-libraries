@@ -101,7 +101,8 @@ protected:
             new(&result) std::string(ComputeSolverDbId(type_name_bare<Solver>()));
         }
 #else  // !BUILD_SHARED_LIBS || !MIOPEN_ENABLE_FIN_INTERFACE
-        [[clang::no_destroy]] static const auto result = ComputeSolverDbId(type_name_bare<Solver>());
+        [[clang::no_destroy]] static const auto result =
+            ComputeSolverDbId(type_name_bare<Solver>());
 #endif // !BUILD_SHARED_LIBS || !MIOPEN_ENABLE_FIN_INTERFACE
         return result;
     }

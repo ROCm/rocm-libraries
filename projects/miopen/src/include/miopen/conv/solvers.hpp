@@ -1821,10 +1821,9 @@ struct ConvMPBidirectWinograd final : ConvSolver
     // kernel_file_name for solver identification
     static fs::path GetSolverFileNames(int id)
     {
-        [[clang::no_destroy]] static const fs::path names[3] = {
-                                          "xform_bidirect_winograd_data.s",
-                                          "xform_bidirect_winograd_filter.s",
-                                          "xform_bidirect_winograd_out.s"};
+        [[clang::no_destroy]] static const fs::path names[3] = {"xform_bidirect_winograd_data.s",
+                                                                "xform_bidirect_winograd_filter.s",
+                                                                "xform_bidirect_winograd_out.s"};
         return names[id];
     }
 
