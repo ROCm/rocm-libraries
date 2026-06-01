@@ -1,0 +1,2096 @@
+====================================================================================================================================================================================
+COMPLETE PARAMETER COVERAGE REPORT - ALL PARAMETERS ACROSS ALL ARCHITECTURES
+====================================================================================================================================================================================
+
+ARCHITECTURES ANALYZED:
+  GFX11: 12 test files
+  GFX12: 50 test files
+  GFX1250: 40 test files
+  GFX94X: 33 test files
+  GFX950: 50 test files
+
+====================================================================================================================================================================================
+SECTION 1: TRACKABLE PARAMETERS (Value Coverage Across Architectures)
+====================================================================================================================================================================================
+
+Parameter                           Category   Default    Valid Values              GFX11           GFX12           GFX1250         GFX94X          GFX950         
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+1LDSBuffer                          solution   None       [-1, 0, 1]                ✓ FULL          ✓ FULL          ✓ FULL          ✓ FULL          ✓ FULL         
+Activation                          problem    False      [False, True]             ✓ FULL          ✓ FULL          ✓ FULL          ⚠️ 1/2          ✓ FULL         
+ActivationAlt                       solution   None       [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+ActivationFuncCall                  solution   None       [False, True]             ✓ FULL          ⚠️ 1/2          ✓ FULL          ✗ MISSING       ✓ FULL         
+ActivationFused                     solution   None       [True]                    ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+ActivationNoGuard                   problem    False      [False, True]             ✗ MISSING       ✗ MISSING       ⚠️ 1/2          ✗ MISSING       ✗ MISSING      
+AdaptiveGemm                        solution   None       [0, 1]                    ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+AdaptiveGemmGSUA                    solution   None       [0, 1]                    ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+AllowNoFreeDims                     problem    False      [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+AsanBuild                           global     False      [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+AsmDebug                            global     False      [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+AssertFree0ElementMultiple          solution   None       [1, 2, 4, 8, 16, 32]      ⚠️ 2/6          ⚠️ 4/6          ✗ MISSING       ⚠️ 2/6          ⚠️ 4/6         
+AssertFree1ElementMultiple          solution   None       [1, 2, 4, 8, 16, 32]      ✗ MISSING       ⚠️ 2/6          ✗ MISSING       ⚠️ 1/6          ⚠️ 2/6         
+AssertSummationElementMultiple      solution   None       [1, 2, 4, 8, 16, 32, 64.. ✗ MISSING       ⚠️ 2/8          ✗ MISSING       ✗ MISSING       ⚠️ 5/8         
+Batched                             problem    False      [False, True]             ⚠️ 1/2          ⚠️ 1/2          ⚠️ 1/2          ⚠️ 1/2          ⚠️ 1/2         
+BufferLoad                          solution   None       [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+BufferStore                         solution   None       [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+CEqualD                             global     False      [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+CSVExportWinner                     global     False      [False, True]             ⚠️ 1/2          ⚠️ 1/2          ✗ MISSING       ⚠️ 1/2          ⚠️ 1/2         
+CSVMergeSameProblemID               global     False      [False, True]             ⚠️ 1/2          ⚠️ 1/2          ✗ MISSING       ⚠️ 1/2          ⚠️ 1/2         
+CheckASMCodeSize                    global     False      [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+ClusterBarrier                      solution   None       [False, True]             ✗ MISSING       ⚠️ 1/2          ✗ MISSING       ✗ MISSING       ✗ MISSING      
+ClusterDim                          solution   None       [[1, 1], [1, 2], [1, 3].. ✗ MISSING       ⚠️ 4/50         ✗ MISSING       ✗ MISSING       ✗ MISSING      
+ClusterLocalRead                    solution   None       [0, 1]                    ⚠️ 1/2          ✓ FULL          ✓ FULL          ⚠️ 1/2          ✓ FULL         
+ComplexConjugateA                   problem    False      [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+ComplexConjugateB                   problem    False      [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+ConvertAfterDS                      solution   None       [False, True]             ✗ MISSING       ⚠️ 1/2          ✗ MISSING       ✗ MISSING       ✓ FULL         
+DebugPersistentKernelLoopForever    solution   None       [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+DebugStreamK                        solution   None       [0, 1, 2, 3]              ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+DirectToLds                         solution   None       [0, 1, 2, 3]              ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✓ FULL         
+DirectToLdsMetadata                 solution   None       [0, 1]                    ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✓ FULL         
+DirectToVgprA                       solution   None       [False, True]             ✗ MISSING       ✓ FULL          ⚠️ 1/2          ✗ MISSING       ✓ FULL         
+DirectToVgprB                       solution   None       [False, True]             ✗ MISSING       ✓ FULL          ⚠️ 1/2          ✗ MISSING       ⚠️ 1/2         
+DirectToVgprMXSA                    solution   None       [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+DirectToVgprMXSB                    solution   None       [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+DirectToVgprSparseMetadata          solution   None       [False, True]             ⚠️ 1/2          ⚠️ 1/2          ⚠️ 1/2          ✓ FULL          ⚠️ 1/2         
+DisableAsmComments                  global     False      [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ⚠️ 1/2         
+DtlPlusLdsBuf                       solution   None       [-1, 0, 1]                ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ⚠️ 2/3         
+DumpTensors                         global     False      [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+EnableMarker                        global     False      [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+ExpandPointerSwap                   solution   None       [False, True]             ✓ FULL          ✓ FULL          ✓ FULL          ✗ MISSING       ✓ FULL         
+ExtraLatencyForLR                   solution   None       [0, 2, 4, 6, 8, 10, 12,.. ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+ExtraMiLatencyLeft                  solution   None       [-1, 0, 1, 2, 3, 4, 6, .. ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ⚠️ 1/8         
+ForceDisableShadowInit              solution   None       [False, True]             ✗ MISSING       ⚠️ 1/2          ✗ MISSING       ✗ MISSING       ⚠️ 1/2         
+ForceRedoBenchmarkProblems          global     True       [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+ForceRedoLibraryClient              global     True       [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+ForceRedoLibraryLogic               global     True       [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+GenerateSourcesAndExit              global     False      [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+GlobalReadVectorWidthA              solution   None       [-2, -1, 1, 2, 3, 4, 6,.. ⚠️ 4/10         ⚠️ 7/10         ⚠️ 1/10         ⚠️ 5/10         ⚠️ 7/10        
+GlobalReadVectorWidthB              solution   None       [-2, -1, 1, 2, 3, 4, 6,.. ⚠️ 4/10         ⚠️ 7/10         ⚠️ 1/10         ⚠️ 2/10         ⚠️ 7/10        
+GlobalSplitUAlgorithm               solution   None       ['SingleBuffer', 'Multi.. ⚠️ 2/3          ⚠️ 2/3          ⚠️ 1/3          ⚠️ 2/3          ⚠️ 2/3         
+GlobalSplitUCoalesced               solution   None       [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✓ FULL          ⚠️ 1/2         
+GlobalSplitUWorkGroupMappingRoundRobin solution   None       [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✓ FULL          ⚠️ 1/2         
+Gradient                            problem    False      [False, True]             ⚠️ 1/2          ⚠️ 1/2          ⚠️ 1/2          ✗ MISSING       ⚠️ 1/2         
+GroupLoadStore                      solution   None       [False, True]             ✗ MISSING       ⚠️ 1/2          ✗ MISSING       ✗ MISSING       ⚠️ 1/2         
+GroupedGemm                         problem    False      [False, True]             ⚠️ 1/2          ✗ MISSING       ✗ MISSING       ✗ MISSING       ⚠️ 1/2         
+HalfPLR                             solution   None       [0, 1, 2, 3]              ✗ MISSING       ✓ FULL          ✗ MISSING       ✗ MISSING       ✗ MISSING      
+HardwareMonitor                     global     True       [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+HighPrecisionAccumulate             problem    False      [False, True]             ⚠️ 1/2          ✓ FULL          ⚠️ 1/2          ⚠️ 1/2          ⚠️ 1/2         
+ISA                                 solution   None       [SemanticVersion(major=.. ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+InitCIterWmma                       solution   None       [-1, 0, 1]                ✗ MISSING       ⚠️ 2/3          ✗ MISSING       ✗ MISSING       ✗ MISSING      
+InnerUnroll                         solution   None       [1, 2, 4, 8, 16, 32, 64.. ⚠️ 1/7          ⚠️ 1/7          ✗ MISSING       ✗ MISSING       ⚠️ 3/7         
+InterleaveAlpha                     solution   None       [0, 1]                    ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+KeepBuildTmp                        global     False      [False, True]             ✗ MISSING       ⚠️ 1/2          ⚠️ 1/2          ✗ MISSING       ⚠️ 1/2         
+KernelLanguage                      solution   None       ['Assembly']              ✓ FULL          ✓ FULL          ✓ FULL          ✓ FULL          ✓ FULL         
+KernelTime                          global     False      [False, True]             ✓ FULL          ✓ FULL          ✓ FULL          ⚠️ 1/2          ⚠️ 1/2         
+LDSTrInst                           solution   None       [False, True]             ✗ MISSING       ✓ FULL          ✓ FULL          ✗ MISSING       ✓ FULL         
+LazyLibraryLoading                  global     False      [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+LdsBlockSizePerPadA                 solution   None       [-1, 0, 64, 128, 256, 5.. ⚠️ 2/8          ⚠️ 2/8          ⚠️ 2/8          ✗ MISSING       ⚠️ 3/8         
+LdsBlockSizePerPadB                 solution   None       [-1, 0, 64, 128, 256, 5.. ⚠️ 2/8          ⚠️ 2/8          ⚠️ 2/8          ✗ MISSING       ⚠️ 3/8         
+LdsBlockSizePerPadMXSA              solution   None       [-1, 0, 64, 128, 256, 5.. ✗ MISSING       ⚠️ 1/8          ✗ MISSING       ✗ MISSING       ✗ MISSING      
+LdsBlockSizePerPadMXSB              solution   None       [-1, 0, 64, 128, 256, 5.. ✗ MISSING       ⚠️ 1/8          ✗ MISSING       ✗ MISSING       ✗ MISSING      
+LdsBlockSizePerPadMetadata          solution   None       [-1, 0, 64, 128, 256, 5.. ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ⚠️ 2/8         
+LdsPadA                             solution   None       [-1, 0, 1, 2, 3, 4, 8, .. ⚠️ 2/11         ⚠️ 2/11         ⚠️ 2/11         ⚠️ 1/11         ⚠️ 6/11        
+LdsPadB                             solution   None       [-1, 0, 1, 2, 3, 4, 8, .. ⚠️ 2/11         ⚠️ 2/11         ⚠️ 2/11         ⚠️ 1/11         ⚠️ 6/11        
+LdsPadMXSA                          solution   None       [-1, 0, 1, 2, 3, 4, 8, .. ✗ MISSING       ⚠️ 1/11         ✗ MISSING       ✗ MISSING       ✗ MISSING      
+LdsPadMXSB                          solution   None       [-1, 0, 1, 2, 3, 4, 8, .. ✗ MISSING       ⚠️ 1/11         ✗ MISSING       ✗ MISSING       ✗ MISSING      
+LdsPadMetadata                      solution   None       [-1, 0, 1, 2, 3, 4, 8]    ⚠️ 1/7          ⚠️ 1/7          ⚠️ 2/7          ⚠️ 1/7          ⚠️ 2/7         
+LibraryUpdateComment                global     False      [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+LocalReadVectorWidth                solution   None       [-1, 1, 2, 4, 8, 16, 32.. ⚠️ 1/7          ⚠️ 5/7          ⚠️ 1/7          ✗ MISSING       ⚠️ 6/7         
+LocalReadVectorWidthA               solution   None       [-1, 1, 2, 4, 8, 16, 32.. ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+LocalReadVectorWidthB               solution   None       [-1, 1, 2, 4, 8, 16, 32.. ⚠️ 1/7          ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+MIArchVgpr                          solution   None       [False, True]             ⚠️ 1/2          ⚠️ 1/2          ✗ MISSING       ✗ MISSING       ✓ FULL         
+MXBlockA                            problem    0          [0, 16, 32]               ✗ MISSING       ⚠️ 2/3          ✗ MISSING       ✗ MISSING       ⚠️ 1/3         
+MXBlockB                            problem    0          [0, 16, 32]               ✗ MISSING       ⚠️ 2/3          ✗ MISSING       ✗ MISSING       ⚠️ 1/3         
+MXLoadInst                          solution   None       ['Auto', 'TDM', 'Buffer.. ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+MXScaleFormat                       solution   None       ['Auto', 'NoSwizzle', '.. ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ⚠️ 1/4         
+MagicDivAlg                         solution   None       [0, 1, 2]                 ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+MaxLDS                              solution   None       [-1, 65536, 163840, 327.. ✗ MISSING       ⚠️ 2/4          ✗ MISSING       ✗ MISSING       ⚠️ 1/4         
+MaxOccupancy                        solution   None       [1, 2, 3, 4, 5, 6, 7, 8.. ⚠️ 1/40         ✗ MISSING       ✗ MISSING       ✗ MISSING       ⚠️ 2/40        
+MbskPrefetchMethod                  solution   None       [-1, 0, 1]                ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+MinGRIncPerMfma                     solution   None       [-1, 1, 2, 3, 4, 5, 6, .. ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ⚠️ 1/10        
+NoReject                            solution   None       [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+NonTemporal                         solution   None       [-1, 0, 1, 2, 3, 4, 5, .. ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ⚠️ 1/9         
+NonTemporalA                        solution   None       [0, 1, 2, 3, 4, 5, 6, 7.. ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ⚠️ 4/8         
+NonTemporalB                        solution   None       [0, 1, 2, 3, 4, 5, 6, 7.. ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ⚠️ 3/8         
+NonTemporalC                        solution   None       [0, 1, 2, 3, 4, 5, 6, 7.. ⚠️ 2/8          ⚠️ 2/8          ✗ MISSING       ✗ MISSING       ⚠️ 2/8         
+NonTemporalD                        solution   None       [0, 1, 2, 3, 4, 5, 6, 7.. ⚠️ 2/8          ⚠️ 2/8          ✗ MISSING       ⚠️ 1/8          ⚠️ 4/8         
+NonTemporalE                        solution   None       [0, 1, 2, 3, 4, 5, 6, 7.. ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+NonTemporalMXSA                     solution   None       [0, 1, 2, 3, 4, 5, 6, 7.. ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+NonTemporalMXSB                     solution   None       [0, 1, 2, 3, 4, 5, 6, 7.. ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+NonTemporalMetadata                 solution   None       [0, 1, 2, 3, 4, 5, 6, 7.. ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ⚠️ 1/8         
+NonTemporalWS                       solution   None       [0, 1, 2, 3, 4, 5, 6, 7.. ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+NumLoadsCoalescedA                  solution   None       [-1, 0, 1, 2, 3, 4, 5, .. ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ⚠️ 1/66        
+NumLoadsCoalescedB                  solution   None       [-1, 0, 1, 2, 3, 4, 5, .. ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ⚠️ 1/66        
+OptNoLoadLoop                       solution   None       [0, 1, 2]                 ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ⚠️ 1/3         
+OutputAmaxD                         problem    False      [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+PinClocks                           global     False      [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+PreciseKernelTime                   global     True       [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+PrefetchGlobalRead                  solution   None       [0, 1, 2, 3, 4, 5, 6, 7.. ⚠️ 2/17         ⚠️ 3/17         ⚠️ 1/17         ⚠️ 3/17         ⚠️ 7/17        
+PreloadKernArgs                     solution   None       [False, True]             ✓ FULL          ⚠️ 1/2          ✗ MISSING       ✗ MISSING       ⚠️ 1/2         
+PrintCodeCommands                   global     False      [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+PrintWinnersOnly                    global     False      [False, True]             ⚠️ 1/2          ✓ FULL          ✓ FULL          ⚠️ 1/2          ⚠️ 1/2         
+PristineOnGPU                       global     True       [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+PythonProfile                       global     False      [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+ScheduleGROverBarrier               solution   None       [-1, 0, 1]                ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ⚠️ 1/3         
+ScheduleGlobalRead                  solution   None       [0, 1]                    ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+ScheduleIterAlg                     solution   None       [0, 1, 2, 3, 4]           ⚠️ 1/5          ⚠️ 4/5          ⚠️ 2/5          ⚠️ 1/5          ⚠️ 3/5         
+ScheduleLocalWrite                  solution   None       [0, 1]                    ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ⚠️ 1/2         
+SeparateArchitectures               global     False      [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+ShowProgressBar                     global     True       [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+SilentHighPrecisionAccumulate       problem    False      [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+SourceSwap                          solution   None       [False, True]             ✓ FULL          ✓ FULL          ✓ FULL          ⚠️ 1/2          ✓ FULL         
+Sparse                              solution   0          [0, 1, 2]                 ✗ MISSING       ✗ MISSING       ⚠️ 2/3          ⚠️ 2/3          ⚠️ 2/3         
+StaggerU                            solution   None       [0, 2, 4, 8, 16, 32, 64.. ⚠️ 3/7          ⚠️ 4/7          ⚠️ 1/7          ⚠️ 3/7          ⚠️ 5/7         
+StaggerUMapping                     solution   None       [0, 1, 2, 3, 4]           ✗ MISSING       ⚠️ 2/5          ✗ MISSING       ✗ MISSING       ⚠️ 1/5         
+StaggerUStride                      solution   None       [-1, 0, 16, 32, 64, 128.. ✗ MISSING       ⚠️ 2/10         ✗ MISSING       ✗ MISSING       ⚠️ 5/10        
+StinkyTofuEnableRemarks             global     False      [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+StochasticRounding                  problem    False      [False, True]             ✗ MISSING       ⚠️ 1/2          ✗ MISSING       ✗ MISSING       ⚠️ 1/2         
+StorePriorityOpt                    solution   None       [False, True]             ⚠️ 1/2          ✓ FULL          ✗ MISSING       ✗ MISSING       ✓ FULL         
+StoreRemapVectorWidth               solution   None       [-1, 0, 1, 2, 4, 8]       ⚠️ 1/6          ⚠️ 1/6          ⚠️ 1/6          ⚠️ 1/6          ⚠️ 3/6         
+StoreVectorWidth                    solution   None       [-1, 1, 2, 3, 4, 6, 8]    ⚠️ 2/7          ⚠️ 2/7          ⚠️ 2/7          ⚠️ 1/7          ⚠️ 4/7         
+StreamK                             solution   None       [0, 1, 2, 3, 4]           ⚠️ 1/5          ⚠️ 1/5          ✗ MISSING       ✗ MISSING       ⚠️ 2/5         
+StreamKAtomic                       solution   None       [0, 1]                    ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+StreamKFixupTreeReduction           solution   None       [0, 1]                    ⚠️ 1/2          ⚠️ 1/2          ✗ MISSING       ✗ MISSING       ⚠️ 1/2         
+StreamKXCCMapping                   solution   None       [0, 2, 3, 4, 5, 6, 7, 8.. ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ⚠️ 2/8         
+StridedBatched                      problem    True       [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+SupportUserArgs                     problem    True       [False, True]             ⚠️ 1/2          ⚠️ 1/2          ⚠️ 1/2          ⚠️ 1/2          ✗ MISSING      
+SuppressNoLoadLoop                  solution   None       [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+SwInstructionPrefetch               solution   None       [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+SwapGlobalReadOrder                 solution   None       [0, 1]                    ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✓ FULL         
+SwizzleTensorA                      problem    False      [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+SwizzleTensorB                      problem    False      [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+TDMInst                             solution   None       [0, 1, 2, 3]              ✗ MISSING       ⚠️ 1/4          ⚠️ 1/4          ✗ MISSING       ✗ MISSING      
+TDMSplit                            solution   None       [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+TailloopInNll                       solution   None       [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✓ FULL         
+TileAwareSelection                  problem    False      [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+TimingInstrumentation               global     False      [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+TransposeA                          problem    False      [False, True]             ✓ FULL          ✓ FULL          ✓ FULL          ✓ FULL          ✓ FULL         
+TransposeB                          problem    True       [False, True]             ✓ FULL          ✓ FULL          ✓ FULL          ✓ FULL          ✓ FULL         
+TransposeLDS                        solution   None       [-1, 1, 0, 2]             ⚠️ 2/4          ✓ FULL          ⚠️ 3/4          ⚠️ 2/4          ✓ FULL         
+TransposeLDSMetadata                solution   None       [-1, 1, 0]                ✗ MISSING       ✗ MISSING       ✗ MISSING       ⚠️ 1/3          ⚠️ 1/3         
+UnrollLoopSwapGlobalReadOrder       solution   None       [0, 1]                    ✗ MISSING       ✗ MISSING       ✗ MISSING       ⚠️ 1/2          ✓ FULL         
+Use64bShadowLimit                   solution   None       [True, False]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ⚠️ 1/2         
+Use64bShadowLimitMX                 solution   None       [True, False]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✓ FULL         
+UseBeta                             problem    True       [False, True]             ⚠️ 1/2          ⚠️ 1/2          ⚠️ 1/2          ⚠️ 1/2          ⚠️ 1/2         
+UseBias                             problem    0          [0, 1, 2, 3]              ⚠️ 2/4          ⚠️ 2/4          ⚠️ 3/4          ⚠️ 2/4          ⚠️ 3/4         
+UseCustomMainLoopSchedule           solution   None       [-1, 0, 1]                ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ⚠️ 2/3         
+UseE                                problem    False      [False, True]             ✓ FULL          ✓ FULL          ⚠️ 1/2          ✗ MISSING       ✓ FULL         
+UseEffLike                          global     True       [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+UseInitialStridesAB                 problem    False      [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+UseInitialStridesCD                 problem    False      [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+UseInstOffsetForGRO                 solution   None       [-1, 0, 1]                ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ⚠️ 1/3         
+UsePLRPack                          solution   None       [0, 1]                    ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✓ FULL         
+UseScaleAB                          problem               ['', 'Scalar', 'Vector'.. ⚠️ 1/3          ✓ FULL          ✗ MISSING       ✗ MISSING       ⚠️ 1/3         
+UseScaleAlphaVec                    problem    0          [0, 1, 2, 3]              ✗ MISSING       ⚠️ 2/4          ⚠️ 1/4          ⚠️ 2/4          ⚠️ 3/4         
+UseScaleCD                          problem    False      [False, True]             ✗ MISSING       ⚠️ 1/2          ✗ MISSING       ✗ MISSING       ✓ FULL         
+UseSgprForGRO                       solution   None       [-1, 0, 1]                ✗ MISSING       ⚠️ 2/3          ✗ MISSING       ⚠️ 1/3          ✓ FULL         
+UseSubtileImpl                      solution   None       [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ⚠️ 1/2         
+UseUserArgs                         global     False      [False, True]             ⚠️ 1/2          ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+ValidationPrintValids               global     False      [False, True]             ⚠️ 1/2          ⚠️ 1/2          ⚠️ 1/2          ⚠️ 1/2          ⚠️ 1/2         
+VectorStore                         solution   None       [-1, 0, 1]                ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ⚠️ 1/3         
+VectorWidthA                        solution   None       [-1, 1, 2, 3, 4, 6, 8]    ⚠️ 2/7          ⚠️ 4/7          ⚠️ 3/7          ⚠️ 5/7          ⚠️ 5/7         
+VectorWidthB                        solution   None       [-1, 1, 2, 3, 4, 6, 8]    ⚠️ 1/7          ⚠️ 3/7          ⚠️ 3/7          ⚠️ 5/7          ⚠️ 5/7         
+WaveSeparateGlobalReadA             solution   None       [0, 1, 2]                 ✗ MISSING       ⚠️ 1/3          ✗ MISSING       ⚠️ 1/3          ⚠️ 1/3         
+WaveSeparateGlobalReadB             solution   None       [0, 1, 2]                 ⚠️ 1/3          ⚠️ 2/3          ✗ MISSING       ⚠️ 1/3          ⚠️ 2/3         
+WaveSplitK                          solution   None       [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ⚠️ 1/2         
+WavefrontSize                       solution   None       [-1, 32, 64]              ⚠️ 1/3          ⚠️ 1/3          ⚠️ 1/3          ✗ MISSING       ⚠️ 1/3         
+WorkGroupMappingXCC                 solution   None       [-1, 1, 2, 4, 8, 16, 32.. ✗ MISSING       ⚠️ 1/7          ✗ MISSING       ⚠️ 1/7          ⚠️ 6/7         
+WorkGroupReduction                  solution   None       [False]                   ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+isMixMode                           problem    False      [False, True]             ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING       ✗ MISSING      
+
+====================================================================================================================================================================================
+TRACKABLE PARAMETERS SUMMARY
+====================================================================================================================================================================================
+
+Architecture    Full Coverage      Partial Coverage   Not Tested         Coverage %     
+------------------------------------------------------------------------------------------
+GFX11           11                 44                 126                30%
+GFX12           19                 61                 101                44%
+GFX1250         12                 34                 135                25%
+GFX94X          7                  38                 136                24%
+GFX950          25                 80                 76                 58%
+
+====================================================================================================================================================================================
+DETAILED MISSING VALUES BREAKDOWN (Trackable Parameters)
+====================================================================================================================================================================================
+
+
+Activation
+  Category: problem, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ FULL COVERAGE
+    GFX12     : ✓ FULL COVERAGE
+    GFX1250   : ✓ FULL COVERAGE
+    GFX94X    : ✓ Tested [True]  |  ✗ Missing [False]
+    GFX950    : ✓ FULL COVERAGE
+
+ActivationAlt
+  Category: solution, Default: None
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+ActivationFuncCall
+  Category: solution, Default: None
+  Valid Values: [False, True]
+    GFX11     : ✓ FULL COVERAGE
+    GFX12     : ✓ Tested [True]  |  ✗ Missing [False]
+    GFX1250   : ✓ FULL COVERAGE
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ FULL COVERAGE
+
+ActivationFused
+  Category: solution, Default: None
+  Valid Values: [True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [True]
+
+ActivationNoGuard
+  Category: problem, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested [False]  |  ✗ Missing [True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+AdaptiveGemm
+  Category: solution, Default: None
+  Valid Values: [0, 1]
+    GFX11     : ✓ Tested []  |  ✗ Missing [0, 1]
+    GFX12     : ✓ Tested []  |  ✗ Missing [0, 1]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [0, 1]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [0, 1]
+    GFX950    : ✓ Tested []  |  ✗ Missing [0, 1]
+
+AdaptiveGemmGSUA
+  Category: solution, Default: None
+  Valid Values: [0, 1]
+    GFX11     : ✓ Tested []  |  ✗ Missing [0, 1]
+    GFX12     : ✓ Tested []  |  ✗ Missing [0, 1]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [0, 1]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [0, 1]
+    GFX950    : ✓ Tested []  |  ✗ Missing [0, 1]
+
+AllowNoFreeDims
+  Category: problem, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+AsanBuild
+  Category: global, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+AsmDebug
+  Category: global, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+AssertFree0ElementMultiple
+  Category: solution, Default: None
+  Valid Values: [1, 16, 2, 32, 4, 8]
+    GFX11     : ✓ Tested [8, True]  |  ✗ Missing [16, 2, 32, 4]
+    GFX12     : ✓ Tested [16, 2, 8, True]  |  ✗ Missing [32, 4]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [1, 16, 2, 32, 4, 8]
+    GFX94X    : ✓ Tested [8, True]  |  ✗ Missing [16, 2, 32, 4]
+    GFX950    : ✓ Tested [2, 4, 8, True]  |  ✗ Missing [16, 32]
+
+AssertFree1ElementMultiple
+  Category: solution, Default: None
+  Valid Values: [1, 16, 2, 32, 4, 8]
+    GFX11     : ✓ Tested []  |  ✗ Missing [1, 16, 2, 32, 4, 8]
+    GFX12     : ✓ Tested [16, True]  |  ✗ Missing [2, 32, 4, 8]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [1, 16, 2, 32, 4, 8]
+    GFX94X    : ✓ Tested [8]  |  ✗ Missing [1, 16, 2, 32, 4]
+    GFX950    : ✓ Tested [4, True]  |  ✗ Missing [16, 2, 32, 8]
+
+AssertSummationElementMultiple
+  Category: solution, Default: None
+  Valid Values: [1, 128, 16, 2, 32, 4, 64, 8]
+    GFX11     : ✓ Tested []  |  ✗ Missing [1, 128, 16, 2, 32, 4, 64, 8]
+    GFX12     : ✓ Tested [16, 32]  |  ✗ Missing [1, 128, 2, 4, 64, 8]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [1, 128, 16, 2, 32, 4, 64, 8]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [1, 128, 16, 2, 32, 4, 64, 8]
+    GFX950    : ✓ Tested [2, 32, 4, 64, True]  |  ✗ Missing [128, 16, 8]
+
+Batched
+  Category: problem, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested [True]  |  ✗ Missing [False]
+    GFX12     : ✓ Tested [True]  |  ✗ Missing [False]
+    GFX1250   : ✓ Tested [True]  |  ✗ Missing [False]
+    GFX94X    : ✓ Tested [True]  |  ✗ Missing [False]
+    GFX950    : ✓ Tested [True]  |  ✗ Missing [False]
+
+BufferLoad
+  Category: solution, Default: None
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+BufferStore
+  Category: solution, Default: None
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+CEqualD
+  Category: global, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+CSVExportWinner
+  Category: global, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested [True]  |  ✗ Missing [False]
+    GFX12     : ✓ Tested [True]  |  ✗ Missing [False]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested [True]  |  ✗ Missing [False]
+    GFX950    : ✓ Tested [True]  |  ✗ Missing [False]
+
+CSVMergeSameProblemID
+  Category: global, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested [True]  |  ✗ Missing [False]
+    GFX12     : ✓ Tested [True]  |  ✗ Missing [False]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested [True]  |  ✗ Missing [False]
+    GFX950    : ✓ Tested [True]  |  ✗ Missing [False]
+
+CheckASMCodeSize
+  Category: global, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+ClusterBarrier
+  Category: solution, Default: None
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested [True]  |  ✗ Missing [False]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+ClusterDim
+  Category: solution, Default: None
+  Valid Values: [(1, 1), (1, 10), (1, 11), (1, 12), (1, 13), (1, 14), (1, 15), (1, 16), (1, 2), (1, 3), (1, 4), (1, 5), (1, 6), (1, 7), (1, 8), (1, 9), (10, 1), (11, 1), (12, 1), (13, 1), (14, 1), (15, 1), (16, 1), (2, 1), (2, 2), (2, 3), (2, 4), (2, 5), (2, 6), (2, 7), (2, 8), (3, 1), (3, 2), (3, 3), (3, 4), (3, 5), (4, 1), (4, 2), (4, 3), (4, 4), (5, 1), (5, 2), (5, 3), (6, 1), (6, 2), (7, 1), (7, 2), (8, 1), (8, 2), (9, 1)]
+    GFX11     : ✓ Tested []  |  ✗ Missing [(1, 1), (1, 10), (1, 11), (1, 12), (1, 13), (1, 14), (1, 15), (1, 16), (1, 2), (1, 3), (1, 4), (1, 5), (1, 6), (1, 7), (1, 8), (1, 9), (10, 1), (11, 1), (12, 1), (13, 1), (14, 1), (15, 1), (16, 1), (2, 1), (2, 2), (2, 3), (2, 4), (2, 5), (2, 6), (2, 7), (2, 8), (3, 1), (3, 2), (3, 3), (3, 4), (3, 5), (4, 1), (4, 2), (4, 3), (4, 4), (5, 1), (5, 2), (5, 3), (6, 1), (6, 2), (7, 1), (7, 2), (8, 1), (8, 2), (9, 1)]
+    GFX12     : ✓ Tested [(1, 1), (2, 2), (2, 3), (4, 2)]  |  ✗ Missing [(1, 10), (1, 11), (1, 12), (1, 13), (1, 14), (1, 15), (1, 16), (1, 2), (1, 3), (1, 4), (1, 5), (1, 6), (1, 7), (1, 8), (1, 9), (10, 1), (11, 1), (12, 1), (13, 1), (14, 1), (15, 1), (16, 1), (2, 1), (2, 4), (2, 5), (2, 6), (2, 7), (2, 8), (3, 1), (3, 2), (3, 3), (3, 4), (3, 5), (4, 1), (4, 3), (4, 4), (5, 1), (5, 2), (5, 3), (6, 1), (6, 2), (7, 1), (7, 2), (8, 1), (8, 2), (9, 1)]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [(1, 1), (1, 10), (1, 11), (1, 12), (1, 13), (1, 14), (1, 15), (1, 16), (1, 2), (1, 3), (1, 4), (1, 5), (1, 6), (1, 7), (1, 8), (1, 9), (10, 1), (11, 1), (12, 1), (13, 1), (14, 1), (15, 1), (16, 1), (2, 1), (2, 2), (2, 3), (2, 4), (2, 5), (2, 6), (2, 7), (2, 8), (3, 1), (3, 2), (3, 3), (3, 4), (3, 5), (4, 1), (4, 2), (4, 3), (4, 4), (5, 1), (5, 2), (5, 3), (6, 1), (6, 2), (7, 1), (7, 2), (8, 1), (8, 2), (9, 1)]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [(1, 1), (1, 10), (1, 11), (1, 12), (1, 13), (1, 14), (1, 15), (1, 16), (1, 2), (1, 3), (1, 4), (1, 5), (1, 6), (1, 7), (1, 8), (1, 9), (10, 1), (11, 1), (12, 1), (13, 1), (14, 1), (15, 1), (16, 1), (2, 1), (2, 2), (2, 3), (2, 4), (2, 5), (2, 6), (2, 7), (2, 8), (3, 1), (3, 2), (3, 3), (3, 4), (3, 5), (4, 1), (4, 2), (4, 3), (4, 4), (5, 1), (5, 2), (5, 3), (6, 1), (6, 2), (7, 1), (7, 2), (8, 1), (8, 2), (9, 1)]
+    GFX950    : ✓ Tested []  |  ✗ Missing [(1, 1), (1, 10), (1, 11), (1, 12), (1, 13), (1, 14), (1, 15), (1, 16), (1, 2), (1, 3), (1, 4), (1, 5), (1, 6), (1, 7), (1, 8), (1, 9), (10, 1), (11, 1), (12, 1), (13, 1), (14, 1), (15, 1), (16, 1), (2, 1), (2, 2), (2, 3), (2, 4), (2, 5), (2, 6), (2, 7), (2, 8), (3, 1), (3, 2), (3, 3), (3, 4), (3, 5), (4, 1), (4, 2), (4, 3), (4, 4), (5, 1), (5, 2), (5, 3), (6, 1), (6, 2), (7, 1), (7, 2), (8, 1), (8, 2), (9, 1)]
+
+ClusterLocalRead
+  Category: solution, Default: None
+  Valid Values: [0, 1]
+    GFX11     : ✓ Tested [True]  |  ✗ Missing [0]
+    GFX12     : ✓ FULL COVERAGE
+    GFX1250   : ✓ FULL COVERAGE
+    GFX94X    : ✓ Tested [True]  |  ✗ Missing [0]
+    GFX950    : ✓ FULL COVERAGE
+
+ComplexConjugateA
+  Category: problem, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+ComplexConjugateB
+  Category: problem, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+ConvertAfterDS
+  Category: solution, Default: None
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested [False]  |  ✗ Missing [True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ FULL COVERAGE
+
+DebugPersistentKernelLoopForever
+  Category: solution, Default: None
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+DebugStreamK
+  Category: solution, Default: None
+  Valid Values: [0, 1, 2, 3]
+    GFX11     : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3]
+    GFX12     : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3]
+    GFX950    : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3]
+
+DirectToLds
+  Category: solution, Default: None
+  Valid Values: [0, 1, 2, 3]
+    GFX11     : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3]
+    GFX12     : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3]
+    GFX950    : ✓ FULL COVERAGE
+
+DirectToLdsMetadata
+  Category: solution, Default: None
+  Valid Values: [0, 1]
+    GFX11     : ✓ Tested []  |  ✗ Missing [0, 1]
+    GFX12     : ✓ Tested []  |  ✗ Missing [0, 1]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [0, 1]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [0, 1]
+    GFX950    : ✓ FULL COVERAGE
+
+DirectToVgprA
+  Category: solution, Default: None
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ FULL COVERAGE
+    GFX1250   : ✓ Tested [False]  |  ✗ Missing [True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ FULL COVERAGE
+
+DirectToVgprB
+  Category: solution, Default: None
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ FULL COVERAGE
+    GFX1250   : ✓ Tested [False]  |  ✗ Missing [True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested [False]  |  ✗ Missing [True]
+
+DirectToVgprMXSA
+  Category: solution, Default: None
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+DirectToVgprMXSB
+  Category: solution, Default: None
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+DirectToVgprSparseMetadata
+  Category: solution, Default: None
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested [False]  |  ✗ Missing [True]
+    GFX12     : ✓ Tested [False]  |  ✗ Missing [True]
+    GFX1250   : ✓ Tested [False]  |  ✗ Missing [True]
+    GFX94X    : ✓ FULL COVERAGE
+    GFX950    : ✓ Tested [False]  |  ✗ Missing [True]
+
+DisableAsmComments
+  Category: global, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested [True]  |  ✗ Missing [False]
+
+DtlPlusLdsBuf
+  Category: solution, Default: None
+  Valid Values: [-1, 0, 1]
+    GFX11     : ✓ Tested []  |  ✗ Missing [-1, 0, 1]
+    GFX12     : ✓ Tested []  |  ✗ Missing [-1, 0, 1]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [-1, 0, 1]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [-1, 0, 1]
+    GFX950    : ✓ Tested [False, True]  |  ✗ Missing [-1]
+
+DumpTensors
+  Category: global, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+EnableMarker
+  Category: global, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+ExpandPointerSwap
+  Category: solution, Default: None
+  Valid Values: [False, True]
+    GFX11     : ✓ FULL COVERAGE
+    GFX12     : ✓ FULL COVERAGE
+    GFX1250   : ✓ FULL COVERAGE
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ FULL COVERAGE
+
+ExtraLatencyForLR
+  Category: solution, Default: None
+  Valid Values: [-10, -20, -30, -40, -50, -60, -70, -80, 0, 10, 12, 14, 16, 2, 4, 6, 8]
+    GFX11     : ✓ Tested []  |  ✗ Missing [-10, -20, -30, -40, -50, -60, -70, -80, 0, 10, 12, 14, 16, 2, 4, 6, 8]
+    GFX12     : ✓ Tested []  |  ✗ Missing [-10, -20, -30, -40, -50, -60, -70, -80, 0, 10, 12, 14, 16, 2, 4, 6, 8]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [-10, -20, -30, -40, -50, -60, -70, -80, 0, 10, 12, 14, 16, 2, 4, 6, 8]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [-10, -20, -30, -40, -50, -60, -70, -80, 0, 10, 12, 14, 16, 2, 4, 6, 8]
+    GFX950    : ✓ Tested []  |  ✗ Missing [-10, -20, -30, -40, -50, -60, -70, -80, 0, 10, 12, 14, 16, 2, 4, 6, 8]
+
+ExtraMiLatencyLeft
+  Category: solution, Default: None
+  Valid Values: [-1, 0, 1, 2, 3, 4, 6, 8]
+    GFX11     : ✓ Tested []  |  ✗ Missing [-1, 0, 1, 2, 3, 4, 6, 8]
+    GFX12     : ✓ Tested []  |  ✗ Missing [-1, 0, 1, 2, 3, 4, 6, 8]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [-1, 0, 1, 2, 3, 4, 6, 8]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [-1, 0, 1, 2, 3, 4, 6, 8]
+    GFX950    : ✓ Tested [False]  |  ✗ Missing [-1, 1, 2, 3, 4, 6, 8]
+
+ForceDisableShadowInit
+  Category: solution, Default: None
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested [True]  |  ✗ Missing [False]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested [False]  |  ✗ Missing [True]
+
+ForceRedoBenchmarkProblems
+  Category: global, Default: True
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+ForceRedoLibraryClient
+  Category: global, Default: True
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+ForceRedoLibraryLogic
+  Category: global, Default: True
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+GenerateSourcesAndExit
+  Category: global, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+GlobalReadVectorWidthA
+  Category: solution, Default: None
+  Valid Values: [-1, -2, 1, 16, 2, 3, 32, 4, 6, 8]
+    GFX11     : ✓ Tested [-1, 2, 4, 8]  |  ✗ Missing [-2, 1, 16, 3, 32, 6]
+    GFX12     : ✓ Tested [-1, 16, 2, 32, 4, 8, True]  |  ✗ Missing [-2, 3, 6]
+    GFX1250   : ✓ Tested [-1]  |  ✗ Missing [-2, 1, 16, 2, 3, 32, 4, 6, 8]
+    GFX94X    : ✓ Tested [-1, 16, 2, 4, 8]  |  ✗ Missing [-2, 1, 3, 32, 6]
+    GFX950    : ✓ Tested [-1, 16, 2, 32, 4, 8, True]  |  ✗ Missing [-2, 3, 6]
+
+GlobalReadVectorWidthB
+  Category: solution, Default: None
+  Valid Values: [-1, -2, 1, 16, 2, 3, 32, 4, 6, 8]
+    GFX11     : ✓ Tested [-1, 2, 4, 8]  |  ✗ Missing [-2, 1, 16, 3, 32, 6]
+    GFX12     : ✓ Tested [-1, 16, 2, 32, 4, 8, True]  |  ✗ Missing [-2, 3, 6]
+    GFX1250   : ✓ Tested [-1]  |  ✗ Missing [-2, 1, 16, 2, 3, 32, 4, 6, 8]
+    GFX94X    : ✓ Tested [4, 8]  |  ✗ Missing [-1, -2, 1, 16, 2, 3, 32, 6]
+    GFX950    : ✓ Tested [-1, 16, 2, 32, 4, 8, True]  |  ✗ Missing [-2, 3, 6]
+
+GlobalSplitUAlgorithm
+  Category: solution, Default: None
+  Valid Values: ['MultipleBuffer', 'MultipleBufferSingleKernel', 'SingleBuffer']
+    GFX11     : ✓ Tested ['MultipleBuffer', 'SingleBuffer']  |  ✗ Missing ['MultipleBufferSingleKernel']
+    GFX12     : ✓ Tested ['MultipleBuffer', 'SingleBuffer']  |  ✗ Missing ['MultipleBufferSingleKernel']
+    GFX1250   : ✓ Tested ['MultipleBuffer']  |  ✗ Missing ['MultipleBufferSingleKernel', 'SingleBuffer']
+    GFX94X    : ✓ Tested ['MultipleBuffer', 'MultipleBufferSingleKernel']  |  ✗ Missing ['SingleBuffer']
+    GFX950    : ✓ Tested ['MultipleBuffer', 'MultipleBufferSingleKernel']  |  ✗ Missing ['SingleBuffer']
+
+GlobalSplitUCoalesced
+  Category: solution, Default: None
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ FULL COVERAGE
+    GFX950    : ✓ Tested [False]  |  ✗ Missing [True]
+
+GlobalSplitUWorkGroupMappingRoundRobin
+  Category: solution, Default: None
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ FULL COVERAGE
+    GFX950    : ✓ Tested [False]  |  ✗ Missing [True]
+
+Gradient
+  Category: problem, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested [True]  |  ✗ Missing [False]
+    GFX12     : ✓ Tested [True]  |  ✗ Missing [False]
+    GFX1250   : ✓ Tested [True]  |  ✗ Missing [False]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested [True]  |  ✗ Missing [False]
+
+GroupLoadStore
+  Category: solution, Default: None
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested [False]  |  ✗ Missing [True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested [False]  |  ✗ Missing [True]
+
+GroupedGemm
+  Category: problem, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested [True]  |  ✗ Missing [False]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested [True]  |  ✗ Missing [False]
+
+HalfPLR
+  Category: solution, Default: None
+  Valid Values: [0, 1, 2, 3]
+    GFX11     : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3]
+    GFX12     : ✓ FULL COVERAGE
+    GFX1250   : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3]
+    GFX950    : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3]
+
+HardwareMonitor
+  Category: global, Default: True
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+HighPrecisionAccumulate
+  Category: problem, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested [True]  |  ✗ Missing [False]
+    GFX12     : ✓ FULL COVERAGE
+    GFX1250   : ✓ Tested [True]  |  ✗ Missing [False]
+    GFX94X    : ✓ Tested [True]  |  ✗ Missing [False]
+    GFX950    : ✓ Tested [True]  |  ✗ Missing [False]
+
+ISA
+  Category: solution, Default: None
+  Valid Values: [SemanticVersion(major=0, minor=0, patch=0), SemanticVersion(major=10, minor=1, patch=0), SemanticVersion(major=10, minor=1, patch=1), SemanticVersion(major=10, minor=1, patch=2), SemanticVersion(major=10, minor=3, patch=0), SemanticVersion(major=11, minor=0, patch=0), SemanticVersion(major=11, minor=0, patch=1), SemanticVersion(major=11, minor=0, patch=2), SemanticVersion(major=11, minor=0, patch=3), SemanticVersion(major=11, minor=5, patch=0), SemanticVersion(major=11, minor=5, patch=1), SemanticVersion(major=11, minor=5, patch=2), SemanticVersion(major=11, minor=5, patch=3), SemanticVersion(major=12, minor=0, patch=0), SemanticVersion(major=12, minor=0, patch=1), SemanticVersion(major=12, minor=5, patch=0), SemanticVersion(major=8, minor=0, patch=3), SemanticVersion(major=9, minor=0, patch=0), SemanticVersion(major=9, minor=0, patch=10), SemanticVersion(major=9, minor=0, patch=6), SemanticVersion(major=9, minor=0, patch=8), SemanticVersion(major=9, minor=4, patch=2), SemanticVersion(major=9, minor=5, patch=0)]
+    GFX11     : ✓ Tested []  |  ✗ Missing [SemanticVersion(major=0, minor=0, patch=0), SemanticVersion(major=10, minor=1, patch=0), SemanticVersion(major=10, minor=1, patch=1), SemanticVersion(major=10, minor=1, patch=2), SemanticVersion(major=10, minor=3, patch=0), SemanticVersion(major=11, minor=0, patch=0), SemanticVersion(major=11, minor=0, patch=1), SemanticVersion(major=11, minor=0, patch=2), SemanticVersion(major=11, minor=0, patch=3), SemanticVersion(major=11, minor=5, patch=0), SemanticVersion(major=11, minor=5, patch=1), SemanticVersion(major=11, minor=5, patch=2), SemanticVersion(major=11, minor=5, patch=3), SemanticVersion(major=12, minor=0, patch=0), SemanticVersion(major=12, minor=0, patch=1), SemanticVersion(major=12, minor=5, patch=0), SemanticVersion(major=8, minor=0, patch=3), SemanticVersion(major=9, minor=0, patch=0), SemanticVersion(major=9, minor=0, patch=10), SemanticVersion(major=9, minor=0, patch=6), SemanticVersion(major=9, minor=0, patch=8), SemanticVersion(major=9, minor=4, patch=2), SemanticVersion(major=9, minor=5, patch=0)]
+    GFX12     : ✓ Tested []  |  ✗ Missing [SemanticVersion(major=0, minor=0, patch=0), SemanticVersion(major=10, minor=1, patch=0), SemanticVersion(major=10, minor=1, patch=1), SemanticVersion(major=10, minor=1, patch=2), SemanticVersion(major=10, minor=3, patch=0), SemanticVersion(major=11, minor=0, patch=0), SemanticVersion(major=11, minor=0, patch=1), SemanticVersion(major=11, minor=0, patch=2), SemanticVersion(major=11, minor=0, patch=3), SemanticVersion(major=11, minor=5, patch=0), SemanticVersion(major=11, minor=5, patch=1), SemanticVersion(major=11, minor=5, patch=2), SemanticVersion(major=11, minor=5, patch=3), SemanticVersion(major=12, minor=0, patch=0), SemanticVersion(major=12, minor=0, patch=1), SemanticVersion(major=12, minor=5, patch=0), SemanticVersion(major=8, minor=0, patch=3), SemanticVersion(major=9, minor=0, patch=0), SemanticVersion(major=9, minor=0, patch=10), SemanticVersion(major=9, minor=0, patch=6), SemanticVersion(major=9, minor=0, patch=8), SemanticVersion(major=9, minor=4, patch=2), SemanticVersion(major=9, minor=5, patch=0)]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [SemanticVersion(major=0, minor=0, patch=0), SemanticVersion(major=10, minor=1, patch=0), SemanticVersion(major=10, minor=1, patch=1), SemanticVersion(major=10, minor=1, patch=2), SemanticVersion(major=10, minor=3, patch=0), SemanticVersion(major=11, minor=0, patch=0), SemanticVersion(major=11, minor=0, patch=1), SemanticVersion(major=11, minor=0, patch=2), SemanticVersion(major=11, minor=0, patch=3), SemanticVersion(major=11, minor=5, patch=0), SemanticVersion(major=11, minor=5, patch=1), SemanticVersion(major=11, minor=5, patch=2), SemanticVersion(major=11, minor=5, patch=3), SemanticVersion(major=12, minor=0, patch=0), SemanticVersion(major=12, minor=0, patch=1), SemanticVersion(major=12, minor=5, patch=0), SemanticVersion(major=8, minor=0, patch=3), SemanticVersion(major=9, minor=0, patch=0), SemanticVersion(major=9, minor=0, patch=10), SemanticVersion(major=9, minor=0, patch=6), SemanticVersion(major=9, minor=0, patch=8), SemanticVersion(major=9, minor=4, patch=2), SemanticVersion(major=9, minor=5, patch=0)]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [SemanticVersion(major=0, minor=0, patch=0), SemanticVersion(major=10, minor=1, patch=0), SemanticVersion(major=10, minor=1, patch=1), SemanticVersion(major=10, minor=1, patch=2), SemanticVersion(major=10, minor=3, patch=0), SemanticVersion(major=11, minor=0, patch=0), SemanticVersion(major=11, minor=0, patch=1), SemanticVersion(major=11, minor=0, patch=2), SemanticVersion(major=11, minor=0, patch=3), SemanticVersion(major=11, minor=5, patch=0), SemanticVersion(major=11, minor=5, patch=1), SemanticVersion(major=11, minor=5, patch=2), SemanticVersion(major=11, minor=5, patch=3), SemanticVersion(major=12, minor=0, patch=0), SemanticVersion(major=12, minor=0, patch=1), SemanticVersion(major=12, minor=5, patch=0), SemanticVersion(major=8, minor=0, patch=3), SemanticVersion(major=9, minor=0, patch=0), SemanticVersion(major=9, minor=0, patch=10), SemanticVersion(major=9, minor=0, patch=6), SemanticVersion(major=9, minor=0, patch=8), SemanticVersion(major=9, minor=4, patch=2), SemanticVersion(major=9, minor=5, patch=0)]
+    GFX950    : ✓ Tested []  |  ✗ Missing [SemanticVersion(major=0, minor=0, patch=0), SemanticVersion(major=10, minor=1, patch=0), SemanticVersion(major=10, minor=1, patch=1), SemanticVersion(major=10, minor=1, patch=2), SemanticVersion(major=10, minor=3, patch=0), SemanticVersion(major=11, minor=0, patch=0), SemanticVersion(major=11, minor=0, patch=1), SemanticVersion(major=11, minor=0, patch=2), SemanticVersion(major=11, minor=0, patch=3), SemanticVersion(major=11, minor=5, patch=0), SemanticVersion(major=11, minor=5, patch=1), SemanticVersion(major=11, minor=5, patch=2), SemanticVersion(major=11, minor=5, patch=3), SemanticVersion(major=12, minor=0, patch=0), SemanticVersion(major=12, minor=0, patch=1), SemanticVersion(major=12, minor=5, patch=0), SemanticVersion(major=8, minor=0, patch=3), SemanticVersion(major=9, minor=0, patch=0), SemanticVersion(major=9, minor=0, patch=10), SemanticVersion(major=9, minor=0, patch=6), SemanticVersion(major=9, minor=0, patch=8), SemanticVersion(major=9, minor=4, patch=2), SemanticVersion(major=9, minor=5, patch=0)]
+
+InitCIterWmma
+  Category: solution, Default: None
+  Valid Values: [-1, 0, 1]
+    GFX11     : ✓ Tested []  |  ✗ Missing [-1, 0, 1]
+    GFX12     : ✓ Tested [-1, False]  |  ✗ Missing [1]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [-1, 0, 1]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [-1, 0, 1]
+    GFX950    : ✓ Tested []  |  ✗ Missing [-1, 0, 1]
+
+InnerUnroll
+  Category: solution, Default: None
+  Valid Values: [1, 16, 2, 32, 4, 64, 8]
+    GFX11     : ✓ Tested [True]  |  ✗ Missing [16, 2, 32, 4, 64, 8]
+    GFX12     : ✓ Tested [True]  |  ✗ Missing [16, 2, 32, 4, 64, 8]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [1, 16, 2, 32, 4, 64, 8]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [1, 16, 2, 32, 4, 64, 8]
+    GFX950    : ✓ Tested [2, 4, True]  |  ✗ Missing [16, 32, 64, 8]
+
+InterleaveAlpha
+  Category: solution, Default: None
+  Valid Values: [0, 1]
+    GFX11     : ✓ Tested []  |  ✗ Missing [0, 1]
+    GFX12     : ✓ Tested []  |  ✗ Missing [0, 1]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [0, 1]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [0, 1]
+    GFX950    : ✓ Tested []  |  ✗ Missing [0, 1]
+
+KeepBuildTmp
+  Category: global, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested [True]  |  ✗ Missing [False]
+    GFX1250   : ✓ Tested [True]  |  ✗ Missing [False]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested [True]  |  ✗ Missing [False]
+
+KernelTime
+  Category: global, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ FULL COVERAGE
+    GFX12     : ✓ FULL COVERAGE
+    GFX1250   : ✓ FULL COVERAGE
+    GFX94X    : ✓ Tested [True]  |  ✗ Missing [False]
+    GFX950    : ✓ Tested [True]  |  ✗ Missing [False]
+
+LDSTrInst
+  Category: solution, Default: None
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ FULL COVERAGE
+    GFX1250   : ✓ FULL COVERAGE
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ FULL COVERAGE
+
+LazyLibraryLoading
+  Category: global, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+LdsBlockSizePerPadA
+  Category: solution, Default: None
+  Valid Values: [-1, 0, 1024, 128, 2048, 256, 512, 64]
+    GFX11     : ✓ Tested [-1, False]  |  ✗ Missing [1024, 128, 2048, 256, 512, 64]
+    GFX12     : ✓ Tested [-1, False]  |  ✗ Missing [1024, 128, 2048, 256, 512, 64]
+    GFX1250   : ✓ Tested [-1, False]  |  ✗ Missing [1024, 128, 2048, 256, 512, 64]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [-1, 0, 1024, 128, 2048, 256, 512, 64]
+    GFX950    : ✓ Tested [-1, 1024, False]  |  ✗ Missing [128, 2048, 256, 512, 64]
+
+LdsBlockSizePerPadB
+  Category: solution, Default: None
+  Valid Values: [-1, 0, 1024, 128, 2048, 256, 512, 64]
+    GFX11     : ✓ Tested [-1, False]  |  ✗ Missing [1024, 128, 2048, 256, 512, 64]
+    GFX12     : ✓ Tested [-1, False]  |  ✗ Missing [1024, 128, 2048, 256, 512, 64]
+    GFX1250   : ✓ Tested [-1, False]  |  ✗ Missing [1024, 128, 2048, 256, 512, 64]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [-1, 0, 1024, 128, 2048, 256, 512, 64]
+    GFX950    : ✓ Tested [-1, 1024, False]  |  ✗ Missing [128, 2048, 256, 512, 64]
+
+LdsBlockSizePerPadMXSA
+  Category: solution, Default: None
+  Valid Values: [-1, 0, 1024, 128, 2048, 256, 512, 64]
+    GFX11     : ✓ Tested []  |  ✗ Missing [-1, 0, 1024, 128, 2048, 256, 512, 64]
+    GFX12     : ✓ Tested [False]  |  ✗ Missing [-1, 1024, 128, 2048, 256, 512, 64]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [-1, 0, 1024, 128, 2048, 256, 512, 64]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [-1, 0, 1024, 128, 2048, 256, 512, 64]
+    GFX950    : ✓ Tested []  |  ✗ Missing [-1, 0, 1024, 128, 2048, 256, 512, 64]
+
+LdsBlockSizePerPadMXSB
+  Category: solution, Default: None
+  Valid Values: [-1, 0, 1024, 128, 2048, 256, 512, 64]
+    GFX11     : ✓ Tested []  |  ✗ Missing [-1, 0, 1024, 128, 2048, 256, 512, 64]
+    GFX12     : ✓ Tested [False]  |  ✗ Missing [-1, 1024, 128, 2048, 256, 512, 64]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [-1, 0, 1024, 128, 2048, 256, 512, 64]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [-1, 0, 1024, 128, 2048, 256, 512, 64]
+    GFX950    : ✓ Tested []  |  ✗ Missing [-1, 0, 1024, 128, 2048, 256, 512, 64]
+
+LdsBlockSizePerPadMetadata
+  Category: solution, Default: None
+  Valid Values: [-1, 0, 1024, 128, 2048, 256, 512, 64]
+    GFX11     : ✓ Tested []  |  ✗ Missing [-1, 0, 1024, 128, 2048, 256, 512, 64]
+    GFX12     : ✓ Tested []  |  ✗ Missing [-1, 0, 1024, 128, 2048, 256, 512, 64]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [-1, 0, 1024, 128, 2048, 256, 512, 64]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [-1, 0, 1024, 128, 2048, 256, 512, 64]
+    GFX950    : ✓ Tested [-1, False]  |  ✗ Missing [1024, 128, 2048, 256, 512, 64]
+
+LdsPadA
+  Category: solution, Default: None
+  Valid Values: [-1, 0, 1, 16, 2, 3, 32, 4, 48, 64, 8]
+    GFX11     : ✓ Tested [-1, False]  |  ✗ Missing [1, 16, 2, 3, 32, 4, 48, 64, 8]
+    GFX12     : ✓ Tested [-1, False]  |  ✗ Missing [1, 16, 2, 3, 32, 4, 48, 64, 8]
+    GFX1250   : ✓ Tested [-1, False]  |  ✗ Missing [1, 16, 2, 3, 32, 4, 48, 64, 8]
+    GFX94X    : ✓ Tested [-1]  |  ✗ Missing [0, 1, 16, 2, 3, 32, 4, 48, 64, 8]
+    GFX950    : ✓ Tested [-1, 16, 32, 4, 8, False]  |  ✗ Missing [1, 2, 3, 48, 64]
+
+LdsPadB
+  Category: solution, Default: None
+  Valid Values: [-1, 0, 1, 16, 2, 3, 32, 4, 48, 64, 8]
+    GFX11     : ✓ Tested [-1, False]  |  ✗ Missing [1, 16, 2, 3, 32, 4, 48, 64, 8]
+    GFX12     : ✓ Tested [-1, False]  |  ✗ Missing [1, 16, 2, 3, 32, 4, 48, 64, 8]
+    GFX1250   : ✓ Tested [-1, False]  |  ✗ Missing [1, 16, 2, 3, 32, 4, 48, 64, 8]
+    GFX94X    : ✓ Tested [-1]  |  ✗ Missing [0, 1, 16, 2, 3, 32, 4, 48, 64, 8]
+    GFX950    : ✓ Tested [-1, 16, 32, 4, 8, False]  |  ✗ Missing [1, 2, 3, 48, 64]
+
+LdsPadMXSA
+  Category: solution, Default: None
+  Valid Values: [-1, 0, 1, 16, 2, 3, 32, 4, 48, 64, 8]
+    GFX11     : ✓ Tested []  |  ✗ Missing [-1, 0, 1, 16, 2, 3, 32, 4, 48, 64, 8]
+    GFX12     : ✓ Tested [False]  |  ✗ Missing [-1, 1, 16, 2, 3, 32, 4, 48, 64, 8]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [-1, 0, 1, 16, 2, 3, 32, 4, 48, 64, 8]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [-1, 0, 1, 16, 2, 3, 32, 4, 48, 64, 8]
+    GFX950    : ✓ Tested []  |  ✗ Missing [-1, 0, 1, 16, 2, 3, 32, 4, 48, 64, 8]
+
+LdsPadMXSB
+  Category: solution, Default: None
+  Valid Values: [-1, 0, 1, 16, 2, 3, 32, 4, 48, 64, 8]
+    GFX11     : ✓ Tested []  |  ✗ Missing [-1, 0, 1, 16, 2, 3, 32, 4, 48, 64, 8]
+    GFX12     : ✓ Tested [False]  |  ✗ Missing [-1, 1, 16, 2, 3, 32, 4, 48, 64, 8]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [-1, 0, 1, 16, 2, 3, 32, 4, 48, 64, 8]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [-1, 0, 1, 16, 2, 3, 32, 4, 48, 64, 8]
+    GFX950    : ✓ Tested []  |  ✗ Missing [-1, 0, 1, 16, 2, 3, 32, 4, 48, 64, 8]
+
+LdsPadMetadata
+  Category: solution, Default: None
+  Valid Values: [-1, 0, 1, 2, 3, 4, 8]
+    GFX11     : ✓ Tested [False]  |  ✗ Missing [-1, 1, 2, 3, 4, 8]
+    GFX12     : ✓ Tested [False]  |  ✗ Missing [-1, 1, 2, 3, 4, 8]
+    GFX1250   : ✓ Tested [-1, False]  |  ✗ Missing [1, 2, 3, 4, 8]
+    GFX94X    : ✓ Tested [-1]  |  ✗ Missing [0, 1, 2, 3, 4, 8]
+    GFX950    : ✓ Tested [-1, False]  |  ✗ Missing [1, 2, 3, 4, 8]
+
+LibraryUpdateComment
+  Category: global, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+LocalReadVectorWidth
+  Category: solution, Default: None
+  Valid Values: [-1, 1, 16, 2, 32, 4, 8]
+    GFX11     : ✓ Tested [16]  |  ✗ Missing [-1, 1, 2, 32, 4, 8]
+    GFX12     : ✓ Tested [-1, 16, 32, 8, True]  |  ✗ Missing [2, 4]
+    GFX1250   : ✓ Tested [-1]  |  ✗ Missing [1, 16, 2, 32, 4, 8]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [-1, 1, 16, 2, 32, 4, 8]
+    GFX950    : ✓ Tested [-1, 16, 32, 4, 8, True]  |  ✗ Missing [2]
+
+LocalReadVectorWidthA
+  Category: solution, Default: None
+  Valid Values: [-1, 1, 16, 2, 32, 4, 8]
+    GFX11     : ✓ Tested []  |  ✗ Missing [-1, 1, 16, 2, 32, 4, 8]
+    GFX12     : ✓ Tested []  |  ✗ Missing [-1, 1, 16, 2, 32, 4, 8]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [-1, 1, 16, 2, 32, 4, 8]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [-1, 1, 16, 2, 32, 4, 8]
+    GFX950    : ✓ Tested []  |  ✗ Missing [-1, 1, 16, 2, 32, 4, 8]
+
+LocalReadVectorWidthB
+  Category: solution, Default: None
+  Valid Values: [-1, 1, 16, 2, 32, 4, 8]
+    GFX11     : ✓ Tested [16]  |  ✗ Missing [-1, 1, 2, 32, 4, 8]
+    GFX12     : ✓ Tested []  |  ✗ Missing [-1, 1, 16, 2, 32, 4, 8]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [-1, 1, 16, 2, 32, 4, 8]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [-1, 1, 16, 2, 32, 4, 8]
+    GFX950    : ✓ Tested []  |  ✗ Missing [-1, 1, 16, 2, 32, 4, 8]
+
+MIArchVgpr
+  Category: solution, Default: None
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested [False]  |  ✗ Missing [True]
+    GFX12     : ✓ Tested [False]  |  ✗ Missing [True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ FULL COVERAGE
+
+MXBlockA
+  Category: problem, Default: 0
+  Valid Values: [0, 16, 32]
+    GFX11     : ✓ Tested []  |  ✗ Missing [0, 16, 32]
+    GFX12     : ✓ Tested [16, 32]  |  ✗ Missing [0]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [0, 16, 32]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [0, 16, 32]
+    GFX950    : ✓ Tested [32]  |  ✗ Missing [0, 16]
+
+MXBlockB
+  Category: problem, Default: 0
+  Valid Values: [0, 16, 32]
+    GFX11     : ✓ Tested []  |  ✗ Missing [0, 16, 32]
+    GFX12     : ✓ Tested [16, 32]  |  ✗ Missing [0]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [0, 16, 32]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [0, 16, 32]
+    GFX950    : ✓ Tested [32]  |  ✗ Missing [0, 16]
+
+MXLoadInst
+  Category: solution, Default: None
+  Valid Values: ['Auto', 'BufferLoad', 'GlobalLoad', 'TDM']
+    GFX11     : ✓ Tested []  |  ✗ Missing ['Auto', 'BufferLoad', 'GlobalLoad', 'TDM']
+    GFX12     : ✓ Tested []  |  ✗ Missing ['Auto', 'BufferLoad', 'GlobalLoad', 'TDM']
+    GFX1250   : ✓ Tested []  |  ✗ Missing ['Auto', 'BufferLoad', 'GlobalLoad', 'TDM']
+    GFX94X    : ✓ Tested []  |  ✗ Missing ['Auto', 'BufferLoad', 'GlobalLoad', 'TDM']
+    GFX950    : ✓ Tested []  |  ✗ Missing ['Auto', 'BufferLoad', 'GlobalLoad', 'TDM']
+
+MXScaleFormat
+  Category: solution, Default: None
+  Valid Values: ['Auto', 'HostPreSwizzle', 'InMemorySwizzle', 'NoSwizzle']
+    GFX11     : ✓ Tested []  |  ✗ Missing ['Auto', 'HostPreSwizzle', 'InMemorySwizzle', 'NoSwizzle']
+    GFX12     : ✓ Tested []  |  ✗ Missing ['Auto', 'HostPreSwizzle', 'InMemorySwizzle', 'NoSwizzle']
+    GFX1250   : ✓ Tested []  |  ✗ Missing ['Auto', 'HostPreSwizzle', 'InMemorySwizzle', 'NoSwizzle']
+    GFX94X    : ✓ Tested []  |  ✗ Missing ['Auto', 'HostPreSwizzle', 'InMemorySwizzle', 'NoSwizzle']
+    GFX950    : ✓ Tested [True]  |  ✗ Missing ['Auto', 'HostPreSwizzle', 'InMemorySwizzle', 'NoSwizzle']
+
+MagicDivAlg
+  Category: solution, Default: None
+  Valid Values: [0, 1, 2]
+    GFX11     : ✓ Tested []  |  ✗ Missing [0, 1, 2]
+    GFX12     : ✓ Tested []  |  ✗ Missing [0, 1, 2]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [0, 1, 2]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [0, 1, 2]
+    GFX950    : ✓ Tested []  |  ✗ Missing [0, 1, 2]
+
+MaxLDS
+  Category: solution, Default: None
+  Valid Values: [-1, 163840, 327680, 65536]
+    GFX11     : ✓ Tested []  |  ✗ Missing [-1, 163840, 327680, 65536]
+    GFX12     : ✓ Tested [163840, 327680]  |  ✗ Missing [-1, 65536]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [-1, 163840, 327680, 65536]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [-1, 163840, 327680, 65536]
+    GFX950    : ✓ Tested [163840]  |  ✗ Missing [-1, 327680, 65536]
+
+MaxOccupancy
+  Category: solution, Default: None
+  Valid Values: [1, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 2, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 3, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 4, 40, 5, 6, 7, 8, 9]
+    GFX11     : ✓ Tested [True]  |  ✗ Missing [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 2, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 3, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 4, 40, 5, 6, 7, 8, 9]
+    GFX12     : ✓ Tested []  |  ✗ Missing [1, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 2, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 3, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 4, 40, 5, 6, 7, 8, 9]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [1, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 2, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 3, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 4, 40, 5, 6, 7, 8, 9]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [1, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 2, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 3, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 4, 40, 5, 6, 7, 8, 9]
+    GFX950    : ✓ Tested [40, True]  |  ✗ Missing [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 2, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 3, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 4, 5, 6, 7, 8, 9]
+
+MbskPrefetchMethod
+  Category: solution, Default: None
+  Valid Values: [-1, 0, 1]
+    GFX11     : ✓ Tested []  |  ✗ Missing [-1, 0, 1]
+    GFX12     : ✓ Tested []  |  ✗ Missing [-1, 0, 1]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [-1, 0, 1]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [-1, 0, 1]
+    GFX950    : ✓ Tested []  |  ✗ Missing [-1, 0, 1]
+
+MinGRIncPerMfma
+  Category: solution, Default: None
+  Valid Values: [-1, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    GFX11     : ✓ Tested []  |  ✗ Missing [-1, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    GFX12     : ✓ Tested []  |  ✗ Missing [-1, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [-1, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [-1, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    GFX950    : ✓ Tested [True]  |  ✗ Missing [-1, 2, 3, 4, 5, 6, 7, 8, 9]
+
+NoReject
+  Category: solution, Default: None
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+NonTemporal
+  Category: solution, Default: None
+  Valid Values: [-1, 0, 1, 2, 3, 4, 5, 6, 7]
+    GFX11     : ✓ Tested []  |  ✗ Missing [-1, 0, 1, 2, 3, 4, 5, 6, 7]
+    GFX12     : ✓ Tested []  |  ✗ Missing [-1, 0, 1, 2, 3, 4, 5, 6, 7]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [-1, 0, 1, 2, 3, 4, 5, 6, 7]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [-1, 0, 1, 2, 3, 4, 5, 6, 7]
+    GFX950    : ✓ Tested [-1]  |  ✗ Missing [0, 1, 2, 3, 4, 5, 6, 7]
+
+NonTemporalA
+  Category: solution, Default: None
+  Valid Values: [0, 1, 2, 3, 4, 5, 6, 7]
+    GFX11     : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3, 4, 5, 6, 7]
+    GFX12     : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3, 4, 5, 6, 7]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3, 4, 5, 6, 7]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3, 4, 5, 6, 7]
+    GFX950    : ✓ Tested [2, 3, 4, False]  |  ✗ Missing [1, 5, 6, 7]
+
+NonTemporalB
+  Category: solution, Default: None
+  Valid Values: [0, 1, 2, 3, 4, 5, 6, 7]
+    GFX11     : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3, 4, 5, 6, 7]
+    GFX12     : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3, 4, 5, 6, 7]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3, 4, 5, 6, 7]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3, 4, 5, 6, 7]
+    GFX950    : ✓ Tested [3, False, True]  |  ✗ Missing [2, 4, 5, 6, 7]
+
+NonTemporalC
+  Category: solution, Default: None
+  Valid Values: [0, 1, 2, 3, 4, 5, 6, 7]
+    GFX11     : ✓ Tested [7, False]  |  ✗ Missing [1, 2, 3, 4, 5, 6]
+    GFX12     : ✓ Tested [7, False]  |  ✗ Missing [1, 2, 3, 4, 5, 6]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3, 4, 5, 6, 7]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3, 4, 5, 6, 7]
+    GFX950    : ✓ Tested [4, False]  |  ✗ Missing [1, 2, 3, 5, 6, 7]
+
+NonTemporalD
+  Category: solution, Default: None
+  Valid Values: [0, 1, 2, 3, 4, 5, 6, 7]
+    GFX11     : ✓ Tested [7, False]  |  ✗ Missing [1, 2, 3, 4, 5, 6]
+    GFX12     : ✓ Tested [7, False]  |  ✗ Missing [1, 2, 3, 4, 5, 6]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3, 4, 5, 6, 7]
+    GFX94X    : ✓ Tested [4]  |  ✗ Missing [0, 1, 2, 3, 5, 6, 7]
+    GFX950    : ✓ Tested [4, 5, False, True]  |  ✗ Missing [2, 3, 6, 7]
+
+NonTemporalE
+  Category: solution, Default: None
+  Valid Values: [0, 1, 2, 3, 4, 5, 6, 7]
+    GFX11     : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3, 4, 5, 6, 7]
+    GFX12     : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3, 4, 5, 6, 7]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3, 4, 5, 6, 7]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3, 4, 5, 6, 7]
+    GFX950    : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3, 4, 5, 6, 7]
+
+NonTemporalMXSA
+  Category: solution, Default: None
+  Valid Values: [0, 1, 2, 3, 4, 5, 6, 7]
+    GFX11     : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3, 4, 5, 6, 7]
+    GFX12     : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3, 4, 5, 6, 7]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3, 4, 5, 6, 7]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3, 4, 5, 6, 7]
+    GFX950    : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3, 4, 5, 6, 7]
+
+NonTemporalMXSB
+  Category: solution, Default: None
+  Valid Values: [0, 1, 2, 3, 4, 5, 6, 7]
+    GFX11     : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3, 4, 5, 6, 7]
+    GFX12     : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3, 4, 5, 6, 7]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3, 4, 5, 6, 7]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3, 4, 5, 6, 7]
+    GFX950    : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3, 4, 5, 6, 7]
+
+NonTemporalMetadata
+  Category: solution, Default: None
+  Valid Values: [0, 1, 2, 3, 4, 5, 6, 7]
+    GFX11     : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3, 4, 5, 6, 7]
+    GFX12     : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3, 4, 5, 6, 7]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3, 4, 5, 6, 7]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3, 4, 5, 6, 7]
+    GFX950    : ✓ Tested [False]  |  ✗ Missing [1, 2, 3, 4, 5, 6, 7]
+
+NonTemporalWS
+  Category: solution, Default: None
+  Valid Values: [0, 1, 2, 3, 4, 5, 6, 7]
+    GFX11     : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3, 4, 5, 6, 7]
+    GFX12     : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3, 4, 5, 6, 7]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3, 4, 5, 6, 7]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3, 4, 5, 6, 7]
+    GFX950    : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3, 4, 5, 6, 7]
+
+NumLoadsCoalescedA
+  Category: solution, Default: None
+  Valid Values: [-1, 0, 1, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 2, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 3, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 4, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 5, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 6, 60, 61, 62, 63, 64, 7, 8, 9]
+    GFX11     : ✓ Tested []  |  ✗ Missing [-1, 0, 1, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 2, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 3, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 4, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 5, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 6, 60, 61, 62, 63, 64, 7, 8, 9]
+    GFX12     : ✓ Tested []  |  ✗ Missing [-1, 0, 1, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 2, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 3, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 4, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 5, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 6, 60, 61, 62, 63, 64, 7, 8, 9]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [-1, 0, 1, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 2, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 3, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 4, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 5, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 6, 60, 61, 62, 63, 64, 7, 8, 9]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [-1, 0, 1, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 2, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 3, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 4, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 5, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 6, 60, 61, 62, 63, 64, 7, 8, 9]
+    GFX950    : ✓ Tested [True]  |  ✗ Missing [-1, 0, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 2, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 3, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 4, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 5, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 6, 60, 61, 62, 63, 64, 7, 8, 9]
+
+NumLoadsCoalescedB
+  Category: solution, Default: None
+  Valid Values: [-1, 0, 1, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 2, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 3, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 4, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 5, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 6, 60, 61, 62, 63, 64, 7, 8, 9]
+    GFX11     : ✓ Tested []  |  ✗ Missing [-1, 0, 1, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 2, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 3, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 4, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 5, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 6, 60, 61, 62, 63, 64, 7, 8, 9]
+    GFX12     : ✓ Tested []  |  ✗ Missing [-1, 0, 1, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 2, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 3, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 4, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 5, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 6, 60, 61, 62, 63, 64, 7, 8, 9]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [-1, 0, 1, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 2, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 3, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 4, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 5, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 6, 60, 61, 62, 63, 64, 7, 8, 9]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [-1, 0, 1, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 2, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 3, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 4, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 5, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 6, 60, 61, 62, 63, 64, 7, 8, 9]
+    GFX950    : ✓ Tested [True]  |  ✗ Missing [-1, 0, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 2, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 3, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 4, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 5, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 6, 60, 61, 62, 63, 64, 7, 8, 9]
+
+OptNoLoadLoop
+  Category: solution, Default: None
+  Valid Values: [0, 1, 2]
+    GFX11     : ✓ Tested []  |  ✗ Missing [0, 1, 2]
+    GFX12     : ✓ Tested []  |  ✗ Missing [0, 1, 2]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [0, 1, 2]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [0, 1, 2]
+    GFX950    : ✓ Tested [True]  |  ✗ Missing [0, 2]
+
+OutputAmaxD
+  Category: problem, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+PinClocks
+  Category: global, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+PreciseKernelTime
+  Category: global, Default: True
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+PrefetchGlobalRead
+  Category: solution, Default: None
+  Valid Values: [0, 1, 10, 11, 12, 13, 14, 15, 16, 2, 3, 4, 5, 6, 7, 8, 9]
+    GFX11     : ✓ Tested [2, False]  |  ✗ Missing [1, 10, 11, 12, 13, 14, 15, 16, 3, 4, 5, 6, 7, 8, 9]
+    GFX12     : ✓ Tested [2, False, True]  |  ✗ Missing [10, 11, 12, 13, 14, 15, 16, 3, 4, 5, 6, 7, 8, 9]
+    GFX1250   : ✓ Tested [2]  |  ✗ Missing [0, 1, 10, 11, 12, 13, 14, 15, 16, 3, 4, 5, 6, 7, 8, 9]
+    GFX94X    : ✓ Tested [2, False, True]  |  ✗ Missing [10, 11, 12, 13, 14, 15, 16, 3, 4, 5, 6, 7, 8, 9]
+    GFX950    : ✓ Tested [2, 3, 4, 5, 6, False, True]  |  ✗ Missing [10, 11, 12, 13, 14, 15, 16, 7, 8, 9]
+
+PreloadKernArgs
+  Category: solution, Default: None
+  Valid Values: [False, True]
+    GFX11     : ✓ FULL COVERAGE
+    GFX12     : ✓ Tested [True]  |  ✗ Missing [False]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested [True]  |  ✗ Missing [False]
+
+PrintCodeCommands
+  Category: global, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+PrintWinnersOnly
+  Category: global, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested [True]  |  ✗ Missing [False]
+    GFX12     : ✓ FULL COVERAGE
+    GFX1250   : ✓ FULL COVERAGE
+    GFX94X    : ✓ Tested [True]  |  ✗ Missing [False]
+    GFX950    : ✓ Tested [True]  |  ✗ Missing [False]
+
+PristineOnGPU
+  Category: global, Default: True
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+PythonProfile
+  Category: global, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+ScheduleGROverBarrier
+  Category: solution, Default: None
+  Valid Values: [-1, 0, 1]
+    GFX11     : ✓ Tested []  |  ✗ Missing [-1, 0, 1]
+    GFX12     : ✓ Tested []  |  ✗ Missing [-1, 0, 1]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [-1, 0, 1]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [-1, 0, 1]
+    GFX950    : ✓ Tested [True]  |  ✗ Missing [-1, 0]
+
+ScheduleGlobalRead
+  Category: solution, Default: None
+  Valid Values: [0, 1]
+    GFX11     : ✓ Tested []  |  ✗ Missing [0, 1]
+    GFX12     : ✓ Tested []  |  ✗ Missing [0, 1]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [0, 1]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [0, 1]
+    GFX950    : ✓ Tested []  |  ✗ Missing [0, 1]
+
+ScheduleIterAlg
+  Category: solution, Default: None
+  Valid Values: [0, 1, 2, 3, 4]
+    GFX11     : ✓ Tested [3]  |  ✗ Missing [0, 1, 2, 4]
+    GFX12     : ✓ Tested [3, 4, False, True]  |  ✗ Missing [2]
+    GFX1250   : ✓ Tested [3, False]  |  ✗ Missing [1, 2, 4]
+    GFX94X    : ✓ Tested [3]  |  ✗ Missing [0, 1, 2, 4]
+    GFX950    : ✓ Tested [2, 3, True]  |  ✗ Missing [0, 4]
+
+ScheduleLocalWrite
+  Category: solution, Default: None
+  Valid Values: [0, 1]
+    GFX11     : ✓ Tested []  |  ✗ Missing [0, 1]
+    GFX12     : ✓ Tested []  |  ✗ Missing [0, 1]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [0, 1]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [0, 1]
+    GFX950    : ✓ Tested [True]  |  ✗ Missing [0]
+
+SeparateArchitectures
+  Category: global, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+ShowProgressBar
+  Category: global, Default: True
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+SilentHighPrecisionAccumulate
+  Category: problem, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+SourceSwap
+  Category: solution, Default: None
+  Valid Values: [False, True]
+    GFX11     : ✓ FULL COVERAGE
+    GFX12     : ✓ FULL COVERAGE
+    GFX1250   : ✓ FULL COVERAGE
+    GFX94X    : ✓ Tested [True]  |  ✗ Missing [False]
+    GFX950    : ✓ FULL COVERAGE
+
+Sparse
+  Category: solution, Default: 0
+  Valid Values: [0, 1, 2]
+    GFX11     : ✓ Tested []  |  ✗ Missing [0, 1, 2]
+    GFX12     : ✓ Tested []  |  ✗ Missing [0, 1, 2]
+    GFX1250   : ✓ Tested [2, True]  |  ✗ Missing [0]
+    GFX94X    : ✓ Tested [2, True]  |  ✗ Missing [0]
+    GFX950    : ✓ Tested [2, True]  |  ✗ Missing [0]
+
+StaggerU
+  Category: solution, Default: None
+  Valid Values: [0, 16, 2, 32, 4, 64, 8]
+    GFX11     : ✓ Tested [32, 4, False]  |  ✗ Missing [16, 2, 64, 8]
+    GFX12     : ✓ Tested [16, 32, 4, False]  |  ✗ Missing [2, 64, 8]
+    GFX1250   : ✓ Tested [False]  |  ✗ Missing [16, 2, 32, 4, 64, 8]
+    GFX94X    : ✓ Tested [16, 4, False]  |  ✗ Missing [2, 32, 64, 8]
+    GFX950    : ✓ Tested [16, 32, 4, 8, False]  |  ✗ Missing [2, 64]
+
+StaggerUMapping
+  Category: solution, Default: None
+  Valid Values: [0, 1, 2, 3, 4]
+    GFX11     : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3, 4]
+    GFX12     : ✓ Tested [False, True]  |  ✗ Missing [2, 3, 4]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3, 4]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3, 4]
+    GFX950    : ✓ Tested [False]  |  ✗ Missing [1, 2, 3, 4]
+
+StaggerUStride
+  Category: solution, Default: None
+  Valid Values: [-1, 0, 1024, 128, 16, 2048, 256, 32, 512, 64]
+    GFX11     : ✓ Tested []  |  ✗ Missing [-1, 0, 1024, 128, 16, 2048, 256, 32, 512, 64]
+    GFX12     : ✓ Tested [-1, 256]  |  ✗ Missing [0, 1024, 128, 16, 2048, 32, 512, 64]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [-1, 0, 1024, 128, 16, 2048, 256, 32, 512, 64]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [-1, 0, 1024, 128, 16, 2048, 256, 32, 512, 64]
+    GFX950    : ✓ Tested [-1, 128, 16, 256, 64]  |  ✗ Missing [0, 1024, 2048, 32, 512]
+
+StinkyTofuEnableRemarks
+  Category: global, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+StochasticRounding
+  Category: problem, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested [True]  |  ✗ Missing [False]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested [True]  |  ✗ Missing [False]
+
+StorePriorityOpt
+  Category: solution, Default: None
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested [True]  |  ✗ Missing [False]
+    GFX12     : ✓ FULL COVERAGE
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ FULL COVERAGE
+
+StoreRemapVectorWidth
+  Category: solution, Default: None
+  Valid Values: [-1, 0, 1, 2, 4, 8]
+    GFX11     : ✓ Tested [False]  |  ✗ Missing [-1, 1, 2, 4, 8]
+    GFX12     : ✓ Tested [False]  |  ✗ Missing [-1, 1, 2, 4, 8]
+    GFX1250   : ✓ Tested [False]  |  ✗ Missing [-1, 1, 2, 4, 8]
+    GFX94X    : ✓ Tested [-1]  |  ✗ Missing [0, 1, 2, 4, 8]
+    GFX950    : ✓ Tested [-1, 8, False]  |  ✗ Missing [1, 2, 4]
+
+StoreVectorWidth
+  Category: solution, Default: None
+  Valid Values: [-1, 1, 2, 3, 4, 6, 8]
+    GFX11     : ✓ Tested [-1, True]  |  ✗ Missing [2, 3, 4, 6, 8]
+    GFX12     : ✓ Tested [-1, True]  |  ✗ Missing [2, 3, 4, 6, 8]
+    GFX1250   : ✓ Tested [-1, True]  |  ✗ Missing [2, 3, 4, 6, 8]
+    GFX94X    : ✓ Tested [-1]  |  ✗ Missing [1, 2, 3, 4, 6, 8]
+    GFX950    : ✓ Tested [-1, 2, 4, True]  |  ✗ Missing [3, 6, 8]
+
+StreamK
+  Category: solution, Default: None
+  Valid Values: [0, 1, 2, 3, 4]
+    GFX11     : ✓ Tested [3]  |  ✗ Missing [0, 1, 2, 4]
+    GFX12     : ✓ Tested [3]  |  ✗ Missing [0, 1, 2, 4]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3, 4]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3, 4]
+    GFX950    : ✓ Tested [3, False]  |  ✗ Missing [1, 2, 4]
+
+StreamKAtomic
+  Category: solution, Default: None
+  Valid Values: [0, 1]
+    GFX11     : ✓ Tested []  |  ✗ Missing [0, 1]
+    GFX12     : ✓ Tested []  |  ✗ Missing [0, 1]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [0, 1]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [0, 1]
+    GFX950    : ✓ Tested []  |  ✗ Missing [0, 1]
+
+StreamKFixupTreeReduction
+  Category: solution, Default: None
+  Valid Values: [0, 1]
+    GFX11     : ✓ Tested [False]  |  ✗ Missing [1]
+    GFX12     : ✓ Tested [False]  |  ✗ Missing [1]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [0, 1]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [0, 1]
+    GFX950    : ✓ Tested [False]  |  ✗ Missing [1]
+
+StreamKXCCMapping
+  Category: solution, Default: None
+  Valid Values: [0, 2, 3, 4, 5, 6, 7, 8]
+    GFX11     : ✓ Tested []  |  ✗ Missing [0, 2, 3, 4, 5, 6, 7, 8]
+    GFX12     : ✓ Tested []  |  ✗ Missing [0, 2, 3, 4, 5, 6, 7, 8]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [0, 2, 3, 4, 5, 6, 7, 8]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [0, 2, 3, 4, 5, 6, 7, 8]
+    GFX950    : ✓ Tested [8, False]  |  ✗ Missing [2, 3, 4, 5, 6, 7]
+
+StridedBatched
+  Category: problem, Default: True
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+SupportUserArgs
+  Category: problem, Default: True
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested [True]  |  ✗ Missing [False]
+    GFX12     : ✓ Tested [True]  |  ✗ Missing [False]
+    GFX1250   : ✓ Tested [True]  |  ✗ Missing [False]
+    GFX94X    : ✓ Tested [False]  |  ✗ Missing [True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+SuppressNoLoadLoop
+  Category: solution, Default: None
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+SwInstructionPrefetch
+  Category: solution, Default: None
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+SwapGlobalReadOrder
+  Category: solution, Default: None
+  Valid Values: [0, 1]
+    GFX11     : ✓ Tested []  |  ✗ Missing [0, 1]
+    GFX12     : ✓ Tested []  |  ✗ Missing [0, 1]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [0, 1]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [0, 1]
+    GFX950    : ✓ FULL COVERAGE
+
+SwizzleTensorA
+  Category: problem, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+SwizzleTensorB
+  Category: problem, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+TDMInst
+  Category: solution, Default: None
+  Valid Values: [0, 1, 2, 3]
+    GFX11     : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3]
+    GFX12     : ✓ Tested [3]  |  ✗ Missing [0, 1, 2]
+    GFX1250   : ✓ Tested [3]  |  ✗ Missing [0, 1, 2]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3]
+    GFX950    : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3]
+
+TDMSplit
+  Category: solution, Default: None
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+TailloopInNll
+  Category: solution, Default: None
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ FULL COVERAGE
+
+TileAwareSelection
+  Category: problem, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+TimingInstrumentation
+  Category: global, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+TransposeLDS
+  Category: solution, Default: None
+  Valid Values: [-1, 0, 1, 2]
+    GFX11     : ✓ Tested [False, True]  |  ✗ Missing [-1, 2]
+    GFX12     : ✓ FULL COVERAGE
+    GFX1250   : ✓ Tested [-1, False, True]  |  ✗ Missing [2]
+    GFX94X    : ✓ Tested [-1, True]  |  ✗ Missing [0, 2]
+    GFX950    : ✓ FULL COVERAGE
+
+TransposeLDSMetadata
+  Category: solution, Default: None
+  Valid Values: [-1, 0, 1]
+    GFX11     : ✓ Tested []  |  ✗ Missing [-1, 0, 1]
+    GFX12     : ✓ Tested []  |  ✗ Missing [-1, 0, 1]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [-1, 0, 1]
+    GFX94X    : ✓ Tested [False]  |  ✗ Missing [-1, 1]
+    GFX950    : ✓ Tested [True]  |  ✗ Missing [-1, 0]
+
+UnrollLoopSwapGlobalReadOrder
+  Category: solution, Default: None
+  Valid Values: [0, 1]
+    GFX11     : ✓ Tested []  |  ✗ Missing [0, 1]
+    GFX12     : ✓ Tested []  |  ✗ Missing [0, 1]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [0, 1]
+    GFX94X    : ✓ Tested [False]  |  ✗ Missing [1]
+    GFX950    : ✓ FULL COVERAGE
+
+Use64bShadowLimit
+  Category: solution, Default: None
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested [True]  |  ✗ Missing [False]
+
+Use64bShadowLimitMX
+  Category: solution, Default: None
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ FULL COVERAGE
+
+UseBeta
+  Category: problem, Default: True
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested [True]  |  ✗ Missing [False]
+    GFX12     : ✓ Tested [True]  |  ✗ Missing [False]
+    GFX1250   : ✓ Tested [True]  |  ✗ Missing [False]
+    GFX94X    : ✓ Tested [True]  |  ✗ Missing [False]
+    GFX950    : ✓ Tested [True]  |  ✗ Missing [False]
+
+UseBias
+  Category: problem, Default: 0
+  Valid Values: [0, 1, 2, 3]
+    GFX11     : ✓ Tested [False, True]  |  ✗ Missing [2, 3]
+    GFX12     : ✓ Tested [False, True]  |  ✗ Missing [2, 3]
+    GFX1250   : ✓ Tested [3, False, True]  |  ✗ Missing [2]
+    GFX94X    : ✓ Tested [3, False]  |  ✗ Missing [1, 2]
+    GFX950    : ✓ Tested [3, False, True]  |  ✗ Missing [2]
+
+UseCustomMainLoopSchedule
+  Category: solution, Default: None
+  Valid Values: [-1, 0, 1]
+    GFX11     : ✓ Tested []  |  ✗ Missing [-1, 0, 1]
+    GFX12     : ✓ Tested []  |  ✗ Missing [-1, 0, 1]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [-1, 0, 1]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [-1, 0, 1]
+    GFX950    : ✓ Tested [False, True]  |  ✗ Missing [-1]
+
+UseE
+  Category: problem, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ FULL COVERAGE
+    GFX12     : ✓ FULL COVERAGE
+    GFX1250   : ✓ Tested [True]  |  ✗ Missing [False]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ FULL COVERAGE
+
+UseEffLike
+  Category: global, Default: True
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+UseInitialStridesAB
+  Category: problem, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+UseInitialStridesCD
+  Category: problem, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+UseInstOffsetForGRO
+  Category: solution, Default: None
+  Valid Values: [-1, 0, 1]
+    GFX11     : ✓ Tested []  |  ✗ Missing [-1, 0, 1]
+    GFX12     : ✓ Tested []  |  ✗ Missing [-1, 0, 1]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [-1, 0, 1]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [-1, 0, 1]
+    GFX950    : ✓ Tested [False]  |  ✗ Missing [-1, 1]
+
+UsePLRPack
+  Category: solution, Default: None
+  Valid Values: [0, 1]
+    GFX11     : ✓ Tested []  |  ✗ Missing [0, 1]
+    GFX12     : ✓ Tested []  |  ✗ Missing [0, 1]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [0, 1]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [0, 1]
+    GFX950    : ✓ FULL COVERAGE
+
+UseScaleAB
+  Category: problem, Default: 
+  Valid Values: ['', 'Scalar', 'Vector']
+    GFX11     : ✓ Tested ['']  |  ✗ Missing ['Scalar', 'Vector']
+    GFX12     : ✓ FULL COVERAGE
+    GFX1250   : ✓ Tested []  |  ✗ Missing ['', 'Scalar', 'Vector']
+    GFX94X    : ✓ Tested []  |  ✗ Missing ['', 'Scalar', 'Vector']
+    GFX950    : ✓ Tested ['Scalar']  |  ✗ Missing ['', 'Vector']
+
+UseScaleAlphaVec
+  Category: problem, Default: 0
+  Valid Values: [0, 1, 2, 3]
+    GFX11     : ✓ Tested []  |  ✗ Missing [0, 1, 2, 3]
+    GFX12     : ✓ Tested [False, True]  |  ✗ Missing [2, 3]
+    GFX1250   : ✓ Tested [3]  |  ✗ Missing [0, 1, 2]
+    GFX94X    : ✓ Tested [3, False]  |  ✗ Missing [1, 2]
+    GFX950    : ✓ Tested [3, False, True]  |  ✗ Missing [2]
+
+UseScaleCD
+  Category: problem, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested [True]  |  ✗ Missing [False]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ FULL COVERAGE
+
+UseSgprForGRO
+  Category: solution, Default: None
+  Valid Values: [-1, 0, 1]
+    GFX11     : ✓ Tested []  |  ✗ Missing [-1, 0, 1]
+    GFX12     : ✓ Tested [False, True]  |  ✗ Missing [-1]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [-1, 0, 1]
+    GFX94X    : ✓ Tested [True]  |  ✗ Missing [-1, 0]
+    GFX950    : ✓ FULL COVERAGE
+
+UseSubtileImpl
+  Category: solution, Default: None
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested [True]  |  ✗ Missing [False]
+
+UseUserArgs
+  Category: global, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested [True]  |  ✗ Missing [False]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+ValidationPrintValids
+  Category: global, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested [False]  |  ✗ Missing [True]
+    GFX12     : ✓ Tested [False]  |  ✗ Missing [True]
+    GFX1250   : ✓ Tested [False]  |  ✗ Missing [True]
+    GFX94X    : ✓ Tested [False]  |  ✗ Missing [True]
+    GFX950    : ✓ Tested [False]  |  ✗ Missing [True]
+
+VectorStore
+  Category: solution, Default: None
+  Valid Values: [-1, 0, 1]
+    GFX11     : ✓ Tested []  |  ✗ Missing [-1, 0, 1]
+    GFX12     : ✓ Tested []  |  ✗ Missing [-1, 0, 1]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [-1, 0, 1]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [-1, 0, 1]
+    GFX950    : ✓ Tested [-1]  |  ✗ Missing [0, 1]
+
+VectorWidthA
+  Category: solution, Default: None
+  Valid Values: [-1, 1, 2, 3, 4, 6, 8]
+    GFX11     : ✓ Tested [2, True]  |  ✗ Missing [-1, 3, 4, 6, 8]
+    GFX12     : ✓ Tested [-1, 2, 8, True]  |  ✗ Missing [3, 4, 6]
+    GFX1250   : ✓ Tested [-1, 4, True]  |  ✗ Missing [2, 3, 6, 8]
+    GFX94X    : ✓ Tested [-1, 2, 4, 8, True]  |  ✗ Missing [3, 6]
+    GFX950    : ✓ Tested [-1, 2, 4, 8, True]  |  ✗ Missing [3, 6]
+
+VectorWidthB
+  Category: solution, Default: None
+  Valid Values: [-1, 1, 2, 3, 4, 6, 8]
+    GFX11     : ✓ Tested [True]  |  ✗ Missing [-1, 2, 3, 4, 6, 8]
+    GFX12     : ✓ Tested [-1, 2, True]  |  ✗ Missing [3, 4, 6, 8]
+    GFX1250   : ✓ Tested [-1, 4, True]  |  ✗ Missing [2, 3, 6, 8]
+    GFX94X    : ✓ Tested [-1, 2, 4, 8, True]  |  ✗ Missing [3, 6]
+    GFX950    : ✓ Tested [-1, 2, 4, 8, True]  |  ✗ Missing [3, 6]
+
+WaveSeparateGlobalReadA
+  Category: solution, Default: None
+  Valid Values: [0, 1, 2]
+    GFX11     : ✓ Tested []  |  ✗ Missing [0, 1, 2]
+    GFX12     : ✓ Tested [False]  |  ✗ Missing [1, 2]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [0, 1, 2]
+    GFX94X    : ✓ Tested [False]  |  ✗ Missing [1, 2]
+    GFX950    : ✓ Tested [False]  |  ✗ Missing [1, 2]
+
+WaveSeparateGlobalReadB
+  Category: solution, Default: None
+  Valid Values: [0, 1, 2]
+    GFX11     : ✓ Tested [True]  |  ✗ Missing [0, 2]
+    GFX12     : ✓ Tested [False, True]  |  ✗ Missing [2]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [0, 1, 2]
+    GFX94X    : ✓ Tested [False]  |  ✗ Missing [1, 2]
+    GFX950    : ✓ Tested [False, True]  |  ✗ Missing [2]
+
+WaveSplitK
+  Category: solution, Default: None
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested [True]  |  ✗ Missing [False]
+
+WavefrontSize
+  Category: solution, Default: None
+  Valid Values: [-1, 32, 64]
+    GFX11     : ✓ Tested [32]  |  ✗ Missing [-1, 64]
+    GFX12     : ✓ Tested [32]  |  ✗ Missing [-1, 64]
+    GFX1250   : ✓ Tested [32]  |  ✗ Missing [-1, 64]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [-1, 32, 64]
+    GFX950    : ✓ Tested [64]  |  ✗ Missing [-1, 32]
+
+WorkGroupMappingXCC
+  Category: solution, Default: None
+  Valid Values: [-1, 1, 16, 2, 32, 4, 8]
+    GFX11     : ✓ Tested []  |  ✗ Missing [-1, 1, 16, 2, 32, 4, 8]
+    GFX12     : ✓ Tested [True]  |  ✗ Missing [-1, 16, 2, 32, 4, 8]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [-1, 1, 16, 2, 32, 4, 8]
+    GFX94X    : ✓ Tested [8]  |  ✗ Missing [-1, 1, 16, 2, 32, 4]
+    GFX950    : ✓ Tested [-1, 2, 32, 4, 8, True]  |  ✗ Missing [16]
+
+WorkGroupReduction
+  Category: solution, Default: None
+  Valid Values: [False]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False]
+
+isMixMode
+  Category: problem, Default: False
+  Valid Values: [False, True]
+    GFX11     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX12     : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX1250   : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX94X    : ✓ Tested []  |  ✗ Missing [False, True]
+    GFX950    : ✓ Tested []  |  ✗ Missing [False, True]
+
+
+====================================================================================================================================================================================
+SECTION 2: NON-TRACKABLE PARAMETERS (Usage Across Architectures)
+====================================================================================================================================================================================
+
+Parameter                           Category   Default         GFX11           GFX12           GFX1250         GFX94X          GFX950         
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+AssertAIGreaterThanEqual            solution   None            ---             ---             ---             ---             ---            
+AssertAILessThanEqual               solution   None            ---             ---             ---             ---             ---            
+BiasSrc                             problem    D               ✓ USED          ---             ✓ USED          ---             ✓ USED         
+BoundsCheck                         global     0               ✓ USED          ✓ USED          ✓ USED          ✓ USED          ✓ USED         
+BuildIdKind                         global     sha1            ---             ---             ---             ---             ---            
+CMakeBuildType                      global     Release         ✓ USED          ✓ USED          ---             ---             ✓ USED         
+CMakeCFlags                         global                     ---             ---             ---             ---             ---            
+CMakeCXXFlags                       global                     ---             ---             ---             ---             ---            
+ClientExecutionLockPath             global     None            ---             ---             ---             ---             ---            
+ClientLogLevel                      global     3               ---             ---             ---             ---             ---            
+CodeObjectVersion                   global     4               ---             ✓ USED          ---             ---             ---            
+ComputeDataType                     problem    0               ✓ USED          ✓ USED          ✓ USED          ✓ USED          ✓ USED         
+CpuThreads                          global     -1              ---             ✓ USED          ✓ USED          ---             ✓ USED         
+CustomKernelName                    solution   None            ---             ---             ---             ---             ---            
+DataInitSeed                        global     0               ---             ---             ---             ---             ---            
+DataInitTypeA                       global     -1              ✓ USED          ✓ USED          ✓ USED          ---             ✓ USED         
+DataInitTypeAB                      global     3               ---             ---             ---             ---             ---            
+DataInitTypeAlpha                   global     2               ✓ USED          ✓ USED          ✓ USED          ✓ USED          ✓ USED         
+DataInitTypeB                       global     -1              ✓ USED          ✓ USED          ✓ USED          ---             ✓ USED         
+DataInitTypeBeta                    global     2               ✓ USED          ✓ USED          ✓ USED          ✓ USED          ✓ USED         
+DataInitTypeBias                    global     3               ✓ USED          ✓ USED          ✓ USED          ---             ✓ USED         
+DataInitTypeC                       global     3               ✓ USED          ✓ USED          ✓ USED          ---             ✓ USED         
+DataInitTypeD                       global     0               ---             ✓ USED          ✓ USED          ---             ---            
+DataInitTypeE                       global     0               ✓ USED          ✓ USED          ✓ USED          ---             ---            
+DataInitTypeMXSA                    global     1               ---             ✓ USED          ---             ---             ✓ USED         
+DataInitTypeMXSB                    global     1               ---             ✓ USED          ---             ---             ✓ USED         
+DataInitTypeScaleA                  global     2               ---             ✓ USED          ---             ---             ✓ USED         
+DataInitTypeScaleAlphaVec           global     3               ✓ USED          ✓ USED          ✓ USED          ---             ✓ USED         
+DataInitTypeScaleB                  global     2               ---             ✓ USED          ---             ---             ✓ USED         
+DataInitTypeScaleC                  global     2               ---             ---             ---             ---             ---            
+DataInitTypeScaleD                  global     2               ---             ---             ---             ---             ---            
+DataInitValueActivationArgs         global     [2.0, 2.0]      ✓ USED          ---             ---             ✓ USED          ✓ USED         
+DataType                            problem    0               ✓ USED          ✓ USED          ✓ USED          ✓ USED          ✓ USED         
+DataTypeA                           problem    0               ✓ USED          ---             ---             ---             ✓ USED         
+DataTypeAmaxD                       problem    0               ---             ---             ---             ---             ---            
+DataTypeB                           problem    0               ✓ USED          ---             ---             ---             ✓ USED         
+DataTypeE                           problem    0               ---             ---             ---             ---             ---            
+DataTypeMXSA                        problem    E8              ---             ✓ USED          ---             ---             ---            
+DataTypeMXSB                        problem    E8              ---             ✓ USED          ---             ---             ---            
+DepthU                              solution   None            ✓ USED          ✓ USED          ✓ USED          ✓ USED          ✓ USED         
+DestDataType                        problem    0               ✓ USED          ✓ USED          ✓ USED          ✓ USED          ✓ USED         
+EnqueuesPerSync                     global     1               ✓ USED          ✓ USED          ✓ USED          ✓ USED          ✓ USED         
+ExitOnFails                         global     1               ---             ---             ---             ---             ---            
+F32XdlMathOp                        problem    0               ---             ✓ USED          ---             ---             ✓ USED         
+GlobalReadPerMfma                   solution   None            ✓ USED          ✓ USED          ---             ---             ✓ USED         
+GlobalSplitU                        solution   None            ✓ USED          ✓ USED          ✓ USED          ✓ USED          ✓ USED         
+GranularityThreshold                global     0.0             ---             ---             ---             ---             ---            
+HipClangVersion                     global     0.0.0           ---             ---             ---             ---             ---            
+IndexAssignmentsA                   problem    [0, 2]          ---             ---             ---             ---             ---            
+IndexAssignmentsB                   problem    [1, 2]          ---             ---             ---             ---             ---            
+IndexAssignmentsLD                  problem    [3, 4, 5, 6]    ---             ---             ---             ---             ---            
+LibraryFormat                       global     yaml            ---             ---             ---             ---             ---            
+LibraryUpdateFile                   global                     ---             ---             ---             ---             ---            
+LocalWritePerMfma                   solution   None            ✓ USED          ✓ USED          ---             ---             ✓ USED         
+LogicFormat                         global     yaml            ---             ---             ---             ---             ---            
+MacDataTypeA                        problem    0               ---             ✓ USED          ---             ---             ---            
+MacDataTypeB                        problem    0               ---             ✓ USED          ---             ---             ---            
+MacroTile                           solution   None            ---             ---             ---             ---             ---            
+MatrixInstruction                   solution   None            ✓ USED          ✓ USED          ✓ USED          ✓ USED          ✓ USED         
+MaxEnqueuesPerSync                  global     -1              ---             ---             ---             ---             ---            
+MaxWorkspaceSize                    global     134217728       ✓ USED          ✓ USED          ✓ USED          ---             ✓ USED         
+MetadataLayout                      problem    0               ---             ---             ✓ USED          ✓ USED          ---            
+MinFlopsPerSync                     global     1               ---             ---             ---             ---             ---            
+MinimumRequiredVersion              global     0.0.0           ✓ USED          ✓ USED          ---             ---             ✓ USED         
+MirrorDimsA                         problem    []              ---             ---             ---             ---             ---            
+MirrorDimsB                         problem    []              ---             ---             ---             ---             ---            
+MirrorDimsMXSA                      problem    []              ---             ---             ---             ---             ---            
+MirrorDimsMXSB                      problem    []              ---             ---             ---             ---             ---            
+MirrorDimsMetadata                  problem    []              ---             ---             ---             ---             ---            
+NumBenchmarks                       global     1               ---             ---             ---             ✓ USED          ✓ USED         
+NumElementsPerBatchStore            solution   None            ✓ USED          ✓ USED          ---             ✓ USED          ✓ USED         
+NumElementsToValidate               global     128             ✓ USED          ✓ USED          ✓ USED          ✓ USED          ✓ USED         
+NumElementsToValidateWinner         global     0               ---             ---             ---             ---             ---            
+NumIndicesC                         problem    2               ---             ---             ---             ---             ---            
+NumIndicesLD                        problem    4               ---             ---             ---             ---             ---            
+NumWarmups                          global     0               ✓ USED          ✓ USED          ✓ USED          ✓ USED          ✓ USED         
+OperationType                       problem    GEMM            ✓ USED          ✓ USED          ✓ USED          ✓ USED          ✓ USED         
+ParallelGpuExecution                global     1               ---             ---             ---             ---             ---            
+PerfModelL2ReadBwMul                global     2               ---             ---             ---             ---             ---            
+PerfModelL2ReadHits                 global     0.0             ---             ---             ---             ---             ---            
+PerfModelL2WriteHits                global     0.15            ---             ---             ---             ---             ---            
+PerfModelReadEfficiency             global     0.85            ---             ---             ---             ---             ---            
+PerformanceMetric                   global     DeviceEfficie   ---             ---             ---             ---             ---            
+Platform                            global     0               ---             ---             ---             ---             ---            
+PredictionThreshold                 global     2.0             ---             ✓ USED          ---             ---             ---            
+PrefetchLocalRead                   solution   None            ✓ USED          ✓ USED          ✓ USED          ✓ USED          ✓ USED         
+PrintTensorA                        global     0               ---             ---             ---             ---             ---            
+PrintTensorAmaxD                    global     0               ---             ---             ---             ---             ---            
+PrintTensorB                        global     0               ---             ---             ---             ---             ---            
+PrintTensorBias                     global     0               ---             ---             ---             ---             ---            
+PrintTensorC                        global     0               ---             ---             ---             ---             ---            
+PrintTensorD                        global     0               ---             ---             ---             ---             ---            
+PrintTensorRef                      global     0               ---             ---             ---             ---             ---            
+PrintTensorScaleAlphaVec            global     0               ---             ---             ---             ---             ---            
+PruneSparseMode                     global     0               ✓ USED          ✓ USED          ✓ USED          ✓ USED          ✓ USED         
+ROCmSMIPath                         global     None            ---             ---             ---             ---             ---            
+RocProfCounter                      global     None            ---             ---             ---             ---             ---            
+RotatingBufferSize                  global     0               ---             ---             ---             ---             ✓ USED         
+RotatingMode                        global     0               ---             ---             ---             ---             ---            
+RuntimeLanguage                     global     HIP             ---             ---             ---             ---             ---            
+SFCWGM                              solution   None            ---             ---             ---             ---             ---            
+SetConstStrideA                     problem    []              ---             ---             ---             ---             ---            
+SetConstStrideB                     problem    []              ---             ---             ---             ---             ---            
+SetConstStrideBias                  problem    []              ---             ---             ---             ---             ---            
+SkipSlowSolutionRatio               global     0.0             ---             ---             ---             ---             ---            
+SleepPercent                        global     300             ✓ USED          ✓ USED          ---             ✓ USED          ✓ USED         
+SolutionSelectionAlg                global     1               ---             ---             ---             ---             ---            
+SpaceFillingAlgo                    solution   None            ---             ---             ---             ---             ---            
+StinkyTofuDebugLevel                global     0               ---             ---             ---             ---             ---            
+StinkyTofuDebugPass                 global                     ---             ---             ---             ---             ---            
+StinkyTofuPassOrderSnapshotJson     global                     ---             ---             ---             ---             ---            
+StinkyTofuPrintAfterPass            global                     ---             ---             ---             ---             ---            
+StinkyTofuPrintBeforePass           global                     ---             ---             ---             ---             ---            
+StoreSyncOpt                        solution   None            ---             ---             ---             ---             ✓ USED         
+SyncsPerBenchmark                   global     1               ✓ USED          ✓ USED          ✓ USED          ✓ USED          ✓ USED         
+ThreadTile                          solution   None            ---             ✓ USED          ---             ---             ✓ USED         
+ValidationMaxToPrint                global     4               ✓ USED          ✓ USED          ✓ USED          ✓ USED          ✓ USED         
+WorkGroup                           solution   None            ---             ✓ USED          ---             ---             ✓ USED         
+WorkGroupMapping                    solution   None            ✓ USED          ✓ USED          ✓ USED          ✓ USED          ✓ USED         
+WorkGroupMappingXCCGroup            solution   None            ---             ---             ---             ---             ✓ USED         
+
+====================================================================================================================================================================================
+OVERALL SUMMARY
+====================================================================================================================================================================================
+
+Total Parameters: 301
+  Trackable (finite value sets): 181
+  Non-trackable (ranges/complex): 120
+
+GFX11: 90/301 parameters used (29%)
+GFX12: 126/301 parameters used (41%)
+GFX1250: 75/301 parameters used (24%)
+GFX94X: 68/301 parameters used (22%)
+GFX950: 151/301 parameters used (50%)
+
+====================================================================================================================================================================================
+PARAMETERS NOT TESTED ON ANY ARCHITECTURE
+====================================================================================================================================================================================
+
+TRACKABLE PARAMETERS (not tested anywhere): 63
+
+Parameter                                Category     Default         Valid Values                                      
+------------------------------------------------------------------------------------------------------------------------
+ActivationAlt                            solution     None            [False, True]                                     
+ActivationFused                          solution     None            [True]                                            
+AdaptiveGemm                             solution     None            [0, 1]                                            
+AdaptiveGemmGSUA                         solution     None            [0, 1]                                            
+AllowNoFreeDims                          problem      False           [False, True]                                     
+AsanBuild                                global       False           [False, True]                                     
+AsmDebug                                 global       False           [False, True]                                     
+BufferLoad                               solution     None            [False, True]                                     
+BufferStore                              solution     None            [False, True]                                     
+CEqualD                                  global       False           [False, True]                                     
+CheckASMCodeSize                         global       False           [False, True]                                     
+ComplexConjugateA                        problem      False           [False, True]                                     
+ComplexConjugateB                        problem      False           [False, True]                                     
+DebugPersistentKernelLoopForever         solution     None            [False, True]                                     
+DebugStreamK                             solution     None            [0, 1, 2, 3]                                      
+DirectToVgprMXSA                         solution     None            [False, True]                                     
+DirectToVgprMXSB                         solution     None            [False, True]                                     
+DumpTensors                              global       False           [False, True]                                     
+EnableMarker                             global       False           [False, True]                                     
+ExtraLatencyForLR                        solution     None            [0, 2, 4, 6, 8, 10, 12, 14, 16, -80, -70, -60...  
+ForceRedoBenchmarkProblems               global       True            [False, True]                                     
+ForceRedoLibraryClient                   global       True            [False, True]                                     
+ForceRedoLibraryLogic                    global       True            [False, True]                                     
+GenerateSourcesAndExit                   global       False           [False, True]                                     
+HardwareMonitor                          global       True            [False, True]                                     
+ISA                                      solution     None            [SemanticVersion(major=0, minor=0, patch=0), ...  
+InterleaveAlpha                          solution     None            [0, 1]                                            
+LazyLibraryLoading                       global       False           [False, True]                                     
+LibraryUpdateComment                     global       False           [False, True]                                     
+LocalReadVectorWidthA                    solution     None            [-1, 1, 2, 4, 8, 16, 32]                          
+MXLoadInst                               solution     None            ['Auto', 'TDM', 'BufferLoad', 'GlobalLoad']       
+MagicDivAlg                              solution     None            [0, 1, 2]                                         
+MbskPrefetchMethod                       solution     None            [-1, 0, 1]                                        
+NoReject                                 solution     None            [False, True]                                     
+NonTemporalE                             solution     None            [0, 1, 2, 3, 4, 5, 6, 7]                          
+NonTemporalMXSA                          solution     None            [0, 1, 2, 3, 4, 5, 6, 7]                          
+NonTemporalMXSB                          solution     None            [0, 1, 2, 3, 4, 5, 6, 7]                          
+NonTemporalWS                            solution     None            [0, 1, 2, 3, 4, 5, 6, 7]                          
+OutputAmaxD                              problem      False           [False, True]                                     
+PinClocks                                global       False           [False, True]                                     
+PreciseKernelTime                        global       True            [False, True]                                     
+PrintCodeCommands                        global       False           [False, True]                                     
+PristineOnGPU                            global       True            [False, True]                                     
+PythonProfile                            global       False           [False, True]                                     
+ScheduleGlobalRead                       solution     None            [0, 1]                                            
+SeparateArchitectures                    global       False           [False, True]                                     
+ShowProgressBar                          global       True            [False, True]                                     
+SilentHighPrecisionAccumulate            problem      False           [False, True]                                     
+StinkyTofuEnableRemarks                  global       False           [False, True]                                     
+StreamKAtomic                            solution     None            [0, 1]                                            
+StridedBatched                           problem      True            [False, True]                                     
+SuppressNoLoadLoop                       solution     None            [False, True]                                     
+SwInstructionPrefetch                    solution     None            [False, True]                                     
+SwizzleTensorA                           problem      False           [False, True]                                     
+SwizzleTensorB                           problem      False           [False, True]                                     
+TDMSplit                                 solution     None            [False, True]                                     
+TileAwareSelection                       problem      False           [False, True]                                     
+TimingInstrumentation                    global       False           [False, True]                                     
+UseEffLike                               global       True            [False, True]                                     
+UseInitialStridesAB                      problem      False           [False, True]                                     
+UseInitialStridesCD                      problem      False           [False, True]                                     
+WorkGroupReduction                       solution     None            [False]                                           
+isMixMode                                problem      False           [False, True]                                     
+
+NON-TRACKABLE PARAMETERS (not tested anywhere): 65
+
+Parameter                                Category     Default        
+----------------------------------------------------------------------
+AssertAIGreaterThanEqual                 solution     None           
+AssertAILessThanEqual                    solution     None           
+BuildIdKind                              global       sha1           
+CMakeCFlags                              global                      
+CMakeCXXFlags                            global                      
+ClientExecutionLockPath                  global       None           
+ClientLogLevel                           global       3              
+CustomKernelName                         solution     None           
+DataInitSeed                             global       0              
+DataInitTypeAB                           global       3              
+DataInitTypeScaleC                       global       2              
+DataInitTypeScaleD                       global       2              
+DataTypeAmaxD                            problem      0              
+DataTypeE                                problem      0              
+ExitOnFails                              global       1              
+GranularityThreshold                     global       0.0            
+HipClangVersion                          global       0.0.0          
+IndexAssignmentsA                        problem      [0, 2]         
+IndexAssignmentsB                        problem      [1, 2]         
+IndexAssignmentsLD                       problem      [3, 4, 5, 6]   
+LibraryFormat                            global       yaml           
+LibraryUpdateFile                        global                      
+LogicFormat                              global       yaml           
+MacroTile                                solution     None           
+MaxEnqueuesPerSync                       global       -1             
+MinFlopsPerSync                          global       1              
+MirrorDimsA                              problem      []             
+MirrorDimsB                              problem      []             
+MirrorDimsMXSA                           problem      []             
+MirrorDimsMXSB                           problem      []             
+MirrorDimsMetadata                       problem      []             
+NumElementsToValidateWinner              global       0              
+NumIndicesC                              problem      2              
+NumIndicesLD                             problem      4              
+ParallelGpuExecution                     global       1              
+PerfModelL2ReadBwMul                     global       2              
+PerfModelL2ReadHits                      global       0.0            
+PerfModelL2WriteHits                     global       0.15           
+PerfModelReadEfficiency                  global       0.85           
+PerformanceMetric                        global       DeviceEfficie  
+Platform                                 global       0              
+PrintTensorA                             global       0              
+PrintTensorAmaxD                         global       0              
+PrintTensorB                             global       0              
+PrintTensorBias                          global       0              
+PrintTensorC                             global       0              
+PrintTensorD                             global       0              
+PrintTensorRef                           global       0              
+PrintTensorScaleAlphaVec                 global       0              
+ROCmSMIPath                              global       None           
+RocProfCounter                           global       None           
+RotatingMode                             global       0              
+RuntimeLanguage                          global       HIP            
+SFCWGM                                   solution     None           
+SetConstStrideA                          problem      []             
+SetConstStrideB                          problem      []             
+SetConstStrideBias                       problem      []             
+SkipSlowSolutionRatio                    global       0.0            
+SolutionSelectionAlg                     global       1              
+SpaceFillingAlgo                         solution     None           
+StinkyTofuDebugLevel                     global       0              
+StinkyTofuDebugPass                      global                      
+StinkyTofuPassOrderSnapshotJson          global                      
+StinkyTofuPrintAfterPass                 global                      
+StinkyTofuPrintBeforePass                global                      
+
+Total untested parameters: 128/301 (42%)
+  Trackable: 63
+  Non-trackable: 65
