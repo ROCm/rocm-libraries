@@ -99,7 +99,7 @@ inline std::array<double, FMHA_NUM_FEATURES> extract_fmha_features(const FmhaPro
     double ai     = ops / std::max(mem, 1.0);
     double decode = (sq <= 1) ? 1.0 : 0.0;
 
-    double pip     = encode_fmha_pipeline(key.algorithm.pipeline_name);
+    double pip     = encode_fmha_pipeline(key.algorithm.pipeline);
     double tm0     = key.algorithm.tile_shape.m0;
     double tn0     = key.algorithm.tile_shape.n0;
     double tk0     = key.algorithm.tile_shape.k0;
