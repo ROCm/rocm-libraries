@@ -1,0 +1,165 @@
+# Evaluating MicroPython as the embedded interpreter for `ck-dsl-provider`
+
+**Status:** Phase 0 (feasibility spike) — started 2026-06-01
+**Branch / worktree:** `users/dahawkin/ck-dsl-provider-micropython`
+**Nature:** One of several **parallel candidates** being investigated. NOT a committed direction.
+
+## Objective
+Determine whether the provider can run the CK DSL **compile path** with **zero dependency on
+any Python installation** using an embedded MicroPython, and quantify the cost/risk vs. the
+parallel candidates (static-CPython embed, C++ rewrite, etc.).
+
+## Motivation
+- The provider must **not depend on a system Python installation**.
+- Embedding **full CPython** carries its own risks: artifact size, security surface, the
+  `ctypes`/OpenSSL/stdlib `.so` tail, and frozen-build + LTO/bitcode toolchain fragility.
+- The current provider is a **POC**; rewriting the provider's C++ embedding glue + tests
+  entirely is acceptable.
+
+## Guiding constraints
+- **`ck_dsl` is what must run** under MicroPython — it's vendored Composable Kernel upstream
+  (`projects/composablekernel/python/ck_dsl`). Every edit to it is fork-maintenance burden, so
+  this plan **prefers MicroPython-side shims over editing `ck_dsl`** and measures residual
+  `ck_dsl` edits as an explicit cost.
+- Provider C++ glue + tests are **accepted as a full rewrite** (POC) — scheduled *last*, after
+  the make-or-break risks are retired.
+- **Default scope: minimal POC slice** — the single conv compile path the integration test
+  already exercises on gfx1151. We do *not* try to make all of `ck_dsl` MicroPython-clean.
+
+## Why the prior "MicroPython impossible" note doesn't end this
+A prior spike concluded full-CPython is required. Re-verified against the live tree: the real
+costs are (1) the CPython C-API embedding glue, (2) `dataclasses` (228×, 181 `frozen=True`) +
+runtime `typing`/`lru_cache`/`pathlib` across `ck_dsl`, (3) `ctypes`→`libamd_comgr`. The user
+accepts (1) as a rewrite; (2) becomes a shim-fidelity question; (3) becomes the **make-or-break
+FFI gate** below. The language itself is clean (no `match`/`async`/metaclasses), so MicroPython's
+*compiler* is not the blocker.
+
+---
+
+## Phase 0 — FFI / comgr go-no-go (THE make-or-break spike) 🔴
+Cheapest test of the hardest blocker. If it fails, MicroPython is rejected and we stop — before
+touching the provider or ck_dsl.
+
+**Steps**
+1. Build the MicroPython **Unix port** with `ffi` (`MICROPY_PY_FFI`) + `uctypes` enabled.
+2. Standalone (no provider, no ck_dsl): reimplement *only* the comgr 3-stage compile
+   (`SOURCE → BC → RELOCATABLE → EXECUTABLE`) from `runtime/comgr.py` against
+   `libamd_comgr.so` using MicroPython `ffi`/`uctypes`.
+3. Feed it a tiny hand-written LLVM IR string; require a valid `.hsaco` blob out.
+4. Stress exactly the worrying surface: `byref` out-params (`create_data_set`/`get_data`/
+   `action_data_count`), `c_char_p`/`c_void_p` arrays (option lists), opaque-handle
+   `Structure`s, `create_string_buffer` blob read-back.
+
+**Gate G0**
+- PASS: `.hsaco` produced and loadable → proceed to Phase 1.
+- FAIL: `ffi`/`uctypes` can't model the out-param/array surface → **STOP, MicroPython rejected**;
+  write up why for the bake-off.
+- ALSO RECORD: MicroPython `ffi` is **Unix-port only** → if Windows is in scope, flag as a
+  likely hard dead-end now.
+
+---
+
+## Phase 1 — Can MicroPython *run* the ck_dsl compile slice? 🟠
+1. Pin the **exact import closure** of the one exercised compile path; trim the eager
+   `ck_dsl/__init__.py` + `helpers/__init__.py` pull-ins (`subprocess`/`ast`/`inspect`/`benchmark`).
+2. Stand up MicroPython-side **shims**, validated against the slice only: `dataclasses`
+   (`frozen=True`, `field(default_factory=...)`, `replace()`), runtime `typing.Generic/Protocol`,
+   `functools.lru_cache`, `pathlib`. Wire `comgr.py`/`hip_module.py` to the Phase-0 `ffi` layer.
+3. Success = run the compile entry for **one conv kernel** under MicroPython and **byte-compare
+   emitted LLVM IR** vs. CPython for the same input (equivalence oracle).
+
+**Gate G1**
+- PASS: IR matches with shims + ≤ small, enumerable `ck_dsl` edits → proceed.
+- FAIL/ESCALATE: shim surface explodes or hits runtime-semantics walls (descriptors,
+  `__set_name__`, metaclass behaviour) → record shim-vs-fork cost, escalate decision.
+
+---
+
+## Phase 2 — Embed MicroPython in the provider, one path end-to-end 🟡
+1. Rewrite the provider embedding layer on MicroPython's `mp_*` embed API: replace
+   `EmbeddedInterpreter.cpp`, `CompileServiceBridge.cpp`, `PythonError.cpp`; reproduce the
+   `py::dict` payload contract (`ConvImplicitGemmPayload.cpp`) as `mp_obj_t`; rewrite error
+   translation. Swap `Python3::Python`/`pybind11::embed` out of CMake.
+2. Rewrite affected unit/integration tests.
+3. Wire one path end-to-end: provider → MicroPython → ck_dsl slice → comgr → `.hsaco` → launch
+   one conv on **gfx1151**, validate accuracy vs the existing `CpuFpReferenceConvolution` harness.
+
+**Gate G2**
+- PASS: conv compiles + runs + matches reference on gfx1151 with no Python install present
+  (verify via isolated `sys.path` / no `PYTHONPATH`).
+
+---
+
+## Phase 3 — Bake-off evidence report 🟢
+Head-to-head table for the parallel investigation:
+- Shipped **artifact size** & whether any external `.so` tail remains (target: none).
+- **Startup / per-compile latency** vs CPython embed.
+- **Python-install independence** (proven by Phase 2 isolation test).
+- **`ck_dsl` fork footprint** (lines changed in vendored upstream + shim LOC).
+- **Portability** (Unix-only `ffi`; Windows verdict).
+- **Risk register** (shim fidelity, upstream drift, multi-plugin embedding interactions).
+
+---
+
+## Recommendation
+Fund **Phase 0 only** as the first commit — highest information-per-dollar; protects against
+sinking Phase 1/2 effort into a dead end. Decide Phase 1 after seeing G0.
+
+---
+
+## Phase 0 working log
+_(to be filled in as the spike progresses)_
+
+### Environment facts (2026-06-01)
+- libamd_comgr: `/opt/rocm-7.2.4/lib/libamd_comgr.so` (+ `.so.3`); also `.so.2` in `/lib/x86_64-linux-gnu`. ROCm 7.2.4.
+- MicroPython: none on PATH → building Unix port from source.
+- Build prereqs present: gcc, cc, make, git, pkg-config; **libffi 3.4.6** (pkg-config OK).
+- uctypes: standard in the Unix port; ffi (`MICROPY_PY_FFI`) is a headline Unix-port feature — confirm `import ffi` after build.
+
+### comgr API surface to reproduce (from `runtime/comgr.py`)
+All functions return `c_int` status. Opaque handles `_Handle{uint64}` are **structs passed by
+value** in ctypes; under SysV AMD64 a single-eightbyte INTEGER struct == bare `uint64`, so model
+them as `"Q"` in `ffi`. **Zero `CFUNCTYPE` callbacks** → the MicroPython ffi-callback GC bug is N/A.
+
+The 3-stage chain: SOURCE(LLVM_IR) → COMPILE_SOURCE_TO_BC → CODEGEN_BC_TO_RELOCATABLE →
+LINK_RELOCATABLE_TO_EXECUTABLE → extract EXECUTABLE bytes (HSACO).
+
+Entry points + the FFI mechanics each exercises:
+- `create_data_set(out _DataSet*)`, `create_data(kind, out _Data*)`, `create_action_info(out*)`
+  → **out-param**: pointer to a uint64 slot, read back (uctypes/bytearray + addressof).
+- `destroy_data_set(set)`, `release_data(data)`, `destroy_action_info(info)`,
+  `data_set_add(set, data)` → **struct(s)-by-value** as `"Q"`.
+- `set_data(data, size, char*)`, `set_data_name(data, char*)`,
+  `action_info_set_isa_name(info, char*)`, `action_info_set_language(info, int)`.
+- `action_info_set_option_list(info, char**, count)` → **array of char\***: bytearray of N*8
+  pointer slots, each = addressof(option bytes); keep refs alive.
+- `action_data_count(set, kind, out size_t*)`, `action_data_get_data(set, kind, idx, out _Data*)`.
+- `get_data(data, in/out size_t*, char* | NULL)` → **two-call size-then-read**; NULL first, then
+  bytearray buffer; read back via the bytearray.
+- `do_action(action_kind, info, in_set, out_set)`.
+- `status_string(status, out char**)` → out `char**`; spike may report numeric status only.
+
+Make-or-break for G0: (a) `ffi` passes single-eightbyte structs-by-value correctly as `"Q"`;
+(b) `uctypes.addressof` on bytes/bytearray supports out-params + the char* pointer array.
+
+### Findings (2026-06-01)
+- MicroPython 3.4.0 (commit `44a569b`), Unix port `build-standard`, ~785KB text. `ffi` exposes
+  `{open, func, as_bytearray, callback}`; `uctypes` exposes `{addressof, bytearray_at, bytes_at,
+  struct, sizeof, ...}`. libffi 3.4.6.
+- Spike `spike/comgr_ffi_spike.py` reimplements `comgr.py`'s 3-stage chain with **no ctypes**:
+  handles → `"Q"`, out-params/buffers/`char**` array → bytearrays via `uctypes.addressof`,
+  two-call `get_data` with NULL=`0`.
+- Run (`LD_LIBRARY_PATH=/opt/rocm-7.2.4/lib`): produced **3520-byte HSACO**, `magic==\x7fELF`,
+  `readelf` → ELF64, OS/ABI **AMD HSA**, Machine **AMD GPU**, targeted gfx1151. Compile is
+  host-side (no GPU needed); blob is structurally valid (load/launch deferred to Phase 2).
+- **Confirmed:** (1) single-eightbyte INTEGER struct-by-value == bare `uint64` holds through
+  MicroPython `ffi`/libffi — all handle calls succeeded; (2) `uctypes.addressof` on bytes/bytearray
+  covers out-params + the `char**` option array; (3) zero callbacks → ffi-callback GC bug N/A.
+
+### G0 verdict: **PASS**
+The FFI/comgr make-or-break blocker is cleared. MicroPython `ffi`/`uctypes` can drive the in-process
+comgr compile end-to-end. The prior "MicroPython impossible" claim is refuted on the FFI axis.
+**Caveat (unchanged):** MicroPython `ffi` is Unix-port only → Windows remains blocked at the *port*
+level (not the ABI level — Win x64 would also pass a single-eightbyte struct in a register).
+**Next:** proceed to Phase 1 (can MicroPython actually *run* the ck_dsl compile slice — dataclasses/
+typing/lru_cache/pathlib shim fidelity), the real remaining uncertainty.
