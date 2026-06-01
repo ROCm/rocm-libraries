@@ -46,10 +46,7 @@ struct MatrixOperands {
 
 // Match rocisa reuse gating: non-scale WMMA f8f6f4 and MX f4-family never reuse.
 static bool supportsMatrixReuse(const StinkyInstruction& inst) {
-    const HwInstDesc* desc = inst.getHwInstDesc();
-    if (!desc || !desc->mnemonic) return false;
-
-    const std::string_view m(desc->mnemonic);
+    const std::string_view m(inst.getHwInstDesc()->mnemonic);
     if (isWMMA(inst) && !isMXWMMA(inst) && m.find("_f8f6f4") != std::string_view::npos)
         return false;
     if (isMXWMMA(inst) && m.ends_with("_f4")) return false;
