@@ -1,0 +1,5 @@
+# Backward-weight 2D smoke shapes (AICK-1277 Phase 1)
+# Channels are per group. Output* columns are informational.
+NDim,Groups,BatchSize,OutChannels,InChannels,KernelH,KernelW,InputH,InputW,OutputH,OutputW,StrideH,StrideW,DilationH,DilationW,LeftPadH,LeftPadW,RightPadH,RightPadW,TestName
+2,2,2,192,192,3,3,28,28,28,28,1,1,1,1,1,1,1,1,smoke_bwd_weight_grouped_s1
+2,1,4,64,64,1,1,14,14,14,14,1,1,1,1,0,0,0,0,smoke_bwd_weight_single_1x1

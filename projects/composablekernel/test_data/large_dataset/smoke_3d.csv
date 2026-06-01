@@ -1,0 +1,4 @@
+# Shared 3D smoke shape (AICK-1277 Phase 1) - keeps the 3D test suites non-empty.
+# Channels are per group. Output* columns are informational.
+NDim,Groups,BatchSize,OutChannels,InChannels,KernelD,KernelH,KernelW,InputD,InputH,InputW,OutputD,OutputH,OutputW,StrideD,StrideH,StrideW,DilationD,DilationH,DilationW,LeftPadD,LeftPadH,LeftPadW,RightPadD,RightPadH,RightPadW,TestName
+3,2,2,128,256,1,1,1,7,7,7,4,4,4,2,2,2,1,1,1,0,0,0,0,0,0,smoke_3d_grouped_s2

@@ -104,6 +104,8 @@ test_data/*
 !test_data/*.py
 !test_data/*.sh
 !test_data/requirements.txt
+# Checked-in large-dataset validation catalogue (AICK-1277), not generated
+!test_data/large_dataset/
 
 # Exceptions to build* patterns above
 # The experimental/builder directory should be tracked despite matching build*

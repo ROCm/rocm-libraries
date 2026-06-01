@@ -1338,6 +1338,10 @@ pipeline {
             defaultValue: false,
             description: "Run comprehensive convolution dataset tests before important changes (default: OFF)")
         booleanParam(
+            name: "RUN_LARGE_DATASET_VALIDATION",
+            defaultValue: false,
+            description: "Run the large-dataset convolution validation (Old CK + CK Tile) over the checked-in customer shape catalogue (default: OFF)")
+        booleanParam(
             name: "RUN_CK_TILE_FMHA_TESTS",
             defaultValue: false,
             description: "Run the ck_tile FMHA tests (default: OFF)")
@@ -1717,6 +1721,50 @@ pipeline {
                                            cd ../build && \
                                            ./bin/test_grouped_convnd_fwd_dataset_xdl && \
                                            ./bin/test_grouped_convnd_bwd_data_dataset_xdl && \
+                                           ./bin/test_grouped_convnd_bwd_weight_dataset_xdl"""
+                    }
+                    steps{
+                        deleteDir()
+                        buildHipClangJobAndReboot(setup_args:setup_args, build_type: 'Release', execute_cmd: execute_args)
+                        cleanWs()
+                    }
+                }
+            }
+        }
+        stage("Run Large Dataset Validation")
+        {
+            when {
+                beforeAgent true
+                expression { env.SHOULD_RUN_CI.toBoolean() }
+            }
+            parallel
+            {
+                stage("Run Large Dataset Validation on gfx942")
+                {
+                    when {
+                        beforeAgent true
+                        expression { params.RUN_LARGE_DATASET_VALIDATION.toBoolean() }
+                    }
+                    agent{ label rocmnode("gfx942")}
+                    environment{
+                        setup_args = "NO_CK_BUILD"
+                        // Large-dataset validation (AICK-1277): runs the checked-in customer
+                        // shape catalogue (test_data/large_dataset/) against BOTH backends -
+                        // Old CK (*_dataset_xdl) and CK Tile (*_dataset_tile). The per-direction
+                        // CSV is copied into the canonical filename each gtest reads.
+                        execute_args = """ python3 ../experimental/grouped_convolution_tile_instances/generate_instances.py --mode=profiler && \
+                                           cmake .. --preset dev-gfx942 -D CK_EXPERIMENTAL_BUILDER=ON && \
+                                           make -j64 test_grouped_convnd_fwd_dataset_xdl \
+                                                     test_grouped_convnd_bwd_data_dataset_xdl \
+                                                     test_grouped_convnd_bwd_weight_dataset_xdl \
+                                                     test_grouped_convnd_bwd_data_dataset_tile && \
+                                           cp ../test_data/large_dataset/smoke_3d.csv ../test_data/conv_test_set_3d_dataset.csv && \
+                                           cp ../test_data/large_dataset/fwd_2d.csv ../test_data/conv_test_set_2d_dataset.csv && \
+                                           ./bin/test_grouped_convnd_fwd_dataset_xdl && \
+                                           cp ../test_data/large_dataset/bwd_data_2d.csv ../test_data/conv_test_set_2d_dataset.csv && \
+                                           ./bin/test_grouped_convnd_bwd_data_dataset_xdl && \
+                                           ./bin/test_grouped_convnd_bwd_data_dataset_tile && \
+                                           cp ../test_data/large_dataset/bwd_weight_2d.csv ../test_data/conv_test_set_2d_dataset.csv && \
                                            ./bin/test_grouped_convnd_bwd_weight_dataset_xdl"""
                     }
                     steps{
