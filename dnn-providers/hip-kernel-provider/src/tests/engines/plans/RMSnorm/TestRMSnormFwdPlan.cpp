@@ -204,7 +204,7 @@ TEST(TestRMSnormFwdPlan, CompileIncludesOffloadArchOption)
     plan.compile(mockCompiler, deviceProps);
 }
 
-TEST(TestRMSnormFwdPlan, CompileFp32SetsCorrectDefines)
+TEST(TestRMSnormFwdPlanFp32, CompileSetsCorrectDefines)
 {
     const MockKernelCompiler mockCompiler;
 
@@ -234,13 +234,15 @@ TEST(TestRMSnormFwdPlan, CompileFp32SetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP32=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP16=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_BFP16=0"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_INNER_SIZE=150528"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_STRIDE=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_INPUT_TYPE=float"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_OUTPUT_TYPE=float"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_SCALE_TYPE=float"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_COMPUTE_TYPE=float"));
 }
 
-TEST(TestRMSnormFwdPlan, CompileFp16SetsCorrectDefines)
+TEST(TestRMSnormFwdPlanFp16, CompileSetsCorrectDefines)
 {
     const MockKernelCompiler mockCompiler;
 
@@ -272,13 +274,15 @@ TEST(TestRMSnormFwdPlan, CompileFp16SetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP32=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP16=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_BFP16=0"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_INNER_SIZE=150528"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_STRIDE=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_INPUT_TYPE=half"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_OUTPUT_TYPE=half"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_SCALE_TYPE=float"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_COMPUTE_TYPE=float"));
 }
 
-TEST(TestRMSnormFwdPlan, CompileBfp16SetsCorrectDefines)
+TEST(TestRMSnormFwdPlanBfp16, CompileSetsCorrectDefines)
 {
     const MockKernelCompiler mockCompiler;
 
@@ -311,6 +315,8 @@ TEST(TestRMSnormFwdPlan, CompileBfp16SetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP32=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP16=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_BFP16=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_INNER_SIZE=150528"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_STRIDE=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_INPUT_TYPE=ushort"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_OUTPUT_TYPE=ushort"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_SCALE_TYPE=float"));
@@ -357,4 +363,42 @@ TEST(TestRMSnormFwdPlan, CompileWithUnsupportedWorkgroupsThrows)
     auto deviceProps = createTestDeviceProps();
 
     EXPECT_THROW(plan.compile(mockCompiler, deviceProps), hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestRMSnormFwdPlan, CompileWithChannelLastInputCorrectlySetsDefines)
+{
+    const MockKernelCompiler mockCompiler;
+
+    std::vector<std::string> capturedOptions;
+    EXPECT_CALL(mockCompiler, compile(::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::vector<std::string>& options) {
+            capturedOptions = options;
+            auto kernel = std::make_unique<MockRunnableKernel>();
+            EXPECT_CALL(*kernel, setBlockSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
+            EXPECT_CALL(*kernel, setGridSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
+            auto program = std::make_unique<MockCompiledProgram>();
+            EXPECT_CALL(*program, getKernel(::testing::_))
+                .WillOnce(::testing::Return(::testing::ByMove(std::move(kernel))));
+            return program;
+        });
+
+    auto [fbb, plan] = createPlanFromGraph({150528, 1, 672, 3}, {1, 3, 224, 224});
+    auto deviceProps = createTestDeviceProps();
+
+    plan.compile(mockCompiler, deviceProps);
+
+    auto hasOption = [&](const std::string& opt) {
+        return std::find(capturedOptions.begin(), capturedOptions.end(), opt)
+               != capturedOptions.end();
+    };
+
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP32=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP16=0"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_BFP16=0"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_INNER_SIZE=150528"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_STRIDE=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_INPUT_TYPE=float"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_OUTPUT_TYPE=float"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_SCALE_TYPE=float"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RMSNORM_COMPUTE_TYPE=float"));
 }

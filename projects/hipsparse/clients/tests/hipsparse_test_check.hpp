@@ -49,6 +49,8 @@ public:
         {
             return std::is_same<T, hipComplex>{} || std::is_same<T, hipDoubleComplex>{};
         }
+        case hipsparse_test_numeric_types_enum::spvv:
+        case hipsparse_test_numeric_types_enum::gather:
         case hipsparse_test_numeric_types_enum::scatter:
         {
             return std::is_same<T, int8_t>{} || std::is_same<T, hipsparseFloat16>{}
@@ -77,6 +79,13 @@ public:
     static constexpr bool is_valid_type()
     {
         return std::is_integral<I>::value && std::is_integral<J>::value && is_valid_type<T>();
+    };
+
+    template <typename I, typename X, typename Y, typename T>
+    static constexpr bool is_valid_type()
+    {
+        return std::is_integral<I>::value && is_valid_type<X>() && is_valid_type<Y>()
+               && is_valid_type<T>();
     };
 
     template <typename I, typename A, typename X, typename Y, typename T>

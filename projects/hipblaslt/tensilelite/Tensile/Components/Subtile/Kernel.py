@@ -8,6 +8,9 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from functools import singledispatch
 from typing import Dict, List, NamedTuple, Optional, Tuple, Type
+from Tensile.Components.Subtile.LogicalScheduler import (
+      LogicalScheduler, SchedulerConfig as MFMASchedulerConfig,
+      ReadGranularity)
 
 from ...Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
   INDEX_CHARS, IsaVersion
@@ -72,8 +75,8 @@ from .SubtileGeometry import (
   ABInputGeometry,
   ABGRGeometry,
   ABLRGeometry,
-  GRTag_1x2, GRTag_2x2, GRTag_TLU1,
-  LRTag_1x2, LRTag_TLU1,
+  GRTag_1x1, GRTag_1x2, GRTag_2x2, GRTag_TLU1,
+  LRTag_1x1, LRTag_1x2, LRTag_TLU1,
   ABTilePair,
   CDTileGeometry,
   MXScaleInputGeometry,
@@ -286,8 +289,8 @@ AB_B4 = ABTilePair(
     lr=ABLRGeometry(tag=LRTag_1x2(), **_B4, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=32)), # 128-bit LR: 32 fp4 along K
 )
 AB_B8 = ABTilePair(
-    gr=ABGRGeometry(tag=GRTag_1x2(), **_B8, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=16)),                  # 128-bit GR: 16 fp8 along K
-    lr=ABLRGeometry(tag=LRTag_1x2(), **_B8, subtileShape=(1, 2), loadShape=LoadShape(m=1, k=32), loadWidth=32), # 256-bit LR: 32 fp8 along K
+    gr=ABGRGeometry(tag=GRTag_1x1(), **_B8, subtileShape=(1, 1), loadShape=LoadShape(m=1, k=16)),  # 128-bit GR: 16 fp8 along K
+    lr=ABLRGeometry(tag=LRTag_1x1(), **_B8, subtileShape=(1, 1), loadShape=LoadShape(m=1, k=16)), # 128-bit LR: 16 fp8 along K
 )
 
 AB_B4_2x2 = ABTilePair(
@@ -311,10 +314,14 @@ AB_B16_TLU1_16x1 = ABTilePair(
 
 # MX scale factor inputs (one scale per mxBlock data elements)
 _MXS_B4 = dict(scaleLayout=MFMA_SCALE_16x16_1B_MX32_8V, instK=128, bpe=1, supportedTypes=('fp4',))
+_MXS_B8 = dict(scaleLayout=MFMA_SCALE_16x16_1B_MX32_8V, instK=128, bpe=1, supportedTypes=('fp8', 'bf8'))
+
 # GR: subtileShape=None -> derived from kernel as (mt_mma, du_scale) to span entire macro tile
 # LR: subtileShape=(2,2) -> 2 scale MMA tiles in M x 2 in K per local read
 MXSA_B4 = MXScaleTilePair(gr=MXScaleGRGeometry(**_MXS_B4, loadWidth=16), lr=MXScaleLRGeometry(**_MXS_B4, loadWidth=4))
 MXSB_B4 = MXScaleTilePair(gr=MXScaleGRGeometry(**_MXS_B4, loadWidth=16), lr=MXScaleLRGeometry(**_MXS_B4, loadWidth=4))
+MXSA_B8 = MXScaleTilePair(gr=MXScaleGRGeometry(**_MXS_B8, loadWidth=16), lr=MXScaleLRGeometry(**_MXS_B8, loadWidth=4))
+MXSB_B8 = MXScaleTilePair(gr=MXScaleGRGeometry(**_MXS_B8, loadWidth=16), lr=MXScaleLRGeometry(**_MXS_B8, loadWidth=4))
 
 # C/D output: 128-bit store = 4 f32 elements along N
 CD_F32 = CDTile_1x1(mmaLayout=MFMA_16x16_1B_4N_4V, bpe=4, supportedTypes=('f32',), storeShape=LoadShape(m=1, k=4))
@@ -325,6 +332,8 @@ def selectMXScaleGeometry(kernel: dict, tc: str) -> MXScaleTilePair:
   dtype = kernel["ProblemType"][f"DataType{data_tc}"]
   if dtype.is6bitFloat() or dtype.isFloat4():
     return MXSA_B4 if tc == 'MXSA' else MXSB_B4
+  if dtype.is8bitFloat():
+    return MXSA_B8 if tc == 'MXSA' else MXSB_B8
   raise NotImplementedError(f"selectMXScaleGeometry: unsupported dtype {dtype} for tc={tc}")
 
 
@@ -1143,89 +1152,7 @@ def emitMfmaCode(writer, kernel):
   return module
 
 
-##################################################
-# Subroutine entry point for main loop impl
-#
-# This should be shared logic for both main loop and nnl loops
-# It would be nice to have this support generic loop unroll
-# and possibly SIMD spec paths
-#
-# Scheduling logic would be introduced here
-#
-def mainLoopImplPGR0(writer, kernel, isNLL = False):
-  module = Module()
 
-  hasMXScale = kernel["ProblemType"].get("MXBlockA", 0) and kernel["ProblemType"].get("MXBlockB", 0)
-
-  tiA_ = writer.states.a.tileInfo
-  tiB_ = writer.states.b.tileInfo
-  tiMXSA_ = writer.states.mxsa.tileInfo if hasMXScale else None
-  tiMXSB_ = writer.states.mxsb.tileInfo if hasMXScale else None
-
-  label = Label("start", comment="")
-  module.add(label)
-
-  if not isNLL:
-    # GR loads: TileInfo emit (uses lrSubtileSize for LDS layout compat)
-    if tiA_ and tiA_.gr:
-      module.add(tiA_.emitGlobalRead(writer, kernel))
-      module.add(tiB_.emitGlobalRead(writer, kernel))
-    else:
-      module.add(globalReadDoSubtile('A', writer, kernel))
-      module.add(globalReadDoSubtile('B', writer, kernel))
-    if hasMXScale:
-      if tiMXSA_:
-        module.add(emitScaleGRLoad(tiMXSA_, writer, kernel))
-        module.add(emitScaleGRLoad(tiMXSB_, writer, kernel))
-      else:
-        module.add(globalReadDoScaleSubtile('MXSA', writer, kernel))
-        module.add(globalReadDoScaleSubtile('MXSB', writer, kernel))
-    module.add(SWaitCnt(dscnt=-1, vlcnt=0, vscnt=-1, comment="Wait for all subtile GRs to complete"))
-    module.add(SBarrier(comment=""))
-
-  # LR loads
-  module.add(localReadDoSubtile('A', writer, kernel))
-  module.add(localReadDoSubtile('B', writer, kernel))
-  if hasMXScale:
-    if tiMXSA_:
-      module.add(emitScaleLRLoad(tiMXSA_, writer, kernel))
-      module.add(emitScaleLRLoad(tiMXSB_, writer, kernel))
-    else:
-      module.add(localReadDoScaleSubtile('MXSA', writer, kernel))
-      module.add(localReadDoScaleSubtile('MXSB', writer, kernel))
-  module.add(SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for all subtile LRs to complete"))
-
-  # MFMA: uses TileInfo (vgprTiles, subtile mapping)
-  module.add(emitMfmaCode(writer, kernel))
-
-  # GR LDS buffer swap
-  module.add(tiA_.emitGRLDSBufferSwap(writer, kernel))
-  module.add(tiB_.emitGRLDSBufferSwap(writer, kernel))
-
-  if hasMXScale:
-    module.add(emitScaleGRLDSSwap(tiMXSA_, writer, kernel))
-    module.add(emitScaleGRLDSSwap(tiMXSB_, writer, kernel))
-
-  # LR LDS buffer swap
-  module.add(tiA_.emitLRLDSBufferSwap(writer, kernel))
-  module.add(tiB_.emitLRLDSBufferSwap(writer, kernel))
-
-  if hasMXScale:
-    module.add(emitScaleLRLDSSwap(tiMXSA_, writer, kernel))
-    module.add(emitScaleLRLDSSwap(tiMXSB_, writer, kernel))
-
-  # GR pointer updates
-  module.add(tiA_.emitGRPtrUpdate(writer, kernel))
-  module.add(tiB_.emitGRPtrUpdate(writer, kernel))
-  if hasMXScale:
-    module.add(emitScaleGRPtrUpdate(tiMXSA_, writer, kernel))
-    module.add(emitScaleGRPtrUpdate(tiMXSB_, writer, kernel))
-
-  module.add(SSubU32(dst=sgpr("LoopCounterL"), src0=sgpr("LoopCounterL"), src1=1))
-  module.add(SCmpEQU32(src0=sgpr("LoopCounterL"), src1=0))
-  module.add(SCBranchSCC0(labelName=label.getLabelName()))
-
-  return module
 
 
 ##################################################
@@ -1273,61 +1200,65 @@ def preLoop(writer, kernel):
 def mainLoop(writer, kernel):
   module = Module()
   pgr = kernel["PrefetchGlobalRead"]
-  assert pgr in (0, 2), "SubtileBasedKernel only supports PGR=0 and PGR=2, got PGR=%d" % pgr
+  assert pgr in (0, 1, 2), "SubtileBasedKernel only supports PGR=0, PGR=1, and PGR=2, got PGR=%d" % pgr
 
-  if pgr == 2:
-    from Tensile.Components.Subtile.LogicalScheduler import (
-        LogicalScheduler, SchedulerConfig as MFMASchedulerConfig,
-        ReadGranularity)
-    tiA = writer.states.a.tileInfo
-    tiB = writer.states.b.tileInfo
-    scaleTiA = writer.states.mxsa.tileInfo if kernel["ProblemType"].get("MXBlockA", 0) else None
-    scaleTiB = writer.states.mxsb.tileInfo if kernel["ProblemType"].get("MXBlockB", 0) else None
 
-    lrAGran = ReadGranularity(mn=1, k=1)
-    lrBGran = ReadGranularity(mn=1, k=1)
-    grAGran = ReadGranularity(mn=1, k=2) if tiA.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
-    grBGran = ReadGranularity(mn=1, k=2) if tiB.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
-    lrSAGran = ReadGranularity(mn=2, k=2) if scaleTiA else None
-    lrSBGran = ReadGranularity(mn=2, k=2) if scaleTiB else None
-    grSAGran = ReadGranularity(mn=scaleTiA.localMMATileGrid[0], k=scaleTiA.localMMATileGrid[1]) if scaleTiA else None
-    grSBGran = ReadGranularity(mn=scaleTiB.localMMATileGrid[0], k=scaleTiB.localMMATileGrid[1]) if scaleTiB else None
+  tiA = writer.states.a.tileInfo
+  tiB = writer.states.b.tileInfo
+  scaleTiA = writer.states.mxsa.tileInfo if kernel["ProblemType"].get("MXBlockA", 0) else None
+  scaleTiB = writer.states.mxsb.tileInfo if kernel["ProblemType"].get("MXBlockB", 0) else None
 
-    vgprBudget = writer.states.regCaps["MaxVgpr"]
-    vgprUsed = writer.vgprPool.size() - writer.vgprPool.available()
+  # Values to be ajusted once we support more tile shapes.  For now, we assume:
+  lrAGran = ReadGranularity(mn=1, k=1)
+  lrBGran = ReadGranularity(mn=1, k=1)
+  grAGran = ReadGranularity(mn=1, k=2) if tiA.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
+  grBGran = ReadGranularity(mn=1, k=2) if tiB.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
+  lrSAGran = ReadGranularity(mn=2, k=2) if scaleTiA else None
+  lrSBGran = ReadGranularity(mn=2, k=2) if scaleTiB else None
+  grSAGran = ReadGranularity(mn=scaleTiA.localMMATileGrid[0], k=scaleTiA.localMMATileGrid[1]) if scaleTiA else None
+  grSBGran = ReadGranularity(mn=scaleTiB.localMMATileGrid[0], k=scaleTiB.localMMATileGrid[1]) if scaleTiB else None
 
-    for numPartM, numPartN in MFMASchedulerConfig.get_partition_candidates(tiA, tiB):
-        cfg = MFMASchedulerConfig(
-            numMFMATilesM=tiA.localMMATileGrid[0],
-            numMFMATilesN=tiB.localMMATileGrid[0],
-            numSubIterK=tiA.localMMATileGrid[1],
-            lrA=lrAGran, lrB=lrBGran,
-            grA=grAGran, grB=grBGran,
-            lrSA=lrSAGran, lrSB=lrSBGran,
-            grSA=grSAGran, grSB=grSBGran,
-            numPartitionsM=numPartM, numPartitionsN=numPartN,
-        )
-        scheduler = LogicalScheduler(cfg)
-        scheduler.build()
-        numVgpr = scheduler.getNumVgpr(tiA, tiB, scaleTiA, scaleTiB)
-        if vgprUsed + numVgpr <= vgprBudget:
-            break
+  schedulerPgr = pgr
 
-    scheduler.allocVgprTiles(writer, tiA, tiB,
-                             scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
-    dtileInfo = writer.states.d.tileInfo
-    scheduler.populate_instructions(
-        writer, kernel,
-        tileInfoA=tiA, tileInfoB=tiB, dtileInfo=dtileInfo,
-        scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
+  vgprBudget = writer.states.regCaps["MaxVgpr"]
+  vgprUsed = writer.vgprPool.size() - writer.vgprPool.available()
 
-    module.add(scheduler.emitAllLoops(writer, kernel))
-    scheduler.deallocVgprTiles(writer)
+  M = tiA.localMMATileGrid[0]
+  N = tiB.localMMATileGrid[0]
+  candidates = [(M, N)] if pgr == 0 else MFMASchedulerConfig.get_partition_candidates(tiA, tiB)
+  for partSizeM, partSizeN in candidates:
+      cfg = MFMASchedulerConfig(
+          numMFMATilesM=M,
+          numMFMATilesN=N,
+          numSubIterK=tiA.localMMATileGrid[1],
+          lrA=lrAGran,
+          lrB=lrBGran,
+          grA=grAGran,
+          grB=grBGran,
+          lrSA=lrSAGran,
+          lrSB=lrSBGran,
+          grSA=grSAGran,
+          grSB=grSBGran,
+          partitionSizeM=partSizeM,
+          partitionSizeN=partSizeN,
+          pgr=schedulerPgr
+      )
+      
+      scheduler = LogicalScheduler(cfg)
+      scheduler.build()
 
-  else:
-    # PGR=0: non-pipelined
-    module.addComment0("MAINLOOP")
-    module.add(mainLoopImplPGR0(writer, kernel))
-    module.addComment("")
+      numVgpr = scheduler.getNumVgpr(tiA, tiB, scaleTiA, scaleTiB)
+      if vgprUsed + numVgpr <= vgprBudget:
+          break
+  scheduler.allocVgprTiles(writer, tiA, tiB,
+                           scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
+  dtileInfo = writer.states.d.tileInfo
+  scheduler.populate_instructions(
+      writer, kernel,
+      tileInfoA=tiA, tileInfoB=tiB, dtileInfo=dtileInfo,
+      scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
+
+  module.add(scheduler.emitAllLoops(writer, kernel))
+  scheduler.deallocVgprTiles(writer)
 
   return module

@@ -92,7 +92,7 @@ get_os_id(OS_ID)
 message(STATUS "OS detected is ${OS_ID}")
 
 # Versioning via rocm-cmake
-set(VERSION_STRING "3.34.0")
+set(VERSION_STRING "3.35.0")
 rocm_setup_version(VERSION ${VERSION_STRING})
 
 # Workaround until llvm and hip CMake modules fix symlink logic in their config files
@@ -181,6 +181,9 @@ else()
       gfx1152
       gfx1153
       gfx12-generic
+      gfx1200
+      gfx1201
+      gfx1250
     )
     if(BUILD_ADDRESS_SANITIZER)
       set(OPTIONAL_TARGETS_QUERY ${XNACK_PLUS_TARGETS})

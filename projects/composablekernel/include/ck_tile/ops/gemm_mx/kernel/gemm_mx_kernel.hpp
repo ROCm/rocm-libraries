@@ -13,6 +13,34 @@
 
 namespace ck_tile {
 
+template <typename Problem, typename Policy>
+struct MXGemmPipelineAgBgCrCompAsyncEightWaves;
+
+namespace detail {
+template <typename Problem>
+struct MXGemmPipelineAgBgCrCompAsyncEightWavesPolicy;
+
+template <typename Pipeline>
+struct MXGemmKernelScaleTraits
+{
+    static constexpr index_t ScaleGranularityK = Pipeline::ScaleGranularityK;
+    static constexpr index_t MXdlPack          = Pipeline::MXdlPack;
+    static constexpr index_t NXdlPack          = Pipeline::NXdlPack;
+    static constexpr index_t KXdlPack          = Pipeline::KXdlPack;
+};
+
+template <typename Problem, typename Policy>
+struct MXGemmKernelScaleTraits<MXGemmPipelineAgBgCrCompAsyncEightWaves<Problem, Policy>>
+{
+    using PolicyTraits = MXGemmPipelineAgBgCrCompAsyncEightWavesPolicy<Problem>;
+
+    static constexpr index_t ScaleGranularityK = PolicyTraits::BlockScaleSize;
+    static constexpr index_t MXdlPack          = PolicyTraits::MXdlPack;
+    static constexpr index_t NXdlPack          = PolicyTraits::NXdlPack;
+    static constexpr index_t KXdlPack          = PolicyTraits::KXdlPack;
+};
+} // namespace detail
+
 template <typename ScaleM    = MXScalePointer<e8m0_t, -1>,
           typename ScaleN    = MXScalePointer<e8m0_t, -1>,
           index_t NumATensor = 1,
@@ -99,9 +127,11 @@ struct MXGemmKernel : UniversalGemmKernel<TilePartitioner_, MXGemmPipeline_, Epi
     static constexpr auto BPackedSize = numeric_traits<BDataType>::PackedSize;
 
     // XdlPack: desired packing of e8m0_t scale values into int32_t
-    static constexpr index_t MXdlPack = 2;
-    static constexpr index_t NXdlPack = 2;
-    static constexpr index_t KXdlPack = 2;
+    using ScaleTraits                          = detail::MXGemmKernelScaleTraits<MXGemmPipeline>;
+    static constexpr index_t ScaleGranularityK = ScaleTraits::ScaleGranularityK;
+    static constexpr index_t MXdlPack          = ScaleTraits::MXdlPack;
+    static constexpr index_t NXdlPack          = ScaleTraits::NXdlPack;
+    static constexpr index_t KXdlPack          = ScaleTraits::KXdlPack;
 
     // Effective pack sizes: fall back to 1 when dimension is too small
     using BlockWarps_                      = typename BlockGemmShape::BlockWarps;
@@ -258,6 +288,20 @@ struct MXGemmKernel : UniversalGemmKernel<TilePartitioner_, MXGemmPipeline_, Epi
             return false;
         }
 
+        // The Preshuffle scale path anchors its scale windows at K = 0 and does not offset them
+        // per split-K batch, so split-K (k_batch > 1) would read the wrong packed scales. Reject
+        // it until the preshuffle scale windows learn the split-K K-offset.
+        if constexpr(MXGemmPipeline::Preshuffle)
+        {
+            if(kargs.k_batch > 1)
+            {
+                if(log)
+                    CK_TILE_ERROR("MX GEMM: split-K (k_batch > 1) is not supported with the "
+                                  "preshuffle pipeline.");
+                return false;
+            }
+        }
+
         // M / N must be a multiple of the block tile when padding is disabled.
         if(!kPadM && (kargs.M % TilePartitioner::MPerBlock != 0))
         {
@@ -331,6 +375,9 @@ struct MXGemmKernel : UniversalGemmKernel<TilePartitioner_, MXGemmPipeline_, Epi
             }
         }
 
+        // Delegate the remaining shape/vector-size checks to the universal kernel. All MX
+        // pipelines (comp-async, eight-waves, preshuffle) expose the templated
+        // GetVectorSize{A,B}<IsWave32>() that UniversalGemmKernel::IsSupportedArgument requires.
         return Underlying::IsSupportedArgument(
             static_cast<const typename Underlying::KernelArgs&>(kargs));
     }
@@ -397,34 +444,103 @@ struct MXGemmKernel : UniversalGemmKernel<TilePartitioner_, MXGemmPipeline_, Epi
                                                       const index_t k_elem_offset = 0)
     {
         auto scale_a = kargs.scale_m_ptr;
+        static_assert(ScaleM::GranularityK == ScaleGranularityK);
+        if constexpr(MXGemmPipeline::Preshuffle)
+        {
+            const auto scale_packs_m = integer_divide_ceil(kargs.M, (MXdlPackEff * MThreadPerXdl));
+            const auto scale_packs_k = kargs.K / ScaleGranularityK / (KXdlPackEff * KThreadPerXdl);
 
-        static constexpr int BlockScaleSize = ScaleM::GranularityK;
-        const auto scale_k_packed           = kargs.K / BlockScaleSize / KXdlPackEff;
-        const auto scale_m_packed           = kargs.M / MXdlPackEff;
+            const auto scale_a_naive_desc = make_naive_tensor_descriptor_packed(
+                make_tuple(scale_packs_m, scale_packs_k, KThreadPerXdl, MThreadPerXdl));
+            const auto scale_a_desc = transform_tensor_descriptor(
+                scale_a_naive_desc,
+                make_tuple(make_merge_transform(make_tuple(scale_packs_m, MThreadPerXdl)),
+                           make_merge_transform(make_tuple(scale_packs_k, KThreadPerXdl))),
+                make_tuple(sequence<0, 3>{}, sequence<1, 2>{}),
+                make_tuple(sequence<0>{}, sequence<1>{}));
 
-        const auto scale_a_tensor_view = make_naive_tensor_view<address_space_enum::global>(
-            reinterpret_cast<const int32_t*>(scale_a.ptr),
-            make_tuple(scale_m_packed, scale_k_packed),
-            make_tuple(scale_k_packed, 1));
+            const auto scale_a_tensor_view = make_tensor_view<address_space_enum::global>(
+                reinterpret_cast<const int32_t*>(scale_a.ptr), scale_a_desc);
 
-        // Pad the scale view so that partial trailing tiles along M and K are handled safely
-        // (OOB scale loads return zero; with A/B also zero on the padded region the contribution
-        // is zero regardless of scale value). Mirrors the A/B view padding done by the pipeline.
-        const auto scale_a_pad_view = pad_tensor_view(
-            scale_a_tensor_view,
-            make_tuple(number<TilePartitioner::MPerBlock / MXdlPackEff>{},
-                       number<TilePartitioner::KPerBlock / BlockScaleSize / KXdlPackEff>{}),
-            sequence<kPadM, kPadK>{});
+            // Preshuffle does not support split-K (k_batch > 1 is rejected in
+            // IsSupportedArgument), so the scale origin stays at K = 0 here.
+            return make_tile_window(
+                scale_a_tensor_view,
+                make_tuple(
+                    number<TilePartitioner::MPerBlock / MXdlPackEff>{},
+                    number<TilePartitioner::KPerBlock / (ScaleGranularityK * KXdlPackEff)>{}),
+                {i_m / MXdlPackEff, 0});
+        }
+        else
+        {
+            const auto scale_k_packed = kargs.K / ScaleGranularityK / KXdlPackEff;
+            const auto scale_m_packed = kargs.M / MXdlPackEff;
 
-        const index_t k_scale_offset = k_elem_offset / BlockScaleSize / KXdlPackEff;
+            // A scale tensor view - layout [M/MXdlPackEff, K/32/KXdlPackEff] with int32_t elements
+            const auto scale_a_tensor_view = make_naive_tensor_view<address_space_enum::global>(
+                reinterpret_cast<const int32_t*>(scale_a.ptr),
+                make_tuple(scale_m_packed, scale_k_packed),
+                make_tuple(scale_k_packed, 1));
 
-        auto scale_a_block_window = make_tile_window(
-            scale_a_pad_view,
-            make_tuple(number<TilePartitioner::MPerBlock / MXdlPackEff>{},
-                       number<TilePartitioner::KPerBlock / BlockScaleSize / KXdlPackEff>{}),
-            {i_m / MXdlPackEff, k_scale_offset});
+            // Pad the scale view so partial trailing tiles along M are handled safely (OOB scale
+            // loads return zero; with A also zero on the padded region the contribution is zero
+            // regardless of scale value). kPadK is statically disabled, so K never actually pads.
+            const auto scale_a_pad_view = pad_tensor_view(
+                scale_a_tensor_view,
+                make_tuple(number<TilePartitioner::MPerBlock / MXdlPackEff>{},
+                           number<TilePartitioner::KPerBlock / ScaleGranularityK / KXdlPackEff>{}),
+                sequence<kPadM, kPadK>{});
 
-        return scale_a_block_window;
+            // For split-K (k_batch > 1) advance the scale origin into this k_id's packed-K slice.
+            const index_t k_scale_offset = k_elem_offset / ScaleGranularityK / KXdlPackEff;
+
+            // Tile window shape: [MPerBlock/MXdlPackEff, KPerBlock/32/KXdlPackEff]
+            return make_tile_window(
+                scale_a_pad_view,
+                make_tuple(number<TilePartitioner::MPerBlock / MXdlPackEff>{},
+                           number<TilePartitioner::KPerBlock / ScaleGranularityK / KXdlPackEff>{}),
+                {i_m / MXdlPackEff, k_scale_offset});
+        }
+    }
+
+    template <typename ScaleM, typename ScaleN>
+    CK_TILE_DEVICE static auto
+    MakeBFlatBlockWindows(const std::array<const BDataType*, NumBTensor>& bs_ptr,
+                          const KernelArgs<ScaleM, ScaleN>& kargs,
+                          const index_t i_n)
+    {
+        static_assert(NumBTensor == 1, "MX GEMM preshuffle currently supports one B tensor");
+
+        constexpr index_t kKPerBlock    = MXGemmPipeline::kKPerBlock;
+        constexpr index_t kNWarpTile    = BlockGemmShape::WarpTile::at(I1);
+        constexpr index_t flatKPerBlock = kKPerBlock * kNWarpTile;
+        const index_t kFlatKBlocks      = kargs.K / kKPerBlock;
+        const index_t kFlatN            = kargs.N / kNWarpTile;
+
+        auto b_flat_tensor_view = [&]() {
+            static_assert(flatKPerBlock % MXGemmPipeline::GetVectorSizeB() == 0,
+                          "wrong! vector size for preshuffled B tensor");
+            auto naive_desc = make_naive_tensor_descriptor_packed(
+                make_tuple(kFlatN, kFlatKBlocks, number<flatKPerBlock>{}));
+            auto desc = transform_tensor_descriptor(
+                naive_desc,
+                make_tuple(make_pass_through_transform(kFlatN),
+                           make_merge_transform_v3_division_mod(
+                               make_tuple(kFlatKBlocks, number<flatKPerBlock>{}))),
+                make_tuple(sequence<0>{}, sequence<1, 2>{}),
+                make_tuple(sequence<0>{}, sequence<1>{}));
+            return make_tensor_view<address_space_enum::global>(bs_ptr[number<0>{}], desc);
+        }();
+
+        return generate_tuple(
+            [&](auto) {
+                return make_tile_window(
+                    b_flat_tensor_view,
+                    make_tuple(number<MXGemmPipeline::flatNPerWarp>{},
+                               number<MXGemmPipeline::flatKPerWarp>{}),
+                    {static_cast<int>(i_n / BlockGemmShape::WarpTile::at(I1)), 0});
+            },
+            number<NumBTensor>{});
     }
 
     template <typename ScaleM, typename ScaleN>
@@ -433,31 +549,64 @@ struct MXGemmKernel : UniversalGemmKernel<TilePartitioner_, MXGemmPipeline_, Epi
                                                       const index_t k_elem_offset = 0)
     {
         auto scale_b = kargs.scale_n_ptr;
+        static_assert(ScaleN::GranularityK == ScaleGranularityK);
 
-        static constexpr int BlockScaleSize = ScaleN::GranularityK;
-        const auto scale_k_packed           = kargs.K / BlockScaleSize / KXdlPackEff;
-        const auto scale_n_packed           = kargs.N / NXdlPackEff;
+        if constexpr(MXGemmPipeline::Preshuffle)
+        {
+            const auto scale_packs_n = integer_divide_ceil(kargs.N, (NXdlPackEff * NThreadPerXdl));
+            const auto scale_packs_k = kargs.K / ScaleGranularityK / (KXdlPackEff * KThreadPerXdl);
 
-        const auto scale_b_tensor_view = make_naive_tensor_view<address_space_enum::global>(
-            reinterpret_cast<const int32_t*>(scale_b.ptr),
-            make_tuple(scale_n_packed, scale_k_packed),
-            make_tuple(scale_k_packed, 1));
+            const auto scale_b_naive_desc = make_naive_tensor_descriptor_packed(
+                make_tuple(scale_packs_n, scale_packs_k, KThreadPerXdl, NThreadPerXdl));
+            const auto scale_b_desc = transform_tensor_descriptor(
+                scale_b_naive_desc,
+                make_tuple(make_merge_transform(make_tuple(scale_packs_n, NThreadPerXdl)),
+                           make_merge_transform(make_tuple(scale_packs_k, KThreadPerXdl))),
+                make_tuple(sequence<0, 3>{}, sequence<1, 2>{}),
+                make_tuple(sequence<0>{}, sequence<1>{}));
 
-        const auto scale_b_pad_view = pad_tensor_view(
-            scale_b_tensor_view,
-            make_tuple(number<TilePartitioner::NPerBlock / NXdlPackEff>{},
-                       number<TilePartitioner::KPerBlock / BlockScaleSize / KXdlPackEff>{}),
-            sequence<kPadN, kPadK>{});
+            const auto scale_b_tensor_view = make_tensor_view<address_space_enum::global>(
+                reinterpret_cast<const int32_t*>(scale_b.ptr), scale_b_desc);
 
-        const index_t k_scale_offset = k_elem_offset / BlockScaleSize / KXdlPackEff;
+            // Preshuffle does not support split-K (k_batch > 1 is rejected in
+            // IsSupportedArgument), so the scale origin stays at K = 0 here.
+            return make_tile_window(
+                scale_b_tensor_view,
+                make_tuple(
+                    number<TilePartitioner::NPerBlock / NXdlPackEff>{},
+                    number<TilePartitioner::KPerBlock / (ScaleGranularityK * KXdlPackEff)>{}),
+                {i_n / NXdlPackEff, 0});
+        }
+        else
+        {
+            const auto scale_k_packed = kargs.K / ScaleGranularityK / KXdlPackEff;
+            const auto scale_n_packed = kargs.N / NXdlPackEff;
 
-        auto scale_b_block_window = make_tile_window(
-            scale_b_pad_view,
-            make_tuple(number<TilePartitioner::NPerBlock / NXdlPackEff>{},
-                       number<TilePartitioner::KPerBlock / BlockScaleSize / KXdlPackEff>{}),
-            {i_n / NXdlPackEff, k_scale_offset});
+            // B scale tensor view - [N/NXdlPackEff, K/32/KXdlPackEff] of int32_t
+            const auto scale_b_tensor_view = make_naive_tensor_view<address_space_enum::global>(
+                reinterpret_cast<const int32_t*>(scale_b.ptr),
+                make_tuple(scale_n_packed, scale_k_packed),
+                make_tuple(scale_k_packed, 1));
 
-        return scale_b_block_window;
+            // Pad the scale view so partial trailing tiles along N are handled safely (OOB scale
+            // loads return zero; with B also zero on the padded region the contribution is zero
+            // regardless of scale value). kPadK is statically disabled, so K never actually pads.
+            const auto scale_b_pad_view = pad_tensor_view(
+                scale_b_tensor_view,
+                make_tuple(number<TilePartitioner::NPerBlock / NXdlPackEff>{},
+                           number<TilePartitioner::KPerBlock / ScaleGranularityK / KXdlPackEff>{}),
+                sequence<kPadN, kPadK>{});
+
+            // For split-K (k_batch > 1) advance the scale origin into this k_id's packed-K slice.
+            const index_t k_scale_offset = k_elem_offset / ScaleGranularityK / KXdlPackEff;
+
+            // Tile window shape: [NPerBlock/NXdlPackEff, KPerBlock/32/KXdlPackEff]
+            return make_tile_window(
+                scale_b_pad_view,
+                make_tuple(number<TilePartitioner::NPerBlock / NXdlPackEff>{},
+                           number<TilePartitioner::KPerBlock / ScaleGranularityK / KXdlPackEff>{}),
+                {i_n / NXdlPackEff, k_scale_offset});
+        }
     }
 
     template <memory_operation_enum DstInMemOp = memory_operation_enum::set,
@@ -467,8 +616,7 @@ struct MXGemmKernel : UniversalGemmKernel<TilePartitioner_, MXGemmPipeline_, Epi
                                          const std::array<const BDataType*, NumBTensor>& bs_ptr,
                                          const std::array<const void*, NumDTensor>& ds_ptr,
                                          EDataType* e_ptr,
-                                         void* smem_ptr_ping,
-                                         void* smem_ptr_pong,
+                                         void* smem_ptr,
                                          const KernelArgs<ScaleM, ScaleN>& kargs,
                                          const SplitKBatchOffset& splitk_batch_offset,
                                          const index_t i_m,
@@ -479,8 +627,17 @@ struct MXGemmKernel : UniversalGemmKernel<TilePartitioner_, MXGemmPipeline_, Epi
         // i_m and i_n are element offsets (iM * MPerBlock, iN * NPerBlock), not tile indices
         const auto& a_block_window =
             Underlying::MakeABlockWindows(as_ptr, kargs, splitk_batch_offset.splitted_k, i_m);
-        const auto& b_block_window =
-            Underlying::MakeBBlockWindows(bs_ptr, kargs, splitk_batch_offset.splitted_k, i_n);
+        const auto& b_block_window = [&]() {
+            if constexpr(MXGemmPipeline::Preshuffle)
+            {
+                return MakeBFlatBlockWindows(bs_ptr, kargs, i_n);
+            }
+            else
+            {
+                return Underlying::MakeBBlockWindows(
+                    bs_ptr, kargs, splitk_batch_offset.splitted_k, i_n);
+            }
+        }();
         const auto& d_block_window = Underlying::MakeDBlockWindows(ds_ptr, kargs, i_m, i_n);
 
         // Create scale block windows. For split-K (k_batch > 1), k_elem_offset advances the
@@ -495,27 +652,38 @@ struct MXGemmKernel : UniversalGemmKernel<TilePartitioner_, MXGemmPipeline_, Epi
                           || ScaleN::GranularityMN == -1,          // or ScaleB is disable
                       "ScaleM and ScaleN should have the same GranularityK");
 
-        const auto& c_block_tile = MXGemmPipeline{}(a_block_window[number<0>{}],
-                                                    b_block_window[number<0>{}],
-                                                    scale_a_block_window,
-                                                    scale_b_block_window,
-                                                    num_loop,
-                                                    smem_ptr_ping,
-                                                    smem_ptr_pong);
+        const auto& c_block_tile = [&]() {
+            if constexpr(MXGemmPipeline::Preshuffle)
+            {
+                constexpr index_t smem_ping_pong_size = MXGemmPipeline::GetSmemSize() / 2;
+                return MXGemmPipeline{}(a_block_window[number<0>{}],
+                                        b_block_window[number<0>{}],
+                                        scale_a_block_window,
+                                        scale_b_block_window,
+                                        num_loop,
+                                        smem_ptr,
+                                        static_cast<char*>(smem_ptr) + smem_ping_pong_size);
+            }
+            else
+            {
+                return MXGemmPipeline{}(a_block_window[number<0>{}],
+                                        b_block_window[number<0>{}],
+                                        scale_a_block_window,
+                                        scale_b_block_window,
+                                        num_loop,
+                                        smem_ptr);
+            }
+        }();
 
-        // Run Epilogue Pipeline - create C block window with the requested memory op.
+        // Run Epilogue Pipeline - create C block window with the requested memory op (set for
+        // k_batch == 1, atomic_add for split-K so partial results accumulate into the same tile).
         auto c_block_window = MakeCBlockWindows<DstInMemOp>(e_ptr, kargs, i_m, i_n);
-        EpiloguePipeline{}(c_block_window, c_block_tile, d_block_window, smem_ptr_ping);
+        EpiloguePipeline{}(c_block_window, c_block_tile, d_block_window, smem_ptr);
     }
 
-    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemPingSize()
+    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
     {
         return max(MXGemmPipeline::GetSmemSize(), EpiloguePipeline::GetSmemSize());
-    }
-
-    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemPongSize()
-    {
-        return MXGemmPipeline::GetSmemSize();
     }
 
     // Compute the K-element offset for a given split-K batch id. Matches the formula used by
@@ -540,8 +708,7 @@ struct MXGemmKernel : UniversalGemmKernel<TilePartitioner_, MXGemmPipeline_, Epi
             amd_wave_read_first_lane(TilePartitioner::GridSize(kargs.M, kargs.N));
 
         // Allocate shared memory for ping pong buffers
-        __shared__ char smem_ptr_ping[GetSmemPingSize()];
-        __shared__ char smem_ptr_pong[GetSmemPongSize()];
+        __shared__ char smem_ptr[GetSmemSize()];
 
         // k_id selects the split-K batch id. blockIdx.z is 0 only when k_batch == 1; when
         // k_batch > 1, blockIdx.z selects the active split-K batch in both persistent and
@@ -587,8 +754,7 @@ struct MXGemmKernel : UniversalGemmKernel<TilePartitioner_, MXGemmPipeline_, Epi
                                                       bs_ptr,
                                                       kargs.ds_ptr,
                                                       e_ptr,
-                                                      smem_ptr_ping,
-                                                      smem_ptr_pong,
+                                                      smem_ptr,
                                                       kargs,
                                                       splitk_batch_offset,
                                                       i_m,
@@ -604,8 +770,7 @@ struct MXGemmKernel : UniversalGemmKernel<TilePartitioner_, MXGemmPipeline_, Epi
                                                                  bs_ptr,
                                                                  kargs.ds_ptr,
                                                                  e_ptr,
-                                                                 smem_ptr_ping,
-                                                                 smem_ptr_pong,
+                                                                 smem_ptr,
                                                                  kargs,
                                                                  splitk_batch_offset,
                                                                  i_m,

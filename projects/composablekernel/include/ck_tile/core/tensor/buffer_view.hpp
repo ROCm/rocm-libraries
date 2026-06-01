@@ -19,11 +19,11 @@
 #include "ck_tile/core/utility/type_traits.hpp"
 #include "ck_tile/core/utility/ignore.hpp"
 
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wno-unknown-warning-option"
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
 #pragma clang diagnostic ignored "-Wlifetime-safety-lifetimebound-violation"
-
+#endif
 namespace ck_tile {
 
 // T may be scalar or vector
@@ -467,7 +467,7 @@ struct buffer_view<address_space_enum::global,
     }
 
     // i is offset of T, not X. i should be aligned to X.
-    // mask — M0[15:0] WGP participation mask; M0[16] sets early-timeout.
+    // mask - M0[15:0] WGP participation mask; M0[16] sets early-timeout.
     template <typename X,
               index_t inst_offset = 0,
               typename std::enable_if<
@@ -489,8 +489,8 @@ struct buffer_view<address_space_enum::global,
         const remove_cvref_t<X>* g_src =
             reinterpret_cast<const remove_cvref_t<X>*>(p_uniform_ptr + i + linear_offset);
 
-        // reinterpret_cast changes only the element type (generic→generic, no address-space
-        // change). to_lds then converts generic→address_space(3) using a pragma-guarded
+        // reinterpret_cast changes only the element type (generic->generic, no address-space
+        // change). to_lds then converts generic->address_space(3) using a pragma-guarded
         // C-style cast, matching the pattern used by the rest of the codebase.
         auto* lds_ptr = to_lds(reinterpret_cast<remove_cvref_t<X>*>(smem));
 
@@ -1588,4 +1588,6 @@ CK_TILE_HOST_DEVICE void print(const buffer_view<BufferAddressSpace,
 
 } // namespace ck_tile
 
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
+#endif
