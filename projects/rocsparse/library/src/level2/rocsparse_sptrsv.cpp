@@ -577,6 +577,15 @@ namespace rocsparse
                                                                      rocsparse_solve_policy_auto,
                                                                      &csrsv_info,
                                                                      buffer)));
+                // Pre-allocate the numeric singular-pivot buffer sized for the
+                // right-hand-side batch count so that the solve can run safely inside
+                // a HIP graph capture region without performing device allocations.
+                if(csrsv_info != nullptr)
+                {
+                    csrsv_info->create_singularity_numeric_exact(
+                        sptrsv_descr->m_batch_count, A->col_type, handle->stream);
+                    RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+                }
                 sptrsv_descr->set_stage(rocsparse_sptrsv_stage_analysis);
                 switch(analysis_policy)
                 {
@@ -619,6 +628,16 @@ namespace rocsparse
                                                                      rocsparse_solve_policy_auto,
                                                                      &csrsv_info,
                                                                      buffer)));
+                // Pre-allocate the numeric singular-pivot buffer sized for the
+                // right-hand-side batch count so that the solve can run safely
+                // inside a HIP graph capture region without performing device
+                // allocations.
+                if(csrsv_info != nullptr)
+                {
+                    csrsv_info->create_singularity_numeric_exact(
+                        sptrsv_descr->m_batch_count, A->col_type, handle->stream);
+                    RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+                }
 
                 switch(analysis_policy)
                 {
