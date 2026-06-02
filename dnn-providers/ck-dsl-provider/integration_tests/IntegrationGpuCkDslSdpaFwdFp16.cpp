@@ -218,14 +218,10 @@ void runSdpaCase(const SdpaCase& cse, ::CkDslHandle& handle, SdpaFwdPlanBuilder&
                            static_cast<std::uint32_t>(deviceBuffers.size()), workspace);
     };
     PerfResult result = pm.measure(launchFn, kFlops, handle.getStream());
+    // pm.log emits the perf summary (min/median us, tflops) to the test
+    // log. (RecordProperty is a Test-fixture method and is not available
+    // here in the free helper; the logged line carries the same data.)
     pm.log(std::string("sdpa_fmha_fwd_") + cse.name, result);
-
-    std::ostringstream summary;
-    summary << "IntegrationGpuCkDslSdpaFwdFp16Gpu.Sdpa/" << cse.name << ": numerical agreement "
-            << "(worst abs diff = " << worstError << " < tol = " << kAbsTol
-            << "), perf min_us = " << result.minUs << ", median_us = " << result.medianUs
-            << ", tflops = " << result.tflops;
-    RecordProperty("ck_dsl_perf_summary", summary.str());
 
     if (workspace != nullptr) {
         ASSERT_EQ(hipFree(workspace), hipSuccess);
