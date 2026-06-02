@@ -10230,10 +10230,11 @@ class KernelWriterAssembly(KernelWriter):
               numLoadVectorComp = int(loadWidth*self.states.bpr//tP["bpeGR"])
 
               if (dataType.isDouble() or dataType.isSingle())\
-                 and kernel["BufferLoad"]:
-                # adjustment for {d,s}gemm + BufferLoad
-                # use same buffer_load instruction for tail loop as out of tail loop
-                # this is mandatory for DirectToLds case. Also, it improves tail loop performance.
+                 and (kernel["BufferLoad"] or tP["tlu"]):
+                # For BufferLoad: use same buffer_load instruction for tail loop as out of tail loop.
+                # This is mandatory for DirectToLds case. Also, it improves tail loop performance.
+                # For flat loads with TLU=True: vectors span tile (not K), so a single
+                # wide load is safe — graShift ensures M/N is in bounds.
                 numLoadVectorComp = numLoadVectorComp // tailGRVW
 
               if isLds or isTr:
@@ -10327,14 +10328,12 @@ class KernelWriterAssembly(KernelWriter):
                   numElementsPerLoad = 16
                   regIdx = r // 4
                 elif dataType.isInt8x4() or dataType.isSingle():
-                  # Only supported for buffer loads since it has OOB checks
-                  if kernel["BufferLoad"]:
+                  if kernel["BufferLoad"] or tP["tlu"]:
                     numElementsPerLoad = tailGRVW
                   regIdx = r
                 elif dataType.isDouble():
-                  # Only supported for buffer loads since it has OOB checks
-                  if kernel["BufferLoad"]:
-                    numElementsPerLoad = tailGRVW # adjust numElementsPerLoad for DGEMM
+                  if kernel["BufferLoad"] or tP["tlu"]:
+                    numElementsPerLoad = tailGRVW
                   regIdx = r*2
                 elif dataType.isSingleComplex():
                   regIdx = r*2
@@ -10520,25 +10519,24 @@ class KernelWriterAssembly(KernelWriter):
                   else:
                     hi16 = 0
                   destVgpr="G2L%s+%u+%u"%(tc, g2lIdx, regIdx)
-                  # load one element from address
                   module.add(self.chooseGlobalRead(False, \
-                            tP["bpeGR"], destVgpr=destVgprHi if (hi16 and destVgprHi != None) else destVgpr, \
+                            bpl, destVgpr=destVgprHi if (hi16 and destVgprHi != None) else destVgpr, \
                             addr0=vgpr("GlobalReadAddr%s+%u"%(tc,graIdx),2), addr1="", \
                             soffset=0, offset=0, \
                             glc=isGlc, slc=isSlc, nt=isNT, lds=isLds, \
                             hi16=hi16, \
-                            comment="load one flat value", scope=scope, th=th, nv=nv))
+                            comment="load %u flat value(s)"%(numElementsPerLoad), scope=scope, th=th, nv=nv))
 
                   # restore full exec mask
                   SOrSaveExecBX = SOrSaveExecB32 if self.states.kernel["WavefrontSize"] == 32 else SOrSaveExecB64
                   module.add(SOrSaveExecBX(dst=VCC(), src=sgpr(fullExec,self.states.laneSGPRCount), comment="all threads active"))
 
-                  # increment address by 1 element (BPE)
+                  # increment address by numElementsPerLoad elements
                   module.add(VAddCOU32(
                       dst=vgpr("GlobalReadAddr%s+%u+0"%(tP["tensorChar"], graIdx)), \
                       dst1=VCC(), \
                       src0=vgpr("GlobalReadAddr%s+%u+0"%(tP["tensorChar"], graIdx)),  \
-                      src1=vgpr(bpeVgpr), comment="gra += 1 (lower)"))
+                      src1=bpl, comment="gra += %u element(s) (lower)"%(numElementsPerLoad)))
                   module.add(VAddCCOU32(
                       dst=vgpr("GlobalReadAddr%s+%u+1"%(tP["tensorChar"], graIdx)), \
                       dst1=VCC(), \
@@ -11060,10 +11058,11 @@ class KernelWriterAssembly(KernelWriter):
     record[1] = True if tc == "B" else False
 
     # For flat (non-buffer) loads, pre-compute max valid address for bounds checking.
-    # This protects against OOB accesses on edge tiles under GuardPageBack mode.
+    # For TLU=True, graShift already clamps tile offsets and the main loop
+    # guarantees K is in bounds, so the exec-mask check is redundant.
     flatLoadMaxAddrVgpr = None
     flatLoadFullExecSgpr = None
-    if not kernel["BufferLoad"] and tc in ("A", "B"):
+    if not kernel["BufferLoad"] and tc in ("A", "B") and not tP["tlu"]:
       with self.allocTmpSgpr(2) as tmpSgprInfo:
         tmpSgpr = tmpSgprInfo.idx
         maxAddrSgpr = tmpSgpr

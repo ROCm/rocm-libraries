@@ -3966,7 +3966,8 @@ class Solution(collections.abc.Mapping):
          state["NoTailLoop"] or \
          (state["DepthU"] <=1 or (state["DepthU"] & (state["DepthU"] - 1) != 0)) or \
          state["LocalSplitU"] > 1 or \
-         state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]:
+         state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"] or \
+         not bufferLoad:
         state["TailloopInNll"] = False
 
       # need restrictions for TailloopInNll
@@ -4676,12 +4677,13 @@ class Solution(collections.abc.Mapping):
     if state["ProblemType"]["TLUA"]:
       state["GuaranteeNoPartialA"] = state["AssertFree0ElementMultiple"]%state["GlobalReadVectorWidthA"]==0
     else:
-      state["GuaranteeNoPartialA"] = True
+      # TLU=False: BufferLoad uses SRD limit hardware; flat loads need graShift
+      state["GuaranteeNoPartialA"] = bufferLoad
 
     if state["ProblemType"]["TLUB"]:
       state["GuaranteeNoPartialB"] = state["AssertFree1ElementMultiple"]%state["GlobalReadVectorWidthB"]==0
     else:
-      state["GuaranteeNoPartialB"] = True
+      state["GuaranteeNoPartialB"] = bufferLoad
 
     state["GuaranteeNoPartialMetadata"] = False if state["ProblemType"]["Sparse"] else True
 
