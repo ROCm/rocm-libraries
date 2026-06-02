@@ -149,10 +149,10 @@ bool serializeVisit(const FLATModifiers& mod, std::ostream& os) {
 
 // GLOBALModifiers — offset plus the temporal hint / cache scope used by
 // global_prefetch_b8 (gl2-prefetch). Serialized so the .stir IR roundtrip
-// preserves the hint/scope; TH_DEFAULT / SCOPE_NONE are omitted.
+// preserves the hint/scope; TH_NONE / SCOPE_NONE are omitted.
 bool serializeVisit(const GLOBALModifiers& mod, std::ostream& os) {
     os << ", mod.global = { offset = " << mod.offset;
-    if (mod.th != TemporalHint::TH_DEFAULT) {
+    if (mod.th != TemporalHint::TH_NONE) {
         os << ", th = \"" << toString(mod.th) << "\"";
     }
     if (mod.scope != MUBUFScope::SCOPE_NONE) {

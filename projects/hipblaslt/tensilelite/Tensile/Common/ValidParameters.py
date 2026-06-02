@@ -282,7 +282,11 @@ validParameters = { # we need to make sure this matches develop
     "PrefetchGlobalRead": [0, 1, 2] + list(range(3,16 + 1)),
     # number of iteration prefetch local reads from lds to VGPRs buffer = PLR
     "PrefetchLocalRead": list(range(128 + 1)),
-    # Enable GL2 prefetch using global_prefetch_b8 instruction
+    # Enable global memory to GL2 cache prefetch using global_prefetch_b8 instruction (gfx1250 only).
+    # So when globalReads are issued, the data is likely to be in GL2 cache.
+    # 0: disable
+    # 1: prefetch one load tile (MTxDepthU) ahead of PrefetchGlobalRead
+    # 2: prefetch two load tiles (MTxDepthU) ahead of PrefetchGlobalRead
     "PrefetchGL2": [0, 1, 2],
     # MatrixInstruction Only
     # If set ClusterLocalRead, each iteration dedicated vgprBuffer for localRead

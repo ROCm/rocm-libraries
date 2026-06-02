@@ -521,9 +521,9 @@ void handleGlobalPrefetchModifier(StinkyInstruction* stinkyInst, std::string_vie
     if (thVal.empty() && scopeVal.empty()) return;
 
     stinkytofu::TemporalHint th =
-        thVal.empty() ? stinkytofu::TemporalHint::TH_DEFAULT : stinkytofu::parseTemporalHint(thVal);
-    stinkytofu::MUBUFScope scope =
-        scopeVal.empty() ? stinkytofu::MUBUFScope::SCOPE_CU : stinkytofu::parseMUBUFScope(scopeVal);
+        thVal.empty() ? stinkytofu::TemporalHint::TH_NONE : stinkytofu::parseTemporalHint(thVal);
+    stinkytofu::MUBUFScope scope = scopeVal.empty() ? stinkytofu::MUBUFScope::SCOPE_NONE
+                                                    : stinkytofu::parseMUBUFScope(scopeVal);
     stinkyInst->addModifier<stinkytofu::GLOBALModifiers>(
         stinkytofu::GLOBALModifiers(/*offset=*/0, th, scope));
 }

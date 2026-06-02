@@ -2352,7 +2352,7 @@ class Solution(collections.abc.Mapping):
         break
     if "ValidDepthU" in state:
       del state["ValidDepthU"]
-      
+
     halfPLR: int = state["HalfPLR"]
     state["HalfPLRA"] = bool(halfPLR & 0x01)
     state["HalfPLRB"] = bool(halfPLR & 0x02)
@@ -5007,7 +5007,7 @@ class Solution(collections.abc.Mapping):
       # Check MT is power of 2
       if not isPowerOf2(state["MacroTile0"]) or not isPowerOf2(state["MacroTile1"]):
         reject(state, printRejectionReason, "PrefetchGL2 requires MacroTile to be power of 2")
-        retur
+        return
       # Check if DataTypeA or DataTypeB is 6-bit float
       if state["ProblemType"]["DataTypeA"].is6bitFloat() or state["ProblemType"]["DataTypeB"].is6bitFloat():
         reject(state, printRejectionReason, "PrefetchGL2 does not support 6-bit float")
@@ -5015,6 +5015,9 @@ class Solution(collections.abc.Mapping):
       # TODO: support GSU if needed
       if state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1:
         reject(state, printRejectionReason, "Currently PrefetchGL2 does not support GSU")
+        return
+      if state["StreamK"] != 0:
+        reject(state, printRejectionReason, "PrefetchGL2 does not support Stream-K")
         return
       if not state["ProblemType"]["StridedBatched"]:
         reject(state, printRejectionReason, "PrefetchGL2 does not support general batch")

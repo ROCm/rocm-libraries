@@ -101,7 +101,7 @@ inline MUBUFScope parseMUBUFScope(std::string_view scope) {
 // Temporal hint for global_prefetch_b8 (gfx1250 gl2-prefetch). Mirrors rocisa's
 // TemporalHint enum; only the values emitted by TensileLite are modeled.
 enum class TemporalHint : uint8_t {
-    TH_DEFAULT = 0,
+    TH_NONE = 0,
     TH_LOAD_NT = 1,
 };
 
@@ -116,7 +116,7 @@ inline std::string_view toString(TemporalHint th) {
 
 inline TemporalHint parseTemporalHint(std::string_view th) {
     if (th == "TH_LOAD_NT") return TemporalHint::TH_LOAD_NT;
-    return TemporalHint::TH_DEFAULT;
+    return TemporalHint::TH_NONE;
 }
 
 // 9-bit DPP permutation control selector (matches the hardware dpp_ctrl field).
@@ -318,11 +318,11 @@ struct FLATModifiers : public TypedModifier<FLATModifiers> {
 // Modifiers for global_* memory ops. Carries the immediate offset (offset:N)
 // plus the temporal hint and cache scope used by global_prefetch_b8 (gfx1250
 // gl2-prefetch). The hint/scope mirror rocisa's GLOBALModifiers defaults
-// (TH_DEFAULT / SCOPE_CU are not printed); offset-only ops leave them default.
+// (TH_NONE / SCOPE_NONE are not printed); offset-only ops leave them default.
 struct GLOBALModifiers : public TypedModifier<GLOBALModifiers> {
     static constexpr Modifier::Type Type = Modifier::Type::GLOBAL;
 
-    GLOBALModifiers(int offset = 0, TemporalHint th = TemporalHint::TH_DEFAULT,
+    GLOBALModifiers(int offset = 0, TemporalHint th = TemporalHint::TH_NONE,
                     MUBUFScope scope = MUBUFScope::SCOPE_NONE)
         : TypedModifier<GLOBALModifiers>(), offset(offset), th(th), scope(scope) {}
 
