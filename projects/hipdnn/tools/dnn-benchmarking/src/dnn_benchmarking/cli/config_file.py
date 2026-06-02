@@ -18,7 +18,7 @@ _CONFIG_ONLY_TOP_LEVEL_KEYS: Set[str] = {
     "engines",
 }
 
-_ALLOWED_ENGINE_KEYS: Set[str] = {"id", "label", "plugin_path"}
+_ALLOWED_ENGINE_KEYS: Set[str] = {"id", "plugin_path"}
 
 _CONFIG_FIELD_RENAMES = {"graph": "graphs"}
 _CONFIG_EXCLUDED_DESTS = {
@@ -146,7 +146,7 @@ def apply_config_file(args: argparse.Namespace, provided: Set[str]) -> None:
 
     engine_overridden = "engine" in provided or "plugin_path" in provided
     for key, value in overrides.items():
-        if key in {"engine", "plugin_path", "_config_engine_names"}:
+        if key in {"engine", "plugin_path"}:
             if engine_overridden:
                 continue
         elif key in provided:
@@ -363,10 +363,8 @@ def _normalise_engines(
         raise ValueError("Config field 'engines' must be a non-empty array of tables")
 
     ids: List[int] = []
-    labels: List[Optional[str]] = []
     plugin_paths: List[Path] = []
     any_plugin_path = False
-    seen_labels: Set[str] = set()
 
     for index, engine in enumerate(engines):
         if not isinstance(engine, dict):
@@ -378,19 +376,6 @@ def _normalise_engines(
         if type(engine_id) is not int:
             raise ValueError(f"Config engine {index} must include integer id")
         ids.append(engine_id)
-
-        label = engine.get("label")
-        if label is not None:
-            if not isinstance(label, str) or not label:
-                raise ValueError(
-                    f"Config engine {index} label must be a non-empty string"
-                )
-            if label in seen_labels:
-                raise ValueError(f"Duplicate config engine label: {label}")
-            seen_labels.add(label)
-            labels.append(label)
-        else:
-            labels.append(None)
 
         plugin_path = engine.get("plugin_path")
         if plugin_path is not None:
@@ -408,5 +393,3 @@ def _normalise_engines(
             )
         out["plugin_path"] = plugin_paths
     out["engine"] = ids
-    if any(label is not None for label in labels):
-        out["_config_engine_names"] = labels

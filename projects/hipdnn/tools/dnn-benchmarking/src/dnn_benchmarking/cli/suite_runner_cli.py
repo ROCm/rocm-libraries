@@ -197,7 +197,6 @@ def run_suite_cli(
             verbose=args.verbose,
             metrics=metrics_config,
             plugin_paths=plugin_paths,
-            engine_names=getattr(args, "_config_engine_names", None),
         )
     except ValueError as e:
         reporter.print_error(f"Suite configuration error: {e}")

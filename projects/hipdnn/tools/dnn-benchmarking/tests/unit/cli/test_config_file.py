@@ -41,12 +41,10 @@ validate = "none"
 metrics_tier = "off"
 
 [[engines]]
-label = "baseline"
 id = 1
 plugin_path = "/plugins/b"
 
 [[engines]]
-label = "candidate"
 id = 1
 plugin_path = "/plugins/a"
 """,
@@ -65,7 +63,6 @@ plugin_path = "/plugins/a"
     assert args.metrics_tier == "off"
     assert args.engine == [1, 1]
     assert args.plugin_path == [Path("/plugins/b"), Path("/plugins/a")]
-    assert args._config_engine_names == ["baseline", "candidate"]
 
 
 def test_cli_scalars_override_config_values(tmp_path: Path) -> None:
@@ -95,12 +92,10 @@ version = 1
 graphs = ["g.json"]
 
 [[engines]]
-label = "baseline"
 id = 2
 plugin_path = "/plugins/b"
 
 [[engines]]
-label = "candidate"
 id = 1
 plugin_path = "/plugins/a"
 
@@ -132,7 +127,7 @@ baseline = "missing"
         apply_config_file(args, provided=set())
 
 
-def test_engine_config_label_is_optional(tmp_path: Path) -> None:
+def test_engine_config_uses_ids_without_display_labels(tmp_path: Path) -> None:
     config = _write_config(
         tmp_path / "bench.toml",
         """
@@ -182,6 +177,7 @@ graphs = ["g.json"]
     ("body", "field"),
     [
         ('plugin_pat = "/plugins"', "plugin_pat"),
+        ('label = "baseline"', "label"),
         ('name = "baseline"', "name"),
     ],
 )
@@ -322,11 +318,9 @@ warmup = 1
 iters = 2
 
 [[engines]]
-label = "baseline"
 id = 2
 
 [[engines]]
-label = "candidate"
 id = 1
 
 """,
@@ -346,7 +340,6 @@ id = 1
     assert suite_config.warmup_iters == 1
     assert suite_config.benchmark_iters == 2
     assert suite_config.engine_filter == [2, 1]
-    assert suite_config.engine_names == ["baseline", "candidate"]
 
 
 def test_missing_graph_without_config_errors(capsys) -> None:

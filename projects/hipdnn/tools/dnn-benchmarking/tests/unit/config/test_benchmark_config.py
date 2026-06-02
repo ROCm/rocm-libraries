@@ -128,22 +128,6 @@ class TestSuiteConfigPluginPaths:
                 plugin_paths=[Path("/plugins/a"), Path("/plugins/b")],
             )
 
-    def test_engine_names_follow_selection_order(self) -> None:
-        config = SuiteConfig(
-            engine_filter=[1, 1],
-            engine_names=["baseline", "candidate"],
-        )
-
-        selections = config.engine_selections_for([1, 1])
-
-        assert [s.name for s in selections] == ["baseline", "candidate"]
-
-    def test_engine_name_count_must_match_engine_count(self) -> None:
-        with pytest.raises(ValueError, match="engine_names must match"):
-            SuiteConfig(
-                engine_filter=[1, 2],
-                engine_names=["baseline"],
-            )
 
 class TestValidationConfig:
     """Tests for ValidationConfig dataclass."""
