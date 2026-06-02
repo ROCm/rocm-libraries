@@ -138,7 +138,7 @@ struct CShuffleEpilogue
     static constexpr bool TiledMMAPermuteN = Problem::TiledMMAPermuteN;
 
     // EightWave selects the packed-N tile-layout variant used by the
-    // EightWaves blockscale/MX pipelines (block gemm produces NRepeat tiles
+    // EightWaves pipelines (block gemm produces NRepeat tiles
     // contiguously per warp). It is opt-in via Problem::EightWavePipeline.
     // Auto-detecting from "MWave * NWave == 8" is unsafe: standard CompV3
     // configurations (e.g. M_Warp=4, N_Warp=2) also have 8 waves but their

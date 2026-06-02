@@ -75,7 +75,7 @@ struct BaseGemmPipelineAgBgCrCompV3
     }
 };
 
-// Tail/hot-loop handling for the EightWaves blockscale pipeline family.
+// Tail/hot-loop handling for the EightWaves pipeline family.
 //
 // The EightWaves pipeline body (see gemm_pipeline_ag_bg_cr_eight_waves_base.hpp)
 // has a different control structure than the standard CompV3 body: when there

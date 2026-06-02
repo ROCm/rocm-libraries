@@ -257,7 +257,7 @@ float gemm_calc_quant(const ck_tile::QuantGemmHostArgs& args, const ck_tile::str
                                    void,  // AComputeDataType_
                                    void,  // BComputeDataType_
                                    false, // TilesPacked_
-                                   // EightWaves blockscale block gemm produces packed-N tile layout
+                                   // EightWaves block gemm produces packed-N tile layout
                                    eight_waves // EightWavePipeline_
                                    >>>;
         using Kernel =
