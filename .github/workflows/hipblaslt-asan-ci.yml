@@ -183,33 +183,26 @@ jobs:
           # from the shared S3 cache. Only hipBLASLt is instrumented and rebuilt
           # cold; the ~30-subproject stack is NOT rebuilt under ASAN flags.
           #
-          # Disable every feature group, then re-enable only BLAS, so the
-          # configure (and therefore the build graph) is limited to the BLAS
-          # dependency chain instead of all ~30 subprojects. Mechanics:
-          #   * THEROCK_ENABLE_ALL=OFF makes every feature-group option (and
-          #     thus every per-feature default: rand/fft/prim/sparse/solver/
-          #     rocwmma/ml-libs/comm-libs/...) default OFF.
-          #   * THEROCK_ENABLE_BLAS=ON re-enables just the BLAS feature.
-          #     math-libs/CMakeLists.txt gates `add_subdirectory(BLAS)` on
-          #     THEROCK_ENABLE_BLAS directly (the math-libs dir itself is
-          #     added unconditionally), so the hipBLASLt target is declared
-          #     and BLAS's required deps (core/compiler/host-blas/...) are
-          #     pulled in by therock_finalize_features().
-          # Do NOT add THEROCK_RESET_FEATURES=ON here: it FORCE-overwrites
-          # every feature cache var with its default, which would clobber the
-          # explicit -DTHEROCK_ENABLE_BLAS=ON back to OFF on this fresh build.
-          #
-          # THEROCK_FLAG_INCLUDE_PROFILER=OFF drops the optional profiler deps
-          # (roctracer + rocprofiler-sdk) that hipBLASLt would otherwise pull
-          # in for its marker support (math-libs/BLAS/CMakeLists.txt appends
-          # them to optional_profiler_deps when the flag is ON). Under the
-          # trimmed feature set those transitive deps are under-provisioned —
-          # rocprofiler-sdk's own test kernel fails to find the HIP runtime
-          # ("clang++: error: cannot find HIP runtime ... --rocm-path"). The
-          # flag is explicitly supported for bringup (see TheRock CMakeLists),
-          # and an ASAN smoke build of hipBLASLt does not need the marker, so
-          # dropping the profiler both fixes the build and trims it further.
-          extra_cmake_options: "-DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ -DTHEROCK_ENABLE_ALL=OFF -DTHEROCK_ENABLE_BLAS=ON -DTHEROCK_FLAG_INCLUDE_PROFILER=OFF -DhipBLASLt_SANITIZER=ASAN"
+          # Use a FULL configure (THEROCK_ENABLE_ALL defaults ON) and scope
+          # the work at BUILD time via `--target hipBLASLt` (see the build
+          # step) rather than by disabling feature groups. Disabling features
+          # to "only build BLAS" was tried and abandoned: it under-provisions
+          # hipBLASLt's transitive deps and breaks the configure/build in ways
+          # a full configure does not. Two concrete dead ends:
+          #   * THEROCK_ENABLE_ALL=OFF + THEROCK_ENABLE_BLAS=ON: rocprofiler-sdk
+          #     (pulled via hipBLASLt's marker deps) builds its own test kernel,
+          #     which can't find the HIP runtime under the trimmed set
+          #     ("clang++: error: cannot find HIP runtime ... --rocm-path").
+          #   * additionally THEROCK_FLAG_INCLUDE_PROFILER=OFF (to drop
+          #     rocprofiler-sdk): hipBLASLt's own configure then fails because
+          #     CMakeLists.txt:128 does find_library(NAMES roctx64) — it has a
+          #     hard dependency on roctracer's roctx, so the profiler cannot be
+          #     dropped.
+          # A full configure resolves every super-project package correctly
+          # (this exact config built green in 3h56m at ~80% ccache hits), and
+          # `--target hipBLASLt` still skips rocBLAS + ~20 unrelated
+          # subprojects, which is where the time goes.
+          extra_cmake_options: "-DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ -DhipBLASLt_SANITIZER=ASAN"
           BUILD_DIR: build
         run: |
           python3 TheRock/build_tools/github_actions/build_configure.py
