@@ -413,7 +413,7 @@ DEF_T(GlobalInvInst, "global_inv", .format = VGLOBAL, .flags = {HasSideEffect}, 
 // 64-bit saddr + 32-bit vaddr; The temporal hint / cache scope (e.g.
 // " th:TH_LOAD_NT scope:SCOPE_SE") are carried as GLOBALModifiers.
 // No destination register.
-DEF_T(GlobalPrefetchB8Inst, "global_prefetch_b8", .format = VGLOBAL,
+DEF_T(GlobalPrefetchB8Inst, "global_prefetch_b8", .format = VGLOBAL, .flags = {HasSideEffect}, logical = "GlobalPrefetchB8",
     .operand_fields = { {S0, vaddr, vgpr, 64}, {S1, saddr, sreg, 64} })
 
 // Scalar ALU — SOPK

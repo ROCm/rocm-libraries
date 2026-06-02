@@ -5013,6 +5013,7 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "PrefetchGL2 does not support 6-bit float")
         return
       # TODO: support GSU if needed
+      state["InternalSupportParams"]["SupportUserGSU"] = False
       if state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1:
         reject(state, printRejectionReason, "Currently PrefetchGL2 does not support GSU")
         return

@@ -3360,9 +3360,10 @@ namespace rocisa
         }
 
         GlobalPrefetchB8(const GlobalPrefetchB8& other)
-            : GlobalPrefetchB8(other.v_addr,
-                       other.s_addr,
-                       other.gm)
+            : GlobalPrefetchB8(other.v_addr ? other.v_addr->clone() : nullptr,
+                               other.s_addr ? other.s_addr->clone() : nullptr,
+                               other.gm,
+                               other.comment)
         {
         }
 
@@ -3405,7 +3406,7 @@ namespace rocisa
 
             kStr = formatWithComment(kStr);
             setMsb(kStr, {v_addr, s_addr}, nullptr);
-            return formatWithComment(kStr);
+            return kStr;
         }
 
     private:

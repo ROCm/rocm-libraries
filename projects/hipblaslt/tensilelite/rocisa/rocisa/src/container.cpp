@@ -347,7 +347,7 @@ void init_containers(nb::module_ m)
         .def(nb::init<int, const rocisa::TemporalHint, const rocisa::CacheScope>(),
              nb::arg("offset") = 0,
              nb::arg("th")     = 0,
-             nb::arg("ms")     = 1)
+             nb::arg("scope")  = 0)
         .def("__str__", &rocisa::GLOBALModifiers::toString)
         .def("__deepcopy__",
              [](const rocisa::GLOBALModifiers& self, nb::dict mamo) {
@@ -355,7 +355,7 @@ void init_containers(nb::module_ m)
              })
         .def("__getstate__",
              [](const rocisa::GLOBALModifiers& self) {
-                 return std::make_tuple(self.offset, self.th, self.ms);
+                 return std::make_tuple(self.offset, self.th, self.scope);
              })
         .def("__setstate__",
              [](rocisa::GLOBALModifiers&                                            self,
