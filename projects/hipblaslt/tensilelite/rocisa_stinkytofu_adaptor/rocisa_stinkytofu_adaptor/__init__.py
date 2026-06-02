@@ -39,16 +39,22 @@ What this file is:
     is rewritten against a real stinkytofu service API.
 
 What it does (real):
-    - ``IsaInfo`` — asm/arch/reg/bug caps holder; picklable.
-    - ``rocIsa`` — singleton mirror of the C++ class. Supports
-      ``init`` / ``isInit``, ``getIsaInfo``,
-      ``getAsmCaps`` / ``getArchCaps`` / ``getRegCaps`` / ``getAsmBugs``,
-      ``setKernel`` / ``getKernel``,
-      ``getOutputOptions`` / ``setOutputOptions``,
-      ``getData`` / ``setData``. Backed by ``caps.py`` snapshots.
+    - Re-exports ``IsaInfo`` from ``base.py`` (the class definition
+      lives there to mirror ``rocisa/include/base.hpp:64-70``).
+    - ``rocIsa`` — singleton forwarding shell mirroring the C++ class.
+      Every method ``init`` / ``isInit`` / ``getIsaInfo`` /
+      ``getAsmCaps`` / ``getArchCaps`` / ``getRegCaps`` / ``getAsmBugs``
+      / ``setKernel`` / ``getKernel`` / ``getOutputOptions`` /
+      ``setOutputOptions`` / ``getData`` / ``setData`` /
+      ``getVgprIdx`` / ``setVgprIdx`` / ``getVgprMsb`` / ``setVgprMsb``
+      forwards to the module-level state in ``base.py``. The class is
+      kept (rather than collapsed into module functions) purely to
+      preserve the ``rocIsa.getInstance().method(...)`` call shape that
+      KernelWriter / Tensile / the C++ binding all expose.
     - Submodules with real implementations: ``register`` (pool),
-      ``enum`` (real ``IntEnum``s), ``base`` (``KernelInfo`` /
-      ``OutputOptions``), ``caps`` (gfx1250 snapshot).
+      ``enum`` (real ``IntEnum``s), ``base`` (state + accessors,
+      ``KernelInfo`` / ``IsaInfo`` / ``OutputOptions``), ``caps``
+      (gfx1250 snapshot).
     - Submodule registration as ``rocisa.<submodule>`` for ``base``,
       ``enum``, ``container``, ``code``, ``label``, ``instruction``,
       ``functions``, ``asmpass``, ``macro``, ``register``.
@@ -64,20 +70,27 @@ Not yet done (dummy):
       ``instruction``, ``functions``, ``asmpass``, ``macro``.
     - ``container``: register-reference layer + ``Container`` ABC,
       hardware tokens, ``MemTokenData``, and ``*Modifiers``.
+
+Design note — singleton state ownership:
+    All process-wide state that the C++ ``rocisa::rocIsa`` singleton
+    holds (KernelInfo / IsaInfo dict / current ISA / vgpr_idx /
+    vgpr_msb / OutputOptions / is_init / assembler_path) lives as
+    module-level globals in ``base.py``. The ``rocIsa`` class below
+    holds NO instance state -- every method is a one-line forwarder.
+    This breaks the prior cycle where ``base.py`` had to reach back
+    into the package facade via lazy imports to read its own flags,
+    and keeps the dependency direction one-way (``__init__`` depends
+    on ``base``, never the reverse).
 """
 
 from __future__ import annotations
 
 from typing import Any, Dict, Tuple
 
+from . import base as _base
 from . import caps as _caps
 from ._dummy import make_dummy_class, make_dummy_func
-from .base import (
-    KernelInfo,
-    OutputOptions,
-    getOutputOptions as _base_getOutputOptions,
-    setOutputOptions as _base_setOutputOptions,
-)
+from .base import IsaInfo, KernelInfo, OutputOptions
 
 # Make submodules importable as attributes (``rocisa.code`` etc.). The
 # rocisa dispatcher in ``tensilelite/rocisa/rocisa/__init__.py`` is what
@@ -97,47 +110,30 @@ _P = "rocisa"
 
 
 # ---------------------------------------------------------------------------
-# Real (non-dummy) shims for ``rocisa.IsaInfo`` and ``rocisa.rocIsa``.
+# ``rocisa.rocIsa`` forwarding shell.
 #
-# These replace the structural dummies because the Tensile capability
-# discovery path (``Tensile.Common.Capabilities.makeIsaInfoMap``) needs to
-# read concrete dicts off ``rocIsa.getInstance().getIsaInfo(v)`` before any
-# kernel can be generated. ``initAsmCaps`` belongs in the rocIsa C++ layer
-# (closest to llvm-mc); here we simply hand back a snapshot captured from a
-# real probe — see ``caps.py`` for the data and how to refresh it.
+# Every method below is a one-line forwarder to the matching accessor in
+# ``base.py`` (where the actual state lives -- see ``base.py`` design
+# note on state sinking). The class is kept (rather than collapsed into
+# module functions) purely to preserve the ``rocIsa.getInstance().X()``
+# call shape that KernelWriter / Tensile / the C++ binding share.
+#
+# Backwards-compatible read/write of the historical private fields
+# (``_vgpr_idx`` / ``_kernel_info``) is provided via ``@property``
+# descriptors. New code should call the public accessors directly.
 # ---------------------------------------------------------------------------
 
 
-class IsaInfo:
-    """Plain holder mirroring ``rocisa::IsaInfo`` (asm/arch/reg/bug dicts)."""
-
-    __slots__ = ("asmCaps", "archCaps", "regCaps", "asmBugs")
-
-    def __init__(self, asmCaps, archCaps, regCaps, asmBugs):
-        self.asmCaps = asmCaps
-        self.archCaps = archCaps
-        self.regCaps = regCaps
-        self.asmBugs = asmBugs
-
-    def __repr__(self) -> str:
-        return (
-            f"IsaInfo(asmCaps={self.asmCaps}, archCaps={self.archCaps}, "
-            f"regCaps={self.regCaps}, asmBugs={self.asmBugs})"
-        )
-
-    # Pickle support so workers spawned by ``ParallelMap2`` can rehydrate
-    # the rocIsa data dict via ``setData(getData())``.
-    def __getstate__(self) -> tuple:
-        return (self.asmCaps, self.archCaps, self.regCaps, self.asmBugs)
-
-    def __setstate__(self, state: tuple) -> None:
-        self.asmCaps, self.archCaps, self.regCaps, self.asmBugs = state
-
-
 class rocIsa:
-    """Singleton mirroring ``rocisa::rocIsa`` for the logicalIR backend.
+    """Singleton forwarding shell mirroring ``rocisa::rocIsa``.
 
-    Implemented members (real, return data from ``caps.py``):
+    All state lives in ``base.py`` module-level globals. This class
+    only exists to keep the public API surface
+    (``rocIsa.getInstance().method(...)``) intact for Tensile /
+    KernelWriter callers; ``__init__`` deliberately stores nothing on
+    the instance.
+
+    Implemented members (real, all forward to ``base.*``):
         - ``getInstance``
         - ``init`` / ``isInit``
         - ``getIsaInfo`` (returns ``IsaInfo``)
@@ -146,37 +142,22 @@ class rocIsa:
         - ``getOutputOptions`` / ``setOutputOptions``
         - ``getData`` / ``setData`` (used by ``ParallelMap2`` workers via
           ``KernelWriter.setRocIsa(data, outOptions)``)
+        - ``getVgprIdx`` / ``setVgprIdx``
+        - ``getVgprMsb`` / ``setVgprMsb`` (wired for Commit Y --
+          Label.toString side effect; no consumer today)
 
     The C++ original keeps per-thread state (``m_threads`` /
     ``m_outputOptions``); Tensile only ever reads it back via
     parameter-less getters from the same thread that wrote it, and across
-    process boundaries goes through pickle, so a single per-instance value
-    is sufficient here.
+    process boundaries goes through pickle, so a single per-process
+    value (held in ``base.py``) is sufficient here.
     """
 
     _instance: "rocIsa | None" = None
 
     def __init__(self) -> None:
-        self._current_isa: Tuple[int, int, int] | None = None
-        self._is_init: bool = False
-        self._assembler_path: str = ""
-        # NOTE: ``OutputOptions`` state lives in ``base.py`` as a module-
-        # level singleton; the ``getOutputOptions`` / ``setOutputOptions``
-        # methods below are forwarding shims kept for rocisa API surface
-        # compatibility. See ``base.py`` design note for why the state
-        # was sunk out of this class. KernelInfo / IsaInfo dict /
-        # vgprIdx are still held here -- they will receive the same
-        # treatment in follow-up commits.
-        self._kernel_info: KernelInfo = KernelInfo()
-        # ISA-keyed snapshot mirroring rocIsa::m_isainfo. Populated by
-        # ``init()`` and shipped to workers by ``setData(getData())``.
-        self._data: Dict[Tuple[int, int, int], IsaInfo] = {}
-        # Symbol -> base-index map shared by all ``RegName`` instances
-        # (mirrors ``rocIsa::m_vgprIdx``). KernelWriter registers a name via
-        # ``setVgprIdx`` (typically when emitting a ``.set name, idx`` macro
-        # or a ``v_mov_b32`` rename) and consumes it via ``getTotalIdx`` on
-        # the RegName side, which calls ``getVgprIdx()[name]``.
-        self._vgpr_idx: Dict[str, int] = {}
+        # All state lives in ``base.py``; nothing to initialise here.
+        pass
 
     @staticmethod
     def getInstance() -> "rocIsa":
@@ -184,95 +165,90 @@ class rocIsa:
             rocIsa._instance = rocIsa()
         return rocIsa._instance
 
+    # --- ISA init / active-ISA accessors ----------------------------------
+
     def init(self, arch: Any, assemblerPath: str = "", debug: bool = False) -> None:
-        # No real probing in the logical adaptor. We just remember which ISA
-        # was selected and stash its (statically-captured) caps so subsequent
-        # parameterless getters / getData() can answer.
-        key = _caps.normalize_isa_key(arch)
-        self._current_isa = key
-        self._assembler_path = assemblerPath
-        if key not in self._data:
-            asm, archc, reg, bugs = _caps.getCaps(key)
-            self._data[key] = IsaInfo(asm, archc, reg, bugs)
-        self._is_init = True
+        _base.init(arch, assemblerPath, debug)
 
     def isInit(self) -> bool:
-        return self._is_init
+        return _base.isInit()
 
     def getIsaInfo(self, arch: Any) -> IsaInfo:
-        key = _caps.normalize_isa_key(arch)
-        info = self._data.get(key)
-        if info is None:
-            asm, archc, reg, bugs = _caps.getCaps(key)
-            info = IsaInfo(asm, archc, reg, bugs)
-            self._data[key] = info
-        return info
-
-    def _activeCaps(self):
-        if self._current_isa is None:
-            raise RuntimeError(
-                "rocisa.rocIsa: init(arch, ...) or setKernel(arch, ...) must "
-                "be called before getAsmCaps()/getArchCaps()/getRegCaps()/"
-                "getAsmBugs()."
-            )
-        info = self._data.get(self._current_isa)
-        if info is None:
-            asm, archc, reg, bugs = _caps.getCaps(self._current_isa)
-            info = IsaInfo(asm, archc, reg, bugs)
-            self._data[self._current_isa] = info
-        return (info.asmCaps, info.archCaps, info.regCaps, info.asmBugs)
+        return _base.getIsaInfo(arch)
 
     def getAsmCaps(self):
-        return self._activeCaps()[0]
+        return _base.getAsmCaps()
 
     def getArchCaps(self):
-        return self._activeCaps()[1]
+        return _base.getArchCaps()
 
     def getRegCaps(self):
-        return self._activeCaps()[2]
+        return _base.getRegCaps()
 
     def getAsmBugs(self):
-        return self._activeCaps()[3]
+        return _base.getAsmBugs()
 
     # --- Per-thread kernel state (used by KernelWriter / Generators). ------
 
     def setKernel(self, arch: Any, wavefrontSize: int) -> None:
-        key = _caps.normalize_isa_key(arch)
-        self._current_isa = key
-        self._kernel_info = KernelInfo(isa=key, wavefrontSize=wavefrontSize)
+        _base.setKernel(arch, wavefrontSize)
 
     def getKernel(self) -> KernelInfo:
-        return self._kernel_info
+        return _base.getKernel()
 
     # --- Output options (mutated in main, shipped to workers via pickle). --
-    #
-    # Both methods forward to the module-level state in ``base.py``. The
-    # rocisa API surface stays unchanged for KernelWriter callers
-    # (``rocIsa.getInstance().getOutputOptions()`` still works); only the
-    # storage location of the actual ``OutputOptions`` instance moved.
 
     def getOutputOptions(self) -> OutputOptions:
-        return _base_getOutputOptions()
+        return _base.getOutputOptions()
 
     def setOutputOptions(self, options: OutputOptions) -> None:
-        _base_setOutputOptions(options)
+        _base.setOutputOptions(options)
 
     # --- Pickle-friendly snapshot of all initialised ISAs. ----------------
 
     def getData(self) -> Dict[Tuple[int, int, int], IsaInfo]:
-        return self._data
+        return _base.getData()
 
     def setData(self, data: Dict[Tuple[int, int, int], IsaInfo]) -> None:
-        self._data = dict(data)
-        self._is_init = bool(self._data)
+        _base.setData(data)
 
     # --- Symbol -> base-index map (consumed by ``RegName.getTotalIdx``). ---
 
     def getVgprIdx(self) -> Dict[str, int]:
-        return self._vgpr_idx
+        return _base.getVgprIdx()
 
     def setVgprIdx(self, name: str, idx: int) -> None:
-        self._vgpr_idx[name] = idx
+        _base.setVgprIdx(name, idx)
+
+    # --- VGPR-MSB (wired for Commit Y / Label.toString side effect). ------
+
+    def getVgprMsb(self) -> int:
+        return _base.getVgprMsb()
+
+    def setVgprMsb(self, msb: int) -> None:
+        _base.setVgprMsb(msb)
+
+    # --- Backwards-compatible private-field shims --------------------------
+    #
+    # Test harnesses (and possibly external code) historically reached
+    # into ``rocIsa.getInstance()._vgpr_idx`` / ``._kernel_info`` to
+    # reset or restore state. After the state-sink refactor these are
+    # exposed as ``@property`` descriptors that delegate to ``base.*``,
+    # so ``._vgpr_idx.clear()`` and ``._kernel_info = info`` keep
+    # working without touching callers. New code should prefer the
+    # public accessors (``base.getVgprIdx()`` / ``base.setKernelInfo``).
+
+    @property
+    def _vgpr_idx(self) -> Dict[str, int]:
+        return _base.getVgprIdx()
+
+    @property
+    def _kernel_info(self) -> KernelInfo:
+        return _base.getKernel()
+
+    @_kernel_info.setter
+    def _kernel_info(self, info: KernelInfo) -> None:
+        _base.setKernelInfo(info)
 
 isaToGfx = make_dummy_func(f"{_P}.isaToGfx")
 
