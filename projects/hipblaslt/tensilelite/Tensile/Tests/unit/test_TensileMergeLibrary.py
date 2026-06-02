@@ -25,8 +25,11 @@
 """Unit tests for `TensileMergeLibrary` using compact embedded YAML fixtures."""
 
 from copy import deepcopy
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
-
+from Tensile import LibraryIO
+from Tensile.CustomYamlLoader import load_yaml_stream
 import pytest
 from unittest.mock import patch
 import yaml
@@ -223,8 +226,21 @@ YAML_BY_ARCH = {"gfx950": GFX950_YAML, "gfx1250": GFX1250_YAML}
 
 
 def _load_arch_data(arch: str) -> Any:
-    """Load architecture fixture data from embedded YAML."""
-    return yaml.safe_load(YAML_BY_ARCH[arch])
+    """Load architecture fixture data from embedded YAML.
+
+    Args:
+        arch: Architecture tag (``"gfx950"`` or ``"gfx1250"``).
+
+    Returns:
+        Parsed Python object (list for gfx950, dict for gfx1250).
+
+    Raises:
+        KeyError: If *arch* is not present in ``YAML_BY_ARCH``.
+    """
+    with TemporaryDirectory() as tmp_dir:
+        yaml_file = Path(tmp_dir) / f"{arch}.yaml"
+        yaml_file.write_text(YAML_BY_ARCH[arch])
+        return load_yaml_stream(yaml_file, yaml.CSafeLoader)
 
 
 def _append_new_size(data: Any, arch: str) -> None:
@@ -715,3 +731,35 @@ class TestMainFunction:
 
         kwargs = mock_avoid.call_args[0]
         assert kwargs[4] == True  # no_eff
+class TestRoundTrip:
+    """Round-trip tests: Python data → YAML on disk (LibraryIO.writeYAML) → back to memory.
+
+    Each test covers both the non-dict (gfx950) and dict (gfx1250) formats.
+    """
+
+    @pytest.mark.parametrize("arch", ["gfx950", "gfx1250"])
+    def test_round_trip_preserves_structure(self, arch, tmp_path):
+        """Data loaded from YAML, written back, and re-read retains key fields.
+
+        Covers: in-memory → disk (LibraryIO.writeYAML) → memory (load_yaml_stream).
+        """
+        # Step 1: in-memory YAML string → temp file → load_yaml_stream
+        data = _load_arch_data(arch)
+
+        # Step 2: loaded Python data → YAML on disk
+        out_file = tmp_path / f"{arch}_roundtrip.yaml"
+        LibraryIO.writeYAML(str(out_file), data, explicit_start=False, explicit_end=False)
+
+        # Step 3: YAML on disk → load_yaml_stream → Python data
+        data2 = load_yaml_stream(out_file, yaml.CSafeLoader)
+
+        # Step 4: key structural fields survive the round-trip
+        accessor1 = createAccessor(data)
+        accessor2 = createAccessor(data2)
+
+        assert type(data) is type(data2)
+        assert getArchitectureFromData(data) == getArchitectureFromData(data2)
+        assert len(accessor1.getSolutions()) == len(accessor2.getSolutions())
+        assert len(accessor1.getExactLogic()) == len(accessor2.getExactLogic())
+        assert (accessor1.getSolutions()[0]["SolutionIndex"]
+                == accessor2.getSolutions()[0]["SolutionIndex"])

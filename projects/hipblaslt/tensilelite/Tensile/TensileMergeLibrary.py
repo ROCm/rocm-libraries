@@ -31,13 +31,13 @@ from copy import deepcopy
 from typing import Any
 
 from Tensile import __version__
+from Tensile.LibraryIO import dictBasedArchitectures
 from Tensile.SolutionStructs.Naming import getSolutionNameMin
 from Tensile.SolutionStructs.Naming import getKernelNameMin
 from Tensile.SolutionStructs.Problem import ProblemType, problemTypeToEnum
 from Tensile.Common import ParallelMap2
 
 verbosity = 1
-dictBasedArchitectures: list[str] = ["gfx1250"]
 
 class DataAccessor:
     """
@@ -320,23 +320,22 @@ def removeDuplicatedSolutions(accessor, prefix=""):
 
 from Tensile import LibraryIO
 
-# FIXME: For dict format files this function can be discarded
+# For dict format files this function can be discarded
 # Move baseName, KernelNameMin, SolutionNameMin to the top of all
 # solutions as well as removing unnecessary null CUCount field
 def reorderSolutionsParams(data):
-    keys = ["SolutionIndex", "BaseName", "KernelNameMin", "SolutionNameMin"]
+    keys = ["SolutionIndex", "KernelNameMin", "SolutionNameMin"]
     vals = {}
     for sol_idx in range(len(data["Solutions"])):
         for key in keys:
             if key in data["Solutions"][sol_idx].keys():
                 vals[key] = data["Solutions"][sol_idx].pop(key)
-            else:
-                vals[key] = ""
         data["Solutions"][sol_idx] = {**vals, **data["Solutions"][sol_idx]}
 
 
-# FIXME: For dict format files this function can be discarded
-def convertToDict(data: list | dict, filename) -> dict:
+def convertToDict(data: list | dict, filename: str) -> dict:
+    """Convert list-format library logic data to dict format.
+    """
     if isinstance(data, list):
         rv = LibraryIO.parseLibraryLogicList(data, filename)
 
@@ -349,7 +348,6 @@ def convertToDict(data: list | dict, filename) -> dict:
                     if v == defaultSolution[k]:
                         del kernel[k]
         reorderSolutionsParams(rv)
-        LibraryIO.writeYAML(filename, rv, explicit_start=False, explicit_end=False)
         data = rv
 
     return data
@@ -358,6 +356,10 @@ from .CustomYamlLoader import load_yaml_stream
 
 def loadData(filename: str) -> list[Any]:
     """Load data from file and convert configured architectures to dict format.
+
+    For dict-based architectures whose file is still in legacy list format the
+    converted dict is written back to disk (one-time migration) so subsequent
+    loads skip the conversion step.
 
     Args:
         filename: Path to YAML logic file.
@@ -370,9 +372,11 @@ def loadData(filename: str) -> list[Any]:
     """
     data = load_yaml_stream(filename, yaml.CSafeLoader)
 
-    # Check architecture before converting
     if isDictBasedArchitecture(data):
         data = convertToDict(data, filename)
+        if isinstance(data, dict):
+            # Persist the converted format so future loads skip this step.
+            LibraryIO.writeYAML(filename, data, explicit_start=False, explicit_end=False)
 
     return [filename, data]
 

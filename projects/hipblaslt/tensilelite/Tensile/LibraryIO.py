@@ -726,6 +726,12 @@ def rawLibraryLogic(data):
 #################
 # Other functions
 #################
+
+# Architectures that must use dict-format library logic files.
+# All other architectures use the legacy list format.
+dictBasedArchitectures: list[str] = ["gfx1250"]
+
+
 def getCUCount() -> int:
     """Return the number of CU Count in current Hardware."""
     CU = os.environ.get("CU", None)
@@ -747,137 +753,121 @@ def getCUCount() -> int:
     return int(CU)
 
 def createLibraryLogic(schedulePrefix, architectureName, deviceNames, libraryType, logicTuple):
-    """Creates the data for a library logic file suitable for writing to YAML."""
+    """Creates the data for a library logic file suitable for writing to YAML.
+
+    Generates a dict for dict-based architectures (see ``dictBasedArchitectures``)
+    and the legacy list format for all other architectures.
+
+    Args:
+        schedulePrefix: The schedule name string.
+        architectureName: The GPU architecture name (e.g. ``"gfx942"``, ``"gfx1250"``).
+        deviceNames: Device names for the schedule.
+        libraryType: Library type string (``"GridBased"``, ``"FreeSize"``, ``"Prediction"``).
+        logicTuple: Tuple of (problemType, solutions, indexOrder, exactLogic, rangeLogic,
+                    tileSelectionSolutions, tileSelectionIndices, perfMetric, ...).
+
+    Returns:
+        dict for dictBasedArchitectures, list for all other architectures.
+
+    Raises:
+        None.
+    """
     problemType = logicTuple[0]
-    solutions = logicTuple[1]
-    indexOrder = logicTuple[2]
-    exactLogic = logicTuple[3]
-    rangeLogic = logicTuple[4]
+    solutions   = logicTuple[1]
+    indexOrder  = logicTuple[2]
+    exactLogic  = logicTuple[3]
+    rangeLogic  = logicTuple[4]
 
-    tileSelection = False
-    if len(logicTuple) > 5 and logicTuple[5]:
-        tileSelection = True
+    tileSelectionSolutions = logicTuple[5] if len(logicTuple) > 5 else None
+    tileSelectionIndices = logicTuple[6] if len(logicTuple) > 6 else None
+    tileSelection = tileSelectionIndices is not None
+    tileSelectionLogic = (
+        {"TileSelectionIndices": tileSelectionIndices} if tileSelection else None
+    )
+    CUCount = getCUCount()
 
-    data = {}
-    # Tensile version
-    data["MinimumRequiredVersion"] = __version__
-    # schedule name
-    data["ScheduleName"] = schedulePrefix
-    # schedule architecture name and get CU count
-    CUCount=getCUCount()
-
-    data["ArchitectureName"] = architectureName
-    if architectureName == "gfx942" and CUCount and CUCount != 304:
-        data["CUCount"] = CUCount
-
-    # schedule device names
-    data["DeviceNames"] = deviceNames
-    # default solution (default values for tuning parameters)
-    data["DefaultSolution"] = defaultSolution
-
-    # problem type
+    # Serialize problem-type enum fields to plain values
     problemTypeState = problemType.state
-    problemTypeState["DataType"] = \
-            problemTypeState["DataType"].value
-    problemTypeState["MacDataTypeA"] = \
-            problemTypeState["MacDataTypeA"].value
-    problemTypeState["MacDataTypeB"] = \
-            problemTypeState["MacDataTypeB"].value
-    problemTypeState["DataTypeA"] = \
-            problemTypeState["DataTypeA"].value
-    problemTypeState["DataTypeB"] = \
-            problemTypeState["DataTypeB"].value
-    problemTypeState["DataTypeE"] = \
-            problemTypeState["DataTypeE"].value
-    problemTypeState["DataTypeAmaxD"] = \
-            problemTypeState["DataTypeAmaxD"].value
-    problemTypeState["DestDataType"] = \
-            problemTypeState["DestDataType"].value
-    problemTypeState["ComputeDataType"] = \
-            problemTypeState["ComputeDataType"].value
-    problemTypeState["BiasDataTypeList"] = \
-            [btype.value for btype in problemTypeState["BiasDataTypeList"]]
-    problemTypeState["ActivationComputeDataType"] = \
-            problemTypeState["ActivationComputeDataType"].value
-    problemTypeState["ActivationType"] = \
-            problemTypeState["ActivationType"].value
-    problemTypeState["F32XdlMathOp"] = \
-            problemTypeState["F32XdlMathOp"].value
-    if "DataTypeMetadata" in problemTypeState:
-        problemTypeState["DataTypeMetadata"] = \
-                problemTypeState["DataTypeMetadata"].value
+    for field in ("DataType", "MacDataTypeA", "MacDataTypeB", "DataTypeA", "DataTypeB",
+                  "DataTypeE", "DataTypeAmaxD", "DestDataType", "ComputeDataType",
+                  "ActivationComputeDataType", "ActivationType", "F32XdlMathOp"):
+        problemTypeState[field] = problemTypeState[field].value
+    problemTypeState["BiasDataTypeList"] = [b.value for b in problemTypeState["BiasDataTypeList"]]
+    for opt in ("DataTypeMetadata", "DataTypeMXSA", "DataTypeMXSB"):
+        if opt in problemTypeState:
+            problemTypeState[opt] = problemTypeState[opt].value
 
-    if "DataTypeMXSA" in problemTypeState:
-        problemTypeState["DataTypeMXSA"] = \
-                problemTypeState["DataTypeMXSA"].value
-    if "DataTypeMXSB" in problemTypeState:
-        problemTypeState["DataTypeMXSB"] = \
-                problemTypeState["DataTypeMXSB"].value
-    data["ProblemType"] = problemTypeState
-
-    # remove parameters with are set to the default values
-    # so they are copied to the yaml files
-    def removeDefaultVals(params):
+    # Build solution list, stripping default values and ProblemType
+    def _removeDefaultVals(params):
         for k in list(params.keys()):
-            if k in defaultSolution.keys():
-                if params[k] == defaultSolution[k]:
-                    del params[k]
+            if k in defaultSolution and params[k] == defaultSolution[k]:
+                del params[k]
 
-    # solutions
     solutionList = []
     for solution in solutions:
         solutionState = solution.getAttributes()
-        removeDefaultVals(solutionState)
+        _removeDefaultVals(solutionState)
         isa = solutionState["ISA"]
-        solutionState["ISA"] = [isa[0], isa[1], isa[2]]        
-        if "ProblemType" in solutionState.keys():
+        solutionState["ISA"] = [isa[0], isa[1], isa[2]]
+        if "ProblemType" in solutionState:
             del solutionState["ProblemType"]
         solutionList.append(solutionState)
 
-    if tileSelection:
-        tileSolutions = logicTuple[5]
-        for solution in tileSolutions:
+    if tileSelectionSolutions:
+        for solution in tileSelectionSolutions:
             solutionState = solution.getAttributes()
-            removeDefaultVals(solutionState)
-            if "ProblemType" in solutionState.keys():
+            _removeDefaultVals(solutionState)
+            if "ProblemType" in solutionState:
                 del solutionState["ProblemType"]
             solutionList.append(solutionState)
 
-    data["Solutions"] = solutionList
+    # Flatten exact logic dict to list-of-pairs
+    exactLogicList = [[list(k), v] for k, v in exactLogic.items()] if exactLogic else None
 
-    # index order
-    data["IndexOrder"] = indexOrder
+    perfMetric = logicTuple[7]
 
-    # exactLogic
-    exactLogicList = []
-    if exactLogic:
-        for key in exactLogic:
-            exactLogicList.append([list(key), exactLogic[key]])
-        data["ExactLogic"] = exactLogicList
-    else:
-        data["ExactLogic"] = None
+    # Determine output format: dict for gfx1250 and similar, list for everyone else
+    arch_lower = architectureName.lower()
+    use_dict = any(d in arch_lower for d in (a.lower() for a in dictBasedArchitectures))
 
-    # rangeLogic
-    data["RangeLogic"] = rangeLogic
+    if use_dict:
+        data = {
+            "MinimumRequiredVersion": __version__,
+            "ScheduleName": schedulePrefix,
+            "ArchitectureName": architectureName,
+            "DeviceNames": deviceNames,
+            "DefaultSolution": defaultSolution,
+            "ProblemType": problemTypeState,
+            "Solutions": solutionList,
+            "IndexOrder": indexOrder,
+            "ExactLogic": exactLogicList,
+            "RangeLogic": rangeLogic,
+            "TileSelectionIndices": tileSelectionLogic,
+            "PerfMetric": perfMetric,
+            "Library": {"distance": libraryType},
+            "LibraryType": ("FreeSize" if libraryType == "FreeSize"
+                            else "Prediction" if libraryType == "Prediction"
+                            else "Matching"),
+        }
+        if architectureName == "gfx942" and CUCount and CUCount != 304:
+            data["CUCount"] = CUCount
+        return data
 
-    if tileSelection:
-        tileSelectionLogic = {}
-        tileSelectionIndices = logicTuple[6]
-        tileSelectionLogic["TileSelectionIndices"] = tileSelectionIndices
-        data["TileSelectionIndices"] = tileSelectionLogic
-    else:
-        data["TileSelectionIndices"] = None
-
-    data["PerfMetric"] = logicTuple[7]
-    data["Library"] = {}
-    if libraryType == "FreeSize":
-        data["LibraryType"] = "FreeSize"
-        data["Library"]["distance"] = libraryType
-    elif libraryType == "Prediction":
-        data["LibraryType"] = "Prediction"
-        data["Library"]["distance"] = libraryType
-    else:
-        data["LibraryType"] = "Matching"
-        data["Library"]["distance"] = libraryType
-
-    return data
+    # Legacy list format (indices match what parseLibraryLogicList expects)
+    architect = ({"Architecture": architectureName, "CUCount": CUCount}
+                  if architectureName == "gfx942" and CUCount and CUCount != 304
+                  else architectureName)
+    return [
+        {"MinimumRequiredVersion": __version__},   # 0
+        schedulePrefix,                            # 1
+        architect,                                 # 2
+        deviceNames,                               # 3
+        problemTypeState,                          # 4
+        solutionList,                              # 5
+        indexOrder,                                # 6
+        exactLogicList,                            # 7
+        rangeLogic,                                # 8
+        tileSelectionLogic,                        # 9
+        perfMetric,                                # 10
+        libraryType,                               # 11
+    ]
