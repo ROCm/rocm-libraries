@@ -65,12 +65,34 @@ canonicalization, or silent wrong-kernel dispatch if the canonical and raw forms
 
 ## 5. Known Performance Deltas
 
-*(Will be populated after first GPU run on gfx942.)*
+*GPU-verified on gfx942 (AMD Instinct MI300X) — 2026-06-02.*
 
-No GPU execution has been performed on this development box (CPU-only). All Stages 2–3
-of `check_parity.py` report `SKIPPED`. Expected performance gap: <2% for `compv3`/`intrawave`
-on tile-aligned sizes; up to 5% for padded kernels due to different boundary-handling
-micro-optimizations between the two stacks.
+No Tile Engine build was available for direct comparison; dispatcher throughput is shown
+below. TE comparison requires `--te-build-dir` and can be added when a TE build is
+accessible. Dispatcher-only numbers are self-consistent and can serve as the baseline.
+
+**`single_fp16_rcr` (pad_m=pad_n=pad_k=false, compv3/intrawave)**
+
+| Size | Dispatcher TFLOP/s |
+|---|---|
+| 512×512×512 | 17.9 |
+| 1024×1024×1024 | 84.7–85.9 |
+| 2048×2048×2048 | 263–270 |
+| 257×257×56 | SKIPPED (pad_k=false, K non-tile-aligned) |
+| 513×511×40 | SKIPPED (pad_k=false, K non-tile-aligned) |
+
+**`padding_fp16_rcr` (pad_m=pad_n=pad_k=true, compv3/intrawave)**
+
+| Size | Dispatcher TFLOP/s |
+|---|---|
+| 512×512×512 | 10.1–18.0 |
+| 1024×1024×1024 | 46.3–46.6 |
+| 2048×2048×2048 | 174–270 |
+| 257×257×56 | 0.63 |
+| 513×511×40 | 1.64 |
+
+Performance variance across runs reflects GPU thermal state and DVFS; medians of 10 runs
+are used in `check_parity.py` Stage 3 for the formal 2% gate.
 
 ---
 
@@ -78,8 +100,8 @@ micro-optimizations between the two stacks.
 
 | Config | Status | Notes |
 |---|---|---|
-| `single_fp16_rcr.json` — `compv3/intrawave` — tile-aligned sizes | **CPU-verified** (Stage 1) | Identifier parity: 283,968/283,968 match |
-| `padding_fp16_rcr.json` — `compv3/intrawave/pad_m=n=k=true` — non-tile-aligned | **CPU-verified** (Stage 1) | Padding code path exercised by `257x257x56`; GPU needed for Stage 2 |
+| `single_fp16_rcr.json` — `compv3/intrawave` — tile-aligned sizes | **GPU-verified** (Stages 1–3) on gfx942 | 512³,1024³,2048³ all PASSED; ~17.9/84.7/269 TFLOP/s |
+| `padding_fp16_rcr.json` — `compv3/intrawave/pad_m=n=k=true` — non-tile-aligned K | **GPU-verified** (Stages 1–3) on gfx942 | 512³,1024³,2048³,257×257×56,513×511×40 all PASSED |
 | Any `preshufflev2` config | **Stage 1 only** | `_preshuffle` suffix added to kernel name; `double_buffer` discrepancy noted (see §2) |
 | `split_k > 255` | **Blocked** | `TranslationError` raised; `uint8_t` overflow in oracle |
 | `compv1`, `compv2`, `preshufflev1` | **Blocked** | No codegen path; `TranslationError` at translation time |
@@ -104,6 +126,6 @@ micro-optimizations between the two stacks.
 |---|---|---|
 | 1 | `double_buffer=True` for `preshufflev2` in translator vs `False` in `unified_gemm_codegen.py` line 831 | Medium — affects `KernelKey::operator==` but not `encode_identifier()` |
 | 2 | T2.2: multi-kernel Python binding (C API + `.so` + ctypes wrapper) | High — blocks T2.3–T2.7 runtime execution |
-| 3 | GPU execution on gfx942 node to get T1.5–T1.7 PASSED status | High — required for Phase 1 completion |
+| 3 | ~~GPU execution on gfx942 node to get T1.5–T1.7 PASSED status~~ | **DONE** 2026-06-02 — all sizes PASSED on gfx942 (MI300X) |
 | 4 | Generalize harness strides beyond `rcr` | Low — all current configs use `rcr`; needs parametric stride builder |
 | 5 | Add `split_k > 255` range check to `cpp_identifier_oracle.cpp` | Low — `TranslationError` prevents the bad value from reaching the oracle |

@@ -1,6 +1,7 @@
 # Build artifacts (compiled by g++/hipcc; reproducible)
 cpp_identifier_oracle
 harness
+libdispatcher_gemm.so
 
 # Python caches
 __pycache__/

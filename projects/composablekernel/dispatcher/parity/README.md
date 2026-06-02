@@ -134,6 +134,16 @@ the performance baseline.
 | `configs/padding_fp16_rcr.json` | — | fp16 rcr config with pad_m/n/k=true (T1.6 padding code path) |
 | `configs/single_fp16_rcr_pad.json` | — | alias for padding_fp16_rcr.json (legacy name) |
 | `configs/multi_fp16_rcr_handful.json` | — | 192-combination config for T1.2 round-trip coverage |
+| `configs/single_bf16_rcr.json` | — | bf16 rcr config (T2.5 dtype coverage) |
+| `configs/single_fp8_rcr.json` | — | fp8 rcr config, tile_k=64, output promoted fp16 (T2.5) |
+| `configs/single_int8_rcr.json` | — | int8 rcr config, int32 acc, tile_k=64 (T2.5) |
+| `configs/single_fp16_rcr_splitk.json` | — | fp16 rcr with split_k=4 (exercises `_splitk4` suffix) |
+| `dispatcher_capi.h` | (g) | T2.2 — multi-kernel C API declaration (`extern "C"`) |
+| `dispatcher_capi.cpp` | (g) | T2.2 — C API implementation; compiled into `libdispatcher_gemm.so` |
+| `dispatcher_binding.py` | (g) | T2.2 — Python ctypes wrapper (`DispatcherLib`) |
+| `sweep_runner.py` | (h) | T2.3 — sweep driver writing Parquet with per-combo try/except + resume |
+| `compare_report.py` | (i) | T2.6 — dispatcher vs TE Markdown/HTML report with delta% |
+| `PORTING_DECISIONS.md` | (j) | T2.7 — living document: skipped combos, defaults, methodology |
 | `make_docs.py` | — | regenerates the two PDFs below (reportlab) |
 | `parity_design.pdf` | — | design walkthrough: every file and how it serves parity |
 | `parity_usage.pdf` | — | basic-usage guide |

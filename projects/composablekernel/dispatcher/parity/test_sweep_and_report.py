@@ -360,6 +360,74 @@ class TestCompareReportDtypeFilter:
         assert "1024" not in text  # bf16 row filtered out
 
 
+# ── sweep_runner TFLOP/s parser ──────────────────────────────────────────────
+
+class TestHarnessTflopsParser:
+    """_run_harness() correctly extracts TFLOP/s from GFLOP/s harness output."""
+
+    def test_gflops_converted_to_tflops(self, monkeypatch, tmp_path):
+        """Harness prints GFLOP/s; runner must convert to TFLOP/s (÷ 1000)."""
+        import sweep_runner
+        import subprocess
+
+        fake_stdout = (
+            "kernel : gemm_fp16_rcr_compv3_...\n"
+            "problem: M=1024 N=1024 K=1024 (rcr)\n"
+            "time   : 0.0250 ms  (85868.1 GFLOP/s)\n"
+            "verify : max_abs_err=0.00000 max_rel_err=0.00000 "
+            "abs_tol=0.03200 rel_tol=0.01000\n"
+            "verify : 1048576/1048576 elements pass (100.0%)\n"
+            "PASSED\n"
+        )
+
+        class FakeProc:
+            returncode = 0
+            stdout = fake_stdout
+            stderr = ""
+
+        monkeypatch.setattr(subprocess, "run", lambda *a, **kw: FakeProc())
+        # create a fake harness binary so the existence check passes
+        harness = sweep_runner._HERE / "harness"
+        harness_existed = harness.exists()
+        if not harness_existed:
+            harness.touch()
+        try:
+            verdict, tflops, err = sweep_runner._run_harness(1024, 1024, 1024, dry_run=False)
+        finally:
+            if not harness_existed:
+                harness.unlink(missing_ok=True)
+
+        assert verdict == "PASSED"
+        assert tflops is not None
+        assert abs(tflops - 85.8681) < 0.01, f"Expected ~85.868 TFLOP/s, got {tflops}"
+
+    def test_skipped_verdict_no_tflops(self, monkeypatch):
+        """SKIPPED lines don't produce tflops."""
+        import sweep_runner
+        import subprocess
+
+        fake_stdout = "SKIPPED: Arguments not supported!\n"
+
+        class FakeProc:
+            returncode = 0
+            stdout = fake_stdout
+            stderr = ""
+
+        monkeypatch.setattr(subprocess, "run", lambda *a, **kw: FakeProc())
+        harness = sweep_runner._HERE / "harness"
+        harness_existed = harness.exists()
+        if not harness_existed:
+            harness.touch()
+        try:
+            verdict, tflops, err = sweep_runner._run_harness(257, 257, 56, dry_run=False)
+        finally:
+            if not harness_existed:
+                harness.unlink(missing_ok=True)
+
+        assert verdict == "SKIPPED"
+        assert tflops is None
+
+
 # ── all configs round-trip check ─────────────────────────────────────────────
 
 class TestAllConfigsTranslate:

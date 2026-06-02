@@ -181,6 +181,7 @@ def _run_harness(m: int, n: int, k: int, dry_run: bool,
     # Parse verdict and tflops from harness stdout.
     verdict = "UNKNOWN"
     tflops: Optional[float] = None
+    import re
     for line in stdout.splitlines():
         if "PASSED" in line:
             verdict = "PASSED"
@@ -188,10 +189,20 @@ def _run_harness(m: int, n: int, k: int, dry_run: bool,
             verdict = "FAILED"
         elif "SKIPPED" in line:
             verdict = "SKIPPED"
-        if "tflops" in line.lower():
+        # Harness prints: time   : 0.0464 ms  (46305.2 GFLOP/s)
+        # Convert GFLOP/s → TFLOP/s for the parquet column.
+        m_gflops = re.search(r"\(([0-9.]+)\s*GFLOP/s\)", line)
+        if m_gflops:
             try:
-                tflops = float(line.split()[-1])
-            except (ValueError, IndexError):
+                tflops = float(m_gflops.group(1)) / 1000.0
+            except ValueError:
+                pass
+        # Also accept explicit TFLOP/s lines (future-proofing).
+        m_tflops = re.search(r"\(([0-9.]+)\s*TFLOP/s\)", line)
+        if m_tflops:
+            try:
+                tflops = float(m_tflops.group(1))
+            except ValueError:
                 pass
     return verdict, tflops, ""
 
@@ -239,35 +250,39 @@ def _sweep_config(
         output_dir = _HERE / "generated"
         header = output_dir / kernel_set / f"gemm_{kernel_name}.hpp"
 
-        if not cpu_only and not dry_run and not header.exists():
-            ok, err = _run_codegen(config_path, idx, output_dir, kernel_set, dry_run)
-            if not ok:
-                print(f"    [codegen FAIL] {err}", file=sys.stderr)
-                for m, n, k in sizes:
-                    key = (ident, m, n, k)
-                    if key in done_keys:
-                        continue
-                    _append_row(output, _make_row(
-                        config_path, idx, cfg, m, n, k,
-                        "ERROR", None, err, "codegen",
-                    ))
-                error_count += 1
-                continue
-
-            if ok and not dry_run:
-                ok_build, err_build = _run_build(header, arch, dry_run)
-                if not ok_build:
-                    print(f"    [build FAIL] {err_build}", file=sys.stderr)
+        if not cpu_only and not dry_run:
+            # Codegen: only if header not yet generated.
+            if not header.exists():
+                ok, err = _run_codegen(config_path, idx, output_dir, kernel_set, dry_run)
+                if not ok:
+                    print(f"    [codegen FAIL] {err}", file=sys.stderr)
                     for m, n, k in sizes:
                         key = (ident, m, n, k)
                         if key in done_keys:
                             continue
                         _append_row(output, _make_row(
                             config_path, idx, cfg, m, n, k,
-                            "ERROR", None, err_build, "build",
+                            "ERROR", None, err, "codegen",
                         ))
                     error_count += 1
                     continue
+
+            # Build: always rebuild for this kernel before running its sizes.
+            # The harness binary is overwritten per-config; skipping the build
+            # would leave the previous config's binary in place.
+            ok_build, err_build = _run_build(header, arch, dry_run)
+            if not ok_build:
+                print(f"    [build FAIL] {err_build}", file=sys.stderr)
+                for m, n, k in sizes:
+                    key = (ident, m, n, k)
+                    if key in done_keys:
+                        continue
+                    _append_row(output, _make_row(
+                        config_path, idx, cfg, m, n, k,
+                        "ERROR", None, err_build, "build",
+                    ))
+                error_count += 1
+                continue
 
         # --- Per-size harness runs ---
         for m, n, k in sizes:
