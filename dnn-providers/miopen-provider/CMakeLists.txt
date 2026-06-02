@@ -97,13 +97,6 @@ list(
     -Wswitch-default # Warn if a switch statement does not have a default case
 )
 
-# miopen.h:6221 declares `miopenTensorArgumentIsScalar = 1U << 31` in an enum with no
-# explicit underlying type. Clang widens via the MS extension, which is exactly what
-# -Wmicrosoft-enum-value reports. We can't change the bit pattern (it's a flag value),
-# and modifying MIOpen's public enum carries ABI/consumer risk. Lowest-risk fix:
-# silence this specific warning here.
-list(APPEND MIOPENPROVIDER_WARNING_COMPILE_OPTIONS -Wno-microsoft-enum-value)
-
 if(WIN32)
     # AMD clang reports `__declspec(dllimport)` as "not supported" on the
     # x86_64-pc-windows-msvc target, even though the attribute is honored
@@ -172,6 +165,14 @@ if(NOT TARGET MIOpen)
     find_package(miopen CONFIG REQUIRED)
 endif()
 
+# Treat MIOpen headers as system headers so neither the compiler nor
+# clang-tidy emits diagnostics for code we do not own. MIOpen's exported
+# CMake package (both in-tree and the installed miopen-targets.cmake)
+# does not mark its include dirs SYSTEM, so we promote them here.
+# Requires CMake 3.25+ (SYSTEM target property); enforced by
+# cmake_minimum_required above.
+set_target_properties(MIOpen PROPERTIES SYSTEM TRUE)
+
 add_library(
     miopen_plugin_impl OBJECT
     engines/MiopenEngine.cpp
@@ -206,6 +207,13 @@ set_target_properties(miopen_plugin_impl PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )
 
+# These sources only call MIOpen's host C API, but linking MIOpen pulls in
+# hip::device's `-x hip --offload-arch=...` interface flags, so each TU is
+# parsed as HIP. clang-tidy resolves to the system clang-tidy (the ROCm one
+# reports an unsupported version), which lacks ROCm's device-library bitcode
+# and errors with "cannot find ROCm device library". The objects are host-only
+# (no kernels, no embedded device code), so tell tidy to skip the device path.
+list(APPEND CLANG_TIDY_EXTRA_ARGS --extra-arg=-nogpulib)
 clang_tidy_check(miopen_plugin_impl)
 
 # Static library for unit tests to link against (provides access to internal implementation)
@@ -222,6 +230,12 @@ if(NOT WIN32)
 endif()
 
 target_compile_options(miopen_plugin PRIVATE ${MIOPENPROVIDER_WARNING_COMPILE_OPTIONS})
+# INSTALL_RPATH applies to the installed plugin only (plain `cmake --install`
+# to ${ROCM_PATH}). It is NOT used by TheRock, which overwrites INSTALL_RPATH
+# with $ORIGIN-relative paths via its global post-subproject hook. Do not set
+# BUILD_WITH_INSTALL_RPATH: that would stamp the install RPATH onto the
+# build-tree .so, causing it to resolve libMIOpen against ${ROCM_PATH}/lib
+# instead of the in-tree build, and would also defeat TheRock's BUILD_RPATH.
 set_target_properties(
     miopen_plugin
     PROPERTIES CXX_VISIBILITY_PRESET hidden
@@ -230,7 +244,6 @@ set_target_properties(
                ARCHIVE_OUTPUT_DIRECTORY "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}"
                INSTALL_RPATH "${ROCM_PATH}/lib"
                INSTALL_RPATH_USE_LINK_PATH TRUE
-               BUILD_WITH_INSTALL_RPATH TRUE
 )
 
 # Set RPATH origin for TheRock integration. The plugin is installed to

@@ -213,12 +213,6 @@ if("hipdnn-integration-tests" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
 endif()
 
 if("miopen" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
-    # Defaults tuned for the superbuild context. The superbuild already supplies
-    # the toolchain, which would normally cause MIOpen to skip its FetchContent
-    # path (cmake/ThirdParty.cmake). Force MIOPEN_STANDALONE_BUILD=ON so miopen
-    # still fetches its own non-shared deps (Eigen3, BZip2, SQLite3,
-    # frugally-deep, GTest); the shared nlohmann_json declared above
-    # intercepts miopen's find_package call and short-circuits its fetch.
     set(MIOPEN_STANDALONE_BUILD ON CACHE BOOL "")
     add_subdirectory_with_message(
         COMPONENT miopen
