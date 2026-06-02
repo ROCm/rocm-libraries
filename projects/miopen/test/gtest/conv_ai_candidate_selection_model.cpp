@@ -25,8 +25,10 @@
  *******************************************************************************/
 #include <gtest/gtest.h>
 #include <miopen/conv/heuristics/ai_candidate_selection.hpp>
-#include <miopen/conv/heuristics/ai_conv_3d_kernel_tuning_utils.hpp>
+#include <miopen/conv/heuristics/ai_conv_nd_kernel_tuning_utils.hpp>
+#include <miopen/db_path.hpp>
 #include <miopen/filesystem.hpp>
+#include <miopen/handle.hpp>
 #include <string>
 #include <map>
 #include <vector>
@@ -52,6 +54,34 @@ void PrintTo(const CandidateSelectionParams& p, std::ostream* os)
 
 // Default validation function: accepts all kernel/split_k combinations
 inline constexpr auto accept_all_combinations = [](int, int) { return true; };
+
+auto GetCandidateSelectionModelFiles(const CandidateSelectionParams& params)
+{
+    const auto db_path = miopen::GetSystemDbPath();
+    return std::vector<miopen::fs::path>{
+        db_path / (params.arch + "_" + params.solver + "_input_encoder.tn.model"),
+        db_path / (params.arch + "_" + params.solver + "_kernel_config_encoder.tn.model"),
+        db_path / (params.arch + "_" + params.solver + "_metadata.tn.model")};
+}
+
+auto GetMissingModelFiles(const CandidateSelectionParams& params)
+{
+    std::vector<miopen::fs::path> missing_files;
+    for(const auto& file : GetCandidateSelectionModelFiles(params))
+    {
+        if(!miopen::fs::exists(file))
+            missing_files.push_back(file);
+    }
+    return missing_files;
+}
+
+std::string FormatMissingFiles(const std::vector<miopen::fs::path>& missing_files)
+{
+    std::ostringstream os;
+    for(const auto& file : missing_files)
+        os << "\n  " << file.string();
+    return os.str();
+}
 
 std::vector<std::vector<std::string>> GenerateValidKernelParams(
     const CandidateSelectionMetadata& meta, const std::string& kernel_name, int num_candidates = 3)
@@ -80,12 +110,31 @@ std::vector<std::vector<std::string>> GenerateValidKernelParams(
     return valid_kernel_params;
 }
 
-class CPU_CandidateSelection_NONE : public ::testing::TestWithParam<CandidateSelectionParams>
+class GPU_CandidateSelection_FP32 : public ::testing::TestWithParam<CandidateSelectionParams>
 {
 protected:
+    miopen::Handle handle;
+
     void SetUp() override
     {
-        // Place for prng::reset_seed() or early skip logic if needed
+        const auto& params      = GetParam();
+        const auto current_arch = handle.GetDeviceName();
+        const auto missing      = GetMissingModelFiles(params);
+
+        if(missing.empty())
+            return;
+
+        const auto message = "Missing AI candidate selection model files for arch " + params.arch +
+                             ", solver " + params.solver + ":" + FormatMissingFiles(missing);
+
+        if(params.arch != current_arch)
+        {
+            GTEST_SKIP() << message << "\nCurrent device arch is " << current_arch
+                         << "; skipping foreign-arch model validation.";
+        }
+
+        FAIL() << message << "\nCurrent device arch is " << current_arch
+               << "; native-arch model files are required.";
     }
 };
 
@@ -93,20 +142,14 @@ protected:
 
 // === TESTS ===
 
-TEST_P(CPU_CandidateSelection_NONE, FilesExist_Test)
+TEST_P(GPU_CandidateSelection_FP32, FilesExist_Test)
 {
-    const auto& params = GetParam();
-    auto db_path       = miopen::GetSystemDbPath();
-    auto input_encoder = db_path / (params.arch + "_" + params.solver + "_input_encoder.tn.model");
-    auto kernel_config_encoder =
-        db_path / (params.arch + "_" + params.solver + "_kernel_config_encoder.tn.model");
-    auto metadata = db_path / (params.arch + "_" + params.solver + "_metadata.tn.model");
-    ASSERT_TRUE(miopen::fs::exists(input_encoder)) << "Input encoder file missing!";
-    ASSERT_TRUE(miopen::fs::exists(kernel_config_encoder)) << "Kernel config encoder file missing!";
-    ASSERT_TRUE(miopen::fs::exists(metadata)) << "Metadata file missing!";
+    const auto missing = GetMissingModelFiles(GetParam());
+    ASSERT_TRUE(missing.empty()) << "Missing AI candidate selection model files:"
+                                 << FormatMissingFiles(missing);
 }
 
-TEST_P(CPU_CandidateSelection_NONE, MetadataAndModelInit_Test)
+TEST_P(GPU_CandidateSelection_FP32, MetadataAndModelInit_Test)
 {
     const auto& params = GetParam();
     ASSERT_NO_THROW({
@@ -115,7 +158,7 @@ TEST_P(CPU_CandidateSelection_NONE, MetadataAndModelInit_Test)
     });
 }
 
-TEST_P(CPU_CandidateSelection_NONE, ModelCaching_Test)
+TEST_P(GPU_CandidateSelection_FP32, ModelCaching_Test)
 {
     const auto& params = GetParam();
     auto& model1       = GetCandidateSelectionModel(params.arch, params.solver);
@@ -124,7 +167,7 @@ TEST_P(CPU_CandidateSelection_NONE, ModelCaching_Test)
         << "GetCandidateSelectionModel did not return the same cached object!";
 }
 
-TEST_P(CPU_CandidateSelection_NONE, EncodeInputFeatures_Test)
+TEST_P(GPU_CandidateSelection_FP32, EncodeInputFeatures_Test)
 {
     const auto& params = GetParam();
     CandidateSelectionModel model(params.arch, params.solver);
@@ -136,7 +179,7 @@ TEST_P(CPU_CandidateSelection_NONE, EncodeInputFeatures_Test)
     ASSERT_FALSE(encoded.empty()) << "EncodeInputFeatures returned empty vector!";
 }
 
-TEST_P(CPU_CandidateSelection_NONE, EncodeKernelConfigs_Test)
+TEST_P(GPU_CandidateSelection_FP32, EncodeKernelConfigs_Test)
 {
     const auto& params = GetParam();
     CandidateSelectionModel model(params.arch, params.solver);
@@ -149,7 +192,7 @@ TEST_P(CPU_CandidateSelection_NONE, EncodeKernelConfigs_Test)
         ASSERT_FALSE(vec.empty()) << "EncodeKernelConfigs returned a candidate with empty vector!";
 }
 
-TEST_P(CPU_CandidateSelection_NONE, EncodeInputFeaturesEdgeCases_Test)
+TEST_P(GPU_CandidateSelection_FP32, EncodeInputFeaturesEdgeCases_Test)
 {
     const auto& params = GetParam();
     CandidateSelectionModel model(params.arch, params.solver);
@@ -179,7 +222,7 @@ TEST_P(CPU_CandidateSelection_NONE, EncodeInputFeaturesEdgeCases_Test)
     }
 }
 
-TEST_P(CPU_CandidateSelection_NONE, EncodeKernelConfigsEdgeCases_Test)
+TEST_P(GPU_CandidateSelection_FP32, EncodeKernelConfigsEdgeCases_Test)
 {
     const auto& params = GetParam();
     CandidateSelectionModel model(params.arch, params.solver);
@@ -193,14 +236,14 @@ TEST_P(CPU_CandidateSelection_NONE, EncodeKernelConfigsEdgeCases_Test)
     EXPECT_THROW(model.EncodeKernelConfigs(candidates_long), std::exception);
 }
 
-TEST_P(CPU_CandidateSelection_NONE, KernelStrMappingUnknownKernelThrows_Test)
+TEST_P(GPU_CandidateSelection_FP32, KernelStrMappingUnknownKernelThrows_Test)
 {
     const auto& params = GetParam();
     CandidateSelectionMetadata meta(params.arch, params.solver);
     EXPECT_THROW(meta.GetKernelStrMapping("unknown_kernel_name"), std::exception);
 }
 
-TEST_P(CPU_CandidateSelection_NONE, OutputConstantRetrieval_Test)
+TEST_P(GPU_CandidateSelection_FP32, OutputConstantRetrieval_Test)
 {
     const auto& params = GetParam();
     CandidateSelectionMetadata meta(params.arch, params.solver);
@@ -213,7 +256,7 @@ TEST_P(CPU_CandidateSelection_NONE, OutputConstantRetrieval_Test)
     EXPECT_EQ(unknown, std::nullopt);
 }
 
-TEST_P(CPU_CandidateSelection_NONE, InputOutputParamIndexThrows_Test)
+TEST_P(GPU_CandidateSelection_FP32, InputOutputParamIndexThrows_Test)
 {
     const auto& params = GetParam();
     CandidateSelectionMetadata meta(params.arch, params.solver);
@@ -221,7 +264,7 @@ TEST_P(CPU_CandidateSelection_NONE, InputOutputParamIndexThrows_Test)
     EXPECT_THROW(meta.GetOutputParamIndex("nonexistent_param"), std::exception);
 }
 
-TEST_P(CPU_CandidateSelection_NONE, EncodeKernelParamsBadValueThrows_Test)
+TEST_P(GPU_CandidateSelection_FP32, EncodeKernelParamsBadValueThrows_Test)
 {
     const auto& params = GetParam();
     CandidateSelectionMetadata meta(params.arch, params.solver);
@@ -237,7 +280,7 @@ TEST_P(CPU_CandidateSelection_NONE, EncodeKernelParamsBadValueThrows_Test)
         << "Expected empty result when all candidates have invalid mappings";
 }
 
-TEST_P(CPU_CandidateSelection_NONE, SelectBestCandidateValid_Test)
+TEST_P(GPU_CandidateSelection_FP32, SelectBestCandidateValid_Test)
 {
     const auto& params = GetParam();
     CandidateSelectionModel model(params.arch, params.solver);
@@ -262,7 +305,7 @@ TEST_P(CPU_CandidateSelection_NONE, SelectBestCandidateValid_Test)
     }
 }
 
-TEST_P(CPU_CandidateSelection_NONE, SelectBestCandidateEmptyInput_Test)
+TEST_P(GPU_CandidateSelection_FP32, SelectBestCandidateEmptyInput_Test)
 {
     const auto& params = GetParam();
     CandidateSelectionModel model(params.arch, params.solver);
@@ -272,7 +315,7 @@ TEST_P(CPU_CandidateSelection_NONE, SelectBestCandidateEmptyInput_Test)
                  std::exception);
 }
 
-TEST_P(CPU_CandidateSelection_NONE, ModelSelectBestCandidate_Test)
+TEST_P(GPU_CandidateSelection_FP32, ModelSelectBestCandidate_Test)
 {
     const auto& params = GetParam();
     CandidateSelectionMetadata meta(params.arch, params.solver);
@@ -295,7 +338,7 @@ TEST_P(CPU_CandidateSelection_NONE, ModelSelectBestCandidate_Test)
     }
 }
 
-TEST_P(CPU_CandidateSelection_NONE, ExpandKernelParamsWithSplitK_Test)
+TEST_P(GPU_CandidateSelection_FP32, ExpandKernelParamsWithSplitK_Test)
 {
     const auto& params                            = GetParam();
     std::vector<std::vector<std::string>> kernels = {{"typeA", "p1"}, {"typeB", "p2"}};
@@ -324,7 +367,7 @@ TEST_P(CPU_CandidateSelection_NONE, ExpandKernelParamsWithSplitK_Test)
     }
 }
 
-TEST_P(CPU_CandidateSelection_NONE, ExpandKernelParamsWithSplitKFunctionality_Test)
+TEST_P(GPU_CandidateSelection_FP32, ExpandKernelParamsWithSplitKFunctionality_Test)
 {
     const auto& params                            = GetParam();
     std::vector<std::vector<std::string>> kernels = {
@@ -346,12 +389,31 @@ TEST_P(CPU_CandidateSelection_NONE, ExpandKernelParamsWithSplitKFunctionality_Te
 
 // === INSTANTIATION ===
 
+// Helper function to generate test parameters for both 2D and 3D solvers
+std::vector<CandidateSelectionParams> GenerateCandidateSelectionParams()
+{
+    // Note: Using DeviceGroupedConvBwdWeight_Xdl_CShuffle for all as it's a common kernel
+    // that exists in the metadata for testing infrastructure (not testing kernel accuracy)
+    return {
+        // 2D solvers
+        {"gfx942",
+         "ConvHipImplicitGemmGroupWrwXdlops",
+         "DeviceGroupedConvBwdWeight_Xdl_CShuffle",
+         8},
+        // 3D solvers
+        {"gfx942",
+         "ConvHipImplicitGemm3DGroupWrwXdlops",
+         "DeviceGroupedConvBwdWeight_Xdl_CShuffle",
+         8},
+    };
+}
+
 INSTANTIATE_TEST_SUITE_P(Full,
-                         CPU_CandidateSelection_NONE,
-                         testing::Values(CandidateSelectionParams{}),
-                         [](const testing::TestParamInfo<CandidateSelectionParams>& info_) {
+                         GPU_CandidateSelection_FP32,
+                         ::testing::ValuesIn(GenerateCandidateSelectionParams()),
+                         [](const ::testing::TestParamInfo<CandidateSelectionParams>& testInfo) {
                              std::ostringstream os;
-                             PrintTo(info_.param, &os);
+                             PrintTo(testInfo.param, &os);
                              return os.str();
                          });
 

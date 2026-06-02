@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -347,7 +347,7 @@ public:
                     oss << "work buffer allocation failed ("
                         << byte_size_to_str(workbuffersizes[device]) << " requested)";
                     oss << "\n" << device_memory_accountant::singleton().get_details(device);
-                    throw work_buffer_alloc_failure(oss.str(), workbuffersizes[device]);
+                    throw work_buffer_alloc_failure(oss.str(), workbuffersizes[device], hip_status);
                 }
 
                 auto rocret = rocfft.execution_info_set_work_buffer(
@@ -428,8 +428,8 @@ public:
         return fft_status_from_rocfftparams(ret);
     }
 
-    void multi_gpu_prepare(std::vector<hostbuf>& input_data_host,
-                           std::vector<gpubuf>& /* input_data_gpu (unused) */,
+    void multi_gpu_prepare(const std::vector<hostbuf>& input_data_host,
+                           const std::vector<gpubuf>& /* input_data_gpu (unused) */,
                            std::vector<void*>& mgpu_ibuffers,
                            std::vector<void*>& mgpu_obuffers) override
     {

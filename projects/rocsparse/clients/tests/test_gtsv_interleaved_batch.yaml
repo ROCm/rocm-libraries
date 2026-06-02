@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -26,11 +26,7 @@ include: rocsparse_common.yaml
 
 
 Tests:
-- name: gtsv_interleaved_batch_bad_arg
-  category: pre_checkin
-  function: gtsv_interleaved_batch_bad_arg
-  precision: *single_double_precisions_complex_real
-
+# Quick
 - name: gtsv_interleaved_batch
   category: quick
   function: gtsv_interleaved_batch
@@ -38,26 +34,6 @@ Tests:
   M: [7, 11]
   batch_count: [10, 45, 111, 213]
   batch_stride: [445]
-  gtsv_interleaved_alg: [rocsparse_gtsv_interleaved_alg_thomas, rocsparse_gtsv_interleaved_alg_lu, rocsparse_gtsv_interleaved_alg_qr]
-  matrix: [rocsparse_matrix_random]
-
-- name: gtsv_interleaved_batch
-  category: pre_checkin
-  function: gtsv_interleaved_batch
-  precision: *single_double_precisions_complex_real
-  M: [2, 3]
-  batch_count: [0, 1, 2, 3, 27, 299]
-  batch_stride: [300]
-  gtsv_interleaved_alg: [rocsparse_gtsv_interleaved_alg_thomas, rocsparse_gtsv_interleaved_alg_lu, rocsparse_gtsv_interleaved_alg_qr]
-  matrix: [rocsparse_matrix_random]
-
-- name: gtsv_interleaved_batch
-  category: nightly
-  function: gtsv_interleaved_batch
-  precision: *single_double_precisions_complex_real
-  M: [2411, 3456]
-  batch_count: [12, 15, 21]
-  batch_stride: [30]
   gtsv_interleaved_alg: [rocsparse_gtsv_interleaved_alg_thomas, rocsparse_gtsv_interleaved_alg_lu, rocsparse_gtsv_interleaved_alg_qr]
   matrix: [rocsparse_matrix_random]
 
@@ -72,13 +48,70 @@ Tests:
   matrix: [rocsparse_matrix_random]
 
 - name: gtsv_interleaved_batch
+  category: quick
+  function: gtsv_interleaved_batch
+  precision: *single_double_precisions_complex_real
+  M: [300]
+  batch_count: [33, 117, 318, 475]
+  batch_stride: [500]
+  gtsv_interleaved_alg: [rocsparse_gtsv_interleaved_alg_thomas]
+  matrix: [rocsparse_matrix_random]
+
+# Pre-checkin
+- name: gtsv_interleaved_batch_bad_arg
+  category: pre_checkin
+  function: gtsv_interleaved_batch_bad_arg
+  precision: *single_double_precisions_complex_real
+
+- name: gtsv_interleaved_batch
+  category: pre_checkin
+  function: gtsv_interleaved_batch
+  precision: *single_double_precisions_complex_real
+  M: [2, 3]
+  batch_count: [0, 1, 2, 3, 27, 299]
+  batch_stride: [300]
+  gtsv_interleaved_alg: [rocsparse_gtsv_interleaved_alg_thomas, rocsparse_gtsv_interleaved_alg_lu, rocsparse_gtsv_interleaved_alg_qr]
+  matrix: [rocsparse_matrix_random]
+
+- name: gtsv_interleaved_batch
   category: pre_checkin
   function: gtsv_interleaved_batch
   precision: *single_double_precisions
   M: [128, 256]
   batch_count: [32, 45, 128]
   batch_stride: [150]
-  gtsv_interleaved_alg: [rocsparse_gtsv_interleaved_alg_lu, rocsparse_gtsv_interleaved_alg_qr]
+  gtsv_interleaved_alg: [rocsparse_gtsv_interleaved_alg_lu, rocsparse_gtsv_interleaved_alg_default]
+  matrix: [rocsparse_matrix_random]
+
+- name: gtsv_interleaved_batch
+  category: pre_checkin
+  function: gtsv_interleaved_batch
+  precision: *single_double_precisions_complex_real
+  M: [25, 34]
+  batch_count: [2560, 45634, 110773]
+  batch_stride: [110773]
+  gtsv_interleaved_alg: [rocsparse_gtsv_interleaved_alg_lu]
+  matrix: [rocsparse_matrix_random]
+
+- name: gtsv_interleaved_batch_graph_test
+  category: pre_checkin
+  function: gtsv_interleaved_batch
+  precision: *single_double_precisions_complex_real
+  M: [7, 11]
+  batch_count: [10, 45, 111, 213]
+  batch_stride: [445]
+  gtsv_interleaved_alg: [rocsparse_gtsv_interleaved_alg_thomas, rocsparse_gtsv_interleaved_alg_lu, rocsparse_gtsv_interleaved_alg_qr]
+  matrix: [rocsparse_matrix_random]
+  graph_test: true
+
+- name: gtsv_interleaved_batch
+  category: nightly
+  function: gtsv_interleaved_batch
+  precision: *single_double_precisions_complex_real
+  M: [2411, 3456]
+  batch_count: [12, 15, 21]
+  batch_stride: [30]
+  gtsv_interleaved_alg: [rocsparse_gtsv_interleaved_alg_thomas, rocsparse_gtsv_interleaved_alg_lu, rocsparse_gtsv_interleaved_alg_qr]
   matrix: [rocsparse_matrix_random]
 
 - name: gtsv_interleaved_batch
@@ -92,26 +125,6 @@ Tests:
   matrix: [rocsparse_matrix_random]
 
 - name: gtsv_interleaved_batch
-  category: quick
-  function: gtsv_interleaved_batch
-  precision: *single_double_precisions_complex_real
-  M: [300]
-  batch_count: [33, 117, 318, 475]
-  batch_stride: [500]
-  gtsv_interleaved_alg: [rocsparse_gtsv_interleaved_alg_thomas]
-  matrix: [rocsparse_matrix_random]
-
-- name: gtsv_interleaved_batch
-  category: pre_checkin
-  function: gtsv_interleaved_batch
-  precision: *single_double_precisions_complex_real
-  M: [25, 34]
-  batch_count: [2560, 45634, 110773]
-  batch_stride: [110773]
-  gtsv_interleaved_alg: [rocsparse_gtsv_interleaved_alg_lu]
-  matrix: [rocsparse_matrix_random]
-
-- name: gtsv_interleaved_batch
   category: nightly
   function: gtsv_interleaved_batch
   precision: *single_double_precisions
@@ -120,14 +133,3 @@ Tests:
   batch_stride: [256000]
   gtsv_interleaved_alg: [rocsparse_gtsv_interleaved_alg_qr]
   matrix: [rocsparse_matrix_random]
-
-- name: gtsv_interleaved_batch_graph_test
-  category: pre_checkin
-  function: gtsv_interleaved_batch
-  precision: *single_double_precisions_complex_real
-  M: [7, 11]
-  batch_count: [10, 45, 111, 213]
-  batch_stride: [445]
-  gtsv_interleaved_alg: [rocsparse_gtsv_interleaved_alg_thomas, rocsparse_gtsv_interleaved_alg_lu, rocsparse_gtsv_interleaved_alg_qr]
-  matrix: [rocsparse_matrix_random]
-  graph_test: true

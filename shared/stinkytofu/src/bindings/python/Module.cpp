@@ -56,12 +56,17 @@ struct InstructionGroupRange {
 
 struct StinkyAsmModule::Impl {
     std::string name;
+    std::string outputName;  // If non-empty, used for cost file basename (full kernel name)
+    std::string outputDir;   // If non-empty, cost file goes to outputDir/<kernel_name>/
     std::array<int, 3> arch;
 
     // This map maintains the defined group names and the range of instructions for each group.
     std::unordered_map<std::string, InstructionGroupRange> instructionGroups;
 
     Function function;
+
+    // Total instruction encoding size in bytes (for .amdhsa_inst_pref_size). -1 if not set.
+    int64_t totalInstructionBytes = -1;
 
     Impl(const std::string& name, const std::array<int, 3>& arch) : name(name), arch(arch) {
         // Create a single BasicBlock to hold all instructions
@@ -76,7 +81,11 @@ struct StinkyAsmModule::Impl {
 
 StinkyAsmModule::StinkyAsmModule(const std::string& name, const std::array<int, 3>& arch,
                                  const ModuleOptions& moduleOptions)
-    : pImpl(std::make_unique<Impl>(name, arch)), moduleOptions(moduleOptions) {}
+    : pImpl(std::make_unique<Impl>(name, arch)), moduleOptions(moduleOptions) {
+    // SwPrefetchScratchSgpr == -1: do not run SwPrefetchInsertionPass (see Gfx1250Backend).
+    this->moduleOptions.EnableSwPrefetchInsertion =
+        (this->moduleOptions.SwPrefetchScratchSgpr != -1);
+}
 
 StinkyAsmModule::~StinkyAsmModule() = default;
 
@@ -85,6 +94,22 @@ StinkyAsmModule& StinkyAsmModule::operator=(StinkyAsmModule&&) noexcept = defaul
 
 std::string StinkyAsmModule::getName() const {
     return pImpl->name;
+}
+
+void StinkyAsmModule::setOutputName(const std::string& name) {
+    pImpl->outputName = name;
+}
+
+std::string StinkyAsmModule::getOutputName() const {
+    return pImpl->outputName;
+}
+
+void StinkyAsmModule::setOutputDir(const std::string& dir) {
+    pImpl->outputDir = dir;
+}
+
+std::string StinkyAsmModule::getOutputDir() const {
+    return pImpl->outputDir;
 }
 
 std::array<int, 3> StinkyAsmModule::getArch() const {
@@ -117,6 +142,10 @@ void StinkyAsmModule::runOptimizationPipeline() {
     backend.runOptimization();
 }
 
+std::optional<uint64_t> StinkyAsmModule::getMetaDataU64(const std::string& key) const {
+    return getFunction().getMetaData(key);
+}
+
 void StinkyAsmModule::addGroup(const std::string& name) {
     if (pImpl->instructionGroups.find(name) != pImpl->instructionGroups.end()) {
         return;
@@ -134,8 +163,13 @@ StinkyAsmModule::findGroupRange(const std::string& groupName) const {
         return std::nullopt;
     }
 
-    return std::make_optional(std::make_pair(pImpl->instructionGroups.at(groupName).begin(),
-                                             pImpl->instructionGroups.at(groupName).end()));
+    const auto& range = pImpl->instructionGroups.at(groupName);
+    // Return nullopt if the group was registered but never populated
+    if (range.first == IntrusiveListIterator<IRBase>()) {
+        return std::nullopt;
+    }
+
+    return std::make_optional(std::make_pair(range.begin(), range.end()));
 }
 
 void StinkyAsmModule::updateInstructionGroups(const std::vector<const std::string*>& groups,
@@ -147,7 +181,7 @@ void StinkyAsmModule::updateInstructionGroups(const std::vector<const std::strin
             auto& groupRange = pImpl->instructionGroups.at(*groupName);
             if (groupRange.first == IntrusiveListIterator<IRBase>()) {
                 auto it = bb.rbegin();
-                for (auto i = 1; i < newInstructionCount; ++i) {
+                for (size_t i = 1; i < newInstructionCount; ++i) {
                     it++;
                 }
                 groupRange.first = IntrusiveListIterator<IRBase>(it.getNodePtr());
@@ -173,6 +207,14 @@ const StinkyAsmModule::ModuleOptions& StinkyAsmModule::getModuleOptions() const 
 
 void StinkyAsmModule::setModuleOptions(const ModuleOptions& moduleOptions) {
     this->moduleOptions = moduleOptions;
+}
+
+void StinkyAsmModule::setTotalInstructionBytes(int64_t totalBytes) {
+    pImpl->totalInstructionBytes = totalBytes;
+}
+
+int64_t StinkyAsmModule::getTotalInstructionBytes() const {
+    return pImpl->totalInstructionBytes;
 }
 
 }  // namespace stinkytofu

@@ -1,34 +1,43 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-#include "FloatTypes.h"
+
+#include <type_traits>
+
+#include "RMSNormCommon.hpp"
 
 constexpr unsigned int LOCAL_SIZE = HIP_PLUGIN_RMSNORM_LOCAL_SIZE;
-constexpr size_t C_SIZE = HIP_PLUGIN_RMSNORM_C_SIZE;
-constexpr size_t C_STRIDE = HIP_PLUGIN_RMSNORM_C_STRIDE;
-constexpr size_t N_STRIDE = C_SIZE * C_STRIDE;
+constexpr unsigned int INNER_SIZE = HIP_PLUGIN_RMSNORM_INNER_SIZE;
+constexpr unsigned int STRIDE = HIP_PLUGIN_RMSNORM_STRIDE;
 
-using IOType = HIP_PLUGIN_RMSNORM_IO_TYPE;
+using InputType = HIP_PLUGIN_RMSNORM_INPUT_TYPE;
+using OutputType = HIP_PLUGIN_RMSNORM_OUTPUT_TYPE;
+using ScaleType = HIP_PLUGIN_RMSNORM_SCALE_TYPE;
+using ComputeType = HIP_PLUGIN_RMSNORM_COMPUTE_TYPE;
 
-extern "C" __global__ void RMSnormFwd(const IOType* __restrict__ x,
-                                      const FLOAT_ACCUM* __restrict__ weight,
-                                      const FLOAT_ACCUM* __restrict__ bias,
-                                      IOType* __restrict__ y,
-                                      FLOAT_ACCUM* __restrict__ rstd,
+extern "C" __global__ void RMSnormFwd(const InputType* __restrict__ x,
+                                      const ScaleType* __restrict__ weight,
+                                      const ScaleType* __restrict__ bias,
+                                      OutputType* __restrict__ y,
+                                      ComputeType* __restrict__ rstd,
                                       float eps)
 {
+    // ComputeType must be float to prevent precision loss
+    static_assert(std::is_same<ComputeType, float>::value,
+                  "ComputeType must be float for the RMSnormFwd kernel");
+
     const unsigned int gid = blockIdx.x;
     const unsigned int lid = threadIdx.x;
-    const unsigned int o = gid / C_STRIDE;
-    const unsigned int s = gid % C_STRIDE;
+    const unsigned int o = gid / STRIDE;
+    const unsigned int s = gid % STRIDE;
 
-    FLOAT_ACCUM pvar(0);
-    __shared__ FLOAT_ACCUM ltmp[LOCAL_SIZE];
+    float pvar = 0.0f;
+    __shared__ float ltmp[LOCAL_SIZE];
 
     // reduce sum
-    for(unsigned int i = lid; i < C_SIZE; i += LOCAL_SIZE)
+    for(unsigned int i = lid; i < INNER_SIZE; i += LOCAL_SIZE)
     {
-        size_t x_idx = (o * N_STRIDE) + (i * C_STRIDE) + s;
-        FLOAT_ACCUM tmp = CVT_FLOAT2ACCUM(x[x_idx]);
+        size_t idx = o * INNER_SIZE * STRIDE + i * STRIDE + s;
+        float tmp = hip_kernel_provider::rmsnorm::to_float32<InputType>(x[idx]);
         pvar += tmp * tmp;
     }
 
@@ -43,8 +52,8 @@ extern "C" __global__ void RMSnormFwd(const IOType* __restrict__ x,
         __syncthreads();
     }
 
-    pvar = ltmp[0] / C_SIZE;
-    FLOAT_ACCUM prstd = rsqrt(pvar + FLOAT_ACCUM(eps));
+    pvar = ltmp[0] / INNER_SIZE;
+    float prstd = rsqrtf(pvar + eps);
 
     if(lid == 0 && rstd)
     {
@@ -52,14 +61,15 @@ extern "C" __global__ void RMSnormFwd(const IOType* __restrict__ x,
     }
 
     // forward calculation
-    for(unsigned int i = lid; i < C_SIZE; i += LOCAL_SIZE)
+    for(unsigned int i = lid; i < INNER_SIZE; i += LOCAL_SIZE)
     {
-        size_t idx = (o * N_STRIDE) + (i * C_STRIDE) + s;
-        FLOAT_ACCUM y_val = (CVT_FLOAT2ACCUM(x[idx])) * prstd * weight[i];
+        size_t idx = o * INNER_SIZE * STRIDE + i * STRIDE + s;
+        float y_val = hip_kernel_provider::rmsnorm::to_float32<InputType>(x[idx]) * prstd
+                      * hip_kernel_provider::rmsnorm::to_float32<ScaleType>(weight[i]);
         if(bias != nullptr)
         {
-            y_val += bias[i];
+            y_val += hip_kernel_provider::rmsnorm::to_float32<ScaleType>(bias[i]);
         }
-        y[idx] = CVT_ACCUM2FLOAT(y_val);
+        y[idx] = hip_kernel_provider::rmsnorm::from_float32<OutputType>(y_val);
     }
 }

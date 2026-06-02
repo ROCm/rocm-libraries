@@ -32,6 +32,7 @@ from Tensile.Common import printExit, printWarning, print2, \
 from Tensile.Common.TimingInstrumentation import timing_context
 from Tensile.Common.Architectures import gfxToIsa
 from Tensile.SolutionStructs import Solution, ProblemSizes
+from Tensile.SolutionStructs.Solution import getTypeMismatchCollector, resetTypeMismatchCollector
 from Tensile.SolutionStructs.Problem import ProblemType, problemTypeToEnum
 
 from typing import IO, NamedTuple, List, Dict, Optional
@@ -75,6 +76,34 @@ except ImportError:
     from yaml import SafeDumper as yamlDumper
     printWarning("CSafeDumper not installed. Fallback to SafeDumper.")
 
+# Custom YAML loader that preserves int type for 0 and 1 (doesn't auto-convert to bool)
+# This allows type validation to catch int-vs-bool mismatches in YAML files.
+class StrictTypeLoader(yamlLoader):
+    """YAML loader that does NOT auto-convert 0/1 to False/True.
+
+    Standard YAML parsers treat 0 and 1 as booleans, but we want to preserve
+    the actual type written in the YAML to catch type mismatches during validation.
+    Accepts both YAML-standard (true/false) and Python-style (True/False) booleans.
+    """
+    pass
+
+# Remove the implicit bool resolver for integers
+# By default, YAML treats various forms as bool (yes/no, true/false, on/off, 0/1)
+# We remove the rule that treats plain scalars matching bool patterns as booleans
+# This forces explicit 'true'/'false' for booleans and preserves 0/1 as integers
+StrictTypeLoader.yaml_implicit_resolvers = {
+    k: [r for r in v if r[0] != 'tag:yaml.org,2002:bool']
+    for k, v in yamlLoader.yaml_implicit_resolvers.items()
+}
+
+# Add back a custom bool resolver that matches true/false/True/False but NOT 0/1
+# This regex matches: true, false, True, False (but not yes, no, on, off, 0, 1)
+StrictTypeLoader.add_implicit_resolver(
+    'tag:yaml.org,2002:bool',
+    re.compile(r'^(?:true|false|True|False)$', re.X),
+    list('tTfF')
+)
+
 try:
     import msgpack
 except ImportError:
@@ -85,6 +114,119 @@ except ImportError:
 ###################
 # Writing functions
 ###################
+
+# YAML keywords that need quoting when used as string values
+_YAML_BOOL_KEYWORDS = frozenset({
+    'true', 'false', 'yes', 'no', 'on', 'off',
+    'True', 'False', 'Yes', 'No', 'On', 'Off',
+    'TRUE', 'FALSE', 'YES', 'NO', 'ON', 'OFF',
+})
+_YAML_NULL_KEYWORDS = frozenset({'null', 'Null', 'NULL', '~'})
+_YAML_SPECIAL_STARTS = frozenset('-?:,[]{}#&*!|>\'"%%@`')
+
+def _fast_yaml_scalar(v):
+    """Format a Python value as an inline YAML scalar."""
+    if v is None:
+        return 'null'
+    if isinstance(v, bool):
+        return 'true' if v else 'false'
+    if isinstance(v, int):
+        return str(v)
+    if isinstance(v, float):
+        return repr(v)
+    if isinstance(v, str):
+        return _fast_yaml_str(v)
+    if isinstance(v, list):
+        return _fast_yaml_flow_list(v)
+    return repr(v)
+
+def _fast_yaml_str(s):
+    """Format a Python string as a YAML scalar, quoting only when necessary."""
+    if not s or s in _YAML_BOOL_KEYWORDS or s in _YAML_NULL_KEYWORDS:
+        return f"'{s}'"
+    escaped = s.replace("'", "''")
+    if s[0] in _YAML_SPECIAL_STARTS or s[0] == ' ' or s[-1] == ' ':
+        return f"'{escaped}'"
+    if ': ' in s or ' #' in s or s.endswith(':') or '\n' in s:
+        return f"'{escaped}'"
+    # Check if it looks like a number
+    c = s[0]
+    if c.isdigit() or (c in '+-.' and len(s) > 1):
+        try:
+            float(s)
+            return f"'{s}'"
+        except ValueError:
+            pass
+    return s
+
+def _fast_yaml_flow_list(lst):
+    """Format a Python list as a YAML flow sequence: [a, b, c]."""
+    if not lst:
+        return '[]'
+    return f"[{', '.join(_fast_yaml_scalar(item) for item in lst)}]"
+
+def fast_yaml_dump(solutionStates, f):
+    """
+    Write a list of solution dicts as YAML, optimized for speed.
+
+    Produces output compatible with yaml.load(f, CSafeLoader).
+    Only handles the plain Python types found in solution state dicts:
+    int, bool, str, float, None, list, and dict (one level of nesting).
+
+    Limitations versus CSafeDumper:
+
+    Structural:
+      - Only one level of dict nesting. Sub-dicts whose values are themselves
+        dicts fall through to repr() via _yamlScalar.
+      - Lists of dicts are not supported. _yamlFlowList calls _yamlScalar on
+        each item, which has no dict case and falls through to repr().
+      - No block style for complex structures; everything is written
+        inline/flow.
+      - No YAML anchors/aliases. Shared references (e.g. the same ProblemType
+        dict in multiple solutions) are duplicated in the output.
+
+    Type handling:
+      - Float special values (inf, -inf, nan) are written via repr(), which
+        produces Python syntax rather than the YAML-spec forms (.inf, -.inf,
+        .nan).
+      - Tuples, sets, bytes, and datetime objects all fall through to repr(),
+        producing Python-syntax output that is not valid YAML. CSafeDumper
+        converts tuples to sequences, datetimes to timestamps, etc.
+
+    String quoting:
+      - Dict keys are never quoted. Keys that are YAML keywords (true, yes,
+        null, etc.) or contain special characters are written bare.
+      - No detection of YAML timestamp-like strings. Values such as
+        "2024-01-01" or "12:30:00" are written unquoted and may be parsed
+        back as dates or times by the loader.
+      - Octal/hex-like strings (e.g. "0x1F", "0o17") may pass through
+        unquoted and be misinterpreted as numbers by some YAML loaders.
+      - Multiline strings (containing literal newlines) are single-quoted
+        with the newline embedded directly, which can produce broken output.
+        CSafeDumper uses block scalars (|) or double-quoted strings with
+        escaped newlines.
+
+    These limitations are acceptable because this writer targets the specific
+    shape of solution state dicts (flat dicts with occasional one-level-deep
+    sub-dicts of simple scalars). The validation in writeSolutions() catches
+    any mismatch against yaml.dump output at runtime.
+    """
+    for sol in solutionStates:
+        first = True
+        for k in sorted(sol.keys()):
+            v = sol[k]
+            if first:
+                prefix = '- '
+                first = False
+            else:
+                prefix = '  '
+            if isinstance(v, dict):
+                f.write(f'{prefix}{k}:\n')
+                for k2 in sorted(v.keys()):
+                    f.write(f'    {k2}: {_fast_yaml_scalar(v[k2])}\n')
+            else:
+                f.write(f'{prefix}{k}: {_fast_yaml_scalar(v)}\n')
+
 def write(filename_noExt, data, format="yaml"):
     """Writes data to file with specified format; extension is appended based on format."""
     if format == "yaml":
@@ -194,7 +336,7 @@ def writeSolutions(filename: str, problemSizes: Optional[ProblemSizes], biasType
         with timing_context("python_wsol_header"):
             _writeSolutionsHeader(f, problemSizes, biasTypeArgs, activationArgs)
         with timing_context("python_wsol_dump"):
-            yaml.dump(solutionStates, f, Dumper=yamlDumper, default_flow_style=None)
+            fast_yaml_dump(solutionStates, f)
 
 
 ###############################
@@ -203,7 +345,7 @@ def writeSolutions(filename: str, problemSizes: Optional[ProblemSizes], biasType
 def read(filename, customizedLoader=False):
     name, extension = os.path.splitext(filename)
     if extension == ".yaml":
-        return load_yaml_stream(filename, yamlLoader) if customizedLoader else readYAML(filename)
+        return load_yaml_stream(filename, StrictTypeLoader) if customizedLoader else readYAML(filename)
     if extension == ".json":
         return readJson(filename)
     else:
@@ -213,7 +355,7 @@ def read(filename, customizedLoader=False):
 def readYAML(filename):
     """Reads and returns YAML data from file."""
     with open(filename, "r") as f:
-        data = yaml.load(f, yamlLoader)
+        data = yaml.load(f, StrictTypeLoader)
     return data
 
 
@@ -325,6 +467,7 @@ class LibraryLogic(NamedTuple):
     solutions: list
     exactLogic: list
     library: SolutionLibrary.MasterSolutionLibrary
+    typeMismatches: dict = {}
 
 def parseLibraryLogicFile(
         filename,
@@ -359,6 +502,10 @@ def parseLibraryLogicData(
         lazyLibraryLoading: bool
     ):
     """Parses the data of a library logic file."""
+    # Reset the type mismatch collector at the start to capture all type
+    # mismatches from both ProblemType and Solution constructors
+    resetTypeMismatchCollector()
+
     if isinstance(data, List):
         data = parseLibraryLogicList(data, srcFile)
 
@@ -385,7 +532,7 @@ def parseLibraryLogicData(
                 .format(srcFile, data["MinimumRequiredVersion"], __version__) )
 
     # unpack problemType
-    problemType = ProblemType(data["ProblemType"], printIndexAssignmentInfo)
+    problemType = ProblemType(data["ProblemType"], printIndexAssignmentInfo, srcFile=srcFile)
 
     # unpack solution
     def solutionStateToSolution(solutionState, assembler, isaInfoMap) -> Solution:
@@ -436,6 +583,7 @@ def parseLibraryLogicData(
         return solutionObject
 
     solutions = [solutionStateToSolution(solutionState, assembler, isaInfoMap) for solutionState in data["Solutions"]]
+    typeMismatches = getTypeMismatchCollector()
 
     newLibrary, _ = SolutionLibrary.MasterSolutionLibrary.FromOriginalState(
         data,
@@ -450,7 +598,7 @@ def parseLibraryLogicData(
     )
 
     return LibraryLogic(data["ScheduleName"], data["ArchitectureName"], problemType, solutions, \
-            data.get("ExactLogic"), newLibrary)
+            data.get("ExactLogic"), newLibrary, typeMismatches)
 
 
 def parseLibraryLogicList(data, srcFile="?"):
