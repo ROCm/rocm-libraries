@@ -1,0 +1,396 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+#include "SdpaCandidateSelector.hpp"
+
+#include <array>
+#include <cstddef>
+#include <cstdlib>
+#include <limits>
+#include <string>
+
+namespace ck_dsl_provider {
+
+namespace {
+
+using ck_tile::dispatcher::FmhaApiFamily;
+using ck_tile::dispatcher::FmhaKernelFamily;
+using ck_tile::dispatcher::FmhaKernelKey;
+using ck_tile::dispatcher::FmhaProblem;
+using ck_tile::dispatcher::FmhaProblemBuilder;
+
+// Enumerated continuous axes. These mirror the kernel's valid sets
+// (UnifiedAttention2DTiledSpec.__post_init__): num_warps in {1,2,4,8},
+// block_m_per_warp in {16,32}.
+constexpr std::array<std::int32_t, 4> kNumWarpsChoices{1, 2, 4, 8};
+constexpr std::array<std::int32_t, 2> kBlockMPerWarpChoices{16, 32};
+
+// tile_size is enumerated as multiples of block_size: {1,2,4} * block.
+// 2*block_size is P's universal analytic default; the {1,4} multiples
+// widen the search while staying within the per-call payload limits the
+// supports() gate re-checks.
+constexpr std::array<std::int32_t, 3> kTileSizeMultiples{1, 2, 4};
+
+// MFMA-atom -> (k0, k1) POC mapping for the tile_shape. The default
+// 16x16x32 geometry uses a 32-wide K step (k0); the 32x32x16 geometry
+// uses a 16-wide K step. n1/k0max are left default-filled (0). These are
+// POC values chosen to mirror the kernel's MFMA K dimension so the
+// scored tile_shape distinguishes the two atom families.
+constexpr std::uint16_t kK0Default = 32;  // 16x16x32 atom K step
+constexpr std::uint16_t kK1Default = 32;
+constexpr std::uint16_t kK0Mfma32 = 16;  // 32x32x16 atom K step
+constexpr std::uint16_t kK1Mfma32 = 16;
+
+}  // namespace
+
+SupportsResult supportsTiled2d(const SdpaSelectionProblem& problem, const SdpaPerfKnobs& knobs) {
+    // dtype in {fp16, bf16}.
+    if (problem.dtype != "fp16" && problem.dtype != "bf16") {
+        return {false, "tiled 2D kernel currently supports fp16/bf16 (got " + problem.dtype + ")"};
+    }
+    // head_size in {64,128,256} and divisible by 32.
+    const std::int32_t hd = problem.head_size;
+    if (hd != 64 && hd != 128 && hd != 256) {
+        return {false, "tiled 2D kernel only supports head_size in {64,128,256} (got " +
+                           std::to_string(hd) + ")"};
+    }
+    if (hd % 32 != 0) {
+        return {false, "tiled 2D kernel requires head_size divisible by 32 (got " +
+                           std::to_string(hd) + ")"};
+    }
+    // block_size in {16,32,64}.
+    const std::int32_t bs = problem.block_size;
+    if (bs != 16 && bs != 32 && bs != 64) {
+        return {false, "tiled 2D kernel only supports block_size in {16,32,64} (got " +
+                           std::to_string(bs) + ")"};
+    }
+    // GQA: 1 <= num_queries_per_kv <= 16.
+    const std::int32_t qpk = problem.num_queries_per_kv();
+    if (qpk < 1 || qpk > 16) {
+        return {false, "tiled 2D kernel needs 1<=num_queries_per_kv<=16 (got " +
+                           std::to_string(qpk) + ")"};
+    }
+    // GQA divides the base-row BLOCK_M = 16 * num_warps. NOTE: this is the
+    // kernel's base-row form (attention_tiled_2d.py:634), NOT the launch
+    // BLOCK_M (num_warps * block_m_per_warp).
+    const std::int32_t blockMBase = 16 * knobs.num_warps;
+    if (blockMBase % qpk != 0) {
+        return {false, "tiled 2D kernel needs num_queries_per_kv to divide BLOCK_M=" +
+                           std::to_string(blockMBase) +
+                           " (num_warps=" + std::to_string(knobs.num_warps) +
+                           ", got num_queries_per_kv=" + std::to_string(qpk) + ")"};
+    }
+    // tile_size: when set, > 0 and a multiple of block_size.
+    if (knobs.tile_size != 0) {
+        if (knobs.tile_size <= 0 || knobs.tile_size % bs != 0) {
+            return {false, "tiled 2D kernel: tile_size=" + std::to_string(knobs.tile_size) +
+                               " must be a positive multiple of block_size=" + std::to_string(bs)};
+        }
+        // DMA payload floor: tile_size*head_size >= num_warps*64*8.
+        const std::int32_t threads = knobs.num_warps * 64;
+        if (knobs.tile_size * hd < threads * 8) {
+            return {false,
+                    "tiled 2D kernel: tile_size*head_size=" + std::to_string(knobs.tile_size * hd) +
+                        " too small for num_warps=" + std::to_string(knobs.num_warps) +
+                        " (need >= " + std::to_string(threads * 8) + ")"};
+        }
+        // Per-wave token uniformity: (64*8)/head_size <= block_size.
+        const std::int32_t perWaveTokens = (64 * 8) / hd;
+        if (perWaveTokens > bs) {
+            return {false, "tiled 2D kernel: per-wave tokens " + std::to_string(perWaveTokens) +
+                               " exceeds block_size=" + std::to_string(bs) +
+                               "; would need lane-divergent block lookup"};
+        }
+    }
+    return {true, ""};
+}
+
+std::vector<SdpaPerfKnobs> enumerateCandidates(const SdpaSelectionProblem& problem) {
+    std::vector<SdpaPerfKnobs> out;
+
+    for (const std::int32_t numWarps : kNumWarpsChoices) {
+        for (const std::int32_t blockMPerWarp : kBlockMPerWarpChoices) {
+            // block_m_per_warp == 32 requires num_warps in {1,2,4}
+            // (CTA thread cap).
+            if (blockMPerWarp == 32 && numWarps == 8) {
+                continue;
+            }
+            for (const std::int32_t mult : kTileSizeMultiples) {
+                const std::int32_t tileSize = mult * problem.block_size;
+
+                // Curated atom/schedule flag set. The 16x16x32 atom is
+                // the default; the 32x32x16 atom requires
+                // block_m_per_warp == 32. We enumerate the atom choice
+                // and (for the default atom) the register-PV /
+                // early-V schedule variants. The OI-B default-fill
+                // table (see below) sets every non-enumerated flag.
+                std::vector<SdpaPerfKnobs> flagVariants;
+
+                // Default 16x16x32 atom, plain schedule.
+                {
+                    SdpaPerfKnobs k;
+                    k.num_warps = numWarps;
+                    k.block_m_per_warp = blockMPerWarp;
+                    k.tile_size = tileSize;
+                    flagVariants.push_back(k);
+                }
+                // Default atom + early-V schedule (a pipeline-affecting
+                // schedule flag, valid on the 16x16x32 path).
+                {
+                    SdpaPerfKnobs k;
+                    k.num_warps = numWarps;
+                    k.block_m_per_warp = blockMPerWarp;
+                    k.tile_size = tileSize;
+                    k.use_early_v_schedule = true;
+                    flagVariants.push_back(k);
+                }
+                // 32x32x16 atom (only when block_m_per_warp == 32).
+                if (blockMPerWarp == 32) {
+                    SdpaPerfKnobs k;
+                    k.num_warps = numWarps;
+                    k.block_m_per_warp = blockMPerWarp;
+                    k.tile_size = tileSize;
+                    k.use_mfma_32x32 = true;
+                    k.use_transposed_qk_32x32 = true;
+                    flagVariants.push_back(k);
+                }
+
+                for (SdpaPerfKnobs k : flagVariants) {
+                    // OI-B default-fill: carry the problem-driven
+                    // variant lanes so every emitted combo is complete.
+                    // The remaining boolean flags keep their POD
+                    // defaults (all false), which is supports()-valid.
+                    k.use_sinks = problem.use_sinks;
+                    k.sliding_window = problem.sliding_window;
+                    k.waves_per_eu = 0;  // unset -> LLVM heuristic
+
+                    if (supportsTiled2d(problem, k).supported) {
+                        out.push_back(k);
+                    }
+                }
+            }
+        }
+    }
+    return out;
+}
+
+std::string pipelineForKnobs(const SdpaSelectionProblem& problem, const SdpaPerfKnobs& knobs) {
+    // Documented schedule-flags -> pipeline map over the valid pipeline
+    // strings recognised by the heuristic feature encoder
+    // (fmha_ml_heuristic.hpp): "qr", "qr_async", "qr_async_trload",
+    // "qr_async_trload_v3", "qr_pagedkv".
+    //
+    //   * paged KV present                  -> "qr_pagedkv"
+    //   * 32x32 transposed atom path        -> "qr_async_trload_v3"
+    //   * early-V async schedule            -> "qr_async_trload"
+    //   * default async (register-PV or not)-> "qr_async"
+    //   * fully serial (no async flags)     -> "qr"
+    //
+    // The tiled 2D kernel always issues async K/V DMA, so the serial
+    // "qr" is reserved for a future non-async lane and is not produced
+    // by the current enumerator.
+    if (problem.use_paged_kv) {
+        return "qr_pagedkv";
+    }
+    if (knobs.use_mfma_32x32 || knobs.use_transposed_qk_32x32) {
+        return "qr_async_trload_v3";
+    }
+    if (knobs.use_early_v_schedule) {
+        return "qr_async_trload";
+    }
+    return "qr_async";
+}
+
+FmhaProblem problemToFmhaProblem(const SdpaSelectionProblem& problem) {
+    return FmhaProblemBuilder()
+        .api_family(FmhaApiFamily::Fwd)
+        .kernel_family(FmhaKernelFamily::Fwd)
+        .gfx_arch("gfx950")
+        .data_type(problem.dtype)
+        .dims(/*hdim_q=*/problem.head_size,
+              /*hdim_v=*/problem.head_size,
+              /*batch=*/problem.batch,
+              /*seqlen_q=*/problem.seqlen_q,
+              /*seqlen_k=*/problem.seqlen_k)
+        .nheads(/*q=*/problem.num_query_heads, /*k=*/problem.num_kv_heads)
+        .mask_type(problem.mask_type)
+        .bias_type(problem.bias_type)
+        .paged_kv(problem.use_paged_kv)
+        .sink(problem.use_sinks)
+        .skip_min_seqlen_q(problem.skip_min_seqlen_q)
+        .build();
+}
+
+FmhaKernelKey knobsToKernelKey(const SdpaSelectionProblem& problem, const SdpaPerfKnobs& knobs) {
+    FmhaKernelKey key;
+
+    // --- Signature: matched to the problem (scored flags) ------------
+    key.signature.family = FmhaKernelFamily::Fwd;
+    key.signature.data_type = problem.dtype;
+    key.signature.mask_type = problem.mask_type;
+    key.signature.bias_type = problem.bias_type;
+    key.signature.has_lse = false;  // paged kernel has no LSE output
+    key.signature.has_dropout = false;
+    key.signature.has_logits_soft_cap = false;  // not expressible from the graph
+    key.signature.has_sink = problem.use_sinks;
+    key.signature.skip_min_seqlen_q = problem.skip_min_seqlen_q;
+    key.signature.use_paged_kv = problem.use_paged_kv;
+    key.signature.hdim_q = static_cast<std::uint16_t>(problem.head_size);
+    key.signature.hdim_v = static_cast<std::uint16_t>(problem.head_size);
+
+    // --- Algorithm.tile_shape: the scored continuous axes ------------
+    // m0 = launch BLOCK_M = num_warps * block_m_per_warp (NOT the GQA
+    // base-row 16*num_warps used by supportsTiled2d).
+    key.algorithm.tile_shape.m0 = static_cast<std::uint16_t>(knobs.block_m());
+    key.algorithm.tile_shape.n0 = static_cast<std::uint16_t>(knobs.tile_size);
+    if (knobs.use_mfma_32x32) {
+        key.algorithm.tile_shape.k0 = kK0Mfma32;
+        key.algorithm.tile_shape.k1 = kK1Mfma32;
+    } else {
+        key.algorithm.tile_shape.k0 = kK0Default;
+        key.algorithm.tile_shape.k1 = kK1Default;
+    }
+    // n1 / k0max: no CK DSL analog -> default-filled.
+    key.algorithm.tile_shape.n1 = 0;
+    key.algorithm.tile_shape.k0max = 0;
+
+    // --- Pipeline string from the schedule flags ---------------------
+    key.algorithm.pipeline = pipelineForKnobs(problem, knobs);
+
+    // --- pad_*: no CK DSL analog -> default-filled (true) ------------
+    key.algorithm.pad_s = true;
+    key.algorithm.pad_sk = true;
+    key.algorithm.pad_d = true;
+    key.algorithm.pad_dv = true;
+
+    // --- Non-scored fields: sensible supports()-valid defaults -------
+    // wave_shape / warp_tile_shape / alignments / block_per_cu /
+    // selection_rank are NOT read by predict_tflops; they keep the
+    // struct's defaults except block_per_cu, which we map from
+    // num_warps so the identifier stays distinct per combo.
+    key.algorithm.block_per_cu = static_cast<std::uint8_t>(knobs.num_warps);
+
+    key.gfx_arch = "gfx950";
+    return key;
+}
+
+SdpaPerfKnobs selectArgmax(
+    const SdpaSelectionProblem& problem, const std::vector<SdpaPerfKnobs>& candidates,
+    const std::function<double(const ck_tile::dispatcher::FmhaKernelKey&)>& score) {
+    // Caller guarantees non-empty.
+    std::size_t bestIdx = 0;
+    double bestScore = -std::numeric_limits<double>::infinity();
+
+    for (std::size_t i = 0; i < candidates.size(); ++i) {
+        const FmhaKernelKey key = knobsToKernelKey(problem, candidates[i]);
+        const double s = score(key);
+        // Strict > preserves enumeration order on ties (the first combo
+        // with the maximal score wins) -> stable, deterministic.
+        if (i == 0 || s > bestScore) {
+            bestScore = s;
+            bestIdx = i;
+        }
+    }
+    return candidates[bestIdx];
+}
+
+namespace {
+
+// Analytic target geometry derived from P's production policy
+// (_select_2d_num_warps / _select_2d_tile_size / _select_2d_block_m_per_warp
+// in attention_unified.py). For the Phase-1 scope (no fp8, no combo/
+// transposed path) the policy reduces to:
+//
+//   * tile_size  = 2 * block_size            (universal default)
+//                  block_size                (when sliding_window > 0)
+//   * num_warps  by max_seqlen_q (~ seqlen_q here):
+//                  <= 64  -> 1
+//                  <= 128 -> 2
+//                  <= 256 -> 4
+//                  > 256  -> 2   (single-seq long prefill; POC treats
+//                                 each shape as one logical sequence)
+//   * block_m_per_warp = 16                  (mw=32 only on fp8 / combo
+//                                             paths, out of Phase-1 scope)
+//   * all schedule flags off                 (plain async pipeline)
+//
+// The architectural clamps (DMA floor, per-wave tokens) are applied by
+// re-validating against supportsTiled2d.
+struct AnalyticTarget {
+    std::int32_t num_warps;
+    std::int32_t block_m_per_warp;
+    std::int32_t tile_size;
+};
+
+AnalyticTarget analyticTarget(const SdpaSelectionProblem& problem) {
+    const std::int32_t bs = problem.block_size;
+    std::int32_t tileSize = 2 * bs;
+    if (problem.sliding_window > 0) {
+        tileSize = bs;
+    }
+
+    std::int32_t numWarps = 4;
+    const std::int32_t sq = problem.seqlen_q;
+    if (sq <= 64) {
+        numWarps = 1;
+    } else if (sq <= 128) {
+        numWarps = 2;
+    } else if (sq <= 256) {
+        numWarps = 4;
+    } else {
+        numWarps = 2;
+    }
+
+    // Step num_warps down until the DMA floor is satisfied for this
+    // tile_size/head_size, mirroring the kernel's own clamp loop.
+    while (numWarps > 1 && tileSize * problem.head_size < numWarps * 64 * 8) {
+        numWarps /= 2;
+    }
+
+    return {numWarps, /*block_m_per_warp=*/16, tileSize};
+}
+
+// Distance score: lower is closer to the analytic target. Returned as a
+// negated value so the caller can take an argmax consistently with
+// selectArgmax's "higher is better" convention.
+double analyticCloseness(const SdpaPerfKnobs& cand, const AnalyticTarget& target) {
+    double dist = 0.0;
+    // num_warps and tile_size are the dominant production axes; weight
+    // them heavily. block_m_per_warp is a smaller correction.
+    dist += 4.0 * static_cast<double>(std::abs(cand.num_warps - target.num_warps));
+    dist += 1.0 * static_cast<double>(std::abs(cand.tile_size - target.tile_size)) /
+            static_cast<double>(target.tile_size > 0 ? target.tile_size : 1);
+    dist += 2.0 * static_cast<double>(std::abs(cand.block_m_per_warp - target.block_m_per_warp));
+    // The production policy uses the plain async pipeline (no atom /
+    // schedule variants) for this scope; penalise variant flags so the
+    // plain combo wins on a tie of the continuous axes.
+    if (cand.use_mfma_32x32 || cand.use_transposed_qk_32x32) {
+        dist += 8.0;
+    }
+    if (cand.use_early_v_schedule) {
+        dist += 0.5;
+    }
+    return -dist;
+}
+
+}  // namespace
+
+SdpaPerfKnobs selectAnalyticFallback(const SdpaSelectionProblem& problem,
+                                     const std::vector<SdpaPerfKnobs>& candidates) {
+    // Caller guarantees non-empty.
+    const AnalyticTarget target = analyticTarget(problem);
+
+    std::size_t bestIdx = 0;
+    double bestScore = -std::numeric_limits<double>::infinity();
+
+    for (std::size_t i = 0; i < candidates.size(); ++i) {
+        const double s = analyticCloseness(candidates[i], target);
+        // Strict > -> first (enumeration-order) candidate wins ties.
+        if (i == 0 || s > bestScore) {
+            bestScore = s;
+            bestIdx = i;
+        }
+    }
+    return candidates[bestIdx];
+}
+
+}  // namespace ck_dsl_provider

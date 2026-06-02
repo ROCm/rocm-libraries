@@ -150,6 +150,16 @@ target_include_directories(ck_dsl_provider_impl
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
 )
 
+# Resolve and expose the header-only CK-Tile dispatcher include dirs so
+# the candidate-selector TU can include fmha_kernel_key.hpp /
+# fmha_problem.hpp. These headers are HIP-free, so no HIP compile mode is
+# required. PUBLIC so the static library and unit tests inherit them.
+ck_dsl_provider_resolve_dispatcher_include()
+target_include_directories(ck_dsl_provider_impl
+    PUBLIC $<BUILD_INTERFACE:${CK_DISPATCHER_INCLUDE_DIR}>
+           $<BUILD_INTERFACE:${CK_TILE_INCLUDE_DIR}>
+)
+
 # Generate version.h on top of the plugin's OBJECT library so every
 # translation unit sees CK_DSL_PROVIDER_VERSION_STRING.
 ck_dsl_provider_generate_version_header(ck_dsl_provider_impl)
