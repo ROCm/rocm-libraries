@@ -60,9 +60,10 @@ template <typename Arch,
           typename BDType,
           typename CDType,
           index_t K,
-          bool MixPrec = false,
-          index_t M    = 16,
-          index_t N    = 16>
+          bool MixPrec    = false,
+          index_t M       = 16,
+          index_t N       = 16,
+          typename DDType = CDType>
 struct WmmaTraitsBase;
 
 // GFX11 specialization
@@ -72,14 +73,16 @@ template <typename ADType,
           index_t K,
           bool MixPrec,
           index_t M,
-          index_t N>
-struct WmmaTraitsBase<gfx11_t, ADType, BDType, CDType, K, MixPrec, M, N>
+          index_t N,
+          typename DDType>
+struct WmmaTraitsBase<gfx11_t, ADType, BDType, CDType, K, MixPrec, M, N, DDType>
 {
     using ArchType = gfx11_t;
 
     using ADataType = ADType;
     using BDataType = BDType;
     using CDataType = CDType;
+    using DDataType = DDType;
 
     static_assert(M % 16 == 0 && N % 16 == 0, "M and N must be multiples of 16");
 
@@ -92,6 +95,7 @@ struct WmmaTraitsBase<gfx11_t, ADType, BDType, CDType, K, MixPrec, M, N>
     using AVecType = ext_vector_t<ADataType, kAMBlock * 16>;
     using BVecType = ext_vector_t<BDataType, kBNBlock * 16>;
     using CVecType = ext_vector_t<CDataType, 8 * kCMBlock * kCNBlock>;
+    using DVecType = ext_vector_t<DDataType, 8 * kCMBlock * kCNBlock>;
 
     static constexpr index_t kM = M;
     static constexpr index_t kN = N;
@@ -139,14 +143,16 @@ template <typename ADType,
           index_t K,
           bool MixPrec,
           index_t M,
-          index_t N>
-struct WmmaTraitsBase<gfx12_t, ADType, BDType, CDType, K, MixPrec, M, N>
+          index_t N,
+          typename DDType>
+struct WmmaTraitsBase<gfx12_t, ADType, BDType, CDType, K, MixPrec, M, N, DDType>
 {
     using ArchType = gfx12_t;
 
     using ADataType = ADType;
     using BDataType = BDType;
     using CDataType = CDType;
+    using DDataType = DDType;
 
     static_assert(M % 16 == 0 && N % 16 == 0, "M and N must be multiples of 16");
 
@@ -202,5 +208,6 @@ struct WmmaTraitsBase<gfx12_t, ADType, BDType, CDType, K, MixPrec, M, N>
     using AVecType                        = ext_vector_t<ADataType, kAInputSize * kAMBlock>;
     using BVecType                        = ext_vector_t<BDataType, kBInputSize * kBNBlock>;
     using CVecType                        = ext_vector_t<CDataType, kCOutputSize * kCNBlock>;
+    using DVecType                        = ext_vector_t<DDataType, kCOutputSize * kCNBlock>;
 };
 } // namespace ck_tile

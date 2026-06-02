@@ -16,7 +16,8 @@ template <typename Arch,
           index_t M,
           index_t N,
           index_t K,
-          typename MXTypeEnable = void>
+          typename MXTypeEnable = void,
+          typename DType        = CType>
 struct WmmaTraits;
 
 // Tag used to select scale16 WMMA traits specializations.
@@ -32,10 +33,12 @@ struct WarpGemmAttributeWmmaImpl
     using ADataType  = typename Traits::ADataType;
     using BDataType  = typename Traits::BDataType;
     using CDataType  = typename Traits::CDataType;
+    using DDataType  = typename Traits::DDataType;
 
     using AVecType = typename Traits::AVecType;
     using BVecType = typename Traits::BVecType;
     using CVecType = typename Traits::CVecType;
+    using DVecType = typename Traits::DVecType;
 
     // Forward all static constants and type aliases
     static constexpr index_t kM = Traits::kM;
@@ -85,11 +88,11 @@ struct WarpGemmAttributeWmmaImpl
         c_vec = Traits::template wmma_intrinsic<Params...>(a_vec, b_vec, c_vec);
     }
 
-    // c_vec = a_vec * b_vec
+    // d_vec = a_vec * b_vec   (accumulate in CVecType, emit DVecType)
     template <typename... Params>
-    CK_TILE_DEVICE CVecType operator()(const AVecType& a_vec, const BVecType& b_vec) const
+    CK_TILE_DEVICE DVecType operator()(const AVecType& a_vec, const BVecType& b_vec) const
     {
-        return bit_cast<CVecType>(
+        return bit_cast<DVecType>(
             Traits::template wmma_intrinsic<Params...>(a_vec, b_vec, CVecType{0.f}));
     }
 

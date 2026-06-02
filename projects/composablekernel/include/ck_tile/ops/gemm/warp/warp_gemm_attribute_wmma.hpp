@@ -178,10 +178,12 @@ struct WarpGemmAttributeWmma
     using ADataType = typename Impl::ADataType;
     using BDataType = typename Impl::BDataType;
     using CDataType = typename Impl::CDataType;
+    using DDataType = typename Impl::DDataType;
 
     using AVecType = typename Impl::AVecType;
     using BVecType = typename Impl::BVecType;
     using CVecType = typename Impl::CVecType;
+    using DVecType = typename Impl::DVecType;
 
     static constexpr index_t kM      = Impl::kM;
     static constexpr index_t kN      = Impl::kN;
@@ -219,9 +221,9 @@ struct WarpGemmAttributeWmma
         }
     }
 
-    // c_vec = a_vec * b_vec
+    // d_vec = a_vec * b_vec
     template <typename... Params>
-    CK_TILE_DEVICE CVecType operator()(const AVecType& a_vec, const BVecType& b_vec) const
+    CK_TILE_DEVICE DVecType operator()(const AVecType& a_vec, const BVecType& b_vec) const
     {
         if constexpr(kTransC)
         {

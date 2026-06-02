@@ -6,6 +6,21 @@
 #include "ck_tile/core.hpp"
 namespace ck_tile {
 
+namespace detail {
+// WMMA warp attributes expose a distinct D (output) type; MFMA/SMFMAC attributes do not.
+// Fall back to CDataType when DDataType is absent so non-WMMA warp gemms are unaffected.
+template <typename T, typename = void>
+struct warp_gemm_d_data_type
+{
+    using type = typename T::CDataType;
+};
+template <typename T>
+struct warp_gemm_d_data_type<T, std::void_t<typename T::DDataType>>
+{
+    using type = typename T::DDataType;
+};
+} // namespace detail
+
 template <typename WarpGemmAttribute_>
 struct WarpGemmImpl
 {
@@ -26,6 +41,7 @@ struct WarpGemmImpl
     using ADataType = typename WarpGemmAttribute::ADataType;
     using BDataType = typename WarpGemmAttribute::BDataType;
     using CDataType = typename WarpGemmAttribute::CDataType;
+    using DDataType = typename detail::warp_gemm_d_data_type<WarpGemmAttribute>::type;
 
     using AWarpDstrEncoding = typename WarpGemmAttribute::AWarpDstrEncoding;
     using BWarpDstrEncoding = typename WarpGemmAttribute::BWarpDstrEncoding;
@@ -38,6 +54,7 @@ struct WarpGemmImpl
     using AWarpTensor = static_distributed_tensor<ADataType, AWarpDstr>;
     using BWarpTensor = static_distributed_tensor<BDataType, BWarpDstr>;
     using CWarpTensor = static_distributed_tensor<CDataType, CWarpDstr>;
+    using DWarpTensor = static_distributed_tensor<DDataType, CWarpDstr>;
 
     CK_TILE_HOST_DEVICE static constexpr auto get_num_of_access()
     {
@@ -124,26 +141,26 @@ struct WarpGemmImpl
     template <typename... Params, typename ATensor, typename BTensor>
     CK_TILE_DEVICE auto operator()(const ATensor& a, const BTensor& b) const
     {
-        using CTensor = CWarpTensor;
+        using DTensor = DWarpTensor;
         static_assert(detail::is_similiar_distributed_tensor_v<ATensor, AWarpTensor> &&
                       detail::is_similiar_distributed_tensor_v<BTensor, BWarpTensor>);
-        CTensor c;
+        DTensor d;
 
         using AVec = ext_vector_t<ADataType, ATensor::get_thread_buffer_size()>;
         using BVec = ext_vector_t<BDataType, BTensor::get_thread_buffer_size()>;
-        using CVec = ext_vector_t<CDataType, CTensor::get_thread_buffer_size()>;
+        using DVec = ext_vector_t<DDataType, DTensor::get_thread_buffer_size()>;
 
         constexpr auto I0 = number<0>{};
 
         const auto a_vec = a.get_thread_buffer().template get_as<AVec>()[I0];
         const auto b_vec = b.get_thread_buffer().template get_as<BVec>()[I0];
 
-        // c_vec = a_vec * b_vec
-        auto c_vec = WarpGemmAttribute{}.template operator()<Params...>(a_vec, b_vec);
+        // d_vec = a_vec * b_vec
+        auto d_vec = WarpGemmAttribute{}.template operator()<Params...>(a_vec, b_vec);
 
-        c.get_thread_buffer().template set_as<CVec>(I0, c_vec);
+        d.get_thread_buffer().template set_as<DVec>(I0, d_vec);
 
-        return c;
+        return d;
     }
 
     template <typename... Params,

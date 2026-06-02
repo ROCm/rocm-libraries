@@ -34,7 +34,8 @@ template <typename AType,
           WGAttrNumAccessEnum AttrNumAccessA = ESingle,
           WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA,
           bool IsScale16                     = false,
-          typename Enable                    = void>
+          typename Enable                    = void,
+          typename D                         = AccType>
 struct Dispatcher;
 
 // clang-format off
@@ -309,7 +310,8 @@ template <typename AType,
           bool UseStructuredSparsity         = false,
           WGAttrNumAccessEnum AttrNumAccessA = WGAttrNumAccessEnum::Default,
           WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA,
-          bool IsScale16                     = false>
+          bool IsScale16                     = false,
+          typename D                         = AccType>
 using WarpGemmDispatcher = typename impl::warp_gemm_dispatcher::Dispatcher< //
     AType,
     BType,
@@ -322,6 +324,8 @@ using WarpGemmDispatcher = typename impl::warp_gemm_dispatcher::Dispatcher< //
     UseStructuredSparsity,
     AttrNumAccessA,
     AttrNumAccessB,
-    IsScale16>::Type;
+    IsScale16,
+    void,
+    D>::Type;
 
 } // namespace ck_tile
