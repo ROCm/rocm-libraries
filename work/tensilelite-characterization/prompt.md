@@ -53,8 +53,14 @@ SCOPE:
     SoftmaxGenerator.py, ExtOpCreateLibrary.py) and modules
     under Tensile/. Pick ONE module for the first suite;
     further modules are follow-ups.
-  - Only test files are added under the component; non-test
-    tensilelite source is not modified.
+  - ADD-ONLY (hard rule): we may ONLY add new files. No
+    existing file may be modified or deleted — not source, not
+    tests, not config (pytest.ini/tox.ini/pyproject.toml),
+    not docs. Anything that would otherwise require editing an
+    existing file (e.g. registering a marker, adjusting
+    testpaths, a pragma to exclude an unreachable line) must
+    instead be solved with a NEW file or documented as a
+    limitation in resistance.md / recommendations.md.
   - Run inside tensilelite's own Python env
     (requirements-dev.txt / uv.lock / tox), not rocMETRICS's.
 
@@ -69,7 +75,7 @@ CONSTRAINTS:
   - Push / PR: do NOT push or create PRs. Commit locally
     only.
 
-BOUND: stop after 60 turns or 180 minutes.
+BOUND: stop after 180 turns or 180 minutes.
 
 AUTONOMY: do not ask for confirmation. If the chosen target
   depends on global mutable state, document in
