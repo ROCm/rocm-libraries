@@ -52,7 +52,7 @@ from ...helpers.tensor_view import (
 )
 
 
-DType = Literal["f16", "bf16"]
+DType = Literal["f16", "bf16", "f32"]
 
 
 @dataclass(frozen=True)
@@ -124,6 +124,10 @@ def is_valid_spec(spec: RMSNorm2DSpec, arch: str = "gfx950") -> Tuple[bool, str]
             vec=spec.vec,
             n_per_block=spec.n_per_block,
             max_elems_per_thread=cap,
+            # Opt this kernel into f32 I/O for residual-stream norms that
+            # the source model holds in f32 (Qwen3.5 SimplifiedLayerNorm).
+            # TileWindow load/store has an f32 fast path (no compute cast).
+            allowed_dtypes=("f16", "fp16", "bf16", "f32"),
         )
     )
     if not ok:

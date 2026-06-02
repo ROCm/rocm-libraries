@@ -889,11 +889,19 @@ class TileWindow:
         ``n == 1`` routes through :meth:`load_scalar` (one scalar load
         + f32 promote) so the vector and scalar
         :class:`ck_dsl.helpers.LoadStoreTraits` paths stay uniform.
+
+        When the underlying view's dtype is already ``f32`` the per-lane
+        cast is a no-op; we just extract the elements out of the vec
+        load. Mirrors the f32 fast path on :meth:`TensorView.load_vec_as_f32`.
         """
         if n == 1:
             scalar = self.load_scalar(b, *local_indices)
+            if self.dtype.name == "f32":
+                return [scalar]
             return [b.cast_to_f32(scalar)]
         v = self.load_vec(b, *local_indices, n=n)
+        if self.dtype.name == "f32":
+            return [b.vec_extract(v, i) for i in range(n)]
         return [b.cast_to_f32(b.vec_extract(v, i)) for i in range(n)]
 
     def store_vec_from_f32(
@@ -906,7 +914,17 @@ class TileWindow:
         truncated to this window's dtype (f16/bf16), packed into a
         ``<n x dtype>`` vector, and stored. The dual of
         :meth:`load_vec_as_f32`.
+
+        When the underlying view's dtype is already ``f32`` the per-lane
+        cast is a no-op; we pack the f32 values directly and store.
         """
+        if self.dtype.name == "f32":
+            if len(values) == 1:
+                self.store_scalar(b, *local_indices, value=values[0])
+                return
+            packed = b.vec_pack(values, self.dtype)
+            self.store_vec(b, *local_indices, value=packed, n=len(values))
+            return
         if self.dtype.name not in ("f16", "bf16"):
             raise NotImplementedError(
                 f"store_vec_from_f32 not wired for {self.dtype.name}; "
