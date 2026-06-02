@@ -639,10 +639,6 @@ Defaults:
   alphai: 0.0
   beta: 0.0
   betai: 0.0
-  stride_a: 0
-  stride_b: 0
-  stride_c: 0
-  stride_d: 0
   transA: '*'
   transB: '*'
   side: '*'
