@@ -36,6 +36,10 @@ const hipDataType string_to_hip_datatype(const std::string& value)
         value == "f8_r"                  ? HIP_R_8F_E4M3    :
         value == "bf8_r"                 ? HIP_R_8F_E5M2    :
 #endif
+#if defined(HIP_FP8_TYPE_FNUZ)
+        value == "f8_fnuz_r"             ? HIP_R_8F_E4M3_FNUZ :
+        value == "bf8_fnuz_r"            ? HIP_R_8F_E5M2_FNUZ :
+#endif
         static_cast<hipDataType>(-1);
 }
 
