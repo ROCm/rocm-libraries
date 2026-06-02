@@ -46,3 +46,19 @@ class TestPointwiseAdd:
         graph, a, b, out = build_pointwise_add_graph()
 
         build_operation_graph(graph)
+
+
+class TestPointwiseAttributes:
+    """Round-trip tests for PointwiseAttributes accessors (no GPU required)."""
+
+    def test_name_round_trip(self):
+        """set_name()/get_name() round-trip."""
+        attrs = hipdnn.PointwiseAttributes()
+        attrs.set_name("relu")
+        assert attrs.get_name() == "relu"
+
+    def test_mode_round_trip(self):
+        """set_mode()/get_mode() round-trip."""
+        attrs = hipdnn.PointwiseAttributes()
+        attrs.set_mode(hipdnn.PointwiseMode.RELU_FWD)
+        assert attrs.get_mode() == hipdnn.PointwiseMode.RELU_FWD

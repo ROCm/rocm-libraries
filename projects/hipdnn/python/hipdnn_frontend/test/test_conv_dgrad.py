@@ -95,3 +95,24 @@ class TestConvDgrad:
             [[1, 2, 0], [3, 5, 2], [0, 3, 4]], dtype=np.float32
         ).reshape(dx.get_dim())
         np.testing.assert_allclose(dx_result, expected, rtol=2e-3, atol=2e-3)
+
+
+class TestConvDgradAttributes:
+    """Attribute accessors and aliases for ConvDgrad (no GPU required)."""
+
+    def test_alias_identity(self):
+        """ConvDgradAttributes is the same class as ConvolutionDgradAttributes."""
+        assert hipdnn.ConvDgradAttributes is hipdnn.ConvolutionDgradAttributes
+
+    def test_pre_post_padding_chain(self):
+        """ConvDgrad pre/post padding setters chain and store the name."""
+        attrs = hipdnn.ConvDgradAttributes()
+        result = (
+            attrs.set_name("dgrad")
+            .set_pre_padding([1, 1])
+            .set_post_padding([1, 1])
+            .set_stride([1, 1])
+            .set_dilation([1, 1])
+        )
+        assert result is attrs
+        assert attrs.get_name() == "dgrad"

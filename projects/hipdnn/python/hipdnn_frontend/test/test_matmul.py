@@ -45,3 +45,19 @@ class TestMatmul:
         graph, a, b, c = build_matmul_graph()
 
         build_operation_graph(graph)
+
+
+class TestMatmulAttributes:
+    """Round-trip tests for MatmulAttributes accessors (no GPU required)."""
+
+    def test_name_round_trip(self):
+        """set_name()/get_name() round-trip."""
+        attrs = hipdnn.MatmulAttributes()
+        attrs.set_name("matmul")
+        assert attrs.get_name() == "matmul"
+
+    def test_compute_data_type_round_trip(self):
+        """set_compute_data_type()/get_compute_data_type() round-trip."""
+        attrs = hipdnn.MatmulAttributes()
+        attrs.set_compute_data_type(hipdnn.DataType.FLOAT)
+        assert attrs.get_compute_data_type() == hipdnn.DataType.FLOAT

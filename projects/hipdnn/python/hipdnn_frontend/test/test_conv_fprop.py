@@ -91,3 +91,23 @@ class TestConvFprop:
 
         expected = np.array([[6, 8], [12, 14]], dtype=np.float32).reshape(y.get_dim())
         np.testing.assert_allclose(y_result, expected, rtol=2e-3, atol=2e-3)
+
+
+class TestConvFpropAttributes:
+    """Attribute accessors and aliases for ConvFprop (no GPU required)."""
+
+    def test_alias_identity(self):
+        """ConvFpropAttributes is the same class as ConvolutionFpropAttributes."""
+        assert hipdnn.ConvFpropAttributes is hipdnn.ConvolutionFpropAttributes
+
+    def test_setters_chain(self):
+        """ConvFprop setters return self for chaining and store the name."""
+        attrs = hipdnn.ConvFpropAttributes()
+        result = (
+            attrs.set_name("conv")
+            .set_padding([1, 1])
+            .set_stride([2, 2])
+            .set_dilation([1, 1])
+        )
+        assert result is attrs
+        assert attrs.get_name() == "conv"

@@ -97,3 +97,24 @@ class TestConvWgrad:
             dw.get_dim()
         )
         np.testing.assert_allclose(dw_result, expected, rtol=2e-3, atol=2e-3)
+
+
+class TestConvWgradAttributes:
+    """Attribute accessors and aliases for ConvWgrad (no GPU required)."""
+
+    def test_alias_identity(self):
+        """ConvWgradAttributes is the same class as ConvolutionWgradAttributes."""
+        assert hipdnn.ConvWgradAttributes is hipdnn.ConvolutionWgradAttributes
+
+    def test_pre_post_padding_chain(self):
+        """ConvWgrad pre/post padding setters chain and store the name."""
+        attrs = hipdnn.ConvWgradAttributes()
+        result = (
+            attrs.set_name("wgrad")
+            .set_pre_padding([1, 1])
+            .set_post_padding([1, 1])
+            .set_stride([1, 1])
+            .set_dilation([1, 1])
+        )
+        assert result is attrs
+        assert attrs.get_name() == "wgrad"
