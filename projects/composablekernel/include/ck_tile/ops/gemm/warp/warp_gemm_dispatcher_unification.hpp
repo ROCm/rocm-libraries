@@ -22,10 +22,7 @@ namespace ck_tile {
 namespace impl {
 namespace warp_gemm_dispatcher {
 
-// C++20 using enum
 static constexpr auto ESingle = WGAttrNumAccessEnum::Single;
-static constexpr auto EDouble = WGAttrNumAccessEnum::Double;
-static constexpr auto EQuad   = WGAttrNumAccessEnum::Quad;
 
 using namespace ck_tile::core::arch;
 using namespace mma;
@@ -146,10 +143,13 @@ template <typename AType,
           bool SwizzleA                      = false,
           bool UseStructuredSparsity         = false,
           WGAttrNumAccessEnum AttrNumAccessA = ESingle,
-          WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA>
+          WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA,
+          bool IsScale16                     = false>
 struct UnificationDispatcher
 {
     // static_assert(0);
+    static_assert(!IsScale16); // TODO: We can't deal with scale16 yet.
+
     // TODO: The dispatcher currently determines whether microscaling intrinsics are requested based
     // on the WaveTile sizes and types. This is potentially dangerous and we should add a dedicated
     // parameter instead.
