@@ -1,0 +1,65 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyWaitCntInsertionPass --print-output
+#
+# ^header has TWO predecessors:
+#   * ^entry  (preheader exit FIFO = [T0])
+#   * ^header (self back-edge exit FIFO = [X1, X2])
+# Buggy merge   = [T0, X1, X2]   -> wait sized for a 3-deep FIFO
+# Correct merge = [T0]           -> wait sized for a 1-deep FIFO
+#
+# Before (buggy)                    Expected after
+# --------------                    --------------
+#   ^entry                            ^entry
+#     T0  (token 0, the dep)            T0  (token 0, the dep)
+#     s_branch                          s_branch
+#       v                                 v
+#   ^header <------+ <--------+       ^header <------+ <--------+
+#                  |          |                      |          |
+#     s_wait_tensorcnt N (>0) [1]       s_wait_tensorcnt 0 [1'] |
+#     ds_load_b64 (token 0)   |         ds_load_b64 (token 0)   |
+#     ds_load_b64 (token 0)   |         ds_load_b64 (token 0)   |
+#     s_wait_tensorcnt 0   [2]|         (no follow-up wait)   [2']
+#     X1, X2 (token 1)        |         X1, X2 (token 1)        |
+#     s_cbranch    |          |         s_cbranch    |          |
+#                  +----------+                      +----------+
+#                  v                                 v
+#               ^exit                             ^exit
+#
+# [1]/[1'] header anchor wait sized from the merged FIFO.
+# [2]/[2'] follow-up wait disappears once [1'] already drained the dep.
+#
+# CHECK-LABEL: @waitcnt_insertion_tensor_per_path_self_loop_anchor
+#
+# Preheader issues the dep tensor load that the loop header's anchor
+# must drain.
+# CHECK: ^entry
+# CHECK: tensor_load_to_lds{{.*}}tokens = [0]
+# CHECK: s_branch
+#
+# Loop header: the anchor's wait is sized for the preheader path (drain
+# the dep). The second back-to-back anchor on the same token has no new
+# tensor loads queued since the first wait, so no extra wait is emitted.
+# The body's iter-prefetch tensor_load_to_lds follows after the anchors.
+# CHECK: ^header
+# CHECK: s_wait_tensorcnt{{.*}}tlcnt = 0
+# CHECK-NEXT: ds_load_b64
+# CHECK-NEXT: ds_load_b64
+# CHECK-NOT: s_wait_tensorcnt
+# CHECK: tensor_load_to_lds{{.*}}tokens = [1]
+# CHECK-NEXT: tensor_load_to_lds{{.*}}tokens = [1]
+# CHECK: s_cbranch_scc1
+
+st.func @waitcnt_insertion_tensor_per_path_self_loop_anchor() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { mod.memtoken = { tokens = [0] } }
+  "st.s_branch"("header")
+  Successors: ^header
+^header:
+  v[0:1] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  v[2:3] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [0] } }
+  "st.tensor_load_to_lds"(s[20:23], s[30:37]) { mod.memtoken = { tokens = [1] } }
+  "st.tensor_load_to_lds"(s[40:43], s[50:57]) { mod.memtoken = { tokens = [1] } }
+  "st.s_cbranch_scc1"("header", SCC0)
+  Successors: ^header, ^exit
+^exit:
+  v[4:5] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [2] } }
+}
