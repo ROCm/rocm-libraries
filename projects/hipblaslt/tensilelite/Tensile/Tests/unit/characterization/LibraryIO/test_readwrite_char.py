@@ -79,6 +79,13 @@ def test_write_yaml_kwargs_override(tmp_path, snapshot):
 # writeJson / readJson round-trip + written text
 # ===========================================================================
 
+def test_write_yaml_flow_style_override(tmp_path, snapshot):
+    # Supplying default_flow_style takes the "already set" branch (no default).
+    p = tmp_path / "out.yaml"
+    L.writeYAML(str(p), _DATA, default_flow_style=False)
+    assert p.read_text() == snapshot
+
+
 def test_write_json_text(tmp_path, snapshot):
     p = tmp_path / "out.json"
     L.writeJson(str(p), _DATA)

@@ -138,6 +138,23 @@
   }
   '''
 # ---
+# name: test_write_yaml_flow_style_override
+  '''
+  ---
+  Count: 3
+  Flag: true
+  Name: example
+  Nested:
+    x: 1
+    y: 0
+  Ratio: 1.5
+  Tags:
+  - a
+  - b
+  ...
+  
+  '''
+# ---
 # name: test_write_yaml_kwargs_override
   '''
   Count: 3
