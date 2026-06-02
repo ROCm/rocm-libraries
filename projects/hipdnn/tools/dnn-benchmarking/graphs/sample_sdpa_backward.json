@@ -1,6 +1,6 @@
 {
     "name": "sample_sdpa_backward_bf16_b1_h1_s16_d128",
-    "compute_data_type": "bfloat16",
+    "compute_data_type": "float",
     "io_data_type": "bfloat16",
     "intermediate_data_type": "bfloat16",
     "tensors": [
