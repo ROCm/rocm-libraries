@@ -16,11 +16,9 @@ from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Set
 _CONFIG_ONLY_TOP_LEVEL_KEYS: Set[str] = {
     "version",
     "engines",
-    # Keep comparison allowed so it gets the dedicated removal message below.
-    "comparison",
 }
 
-_ALLOWED_ENGINE_KEYS: Set[str] = {"id", "name", "plugin_path"}
+_ALLOWED_ENGINE_KEYS: Set[str] = {"id", "label", "plugin_path"}
 
 _CONFIG_FIELD_RENAMES = {"graph": "graphs"}
 _CONFIG_EXCLUDED_DESTS = {
@@ -175,7 +173,6 @@ def _normalise_config(raw: Dict[str, Any], path: Path) -> Dict[str, Any]:
         raise ValueError(f"Unsupported config version in {path}: {version!r}")
 
     _reject_unknown_keys(raw.keys(), _allowed_top_level_keys(), "config")
-    _reject_comparison(raw)
 
     base_dir = path.parent
     out: Dict[str, Any] = {}
@@ -366,10 +363,10 @@ def _normalise_engines(
         raise ValueError("Config field 'engines' must be a non-empty array of tables")
 
     ids: List[int] = []
-    names: List[Optional[str]] = []
+    labels: List[Optional[str]] = []
     plugin_paths: List[Path] = []
     any_plugin_path = False
-    seen_names: Set[str] = set()
+    seen_labels: Set[str] = set()
 
     for index, engine in enumerate(engines):
         if not isinstance(engine, dict):
@@ -382,18 +379,18 @@ def _normalise_engines(
             raise ValueError(f"Config engine {index} must include integer id")
         ids.append(engine_id)
 
-        name = engine.get("name")
-        if name is not None:
-            if not isinstance(name, str) or not name:
+        label = engine.get("label")
+        if label is not None:
+            if not isinstance(label, str) or not label:
                 raise ValueError(
-                    f"Config engine {index} name must be a non-empty string"
+                    f"Config engine {index} label must be a non-empty string"
                 )
-            if name in seen_names:
-                raise ValueError(f"Duplicate config engine name: {name}")
-            seen_names.add(name)
-            names.append(name)
+            if label in seen_labels:
+                raise ValueError(f"Duplicate config engine label: {label}")
+            seen_labels.add(label)
+            labels.append(label)
         else:
-            names.append(None)
+            labels.append(None)
 
         plugin_path = engine.get("plugin_path")
         if plugin_path is not None:
@@ -411,14 +408,5 @@ def _normalise_engines(
             )
         out["plugin_path"] = plugin_paths
     out["engine"] = ids
-    if any(name is not None for name in names):
-        out["_config_engine_names"] = names
-
-
-def _reject_comparison(raw: Dict[str, Any]) -> None:
-    """Reject the removed derived-delta comparison config table."""
-    if "comparison" in raw:
-        raise ValueError(
-            "Config field 'comparison' is no longer supported; list multiple "
-            "engines in [[engines]] to run them side by side"
-        )
+    if any(label is not None for label in labels):
+        out["_config_engine_names"] = labels

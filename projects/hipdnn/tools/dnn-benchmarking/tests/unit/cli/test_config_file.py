@@ -41,15 +41,15 @@ validate = "none"
 metrics_tier = "off"
 
 [[engines]]
-name = "baseline"
+label = "baseline"
 id = 1
 plugin_path = "/plugins/b"
 
 [[engines]]
-name = "candidate"
+label = "candidate"
 id = 1
 plugin_path = "/plugins/a"
-"""
+""",
     )
     args = create_parser().parse_args(["--config", str(config)])
 
@@ -95,12 +95,12 @@ version = 1
 graphs = ["g.json"]
 
 [[engines]]
-name = "baseline"
+label = "baseline"
 id = 2
 plugin_path = "/plugins/b"
 
 [[engines]]
-name = "candidate"
+label = "candidate"
 id = 1
 plugin_path = "/plugins/a"
 
@@ -115,7 +115,7 @@ plugin_path = "/plugins/a"
     assert not hasattr(args, "_config_engine_names")
 
 
-def test_comparison_table_is_rejected(tmp_path: Path) -> None:
+def test_comparison_table_is_rejected_as_unknown_field(tmp_path: Path) -> None:
     config = _write_config(
         tmp_path / "bench.toml",
         """
@@ -128,8 +128,30 @@ baseline = "missing"
     )
     args = create_parser().parse_args(["--config", str(config)])
 
-    with pytest.raises(ValueError, match="comparison.*no longer supported"):
+    with pytest.raises(ValueError, match="Unknown config field: comparison"):
         apply_config_file(args, provided=set())
+
+
+def test_engine_config_label_is_optional(tmp_path: Path) -> None:
+    config = _write_config(
+        tmp_path / "bench.toml",
+        """
+version = 1
+graphs = ["g.json"]
+
+[[engines]]
+id = 2
+
+[[engines]]
+id = 1
+""",
+    )
+    args = create_parser().parse_args(["--config", str(config)])
+
+    apply_config_file(args, provided=set())
+
+    assert args.engine == [2, 1]
+    assert not hasattr(args, "_config_engine_names")
 
 
 @pytest.mark.parametrize(
@@ -156,23 +178,30 @@ graphs = ["g.json"]
         apply_config_file(args, provided=set())
 
 
-def test_unknown_engine_config_fields_are_rejected(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("body", "field"),
+    [
+        ('plugin_pat = "/plugins"', "plugin_pat"),
+        ('name = "baseline"', "name"),
+    ],
+)
+def test_unknown_engine_config_fields_are_rejected(
+    tmp_path: Path, body: str, field: str
+) -> None:
     config = _write_config(
         tmp_path / "bench.toml",
-        """
+        f"""
 version = 1
 graphs = ["g.json"]
 
 [[engines]]
 id = 1
-plugin_pat = "/plugins"
+{body}
 """,
     )
     args = create_parser().parse_args(["--config", str(config)])
 
-    with pytest.raises(
-        ValueError, match="Unknown config engine 0 field: plugin_pat"
-    ):
+    with pytest.raises(ValueError, match=f"Unknown config engine 0 field: {field}"):
         apply_config_file(args, provided=set())
 
 
@@ -199,9 +228,7 @@ graphs = ["g.json"]
     )
     args = create_parser().parse_args(["--config", str(config)])
 
-    with pytest.raises(
-        ValueError, match=f"Config field '{field}' must be one of"
-    ):
+    with pytest.raises(ValueError, match=f"Config field '{field}' must be one of"):
         apply_config_file(args, provided=set())
 
 
@@ -257,9 +284,7 @@ def test_sample_configs_parse_and_reference_existing_graphs() -> None:
             assert Path(graph).exists()
 
 
-def test_invalid_config_backend_errors_before_gpu_check(
-    tmp_path: Path, capsys
-) -> None:
+def test_invalid_config_backend_errors_before_gpu_check(tmp_path: Path, capsys) -> None:
     config = _write_config(
         tmp_path / "bench.toml",
         """
@@ -297,11 +322,11 @@ warmup = 1
 iters = 2
 
 [[engines]]
-name = "baseline"
+label = "baseline"
 id = 2
 
 [[engines]]
-name = "candidate"
+label = "candidate"
 id = 1
 
 """,

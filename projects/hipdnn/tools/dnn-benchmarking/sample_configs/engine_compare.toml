@@ -17,14 +17,15 @@ validate = "none"
 metrics_tier = "basic"
 
 [[engines]]
-name = "baseline"
+# Optional display label; engine selection is by id.
+label = "baseline"
 id = 1
 # Optional: uncomment when comparing plugin directories.
 # plugin_path = "/opt/rocm/lib/hipdnn/plugins/baseline"
 
 [[engines]]
-name = "candidate"
+# Optional display label; engine selection is by id.
+label = "candidate"
 id = 2
 # Optional: uncomment when comparing plugin directories.
 # plugin_path = "/path/to/candidate/plugins"
-
