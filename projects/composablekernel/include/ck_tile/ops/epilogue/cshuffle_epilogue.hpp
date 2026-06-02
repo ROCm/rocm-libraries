@@ -344,6 +344,7 @@ struct CShuffleEpilogue
             static_assert((BaseStrideElems * DataTypeSize) % BytesPerBank == 0,
                           "LDS row stride must be 4B-aligned for bank-word padding logic");
             // calculate how many elements to pad to avoid bank conflict
+#if defined(__gfx950__) || defined(__gfx125__)
 #if defined(__gfx950__)
             constexpr index_t ElemsPer4B = BytesPerBank / ck_tile::gcd(BytesPerBank, DataTypeSize);
             constexpr auto ToWords       = [](index_t elems) constexpr {
@@ -352,10 +353,8 @@ struct CShuffleEpilogue
             constexpr index_t BaseWords  = ToWords(BaseStrideElems);
             constexpr index_t PadWords   = ((BaseWords % 2) == 0) ? 1 : 0;
             constexpr auto PaddingAmount = PadWords * ElemsPer4B;
-#elif defined(__gfx125__)
-            constexpr auto PaddingAmount = VectorLen;
 #else
-            constexpr auto PaddingAmount = 0;
+            constexpr auto PaddingAmount = VectorLen;
 #endif
 
             constexpr auto lds_block_desc_0 = make_naive_tensor_descriptor(
@@ -385,7 +384,14 @@ struct CShuffleEpilogue
                                number<NPerIterationShuffle / VectorLen>{}, number<VectorLen>{}))),
                 make_tuple(sequence<0, 1>{}, sequence<2, 3>{}),
                 make_tuple(sequence<0>{}, sequence<1>{}));
-
+#else
+            constexpr auto PaddingAmount  = 0;
+            constexpr auto lds_block_desc = make_naive_tensor_descriptor(
+                make_tuple(number<MPerIterationShuffle>{}, number<NPerIterationShuffle>{}),
+                make_tuple(number<NPerIterationShuffle + PaddingAmount>{}, number<1>{}),
+                number<VectorLen>{},
+                number<1>{});
+#endif
             return lds_block_desc;
         }
         // M is contiguous dimension
@@ -555,6 +561,33 @@ struct CShuffleEpilogue
     {
         constexpr auto lds_block_desc = MakeLdsBlockDescriptor<Problem>();
         return lds_block_desc.get_element_space_size() * sizeof(ODataType);
+    }
+
+    /// Number of block_sync_lds() calls in operator().
+    /// Used by RunBarrierStub() to match barrier count for wavelet load waves.
+    /// IMPORTANT: Must be kept in sync with operator(). See RunBarrierStub().
+    CK_TILE_HOST_DEVICE static constexpr index_t GetBarrierCount()
+    {
+        // operator() issues:
+        //   1x s_wait_tensorcnt_barrier()  (counted as 1 barrier)
+        //   num_access iterations x 2 block_sync_lds() each
+        constexpr index_t num_access = SFC::get_num_of_access();
+        return 1 + 2 * num_access;
+    }
+
+    /// Run matching barriers for wavelet load waves that don't participate
+    /// in the epilogue data path. Must issue the same number of barriers
+    /// as operator() to avoid deadlock.
+    CK_TILE_DEVICE static void RunBarrierStub()
+    {
+        constexpr index_t num_access = SFC::get_num_of_access();
+        constexpr index_t count      = GetBarrierCount();
+        // Verify the barrier count formula matches the structural pattern in operator():
+        //   1 x s_wait_tensorcnt_barrier  +  num_access x 2 block_sync_lds
+        static_assert(count == 1 + 2 * num_access,
+                      "RunBarrierStub: barrier count mismatch with operator(). "
+                      "If operator()'s barrier pattern changed, update GetBarrierCount().");
+        static_for<0, count, 1>{}([&](auto) { block_sync_lds(); });
     }
 
     template <index_t iAccess, typename LdsTile, typename ScaleM, typename ScaleN>
@@ -778,6 +811,9 @@ struct CShuffleEpilogue
             }
         }();
 
+        // NOTE: This barrier pattern must match GetBarrierCount().
+        // Total barriers = 1 (s_wait_tensorcnt_barrier) + 2 * num_access (block_sync_lds pairs).
+        // If you add/remove barriers here, update GetBarrierCount() and RunBarrierStub().
         s_wait_tensorcnt_barrier();
 
         static_for<0, num_access, 1>{}([&](auto iAccess) {

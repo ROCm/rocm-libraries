@@ -347,7 +347,7 @@ public:
                     oss << "work buffer allocation failed ("
                         << byte_size_to_str(workbuffersizes[device]) << " requested)";
                     oss << "\n" << device_memory_accountant::singleton().get_details(device);
-                    throw work_buffer_alloc_failure(oss.str(), workbuffersizes[device]);
+                    throw work_buffer_alloc_failure(oss.str(), workbuffersizes[device], hip_status);
                 }
 
                 auto rocret = rocfft.execution_info_set_work_buffer(
