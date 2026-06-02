@@ -190,6 +190,42 @@ SignatureHash GraphSignature::computeForSpec(std::string_view opKind, const Sdpa
     // Appended after the name so existing stats-off keys keep their
     // prefix (the version-string fold ultimately bumps stale entries).
     h = fnv1aBool(h, spec.generate_stats);
+    h = fnv1aFold(h, 0x00);
+
+    // Unified paged/varlen problem lanes. Each describes a distinct
+    // marshalling path / KV layout the kernel sees (paged vs dense,
+    // varlen vs fixed-length, windowed vs full causal, sinks vs none),
+    // so each emits a distinct kernel binary and grid and must cache
+    // distinctly. Same separator style as the conv overload.
+    h = fnv1aBool(h, spec.is_paged);
+    h = fnv1aI32(h, spec.block_size);
+    h = fnv1aFold(h, 0x00);
+    h = fnv1aBool(h, spec.is_varlen);
+    h = fnv1aI32(h, spec.sliding_window);
+    h = fnv1aFold(h, 0x00);
+    h = fnv1aBool(h, spec.use_sinks);
+    h = fnv1aFold(h, 0x00);
+
+    // Chosen perf knobs. The scorer-driven selection writes these onto
+    // the spec before the key is computed; distinct scored configs must
+    // cache distinctly. The continuous axes (num_warps, block_m_per_warp,
+    // tile_size, waves_per_eu) and the curated boolean flags all change
+    // the emitted HSACO (tile shape, MFMA atom, schedule pipeline,
+    // occupancy hint, paged-KV descriptor), so fold them all -- mirroring
+    // how the conv overload folds its codegen knobs. Folding these changes
+    // the hash for every SDPA spec (defaults included); that only
+    // invalidates stale JIT cache entries, never correctness.
+    const auto& k = spec.knobs;
+    h = fnv1aI32(h, k.num_warps);
+    h = fnv1aI32(h, k.block_m_per_warp);
+    h = fnv1aI32(h, k.tile_size);
+    h = fnv1aI32(h, k.waves_per_eu);
+    h = fnv1aFold(h, 0x00);
+    h = fnv1aBool(h, k.use_mfma_32x32);
+    h = fnv1aBool(h, k.use_transposed_qk_32x32);
+    h = fnv1aBool(h, k.use_register_pv);
+    h = fnv1aBool(h, k.use_early_v_schedule);
+    h = fnv1aBool(h, k.use_fast_paged_kv_desc);
 
     // Intentionally NOT folded: the eight stride_* scalars and
     // scale_log2. They are launch-time kernel arguments -- the compiled

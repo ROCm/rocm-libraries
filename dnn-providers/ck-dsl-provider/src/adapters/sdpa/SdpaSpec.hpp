@@ -6,6 +6,8 @@
 #include <cstdint>
 #include <string>
 
+#include "SdpaPerfKnobs.hpp"
+
 namespace ck_dsl_provider {
 
 /// C++ mirror of the CK DSL FMHA-forward problem description.
@@ -63,12 +65,14 @@ struct SdpaProblem {
 ///
 /// ``name`` keeps a provider-specific prefix for kernel identification
 /// in profiles. ``dtype`` and ``mask_mode`` are codegen-relevant (folded
-/// into the cache key alongside the problem's shape fields); the M1 path
-/// is FP16-only with top-left causal or no mask.
+/// into the cache key alongside the problem's shape fields). ``dtype``
+/// holds an unenumerated type string -- the supported values are "f16"
+/// and "bf16" (the unified paged kernel accepts both); other types are
+/// declined by the capability gate.
 struct SdpaSpec {
     SdpaProblem problem;
     std::string name{"ck_dsl_fmha_fwd_mfma"};
-    std::string dtype{"f16"};       // codegen-relevant
+    std::string dtype{"f16"};       // "f16" | "bf16"; codegen-relevant
     std::string mask_mode{"none"};  // "none" | "causal"; codegen-relevant
 
     // Opt-in forward-training stats (LSE) output. When true the kernel
@@ -78,6 +82,43 @@ struct SdpaSpec {
     // stats-off emit distinct kernels, so this is folded into the cache
     // signature.
     bool generate_stats{false};
+
+    // --- Unified paged/varlen problem lanes --------------------------
+    // These describe which marshalling path the spec takes and the KV
+    // layout the kernel sees. They are codegen-relevant: a paged build,
+    // a varlen build, and a windowed build emit distinct kernels and
+    // grids, so all are folded into the cache signature.
+
+    /// Paged KV layout in effect -- either a real paged graph
+    /// (Page_table_K/V present) or the dense-degenerate one-block-per-
+    /// sequence layout the unified kernel always runs.
+    bool is_paged{false};
+
+    /// Paged KV block size (tokens per block). One of {16, 32, 64}.
+    /// 0 means "unset" -- the dense-degenerate default is chosen later
+    /// during marshalling.
+    std::int32_t block_size{0};
+
+    /// Variable-length sequence path (cu_seqlens / seqused KV). When
+    /// false the fixed-length dense layout synthesizes trivial
+    /// cu_seqlens during marshalling.
+    bool is_varlen{false};
+
+    /// Sliding-window span (the graph's ``left_bound``), in tokens.
+    /// 0 means no window (full causal context).
+    std::int32_t sliding_window{0};
+
+    /// Attention sinks in effect (the graph's Sink_token tensor).
+    bool use_sinks{false};
+
+    // --- Chosen perf config ------------------------------------------
+
+    /// Performance knobs the scorer-driven selection picks for this
+    /// problem (Phase 2b writes this). Defaults to the Phase-1 POD
+    /// defaults so an unscored spec is still complete. Codegen-relevant:
+    /// distinct scored configs must cache distinctly, so the knob fields
+    /// are folded into the cache signature.
+    SdpaPerfKnobs knobs{};
 };
 
 }  // namespace ck_dsl_provider
