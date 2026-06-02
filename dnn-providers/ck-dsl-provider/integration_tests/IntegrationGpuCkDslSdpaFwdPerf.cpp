@@ -232,6 +232,10 @@ const std::vector<SdpaPerfCase> kSdpaPerfCases = {
     {"Bf16_InFamily_GQA8_D64_S2048", data_objects::DataType::BFLOAT16, 1, 64, 8, 2048, 2048, 64},
     {"Bf16_InFamily_GQA8_D64_S2016_B32", data_objects::DataType::BFLOAT16, 1, 64, 8, 2016, 2016,
      64},
+    // Saturation sweep: push S and B up to see if TFLOPS plateaus.
+    {"Fp16_Prefill_GQA_S8192_D128", data_objects::DataType::HALF, 1, 32, 8, 8192, 8192, 128},
+    {"Fp16_Prefill_GQA_B8_S2048_D128", data_objects::DataType::HALF, 8, 32, 8, 2048, 2048, 128},
+    {"Fp16_Prefill_GQA_B4_S4096_D128", data_objects::DataType::HALF, 4, 32, 8, 4096, 4096, 128},
 };
 
 INSTANTIATE_TEST_SUITE_P(Shapes, IntegrationGpuCkDslSdpaFwdPerfGpu,
