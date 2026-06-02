@@ -15,32 +15,27 @@ using F32 = float;
 using PF4 = ck_tile::pk_fp4_t;
 using PF6 = ck_tile::pk_fp6x16_t;
 
-template <int V>
-using InitMethod = ck_tile::integral_constant<int, V>;
-
 // clang-format off
 using KernelTypes = ::testing::Types<
-    //         ADataType, BDataType, CDataType, ArchTraits,                          InitMethod
+    //         ADataType, BDataType, CDataType, ArchTraits
 #if defined(CK_USE_GFX950)
     // GFX950: MXFlatmmPipelineAGmemBGmemCRegV1
-    std::tuple<F8,        F8,        F16,       MXFlatmm_GFX950_FP8FP8_Traits,      InitMethod<0>>,
-    std::tuple<PF4,       PF4,       F16,       MXFlatmm_GFX950_FP4FP4_Traits,      InitMethod<0>>,
-    std::tuple<F8,        PF4,       F16,       MXFlatmm_GFX950_FP8FP4_Traits,      InitMethod<0>>,
-    std::tuple<PF4,       F8,        F16,       MXFlatmm_GFX950_FP4FP8_Traits,      InitMethod<0>>,
+    std::tuple<F8,        F8,        F16,       MXFlatmm_GFX950_FP8FP8_Traits>,
+    std::tuple<PF4,       PF4,       F16,       MXFlatmm_GFX950_FP4FP4_Traits>,
+    std::tuple<F8,        PF4,       F16,       MXFlatmm_GFX950_FP8FP4_Traits>,
+    std::tuple<PF4,       F8,        F16,       MXFlatmm_GFX950_FP4FP8_Traits>,
 #endif
 #if defined(CK_USE_GFX1250)
     // GFX1250: MXFlatmmPipelineAGmemBGmemCRegV1 (non-TDM)
-    std::tuple<F8,        F8,        F16,       MXFlatmm_GFX1250_FP8FP8_Traits,     InitMethod<0>>,
-    std::tuple<PF4,       PF4,       F16,       MXFlatmm_GFX1250_FP4FP4_Traits,     InitMethod<0>>,
-    std::tuple<F8,        PF4,       F16,       MXFlatmm_GFX1250_FP8FP4_Traits,     InitMethod<0>>,
-    std::tuple<PF4,       F8,        F16,       MXFlatmm_GFX1250_FP4FP8_Traits,     InitMethod<0>>,
+    std::tuple<F8,        F8,        F16,       MXFlatmm_GFX1250_FP8FP8_Traits>,
+    std::tuple<PF4,       PF4,       F16,       MXFlatmm_GFX1250_FP4FP4_Traits>,
+    std::tuple<F8,        PF4,       F16,       MXFlatmm_GFX1250_FP8FP4_Traits>,
+    std::tuple<PF4,       F8,        F16,       MXFlatmm_GFX1250_FP4FP8_Traits>,
     // GFX1250: MXFlatmmTDM (WeightPreshufflePipelineAGmemBGmemCRegTDM)
-    std::tuple<F8,        F8,        F16,       MXFlatmmTDM_GFX1250_FP8FP8_Traits,  InitMethod<0>>,
-    std::tuple<PF4,       PF4,       F16,       MXFlatmmTDM_GFX1250_FP4FP4_Traits,  InitMethod<0>>,
-    std::tuple<F8,        PF4,       F16,       MXFlatmmTDM_GFX1250_FP8FP4_Traits,  InitMethod<0>>,
-    std::tuple<PF4,       F8,        F16,       MXFlatmmTDM_GFX1250_FP4FP8_Traits,  InitMethod<0>>,
-    // Constant init (init_method=1) variant
-    std::tuple<F8,        F8,        F16,       MXFlatmm_GFX1250_FP8FP8_Traits,     InitMethod<1>>
+    std::tuple<F8,        F8,        F16,       MXFlatmmTDM_GFX1250_FP8FP8_Traits>,
+    std::tuple<PF4,       PF4,       F16,       MXFlatmmTDM_GFX1250_FP4FP4_Traits>,
+    std::tuple<F8,        PF4,       F16,       MXFlatmmTDM_GFX1250_FP8FP4_Traits>,
+    std::tuple<PF4,       F8,        F16,       MXFlatmmTDM_GFX1250_FP4FP8_Traits>
 #endif
 >;
 // clang-format on

@@ -62,18 +62,15 @@ auto preShuffleWeight(ck_tile::HostTensor<dtype>& src)
     return shuffled;
 }
 
-// Tuple layout:
-//   <ADataType, BDataType, CDataType, MXFlatmmArchTraits, InitMethod>
-//   InitMethod: integral_constant<int, 0> = random, integral_constant<int, 1> = constant
+// Tuple layout: <ADataType, BDataType, CDataType, MXFlatmmArchTraits>
 template <typename Tuple>
 class TestGroupedGemmMXFlatmm : public ::testing::Test
 {
     protected:
-    using ADataType                  = std::tuple_element_t<0, Tuple>;
-    using BDataType                  = std::tuple_element_t<1, Tuple>;
-    using CDataType                  = std::tuple_element_t<2, Tuple>;
-    using MXFlatmmArchTraits         = std::tuple_element_t<3, Tuple>;
-    static constexpr int kInitMethod = std::tuple_element_t<4, Tuple>::value;
+    using ADataType          = std::tuple_element_t<0, Tuple>;
+    using BDataType          = std::tuple_element_t<1, Tuple>;
+    using CDataType          = std::tuple_element_t<2, Tuple>;
+    using MXFlatmmArchTraits = std::tuple_element_t<3, Tuple>;
 
     using AInitType = mx_flatmm_init_proxy_t<ADataType>;
     using BInitType = mx_flatmm_init_proxy_t<BDataType>;
@@ -106,16 +103,16 @@ class TestGroupedGemmMXFlatmm : public ::testing::Test
     static constexpr index_t NumDTensor = 0;
 
     template <typename InitType>
-    static void fill_tensor(ck_tile::HostTensor<InitType>& tensor, bool is_a)
+    static void fill_tensor(ck_tile::HostTensor<InitType>& tensor, bool is_a, int init_method)
     {
-        if constexpr(kInitMethod == 0)
+        if(init_method == 0)
         {
             if(is_a)
                 ck_tile::FillUniformDistribution<>{0.0f, 1.0f}(tensor);
             else
                 ck_tile::FillUniformDistribution<>{-.5f, .5f}(tensor);
         }
-        else
+        else if(init_method == 1)
         {
             if(is_a)
                 ck_tile::FillUniformDistribution<>{2.f, 2.f}(tensor);
@@ -124,13 +121,13 @@ class TestGroupedGemmMXFlatmm : public ::testing::Test
         }
     }
 
-    static void fill_scale(ck_tile::HostTensor<ScaleType>& tensor, bool is_a)
+    static void fill_scale(ck_tile::HostTensor<ScaleType>& tensor, bool is_a, int init_method)
     {
-        if constexpr(kInitMethod == 0)
+        if(init_method == 0)
         {
             ck_tile::FillUniformDistribution<>{-2.f, 2.f}(tensor);
         }
-        else
+        else if(init_method == 1)
         {
             if(is_a)
                 ck_tile::FillUniformDistribution<>{0.5f, 0.5f}(tensor);
@@ -161,7 +158,8 @@ class TestGroupedGemmMXFlatmm : public ::testing::Test
     void Run(const std::vector<int>& Ms,
              const std::vector<int>& Ns,
              const std::vector<int>& Ks,
-             const int group_count)
+             const int group_count,
+             const int init_method = 1)
     {
         using namespace ck_tile::literals;
 
@@ -257,10 +255,10 @@ class TestGroupedGemmMXFlatmm : public ::testing::Test
             ck_tile::HostTensor<BInitType> b_init(ck_tile::host_tensor_descriptor(
                 K, N, stride_B, ck_tile::bool_constant<b_row_major>{}));
 
-            fill_tensor(a_init, true);
-            fill_tensor(b_init, false);
-            fill_scale(scale_a, true);
-            fill_scale(scale_b, false);
+            fill_tensor(a_init, true, init_method);
+            fill_tensor(b_init, false, init_method);
+            fill_scale(scale_a, true, init_method);
+            fill_scale(scale_b, false, init_method);
 
             copy_proxy_to_real(a_host, a_init);
             copy_proxy_to_real(b_origin_host, b_init);

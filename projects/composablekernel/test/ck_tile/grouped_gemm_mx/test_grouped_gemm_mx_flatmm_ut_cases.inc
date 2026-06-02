@@ -6,6 +6,7 @@
 TYPED_TEST(TestGroupedGemmMXFlatmm, Basic_4Groups)
 {
     const int group_count = 4;
+    const int init_method = 1;
     std::vector<int> Ms;
     std::vector<int> Ns;
     std::vector<int> Ks;
@@ -17,19 +18,23 @@ TYPED_TEST(TestGroupedGemmMXFlatmm, Basic_4Groups)
         Ks.push_back(256 + 256 * i);
     }
 
-    this->Run(Ms, Ns, Ks, group_count);
+    this->Run(Ms, Ns, Ks, group_count, init_method);
 }
 
-TYPED_TEST(TestGroupedGemmMXFlatmm, Single_Group) { this->Run({512}, {512}, {512}, 1); }
+TYPED_TEST(TestGroupedGemmMXFlatmm, Single_Group)
+{
+    this->Run({512}, {512}, {512}, 1, /*init_method=*/1);
+}
 
 TYPED_TEST(TestGroupedGemmMXFlatmm, Two_Groups_Same_Size)
 {
-    this->Run({256, 256}, {256, 256}, {256, 256}, 2);
+    this->Run({256, 256}, {256, 256}, {256, 256}, 2, /*init_method=*/1);
 }
 
 TYPED_TEST(TestGroupedGemmMXFlatmm, Eight_Groups)
 {
     const int group_count = 8;
+    const int init_method = 1;
     std::vector<int> Ms;
     std::vector<int> Ns;
     std::vector<int> Ks;
@@ -41,5 +46,5 @@ TYPED_TEST(TestGroupedGemmMXFlatmm, Eight_Groups)
         Ks.push_back(256 + 256 * i);
     }
 
-    this->Run(Ms, Ns, Ks, group_count);
+    this->Run(Ms, Ns, Ks, group_count, init_method);
 }
