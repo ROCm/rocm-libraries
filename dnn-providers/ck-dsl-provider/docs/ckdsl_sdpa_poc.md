@@ -77,6 +77,7 @@ B=./build-superbuild/bin/ck_dsl_provider_integration_tests
 $B --gtest_filter='*SdpaFwdFp16*'                          # correctness vs CPU reference (8 cases)
 HIPDNN_LOG_LEVEL=info $B --gtest_filter='*SdpaFwdPerf*'    # throughput sweep (TFLOPS)
 HIPDNN_LOG_LEVEL=info $B --gtest_filter='*Oracle*'         # oracle config sweep (heuristic vs best); slow
+$B --gtest_filter='*BuildTime*'                            # first-use / JIT-compile latency (prints [BuildTime] lines)
 ```
 
 ### 3. PyTorch perf baseline (external — separate venv, torch NOT in the hipDNN tree)
@@ -121,6 +122,8 @@ it times `F.scaled_dot_product_attention(is_causal=True)` with the same shapes/d
 - `integration_tests/IntegrationGpuCkDslSdpaFwdFp16.cpp` — gfx950 correctness vs CPU reference.
 - `integration_tests/IntegrationGpuCkDslSdpaFwdPerf.cpp` — gfx950 throughput sweep.
 - `integration_tests/IntegrationGpuCkDslSdpaFwdOracle.cpp` — gfx950 oracle config sweep.
+- `integration_tests/IntegrationGpuCkDslSdpaFwdBuildTime.cpp` — gfx950 first-use / JIT-compile
+  latency probe (separates one-time warmup, per-shape cold compile, and JitCache hit).
 
 ---
 
@@ -133,6 +136,23 @@ it times `F.scaled_dot_product_attention(is_causal=True)` with the same shapes/d
   heuristic's pick** at S8192 (504 vs 246 TFLOPS), reaching ~0.64–0.73× of flash. The heuristic
   degenerately picks the *smallest* config for every shape → the gap is a **config-selection**
   problem (retrain/autotune), not a kernel ceiling.
+
+### First-use latency (JIT / `buildPlan`)
+
+`buildPlan` (capability gate + dispatcher scoring + comgr JIT compile + `HipModule` load) is paid
+at plan-build time, **separate from** the per-launch kernel time the TFLOPS numbers report
+(`execute()` is ~0.3 ms at S2048 to ~4.5 ms at S8192). Measured by `*BuildTime*`:
+
+| phase | cost | what it is |
+|-------|------|------------|
+| First call in the process | **~5.9 s** | one-time warmup: LightGBM model load (~11 MB) + comgr / embedded-CPython init + first compile |
+| Steady-state cold compile (each **new** shape) | **~105–115 ms** | comgr lowering+compile of the gfx950 HSACO — effectively shape-independent |
+| JitCache hit (repeat shape) | **~2 ms** | module is cached by signature; this is just the dispatcher **re-scoring**, which runs on every `buildPlan` |
+
+Implications for users: the first SDPA call in a process eats ~6 s of one-time init; each distinct
+shape then costs ~110 ms to JIT once; thereafter plan-build is ~2 ms — and that residual is
+re-scoring (enumerate + LightGBM predict), not recompile, so it's cacheable if it ever matters.
+The compile cost amortizes after a handful of launches per shape.
 
 ### Open follow-ups
 1. CK-DSL autotuner + heuristic retrain over realistic shapes (closes the ~2×).
