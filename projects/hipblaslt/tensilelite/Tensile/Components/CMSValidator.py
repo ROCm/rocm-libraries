@@ -3623,12 +3623,34 @@ def compare_graphs(
     # answers the pipeline-integrity question (both pipelines emitted N
     # LR / M MFMA / etc.) without conflating naming differences.
     #
-    # NOTE — NOT YET FIXED: the edge layer (edge_keys, below) still embeds
-    # `(producer.identity, consumer.identity, ...)` in its edge-key
-    # tuples and will still divergence-detect on T/X register naming.
-    # Closing that requires a complementary follow-up (likely byte-key
-    # matching per the Approach-E reference in the comments above /
-    # `DataflowGraph.edge_keys` docstring).
+    # NOTE — NOT YET FIXED (tracked under rocm-libraries-n7og, P0
+    # blocker on Phase 3 / r62g): the edge layer (edge_keys, below)
+    # still embeds `(producer.identity, consumer.identity, ...)` in
+    # its edge-key tuples and will still divergence-detect on T/X
+    # register naming when the reference and subject pair has any
+    # register-naming drift. Empirically characterized during w5xw
+    # triage on the canonical TF32 4x4 TN (UsePLRPack=True) fixture
+    # against the *Approach A* `build_non_cms_reference` pair: 642
+    # per-(body, render) mismatches break down as 520 (81%) oplb-class
+    # T/X register-naming drift on (ds_read_b128, v_cvt_pk_bf16_f32,
+    # v_mfma_f32_4x4x4_16b_bf16) and 122 (19%) real codegen-branch
+    # divergence (missing SCBranchSCC0 in ML/ML-1 on the CMS side, ~40
+    # extra MFMA + VCvtPkF32toBF16 in NLL on the CMS side). The 19%
+    # are *Approach-A reference noise* (the j4qm class called out at
+    # DEFAULT_SCHEDULER_REFERENCE_DESIGN.md §1.5) — they do NOT
+    # reproduce against the SHADOW pair (`_last_default_capture`,
+    # which has 0 mismatches against `_last_cms_capture` on the same
+    # fixture, since SHADOW is observed inside the same Build #1 that
+    # emits CMS). Per dm4p Phase 2 SHADOW is `ctx.default` (the
+    # canonical reference per design v5) and Approach A is retired in
+    # Phase 4 / u89e. The 81% T/X edge-layer concern remains real and
+    # is what n7og tracks: even on the SHADOW pair, future fixtures
+    # with cross-instance register-naming drift would still trigger
+    # edge-key mismatches here. Closing this requires a complementary
+    # follow-up (likely byte-key matching per the Approach-E reference
+    # in the comments above / `DataflowGraph.edge_keys` docstring).
+    # See n7og description for the design-doc alignment per
+    # DEFAULT_SCHEDULER_REFERENCE_DESIGN.md §1.5, §6 oplb-row.
     from collections import Counter
 
     def _data_flow_category_counts(graph):

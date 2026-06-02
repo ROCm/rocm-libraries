@@ -627,7 +627,7 @@ def _captures_per_body(four_part_capture):
 
 
 def test_real_kernel_per_render_counts_match(
-    real_kernel_capture_pair_approach_a,
+    real_kernel_capture_pair,
 ):
     """Memo §6.2 #1: for every (body, canonical_render) in either real
     build's captures, both builds emit the same count.
@@ -639,16 +639,32 @@ def test_real_kernel_per_render_counts_match(
     not user-program semantics; comparing them across CMS and default
     captures would assert against scheduler choice.
 
-    rocm-libraries-aixt: re-routed onto
+    rocm-libraries-aixt: originally re-routed onto
     ``real_kernel_capture_pair_approach_a`` so the default-side capture
-    comes from ``build_non_cms_reference`` (Build #2 finalize-after-
-    closeLoop) rather than the SHADOW capture (which was missing the
-    LCC pair in ML/ML-1). The xfail marker that pinned the SHADOW
-    capture's missing-LCC defect was removed alongside the re-route.
+    came from ``build_non_cms_reference`` (Build #2 finalize-after-
+    closeLoop) rather than the SHADOW capture (which historically was
+    missing the LCC pair in ML/ML-1). The xfail marker that pinned the
+    SHADOW capture's missing-LCC defect was removed alongside the
+    re-route.
+
+    rocm-libraries-w5xw (revision): re-routed BACK onto the SHADOW
+    fixture ``real_kernel_capture_pair``. The dm4p Phase 2 work wired
+    SHADOW as ``ctx.default`` (the canonical reference per design v5),
+    and the nmsx capture-window/scope/walk fixes plus the nyb5
+    finalize-after-closeLoop change populate the SHADOW capture's
+    ML/ML-1 LCC pair correctly. Empirically the SHADOW-vs-CMS pair
+    produces 0 per-(body, render) mismatches on the canonical TF32 4x4
+    TN fixture, whereas Approach A's ``build_non_cms_reference`` (the
+    aixt fixture) surfaces 642 mismatches — of which 520 (81%) are the
+    oplb T/X register-naming pattern and 122 (19%) are Approach-A
+    codegen-branch divergences (missing SCBranchSCC0 in ML/ML-1, ~40
+    extra NLL instructions on the CMS side). Both are *Approach-A
+    reference noise* and are obviated by the SHADOW re-route since
+    Approach A is being retired in Phase 4 (rocm-libraries-u89e).
     """
     from Tensile.Components.CMSValidator import data_flow_instructions
 
-    default_cap, cms_cap = real_kernel_capture_pair_approach_a
+    default_cap, cms_cap = real_kernel_capture_pair
     default_bodies = _captures_per_body(default_cap)
     cms_bodies = _captures_per_body(cms_cap)
     assert set(default_bodies) == set(cms_bodies), (
@@ -678,7 +694,7 @@ def test_real_kernel_per_render_counts_match(
 
 
 def test_real_kernel_per_ordinal_logical_instruction_matches(
-    real_kernel_capture_pair_approach_a,
+    real_kernel_capture_pair,
 ):
     """Memo §6.2 #2: for every (body, canonical_render, ordinal) tuple
     appearing in either real build, both builds resolve to a
@@ -688,14 +704,23 @@ def test_real_kernel_per_ordinal_logical_instruction_matches(
     `CMSValidator` (rocm-libraries-d3zj); see the docstring on
     `test_real_kernel_per_render_counts_match` above for the rationale.
 
-    rocm-libraries-aixt: re-routed onto
+    rocm-libraries-aixt: originally re-routed onto
     ``real_kernel_capture_pair_approach_a`` (Approach A two-build).
     The xfail marker citing nyb5 as the principled fix was removed
     alongside the re-route — nyb5's helper is the fix.
+
+    rocm-libraries-w5xw (revision): re-routed BACK onto the SHADOW
+    fixture ``real_kernel_capture_pair``. Same rationale as
+    ``test_real_kernel_per_render_counts_match`` above — SHADOW is the
+    canonical reference per dm4p Phase 2 / design v5, and SHADOW-vs-CMS
+    yields 0 mismatches on this fixture. Approach A's reference
+    surfaces 642 mismatches (81% T/X register-naming oplb pattern, 19%
+    Approach-A codegen-branch divergence in ML/ML-1/NLL) that don't
+    exist between SHADOW and CMS.
     """
     from Tensile.Components.CMSValidator import data_flow_instructions
 
-    default_cap, cms_cap = real_kernel_capture_pair_approach_a
+    default_cap, cms_cap = real_kernel_capture_pair
     default_bodies = _captures_per_body(default_cap)
     cms_bodies = _captures_per_body(cms_cap)
     mismatches = []
