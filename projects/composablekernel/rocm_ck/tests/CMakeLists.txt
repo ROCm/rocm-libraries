@@ -60,6 +60,16 @@ set_source_files_properties(${ROCM_CK_UNIT_SOURCES} PROPERTIES LANGUAGE CXX)
 
 add_rocm_ck_test(rocm_ck_unit ${ROCM_CK_UNIT_SOURCES})
 target_include_directories(rocm_ck_unit PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+
+# When built inside CK (hipcc/amdclang++ is the CXX compiler), the global
+# link_libraries(hip::device) injects -x hip via INTERFACE_COMPILE_OPTIONS,
+# forcing amdclang++ to run both host and device compilation passes on every
+# TU.  The device pass defines __HIP_DEVICE_COMPILE__, which triggers the
+# #error guards in host-only _api.hpp headers.  --offload-host-only suppresses
+# the device pass for this pure-host test target.
+if(TARGET hip::device)
+    target_compile_options(rocm_ck_unit PRIVATE --offload-host-only)
+endif()
 add_test(NAME rocm_ck_unit COMMAND rocm_ck_unit)
 set_tests_properties(rocm_ck_unit PROPERTIES LABELS "ROCM_CK_SMOKE")
 
