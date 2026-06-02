@@ -66,11 +66,8 @@ std::vector<PoolingTestCase> GetWidePooling2dTestCases()
 inline bool IsKnownUnstableWideFp16Case(const pooling_gtest::PoolingTestCase& tc)
 {
     return tc.in_shape == std::vector<int>{1, 3, 255, 255} &&
-           tc.lens == std::vector<int>{255, 255} &&
-           tc.pads == std::vector<int>{0, 0} &&
-           tc.strides == std::vector<int>{1, 1} &&
-           tc.in_layout == "NCHW" &&
-           tc.wsidx == 1 &&
+           tc.lens == std::vector<int>{255, 255} && tc.pads == std::vector<int>{0, 0} &&
+           tc.strides == std::vector<int>{1, 1} && tc.in_layout == "NCHW" && tc.wsidx == 1 &&
            (tc.mode == miopenPoolingAverage || tc.mode == miopenPoolingAverageInclusive);
 }
 
