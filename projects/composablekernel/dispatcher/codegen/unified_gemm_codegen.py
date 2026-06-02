@@ -415,7 +415,7 @@ using namespace ck_tile;
     // Data types (inside namespace to avoid conflicts across layouts)
     using ADataType = {self.tm.DTYPE_TO_CK[self.datatype]};
     using BDataType = {self.tm.DTYPE_TO_CK[self.datatype]};
-    using AccDataType = float;
+    using AccDataType = {self.tm.get_acc_dtype_ck(self.datatype)};
     using CDataType = {self.tm.DTYPE_TO_CK[output_dtype]};
 
     // Layouts (inside namespace to avoid conflicts when mixing layouts)
@@ -463,7 +463,7 @@ constexpr const char* KERNEL_NAME = "{kernel_name}";
 // Data types (inside namespace to avoid conflicts across different kernels)
 using ADataType = {self.tm.DTYPE_TO_CK[self.datatype]};
 using BDataType = {self.tm.DTYPE_TO_CK[self.datatype]};
-using AccDataType = float;
+using AccDataType = {self.tm.get_acc_dtype_ck(self.datatype)};
 using CDataType = {self.tm.DTYPE_TO_CK[output_dtype]};
 
 // Layouts (inside namespace to avoid conflicts when mixing layouts like RCR + RRR)
@@ -519,7 +519,7 @@ constexpr const char* KERNEL_NAME = {ns_name}::KERNEL_NAME;
 using ADataType = {self.tm.DTYPE_TO_CK_QUALIFIED[self.datatype]};
 using BDataType = {self.tm.DTYPE_TO_CK_QUALIFIED[self.datatype]};
 using CDataType = {self.tm.DTYPE_TO_CK_QUALIFIED[self.tm.get_output_dtype(self.datatype)]};
-using AccDataType = float;
+using AccDataType = {self.tm.get_acc_dtype_ck(self.datatype)};
 #endif // CK_TILE_SINGLE_KERNEL_INCLUDE
 """
 

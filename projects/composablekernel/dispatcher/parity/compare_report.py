@@ -176,9 +176,12 @@ def _build_markdown(df: pd.DataFrame, disp_path: Path,
         "",
     ]
 
-    # Roll-up tables
+    # Roll-up tables (spec T2.6: "by dtype and by layout"; also pipeline and tile)
     if "datatype" in df.columns:
         lines.append(_rollup_table(df, "datatype", "By dtype"))
+        lines.append("")
+    if "layout" in df.columns:
+        lines.append(_rollup_table(df, "layout", "By layout"))
         lines.append("")
     if "pipeline" in df.columns:
         lines.append(_rollup_table(df, "pipeline", "By pipeline"))

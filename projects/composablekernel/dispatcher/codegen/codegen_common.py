@@ -205,6 +205,11 @@ class CommonTypeMappings:
         """Get output datatype (fp8/bf8 -> fp16)."""
         return "fp16" if dtype in ("fp8", "bf8") else dtype
 
+    @staticmethod
+    def get_acc_dtype_ck(dtype: str) -> str:
+        """Get CK accumulator type string (int8 -> int32_t, everything else -> float)."""
+        return "int32_t" if dtype == "int8" else "float"
+
 
 # ============================================================================
 # Code Generation Helpers

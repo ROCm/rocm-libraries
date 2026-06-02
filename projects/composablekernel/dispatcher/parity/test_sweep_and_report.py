@@ -402,6 +402,112 @@ class TestCompareReportTileRollup:
         assert "50.0%" in text
 
 
+# ── compare_report layout rollup ─────────────────────────────────────────────
+
+class TestCompareReportLayoutRollup:
+    """compare_report includes a 'By layout' rollup table (T2.6 spec requirement)."""
+
+    def test_layout_rollup_present(self, tmp_path):
+        import subprocess, sys
+        rows = [
+            dict(_BASE_ROW, layout="rcr", M=512),
+            dict(_BASE_ROW, layout="rcr", M=1024),
+        ]
+        pq = _make_parquet(rows, tmp_path / "disp.parquet")
+        out = tmp_path / "report.md"
+        result = subprocess.run(
+            [sys.executable, str(_HERE / "compare_report.py"),
+             str(pq), "-o", str(out)],
+            capture_output=True, text=True, cwd=_HERE,
+        )
+        assert result.returncode == 0, result.stderr
+        text = out.read_text()
+        assert "By layout" in text
+        assert "rcr" in text
+
+    def test_layout_rollup_after_dtype_before_pipeline(self, tmp_path):
+        """Layout rollup must appear between dtype and pipeline sections."""
+        import subprocess, sys
+        pq = _make_parquet([dict(_BASE_ROW)], tmp_path / "disp.parquet")
+        out = tmp_path / "report.md"
+        subprocess.run(
+            [sys.executable, str(_HERE / "compare_report.py"),
+             str(pq), "-o", str(out)],
+            capture_output=True, text=True, cwd=_HERE,
+        )
+        text = out.read_text()
+        pos_dtype = text.find("By dtype")
+        pos_layout = text.find("By layout")
+        pos_pipeline = text.find("By pipeline")
+        assert pos_dtype < pos_layout < pos_pipeline, (
+            f"Expected By dtype < By layout < By pipeline in report; "
+            f"got positions {pos_dtype}, {pos_layout}, {pos_pipeline}"
+        )
+
+
+# ── dispatcher_binding structural tests ──────────────────────────────────────
+
+class TestDispatcherBindingStructure:
+    """dispatcher_binding.py can be imported and has the required interface."""
+
+    def test_module_imports(self):
+        """The module must import without a GPU or .so file."""
+        import importlib.util, sys
+        spec = importlib.util.spec_from_file_location(
+            "dispatcher_binding",
+            str(_HERE / "dispatcher_binding.py"),
+        )
+        mod = importlib.util.module_from_spec(spec)
+        # Loading the source-only module (not instantiating DispatcherLib) must not fail
+        spec.loader.exec_module(mod)
+
+    def test_required_symbols_present(self):
+        """DispatcherLib, DispatcherError, and status codes must be exported."""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "dispatcher_binding",
+            str(_HERE / "dispatcher_binding.py"),
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        assert hasattr(mod, "DispatcherLib")
+        assert hasattr(mod, "DispatcherError")
+        assert hasattr(mod, "DISPATCHER_OK")
+        assert hasattr(mod, "DISPATCHER_ERR_NOT_FOUND")
+        assert hasattr(mod, "DISPATCHER_ERR_LAUNCH")
+
+    def test_dispatcher_lib_methods(self):
+        """DispatcherLib must expose all 7 C API methods."""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "dispatcher_binding",
+            str(_HERE / "dispatcher_binding.py"),
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        required = [
+            "version", "kernel_count", "kernel_names",
+            "find_kernel", "kernel_name", "supports", "run_gemm",
+        ]
+        for name in required:
+            assert hasattr(mod.DispatcherLib, name), (
+                f"DispatcherLib missing method: {name}"
+            )
+
+    def test_dispatcher_error_has_status(self):
+        """DispatcherError must carry a .status attribute."""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "dispatcher_binding",
+            str(_HERE / "dispatcher_binding.py"),
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        err = mod.DispatcherError(mod.DISPATCHER_ERR_NOT_FOUND, "test")
+        assert err.status == mod.DISPATCHER_ERR_NOT_FOUND
+        assert "NOT_FOUND" in str(err)
+
+
 # ── sweep_runner TFLOP/s parser ──────────────────────────────────────────────
 
 class TestHarnessTflopsParser:
