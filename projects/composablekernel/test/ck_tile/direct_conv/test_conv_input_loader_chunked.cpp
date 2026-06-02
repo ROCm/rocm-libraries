@@ -19,7 +19,7 @@
 #pragma clang diagnostic ignored "-Wunused-parameter"
 #pragma clang diagnostic ignored "-Wshadow"
 #include "ck_tile/core.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/conv_32c_tile_impl_v3.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/impl/conv_32c_tile_impl_v3.hpp"
 #pragma clang diagnostic pop
 
 #include <hip/hip_fp16.h>

@@ -17,11 +17,11 @@
 
 #pragma once
 
-#include "ck_tile/ops/direct_convolution/kernel/grouped_conv_kernel_base.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/grouped_conv_descriptors.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/grouped_conv_input_loader.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/grouped_conv_weight_loader.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/grouped_conv_output_writer.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/impl/grouped_conv_kernel_base.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/impl/grouped_conv_descriptors.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/impl/grouped_conv_input_loader.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/impl/grouped_conv_weight_loader.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/impl/grouped_conv_output_writer.hpp"
 #include "ck_tile/ops/direct_convolution/utils/transpose_lds_layout.hpp"
 #include "ck_tile/ops/direct_convolution/utils/detail.hpp"
 #include "ck_tile/ops/direct_convolution/utils/common.hpp"
