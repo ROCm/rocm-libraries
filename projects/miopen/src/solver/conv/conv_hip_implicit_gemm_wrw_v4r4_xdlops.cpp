@@ -1104,20 +1104,20 @@ bool ConvHipImplicitGemmWrwV4R4Xdlops::IsApplicable(const ExecutionContext& ctx,
     int gemm_m       = -1;
     int gemm_n       = -1;
     int gemm_k_total = -1;
-    int GemmKBlock   = -1;
+    int gemm_k_block = -1;
 
-    std::tie(std::ignore, gemm_m, gemm_n, gemm_k_total, GemmKBlock, std::ignore) =
+    std::tie(std::ignore, gemm_m, gemm_n, gemm_k_total, gemm_k_block, std::ignore) =
         config.CalculateGemmSizeAndGemmKBlock(ctx, problem);
 
     // Reject non-deterministic configs when determinism is requested.
-    // WrwV4R4Xdlops kernel uses AtomicAdd when GemmKBlock > 1
+    // WrwV4R4Xdlops kernel uses AtomicAdd when gemm_k_block > 1
     // (kernel code: GemmKBlock > 1 ? InMemoryDataOperation::AtomicAdd : Set).
-    // GemmKBlock > 2 is proven non-deterministic due to FP non-associativity:
+    // gemm_k_block > 2 is proven non-deterministic due to FP non-associativity:
     //   (a+b)+c != (a+c)+b when 3+ atomicAdds accumulate per output element.
-    // GemmKBlock == 2 is deterministic (FP commutativity: a+b = b+a).
-    // GemmKBlock == 1 does not use AtomicAdd (uses Set).
+    // gemm_k_block == 2 is deterministic (FP commutativity: a+b = b+a).
+    // gemm_k_block == 1 does not use AtomicAdd (uses Set).
     // Tested with 101,000+ kernel runs on gfx908 (MI100).
-    if(problem.GetConv().attribute.deterministic.Get() != 0 && GemmKBlock > 2)
+    if(problem.GetConv().attribute.deterministic.Get() != 0 && gemm_k_block > 2)
         return false;
 
     return static_ck::IsValidGridGemmXdlops(gemm_m, gemm_n, gemm_k_total);

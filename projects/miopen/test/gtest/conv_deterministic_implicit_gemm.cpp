@@ -281,6 +281,73 @@ protected:
     }
 };
 
+// Tests that IsApplicable returns false in deterministic mode for shapes that
+// would use non-deterministic AtomicAdd.
+template <typename T, Direction CONV_DIR, typename SolverType>
+class GPU_ConvDeterministicRejection : public ::testing::TestWithParam<DeterministicTestConfig>
+{
+protected:
+    void RunTest()
+    {
+        const auto& config = GetParam();
+        auto& handle       = get_handle();
+
+        std::vector<size_t> input_dims  = {config.N, config.C, config.H, config.W};
+        std::vector<size_t> weight_dims = {config.K, config.C, config.y, config.x};
+
+        tensor<T> input{miopenTensorNCHW, input_dims};
+        tensor<T> weights{miopenTensorNCHW, weight_dims};
+
+        auto conv_desc = miopen::ConvolutionDescriptor{
+            2,
+            miopenConvolution,
+            miopenPaddingDefault,
+            {static_cast<int>(config.pad_h), static_cast<int>(config.pad_w)},
+            {static_cast<int>(config.stride_h), static_cast<int>(config.stride_w)},
+            {static_cast<int>(config.dilation_h), static_cast<int>(config.dilation_w)},
+            {0, 0},
+            1,
+            1.0};
+
+        miopen::TensorDescriptor output_desc =
+            conv_desc.GetForwardOutputTensor(input.desc, weights.desc, miopen_type<T>{});
+        tensor<T> output{miopenTensorNCHW, output_desc.GetLengths()};
+
+        SolverType solv{};
+        auto ctx = miopen::ExecutionContext{&handle};
+
+        // Without deterministic mode: solver should be applicable (or skip if GPU mismatch)
+        miopen::conv::ProblemDescription problem_ndet = [&]() {
+            if constexpr(CONV_DIR == Direction::Forward)
+                return miopen::conv::ProblemDescription{
+                    input.desc, weights.desc, output.desc, conv_desc, CONV_DIR};
+            else
+                return miopen::conv::ProblemDescription{
+                    output.desc, weights.desc, input.desc, conv_desc, CONV_DIR};
+        }();
+        problem_ndet.SetupFloats(ctx);
+        if(!solv.IsApplicable(ctx, problem_ndet))
+            GTEST_SKIP() << solv.SolverDbId() << " Not Applicable on this GPU/config";
+
+        // With deterministic mode: solver must reject this shape
+        conv_desc.attribute.Set(MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC, 1);
+        ASSERT_TRUE(conv_desc.attribute.deterministic.Get() == 1);
+
+        miopen::conv::ProblemDescription problem_det = [&]() {
+            if constexpr(CONV_DIR == Direction::Forward)
+                return miopen::conv::ProblemDescription{
+                    input.desc, weights.desc, output.desc, conv_desc, CONV_DIR};
+            else
+                return miopen::conv::ProblemDescription{
+                    output.desc, weights.desc, input.desc, conv_desc, CONV_DIR};
+        }();
+        problem_det.SetupFloats(ctx);
+
+        EXPECT_FALSE(solv.IsApplicable(ctx, problem_det))
+            << solv.SolverDbId() << " must reject non-deterministic shape in deterministic mode";
+    }
+};
+
 } // namespace
 
 // ============================================================================
@@ -326,6 +393,17 @@ using GPU_ConvDeterministic_WrwV4R4Xdlops_BFP16 =
                                       Direction::BackwardWeights,
                                       miopen::solver::conv::ConvHipImplicitGemmWrwV4R4Xdlops>;
 
+// Rejection tests: verify IsApplicable returns false for non-deterministic shapes
+using GPU_ConvDeterministicRejection_BwdV1R1_BFP16 =
+    GPU_ConvDeterministicRejection<bfloat16,
+                                   Direction::BackwardData,
+                                   miopen::solver::conv::ConvHipImplicitGemmBwdDataV1R1>;
+
+using GPU_ConvDeterministicRejection_WrwV4R4Xdlops_BFP16 =
+    GPU_ConvDeterministicRejection<bfloat16,
+                                   Direction::BackwardWeights,
+                                   miopen::solver::conv::ConvHipImplicitGemmWrwV4R4Xdlops>;
+
 // ============================================================================
 // Test definitions
 // ============================================================================
@@ -342,6 +420,10 @@ TEST_P(GPU_ConvDeterministic_BwdV4R1_BFP16, DeterministicTest) { this->RunTest()
 // Weight-update
 TEST_P(GPU_ConvDeterministic_WrwV4R4_BFP16, DeterministicTest) { this->RunTest(); };
 TEST_P(GPU_ConvDeterministic_WrwV4R4Xdlops_BFP16, DeterministicTest) { this->RunTest(); };
+
+// Rejection tests: IsApplicable must return false for non-deterministic shapes
+TEST_P(GPU_ConvDeterministicRejection_BwdV1R1_BFP16, RejectionTest) { this->RunTest(); };
+TEST_P(GPU_ConvDeterministicRejection_WrwV4R4Xdlops_BFP16, RejectionTest) { this->RunTest(); };
 
 // ============================================================================
 // Test configs — small shapes for fast CI execution.
@@ -386,3 +468,42 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_ConvDeterministic_WrwV4R4Xdlops_BFP16,
                          testing::Values(DeterministicTestConfig{
                              1, 192, 16, 28, 28, 1, 1, 0, 0, 1, 1, 1, 1}));
+
+// Rejection test configs
+// BwdV1R1: stride=1 < threshold=dilation*(y-1)+1=3 → AtomicAdd path → must be rejected
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_ConvDeterministicRejection_BwdV1R1_BFP16,
+                         testing::Values(DeterministicTestConfig{
+                             //  N   C   K   H   W  y  x  ph pw sh sw dh dw
+                             64,
+                             64,
+                             64,
+                             14,
+                             14,
+                             3,
+                             3,
+                             1,
+                             1,
+                             1,
+                             1,
+                             1,
+                             1}));
+
+// WrwV4R4Xdlops: N=4 allows gemm_k_block>1; shape chosen so gemm_k_block>2 → must be rejected
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         GPU_ConvDeterministicRejection_WrwV4R4Xdlops_BFP16,
+                         testing::Values(DeterministicTestConfig{
+                             //  N   C   K   H   W  y  x  ph pw sh sw dh dw
+                             4,
+                             192,
+                             16,
+                             28,
+                             28,
+                             1,
+                             1,
+                             0,
+                             0,
+                             1,
+                             1,
+                             1,
+                             1}));
