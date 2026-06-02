@@ -88,10 +88,8 @@ rocblas_set_matrix_zero_if_alpha_zero_kernel(rocblas_int    m,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         auto alpha = load_scalar(alpha_device_host, batch, stride_alpha);
 
@@ -105,10 +103,7 @@ rocblas_set_matrix_zero_if_alpha_zero_kernel(rocblas_int    m,
                 A[tx + size_t(lda) * ty] = 0;
             }
         }
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 template <typename TScal, typename TPtr>
@@ -206,10 +201,8 @@ rocblas_trmm_outofplace_kernel(rocblas_diagonal diag,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         auto alpha = load_scalar(alpha_device_host, batch, stride_alpha);
         auto A     = load_ptr_batch(A_arg, batch, offset_a, stride_a);
@@ -359,10 +352,7 @@ rocblas_trmm_outofplace_kernel(rocblas_diagonal diag,
                 }
             }
         }
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 template <typename T,
@@ -494,10 +484,8 @@ rocblas_trmm_lNx_kernel(rocblas_fill     uplo,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         T alpha = load_scalar(alpha_device_host, batch, stride_alpha);
         if(alpha != T(0))
@@ -552,9 +540,7 @@ rocblas_trmm_lNx_kernel(rocblas_fill     uplo,
             if(ty < nn && tx < m)
                 C[ty * size_t(ldc) + tx] = accumulator;
         }
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 // left, Trans|ConjTrans
@@ -583,10 +569,8 @@ rocblas_trmm_lTx_kernel(rocblas_fill     uplo,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         T alpha = load_scalar(alpha_device_host, batch, stride_alpha);
         if(alpha != T(0))
@@ -654,9 +638,7 @@ rocblas_trmm_lTx_kernel(rocblas_fill     uplo,
             if(ty < nn && tx < m)
                 C[ty * size_t(ldc) + tx] = accumulator;
         }
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 // right NoTrans
@@ -685,10 +667,8 @@ rocblas_trmm_rNx_kernel(rocblas_fill     uplo,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         T alpha = load_scalar(alpha_device_host, batch, stride_alpha);
         if(alpha != T(0))
@@ -744,9 +724,7 @@ rocblas_trmm_rNx_kernel(rocblas_fill     uplo,
             if(ty < n && tx < mm)
                 C[ty * size_t(ldc) + tx] = accumulator;
         }
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 // right, transpose_and_conjugate_transpose
@@ -775,10 +753,8 @@ rocblas_trmm_rTx_kernel(rocblas_fill     uplo,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         T alpha = load_scalar(alpha_device_host, batch, stride_alpha);
         if(alpha != T(0))
@@ -843,10 +819,7 @@ rocblas_trmm_rTx_kernel(rocblas_fill     uplo,
             if(ty < n && tx < mm)
                 C[ty * size_t(ldc) + tx] = accumulator;
         }
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 // clang-format off

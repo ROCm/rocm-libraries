@@ -31,6 +31,11 @@ from Tensile.SolutionStructs.Solution import (
     resetTypeMismatchCollector,
     printTypeMismatchSummary,
 )
+from Tensile.SolutionStructs.Problem import (
+    validateProblemTypeParameterTypes,
+    _expectedProblemTypeParamTypes,
+    _defaultProblemType,
+)
 from Tensile.Common.ValidParameters import validParameters
 
 
@@ -363,3 +368,126 @@ class TestPrintTypeMismatchSummary:
         captured = capsys.readouterr()
         assert "UseCustomMainLoopSchedule" in captured.out
         assert "BufferLoad" in captured.out
+
+
+class TestValidateProblemTypeParameterTypes:
+    """Tests for the validateProblemTypeParameterTypes function."""
+
+    def setup_method(self):
+        """Reset the collector before each test."""
+        resetTypeMismatchCollector()
+
+    # --- Passing cases (no mismatches collected) ---
+
+    def test_bool_param_with_bool_value_passes(self):
+        """TransposeA: False (bool) should not collect a mismatch."""
+        state = {"TransposeA": False}
+        validateProblemTypeParameterTypes(state)
+        assert len(_typeMismatchCollector) == 0
+
+    def test_bool_param_with_true_passes(self):
+        """TransposeA: True (bool) should not collect a mismatch."""
+        state = {"TransposeA": True}
+        validateProblemTypeParameterTypes(state)
+        assert len(_typeMismatchCollector) == 0
+
+    def test_usebeta_bool_param_with_bool_passes(self):
+        """UseBeta: True (bool) should not collect a mismatch."""
+        state = {"UseBeta": True}
+        validateProblemTypeParameterTypes(state)
+        assert len(_typeMismatchCollector) == 0
+
+    def test_int_param_with_int_value_passes(self):
+        """UseBias: 1 (int) should not collect a mismatch."""
+        state = {"UseBias": 1}
+        validateProblemTypeParameterTypes(state)
+        assert len(_typeMismatchCollector) == 0
+
+    def test_mxblock_int_param_passes(self):
+        """MXBlockA: 16 (int) should not collect a mismatch."""
+        state = {"MXBlockA": 16}
+        validateProblemTypeParameterTypes(state)
+        assert len(_typeMismatchCollector) == 0
+
+    def test_unknown_param_ignored(self):
+        """Parameters not in _defaultProblemType should be silently skipped."""
+        state = {"UnknownProblemTypeParam": "anything"}
+        validateProblemTypeParameterTypes(state)
+        assert len(_typeMismatchCollector) == 0
+
+    def test_empty_state_passes(self):
+        """Empty state should not collect any mismatches."""
+        validateProblemTypeParameterTypes({})
+        assert len(_typeMismatchCollector) == 0
+
+    # --- Failing cases (mismatches collected) ---
+
+    def test_bool_param_with_int_value_collects_mismatch(self):
+        """TransposeA: 0 (int) should collect a bool-vs-int mismatch."""
+        state = {"TransposeA": 0}
+        validateProblemTypeParameterTypes(state)
+        assert len(_typeMismatchCollector) == 1
+        key = ("TransposeA", "int", "bool")
+        assert key in _typeMismatchCollector
+
+    def test_bool_param_with_int_one_collects_mismatch(self):
+        """UseBeta: 1 (int) should collect a bool-vs-int mismatch."""
+        state = {"UseBeta": 1}
+        validateProblemTypeParameterTypes(state)
+        assert len(_typeMismatchCollector) == 1
+        key = ("UseBeta", "int", "bool")
+        assert key in _typeMismatchCollector
+
+    def test_int_param_with_bool_collects_mismatch(self):
+        """UseBias: True (bool) should collect an int-vs-bool mismatch."""
+        state = {"UseBias": True}
+        validateProblemTypeParameterTypes(state)
+        assert len(_typeMismatchCollector) == 1
+        key = ("UseBias", "bool", "int")
+        assert key in _typeMismatchCollector
+
+    def test_mxblock_with_bool_collects_mismatch(self):
+        """MXBlockA: False (bool) should collect an int-vs-bool mismatch."""
+        state = {"MXBlockA": False}
+        validateProblemTypeParameterTypes(state)
+        assert len(_typeMismatchCollector) == 1
+        key = ("MXBlockA", "bool", "int")
+        assert key in _typeMismatchCollector
+
+    def test_collector_tracks_srcfile(self):
+        """srcFile should be recorded in the collector entry."""
+        state = {"TransposeA": 0}
+        validateProblemTypeParameterTypes(state, srcFile="problem_config.yaml")
+        key = ("TransposeA", "int", "bool")
+        assert "problem_config.yaml" in _typeMismatchCollector[key]["files"]
+
+    def test_collector_tracks_values(self):
+        """Different values should be collected in the values set."""
+        validateProblemTypeParameterTypes({"TransposeA": 0})
+        validateProblemTypeParameterTypes({"TransposeA": 1})
+        key = ("TransposeA", "int", "bool")
+        assert "0" in _typeMismatchCollector[key]["values"]
+        assert "1" in _typeMismatchCollector[key]["values"]
+
+    def test_multiple_params_collect_separately(self):
+        """Different parameters should create separate collector entries."""
+        state = {"TransposeA": 0, "UseBeta": 1, "UseBias": True}
+        validateProblemTypeParameterTypes(state)
+        assert len(_typeMismatchCollector) == 3
+
+    def test_accumulates_with_solution_params(self):
+        """ProblemType and Solution mismatches should accumulate together."""
+        validateParameterTypes({"UseCustomMainLoopSchedule": False})
+        validateProblemTypeParameterTypes({"TransposeA": 0})
+        assert len(_typeMismatchCollector) == 2
+
+    def test_precomputed_problemtype_types(self):
+        """_expectedProblemTypeParamTypes should be precomputed correctly."""
+        assert "TransposeA" in _expectedProblemTypeParamTypes
+        assert _expectedProblemTypeParamTypes["TransposeA"] == {bool}
+        assert "UseBeta" in _expectedProblemTypeParamTypes
+        assert _expectedProblemTypeParamTypes["UseBeta"] == {bool}
+        assert "UseBias" in _expectedProblemTypeParamTypes
+        assert _expectedProblemTypeParamTypes["UseBias"] == {int}
+        assert "MXBlockA" in _expectedProblemTypeParamTypes
+        assert _expectedProblemTypeParamTypes["MXBlockA"] == {int}

@@ -83,6 +83,7 @@ TEST(TestBatchnormBwdParams, InitializesFusedActivationWithAllTensors)
     EXPECT_TRUE(params.hasSavedStats());
     EXPECT_TRUE(params.optActivation().has_value());
     EXPECT_NE(params.bias(), nullptr);
+    EXPECT_EQ(params.dy()->uid(), pointwiseAttrs->in_0_tensor_uid());
 }
 
 TEST(TestBatchnormBwdPlan, GetWorkspaceSizeReturnsZero)
