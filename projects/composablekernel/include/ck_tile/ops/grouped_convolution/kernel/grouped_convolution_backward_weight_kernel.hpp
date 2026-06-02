@@ -697,17 +697,16 @@ struct GroupedConvolutionBackwardWeightKernel
             constexpr int num_loop_threashold = GemmPipeline_::PrefetchStages + 1;
             if(num_loop < num_loop_threashold)
             {
-                LogInfo(
-                    "For V6 pipeline, GemmK / (k_batch * KPerBlock) must be >= ",
-                    num_loop_threashold,
-                    ". Now GemmK is ",
-                    kargs.GemmK,
-                    ", k_batch is ",
-                    kargs.k_batch,
-                    ", KPerBlock is ",
-                    number<TilePartitioner::KPerBlock>{},
-                    ", num_loop is ",
-                    num_loop);
+                LogInfo("For V6 pipeline, GemmK / (k_batch * KPerBlock) must be >= ",
+                        num_loop_threashold,
+                        ". Now GemmK is ",
+                        kargs.GemmK,
+                        ", k_batch is ",
+                        kargs.k_batch,
+                        ", KPerBlock is ",
+                        number<TilePartitioner::KPerBlock>{},
+                        ", num_loop is ",
+                        num_loop);
                 return false;
             }
         }
