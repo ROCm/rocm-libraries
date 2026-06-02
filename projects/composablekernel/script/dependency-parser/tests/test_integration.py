@@ -239,11 +239,7 @@ class TestPerformance(unittest.TestCase):
     """Performance tests."""
 
     def test_extraction_returns_dependencies(self):
-        """Single-file extraction returns a non-empty dependency set.
-
-        Correctness check, not a benchmark: hangs are bounded by the extractor's
-        own subprocess timeout, so no wall-clock assertion is needed here.
-        """
+        """Single-file extraction returns a non-empty dependency set."""
         from cmake_dependency_analyzer import CompileCommandsParser, DependencyExtractor
 
         parser = CompileCommandsParser(str(COMPILE_COMMANDS))
