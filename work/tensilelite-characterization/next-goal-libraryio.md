@@ -155,17 +155,23 @@ pulled in transitively (Solution parsing), so it must be built — it is.
    recommendations.md (grounded in inspection) + commit. Mark this checklist
    done.
 
-## Definition of done checklist
+## Definition of done checklist — COMPLETE
 
-- [ ] `coverage-before.txt` captured (baseline) and committed BEFORE new tests.
-- [ ] `--cov=Tensile/LibraryIO` (path-mode) ≥95% line.
-- [ ] `coverage-after.txt` captured; before→after delta in target.md.
-- [ ] Every Tier A/B public fn has snapshot coverage; Tier C documented.
-- [ ] Paths/versions/timestamps normalised in snapshots.
-- [ ] resistance.md lists each resisting fn (expect: `writeMsgPack`,
-      `getCUCount` subprocess path, deep `parseSolutionsData` branches).
-- [ ] recommendations.md: go/no-go on the next target (Common vs a
-      Solution/Problem slice).
-- [ ] full `-m unit` ≥ 1330 passed / 201 skipped, no failures, additive only.
-- [ ] All work committed (atomic, no push); tree clean.
-- [ ] Next goal prompt `next-goal-<target>.md` created and committed.
+- [x] `coverage-before.txt` captured (baseline) and committed BEFORE new tests.
+      (448 stmts, 301 miss = 32.81% line; `--cov=Tensile` + grep fallback used.)
+- [x] `--cov` (path-mode + grep) ≥95% line — **98.21% line** (448 stmts, 8 miss).
+- [x] `coverage-after.txt` captured; before→after delta in target.md
+      (+65.40 pts).
+- [x] Every Tier A/B public fn has snapshot coverage; Tier C (heavy parse
+      paths) driven via a vendored real fixture + write→read round-trip.
+- [x] Paths/versions/timestamps normalised in snapshots (version → `<VERSION>`;
+      file I/O over `tmp_path`; structural summaries, not live objects).
+- [x] resistance.md lists each resisting item (`writeMsgPack` round-trip not
+      raw bytes; `getCUCount` subprocess monkeypatched; custom-kernel branch via
+      injected `getCustomKernelConfig`; 8 unreachable lines incl. import
+      fallbacks + redundant per-solution re-defaulting).
+- [x] recommendations.md: GO → `Common/DataType.py` next, then a `Problem.py`
+      ProblemType slice.
+- [x] full `-m unit` = **1443 passed / 201 skipped**, no failures, additive only.
+- [x] All work committed (atomic, no push); tree clean.
+- [x] Next goal prompt `next-goal-datatype.md` created and committed.
