@@ -78,5 +78,34 @@ class TestEvaluate(unittest.TestCase):
         self.assertEqual(r["false_negatives"], ["bin/rocm_ck_x"])
 
 
+class TestReachability(unittest.TestCase):
+    def _depmap(self):
+        return {
+            "file_to_executables": {"h.hpp": ["bin/test_a", "bin/test_b"]},
+            "executable_to_files": {"bin/test_a": ["h.hpp"], "bin/test_b": ["h.hpp"]},
+        }
+
+    def test_reachable_basenames(self):
+        self.assertEqual(
+            bfo.reachable_exe_basenames(self._depmap()), {"test_a", "test_b"}
+        )
+
+    def test_unreachable_flags_tests_with_no_mapping(self):
+        # test_c is ctest-registered but no file maps to it -> unreachable (FN).
+        unreach = bfo.unreachable_tests(self._depmap(), {"test_a", "test_b", "test_c"})
+        self.assertEqual(unreach, ["test_c"])
+
+    def test_all_reachable(self):
+        self.assertEqual(
+            bfo.unreachable_tests(self._depmap(), {"test_a", "test_b"}), []
+        )
+
+    def test_allowlist_suppresses_known_unreachable(self):
+        unreach = bfo.unreachable_tests(
+            self._depmap(), {"test_a", "test_c"}, allow={"test_c"}
+        )
+        self.assertEqual(unreach, [])
+
+
 if __name__ == "__main__":
     unittest.main()

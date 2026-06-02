@@ -89,20 +89,24 @@ def evaluate(file_key, sel, true_set):
     }
 
 
-def main():
-    p = argparse.ArgumentParser(description="Build-filter completeness oracle")
-    p.add_argument("--depmap", required=True, help="cmake_dependency_mapping.json")
-    p.add_argument("--ninja", required=True, help="build.ninja")
-    p.add_argument("--ctest", help="ctest -N output (optional intersection)")
-    p.add_argument("--file", required=True, help="changed file, depmap-relative key")
-    p.add_argument(
-        "--failed-objects",
-        required=True,
-        help="file containing ninja stderr (FAILED: lines) from the perturbed build",
-    )
-    p.add_argument("--output", help="write per-probe result JSON here")
-    args = p.parse_args()
+def reachable_exe_basenames(depmap):
+    """Executables that at least one file maps to (can be selected by the filter)."""
+    e2f = depmap.get("executable_to_files", {})
+    return set(os.path.basename(e) for e in e2f)
 
+
+def unreachable_tests(depmap, ctest_tests, allow=None):
+    """ctest tests that no file maps to -> the filter can never select them (FN).
+
+    Such a test is a guaranteed false negative: if its sources change, smart-build
+    will not run it. Usually caused by a dependency-extraction gap for its TU.
+    """
+    reach = reachable_exe_basenames(depmap)
+    allow = allow or set()
+    return sorted(t for t in ctest_tests if t not in reach and t not in allow)
+
+
+def _run_probe(args):
     depmap = json.load(open(args.depmap))
     file_to_executables = depmap.get("file_to_executables", depmap)
     ctest_tests = load_ctest_tests(args.ctest) if args.ctest else None
@@ -127,7 +131,70 @@ def main():
         print(f"  FN ✗ {e}")
     print(f"false positives:  {result['n_fp']} (safe over-selection)")
     print(f"verdict: {result['verdict'].upper()}")
-    sys.exit(0 if result["verdict"] == "pass" else 1)
+    return 0 if result["verdict"] == "pass" else 1
+
+
+def _run_reachability(args):
+    depmap = json.load(open(args.depmap))
+    ctest_tests = load_ctest_tests(args.ctest)
+    allow = set()
+    if args.allowlist and os.path.exists(args.allowlist):
+        allow = {ln.strip() for ln in open(args.allowlist)
+                 if ln.strip() and not ln.startswith("#")}
+    unreach = unreachable_tests(depmap, ctest_tests, allow)
+    result = {
+        "n_ctest": len(ctest_tests),
+        "n_reachable": len(reachable_exe_basenames(depmap)),
+        "n_unreachable": len(unreach),
+        "unreachable": unreach,
+        "allowlisted": sorted(allow),
+        "verdict": "pass" if not unreach else "fail",
+    }
+    if args.output:
+        json.dump(result, open(args.output, "w"), indent=2)
+
+    print("=== reachability guardrail ===")
+    print(f"ctest tests:     {result['n_ctest']}")
+    print(f"reachable exes:  {result['n_reachable']}")
+    print(f"unreachable:     {result['n_unreachable']} (filter can never select -> FN)")
+    for t in unreach:
+        print(f"  ✗ {t}")
+    if allow:
+        print(f"allowlisted (ignored): {len(allow)}")
+    print(f"verdict: {result['verdict'].upper()}")
+    return 0 if result["verdict"] == "pass" else 1
+
+
+def main():
+    p = argparse.ArgumentParser(description="Build-filter completeness oracle")
+    sub = p.add_subparsers(dest="command", required=True)
+
+    pr = sub.add_parser("probe", help="Per-file FN/FP via perturb+rebuild ground truth")
+    pr.add_argument("--depmap", required=True, help="cmake_dependency_mapping.json")
+    pr.add_argument("--ninja", required=True, help="build.ninja")
+    pr.add_argument("--ctest", help="ctest -N output (optional intersection)")
+    pr.add_argument("--file", required=True, help="changed file, depmap-relative key")
+    pr.add_argument(
+        "--failed-objects",
+        required=True,
+        help="file with ninja stderr (FAILED: lines) from the perturbed build",
+    )
+    pr.add_argument("--output", help="write per-probe result JSON here")
+
+    rc = sub.add_parser(
+        "reachability",
+        help="Guardrail: fail if any ctest test is unreachable in the depmap (no build)",
+    )
+    rc.add_argument("--depmap", required=True, help="cmake_dependency_mapping.json")
+    rc.add_argument("--ctest", required=True, help="ctest -N output")
+    rc.add_argument("--allowlist", help="file of known-acceptable unreachable test names")
+    rc.add_argument("--output", help="write result JSON here")
+
+    args = p.parse_args()
+    if args.command == "probe":
+        sys.exit(_run_probe(args))
+    elif args.command == "reachability":
+        sys.exit(_run_reachability(args))
 
 
 if __name__ == "__main__":
