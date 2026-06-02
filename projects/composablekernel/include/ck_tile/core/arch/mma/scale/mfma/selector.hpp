@@ -7,6 +7,7 @@
 #include "ck_tile/core/arch/mma/amdgcn_mma.hpp"
 #include "ck_tile/core/arch/mma/mma_selector.hpp"
 #include "ck_tile/core/utility/type_traits.hpp"
+#include "ck_tile/core/arch/mma/scale/mfma/scale_gfx9.hpp"
 
 namespace ck_tile::core::arch::mma {
 // TODO: We do not allow M / N composition for now, since it is not used in current CK Tile.
