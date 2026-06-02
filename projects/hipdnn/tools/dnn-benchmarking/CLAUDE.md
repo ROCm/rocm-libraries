@@ -90,7 +90,7 @@ python -m dnn_benchmarking --graph 'graphs/*.json' \
   --plugin-path /path/to/hipdnn/plugins --output results.json
 
 # Repeatable recipe from TOML config
-python -m dnn_benchmarking --config sample_configs/engine_compare.toml
+python -m dnn_benchmarking --config sample_configs/basic.toml.example --graph ./graphs/sample_conv_fwd.json
 
 # Engine comparison
 python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json --engine 1,2

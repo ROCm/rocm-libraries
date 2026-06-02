@@ -66,8 +66,8 @@ Examples:
   dnn-benchmark -g ./graphs/conv1_fwd.json -e 1
   dnn-benchmark -g ./graphs/conv1_fwd.json -v        # verbose per-engine output
   dnn-benchmark -g ./graphs/conv1_fwd.json -e 1,2
-  dnn-benchmark --config sample_configs/basic_suite.toml
-  dnn-benchmark --config sample_configs/engine_compare.toml --iters 500
+  dnn-benchmark --config sample_configs/basic.toml.example --graph ./graphs/conv1_fwd.json
+  dnn-benchmark --config sample_configs/config.toml.example --iters 500
 
 PyTorch Backend (GPU via PyTorch):
   dnn-benchmark -g ./graph.json --backend pytorch

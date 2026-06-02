@@ -118,12 +118,12 @@ python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json \
 ### Config Files
 
 Use `--config` for repeatable benchmark recipes. CLI flags override config
-values, so a recipe can be reused with quick iteration-count changes. Relative
-paths in a config file are resolved from that config file's directory.
+values, so a recipe can be reused with per-run workload or iteration changes.
+Relative paths in a config file are resolved from that config file's directory.
 
 ```bash
-python -m dnn_benchmarking --config sample_configs/basic_suite.toml
-python -m dnn_benchmarking --config sample_configs/engine_compare.toml --iters 500
+python -m dnn_benchmarking --config sample_configs/basic.toml.example --graph ./graphs/sample_conv_fwd.json
+python -m dnn_benchmarking --config sample_configs/config.toml.example --iters 500
 ```
 
 ### CLI Options

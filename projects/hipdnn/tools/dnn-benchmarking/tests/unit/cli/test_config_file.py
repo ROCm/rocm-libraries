@@ -269,15 +269,28 @@ profiling_output_dir = "profiles"
 def test_sample_configs_parse_and_reference_existing_graphs() -> None:
     root = Path(__file__).resolve().parents[3]
 
-    for name in ("basic_suite.toml", "engine_compare.toml"):
-        config = root / "sample_configs" / name
-        args = create_parser().parse_args(["--config", str(config)])
+    full_config = root / "sample_configs" / "config.toml.example"
+    full_args = create_parser().parse_args(["--config", str(full_config)])
 
-        apply_config_file(args, provided=set())
+    apply_config_file(full_args, provided=set())
 
-        assert args.graph
-        for graph in args.graph:
-            assert Path(graph).exists()
+    assert full_args.graph
+    for graph in full_args.graph:
+        assert Path(graph).exists()
+
+    basic_config = root / "sample_configs" / "basic.toml.example"
+    graph = root / "graphs" / "sample_conv_fwd.json"
+    basic_args = create_parser().parse_args(
+        ["--config", str(basic_config), "--graph", str(graph)]
+    )
+
+    apply_config_file(basic_args, provided={"graph"})
+
+    assert basic_args.graph == [str(graph)]
+    assert basic_args.warmup == 10
+    assert basic_args.iters == 100
+    assert basic_args.verbose is True
+    assert basic_args.plugin_path == [Path("/opt/rocm/lib/hipdnn_plugins/engines")]
 
 
 def test_invalid_config_backend_errors_before_gpu_check(tmp_path: Path, capsys) -> None:
