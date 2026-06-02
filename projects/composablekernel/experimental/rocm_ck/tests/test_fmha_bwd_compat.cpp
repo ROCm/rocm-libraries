@@ -7,9 +7,16 @@
 // registry and asserts ALL fields. If a schema change breaks a test,
 // the change is not backwards-compatible.
 //
-// NOTE: block_size and block_n0 in DqDkDv are demo constants
-// (dqdkdv_spec.hpp:200-204). Update when architecture-dependent tile
-// selection is implemented.
+// NOTE: block_size and block_n0 in DqDkDv are demo constants (makeSpec()'s
+// demo_block_size / demo_block_n0 in dqdkdv_spec.hpp). Update when
+// architecture-dependent tile selection is implemented.
+//
+// These host tests can only assert spec-layer fields. block_n0 is the SAME
+// (128) for d64 and d128, so it does NOT distinguish the two tiles -- the
+// per-hdim tile geometry lives in dqdkdv_dev.hpp's conditional BlockTile and
+// is verified there by a static_assert (block_n0 == BlockTile kN0). What
+// gates the d64 vs d128 tile selection is hdim_q/hdim_v, which these tests do
+// assert.
 //
 // The findVariant() tests require the registry header from the example
 // directory, which is added to the include path by CMakeLists.txt.
@@ -206,12 +213,9 @@ TEST(FmhaBwdCompat, DqDkDv_BF16_D128_Batch)
 
 TEST(FmhaBwdCompat, DqDkDv_FP16_D64_Batch)
 {
-    constexpr auto k =
-        makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
-                                                   .hdim_q = 64,
-                                                   .hdim_v = 64,
-                                                   .mode   = FmhaMode::BATCH},
-                                     .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+    constexpr auto k = makeSpec(FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 64, .hdim_v = 64, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
 
     EXPECT_EQ(k.dtype, DataType::FP16);
     EXPECT_EQ(k.hdim_q, 64);
@@ -231,12 +235,9 @@ TEST(FmhaBwdCompat, DqDkDv_FP16_D64_Batch)
 
 TEST(FmhaBwdCompat, DqDkDv_BF16_D64_Batch)
 {
-    constexpr auto k =
-        makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::BF16,
-                                                   .hdim_q = 64,
-                                                   .hdim_v = 64,
-                                                   .mode   = FmhaMode::BATCH},
-                                     .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+    constexpr auto k = makeSpec(FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::BF16, .hdim_q = 64, .hdim_v = 64, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
 
     EXPECT_EQ(k.dtype, DataType::BF16);
     EXPECT_EQ(k.hdim_q, 64);
@@ -843,24 +844,18 @@ TEST(FmhaBwdCompat, Registry_DqDkDv_FindsBF16Group)
 
 TEST(FmhaBwdCompat, Registry_DqDkDv_FindsFP16D64Batch)
 {
-    const auto* v =
-        findVariant(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
-                                                      .hdim_q = 64,
-                                                      .hdim_v = 64,
-                                                      .mode   = FmhaMode::BATCH},
-                                        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+    const auto* v = findVariant(FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 64, .hdim_v = 64, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
     ASSERT_NE(v, nullptr);
     EXPECT_STREQ(v->name, "fmha_bwd_dqdkdv_fp16_d64_batch");
 }
 
 TEST(FmhaBwdCompat, Registry_DqDkDv_FindsBF16D64Batch)
 {
-    const auto* v =
-        findVariant(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::BF16,
-                                                      .hdim_q = 64,
-                                                      .hdim_v = 64,
-                                                      .mode   = FmhaMode::BATCH},
-                                        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+    const auto* v = findVariant(FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::BF16, .hdim_q = 64, .hdim_v = 64, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
     ASSERT_NE(v, nullptr);
     EXPECT_STREQ(v->name, "fmha_bwd_dqdkdv_bf16_d64_batch");
 }
@@ -1056,6 +1051,20 @@ TEST(FmhaBwdCompat, Registry_DqDkDv_FindsBF16EBiasDBias)
 
 TEST(FmhaBwdCompat, Registry_DqDkDv_ReturnsNullForUnregistered)
 {
+    // This negative test relies on d96 being a valid-but-unregistered hdim.
+    // Guard that premise: if a d96 dqdkdv variant is ever added, this fires and
+    // forces picking a different unregistered probe below (otherwise the test
+    // would silently start passing for the wrong reason).
+    for(int i = 0; i < ALL_DQDKDV_VARIANTS_COUNT; ++i)
+    {
+        const auto& s = rocm_ck::ALL_DQDKDV_VARIANTS[i].spec;
+        EXPECT_FALSE(s.hdim_q == 96 && s.hdim_v == 96)
+            << "variant '" << rocm_ck::ALL_DQDKDV_VARIANTS[i].name
+            << "' is a d96 dqdkdv entry; the unregistered-probe premise of "
+               "Registry_DqDkDv_ReturnsNullForUnregistered no longer holds -- "
+               "pick a different unregistered hdim";
+    }
+
     const auto* v = findVariant(FmhaBwdDQDKDVConfig{
         .signature = {.dtype = DataType::FP16, .hdim_q = 96, .hdim_v = 96, .mode = FmhaMode::BATCH},
         .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
