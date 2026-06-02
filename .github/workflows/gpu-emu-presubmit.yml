@@ -3,15 +3,15 @@
 
 # Pre-submit GPU emulation tests for TensileLite gfx1250 common GEMM tests.
 #
-# Dispatches to an external PSDB (Pre-Submit DataBase) workflow that builds
-# ROCm from the PR's commit and runs FFM (Functional Model) tests.
+# Dispatches to an external CI workflow that builds ROCm from the PR's commit
+# and runs GPU emulation tests on gfx1250.
 #
 # Required secrets (configured by repo admin):
-#   PSDB_DISPATCH_PAT  — GitHub PAT with `repo` scope on the target repository
-#   PSDB_DISPATCH_REPO — Target repository in "org/repo" format
+#   GPU_EMU_DISPATCH_PAT  — GitHub PAT with `repo` scope on the target repository
+#   GPU_EMU_DISPATCH_REPO — Target repository in "org/repo" format
 #
 # Required variable:
-#   PSDB_DISPATCH_ENABLED — Set to "true" to enable dispatch (kill switch)
+#   GPU_EMU_DISPATCH_ENABLED — Set to "true" to enable dispatch (kill switch)
 
 name: Pre-Submit GPU Emulation Tests
 
@@ -27,17 +27,17 @@ permissions:
 
 jobs:
   dispatch-gpu-tests:
-    name: Dispatch gfx1250 FFM tests
+    name: Dispatch gfx1250 emulation tests
     if: >-
       !github.event.pull_request.draft &&
-      vars.PSDB_DISPATCH_ENABLED == 'true'
+      vars.GPU_EMU_DISPATCH_ENABLED == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger PSDB build + FFM tests
+      - name: Trigger GPU emulation build and tests
         env:
-          GH_TOKEN: ${{ secrets.PSDB_DISPATCH_PAT }}
+          GH_TOKEN: ${{ secrets.GPU_EMU_DISPATCH_PAT }}
         run: |
-          gh api "repos/${{ secrets.PSDB_DISPATCH_REPO }}/dispatches" \
+          gh api "repos/${{ secrets.GPU_EMU_DISPATCH_REPO }}/dispatches" \
             -f event_type=psdb-trigger \
             -f "client_payload={
               \"repo\": \"rocm-libraries\",
