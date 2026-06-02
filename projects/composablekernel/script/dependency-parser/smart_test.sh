@@ -16,15 +16,15 @@
 #   0 = Success (tests passed, or nothing to test)
 #   1 = Test failure, or build phase did not run (missing build_mode.env)
 #
-# Environment variables:
-#   BUILD_DIR - Build directory (defaults to current directory)
-#   CTEST_PARALLEL - ctest parallel level (default: 4)
+# Environment: see lib_env.sh for the shared variables and defaults (this script
+# uses BUILD_DIR and CTEST_PARALLEL).
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BUILD_DIR="${BUILD_DIR:-$(pwd)}"
-CTEST_PARALLEL="${CTEST_PARALLEL:-4}"
+# shellcheck source=lib_env.sh
+source "${SCRIPT_DIR}/lib_env.sh"
+init_smart_build_env
 LOG_FILE="${BUILD_DIR}/smart_test.log"
 
 # shellcheck source=lib_logging.sh

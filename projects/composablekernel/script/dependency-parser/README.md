@@ -658,6 +658,7 @@ uv run pytest tests/ --cov=src --cov-report=html
 | `smart_build.sh` | CI build phase: invokes smart_build_ci.sh, then builds selected (or all) test targets |
 | `smart_test.sh` | CI test phase: reads build_mode.env and runs the affected (or full) ctest suite |
 | `lib_logging.sh` | Sourced helper: `start_tee_log` (FIFO-tee logging, flush-safe, nest-aware) |
+| `lib_env.sh` | Sourced helper: `init_smart_build_env` (shared env defaults + canonical env-var reference) |
 | `ci_safety_check.sh` | Decides selective vs full build (cmake/tooling changes → full) |
 | `validate_pr.sh` | Developer tool: offline as-if comparison of smart vs legacy selection for a PR |
 | `filter_oracle.py` | Reachability guardrail (CI) and build-filter probe oracle |

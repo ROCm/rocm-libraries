@@ -23,25 +23,15 @@
 #   0 = Success (build complete, or dry-run validated, or nothing to build)
 #   1 = Build failure (or, in dry-run, an unresolvable target)
 #
-# Environment variables:
-#   WORKSPACE_ROOT - Path to workspace root
-#   BUILD_DIR - Build directory (defaults to current directory)
-#   PARALLEL - Number of parallel jobs for dependency analysis (default: 32)
-#   NINJA_JOBS - Number of ninja parallel jobs (required unless DRY_RUN=true)
-#   ARCH_NAME - Architecture name for trace files (required if PROCESS_NINJA_TRACE=true)
-#   PROCESS_NINJA_TRACE - Set to "true" to process ninja build traces (default: false)
-#   NINJA_FTIME_TRACE - Set to "true" to run ClangBuildAnalyzer (default: false)
-#   DRY_RUN - Set to "true" to validate the build graph without building (default: false)
+# Environment: see lib_env.sh for the shared variables and defaults. This script
+# also requires NINJA_JOBS (unless DRY_RUN) and ARCH_NAME (if PROCESS_NINJA_TRACE=true).
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BUILD_DIR="${BUILD_DIR:-$(pwd)}"
-WORKSPACE_ROOT="${WORKSPACE_ROOT:-$(cd ${BUILD_DIR}/.. && pwd)}"
-PARALLEL="${PARALLEL:-32}"
-PROCESS_NINJA_TRACE="${PROCESS_NINJA_TRACE:-false}"
-NINJA_FTIME_TRACE="${NINJA_FTIME_TRACE:-false}"
-DRY_RUN="${DRY_RUN:-false}"
+# shellcheck source=lib_env.sh
+source "${SCRIPT_DIR}/lib_env.sh"
+init_smart_build_env
 LOG_FILE="${BUILD_DIR}/smart_build.log"
 
 # Allow --dry-run / --smoke as a CLI alternative to DRY_RUN=true

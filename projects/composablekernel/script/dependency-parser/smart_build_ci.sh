@@ -24,10 +24,9 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BUILD_DIR="${BUILD_DIR:-$(pwd)}"
-WORKSPACE_ROOT="${WORKSPACE_ROOT:-$(cd ${BUILD_DIR}/.. && pwd)}"
-PARALLEL="${PARALLEL:-32}"
-BASE_BRANCH="${BASE_BRANCH:-develop}"
+# shellcheck source=lib_env.sh
+source "${SCRIPT_DIR}/lib_env.sh"
+init_smart_build_env
 LOG_FILE="${BUILD_DIR}/smart_build_ci.log"
 
 # Stream output to a log file (for CI artifact archiving) as well as the console.
