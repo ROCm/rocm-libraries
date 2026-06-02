@@ -133,6 +133,7 @@ def get_modified_paths(base_ref: str) -> Optional[Iterable[str]]:
 
 GITHUB_WORKFLOWS_CI_PATTERNS = [
     "therock*",
+    "ci-env*",
 ]
 
 
@@ -142,6 +143,9 @@ def is_path_workflow_file_related_to_ci(path: str) -> bool:
         for pattern in GITHUB_WORKFLOWS_CI_PATTERNS
     ) or any(
         fnmatch.fnmatch(path, ".github/scripts/" + pattern)
+        for pattern in GITHUB_WORKFLOWS_CI_PATTERNS
+    ) or any(
+        fnmatch.fnmatch(path, ".github/actions/" + pattern)
         for pattern in GITHUB_WORKFLOWS_CI_PATTERNS
     )
 
