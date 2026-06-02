@@ -426,19 +426,18 @@ violated, disable smart build until fixed.
      when enabled; the only risk is the depmap configure diverging from the build
      configure (keep them in lockstep).
 
-   - **Separate-stage components** — built/tested in their *own* build dir by a
-     different Jenkins stage, outside smart-build entirely: `codegen` /
-     `composable_kernel_host` (`CK_USE_CODEGEN`, gfx9; built by
-     `build_client_examples_and_codegen_tests` in `codegen/build`; tests
-     `codegen_test_*`) and `dispatcher`. These are **out of smart-build scope by
-     design** and run as an always-full stage — so they are *not* smart-build
-     false negatives; smart-build neither selects nor claims them. (Nuance:
-     `codegen` embeds CK headers via `add_embed_library` + hiprtc, so part of its
-     header dependence is runtime/embedded rather than compile-`#include` anyway.)
+   - **Separate-stage components** — built and tested in their *own* build dir by a
+     dedicated Jenkins stage: `codegen` / `composable_kernel_host`
+     (`CK_USE_CODEGEN`, gfx9; built by `build_client_examples_and_codegen_tests` in
+     `codegen/build`; tests `codegen_test_*`) and `dispatcher`. **Their own stage
+     covers them**, so smart-build correctly leaves them to it — they sit outside
+     smart-build's scope by design. (Nuance: `codegen` embeds CK headers via
+     `add_embed_library` + hiprtc, so part of its header dependence is
+     runtime/embedded rather than compile-`#include`.)
 
-   Rule of thumb: a component built **in the smart-build flow** must be in that
-   flow's depmap configure (else FN); a component built **in its own stage** is
-   covered there, independently.
+   Rule of thumb: a component built **in the smart-build flow** belongs in that
+   flow's depmap configure to be selectable; a component built **in its own
+   stage** is covered there, independently.
 
 ---
 
