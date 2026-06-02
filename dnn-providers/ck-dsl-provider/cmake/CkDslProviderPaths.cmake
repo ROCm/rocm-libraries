@@ -83,3 +83,53 @@ function(ck_dsl_provider_resolve_python_paths)
         "ck_dsl=${_resolvedCkDslDir}, "
         "ck_dsl_provider=${_providerPyDir}")
 endfunction()
+
+# Resolve the include directories needed to consume the header-only
+# CK-Tile dispatcher key/problem types (fmha_kernel_key.hpp /
+# fmha_problem.hpp). Two directories are required because fmha_types.hpp
+# (pulled in transitively) includes ck_tile/core and ck_tile/ops headers:
+#   1. projects/composablekernel/dispatcher/include
+#   2. projects/composablekernel/include
+#
+# Both are HIP-free (the key/problem headers do NOT transitively include
+# kernel_launch.hpp), so the consuming TUs need no HIP compile mode.
+#
+# Walks up from the provider source directory the same way the Python
+# package resolver does. Outputs (set in caller's scope):
+#   CK_DISPATCHER_INCLUDE_DIR  dispatcher/include
+#   CK_TILE_INCLUDE_DIR        composablekernel/include
+function(ck_dsl_provider_resolve_dispatcher_include)
+    set(_searchDir "${_ckDslProviderPathsCmakeDir}/..")
+    get_filename_component(_searchDir "${_searchDir}" ABSOLUTE)
+
+    set(_ckRelMarker "projects/composablekernel/dispatcher/include/ck_tile/dispatcher/fmha_kernel_key.hpp")
+    set(_resolvedCkRoot "")
+
+    while(NOT _resolvedCkRoot AND NOT _searchDir STREQUAL "/")
+        if(EXISTS "${_searchDir}/${_ckRelMarker}")
+            set(_resolvedCkRoot "${_searchDir}/projects/composablekernel")
+            break()
+        endif()
+        get_filename_component(_parent "${_searchDir}" DIRECTORY)
+        if(_parent STREQUAL _searchDir)
+            break()
+        endif()
+        set(_searchDir "${_parent}")
+    endwhile()
+
+    if(NOT _resolvedCkRoot OR NOT EXISTS "${_resolvedCkRoot}/dispatcher/include")
+        message(FATAL_ERROR
+            "CK DSL provider: failed to locate the CK-Tile dispatcher "
+            "include directory. Walked up from "
+            "${CMAKE_CURRENT_LIST_DIR}/.. looking for ${_ckRelMarker}. "
+            "Set CK_DISPATCHER_INCLUDE_DIR explicitly to override the search.")
+    endif()
+
+    set(CK_DISPATCHER_INCLUDE_DIR "${_resolvedCkRoot}/dispatcher/include" PARENT_SCOPE)
+    set(CK_TILE_INCLUDE_DIR "${_resolvedCkRoot}/include" PARENT_SCOPE)
+
+    message(STATUS
+        "CK DSL provider dispatcher includes: "
+        "dispatcher=${_resolvedCkRoot}/dispatcher/include, "
+        "ck_tile=${_resolvedCkRoot}/include")
+endfunction()

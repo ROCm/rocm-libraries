@@ -18,6 +18,7 @@ add_executable(
     ConvImplicitGemmAdapterTest.cpp
     ConvImplicitGemmPlanBuilderTest.cpp
     SdpaAdapterTest.cpp
+    SdpaCandidateSelectorTest.cpp
     SdpaFwdPlanBuilderTest.cpp
     SdpaBwdAdapterTest.cpp
     SdpaBwdPlanBuilderTest.cpp

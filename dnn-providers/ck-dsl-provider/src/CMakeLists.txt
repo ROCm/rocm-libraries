@@ -14,6 +14,7 @@ add_library(
     adapters/conv_implicit_gemm/ConvImplicitGemmAdapter.cpp
     adapters/conv_implicit_gemm/ConvImplicitGemmPayload.cpp
     adapters/sdpa/SdpaAdapter.cpp
+    adapters/sdpa/SdpaCandidateSelector.cpp
     adapters/sdpa/SdpaBwdAdapter.cpp
     adapters/sdpa/SdpaBwdPayload.cpp
     adapters/sdpa/SdpaPayload.cpp
