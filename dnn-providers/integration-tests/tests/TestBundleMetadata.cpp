@@ -389,7 +389,7 @@ TEST(TestCheckArchCompatibility, PassesWhenArchMatches)
     BundleMetadata meta;
     meta.referenceExecutor = "gpu";
     meta.gpuArchitecture = "gfx942";
-    // "gfx942" is a substring of "gfx942:sramecc+:xnack-"
+    // "gfx942" is a prefix of "gfx942:sramecc+:xnack-" (followed by ':')
     EXPECT_FALSE(checkArchCompatibility(meta, "gfx942:sramecc+:xnack-").has_value());
 }
 
