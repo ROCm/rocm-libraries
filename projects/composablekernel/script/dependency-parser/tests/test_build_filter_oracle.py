@@ -158,5 +158,39 @@ class TestCodegenGlobs(unittest.TestCase):
         self.assertEqual(bfo.expand_test_globs([], {"test_gemm"}), [])
 
 
+class TestCoverage(unittest.TestCase):
+    def test_full_coverage_when_pre_superset(self):
+        pre = {"a.hpp": ["bin/test_a", "bin/test_b"], "b.cpp": ["bin/test_b"]}
+        post = {"a.hpp": ["bin/test_a"], "b.cpp": ["bin/test_b"]}
+        r = bfo.compute_coverage(pre, post)
+        self.assertEqual(r["coverage"], 1.0)
+        self.assertEqual(r["n_false_negatives"], 0)
+        self.assertEqual(r["verdict"], "pass")
+
+    def test_missing_edge_is_false_negative(self):
+        pre = {"gen.cpp": []}  # depmap saw the file but no exe (e.g. generated)
+        post = {"gen.cpp": ["bin/test_fmha"]}  # real build proves the edge
+        r = bfo.compute_coverage(pre, post)
+        self.assertEqual(r["verdict"], "fail")
+        self.assertEqual(r["false_negatives"], {"gen.cpp": ["bin/test_fmha"]})
+        self.assertEqual(r["coverage"], 0.0)
+
+    def test_ctest_intersection_excludes_nontests(self):
+        pre = {"h.hpp": ["bin/test_x"]}
+        post = {"h.hpp": ["bin/test_x", "bin/example_x"]}
+        # example_x is not ctest-registered -> not counted as a missing edge
+        r = bfo.compute_coverage(pre, post, ctest_tests={"test_x"})
+        self.assertEqual(r["coverage"], 1.0)
+        self.assertEqual(r["n_false_negatives"], 0)
+
+    def test_partial_coverage_fraction(self):
+        pre = {"a": ["bin/t1"], "b": []}
+        post = {"a": ["bin/t1"], "b": ["bin/t2"]}  # 1 of 2 edges covered
+        r = bfo.compute_coverage(pre, post)
+        self.assertEqual(r["n_edges_post"], 2)
+        self.assertEqual(r["n_edges_covered"], 1)
+        self.assertEqual(r["coverage"], 0.5)
+
+
 if __name__ == "__main__":
     unittest.main()

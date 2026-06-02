@@ -482,7 +482,36 @@ as a follow-up.
 
 ---
 
-## 10. Contacts and escalation
+## 10. Nightly filter-coverage oracle
+
+The nightly (develop / `RUN_ALL_UNIT_TESTS=true`) does a clean full `ninja check`,
+which leaves the compiler's real `#include` graph in `.ninja_deps`. A non-fatal
+step then measures how well the smart-build depmap *would have* covered that real
+graph — for free, whole-repo, on the actual configuration:
+
+```
+main.py cmake-parse … --workspace-root $WS --output pre_depmap.json   # the prediction
+main.py parse build.ninja --workspace-root $WS                        # -> enhanced_dependency_mapping.json (ground truth, via ninja -t deps)
+filter_oracle.py coverage --pre pre_depmap.json --post enhanced_dependency_mapping.json --ctest ctest_list.txt --output coverage_result.json
+```
+
+`coverage_result.json` fields:
+- `coverage` — covered edges / total real edges (toward the ≥99% run-accuracy goal).
+- `false_negatives` — `{file: [tests]}` the real build proves but the depmap lacks
+  (extraction gaps the filter would silently skip). The list to drive to zero.
+- `n_edges_post`, `n_edges_covered`, `verdict`.
+
+This is the cheap path to the run-accuracy signal: the expensive build already
+happened nightly; the diff costs `cmake-parse` (minutes) + one `ninja -t deps`
+(~2s). It validates the **compile/`#include`** channel only — runtime/behavioral
+deps (data files, dlopen) are not covered. Both maps must use the **same
+`--workspace-root`** or path mismatch shows up as spurious FNs.
+
+To reproduce on any full build dir: run the three commands above in it.
+
+---
+
+## 11. Contacts and escalation
 
 - Smart-build tooling is in `projects/composablekernel/script/dependency-parser/`
 - Unit tests: `uv run pytest tests/` (requires `uv sync` once)

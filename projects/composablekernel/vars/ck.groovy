@@ -808,6 +808,21 @@ def cmake_build(Map conf=[:]){
                     if(!setup_args.contains("gfx1250")){
                         echo "Full test suite requested (RUN_ALL_UNIT_TESTS=true or develop branch)"
                         sh "ninja -j${nt} check"
+
+                        // Filter-coverage oracle (advisory, non-fatal): the full
+                        // build just produced the real #include graph in .ninja_deps.
+                        // Diff the pre-build smart depmap against that post-build
+                        // ground truth to measure selection coverage (FN candidates)
+                        // for free. Both maps use the same --workspace-root so keys
+                        // align. Compile-coverage only.
+                        sh """
+                            export DP=../script/dependency-parser
+                            python3 \$DP/main.py cmake-parse compile_commands.json build.ninja --workspace-root ${env.WORKSPACE} --parallel 32 --output pre_depmap.json || true
+                            python3 \$DP/main.py parse build.ninja --workspace-root ${env.WORKSPACE} || true
+                            ctest -N > ctest_list.txt 2>/dev/null || true
+                            python3 \$DP/filter_oracle.py coverage --pre pre_depmap.json --post enhanced_dependency_mapping.json --ctest ctest_list.txt --output coverage_result.json || true
+                        """
+                        archiveArtifacts artifacts: "coverage_result.json", allowEmptyArchive: true
                     }
                     else{ //do not run tests on gfx1250, just build everything
                         echo "Building for gfx1250"

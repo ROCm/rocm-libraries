@@ -67,6 +67,47 @@ def sel_for_file(file_to_executables, ctest_tests, file_key):
     return exes
 
 
+def compute_coverage(pre_f2e, post_f2e, ctest_tests=None):
+    """Diff a pre-build depmap against the post-build ground-truth depmap.
+
+    post_f2e is the real build's file->executables (from `ninja -t deps`); pre_f2e
+    is the smart-build prediction (from cmake-parse). For each file, edges the real
+    build proves but the prediction lacks (post[f] minus pre[f]) are false-negative
+    candidates. With ctest_tests, only edges to registered tests count. Both maps
+    must be keyed with the same workspace-root so paths match.
+    """
+    def _ctest_only(exes):
+        if ctest_tests is None:
+            return set(exes)
+        return {e for e in exes if os.path.basename(e) in ctest_tests}
+
+    false_negatives = {}
+    n_edges_post = 0
+    n_edges_covered = 0
+    for f, post_exes in post_f2e.items():
+        post_set = _ctest_only(post_exes)
+        if not post_set:
+            continue
+        pre_set = set(pre_f2e.get(f, []))
+        missing = post_set - pre_set
+        n_edges_post += len(post_set)
+        n_edges_covered += len(post_set & pre_set)
+        if missing:
+            false_negatives[f] = sorted(missing)
+
+    coverage = (n_edges_covered / n_edges_post) if n_edges_post else 1.0
+    return {
+        "n_files": len(post_f2e),
+        "n_edges_post": n_edges_post,
+        "n_edges_covered": n_edges_covered,
+        "coverage": round(coverage, 6),
+        "n_false_negatives": sum(len(v) for v in false_negatives.values()),
+        "n_files_with_fn": len(false_negatives),
+        "false_negatives": dict(sorted(false_negatives.items())),
+        "verdict": "pass" if not false_negatives else "fail",
+    }
+
+
 def parse_failed_objects(ninja_stderr_text):
     """Extract object paths from `ninja` FAILED: lines.
 
@@ -265,6 +306,40 @@ def _run_codegen_allowlist(args):
     return 0
 
 
+def _load_f2e(path):
+    """Load a depmap JSON -> its file_to_executables dict."""
+    with open(path) as f:
+        data = json.load(f)
+    return data.get("file_to_executables", data)
+
+
+def _run_coverage(args):
+    for path, label in [(args.pre, "--pre"), (args.post, "--post")]:
+        if not os.path.exists(path):
+            print(f"Error: missing required input ({label}): {path}", file=sys.stderr)
+            return 2
+    pre = _load_f2e(args.pre)
+    post = _load_f2e(args.post)
+    ctest_tests = load_ctest_tests(args.ctest) if args.ctest else None
+
+    result = compute_coverage(pre, post, ctest_tests)
+    if args.output:
+        with open(args.output, "w") as f:
+            json.dump(result, f, indent=2)
+
+    print("=== filter coverage (pre-build depmap vs post-build ground truth) ===")
+    print(f"files (post):     {result['n_files']}")
+    print(f"edges (post):     {result['n_edges_post']}")
+    print(f"covered:          {result['n_edges_covered']}")
+    print(f"coverage:         {result['coverage']:.4f}")
+    print(f"false negatives:  {result['n_false_negatives']} "
+          f"(across {result['n_files_with_fn']} files)")
+    for f, exes in list(result["false_negatives"].items())[:20]:
+        print(f"  FN {f} -> {', '.join(exes)}")
+    print(f"verdict: {result['verdict'].upper()}")
+    return 0 if result["verdict"] == "pass" else 1
+
+
 def main():
     p = argparse.ArgumentParser(description="Build-filter completeness oracle")
     sub = p.add_subparsers(dest="command", required=True)
@@ -308,6 +383,18 @@ def main():
     ca.add_argument("--ctest", required=True, help="ctest -N output")
     ca.add_argument("--output", help="write matched test names here (default: stdout)")
 
+    cov = sub.add_parser(
+        "coverage",
+        help="Diff a pre-build depmap vs the post-build ground truth (no build): "
+        "report file->test edges the real build proves but the depmap lacks (FNs)",
+    )
+    cov.add_argument("--pre", required=True,
+                     help="pre-build depmap JSON (cmake-parse output)")
+    cov.add_argument("--post", required=True,
+                     help="post-build depmap JSON (main.py parse / ninja -t deps)")
+    cov.add_argument("--ctest", help="ctest -N output (count only registered-test edges)")
+    cov.add_argument("--output", help="write coverage result JSON here")
+
     args = p.parse_args()
     if args.command == "probe":
         sys.exit(_run_probe(args))
@@ -315,6 +402,8 @@ def main():
         sys.exit(_run_reachability(args))
     elif args.command == "codegen-allowlist":
         sys.exit(_run_codegen_allowlist(args))
+    elif args.command == "coverage":
+        sys.exit(_run_coverage(args))
 
 
 if __name__ == "__main__":
