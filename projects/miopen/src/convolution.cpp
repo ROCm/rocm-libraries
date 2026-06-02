@@ -282,7 +282,7 @@ ConvolutionDescriptor::GetForwardOutputTensorWithLayout(const TensorDescriptor& 
     {
         out_c = wei_k;
 
-        for(size_t i = 0ULL; i < spatial_dim; ++i)
+        for(size_t i = 0U; i < spatial_dim; ++i)
         {
             out_spatial[i] = miopen::integer_division_ceil(in_spatial[i], GetConvStrides()[i]);
         }
@@ -292,7 +292,7 @@ ConvolutionDescriptor::GetForwardOutputTensorWithLayout(const TensorDescriptor& 
     {
         out_c = wei_k;
 
-        for(size_t i = 0ULL; i < spatial_dim; ++i)
+        for(size_t i = 0U; i < spatial_dim; ++i)
         {
             out_spatial[i] = miopen::integer_division_ceil(
                 std::ptrdiff_t(in_spatial[i]) - wei_spatial[i] + 1, GetConvStrides()[i]);
@@ -305,7 +305,7 @@ ConvolutionDescriptor::GetForwardOutputTensorWithLayout(const TensorDescriptor& 
         {
             out_c = wei_c * group_count;
 
-            for(size_t i = 0ULL; i < spatial_dim; ++i)
+            for(size_t i = 0U; i < spatial_dim; ++i)
             {
                 out_spatial[i] = std::max<std::ptrdiff_t>(
                     1,
@@ -319,7 +319,7 @@ ConvolutionDescriptor::GetForwardOutputTensorWithLayout(const TensorDescriptor& 
         {
             out_c = wei_k / wDesc.GetVectorLength();
 
-            for(size_t i = 0ULL; i < spatial_dim; ++i)
+            for(size_t i = 0U; i < spatial_dim; ++i)
             {
                 out_spatial[i] = std::max<std::ptrdiff_t>(
                     1,

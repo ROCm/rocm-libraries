@@ -345,7 +345,7 @@ T get_offset_from_index(const std::vector<T>& strides, const std::vector<T>& ind
 
     assert(strides.size() == index.size());
 
-    for(size_t i = 0ULL; i < index.size(); i++)
+    for(size_t i = 0U; i < index.size(); i++)
         offset += strides[i] * index[i];
 
     return (offset);
@@ -512,7 +512,7 @@ std::tuple<tensor<Tref>, tensor<int>> reduce_cpu_common(const miopenReduceTensor
         }
         else
         {
-            for(size_t p = 0ULL; p < P; ++p)
+            for(size_t p = 0U; p < P; ++p)
             {
                 worker(p);
             }
@@ -604,7 +604,7 @@ std::tuple<tensor<Tref>, tensor<int>> reduce_cpu_common(const miopenReduceTensor
         }
         else
         {
-            for(size_t te = 0ULL; te < Te; ++te)
+            for(size_t te = 0U; te < Te; ++te)
             {
                 worker(te);
             }

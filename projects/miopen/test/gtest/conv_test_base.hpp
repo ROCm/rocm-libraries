@@ -37,7 +37,14 @@ using Direction = miopen::conv::Direction;
 
 struct GroupConvTestConfigBase
 {
-    virtual ~GroupConvTestConfigBase() = default;
+    virtual ~GroupConvTestConfigBase()                                     = default;
+    GroupConvTestConfigBase(const GroupConvTestConfigBase&)                = default;
+    GroupConvTestConfigBase& operator=(const GroupConvTestConfigBase&)     = default;
+    GroupConvTestConfigBase(GroupConvTestConfigBase&&) noexcept            = default;
+    GroupConvTestConfigBase& operator=(GroupConvTestConfigBase&&) noexcept = default;
+
+protected:
+    GroupConvTestConfigBase() = default;
 };
 
 template <unsigned NDIM>
@@ -101,7 +108,7 @@ struct GroupConvTestConfig<2u> : GroupConvTestConfigBase
     std::vector<size_t> GetInput() { return {N, C, img.y, img.x}; }
     std::vector<size_t> GetWeights()
     {
-        EXPECT_EQUAL(C % G, 0ULL);
+        EXPECT_EQUAL(C % G, 0U);
         return {k, C / G, filter.y, filter.x};
     }
 
@@ -201,7 +208,7 @@ struct GroupConvTestConfig<3u>
     std::vector<size_t> GetInput() { return {N, C, img.z, img.y, img.x}; }
     std::vector<size_t> GetWeights()
     {
-        EXPECT_EQUAL(C % G, 0ULL);
+        EXPECT_EQUAL(C % G, 0U);
         return {k, C / G, filter.z, filter.y, filter.x};
     }
 
@@ -391,7 +398,7 @@ protected:
 
     void TearDownConv()
     {
-        ref_out = tensor<Tref>{output.desc.GetLayout_t(), output.desc.GetLengths()};
+        ref_out = tensor<Tref>{output.desc.GetLayoutEnum().value(), output.desc.GetLengths()};
         if(use_cpu_ref)
         {
             cpu_convolution_forward(conv_desc.GetSpatialDimension(),
