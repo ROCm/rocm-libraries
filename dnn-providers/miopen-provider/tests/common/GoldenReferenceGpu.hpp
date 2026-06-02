@@ -22,7 +22,7 @@
 namespace test_helpers
 {
 
-/// Query total device VRAM in megabytes for device 0.
+/// Query total device VRAM in megabytes for the current HIP device.
 /// Returns 0 if the device cannot be queried (e.g. no GPU present).
 inline std::size_t getDeviceTotalVramMb()
 {

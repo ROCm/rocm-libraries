@@ -261,6 +261,14 @@ TEST(TestLoadBundleMetadata, ReturnsNulloptOnStringFormatVersion)
     EXPECT_FALSE(meta.has_value());
 }
 
+TEST(TestLoadBundleMetadata, ReturnsNulloptOnFloatFormatVersion)
+{
+    // 1.0 is a float, not an integer — is_number_integer() returns false
+    const TempBundle bundle(R"({"format_version": 1.0})");
+    auto meta = loadBundleMetadata(bundle.bundleJsonPath());
+    EXPECT_FALSE(meta.has_value());
+}
+
 TEST(TestLoadBundleMetadata, IgnoresMetadataThatIsNotAnObject)
 {
     const TempBundle bundle(R"({"format_version": 1, "metadata": "not_an_object"})");
@@ -404,7 +412,7 @@ TEST(TestCheckArchCompatibility, SkipsWhenArchMismatches)
     EXPECT_NE(result->find("gfx1100"), std::string::npos);
 }
 
-TEST(TestCheckArchCompatibility, SkipsWhenArchSubstringNotFound)
+TEST(TestCheckArchCompatibility, SkipsWhenArchDoesNotMatch)
 {
     BundleMetadata meta;
     meta.referenceExecutor = "gpu";
