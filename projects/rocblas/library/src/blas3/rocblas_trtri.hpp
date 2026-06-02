@@ -405,10 +405,8 @@ rocblas_trtri_fill(rocblas_handle handle,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         size_t tx   = size_t(blockIdx.x) * DIM_X + threadIdx.x;
         T*     aptr = load_ptr_batch(A, batch, offset_A, stride_A);
@@ -427,10 +425,7 @@ rocblas_trtri_fill(rocblas_handle handle,
 
             tx += size_t(blockDim.x) * gridDim.x;
         }
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 // flag indicate whether write into A or invA
@@ -453,10 +448,8 @@ rocblas_trtri_small_kernel(rocblas_fill     uplo,
 {
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         // get the individual matrix which is processed by device function
         // device function only see one matrix
@@ -466,10 +459,7 @@ rocblas_trtri_small_kernel(rocblas_fill     uplo,
             = load_ptr_batch(invA, batch, offset_invA, stride_invA) + blockIdx.x * sub_stride_invA;
 
         rocblas_trtri_device<NB>(uplo, diag, n, individual_A, lda, individual_invA, ldinvA);
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 template <rocblas_int NB, typename T, typename U, typename V>
@@ -490,10 +480,8 @@ ROCBLAS_KERNEL_NO_BOUNDS rocblas_trtri_remainder_kernel(rocblas_fill     uplo,
 {
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         // get the individual matrix which is processed by device function
         // device function only see one matrix
@@ -503,10 +491,7 @@ ROCBLAS_KERNEL_NO_BOUNDS rocblas_trtri_remainder_kernel(rocblas_fill     uplo,
             = load_ptr_batch(invA, batch, offset_invA, stride_invA) + blockIdx.x * sub_stride_invA;
 
         rocblas_trtri_device<2 * NB>(uplo, diag, n, individual_A, lda, individual_invA, ldinvA);
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 template <rocblas_int NB, typename T, typename U, typename V>
@@ -604,10 +589,8 @@ rocblas_trtri_diagonal_kernel(rocblas_fill     uplo,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         // each hip thread Block compute a inverse of a IB * IB diagonal block of A
 
@@ -622,10 +605,7 @@ rocblas_trtri_diagonal_kernel(rocblas_fill     uplo,
         auto rem = n - (blockIdx.x % tiles) * IB;
         rocblas_custom_trtri_device<IB>(
             uplo, diag, rem < IB ? rem : IB, individual_A, lda, individual_invA, ldinvA);
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 // compute square block of invA
