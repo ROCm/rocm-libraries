@@ -22,6 +22,7 @@ add_executable(
     SdpaMarshallingTest.cpp
     SdpaScorerTest.cpp
     SdpaFwdPlanBuilderTest.cpp
+    SdpaFwdFakeLaunchTest.cpp
     SdpaBwdAdapterTest.cpp
     SdpaBwdPlanBuilderTest.cpp
     GraphSignatureTest.cpp

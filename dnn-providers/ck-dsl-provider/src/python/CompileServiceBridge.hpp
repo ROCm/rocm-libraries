@@ -67,6 +67,21 @@ class CompileServiceBridge {
     /// compiles go through :func:`compile`.
     KernelArtifact compileSmoke();
 
+    /// POC verification entry point (ALMIOPEN-2002, Phase 4). Invokes
+    /// ``ck_dsl_provider.compile_service.compile_sdpa_fwd_fake(arch)`` and
+    /// translates the returned dict into a ``KernelArtifact``. The fake
+    /// kernel has the EXACT 18-slot unified-SDPA ABI so the production
+    /// ``SdpaFwdPlan`` packs + launches it unchanged, but its body does no
+    /// attention math -- thread 0 writes an ABI-slot fingerprint into the
+    /// output buffer. Used by the gfx90a fake-launch test to verify the
+    /// real ``execute()`` arg binding + marshalling + launch plumbing on
+    /// hardware without the gfx950 kernel's numerics.
+    ///
+    /// ``arch`` is the explicit target gfx token (the POC passes the
+    /// detected device arch). Acquires the GIL internally; any
+    /// ``py::error_already_set`` is translated via ``PythonError::raise``.
+    KernelArtifact compileSdpaFwdFake(std::string_view arch);
+
     /// Production compile entry point. Invokes
     /// ck_dsl_provider.compile_service.compile(op_kind, payload, arch),
     /// translates the returned dict into a ``KernelArtifact``, and
