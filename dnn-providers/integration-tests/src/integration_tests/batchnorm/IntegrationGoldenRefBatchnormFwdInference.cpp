@@ -53,7 +53,7 @@ TEST_P(TestCpuBatchnormFwdInferenceGoldenReferenceNchwFp32, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(,
                          TestCpuBatchnormFwdInferenceGoldenReferenceNchwFp32,
-                         getGoldenReferenceParams("BatchnormFwdInference/nchw/fp32"));
+                         getGoldenReferenceParams("quick/BatchnormFwdInference/nchw/fp32"));
 
 // Nchw Fp16------------
 TEST_P(TestCpuBatchnormFwdInferenceGoldenReferenceNchwFp16, Correctness)
@@ -63,7 +63,7 @@ TEST_P(TestCpuBatchnormFwdInferenceGoldenReferenceNchwFp16, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(,
                          TestCpuBatchnormFwdInferenceGoldenReferenceNchwFp16,
-                         getGoldenReferenceParams("BatchnormFwdInference/nchw/fp16"));
+                         getGoldenReferenceParams("quick/BatchnormFwdInference/nchw/fp16"));
 
 // Nchw Bfp16------------
 TEST_P(TestCpuBatchnormFwdInferenceGoldenReferenceNchwBfp16, Correctness)
@@ -73,7 +73,7 @@ TEST_P(TestCpuBatchnormFwdInferenceGoldenReferenceNchwBfp16, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(,
                          TestCpuBatchnormFwdInferenceGoldenReferenceNchwBfp16,
-                         getGoldenReferenceParams("BatchnormFwdInference/nchw/bfp16"));
+                         getGoldenReferenceParams("quick/BatchnormFwdInference/nchw/bfp16"));
 
 // Ncdhw Fp32------------
 TEST_P(TestCpuBatchnormFwdInferenceGoldenReferenceNcdhwFp32, Correctness)
@@ -83,6 +83,6 @@ TEST_P(TestCpuBatchnormFwdInferenceGoldenReferenceNcdhwFp32, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(,
                          TestCpuBatchnormFwdInferenceGoldenReferenceNcdhwFp32,
-                         getGoldenReferenceParams("BatchnormFwdInference/ncdhw/fp32"));
+                         getGoldenReferenceParams("quick/BatchnormFwdInference/ncdhw/fp32"));
 
 #endif // HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
