@@ -45,17 +45,31 @@
 //   Phase 1 buildBlockExitStates
 //                             Pre-scan every processed block once; populate
 //                             blockExitMemState with the DS / buffer / tensor
-//                             ops in flight at each block's exit.
+//                             ops in flight at each block's exit. The tensor
+//                             state is stored as a single collapsed
+//                             TensorPath (pred == self) for successor seeding.
 //   Phase 2 computeRequiredWaits   (per block, reverse post-order)
-//                             Seed the tensor queue from predecessors, walk
-//                             the block in program order, and produce a list
-//                             of (anchor, WaitCountSpec) pairs across all
-//                             three counters. Trims the refined exit state
-//                             back into blockExitMemState for successors.
+//                             Seed ONE TensorPath per non-self CFG
+//                             predecessor (preserving per-pred FIFO depth),
+//                             walk the block in program order, and produce a
+//                             list of (anchor, WaitCountSpec) pairs across
+//                             all three counters. Tensor waits run through
+//                             planTensorWait, which can record compensating
+//                             drains for shallower predecessors. Trims the
+//                             refined exit state back into blockExitMemState
+//                             for successors (tensor paths collapsed to a
+//                             single union view).
 //   Phase 3 emitWaitInstructions   (per block, reverse post-order)
 //                             Insert one s_wait_* IR node per non-kUnused
 //                             field in each WaitCountSpec, immediately before
 //                             the anchor.
+//   Phase 3.5 emitTailTensorCompensations  (after the RPO walk)
+//                             For every (predBlock, predRelativeWait)
+//                             recorded by planTensorWait's correctives,
+//                             insert an s_wait_tensorcnt at the
+//                             predecessor's tail (before its terminator)
+//                             so the shallower path drains its dep before
+//                             the merge anchor sees it.
 //   Phase 4 removePHIs        Strip PHI pseudo-instructions from processed
 //                             blocks now that def-use chains have been
 //                             consumed.
@@ -69,6 +83,7 @@
 
 #include <deque>
 #include <iostream>
+#include <limits>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -240,6 +255,46 @@ struct WaitCountSpec {
     }
 };
 
+/// Output of @c planTensorWait: the wait immediate to emit AT the anchor plus
+/// any compensating waits to insert at predecessors' tails to keep the anchor
+/// wait as lenient as possible.
+///
+/// Why per-path correctives: when paths converging at @c bb have different
+/// tensor FIFO depths, the strictest single anchor wait is
+/// @c min(w_i) over constrained paths, which over-drains the deeper paths
+/// and loses parallelism. Pre-draining the SHALLOWER paths at their pred's
+/// tail isolates their dep from the anchor, letting the anchor relax to
+/// @c max(w_i over correctable paths) -- the deepest path's strictest
+/// wait. The deepest path drains exactly its dep; shallower paths arrive
+/// already drained, so the anchor wait is a no-op for them.
+struct TensorWaitPlan {
+    /// True iff the anchor needs to emit @c s_wait_tensorcnt @c anchorWait.
+    bool needsWait = false;
+    /// Immediate for the anchor's @c s_wait_tensorcnt; valid iff @c needsWait.
+    int anchorWait = 0;
+    /// Pre-drains to insert at each predecessor's tail (before its terminator).
+    /// Each pair is @c (predBlock, predRelativeWait) where @c predRelativeWait
+    /// is the immediate to emit so that the pred's exit FIFO drains its
+    /// portion of the strictest dep on that path. Empty when every
+    /// constrained path already agrees on the same wait.
+    std::vector<std::pair<BasicBlock*, int>> correctives;
+    /// Per-path post-anchor "keep" size, aligned with
+    /// @c tracker.pendingTensorLoadOps. Each entry is the number of NEWEST
+    /// entries that remain in flight on that path after the anchor's wait
+    /// AND any compensating predecessor drains take effect:
+    ///   - correctable path with @c w_i < @c anchorWait: keep @c w_i
+    ///     (pred-tail corrective drains the rest);
+    ///   - any other constrained path: keep @c anchorWait (anchor's wait
+    ///     drains down to that residual on this path);
+    ///   - unconstrained or empty path: keep @c anchorWait (anchor's wait
+    ///     still applies; trim is a no-op when @c queue.size() <= keep).
+    /// The caller applies this per-path trim so bookkeeping reflects what
+    /// hardware will actually see on each CFG path, preventing later anchors
+    /// from emitting redundant drains for ops that the prior wait +
+    /// correctives already retired.
+    std::vector<int> perPathTrim;
+};
+
 /// Tracks in-flight (not yet waited-on) memory operations as ordered queues,
 /// one queue per hardware counter (DS / buffer / tensor). Each processed basic
 /// block has an associated tracker that represents its exit state; the
@@ -253,8 +308,29 @@ struct PendingMemOpTracker {
     std::unordered_set<int> activeDSTokens;
     /// Global loads/stores in issue order.
     std::deque<StinkyInstruction*> pendingBufferOps;
-    /// Tensor loads (tensor_load_to_lds) in issue order, tracked on tlcnt.
-    std::deque<StinkyInstruction*> pendingTensorLoadOps;
+
+    /// Per-predecessor view of in-flight @c tensor_load_to_lds ops.
+    ///
+    /// Each @c TensorPath represents the tensor FIFO along ONE incoming CFG
+    /// edge (or a synthetic "local-only" path when no predecessor state was
+    /// available). @c pred identifies the predecessor whose exit FIFO seeded
+    /// the entry; @c queue holds the pending loads on that path.
+    ///
+    /// During Phase 2 @c computeRequiredWaits the tracker holds one entry per
+    /// CFG predecessor (skip-self), populated by
+    /// @c seedTensorPathFromPredecessor. Local @c tensor_load_to_lds ops are
+    /// appended to EVERY entry by @c recordTensorLoadOperation so each path's
+    /// tail mirrors the in-block prefix.
+    ///
+    /// At block exit the tracker collapses to a single entry (the union of
+    /// all paths, tagged with @c pred == self) for storage in
+    /// @c blockExitMemState. Successors seed their own per-pred path from
+    /// that single queue via @c tensorExitQueue().
+    struct TensorPath {
+        BasicBlock* pred = nullptr;
+        std::deque<StinkyInstruction*> queue;
+    };
+    std::vector<TensorPath> pendingTensorLoadOps;
 
     int pendingDSCount() const {
         return static_cast<int>(pendingDSOps.size());
@@ -264,8 +340,45 @@ struct PendingMemOpTracker {
         return static_cast<int>(pendingBufferOps.size());
     }
 
-    int pendingTensorLoadCount() const {
+    /// Number of per-pred tensor path queues currently tracked.
+    int pendingTensorLoadPathCount() const {
         return static_cast<int>(pendingTensorLoadOps.size());
+    }
+
+    /// True iff every per-path tensor queue is empty.
+    bool noPendingTensorLoad() const {
+        for (const auto& p : pendingTensorLoadOps) {
+            if (!p.queue.empty()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /// Deduplicated union of all per-path tensor queues, preserving
+    /// first-occurrence order. Used by @c collectTensorLoadDependencies to
+    /// harvest the set of candidate tensor loads across every incoming path.
+    std::deque<StinkyInstruction*> tensorLoadUnion() const {
+        std::deque<StinkyInstruction*> u;
+        std::unordered_set<StinkyInstruction*> seen;
+        for (const auto& p : pendingTensorLoadOps) {
+            for (StinkyInstruction* op : p.queue) {
+                if (seen.insert(op).second) {
+                    u.push_back(op);
+                }
+            }
+        }
+        return u;
+    }
+
+    /// Single-queue exit-FIFO view used by successors when seeding their own
+    /// per-pred path from this block. Returns an empty deque if no exit
+    /// state has been stored. Precondition: the tracker stores at most one
+    /// path (collapsed exit form), enforced by
+    /// @c collapseTensorPathsToExitView after Phase 2.
+    const std::deque<StinkyInstruction*>& tensorExitQueue() const {
+        static const std::deque<StinkyInstruction*> kEmpty;
+        return pendingTensorLoadOps.empty() ? kEmpty : pendingTensorLoadOps.front().queue;
     }
 
     /// Number of DS ops from @p inst (inclusive) to the end of the queue. Returns 0 if
@@ -288,16 +401,6 @@ struct PendingMemOpTracker {
         return 0;
     }
 
-    /// Number of tensor loads from @p inst (inclusive) to the end of the queue.
-    /// Returns 0 if @p inst is not in the queue.
-    int pendingTensorLoadCountFrom(StinkyInstruction* inst) const {
-        auto it = std::find(pendingTensorLoadOps.begin(), pendingTensorLoadOps.end(), inst);
-        if (it != pendingTensorLoadOps.end()) {
-            return static_cast<int>(std::distance(it, pendingTensorLoadOps.end()));
-        }
-        return 0;
-    }
-
     /// True iff any in-flight DS op lacks MemTokenData. Used by the conservative
     /// barrier-vs-DS conflict path: an untagged pending DS op cannot be proven
     /// disjoint from a barrier, so a tagged barrier must still drain.
@@ -307,13 +410,19 @@ struct PendingMemOpTracker {
             [](const StinkyInstruction* op) { return op->getModifier<MemTokenData>() == nullptr; });
     }
 
-    /// True iff any in-flight tensor load lacks MemTokenData. Used by the conservative
-    /// tensor-wait path: an untagged pending tensor load cannot be proven disjoint
-    /// from a tagged anchor, so the anchor still drains.
+    /// True iff any in-flight tensor load on any per-path queue lacks
+    /// @c MemTokenData. Used by the conservative tensor-wait path: an
+    /// untagged pending tensor load cannot be proven disjoint from a tagged
+    /// anchor, so the anchor still drains.
     bool hasUntaggedTensorLoadOp() const {
-        return std::any_of(
-            pendingTensorLoadOps.begin(), pendingTensorLoadOps.end(),
-            [](const StinkyInstruction* op) { return op->getModifier<MemTokenData>() == nullptr; });
+        for (const auto& p : pendingTensorLoadOps) {
+            for (StinkyInstruction* op : p.queue) {
+                if (op->getModifier<MemTokenData>() == nullptr) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     void clear() {
@@ -348,32 +457,56 @@ struct PendingMemOpTracker {
         return true;
     }
 
-    /// Append @p inst to the tensor-load queue. Returns true iff appended.
+    /// Append @p inst to EVERY per-path tensor queue, ensuring at least one
+    /// path entry exists (a synthetic local-only path with @c pred == nullptr
+    /// is created if none was seeded). Returns true iff appended (i.e. when
+    /// @p inst is a @c tensor_load_to_lds).
+    ///
+    /// Per the per-path model, a local tensor load is in flight on every
+    /// incoming CFG path through this block, so it joins every path's tail.
+    /// The pred-portion of each path is therefore the entries SEEDED at
+    /// block entry; everything appended afterwards is the shared in-block
+    /// prefix.
     bool recordTensorLoadOperation(StinkyInstruction* inst) {
         if (inst == nullptr || !isTensorLoad(*inst)) {
             return false;
         }
-
-        pendingTensorLoadOps.push_back(inst);
+        if (pendingTensorLoadOps.empty()) {
+            pendingTensorLoadOps.push_back({nullptr, {}});
+        }
+        for (auto& p : pendingTensorLoadOps) {
+            p.queue.push_back(inst);
+        }
         return true;
     }
 
-    /// Tensor-only merge used by @c computeRequiredWaits to seed @c localState
-    /// with cross-block tensor in-flight ops at block entry. Appends every
-    /// pending tensor load from @p other while skipping pointers already
-    /// present, so multiple converging CFG paths do not duplicate the same op.
-    ///
-    /// The tracker has no @c activeTensorTokens companion to @c activeDSTokens;
-    /// tensor token-overlap is computed per-op against each pending load's
-    /// @c MemTokenData modifier, so seeding the @c pendingTensorLoadOps deque
-    /// alone is sufficient for both the barrier and DS-op tensor-wait anchors.
-    void mergeTensorFrom(const PendingMemOpTracker& other) {
-        for (StinkyInstruction* op : other.pendingTensorLoadOps) {
-            if (std::find(pendingTensorLoadOps.begin(), pendingTensorLoadOps.end(), op) ==
-                pendingTensorLoadOps.end()) {
-                pendingTensorLoadOps.push_back(op);
-            }
+    /// Seed a new per-predecessor tensor path with @p pred's exit FIFO. Used
+    /// by @c computeRequiredWaits at block entry so the per-anchor planner
+    /// can compute waits independently against each incoming CFG path.
+    /// @c exitQueue is copied; the caller may continue to mutate @p pred's
+    /// state without invalidating this seed.
+    void seedTensorPathFromPredecessor(BasicBlock* pred,
+                                       const std::deque<StinkyInstruction*>& exitQueue) {
+        pendingTensorLoadOps.push_back({pred, exitQueue});
+    }
+
+    /// Clear every per-path tensor queue (after a full drain
+    /// @c s_wait_tensorcnt 0).
+    void clearAllTensorPaths() {
+        for (auto& p : pendingTensorLoadOps) {
+            p.queue.clear();
         }
+    }
+
+    /// Collapse all per-path queues into a single entry holding the union
+    /// view, tagged with @p selfBlock. Called at block exit before storing
+    /// the tracker into @c blockExitMemState[selfBlock]: successors only see
+    /// this block as one CFG predecessor, so a single representative queue
+    /// is sufficient.
+    void collapseTensorPathsToExitView(BasicBlock* selfBlock) {
+        auto u = tensorLoadUnion();
+        pendingTensorLoadOps.clear();
+        pendingTensorLoadOps.push_back({selfBlock, std::move(u)});
     }
 
     /// Trim @p queue so only the last @p lastWait ops remain. No-op when there is no
@@ -389,6 +522,148 @@ struct PendingMemOpTracker {
         queue.erase(queue.begin(), queue.end() - lastWait);
     }
 };
+
+/// Plan the tensor wait at an anchor given the current per-path tracker
+/// state, the set of @p deps (token-overlapping prior tensor loads collected
+/// by @c collectTensorLoadDependencies), the number of tensor loads issued
+/// in the current block so far (@p inBlockTensorLoadCount), and the block
+/// itself (@p selfBlock) for the self-loop guard.
+///
+/// Algorithm (see "Per-path tensor wait planner" in the user doc):
+///   1. For each per-path queue, find the strictest dep (smallest
+///      @c count - 1) and remember whether that dep sits in the pred-portion
+///      of the path (i.e. it was seeded from the predecessor, not appended
+///      locally during this block walk).
+///   2. Partition constrained paths into CORRECTABLE (pred != nullptr,
+///      pred != selfBlock, strictest dep is in pred-portion) and the rest.
+///      Correctable paths can be drained at the pred's tail; the rest must
+///      be satisfied by the anchor's wait alone.
+///   3. @c anchorWait = @c min(@c max_w_correctable, @c min_w_uncorrectable)
+///      so the anchor wait is as lenient as possible while still draining
+///      every dep on every uncorrectable path.
+///   4. For each correctable path with @c w_i < @c anchorWait, emit a
+///      compensating @c s_wait_tensorcnt at the pred's tail with the
+///      pred-relative immediate @c w_i - @c inBlockTensorLoadCount, so by
+///      the time control reaches the anchor the pred has drained its share
+///      and the anchor wait is a no-op for that path.
+TensorWaitPlan planTensorWait(const PendingMemOpTracker& tracker,
+                              const std::unordered_set<StinkyInstruction*>& deps,
+                              int inBlockTensorLoadCount, BasicBlock* selfBlock) {
+    TensorWaitPlan plan;
+    // perPathTrim is always sized to match tracker.pendingTensorLoadOps so the
+    // caller can index it without a length check.
+    plan.perPathTrim.assign(tracker.pendingTensorLoadOps.size(), 0);
+    if (deps.empty()) {
+        return plan;
+    }
+
+    struct PathInfo {
+        BasicBlock* pred;
+        size_t pathIdx;
+        int w;
+        int wPred;
+        bool correctable;
+    };
+    std::vector<PathInfo> infos;
+    infos.reserve(tracker.pendingTensorLoadOps.size());
+
+    for (size_t pathIdx = 0; pathIdx < tracker.pendingTensorLoadOps.size(); ++pathIdx) {
+        const auto& path = tracker.pendingTensorLoadOps[pathIdx];
+        const int queueSize = static_cast<int>(path.queue.size());
+        if (queueSize == 0) {
+            continue;
+        }
+
+        int bestW = std::numeric_limits<int>::max();
+        int bestIndex = -1;
+        for (StinkyInstruction* dep : deps) {
+            auto it = std::find(path.queue.begin(), path.queue.end(), dep);
+            if (it == path.queue.end()) {
+                continue;
+            }
+            const int index = static_cast<int>(std::distance(path.queue.begin(), it));
+            const int w = queueSize - index - 1;
+            if (w < bestW) {
+                bestW = w;
+                bestIndex = index;
+            }
+        }
+        if (bestIndex < 0) {
+            continue;  // path has no dep in flight; unconstrained
+        }
+
+        // Local prefix = in-block tensor loads, appended uniformly to every
+        // path. predEntrySize is the per-path pred FIFO depth at block entry.
+        int predEntrySize = queueSize - inBlockTensorLoadCount;
+        if (predEntrySize < 0) {
+            predEntrySize = 0;
+        }
+        const bool strictestInPredPortion = bestIndex < predEntrySize;
+        const bool correctable =
+            (path.pred != nullptr && path.pred != selfBlock && strictestInPredPortion);
+
+        PathInfo info{path.pred, pathIdx, bestW, 0, correctable};
+        if (correctable) {
+            int wPred = bestW - inBlockTensorLoadCount;
+            if (wPred < 0) {
+                wPred = 0;
+            }
+            info.wPred = wPred;
+        }
+        infos.push_back(info);
+    }
+
+    if (infos.empty()) {
+        return plan;
+    }
+
+    int maxCorrectable = std::numeric_limits<int>::min();
+    int minUncorrectable = std::numeric_limits<int>::max();
+    for (const auto& info : infos) {
+        if (info.correctable) {
+            if (info.w > maxCorrectable) {
+                maxCorrectable = info.w;
+            }
+        } else {
+            if (info.w < minUncorrectable) {
+                minUncorrectable = info.w;
+            }
+        }
+    }
+
+    int anchorWait;
+    if (maxCorrectable == std::numeric_limits<int>::min()) {
+        anchorWait = minUncorrectable;
+    } else if (minUncorrectable == std::numeric_limits<int>::max()) {
+        anchorWait = maxCorrectable;
+    } else {
+        anchorWait = std::min(maxCorrectable, minUncorrectable);
+    }
+
+    plan.needsWait = true;
+    plan.anchorWait = anchorWait;
+
+    // Default per-path trim: anchorWait. The anchor's wait drains every path
+    // to at most anchorWait newest, so this is the conservative residual for
+    // unconstrained / uncorrectable paths AND for correctable paths whose
+    // strictest dep is deeper than anchorWait (where anchorWait was capped
+    // by some uncorrectable path).
+    std::fill(plan.perPathTrim.begin(), plan.perPathTrim.end(), anchorWait);
+    for (const auto& info : infos) {
+        if (info.correctable && info.w < anchorWait) {
+            // Pre-drain at pred's tail leaves this path with w_i ≤ anchorWait
+            // ops in flight at the anchor; the anchor wait is a no-op for it.
+            plan.correctives.emplace_back(info.pred, info.wPred);
+            plan.perPathTrim[info.pathIdx] = info.w;
+        } else if (info.correctable && info.w == anchorWait) {
+            // No corrective needed (path already matches anchor wait), but
+            // mark its trim explicitly so bookkeeping stays in sync.
+            plan.perPathTrim[info.pathIdx] = info.w;
+        }
+        // Otherwise leave perPathTrim[info.pathIdx] at the default anchorWait.
+    }
+    return plan;
+}
 
 // ----------------------------------------------------------------------------
 // Pass class
@@ -420,6 +695,9 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
         buildUseDefChain(func, domInfo, true);
         const auto& rpo = AM.getResult<BBIndexAnalysis>(func).rpo;
 
+        blockExitMemState.clear();
+        tailTensorCompensations.clear();
+
         buildBlockExitStates(func, passCtx);
 
         for (auto* bb : rpo) {
@@ -429,6 +707,12 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
             WaitInsertionList waits = computeRequiredWaits(*bb);
             emitWaitInstructions(*bb, arch, waits);
         }
+
+        // Per-path planner may have recorded compensating tensor drains at
+        // shallower predecessors' tails to keep the merge anchor wait lenient.
+        // Emit them now (after all per-block waits are in place) so the
+        // pre-drain immediates target each pred's actual exit FIFO state.
+        emitTailTensorCompensations(passCtx, arch);
 
         removePHIs(passCtx, rpo);
         return preserveCFGAnalyses();
@@ -460,6 +744,15 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
     /// Pre-populated by buildBlockExitStates and refined per block by computeRequiredWaits.
     std::unordered_map<BasicBlock*, PendingMemOpTracker> blockExitMemState;
 
+    /// Compensating @c s_wait_tensorcnt drains to emit at the tail (before
+    /// the terminator) of selected predecessor blocks. Populated by
+    /// @c recordTailTensorCompensation from per-anchor @c TensorWaitPlan
+    /// correctives; consumed by @c emitTailTensorCompensations after the
+    /// RPO walk completes. The stored immediate is the STRICTEST (smallest)
+    /// pred-relative wait across all anchors that requested a drain for the
+    /// same predecessor.
+    std::unordered_map<BasicBlock*, int> tailTensorCompensations;
+
     /// Phase 1: pre-scan every processed block once, recording DS / buffer /
     /// tensor memory ops in program order. Populates @c blockExitMemState[bb]
     /// with the full set of in-flight ops at each block's exit before any
@@ -476,6 +769,10 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
     /// Helper for buildBlockExitStates: record DS, buffer, and tensor-load ops
     /// in @p bb in program order. Each @c record*Operation call is a no-op for
     /// instructions that do not match the corresponding queue.
+    ///
+    /// After the scan, the tensor path set is collapsed to a single entry
+    /// tagged with @p &bb so successors can seed their own per-pred path from
+    /// the resulting @c tensorExitQueue().
     void scanBlockMemOps(BasicBlock& bb) {
         PendingMemOpTracker& state = blockExitMemState[&bb];
         state.clear();
@@ -489,6 +786,7 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
             state.recordBufferOperation(inst);
             state.recordTensorLoadOperation(inst);
         }
+        state.collapseTensorPathsToExitView(&bb);
     }
 
     /// Compute the minimum wait-count value for a single counter (DS or buffer) given
@@ -634,11 +932,13 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
     }
 
     /// Collect prior tensor loads whose MemTokenData tokens overlap @p anchor's.
-    /// Scans @p localState only -- @c computeRequiredWaits seeds @c localState
-    /// with every predecessor's pending tensor loads at block entry (via
-    /// @c PendingMemOpTracker::mergeTensorFrom), so the local queue already
-    /// reflects cross-block in-flight tensor state. Surfaces dependencies that
-    /// flow through LDS pseudo-registers rather than the SSA def-use chain.
+    /// Walks every per-path tensor queue in @p localState. @c computeRequiredWaits
+    /// seeds one path per predecessor's exit FIFO at block entry (via
+    /// @c PendingMemOpTracker::seedTensorPathFromPredecessor) and appends local
+    /// loads to every path via @c recordTensorLoadOperation, so iterating each
+    /// path covers cross-block + in-block in-flight tensor state. Surfaces
+    /// dependencies that flow through LDS pseudo-registers rather than the SSA
+    /// def-use chain.
     ///
     /// Anchors are barriers / DS reads / DS writes / DS atomics (see
     /// @c isTensorWaitAnchor). Tensor loads themselves are excluded because
@@ -647,11 +947,12 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
     ///
     /// Conservative fallback (hybrid policy for missing MemTokenData):
     ///   - Anchor lacks MemTokenData: we cannot prove disjointness against any
-    ///     pending tensor load. Returns with @c forceTensorDrain == true; the
-    ///     caller emits @c s_wait_tensorcnt 0.
+    ///     pending tensor load on any path. Returns with
+    ///     @c forceTensorDrain == true; the caller emits
+    ///     @c s_wait_tensorcnt 0.
     ///   - Candidate tensor load lacks MemTokenData (anchor has tokens):
     ///     conservatively treat it as conflicting and add it to @c deps so the
-    ///     normal @c min(count - 1) algorithm computes the wait value.
+    ///     per-path @c planTensorWait planner computes the wait value.
     TensorWaitDepResult collectTensorLoadDependencies(StinkyInstruction* anchor, BasicBlock& bb,
                                                       const PendingMemOpTracker& localState) {
         (void)bb;
@@ -667,22 +968,18 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
         };
 
         if (anchorLacksTokens) {
-            // Conservative branch: any pending tensor load (seeded from preds +
-            // augmented locally) forces a full tlcnt drain.
-            auto anyCandidate = [&](const std::deque<StinkyInstruction*>& q) {
-                return std::any_of(q.begin(), q.end(), isCandidate);
-            };
-            if (anyCandidate(localState.pendingTensorLoadOps)) {
-                result.forceTensorDrain = true;
-                PASS_DEBUG(std::cerr << "[WaitCntInsertion] conservative tensor drain: anchor "
-                                     << "lacks MemTokenData (" << anchor->getHwInstDesc()->mnemonic
-                                     << ")\n");
+            for (const auto& path : localState.pendingTensorLoadOps) {
+                if (std::any_of(path.queue.begin(), path.queue.end(), isCandidate)) {
+                    result.forceTensorDrain = true;
+                    PASS_DEBUG(std::cerr << "[WaitCntInsertion] conservative tensor drain: anchor "
+                                         << "lacks MemTokenData ("
+                                         << anchor->getHwInstDesc()->mnemonic << ")\n");
+                    break;
+                }
             }
             return result;
         }
 
-        // Anchor has tokens: per-token overlap path with conservative widening
-        // for candidates that lack MemTokenData.
         auto isConflictingLoad = [&](StinkyInstruction* op) {
             if (!isCandidate(op)) {
                 return false;
@@ -698,9 +995,12 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
             return hasTokenOverlap(mt->tokens, anchorTokens->tokens);
         };
 
-        for (StinkyInstruction* op : localState.pendingTensorLoadOps) {
-            if (isConflictingLoad(op)) {
-                result.deps.insert(op);
+        // Walk every per-path queue. Dedupe via the result set itself.
+        for (const auto& path : localState.pendingTensorLoadOps) {
+            for (StinkyInstruction* op : path.queue) {
+                if (isConflictingLoad(op)) {
+                    result.deps.insert(op);
+                }
             }
         }
 
@@ -712,13 +1012,17 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
     ///
     /// Outline (full per-step contract lives in the user doc, "Core Algorithm:
     /// computeRequiredWaits"):
-    ///   0. Block entry -- seed @c localState.pendingTensorLoadOps from every
-    ///      predecessor's exit state via @c mergeTensorFrom. DS / buffer
-    ///      queues are intentionally NOT seeded here; their helpers walk
-    ///      predecessors explicitly.
+    ///   0. Block entry -- for each non-self predecessor with stored exit
+    ///      state, seed a per-pred @c TensorPath into
+    ///      @c localState.pendingTensorLoadOps via
+    ///      @c seedTensorPathFromPredecessor. DS / buffer queues are
+    ///      intentionally NOT seeded here; their helpers walk predecessors
+    ///      explicitly.
     ///   1. Tensor-wait anchor (barrier / DS read / DS write / DS atomic):
-    ///      run @c collectTensorLoadDependencies; emit @c s_wait_tensorcnt 0
-    ///      on @c forceTensorDrain, otherwise @c s_wait_tensorcnt min(count-1).
+    ///      run @c collectTensorLoadDependencies over every per-path queue,
+    ///      then call @c planTensorWait to produce the anchor wait plus any
+    ///      compensating pre-drains for shallower paths. Force a full drain
+    ///      on @c forceTensorDrain.
     ///   2. Barrier vs. DS conflict: drain on token overlap, on a barrier that
     ///      lacks @c MemTokenData, or on an untagged pending DS op.
     ///   3. Collect this instruction's DS / buffer dependencies via
@@ -730,25 +1034,38 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
     ///        redundancy elision via @c CounterWaitState::needsNewWait.
     ///   7. Tail recording: only AFTER any wait is emitted, push @c inst onto
     ///      the relevant queues so the wait's queue snapshot excludes its own
-    ///      consumer (matches hardware semantics).
-    ///   8-9. Trim each queue using its counter's @c lastEmittedWait and store
-    ///        the refined state into @c blockExitMemState for successors.
+    ///      consumer (matches hardware semantics). For tensor loads, the
+    ///      record fans out to EVERY per-pred path queue.
+    ///   8-9. Trim DS / buffer exit-state queues using each counter's
+    ///        @c lastEmittedWait; collapse the per-pred tensor paths into a
+    ///        single union exit view; store the refined state into
+    ///        @c blockExitMemState for successors.
     WaitInsertionList computeRequiredWaits(BasicBlock& bb) {
         PendingMemOpTracker localState;
         WaitInsertionList waits;
         CounterWaitState dsState;
         CounterWaitState bufferState;
         CounterWaitState tensorState;
+        // Local tensor-load prefix size (number of tensor_load_to_lds recorded
+        // since block entry). Used by planTensorWait to split each path's
+        // queue into pred-portion vs. in-block prefix so correctives target
+        // the pred's tail with the correct pred-relative immediate.
+        int inBlockTensorLoadCount = 0;
 
-        // Seed the tensor queue from every predecessor's exit state so the
-        // tensor-wait anchor branch and the tensor-counter computation see
-        // cross-block in-flight tensor loads via localState alone.
+        // Seed one per-pred TensorPath from each non-self predecessor's
+        // collapsed exit FIFO. Self-pred back-edges are skipped: their
+        // Phase-1 raw scan includes loads issued AFTER the consumer (in the
+        // same body), and treating them as in-flight at the header would
+        // over-count and produce an unsafely-large wait immediate.
         for (BasicBlock* pred : bb.getPredecessors()) {
+            if (pred == &bb) {
+                continue;
+            }
             auto it = blockExitMemState.find(pred);
             if (it == blockExitMemState.end()) {
                 continue;
             }
-            localState.mergeTensorFrom(it->second);
+            localState.seedTensorPathFromPredecessor(pred, it->second.tensorExitQueue());
         }
 
         for (auto it = bb.begin(); it != bb.end(); ++it) {
@@ -757,7 +1074,7 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
                 continue;
             }
 
-            // tensor-wait check (token-based, independent counter).
+            // Tensor-wait check: per-path planner.
             if (isTensorWaitAnchor(*inst)) {
                 auto twResult = collectTensorLoadDependencies(inst, bb, localState);
                 if (twResult.forceTensorDrain) {
@@ -765,19 +1082,37 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
                         waits.emplace_back(
                             inst, WaitCountSpec(WaitCountSpec::kUnused, WaitCountSpec::kUnused, 0));
                         tensorState.recordEmittedWait(0);
-                        localState.pendingTensorLoadOps.clear();
+                        localState.clearAllTensorPaths();
                     }
                 } else if (!twResult.deps.empty()) {
-                    auto tResult = computeWaitValueForCounter(
-                        localState.pendingTensorLoadCount(), localState, twResult.deps, tensorState,
-                        [](const PendingMemOpTracker& tracker, StinkyInstruction* src) {
-                            return tracker.pendingTensorLoadCountFrom(src);
-                        });
-                    if (tResult.second && tensorState.needsNewWait(tResult.first)) {
+                    TensorWaitPlan plan =
+                        planTensorWait(localState, twResult.deps, inBlockTensorLoadCount, &bb);
+                    if (plan.needsWait && tensorState.needsNewWait(plan.anchorWait)) {
                         waits.emplace_back(
                             inst, WaitCountSpec(WaitCountSpec::kUnused, WaitCountSpec::kUnused,
-                                                tResult.first));
-                        tensorState.recordEmittedWait(tResult.first);
+                                                plan.anchorWait));
+                        tensorState.recordEmittedWait(plan.anchorWait);
+                        for (const auto& corrective : plan.correctives) {
+                            recordTailTensorCompensation(corrective.first, corrective.second);
+                        }
+                        // Apply per-path trim so each path's bookkeeping matches what
+                        // the hardware sees on that CFG path after the anchor's wait
+                        // AND the pred-tail correctives take effect. Trimming uniformly
+                        // to anchorWait would leave shallow correctable paths "still
+                        // holding" their drained ops in bookkeeping, causing later
+                        // anchors in the same block to emit redundant drains.
+                        for (size_t pathIdx = 0; pathIdx < localState.pendingTensorLoadOps.size();
+                             ++pathIdx) {
+                            const int keep = (pathIdx < plan.perPathTrim.size())
+                                                 ? plan.perPathTrim[pathIdx]
+                                                 : plan.anchorWait;
+                            auto& q = localState.pendingTensorLoadOps[pathIdx].queue;
+                            if (keep <= 0) {
+                                q.clear();
+                            } else if (static_cast<int>(q.size()) > keep) {
+                                q.erase(q.begin(), q.end() - keep);
+                            }
+                        }
                     }
                 }
             }
@@ -883,7 +1218,9 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
 
             // Tail recording: after any wait for this instruction has been emitted,
             // push inst onto the trackers so future iterations and the block exit
-            // state see it as in-flight.
+            // state see it as in-flight. Tensor loads fan out to EVERY per-pred
+            // path queue inside recordTensorLoadOperation, so each path's tail
+            // mirrors the in-block prefix.
             if (localState.recordDSOperation(inst)) {
                 dsState.recordNewOp();
             }
@@ -892,15 +1229,18 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
             }
             if (localState.recordTensorLoadOperation(inst)) {
                 tensorState.recordNewOp();
+                ++inBlockTensorLoadCount;
             }
         }
 
-        // Trim exit-state queues using the last emitted wait so successor blocks see
-        // only ops still genuinely in flight.
+        // Trim DS / buffer exit-state queues using each counter's last emitted
+        // wait so successor blocks see only ops still genuinely in flight.
         localState.trimQueueToLastWait(localState.pendingDSOps, dsState.lastEmittedWait);
         localState.trimQueueToLastWait(localState.pendingBufferOps, bufferState.lastEmittedWait);
-        localState.trimQueueToLastWait(localState.pendingTensorLoadOps,
-                                       tensorState.lastEmittedWait);
+        // Tensor: per-path queues were trimmed at each anchor; collapse the
+        // multi-path working state into a single union exit view tagged with
+        // &bb for successor seeding.
+        localState.collapseTensorPathsToExitView(&bb);
 
         blockExitMemState[&bb] = localState;
         return waits;
@@ -949,6 +1289,62 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
                 waitCntData.tlcnt = waitSpec.tensorCount;
                 waitInst->addModifier<SWaitTensorCntData>(waitCntData);
             }
+        }
+    }
+
+    /// Record a compensating @c s_wait_tensorcnt drain to insert at the tail
+    /// (before the terminator) of @p predBB. Per-path @c planTensorWait
+    /// emits these when a merge anchor has divergent per-pred waits, draining
+    /// the shallower preds early so the anchor can use the deepest path's
+    /// wait. If multiple anchors target the same predecessor with different
+    /// pred-relative immediates, the STRICTEST (smallest) wins so every
+    /// requesting anchor is satisfied.
+    void recordTailTensorCompensation(BasicBlock* predBB, int predRelativeWait) {
+        if (predBB == nullptr) {
+            return;
+        }
+        auto [it, inserted] = tailTensorCompensations.emplace(predBB, predRelativeWait);
+        if (!inserted && predRelativeWait < it->second) {
+            it->second = predRelativeWait;
+        }
+    }
+
+    /// Materialise the compensating @c s_wait_tensorcnt drains recorded by
+    /// @c recordTailTensorCompensation. Each entry produces one
+    /// @c s_wait_tensorcnt placed immediately before the predecessor's
+    /// terminator (or appended if the block has no branch terminator). Skips
+    /// preds that were never processed by this pass (no entry in
+    /// @c blockExitMemState) and preds whose stored exit tensor FIFO is
+    /// already shorter than the recorded immediate (in which case the drain
+    /// would be a hardware no-op anyway).
+    void emitTailTensorCompensations(PassContext& passCtx, GfxArchID arch) {
+        for (const auto& entry : tailTensorCompensations) {
+            BasicBlock* predBB = entry.first;
+            int predRelativeWait = entry.second;
+            if (predBB == nullptr || !passCtx.shouldProcessBasicBlock(*predBB)) {
+                continue;
+            }
+            auto stateIt = blockExitMemState.find(predBB);
+            if (stateIt == blockExitMemState.end()) {
+                continue;
+            }
+            const auto& exitQueue = stateIt->second.tensorExitQueue();
+            if (static_cast<int>(exitQueue.size()) <= predRelativeWait) {
+                continue;  // no-op: pred has already drained below the target
+            }
+
+            AsmIRBuilder builder(*predBB, arch);
+            IRBase* term = predBB->getTerminator();
+            StinkyInstruction* termInst = term ? dyn_cast<StinkyInstruction>(term) : nullptr;
+            StinkyInstruction* anchor =
+                (termInst != nullptr && isBranch(*termInst)) ? termInst : nullptr;
+
+            StinkyInstruction* waitInst =
+                builder.create(getMCIDByUOp(GFX::s_wait_tensorcnt, arch), anchor);
+            waitInst->addSrcReg(StinkyRegister(predRelativeWait));
+            SWaitTensorCntData waitCntData;
+            waitCntData.tlcnt = predRelativeWait;
+            waitInst->addModifier<SWaitTensorCntData>(waitCntData);
         }
     }
 
