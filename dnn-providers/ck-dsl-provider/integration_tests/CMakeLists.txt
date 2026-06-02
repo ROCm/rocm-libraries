@@ -18,6 +18,7 @@ add_executable(
     IntegrationGpuCkDslSdpaFwdPerf.cpp
     IntegrationGpuCkDslSdpaFwdOracle.cpp
     IntegrationGpuCkDslSdpaFwdBuildTime.cpp
+    IntegrationGpuCkDslSdpaFwdScorerDiag.cpp
     IntegrationGpuCkDslSdpaBwdFp16.cpp
 )
 

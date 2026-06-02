@@ -137,6 +137,44 @@ SupportsResult supportsTiled2d(const SdpaSelectionProblem& problem, const SdpaPe
             return {false, "tiled 2D kernel: use_mfma_32x32 requires head_size divisible by 16"};
         }
     }
+    // LDS-budget gate (AHEAD-OF-TIME compilability). The unified kernel stages
+    // its tiles in LDS; comgr CODEGEN (CODEGEN_BC_TO_RELOCATABLE) rejects a
+    // kernel whose static group segment exceeds the gfx950 LDS capacity
+    // (163840 B / 160 KB; arch_specs.json gfx950 lds_capacity_bytes). This
+    // mirrors the kernel's actual smem_alloc footprint
+    // (attention_tiled_2d.py:1011-1100, bpe=2 for fp16/bf16):
+    //   K_lds  = 2*T*hd*bpe   (double-buffered async load)
+    //   V_lds  =   T*hd*bpe   (single-buffered)
+    //   P_lds  = BLOCK_M*(T+8)*bpe  (score tile; +8 pad)
+    //   Q_lds  = BLOCK_M*hd*bpe, but 0 when it aliases K (BLOCK_M <= 2*T)
+    //   Acc_lds= BLOCK_M*OUT_STRIPE*bpe,  OUT_STRIPE = (hd<=64)?32:hd
+    // where T = tile_size_eff, BLOCK_M = num_warps*block_m_per_warp. The model
+    // now (after the predict dtype fix) prefers large tiles, so without this
+    // gate the heuristic's pick comes back unbuildable. Conservative: assumes
+    // P_lds is present (the bf16 REGISTER_PV path drops it) and is LDS-only, so
+    // it may reject a couple of register-pressure-borderline mfma32 configs --
+    // safe (never emits an unbuildable combo); it keeps the oracle-best
+    // tile_size=64 configs. The authoritative copy belongs DSL-side
+    // (attention_tiled_2d.py supports_tiled_2d); this is the C++ enumerator
+    // mirror, kept in lockstep.
+    {
+        constexpr std::int64_t kLdsCapacityBytes = 163840;  // gfx950, 160 KB
+        constexpr std::int64_t kBytesPerElem = 2;           // fp16/bf16
+        const std::int64_t tEff = knobs.tile_size != 0 ? knobs.tile_size : bs;
+        const std::int64_t blockM =
+            static_cast<std::int64_t>(knobs.num_warps) * knobs.block_m_per_warp;
+        const std::int64_t outStripe = hd <= 64 ? 32 : hd;
+        const std::int64_t kLds = 2 * tEff * hd * kBytesPerElem;
+        const std::int64_t vLds = tEff * hd * kBytesPerElem;
+        const std::int64_t pLds = blockM * (tEff + 8) * kBytesPerElem;
+        const std::int64_t qLds = (blockM <= 2 * tEff) ? 0 : blockM * hd * kBytesPerElem;
+        const std::int64_t accLds = blockM * outStripe * kBytesPerElem;
+        const std::int64_t ldsBytes = kLds + vLds + pLds + qLds + accLds;
+        if (ldsBytes > kLdsCapacityBytes) {
+            return {false, "tiled 2D kernel: estimated LDS " + std::to_string(ldsBytes) +
+                               " B exceeds the gfx950 160 KB budget; comgr CODEGEN would fail"};
+        }
+    }
     return {true, ""};
 }
 

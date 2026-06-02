@@ -259,7 +259,7 @@ class FmhaMLHeuristic
         double pred     = 0.0;
         if(LGBM_BoosterPredictForMat(booster_,
                                      features.data(),
-                                     0,
+                                     1,  // C_API_DTYPE_FLOAT64 (features are double)
                                      1,
                                      FMHA_NUM_FEATURES,
                                      1,
