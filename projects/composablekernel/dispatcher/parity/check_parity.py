@@ -70,6 +70,18 @@ _CHECK_IDENTIFIER = _HERE / "check_identifier_parity.py"
 # --------------------------------------------------------------------------- #
 # Naming: the joint key shared by the dispatcher header and the TE executable.
 # --------------------------------------------------------------------------- #
+_SEP = "=" * 72
+
+# Sentinel used by run_harness() when dry_run=True. Named constant to make the
+# contract explicit for _adjudicate_numerical().
+_DRYRUN_VERDICT = "DRYRUN"
+
+
+def _capitalize_bool(b: bool) -> str:
+    """Return 'True' or 'False' matching Python str(bool)."""
+    return str(bool(b)).capitalize()
+
+
 def te_kernel_name(cfg: Dict[str, Any]) -> str:
     """Raw-TE kernel name used by BOTH codegen header and TE benchmark target.
 
@@ -79,11 +91,15 @@ def te_kernel_name(cfg: Dict[str, Any]) -> str:
     TE trait strings (``compv3``/``intrawave``/``default``) -- NOT the canonical
     dispatcher form (where e.g. scheduler ``default`` -> ``auto``). So this is
     distinct from encode_identifier() and is the right key for locating files.
+
+    For ``preshufflev2`` configs, ``unified_gemm_codegen.py``'s
+    ``KernelNaming.generate()`` appends ``_preshuffle`` to the kernel name.
+    We mirror that here so file-based lookups succeed.
     """
     te = cfg["_te"]
     alg = cfg["algorithm"]
-    cap = lambda b: str(bool(b)).capitalize()  # True / False
-    return (
+    cap = _capitalize_bool
+    name = (
         f"{te['datatype']}_{te['layout']}_"
         f"{te['pipeline']}_{te['epilogue']}_{te['scheduler']}_"
         f"{cap(alg['pad_m'])}_{cap(alg['pad_n'])}_{cap(alg['pad_k'])}_{cap(alg['persistent'])}_"
@@ -91,6 +107,10 @@ def te_kernel_name(cfg: Dict[str, Any]) -> str:
         f"{alg['warp_m']}x{alg['warp_n']}x{alg['warp_k']}_"
         f"{alg['warp_tile_m']}x{alg['warp_tile_n']}x{alg['warp_tile_k']}"
     )
+    # KernelNaming.generate() appends _preshuffle for GemmVariant.PRESHUFFLE.
+    if te["pipeline"] in ("preshufflev2",):
+        name += "_preshuffle"
+    return name
 
 
 def dispatcher_header_path(output_dir: Path, kernel_set: str, cfg: Dict[str, Any]) -> Path:
@@ -185,7 +205,7 @@ def parse_te_csv(csv_path: Path) -> Optional[Dict[str, float]]:
     row = lines[-1].split(",")
     cols = dict(zip(header, row))
 
-    def _f(key: str) -> Optional[float]:
+    def _column_float(key: str) -> Optional[float]:
         for k, v in cols.items():
             if k.startswith(key):
                 try:
@@ -195,9 +215,9 @@ def parse_te_csv(csv_path: Path) -> Optional[Dict[str, float]]:
         return None
 
     return {
-        "latency_ms": _f("latency"),
-        "tflops": _f("tflops"),
-        "bandwidth": _f("bandwidth"),
+        "latency_ms": _column_float("latency"),
+        "tflops": _column_float("tflops"),
+        "bandwidth": _column_float("bandwidth"),
     }
 
 
@@ -205,9 +225,9 @@ def parse_te_csv(csv_path: Path) -> Optional[Dict[str, float]]:
 # Stage 1: identifier parity (always runnable).
 # --------------------------------------------------------------------------- #
 def stage_identifier(config_path: Path, dry_run: bool) -> bool:
-    print("=" * 72)
+    print(_SEP)
     print("STAGE 1/3  identifier parity  (python encode_identifier vs C++ KernelKey)")
-    print("=" * 72)
+    print(_SEP)
     cmd = [sys.executable, str(_CHECK_IDENTIFIER), str(config_path)]
     print("  $ " + " ".join(cmd))
     if dry_run:
@@ -264,10 +284,12 @@ def run_harness(sizes: List[Tuple[int, int, int]], dry_run: bool
         print("  $ " + " ".join(cmd))
         if dry_run:
             print("  [dry-run] not executed")
-            results[(m, n, k)] = {"verdict": "DRYRUN", "tflops": None, "detail": ""}
+            results[(m, n, k)] = {"verdict": _DRYRUN_VERDICT, "tflops": None, "detail": ""}
             continue
         proc = subprocess.run(cmd, capture_output=True, text=True)
         sys.stdout.write(proc.stdout)
+        if proc.stderr:
+            sys.stderr.write(proc.stderr)
         results[(m, n, k)] = parse_harness_output(proc.stdout)
     return results
 
@@ -284,7 +306,10 @@ def find_te_executable(te_build_dir: Path, cfg: Dict[str, Any]) -> Optional[Path
 def run_te_benchmark(exe: Path, m: int, n: int, k: int, csv_stub: Path, dry_run: bool
                      ) -> Optional[Dict[str, float]]:
     csv_stub.with_suffix(".csv").unlink(missing_ok=True)
+    # --warmup 3 --repeat 20 mirrors the harness's stream_config (cold_niters_=3,
+    # nrepeat_=20) so the two stacks measure on comparable footing.
     cmd = [str(exe), f"-m={m}", f"-n={n}", f"-k={k}", "-verify=1",
+           "-warmup=3", "-repeat=20",
            f"-csv_filename={csv_stub}"]
     print("  $ " + " ".join(cmd))
     if dry_run:
@@ -292,11 +317,23 @@ def run_te_benchmark(exe: Path, m: int, n: int, k: int, csv_stub: Path, dry_run:
         return None
     proc = subprocess.run(cmd, capture_output=True, text=True)
     sys.stdout.write(proc.stdout)
+    if proc.stderr:
+        sys.stderr.write(proc.stderr)
     return parse_te_csv(csv_stub.with_suffix(".csv"))
 
 
 # --------------------------------------------------------------------------- #
-# Orchestration.
+# Orchestration helpers.
+# --------------------------------------------------------------------------- #
+def _fail(summary: Dict[str, str], **stages: str) -> int:
+    """Merge extra stage results into summary, print it, return 1."""
+    summary.update(stages)
+    _print_summary(summary)
+    return 1
+
+
+# --------------------------------------------------------------------------- #
+# Main orchestration.
 # --------------------------------------------------------------------------- #
 def run(args: argparse.Namespace) -> int:
     configs = translate_file(args.config)
@@ -329,17 +366,16 @@ def run(args: argparse.Namespace) -> int:
     id_ok = stage_identifier(args.config, args.dry_run)
     summary["identifier"] = "PASS" if id_ok else "FAIL"
     if not id_ok and not args.dry_run:
-        _print_summary(summary)
-        return 1
+        return _fail(summary)
 
     # ---- Gating for GPU stages -------------------------------------------- #
     gpu_runnable = args.dry_run or (gpu and have_hipcc())
     if not gpu_runnable:
         reason = "no GPU" if not gpu else "no hipcc"
         print()
-        print("=" * 72)
+        print(_SEP)
         print(f"STAGE 2/3  numerical + performance parity  -- SKIPPED ({reason})")
-        print("=" * 72)
+        print(_SEP)
         print("  Build/run requires a ROCm GPU node. Re-run there, or use --dry-run")
         print("  to see the full command plan.")
         summary["numerical"] = f"SKIPPED ({reason})"
@@ -349,30 +385,27 @@ def run(args: argparse.Namespace) -> int:
 
     # ---- Codegen + build (shared) ----------------------------------------- #
     print()
-    print("=" * 72)
+    print(_SEP)
     print("STAGE 2/3  numerical parity  (codegen -> build harness -> verify)")
-    print("=" * 72)
+    print(_SEP)
     cg_ok, _ = drive_codegen(args.config, args.index, args.output_dir,
                              args.kernel_set, args.dry_run)
     if not cg_ok:
-        summary["numerical"] = "FAIL (codegen)"
-        summary["performance"] = "SKIPPED (numerical failed)"
-        _print_summary(summary)
-        return 1
+        return _fail(summary,
+                     numerical="FAIL (codegen)",
+                     performance="SKIPPED (numerical failed)")
 
     header = dispatcher_header_path(args.output_dir, args.kernel_set, cfg)
     if not args.dry_run and not header.exists():
         print(f"error: expected generated header not found: {header}", file=sys.stderr)
-        summary["numerical"] = "FAIL (missing header)"
-        summary["performance"] = "SKIPPED (numerical failed)"
-        _print_summary(summary)
-        return 1
+        return _fail(summary,
+                     numerical="FAIL (missing header)",
+                     performance="SKIPPED (numerical failed)")
 
     if not build_harness(header, args.arch, args.dry_run):
-        summary["numerical"] = "FAIL (build)"
-        summary["performance"] = "SKIPPED (numerical failed)"
-        _print_summary(summary)
-        return 1
+        return _fail(summary,
+                     numerical="FAIL (build)",
+                     performance="SKIPPED (numerical failed)")
 
     # ---- Run dispatcher harness ------------------------------------------- #
     disp = run_harness(sizes, args.dry_run)
@@ -398,19 +431,18 @@ def run(args: argparse.Namespace) -> int:
             te_results[(m, n, k)] = run_te_benchmark(te_exe, m, n, k, stub, args.dry_run)
 
     # ---- Adjudicate numerical --------------------------------------------- #
-    num_ok = _adjudicate_numerical(sizes, disp, te_results, bool(te_exe), args.dry_run)
+    has_te_exe = bool(te_exe)
+    num_ok = _adjudicate_numerical(sizes, disp, te_results, has_te_exe, args.dry_run)
     summary["numerical"] = "PASS" if num_ok else "FAIL"
 
     if not num_ok and not args.dry_run:
-        summary["performance"] = "SKIPPED (numerical failed)"
-        _print_summary(summary)
-        return 1
+        return _fail(summary, performance="SKIPPED (numerical failed)")
 
     # ---- Stage 3: performance --------------------------------------------- #
     print()
-    print("=" * 72)
+    print(_SEP)
     print("STAGE 3/3  performance parity  (dispatcher TFLOP/s vs Tile Engine)")
-    print("=" * 72)
+    print(_SEP)
     if te_exe is None and not args.dry_run:
         print("  No Tile Engine build given -- reporting dispatcher throughput only.")
         for (m, n, k) in sizes:
@@ -422,14 +454,19 @@ def run(args: argparse.Namespace) -> int:
                                           args.dry_run)
         summary["performance"] = "PASS" if perf_ok else "FAIL"
         if not perf_ok and not args.dry_run:
-            _print_summary(summary)
-            return 1
+            return _fail(summary)
 
     _print_summary(summary)
     return 0
 
 
-def _adjudicate_numerical(sizes, disp, te_results, te_active, dry_run) -> bool:
+def _adjudicate_numerical(
+    sizes: List[Tuple[int, int, int]],
+    disp: Dict[Tuple[int, int, int], Dict[str, Any]],
+    te_results: Dict[Tuple[int, int, int], Optional[Dict[str, float]]],
+    has_te_exe: bool,
+    dry_run: bool,
+) -> bool:
     print()
     print("  numerical verdict per size:")
     ok = True
@@ -438,7 +475,7 @@ def _adjudicate_numerical(sizes, disp, te_results, te_active, dry_run) -> bool:
         d = disp.get(sz, {})
         dv = d.get("verdict", "UNKNOWN")
         line = f"    {m}x{n}x{k}: dispatcher={dv}"
-        if te_active:
+        if has_te_exe:
             te = te_results.get(sz)
             te_pass = te is not None and te.get("tflops") is not None
             line += f"  tile_engine={'PASSED' if te_pass else 'NO-ROW/FAILED'}"
@@ -446,13 +483,19 @@ def _adjudicate_numerical(sizes, disp, te_results, te_active, dry_run) -> bool:
                 if dv != "SKIPPED":
                     ok = False
         else:
-            if not dry_run and dv not in ("PASSED", "SKIPPED", "DRYRUN"):
+            if not dry_run and dv not in ("PASSED", "SKIPPED", _DRYRUN_VERDICT):
                 ok = False
         print(line)
     return ok
 
 
-def _adjudicate_performance(sizes, disp, te_results, perf_tol, dry_run) -> bool:
+def _adjudicate_performance(
+    sizes: List[Tuple[int, int, int]],
+    disp: Dict[Tuple[int, int, int], Dict[str, Any]],
+    te_results: Dict[Tuple[int, int, int], Optional[Dict[str, float]]],
+    perf_tol: float,
+    dry_run: bool,
+) -> bool:
     print(f"  relative tolerance: {perf_tol:.0%}")
     ok = True
     for sz in sizes:
@@ -483,9 +526,9 @@ def _fmt(x: Optional[float]) -> str:
 
 def _print_summary(summary: Dict[str, str]) -> None:
     print()
-    print("=" * 72)
+    print(_SEP)
     print("PARITY SUMMARY")
-    print("=" * 72)
+    print(_SEP)
     for stage in ("identifier", "numerical", "performance"):
         if stage in summary:
             print(f"  {stage:<12}: {summary[stage]}")
@@ -500,8 +543,11 @@ def main() -> int:
     ap.add_argument("config", type=Path, help="Tile Engine config JSON")
     ap.add_argument("--index", type=int, default=0,
                     help="Which translated config to check (default 0)")
-    ap.add_argument("--sizes", default="512x512x512,1024x1024x1024,2048x2048x2048",
-                    help="Comma-separated MxNxK problem sizes")
+    ap.add_argument("--sizes",
+                    default="512x512x512,1024x1024x1024,2048x2048x2048,513x511x33",
+                    help="Comma-separated MxNxK problem sizes. "
+                         "513x511x33 is intentionally non-tile-aligned to exercise "
+                         "the padding code path (pad_m/n/k=True configs).")
     ap.add_argument("--arch", default="gfx942", help="GPU arch for harness build")
     ap.add_argument("--output-dir", type=Path, default=_HERE / "generated",
                     help="Codegen output directory")

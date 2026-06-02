@@ -35,7 +35,7 @@ import json
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterator, List
+from typing import Any, Dict, List
 
 # --------------------------------------------------------------------------- #
 # Canonical mappings (mirror codegen_common.CommonTypeMappings + kernel_key.hpp)
@@ -66,16 +66,23 @@ _SCHEDULER_CANON = {
 # TE pipeline names already match Pipeline::to_string() for the set the tile
 # engine emits. Listed explicitly so an unknown pipeline is a hard error rather
 # than a silent passthrough that would desync the identifier.
+#
+# Pipelines that have NO codegen path in codegen_common.PIPELINE_TO_DISPATCHER
+# or unified_gemm_codegen are excluded. If a TE config specifies one, we raise
+# TranslationError immediately (at translation time) rather than letting codegen
+# fail with an opaque error message.
 _PIPELINE_CANON = {
     "mem": "mem",
-    "compv1": "compv1",
-    "compv2": "compv2",
     "compv3": "compv3",
     "compv4": "compv4",
     "compv5": "compv5",
-    "preshufflev1": "preshufflev1",
     "preshufflev2": "preshufflev2",
 }
+
+# Pipelines recognized in TE configs but NOT supported by the dispatcher codegen.
+# Raising TranslationError for these at translation time gives a clear diagnostic
+# rather than an opaque codegen failure.
+_UNSUPPORTED_PIPELINES = frozenset({"compv1", "compv2", "preshufflev1"})
 
 _EPILOGUE_CANON = {
     "default": "default",
@@ -83,7 +90,7 @@ _EPILOGUE_CANON = {
     "none": "none",
 }
 
-_LAYOUT_CHAR = {"r": "r", "c": "c", "p": "p"}
+_LAYOUT_CHAR = {"r": "r", "c": "c", "p": "p"}  # p = PackedExternal
 
 # Pipelines that imply double SMEM buffering (matches unified_gemm_codegen).
 _DOUBLE_BUFFER_PIPELINES = {"compv4", "preshufflev2"}
@@ -119,6 +126,11 @@ def _values(spec: Dict[str, Any], key: str, default: List) -> List:
 
 @dataclass(frozen=True)
 class _Tile:
+    # NOTE: Naming trap — TE uses "warp_m/n/k" to mean wave counts per block
+    # (how many waves/warps tile the block). The dispatcher calls these same
+    # values "wave_shape.m/n/k". What the dispatcher calls "warp_tile" is the
+    # per-warp MFMA shape (tile_m/n/k per wave). They map one-to-one but the
+    # vocabularies are swapped; mixing them produces valid-looking but wrong kernels.
     tile_m: int
     tile_n: int
     tile_k: int
@@ -265,6 +277,11 @@ def _build_config(
     num_wave_groups: int,
     split_k: int,
 ) -> Dict[str, Any]:
+    if pipeline in _UNSUPPORTED_PIPELINES:
+        raise TranslationError(
+            f"Pipeline {pipeline!r} has no dispatcher codegen path "
+            f"(compv1/compv2/preshufflev1 are not supported by unified_gemm_codegen)"
+        )
     if pipeline not in _PIPELINE_CANON:
         raise TranslationError(f"Unknown pipeline {pipeline!r}")
     if epilogue not in _EPILOGUE_CANON:
@@ -334,10 +351,6 @@ def _build_config(
     }
 
 
-def iter_configs(path: str | Path) -> Iterator[Dict[str, Any]]:
-    yield from translate_file(path)
-
-
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("config", type=Path, help="Tile Engine config JSON")
@@ -355,8 +368,9 @@ def main() -> int:
         return 0
 
     print(f"{len(configs)} dispatcher config(s) from {args.config}:")
-    # Lazy import to keep translate() dependency-free.
-    from identifier import encode_identifier
+    # Lazy import: identifier.py depends on te_to_dispatcher indirectly, so we
+    # defer it to main() to keep translate() dependency-free.
+    from identifier import encode_identifier  # noqa: PLC0415
 
     for cfg in configs:
         print(f"  {encode_identifier(cfg)}")

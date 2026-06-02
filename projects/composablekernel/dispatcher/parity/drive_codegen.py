@@ -54,7 +54,14 @@ def _minimal_te_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     te = cfg["_te"]
     alg = cfg["algorithm"]
 
+    # NOTE: block_size, num_wave_groups, and k_block_per_cu are top-level codegen
+    # fields (not inside tile_config/trait_config). They must be forwarded here
+    # explicitly; otherwise unified_gemm_codegen silently defaults to 256/1/1,
+    # producing a different kernel than the original TE config requested.
     return {
+        "block_size": alg["block_size"],
+        "num_wave_groups": alg["num_wave_groups"],
+        "k_block_per_cu": alg["k_block_per_cu"],
         "tile_config": {
             "tile_m": [alg["tile_m"]],
             "tile_n": [alg["tile_n"]],
@@ -129,8 +136,8 @@ def drive(
     print("  " + " ".join(cmd))
 
     if dry_run:
-        print("\n--dry-run: not invoking codegen. Minimal TE config written to:")
-        print(f"  {tmp.name}")
+        print("\n--dry-run: not invoking codegen.")
+        Path(tmp.name).unlink(missing_ok=True)
         return 0
 
     try:

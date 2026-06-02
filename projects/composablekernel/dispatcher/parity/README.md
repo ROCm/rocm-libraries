@@ -41,8 +41,12 @@ Tile Engine config JSON
 | Identifier parity (b) | python3 + g++ | ✅ runs (283968/283968 match on full config) |
 | Drive codegen (c) | python3 | ✅ runs (emits the header) |
 | Build harness (d) | hipcc + CK include tree | ✅ **builds** (running needs a GPU) |
-| Numerical parity (f) | GPU (+ TE build for cross-check) | ⛔ GPU-gated → SKIPPED here |
+| Numerical parity (e) | GPU (+ TE build for cross-check) | ⛔ GPU-gated → SKIPPED here |
 | Performance parity (f) | GPU + TE build | ⛔ GPU-gated → SKIPPED here |
+
+> **Note:** `te_*.csv` files are written by the TE benchmark runner into this directory
+> on every GPU run. They accumulate over time and are gitignored. To clean them up:
+> `rm te_*.csv`
 
 No `cmake` and no GPU on this box, so the orchestrator gates 2–3 to **SKIPPED**
 (not FAILED) and exits 0 when the identifier stage passes.

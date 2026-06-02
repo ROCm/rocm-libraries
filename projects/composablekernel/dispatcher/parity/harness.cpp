@@ -69,6 +69,18 @@ int arg_int(int argc, char** argv, const std::string& flag, int dflt)
     return dflt;
 }
 
+std::string arg_str(int argc, char** argv, const std::string& flag,
+                    const std::string& dflt)
+{
+    for(int i = 1; i < argc; ++i)
+    {
+        std::string a = argv[i];
+        if(a.rfind(flag + "=", 0) == 0)
+            return a.substr(flag.size() + 1);
+    }
+    return dflt;
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -77,6 +89,20 @@ int main(int argc, char** argv)
     const int N      = arg_int(argc, argv, "-n", 512);
     const int K      = arg_int(argc, argv, "-k", 512);
     const int verify = arg_int(argc, argv, "-verify", 1);
+
+    // Layout guard: this harness hard-codes rcr strides (A row-major, B col-major,
+    // C row-major). If the kernel was generated for a different layout the strides
+    // will be wrong and produce silently wrong results.  --layout= lets the
+    // orchestrator assert the config matches before invoking.
+    const std::string layout = arg_str(argc, argv, "-layout", "rcr");
+    if(layout != "rcr")
+    {
+        std::fprintf(stderr,
+                     "error: harness only supports rcr layout; got '%s'.\n"
+                     "       Pass -layout=rcr or generalize strides.\n",
+                     layout.c_str());
+        return 1;
+    }
 
     std::printf("kernel : %s\n", KERNEL_NAME);
     std::printf("problem: M=%d N=%d K=%d (rcr)\n", M, N, K);
@@ -160,11 +186,16 @@ int main(int argc, char** argv)
                 max_rel_err = std::max(max_rel_err, abs_err / (std::fabs(acc) + 1e-6));
             }
         }
-        // fp16 accumulation tolerance scales with K.
-        const double tol = 1e-2 * std::sqrt(static_cast<double>(K));
-        std::printf("verify : max_abs_err=%.5f max_rel_err=%.5f tol=%.5f\n",
-                    max_abs_err, max_rel_err, tol);
-        if(max_abs_err > tol)
+        // fp16 accumulation tolerance:
+        //   abs: 1e-3 * sqrt(K)   (tight constant vs original 1e-2)
+        //   rel: 1e-2             (relative gate matches projectdes.txt T1.5 spec)
+        // Both gates must pass; a kernel returning values off by 0.2 when K=512
+        // would slip past the abs-only check but is caught by the relative gate.
+        const double abs_tol = 1e-3 * std::sqrt(static_cast<double>(K));
+        const double rel_tol = 1e-2;
+        std::printf("verify : max_abs_err=%.5f max_rel_err=%.5f abs_tol=%.5f rel_tol=%.5f\n",
+                    max_abs_err, max_rel_err, abs_tol, rel_tol);
+        if(max_abs_err > abs_tol || max_rel_err > rel_tol)
         {
             std::printf("FAILED\n");
             rc = 1;
