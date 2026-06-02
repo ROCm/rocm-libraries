@@ -79,6 +79,7 @@ HIPDNN_LOG_LEVEL=info $B --gtest_filter='*SdpaFwdPerf*'    # dense throughput sw
 HIPDNN_LOG_LEVEL=info $B --gtest_filter='*Paged*:*Varlen*' # paged + varlen throughput (perf-only, no oracle)
 HIPDNN_LOG_LEVEL=info $B --gtest_filter='*Oracle*'         # oracle config sweep (heuristic vs best); slow
 $B --gtest_filter='*BuildTime*'                            # first-use / JIT-compile latency (prints [BuildTime] lines)
+$B --gtest_filter='*ScorerDiag*'                           # scorer wiring probe: dumps per-config predict_tflops (CPU-only)
 ```
 
 ### 3. PyTorch perf baseline (external — separate venv, torch NOT in the hipDNN tree)
@@ -126,6 +127,8 @@ it times `F.scaled_dot_product_attention(is_causal=True)` with the same shapes/d
 - `integration_tests/IntegrationGpuCkDslSdpaFwdOracle.cpp` — gfx950 oracle config sweep.
 - `integration_tests/IntegrationGpuCkDslSdpaFwdBuildTime.cpp` — gfx950 first-use / JIT-compile
   latency probe (separates one-time warmup, per-shape cold compile, and JitCache hit).
+- `integration_tests/IntegrationGpuCkDslSdpaFwdScorerDiag.cpp` — pure-CPU scorer wiring probe:
+  dumps raw `predict_tflops` per config (catches a constant/garbage prediction = a wiring bug).
 
 ---
 
@@ -133,8 +136,10 @@ it times `F.scaled_dot_product_attention(is_causal=True)` with the same shapes/d
 
 - **Correctness:** 8/8 — fp16 & bf16 × head {64,128,256} × {MHA,GQA}, causal, vs CPU reference.
   (Dense path only — there is no CPU reference for paged/varlen, so those are perf-only.)
-- **Perf vs PyTorch flash** (aligned hipEvent harness, full `4·B·Hq·S²·D`): dispatcher pick
-  ~0.31–0.52× of flash, plateauing ~250 TFLOPS.
+- **Perf vs PyTorch flash** (aligned hipEvent harness, full `4·B·Hq·S²·D`): with the working
+  heuristic (post predict-dtype fix) the dispatcher pick is ~0.45–0.58× of flash (fp16 S8192 355 vs
+  786; S2048 255 vs 443), up from ~0.31–0.52× when the heuristic was mis-wired. Oracle-best (the
+  ceiling a perfect pick reaches) is ~0.64–0.73× of flash.
 - **Paged + varlen (wired, perf-only):** the unified kernel is always paged; real-paged binds the
   graph's `Page_table_K` device buffer directly to the block-table slot, varlen reads per-sequence
   lengths via a small in-`execute()` D2H. Measured (B4 GQA D128 S2048): `Paged_Identity` **245
@@ -142,29 +147,28 @@ it times `F.scaled_dot_product_attention(is_causal=True)` with the same shapes/d
   plumbing), `Paged_Scatter` **245** (reverse-permutation table — block-table indirection adds no
   measurable overhead at this shape), `Varlen_Mixed` **228** (bf16, lengths {S,S/2,S,S/4}, actual-
   token denominator). No correctness oracle exists for these paths.
-- **Oracle sweep (key finding):** the best enumerated config is **~2× faster than the
-  heuristic's pick** at S8192 (503 vs 247 TFLOPS), reaching ~0.64–0.73× of flash. The heuristic
-  picks the *smallest* config (nw1/mw16) for every shape → the gap is a **config-selection**
-  problem, not a kernel ceiling.
-- **Scoring-query fidelity fix + dispatcher-vs-analytic (decisive):** the heuristic was querying the
-  model out-of-distribution (pipeline pinned to the OOV `qr_pagedkv`, stub `tile_k0`, paged flag the
-  fwd model never saw). We made the scoring query trained-faithful (score `qr_async`, real
-  `k0/k1/n1/k0max`, dense scoring flag) — a scoring-only change (kernel + JIT cache unchanged). **It
-  did NOT change the pick:** the heuristic still selects nw1/mw16 for every shape, *including
-  in-family* bf16/d64/gqa8, where it is actually **worse than the analytic baseline** (0.90×). Oracle
-  vs heuristic vs analytic:
+- **The heuristic was MIS-WIRED — a C-API dtype bug (root cause, now fixed).** The dispatcher
+  called `LGBM_BoosterPredictForMat(..., features.data(), 0, ...)` — data-type `0`
+  (`C_API_DTYPE_FLOAT32`) — with a `std::array<double>` buffer, so LightGBM read the 8-byte doubles
+  as 4-byte floats and returned a **constant garbage prediction (~0.116) for every config**.
+  `selectArgmax` then tie-broke to the first (smallest) enumerated config every time — hence
+  "always the tiny kernel." Fix: data-type `0`→`1` (`C_API_DTYPE_FLOAT64`) in both the FMHA and GEMM
+  heuristic headers. After the fix predictions vary and are real TFLOPS (m0=16→200, m0=128→400,
+  m0=256→516) and the model correctly prefers large tiles. (Verified independent of the GPU by
+  `*ScorerDiag*`, which dumps per-config `predict_tflops` and asserts they are not all identical.)
+  The earlier scoring-query fidelity fix (score `qr_async`, real `k0/k1/n1/k0max`, dense scoring
+  flag) was correct and is a prerequisite, but its effect was masked by this bug.
+- **Oracle sweep + dispatcher-vs-analytic (post-fix):** the heuristic now picks the large
+  nw4/mw32 config and **beats the analytic baseline** on fp16. The residual oracle gap is almost
+  entirely the **MFMA atom** — oracle-best is always the `mfma32=1` variant, but the model's
+  68-feature schema has no slot for the warp atom, so it can't select it (a model feature-schema
+  item, not a wiring bug).
 
-  | shape | heuristic | oracle-best | oracle/heur | analytic | heur/analytic |
+  | shape | heuristic (pick) | oracle-best | oracle/heur | analytic | heur/analytic |
   |---|---|---|---|---|---|
-  | fp16 S8192 D128 | 247 | 503 (nw4/mw32/mfma32) | 2.03× | 216 | 1.15× |
-  | fp16 S2048 D128 | 227 | 324 (same) | 1.42× | 192 | 1.19× |
-  | bf16 in-family D64 S2048 | 290 | 452 (same) | 1.56× | 322 | **0.90×** |
-
-  Conclusion: the gfx950 model was trained on CK-Tile **assembly** fwd kernels and **does not
-  transfer** to the CK DSL unified kernel — it ranks small tiles highest when our kernel wants large
-  tiles. A faithful query is necessary (and a prerequisite for any working model) but **insufficient**.
-  The real lever is a **retrain/autotune on CK-DSL-measured TFLOPS** (the oracle harness already
-  produces exactly that data; oracle-best is the same nw4/mw32/mfma32 config across all shapes tested).
+  | fp16 S8192 D128 | 355 (nw4/mw32) | 501 (nw4/mw32/mfma32) | 1.41× | 216 | **1.64×** |
+  | fp16 S2048 D128 | 255 (nw4/mw32) | 324 (same) | 1.27× | 197 | **1.30×** |
+  | bf16 in-family D64 S2048 | 230 (nw4/mw32/t128) | 453 (t64/mfma32) | 1.96× | 324 | 0.71× |
 
 ### First-use latency (JIT / `buildPlan`)
 
@@ -184,12 +188,14 @@ re-scoring (enumerate + LightGBM predict), not recompile, so it's cacheable if i
 The compile cost amortizes after a handful of launches per shape.
 
 ### Open follow-ups
-1. **CK-DSL-native heuristic retrain (the lever — now confirmed required).** The scoring query is
-   trained-faithful but the gfx950 CK-Tile-assembly model does not transfer to the DSL kernel
-   (still picks nw1/mw16; ≈/worse than analytic). Retrain a model on CK-DSL-measured TFLOPS — the
-   oracle sweep already emits per-(shape,config) TFLOPS, the exact training signal. Closes the ~2×.
-2. `num_warps=8` + large-tile comgr CODEGEN failure (21/51 oracle configs); tighten the
-   enumerator's `supportsTiled2d` mirror so it doesn't emit non-compilable configs.
+1. **MFMA-atom feature (closes the residual ~1.3–1.9× gap).** The model can't see the warp atom, so
+   it never picks the `mfma32=1` oracle-best variant. Either add the atom to the feature schema and
+   fine-tune on CK-DSL-measured TFLOPS (the oracle emits exactly that signal), or add a deterministic
+   "prefer mfma32 when scores tie" selection tweak (the mfma32 variant shares the scoring key, so it
+   ties — care needed for the bf16 t128 case). A full retrain is **not** required; the model works.
+2. Fix the DSL `_select_2d_num_warps` stale LDS formula (attention_unified.py: 96 KB budget +
+   outdated allocation) to match the corrected `supports_tiled_2d` gate; affects only the analytic
+   fallback.
 3. Kernel feature gaps (further work needed): non-causal mode; LSE output (paged kernel emits none).
 4. Real-paged + varlen `execute()` launch branches are now wired and perf-measured (dense,
    real-paged, varlen, paged+varlen). A CPU reference for paged/varlen (to add *correctness*
