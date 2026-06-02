@@ -158,6 +158,18 @@ def drive(
     for h in headers:
         print(f"  {h}")
     print(f"\nExpected registry identifier: {identifier}")
+
+    # Exactly one header must be emitted for this config, and it must contain the
+    # expected identifier in its filename so the harness macro lookup cannot silently
+    # pick the wrong kernel.
+    if len(headers) != 1:
+        print(f"error: expected exactly 1 generated header, got {len(headers)}: {headers}",
+              file=sys.stderr)
+        return 1
+    if identifier not in headers[0].name:
+        print(f"error: expected identifier {identifier!r} in header name {headers[0].name!r}",
+              file=sys.stderr)
+        return 1
     return 0
 
 

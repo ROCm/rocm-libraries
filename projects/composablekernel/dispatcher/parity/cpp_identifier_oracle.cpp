@@ -24,6 +24,7 @@
 
 #include "ck_tile/dispatcher/kernel_key.hpp"
 
+#include <cstdlib>
 #include <iostream>
 #include <map>
 #include <string>

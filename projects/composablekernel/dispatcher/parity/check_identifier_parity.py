@@ -40,6 +40,7 @@ _ORACLE_SRC = _HERE / "cpp_identifier_oracle.cpp"
 _ORACLE_BIN = _HERE / "cpp_identifier_oracle"
 # kernel_key.hpp lives at <dispatcher>/include/ck_tile/dispatcher/kernel_key.hpp
 _INCLUDE_DIR = _HERE.parent / "include"
+_KERNEL_KEY_HPP = _INCLUDE_DIR / "ck_tile" / "dispatcher" / "kernel_key.hpp"
 
 
 def _bool_field(value: Any) -> str:
@@ -98,8 +99,16 @@ def _serialize(cfg: Dict[str, Any]) -> str:
 
 def _ensure_oracle() -> Path:
     """Compile the C++ oracle if needed; return its path. Host compiler only."""
-    if _ORACLE_BIN.exists() and _ORACLE_BIN.stat().st_mtime >= _ORACLE_SRC.stat().st_mtime:
-        return _ORACLE_BIN
+    if _ORACLE_BIN.exists():
+        bin_mtime = _ORACLE_BIN.stat().st_mtime
+        # Recompile if either the oracle source or the inline header it includes
+        # is newer than the binary. Checking only cpp_identifier_oracle.cpp misses
+        # edits to kernel_key.hpp (where encode_identifier() is defined inline),
+        # which would leave a stale binary silently returning wrong identifiers.
+        src_mtime = _ORACLE_SRC.stat().st_mtime
+        hdr_mtime = _KERNEL_KEY_HPP.stat().st_mtime if _KERNEL_KEY_HPP.exists() else 0.0
+        if bin_mtime >= max(src_mtime, hdr_mtime):
+            return _ORACLE_BIN
 
     cxx = shutil.which("g++") or shutil.which("c++") or shutil.which("clang++")
     if cxx is None:

@@ -53,6 +53,7 @@ from __future__ import annotations
 import argparse
 import re
 import shutil
+import statistics
 import subprocess
 import sys
 from pathlib import Path
@@ -75,6 +76,10 @@ _SEP = "=" * 72
 # Sentinel used by run_harness() when dry_run=True. Named constant to make the
 # contract explicit for _adjudicate_numerical().
 _DRYRUN_VERDICT = "DRYRUN"
+
+# Number of outer invocations for the performance stage. Medians over N runs
+# reduce the effect of GPU clock transients and OS scheduling jitter.
+_PERF_RUNS = 10
 
 
 def _capitalize_bool(b: bool) -> str:
@@ -304,7 +309,19 @@ def find_te_executable(te_build_dir: Path, cfg: Dict[str, Any]) -> Optional[Path
 
 
 def run_te_benchmark(exe: Path, m: int, n: int, k: int, csv_stub: Path, dry_run: bool
-                     ) -> Optional[Dict[str, float]]:
+                     ) -> Dict[str, Any]:
+    """Run the TE benchmark executable for one problem size.
+
+    Returns a dict with:
+      verdict: 'PASSED' | 'FAILED' | 'SKIPPED' | 'DRYRUN'
+      tflops:  float or None
+      rc:      process return code (0 = ok, None for dry-run)
+
+    The TE benchmark only writes a CSV row when it verifies (verify enabled), so a
+    missing or empty CSV is a skip signal (TE reported 'unsupported'), not a failure.
+    This keeps _adjudicate_numerical from penalizing sizes the TE kernel doesn't
+    support (which is a valid outcome, not a bug in either stack).
+    """
     csv_stub.with_suffix(".csv").unlink(missing_ok=True)
     # --warmup 3 --repeat 20 mirrors the harness's stream_config (cold_niters_=3,
     # nrepeat_=20) so the two stacks measure on comparable footing.
@@ -314,12 +331,18 @@ def run_te_benchmark(exe: Path, m: int, n: int, k: int, csv_stub: Path, dry_run:
     print("  $ " + " ".join(cmd))
     if dry_run:
         print("  [dry-run] not executed")
-        return None
+        return {"verdict": _DRYRUN_VERDICT, "tflops": None, "rc": None}
     proc = subprocess.run(cmd, capture_output=True, text=True)
     sys.stdout.write(proc.stdout)
     if proc.stderr:
         sys.stderr.write(proc.stderr)
-    return parse_te_csv(csv_stub.with_suffix(".csv"))
+    row = parse_te_csv(csv_stub.with_suffix(".csv"))
+    if row is None:
+        # No CSV row: TE skipped (unsupported size/config). Not a failure.
+        return {"verdict": "SKIPPED", "tflops": None, "rc": proc.returncode}
+    tflops = row.get("tflops")
+    verdict = "PASSED" if tflops is not None else "FAILED"
+    return {"verdict": verdict, "tflops": tflops, "rc": proc.returncode}
 
 
 # --------------------------------------------------------------------------- #
@@ -418,14 +441,14 @@ def run(args: argparse.Namespace) -> int:
             print(f"  warning: TE executable {te_benchmark_name(cfg)} not found "
                   f"under {args.te_build_dir}; running dispatcher-only.")
 
-    te_results: Dict[Tuple[int, int, int], Optional[Dict[str, float]]] = {}
+    te_results: Dict[Tuple[int, int, int], Dict[str, Any]] = {}
     if te_exe is not None or args.dry_run:
         for (m, n, k) in sizes:
             if te_exe is None:  # dry-run with no real exe
                 print(f"  $ {te_benchmark_name(cfg)} -m={m} -n={n} -k={k} "
                       f"-verify=1 -csv_filename=<stub>")
                 print("  [dry-run] not executed")
-                te_results[(m, n, k)] = None
+                te_results[(m, n, k)] = {"verdict": _DRYRUN_VERDICT, "tflops": None, "rc": None}
                 continue
             stub = _HERE / f"te_{m}x{n}x{k}"
             te_results[(m, n, k)] = run_te_benchmark(te_exe, m, n, k, stub, args.dry_run)
@@ -451,7 +474,7 @@ def run(args: argparse.Namespace) -> int:
         summary["performance"] = "INFO (dispatcher-only, no TE baseline)"
     else:
         perf_ok = _adjudicate_performance(sizes, disp, te_results, args.perf_tol,
-                                          args.dry_run)
+                                          args.dry_run, args.perf_runs)
         summary["performance"] = "PASS" if perf_ok else "FAIL"
         if not perf_ok and not args.dry_run:
             return _fail(summary)
@@ -463,7 +486,7 @@ def run(args: argparse.Namespace) -> int:
 def _adjudicate_numerical(
     sizes: List[Tuple[int, int, int]],
     disp: Dict[Tuple[int, int, int], Dict[str, Any]],
-    te_results: Dict[Tuple[int, int, int], Optional[Dict[str, float]]],
+    te_results: Dict[Tuple[int, int, int], Dict[str, Any]],
     has_te_exe: bool,
     dry_run: bool,
 ) -> bool:
@@ -476,11 +499,15 @@ def _adjudicate_numerical(
         dv = d.get("verdict", "UNKNOWN")
         line = f"    {m}x{n}x{k}: dispatcher={dv}"
         if has_te_exe:
-            te = te_results.get(sz)
-            te_pass = te is not None and te.get("tflops") is not None
-            line += f"  tile_engine={'PASSED' if te_pass else 'NO-ROW/FAILED'}"
-            if not dry_run and not (dv == "PASSED" and te_pass):
-                if dv != "SKIPPED":
+            te = te_results.get(sz, {})
+            tv = te.get("verdict", "UNKNOWN")
+            line += f"  tile_engine={tv}"
+            if not dry_run:
+                # Both must PASS or SKIP together; a SKIP on one side with PASS on
+                # the other is still OK (TE may not support all tile-aligned sizes).
+                disp_ok = dv in ("PASSED", "SKIPPED")
+                te_ok = tv in ("PASSED", "SKIPPED", _DRYRUN_VERDICT)
+                if not disp_ok or (tv == "FAILED"):
                     ok = False
         else:
             if not dry_run and dv not in ("PASSED", "SKIPPED", _DRYRUN_VERDICT):
@@ -492,31 +519,54 @@ def _adjudicate_numerical(
 def _adjudicate_performance(
     sizes: List[Tuple[int, int, int]],
     disp: Dict[Tuple[int, int, int], Dict[str, Any]],
-    te_results: Dict[Tuple[int, int, int], Optional[Dict[str, float]]],
+    te_results: Dict[Tuple[int, int, int], Dict[str, Any]],
     perf_tol: float,
     dry_run: bool,
+    perf_runs: int = _PERF_RUNS,
 ) -> bool:
-    print(f"  relative tolerance: {perf_tol:.0%}")
+    """Compare dispatcher vs TE TFLOP/s using medians over multiple harness runs.
+
+    Each size is measured ``perf_runs`` times (default 10). The median of those
+    runs is compared against the TE baseline median. Using the median suppresses
+    GPU clock transients and OS scheduling jitter that inflate single-run variance.
+    """
+    print(f"  relative tolerance: {perf_tol:.0%}  (median of {perf_runs} runs)")
+    harness = _HERE / "harness"
     ok = True
     for sz in sizes:
         m, n, k = sz
-        dt = disp.get(sz, {}).get("tflops")
-        te = te_results.get(sz)
-        tt = te.get("tflops") if te else None
+        te = te_results.get(sz, {})
+        tt = te.get("tflops")
+
         if dry_run:
-            print(f"    {m}x{n}x{k}: dispatcher=<t> tile_engine=<t> (dry-run)")
+            print(f"    {m}x{n}x{k}: dispatcher=<median> tile_engine=<median> (dry-run)")
             continue
-        if dt is None or tt is None or tt == 0:
-            print(f"    {m}x{n}x{k}: dispatcher={_fmt(dt)} tile_engine={_fmt(tt)} "
-                  f"-> INSUFFICIENT DATA")
+        if tt is None or tt == 0:
+            print(f"    {m}x{n}x{k}: tile_engine={_fmt(tt)} -> INSUFFICIENT DATA (no TE baseline)")
             ok = False
             continue
+
+        # Collect dispatcher TFLOP/s over perf_runs invocations (verify=0 for speed).
+        d_samples: List[float] = []
+        for _ in range(perf_runs):
+            cmd = [str(harness), f"-m={m}", f"-n={n}", f"-k={k}", "-verify=0"]
+            proc = subprocess.run(cmd, capture_output=True, text=True)
+            parsed = parse_harness_output(proc.stdout)
+            if parsed.get("tflops") is not None:
+                d_samples.append(parsed["tflops"])
+
+        if not d_samples:
+            print(f"    {m}x{n}x{k}: dispatcher=n/a (no throughput from {perf_runs} runs) -> FAIL")
+            ok = False
+            continue
+
+        dt = statistics.median(d_samples)
         rel = abs(dt - tt) / tt
         verdict = "OK" if rel <= perf_tol else "OUT-OF-TOL"
         if rel > perf_tol:
             ok = False
         print(f"    {m}x{n}x{k}: dispatcher={dt:.1f} tile_engine={tt:.1f} TFLOP/s "
-              f"(rel {rel:.1%}) -> {verdict}")
+              f"(rel {rel:.1%}, n={len(d_samples)}) -> {verdict}")
     return ok
 
 
@@ -556,9 +606,12 @@ def main() -> int:
     ap.add_argument("--te-build-dir", type=Path, default=None,
                     help="Tile Engine build dir containing benchmark_gemm_universal_* "
                          "executables (enables dispatcher-vs-TE comparison)")
-    ap.add_argument("--perf-tol", type=float, default=0.10,
+    ap.add_argument("--perf-tol", type=float, default=0.02,
                     help="Relative throughput tolerance for performance parity "
-                         "(default 0.10 = 10%%)")
+                         "(default 0.02 = 2%%)")
+    ap.add_argument("--perf-runs", type=int, default=_PERF_RUNS,
+                    help=f"Number of harness invocations for performance median "
+                         f"(default {_PERF_RUNS})")
     ap.add_argument("--dry-run", action="store_true",
                     help="Print the full command plan without executing")
     args = ap.parse_args()

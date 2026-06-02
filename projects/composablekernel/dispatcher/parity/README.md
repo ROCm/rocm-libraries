@@ -129,3 +129,15 @@ the performance baseline.
 | `make_docs.py` | — | regenerates the two PDFs below (reportlab) |
 | `parity_design.pdf` | — | design walkthrough: every file and how it serves parity |
 | `parity_usage.pdf` | — | basic-usage guide |
+
+## Measurement methodology (Stage 3)
+
+| Parameter | Value | Rationale |
+|-----------|-------|-----------|
+| Warmup invocations | 3 (`-warmup=3`) | Allows GPU caches and clocks to stabilise before timing begins |
+| Timed invocations | 20 (`-repeat=20`) | Average over 20 kernel launches per harness call; reduces single-launch jitter |
+| Timer type | GPU timer (`is_gpu_timer_=true`) | Avoids host-side overhead and driver-submission latency from polluting measurements |
+| Outer repetitions | 10 (`--perf-runs`) | Each size is driven 10 times; the **median** TFLOP/s is used for comparison |
+| Tolerance | 2% (`--perf-tol 0.02`) | Tight enough to catch genuine regressions; loose enough to absorb run-to-run GPU clock variance across different thermal states |
+
+Using the median of 10 outer runs (rather than a single run or the arithmetic mean) suppresses outlier spikes caused by GPU DVFS transitions and OS scheduler preemption. The harness and TE benchmark use identical warmup/repeat settings so the two stacks are measured on comparable footing.

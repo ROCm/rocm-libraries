@@ -28,6 +28,7 @@
 #include <cstdlib>
 #include <cmath>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include <hip/hip_runtime.h>
@@ -166,8 +167,21 @@ int main(int argc, char** argv)
     if(verify)
     {
         // CPU reference in fp32: C[m,n] = sum_k A[m,k] * B[k,n] (B col-major).
+        // fp16 accumulation tolerance:
+        //   abs: 1e-3 * sqrt(K)   (tight constant vs original 1e-2)
+        //   rel: 1e-2             (relative gate matches projectdes.txt T1.5 spec)
+        // Both gates must pass; a kernel returning values off by 0.2 when K=512
+        // would slip past the abs-only check but is caught by the relative gate.
+        const double abs_tol = 1e-3 * std::sqrt(static_cast<double>(K));
+        const double rel_tol = 1e-2;
+
         double max_abs_err = 0.0;
         double max_rel_err = 0.0;
+        int total_elems    = 0;
+        int fail_count     = 0;
+        // First 10 mismatches printed to stderr to aid diagnosis without overwhelming output.
+        std::vector<std::tuple<int,int,float,float>> first_mismatches;
+
         for(int m = 0; m < M; ++m)
         {
             for(int n = 0; n < N; ++n)
@@ -182,21 +196,32 @@ int main(int argc, char** argv)
                 const float got =
                     ck_tile::type_convert<float>(h_c[static_cast<size_t>(m) * stride_c + n]);
                 const double abs_err = std::fabs(got - acc);
-                max_abs_err          = std::max(max_abs_err, abs_err);
-                max_rel_err = std::max(max_rel_err, abs_err / (std::fabs(acc) + 1e-6));
+                const double rel_err = abs_err / (std::fabs(acc) + 1e-6);
+                max_abs_err = std::max(max_abs_err, abs_err);
+                max_rel_err = std::max(max_rel_err, rel_err);
+                ++total_elems;
+                if(abs_err > abs_tol || rel_err > rel_tol)
+                {
+                    ++fail_count;
+                    if(static_cast<int>(first_mismatches.size()) < 10)
+                        first_mismatches.emplace_back(m, n, got, acc);
+                }
             }
         }
-        // fp16 accumulation tolerance:
-        //   abs: 1e-3 * sqrt(K)   (tight constant vs original 1e-2)
-        //   rel: 1e-2             (relative gate matches projectdes.txt T1.5 spec)
-        // Both gates must pass; a kernel returning values off by 0.2 when K=512
-        // would slip past the abs-only check but is caught by the relative gate.
-        const double abs_tol = 1e-3 * std::sqrt(static_cast<double>(K));
-        const double rel_tol = 1e-2;
+
+        const int pass_count = total_elems - fail_count;
         std::printf("verify : max_abs_err=%.5f max_rel_err=%.5f abs_tol=%.5f rel_tol=%.5f\n",
                     max_abs_err, max_rel_err, abs_tol, rel_tol);
-        if(max_abs_err > abs_tol || max_rel_err > rel_tol)
+        std::printf("verify : %d/%d elements pass (%.1f%%)\n",
+                    pass_count, total_elems,
+                    total_elems > 0 ? 100.0 * pass_count / total_elems : 0.0);
+
+        if(fail_count > 0)
         {
+            std::fprintf(stderr, "first %d mismatch(es):\n",
+                         static_cast<int>(first_mismatches.size()));
+            for(auto& [mm, nn, got, ref] : first_mismatches)
+                std::fprintf(stderr, "  C[%d,%d]: got=%.6f ref=%.6f\n", mm, nn, got, ref);
             std::printf("FAILED\n");
             rc = 1;
         }
