@@ -105,13 +105,14 @@ def render_junit(result):
     for t in result.get("invalid_tests", []):
         failures.append(("not a registered ctest test", t))
 
+    _attr = {"'": "&apos;", '"': "&quot;"}
     cases = []
     if failures:
         for reason, name in failures:
             cases.append(
                 f'    <testcase classname="smart-build.selection" '
-                f'name="{escape(name)}">\n'
-                f'      <failure message="{escape(reason)}"/>\n'
+                f'name="{escape(name, _attr)}">\n'
+                f'      <failure message="{escape(reason, _attr)}"/>\n'
                 f"    </testcase>"
             )
     else:

@@ -95,17 +95,6 @@ def reachable_exe_basenames(depmap):
     return set(os.path.basename(e) for e in e2f)
 
 
-def unreachable_tests(depmap, ctest_tests, allow=None):
-    """ctest tests that no file maps to -> the filter can never select them.
-
-    Such a test is a guaranteed false negative: if its sources change, smart-build
-    will not run it. Usually caused by a dependency-extraction gap for its TU.
-    """
-    reach = reachable_exe_basenames(depmap)
-    allow = allow or set()
-    return sorted(t for t in ctest_tests if t not in reach and t not in allow)
-
-
 def classify_unreachable(depmap, ctest_tests, compiled=None, allow=None):
     """Split unreachable ctest tests into false negatives vs non-compiled.
 
@@ -131,12 +120,23 @@ def classify_unreachable(depmap, ctest_tests, compiled=None, allow=None):
 
 
 def _run_probe(args):
-    depmap = json.load(open(args.depmap))
+    for path, label in [
+        (args.depmap, "--depmap"),
+        (args.ninja, "--ninja"),
+        (args.failed_objects, "--failed-objects"),
+    ] + ([(args.ctest, "--ctest")] if args.ctest else []):
+        if not os.path.exists(path):
+            print(f"Error: file not found ({label}): {path}", file=sys.stderr)
+            return 2
+
+    with open(args.depmap) as f:
+        depmap = json.load(f)
     file_to_executables = depmap.get("file_to_executables", depmap)
     ctest_tests = load_ctest_tests(args.ctest) if args.ctest else None
 
     exe_to_objects = NinjaTargetParser(args.ninja).parse_executable_mappings()
-    failed = parse_failed_objects(open(args.failed_objects, errors="replace").read())
+    with open(args.failed_objects, errors="replace") as f:
+        failed = parse_failed_objects(f.read())
 
     sel = sel_for_file(file_to_executables, ctest_tests, args.file)
     true_set = exes_for_objects(exe_to_objects, failed, ctest_tests)
@@ -144,7 +144,8 @@ def _run_probe(args):
     result["n_failed_objects"] = len(failed)
 
     if args.output:
-        json.dump(result, open(args.output, "w"), indent=2)
+        with open(args.output, "w") as f:
+            json.dump(result, f, indent=2)
 
     print(f"=== build-filter oracle: {args.file} ===")
     print(f"failed objects:   {result['n_failed_objects']}")
@@ -159,12 +160,13 @@ def _run_probe(args):
 
 
 def _run_reachability(args):
-    depmap = json.load(open(args.depmap))
+    with open(args.depmap) as f:
+        depmap = json.load(f)
     ctest_tests = load_ctest_tests(args.ctest)
     allow = set()
     if args.allowlist and os.path.exists(args.allowlist):
-        allow = {ln.strip() for ln in open(args.allowlist)
-                 if ln.strip() and not ln.startswith("#")}
+        with open(args.allowlist) as f:
+            allow = {ln.strip() for ln in f if ln.strip() and not ln.startswith("#")}
     # If build.ninja is given, classify: only tests backed by a compiled bin/
     # target can be FNs; tests with no bin/ target are non-compiled (always-run).
     compiled = None
@@ -186,7 +188,8 @@ def _run_reachability(args):
         "verdict": "pass" if not fn else "fail",
     }
     if args.output:
-        json.dump(result, open(args.output, "w"), indent=2)
+        with open(args.output, "w") as f:
+            json.dump(result, f, indent=2)
 
     print("=== reachability guardrail ===")
     print(f"ctest tests:      {result['n_ctest']}")

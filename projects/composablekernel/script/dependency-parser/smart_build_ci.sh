@@ -15,9 +15,11 @@
 #   1 = Full build required (run ninja check)
 #
 # Output files:
-#   tests_to_run.json - Selected tests and executables
-#   build_targets.txt - Space-separated list of ninja targets to build
-#   build_mode.env - Environment variables (SMART_BUILD_MODE=selective|full)
+#   tests_to_run.json     - Selected tests and executables
+#   build_targets.txt     - Space-separated list of ninja targets to build
+#   build_mode.env        - Environment variables (SMART_BUILD_MODE=selective|full|none)
+#   smart_build_ci.log    - Full run log (also printed to stdout via tee)
+#   reachability_result.json - Guardrail: tests unreachable from any changed file
 
 set -e
 
@@ -26,6 +28,10 @@ BUILD_DIR="${BUILD_DIR:-$(pwd)}"
 WORKSPACE_ROOT="${WORKSPACE_ROOT:-$(cd ${BUILD_DIR}/.. && pwd)}"
 PARALLEL="${PARALLEL:-32}"
 BASE_BRANCH="${BASE_BRANCH:-develop}"
+LOG_FILE="${BUILD_DIR}/smart_build_ci.log"
+
+# Tee all output (stdout+stderr) to the log file for CI artifact archiving.
+exec > >(tee -a "${LOG_FILE}") 2>&1
 
 echo "========================================="
 echo "Smart Build CI"
@@ -43,6 +49,7 @@ cd "${BUILD_DIR}"
 if ! bash "${SCRIPT_DIR}/ci_safety_check.sh"; then
     echo "CI safety check failed - full build required"
     echo "full" > build_targets.txt
+    echo "SMART_BUILD_MODE=full" > build_mode.env
     exit 1
 fi
 
@@ -84,12 +91,18 @@ echo "✓ Dependency map generated"
 echo ""
 echo "Step 2b: Reachability guardrail (non-fatal)..."
 ctest -N > ctest_list.txt 2>/dev/null || true
-python3 "${SCRIPT_DIR}/filter_oracle.py" reachability \
-    --depmap enhanced_dependency_mapping.json \
-    --ctest ctest_list.txt \
-    --ninja build.ninja \
-    --output reachability_result.json \
-    || echo "⚠ reachability guardrail found unreachable compiled tests (see reachability_result.json) - continuing"
+# Guard: if ctest -N produced no test lines the guardrail would trivially pass
+# (empty intersection), giving a false green. Skip it and warn instead.
+if ! grep -q "Test #" ctest_list.txt 2>/dev/null; then
+    echo "⚠ ctest -N returned no tests (not yet configured or wrong CWD?) - skipping reachability guardrail"
+else
+    python3 "${SCRIPT_DIR}/filter_oracle.py" reachability \
+        --depmap enhanced_dependency_mapping.json \
+        --ctest ctest_list.txt \
+        --ninja build.ninja \
+        --output reachability_result.json \
+        || echo "⚠ reachability guardrail found unreachable compiled tests (see reachability_result.json) - continuing"
+fi
 
 # Step 3: Select affected tests
 echo ""
@@ -116,16 +129,19 @@ if [ "${num_tests}" -eq 0 ]; then
     echo "Result: No tests affected by changes"
     echo "========================================="
     echo "none" > build_targets.txt
+    echo "SMART_BUILD_MODE=none" > build_mode.env
     exit 0
 fi
 
 # Step 5: Extract build targets (executables)
 echo ""
-echo "Step 4: Extracting build targets..."
+echo "Step 5: Extracting build targets..."
 jq -r '.executables[]' tests_to_run.json | tr '\n' ' ' > build_targets.txt
 
 num_targets=$(jq -r '.executables | length' tests_to_run.json)
 echo "✓ Generated ${num_targets} build targets"
+
+echo "SMART_BUILD_MODE=selective" > build_mode.env
 
 # Display summary
 echo ""
@@ -138,12 +154,14 @@ echo "Output files:"
 echo "  - tests_to_run.json (test selection)"
 echo "  - build_targets.txt (ninja targets)"
 echo "  - build_mode.env (SMART_BUILD_MODE=selective)"
+echo "  - smart_build_ci.log (full run log)"
 echo "========================================="
 
 # Show first few targets for verification
 echo ""
 echo "Sample build targets (first 5):"
-head -1 build_targets.txt | tr ' ' '\n' | head -5
+# Use tr+awk rather than nested head to avoid SIGPIPE under set -e
+tr ' ' '\n' < build_targets.txt | awk 'NR<=5'
 
 echo ""
 echo "✓ Smart build preparation complete"

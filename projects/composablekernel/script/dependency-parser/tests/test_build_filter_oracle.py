@@ -90,22 +90,6 @@ class TestReachability(unittest.TestCase):
             bfo.reachable_exe_basenames(self._depmap()), {"test_a", "test_b"}
         )
 
-    def test_unreachable_flags_tests_with_no_mapping(self):
-        # test_c is ctest-registered but no file maps to it -> unreachable (FN).
-        unreach = bfo.unreachable_tests(self._depmap(), {"test_a", "test_b", "test_c"})
-        self.assertEqual(unreach, ["test_c"])
-
-    def test_all_reachable(self):
-        self.assertEqual(
-            bfo.unreachable_tests(self._depmap(), {"test_a", "test_b"}), []
-        )
-
-    def test_allowlist_suppresses_known_unreachable(self):
-        unreach = bfo.unreachable_tests(
-            self._depmap(), {"test_a", "test_c"}, allow={"test_c"}
-        )
-        self.assertEqual(unreach, [])
-
 
 class TestClassifyUnreachable(unittest.TestCase):
     def _depmap(self):

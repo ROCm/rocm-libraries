@@ -43,6 +43,7 @@ PARALLEL="${PARALLEL:-32}"
 PROCESS_NINJA_TRACE="${PROCESS_NINJA_TRACE:-false}"
 NINJA_FTIME_TRACE="${NINJA_FTIME_TRACE:-false}"
 DRY_RUN="${DRY_RUN:-false}"
+LOG_FILE="${BUILD_DIR}/smart_build.log"
 
 # Allow --dry-run / --smoke as a CLI alternative to DRY_RUN=true
 for arg in "$@"; do
@@ -51,8 +52,11 @@ for arg in "$@"; do
     esac
 done
 
+# Tee all output (stdout+stderr) to the log file for CI artifact archiving.
+exec > >(tee -a "${LOG_FILE}") 2>&1
+
 # Validate required parameters
-# NINJA_JOBS is not needed in dry-run mode (ninja -n does not compile).
+# NINJA_JOBS is not needed in dry-run mode (no compilation; uses ninja -t targets all).
 if [ "$DRY_RUN" != "true" ] && [ -z "$NINJA_JOBS" ]; then
     echo "Error: NINJA_JOBS environment variable is required"
     exit 1
@@ -121,14 +125,14 @@ fi
 
 # Step 3: Build only affected targets
 if [ "$DRY_RUN" = "true" ]; then
-    NUM_TARGETS=$(echo ${BUILD_TARGETS} | wc -w)
+    NUM_TARGETS=$(echo "${BUILD_TARGETS}" | wc -w)
     echo "🧪 DRY RUN - validating ${NUM_TARGETS} selected target(s), no compilation, no tests"
     # Validate the selection against ninja's real target namespace.
     # NOTE: `ninja -n <target>` is NOT used as the oracle: CK uses CMake GLOB
     # CONFIGURE_DEPENDS, so every ninja call regenerates build.ninja and
     # `ninja -n` then exits 0 for any target (real or bogus). The reliable
     # oracle is the target list from `ninja -t targets all`.
-    ninja -t targets all > ninja_targets.txt
+    ninja -t targets all > ninja_targets.txt 2>/dev/null || { echo "⚠ ninja -t targets all failed; cannot validate target namespace"; exit 1; }
     python3 "${SCRIPT_DIR}/main.py" validate \
         tests_to_run.json \
         --ninja-targets ninja_targets.txt \
@@ -153,7 +157,10 @@ python3 "${SCRIPT_DIR}/main.py" validate \
 
 echo "✓ Selective build - building only affected targets"
 echo "Building targets: ${BUILD_TARGETS}"
-ninja -j${NINJA_JOBS} ${BUILD_TARGETS}
+# Word-split BUILD_TARGETS intentionally: targets are space-separated basenames
+# that never contain spaces (ninja target naming convention).
+# shellcheck disable=SC2086
+ninja -j"${NINJA_JOBS}" ${BUILD_TARGETS}
 
 # Process ninja build trace if requested
 if [ "$PROCESS_NINJA_TRACE" = "true" ]; then

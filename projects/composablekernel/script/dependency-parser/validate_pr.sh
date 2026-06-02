@@ -37,7 +37,7 @@ Required:
 
 Options:
   -b, --base BRANCH           Base branch (default: origin/develop)
-  -s, --smart-build BRANCH    Smart build branch (default: users/yraparti/ck/dependency-parser-smart-build)
+  -s, --smart-build BRANCH    Smart build branch (default: origin/develop)
   --skip-build                Skip full build (use existing build artifacts)
   --skip-legacy               Skip legacy analysis (only run smart build)
   -h, --help                  Show this help
@@ -164,7 +164,7 @@ log_section "Step 2: Rebase on Smart Build Branch"
 log_info "Rebasing pr-${PR_NUMBER} on $SMART_BUILD_BRANCH..."
 
 # Attempt rebase, handling conflicts by accepting PR changes
-if ! git rebase $SMART_BUILD_BRANCH; then
+if ! git rebase "${SMART_BUILD_BRANCH}"; then
     log_warn "Rebase conflicts detected, resolving by accepting PR changes..."
 
     # Loop to handle multiple conflicts during rebase
@@ -210,7 +210,7 @@ git log --oneline -5
 
 log_section "Step 3: Analyze Changed Files"
 log_info "Files changed vs $BASE_BRANCH:"
-CHANGED_FILES=$(git diff --name-only ${BASE_BRANCH}...HEAD -- projects/composablekernel)
+CHANGED_FILES=$(git diff --name-only "${BASE_BRANCH}"...HEAD -- projects/composablekernel)
 # `echo "" | wc -l` is 1, so count non-empty lines to report 0 for an empty diff.
 if [ -z "$CHANGED_FILES" ]; then
     NUM_FILES=0
@@ -230,7 +230,9 @@ cd "$BUILD_DIR" || exit 1
 log_info "Configuring CMake to generate compile_commands.json..."
 # CMAKE_EXTRA_ARGS lets callers inject environment-specific flags, e.g. a CPU-only
 # cluster node: CMAKE_EXTRA_ARGS="-DCMAKE_CXX_COMPILER=amdclang++ -DGPU_TARGETS=gfx942"
-cmake .. -GNinja -DCMAKE_EXPORT_COMPILE_COMMANDS=ON ${CMAKE_EXTRA_ARGS:-} 2>&1 | grep -v "^-- " || true
+# Suppress the verbose "-- Configuring..." progress lines; propagate cmake errors.
+cmake .. -GNinja -DCMAKE_EXPORT_COMPILE_COMMANDS=ON ${CMAKE_EXTRA_ARGS:-} 2>&1 \
+    | { grep -v "^-- " || true; }
 
 if [ ! -f "compile_commands.json" ]; then
     log_error "CMake configuration failed - compile_commands.json not generated"
@@ -268,7 +270,7 @@ log_section "Step 5: Smart Build Test Selection"
 log_info "Running smart build test selection..."
 python3 ../script/dependency-parser/main.py select \
     "$SMART_MAP" \
-    $BASE_BRANCH \
+    "${BASE_BRANCH}" \
     HEAD \
     --ctest-only \
     --output pr${PR_NUMBER}_smart_build.json
@@ -323,7 +325,7 @@ log_section "Step 8: Legacy Test Selection"
 log_info "Running legacy test selection..."
 python3 ../script/dependency-parser/main.py select \
     enhanced_dependency_mapping.json \
-    $BASE_BRANCH \
+    "${BASE_BRANCH}" \
     HEAD \
     --ctest-only \
     --output pr${PR_NUMBER}_legacy_tests.json

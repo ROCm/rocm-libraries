@@ -36,11 +36,6 @@ class TestIsCodeFile(unittest.TestCase):
 
 
 class TestLoadCtestTests(unittest.TestCase):
-    def _write_tmp(self, tmp_path, content):
-        p = tmp_path / "ctest_n.txt"
-        p.write_text(content)
-        return str(p)
-
     def test_parses_standard_format(self):
         import tempfile, os
         with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:

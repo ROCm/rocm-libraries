@@ -35,24 +35,15 @@ Output fields:
 
 import json
 import os
-import re
 import sys
+
+# Reuse the canonical parser from validate_selection to avoid duplication.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "src"))
+from validate_selection import load_ctest_tests  # noqa: E402
 
 CODE_EXT = {".hpp", ".h", ".hh", ".cpp", ".cc", ".cxx", ".c", ".cu", ".hip",
             ".inc", ".ipp", ".tpp"}
 PROJ_PREFIX = "projects/composablekernel/"
-
-
-def load_ctest_tests(path):
-    """Parse `ctest -N` output -> set of test names."""
-    pat = re.compile(r"^\s*Test\s+#\d+:\s*(.+)$")
-    tests = set()
-    with open(path) as fh:
-        for line in fh:
-            m = pat.match(line)
-            if m:
-                tests.add(m.group(1).strip())
-    return tests
 
 
 def is_code_file(path):
@@ -138,12 +129,15 @@ def main(argv=None):
         sys.exit(2)
     depmap_path, ctest_path, pr_json_path, out_path = argv[:4]
 
-    f2e = json.load(open(depmap_path))["file_to_executables"]
+    with open(depmap_path) as f:
+        f2e = json.load(f)["file_to_executables"]
     ctest_tests = load_ctest_tests(ctest_path)
-    pr = json.load(open(pr_json_path))
+    with open(pr_json_path) as f:
+        pr = json.load(f)
 
     result = analyze_pr(f2e, ctest_tests, pr)
-    json.dump(result, open(out_path, "w"), indent=2)
+    with open(out_path, "w") as f:
+        json.dump(result, f, indent=2)
     print(summary_line(result))
 
 
