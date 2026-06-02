@@ -83,7 +83,28 @@ and blended are reported).
 | | Stmts | Miss | Line cov | Blended |
 |---|---|---|---|---|
 | Before | 448 | 301 | 32.81% | 30.45% |
-| After  | TBD | TBD | TBD | TBD |
+| After  | 448 | 8 | **98.21%** | 97.76% |
 
-(Filled in at the final coverage step; see `coverage-after.txt` and
-`resistance.md` / `recommendations.md`.)
+Delta: **+65.40 pts line**, −293 missing statements. The 8 remaining
+line-misses are all provably unreachable in this environment (ujson/simplejson
+print arms — packages absent; the yaml-missing `printExit` — blocking yaml
+aborts import; and the redundant per-solution ProblemType re-defaulting at
+L559/562/565/570 — the data-level defaulting always populates ProblemType
+first). Details + the 3 unreachable partial branches in `resistance.md`.
+
+No regression: full `-m unit` went **1330 → 1443 passed** (+113 new tests),
+201 skipped unchanged. Per-row detail in `coverage-after.txt`; next-target
+go/no-go in `recommendations.md`.
+
+### Suite layout (new files in this dir, add-only)
+
+| File | Drives |
+|---|---|
+| `conftest.py` | session `cxx_compiler` / `isa_info_map` / `assembler` |
+| `test_serializers_char.py` | `_fast_yaml_*`, `fast_yaml_dump`, `getRealDataType{A,B}`, `LibraryLogic` |
+| `test_readwrite_char.py` | `write`/`writeYAML`/`writeJson`/`writeMsgPack`, `read*`, `StrictTypeLoader` |
+| `test_writesolutions_char.py` | `_writeSolutionsHeader`, `_findBodyOffset`, `writeSolutions` (cache + non-cache) |
+| `test_logiccontract_char.py` | `parseLibraryLogicList`, `rawLibraryLogic`, `createLibraryLogic`, `getCUCount` |
+| `test_parse_integration_char.py` | `parseLibraryLogic{File,Data}`, `parseSolutions{File,Data}` over a real fixture |
+| `test_import_fallbacks_char.py` | the optional-dependency `except ImportError` arms |
+| `data/logic_gfx942_HSS_BH.yaml` | vendored real logic fixture |

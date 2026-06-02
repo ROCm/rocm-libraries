@@ -1,0 +1,31 @@
+# AFTER coverage — full `-m unit` suite WITH the LibraryIO characterization suite.
+#
+# Command (documented fallback: single-file path-prefix does not match coverage's
+# --cov; use the package dir + grep — see coverage-before.txt / target.md):
+#   pytest -m unit --cov=Tensile --cov-config=pyproject.toml \
+#     --cov-report=term-missing Tensile/Tests/unit | grep LibraryIO
+
+Name                                                          Stmts   Miss Branch BrPart   Cover   Missing
+Tensile/LibraryIO.py                                            448      8    176      6  97.76%   51, 55, 62-63, 539->541, 559, 562, 565, 570, 694->701
+
+1443 passed, 201 skipped
+
+# Line coverage = (Stmts - Miss) / Stmts = (448 - 8) / 448 = 98.21% line   >= 95% goal MET
+# Blended (line+branch, the report's Cover column)            = 97.76%
+#
+# The 8 missing LINES are all unreachable in this environment (see resistance.md):
+#   51, 55  — print2() in the ujson / simplejson import-success arms; neither
+#             package is installed, so an `import` can never reach the print.
+#   62-63   — yaml-missing -> printExit; yaml is mandatory, blocking it aborts
+#             the module import itself (cannot be exercised without crashing).
+#   559,562,565,570 — per-solution ProblemType re-defaulting in
+#             solutionStateToSolution; the data-level defaulting (L514-528)
+#             always populates ProblemType before the object is built, so these
+#             "not in" guards are never true (redundant defensive code).
+#
+# The 3 partial BRANCHES (539->541, 694->701) are likewise unreachable:
+#   539->541  — non-"Assembly" KernelLanguage in a logic solution.
+#   694->701  — getCUCount: `"".strip().split("\n")` is `['']` (always truthy),
+#               so the empty-lines arm cannot be taken.
+#
+# Before -> After: 32.81% -> 98.21% line  (+65.40 pts); 301 -> 8 missing stmts.
