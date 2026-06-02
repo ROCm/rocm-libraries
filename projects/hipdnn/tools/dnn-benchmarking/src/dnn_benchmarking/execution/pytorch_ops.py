@@ -812,6 +812,16 @@ def handle_sdpa(
     graph_json: Dict[str, Any],
 ) -> None:
     """Handle scaled dot-product attention forward."""
+    _sdpa_unsupported_if_present(
+        node,
+        [
+            "max_tensor_uid",
+            "sum_exp_tensor_uid",
+            "rng_dump_tensor_uid",
+            "amax_s_tensor_uid",
+            "amax_o_tensor_uid",
+        ],
+    )
     q_uid = _required_input_uid(node, "q_tensor_uid")
     k_uid = _required_input_uid(node, "k_tensor_uid")
     v_uid = _required_input_uid(node, "v_tensor_uid")

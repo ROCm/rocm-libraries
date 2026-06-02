@@ -7,14 +7,14 @@ Benchmarking and validation tool for hipDNN graphs.
 > **Caution**: This tool is in early development and subject to change.
 > Do not use it in build workflows or CI pipelines.
 
-This tool loads serialized hipDNN graphs, executes them via the MIOpen plugin, and captures performance metrics. PyTorch is optional but strongly recommended: when installed (ROCm or CUDA build) it provides GPU kernel-event timing and `torch.cuda.synchronize()` for accurate E2E timing. Without it, host-side E2E timings are still reported but may not capture full GPU execution.
+This tool loads serialized hipDNN graphs, executes them via installed hipDNN engine plugins, and captures performance metrics. PyTorch is optional but strongly recommended: when installed (ROCm or CUDA build) it provides GPU kernel-event timing and `torch.cuda.synchronize()` for accurate E2E timing. Without it, host-side E2E timings are still reported but may not capture full GPU execution.
 
 ## Requirements
 
 - Python 3.9+
 - numpy
 - hipdnn_frontend (installed hipDNN Python bindings)
-- AMD GPU with ROCm + MIOpen plugin
+- AMD GPU with ROCm + hipDNN provider plugins for the graphs under test
 - PyTorch *(optional)* — ROCm or CUDA build enables GPU kernel-event timing, the `--backend pytorch` executor, and the `--validate pytorch` reference provider. Not listed in `pyproject.toml` because it must come from the ROCm/CUDA nightly index.
 
 ## Installation
@@ -31,7 +31,7 @@ source /workspace/.venv/bin/activate  # or $DNN_BENCH_WORKSPACE/.venv/bin/activa
 This script handles everything automatically:
 1. Creates a virtual environment under `$DNN_BENCH_WORKSPACE` (defaults to `/workspace`)
 2. Detects the GPU architecture and installs ROCm-compatible PyTorch
-3. Builds hipDNN and the MIOpen provider (if not already installed, or with `--force-build`)
+3. Builds hipDNN and the MIOpen, hipBLASLt, and hip-kernel providers when their installed artifacts are missing (or with `--force-build`)
 4. Installs the hipDNN Python bindings from the hipDNN source tree
 
 ### CUDA Setup
@@ -168,6 +168,8 @@ Used by A/B testing, reference validation, and suite-mode tolerance checks.
 |--------|-------------|---------|
 | `--rtol` | Relative tolerance for output comparison. Overrides dtype-aware defaults when set. | dtype-aware |
 | `--atol` | Absolute tolerance for output comparison. Overrides dtype-aware defaults when set. | dtype-aware |
+
+Automatic validation tolerances are dtype-aware. BF16 SDPA backward uses `rtol=1.25e-1`, `atol=8e-3`; this allows BF16 output quantization and accumulation-order differences without letting an all-zero gradient buffer pass against ordinary nonzero gradients.
 
 ## Output
 

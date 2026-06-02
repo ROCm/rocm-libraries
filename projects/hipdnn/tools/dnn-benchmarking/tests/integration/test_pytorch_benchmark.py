@@ -254,7 +254,6 @@ class TestPyTorchCudaExecutor:
 
             assert len(result.e2e_timings) == 5
 
-
     @pytest.mark.parametrize(
         "graph_name",
         [
@@ -280,12 +279,16 @@ class TestPyTorchCudaExecutor:
         loader = GraphLoader()
         graph_json = loader.load_json(graph_path)
         tensor_infos = loader.extract_tensor_info(graph_json)
-        config = BenchmarkConfig(graph_path=graph_path, warmup_iters=1, benchmark_iters=1)
+        config = BenchmarkConfig(
+            graph_path=graph_path, warmup_iters=1, benchmark_iters=1
+        )
 
         executor = PyTorchCudaExecutor(graph_json, config)
         executor.prepare()
 
-        with PyTorchCudaBufferManager(tensor_infos) as buffer_manager:
+        with PyTorchCudaBufferManager(
+            tensor_infos, graph_json=graph_json
+        ) as buffer_manager:
             buffer_manager.allocate_all()
             buffer_manager.fill_inputs_random(seed=42)
             buffer_manager.zero_outputs()

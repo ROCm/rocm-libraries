@@ -65,7 +65,9 @@ def run_pytorch_benchmark(
 
         reporter.print_init_time(executor.init_time_ms)
 
-        with PyTorchCudaBufferManager(tensor_infos, device=device) as buffer_manager:
+        with PyTorchCudaBufferManager(
+            tensor_infos, device=device, graph_json=graph_json
+        ) as buffer_manager:
             buffer_manager.allocate_all()
             buffer_manager.fill_inputs_random(seed=seed)
             buffer_manager.zero_outputs()

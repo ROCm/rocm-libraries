@@ -686,6 +686,25 @@ class TestPyTorchProviderNewOps:
         assert outputs[4].data.dtype == np.float32
         np.testing.assert_array_equal(outputs[4].data, expected.numpy())
 
+    def test_sdpa_forward_rejects_unsupported_optional_outputs(self) -> None:
+        provider = ReferenceProviderRegistry.get_provider("pytorch")
+        q = np.array([[[[1.0, 0.0], [0.0, 1.0]]]], dtype=np.float32)
+        k = q.copy()
+        v = np.array([[[[1.0, 2.0], [3.0, 4.0]]]], dtype=np.float32)
+        graph_json = {
+            "nodes": [
+                {
+                    "type": "SdpaAttributes",
+                    "inputs": {"q_tensor_uid": 1, "k_tensor_uid": 2, "v_tensor_uid": 3},
+                    "outputs": {"o_tensor_uid": 4, "max_tensor_uid": 5},
+                    "attributes": {"dropout_probability": 0.0},
+                }
+            ]
+        }
+
+        with pytest.raises(ValueError, match="max_tensor_uid"):
+            provider.compute_reference(graph_json, {1: q, 2: k, 3: v})
+
     def test_sdpa_backward_rejects_inconsistent_stats(self) -> None:
         provider = ReferenceProviderRegistry.get_provider("pytorch")
         q = np.array([[[[1.0, 0.0], [0.0, 1.0]]]], dtype=np.float32)

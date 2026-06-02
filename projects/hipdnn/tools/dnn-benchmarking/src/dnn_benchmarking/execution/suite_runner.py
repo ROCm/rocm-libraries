@@ -42,6 +42,12 @@ from ..validation.reference_provider import (
 from ..validation.validator import Validator
 
 
+_BFLOAT16_RTOL = 6e-3
+_BFLOAT16_ATOL = 3e-3
+_BFLOAT16_SDPA_BACKWARD_RTOL = 1.25e-1
+_BFLOAT16_SDPA_BACKWARD_ATOL = 8e-3
+
+
 def _output_node_types(graph_json: Dict[str, Any]) -> Dict[int, str]:
     output_to_node: Dict[int, str] = {}
     for node in graph_json.get("nodes", []):
@@ -59,8 +65,8 @@ def _default_tolerance_for_output(
     dtype = str(getattr(tensor_info, "data_type", "float")).lower()
     if dtype == "bfloat16":
         if output_node_type == "SdpaBackwardAttributes":
-            return 2.0, 2.0
-        return 6e-3, 3e-3
+            return _BFLOAT16_SDPA_BACKWARD_RTOL, _BFLOAT16_SDPA_BACKWARD_ATOL
+        return _BFLOAT16_RTOL, _BFLOAT16_ATOL
     if dtype == "half":
         return 1e-3, 1e-3
     return 1e-5, 1e-6
@@ -244,7 +250,16 @@ def _check_correctness(
                 continue
 
             if ti.uid not in ref_outputs:
-                continue
+                return CorrectnessResult(
+                    execution_success=True,
+                    tolerance_match=False,
+                    rtol=config.rtol,
+                    atol=config.atol,
+                    error_message=(
+                        f"Reference provider '{ref_provider.name}' did not produce "
+                        f"output tensor UID {ti.uid}"
+                    ),
+                )
 
             rtol, atol = _tolerance_for_output(
                 config, ti, output_node_types.get(ti.uid)
