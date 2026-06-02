@@ -2542,11 +2542,34 @@ class Solution(collections.abc.Mapping):
         state["_DepthUMXSB"] = depthUB // state["ProblemType"]["MXBlockB"]
       state["_DepthUMetadata"] = depthUM# internal
 
-      # Auto-derived VW must keep LdsBlockSizePerPad <= 1024 bytes
-      # (TDM pad_interval cap of 7). Halve VW until it fits.
+      # fp6 doesn't support LDS padding yet.
+      for tc in ["A", "B"]:
+        if state["ProblemType"]["MacDataType%s" % tc].is6bitFloat() and (
+            state["LdsPad%s" % tc] != 0 or state["LdsBlockSizePerPad%s" % tc] != 0):
+          reject(state, printRejectionReason,
+                 f"fp6 MacDataType{tc}: LdsPad{tc} and LdsBlockSizePerPad{tc} must be 0")
+          return
+
+      iterModeMask = state["TDMIterateMode"]
+      # ds_load_tr's brute-force layout search keeps LBSPP within pad_interval's
+      # 1024 B limit.
+      if iterModeMask & 1 and state["enableLDSTrA"]:
+        reject(state, printRejectionReason, "TDMIterateMode bit for A set but enableLDSTrA is True")
+        return
+      if iterModeMask & 2 and state["enableLDSTrB"]:
+        reject(state, printRejectionReason, "TDMIterateMode bit for B set but enableLDSTrB is True")
+        return
+      iterModeForce = {"A": bool(iterModeMask & 1), "B": bool(iterModeMask & 2)}
+      for tc in ["A", "B"]:
+        if iterModeForce[tc]:
+          state["_TDMIterateMode%s" % tc] = True
+
+      # Halve auto-derived VW until LBSPP fits the pad_interval 1024 B limit.
       if state["TDMInst"] and state["EnableMatrixInstruction"] and not state["ProblemType"]["Sparse"]:
         multiple = 256
         for tc in ["A", "B"]:
+          if iterModeForce[tc]:
+            continue
           if not state.get("_inputVW%s_was_auto" % tc, False):
             continue
           if not state["UnrollMajorLDS%s" % tc]:
@@ -2557,15 +2580,13 @@ class Solution(collections.abc.Mapping):
           tmpBpe = state["ProblemType"]["MacDataType%s" % tc].numBytes()
           depthU_tc = state["_DepthU%s" % tc]
           origVw = vw
-          if tmpBpe == 0.75:
-              continue # FP6 not yet supported; skip this tc, still process the other
           while vw > 1:
             candidate = roundUpToNearestMultiple(int(depthU_tc * tmpBpe * vw), multiple)
             dwords = candidate // 4
             if dwords > 0 and (dwords & (dwords - 1)) == 0:
               pad_interval = int(math.log2(dwords)) - 1
               if pad_interval <= 7:
-                break  # this VW produces a valid LdsBlockSizePerPad
+                break  # current VW fits pad_interval encoding
             vw //= 2
           if vw != origVw:
             state["VectorWidth%s" % tc] = vw
@@ -2770,15 +2791,20 @@ class Solution(collections.abc.Mapping):
           pads = {"A": ldsBlockSizePerPadA, "B": ldsBlockSizePerPadB, "MXSA": ldsBlockSizePerPadMXSA, "MXSB": ldsBlockSizePerPadMXSB}
           for tc, val in pads.items():
             if val == 0: continue
+            # A/B in iterate-mode bypass the pad_interval encoding; skip their
+            # check. MXSA/MXSB do not support iterate-mode, so their LBSPP
+            # must still satisfy the pad_interval constraints.
+            if tc in ("A", "B") and state.get("_TDMIterateMode%s" % tc, False):
+              continue
             dwords = val // 4
             if dwords == 0 or (dwords & (dwords - 1)) != 0:
               reject(state, printRejectionReason, f"LdsBlockSizePerPad{tc}={val}: val//4={dwords} must be a positive power of 2 for TDM hardware encoding")
               return
             pad_interval = TensorDataMoverLoad.calPadInterval(val)
             if pad_interval > 7:
-              # MXSA/MXSB share the host A/B operand's VectorWidth.
-              vwName = "VectorWidthA" if tc.endswith("A") else "VectorWidthB"
-              reject(state, printRejectionReason, f"pad_interval=(log2(LdsBlockSizePerPad//4)-1)={pad_interval} should be smaller than or equal to 7 for ldsBlockSizePerPad{tc}={val}. Please reduce DepthU or {vwName}")
+              reject(state, printRejectionReason,
+                     f"LdsBlockSizePerPad{tc}={val} exceeds TDM padding (1024B). "
+                     f"Set TDMIterateMode or reduce DepthU / VectorWidth.")
 
       def calcMXSLdsBlockSizePerPad(tc: str, lrvw: int) -> int:
         LdsBlockSizePerPad = state["LdsBlockSizePerPad%s"%tc]

@@ -541,7 +541,8 @@ defaultBenchmarkCommonParameters = [
     # TDM-multicast data. Requires ClusterDim != [1, 1] and TDMInst != 0;
     # False: standard per-WG barriers, no inter-WG synchronization.
     {"ClusterBarrier": [ False ]},
-    {"HalfPLR": [0]}
+    {"HalfPLR": [0]},
+    {"TDMIterateMode": [0]}
 ]
 
 # dictionary of defaults comprised of default option for each parameter
