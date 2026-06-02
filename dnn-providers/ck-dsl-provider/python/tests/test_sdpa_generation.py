@@ -213,6 +213,17 @@ def _assert_unified_result(result: Dict[str, Any], payload: Dict[str, Any]) -> N
 #   use_early_v_schedule: True
 #   use_register_pv (bf16-only): True
 #   GQA ratio:        1, 8, 16
+#   use_fast_paged_kv_desc: True
+#   cross-axis combos: sinks+sliding_window, mfma32+GQA16
+#
+# DELIBERATELY NOT in this matrix (not provider-reachable -- no provider
+# payload can emit them; see compile_service.py):
+#   * fp8 KV (kv_storage_dtype / use_fp8_mfma_*): absent from
+#     _SDPA_FWD_UNIFIED_KNOB_KEYS, so the provider path cannot request it.
+#   * ALiBi / QQ-bias: _is_applicable_sdpa_fwd_unified hardcodes
+#     use_alibi=False / use_qq_bias=False.
+#   * GPU launch / numerical correctness: Phase 4 (gfx950 host); the
+#     gfx950 object is never loaded on this gfx90a box.
 # ---------------------------------------------------------------------------
 
 # Each tuple is (case_id, payload). Validity constraints (DMA floor, mfma32
@@ -297,6 +308,30 @@ _MATRIX_CASES = [
             block_size=32,
             num_warps=4,
             block_m_per_warp=16,
+        ),
+    ),
+    # --- cross-axis interaction combos (catch axis-interaction regressions
+    #     the one-axis-at-a-time sweep would miss) -----------------------
+    # sinks + sliding-window together (both problem-driven lanes on at once;
+    # tile_size=block_size on the sliding-window path).
+    (
+        "combo_sinks_sliding_window",
+        _make_payload(use_sinks=True, sliding_window=256, tile_size=32),
+    ),
+    # mfma 32x32 atom + GQA 16 (bmpw=32 needs num_warps in {1,2,4};
+    # 16*num_warps=32 is divisible by nqk=16; tile%32==0; head%16==0).
+    (
+        "combo_mfma32_gqa16",
+        _make_payload(
+            head_size=64,
+            num_query_heads=128,
+            num_kv_heads=8,
+            dtype="bf16",
+            num_warps=2,
+            block_m_per_warp=32,
+            tile_size=64,
+            use_mfma_32x32=True,
+            use_transposed_qk_32x32=True,
         ),
     ),
 ]
@@ -538,6 +573,10 @@ def test_ir_mfma_32x32_emits_32x32_mfma():
     )
     # 32x32 atom present (bf16 variant).
     assert "@llvm.amdgcn.mfma.f32.32x32x16.bf16" in ll
+    # ...and the default 16x16x32 atom must NOT also be present (symmetric
+    # with the default-atom test: proves the knob FLIPPED the atom, not just
+    # added a second one).
+    assert "@llvm.amdgcn.mfma.f32.16x16x32" not in ll
     # Async DMA still present.
     assert "@llvm.amdgcn.raw.ptr.buffer.load.lds" in ll
     # qq_bias_stride_0 still the last param (ABI unchanged by the knob).
