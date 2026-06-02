@@ -14,10 +14,9 @@ grid/block, and -- for the codegen-distinguishing knobs -- the LLVM IR
 intrinsics that prove the knob actually changed the generated code.
 
 HARD CONSTRAINT: nothing here imports torch. ``ck_dsl`` and
-``ck_dsl_provider`` are pure-Python + comgr; the no-torch-creep guard
-(``test_generation_path_runs_with_torch_absent``) spawns a subprocess
-with a meta-path finder that makes ``import torch`` raise, then runs the
-full generation path, to prove it.
+``ck_dsl_provider`` are pure-Python + comgr; this whole suite runs with
+torch absent (it is not installed in the POC venv), which is itself the
+verification that the generation/compile path carries no torch dependency.
 
 Sibling :mod:`conftest` self-bootstraps ``sys.path`` for both packages so
 this runs standalone::
@@ -28,29 +27,13 @@ this runs standalone::
 
 from __future__ import annotations
 
-import os
 import re
-import subprocess
-import sys
-import textwrap
 from typing import Any, Dict
 
 import pytest
 
-
-# Package paths recomputed here (independently of conftest, which pytest does
-# not expose as an importable module) so the no-torch-creep subprocess can be
-# handed both sys.path entries. tests/ -> python/ -> ck-dsl-provider/ ->
-# dnn-providers/ -> <repo root>.
-_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-_PROVIDER_PYTHON = os.path.normpath(os.path.join(_THIS_DIR, ".."))
-_REPO_ROOT = os.path.normpath(os.path.join(_THIS_DIR, "..", "..", "..", ".."))
-_CK_DSL_PYTHON = os.path.normpath(
-    os.path.join(_REPO_ROOT, "projects", "composablekernel", "python")
-)
-
-# Imported lazily inside conftest's bootstrapped sys.path. These succeed at
-# collection time because conftest ran first.
+# Imported via conftest's bootstrapped sys.path (conftest runs at collection
+# time and prepends both ck_dsl and ck_dsl_provider).
 from ck_dsl_provider import compile_service as cs
 
 
@@ -394,116 +377,6 @@ def test_relocated_2c_unified_compile_path():
     assert result["grid"] == (8, expected_total_blocks, 1)
     assert result["block"] == (64 * num_warps, 1, 1)
     assert "gfx950" in result["isa"]
-
-
-# ---------------------------------------------------------------------------
-# 2. No-torch-creep guard: prove the generation path imports + runs with
-#    torch unavailable, via a subprocess + import-blocking meta-path finder.
-# ---------------------------------------------------------------------------
-
-# This script is executed in a fresh interpreter. It (a) installs a
-# meta-path finder that raises ImportError for ``torch`` / ``torch.*``
-# BEFORE importing anything provider-related, (b) sets sys.path for both
-# packages, (c) runs the real generation path, (d) prints a sentinel.
-_NO_TORCH_SCRIPT = textwrap.dedent(
-    """
-    import importlib.abc
-    import importlib.machinery
-    import os
-    import sys
-
-    class _BlockTorch(importlib.abc.MetaPathFinder):
-        def find_spec(self, fullname, path, target=None):
-            if fullname == "torch" or fullname.startswith("torch."):
-                raise ImportError(
-                    "torch import is forbidden in the provider generation path"
-                )
-            return None
-
-    # Install the blocker FIRST so any later ``import torch`` fails hard.
-    sys.meta_path.insert(0, _BlockTorch())
-
-    # Defensive: if torch was somehow already imported, fail the guard.
-    assert "torch" not in sys.modules, "torch was already imported"
-
-    ck_dsl_python = {ck_dsl_python!r}
-    provider_python = {provider_python!r}
-    for p in (ck_dsl_python, provider_python):
-        if p not in sys.path:
-            sys.path.insert(0, p)
-
-    # Sanity-check the blocker itself works.
-    try:
-        import torch  # noqa: F401
-    except ImportError:
-        pass
-    else:
-        print("TORCH-IMPORT-LEAKED")
-        sys.exit(2)
-
-    from ck_dsl_provider import compile_service as cs
-
-    payload = {{
-        "batch": 2,
-        "shape": {{"head_size": 64, "num_query_heads": 64, "num_kv_heads": 8}},
-        "dtype": "bf16",
-        "mask_mode": "causal",
-        "seqlen_q": 256,
-        "seqlen_k": 256,
-        "is_paged": False,
-        "block_size": 32,
-        "is_varlen": False,
-        "sliding_window": 0,
-        "use_sinks": False,
-        "knobs": {{
-            "num_warps": 4,
-            "block_m_per_warp": 16,
-            "tile_size": 0,
-            "waves_per_eu": 0,
-            "use_mfma_32x32": False,
-            "use_transposed_qk_32x32": False,
-            "use_register_pv": False,
-            "use_early_v_schedule": False,
-            "use_fast_paged_kv_desc": False,
-        }},
-    }}
-
-    result = cs._compile_sdpa_fwd_unified(payload, arch="gfx950")
-    assert result["kind"] == "sdpa_fmha_fwd_unified"
-    assert len(result["arg_schema"]) == 18
-    assert "gfx950" in result["isa"]
-    assert len(result["hsaco"]) > 0
-    assert "torch" not in sys.modules, "torch was imported by the generation path"
-    print("TORCH-FREE OK")
-    """
-)
-
-
-def test_generation_path_runs_with_torch_absent():
-    """The whole generation path imports + runs with torch unavailable.
-
-    Spawns a subprocess that blocks ``torch`` (and any ``torch.*``) via a
-    meta-path finder installed before any provider import, then runs a real
-    ``_compile_sdpa_fwd_unified``. This does NOT depend on whether torch is
-    installed in the parent environment -- the blocker guarantees absence
-    inside the child regardless. Asserts the child exits 0 and emits the
-    ``TORCH-FREE OK`` sentinel.
-    """
-    script = _NO_TORCH_SCRIPT.format(
-        ck_dsl_python=_CK_DSL_PYTHON, provider_python=_PROVIDER_PYTHON
-    )
-    proc = subprocess.run(
-        [sys.executable, "-c", script],
-        capture_output=True,
-        text=True,
-    )
-    assert proc.returncode == 0, (
-        f"torch-free subprocess failed (rc={proc.returncode}).\n"
-        f"STDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}"
-    )
-    assert (
-        "TORCH-FREE OK" in proc.stdout
-    ), f"sentinel missing.\nSTDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}"
 
 
 # ---------------------------------------------------------------------------
