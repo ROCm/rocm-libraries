@@ -1267,18 +1267,53 @@ rocblaslt_status fp64EmulatedGemm(hipblasOperation_t           opA,
         const unsigned actual = (chunk_start + chunk_size <= num_moduli)
                                 ? chunk_size : (num_moduli - chunk_start);
 
-        /* Run 'actual' GEMMs for this chunk, each into its own C32i slice */
-        for(unsigned t_local = 0; t_local < actual; ++t_local) {
-            const unsigned  t  = chunk_start + t_local;
-            const int8_t*   At = A8i + t * strideA8i;
-            const int8_t*   Bt = B8i + t * strideB8i;
-            int32_t*        Ct = C32i_batch + t_local * static_cast<ptrdiff_t>(szC32i);
+        /* Replace per-modulus loop with one strided-batch GEMM.
+         * All 'actual' A/B slices are contiguous in memory with fixed strides,
+         * and the C32i output slices are also contiguous — ideal for batch.   */
+        hipblasLtMatrixLayout_t layoutA_b  = nullptr;
+        hipblasLtMatrixLayout_t layoutB_b  = nullptr;
+        hipblasLtMatrixLayout_t layoutCD_b = nullptr;
 
-            hipblasLtMatmul(t_ltHandle, matmulDesc,
-                            &one_i, At, layoutA, Bt, layoutB,
-                            &zero_i, Ct, layoutCD, Ct, layoutCD,
-                            nullptr, nullptr, 0, stream);
-        }
+        hipblasLtMatrixLayoutCreate(&layoutA_b,  HIP_R_8I,
+                                    static_cast<uint64_t>(k), static_cast<uint64_t>(m),
+                                    static_cast<int64_t>(lda8i));
+        hipblasLtMatrixLayoutCreate(&layoutB_b,  HIP_R_8I,
+                                    static_cast<uint64_t>(k), static_cast<uint64_t>(n),
+                                    static_cast<int64_t>(ldb8i));
+        hipblasLtMatrixLayoutCreate(&layoutCD_b, HIP_R_32I,
+                                    static_cast<uint64_t>(m), static_cast<uint64_t>(n),
+                                    static_cast<int64_t>(ldc32i));
+
+        const int32_t batch_count = static_cast<int32_t>(actual);
+        /* HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET is in elements, not bytes. */
+        const int64_t stride_A_b  = static_cast<int64_t>(strideA8i);  /* int8 elements */
+        const int64_t stride_B_b  = static_cast<int64_t>(strideB8i);  /* int8 elements */
+        const int64_t stride_C_b  = static_cast<int64_t>(szC32i);     /* int32 elements */
+
+        hipblasLtMatrixLayoutSetAttribute(layoutA_b,
+            HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT,          &batch_count, sizeof(batch_count));
+        hipblasLtMatrixLayoutSetAttribute(layoutA_b,
+            HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &stride_A_b,  sizeof(stride_A_b));
+        hipblasLtMatrixLayoutSetAttribute(layoutB_b,
+            HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT,          &batch_count, sizeof(batch_count));
+        hipblasLtMatrixLayoutSetAttribute(layoutB_b,
+            HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &stride_B_b,  sizeof(stride_B_b));
+        hipblasLtMatrixLayoutSetAttribute(layoutCD_b,
+            HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT,          &batch_count, sizeof(batch_count));
+        hipblasLtMatrixLayoutSetAttribute(layoutCD_b,
+            HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &stride_C_b,  sizeof(stride_C_b));
+
+        hipblasLtMatmul(t_ltHandle, matmulDesc,
+                        &one_i,
+                        A8i + chunk_start * strideA8i, layoutA_b,
+                        B8i + chunk_start * strideB8i, layoutB_b,
+                        &zero_i,
+                        C32i_batch, layoutCD_b, C32i_batch, layoutCD_b,
+                        nullptr, nullptr, 0, stream);
+
+        hipblasLtMatrixLayoutDestroy(layoutCD_b);
+        hipblasLtMatrixLayoutDestroy(layoutB_b);
+        hipblasLtMatrixLayoutDestroy(layoutA_b);
 
         /* Accumulate all 'actual' slices into Zhi/Zlo in one kernel call */
         const bool is_first = (chunk_start == 0);
