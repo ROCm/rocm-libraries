@@ -2,27 +2,26 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-# Smart Build and Test Execution Script
+# Smart Build Script (selection + build; no test execution)
 #
-# This script handles the complete smart-build workflow:
-# 1. Runs smart_build_ci.sh to determine build mode and targets
-# 2. Builds only affected targets (selective mode) or everything (full mode)
-# 3. Runs affected tests using ctest with regex filtering
-# 4. Optionally processes ninja build traces
+# Phase 1 of the decoupled smart-build pipeline. Determines the build mode and
+# targets (via smart_build_ci.sh), then builds:
+#   - selective: builds only the affected test executables
+#   - full:      builds all test executables (`ninja tests`, no run)
+#   - none:      nothing to build (no CK code affected)
+# Test execution is a separate phase - see smart_test.sh, which consumes the
+# build/ directory and the selection artifacts produced here.
 #
 # Dry-run / smoke mode (DRY_RUN=true or --dry-run/--smoke):
-#   Instead of compiling and testing, validates the selected executables against
-#   ninja's real target namespace (`ninja -t targets all`) via main.py validate,
-#   writing a structured smoke_result.json verdict. This proves every selected
-#   target is one ninja actually knows about - without invoking the compiler or a
-#   GPU - a fast, GPU-free gate that catches test-selection bugs (e.g. a target
-#   name ninja does not know) before committing to a real build.
-#   (`ninja -n` is deliberately NOT used: CK's GLOB CONFIGURE_DEPENDS makes every
-#   ninja call regenerate build.ninja, so `ninja -n` exits 0 for any target.)
+#   Validates the selected executables against ninja's real target namespace
+#   (`ninja -t targets all`) via main.py validate, writing smoke_result.json -
+#   without invoking the compiler. (`ninja -n` is deliberately NOT used: CK's
+#   GLOB CONFIGURE_DEPENDS regenerates build.ninja on every call, so `ninja -n`
+#   exits 0 for any target.)
 #
 # Exit codes:
-#   0 = Success
-#   1 = Build or test failure (or, in dry-run, an unresolvable target)
+#   0 = Success (build complete, or dry-run validated, or nothing to build)
+#   1 = Build failure (or, in dry-run, an unresolvable target)
 #
 # Environment variables:
 #   WORKSPACE_ROOT - Path to workspace root
@@ -32,7 +31,7 @@
 #   ARCH_NAME - Architecture name for trace files (required if PROCESS_NINJA_TRACE=true)
 #   PROCESS_NINJA_TRACE - Set to "true" to process ninja build traces (default: false)
 #   NINJA_FTIME_TRACE - Set to "true" to run ClangBuildAnalyzer (default: false)
-#   DRY_RUN - Set to "true" to validate the build graph without building/testing (default: false)
+#   DRY_RUN - Set to "true" to validate the build graph without building (default: false)
 
 set -e
 
@@ -52,20 +51,9 @@ for arg in "$@"; do
     esac
 done
 
-# Stream output to a combined log file (for CI artifact archiving) as well as the
-# console. This is the top-level entry point, so it always tees; it exports
-# _SMART_BUILD_NESTED before calling smart_build_ci.sh so the child skips its own
-# tee and its output flows into this single combined log in order. A backgrounded
-# tee draining a FIFO (whose PID we wait on at exit) is used instead of
-# `exec > >(tee)` so the log is fully flushed before exit (the bare form can lose
-# the tail, including the final pass/fail banner).
-_LOG_FIFO="$(mktemp -u)"
-mkfifo "${_LOG_FIFO}"
-tee "${LOG_FILE}" < "${_LOG_FIFO}" &
-_TEE_PID=$!
-exec > "${_LOG_FIFO}" 2>&1
-rm -f "${_LOG_FIFO}"
-trap '_rc=$?; exec 1>&- 2>&-; wait "${_TEE_PID}" 2>/dev/null || true; exit ${_rc}' EXIT
+# shellcheck source=lib_logging.sh
+source "${SCRIPT_DIR}/lib_logging.sh"
+start_tee_log "${LOG_FILE}"
 
 # Validate required parameters
 # NINJA_JOBS is not needed in dry-run mode (no compilation; uses ninja -t targets all).
@@ -80,7 +68,7 @@ if [ "$PROCESS_NINJA_TRACE" = "true" ] && [ -z "$ARCH_NAME" ]; then
 fi
 
 echo "========================================="
-echo "Smart Build and Test Execution"
+echo "Smart Build (selection + build)"
 echo "========================================="
 echo "BUILD_DIR: ${BUILD_DIR}"
 echo "WORKSPACE_ROOT: ${WORKSPACE_ROOT}"
@@ -92,7 +80,21 @@ echo "-----------------------------------------"
 
 cd "${BUILD_DIR}"
 
-# Step 1: Run smart-build CI script
+# Process the ninja build trace if requested (shared by full + selective paths).
+process_ninja_trace() {
+    [ "$PROCESS_NINJA_TRACE" = "true" ] || return 0
+    echo ""
+    echo "Processing ninja build trace..."
+    python3 ../script/ninja_json_converter.py .ninja_log --legacy-format --output ck_build_trace_${ARCH_NAME}.json
+    python3 ../script/parse_ninja_trace.py ck_build_trace_${ARCH_NAME}.json
+    if [ "$NINJA_FTIME_TRACE" = "true" ]; then
+        echo "Running ClangBuildAnalyzer..."
+        /ClangBuildAnalyzer/build/ClangBuildAnalyzer --all . clang_build.log
+        /ClangBuildAnalyzer/build/ClangBuildAnalyzer --analyze clang_build.log > clang_build_analysis_${ARCH_NAME}.log
+    fi
+}
+
+# Step 1: Run smart-build CI script (selection)
 echo "Using Smart Build System"
 echo ""
 
@@ -109,23 +111,13 @@ if ! bash "${SCRIPT_DIR}/smart_build_ci.sh"; then
         exit 0
     fi
 
-    echo "WARNING: Full build mode - building and testing everything"
-    ninja -j${NINJA_JOBS} check
-
-    # Process ninja build trace if requested
-    if [ "$PROCESS_NINJA_TRACE" = "true" ]; then
-        echo ""
-        echo "Processing ninja build trace..."
-        python3 ../script/ninja_json_converter.py .ninja_log --legacy-format --output ck_build_trace_${ARCH_NAME}.json
-        python3 ../script/parse_ninja_trace.py ck_build_trace_${ARCH_NAME}.json
-
-        if [ "$NINJA_FTIME_TRACE" = "true" ]; then
-            echo "Running ClangBuildAnalyzer..."
-            /ClangBuildAnalyzer/build/ClangBuildAnalyzer --all . clang_build.log
-            /ClangBuildAnalyzer/build/ClangBuildAnalyzer --analyze clang_build.log > clang_build_analysis_${ARCH_NAME}.log
-        fi
-    fi
-
+    echo "WARNING: Full build mode - building all test executables"
+    # Build only (no run): the `tests` target aggregates every test executable
+    # (add_dependencies(tests <test>)). Test execution happens in smart_test.sh.
+    ninja -j${NINJA_JOBS} tests
+    process_ninja_trace
+    echo ""
+    echo "[OK] Smart build complete (full mode - all tests built)"
     exit 0
 fi
 
@@ -133,14 +125,14 @@ fi
 BUILD_TARGETS=$(cat build_targets.txt)
 
 if [ "$BUILD_TARGETS" = "none" ]; then
-    echo "[OK] No tests affected by changes - skipping build and test execution"
+    echo "[OK] No tests affected by changes - nothing to build"
     exit 0
 fi
 
 # Step 3: Build only affected targets
 if [ "$DRY_RUN" = "true" ]; then
     NUM_TARGETS=$(echo "${BUILD_TARGETS}" | wc -w)
-    echo "DRY RUN - validating ${NUM_TARGETS} selected target(s), no compilation, no tests"
+    echo "DRY RUN - validating ${NUM_TARGETS} selected target(s), no compilation"
     # Validate the selection against ninja's real target namespace.
     # NOTE: `ninja -n <target>` is NOT used as the oracle: CK uses CMake GLOB
     # CONFIGURE_DEPENDS, so every ninja call regenerates build.ninja and
@@ -156,9 +148,9 @@ if [ "$DRY_RUN" = "true" ]; then
 fi
 
 # Observability (non-fatal): record a structured verdict on whether the selection
-# maps to real ninja targets. This does NOT change build/test behavior - it only
-# emits smoke_result.json / smoke_result.xml for CI to archive. The real build
-# below proceeds regardless of the verdict.
+# maps to real ninja targets. This does NOT change build behavior - it only emits
+# smoke_result.json / smoke_result.xml for CI to archive. The build below proceeds
+# regardless of the verdict.
 echo ""
 echo "Recording selection validation (observability, non-fatal)..."
 ninja -t targets all > ninja_targets.txt 2>/dev/null || true
@@ -176,38 +168,8 @@ echo "Building targets: ${BUILD_TARGETS}"
 # shellcheck disable=SC2086
 ninja -j"${NINJA_JOBS}" ${BUILD_TARGETS}
 
-# Process ninja build trace if requested
-if [ "$PROCESS_NINJA_TRACE" = "true" ]; then
-    echo ""
-    echo "Processing ninja build trace..."
-    python3 ../script/ninja_json_converter.py .ninja_log --legacy-format --output ck_build_trace_${ARCH_NAME}.json
-    python3 ../script/parse_ninja_trace.py ck_build_trace_${ARCH_NAME}.json
-
-    if [ "$NINJA_FTIME_TRACE" = "true" ]; then
-        echo "Running ClangBuildAnalyzer..."
-        /ClangBuildAnalyzer/build/ClangBuildAnalyzer --all . clang_build.log
-        /ClangBuildAnalyzer/build/ClangBuildAnalyzer --analyze clang_build.log > clang_build_analysis_${ARCH_NAME}.log
-    fi
-fi
-
-# Step 4: Run affected tests using regex_chunks
-echo ""
-echo "Running affected tests..."
-
-NUM_CHUNKS=$(jq -r '.regex_chunks | length' tests_to_run.json)
-echo "Running ${NUM_CHUNKS} test chunk(s)"
-
-if [ "$NUM_CHUNKS" -eq 1 ]; then
-    TEST_REGEX=$(jq -r '.regex_chunks[0]' tests_to_run.json)
-    CTEST_PARALLEL_LEVEL=4 ctest --output-on-failure -R "${TEST_REGEX}"
-else
-    for ((i=0; i<NUM_CHUNKS; i++)); do
-        TEST_REGEX=$(jq -r ".regex_chunks[$i]" tests_to_run.json)
-        echo "Running test chunk $((i+1))/${NUM_CHUNKS}"
-        CTEST_PARALLEL_LEVEL=4 ctest --output-on-failure -R "${TEST_REGEX}"
-    done
-fi
+process_ninja_trace
 
 echo ""
-echo "[OK] Smart build and test execution complete"
+echo "[OK] Smart build complete (selective mode)"
 exit 0

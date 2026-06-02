@@ -59,7 +59,8 @@ build's **Artifacts** tab and look for these files.
 | File | What it means | First thing to check |
 |------|--------------|----------------------|
 | `build_mode.env` | `SMART_BUILD_MODE=selective\|full\|none` | Which path the run took |
-| `smart_build.log` | Full combined stdout+stderr of the run (selection + build + test) | Start here for any CI failure |
+| `smart_build.log` | Build-phase log (selection + compile) from `smart_build.sh` | Build-stage failures |
+| `smart_test.log` | Test-phase log (ctest) from `smart_test.sh` | Test-stage failures |
 | `smart_build_ci.log` | Selection-phase log — **only produced when `smart_build_ci.sh` is run standalone**; in CI the output is folded into `smart_build.log` | Standalone runs only |
 | `tests_to_run.json` | The selected executables and ctest regex | Which tests were chosen |
 | `build_targets.txt` | Space-separated ninja targets, **or** the sentinel word `full`/`none` (see below) | What was actually built |
@@ -67,17 +68,24 @@ build's **Artifacts** tab and look for these files.
 | `smoke_result.json` | Whether every selected target is a real ninja target | Selection drift detection |
 | `smoke_result.xml` | JUnit version of `smoke_result.json` | Published to Jenkins test results |
 
+> **Two stages:** the pipeline runs `smart_build.sh` (Smart Build stage) then
+> `smart_test.sh` (Smart Test stage). A **build** failure and a **test** failure
+> now surface as distinct Jenkins stage failures with separate timing — check the
+> stage name first, then its log (`smart_build.log` vs `smart_test.log`). The two
+> stages share the `build/` directory; `smart_test.sh` reads `build_mode.env`
+> (and `tests_to_run.json` in selective mode) to know what to run.
+
 > **`build_targets.txt` sentinels:** in `full` mode the file contains the single
 > word `full`; in `none` mode it contains `none`. Only in `selective` mode does it
-> hold a real space-separated target list. `smart_build_and_test.sh` checks for
-> `none` and skips the build/test phase. Do not `ninja $(cat build_targets.txt)`
-> without first checking `build_mode.env`.
+> hold a real space-separated target list. `smart_build.sh` checks for `none` and
+> skips the build phase. Do not `ninja $(cat build_targets.txt)` without first
+> checking `build_mode.env`.
 
-> **Why `smart_build_ci.log` is usually absent in CI:** CI invokes
-> `smart_build_and_test.sh`, which sets `_SMART_BUILD_NESTED=1` and calls
-> `smart_build_ci.sh` as a child. The child detects the nesting and skips its own
-> log, so its selection-phase output appears in the combined `smart_build.log`
-> instead. The separate file appears only when you run `smart_build_ci.sh` by hand.
+> **Why `smart_build_ci.log` is usually absent in CI:** the Smart Build stage runs
+> `smart_build.sh`, which sets `_SMART_BUILD_NESTED=1` and calls `smart_build_ci.sh`
+> as a child. The child detects the nesting and skips its own log, so its
+> selection-phase output appears in `smart_build.log` instead. The separate file
+> appears only when you run `smart_build_ci.sh` by hand.
 
 ### `build_mode.env` values
 
@@ -378,7 +386,48 @@ violated, disable smart build until fixed.
 
 ---
 
-## 9. Contacts and escalation
+## 9. Cross-node (CPU build / GPU test) migration
+
+The pipeline is split into `smart_build.sh` and `smart_test.sh` so the test phase
+can eventually run on a different (GPU) node than the build phase (CPU). Today
+both run on one node; this section is the design for when they don't.
+
+**The seam** is the `build/` directory plus the selection artifacts. For the test
+phase to run elsewhere, the test node needs:
+- the built test executables (`build/**/bin/*`, `build/test/**`),
+- the linked instance libraries the tests load (`build/lib/**`),
+- `CTestTestfile.cmake` (the whole tree — ctest reads it recursively),
+- `build_mode.env` and (selective mode) `tests_to_run.json`.
+
+`smart_test.sh` already reads `build_mode.env`/`tests_to_run.json` and assumes the
+`build/` dir is present, so the script side needs no change — only the *transport*
+of `build/` between nodes.
+
+**Options for carrying `build/` (pick per infra):**
+
+1. **Shared workspace (simplest, preferred if available).** If the CPU and GPU
+   nodes mount the same NFS/Lustre workspace, no transport is needed — the GPU
+   node just runs `smart_test.sh` in the same `build/` dir. Watch for stale
+   `RPATH`/absolute paths baked at build time; keep the path identical on both.
+
+2. **`stash`/`unstash` the build tree.** Easiest in Jenkins but the CK `build/`
+   is multi-GB (thousands of instance objects), so stash/unstash is slow and
+   can dominate the time saved. If used, stash only what §9's seam list needs,
+   not the `.o` files.
+
+3. **sccache + minimal stash.** Use sccache so recompiles are cheap, and stash
+   only the test binaries + libs + `CTestTestfile.cmake` + the two JSON/env
+   artifacts. Smallest transport, most plumbing.
+
+**Caveats:** test exes built on the CPU node must target the GPU arch (build with
+the right `ARCH_NAME`/`-DGPU_TARGETS`); the GPU node needs the matching ROCm
+runtime; and `ctest` working directory / `RPATH` must resolve the same on both
+nodes. None of this changes the scripts — it's Jenkinsfile + infra work, tracked
+as a follow-up.
+
+---
+
+## 10. Contacts and escalation
 
 - Smart-build tooling is in `projects/composablekernel/script/dependency-parser/`
 - Unit tests: `uv run pytest tests/` (requires `uv sync` once)

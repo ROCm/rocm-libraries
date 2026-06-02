@@ -31,22 +31,12 @@ BASE_BRANCH="${BASE_BRANCH:-develop}"
 LOG_FILE="${BUILD_DIR}/smart_build_ci.log"
 
 # Stream output to a log file (for CI artifact archiving) as well as the console.
-# When invoked by smart_build_and_test.sh the parent already tees a combined log,
-# so we skip our own tee to avoid double-logging and out-of-order interleaving
-# (smart_build_ci.log is only produced when this script is run standalone).
-# A backgrounded tee draining a FIFO (whose PID we wait on at exit) is used
-# instead of `exec > >(tee)` so the log is fully flushed before the script exits:
-# the bare process-substitution form does not wait for tee and can lose the tail
-# (including the final verdict banner).
-if [ -z "${_SMART_BUILD_NESTED:-}" ]; then
-    _LOG_FIFO="$(mktemp -u)"
-    mkfifo "${_LOG_FIFO}"
-    tee "${LOG_FILE}" < "${_LOG_FIFO}" &
-    _TEE_PID=$!
-    exec > "${_LOG_FIFO}" 2>&1
-    rm -f "${_LOG_FIFO}"
-    trap '_rc=$?; exec 1>&- 2>&-; wait "${_TEE_PID}" 2>/dev/null || true; exit ${_rc}' EXIT
-fi
+# When invoked by smart_build.sh the parent already tees a combined log, so
+# start_tee_log honors _SMART_BUILD_NESTED and skips its own tee (smart_build_ci.log
+# is only produced when this script is run standalone).
+# shellcheck source=lib_logging.sh
+source "${SCRIPT_DIR}/lib_logging.sh"
+start_tee_log "${LOG_FILE}"
 
 echo "========================================="
 echo "Smart Build CI"

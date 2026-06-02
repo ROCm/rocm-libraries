@@ -780,20 +780,29 @@ def cmake_build(Map conf=[:]){
             // So no ninja trace processing needed here
             if (!params.BUILD_INSTANCES_ONLY){
                 if (!runAllUnitTests && !setup_args.contains("gfx1250") ){
-                    // Smart Build: Run smart_build_and_test.sh
-                    sh """
-                        export WORKSPACE_ROOT=${env.WORKSPACE}
-                        export PARALLEL=32
-                        export NINJA_JOBS=${nt}
-                        export ARCH_NAME=${arch_name}
-                        export PROCESS_NINJA_TRACE=false
-                        export NINJA_FTIME_TRACE=false
-                        bash ../script/dependency-parser/smart_build_and_test.sh
-                    """
-                    // Observability: persist the smart-build selection decision,
-                    // its validation verdict, and the full run logs.
-                    archiveArtifacts artifacts: "tests_to_run.json,build_targets.txt,build_mode.env,smoke_result.json,reachability_result.json,smart_build_ci.log,smart_build.log", allowEmptyArchive: true
-                    junit testResults: "smoke_result.xml", allowEmptyResults: true
+                    // Smart Build is split into two stages so build and test get
+                    // independent pass/fail + timing, and so the test phase can
+                    // later move to a separate node (the build/ dir + selection
+                    // artifacts are the seam). Both run on this node for now.
+                    stage("Smart Build (${arch_name})") {
+                        sh """
+                            export WORKSPACE_ROOT=${env.WORKSPACE}
+                            export PARALLEL=32
+                            export NINJA_JOBS=${nt}
+                            export ARCH_NAME=${arch_name}
+                            export PROCESS_NINJA_TRACE=false
+                            export NINJA_FTIME_TRACE=false
+                            bash ../script/dependency-parser/smart_build.sh
+                        """
+                        // Observability: persist the selection decision, its
+                        // validation verdict, and the build-phase log.
+                        archiveArtifacts artifacts: "tests_to_run.json,build_targets.txt,build_mode.env,smoke_result.json,reachability_result.json,smart_build_ci.log,smart_build.log", allowEmptyArchive: true
+                    }
+                    stage("Smart Test (${arch_name})") {
+                        sh "bash ../script/dependency-parser/smart_test.sh"
+                        archiveArtifacts artifacts: "smart_test.log", allowEmptyArchive: true
+                        junit testResults: "smoke_result.xml", allowEmptyResults: true
+                    }
                 }
                 else{ //run all tests
                     if(!setup_args.contains("gfx1250")){

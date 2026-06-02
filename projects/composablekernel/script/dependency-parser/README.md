@@ -655,7 +655,9 @@ uv run pytest tests/ --cov=src --cov-report=html
 |------|-------------|
 | `main.py` | Unified CLI entry point (`cmake-parse`, `select`, `validate`, `audit`, `optimize`) |
 | `smart_build_ci.sh` | CI orchestrator: safety check → depmap → select → output artifacts |
-| `smart_build_and_test.sh` | Full CI driver: invokes smart_build_ci.sh, then builds + runs selected tests |
+| `smart_build.sh` | CI build phase: invokes smart_build_ci.sh, then builds selected (or all) test targets |
+| `smart_test.sh` | CI test phase: reads build_mode.env and runs the affected (or full) ctest suite |
+| `lib_logging.sh` | Sourced helper: `start_tee_log` (FIFO-tee logging, flush-safe, nest-aware) |
 | `ci_safety_check.sh` | Decides selective vs full build (cmake/tooling changes → full) |
 | `validate_pr.sh` | Developer tool: offline as-if comparison of smart vs legacy selection for a PR |
 | `filter_oracle.py` | Reachability guardrail (CI) and build-filter probe oracle |
