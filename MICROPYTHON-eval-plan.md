@@ -156,7 +156,23 @@ Make-or-break for G0: (a) `ffi` passes single-eightbyte structs-by-value correct
   MicroPython `ffi`/libffi — all handle calls succeeded; (2) `uctypes.addressof` on bytes/bytearray
   covers out-params + the `char**` option array; (3) zero callbacks → ffi-callback GC bug N/A.
 
-### G0 verdict: **PASS**
+### ctypes footprint across ck_dsl (scoping G0's claim)
+Heavy but concentrated in `runtime/`: `comgr.py` (50, **compile — ported by G0**),
+`hip_module.py` (96, **launch**), `torch_module.py` (4, not used). All other ctypes is under
+`examples/` (standalone bench/tune scripts, not provider code).
+
+The provider drives **compile** in Python (`compile_service.compile` → `helpers.compile.compile_kernel`
+→ `comgr.py`) and does GPU **load/launch in C++** (`hipModuleLoadData`/`hipModuleLaunchKernel`),
+NOT via `hip_module.py` — stated in `compile_service.py`'s own docstring. So `hip_module.py`'s 96
+launch-side ctypes refs are **never called** on the provider path. `hip_module.py` is reachable only
+because `comgr.py` imports 4 lib-resolution helpers from it (`_IS_WINDOWS, _LazyFn, _add_dll_dir,
+_candidate_lib_paths`); a small refactor extracting those into their own module keeps the launch
+ctypes out of the MicroPython scope entirely (Phase 1 task).
+`hip_module.py` is not harder than comgr if ever needed: no callbacks; all 3 handle structs are
+single `void*`; buffers are `(c_ubyte*n).from_buffer_copy` = bytearray. Only multi-field struct is
+`hipDeviceProp_t` (device query, off-path).
+
+### G0 verdict: **PASS** (scoped: compile-path FFI / comgr)
 The FFI/comgr make-or-break blocker is cleared. MicroPython `ffi`/`uctypes` can drive the in-process
 comgr compile end-to-end. The prior "MicroPython impossible" claim is refuted on the FFI axis.
 **Caveat (unchanged):** MicroPython `ffi` is Unix-port only → Windows remains blocked at the *port*
