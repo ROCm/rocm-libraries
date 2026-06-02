@@ -65,7 +65,7 @@ namespace ck_dsl_provider {
 ///     seqlen * sequence-stride for batch>1)
 ///   * mismatched page_table_k/page_table_v (single-table kernel)
 ///   * LSE/stats output (generate_stats) -- a REGRESSION vs the dense path,
-///     which can emit LSE; the paged kernel cannot (Vidya follow-up)
+///     which can emit LSE; the paged kernel cannot (further work needed)
 ///   * additive attn_mask (bias), per-element scale tensor, dropout
 ///     (tensors and dropout_probability), block mask, padding mask, ALiBi
 ///   * FP8 descale/scale tensors (deferred), amax_s/amax_o, rng_dump,
