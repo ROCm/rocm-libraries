@@ -158,7 +158,7 @@ The compile cost amortizes after a handful of launches per shape.
 1. CK-DSL autotuner + heuristic retrain over realistic shapes (closes the ~2×).
 2. `num_warps=8` + large-tile comgr CODEGEN failure (21/51 oracle configs); tighten the
    enumerator's `supportsTiled2d` mirror so it doesn't emit non-compilable configs.
-3. Kernel feature gaps (raise with Vidya): non-causal mode; LSE output (paged kernel emits none).
+3. Kernel feature gaps (further work needed): non-causal mode; LSE output (paged kernel emits none).
 4. Real-paged / varlen `execute()` launch branches (dense-degenerate is wired + verified).
 
 Full technical writeup + perf tables: workspace `Plans/almiopen-2002-writeup-DRAFT.md`.

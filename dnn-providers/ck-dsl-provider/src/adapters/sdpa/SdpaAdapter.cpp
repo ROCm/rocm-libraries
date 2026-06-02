@@ -416,14 +416,14 @@ SdpaSpec SdpaAdapter::buildSpec(const SdpaAttributes& sdpaAttr, const TensorMap&
     // -- LSE / softmax-stats output. The dense path CAN emit LSE
     //    (generate_stats, ABI slot 16) but the unified paged kernel emits
     //    NONE. Declining it here is a deliberate REGRESSION vs the dense
-    //    path (Vidya follow-up); it is never silently dropped.
+    //    path (further work needed); it is never silently dropped.
     const bool wantStats =
         (sdpaAttr.generate_stats().has_value() && sdpaAttr.generate_stats().value()) ||
         sdpaAttr.stats_tensor_uid().has_value();
     if (wantStats) {
         throwBadParam(
             "LSE/stats output (generate_stats) not supported on the unified paged SDPA path "
-            "(regression vs dense; Vidya follow-up)");
+            "(regression vs dense; further work needed)");
     }
     if (sdpaAttr.max_tensor_uid().has_value() || sdpaAttr.sum_exp_tensor_uid().has_value()) {
         throwBadParam("max/sum_exp outputs not supported");

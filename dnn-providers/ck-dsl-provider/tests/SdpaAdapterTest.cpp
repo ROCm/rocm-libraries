@@ -268,7 +268,7 @@ TEST(TestSdpaAdapter, DeclinesStatsOutput) {
     // The dense path can emit LSE, but the unified paged kernel cannot.
     // A forward graph requesting the LSE stats output (even with a valid
     // causal mask) is DECLINED -- a deliberate regression vs the dense
-    // path (Vidya follow-up). The throw is the clean capability decline.
+    // path (further work needed). The throw is the clean capability decline.
     const auto qkvoStrides = bshdStrides(/*H=*/8, /*S=*/16, /*D=*/64);
     auto fbBuilder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
         /*qDims=*/{2, 8, 16, 64}, /*qStrides=*/qkvoStrides,
