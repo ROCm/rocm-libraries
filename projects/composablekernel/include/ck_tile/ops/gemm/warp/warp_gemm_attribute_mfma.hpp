@@ -70,6 +70,7 @@ struct WarpGemmAttributeMfma
     using ADataType = typename Impl::ADataType;
     using BDataType = typename Impl::BDataType;
     using CDataType = typename Impl::CDataType;
+    using DDataType = typename Impl::CDataType;
 
     using AVecType = typename Impl::AVecType;
     using BVecType = typename Impl::BVecType;
@@ -210,6 +211,7 @@ struct WarpGemmAttributeMfmaIterateK
     using ADataType = typename Impl::ADataType;
     using BDataType = typename Impl::BDataType;
     using CDataType = typename Impl::CDataType;
+    using DDataType = typename Impl::CDataType;
 
     using AVecType =
         ext_vector_t<ADataType, vector_traits<typename Impl::AVecType>::vector_size * kKIter>;
@@ -412,6 +414,7 @@ struct WarpGemmAttributeMfmaTransposedCDistribution
     using ADataType = typename Impl::BDataType;
     using BDataType = typename Impl::ADataType;
     using CDataType = typename Impl::CDataType;
+    using DDataType = typename Impl::CDataType;
 
     using AVecType = typename Impl::BVecType;
     using BVecType = typename Impl::AVecType;
@@ -480,6 +483,7 @@ struct WarpGemmAttributeMfmaTransposedCDistribution_SwizzleB
     using ADataType = typename Impl::BDataType;
     using BDataType = typename Impl::ADataType;
     using CDataType = typename Impl::CDataType;
+    using DDataType = typename Impl::CDataType;
 
     using AVecType = typename Impl::BVecType;
     using BVecType = typename Impl::AVecType;
@@ -589,6 +593,7 @@ struct WarpGemmAttributeMfmaIterateKAndTransposedCDistribution
     using ADataType = typename Impl::BDataType;
     using BDataType = typename Impl::ADataType;
     using CDataType = typename Impl::CDataType;
+    using DDataType = typename Impl::CDataType;
 
     using AVecType =
         ext_vector_t<ADataType, vector_traits<typename Impl::AVecType>::vector_size * kKIter>;
@@ -708,6 +713,7 @@ struct WarpGemmAttributeMfmaIterateKAndTransposedCDistribution_SwizzleB
     using ADataType = typename Impl::BDataType;
     using BDataType = typename Impl::ADataType;
     using CDataType = typename Impl::CDataType;
+    using DDataType = typename Impl::CDataType;
 
     using AVecType =
         ext_vector_t<ADataType, vector_traits<typename Impl::AVecType>::vector_size * kKIter>;
@@ -833,6 +839,7 @@ struct WarpGemmAttributeMfmaIterateK_SwizzleA
     using ADataType = typename Impl::ADataType;
     using BDataType = typename Impl::BDataType;
     using CDataType = typename Impl::CDataType;
+    using DDataType = typename Impl::CDataType;
 
     using AVecType =
         ext_vector_t<ADataType, vector_traits<typename Impl::AVecType>::vector_size * kKIter>;

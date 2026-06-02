@@ -6,21 +6,6 @@
 #include "ck_tile/core.hpp"
 namespace ck_tile {
 
-namespace detail {
-// WMMA warp attributes expose a distinct D (output) type; MFMA/SMFMAC attributes do not.
-// Fall back to CDataType when DDataType is absent so non-WMMA warp gemms are unaffected.
-template <typename T, typename = void>
-struct warp_gemm_d_data_type
-{
-    using type = typename T::CDataType;
-};
-template <typename T>
-struct warp_gemm_d_data_type<T, std::void_t<typename T::DDataType>>
-{
-    using type = typename T::DDataType;
-};
-} // namespace detail
-
 template <typename WarpGemmAttribute_>
 struct WarpGemmImpl
 {
@@ -41,7 +26,7 @@ struct WarpGemmImpl
     using ADataType = typename WarpGemmAttribute::ADataType;
     using BDataType = typename WarpGemmAttribute::BDataType;
     using CDataType = typename WarpGemmAttribute::CDataType;
-    using DDataType = typename detail::warp_gemm_d_data_type<WarpGemmAttribute>::type;
+    using DDataType = typename WarpGemmAttribute::DDataType;
 
     using AWarpDstrEncoding = typename WarpGemmAttribute::AWarpDstrEncoding;
     using BWarpDstrEncoding = typename WarpGemmAttribute::BWarpDstrEncoding;

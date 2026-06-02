@@ -30,6 +30,7 @@ struct WarpGemmAttributeSmfmac
     using BDataType   = typename Impl::BDataType;
     using IdxDataType = typename Impl::IdxDataType;
     using CDataType   = typename Impl::CDataType;
+    using DDataType   = typename Impl::CDataType;
 
     using AVecType = typename Impl::AVecType;
     using BVecType = typename Impl::BVecType;
