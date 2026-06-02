@@ -59,7 +59,6 @@ if(ENABLE_ASM_SDPA_ENGINE)
             asm_sdpa_engine/AsmSdpaConfigHelpers.cpp
             asm_sdpa_engine/IntegrationGpuSdpaForward.cpp
             asm_sdpa_engine/IntegrationGpuSdpaBackward.cpp
-            asm_sdpa_engine/IntegrationGoldenRefSdpaForward.cpp
         )
         # Copy golden reference data to build tree for test discovery
         if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/asm_sdpa_engine/golden_data/")
