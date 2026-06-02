@@ -34,6 +34,7 @@
 #include "origami/hardware.hpp"
 #include "origami/math.hpp"
 #include "origami/types.hpp"
+#include "origami/origami_export.h"
 
 namespace origami {
 /**
@@ -96,7 +97,7 @@ struct heuristic_defaults_t {
  * This structure consolidates all empirical constants and weights used in
  * the latency model, making them trainable and configuration-driven.
  */
-struct heuristic_params_t {
+struct ORIGAMI_EXPORT heuristic_params_t {
   // === Latency Component Weights ===
   double weight_mem_l2        = heuristic_defaults_t::WEIGHT_MEM_L2;
   double weight_mem_mall      = heuristic_defaults_t::WEIGHT_MEM_MALL;
@@ -157,7 +158,7 @@ struct heuristic_params_t {
  * This key captures all relevant characteristics that might affect
  * heuristic parameter selection. Fields can be wildcards (using optional).
  */
-struct heuristic_key_t {
+struct ORIGAMI_EXPORT heuristic_key_t {
   std::optional<hardware_t::architecture_t> arch;
   std::optional<data_type_t> a_dtype;
   std::optional<data_type_t> b_dtype;
@@ -248,7 +249,7 @@ struct hand_optimized_kernel_key_hash {
  * - Do NOT call add_entry() after the singleton is initialized and
  *   multiple threads may be accessing the database
  */
-class heuristics_database_t {
+class ORIGAMI_EXPORT heuristics_database_t {
  public:
   /**
    * @brief Lookup heuristic parameters for given problem/hardware/config.
@@ -320,7 +321,7 @@ inline heuristic_params_t get_heuristic_params(const problem_t& problem,
 /**
  * @brief Helper to create a key for hand-optimized kernels
  */
-heuristic_key_t make_hand_optimized_kernel_key(hardware_t::architecture_t arch,
+ORIGAMI_EXPORT heuristic_key_t make_hand_optimized_kernel_key(hardware_t::architecture_t arch,
                                                data_type_t mi_dtype,
                                                transpose_t transA,
                                                transpose_t transB,
@@ -331,7 +332,7 @@ heuristic_key_t make_hand_optimized_kernel_key(hardware_t::architecture_t arch,
 /**
  * @brief Helper to create a key for tile configuration.
  */
-heuristic_key_t make_tile_key(size_t MT_M,
+ORIGAMI_EXPORT heuristic_key_t make_tile_key(size_t MT_M,
                               size_t MT_N,
                               size_t MT_K,
                               std::optional<transpose_t> transA = std::nullopt,
@@ -340,6 +341,6 @@ heuristic_key_t make_tile_key(size_t MT_M,
 /**
  * @brief Helper to create a key for architecture/datatype combination.
  */
-heuristic_key_t make_arch_dtype_key(hardware_t::architecture_t arch, data_type_t mi_dtype);
+ORIGAMI_EXPORT heuristic_key_t make_arch_dtype_key(hardware_t::architecture_t arch, data_type_t mi_dtype);
 
 }  // namespace origami

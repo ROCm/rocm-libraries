@@ -36,6 +36,7 @@
 #include <hip/hip_runtime.h>
 
 #include "origami/types.hpp"
+#include "origami/origami_export.h"
 
 namespace origami {
 
@@ -43,7 +44,7 @@ namespace origami {
  * @brief Represents hardware characteristics and capabilities of GPU architectures.
  *
  */
-class hardware_t {
+class ORIGAMI_EXPORT hardware_t {
  public:
   /**
    * @brief Enumeration of supported GPU architectures.
