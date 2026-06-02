@@ -35,7 +35,7 @@ def loadCk() {
         def branch = (params.USE_CURRENT_BRANCH_FOR_CK_GROOVY
             ? (env.CHANGE_BRANCH ?: env.BRANCH_NAME)
             : 'develop')
-        ck = library("ck@${branch}").ck.get()
+        ck = library("ck@${branch}").ck
     }
 }
 
