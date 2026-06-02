@@ -312,16 +312,27 @@ void SdpaFwdPlanBuilder::buildPlan(const ::CkDslHandle& handle,
     const bool hasStats = spec.generate_stats;
     const std::int64_t statsUid = hasStats ? sdpaAttr.stats_tensor_uid().value() : -1;
 
-    // The plan needs the module + tensor UIDs + the launch-time scalars.
-    // HipModule carries the launch metadata (grid, block, ldsBytes,
-    // argSchema) captured from the artifact at load time, so execute()
-    // can pack args and launch without re-reading the cache.
+    // The SDPA sink_token tensor uid is 20 in the graph contract; pass it
+    // when sinks are in effect so execute() can bind the sink pointer
+    // (otherwise -1, sink pointer is null). A literal is acceptable for
+    // the POC -- the dense path the launch wires today never enables
+    // sinks, so this lane is structural until the real-paged path lands.
+    constexpr std::int64_t kSdpaSinkTokenUid = 20;
+    const std::int64_t sinkUid = spec.use_sinks ? kSdpaSinkTokenUid : -1;
+
+    // The plan needs the module + tensor UIDs + the launch-time scalars +
+    // the marshalling-path lanes (batch / block_size / paged / varlen /
+    // sinks) execute() reads to build the 18-slot ABI. HipModule carries
+    // the launch metadata (grid, block, ldsBytes, argSchema) captured from
+    // the artifact at load time, so execute() can pack args and launch
+    // without re-reading the cache.
     auto plan = std::make_unique<SdpaFwdPlan>(
         std::move(module), sdpaAttr.q_tensor_uid(), sdpaAttr.k_tensor_uid(),
         sdpaAttr.v_tensor_uid(), sdpaAttr.o_tensor_uid(), spec.problem.scale_log2, spec.problem.Sq,
         spec.problem.Skv, spec.problem.stride_q_token, spec.problem.stride_q_head,
         spec.problem.stride_k_token, spec.problem.stride_k_head, spec.problem.stride_v_token,
         spec.problem.stride_v_head, spec.problem.stride_o_token, spec.problem.stride_o_head,
+        spec.problem.B, spec.block_size, spec.is_paged, spec.is_varlen, spec.use_sinks, sinkUid,
         hasStats, statsUid);
 
     executionContext.setPlan(std::move(plan));

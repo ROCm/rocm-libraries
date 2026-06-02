@@ -1125,6 +1125,121 @@ def _compile_sdpa_fwd_unified(payload: dict, arch: str) -> dict:
     }
 
 
+def _build_sdpa_fwd_fake_kernel():
+    """Build a trivial fake unified-SDPA kernel with the real 18-slot ABI.
+
+    POC verification kernel (ALMIOPEN-2002, Phase 4): it has the EXACT
+    18-parameter signature of the production unified attention kernel --
+    in ABI order -- so the real :class:`SdpaFwdPlan::execute` packs and
+    launches it unchanged, but its body does NO attention math. Instead a
+    single workgroup (grid (1,1,1), block (64,1,1)) has thread 0 write a
+    FINGERPRINT into the output pointer (slot 0) so the host can read back
+    proof that every ABI slot was bound correctly.
+
+    The pointers are declared as ``ptr<i32> global`` views so the body can
+    read an i32 from a few of them (slots 1 / 5 / 9) to prove those
+    pointer slots are wired, and write i32 fingerprint elements into
+    output (slot 0). The kernel issues no MFMA / no LDS, so it compiles
+    cleanly on any gfx9 target (the POC runs it on gfx90a).
+
+    Fingerprint written to output (int32 elements), and what each proves:
+
+      out[0] = num_seqs            (i32 slot 15 bound)
+      out[1] = block_table_stride  (i32 slot 16 bound)
+      out[2] = qq_bias_stride_0    (i32 slot 17 bound)
+      out[3] = bitcast<i32>(scale)   (f32 slot 10 bound)
+      out[4] = bitcast<i32>(k_scale) (f32 slot 11 bound)
+      out[5] = query_ptr[0]          (pointer slot 1 bound)
+      out[6] = block_tables_ptr[0]   (pointer slot 5 bound)
+      out[7] = query_start_len_ptr[0](pointer slot 9 bound)
+
+    Slot 0 (output_ptr) is implicitly proven by the readback itself.
+    """
+    from ck_dsl.core.ir import F32, I32, IRBuilder, PtrType
+
+    b = IRBuilder("ck_dsl_provider_sdpa_fake")
+    b.kernel.attrs["max_workgroup_size"] = 64
+
+    i32_ptr = PtrType(I32, "global")
+
+    # 18-slot ABI in order. Pointer slots are i32 views (the fake body
+    # reads/writes i32 from them); the real attention dtype is irrelevant
+    # for the plumbing check.
+    output = b.param("output_ptr", i32_ptr, align=16)
+    query = b.param("query_ptr", i32_ptr, align=16)
+    b.param("key_cache_ptr", i32_ptr, align=16)
+    b.param("value_cache_ptr", i32_ptr, align=16)
+    b.param("sink_ptr", i32_ptr, align=16)
+    block_tables = b.param("block_tables_ptr", i32_ptr, align=16)
+    b.param("seq_lens_ptr", i32_ptr, align=16)
+    b.param("alibi_slopes_ptr", i32_ptr, align=16)
+    b.param("qq_bias_ptr", i32_ptr, align=16)
+    query_start_len = b.param("query_start_len_ptr", i32_ptr, align=16)
+    scale = b.param("scale", F32)
+    k_scale = b.param("k_scale", F32)
+    b.param("v_scale", F32)
+    b.param("out_scale", F32)
+    b.param("softcap", F32)
+    num_seqs = b.param("num_seqs", I32)
+    block_table_stride = b.param("block_table_stride", I32)
+    qq_bias_stride_0 = b.param("qq_bias_stride_0", I32)
+
+    tid = b.thread_id_x()
+    is_lane0 = b.cmp_eq(tid, b.const_i32(0))
+    zero = b.const_i32(0)
+
+    with b.scf_if(is_lane0):
+        # Scalar i32 slots (15, 16, 17): write straight through.
+        b.global_store(output, b.const_i32(0), num_seqs, align=4)
+        b.global_store(output, b.const_i32(1), block_table_stride, align=4)
+        b.global_store(output, b.const_i32(2), qq_bias_stride_0, align=4)
+        # f32 slots (10, 11): bitcast to i32 so the host can bit-compare.
+        b.global_store(output, b.const_i32(3), b.bitcast(scale, I32), align=4)
+        b.global_store(output, b.const_i32(4), b.bitcast(k_scale, I32), align=4)
+        # Pointer slots (1, 5, 9): load element 0 to prove the pointer is
+        # bound to the buffer execute() resolved / uploaded.
+        b.global_store(output, b.const_i32(5), b.global_load_i32(query, zero), align=4)
+        b.global_store(
+            output, b.const_i32(6), b.global_load_i32(block_tables, zero), align=4
+        )
+        b.global_store(
+            output, b.const_i32(7), b.global_load_i32(query_start_len, zero), align=4
+        )
+
+    return b.kernel
+
+
+def compile_sdpa_fwd_fake(arch: str) -> dict:
+    """Compile the fake unified-SDPA kernel for ``arch`` (POC launch test).
+
+    Mirrors :func:`compile_smoke`: builds + compiles the trivial fake
+    kernel and returns the on-wire dict the C++
+    ``CompileServiceBridge::compileSdpaFwdFake`` translates into a
+    ``KernelArtifact``. The ``arg_schema`` is the REAL 18-slot unified
+    schema (:func:`_sdpa_fwd_unified_arg_schema`) so the production
+    ``SdpaFwdPlan`` accepts the module and packs against it unchanged. The
+    grid/block are a single workgroup: the fake body only needs thread 0.
+
+    ``arch`` is the explicit compile target (no device detection); on the
+    POC box this is the detected device arch (e.g. ``gfx90a``).
+    """
+    from ck_dsl.helpers.compile import compile_kernel
+
+    kernel_def = _build_sdpa_fwd_fake_kernel()
+    artifact = compile_kernel(kernel_def, arch=arch)
+
+    return {
+        "hsaco": artifact.hsaco,
+        "kernel_name": artifact.kernel_name,
+        "kind": "sdpa_fmha_fwd_fake",
+        "grid": (1, 1, 1),
+        "block": (64, 1, 1),
+        "lds_bytes": 0,
+        "arg_schema": _sdpa_fwd_unified_arg_schema(),
+        "isa": artifact.isa,
+    }
+
+
 def _compile_sdpa_bwd(payload: dict, arch: str) -> dict:
     """Build + compile an FMHA backward kernel from the payload.
 

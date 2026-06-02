@@ -43,39 +43,55 @@ namespace ck_dsl_provider {
 /// ctor parameter is retained for source compatibility with the plan
 /// builder's call site.
 ///
-/// **Phase-4 GPU launch (TODO).** ``execute`` cannot yet bind the three
-/// host-marshalled integer arrays (block_tables / cu_seqlens_q /
-/// seqused_k -- see ``SdpaMarshalling``) to device memory: that device
-/// allocation + the 18-arg launch land in Phase 4 (gfx950). The
-/// host-side marshalling LOGIC is implemented and unit-tested now; the
-/// device binding is the remaining piece. ``execute`` therefore throws a
-/// clearly-marked "not yet wired" error so a premature call fails loudly
-/// rather than launching with unbound buffers. The GPU-gated SDPA tests
-/// skip on non-gfx950 hosts, so this does not affect host CI.
+/// **GPU launch.** ``execute`` marshals the three host integer arrays
+/// (block_tables / cu_seqlens_q / seqused_k -- see ``SdpaMarshalling``),
+/// uploads them into the caller-provided workspace, binds the unified
+/// 18-slot ABI, and launches on the handle's stream. Only the DENSE
+/// (non-paged, non-varlen) marshalling path is wired; the paged / varlen
+/// branches throw a clearly-marked Phase-4-follow-up error rather than
+/// silently mishandling them. Workspace bytes come from
+/// ``getWorkspaceSize`` (the plan never allocates device memory
+/// internally).
 class SdpaFwdPlan : public hipdnn_plugin_sdk::IPlan<::CkDslHandle> {
    public:
+    /// Construction params beyond the tensor UIDs + launch scalars:
+    ///   ``batch``     -- num_seqs (the dense-degenerate sequence count).
+    ///   ``blockSize`` -- paged KV block size in tokens (one of 16/32/64);
+    ///                    sizes the degenerate block table + the
+    ///                    ``block_table_stride`` arg.
+    ///   ``isPaged`` / ``isVarlen`` -- marshalling-path selectors. Only
+    ///                    the dense (both false) path is wired today.
+    ///   ``useSinks``  -- bind the sink_ptr from ``sinkUid`` (else null).
+    ///   ``sinkUid``   -- device-buffer uid for the sink tensor (the SDPA
+    ///                    sink_token uid; -1 when sinks are off).
     SdpaFwdPlan(std::shared_ptr<HipModule> module, std::int64_t qUid, std::int64_t kUid,
                 std::int64_t vUid, std::int64_t oUid, float scaleLog2, std::int32_t seqlenQ,
                 std::int32_t seqlenK, std::int32_t strideQToken, std::int32_t strideQHead,
                 std::int32_t strideKToken, std::int32_t strideKHead, std::int32_t strideVToken,
                 std::int32_t strideVHead, std::int32_t strideOToken, std::int32_t strideOHead,
-                bool hasStats = false, std::int64_t statsUid = -1);
+                std::int32_t batch, std::int32_t blockSize, bool isPaged, bool isVarlen,
+                bool useSinks, std::int64_t sinkUid = -1, bool hasStats = false,
+                std::int64_t statsUid = -1);
 
+    /// Bytes the caller must allocate and pass as ``workspace`` to
+    /// ``execute``: enough device memory to hold the three host-marshalled
+    /// i32 arrays (block_tables / cu_seqlens_q / seqused_k), each rounded
+    /// up to a 256-byte sub-region. Returns 0 only defensively when
+    /// ``blockSize <= 0``.
     std::size_t getWorkspaceSize(const ::CkDslHandle& handle) const override;
 
-    /// Resolve Q/K/V/O device pointers from ``deviceBuffers`` by uid (so a
-    /// graph-vs-buffer mismatch surfaces here) and -- in Phase 4 -- bind +
-    /// launch the unified 18-slot ABI. The host marshalling of
-    /// block_tables / cu_seqlens_q / seqused_k is implemented in
-    /// ``SdpaMarshalling`` and unit-tested now; the device-side upload of
-    /// those arrays and the kernel launch are the remaining Phase-4 work,
-    /// so this currently throws a clearly-marked "not yet wired" error
-    /// rather than launching with unbound buffers.
+    /// Resolve Q/K/V/O (+ optional sink) device pointers from
+    /// ``deviceBuffers`` by uid (so a graph-vs-buffer mismatch surfaces
+    /// here), marshal the three host integer arrays, upload them into
+    /// ``workspace``, bind the unified 18-slot ABI, and launch on the
+    /// handle's stream. Only the dense (non-paged, non-varlen) path is
+    /// wired; paged/varlen throw a Phase-4-follow-up error.
     ///
     /// Throws ``hipdnn_plugin_sdk::HipdnnPluginException`` if a UID is
-    /// missing from ``deviceBuffers`` or (until Phase 4 lands the launch)
-    /// to report the unwired unified ABI. Workspace is unused (this kernel
-    /// allocates its scratch in static LDS).
+    /// missing, if ``workspace`` is null (the caller must provide
+    /// ``getWorkspaceSize`` bytes -- the plan never allocates device
+    /// memory itself), if a HIP upload/launch fails, or if the
+    /// marshalling path is paged/varlen.
     void execute(const ::CkDslHandle& handle, const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                  std::uint32_t numDeviceBuffers, void* workspace = nullptr) const override;
 
@@ -112,6 +128,12 @@ class SdpaFwdPlan : public hipdnn_plugin_sdk::IPlan<::CkDslHandle> {
     std::int32_t _strideVHead;
     std::int32_t _strideOToken;
     std::int32_t _strideOHead;
+    std::int32_t _batch;
+    std::int32_t _blockSize;
+    bool _isPaged;
+    bool _isVarlen;
+    bool _useSinks;
+    std::int64_t _sinkUid;
     bool _hasStats;
     std::int64_t _statsUid;
 };

@@ -259,6 +259,25 @@ KernelArtifact CompileServiceBridge::compileSmoke() {
     }
 }
 
+KernelArtifact CompileServiceBridge::compileSdpaFwdFake(std::string_view arch) {
+    try {
+        py::gil_scoped_acquire gil;
+        py::str archStr(arch.data(), arch.size());
+        py::object result = _module.attr("compile_sdpa_fwd_fake")(archStr);
+        KernelArtifact artifact =
+            dictToArtifact(result.cast<py::dict>(), "CompileServiceBridge::compileSdpaFwdFake");
+
+        HIPDNN_PLUGIN_LOG_INFO("CompileServiceBridge::compileSdpaFwdFake produced kernel='"
+                               << artifact.kernelName << "' kind='" << artifact.kind
+                               << "' hsaco_bytes=" << artifact.hsaco.size() << " isa='"
+                               << artifact.isa << "'");
+
+        return artifact;
+    } catch (const py::error_already_set& error) {
+        PythonError::raise(error, "CompileServiceBridge::compileSdpaFwdFake");
+    }
+}
+
 KernelArtifact CompileServiceBridge::compile(std::string_view opKind, const py::dict& payload,
                                              std::string_view arch) {
     try {
