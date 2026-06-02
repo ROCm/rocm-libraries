@@ -82,16 +82,22 @@ struct SupportsResult {
 [[nodiscard]] std::vector<SdpaPerfKnobs> enumerateCandidates(const SdpaSelectionProblem& problem);
 
 /// Deterministic forward mapping from a knob combo to the dispatcher's
-/// ``FmhaKernelKey``. The scored fields are set per §2.6:
+/// SCORING ``FmhaKernelKey``. The scored fields are set to land in the fwd
+/// model's trained distribution:
 ///   * tile_shape.m0 = block_m() = num_warps * block_m_per_warp
 ///   * tile_shape.n0 = tile_size
-///   * tile_shape.k0 / k1 from the MFMA-atom flag
-///   * pipeline string from the schedule flags
+///   * tile_shape.k0 = k1 = 32 (trained block-K, both MFMA atoms)
+///   * tile_shape.n1 = head_size (hdim_v)
+///   * tile_shape.k0max = trained head_size -> k0max map
+///   * pipeline string = "qr_async" (trained-vocabulary token)
 ///   * pad_* default-filled (true)
-///   * signature.* matched to the problem
+///   * signature.* matched to the problem, EXCEPT use_paged_kv which is
+///     forced false for scoring (the fwd model never saw paged candidates)
 /// Non-scored fields (wave_shape, warp_tile_shape, alignments,
 /// block_per_cu, selection_rank, gfx_arch) are left at sensible
-/// defaults; they do not affect the score.
+/// defaults; they do not affect the score. This key is the prediction
+/// query only; it does not drive the compiled kernel or the runtime
+/// marshalling path.
 [[nodiscard]] ck_tile::dispatcher::FmhaKernelKey knobsToKernelKey(
     const SdpaSelectionProblem& problem, const SdpaPerfKnobs& knobs);
 
@@ -101,10 +107,12 @@ struct SupportsResult {
 [[nodiscard]] ck_tile::dispatcher::FmhaProblem problemToFmhaProblem(
     const SdpaSelectionProblem& problem);
 
-/// Map a knob combo's schedule flags to the dispatcher pipeline string.
-/// Returns one of the valid pipeline names recognised by the heuristic
-/// feature encoder: "qr", "qr_async", "qr_async_trload",
-/// "qr_async_trload_v3", "qr_pagedkv".
+/// Return the SCORING pipeline token for a knob combo. Always
+/// "qr_async": the fwd model was trained only on the "qr" / "qr_async"
+/// vocabulary, so the other heuristic-encoder tokens ("qr_async_trload*",
+/// "qr_pagedkv") are out-of-distribution and are not scored. The
+/// ``problem`` / ``knobs`` parameters are retained for signature stability
+/// and a future non-async lane.
 [[nodiscard]] std::string pipelineForKnobs(const SdpaSelectionProblem& problem,
                                            const SdpaPerfKnobs& knobs);
 

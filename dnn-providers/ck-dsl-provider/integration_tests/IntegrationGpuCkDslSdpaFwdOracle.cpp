@@ -60,16 +60,19 @@ using ck_dsl_provider::SdpaPerfKnobs;
 using ck_dsl_provider::SdpaScorer;
 using ck_dsl_provider::SdpaSelectionProblem;
 using ck_dsl_provider::SdpaSpec;
+using hipdnn_data_sdk::types::bfloat16;
 using hipdnn_data_sdk::types::half;
 
 /// One LARGE forward-SDPA shape the oracle sweep brute-forces. All causal,
-/// fp16, BSHD. The flagship case is the S8192 GQA shape where the
-/// heuristic's TFLOPS plateaued at ~0.31x of a roofline expectation -- the
-/// sweep answers whether that plateau is the heuristic's pick or a
-/// config-space ceiling.
+/// BSHD. The flagship case is the S8192 GQA shape where the heuristic's
+/// TFLOPS plateaued at ~0.31x of a roofline expectation -- the sweep
+/// answers whether that plateau is the heuristic's pick or a config-space
+/// ceiling. ``dtype`` selects fp16 vs bf16 (bf16/d64/gqa8 is the model's
+/// in-family regime, where a trained-faithful query should rank best).
 struct OracleCase {
     const char* name;
     int B, Hq, Hkv, Sq, Skv, D;
+    data_objects::DataType dtype;
 };
 
 /// BSHD physical strides for a logical [B, H, S, D] tensor -- identical to
@@ -249,8 +252,9 @@ std::optional<double> timeCandidate(CkDslContainer& container, ::CkDslHandle& ha
 /// Brute-force the entire enumerated candidate config space for one shape:
 /// compile + time EACH candidate, report the max TFLOPS (the ORACLE best),
 /// and compare it to the config the dispatcher heuristic actually selects.
-void runOracleSweep(const OracleCase& cse, CkDslContainer& container, ::CkDslHandle& handle,
-                    const std::string& arch) {
+template <typename ElemT>
+void runOracleSweepImpl(const OracleCase& cse, CkDslContainer& container, ::CkDslHandle& handle,
+                        const std::string& arch) {
     const int kB = cse.B;
     const int kHq = cse.Hq;
     const int kHkv = cse.Hkv;
@@ -273,7 +277,7 @@ void runOracleSweep(const OracleCase& cse, CkDslContainer& container, ::CkDslHan
     //    createValidSdpaFwdGraph: q=1, k=2, v=3, o=4.
     auto fbBuilder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
         qDims, qStrides, kDims, kStrides, vDims, vStrides, oDims, oStrides,
-        /*dataType=*/data_objects::DataType::HALF, /*withAttnMask=*/false, /*withScale=*/false,
+        /*dataType=*/cse.dtype, /*withAttnMask=*/false, /*withScale=*/false,
         /*withStats=*/false, /*alibiMask=*/false, /*paddingMask=*/false, /*causalMask=*/true);
     flatbuffer_utilities::GraphWrapper graph(fbBuilder.GetBufferPointer(), fbBuilder.GetSize());
 
@@ -305,16 +309,16 @@ void runOracleSweep(const OracleCase& cse, CkDslContainer& container, ::CkDslHan
     // 5. Allocate Q/K/V/O device tensors ONCE (small random fill; no
     //    readback -- this is perf only). Reading deviceData() drives the
     //    H->D copy for inputs; O is written by the kernel.
-    utilities::Tensor<half> tensorQ(qDims, qStrides);
-    utilities::Tensor<half> tensorK(kDims, kStrides);
-    utilities::Tensor<half> tensorV(vDims, vStrides);
-    utilities::Tensor<half> tensorO(oDims, oStrides);
+    utilities::Tensor<ElemT> tensorQ(qDims, qStrides);
+    utilities::Tensor<ElemT> tensorK(kDims, kStrides);
+    utilities::Tensor<ElemT> tensorV(vDims, vStrides);
+    utilities::Tensor<ElemT> tensorO(oDims, oStrides);
     constexpr unsigned kSeedQ = 0x4242u;
     constexpr unsigned kSeedK = 0x5555u;
     constexpr unsigned kSeedV = 0x6363u;
-    tensorQ.fillWithRandomValues(half(-0.1f), half(0.1f), kSeedQ);
-    tensorK.fillWithRandomValues(half(-0.1f), half(0.1f), kSeedK);
-    tensorV.fillWithRandomValues(half(-0.1f), half(0.1f), kSeedV);
+    tensorQ.fillWithRandomValues(ElemT(-0.1f), ElemT(0.1f), kSeedQ);
+    tensorK.fillWithRandomValues(ElemT(-0.1f), ElemT(0.1f), kSeedK);
+    tensorV.fillWithRandomValues(ElemT(-0.1f), ElemT(0.1f), kSeedV);
 
     const std::vector<hipdnnPluginDeviceBuffer_t> deviceBuffers = {
         {1, tensorQ.memory().deviceData()},
@@ -412,6 +416,25 @@ void runOracleSweep(const OracleCase& cse, CkDslContainer& container, ::CkDslHan
                                   << formatKnobs(picked)
                                   << ") is not in the enumerated candidate set";
 
+    // 7b. The ANALYTIC fallback's pick (the non-ML baseline). Timing it
+    //     here closes the dispatcher-vs-analytic A/B: does the ML heuristic
+    //     beat the explicit analytic ordering on real hardware? Same
+    //     compile+time path as the heuristic pick.
+    const SdpaPerfKnobs analytic = ck_dsl_provider::selectAnalyticFallback(selProblem, candidates);
+    double analyticTflops = -1.0;
+    double analyticUs = 0.0;
+    bool analyticMatched = false;
+    {
+        double medianUs = 0.0;
+        std::optional<double> tflops =
+            timeCandidate(container, handle, arch, spec, analytic, deviceBuffers, kFlops, medianUs);
+        if (tflops.has_value()) {
+            analyticTflops = *tflops;
+            analyticUs = medianUs;
+            analyticMatched = true;
+        }
+    }
+
     // 8. SUMMARY line. ratio = oracle/heuristic (>1 means the heuristic
     //    left perf on the table; ~1 means the plateau is a config-space /
     //    kernel ceiling, not the heuristic's fault).
@@ -426,9 +449,36 @@ void runOracleSweep(const OracleCase& cse, CkDslContainer& container, ::CkDslHan
     } else {
         summary << " heuristic=UNAVAILABLE @(" << formatKnobs(picked) << ")";
     }
+    if (analyticMatched) {
+        const double ratioA = analyticTflops > 0.0 ? (bestTflops / analyticTflops) : 0.0;
+        const double hVsA = (analyticTflops > 0.0 && heuristicTflops > 0.0)
+                                ? (heuristicTflops / analyticTflops)
+                                : 0.0;
+        summary << " analytic=" << analyticTflops << " tflops @(" << formatKnobs(analytic)
+                << ") median_us=" << analyticUs << " oracle/analytic=" << ratioA
+                << "x heuristic/analytic=" << hVsA << "x";
+    } else {
+        summary << " analytic=UNAVAILABLE @(" << formatKnobs(analytic) << ")";
+    }
     HIPDNN_PLUGIN_LOG_INFO(summary.str());
     // Also to stdout so the summary survives even with plugin logging off.
     std::cout << summary.str() << std::endl;
+}
+
+/// Dispatch the templated sweep on the case dtype (HALF -> half,
+/// BFLOAT16 -> bfloat16), mirroring the correctness test's dispatcher.
+void runOracleSweep(const OracleCase& cse, CkDslContainer& container, ::CkDslHandle& handle,
+                    const std::string& arch) {
+    switch (cse.dtype) {
+        case data_objects::DataType::HALF:
+            runOracleSweepImpl<half>(cse, container, handle, arch);
+            break;
+        case data_objects::DataType::BFLOAT16:
+            runOracleSweepImpl<bfloat16>(cse, container, handle, arch);
+            break;
+        default:
+            FAIL() << "unsupported dtype for oracle case '" << cse.name << "'";
+    }
 }
 
 /// gfx950-gated oracle perf-sweep fixture. Brings up the embedded
@@ -451,15 +501,45 @@ class IntegrationGpuCkDslSdpaFwdOracleGpu : public ::testing::Test {
 
 // Flagship: the S8192 GQA fp16 D128 case (the ~0.31x-ratio plateau).
 TEST_F(IntegrationGpuCkDslSdpaFwdOracleGpu, OracleConfigSweep) {
-    const OracleCase cse{"Fp16_GQA_S8192_D128", /*B=*/1,      /*Hq=*/32, /*Hkv=*/8,
-                         /*Sq=*/8192,           /*Skv=*/8192, /*D=*/128};
+    const OracleCase cse{
+        "Fp16_GQA_S8192_D128", /*B=*/1,      /*Hq=*/32, /*Hkv=*/8,
+        /*Sq=*/8192,           /*Skv=*/8192, /*D=*/128, data_objects::DataType::HALF};
     runOracleSweep(cse, *_container, *_handle, _arch);
 }
 
 // Contrast: a smaller S2048 GQA fp16 D128 shape, same sweep machinery.
 TEST_F(IntegrationGpuCkDslSdpaFwdOracleGpu, OracleConfigSweepS2048) {
-    const OracleCase cse{"Fp16_GQA_S2048_D128", /*B=*/1,      /*Hq=*/32, /*Hkv=*/8,
-                         /*Sq=*/2048,           /*Skv=*/2048, /*D=*/128};
+    const OracleCase cse{
+        "Fp16_GQA_S2048_D128", /*B=*/1,      /*Hq=*/32, /*Hkv=*/8,
+        /*Sq=*/2048,           /*Skv=*/2048, /*D=*/128, data_objects::DataType::HALF};
+    runOracleSweep(cse, *_container, *_handle, _arch);
+}
+
+// IN-FAMILY: bf16 / D64 / Hq64-Hkv8 (GQA ratio 8) -- the regime the gfx950
+// fwd model was trained on. After the trained-faithful scoring query, this
+// is where the heuristic pick should track oracle-best most closely.
+TEST_F(IntegrationGpuCkDslSdpaFwdOracleGpu, OracleConfigSweepInFamilyBf16S2048) {
+    const OracleCase cse{"Bf16_InFamily_GQA8_D64_S2048",
+                         /*B=*/2,
+                         /*Hq=*/64,
+                         /*Hkv=*/8,
+                         /*Sq=*/2048,
+                         /*Skv=*/2048,
+                         /*D=*/64,
+                         data_objects::DataType::BFLOAT16};
+    runOracleSweep(cse, *_container, *_handle, _arch);
+}
+
+// IN-FAMILY at large S: does the in-distribution pick still hold at S8192?
+TEST_F(IntegrationGpuCkDslSdpaFwdOracleGpu, OracleConfigSweepInFamilyBf16S8192) {
+    const OracleCase cse{"Bf16_InFamily_GQA8_D64_S8192",
+                         /*B=*/2,
+                         /*Hq=*/64,
+                         /*Hkv=*/8,
+                         /*Sq=*/8192,
+                         /*Skv=*/8192,
+                         /*D=*/64,
+                         data_objects::DataType::BFLOAT16};
     runOracleSweep(cse, *_container, *_handle, _arch);
 }
 

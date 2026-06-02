@@ -142,10 +142,29 @@ it times `F.scaled_dot_product_attention(is_causal=True)` with the same shapes/d
   plumbing), `Paged_Scatter` **245** (reverse-permutation table — block-table indirection adds no
   measurable overhead at this shape), `Varlen_Mixed` **228** (bf16, lengths {S,S/2,S,S/4}, actual-
   token denominator). No correctness oracle exists for these paths.
-- **Oracle sweep (key finding):** the best enumerated config is **2.05× faster than the
-  heuristic's pick** at S8192 (504 vs 246 TFLOPS), reaching ~0.64–0.73× of flash. The heuristic
-  degenerately picks the *smallest* config for every shape → the gap is a **config-selection**
-  problem (retrain/autotune), not a kernel ceiling.
+- **Oracle sweep (key finding):** the best enumerated config is **~2× faster than the
+  heuristic's pick** at S8192 (503 vs 247 TFLOPS), reaching ~0.64–0.73× of flash. The heuristic
+  picks the *smallest* config (nw1/mw16) for every shape → the gap is a **config-selection**
+  problem, not a kernel ceiling.
+- **Scoring-query fidelity fix + dispatcher-vs-analytic (decisive):** the heuristic was querying the
+  model out-of-distribution (pipeline pinned to the OOV `qr_pagedkv`, stub `tile_k0`, paged flag the
+  fwd model never saw). We made the scoring query trained-faithful (score `qr_async`, real
+  `k0/k1/n1/k0max`, dense scoring flag) — a scoring-only change (kernel + JIT cache unchanged). **It
+  did NOT change the pick:** the heuristic still selects nw1/mw16 for every shape, *including
+  in-family* bf16/d64/gqa8, where it is actually **worse than the analytic baseline** (0.90×). Oracle
+  vs heuristic vs analytic:
+
+  | shape | heuristic | oracle-best | oracle/heur | analytic | heur/analytic |
+  |---|---|---|---|---|---|
+  | fp16 S8192 D128 | 247 | 503 (nw4/mw32/mfma32) | 2.03× | 216 | 1.15× |
+  | fp16 S2048 D128 | 227 | 324 (same) | 1.42× | 192 | 1.19× |
+  | bf16 in-family D64 S2048 | 290 | 452 (same) | 1.56× | 322 | **0.90×** |
+
+  Conclusion: the gfx950 model was trained on CK-Tile **assembly** fwd kernels and **does not
+  transfer** to the CK DSL unified kernel — it ranks small tiles highest when our kernel wants large
+  tiles. A faithful query is necessary (and a prerequisite for any working model) but **insufficient**.
+  The real lever is a **retrain/autotune on CK-DSL-measured TFLOPS** (the oracle harness already
+  produces exactly that data; oracle-best is the same nw4/mw32/mfma32 config across all shapes tested).
 
 ### First-use latency (JIT / `buildPlan`)
 
@@ -165,7 +184,10 @@ re-scoring (enumerate + LightGBM predict), not recompile, so it's cacheable if i
 The compile cost amortizes after a handful of launches per shape.
 
 ### Open follow-ups
-1. CK-DSL autotuner + heuristic retrain over realistic shapes (closes the ~2×).
+1. **CK-DSL-native heuristic retrain (the lever — now confirmed required).** The scoring query is
+   trained-faithful but the gfx950 CK-Tile-assembly model does not transfer to the DSL kernel
+   (still picks nw1/mw16; ≈/worse than analytic). Retrain a model on CK-DSL-measured TFLOPS — the
+   oracle sweep already emits per-(shape,config) TFLOPS, the exact training signal. Closes the ~2×.
 2. `num_warps=8` + large-tile comgr CODEGEN failure (21/51 oracle configs); tighten the
    enumerator's `supportsTiled2d` mirror so it doesn't emit non-compilable configs.
 3. Kernel feature gaps (further work needed): non-causal mode; LSE output (paged kernel emits none).

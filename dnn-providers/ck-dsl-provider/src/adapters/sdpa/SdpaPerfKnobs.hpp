@@ -19,13 +19,15 @@ namespace ck_dsl_provider {
 ///
 /// The continuous performance axes the dispatcher actually scores are
 /// ``num_warps``, ``block_m_per_warp`` (together forming BLOCK_M), and
-/// ``tile_size``. The remaining boolean variant flags either steer the
-/// MFMA atom / schedule (which DO affect the kernel-key mapping and
-/// therefore the score, e.g. ``use_mfma_32x32`` and the schedule flags
-/// that pick the pipeline string) or are problem-driven variant lanes
-/// (sinks / sliding-window / fp8) that Phase 2 sets from the graph. They
-/// are carried here with safe defaults so every emitted combo is
-/// complete and buildable.
+/// ``tile_size``. The remaining boolean variant flags steer the COMPILED
+/// kernel (the MFMA atom / schedule, e.g. ``use_mfma_32x32``) or are
+/// problem-driven variant lanes (sinks / sliding-window / fp8) that
+/// Phase 2 sets from the graph. They affect the built kernel but NOT the
+/// scoring key: the scoring query is trained-faithful (fixed block-K and a
+/// single ``qr_async`` pipeline token), so the model never saw the atom /
+/// schedule as discriminating features and they are intentionally
+/// uniform across the scored key. They are carried here with safe defaults
+/// so every emitted combo is complete and buildable.
 ///
 /// There is deliberately NO ``compile_backend`` member: the kernel's
 /// ``UnifiedAttention2DTiledSpec`` has no such field; the JIT backend is
@@ -57,12 +59,13 @@ struct SdpaPerfKnobs {
 
     // --- Curated MFMA-atom / schedule flags (affect key mapping) -----
 
-    /// Use the 32x32x16 MFMA geometry instead of the default 16x16x32.
-    /// Requires block_m_per_warp == 32. Drives the k0/k1 mapping.
+    /// Use the 32x32x16 MFMA geometry instead of the default 16x16x32 in
+    /// the compiled kernel. Requires block_m_per_warp == 32. (Does not
+    /// change the scoring key -- the trained-faithful query fixes k0/k1.)
     bool use_mfma_32x32{false};
 
     /// Transposed QK orientation for the 32x32 path (requires
-    /// use_mfma_32x32). Part of the schedule-flag -> pipeline mapping.
+    /// use_mfma_32x32) in the compiled kernel. (Not a scoring-key feature.)
     bool use_transposed_qk_32x32{false};
 
     /// Keep softmax P in registers across the PV MFMA instead of the
