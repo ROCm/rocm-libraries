@@ -12,7 +12,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-GENERATOR="$(cd "$SCRIPT_DIR" && cd ../../../hip-kernel-provider/src/integration_tests/asm_sdpa_engine/scripts && pwd)/generate_sdpa_fwd_golden.py"
+GENERATOR="$(cd "$SCRIPT_DIR" && cd ../../reference_data_scripts && pwd)/generate_sdpa_fwd_golden.py"
 
 if [[ ! -f "$GENERATOR" ]]; then
     echo "ERROR: Generator script not found at: $GENERATOR"

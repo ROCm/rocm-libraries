@@ -22,6 +22,7 @@ Usage:
 
 import argparse
 import datetime
+import hashlib
 import json
 import math
 import os
@@ -33,6 +34,10 @@ import torch
 import torch.nn.functional as F
 from torch.nn.attention import SDPBackend, sdpa_kernel
 
+
+# Bump when generator logic changes in a way that affects output data.
+# (e.g., different reference backend, precision handling, tensor layout)
+GENERATOR_VERSION = "1.0.0"
 
 DTYPE_MAP = {
     "bf16": {"torch": torch.bfloat16, "json": "bfloat16", "bytes": 2},
@@ -156,18 +161,11 @@ def build_graph_json(q_dims, k_dims, v_dims, o_dims, scale, dtype_str="bfloat16"
     return graph
 
 
-def _get_generator_commit_hash():
-    try:
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        result = subprocess.run(
-            ["git", "log", "-1", "--format=%h", "--", os.path.abspath(__file__)],
-            cwd=script_dir,
-            capture_output=True,
-            text=True,
-        )
-        return result.stdout.strip() if result.returncode == 0 else ""
-    except Exception:
-        return ""
+def _get_generator_sha256():
+    """SHA-256 of this script's contents — git-independent version marker."""
+    script_path = os.path.abspath(__file__)
+    with open(script_path, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()
 
 
 def build_meta_json(config, pytorch_version):
@@ -177,14 +175,14 @@ def build_meta_json(config, pytorch_version):
 
     return {
         "generator": "generate_sdpa_fwd_golden.py",
-        "generator_commit": _get_generator_commit_hash(),
+        "generator_sha256": _get_generator_sha256(),
         "generated_at": datetime.datetime.now(datetime.timezone.utc).strftime(
             "%Y-%m-%dT%H:%M:%SZ"
         ),
         "reference_source": f"PyTorch {pytorch_version}",
         "reference_backend": "pytorch_math_backend",
         "rocm_version": rocm_ver,
-        "generator_version": "1.0.0",
+        "generator_version": GENERATOR_VERSION,
         "generation_precision": f"like-for-like: {config['dtype'].upper()} inputs, FP32 intermediates",
         "direction": "forward",
         "seed": config["seed"],
