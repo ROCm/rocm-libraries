@@ -1102,14 +1102,12 @@ struct buffer_view<address_space_enum::lds,
                                            scalar_per_t_vector * scalar_per_x_vector>;
                 // Strict-aliasing: the LDS allocation backing p_data_ was sized
                 // via lds_padded_sizeof<T>() at the kernel level, so the storage
-                // is laid out as an array of lds_padded_element<T>. The
-                // reinterpret_cast establishes that array view; the actual load
-                // is performed through &padded[i].value (a T-typed lvalue), which
-                // is in the permitted aliasing set. For non-padded types
-                // sizeof(lds_padded_element<T>) == sizeof(T), so this is a no-op.
-                const auto* padded = reinterpret_cast<const lds_padded_element<T>*>(p_data_);
-                auto rtn           = *c_style_pointer_cast<const buf_t*>(
-                    &padded[i + linear_offset + static_offset].value);
+                // is laid out as an array of lds_padded_element<T>. lds_padded_ptr
+                // performs the leaf load through &padded[i].value (a T-typed
+                // lvalue), which is in the permitted aliasing set. For non-padded
+                // types this reduces to &p_data_[i], so it is a no-op.
+                auto rtn = *c_style_pointer_cast<const buf_t*>(
+                    lds_padded_ptr(p_data_, i + linear_offset + static_offset));
                 return bit_cast<X>(rtn);
             }
 #endif
@@ -1141,7 +1139,7 @@ struct buffer_view<address_space_enum::lds,
                                           bool /*is_valid_element*/,
                                           bool_constant<pre_nop> = {}) const
     {
-        constexpr index_t stride = sizeof(lds_padded_element<T>);
+        constexpr index_t stride = lds_padded_sizeof<T>();
         smem_load<sizeof(X)>{}(dst, v_offset * stride, i_offset * stride);
     }
 
@@ -1384,11 +1382,10 @@ struct buffer_view<address_space_enum::lds,
                 using buf_t = ext_vector_t<typename vector_traits<remove_cvref_t<T>>::scalar_type,
                                            scalar_per_t_vector * scalar_per_x_vector>;
                 // Strict-aliasing: see matching note in get_raw() above. LDS was
-                // sized via lds_padded_sizeof<T>(); the reinterpret_cast yields a
-                // valid array-of-wrapper view, and the store goes through
-                // &padded[i].value (T-typed lvalue).
-                auto* padded = reinterpret_cast<lds_padded_element<T>*>(p_data_);
-                *c_style_pointer_cast<buf_t*>(&padded[i].value) = reinterpret_cast<const buf_t&>(x);
+                // sized via lds_padded_sizeof<T>(); lds_padded_ptr stores through
+                // &padded[i].value (a T-typed lvalue).
+                *c_style_pointer_cast<buf_t*>(lds_padded_ptr(p_data_, i)) =
+                    reinterpret_cast<const buf_t&>(x);
 #endif
             }
         }

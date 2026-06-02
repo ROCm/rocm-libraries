@@ -12,6 +12,7 @@
 #include "ck_tile/core/numeric/type_convert.hpp"
 #include "ck_tile/core/numeric/mxfp_scale.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
+#include "ck_tile/core/tensor/lds_padding.hpp"
 
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)
 #define CK_TILE_FP6_CVT_DEVICE 1
@@ -1273,9 +1274,21 @@ using pk_fp6x32_t = pk_f6_legacy_t<32, f6_kind::fp6>;
 using pk_bf6x16_t = pk_f6_legacy_t<16, f6_kind::bf6>;
 using pk_bf6x32_t = pk_f6_legacy_t<32, f6_kind::bf6>;
 
+// pk_fp6x16_t is the 12-byte packed FP6 type consumed by the gfx950 MX
+// scaled-MFMA path. It reaches LDS via the buffer_load_dwordx3 -> LDS async
+// path, which writes a fixed 16-byte per-thread stride, so it opts into the
+// 12 -> 16 padded LDS stride (see ck_tile/core/tensor/lds_padding.hpp).
+template <>
+struct needs_lds_pad<pk_fp6x16_t> : std::true_type
+{
+};
+
 template <int N, f6_kind kind>
 struct numeric_traits<pk_f6_legacy_t<N, kind>>
 {
+    // fp6 is e2m3, bf6 is e3m2.
+    static constexpr int exp        = (kind == f6_kind::fp6) ? 2 : 3;
+    static constexpr int mant       = (kind == f6_kind::fp6) ? 3 : 2;
     static constexpr int PackedSize = N;
 };
 

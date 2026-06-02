@@ -701,20 +701,15 @@ struct tile_window_with_static_distribution
                 const auto lds_origin_coord =
                     make_tensor_coordinate(tensor_descriptor, lds_bottom_tensor_thread_idx);
 
-                // Calculate SMEM address using typed pointer arithmetic.
-                // Strict-aliasing: the LDS region pointed to by lds_base_ptr was
-                // sized via lds_padded_sizeof<LdsDataType>() at the kernel level
-                // (see GetSmemSizeA/B in the policy), so it is a valid array of
-                // lds_padded_element<LdsDataType>. The leaf load/store goes
-                // through &padded_base[i].value, which is in the permitted
-                // aliasing set for LdsDataType.
-                auto* padded_base =
-                    reinterpret_cast<CK_TILE_LDS_ADDR lds_padded_element<LdsDataType>*>(
-                        lds_base_ptr);
+                // Calculate SMEM address via lds_padded_ptr. The LDS region was
+                // sized with lds_padded_sizeof<LdsDataType>() at the kernel level
+                // (see GetSmemSizeA/B in the policy), so indexing through the
+                // padded element applies the same per-element stride the LDS read
+                // side uses. No-op for non-padded types.
                 CK_TILE_LDS_ADDR LdsDataType* smem =
-                    &padded_base[lds_origin_coord.get_offset() / Traits::PackedSize +
-                                 lds_ys_offset / Traits::PackedSize]
-                         .value;
+                    lds_padded_ptr(lds_base_ptr,
+                                   lds_origin_coord.get_offset() / Traits::PackedSize +
+                                       lds_ys_offset / Traits::PackedSize);
 
                 static_for<0, NumAccessPerCoord, 1>{}([&](auto iCoordAccess) {
                     constexpr auto iAccess = number<iCoord * NumAccessPerCoord + iCoordAccess>{};
@@ -800,22 +795,16 @@ struct tile_window_with_static_distribution
                     const auto lds_coord =
                         make_tensor_coordinate(tensor_descriptor, lds_bottom_tensor_thread_idx);
 
-                    // Calculate SMEM address using typed pointer arithmetic.
-                    // The LDS region backing lds_base_ptr was sized via
-                    // lds_padded_sizeof<LdsDataType>() at the kernel level (see
-                    // GetSmemSizeA/B in the policy), so it is a valid array of
-                    // lds_padded_element<LdsDataType>. Indexing through it applies
-                    // the padded per-element stride (e.g. the gfx950 12->16B FP6
-                    // slot) that the LDS read side also uses, keeping the async
-                    // store and the subsequent reads in sync. For non-padded types
-                    // sizeof(lds_padded_element<T>) == sizeof(T), so this is a no-op.
-                    auto* padded_base =
-                        reinterpret_cast<CK_TILE_LDS_ADDR lds_padded_element<LdsDataType>*>(
-                            lds_base_ptr);
+                    // Calculate SMEM address via lds_padded_ptr. The LDS region
+                    // was sized with lds_padded_sizeof<LdsDataType>() at the kernel
+                    // level (see GetSmemSizeA/B in the policy), so indexing through
+                    // the padded element applies the gfx950 12->16B FP6 stride that
+                    // the LDS read side also uses, keeping the async store and the
+                    // subsequent reads in sync. No-op for non-padded types.
                     CK_TILE_LDS_ADDR LdsDataType* smem =
-                        &padded_base[lds_coord.get_offset() / Traits::PackedSize +
-                                     lds_ys_offset / Traits::PackedSize]
-                             .value;
+                        lds_padded_ptr(lds_base_ptr,
+                                       lds_coord.get_offset() / Traits::PackedSize +
+                                           lds_ys_offset / Traits::PackedSize);
 
                     const auto dram_ys_offset = [&]() {
                         if constexpr(static_move_ys)

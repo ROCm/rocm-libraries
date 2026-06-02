@@ -7,7 +7,6 @@
 
 #include "ck_tile/core/config.hpp"
 #include "ck_tile/core/numeric/integer.hpp"
-#include "ck_tile/core/numeric/pk_f6.hpp"
 
 // LDS padding helpers.
 //
@@ -24,23 +23,16 @@
 //
 // To avoid silently changing the layout of unrelated 12-byte aggregates
 // (e.g. future `float[3]` wrappers), the 12->16 rule is gated on an opt-in
-// trait `needs_lds_pad<T>`. Add a `template <> struct needs_lds_pad<T>
-// : std::true_type {};` specialization for any new type that travels through
-// the async-load-to-LDS path.
+// trait `needs_lds_pad<T>`. The specialization for a concrete type lives next
+// to that type's definition (e.g. needs_lds_pad<pk_fp6x16_t> in pk_f6.hpp) so
+// that simply naming the type makes the opt-in visible. Add a
+// `template <> struct needs_lds_pad<T> : std::true_type {};` next to any new
+// type that travels through the async-load-to-LDS path.
 
 namespace ck_tile {
 
 template <typename T>
 struct needs_lds_pad : std::false_type
-{
-};
-
-// pk_fp6x16_t (= pk_f6_legacy_t<16, f6_kind::fp6>) is the 12-byte packed FP6
-// type consumed by the gfx950 MX scaled-MFMA path. It reaches LDS via the
-// buffer_load_dwordx3 -> LDS async path, which writes a fixed 16-byte
-// per-thread stride, so it opts into the 12 -> 16 padded LDS stride.
-template <>
-struct needs_lds_pad<pk_fp6x16_t> : std::true_type
 {
 };
 
@@ -84,5 +76,28 @@ struct alignas(lds_padded_alignof<T>()) lds_padded_element
                   "Padded size must be a multiple of the padded alignment");
     T value;
 };
+
+// Reinterpret an LDS region (sized via lds_padded_sizeof<T>()) as an array of
+// lds_padded_element<T> and return a pointer to the i-th logical element's
+// payload. Indexing therefore applies the padded per-element stride (e.g. the
+// gfx950 12->16B FP6 slot), and the returned &elem.value is a plain T lvalue,
+// which is the well-defined access path into the wrapper. For non-padded types
+// sizeof(lds_padded_element<T>) == sizeof(T), so this reduces to &base[i].
+//
+// This is the single choke point for the padded LDS layout: every LDS
+// read/write address for a padded type goes through here, which keeps the async
+// store, the scatter/gather store and the subsequent loads on one stride. It is
+// also the natural place to add any future arch-gating of the padding.
+template <typename T>
+CK_TILE_HOST_DEVICE constexpr T* lds_padded_ptr(T* base, index_t i)
+{
+    return &reinterpret_cast<lds_padded_element<T>*>(base)[i].value;
+}
+
+template <typename T>
+CK_TILE_HOST_DEVICE constexpr const T* lds_padded_ptr(const T* base, index_t i)
+{
+    return &reinterpret_cast<const lds_padded_element<T>*>(base)[i].value;
+}
 
 } // namespace ck_tile
