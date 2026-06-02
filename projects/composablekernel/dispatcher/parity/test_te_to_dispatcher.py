@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import pytest
 
-from te_to_dispatcher import TranslationError, translate
+from te_to_dispatcher import TranslationError, translate, translate_with_rejections
 
 
 # ------------------------------------------------------------------ helpers --
@@ -329,6 +329,73 @@ class TestNonDefaultBlockParams:
         configs = translate(_single_config(k_block_per_cu=2))
         assert len(configs) == 1
         assert configs[0]["algorithm"]["k_block_per_cu"] == 2
+
+
+class TestRejectionManifest:
+    """translate_with_rejections() returns (valid_configs, rejections) with reason strings."""
+
+    def test_all_valid_no_rejections(self):
+        valid, rejected = translate_with_rejections(_single_config())
+        assert len(valid) == 1
+        assert rejected == []
+
+    def test_invalid_tile_appears_in_rejections(self):
+        # tile_m=64, warp_m=4, warp_tile_m=32 → 4*32=128 > 64 → invalid
+        valid, rejected = translate_with_rejections(
+            _single_config(tile_m=64, warp_m=4, warp_tile_m=32)
+        )
+        assert valid == []
+        assert len(rejected) == 1
+        assert rejected[0]["reason"] == "invalid_tile_divisibility"
+
+    def test_rejection_has_combo_and_reason_keys(self):
+        _, rejected = translate_with_rejections(
+            _single_config(tile_m=64, warp_m=4, warp_tile_m=32)
+        )
+        assert "combo" in rejected[0]
+        assert "reason" in rejected[0]
+
+    def test_valid_plus_rejected_equals_total_combinations(self):
+        # A 2-combo config: one valid, one invalid tile.
+        data = {
+            "datatype": "fp16",
+            "layout": "rcr",
+            "gpu_target": "gfx942",
+            "block_size": 256,
+            "k_block_per_cu": 1,
+            "num_wave_groups": 1,
+            "split_k": 1,
+            "tile_config": {
+                "tile_m": {"values": [256, 64]},   # 64 invalid with warp_tile_m=32, warp_m=4
+                "tile_n": {"values": [128]},
+                "tile_k": {"values": [32]},
+                "warp_m": {"values": [4]},
+                "warp_n": {"values": [1]},
+                "warp_k": {"values": [1]},
+                "warp_tile_m": {"values": [32]},
+                "warp_tile_n": {"values": [32]},
+                "warp_tile_k": {"values": [16]},
+            },
+            "trait_config": {
+                "pipeline": {"values": ["compv3"]},
+                "epilogue": {"values": ["default"]},
+                "scheduler": {"values": ["intrawave"]},
+                "pad_m": {"values": [False]},
+                "pad_n": {"values": [False]},
+                "pad_k": {"values": [False]},
+                "persistent": {"values": [False]},
+            },
+        }
+        valid, rejected = translate_with_rejections(data)
+        assert len(valid) == 1
+        assert len(rejected) == 1
+
+    def test_padding_config_no_rejections(self):
+        valid, rejected = translate_with_rejections(
+            _single_config(pad_m=True, pad_n=True, pad_k=True)
+        )
+        assert len(valid) == 1
+        assert rejected == []
 
 
 if __name__ == "__main__":

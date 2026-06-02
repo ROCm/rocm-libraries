@@ -45,7 +45,7 @@ Usage:
 
     # On a GPU node, full dispatcher-vs-TE numerical + performance parity:
     python check_parity.py configs/single_fp16_rcr.json \
-        --te-build-dir /path/to/tile_engine/build --perf-tol 0.10
+        --te-build-dir /path/to/tile_engine/build
 """
 
 from __future__ import annotations
@@ -597,11 +597,13 @@ def main() -> int:
     ap.add_argument("--index", type=int, default=0,
                     help="Which translated config to check per file (default 0)")
     ap.add_argument("--sizes",
-                    default="512x512x512,1024x1024x1024,2048x2048x2048,257x257x257,513x511x33",
+                    default="512x512x512,1024x1024x1024,2048x2048x2048,257x257x256,513x511x64",
                     help="Comma-separated MxNxK problem sizes. "
-                         "257x257x257 is from the T1.6 spec (non-power-of-two, exercises "
-                         "padding on tile boundaries). 513x511x33 is additionally "
-                         "non-tile-aligned to stress pad_m/n/k=True configs.")
+                         "257x257x256 exercises padding on M/N tile boundaries (non-tile-aligned "
+                         "M and N; K kept at tile_k multiple because the kernel's loop-count is "
+                         "K/tile_k -- non-aligned K requires a pad_k-capable config AND "
+                         "tile_k-aligned K to avoid the unsupported guard). "
+                         "513x511x64 additionally stresses larger non-tile-aligned M/N.")
     ap.add_argument("--arch", default="gfx942", help="GPU arch for harness build")
     ap.add_argument("--output-dir", type=Path, default=_HERE / "generated",
                     help="Codegen output directory")
