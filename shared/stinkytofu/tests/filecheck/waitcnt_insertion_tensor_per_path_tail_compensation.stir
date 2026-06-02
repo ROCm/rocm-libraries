@@ -1,0 +1,95 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyWaitCntInsertionPass --print-output
+#
+# Policy
+# ------
+# A tensor-wait anchor at a merge block must drain its conflicting
+# tensor_load_to_lds dep on EVERY incoming CFG path.
+#
+# Each incoming path carries its own per-path tensor-load FIFO -- the
+# tensor_load_to_lds ops issued on that path that are still in flight
+# at the merge entry. "Deep" / "shallow" describe how full those FIFOs
+# are; in this test, when control reaches ^merge:
+#   ^A's per-path FIFO = [T0, X1, X2]  -> deep  (3 in flight)
+#   ^B's per-path FIFO = [T0]          -> shallow (1 in flight)
+# Both paths carry the same dep T0, but X1/X2 sit in ^A's FIFO ahead
+# of the dep at merge entry.
+#
+# A single merge anchor wait sized for the deeper predecessor (^A) --
+# `s_wait_tensorcnt 2` here -- waits for "<= 2 tensor loads in flight",
+# which is a no-op on ^B (which only has 1 in flight), so T0 does not
+# drain on the ^B path and the consumer observes a stale LDS region.
+#
+# The conservative correct behavior is to drop a `s_wait_tensorcnt 0`
+# at the merge -- it drains everything for both predecessors, but it
+# also kills any in-flight overlap on ^A's path.
+#
+# This pass optimizes that conservative drain by PROMOTING the
+# `s_wait_tensorcnt 0` out of the merge and into ^B's tail (the
+# shallower predecessor), so:
+#   * ^B's path drains its dep before joining the merge, and
+#   * the merge can use a relaxed wait sized for ^A's FIFO depth
+#     (still correct on ^B because ^B already drained at its own tail).
+#
+# Conservative                      Optimized (this pass)
+# ------------                      ---------------------
+#   ^entry                            ^entry
+#     T0   (token 0, the dep)           T0   (token 0, the dep)
+#     s_cbranch                         s_cbranch
+#    /        \                        /        \
+# ^A (deep)   ^B (shallow)         ^A (deep)   ^B (shallow)
+#   X1                                X1
+#   X2                                X2
+#   s_branch    s_branch              s_branch    s_wait_tensorcnt 0  <-- promoted
+#       \      /                          \       s_branch
+#        v    v                            \      /
+#       ^merge                              v    v
+#       s_wait_tensorcnt 0                 ^merge
+#       ds_load_b64 (token 0)              s_wait_tensorcnt 2
+#                                          ds_load_b64 (token 0)
+#
+# CHECK-LABEL: @waitcnt_insertion_tensor_per_path_tail_compensation
+#
+# Entry issues the tensor load whose dep flows to both branches.
+# CHECK: ^entry
+# CHECK: tensor_load_to_lds{{.*}}tokens = [0]
+# CHECK: s_cbranch_scc1
+#
+# ^A (deep predecessor): two extra tensor_load_to_lds with disjoint
+# tokens that extend its in-flight depth ahead of the merge. No
+# pre-drain inserted here because ^A's depth drives the merge wait.
+# CHECK: ^A
+# CHECK: tensor_load_to_lds{{.*}}tokens = [1]
+# CHECK-NEXT: tensor_load_to_lds{{.*}}tokens = [1]
+# CHECK-NEXT: s_branch
+#
+# ^B (shallow predecessor): receives the promoted `s_wait_tensorcnt 0`
+# before its terminator so the dep is drained on this path before
+# reaching the merge.
+# CHECK: ^B
+# CHECK: s_wait_tensorcnt{{.*}}tlcnt = 0
+# CHECK-NEXT: s_branch
+#
+# ^merge: relaxed wait sized for ^A's depth, emitted before the
+# consumer that conflicts with the shared dep on token 0.
+# CHECK: ^merge
+# CHECK: s_wait_tensorcnt{{.*}}tlcnt = 2
+# CHECK-NEXT: ds_load_b64
+# CHECK-NOT: s_wait_loadcnt
+# CHECK-NOT: s_wait_dscnt
+
+st.func @waitcnt_insertion_tensor_per_path_tail_compensation() {
+^entry:
+  "st.tensor_load_to_lds"(s[0:3], s[10:17]) { mod.memtoken = { tokens = [0] } }
+  "st.s_cbranch_scc1"("B", SCC0)
+  Successors: ^A, ^B
+^A:
+  "st.tensor_load_to_lds"(s[20:23], s[30:37]) { mod.memtoken = { tokens = [1] } }
+  "st.tensor_load_to_lds"(s[40:43], s[50:57]) { mod.memtoken = { tokens = [1] } }
+  "st.s_branch"("merge")
+  Successors: ^merge
+^B:
+  "st.s_branch"("merge")
+  Successors: ^merge
+^merge:
+  v[0:1] = "st.ds_load_b64"(v10) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+}
