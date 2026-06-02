@@ -505,7 +505,7 @@ defaultBenchmarkCommonParameters = [
     {"WorkGroupReduction": [False]},
     {"ConvertAfterDS": [False]},
     {"ForceDisableShadowInit": [False]},
-    {"InitCIterWmma": [-1]},
+    {"InitCIterWmma": [0]},
     {"LDSTrInst": [False]},
     {"WaveSplitK": [ False ]},
     {"MbskPrefetchMethod": [-1]},
