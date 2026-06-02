@@ -322,6 +322,7 @@ def supports_native_unified_attention_tiled(
         use_fp8=problem.use_fp8,
         q_dtype=problem.q_dtype,
         num_warps=_select_2d_num_warps(problem),
+        block_m_per_warp=_select_2d_block_m_per_warp(problem),
         kv_storage_dtype=_kv_storage_dtype(problem),
         tile_size=_select_2d_tile_size(problem),
         arch=arch,

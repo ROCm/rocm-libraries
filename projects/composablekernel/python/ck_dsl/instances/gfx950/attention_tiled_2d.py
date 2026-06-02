@@ -596,6 +596,7 @@ def supports_tiled_2d(
     use_fp8: bool,
     q_dtype,
     num_warps: int = 1,
+    block_m_per_warp: int = 16,
     kv_storage_dtype: Optional[str] = None,
     tile_size: Optional[int] = None,
     arch: str = "gfx950",
@@ -686,6 +687,43 @@ def supports_tiled_2d(
                 False,
                 f"tiled 2D kernel: per-wave tokens {per_wave_tokens} exceeds "
                 f"block_size={block_size}; would need lane-divergent block lookup",
+            )
+    # LDS-budget gate (ahead-of-time compilability). The kernel stages its
+    # tiles in LDS (the smem_alloc calls in build_unified_attention_2d_tiled);
+    # comgr CODEGEN (CODEGEN_BC_TO_RELOCATABLE) rejects a kernel whose static
+    # group segment exceeds the target LDS capacity (gfx950: 163840 B / 160 KB,
+    # arch_specs.json; arch is already gated to the tiled-attention family
+    # above). Rejecting here yields a clean reason instead of a comgr abort.
+    # The footprint mirrors the fp16/bf16 allocations (bpe=2):
+    #   K_lds  = 2*T*HD*bpe   (double-buffered async load)
+    #   V_lds  =   T*HD*bpe   (single-buffered)
+    #   P_lds  = BLOCK_M*(T+8)*bpe  (score tile; +8 pad)
+    #   Q_lds  = BLOCK_M*HD*bpe, 0 when it aliases K_lds (BLOCK_M <= 2*T)
+    #   Acc_lds= BLOCK_M*OUT_STRIPE*bpe,  OUT_STRIPE = 32 if HD<=64 else HD
+    # where BLOCK_M = num_warps*block_m_per_warp, T = tile_size_eff. This is
+    # LDS-only and conservative (assumes P_lds present -- the bf16 REGISTER_PV
+    # path drops it -- and ignores register/AGPR pressure, which can flip a
+    # couple of borderline mfma32 configs), so it never admits an unbuildable
+    # combo. FP8 staging has extra LDS allocations and a 1-byte KV dtype, so it
+    # is accounted separately; gate only the validated fp16/bf16 path here.
+    if not use_fp8:
+        _LDS_CAPACITY_BYTES = 163840  # gfx950, 160 KB (arch_specs.json)
+        _BPE = 2  # fp16/bf16
+        _t_eff = tile_size if tile_size is not None else block_size
+        _block_m = num_warps * block_m_per_warp
+        _out_stripe = 32 if head_size <= 64 else head_size
+        _lds = (
+            2 * _t_eff * head_size * _BPE  # K_lds (double-buffered)
+            + _t_eff * head_size * _BPE  # V_lds
+            + _block_m * (_t_eff + 8) * _BPE  # P_lds
+            + (0 if _block_m <= 2 * _t_eff else _block_m * head_size * _BPE)  # Q_lds
+            + _block_m * _out_stripe * _BPE  # Acc_lds
+        )
+        if _lds > _LDS_CAPACITY_BYTES:
+            return (
+                False,
+                f"tiled 2D kernel: estimated LDS {_lds} B (BLOCK_M={_block_m}, T={_t_eff}, "
+                f"HD={head_size}) exceeds the gfx950 160 KB budget; comgr CODEGEN would fail",
             )
     return True, "supported"
 
