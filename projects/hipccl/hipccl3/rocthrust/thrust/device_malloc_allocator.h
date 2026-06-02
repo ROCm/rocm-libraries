@@ -155,11 +155,8 @@ public:
    *  \note Memory deallocated by this function must previously have been
    *        allocated with \p allocate.
    */
-  THRUST_HOST inline void deallocate(pointer p, size_type cnt) noexcept
+  THRUST_HOST inline void deallocate(pointer p, [[maybe_unused]] size_type cnt) noexcept
   {
-    // silence unused parameter warning while still leaving the parameter name for Doxygen
-    (void) (cnt);
-
     device_free(p);
   } // end deallocate()
 
