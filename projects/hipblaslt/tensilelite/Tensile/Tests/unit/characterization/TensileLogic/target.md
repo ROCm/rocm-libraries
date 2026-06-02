@@ -88,8 +88,11 @@ and blended are reported).
 | | Stmts | Miss | Line cov |
 |---|---|---|---|
 | Before | 393 | 269 | 31.55% |
-| After  | _see `coverage-after.txt`_ | | |
+| After  | 393 | 2 | **99.49%** |
 
-Delta and per-file detail recorded in `coverage-after.txt` and the
-`TensileLogic` sections of `../resistance.md`-style `resistance.md` /
-`recommendations.md` (kept as new files in this dir).
+Delta: **+67.94 pts line**, −267 missing statements. Seven of eight files
+reach 100% line; only `ValidChipId.py:129,155` remain (unreachable defensive
+code — see `resistance.md`). No regression: full `-m unit` went 1249 → **1330
+passed** (+81 new tests), 201 skipped unchanged. Per-file detail in
+`coverage-after.txt`; resisting items and the next-target go/no-go in the
+sibling `resistance.md` / `recommendations.md` (new files in this dir).
