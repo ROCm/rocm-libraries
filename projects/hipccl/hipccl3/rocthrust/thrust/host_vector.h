@@ -33,8 +33,9 @@
 #include <thrust/detail/memory_wrapper.h>
 #include <thrust/detail/vector_base.h>
 
+#include _THRUST_STD_INCLUDE(utility)
+
 #include <initializer_list>
-#include <utility>
 #include <vector>
 
 THRUST_NAMESPACE_BEGIN
@@ -144,7 +145,7 @@ public:
    *  \param v The host_vector to move.
    */
   THRUST_HOST host_vector(host_vector&& v)
-      : Parent(std::move(v))
+      : Parent(_THRUST_STD::move(v))
   {}
 
   /*! Move constructor moves from another host_vector.
@@ -152,7 +153,7 @@ public:
    *  \param alloc The allocator to use by this host_vector.
    */
   THRUST_HOST host_vector(host_vector&& v, const Alloc& alloc)
-      : Parent(std::move(v), alloc)
+      : Parent(_THRUST_STD::move(v), alloc)
   {}
 
   /*! Assign operator copies from an exemplar \p host_vector.
@@ -169,7 +170,7 @@ public:
    */
   THRUST_HOST host_vector& operator=(host_vector&& v)
   {
-    Parent::operator=(std::move(v));
+    Parent::operator=(_THRUST_STD::move(v));
     return *this;
   }
 

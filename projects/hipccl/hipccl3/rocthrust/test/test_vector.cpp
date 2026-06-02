@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -863,7 +863,7 @@ TYPED_TEST(VectorTests, TestVectorMove)
   const auto ptr1  = v1.data();
   const auto size1 = v1.size();
 
-  Vector v2(std::move(v1));
+  Vector v2(_THRUST_STD::move(v1));
   const auto ptr2  = v2.data();
   const auto size2 = v2.size();
 
@@ -884,7 +884,7 @@ TYPED_TEST(VectorTests, TestVectorMove)
   const auto ptr3  = v3.data();
   const auto size3 = v3.size();
 
-  v2               = std::move(v3);
+  v2               = _THRUST_STD::move(v3);
   const auto ptr4  = v2.data();
   const auto size4 = v2.size();
 
