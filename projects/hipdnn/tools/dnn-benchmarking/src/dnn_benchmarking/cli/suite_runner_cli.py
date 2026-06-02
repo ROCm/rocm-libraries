@@ -185,13 +185,15 @@ def run_suite_cli(
                 "--roofline); the directory will not be written to"
             )
         plugin_paths = args.plugin_path
+        explicit_tolerances = args.rtol is not None or args.atol is not None
         config = SuiteConfig(
             warmup_iters=args.warmup,
             benchmark_iters=args.iters,
             seed=args.seed,
             engine_filter=args.engine,
-            rtol=args.rtol,
-            atol=args.atol,
+            rtol=1e-5 if args.rtol is None else args.rtol,
+            atol=1e-8 if args.atol is None else args.atol,
+            auto_tolerances=not explicit_tolerances,
             gpu_backend="auto",
             reference_provider=args.validate,
             verbose=args.verbose,

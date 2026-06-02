@@ -179,16 +179,16 @@ Tarball Input:
     comparison_group.add_argument(
         "--rtol",
         type=float,
-        default=1e-5,
+        default=None,
         metavar="TOL",
-        help="Relative tolerance for output comparison (default: 1e-5)",
+        help="Relative tolerance for output comparison (default: dtype-aware)",
     )
     comparison_group.add_argument(
         "--atol",
         type=float,
-        default=1e-8,
+        default=None,
         metavar="TOL",
-        help="Absolute tolerance for output comparison (default: 1e-8)",
+        help="Absolute tolerance for output comparison (default: dtype-aware)",
     )
 
     # Reference Validation arguments

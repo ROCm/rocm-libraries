@@ -117,7 +117,9 @@ def execute_graph(
 # -----------------------------------------------------------------------------
 
 
-def _as_tuple(values: Optional[Sequence[Any]], default: Sequence[int]) -> Tuple[int, ...]:
+def _as_tuple(
+    values: Optional[Sequence[Any]], default: Sequence[int]
+) -> Tuple[int, ...]:
     if values is None:
         return tuple(int(v) for v in default)
     return tuple(int(v) for v in values)
@@ -152,7 +154,9 @@ def _node_uid(
     if key in node and node[key] is not None:
         return int(node[key])
     if required:
-        raise ValueError(f"{node.get('type', 'Node')} missing required tensor UIDs ({key}): {node}")
+        raise ValueError(
+            f"{node.get('type', 'Node')} missing required tensor UIDs ({key}): {node}"
+        )
     return None
 
 
@@ -168,7 +172,9 @@ def _optional_uid(node: Dict[str, Any], key: str) -> Optional[int]:
     return _node_uid(node, key, ("inputs", "outputs"), required=False)
 
 
-def _tensor(tensors: Dict[int, torch.Tensor], uid: int, node: Dict[str, Any]) -> torch.Tensor:
+def _tensor(
+    tensors: Dict[int, torch.Tensor], uid: int, node: Dict[str, Any]
+) -> torch.Tensor:
     try:
         return tensors[uid]
     except KeyError as e:
@@ -184,7 +190,9 @@ def _tensor_shape(graph_json: Dict[str, Any], uid: int) -> Optional[Tuple[int, .
     return None
 
 
-def _store_tensor(tensors: Dict[int, torch.Tensor], uid: int, value: torch.Tensor) -> None:
+def _store_tensor(
+    tensors: Dict[int, torch.Tensor], uid: int, value: torch.Tensor
+) -> None:
     existing = tensors.get(uid)
     if existing is not None and tuple(existing.shape) == tuple(value.shape):
         existing.copy_(value.to(dtype=existing.dtype, device=existing.device))
@@ -224,7 +232,9 @@ def _channel_broadcast(values: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
     return values.reshape([1, values.numel()] + [1] * (x.ndim - 2)).to(device=x.device)
 
 
-def _scalar_value(tensors: Dict[int, torch.Tensor], uid: int, node: Dict[str, Any]) -> float:
+def _scalar_value(
+    tensors: Dict[int, torch.Tensor], uid: int, node: Dict[str, Any]
+) -> float:
     tensor = _tensor(tensors, uid, node)
     if tensor.numel() < 1:
         raise ValueError(f"Scalar tensor UID {uid} is empty")
@@ -247,7 +257,9 @@ def _conv_padding(node: Dict[str, Any]) -> Tuple[Tuple[int, int], Tuple[int, int
     return (pre[0], pre[1]), (post[0], post[1])
 
 
-def _conv_stride_dilation(node: Dict[str, Any]) -> Tuple[Tuple[int, int], Tuple[int, int]]:
+def _conv_stride_dilation(
+    node: Dict[str, Any],
+) -> Tuple[Tuple[int, int], Tuple[int, int]]:
     stride = _as_tuple(_node_param(node, "stride", [1, 1]), [1, 1])
     dilation = _as_tuple(_node_param(node, "dilation", [1, 1]), [1, 1])
     if len(stride) != 2 or len(dilation) != 2:
@@ -255,13 +267,17 @@ def _conv_stride_dilation(node: Dict[str, Any]) -> Tuple[Tuple[int, int], Tuple[
     return (stride[0], stride[1]), (dilation[0], dilation[1])
 
 
-def _pad_conv_input(x: torch.Tensor, pre: Tuple[int, int], post: Tuple[int, int]) -> torch.Tensor:
+def _pad_conv_input(
+    x: torch.Tensor, pre: Tuple[int, int], post: Tuple[int, int]
+) -> torch.Tensor:
     if pre == (0, 0) and post == (0, 0):
         return x
     return F.pad(x, (pre[1], post[1], pre[0], post[0]))
 
 
-def _conv2d_forward(node: Dict[str, Any], x: torch.Tensor, w: torch.Tensor) -> torch.Tensor:
+def _conv2d_forward(
+    node: Dict[str, Any], x: torch.Tensor, w: torch.Tensor
+) -> torch.Tensor:
     _validate_cross_correlation(node)
     pre, post = _conv_padding(node)
     stride, dilation = _conv_stride_dilation(node)
@@ -311,10 +327,14 @@ def _sdpa_bool(node: Dict[str, Any], key: str, default: bool = False) -> bool:
 def _sdpa_unsupported_if_present(node: Dict[str, Any], keys: Sequence[str]) -> None:
     for key in keys:
         if _optional_uid(node, key) is not None:
-            raise ValueError(f"Unsupported SDPA optional tensor '{key}' in PyTorch reference")
+            raise ValueError(
+                f"Unsupported SDPA optional tensor '{key}' in PyTorch reference"
+            )
 
 
-def _sdpa_scale(node: Dict[str, Any], tensors: Dict[int, torch.Tensor]) -> Optional[float]:
+def _sdpa_scale(
+    node: Dict[str, Any], tensors: Dict[int, torch.Tensor]
+) -> Optional[float]:
     scale_uid = _optional_uid(node, "scale_tensor_uid")
     if scale_uid is not None:
         return _scalar_value(tensors, scale_uid, node)
@@ -349,25 +369,38 @@ def _sdpa_common(
     _sdpa_unsupported_if_present(node, unsupported)
 
     if _sdpa_bool(node, "alibi_mask") or _sdpa_bool(node, "padding_mask"):
-        raise ValueError("SDPA alibi/padding masks are not supported by the PyTorch reference")
+        raise ValueError(
+            "SDPA alibi/padding masks are not supported by the PyTorch reference"
+        )
     if _sdpa_bool(node, "causal_mask_bottom_right"):
-        raise ValueError("SDPA bottom-right causal mask is not supported by the PyTorch reference")
+        raise ValueError(
+            "SDPA bottom-right causal mask is not supported by the PyTorch reference"
+        )
     diagonal_alignment = _node_param(node, "diagonal_alignment", "TOP_LEFT")
     if diagonal_alignment not in ("TOP_LEFT", 0, None):
         raise ValueError("Only TOP_LEFT SDPA diagonal alignment is supported")
-    if _node_param(node, "left_bound", None) is not None or _node_param(node, "right_bound", None) is not None:
-        raise ValueError("SDPA sliding-window bounds are not supported by the PyTorch reference")
+    if (
+        _node_param(node, "left_bound", None) is not None
+        or _node_param(node, "right_bound", None) is not None
+    ):
+        raise ValueError(
+            "SDPA sliding-window bounds are not supported by the PyTorch reference"
+        )
 
     dropout_probability = _node_param(node, "dropout_probability", 0.0)
     dropout_p = 0.0 if dropout_probability is None else float(dropout_probability)
     if dropout_p != 0.0:
-        raise ValueError("Nonzero SDPA dropout cannot be exactly validated against PyTorch")
+        raise ValueError(
+            "Nonzero SDPA dropout cannot be exactly validated against PyTorch"
+        )
 
     mask_uid = _optional_uid(node, "attn_mask_tensor_uid")
     attn_mask = _tensor(tensors, mask_uid, node) if mask_uid is not None else None
     is_causal = _sdpa_bool(node, "causal_mask")
     if attn_mask is not None and is_causal:
-        raise ValueError("PyTorch SDPA reference does not support both attn_mask and causal_mask")
+        raise ValueError(
+            "PyTorch SDPA reference does not support both attn_mask and causal_mask"
+        )
 
     scale = _sdpa_scale(node, tensors)
     if q.ndim < 3 or k.ndim < 3:
@@ -376,7 +409,9 @@ def _sdpa_common(
     kv_heads = int(k.shape[-3])
     enable_gqa = q_heads != kv_heads
     if enable_gqa and (kv_heads == 0 or q_heads % kv_heads != 0):
-        raise ValueError(f"Unsupported GQA head counts: q_heads={q_heads}, kv_heads={kv_heads}")
+        raise ValueError(
+            f"Unsupported GQA head counts: q_heads={q_heads}, kv_heads={kv_heads}"
+        )
     return attn_mask, dropout_p, is_causal, scale, enable_gqa
 
 
@@ -450,6 +485,34 @@ def _sdpa_stats(
     return torch.logsumexp(scores, dim=-1)
 
 
+def _sdpa_consistency_tolerances(dtype: torch.dtype) -> Tuple[float, float]:
+    if dtype == torch.bfloat16:
+        return 6e-3, 3e-3
+    if dtype == torch.float16:
+        return 1e-3, 1e-3
+    return 1e-5, 1e-6
+
+
+def _assert_sdpa_consistent(
+    actual: torch.Tensor,
+    expected: torch.Tensor,
+    name: str,
+    dtype: torch.dtype,
+) -> None:
+    rtol, atol = _sdpa_consistency_tolerances(dtype)
+    if not torch.allclose(
+        actual.to(dtype=torch.float32),
+        expected.to(dtype=torch.float32),
+        rtol=rtol,
+        atol=atol,
+    ):
+        diff = (actual.to(dtype=torch.float32) - expected.to(dtype=torch.float32)).abs()
+        raise ValueError(
+            f"SDPA backward input '{name}' is inconsistent with q/k/v "
+            f"(max_abs_diff={float(diff.max())}, rtol={rtol}, atol={atol})"
+        )
+
+
 # -----------------------------------------------------------------------------
 # Operation Handlers
 # -----------------------------------------------------------------------------
@@ -466,7 +529,9 @@ def handle_conv_fwd(
     w_uid = _required_input_uid(node, "w_tensor_uid")
     y_uid = _required_output_uid(node, "y_tensor_uid")
 
-    y = _conv2d_forward(node, _tensor(tensors, x_uid, node), _tensor(tensors, w_uid, node))
+    y = _conv2d_forward(
+        node, _tensor(tensors, x_uid, node), _tensor(tensors, w_uid, node)
+    )
     _store_tensor(tensors, y_uid, y)
 
 
@@ -486,7 +551,9 @@ def handle_conv_bwd(
     w = _tensor(tensors, w_uid, node)
     input_size = _tensor_shape(graph_json, dx_uid)
     if input_size is None:
-        raise ValueError(f"ConvolutionBwdAttributes missing dx tensor shape for UID {dx_uid}")
+        raise ValueError(
+            f"ConvolutionBwdAttributes missing dx tensor shape for UID {dx_uid}"
+        )
 
     stride, dilation = _conv_stride_dilation(node)
     pre, post = _conv_padding(node)
@@ -501,7 +568,9 @@ def handle_conv_bwd(
         )
     else:
         with torch.enable_grad():
-            x = torch.zeros(input_size, dtype=dy.dtype, device=dy.device, requires_grad=True)
+            x = torch.zeros(
+                input_size, dtype=dy.dtype, device=dy.device, requires_grad=True
+            )
             y = _conv2d_forward(node, x, w.detach())
             y.backward(dy)
             dx = x.grad.detach()
@@ -524,7 +593,9 @@ def handle_conv_wrw(
     dy = _tensor(tensors, dy_uid, node)
     weight_size = _tensor_shape(graph_json, dw_uid)
     if weight_size is None:
-        raise ValueError(f"ConvolutionWrwAttributes missing dw tensor shape for UID {dw_uid}")
+        raise ValueError(
+            f"ConvolutionWrwAttributes missing dw tensor shape for UID {dw_uid}"
+        )
 
     stride, dilation = _conv_stride_dilation(node)
     pre, _post = _conv_padding(node)
@@ -539,7 +610,9 @@ def handle_conv_wrw(
         )
     else:
         with torch.enable_grad():
-            w = torch.zeros(weight_size, dtype=x.dtype, device=x.device, requires_grad=True)
+            w = torch.zeros(
+                weight_size, dtype=x.dtype, device=x.device, requires_grad=True
+            )
             y = _conv2d_forward(node, x.detach(), w)
             y.backward(dy)
             dw = w.grad.detach()
@@ -650,10 +723,18 @@ def handle_batchnorm_training(
     next_mean_uid = _optional_uid(node, "next_running_mean_tensor_uid")
     next_var_uid = _optional_uid(node, "next_running_variance_tensor_uid")
     momentum_uid = _optional_uid(node, "momentum_tensor_uid")
-    running_present = [prev_mean_uid, prev_var_uid, next_mean_uid, next_var_uid, momentum_uid]
+    running_present = [
+        prev_mean_uid,
+        prev_var_uid,
+        next_mean_uid,
+        next_var_uid,
+        momentum_uid,
+    ]
     if any(uid is not None for uid in running_present):
         if not all(uid is not None for uid in running_present):
-            raise ValueError("Batchnorm running-stat update requires prev mean/var, next mean/var, and momentum")
+            raise ValueError(
+                "Batchnorm running-stat update requires prev mean/var, next mean/var, and momentum"
+            )
         momentum = _scalar_value(tensors, int(momentum_uid), node)
         prev_mean = _channel_values(_tensor(tensors, int(prev_mean_uid), node), x)
         prev_var = _channel_values(_tensor(tensors, int(prev_var_uid), node), x)
@@ -661,7 +742,9 @@ def handle_batchnorm_training(
         if elements_per_channel == 1:
             adjusted_variance = variance
         else:
-            adjusted_variance = variance * (elements_per_channel / (elements_per_channel - 1))
+            adjusted_variance = variance * (
+                elements_per_channel / (elements_per_channel - 1)
+            )
         next_mean = (1.0 - momentum) * prev_mean + momentum * mean
         next_var = (1.0 - momentum) * prev_var + momentum * adjusted_variance
         _store_channel_tensor(tensors, next_mean_uid, next_mean, x.ndim)
@@ -689,7 +772,9 @@ def handle_batchnorm_backward(
     mean_uid = _optional_uid(node, "mean_tensor_uid")
     inv_uid = _optional_uid(node, "inv_variance_tensor_uid")
     if (mean_uid is None) != (inv_uid is None):
-        raise ValueError("Batchnorm backward requires both mean and inv variance, or neither")
+        raise ValueError(
+            "Batchnorm backward requires both mean and inv variance, or neither"
+        )
     if mean_uid is None:
         mean, variance = _bn_mean_var(x)
         inv_variance = torch.rsqrt(variance + 1e-5)
@@ -697,7 +782,9 @@ def handle_batchnorm_backward(
         mean = _channel_values(_tensor(tensors, int(mean_uid), node), x)
         inv_variance = _channel_values(_tensor(tensors, int(inv_uid), node), x)
 
-    x_hat = (x_float - _channel_broadcast(mean, x_float)) * _channel_broadcast(inv_variance, x_float)
+    x_hat = (x_float - _channel_broadcast(mean, x_float)) * _channel_broadcast(
+        inv_variance, x_float
+    )
     reduce_dims = _bn_reduce_dims(x)
     dscale = (x_hat * dy).sum(dim=reduce_dims)
     dbias = dy.sum(dim=reduce_dims)
@@ -705,7 +792,11 @@ def handle_batchnorm_backward(
     mean_dy = dbias / elements_per_channel
     mean_dy_xhat = dscale / elements_per_channel
     dx = (
-        (dy - _channel_broadcast(mean_dy, x_float) - x_hat * _channel_broadcast(mean_dy_xhat, x_float))
+        (
+            dy
+            - _channel_broadcast(mean_dy, x_float)
+            - x_hat * _channel_broadcast(mean_dy_xhat, x_float)
+        )
         * _channel_broadcast(scale * inv_variance, x_float)
     ).to(dtype=x.dtype)
 
@@ -729,7 +820,9 @@ def handle_sdpa(
     q = _tensor(tensors, q_uid, node)
     k = _tensor(tensors, k_uid, node)
     v = _tensor(tensors, v_uid, node)
-    attn_mask, dropout_p, is_causal, scale, enable_gqa = _sdpa_common(node, tensors, q, k)
+    attn_mask, dropout_p, is_causal, scale, enable_gqa = _sdpa_common(
+        node, tensors, q, k
+    )
     o = _call_sdpa(q, k, v, attn_mask, dropout_p, is_causal, scale, enable_gqa)
     _store_tensor(tensors, o_uid, o)
 
@@ -763,9 +856,9 @@ def handle_sdpa_backward(
     q_uid = _required_input_uid(node, "q_tensor_uid")
     k_uid = _required_input_uid(node, "k_tensor_uid")
     v_uid = _required_input_uid(node, "v_tensor_uid")
-    _required_input_uid(node, "o_tensor_uid")
+    o_uid = _required_input_uid(node, "o_tensor_uid")
     do_uid = _required_input_uid(node, "do_tensor_uid")
-    _required_input_uid(node, "stats_tensor_uid")
+    stats_uid = _required_input_uid(node, "stats_tensor_uid")
     dq_uid = _required_output_uid(node, "dq_tensor_uid")
     dk_uid = _required_output_uid(node, "dk_tensor_uid")
     dv_uid = _required_output_uid(node, "dv_tensor_uid")
@@ -773,37 +866,78 @@ def handle_sdpa_backward(
     q_base = _tensor(tensors, q_uid, node)
     k_base = _tensor(tensors, k_uid, node)
     v_base = _tensor(tensors, v_uid, node)
+    o = _tensor(tensors, o_uid, node)
     do = _tensor(tensors, do_uid, node)
-    attn_mask, dropout_p, is_causal, scale, enable_gqa = _sdpa_common(node, tensors, q_base, k_base)
+    stats = _tensor(tensors, stats_uid, node)
+    attn_mask, dropout_p, is_causal, scale, enable_gqa = _sdpa_common(
+        node, tensors, q_base, k_base
+    )
     if dropout_p != 0.0:
-        raise ValueError("Nonzero SDPA dropout cannot be exactly validated against PyTorch")
+        raise ValueError(
+            "Nonzero SDPA dropout cannot be exactly validated against PyTorch"
+        )
 
-    with torch.enable_grad():
-        q = q_base.detach().clone().requires_grad_(True)
-        k = k_base.detach().clone().requires_grad_(True)
-        v = v_base.detach().clone().requires_grad_(True)
-        mask_grad = None
-        if attn_mask is not None:
-            attn_mask_for_grad = attn_mask.detach().clone().requires_grad_(True)
-        else:
-            attn_mask_for_grad = None
-        o = _call_sdpa(q, k, v, attn_mask_for_grad, 0.0, is_causal, scale, enable_gqa)
-        o.backward(do)
-        dq = q.grad.detach()
-        dk = k.grad.detach()
-        dv = v.grad.detach()
-        if attn_mask_for_grad is not None and attn_mask_for_grad.grad is not None:
-            mask_grad = attn_mask_for_grad.grad.detach()
+    q = q_base.to(dtype=torch.float32)
+    k = k_base.to(dtype=torch.float32)
+    v = v_base.to(dtype=torch.float32)
+    if enable_gqa:
+        repeat = q.shape[-3] // k.shape[-3]
+        k_for_attn = k.repeat_interleave(repeat, dim=-3)
+        v_for_attn = v.repeat_interleave(repeat, dim=-3)
+    else:
+        repeat = 1
+        k_for_attn = k
+        v_for_attn = v
 
-    _store_tensor(tensors, dq_uid, dq)
-    _store_tensor(tensors, dk_uid, dk)
-    _store_tensor(tensors, dv_uid, dv)
+    scale_value = (1.0 / sqrt(float(q.shape[-1]))) if scale is None else float(scale)
+    scores = torch.matmul(q, k_for_attn.transpose(-2, -1)) * scale_value
+    if attn_mask is not None:
+        scores = scores + attn_mask.to(dtype=torch.float32)
+    if is_causal:
+        length_q = scores.shape[-2]
+        length_k = scores.shape[-1]
+        causal = torch.ones(
+            length_q,
+            length_k,
+            dtype=torch.bool,
+            device=scores.device,
+        ).tril()
+        scores = scores.masked_fill(~causal, float("-inf"))
+
+    expected_stats = torch.logsumexp(scores, dim=-1)
+    _assert_sdpa_consistent(stats, expected_stats, "stats_tensor_uid", q_base.dtype)
+
+    probs = torch.exp(scores - stats.to(dtype=torch.float32).unsqueeze(-1))
+    expected_o = torch.matmul(probs, v_for_attn)
+    _assert_sdpa_consistent(o, expected_o, "o_tensor_uid", q_base.dtype)
+
+    do_f32 = do.to(dtype=torch.float32)
+    o_f32 = o.to(dtype=torch.float32)
+    d = (do_f32 * o_f32).sum(dim=-1)
+    dp = torch.matmul(do_f32, v_for_attn.transpose(-2, -1))
+    ds = probs * (dp - d.unsqueeze(-1))
+
+    dq = torch.matmul(ds, k_for_attn) * scale_value
+    dk = torch.matmul(ds.transpose(-2, -1), q) * scale_value
+    dv = torch.matmul(probs.transpose(-2, -1), do_f32)
+
+    if enable_gqa:
+        kv_heads = k.shape[-3]
+        prefix = dk.shape[:-3]
+        dk = dk.reshape(*prefix, kv_heads, repeat, dk.shape[-2], dk.shape[-1]).sum(
+            dim=-3
+        )
+        dv = dv.reshape(*prefix, kv_heads, repeat, dv.shape[-2], dv.shape[-1]).sum(
+            dim=-3
+        )
+
+    _store_tensor(tensors, dq_uid, dq.to(dtype=q_base.dtype))
+    _store_tensor(tensors, dk_uid, dk.to(dtype=k_base.dtype))
+    _store_tensor(tensors, dv_uid, dv.to(dtype=v_base.dtype))
 
     dbias_uid = _optional_uid(node, "dbias_tensor_uid")
     if dbias_uid is not None:
-        if mask_grad is None:
-            raise ValueError("SDPA dbias output requires attn_mask input")
-        _store_tensor(tensors, dbias_uid, mask_grad)
+        raise ValueError("SDPA dbias output is not supported by the PyTorch reference")
 
 
 @register_handler("PointwiseAttributes")

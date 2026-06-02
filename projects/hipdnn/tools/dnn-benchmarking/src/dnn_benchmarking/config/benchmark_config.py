@@ -245,8 +245,12 @@ class SuiteConfig:
         benchmark_iters: Number of benchmark iterations for timing.
         seed: Optional random seed for reproducible inputs.
         engine_filter: If set, ordered engine selections to run.
-        rtol: Relative tolerance for correctness comparison.
-        atol: Absolute tolerance for correctness comparison.
+        rtol: Relative tolerance for correctness comparison when automatic
+            dtype-aware tolerances are disabled.
+        atol: Absolute tolerance for correctness comparison when automatic
+            dtype-aware tolerances are disabled.
+        auto_tolerances: If True, validation chooses tolerances from output
+            dtype and operation. Explicit CLI tolerances disable this.
         gpu_backend: GPU timer backend to use.
         reference_provider: Reference provider name for correctness checking.
         verbose: If True, print rich per-engine block per graph instead of summary.
@@ -260,6 +264,7 @@ class SuiteConfig:
     engine_filter: Optional[List[int]] = None
     rtol: float = 1e-5
     atol: float = 1e-8
+    auto_tolerances: bool = True
     gpu_backend: str = "auto"
     reference_provider: str = "none"
     verbose: bool = False

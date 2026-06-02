@@ -17,6 +17,7 @@ import pytest
 from dnn_benchmarking.execution.buffer_manager import (
     BufferManager,
     _bfloat16_bytes_to_ndarray,
+    _bfloat16_storage_bytes_to_ndarray,
     _f32_to_bf16_bytes,
     _generate_bfloat16_bytes,
 )
@@ -245,6 +246,76 @@ class TestFillInputsRandomReproducibility:
         bytes_a = mock_a.copy_from_host.call_args[0][0]
         bytes_b = mock_b.copy_from_host.call_args[0][0]
         assert bytes_a == bytes_b
+
+    def test_bfloat16_host_data_matches_device_bytes(self) -> None:
+        tensor = _make_bf16_input_tensor(uid=8)
+        buffer_manager = BufferManager([tensor])
+        mock_buffer = MagicMock()
+        buffer_manager._buffers[tensor.uid] = mock_buffer
+
+        buffer_manager.fill_inputs_random(seed=101)
+
+        raw = mock_buffer.copy_from_host.call_args[0][0]
+        expected_host = _bfloat16_storage_bytes_to_ndarray(raw, tensor)
+        np.testing.assert_array_equal(
+            buffer_manager.get_input_data(tensor.uid), expected_host
+        )
+
+    def test_sdpa_backward_inputs_are_derived_from_qkv(self) -> None:
+        tensors = [
+            TensorInfo(1, "q", [1, 1, 2, 2], [], "bfloat16", False, False),
+            TensorInfo(2, "k", [1, 1, 2, 2], [], "bfloat16", False, False),
+            TensorInfo(3, "v", [1, 1, 2, 2], [], "bfloat16", False, False),
+            TensorInfo(4, "o", [1, 1, 2, 2], [], "bfloat16", False, False),
+            TensorInfo(5, "do", [1, 1, 2, 2], [], "bfloat16", False, False),
+            TensorInfo(6, "stats", [1, 1, 2], [], "float", False, False),
+            TensorInfo(7, "dq", [1, 1, 2, 2], [], "bfloat16", False, True),
+        ]
+        graph_json = {
+            "nodes": [
+                {
+                    "type": "SdpaBackwardAttributes",
+                    "inputs": {
+                        "q_tensor_uid": 1,
+                        "k_tensor_uid": 2,
+                        "v_tensor_uid": 3,
+                        "o_tensor_uid": 4,
+                        "do_tensor_uid": 5,
+                        "stats_tensor_uid": 6,
+                    },
+                    "outputs": {"dq_tensor_uid": 7},
+                }
+            ]
+        }
+        buffer_manager = BufferManager(tensors, graph_json=graph_json)
+        for tensor in tensors:
+            if not tensor.is_output:
+                buffer_manager._buffers[tensor.uid] = MagicMock()
+
+        buffer_manager.fill_inputs_random(seed=2024)
+
+        q = buffer_manager.get_input_data(1).astype(np.float32)
+        k = buffer_manager.get_input_data(2).astype(np.float32)
+        v = buffer_manager.get_input_data(3).astype(np.float32)
+        scores = np.matmul(q, np.swapaxes(k, -1, -2)) / np.sqrt(float(q.shape[-1]))
+        row_max = np.max(scores, axis=-1, keepdims=True)
+        exp_scores = np.exp(scores - row_max)
+        denom = np.sum(exp_scores, axis=-1, keepdims=True)
+        expected_stats = (
+            np.squeeze(row_max, axis=-1) + np.log(np.squeeze(denom, axis=-1))
+        ).astype(np.float32)
+        expected_output = np.matmul(exp_scores / denom, v)
+
+        np.testing.assert_allclose(buffer_manager.get_input_data(6), expected_stats)
+        raw_o = buffer_manager._buffers[4].copy_from_host.call_args[0][0]
+        np.testing.assert_array_equal(
+            buffer_manager.get_input_data(4),
+            _bfloat16_storage_bytes_to_ndarray(raw_o, tensors[3]),
+        )
+        np.testing.assert_allclose(
+            buffer_manager.get_input_data(4), expected_output, atol=3e-3
+        )
+
 
 class TestStridedTensorStorage:
     """Stride-aware storage footprint and host-copy tests."""

@@ -166,8 +166,8 @@ Used by A/B testing, reference validation, and suite-mode tolerance checks.
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--rtol` | Relative tolerance for output comparison | 1e-5 |
-| `--atol` | Absolute tolerance for output comparison | 1e-8 |
+| `--rtol` | Relative tolerance for output comparison. Overrides dtype-aware defaults when set. | dtype-aware |
+| `--atol` | Absolute tolerance for output comparison. Overrides dtype-aware defaults when set. | dtype-aware |
 
 ## Output
 

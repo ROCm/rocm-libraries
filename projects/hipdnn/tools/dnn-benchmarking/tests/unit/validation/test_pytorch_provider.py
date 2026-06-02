@@ -462,7 +462,10 @@ class TestPyTorchProviderNewOps:
         b = np.arange(20, dtype=np.float32).reshape(1, 4, 5)
         outputs = provider.compute_reference(graph_json, {1: a, 2: b})
 
-        np.testing.assert_allclose(outputs[3].data, torch.matmul(torch.from_numpy(a), torch.from_numpy(b)).numpy())
+        np.testing.assert_allclose(
+            outputs[3].data,
+            torch.matmul(torch.from_numpy(a), torch.from_numpy(b)).numpy(),
+        )
 
     def test_conv_dgrad_and_wgrad(self) -> None:
         provider = ReferenceProviderRegistry.get_provider("pytorch")
@@ -502,8 +505,18 @@ class TestPyTorchProviderNewOps:
         dgrad = provider.compute_reference(dgrad_graph, {1: dy, 2: w})[3].data
         wrw = provider.compute_reference(wrw_graph, {1: dy, 3: x})[4].data
 
-        np.testing.assert_allclose(dgrad, torch.nn.grad.conv2d_input((1, 1, 4, 4), torch.from_numpy(w), torch.from_numpy(dy)).numpy())
-        np.testing.assert_allclose(wrw, torch.nn.grad.conv2d_weight(torch.from_numpy(x), (1, 1, 2, 2), torch.from_numpy(dy)).numpy())
+        np.testing.assert_allclose(
+            dgrad,
+            torch.nn.grad.conv2d_input(
+                (1, 1, 4, 4), torch.from_numpy(w), torch.from_numpy(dy)
+            ).numpy(),
+        )
+        np.testing.assert_allclose(
+            wrw,
+            torch.nn.grad.conv2d_weight(
+                torch.from_numpy(x), (1, 1, 2, 2), torch.from_numpy(dy)
+            ).numpy(),
+        )
 
     def test_batchnorm_training_saved_and_running_stats(self) -> None:
         provider = ReferenceProviderRegistry.get_provider("pytorch")
@@ -592,7 +605,7 @@ class TestPyTorchProviderNewOps:
                 {
                     "type": "SdpaAttributes",
                     "inputs": {"q_tensor_uid": 1, "k_tensor_uid": 2, "v_tensor_uid": 3},
-                    "outputs": {"o_tensor_uid": 4},
+                    "outputs": {"o_tensor_uid": 4, "stats_tensor_uid": 6},
                     "attributes": {"dropout_probability": 0.0},
                 }
             ]
@@ -609,25 +622,110 @@ class TestPyTorchProviderNewOps:
                         "do_tensor_uid": 5,
                         "stats_tensor_uid": 6,
                     },
-                    "outputs": {"dq_tensor_uid": 7, "dk_tensor_uid": 8, "dv_tensor_uid": 9},
+                    "outputs": {
+                        "dq_tensor_uid": 7,
+                        "dk_tensor_uid": 8,
+                        "dv_tensor_uid": 9,
+                    },
                     "parameters": {"dropout_probability": 0.0},
                 }
             ]
         }
 
-        fwd = provider.compute_reference(fwd_graph, {1: q, 2: k, 3: v})[4].data
+        fwd_outputs = provider.compute_reference(fwd_graph, {1: q, 2: k, 3: v})
+        fwd = fwd_outputs[4].data
+        stats = fwd_outputs[6].data
         bwd = provider.compute_reference(
             bwd_graph,
-            {1: q, 2: k, 3: v, 4: fwd, 5: do, 6: np.zeros((1, 1, 2), dtype=np.float32)},
+            {1: q, 2: k, 3: v, 4: fwd, 5: do, 6: stats},
         )
 
         q_t = torch.from_numpy(q).requires_grad_(True)
         k_t = torch.from_numpy(k).requires_grad_(True)
         v_t = torch.from_numpy(v).requires_grad_(True)
-        expected = torch.nn.functional.scaled_dot_product_attention(q_t, k_t, v_t, dropout_p=0.0)
+        expected = torch.nn.functional.scaled_dot_product_attention(
+            q_t, k_t, v_t, dropout_p=0.0
+        )
         expected.backward(torch.from_numpy(do))
 
         np.testing.assert_allclose(fwd, expected.detach().numpy(), rtol=1e-6)
         np.testing.assert_allclose(bwd[7].data, q_t.grad.numpy(), rtol=1e-6)
         np.testing.assert_allclose(bwd[8].data, k_t.grad.numpy(), rtol=1e-6)
         np.testing.assert_allclose(bwd[9].data, v_t.grad.numpy(), rtol=1e-6)
+
+    def test_sdpa_bfloat16_uses_graph_dtype(self) -> None:
+        provider = ReferenceProviderRegistry.get_provider("pytorch")
+        q = np.array([[[[0.10, 0.20], [0.30, 0.40]]]], dtype=np.float32)
+        k = np.array([[[[0.50, 0.60], [0.70, 0.80]]]], dtype=np.float32)
+        v = np.array([[[[0.90, 0.25], [0.125, 0.75]]]], dtype=np.float32)
+        graph_json = {
+            "tensors": [
+                {"uid": 1, "dims": [1, 1, 2, 2], "data_type": "bfloat16"},
+                {"uid": 2, "dims": [1, 1, 2, 2], "data_type": "bfloat16"},
+                {"uid": 3, "dims": [1, 1, 2, 2], "data_type": "bfloat16"},
+                {"uid": 4, "dims": [1, 1, 2, 2], "data_type": "bfloat16"},
+            ],
+            "nodes": [
+                {
+                    "type": "SdpaAttributes",
+                    "inputs": {"q_tensor_uid": 1, "k_tensor_uid": 2, "v_tensor_uid": 3},
+                    "outputs": {"o_tensor_uid": 4},
+                    "attributes": {"dropout_probability": 0.0},
+                }
+            ],
+        }
+
+        outputs = provider.compute_reference(graph_json, {1: q, 2: k, 3: v})
+        expected = torch.nn.functional.scaled_dot_product_attention(
+            torch.from_numpy(q).to(torch.bfloat16),
+            torch.from_numpy(k).to(torch.bfloat16),
+            torch.from_numpy(v).to(torch.bfloat16),
+            dropout_p=0.0,
+        ).to(torch.float32)
+
+        assert outputs[4].data.dtype == np.float32
+        np.testing.assert_array_equal(outputs[4].data, expected.numpy())
+
+    def test_sdpa_backward_rejects_inconsistent_stats(self) -> None:
+        provider = ReferenceProviderRegistry.get_provider("pytorch")
+        q = np.array([[[[1.0, 0.0], [0.0, 1.0]]]], dtype=np.float32)
+        k = q.copy()
+        v = np.array([[[[1.0, 2.0], [3.0, 4.0]]]], dtype=np.float32)
+        do = np.ones_like(v)
+        graph_json = {
+            "nodes": [
+                {
+                    "type": "SdpaBackwardAttributes",
+                    "inputs": {
+                        "q_tensor_uid": 1,
+                        "k_tensor_uid": 2,
+                        "v_tensor_uid": 3,
+                        "o_tensor_uid": 4,
+                        "do_tensor_uid": 5,
+                        "stats_tensor_uid": 6,
+                    },
+                    "outputs": {
+                        "dq_tensor_uid": 7,
+                        "dk_tensor_uid": 8,
+                        "dv_tensor_uid": 9,
+                    },
+                    "parameters": {"dropout_probability": 0.0},
+                }
+            ]
+        }
+        fwd = torch.nn.functional.scaled_dot_product_attention(
+            torch.from_numpy(q), torch.from_numpy(k), torch.from_numpy(v), dropout_p=0.0
+        ).numpy()
+
+        with pytest.raises(ValueError, match="stats_tensor_uid"):
+            provider.compute_reference(
+                graph_json,
+                {
+                    1: q,
+                    2: k,
+                    3: v,
+                    4: fwd,
+                    5: do,
+                    6: np.zeros((1, 1, 2), dtype=np.float32),
+                },
+            )
