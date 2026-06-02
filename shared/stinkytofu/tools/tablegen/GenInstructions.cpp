@@ -73,6 +73,12 @@ struct OperandSpec {
     }
 };
 
+// HWREG name table entry parsed from DEF_HWREG(NAME, ID) lines.
+struct HwRegEntry {
+    std::string name;  // e.g. "HW_REG_WAVE_MODE"
+    int id = 0;        // numeric slot, 0..63
+};
+
 // Architecture metadata (from DEF_ARCH in Formats.def)
 struct ArchDef {
     std::string name;
@@ -85,6 +91,7 @@ struct ArchDef {
     int maxAGPR = 0;
     int defaultCycle = 4;
     int defaultLatency = 4;
+    std::vector<HwRegEntry> hwRegs;
 };
 
 // Operand field description.
@@ -178,6 +185,20 @@ struct InstructionDef {
     std::vector<OperandFieldEntry> finalPromotedFields;  // Promoted encoding fields
     int encodingBits = 32;  // From format .encoding (bits); sizeInBytes = encodingBits/8
 };
+
+//==========================================================================
+// HELPERS
+//==========================================================================
+
+// Return indices into `v` sorted by `key(v[i])`. Lets a generator iterate the
+// input vector in sorted order without mutating it, then emit a sorted table.
+template <typename T, typename KeyFn>
+static std::vector<size_t> sortedIndices(const std::vector<T>& v, KeyFn key) {
+    std::vector<size_t> idx(v.size());
+    for (size_t i = 0; i < v.size(); ++i) idx[i] = i;
+    std::sort(idx.begin(), idx.end(), [&](size_t a, size_t b) { return key(v[a]) < key(v[b]); });
+    return idx;
+}
 
 //==========================================================================
 // PARSER
@@ -422,7 +443,7 @@ class DefTParser {
         size_t defArchPos = content.find("DEF_ARCH(");
         if (defArchPos != std::string::npos) {
             size_t nameStart = defArchPos + 9;
-            size_t nameEnd = content.find(",", nameStart);
+            size_t nameEnd = content.find(',', nameStart);
             if (nameEnd != std::string::npos) {
                 arch_.name = content.substr(nameStart, nameEnd - nameStart);
                 arch_.name.erase(0, arch_.name.find_first_not_of(" \t\n\r"));
@@ -454,12 +475,55 @@ class DefTParser {
             arch_.defaultLatency = 4;
         }
 
+        // Parse DEF_HWREG(NAME, ID) — one HWREG entry per line, terse form.
+        // Lookup table for s_setreg/s_getreg is emitted from these per arch.
+        {
+            size_t hwregPos = 0;
+            while ((hwregPos = content.find("DEF_HWREG(", hwregPos)) != std::string::npos) {
+                size_t argsStart = hwregPos + 10;  // After "DEF_HWREG("
+                size_t argsEnd = content.find(')', argsStart);
+                if (argsEnd == std::string::npos) {
+                    int line = getLineNumber(content, argsStart);
+                    if (!formatFile.empty()) std::cerr << formatFile << ":" << line << ": ";
+                    std::cerr << "Error: DEF_HWREG(...): missing closing ')'.\n";
+                    return false;
+                }
+                std::string args = content.substr(argsStart, argsEnd - argsStart);
+                size_t comma = args.find(',');
+                if (comma == std::string::npos) {
+                    int line = getLineNumber(content, argsStart);
+                    if (!formatFile.empty()) std::cerr << formatFile << ":" << line << ": ";
+                    std::cerr << "Error: DEF_HWREG(NAME, ID): missing ',' between name and id.\n";
+                    return false;
+                }
+                HwRegEntry entry;
+                entry.name = args.substr(0, comma);
+                entry.name.erase(0, entry.name.find_first_not_of(" \t\n\r"));
+                entry.name.erase(entry.name.find_last_not_of(" \t\n\r") + 1);
+                std::string idStr = args.substr(comma + 1);
+                idStr.erase(0, idStr.find_first_not_of(" \t\n\r"));
+                idStr.erase(idStr.find_last_not_of(" \t\n\r") + 1);
+                char* end = nullptr;
+                long parsed = std::strtol(idStr.c_str(), &end, 0);
+                if (idStr.empty() || end != idStr.c_str() + idStr.size()) {
+                    int line = getLineNumber(content, argsStart);
+                    if (!formatFile.empty()) std::cerr << formatFile << ":" << line << ": ";
+                    std::cerr << "Error: DEF_HWREG(" << entry.name << ", " << idStr
+                              << "): id is not a valid integer.\n";
+                    return false;
+                }
+                entry.id = static_cast<int>(parsed);
+                arch_.hwRegs.push_back(std::move(entry));
+                hwregPos = argsEnd + 1;
+            }
+        }
+
         // Parse DEF_FORMAT(...) blocks
         size_t pos = 0;
         while ((pos = content.find("DEF_FORMAT(", pos)) != std::string::npos) {
             size_t nameStart = pos + 11;  // After "DEF_FORMAT("
-            size_t firstComma = content.find(",", nameStart);
-            size_t firstDot = content.find(".", nameStart);
+            size_t firstComma = content.find(',', nameStart);
+            size_t firstDot = content.find('.', nameStart);
             // Comma must appear before any field (.xxx = ...)
             if (firstDot != std::string::npos &&
                 (firstComma == std::string::npos || firstDot < firstComma)) {
@@ -782,7 +846,7 @@ class DefTParser {
         while ((pos = content.find("DEF_T(", pos)) != std::string::npos) {
             int defLine = getLineNumber(content, pos);
             size_t argsStart = pos + 6;  // After "DEF_T("
-            size_t firstComma = content.find(",", argsStart);
+            size_t firstComma = content.find(',', argsStart);
             if (firstComma == std::string::npos) break;
 
             // Parse: DEF_T(InstClass, "mnemonic", ...)
@@ -790,8 +854,8 @@ class DefTParser {
             instClass.erase(0, instClass.find_first_not_of(" \t\n\r"));
             instClass.erase(instClass.find_last_not_of(" \t\n\r") + 1);
 
-            size_t mnemonicStart = content.find("\"", firstComma);
-            size_t mnemonicEnd = content.find("\"", mnemonicStart + 1);
+            size_t mnemonicStart = content.find('"', firstComma);
+            size_t mnemonicEnd = content.find('"', mnemonicStart + 1);
             if (mnemonicStart == std::string::npos || mnemonicEnd == std::string::npos) break;
 
             std::string mnemonic =
@@ -848,7 +912,7 @@ class DefTParser {
         size_t pos = block.find(fieldName);
         if (pos == std::string::npos) return;
 
-        size_t eqPos = block.find("=", pos);
+        size_t eqPos = block.find('=', pos);
         if (eqPos == std::string::npos) return;
 
         size_t valStart = eqPos + 1;
@@ -882,14 +946,14 @@ class DefTParser {
                             std::vector<int>& out) {
         size_t pos = block.find(fieldName);
         if (pos == std::string::npos) return;
-        size_t lbrace = block.find("{", pos);
-        size_t rbrace = block.find("}", lbrace);
+        size_t lbrace = block.find('{', pos);
+        size_t rbrace = block.find('}', lbrace);
         if (lbrace == std::string::npos || rbrace == std::string::npos) return;
         std::string inner = block.substr(lbrace + 1, rbrace - lbrace - 1);
         out.clear();
         size_t start = 0;
         while (start < inner.size()) {
-            size_t end = inner.find(",", start);
+            size_t end = inner.find(',', start);
             if (end == std::string::npos) end = inner.size();
             std::string num = inner.substr(start, end - start);
             num.erase(0, num.find_first_not_of(" \t\n\r"));
@@ -905,12 +969,12 @@ class DefTParser {
         size_t pos = block.find(fieldName);
         if (pos == std::string::npos) return;
 
-        size_t lbrace = block.find("{", pos);
-        size_t rbrace = block.find("}", lbrace);
+        size_t lbrace = block.find('{', pos);
+        size_t rbrace = block.find('}', lbrace);
         if (lbrace == std::string::npos || rbrace == std::string::npos) return;
 
         std::string costStr = block.substr(lbrace + 1, rbrace - lbrace - 1);
-        size_t comma = costStr.find(",");
+        size_t comma = costStr.find(',');
         if (comma != std::string::npos) {
             cycle = std::stoi(costStr.substr(0, comma));
             latency = std::stoi(costStr.substr(comma + 1));
@@ -935,16 +999,16 @@ class DefTParser {
     void parseFieldCostOverrides(const std::string& block, std::vector<CostOverrideEntry>& out) {
         size_t pos = block.find(".costOverrides");
         if (pos == std::string::npos) return;
-        size_t eqPos = block.find("=", pos);
+        size_t eqPos = block.find('=', pos);
         if (eqPos == std::string::npos) return;
-        size_t lbrace = block.find("{", eqPos);
+        size_t lbrace = block.find('{', eqPos);
         if (lbrace == std::string::npos) return;
         size_t rbrace = findMatchingBrace(block, lbrace);
         if (rbrace == std::string::npos) return;
         std::string content = block.substr(lbrace + 1, rbrace - lbrace - 1);
         size_t entryStart = 0;
         while (entryStart < content.size()) {
-            size_t entryL = content.find("{", entryStart);
+            size_t entryL = content.find('{', entryStart);
             if (entryL == std::string::npos) break;
             size_t entryR = findMatchingBrace(content, entryL);
             if (entryR == std::string::npos) break;
@@ -957,7 +1021,7 @@ class DefTParser {
             }
             std::string modPart = entry.substr(0, sep + 1);  // include ')'
             std::string costPart = entry.substr(sep + 2);
-            size_t lparen = modPart.find("(");
+            size_t lparen = modPart.find('(');
             if (lparen == std::string::npos) {
                 entryStart = entryR + 1;
                 continue;
@@ -974,7 +1038,7 @@ class DefTParser {
             std::string argsStr = modPart.substr(lparen + 1, rparen - lparen - 1);
             size_t as = 0;
             while (as < argsStr.size()) {
-                size_t ac = argsStr.find(",", as);
+                size_t ac = argsStr.find(',', as);
                 if (ac == std::string::npos) ac = argsStr.size();
                 std::string arg = argsStr.substr(as, ac - as);
                 arg.erase(0, arg.find_first_not_of(" \t\n\r"));
@@ -983,7 +1047,7 @@ class DefTParser {
                 as = ac + 1;
             }
             costPart.erase(0, costPart.find_first_not_of(" \t\n\r"));
-            size_t cc = costPart.find(",");
+            size_t cc = costPart.find(',');
             if (cc != std::string::npos) {
                 e.cycle = std::stoi(costPart.substr(0, cc));
                 e.latency = std::stoi(costPart.substr(cc + 1));
@@ -999,8 +1063,8 @@ class DefTParser {
         size_t pos = block.find(fieldName);
         if (pos == std::string::npos) return;
 
-        size_t lbrace = block.find("{", pos);
-        size_t rbrace = block.find("}", lbrace);
+        size_t lbrace = block.find('{', pos);
+        size_t rbrace = block.find('}', lbrace);
         if (lbrace == std::string::npos || rbrace == std::string::npos) return;
 
         std::string flagsStr = block.substr(lbrace + 1, rbrace - lbrace - 1);
@@ -1008,7 +1072,7 @@ class DefTParser {
         // Split by comma
         size_t start = 0;
         while (start < flagsStr.size()) {
-            size_t end = flagsStr.find(",", start);
+            size_t end = flagsStr.find(',', start);
             if (end == std::string::npos) end = flagsStr.size();
 
             std::string flag = flagsStr.substr(start, end - start);
@@ -1026,7 +1090,7 @@ class DefTParser {
         size_t pos = block.find(".logical");
         if (pos == std::string::npos) return;
 
-        size_t eqPos = block.find("=", pos);
+        size_t eqPos = block.find('=', pos);
         if (eqPos == std::string::npos) return;
 
         size_t valStart = eqPos + 1;
@@ -1035,12 +1099,12 @@ class DefTParser {
 
         if (block[valStart] == '{') {
             // .logical = {"X", "Y"}
-            size_t rbrace = block.find("}", valStart);
+            size_t rbrace = block.find('}', valStart);
             if (rbrace == std::string::npos) return;
             std::string inner = block.substr(valStart + 1, rbrace - valStart - 1);
             size_t start = 0;
             while (start < inner.size()) {
-                size_t end = inner.find(",", start);
+                size_t end = inner.find(',', start);
                 if (end == std::string::npos) end = inner.size();
                 std::string s = inner.substr(start, end - start);
                 s.erase(0, s.find_first_not_of(" \t\n\r\""));
@@ -1095,18 +1159,18 @@ class DefTParser {
             break;
         }
 
-        size_t eqPos = block.find("=", pos);
+        size_t eqPos = block.find('=', pos);
         if (eqPos == std::string::npos) return;
-        size_t outerStart = block.find("{", eqPos);
+        size_t outerStart = block.find('{', eqPos);
         if (outerStart == std::string::npos) return;
         size_t outerEnd = findMatchingBrace(block, outerStart);
         if (outerEnd == std::string::npos) return;
 
         size_t i = outerStart + 1;
         while (i < outerEnd) {
-            size_t innerStart = block.find("{", i);
+            size_t innerStart = block.find('{', i);
             if (innerStart == std::string::npos || innerStart >= outerEnd) break;
-            size_t innerEnd = block.find("}", innerStart);
+            size_t innerEnd = block.find('}', innerStart);
             if (innerEnd == std::string::npos || innerEnd >= outerEnd) break;
 
             std::string entry = block.substr(innerStart + 1, innerEnd - innerStart - 1);
@@ -1445,6 +1509,83 @@ class InstructionCodeGen {
         }
 
         out << "\n// Total generated instructions: " << instructions_.size() << "\n";
+        return true;
+    }
+
+    // Emit two per-arch sorted (name, id) tables and the two binary-search lookup
+    // functions that consume them. HwReg.cpp dispatches on arch to nameToId<Arch>
+    // / idToName<Arch>.
+    //
+    //   kHwregByName_<Arch>[]   — sorted by name; backs nameToId<Arch>
+    //   kHwregById_<Arch>[]     — sorted by id;   backs idToName<Arch>
+    //   nameToId<Arch>(name, out) — std::lower_bound + equality check
+    //   idToName<Arch>(id)        — std::lower_bound + equality check
+    //
+    // Each table is guarded by a static_assert(is_sorted) so any future drift fails to compile.
+    bool generateHwregTable(const std::string& outputPath) {
+        std::ofstream out(outputPath);
+        if (!out) {
+            std::cerr << "Error: Cannot write " << outputPath << "\n";
+            return false;
+        }
+        emitHeader(out, "HWREG Name Tables");
+        out << "// HWREG (name, id) rows + per-arch lookup functions for "
+               "s_setreg / s_getreg.\n"
+            << "// Included inside HwReg.cpp at namespace stinkytofu::HwReg scope.\n\n";
+
+        auto emitTable = [&](const std::string& suffix, const std::vector<size_t>& idx,
+                             const std::string& sortKey) {
+            const std::string symbol = "kHwreg" + suffix + "_" + arch_;
+            out << "static constexpr ::stinkytofu::HwReg::NamedId " << symbol << "[] = {\n";
+            for (size_t k : idx) {
+                const auto& e = archDef_.hwRegs[k];
+                out << "    {\"" << e.name << "\", static_cast<::stinkytofu::HwReg::Id>(" << e.id
+                    << ")},\n";
+            }
+            out << "};\n";
+            out << "static_assert(std::is_sorted(std::begin(" << symbol << "), std::end(" << symbol
+                << "),\n"
+                << "    [](const ::stinkytofu::HwReg::NamedId& a,\n"
+                << "       const ::stinkytofu::HwReg::NamedId& b) {\n"
+                << "        return " << sortKey << ";\n"
+                << "    }),\n"
+                << "    \"" << symbol << " must be sorted by " << suffix << "\");\n\n";
+        };
+
+        auto byName = sortedIndices(archDef_.hwRegs, [](const HwRegEntry& e) { return e.name; });
+        emitTable("ByName", byName, "a.name < b.name");
+
+        auto byId = sortedIndices(archDef_.hwRegs, [](const HwRegEntry& e) { return e.id; });
+        emitTable("ById", byId, "static_cast<uint16_t>(a.id) < static_cast<uint16_t>(b.id)");
+
+        // nameToId<Arch>: binary-search the by-name table.
+        out << "inline bool nameToId" << arch_
+            << "(std::string_view name, ::stinkytofu::HwReg::Id& out) {\n"
+            << "    const auto* end = std::end(kHwregByName_" << arch_ << ");\n"
+            << "    const auto* it = std::lower_bound(\n"
+            << "        std::begin(kHwregByName_" << arch_ << "), end, name,\n"
+            << "        [](const ::stinkytofu::HwReg::NamedId& e, std::string_view target) {\n"
+            << "            return e.name < target;\n"
+            << "        });\n"
+            << "    if (it != end && it->name == name) {\n"
+            << "        out = it->id;\n"
+            << "        return true;\n"
+            << "    }\n"
+            << "    return false;\n"
+            << "}\n\n";
+
+        // idToName<Arch>: binary-search the by-id table.
+        out << "inline std::string_view idToName" << arch_ << "(uint16_t id) {\n"
+            << "    const auto* end = std::end(kHwregById_" << arch_ << ");\n"
+            << "    const auto* it = std::lower_bound(\n"
+            << "        std::begin(kHwregById_" << arch_ << "), end, id,\n"
+            << "        [](const ::stinkytofu::HwReg::NamedId& e, uint16_t target) {\n"
+            << "            return static_cast<uint16_t>(e.id) < target;\n"
+            << "        });\n"
+            << "    if (it != end && static_cast<uint16_t>(it->id) == id) return it->name;\n"
+            << "    return {};\n"
+            << "}\n\n";
+
         return true;
     }
 
@@ -1857,6 +1998,7 @@ static std::string normalizeArch(const std::string& arch) {
     return s;
 }
 
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 bool genInstructions(const std::string& arch, const std::string& inputDir,
                      const std::string& outputDir) {
     std::string normArch = normalizeArch(arch);
@@ -1890,6 +2032,7 @@ bool genInstructions(const std::string& arch, const std::string& inputDir,
     success &= codegen.generateCostTable(outputBase + "_costs.inc");
     success &= codegen.generateOperandRequirements(outputBase + "_operands.inc");
     success &= codegen.generateInitFile(outputBase + "_init.inc");
+    success &= codegen.generateHwregTable(outputBase + "_hwreg.inc");
 
     if (success) {
         std::cout << "Successfully generated instruction metadata for " << normArch << "\n";
@@ -1901,13 +2044,16 @@ bool genInstructions(const std::string& arch, const std::string& inputDir,
 // Generate for all archs from .def and emit ISA .inc (so full tablegen does not need gfxisa for
 // ISA). Single run: *.def -> costs, init, operands, *Isa.inc, gfxIsa.inc, GfxXXX.hpp, *_block.inc,
 // GfxArchDefines.cpp -> one build.
+// NOLINTNEXTLINE(misc-use-internal-linkage)
 bool genAllInstructions(const std::string& inputDir, const std::string& outputDir) {
     const std::vector<std::string> archs = {"Gfx1250"};
 
     std::map<std::string, std::vector<InstructionDef>> archInstructions;
     std::map<std::string, ArchDef> archDefs;
     for (const std::string& arch : archs) {
+        // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
         std::string formatFile = inputDir + "/" + arch + "/" + arch + "Formats.def";
+        // NOLINTNEXTLINE(performance-inefficient-string-concatenation)
         std::string instFile = inputDir + "/" + arch + "/" + arch + "Instructions.def";
         DefTParser parser(arch);
         if (!parser.parseFormats(formatFile)) {
@@ -1961,6 +2107,7 @@ bool genAllInstructions(const std::string& inputDir, const std::string& outputDi
         success &=
             codegen.generateOperandRequirements((genDir / (arch + "_operands.inc")).string());
         success &= codegen.generateInitFile((genDir / (arch + "_init.inc")).string());
+        success &= codegen.generateHwregTable((genDir / (arch + "_hwreg.inc")).string());
         success &=
             emitArchIsaFile(arch, insts, unifiedOpcodeMap, (hwDir / (arch + "Isa.inc")).string());
         success &= emitArchHeader(ad, (archHdrDir / (arch + ".hpp")).string());

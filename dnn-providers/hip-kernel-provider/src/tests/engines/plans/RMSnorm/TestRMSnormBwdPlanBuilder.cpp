@@ -28,6 +28,35 @@ protected:
     RMSnormBwdPlanBuilder _planBuilder{_mockKernelCompiler, _mockDevicePropertyProvider};
     HipKernelHandle _dummyHandle;
     MockEngineConfig _mockEngineConfig;
+
+    void setupMockCompileChain()
+    {
+        hipDeviceProp_t deviceProps = {};
+        deviceProps.multiProcessorCount = 60;
+        deviceProps.warpSize = 64;
+        std::snprintf(deviceProps.gcnArchName, sizeof(deviceProps.gcnArchName), "%s", "gfx942");
+
+        EXPECT_CALL(_mockDevicePropertyProvider, getDeviceProperties())
+            .WillOnce(::testing::Return(deviceProps));
+
+        // First mock kernel for BwdData
+        auto mockKernel1 = std::make_unique<MockRunnableKernel>();
+        EXPECT_CALL(*mockKernel1, setBlockSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
+        EXPECT_CALL(*mockKernel1, setGridSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
+
+        // Second mock kernel for BwdWeightBias
+        auto mockKernel2 = std::make_unique<MockRunnableKernel>();
+        EXPECT_CALL(*mockKernel2, setBlockSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
+        EXPECT_CALL(*mockKernel2, setGridSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
+
+        auto mockProgram = std::make_unique<MockCompiledProgram>();
+        EXPECT_CALL(*mockProgram, getKernel(::testing::_))
+            .WillOnce(::testing::Return(::testing::ByMove(std::move(mockKernel1))))
+            .WillOnce(::testing::Return(::testing::ByMove(std::move(mockKernel2))));
+
+        EXPECT_CALL(_mockKernelCompiler, compile(::testing::_, ::testing::_))
+            .WillOnce(::testing::Return(::testing::ByMove(std::move(mockProgram))));
+    }
 };
 
 // ============================================================================
@@ -86,16 +115,15 @@ TEST_F(TestRMSnormBwdPlanBuilder, IsNotApplicableForNonF32ComputeType)
 
 TEST_F(TestRMSnormBwdPlanBuilder, BuildPlanSetsPlanForSingleNodeGraph)
 {
+    setupMockCompileChain();
+
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     HipKernelContext ctx;
 
-    EXPECT_CALL(_mockDevicePropertyProvider, getDeviceProperties())
-        .WillOnce(::testing::Return(hipDeviceProp_t{}));
-
-    EXPECT_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx),
-                 hipdnn_plugin_sdk::HipdnnPluginException);
+    EXPECT_NO_THROW(_planBuilder.buildPlan(_dummyHandle, graph, _mockEngineConfig, ctx));
+    EXPECT_TRUE(ctx.hasValidPlan());
 }
 
 // ============================================================================

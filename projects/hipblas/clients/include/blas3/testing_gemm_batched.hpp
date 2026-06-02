@@ -295,7 +295,7 @@ void testing_gemm_batched_bad_arg(const Arguments& arg)
                         ldc,
                         batch_count));
 
-            // If K == 0, alpha, A, and B can be nullptr
+            // If K == 0, A, and B can be nullptr
             DAPI_CHECK(hipblasGemmBatchedFn,
                        (handle,
                         transA,
@@ -303,7 +303,7 @@ void testing_gemm_batched_bad_arg(const Arguments& arg)
                         M,
                         N,
                         0,
-                        nullptr,
+                        alpha,
                         nullptr,
                         lda,
                         nullptr,

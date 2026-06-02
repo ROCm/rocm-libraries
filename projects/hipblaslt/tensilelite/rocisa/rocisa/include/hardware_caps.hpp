@@ -219,6 +219,16 @@ inline std::map<std::string, int>
                                         "v_wmma_f32_16x16x128_f8f6f4 v[0:7], v[16:31], v[16:31], v[0:7]",
                                         isDebug);
 
+    // InitCIterWmma replaces the v_mov initC with a WMMA using src C = immediate 0
+    rv["HasWMMA_AccImmZero"] = tryAssembler(isaVersion,
+                                            assemblerPath,
+                                            "v_wmma_f32_16x16x32_bf16 v[0:7], v[8:15], v[8:15], 0",
+                                            isDebug)
+                                && tryAssembler(isaVersion,
+                                                assemblerPath,
+                                                "v_wmma_f32_16x16x4_f32 v[0:7], v[8:9], v[8:9], 0",
+                                                isDebug);
+
     rv["HasAdd_PC_i64"] = false;
 
     rv["HasSWMMAC"] = tryAssembler(isaVersion, 
@@ -412,6 +422,7 @@ inline std::map<std::string, int>
                        isDebug);
 
     rv["HasNewBarrier"] = tryAssembler(isaVersion, assemblerPath, "s_barrier_wait -1", isDebug);
+    rv["HasClusterBarrier"] = tryAssembler(isaVersion, assemblerPath, "s_barrier_wait -3", isDebug);
     rv["HasTDM"] = tryAssembler(isaVersion, assemblerPath, "tensor_load_to_lds s[0:3], s[4:11]", isDebug);
 
     rv["s_delay_alu"]
@@ -464,6 +475,16 @@ inline std::map<std::string, int>
         rv["MaxLgkmcnt"] = getMaxCnt(isaVersion, assemblerPath, "s_waitcnt lgkmcnt(", ")", isDebug);
     }
 
+    // s_wait_xcnt drains XNACK-replay tracking before a subsequent volatile/atomic
+    // VMEM op. Probed independently because not every arch with separate vmem
+    // counters supports xcnt (e.g. it is gfx1250+). The immediate accepts 16 bits
+    // but hardware only consumes the lowest 6 bits, matching loadcnt/storecnt.
+    rv["HasXcnt"] = tryAssembler(isaVersion, assemblerPath, "s_wait_xcnt 0", isDebug);
+    if(rv["HasXcnt"])
+    {
+        rv["MaxXcnt"] = 63;
+    }
+
     rv["SupportedSource"] = true;
 
     return rv;
@@ -485,7 +506,7 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     rv["DeviceLDS"]          = deviceLDS;
     rv["CMPXWritesSGPR"]     = checkNotInList(isaVersion[0], {10, 11, 12});
     rv["HasWave32"]          = checkInList(isaVersion[0], {10, 11, 12});
-    rv["HasSchedMode"]       = checkInList(isaVersion[0], {}); //TODO: https://github.com/ROCm/rocm-libraries/issues/3211
+    rv["HasSchedMode"]       = checkInList(isaVersion[0], {12});
     rv["HasAccCD"]           = checkInList(isaVersion, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
     rv["ArchAccUnifiedRegs"] = checkInList(isaVersion, {{9, 0, 10}, {9, 4, 2}, {9, 5, 0}});
     rv["CrosslaneWait"]      = checkInList(isaVersion, {{9, 4, 2}, {9, 5, 0}});

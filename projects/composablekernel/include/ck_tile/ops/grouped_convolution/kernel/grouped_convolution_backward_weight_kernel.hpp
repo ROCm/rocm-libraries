@@ -370,7 +370,7 @@ struct GroupedConvBwdWeightKernelArgs
 
     void* workspace_ptr = nullptr;
 
-    // StreamK tile partitioner — stored directly when TilePartitioner_ is a real type,
+    // StreamK tile partitioner - stored directly when TilePartitioner_ is a real type,
     // empty struct when void (Split-K path). Constructed with dummy values here;
     // properly initialized in MakeKernelArgs before device-side use.
     struct EmptyPartitioner
@@ -447,7 +447,21 @@ struct GroupedConvolutionBackwardWeightKernel
     using GemmDsLayout                  = remove_cvref_t<typename EpiloguePipeline::DsLayout>;
     static constexpr index_t NumDTensor = GroupedConvTraitsType_::NumDTensor;
 
-    static constexpr index_t kBlockSize = GemmPipeline::BlockSize;
+    // For wavelet, LaunchBlockSize > BlockSize. Use LaunchBlockSize for kernel launch.
+    template <typename T, typename = void>
+    struct has_launch_block_size : std::false_type
+    {
+    };
+    template <typename T>
+    struct has_launch_block_size<T, std::void_t<decltype(T::LaunchBlockSize)>> : std::true_type
+    {
+    };
+    static constexpr index_t kBlockSize = []() {
+        if constexpr(has_launch_block_size<GemmPipeline>::value)
+            return GemmPipeline::LaunchBlockSize;
+        else
+            return GemmPipeline::BlockSize;
+    }();
 
     using OutDataType = remove_cvref_t<typename GemmPipeline::ADataType>;
     using InDataType  = remove_cvref_t<typename GemmPipeline::BDataType>;
@@ -651,7 +665,7 @@ struct GroupedConvolutionBackwardWeightKernel
                 return false;
             }
         }
-        // Runtime arch check — complements the static_assert in operator().
+        // Runtime arch check - complements the static_assert in operator().
         // Both are needed: this check runs on the host (where get_compiler_target()
         // isn't available since HIP's host pass doesn't define __gfx*__ macros),
         // while the static_assert in operator() catches misuse at device compile time.
@@ -995,6 +1009,22 @@ struct GroupedConvolutionBackwardWeightKernel
             {block_idx_k, block_idx_m});
     }
 
+    // SFINAE helper: detect GemmPipeline::IsWavelet
+    template <typename T, typename = void>
+    struct has_is_wavelet : std::false_type
+    {
+    };
+    template <typename T>
+    struct has_is_wavelet<T, std::void_t<decltype(T::IsWavelet)>> : std::true_type
+    {
+    };
+    static constexpr bool kIsWavelet = []() {
+        if constexpr(has_is_wavelet<GemmPipeline>::value)
+            return GemmPipeline::IsWavelet;
+        else
+            return false;
+    }();
+
     /**
      * @brief Runs single GEMM problem cooperatively by whole workgroup.
      *
@@ -1027,23 +1057,55 @@ struct GroupedConvolutionBackwardWeightKernel
         const auto& c_block_tile = GemmPipeline{}.template operator()(
             a_block_window, b_block_window, num_loop, smem_ptr_0);
 
-        // Run Epilogue Pipeline with k_batch dispatching
-        if(kargs.k_batch == 1)
+        if constexpr(kIsWavelet)
         {
-            auto c_block_window = MakeCBlockWindow<memory_operation_enum::set>(
-                c_ptr, kargs, block_idx_m, block_idx_n);
-
-            EpiloguePipeline{}(c_block_window, c_block_tile, d_block_window, smem_ptr_0);
+            // Wavelet: math waves run the epilogue, load waves run matching barriers
+            if(GemmPipeline::IsMathWave())
+            {
+                if(kargs.k_batch == 1)
+                {
+                    auto c_block_window = MakeCBlockWindow<memory_operation_enum::set>(
+                        c_ptr, kargs, block_idx_m, block_idx_n);
+                    EpiloguePipeline{}(c_block_window, c_block_tile, d_block_window, smem_ptr_0);
+                }
+                else
+                {
+                    if constexpr(!(GroupedConvTraitsType_::VectorSizeC % 2 != 0 &&
+                                   is_any_of<WeiDataType, fp16_t, bf16_t>::value))
+                    {
+                        auto c_block_window = MakeCBlockWindow<memory_operation_enum::atomic_add>(
+                            c_ptr, kargs, block_idx_m, block_idx_n);
+                        EpiloguePipeline{}(
+                            c_block_window, c_block_tile, d_block_window, smem_ptr_0);
+                    }
+                }
+            }
+            else
+            {
+                // Load waves: match epilogue barrier count to avoid deadlock
+                EpiloguePipeline::RunBarrierStub();
+            }
         }
         else
         {
-            if constexpr(!(GroupedConvTraitsType_::VectorSizeC % 2 != 0 &&
-                           is_any_of<WeiDataType, fp16_t, bf16_t>::value))
+            // Standard (non-wavelet) path
+            if(kargs.k_batch == 1)
             {
-                auto c_block_window = MakeCBlockWindow<memory_operation_enum::atomic_add>(
+                auto c_block_window = MakeCBlockWindow<memory_operation_enum::set>(
                     c_ptr, kargs, block_idx_m, block_idx_n);
 
                 EpiloguePipeline{}(c_block_window, c_block_tile, d_block_window, smem_ptr_0);
+            }
+            else
+            {
+                if constexpr(!(GroupedConvTraitsType_::VectorSizeC % 2 != 0 &&
+                               is_any_of<WeiDataType, fp16_t, bf16_t>::value))
+                {
+                    auto c_block_window = MakeCBlockWindow<memory_operation_enum::atomic_add>(
+                        c_ptr, kargs, block_idx_m, block_idx_n);
+
+                    EpiloguePipeline{}(c_block_window, c_block_tile, d_block_window, smem_ptr_0);
+                }
             }
         }
     }
@@ -1075,7 +1137,7 @@ struct GroupedConvolutionBackwardWeightKernel
 
     CK_TILE_DEVICE void RunStreamK(GroupedConvBwdWeightKernelArgsSpecialized& kargs) const
     {
-        // Device-side compile-time arch check — complements the runtime check in
+        // Device-side compile-time arch check - complements the runtime check in
         // IsSupportedArgument(). Both are needed: the runtime check runs on the host
         // (where get_compiler_target() isn't available since HIP's host pass doesn't
         // define __gfx*__ macros), while this catches misuse at device compile time.
@@ -1086,6 +1148,9 @@ struct GroupedConvolutionBackwardWeightKernel
             "Currently supported: gfx90a, gfx942, gfx950.");
 
         __shared__ char smem_ptr[GetSmemSize()];
+
+        // Group offset (blockIdx.y = group batch index)
+        const auto blockIdX       = amd_wave_read_first_lane(blockIdx.x);
         const index_t dp_num_loop = kargs.tile_partitioner.get_iters_per_tile();
 
         StreamKDispatch(
@@ -1128,7 +1193,8 @@ struct GroupedConvolutionBackwardWeightKernel
                                static_cast<const InDataType*>(kargs.in_ptr),
                                static_cast<WeiDataType*>(kargs.wei_ptr),
                                smem_ptr);
-            });
+            },
+            blockIdX);
     }
 
     /// @brief Stream-K loop: iterate over assigned K-iterations, run GEMM pipeline,
@@ -1258,7 +1324,7 @@ struct GroupedConvolutionBackwardWeightKernel
                         amd_wave_read_first_lane(partner_start_iter < tile_iter_end);
 
                     // If the partner of the tile-starter is not in this tile,
-                    // then all partials are accumulated — write final result.
+                    // then all partials are accumulated - write final result.
                     if(tile_started && !partner_in_tile)
                     {
                         auto c_block_window_out =

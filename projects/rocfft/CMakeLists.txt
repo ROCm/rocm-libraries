@@ -87,7 +87,7 @@ endif()
 # Using standardized versioning from rocm-cmake
 set ( ROCFFT_VERSION_MAJOR "1" )
 set ( ROCFFT_VERSION_MINOR "0" )
-set ( ROCFFT_VERSION_PATCH "37" )
+set ( ROCFFT_VERSION_PATCH "38" )
 set ( VERSION_STRING "${ROCFFT_VERSION_MAJOR}.${ROCFFT_VERSION_MINOR}.${ROCFFT_VERSION_PATCH}" )
 rocm_setup_version( VERSION ${VERSION_STRING} )
 
@@ -141,7 +141,9 @@ set(DEFAULT_GPUS
   gfx1152
   gfx1153
   gfx1200
-  gfx1201)
+  gfx1201
+  gfx1250
+)
 
 if(BUILD_ADDRESS_SANITIZER)
   add_compile_options(-fsanitize=address)
