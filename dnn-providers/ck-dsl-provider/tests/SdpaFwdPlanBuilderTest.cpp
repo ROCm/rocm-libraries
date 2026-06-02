@@ -121,8 +121,12 @@ TEST_F(SdpaFwdPlanBuilderHost, IsApplicableFalseForConvGraph) {
     EXPECT_FALSE(builder().isApplicable(*_handle, graph));
 }
 
-TEST_F(SdpaFwdPlanBuilderHost, IsApplicableFalseForBf16Sdpa) {
-    // BSHD strides so the only disqualifier is the dtype.
+TEST_F(SdpaFwdPlanBuilderHost, IsApplicableFalseForNonCausalSdpa) {
+    // The unified paged kernel applies causal masking unconditionally, so a
+    // non-causal graph (the default: causalMask=false) is declined by the
+    // capability gate. BSHD strides + the now-accepted bf16 dtype isolate
+    // the missing causal mask as the sole disqualifier (bf16 alone is
+    // accepted -- see SdpaAdapterTest AcceptsBf16Dtype).
     const auto qkvoStrides = bshdStrides(/*H=*/8, /*S=*/16, /*D=*/64);
     auto fbBuilder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
         /*qDims=*/{2, 8, 16, 64}, /*qStrides=*/qkvoStrides,
