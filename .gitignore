@@ -3,6 +3,10 @@ __pycache__
 # Build directories
 _build/
 build/
+build-superbuild/
+
+# Python venvs (ck-dsl-provider embedded-interp / benchmarking)
+.venv/
 
 # User-specific CMake presets
 CMakeUserPresets.json
