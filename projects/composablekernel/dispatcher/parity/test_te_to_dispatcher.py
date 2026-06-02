@@ -472,5 +472,139 @@ class TestVerificationModel:
         )
 
 
+# ── Python identifier oracle unit tests (T1.2) ──────────────────────────────
+
+class TestIdentifierPython:
+    """encode_identifier() must produce the same byte-for-byte string as the C++ oracle.
+
+    These tests use known config dicts and the expected identifier string derived
+    from the C++ encode_identifier() rule documented in identifier.py's docstring.
+    They do NOT require g++ or a GPU — pure Python, always runnable.
+    """
+
+    def _make_cfg(
+        self,
+        dtype="fp16", layout="rcr",
+        pipeline="compv3", epilogue="default", scheduler="intrawave",
+        pad_m=False, pad_n=False, pad_k=False, persistent=False,
+        tile_m=256, tile_n=128, tile_k=32,
+        warp_m=4, warp_n=1, warp_k=1,
+        warp_tile_m=32, warp_tile_n=32, warp_tile_k=16,
+        split_k=1, elementwise_op="", num_d_tensors=0,
+        structured_sparsity=False, preshuffle=False,
+    ):
+        return {
+            "signature": {
+                "dtype_a": dtype,
+                "layout_a": layout[0], "layout_b": layout[1], "layout_c": layout[2],
+                "split_k": split_k,
+                "elementwise_op": elementwise_op,
+                "num_d_tensors": num_d_tensors,
+                "structured_sparsity": structured_sparsity,
+            },
+            "algorithm": {
+                "pipeline": pipeline, "epilogue": epilogue, "scheduler": scheduler,
+                "pad_m": pad_m, "pad_n": pad_n, "pad_k": pad_k, "persistent": persistent,
+                "tile_m": tile_m, "tile_n": tile_n, "tile_k": tile_k,
+                "warp_m": warp_m, "warp_n": warp_n, "warp_k": warp_k,
+                "warp_tile_m": warp_tile_m, "warp_tile_n": warp_tile_n, "warp_tile_k": warp_tile_k,
+                "preshuffle": preshuffle,
+            },
+        }
+
+    def test_vanilla_fp16_rcr(self):
+        from identifier import encode_identifier
+        cfg = self._make_cfg()
+        ident = encode_identifier(cfg)
+        expected = (
+            "fp16_rcr_compv3_default_intrawave_"
+            "False_False_False_False_"
+            "256x128x32_4x1x1_32x32x16"
+        )
+        assert ident == expected, f"Got: {ident!r}"
+
+    def test_padding_enabled_identifier(self):
+        from identifier import encode_identifier
+        cfg = self._make_cfg(pad_m=True, pad_n=True, pad_k=True)
+        ident = encode_identifier(cfg)
+        assert "True_True_True_False_" in ident, f"Padding flags wrong: {ident!r}"
+
+    def test_split_k_suffix(self):
+        from identifier import encode_identifier
+        cfg = self._make_cfg(split_k=4)
+        ident = encode_identifier(cfg)
+        assert ident.endswith("_splitk4"), f"Expected _splitk4 suffix: {ident!r}"
+
+    def test_split_k_1_no_suffix(self):
+        from identifier import encode_identifier
+        cfg = self._make_cfg(split_k=1)
+        ident = encode_identifier(cfg)
+        assert "_splitk" not in ident, f"split_k=1 must not add suffix: {ident!r}"
+
+    def test_preshuffle_suffix(self):
+        from identifier import encode_identifier
+        cfg = self._make_cfg(preshuffle=True)
+        ident = encode_identifier(cfg)
+        assert ident.endswith("_preshuffle"), f"Expected _preshuffle suffix: {ident!r}"
+
+    def test_preshuffle_false_no_suffix(self):
+        from identifier import encode_identifier
+        cfg = self._make_cfg(preshuffle=False)
+        ident = encode_identifier(cfg)
+        assert "_preshuffle" not in ident, f"preshuffle=False must not add suffix: {ident!r}"
+
+    def test_passthrough_elementwise_op_skipped(self):
+        from identifier import encode_identifier
+        cfg = self._make_cfg(elementwise_op="PassThrough")
+        ident_pt = encode_identifier(cfg)
+        cfg2 = self._make_cfg(elementwise_op="")
+        ident_empty = encode_identifier(cfg2)
+        assert ident_pt == ident_empty, "PassThrough must not add suffix to identifier"
+
+    def test_nonpassthrough_op_appended(self):
+        from identifier import encode_identifier
+        cfg = self._make_cfg(elementwise_op="Relu")
+        ident = encode_identifier(cfg)
+        assert ident.endswith("_Relu"), f"Custom op must appear in identifier: {ident!r}"
+
+    def test_scheduler_auto_used_as_is(self):
+        """Canonical scheduler 'auto' must appear verbatim (no further mapping)."""
+        from identifier import encode_identifier
+        cfg = self._make_cfg(scheduler="auto")
+        ident = encode_identifier(cfg)
+        assert "_auto_" in ident, f"Scheduler 'auto' must appear in identifier: {ident!r}"
+
+    def test_bf16_dtype(self):
+        from identifier import encode_identifier
+        cfg = self._make_cfg(dtype="bf16")
+        ident = encode_identifier(cfg)
+        assert ident.startswith("bf16_"), f"bf16 dtype prefix wrong: {ident!r}"
+
+    def test_persistent_flag(self):
+        from identifier import encode_identifier
+        cfg = self._make_cfg(persistent=True)
+        ident = encode_identifier(cfg)
+        # persistent is the 4th bool after pad_m/n/k
+        assert "_False_False_False_True_" in ident, \
+            f"persistent=True must appear as True: {ident!r}"
+
+    def test_identifier_field_order(self):
+        """Full field order: dtype_layout_pipeline_epilogue_scheduler_padM_N_K_persist_tile."""
+        from identifier import encode_identifier
+        cfg = self._make_cfg()
+        ident = encode_identifier(cfg)
+        parts = ident.split("_")
+        # dtype, layout_abc, pipeline, epilogue, scheduler, padM, padN, padK, persist, tile...
+        assert parts[0] == "fp16"
+        assert parts[1] == "rcr"
+        assert parts[2] == "compv3"
+        assert parts[3] == "default"
+        assert parts[4] == "intrawave"
+        assert parts[5] == "False"   # pad_m
+        assert parts[6] == "False"   # pad_n
+        assert parts[7] == "False"   # pad_k
+        assert parts[8] == "False"   # persistent
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))
