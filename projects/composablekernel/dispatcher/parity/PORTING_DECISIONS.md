@@ -1,6 +1,6 @@
 # Porting Decisions — Tile Engine → Dispatcher GEMM
 
-*Branch: `muozturk/dispatcher-te-parity` · Updated: 2026-06-02*
+*Branch: `muozturk/dispatcher-te-parity` · Updated: 2026-06-02 (iteration 4)*
 
 This document captures every non-trivial decision made during the Phase 1 + Phase 2 port.
 It is the reference for "why does this config not exist on the dispatcher side?" or
@@ -116,7 +116,7 @@ are used in `check_parity.py` Stage 3 for the formal 2% gate.
 | **Incremental resume via done-key set** | Full sweeps take O(hours); crash-safety requires not redoing finished rows |
 | **Per-combination try/except in sweep_runner.py** | Some (kernel, problem) pairs will fail; the runner must log and continue, not abort the whole sweep |
 | **Markdown + HTML output for compare_report.py** | Markdown is human-readable in PRs and CI logs; HTML for richer rendering; same content produced by one flag |
-| **T2.2 (C API binding) deferred** | Requires build system changes (many kernel headers into one .so) and new C API design; out of scope for Phase 1 completion PR |
+| **T2.2 C API implemented** | `dispatcher_capi.h` (interface), `dispatcher_capi.cpp` (KernelEntry registry + all 7 extern "C" functions), `dispatcher_binding.py` (Python ctypes `DispatcherLib`). Build: `hipcc -fPIC -shared -o libdispatcher_gemm.so dispatcher_capi.cpp -I<ck_include> -include register_all_kernels.hpp`. |
 
 ---
 
@@ -125,7 +125,7 @@ are used in `check_parity.py` Stage 3 for the formal 2% gate.
 | # | Issue | Priority |
 |---|---|---|
 | 1 | `double_buffer=True` for `preshufflev2` in translator vs `False` in `unified_gemm_codegen.py` line 831 | Medium — affects `KernelKey::operator==` but not `encode_identifier()` |
-| 2 | T2.2: multi-kernel Python binding (C API + `.so` + ctypes wrapper) | High — blocks T2.3–T2.7 runtime execution |
+| 2 | ~~T2.2: multi-kernel Python binding (C API + `.so` + ctypes wrapper)~~ | **DONE** 2026-06-02 — `dispatcher_capi.h`, `dispatcher_capi.cpp`, `dispatcher_binding.py` added |
 | 3 | ~~GPU execution on gfx942 node to get T1.5–T1.7 PASSED status~~ | **DONE** 2026-06-02 — all sizes PASSED on gfx942 (MI300X) |
 | 4 | Generalize harness strides beyond `rcr` | Low — all current configs use `rcr`; needs parametric stride builder |
 | 5 | Add `split_k > 255` range check to `cpp_identifier_oracle.cpp` | Low — `TranslationError` prevents the bad value from reaching the oracle |
