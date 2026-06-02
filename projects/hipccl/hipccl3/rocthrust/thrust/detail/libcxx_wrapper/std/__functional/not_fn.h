@@ -133,7 +133,7 @@ template <typename Fn,
           bool cccl_true                                                                    = true,
           ::std::enable_if_t<::std::is_constructible_v<decay_t<Fn>, Fn> && cccl_true, int>  = 0,
           ::std::enable_if_t<::std::is_move_constructible_v<decay_t<Fn>> && cccl_true, int> = 0>
-THRUST_NODISCARD inline THRUST_HOST_DEVICE constexpr auto not_fn(Fn&& f)
+[[nodiscard]] inline THRUST_HOST_DEVICE constexpr auto not_fn(Fn&& f)
 {
   return not_fn_t<decay_t<Fn>>(::std::forward<Fn>(f));
 }
