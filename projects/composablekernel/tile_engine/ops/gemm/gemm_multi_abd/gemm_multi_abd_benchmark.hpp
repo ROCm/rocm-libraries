@@ -24,11 +24,10 @@
 
 // Data types and Layouts are defined by the generated kernel headers
 // No hardcoded type definitions here to avoid conflicts
-struct GemmMultiABDProblem
+struct GemmMultiABDProblem : GemmProblem
 {
-
-    int split_k_;
-    int m_, n_, k_;
+    // GemmProblem provides: split_k_, m_, n_, k_
+    // stride_a_, stride_b_, stride_c_ are unused (multi-tensor ops use vectors below)
     std::vector<int> stride_as_;
     std::vector<int> stride_bs_;
     std::vector<int> stride_ds_;
@@ -36,7 +35,7 @@ struct GemmMultiABDProblem
     std::vector<std::string> dtype_as_;
     std::vector<std::string> dtype_bs_;
     std::vector<std::string> dtype_ds_;
-    std::string dtype_acc_, dtype_e_;
+    std::string dtype_e_;
     std::vector<std::string> layout_as_;
     std::vector<std::string> layout_bs_;
     std::vector<std::string> layout_ds_;
