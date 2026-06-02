@@ -77,22 +77,25 @@ python drive_codegen.py configs/single_fp16_rcr.json --index 0
 # 3. Build the single-kernel harness against that header (hipcc).
 ./build_harness.sh        # auto-picks the lone generated gemm_*.hpp
 
-# 4. Full orchestration. On this box stages 2-3 SKIP; on a GPU node they run.
+# 4. Full orchestration — single config. On this box stages 2-3 SKIP; on a GPU node they run.
 python check_parity.py configs/single_fp16_rcr.json                 # CPU: stage 1 only
 python check_parity.py configs/single_fp16_rcr.json --dry-run       # print full plan
+
+# 5. Multiple configs in one invocation (T1.6: padding config + 257^3 size).
+python check_parity.py configs/single_fp16_rcr.json configs/padding_fp16_rcr.json
 ```
 
 ### On a GPU node
 
 ```bash
-# Dispatcher-only numerical + performance:
-python check_parity.py configs/single_fp16_rcr.json \
-    --sizes 512x512x512,1024x1024x1024,2048x2048x2048 --arch gfx942
+# T1.6: standard + padding config, with the non-tile-aligned 257^3 size included.
+python check_parity.py configs/single_fp16_rcr.json configs/padding_fp16_rcr.json \
+    --sizes 1024x1024x1024,257x257x257 --arch gfx942
 
-# Dispatcher vs Tile Engine (numerical first, then performance within tolerance):
-python check_parity.py configs/single_fp16_rcr.json \
-    --te-build-dir /path/to/tile_engine/build \
-    --perf-tol 0.10
+# T1.7: Dispatcher vs Tile Engine — numerical first, then performance within 2% tolerance.
+# Runs 10 harness invocations per size; compares medians.
+python check_parity.py configs/single_fp16_rcr.json configs/padding_fp16_rcr.json \
+    --te-build-dir /path/to/tile_engine/build
 ```
 
 `--te-build-dir` is searched recursively for `benchmark_gemm_universal_<name>`.
@@ -106,12 +109,12 @@ the performance baseline.
   every translated config ⇒ the offline registry key equals the runtime key, so
   dispatch lookups cannot silently miss.
 * **Numerical**: the dispatcher harness `PASSED` against its CPU fp32 reference
-  (tol `1e-2·√K`); with `--te-build-dir`, the TE benchmark must also verify for
-  the same `MxNxK`. Either tool emitting `SKIPPED`/unsupported is a skip, not a
-  failure. Numerical is adjudicated **before** performance.
+  (abs_tol `1e-3·√K`, rel_tol `1e-2`); with `--te-build-dir`, the TE benchmark
+  must also verify for the same `MxNxK`. Either tool emitting `SKIPPED`/unsupported
+  is a skip, not a failure. Numerical is adjudicated **before** performance.
 * **Performance**: `|disp_TFLOPs − te_TFLOPs| / te_TFLOPs ≤ --perf-tol`
-  (default 10%). The dispatcher harness reports GFLOP/s; the orchestrator
-  converts to TFLOP/s to match TE's units.
+  (default 2%). Medians over 10 runs per size. The dispatcher harness reports
+  GFLOP/s; the orchestrator converts to TFLOP/s to match TE's units.
 
 ## Files
 
@@ -125,7 +128,10 @@ the performance baseline.
 | `harness.cpp` | (d) | single-kernel runner via `CK_TILE_SINGLE_KERNEL_INCLUDE` |
 | `build_harness.sh` | (d) | hipcc build of the harness against a generated header |
 | `check_parity.py` | (e)(f) | the 3-stage orchestrator above |
-| `configs/single_fp16_rcr.json` | — | example single fp16 rcr config |
+| `configs/single_fp16_rcr.json` | — | single fp16 rcr config (no padding, T1.1–T1.7 baseline) |
+| `configs/padding_fp16_rcr.json` | — | fp16 rcr config with pad_m/n/k=true (T1.6 padding code path) |
+| `configs/single_fp16_rcr_pad.json` | — | alias for padding_fp16_rcr.json (legacy name) |
+| `configs/multi_fp16_rcr_handful.json` | — | 192-combination config for T1.2 round-trip coverage |
 | `make_docs.py` | — | regenerates the two PDFs below (reportlab) |
 | `parity_design.pdf` | — | design walkthrough: every file and how it serves parity |
 | `parity_usage.pdf` | — | basic-usage guide |

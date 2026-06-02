@@ -358,10 +358,10 @@ def _fail(summary: Dict[str, str], **stages: str) -> int:
 # --------------------------------------------------------------------------- #
 # Main orchestration.
 # --------------------------------------------------------------------------- #
-def run(args: argparse.Namespace) -> int:
-    configs = translate_file(args.config)
+def run(args: argparse.Namespace, config_path: Path) -> int:
+    configs = translate_file(config_path)
     if not configs:
-        print(f"error: no valid dispatcher configs from {args.config}", file=sys.stderr)
+        print(f"error: no valid dispatcher configs from {config_path}", file=sys.stderr)
         return 1
     if not (0 <= args.index < len(configs)):
         print(f"error: index {args.index} out of range (0..{len(configs)-1})",
@@ -372,7 +372,7 @@ def run(args: argparse.Namespace) -> int:
     identifier = encode_identifier(cfg)
     sizes = parse_sizes(args.sizes)
 
-    print(f"config file : {args.config}")
+    print(f"config file : {config_path}")
     print(f"config #    : {args.index} of {len(configs)}")
     print(f"identifier  : {identifier}")
     print(f"kernel name : {te_kernel_name(cfg)}")
@@ -386,7 +386,7 @@ def run(args: argparse.Namespace) -> int:
     summary: Dict[str, str] = {}
 
     # ---- Stage 1: identifier (always) ------------------------------------- #
-    id_ok = stage_identifier(args.config, args.dry_run)
+    id_ok = stage_identifier(config_path, args.dry_run)
     summary["identifier"] = "PASS" if id_ok else "FAIL"
     if not id_ok and not args.dry_run:
         return _fail(summary)
@@ -411,7 +411,7 @@ def run(args: argparse.Namespace) -> int:
     print(_SEP)
     print("STAGE 2/3  numerical parity  (codegen -> build harness -> verify)")
     print(_SEP)
-    cg_ok, _ = drive_codegen(args.config, args.index, args.output_dir,
+    cg_ok, _ = drive_codegen(config_path, args.index, args.output_dir,
                              args.kernel_set, args.dry_run)
     if not cg_ok:
         return _fail(summary,
@@ -590,14 +590,18 @@ def main() -> int:
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    ap.add_argument("config", type=Path, help="Tile Engine config JSON")
+    ap.add_argument("configs", type=Path, nargs="+",
+                    help="One or more Tile Engine config JSON files. "
+                         "Stages 1–3 are run for each file in order; the overall "
+                         "exit code is 0 only if all files pass.")
     ap.add_argument("--index", type=int, default=0,
-                    help="Which translated config to check (default 0)")
+                    help="Which translated config to check per file (default 0)")
     ap.add_argument("--sizes",
-                    default="512x512x512,1024x1024x1024,2048x2048x2048,513x511x33",
+                    default="512x512x512,1024x1024x1024,2048x2048x2048,257x257x257,513x511x33",
                     help="Comma-separated MxNxK problem sizes. "
-                         "513x511x33 is intentionally non-tile-aligned to exercise "
-                         "the padding code path (pad_m/n/k=True configs).")
+                         "257x257x257 is from the T1.6 spec (non-power-of-two, exercises "
+                         "padding on tile boundaries). 513x511x33 is additionally "
+                         "non-tile-aligned to stress pad_m/n/k=True configs.")
     ap.add_argument("--arch", default="gfx942", help="GPU arch for harness build")
     ap.add_argument("--output-dir", type=Path, default=_HERE / "generated",
                     help="Codegen output directory")
@@ -617,7 +621,12 @@ def main() -> int:
     args = ap.parse_args()
 
     try:
-        return run(args)
+        overall_rc = 0
+        for config_path in args.configs:
+            rc = run(args, config_path)
+            if rc != 0:
+                overall_rc = rc
+        return overall_rc
     except (TranslationError, ValueError, OSError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1

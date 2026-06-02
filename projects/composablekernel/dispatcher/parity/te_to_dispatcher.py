@@ -30,12 +30,13 @@ CLI:
 from __future__ import annotations
 
 import argparse
+import csv
 import itertools
 import json
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 # --------------------------------------------------------------------------- #
 # Canonical mappings (mirror codegen_common.CommonTypeMappings + kernel_key.hpp)
@@ -175,12 +176,33 @@ def translate_file(path: str | Path) -> List[Dict[str, Any]]:
     return translate(data)
 
 
+def translate_with_rejections(
+    data: Dict[str, Any],
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, str]]]:
+    """Like translate(), but also returns a list of rejected combination reasons.
+
+    Returns:
+        (valid_configs, rejections) where each rejection is a dict with keys
+        {combo, reason} suitable for writing to a CSV rejection manifest.
+    """
+    return _translate_impl(data, collect_rejections=True)
+
+
 def translate(data: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Translate a parsed TE config dict into dispatcher config dicts.
 
     Returns one dict per valid (tile x trait) combination. Invalid combinations
     (tile divisibility / unsupported traits) are dropped, matching codegen.
     """
+    configs, _ = _translate_impl(data, collect_rejections=False)
+    return configs
+
+
+def _translate_impl(
+    data: Dict[str, Any],
+    collect_rejections: bool,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, str]]]:
+    """Shared implementation for translate() and translate_with_rejections()."""
     datatype = data.get("datatype", "fp16")
     if isinstance(datatype, dict):
         # tile_engine sometimes nests dtype as {"a","b","c","acc"}; take A.
@@ -231,11 +253,23 @@ def translate(data: Dict[str, Any]) -> List[Dict[str, Any]]:
     )
 
     configs: List[Dict[str, Any]] = []
+    rejections: List[Dict[str, str]] = []
+
     for tile in tiles:
         if not tile.is_valid():
+            if collect_rejections:
+                rejections.append({
+                    "combo": str(tile),
+                    "reason": "invalid_tile_divisibility",
+                })
             continue
         for (pipeline, epilogue, scheduler, pad_m, pad_n, pad_k, persistent) in trait_combos:
             if (pipeline, epilogue, scheduler) in _UNSUPPORTED_TRAITS:
+                if collect_rejections:
+                    rejections.append({
+                        "combo": f"{tile}+{pipeline}_{epilogue}_{scheduler}",
+                        "reason": f"unsupported_trait_combo:{pipeline}_{epilogue}_{scheduler}",
+                    })
                 continue
             configs.append(
                 _build_config(
@@ -256,7 +290,7 @@ def translate(data: Dict[str, Any]) -> List[Dict[str, Any]]:
                     split_k=split_k,
                 )
             )
-    return configs
+    return configs, rejections
 
 
 def _build_config(
@@ -355,10 +389,22 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("config", type=Path, help="Tile Engine config JSON")
     ap.add_argument("--json", action="store_true", help="Dump full config objects as JSON")
+    ap.add_argument(
+        "--output-dir", type=Path, default=None,
+        help="Write one JSON per valid config into this directory (Phase 2 foundation). "
+             "Each file is named <identifier>.json.",
+    )
+    ap.add_argument(
+        "--rejection-csv", type=Path, default=None,
+        help="Write a CSV manifest of rejected (invalid/unsupported) combinations to this path. "
+             "Columns: combo, reason. Enables auditing what was dropped and why.",
+    )
     args = ap.parse_args()
 
     try:
-        configs = translate_file(args.config)
+        with open(args.config) as f:
+            data = json.load(f)
+        configs, rejections = translate_with_rejections(data)
     except (TranslationError, OSError, json.JSONDecodeError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
@@ -367,13 +413,30 @@ def main() -> int:
         print(json.dumps(configs, indent=2))
         return 0
 
-    print(f"{len(configs)} dispatcher config(s) from {args.config}:")
     # Lazy import: identifier.py depends on te_to_dispatcher indirectly, so we
     # defer it to main() to keep translate() dependency-free.
     from identifier import encode_identifier  # noqa: PLC0415
 
+    print(f"{len(configs)} dispatcher config(s) from {args.config} "
+          f"({len(rejections)} rejected):")
     for cfg in configs:
         print(f"  {encode_identifier(cfg)}")
+
+    if args.output_dir:
+        args.output_dir.mkdir(parents=True, exist_ok=True)
+        for cfg in configs:
+            ident = encode_identifier(cfg)
+            out = args.output_dir / f"{ident}.json"
+            out.write_text(json.dumps(cfg, indent=2))
+        print(f"\nWrote {len(configs)} config JSON files to {args.output_dir}")
+
+    if args.rejection_csv:
+        with open(args.rejection_csv, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=["combo", "reason"])
+            writer.writeheader()
+            writer.writerows(rejections)
+        print(f"Wrote {len(rejections)} rejection(s) to {args.rejection_csv}")
+
     return 0
 
 
