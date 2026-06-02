@@ -46,7 +46,7 @@ import enum as _stdenum
 from typing import Any, Iterable, Mapping, Type
 
 
-def make_dummy_class(full_name: str) -> Type[Any]:
+def make_dummy_class(full_name: str, *, base: Type[Any] = object) -> Type[Any]:
     """Create a dummy class whose ``__init__`` prints ``full_name``.
 
     Calls such as ``BufferLoadB128(dst=...)`` will print
@@ -54,20 +54,48 @@ def make_dummy_class(full_name: str) -> Type[Any]:
     Arbitrary attribute access on the instance returns another dummy
     callable so that chained method calls (e.g. ``.add(...)``) never
     raise AttributeError during the structural-only phase.
+
+    ``base`` lets the dummy participate in the real class hierarchy
+    (rocisa C++ has every IR-tree node inheriting from ``Item``). When
+    set, ``isinstance(dummy_instance, base)`` returns ``True`` -- so
+    e.g. ``Module.findIndexByType(Item)`` would also match dummy
+    Label / ValueSet / Macro nodes that are still pending real
+    implementations. The dummy ``__init__`` calls ``super().__init__()``
+    with no args, so ``base`` must have an ``__init__`` whose required
+    parameters are all defaultable; ``Item`` qualifies because
+    ``Item.__init__(self, name="")`` defaults name.
+
+    Methods defined on ``base`` (``toString`` / ``prettyPrint`` /
+    ``countType`` / ``countExactType`` / capability proxies) take
+    precedence over the dummy ``__getattr__`` no-op, so a dummy Label
+    will inherit the real Item behaviour for those methods rather
+    than silently returning ``None``.
     """
 
     short = full_name.rsplit(".", 1)[-1]
 
-    class _DummyMeta(type):
+    # The custom metaclass must be a subclass of ``base``'s metaclass so
+    # Python's "child metaclass derives from all parent metaclasses"
+    # rule is satisfied. ``type(base)`` covers both ``type`` (the
+    # default for regular classes like ``Item``) and any custom
+    # metaclass downstream might introduce.
+    _BaseMeta = type(base)
+
+    class _DummyMeta(_BaseMeta):
         def __getattr__(cls, name: str) -> Any:
             def _classlevel_noop(*args: Any, **kwargs: Any) -> None:
                 return 1
             return _classlevel_noop
 
-    class _DummyInstance(metaclass=_DummyMeta):
+    class _DummyInstance(base, metaclass=_DummyMeta):  # type: ignore[misc]
         __slots__ = ("_full_name",)
 
         def __init__(self, *args: Any, **kwargs: Any) -> None:
+            # Initialise the ``base`` portion (e.g. Item.name / parent)
+            # so downstream code that touches inherited slots through
+            # ``base``'s methods (Item.prettyPrint reads self.name)
+            # doesn't AttributeError on uninitialised slots.
+            super().__init__()
             object.__setattr__(self, "_full_name", full_name)
             print(full_name)
 

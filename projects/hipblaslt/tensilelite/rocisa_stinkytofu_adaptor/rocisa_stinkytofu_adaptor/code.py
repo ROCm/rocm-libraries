@@ -84,7 +84,7 @@ import copy as _copy
 from typing import Any, Iterable, List, Optional, Sequence
 
 from ._dummy import make_dummy_class
-from .base import outputNoComment as _outputNoComment
+from .base import Item, outputNoComment as _outputNoComment
 
 _P = "rocisa.code"
 
@@ -99,11 +99,13 @@ _P = "rocisa.code"
 #   - ``toString()`` returns ``text`` unless ``outputNoComment`` is set
 #   - ``__getstate__`` / ``__setstate__`` round-trip ``(name, text)``
 #   - ``prettyPrint`` inherits ``Item::prettyPrint`` -- ``indent + className
-#     + " " + toString()`` with NO trailing newline
+#     + " " + toString()`` with NO trailing newline (we now actually
+#     inherit it via the Python ``Item`` base class rather than re-
+#     declaring it -- matches the C++ inheritance shape one-for-one)
 # We mirror every one of these points so an adapter swap is byte-identical
 # at both the asm-emit layer (``Module.toString``) and the debug-dump layer
 # (``Module.prettyPrint``).
-class TextBlock:
+class TextBlock(Item):
     """Raw text leaf; mirror of ``rocisa::TextBlock`` (code.hpp:133-160).
 
     Created internally by ``Module.addSpaceLine`` / ``Module.addComment*``
@@ -117,9 +119,16 @@ class TextBlock:
     suppressor, not just for ``// foo`` comments; inline-asm TextBlocks
     are also stripped). We read the flag through ``base.outputNoComment()``
     so the adapter stays decoupled from the rocisa C++ singleton.
+
+    Inheritance: subclass of ``Item`` -- ``name`` / ``parent`` come from
+    the Item base (its ``__slots__`` provides them; redeclaring them
+    here would TypeError). ``__str__`` / ``prettyPrint`` are inherited
+    too (Item's defaults match TextBlock's required format byte-for-
+    byte: ``"{indent}TextBlock {toString()}"`` via
+    ``type(self).__name__``).
     """
 
-    __slots__ = ("name", "text", "parent")
+    __slots__ = ("text",)
 
     def __init__(self, text: str = ""):
         # rocisa C++: ``TextBlock(text) : Item(text), text(text)`` -- the
@@ -127,15 +136,8 @@ class TextBlock:
         # ``Module.findNamedItem`` / ``removeItemsByName`` see identical
         # behaviour on both backends. (Default text="" still gives name="",
         # so the common addComment / addSpaceLine path is unchanged.)
-        self.name: str = text
+        super().__init__(name=text)
         self.text: str = text
-        self.parent: Optional["Module"] = None
-
-    def __str__(self) -> str:
-        # rocisa binds ``__str__`` directly to ``toString`` (code.cpp:142);
-        # keep the same indirection here so any future toString gating
-        # automatically propagates to ``str(tb)``.
-        return self.toString()
 
     def toString(self) -> str:
         # rocisa code.hpp:154-159 -- the ``outputNoComment`` flag blanket-
@@ -146,19 +148,13 @@ class TextBlock:
             return ""
         return self.text
 
-    def prettyPrint(self, indent: str = "") -> str:
-        # Inherits ``Item::prettyPrint`` (base.hpp:287-293):
-        #   ``indent + className + " " + toString()`` -- NO trailing \n.
-        # Calling ``toString()`` (not ``self.text``) ensures the dump
-        # respects ``outputNoComment`` the same way the emitted asm does.
-        return f"{indent}TextBlock {self.toString()}"
-
     def __deepcopy__(self, memo):
         # rocisa binding lambda (code.cpp:143-148) copies via the public
         # ctor and then patches ``name`` separately. Since our ctor already
         # sets ``name = text``, replicate the same patch path so callers
         # that mutate ``name`` post-construction (rare but legal) survive
-        # the clone.
+        # the clone. ``__new__`` skips ``__init__`` so we set the Item-
+        # inherited slots (name / parent) explicitly here.
         tb = TextBlock.__new__(TextBlock)
         tb.name = self.name
         tb.text = self.text
@@ -174,6 +170,8 @@ class TextBlock:
         # rocisa code.cpp:151-154 -- rebuild via ``TextBlock(text)`` (which
         # sets name=text), then patch ``name`` from the stored value. The
         # two-step matters when a TextBlock was renamed after construction.
+        # ``name`` / ``parent`` are Item-inherited slots; they exist on
+        # the unpickled instance even though ``__init__`` wasn't called.
         name, text = state
         self.name = name
         self.text = text
@@ -233,7 +231,7 @@ def _block_3line(comment: str) -> str:
 # we do not type-check on ``Item`` so the dummy instruction shims still
 # work during the bring-up phase. The only hard requirement at lowering
 # time is that logical-IR leaves expose ``to_stinky_logical()`` (Step 3).
-class Module:
+class Module(Item):
     """Tree-shaped IR container mirroring ``rocisa::Module``.
 
     The container is identity-based for ``replaceItem`` / ``removeItem``
@@ -241,17 +239,20 @@ class Module:
     Children with a ``.parent`` attribute are reparented to this Module
     on insertion so KernelWriter's tree-walks ascend correctly.
 
-    Item-inherited read-only properties NOT exposed here (intentional):
-        ``asmCaps`` / ``archCaps`` / ``regCaps`` / ``asmBugs`` / ``vgprIdx``
-        / ``vgprMsb`` / ``kernel`` (the seven ``def_prop_ro`` entries on
-        ``rocisa::Item`` -- see ``rocisa/src/base.cpp:202-212``). These
-        proxy through the rocisa C++ singleton in the upstream binding.
-        KernelWriter only reads them off Instruction subclasses (where
-        they ARE wired up in ``instruction.py``); a workspace-wide grep
-        for ``\\.asmCaps`` / ``\\.kernel`` on Module instances comes back
-        empty, so we deliberately keep this surface narrow rather than
-        reach back into the C++ singleton. Add a property here the day
-        KernelWriter actually hits one of them on a Module.
+    Item inheritance: ``Module(Item)`` -- ``name`` / ``parent`` come
+    from Item's ``__slots__``; the seven capability proxies
+    (``getAsmCaps`` / ``getArchCaps`` / ``getRegCaps`` / ``getAsmBugs``
+    / ``getVgprIdx`` / ``getVgprMsb`` / ``kernel``) are inherited as
+    methods that forward to module-level ``base.py`` accessors.
+
+    Property vs method note: rocisa C++ binds these as ``def_prop_ro``
+    (so ``module.asmCaps`` works in C++/Python); the Python adapter
+    exposes them as methods (``module.getAsmCaps()``). KernelWriter
+    never reads them off Module instances today (workspace-wide grep
+    for ``\\.asmCaps`` / ``\\.kernel`` on Module comes back empty -- it
+    only does so on Instruction subclasses), so this method-vs-property
+    asymmetry is invisible in practice. Promote to ``@property`` here
+    only if KernelWriter ever starts reading them off a Module.
 
     Pickling: ``__reduce__`` raises ``RuntimeError("Module is not
     picklable")``, matching rocisa code.cpp -- ``ParallelMap2`` workers
@@ -266,12 +267,11 @@ class Module:
     See module-level docstring for the architectural picture.
     """
 
-    __slots__ = ("name", "itemList", "parent", "tempVgpr", "_isNoOpt")
+    __slots__ = ("itemList", "tempVgpr", "_isNoOpt")
 
     def __init__(self, name: str = ""):
-        self.name: str = name
+        super().__init__(name=name)
         self.itemList: List[Any] = []
-        self.parent: Optional["Module"] = None
         self.tempVgpr: Any = None
         self._isNoOpt: bool = False
 
@@ -327,6 +327,52 @@ class Module:
             if isinstance(it, Module):
                 n += it.count()
             else:
+                n += 1
+        return n
+
+    def countType(self, type_obj: type) -> int:
+        """Recursive ``isinstance`` count -- mirror of
+        ``rocisa::Module::countType`` (code.hpp:441-449).
+
+        Sums ``isinstance(self, type_obj)`` (this Module) plus the
+        ``countType`` of every child. Non-Item children that happen to
+        live in ``itemList`` (raw dummies during bring-up) fall back
+        to a manual ``isinstance`` check so they still contribute.
+        """
+        n = 1 if isinstance(self, type_obj) else 0
+        for it in self.itemList:
+            inner_count = getattr(it, "countType", None)
+            if callable(inner_count):
+                res = inner_count(type_obj)
+                if isinstance(res, int):
+                    n += res
+                    continue
+            # Fallback for items that don't expose countType (e.g. raw
+            # Python objects KernelWriter might stash). Still respects
+            # isinstance so type checks against ``object`` work.
+            if isinstance(it, type_obj):
+                n += 1
+        return n
+
+    def countExactType(self, type_obj: type) -> int:
+        """Recursive ``type(...) is`` count -- mirror of
+        ``rocisa::Module::countExactType`` (code.hpp:451-459).
+
+        Uses identity comparison (``type(self) is type_obj``) rather
+        than ``isinstance`` so subclasses do NOT count -- a
+        ``StructuredModule`` is not counted as a ``Module`` here even
+        though it inherits from it. Matches ``typeid(*this) ==
+        targetType`` in C++.
+        """
+        n = 1 if type(self) is type_obj else 0
+        for it in self.itemList:
+            inner_count = getattr(it, "countExactType", None)
+            if callable(inner_count):
+                res = inner_count(type_obj)
+                if isinstance(res, int):
+                    n += res
+                    continue
+            if type(it) is type_obj:
                 n += 1
         return n
 
@@ -588,18 +634,47 @@ class Module:
             pass
 
 
-Label = make_dummy_class(f"{_P}.Label")
-Macro = make_dummy_class(f"{_P}.Macro")
-StructuredModule = make_dummy_class(f"{_P}.StructuredModule")
-ValueEndif = make_dummy_class(f"{_P}.ValueEndif")
-ValueIf = make_dummy_class(f"{_P}.ValueIf")
-ValueElseIf = make_dummy_class(f"{_P}.ValueElseIf")
-ValueSet = make_dummy_class(f"{_P}.ValueSet")
-RegSet = make_dummy_class(f"{_P}.RegSet")
+# ---------------------------------------------------------------------------
+# Dummy IR-tree nodes (pending real implementation).
+# ---------------------------------------------------------------------------
+#
+# Every dummy below inherits from the real ``Item`` base so:
+#   * ``isinstance(dummy_instance, Item)`` is True -- ``Module.findIndex
+#     ByType(Item)`` / KernelWriter type-walks see them as IR nodes.
+#   * ``dummy.toString()`` / ``dummy.prettyPrint()`` /
+#     ``dummy.countType()`` / ``dummy.countExactType()`` resolve to the
+#     real Item methods (not the no-op ``__getattr__`` shim), so a
+#     dummy Label dropped into a Module tree still produces sensible
+#     prettyPrint / count output during bring-up.
+#
+# Inheritance map (mirror of code.hpp):
+#   Label / Macro / ValueEndif / ValueIf / ValueElseIf
+#     / ValueSet / RegSet / SignatureCodeMeta / SignatureBase
+#     / KernelBody   -- ``: Item`` in C++ ⇒ ``base=Item`` here.
+#   StructuredModule -- ``: Module`` in C++ (code.hpp:469). Using
+#     ``base=Module`` here means KernelWriter's
+#     ``self.codes.globalReadA = StructuredModule()`` actually gets a
+#     working ``.add() / .items() / .appendModule(...)`` surface
+#     during bring-up instead of silent no-ops. The "structured"
+#     part (separate header/body/footer modules) is the only thing
+#     missing; Commit Z makes it real.
+#   BitfieldUnion -- standalone polymorphic root in C++
+#     (code.hpp:928, NOT a subclass of Item). Kept ``base=object``
+#     so ``isinstance(bf, Item)`` correctly stays False; the C++ class
+#     is the polymorphic root for the ``SrdUpperValue*`` family.
+
+Label = make_dummy_class(f"{_P}.Label", base=Item)
+Macro = make_dummy_class(f"{_P}.Macro", base=Item)
+StructuredModule = make_dummy_class(f"{_P}.StructuredModule", base=Module)
+ValueEndif = make_dummy_class(f"{_P}.ValueEndif", base=Item)
+ValueIf = make_dummy_class(f"{_P}.ValueIf", base=Item)
+ValueElseIf = make_dummy_class(f"{_P}.ValueElseIf", base=Item)
+ValueSet = make_dummy_class(f"{_P}.ValueSet", base=Item)
+RegSet = make_dummy_class(f"{_P}.RegSet", base=Item)
 BitfieldUnion = make_dummy_class(f"{_P}.BitfieldUnion")
-SignatureCodeMeta = make_dummy_class(f"{_P}.SignatureCodeMeta")
-SignatureBase = make_dummy_class(f"{_P}.SignatureBase")
-KernelBody = make_dummy_class(f"{_P}.KernelBody")
+SignatureCodeMeta = make_dummy_class(f"{_P}.SignatureCodeMeta", base=Item)
+SignatureBase = make_dummy_class(f"{_P}.SignatureBase", base=Item)
+KernelBody = make_dummy_class(f"{_P}.KernelBody", base=Item)
 
 
 # ---------------------------------------------------------------------------

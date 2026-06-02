@@ -45,11 +45,16 @@ What it does (real):
       ``setKernelInfo`` / ``getKernel`` / ``getData`` / ``setData`` /
       ``getVgprIdx`` / ``setVgprIdx`` / ``getVgprMsb`` / ``setVgprMsb`` /
       ``getOutputOptions`` / ``setOutputOptions`` / ``outputNoComment``.
+    - ``Item`` — polymorphic root of the IR tree; concrete class with
+      default ``toString`` / ``prettyPrint`` / ``countType`` /
+      ``countExactType`` and the seven capability proxies
+      (``getAsmCaps`` / ... / ``kernel``) forwarding to the accessors
+      above. Mirror of ``rocisa::Item`` (base.hpp:220-297).
+    - ``DummyItem`` — inert ``Item`` subclass whose ``countType`` is
+      hardcoded 0, mirror of ``rocisa::DummyItem`` (base.hpp:299-310).
 
 Not yet done (dummy):
     - ``IsaVersion`` — used as a marker only today.
-    - ``Item``, ``DummyItem`` — IR-tree base nodes; arrive with Commit Y
-      of the Phase 4 IR-tree work.
 
 Design note — singleton decomposition:
     Earlier iterations housed ALL ``rocIsa`` state on the god-singleton
@@ -92,8 +97,11 @@ _P = "rocisa.base"
 
 
 IsaVersion = make_dummy_class(f"{_P}.IsaVersion")
-Item = make_dummy_class(f"{_P}.Item")
-DummyItem = make_dummy_class(f"{_P}.DummyItem")
+
+# ``Item`` and ``DummyItem`` are real classes; they live at the bottom of
+# this file because their default ``toString`` / ``prettyPrint`` / cap-
+# proxy methods reach into the module-level accessors defined further
+# down. See the "Item base class" section near the end.
 
 
 # Re-export the public ISA key alias from caps for nicer typing downstream.
@@ -493,3 +501,182 @@ def setVgprMsb(msb: int) -> None:
     """
     global _vgpr_msb
     _vgpr_msb = int(msb)
+
+
+# ---------------------------------------------------------------------------
+# Item base class -- polymorphic root of the IR tree.
+# ---------------------------------------------------------------------------
+#
+# Mirrors ``rocisa::Item`` (base.hpp:220-297). Lives at the bottom of
+# this file so its capability-proxy methods can refer to the module-
+# level accessors above by simple name (Python's LEGB lookup resolves
+# ``getAsmCaps`` etc. to the module globals, not to ``self.getAsmCaps``
+# which would recurse -- method names are not in the method's local
+# scope, only in the class dict).
+#
+# Design choices vs. C++:
+#   * ``Item`` is a regular (concrete) class, NOT an ``abc.ABC``.
+#     ``Item("foo")`` is valid (matches C++ where ``rocisa::Item it("foo")``
+#     compiles and ``.toString()`` returns "foo"); only ``clone()`` raises
+#     by default.
+#   * ``__slots__ = ("name", "parent")`` -- subclasses (Module / TextBlock /
+#     ...) must NOT redeclare these. They declare only their own new
+#     slots; ``name`` / ``parent`` are inherited.
+#   * Capability proxies (``getAsmCaps`` / ``getArchCaps`` / ``getRegCaps`` /
+#     ``getAsmBugs`` / ``getVgprIdx`` / ``getVgprMsb`` / ``kernel``) all
+#     forward to the module-level accessors -- they reach module-level
+#     ``base.py`` state, NOT the ``rocIsa`` singleton class. That keeps
+#     the dependency direction one-way and means an Item subclass can
+#     read caps even if the package facade hasn't been imported yet.
+#   * ``countType`` accepts a Python ``type`` (not a nanobind ``nb::object``)
+#     and uses ``isinstance``; ``countExactType`` checks ``type(self) is
+#     target`` to match the C++ ``typeid(*this) == targetType`` semantics.
+
+class Item:
+    """Polymorphic root of the IR tree; mirror of ``rocisa::Item``
+    (base.hpp:220-297).
+
+    Concrete (not abstract): ``Item("foo").toString()`` returns ``"foo"``
+    and ``Item().prettyPrint()`` returns ``"<class-name> "``; only
+    ``clone()`` raises by default, matching the C++ ``throw
+    std::runtime_error("clone() not implemented")``.
+
+    Subclassing:
+        Subclasses declare only their own additional ``__slots__`` --
+        ``name`` and ``parent`` come from this class. ``__init__``
+        must call ``super().__init__(name)`` (or
+        ``super().__init__()`` for the default empty name) so the
+        inherited slots get populated.
+
+    Capability proxies (``getAsmCaps`` etc.) forward to the module-
+    level accessors in this file; an Item subclass need never know
+    that the actual state lives in ``_data`` / ``_kernel_info`` /
+    ``_vgpr_idx`` globals.
+
+    Item-inherited proxies NOT exposed on ``Module`` instances
+    (matches Phase-4 audit -- KernelWriter only reads these off
+    Instruction subclasses) are still present on the base class
+    itself, so explicit ``isinstance(x, Item)`` callers get the
+    full surface.
+    """
+
+    __slots__ = ("name", "parent")
+
+    def __init__(self, name: str = "") -> None:
+        self.name: str = name
+        self.parent: "Item | None" = None
+
+    # ---- Polymorphic operations with default impls -----------------------
+
+    def toString(self) -> str:
+        """Default: return ``name`` (mirror of ``Item::toString``,
+        base.hpp:282-285)."""
+        return self.name
+
+    def __str__(self) -> str:
+        # Bound to toString() so subclass overrides automatically
+        # propagate to ``str(item)``, matching nanobind's
+        # ``.def("__str__", &Item::toString)`` pattern.
+        return self.toString()
+
+    def prettyPrint(self, indent: str = "") -> str:
+        """Default: ``indent + className + " " + toString()``
+        (mirror of ``Item::prettyPrint``, base.hpp:287-293).
+
+        Note the trailing space + ``toString()`` with NO newline --
+        callers (e.g. ``Module::prettyPrint``) concatenate child
+        ``prettyPrint`` results verbatim and the children that need
+        a newline (``Module``, ``Instruction``) emit it themselves
+        in their override.
+        """
+        return f"{indent}{type(self).__name__} {self.toString()}"
+
+    def countType(self, type_obj: type) -> int:
+        """Default: ``1`` if ``self`` is an instance of ``type_obj``,
+        else ``0`` (mirror of ``Item::countType``, base.hpp:271-275).
+
+        C++ accepts an ``nb::object`` (i.e. a Python class object) and
+        uses ``nb::isinstance``; the Python adaptor accepts a regular
+        ``type`` directly and uses the builtin ``isinstance``.
+        Subclasses with children (Module, Macro, StructuredModule)
+        override this to recurse.
+        """
+        return int(isinstance(self, type_obj))
+
+    def countExactType(self, type_obj: type) -> int:
+        """Default: ``1`` if ``type(self) is type_obj``, else ``0``
+        (mirror of ``Item::countExactType``, base.hpp:277-280).
+
+        The exact-type check uses ``is`` rather than ``isinstance``
+        to match C++ ``typeid(*this) == targetType`` semantics -- a
+        ``StructuredModule`` does NOT count as a ``Module`` here even
+        though it inherits from it. Containers (Module, Macro,
+        StructuredModule) override this to recurse.
+        """
+        return int(type(self) is type_obj)
+
+    def clone(self) -> "Item":
+        """Mirror of ``Item::clone`` (base.hpp:230-234) -- raises by
+        default, subclasses override (the C++ original throws
+        ``std::runtime_error("clone() not implemented")``). Python
+        subclasses typically provide ``__deepcopy__`` instead; this
+        method is here for rocisa API parity."""
+        raise NotImplementedError("clone() not implemented")
+
+    # ---- Capability proxies (forward to module-level accessors) ----------
+    #
+    # Mirror of the seven ``def_prop_ro`` / member-function proxies on
+    # ``rocisa::Item`` (base.hpp:236-269 + base.cpp:202-212). All of
+    # them defer to the active-ISA state in ``base.py`` module globals.
+    #
+    # NB: writing ``return getAsmCaps()`` resolves to the module-level
+    # ``getAsmCaps`` defined above (Python LEGB: local -> enclosing ->
+    # module-globals -> builtins; class-method names are NOT in scope
+    # inside the method body). No self-recursion.
+
+    def getAsmCaps(self) -> Dict[str, int]:
+        """Mirror of ``Item::getAsmCaps`` (base.hpp:236-239)."""
+        return getAsmCaps()
+
+    def getArchCaps(self) -> Dict[str, int]:
+        """Mirror of ``Item::getArchCaps`` (base.hpp:246-249)."""
+        return getArchCaps()
+
+    def getRegCaps(self) -> Dict[str, int]:
+        """Mirror of ``Item::getRegCaps`` (base.hpp:241-244)."""
+        return getRegCaps()
+
+    def getAsmBugs(self) -> Dict[str, bool]:
+        """Mirror of ``Item::getAsmBugs`` (base.hpp:251-254)."""
+        return getAsmBugs()
+
+    def getVgprIdx(self) -> Dict[str, int]:
+        """Mirror of ``Item::getVgprIdx`` (base.hpp:256-259)."""
+        return getVgprIdx()
+
+    def getVgprMsb(self) -> int:
+        """Mirror of ``Item::getVgprMsb`` (base.hpp:261-264)."""
+        return getVgprMsb()
+
+    def kernel(self) -> "KernelInfo":
+        """Mirror of ``Item::kernel`` (base.hpp:266-269)."""
+        return getKernel()
+
+
+class DummyItem(Item):
+    """Mirror of ``rocisa::DummyItem`` (base.hpp:299-310).
+
+    A no-op Item subclass that exists purely so KernelWriter can stick
+    a marker into a Module tree without triggering ``countType`` /
+    instance accounting. The C++ override returns 0 regardless of the
+    queried type; we mirror that.
+    """
+
+    __slots__ = ()
+
+    def __init__(self) -> None:
+        super().__init__(name="")
+
+    def countType(self, type_obj: type) -> int:
+        # rocisa C++ override (base.hpp:306-309) hardcodes 0.
+        return 0

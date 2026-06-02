@@ -60,9 +60,22 @@ _PKG_PARENT = os.path.normpath(os.path.join(_HERE, ".."))
 if _PKG_PARENT not in sys.path:
     sys.path.insert(0, _PKG_PARENT)
 
+from rocisa_stinkytofu_adaptor.base import Item  # noqa: E402
 from rocisa_stinkytofu_adaptor.code import (  # noqa: E402
+    BitfieldUnion,
+    KernelBody,
+    Label,
+    Macro,
     Module,
+    RegSet,
+    SignatureBase,
+    SignatureCodeMeta,
+    StructuredModule,
     TextBlock,
+    ValueElseIf,
+    ValueEndif,
+    ValueIf,
+    ValueSet,
 )
 
 
@@ -1418,6 +1431,239 @@ class TestStinkytofuOptional(unittest.TestCase):
         # str / count / items still work without ever touching stinkytofu.
         self.assertEqual(str(m), "x")
         self.assertEqual(m.itemsSize(), 2)
+
+
+# ===========================================================================
+# Item-hierarchy parity -- Commit Y.
+# ===========================================================================
+#
+# These pin the rocisa C++ inheritance shape one-for-one:
+#   * ``TextBlock`` / ``Module`` are subclasses of ``Item``
+#     (code.hpp:133 / code.hpp:330).
+#   * Dummy IR-tree nodes (Label / Macro / ValueSet / ...) are also
+#     ``Item`` subclasses via ``make_dummy_class(..., base=Item)``.
+#   * ``StructuredModule`` is a ``Module`` subclass in C++
+#     (code.hpp:469); the dummy here uses ``base=Module`` for the
+#     same shape.
+#   * ``BitfieldUnion`` is a standalone polymorphic root in C++
+#     (code.hpp:928, NOT a subclass of Item); the dummy correctly
+#     stays out of the Item hierarchy.
+#
+# Module's ``countType`` / ``countExactType`` overrides are recursive
+# (mirror of code.hpp:441-459). The non-recursive base-class
+# behaviour is tested in test_base.py; here we verify recursion +
+# the isinstance-vs-identity distinction across a real tree.
+
+
+class TestItemInheritanceShape(unittest.TestCase):
+    """``isinstance(x, Item)`` parity with the C++ class hierarchy."""
+
+    def test_textblock_isinstance_item(self):
+        self.assertIsInstance(TextBlock("x"), Item)
+
+    def test_module_isinstance_item(self):
+        self.assertIsInstance(Module("k"), Item)
+
+    def test_textblock_name_and_parent_inherited_from_item(self):
+        # ``__slots__`` for TextBlock are ``("text",)`` only -- name /
+        # parent live on Item. The class must NOT redeclare them or
+        # Python raises TypeError at class-creation time, so reaching
+        # this test at all means the slot composition is correct;
+        # the assertions below pin the runtime values.
+        tb = TextBlock("hello")
+        self.assertEqual(tb.name, "hello")
+        self.assertIsNone(tb.parent)
+
+    def test_module_name_and_parent_inherited_from_item(self):
+        m = Module("kernel")
+        self.assertEqual(m.name, "kernel")
+        self.assertIsNone(m.parent)
+
+    def test_module_slots_do_not_redeclare_item_slots(self):
+        # Catch accidental future regression -- if Module's __slots__
+        # ever re-adds "name" or "parent" the class itself fails to
+        # build (Python raises TypeError on slot conflict). We make
+        # the test explicit by checking the declared slot tuple.
+        self.assertNotIn("name", Module.__slots__)
+        self.assertNotIn("parent", Module.__slots__)
+
+    def test_textblock_slots_do_not_redeclare_item_slots(self):
+        self.assertNotIn("name", TextBlock.__slots__)
+        self.assertNotIn("parent", TextBlock.__slots__)
+
+
+class TestDummyClassesInheritItem(unittest.TestCase):
+    """Every dummy IR-tree node uses ``base=Item`` (with the exception
+    of ``StructuredModule`` which uses ``base=Module`` and
+    ``BitfieldUnion`` which is intentionally standalone). This is the
+    foundation that lets ``Module.findIndexByType(Item)`` /
+    ``isinstance``-based KernelWriter walks see dummies as IR
+    nodes during the bring-up phase."""
+
+    def test_label_is_item(self):
+        self.assertIsInstance(Label(), Item)
+
+    def test_macro_is_item(self):
+        self.assertIsInstance(Macro(), Item)
+
+    def test_valueendif_is_item(self):
+        self.assertIsInstance(ValueEndif(), Item)
+
+    def test_valueif_is_item(self):
+        self.assertIsInstance(ValueIf(), Item)
+
+    def test_valueelseif_is_item(self):
+        self.assertIsInstance(ValueElseIf(), Item)
+
+    def test_valueset_is_item(self):
+        self.assertIsInstance(ValueSet(), Item)
+
+    def test_regset_is_item(self):
+        self.assertIsInstance(RegSet(), Item)
+
+    def test_signaturecodemeta_is_item(self):
+        self.assertIsInstance(SignatureCodeMeta(), Item)
+
+    def test_signaturebase_is_item(self):
+        self.assertIsInstance(SignatureBase(), Item)
+
+    def test_kernelbody_is_item(self):
+        self.assertIsInstance(KernelBody(), Item)
+
+    def test_structuredmodule_is_module_and_item(self):
+        # ``base=Module`` so KernelWriter's
+        # ``self.codes.globalReadA = StructuredModule()`` actually
+        # gets a working ``.add() / .items()`` surface during
+        # bring-up rather than silent ``__getattr__`` no-ops.
+        sm = StructuredModule()
+        self.assertIsInstance(sm, Module)
+        self.assertIsInstance(sm, Item)
+
+    def test_bitfieldunion_is_not_item(self):
+        # Intentionally NOT in the Item hierarchy -- mirror of
+        # rocisa C++ where ``BitfieldUnion`` (code.hpp:928) is its
+        # own standalone polymorphic root for the SrdUpperValue
+        # family. Counting it as an Item would incorrectly inflate
+        # ``Module.countType(Item)`` for any tree that contains
+        # a BitfieldUnion sibling.
+        self.assertNotIsInstance(BitfieldUnion(), Item)
+
+
+class TestDummyInheritsItemDefaults(unittest.TestCase):
+    """Methods inherited from Item (toString / countType / cap-proxies)
+    take precedence over the dummy ``__getattr__`` no-op -- otherwise
+    a dummy Label dropped into a Module tree would silently break
+    prettyPrint / countType passes."""
+
+    def test_dummy_toString_returns_name_from_item(self):
+        # The dummy ``__init__`` calls ``super().__init__()`` with no
+        # args, so Item.name defaults to "". ``toString`` therefore
+        # returns "" -- NOT the dummy ``__getattr__`` no-op which
+        # would have returned None.
+        self.assertEqual(Label().toString(), "")
+
+    def test_dummy_str_returns_name_from_item(self):
+        # ``str(dummy)`` must NOT return ``<DummyShim ...>`` (that's
+        # __repr__'s job) -- it must go through Item.__str__ →
+        # Item.toString → "" so that ``Module.toString`` (which
+        # concatenates ``str(it)``) emits empty rather than the
+        # debug-repr.
+        self.assertEqual(str(Label()), "")
+
+    def test_dummy_countType_is_one_for_itself(self):
+        lbl = Label()
+        # Inherited from Item.countType: 1 if isinstance match.
+        self.assertEqual(lbl.countType(Label), 1)
+        self.assertEqual(lbl.countType(Item), 1)
+        self.assertEqual(lbl.countType(Module), 0)
+
+
+class TestModuleCountTypeRecursion(unittest.TestCase):
+    """``Module.countType`` / ``countExactType`` override Item's default
+    to recurse through ``itemList``. Mirror of rocisa C++ code.hpp:
+    441-459."""
+
+    def test_countType_recurses_through_children(self):
+        # ``Module(Item)`` so countType(Item) on a module with two
+        # TextBlocks (also Items) yields 1 (self) + 2 (children) = 3.
+        m = Module("k")
+        m.add(TextBlock("a"))
+        m.add(TextBlock("b"))
+        self.assertEqual(m.countType(Item), 3)
+
+    def test_countType_recurses_into_submodules(self):
+        # Two-level tree: 1 (outer Module) + 1 (TextBlock) +
+        # 1 (inner Module) + 1 (TextBlock inside inner) = 4 Items.
+        outer = Module("o")
+        outer.add(TextBlock("a"))
+        inner = Module("i")
+        inner.add(TextBlock("b"))
+        outer.add(inner)
+        self.assertEqual(outer.countType(Item), 4)
+
+    def test_countType_TextBlock_only(self):
+        # TextBlock is the target, not Item -- Module counts as 0,
+        # TextBlocks count as 1 each.
+        m = Module()
+        m.add(TextBlock("a"))
+        m.add(TextBlock("b"))
+        m.add(TextBlock("c"))
+        self.assertEqual(m.countType(TextBlock), 3)
+
+    def test_countType_includes_dummy_descendants(self):
+        # Dummies inherit from Item; they MUST be visible to
+        # ``countType(Item)`` walks (the very reason for
+        # ``make_dummy_class(..., base=Item)``).
+        m = Module()
+        m.add(Label())
+        m.add(Macro())
+        m.add(TextBlock("x"))
+        # 1 (Module) + 1 (Label) + 1 (Macro) + 1 (TextBlock) = 4.
+        self.assertEqual(m.countType(Item), 4)
+
+    def test_countExactType_is_strict_identity(self):
+        # ``type(self) is Module`` is True for Module but False for
+        # any subclass. We don't have a real Module subclass to
+        # contrast with yet (StructuredModule is dummy + base=Module),
+        # so verify with TextBlock as the comparison.
+        m = Module()
+        m.add(TextBlock("a"))
+        m.add(TextBlock("b"))
+        # countExactType(Module): only ``m`` itself counts (1).
+        self.assertEqual(m.countExactType(Module), 1)
+        # countExactType(TextBlock): only the two leaves count (2).
+        self.assertEqual(m.countExactType(TextBlock), 2)
+
+    def test_countExactType_subclass_does_not_match_module(self):
+        # StructuredModule is a Module subclass; countExactType(Module)
+        # on a StructuredModule must return 0 (NOT 1). Mirror of C++
+        # ``typeid(*this) == targetType`` semantics where a derived
+        # type does not match its base.
+        sm = StructuredModule()  # base=Module dummy
+        self.assertEqual(sm.countExactType(Module), 0)
+        # ... but it DOES match its own type:
+        self.assertEqual(sm.countExactType(StructuredModule), 1)
+        # ... and isinstance-based countType matches Module:
+        self.assertEqual(sm.countType(Module), 1)
+
+
+class TestStructuredModuleDummyBehaviour(unittest.TestCase):
+    """``StructuredModule`` dummy uses ``base=Module`` so KernelWriter's
+    ``self.codes.globalReadA = StructuredModule(); ...add(...)`` flow
+    actually works during bring-up. The "structured" semantics
+    (separate header/body/footer modules) are NOT implemented yet --
+    Commit Z lands them."""
+
+    def test_structuredmodule_inherits_module_add(self):
+        sm = StructuredModule()
+        sm.add(TextBlock("hello"))
+        self.assertEqual(sm.itemsSize(), 1)
+        self.assertEqual(str(sm), "hello")
+
+    def test_structuredmodule_inherits_module_findIndexByType(self):
+        sm = StructuredModule()
+        sm.add(TextBlock("x"))
+        self.assertEqual(sm.findIndexByType(TextBlock), 0)
 
 
 if __name__ == "__main__":

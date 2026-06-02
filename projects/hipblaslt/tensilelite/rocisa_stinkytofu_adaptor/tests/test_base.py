@@ -61,6 +61,7 @@ from rocisa_stinkytofu_adaptor import (  # noqa: E402
     OutputOptions,
     rocIsa,
 )
+from rocisa_stinkytofu_adaptor.base import DummyItem, Item  # noqa: E402
 
 
 # ===========================================================================
@@ -444,6 +445,175 @@ class TestBaseAccessorsAreSourceOfTruth(_StateSaveRestore):
     def test_setvgprmsb_via_rocisa_visible_via_base(self):
         rocIsa.getInstance().setVgprMsb(7)
         self.assertEqual(_base.getVgprMsb(), 7)
+
+
+# ===========================================================================
+# Item base class -- regular (concrete) class with default behaviour.
+# ===========================================================================
+#
+# Mirror of ``rocisa::Item`` (base.hpp:220-297). The whole point of
+# Commit Y is that this class exists as a real Python class so that
+# Module / TextBlock / dummy nodes participate in a proper polymorphic
+# hierarchy (``isinstance(x, Item)``), and that the default methods
+# (toString / prettyPrint / countType / countExactType / clone /
+# 7 cap-proxies) are inherited as-written rather than being silently
+# overridden by the ``_dummy.py`` ``__getattr__`` no-op.
+
+
+class TestItemConstruction(unittest.TestCase):
+    """Item is a regular (concrete) class -- the C++ ``Item`` is also
+    concrete (``Item("foo")`` compiles and ``.toString()`` returns
+    "foo"), so we mirror that. Only ``clone()`` is semi-abstract
+    (raises by default)."""
+
+    def test_item_is_regular_class(self):
+        # Not an ABC -- ``Item()`` must succeed without an
+        # implementation of any "abstract" method.
+        it = Item()
+        self.assertIsInstance(it, Item)
+        self.assertEqual(it.name, "")
+        self.assertIsNone(it.parent)
+
+    def test_item_named_construction(self):
+        it = Item("foo")
+        self.assertEqual(it.name, "foo")
+
+    def test_item_has_slots(self):
+        # ``__slots__ = ("name", "parent")`` so no __dict__ -- catches
+        # accidental future regression where someone removes slots.
+        self.assertFalse(hasattr(Item(), "__dict__"))
+
+
+class TestItemDefaultMethods(unittest.TestCase):
+    """Default ``toString`` / ``prettyPrint`` / ``__str__`` / counters
+    on the bare ``Item`` -- subclasses (Module / TextBlock) override
+    them but the base behaviour is what dummies fall back to."""
+
+    def test_toString_returns_name(self):
+        # rocisa C++ ``Item::toString`` (base.hpp:282-285) returns
+        # the stored name verbatim.
+        self.assertEqual(Item("hello").toString(), "hello")
+
+    def test_str_delegates_to_toString(self):
+        # ``__str__`` is bound to ``toString`` so subclass overrides
+        # propagate -- ``str(Module(...))`` calls ``Module.toString``
+        # automatically because of this binding (mirror of nanobind's
+        # ``.def("__str__", &Item::toString)`` pattern).
+        self.assertEqual(str(Item("bar")), "bar")
+
+    def test_prettyPrint_default_format(self):
+        # rocisa C++ format (base.hpp:287-293):
+        #   ``{indent}{className} {toString()}`` -- with the trailing
+        # space and NO newline. The trailing space is intentional
+        # (matches the C++ ``<< " " << toString()``).
+        self.assertEqual(Item("x").prettyPrint("  "), "  Item x")
+        self.assertEqual(Item().prettyPrint(), "Item ")
+
+    def test_countType_self_match(self):
+        # ``isinstance(self, Item)`` is True for any Item, so the
+        # default ``countType(Item)`` returns 1.
+        self.assertEqual(Item().countType(Item), 1)
+
+    def test_countType_unrelated_zero(self):
+        self.assertEqual(Item().countType(str), 0)
+
+    def test_countExactType_match(self):
+        self.assertEqual(Item().countExactType(Item), 1)
+
+    def test_countExactType_subclass_does_not_match(self):
+        # ``type(self) is type_obj`` is strict equality, so a
+        # DummyItem instance does NOT count as ``Item`` here even
+        # though it ``isinstance``-matches.
+        self.assertEqual(DummyItem().countExactType(Item), 0)
+        # ... but countType (isinstance) DOES match the base class.
+        self.assertEqual(DummyItem().countType(Item), 0)
+        # NB the second line above tests DummyItem's hardcoded 0
+        # override (mirror of rocisa base.hpp:306-309), not the
+        # generic Item.countType.
+
+    def test_clone_raises_by_default(self):
+        # Mirror of rocisa C++ ``Item::clone`` which throws
+        # ``std::runtime_error("clone() not implemented")``. Python
+        # callers wanting a copy use ``copy.deepcopy`` (which Module
+        # / TextBlock implement via ``__deepcopy__``).
+        with self.assertRaises(NotImplementedError):
+            Item().clone()
+
+
+class TestItemCapabilityProxies(_StateSaveRestore):
+    """The seven cap-proxy methods on Item forward to the module-level
+    accessors in ``base.py``. This lets any Item subclass read caps
+    without knowing about the ``rocIsa`` singleton at all.
+
+    Cap accessors (``getAsmCaps`` / ``getArchCaps`` / ``getRegCaps`` /
+    ``getAsmBugs``) need an active ISA to resolve, so the per-test
+    setUp pumps ``init((12, 5, 0), "", False)`` -- the same wakeup
+    sequence the package-level ``rocIsa.init`` uses in production.
+    The ``_StateSaveRestore`` superclass undoes any state mutation in
+    tearDown so the rest of the suite sees a clean slate."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        # Pump ISA state so the four cap-table accessors stop raising
+        # the "init() or setKernel() must be called first" RuntimeError.
+        # gfx1250 is the only ISA the adapter has cap tables for today.
+        _base.init((12, 5, 0), "", False)
+
+    def test_getAsmCaps_forwards_to_base(self):
+        # Both call paths must hit the same dict object so a mutation
+        # in either place is visible to the other.
+        self.assertIs(Item().getAsmCaps(), _base.getAsmCaps())
+
+    def test_getArchCaps_forwards_to_base(self):
+        self.assertIs(Item().getArchCaps(), _base.getArchCaps())
+
+    def test_getRegCaps_forwards_to_base(self):
+        self.assertIs(Item().getRegCaps(), _base.getRegCaps())
+
+    def test_getAsmBugs_forwards_to_base(self):
+        self.assertIs(Item().getAsmBugs(), _base.getAsmBugs())
+
+    def test_getVgprIdx_forwards_to_base(self):
+        # ``_base.getVgprIdx()`` returns the live dict; mutations
+        # propagate.
+        _base.setVgprIdx("CAP_PROXY_K", 42)
+        self.assertEqual(Item().getVgprIdx()["CAP_PROXY_K"], 42)
+
+    def test_getVgprMsb_forwards_to_base(self):
+        _base.setVgprMsb(13)
+        self.assertEqual(Item().getVgprMsb(), 13)
+
+    def test_kernel_forwards_to_base(self):
+        _base.setKernel((12, 5, 0), 32)
+        ki = Item().kernel()
+        self.assertEqual(ki.isa, (12, 5, 0))
+        self.assertEqual(ki.wavefrontSize, 32)
+
+
+class TestDummyItem(unittest.TestCase):
+    """``DummyItem`` is the inert sentinel KernelWriter sticks into
+    Module trees as a marker without polluting countType totals.
+    Mirror of rocisa C++ ``DummyItem`` (base.hpp:299-310)."""
+
+    def test_dummyitem_isinstance_item(self):
+        self.assertIsInstance(DummyItem(), Item)
+
+    def test_dummyitem_no_ctor_args(self):
+        # rocisa C++ ctor takes no args (just ``Item("")``); the
+        # Python adapter mirrors that.
+        d = DummyItem()
+        self.assertEqual(d.name, "")
+        self.assertIsNone(d.parent)
+
+    def test_dummyitem_countType_always_zero(self):
+        # Hardcoded 0 regardless of queried type -- mirror of
+        # rocisa C++ override (base.hpp:306-309). Matters because
+        # KernelWriter uses DummyItem as a "neutral" marker that
+        # tree-walks must skip; counting it would corrupt
+        # instruction tallies.
+        self.assertEqual(DummyItem().countType(DummyItem), 0)
+        self.assertEqual(DummyItem().countType(Item), 0)
+        self.assertEqual(DummyItem().countType(object), 0)
 
 
 if __name__ == "__main__":
