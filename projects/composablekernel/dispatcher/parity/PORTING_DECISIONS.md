@@ -28,7 +28,7 @@ It is the reference for "why does this config not exist on the dispatcher side?"
 | Field | Tile Engine default | Dispatcher chosen value | Resolution |
 |---|---|---|---|
 | `scheduler` string `"default"` | Maps to the interwave scheduler in TE | Canonicalized to `"auto"` in dispatcher | `encode_identifier()` uses `"auto"`; TE's `"default"` is an alias. Translator maps `"default"→"auto"`. Raw TE string preserved in `_te` for codegen. |
-| `double_buffer` for `preshufflev2` | TE codegen sets `False` (`compv4`-only at line 831) | Translator set `True` (in `_DOUBLE_BUFFER_PIPELINES`) | **Known discrepancy.** `double_buffer` is in `KernelKey::tie()` (equality) but NOT in `encode_identifier()`, so Stage 1 passes but runtime `operator==` disagrees. Pre-existing in codegen; filed as follow-up. Current behavior documented in `TestDoubleBuffer.test_preshufflev2_no_double_buffer`. |
+| `double_buffer` for `preshufflev2` | TE codegen sets `True` (`DoubleSmemBuffer = pipeline == "compv4" or pipeline == "preshufflev2"`) | Translator sets `True` (in `_DOUBLE_BUFFER_PIPELINES`) | **Agrees — no discrepancy.** `unified_gemm_codegen.py` enables double SMEM buffering for both `compv4` and `preshufflev2`; the translator's `_DOUBLE_BUFFER_PIPELINES = {"compv4", "preshufflev2"}` matches. Verified in `TestDoubleBuffer.test_preshufflev2_sets_double_buffer`. |
 | Accumulation dtype `fp8/bf8` | Accumulated in `fp32`, output `fp16` | Same | Both stacks promote 8-bit output to `fp16` (8-bit too narrow for C). Correct behavior. |
 | Accumulation dtype `int8` | `int32` accumulator, `int8` output | Same | No promotion needed. |
 | `block_size`, `num_wave_groups`, `k_block_per_cu` | Codegen defaults: `256`, `1`, `1` | Forwarded explicitly from TE config | Bug 2 from PR review: these were previously dropped; codegen silently produced wrong kernels for non-default values. Fixed in `_minimal_te_config()`. |
@@ -111,7 +111,7 @@ are used in `check_parity.py` Stage 3 for the formal 2% gate.
 | `single_fp8_rcr.json` — `compv3/intrawave`, tile_k=64 | **GPU-verified** (timing-only) on gfx942 | 512³ ~26.9 TFLOP/s; 1024³ ~139 TFLOP/s — PASSED. Numerical verify SKIPPED: fp8 host-side `type_convert` requires `CK_TILE_USE_CUSTOM_DATA_TYPE` which conflicts with host headers. |
 | `single_int8_rcr.json` — `compv3/intrawave`, int32 acc | **GPU-verified** (Stages 1–2) on gfx942 | 512³ ~25.9 TFLOP/s; 1024³ ~145 TFLOP/s — PASSED. Fix: codegen previously hardcoded `AccDataType=float`; fixed to `int32_t` for int8. |
 | `single_fp16_rcr_splitk.json` — `compv3/intrawave`, split_k=4 | **GPU-verified** (Stages 1–2) on gfx942 | 512³ ~17.8 TFLOP/s; 1024³ ~85.8 TFLOP/s — PASSED. |
-| Any `preshufflev2` config | **Stage 1 only** | `_preshuffle` suffix added to kernel name; `double_buffer` discrepancy noted (see §2) |
+| Any `preshufflev2` config | **Stage 1 only** | `_preshuffle` suffix added to kernel name; `double_buffer=True` matches codegen (see §2) |
 | `split_k > 255` | **Blocked** | `TranslationError` raised; `uint8_t` overflow in oracle |
 | `compv1`, `compv2`, `preshufflev1` | **Blocked** | No codegen path; `TranslationError` at translation time |
 
@@ -133,7 +133,7 @@ are used in `check_parity.py` Stage 3 for the formal 2% gate.
 
 | # | Issue | Priority |
 |---|---|---|
-| 1 | `double_buffer=True` for `preshufflev2` in translator vs `False` in `unified_gemm_codegen.py` line 831 | Medium — affects `KernelKey::operator==` but not `encode_identifier()` |
+| 1 | ~~`double_buffer=True` for `preshufflev2` in translator vs `False` in codegen~~ | **NOT A BUG** — codegen (`unified_gemm_codegen.py`) sets `DoubleSmemBuffer=True` for `preshufflev2` too; translator matches. Earlier claim cited a stale line number. |
 | 2 | ~~T2.2: multi-kernel Python binding (C API + `.so` + ctypes wrapper)~~ | **DONE** 2026-06-02 — `dispatcher_capi.h`, `dispatcher_capi.cpp`, `dispatcher_binding.py` added |
 | 3 | ~~GPU execution on gfx942 node to get T1.5–T1.7 PASSED status~~ | **DONE** 2026-06-02 — all sizes PASSED on gfx942 (MI300X) |
 | 4 | Generalize harness strides beyond `rcr` | Low — all current configs use `rcr`; needs parametric stride builder |

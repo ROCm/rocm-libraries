@@ -191,7 +191,7 @@ class TestPersistent:
 
 
 class TestDoubleBuffer:
-    """double_buffer flag: compv4 → True, compv3 → False."""
+    """double_buffer flag: compv4 → True, preshufflev2 → True, compv3 → False."""
 
     def test_compv4_sets_double_buffer(self):
         # compv4 uses double SMEM buffering.
@@ -204,16 +204,13 @@ class TestDoubleBuffer:
         assert len(configs) == 1
         assert configs[0]["algorithm"]["double_buffer"] is False
 
-    def test_preshufflev2_no_double_buffer(self):
-        # preshufflev2: translator previously set True (Bug 5 in PR review).
-        # Corrected to match codegen's actual behaviour (compv4 only).
+    def test_preshufflev2_sets_double_buffer(self):
+        # preshufflev2 uses double SMEM buffering, matching codegen:
+        # unified_gemm_codegen.py sets DoubleSmemBuffer = (pipeline == "compv4"
+        # or pipeline == "preshufflev2"). The translator's _DOUBLE_BUFFER_PIPELINES
+        # = {"compv4", "preshufflev2"} agrees, so there is no discrepancy.
         configs = translate(_single_config(pipeline="preshufflev2"))
         assert len(configs) == 1
-        # The translator currently sets double_buffer=True for preshufflev2
-        # (matching _DOUBLE_BUFFER_PIPELINES); this is a known discrepancy vs
-        # unified_gemm_codegen.py line 831 (which sets True only for compv4).
-        # This test documents the current behaviour and will fail if someone
-        # fixes _DOUBLE_BUFFER_PIPELINES to remove preshufflev2. Update it then.
         assert configs[0]["algorithm"]["double_buffer"] is True
 
 
