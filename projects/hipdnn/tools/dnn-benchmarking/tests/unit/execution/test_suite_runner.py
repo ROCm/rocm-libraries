@@ -4,7 +4,7 @@
 """Unit tests for suite_runner module."""
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -333,10 +333,22 @@ class TestDiscoveryFailure:
         assert r.status == "skipped"
         assert "No engine configurations" in (r.skip_reason or "")
 
+    @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
+    @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
     @patch("dnn_benchmarking.execution.suite_runner.Executor")
-    def test_engine_filter_excludes_everything(self, mock_exec_cls):
-        """When engine_filter excludes every discovered engine, surface as error."""
+    @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
+    def test_engine_filter_runs_explicit_id_without_discovery(
+        self,
+        mock_bm_cls,
+        mock_exec_cls,
+        mock_get_ref,
+        mock_resolve_name,
+    ):
+        """Explicit --engine IDs run in CLI order without discovery filtering."""
+        mock_resolve_name.side_effect = lambda eid: f"engine_{eid}"
+        mock_get_ref.return_value = None
         mock_exec_cls.side_effect = _make_exec_factory(engine_ids=[0, 1])
+        mock_bm_cls.return_value = _make_bm_mock()
 
         result = run_graph_all_providers(
             graph_path=Path("test.json"),
@@ -347,8 +359,8 @@ class TestDiscoveryFailure:
         )
 
         assert len(result.results) == 1
-        assert result.results[0].status == "error"
-        assert "filter" in result.results[0].error_message.lower()
+        assert result.results[0].status == "success"
+        assert result.results[0].engine_id == 99
 
 
 class TestSuiteConfigValidation:
@@ -454,7 +466,7 @@ class TestEngineFilter:
         mock_get_ref,
         mock_resolve_name,
     ):
-        """engine_filter=[1, 3, 99]: engines 1 and 3 run; 99 (not discovered) is dropped."""
+        """engine_filter=[1, 3, 99] runs exactly those IDs in caller order."""
         mock_resolve_name.side_effect = lambda eid: f"engine_{eid}"
         mock_get_ref.return_value = None
 
@@ -469,8 +481,91 @@ class TestEngineFilter:
             handle=MagicMock(),
         )
 
-        engine_ids = sorted(r.engine_id for r in result.results)
-        assert engine_ids == [1, 3]
+        engine_ids = [r.engine_id for r in result.results]
+        assert engine_ids == [1, 3, 99]
+
+    @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
+    @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
+    @patch("dnn_benchmarking.execution.suite_runner.Executor")
+    @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
+    def test_same_engine_runs_with_distinct_plugin_paths(
+        self,
+        mock_bm_cls,
+        mock_exec_cls,
+        mock_get_ref,
+        mock_resolve_name,
+    ):
+        """Repeated engine IDs are separate ordered selections."""
+        mock_resolve_name.side_effect = lambda eid: f"engine_{eid}"
+        mock_get_ref.return_value = None
+        mock_exec_cls.side_effect = _make_exec_factory(has_kernel_timings=True)
+        mock_bm_cls.return_value = _make_bm_mock()
+        hipdnn = MagicMock()
+        hipdnn.PluginLoadingMode.ABSOLUTE = "absolute"
+        hipdnn.Handle.side_effect = [MagicMock(), MagicMock()]
+
+        with patch.dict("sys.modules", {"hipdnn_frontend": hipdnn}):
+            result = run_graph_all_providers(
+                graph_path=Path("test.json"),
+                graph_json=_make_graph_json(),
+                tensor_infos=[_make_tensor_info(1)],
+                config=_make_config(
+                    engine_filter=[1, 1],
+                    plugin_paths=[Path("/plugins/a"), Path("/plugins/b")],
+                ),
+                handle=None,
+            )
+
+        assert [r.engine_id for r in result.results] == [1, 1]
+        assert [r.plugin_path for r in result.results] == [
+            "/plugins/a",
+            "/plugins/b",
+        ]
+        hipdnn.set_engine_plugin_paths.assert_has_calls(
+            [
+                call(["/plugins/a"], "absolute"),
+                call(["/plugins/b"], "absolute"),
+            ]
+        )
+
+    @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
+    @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
+    @patch("dnn_benchmarking.execution.suite_runner.Executor")
+    @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
+    def test_per_engine_handle_creation_failure_records_error_result(
+        self,
+        mock_bm_cls,
+        mock_exec_cls,
+        mock_get_ref,
+        mock_resolve_name,
+    ):
+        """A later per-engine handle failure records an error row and continues."""
+        mock_resolve_name.side_effect = lambda eid: f"engine_{eid}"
+        mock_get_ref.return_value = None
+        mock_exec_cls.side_effect = _make_exec_factory(has_kernel_timings=True)
+        mock_bm_cls.return_value = _make_bm_mock()
+        hipdnn = MagicMock()
+        hipdnn.PluginLoadingMode.ABSOLUTE = "absolute"
+        hipdnn.Handle.side_effect = [MagicMock(), RuntimeError("bad plugin")]
+
+        with patch.dict("sys.modules", {"hipdnn_frontend": hipdnn}):
+            result = run_graph_all_providers(
+                graph_path=Path("test.json"),
+                graph_json=_make_graph_json(),
+                tensor_infos=[_make_tensor_info(1)],
+                config=_make_config(
+                    engine_filter=[1, 2],
+                    plugin_paths=[Path("/plugins/a"), Path("/plugins/b")],
+                ),
+                handle=None,
+            )
+
+        assert [r.status for r in result.results] == ["success", "error"]
+        assert result.results[0].plugin_path == "/plugins/a"
+        assert result.results[1].plugin_path == "/plugins/b"
+        assert "bad plugin" in (result.results[1].error_message or "")
+        assert result.results[1].correctness is not None
+        assert result.results[1].correctness.execution_success is False
 
 
 class TestNoRetryOnFailure:
