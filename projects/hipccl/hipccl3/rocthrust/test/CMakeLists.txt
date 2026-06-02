@@ -417,6 +417,9 @@ set_target_properties(rocthrust_generate_resource_spec PROPERTIES
   OUTPUT_NAME "generate_resource_spec"
 )
 target_link_libraries(rocthrust_generate_resource_spec PRIVATE hip::host)
+# This test may still get the offload-compress flag passed. Since it does not include any kernel
+# code it will give an unused-command-line-argument warning.
+target_compile_options(rocthrust_generate_resource_spec PRIVATE "-Wno-unused-command-line-argument")
 
 # Install the executable using the standard install command instead of rocm_install
 # since we want to put it in a custom DESTINATION (rocm_install does not support
