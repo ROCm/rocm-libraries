@@ -42,11 +42,10 @@ if(GPU_TARGETS MATCHES "gfx9|gfx11|gfx12")
     target_link_device_conv_libraries_if_exist(test_grouped_convnd_fwd_scale PRIVATE utility device_conv_operations)
 
     add_gtest_executable(test_grouped_convnd_fwd_bias_bnorm_clamp test_grouped_convnd_fwd_bias_bnorm_clamp.cpp)
-    set(BIAS_BNORM_CLAMP_LIBS utility device_conv_operations)
-    target_link_libraries(test_grouped_convnd_fwd_bias_bnorm_clamp PRIVATE ${BIAS_BNORM_CLAMP_LIBS})
+    target_link_device_conv_libraries_if_exist(test_grouped_convnd_fwd_bias_bnorm_clamp PRIVATE utility device_conv_operations)
 
     add_gtest_executable(test_grouped_convnd_fwd_gk_bias_bnorm_clamp test_grouped_convnd_fwd_gk_bias_bnorm_clamp.cpp)
-    target_link_libraries(test_grouped_convnd_fwd_gk_bias_bnorm_clamp PRIVATE ${BIAS_BNORM_CLAMP_LIBS})
+    target_link_device_conv_libraries_if_exist(test_grouped_convnd_fwd_gk_bias_bnorm_clamp PRIVATE utility device_conv_operations)
 
     add_gtest_executable(test_grouped_convnd_fwd_scaleadd_scaleadd_relu test_grouped_convnd_fwd_scaleadd_scaleadd_relu.cpp)
     target_link_device_conv_libraries_if_exist(test_grouped_convnd_fwd_scaleadd_scaleadd_relu PRIVATE utility device_conv_operations)
