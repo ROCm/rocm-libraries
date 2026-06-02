@@ -230,17 +230,7 @@ struct reference_fft_data_t
                                                   hipMemcpyDeviceToHost);
                 if(hip_status != hipSuccess)
                 {
-                    ++n_hip_failures;
-                    std::stringstream ss;
-                    ss << "hipMemcpy failure with error " << hip_status;
-                    if(skip_runtime_fails)
-                    {
-                        throw ROCFFT_SKIP{ss.str()};
-                    }
-                    else
-                    {
-                        throw ROCFFT_FAIL{ss.str()};
-                    }
+                    throw hip_runtime_error("hipMemcpy failure", hip_status);
                 }
             }
         }
@@ -256,17 +246,7 @@ struct reference_fft_data_t
                                                   hipMemcpyDeviceToHost);
                 if(hip_status != hipSuccess)
                 {
-                    ++n_hip_failures;
-                    std::stringstream ss;
-                    ss << "hipMemcpy failure with error " << hip_status;
-                    if(skip_runtime_fails)
-                    {
-                        throw ROCFFT_SKIP{ss.str()};
-                    }
-                    else
-                    {
-                        throw ROCFFT_FAIL{ss.str()};
-                    }
+                    throw hip_runtime_error("hipMemcpy failure", hip_status);
                 }
             }
 
@@ -350,17 +330,7 @@ struct reference_fft_data_t
 
             if(hip_status != hipSuccess)
             {
-                ++n_hip_failures;
-                std::stringstream ss;
-                ss << "hipMemcpy failure with error " << hip_status;
-                if(skip_runtime_fails)
-                {
-                    throw ROCFFT_SKIP{ss.str()};
-                }
-                else
-                {
-                    throw ROCFFT_FAIL{ss.str()};
-                }
+                throw hip_runtime_error("hipMemcpy failure", hip_status);
             }
         }
     }

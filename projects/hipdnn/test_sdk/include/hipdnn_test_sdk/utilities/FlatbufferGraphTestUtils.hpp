@@ -614,8 +614,8 @@ inline flatbuffers::FlatBufferBuilder createValidBatchnormInferActBwdGraph(
         std::nullopt, // relu_upper_clip
         std::nullopt, // relu_lower_clip_slope
         flatbuffers::nullopt, // axis_tensor_uid
-        10, // in_0_tensor_uid (BN_Y)
-        flatbuffers::Optional<int64_t>(6), // in_1_tensor_uid (dy)
+        6, // in_0_tensor_uid (dy)
+        flatbuffers::Optional<int64_t>(10), // in_1_tensor_uid (BN_Y)
         flatbuffers::nullopt, // in_2_tensor_uid
         11 // out_0_tensor_uid (DX_drelu - virtual)
     );
