@@ -1,55 +1,55 @@
 // Direct CK Tile convolution (streaming) 32c v2 kernels — Dgrad configs
 // Group 0: no swizzle, direct DRAM epilogue — Dgrad indices 0-7
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<0, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<1, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<2, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<3, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<4, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<5, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<6, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<7, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<ck_tile::direct_conv::grouped_32c_tile::v2::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(0), direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<ck_tile::direct_conv::grouped_32c_tile::v2::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(1), direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<ck_tile::direct_conv::grouped_32c_tile::v2::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(2), direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<ck_tile::direct_conv::grouped_32c_tile::v2::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(3), direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<ck_tile::direct_conv::grouped_32c_tile::v2::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(4), direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<ck_tile::direct_conv::grouped_32c_tile::v2::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(5), direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<ck_tile::direct_conv::grouped_32c_tile::v2::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(6), direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<ck_tile::direct_conv::grouped_32c_tile::v2::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(7), direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
 // Group 1: no swizzle, LDS-staged epilogue — Dgrad indices 16-23
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<16, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<17, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<18, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<19, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<20, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<21, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<22, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<23, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<ck_tile::direct_conv::grouped_32c_tile::v2::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(16), direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<ck_tile::direct_conv::grouped_32c_tile::v2::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(17), direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<ck_tile::direct_conv::grouped_32c_tile::v2::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(18), direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<ck_tile::direct_conv::grouped_32c_tile::v2::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(19), direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<ck_tile::direct_conv::grouped_32c_tile::v2::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(20), direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<ck_tile::direct_conv::grouped_32c_tile::v2::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(21), direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<ck_tile::direct_conv::grouped_32c_tile::v2::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(22), direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<ck_tile::direct_conv::grouped_32c_tile::v2::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(23), direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
 // Group 2: XOR swizzle, direct DRAM epilogue — Dgrad indices 34-41
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<32, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<33, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<34, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<35, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<36, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<37, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<38, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<39, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<ck_tile::direct_conv::grouped_32c_tile::v2::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(32), direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<ck_tile::direct_conv::grouped_32c_tile::v2::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(33), direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<ck_tile::direct_conv::grouped_32c_tile::v2::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(34), direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<ck_tile::direct_conv::grouped_32c_tile::v2::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(35), direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<ck_tile::direct_conv::grouped_32c_tile::v2::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(36), direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<ck_tile::direct_conv::grouped_32c_tile::v2::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(37), direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<ck_tile::direct_conv::grouped_32c_tile::v2::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(38), direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<ck_tile::direct_conv::grouped_32c_tile::v2::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(39), direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
 // Group 3: XOR swizzle, LDS-staged epilogue — Dgrad indices 48-55
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<48, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<49, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<50, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<51, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<52, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<53, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<54, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<55, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<ck_tile::direct_conv::grouped_32c_tile::v2::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(48), direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<ck_tile::direct_conv::grouped_32c_tile::v2::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(49), direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<ck_tile::direct_conv::grouped_32c_tile::v2::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(50), direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<ck_tile::direct_conv::grouped_32c_tile::v2::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(51), direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<ck_tile::direct_conv::grouped_32c_tile::v2::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(52), direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<ck_tile::direct_conv::grouped_32c_tile::v2::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(53), direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<ck_tile::direct_conv::grouped_32c_tile::v2::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(54), direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<ck_tile::direct_conv::grouped_32c_tile::v2::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(55), direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
 // Group 4: Cyclic-shift swizzle — Dgrad indices 66-67
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<66, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<67, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<ck_tile::direct_conv::grouped_32c_tile::v2::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(66), direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<ck_tile::direct_conv::grouped_32c_tile::v2::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(67), direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
 // Padded CyclicShift configs — Dgrad indices 68-72 (vector_size = 16, 8, 4, 2, 1)
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<68, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<69, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<70, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<71, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<72, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<ck_tile::direct_conv::grouped_32c_tile::v2::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(68), direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<ck_tile::direct_conv::grouped_32c_tile::v2::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(69), direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<ck_tile::direct_conv::grouped_32c_tile::v2::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(70), direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<ck_tile::direct_conv::grouped_32c_tile::v2::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(71), direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<ck_tile::direct_conv::grouped_32c_tile::v2::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(72), direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
 // Padded no-swizzle fallback — Dgrad index 78 (vector_size = 1)
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<78, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<ck_tile::direct_conv::grouped_32c_tile::v2::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(78), direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
 
 // Additional cyclic shift instances for 34-channel kernels.
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<82, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<83, direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<ck_tile::direct_conv::grouped_32c_tile::v2::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(82), direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<ck_tile::direct_conv::grouped_32c_tile::v2::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(83), direct_conv::Version::v2, direct_conv::DataType::bf16>, SIGNATURE>);
 
 ////////////////////////////////////////////////////////////////////////
 // Non-grouped convolution v3 (mfma_f32_16x16x32, M16N16K32)
@@ -63,43 +63,43 @@ run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CKernel<83, direct_c
 //   22    CyclicShift 8-wave  (LDS epilogue)
 ////////////////////////////////////////////////////////////////////////
 // No swizzle, direct DRAM epilogue
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<0, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<1, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<ck_tile::direct_conv::conv_32c_tile::v3::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(0), direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<ck_tile::direct_conv::conv_32c_tile::v3::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(1), direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
 // CyclicShift, direct DRAM epilogue
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<4, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<5, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<ck_tile::direct_conv::conv_32c_tile::v3::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(4), direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<ck_tile::direct_conv::conv_32c_tile::v3::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(5), direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
 // XOR, direct DRAM epilogue
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<8, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<9, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<ck_tile::direct_conv::conv_32c_tile::v3::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(8), direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<ck_tile::direct_conv::conv_32c_tile::v3::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(9), direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
 // CyclicShift + LDS-staged epilogue
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<12, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<13, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<ck_tile::direct_conv::conv_32c_tile::v3::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(12), direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<ck_tile::direct_conv::conv_32c_tile::v3::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(13), direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
 // XOR + LDS-staged epilogue
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<16, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<17, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<ck_tile::direct_conv::conv_32c_tile::v3::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(16), direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<ck_tile::direct_conv::conv_32c_tile::v3::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(17), direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
 // CyclicShift 8-wave
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<20, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<22, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<ck_tile::direct_conv::conv_32c_tile::v3::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(20), direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<ck_tile::direct_conv::conv_32c_tile::v3::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(22), direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
 // CyclicShift DRAM, 3-wave
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<24, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<ck_tile::direct_conv::conv_32c_tile::v3::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(24), direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
 // CyclicShift+LDS, 3-wave
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<26, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<ck_tile::direct_conv::conv_32c_tile::v3::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(26), direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
 // CyclicShift DRAM, 5-wave
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<28, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<ck_tile::direct_conv::conv_32c_tile::v3::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(28), direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
 // CyclicShift+LDS, 5-wave
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<30, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<ck_tile::direct_conv::conv_32c_tile::v3::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(30), direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
 // CyclicShift DRAM, 6-wave
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<32, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<ck_tile::direct_conv::conv_32c_tile::v3::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(32), direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
 // CyclicShift+LDS, 6-wave
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<34, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<ck_tile::direct_conv::conv_32c_tile::v3::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(34), direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
 // CyclicShift DRAM, 7-wave
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<36, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<ck_tile::direct_conv::conv_32c_tile::v3::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(36), direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
 // CyclicShift+LDS, 7-wave
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<38, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<ck_tile::direct_conv::conv_32c_tile::v3::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(38), direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
 // XOR DRAM, 8-wave
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<40, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<ck_tile::direct_conv::conv_32c_tile::v3::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(40), direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
 // XOR+LDS, 8-wave
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<42, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<ck_tile::direct_conv::conv_32c_tile::v3::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(42), direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
 
 ////////////////////////////////////////////////////////////////////////
 // Non-grouped convolution v3 — c_slices_per_wave > 1 (16x16x32 only)
@@ -107,11 +107,11 @@ run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<42, dir
 // Dgrad indices: 45,47 (waves=2 N=2/4), 49,51 (waves=2 N=2 Cyclic/XOR),
 //                53,55 (waves=4 N=2/4), 57,59 (waves=4 N=2 Cyclic/XOR)
 ////////////////////////////////////////////////////////////////////////
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<45, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<47, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<49, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<51, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<53, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<55, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<57, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
-run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<59, direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<ck_tile::direct_conv::conv_32c_tile::v3::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(45), direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<ck_tile::direct_conv::conv_32c_tile::v3::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(47), direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<ck_tile::direct_conv::conv_32c_tile::v3::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(49), direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<ck_tile::direct_conv::conv_32c_tile::v3::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(51), direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<ck_tile::direct_conv::conv_32c_tile::v3::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(53), direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<ck_tile::direct_conv::conv_32c_tile::v3::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(55), direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<ck_tile::direct_conv::conv_32c_tile::v3::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(57), direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);
+run_alg(run_direct_conv<direct_conv::DirectTileConvBwdData32CDenseKernel<ck_tile::direct_conv::conv_32c_tile::v3::KernelConfigurations<ck_tile::direct_conv::DataType::bf16>::configs_map.get(59), direct_conv::Version::v3, direct_conv::DataType::bf16>, SIGNATURE>);

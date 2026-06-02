@@ -8,14 +8,17 @@
 #pragma clang diagnostic ignored "-Wunused-parameter"
 #pragma clang diagnostic ignored "-Wshadow"
 #include "ck_tile/ops/direct_convolution/kernel/direct_conv_8c.hpp"
+#include "ck_tile/ops/direct_convolution/configs/direct_conv_8c_hip_configs.hpp"
 #pragma clang diagnostic pop
 
 struct HipConv8cKernelTraits
 {
     template <int ConfigIdx>
-    using FwdKernel = ck_tile::direct_conv::DirectHipConvForward8CFp16Kernel<ConfigIdx>;
+    using FwdKernel = ck_tile::direct_conv::DirectHipConvForward8CFp16Kernel<
+        ck_tile::direct_hip_conv::grouped_8c::configs_map.get(ConfigIdx)>;
     template <int ConfigIdx>
-    using BwdDataKernel = ck_tile::direct_conv::DirectHipConvBwdData8CFp16Kernel<ConfigIdx>;
+    using BwdDataKernel = ck_tile::direct_conv::DirectHipConvBwdData8CFp16Kernel<
+        ck_tile::direct_hip_conv::grouped_8c::configs_map.get(ConfigIdx)>;
 };
 
 class DirectConvGrouped8cFp16HipTest

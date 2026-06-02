@@ -20,7 +20,7 @@ namespace ck_tile::direct_conv {
 /// value at compile time.  This eliminates all runtime config-map lookups.
 ///
 /// Derived must provide:
-///   using V = <VariantAccessor>;  // has: configs_map, get_launch_params<cfg>,
+///   using V = <VariantAccessor>;  // has: get_launch_params<cfg>,
 ///                                 //      launch_kernel<cfg>, is_applicable,
 ///                                 //      is_config_compatible<cfg>
 ///   static constexpr bool kIsFprop = true/false;

@@ -24,6 +24,9 @@
 #include "ck_tile/ops/direct_convolution/utils/types.hpp"
 #include "ck_tile/ops/direct_convolution/kernel/impl/grouped_8c_tile_conv_impl_v2.hpp"
 #include "ck_tile/ops/direct_convolution/kernel/impl/grouped_16c_tile_conv_impl_v2.hpp"
+#include "ck_tile/ops/direct_convolution/configs/direct_conv_4c_configs.hpp"
+#include "ck_tile/ops/direct_convolution/configs/direct_conv_8c_configs.hpp"
+#include "ck_tile/ops/direct_convolution/configs/direct_conv_16c_configs.hpp"
 #pragma clang diagnostic pop
 
 #include <hip/hip_fp16.h>

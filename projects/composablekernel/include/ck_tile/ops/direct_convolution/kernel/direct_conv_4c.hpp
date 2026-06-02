@@ -22,8 +22,6 @@ struct TileConvVariant4c;
 template <DataType DT>
 struct TileConvVariant4c<Version::v3, DT>
 {
-    static constexpr auto& configs_map = grouped_4c_tile::v3::KernelConfigurations<DT>::configs_map;
-
     static bool is_applicable(const Conv2dParams& par)
     { return grouped_4c_tile::v3::is_applicable<DT>(par); }
 
@@ -43,8 +41,6 @@ struct TileConvVariant4c<Version::v3, DT>
 
 struct HipConvVariant4c
 {
-    static constexpr auto& configs_map = ck_tile::direct_hip_conv::grouped_4c::configs_map;
-
     static bool is_applicable(const Conv2dParams& par)
     { return ck_tile::direct_hip_conv::grouped_4c::is_applicable(par); }
 
@@ -66,10 +62,9 @@ struct HipConvVariant4c
 // Concrete kernel wrappers — 4c
 // ============================================================================
 
-template <int ConfigIdx, Version Ver = Version::v3, DataType DT = DataType::fp16>
+template <auto Cfg, Version Ver = Version::v3, DataType DT = DataType::fp16>
 struct DirectTileConvForward4CKernel
-    : DirectConvKernel<DirectTileConvForward4CKernel<ConfigIdx, Ver, DT>,
-                       TileConvVariant4c<Ver, DT>::configs_map.get(ConfigIdx)>
+    : DirectConvKernel<DirectTileConvForward4CKernel<Cfg, Ver, DT>, Cfg>
 {
     using V = TileConvVariant4c<Ver, DT>;
     static constexpr bool kIsFprop = true;
@@ -83,10 +78,9 @@ struct DirectTileConvForward4CKernel
     }
 };
 
-template <int ConfigIdx, Version Ver = Version::v3, DataType DT = DataType::fp16>
+template <auto Cfg, Version Ver = Version::v3, DataType DT = DataType::fp16>
 struct DirectTileConvBwdData4CKernel
-    : DirectConvKernel<DirectTileConvBwdData4CKernel<ConfigIdx, Ver, DT>,
-                       TileConvVariant4c<Ver, DT>::configs_map.get(ConfigIdx)>
+    : DirectConvKernel<DirectTileConvBwdData4CKernel<Cfg, Ver, DT>, Cfg>
 {
     using V = TileConvVariant4c<Ver, DT>;
     static constexpr bool kIsFprop = false;
@@ -100,10 +94,9 @@ struct DirectTileConvBwdData4CKernel
     }
 };
 
-template <int ConfigIdx>
+template <auto Cfg>
 struct DirectHipConvForward4CFp16Kernel
-    : DirectConvKernel<DirectHipConvForward4CFp16Kernel<ConfigIdx>,
-                       HipConvVariant4c::configs_map.get(ConfigIdx)>
+    : DirectConvKernel<DirectHipConvForward4CFp16Kernel<Cfg>, Cfg>
 {
     using V = HipConvVariant4c;
     static constexpr bool kIsFprop = true;
@@ -111,10 +104,9 @@ struct DirectHipConvForward4CFp16Kernel
     static std::string GetNamePrefix() { return "direct_hip_conv_fp16_fwd_"; }
 };
 
-template <int ConfigIdx>
+template <auto Cfg>
 struct DirectHipConvBwdData4CFp16Kernel
-    : DirectConvKernel<DirectHipConvBwdData4CFp16Kernel<ConfigIdx>,
-                       HipConvVariant4c::configs_map.get(ConfigIdx)>
+    : DirectConvKernel<DirectHipConvBwdData4CFp16Kernel<Cfg>, Cfg>
 {
     using V = HipConvVariant4c;
     static constexpr bool kIsFprop = false;

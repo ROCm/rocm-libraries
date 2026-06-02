@@ -57,23 +57,6 @@ struct Config
     }
 };
 
-// All instantiated configurations. Keys are explicit integers — the mapping from key to
-// Config is stable regardless of insertion order, unlike a plain array where position
-// implicitly encodes the key.
-// waves_per_wg = groups_per_wg * 2 (since 32c uses 2 waves per group)
-// groups_per_wg=2 -> waves_per_wg=4, groups_per_wg=1 -> waves_per_wg=2
-constexpr auto configs_map = make_config_map<Config>({
-    // Dgrad (keys 0–1)
-    {0, {.waves_per_wg = 4, .direction = Direction::Dgrad}},
-    {1, {.waves_per_wg = 2, .direction = Direction::Dgrad}},
-    // Fprop (keys 2–3)
-    {2, {.waves_per_wg = 4}},
-    {3, {.waves_per_wg = 2}},
-});
-static_assert(configs_map.is_valid(), "Duplicate or negative config key in grouped_32c configs_map");
-
-constexpr int NUM_CONFIGS = configs_map.size;
-
 inline bool is_valid_config(const Conv2dParams& par, const Config& cfg)
 {
     if(par.direction != cfg.direction)

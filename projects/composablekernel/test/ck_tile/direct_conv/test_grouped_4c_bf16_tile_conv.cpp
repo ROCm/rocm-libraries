@@ -7,6 +7,7 @@
 #pragma clang diagnostic ignored "-Wunused-parameter"
 #pragma clang diagnostic ignored "-Wshadow"
 #include "ck_tile/ops/direct_convolution/kernel/direct_conv_4c.hpp"
+#include "ck_tile/ops/direct_convolution/configs/direct_conv_4c_configs.hpp"
 #pragma clang diagnostic pop
 
 constexpr auto v3 = ck_tile::direct_conv::Version::v3;
@@ -15,10 +16,14 @@ struct TileConv4cBf16KernelTraits
 {
     template <int ConfigIdx>
     using FwdKernel = ck_tile::direct_conv::DirectTileConvForward4CKernel<
-        ConfigIdx, v3, ck_tile::direct_conv::DataType::bf16>;
+        ck_tile::direct_conv::grouped_4c_tile::v3::KernelConfigurations<
+            ck_tile::direct_conv::DataType::bf16>::configs_map.get(ConfigIdx),
+        v3, ck_tile::direct_conv::DataType::bf16>;
     template <int ConfigIdx>
     using BwdDataKernel = ck_tile::direct_conv::DirectTileConvBwdData4CKernel<
-        ConfigIdx, v3, ck_tile::direct_conv::DataType::bf16>;
+        ck_tile::direct_conv::grouped_4c_tile::v3::KernelConfigurations<
+            ck_tile::direct_conv::DataType::bf16>::configs_map.get(ConfigIdx),
+        v3, ck_tile::direct_conv::DataType::bf16>;
 };
 
 class DirectConvGrouped4cBf16TileConvTestV3

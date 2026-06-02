@@ -36,7 +36,6 @@ constexpr int WARP_Q = 4;
 constexpr int GROUP_SIZE = 4;
 
 // Kernel configuration parameters.
-
 struct Config
 {
     int waves_c64;
@@ -66,27 +65,6 @@ struct Config
                "_waves_q4_" + std::to_string(waves_q4);
     }
 };
-
-// All instantiated configurations. The first valid config is expected to be the fastest.
-// Keys are explicit integers — the mapping from key to Config is stable regardless of
-// insertion order, unlike a plain array where position implicitly encodes the key.
-constexpr auto configs_map = make_config_map<Config>({
-    // Dgrad (keys 0–4)
-    {0, {.waves_c64 = 2, .waves_q4 = 8, .direction = Direction::Dgrad}},
-    {1, {.waves_c64 = 2, .waves_q4 = 4, .direction = Direction::Dgrad}},
-    {2, {.waves_c64 = 2, .waves_q4 = 2, .direction = Direction::Dgrad}},
-    {3, {.waves_c64 = 2, .waves_q4 = 1, .direction = Direction::Dgrad}},
-    {4, {.waves_c64 = 1, .waves_q4 = 1, .direction = Direction::Dgrad}},
-    // Fprop (keys 5–9)
-    {5, {.waves_c64 = 2, .waves_q4 = 8}},
-    {6, {.waves_c64 = 2, .waves_q4 = 4}},
-    {7, {.waves_c64 = 2, .waves_q4 = 2}},
-    {8, {.waves_c64 = 2, .waves_q4 = 1}},
-    {9, {.waves_c64 = 1, .waves_q4 = 1}},
-});
-static_assert(configs_map.is_valid(), "Duplicate or negative config key in grouped_4c configs_map");
-
-constexpr int NUM_CONFIGS = configs_map.size;
 
 inline bool is_valid_config(const Conv2dParams& par, const Config& cfg)
 {
