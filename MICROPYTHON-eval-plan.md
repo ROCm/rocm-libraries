@@ -179,3 +179,43 @@ comgr compile end-to-end. The prior "MicroPython impossible" claim is refuted on
 level (not the ABI level — Win x64 would also pass a single-eightbyte struct in a register).
 **Next:** proceed to Phase 1 (can MicroPython actually *run* the ck_dsl compile slice — dataclasses/
 typing/lru_cache/pathlib shim fidelity), the real remaining uncertainty.
+
+## Phase 1 working log
+
+### Import-closure analysis (CPython ground truth, 2026-06-01)
+Probes: `spike/phase1_closure.py` (full), `spike/phase1_minimal_closure.py` (heavy package
+`__init__`s neutered via sys.modules namespace stubs), `spike/phase1_trace.py` (who-imports-what).
+- Full closure of provider compile path: **120 ck modules + 68 non-ck top-level packages.**
+- Neutering eager `__init__` bloat (`ck_dsl`/`helpers`/`instances`/`runtime`) cut ck modules to
+  **21 (elementwise) / 34 (+conv)**, but non-ck only fell to 57 → the stdlib breadth is pulled by
+  the **leaf compile-core modules**, not the `__init__` bloat.
+- Elementwise smoke compiles cleanly with the stubs (valid gfx1151 HSACO). **Conv does NOT stay
+  minimal**: `conv → helpers.pipeline → helpers.schedule → analysis.ir → analysis/__init__ →
+  analysis.report → `from ..helpers import KernelArtifact`` (package-level export) — real coupling
+  into `analysis` + package-level `helpers`. So elementwise is the clean first slice; conv needs
+  the coupling untangled (or `analysis`/`helpers` partially shimmed).
+
+### Causal map → the closure collapses (key finding)
+`spike/phase1_trace.py` shows the 57 non-ck packages are mostly **cascade from removable roots**:
+- `inspect ← dataclasses` → pulls `ast, dis, tokenize, token, linecache, opcode`. A clean
+  dataclasses shim (no `inspect`) deletes all of them.
+- `subprocess, tempfile ← helpers.compile` (only the **hipcc fallback**, not the comgr path) →
+  pull `shutil → bz2, lzma`, `locale → re`, `weakref`, `signal/select/selectors/fcntl`. Making
+  those two imports lazy deletes the whole cascade.
+- `urllib ← pathlib`, `ipaddress ← urllib` → a minimal pathlib shim deletes both.
+- `glob ← hip_module` → the 4-helper extraction deletes it. `ctypes ← comgr` → Phase-0 ffi.
+- `json ← arch.target`, `re` → MicroPython built-ins.
+
+### Core-path shim surface (final inventory)
+Real shims: **`dataclasses` (big: frozen/field/replace), `typing` (medium), `enum` (small),
+`functools.lru_cache` (small), `pathlib` (minimal)**. Built-in in MicroPython: `json, math,
+struct, re`. Two small ck_dsl edits: lazy `subprocess`/`tempfile` in `helpers/compile.py`;
+extract comgr's 4 lib helpers out of `hip_module.py`. **New risk:** MicroPython `re` is a
+SUBSET — must verify the actual patterns in `ir/lower_*/arch/elementwise/compile` parse under it.
+
+### Remaining Phase-1 steps (to reach G1)
+1. Build the shim package (dataclasses, typing, enum, functools.lru_cache, pathlib) for MicroPython.
+2. Drop in the Phase-0 comgr-ffi as `runtime/comgr` replacement; extract the 4 hip_module helpers.
+3. Provide trimmed `__init__`s (or direct leaf imports) for the elementwise slice.
+4. Run `compile_smoke`-equivalent under MicroPython; **byte-compare emitted LLVM IR vs CPython**
+   (equivalence oracle) → G1. Then attempt the conv slice (untangle analysis/helpers coupling).
