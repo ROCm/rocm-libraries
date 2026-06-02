@@ -318,8 +318,8 @@ def design_story():
         "the matching <font face='Courier'>benchmark_gemm_universal_&lt;name&gt;</font> is "
         "also run with verify; both must agree against the same reference.",
         "<b>Stage 3 &mdash; performance</b> (GPU-gated): "
-        "<font face='Courier'>|disp - te| / te &le; --perf-tol</font> (default 10%). The "
-        "harness reports GFLOP/s; it is converted to TFLOP/s to match Tile Engine's units.",
+        "<font face='Courier'>|disp - te| / te &le; --perf-tol</font> (default 2%). "
+        "Median of 10 outer runs per size; harness GFLOP/s converted to TFLOP/s to match Tile Engine's units.",
     ]))
     s.append(Paragraph(
         "A numerical failure short-circuits before performance is judged &mdash; enforcing "
@@ -443,8 +443,7 @@ def usage_story():
     s.append(Paragraph("Full dispatcher-vs-Tile-Engine (numerical then performance):", BODY))
     s.append(code(
         "python check_parity.py configs/single_fp16_rcr.json \\\n"
-        "    --te-build-dir /path/to/tile_engine/build \\\n"
-        "    --perf-tol 0.10"))
+        "    --te-build-dir /path/to/tile_engine/build"))
     s.append(Paragraph(
         "<font face='Courier'>--te-build-dir</font> is searched recursively for "
         "<font face='Courier'>benchmark_gemm_universal_&lt;name&gt;</font>. Tile Engine "
@@ -465,8 +464,8 @@ def usage_story():
          cell("GPU arch for the harness build")],
         [cell("<font face='Courier'>--te-build-dir</font>"), cell("(none)"),
          cell("Enables dispatcher-vs-TE comparison")],
-        [cell("<font face='Courier'>--perf-tol</font>"), cell("0.10"),
-         cell("Relative throughput tolerance (10%)")],
+        [cell("<font face='Courier'>--perf-tol</font>"), cell("0.02"),
+         cell("Relative throughput tolerance (2%)")],
         [cell("<font face='Courier'>--output-dir</font>"), cell("generated/"),
          cell("Codegen output directory")],
         [cell("<font face='Courier'>--kernel-set</font>"), cell("parity_single"),
