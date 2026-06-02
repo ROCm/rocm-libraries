@@ -38,6 +38,7 @@
 #include "IRLexer.hpp"
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/GfxIsa.hpp"
+#include "stinkytofu/hardware/HwRegHelpers.hpp"
 
 #define DEBUG_TYPE "RawAsmParser"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
@@ -521,36 +522,43 @@ bool parseWaitAluSyntax(IRLexer& lexer, ParsedInstruction& inst) {
     return true;
 }
 
-/// Parse hwreg(id, offset, width) syntax and store as a LiteralString
-/// register on the instruction for verbatim round-trip emission.
+/// Parse `hwreg(id [, offset [, size]])` into a structured HwReg operand.
+/// id accepts numeric (decimal or 0x) or symbolic HW_REG_* names.
 void parseHwregOperand(IRLexer& lexer, ParsedInstruction& inst,
-                       const HwInstDesc::OperandFieldDesc& field) {
+                       const HwInstDesc::OperandFieldDesc& field, GfxArchID arch) {
     if (lexer.isAtEnd() || lexer.peek().kind != TokenKind::Identifier) return;
-    std::string text(lexer.peek().text);
-    if (text != "hwreg") return;
+    if (lexer.peek().text != "hwreg") return;
+    lexer.consume();
+    if (lexer.isAtEnd() || lexer.peek().kind != TokenKind::LeftParen) return;
     lexer.consume();
 
-    if (lexer.isAtEnd() || lexer.peek().kind != TokenKind::LeftParen) {
-        StinkyRegister reg(text);
-        if (field.isDest)
-            inst.destRegs.push_back(reg);
-        else
-            inst.srcRegs.push_back(reg);
-        return;
-    }
-    text += '(';
+    if (lexer.isAtEnd()) return;
+    auto idOpt = HwReg::parseId(arch, lexer.peek().text);
+    if (!idOpt) return;
+    uint16_t id = *idOpt;
     lexer.consume();
 
-    int depth = 1;
-    while (!lexer.isAtEnd() && depth > 0) {
-        const auto& tok = lexer.consume();
-        if (tok.kind == TokenKind::LeftParen) depth++;
-        if (tok.kind == TokenKind::RightParen) depth--;
-        if (depth > 0) text += std::string(tok.text);
-    }
-    text += ')';
+    auto consumeIntField = [&](uint16_t& out) -> bool {
+        if (lexer.isAtEnd() || lexer.peek().kind != TokenKind::Comma) return false;
+        lexer.consume();
+        if (lexer.isAtEnd()) return false;
+        const auto& t = lexer.peek();
+        if (t.kind != TokenKind::IntegerLiteral && t.kind != TokenKind::HexLiteral) return false;
+        std::string s(t.text);
+        char* end = nullptr;
+        unsigned long v = std::strtoul(s.c_str(), &end, 0);
+        if (end != s.c_str() + s.size() || v > 0xFFFFu) return false;
+        out = static_cast<uint16_t>(v);
+        lexer.consume();
+        return true;
+    };
+    uint16_t offset = 0;
+    uint16_t size = 32;
+    if (consumeIntField(offset)) consumeIntField(size);
 
-    StinkyRegister reg(text);
+    if (!lexer.isAtEnd() && lexer.peek().kind == TokenKind::RightParen) lexer.consume();
+
+    StinkyRegister reg = StinkyRegister::Hwreg(id, offset, size);
     if (field.isDest)
         inst.destRegs.push_back(reg);
     else
@@ -559,7 +567,7 @@ void parseHwregOperand(IRLexer& lexer, ParsedInstruction& inst,
 
 /// Dispatch a custom-syntax operand to its dedicated parser based on FieldType.
 void parseCustomOperand(IRLexer& lexer, ParsedInstruction& inst,
-                        const HwInstDesc::OperandFieldDesc& field) {
+                        const HwInstDesc::OperandFieldDesc& field, GfxArchID arch) {
     switch (field.fieldType) {
         case FieldType::delay:
             parseDelayAluSyntax(lexer, inst);
@@ -568,7 +576,7 @@ void parseCustomOperand(IRLexer& lexer, ParsedInstruction& inst,
             parseWaitAluSyntax(lexer, inst);
             break;
         case FieldType::hwreg:
-            parseHwregOperand(lexer, inst, field);
+            parseHwregOperand(lexer, inst, field, arch);
             break;
         default:
             break;
@@ -927,7 +935,7 @@ std::unique_ptr<ParsedInstruction> parseInstLine(const std::string& line, GfxArc
 
             // Custom-syntax operand: dispatch to dedicated parser.
             if (hasCustomOperandSyntax(field.fieldType)) {
-                parseCustomOperand(lexer, *inst, field);
+                parseCustomOperand(lexer, *inst, field, arch);
                 continue;
             }
 

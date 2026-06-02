@@ -181,6 +181,9 @@ else()
       gfx1152
       gfx1153
       gfx12-generic
+      gfx1200
+      gfx1201
+      gfx1250
     )
     if(BUILD_ADDRESS_SANITIZER)
       set(OPTIONAL_TARGETS_QUERY ${XNACK_PLUS_TARGETS})
