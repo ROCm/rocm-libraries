@@ -43,15 +43,25 @@ namespace ck_dsl_provider {
 /// ctor parameter is retained for source compatibility with the plan
 /// builder's call site.
 ///
-/// **GPU launch.** ``execute`` marshals the three host integer arrays
-/// (block_tables / cu_seqlens_q / seqused_k -- see ``SdpaMarshalling``),
-/// uploads them into the caller-provided workspace, binds the unified
-/// 18-slot ABI, and launches on the handle's stream. Only the DENSE
-/// (non-paged, non-varlen) marshalling path is wired; the paged / varlen
-/// branches throw a clearly-marked Phase-4-follow-up error rather than
-/// silently mishandling them. Workspace bytes come from
-/// ``getWorkspaceSize`` (the plan never allocates device memory
-/// internally).
+/// **GPU launch.** ``execute`` resolves Q/K/V/O (+ optional sink) to
+/// device pointers, marshals the host integer arrays the kernel reads
+/// (cu_seqlens_q / seqused_k, plus block_tables for the non-paged paths
+/// -- see ``SdpaMarshalling``), uploads them into the caller-provided
+/// workspace, binds the unified 18-slot ABI, and launches on the handle's
+/// stream. All four marshalling paths are wired:
+///   - **dense** (!paged && !varlen): the degenerate one-block-per-position
+///     layout; block_tables/cu_seqlens_q/seqused_k all come from
+///     ``marshalDenseDegenerate`` and are uploaded into the workspace.
+///   - **real-paged** (paged && !varlen): cu_seqlens_q/seqused_k come from
+///     ``marshalDenseDegenerate`` (uniform lengths); the block_tables slot
+///     binds the graph's Page_table_K device buffer DIRECTLY (no upload).
+///   - **varlen** (!paged && varlen): per-sequence lengths are read from
+///     the graph's seq_len_q/seq_len_kv device buffers via a small D2H
+///     copy, then ``marshalVarlen`` builds all three arrays (uploaded).
+///   - **paged + varlen**: the varlen seq-lens drive cu_seqlens_q/seqused_k
+///     (uploaded) and the graph's block table binds directly (no upload).
+/// Workspace bytes come from ``getWorkspaceSize`` (the plan never
+/// allocates device memory internally).
 class SdpaFwdPlan : public hipdnn_plugin_sdk::IPlan<::CkDslHandle> {
    public:
     /// Construction params beyond the tensor UIDs + launch scalars:
@@ -59,18 +69,25 @@ class SdpaFwdPlan : public hipdnn_plugin_sdk::IPlan<::CkDslHandle> {
     ///   ``blockSize`` -- paged KV block size in tokens (one of 16/32/64);
     ///                    sizes the degenerate block table + the
     ///                    ``block_table_stride`` arg.
-    ///   ``isPaged`` / ``isVarlen`` -- marshalling-path selectors. Only
-    ///                    the dense (both false) path is wired today.
+    ///   ``isPaged`` / ``isVarlen`` -- marshalling-path selectors; all four
+    ///                    combinations are wired (see the class comment).
     ///   ``useSinks``  -- bind the sink_ptr from ``sinkUid`` (else null).
     ///   ``sinkUid``   -- device-buffer uid for the sink tensor (the SDPA
     ///                    sink_token uid; -1 when sinks are off).
+    ///   ``pageTableUid`` -- device-buffer uid for the graph's Page_table_K
+    ///                    tensor, bound directly to the block_tables slot on
+    ///                    the paged paths (-1 when not paged).
+    ///   ``seqLenQUid`` / ``seqLenKvUid`` -- device-buffer uids for the
+    ///                    graph's seq_len_q / seq_len_kv tensors; read via a
+    ///                    small D2H copy on the varlen paths (-1 otherwise).
     SdpaFwdPlan(std::shared_ptr<HipModule> module, std::int64_t qUid, std::int64_t kUid,
                 std::int64_t vUid, std::int64_t oUid, float scaleLog2, std::int32_t seqlenQ,
                 std::int32_t seqlenK, std::int32_t strideQToken, std::int32_t strideQHead,
                 std::int32_t strideKToken, std::int32_t strideKHead, std::int32_t strideVToken,
                 std::int32_t strideVHead, std::int32_t strideOToken, std::int32_t strideOHead,
                 std::int32_t batch, std::int32_t blockSize, bool isPaged, bool isVarlen,
-                bool useSinks, std::int64_t sinkUid = -1, bool hasStats = false,
+                bool useSinks, std::int64_t pageTableUid = -1, std::int64_t seqLenQUid = -1,
+                std::int64_t seqLenKvUid = -1, std::int64_t sinkUid = -1, bool hasStats = false,
                 std::int64_t statsUid = -1);
 
     /// Bytes the caller must allocate and pass as ``workspace`` to
@@ -82,16 +99,17 @@ class SdpaFwdPlan : public hipdnn_plugin_sdk::IPlan<::CkDslHandle> {
 
     /// Resolve Q/K/V/O (+ optional sink) device pointers from
     /// ``deviceBuffers`` by uid (so a graph-vs-buffer mismatch surfaces
-    /// here), marshal the three host integer arrays, upload them into
-    /// ``workspace``, bind the unified 18-slot ABI, and launch on the
-    /// handle's stream. Only the dense (non-paged, non-varlen) path is
-    /// wired; paged/varlen throw a Phase-4-follow-up error.
+    /// here), marshal the host integer arrays for the selected path,
+    /// upload the workspace-bound ones, bind the unified 18-slot ABI, and
+    /// launch on the handle's stream. The path is chosen from
+    /// ``isPaged`` / ``isVarlen``: the varlen paths first D2H-copy the
+    /// graph's per-sequence lengths; the paged paths bind the graph's
+    /// block table directly (see the class comment for the four cases).
     ///
     /// Throws ``hipdnn_plugin_sdk::HipdnnPluginException`` if a UID is
     /// missing, if ``workspace`` is null (the caller must provide
     /// ``getWorkspaceSize`` bytes -- the plan never allocates device
-    /// memory itself), if a HIP upload/launch fails, or if the
-    /// marshalling path is paged/varlen.
+    /// memory itself), or if a HIP copy/launch fails.
     void execute(const ::CkDslHandle& handle, const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                  std::uint32_t numDeviceBuffers, void* workspace = nullptr) const override;
 
@@ -133,6 +151,9 @@ class SdpaFwdPlan : public hipdnn_plugin_sdk::IPlan<::CkDslHandle> {
     bool _isPaged;
     bool _isVarlen;
     bool _useSinks;
+    std::int64_t _pageTableUid;
+    std::int64_t _seqLenQUid;
+    std::int64_t _seqLenKvUid;
     std::int64_t _sinkUid;
     bool _hasStats;
     std::int64_t _statsUid;

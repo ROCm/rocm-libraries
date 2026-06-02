@@ -88,7 +88,8 @@ TEST(SdpaFwdFakeLaunch, ExecuteBindsAllAbiSlots) {
                      kSeqlenK, /*strideQToken=*/0, /*strideQHead=*/0, /*strideKToken=*/0,
                      /*strideKHead=*/0, /*strideVToken=*/0, /*strideVHead=*/0, /*strideOToken=*/0,
                      /*strideOHead=*/0, kBatch, kBlockSize, /*isPaged=*/false, /*isVarlen=*/false,
-                     /*useSinks=*/false, /*sinkUid=*/-1);
+                     /*useSinks=*/false, /*pageTableUid=*/-1, /*seqLenQUid=*/-1,
+                     /*seqLenKvUid=*/-1, /*sinkUid=*/-1);
 
     // Output holds the fingerprint: 11 int32 elements. Query is read at
     // element 0 to prove pointer slot 1 is bound; seed it with a sentinel.
