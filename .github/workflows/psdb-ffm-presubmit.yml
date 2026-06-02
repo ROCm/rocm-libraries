@@ -1,0 +1,48 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+# Pre-submit GPU emulation tests for TensileLite gfx1250 common GEMM tests.
+#
+# Dispatches to an external PSDB (Pre-Submit DataBase) workflow that builds
+# ROCm from the PR's commit and runs FFM (Functional Model) tests.
+#
+# Required secrets (configured by repo admin):
+#   PSDB_DISPATCH_PAT  — GitHub PAT with `repo` scope on the target repository
+#   PSDB_DISPATCH_REPO — Target repository in "org/repo" format
+#
+# Required variable:
+#   PSDB_DISPATCH_ENABLED — Set to "true" to enable dispatch (kill switch)
+
+name: Pre-Submit GPU Emulation Tests
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [develop]
+    paths:
+      - "projects/hipblaslt/tensilelite/**"
+
+permissions:
+  contents: read
+
+jobs:
+  dispatch-gpu-tests:
+    name: Dispatch gfx1250 FFM tests
+    if: >-
+      !github.event.pull_request.draft &&
+      vars.PSDB_DISPATCH_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger PSDB build + FFM tests
+        env:
+          GH_TOKEN: ${{ secrets.PSDB_DISPATCH_PAT }}
+        run: |
+          gh api "repos/${{ secrets.PSDB_DISPATCH_REPO }}/dispatches" \
+            -f event_type=psdb-trigger \
+            -f "client_payload={
+              \"repo\": \"rocm-libraries\",
+              \"commit\": \"${{ github.event.pull_request.head.sha }}\",
+              \"pr_number\": \"${{ github.event.pull_request.number }}\",
+              \"families\": \"gfx1250\",
+              \"component_list\": \"tensilelite\"
+            }"
