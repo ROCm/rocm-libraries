@@ -152,22 +152,30 @@ def drive(
         return proc.returncode
 
     # Surface generated headers for the chosen kernel set.
+    # Only count top-level gemm_*.hpp files in set_dir — not the dispatcher_wrappers/
+    # subdirectory that codegen also emits (register_all_kernels.hpp, wrapper hpp).
+    # The harness compiles against the primary kernel header, so that's the only one
+    # that must exist and carry the expected identifier in its name.
     set_dir = output_dir / kernel_set
-    headers = sorted(set_dir.rglob("*.hpp")) if set_dir.exists() else []
-    print(f"\nGenerated {len(headers)} header(s) under {set_dir}:")
-    for h in headers:
+    all_headers = sorted(set_dir.rglob("*.hpp")) if set_dir.exists() else []
+    kernel_headers = [h for h in all_headers if h.parent == set_dir]
+    print(f"\nGenerated {len(all_headers)} header(s) under {set_dir} "
+          f"({len(kernel_headers)} primary kernel header(s)):")
+    for h in all_headers:
         print(f"  {h}")
     print(f"\nExpected registry identifier: {identifier}")
 
-    # Exactly one header must be emitted for this config, and it must contain the
+    # Exactly one primary kernel header must be emitted, and it must contain the
     # expected identifier in its filename so the harness macro lookup cannot silently
     # pick the wrong kernel.
-    if len(headers) != 1:
-        print(f"error: expected exactly 1 generated header, got {len(headers)}: {headers}",
+    if len(kernel_headers) != 1:
+        print(f"error: expected exactly 1 primary kernel header in {set_dir}, "
+              f"got {len(kernel_headers)}: {kernel_headers}",
               file=sys.stderr)
         return 1
-    if identifier not in headers[0].name:
-        print(f"error: expected identifier {identifier!r} in header name {headers[0].name!r}",
+    if identifier not in kernel_headers[0].name:
+        print(f"error: expected identifier {identifier!r} in header name "
+              f"{kernel_headers[0].name!r}",
               file=sys.stderr)
         return 1
     return 0
