@@ -193,12 +193,12 @@ class GL2PrefetchLoad(GL2Prefetch):
                         continue
                     assert(batchIdx==2) # can only have one wg2 with a batch. Other dimensions should be packed into wg0/wg1
                     batchStrideName = "Stride%s%s"%(tc, writer.states.indexChars[batchIdx])
-                    mod.add(scalarMultiplyBpe(tmpSgprIdx0, batchStrideName, bpe, comment="batchStride * bpe"))
+                    mod.add(scalarMultiplyBpe(tmpSgprIdx2, batchStrideName, bpe, comment="batchStride * bpe"))
                     mod.addModuleAsFlatItems(writer.s_mul_u64_u32(
-                        sgpr(tmpSgprIdx0), sgpr(tmpSgprIdx1),
-                        sgpr("WorkGroup2"), sgpr(tmpSgprIdx0),
+                        sgpr(tmpSgprIdx2), sgpr(tmpSgprIdx3),
+                        sgpr("WorkGroup2"), sgpr(tmpSgprIdx2),
                         tmpVgprIdx, comment="batch offset * wg2"))
-
+                    mod.add(SAddU64(sgpr(tmpSgprIdx0, 2), sgpr(tmpSgprIdx0, 2), sgpr(tmpSgprIdx2, 2)))
             # skip PGR loads (uses GSU-adjusted increment)
             if kernel["PrefetchGlobalRead"] > 0:
                 if kernel["PrefetchGlobalRead"] > 1:
