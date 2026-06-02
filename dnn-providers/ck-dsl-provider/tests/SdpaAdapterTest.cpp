@@ -56,9 +56,12 @@ SdpaSpec buildSpecFromGraph(const flatbuffer_utilities::GraphWrapper& graph) {
     return SdpaAdapter::buildSpec(sdpaAttr, graph.getTensorMap());
 }
 
-/// Valid SDPA-fwd graph: B=2, Hq=Hkv=8, Sq=Skv=16, D=64, FP16, no mask,
-/// BSHD strides. For these dims BSHD = {8192, 64, 512, 1}: batch =
-/// 16*8*64 = 8192, head = 64, token = 8*64 = 512, d = 1.
+/// Valid SDPA-fwd graph: B=2, Hq=Hkv=8, Sq=Skv=16, D=64, FP16, top-left
+/// causal mask, BSHD strides. For these dims BSHD = {8192, 64, 512, 1}:
+/// batch = 16*8*64 = 8192, head = 64, token = 8*64 = 512, d = 1. The
+/// unified paged kernel applies causal masking unconditionally, so the
+/// default-accepted shape carries causal_mask (a non-causal graph is
+/// declined -- see RejectsNonCausal).
 TEST(TestSdpaAdapter, BuildSpecForDefaultShape) {
     const auto qkvoStrides = bshdStrides(/*H=*/8, /*S=*/16, /*D=*/64);
     auto fbBuilder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
@@ -66,7 +69,8 @@ TEST(TestSdpaAdapter, BuildSpecForDefaultShape) {
         /*kDims=*/{2, 8, 16, 64}, /*kStrides=*/qkvoStrides,
         /*vDims=*/{2, 8, 16, 64}, /*vStrides=*/qkvoStrides,
         /*oDims=*/{2, 8, 16, 64}, /*oStrides=*/qkvoStrides,
-        /*dataType=*/DataType::HALF);
+        /*dataType=*/DataType::HALF, /*withAttnMask=*/false, /*withScale=*/false,
+        /*withStats=*/false, /*alibiMask=*/false, /*paddingMask=*/false, /*causalMask=*/true);
     flatbuffer_utilities::GraphWrapper graph(fbBuilder.GetBufferPointer(), fbBuilder.GetSize());
 
     SdpaSpec spec = buildSpecFromGraph(graph);
@@ -89,7 +93,16 @@ TEST(TestSdpaAdapter, BuildSpecForDefaultShape) {
     EXPECT_EQ(spec.problem.stride_o_head, 64);
 
     EXPECT_EQ(spec.dtype, "f16");
-    EXPECT_EQ(spec.mask_mode, "none");
+    EXPECT_EQ(spec.mask_mode, "causal");
+
+    // Dense (no page tables / no seqlen tensors): not paged, not varlen,
+    // no window, no sinks.
+    EXPECT_FALSE(spec.is_paged);
+    EXPECT_EQ(spec.block_size, 0);
+    EXPECT_FALSE(spec.is_varlen);
+    EXPECT_EQ(spec.sliding_window, 0);
+    EXPECT_FALSE(spec.use_sinks);
+    EXPECT_FALSE(spec.generate_stats);
 
     // Default scale: 1/sqrt(D) folded into log2 space.
     const float expectedScaleLog2 = (1.0f / std::sqrt(64.0f)) * static_cast<float>(M_LOG2E);
@@ -122,7 +135,8 @@ TEST(TestSdpaAdapter, AcceptsGqa) {
         /*kDims=*/{2, 2, 16, 64}, /*kStrides=*/kvStrides,
         /*vDims=*/{2, 2, 16, 64}, /*vStrides=*/kvStrides,
         /*oDims=*/{2, 8, 16, 64}, /*oStrides=*/qoStrides,
-        /*dataType=*/DataType::HALF);
+        /*dataType=*/DataType::HALF, /*withAttnMask=*/false, /*withScale=*/false,
+        /*withStats=*/false, /*alibiMask=*/false, /*paddingMask=*/false, /*causalMask=*/true);
     flatbuffer_utilities::GraphWrapper graph(fbBuilder.GetBufferPointer(), fbBuilder.GetSize());
 
     SdpaSpec spec = buildSpecFromGraph(graph);
@@ -133,16 +147,20 @@ TEST(TestSdpaAdapter, AcceptsGqa) {
 
 // ---- Reject cases -------------------------------------------------------
 
-TEST(TestSdpaAdapter, RejectsBf16Dtype) {
+TEST(TestSdpaAdapter, AcceptsBf16Dtype) {
+    // The unified paged kernel emits BF16 as well as FP16. A causal BF16
+    // graph is accepted and spec.dtype == "bf16".
     const auto qkvoStrides = bshdStrides(/*H=*/8, /*S=*/16, /*D=*/64);
     auto fbBuilder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
         /*qDims=*/{2, 8, 16, 64}, /*qStrides=*/qkvoStrides,
         /*kDims=*/{2, 8, 16, 64}, /*kStrides=*/qkvoStrides,
         /*vDims=*/{2, 8, 16, 64}, /*vStrides=*/qkvoStrides,
         /*oDims=*/{2, 8, 16, 64}, /*oStrides=*/qkvoStrides,
-        /*dataType=*/DataType::BFLOAT16);
+        /*dataType=*/DataType::BFLOAT16, /*withAttnMask=*/false, /*withScale=*/false,
+        /*withStats=*/false, /*alibiMask=*/false, /*paddingMask=*/false, /*causalMask=*/true);
     flatbuffer_utilities::GraphWrapper graph(fbBuilder.GetBufferPointer(), fbBuilder.GetSize());
-    EXPECT_THROW(buildSpecFromGraph(graph), hipdnn_plugin_sdk::HipdnnPluginException);
+    SdpaSpec spec = buildSpecFromGraph(graph);
+    EXPECT_EQ(spec.dtype, "bf16");
 }
 
 TEST(TestSdpaAdapter, RejectsSeqlenQNotMultipleOf16) {
@@ -197,7 +215,8 @@ TEST(TestSdpaAdapter, RejectsNonUnitHeadDimStride) {
         /*kDims=*/{2, 8, 16, 64}, /*kStrides=*/qkvoStrides,
         /*vDims=*/{2, 8, 16, 64}, /*vStrides=*/qkvoStrides,
         /*oDims=*/{2, 8, 16, 64}, /*oStrides=*/qkvoStrides,
-        /*dataType=*/DataType::HALF);
+        /*dataType=*/DataType::HALF, /*withAttnMask=*/false, /*withScale=*/false,
+        /*withStats=*/false, /*alibiMask=*/false, /*paddingMask=*/false, /*causalMask=*/true);
     flatbuffer_utilities::GraphWrapper graph(fbBuilder.GetBufferPointer(), fbBuilder.GetSize());
     EXPECT_THROW(buildSpecFromGraph(graph), hipdnn_plugin_sdk::HipdnnPluginException);
 }
@@ -206,13 +225,16 @@ TEST(TestSdpaAdapter, BhsdLayoutRejectedForBatchGt1) {
     // Contiguous BHSD strides {H*S*D, S*D, D, 1} = {8192, 1024, 64, 1}.
     // With B>1 this violates the batch-contiguity contract (batch stride
     // must equal seqlen*token = 16*1024 != 8192), so the adapter rejects.
+    // A valid causal mask is set so the layout check (not the non-causal
+    // decline) is what trips.
     const std::vector<std::int64_t> bhsdStrides{8192, 1024, 64, 1};
     auto fbBuilder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
         /*qDims=*/{2, 8, 16, 64}, /*qStrides=*/bhsdStrides,
         /*kDims=*/{2, 8, 16, 64}, /*kStrides=*/bhsdStrides,
         /*vDims=*/{2, 8, 16, 64}, /*vStrides=*/bhsdStrides,
         /*oDims=*/{2, 8, 16, 64}, /*oStrides=*/bhsdStrides,
-        /*dataType=*/DataType::HALF);
+        /*dataType=*/DataType::HALF, /*withAttnMask=*/false, /*withScale=*/false,
+        /*withStats=*/false, /*alibiMask=*/false, /*paddingMask=*/false, /*causalMask=*/true);
     flatbuffer_utilities::GraphWrapper graph(fbBuilder.GetBufferPointer(), fbBuilder.GetSize());
     EXPECT_THROW(buildSpecFromGraph(graph), hipdnn_plugin_sdk::HipdnnPluginException);
 }
@@ -236,16 +258,17 @@ TEST(TestSdpaAdapter, RejectsScaleTensor) {
         /*kDims=*/{2, 8, 16, 64}, /*kStrides=*/qkvoStrides,
         /*vDims=*/{2, 8, 16, 64}, /*vStrides=*/qkvoStrides,
         /*oDims=*/{2, 8, 16, 64}, /*oStrides=*/qkvoStrides,
-        /*dataType=*/DataType::HALF, /*withAttnMask=*/false, /*withScale=*/true);
+        /*dataType=*/DataType::HALF, /*withAttnMask=*/false, /*withScale=*/true,
+        /*withStats=*/false, /*alibiMask=*/false, /*paddingMask=*/false, /*causalMask=*/true);
     flatbuffer_utilities::GraphWrapper graph(fbBuilder.GetBufferPointer(), fbBuilder.GetSize());
     EXPECT_THROW(buildSpecFromGraph(graph), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
-TEST(TestSdpaAdapter, AcceptsStatsOutput) {
-    // A forward graph requesting the LSE stats output (training) is
-    // supported: the helper's stats tensor is FLOAT [B, Hq, Sq, 1] with
-    // head-major contiguous strides, which the adapter accepts and flags
-    // via generate_stats. The kernel then emits the natural-log LSE.
+TEST(TestSdpaAdapter, DeclinesStatsOutput) {
+    // The dense path can emit LSE, but the unified paged kernel cannot.
+    // A forward graph requesting the LSE stats output (even with a valid
+    // causal mask) is DECLINED -- a deliberate regression vs the dense
+    // path (Vidya follow-up). The throw is the clean capability decline.
     const auto qkvoStrides = bshdStrides(/*H=*/8, /*S=*/16, /*D=*/64);
     auto fbBuilder = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
         /*qDims=*/{2, 8, 16, 64}, /*qStrides=*/qkvoStrides,
@@ -253,10 +276,9 @@ TEST(TestSdpaAdapter, AcceptsStatsOutput) {
         /*vDims=*/{2, 8, 16, 64}, /*vStrides=*/qkvoStrides,
         /*oDims=*/{2, 8, 16, 64}, /*oStrides=*/qkvoStrides,
         /*dataType=*/DataType::HALF, /*withAttnMask=*/false, /*withScale=*/false,
-        /*withStats=*/true);
+        /*withStats=*/true, /*alibiMask=*/false, /*paddingMask=*/false, /*causalMask=*/true);
     flatbuffer_utilities::GraphWrapper graph(fbBuilder.GetBufferPointer(), fbBuilder.GetSize());
-    SdpaSpec spec = buildSpecFromGraph(graph);
-    EXPECT_TRUE(spec.generate_stats);
+    EXPECT_THROW(buildSpecFromGraph(graph), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
 TEST(TestSdpaAdapter, RejectsAlibiMask) {
@@ -301,12 +323,39 @@ struct SdpaAttrConfig {
     std::int32_t Skv{16};
     std::int32_t D{64};
 
-    // Optional scalars / uids the M1 forward adapter rejects when present.
+    // Q/K/V/O dtype. The unified paged kernel accepts HALF and BFLOAT16.
+    DataType dataType{DataType::HALF};
+
+    // Masking. The kernel applies causal unconditionally, so the baseline
+    // sets causal_mask=true (a non-causal graph is declined). Tests flip
+    // these to exercise the mask decline/accept matrix.
+    bool causalMask{true};
+    bool causalMaskBottomRight{false};
+    data_objects::DiagonalAlignment diagonalAlignment{data_objects::DiagonalAlignment::TOP_LEFT};
+    flatbuffers::Optional<std::int64_t> leftBound{flatbuffers::nullopt};
+    flatbuffers::Optional<std::int64_t> rightBound{flatbuffers::nullopt};
+
+    // Optional scalars / uids the adapter accepts or declines.
     flatbuffers::Optional<float> attnScaleValue{flatbuffers::nullopt};
     flatbuffers::Optional<float> dropoutProbability{flatbuffers::nullopt};
     flatbuffers::Optional<std::int64_t> descaleQUid{flatbuffers::nullopt};
     flatbuffers::Optional<std::int64_t> amaxSUid{flatbuffers::nullopt};
     flatbuffers::Optional<std::int64_t> rngDumpUid{flatbuffers::nullopt};
+    flatbuffers::Optional<std::int64_t> statsUid{flatbuffers::nullopt};
+
+    // Variant lanes: present uids select varlen / paged / sinks. The page
+    // tables are created with [num_seqs, max_blocks_per_seq] = [B, kPages]
+    // dims; with max_seq_len_kv the adapter derives block_size. By default
+    // kPagesK == kPagesV (matched single-table layout); set kPagesV != 0
+    // and different to force a mismatch.
+    bool withSeqLenQ{false};
+    bool withSeqLenKv{false};
+    bool withPageTableK{false};
+    bool withPageTableV{false};
+    std::int64_t kPagesK{4};
+    std::int64_t kPagesV{4};
+    flatbuffers::Optional<std::int32_t> maxSeqLenKv{flatbuffers::nullopt};
+    bool withSinkToken{false};
 };
 
 /// Build a single SDPA node + its Q/K/V/O tensor map by hand so we can
@@ -321,6 +370,11 @@ struct SdpaAttrFixture {
     flatbuffers::FlatBufferBuilder kBuilder;
     flatbuffers::FlatBufferBuilder vBuilder;
     flatbuffers::FlatBufferBuilder oBuilder;
+    flatbuffers::FlatBufferBuilder pageKBuilder;
+    flatbuffers::FlatBufferBuilder pageVBuilder;
+    flatbuffers::FlatBufferBuilder seqQBuilder;
+    flatbuffers::FlatBufferBuilder seqKvBuilder;
+    flatbuffers::FlatBufferBuilder sinkBuilder;
     flatbuffers::FlatBufferBuilder attrBuilder;
     const data_objects::TensorAttributes* q{nullptr};
     const data_objects::TensorAttributes* k{nullptr};
@@ -329,11 +383,19 @@ struct SdpaAttrFixture {
     const SdpaAttributes* attr{nullptr};
     SdpaAdapter::TensorMap tensorMap;
 
+    // UIDs for the optional variant tensors (only inserted when enabled).
+    static constexpr std::int64_t kPageKUid = 11;
+    static constexpr std::int64_t kPageVUid = 12;
+    static constexpr std::int64_t kSeqQUid = 7;
+    static constexpr std::int64_t kSeqKvUid = 8;
+    static constexpr std::int64_t kSinkUid = 20;
+
     static const data_objects::TensorAttributes* finishTensor(
         flatbuffers::FlatBufferBuilder& builder, std::int64_t uid, const std::string& name,
-        const std::vector<std::int64_t>& dims, const std::vector<std::int64_t>& strides) {
+        DataType dtype, const std::vector<std::int64_t>& dims,
+        const std::vector<std::int64_t>& strides) {
         auto attrOffset = data_objects::CreateTensorAttributesDirect(
-            builder, uid, name.c_str(), DataType::HALF, &strides, &dims, /*virtual=*/false);
+            builder, uid, name.c_str(), dtype, &strides, &dims, /*virtual=*/false);
         builder.Finish(attrOffset);
         return flatbuffers::GetRoot<data_objects::TensorAttributes>(builder.GetBufferPointer());
     }
@@ -343,45 +405,95 @@ struct SdpaAttrFixture {
         const std::vector<std::int64_t> kvDims{cfg.B, cfg.Hkv, cfg.Skv, cfg.D};
         const std::vector<std::int64_t> qoStrides = bshdStrides(cfg.Hq, cfg.Sq, cfg.D);
         const std::vector<std::int64_t> kvStrides = bshdStrides(cfg.Hkv, cfg.Skv, cfg.D);
-        q = finishTensor(qBuilder, /*uid=*/1, "q", qoDims, qoStrides);
-        k = finishTensor(kBuilder, /*uid=*/2, "k", kvDims, kvStrides);
-        v = finishTensor(vBuilder, /*uid=*/3, "v", kvDims, kvStrides);
-        o = finishTensor(oBuilder, /*uid=*/4, "o", qoDims, qoStrides);
+        q = finishTensor(qBuilder, /*uid=*/1, "q", cfg.dataType, qoDims, qoStrides);
+        k = finishTensor(kBuilder, /*uid=*/2, "k", cfg.dataType, kvDims, kvStrides);
+        v = finishTensor(vBuilder, /*uid=*/3, "v", cfg.dataType, kvDims, kvStrides);
+        o = finishTensor(oBuilder, /*uid=*/4, "o", cfg.dataType, qoDims, qoStrides);
         tensorMap[1] = q;
         tensorMap[2] = k;
         tensorMap[3] = v;
         tensorMap[4] = o;
 
+        // Page tables: [num_seqs, max_blocks_per_seq] = [B, kPages]. The
+        // exact strides do not matter for the gate (it reads dims only).
+        flatbuffers::Optional<std::int64_t> pageKUid = flatbuffers::nullopt;
+        flatbuffers::Optional<std::int64_t> pageVUid = flatbuffers::nullopt;
+        if (cfg.withPageTableK) {
+            const std::vector<std::int64_t> dims{cfg.B, cfg.kPagesK};
+            const std::vector<std::int64_t> strides{cfg.kPagesK, 1};
+            tensorMap[kPageKUid] =
+                finishTensor(pageKBuilder, kPageKUid, "page_k", DataType::INT32, dims, strides);
+            pageKUid = flatbuffers::Optional<std::int64_t>(kPageKUid);
+        }
+        if (cfg.withPageTableV) {
+            const std::vector<std::int64_t> dims{cfg.B, cfg.kPagesV};
+            const std::vector<std::int64_t> strides{cfg.kPagesV, 1};
+            tensorMap[kPageVUid] =
+                finishTensor(pageVBuilder, kPageVUid, "page_v", DataType::INT32, dims, strides);
+            pageVUid = flatbuffers::Optional<std::int64_t>(kPageVUid);
+        }
+
+        // Varlen seqlen tensors: rank-1 [B].
+        flatbuffers::Optional<std::int64_t> seqQUid = flatbuffers::nullopt;
+        flatbuffers::Optional<std::int64_t> seqKvUid = flatbuffers::nullopt;
+        if (cfg.withSeqLenQ) {
+            const std::vector<std::int64_t> dims{cfg.B};
+            const std::vector<std::int64_t> strides{1};
+            tensorMap[kSeqQUid] =
+                finishTensor(seqQBuilder, kSeqQUid, "seq_q", DataType::INT32, dims, strides);
+            seqQUid = flatbuffers::Optional<std::int64_t>(kSeqQUid);
+        }
+        if (cfg.withSeqLenKv) {
+            const std::vector<std::int64_t> dims{cfg.B};
+            const std::vector<std::int64_t> strides{1};
+            tensorMap[kSeqKvUid] =
+                finishTensor(seqKvBuilder, kSeqKvUid, "seq_kv", DataType::INT32, dims, strides);
+            seqKvUid = flatbuffers::Optional<std::int64_t>(kSeqKvUid);
+        }
+
+        // Sink tokens: rank-1 [Hq].
+        flatbuffers::Optional<std::int64_t> sinkUid = flatbuffers::nullopt;
+        if (cfg.withSinkToken) {
+            const std::vector<std::int64_t> dims{cfg.Hq};
+            const std::vector<std::int64_t> strides{1};
+            tensorMap[kSinkUid] =
+                finishTensor(sinkBuilder, kSinkUid, "sink", cfg.dataType, dims, strides);
+            sinkUid = flatbuffers::Optional<std::int64_t>(kSinkUid);
+        }
+
         auto attrOffset = data_objects::CreateSdpaAttributes(
             attrBuilder, /*q_tensor_uid=*/1, /*k_tensor_uid=*/2, /*v_tensor_uid=*/3,
             /*o_tensor_uid=*/4, /*attn_mask_tensor_uid=*/flatbuffers::nullopt,
             /*scale_tensor_uid=*/flatbuffers::nullopt,
-            /*seq_len_q_tensor_uid=*/flatbuffers::nullopt,
-            /*seq_len_kv_tensor_uid=*/flatbuffers::nullopt,
+            /*seq_len_q_tensor_uid=*/seqQUid,
+            /*seq_len_kv_tensor_uid=*/seqKvUid,
             /*seed_tensor_uid=*/flatbuffers::nullopt,
             /*offset_tensor_uid=*/flatbuffers::nullopt,
             /*dropout_mask_tensor_uid=*/flatbuffers::nullopt,
             /*dropout_scale_tensor_uid=*/flatbuffers::nullopt,
-            /*page_table_k_tensor_uid=*/flatbuffers::nullopt,
-            /*page_table_v_tensor_uid=*/flatbuffers::nullopt,
+            /*page_table_k_tensor_uid=*/pageKUid,
+            /*page_table_v_tensor_uid=*/pageVUid,
             /*block_mask_tensor_uid=*/flatbuffers::nullopt,
-            /*sink_token_tensor_uid=*/flatbuffers::nullopt,
+            /*sink_token_tensor_uid=*/sinkUid,
             /*descale_q_tensor_uid=*/cfg.descaleQUid,
             /*descale_k_tensor_uid=*/flatbuffers::nullopt,
             /*descale_v_tensor_uid=*/flatbuffers::nullopt,
             /*descale_s_tensor_uid=*/flatbuffers::nullopt,
             /*scale_s_tensor_uid=*/flatbuffers::nullopt,
             /*scale_o_tensor_uid=*/flatbuffers::nullopt,
-            /*stats_tensor_uid=*/flatbuffers::nullopt,
+            /*stats_tensor_uid=*/cfg.statsUid,
             /*max_tensor_uid=*/flatbuffers::nullopt,
             /*sum_exp_tensor_uid=*/flatbuffers::nullopt,
             /*rng_dump_tensor_uid=*/cfg.rngDumpUid,
             /*amax_s_tensor_uid=*/cfg.amaxSUid,
             /*amax_o_tensor_uid=*/flatbuffers::nullopt,
             /*generate_stats=*/flatbuffers::nullopt, /*alibi_mask=*/false, /*padding_mask=*/false,
-            /*causal_mask=*/false, /*causal_mask_bottom_right=*/false,
+            /*causal_mask=*/cfg.causalMask,
+            /*causal_mask_bottom_right=*/cfg.causalMaskBottomRight,
             /*dropout_probability=*/cfg.dropoutProbability,
-            /*attn_scale_value=*/cfg.attnScaleValue);
+            /*attn_scale_value=*/cfg.attnScaleValue, /*left_bound=*/cfg.leftBound,
+            /*right_bound=*/cfg.rightBound, /*max_seq_len_kv=*/cfg.maxSeqLenKv,
+            /*diagonal_alignment=*/cfg.diagonalAlignment);
         attrBuilder.Finish(attrOffset);
         attr = flatbuffers::GetRoot<SdpaAttributes>(attrBuilder.GetBufferPointer());
     }
@@ -441,6 +553,233 @@ TEST(TestSdpaAdapter, RejectsZeroSeqlen) {
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
+// ======================================================================
+// Capability-gate matrix (Phase 2d): the honest gate for the unified
+// paged/varlen kernel. Every unsupported variant DECLINES (buildSpec
+// throws HipdnnPluginException, which tryBuildSpec converts to
+// isApplicable=false); every supported variant ACCEPTS and extracts the
+// right spec fields. The hand-built fixture defaults to a valid causal
+// FP16 BSHD baseline; each test flips exactly the field under test.
+// ======================================================================
+
+// ---- DECLINE tests ------------------------------------------------------
+
+TEST(TestSdpaAdapter, RejectsNonCausal) {
+    // The kernel applies causal unconditionally; a non-causal graph (no
+    // causal_mask, no window) is declined.
+    SdpaAttrConfig cfg;
+    cfg.causalMask = false;
+    SdpaAttrFixture fx(cfg);
+    EXPECT_THROW(SdpaAdapter::buildSpec(*fx.attr, fx.tensorMap),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestSdpaAdapter, RejectsBottomRightDeprecatedBool) {
+    SdpaAttrConfig cfg;
+    cfg.causalMaskBottomRight = true;
+    SdpaAttrFixture fx(cfg);
+    EXPECT_THROW(SdpaAdapter::buildSpec(*fx.attr, fx.tensorMap),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestSdpaAdapter, RejectsBottomRightDiagonalAlignment) {
+    SdpaAttrConfig cfg;
+    cfg.diagonalAlignment = data_objects::DiagonalAlignment::BOTTOM_RIGHT;
+    SdpaAttrFixture fx(cfg);
+    EXPECT_THROW(SdpaAdapter::buildSpec(*fx.attr, fx.tensorMap),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestSdpaAdapter, RejectsRightBound) {
+    // Only a left causal window is modelled; right_bound != 0 is declined.
+    SdpaAttrConfig cfg;
+    cfg.rightBound = flatbuffers::Optional<std::int64_t>(4);
+    SdpaAttrFixture fx(cfg);
+    EXPECT_THROW(SdpaAdapter::buildSpec(*fx.attr, fx.tensorMap),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestSdpaAdapter, RejectsOneSidedPageTableK) {
+    // Only page_table_k present -> single-table mismatch decline.
+    SdpaAttrConfig cfg;
+    cfg.withPageTableK = true;
+    cfg.maxSeqLenKv = flatbuffers::Optional<std::int32_t>(64);
+    SdpaAttrFixture fx(cfg);
+    EXPECT_THROW(SdpaAdapter::buildSpec(*fx.attr, fx.tensorMap),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestSdpaAdapter, RejectsOneSidedPageTableV) {
+    SdpaAttrConfig cfg;
+    cfg.withPageTableV = true;
+    cfg.maxSeqLenKv = flatbuffers::Optional<std::int32_t>(64);
+    SdpaAttrFixture fx(cfg);
+    EXPECT_THROW(SdpaAdapter::buildSpec(*fx.attr, fx.tensorMap),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestSdpaAdapter, RejectsMismatchedPageTables) {
+    // Both page tables present but with divergent block-table layouts
+    // (different max_blocks_per_seq) -> the single-table kernel declines.
+    SdpaAttrConfig cfg;
+    cfg.withPageTableK = true;
+    cfg.withPageTableV = true;
+    cfg.kPagesK = 4;
+    cfg.kPagesV = 8;
+    cfg.maxSeqLenKv = flatbuffers::Optional<std::int32_t>(64);
+    SdpaAttrFixture fx(cfg);
+    EXPECT_THROW(SdpaAdapter::buildSpec(*fx.attr, fx.tensorMap),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestSdpaAdapter, RejectsOneSidedVarlen) {
+    // Only seq_len_q present -> varlen requires both seqlen tensors.
+    SdpaAttrConfig cfg;
+    cfg.withSeqLenQ = true;
+    SdpaAttrFixture fx(cfg);
+    EXPECT_THROW(SdpaAdapter::buildSpec(*fx.attr, fx.tensorMap),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestSdpaAdapter, DeclinesStatsViaFixture) {
+    // A present stats_tensor_uid requests LSE -> declined (regression vs
+    // dense). Exercised through the hand-built fixture in addition to the
+    // SDK-helper DeclinesStatsOutput test.
+    SdpaAttrConfig cfg;
+    cfg.statsUid = flatbuffers::Optional<std::int64_t>(30);
+    SdpaAttrFixture fx(cfg);
+    EXPECT_THROW(SdpaAdapter::buildSpec(*fx.attr, fx.tensorMap),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestSdpaAdapter, RejectsHeadSize32) {
+    // head_size 32 is outside the unified paged kernel's {64, 128, 256}.
+    SdpaAttrConfig cfg;
+    cfg.D = 32;
+    SdpaAttrFixture fx(cfg);
+    EXPECT_THROW(SdpaAdapter::buildSpec(*fx.attr, fx.tensorMap),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestSdpaAdapter, RejectsHeadSize192) {
+    // head_size 192 is outside the unified paged kernel's {64, 128, 256}.
+    SdpaAttrConfig cfg;
+    cfg.D = 192;
+    SdpaAttrFixture fx(cfg);
+    EXPECT_THROW(SdpaAdapter::buildSpec(*fx.attr, fx.tensorMap),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+// ---- ACCEPT tests -------------------------------------------------------
+
+TEST(TestSdpaAdapter, AcceptsBf16ViaFixture) {
+    SdpaAttrConfig cfg;
+    cfg.dataType = DataType::BFLOAT16;
+    SdpaAttrFixture fx(cfg);
+    SdpaSpec spec = SdpaAdapter::buildSpec(*fx.attr, fx.tensorMap);
+    EXPECT_EQ(spec.dtype, "bf16");
+    EXPECT_EQ(spec.mask_mode, "causal");
+}
+
+TEST(TestSdpaAdapter, AcceptsSlidingWindow) {
+    // Top-left causal + left_bound > 0 -> sliding window accepted;
+    // spec.sliding_window == left_bound; mask stays causal.
+    SdpaAttrConfig cfg;
+    cfg.causalMask = false;  // window alone signals causal context
+    cfg.leftBound = flatbuffers::Optional<std::int64_t>(8);
+    SdpaAttrFixture fx(cfg);
+    SdpaSpec spec = SdpaAdapter::buildSpec(*fx.attr, fx.tensorMap);
+    EXPECT_EQ(spec.mask_mode, "causal");
+    EXPECT_EQ(spec.sliding_window, 8);
+    EXPECT_EQ(spec.knobs.sliding_window, 8);
+}
+
+TEST(TestSdpaAdapter, AcceptsSinks) {
+    SdpaAttrConfig cfg;
+    cfg.withSinkToken = true;
+    SdpaAttrFixture fx(cfg);
+    SdpaSpec spec = SdpaAdapter::buildSpec(*fx.attr, fx.tensorMap);
+    EXPECT_TRUE(spec.use_sinks);
+    EXPECT_TRUE(spec.knobs.use_sinks);
+}
+
+TEST(TestSdpaAdapter, AcceptsVarlen) {
+    SdpaAttrConfig cfg;
+    cfg.withSeqLenQ = true;
+    cfg.withSeqLenKv = true;
+    SdpaAttrFixture fx(cfg);
+    SdpaSpec spec = SdpaAdapter::buildSpec(*fx.attr, fx.tensorMap);
+    EXPECT_TRUE(spec.is_varlen);
+}
+
+TEST(TestSdpaAdapter, AcceptsPagedAndDerivesBlockSize) {
+    // Both page tables present + matched layout. With max_seq_len_kv=64
+    // and max_blocks_per_seq=4, ceil(64/4)=16 -> block_size 16.
+    SdpaAttrConfig cfg;
+    cfg.withPageTableK = true;
+    cfg.withPageTableV = true;
+    cfg.kPagesK = 4;
+    cfg.kPagesV = 4;
+    cfg.maxSeqLenKv = flatbuffers::Optional<std::int32_t>(64);
+    SdpaAttrFixture fx(cfg);
+    SdpaSpec spec = SdpaAdapter::buildSpec(*fx.attr, fx.tensorMap);
+    EXPECT_TRUE(spec.is_paged);
+    EXPECT_EQ(spec.block_size, 16);
+}
+
+TEST(TestSdpaAdapter, AcceptsPagedBlockSize32) {
+    // ceil(128 / 4) = 32 -> block_size 32.
+    SdpaAttrConfig cfg;
+    cfg.withPageTableK = true;
+    cfg.withPageTableV = true;
+    cfg.kPagesK = 4;
+    cfg.kPagesV = 4;
+    cfg.maxSeqLenKv = flatbuffers::Optional<std::int32_t>(128);
+    SdpaAttrFixture fx(cfg);
+    SdpaSpec spec = SdpaAdapter::buildSpec(*fx.attr, fx.tensorMap);
+    EXPECT_TRUE(spec.is_paged);
+    EXPECT_EQ(spec.block_size, 32);
+}
+
+TEST(TestSdpaAdapter, AcceptsPagedDefaultBlockSizeWhenUnderivable) {
+    // Page tables present but no max_seq_len_kv -> block_size is not
+    // derivable from the graph, so it falls back to the documented
+    // default of 16 (still in {16, 32, 64}).
+    SdpaAttrConfig cfg;
+    cfg.withPageTableK = true;
+    cfg.withPageTableV = true;
+    SdpaAttrFixture fx(cfg);
+    SdpaSpec spec = SdpaAdapter::buildSpec(*fx.attr, fx.tensorMap);
+    EXPECT_TRUE(spec.is_paged);
+    EXPECT_EQ(spec.block_size, 16);
+}
+
+TEST(TestSdpaAdapter, AcceptsHeadSize128) {
+    SdpaAttrConfig cfg;
+    cfg.D = 128;
+    SdpaAttrFixture fx(cfg);
+    SdpaSpec spec = SdpaAdapter::buildSpec(*fx.attr, fx.tensorMap);
+    EXPECT_EQ(spec.problem.D, 128);
+}
+
+TEST(TestSdpaAdapter, AcceptsHeadSize256) {
+    SdpaAttrConfig cfg;
+    cfg.D = 256;
+    SdpaAttrFixture fx(cfg);
+    SdpaSpec spec = SdpaAdapter::buildSpec(*fx.attr, fx.tensorMap);
+    EXPECT_EQ(spec.problem.D, 256);
+}
+
+TEST(TestSdpaAdapter, AcceptsGqaViaFixture) {
+    SdpaAttrConfig cfg;
+    cfg.Hq = 8;
+    cfg.Hkv = 2;
+    SdpaAttrFixture fx(cfg);
+    SdpaSpec spec = SdpaAdapter::buildSpec(*fx.attr, fx.tensorMap);
+    EXPECT_EQ(spec.problem.Hq, 8);
+    EXPECT_EQ(spec.problem.Hkv, 2);
+}
+
 // ---- Payload round-trip (needs the embedded interpreter) ----------------
 
 /// Payload conversion allocates Python objects, so the embedded
@@ -462,7 +801,8 @@ TEST_F(TestSdpaPayload, PayloadDictForDefaultShape) {
         /*kDims=*/{2, 8, 16, 64}, /*kStrides=*/qkvoStrides,
         /*vDims=*/{2, 8, 16, 64}, /*vStrides=*/qkvoStrides,
         /*oDims=*/{2, 8, 16, 64}, /*oStrides=*/qkvoStrides,
-        /*dataType=*/DataType::HALF);
+        /*dataType=*/DataType::HALF, /*withAttnMask=*/false, /*withScale=*/false,
+        /*withStats=*/false, /*alibiMask=*/false, /*paddingMask=*/false, /*causalMask=*/true);
     flatbuffer_utilities::GraphWrapper graph(fbBuilder.GetBufferPointer(), fbBuilder.GetSize());
     SdpaSpec spec = buildSpecFromGraph(graph);
 
@@ -478,7 +818,7 @@ TEST_F(TestSdpaPayload, PayloadDictForDefaultShape) {
 
     EXPECT_EQ(payload["batch"].cast<int>(), 2);
     EXPECT_EQ(payload["dtype"].cast<std::string>(), "f16");
-    EXPECT_EQ(payload["mask_mode"].cast<std::string>(), "none");
+    EXPECT_EQ(payload["mask_mode"].cast<std::string>(), "causal");
     EXPECT_EQ(payload["seqlen_q"].cast<int>(), 16);
     EXPECT_EQ(payload["seqlen_k"].cast<int>(), 16);
 
