@@ -8,11 +8,11 @@
 | GEMM | streamk_gemm [5][6][7]<br>engine: gemm_streamk/<br>example: 40_streamk_gemm/ | ✅ | ✅ | ❌ | ❌ | | | | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
 | GEMM | batched_gemm<br>example: 16_batched_gemm/ | ❌ | | | | | | | ❌ | | | | ❌ | ❌ | ❌ | ❌ |
 | GEMM | batched_contraction<br>example: 41_batched_contraction/ | ✅ | | | | | | | ✅ | | | | ✅ | ✅ | ✅ | ❌ |
-| GEMM | block_scale_gemm<br>example: 38_block_scale_gemm/ | | ❌ | ❌ | ❌ | | ❌ | | ❌ | | | | ❌ | ❌ | ❌ | ❌ |
+| GEMM | block_scale_gemm/gemm_rowcolquant [9]<br>engine: block_scale_gemm/gemm_rowcolquant/<br>example: 38_block_scale_gemm/ | | ✅ | | ✅ | | | | ✅ | | | | ❌ | ✅ | ✅ | ✅ |
 | GEMM | flatmm<br>example: 18_flatmm/ | ❌ | ❌ | ❌ | ❌ | | ❌ | ❌ | ❌ | | | | ❌ | ❌ | ❌ | ❌ |
 | GEMM | gemm_multi_abd<br>example: 22_gemm_multi_abd/ | ✅ | | | | | | | ✅ | | | | ✅ | ✅ | ✅ | ✅ |
 | GEMM | gemm_quant | | ❌ | | ❌ | | | | ❌ | | | | ❌ | ❌ | ❌ | ❌ |
-| GEMM | grouped_gemm<br>example: 17_grouped_gemm/ | ❌ | ❌ | ❌ | | | | | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| GEMM | grouped_gemm [10]<br>engine: grouped_gemm/<br>example: 17_grouped_gemm/ | ✅ | ✅ | | | | | | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ |
 | GEMM | grouped_gemm_quant | | ❌ | | ❌ | | | | ❌ | | | | ❌ | ❌ | ❌ | ❌ |
 | Reduce | multi_reduce2d [8]<br>engine: reduce/<br>example: 05_reduce/ | ✅ | | ❌ | | | | | | | | | ❌ | ✅ | ✅ | ❌ |
 | Reduce | reduce2d<br>example: 05_reduce/ | ❌ | | ❌ | | | | | | | | | ❌ | ❌ | ❌ | ❌ |
@@ -49,6 +49,8 @@
 - [6] **streamk_gemm:** Builder and default configs support all 4 layouts, but CMake defaults to `rcr` only. Building others requires `-DGEMM_STREAMK_LAYOUT="rcr;rrr;ccr;crr"`.
 - [7] **streamk_gemm:** CK Tile kernels have no arch-specific guards; tile engine filtering is pending validation for gfx950/gfx1201.
 - [8] **multi_reduce2d:** CK Tile's reduce example supports bf16 input but the tile engine only configures fp16. The reduce kernel adapts to wave32/wave64 at runtime via `is_wave32()`.
+- [9] **block_scale_gemm/gemm_rowcolquant:** Supports row-column quantized GEMM with fp8/bf8 inputs. Only rcr layout is supported. Not validated on gfx90a.
+- [10] **grouped_gemm:** Tile engine filters to gfx942, gfx950, and gfx12-generic (gfx1201) targets only. Supports fp16 and fp8 datatypes with all 4 layouts.
 - Reduce operations do not use matrix layouts.
 
 **Layout codes:** Each layout code specifies the memory layout of tensors A, B, and C as row-major (r) or column-major (c). For example, `rcr` means A is row-major, B is column-major, and C is row-major. For gemm_multi_d, the instance builder uses 4-character codes (e.g., `rcrr`) where the 4th character specifies the D tensor layout; in the table above, the 3-character A/B/C portion is shown since the D layout is always row-major (r) for all supported configurations.
