@@ -61,7 +61,8 @@ SdpaFwdPlan::SdpaFwdPlan(std::shared_ptr<HipModule> module, std::int64_t qUid, s
                          std::int32_t strideKHead, std::int32_t strideVToken,
                          std::int32_t strideVHead, std::int32_t strideOToken,
                          std::int32_t strideOHead, std::int32_t batch, std::int32_t blockSize,
-                         bool isPaged, bool isVarlen, bool useSinks, std::int64_t sinkUid,
+                         bool isPaged, bool isVarlen, bool useSinks, std::int64_t pageTableUid,
+                         std::int64_t seqLenQUid, std::int64_t seqLenKvUid, std::int64_t sinkUid,
                          bool hasStats, std::int64_t statsUid)
     : _module(std::move(module)),
       _qUid(qUid),
@@ -84,6 +85,9 @@ SdpaFwdPlan::SdpaFwdPlan(std::shared_ptr<HipModule> module, std::int64_t qUid, s
       _isPaged(isPaged),
       _isVarlen(isVarlen),
       _useSinks(useSinks),
+      _pageTableUid(pageTableUid),
+      _seqLenQUid(seqLenQUid),
+      _seqLenKvUid(seqLenKvUid),
       _sinkUid(sinkUid),
       _hasStats(hasStats),
       _statsUid(statsUid) {
@@ -200,32 +204,68 @@ void SdpaFwdPlan::execute(const ::CkDslHandle& handle,
         sinkPtr = findDeviceBuffer(_sinkUid, deviceBuffers, numDeviceBuffers, "sink").ptr;
     }
 
-    // Only the dense-degenerate marshalling path is wired. The real-paged
-    // and varlen paths need the graph's physical block table / explicit
-    // per-sequence lengths; binding them is a Phase-4 follow-up. Fail
-    // loudly rather than mishandle them.
-    if (_isPaged || _isVarlen) {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
-            "SdpaFwdPlan::execute: real-paged/varlen launch is a Phase-4 follow-up; "
-            "only the dense-degenerate marshalling path is wired");
-    }
-
     if (_blockSize <= 0) {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-            "SdpaFwdPlan::execute: block_size must be positive for the dense path");
+            "SdpaFwdPlan::execute: block_size must be positive");
     }
 
-    // Marshal the three host integer arrays for the dense-degenerate
-    // one-block-per-position paged layout the unified kernel always runs.
+    const hipStream_t stream = handle.getStream();
+
+    // Common marshalling inputs (shape-driven). The varlen builders ignore
+    // ``seqlen_q`` / ``seqlen_k`` (they take explicit per-sequence
+    // lengths) but every builder reads ``num_seqs`` / ``block_size`` /
+    // ``max_seqlen_k``.
     SdpaMarshalInputs in;
     in.num_seqs = _batch;
     in.block_size = _blockSize;
     in.max_seqlen_k = _seqlenK;
     in.seqlen_q = _seqlenQ;
     in.seqlen_k = _seqlenK;
-    const SdpaMarshalledArrays arrays = marshalDenseDegenerate(in);
+
+    // Varlen paths need the graph's per-sequence Q/KV lengths, which live
+    // in device memory (the seq_len_q / seq_len_kv tensors). Pull them down
+    // with a small synchronous D2H copy before marshalling. ``_batch`` is
+    // num_seqs for the varlen layout. The copies are SYNC (plain
+    // hipMemcpy) so the host vectors are valid for the marshalling below.
+    std::vector<std::int32_t> qLens;
+    std::vector<std::int32_t> kLens;
+    if (_isVarlen) {
+        qLens.resize(static_cast<std::size_t>(_batch));
+        kLens.resize(static_cast<std::size_t>(_batch));
+        const auto& seqQBuf =
+            findDeviceBuffer(_seqLenQUid, deviceBuffers, numDeviceBuffers, "seq_len_q");
+        const auto& seqKvBuf =
+            findDeviceBuffer(_seqLenKvUid, deviceBuffers, numDeviceBuffers, "seq_len_kv");
+        const std::size_t lenBytes = static_cast<std::size_t>(_batch) * sizeof(std::int32_t);
+        auto downloadLens = [&](void* src, std::vector<std::int32_t>& dst, const char* role) {
+            const hipError_t err = hipMemcpy(dst.data(), src, lenBytes, hipMemcpyDeviceToHost);
+            if (err != hipSuccess) {
+                std::ostringstream oss;
+                oss << "SdpaFwdPlan::execute: hipMemcpy (D2H) failed for " << role << " ("
+                    << hipGetErrorString(err) << ")";
+                throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                                               oss.str());
+            }
+        };
+        downloadLens(seqQBuf.ptr, qLens, "seq_len_q");
+        downloadLens(seqKvBuf.ptr, kLens, "seq_len_kv");
+    }
+
+    // Marshal the host integer arrays for the selected path. cu_seqlens_q
+    // and seqused_k are always bound from the workspace; block_tables is
+    // bound from the workspace only on the non-paged paths (the paged
+    // paths bind the graph's physical block table directly). On the paged
+    // paths the marshalled ``block_tables`` is intentionally ignored.
+    //
+    // Real-paged (non-varlen) reuses ``marshalDenseDegenerate`` for
+    // ``cu_seqlens_q`` / ``seqused_k``, i.e. UNIFORM full-length sequences
+    // (Sq / Skv repeated). This is correct for the perf probe and any
+    // full-length paged use; a real-paged path with per-sequence KV
+    // lengths would instead source ``seqused_k`` from the seq-len inputs
+    // (e.g. via ``marshalRealPaged``).
+    const SdpaMarshalledArrays arrays =
+        _isVarlen ? marshalVarlen(in, qLens, kLens) : marshalDenseDegenerate(in);
 
     // The caller owns the device scratch. We never hipMalloc internally:
     // a null workspace is a programming error (call getWorkspaceSize and
@@ -239,7 +279,10 @@ void SdpaFwdPlan::execute(const ::CkDslHandle& handle,
     }
 
     // Compute the same 256B-aligned sub-offsets getWorkspaceSize sized.
-    // Layout order: block_tables, then cu_seqlens_q, then seqused_k.
+    // Layout order: block_tables, then cu_seqlens_q, then seqused_k. The
+    // block_tables sub-region is left untouched on the paged paths (we
+    // bind the graph buffer instead); keeping its offset in the layout is
+    // harmless and keeps the offset math identical to getWorkspaceSize.
     const std::size_t blockTablesBytes = arrays.block_tables.size() * sizeof(std::int32_t);
     const std::size_t cuSeqlensQBytes = arrays.cu_seqlens_q.size() * sizeof(std::int32_t);
     const std::size_t sequsedKBytes = arrays.seqused_k.size() * sizeof(std::int32_t);
@@ -249,9 +292,19 @@ void SdpaFwdPlan::execute(const ::CkDslHandle& handle,
     const std::size_t cuSeqlensQOff = blockTablesOff + roundUpWs(blockTablesBytes);
     const std::size_t sequsedKOff = cuSeqlensQOff + roundUpWs(cuSeqlensQBytes);
 
-    void* dBlockTables = wsBase + blockTablesOff;
     void* dCuSeqlensQ = wsBase + cuSeqlensQOff;
     void* dSequsedK = wsBase + sequsedKOff;
+
+    // The block_tables slot binds the graph's Page_table_K device buffer
+    // directly on the paged paths; otherwise it binds the workspace
+    // sub-region the marshalled table is uploaded into.
+    void* dBlockTables = nullptr;
+    if (_isPaged) {
+        dBlockTables =
+            findDeviceBuffer(_pageTableUid, deviceBuffers, numDeviceBuffers, "page_table_k").ptr;
+    } else {
+        dBlockTables = wsBase + blockTablesOff;
+    }
 
     // The marshalled ``arrays`` host vectors are consumed by the H2D
     // copies below before this call returns: hipMemcpyAsync from PAGEABLE
@@ -259,7 +312,6 @@ void SdpaFwdPlan::execute(const ::CkDslHandle& handle,
     // the source is freed), so the local vectors outliving only this
     // function body is safe. If a future optimisation pins these buffers,
     // it must keep them alive until a stream sync.
-    const hipStream_t stream = handle.getStream();
     auto upload = [&](void* dst, const std::vector<std::int32_t>& src, std::size_t bytes,
                       const char* role) {
         // hipMemcpyAsync takes a const src + an explicit kind, so no
@@ -274,7 +326,11 @@ void SdpaFwdPlan::execute(const ::CkDslHandle& handle,
                                                            oss.str());
         }
     };
-    upload(dBlockTables, arrays.block_tables, blockTablesBytes, "block_tables");
+    // Only upload the workspace-bound arrays. The block_tables upload is
+    // skipped on the paged paths (the slot points at the graph buffer).
+    if (!_isPaged) {
+        upload(dBlockTables, arrays.block_tables, blockTablesBytes, "block_tables");
+    }
     upload(dCuSeqlensQ, arrays.cu_seqlens_q, cuSeqlensQBytes, "cu_seqlens_q");
     upload(dSequsedK, arrays.seqused_k, sequsedKBytes, "seqused_k");
 

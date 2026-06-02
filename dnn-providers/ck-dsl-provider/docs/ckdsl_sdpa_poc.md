@@ -75,7 +75,8 @@ perf lines.
 ```bash
 B=./build-superbuild/bin/ck_dsl_provider_integration_tests
 $B --gtest_filter='*SdpaFwdFp16*'                          # correctness vs CPU reference (8 cases)
-HIPDNN_LOG_LEVEL=info $B --gtest_filter='*SdpaFwdPerf*'    # throughput sweep (TFLOPS)
+HIPDNN_LOG_LEVEL=info $B --gtest_filter='*SdpaFwdPerf*'    # dense throughput sweep (TFLOPS)
+HIPDNN_LOG_LEVEL=info $B --gtest_filter='*Paged*:*Varlen*' # paged + varlen throughput (perf-only, no oracle)
 HIPDNN_LOG_LEVEL=info $B --gtest_filter='*Oracle*'         # oracle config sweep (heuristic vs best); slow
 $B --gtest_filter='*BuildTime*'                            # first-use / JIT-compile latency (prints [BuildTime] lines)
 ```
@@ -120,7 +121,8 @@ it times `F.scaled_dot_product_attention(is_causal=True)` with the same shapes/d
 - `python/tests/test_sdpa_generation.py` — torch-free generation matrix (HSACO/ABI/grid/IR).
 - `tests/SdpaFwdFakeLaunchTest.cpp` — full execute() plumbing proof on any GPU (fake kernel).
 - `integration_tests/IntegrationGpuCkDslSdpaFwdFp16.cpp` — gfx950 correctness vs CPU reference.
-- `integration_tests/IntegrationGpuCkDslSdpaFwdPerf.cpp` — gfx950 throughput sweep.
+- `integration_tests/IntegrationGpuCkDslSdpaFwdPerf.cpp` — gfx950 throughput sweep (dense), plus
+  the perf-only `Paged_Identity` / `Paged_Scatter` / `Varlen_Mixed` cases.
 - `integration_tests/IntegrationGpuCkDslSdpaFwdOracle.cpp` — gfx950 oracle config sweep.
 - `integration_tests/IntegrationGpuCkDslSdpaFwdBuildTime.cpp` — gfx950 first-use / JIT-compile
   latency probe (separates one-time warmup, per-shape cold compile, and JitCache hit).
@@ -130,8 +132,16 @@ it times `F.scaled_dot_product_attention(is_causal=True)` with the same shapes/d
 ## Status & results (MI350X / gfx950)
 
 - **Correctness:** 8/8 — fp16 & bf16 × head {64,128,256} × {MHA,GQA}, causal, vs CPU reference.
+  (Dense path only — there is no CPU reference for paged/varlen, so those are perf-only.)
 - **Perf vs PyTorch flash** (aligned hipEvent harness, full `4·B·Hq·S²·D`): dispatcher pick
   ~0.31–0.52× of flash, plateauing ~250 TFLOPS.
+- **Paged + varlen (wired, perf-only):** the unified kernel is always paged; real-paged binds the
+  graph's `Page_table_K` device buffer directly to the block-table slot, varlen reads per-sequence
+  lengths via a small in-`execute()` D2H. Measured (B4 GQA D128 S2048): `Paged_Identity` **245
+  TFLOPS** (contiguous table — parity with the dense B4/S2048 246, confirming the passthrough
+  plumbing), `Paged_Scatter` **245** (reverse-permutation table — block-table indirection adds no
+  measurable overhead at this shape), `Varlen_Mixed` **228** (bf16, lengths {S,S/2,S,S/4}, actual-
+  token denominator). No correctness oracle exists for these paths.
 - **Oracle sweep (key finding):** the best enumerated config is **2.05× faster than the
   heuristic's pick** at S8192 (504 vs 246 TFLOPS), reaching ~0.64–0.73× of flash. The heuristic
   degenerately picks the *smallest* config for every shape → the gap is a **config-selection**
@@ -159,6 +169,8 @@ The compile cost amortizes after a handful of launches per shape.
 2. `num_warps=8` + large-tile comgr CODEGEN failure (21/51 oracle configs); tighten the
    enumerator's `supportsTiled2d` mirror so it doesn't emit non-compilable configs.
 3. Kernel feature gaps (further work needed): non-causal mode; LSE output (paged kernel emits none).
-4. Real-paged / varlen `execute()` launch branches (dense-degenerate is wired + verified).
+4. Real-paged + varlen `execute()` launch branches are now wired and perf-measured (dense,
+   real-paged, varlen, paged+varlen). A CPU reference for paged/varlen (to add *correctness*
+   coverage beyond perf) remains future work.
 
 Full technical writeup + perf tables: workspace `Plans/almiopen-2002-writeup-DRAFT.md`.

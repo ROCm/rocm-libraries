@@ -201,7 +201,8 @@ std::optional<double> timeCandidate(CkDslContainer& container, ::CkDslHandle& ha
                      baseSpec.problem.stride_v_token, baseSpec.problem.stride_v_head,
                      baseSpec.problem.stride_o_token, baseSpec.problem.stride_o_head,
                      baseSpec.problem.B, baseSpec.block_size, /*isPaged=*/false, /*isVarlen=*/false,
-                     /*useSinks=*/false, /*sinkUid=*/-1);
+                     /*useSinks=*/false, /*pageTableUid=*/-1, /*seqLenQUid=*/-1,
+                     /*seqLenKvUid=*/-1, /*sinkUid=*/-1);
 
     const std::size_t wsBytes = plan.getWorkspaceSize(handle);
     void* workspace = nullptr;

@@ -320,6 +320,17 @@ void SdpaFwdPlanBuilder::buildPlan(const ::CkDslHandle& handle,
     constexpr std::int64_t kSdpaSinkTokenUid = 20;
     const std::int64_t sinkUid = spec.use_sinks ? kSdpaSinkTokenUid : -1;
 
+    // Runtime-input tensor UIDs execute() resolves to device buffers for
+    // the paged / varlen launch paths. Mirroring the sinkUid lane: read
+    // the optional uid off the attributes when the spec selects that path,
+    // else -1. The paged path binds the graph's Page_table_K buffer to the
+    // block_tables slot directly; the varlen path D2H-copies the
+    // seq_len_q / seq_len_kv buffers to recover the per-sequence lengths.
+    const std::int64_t pageTableUid =
+        spec.is_paged ? sdpaAttr.page_table_k_tensor_uid().value() : -1;
+    const std::int64_t seqLenQUid = spec.is_varlen ? sdpaAttr.seq_len_q_tensor_uid().value() : -1;
+    const std::int64_t seqLenKvUid = spec.is_varlen ? sdpaAttr.seq_len_kv_tensor_uid().value() : -1;
+
     // The plan needs the module + tensor UIDs + the launch-time scalars +
     // the marshalling-path lanes (batch / block_size / paged / varlen /
     // sinks) execute() reads to build the 18-slot ABI. HipModule carries
@@ -332,8 +343,8 @@ void SdpaFwdPlanBuilder::buildPlan(const ::CkDslHandle& handle,
         spec.problem.Skv, spec.problem.stride_q_token, spec.problem.stride_q_head,
         spec.problem.stride_k_token, spec.problem.stride_k_head, spec.problem.stride_v_token,
         spec.problem.stride_v_head, spec.problem.stride_o_token, spec.problem.stride_o_head,
-        spec.problem.B, spec.block_size, spec.is_paged, spec.is_varlen, spec.use_sinks, sinkUid,
-        hasStats, statsUid);
+        spec.problem.B, spec.block_size, spec.is_paged, spec.is_varlen, spec.use_sinks,
+        pageTableUid, seqLenQUid, seqLenKvUid, sinkUid, hasStats, statsUid);
 
     executionContext.setPlan(std::move(plan));
 }
