@@ -363,7 +363,7 @@ def _normalise_engines(
         raise ValueError("Config field 'engines' must be a non-empty array of tables")
 
     ids: List[int] = []
-    plugin_paths: List[Path] = []
+    plugin_paths: List[Optional[Path]] = []
     any_plugin_path = False
 
     for index, engine in enumerate(engines):
@@ -384,12 +384,12 @@ def _normalise_engines(
             any_plugin_path = True
             plugin_paths.append(_path_from_config(base_dir, plugin_path))
         else:
-            plugin_paths.append(Path())
+            plugin_paths.append(None)
 
     if any_plugin_path:
-        if any(not str(p) for p in plugin_paths):
+        if any(p is None for p in plugin_paths):
             raise ValueError(
                 "Every config engine must set plugin_path when any engine does"
             )
-        out["plugin_path"] = plugin_paths
+        out["plugin_path"] = [p for p in plugin_paths if p is not None]
     out["engine"] = ids

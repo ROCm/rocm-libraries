@@ -149,6 +149,27 @@ id = 1
     assert not hasattr(args, "_config_engine_names")
 
 
+def test_every_engine_sets_plugin_path_when_any_engine_does(tmp_path: Path) -> None:
+    config = _write_config(
+        tmp_path / "bench.toml",
+        """
+version = 1
+graphs = ["g.json"]
+
+[[engines]]
+id = 1
+plugin_path = "/plugins/a"
+
+[[engines]]
+id = 2
+""",
+    )
+    args = create_parser().parse_args(["--config", str(config)])
+
+    with pytest.raises(ValueError, match="Every config engine must set plugin_path"):
+        apply_config_file(args, provided=set())
+
+
 @pytest.mark.parametrize(
     ("body", "field"),
     [
