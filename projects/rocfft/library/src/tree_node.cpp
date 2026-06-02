@@ -464,6 +464,10 @@ void TreeNode::CollapseContiguousDims()
                 continue;
             }
 
+            // add to comment list:
+            std::stringstream msg;
+            msg << "collapsing contiguous high length " << del_ilength << " into "
+                << (keep_idx == length.size() ? "batch " : "other high length ") << keep_ilength;
             // do the collapse
             if(keep_is_multiple_of_del)
             {
@@ -487,6 +491,11 @@ void TreeNode::CollapseContiguousDims()
                 if(axis_idx > del_idx)
                     axis_idx--;
             }
+            msg << ". Resulting lengths and batch are: ";
+            for(const auto& len : length)
+                msg << len << ", ";
+            msg << batch;
+            comments.push_back(msg.str());
             collapsed_some = true;
         }
         if(collapsed_some)
@@ -498,6 +507,7 @@ void TreeNode::CollapseContiguousDims()
         else
             first_axis_it++;
     }
+
     if(!outputLength.empty())
         outputLength = outputLengthTemp;
 }
