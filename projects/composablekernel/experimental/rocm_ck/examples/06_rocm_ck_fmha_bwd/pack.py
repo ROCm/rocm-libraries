@@ -248,7 +248,7 @@ VARIANTS = [
         "hdim_q": 128,
         "hdim_v": 128,
         "mode": "group",
-        "has_mask": True,
+        "mask_type": "top_left_causal",
         "block_size": 256,
     },
     {

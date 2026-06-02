@@ -195,7 +195,7 @@ static constexpr FmhaBwdDQDKDVVariant ALL_DQDKDV_VARIANTS[] = {
          .signature = {.dtype = DataType::FP16,
                        .hdim_q = 128, .hdim_v = 128,
                        .mode = FmhaMode::GROUP},
-         .algorithm = {.has_mask = true,
+         .algorithm = {.mask_type = FmhaMaskType::TOP_LEFT_CAUSAL,
                        .pad_hdim_q = 8, .pad_hdim_v = 8}})},
     {"fmha_bwd_dqdkdv_fp16_d128_group_det", makeSpec(FmhaBwdDQDKDVConfig{
          .signature = {.dtype = DataType::FP16,
