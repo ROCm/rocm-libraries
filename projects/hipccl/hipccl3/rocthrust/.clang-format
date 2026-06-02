@@ -28,7 +28,6 @@ AttributeMacros: [
                   'THRUST_FORCEINLINE',
                   'THRUST_HOST_DEVICE',
                   'THRUST_HOST',
-                  'THRUST_NODISCARD',
                   'THRUST_DEPRECATED',
                   'THRUST_GLOBAL_CONSTANT',
                   # thrust
@@ -45,7 +44,6 @@ AttributeMacros: [
                   '_CCCL_HOST',
                   '_CCCL_NO_UNIQUE_ADDRESS',
                   '_CCCL_NODISCARD_FRIEND',
-                  '_CCCL_NODISCARD',
                   '_CCCL_NORETURN',
                   '_CCCL_VISIBILITY_HIDDEN',
                   'CUB_RUNTIME_FUNCTION',
