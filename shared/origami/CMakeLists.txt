@@ -29,20 +29,41 @@ option(ORIGAMI_ENABLE_FETCH "Auto-fetch dependencies with FetchContent" ON)
 find_package(hip REQUIRED)
 
 if(ORIGAMI_BUILD_SHARED_LIBS OR (BUILD_SHARED_LIBS AND ORIGAMI_STANDALONE))
-    add_library(origami SHARED)
+    set(ORIGAMI_LIBRARY_TYPE SHARED)
 else()
-    add_library(origami STATIC)
+    set(ORIGAMI_LIBRARY_TYPE STATIC)
 endif()
+add_library(origami ${ORIGAMI_LIBRARY_TYPE})
 
 rocm_set_soversion(origami "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
 
 add_library(roc::origami ALIAS origami)
 
-set_target_properties(origami PROPERTIES 
+# Control the exported symbol surface explicitly: hide everything by default and
+# export only what is annotated with ORIGAMI_EXPORT (generated below). This replaces
+# the previous "export everything" behaviour (default visibility +
+# WINDOWS_EXPORT_ALL_SYMBOLS) so the public ABI is the public API and nothing more.
+set_target_properties(origami PROPERTIES
     POSITION_INDEPENDENT_CODE ON
-    WINDOWS_EXPORT_ALL_SYMBOLS ON
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON
 )
 target_compile_features(origami PUBLIC cxx_std_17)
+
+# Generate origami/origami_export.h defining the ORIGAMI_EXPORT visibility macro
+# (and ORIGAMI_STATIC for static builds). Public headers include it to annotate the
+# exported API. The header is generated at configure time into the build tree.
+include(GenerateExportHeader)
+generate_export_header(origami
+    BASE_NAME ORIGAMI
+    EXPORT_MACRO_NAME ORIGAMI_EXPORT
+    EXPORT_FILE_NAME "${PROJECT_BINARY_DIR}/include/origami/origami_export.h"
+    STATIC_DEFINE ORIGAMI_STATIC
+)
+if(ORIGAMI_LIBRARY_TYPE STREQUAL "STATIC")
+    # A static origami has no import library; consumers must see ORIGAMI_EXPORT as empty.
+    target_compile_definitions(origami PUBLIC ORIGAMI_STATIC)
+endif()
 
 add_library(origami-headers INTERFACE)
 add_library(roc::origami-headers ALIAS origami-headers)
@@ -51,11 +72,13 @@ target_compile_features(origami-headers INTERFACE cxx_std_17)
 
 target_include_directories(
     origami-headers INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+                              $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
                               $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 target_sources(
     origami-headers
-    INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/gemm.hpp>
+    INTERFACE $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include/origami/origami_export.h>
+              $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/gemm.hpp>
               $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/hardware.hpp>
               $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/heuristics.hpp>
               $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/logger.hpp>
@@ -123,6 +146,14 @@ if(ORIGAMI_ENABLE_INSTALL OR ORIGAMI_STANDALONE)
         "*.hpp"
         PATTERN
         "*.h"
+    )
+
+    # The export header is generated into the build tree, so it is not covered by the
+    # include/ directory install above; install it next to the hand-authored headers.
+    rocm_install(
+        FILES "${PROJECT_BINARY_DIR}/include/origami/origami_export.h"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/origami"
+        COMPONENT devel
     )
 
     configure_file(
