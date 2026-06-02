@@ -241,16 +241,19 @@ consteval FmhaBwdDQDKDVSpec makeSpec(FmhaBwdDQDKDVConfig cfg)
     if(algo.pad_hdim_v != 0 && algo.pad_hdim_v != 1 && algo.pad_hdim_v != 8)
         throw "pad_hdim_v must be 0, 1, or 8";
 
-    // --- tile geometry (hardcoded for d128 gfx9 demo) ---
-    // Config 4 from fmha_bwd.py: num_warps=4, warp_size=64, bn0=128.
-    // Production would derive these from architecture + hdim.
+    // --- tile geometry (hardcoded for the gfx9 d64/d128 demo configs) ---
+    // From fmha_bwd.py: num_warps=4, warp_size=64. The wired d64 and d128 rows
+    // both happen to use bn0=128, so a single hardcoded block_n0 is correct for
+    // them; the device bridge static_asserts that block_n0 == BlockTile kN0.
+    // Production would derive these from architecture + hdim (e.g. the gfx9
+    // d256 row uses bn0=64).
     constexpr int demo_block_size = 256; // 4 warps * 64
-    constexpr int demo_block_n0   = 128; // kN0 = bn0
+    constexpr int demo_block_n0   = 128; // kN0 = bn0 (d64 and d128)
 
     // --- block_per_cu default ---
     int resolved_block_per_cu = algo.block_per_cu;
     if(resolved_block_per_cu == -1)
-        resolved_block_per_cu = 1; // d128 dQ/dK/dV is register-heavy
+        resolved_block_per_cu = 1; // d64/d128 dQ/dK/dV is register-heavy (occupancy=1)
 
     if(resolved_block_per_cu <= 0)
         throw "block_per_cu must be positive (or -1 for auto)";
