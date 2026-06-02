@@ -322,4 +322,58 @@ TEST(TestGraphSignature, SdpaOpKindAndArchChangeSignature) {
         << "arch did not affect the signature";
 }
 
+// Each unified paged/varlen problem lane is codegen-relevant: a paged
+// build, a varlen build, a windowed build, and a sinks build each emit a
+// distinct kernel/grid and so must hash distinctly. A fold that dropped
+// one would let two distinct kernels collide on the same cache key.
+TEST(TestGraphSignature, SdpaChangesWithEachProblemLane) {
+    const auto baseline = GraphSignature::computeForSpec(kSdpaOpKind, makeSdpaSpec(), kArch);
+
+    const std::vector<std::pair<const char*, std::function<void(SdpaSpec&)>>> mutators = {
+        {"is_paged", [](SdpaSpec& s) { s.is_paged = true; }},
+        {"block_size", [](SdpaSpec& s) { s.block_size = 32; }},
+        {"is_varlen", [](SdpaSpec& s) { s.is_varlen = true; }},
+        {"sliding_window", [](SdpaSpec& s) { s.sliding_window = 128; }},
+        {"use_sinks", [](SdpaSpec& s) { s.use_sinks = true; }},
+    };
+
+    for (const auto& [name, mutate] : mutators) {
+        auto spec = makeSdpaSpec();
+        mutate(spec);
+        EXPECT_NE(GraphSignature::computeForSpec(kSdpaOpKind, spec, kArch), baseline)
+            << "SdpaSpec problem lane '" << name << "' did not affect the signature";
+    }
+}
+
+// Every folded perf knob must move the hash. The scorer-driven selection
+// writes these onto the spec before the key is computed, so two distinct
+// scored configs of the same shape must land on distinct cache keys --
+// otherwise one would silently load the other's module.
+TEST(TestGraphSignature, SdpaChangesWithEachPerfKnob) {
+    const auto baseline = GraphSignature::computeForSpec(kSdpaOpKind, makeSdpaSpec(), kArch);
+
+    const std::vector<std::pair<const char*, std::function<void(SdpaSpec&)>>> mutators = {
+        {"num_warps", [](SdpaSpec& s) { s.knobs.num_warps += 1; }},
+        {"block_m_per_warp", [](SdpaSpec& s) { s.knobs.block_m_per_warp += 1; }},
+        {"tile_size", [](SdpaSpec& s) { s.knobs.tile_size += 1; }},
+        {"waves_per_eu", [](SdpaSpec& s) { s.knobs.waves_per_eu += 1; }},
+        {"use_mfma_32x32", [](SdpaSpec& s) { s.knobs.use_mfma_32x32 = !s.knobs.use_mfma_32x32; }},
+        {"use_transposed_qk_32x32",
+         [](SdpaSpec& s) { s.knobs.use_transposed_qk_32x32 = !s.knobs.use_transposed_qk_32x32; }},
+        {"use_register_pv",
+         [](SdpaSpec& s) { s.knobs.use_register_pv = !s.knobs.use_register_pv; }},
+        {"use_early_v_schedule",
+         [](SdpaSpec& s) { s.knobs.use_early_v_schedule = !s.knobs.use_early_v_schedule; }},
+        {"use_fast_paged_kv_desc",
+         [](SdpaSpec& s) { s.knobs.use_fast_paged_kv_desc = !s.knobs.use_fast_paged_kv_desc; }},
+    };
+
+    for (const auto& [name, mutate] : mutators) {
+        auto spec = makeSdpaSpec();
+        mutate(spec);
+        EXPECT_NE(GraphSignature::computeForSpec(kSdpaOpKind, spec, kArch), baseline)
+            << "SdpaSpec perf knob '" << name << "' did not affect the signature";
+    }
+}
+
 }  // namespace
