@@ -133,9 +133,29 @@ struct FmhaBwdDQDKDVTypes
     //   NumWarps = 4, BlockSize = 256, maxSeqLenQ = 0 (unlimited)
     //
     // BlockTile: sequence<bm0, bn0, bk0, bk1, bk2, bk3, bk4, bhdq, bhdv>
-    using BlockTile = std::conditional_t<kIsD64,
-                                         ck_tile::sequence<32, 128, 64, 32, 64, 32, 32, 64, 64>,
-                                         ck_tile::sequence<16, 128, 128, 16, 128, 16, 32, 128, 128>>;
+    using BlockTile =
+        std::conditional_t<kIsD64,
+                           ck_tile::sequence<32, 128, 64, 32, 64, 32, 32, 64, 64>,
+                           ck_tile::sequence<16, 128, 128, 16, 128, 16, 32, 128, 128>>;
+
+    // Guard: the non-deterministic host grid is ceil(seqlen_k / K.block_n0)
+    // (see dqdkdv_api.hpp), and the kernel maps each block to K-tile offset
+    // i_n0 = blockIdx.x * kN0 (fmha_bwd_kernel.hpp). So K.block_n0 MUST equal
+    // this tile's kN0 (bn0 == BlockTile[1], the K-sequence tile step):
+    //   * block_n0 > kN0 -> too few blocks -> the tail of the K sequence is
+    //     never visited -> dK/dV rows for those tiles are left unwritten
+    //     (stale/garbage output, no fault).
+    //   * block_n0 < kN0 -> too many blocks -> trailing blocks address
+    //     i_n0 >= seqlen_k (wasted, seqlen-guarded work).
+    // (The deterministic path launches a persistent grid (num_cus,1,1) that
+    // does not use block_n0; the host launcher selects that path separately.
+    // The invariant must still hold so both paths agree on the K-tile step.)
+    // makeSpec() currently hardcodes block_n0=128, which matches both wired
+    // tiles. This fires the moment a future hdim row uses a different bn0
+    // (e.g. the gfx9 d256 row has bn0=64).
+    static_assert(BlockTile::at(1) == K.block_n0,
+                  "block_n0 (host grid sizing) must match the BlockTile kN0 (bn0). "
+                  "Derive block_n0 from the selected tile in makeSpec().");
 
     // Gemm0 & Gemm2: compute S = Q @ K^T and dP = dO @ V^T
     using Gemm0BlockWarps = ck_tile::sequence<1, 4, 1>;
