@@ -25,6 +25,10 @@ Documentation for rocThrust available at
 
 * Replaced `std::move` operators to `hip::std` operators.
 
+### Changed
+
+* Replaced `std::move` operators to `hip::std` operators.
+
 ### Removed
 
 * Deprecated `thrust::advance`, `thrust::bit_and`, `thrust::bit_or`, `thrust::bit_xor`, `thrust::distance`, `thrust::equal_to`, `thrust::greater`, `thrust::greater_equal`, `thrust::less`, `thrust::less_equal`, `thrust::logical_and`, `thrust::logical_not`, `thrust::logical_or`, `thrust::maximum`, `thrust::minimum`, `thrust::modulus`, `thrust::multiplies`, `thrust::negate`, `thrust::next`, `thrust::not_equal_to`, `thrust::not_fn`, `thrust::operator_name`, and `thrust::plus`. Use `hip::std::advance`, `hip::std::bit_and`, `hip::std::bit_or`, `hip::std::bit_xor`, `hip::std::distance`, `hip::std::equal_to`, `hip::std::greater`, `hip::std::greater_equal`, `hip::std::less`, `hip::std::less_equal`, `hip::std::logical_and`, `hip::std::logical_not`, `hip::std::logical_or`, `hip::maximum`, `hip::minimum`, `hip::modulus`, `hip::std::multiplies`, `hip::std::negate`, `hip::std::next`, `hip::std::not_equal_to`, `hip::std::not_fn`, `hip::std::operator_name` and `hip::std::plus` instead.

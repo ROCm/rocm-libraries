@@ -40,6 +40,8 @@
 
 #include _THRUST_STD_INCLUDE(__host_stdlib/stdexcept)
 
+#include _THRUST_STD_INCLUDE(utility)
+
 THRUST_NAMESPACE_BEGIN
 
 namespace detail
