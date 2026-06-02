@@ -38,6 +38,11 @@ function(embed_kernel_sources OUTPUT_SRCS_CPP OUTPUT_SRCS_HPP OUTPUT_INCS_CPP OU
 
     foreach(KERNEL_FILE ${KERNEL_FILES})
         file(READ ${KERNEL_FILE} KERNEL_CONTENT)
+        # Setting this property ensures that the kernels will get properly re-inlined as they are modified.
+        # The drawback is that CMake is going to reconfigure every time a kernel is modified.
+        # Yet, that will improve developer experience, because it will lead to shorter build times -- only
+        # the build of kernel_sources and kernel_includes will be affected.
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${KERNEL_FILE})
         get_filename_component(KERNEL_NAME ${KERNEL_FILE} NAME_WE)
         get_filename_component(KERNEL_FILENAME ${KERNEL_FILE} NAME)
         get_filename_component(KERNEL_EXT ${KERNEL_FILE} EXT)
