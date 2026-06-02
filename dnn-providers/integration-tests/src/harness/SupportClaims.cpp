@@ -288,14 +288,22 @@ SupportClaims::SupportClaims(const std::filesystem::path& sidecarPath,
     //        in fact serve as the source of truth that renders it,
     //        and gives compute/intermediate first-class matcher key
     //        status (the engine actually dispatches on them).
+    //   v6 — extended describeNodeVariant() with shape-flag tags on
+    //        Conv (1x1, grouped, multi_batch, non_square, padding,
+    //        stride, dilation) and Batchnorm-family (multi_batch).
+    //        op_chain strings now read e.g. "ConvFprop[1x1,grouped]"
+    //        — engines that partition support along these shape axes
+    //        (hipblaslt only handling 1x1, hip-kernel skipping
+    //        grouped/dilated) can record distinct matcher rectangles
+    //        instead of over-claiming via the bare node type.
     // Older readers can't tell that the format changed and would
     // silently miss matchers, so the safe contract is refuse-and-regen.
-    if(*version != 5)
+    if(*version != 6)
     {
         throw std::runtime_error("SupportClaims: unsupported version " + std::to_string(*version)
                                  + " in " + sidecarPath.string()
-                                 + " (expected 5; older sidecars predate the named-field "
-                                   "dtype_combos schema and need regeneration via "
+                                 + " (expected 6; older sidecars predate the conv/batchnorm "
+                                   "shape-variant op_chain tags and need regeneration via "
                                    "--write-support-claims)");
     }
 

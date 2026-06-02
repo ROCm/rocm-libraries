@@ -3,12 +3,24 @@
 
 #pragma once
 
+#include <algorithm>
+#include <cstdint>
+#include <memory>
 #include <set>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Types.hpp>
+#include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+#include <hipdnn_frontend/node/BatchnormBackwardNode.hpp>
+#include <hipdnn_frontend/node/BatchnormInferenceNode.hpp>
+#include <hipdnn_frontend/node/BatchnormInferenceNodeVarianceExt.hpp>
+#include <hipdnn_frontend/node/BatchnormNode.hpp>
+#include <hipdnn_frontend/node/ConvolutionDgradNode.hpp>
+#include <hipdnn_frontend/node/ConvolutionFpropNode.hpp>
+#include <hipdnn_frontend/node/ConvolutionWgradNode.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
 #include <hipdnn_frontend/node/ReductionNode.hpp>
 
@@ -121,16 +133,169 @@ inline std::string describeNodeVariant(const hipdnn_frontend::graph::INode& node
         auto mode = red->attributes.get_mode();
         return mode.has_value() ? std::string(to_string(*mode)) : std::string{};
     }
-    // BatchnormNode intentionally has no variant tag. An earlier attempt
-    // distinguished FULL_TRAINING vs WITH_BATCH_STATS via the presence of
-    // prev_running_stats inputs, on the hypothesis that MIOpen would
-    // dispatch the two topologies to different solvers. The regenerated
-    // sidecar showed both variants landing in the same matcher with the
-    // same coverage rectangle — MIOpen evidently treats them identically
-    // on RDNA3 (the optional inputs are a no-op when not consumed). The
-    // variant was non-load-bearing and added matcher-set noise. Rule of
-    // thumb: a variant tag belongs here only when a real S∩U conflict
-    // has demonstrated the bare node type is too coarse.
+
+    // Convolution shape tags (v6). Engines that share the bare ConvFprop/
+    // ConvDgrad/ConvWgrad node type can still dispatch differently based
+    // on the *shape* of the convolution — MIOpen has a dedicated 1x1
+    // solver path, hipblaslt only handles 1x1 (it's GEMM-backed), and
+    // hip-kernel may handle plain conv but not grouped or dilated. Without
+    // these tags in the op_chain, engines that genuinely partition along
+    // a shape axis would either over-claim (sidecar says "supports
+    // ConvFprop" when it actually only handles 1x1) or trigger S∩U
+    // condenser conflicts.
+    //
+    // The tag set mirrors test_conv_common::ConvTestCase::generateNote()
+    // — which previously fed the Notes column of the test-time matrix —
+    // but is now computed from the actual graph node attributes so the
+    // describer is the single source of truth. Snake_case to match the
+    // Pointwise flag convention (lower_clip, upper_clip, ...). Order is
+    // alphabetical for deterministic op_chain strings.
+    const auto convVariant = [](const std::vector<int64_t>& inputDims,
+                                const std::vector<int64_t>& filterDims,
+                                const std::vector<int64_t>& prePadding,
+                                const std::vector<int64_t>& postPadding,
+                                const std::vector<int64_t>& stride,
+                                const std::vector<int64_t>& dilation) -> std::string {
+        std::vector<std::string> tags;
+
+        if(filterDims.size() > 2
+           && std::all_of(
+               filterDims.begin() + 2, filterDims.end(), [](int64_t d) { return d == 1; }))
+        {
+            tags.emplace_back("1x1");
+        }
+        if(filterDims.size() >= 2 && filterDims[1] > 0 && inputDims.size() >= 2
+           && (inputDims[1] / filterDims[1]) > 1)
+        {
+            tags.emplace_back("grouped");
+        }
+        if(!inputDims.empty() && inputDims[0] > 1)
+        {
+            tags.emplace_back("multi_batch");
+        }
+        if(inputDims.size() > 3)
+        {
+            for(size_t i = 3; i < inputDims.size(); ++i)
+            {
+                if(inputDims[i] != inputDims[2])
+                {
+                    tags.emplace_back("non_square");
+                    break;
+                }
+            }
+        }
+        const auto anyNonZero = [](const std::vector<int64_t>& v) {
+            return std::any_of(v.begin(), v.end(), [](int64_t x) { return x != 0; });
+        };
+        const auto anyNotOne = [](const std::vector<int64_t>& v) {
+            return std::any_of(v.begin(), v.end(), [](int64_t x) { return x != 1; });
+        };
+        if(anyNonZero(prePadding) || anyNonZero(postPadding))
+        {
+            tags.emplace_back("padding");
+        }
+        if(anyNotOne(stride))
+        {
+            tags.emplace_back("stride");
+        }
+        if(anyNotOne(dilation))
+        {
+            tags.emplace_back("dilation");
+        }
+
+        if(tags.empty())
+        {
+            return {};
+        }
+        std::string out = "[";
+        for(size_t i = 0; i < tags.size(); ++i)
+        {
+            if(i > 0)
+            {
+                out += ",";
+            }
+            out += tags[i];
+        }
+        out += "]";
+        return out;
+    };
+
+    if(const auto* conv = dynamic_cast<const ConvolutionFpropNode*>(&node))
+    {
+        const auto& attrs = conv->attributes;
+        const auto x = attrs.get_x();
+        const auto w = attrs.get_w();
+        if(x && w)
+        {
+            return convVariant(x->get_dim(),
+                               w->get_dim(),
+                               attrs.get_pre_padding(),
+                               attrs.get_post_padding(),
+                               attrs.get_stride(),
+                               attrs.get_dilation());
+        }
+    }
+    if(const auto* conv = dynamic_cast<const ConvolutionDgradNode*>(&node))
+    {
+        const auto& attrs = conv->attributes;
+        // dx mirrors the forward input shape; w is the filter.
+        const auto dx = attrs.get_dx();
+        const auto w = attrs.get_w();
+        if(dx && w)
+        {
+            return convVariant(dx->get_dim(),
+                               w->get_dim(),
+                               attrs.get_pre_padding(),
+                               attrs.get_post_padding(),
+                               attrs.get_stride(),
+                               attrs.get_dilation());
+        }
+    }
+    if(const auto* conv = dynamic_cast<const ConvolutionWgradNode*>(&node))
+    {
+        const auto& attrs = conv->attributes;
+        // dw mirrors the forward filter shape; x is the input.
+        const auto x = attrs.get_x();
+        const auto dw = attrs.get_dw();
+        if(x && dw)
+        {
+            return convVariant(x->get_dim(),
+                               dw->get_dim(),
+                               attrs.get_pre_padding(),
+                               attrs.get_post_padding(),
+                               attrs.get_stride(),
+                               attrs.get_dilation());
+        }
+    }
+
+    // Batchnorm family: only multi_batch matters for dispatch today.
+    // BatchnormNode previously had no variant (see history note in v5);
+    // we add the multi_batch tag in v6 because N>1 vs N=1 hits different
+    // MIOpen solver paths and the same shape distinction will partition
+    // support on other engines that target single-batch inference paths.
+    const auto bnMultiBatch = [](const std::shared_ptr<TensorAttributes>& x) -> std::string {
+        if(x && !x->get_dim().empty() && x->get_dim()[0] > 1)
+        {
+            return "[multi_batch]";
+        }
+        return {};
+    };
+    if(const auto* bn = dynamic_cast<const BatchnormNode*>(&node))
+    {
+        return bnMultiBatch(bn->attributes.get_x());
+    }
+    if(const auto* bn = dynamic_cast<const BatchnormBackwardNode*>(&node))
+    {
+        return bnMultiBatch(bn->attributes.get_x());
+    }
+    if(const auto* bn = dynamic_cast<const BatchnormInferenceNode*>(&node))
+    {
+        return bnMultiBatch(bn->attributes.get_x());
+    }
+    if(const auto* bn = dynamic_cast<const BatchnormInferenceNodeVarianceExt*>(&node))
+    {
+        return bnMultiBatch(bn->attributes.get_x());
+    }
     return {};
 }
 
@@ -167,7 +332,17 @@ inline StructuredGraphDescription
         const auto variant = describeNodeVariant(node);
         if(!variant.empty())
         {
-            ops << ":" << variant;
+            // v6: shape-only variants (conv, batchnorm) come pre-wrapped
+            // as "[tag,tag]" and are appended directly to the node name
+            // — e.g. "ConvFprop[1x1,grouped]". Mode-bearing variants
+            // (Pointwise:RELU_FWD[upper_clip], Reduction:ADD) keep the
+            // ":VARIANT" separator so the rendered string distinguishes
+            // "the node has a mode" from "the node has shape flags".
+            if(variant.front() != '[')
+            {
+                ops << ":";
+            }
+            ops << variant;
         }
     });
 

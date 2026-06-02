@@ -437,7 +437,7 @@ std::string defaultHeader(const std::string& engineName)
            "support-claims-schema.md\n"
         << "\n"
         << "[meta]\n"
-        << "version = 5\n"
+        << "version = 6\n"
         << "engine  = \"" << engineName << "\"\n"
         << "\n";
     return out.str();

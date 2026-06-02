@@ -1,0 +1,17 @@
+# HIPBLASLT_ENGINE.supported.toml
+# Bring-up placeholder — see dnn-providers/integration-tests/docs/support-claims-schema.md
+#
+# This engine is matmul-only. The cross-engine hipdnn_integration_tests
+# suite exercises conv/batchnorm/RmsNorm graphs that hipblaslt does not
+# implement, so a real --write-support-claims run produces zero matchers
+# for gfx1151/windows. Matmul coverage lives in
+# hipblaslt_plugin_integration_tests.exe, which has not yet been wired
+# into the support-claims pipeline.
+#
+# Once the matmul tests are routed through hipdnn_integration_tests
+# --write-support-claims (or hipblaslt_plugin_integration_tests grows
+# the same flag), regenerate this file on hardware via the tool.
+
+[meta]
+version = 6
+engine  = "HIPBLASLT_ENGINE"

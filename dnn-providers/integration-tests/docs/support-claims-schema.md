@@ -29,11 +29,11 @@ The sidecar is discovered automatically — `TestSettings` looks for
 
 ```toml
 [meta]
-version = 5
+version = 6
 engine  = "MIOPEN_ENGINE"
 ```
 
-- `version` — sidecar schema version. Currently `5`. History:
+- `version` — sidecar schema version. Currently `6`. History:
   - **v1** — initial schema with bare-node-name op_chains.
   - **v2** — op_chain extended with per-node `:variant[flags]` tags so
     Pointwise modes / params, Reduction modes, etc. partition graphs
@@ -47,6 +47,16 @@ engine  = "MIOPEN_ENGINE"
     intermediate?}`. The schema now mirrors the support-matrix display
     and captures compute/intermediate dtypes that affect MIOpen's solver
     dispatch (previously recorded but not matched against).
+  - **v6** — extended `describeNodeVariant()` with shape-flag tags on
+    Conv (`1x1`, `grouped`, `multi_batch`, `non_square`, `padding`,
+    `stride`, `dilation`) and Batchnorm-family (`multi_batch`). op_chain
+    strings now read e.g. `"ConvFprop[1x1,grouped]"`. Engines that
+    partition support along these shape axes (hipblaslt only handling
+    1x1, hip-kernel skipping grouped/dilated) can record distinct
+    matcher rectangles instead of over-claiming via the bare node type.
+    Tag-only variants are appended directly with no leading `:` —
+    `ConvFprop[1x1]` not `ConvFprop:[1x1]` — to keep the mode-bearing
+    `Pointwise:RELU_FWD[upper_clip]` form visually distinct.
 
   Older-version sidecars are refused at load — regenerate via
   `--write-support-claims`. The main TOML's `[meta].version` is a
@@ -157,6 +167,8 @@ Today:
 |------|----------------|-----|
 | `Pointwise` | `MODE` plus `[flags]` listing which optional params are set — `lower_clip`, `upper_clip`, `lower_slope`, `swish_beta`, `elu_alpha`, `softplus_beta` (alphabetical, deterministic). Example: `RELU_FWD[lower_clip,upper_clip]`. | Different MIOpen solvers per (mode, params) combination — plain ReLU, ReLU6, clamp, and leaky-ReLU all use mode `RELU_FWD` but dispatch differently. |
 | `Reduction` | `ADD`, `MAX`, ... when mode is set | Different solvers per reduction op. |
+| `ConvFprop` / `ConvDgrad` / `ConvWgrad` | `[flags]` only, alphabetical: `1x1` (all spatial filter dims == 1), `grouped` (input channels / filter channels > 1), `multi_batch` (N > 1), `non_square` (spatial input dims differ), `padding` (any non-zero pre/post padding), `stride` (any stride ≠ 1), `dilation` (any dilation ≠ 1). Example: `ConvFprop[1x1,multi_batch]`. | Conv engines partition support along shape axes — MIOpen has a dedicated 1x1 solver path, hipblaslt only handles 1x1 (GEMM-backed), hip-kernel may skip grouped or dilated convs. Without these tags an engine that only supports 1x1 conv would over-claim by saying it supports `ConvFprop`. |
+| `Batchnorm` / `BatchnormBackward` / `BatchnormInference` / `BatchnormInferenceVarianceExt` | `[multi_batch]` when input N > 1. | N=1 vs N>1 hits different MIOpen solver paths and is the partition axis for engines targeting single-batch inference. |
 
 **Rule of thumb**: variants are extended per-node-type only when a real
 S∩U conflict has demonstrated the bare node type is too coarse. Adding
@@ -176,7 +188,7 @@ triggers coordinated regeneration of every sidecar.
 # MIOPEN_ENGINE.supported.toml
 
 [meta]
-version = 5
+version = 6
 engine  = "MIOPEN_ENGINE"
 
 [[supported]]

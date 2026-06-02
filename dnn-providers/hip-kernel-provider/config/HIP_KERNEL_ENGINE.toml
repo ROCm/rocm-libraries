@@ -1,0 +1,7 @@
+# Integration test configuration for HIP_KERNEL_ENGINE
+# Created during v6 schema bring-up; tolerance overrides and skips
+# can be added here as needed.
+
+[meta]
+version = 1
+engine  = "HIP_KERNEL_ENGINE"
