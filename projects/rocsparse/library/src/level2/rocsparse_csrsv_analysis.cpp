@@ -513,5 +513,16 @@ rocsparse_status rocsparse::csrsv_analysis(rocsparse_handle            handle,
                                                    A->const_col_data,
                                                    temp_buffer));
 
+    // Pre-allocate the numeric singularity buffer here (during analysis, which is
+    // always outside any hipGraph capture context).  csrsv_solve may be captured
+    // into a hipGraph; inside a capture neither hipMalloc nor hipMallocAsync can
+    // allocate persistent memory (hipMallocAsync creates a graph-managed node
+    // that is freed on hipGraphExecDestroy, leaving a dangling pointer).
+    // By pre-allocating now, the call to create_singularity_numeric_exact inside
+    // csrsv_solve finds an already-valid buffer and only runs the capturable
+    // set_max_position_async (a kernel launch).
+    csrsv_info->create_singularity_numeric_exact(
+        static_cast<int64_t>(1), A->col_type, handle->stream);
+
     return rocsparse_status_success;
 }
