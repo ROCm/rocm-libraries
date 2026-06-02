@@ -43,9 +43,18 @@ Usage:
     # On a GPU node, dispatcher-only numerical+perf:
     python check_parity.py configs/single_fp16_rcr.json --sizes 512x512x512,1024x1024x1024
 
+    # On a GPU node, padding config (different --kernel-set to avoid harness conflict):
+    python check_parity.py configs/padding_fp16_rcr.json \
+        --sizes 1024x1024x1024,257x257x256,513x511x64 --kernel-set parity_padding
+
     # On a GPU node, full dispatcher-vs-TE numerical + performance parity:
     python check_parity.py configs/single_fp16_rcr.json \
         --te-build-dir /path/to/tile_engine/build
+
+Note: --kernel-set is a single global flag shared across all config files in one
+invocation. When running configs that produce different kernels in the same call,
+either use separate invocations with distinct --kernel-set values, or ensure
+all configs share the same kernel-set directory.
 """
 
 from __future__ import annotations
