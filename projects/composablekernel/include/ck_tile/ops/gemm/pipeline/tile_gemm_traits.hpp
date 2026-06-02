@@ -46,9 +46,9 @@ template <bool kPadM_,
           index_t NumWaveGroups_                    = 1,
           bool Preshuffle_                          = false,
           int VectorSize_                           = 16,
-          bool LargeTensors_                        = false,
           DataCachePrefetchKind DataCachePrefetchA_ = DataCachePrefetchKind::None,
-          DataCachePrefetchKind DataCachePrefetchB_ = DataCachePrefetchKind::None>
+          DataCachePrefetchKind DataCachePrefetchB_ = DataCachePrefetchKind::None,
+          bool LargeTensors_                        = false>
 struct TileGemmUniversalTraits
 {
     static constexpr bool kPadM            = kPadM_;
