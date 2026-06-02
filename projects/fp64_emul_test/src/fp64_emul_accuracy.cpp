@@ -6,6 +6,9 @@
  *
  * FP64 emulation accuracy and runtime benchmark.
  *
+ * Uses only the public hipBLASLt API to invoke both native FP64 GEMM and
+ * FP64 emulation via Ozaki Scheme II.  No internal headers are included.
+ *
  * Methodology mirrors GEMMul8 (Ozaki, Uchino, Imamura, arXiv:2504.08009):
  *
  *   Matrix distribution:
@@ -20,16 +23,13 @@
  *   Reports err_max (maximum) and err_med (median over all NxN elements).
  *
  *   Comparisons:
- *     1. hipBLASLt native DGEMM  (HIPBLAS_COMPUTE_64F)
- *     2. fp64EmulatedGemm() with num_moduli = min_s .. max_s  (default 2..20)
+ *     1. hipBLASLt native DGEMM  (HIPBLAS_COMPUTE_64F, emulation disabled)
+ *     2. FP64 emulation with num_moduli = min_s .. max_s  (default 2..14)
+ *     3. FP64 emulation adaptive-s (library default settings)
  *
  * This file must be compiled as HIP (it contains __global__ kernels).
  * The CMakeLists.txt sets LANGUAGE HIP for it.
  */
-
-/* Internal hipBLASLt header — declares fp64EmulatedGemm, Fp64EmulationSettings,
- * fp64EmulationWorkspaceSize, etc.  Requires ROCBLASLT_INTERNAL_API define. */
-#include "fp64_emulation.hpp"
 
 #include <hipblaslt/hipblaslt.h>
 #include <hip/hip_runtime.h>
@@ -74,10 +74,6 @@
 static constexpr double M_PI = 3.14159265358979323846;
 #endif
 
-/* On device, IEEE 754 is enforced by default (no -ffast-math) so the pragma
- * is both unnecessary and harmful — it marks inlined primitives as optnone,
- * making the DD GEMM kernel orders of magnitude slower.
- * On host it remains a useful safety net. */
 #ifndef __HIP_DEVICE_COMPILE__
 # pragma clang optimize off
 #endif
@@ -94,7 +90,6 @@ void two_sum(double a, double b, double& s, double& e)
 __host__ __device__ __forceinline__
 void fast_two_sum(double a, double b, double& s, double& e)
 {
-    /* Requires |a| >= |b| */
     s = a + b;
     e = (a - s) + b;
 }
@@ -123,8 +118,6 @@ void two_prod(double a, double b, double& p, double& e)
 # pragma clang optimize on
 #endif
 
-/* ── double2 = (hi, lo), |lo| << |hi| ── */
-
 __host__ __device__ __forceinline__
 double2 dd_add(double2 a, double2 b)
 {
@@ -135,7 +128,6 @@ double2 dd_add(double2 a, double2 b)
     return c;
 }
 
-/* Subtract double2 from double: returns (double - double2) as double2. */
 __host__ __device__ __forceinline__
 double2 dd_sub(double a, double2 b)
 {
@@ -146,7 +138,6 @@ double2 dd_sub(double a, double2 b)
     return c;
 }
 
-/* Multiply two doubles, returning exact product as double2. */
 __host__ __device__ __forceinline__
 double2 dd_mul(double a, double b)
 {
@@ -155,16 +146,13 @@ double2 dd_mul(double a, double b)
     return c;
 }
 
-/* Divide double2 by double2 (one Newton step). */
 __host__ __device__ __forceinline__
 double2 dd_div(double2 a, double2 b)
 {
     double q1 = a.x / b.x;
-    /* r = a - q1 * b  (double-double) */
     double2 q1b;
     two_prod(q1, b.x, q1b.x, q1b.y);
     q1b.y += q1 * b.y;
-    /* r.hi = a.hi - q1b.hi, r.lo = a.lo - q1b.lo (approximate) */
     double rhi, re;
     two_sub(a.x, q1b.x, rhi, re);
     double rlo = re + (a.y - q1b.y);
@@ -176,10 +164,7 @@ double2 dd_div(double2 a, double2 b)
 
 /* =========================================================================
  * GPU random-number helpers
- * 64-bit xorshift + Box-Muller transform.
- * Seeds follow GEMMul8: seedA=12345, seedB=54321.
  * ========================================================================= */
-
 static constexpr uint64_t SEED_A = 12345ULL;
 static constexpr uint64_t SEED_B = 54321ULL;
 
@@ -192,76 +177,55 @@ uint64_t xorshift64(uint64_t s)
     return s;
 }
 
-/* Map 64-bit integer to double in (0, 1) exclusive. */
 __device__ __forceinline__
 double bits_to_uniform(uint64_t bits)
 {
-    /* top 53 bits → [0, 1) shifted slightly above 0 to avoid log(0) */
-    return static_cast<double>(bits >> 11) * (1.0 / 9007199254740992.0)
-           + 1e-300;
+    return static_cast<double>(bits >> 11) * (1.0 / 9007199254740992.0) + 1e-300;
 }
 
-/* Box-Muller cosine branch: (u1, u2) in (0,1) → standard normal. */
 __device__ __forceinline__
 double box_muller(double u1, double u2)
 {
     return sqrt(-2.0 * log(u1)) * cos(2.0 * M_PI * u2);
 }
 
-/* =========================================================================
- * randmat_kernel
- *
- * Fills n_elems doubles with the GEMMul8 distribution (phi parameter):
- *   phi < 0  → N(0, 1)
- *   phi >= 0 → (U(0,1) - 0.5) * exp(N(0,1) * phi)
- * ========================================================================= */
 __global__ static void
 randmat_kernel(size_t n_elems, double* __restrict__ A, double phi, uint64_t seed)
 {
     const size_t idx = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
     if(idx >= n_elems) return;
 
-    /* Per-element unique state — mix seed with index using a Knuth multiplier */
     uint64_t s = seed ^ (idx * 0x9e3779b97f4a7c15ULL + 1442695040888963407ULL);
     s = xorshift64(s);
-    s = xorshift64(s);   /* additional mixing */
+    s = xorshift64(s);
 
     uint64_t b0 = xorshift64(s);
     uint64_t b1 = xorshift64(b0);
     uint64_t b2 = xorshift64(b1);
 
-    const double u0 = bits_to_uniform(b0);   /* Box-Muller input 1 */
-    const double u1 = bits_to_uniform(b1);   /* Box-Muller input 2 */
-    const double u2 = bits_to_uniform(b2);   /* uniform for (rand-0.5) part */
+    const double u0 = bits_to_uniform(b0);
+    const double u1 = bits_to_uniform(b1);
+    const double u2 = bits_to_uniform(b2);
 
     const double randn = box_muller(u0, u1);
     A[idx] = (phi < 0.0) ? randn : ((u2 - 0.5) * exp(randn * phi));
 }
 
 /* =========================================================================
- * dd_gemm_kernel
- *
- * Computes C_dd[m × n] = A[m × k] * B[k × n] in double-double arithmetic.
- * All matrices column-major with natural leading dimensions (ld = first dim).
- * Output: double2 per element (hi, lo).
- *
- * Tiled 32×32 shared-memory kernel, mirrors GEMMul8's simple_gemm_device.
- *
- * Grid:  ((n + TILE-1)/TILE, (m + TILE-1)/TILE)
- * Block: (TILE, TILE)
+ * dd_gemm_kernel — double-double reference GEMM
  * ========================================================================= */
 static constexpr int DD_TILE = 32;
 
 __global__ static void
 dd_gemm_kernel(size_t m, size_t n, size_t k,
-               const double* __restrict__ A,    /* col-major, ld = m */
-               const double* __restrict__ B,    /* col-major, ld = k */
-               double2* __restrict__      C_dd) /* col-major, ld = m */
+               const double* __restrict__ A,
+               const double* __restrict__ B,
+               double2* __restrict__      C_dd)
 {
     const size_t row = static_cast<size_t>(blockIdx.y) * DD_TILE + threadIdx.y;
     const size_t col = static_cast<size_t>(blockIdx.x) * DD_TILE + threadIdx.x;
 
-    __shared__ double Asub[DD_TILE][DD_TILE + 1]; /* +1 avoids bank conflicts */
+    __shared__ double Asub[DD_TILE][DD_TILE + 1];
     __shared__ double Bsub[DD_TILE][DD_TILE + 1];
 
     double2 sum = {0.0, 0.0};
@@ -269,12 +233,10 @@ dd_gemm_kernel(size_t m, size_t n, size_t k,
     const int num_tiles = static_cast<int>((k + DD_TILE - 1) / DD_TILE);
 
     for(int t = 0; t < num_tiles; ++t) {
-        /* A[row, t*TILE + threadIdx.x] */
         const size_t a_col = static_cast<size_t>(t * DD_TILE) + threadIdx.x;
         Asub[threadIdx.y][threadIdx.x] =
             (row < m && a_col < k) ? A[row + a_col * m] : 0.0;
 
-        /* B[t*TILE + threadIdx.y, col] */
         const size_t b_row = static_cast<size_t>(t * DD_TILE) + threadIdx.y;
         Bsub[threadIdx.y][threadIdx.x] =
             (b_row < k && col < n) ? B[b_row + col * k] : 0.0;
@@ -282,10 +244,8 @@ dd_gemm_kernel(size_t m, size_t n, size_t k,
         __syncthreads();
 
 #pragma unroll
-        for(int i = 0; i < DD_TILE; ++i) {
-            /* sum += Asub[row_local][i] * Bsub[i][col_local]  (double-double) */
+        for(int i = 0; i < DD_TILE; ++i)
             sum = dd_add(sum, dd_mul(Asub[threadIdx.y][i], Bsub[i][threadIdx.x]));
-        }
         __syncthreads();
     }
 
@@ -293,33 +253,23 @@ dd_gemm_kernel(size_t m, size_t n, size_t k,
         C_dd[row + col * m] = sum;
 }
 
-/* =========================================================================
- * gemm_err_kernel
- *
- * Overwrites D_tmp[idx] (double, in-place) with the componentwise relative
- * error vs the double-double reference:
- *   |err[idx]| = |(D[idx] - C_exact[idx]) / C_exact[idx]|  (hi part of DD)
- *
- * Mirrors GEMMul8/testing/eval.hpp :: gemm_err_kernel.
- * ========================================================================= */
 __global__ static void
 gemm_err_kernel(size_t n_elems,
-                double* __restrict__        D_tmp,  /* in: computed; out: |err| */
-                const double2* __restrict__ C_dd)   /* double-double reference  */
+                double* __restrict__        D_tmp,
+                const double2* __restrict__ C_dd)
 {
     const size_t idx = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
     if(idx >= n_elems) return;
 
     const double2 ref = C_dd[idx];
     if(ref.x == 0.0 && ref.y == 0.0) {
-        /* Exact zero — report |D| as absolute error (edge case) */
         D_tmp[idx] = fabs(D_tmp[idx]);
         return;
     }
 
-    const double2 gap = dd_sub(D_tmp[idx], ref);       /* D - C_exact  (DD)  */
-    const double2 err = dd_div(gap, ref);              /* gap / C_exact (DD)  */
-    D_tmp[idx] = fabs(err.x);                         /* |relative error| hi */
+    const double2 gap = dd_sub(D_tmp[idx], ref);
+    const double2 err = dd_div(gap, ref);
+    D_tmp[idx] = fabs(err.x);
 }
 
 /* =========================================================================
@@ -347,11 +297,6 @@ static void launch_dd_gemm(size_t N,
                        N, N, N, d_A, d_B, d_C_dd);
 }
 
-/**
- * Compute errors of d_D vs d_C_dd, return {err_max, err_med}.
- * Uses d_err as a temporary device buffer (must be N*N doubles).
- * h_err is a pre-allocated host buffer of size N*N used for sorting.
- */
 static std::pair<double, double>
 compute_errors(size_t N,
                const double*  d_D,
@@ -362,7 +307,6 @@ compute_errors(size_t N,
 {
     const size_t n_elems = N * N;
 
-    /* d_err = copy of d_D (kernel overwrites it) */
     HIP_CHECK(hipMemcpyAsync(d_err, d_D, n_elems * sizeof(double),
                              hipMemcpyDeviceToDevice, stream));
 
@@ -385,9 +329,10 @@ compute_errors(size_t N,
 }
 
 /* =========================================================================
- * Native DGEMM via hipBLASLt  (HIPBLAS_COMPUTE_64F)
+ * DgemmRunner — wraps a hipBLASLt handle + matmul descriptors for N×N DGEMM.
+ * Used for both native (emulation disabled) and emulated (emulation enabled).
  * ========================================================================= */
-struct NativeDgemm {
+struct DgemmRunner {
     hipblasLtHandle_t            handle  = nullptr;
     hipblasLtMatmulDesc_t        desc    = nullptr;
     hipblasLtMatrixLayout_t      layoutA = nullptr;
@@ -397,11 +342,22 @@ struct NativeDgemm {
     hipblasLtMatmulHeuristicResult_t heur{};
     bool hasAlgo = false;
 
-    void init(int64_t N)
+    void init(int64_t N, bool emulation_enabled, size_t workspace_bytes)
     {
         HLT_CHECK(hipblasLtCreate(&handle));
 
-        /* Matmul descriptor: native FP64 */
+        /* Enable or disable emulation for this handle */
+        HLT_CHECK(hipblasLtSetEmulationEnabled(handle, emulation_enabled));
+
+        if(emulation_enabled) {
+            /* EAGER: emulate regardless of problem size (bypass AI heuristic) */
+            HLT_CHECK(hipblasLtSetEmulationStrategy(handle,
+                                                    HIPBLASLT_EMULATION_STRATEGY_EAGER));
+            /* Disable Inf/NaN detection for speed (benchmark uses clean data) */
+            HLT_CHECK(hipblasLtSetEmulationSpecialValuesSupport(handle, 0u));
+        }
+
+        /* Matmul descriptor: FP64 compute and scale type */
         HLT_CHECK(hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_64F, HIP_R_64F));
         {
             hipblasOperation_t opN = HIPBLAS_OP_N;
@@ -411,7 +367,7 @@ struct NativeDgemm {
                 desc, HIPBLASLT_MATMUL_DESC_TRANSB, &opN, sizeof(opN)));
         }
 
-        /* Square N×N, column-major, ld = N */
+        /* Square N×N, column-major */
         HLT_CHECK(hipblasLtMatrixLayoutCreate(
             &layoutA, HIP_R_64F,
             static_cast<uint64_t>(N), static_cast<uint64_t>(N), N));
@@ -423,6 +379,9 @@ struct NativeDgemm {
             static_cast<uint64_t>(N), static_cast<uint64_t>(N), N));
 
         HLT_CHECK(hipblasLtMatmulPreferenceCreate(&pref));
+        HLT_CHECK(hipblasLtMatmulPreferenceSetAttribute(
+            pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
+            &workspace_bytes, sizeof(workspace_bytes)));
 
         int cnt = 0;
         hipblasLtMatmulAlgoGetHeuristic(
@@ -436,6 +395,7 @@ struct NativeDgemm {
     }
 
     void run(const double* A, const double* B, double* D,
+             void* workspace, size_t workspace_bytes,
              hipStream_t stream) const
     {
         const double alpha = 1.0, beta = 0.0;
@@ -444,7 +404,7 @@ struct NativeDgemm {
             &alpha, A, layoutA, B, layoutB,
             &beta,  D, layoutD, D, layoutD,
             hasAlgo ? &heur.algo : nullptr,
-            nullptr, 0, stream));
+            workspace, workspace_bytes, stream));
     }
 
     void destroy()
@@ -462,8 +422,6 @@ struct NativeDgemm {
  * Timing helper
  * ========================================================================= */
 
-/** Warmup num_warmup calls (no timing), then time num_runs calls.
- *  Returns elapsed milliseconds per run. */
 template<typename Fn>
 static double run_and_time(Fn fn, unsigned num_warmup, unsigned num_runs,
                            hipStream_t stream)
@@ -478,7 +436,7 @@ static double run_and_time(Fn fn, unsigned num_warmup, unsigned num_runs,
     HIP_CHECK(hipEventRecord(beg, stream));
     for(unsigned i = 0; i < num_runs; ++i) fn();
     HIP_CHECK(hipEventRecord(end, stream));
-    HIP_CHECK(hipEventSynchronize(end));  /* all work through 'end' is done */
+    HIP_CHECK(hipEventSynchronize(end));
 
     float ms_total = 0.0f;
     HIP_CHECK(hipEventElapsedTime(&ms_total, beg, end));
@@ -489,7 +447,7 @@ static double run_and_time(Fn fn, unsigned num_warmup, unsigned num_runs,
 }
 
 /* =========================================================================
- * CRT bit capacity for num_moduli = 2..20 (from fp64_emulation.cpp)
+ * CRT bit capacity for num_moduli = 2..20
  * Indexed directly by s: CRT_BITS[s], s in {2, ..., 20}.
  * ========================================================================= */
 static constexpr double CRT_BITS[21] = {
@@ -516,6 +474,23 @@ static constexpr double CRT_BITS[21] = {
    155.365, /* s=20 */
 };
 
+/**
+ * bits_for_moduli(s): returns the integer maxBits value that causes the
+ * library to select exactly s moduli.
+ *
+ * The library picks the minimum s' such that CRT_BITS[s'] >= maxBits.
+ * To select exactly s, we need:
+ *   CRT_BITS[s-1] < maxBits <= CRT_BITS[s]
+ * Using maxBits = (int)CRT_BITS[s-1] + 1 satisfies this:
+ *   CRT_BITS[s-1] is ~N.xxx, so (int)CRT_BITS[s-1] = floor = N < N.xxx
+ *   and N+1 > CRT_BITS[s-1] but <= CRT_BITS[s] (verified for s=2..14).
+ */
+static int bits_for_moduli(unsigned s)
+{
+    if(s < 2u) s = 2u;
+    return static_cast<int>(CRT_BITS[s - 1]) + 1;
+}
+
 /* =========================================================================
  * CLI parsing
  * ========================================================================= */
@@ -525,7 +500,7 @@ struct Config {
     unsigned            min_s        = 2;
     unsigned            max_s        = 20;
     std::vector<double> phi_list     = {0.5, 1.0, 2.0, 4.0};
-    bool                run_adaptive = true;  /* include adaptive-s run */
+    bool                run_adaptive = true;
 };
 
 static void print_usage(const char* prog)
@@ -534,17 +509,16 @@ static void print_usage(const char* prog)
         "Usage: %s [options]\n"
         "  -n N           Square matrix size M=N=K (default: 512)\n"
         "  --num-runs R   Timed iterations per config (default: 30)\n"
-        "                 Warmup runs = same count as timed runs.\n"
         "  --min-s S      Minimum num_moduli for emulation (default: 2)\n"
         "  --max-s S      Maximum num_moduli for emulation (default: 20)\n"
         "  --phi-list P   Comma-separated phi values\n"
-        "                 (default: -1,0,0.5,1,2,4  — same as GEMMul8)\n"
-        "  --no-adaptive  Skip the adaptive-s (default settings) run\n"
+        "                 (default: 0.5,1,2,4  — same as GEMMul8)\n"
+        "  --no-adaptive  Skip the adaptive-s (library-default) run\n"
         "  -h, --help     Print this help and exit\n"
         "\n"
         "Output: CSV with columns  phi,N,algo,crt_bits,err_max,err_med,ms_per_run\n"
-        "  algo = 'DGEMM'              native FP64\n"
-        "  algo = 'OS2-accu-adaptive'  adaptive s (default settings, s≤16)\n"
+        "  algo = 'DGEMM'              native FP64 (emulation disabled)\n"
+        "  algo = 'OS2-accu-adaptive'  adaptive s (library default, s<=14)\n"
         "  algo = 'OS2-accu-sN'        fixed N moduli\n",
         prog);
 }
@@ -592,7 +566,6 @@ static Config parse_args(int argc, char** argv)
         }
     }
 
-    /* Clamp moduli range to valid [2, 20] */
     if(cfg.min_s < 2u)  cfg.min_s = 2u;
     if(cfg.max_s > 20u) cfg.max_s = 20u;
     if(cfg.min_s > cfg.max_s) std::swap(cfg.min_s, cfg.max_s);
@@ -633,11 +606,11 @@ int main(int argc, char** argv)
     std::fprintf(stderr, "]\n\n");
 
     /* ── GPU allocations ──────────────────────────────────────────────── */
-    double*  d_A    = nullptr;  /* N×N input matrix A          */
-    double*  d_B    = nullptr;  /* N×N input matrix B          */
-    double*  d_D    = nullptr;  /* N×N GEMM result             */
-    double*  d_err  = nullptr;  /* N×N temp for error kernel   */
-    double2* d_C_dd = nullptr;  /* N×N double-double reference */
+    double*  d_A    = nullptr;
+    double*  d_B    = nullptr;
+    double*  d_D    = nullptr;
+    double*  d_err  = nullptr;
+    double2* d_C_dd = nullptr;
 
     HIP_CHECK(hipMalloc(&d_A,    N2 * sizeof(double)));
     HIP_CHECK(hipMalloc(&d_B,    N2 * sizeof(double)));
@@ -645,90 +618,73 @@ int main(int argc, char** argv)
     HIP_CHECK(hipMalloc(&d_err,  N2 * sizeof(double)));
     HIP_CHECK(hipMalloc(&d_C_dd, N2 * sizeof(double2)));
 
-    std::vector<double> h_err(N2);  /* host buffer for sort */
+    std::vector<double> h_err(N2);
 
-    /* Emulation workspace — allocate for the maximum (20 moduli) */
-    size_t ws_bytes = fp64EmulationWorkspaceSize(
-        static_cast<int64_t>(N), static_cast<int64_t>(N),
-        static_cast<int64_t>(N), 20u);
+    /*
+     * Workspace for hipblasLtMatmul.
+     * The emulation code allocates internally if the provided workspace is
+     * too small, but pre-allocating avoids that latency during timed runs.
+     * 512 MiB is sufficient for N up to ~4096 with 14 moduli.
+     */
+    constexpr size_t WS_BYTES = 512ull << 20;  /* 512 MiB */
     void* d_ws = nullptr;
-    HIP_CHECK(hipMalloc(&d_ws, ws_bytes));
+    HIP_CHECK(hipMalloc(&d_ws, WS_BYTES));
 
     hipStream_t stream;
     HIP_CHECK(hipStreamCreate(&stream));
 
-    /* ── Native DGEMM setup ───────────────────────────────────────────── */
-    NativeDgemm native;
-    native.init(static_cast<int64_t>(N));
+    /* ── hipBLASLt runner setup ───────────────────────────────────────── */
+    /* Native DGEMM: emulation explicitly disabled */
+    DgemmRunner native;
+    native.init(static_cast<int64_t>(N), /*emulation_enabled=*/false, WS_BYTES);
+
+    /* Emulated DGEMM: emulation enabled, EAGER strategy, no Inf/NaN check */
+    DgemmRunner emulated;
+    emulated.init(static_cast<int64_t>(N), /*emulation_enabled=*/true, WS_BYTES);
 
     /* ── CSV header ───────────────────────────────────────────────────── */
     std::printf("phi,N,algo,crt_bits,err_max,err_med,ms_per_run\n");
     std::fflush(stdout);
 
     /* ── Main sweep ───────────────────────────────────────────────────── */
-    const double alpha = 1.0;
-    const double beta  = 0.0;
-
     for(double phi : cfg.phi_list) {
 
-        /* Fill A, B on GPU with GEMMul8 distribution */
+        /* Fill A, B on GPU */
         launch_randmat(N, N, d_A, phi, SEED_A, stream);
         launch_randmat(N, N, d_B, phi, SEED_B, stream);
         HIP_CHECK(hipStreamSynchronize(stream));
 
-        /* Compute double-double reference: C_dd = A * B */
+        /* Double-double reference */
         launch_dd_gemm(N, d_A, d_B, d_C_dd, stream);
         HIP_CHECK(hipStreamSynchronize(stream));
 
         /* ── Native DGEMM ─────────────────────────────────────────────── */
         {
-            auto fn = [&]{ native.run(d_A, d_B, d_D, stream); };
-
-            /* Warmup + timed runs; d_D holds the last result after this. */
+            auto fn = [&]{ native.run(d_A, d_B, d_D, d_ws, WS_BYTES, stream); };
             double ms = run_and_time(fn, num_runs, num_runs, stream);
 
             auto [err_max, err_med] = compute_errors(
                 N, d_D, d_C_dd, d_err, h_err, stream);
 
             std::printf("%.4g,%zu,DGEMM,%.1f,%.4e,%.4e,%.3f\n",
-                        phi, N, 53.0 /* FP64 mantissa bits */,
-                        err_max, err_med, ms);
+                        phi, N, 53.0, err_max, err_med, ms);
             std::fflush(stdout);
         }
 
-        /* ── Adaptive-s run: num_moduli=0 → fp64EmulationNumModuli()=16,
-         *   then per-call adaptive selection reduces s based on actual
-         *   C32i_prelim magnitudes (captures exponent range + inner products).
-         *   Upper-bound CRT capacity: CRT_BITS[16] = 125.4 bits.           ── */
+        /* ── Adaptive-s emulation run ─────────────────────────────────── */
         if(cfg.run_adaptive) {
-            Fp64EmulationSettings settings;
-            settings.num_moduli      = 0u;       /* 0 = use fp64EmulationNumModuli() */
-            settings.sv_mask         = 0u;       /* skip Inf/NaN detection */
-            settings.workspace       = d_ws;
-            settings.workspace_bytes = ws_bytes;
+            /* DYNAMIC: library selects num_moduli automatically.
+             * Default mantissa control is DYNAMIC, so just reset it. */
+            HLT_CHECK(hipblasLtSetFixedPointEmulationMantissaControl(
+                emulated.handle, HIPBLAS_EMULATION_MANTISSA_CONTROL_DYNAMIC));
 
-            auto fn = [&]{
-                fp64EmulatedGemm(
-                    HIPBLAS_OP_N, HIPBLAS_OP_N,
-                    static_cast<int64_t>(N),
-                    static_cast<int64_t>(N),
-                    static_cast<int64_t>(N),
-                    &alpha,
-                    d_A, static_cast<int64_t>(N),
-                    d_B, static_cast<int64_t>(N),
-                    &beta,
-                    d_D, static_cast<int64_t>(N),
-                    d_D, static_cast<int64_t>(N),
-                    stream, settings);
-            };
-
+            auto fn = [&]{ emulated.run(d_A, d_B, d_D, d_ws, WS_BYTES, stream); };
             double ms = run_and_time(fn, num_runs, num_runs, stream);
-            /* d_D holds the result of the last timed call */
 
             auto [err_max, err_med] = compute_errors(
                 N, d_D, d_C_dd, d_err, h_err, stream);
 
-            /* Report crt_bits as the upper-bound (default s=16 → 125.4 bits) */
+            /* Report crt_bits as the library default upper-bound (16 moduli → 125.4 bits) */
             std::printf("%.4g,%zu,OS2-accu-adaptive,%.1f,%.4e,%.4e,%.3f\n",
                         phi, N, CRT_BITS[16], err_max, err_med, ms);
             std::fflush(stdout);
@@ -736,29 +692,14 @@ int main(int argc, char** argv)
 
         /* ── Emulation sweep over num_moduli = min_s .. max_s ─────────── */
         for(unsigned s = cfg.min_s; s <= cfg.max_s; ++s) {
-            Fp64EmulationSettings settings;
-            settings.num_moduli      = s;
-            settings.sv_mask         = 0u;      /* skip Inf/NaN detection */
-            settings.workspace       = d_ws;
-            settings.workspace_bytes = ws_bytes;
+            /* FIXED: use the computed bit count that selects exactly s moduli */
+            HLT_CHECK(hipblasLtSetFixedPointEmulationMantissaControl(
+                emulated.handle, HIPBLAS_EMULATION_MANTISSA_CONTROL_FIXED));
+            HLT_CHECK(hipblasLtSetFixedPointEmulationMaxMantissaBitCount(
+                emulated.handle, bits_for_moduli(s)));
 
-            auto fn = [&]{
-                fp64EmulatedGemm(
-                    HIPBLAS_OP_N, HIPBLAS_OP_N,
-                    static_cast<int64_t>(N),
-                    static_cast<int64_t>(N),
-                    static_cast<int64_t>(N),
-                    &alpha,
-                    d_A, static_cast<int64_t>(N),
-                    d_B, static_cast<int64_t>(N),
-                    &beta,
-                    d_D, static_cast<int64_t>(N),
-                    d_D, static_cast<int64_t>(N),
-                    stream, settings);
-            };
-
+            auto fn = [&]{ emulated.run(d_A, d_B, d_D, d_ws, WS_BYTES, stream); };
             double ms = run_and_time(fn, num_runs, num_runs, stream);
-            /* d_D now holds the result of the last timed call. */
 
             auto [err_max, err_med] = compute_errors(
                 N, d_D, d_C_dd, d_err, h_err, stream);
@@ -774,6 +715,7 @@ int main(int argc, char** argv)
     }
 
     /* ── Cleanup ──────────────────────────────────────────────────────── */
+    emulated.destroy();
     native.destroy();
     HIP_CHECK(hipFree(d_ws));
     HIP_CHECK(hipFree(d_C_dd));
