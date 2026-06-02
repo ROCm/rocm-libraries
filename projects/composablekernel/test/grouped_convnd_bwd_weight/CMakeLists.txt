@@ -26,6 +26,15 @@ if(GPU_TARGETS MATCHES "gfx9")
     if(TARGET device_grouped_conv_bwd_weight_tile_instances)
         target_link_libraries(test_grouped_convnd_bwd_weight_tile PRIVATE device_grouped_conv_bwd_weight_tile_instances)
     endif()
+
+    # CSV-driven CK Tile dataset test (AICK-1277): consumes the same catalogue as
+    # test_grouped_convnd_bwd_weight_dataset_xdl so one CSV feeds both backends.
+    add_gtest_executable(test_grouped_convnd_bwd_weight_dataset_tile test_grouped_convnd_bwd_weight_dataset_tile.cpp)
+    target_compile_options(test_grouped_convnd_bwd_weight_dataset_tile PRIVATE -Wno-global-constructors -Wno-undef -Wno-c++20-compat)
+    target_link_libraries(test_grouped_convnd_bwd_weight_dataset_tile PRIVATE gtest_main getopt::getopt utility)
+    if(TARGET device_grouped_conv_bwd_weight_tile_instances)
+        target_link_libraries(test_grouped_convnd_bwd_weight_dataset_tile PRIVATE device_grouped_conv_bwd_weight_tile_instances)
+    endif()
   endif()
 endif()
 
