@@ -33,8 +33,9 @@
 #include <thrust/detail/vector_base.h>
 #include <thrust/device_allocator.h>
 
+#include _THRUST_STD_INCLUDE(utility)
+
 #include <initializer_list>
-#include <utility>
 #include <vector>
 
 THRUST_NAMESPACE_BEGIN
@@ -143,7 +144,7 @@ public:
    *  \param v The device_vector to move.
    */
   device_vector(device_vector&& v)
-      : Parent(std::move(v))
+      : Parent(_THRUST_STD::move(v))
   {}
 
   /*! Move constructor moves from another \p device_vector.
@@ -151,7 +152,7 @@ public:
    *  \param alloc The allocator to use by this device_vector.
    */
   device_vector(device_vector&& v, const Alloc& alloc)
-      : Parent(std::move(v), alloc)
+      : Parent(_THRUST_STD::move(v), alloc)
   {}
 
   /*! Copy assign operator copies another \p device_vector with the same type.
@@ -168,7 +169,7 @@ public:
    */
   device_vector& operator=(device_vector&& v)
   {
-    Parent::operator=(std::move(v));
+    Parent::operator=(_THRUST_STD::move(v));
     return *this;
   }
 

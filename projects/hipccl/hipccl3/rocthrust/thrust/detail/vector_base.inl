@@ -122,7 +122,7 @@ vector_base<T, Alloc>::vector_base(vector_base&& v)
     : m_storage(copy_allocator_t(), v.m_storage)
     , m_size(0)
 {
-  *this = std::move(v);
+  *this = _THRUST_STD::move(v);
 } // end vector_base::vector_base()
 
 template <typename T, typename Alloc>
@@ -145,8 +145,8 @@ template <typename T, typename Alloc>
 vector_base<T, Alloc>& vector_base<T, Alloc>::operator=(vector_base&& v)
 {
   m_storage.destroy(begin(), end());
-  m_storage = std::move(v.m_storage);
-  m_size    = std::move(v.m_size);
+  m_storage = _THRUST_STD::move(v.m_storage);
+  m_size    = _THRUST_STD::move(v.m_size);
 
   v.m_storage = contiguous_storage<T, Alloc>(copy_allocator_t(), m_storage);
   v.m_size    = 0;
