@@ -440,19 +440,19 @@ violated, disable smart build until fixed.
    stage** is covered there, independently.
 
 6. **Toolchain assumption: clang + Ninja generator on Linux.** CK builds with
-   amdclang/hipcc, and the tooling depends on it:
+   amdclang/hipcc, and the tooling builds on that:
    - depmap extraction uses `clang -MM` / `clang-scan-deps -format make`;
    - the build-graph layer (`ninja -t targets all` oracle, `ninja -t deps` ground
-     truth, `NinjaTargetParser`) assumes the **Ninja generator** (`-G Ninja`);
-   - paths are normalized as forward-slash, case-sensitive (git's view).
+     truth, `NinjaTargetParser`) relies on the **Ninja generator** (`-G Ninja`);
+   - paths are normalized to git's forward-slash, case-sensitive keys.
 
-   **Porting to MSVC would need:** an MSVC dep backend using
-   `cl /sourceDependencies <out>.json` (or `/showIncludes`) in place of the make
-   backend; the **Ninja generator** (with `deps = msvc`, so `ninja -t deps` still
-   works — the VS/MSBuild generator has no `build.ninja` and would break the whole
-   build-graph layer); and Windows path normalization (backslashes / drive letters
-   / case) folded to git's keys. The HIP resource-dir injection is amdclang-only.
-   MSVC is not a current CK target; this is a portability note, not a TODO.
+   **Porting to MSVC** would add: an MSVC dep backend using
+   `cl /sourceDependencies <out>.json` (or `/showIncludes`) alongside the make
+   backend; the **Ninja generator** with `deps = msvc` (which keeps `ninja -t deps`
+   and the whole build-graph layer intact — use `-G Ninja` for an MSVC build too);
+   and Windows path normalization (backslashes / drive letters / case) folded to
+   git's keys. The HIP resource-dir injection applies to amdclang. This applies
+   only as a future MSVC port — recorded here as a portability note.
 
 ---
 
