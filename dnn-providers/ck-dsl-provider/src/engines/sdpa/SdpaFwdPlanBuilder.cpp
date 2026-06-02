@@ -285,6 +285,11 @@ void SdpaFwdPlanBuilder::buildPlan(const ::CkDslHandle& handle,
     //    fallback over the same candidate set. The returned knobs carry
     //    the problem-driven sinks / sliding-window lanes (the enumerator
     //    copied them from selProblem).
+    //    Thread-safety: C++11 guarantees thread-safe static init, and
+    //    predict() is const. This assumes LightGBM's booster predict is
+    //    reentrant under concurrent buildPlan calls -- true for the
+    //    single-threaded host path; CONFIRM before any multi-threaded
+    //    plan-finding (Phase 4) or guard the predict with a mutex.
     static const SdpaScorer kScorer;
     spec.knobs = selectPerfKnobs(selProblem, candidates, kScorer);
 
