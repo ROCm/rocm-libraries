@@ -36,7 +36,7 @@ reference).
 | dtype | hd64 | hd128 | hd192 |
 |---|---|---|---|
 | bf16 | unverified | **verified** | unverified |
-| fp16 | unverified | unverified | unverified |
+| fp16 | unverified | **verified** | unverified |
 
 This matrix is the source of truth for the `verified` flag computed in
 `SdpaBwdPlanBuilder.cpp` (`computeDispatchTuples`). At runtime, dispatch emits a

@@ -91,9 +91,8 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableSdpaBwdVariations)
         // accepts.
         {GraphTest{createSdpaBwdGraph({4, 8, 256, 192}), "Head dimension 192"}, true},
 
-        // FP16 HD128: registry-supported and now dispatched. The CPU reference
-        // is not yet calibrated, so buildPlan logs a one-time WARN; isApplicable
-        // accepts.
+        // FP16 HD128: registry-supported and dispatched, with a calibrated CPU
+        // reference (logs INFO, like bf16 hd128); isApplicable accepts.
         {GraphTest{createSdpaBwdGraph({4, 8, 256, 128}, DataType::HALF), "FP16 tensors"}, true},
 
         // Causal mask not currently dispatched.

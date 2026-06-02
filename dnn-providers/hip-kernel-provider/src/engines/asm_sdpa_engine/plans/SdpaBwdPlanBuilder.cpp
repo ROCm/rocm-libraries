@@ -303,13 +303,14 @@ bool wouldBwdByteStridesFitUint32(
 // The `verified` flag records whether the resolved (dtype, hdim) kernels have a
 // CPU backward reference that has been calibrated against the in-tree kernels.
 // It is keyed on (dtype, hdim) — not on pipeline stage — so all three stages of
-// a dispatch share the same value. Today only (bf16, hd128) is calibrated.
+// a dispatch share the same value. Today (bf16, hd128) and (fp16, hd128) are
+// calibrated.
 BwdDispatchTuples computeDispatchTuples(const std::string& dataType,
                                         int hdimQ,
                                         MaskType maskType,
                                         int bf16CvtValue)
 {
-    const bool verified = (dataType == "bf16" && hdimQ == 128);
+    const bool verified = (dataType == "bf16" || dataType == "fp16") && hdimQ == 128;
 
     BwdDispatchTuples tuples{};
     tuples.odo = {0, 0, 0, 0, BF16_CVT_FP16_SENTINEL, verified};
