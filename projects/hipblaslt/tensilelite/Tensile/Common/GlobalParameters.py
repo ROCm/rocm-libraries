@@ -356,6 +356,12 @@ globalParameters["StinkyTofuDebugPass"] = ""
 # Note: multiple kernels may overwrite the same file unless you use a unique path per build.
 globalParameters["StinkyTofuPassOrderSnapshotJson"] = ""
 
+# StinkyTofu optimization remarks (stderr).  Unlike PASS_DEBUG (for compiler
+# developers), remarks are for kernel developers who want to understand generated
+# code quality — e.g. how many regions a loop was split into, what caused the
+# splits, and how many s_nop cycles were wasted.
+globalParameters["StinkyTofuEnableRemarks"] = False
+
 # Save a copy - since pytest doesn't re-run this initialization code and YAML files can override global settings - odd things can happen
 # we should do this here...
 defaultGlobalParameters = deepcopy(globalParameters)
@@ -391,14 +397,14 @@ defaultBenchmarkCommonParameters = [
     {"InnerUnroll": [1]},
     {"KernelLanguage": ["Assembly"]},
     {"LdsPadA": [-1]},
-    {"LdsPadMXSA": [ 0 ] },
+    {"LdsPadMXSA": [ -1 ] },
     {"LdsPadB": [-1]},
-    {"LdsPadMXSB": [ 0 ] },
+    {"LdsPadMXSB": [ -1 ] },
     {"LdsPadMetadata": [0]},
     {"LdsBlockSizePerPadA": [-1]},
-    {"LdsBlockSizePerPadMXSA": [ 0 ] },
+    {"LdsBlockSizePerPadMXSA": [ -1 ] },
     {"LdsBlockSizePerPadB": [-1]},
-    {"LdsBlockSizePerPadMXSB": [ 0 ] },
+    {"LdsBlockSizePerPadMXSB": [ -1 ] },
     {"LdsBlockSizePerPadMetadata": [0]},
     {"TransposeLDS": [-1]},
     {"TransposeLDSMetadata": [-1]},
@@ -492,12 +498,14 @@ defaultBenchmarkCommonParameters = [
     {"StreamKXCCMapping": [0]},
     {"StreamKFixupTreeReduction": [0]},
     {"DebugStreamK": [0]},
+    {"DebugPersistentKernelLoopForever": [False]},
     {"ActivationFused": [True]},
     {"ActivationFuncCall": [True]},
     {"ActivationAlt": [False]},
     {"WorkGroupReduction": [False]},
     {"ConvertAfterDS": [False]},
     {"ForceDisableShadowInit": [False]},
+    {"InitCIterWmma": [-1]},
     {"LDSTrInst": [False]},
     {"WaveSplitK": [ False ]},
     {"MbskPrefetchMethod": [-1]},
@@ -524,7 +532,15 @@ defaultBenchmarkCommonParameters = [
     # code evicted from the I-cache before it runs. Software prefetch helps keep instruction fetch
     # ahead of execution. False: no SGPR reserved; Stinky prefetch pass disabled for that kernel.
     {"SwInstructionPrefetch": [True]},
+    # ClusterDim — workgroup cluster dimensions [x, y] for clustered kernel launch.
+    # [1, 1] disables clustering. Non-[1, 1] enables Multicast so workgroups within
+    # a cluster can share data loaded via TDM-multicast, reducing redundant global reads.
     {"ClusterDim": [[1, 1]]},
+    # ClusterBarrier — True: emit split signal/wait cluster_barrier instructions
+    # so workgroups in a cluster synchronize before/after consuming shared
+    # TDM-multicast data. Requires ClusterDim != [1, 1] and TDMInst != 0;
+    # False: standard per-WG barriers, no inter-WG synchronization.
+    {"ClusterBarrier": [ False ]},
     {"HalfPLR": [0]}
 ]
 

@@ -55,14 +55,6 @@ static void dumpDAGGraph(const std::vector<std::unordered_set<unsigned>>& dagGra
     std::cerr << "\n\n";
 }
 
-static bool hasLdsPseudoRegs(const StinkyInstruction& inst) {
-    for (const StinkyRegister& r : inst.getSrcRegs())
-        if (r.isRegister() && r.reg.type == RegType::LDS) return true;
-    for (const StinkyRegister& r : inst.getDestRegs())
-        if (r.isRegister() && r.reg.type == RegType::LDS) return true;
-    return false;
-}
-
 // --- Region scheduler (does NOT move fences) ---
 //
 // Build a DAG within a region and perform a stable topological schedule.
@@ -329,22 +321,6 @@ static void scheduleRegionWithMovableSideEffects(
     }
 }
 
-static bool hasSideEffect(const StinkyInstruction& inst) {
-    if (isGlobalMemStore(inst) || isBranch(inst) || isWaitCnt(inst) || isHasSideEffect(inst)) {
-        return true;
-    }
-
-    // Barriers and memory ops without LDS pseudo-registers (no MemTokenData
-    // assigned) must be treated conservatively as non-movable side effects to
-    // preserve strict ordering. When LDS pseudo-regs are present, ordering is
-    // enforced by the DAG via def-use edges, so they are safe to schedule.
-    if ((isBarrier(inst) || isTensorLoad(inst) || isDSRead(inst) || isDSWrite(inst)) &&
-        !hasLdsPseudoRegs(inst)) {
-        return true;
-    }
-    return false;
-}
-
 // Schedule the instructions in the given IRList.
 // This will split the instructions into regions based on side-effect instructions
 // and schedule each region in a DAG.
@@ -451,7 +427,7 @@ class StinkyDAGSchedulerPass : public StinkyInstPass {
                 for (auto it = bb->begin(); it != bb->end(); ++it) {
                     auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
                     if (!inst) continue;
-                    if (isWMMA(*inst) || isSWMMA(*inst)) wmmaIndex[inst] = idx++;
+                    if (isMatrixInstruction(*inst)) wmmaIndex[inst] = idx++;
                 }
             }
         }

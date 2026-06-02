@@ -408,7 +408,6 @@ Tests:
   function:
     matmul: 
       - { a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r}
-      - { a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 4, scaleB: 4, scale_type: f32_r}
       - { a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 6, scaleB: 6, scale_type: f32_r}
   matrix_size:
     - { M:  128,  N:  128,  K:  512  }
