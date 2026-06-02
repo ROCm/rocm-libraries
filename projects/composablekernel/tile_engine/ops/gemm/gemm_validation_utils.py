@@ -233,6 +233,7 @@ def is_trait_combination_valid(
     if (
         kernel_name_prefix == "grouped_gemm_rowcolquant"
         or kernel_name_prefix == "grouped_gemm_tensorquant"
+        or kernel_name_prefix == "gemm_rowcolquant"
     ):
         # rowcolquant and tensorquant only supports compv3 + intrawave + cshuffle
         if pipeline != "compv3" or scheduler != "intrawave" or epilogue != "cshuffle":
@@ -585,6 +586,31 @@ def is_tile_config_valid(
         if not rowcol_tensor_quant_valid:
             logging.debug(
                 f"GEMM RowColQuant/TensorQuant validation failed: {rowcol_tensor_quant_valid_error}"
+            )
+            return False
+
+    # Additional operator-specific validation (runs after pipeline validation)
+    if kernel_name_prefix == "gemm_rowcolquant" or kernel_name_prefix == "grouped_gemm_rowcolquant" or kernel_name_prefix == "grouped_gemm_tensorquant":
+        rowcol_tensor_quant_valid, rowcol_tensor_quant_valid_error = validate_gemm_rowcol_tensor_quant(
+            tile_m,
+            tile_n,
+            tile_k,
+            warp_m,
+            warp_n,
+            warp_k,
+            warp_tile_m,
+            warp_tile_n,
+            warp_tile_k,
+            a_datatype,
+            b_datatype,
+            c_datatype,
+            pipeline,
+            layout,
+            gpu_target,
+        )
+        if not rowcol_tensor_quant_valid_error:
+            logging.debug(
+                f"GEMM RowColQuant validation failed: {rowcol_tensor_quant_valid_error}"
             )
             return False
 
@@ -1092,7 +1118,7 @@ def validate_m0_m1_m2_configuration(
         return False, f"Error in M0/M1/M2 validation: {str(e)}"
 
 
-def validate_gemm_rowcolquant_tensorquant(
+def validate_gemm_rowcol_tensor_quant(
     tile_m: int,
     tile_n: int,
     tile_k: int,
@@ -1146,3 +1172,4 @@ def validate_gemm_rowcolquant_tensorquant(
             )
 
         return True, ""
+
