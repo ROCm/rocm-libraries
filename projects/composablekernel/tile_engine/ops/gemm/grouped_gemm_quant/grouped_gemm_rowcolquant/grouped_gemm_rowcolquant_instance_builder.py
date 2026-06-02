@@ -42,10 +42,6 @@ def _import_validation_utils():
 
 
 _validation_utils = _import_validation_utils()
-<<<<<<< HEAD
-=======
-get_abc_layouts = _validation_utils.get_abc_layouts
->>>>>>> 1b46bdce50 (grouped gemm rowcolquant tile engine support)
 
 
 class GroupedRowColQuantGemmKernelBuilder(GemmKernelBuilder):
@@ -57,7 +53,6 @@ class GroupedRowColQuantGemmKernelBuilder(GemmKernelBuilder):
         datatype,
         layout,
         config_json=None,
-<<<<<<< HEAD
         max_instances=None,
         seed=None,
         tier=None,
@@ -74,11 +69,6 @@ class GroupedRowColQuantGemmKernelBuilder(GemmKernelBuilder):
             seed=seed,
             tier=tier,
             manifest_path=manifest_path,
-=======
-    ):
-        super().__init__(
-            kernel_name_prefix, working_path, gpu_target, datatype, layout, config_json
->>>>>>> 1b46bdce50 (grouped gemm rowcolquant tile engine support)
         )
 
     def populate_kernel_header(self, kernel_name):
@@ -375,7 +365,6 @@ using BQLayout = ck_tile::tensor_layout::gemm::ColumnMajor;
                         self.config_json,
                     )
                 )
-<<<<<<< HEAD
 
         # Apply RFC-compliant sampling (Sobol + LHS + maximin)
         if self.max_instances is not None and len(work_items) > self.max_instances:
@@ -386,8 +375,6 @@ using BQLayout = ck_tile::tensor_layout::gemm::ColumnMajor;
             sampled = self._apply_sampling(kernel_dicts)
             work_items = [k["_work_item"] for k in sampled]
 
-=======
->>>>>>> 1b46bdce50 (grouped gemm rowcolquant tile engine support)
         print(
             f"Generating {len(work_items)} individual kernel files using {num_workers} workers..."
         )
@@ -498,11 +485,7 @@ def main():
     parser.add_argument(
         "--layout",
         required=True,
-<<<<<<< HEAD
-        choices=["rcr"],
-=======
         choices=["rcr", "rrr", "ccr", "crr"],
->>>>>>> 1b46bdce50 (grouped gemm rowcolquant tile engine support)
         help="Matrix layout",
     )
     parser.add_argument("--config_json", help="Configuration JSON file")
@@ -529,7 +512,6 @@ def main():
         action="store_true",
         help="List kernel configurations without generating files",
     )
-<<<<<<< HEAD
     parser.add_argument(
         "--max-instances",
         type=int,
@@ -546,8 +528,6 @@ def main():
     parser.add_argument(
         "--manifest-path", default=None, help="Directory for chosen_instances.json"
     )
-=======
->>>>>>> 1b46bdce50 (grouped gemm rowcolquant tile engine support)
 
     args = parser.parse_args()
 
@@ -566,11 +546,7 @@ def main():
     matrix_b_layout = layout_str[1]
     matrix_c_layout = layout_str[2]
 
-<<<<<<< HEAD
-    if matrix_a_layout not in ["r"] or matrix_b_layout not in ["c"]:
-=======
     if matrix_a_layout not in ["r", "c"] or matrix_b_layout not in ["r", "c"]:
->>>>>>> 1b46bdce50 (grouped gemm rowcolquant tile engine support)
         parser.error(
             f"Invalid matrix_a layout: {matrix_a_layout} or matrix_b layout: {matrix_b_layout}"
         )
@@ -588,13 +564,10 @@ def main():
         args.datatype,
         args.layout,
         args.config_json,
-<<<<<<< HEAD
         max_instances=args.max_instances,
         seed=args.seed,
         tier=args.tier,
         manifest_path=args.manifest_path,
-=======
->>>>>>> 1b46bdce50 (grouped gemm rowcolquant tile engine support)
     )
 
     if args.list_kernels:
