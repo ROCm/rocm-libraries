@@ -4,8 +4,10 @@
 #include <gtest/gtest.h>
 
 #include <ck_tile/dispatcher/fmha_kernel_key.hpp>
+#include <cmath>
 #include <functional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "adapters/sdpa/SdpaCandidateSelector.hpp"
@@ -191,22 +193,25 @@ TEST(SdpaCandidateSelectorSelection, ArgmaxReturnsScorePeak) {
     ASSERT_GE(combos.size(), 2u);
 
     // Pick a target combo from the middle of the set and make the stub
-    // score peak exactly on its kernel-key tile_shape.
+    // score peak on its scoring-key continuous axes (m0, n0) plus
+    // block_per_cu (= num_warps). k0/k1/pipeline are now uniform across
+    // candidates, so they no longer discriminate; the schedule-flag-only
+    // variants are deliberately indistinguishable in the scoring key, so
+    // we assert on the continuous axes the key actually carries.
     const SdpaPerfKnobs target = combos[combos.size() / 2];
     const FmhaKernelKey targetKey = knobsToKernelKey(problem, target);
 
     auto stubScore = [&](const FmhaKernelKey& key) -> double {
         const bool match = key.algorithm.tile_shape.m0 == targetKey.algorithm.tile_shape.m0 &&
                            key.algorithm.tile_shape.n0 == targetKey.algorithm.tile_shape.n0 &&
-                           key.algorithm.tile_shape.k0 == targetKey.algorithm.tile_shape.k0 &&
-                           key.algorithm.pipeline == targetKey.algorithm.pipeline;
+                           key.algorithm.block_per_cu == targetKey.algorithm.block_per_cu;
         return match ? 100.0 : 1.0;
     };
 
     const SdpaPerfKnobs picked = selectArgmax(problem, combos, stubScore);
     EXPECT_EQ(picked.block_m(), target.block_m());
     EXPECT_EQ(picked.tile_size, target.tile_size);
-    EXPECT_EQ(picked.use_mfma_32x32, target.use_mfma_32x32);
+    EXPECT_EQ(picked.num_warps, target.num_warps);
 }
 
 TEST(SdpaCandidateSelectorSelection, ConstantScoreYieldsStableFirstCombo) {
@@ -241,12 +246,18 @@ TEST(SdpaCandidateSelectorMapping, ScoredTileShapeMatchesKnobs) {
     // m0 = launch BLOCK_M = num_warps * block_m_per_warp = 64.
     EXPECT_EQ(key.algorithm.tile_shape.m0, 64);
     EXPECT_EQ(key.algorithm.tile_shape.n0, 64);
-    // Default 16x16x32 atom -> k0/k1 = 32.
+    // Trained block-K: k0 = k1 = 32 for both MFMA atoms.
     EXPECT_EQ(key.algorithm.tile_shape.k0, 32);
     EXPECT_EQ(key.algorithm.tile_shape.k1, 32);
+    // n1 = hdim_v (= head_size = 64); k0max from the trained map (64 -> 64).
+    EXPECT_EQ(key.algorithm.tile_shape.n1, 64);
+    EXPECT_EQ(key.algorithm.tile_shape.k0max, 64);
 }
 
-TEST(SdpaCandidateSelectorMapping, Mfma32AtomChangesK0K1) {
+TEST(SdpaCandidateSelectorMapping, Mfma32AtomSharesTrainedBlockK) {
+    // The 32x32x16 (use_mfma_32x32) atom uses the same trained block-K as
+    // the default atom: bk0 = bk1 = 32 (32 % wk0 == 0 for both wk0 in
+    // {16,32}). Only m0 differs, via block_m_per_warp.
     SdpaSelectionProblem problem = makeReferenceProblem();
     SdpaPerfKnobs knobs;
     knobs.num_warps = 4;
@@ -257,11 +268,15 @@ TEST(SdpaCandidateSelectorMapping, Mfma32AtomChangesK0K1) {
 
     const FmhaKernelKey key = knobsToKernelKey(problem, knobs);
     EXPECT_EQ(key.algorithm.tile_shape.m0, 128);  // 4 * 32
-    EXPECT_EQ(key.algorithm.tile_shape.k0, 16);
-    EXPECT_EQ(key.algorithm.tile_shape.k1, 16);
+    EXPECT_EQ(key.algorithm.tile_shape.k0, 32);
+    EXPECT_EQ(key.algorithm.tile_shape.k1, 32);
 }
 
-TEST(SdpaCandidateSelectorMapping, PipelineFollowsScheduleFlags) {
+TEST(SdpaCandidateSelectorMapping, PipelineAlwaysTrainedQrAsync) {
+    // The scoring pipeline token is always "qr_async": the fwd model was
+    // trained only on the "qr" / "qr_async" vocabulary, so schedule flags
+    // and paged-KV no longer steer the token to an out-of-distribution
+    // value.
     SdpaSelectionProblem dense = makeReferenceProblem();
     dense.use_paged_kv = false;
 
@@ -272,18 +287,18 @@ TEST(SdpaCandidateSelectorMapping, PipelineFollowsScheduleFlags) {
 
     SdpaPerfKnobs earlyv = plain;
     earlyv.use_early_v_schedule = true;
-    EXPECT_EQ(pipelineForKnobs(dense, earlyv), "qr_async_trload");
+    EXPECT_EQ(pipelineForKnobs(dense, earlyv), "qr_async");
 
     SdpaPerfKnobs mfma32 = plain;
     mfma32.block_m_per_warp = 32;
     mfma32.use_mfma_32x32 = true;
     mfma32.use_transposed_qk_32x32 = true;
-    EXPECT_EQ(pipelineForKnobs(dense, mfma32), "qr_async_trload_v3");
+    EXPECT_EQ(pipelineForKnobs(dense, mfma32), "qr_async");
 
-    // Paged KV dominates the pipeline choice.
+    // Paged KV no longer selects "qr_pagedkv" for the scoring token.
     SdpaSelectionProblem paged = makeReferenceProblem();
     paged.use_paged_kv = true;
-    EXPECT_EQ(pipelineForKnobs(paged, plain), "qr_pagedkv");
+    EXPECT_EQ(pipelineForKnobs(paged, plain), "qr_async");
 }
 
 TEST(SdpaCandidateSelectorMapping, SignatureMatchesProblem) {
@@ -303,7 +318,9 @@ TEST(SdpaCandidateSelectorMapping, SignatureMatchesProblem) {
     EXPECT_EQ(key.signature.mask_type, 1);
     EXPECT_EQ(key.signature.bias_type, 0);
     EXPECT_TRUE(key.signature.has_sink);
-    EXPECT_TRUE(key.signature.use_paged_kv);
+    // Scoring-only: use_paged_kv is forced false on the prediction key even
+    // though the problem is paged (the fwd model never saw paged candidates).
+    EXPECT_FALSE(key.signature.use_paged_kv);
     EXPECT_TRUE(key.signature.skip_min_seqlen_q);
     EXPECT_FALSE(key.signature.has_lse);  // paged kernel has no LSE
     EXPECT_EQ(key.signature.hdim_q, 64);
@@ -359,6 +376,126 @@ TEST(SdpaCandidateSelectorMapping, FmhaProblemFromSpecIsConsistent) {
     EXPECT_TRUE(fp.has_sink);
     EXPECT_TRUE(fp.use_paged_kv);
     EXPECT_EQ(fp.gfx_arch, "gfx950");
+}
+
+// ---------------------------------------------------------------------------
+// Trained-distribution regression guard: the scoring key must stay faithful
+// to the fwd model's vocabulary so scoring stops degenerately collapsing
+// onto the smallest config. These lock in the A/B/C scoring-only changes
+// without needing a GPU.
+// ---------------------------------------------------------------------------
+
+TEST(SdpaCandidateSelectorTrainedKey, ScoringKeyFieldsAreTrainedFaithful) {
+    // Representative large shape: S8192, D128. The scoring key must emit the
+    // trained-vocabulary pipeline token, dense (non-paged) signature, the
+    // trained block-K (k1 = 32), n1 = head_size, and k0max from the trained
+    // head_size map -- NOT the old 0 stubs / qr_pagedkv / paged=1 query that
+    // pulled every shape off-distribution.
+    SdpaSelectionProblem problem = makeReferenceProblem();
+    problem.seqlen_q = 8192;
+    problem.seqlen_k = 8192;
+    problem.head_size = 128;
+    problem.num_query_heads = 64;
+    problem.num_kv_heads = 8;     // qpk = 8
+    problem.use_paged_kv = true;  // problem is paged; scoring query must not be
+
+    SdpaPerfKnobs knobs;
+    knobs.num_warps = 4;
+    knobs.block_m_per_warp = 16;
+    knobs.tile_size = 64;
+
+    const FmhaKernelKey key = knobsToKernelKey(problem, knobs);
+    EXPECT_EQ(key.algorithm.pipeline, "qr_async");
+    EXPECT_FALSE(key.signature.use_paged_kv);
+    EXPECT_EQ(key.algorithm.tile_shape.k0, 32);
+    EXPECT_EQ(key.algorithm.tile_shape.k1, 32);
+    EXPECT_EQ(key.algorithm.tile_shape.n1, 128);     // head_size
+    EXPECT_EQ(key.algorithm.tile_shape.k0max, 128);  // map[128] = 128
+}
+
+TEST(SdpaCandidateSelectorTrainedKey, K0maxMapCoversHeadSizes) {
+    // The trained head_size -> k0max map must be applied for every supported
+    // head_size (64/128/256). Unmapped sizes fall back to head_size, but the
+    // POC only enumerates {64,128,256}.
+    SdpaPerfKnobs knobs;
+    knobs.num_warps = 2;
+    knobs.block_m_per_warp = 16;
+    knobs.tile_size = 64;
+
+    for (const auto& [hd, expected] :
+         std::vector<std::pair<int, int>>{{64, 64}, {128, 128}, {256, 256}}) {
+        SdpaSelectionProblem problem = makeReferenceProblem();
+        problem.head_size = hd;
+        problem.block_size = 32;
+        const FmhaKernelKey key = knobsToKernelKey(problem, knobs);
+        EXPECT_EQ(key.algorithm.tile_shape.n1, hd) << "n1 for head_size=" << hd;
+        EXPECT_EQ(key.algorithm.tile_shape.k0max, expected) << "k0max for head_size=" << hd;
+    }
+}
+
+TEST(SdpaCandidateSelectorTrainedKey, ArgmaxDoesNotCollapseToSmallestConfig) {
+    // De-degeneracy guard via the injectable-score path (no GPU needed). A
+    // score that rewards larger tile area (m0 * n0) must NOT pick the
+    // smallest enumerated config (combos.front(): num_warps=1, smallest
+    // tile). Before the trained-key fix the real scorer collapsed every
+    // shape onto that smallest config; the pick-variance with the REAL
+    // gfx950 scorer is covered by the oracle test.
+    SdpaSelectionProblem problem = makeReferenceProblem();
+    problem.seqlen_q = 8192;
+    problem.seqlen_k = 8192;
+    problem.head_size = 128;
+    problem.num_query_heads = 64;
+    problem.num_kv_heads = 8;
+
+    const std::vector<SdpaPerfKnobs> combos = enumerateCandidates(problem);
+    ASSERT_GE(combos.size(), 2u);
+
+    auto areaScore = [](const FmhaKernelKey& key) -> double {
+        return static_cast<double>(key.algorithm.tile_shape.m0) *
+               static_cast<double>(key.algorithm.tile_shape.n0);
+    };
+
+    const SdpaPerfKnobs picked = selectArgmax(problem, combos, areaScore);
+    const SdpaPerfKnobs smallest = combos.front();
+    const bool sameAsSmallest =
+        picked.block_m() == smallest.block_m() && picked.tile_size == smallest.tile_size;
+    EXPECT_FALSE(sameAsSmallest)
+        << "area-rewarding score degenerately picked the smallest config m0=" << smallest.block_m()
+        << " n0=" << smallest.tile_size;
+}
+
+TEST(SdpaCandidateSelectorTrainedKey, DistinctShapesCanProduceDistinctPicks) {
+    // Two distinct shapes must be able to produce different picks under a
+    // shape-sensitive injected score (here: minimise |n0 - seqlen_k/8|, so
+    // the preferred tile_size tracks the shape). This proves the selection
+    // is not shape-invariant -- the degenerate failure mode being guarded.
+    SdpaSelectionProblem shapeA = makeReferenceProblem();
+    shapeA.seqlen_q = 256;
+    shapeA.seqlen_k = 256;
+    shapeA.block_size = 16;  // tile_size in {16,32,64}
+
+    SdpaSelectionProblem shapeB = makeReferenceProblem();
+    shapeB.seqlen_q = 8192;
+    shapeB.seqlen_k = 8192;
+    shapeB.block_size = 64;  // tile_size in {64,128,256}
+
+    const std::vector<SdpaPerfKnobs> combosA = enumerateCandidates(shapeA);
+    const std::vector<SdpaPerfKnobs> combosB = enumerateCandidates(shapeB);
+    ASSERT_FALSE(combosA.empty());
+    ASSERT_FALSE(combosB.empty());
+
+    auto targetN0 = [](double target) {
+        return [target](const FmhaKernelKey& key) -> double {
+            // Higher is better -> negate the distance to the target n0.
+            return -std::abs(static_cast<double>(key.algorithm.tile_shape.n0) - target);
+        };
+    };
+
+    const SdpaPerfKnobs pickA = selectArgmax(shapeA, combosA, targetN0(32.0));
+    const SdpaPerfKnobs pickB = selectArgmax(shapeB, combosB, targetN0(256.0));
+
+    EXPECT_NE(pickA.tile_size, pickB.tile_size)
+        << "shape-sensitive score produced identical picks across distinct shapes";
 }
 
 // ---------------------------------------------------------------------------

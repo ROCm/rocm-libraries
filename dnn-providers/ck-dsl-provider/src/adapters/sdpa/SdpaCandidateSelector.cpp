@@ -31,15 +31,31 @@ constexpr std::array<std::int32_t, 2> kBlockMPerWarpChoices{16, 32};
 // supports() gate re-checks.
 constexpr std::array<std::int32_t, 3> kTileSizeMultiples{1, 2, 4};
 
-// MFMA-atom -> (k0, k1) POC mapping for the tile_shape. The default
-// 16x16x32 geometry uses a 32-wide K step (k0); the 32x32x16 geometry
-// uses a 16-wide K step. n1/k0max are left default-filled (0). These are
-// POC values chosen to mirror the kernel's MFMA K dimension so the
-// scored tile_shape distinguishes the two atom families.
-constexpr std::uint16_t kK0Default = 32;  // 16x16x32 atom K step
-constexpr std::uint16_t kK1Default = 32;
-constexpr std::uint16_t kK0Mfma32 = 16;  // 32x32x16 atom K step
-constexpr std::uint16_t kK1Mfma32 = 16;
+// head_size (= hdim_v) -> k0max for the scored tile_shape, mirroring the
+// trained K0_MAX_SUBMAX_MAP. k0max feeds the model's tk0max feature, so a
+// faithful value (not the old 0 stub) is required for the score to land in
+// the model's trained distribution. Unmapped head sizes fall back to
+// head_size (see knobsToKernelKey).
+std::uint16_t k0maxForHeadSize(std::int32_t headSize) {
+    switch (headSize) {
+        case 64:
+            return 64;
+        case 80:
+            return 96;
+        case 96:
+            return 128;
+        case 128:
+            return 128;
+        case 160:
+            return 256;
+        case 192:
+            return 192;
+        case 256:
+            return 256;
+        default:
+            return static_cast<std::uint16_t>(headSize);
+    }
+}
 
 }  // namespace
 
@@ -194,29 +210,16 @@ std::vector<SdpaPerfKnobs> enumerateCandidates(const SdpaSelectionProblem& probl
 }
 
 std::string pipelineForKnobs(const SdpaSelectionProblem& problem, const SdpaPerfKnobs& knobs) {
-    // Documented schedule-flags -> pipeline map over the valid pipeline
-    // strings recognised by the heuristic feature encoder
-    // (fmha_ml_heuristic.hpp): "qr", "qr_async", "qr_async_trload",
-    // "qr_async_trload_v3", "qr_pagedkv".
-    //
-    //   * paged KV present                  -> "qr_pagedkv"
-    //   * 32x32 transposed atom path        -> "qr_async_trload_v3"
-    //   * early-V async schedule            -> "qr_async_trload"
-    //   * default async (register-PV or not)-> "qr_async"
-    //   * fully serial (no async flags)     -> "qr"
-    //
-    // The tiled 2D kernel always issues async K/V DMA, so the serial
-    // "qr" is reserved for a future non-async lane and is not produced
-    // by the current enumerator.
-    if (problem.use_paged_kv) {
-        return "qr_pagedkv";
-    }
-    if (knobs.use_mfma_32x32 || knobs.use_transposed_qk_32x32) {
-        return "qr_async_trload_v3";
-    }
-    if (knobs.use_early_v_schedule) {
-        return "qr_async_trload";
-    }
+    // SCORING pipeline token. The fwd model (gfx950) was trained ONLY on
+    // the "qr" / "qr_async" pipelines; "qr_pagedkv" and the "qr_async_trload*"
+    // tokens are out-of-vocabulary and pull the prediction off-distribution.
+    // We score every current candidate as "qr_async": it is the codegen
+    // default, dominates the gfx950 fwd training set, and matches our
+    // kernel's async K/V DMA. (We do NOT score the serial "qr": the tiled 2D
+    // kernel always issues async DMA.) This is a scoring-only token; it does
+    // not change the compiled kernel or the enumerated knob set.
+    (void)problem;
+    (void)knobs;
     return "qr_async";
 }
 
@@ -253,7 +256,13 @@ FmhaKernelKey knobsToKernelKey(const SdpaSelectionProblem& problem, const SdpaPe
     key.signature.has_logits_soft_cap = false;  // not expressible from the graph
     key.signature.has_sink = problem.use_sinks;
     key.signature.skip_min_seqlen_q = problem.skip_min_seqlen_q;
-    key.signature.use_paged_kv = problem.use_paged_kv;
+    // SCORING-only: the fwd model never saw paged candidates. A paged=1
+    // query inflates the dominant feature_count split and zeroes the
+    // ratio_dv_to_n1 feature, collapsing every shape onto the smallest
+    // config. We score as dense (use_paged_kv=false); this is the
+    // prediction query only and does NOT touch the runtime marshalling
+    // path (SdpaFwdPlanBuilder keeps selProblem.use_paged_kv = true).
+    key.signature.use_paged_kv = false;
     key.signature.hdim_q = static_cast<std::uint16_t>(problem.head_size);
     key.signature.hdim_v = static_cast<std::uint16_t>(problem.head_size);
 
@@ -262,18 +271,21 @@ FmhaKernelKey knobsToKernelKey(const SdpaSelectionProblem& problem, const SdpaPe
     // base-row 16*num_warps used by supportsTiled2d).
     key.algorithm.tile_shape.m0 = static_cast<std::uint16_t>(knobs.block_m());
     key.algorithm.tile_shape.n0 = static_cast<std::uint16_t>(knobs.tile_size);
-    if (knobs.use_mfma_32x32) {
-        key.algorithm.tile_shape.k0 = kK0Mfma32;
-        key.algorithm.tile_shape.k1 = kK1Mfma32;
-    } else {
-        key.algorithm.tile_shape.k0 = kK0Default;
-        key.algorithm.tile_shape.k1 = kK1Default;
-    }
-    // n1 / k0max: no CK DSL analog -> default-filled.
-    key.algorithm.tile_shape.n1 = 0;
-    key.algorithm.tile_shape.k0max = 0;
+    // Trained-faithful block-K fields. The trained convention pairs the
+    // MFMA K-atom wk0 (=32 for the default 16x16x32 atom, =16 for the
+    // 32x32x16 use_mfma_32x32 atom) with a block-K bk0 ("tile_k0") near 32
+    // that satisfies bk0 % wk0 == 0 and bk0 <= D, plus bk1 ("tile_k1") = 32.
+    // bk0 = bk1 = 32 satisfies 32 % wk0 == 0 for wk0 in {16,32} and 32 <= D
+    // for D in {64,128,256}, so both atoms share k0 = k1 = 32 here.
+    key.algorithm.tile_shape.k0 = 32;
+    key.algorithm.tile_shape.k1 = 32;
+    // bn1 ("tile_n1") = hdim_v (= head_size); k0max from the trained
+    // head_size -> k0max map. These feed the model's tn1 / tk0max features;
+    // the old 0 stubs zeroed ratio_dv_to_n1 and the k0max split.
+    key.algorithm.tile_shape.n1 = static_cast<std::uint16_t>(problem.head_size);
+    key.algorithm.tile_shape.k0max = k0maxForHeadSize(problem.head_size);
 
-    // --- Pipeline string from the schedule flags ---------------------
+    // --- Pipeline string: trained-vocabulary token ("qr_async") ------
     key.algorithm.pipeline = pipelineForKnobs(problem, knobs);
 
     // --- pad_*: no CK DSL analog -> default-filled (true) ------------
