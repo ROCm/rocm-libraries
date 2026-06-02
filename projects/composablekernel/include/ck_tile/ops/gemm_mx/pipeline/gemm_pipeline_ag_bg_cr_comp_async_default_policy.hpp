@@ -349,7 +349,7 @@ struct MXGemmPipelineAgBgCrCompAsyncDefaultPolicy
         }
     }
 
-    // MX GEMM: Double access for FP8/BF8, Single for FP4
+    // MX GEMM: Double access for FP8/BF8, Single for FP4/FP6
     template <typename DataType_>
     CK_TILE_HOST_DEVICE static constexpr auto CalculateWGAttrNumAccess()
     {
@@ -359,8 +359,11 @@ struct MXGemmPipelineAgBgCrCompAsyncDefaultPolicy
         {
             return WGAttrNumAccessEnum::Double;
         }
-        else if constexpr(std::is_same_v<DataType, pk_fp4_t>)
+        else if constexpr(std::is_same_v<DataType, pk_fp4_t> ||
+                          std::is_same_v<DataType, pk_fp6x16_t>)
         {
+            // Legacy 12-byte pk_fp6x16_t uses the same single-access scaled-MFMA
+            // layout as FP4 on gfx950 (matches the pre-refactor async policy).
             return WGAttrNumAccessEnum::Single;
         }
         else

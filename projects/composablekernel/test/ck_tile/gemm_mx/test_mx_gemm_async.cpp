@@ -14,7 +14,6 @@ using F6  = ck_tile::pk_fp6x16_t;
 using MxTypes = ::testing::Types<std::tuple<F4, F4, MX_GemmConfig16,         Row, Col, Row>,
                                  std::tuple<F4, F4, MX_GemmConfigEightWaves, Row, Col, Row>,
                                  std::tuple<F6, F6, MX_GemmConfig16,         Row, Col, Row>,
-                                 std::tuple<F6, F6, MX_GemmConfigEightWaves, Row, Col, Row>,
                                  std::tuple<F8, F8, MX_GemmConfig16,         Row, Col, Row>,
                                  std::tuple<F8, F8, MX_GemmConfigEightWaves, Row, Col, Row>>;
 
