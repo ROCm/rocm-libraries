@@ -79,7 +79,10 @@ class TensorInfo:
                     f"Tensor {self.uid} has {len(self.dims)} dims but "
                     f"{len(self.strides)} strides"
                 )
-            return sum((dim - 1) * stride for dim, stride in zip(self.dims, self.strides)) + 1
+            return (
+                sum((dim - 1) * stride for dim, stride in zip(self.dims, self.strides))
+                + 1
+            )
         return self.num_elements
 
     @property
