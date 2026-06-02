@@ -70,25 +70,43 @@ add_library(roc::origami-headers ALIAS origami-headers)
 
 target_compile_features(origami-headers INTERFACE cxx_std_17)
 
+# Public header contract, expressed as a CMake HEADER file set. This makes the
+# public surface explicit (only these headers are installed/exported), carries
+# the include roots into the build and install interfaces (BASE_DIRS), and lets
+# VERIFY_INTERFACE_HEADER_SETS compile each public header standalone (G3).
+# Anything not listed here is private by construction.
+target_sources(origami-headers
+    INTERFACE
+    FILE_SET HEADERS
+    BASE_DIRS
+        "${CMAKE_CURRENT_SOURCE_DIR}/include"
+        "${PROJECT_BINARY_DIR}/include"
+    FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/gemm.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/hardware.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/heuristics.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/logger.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/math.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/origami.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/streamk.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/types.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/simulator/tensilelite/formocast.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/simulator/tensilelite/formocast_simulator.hpp"
+        "${PROJECT_BINARY_DIR}/include/origami/origami_export.h"
+)
 target_include_directories(
-    origami-headers INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-                              $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
-                              $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+    origami-headers INTERFACE $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
-target_sources(
-    origami-headers
-    INTERFACE $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include/origami/origami_export.h>
-              $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/gemm.hpp>
-              $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/hardware.hpp>
-              $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/heuristics.hpp>
-              $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/logger.hpp>
-              $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/math.hpp>
-              $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/origami.hpp>
-              $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/streamk.hpp>
-              $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/types.hpp>
-              $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/simulator/tensilelite/formocast_simulator.hpp>
-              $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/simulator/tensilelite/formocast.hpp>
-)
+
+# origami's public headers include <hip/hip_runtime.h> and use hip types
+# (e.g. hipDeviceProp_t) in their signatures, so the header interface genuinely
+# requires hip. Expose hip::host (never hip::device) here so header-only
+# consumers and the header-set verification compile see hip's include dirs.
+target_link_libraries(origami-headers INTERFACE hip::host)
+
+# Rigorously enforce that every public header is a self-contained translation
+# unit (built as `all_verify_interface_header_sets` / the per-target verify).
+set_target_properties(origami-headers PROPERTIES VERIFY_INTERFACE_HEADER_SETS ON)
 
 target_link_libraries(origami PUBLIC roc::origami-headers)
 
@@ -105,7 +123,9 @@ target_sources(
             "${CMAKE_CURRENT_SOURCE_DIR}/src/simulator/tensilelite/formocast.cpp"
 )
 
-target_link_libraries(origami PUBLIC hip::host)
+# hip is part of origami's public interface via roc::origami-headers above; this
+# direct link is the library's own (implementation) dependency on the hip runtime.
+target_link_libraries(origami PRIVATE hip::host)
 
 if(ORIGAMI_ENABLE_PYTHON)
     add_subdirectory(python)
@@ -117,7 +137,18 @@ if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
 endif()
 
 if(ORIGAMI_ENABLE_INSTALL OR ORIGAMI_STANDALONE)
-    rocm_install(TARGETS origami origami-headers)
+    rocm_install(TARGETS origami)
+
+    # origami-headers carries the public HEADERS file set, so it must be installed
+    # with its FILE_SET in the same call that adds it to the export (rocm_install's
+    # TARGETS wrapper cannot forward FILE_SET). Done explicitly here, appended to
+    # the same origami-targets export, before rocm_export_targets writes the export.
+    install(TARGETS origami-headers
+        EXPORT origami-targets
+        FILE_SET HEADERS
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+        COMPONENT devel
+    )
 
     rocm_export_targets(
         TARGETS
@@ -133,28 +164,6 @@ if(ORIGAMI_ENABLE_INSTALL OR ORIGAMI_STANDALONE)
     if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
         rocm_install(TARGETS origami-tests COMPONENT tests)
     endif()
-
-    rocm_install(
-        DIRECTORY
-        include/
-        DESTINATION
-        "${CMAKE_INSTALL_INCLUDEDIR}"
-        COMPONENT
-        devel
-        FILES_MATCHING
-        PATTERN
-        "*.hpp"
-        PATTERN
-        "*.h"
-    )
-
-    # The export header is generated into the build tree, so it is not covered by the
-    # include/ directory install above; install it next to the hand-authored headers.
-    rocm_install(
-        FILES "${PROJECT_BINARY_DIR}/include/origami/origami_export.h"
-        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/origami"
-        COMPONENT devel
-    )
 
     configure_file(
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/origami-config.cmake.in"
