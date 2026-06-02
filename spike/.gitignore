@@ -1,3 +1,5 @@
 micropython/
 *.log
 *.hsaco
+mp1/dl/
+mp1/shims/udataclasses/

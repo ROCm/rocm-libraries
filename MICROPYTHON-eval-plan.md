@@ -219,3 +219,33 @@ SUBSET — must verify the actual patterns in `ir/lower_*/arch/elementwise/compi
 3. Provide trimmed `__init__`s (or direct leaf imports) for the elementwise slice.
 4. Run `compile_smoke`-equivalent under MicroPython; **byte-compare emitted LLVM IR vs CPython**
    (equivalence oracle) → G1. Then attempt the conv slice (untangle analysis/helpers coupling).
+
+### G1 BLOCKER (2026-06-01): MicroPython erases class annotations → dataclasses unrunnable
+Make-or-break test of the vendored `udataclasses` (`spike/mp1/test_udataclasses.py`) failed —
+and failed **identically under CPython and MicroPython**, exposing a fundamental wall:
+- **MicroPython does not expose class `__annotations__`** (`hasattr(C, "__annotations__") == False`):
+  bare-annotation fields (`name: int`, no default) are parsed and **discarded**; the field
+  name/order does not exist at runtime.
+- **`udataclasses` discovers fields from `cls.__dict__`** — only attributes carrying a value
+  (`field()` or a default). Bare-annotation required fields are invisible to it.
+- Combined: for a required field declared `x: int` (ck_dsl's normal style) the field metadata is
+  **gone after parsing** under MicroPython. NO shim — udataclasses or hand-written — can recover
+  what the interpreter threw away.
+
+Blast radius on the chosen elementwise slice (concrete): `ElementwiseSpec.op` is bare/required;
+`core/ir.py` = **97** bare no-default fields, `core/arch/target.py` = **53**. So even the
+simplest slice cannot construct its core IR/spec objects. This is a MicroPython *language-runtime*
+limitation, independent of FFI (G0 passed) and of shim fidelity.
+
+**Escape routes (all expensive — escalated to user):**
+1. **Rewrite ck_dsl** so every required field carries an explicit `field()`/default (lands in
+   `__dict__`). ~150+ fields on the core path alone, hundreds across 228 dataclasses. Invasive,
+   perpetual fork of vendored CK; could be automated by a source transform but still a fork.
+2. **Patch the MicroPython compiler** to emit/retain class `__annotations__`, then a small
+   annotation-reading dataclasses shim works and **ck_dsl stays 100% unmodified**. One change to
+   a component we already vendor/build, but non-trivial C compiler work + a MicroPython fork.
+3. **Source-to-source transform at bundle build** (annotations → `field()` defaults) — automated
+   fork-in-a-build-step; keeps CK source readable but fragile and still a maintained transform.
+
+**Verdict:** G1 is NOT cleared. udataclasses (the chosen approach) cannot work as-is. The decision
+between routes 1/2/3 is strategic and changes MicroPython's cost vs the parallel candidates.
