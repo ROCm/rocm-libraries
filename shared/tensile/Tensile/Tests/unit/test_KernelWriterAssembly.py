@@ -23,6 +23,7 @@
 ################################################################################
 
 from Tensile.KernelWriterAssembly import KernelWriterAssembly
+from Tensile.AsmRegisterPool import RegisterPool
 import collections
 from types import SimpleNamespace
 
@@ -41,9 +42,33 @@ def test_gfx12_compatibility_checks_do_not_apply_to_future_isa():
 
 def test_gfx12_atomic_cmpswap_modifier_preserves_extra_modifiers():
     kw = KernelWriterAssembly("","")
+    kw.version = (12, 0, 1)
 
     assert kw.gfx12AtomicCmpswapMemoryModifier("glc") == "th:TH_ATOMIC_RT_RETURN"
     assert kw.gfx12AtomicCmpswapMemoryModifier("glc slc") == "th:TH_ATOMIC_RT_RETURN slc"
+
+def test_gfx12_atomic_cmpswap_modifier_rejects_other_architectures():
+    kw = KernelWriterAssembly("","")
+    kw.version = (13, 0, 0)
+
+    try:
+        kw.gfx12AtomicCmpswapMemoryModifier("glc")
+    except RuntimeError:
+        return
+
+    assert False, "Expected gfx12 atomic modifier helper to reject gfx13"
+
+def test_gfx12_b256_emulation_preserves_outer_module_setup():
+    kw = KernelWriterAssembly("","")
+    kw.version = (12, 0, 1)
+    kw.sgprPool = RegisterPool(8, "s", defaultPreventOverflow=False, printRP=0)
+    kw.sgprPool.add(0, 8, "tmp")
+
+    code = str(kw.chooseGlobalRead(True, 32, 0, "v0", "s[0:3]", 0, 0, "", False))
+
+    assert "gfx12 buffer soffset must be SGPR" in code
+    assert code.count("_buffer_load_b128") == 2
+    assert code.index("gfx12 buffer soffset must be SGPR") < code.index("_buffer_load_b128")
 
 def test_workgroup2_hydration_uses_actual_sgpr_definition():
     kw = KernelWriterAssembly("","")

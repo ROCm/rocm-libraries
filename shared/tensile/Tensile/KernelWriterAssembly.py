@@ -23,7 +23,7 @@
 ################################################################################
 
 from . import Code
-from .Common import gfxName, globalParameters, getCOVFromParam, tPrint, printExit, printWarning, roundUp
+from .Common import gfxName, globalParameters, getCOVFromParam, isGfx12, tPrint, printExit, printWarning, roundUp
 from .Component import Component
 from .KernelWriter import KernelWriter
 from .SolutionStructs import isPackedIndex
@@ -236,13 +236,15 @@ class KernelWriterAssembly(KernelWriter):
     return 1
 
   def isGfx12(self):
-    return self.version[0] == 12
+    return isGfx12(self.version)
 
   def hasWorkGroup2(self):
     return hasattr(self, "sgprs") and "WorkGroup2" in self.sgprs
 
   def gfx12AtomicCmpswapMemoryModifier(self, memoryBit):
     """Add the gfx12 atomic return modifier while preserving trailing modifiers."""
+    if not self.isGfx12():
+      raise RuntimeError("gfx12AtomicCmpswapMemoryModifier is only valid for gfx12")
     modifiers = memoryBit.split()
     returnModifier = "th:TH_ATOMIC_RT_RETURN"
 
@@ -3433,7 +3435,7 @@ class KernelWriterAssembly(KernelWriter):
     # SRD / shadow-limit computation and produces an out-of-bounds buffer access
     # that page-faults. Copy the ttmp values into sgprWorkGroup{0,1,2} before
     # anything reads them. This is a no-op on gfx9/10/11 paths.
-    if self.version[0] == 12:
+    if self.isGfx12():
       kStr += self.comment("gfx12: hydrate WorkGroup IDs from architected ttmp registers")
       kStr += inst("s_mov_b32", sgpr("WorkGroup0"), "ttmp9",
                    "WorkGroup0 = ttmp9")
@@ -13836,6 +13838,7 @@ class KernelWriterAssembly(KernelWriter):
         else:
           assert 0, "offset too large and soffset set"
       elif self.isGfx12() and (soffset == 0 or soffset == "0"):
+        # gfx12 buffer instructions reject literal 0 in the soffset operand.
         soffset = sgpr(self.getTmpSgpr(1).idx())
         rv.addCode(inst("s_mov_b32", soffset, 0, "gfx12 buffer soffset must be SGPR"))
       if extraFields != "":
@@ -13937,6 +13940,7 @@ class KernelWriterAssembly(KernelWriter):
         tmpSgpr = soffset
 
       if self.isGfx12() and (tmpSgpr == 0 or tmpSgpr == "0"):
+        # gfx12 buffer instructions reject literal 0 in the soffset operand.
         tmpSgpr = sgpr(self.getTmpSgpr(1).idx())
         kStr += inst("s_mov_b32", tmpSgpr, 0, "gfx12 buffer soffset must be SGPR")
 
@@ -14136,6 +14140,7 @@ class KernelWriterAssembly(KernelWriter):
         atomicMemoryBit = memoryBit
         atomicOffset = "0 offen offset:%u" % (addrCalc.globalOffset + offset)
         if self.isGfx12():
+          # gfx12 buffer atomics reject literal 0 in the soffset operand.
           tmpSgpr = sgpr(self.getTmpSgpr(1).idx())
           kStr += inst("s_mov_b32", tmpSgpr, 0, "gfx12 buffer atomic soffset must be SGPR")
           atomicOffset = "%s offen offset:%u" % (tmpSgpr, addrCalc.globalOffset + offset)
@@ -14150,7 +14155,7 @@ class KernelWriterAssembly(KernelWriter):
             "attempt write", self.endLine )
       else:
         # not BufferStore case
-        if self.version[0] >= 12:
+        if self.isGfx12():
           memoryBit = self.gfx12AtomicCmpswapMemoryModifier(memoryBit)
         kStr += "_global_atomic_cmpswap_b%u %s, %s, %s, %s, %s, %s    // %s%s" % \
             (bits, vgpr(addDst,atomicOpW), vgpr(addrCalc.addrDVgpr,2), \

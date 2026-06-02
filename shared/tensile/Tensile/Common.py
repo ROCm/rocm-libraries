@@ -46,6 +46,9 @@ ParallelMap = Parallel.ParallelMap
 
 IsaVersion = Tuple[int, int, int]
 
+def isGfx12(isaVersion: IsaVersion) -> bool:
+  return isaVersion[0] == 12
+
 class SemanticVersion(NamedTuple):
     major: int
     minor: int
@@ -2031,8 +2034,12 @@ def GetAsmCaps(isaVersion: IsaVersion, hipVersion: SemanticVersion, cachedAsmCap
     derivedAsmCaps["HasLshlOr"]             = tryAssembler(isaVersion, "v_lshl_or_b32 v47, v36, 0x2, v34")
     derivedAsmCaps["HasSMulHi"]             = tryAssembler(isaVersion, "s_mul_hi_u32 s47, s36, s34")
 
-    if isaVersion[0] >= 12:
-      derivedAsmCaps["HasWMMA"]             = tryAssembler(isaVersion, "v_wmma_f32_16x16x16_f16 v[0:7], v[8:11], v[12:15], v[0:7]", False, "-mno-wavefrontsize64", "-mno-cumode")
+    if isGfx12(isaVersion):
+      # Tensile only enables WMMA kernels with WavefrontSize=32. Probe the same
+      # gfx12 operand layout and wave mode that codegen uses; the wave64 form
+      # accepts different operands and would advertise support for a path that
+      # SolutionStructs rejects.
+      derivedAsmCaps["HasWMMA"]             = tryAssembler(isaVersion, "v_wmma_f32_16x16x16_f16 v[0:7], v[8:11], v[12:15], v[0:7]", False, "-mno-wavefrontsize64")
     else:
       derivedAsmCaps["HasWMMA"]             = tryAssembler(isaVersion, "v_wmma_f32_16x16x16_f16 v[0:3], v[8:15], v[16:23], v[0:3]")
     derivedAsmCaps["HasMFMA"]               = tryAssembler(isaVersion, "v_mfma_f32_32x32x2bf16 a[0:31], v32, v33, a[0:31]") \

@@ -25,6 +25,7 @@
 from .Common import assignParameterRequired, assignParameterWithDefault, \
                     defaultProblemType, defaultSolution, \
                     globalParameters, \
+                    isGfx12, \
                     tPrint, printExit, printWarning, \
                     validActivationFormats, validConvolutionConfig, \
                     validMFMA, validWMMA, validParameters, validWeightFormats, \
@@ -73,6 +74,11 @@ def reject(state, *args):
         SolutionIndex: %d (or SolutionName/ProblemType: %s)"%(solutionIndex, solutionNameMin))
   if state != None:
     state["Valid"] = False
+
+def disablePreloadKernelArguments(state):
+  state["PreloadKernelArguments"] = 0
+  if "DelayRemainingArguments" in state:
+    state["DelayRemainingArguments"] = False
 
 # print a labled variable
 def pvar(state, field):
@@ -2401,7 +2407,11 @@ class Solution(collections.abc.Mapping):
       isa = tuple(state["ISA"])
       state['MIInputPerThread'] = state["MatrixInstruction"][0] * state["MatrixInstruction"][2] * state["MatrixInstruction"][3] // state["WavefrontSize"]
       if (not globalParameters["AsmCaps"][isa]['HasMFMA']) and globalParameters["AsmCaps"][isa]['HasWMMA']:
-        state['MIInputPerThread'] = state["MatrixInstruction"][2] // 2 if isa[0] >= 12 else state["MatrixInstruction"][2]
+        # WMMA is only accepted for WavefrontSize=32 below. For that gfx12
+        # encoding, each lane supplies half of MatrixInstK; current validWMMA
+        # contains K=16, so this is 8, and remains proportional if more gfx12
+        # WMMA K shapes are added.
+        state['MIInputPerThread'] = state["MatrixInstruction"][2] // 2 if isGfx12(isa) else state["MatrixInstruction"][2]
 
     else:
       state["EnableMatrixInstruction"] = False
@@ -3048,7 +3058,9 @@ class Solution(collections.abc.Mapping):
     elif pkaRequested == 1:
       if not pkaSupported:
         if not globalParameters["AsmCaps"][isa]["KernargPreloading"]:
-          state["PreloadKernelArguments"] = 0
+          # The hardware cannot preload kernargs; fall back to the normal s_load
+          # path and disable the dependent delayed-argument schedule.
+          disablePreloadKernelArguments(state)
           pkaForcedOff = True
         else:
           reject(state, pkaMsg)
