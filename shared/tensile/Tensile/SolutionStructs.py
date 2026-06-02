@@ -45,11 +45,9 @@ from enum import Enum
 from functools import reduce
 
 import collections
-import json
 import math
 import operator
 import sys
-import time
 
 ########################################
 # Print a reject message :
@@ -3063,14 +3061,6 @@ class Solution(collections.abc.Mapping):
           reject(state, "Delayed kernel arguments only supported when preloading.")
     else:
       state["DelayRemainingArguments"] = False
-
-    #region agent log
-    try:
-      with open("/home/bstefanu/dev/rocm-libraries/.cursor/debug-1f3213.log", "a", encoding="utf-8") as f:
-        f.write(json.dumps({"sessionId":"1f3213","runId":"post-pka-fix","hypothesisId":"H1","location":"Tensile/SolutionStructs.py:PreloadKernelArguments","message":"Normalized preload kernel arguments","data":{"isa":isa,"requestedPreloadKernelArguments":pkaRequested,"preloadSupported":pkaSupported,"preloadMessage":pkaMsg,"forcedOff":pkaForcedOff,"finalPreloadKernelArguments":state["PreloadKernelArguments"],"finalDelayRemainingArguments":state["DelayRemainingArguments"]},"timestamp":int(time.time()*1000)}) + "\n")
-    except Exception:
-      pass
-    #endregion
 
     if state["VectorStore"] == -1:
         state["_VectorStore"] = 1 # default, may be changed if needed to generate a valid kernel

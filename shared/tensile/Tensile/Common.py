@@ -39,7 +39,6 @@ import sys
 import time
 import warnings
 import re
-import json
 
 startTime = time.time()
 
@@ -1988,13 +1987,6 @@ def printWarning(message: str, category=UserWarning):
   sys.stdout.flush()
 
 def printExit(message):
-  #region agent log
-  try:
-    with open("/home/bstefanu/dev/rocm-libraries/.cursor/debug-1f3213.log", "a", encoding="utf-8") as f:
-      f.write(json.dumps({"sessionId":"1f3213","runId":"initial","hypothesisId":"H1,H2,H3,H4","location":"Tensile/Common.py:printExit","message":"Tensile fatal exit","data":{"fatalMessage":str(message),"argv":sys.argv,"cwd":os.getcwd()},"timestamp":int(time.time()*1000)}) + "\n")
-  except Exception:
-    pass
-  #endregion
   if TENSILE_TERM_COLORS:
         message = f"[bold red]{message}[/bold red]"
   print(message)
