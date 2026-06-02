@@ -2,24 +2,30 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Analyze the smart-build selection for a set of PRs against a dependency map.
+"""Bulk audit of the smart-build selection for a set of PRs.
 
-For each PR, maps the changed files through the depmap, intersects with
-ctest-registered tests, and emits a structured JSON analysis useful for
-auditing false-negative / blind-spot coverage.
+For each PR, maps the changed-file paths through a pre-built dependency map,
+intersects with ctest-registered tests, and emits a structured analysis with
+false-negative / blind-spot flags. This is the cheap, offline counterpart to
+validate_pr.sh (which checks out each PR, regenerates the depmap, and does the
+authoritative smart-vs-legacy differential). This tool only needs the changed
+*paths*, so it fetches them via `gh pr view` (a metadata-only API call, far
+cheaper than `git fetch` of the PR objects) and never builds or checks out.
 
-Usage (per-PR):
-    python3 analyze_pr_selection.py \\
-        enhanced_dependency_mapping.json \\
-        ctest_list.txt \\
-        pr_files.json \\
-        output.json
+Usage:
+    # Fetch PR file lists via gh (run inside the repo, or pass --repo):
+    analyze_pr_selection.py 7964 7357 \\
+        --depmap enhanced_dependency_mapping.json \\
+        --ctest ctest_list.txt \\
+        --output-dir pr_analysis --summary pr_analysis/summary.json
 
-    where pr_files.json is produced by:
-        gh pr view <N> --json number,title,files \
-            --jq '{number:.number,title:.title,files:[.files[].path]}' > pr_files.json
+    # Offline (no gh): supply pre-fetched PR JSON files instead of numbers:
+    analyze_pr_selection.py --pr-files pr7964.json pr7357.json --depmap ... --ctest ...
 
-Output fields:
+A --pr-files JSON may be either {number,title,files:[path,...]} or the raw
+`gh pr view --json number,title,files` shape ({...,files:[{path,...}]}).
+
+Per-PR output fields:
     pr, title
     n_changed_files, n_ck_files, n_code_files
     n_selected, selected           - ctest-registered test executables the filter picks
@@ -33,8 +39,10 @@ Output fields:
         noncode_files                  - cmake/yaml/docs etc., not mapped by compile deps
 """
 
+import argparse
 import json
 import os
+import subprocess
 import sys
 
 # Reuse the canonical parser from validate_selection to avoid duplication.
@@ -118,28 +126,147 @@ def summary_line(result):
     )
 
 
+def _normalize_pr(data):
+    """Normalize a PR dict to {number, title, files:[path,...]}.
+
+    Accepts our own shape (files already a list of paths) or the raw
+    `gh pr view --json ... files` shape (files a list of {path,...} objects).
+    """
+    files = data.get("files", [])
+    norm = [f["path"] if isinstance(f, dict) else f for f in files]
+    return {
+        "number": data["number"],
+        "title": data.get("title", ""),
+        "files": norm,
+    }
+
+
+def fetch_pr(number, repo=None):
+    """Fetch one PR's metadata via gh (number, title, changed-file paths).
+
+    Uses `gh pr view <N> --json number,title,files`, a metadata-only call - no
+    clone and no object transfer, unlike `git fetch`. Raises RuntimeError with a
+    clear message if gh is missing/unauthenticated or the PR can't be read.
+    """
+    cmd = ["gh", "pr", "view", str(number), "--json", "number,title,files"]
+    if repo:
+        cmd += ["-R", repo]
+    try:
+        out = subprocess.run(cmd, check=True, capture_output=True, text=True).stdout
+    except FileNotFoundError as e:
+        raise RuntimeError("gh CLI not found on PATH (needed to fetch PRs)") from e
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(
+            f"gh failed for PR #{number}: {e.stderr.strip() or e}"
+        ) from e
+    return _normalize_pr(json.loads(out))
+
+
+def load_pr_file(path):
+    """Load and normalize a pre-fetched PR JSON file (offline path)."""
+    with open(path) as f:
+        return _normalize_pr(json.load(f))
+
+
+def write_summary(results, path):
+    """Write an aggregate JSON across all analyzed PRs."""
+    def _flag(r, name):
+        return r["flags"][name]
+    rows = [
+        {
+            "pr": r["pr"],
+            "n_selected": r["n_selected"],
+            "n_expected_dependents": r["n_expected_dependents"],
+            "n_code_files": r["n_code_files"],
+            "n_files_not_in_depmap": len(_flag(r, "code_files_not_in_depmap")),
+            "n_dead_headers": len(_flag(r, "code_files_with_no_dependents")),
+        }
+        for r in results
+    ]
+    summary = {
+        "n_prs": len(results),
+        "prs": rows,
+        "prs_with_files_not_in_depmap": sorted(
+            r["pr"] for r in results if _flag(r, "code_files_not_in_depmap")
+        ),
+        "prs_with_dead_headers": sorted(
+            r["pr"] for r in results if _flag(r, "code_files_with_no_dependents")
+        ),
+        "totals": {
+            "selected": sum(r["n_selected"] for r in results),
+            "files_not_in_depmap": sum(
+                len(_flag(r, "code_files_not_in_depmap")) for r in results
+            ),
+        },
+    }
+    with open(path, "w") as f:
+        json.dump(summary, f, indent=2)
+
+
 def main(argv=None):
-    argv = argv or sys.argv[1:]
-    if len(argv) < 4:
-        print(
-            "Usage: analyze_pr_selection.py <depmap.json> <ctest_list.txt>"
-            " <pr_files.json> <output.json>",
-            file=sys.stderr,
-        )
-        sys.exit(2)
-    depmap_path, ctest_path, pr_json_path, out_path = argv[:4]
+    parser = argparse.ArgumentParser(
+        description="Bulk audit of smart-build selection for a set of PRs"
+    )
+    parser.add_argument("prs", nargs="*", help="PR numbers to fetch via gh")
+    parser.add_argument(
+        "--depmap",
+        default="enhanced_dependency_mapping.json",
+        help="dependency map JSON (default: enhanced_dependency_mapping.json)",
+    )
+    parser.add_argument(
+        "--ctest",
+        default="ctest_list.txt",
+        help="`ctest -N` output (default: ctest_list.txt). Not auto-generated.",
+    )
+    parser.add_argument("--repo", help="OWNER/REPO for gh (default: inferred from cwd)")
+    parser.add_argument(
+        "--pr-files",
+        nargs="+",
+        default=[],
+        metavar="JSON",
+        help="offline: pre-fetched PR JSON file(s) instead of gh-fetching numbers",
+    )
+    parser.add_argument("--output-dir", help="write pr_<N>.json per PR into this dir")
+    parser.add_argument("--summary", help="write an aggregate JSON across all PRs")
+    args = parser.parse_args(argv)
 
-    with open(depmap_path) as f:
+    if not args.prs and not args.pr_files:
+        parser.error("provide at least one PR number or --pr-files JSON")
+    for path, label in [(args.depmap, "--depmap"), (args.ctest, "--ctest")]:
+        if not os.path.exists(path):
+            print(f"Error: file not found ({label}): {path}", file=sys.stderr)
+            return 2
+
+    with open(args.depmap) as f:
         f2e = json.load(f)["file_to_executables"]
-    ctest_tests = load_ctest_tests(ctest_path)
-    with open(pr_json_path) as f:
-        pr = json.load(f)
+    ctest_tests = load_ctest_tests(args.ctest)
 
-    result = analyze_pr(f2e, ctest_tests, pr)
-    with open(out_path, "w") as f:
-        json.dump(result, f, indent=2)
-    print(summary_line(result))
+    if args.output_dir:
+        os.makedirs(args.output_dir, exist_ok=True)
+
+    results = []
+    failed = 0
+    prs = [("file", p) for p in args.pr_files] + [("num", n) for n in args.prs]
+    for kind, ref in prs:
+        try:
+            pr = load_pr_file(ref) if kind == "file" else fetch_pr(ref, args.repo)
+            result = analyze_pr(f2e, ctest_tests, pr)
+        except (RuntimeError, OSError, ValueError, KeyError) as e:
+            print(f"Error processing PR {ref}: {e}", file=sys.stderr)
+            failed += 1
+            continue
+        results.append(result)
+        print(summary_line(result))
+        if args.output_dir:
+            out = os.path.join(args.output_dir, f"pr_{result['pr']}.json")
+            with open(out, "w") as f:
+                json.dump(result, f, indent=2)
+
+    if args.summary and results:
+        write_summary(results, args.summary)
+
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

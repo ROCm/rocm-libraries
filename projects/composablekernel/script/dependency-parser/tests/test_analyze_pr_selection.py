@@ -2,12 +2,17 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Unit tests for analyze_pr_selection.py (pure functions, no I/O)."""
+"""Unit tests for analyze_pr_selection.py."""
 
+import json
+import os
+import subprocess
 import sys
+import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 import analyze_pr_selection as aps  # noqa: E402
@@ -156,6 +161,95 @@ class TestSummaryLine(unittest.TestCase):
         self.assertIn("PR #123", line)
         self.assertIn("sel=5", line)
         self.assertIn("not_in_map=1", line)
+
+
+class TestNormalizeAndLoad(unittest.TestCase):
+    def test_normalize_raw_gh_shape(self):
+        # gh pr view --json files -> files is a list of {path, ...} objects.
+        data = {"number": 7, "title": "t", "files": [{"path": "a/b.cpp", "additions": 3}]}
+        self.assertEqual(aps._normalize_pr(data),
+                         {"number": 7, "title": "t", "files": ["a/b.cpp"]})
+
+    def test_normalize_our_shape(self):
+        data = {"number": 7, "title": "t", "files": ["a/b.cpp", "c/d.hpp"]}
+        self.assertEqual(aps._normalize_pr(data)["files"], ["a/b.cpp", "c/d.hpp"])
+
+    def test_load_pr_file_normalizes(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump({"number": 9, "title": "x", "files": [{"path": "p.hpp"}]}, f)
+            name = f.name
+        try:
+            pr = aps.load_pr_file(name)
+        finally:
+            os.unlink(name)
+        self.assertEqual(pr["files"], ["p.hpp"])
+
+
+class TestFetchPr(unittest.TestCase):
+    def test_fetch_parses_gh_json(self):
+        gh_out = json.dumps({
+            "number": 7964, "title": "Smart build",
+            "files": [{"path": "projects/composablekernel/x.hpp"}, {"path": "README.md"}],
+        })
+        completed = subprocess.CompletedProcess(args=[], returncode=0, stdout=gh_out)
+        with mock.patch("analyze_pr_selection.subprocess.run", return_value=completed):
+            pr = aps.fetch_pr(7964)
+        self.assertEqual(pr["number"], 7964)
+        self.assertEqual(pr["files"],
+                         ["projects/composablekernel/x.hpp", "README.md"])
+
+    def test_fetch_missing_gh_raises_runtimeerror(self):
+        with mock.patch("analyze_pr_selection.subprocess.run", side_effect=FileNotFoundError()):
+            with self.assertRaises(RuntimeError):
+                aps.fetch_pr(1)
+
+    def test_fetch_gh_failure_raises_runtimeerror(self):
+        err = subprocess.CalledProcessError(1, "gh", stderr="no such PR")
+        with mock.patch("analyze_pr_selection.subprocess.run", side_effect=err):
+            with self.assertRaises(RuntimeError):
+                aps.fetch_pr(1)
+
+
+class TestMainOffline(unittest.TestCase):
+    def _setup(self, tmp):
+        depmap = Path(tmp) / "dep.json"
+        depmap.write_text(json.dumps({"file_to_executables": {
+            "include/ck/gemm.hpp": ["bin/test_gemm", "bin/example_gemm"],
+        }}))
+        ctest = Path(tmp) / "ctest.txt"
+        ctest.write_text(CTEST_N_OUTPUT)
+        prf = Path(tmp) / "pr.json"
+        prf.write_text(json.dumps({
+            "number": 100, "title": "demo",
+            "files": ["projects/composablekernel/include/ck/gemm.hpp"],
+        }))
+        return depmap, ctest, prf
+
+    def test_offline_run_writes_outputs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            depmap, ctest, prf = self._setup(tmp)
+            outdir = Path(tmp) / "out"
+            summary = Path(tmp) / "summary.json"
+            rc = aps.main([
+                "--pr-files", str(prf),
+                "--depmap", str(depmap), "--ctest", str(ctest),
+                "--output-dir", str(outdir), "--summary", str(summary),
+            ])
+            self.assertEqual(rc, 0)
+            per_pr = json.loads((outdir / "pr_100.json").read_text())
+            self.assertIn("bin/test_gemm", per_pr["selected"])
+            agg = json.loads(summary.read_text())
+            self.assertEqual(agg["n_prs"], 1)
+            self.assertEqual(agg["prs"][0]["pr"], 100)
+
+    def test_missing_depmap_exit_two(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            _, ctest, prf = self._setup(tmp)
+            rc = aps.main([
+                "--pr-files", str(prf),
+                "--depmap", str(Path(tmp) / "nope.json"), "--ctest", str(ctest),
+            ])
+            self.assertEqual(rc, 2)
 
 
 if __name__ == "__main__":

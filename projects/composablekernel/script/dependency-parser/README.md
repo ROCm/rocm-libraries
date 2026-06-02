@@ -662,7 +662,7 @@ uv run pytest tests/ --cov=src --cov-report=html
 | `ci_safety_check.sh` | Decides selective vs full build (cmake/tooling changes → full) |
 | `validate_pr.sh` | Developer tool: offline as-if comparison of smart vs legacy selection for a PR |
 | `filter_oracle.py` | Reachability guardrail (CI) and build-filter probe oracle |
-| `analyze_pr_selection.py` | Maps PR file lists through depmap for corpus analysis |
+| `analyze_pr_selection.py` | Bulk corpus audit: takes PR numbers (gh-fetched, or offline `--pr-files`), maps changed files through the depmap, flags FN/blind-spot risk |
 | `src/cmake_dependency_analyzer.py` | Pre-build dependency extractor (`clang -MM` and `clang-scan-deps`) |
 | `src/validate_selection.py` | Validates selected executables against `ninja -t targets all` |
 | `src/selective_test_filter.py` | Test selection from git diff + depmap lookup |
