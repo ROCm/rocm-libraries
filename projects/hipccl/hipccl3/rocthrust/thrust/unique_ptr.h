@@ -471,7 +471,7 @@ public:
   template <bool Dummy = true, class = EnableIfDeleterConstructible<GoodRValRefType<Dummy>>>
   THRUST_HOST THRUST_CONSTEXPR_CXX23 unique_ptr(pointer p, GoodRValRefType<Dummy> d) noexcept
       : m_ptr(p)
-      , m_deleter(std::move(d))
+      , m_deleter(_THRUST_STD::move(d))
   {
     static_assert(!std::is_reference_v<deleter_type>, "rvalue deleter bound to reference");
   }
@@ -911,7 +911,7 @@ public:
             class      = EnableIfPointerConvertible<Pp>>
   THRUST_HOST THRUST_CONSTEXPR_CXX23 unique_ptr(Pp p, GoodRValRefType<Dummy> deleter) noexcept
       : m_ptr(p)
-      , m_deleter(std::move(deleter))
+      , m_deleter(_THRUST_STD::move(deleter))
   {
     static_assert(!std::is_reference_v<deleter_type>, "rvalue deleter bound to reference");
   }
@@ -923,7 +923,7 @@ public:
   template <bool Dummy = true, class = EnableIfDeleterConstructible<GoodRValRefType<Dummy>>>
   THRUST_HOST THRUST_CONSTEXPR_CXX23 unique_ptr(std::nullptr_t, GoodRValRefType<Dummy> deleter) noexcept
       : m_ptr(nullptr)
-      , m_deleter(std::move(deleter))
+      , m_deleter(_THRUST_STD::move(deleter))
   {
     static_assert(!std::is_reference_v<deleter_type>, "rvalue deleter bound to reference");
   }

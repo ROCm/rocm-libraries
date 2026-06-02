@@ -5,6 +5,10 @@ Documentation for rocThrust available at
 
 ## rocThrust *.*.* for ROCm *.*.* (CCCL 3.1 parity)
 
+### Changed
+
+* Replaced `std::move` operators to `hip::std` operators.
+
 ### Removed
 
 * Removed `THRUST_NODISCARD`.

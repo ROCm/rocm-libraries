@@ -150,7 +150,7 @@ public:
 
   /*! Constructs a \p zip_function with the provided function object \p func. */
   THRUST_HOST_DEVICE zip_function(Function func)
-      : func(std::move(func))
+      : func(_THRUST_STD::move(func))
   {}
 
   /*! Applies the N-ary function object to elements of the tuple \p args. */
