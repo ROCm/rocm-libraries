@@ -1137,6 +1137,23 @@ hipblasStatus_t hipblasLtMatrixTransform(hipblasLtHandle_t              lightHan
                                          hipblasLtMatrixLayout_t Cdesc,
                                          hipStream_t             stream);
 /*! \ingroup library_module
+ *  \brief Enable or disable FP64 emulation for a hipBLASLt handle.
+ *
+ *  \details
+ *  When \p enabled is \c true, the handle will use FP64 emulation via
+ *  Ozaki Scheme II for supported DGEMM calls, overriding the
+ *  \c HIPBLASLT_EMULATE_DOUBLE_PRECISION environment variable.
+ *  When \p enabled is \c false, emulation is suppressed for this handle
+ *  even if the environment variable is set.  After \ref hipblasLtCreate()
+ *  the default is to defer to the environment variable.
+ *
+ *  \retval HIPBLAS_STATUS_SUCCESS         Setting applied successfully.
+ *  \retval HIPBLAS_STATUS_INVALID_VALUE   \p handle is NULL.
+ */
+HIPBLASLT_EXPORT
+hipblasStatus_t hipblasLtSetEmulationEnabled(hipblasLtHandle_t handle, bool enabled);
+
+/*! \ingroup library_module
  *  \brief Set the FP64 emulation strategy for a hipBLASLt handle.
  *
  *  \details
@@ -1189,17 +1206,16 @@ hipblasStatus_t hipblasLtSetFixedPointEmulationMantissaControl(
  *  \details
  *  Specifies the total CRT capacity in bits (sum of log2 of all moduli used).
  *  The library selects the minimum number of moduli s such that
- *  log2(prod(moduli)) >= maxBits.  Notable values: 55→7 GEMMs,
- *  79→10 GEMMs, 110→14 GEMMs (default maximum).
+ *  CRT_capacity(s) >= maxBits.  Notable values: 16→3 GEMMs, 55→7 GEMMs,
+ *  79→10 GEMMs, 110→14 GEMMs (default maximum).  Use 0 or 1 to select the
+ *  minimum of 2 moduli.
  *
- *  Only effective when mantissa control is ``FIXED`` or when the env var
- *  HIPBLASLT_FIXEDPOINT_EMULATION_MANTISSA_BIT_COUNT has not been set.
- *  Set to -1 to revert to the process-wide default.
+ *  Set to -1 to revert to the process-wide env var default.  Any
+ *  non-negative value is accepted; values exceeding the maximum supported
+ *  CRT capacity will silently clamp to the maximum number of moduli.
  *
  *  \retval HIPBLAS_STATUS_SUCCESS         Setting applied successfully.
- *  \retval HIPBLAS_STATUS_INVALID_VALUE   \p handle is NULL or \p maxBits
- *                                         is out of range (must be -1 or
- *                                         in [16, 110]).
+ *  \retval HIPBLAS_STATUS_INVALID_VALUE   \p handle is NULL or \p maxBits < -1.
  */
 HIPBLASLT_EXPORT
 hipblasStatus_t hipblasLtSetFixedPointEmulationMaxMantissaBitCount(hipblasLtHandle_t handle,

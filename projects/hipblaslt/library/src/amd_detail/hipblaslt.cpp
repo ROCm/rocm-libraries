@@ -799,6 +799,19 @@ catch(...)
  * FP64 emulation handle-level API
  * ========================================================================= */
 
+hipblasStatus_t hipblasLtSetEmulationEnabled(hipblasLtHandle_t handle, bool enabled)
+try
+{
+    if(handle == nullptr) return HIPBLAS_STATUS_INVALID_VALUE;
+    auto* h = reinterpret_cast<_rocblaslt_handle*>(handle);
+    h->emulation.enabled = enabled ? 1 : 0;
+    return HIPBLAS_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return exception_to_hipblas_status();
+}
+
 hipblasStatus_t hipblasLtSetEmulationStrategy(hipblasLtHandle_t            handle,
                                               hipblasLtEmulationStrategy_t strategy)
 try
@@ -853,7 +866,10 @@ hipblasStatus_t hipblasLtSetFixedPointEmulationMaxMantissaBitCount(hipblasLtHand
 try
 {
     if(handle == nullptr) return HIPBLAS_STATUS_INVALID_VALUE;
-    if(maxBits != -1 && (maxBits < 16 || maxBits > 110))
+    /* -1 = revert to process-wide env var default.
+     * Any non-negative value is valid; the library maps it to the minimum
+     * number of moduli whose CRT capacity meets or exceeds maxBits. */
+    if(maxBits < -1)
         return HIPBLAS_STATUS_INVALID_VALUE;
     auto* h = reinterpret_cast<_rocblaslt_handle*>(handle);
     h->emulation.max_mantissa_bits = maxBits;

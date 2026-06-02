@@ -112,11 +112,12 @@ struct _rocblaslt_handle
     /* FP64 emulation (Ozaki Scheme II) — per-handle overrides for env vars.
      * Sentinel values (-1 / ~0u) mean "use the process-wide env var default". */
     struct {
+        int          enabled;               /* 1=force on, 0=force off, -1=env var (default) */
         int          strategy;              /* 0=DEFAULT, 1=PERFORMANT, 2=EAGER; -1=env var */
         int          mantissa_control;      /* 0=DYNAMIC, 1=FIXED */
         int          max_mantissa_bits;     /* bit target for FIXED mode; -1=env var */
         unsigned int special_values_mask;   /* Inf/NaN mask; ~0u=env var */
-    } emulation = {-1, 0, -1, ~0u};
+    } emulation = {-1, -1, 0, -1, ~0u};
 
     // HIPBLASLT_CHECK_NUMERICS state. Read once in the ctor; opt-in via env.
     // See check_numerics_matrix.hpp for the scanner protocol.

@@ -133,12 +133,16 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
     //   • Non-batched (batch_count == 1)
     //   • Plain GEMM epilogue (no activation, no bias, no auxiliary outputs)
     //   • alpha/beta are host (non-device-pointer) scalars
-    //   • The environment variable HIPBLASLT_EMULATE_DOUBLE_PRECISION=1
+    //   • Emulation is enabled: handle override (1=on, 0=off) or env var
     //   • Arithmetic intensity exceeds the threshold (compute-bound region)
     //
     // On success the emulated result is returned directly; the native path
     // is used as fall-back when fp64EmulatedGemm returns non-success.
     // -----------------------------------------------------------------------
+    /* Resolve per-handle enabled override vs process-wide env var.
+     * handle->emulation.enabled: 1=force on, 0=force off, -1=defer to env var */
+    const bool emulEnabled = (handle->emulation.enabled == 1)
+                          || (handle->emulation.enabled != 0 && fp64EmulationIsEnabled());
     if(type_a == HIP_R_64F
        && num_batches_a == 1
        && bias          == nullptr
@@ -146,7 +150,7 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
        && E             == nullptr
        && !matmul_descr->pointermode
        && epilogue      == ROCBLASLT_EPILOGUE_DEFAULT
-       && fp64EmulationIsEnabled())
+       && emulEnabled)
     {
         /* Resolve emulation strategy: handle setting > env var.
          * handle->emulation.strategy:  -1=use env var, 0=DEFAULT(=env var),
@@ -163,14 +167,33 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
 
             /* num_moduli: derive from handle's max_mantissa_bits if set */
             if(handle->emulation.max_mantissa_bits >= 0) {
-                static constexpr double cum_bits[14] = {
-                    15.994, 23.976, 31.945, 39.894, 47.807, 55.708,
-                    63.572, 71.411, 79.238, 87.040, 94.801, 102.522, 110.160
+                /* CRT bit capacity for s=2..20 (19 entries, indexed by s-2). */
+                static constexpr double cum_bits[19] = {
+                     15.994,  /* s=2  */
+                     23.976,  /* s=3  */
+                     31.945,  /* s=4  */
+                     39.894,  /* s=5  */
+                     47.807,  /* s=6  */
+                     55.708,  /* s=7  */
+                     63.572,  /* s=8  */
+                     71.411,  /* s=9  */
+                     79.238,  /* s=10 */
+                     87.040,  /* s=11 */
+                     94.801,  /* s=12 */
+                    102.522,  /* s=13 */
+                    110.160,  /* s=14 */
+                    117.782,  /* s=15 */
+                    125.374,  /* s=16 */
+                    132.949,  /* s=17 */
+                    140.448,  /* s=18 */
+                    147.931,  /* s=19 */
+                    155.365,  /* s=20 */
                 };
+                static constexpr unsigned OZ2_S_MAX = 20u;
                 const unsigned target = static_cast<unsigned>(
                     handle->emulation.max_mantissa_bits);
-                emulSettings.num_moduli = 14u;
-                for(unsigned s = 2u; s <= 14u; ++s) {
+                emulSettings.num_moduli = OZ2_S_MAX;
+                for(unsigned s = 2u; s <= OZ2_S_MAX; ++s) {
                     if(cum_bits[s - 2u] >= static_cast<double>(target)) {
                         emulSettings.num_moduli = s;
                         break;
