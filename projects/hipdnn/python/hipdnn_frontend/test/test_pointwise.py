@@ -33,16 +33,8 @@ def build_pointwise_add_graph(n=16, c=16, h=16, w=16):
 
 
 @pytest.mark.gpu
-@pytest.mark.integration
 class TestPointwiseAdd:
     """Tests for pointwise add end-to-end pipeline."""
-
-    def test_graph_validates_successfully(self):
-        """Build a pointwise add graph and verify validation passes."""
-        graph, a, b, out = build_pointwise_add_graph()
-
-        result = graph.validate()
-        assert result.is_good(), f"Validation failed: {result.get_message()}"
 
     def test_builds_operation_graph(self):
         """Pointwise add graph validates and lowers to a backend operation graph.

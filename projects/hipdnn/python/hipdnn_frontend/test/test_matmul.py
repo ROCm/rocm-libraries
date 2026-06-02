@@ -32,16 +32,8 @@ def build_matmul_graph(m=4, k=3, n=5):
 
 
 @pytest.mark.gpu
-@pytest.mark.integration
 class TestMatmul:
     """Tests for matrix multiplication end-to-end pipeline."""
-
-    def test_graph_validates(self):
-        """Create a matmul graph and verify validation passes."""
-        graph, a, b, c = build_matmul_graph()
-
-        result = graph.validate()
-        assert result.is_good(), f"Validation failed: {result.get_message()}"
 
     def test_builds_operation_graph(self):
         """Matmul graph validates and lowers to a backend operation graph.

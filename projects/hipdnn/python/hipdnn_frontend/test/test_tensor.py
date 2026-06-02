@@ -68,3 +68,35 @@ class TestTensorAttributes:
         tensor.set_is_virtual(True)
 
         assert tensor.get_is_virtual()
+
+    def test_create_does_not_auto_assign_uid(self):
+        """create() leaves the uid unset until set_uid() is called."""
+        tensor = hipdnn.Tensor.create([1, 2], hipdnn.DataType.FLOAT)
+
+        assert not tensor.has_uid()
+
+    def test_set_output_returns_self(self):
+        """set_output() marks the tensor as output and returns self for chaining."""
+        tensor = hipdnn.Tensor.create([1, 2], hipdnn.DataType.FLOAT)
+
+        assert tensor.set_output(True) is tensor
+
+    def test_method_chaining_returns_self(self):
+        """Chained setters return the same tensor and apply each value."""
+        tensor = hipdnn.Tensor.create([2, 3], hipdnn.DataType.FLOAT)
+
+        result = (
+            tensor.set_name("chained").set_uid(42).set_data_type(hipdnn.DataType.FLOAT)
+        )
+
+        assert result is tensor
+        assert tensor.get_name() == "chained"
+        assert tensor.get_uid() == 42
+
+    def test_validate_succeeds_for_configured_tensor(self):
+        """A properly configured tensor passes validation."""
+        tensor = hipdnn.Tensor.create([2, 3, 4], hipdnn.DataType.FLOAT)
+        tensor.set_name("valid_tensor")
+
+        result = tensor.validate()
+        assert result.is_good(), f"Validation failed: {result.get_message()}"

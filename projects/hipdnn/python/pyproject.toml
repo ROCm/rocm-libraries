@@ -44,5 +44,4 @@ wheel.packages = []
 [tool.pytest.ini_options]
 markers = [
     "gpu: test requires a ROCm-capable GPU",
-    "integration: end-to-end integration test (slower)",
 ]

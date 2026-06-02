@@ -49,16 +49,6 @@ class TestGraphConfiguration:
 class TestGraphTensorCreation:
     """Tests for creating tensors via the Graph API."""
 
-    def test_graph_tensor_creation(self):
-        """Tensor.create() produces a tensor with expected dims and dtype."""
-        t = hipdnn.Tensor.create([2, 3, 4], hipdnn.DataType.FLOAT)
-        t.set_stride([12, 4, 1])
-
-        assert t is not None
-        assert t.get_dim() == [2, 3, 4]
-        assert t.get_data_type() == hipdnn.DataType.FLOAT
-        assert t.get_stride() == [12, 4, 1]
-
     def test_graph_tensor_like(self):
         """Graph.tensor_like() creates a tensor with matching dims but new uid."""
         original = hipdnn.Tensor.create([4, 8, 16], hipdnn.DataType.FLOAT)
@@ -70,3 +60,65 @@ class TestGraphTensorCreation:
         assert copy.get_data_type() == original.get_data_type()
         # tensor_like clears the uid, so has_uid should be False
         assert not copy.has_uid()
+
+
+def _build_pointwise_add_graph(dim_a, dim_b):
+    """Build a single-node pointwise-add graph over two input tensors."""
+    graph = hipdnn.Graph()
+    graph.set_io_data_type(hipdnn.DataType.FLOAT)
+    graph.set_compute_data_type(hipdnn.DataType.FLOAT)
+    graph.set_intermediate_data_type(hipdnn.DataType.FLOAT)
+
+    a = hipdnn.Tensor.create(dim_a, hipdnn.DataType.FLOAT)
+    a.set_name("a")
+    b = hipdnn.Tensor.create(dim_b, hipdnn.DataType.FLOAT)
+    b.set_name("b")
+
+    attrs = hipdnn.PointwiseAttributes()
+    attrs.set_name("add")
+    attrs.set_mode(hipdnn.PointwiseMode.ADD)
+
+    out = graph.pointwise(a, b, attrs)
+    out.set_name("out")
+    out.set_output(True)
+    return graph
+
+
+class TestGraphValidation:
+    """Happy- and unhappy-path validation of multi-node graphs (no GPU)."""
+
+    def test_pointwise_graph_validates(self):
+        """A well-formed pointwise-add graph passes validation."""
+        graph = _build_pointwise_add_graph([8, 16], [8, 16])
+
+        result = graph.validate()
+        assert result.is_good(), f"Validation failed: {result.get_message()}"
+
+    def test_mismatched_pointwise_shapes_fail_validation(self):
+        """Incompatible operand shapes for pointwise add fail validation."""
+        graph = _build_pointwise_add_graph([8, 16], [4, 4])
+
+        result = graph.validate()
+        assert not result.is_good()
+
+    def test_matmul_inner_dim_mismatch_fails_validation(self):
+        """Matmul with non-matching contraction dims fails validation."""
+        graph = hipdnn.Graph()
+        graph.set_io_data_type(hipdnn.DataType.FLOAT)
+        graph.set_compute_data_type(hipdnn.DataType.FLOAT)
+        graph.set_intermediate_data_type(hipdnn.DataType.FLOAT)
+
+        a = hipdnn.Tensor.create([4, 3], hipdnn.DataType.FLOAT)
+        a.set_name("A")
+        b = hipdnn.Tensor.create([5, 6], hipdnn.DataType.FLOAT)
+        b.set_name("B")
+
+        attrs = hipdnn.MatmulAttributes()
+        attrs.set_name("matmul")
+
+        c = graph.matmul(a, b, attrs)
+        c.set_name("C")
+        c.set_output(True)
+
+        result = graph.validate()
+        assert not result.is_good()
