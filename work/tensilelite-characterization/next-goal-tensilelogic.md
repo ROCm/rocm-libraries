@@ -14,6 +14,9 @@ no new survey needed), integrated with the existing pytest/tox setup.
 Document resisting functions + a go/no-go on the *next* target after this one.
 
 Achieved when:
+- **Baseline (BEFORE) coverage report captured FIRST**, before adding any new
+  tests — the TensileLogic module coverage from the *existing* suite — and
+  saved as a committed artifact (see "Coverage reports" below).
 - `target.md` for TensileLogic (rationale + the location/scope notes below).
 - `Tensile/Tests/unit/characterization/TensileLogic/` exists with syrupy
   snapshots driving every reasonably-testable public function (see API
@@ -22,12 +25,42 @@ Achieved when:
   module-global failure-report state reset between cases; no RNG/time/thread
   nondeterminism leaks into snapshots.
 - `pytest --cov` (path-mode) reports **≥95% line** on the module.
+- **Final (AFTER) coverage report captured** and saved as a committed
+  artifact, with the before→after delta recorded.
 - `resistance.md` (append a TensileLogic section, or a new file in the
   TensileLogic dir) lists every function that resisted + reason + workaround.
 - `recommendations.md` updated: go/no-go on the *following* target (LibraryIO
   vs Common) + effort estimate.
 - No regression: full `-m unit` suite still passes (current baseline incl.
   Validators suite = **1249 passed / 201 skipped**; this work only adds).
+- **The work is committed** (atomic commits throughout; tree clean; no push).
+- **The next goal prompt is created**: a `next-goal-<target>.md` kickoff
+  (same shape as this file) for the target chosen in `recommendations.md`
+  (LibraryIO or Common), grounded in inspection of that module.
+
+## Coverage reports (BEFORE / AFTER) — required deliverable
+
+Capture both with the path-mode command and save them as committed text
+artifacts so the gain is auditable:
+
+```
+# BEFORE — run on a clean tree (existing tests only), save the module rows:
+pytest -m unit --cov=Tensile/TensileLogic --cov-config=pyproject.toml \
+  --cov-report=term-missing Tensile/Tests/unit \
+  | tee Tensile/Tests/unit/characterization/TensileLogic/coverage-before.txt
+
+# AFTER — rerun once the suite is complete:
+pytest -m unit --cov=Tensile/TensileLogic --cov-config=pyproject.toml \
+  --cov-report=term-missing Tensile/Tests/unit \
+  | tee Tensile/Tests/unit/characterization/TensileLogic/coverage-after.txt
+```
+
+- Commit `coverage-before.txt` as part of the first TensileLogic commit
+  (before/with `target.md`), and `coverage-after.txt` in the final commit.
+- Record the headline before→after numbers (line % and missing count) in
+  `target.md` and `recommendations.md`.
+- Both are new files → add-only safe. (They are generated reports, but here we
+  intentionally keep them as committed evidence of the before/after gate.)
 
 ## CONSTRAINTS (unchanged, hard)
 
@@ -115,7 +148,8 @@ built — it is.
 
 ## Suggested commit sequence (atomic)
 
-1. `target.md` for TensileLogic.
+1. **Capture `coverage-before.txt`** (baseline, existing tests only) +
+   `target.md` for TensileLogic.
 2. `ValidWorkGroup` + `ValidMatrixInstruction` suites (cheapest; reuse
    Validators fixtures).
 3. `KnownBugs` suite (YAML load + normalise + is_known_bug).
@@ -124,14 +158,23 @@ built — it is.
 6. `HandleCustomKernel` + `ParseArguments` suites.
 7. `_runChecks` (Run.py) if tractable.
 8. resistance.md + recommendations.md updates.
-9. Final coverage run (path-mode) + no-regression confirmation.
+9. Final coverage run (path-mode) + **save/commit `coverage-after.txt`** +
+   no-regression confirmation.
+10. **Create the next goal prompt** `next-goal-<target>.md` for the target
+    selected in recommendations.md (grounded in inspection of that module) +
+    commit. Mark this file's checklist done.
 
 ## Definition of done checklist
 
+- [ ] `coverage-before.txt` captured (baseline) and committed BEFORE new tests.
 - [ ] `--cov=Tensile/TensileLogic` (path-mode) ≥95% line.
+- [ ] `coverage-after.txt` captured and committed; before→after delta recorded
+      in target.md + recommendations.md.
 - [ ] Every Tier A/B public fn has snapshot coverage; Tier C documented.
 - [ ] Module-global state reset per test; paths normalised in snapshots.
 - [ ] resistance.md lists each resisting fn (expect: `main`, `_setup`,
       `_progress_loop`, possibly path-coupled message lines).
 - [ ] recommendations.md: go/no-go on the target after this (LibraryIO/Common).
 - [ ] full `-m unit` ≥ 1249 passed / 201 skipped, no failures, additive only.
+- [ ] All work committed (atomic, no push); tree clean.
+- [ ] Next goal prompt `next-goal-<target>.md` created and committed.
