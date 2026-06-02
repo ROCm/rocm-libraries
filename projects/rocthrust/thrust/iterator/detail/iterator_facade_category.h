@@ -47,19 +47,16 @@ THRUST_NAMESPACE_BEGIN
 namespace detail
 {
 template <typename T>
-// TODO(libhipcxx): replace inline with _CCCL_INLINE_VAR once libhipcxx gets ready
 inline constexpr bool is_host_iterator_category =
   _THRUST_STD::is_convertible_v<T, input_host_iterator_tag>
   || _THRUST_STD::is_convertible_v<T, output_host_iterator_tag>;
 
 template <typename T>
-// TODO(libhipcxx): replace inline with _CCCL_INLINE_VAR once libhipcxx gets ready
 inline constexpr bool is_device_iterator_category =
   _THRUST_STD::is_convertible_v<T, input_device_iterator_tag>
   || _THRUST_STD::is_convertible_v<T, output_device_iterator_tag>;
 
 template <typename T>
-// TODO(libhipcxx): replace inline with _CCCL_INLINE_VAR once libhipcxx gets ready
 inline constexpr bool is_iterator_category = is_host_iterator_category<T> || is_device_iterator_category<T>;
 
 // adapted from http://www.boost.org/doc/libs/1_37_0/libs/iterator/doc/iterator_facade.html#iterator-category
