@@ -138,15 +138,19 @@ GITHUB_WORKFLOWS_CI_PATTERNS = [
 
 
 def is_path_workflow_file_related_to_ci(path: str) -> bool:
-    return any(
-        fnmatch.fnmatch(path, ".github/workflows/" + pattern)
-        for pattern in GITHUB_WORKFLOWS_CI_PATTERNS
-    ) or any(
-        fnmatch.fnmatch(path, ".github/scripts/" + pattern)
-        for pattern in GITHUB_WORKFLOWS_CI_PATTERNS
-    ) or any(
-        fnmatch.fnmatch(path, ".github/actions/" + pattern)
-        for pattern in GITHUB_WORKFLOWS_CI_PATTERNS
+    return (
+        any(
+            fnmatch.fnmatch(path, ".github/workflows/" + pattern)
+            for pattern in GITHUB_WORKFLOWS_CI_PATTERNS
+        )
+        or any(
+            fnmatch.fnmatch(path, ".github/scripts/" + pattern)
+            for pattern in GITHUB_WORKFLOWS_CI_PATTERNS
+        )
+        or any(
+            fnmatch.fnmatch(path, ".github/actions/" + pattern)
+            for pattern in GITHUB_WORKFLOWS_CI_PATTERNS
+        )
     )
 
 
