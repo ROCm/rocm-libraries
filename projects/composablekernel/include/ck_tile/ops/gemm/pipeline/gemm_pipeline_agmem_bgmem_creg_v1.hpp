@@ -252,22 +252,22 @@ struct GemmPipelineAGmemBGmemCRegV1 : public BaseGemmPipelineAGmemBGmemCRegV1<Pr
 
             // prefetch
             // global read 0
-            // Load tile — during value loading, an elementwise function is executed for each A0,
-            // A1, … AN. The values A0, A1, … AN are read by the same thread.
+            // Load tile - during value loading, an elementwise function is executed for each A0,
+            // A1, ... AN. The values A0, A1, ... AN are read by the same thread.
             auto elementwise_As_res =
                 load_tile_with_elementwise(as_copy_dram_window, a_element_func);
 
-            // Load tile — during value loading, an elementwise function is executed for each B0,
-            // B1, … BN. The values B0, B1, … BN are read by the same thread.
+            // Load tile - during value loading, an elementwise function is executed for each B0,
+            // B1, ... BN. The values B0, B1, ... BN are read by the same thread.
             auto elementwise_Bs_res =
                 load_tile_with_elementwise(bs_copy_dram_window, b_element_func);
 
             {
                 // move to 1
-                // Move each A — the enhanced function move_tile_window is executed, which takes a
+                // Move each A - the enhanced function move_tile_window is executed, which takes a
                 // tuple as input.
                 move_tile_window(as_copy_dram_window, a_dram_tile_window_step);
-                // Move each B — the enhanced function move_tile_window is executed, which takes a
+                // Move each B - the enhanced function move_tile_window is executed, which takes a
                 // tuple as input.
                 move_tile_window(bs_copy_dram_window, b_dram_tile_window_step);
 
@@ -465,22 +465,22 @@ struct GemmPipelineAGmemBGmemCRegV1 : public BaseGemmPipelineAGmemBGmemCRegV1<Pr
 
             // prefetch
             // global read 0
-            // Load tile — during value loading, an elementwise function is executed for each A0,
-            // A1, … AN. The values A0, A1, … AN are read by the same thread.
+            // Load tile - during value loading, an elementwise function is executed for each A0,
+            // A1, ... AN. The values A0, A1, ... AN are read by the same thread.
             auto elementwise_As_res =
                 load_tile_with_elementwise(as_copy_dram_window, a_element_func);
 
-            // Load tile — during value loading, an elementwise function is executed for each B0,
-            // B1, … BN. The values B0, B1, … BN are read by the same thread.
+            // Load tile - during value loading, an elementwise function is executed for each B0,
+            // B1, ... BN. The values B0, B1, ... BN are read by the same thread.
             auto elementwise_Bs_res =
                 load_tile_with_elementwise(bs_copy_dram_window, b_element_func);
 
             {
                 // move to 1
-                // Move each A — the enhanced function move_tile_window is executed, which takes a
+                // Move each A - the enhanced function move_tile_window is executed, which takes a
                 // tuple as input.
                 move_tile_window(as_copy_dram_window, a_dram_tile_window_step);
-                // Move each B — the enhanced function move_tile_window is executed, which takes a
+                // Move each B - the enhanced function move_tile_window is executed, which takes a
                 // tuple as input.
                 move_tile_window(bs_copy_dram_window, b_dram_tile_window_step);
 
@@ -643,6 +643,28 @@ struct GemmPipelineAGmemBGmemCRegV1 : public BaseGemmPipelineAGmemBGmemCRegV1<Pr
                                                                            p_smem);
         };
         return Base::TailHandler(RunPipeline, has_hot_loop);
+    }
+
+    template <typename AsDramBlockWindowTmp,
+              typename BsDramBlockWindowTmp,
+              typename AElementFunction,
+              typename BElementFunction,
+              typename std::enable_if_t<!is_detected<is_tuple, AsDramBlockWindowTmp>::value &&
+                                            !is_detected<is_tuple, BsDramBlockWindowTmp>::value,
+                                        bool>* = nullptr>
+    CK_TILE_DEVICE auto operator()(const AsDramBlockWindowTmp& a_dram_block_window_tmp,
+                                   const AElementFunction& a_element_func,
+                                   const BsDramBlockWindowTmp& b_dram_block_window_tmp,
+                                   const BElementFunction& b_element_func,
+                                   index_t num_loop,
+                                   void* p_smem) const
+    {
+        return operator()(ck_tile::make_tuple(a_dram_block_window_tmp),
+                          a_element_func,
+                          ck_tile::make_tuple(b_dram_block_window_tmp),
+                          b_element_func,
+                          num_loop,
+                          p_smem);
     }
 };
 

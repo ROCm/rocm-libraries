@@ -22,7 +22,9 @@
 #include "Fp6E2M3.hpp"
 #include "Fp6E3M2.hpp"
 #include "Fp8E4M3.hpp"
+#include "Fp8E4M3Fnuz.hpp"
 #include "Fp8E5M2.hpp"
+#include "Fp8E5M2Fnuz.hpp"
 #include "Fp8E8M0.hpp"
 #include "Half.hpp"
 
@@ -64,7 +66,19 @@ inline bfloat16_t<RoundMode>::bfloat16_t(fp8_e4m3 f) noexcept
 }
 
 template <Bfloat16RoundingMode RoundMode>
+inline bfloat16_t<RoundMode>::bfloat16_t(fp8_e4m3_fnuz f) noexcept
+    : bfloat16_t(static_cast<float>(f))
+{
+}
+
+template <Bfloat16RoundingMode RoundMode>
 inline bfloat16_t<RoundMode>::bfloat16_t(fp8_e5m2 f) noexcept
+    : bfloat16_t(static_cast<float>(f))
+{
+}
+
+template <Bfloat16RoundingMode RoundMode>
+inline bfloat16_t<RoundMode>::bfloat16_t(fp8_e5m2_fnuz f) noexcept
     : bfloat16_t(static_cast<float>(f))
 {
 }
@@ -105,7 +119,17 @@ inline half::half(fp8_e4m3 f) noexcept
 {
 }
 
+inline half::half(fp8_e4m3_fnuz f) noexcept
+    : half(static_cast<float>(f))
+{
+}
+
 inline half::half(fp8_e5m2 f) noexcept
+    : half(static_cast<float>(f))
+{
+}
+
+inline half::half(fp8_e5m2_fnuz f) noexcept
     : half(static_cast<float>(f))
 {
 }
@@ -181,6 +205,26 @@ inline fp8_e4m3::fp8_e4m3(fp8_e5m2 f) noexcept
 }
 
 // ============================================================================
+// fp8_e4m3_fnuz cross-type constructors
+// ============================================================================
+
+template <Bfloat16RoundingMode M>
+inline fp8_e4m3_fnuz::fp8_e4m3_fnuz(bfloat16_t<M> b) noexcept
+    : fp8_e4m3_fnuz(static_cast<float>(b))
+{
+}
+
+inline fp8_e4m3_fnuz::fp8_e4m3_fnuz(half h) noexcept
+    : fp8_e4m3_fnuz(static_cast<float>(h))
+{
+}
+
+inline fp8_e4m3_fnuz::fp8_e4m3_fnuz(fp8_e5m2_fnuz f) noexcept
+    : fp8_e4m3_fnuz(static_cast<float>(f))
+{
+}
+
+// ============================================================================
 // fp8_e5m2 cross-type constructors
 // ============================================================================
 
@@ -197,6 +241,26 @@ inline fp8_e5m2::fp8_e5m2(half h) noexcept
 
 inline fp8_e5m2::fp8_e5m2(fp8_e4m3 f) noexcept
     : fp8_e5m2(static_cast<float>(f))
+{
+}
+
+// ============================================================================
+// fp8_e5m2_fnuz cross-type constructors
+// ============================================================================
+
+template <Bfloat16RoundingMode M>
+inline fp8_e5m2_fnuz::fp8_e5m2_fnuz(bfloat16_t<M> b) noexcept
+    : fp8_e5m2_fnuz(static_cast<float>(b))
+{
+}
+
+inline fp8_e5m2_fnuz::fp8_e5m2_fnuz(half h) noexcept
+    : fp8_e5m2_fnuz(static_cast<float>(h))
+{
+}
+
+inline fp8_e5m2_fnuz::fp8_e5m2_fnuz(fp8_e4m3_fnuz f) noexcept
+    : fp8_e5m2_fnuz(static_cast<float>(f))
 {
 }
 

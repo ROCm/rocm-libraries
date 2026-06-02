@@ -34,6 +34,7 @@
  *****************************************************************************/
 
 #include "Debug.hpp"
+#include "include/check_numerics_matrix.hpp"
 #include "rocblaslt-types.h"
 #include "rocblaslt_mat_utils.hpp"
 #include "tensile_host.hpp"
@@ -134,7 +135,8 @@ RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     
                                                          void*                  Synchronizer,
                                                          bool                   swizzleA,
                                                          bool                   swizzleB,
-                                                         hipblasLtBatchMode_t   batchMode)
+                                                         hipblasLtBatchMode_t   batchMode,
+                                                         int32_t                bias_stride)
     : trans_a(trans_a)
     , trans_b(trans_b)
     , m(m)
@@ -199,6 +201,7 @@ RocblasltContractionProblem::RocblasltContractionProblem(hipblasOperation_t     
     , swizzleA(swizzleA)
     , swizzleB(swizzleB)
     , batchMode(batchMode)
+    , bias_stride(bias_stride)
 {
     if(this->bias_type == HIPBLASLT_DATATYPE_INVALID)
     {
@@ -478,6 +481,58 @@ namespace
             throw std::runtime_error("Unsupported type.");
         }
         return HIP_R_32F;
+    }
+
+    // Adapter: extract shape from a Tensile problem and forward to scan_D.
+    rocblaslt_status maybe_check_numerics_problem(
+        rocblaslt_handle                           handle,
+        hipStream_t                                stream,
+        const TensileLite::ContractionProblemGemm& prob,
+        const void*                                D,
+        uint32_t                                   call_id)
+    {
+        if(!handle || !handle->check_numerics || !D || call_id == 0)
+            return rocblaslt_status_success;
+
+        const int64_t m        = prob.c().sizes()[0];
+        const int64_t n        = prob.c().sizes()[1];
+        const int64_t ldd      = prob.d().strides()[1];
+        const int64_t stride_d = prob.d().strides()[2];
+        const int32_t batch    = static_cast<int32_t>(prob.batchSize(0));
+        // Tensile builds column-major strides; row-major D has strides()[0] != 1.
+        const bool        row_major = (prob.d().strides()[0] != 1);
+        const hipDataType type_d    = tensile2HipType(prob.d().dataType());
+
+        return hipblaslt_check_numerics_scan_D(handle,
+                                               stream,
+                                               call_id,
+                                               m, n, batch,
+                                               type_d,
+                                               D,
+                                               ldd,
+                                               stride_d,
+                                               row_major);
+    }
+
+    // Post-launch hook shared by single- and grouped-GEMM. Acquires one
+    // call_id then invokes enumerate(call_id, scan_one) for each sub-problem.
+    template <typename Enumerate>
+    rocblaslt_status check_numerics_post_launch(rocblaslt_handle handle,
+                                                hipStream_t      stream,
+                                                Enumerate&&      enumerate)
+    {
+        const uint32_t call_id = hipblaslt_check_numerics_begin_call(handle);
+        if(call_id == 0)
+            return rocblaslt_status_success;
+        rocblaslt_status agg = rocblaslt_status_success;
+        enumerate(call_id,
+                  [&](const TensileLite::ContractionProblemGemm& prob, const void* d) {
+                      const auto st = maybe_check_numerics_problem(
+                          handle, stream, prob, d, call_id);
+                      if(st != rocblaslt_status_success && agg == rocblaslt_status_success)
+                          agg = st;
+                  });
+        return agg;
     }
 
     rocisa::DataType roc2TensileType(rocblaslt_compute_type type, bool fallback = true)
@@ -922,6 +977,8 @@ namespace
             problem.transB() ? "T" : "N",
             "--batch_count",
             problem.batchSize(0),
+			"--batch_mode",
+			problem.batchMode(),
             "--scaleA",
             problem.useScaleAB().empty() ? 0 : (problem.useScaleAB() == "Vector" ? 2 : 1),
             "--scaleB",
@@ -936,6 +993,8 @@ namespace
             problem.useBias() ? "--bias_vector" : "",
             problem.useBias() ? "--bias_source" : "",
             problem.useBias() ? problem.tensor(problem.biasSrc()).getName() : "",
+			problem.useBias() ? "--bias_stride" : "",
+			problem.useBias() ? std::to_string((problem.bias().strides())[2]) : "",
             "--a_type",
             hipDataType_to_bench_string(tensile2HipType(problem.a().dataType())),
             "--b_type",
@@ -1039,6 +1098,8 @@ namespace
                     problem.transB() ? "T" : "N",
                     "batch_count",
                     problem.batchSize(0),
+					"batch_mode",
+					problem.batchMode(),
                     "scaleA",
                     problem.useScaleAB().empty() ? 0 : (problem.useScaleAB() == "Vector" ? 2 : 1),
                     "scaleB",
@@ -1061,6 +1122,8 @@ namespace
                     problem.useBias() ? "true" : "false",
                     "bias_source",
                     problem.useBias() ? problem.tensor(problem.biasSrc()).getName() : "d",
+					"bias_stride",
+					problem.useBias() ? (problem.bias().strides())[2] : 0,
                     "a_type",
                     hipDataType_to_bench_string(tensile2HipType(problem.a().dataType())),
                     "b_type",
@@ -1152,6 +1215,8 @@ namespace
                     problem.transB() ? "T" : "N",
                     "batch_count",
                     problem.batchSize(0),
+					"batch_mode",
+					problem.batchMode(),
                     "scaleA",
                     problem.useScaleAB().empty() ? 0 : (problem.useScaleAB() == "Vector" ? 2 : 1),
                     "scaleB",
@@ -1174,6 +1239,8 @@ namespace
                     problem.useBias() ? "true" : "false",
                     "bias_source",
                     problem.useBias() ? problem.tensor(problem.biasSrc()).getName() : "d",
+					"bias_stride",
+					problem.useBias() ? (problem.bias().strides())[2] : 0,
                     "a_type",
                     hipDataType_to_bench_string(tensile2HipType(problem.a().dataType())),
                     "b_type",
@@ -1842,7 +1909,7 @@ namespace
                                                                                     : d.sizes()[0];
         tensileProblem.setUseBias(prob.bias != nullptr);
         auto biasType = hipDataType_to_tensile_type(prob.bias_type);
-        tensileProblem.setBias(biasType, biasSize, 0, prob.gradient, biasSrc);
+        tensileProblem.setBias(biasType, biasSize, prob.bias_stride, prob.gradient, biasSrc);
         tensileProblem.setParams().setBiasEnum(
             tensileUseBias(prob.epilogue) ? biasType : rocisa::DataType::None);
 
@@ -2141,7 +2208,7 @@ namespace
 
         tensileProblem.setUseBias(prob.bias != nullptr);
         auto biasType = hipDataType_to_tensile_type(prob.bias_type);
-        tensileProblem.setBias(biasType, biasSize, 0, prob.gradient, biasSrc);
+        tensileProblem.setBias(biasType, biasSize, prob.bias_stride, prob.gradient, biasSrc);
         tensileProblem.setParams().setBiasEnum(
             tensileUseBias(prob.epilogue) ? biasType : rocisa::DataType::None);
 
@@ -3753,6 +3820,16 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
             status = hip2RocStatus(adapter->launchKernels(data->kernels, stream, start, stop));
             if(rocblaslt::Debug::Instance().printLogAsMarker())
                 rocblaslt::Debug::Instance().logMarkerStop();
+
+            if(status == rocblaslt_status_success)
+            {
+                auto st = check_numerics_post_launch(
+                    handle, stream, [&](uint32_t /*cid*/, auto visit) {
+                        visit(data->problem, data->inputs.d);
+                    });
+                if(st != rocblaslt_status_success)
+                    status = st;
+            }
         }
         else if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM)
         {
@@ -3807,6 +3884,22 @@ rocblaslt_status runKernelFromInvocation(rocblaslt_handle       handle,
             status = hip2RocStatus(adapter->launchKernels(data->kernels, stream, start, stop));
             if(rocblaslt::Debug::Instance().printLogAsMarker())
                 rocblaslt::Debug::Instance().logMarkerStop();
+
+            if(status == rocblaslt_status_success)
+            {
+                // One launchKernels = one matmul = one call_id, shared across
+                // all sub-problems so the first NaN'd sub-problem claims the
+                // slot at the matmul-level id.
+                auto st = check_numerics_post_launch(
+                    handle, stream, [&](uint32_t /*cid*/, auto visit) {
+                        const size_t N = std::min(data->problem.gemms.size(),
+                                                  data->inputs.grouped.size());
+                        for(size_t i = 0; i < N; ++i)
+                            visit(data->problem.gemms[i], data->inputs.grouped[i].d);
+                    });
+                if(st != rocblaslt_status_success && status == rocblaslt_status_success)
+                    status = st;
+            }
         }
         else
         {
@@ -3896,6 +3989,10 @@ rocblaslt_status getDeviceUserArgumentsValuesFromContractionProblem(rocblaslt_ha
     return status;
 }
 
+// HIPBLASLT_CHECK_NUMERICS is intentionally NOT wired here: the kernel reads
+// per-gemm D pointers from `deviceUserArgs` (a GPU buffer), which may differ
+// from the host-side `data->inputs.grouped[i].d` captured at create time.
+// Scanning the wrong buffer is worse than not scanning. Tracked as known gap.
 rocblaslt_status runKernelFromNewDeviceUserArguments(rocblaslt_handle       handle,
                                                      rocblaslt::RocGemmType gemmType,
                                                      std::shared_ptr<void>  gemmData,
@@ -4016,6 +4113,9 @@ rocblaslt_status runKernelFromNewDeviceUserArguments(rocblaslt_handle       hand
     return status;
 }
 
+// HIPBLASLT_CHECK_NUMERICS is intentionally NOT wired here: same reason as
+// runKernelFromNewDeviceUserArguments above -- D pointers come from
+// `deviceUserArgs` and may not match host-side records.
 rocblaslt_status runKernelFromDeviceUserArguments(rocblaslt_handle             handle,
                                                   rocblaslt::RocGemmType       gemmType,
                                                   size_t                       gemmCount,

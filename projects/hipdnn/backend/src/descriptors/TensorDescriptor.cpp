@@ -285,6 +285,8 @@ void TensorDescriptor::setTensorValue(hipdnnBackendAttributeType_t attributeType
     case DataType::INT8:
     case DataType::FP8_E4M3:
     case DataType::FP8_E5M2:
+    case DataType::FP8_E4M3_FNUZ:
+    case DataType::FP8_E5M2_FNUZ:
     {
         _data.value.Set(Float8Value(bytes[0]));
         break;
@@ -417,6 +419,8 @@ void TensorDescriptor::getTensorValue(hipdnnBackendAttributeType_t attributeType
     }
     case DataType::FP8_E4M3:
     case DataType::FP8_E5M2:
+    case DataType::FP8_E4M3_FNUZ:
+    case DataType::FP8_E5M2_FNUZ:
     {
         const auto* val = _data.value.AsFloat8Value();
         THROW_IF_TRUE(val == nullptr,
