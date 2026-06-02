@@ -99,13 +99,13 @@ echo "DISABLE_SMART_BUILD: ${DISABLE_SMART_BUILD:-false}"
 echo "-----------------------------------------"
 
 if [ "$FORCE_FULL_BUILD" = true ]; then
-    echo "Decision: 🔴 FULL BUILD REQUIRED"
+    echo "Decision: FULL BUILD REQUIRED"
     echo "Reason: $REASON"
     echo "========================================="
     echo "export SMART_BUILD_MODE=full" > build_mode.env
     exit 1  # Exit with error to signal full build needed
 else
-    echo "Decision: 🟢 SELECTIVE BUILD ENABLED"
+    echo "Decision: SELECTIVE BUILD ENABLED"
     echo "Using smart build for faster CI"
     echo "========================================="
     echo "export SMART_BUILD_MODE=selective" > build_mode.env

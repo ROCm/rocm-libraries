@@ -93,7 +93,7 @@ echo "-----------------------------------------"
 cd "${BUILD_DIR}"
 
 # Step 1: Run smart-build CI script
-echo "🚀 Using Smart Build System"
+echo "Using Smart Build System"
 echo ""
 
 export WORKSPACE_ROOT
@@ -104,12 +104,12 @@ export _SMART_BUILD_NESTED=1
 if ! bash "${SCRIPT_DIR}/smart_build_ci.sh"; then
     # Full build required (exit code 1 from smart_build_ci.sh)
     if [ "$DRY_RUN" = "true" ]; then
-        echo "🧪 DRY RUN - full build mode: no selection to validate (everything is built)"
-        echo "✓ Dry run complete (full build mode)"
+        echo "DRY RUN - full build mode: no selection to validate (everything is built)"
+        echo "[OK] Dry run complete (full build mode)"
         exit 0
     fi
 
-    echo "⚠ Full build mode - building and testing everything"
+    echo "WARNING: Full build mode - building and testing everything"
     ninja -j${NINJA_JOBS} check
 
     # Process ninja build trace if requested
@@ -133,25 +133,25 @@ fi
 BUILD_TARGETS=$(cat build_targets.txt)
 
 if [ "$BUILD_TARGETS" = "none" ]; then
-    echo "✓ No tests affected by changes - skipping build and test execution"
+    echo "[OK] No tests affected by changes - skipping build and test execution"
     exit 0
 fi
 
 # Step 3: Build only affected targets
 if [ "$DRY_RUN" = "true" ]; then
     NUM_TARGETS=$(echo "${BUILD_TARGETS}" | wc -w)
-    echo "🧪 DRY RUN - validating ${NUM_TARGETS} selected target(s), no compilation, no tests"
+    echo "DRY RUN - validating ${NUM_TARGETS} selected target(s), no compilation, no tests"
     # Validate the selection against ninja's real target namespace.
     # NOTE: `ninja -n <target>` is NOT used as the oracle: CK uses CMake GLOB
     # CONFIGURE_DEPENDS, so every ninja call regenerates build.ninja and
     # `ninja -n` then exits 0 for any target (real or bogus). The reliable
     # oracle is the target list from `ninja -t targets all`.
-    ninja -t targets all > ninja_targets.txt 2>/dev/null || { echo "⚠ ninja -t targets all failed; cannot validate target namespace"; exit 1; }
+    ninja -t targets all > ninja_targets.txt 2>/dev/null || { echo "WARNING: ninja -t targets all failed; cannot validate target namespace"; exit 1; }
     python3 "${SCRIPT_DIR}/main.py" validate \
         tests_to_run.json \
         --ninja-targets ninja_targets.txt \
         --output smoke_result.json
-    echo "✓ Dry run complete - selection validated against ninja target namespace"
+    echo "[OK] Dry run complete - selection validated against ninja target namespace"
     exit 0
 fi
 
@@ -167,9 +167,9 @@ python3 "${SCRIPT_DIR}/main.py" validate \
     --ninja-targets ninja_targets.txt \
     --output smoke_result.json \
     --junit smoke_result.xml \
-    || echo "⚠ selection validation flagged issues (see smoke_result.json) - continuing with build"
+    || echo "WARNING: selection validation flagged issues (see smoke_result.json) - continuing with build"
 
-echo "✓ Selective build - building only affected targets"
+echo "[OK] Selective build - building only affected targets"
 echo "Building targets: ${BUILD_TARGETS}"
 # Word-split BUILD_TARGETS intentionally: targets are space-separated basenames
 # that never contain spaces (ninja target naming convention).
@@ -209,5 +209,5 @@ else
 fi
 
 echo ""
-echo "✓ Smart build and test execution complete"
+echo "[OK] Smart build and test execution complete"
 exit 0

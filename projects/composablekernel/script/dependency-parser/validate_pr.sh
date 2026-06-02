@@ -370,14 +370,14 @@ jq '{changed_files: .changed_files | length, tests_selected: .tests_to_run | len
 
 log_section "Step 9: Compare Results"
 echo ""
-echo "╔════════════════════════════════════════════════════════════════╗"
-echo "║                    VALIDATION RESULTS                          ║"
-echo "╠════════════════════════════════════════════════════════════════╣"
-echo "║ PR Number:          #${PR_NUMBER}                              "
-echo "║ Changed Files:      $NUM_FILES                                 "
-echo "║ Smart Build Tests:  $SMART_TESTS                               "
-echo "║ Legacy Tests:       $LEGACY_TESTS                              "
-echo "╠════════════════════════════════════════════════════════════════╣"
+echo "+================================================================+"
+echo "|                    VALIDATION RESULTS                          |"
+echo "+================================================================+"
+echo "| PR Number:          #${PR_NUMBER}                              "
+echo "| Changed Files:      $NUM_FILES                                 "
+echo "| Smart Build Tests:  $SMART_TESTS                               "
+echo "| Legacy Tests:       $LEGACY_TESTS                              "
+echo "+================================================================+"
 
 # Verdict is by SET equality, not count. Equal counts with different members is
 # a real selection bug, not a pass - comparing counts only would hide it.
@@ -385,14 +385,14 @@ SMART_LIST=$(jq -r '.tests_to_run | sort | .[]' pr${PR_NUMBER}_smart_build.json)
 LEGACY_LIST=$(jq -r '.tests_to_run | sort | .[]' pr${PR_NUMBER}_legacy_tests.json)
 
 if [ "$SMART_LIST" = "$LEGACY_LIST" ]; then
-    echo "║ Result:             ✅ MATCH (identical test sets)            "
-    echo "╚════════════════════════════════════════════════════════════════╝"
+    echo "| Result:             MATCH (identical test sets)            "
+    echo "+================================================================+"
     echo ""
     log_info "VALIDATION PASSED: both methods selected the same $SMART_TESTS tests"
     EXIT_CODE=0
 else
-    echo "║ Result:             ❌ MISMATCH                                "
-    echo "╚════════════════════════════════════════════════════════════════╝"
+    echo "| Result:             MISMATCH                                "
+    echo "+================================================================+"
     echo ""
     log_error "VALIDATION FAILED: smart build and legacy selected different test sets"
     if [ "$SMART_TESTS" -eq "$LEGACY_TESTS" ]; then

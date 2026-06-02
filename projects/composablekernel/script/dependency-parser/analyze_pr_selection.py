@@ -22,15 +22,15 @@ Usage (per-PR):
 Output fields:
     pr, title
     n_changed_files, n_ck_files, n_code_files
-    n_selected, selected           — ctest-registered test executables the filter picks
-    n_expected_dependents          — raw executables before ctest intersection
-    dropped_non_ctest              — executables in depmap but not in ctest
-    files_outside_composablekernel — PR files outside the CK project root
-    per_file                       — per-changed-file breakdown
+    n_selected, selected           - ctest-registered test executables the filter picks
+    n_expected_dependents          - raw executables before ctest intersection
+    dropped_non_ctest              - executables in depmap but not in ctest
+    files_outside_composablekernel - PR files outside the CK project root
+    per_file                       - per-changed-file breakdown
     flags:
-        code_files_with_no_dependents  — in depmap but no exe depends on it (dead header)
-        code_files_not_in_depmap       — TU not extracted (potential FN source)
-        noncode_files                  — cmake/yaml/docs etc., not mapped by compile deps
+        code_files_with_no_dependents  - in depmap but no exe depends on it (dead header)
+        code_files_not_in_depmap       - TU not extracted (potential FN source)
+        noncode_files                  - cmake/yaml/docs etc., not mapped by compile deps
 """
 
 import json

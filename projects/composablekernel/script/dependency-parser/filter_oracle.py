@@ -39,7 +39,7 @@ from validate_selection import load_ctest_tests  # noqa: E402
 
 
 def sel_for_file(file_to_executables, ctest_tests, file_key):
-    """Filter's prediction for a changed file: dependents ∩ ctest tests."""
+    """Filter's prediction for a changed file: dependents intersect ctest tests."""
     exes = set(file_to_executables.get(file_key, []))
     if ctest_tests is not None:
         exes = {e for e in exes if os.path.basename(e) in ctest_tests}
@@ -153,7 +153,7 @@ def _run_probe(args):
     print(f"TRUE (rebuild):   {result['n_true']}")
     print(f"false negatives:  {result['n_fn']}")
     for e in result["false_negatives"]:
-        print(f"  FN ✗ {e}")
+        print(f"  FN [X] {e}")
     print(f"false positives:  {result['n_fp']} (safe over-selection)")
     print(f"verdict: {result['verdict'].upper()}")
     return 0 if result["verdict"] == "pass" else 1
@@ -202,7 +202,7 @@ def _run_reachability(args):
     print(f"false negatives:  {result['n_false_negatives']} "
           f"(compiled test, unreachable -> filter would skip)")
     for t in fn:
-        print(f"  ✗ {t}")
+        print(f"  [X] {t}")
     if compiled is not None:
         print(f"non-compiled:     {result['n_non_compiled']} "
               f"(no bin/ target: python/try_compile; always-run class)")

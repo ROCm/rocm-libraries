@@ -68,7 +68,7 @@ if ! bash "${SCRIPT_DIR}/ci_safety_check.sh"; then
     exit 1
 fi
 
-echo "✓ CI safety check passed - selective build enabled"
+echo "[OK] CI safety check passed - selective build enabled"
 
 # Step 2: Generate dependency map
 echo ""
@@ -100,7 +100,7 @@ if [ ! -f "enhanced_dependency_mapping.json" ]; then
     exit 1
 fi
 
-echo "✓ Dependency map generated"
+echo "[OK] Dependency map generated"
 
 # Step 2b: Reachability guardrail (observability, non-fatal).
 # Flags ctest tests that no file maps to - the filter can never select them, i.e.
@@ -112,14 +112,14 @@ ctest -N > ctest_list.txt 2>/dev/null || true
 # Guard: if ctest -N produced no test lines the guardrail would trivially pass
 # (empty intersection), giving a false green. Skip it and warn instead.
 if ! grep -q "Test #" ctest_list.txt 2>/dev/null; then
-    echo "⚠ ctest -N returned no tests (not yet configured or wrong CWD?) - skipping reachability guardrail"
+    echo "WARNING: ctest -N returned no tests (not yet configured or wrong CWD?) - skipping reachability guardrail"
 else
     python3 "${SCRIPT_DIR}/filter_oracle.py" reachability \
         --depmap enhanced_dependency_mapping.json \
         --ctest ctest_list.txt \
         --ninja build.ninja \
         --output reachability_result.json \
-        || echo "⚠ reachability guardrail found unreachable compiled tests (see reachability_result.json) - continuing"
+        || echo "WARNING: reachability guardrail found unreachable compiled tests (see reachability_result.json) - continuing"
 fi
 
 # Step 3: Select affected tests
@@ -140,7 +140,7 @@ fi
 
 # Step 4: Check if any tests were selected
 num_tests=$(jq -r '.tests_to_run | length' tests_to_run.json 2>/dev/null || echo "0")
-echo "✓ Selected ${num_tests} tests"
+echo "[OK] Selected ${num_tests} tests"
 
 if [ "${num_tests}" -eq 0 ]; then
     echo ""
@@ -158,7 +158,7 @@ echo "Step 5: Extracting build targets..."
 jq -r '.executables[]' tests_to_run.json | tr '\n' ' ' > build_targets.txt
 
 num_targets=$(jq -r '.executables | length' tests_to_run.json)
-echo "✓ Generated ${num_targets} build targets"
+echo "[OK] Generated ${num_targets} build targets"
 
 echo "SMART_BUILD_MODE=selective" > build_mode.env
 
@@ -183,5 +183,5 @@ echo "Sample build targets (first 5):"
 tr ' ' '\n' < build_targets.txt | awk 'NR<=5'
 
 echo ""
-echo "✓ Smart build preparation complete"
+echo "[OK] Smart build preparation complete"
 exit 0

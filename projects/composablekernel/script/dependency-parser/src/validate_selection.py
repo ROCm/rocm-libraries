@@ -187,11 +187,11 @@ def main():
     print(f"Invalid targets:      {result['n_invalid_targets']}")
     if result["invalid_targets"]:
         for t in result["invalid_targets"]:
-            print(f"  ✗ {t}")
+            print(f"  [X] {t}")
     if "invalid_tests" in result and result["invalid_tests"]:
         print(f"Invalid ctest names:  {result['n_invalid_tests']}")
         for t in result["invalid_tests"]:
-            print(f"  ✗ {t}")
+            print(f"  [X] {t}")
     print(f"Verdict: {result['verdict'].upper()}")
     print(f"Result written to: {args.output}")
     print("=========================================")
