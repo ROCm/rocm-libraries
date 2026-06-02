@@ -166,15 +166,26 @@ built — it is.
 
 ## Definition of done checklist
 
-- [ ] `coverage-before.txt` captured (baseline) and committed BEFORE new tests.
-- [ ] `--cov=Tensile/TensileLogic` (path-mode) ≥95% line.
-- [ ] `coverage-after.txt` captured and committed; before→after delta recorded
-      in target.md + recommendations.md.
-- [ ] Every Tier A/B public fn has snapshot coverage; Tier C documented.
-- [ ] Module-global state reset per test; paths normalised in snapshots.
-- [ ] resistance.md lists each resisting fn (expect: `main`, `_setup`,
-      `_progress_loop`, possibly path-coupled message lines).
-- [ ] recommendations.md: go/no-go on the target after this (LibraryIO/Common).
-- [ ] full `-m unit` ≥ 1249 passed / 201 skipped, no failures, additive only.
-- [ ] All work committed (atomic, no push); tree clean.
-- [ ] Next goal prompt `next-goal-<target>.md` created and committed.
+- [x] `coverage-before.txt` captured (baseline) and committed BEFORE new tests.
+- [x] `--cov=Tensile/TensileLogic` (path-mode) ≥95% line. **(99.49% line)**
+- [x] `coverage-after.txt` captured and committed; before→after delta recorded
+      in target.md + recommendations.md. **(31.55% → 99.49%, −267 missing)**
+- [x] Every Tier A/B public fn has snapshot coverage; Tier C documented.
+      **(Run.py reached 100% line via namespace injection)**
+- [x] Module-global state reset per test; paths normalised in snapshots.
+- [x] resistance.md lists each resisting fn. **(main/_setup/_progress_loop were
+      not resisters — covered via injection; the genuine resisters are the 2
+      unreachable ValidChipId.py:129,155 lines, documented with proofs.)**
+- [x] recommendations.md: go/no-go on the target after this (LibraryIO/Common).
+      **(GO → LibraryIO)**
+- [x] full `-m unit` ≥ 1249 passed / 201 skipped, no failures, additive only.
+      **(1330 passed / 201 skipped)**
+- [x] All work committed (atomic, no push); tree clean.
+- [x] Next goal prompt `next-goal-<target>.md` created and committed.
+      **(next-goal-libraryio.md)**
+
+> **COMPLETE** — TensileLogic characterization goal achieved. Deliverables under
+> `Tensile/Tests/unit/characterization/TensileLogic/` (8 syrupy suites, 128
+> snapshots, target/resistance/recommendations/coverage-before/after) and
+> `work/tensilelite-characterization/next-goal-libraryio.md`. Local only; nothing
+> pushed.
