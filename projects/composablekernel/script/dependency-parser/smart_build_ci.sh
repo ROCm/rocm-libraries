@@ -77,6 +77,19 @@ fi
 
 echo "✓ Dependency map generated"
 
+# Step 2b: Reachability guardrail (observability, non-fatal).
+# Flags ctest tests that no file maps to - the filter can never select them, i.e.
+# guaranteed false negatives (usually a dependency-extraction gap). Emits
+# reachability_result.json for CI to archive; does NOT fail the build.
+echo ""
+echo "Step 2b: Reachability guardrail (non-fatal)..."
+ctest -N > ctest_list.txt 2>/dev/null || true
+python3 "${SCRIPT_DIR}/filter_oracle.py" reachability \
+    --depmap enhanced_dependency_mapping.json \
+    --ctest ctest_list.txt \
+    --output reachability_result.json \
+    || echo "⚠ reachability guardrail found unreachable tests (see reachability_result.json) - continuing"
+
 # Step 3: Select affected tests
 echo ""
 echo "Step 3: Selecting affected tests..."
