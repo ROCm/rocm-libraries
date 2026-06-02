@@ -6,15 +6,11 @@
 from __future__ import annotations
 
 import argparse
+import tomllib
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Set
-
-try:  # Python 3.11+
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover - exercised only on Python < 3.11
-    import tomli as tomllib  # type: ignore[no-redef]
 
 
 _CONFIG_ONLY_TOP_LEVEL_KEYS: Set[str] = {
@@ -196,9 +192,7 @@ def _normalise_config(raw: Dict[str, Any], path: Path) -> Dict[str, Any]:
     return out
 
 
-def _reject_unknown_keys(
-    keys: Iterable[str], allowed: Set[str], context: str
-) -> None:
+def _reject_unknown_keys(keys: Iterable[str], allowed: Set[str], context: str) -> None:
     unknown = sorted(set(keys) - allowed)
     if not unknown:
         return
@@ -369,9 +363,7 @@ def _normalise_engines(
     if engines is None:
         return
     if not isinstance(engines, list) or not engines:
-        raise ValueError(
-            "Config field 'engines' must be a non-empty array of tables"
-        )
+        raise ValueError("Config field 'engines' must be a non-empty array of tables")
 
     ids: List[int] = []
     names: List[Optional[str]] = []
@@ -406,9 +398,7 @@ def _normalise_engines(
         plugin_path = engine.get("plugin_path")
         if plugin_path is not None:
             if not isinstance(plugin_path, str) or not plugin_path:
-                raise ValueError(
-                    f"Config engine {index} plugin_path must be a string"
-                )
+                raise ValueError(f"Config engine {index} plugin_path must be a string")
             any_plugin_path = True
             plugin_paths.append(_path_from_config(base_dir, plugin_path))
         else:
