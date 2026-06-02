@@ -8,10 +8,8 @@
 #include <sstream>
 #include <string>
 #include <utility>
-#include <vector>
 
 #include "../../runtime/KernelArtifact.hpp"
-#include "../../runtime/LaunchAbi.hpp"
 
 namespace ck_dsl_provider {
 
@@ -69,50 +67,52 @@ SdpaFwdPlan::SdpaFwdPlan(std::shared_ptr<HipModule> module, std::int64_t qUid, s
             "SdpaFwdPlan: refusing to construct with null HipModule");
     }
 
-    // Validate the kernel's argument schema matches the ABI execute()
-    // packs against: the 15-slot base layout (Pointer x4, F32, I32 x10),
-    // plus -- when opt-in stats are enabled -- a 16th Pointer slot
-    // (LSE_out). If a future kernel variant grows or rearranges its
-    // parameter list, the plan must refuse to launch rather than pack
-    // values into wrong-typed slots. The schema arrives via KernelArtifact
-    // at JIT time, so this is fixed for the lifetime of each cached
-    // HipModule. The stats flag and the schema width must agree: a 16-slot
-    // schema iff stats are enabled (otherwise the cache key and the loaded
-    // module have drifted).
+    // Validate the kernel's argument schema matches the unified
+    // paged/varlen tiled-2D ABI: a fixed 18-slot layout
+    // (Pointer x10, F32 x5, I32 x3). If a future kernel variant grows or
+    // rearranges its parameter list, the plan must refuse to launch
+    // rather than pack values into wrong-typed slots. The schema arrives
+    // via KernelArtifact at JIT time, so this is fixed for the lifetime of
+    // each cached HipModule. The unified kernel emits no LSE, so
+    // ``hasStats`` must be false here.
     const auto& schema = _module->argSchema();
     auto rejectSlot = [&](const std::string& detail) {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
             "SdpaFwdPlan: kernel argSchema does not match the expected "
-            "(Pointer x4, F32, I32 x10[, Pointer]) layout for the FMHA-forward kernel signature; " +
+            "(Pointer x10, F32 x5, I32 x3) layout for the unified paged/varlen "
+            "FMHA-forward kernel signature; " +
                 detail);
     };
-    const std::size_t expectedSlots = _hasStats ? 16u : 15u;
-    if (schema.size() != expectedSlots) {
+    if (_hasStats) {
+        rejectSlot("opt-in stats (LSE) are not supported on the unified paged path");
+    }
+    constexpr std::size_t kUnifiedSlots = 18u;
+    if (schema.size() != kUnifiedSlots) {
         std::ostringstream oss;
-        oss << "got " << schema.size() << " slots, expected " << expectedSlots << " (stats "
-            << (_hasStats ? "enabled" : "disabled") << ")";
+        oss << "got " << schema.size() << " slots, expected " << kUnifiedSlots;
         rejectSlot(oss.str());
     }
-    for (std::size_t i = 0; i < 4; ++i) {
+    for (std::size_t i = 0; i < 10; ++i) {
         if (schema[i].kind != ArgSchema::Kind::Pointer) {
             std::ostringstream oss;
             oss << "slot " << i << " must be Pointer";
             rejectSlot(oss.str());
         }
     }
-    if (schema[4].kind != ArgSchema::Kind::F32) {
-        rejectSlot("slot 4 must be F32 (scale_log2)");
+    for (std::size_t i = 10; i < 15; ++i) {
+        if (schema[i].kind != ArgSchema::Kind::F32) {
+            std::ostringstream oss;
+            oss << "slot " << i << " must be F32";
+            rejectSlot(oss.str());
+        }
     }
-    for (std::size_t i = 5; i < 15; ++i) {
+    for (std::size_t i = 15; i < 18; ++i) {
         if (schema[i].kind != ArgSchema::Kind::I32) {
             std::ostringstream oss;
             oss << "slot " << i << " must be I32";
             rejectSlot(oss.str());
         }
-    }
-    if (_hasStats && schema[15].kind != ArgSchema::Kind::Pointer) {
-        rejectSlot("slot 15 must be Pointer (LSE_out)");
     }
 
     // One-shot launch-shape log: useful operator diagnostic at plan
@@ -133,7 +133,7 @@ std::size_t SdpaFwdPlan::getWorkspaceSize(const ::CkDslHandle& /*handle*/) const
     return 0;
 }
 
-void SdpaFwdPlan::execute(const ::CkDslHandle& handle,
+void SdpaFwdPlan::execute(const ::CkDslHandle& /*handle*/,
                           const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                           std::uint32_t numDeviceBuffers, void* /*workspace*/) const {
     if (deviceBuffers == nullptr && numDeviceBuffers > 0) {
@@ -142,35 +142,37 @@ void SdpaFwdPlan::execute(const ::CkDslHandle& handle,
             "SdpaFwdPlan::execute: deviceBuffers is null but numDeviceBuffers > 0");
     }
 
-    const auto& qBuf = findDeviceBuffer(_qUid, deviceBuffers, numDeviceBuffers, "Q");
-    const auto& kBuf = findDeviceBuffer(_kUid, deviceBuffers, numDeviceBuffers, "K");
-    const auto& vBuf = findDeviceBuffer(_vUid, deviceBuffers, numDeviceBuffers, "V");
-    const auto& oBuf = findDeviceBuffer(_oUid, deviceBuffers, numDeviceBuffers, "O");
+    // Resolve the Q/K/V/O buffers so a graph-vs-buffer UID mismatch still
+    // surfaces here with concrete context (the same validation the dense
+    // path performed). The resolved pointers are not yet bound: the
+    // unified 18-arg launch is deferred to Phase 4.
+    static_cast<void>(findDeviceBuffer(_qUid, deviceBuffers, numDeviceBuffers, "Q"));
+    static_cast<void>(findDeviceBuffer(_kUid, deviceBuffers, numDeviceBuffers, "K"));
+    static_cast<void>(findDeviceBuffer(_vUid, deviceBuffers, numDeviceBuffers, "V"));
+    static_cast<void>(findDeviceBuffer(_oUid, deviceBuffers, numDeviceBuffers, "O"));
 
-    // ABI order: Q, K, V, O, scale_log2, seqlen_q, seqlen_k, then the
-    // eight token/head strides for Q/K/V/O. Matches the kernel signature
-    // and the Python _sdpa_fwd_arg_schema order exactly.
-    std::vector<ArgValue> values = {
-        ArgValue::pointer(qBuf.ptr),  ArgValue::pointer(kBuf.ptr),  ArgValue::pointer(vBuf.ptr),
-        ArgValue::pointer(oBuf.ptr),  ArgValue::f32(_scaleLog2),    ArgValue::i32(_seqlenQ),
-        ArgValue::i32(_seqlenK),      ArgValue::i32(_strideQToken), ArgValue::i32(_strideQHead),
-        ArgValue::i32(_strideKToken), ArgValue::i32(_strideKHead),  ArgValue::i32(_strideVToken),
-        ArgValue::i32(_strideVHead),  ArgValue::i32(_strideOToken), ArgValue::i32(_strideOHead),
-    };
-
-    // Opt-in stats (LSE) output: resolve the head-major [B, Hq, Sq] f32
-    // buffer by uid and append it as the 16th arg (slot index 15), after
-    // the 15 base args -- matching the schema's conditional LSE_out slot.
-    if (_hasStats) {
-        const auto& lseBuf =
-            findDeviceBuffer(_statsUid, deviceBuffers, numDeviceBuffers, "LSE_out");
-        values.push_back(ArgValue::pointer(lseBuf.ptr));
-    }
-
-    std::vector<std::byte> packed = LaunchAbi::pack(_module->argSchema(), values);
-
-    _module->launch(packed.data(), packed.size(), _module->grid(), _module->block(),
-                    _module->ldsBytes(), handle.getStream());
+    // PHASE-4 TODO (gfx950 GPU launch): bind the unified 18-slot ABI and
+    // launch. The remaining work is:
+    //   1. Compute the host marshalling arrays via ``SdpaMarshalling``
+    //      (block_tables / cu_seqlens_q / seqused_k + block_table_stride)
+    //      from the problem shape carried on the plan.
+    //   2. Upload those three i32 arrays to device memory (RAII-owned for
+    //      the launch's lifetime) and resolve the sink / alibi / qq_bias
+    //      pointers (0 when the feature is off).
+    //   3. Pack the 18 args in schema order -- pointers [output, query,
+    //      key_cache, value_cache, sink, block_tables, seq_lens,
+    //      alibi_slopes, qq_bias, query_start_len], f32 [scale, k_scale,
+    //      v_scale, out_scale, softcap], i32 [num_seqs,
+    //      block_table_stride, qq_bias_stride_0] -- and launch via
+    //      ``HipModule::launch`` on the handle's stream.
+    // The host marshalling LOGIC (step 1) is implemented + unit-tested in
+    // Phase 2; the device binding (steps 2-3) is Phase 4. The GPU-gated
+    // SDPA tests skip on non-gfx950 hosts, so host CI never reaches here.
+    throw hipdnn_plugin_sdk::HipdnnPluginException(
+        HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+        "SdpaFwdPlan::execute: the unified paged/varlen 18-arg launch is not yet "
+        "wired (Phase 4, gfx950). Host marshalling logic is implemented and "
+        "unit-tested; device buffer binding + kernel launch remain.");
 }
 
 }  // namespace ck_dsl_provider

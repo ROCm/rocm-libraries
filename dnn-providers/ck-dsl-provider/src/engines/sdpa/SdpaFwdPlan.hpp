@@ -27,19 +27,31 @@ namespace ck_dsl_provider {
 /// strides for Q/K/V/O.
 ///
 /// **Schema-driven packing.** The plan packs its arguments per call via
-/// ``LaunchAbi::pack`` against the module's argSchema. The kernel's ABI is
-/// validated in the ctor:
-///   slots 0..3  -> Pointer (Q, K, V, O)
-///   slot  4     -> F32     (scale_log2)
-///   slots 5..14 -> I32     (seqlen_q, seqlen_k, then the eight strides)
-///   slot  15    -> Pointer (LSE_out) -- present iff opt-in stats are
-///                  enabled (a 16-slot schema); otherwise the schema is
-///                  the byte-identical 15-slot ABI.
+/// ``LaunchAbi::pack`` against the module's argSchema. The unified
+/// paged/varlen tiled-2D kernel exposes a fixed 18-slot ABI, validated in
+/// the ctor:
+///   slots 0..9   -> Pointer (output, query, key_cache, value_cache,
+///                   sink, block_tables, seq_lens, alibi_slopes, qq_bias,
+///                   query_start_len)
+///   slots 10..14 -> F32     (scale, k_scale, v_scale, out_scale, softcap)
+///   slots 15..17 -> I32     (num_seqs, block_table_stride,
+///                   qq_bias_stride_0)
 ///
-/// **Opt-in stats (LSE).** When ``hasStats`` is set the kernel writes the
-/// natural-log LSE to a head-major [B, Hq, Sq] f32 buffer resolved by
-/// ``statsUid`` at execute time and bound to the 16th arg slot. The
-/// non-stats path is unchanged (15 args, no LSE pointer resolved).
+/// **Opt-in stats (LSE).** The unified paged kernel emits NO LSE output
+/// (the adapter gate declines any stats request), so ``hasStats`` is
+/// always false on this path; the 18-slot ABI has no LSE_out slot. The
+/// ctor parameter is retained for source compatibility with the plan
+/// builder's call site.
+///
+/// **Phase-4 GPU launch (TODO).** ``execute`` cannot yet bind the three
+/// host-marshalled integer arrays (block_tables / cu_seqlens_q /
+/// seqused_k -- see ``SdpaMarshalling``) to device memory: that device
+/// allocation + the 18-arg launch land in Phase 4 (gfx950). The
+/// host-side marshalling LOGIC is implemented and unit-tested now; the
+/// device binding is the remaining piece. ``execute`` therefore throws a
+/// clearly-marked "not yet wired" error so a premature call fails loudly
+/// rather than launching with unbound buffers. The GPU-gated SDPA tests
+/// skip on non-gfx950 hosts, so this does not affect host CI.
 class SdpaFwdPlan : public hipdnn_plugin_sdk::IPlan<::CkDslHandle> {
    public:
     SdpaFwdPlan(std::shared_ptr<HipModule> module, std::int64_t qUid, std::int64_t kUid,
@@ -51,15 +63,19 @@ class SdpaFwdPlan : public hipdnn_plugin_sdk::IPlan<::CkDslHandle> {
 
     std::size_t getWorkspaceSize(const ::CkDslHandle& handle) const override;
 
-    /// Resolve Q/K/V/O device pointers from ``deviceBuffers`` by uid (plus
-    /// the LSE_out pointer by ``statsUid`` when opt-in stats are enabled),
-    /// pack the 15- or 16-slot argument buffer via ``LaunchAbi::pack``, and
-    /// launch via ``HipModule::launch`` on the handle's stream.
+    /// Resolve Q/K/V/O device pointers from ``deviceBuffers`` by uid (so a
+    /// graph-vs-buffer mismatch surfaces here) and -- in Phase 4 -- bind +
+    /// launch the unified 18-slot ABI. The host marshalling of
+    /// block_tables / cu_seqlens_q / seqused_k is implemented in
+    /// ``SdpaMarshalling`` and unit-tested now; the device-side upload of
+    /// those arrays and the kernel launch are the remaining Phase-4 work,
+    /// so this currently throws a clearly-marked "not yet wired" error
+    /// rather than launching with unbound buffers.
     ///
     /// Throws ``hipdnn_plugin_sdk::HipdnnPluginException`` if a UID is
-    /// missing from ``deviceBuffers`` or if the underlying HIP launch
-    /// fails. Workspace is unused (this kernel allocates its scratch in
-    /// static LDS).
+    /// missing from ``deviceBuffers`` or (until Phase 4 lands the launch)
+    /// to report the unwired unified ABI. Workspace is unused (this kernel
+    /// allocates its scratch in static LDS).
     void execute(const ::CkDslHandle& handle, const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                  std::uint32_t numDeviceBuffers, void* workspace = nullptr) const override;
 

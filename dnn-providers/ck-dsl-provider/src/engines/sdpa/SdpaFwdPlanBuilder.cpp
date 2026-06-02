@@ -298,12 +298,12 @@ void SdpaFwdPlanBuilder::buildPlan(const ::CkDslHandle& handle,
 
     std::shared_ptr<HipModule> module = _cache.getOrLoad(key, loader);
 
-    // Opt-in stats (LSE) output. The adapter already validated the stats
-    // tensor (dtype / shape / contiguity) when it set spec.generate_stats;
-    // the UID is read straight off the FB node here (the spec carries only
-    // the enable flag, not the UID). The cache key already distinguishes
-    // stats-on / stats-off via the signature fold, so the loaded module's
-    // 16-slot schema matches hasStats.
+    // Opt-in stats (LSE) output. The unified paged kernel emits no LSE
+    // (the adapter capability gate declines any stats request, so
+    // spec.generate_stats is always false here and the loaded module's
+    // 18-slot ABI carries no LSE_out slot). The flag + UID are still
+    // passed through to the plan ctor for source compatibility; the ctor
+    // rejects a stats-on plan on this path.
     const bool hasStats = spec.generate_stats;
     const std::int64_t statsUid = hasStats ? sdpaAttr.stats_tensor_uid().value() : -1;
 

@@ -19,6 +19,7 @@ add_executable(
     ConvImplicitGemmPlanBuilderTest.cpp
     SdpaAdapterTest.cpp
     SdpaCandidateSelectorTest.cpp
+    SdpaMarshallingTest.cpp
     SdpaScorerTest.cpp
     SdpaFwdPlanBuilderTest.cpp
     SdpaBwdAdapterTest.cpp

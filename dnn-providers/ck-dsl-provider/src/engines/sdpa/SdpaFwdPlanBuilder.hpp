@@ -78,9 +78,13 @@ class SdpaFwdPlanBuilder
 
     /// Stable op-kind string used as the cache-key partition and as the
     /// dispatch tag the Python compile_service sees. Defined here so the
-    /// test can cross-check the signature derivation.
+    /// test can cross-check the signature derivation. Points at the
+    /// unified paged/varlen tiled-2D compile path
+    /// (``_compile_sdpa_fwd_unified``); the dense ``"sdpa_fmha_fwd"``
+    /// path stays available in the compile service as the A/B regression
+    /// anchor but is no longer driven by this builder.
     static constexpr const char* opKind() {
-        return "sdpa_fmha_fwd";
+        return "sdpa_fmha_fwd_unified";
     }
 
    private:
