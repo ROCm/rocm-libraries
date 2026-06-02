@@ -1,7 +1,30 @@
-# Checkpoint / resume — tensilelite characterization (#7)
+# tensilelite characterization (#7) — COMPLETE
 
-Status as of this checkpoint. Local-only; nothing pushed. **ADD-ONLY**: only
-add new files — never modify/delete any existing file (see prompt.md).
+**STATUS: DONE.** All goal deliverables met for the
+`Tensile/SolutionStructs/Validators/` target. Local-only; nothing pushed.
+**ADD-ONLY** honored throughout (every commit verified `A`-only).
+
+## Final result
+- Module coverage (characterization suite alone AND full `-m unit`):
+  **96.65% line / 95.08% branch** (239 stmts, 8 missing — all provably
+  unreachable defensive code, see resistance.md). ≥95% line goal met.
+- No regression: full `-m unit` = **1249 passed / 201 skipped** (baseline
+  1186/201 + 63 new characterization tests; skip count unchanged).
+- Deliverables (under `Tensile/Tests/unit/characterization/`): survey.md,
+  target.md, resistance.md, recommendations.md, and `Validators/` with
+  4 syrupy test files + `__snapshots__/` driving every public function
+  (validateWorkGroup; validateMXScaleFormatCombination + _mx helpers;
+  matrixInstructionToMIParameters; validateMIParameters).
+- recommendations.md verdict: **GO (conditional)** on scaling, with a
+  per-target effort model and next targets (TensileLogic, LibraryIO, Common).
+
+Re-run the gate anytime with the command in "Resume steps" below.
+
+---
+
+## (historical) Checkpoint / resume notes
+
+**ADD-ONLY**: only add new files — never modify/delete any existing file.
 
 ## Done (6 commits on `users/davidd-amd/tensillite-coverage`)
 
