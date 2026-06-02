@@ -12,3 +12,6 @@ generated/
 # TE benchmark CSV output written by run_te_benchmark() on every GPU run.
 # Accumulates in the parity directory after each run; not committed.
 te_*.csv
+
+# Sweep runner Parquet output (sweep_runner.py); can be large; regenerated on demand.
+*.parquet

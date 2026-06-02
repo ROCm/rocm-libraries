@@ -1,0 +1,31 @@
+{
+    "_comment": "Single fp8 rcr config for T2.5 dtype coverage.",
+    "_comment2": "fp8 output is promoted to fp16 (8-bit too narrow for C); acc is fp32.",
+    "datatype": "fp8",
+    "layout": "rcr",
+    "gpu_target": "gfx942",
+    "block_size": 256,
+    "k_block_per_cu": 1,
+    "num_wave_groups": 1,
+    "split_k": 1,
+    "tile_config": {
+        "tile_m": {"values": [256]},
+        "tile_n": {"values": [128]},
+        "tile_k": {"values": [64]},
+        "warp_m": {"values": [4]},
+        "warp_n": {"values": [1]},
+        "warp_k": {"values": [1]},
+        "warp_tile_m": {"values": [32]},
+        "warp_tile_n": {"values": [32]},
+        "warp_tile_k": {"values": [16]}
+    },
+    "trait_config": {
+        "pipeline": {"values": ["compv3"]},
+        "epilogue": {"values": ["default"]},
+        "scheduler": {"values": ["intrawave"]},
+        "pad_m": {"values": [false]},
+        "pad_n": {"values": [false]},
+        "pad_k": {"values": [false]},
+        "persistent": {"values": [false]}
+    }
+}
