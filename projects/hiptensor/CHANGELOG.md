@@ -8,6 +8,10 @@ Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hip
 
 * Added support for new GPU target gfx1250.
 
+### Optimized
+
+* Re-selected `HIPTENSOR_ALGO_ACTOR_CRITIC` winning kernels for all contraction type/rank/layout combinations to reflect current Composable Kernel tile parameters.
+
 ## Since last release ROCm 7.12
 
 ### Added

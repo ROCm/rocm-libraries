@@ -51,6 +51,13 @@ SKIPPABLE_PATH_PATTERNS = [
     "projects/hipdnn/tools/*",
     "shared/*/.gitignore",
     "shared/*/docs/*",
+    "projects/composablekernel/Jenkinsfile",
+    "projects/composablekernel/Docker*",
+    "projects/composablekernel/tutorial/*",
+    "projects/composablekernel/script/*",
+    "projects/composablekernel/client_example/*",
+    "projects/composablekernel/tile_engine/*",
+    "projects/composablekernel/vars/ck.groovy",
 ]
 
 
