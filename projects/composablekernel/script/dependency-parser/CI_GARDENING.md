@@ -415,6 +415,19 @@ violated, disable smart build until fixed.
    `build.ninja` on every ninja call, making `ninja -n` exit 0 for any target
    (real or bogus). Do not use `ninja -n` for selection validation.
 
+5. **The depmap, `ctest -N`, and the CI build all come from the same cmake
+   configure** (same options/components). Selection coverage equals configure
+   coverage: a component built by CI but absent from the depmap's configure is
+   unreachable (a false negative); one in the depmap but not built by CI is dead
+   weight. This especially affects **optional, separately-gated components**:
+   - `rocm_ck` (`CK_ENABLE_ROCM_CK`) — tests `rocm_ck_*`,
+   - `codegen` / `composable_kernel_host` (`CK_USE_CODEGEN`, gfx9 only) — tests `codegen_test_*`,
+   - `dispatcher` (its own `add_subdirectory(codegen)` gating).
+   For full coverage, generate the depmap from a configure with the **same
+   component flags CI builds with**, and run `ctest -N` against that same build
+   dir. (Nuance: `codegen` embeds CK headers via `add_embed_library` + hiprtc, so
+   some of its header dependence is runtime/embedded rather than compile-`#include`.)
+
 ---
 
 ## 9. Cross-node (CPU build / GPU test) migration
