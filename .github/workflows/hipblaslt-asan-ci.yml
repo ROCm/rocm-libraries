@@ -198,7 +198,18 @@ jobs:
           # Do NOT add THEROCK_RESET_FEATURES=ON here: it FORCE-overwrites
           # every feature cache var with its default, which would clobber the
           # explicit -DTHEROCK_ENABLE_BLAS=ON back to OFF on this fresh build.
-          extra_cmake_options: "-DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ -DTHEROCK_ENABLE_ALL=OFF -DTHEROCK_ENABLE_BLAS=ON -DhipBLASLt_SANITIZER=ASAN"
+          #
+          # THEROCK_FLAG_INCLUDE_PROFILER=OFF drops the optional profiler deps
+          # (roctracer + rocprofiler-sdk) that hipBLASLt would otherwise pull
+          # in for its marker support (math-libs/BLAS/CMakeLists.txt appends
+          # them to optional_profiler_deps when the flag is ON). Under the
+          # trimmed feature set those transitive deps are under-provisioned —
+          # rocprofiler-sdk's own test kernel fails to find the HIP runtime
+          # ("clang++: error: cannot find HIP runtime ... --rocm-path"). The
+          # flag is explicitly supported for bringup (see TheRock CMakeLists),
+          # and an ASAN smoke build of hipBLASLt does not need the marker, so
+          # dropping the profiler both fixes the build and trims it further.
+          extra_cmake_options: "-DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ -DTHEROCK_ENABLE_ALL=OFF -DTHEROCK_ENABLE_BLAS=ON -DTHEROCK_FLAG_INCLUDE_PROFILER=OFF -DhipBLASLt_SANITIZER=ASAN"
           BUILD_DIR: build
         run: |
           python3 TheRock/build_tools/github_actions/build_configure.py
