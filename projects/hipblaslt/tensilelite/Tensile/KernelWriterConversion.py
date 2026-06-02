@@ -110,8 +110,7 @@ class KernelWriterConversion(KernelWriterBase):
     kStr += "  " + self.datatype + " * W;" + self.endLine
     kStr += "  " + ptrStr + " * " + bStr + "C;" + self.endLine
 
-    # Batch offsets for General Batched GEMM (SupportUserArgs kernels)
-    #if self.state["ProblemType"]["SupportUserArgs"]:
+    # Batch offsets for General Batched GEMM
     if not self.state["ProblemType"]["GroupedGemm"]:
       kStr += "  int64_t batchOffsetD;" + self.endLine
       kStr += "  int64_t batchOffsetC;" + self.endLine
@@ -435,17 +434,9 @@ class KernelWriterConversion(KernelWriterBase):
         kStr += "  " + ptrStr + " * arg.E = arg.BatchE[wg];" + self.endLine
       ptrStr = self.state["ProblemType"]["DestDataType"].toDevice(self.language)
       kStr += "  " + ptrStr + " * arg.D = arg.BatchD[wg];" + self.endLine
-#      if self.state["ProblemType"]["SupportUserArgs"]:
-#        kStr += "  " + ptrStr + " * arg.D = arg.BatchD[wg] + arg.batchOffsetD;" + self.endLine
-#      else:
-#        kStr += "  " + ptrStr + " * arg.D = arg.BatchD[wg];" + self.endLine
       ptrStr = self.state["ProblemType"]["DestDataType"].toDevice(self.language)
       zeroStr = self.state["ProblemType"]["ComputeDataType"].zeroString(self.language, 1)
       kStr += "  " + ptrStr + f" const* arg.C = (arg.beta == {zeroStr}) ? nullptr : arg.BatchC[wg];" + self.endLine
-#      if self.state["ProblemType"]["SupportUserArgs"]:
-#        kStr += "  " + ptrStr + f" const* arg.C = (arg.beta == {zeroStr}) ? nullptr : arg.BatchC[wg] + arg.batchOffsetC;" + self.endLine
-#      else:
-#        kStr += "  " + ptrStr + f" const* arg.C = (arg.beta == {zeroStr}) ? nullptr : arg.BatchC[wg];" + self.endLine
 
     ########################################
     # D index
@@ -776,7 +767,7 @@ class KernelWriterConversion(KernelWriterBase):
       kStr += "  }" + self.endLine
       kStr += "  else" + self.endLine
       kStr += "  {" + self.endLine
-      kStr += "    %s *ptr = *(reinterpret_cast<%s **>(((char *)arg.C) + (8*id2)));" % (destTypeStr, destTypeStr) + self.endLine
+      kStr += "    %s *ptr = *(reinterpret_cast<%s **>(((char *)arg.C) + (8*id2))) + batchOffsetC/sizeof(%s);" % (destTypeStr, destTypeStr, destTypeStr) + self.endLine
       for vIdx in range(self.num_dword_load):
         kStr += "    %s[%d] += arg.beta * (%s)ptr[idxC+%d];%s" % (accumStr, vIdx, intermediateDataType, vIdx, self.endLine)
       kStr += "  }" + self.endLine
@@ -882,7 +873,7 @@ class KernelWriterConversion(KernelWriterBase):
       kStr += "  if(batch_mode == 0) {" + self.endLine
       kStr += "    buffer_store<%s, sizeof(%s), CacheOperation::Kind::Always>(*(%s *)%s, arg.D, byteOffsetD, 0);%s" % (storeTypeStr, storeTypeStr, storeTypeStr, resultStr, self.endLine)
       kStr += "  } else {" + self.endLine
-      kStr += "    %s *ptr = *(reinterpret_cast<%s **>(((char *)arg.D) + (8*id2)));" % (destTypeStr, destTypeStr) + self.endLine
+      kStr += "    %s *ptr = *(reinterpret_cast<%s **>(((char *)arg.D) + (8*id2))) + batchOffsetD/sizeof(%s);" % (destTypeStr, destTypeStr, destTypeStr) + self.endLine
       kStr += "    buffer_store<%s, sizeof(%s), CacheOperation::Kind::Always>(*(%s *)%s, ptr, byteOffsetD, 0);%s" % (storeTypeStr, storeTypeStr, storeTypeStr, resultStr, self.endLine)
       kStr += "  }" + self.endLine
     else:

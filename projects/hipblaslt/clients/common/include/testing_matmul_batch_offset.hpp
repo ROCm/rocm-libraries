@@ -378,7 +378,7 @@ void testing_matmul_batch_offset_impl(const Arguments& arg)
         EXPECT_LT(max_error, tol) << "GPU vs CPU mismatch (error: " << max_error << ", tol: " << tol << ")";
     }
 
-    if(arg.norm_check)
+    if(arg.norm_check && max_error >= tol)
     {
         hipblaslt_cout << "GPU vs CPU max error: " << max_error << " (tol: " << tol << ")" << std::endl;
     }
