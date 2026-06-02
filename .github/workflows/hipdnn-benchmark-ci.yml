@@ -1,93 +1,58 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# hipDNN benchmark presubmit (ALMIOPEN-1848).
+# hipDNN benchmark smoke gate (ALMIOPEN-1848) — reusable workflow.
 #
-# Smoke/health gate for the dnn_benchmarking tool: on each PR touching the tool
-# or the hipDNN python bindings, fetch PREBUILT TheRock ROCm artifacts (pinned by
-# run-id, never built from source), build+install the hipdnn_frontend binding
-# wheel in-job, run the benchmark over the committed sample graphs on a gfx942
-# GPU runner, and fail ONLY if the tool itself breaks (non-zero exit, zero passes,
-# or any errored combination). It does NOT validate performance or correctness.
+# Invoked as a job from therock-ci-linux.yml, AFTER therock-build-linux, so it
+# runs inside the SAME therock-ci run that built the hipDNN artifacts. That is the
+# whole point of this shape: the benchmark installs the PR's OWN freshly-built
+# ROCm by `github.run_id` (install_rocm_from_artifacts --run-id) — no cross-run
+# artifact resolution, no slice-aware run-id scan. hipDNN is built CONDITIONALLY
+# (therock_configure_ci only builds changed subtrees), but the caller gates this
+# job on the build matrix actually carrying hipDNN (projects_to_test contains
+# "hipdnn") and on the gfx94X-dcgpu family, so it runs only when there are hipDNN
+# artifacts in this very run to benchmark.
 #
-# Fork policy: triggered via `pull_request` (NOT `pull_request_target`) so
-# untrusted fork code never runs with write-scoped secrets on a GPU runner.
-# Fork PRs may lack GPU-runner/secret access; treat this as advisory / non-required
-# for forks. Trusted in-repo branch PRs get the full gate.
+# Smoke/health gate only: install the prebuilt hipdnn_frontend wheel from the
+# --tests slice, run dnn_benchmarking over the committed sample graphs on a gfx942
+# GPU, and fail ONLY if the tool itself breaks (non-zero exit, zero passes, or any
+# errored combination). It does NOT validate performance or correctness.
+#
+# Fork policy is owned by the caller (therock-ci): this reusable workflow never
+# defines its own pull_request trigger, so untrusted fork code only reaches the
+# GPU runner if the parent pipeline already admitted it.
 
 name: hipDNN Benchmark CI
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened]
-    paths:
-      - "projects/hipdnn/tools/dnn-benchmarking/**"
-      - "projects/hipdnn/python/**"
-      - ".github/workflows/hipdnn-benchmark-ci.yml"
-  workflow_dispatch:
+  workflow_call:
     inputs:
-      graph_glob:
-        description: "Graph file/dir/glob/tarball passed to --graph. Default is the DVC-tracked benchmark suite (Workloads/*.tar.gz) materialized by `dvc pull`; --graph natively extracts JSON graphs from the tarballs."
-        type: string
-        default: "projects/hipdnn/tools/dnn-benchmarking/Workloads/*.tar.gz"
-      amdgpu_family:
-        description: "TheRock artifact family for install_rocm_from_artifacts.py."
-        type: string
-        default: "gfx94X-dcgpu"
-      amdgpu_targets:
-        description: "GPU target arch."
-        type: string
-        default: "gfx942"
       therock_ref:
-        # The benchmark fetches the PUBLISHED hipdnn_frontend wheel from the
-        # --tests slice and repacks it with TheRock's pack_frontend_wheel.py.
-        # That script currently lives ONLY on TheRock branch
-        # users/tvy/hipdnn-python-wheel (not yet merged to main). Until it
-        # merges, dispatch this workflow with therock_ref=users/tvy/hipdnn-python-wheel
-        # so the sparse build_tools checkout includes the repack script.
-        description: "TheRock build_tools commit to check out (script version). Empty -> resolved from .github/actions/ci-env. NOTE: until users/tvy/hipdnn-python-wheel merges to TheRock main, dispatch with therock_ref=users/tvy/hipdnn-python-wheel."
+        description: "TheRock ref to check out build_tools from (script version, incl. pack_frontend_wheel.py)."
         type: string
-        default: ""
-      artifact_run_id:
-        description: "GitHub run-id (ROCm/rocm-libraries therock-ci build) whose prebuilt artifacts to install (deterministic pin). Empty -> resolve the latest green therock-ci run on develop at job time."
+        required: true
+      projects_to_test:
+        description: "Build matrix projects_to_test string; the benchmark job runs only when it contains 'hipdnn'."
         type: string
-        default: ""
-      run_github_repo:
-        description: "Repo that owns artifact_run_id (the rocm-libraries CI build that uploaded the artifacts)."
+        required: true
+      amdgpu_families:
+        description: "TheRock artifact family for install_rocm_from_artifacts.py (e.g. gfx94X-dcgpu)."
         type: string
-        default: "ROCm/rocm-libraries"
-      runs_on:
-        description: "GPU runner label."
+        required: true
+      test_runs_on:
+        description: "GPU test runner label."
         type: string
-        default: "linux-gfx942-2gpu-core42-ossci-rocm"
-      warmup:
-        description: "Benchmark warmup iterations."
-        type: string
-        default: "1"
-      iters:
-        description: "Benchmark timed iterations."
-        type: string
-        default: "1"
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
-  cancel-in-progress: true
+        required: true
 
 permissions:
   contents: read
 
 jobs:
   benchmark:
-    name: hipDNN benchmark smoke (gfx942)
-    # Fork guard: run on the GPU runner ONLY for manual dispatch or in-repo PRs.
-    # Untrusted fork PRs (head repo != this repo) never reach the GPU runner /
-    # prebuilt-artifact install. Fork PRs are treated as advisory / non-required.
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.event.pull_request.head.repo.full_name == github.repository
-    # GPU runner label. Overridable via workflow_dispatch; the literal default
-    # mirrors the gfx942 test_machine in therock-ci-nightly.yml.
-    runs-on: ${{ inputs.runs_on || 'linux-gfx942-2gpu-core42-ossci-rocm' }}
+    name: hipDNN benchmark smoke (${{ inputs.amdgpu_families }})
+    # Defensive self-guard; the caller already gates on the same condition.
+    if: ${{ contains(inputs.projects_to_test, 'hipdnn') }}
+    runs-on: ${{ inputs.test_runs_on }}
     timeout-minutes: 60
     container:
       image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
@@ -103,12 +68,14 @@ jobs:
       run:
         shell: bash
     env:
-      AMDGPU_FAMILY: ${{ inputs.amdgpu_family || 'gfx94X-dcgpu' }}
-      AMDGPU_TARGETS: ${{ inputs.amdgpu_targets || 'gfx942' }}
-      RUN_GITHUB_REPO: ${{ inputs.run_github_repo || 'ROCm/rocm-libraries' }}
-      GRAPH_GLOB: ${{ inputs.graph_glob || 'projects/hipdnn/tools/dnn-benchmarking/Workloads/*.tar.gz' }}
-      WARMUP: ${{ inputs.warmup || '1' }}
-      ITERS: ${{ inputs.iters || '1' }}
+      AMDGPU_FAMILY: ${{ inputs.amdgpu_families }}
+      AMDGPU_TARGETS: gfx942
+      # The artifacts to install are THIS run's own build outputs.
+      RUN_GITHUB_REPO: ${{ github.repository }}
+      ARTIFACT_RUN_ID: ${{ github.run_id }}
+      GRAPH_GLOB: projects/hipdnn/tools/dnn-benchmarking/Workloads/*.tar.gz
+      WARMUP: "1"
+      ITERS: "1"
       VENV_DIR: ${{ github.workspace }}/.venv
       LD_LIBRARY_PATH: /opt/rocm/lib
     steps:
@@ -128,60 +95,11 @@ jobs:
         with:
           path: rocm-libraries
 
-      - name: Resolve TheRock ref (ci-env)
-        id: ci_env
-        uses: ./rocm-libraries/.github/actions/ci-env
-
-      - name: Resolve pins
-        id: pins
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          THEROCK_REF="${{ inputs.therock_ref }}"
-          if [ -z "${THEROCK_REF}" ]; then
-            THEROCK_REF="${{ steps.ci_env.outputs.therock-ref }}"
-          fi
-          echo "therock_ref=${THEROCK_REF}" >> "$GITHUB_OUTPUT"
-          echo "THEROCK_REF=${THEROCK_REF}" >> "$GITHUB_ENV"
-
-          # Prebuilt-artifact pin. The manual artifact_run_id input wins when set
-          # (deterministic re-run). Otherwise resolve the LATEST develop commit
-          # whose ROCm/rocm-libraries `therock-ci` run has the required artifact
-          # group live in S3, via TheRock's find_latest_artifacts. That tool walks
-          # recent develop commits, maps each to its therock-ci workflow run, and
-          # HTTP-HEADs the S3 artifact index to confirm the slices actually exist
-          # at s3://therock-ci-artifacts-external/ROCm-rocm-libraries/<run-id>-linux
-          # (public-read). It uses the GitHub REST API authenticated with the
-          # read-scoped github.token (GITHUB_TOKEN) and is pure-stdlib, so it works
-          # inside the no_rocm container, which has no `gh` CLI (the previous
-          # `gh run list` here exited 127). The finder ships in the prejob
-          # build_tools checkout (ROCm/TheRock default branch). Resolving at job
-          # time avoids the staleness liability: external CI artifacts age out in
-          # days-to-weeks, so the newest develop run with live artifacts is always
-          # freshest. RUN_GITHUB_REPO must be ROCm/rocm-libraries, not ROCm/TheRock.
-          ARTIFACT_RUN_ID="${{ inputs.artifact_run_id }}"
-          if [ -z "${ARTIFACT_RUN_ID}" ]; then
-            ARTIFACT_RUN_ID="$(python3 prejob/build_tools/find_latest_artifacts.py \
-              --repo "${RUN_GITHUB_REPO}" \
-              --workflow therock-ci.yml \
-              --platform linux \
-              --branch develop \
-              --artifact-group "${AMDGPU_FAMILY}" \
-              | awk -F': *' '/Workflow run ID:/ {print $2; exit}')"
-          fi
-          if [ -z "${ARTIFACT_RUN_ID}" ] || [ "${ARTIFACT_RUN_ID}" = "null" ]; then
-            echo "::error::Could not resolve an artifact run-id. The artifact_run_id input was empty and find_latest_artifacts found no recent ROCm/rocm-libraries develop therock-ci run with live ${AMDGPU_FAMILY} artifacts in S3. Set a known-good run-id via the artifact_run_id input."
-            exit 1
-          fi
-          echo "Resolved artifact run-id: ${ARTIFACT_RUN_ID}"
-          echo "artifact_run_id=${ARTIFACT_RUN_ID}" >> "$GITHUB_OUTPUT"
-          echo "ARTIFACT_RUN_ID=${ARTIFACT_RUN_ID}" >> "$GITHUB_ENV"
-
       - name: Checkout TheRock build_tools at pinned ref
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: ${{ steps.pins.outputs.therock_ref }}
+          ref: ${{ inputs.therock_ref }}
           sparse-checkout: build_tools
           path: TheRock
 
@@ -198,35 +116,21 @@ jobs:
           # boto3/s3fs. boto3 is also needed by install_rocm_from_artifacts.py.
           pip install boto3 cmake ninja "dvc[s3]"
 
-      - name: Verify prebuilt slices exist (dry-run)
+      - name: Fetch prebuilt ROCm by run-id (this run's own build)
         run: |
-          # Fail fast BEFORE the (slow) real install if the resolved develop run
-          # is missing any required slice. The most likely cause is that the
-          # TheRock hipDNN-python-wheel publishing (which ships the prebuilt
-          # hipdnn_frontend bindings into the --tests slice) has not landed on
-          # develop yet, so the newest green therock-ci run predates it. Flags
-          # MUST match the real install below.
-          python3 TheRock/build_tools/install_rocm_from_artifacts.py \
-            --run-id "${ARTIFACT_RUN_ID}" \
-            --run-github-repo "${RUN_GITHUB_REPO}" \
-            --amdgpu-family "${AMDGPU_FAMILY}" \
-            --amdgpu-targets "${AMDGPU_TARGETS}" \
-            --output-dir /opt/rocm \
-            --hipdnn --miopenprovider --tests --blas --miopen \
-            --dry-run || {
-              echo "::error::The resolved ROCm/rocm-libraries develop run (${ARTIFACT_RUN_ID}) lacks one or more required artifact slices (hipdnn / miopenprovider / tests / blas / miopen). Most likely the TheRock hipDNN-python-wheel publishing has not landed on develop yet, so the latest green therock-ci run predates it. Re-dispatch with an artifact_run_id from a run that includes the bindings, or wait for the publishing change to merge to develop."
-              exit 1; }
-
-      - name: Fetch prebuilt ROCm by run-id (deterministic)
-        run: |
+          # ARTIFACT_RUN_ID is github.run_id — the therock-ci run that just built
+          # hipDNN in the therock-build-linux job this job depends on. Because the
+          # caller only invokes this job when the matrix built hipDNN, the hipdnn /
+          # miopenprovider / tests slices are guaranteed present, so no slice-aware
+          # resolver is needed.
+          #
           # --miopenprovider is REQUIRED: the MIOpen engine plugin
           # (lib/hipdnn_plugins/engines/libmiopen_plugin.so) ships in the
-          # miopenprovider slice, NOT in hipdnn_lib. Without it the plugin dir is
-          # empty and every benchmark combination is skipped -> the gate fails
-          # with pass_combinations=0. --flatten (set by install_rocm_from_artifacts
-          # for run-id installs) strips the ml-libs/<comp>/stage prefix so the
-          # engine lands at /opt/rocm/lib/hipdnn_plugins/engines/. Flags MUST match
-          # the dry-run gate above.
+          # miopenprovider slice, NOT hipdnn_lib. Without it the plugin dir is empty
+          # and every combination is skipped -> the gate fails with
+          # pass_combinations=0. --flatten (set by install_rocm_from_artifacts for
+          # run-id installs) strips the ml-libs/<comp>/stage prefix so the engine
+          # lands at /opt/rocm/lib/hipdnn_plugins/engines/.
           python3 TheRock/build_tools/install_rocm_from_artifacts.py \
             --run-id "${ARTIFACT_RUN_ID}" \
             --run-github-repo "${RUN_GITHUB_REPO}" \
@@ -247,16 +151,14 @@ jobs:
 
       - name: Repack + install prebuilt hipdnn_frontend wheel
         run: |
-          # The hipdnn_frontend Python bindings now ship PREBUILT inside the
-          # --tests artifact slice. install_rocm_from_artifacts.py --flatten lands
-          # the staged files at /opt/rocm/share/hipdnn/python/hipdnn_frontend.
-          # Do NOT compile the binding in-job — repack the prebuilt staged files
-          # into a wheel with TheRock's repack script and install it. The repack
-          # script lives only on TheRock branch users/tvy/hipdnn-python-wheel
-          # until that merges to main (see the therock_ref input note).
+          # The hipdnn_frontend Python bindings ship PREBUILT inside the --tests
+          # artifact slice. install_rocm_from_artifacts.py --flatten lands the staged
+          # files at /opt/rocm/share/hipdnn/python/hipdnn_frontend. Repack them into a
+          # wheel with TheRock's repack script and install — do NOT compile in-job.
+          # The repack script lives on the TheRock ref passed in via therock_ref.
           PKG_DIR=/opt/rocm/share/hipdnn/python/hipdnn_frontend
           if [ ! -d "${PKG_DIR}" ]; then
-            echo "::error::Prebuilt hipdnn_frontend bindings not found at ${PKG_DIR}. The TheRock hipDNN-python-wheel publishing dependency (which ships the bindings into the --tests slice) has not landed on the resolved develop run. Re-dispatch with an artifact_run_id that includes the bindings, or wait for the publishing change to merge."
+            echo "::error::Prebuilt hipdnn_frontend bindings not found at ${PKG_DIR}. The TheRock hipDNN-python-wheel publishing dependency (which ships the bindings into the --tests slice) is not present on this run. Ensure the publishing change has landed and the build matrix includes the --tests slice."
             exit 1
           fi
           pip install build wheel
@@ -267,16 +169,14 @@ jobs:
 
       - name: Patch torch's bundled libhipdnn_backend.so
         # torch's ROCm wheel bundles libhipdnn_backend.so in its _rocm_sdk_libraries_*
-        # companion package. With RTLD_GLOBAL the frontend can bind to that stale
-        # copy instead of the prebuilt-TheRock backend it was built against ->
-        # ABI mismatch crash. Overwrite it with the /opt/rocm backend. Mirrors
+        # companion package. With RTLD_GLOBAL the frontend can bind to that stale copy
+        # instead of the prebuilt-TheRock backend it was built against -> ABI mismatch
+        # crash. Overwrite it with the /opt/rocm backend. Mirrors
         # dnn-benchmarking/setup.sh. Guarded so it no-ops if either path is absent.
         #
-        # This stays defensive even with the prebuilt-wheel flow: the benchmark
-        # lazily imports torch during timing (timing.py), so torch's bundled
-        # backend can still shadow the prebuilt /opt/rocm backend via RTLD_GLOBAL.
-        # (The TheRock python-wheel test harness omits this patch only because it
-        # never imports torch.)
+        # Stays defensive even with the prebuilt-wheel flow: the benchmark lazily
+        # imports torch during timing (timing.py), so torch's bundled backend can
+        # still shadow the prebuilt /opt/rocm backend via RTLD_GLOBAL.
         run: |
           WHEEL_BACKEND=$(find "$VENV_DIR" -path '*/_rocm_sdk_libraries_*/lib/libhipdnn_backend.so' 2>/dev/null | head -1)
           if [ -n "${WHEEL_BACKEND}" ] && [ -f /opt/rocm/lib/libhipdnn_backend.so ]; then
@@ -294,10 +194,10 @@ jobs:
         # The benchmark suite (Workloads/*.tar.gz) is DVC-tracked, not committed —
         # only the *.tar.gz.dvc pointer files are in git. The remote
         # (s3://therock-dvc/rocm-libraries) is anonymous public-read
-        # (allow_anonymous_login=true in .dvc/config), so no secrets/auth are
-        # needed on the runner. Pull the Workloads pointers explicitly (targeted,
-        # so an unrelated .dvc elsewhere in the repo can't drag in extra data),
-        # then assert at least one tarball materialized before benchmarking.
+        # (allow_anonymous_login=true in .dvc/config), so no secrets/auth are needed
+        # on the runner. Pull the Workloads pointers explicitly (targeted, so an
+        # unrelated .dvc elsewhere can't drag in extra data), then assert at least one
+        # tarball materialized before benchmarking.
         run: |
           dvc pull \
             projects/hipdnn/tools/dnn-benchmarking/Workloads/bnorm_backward.tar.gz.dvc \
@@ -337,8 +237,8 @@ jobs:
           GRAPH_GLOB: ${{ env.GRAPH_GLOB }}
           WARMUP: ${{ env.WARMUP }}
           ITERS: ${{ env.ITERS }}
-          THEROCK_REF: ${{ steps.pins.outputs.therock_ref }}
-          ARTIFACT_RUN_ID: ${{ steps.pins.outputs.artifact_run_id }}
+          THEROCK_REF: ${{ inputs.therock_ref }}
+          ARTIFACT_RUN_ID: ${{ env.ARTIFACT_RUN_ID }}
           RUN_GITHUB_REPO: ${{ env.RUN_GITHUB_REPO }}
         run: python3 projects/hipdnn/tools/dnn-benchmarking/ci/emit_provenance.py provenance.json
 

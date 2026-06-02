@@ -171,3 +171,20 @@ jobs:
       platform: "linux"
       test_type: ${{ inputs.test_type }}
     secrets: inherit
+
+  hipdnn-benchmark-linux:
+    name: hipDNN benchmark (${{ inputs.amdgpu_families }})
+    needs: [therock-build-linux]
+    # Run only when the build matrix actually carried hipDNN (conditional builds)
+    # and on the gfx94X-dcgpu family, so the benchmark installs THIS run's own
+    # freshly-built hipDNN artifacts by github.run_id.
+    if: >-
+      ${{ contains(inputs.projects_to_test, 'hipdnn') &&
+          inputs.amdgpu_families == 'gfx94X-dcgpu' }}
+    uses: ./.github/workflows/hipdnn-benchmark-ci.yml
+    with:
+      therock_ref: ${{ inputs.therock_ref }}
+      projects_to_test: ${{ inputs.projects_to_test }}
+      amdgpu_families: ${{ inputs.amdgpu_families }}
+      test_runs_on: ${{ inputs.test_runs_on }}
+    secrets: inherit
