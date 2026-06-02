@@ -42,7 +42,6 @@ def _import_validation_utils():
 
 
 _validation_utils = _import_validation_utils()
-get_abc_layouts = _validation_utils.get_abc_layouts
 
 
 class GroupedRowColQuantGemmKernelBuilder(GemmKernelBuilder):
@@ -486,7 +485,7 @@ def main():
     parser.add_argument(
         "--layout",
         required=True,
-        choices=["rcr", "rrr", "ccr", "crr"],
+        choices=["rcr"],
         help="Matrix layout",
     )
     parser.add_argument("--config_json", help="Configuration JSON file")
@@ -547,7 +546,7 @@ def main():
     matrix_b_layout = layout_str[1]
     matrix_c_layout = layout_str[2]
 
-    if matrix_a_layout not in ["r", "c"] or matrix_b_layout not in ["r", "c"]:
+    if matrix_a_layout not in ["r"] or matrix_b_layout not in ["c"]:
         parser.error(
             f"Invalid matrix_a layout: {matrix_a_layout} or matrix_b layout: {matrix_b_layout}"
         )

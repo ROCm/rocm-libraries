@@ -79,7 +79,7 @@ void gemm_host_reference_grouped(int verify,
 {
     const int group_count = problem.group_count_;
 
-    if(verify == 1)
+    if(verify > 0)
     {
         for(int i = 0; i < group_count; ++i)
         {
