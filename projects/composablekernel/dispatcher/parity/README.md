@@ -88,9 +88,11 @@ python check_parity.py configs/single_fp16_rcr.json configs/padding_fp16_rcr.jso
 ### On a GPU node
 
 ```bash
-# T1.6: standard + padding config, with the non-tile-aligned 257^3 size included.
+# T1.6: standard + padding config, with non-tile-aligned K that exercises pad_k.
+# K must be a multiple of 8 (fp16 vector load size); 257 and 33 are rejected.
+# K=56 (56%8=0, 56%32=24) and K=40 (40%8=0, 40%32=8) are non-tile-aligned but valid.
 python check_parity.py configs/single_fp16_rcr.json configs/padding_fp16_rcr.json \
-    --sizes 1024x1024x1024,257x257x257 --arch gfx942
+    --sizes 1024x1024x1024,257x257x56,513x511x40 --arch gfx942
 
 # T1.7: Dispatcher vs Tile Engine — numerical first, then performance within 2% tolerance.
 # Runs 10 harness invocations per size; compares medians.
