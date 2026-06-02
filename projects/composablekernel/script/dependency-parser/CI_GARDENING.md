@@ -439,6 +439,21 @@ violated, disable smart build until fixed.
    flow's depmap configure to be selectable; a component built **in its own
    stage** is covered there, independently.
 
+6. **Toolchain assumption: clang + Ninja generator on Linux.** CK builds with
+   amdclang/hipcc, and the tooling depends on it:
+   - depmap extraction uses `clang -MM` / `clang-scan-deps -format make`;
+   - the build-graph layer (`ninja -t targets all` oracle, `ninja -t deps` ground
+     truth, `NinjaTargetParser`) assumes the **Ninja generator** (`-G Ninja`);
+   - paths are normalized as forward-slash, case-sensitive (git's view).
+
+   **Porting to MSVC would need:** an MSVC dep backend using
+   `cl /sourceDependencies <out>.json` (or `/showIncludes`) in place of the make
+   backend; the **Ninja generator** (with `deps = msvc`, so `ninja -t deps` still
+   works — the VS/MSBuild generator has no `build.ninja` and would break the whole
+   build-graph layer); and Windows path normalization (backslashes / drive letters
+   / case) folded to git's keys. The HIP resource-dir injection is amdclang-only.
+   MSVC is not a current CK target; this is a portability note, not a TODO.
+
 ---
 
 ## 9. Cross-node (CPU build / GPU test) migration
