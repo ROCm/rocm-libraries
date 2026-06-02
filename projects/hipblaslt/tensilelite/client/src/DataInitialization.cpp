@@ -1247,14 +1247,17 @@ namespace TensileLite
                                 vec_rm.push_back(0);
                                 continue;
                             }
-                            if(it == m_vdata[i].pristine.end() || it->second.maxElements == 0)
-                            {
-                                vec_rm.push_back(0);
-                                continue;
-                            }
-                            size_t const bytes = multiplyElementSize(
-                                it->second.maxElements, DataTypeInfo::Get(dataType).elementSize);
-                            vec_rm.push_back(bytes);
+                            // Use the problem's actually-allocated bytes, matching the
+                            // runtime getRotatingSize() accounting. We deliberately do NOT
+                            // use pristine.maxElements * elementSize here, because for sparse
+                            // tensors pristine tracks the uncompressed element count while
+                            // getRotatingSize reads the compressed tensor size; the mismatch
+                            // makes unit.totalSize blow past m_rotatingBuffer, collapses
+                            // rotatingNum to 1, and leaves rotatingAllocatedSize == 0.
+                            // Caveat: loses post-bounds-check guard-page round-up here, but
+                            // that path doesn't fire under default BoundsCheck=Disable.
+                            (void)it;
+                            vec_rm.push_back(problem.tensors()[i].totalAllocatedBytes());
                         }
                         if(!isRMInitPost)
                         {
@@ -1281,14 +1284,10 @@ namespace TensileLite
                                     tmp_rm.push_back(0);
                                     continue;
                                 }
-                                if(it == m_vdata[i].pristine.end() || it->second.maxElements == 0)
-                                {
-                                    tmp_rm.push_back(0);
-                                    continue;
-                                }
-                                size_t const bytes = multiplyElementSize(
-                                    it->second.maxElements, DataTypeInfo::Get(dataType).elementSize);
-                                tmp_rm.push_back(bytes);
+                                // Same accounting as the single-GEMM path above:
+                                // use totalAllocatedBytes() to match getRotatingSize.
+                                (void)it;
+                                tmp_rm.push_back(problem.tensors()[i].totalAllocatedBytes());
                             }
                             if(vec_rm.empty())
                             {
@@ -3155,11 +3154,22 @@ namespace TensileLite
                         = m_rm->getDataSize() - m_rm->getDataLargestUnitSize();
                     if(totalRotatingSizeNeeded > rotatingAllocatedSize)
                     {
-                        std::cout << "Rotating buffer size: " << rotatingAllocatedSize
-                                  << " is not enough for rotating buffer size: " << rotatingSize
-                                  << " * " << rotatingNum << " = " << totalRotatingSizeNeeded
+                        // Pool too small for the requested rotation count.
+                        // Happens when this problem's unit.totalSize >= m_rotatingBuffer
+                        // (single tensor set already fills the pool), so
+                        // createRotatingMemory could only set aside one base slot.
+                        // Instead of aborting, clamp rotatingNum to what fits.
+                        int32_t fits = (rotatingSize > 0)
+                            ? static_cast<int32_t>(rotatingAllocatedSize / rotatingSize)
+                            : 0;
+                        std::cout << "Warning: rotating pool too small ("
+                                  << rotatingAllocatedSize << " bytes); clamping rotating num "
+                                  << rotatingNum << " -> " << fits
+                                  << " (rotatingSize=" << rotatingSize
+                                  << "). Perf number for this problem will not reflect cold L2."
                                   << std::endl;
-                        throw std::runtime_error("Insufficient rotating buffer size.");
+                        rotatingNum             = fits;
+                        totalRotatingSizeNeeded = rotatingNum * rotatingSize;
                     }
                     uint8_t* ptr = (uint8_t*)m_rm->getData().get() + m_rm->getDataLargestUnitSize();
                     int64_t  offset = 0;
@@ -3217,11 +3227,18 @@ namespace TensileLite
                         = m_rm->getDataSize() - m_rm->getDataLargestUnitSize();
                     if(totalRotatingSizeNeeded > rotatingAllocatedSize)
                     {
-                        std::cout << "Rotating buffer size: " << rotatingAllocatedSize
-                                  << " is not enough for rotating buffer size: " << rotatingSize
-                                  << " * " << rotatingNum << " = " << totalRotatingSizeNeeded
+                        // Same clamp as the single-GEMM branch above.
+                        int32_t fits = (rotatingSize > 0)
+                            ? static_cast<int32_t>(rotatingAllocatedSize / rotatingSize)
+                            : 0;
+                        std::cout << "Warning: rotating pool too small ("
+                                  << rotatingAllocatedSize << " bytes); clamping rotating num "
+                                  << rotatingNum << " -> " << fits
+                                  << " (rotatingSize=" << rotatingSize
+                                  << "). Perf number for this group will not reflect cold L2."
                                   << std::endl;
-                        throw std::runtime_error("Insufficient rotating buffer size.");
+                        rotatingNum             = fits;
+                        totalRotatingSizeNeeded = rotatingNum * rotatingSize;
                     }
                     uint8_t* ptr = (uint8_t*)m_rm->getData().get() + m_rm->getDataLargestUnitSize();
                     int64_t  offset = 0;
