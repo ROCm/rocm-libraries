@@ -112,6 +112,26 @@ struct FmhaBwdDQDKDVVariant
 
 // clang-format off
 static constexpr FmhaBwdDQDKDVVariant ALL_DQDKDV_VARIANTS[] = {
+    {"fmha_bwd_dqdkdv_fp16_d32_batch", makeSpec(FmhaBwdDQDKDVConfig{
+         .signature = {.dtype = DataType::FP16,
+                       .hdim_q = 32, .hdim_v = 32,
+                       .mode = FmhaMode::BATCH},
+         .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}})},
+    {"fmha_bwd_dqdkdv_bf16_d32_batch", makeSpec(FmhaBwdDQDKDVConfig{
+         .signature = {.dtype = DataType::BF16,
+                       .hdim_q = 32, .hdim_v = 32,
+                       .mode = FmhaMode::BATCH},
+         .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}})},
+    {"fmha_bwd_dqdkdv_fp16_d96_batch", makeSpec(FmhaBwdDQDKDVConfig{
+         .signature = {.dtype = DataType::FP16,
+                       .hdim_q = 96, .hdim_v = 96,
+                       .mode = FmhaMode::BATCH},
+         .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}})},
+    {"fmha_bwd_dqdkdv_bf16_d96_batch", makeSpec(FmhaBwdDQDKDVConfig{
+         .signature = {.dtype = DataType::BF16,
+                       .hdim_q = 96, .hdim_v = 96,
+                       .mode = FmhaMode::BATCH},
+         .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}})},
     {"fmha_bwd_dqdkdv_fp16_d128_batch", makeSpec(FmhaBwdDQDKDVConfig{
          .signature = {.dtype = DataType::FP16,
                        .hdim_q = 128, .hdim_v = 128,
@@ -120,6 +140,16 @@ static constexpr FmhaBwdDQDKDVVariant ALL_DQDKDV_VARIANTS[] = {
     {"fmha_bwd_dqdkdv_bf16_d128_batch", makeSpec(FmhaBwdDQDKDVConfig{
          .signature = {.dtype = DataType::BF16,
                        .hdim_q = 128, .hdim_v = 128,
+                       .mode = FmhaMode::BATCH},
+         .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}})},
+    {"fmha_bwd_dqdkdv_fp16_d256_batch", makeSpec(FmhaBwdDQDKDVConfig{
+         .signature = {.dtype = DataType::FP16,
+                       .hdim_q = 256, .hdim_v = 256,
+                       .mode = FmhaMode::BATCH},
+         .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}})},
+    {"fmha_bwd_dqdkdv_bf16_d256_batch", makeSpec(FmhaBwdDQDKDVConfig{
+         .signature = {.dtype = DataType::BF16,
+                       .hdim_q = 256, .hdim_v = 256,
                        .mode = FmhaMode::BATCH},
          .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}})},
     {"fmha_bwd_dqdkdv_fp16_d128_batch_cmask", makeSpec(FmhaBwdDQDKDVConfig{
