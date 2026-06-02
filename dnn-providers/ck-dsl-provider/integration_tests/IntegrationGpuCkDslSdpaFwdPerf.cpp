@@ -226,6 +226,12 @@ const std::vector<SdpaPerfCase> kSdpaPerfCases = {
     {"Fp16_Prefill_GQA_S2048_D64", data_objects::DataType::HALF, 1, 32, 8, 2048, 2048, 64},
     {"Fp16_Prefill_GQA_S2048_D256", data_objects::DataType::HALF, 1, 32, 8, 2048, 2048, 256},
     {"Bf16_Prefill_GQA_S2048_D128", data_objects::DataType::BFLOAT16, 1, 32, 8, 2048, 2048, 128},
+    // In-family with the gfx950 heuristic's training set (~bf16/d64/h64kv8;
+    // GQA ratio 8 = Hq64/Hkv8). S2016 makes the dense-degenerate block_size
+    // resolve to 32 (2016 = 63*32, not %64), matching the trained b32.
+    {"Bf16_InFamily_GQA8_D64_S2048", data_objects::DataType::BFLOAT16, 1, 64, 8, 2048, 2048, 64},
+    {"Bf16_InFamily_GQA8_D64_S2016_B32", data_objects::DataType::BFLOAT16, 1, 64, 8, 2016, 2016,
+     64},
 };
 
 INSTANTIATE_TEST_SUITE_P(Shapes, IntegrationGpuCkDslSdpaFwdPerfGpu,
