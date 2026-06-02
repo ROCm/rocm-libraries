@@ -52,6 +52,24 @@ list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/llvm ${ROCM_PATH} ${ROCM_PATH}/hip)
 
 find_package(hip REQUIRED)
 
+# Enable the HIP language for the few TUs that must be HIP-compiled
+# (SdpaScorer.cpp includes fmha_ml_heuristic.hpp, which transitively
+# pulls in ck_tile/host/kernel_launch.hpp). The project declares only
+# CXX in project(); the ROCm toolchain provides HIP, so enabling it here
+# is the minimal extension.
+#
+# SdpaScorer.cpp is host-only HIP (no __global__ kernels -- it just needs
+# the HIP host headers to parse), but CMake >= 3.21 requires
+# CMAKE_HIP_ARCHITECTURES to be set before enable_language(HIP). Provide a
+# sensible default (the POC's dev + target arches) when the caller has
+# not pinned one; the superbuild / TheRock override this on the command
+# line.
+if(NOT DEFINED CMAKE_HIP_ARCHITECTURES)
+    set(CMAKE_HIP_ARCHITECTURES "gfx90a;gfx950" CACHE STRING
+        "HIP offload architectures for the CK DSL provider")
+endif()
+enable_language(HIP)
+
 # --- Embedded Python (libpython + pybind11) ----------------------------------
 # I-2 wires an embedded CPython interpreter into the plugin .so so that
 # the provider can drive the CK DSL compile pipeline at runtime (plan
@@ -70,6 +88,47 @@ if(NOT DEFINED Python3_FIND_STRATEGY)
 endif()
 find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
 message(STATUS "CK DSL provider Python3: ${Python3_EXECUTABLE} (${Python3_VERSION})")
+
+# --- LightGBM (FMHA scorer backend) ------------------------------------------
+# The SdpaScorer links the LightGBM C API (LGBM_BoosterCreateFromModelfile
+# etc.) -- declared extern "C" in fmha_ml_heuristic.hpp, so no LightGBM
+# header is needed, only the shared library. Find it the same way the
+# dispatcher examples do: derive the active interpreter's site-packages
+# and look under lightgbm/lib. NO_DEFAULT_PATH keeps a stray system
+# LightGBM from masking the venv copy the model was trained against.
+set(LIGHTGBM_SEARCH_PATHS)
+if(Python3_FOUND AND Python3_EXECUTABLE)
+    execute_process(
+        COMMAND ${Python3_EXECUTABLE} -c "import sysconfig; print(sysconfig.get_path('purelib'))"
+        OUTPUT_VARIABLE _ckdslLightgbmSitePackages
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    if(_ckdslLightgbmSitePackages)
+        list(APPEND LIGHTGBM_SEARCH_PATHS "${_ckdslLightgbmSitePackages}/lightgbm/lib")
+    endif()
+endif()
+
+find_library(LIGHTGBM_LIB
+    NAMES LightGBM lib_lightgbm _lightgbm
+    HINTS ${CMAKE_PREFIX_PATH}
+    PATHS ${LIGHTGBM_SEARCH_PATHS}
+    NO_DEFAULT_PATH
+    DOC "LightGBM shared library backing the FMHA scorer"
+)
+# Fallback: search default paths (respects LightGBM_DIR if user-set).
+if(NOT LIGHTGBM_LIB)
+    find_library(LIGHTGBM_LIB NAMES LightGBM lib_lightgbm _lightgbm)
+endif()
+
+if(NOT LIGHTGBM_LIB)
+    message(FATAL_ERROR
+        "CK DSL provider: LightGBM shared library not found. The FMHA "
+        "scorer (SdpaScorer) links it directly. Install it into the "
+        "active interpreter (pip install lightgbm) or set LightGBM_DIR / "
+        "CMAKE_PREFIX_PATH. Searched: ${LIGHTGBM_SEARCH_PATHS}")
+endif()
+message(STATUS "CK DSL provider LightGBM: ${LIGHTGBM_LIB}")
 
 # pybind11: prefer the standard CMake config; if that fails, fall back
 # to asking the pinned interpreter where its cmake dir is (this is the
@@ -134,6 +193,11 @@ file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
 # to sys.path (PREP_FINDINGS §P-4).
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/CkDslProviderPaths.cmake)
 ck_dsl_provider_resolve_python_paths()
+
+# Resolve the in-tree FMHA-forward LightGBM model path so the generated
+# header carries CK_DSL_FMHA_FWD_MODEL_PATH for the SdpaScorer default
+# constructor.
+ck_dsl_provider_resolve_fmha_fwd_model()
 
 set(_ckDslPathsHeader "${CMAKE_CURRENT_BINARY_DIR}/include/ckdsl_provider_paths.h")
 configure_file(
