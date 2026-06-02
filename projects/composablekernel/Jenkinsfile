@@ -24,19 +24,15 @@
 // Benefits: PR builds 5h -> 30min (typical), nightly builds unchanged
 // See: script/dependency-parser/README.md for details
 //
-ck = null
-
 def rocmnode(name) {
     return '(rocmtest || miopen) && (' + name + ')'
 }
 
 def loadCk() {
-    if (ck == null) {
-        def branch = (params.USE_CURRENT_BRANCH_FOR_CK_GROOVY
-            ? (env.CHANGE_BRANCH ?: env.BRANCH_NAME)
-            : 'develop')
-        ck = library("ck@${branch}").ck
-    }
+    def branch = (params.USE_CURRENT_BRANCH_FOR_CK_GROOVY
+        ? (env.CHANGE_BRANCH ?: env.BRANCH_NAME)
+        : 'develop')
+    library("ck@${branch}")
 }
 
 //launch develop branch daily jobs
