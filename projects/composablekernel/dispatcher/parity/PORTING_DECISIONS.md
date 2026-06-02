@@ -28,6 +28,7 @@ It is the reference for "why does this config not exist on the dispatcher side?"
 | Accumulation dtype `fp8/bf8` | Accumulated in `fp32`, output `fp16` | Same | Both stacks promote 8-bit output to `fp16` (8-bit too narrow for C). Correct behavior. |
 | Accumulation dtype `int8` | `int32` accumulator, `int8` output | Same | No promotion needed. |
 | `block_size`, `num_wave_groups`, `k_block_per_cu` | Codegen defaults: `256`, `1`, `1` | Forwarded explicitly from TE config | Bug 2 from PR review: these were previously dropped; codegen silently produced wrong kernels for non-default values. Fixed in `_minimal_te_config()`. |
+| **Numerical verification model** | TE benchmark uses `FillUniformDistribution{-1,1}` (random, `-init=0`) | Dispatcher harness uses `(i%7-3)*0.25` / `(i%5-2)*0.25` (fixed, bounded) | **By design — different inputs.** Each stack verifies C against its own CPU fp32 reference. This proves self-consistency of each stack's kernel, not identical C matrices. TE `-init=1` (monotonic 0,1,2,…) overflows fp16 for large K; harness pattern avoids overflow. True shared-data cross-stack comparison (write dispatcher C → feed TE as reference) is out of scope. Stage 3 (TFLOP/s comparison) is input-independent and constitutes the cross-stack performance gate. |
 
 ---
 

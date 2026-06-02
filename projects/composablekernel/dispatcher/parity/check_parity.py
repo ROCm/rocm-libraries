@@ -350,14 +350,30 @@ def run_te_benchmark(exe: Path, m: int, n: int, k: int, csv_stub: Path, dry_run:
       tflops:  float or None
       rc:      process return code (0 = ok, None for dry-run)
 
-    The TE benchmark only writes a CSV row when it verifies (verify enabled), so a
-    missing or empty CSV is a skip signal (TE reported 'unsupported'), not a failure.
-    This keeps _adjudicate_numerical from penalizing sizes the TE kernel doesn't
-    support (which is a valid outcome, not a bug in either stack).
+    Verification model
+    ------------------
+    Each stack verifies against its **own** CPU fp32 reference:
+    - The dispatcher harness fills A with ``(i%7-3)*0.25`` and B with
+      ``(i%5-2)*0.25``, then checks GPU C against a CPU dot-product.
+    - The TE benchmark (``-init=0``, random) uses ``FillUniformDistribution``
+      with its own CPU reference.
+
+    This means numerical parity (Stage 2) proves self-consistency of each
+    stack — not that both stacks produce the same C matrix for the same input.
+    If both stacks PASS their own reference, neither has a kernel computation
+    bug; their C matrices may differ due to different input data, which is
+    expected and not a defect.  True shared-data cross-stack comparison would
+    require writing the dispatcher C to a file and feeding it to TE as
+    reference, which is out of scope (see PORTING_DECISIONS.md §2).
+
+    Stage 3 (performance) is independent of input data and cross-stack valid.
+
+    The TE benchmark only writes a CSV row when it verifies (verify enabled),
+    so a missing or empty CSV is a skip signal (unsupported size), not failure.
     """
     csv_stub.with_suffix(".csv").unlink(missing_ok=True)
-    # --warmup 3 --repeat 20 mirrors the harness's stream_config (cold_niters_=3,
-    # nrepeat_=20) so the two stacks measure on comparable footing.
+    # -warmup=3 -repeat=20 mirrors harness stream_config (cold_niters_=3,
+    # nrepeat_=20) so both stacks measure on comparable footing.
     cmd = [str(exe), f"-m={m}", f"-n={n}", f"-k={k}", "-verify=1",
            "-warmup=3", "-repeat=20",
            f"-csv_filename={csv_stub}"]

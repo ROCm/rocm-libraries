@@ -416,5 +416,61 @@ class TestRejectionManifest:
         assert rejected == []
 
 
+# ── verification model documentation ─────────────────────────────────────────
+
+class TestVerificationModel:
+    """Checks that the 'each stack verifies against its own CPU ref' model
+    is correctly documented in code and that the harness output format is
+    compatible with check_parity.py parsing."""
+
+    def test_check_parity_documents_own_cpu_ref_model(self):
+        """run_te_benchmark docstring must explain the own-CPU-ref limitation."""
+        import check_parity
+        import inspect
+        src = inspect.getsource(check_parity.run_te_benchmark)
+        assert "own" in src.lower() or "self-consist" in src.lower(), (
+            "run_te_benchmark docstring must document that each stack "
+            "verifies against its own CPU reference"
+        )
+
+    def test_harness_cpp_uses_fixed_bounded_init(self):
+        """harness.cpp must use a fixed, bounded init pattern — not random."""
+        harness = (
+            __import__("pathlib").Path(__file__).resolve().parent / "harness.cpp"
+        )
+        text = harness.read_text()
+        # Fixed modular pattern keeps values in a bounded range
+        assert "% 7" in text or "%7" in text, (
+            "harness.cpp must use deterministic (i%7) init to avoid fp16 overflow"
+        )
+        # Must NOT use FillUniformDistribution (random)
+        assert "FillUniformDistribution" not in text, (
+            "harness.cpp must not use random init — TE benchmark uses random "
+            "so using it here would still be different data due to different seeds"
+        )
+
+    def test_porting_decisions_documents_verification_model(self):
+        """PORTING_DECISIONS.md §2 must mention the different-init decision."""
+        pd = (
+            __import__("pathlib").Path(__file__).resolve().parent
+            / "PORTING_DECISIONS.md"
+        )
+        text = pd.read_text()
+        assert "verification model" in text.lower() or "own cpu" in text.lower() or (
+            "self-consist" in text.lower()
+        ), "PORTING_DECISIONS.md must document the verification model decision"
+
+    def test_harness_explicit_warmup_set(self):
+        """harness.cpp must set cold_niters_ explicitly (documents warmup count)."""
+        harness = (
+            __import__("pathlib").Path(__file__).resolve().parent / "harness.cpp"
+        )
+        text = harness.read_text()
+        assert "cold_niters_" in text, (
+            "harness.cpp must set cold_niters_ explicitly so warmup=3 is "
+            "self-documenting alongside nrepeat_=20"
+        )
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))

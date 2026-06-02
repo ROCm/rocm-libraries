@@ -173,9 +173,13 @@ def drive(
               f"got {len(kernel_headers)}: {kernel_headers}",
               file=sys.stderr)
         return 1
-    if identifier not in kernel_headers[0].name:
-        print(f"error: expected identifier {identifier!r} in header name "
-              f"{kernel_headers[0].name!r}",
+    # split_k is a runtime parameter and not encoded in the header filename;
+    # strip any _splitkN suffix before checking filename containment.
+    import re as _re
+    base_identifier = _re.sub(r"_splitk\d+$", "", identifier)
+    if base_identifier not in kernel_headers[0].name:
+        print(f"error: expected identifier {base_identifier!r} (base of {identifier!r}) "
+              f"in header name {kernel_headers[0].name!r}",
               file=sys.stderr)
         return 1
     return 0
