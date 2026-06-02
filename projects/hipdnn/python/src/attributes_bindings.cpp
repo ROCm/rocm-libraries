@@ -32,7 +32,8 @@ void attributesBindings(nb::module_& m)
         .def("get_compute_data_type", &graph::BatchnormAttributes::get_compute_data_type)
         .def(
             "set_epsilon",
-            [](graph::BatchnormAttributes& self, std::shared_ptr<graph::TensorAttributes> epsilon)
+            [](graph::BatchnormAttributes& self,
+               const std::shared_ptr<graph::TensorAttributes>& epsilon)
                 -> graph::BatchnormAttributes& { return self.set_epsilon(epsilon); },
             nb::rv_policy::reference_internal)
         .def("get_epsilon", &graph::BatchnormAttributes::get_epsilon)
