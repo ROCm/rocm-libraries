@@ -102,6 +102,25 @@ SupportsResult supportsTiled2d(const SdpaSelectionProblem& problem, const SdpaPe
                                "; would need lane-divergent block lookup"};
         }
     }
+    // use_mfma_32x32 (__post_init__, attention_tiled_2d.py:354-367): requires
+    // block_m_per_warp == 32, tile_size_eff % 32 == 0, and head_size % 16 == 0.
+    // tile_size_eff falls back to block_size when tile_size is unset. These are
+    // __post_init__ constraints (not part of supports_tiled_2d proper) but the
+    // builder enforces them too, so the enumerator must respect them to emit
+    // only buildable combos.
+    if (knobs.use_mfma_32x32) {
+        if (knobs.block_m_per_warp != 32) {
+            return {false, "tiled 2D kernel: use_mfma_32x32 requires block_m_per_warp=32"};
+        }
+        const std::int32_t tileEff = knobs.tile_size != 0 ? knobs.tile_size : bs;
+        if (tileEff % 32 != 0) {
+            return {false, "tiled 2D kernel: use_mfma_32x32 requires tile_size (eff=" +
+                               std::to_string(tileEff) + ") to be a multiple of 32"};
+        }
+        if (hd % 16 != 0) {
+            return {false, "tiled 2D kernel: use_mfma_32x32 requires head_size divisible by 16"};
+        }
+    }
     return {true, ""};
 }
 

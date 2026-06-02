@@ -147,6 +147,39 @@ TEST(SdpaCandidateSelectorSupports, UnsupportedHeadSizeRejected) {
     EXPECT_FALSE(result.supported);
 }
 
+TEST(SdpaCandidateSelectorSupports, Mfma32WithNonMultipleOf32TileRejected) {
+    // __post_init__: use_mfma_32x32 requires tile_size_eff % 32 == 0. A
+    // block_size=16 problem with tile_size=16 passes supports_tiled_2d proper
+    // but the mfma32 atom needs a 32-multiple tile, so the combo is unbuildable.
+    SdpaSelectionProblem problem = makeReferenceProblem();
+    problem.block_size = 16;
+    problem.head_size = 64;
+    SdpaPerfKnobs knobs;
+    knobs.num_warps = 1;
+    knobs.block_m_per_warp = 32;
+    knobs.tile_size = 16;  // multiple of block_size=16 but not of 32
+    knobs.use_mfma_32x32 = true;
+    knobs.use_transposed_qk_32x32 = true;
+    const auto result = supportsTiled2d(problem, knobs);
+    EXPECT_FALSE(result.supported);
+}
+
+TEST(SdpaCandidateSelectorEnumerator, BlockSize16EmitsOnlyBuildableMfma32Combos) {
+    // Regression guard: for a block_size=16 problem, every emitted mfma32 combo
+    // must carry a 32-multiple tile_size (the __post_init__ mfma32 rule).
+    SdpaSelectionProblem problem = makeReferenceProblem();
+    problem.block_size = 16;
+    problem.head_size = 64;
+    const std::vector<SdpaPerfKnobs> combos = enumerateCandidates(problem);
+    ASSERT_FALSE(combos.empty());
+    for (const SdpaPerfKnobs& k : combos) {
+        if (k.use_mfma_32x32) {
+            EXPECT_EQ(k.tile_size % 32, 0)
+                << "emitted mfma32 combo with non-32-multiple tile_size=" << k.tile_size;
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Selection: argmax over a stubbed score returns the peak combo;
 // determinism and stable tie-break.
