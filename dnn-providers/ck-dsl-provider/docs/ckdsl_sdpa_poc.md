@@ -137,9 +137,9 @@ it times `F.scaled_dot_product_attention(is_causal=True)` with the same shapes/d
 - **Correctness:** 8/8 — fp16 & bf16 × head {64,128,256} × {MHA,GQA}, causal, vs CPU reference.
   (Dense path only — there is no CPU reference for paged/varlen, so those are perf-only.)
 - **Perf vs PyTorch flash** (aligned hipEvent harness, full `4·B·Hq·S²·D`): with the working
-  heuristic (post predict-dtype fix) the dispatcher pick is ~0.45–0.58× of flash (fp16 S8192 355 vs
-  786; S2048 255 vs 443), up from ~0.31–0.52× when the heuristic was mis-wired. Oracle-best (the
-  ceiling a perfect pick reaches) is ~0.64–0.73× of flash.
+  heuristic (post predict-dtype fix) the dispatcher pick is **~0.45–0.72× of flash**, up from
+  ~0.28–0.59× when the heuristic was mis-wired (D256 was the worst, 0.28×→0.61×). Oracle-best (the
+  ceiling a perfect pick reaches) is **~0.64–0.98× of flash**. Full per-shape chart below.
 - **Paged + varlen (wired, perf-only):** the unified kernel is always paged; real-paged binds the
   graph's `Page_table_K` device buffer directly to the block-table slot, varlen reads per-sequence
   lengths via a small in-`execute()` D2H. Measured (B4 GQA D128 S2048): `Paged_Identity` **245
@@ -158,17 +158,39 @@ it times `F.scaled_dot_product_attention(is_causal=True)` with the same shapes/d
   `*ScorerDiag*`, which dumps per-config `predict_tflops` and asserts they are not all identical.)
   The earlier scoring-query fidelity fix (score `qr_async`, real `k0/k1/n1/k0max`, dense scoring
   flag) was correct and is a prerequisite, but its effect was masked by this bug.
+  **This bug is in the shared CK-Tile dispatcher** (`composablekernel/.../fmha_ml_heuristic.hpp` and
+  `ml_heuristic.hpp`), **not** hipDNN-specific — it silently degraded **both** the FMHA and GEMM ML
+  heuristics for every consumer, so it is worth upstreaming to the CK team.
 - **Oracle sweep + dispatcher-vs-analytic (post-fix):** the heuristic now picks the large
   nw4/mw32 config and **beats the analytic baseline** on fp16. The residual oracle gap is almost
   entirely the **MFMA atom** — oracle-best is always the `mfma32=1` variant, but the model's
   68-feature schema has no slot for the warp atom, so it can't select it (a model feature-schema
   item, not a wiring bug).
 
-  | shape | heuristic (pick) | oracle-best | oracle/heur | analytic | heur/analytic |
-  |---|---|---|---|---|---|
-  | fp16 S8192 D128 | 355 (nw4/mw32) | 501 (nw4/mw32/mfma32) | 1.41× | 216 | **1.64×** |
-  | fp16 S2048 D128 | 255 (nw4/mw32) | 324 (same) | 1.27× | 197 | **1.30×** |
-  | bf16 in-family D64 S2048 | 230 (nw4/mw32/t128) | 453 (t64/mfma32) | 1.96× | 324 | 0.71× |
+  **Full chart (TFLOPS; gfx950/MI350X, causal, aligned harness). Heuristic = the dispatcher's pick;
+  Oracle = best of all enumerated configs; Analytic = the non-ML fallback.**
+
+  | shape (dtype, B, Hq/Hkv, S, D) | PyTorch | Heuristic | Analytic | Oracle | Heur/PyT | Oracle/PyT | Oracle/Heur |
+  |---|---|---|---|---|---|---|---|
+  | fp16 GQA S2048 D128 | 443 | 252 | 192 | 320 | 0.57× | 0.72× | 1.27× |
+  | fp16 GQA S4096 D128 | 619 | 312 | 205 | 431 | 0.50× | 0.70× | 1.38× |
+  | fp16 GQA S8192 D128 | 786 | 355 | 216 | 502 | 0.45× | 0.64× | 1.41× |
+  | fp16 MHA S2048 D128 | 476 | 235 | 62 | 315 | 0.49× | 0.66× | 1.34× |
+  | fp16 GQA B4 S2048 D128 | 597 | 324 | 194 | 443 | 0.54× | 0.74× | 1.37× |
+  | fp16 GQA B8 S2048 D128 | 625 | 341 | 196 | 495 | 0.55× | 0.79× | 1.45× |
+  | fp16 GQA B4 S4096 D128 | 668 | 361 | 210 | 518 | 0.54× | 0.78× | 1.44× |
+  | fp16 GQA S2048 D64 | 404 | 222 | 271 | 308 | 0.55× | 0.76× | 1.39× |
+  | fp16 GQA S2048 D256 | 408 | 250 | 194 | 318 | 0.61× | 0.78× | 1.27× |
+  | bf16 GQA S2048 D128 | 466 | 252 | 197 | 322 | 0.54× | 0.69× | 1.28× |
+  | bf16 in-family D64 S2048 | 509 | 244 | 309 | 382 | 0.48× | 0.75× | 1.57× |
+  | bf16 in-family D64 S2016 B32 | 389 | 281 | 318 | 382 | 0.72× | **0.98×** | 1.36× |
+
+  Notes: oracle-best is the `nw4/mw32/t64/mfma32=1` config on the D128 rows (the heuristic picks the
+  same `nw4/mw32` minus the atom it can't see → the 1.27–1.45× gap **is** the MFMA atom). The
+  heuristic beats the analytic baseline on D128/D256 (up to 1.7×) but **trails it on D64 / in-family
+  bf16** (0.79–0.88×) — for small head dim the ML pick over-sizes the tile. Reproduce with
+  `*OracleConfigSweep*` (heuristic/oracle/analytic) and `*SdpaFwdPerf*` (heuristic TFLOPS); PyTorch
+  via the external `torch_sdpa_bench.py`.
 
 ### First-use latency (JIT / `buildPlan`)
 
