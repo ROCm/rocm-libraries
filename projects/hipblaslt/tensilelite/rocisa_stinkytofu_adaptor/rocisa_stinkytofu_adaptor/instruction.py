@@ -129,19 +129,10 @@ def _format_str(output_inline_asm: bool, inst_str: str, comment: str,
     return formatted + "\n"
 
 
-def _output_no_comment() -> bool:
-    """Read ``rocIsa.getInstance().getOutputOptions().outputNoComment``.
-
-    Lazy import to keep this module loadable in environments where
-    ``rocIsa`` hasn't been instantiated yet (test isolation).
-    """
-    try:
-        from . import rocIsa  # noqa: WPS433  (avoid import cycle at module load)
-
-        opts = rocIsa.getInstance().getOutputOptions()
-        return bool(getattr(opts, "outputNoComment", False))
-    except Exception:  # noqa: BLE001  (best-effort default)
-        return False
+# ``outputNoComment`` lives in ``base.py`` so ``code.TextBlock.toString``
+# and the instruction formatter share one reader. See ``base.outputNoComment``
+# for the full decoupling rationale (Python-side mirror, lazy-import, etc.).
+from .base import outputNoComment as _output_no_comment  # noqa: E402
 
 
 class Instruction:

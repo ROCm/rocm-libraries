@@ -75,10 +75,12 @@ class TestTextBlockConstruction(unittest.TestCase):
     def test_default_text_empty(self):
         tb = TextBlock()
         self.assertEqual(tb.text, "")
-        # name == "" matches rocisa's ``Item("")`` ctor; KernelWriter's
-        # removeItemsByName("foo") relies on TextBlocks NOT picking up
-        # "TextBlock" as a name (else mass-delete by class name would
-        # silently nuke all comments).
+        # rocisa C++: ``TextBlock(text) : Item(text)`` -- default ``text=""``
+        # produces ``name == ""`` because Item's ctor stores ``name = text``.
+        # The common ``addComment / addSpaceLine`` path goes through this
+        # branch via ``TextBlock(formatted_text)`` (non-empty), so ``name``
+        # will normally equal the formatted string -- see
+        # ``test_name_mirrors_text`` below.
         self.assertEqual(tb.name, "")
         self.assertIsNone(tb.parent)
 
@@ -86,10 +88,42 @@ class TestTextBlockConstruction(unittest.TestCase):
         tb = TextBlock("hello\n")
         self.assertEqual(tb.text, "hello\n")
 
+    def test_name_mirrors_text(self):
+        # rocisa parity (code.hpp:137-141): the Item(name) base ctor
+        # stores ``name = text``, so a non-empty TextBlock has its text
+        # as its name. KernelWriter does NOT rely on TextBlock names
+        # for ``removeItemsByName`` (it targets Module / Label names),
+        # but the adapter must still mirror the field exactly so any
+        # downstream tooling that inspects ``tb.name`` sees the same
+        # value across backends.
+        tb = TextBlock("// foo\n")
+        self.assertEqual(tb.name, "// foo\n")
+
+    def test_name_mirrors_text_for_comment_textblocks(self):
+        # Module.addComment("hello") creates TextBlock("// hello\n").
+        # After P1 (name == text), that TextBlock now has its full
+        # formatted text as its name. This is rocisa-faithful; documented
+        # here so reviewers can sanity-check the diff.
+        from rocisa_stinkytofu_adaptor.code import Module as _Module  # noqa: WPS433
+        m = _Module()
+        m.addComment("hello")
+        self.assertEqual(m.itemList[0].name, "// hello\n")
+
     def test_str_and_toString_match(self):
         tb = TextBlock("// foo\n")
         self.assertEqual(str(tb), "// foo\n")
         self.assertEqual(tb.toString(), "// foo\n")
+
+    def test_str_delegates_to_toString(self):
+        # ``__str__`` must route through ``toString`` so that any future
+        # gating on ``outputNoComment`` (or future production toggles)
+        # automatically applies to ``str(tb)`` too -- mirrors rocisa
+        # binding ``__str__ -> toString`` (code.cpp:142).
+        class _TBSub(TextBlock):
+            def toString(self):  # noqa: D401
+                return "<<gated>>"
+
+        self.assertEqual(str(_TBSub("hi")), "<<gated>>")
 
     def test_repr_shows_text(self):
         # Debug-only; exact format isn't pinned but ``text`` must appear.
@@ -104,10 +138,178 @@ class TestTextBlockConstruction(unittest.TestCase):
         self.assertEqual(tb.text, "a")
         self.assertEqual(c.text, "b")
 
+    def test_deepcopy_preserves_renamed_name(self):
+        # rocisa __deepcopy__ (code.cpp:143-148) rebuilds via the ctor
+        # AND patches ``name`` separately so renamed TextBlocks survive
+        # the clone. Verify the adapter matches.
+        tb = TextBlock("a")
+        tb.name = "renamed"
+        c = copy.deepcopy(tb)
+        self.assertEqual(c.name, "renamed")
+        self.assertEqual(c.text, "a")
+
     def test_prettyPrint_returns_string(self):
         # Defensive: Module.prettyPrint joins children's prettyPrint output;
         # a non-str return would explode the join.
         self.assertIsInstance(TextBlock("x").prettyPrint(), str)
+
+
+# ===========================================================================
+# TextBlock prettyPrint -- text content visibility + rocisa-shape parity.
+# ===========================================================================
+
+
+class TestTextBlockPrettyPrint(unittest.TestCase):
+    """``TextBlock.prettyPrint`` inherits ``rocisa::Item::prettyPrint``::
+
+        return indent + className + " " + toString();   // base.hpp:287-293
+
+    The line carries the text content and has NO trailing newline.
+    """
+
+    def test_pretty_print_includes_text(self):
+        # Regression for P3 -- the old impl dropped ``text`` and just
+        # emitted "{indent}TextBlock\n", silently hiding contents in
+        # any debug dump that walked a Module tree.
+        self.assertEqual(TextBlock("abc").prettyPrint(), "TextBlock abc")
+
+    def test_pretty_print_with_indent(self):
+        self.assertEqual(TextBlock("x").prettyPrint("|--"), "|--TextBlock x")
+
+    def test_pretty_print_no_trailing_newline(self):
+        # Item::prettyPrint base does NOT append \n -- Module's prettyPrint
+        # concatenates children verbatim and is responsible for the line
+        # break (it adds \n only on its own header; child Modules add their
+        # own header \n; leaf items either include \n in toString() or
+        # don't, just like rocisa).
+        self.assertFalse(TextBlock("x").prettyPrint().endswith("\n"))
+
+    def test_pretty_print_reflects_outputNoComment_suppression(self):
+        # Item::prettyPrint calls toString(); when ``outputNoComment`` is
+        # set, TextBlock.toString() returns "" -- so prettyPrint of a
+        # TextBlock degrades to ``"{indent}TextBlock "`` (trailing space
+        # is what Item::prettyPrint emits; matches rocisa C++).
+        from rocisa_stinkytofu_adaptor import rocIsa  # noqa: WPS433
+        opts = rocIsa.getInstance().getOutputOptions()
+        saved = opts.outputNoComment
+        try:
+            opts.outputNoComment = True
+            self.assertEqual(TextBlock("anything").prettyPrint(), "TextBlock ")
+        finally:
+            opts.outputNoComment = saved
+
+
+# ===========================================================================
+# TextBlock.toString -- outputNoComment production-build suppression.
+# ===========================================================================
+
+
+class TestTextBlockOutputNoComment(unittest.TestCase):
+    """``rocIsa.outputNoComment=True`` blanket-suppresses TextBlock text.
+
+    Mirrors rocisa code.hpp:154-159 -- the flag suppresses EVERY TextBlock
+    payload (comments AND inline-asm) so production builds emit no human-
+    readable annotations.
+    """
+
+    def setUp(self):
+        # Snapshot the flag so we can restore after each test, regardless
+        # of pass/fail. Important because the singleton is process-wide.
+        from rocisa_stinkytofu_adaptor import rocIsa  # noqa: WPS433
+        self._opts = rocIsa.getInstance().getOutputOptions()
+        self._saved = self._opts.outputNoComment
+
+    def tearDown(self):
+        self._opts.outputNoComment = self._saved
+
+    def test_default_does_not_suppress(self):
+        self._opts.outputNoComment = False
+        self.assertEqual(TextBlock("// comment\n").toString(), "// comment\n")
+        self.assertEqual(str(TextBlock("// comment\n")), "// comment\n")
+
+    def test_outputNoComment_blanks_text(self):
+        # Regression for P2 -- the old toString returned ``self.text``
+        # unconditionally, so production-build kernels carried every
+        # comment & inline-asm fragment in the emitted output.
+        self._opts.outputNoComment = True
+        self.assertEqual(TextBlock("// comment\n").toString(), "")
+        self.assertEqual(str(TextBlock("// comment\n")), "")
+
+    def test_outputNoComment_suppresses_inline_asm_too(self):
+        # Not just comments: rocisa's gate is "blanket suppress" -- inline
+        # asm fragments (which KernelWriter occasionally injects as
+        # TextBlocks) get stripped just the same. We must match.
+        self._opts.outputNoComment = True
+        self.assertEqual(TextBlock("v_mov_b32 v0, v1").toString(), "")
+
+    def test_outputNoComment_module_str_concats_empty(self):
+        # Module.toString concatenates ``str(child)`` -- with the flag
+        # on, every TextBlock collapses to "" so the whole Module string
+        # contains only non-TextBlock items.
+        from rocisa_stinkytofu_adaptor.code import Module as _Module  # noqa: WPS433
+        m = _Module()
+        m.add(TextBlock("// a\n"))
+        m.add(TextBlock("// b\n"))
+        self._opts.outputNoComment = True
+        self.assertEqual(str(m), "")
+
+    def test_outputNoComment_round_trip_via_setOutputOptions(self):
+        # rocIsa.setOutputOptions(opts) is how Tensile ships the flag to
+        # ParallelMap2 workers; verify the helper picks the new value up.
+        from rocisa_stinkytofu_adaptor import rocIsa, OutputOptions  # noqa: WPS433
+        rocIsa.getInstance().setOutputOptions(OutputOptions(outputNoComment=True))
+        try:
+            self.assertEqual(TextBlock("x").toString(), "")
+        finally:
+            rocIsa.getInstance().setOutputOptions(
+                OutputOptions(outputNoComment=self._saved)
+            )
+            # Re-snapshot because we just swapped the *instance*.
+            self._opts = rocIsa.getInstance().getOutputOptions()
+
+
+# ===========================================================================
+# TextBlock pickle -- (name, text) round-trip mirroring rocisa C++.
+# ===========================================================================
+
+
+class TestTextBlockPickle(unittest.TestCase):
+    """rocisa code.cpp:149-154 -- ``(name, text)`` tuple round-trip."""
+
+    def test_pickle_round_trip_default(self):
+        tb = TextBlock("hello\n")
+        # name defaults to text after P1, so both are "hello\n".
+        clone = pickle.loads(pickle.dumps(tb))
+        self.assertEqual(clone.name, "hello\n")
+        self.assertEqual(clone.text, "hello\n")
+        self.assertIsNone(clone.parent)
+        self.assertIsNot(clone, tb)
+
+    def test_pickle_round_trip_after_rename(self):
+        # rocisa __setstate__ rebuilds via TextBlock(text), then patches
+        # ``name``. Verify the two-step actually preserves a name that
+        # was changed post-construction.
+        tb = TextBlock("payload")
+        tb.name = "label-X"
+        clone = pickle.loads(pickle.dumps(tb))
+        self.assertEqual(clone.name, "label-X")
+        self.assertEqual(clone.text, "payload")
+
+    def test_pickle_protocol_2_and_5(self):
+        # Sanity: KernelWriter / ParallelMap2 don't pin a protocol, so
+        # cover the common ones (2 = py3 default-ish, 5 = py3.8+ buffer
+        # protocol used by multiprocessing fast path).
+        tb = TextBlock("v_mov_b32 v0, v1")
+        for proto in (2, pickle.HIGHEST_PROTOCOL):
+            clone = pickle.loads(pickle.dumps(tb, protocol=proto))
+            self.assertEqual(clone.text, "v_mov_b32 v0, v1")
+            self.assertEqual(clone.name, "v_mov_b32 v0, v1")
+
+    def test_getstate_returns_name_text_tuple(self):
+        # Pin the wire format so any future shape change is intentional.
+        tb = TextBlock("payload")
+        tb.name = "lbl"
+        self.assertEqual(tb.__getstate__(), ("lbl", "payload"))
 
 
 # ===========================================================================
@@ -724,6 +926,12 @@ class TestModulePrettyPrint(unittest.TestCase):
         out = Module("Foo").prettyPrint()
         self.assertIn('Module "Foo"', out)
 
+    def test_empty_module_exact_format(self):
+        # rocisa code.hpp:418-427 -- ``{indent}{ClassName} "{name}"\n`` and
+        # nothing else when the module is empty. Pin the exact bytes so
+        # any future format drift surfaces here, not in a downstream diff.
+        self.assertEqual(Module("Foo").prettyPrint(), 'Module "Foo"\n')
+
     def test_nested_structure(self):
         outer = Module("Outer")
         inner = Module("Inner")
@@ -734,6 +942,68 @@ class TestModulePrettyPrint(unittest.TestCase):
         self.assertIn('Module "Inner"', out)
         self.assertIn("TextBlock", out)
 
+    def test_includes_textblock_payload(self):
+        # Regression for P3: the old TextBlock.prettyPrint dropped its
+        # text, so debugging a tree gave you no idea what the comments
+        # said. After the fix, each TextBlock line contains its content.
+        outer = Module("Outer")
+        outer.add(TextBlock("INTERESTING-PAYLOAD"))
+        out = outer.prettyPrint()
+        self.assertIn("INTERESTING-PAYLOAD", out)
+
+    def test_nested_exact_concat_format(self):
+        # Byte-for-byte format check against rocisa C++:
+        #   - Module header line ends with `"\n`
+        #   - Each child's prettyPrint(indent + "|--") is concatenated
+        #     verbatim (no extra separators / no rstrip / no joins)
+        #   - Sub-Module brings its own trailing newline (its header)
+        #   - Leaf TextBlock has NO trailing newline (Item base)
+        outer = Module("Outer")
+        inner = Module("Inner")
+        inner.add(TextBlock("leaf"))
+        outer.add(inner)
+        expected = (
+            'Module "Outer"\n'
+            '|--Module "Inner"\n'
+            '|--|--TextBlock leaf'
+        )
+        self.assertEqual(outer.prettyPrint(), expected)
+
+    def test_deep_nesting_indent_doubles(self):
+        # Each level adds "|--" to the indent. A 3-level nest has 3 |--.
+        root = Module("L0")
+        l1 = Module("L1")
+        l2 = Module("L2")
+        l2.add(TextBlock("x"))
+        l1.add(l2)
+        root.add(l1)
+        expected = (
+            'Module "L0"\n'
+            '|--Module "L1"\n'
+            '|--|--Module "L2"\n'
+            '|--|--|--TextBlock x'
+        )
+        self.assertEqual(root.prettyPrint(), expected)
+
+    def test_starting_indent_param_propagates(self):
+        # ``prettyPrint("> ")`` ships the indent through to children too.
+        m = Module("Root")
+        m.add(TextBlock("x"))
+        self.assertEqual(m.prettyPrint("> "), '> Module "Root"\n> |--TextBlock x')
+
+    def test_multiple_siblings_concatenated_in_order(self):
+        # rocisa: ``for(const auto& i : itemList) ostream += i->prettyPrint(...)``.
+        # Two siblings emit two consecutive child lines, in itemList order.
+        m = Module("M")
+        m.add(TextBlock("first"))
+        m.add(TextBlock("second"))
+        # No newline between the two TextBlock lines because Item::prettyPrint
+        # has no trailing \n -- they fuse exactly as in rocisa.
+        self.assertEqual(
+            m.prettyPrint(),
+            'Module "M"\n|--TextBlock first|--TextBlock second',
+        )
+
     def test_indent_propagates(self):
         # Inner items should be indented more than the outer header.
         outer = Module("Outer")
@@ -741,6 +1011,23 @@ class TestModulePrettyPrint(unittest.TestCase):
         out = outer.prettyPrint()
         lines = [ln for ln in out.split("\n") if ln]
         self.assertTrue(any("|--" in ln for ln in lines))
+
+    def test_dummy_child_without_prettyPrint_falls_back(self):
+        # If a child returns a non-string from prettyPrint (e.g. dummy
+        # shim's noop __getattr__), Module emits a class-name fallback
+        # line so the tree dump stays usable during bring-up.
+        class _NoPretty:
+            def __str__(self):
+                return ""
+
+            def prettyPrint(self, indent=""):
+                return None  # simulate dummy ``_noop``
+
+        m = Module("M")
+        m.add(_NoPretty())
+        out = m.prettyPrint()
+        self.assertIn("_NoPretty", out)
+        self.assertTrue(out.endswith("\n"))
 
 
 # ===========================================================================
@@ -985,6 +1272,133 @@ class TestToStinkyAsm(unittest.TestCase):
         m.add(self._make_fake_vmovb32())
         asm = m.to_stinky_asm((12, 5, 0))
         self.assertIn("v_mov_b32", asm.emitAssembly())
+
+
+# ===========================================================================
+# KernelWriter-shaped integration -- the actual usage patterns from
+# tensilelite KernelWriter that the adapter has to support 1:1.
+# ===========================================================================
+
+
+class TestKernelWriterModuleUsage(unittest.TestCase):
+    """Pin the Module/TextBlock interactions KernelWriter relies on.
+
+    KernelWriter constructs a kernel as a Module containing named child
+    Modules (one per logical phase: SetupVgpr, LoopHeader, ...), interleaved
+    with comment / spacing TextBlocks. It then uses ``findNamedItem`` to
+    splice extra code into a specific phase, and ``removeItemsByName`` to
+    drop a section entirely. Cover the combinations that matter.
+    """
+
+    def _make_kernel_skeleton(self):
+        """Build a realistic mini-Module: comments + named sub-Modules."""
+        kernel = Module("MyKernel")
+        kernel.addComment0("Kernel preamble")
+        kernel.add(Module("SetupVgpr"))
+        kernel.addComment("BetaCheck setup")
+        kernel.add(Module("BetaCheck"))
+        kernel.addSpaceLine()
+        kernel.add(Module("LoopBody"))
+        kernel.addComment("Cleanup")
+        kernel.add(Module("Cleanup"))
+        return kernel
+
+    def test_findNamedItem_skips_comment_textblocks(self):
+        # After P1 TextBlock.name == text, so a TextBlock from addComment
+        # has name == "// BetaCheck setup\n" -- which must NOT collide
+        # with the named ``Module("BetaCheck")`` lookup.
+        kernel = self._make_kernel_skeleton()
+        beta = kernel.findNamedItem("BetaCheck")
+        self.assertIsNotNone(beta)
+        self.assertIsInstance(beta, Module)
+        self.assertEqual(beta.name, "BetaCheck")
+
+    def test_findNamedItem_returns_None_for_partial_match(self):
+        # ``BetaCheck setup`` is a comment's name (well, the formatted
+        # ``// BetaCheck setup\n`` is). ``findNamedItem`` is exact-match
+        # so the substring ``"BetaCheck"`` of the comment does NOT
+        # short-circuit the real ``Module("BetaCheck")`` -- otherwise
+        # KernelWriter splicing logic would target the wrong node.
+        kernel = self._make_kernel_skeleton()
+        # The comment's exact name (the formatted text), not just substring:
+        comment_name = "// BetaCheck setup\n"
+        found = kernel.findNamedItem(comment_name)
+        # This DOES match the TextBlock by exact name -- demonstrating
+        # the rocisa-faithful exact-equality semantic. KernelWriter
+        # never calls findNamedItem with such a string, so no harm done.
+        self.assertIsNotNone(found)
+        self.assertNotIsInstance(found, Module)
+
+    def test_removeItemsByName_targets_module_not_textblock(self):
+        # KernelWriter calls e.g. ``module.removeItemsByName("LoopBody")``;
+        # only the Module with that exact name is removed, comments stay.
+        kernel = self._make_kernel_skeleton()
+        before = kernel.itemsSize()
+        kernel.removeItemsByName("LoopBody")
+        self.assertEqual(kernel.itemsSize(), before - 1)
+        # Comments untouched:
+        self.assertTrue(
+            any(
+                isinstance(it, TextBlock) and "Cleanup" in it.text
+                for it in kernel.itemList
+            )
+        )
+
+    def test_findNamedItem_returns_first_among_modules_only(self):
+        # A subtle KernelWriter assumption: ``findNamedItem`` is identity-
+        # free, name-based, first-match. We covered the first-match case
+        # in TestModuleFind; here pin the cross-Module-and-TextBlock
+        # variant for a more realistic kernel skeleton.
+        kernel = self._make_kernel_skeleton()
+        setup = kernel.findNamedItem("SetupVgpr")
+        self.assertEqual(setup.name, "SetupVgpr")
+
+    def test_emitted_asm_contains_comments_by_default(self):
+        # Default OutputOptions(outputNoComment=False): every comment makes
+        # it into the rendered string. This is the development-build path.
+        from rocisa_stinkytofu_adaptor import rocIsa  # noqa: WPS433
+        opts = rocIsa.getInstance().getOutputOptions()
+        saved = opts.outputNoComment
+        try:
+            opts.outputNoComment = False
+            kernel = self._make_kernel_skeleton()
+            text = str(kernel)
+            self.assertIn("// BetaCheck setup", text)
+            self.assertIn("// Cleanup", text)
+        finally:
+            opts.outputNoComment = saved
+
+    def test_emitted_asm_strips_comments_when_outputNoComment(self):
+        # Production build path (P2 regression). With the flag on, every
+        # TextBlock in the kernel -- including header / divider / spacing
+        # / per-section comments -- collapses to "". Named sub-Modules
+        # still render normally (they have no text payload).
+        from rocisa_stinkytofu_adaptor import rocIsa  # noqa: WPS433
+        opts = rocIsa.getInstance().getOutputOptions()
+        saved = opts.outputNoComment
+        try:
+            opts.outputNoComment = True
+            kernel = self._make_kernel_skeleton()
+            text = str(kernel)
+            self.assertNotIn("BetaCheck setup", text)
+            self.assertNotIn("Cleanup", text)
+            self.assertNotIn("//", text)
+            self.assertNotIn("/*", text)
+        finally:
+            opts.outputNoComment = saved
+
+    def test_replaceItem_swap_preserves_outer_parent(self):
+        # KernelWriter occasionally swaps a phase Module wholesale
+        # (e.g. choosing between two LoopBody implementations). The
+        # replacement must inherit the outer Module as its parent, or
+        # any subsequent tree walk that ascends would break.
+        kernel = Module("kernel")
+        old = Module("LoopBody")
+        new = Module("LoopBody")
+        kernel.add(old)
+        kernel.replaceItem(old, new)
+        self.assertIs(new.parent, kernel)
+        self.assertIs(kernel.findNamedItem("LoopBody"), new)
 
 
 # ===========================================================================

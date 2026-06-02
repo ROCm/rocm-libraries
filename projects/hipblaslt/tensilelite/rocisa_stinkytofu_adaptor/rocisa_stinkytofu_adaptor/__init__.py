@@ -72,7 +72,12 @@ from typing import Any, Dict, Tuple
 
 from . import caps as _caps
 from ._dummy import make_dummy_class, make_dummy_func
-from .base import KernelInfo, OutputOptions
+from .base import (
+    KernelInfo,
+    OutputOptions,
+    getOutputOptions as _base_getOutputOptions,
+    setOutputOptions as _base_setOutputOptions,
+)
 
 # Make submodules importable as attributes (``rocisa.code`` etc.). The
 # rocisa dispatcher in ``tensilelite/rocisa/rocisa/__init__.py`` is what
@@ -155,7 +160,13 @@ class rocIsa:
         self._current_isa: Tuple[int, int, int] | None = None
         self._is_init: bool = False
         self._assembler_path: str = ""
-        self._output_options: OutputOptions = OutputOptions()
+        # NOTE: ``OutputOptions`` state lives in ``base.py`` as a module-
+        # level singleton; the ``getOutputOptions`` / ``setOutputOptions``
+        # methods below are forwarding shims kept for rocisa API surface
+        # compatibility. See ``base.py`` design note for why the state
+        # was sunk out of this class. KernelInfo / IsaInfo dict /
+        # vgprIdx are still held here -- they will receive the same
+        # treatment in follow-up commits.
         self._kernel_info: KernelInfo = KernelInfo()
         # ISA-keyed snapshot mirroring rocIsa::m_isainfo. Populated by
         # ``init()`` and shipped to workers by ``setData(getData())``.
@@ -234,12 +245,17 @@ class rocIsa:
         return self._kernel_info
 
     # --- Output options (mutated in main, shipped to workers via pickle). --
+    #
+    # Both methods forward to the module-level state in ``base.py``. The
+    # rocisa API surface stays unchanged for KernelWriter callers
+    # (``rocIsa.getInstance().getOutputOptions()`` still works); only the
+    # storage location of the actual ``OutputOptions`` instance moved.
 
     def getOutputOptions(self) -> OutputOptions:
-        return self._output_options
+        return _base_getOutputOptions()
 
     def setOutputOptions(self, options: OutputOptions) -> None:
-        self._output_options = options
+        _base_setOutputOptions(options)
 
     # --- Pickle-friendly snapshot of all initialised ISAs. ----------------
 

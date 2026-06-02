@@ -84,6 +84,7 @@ import copy as _copy
 from typing import Any, Iterable, List, Optional, Sequence
 
 from ._dummy import make_dummy_class
+from .base import outputNoComment as _outputNoComment
 
 _P = "rocisa.code"
 
@@ -92,43 +93,91 @@ _P = "rocisa.code"
 # TextBlock -- raw text leaf node.
 # ---------------------------------------------------------------------------
 #
-# rocisa::TextBlock holds a single string and emits it verbatim. We keep
-# ``name = ""`` to match the C++ ctor (``Item("")``) so Module's
-# ``findNamedItem`` / ``removeItemsByName`` behave identically for
-# unnamed TextBlocks (which is the common case: addComment / addSpaceLine
-# both create unnamed TextBlocks).
+# Mirrors ``rocisa::TextBlock`` (code.hpp:133-160 + code.cpp:140-155). The
+# binding boils down to:
+#   - ctor ``TextBlock(text) : Item(text), text(text)``       -- name == text
+#   - ``toString()`` returns ``text`` unless ``outputNoComment`` is set
+#   - ``__getstate__`` / ``__setstate__`` round-trip ``(name, text)``
+#   - ``prettyPrint`` inherits ``Item::prettyPrint`` -- ``indent + className
+#     + " " + toString()`` with NO trailing newline
+# We mirror every one of these points so an adapter swap is byte-identical
+# at both the asm-emit layer (``Module.toString``) and the debug-dump layer
+# (``Module.prettyPrint``).
 class TextBlock:
-    """Raw text leaf; prints ``self.text`` verbatim.
+    """Raw text leaf; mirror of ``rocisa::TextBlock`` (code.hpp:133-160).
 
     Created internally by ``Module.addSpaceLine`` / ``Module.addComment*``
     and also constructed directly by KernelWriter for inline asm / macro
     snippets. Has no logicalIR counterpart -- ``Module.to_stinky_asm``
     silently skips TextBlock items.
+
+    Production-build comment suppression: ``rocIsa.getOutputOptions().
+    outputNoComment = True`` causes ``toString()`` to return ``""`` for
+    every TextBlock (rocisa code.hpp:154-159 -- the flag is a blanket
+    suppressor, not just for ``// foo`` comments; inline-asm TextBlocks
+    are also stripped). We read the flag through ``base.outputNoComment()``
+    so the adapter stays decoupled from the rocisa C++ singleton.
     """
 
     __slots__ = ("name", "text", "parent")
 
     def __init__(self, text: str = ""):
-        self.name: str = ""
+        # rocisa C++: ``TextBlock(text) : Item(text), text(text)`` -- the
+        # base ``Item(name)`` ctor stores ``name = text``. Match exactly so
+        # ``Module.findNamedItem`` / ``removeItemsByName`` see identical
+        # behaviour on both backends. (Default text="" still gives name="",
+        # so the common addComment / addSpaceLine path is unchanged.)
+        self.name: str = text
         self.text: str = text
         self.parent: Optional["Module"] = None
 
     def __str__(self) -> str:
-        return self.text
+        # rocisa binds ``__str__`` directly to ``toString`` (code.cpp:142);
+        # keep the same indirection here so any future toString gating
+        # automatically propagates to ``str(tb)``.
+        return self.toString()
 
     def toString(self) -> str:
+        # rocisa code.hpp:154-159 -- the ``outputNoComment`` flag blanket-
+        # suppresses TextBlock output regardless of whether the text is a
+        # comment or an inline-asm fragment. Production builds rely on
+        # this to strip every human-readable annotation in one pass.
+        if _outputNoComment():
+            return ""
         return self.text
 
     def prettyPrint(self, indent: str = "") -> str:
-        return f"{indent}TextBlock\n"
+        # Inherits ``Item::prettyPrint`` (base.hpp:287-293):
+        #   ``indent + className + " " + toString()`` -- NO trailing \n.
+        # Calling ``toString()`` (not ``self.text``) ensures the dump
+        # respects ``outputNoComment`` the same way the emitted asm does.
+        return f"{indent}TextBlock {self.toString()}"
 
     def __deepcopy__(self, memo):
+        # rocisa binding lambda (code.cpp:143-148) copies via the public
+        # ctor and then patches ``name`` separately. Since our ctor already
+        # sets ``name = text``, replicate the same patch path so callers
+        # that mutate ``name`` post-construction (rare but legal) survive
+        # the clone.
         tb = TextBlock.__new__(TextBlock)
         tb.name = self.name
         tb.text = self.text
         tb.parent = None  # cloned subtree gets re-parented by Module.__deepcopy__
         memo[id(self)] = tb
         return tb
+
+    def __getstate__(self) -> tuple:
+        # rocisa code.cpp:149-150 -- ``make_tuple(name, text)``.
+        return (self.name, self.text)
+
+    def __setstate__(self, state: tuple) -> None:
+        # rocisa code.cpp:151-154 -- rebuild via ``TextBlock(text)`` (which
+        # sets name=text), then patch ``name`` from the stored value. The
+        # two-step matters when a TextBlock was renamed after construction.
+        name, text = state
+        self.name = name
+        self.text = text
+        self.parent = None
 
     def __repr__(self) -> str:
         return f"TextBlock({self.text!r})"
@@ -191,6 +240,23 @@ class Module:
     (matches rocisa, which compares ``shared_ptr<Item>`` equality).
     Children with a ``.parent`` attribute are reparented to this Module
     on insertion so KernelWriter's tree-walks ascend correctly.
+
+    Item-inherited read-only properties NOT exposed here (intentional):
+        ``asmCaps`` / ``archCaps`` / ``regCaps`` / ``asmBugs`` / ``vgprIdx``
+        / ``vgprMsb`` / ``kernel`` (the seven ``def_prop_ro`` entries on
+        ``rocisa::Item`` -- see ``rocisa/src/base.cpp:202-212``). These
+        proxy through the rocisa C++ singleton in the upstream binding.
+        KernelWriter only reads them off Instruction subclasses (where
+        they ARE wired up in ``instruction.py``); a workspace-wide grep
+        for ``\\.asmCaps`` / ``\\.kernel`` on Module instances comes back
+        empty, so we deliberately keep this surface narrow rather than
+        reach back into the C++ singleton. Add a property here the day
+        KernelWriter actually hits one of them on a Module.
+
+    Pickling: ``__reduce__`` raises ``RuntimeError("Module is not
+    picklable")``, matching rocisa code.cpp -- ``ParallelMap2`` workers
+    are expected to round-trip the kernel **arguments** (and let each
+    worker rebuild its own Module tree from scratch), not the IR.
 
     Left-path entry point::
 
@@ -396,20 +462,32 @@ class Module:
         return self.toString()
 
     def prettyPrint(self, indent: str = "") -> str:
-        lines = [f'{indent}{type(self).__name__} "{self.name}"']
+        """Tree dump mirroring ``rocisa::Module::prettyPrint`` (code.hpp:418-427).
+
+        Format (byte-for-byte):
+
+            {indent}{ClassName} "{name}"\\n        <- this Module's header
+            {indent}|--child.prettyPrint(indent+"|--")
+            ...
+
+        Children are concatenated **verbatim** (no separator) -- each child
+        is expected to emit its own trailing ``\\n`` (Module's header line
+        does, ``Instruction.toString`` does; ``Item::prettyPrint`` does
+        NOT, matching rocisa C++). Dummy shims whose ``__getattr__`` makes
+        ``prettyPrint`` return ``None`` fall back to a class-name line with
+        an explicit ``\\n`` so the dump stays well-formed during bring-up.
+        """
+        out = f'{indent}{type(self).__name__} "{self.name}"\n'
         for it in self.itemList:
             pp = getattr(it, "prettyPrint", None)
             if callable(pp):
-                # Defensive: dummy shims return None from their noop __getattr__
-                # which would explode the join. Tolerate non-str returns.
                 res = pp(indent + "|--")
                 if isinstance(res, str):
-                    lines.append(res.rstrip("\n"))
-                else:
-                    lines.append(f"{indent}|--{type(it).__name__}")
-            else:
-                lines.append(f"{indent}|--{type(it).__name__}")
-        return "\n".join(lines) + "\n"
+                    out += res
+                    continue
+                # dummy ``_noop`` returned None -- fall through to fallback
+            out += f"{indent}|--{type(it).__name__}\n"
+        return out
 
     # ------------------------------------------------------------- pickle
     def __deepcopy__(self, memo):
