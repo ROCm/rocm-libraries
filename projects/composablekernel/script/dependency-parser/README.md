@@ -218,6 +218,9 @@ python3 main.py optimize <depmap.json> <file1> <file2> ...
 
 ## CI Integration
 
+> **CI gardeners:** See [CI_GARDENING.md](CI_GARDENING.md) for the decision
+> tree, artifact reference, common failure scenarios, and emergency overrides.
+
 ### Jenkins Example
 
 ```groovy
@@ -628,33 +631,41 @@ Validated that new pre-build method produces identical test selection as legacy 
 ### Running Tests
 
 ```bash
-# Unit tests
 cd script/dependency-parser
-python3 -m pytest tests/test_cmake_dependency_analyzer.py -v
 
-# Integration tests (requires build/)
-python3 -m pytest tests/test_integration.py -v
+# First time: create the venv (uv reads pyproject.toml)
+uv sync
 
 # All tests
-python3 -m pytest tests/ -v
-```
+uv run pytest tests/ -v
 
-### Test Coverage
+# Unit tests only (fast, no build required)
+uv run pytest tests/ -v --ignore=tests/test_integration.py
 
-```bash
-python3 -m pytest tests/ --cov=src --cov-report=html
+# Integration tests (requires a configured build/ directory)
+uv run pytest tests/test_integration.py -v
+
+# Coverage
+uv run pytest tests/ --cov=src --cov-report=html
 ```
 
 ## File Descriptions
 
 | File | Description |
 |------|-------------|
-| `main.py` | Unified CLI entry point |
-| `src/cmake_dependency_analyzer.py` | NEW: Pre-build dependency analyzer |
-| `src/enhanced_ninja_parser.py` | LEGACY: Post-build dependency parser |
-| `src/selective_test_filter.py` | Test selection based on git changes |
-| `tests/test_cmake_dependency_analyzer.py` | Unit tests (23 tests) |
-| `tests/test_integration.py` | Integration tests with real build (9 tests) |
+| `main.py` | Unified CLI entry point (`cmake-parse`, `select`, `validate`, `audit`, `optimize`) |
+| `smart_build_ci.sh` | CI orchestrator: safety check → depmap → select → output artifacts |
+| `smart_build_and_test.sh` | Full CI driver: invokes smart_build_ci.sh, then builds + runs selected tests |
+| `ci_safety_check.sh` | Decides selective vs full build (cmake/tooling changes → full) |
+| `validate_pr.sh` | Developer tool: offline as-if comparison of smart vs legacy selection for a PR |
+| `filter_oracle.py` | Reachability guardrail (CI) and build-filter probe oracle |
+| `analyze_pr_selection.py` | Maps PR file lists through depmap for corpus analysis |
+| `src/cmake_dependency_analyzer.py` | Pre-build dependency extractor (`clang -MM` and `clang-scan-deps`) |
+| `src/validate_selection.py` | Validates selected executables against `ninja -t targets all` |
+| `src/selective_test_filter.py` | Test selection from git diff + depmap lookup |
+| `src/enhanced_ninja_parser.py` | LEGACY: Post-build dependency parser (`ninja -t deps`) |
+| `tests/` | Unit and integration tests (82 total; run with `uv run pytest tests/`) |
+| `CI_GARDENING.md` | **Operator runbook**: decision tree, artifacts, failure scenarios, overrides |
 | `README_legacy.md` | Documentation for legacy post-build approach |
 
 ## References
