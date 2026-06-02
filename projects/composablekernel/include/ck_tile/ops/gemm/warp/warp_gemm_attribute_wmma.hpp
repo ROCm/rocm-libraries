@@ -172,7 +172,9 @@ struct WarpGemmAttributeWmma
                                                                 typename Impl::CDataType,
                                                                 Impl::kM,
                                                                 Impl::kN,
-                                                                Impl::kK>>,
+                                                                Impl::kK,
+                                                                void,
+                                                                typename Impl::DDataType>>,
                            Impl>;
 
     using ADataType = typename Impl::ADataType;

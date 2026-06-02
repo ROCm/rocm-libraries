@@ -92,8 +92,7 @@ struct WarpGemmAttributeWmmaImpl
     template <typename... Params>
     CK_TILE_DEVICE DVecType operator()(const AVecType& a_vec, const BVecType& b_vec) const
     {
-        return bit_cast<DVecType>(
-            Traits::template wmma_intrinsic<Params...>(a_vec, b_vec, CVecType{0.f}));
+        return Traits::template wmma_intrinsic<Params...>(a_vec, b_vec, CVecType{0.f});
     }
 
     template <typename... Params, typename AScaleType, typename BScaleType>
