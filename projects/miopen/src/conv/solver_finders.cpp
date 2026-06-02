@@ -218,14 +218,18 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
     if(!arch.empty())
         return ret;
 
+    const auto is_naive_solver = [](const solver::ConvSolution& s) {
+        return s.solver_id.find("Naive") != std::string::npos;
+    };
+
     bool naive_disable       = env::value(MIOPEN_NAIVE_DISABLE_IF_ALT);
     bool using_search_cutoff = env::value(MIOPEN_SEARCH_CUTOFF);
     // Defer Naive only when a non-Naive alternative exists across all algorithms or this one.
     const bool defer_naive =
-        naive_disable && (non_naive_succeeded ||
-                          std::any_of(solutions.begin(), solutions.end(), [](const auto& s) {
-                              return s.solver_id.find("Naive") == std::string::npos;
-                          }));
+        naive_disable &&
+        (non_naive_succeeded || std::any_of(solutions.begin(), solutions.end(), [&](const auto& s) {
+             return !is_naive_solver(s);
+         }));
     auto selected     = miopen::solver::ConvSolution{miopenStatusUnknownError};
     auto best         = std::numeric_limits<float>::max();
     auto best_invoker = Invoker{};
@@ -237,15 +241,15 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
     if(defer_naive)
     {
         std::stable_partition(order.begin(), order.end(), [&](std::size_t i) {
-            return solutions[i].solver_id.find("Naive") == std::string::npos;
+            return !is_naive_solver(solutions[i]);
         });
     }
 
-    for(std::size_t i : order)
+    for(std::size_t idx : order)
     {
-        const auto& sol = solutions[i];
+        const auto& sol = solutions[idx];
 
-        const bool is_naive = sol.solver_id.find("Naive") != std::string::npos;
+        const bool is_naive = is_naive_solver(sol);
         if(naive_disable && is_naive)
         {
             if(defer_naive && non_naive_succeeded)
