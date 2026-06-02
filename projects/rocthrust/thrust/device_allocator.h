@@ -75,7 +75,7 @@ public:
    *  \param alignment alignment size, in bytes
    *  \return a pointer to the newly allocated storage.
    */
-  THRUST_NODISCARD THRUST_HOST virtual pointer
+  [[nodiscard]] THRUST_HOST virtual pointer
   do_allocate(std::size_t bytes, std::size_t alignment = THRUST_MR_DEFAULT_ALIGNMENT) override
   {
     return pointer(m_upstream->do_allocate(bytes, alignment).get());

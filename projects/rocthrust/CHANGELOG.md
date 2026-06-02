@@ -3,6 +3,15 @@
 Documentation for rocThrust available at
 [https://rocm.docs.amd.com/projects/rocThrust/en/latest/](https://rocm.docs.amd.com/projects/rocThrust/en/latest/).
 
+## rocThrust *.*.* for ROCm *.*.* (CCCL 3.1 parity)
+### Added
+
+### Changed
+
+### Removed
+* Removed `THRUST_NODISCARD`.
+
+
 ## rocThrust 5.0.0 for ROCm 10.0.0
 
 ### Added
