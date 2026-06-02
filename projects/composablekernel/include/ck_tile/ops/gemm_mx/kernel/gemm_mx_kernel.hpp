@@ -189,12 +189,6 @@ struct MXGemmKernel : UniversalGemmKernel<TilePartitioner_, MXGemmPipeline_, Epi
                   "boundary, so partial K tiles produce silently wrong results. Choose K so "
                   "that K is a multiple of KPerBlock * k_batch.");
 
-    // Split-K relies on the row-major SplitKBatchOffset: operator() reads this k_id's K-element
-    // start from as_k_split_offset[0], and the packed-scale / flat-B K offsets are derived from
-    // it. That identity (as_k_split_offset[0] == logical K start) only holds for row-major A.
-    static_assert(std::is_same_v<ALayout, tensor_layout::gemm::RowMajor>,
-                  "MX GEMM kernel assumes row-major A.");
-
     // Single source of truth for the split-K atomic-add precondition, shared by the runtime
     // check in IsSupportedArgument and the atomic_add dispatch in operator(). Split-K
     // accumulates each k_id's partial C tile with atomic_add; the CShuffle epilogue can only
@@ -313,6 +307,21 @@ struct MXGemmKernel : UniversalGemmKernel<TilePartitioner_, MXGemmPipeline_, Epi
                 if(log)
                     CK_TILE_ERROR("MX GEMM: split-K (k_batch > 1) requires an even C vector size "
                                   "for fp16/bf16 outputs (atomic_add epilogue constraint).");
+                return false;
+            }
+        }
+
+        // Split-K derives this k_id's logical K start from the row-major SplitKBatchOffset
+        // (as_k_split_offset[0]) to offset the packed-scale / flat-B windows; for column-major A
+        // that field is stride-scaled, so split-K with non-row-major A is not yet supported.
+        // (k_batch == 1 is unaffected -- the offset is 0 and unused.) When col-major A lands for
+        // non-preshuffle, extend the split-K K-offset here instead of this reject.
+        if constexpr(!std::is_same_v<ALayout, tensor_layout::gemm::RowMajor>)
+        {
+            if(kargs.k_batch > 1)
+            {
+                if(log)
+                    CK_TILE_ERROR("MX GEMM: split-K (k_batch > 1) currently requires row-major A.");
                 return false;
             }
         }
@@ -778,9 +787,10 @@ struct MXGemmKernel : UniversalGemmKernel<TilePartitioner_, MXGemmPipeline_, Epi
             const SplitKBatchOffset splitk_batch_offset(
                 static_cast<const typename Underlying::KernelArgs&>(kargs));
 
-            // This k_id's logical K-element start. For row-major A (see static_assert above)
-            // as_k_split_offset[0] is exactly that offset, so reuse it rather than recomputing the
-            // split formula; the packed-scale and flat-B K offsets are derived from it.
+            // This k_id's logical K-element start. For row-major A, as_k_split_offset[0] is exactly
+            // that offset, so reuse it rather than recomputing the split formula; the packed-scale
+            // and flat-B K offsets are derived from it. Split-K with non-row-major A is rejected in
+            // IsSupportedArgument; for k_batch == 1 this value is 0 and unused for any layout.
             const index_t k_elem_offset =
                 amd_wave_read_first_lane(splitk_batch_offset.as_k_split_offset[I0]);
 
