@@ -5,9 +5,9 @@
 
 import sys
 from pathlib import Path
-from typing import Any, List, Optional, TextIO
+from typing import List, Optional, TextIO
 
-from ..config.benchmark_config import ABTestConfig, BenchmarkConfig, SuiteConfig
+from ..config.benchmark_config import BenchmarkConfig, SuiteConfig
 from .statistics import BenchmarkStats, CombinedBenchmarkStats
 from .suite_results import (
     CorrectnessResult,
@@ -127,6 +127,7 @@ class Reporter:
             stats: Benchmark statistics.
         """
         self._print(f"  Mean:                 {stats.mean_ms:.3f} ms")
+        self._print(f"  Median:               {stats.median_ms:.3f} ms")
         self._print(f"  Std Dev:              {stats.std_ms:.3f} ms")
         self._print(f"  Min:                  {stats.min_ms:.3f} ms")
         self._print(f"  Max:                  {stats.max_ms:.3f} ms")
@@ -181,242 +182,6 @@ class Reporter:
             char: Character to use for the line.
         """
         print(char * self.WIDTH, file=self._output)
-
-    # A/B Testing Methods
-
-    def print_ab_header(
-        self, config: BenchmarkConfig, ab_config: ABTestConfig, graph_name: str
-    ) -> None:
-        """Print A/B test configuration header.
-
-        Args:
-            config: Benchmark configuration.
-            ab_config: A/B test configuration.
-            graph_name: Name of the graph being benchmarked.
-        """
-        self._print_line("=")
-        self._print(f"hipDNN A/B Test: {graph_name}")
-        self._print_line("=")
-        self._print(f"Graph:      {config.graph_path}")
-        self._print(f"Warmup:     {config.warmup_iters} iterations")
-        self._print(f"Benchmark:  {config.benchmark_iters} iterations")
-        self._print_line("-")
-        self._print("Configuration A:")
-        if ab_config.a_path:
-            self._print(f"  Plugin Path: {ab_config.a_path}")
-        else:
-            self._print("  Plugin Path: (default)")
-        self._print(f"  Engine ID:   {ab_config.a_id}")
-        self._print("Configuration B:")
-        if ab_config.b_path:
-            self._print(f"  Plugin Path: {ab_config.b_path}")
-        else:
-            self._print("  Plugin Path: (default)")
-        self._print(f"  Engine ID:   {ab_config.b_id}")
-        self._print_line("-")
-        self._print("")
-
-    def print_ab_stats(
-        self,
-        stats_a: BenchmarkStats,
-        stats_b: BenchmarkStats,
-        init_time_a_ms: float,
-        init_time_b_ms: float,
-    ) -> None:
-        """Print side-by-side comparison of A vs B statistics.
-
-        Args:
-            stats_a: Statistics for configuration A.
-            stats_b: Statistics for configuration B.
-            init_time_a_ms: Init time for A in milliseconds.
-            init_time_b_ms: Init time for B in milliseconds.
-        """
-        # Header
-        self._print(f"{'':20} {'A':>15} {'B':>15}")
-        self._print_line("-")
-
-        # Init times
-        self._print(
-            f"{'Init Time:':20} {init_time_a_ms:>12.2f} ms {init_time_b_ms:>12.2f} ms"
-        )
-
-        # Execution stats
-        self._print(
-            f"{'Mean:':20} {stats_a.mean_ms:>12.3f} ms {stats_b.mean_ms:>12.3f} ms"
-        )
-        self._print(
-            f"{'Std Dev:':20} {stats_a.std_ms:>12.3f} ms {stats_b.std_ms:>12.3f} ms"
-        )
-        self._print(
-            f"{'Min:':20} {stats_a.min_ms:>12.3f} ms {stats_b.min_ms:>12.3f} ms"
-        )
-        self._print(
-            f"{'Max:':20} {stats_a.max_ms:>12.3f} ms {stats_b.max_ms:>12.3f} ms"
-        )
-        self._print(
-            f"{'P95:':20} {stats_a.p95_ms:>12.3f} ms {stats_b.p95_ms:>12.3f} ms"
-        )
-        self._print(
-            f"{'P99:':20} {stats_a.p99_ms:>12.3f} ms {stats_b.p99_ms:>12.3f} ms"
-        )
-        self._print_line("-")
-
-        # Calculate speedup
-        if stats_a.mean_ms > 0 and stats_b.mean_ms > 0:
-            if stats_a.mean_ms > stats_b.mean_ms:
-                speedup = (stats_a.mean_ms - stats_b.mean_ms) / stats_a.mean_ms * 100
-                self._print(f"Speedup:            B is {speedup:.1f}% faster")
-            elif stats_b.mean_ms > stats_a.mean_ms:
-                speedup = (stats_b.mean_ms - stats_a.mean_ms) / stats_b.mean_ms * 100
-                self._print(f"Speedup:            A is {speedup:.1f}% faster")
-            else:
-                self._print("Speedup:            A and B are equal")
-
-        self._print("")
-
-    def print_ab_combined_stats(
-        self,
-        stats_a: CombinedBenchmarkStats,
-        stats_b: CombinedBenchmarkStats,
-        init_time_a_ms: float,
-        init_time_b_ms: float,
-    ) -> None:
-        """Print side-by-side comparison of A vs B with both E2E and kernel stats.
-
-        Args:
-            stats_a: Combined statistics for configuration A.
-            stats_b: Combined statistics for configuration B.
-            init_time_a_ms: Init time for A in milliseconds.
-            init_time_b_ms: Init time for B in milliseconds.
-        """
-        # E2E Stats section
-        self._print("E2E Execution Statistics:")
-        self._print(f"{'':20} {'A':>15} {'B':>15}")
-        self._print_line("-")
-
-        # Init times
-        self._print(
-            f"{'Init Time:':20} {init_time_a_ms:>12.2f} ms {init_time_b_ms:>12.2f} ms"
-        )
-
-        # E2E execution stats
-        self._print_ab_stats_block(stats_a.e2e_stats, stats_b.e2e_stats)
-        self._print("")
-
-        # Kernel Stats section (if available)
-        if stats_a.kernel_stats and stats_b.kernel_stats:
-            self._print("Kernel Execution Statistics:")
-            self._print(f"{'':20} {'A':>15} {'B':>15}")
-            self._print_line("-")
-            self._print_ab_stats_block(stats_a.kernel_stats, stats_b.kernel_stats)
-            self._print("")
-
-            # Calculate kernel speedup
-            ka, kb = stats_a.kernel_stats, stats_b.kernel_stats
-            if ka.mean_ms > 0 and kb.mean_ms > 0:
-                if ka.mean_ms > kb.mean_ms:
-                    speedup = (ka.mean_ms - kb.mean_ms) / ka.mean_ms * 100
-                    self._print(f"Kernel Speedup:     B is {speedup:.1f}% faster")
-                elif kb.mean_ms > ka.mean_ms:
-                    speedup = (kb.mean_ms - ka.mean_ms) / kb.mean_ms * 100
-                    self._print(f"Kernel Speedup:     A is {speedup:.1f}% faster")
-                else:
-                    self._print("Kernel Speedup:     A and B are equal")
-                self._print("")
-        else:
-            self._print("Kernel Timing: Not available")
-            self._print("")
-
-    def _print_ab_stats_block(
-        self, stats_a: BenchmarkStats, stats_b: BenchmarkStats
-    ) -> None:
-        """Print a side-by-side statistics block for A/B comparison.
-
-        Args:
-            stats_a: Statistics for configuration A.
-            stats_b: Statistics for configuration B.
-        """
-        self._print(
-            f"{'Mean:':20} {stats_a.mean_ms:>12.3f} ms {stats_b.mean_ms:>12.3f} ms"
-        )
-        self._print(
-            f"{'Std Dev:':20} {stats_a.std_ms:>12.3f} ms {stats_b.std_ms:>12.3f} ms"
-        )
-        self._print(
-            f"{'Min:':20} {stats_a.min_ms:>12.3f} ms {stats_b.min_ms:>12.3f} ms"
-        )
-        self._print(
-            f"{'Max:':20} {stats_a.max_ms:>12.3f} ms {stats_b.max_ms:>12.3f} ms"
-        )
-        self._print(
-            f"{'P95:':20} {stats_a.p95_ms:>12.3f} ms {stats_b.p95_ms:>12.3f} ms"
-        )
-        self._print(
-            f"{'P99:':20} {stats_a.p99_ms:>12.3f} ms {stats_b.p99_ms:>12.3f} ms"
-        )
-
-    def print_ab_comparison(
-        self,
-        passed: bool,
-        max_abs_diff: float,
-        max_rel_diff: float,
-        rtol: float,
-        atol: float,
-    ) -> None:
-        """Print A/B accuracy comparison result.
-
-        Args:
-            passed: Whether comparison passed.
-            max_abs_diff: Maximum absolute difference.
-            max_rel_diff: Maximum relative difference.
-            rtol: Relative tolerance used.
-            atol: Absolute tolerance used.
-        """
-        status = "PASSED" if passed else "FAILED"
-        self._print(f"Accuracy Comparison: {status}")
-        self._print(f"  (rtol={rtol:.0e}, atol={atol:.0e})")
-        if not passed:
-            self._print(f"  Max abs diff: {max_abs_diff:.2e}")
-            self._print(f"  Max rel diff: {max_rel_diff:.2e}")
-
-    def print_ab_validation(
-        self,
-        validation_a: Optional[Any],
-        validation_b: Optional[Any],
-        rtol: float,
-        atol: float,
-    ) -> None:
-        """Print reference validation results for A/B test.
-
-        Args:
-            validation_a: ValidationResult for configuration A, or None.
-            validation_b: ValidationResult for configuration B, or None.
-            rtol: Relative tolerance used.
-            atol: Absolute tolerance used.
-        """
-        if validation_a is None and validation_b is None:
-            return
-
-        self._print("")
-        self._print("Reference Validation:")
-
-        if validation_a is not None:
-            status_a = "PASSED" if validation_a.passed else "FAILED"
-            self._print(f"  Config A vs {validation_a.provider_name}: {status_a}")
-            if not validation_a.passed:
-                self._print(f"    Max abs diff: {validation_a.max_abs_diff:.2e}")
-                self._print(f"    Max rel diff: {validation_a.max_rel_diff:.2e}")
-
-        if validation_b is not None:
-            status_b = "PASSED" if validation_b.passed else "FAILED"
-            self._print(f"  Config B vs {validation_b.provider_name}: {status_b}")
-            if not validation_b.passed:
-                self._print(f"    Max abs diff: {validation_b.max_abs_diff:.2e}")
-                self._print(f"    Max rel diff: {validation_b.max_rel_diff:.2e}")
-
-        self._print(f"  (rtol={rtol:.0e}, atol={atol:.0e})")
-
-    # Reference Validation Methods
 
     # Suite Methods
 
@@ -601,6 +366,66 @@ class Reporter:
         if pe.status == "skipped":
             return "skipped"
         return "errored"
+
+    def print_graph_result_table(self, graph_result: GraphResult) -> None:
+        """Render one compact summary row per engine for a graph."""
+        if not graph_result.results:
+            return
+
+        include_plugin = any(pe.plugin_path for pe in graph_result.results)
+        headers = ["engine", "status"]
+        if include_plugin:
+            headers.append("plugin_path")
+        headers.extend(
+            [
+                "kernel_mean_ms",
+                "kernel_median_ms",
+                "e2e_mean_ms",
+                "e2e_median_ms",
+            ]
+        )
+        rows: List[List[str]] = []
+        for pe in graph_result.results:
+            row = [pe.provider, self._pe_status(pe)]
+            if include_plugin:
+                row.append(pe.plugin_path or "")
+            row.extend(
+                [
+                    self._fmt_stat(pe.gpu_kernel_stats, "mean_ms"),
+                    self._fmt_stat(pe.gpu_kernel_stats, "median_ms"),
+                    self._fmt_stat(pe.e2e_stats, "mean_ms"),
+                    self._fmt_stat(pe.e2e_stats, "median_ms"),
+                ]
+            )
+            rows.append(row)
+
+        widths = [
+            max(len(headers[i]), *(len(row[i]) for row in rows))
+            for i in range(len(headers))
+        ]
+        self._print("Results:")
+        self._print("  " + "  ".join(h.ljust(widths[i]) for i, h in enumerate(headers)))
+        self._print("  " + "  ".join("-" * width for width in widths))
+        for row in rows:
+            self._print(
+                "  " + "  ".join(row[i].ljust(widths[i]) for i in range(len(row)))
+            )
+        self._print("")
+
+    @staticmethod
+    def _pe_status(pe: ProviderEngineResult) -> str:
+        if pe.status != "success":
+            return pe.status
+        if pe.correctness is not None and pe.correctness.tolerance_match is False:
+            return "failed"
+        return "passed"
+
+    @staticmethod
+    def _fmt_stat(stats: Optional[BenchmarkStats], name: str) -> str:
+        if stats is None:
+            return "n/a"
+        value = getattr(stats, name)
+        return f"{value:.3f}"
 
     def print_verbose_graph_result(
         self, graph_result: GraphResult, suite_config: SuiteConfig

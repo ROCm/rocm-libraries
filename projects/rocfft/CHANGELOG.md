@@ -8,6 +8,7 @@ Documentation for rocFFT is available at
 ### Added
 
 * Generalized multi-device computations for transforms such that each of the length dimension is fully covered either in all the input field's bricks or in all the output field's bricks, regardless of the type and placement of the transform. Note specifically for real transforms: the innermost length dimension must be fully covered in all the input (resp. output) field's bricks for real forward (resp. inverse) transforms.
+* Support for the gfx1250 architecture.
 
 ### Changed
 

@@ -3,7 +3,6 @@
 
 """Execution module for dnn-benchmarking."""
 
-from .ab_runner import ABRunner, ABTestResult
 from .buffer_manager import BufferManager
 from .executor import Executor
 
@@ -23,8 +22,6 @@ from .timing import (
 )
 
 __all__ = [
-    "ABRunner",
-    "ABTestResult",
     "BufferManager",
     "Executor",
     "GpuTimer",
