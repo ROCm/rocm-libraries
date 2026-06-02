@@ -186,4 +186,175 @@ TEST(SdpaMarshallingRealPaged, RejectsTableSizeMismatch) {
     EXPECT_THROW(marshalRealPaged(in, badTable, {1, 1}, {1, 1}), std::invalid_argument);
 }
 
+// ---------------------------------------------------------------------------
+// Runtime layout matrix (Phase 3). These axes are excluded from the codegen
+// generation matrix because they change only the host-prepared launch arrays
+// (block_tables / cu_seqlens_q / seqused_k) and the block_table_stride scalar
+// -- the kernel BINARY and 18-arg ABI are identical. They are covered here,
+// against the pure marshalling functions, on the CPU.
+// ---------------------------------------------------------------------------
+
+// --- Ceil stride when block_size does not divide Skv, for {16,32,64}. ------
+
+TEST(SdpaMarshallingDenseCeilStride, BlockSize16NonDivisible) {
+    // B=2, block_size=16, Skv=50 -> stride = ceil(50/16) = 4 (50/16=3.125).
+    SdpaMarshalInputs in;
+    in.num_seqs = 2;
+    in.block_size = 16;
+    in.max_seqlen_k = 50;
+    in.seqlen_q = 8;
+    in.seqlen_k = 50;
+
+    const SdpaMarshalledArrays out = marshalDenseDegenerate(in);
+
+    EXPECT_EQ(out.block_table_stride, 4);
+    // 2 seqs * 4 blocks = 8 consecutive entries 0..7.
+    ASSERT_EQ(out.block_tables.size(), 8u);
+    for (std::int32_t i = 0; i < 8; ++i) {
+        EXPECT_EQ(out.block_tables[static_cast<std::size_t>(i)], i);
+    }
+    EXPECT_EQ(out.cu_seqlens_q, (std::vector<std::int32_t>{0, 8, 16}));
+    EXPECT_EQ(out.seqused_k, (std::vector<std::int32_t>{50, 50}));
+}
+
+TEST(SdpaMarshallingDenseCeilStride, BlockSize32NonDivisible) {
+    // B=2, block_size=32, Skv=70 -> stride = ceil(70/32) = 3 (70/32=2.1875).
+    SdpaMarshalInputs in;
+    in.num_seqs = 2;
+    in.block_size = 32;
+    in.max_seqlen_k = 70;
+    in.seqlen_q = 4;
+    in.seqlen_k = 70;
+
+    const SdpaMarshalledArrays out = marshalDenseDegenerate(in);
+
+    EXPECT_EQ(out.block_table_stride, 3);
+    ASSERT_EQ(out.block_tables.size(), 6u);
+    for (std::int32_t i = 0; i < 6; ++i) {
+        EXPECT_EQ(out.block_tables[static_cast<std::size_t>(i)], i);
+    }
+}
+
+TEST(SdpaMarshallingDenseCeilStride, BlockSize64NonDivisible) {
+    // B=3, block_size=64, Skv=200 -> stride = ceil(200/64) = 4 (200/64=3.125).
+    SdpaMarshalInputs in;
+    in.num_seqs = 3;
+    in.block_size = 64;
+    in.max_seqlen_k = 200;
+    in.seqlen_q = 5;
+    in.seqlen_k = 200;
+
+    const SdpaMarshalledArrays out = marshalDenseDegenerate(in);
+
+    EXPECT_EQ(out.block_table_stride, 4);
+    // 3 seqs * 4 blocks = 12 consecutive entries.
+    ASSERT_EQ(out.block_tables.size(), 12u);
+    for (std::int32_t i = 0; i < 12; ++i) {
+        EXPECT_EQ(out.block_tables[static_cast<std::size_t>(i)], i);
+    }
+    EXPECT_EQ(out.cu_seqlens_q, (std::vector<std::int32_t>{0, 5, 10, 15}));
+}
+
+// --- Varlen with ragged and zero-length sequences. -------------------------
+
+TEST(SdpaMarshallingVarlenRagged, ZeroLengthQAndKSequences) {
+    // 4 packed sequences; seq 1 has zero query tokens, seq 3 has zero KV.
+    SdpaMarshalInputs in;
+    in.num_seqs = 4;
+    in.block_size = 32;
+    in.max_seqlen_k = 96;  // stride = ceil(96/32) = 3.
+
+    const std::vector<std::int32_t> qLens = {5, 0, 12, 3};
+    const std::vector<std::int32_t> kLens = {64, 32, 96, 0};
+
+    const SdpaMarshalledArrays out = marshalVarlen(in, qLens, kLens);
+
+    EXPECT_EQ(out.block_table_stride, 3);
+    // Prefix sum tolerates the zero-length query: [0, 5, 5, 17, 20].
+    EXPECT_EQ(out.cu_seqlens_q, (std::vector<std::int32_t>{0, 5, 5, 17, 20}));
+    // seqused_k mirrors kLens, including the zero-KV sequence.
+    EXPECT_EQ(out.seqused_k, kLens);
+    // Block table sized to num_seqs * stride = 12, consecutive.
+    ASSERT_EQ(out.block_tables.size(), 12u);
+    for (std::int32_t i = 0; i < 12; ++i) {
+        EXPECT_EQ(out.block_tables[static_cast<std::size_t>(i)], i);
+    }
+}
+
+TEST(SdpaMarshallingVarlenRagged, LargeNumSeqsRaggedLengths) {
+    // 8 sequences with monotonically varying lengths; larger num_seqs.
+    SdpaMarshalInputs in;
+    in.num_seqs = 8;
+    in.block_size = 16;
+    in.max_seqlen_k = 64;  // stride = 64/16 = 4.
+
+    const std::vector<std::int32_t> qLens = {1, 2, 3, 4, 5, 6, 7, 8};
+    const std::vector<std::int32_t> kLens = {16, 16, 32, 32, 48, 48, 64, 64};
+
+    const SdpaMarshalledArrays out = marshalVarlen(in, qLens, kLens);
+
+    EXPECT_EQ(out.block_table_stride, 4);
+    // Prefix sum of 1..8 = [0,1,3,6,10,15,21,28,36].
+    EXPECT_EQ(out.cu_seqlens_q, (std::vector<std::int32_t>{0, 1, 3, 6, 10, 15, 21, 28, 36}));
+    EXPECT_EQ(out.seqused_k, kLens);
+    // 8 seqs * 4 blocks = 32 entries.
+    ASSERT_EQ(out.block_tables.size(), 32u);
+}
+
+// --- Real-paged with a multi-block, non-consecutive physical layout. -------
+
+TEST(SdpaMarshallingRealPagedMultiBlock, MultiBlockNonConsecutiveStride) {
+    // 3 seqs, block_size 64, max_seqlen_k 256 -> stride = 256/64 = 4. Each
+    // sequence's KV spans up to 4 physical cache blocks, scattered.
+    SdpaMarshalInputs in;
+    in.num_seqs = 3;
+    in.block_size = 64;
+    in.max_seqlen_k = 256;
+
+    // Caller-owned physical table, size 3*4 = 12, deliberately scattered.
+    const std::vector<std::int32_t> table = {
+        12, 3, 88, 1,   // seq 0
+        9,  9, 0,  41,  // seq 1 (a repeated page id is legal)
+        7,  6, 5,  4,   // seq 2
+    };
+    const std::vector<std::int32_t> qLens = {64, 128, 32};
+    const std::vector<std::int32_t> kLens = {256, 192, 100};
+
+    const SdpaMarshalledArrays out = marshalRealPaged(in, table, qLens, kLens);
+
+    EXPECT_EQ(out.block_table_stride, 4);
+    EXPECT_EQ(out.block_tables, table);  // verbatim passthrough.
+    EXPECT_EQ(out.cu_seqlens_q, (std::vector<std::int32_t>{0, 64, 192, 224}));
+    EXPECT_EQ(out.seqused_k, kLens);
+}
+
+TEST(SdpaMarshallingRealPagedMultiBlock, LargeNumSeqsTablePassthrough) {
+    // 16 seqs, block_size 32, max_seqlen_k 128 -> stride = 4; table 16*4 = 64.
+    SdpaMarshalInputs in;
+    in.num_seqs = 16;
+    in.block_size = 32;
+    in.max_seqlen_k = 128;
+
+    std::vector<std::int32_t> table;
+    table.reserve(64);
+    // Reverse-ordered physical ids to prove no implicit consecutive
+    // assumption is baked in.
+    for (std::int32_t i = 63; i >= 0; --i) {
+        table.push_back(i);
+    }
+    std::vector<std::int32_t> qLens(16, 1);  // pure decode (one q token each).
+    std::vector<std::int32_t> kLens(16, 128);
+
+    const SdpaMarshalledArrays out = marshalRealPaged(in, table, qLens, kLens);
+
+    EXPECT_EQ(out.block_table_stride, 4);
+    EXPECT_EQ(out.block_tables, table);
+    // cu_seqlens_q for 16 unit-length queries = [0,1,2,...,16].
+    ASSERT_EQ(out.cu_seqlens_q.size(), 17u);
+    for (std::int32_t i = 0; i <= 16; ++i) {
+        EXPECT_EQ(out.cu_seqlens_q[static_cast<std::size_t>(i)], i);
+    }
+    EXPECT_EQ(out.seqused_k, kLens);
+}
+
 }  // namespace
