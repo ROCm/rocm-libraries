@@ -52,7 +52,7 @@ mode. We aim to beat that on the same shape.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace as dc_replace
-from typing import List, Optional, Sequence, Tuple
+from typing import Callable, List, Optional, Sequence, Tuple
 
 from ...core.ir import (
     F16,
@@ -137,6 +137,47 @@ class ConvProblem:
 
     def short(self) -> str:
         return f"N{self.N}H{self.Hi}W{self.Wi}C{self.C}_K{self.K}R{self.R}S{self.S}"
+
+
+@dataclass(frozen=True)
+class ConvAccumulatorEpilogue:
+    """Static fp32 accumulator transform applied before the conv store.
+
+    This is intentionally narrower than ``helpers.fuse.FusedEpilogue``:
+    it runs directly on MFMA accumulator fragments inside the hand-authored
+    conv instance. The default is identity, preserving the historical conv IR.
+    """
+
+    bias: float = 0.0
+    scale: float = 1.0
+    relu: bool = False
+    clamp_min: Optional[float] = None
+    clamp_max: Optional[float] = None
+
+    def is_identity(self) -> bool:
+        return (
+            self.bias == 0.0
+            and self.scale == 1.0
+            and not self.relu
+            and self.clamp_min is None
+            and self.clamp_max is None
+        )
+
+    def tag(self) -> str:
+        if self.is_identity():
+            return ""
+        pieces: List[str] = []
+        if self.bias != 0.0:
+            pieces.append(f"bias{self.bias:g}")
+        if self.scale != 1.0:
+            pieces.append(f"scale{self.scale:g}")
+        if self.relu:
+            pieces.append("relu")
+        if self.clamp_min is not None or self.clamp_max is not None:
+            lo = "-inf" if self.clamp_min is None else f"{self.clamp_min:g}"
+            hi = "inf" if self.clamp_max is None else f"{self.clamp_max:g}"
+            pieces.append(f"clamp{lo}to{hi}")
+        return "epi_" + "_".join(pieces)
 
 
 @dataclass(frozen=True)
@@ -246,6 +287,10 @@ class ImplicitGemmConvSpec:
     # default) the descriptor reduces to the flat-conv form and the
     # kernel emits the same code as before.
     groups: int = 1
+    # Static accumulator epilogue used by the gfx950 deep-fusion prototype.
+    # It composes simple fp32 VALU transforms directly on MFMA accumulator
+    # fragments before the existing direct/cshuffle store path.
+    acc_epilogue: ConvAccumulatorEpilogue = ConvAccumulatorEpilogue()
 
     @property
     def block_size(self) -> int:
@@ -278,6 +323,7 @@ class ImplicitGemmConvSpec:
             f"w{self.warp_m}x{self.warp_n}",
             f"a{self.warp_tile_m}x{self.warp_tile_n}x{self.warp_tile_k}",
             f"{self.pipeline}_{self.epilogue}",
+            self.acc_epilogue.tag(),
             flags={"async": self.async_dma},
         )
 
@@ -305,6 +351,15 @@ class ImplicitGemmConvSpec:
             raise ValueError(
                 "async_dma requires lds_k_pad to be 0/None because "
                 "raw_ptr_buffer_load_lds writes a packed lane-contiguous tile"
+            )
+        if (
+            self.acc_epilogue.clamp_min is not None
+            and self.acc_epilogue.clamp_max is not None
+            and self.acc_epilogue.clamp_min > self.acc_epilogue.clamp_max
+        ):
+            raise ValueError(
+                "acc_epilogue clamp_min must be <= clamp_max "
+                f"(got {self.acc_epilogue.clamp_min} > {self.acc_epilogue.clamp_max})"
             )
 
     def effective_lds_layout(self) -> LdsLayout:
@@ -576,6 +631,51 @@ def _emit_smem_load(b: IRBuilder, smem: Value, row: Value, col: Value, n: int) -
     return b.smem_load_vN_f16(smem, row, col, n=n)
 
 
+def _apply_accumulator_epilogue(
+    b: IRBuilder,
+    epilogue: ConvAccumulatorEpilogue,
+    accs: Sequence[Value],
+) -> List[Value]:
+    """Apply a static fp32 epilogue to each accumulator fragment.
+
+    The transform is scalar per accumulator lane, then packed back into the
+    original vector width so the existing direct/cshuffle epilogues can consume
+    the result unchanged.
+    """
+
+    if epilogue.is_identity():
+        return list(accs)
+
+    out: List[Value] = []
+    c_zero = b.const_f32(0.0)
+    c_bias = b.const_f32(epilogue.bias) if epilogue.bias != 0.0 else None
+    c_scale = b.const_f32(epilogue.scale) if epilogue.scale != 1.0 else None
+    c_clamp_min = (
+        b.const_f32(epilogue.clamp_min) if epilogue.clamp_min is not None else None
+    )
+    c_clamp_max = (
+        b.const_f32(epilogue.clamp_max) if epilogue.clamp_max is not None else None
+    )
+
+    for acc in accs:
+        elems: List[Value] = []
+        for i in range(acc.type.count):
+            v = b.vec_extract(acc, i)
+            if c_bias is not None:
+                v = b.fadd(v, c_bias)
+            if c_scale is not None:
+                v = b.fmul(v, c_scale)
+            if epilogue.relu:
+                v = b.fmax(v, c_zero)
+            if c_clamp_min is not None:
+                v = b.fmax(v, c_clamp_min)
+            if c_clamp_max is not None:
+                v = b.fmin(v, c_clamp_max)
+            elems.append(v)
+        out.append(b.vec_pack(elems, elems[0].type))
+    return out
+
+
 def _emit_frag_smem_load(
     b: IRBuilder,
     src: Value,
@@ -615,7 +715,16 @@ def _choose_load_vec(spec: ImplicitGemmConvSpec) -> int:
 
 
 def build_implicit_gemm_conv(
-    spec: ImplicitGemmConvSpec, arch: str = "gfx950"
+    spec: ImplicitGemmConvSpec,
+    arch: str = "gfx950",
+    extra_params: Optional[Callable[[IRBuilder], object]] = None,
+    m_index_fn: Optional[Callable[[IRBuilder, Value, WarpGrid], Value]] = None,
+    epilogue_override: Optional[
+        Callable[
+            [IRBuilder, ImplicitGemmConvSpec, Sequence[Value], WarpGrid, Value, object],
+            None,
+        ]
+    ] = None,
 ) -> KernelDef:
     """Build the IR for one implicit-GEMM conv instance.
 
@@ -649,6 +758,7 @@ def build_implicit_gemm_conv(
     A = b.param("A", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
     Bp = b.param("B", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
     D = b.param("D", PtrType(F16, "global"), noalias=True, writeonly=True, align=16)
+    extra_context = extra_params(b) if extra_params is not None else None
     A_bytes = b.param("A_bytes", I32)
     B_bytes = b.param("B_bytes", I32)
     D_bytes = b.param("D_bytes", I32)
@@ -806,7 +916,11 @@ def build_implicit_gemm_conv(
     # coordinate system. The descriptor returns
     # `(element_offset, valid_predicate)`.
     def a_descriptor(b_: IRBuilder, row: Value, col: Value):
-        m_val = b_.add(block_m_off_v, row)
+        m_val = (
+            m_index_fn(b_, row, grid)
+            if m_index_fn is not None
+            else b_.add(block_m_off_v, row)
+        )
         k_val = b_.add(k_off_capture[0], col)
         return A_desc.offset(b_, m=m_val, k=k_val)
 
@@ -1148,11 +1262,14 @@ def build_implicit_gemm_conv(
         )
 
     # ---- epilogue ----
+    final_accs = _apply_accumulator_epilogue(b, spec.acc_epilogue, final_accs)
     # Both ``DirectEpilogue`` and ``CShuffleEpilogue`` consume the bound
     # :class:`WarpGrid`, which carries the per-warp / per-block / per-lane
     # SSA values plus the tile origins. The conv-specific bit is the
     # D-descriptor address callback.
-    if spec.epilogue == "cshuffle":
+    if epilogue_override is not None:
+        epilogue_override(b, spec, final_accs, grid, d_rsrc, extra_context)
+    elif spec.epilogue == "cshuffle":
         _emit_cshuffle_epilogue(b, spec, final_accs, grid, d_rsrc)
     elif op.family == "wmma":
         # WMMA (RDNA) direct epilogue still uses the explicit per-warp/lane
