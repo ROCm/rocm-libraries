@@ -729,6 +729,109 @@ class TestHelpers(unittest.TestCase):
         # `qq_bias_stride_0` is the very last kernel param.
         self.assertIn("i32 %qq_bias_stride_0", ll)
 
+    def test_ck_dsl_provider_unified_compile_path(self):
+        """The CK DSL provider's unified SDPA-fwd compile path is CPU-only.
+
+        Drives ``ck_dsl_provider.compile_service._compile_sdpa_fwd_unified``
+        for a reference shape with ``arch="gfx950"`` and asserts it returns
+        the fixed 18-slot arg schema, a launch grid consistent with the
+        chosen perf knobs, and an ISA targeting gfx950. This exercises the
+        lowering/compile path only (comgr produces an HSACO on the host); no
+        GPU launch is involved. Skips cleanly if the provider package is not
+        importable from this checkout.
+        """
+        import os
+        import sys
+
+        provider_python = os.path.normpath(
+            os.path.join(
+                os.path.dirname(__file__),
+                "..",
+                "..",
+                "..",
+                "..",
+                "dnn-providers",
+                "ck-dsl-provider",
+                "python",
+            )
+        )
+        if not os.path.isdir(provider_python):
+            self.skipTest(f"ck-dsl-provider python package not found at {provider_python}")
+        if provider_python not in sys.path:
+            sys.path.insert(0, provider_python)
+        try:
+            from ck_dsl_provider import compile_service
+        except ImportError as exc:  # pragma: no cover - environment guard
+            self.skipTest(f"ck_dsl_provider not importable: {exc}")
+
+        # Reference shape: head 64, GQA 8 (Hq=64, Hkv=8), bf16, paged
+        # block_size 32. Knobs match the dense-degenerate default lane plus
+        # an explicit (num_warps=4, block_m_per_warp=16) BLOCK_M so the grid
+        # is deterministic. batch=2, Sq=Skv=1024.
+        batch = 2
+        seqlen_q = 1024
+        num_warps = 4
+        block_m_per_warp = 16
+        payload = {
+            "batch": batch,
+            "shape": {
+                "head_size": 64,
+                "num_query_heads": 64,
+                "num_kv_heads": 8,
+            },
+            "dtype": "bf16",
+            "mask_mode": "causal",
+            "seqlen_q": seqlen_q,
+            "seqlen_k": 1024,
+            "is_paged": False,
+            "block_size": 32,
+            "is_varlen": False,
+            "sliding_window": 0,
+            "use_sinks": False,
+            "knobs": {
+                "num_warps": num_warps,
+                "block_m_per_warp": block_m_per_warp,
+                "tile_size": 0,
+                "waves_per_eu": 0,
+                "use_mfma_32x32": False,
+                "use_transposed_qk_32x32": False,
+                "use_register_pv": False,
+                "use_early_v_schedule": False,
+                "use_fast_paged_kv_desc": False,
+            },
+        }
+
+        result = compile_service._compile_sdpa_fwd_unified(payload, arch="gfx950")
+
+        self.assertEqual(result["kind"], "sdpa_fmha_fwd_unified")
+
+        # 18-slot ABI: 10 pointers, 5 f32, 3 i32 (in that order).
+        schema = result["arg_schema"]
+        self.assertEqual(len(schema), 18)
+        kinds = [slot["kind"] for slot in schema]
+        self.assertEqual(kinds, ["Pointer"] * 10 + ["F32"] * 5 + ["I32"] * 3)
+        self.assertEqual(schema[0]["name"], "output_ptr")
+        self.assertEqual(schema[5]["name"], "block_tables_ptr")
+        self.assertEqual(schema[10]["name"], "scale")
+        self.assertEqual(schema[-1]["name"], "qq_bias_stride_0")
+
+        # Grid = (num_kv_heads, total_num_q_blocks, 1) with the same knobs
+        # the kernel was built with. block_m = num_warps * block_m_per_warp;
+        # block_q = block_m // num_queries_per_kv; total_num_q_blocks =
+        # total_q // block_q + num_seqs.
+        num_queries_per_kv = 64 // 8
+        block_m = num_warps * block_m_per_warp
+        block_q = block_m // num_queries_per_kv
+        total_q = batch * seqlen_q
+        expected_total_blocks = total_q // block_q + batch
+        self.assertEqual(result["grid"], (8, expected_total_blocks, 1))
+
+        # block = (64 * num_warps, 1, 1).
+        self.assertEqual(result["block"], (64 * num_warps, 1, 1))
+
+        # The artifact targets gfx950 (arch threaded through to comgr).
+        self.assertIn("gfx950", result["isa"])
+
     def test_unified_attention_2d_tiled_half_local_pv_compiles(self):
         """The R4 half-local PV variant emits 32x32 MFMA with its suffixes."""
         from ck_dsl.instances import (

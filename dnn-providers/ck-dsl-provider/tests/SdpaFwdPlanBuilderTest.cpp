@@ -71,7 +71,18 @@ SdpaSpec makeValidSpec() {
     auto fbBuilder = makeValidSdpaFwdGraph();
     flatbuffer_utilities::GraphWrapper graph(fbBuilder.GetBufferPointer(), fbBuilder.GetSize());
     const auto& attr = graph.getNodeWrapper(0).attributesAs<SdpaAttributes>();
-    return SdpaAdapter::buildSpec(attr, graph.getTensorMap());
+    SdpaSpec spec = SdpaAdapter::buildSpec(attr, graph.getTensorMap());
+    // The adapter leaves a dense (non-paged) graph's block_size at 0; the
+    // plan builder finalises it via chooseDegenerateBlockSize before the
+    // payload is emitted. This arch-gate test bypasses buildPlan and calls
+    // sdpaSpecToPayload directly, so finalise it here too: the unified
+    // applicability gate (supports_tiled_2d) requires a real block size in
+    // {16,32,64}. Skv=16 -> the degenerate choice is 16. The default perf
+    // knobs (num_warps=1, block_m_per_warp=16, tile_size unset) are valid.
+    if (!spec.is_paged && spec.block_size == 0) {
+        spec.block_size = 16;
+    }
+    return spec;
 }
 
 /// Host-only base: needs the container so the bridge + interpreter are

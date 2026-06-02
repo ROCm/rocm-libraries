@@ -284,6 +284,116 @@ def _sdpa_fwd_arg_schema(generate_stats: bool = False) -> List[Dict[str, Any]]:
     return schema
 
 
+def _sdpa_fwd_unified_arg_schema() -> List[Dict[str, Any]]:
+    """Schema for the unified paged/varlen tiled-2D attention kernel.
+
+    From ``build_unified_attention_2d_tiled`` (the parameter declarations
+    in ``instances/gfx950/attention_tiled_2d.py``) the kernel takes
+    eighteen positional parameters in this fixed order:
+
+      output_ptr:          ptr<dtype>  global  (attention output)
+      query_ptr:           ptr<dtype>  global
+      key_cache_ptr:       ptr<kv>     global  (paged K cache)
+      value_cache_ptr:     ptr<kv>     global  (paged V cache)
+      sink_ptr:            ptr<dtype>  global  (attention sinks; 0 if unused)
+      block_tables_ptr:    ptr<i32>    global  ([num_seqs, blocks_per_seq])
+      seq_lens_ptr:        ptr<i32>    global  (seqused_k per sequence)
+      alibi_slopes_ptr:    ptr<f32>    global  (0 if unused)
+      qq_bias_ptr:         ptr<f32>    global  (0 if unused)
+      query_start_len_ptr: ptr<i32>    global  (cu_seqlens_q, len num_seqs+1)
+      scale:               f32                 (softmax scale; launch-time)
+      k_scale:             f32                 (fp8 KV dequant; 1.0 default)
+      v_scale:             f32
+      out_scale:           f32
+      softcap:             f32                 (0.0 == no softcap)
+      num_seqs:            i32
+      block_table_stride:  i32                 (ceil(max_seqlen_k/block_size))
+      qq_bias_stride_0:    i32
+
+    The host packs these back-to-back at natural alignment: ten 8-byte
+    pointers, five 4-byte f32, then three 4-byte i32. The pointer / scale
+    / stride values are all supplied at launch time -- the schema
+    describes the 18-slot layout, not baked-in data. This ABI is fixed
+    regardless of the chosen perf knobs (the knobs steer codegen, not the
+    parameter list).
+    """
+    return [
+        {
+            "name": "output_ptr",
+            "kind": "Pointer",
+            "size": _PTR_SIZE,
+            "align": _PTR_ALIGN,
+        },
+        {
+            "name": "query_ptr",
+            "kind": "Pointer",
+            "size": _PTR_SIZE,
+            "align": _PTR_ALIGN,
+        },
+        {
+            "name": "key_cache_ptr",
+            "kind": "Pointer",
+            "size": _PTR_SIZE,
+            "align": _PTR_ALIGN,
+        },
+        {
+            "name": "value_cache_ptr",
+            "kind": "Pointer",
+            "size": _PTR_SIZE,
+            "align": _PTR_ALIGN,
+        },
+        {"name": "sink_ptr", "kind": "Pointer", "size": _PTR_SIZE, "align": _PTR_ALIGN},
+        {
+            "name": "block_tables_ptr",
+            "kind": "Pointer",
+            "size": _PTR_SIZE,
+            "align": _PTR_ALIGN,
+        },
+        {
+            "name": "seq_lens_ptr",
+            "kind": "Pointer",
+            "size": _PTR_SIZE,
+            "align": _PTR_ALIGN,
+        },
+        {
+            "name": "alibi_slopes_ptr",
+            "kind": "Pointer",
+            "size": _PTR_SIZE,
+            "align": _PTR_ALIGN,
+        },
+        {
+            "name": "qq_bias_ptr",
+            "kind": "Pointer",
+            "size": _PTR_SIZE,
+            "align": _PTR_ALIGN,
+        },
+        {
+            "name": "query_start_len_ptr",
+            "kind": "Pointer",
+            "size": _PTR_SIZE,
+            "align": _PTR_ALIGN,
+        },
+        {"name": "scale", "kind": "F32", "size": _F32_SIZE, "align": _F32_ALIGN},
+        {"name": "k_scale", "kind": "F32", "size": _F32_SIZE, "align": _F32_ALIGN},
+        {"name": "v_scale", "kind": "F32", "size": _F32_SIZE, "align": _F32_ALIGN},
+        {"name": "out_scale", "kind": "F32", "size": _F32_SIZE, "align": _F32_ALIGN},
+        {"name": "softcap", "kind": "F32", "size": _F32_SIZE, "align": _F32_ALIGN},
+        {"name": "num_seqs", "kind": "I32", "size": _I32_SIZE, "align": _I32_ALIGN},
+        {
+            "name": "block_table_stride",
+            "kind": "I32",
+            "size": _I32_SIZE,
+            "align": _I32_ALIGN,
+        },
+        {
+            "name": "qq_bias_stride_0",
+            "kind": "I32",
+            "size": _I32_SIZE,
+            "align": _I32_ALIGN,
+        },
+    ]
+
+
 def _sdpa_bwd_arg_schema() -> List[Dict[str, Any]]:
     """Schema for the FMHA backward kernel signature.
 
@@ -480,6 +590,50 @@ _SDPA_FWD_SHAPE_KEYS = frozenset({"head_size", "num_query_heads", "num_kv_heads"
 # rides on the payload alongside the shape / dtype / mask codegen inputs.
 _SDPA_FWD_TOP_KEYS = frozenset(
     {"batch", "shape", "dtype", "mask_mode", "seqlen_q", "seqlen_k", "generate_stats"}
+)
+
+# Whitelisted nested ``knobs`` keys the C++ ``sdpaSpecToPayload`` may set for
+# the unified paged/varlen tiled-2D path. These map field-for-field onto the
+# ``SdpaPerfKnobs`` POD the scorer-driven selection produced and, downstream,
+# onto the ``UnifiedAttention2DTiledSpec`` keyword arguments. Same fail-closed
+# rationale as every other whitelist: an unexpected knob name fails before any
+# value reaches the dataclass via ``**kwargs``.
+_SDPA_FWD_UNIFIED_KNOB_KEYS = frozenset(
+    {
+        "num_warps",
+        "block_m_per_warp",
+        "tile_size",
+        "waves_per_eu",
+        "use_mfma_32x32",
+        "use_transposed_qk_32x32",
+        "use_register_pv",
+        "use_early_v_schedule",
+        "use_fast_paged_kv_desc",
+    }
+)
+# Whitelisted top-level keys the C++ ``sdpaSpecToPayload`` may set for the
+# unified path. Adds the four paged/varlen problem lanes (is_paged,
+# block_size, is_varlen, sliding_window, use_sinks) plus the nested ``knobs``
+# dict on top of the shape / dtype / mask / seqlen codegen inputs. ``batch``
+# is grid-only (sizes ``num_seqs`` for the dense-degenerate problem). The
+# strides and scale are launch-time args, absent by design. ``generate_stats``
+# is NOT part of the unified payload: the unified kernel has no opt-in LSE
+# slot in its 18-arg ABI (forward-training stats are a dense-path concern).
+_SDPA_FWD_UNIFIED_TOP_KEYS = frozenset(
+    {
+        "batch",
+        "shape",
+        "dtype",
+        "mask_mode",
+        "seqlen_q",
+        "seqlen_k",
+        "is_paged",
+        "block_size",
+        "is_varlen",
+        "sliding_window",
+        "use_sinks",
+        "knobs",
+    }
 )
 
 # Whitelisted top-level keys the C++ ``sdpaBwdSpecToPayload`` may set. Shares
@@ -784,6 +938,193 @@ def _compile_sdpa_fwd(payload: dict, arch: str) -> dict:
     }
 
 
+def _normalize_unified_dtype(dtype: str) -> str:
+    """Map the C++ spec dtype spelling onto the kernel's spelling.
+
+    ``SdpaSpec::dtype`` uses ``"f16"`` whereas the unified tiled-2D kernel
+    (``UnifiedAttention2DTiledSpec`` / ``UnifiedAttentionProblem``) uses
+    ``"fp16"``. ``"bf16"`` is identical in both. Any other spelling is left
+    as-is so the dataclass's own validation surfaces the unsupported type.
+    """
+    return "fp16" if dtype == "f16" else dtype
+
+
+def _sdpa_fwd_unified_problem_and_knobs(payload: dict):
+    """Deserialize the unified wire payload into ``(problem, knobs_dict, block_size)``.
+
+    Shared by the compile and applicability paths so both honour one
+    deserialization contract -- the whitelist and the dataclass
+    construction can't drift between them.
+
+    Caller contract: ``payload`` is the dict ``sdpaSpecToPayload`` emits for
+    the unified path -- a nested ``"shape"`` dict (head_size /
+    num_query_heads / num_kv_heads) and a nested ``"knobs"`` dict (the nine
+    ``SdpaPerfKnobs`` fields), plus the top-level ``dtype`` / ``mask_mode`` /
+    ``seqlen_q`` / ``seqlen_k`` codegen inputs, the ``batch`` extent, and the
+    paged/varlen lanes (``is_paged`` / ``block_size`` / ``is_varlen`` /
+    ``sliding_window`` / ``use_sinks``). Keys are whitelisted against
+    ``_SDPA_FWD_UNIFIED_TOP_KEYS`` / ``_SDPA_FWD_SHAPE_KEYS`` /
+    ``_SDPA_FWD_UNIFIED_KNOB_KEYS`` so an unexpected field fails closed.
+
+    The dense-degenerate problem maps ``num_seqs = batch``,
+    ``total_q = batch * seqlen_q``, ``max_seqlen_q = seqlen_q``, and
+    ``max_seqlen_k = seqlen_k``. The unified kernel is always paged; the
+    payload's ``block_size`` (finalised on the C++ side for the dense path)
+    is the cache-block size the marshalling lays out.
+
+    The target arch is NOT part of the payload: it is an orthogonal compile
+    target threaded as a separate argument (mirroring the DSL).
+    """
+    from ck_dsl.instances.common.attention_unified import UnifiedAttentionProblem
+
+    _reject_unexpected(
+        payload.keys(), _SDPA_FWD_UNIFIED_TOP_KEYS, "sdpa_fmha_fwd_unified"
+    )
+
+    shape_payload = dict(payload["shape"])
+    _reject_unexpected(
+        shape_payload.keys(), _SDPA_FWD_SHAPE_KEYS, "sdpa_fmha_fwd_unified.shape"
+    )
+
+    knobs_payload = dict(payload["knobs"])
+    _reject_unexpected(
+        knobs_payload.keys(),
+        _SDPA_FWD_UNIFIED_KNOB_KEYS,
+        "sdpa_fmha_fwd_unified.knobs",
+    )
+
+    batch = int(payload["batch"])
+    seqlen_q = int(payload["seqlen_q"])
+    seqlen_k = int(payload["seqlen_k"])
+    block_size = int(payload["block_size"])
+    dtype = _normalize_unified_dtype(payload["dtype"])
+
+    problem = UnifiedAttentionProblem(
+        total_q=batch * seqlen_q,
+        num_seqs=batch,
+        num_query_heads=int(shape_payload["num_query_heads"]),
+        num_kv_heads=int(shape_payload["num_kv_heads"]),
+        head_size=int(shape_payload["head_size"]),
+        block_size=block_size,
+        max_seqlen_q=seqlen_q,
+        max_seqlen_k=seqlen_k,
+        dtype=dtype,
+        sliding_window=int(payload.get("sliding_window", 0)),
+        use_sinks=bool(payload.get("use_sinks", False)),
+    )
+    return problem, knobs_payload, block_size
+
+
+def _unified_tiled_spec_from_problem(problem, knobs: dict):
+    """Build a ``UnifiedAttention2DTiledSpec`` from the problem + chosen knobs.
+
+    Mirrors the field mapping the runtime dispatcher's
+    ``_tiled_spec_from_problem`` performs, but takes the perf knobs from the
+    provider's scorer-driven selection (passed on the wire) rather than
+    re-deriving them from a device-detected selector. The nine knob fields
+    map 1:1 onto the kernel spec; the remaining spec fields come from the
+    problem shape. ``tile_size`` of 0 ("unset") is forwarded as ``None`` so
+    the kernel defaults ``T = block_size``; ``waves_per_eu`` of 0 likewise
+    maps to ``None`` (let the LLVM heuristic decide).
+
+    ``num_seqs`` is carried onto the spec so the binary-search trip count
+    specialises to the problem's batch (matching the dispatcher).
+    """
+    from ck_dsl.instances import UnifiedAttention2DTiledSpec
+
+    tile_size = int(knobs.get("tile_size", 0))
+    waves_per_eu = int(knobs.get("waves_per_eu", 0))
+    return UnifiedAttention2DTiledSpec(
+        head_size=problem.head_size,
+        block_size=problem.block_size,
+        num_query_heads=problem.num_query_heads,
+        num_kv_heads=problem.num_kv_heads,
+        dtype=problem.dtype,
+        use_sinks=problem.use_sinks,
+        sliding_window=problem.sliding_window,
+        has_softcap=problem.softcap > 0.0,
+        num_seqs=problem.num_seqs,
+        num_warps=int(knobs.get("num_warps", 1)),
+        block_m_per_warp=int(knobs.get("block_m_per_warp", 16)),
+        tile_size=tile_size if tile_size > 0 else None,
+        waves_per_eu=waves_per_eu if waves_per_eu > 0 else None,
+        use_mfma_32x32=bool(knobs.get("use_mfma_32x32", False)),
+        use_transposed_qk_32x32=bool(knobs.get("use_transposed_qk_32x32", False)),
+        use_register_pv=bool(knobs.get("use_register_pv", False)),
+        use_early_v_schedule=bool(knobs.get("use_early_v_schedule", False)),
+        use_fast_paged_kv_desc=bool(knobs.get("use_fast_paged_kv_desc", False)),
+    )
+
+
+def _unified_grid(problem, num_warps: int, block_m_per_warp: int):
+    """Recompute the unified tiled-2D launch grid for the chosen BLOCK_M.
+
+    Mirrors the dispatcher's hot-path grid math
+    (``attention_unified._run_2d_tiled``): the grid is
+    ``(num_kv_heads, total_num_q_blocks, 1)`` where
+
+      block_m = num_warps * block_m_per_warp
+      block_q = block_m // num_queries_per_kv  (if NQK <= block_m, else 1)
+      total_num_q_blocks = total_q // block_q + num_seqs
+
+    The provider MUST recompute the grid with the SAME num_warps /
+    block_m_per_warp the kernel was built with: a mismatch launches the
+    wrong number of CTAs and the kernel's q_block_local_idx math touches
+    the wrong query positions.
+    """
+    block_m = num_warps * block_m_per_warp
+    nqk = problem.num_queries_per_kv
+    block_q = block_m // nqk if nqk <= block_m else 1
+    total_num_q_blocks = problem.total_q // block_q + problem.num_seqs
+    return (int(problem.num_kv_heads), int(total_num_q_blocks), 1)
+
+
+def _compile_sdpa_fwd_unified(payload: dict, arch: str) -> dict:
+    """Build + compile the unified paged/varlen tiled-2D attention kernel.
+
+    ``arch`` is threaded to BOTH ``build_unified_attention_2d_tiled`` (which
+    rejects non-gfx950 targets before any IR is emitted and resolves the
+    per-arch MFMA atoms) and ``compile_kernel`` (which selects the ISA
+    triple). The arch is the explicit compile target -- this path
+    deliberately does NOT call ``_resolve_attention_arch`` (which
+    device-detects the running GPU); the provider always knows its target
+    arch and a Phase-2 host compile must not depend on a present device.
+
+    The scale / k_scale / v_scale / out_scale / softcap floats and the
+    block_table_stride / num_seqs / qq_bias_stride_0 i32s are launch-time
+    arguments the host packs into the 18-slot arg buffer per
+    :func:`_sdpa_fwd_unified_arg_schema`; they are not codegen inputs, so
+    they are absent from the payload and never baked into the kernel.
+    """
+    from ck_dsl.helpers.compile import compile_kernel
+    from ck_dsl.instances import build_unified_attention_2d_tiled
+
+    problem, knobs, _block_size = _sdpa_fwd_unified_problem_and_knobs(payload)
+    spec = _unified_tiled_spec_from_problem(problem, knobs)
+
+    kernel = build_unified_attention_2d_tiled(spec, arch=arch)
+    artifact = compile_kernel(kernel, arch=arch)
+
+    num_warps = spec.num_warps
+    block = (64 * num_warps, 1, 1)
+    grid = _unified_grid(problem, num_warps, spec.block_m_per_warp)
+
+    return {
+        "hsaco": artifact.hsaco,
+        "kernel_name": artifact.kernel_name,
+        "kind": "sdpa_fmha_fwd_unified",
+        "grid": grid,
+        "block": block,
+        # The tiled-2D body stages Q / K / V / P / Acc slabs via smem_alloc
+        # with statically-known shapes, so the dynamic-LDS arg to
+        # hipModuleLaunchKernel is zero -- static LDS lives in the HSACO's
+        # kernarg descriptor.
+        "lds_bytes": 0,
+        "arg_schema": _sdpa_fwd_unified_arg_schema(),
+        "isa": artifact.isa,
+    }
+
+
 def _compile_sdpa_bwd(payload: dict, arch: str) -> dict:
     """Build + compile an FMHA backward kernel from the payload.
 
@@ -883,9 +1224,9 @@ def compile(op_kind: str, payload: dict, arch: str) -> dict:
 
     Called by the C++ ``CompileServiceBridge::compile`` on a
     ``JitCache`` miss. Dispatches on ``op_kind`` (``"conv_implicit_gemm"``,
-    ``"sdpa_fmha_fwd"``, ``"sdpa_fmha_bwd"``, or ``"sdpa_lse_prep"``).
-    Unknown kinds raise ``ValueError``, which the bridge surfaces as a
-    ``HipdnnPluginException``.
+    ``"sdpa_fmha_fwd"``, ``"sdpa_fmha_fwd_unified"``, ``"sdpa_fmha_bwd"``,
+    or ``"sdpa_lse_prep"``). Unknown kinds raise ``ValueError``, which the
+    bridge surfaces as a ``HipdnnPluginException``.
 
     ``arch`` is the target gfx token, passed separately from ``payload``
     (an orthogonal compile target, not a spec field -- mirroring the DSL
@@ -899,6 +1240,8 @@ def compile(op_kind: str, payload: dict, arch: str) -> dict:
         return _compile_conv_implicit_gemm(payload, arch)
     elif op_kind == "sdpa_fmha_fwd":
         return _compile_sdpa_fwd(payload, arch)
+    elif op_kind == "sdpa_fmha_fwd_unified":
+        return _compile_sdpa_fwd_unified(payload, arch)
     elif op_kind == "sdpa_fmha_bwd":
         return _compile_sdpa_bwd(payload, arch)
     elif op_kind == "sdpa_lse_prep":
@@ -944,6 +1287,43 @@ def _is_applicable_sdpa_fwd(payload: dict, arch: str):
 
     spec, _batch, _generate_stats = _sdpa_fwd_spec_from_payload(payload)
     ok, reason = is_valid_spec(spec, arch)
+    return bool(ok), str(reason)
+
+
+def _is_applicable_sdpa_fwd_unified(payload: dict, arch: str):
+    """Arch-aware applicability for the unified paged/varlen tiled-2D spec.
+
+    Consults the DSL's ``supports_tiled_2d`` for ``arch`` -- the exact gate
+    ``build_unified_attention_2d_tiled`` enforces (via
+    ``require_tiled_attention_arch`` + the shape checks) -- so the C++
+    ``isApplicable`` gate matches the compile path. No kernel is built and
+    comgr is never invoked; this is a pure data-driven check against the
+    target's :class:`ck_dsl.core.arch.ArchTarget` (wide-K MFMA atom
+    presence) plus the head_size / block_size / GQA shape constraints.
+    ``supports_tiled_2d`` returns ``(False, ...)`` for an unsupported arch,
+    so this single call covers both "arch unsupported" and "shape invalid
+    for this arch". The boolean knob combo is validated at spec
+    ``__post_init__`` time on the compile path; the provider's enumerator
+    only emits valid combos, so it is not re-checked here.
+    """
+    from ck_dsl.instances.gfx950.attention_tiled_2d import supports_tiled_2d
+
+    problem, knobs, _block_size = _sdpa_fwd_unified_problem_and_knobs(payload)
+    ok, reason = supports_tiled_2d(
+        head_size=problem.head_size,
+        block_size=problem.block_size,
+        dtype=problem.dtype,
+        num_queries_per_kv=problem.num_queries_per_kv,
+        use_alibi=False,
+        use_qq_bias=False,
+        use_fp8=False,
+        q_dtype=problem.dtype,
+        num_warps=int(knobs.get("num_warps", 1)),
+        tile_size=(
+            int(knobs["tile_size"]) if int(knobs.get("tile_size", 0)) > 0 else None
+        ),
+        arch=arch,
+    )
     return bool(ok), str(reason)
 
 
@@ -1003,6 +1383,8 @@ def is_applicable(op_kind: str, payload: dict, arch: str):
         return _is_applicable_conv_implicit_gemm(payload, arch)
     elif op_kind == "sdpa_fmha_fwd":
         return _is_applicable_sdpa_fwd(payload, arch)
+    elif op_kind == "sdpa_fmha_fwd_unified":
+        return _is_applicable_sdpa_fwd_unified(payload, arch)
     elif op_kind == "sdpa_fmha_bwd":
         return _is_applicable_sdpa_bwd(payload, arch)
     elif op_kind == "sdpa_lse_prep":

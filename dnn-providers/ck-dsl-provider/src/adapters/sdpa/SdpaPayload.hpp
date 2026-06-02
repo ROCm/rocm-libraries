@@ -10,15 +10,20 @@
 namespace ck_dsl_provider {
 
 /// Translate an ``SdpaSpec`` into the on-wire payload dict that the
-/// Python ``ck_dsl_provider.compile_service`` consumes for the SDPA
-/// forward op.
+/// Python ``ck_dsl_provider.compile_service`` consumes for the unified
+/// paged/varlen SDPA-forward op (``"sdpa_fmha_fwd_unified"``).
 ///
-/// The dict carries only the codegen-relevant fields: batch, the
-/// head-shape triple (head_size / num_query_heads / num_kv_heads), the
-/// dtype, the mask mode, and the two sequence lengths. The eight
-/// stride_* scalars and scale_log2 are deliberately omitted -- they are
-/// launch-time kernel arguments, not codegen inputs, so they neither
-/// belong in the payload nor in the cache key.
+/// The dict carries the codegen-relevant fields: batch, the head-shape
+/// triple (head_size / num_query_heads / num_kv_heads), the dtype, the
+/// mask mode, the two sequence lengths, the paged/varlen problem lanes
+/// (is_paged / block_size / is_varlen / sliding_window / use_sinks), and
+/// a nested ``knobs`` dict with the nine ``SdpaPerfKnobs`` fields the
+/// scorer-driven selection chose. Key names mirror the Python
+/// ``_SDPA_FWD_UNIFIED_TOP_KEYS`` / ``_SDPA_FWD_UNIFIED_KNOB_KEYS``
+/// whitelists exactly. The eight stride_* scalars, scale_log2, and the
+/// k/v/out scale + softcap floats are deliberately omitted -- they are
+/// launch-time kernel arguments (the 18-slot arg buffer), not codegen
+/// inputs, so they neither belong in the payload nor in the cache key.
 ///
 /// **GIL discipline:** the caller MUST hold the GIL before invoking this
 /// function. It allocates Python objects (py::dict, py::int_, etc.);

@@ -18,6 +18,7 @@ add_library(
     adapters/sdpa/SdpaScorer.cpp
     adapters/sdpa/SdpaBwdAdapter.cpp
     adapters/sdpa/SdpaBwdPayload.cpp
+    adapters/sdpa/SdpaMarshalling.cpp
     adapters/sdpa/SdpaPayload.cpp
     engines/conv_implicit_gemm/CkDslConvImplicitGemmEngine.cpp
     engines/conv_implicit_gemm/ConvImplicitGemmPlan.cpp
