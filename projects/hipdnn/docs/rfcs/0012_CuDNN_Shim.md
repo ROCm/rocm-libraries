@@ -1,6 +1,6 @@
 # RFC: cuDNN shim for hipDNN
 
-- **Status**: Draft
+- **Status**: Accepted
 - **Authors**: Mitch Ousdahl
 
 ## Table of Contents
@@ -418,7 +418,7 @@ Three surface details that drive the wrapper implementation:
 
 For the full upstream `Graph` signature with line-number citations against
 `include/cudnn_frontend/graph_interface.h`, see
-[Supporting Reference §1](./0011_CuDNN_Shim_Reference.md#1-graph-class--verified-signature).
+[Supporting Reference §1](./0012_CuDNN_Shim_Reference.md#1-graph-class--verified-signature).
 
 #### 4.4.1 Tensor identity
 
@@ -477,7 +477,7 @@ missing node.
 The full class-by-class table (39 entries, with line numbers in
 `graph_properties.h` and the matching hipDNN attribute type — or "none" —
 for each) is in
-[Supporting Reference §2](./0011_CuDNN_Shim_Reference.md#2-full-_attributes-coverage-table).
+[Supporting Reference §2](./0012_CuDNN_Shim_Reference.md#2-full-_attributes-coverage-table).
 
 #### 4.4.3 Verified PyTorch consumer surface (cuDNN FE v9 graph API)
 
@@ -494,7 +494,7 @@ handling for either keying style.
 
 For the precise symbol-by-symbol table with line-number citations, plus
 the explicit list of cuDNN FE features PyTorch does **not** use, see
-[Supporting Reference §3](./0011_CuDNN_Shim_Reference.md#3-verified-pytorch-consumer-surface).
+[Supporting Reference §3](./0012_CuDNN_Shim_Reference.md#3-verified-pytorch-consumer-surface).
 
 The shim **ships the full v9 surface so hipified source compiles, and fails
 loudly at use** (build/validate time, §4.4.2), with hipDNN node work
@@ -545,7 +545,7 @@ triaged into one of three handlings:
   non-deterministic results. (Recorded-error mechanism, §4.4.2.)
 
 The per-note classification table lives in
-[Supporting Reference §4](./0011_CuDNN_Shim_Reference.md#4-heuristics-and-plan-selection--verified-api)
+[Supporting Reference §4](./0012_CuDNN_Shim_Reference.md#4-heuristics-and-plan-selection--verified-api)
 and must be reviewed note-by-note before Phase 4 lands.
 
 **Resource caps.** The workspace-size cap is enforced post-hoc against
@@ -558,7 +558,7 @@ than silently ignoring it (Reference §4).
 For the full upstream method enumeration (with `graph_interface.h` line
 numbers), behaviour table, and the open question about hipDNN-side
 metadata extensions, see
-[Supporting Reference §4](./0011_CuDNN_Shim_Reference.md#4-heuristics-and-plan-selection--verified-api).
+[Supporting Reference §4](./0012_CuDNN_Shim_Reference.md#4-heuristics-and-plan-selection--verified-api).
 
 ### 4.6 Error handling and logging
 
@@ -592,7 +592,7 @@ keeps the bridge in the shim.)
 For the verified `error_object` structure, the full macro list, and the
 detailed logging API surface (with `cudnn_frontend_Logging.h` references),
 see
-[Supporting Reference §5](./0011_CuDNN_Shim_Reference.md#5-error-handling-and-logging--verified-api).
+[Supporting Reference §5](./0012_CuDNN_Shim_Reference.md#5-error-handling-and-logging--verified-api).
 
 ### 4.7 Compatibility scope (and the `<cudnn.h>` / v0.x problem)
 
@@ -671,7 +671,7 @@ shim) is enumerated in §9 as deferred future work.
 For the verbatim upstream `cudnn_frontend.h` include list, the
 enumeration of v0.x aliases, and the considered-but-deferred options for
 v0.x source compatibility, see
-[Supporting Reference §6](./0011_CuDNN_Shim_Reference.md#6-the-cudnnh--v0x-umbrella-header-problem).
+[Supporting Reference §6](./0012_CuDNN_Shim_Reference.md#6-the-cudnnh--v0x-umbrella-header-problem).
 
 ### 4.8 Versioning
 
@@ -976,7 +976,7 @@ the corresponding cuDNN FE sample.
 - Implement `HeurMode_t`, `NumericalNote_t`, `BehaviorNote_t` enum mapping.
 - Wire the plan-filter methods on the shim's `Graph`, applying the
   per-note triage (§4.5; classification table in
-  [Supporting Reference §4](./0011_CuDNN_Shim_Reference.md#4-heuristics-and-plan-selection--verified-api)):
+  [Supporting Reference §4](./0012_CuDNN_Shim_Reference.md#4-heuristics-and-plan-selection--verified-api)):
   - `select_*` / `deselect_*` notes — map to engine capability where
     hipDNN can honor it, warn-and-ignore where advisory, **error** where
     correctness-critical and unsupported (e.g. deterministic). No blanket
@@ -986,7 +986,7 @@ the corresponding cuDNN FE sample.
     `get_workspace_size()` is sufficient).
   - `deselect_shared_mem_greater_than` — **reject a non-zero value** until
     hipDNN exposes per-plan shared-memory metadata (see
-    [Supporting Reference §4](./0011_CuDNN_Shim_Reference.md#4-heuristics-and-plan-selection--verified-api)).
+    [Supporting Reference §4](./0012_CuDNN_Shim_Reference.md#4-heuristics-and-plan-selection--verified-api)).
 - Wire the plan/engine introspection surface (Reference §1): `build()`,
   `get_engine_count`, `get_knobs_for_engine`, `create_execution_plan(engine_id,
   knobs)`, `get_plan_name` / `get_plan_name_at_index`,
@@ -1162,5 +1162,5 @@ PyTorch in, or (c) the test is run on-demand by the shim's named owners
   in `<shim_ns>` and `<shim_ns>::detail`, with no rename or move of v9
   symbols. The path layout in §4.1 was chosen with that in mind. See
   §4.7 and
-  [Supporting Reference §6](./0011_CuDNN_Shim_Reference.md#6-the-cudnnh--v0x-umbrella-header-problem)
+  [Supporting Reference §6](./0012_CuDNN_Shim_Reference.md#6-the-cudnnh--v0x-umbrella-header-problem)
   for the underlying constraint and the options considered.

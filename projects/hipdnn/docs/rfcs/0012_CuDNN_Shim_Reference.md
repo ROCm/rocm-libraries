@@ -1,7 +1,7 @@
-# RFC 0011 — Supporting Reference: Verified cuDNN FE v1.24 Surface
+# RFC 0012 — Supporting Reference: Verified cuDNN FE v1.24 Surface
 
 This document is the long-form companion to
-[RFC 0011: cuDNN shim for hipDNN](./0011_CuDNN_Shim.md). It collects the
+[RFC 0012: cuDNN shim for hipDNN](./0012_CuDNN_Shim.md). It collects the
 verbose, source-verified material that the main RFC summarises: the full
 `Graph` C++ signature, the complete `*_attributes` coverage table, the
 PyTorch consumer surface, the heuristics/plan API enumeration, the error and
