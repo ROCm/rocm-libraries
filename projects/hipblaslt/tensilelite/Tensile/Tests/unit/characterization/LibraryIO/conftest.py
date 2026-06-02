@@ -37,7 +37,8 @@ import pytest
 
 from Tensile.Common.Architectures import SUPPORTED_ISA
 from Tensile.Common.Capabilities import makeIsaInfoMap
-from Tensile.Toolchain.Validators import validateToolchain
+from Tensile.Toolchain.Assembly import makeAssemblyToolchain
+from Tensile.Toolchain.Validators import validateToolchain, ToolchainDefaults
 
 
 @pytest.fixture(scope="session")
@@ -48,3 +49,11 @@ def cxx_compiler():
 @pytest.fixture(scope="session")
 def isa_info_map(cxx_compiler):
     return makeIsaInfoMap(SUPPORTED_ISA, cxx_compiler)
+
+
+@pytest.fixture(scope="session")
+def assembler(cxx_compiler):
+    """A real ``Assembler`` (not a path string) — ``Solution`` construction in
+    the parse paths reads ``assembler.rocm_version``. Built once per session."""
+    bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
+    return makeAssemblyToolchain(cxx_compiler, bundler, "default").assembler
