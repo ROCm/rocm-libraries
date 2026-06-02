@@ -387,11 +387,14 @@ def main():
         "coverage",
         help="Diff a pre-build depmap vs the post-build ground truth (no build): "
         "report file->test edges the real build proves but the depmap lacks (FNs)",
+        epilog="Caveat: --pre and --post must be generated with the SAME "
+        "--workspace-root, or path-canonicalization mismatch shows up as spurious "
+        "false negatives.",
     )
     cov.add_argument("--pre", required=True,
-                     help="pre-build depmap JSON (cmake-parse output)")
+                     help="pre-build depmap JSON (cmake-parse output; same --workspace-root as --post)")
     cov.add_argument("--post", required=True,
-                     help="post-build depmap JSON (main.py parse / ninja -t deps)")
+                     help="post-build depmap JSON (main.py parse / ninja -t deps; same --workspace-root as --pre)")
     cov.add_argument("--ctest", help="ctest -N output (count only registered-test edges)")
     cov.add_argument("--output", help="write coverage result JSON here")
 
