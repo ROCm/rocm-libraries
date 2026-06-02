@@ -24,10 +24,10 @@
 
 #pragma once
 
-#include "ck_tile/ops/direct_convolution/kernel/grouped_conv_kernel_base.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/grouped_conv_input_loader.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/grouped_conv_output_writer.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/non_grouped_conv_compute_loop_v3.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/impl/grouped_conv_kernel_base.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/impl/grouped_conv_input_loader.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/impl/grouped_conv_output_writer.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/impl/non_grouped_conv_compute_loop_v3.hpp"
 #include "ck_tile/ops/direct_convolution/utils/common.hpp"
 #include "ck_tile/ops/direct_convolution/utils/mfma.hpp"
 #include "ck_tile/ops/direct_convolution/utils/memory.hpp"

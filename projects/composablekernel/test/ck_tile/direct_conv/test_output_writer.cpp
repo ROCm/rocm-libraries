@@ -20,10 +20,10 @@
 #pragma clang diagnostic ignored "-Wunused-parameter"
 #pragma clang diagnostic ignored "-Wshadow"
 #include "ck_tile/core.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/grouped_4c_tile_conv_impl_v3.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/impl/grouped_4c_tile_conv_impl_v3.hpp"
 #include "ck_tile/ops/direct_convolution/utils/types.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/grouped_8c_tile_conv_impl_v2.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/grouped_16c_tile_conv_impl_v2.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/impl/grouped_8c_tile_conv_impl_v2.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/impl/grouped_16c_tile_conv_impl_v2.hpp"
 #pragma clang diagnostic pop
 
 #include <hip/hip_fp16.h>

@@ -6,7 +6,7 @@
 #pragma clang diagnostic ignored "-Wold-style-cast"
 #pragma clang diagnostic ignored "-Wunused-parameter"
 #pragma clang diagnostic ignored "-Wshadow"
-#include "ck_tile/ops/direct_convolution/kernel/direct_conv_kernels.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/direct_conv_8c.hpp"
 #pragma clang diagnostic pop
 
 constexpr auto v2 = ck_tile::direct_conv::Version::v2;

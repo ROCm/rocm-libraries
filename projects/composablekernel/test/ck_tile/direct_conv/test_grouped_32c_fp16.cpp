@@ -7,7 +7,7 @@
 #pragma clang diagnostic ignored "-Wold-style-cast"
 #pragma clang diagnostic ignored "-Wunused-parameter"
 #pragma clang diagnostic ignored "-Wshadow"
-#include "ck_tile/ops/direct_convolution/kernel/direct_conv_kernels.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/direct_conv_32c.hpp"
 #pragma clang diagnostic pop
 
 struct HipConv32cKernelTraits

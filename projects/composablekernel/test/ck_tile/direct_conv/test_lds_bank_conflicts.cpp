@@ -9,8 +9,8 @@
 #pragma clang diagnostic ignored "-Wold-style-cast"
 #pragma clang diagnostic ignored "-Wunused-parameter"
 #pragma clang diagnostic ignored "-Wshadow"
-#include "ck_tile/ops/direct_convolution/kernel/grouped_4c_tile_conv_impl_v3.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/grouped_16c_tile_conv_impl_v2.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/impl/grouped_4c_tile_conv_impl_v3.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/impl/grouped_16c_tile_conv_impl_v2.hpp"
 #include "ck_tile/ops/direct_convolution/utils/swizzle.hpp"
 #include "ck_tile/ops/direct_convolution/utils/matrix_layout.hpp"
 #pragma clang diagnostic pop

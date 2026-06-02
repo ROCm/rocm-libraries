@@ -18,11 +18,11 @@
 //
 // Everything else lives here and is shared verbatim.
 
-#include "ck_tile/ops/direct_convolution/kernel/grouped_conv_descriptors.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/grouped_conv_input_loader.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/grouped_conv_weight_loader.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/grouped_conv_output_writer.hpp"
-#include "ck_tile/ops/direct_convolution/kernel/grouped_conv_compute_loop.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/impl/grouped_conv_descriptors.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/impl/grouped_conv_input_loader.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/impl/grouped_conv_weight_loader.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/impl/grouped_conv_output_writer.hpp"
+#include "ck_tile/ops/direct_convolution/kernel/impl/grouped_conv_compute_loop.hpp"
 #include "ck_tile/ops/direct_convolution/utils/common.hpp"
 #include "ck_tile/ops/direct_convolution/utils/detail.hpp"
 #include "ck_tile/ops/direct_convolution/utils/launch_params.hpp"
