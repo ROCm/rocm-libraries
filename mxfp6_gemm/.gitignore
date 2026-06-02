@@ -1,0 +1,14 @@
+# build artifacts
+*.bin
+*.o
+*.s
+*.out
+*.hipfb
+*.build.log
+test_pipeline_v17
+test_reference
+# profiler / tooling output
+prof_out*/
+.rocprofv3/
+compile_commands.json
+.vscode/

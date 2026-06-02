@@ -195,6 +195,21 @@ __device__ __forceinline__ void mfma_scale_f32_32x32x64_fp6(
     );
 }
 
+// MFMA: v6i operands, accumulator in Arch VGPR (ACC_CD=0).
+// Mirror of the AccTileA v6i overload — lets a tile mix AGPR + Arch-VGPR
+// accumulators so a single wave can hold more than 256 AGPR worth of acc.
+template <int BYTE_SEL>
+__device__ __forceinline__ void mfma_scale_f32_32x32x64_fp6(
+    AccTileV& acc, v6i a, v6i b, int scale_a, int scale_b)
+{
+    static_assert(BYTE_SEL == 0, "only BYTE_SEL=0 supported for now");
+    asm volatile(
+        "v_mfma_scale_f32_32x32x64_f8f6f4 %0, %1, %2, %0, %3, %4 cbsz:2 blgp:2"
+        : "+v"(acc.vec)
+        : "v"(b), "v"(a), "v"(scale_b), "v"(scale_a)
+    );
+}
+
 // ---- Epilogue: store 32×32 AccTile to global ----
 //
 // With TransposeC, each lane holds 1 M-row × 16 N-columns.
