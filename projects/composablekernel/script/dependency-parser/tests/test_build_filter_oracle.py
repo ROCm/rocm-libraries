@@ -122,5 +122,41 @@ class TestClassifyUnreachable(unittest.TestCase):
         self.assertEqual(nc, [])
 
 
+class TestCodegenGlobs(unittest.TestCase):
+    def _inventory(self, tmp):
+        import json
+        from pathlib import Path
+        p = Path(tmp) / "codegen.json"
+        p.write_text(json.dumps({"generators": [
+            {"input": "a/generate.py", "test_globs": ["test_ck_tile_fmha_*"]},
+            {"input": "b/generate.py", "test_globs": ["tile_example_sageattn_*", "test_x"]},
+            {"input": "cmake/x.in", "test_globs": []},
+        ]}))
+        return str(p)
+
+    def test_load_codegen_globs_flattens(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            globs = bfo.load_codegen_globs(self._inventory(tmp))
+        self.assertEqual(
+            globs, ["test_ck_tile_fmha_*", "tile_example_sageattn_*", "test_x"]
+        )
+
+    def test_expand_matches_globs_and_exact(self):
+        ctest = {"test_ck_tile_fmha_fwd_fp16", "tile_example_sageattn_fwd",
+                 "test_x", "test_gemm"}
+        globs = ["test_ck_tile_fmha_*", "tile_example_sageattn_*", "test_x"]
+        self.assertEqual(
+            bfo.expand_test_globs(globs, ctest),
+            ["test_ck_tile_fmha_fwd_fp16", "test_x", "tile_example_sageattn_fwd"],
+        )
+
+    def test_expand_no_match_is_empty(self):
+        self.assertEqual(bfo.expand_test_globs(["nope_*"], {"test_gemm"}), [])
+
+    def test_expand_empty_globs_is_empty(self):
+        self.assertEqual(bfo.expand_test_globs([], {"test_gemm"}), [])
+
+
 if __name__ == "__main__":
     unittest.main()

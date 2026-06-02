@@ -1,0 +1,65 @@
+{
+  "_comment": [
+    "Inventory of build-time code generators in CK and the ctest tests their",
+    "generated sources feed. This is the source-of-truth record of the codegen",
+    "blind spot for smart-build test selection:",
+    "  B1 - generated .cpp do not exist when the depmap is built (pre-build), so",
+    "       their compile deps are missed.",
+    "  B2 - a change to a generator INPUT (generate.py / cmake/*.in) maps to NO",
+    "       test via #include analysis (the depmap has generated.cpp -> headers,",
+    "       never generate.py -> generated.cpp); no compile-dep tool can see it.",
+    "Used by: filter_oracle.py codegen-allowlist (marks these tests as a known",
+    "codegen class in the reachability guardrail). Correctness for B2 does NOT",
+    "depend on this file being complete - ci_safety_check.sh forces a full build on",
+    "any */generate.py or cmake/*.in change as a backstop.",
+    "Add an entry when you add a generator. Paths are relative to projects/composablekernel.",
+    "test_globs use shell-style wildcards matched against `ctest -N` names."
+  ],
+  "generators": [
+    {
+      "input": "example/ck_tile/01_fmha/generate.py",
+      "test_globs": ["test_ck_tile_fmha_*", "tile_example_fmha_*"],
+      "note": "FMHA fwd/bwd instances generated at build time (add_custom_command OUTPUT)"
+    },
+    {
+      "input": "example/ck_tile/02_layernorm2d/generate.py",
+      "test_globs": ["tile_example_layernorm2d_*"],
+      "note": "layernorm2d example instances generated at build time"
+    },
+    {
+      "input": "example/ck_tile/10_rmsnorm2d/generate.py",
+      "test_globs": ["tile_example_rmsnorm2d_*", "tile_example_add_rmsnorm2d_*"],
+      "note": "rmsnorm2d example instances generated at build time"
+    },
+    {
+      "input": "example/ck_tile/49_sageattention/generate.py",
+      "test_globs": ["tile_example_sageattn_*"],
+      "note": "sage-attention instances generated at build time"
+    },
+    {
+      "input": "example/ck_tile/50_sparse_attn/generate.py",
+      "test_globs": ["tile_example_*sparse_attn*"],
+      "note": "sparse-attention (jenga/vsa) instances generated at build time"
+    },
+    {
+      "input": "test/ck_tile/layernorm2d/generate.py",
+      "test_globs": ["test_ck_tile_layernorm2d_*"],
+      "note": "layernorm2d test blobs (target_sources of generated .cpp)"
+    },
+    {
+      "input": "test/ck_tile/rmsnorm2d/generate.py",
+      "test_globs": ["test_ck_tile_rmsnorm2d_*", "test_ck_tile_add_rmsnorm2d_*"],
+      "note": "rmsnorm2d test blobs (target_sources of generated .cpp)"
+    },
+    {
+      "input": "cmake/instantiate_shard.in",
+      "test_globs": [],
+      "note": "configure_file template for sharded instance libraries; broad blast radius (any test linking those instances). Covered by the safety-check backstop, not a precise test glob."
+    },
+    {
+      "input": "cmake/call_shard.in",
+      "test_globs": [],
+      "note": "configure_file template for shard callers; see instantiate_shard.in"
+    }
+  ]
+}

@@ -107,6 +107,7 @@ else
         --depmap enhanced_dependency_mapping.json \
         --ctest ctest_list.txt \
         --ninja build.ninja \
+        --codegen-inventory "${SCRIPT_DIR}/codegen_blindspots.json" \
         --output reachability_result.json \
         || echo "WARNING: reachability guardrail found unreachable compiled tests (see reachability_result.json) - continuing"
 fi

@@ -69,6 +69,19 @@ if echo "$CHANGED_FILES" | grep -qE "${BUILD_INFRA_PATTERN}"; then
     REASON="build system configuration changed"
 fi
 
+# Codegen inputs: a change to a generator script/template maps to no test via
+# #include analysis (the depmap has generated.cpp -> headers, never
+# generate.py -> generated.cpp), so a selective build could silently skip the
+# affected tests. Force a full build. This is the backstop for the codegen blind
+# spot inventoried in script/dependency-parser/codegen_blindspots.json, and holds
+# even when that inventory lags behind a newly added generator.
+CODEGEN_PATTERN="projects/composablekernel/.*/generate\.py$|projects/composablekernel/cmake/.*\.in$"
+
+if echo "$CHANGED_FILES" | grep -qE "${CODEGEN_PATTERN}"; then
+    FORCE_FULL_BUILD=true
+    REASON="codegen input changed (generated sources are not tracked pre-build)"
+fi
+
 # 4. Force full build if dependency cache is older than 7 days
 CACHE_FILE="cmake_dependency_mapping.json"
 if [ -f "$CACHE_FILE" ]; then

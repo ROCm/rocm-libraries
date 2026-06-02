@@ -29,6 +29,7 @@ separate-build components like experimental/rocm_ck.
 """
 
 import argparse
+import fnmatch
 import json
 import os
 import re
@@ -38,6 +39,24 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "src"))
 from cmake_dependency_analyzer import NinjaTargetParser  # noqa: E402
 from validate_selection import load_ctest_tests  # noqa: E402
+
+
+def load_codegen_globs(inventory_path):
+    """Return the flat list of test_globs from a codegen_blindspots.json inventory."""
+    with open(inventory_path) as f:
+        data = json.load(f)
+    globs = []
+    for gen in data.get("generators", []):
+        globs.extend(gen.get("test_globs", []))
+    return globs
+
+
+def expand_test_globs(globs, ctest_tests):
+    """Match shell-style globs against ctest test names -> sorted list of names."""
+    return sorted(
+        name for name in ctest_tests
+        if any(fnmatch.fnmatch(name, pat) for pat in globs)
+    )
 
 
 def sel_for_file(file_to_executables, ctest_tests, file_key):
@@ -174,6 +193,16 @@ def _run_reachability(args):
     if args.allowlist and os.path.exists(args.allowlist):
         with open(args.allowlist) as f:
             allow = {ln.strip() for ln in f if ln.strip() and not ln.startswith("#")}
+    # Codegen-driven tests (from the codegen_blindspots.json inventory) look
+    # unreachable in a pre-build depmap because their sources are generated at
+    # build time. Mark them as a known codegen class so they don't read as FNs;
+    # generator-input changes are handled separately by ci_safety_check.sh.
+    codegen_allow = []
+    if args.codegen_inventory and os.path.exists(args.codegen_inventory):
+        codegen_allow = expand_test_globs(
+            load_codegen_globs(args.codegen_inventory), ctest_tests
+        )
+    suppress = allow | set(codegen_allow)
     # If build.ninja is given, classify: only tests backed by a compiled bin/
     # target can be FNs; tests with no bin/ target are non-compiled (always-run).
     compiled = None
@@ -182,7 +211,7 @@ def _run_reachability(args):
             os.path.basename(e)
             for e in NinjaTargetParser(args.ninja).parse_executable_mappings()
         )
-    fn, non_compiled = classify_unreachable(depmap, ctest_tests, compiled, allow)
+    fn, non_compiled = classify_unreachable(depmap, ctest_tests, compiled, suppress)
     result = {
         "n_ctest": len(ctest_tests),
         "n_reachable": len(reachable_exe_basenames(depmap)),
@@ -191,6 +220,8 @@ def _run_reachability(args):
         "n_non_compiled": len(non_compiled),
         "non_compiled": non_compiled,
         "allowlisted": sorted(allow),
+        "n_codegen_allowlisted": len(codegen_allow),
+        "codegen_allowlisted": codegen_allow,
         "classified": compiled is not None,
         "verdict": "pass" if not fn else "fail",
     }
@@ -210,8 +241,28 @@ def _run_reachability(args):
               f"(no bin/ target: python/try_compile; always-run class)")
     if allow:
         print(f"allowlisted:      {len(allow)}")
+    if codegen_allow:
+        print(f"codegen class:    {len(codegen_allow)} "
+              f"(generated at build time; tracked via codegen_blindspots.json)")
     print(f"verdict: {result['verdict'].upper()}")
     return 0 if result["verdict"] == "pass" else 1
+
+
+def _run_codegen_allowlist(args):
+    for path, label in [(args.inventory, "--inventory"), (args.ctest, "--ctest")]:
+        if not os.path.exists(path):
+            print(f"Error: missing required input ({label}): {path}", file=sys.stderr)
+            return 2
+    ctest_tests = load_ctest_tests(args.ctest)
+    names = expand_test_globs(load_codegen_globs(args.inventory), ctest_tests)
+    text = "".join(f"{n}\n" for n in names)
+    if args.output:
+        with open(args.output, "w") as f:
+            f.write(text)
+    else:
+        sys.stdout.write(text)
+    print(f"codegen-driven tests matched: {len(names)}", file=sys.stderr)
+    return 0
 
 
 def main():
@@ -242,13 +293,28 @@ def main():
         "non-compiled (no bin/ target -> always-run, not FN)",
     )
     rc.add_argument("--allowlist", help="file of known-acceptable unreachable test names")
+    rc.add_argument(
+        "--codegen-inventory",
+        help="codegen_blindspots.json: mark codegen-driven tests (generated at "
+        "build time) as a known class rather than false negatives",
+    )
     rc.add_argument("--output", help="write result JSON here")
+
+    ca = sub.add_parser(
+        "codegen-allowlist",
+        help="Expand codegen_blindspots.json test_globs against `ctest -N` -> test names",
+    )
+    ca.add_argument("--inventory", required=True, help="codegen_blindspots.json")
+    ca.add_argument("--ctest", required=True, help="ctest -N output")
+    ca.add_argument("--output", help="write matched test names here (default: stdout)")
 
     args = p.parse_args()
     if args.command == "probe":
         sys.exit(_run_probe(args))
     elif args.command == "reachability":
         sys.exit(_run_reachability(args))
+    elif args.command == "codegen-allowlist":
+        sys.exit(_run_codegen_allowlist(args))
 
 
 if __name__ == "__main__":

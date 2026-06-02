@@ -277,6 +277,34 @@ python3 "${SCRIPT_DIR}/filter_oracle.py" reachability \
     --output reachability_result.json
 ```
 
+### Codegen blind spot (build-time generated tests)
+
+Some tests are generated at **build** time from a script/template
+(`example/ck_tile/01_fmha/generate.py`, `test/ck_tile/{layernorm2d,rmsnorm2d}/generate.py`,
+`cmake/*.in`). Two consequences for selection:
+
+- Their sources don't exist when the depmap is built (pre-build), so they look
+  unreachable. `script/dependency-parser/codegen_blindspots.json` inventories each
+  generator → the tests its outputs feed. `smart_build_ci.sh` passes it via
+  `filter_oracle.py reachability --codegen-inventory …`, which marks those tests
+  as a known codegen class — reported under `codegen_allowlisted` in
+  `reachability_result.json` rather than as false negatives.
+- A change to a generator **input** maps to no test via `#include` analysis, so
+  `ci_safety_check.sh` treats `**/generate.py` and `cmake/*.in` as build-infra and
+  forces a full build (reason: "codegen input changed"). This backstop holds even
+  if the inventory lags a newly added generator.
+
+To inspect which ctest tests the inventory currently covers:
+```bash
+python3 filter_oracle.py codegen-allowlist \
+    --inventory codegen_blindspots.json --ctest ctest_list.txt
+```
+
+> Root-cause note: CK's codegen `add_custom_command`s omit `DEPENDS <script>`, so
+> the ninja graph doesn't carry the generator→output edge (also a latent
+> incremental-build gap). The proper fix is upstream in CMake; this inventory +
+> backstop is the interim workaround. See the Test Filtering design page.
+
 ---
 
 ## 6. Emergency overrides
