@@ -138,42 +138,25 @@ struct FmhaBwdDQDKDVTypes
     //
     //   Gemm0/Gemm2 block_warps: <1, 4, 1>  warp_tile: <16, 16, 32>
     //   Gemm1/Gemm3 block_warps: <4, 1, 1>  warp_tile: <16, 16, 16>
-    //   Gemm4       block_warps: <2, 2, 1> for d32/d96, <1, 4, 1> otherwise
-    //   NumWarps = 4, BlockSize = 256, maxSeqLenQ = 0 (unlimited)
+    //   Gemm4       block_warps: <2, 2, 1> for d32/d96, <1, 4, 1> otherwise; warp_tile: <16, 16,
+    //   32> NumWarps = 4, BlockSize = 256, maxSeqLenQ = 0 (unlimited)
     //
     // BlockTile: sequence<bm0, bn0, bk0, bk1, bk2, bk3, bk4, bhdq, bhdv>
-    using BlockTile = std::conditional_t<kIsD32,
-                                         ck_tile::sequence<32, 128, 32, 32, 32, 32, 64, 32, 32>,
-                                         std::conditional_t<kIsD96,
-                                                            ck_tile::sequence<32,
-                                                                              128,
-                                                                              96,
-                                                                              32,
-                                                                              96,
-                                                                              32,
-                                                                              32,
-                                                                              96,
-                                                                              96>,
-                                                            std::conditional_t<
-                                                                kIsD128,
-                                                                ck_tile::sequence<16,
-                                                                                  128,
-                                                                                  128,
-                                                                                  16,
-                                                                                  128,
-                                                                                  16,
-                                                                                  32,
-                                                                                  128,
-                                                                                  128>,
-                                                                ck_tile::sequence<16,
-                                                                                  64,
-                                                                                  256,
-                                                                                  16,
-                                                                                  256,
-                                                                                  16,
-                                                                                  32,
-                                                                                  256,
-                                                                                  256>>>>;
+    // One named alias per wired hdim keeps each row flat and independently
+    // checkable against the fmha_bwd.py gfx9 table; the selection below picks
+    // the row matching this spec's hdim (the static_assert above guarantees
+    // exactly one of kIsD32/kIsD96/kIsD128/kIsD256 holds).
+    using BlockTileD32  = ck_tile::sequence<32, 128, 32, 32, 32, 32, 64, 32, 32>;
+    using BlockTileD96  = ck_tile::sequence<32, 128, 96, 32, 96, 32, 32, 96, 96>;
+    using BlockTileD128 = ck_tile::sequence<16, 128, 128, 16, 128, 16, 32, 128, 128>;
+    using BlockTileD256 = ck_tile::sequence<16, 64, 256, 16, 256, 16, 32, 256, 256>;
+
+    using BlockTile = std::conditional_t<
+        kIsD32,
+        BlockTileD32,
+        std::conditional_t<kIsD96,
+                           BlockTileD96,
+                           std::conditional_t<kIsD128, BlockTileD128, BlockTileD256>>>;
 
     // Gemm0 & Gemm2: compute S = Q @ K^T and dP = dO @ V^T
     using Gemm0BlockWarps = ck_tile::sequence<1, 4, 1>;
@@ -184,10 +167,9 @@ struct FmhaBwdDQDKDVTypes
     using Gemm1WarpTile   = ck_tile::sequence<16, 16, 16>;
 
     // Gemm4: compute dQ = dS @ K
-    using Gemm4BlockWarps = std::conditional_t<kIsD32 || kIsD96,
-                                               ck_tile::sequence<2, 2, 1>,
-                                               ck_tile::sequence<1, 4, 1>>;
-    using Gemm4WarpTile   = ck_tile::sequence<16, 16, 32>;
+    using Gemm4BlockWarps = std::
+        conditional_t<kIsD32 || kIsD96, ck_tile::sequence<2, 2, 1>, ck_tile::sequence<1, 4, 1>>;
+    using Gemm4WarpTile = ck_tile::sequence<16, 16, 32>;
 
     // TileFmhaBwdShape: 5 GEMMs with their block_warps and warp_tiles
     //   G0=G2 (S/dP), G1=G3 (dV/dK), G4 (dQ)

@@ -293,7 +293,9 @@ consteval FmhaBwdDQDKDVSpec makeSpec(FmhaBwdDQDKDVConfig cfg)
     // --- block_per_cu default ---
     int resolved_block_per_cu = algo.block_per_cu;
     if(resolved_block_per_cu == -1)
-        resolved_block_per_cu = 1; // d128 dQ/dK/dV is register-heavy
+        resolved_block_per_cu = 1; // dQ/dK/dV is register-heavy for all wired
+                                   // hdims (matches F_occupancy=1 for every gfx9
+                                   // row in fmha_bwd.py get_dq_dk_dv_tiles)
 
     if(resolved_block_per_cu <= 0)
         throw "block_per_cu must be positive (or -1 for auto)";

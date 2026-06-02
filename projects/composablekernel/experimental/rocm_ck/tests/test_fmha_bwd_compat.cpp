@@ -163,12 +163,9 @@ TEST(FmhaBwdCompat, DqDkDv_BF16_D128_Batch)
 
 TEST(FmhaBwdCompat, DqDkDv_FP16_D32_Batch)
 {
-    constexpr auto k =
-        makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
-                                                   .hdim_q = 32,
-                                                   .hdim_v = 32,
-                                                   .mode   = FmhaMode::BATCH},
-                                     .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+    constexpr auto k = makeSpec(FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 32, .hdim_v = 32, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
 
     EXPECT_EQ(k.dtype, DataType::FP16);
     EXPECT_EQ(k.hdim_q, 32);
@@ -182,12 +179,9 @@ TEST(FmhaBwdCompat, DqDkDv_FP16_D32_Batch)
 
 TEST(FmhaBwdCompat, DqDkDv_BF16_D32_Batch)
 {
-    constexpr auto k =
-        makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::BF16,
-                                                   .hdim_q = 32,
-                                                   .hdim_v = 32,
-                                                   .mode   = FmhaMode::BATCH},
-                                     .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+    constexpr auto k = makeSpec(FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::BF16, .hdim_q = 32, .hdim_v = 32, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
 
     EXPECT_EQ(k.dtype, DataType::BF16);
     EXPECT_EQ(k.hdim_q, 32);
@@ -201,12 +195,9 @@ TEST(FmhaBwdCompat, DqDkDv_BF16_D32_Batch)
 
 TEST(FmhaBwdCompat, DqDkDv_FP16_D96_Batch)
 {
-    constexpr auto k =
-        makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
-                                                   .hdim_q = 96,
-                                                   .hdim_v = 96,
-                                                   .mode   = FmhaMode::BATCH},
-                                     .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+    constexpr auto k = makeSpec(FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 96, .hdim_v = 96, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
 
     EXPECT_EQ(k.dtype, DataType::FP16);
     EXPECT_EQ(k.hdim_q, 96);
@@ -220,12 +211,9 @@ TEST(FmhaBwdCompat, DqDkDv_FP16_D96_Batch)
 
 TEST(FmhaBwdCompat, DqDkDv_BF16_D96_Batch)
 {
-    constexpr auto k =
-        makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::BF16,
-                                                   .hdim_q = 96,
-                                                   .hdim_v = 96,
-                                                   .mode   = FmhaMode::BATCH},
-                                     .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+    constexpr auto k = makeSpec(FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::BF16, .hdim_q = 96, .hdim_v = 96, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
 
     EXPECT_EQ(k.dtype, DataType::BF16);
     EXPECT_EQ(k.hdim_q, 96);
@@ -626,48 +614,36 @@ TEST(FmhaBwdCompat, Registry_DqDkDv_FindsBF16Batch)
 
 TEST(FmhaBwdCompat, Registry_DqDkDv_FindsFP16D32Batch)
 {
-    const auto* v =
-        findVariant(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
-                                                      .hdim_q = 32,
-                                                      .hdim_v = 32,
-                                                      .mode   = FmhaMode::BATCH},
-                                        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+    const auto* v = findVariant(FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 32, .hdim_v = 32, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
     ASSERT_NE(v, nullptr);
     EXPECT_STREQ(v->name, "fmha_bwd_dqdkdv_fp16_d32_batch");
 }
 
 TEST(FmhaBwdCompat, Registry_DqDkDv_FindsBF16D32Batch)
 {
-    const auto* v =
-        findVariant(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::BF16,
-                                                      .hdim_q = 32,
-                                                      .hdim_v = 32,
-                                                      .mode   = FmhaMode::BATCH},
-                                        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+    const auto* v = findVariant(FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::BF16, .hdim_q = 32, .hdim_v = 32, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
     ASSERT_NE(v, nullptr);
     EXPECT_STREQ(v->name, "fmha_bwd_dqdkdv_bf16_d32_batch");
 }
 
 TEST(FmhaBwdCompat, Registry_DqDkDv_FindsFP16D96Batch)
 {
-    const auto* v =
-        findVariant(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
-                                                      .hdim_q = 96,
-                                                      .hdim_v = 96,
-                                                      .mode   = FmhaMode::BATCH},
-                                        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+    const auto* v = findVariant(FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 96, .hdim_v = 96, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
     ASSERT_NE(v, nullptr);
     EXPECT_STREQ(v->name, "fmha_bwd_dqdkdv_fp16_d96_batch");
 }
 
 TEST(FmhaBwdCompat, Registry_DqDkDv_FindsBF16D96Batch)
 {
-    const auto* v =
-        findVariant(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::BF16,
-                                                      .hdim_q = 96,
-                                                      .hdim_v = 96,
-                                                      .mode   = FmhaMode::BATCH},
-                                        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+    const auto* v = findVariant(FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::BF16, .hdim_q = 96, .hdim_v = 96, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
     ASSERT_NE(v, nullptr);
     EXPECT_STREQ(v->name, "fmha_bwd_dqdkdv_bf16_d96_batch");
 }
