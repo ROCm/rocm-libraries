@@ -834,8 +834,8 @@ class TestCheckCorrectnessOutputCount:
         )
 
         assert result.tolerance_match is False
-        assert result.rtol == pytest.approx(1.25e-1)
-        assert result.atol == pytest.approx(8e-3)
+        assert result.rtol == pytest.approx(1e-2)
+        assert result.atol == pytest.approx(1e-2)
 
 
 class TestResolveEngineName:

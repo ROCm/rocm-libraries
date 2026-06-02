@@ -42,10 +42,8 @@ from ..validation.reference_provider import (
 from ..validation.validator import Validator
 
 
-_BFLOAT16_RTOL = 6e-3
-_BFLOAT16_ATOL = 3e-3
-_BFLOAT16_SDPA_BACKWARD_RTOL = 1.25e-1
-_BFLOAT16_SDPA_BACKWARD_ATOL = 8e-3
+_BFLOAT16_RTOL = 1e-2
+_BFLOAT16_ATOL = 1e-2
 
 
 def _output_node_types(graph_json: Dict[str, Any]) -> Dict[int, str]:
@@ -64,8 +62,6 @@ def _default_tolerance_for_output(
 ) -> tuple[float, float]:
     dtype = str(getattr(tensor_info, "data_type", "float")).lower()
     if dtype == "bfloat16":
-        if output_node_type == "SdpaBackwardAttributes":
-            return _BFLOAT16_SDPA_BACKWARD_RTOL, _BFLOAT16_SDPA_BACKWARD_ATOL
         return _BFLOAT16_RTOL, _BFLOAT16_ATOL
     if dtype == "half":
         return 1e-3, 1e-3

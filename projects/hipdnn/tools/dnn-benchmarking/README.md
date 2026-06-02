@@ -169,7 +169,7 @@ Used by A/B testing, reference validation, and suite-mode tolerance checks.
 | `--rtol` | Relative tolerance for output comparison. Overrides dtype-aware defaults when set. | dtype-aware |
 | `--atol` | Absolute tolerance for output comparison. Overrides dtype-aware defaults when set. | dtype-aware |
 
-Automatic validation tolerances are dtype-aware. BF16 SDPA backward uses `rtol=1.25e-1`, `atol=8e-3`; this allows BF16 output quantization and accumulation-order differences without letting an all-zero gradient buffer pass against ordinary nonzero gradients.
+Automatic validation tolerances are dtype-aware. BF16 outputs use `rtol=1e-2`, `atol=1e-2`; this allows BF16 output quantization and accumulation-order differences without letting an all-zero gradient buffer pass against ordinary nonzero gradients.
 
 ## Output
 
