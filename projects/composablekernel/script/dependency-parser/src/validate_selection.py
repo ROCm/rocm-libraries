@@ -5,23 +5,34 @@
 """
 Validate a smart-build test selection against the real build/test namespaces.
 
-The selector (selective_test_filter.py) emits a list of executables to build and
-test. This tool asserts that every selected executable is a target that ninja
-actually knows about, catching path/normalization drift between the dependency
-analyzer's view and ninja's real target namespace *before* a build is attempted.
+PURPOSE
+    Asserts that every selected executable is a target ninja actually knows about
+    - plain set-membership against `ninja -t targets all`. With --ctest it also
+    checks each selected basename is a registered ctest test. This catches
+    path/normalization drift between the depmap's view and ninja's real target
+    namespace *before* a build is attempted.
 
-Why not `ninja -n`: CK uses CMake GLOB CONFIGURE_DEPENDS, so every ninja
-invocation regenerates build.ninja and `ninja -n <target>` exits 0 for any
-target (real or bogus) - it only performs the manifest regeneration. The
-reliable oracle is the target list from `ninja -t targets all`, against which we
-do plain set-membership here.
+INPUTS (where each comes from)
+    tests_to_run.json  <- main.py select
+    ninja_targets.txt  <- ninja -t targets all > ninja_targets.txt
+    ctest_list.txt     <- ctest -N > ctest_list.txt   (optional)
 
-Usage:
-  validate_selection.py <tests_to_run.json> --ninja-targets <ninja_targets.txt>
-                        [--ctest <ctest_list.txt>] [--output smoke_result.json]
-                        [--junit smoke_result.xml]
+USAGE
+    validate_selection.py <tests_to_run.json> --ninja-targets <ninja_targets.txt>
+                          [--ctest <ctest_list.txt>] [--output smoke_result.json]
+                          [--junit smoke_result.xml]
 
-Exit code: 0 if the selection is valid (or empty), 1 otherwise.
+OUTPUT
+    Writes smoke_result.json (+ optional JUnit XML). Exit codes:
+      0  selection valid (or empty)
+      1  selection invalid (a selected name is not a ninja target / ctest test)
+      2  a required input file is missing
+
+Caveat: `ninja -t targets all` is the oracle because CK's CMake
+GLOB CONFIGURE_DEPENDS regenerates build.ninja on every call, so `ninja -n
+<target>` exits 0 for any name and cannot be used to test target existence.
+
+Terminology: see the Glossary in README.md.
 """
 
 import argparse
@@ -72,12 +83,14 @@ def load_ctest_tests(path):
 
 
 def validate(selected, valid_targets, ctest_tests=None):
-    """Validate selected executables against the known ninja targets.
+    """Check a selection against the known ninja targets (and optionally ctest).
 
-    Returns a result dict. verdict is "pass" when every selected executable is a
-    known target (an empty selection is a pass); "fail" otherwise. When
-    ctest_tests is provided, also checks each executable's basename is a
-    registered ctest test (secondary, may flip verdict to fail).
+    Runs up to two checks and returns a result dict:
+      primary   - every selected executable exists in valid_targets;
+      secondary - when ctest_tests is given, every selected basename is a
+                  registered ctest test.
+    The verdict is "pass" only if all applicable checks hold (an empty selection
+    passes); otherwise "fail", with the offending names listed.
     """
     invalid_targets = [e for e in selected if e not in valid_targets]
     result = {
@@ -135,7 +148,22 @@ def render_junit(result):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Validate a smart-build selection against ninja/ctest namespaces"
+        description="Validate a smart-build selection: every selected executable "
+        "must be a real `ninja -t targets all` target (and, with --ctest, a "
+        "registered ctest test).",
+        epilog=(
+            "Inputs (where each comes from):\n"
+            "  tests_to_run.json   main.py select\n"
+            "  ninja_targets.txt   ninja -t targets all > ninja_targets.txt\n"
+            "  ctest_list.txt      ctest -N > ctest_list.txt   (optional, --ctest)\n\n"
+            "Example:\n"
+            "  validate_selection.py tests_to_run.json \\\n"
+            "    --ninja-targets ninja_targets.txt --ctest ctest_list.txt \\\n"
+            "    --output smoke_result.json --junit smoke_result.xml\n\n"
+            "Exit: 0 valid (or empty), 1 invalid, 2 missing input.\n"
+            "Terminology: see the Glossary in README.md."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("tests_json", help="Path to tests_to_run.json from select")
     parser.add_argument(
