@@ -805,7 +805,7 @@ class TestCheckCorrectnessOutputCount:
         assert result.tolerance_match is False
         assert "did not produce output tensor UID 7" in (result.error_message or "")
 
-    def test_zero_bf16_sdpa_backward_gradients_fail_default_tolerance(self):
+    def test_zero_bf16_sdpa_forward_output_uses_bfloat16_tolerance(self):
         bm = MagicMock()
         bm.get_input_data.return_value = None
         bm.get_output_data.return_value = np.zeros((2,), dtype=np.float32)
@@ -824,8 +824,8 @@ class TestCheckCorrectnessOutputCount:
             graph_json={
                 "nodes": [
                     {
-                        "type": "SdpaBackwardAttributes",
-                        "outputs": {"dq_tensor_uid": 7},
+                        "type": "SdpaAttributes",
+                        "outputs": {"o_tensor_uid": 7},
                     }
                 ]
             },

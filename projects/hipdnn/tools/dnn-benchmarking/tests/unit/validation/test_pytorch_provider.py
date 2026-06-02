@@ -398,7 +398,6 @@ class TestPyTorchProviderGraphSupport:
         assert "BatchnormInferenceAttributesVarianceExt" in supported
         assert "BatchnormBackwardAttributes" in supported
         assert "SdpaAttributes" in supported
-        assert "SdpaBackwardAttributes" in supported
 
 
 class TestPyTorchProviderErrors:
@@ -660,13 +659,12 @@ class TestPyTorchProviderNewOps:
         np.testing.assert_allclose(outputs[7].data, [[[[2.0]]]], rtol=1e-6)
         np.testing.assert_allclose(outputs[8].data, [[[[6.0]]]], rtol=1e-6)
 
-    def test_sdpa_forward_and_backward(self) -> None:
+    def test_sdpa_forward_matches_torch_and_returns_stats(self) -> None:
         provider = ReferenceProviderRegistry.get_provider("pytorch")
         q = np.array([[[[1.0, 0.0], [0.0, 1.0]]]], dtype=np.float32)
         k = q.copy()
         v = np.array([[[[1.0, 2.0], [3.0, 4.0]]]], dtype=np.float32)
-        do = np.ones_like(v)
-        fwd_graph = {
+        graph_json = {
             "nodes": [
                 {
                     "type": "SdpaAttributes",
@@ -676,48 +674,21 @@ class TestPyTorchProviderNewOps:
                 }
             ]
         }
-        bwd_graph = {
-            "nodes": [
-                {
-                    "type": "SdpaBackwardAttributes",
-                    "inputs": {
-                        "q_tensor_uid": 1,
-                        "k_tensor_uid": 2,
-                        "v_tensor_uid": 3,
-                        "o_tensor_uid": 4,
-                        "do_tensor_uid": 5,
-                        "stats_tensor_uid": 6,
-                    },
-                    "outputs": {
-                        "dq_tensor_uid": 7,
-                        "dk_tensor_uid": 8,
-                        "dv_tensor_uid": 9,
-                    },
-                    "parameters": {"dropout_probability": 0.0},
-                }
-            ]
-        }
 
-        fwd_outputs = provider.compute_reference(fwd_graph, {1: q, 2: k, 3: v})
-        fwd = fwd_outputs[4].data
-        stats = fwd_outputs[6].data
-        bwd = provider.compute_reference(
-            bwd_graph,
-            {1: q, 2: k, 3: v, 4: fwd, 5: do, 6: stats},
-        )
-
-        q_t = torch.from_numpy(q).requires_grad_(True)
-        k_t = torch.from_numpy(k).requires_grad_(True)
-        v_t = torch.from_numpy(v).requires_grad_(True)
+        outputs = provider.compute_reference(graph_json, {1: q, 2: k, 3: v})
+        q_t = torch.from_numpy(q)
+        k_t = torch.from_numpy(k)
+        v_t = torch.from_numpy(v)
         expected = torch.nn.functional.scaled_dot_product_attention(
             q_t, k_t, v_t, dropout_p=0.0
         )
-        expected.backward(torch.from_numpy(do))
+        expected_stats = torch.logsumexp(
+            torch.matmul(q_t, k_t.transpose(-2, -1)) / torch.sqrt(torch.tensor(2.0)),
+            dim=-1,
+        )
 
-        np.testing.assert_allclose(fwd, expected.detach().numpy(), rtol=1e-6)
-        np.testing.assert_allclose(bwd[7].data, q_t.grad.numpy(), rtol=1e-6)
-        np.testing.assert_allclose(bwd[8].data, k_t.grad.numpy(), rtol=1e-6)
-        np.testing.assert_allclose(bwd[9].data, v_t.grad.numpy(), rtol=1e-6)
+        np.testing.assert_allclose(outputs[4].data, expected.numpy(), rtol=1e-6)
+        np.testing.assert_allclose(outputs[6].data, expected_stats.numpy(), rtol=1e-6)
 
     def test_sdpa_bfloat16_uses_graph_dtype(self) -> None:
         provider = ReferenceProviderRegistry.get_provider("pytorch")
@@ -782,173 +753,3 @@ class TestPyTorchProviderNewOps:
 
         with pytest.raises(ValueError, match=optional_output):
             provider.compute_reference(graph_json, {1: q, 2: k, 3: v})
-
-    def test_sdpa_backward_bfloat16_uses_graph_dtype(self) -> None:
-        provider = ReferenceProviderRegistry.get_provider("pytorch")
-        q = np.array([[[[0.10, 0.20], [0.30, 0.40]]]], dtype=np.float32)
-        k = np.array([[[[0.50, 0.60], [0.70, 0.80]]]], dtype=np.float32)
-        v = np.array([[[[0.90, 0.25], [0.125, 0.75]]]], dtype=np.float32)
-        do = np.array([[[[0.20, 0.30], [0.40, 0.50]]]], dtype=np.float32)
-        tensors = [
-            {"uid": 1, "dims": [1, 1, 2, 2], "data_type": "bfloat16"},
-            {"uid": 2, "dims": [1, 1, 2, 2], "data_type": "bfloat16"},
-            {"uid": 3, "dims": [1, 1, 2, 2], "data_type": "bfloat16"},
-            {"uid": 4, "dims": [1, 1, 2, 2], "data_type": "bfloat16"},
-            {"uid": 5, "dims": [1, 1, 2, 2], "data_type": "bfloat16"},
-            {"uid": 6, "dims": [1, 1, 2], "data_type": "float"},
-            {"uid": 7, "dims": [1, 1, 2, 2], "data_type": "bfloat16"},
-            {"uid": 8, "dims": [1, 1, 2, 2], "data_type": "bfloat16"},
-            {"uid": 9, "dims": [1, 1, 2, 2], "data_type": "bfloat16"},
-        ]
-        fwd_graph = {
-            "tensors": tensors,
-            "nodes": [
-                {
-                    "type": "SdpaAttributes",
-                    "inputs": {"q_tensor_uid": 1, "k_tensor_uid": 2, "v_tensor_uid": 3},
-                    "outputs": {"o_tensor_uid": 4, "stats_tensor_uid": 6},
-                    "attributes": {"dropout_probability": 0.0},
-                }
-            ],
-        }
-        bwd_graph = {
-            "tensors": tensors,
-            "nodes": [
-                {
-                    "type": "SdpaBackwardAttributes",
-                    "inputs": {
-                        "q_tensor_uid": 1,
-                        "k_tensor_uid": 2,
-                        "v_tensor_uid": 3,
-                        "o_tensor_uid": 4,
-                        "do_tensor_uid": 5,
-                        "stats_tensor_uid": 6,
-                    },
-                    "outputs": {
-                        "dq_tensor_uid": 7,
-                        "dk_tensor_uid": 8,
-                        "dv_tensor_uid": 9,
-                    },
-                    "parameters": {"dropout_probability": 0.0},
-                }
-            ],
-        }
-
-        fwd = provider.compute_reference(fwd_graph, {1: q, 2: k, 3: v})
-        bwd = provider.compute_reference(
-            bwd_graph,
-            {1: q, 2: k, 3: v, 4: fwd[4].data, 5: do, 6: fwd[6].data},
-        )
-
-        q_t = torch.from_numpy(q).to(torch.bfloat16).requires_grad_(True)
-        k_t = torch.from_numpy(k).to(torch.bfloat16).requires_grad_(True)
-        v_t = torch.from_numpy(v).to(torch.bfloat16).requires_grad_(True)
-        expected = torch.nn.functional.scaled_dot_product_attention(
-            q_t, k_t, v_t, dropout_p=0.0
-        )
-        expected.backward(torch.from_numpy(do).to(torch.bfloat16))
-
-        for uid, grad in ((7, q_t.grad), (8, k_t.grad), (9, v_t.grad)):
-            assert bwd[uid].data.dtype == np.float32
-            np.testing.assert_allclose(
-                bwd[uid].data,
-                grad.to(torch.float32).numpy(),
-                rtol=1e-2,
-                atol=1e-5,
-            )
-
-    def test_sdpa_backward_rejects_inconsistent_output(self) -> None:
-        provider = ReferenceProviderRegistry.get_provider("pytorch")
-        q = np.array([[[[1.0, 0.0], [0.0, 1.0]]]], dtype=np.float32)
-        k = q.copy()
-        v = np.array([[[[1.0, 2.0], [3.0, 4.0]]]], dtype=np.float32)
-        do = np.ones_like(v)
-        fwd_graph = {
-            "nodes": [
-                {
-                    "type": "SdpaAttributes",
-                    "inputs": {"q_tensor_uid": 1, "k_tensor_uid": 2, "v_tensor_uid": 3},
-                    "outputs": {"o_tensor_uid": 4, "stats_tensor_uid": 6},
-                    "attributes": {"dropout_probability": 0.0},
-                }
-            ]
-        }
-        bwd_graph = {
-            "nodes": [
-                {
-                    "type": "SdpaBackwardAttributes",
-                    "inputs": {
-                        "q_tensor_uid": 1,
-                        "k_tensor_uid": 2,
-                        "v_tensor_uid": 3,
-                        "o_tensor_uid": 4,
-                        "do_tensor_uid": 5,
-                        "stats_tensor_uid": 6,
-                    },
-                    "outputs": {
-                        "dq_tensor_uid": 7,
-                        "dk_tensor_uid": 8,
-                        "dv_tensor_uid": 9,
-                    },
-                    "parameters": {"dropout_probability": 0.0},
-                }
-            ]
-        }
-        fwd = provider.compute_reference(fwd_graph, {1: q, 2: k, 3: v})
-
-        with pytest.raises(ValueError, match="o_tensor_uid"):
-            provider.compute_reference(
-                bwd_graph,
-                {
-                    1: q,
-                    2: k,
-                    3: v,
-                    4: np.zeros_like(fwd[4].data),
-                    5: do,
-                    6: fwd[6].data,
-                },
-            )
-
-    def test_sdpa_backward_rejects_inconsistent_stats(self) -> None:
-        provider = ReferenceProviderRegistry.get_provider("pytorch")
-        q = np.array([[[[1.0, 0.0], [0.0, 1.0]]]], dtype=np.float32)
-        k = q.copy()
-        v = np.array([[[[1.0, 2.0], [3.0, 4.0]]]], dtype=np.float32)
-        do = np.ones_like(v)
-        graph_json = {
-            "nodes": [
-                {
-                    "type": "SdpaBackwardAttributes",
-                    "inputs": {
-                        "q_tensor_uid": 1,
-                        "k_tensor_uid": 2,
-                        "v_tensor_uid": 3,
-                        "o_tensor_uid": 4,
-                        "do_tensor_uid": 5,
-                        "stats_tensor_uid": 6,
-                    },
-                    "outputs": {
-                        "dq_tensor_uid": 7,
-                        "dk_tensor_uid": 8,
-                        "dv_tensor_uid": 9,
-                    },
-                    "parameters": {"dropout_probability": 0.0},
-                }
-            ]
-        }
-        fwd = torch.nn.functional.scaled_dot_product_attention(
-            torch.from_numpy(q), torch.from_numpy(k), torch.from_numpy(v), dropout_p=0.0
-        ).numpy()
-
-        with pytest.raises(ValueError, match="stats_tensor_uid"):
-            provider.compute_reference(
-                graph_json,
-                {
-                    1: q,
-                    2: k,
-                    3: v,
-                    4: fwd,
-                    5: do,
-                    6: np.zeros((1, 1, 2), dtype=np.float32),
-                },
-            )

@@ -68,7 +68,6 @@ class TestPyTorchOps:
         assert "BatchnormInferenceAttributesVarianceExt" in supported
         assert "BatchnormBackwardAttributes" in supported
         assert "SdpaAttributes" in supported
-        assert "SdpaBackwardAttributes" in supported
 
     def test_supports_graph(self, sample_conv_graph):
         """Test graph support checking."""
@@ -267,7 +266,6 @@ class TestPyTorchCudaExecutor:
             "sample_batchnorm_backward.json",
             "sample_sdpa.json",
             "sample_mha_sdpa.json",
-            "sample_sdpa_backward.json",
         ],
     )
     def test_full_benchmark_new_reference_graphs(self, graph_name):
@@ -286,9 +284,7 @@ class TestPyTorchCudaExecutor:
         executor = PyTorchCudaExecutor(graph_json, config)
         executor.prepare()
 
-        with PyTorchCudaBufferManager(
-            tensor_infos, graph_json=graph_json
-        ) as buffer_manager:
+        with PyTorchCudaBufferManager(tensor_infos) as buffer_manager:
             buffer_manager.allocate_all()
             buffer_manager.fill_inputs_random(seed=42)
             buffer_manager.zero_outputs()

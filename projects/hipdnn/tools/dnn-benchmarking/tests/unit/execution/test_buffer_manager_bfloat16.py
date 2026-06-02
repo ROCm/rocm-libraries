@@ -14,7 +14,6 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from dnn_benchmarking.execution import pytorch_ops
 from dnn_benchmarking.execution.buffer_manager import (
     BufferManager,
     _bfloat16_bytes_to_ndarray,
@@ -22,7 +21,6 @@ from dnn_benchmarking.execution.buffer_manager import (
     _f32_to_bf16_bytes,
     _generate_bfloat16_bytes,
 )
-from dnn_benchmarking.execution.pytorch_buffer_manager import PyTorchCudaBufferManager
 from dnn_benchmarking.graph.tensor_info import TensorInfo
 
 
@@ -262,134 +260,6 @@ class TestFillInputsRandomReproducibility:
         np.testing.assert_array_equal(
             buffer_manager.get_input_data(tensor.uid), expected_host
         )
-
-    def test_sdpa_backward_inputs_are_derived_from_qkv(self) -> None:
-        tensors = [
-            TensorInfo(1, "q", [1, 1, 2, 2], [], "bfloat16", False, False),
-            TensorInfo(2, "k", [1, 1, 2, 2], [], "bfloat16", False, False),
-            TensorInfo(3, "v", [1, 1, 2, 2], [], "bfloat16", False, False),
-            TensorInfo(4, "o", [1, 1, 2, 2], [], "bfloat16", False, False),
-            TensorInfo(5, "do", [1, 1, 2, 2], [], "bfloat16", False, False),
-            TensorInfo(6, "stats", [1, 1, 2], [], "float", False, False),
-            TensorInfo(7, "dq", [1, 1, 2, 2], [], "bfloat16", False, True),
-        ]
-        graph_json = {
-            "nodes": [
-                {
-                    "type": "SdpaBackwardAttributes",
-                    "inputs": {
-                        "q_tensor_uid": 1,
-                        "k_tensor_uid": 2,
-                        "v_tensor_uid": 3,
-                        "o_tensor_uid": 4,
-                        "do_tensor_uid": 5,
-                        "stats_tensor_uid": 6,
-                    },
-                    "outputs": {"dq_tensor_uid": 7},
-                }
-            ]
-        }
-        buffer_manager = BufferManager(tensors, graph_json=graph_json)
-        for tensor in tensors:
-            if not tensor.is_output:
-                buffer_manager._buffers[tensor.uid] = MagicMock()
-
-        buffer_manager.fill_inputs_random(seed=2024)
-
-        q = buffer_manager.get_input_data(1).astype(np.float32)
-        k = buffer_manager.get_input_data(2).astype(np.float32)
-        v = buffer_manager.get_input_data(3).astype(np.float32)
-        scores = np.matmul(q, np.swapaxes(k, -1, -2)) / np.sqrt(float(q.shape[-1]))
-        row_max = np.max(scores, axis=-1, keepdims=True)
-        exp_scores = np.exp(scores - row_max)
-        denom = np.sum(exp_scores, axis=-1, keepdims=True)
-        expected_stats = (
-            np.squeeze(row_max, axis=-1) + np.log(np.squeeze(denom, axis=-1))
-        ).astype(np.float32)
-        expected_output = np.matmul(exp_scores / denom, v)
-
-        np.testing.assert_allclose(buffer_manager.get_input_data(6), expected_stats)
-        raw_o = buffer_manager._buffers[4].copy_from_host.call_args[0][0]
-        np.testing.assert_array_equal(
-            buffer_manager.get_input_data(4),
-            _bfloat16_storage_bytes_to_ndarray(raw_o, tensors[3]),
-        )
-        np.testing.assert_allclose(
-            buffer_manager.get_input_data(4), expected_output, atol=3e-3
-        )
-
-    def test_pytorch_cuda_manager_derives_sdpa_backward_inputs_on_device(self) -> None:
-        torch = pytest.importorskip("torch")
-        tensors = [
-            TensorInfo(1, "q", [1, 1, 2, 2], [], "bfloat16", False, False),
-            TensorInfo(2, "k", [1, 1, 2, 2], [], "bfloat16", False, False),
-            TensorInfo(3, "v", [1, 1, 2, 2], [], "bfloat16", False, False),
-            TensorInfo(4, "o", [1, 1, 2, 2], [], "bfloat16", False, False),
-            TensorInfo(5, "do", [1, 1, 2, 2], [], "bfloat16", False, False),
-            TensorInfo(6, "stats", [1, 1, 2], [], "float", False, False),
-            TensorInfo(7, "dq", [1, 1, 2, 2], [], "bfloat16", False, True),
-            TensorInfo(8, "dk", [1, 1, 2, 2], [], "bfloat16", False, True),
-            TensorInfo(9, "dv", [1, 1, 2, 2], [], "bfloat16", False, True),
-        ]
-        graph_json = {
-            "nodes": [
-                {
-                    "type": "SdpaBackwardAttributes",
-                    "inputs": {
-                        "q_tensor_uid": 1,
-                        "k_tensor_uid": 2,
-                        "v_tensor_uid": 3,
-                        "o_tensor_uid": 4,
-                        "do_tensor_uid": 5,
-                        "stats_tensor_uid": 6,
-                    },
-                    "outputs": {
-                        "dq_tensor_uid": 7,
-                        "dk_tensor_uid": 8,
-                        "dv_tensor_uid": 9,
-                    },
-                    "parameters": {"dropout_probability": 0.0},
-                }
-            ]
-        }
-
-        with PyTorchCudaBufferManager(
-            tensors, device="cpu", graph_json=graph_json
-        ) as buffer_manager:
-            buffer_manager.allocate_all()
-            buffer_manager.fill_inputs_random(seed=2024)
-
-            torch_tensors = buffer_manager.get_tensors()
-            q = torch_tensors[1].to(dtype=torch.float32)
-            k = torch_tensors[2].to(dtype=torch.float32)
-            v = torch_tensors[3].to(dtype=torch.float32)
-            scores = torch.matmul(q, k.transpose(-2, -1)) / torch.sqrt(
-                torch.tensor(float(q.shape[-1]))
-            )
-            expected_stats = torch.logsumexp(scores, dim=-1)
-            expected_output = torch.matmul(
-                torch.exp(scores - expected_stats.unsqueeze(-1)), v
-            )
-
-            np.testing.assert_allclose(
-                buffer_manager.get_input_data(6),
-                expected_stats.numpy(),
-                rtol=1e-6,
-                atol=1e-6,
-            )
-            np.testing.assert_array_equal(
-                buffer_manager.get_input_data(4),
-                expected_output.to(dtype=torch.bfloat16)
-                .to(dtype=torch.float32)
-                .numpy(),
-            )
-
-            buffer_manager.zero_outputs()
-            pytorch_ops.execute_graph(graph_json, torch_tensors)
-
-            assert np.any(buffer_manager.get_output_data(7) != 0.0)
-            assert np.any(buffer_manager.get_output_data(8) != 0.0)
-            assert np.any(buffer_manager.get_output_data(9) != 0.0)
 
 
 class TestStridedTensorStorage:

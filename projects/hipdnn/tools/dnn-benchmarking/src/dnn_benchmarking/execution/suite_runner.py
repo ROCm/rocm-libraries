@@ -603,7 +603,7 @@ def run_single_provider_engine(
         if metrics_basic:
             result.workspace_bytes = executor.workspace_size
 
-        with BufferManager(tensor_infos, graph_json=graph_json) as bm:
+        with BufferManager(tensor_infos) as bm:
             bm.allocate_all()
             bm.fill_inputs_random(seed=config.seed)
             bm.zero_outputs()

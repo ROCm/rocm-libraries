@@ -253,7 +253,6 @@ class TestPyTorchOpsNewHandlers:
             "BatchnormInferenceAttributesVarianceExt",
             "BatchnormBackwardAttributes",
             "SdpaAttributes",
-            "SdpaBackwardAttributes",
         ],
     )
     def test_get_handler_returns_handler_for_new_ops(self, op_type: str) -> None:

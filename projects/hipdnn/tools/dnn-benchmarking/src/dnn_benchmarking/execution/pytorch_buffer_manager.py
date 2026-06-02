@@ -3,7 +3,7 @@
 
 """PyTorch CUDA tensor management for graph execution."""
 
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 import numpy as np
 import torch
@@ -47,20 +47,15 @@ class PyTorchCudaBufferManager:
         self,
         tensor_infos: List[TensorInfo],
         device: str = "cuda:0",
-        graph_json: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Initialize buffer manager with tensor metadata.
 
         Args:
             tensor_infos: List of TensorInfo objects describing tensors.
             device: CUDA device to use (e.g., "cuda:0").
-            graph_json: Optional graph JSON used to derive dependent synthetic
-                inputs, such as standalone SDPA backward O/LSE tensors.
         """
         self._tensor_infos = tensor_infos
-        self._tensor_info_by_uid = {tensor.uid: tensor for tensor in tensor_infos}
         self._device = torch.device(device)
-        self._graph_json = graph_json or {}
         self._tensors: Dict[int, torch.Tensor] = {}
         self._host_data: Dict[int, np.ndarray] = {}
 
@@ -102,114 +97,6 @@ class PyTorchCudaBufferManager:
             return host.to(dtype=torch.float32).numpy()
         return host.numpy()
 
-    @staticmethod
-    def _node_uid(node: Dict[str, Any], key: str) -> Optional[int]:
-        for section_name in ("inputs", "outputs"):
-            value = (node.get(section_name) or {}).get(key)
-            if value is not None:
-                return int(value)
-        return None
-
-    @staticmethod
-    def _node_param(node: Dict[str, Any], key: str, default: Any = None) -> Any:
-        for section_name in ("parameters", "attributes", "inputs", "outputs"):
-            section = node.get(section_name) or {}
-            if key in section:
-                return section[key]
-        return default
-
-    def _set_tensor_from_value(self, uid: int, value: torch.Tensor) -> None:
-        tensor = self._tensors.get(uid)
-        if tensor is None:
-            return
-        tensor.copy_(value.to(dtype=tensor.dtype, device=tensor.device))
-        self._host_data[uid] = self._host_numpy(tensor)
-
-    def _fill_sdpa_backward_prerequisites(self) -> None:
-        """Populate standalone SDPA backward O/LSE inputs from Q/K/V tensors."""
-        for node in self._graph_json.get("nodes") or []:
-            if node.get("type") != "SdpaBackwardAttributes":
-                continue
-
-            q_uid = self._node_uid(node, "q_tensor_uid")
-            k_uid = self._node_uid(node, "k_tensor_uid")
-            v_uid = self._node_uid(node, "v_tensor_uid")
-            o_uid = self._node_uid(node, "o_tensor_uid")
-            stats_uid = self._node_uid(node, "stats_tensor_uid")
-            if None in (q_uid, k_uid, v_uid, o_uid, stats_uid):
-                continue
-
-            o_info = self._tensor_info_by_uid.get(o_uid)
-            stats_info = self._tensor_info_by_uid.get(stats_uid)
-            if o_info is None or stats_info is None:
-                continue
-            if o_info.is_output or stats_info.is_output:
-                continue
-
-            q_base = self._tensors.get(q_uid)
-            k_base = self._tensors.get(k_uid)
-            v_base = self._tensors.get(v_uid)
-            if q_base is None or k_base is None or v_base is None:
-                continue
-
-            dropout_probability = self._node_param(node, "dropout_probability", 0.0)
-            if float(dropout_probability or 0.0) != 0.0:
-                continue
-
-            with torch.no_grad():
-                q = q_base.to(dtype=torch.float32)
-                k = k_base.to(dtype=torch.float32)
-                v = v_base.to(dtype=torch.float32)
-
-                q_heads = int(q.shape[-3])
-                kv_heads = int(k.shape[-3])
-                if q_heads != kv_heads:
-                    if kv_heads == 0 or q_heads % kv_heads != 0:
-                        raise ValueError(
-                            f"Unsupported SDPA GQA head counts: q_heads={q_heads}, "
-                            f"kv_heads={kv_heads}"
-                        )
-                    repeat = q_heads // kv_heads
-                    k = k.repeat_interleave(repeat, dim=-3)
-                    v = v.repeat_interleave(repeat, dim=-3)
-
-                scale_uid = self._node_uid(node, "scale_tensor_uid")
-                if scale_uid is not None and scale_uid in self._tensors:
-                    scale_value = float(
-                        self._tensors[scale_uid].detach().reshape(-1)[0].item()
-                    )
-                else:
-                    scale = self._node_param(node, "attn_scale_value", None)
-                    scale_value = (
-                        1.0 / (float(q.shape[-1]) ** 0.5)
-                        if scale is None
-                        else float(scale)
-                    )
-
-                scores = torch.matmul(q, k.transpose(-2, -1)) * scale_value
-
-                mask_uid = self._node_uid(node, "attn_mask_tensor_uid")
-                if mask_uid is not None and mask_uid in self._tensors:
-                    scores = scores + self._tensors[mask_uid].to(dtype=torch.float32)
-
-                if bool(self._node_param(node, "causal_mask", False)):
-                    length_q = scores.shape[-2]
-                    length_k = scores.shape[-1]
-                    causal = torch.ones(
-                        length_q,
-                        length_k,
-                        dtype=torch.bool,
-                        device=scores.device,
-                    ).tril()
-                    scores = scores.masked_fill(~causal, float("-inf"))
-
-                stats = torch.logsumexp(scores, dim=-1)
-                probs = torch.exp(scores - stats.unsqueeze(-1))
-                output = torch.matmul(probs, v)
-
-                self._set_tensor_from_value(o_uid, output)
-                self._set_tensor_from_value(stats_uid, stats)
-
     def fill_inputs_random(self, seed: Optional[int] = None) -> None:
         """Fill input tensor buffers with random data.
 
@@ -240,8 +127,6 @@ class PyTorchCudaBufferManager:
             # in numpy because numpy has no native bfloat16 dtype).
             tensor.copy_(torch.from_numpy(data))
             self._host_data[tensor_info.uid] = self._host_numpy(tensor)
-
-        self._fill_sdpa_backward_prerequisites()
 
     def zero_outputs(self) -> None:
         """Zero output tensor buffers."""

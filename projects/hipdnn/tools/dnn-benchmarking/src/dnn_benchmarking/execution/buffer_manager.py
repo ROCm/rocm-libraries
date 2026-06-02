@@ -3,7 +3,7 @@
 
 """Device buffer management for graph execution."""
 
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 import numpy as np
 
@@ -159,18 +159,14 @@ class BufferManager:
     def __init__(
         self,
         tensor_infos: List[TensorInfo],
-        graph_json: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Initialize buffer manager with tensor metadata.
 
         Args:
             tensor_infos: List of TensorInfo objects describing tensors.
-            graph_json: Optional graph JSON used to derive dependent synthetic
-                inputs, such as SDPA backward O/LSE tensors.
         """
         self._tensor_infos = tensor_infos
         self._tensor_info_by_uid = {tensor.uid: tensor for tensor in tensor_infos}
-        self._graph_json = graph_json or {}
         self._buffers: Dict[int, "DeviceBuffer"] = {}  # UID -> DeviceBuffer
         self._host_data: Dict[int, np.ndarray] = {}  # UID -> logical numpy array
 
@@ -233,100 +229,6 @@ class BufferManager:
         if buffer:
             buffer.copy_from_host(raw_bytes)
 
-    @staticmethod
-    def _node_uid(node: Dict[str, Any], key: str) -> Optional[int]:
-        for section_name in ("inputs", "outputs"):
-            value = (node.get(section_name) or {}).get(key)
-            if value is not None:
-                return int(value)
-        return None
-
-    @staticmethod
-    def _node_param(node: Dict[str, Any], key: str, default: Any = None) -> Any:
-        for section_name in ("parameters", "attributes", "inputs", "outputs"):
-            section = node.get(section_name) or {}
-            if key in section:
-                return section[key]
-        return default
-
-    def _fill_sdpa_backward_prerequisites(self) -> None:
-        """Populate standalone SDPA backward O/LSE inputs from Q/K/V.
-
-        The ASM backward kernels require O and LSE from the matching forward
-        pass. Random O/LSE values make the graph mathematically invalid and can
-        accidentally compare against a reference that is solving a different
-        problem. When benchmarking a standalone backward JSON with synthetic
-        inputs, derive those tensors from the same Q/K/V data that was copied to
-        the device.
-        """
-        nodes = self._graph_json.get("nodes") or []
-        for node in nodes:
-            if node.get("type") != "SdpaBackwardAttributes":
-                continue
-
-            q_uid = self._node_uid(node, "q_tensor_uid")
-            k_uid = self._node_uid(node, "k_tensor_uid")
-            v_uid = self._node_uid(node, "v_tensor_uid")
-            o_uid = self._node_uid(node, "o_tensor_uid")
-            stats_uid = self._node_uid(node, "stats_tensor_uid")
-            if None in (q_uid, k_uid, v_uid, o_uid, stats_uid):
-                continue
-
-            o_info = self._tensor_info_by_uid.get(o_uid)
-            stats_info = self._tensor_info_by_uid.get(stats_uid)
-            if o_info is None or stats_info is None:
-                continue
-            if o_info.is_output or stats_info.is_output:
-                continue
-
-            q = self._host_data.get(q_uid)
-            k = self._host_data.get(k_uid)
-            v = self._host_data.get(v_uid)
-            if q is None or k is None or v is None:
-                continue
-
-            q_f32 = q.astype(np.float32, copy=False)
-            k_f32 = k.astype(np.float32, copy=False)
-            v_f32 = v.astype(np.float32, copy=False)
-
-            q_heads = q_f32.shape[-3]
-            kv_heads = k_f32.shape[-3]
-            if q_heads != kv_heads:
-                if kv_heads == 0 or q_heads % kv_heads != 0:
-                    raise ExecutionError(
-                        f"Unsupported SDPA GQA head counts: q_heads={q_heads}, "
-                        f"kv_heads={kv_heads}"
-                    )
-                repeat = q_heads // kv_heads
-                k_f32 = np.repeat(k_f32, repeat, axis=-3)
-                v_f32 = np.repeat(v_f32, repeat, axis=-3)
-
-            scale = self._node_param(node, "attn_scale_value", None)
-            scale_value = (
-                1.0 / np.sqrt(float(q_f32.shape[-1])) if scale is None else float(scale)
-            )
-
-            scores = np.matmul(q_f32, np.swapaxes(k_f32, -1, -2)) * scale_value
-
-            causal = bool(self._node_param(node, "causal_mask", False))
-            if causal:
-                q_len = scores.shape[-2]
-                k_len = scores.shape[-1]
-                mask = np.tril(np.ones((q_len, k_len), dtype=bool))
-                scores = np.where(mask, scores, -np.inf)
-
-            row_max = np.max(scores, axis=-1, keepdims=True)
-            exp_scores = np.exp(scores - row_max)
-            denom = np.sum(exp_scores, axis=-1, keepdims=True)
-            stats = (
-                np.squeeze(row_max, axis=-1) + np.log(np.squeeze(denom, axis=-1))
-            ).astype(np.float32)
-            probs = exp_scores / denom
-            output = np.matmul(probs, v_f32)
-
-            self._copy_logical_data_to_buffer(o_uid, output)
-            self._copy_logical_data_to_buffer(stats_uid, stats)
-
     def fill_inputs_random(self, seed: Optional[int] = None) -> None:
         """Fill input tensor buffers with random data.
 
@@ -360,8 +262,6 @@ class BufferManager:
                 data = rng.uniform(0.0, 1.0, tensor_info.dims).astype(dtype)
 
             self._copy_logical_data_to_buffer(tensor_info.uid, data)
-
-        self._fill_sdpa_backward_prerequisites()
 
     def zero_outputs(self) -> None:
         """Zero output tensor buffers.
