@@ -51,12 +51,17 @@ std::vector<std::int64_t> bshdStrides(int H, int S, int D) {
 /// the SDK hands the plan builder at runtime.
 flatbuffers::FlatBufferBuilder makeValidSdpaFwdGraph() {
     const auto qkvoStrides = bshdStrides(/*H=*/8, /*S=*/16, /*D=*/64);
+    // causalMask=true: the unified paged kernel applies causal masking
+    // unconditionally, so the capability gate (Phase 2d) declines a
+    // non-causal graph. A "valid" SDPA-fwd graph for this provider must
+    // therefore request top-left causal masking.
     return hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
         /*qDims=*/{2, 8, 16, 64}, /*qStrides=*/qkvoStrides,
         /*kDims=*/{2, 8, 16, 64}, /*kStrides=*/qkvoStrides,
         /*vDims=*/{2, 8, 16, 64}, /*vStrides=*/qkvoStrides,
         /*oDims=*/{2, 8, 16, 64}, /*oStrides=*/qkvoStrides,
-        /*dataType=*/DataType::HALF);
+        /*dataType=*/DataType::HALF, /*withAttnMask=*/false, /*withScale=*/false,
+        /*withStats=*/false, /*alibiMask=*/false, /*paddingMask=*/false, /*causalMask=*/true);
 }
 
 /// A valid spec built straight off the default graph; the arch-gate

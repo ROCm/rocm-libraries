@@ -15,6 +15,7 @@ add_library(
     adapters/conv_implicit_gemm/ConvImplicitGemmPayload.cpp
     adapters/sdpa/SdpaAdapter.cpp
     adapters/sdpa/SdpaCandidateSelector.cpp
+    adapters/sdpa/SdpaScorer.cpp
     adapters/sdpa/SdpaBwdAdapter.cpp
     adapters/sdpa/SdpaBwdPayload.cpp
     adapters/sdpa/SdpaPayload.cpp
@@ -45,6 +46,13 @@ target_link_libraries(
            Python3::Python pybind11::embed
 )
 
+# SdpaScorer.cpp includes fmha_ml_heuristic.hpp, which transitively pulls
+# in ck_tile/host/kernel_launch.hpp (HIP). Compile this single TU as HIP
+# so device/launch headers parse; the rest of the OBJECT library stays
+# CXX. SdpaScorer.hpp is HIP-free (pimpl), so its CXX consumers
+# (SdpaFwdPlanBuilder.cpp, the scorer test) need no HIP mode.
+set_source_files_properties(adapters/sdpa/SdpaScorer.cpp PROPERTIES LANGUAGE HIP)
+
 set_target_properties(ck_dsl_provider_impl PROPERTIES
     CXX_VISIBILITY_PRESET hidden
     POSITION_INDEPENDENT_CODE ON
@@ -60,13 +68,18 @@ target_link_libraries(
     PUBLIC hipdnn_plugin_sdk hipdnn_data_sdk hipdnn_flatbuffers_sdk ck_dsl_provider_impl
            Python3::Python pybind11::embed
 )
+# LightGBM is referenced by SdpaScorer.cpp (in the OBJECT lib). OBJECT
+# libraries do not link, so the dependency must be propagated to every
+# final linker. PUBLIC here so the unit-test exe inherits it transitively
+# through ck_dsl_provider_private.
+target_link_libraries(ck_dsl_provider_private PUBLIC ${LIGHTGBM_LIB})
 
 # Shared library: the actual plugin loaded at runtime by hipDNN.
 add_library(ck_dsl_provider_plugin SHARED $<TARGET_OBJECTS:ck_dsl_provider_impl>)
 target_link_libraries(
     ck_dsl_provider_plugin
     PRIVATE hipdnn_plugin_sdk hipdnn_data_sdk hipdnn_flatbuffers_sdk hip::host
-            Python3::Python pybind11::embed
+            Python3::Python pybind11::embed ${LIGHTGBM_LIB}
 )
 
 if(NOT WIN32)

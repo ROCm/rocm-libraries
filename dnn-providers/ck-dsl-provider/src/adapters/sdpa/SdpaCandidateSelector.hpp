@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "SdpaPerfKnobs.hpp"
+#include "SdpaScorer.hpp"
 
 namespace ck_dsl_provider {
 
@@ -129,5 +130,22 @@ struct SupportsResult {
 /// the best. ``candidates`` must be non-empty.
 [[nodiscard]] SdpaPerfKnobs selectAnalyticFallback(const SdpaSelectionProblem& problem,
                                                    const std::vector<SdpaPerfKnobs>& candidates);
+
+/// Top-level knob selection for the plan builder. Picks the best combo
+/// from ``candidates`` (which the caller enumerated for ``problem``):
+///
+///   * when the scorer's model loaded -> ML argmax over the candidates,
+///     scoring each by ``scorer.predict(problemToFmhaProblem(problem),
+///     knobsToKernelKey(problem, cand))`` (the dispatcher ``FmhaProblem``
+///     is built ONCE and reused across all candidates);
+///   * when the model failed to load -> the analytic production-policy
+///     fallback (``selectAnalyticFallback``), NOT a trivial first-fit.
+///
+/// HIP-free: ``SdpaScorer`` is the pimpl wrapper, so this declaration and
+/// the plan builder that calls it both stay plain CXX. ``candidates``
+/// must be non-empty (the caller hard-errors on an empty enumeration).
+[[nodiscard]] SdpaPerfKnobs selectPerfKnobs(const SdpaSelectionProblem& problem,
+                                            const std::vector<SdpaPerfKnobs>& candidates,
+                                            const SdpaScorer& scorer);
 
 }  // namespace ck_dsl_provider

@@ -15,9 +15,13 @@
 #include <string>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "../../adapters/sdpa/SdpaAdapter.hpp"
+#include "../../adapters/sdpa/SdpaCandidateSelector.hpp"
 #include "../../adapters/sdpa/SdpaPayload.hpp"
+#include "../../adapters/sdpa/SdpaPerfKnobs.hpp"
+#include "../../adapters/sdpa/SdpaScorer.hpp"
 #include "../../adapters/sdpa/SdpaSpec.hpp"
 #include "../../graph/GraphSignature.hpp"
 #include "../../python/CompileServiceBridge.hpp"
@@ -75,6 +79,61 @@ std::optional<SdpaSpec> tryBuildSpec(const flatbuffer_utilities::IGraph& opGraph
         reason = e.what();
         return std::nullopt;
     }
+}
+
+/// Pick a concrete paged-KV block size for the dense (non-paged)
+/// degenerate path. The unified kernel is always paged; a dense graph
+/// runs the one-block-per-sequence layout, but the scorer (and the 2c
+/// marshalling) still need a real block size in {16, 32, 64}. Choose the
+/// largest of {64, 32, 16} that divides ``Skv`` so a single block tiles
+/// the sequence cleanly; fall back to 16 (the supports() floor) when
+/// none divides. Folded into the cache key via ``spec.block_size`` so a
+/// scored dense plan caches distinctly from an unscored one.
+std::int32_t chooseDegenerateBlockSize(std::int32_t skv) {
+    for (const std::int32_t candidate : {64, 32, 16}) {
+        if (skv > 0 && skv % candidate == 0) {
+            return candidate;
+        }
+    }
+    return 16;
+}
+
+/// Normalise the spec's dtype spelling ("f16") to the kernel's
+/// ("fp16") that ``SdpaSelectionProblem`` and the heuristic expect.
+/// "bf16" passes through unchanged.
+std::string normalizeScoringDtype(const std::string& specDtype) {
+    if (specDtype == "f16") {
+        return "fp16";
+    }
+    return specDtype;
+}
+
+/// Build the selection problem the candidate enumerator + scorer read,
+/// from the (already block-size-finalised) spec.
+SdpaSelectionProblem buildSelectionProblem(const SdpaSpec& spec) {
+    SdpaSelectionProblem selProblem;
+    selProblem.batch = spec.problem.B;
+    selProblem.num_query_heads = spec.problem.Hq;
+    selProblem.num_kv_heads = spec.problem.Hkv;
+    selProblem.seqlen_q = spec.problem.Sq;
+    selProblem.seqlen_k = spec.problem.Skv;
+    selProblem.head_size = spec.problem.D;
+    selProblem.block_size = spec.block_size;
+    selProblem.dtype = normalizeScoringDtype(spec.dtype);
+
+    // The unified kernel is ALWAYS paged (real paged graph or the dense
+    // degenerate one-block-per-sequence layout), so use_paged_kv is the
+    // honest feature value for the model regardless of spec.is_paged.
+    selProblem.use_paged_kv = true;
+    selProblem.use_sinks = spec.use_sinks;
+    selProblem.sliding_window = spec.sliding_window;
+
+    // The capability gate guarantees causal masking for this provider;
+    // top-left causal == fmha mask_enum int 1.
+    selProblem.mask_type = 1;
+    selProblem.bias_type = 0;
+    selProblem.skip_min_seqlen_q = false;
+    return selProblem;
 }
 
 }  // namespace
@@ -189,6 +248,45 @@ void SdpaFwdPlanBuilder::buildPlan(const ::CkDslHandle& handle,
             "architecture cannot be determined; a GPU is required to build a plan");
     }
     const std::string arch = *detectedArch;
+
+    // --- Scorer-driven perf-knob selection ---------------------------
+    // Run BEFORE computeForSpec and the loader: both read spec, and the
+    // chosen knobs (plus the finalised block_size) are folded into the
+    // cache key. Mutating spec here keeps the key, the loader's payload,
+    // and the eventual marshalling (Task 2c) in lock-step.
+
+    // 1. Finalise block_size for the dense path so the scorer and the
+    //    cache key see a concrete value. Real paged graphs already carry
+    //    a block_size from the adapter; leave those as-is.
+    if (!spec.is_paged && spec.block_size == 0) {
+        spec.block_size = chooseDegenerateBlockSize(spec.problem.Skv);
+    }
+
+    // 2. Build the selection problem from the finalised spec.
+    const SdpaSelectionProblem selProblem = buildSelectionProblem(spec);
+
+    // 3. Enumerate buildable candidates. Post-gate, at least one combo
+    //    must exist; an empty set is a genuine fault on the commit path.
+    const std::vector<SdpaPerfKnobs> candidates = enumerateCandidates(selProblem);
+    if (candidates.empty()) {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "SdpaFwdPlanBuilder::buildPlan: no buildable FMHA-forward kernel "
+            "configuration for this problem (block_size=" +
+                std::to_string(spec.block_size) + ", head_size=" + std::to_string(spec.problem.D) +
+                "); the "
+                "applicability gate should have rejected it earlier");
+    }
+
+    // 4. Select the perf knobs. The scorer is loaded once for the
+    //    process (the gfx950 model is ~11 MB): a function-local static
+    //    that is shared across every buildPlan call. When the model
+    //    failed to load, selectPerfKnobs degrades to the analytic
+    //    fallback over the same candidate set. The returned knobs carry
+    //    the problem-driven sinks / sliding-window lanes (the enumerator
+    //    copied them from selProblem).
+    static const SdpaScorer kScorer;
+    spec.knobs = selectPerfKnobs(selProblem, candidates, kScorer);
 
     SignatureHash key = GraphSignature::computeForSpec(opKind(), spec, arch);
 

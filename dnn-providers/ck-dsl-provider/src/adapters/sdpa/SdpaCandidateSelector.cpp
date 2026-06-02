@@ -412,4 +412,26 @@ SdpaPerfKnobs selectAnalyticFallback(const SdpaSelectionProblem& problem,
     return candidates[bestIdx];
 }
 
+SdpaPerfKnobs selectPerfKnobs(const SdpaSelectionProblem& problem,
+                              const std::vector<SdpaPerfKnobs>& candidates,
+                              const SdpaScorer& scorer) {
+    // Model-load failure (or no model in the tree) degrades to the
+    // analytic production policy over the SAME candidate set -- never a
+    // trivial first-fit.
+    if (!scorer.isLoaded()) {
+        return selectAnalyticFallback(problem, candidates);
+    }
+
+    // Build the dispatcher FmhaProblem ONCE: signature.* is identical
+    // across every scored candidate (only the algorithm.* tile/pipeline
+    // fields vary per knob combo via knobsToKernelKey), so re-deriving it
+    // inside the scoring lambda would be pure waste.
+    const FmhaProblem fmhaProblem = problemToFmhaProblem(problem);
+
+    return selectArgmax(problem, candidates,
+                        [&scorer, &fmhaProblem](const FmhaKernelKey& key) -> double {
+                            return scorer.predict(fmhaProblem, key);
+                        });
+}
+
 }  // namespace ck_dsl_provider

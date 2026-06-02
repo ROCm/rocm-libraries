@@ -21,6 +21,17 @@ inline constexpr std::string_view kCkDslPythonPackagePath =
 inline constexpr std::string_view kCkDslProviderPythonPackagePath =
     "@CK_DSL_PROVIDER_PYTHON_PACKAGE_PATH@";
 
+// Absolute path of the in-tree LightGBM model the FMHA-forward scorer
+// (SdpaScorer) loads, resolved at configure time
+// (projects/composablekernel/dispatcher/heuristics/models/
+//  fmha_fwd_gfx950/model_tflops.lgbm).
+//
+// NOTE: this points into the SOURCE tree for the POC -- the model is
+// not installed beside the .so. A productised build would stage the
+// model into the install tree and resolve a runtime-relative path.
+inline constexpr std::string_view kCkDslFmhaFwdModelPath =
+    "@CK_DSL_FMHA_FWD_MODEL_PATH@";
+
 }  // namespace ck_dsl_provider
 
 #endif  // CK_DSL_PROVIDER_PATHS_H
