@@ -481,9 +481,12 @@ void runOracleSweep(const OracleCase& cse, CkDslContainer& container, ::CkDslHan
     }
 }
 
-/// gfx950-gated oracle perf-sweep fixture. Brings up the embedded
+/// gfx950-gated oracle perf-sweep fixture, parameterized over the SAME shape
+/// set as IntegrationGpuCkDslSdpaFwdPerf (and the external PyTorch script), so
+/// the per-shape oracle-best / heuristic-pick / analytic numbers line up
+/// column-for-column with the perf and PyTorch results. Brings up the embedded
 /// interpreter (CkDslContainer) + a handle once per test.
-class IntegrationGpuCkDslSdpaFwdOracleGpu : public ::testing::Test {
+class IntegrationGpuCkDslSdpaFwdOracleGpu : public ::testing::TestWithParam<OracleCase> {
    protected:
     void SetUp() override {
         CK_DSL_PROVIDER_SKIP_IF_NOT_GFX950("IntegrationGpuCkDslSdpaFwdOracleGpu");
@@ -499,48 +502,32 @@ class IntegrationGpuCkDslSdpaFwdOracleGpu : public ::testing::Test {
     std::string _arch;
 };
 
-// Flagship: the S8192 GQA fp16 D128 case (the ~0.31x-ratio plateau).
-TEST_F(IntegrationGpuCkDslSdpaFwdOracleGpu, OracleConfigSweep) {
-    const OracleCase cse{
-        "Fp16_GQA_S8192_D128", /*B=*/1,      /*Hq=*/32, /*Hkv=*/8,
-        /*Sq=*/8192,           /*Skv=*/8192, /*D=*/128, data_objects::DataType::HALF};
-    runOracleSweep(cse, *_container, *_handle, _arch);
+// Mirror of kSdpaPerfCases in IntegrationGpuCkDslSdpaFwdPerf.cpp -- keep the
+// dims identical so oracle-best aligns with the perf/PyTorch chart.
+const std::vector<OracleCase> kOracleCases = {
+    {"Fp16_GQA_S2048_D128", 1, 32, 8, 2048, 2048, 128, data_objects::DataType::HALF},
+    {"Fp16_GQA_S4096_D128", 1, 32, 8, 4096, 4096, 128, data_objects::DataType::HALF},
+    {"Fp16_MHA_S2048_D128", 1, 32, 32, 2048, 2048, 128, data_objects::DataType::HALF},
+    {"Fp16_GQA_B4_S2048_D128", 4, 32, 8, 2048, 2048, 128, data_objects::DataType::HALF},
+    {"Fp16_GQA_S2048_D64", 1, 32, 8, 2048, 2048, 64, data_objects::DataType::HALF},
+    {"Fp16_GQA_S2048_D256", 1, 32, 8, 2048, 2048, 256, data_objects::DataType::HALF},
+    {"Bf16_GQA_S2048_D128", 1, 32, 8, 2048, 2048, 128, data_objects::DataType::BFLOAT16},
+    {"Bf16_InFamily_GQA8_D64_S2048", 1, 64, 8, 2048, 2048, 64, data_objects::DataType::BFLOAT16},
+    {"Bf16_InFamily_GQA8_D64_S2016_B32", 1, 64, 8, 2016, 2016, 64,
+     data_objects::DataType::BFLOAT16},
+    {"Fp16_GQA_S8192_D128", 1, 32, 8, 8192, 8192, 128, data_objects::DataType::HALF},
+    {"Fp16_GQA_B8_S2048_D128", 8, 32, 8, 2048, 2048, 128, data_objects::DataType::HALF},
+    {"Fp16_GQA_B4_S4096_D128", 4, 32, 8, 4096, 4096, 128, data_objects::DataType::HALF},
+};
+
+TEST_P(IntegrationGpuCkDslSdpaFwdOracleGpu, OracleConfigSweep) {
+    runOracleSweep(GetParam(), *_container, *_handle, _arch);
 }
 
-// Contrast: a smaller S2048 GQA fp16 D128 shape, same sweep machinery.
-TEST_F(IntegrationGpuCkDslSdpaFwdOracleGpu, OracleConfigSweepS2048) {
-    const OracleCase cse{
-        "Fp16_GQA_S2048_D128", /*B=*/1,      /*Hq=*/32, /*Hkv=*/8,
-        /*Sq=*/2048,           /*Skv=*/2048, /*D=*/128, data_objects::DataType::HALF};
-    runOracleSweep(cse, *_container, *_handle, _arch);
-}
-
-// IN-FAMILY: bf16 / D64 / Hq64-Hkv8 (GQA ratio 8) -- the regime the gfx950
-// fwd model was trained on. After the trained-faithful scoring query, this
-// is where the heuristic pick should track oracle-best most closely.
-TEST_F(IntegrationGpuCkDslSdpaFwdOracleGpu, OracleConfigSweepInFamilyBf16S2048) {
-    const OracleCase cse{"Bf16_InFamily_GQA8_D64_S2048",
-                         /*B=*/2,
-                         /*Hq=*/64,
-                         /*Hkv=*/8,
-                         /*Sq=*/2048,
-                         /*Skv=*/2048,
-                         /*D=*/64,
-                         data_objects::DataType::BFLOAT16};
-    runOracleSweep(cse, *_container, *_handle, _arch);
-}
-
-// IN-FAMILY at large S: does the in-distribution pick still hold at S8192?
-TEST_F(IntegrationGpuCkDslSdpaFwdOracleGpu, OracleConfigSweepInFamilyBf16S8192) {
-    const OracleCase cse{"Bf16_InFamily_GQA8_D64_S8192",
-                         /*B=*/2,
-                         /*Hq=*/64,
-                         /*Hkv=*/8,
-                         /*Sq=*/8192,
-                         /*Skv=*/8192,
-                         /*D=*/64,
-                         data_objects::DataType::BFLOAT16};
-    runOracleSweep(cse, *_container, *_handle, _arch);
-}
+INSTANTIATE_TEST_SUITE_P(Shapes, IntegrationGpuCkDslSdpaFwdOracleGpu,
+                         ::testing::ValuesIn(kOracleCases),
+                         [](const ::testing::TestParamInfo<OracleCase>& info) {
+                             return std::string(info.param.name);
+                         });
 
 }  // namespace
