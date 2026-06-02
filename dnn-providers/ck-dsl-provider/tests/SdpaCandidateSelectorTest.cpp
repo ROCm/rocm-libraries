@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <ck_tile/dispatcher/fmha_kernel_key.hpp>
 #include <cmath>
 #include <functional>
@@ -214,7 +215,7 @@ TEST(SdpaCandidateSelectorSelection, ArgmaxReturnsScorePeak) {
     EXPECT_EQ(picked.num_warps, target.num_warps);
 }
 
-TEST(SdpaCandidateSelectorSelection, ConstantScoreYieldsStableFirstCombo) {
+TEST(SdpaCandidateSelectorSelection, ConstantScorePrefersMfma32TieBreak) {
     const SdpaSelectionProblem problem = makeReferenceProblem();
     const std::vector<SdpaPerfKnobs> combos = enumerateCandidates(problem);
     ASSERT_FALSE(combos.empty());
@@ -223,12 +224,17 @@ TEST(SdpaCandidateSelectorSelection, ConstantScoreYieldsStableFirstCombo) {
 
     const SdpaPerfKnobs first = selectArgmax(problem, combos, constScore);
     const SdpaPerfKnobs second = selectArgmax(problem, combos, constScore);
-    // Stable tie-break: the first enumerated combo wins, repeatably.
-    EXPECT_EQ(first.num_warps, combos.front().num_warps);
-    EXPECT_EQ(first.block_m_per_warp, combos.front().block_m_per_warp);
-    EXPECT_EQ(first.tile_size, combos.front().tile_size);
+    // Deterministic + repeatable.
     EXPECT_EQ(first.num_warps, second.num_warps);
+    EXPECT_EQ(first.block_m_per_warp, second.block_m_per_warp);
     EXPECT_EQ(first.tile_size, second.tile_size);
+    EXPECT_EQ(first.use_mfma_32x32, second.use_mfma_32x32);
+    // MFMA-atom tie-break: when the score is flat (the model has no warp-atom
+    // feature, so mfma32 / non-mfma32 variants tie), an mfma32 combo wins if
+    // one exists -- the 32x32x16 atom is oracle-best on the targeted shapes.
+    const bool anyMfma32 = std::any_of(combos.begin(), combos.end(),
+                                       [](const SdpaPerfKnobs& k) { return k.use_mfma_32x32; });
+    EXPECT_EQ(first.use_mfma_32x32, anyMfma32);
 }
 
 // ---------------------------------------------------------------------------

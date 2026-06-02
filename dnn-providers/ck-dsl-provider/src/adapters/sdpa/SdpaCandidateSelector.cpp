@@ -358,6 +358,14 @@ SdpaPerfKnobs selectArgmax(
         if (i == 0 || s > bestScore) {
             bestScore = s;
             bestIdx = i;
+        } else if (s == bestScore && candidates[i].use_mfma_32x32 &&
+                   !candidates[bestIdx].use_mfma_32x32) {
+            // MFMA-atom tie-break. The scoring key is byte-identical for the
+            // mfma32 and non-mfma32 variants of the same (m0, n0, tile) -- the
+            // model has no warp-atom feature -- so predict() returns the exact
+            // same score and they tie. The 32x32x16 atom is the oracle-best on
+            // the D128 shapes the model targets, so break the tie toward it.
+            bestIdx = i;
         }
     }
     return candidates[bestIdx];
