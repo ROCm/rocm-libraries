@@ -183,56 +183,112 @@ jobs:
           # from the shared S3 cache. Only hipBLASLt is instrumented and rebuilt
           # cold; the ~30-subproject stack is NOT rebuilt under ASAN flags.
           #
-          # Otherwise match the regular TheRock CI blas config. Extra preset
-          # options (CMAKE_BUILD_TYPE=RelWithDebInfo,
-          # THEROCK_FLAG_KPACK_SPLIT_ARTIFACTS=OFF) caused build_configure.py
-          # at TheRock pin 4e469b56 to produce a configure that did not
-          # register the `therock-archives` target — the build step then
-          # failed with `ninja: error: unknown target 'therock-archives'`.
-          extra_cmake_options: "-DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ -DTHEROCK_ENABLE_BLAS=ON -DhipBLASLt_SANITIZER=ASAN"
+          # Disable every feature group, then re-enable only BLAS, so the
+          # configure (and therefore the build graph) is limited to the BLAS
+          # dependency chain instead of all ~30 subprojects. Mechanics:
+          #   * THEROCK_ENABLE_ALL=OFF makes every feature-group option (and
+          #     thus every per-feature default: rand/fft/prim/sparse/solver/
+          #     rocwmma/ml-libs/comm-libs/...) default OFF.
+          #   * THEROCK_ENABLE_BLAS=ON re-enables just the BLAS feature.
+          #     math-libs/CMakeLists.txt gates `add_subdirectory(BLAS)` on
+          #     THEROCK_ENABLE_BLAS directly (the math-libs dir itself is
+          #     added unconditionally), so the hipBLASLt target is declared
+          #     and BLAS's required deps (core/compiler/host-blas/...) are
+          #     pulled in by therock_finalize_features().
+          # Do NOT add THEROCK_RESET_FEATURES=ON here: it FORCE-overwrites
+          # every feature cache var with its default, which would clobber the
+          # explicit -DTHEROCK_ENABLE_BLAS=ON back to OFF on this fresh build.
+          extra_cmake_options: "-DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ -DTHEROCK_ENABLE_ALL=OFF -DTHEROCK_ENABLE_BLAS=ON -DhipBLASLt_SANITIZER=ASAN"
           BUILD_DIR: build
         run: |
           python3 TheRock/build_tools/github_actions/build_configure.py
 
-      - name: Build therock-archives and therock-dist
-        run: cmake --build TheRock/build --target therock-archives therock-dist -- -k 0
+      - name: Build hipBLASLt
+        # Build ONLY the hipBLASLt subproject target, not therock-archives /
+        # therock-dist (which would build archives for every enabled artifact,
+        # i.e. the whole stack). The hipBLASLt target pulls in just its
+        # transitive build deps via the subproject graph: hipBLAS-common,
+        # rocRoller, the amd-llvm/hip toolchain and core runtime. It does NOT
+        # depend on rocBLAS/hipBLAS/fft/rand/sparse/solver/miopen, so those
+        # are never built. This is the actual "just build hipblaslt" lever —
+        # scoping the sanitizer alone does not shrink the build set. It also
+        # sidesteps the `therock-archives` target entirely.
+        run: cmake --build TheRock/build --target hipBLASLt -- -k 0
 
       - name: Report
         if: ${{ !cancelled() }}
         run: |
-          echo "Full SDK du:"
-          echo "------------"
-          du -h -d 1 TheRock/build/dist/rocm
-          echo "Artifact Archives:"
-          echo "------------------"
-          ls -lh TheRock/build/artifacts/*.tar.xz
-          echo "Artifacts:"
-          echo "----------"
-          du -h -d 1 TheRock/build/artifacts
+          # We build only the hipBLASLt subproject target, so the full-SDK
+          # dist/ and artifacts/ trees do not exist. Discover what the
+          # hipBLASLt subproject actually produced (its stage/ install tree
+          # and the gtest binary) so we can package it for the test job, and
+          # so the layout is visible in the log while this workflow is still
+          # being shaped.
+          echo "hipBLASLt subproject dirs:"
+          echo "--------------------------"
+          find TheRock/build -maxdepth 5 -type d -path '*hipBLASLt*' \
+            \( -name stage -o -name dist -o -name build \) -print 2>/dev/null || true
+          echo "hipblaslt-test binary:"
+          echo "----------------------"
+          find TheRock/build -type f -name 'hipblaslt-test' 2>/dev/null || true
+          echo "hipBLASLt stage tree (top levels):"
+          echo "----------------------------------"
+          for d in $(find TheRock/build -maxdepth 5 -type d -path '*hipBLASLt*' -name stage 2>/dev/null); do
+            echo "## $d"
+            find "$d" -maxdepth 3 -name 'hipblaslt-test' -o -maxdepth 3 -type d -name library 2>/dev/null || true
+            du -h -d 2 "$d" 2>/dev/null | tail -20 || true
+          done
           echo "CCache Stats:"
           echo "-------------"
-          ccache -s -v
-          tail -v -n +1 .ccache/compiler_check_cache/* > TheRock/build/logs/ccache_compiler_check_cache.log
+          ccache -s -v || true
 
-      - name: Configure AWS Credentials for non-forked repos
-        if: ${{ always() && !github.event.pull_request.head.repo.fork }}
-        uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7 # v6.0.0
-        with:
-          aws-region: us-east-2
-          role-to-assume: arn:aws:iam::692859939525:role/therock-ci-external
-
-      - name: Post Build Upload
-        if: always()
+      # The whole-stack S3 upload (post_build_upload.py) and its
+      # therock_manifest.json / artifact archives are gone: we build only the
+      # hipBLASLt subproject target, so no therock-archives / therock-dist
+      # outputs exist. Instead package the hipBLASLt subproject's own trees
+      # and publish them as a GitHub Actions artifact. This (a) lets us
+      # inspect the real on-disk layout while the test wiring is being shaped
+      # and (b) becomes the input the GPU test job consumes once wired.
+      - name: Package hipBLASLt trees
+        if: ${{ !cancelled() }}
         run: |
-          python3 TheRock/build_tools/github_actions/post_build_upload.py \
-            --run-id ${{ github.run_id }} \
-            --artifact-group ${ARTIFACT_GROUP} \
-            --build-dir TheRock/build \
-            --upload
+          set -uo pipefail
+          mkdir -p upload
+          found=0
+          # stage/ = hipBLASLt's own install (gtest 'test' component + the
+          #          per-base lib/hipblaslt/library/<gfx*> tree).
+          # dist/  = flattened tree with runtime deps (hip, rocRoller, ...).
+          # The test job will merge dist + stage to get a runnable tree.
+          for kind in stage dist; do
+            for d in $(find TheRock/build -maxdepth 6 -type d -path '*hipBLASLt*' -name "$kind" 2>/dev/null); do
+              echo "Packaging $kind tree: $d"
+              if tar -C "$d" -czf "upload/hipblaslt-${kind}.tar.gz" . ; then found=1; fi
+              break
+            done
+          done
+          ls -lh upload || true
+          [ "$found" = 1 ] || echo "::warning::no hipBLASLt stage/dist tree found to package"
+
+      - name: Upload hipBLASLt trees
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: hipblaslt-asan-trees
+          path: upload/*.tar.gz
+          if-no-files-found: warn
+          retention-days: 7
 
   test:
     name: "Test hipblaslt ASAN (shard ${{ matrix.shard }} of 6)"
     needs: [setup, build]
+    # TODO(iter2): wire this to the `hipblaslt-asan-trees` artifact produced
+    # by the build job. It currently uses TheRock's setup_test_environment,
+    # which fetches whole-stack artifacts from S3 (post_build_upload) that we
+    # no longer produce. Once the iter1 run reveals the stage/dist layout,
+    # replace setup_test_environment with download-artifact + merge (dist then
+    # stage overlay) into OUTPUT_ARTIFACTS_DIR and re-enable. Gated off so the
+    # workflow is green on the scoped build alone in the meantime.
+    if: false
     runs-on: linux-gfx90a-gpu-rocm
     timeout-minutes: 210
     container:
