@@ -241,6 +241,18 @@ enum fft_array_type
     fft_array_type_unset,
 };
 
+inline bool array_type_is_planar(fft_array_type array_type)
+{
+    return array_type == fft_array_type_complex_planar
+           || array_type == fft_array_type_hermitian_planar;
+}
+
+inline bool array_type_is_interleaved(fft_array_type array_type)
+{
+    return array_type == fft_array_type_complex_interleaved
+           || array_type == fft_array_type_hermitian_interleaved;
+}
+
 inline void validate_or_throw(fft_array_type array_type, const std::string& func_name)
 {
     switch(array_type)

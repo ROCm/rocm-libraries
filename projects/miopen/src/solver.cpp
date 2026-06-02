@@ -321,7 +321,7 @@ inline SolverRegistrar::SolverRegistrar(IdRegistryData& registry)
     ++id; // removed solver ConvOclBwdWrW2<8>
     ++id; // removed solver ConvOclBwdWrW2<16>
     ++id; // removed solver ConvOclBwdWrW2NonTunable
-    RegisterWithSolver(registry, ++id, conv::ConvOclBwdWrW53{}, miopenConvolutionAlgoDirect);
+    RegisterWithSolver(registry, ++id, conv::ConvHipBwdWrW53{}, miopenConvolutionAlgoDirect);
     ++id; // removed solver ConvOclBwdWrW1x1
     RegisterWithSolver(
         registry, ++id, conv::ConvHipImplicitGemmV4R1Fwd{}, miopenConvolutionAlgoImplicitGEMM);
