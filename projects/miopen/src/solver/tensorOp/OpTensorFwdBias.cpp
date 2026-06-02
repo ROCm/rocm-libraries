@@ -133,8 +133,8 @@ ConvSolution OpTensorFwdBias::GetSolution([[maybe_unused]] const ExecutionContex
         kernel.kernel_name = "OpTensorFwdBiasGeneric";
     }
 
-    kernel.comp_options = build_params.GenerateFor(kbp::OpenCL{});
-    kernel.kernel_file  = "MIOpenTensorKernels.cl";
+    kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
+    kernel.kernel_file  = "MIOpenTensorKernelsHip.cpp";
 
     using std::begin, std::end;
 
