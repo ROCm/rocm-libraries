@@ -37,7 +37,8 @@ def load_selected_executables(tests_json):
     with open(tests_json) as f:
         data = json.load(f)
     # selective_test_filter.py writes both "executables" and "tests_to_run".
-    return list(data.get("executables", data.get("tests_to_run", [])))
+    # Use `or` chaining so an explicit JSON null is treated as empty, not None.
+    return list(data.get("executables") or data.get("tests_to_run") or [])
 
 
 def load_ninja_targets(path):

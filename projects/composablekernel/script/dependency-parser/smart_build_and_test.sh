@@ -52,8 +52,20 @@ for arg in "$@"; do
     esac
 done
 
-# Tee all output (stdout+stderr) to the log file for CI artifact archiving.
-exec > >(tee -a "${LOG_FILE}") 2>&1
+# Stream output to a combined log file (for CI artifact archiving) as well as the
+# console. This is the top-level entry point, so it always tees; it exports
+# _SMART_BUILD_NESTED before calling smart_build_ci.sh so the child skips its own
+# tee and its output flows into this single combined log in order. A backgrounded
+# tee draining a FIFO (whose PID we wait on at exit) is used instead of
+# `exec > >(tee)` so the log is fully flushed before exit (the bare form can lose
+# the tail, including the final pass/fail banner).
+_LOG_FIFO="$(mktemp -u)"
+mkfifo "${_LOG_FIFO}"
+tee "${LOG_FILE}" < "${_LOG_FIFO}" &
+_TEE_PID=$!
+exec > "${_LOG_FIFO}" 2>&1
+rm -f "${_LOG_FIFO}"
+trap '_rc=$?; exec 1>&- 2>&-; wait "${_TEE_PID}" 2>/dev/null || true; exit ${_rc}' EXIT
 
 # Validate required parameters
 # NINJA_JOBS is not needed in dry-run mode (no compilation; uses ninja -t targets all).
@@ -86,6 +98,8 @@ echo ""
 
 export WORKSPACE_ROOT
 export PARALLEL
+# Tell the child to skip its own tee; its output flows into our combined log.
+export _SMART_BUILD_NESTED=1
 
 if ! bash "${SCRIPT_DIR}/smart_build_ci.sh"; then
     # Full build required (exit code 1 from smart_build_ci.sh)

@@ -59,13 +59,25 @@ build's **Artifacts** tab and look for these files.
 | File | What it means | First thing to check |
 |------|--------------|----------------------|
 | `build_mode.env` | `SMART_BUILD_MODE=selective\|full\|none` | Which path the run took |
-| `smart_build_ci.log` | Full stdout+stderr of `smart_build_ci.sh` | Start here for any CI failure |
-| `smart_build.log` | Full stdout+stderr of `smart_build_and_test.sh` | Build/test failures |
+| `smart_build.log` | Full combined stdout+stderr of the run (selection + build + test) | Start here for any CI failure |
+| `smart_build_ci.log` | Selection-phase log — **only produced when `smart_build_ci.sh` is run standalone**; in CI the output is folded into `smart_build.log` | Standalone runs only |
 | `tests_to_run.json` | The selected executables and ctest regex | Which tests were chosen |
-| `build_targets.txt` | Space-separated ninja targets | What was actually built |
+| `build_targets.txt` | Space-separated ninja targets, **or** the sentinel word `full`/`none` (see below) | What was actually built |
 | `reachability_result.json` | Guardrail verdict — which ctest tests are unreachable | Ongoing FN monitoring |
 | `smoke_result.json` | Whether every selected target is a real ninja target | Selection drift detection |
 | `smoke_result.xml` | JUnit version of `smoke_result.json` | Published to Jenkins test results |
+
+> **`build_targets.txt` sentinels:** in `full` mode the file contains the single
+> word `full`; in `none` mode it contains `none`. Only in `selective` mode does it
+> hold a real space-separated target list. `smart_build_and_test.sh` checks for
+> `none` and skips the build/test phase. Do not `ninja $(cat build_targets.txt)`
+> without first checking `build_mode.env`.
+
+> **Why `smart_build_ci.log` is usually absent in CI:** CI invokes
+> `smart_build_and_test.sh`, which sets `_SMART_BUILD_NESTED=1` and calls
+> `smart_build_ci.sh` as a child. The child detects the nesting and skips its own
+> log, so its selection-phase output appears in the combined `smart_build.log`
+> instead. The separate file appears only when you run `smart_build_ci.sh` by hand.
 
 ### `build_mode.env` values
 
@@ -88,6 +100,7 @@ If the file is **absent**, `smart_build_ci.sh` crashed before it could write it
   "false_negatives": [],
   "n_non_compiled": 37,    // python/try_compile tests — always-run class, not FNs
   "non_compiled": [...],
+  "allowlisted": [],       // tests suppressed via --allowlist (see §5)
   "classified": true,      // true = build.ninja was provided for classification
   "verdict": "pass"        // "fail" if any compiled test is unreachable
 }
@@ -242,7 +255,8 @@ test_foo
 EOF
 ```
 
-Pass it to the guardrail invocation in `smart_build_ci.sh`:
+The guardrail invocation in `smart_build_ci.sh` does **not** pass `--allowlist` by
+default — you must add the flag to wire the allowlist in:
 ```bash
 python3 "${SCRIPT_DIR}/filter_oracle.py" reachability \
     --depmap enhanced_dependency_mapping.json \
@@ -281,6 +295,12 @@ bash ../script/dependency-parser/smart_build_ci.sh
 #   build_mode.env, reachability_result.json
 ```
 
+> **`BASE_BRANCH` vs `CHANGE_TARGET`:** `smart_build_ci.sh`'s `select` step uses
+> `BASE_BRANCH`. `ci_safety_check.sh` resolves its base as
+> `${CHANGE_TARGET:-${BASE_BRANCH:-develop}}`, so in Jenkins `CHANGE_TARGET`
+> (set for PR builds) takes precedence there. For consistent local behavior, set
+> `BASE_BRANCH` and leave `CHANGE_TARGET` unset.
+
 ### Inspect the depmap interactively
 
 ```bash
@@ -301,20 +321,34 @@ jq '.executable_to_files | to_entries | sort_by(.value | length) | reverse | .[0
 
 ## 7. Safety check logic (ci_safety_check.sh)
 
-The safety check forces a full build when the PR touches any of:
+The safety check forces a full build when any of these holds. All path patterns
+are scoped to `projects/composablekernel/` and matched against
+`git diff origin/${BASE_BRANCH}...HEAD` (three-dot: only changes unique to the
+branch, so merged-in develop commits don't trigger a false positive).
 
-| Pattern | Rationale |
+| Trigger | Rationale |
 |---------|-----------|
-| `CMakeLists.txt`, `*.cmake` | Build graph may have changed; depmap is potentially stale |
+| `**/CMakeLists.txt` | Build graph may have changed; depmap is potentially stale |
+| `**/*.cmake`, `**/*.cmake.in` | CMake module/config changes |
 | `script/dependency-parser/**` | The tooling itself changed; can't trust its own output |
+| `script/cmake/**` | CMake helper scripts |
+| `setup.py`, `pyproject.toml` | Python build config |
+| dependency cache (`cmake_dependency_mapping.json`) older than 7 days | Stale cache; force a fresh full build |
 | `FORCE_CI=true` env var | Nightly/scheduled builds always run everything |
 | `DISABLE_SMART_BUILD=true` env var | Manual override |
 
-**~47% of corpus PRs trigger full build** due to CMakeLists.txt touches. This is
-expected — structural changes to the build graph need the full rebuild.
+A meaningful fraction of PRs hit the CMakeLists.txt trigger and fall back to full
+build — this is expected, since structural changes to the build graph need a full
+rebuild. (Exact rate depends on the PR mix; measure it from archived
+`build_mode.env` artifacts rather than assuming a fixed percentage.)
 
-The script exits 0 (selective OK) or 1 (full required). Its output is captured
-in `smart_build_ci.log`.
+The script exits 0 (selective OK) or 1 (full required). Its output is captured in
+the run log (`smart_build.log`, or `smart_build_ci.log` for standalone runs).
+
+> **Note on `build_mode.env`:** `ci_safety_check.sh` writes it with an `export `
+> prefix (`export SMART_BUILD_MODE=full`), but `smart_build_ci.sh` overwrites it
+> afterwards without the prefix. The final archived artifact has no `export `
+> prefix.
 
 ---
 

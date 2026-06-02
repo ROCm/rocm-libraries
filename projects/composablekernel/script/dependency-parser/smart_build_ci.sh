@@ -30,8 +30,23 @@ PARALLEL="${PARALLEL:-32}"
 BASE_BRANCH="${BASE_BRANCH:-develop}"
 LOG_FILE="${BUILD_DIR}/smart_build_ci.log"
 
-# Tee all output (stdout+stderr) to the log file for CI artifact archiving.
-exec > >(tee -a "${LOG_FILE}") 2>&1
+# Stream output to a log file (for CI artifact archiving) as well as the console.
+# When invoked by smart_build_and_test.sh the parent already tees a combined log,
+# so we skip our own tee to avoid double-logging and out-of-order interleaving
+# (smart_build_ci.log is only produced when this script is run standalone).
+# A backgrounded tee draining a FIFO (whose PID we wait on at exit) is used
+# instead of `exec > >(tee)` so the log is fully flushed before the script exits:
+# the bare process-substitution form does not wait for tee and can lose the tail
+# (including the final verdict banner).
+if [ -z "${_SMART_BUILD_NESTED:-}" ]; then
+    _LOG_FIFO="$(mktemp -u)"
+    mkfifo "${_LOG_FIFO}"
+    tee "${LOG_FILE}" < "${_LOG_FIFO}" &
+    _TEE_PID=$!
+    exec > "${_LOG_FIFO}" 2>&1
+    rm -f "${_LOG_FIFO}"
+    trap '_rc=$?; exec 1>&- 2>&-; wait "${_TEE_PID}" 2>/dev/null || true; exit ${_rc}' EXIT
+fi
 
 echo "========================================="
 echo "Smart Build CI"
@@ -61,12 +76,14 @@ echo "Step 2: Generating dependency map..."
 if [ ! -f "compile_commands.json" ]; then
     echo "Error: compile_commands.json not found in ${BUILD_DIR}"
     echo "Make sure cmake configure has been run with -DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
+    echo "SMART_BUILD_MODE=full" > build_mode.env
     exit 1
 fi
 
 if [ ! -f "build.ninja" ]; then
     echo "Error: build.ninja not found in ${BUILD_DIR}"
     echo "Make sure cmake configure has been run with -G Ninja"
+    echo "SMART_BUILD_MODE=full" > build_mode.env
     exit 1
 fi
 
@@ -79,6 +96,7 @@ python3 "${SCRIPT_DIR}/main.py" cmake-parse \
 
 if [ ! -f "enhanced_dependency_mapping.json" ]; then
     echo "Error: Failed to generate enhanced_dependency_mapping.json"
+    echo "SMART_BUILD_MODE=full" > build_mode.env
     exit 1
 fi
 
@@ -116,6 +134,7 @@ python3 "${SCRIPT_DIR}/main.py" select \
 
 if [ ! -f "tests_to_run.json" ]; then
     echo "Error: Failed to generate tests_to_run.json"
+    echo "SMART_BUILD_MODE=full" > build_mode.env
     exit 1
 fi
 

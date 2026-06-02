@@ -129,8 +129,16 @@ echo "Skip Build: $SKIP_BUILD"
 echo "Skip Legacy: $SKIP_LEGACY"
 echo "Output File: $OUTPUT_FILE"
 
-# Start validation log
-exec > >(tee "$OUTPUT_FILE") 2>&1
+# Start validation log. Use a backgrounded tee on a FIFO (whose PID we wait on at
+# exit) rather than `exec > >(tee)` so the results file is fully flushed before
+# the script returns - the bare process-substitution form does not wait for tee
+# and can drop the tail (including the final MATCH/MISMATCH verdict).
+_LOG_FIFO="$(mktemp -u)"
+mkfifo "${_LOG_FIFO}"
+tee "$OUTPUT_FILE" < "${_LOG_FIFO}" &
+_TEE_PID=$!
+exec > "${_LOG_FIFO}" 2>&1
+rm -f "${_LOG_FIFO}"
 
 log_section "Step 1: Fetch PR $PR_NUMBER"
 cd "$PROJECT_ROOT" || exit 1
@@ -144,10 +152,15 @@ fi
 
 ORIG_REF="$(git symbolic-ref -q --short HEAD || git rev-parse HEAD)"
 restore_git() {
+    _rc=$?
     log_info "Restoring original git state (${ORIG_REF})..."
     git rebase --abort 2>/dev/null || true
     git checkout -q "$ORIG_REF" 2>/dev/null || true
     git branch -D "pr-${PR_NUMBER}" 2>/dev/null || true
+    # Drain the log tee so the results file is complete before we exit.
+    exec 1>&- 2>&-
+    wait "${_TEE_PID}" 2>/dev/null || true
+    exit ${_rc}
 }
 trap restore_git EXIT
 
@@ -167,8 +180,17 @@ log_info "Rebasing pr-${PR_NUMBER} on $SMART_BUILD_BRANCH..."
 if ! git rebase "${SMART_BUILD_BRANCH}"; then
     log_warn "Rebase conflicts detected, resolving by accepting PR changes..."
 
-    # Loop to handle multiple conflicts during rebase
+    # Loop to handle multiple conflicts during rebase. Guard against an
+    # unresolvable conflict spinning forever: cap iterations and fail loudly.
+    MAX_REBASE_STEPS=200
+    step=0
     while true; do
+        step=$((step + 1))
+        if [ "$step" -gt "$MAX_REBASE_STEPS" ]; then
+            log_error "Rebase did not converge after ${MAX_REBASE_STEPS} steps; aborting."
+            exit 1
+        fi
+
         # Get list of conflicted files
         CONFLICTED_FILES=$(git diff --name-only --diff-filter=U)
 
@@ -180,18 +202,26 @@ if ! git rebase "${SMART_BUILD_BRANCH}"; then
         log_info "Conflicted files:"
         echo "$CONFLICTED_FILES"
 
-        # For each conflicted file, accept the PR's version (theirs)
+        # For each conflicted file, accept the PR's version (theirs). For
+        # delete/rename conflicts the path may not exist as a regular file;
+        # `git rm` clears those so the rebase can make progress.
         while IFS= read -r file; do
             if [ -f "$file" ]; then
                 log_info "Accepting PR changes for: $file"
-                git checkout --theirs "$file"
-                git add "$file"
+                git checkout --theirs "$file" && git add "$file"
+            else
+                log_info "Removing conflicted (deleted/renamed) path: $file"
+                git rm -f "$file" 2>/dev/null || git add "$file"
             fi
         done <<< "$CONFLICTED_FILES"
 
-        # Continue the rebase
+        # Continue the rebase. Capture output explicitly: piping straight into
+        # grep would mask a real `rebase --continue` failure (its exit code is
+        # lost to grep's under a no-pipefail shell).
         log_info "Continuing rebase..."
-        if git -c core.editor=true rebase --continue 2>&1 | grep -q "No changes"; then
+        cont_out=$(git -c core.editor=true rebase --continue 2>&1) || true
+        echo "$cont_out"
+        if printf '%s' "$cont_out" | grep -q "No changes"; then
             log_warn "No changes after conflict resolution, skipping commit"
             git rebase --skip
         elif git rebase --show-current-patch &>/dev/null; then

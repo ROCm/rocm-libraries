@@ -160,6 +160,11 @@ def _run_probe(args):
 
 
 def _run_reachability(args):
+    for path, label in [(args.depmap, "--depmap"), (args.ctest, "--ctest")]:
+        if not os.path.exists(path):
+            print(f"Error: file not found ({label}): {path}", file=sys.stderr)
+            return 2
+
     with open(args.depmap) as f:
         depmap = json.load(f)
     ctest_tests = load_ctest_tests(args.ctest)
