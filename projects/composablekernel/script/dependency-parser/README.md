@@ -9,6 +9,43 @@ Two approaches are available:
 1. **CMake Pre-Build Analysis** (NEW, RECOMMENDED) - Analyzes dependencies before building
 2. **Ninja Post-Build Analysis** (LEGACY) - Analyzes dependencies after a full build
 
+## Glossary
+
+Shared vocabulary for all tools in this directory (`select`, `validate`,
+`filter_oracle.py`, `analyze_pr_selection.py`, the smart-build scripts, and
+`CI_GARDENING.md`).
+
+| Term | Meaning |
+|------|---------|
+| **depmap** | The dependency map JSON (e.g. `enhanced_dependency_mapping.json`). Holds `file_to_executables` (a source/header → the test executables that compile it in) and the inverse `executable_to_files`. Built before any compile from `compile_commands.json` + `build.ninja`. |
+| **selection** / **selective build** | The subset of test executables chosen to build/run for a given change, instead of everything. The whole point of "smart build". |
+| **ctest-registered test** | A test name that `ctest -N` lists. A build target can exist without being a registered test (e.g. examples, benchmarks); selection intersects with this set so only real tests run. |
+| **expected dependents** | For a changed file, every executable the depmap maps it to — *before* intersecting with ctest-registered tests. |
+| **selected** | `expected dependents` ∩ `ctest-registered tests` — what actually gets built/run. |
+| **dropped (non-ctest)** | `expected dependents` minus `selected`: executables in the depmap that aren't ctest tests (examples/benchmarks), so they're not run. |
+| **false negative (FN)** / **blind spot** | A test that *should* be selected for a change but isn't — it would be silently skipped. The dangerous case the guardrails hunt for. |
+| **false positive (FP)** | Over-selection: a test built/run that the change didn't actually affect. Safe (just slower). |
+| **dead header** | A file present in the depmap that no executable depends on (`file_to_executables[f] == []`). |
+| **reachability** | Whether a ctest test *can ever* be selected — i.e. some file in the depmap maps to it. An unreachable compiled test is a guaranteed FN (see `filter_oracle.py reachability`). |
+
+## Prerequisites
+
+The `select`/`validate`/audit tools consume two artifacts produced from a
+**configured** build directory. Generate them once:
+
+```bash
+cd build
+cmake -G Ninja -DCMAKE_EXPORT_COMPILE_COMMANDS=ON ..        # produces compile_commands.json + build.ninja
+
+# depmap (no compile needed):
+python3 ../script/dependency-parser/main.py cmake-parse \
+  compile_commands.json build.ninja \
+  --workspace-root .. --output enhanced_dependency_mapping.json
+
+# ctest-registered test list:
+ctest -N > ctest_list.txt
+```
+
 ## Quick Start
 
 ### Pre-Build Approach (Recommended)

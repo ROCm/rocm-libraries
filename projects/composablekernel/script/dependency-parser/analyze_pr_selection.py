@@ -2,41 +2,55 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Bulk audit of the smart-build selection for a set of PRs.
+"""Bulk audit of the smart-build test selection for a set of PRs.
 
-For each PR, maps the changed-file paths through a pre-built dependency map,
-intersects with ctest-registered tests, and emits a structured analysis with
-false-negative / blind-spot flags. This is the cheap, offline counterpart to
-validate_pr.sh (which checks out each PR, regenerates the depmap, and does the
-authoritative smart-vs-legacy differential). This tool only needs the changed
-*paths*, so it fetches them via `gh pr view` (a metadata-only API call, far
-cheaper than `git fetch` of the PR objects) and never builds or checks out.
+PURPOSE
+    For each PR, map its changed-file paths through a pre-built dependency map
+    (depmap), intersect with the ctest-registered tests, and report what the
+    smart-build filter *would* select - flagging false-negative / blind-spot
+    risk. It only needs the changed *paths*, so it fetches them via `gh pr view`
+    (a cheap metadata API call) and never checks out or builds anything.
 
-Usage:
+WHEN TO USE (vs validate_pr.sh)
+    This is the cheap, offline, many-PR audit. `validate_pr.sh` is the heavy,
+    authoritative per-PR check (it checks out the PR, regenerates the depmap, and
+    diffs the new selection against the legacy one). Use this to scan a corpus;
+    use validate_pr.sh to certify a single PR.
+
+PREREQUISITES (produced once from a configured build/ dir; see README)
+    depmap : main.py cmake-parse compile_commands.json build.ninja \\
+                 --workspace-root .. --output enhanced_dependency_mapping.json
+    ctest  : ctest -N > ctest_list.txt
+
+USAGE
     # Fetch PR file lists via gh (run inside the repo, or pass --repo):
     analyze_pr_selection.py 7964 7357 \\
-        --depmap enhanced_dependency_mapping.json \\
-        --ctest ctest_list.txt \\
+        --depmap enhanced_dependency_mapping.json --ctest ctest_list.txt \\
         --output-dir pr_analysis --summary pr_analysis/summary.json
 
-    # Offline (no gh): supply pre-fetched PR JSON files instead of numbers:
-    analyze_pr_selection.py --pr-files pr7964.json pr7357.json --depmap ... --ctest ...
+    # Offline (no gh): supply pre-fetched PR JSON instead of numbers:
+    analyze_pr_selection.py --pr-files pr7964.json --depmap ... --ctest ...
+    # (--pr-files JSON may be {number,title,files:[path,...]} or the raw
+    #  `gh pr view --json number,title,files` shape with files:[{path,...}].)
 
-A --pr-files JSON may be either {number,title,files:[path,...]} or the raw
-`gh pr view --json number,title,files` shape ({...,files:[{path,...}]}).
-
-Per-PR output fields:
-    pr, title
-    n_changed_files, n_ck_files, n_code_files
-    n_selected, selected           - ctest-registered test executables the filter picks
-    n_expected_dependents          - raw executables before ctest intersection
-    dropped_non_ctest              - executables in depmap but not in ctest
-    files_outside_composablekernel - PR files outside the CK project root
-    per_file                       - per-changed-file breakdown
+OUTPUT (per PR)
+    n_selected / selected          tests the filter would build+run (the answer)
+    n_expected_dependents          executables before the ctest intersection
+    dropped_non_ctest              expected exes that aren't ctest tests (skipped)
+    files_outside_composablekernel PR files outside the CK project root
+    per_file                       per-changed-file breakdown
     flags:
-        code_files_with_no_dependents  - in depmap but no exe depends on it (dead header)
-        code_files_not_in_depmap       - TU not extracted (potential FN source)
-        noncode_files                  - cmake/yaml/docs etc., not mapped by compile deps
+      code_files_not_in_depmap     code file the depmap never saw -> possible FN
+      code_files_with_no_dependents code file no exe depends on (dead header)
+      noncode_files                cmake/yaml/docs etc. (not compile-mapped)
+
+GLOSSARY (one-liners; full definitions in README "Glossary")
+    depmap            file -> dependent test executables, built pre-compile
+    selection         expected dependents intersected with ctest-registered tests
+    expected dependents  all exes a changed file maps to (before ctest filter)
+    dropped_non_ctest    in the depmap but not a registered test (e.g. examples)
+    dead header       a file no executable depends on
+    FN / blind spot   a test that should be selected for a change but isn't
 """
 
 import argparse
@@ -205,7 +219,20 @@ def write_summary(results, path):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="Bulk audit of smart-build selection for a set of PRs"
+        description="Bulk audit of the smart-build test selection for a set of PRs "
+        "(cheap, offline, many-PR; the authoritative per-PR check is validate_pr.sh).",
+        epilog=(
+            "Prerequisites (produced once from a configured build/ dir; see README):\n"
+            "  depmap:  main.py cmake-parse compile_commands.json build.ninja \\\n"
+            "             --workspace-root .. --output enhanced_dependency_mapping.json\n"
+            "  ctest:   ctest -N > ctest_list.txt\n\n"
+            "Example:\n"
+            "  analyze_pr_selection.py 7964 7357 \\\n"
+            "    --depmap enhanced_dependency_mapping.json --ctest ctest_list.txt \\\n"
+            "    --output-dir pr_analysis --summary pr_analysis/summary.json\n\n"
+            "Terminology: see the Glossary in README.md."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("prs", nargs="*", help="PR numbers to fetch via gh")
     parser.add_argument(

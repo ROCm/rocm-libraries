@@ -4,6 +4,9 @@ This document is for people who maintain, debug, and operate the CK smart-build
 CI pipeline. It covers the decision flow, what every artifact means, how to
 diagnose a misbehaving run, and how to safely override or disable the system.
 
+> **Terminology:** see the **Glossary** in [README.md](README.md) for depmap,
+> selection, false negative / blind spot, reachability, and related terms.
+
 ---
 
 ## 1. What the system does (one paragraph)
