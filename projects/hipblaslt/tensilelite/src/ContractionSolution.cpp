@@ -3523,10 +3523,6 @@ namespace TensileLite
         {
             skGrid = pAMDGPU->skFixedGrid;
         }
-        else if(sizeMapping.streamKForceDPOnly != 0)
-        {
-            skGrid = cuCount;
-        }
         else if(pAMDGPU->skDynamicGrid > 0)
         {
             if(sizeMapping.streamK == 4)

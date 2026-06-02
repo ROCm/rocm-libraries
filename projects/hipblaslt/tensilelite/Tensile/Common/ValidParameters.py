@@ -774,10 +774,9 @@ validParameters = { # we need to make sure this matches develop
     # TENSILE_STREAMK_FIXED_GRID > TENSILE_STREAMK_DYNAMIC_GRID > TENSILE_STREAMK_MAX_CUS > TENSILE_STREAMK_GRID_MULTIPLIER
     "StreamK": [0, 1, 2, 3, 4],
     # Force StreamK=3 to run all output tiles through the persistent DP path.
-    # When enabled, StreamK uses tree reduction, sets skTiles=0 to skip the SK region, and
-    # uses SK_grid = CU count unless TENSILE_STREAMK_FIXED_GRID is explicitly set.
-    # Other StreamK env grid knobs are bypassed in this mode. The invariant is no partial
-    # output tile fixup and no SK-region processing.
+    # When enabled, dispatch uses the single-kernel StreamK path, sets skTiles=0
+    # to skip the SK region, and keeps the normal StreamK grid selection policy.
+    # The invariant is no partial output tile fixup and no SK-region processing.
     # Valid only with DP-first, non-atomic StreamK mode 3.
     "StreamKForceDPOnly": [0, 1],
     # Determines if StreamK kernel uses atomics
