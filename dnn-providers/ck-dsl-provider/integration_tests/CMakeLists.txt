@@ -16,6 +16,7 @@ add_executable(
     IntegrationGpuCkDslConvFp16.cpp
     IntegrationGpuCkDslSdpaFwdFp16.cpp
     IntegrationGpuCkDslSdpaFwdPerf.cpp
+    IntegrationGpuCkDslSdpaFwdOracle.cpp
     IntegrationGpuCkDslSdpaBwdFp16.cpp
 )
 
