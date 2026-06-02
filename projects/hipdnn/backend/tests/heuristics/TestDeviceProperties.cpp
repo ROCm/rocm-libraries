@@ -243,25 +243,38 @@ TEST_F(TestDeviceProperties, SerializeDevicePropertiesWithLongArchitectureName)
     expectMatchesProps(serialized.data(), props);
 }
 
+// ========== queryDeviceProperties(handle) null-handle Test ==========
+
+TEST_F(TestDeviceProperties, QueryDevicePropertiesNullHandleThrows)
+{
+    EXPECT_THROW(queryDeviceProperties(static_cast<hipdnnHandle_t>(nullptr)),
+                 hipdnn_backend::HipdnnException);
+}
+
 // ========== queryDeviceProperties Tests (GPU required) ==========
 
-// queryDeviceProperties() goes through hipGetDevice/hipGetDeviceProperties;
-// SKIP rather than fail on no-device CI runners.
+// queryDeviceProperties(int) goes through hipGetDeviceProperties; SKIP rather
+// than fail on no-device CI runners. The Handle overload is exercised by
+// EngineHeuristicDescriptor integration tests, which already own the handle
+// infrastructure.
 class TestGpuDeviceProperties : public ::testing::Test
 {
 protected:
     void SetUp() override
     {
         SKIP_IF_NO_DEVICES();
+        ASSERT_EQ(hipGetDevice(&_currentDevice), hipSuccess);
     }
+
+    int _currentDevice = 0;
 };
 
 TEST_F(TestGpuDeviceProperties, QueryDevicePropertiesSucceeds)
 {
     DevicePropertiesT props;
-    EXPECT_NO_THROW({ props = queryDeviceProperties(); });
+    EXPECT_NO_THROW({ props = queryDeviceProperties(_currentDevice); });
 
-    EXPECT_GE(props.device_id, 0);
+    EXPECT_EQ(props.device_id, _currentDevice);
     EXPECT_GT(props.multi_processor_count, 0);
     EXPECT_GT(props.total_global_mem, 0ULL);
     EXPECT_FALSE(props.architecture_name.empty());
@@ -269,7 +282,7 @@ TEST_F(TestGpuDeviceProperties, QueryDevicePropertiesSucceeds)
 
 TEST_F(TestGpuDeviceProperties, QueryDevicePropertiesHasValidArchitecture)
 {
-    const auto props = queryDeviceProperties();
+    const auto props = queryDeviceProperties(_currentDevice);
 
     // hipDeviceProp_t::gcnArchName always reports an AMD GPU architecture name
     // starting with "gfx" (e.g. gfx908, gfx90a, gfx942).
@@ -279,8 +292,8 @@ TEST_F(TestGpuDeviceProperties, QueryDevicePropertiesHasValidArchitecture)
 
 TEST_F(TestGpuDeviceProperties, QueryDevicePropertiesIsConsistent)
 {
-    const auto props1 = queryDeviceProperties();
-    const auto props2 = queryDeviceProperties();
+    const auto props1 = queryDeviceProperties(_currentDevice);
+    const auto props2 = queryDeviceProperties(_currentDevice);
 
     EXPECT_EQ(props1.device_id, props2.device_id);
     EXPECT_EQ(props1.multi_processor_count, props2.multi_processor_count);
@@ -303,28 +316,10 @@ TEST_F(TestGpuDeviceProperties, QueryDevicePropertiesInvalidDeviceIdThrows)
     (void)hipExtGetLastError();
 }
 
-TEST_F(TestGpuDeviceProperties, QueryDevicePropertiesExplicitDeviceIdMatchesCurrent)
-{
-    // The no-arg overload resolves the current device through hipGetDevice and
-    // delegates to the int overload. Both forms must produce identical results
-    // for the same device.
-    int currentDevice = 0;
-    ASSERT_EQ(hipGetDevice(&currentDevice), hipSuccess);
-
-    const auto fromNoArg = queryDeviceProperties();
-    const auto fromExplicit = queryDeviceProperties(currentDevice);
-
-    EXPECT_EQ(fromNoArg.device_id, fromExplicit.device_id);
-    EXPECT_EQ(fromNoArg.multi_processor_count, fromExplicit.multi_processor_count);
-    EXPECT_EQ(fromNoArg.total_global_mem, fromExplicit.total_global_mem);
-    EXPECT_EQ(fromNoArg.architecture_name, fromExplicit.architecture_name);
-    EXPECT_EQ(fromExplicit.device_id, currentDevice);
-}
-
 TEST_F(TestGpuDeviceProperties, CompleteWorkflowQuerySerializeWrap)
 {
     // Complete workflow: query -> serialize -> wrap
-    const auto props = queryDeviceProperties();
+    const auto props = queryDeviceProperties(_currentDevice);
     const auto serialized = serializeDeviceProperties(props);
     const auto wrapper = wrapSerializedDeviceProperties(serialized);
 

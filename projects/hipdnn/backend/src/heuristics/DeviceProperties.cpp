@@ -9,6 +9,7 @@
 #include <string>
 
 #include "HipdnnException.hpp"
+#include "handle/Handle.hpp"
 
 namespace hipdnn_backend::heuristics
 {
@@ -33,17 +34,22 @@ hipdnn_flatbuffers_sdk::data_objects::DevicePropertiesT queryDeviceProperties(in
     return devProps;
 }
 
-hipdnn_flatbuffers_sdk::data_objects::DevicePropertiesT queryDeviceProperties()
+hipdnn_flatbuffers_sdk::data_objects::DevicePropertiesT queryDeviceProperties(hipdnnHandle_t handle)
 {
-    int currentDevice = 0;
-    auto status = hipGetDevice(&currentDevice);
+    if(handle == nullptr)
+    {
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM, "queryDeviceProperties: handle is null");
+    }
+
+    int deviceId = 0;
+    auto status = hipStreamGetDevice(handle->getStream(), &deviceId);
     if(status != hipSuccess)
     {
         throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
-                              std::string{"Failed to get current device: "}
+                              std::string{"Failed to get device from handle's stream: "}
                                   + hipGetErrorString(status));
     }
-    return queryDeviceProperties(currentDevice);
+    return queryDeviceProperties(deviceId);
 }
 
 std::vector<uint8_t>

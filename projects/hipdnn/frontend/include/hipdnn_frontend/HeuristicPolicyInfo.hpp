@@ -27,6 +27,7 @@
 #include <utility>
 #include <vector>
 
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Handle.hpp>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
@@ -96,16 +97,7 @@ inline std::pair<std::vector<HeuristicPolicyInfo>, Error>
 
     auto backend = detail::hipdnnBackend();
 
-    // Strips a trailing NUL from a length-delimited C string so the resulting
-    // std::string matches what the user printed regardless of whether the
-    // backend reports the NUL in its length.
-    const auto bufferToString = [](const std::vector<char>& buf, size_t len) {
-        if(len > 0 && buf[len - 1] == '\0')
-        {
-            --len;
-        }
-        return std::string(buf.data(), len);
-    };
+    using hipdnn_data_sdk::utilities::bufferToString;
 
     // Get policy count
     size_t numPolicies = 0;

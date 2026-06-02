@@ -9,6 +9,9 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/device_properties_generated.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 
+struct hipdnnHandle;
+using hipdnnHandle_t = struct hipdnnHandle*;
+
 namespace hipdnn_backend::heuristics
 {
 
@@ -17,7 +20,7 @@ namespace hipdnn_backend::heuristics
  *
  * Calls hipGetDeviceProperties() for @p deviceId and populates a
  * DevicePropertiesT structure. Use this overload when the caller already
- * knows which device to query (e.g. the device a handle's stream is bound to).
+ * knows which device to query (e.g. resolved from a handle's stream).
  *
  * RFC 0007 Reference: Section 6.2
  *
@@ -28,18 +31,21 @@ namespace hipdnn_backend::heuristics
 hipdnn_flatbuffers_sdk::data_objects::DevicePropertiesT queryDeviceProperties(int deviceId);
 
 /**
- * @brief Query device properties for the current HIP device.
+ * @brief Query device properties for the device bound to a handle's stream.
  *
- * Calls hipGetDevice() to resolve the current device, then delegates to
- * the explicit-id overload. Default acquisition path when no device id
- * has been resolved by the caller.
+ * Resolves the device id from @p handle's stream via hipStreamGetDevice and
+ * delegates to the explicit-id overload. This is the canonical acquisition
+ * path inside the backend: device facts must follow the handle's stream, not
+ * whatever device happens to be current on the calling thread.
  *
  * RFC 0007 Reference: Section 6.2
  *
+ * @param handle Handle whose stream identifies the target device.
  * @return DevicePropertiesT populated from HIP device properties.
- * @throws HipdnnException if HIP calls fail.
+ * @throws HipdnnException if @p handle is null or if any HIP call fails.
  */
-hipdnn_flatbuffers_sdk::data_objects::DevicePropertiesT queryDeviceProperties();
+hipdnn_flatbuffers_sdk::data_objects::DevicePropertiesT
+    queryDeviceProperties(hipdnnHandle_t handle);
 
 /**
  * @brief Serialize DevicePropertiesT to FlatBuffer format.

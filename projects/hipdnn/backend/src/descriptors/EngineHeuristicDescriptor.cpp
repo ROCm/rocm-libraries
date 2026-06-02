@@ -19,7 +19,6 @@
 #include "logging/Logging.hpp"
 #include "plugin/HeuristicPlugin.hpp"
 #include "plugin/HeuristicPluginResourceManager.hpp"
-#include <hip/hip_runtime.h>
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
@@ -206,18 +205,8 @@ void EngineHeuristicDescriptor::finalize()
         return;
     }
 
-    // Query and serialize device properties for the device the handle's stream
-    // is bound to. The serialized buffer must outlive devicePropsWrapper because
-    // wrapSerializedDeviceProperties aliases the vector's storage.
-    int deviceId = 0;
-    auto status = hipStreamGetDevice(handle->getStream(), &deviceId);
-    if(status != hipSuccess)
-    {
-        throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
-                              "Failed to get device from handle's stream");
-    }
-
-    const auto devProps = heuristics::queryDeviceProperties(deviceId);
+    // devicePropsSerialized must outlive devicePropsWrapper — the wrapper aliases its storage.
+    const auto devProps = heuristics::queryDeviceProperties(handle);
     const auto devicePropsSerialized = heuristics::serializeDeviceProperties(devProps);
     const hipdnnPluginConstData_t devicePropsWrapper
         = heuristics::wrapSerializedDeviceProperties(devicePropsSerialized);

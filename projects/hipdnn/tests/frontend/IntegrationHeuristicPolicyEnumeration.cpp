@@ -2,7 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 /**
- * @file TestHeuristicPolicyEnumeration.cpp
+ * @file IntegrationHeuristicPolicyEnumeration.cpp
  * @brief Frontend tests for heuristic policy enumeration (RFC 0007 Section 16)
  *
  * Tests the frontend API for querying loaded heuristic policies.
@@ -20,6 +20,22 @@
 #include <sstream>
 
 using namespace hipdnn_frontend;
+
+namespace
+{
+
+// Enumeration order is unspecified (backed by unordered_map); compare as sets.
+std::set<int64_t> toPolicyIdSet(const std::vector<HeuristicPolicyInfo>& policies)
+{
+    std::set<int64_t> ids;
+    for(const auto& p : policies)
+    {
+        ids.insert(p.policyId);
+    }
+    return ids;
+}
+
+} // namespace
 
 class IntegrationHeuristicPolicyEnumeration : public ::testing::Test
 {
@@ -143,16 +159,7 @@ TEST_F(IntegrationHeuristicPolicyEnumeration, MultipleQueriesReturnSameResults)
     ASSERT_FALSE(err1.is_bad());
     ASSERT_FALSE(err2.is_bad());
 
-    // Enumeration order is unspecified (backed by unordered_map); compare as sets.
-    const auto toIdSet = [](const std::vector<HeuristicPolicyInfo>& policies) {
-        std::set<int64_t> ids;
-        for(const auto& p : policies)
-        {
-            ids.insert(p.policyId);
-        }
-        return ids;
-    };
-    EXPECT_EQ(toIdSet(policies1), toIdSet(policies2));
+    EXPECT_EQ(toPolicyIdSet(policies1), toPolicyIdSet(policies2));
 }
 
 // ========== Handle Independence Tests ==========
@@ -168,19 +175,8 @@ TEST_F(IntegrationHeuristicPolicyEnumeration, DifferentHandlesHaveSamePolicies)
     ASSERT_FALSE(err1.is_bad());
     ASSERT_FALSE(err2.is_bad());
 
-    // Both handles should see the same loaded policies. Enumeration order is
-    // unspecified, so compare the set of policy IDs.
-    std::set<int64_t> ids1;
-    std::set<int64_t> ids2;
-    for(const auto& p : policies1)
-    {
-        ids1.insert(p.policyId);
-    }
-    for(const auto& p : policies2)
-    {
-        ids2.insert(p.policyId);
-    }
-    EXPECT_EQ(ids1, ids2);
+    // Both handles should see the same loaded policies.
+    EXPECT_EQ(toPolicyIdSet(policies1), toPolicyIdSet(policies2));
 }
 
 // ========== Content Validation Tests ==========
