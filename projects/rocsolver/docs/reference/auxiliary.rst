@@ -22,7 +22,7 @@ The auxiliary functions are divided into the following categories:
 * :ref:`unitary`: Generation and application of unitary matrices.
 
 .. note::
-   
+
    The API descriptions use the following notations:
 
    *  ``i``, ``j``, and ``k`` are used as general purpose indices. In some legacy LAPACK APIs, ``k`` can be
@@ -280,6 +280,29 @@ rocsolver_<type>bdsvdx()
 .. doxygenfunction:: rocsolver_dbdsvdx
    :outline:
 .. doxygenfunction:: rocsolver_sbdsvdx
+
+
+
+.. _hessenberg:
+
+Hessenberg forms
+==================================
+
+.. contents:: List of functions for Hessenberg forms
+   :local:
+   :backlinks: top
+
+.. _lahr2:
+
+rocsolver_<type>lahr2()
+---------------------------------------
+.. doxygenfunction:: rocsolver_zlahr2
+   :outline:
+.. doxygenfunction:: rocsolver_clahr2
+   :outline:
+.. doxygenfunction:: rocsolver_dlahr2
+   :outline:
+.. doxygenfunction:: rocsolver_slahr2
 
 
 

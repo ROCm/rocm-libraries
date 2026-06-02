@@ -52,6 +52,11 @@ LAPACK auxiliary functions
     :ref:`rocsolver_bdsqr <bdsqr>`, x, x, x, x
     :ref:`rocsolver_bdsvdx <bdsvdx>`, x, x, ,
 
+.. csv-table:: Hessenberg forms
+    :header: "Function", "single", "double", "single complex", "double complex"
+
+    :ref:`rocsolver_lahr2 <lahr2>`, x, x, x, x
+
 .. csv-table:: Tridiagonal forms
     :header: "Function", "single", "double", "single complex", "double complex"
 

@@ -6,6 +6,10 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ## (Unreleased) rocSOLVER
 
 ### Added
+
+* Hessenberg reduction auxiliary routine
+    * LAHR2
+
 ### Changed
 ### Removed
 ### Optimized

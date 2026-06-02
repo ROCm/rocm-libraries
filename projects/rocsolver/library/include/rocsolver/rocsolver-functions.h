@@ -1287,6 +1287,120 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zlabrd(rocblas_handle handle,
 //! @}
 
 /*! @{
+    \brief LAHR2 reduces the first ``nb`` columns of a general n-by-(n-k+1) matrix A
+    so that elements below the k-th subdiagonal are zero. This is an auxiliary routine
+    used in the blocked reduction to upper Hessenberg form (GEHRD).
+
+    \details
+    The reduction is performed by ``nb`` Householder reflectors. Each Householder
+    matrix \f$H(i)\f$ is of the form
+
+    \f[
+        H(i) = I - \text{tau}[i] \cdot v_i v_i'
+    \f]
+
+    where tau[\f$i\f$] is the Householder scalar and \f$v_i\f$ is the corresponding
+    Householder vector, with \f$v_i[0:k+i-1] = 0\f$ and \f$v_i[k+i] = 1\f$.
+
+    LAHR2 returns the block reflector in compact WY form: a matrix \f$T\f$ and the
+    precomputed matrix
+
+    \f[
+        Y = A V T
+    \f]
+
+    where \f$V\f$ is the n-by-nb matrix of Householder vectors. Together, \f$(V, T, Y)\f$
+    allow the unreduced trailing part of A to be updated via rank-nb operations
+    instead of nb individual rank-1 updates.
+
+    @param[in]
+    handle      rocblas_handle.
+    @param[in]
+    n           rocblas_int. n >= 0.\n
+                The order of the matrix A.
+    @param[in]
+    k           rocblas_int. k >= 1.\n
+                The offset (1-based column index) at which the reduction begins.
+    @param[in]
+    nb          rocblas_int. 1 <= nb <= n - k + 1.\n
+                The number of columns to reduce.
+    @param[inout]
+    A           pointer to type. Array on the GPU of dimension lda*n.\n
+                On entry, the n-by-n general matrix to reduce.
+                On exit, the first nb Householder vectors are stored in the
+                lower triangle of the submatrix A(k:n-1, k:k+nb-1) (0-based),
+                and the rest of A is updated accordingly.
+    @param[in]
+    lda         rocblas_int. lda >= max(1, n).\n
+                The leading dimension of A.
+    @param[out]
+    tau         pointer to type. Array of nb scalars on the GPU.\n
+                The Householder scalars tau[0..nb-1].
+    @param[out]
+    T           pointer to type. Array on the GPU of dimension ldt*nb.\n
+                The upper triangular T factor of the block reflector
+                \f$H = I - V T V'\f$.
+    @param[in]
+    ldt         rocblas_int. ldt >= nb.\n
+                The leading dimension of T.
+    @param[out]
+    Y           pointer to type. Array on the GPU of dimension ldy*nb.\n
+                The n-by-nb matrix \f$Y = A V T\f$.
+    @param[in]
+    ldy         rocblas_int. ldy >= n.\n
+                The leading dimension of Y.
+    ********************************************************************/
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_slahr2(rocblas_handle handle,
+                                                 const rocblas_int n,
+                                                 const rocblas_int k,
+                                                 const rocblas_int nb,
+                                                 float* A,
+                                                 const rocblas_int lda,
+                                                 float* tau,
+                                                 float* T,
+                                                 const rocblas_int ldt,
+                                                 float* Y,
+                                                 const rocblas_int ldy);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_dlahr2(rocblas_handle handle,
+                                                 const rocblas_int n,
+                                                 const rocblas_int k,
+                                                 const rocblas_int nb,
+                                                 double* A,
+                                                 const rocblas_int lda,
+                                                 double* tau,
+                                                 double* T,
+                                                 const rocblas_int ldt,
+                                                 double* Y,
+                                                 const rocblas_int ldy);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_clahr2(rocblas_handle handle,
+                                                 const rocblas_int n,
+                                                 const rocblas_int k,
+                                                 const rocblas_int nb,
+                                                 rocblas_float_complex* A,
+                                                 const rocblas_int lda,
+                                                 rocblas_float_complex* tau,
+                                                 rocblas_float_complex* T,
+                                                 const rocblas_int ldt,
+                                                 rocblas_float_complex* Y,
+                                                 const rocblas_int ldy);
+
+ROCSOLVER_EXPORT rocblas_status rocsolver_zlahr2(rocblas_handle handle,
+                                                 const rocblas_int n,
+                                                 const rocblas_int k,
+                                                 const rocblas_int nb,
+                                                 rocblas_double_complex* A,
+                                                 const rocblas_int lda,
+                                                 rocblas_double_complex* tau,
+                                                 rocblas_double_complex* T,
+                                                 const rocblas_int ldt,
+                                                 rocblas_double_complex* Y,
+                                                 const rocblas_int ldy);
+//! @}
+
+/*! @{
     \brief LATRD computes the tridiagonal form of k rows and columns of
     a symmetric/hermitian matrix A, as well as the matrix W needed to update
     the remaining part of A.
@@ -10089,7 +10203,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgetrs_strided_batched_64(rocblas_hand
     \brief The SYTRS functions solve a system of ``n`` linear equations on ``n`` variables in its factorized form.
 
     \details
-    It solves the linear system \f$ A X = B \f$, where the n-by-n matrix A is symmetric and maybe indefinite, 
+    It solves the linear system \f$ A X = B \f$, where the n-by-n matrix A is symmetric and maybe indefinite,
     using one of the following factorizations that depends on the value of ``uplo``:
 
     \f[
@@ -10231,7 +10345,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zsytrs_64(rocblas_handle handle,
         \end{array}
     \f]
 
-    Matrix \f$A_l\f$ is defined by its triangular factors as returned by 
+    Matrix \f$A_l\f$ is defined by its triangular factors as returned by
     \ref rocsolver_ssytrf_batched "SYTRF_BATCHED".
     Note matrix \f$ D_l \f$ contains 1-by-1 or 2-by-2 blocks on the main diagonal.
 
@@ -10386,7 +10500,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zsytrs_batched_64(rocblas_handle handl
         \end{array}
     \f]
 
-    Matrix \f$A_l\f$ is defined by its triangular factors as returned by 
+    Matrix \f$A_l\f$ is defined by its triangular factors as returned by
     \ref rocsolver_ssytrf_strided_batched "SYTRF_STRIDED_BATCHED".
     Note matrix \f$ D_l \f$ contains 1-by-1 or 2-by-2 blocks on the main diagonal.
 
