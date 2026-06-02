@@ -59,7 +59,7 @@ std::vector<uint8_t> loadBinFile(const std::filesystem::path& path)
 
 std::filesystem::path getGoldenDataDir()
 {
-    return getCurrentExecutableDirectory() / "../lib/golden_data/SdpaFwd/bf16";
+    return getCurrentExecutableDirectory() / "../lib/golden_data/SdpaFwd/bf16_hd128_nomask_batch";
 }
 
 class GoldenRefSdpaFwdBf16 : public ::testing::TestWithParam<FwdGoldenRefTestCase>
