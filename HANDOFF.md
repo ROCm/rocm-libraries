@@ -146,6 +146,115 @@ FP6 MFMA 理论峰值约 9216 TFLOPS (256 CUs × 4 SIMDs × 131072 FLOPs/MFMA / 
 
 **当前最优:8192³ 合法 1375 TFLOPS(~15% 峰值),从最初 766 接近翻倍,反超需非法预处理的 v4。** B 仍 pre-shuffle(权重,可离线,合法)。
 
+### Step 10 ✅ v10 重新 profile + 瓶颈两次纠错(v11 预取 / v12 LDS 均证伪,不并入)
+
+**用 gpu-profile full(2-agent 并行)重测 v10 最优点(8192³ N_TILE=512),交付物在 `mxfp6_gemm/prof_out_v10/`(profile.md / annotated.asm / raw.asm / rcv.tar.gz)。然后做两个对照实验,把瓶颈判断纠错两次:**
+
+| 实验 | 做法 | 8192³ | 结论 |
+|---|---|---|---|
+| v10 profile | — | 1376 | 看着 latency-bound(78% stall=vmcnt40%+load38%) |
+| v11 预取 | ping-pong 双缓冲跨 k-iter 软件预取 | 1393(+0.9%) | 延迟藏了(vmcnt8→43 in-flight)但没用 → **排除 latency** |
+| v12 LDS | big tile+LDS 合并加载 A+ds_read 转置+双缓冲 | 1255(−9%) | L2 流量砍 47%(TCC 73M→39M)反而慢 → **排除 throughput** |
+
+**🔑 最终瓶颈判断(取代 Step 7.5/9 的旧框架):v10 既非 latency 也非 memory-bound,而是 occ1 下的 compute/issue/dependency-bound。**
+- MFMA util 仅 16-17%(GRBM 基准),单 wave/SIMD 无法掩盖任何依赖延迟;16 独立 acc 的 ILP 只够到 16%。
+- **加任何指令都更慢**(v12 多 ds_write/ds_read/barrier 就降速)= issue/compute bound 的铁证。
+- profile 里的 vmcnt stall 是 occ1 症状(无第二 wave 可切),不是访存量问题。
+- WAVES 扫描佐证:WAVES_M=4/N=1(A 零冗余)=1171 最差,2×2 最优;且 B(N512)流量是 A(M128)的 4×,A 是少数派。
+
+**判定法(写给后人):藏延迟没用→非 latency;砍访存量没用→非 throughput;加指令就更慢→issue/compute bound。**
+
+v11(`test_pipeline_v11.cpp`)/v12(`test_pipeline_v12.cpp`)保留为"已证伪"记录,**均不并入主线**。v10 的 1376 ≈ occ1 此 tile 形状的天花板。
+
+### Step 11 ✅ 减地址算术 / ki-unroll(v13,证伪,不并入)
+
+**攻 issue-bound 正面**(Step 10 列的剩余杠杆 #1):v10 内循环 ~38 条 `v_lshl_add_u64`/ki(B 16 段指针 + 8 基址重建 + 10 scale + A),编译器不跨 ki 展开,每个基址每迭代从 SGPR base 重建。**v13(`test_pipeline_v13.cpp`)**:ki 方向展开 KU=2,用 `+j*stride` 立即数 offset(global_load 13-bit ±4096:A+48 / B+1536(sec1 max 2560) / scale+64)让同一基址服务相邻 ki。
+
+| 变体 | 8192³ | arch VGPR | 结论 |
+|---|---|---|---|
+| v10 基线(同会话) | 1379 | 132 | — |
+| v13 批量(KU 个 load 全提前发) | 1341(−2.8%) | 192 | 地址砍半(38→19.5/ki)但爆寄存器+拉长启动延迟 |
+| v13 交错(load-then-mfma) | 1262(−8.5%) | 168 | 杀掉跨-load vmcnt 瀑布重叠 |
+
+正确性 4/4 error=0。**地址算术机制上确实砍半,性能却回归 → 再次证伪:非 issue-count-bound,而是 occ1 下 load→MFMA 重叠/依赖结构 bound,v10 该结构已近最优。** 这是第三个被证伪的瓶颈假设(latency/throughput/issue-count 全错)。
+
+> 注:gfx950 asm metadata `.vgpr_count` = arch+acc **合并**值(v10=388=132+256, v13=448=192+256);算 arch VGPR 须减 256。
+
+**剩余唯一确定有收益的方向 = 小矩阵 tile 自适应/split-K**(独立于瓶颈,见 Next Steps #3)。"减每-MFMA 指令"已随 v13 排除。
+
+### Step 12 ✅ Tile 自适应 dispatch(v14,小矩阵 +32~68%,大矩阵零回归)
+
+**实现 Next Steps #3a**(唯一确定有收益、独立于峰值瓶颈的方向)。v10 kernel 不变,纯 host 端按 (M,N,K) 选 N_TILE(`test_pipeline_v14.cpp`)。big tile occ1 在小 M/N 时 grid 填不满 256 CU(2048×4096 只 128 WG,半数 CU 闲),换小 tile(occ2/4)做更多 WG 填满。
+
+**heuristic**:选 grid_WG≥256 CU 的**最大** tile(满载时大 tile 每-WG 效率最高);都填不满则选 WG 最多(最小 tile)。三档:N512(occ1)/N256(occ2)/N128(occ4),`__launch_bounds__(256, MIN_OCC)` 模板化(N512 必须 MIN_OCC=1 否则编译器砍 AGPR 装不下 16 acc)。
+
+**实测(min-of-4-rounds 锁高时钟,heuristic vs 全 tile oracle,8/8 命中最优 ✓opt):**
+
+| 尺寸 | N512 | N256 | N128 | 选中 | vs 旧单配置N512 |
+|---|---|---|---|---|---|
+| 2048×2048×4096 | 407 | 563 | **683** | N128 | **+68%** |
+| 2048×4096×4096 | 793 | **1047** | 721 | N256 | **+32%** |
+| 2048×8192×4096 | **1241** | 1081 | 763 | N512 | 持平 |
+| 4096³ | **1269** | — | — | N512 | 持平 |
+| 8192×4096² | **1454** | — | — | N512 | 持平 |
+| 8192³ | **1460** | — | — | N512 | 持平 |
+
+正确性 8/8(含强制三档 tile 各跑一遍)。**小矩阵大涨、大矩阵零回归,生产 dispatcher 应内置此 heuristic。** 注:绝对值比 Step 7-11 高因 min-of-rounds 方法学不同(锁高时钟),相对 tile 对比同会话干净。
+
+### Step 13 ✅ Split-K kernel + 统一 dispatcher(v15,仅极瘦矩阵受益 3.6×,正常形状零触发)
+
+**实现 Next Steps #3b**。独立的 split-K kernel(`mxfp6_gemm_splitk`,与 v10 主体同),grid.z=S 沿 K 切分,每 split 算 K/S 的 partial。
+
+**关键设计教训:partial 累加必须用独立 buffer + reduction kernel,不能用 atomicAdd。**
+- 首版 atomicAdd 到 D:**崩(2048×4096 N512 S2 = 153 TFLOPS,−86%)**。float4 无法 atomic → 256 scalar atomicAdd/lane;K-slice 变短后 epilogue 占比暴涨 + S 份同时 hammer 同批 cache line 重度争用。
+- 改版:每 split 用快速 float4 store 写自己的 `partial[s]`(M×N 平面),再跑 memory-bound 的 `splitk_reduce` 求和 → 无争用。
+
+**实测结论:split-K 打不过 tile-shrink(v14),除非连最小 tile 都填不满 CU。**
+
+| 尺寸 | v14 tile-shrink | split-K | 判定 |
+|---|---|---|---|
+| 2048×4096×4096 | N256 1062 | N512 S2 897 | **split −17%(reduction+S×写出 > 大tile收益)** |
+| 2048×2048×4096 | N128 683 | N512 S4 646 | split −5% |
+| 512×1024×8192 | N128 100 | **N128 S8 358** | **split +259%(3.6×)** |
+| 512×512×8192 | N128 51 | **N128 S8 197** | **split +285%(3.85×)** |
+
+→ **正常形状 tile-shrink 用换小 tile 免费填满 CU,胜过 split-K(后者有 reduction + S× partial 写出开销)。split-K 只在 M×N 太小、连 N128(最小 tile)都填不满 CU 且 K 够大可切时独占价值(512×1024 仅 32 WG → S8 → 256 WG 满 → 3.6×)。**
+
+**最终 dispatcher(`choose_plan`,生产级):** 先 tile-shrink 填(`choose_tile_nosplit`,v14);grid≥256 WG 就 S=1 不切;只有连最小 tile 都 <256 WG 才 split-K 把它填满。**正常形状零触发→零回归;极瘦矩阵 3-4×。** 正确性 10/10(含每 tile 强制 split2 验 reduction,error=0)。这些极瘦形状超出目标 M=2K~8K,但对 small-batch/decode 真实有用。
+
+### Step 14 ✅ 混合累加器 N640 / V2(v16,非 2 幂 N +5~12%)
+
+**突破"2 幂 N 卡 1379"的第一刀**(2026-05-29)。occ1 合并 VGPR 池(arch+acc=512)在 N512 时只用 388/512,闲 124 个 arch VGPR。让**溢出的 acc tile 走 Arch VGPR**(MFMA 输出可写 Arch VGPR,ACC_CD=0),单 wave 就能持有 >256 AGPR 的累加器:N512 的 16 acc + 4 溢出进 Arch VGPR = **N640 的 20 acc**。
+
+- ⚠️ 限制:`N_TILE = WAVES_N × NPW × 32` 须整除 N。N640=2^7×5,只整除含因子 5 的 N;2 幂 N(4096/8192)整除不了,只能退回 NPW=8(16 acc)→ 目标 2 幂形状仍卡 ~1490。
+- **V2(N640,20 acc)只吃非 2 幂 N**:真·同 N 对比 8192²×**5120** +11.6%、×**7680** +7.6%(5120 是真实 LLM hidden dim)。grid 均衡时整体 +5~12%。
+- sweet spot = V2(20 acc);V3(22 acc)掉、V4 spill。N576(2^6×9,18 acc)覆盖另一种非 2 幂可整除性。
+
+### Step 15 ✅ 生产 dispatcher 合一(v17 = tile-shrink + V2 + depth-1 预取 + 4x4 wave)
+
+**把 v14/v15 的 tile-shrink、V2 混合累加器、depth-1 软件预取、方 wave-tile 全合进一个 kernel + 一个 cost-model dispatcher。** `mxfp6_gemm_pipeline<M_TILE,NPW_A,NPW_V,N_WAVES,MIN_OCC,WAVES_M,WAVES_N,SWZ>`:`NPW_A` 列走 AGPR、`NPW_V` 列溢出进 Arch VGPR。
+
+- **depth-1 软件预取(仅 occ1)**:ki+1 的 load 在 ki 的 MFMA 之前发,用 MLP 重叠 ~876cyc 的 load 延迟(编译期 double buffer,动态 reg-array index 会 spill)。occ≥2(N128/N256)第二 wave 已藏延迟,预取只占寄存器降 occ → 跳过。**注:这条 +1~15% 已并入,取代了 v11"预取无用"的旧结论——区别在 v11 用动态索引 spill 了。**
+- **方 wave-tile(4x4)**:N512 可跑 2x8 或 4x4(同 16 acc/occ1/WG-tile),4x4 每 16 MFMA 只 load 8 vs 10 个 tile(perimeter 小)。见 [[mxfp6_wave_shape]];2 幂方阵 occ1 下 4x4 反输给 2x8+swz(见 Step 17),dispatcher 默认 2x8。
+- **统一 cost model**:`cost(tile)=ceil(WG/256)/(WG×eff)`,一个公式覆盖小矩阵 shrink(N128/256 填 CU)+ 大混合-acc tile(N512/576/640 摊 A)+ 非 2 幂可整除性。`choose_tile` 扫 5 档取最低 cost。
+- 实测 dispatch **12/12 OPT 0 MISS**(heuristic 选中 == 全 tile oracle 最优),correctness 全 PASS。**生产 kernel = v17。**
+
+### Step 16 ✅ A 合并的最终证伪(v18,LDS-stage 在 occ1 big-tile 负优化)
+
+**受控实验**(`test_pipeline_v18.cpp`,现已删,结论入 [[mxfp6_a_no_lds]]):两 kernel 除 A 路径外全同(同 scale 合并 / 同 B / N512 occ1)。`kern_direct`(非合并直载,= v17)vs `kern_lds`(KSLAB 沿 K 合并 global→LDS→ds_read 转置)。correctness 6/6 err=0,但 **lds 慢 18~32%**(8192³ 1459→990,−32.2%)。根因:occ1 下 global→LDS 多一跳 + 每 slab 2 个 __syncthreads(无第二 wave 顶 barrier)全暴露 > 合并省下的。**∴ A 合并这条路在 occ1/big-tile 彻底堵死,876cyc 是 occ1 延迟暴露非"非合并"本身。**
+
+### Step 17 ✅ L2-aware WG swizzle 打破 2 幂方阵天花板(8192³ 1491→1557)
+
+**不碰 A 加载、不动 occ/tile,只重排 WG→(m,n) 映射就破了 2 幂方阵的"天花板"。** 原 `(blockIdx.x,y)=(m,n)`;swizzle(`SWZ` 模板参 + `if constexpr` 的 host index 重排)让 WG 沿 M 走完一个 `SWZ` 宽的 n-block band 再跳下一 band → 同时在飞的相邻 WG 共享同一段 B,B 留 L2 热着。
+
+- **8192³**:N512=1491 → N512+swz16=**1557(+4.4%)**。这是 prefetch 实验里相对 v17 唯一的新增益(v17 早有 depth-1 预取)。
+- **门控(实测定标,`choose_swz`)**:仅当 `nb=N/512≥16`(N≥8192,n-band 填满)才启用 SWZ=16,跨 M(2048~8192)都 +0.8~4.4%;`nb<16` 中性偏负(−0.6~2.1%),`nb=15`(7680)持平 → **只按 N 门控,与 M 无关**(小 M 时重排退化为恒等映射,不伤)。SWZ=8≈16,取 16。
+- 已并入 v17,correctness 8/8(含 swz 重映射 err=0),dispatch 12/12 OPT。详见 [[mxfp6_swizzle_breakthrough]]。
+
+### Step 18 ✅ 仓库整理:只留生产路径
+
+删光 v2~v15/v18 全部迭代、prefetch/square/f16/occ 实验、早期脚手架测试(lds_shuffle/k_loop/accvgpr/multitile/bench)、prof/工具/所有产物。**生产路径 = `test_pipeline_v17.cpp` + 4 个 `mxfp6_*.hpp` + `test_reference.cpp` + `Makefile` + `counters.txt` + `.gitignore`。** 已 rsync 同步 NFS(保留 NFS 上 prof_out* 备份)。
+
 ## 🔑 核心技术要点
 
 ### MFMA 32x32x64 f8f6f4 数据布局 (ISA Section 7.1.5)
@@ -233,29 +342,20 @@ MFMA FP6 src0/src1 需要精确 6 个连续 VGPR。v8i 的 8-reg 范围被汇编
 
 ## 代码文件
 
+仓库已整理为只留生产路径(Step 18)。历史迭代 v2~v15/v18 / 脚手架测试 / 实验 / 产物全部删除,演进过程见上面 Step 1–17 与关联 memory(代码可从 git 历史取回)。
+
 ```
 mxfp6_gemm/
 ├── mxfp6_types.hpp          # FP6/E8M0 编解码 + dense packing
-├── mxfp6_preprocess.hpp     # 量化/反量化, B 转置, scale 重排, B pre-shuffle
+├── mxfp6_preprocess.hpp     # 量化/反量化, B 转置, scale 重排+合并, B pre-shuffle
 ├── mxfp6_reference.hpp      # CPU golden reference GEMM
-├── mxfp6_asm_utils.hpp      # GPU ASM: MFMA (inline asm, AccVGPR), LDS, store
-├── test_reference.cpp       # CPU 单元测试 (162 pass)
-├── test_lds_shuffle.cpp     # A 矩阵 LDS 通路验证
-├── test_k_loop.cpp          # K 循环测试 (K=64~512, AccTileV)
-├── test_accvgpr.cpp         # AccVGPR 路径测试 (AccTileA)
-├── test_multitile.cpp       # Multi-tile 128×128 测试
-├── test_pipeline.cpp        # 旧 baseline: 手动 waitcnt LDS pipeline (752 TFLOPS)
-├── test_pipeline_v2.cpp     # Step8: 编译器管 waitcnt, plain load (766)
-├── test_pipeline_v4.cpp     # ⚠️非法: pre-shuffle A 直载 (1252, A 需预处理)
-├── test_pipeline_v5.cpp     # 合法基底: 直载 raw A 无 LDS (769)
-├── test_pipeline_v7.cpp     # LDS K=256 slab 合并加载 (792)
-├── test_pipeline_v10.cpp    # ★最优: v5 + 大 tile, N_TILE=512→1375 / 256→1115
-│                            #   (v3/v6/v8/v9 为探索中的回归版, 可删)
-├── bench_gemm.cpp           # 性能 benchmark (无 pipeline 基线)
-├── bench_lds_shuffle.cpp    # LDS 带宽基准
-├── probe_waitcnt.cpp        # Step8 探针: 证实 asm 内 load 编译器看不见
-├── Makefile
-└── counters.txt             # rocprofv3 计数器配置
+├── mxfp6_asm_utils.hpp      # GPU ASM: MFMA (inline asm, AccVGPR/Arch VGPR), LDS, store
+├── test_reference.cpp       # CPU 单元测试 (162 pass) — ground truth
+├── test_pipeline_v17.cpp    # ★生产 kernel + dispatcher: tile-shrink + V2 混合acc(N640)
+│                            #   + depth-1 预取 + 4x4 wave + L2 swizzle(choose_tile/swz)
+├── Makefile                 # make test_pipeline_v17 / test_reference
+├── counters.txt             # rocprofv3 计数器配置
+└── .gitignore               # build/profiler 产物 + 编辑器配置
 ```
 
 **工具：**
@@ -266,16 +366,21 @@ mxfp6_gemm/
 
 ## Next Steps
 
-**当前最优 v10:8192³ 1375 TFLOPS(~15% 峰值)。已确认主导杠杆是大寄存器 tile,不是 A 加载方式。按预期收益:**
+**当前生产 = v17(Step 15)。8192³ 1557 TFLOPS(~17% 峰值,L2 swizzle 后);非 2 幂目标形状靠 V2(N640/576)更高(8192×5120 ~1755)。生产 kernel 采用 v17 的 `choose_tile`/`choose_swz` dispatcher。**
 
-1. **小矩阵 split-K(最高收益,针对 M=2048 等)**: 大 tile(N_TILE=512, occ1)在小矩阵下 grid WG 数 < 256 CU,半数 CU 闲(2048×4096²=778)。split-K 沿 K 切分增加 WG 数填满 CU;或对小矩阵 dispatch 用 N_TILE=256(occ2)。生产 kernel 应按 (M,N,K) 选 tile。
-2. **重新 profile v10 定位新瓶颈**: 之前所有 PMC 结论是旧 kernel 的,v10 结构已变(大 tile/低 occ),老结论全过期。须在 v10 上重测 stall(MFMA util / VMEM wait / 是否 issue-bound)再定下一步。
-3. **继续调 tile 形状**: 试 M 方向加大(4×4 等)、不同 M_TILE/N_TILE 组合;K 方向寄存器/LDS 预取在大 tile 下是否还有收益(之前小 tile 下软件流水都是负优化)。
-4. **B 也用大 tile 复用**: 当前 B pre-shuffled 直载;大 tile 下每个 B 也复用更多次,检查 B 流量是否成新瓶颈。
-5. **Epilogue/输出类型**: F16/BF16 输出(当前 F32 直写),见 memory `mxfp6_output_epilogue`。
+⚠️ **"改 8192³ 峰值是死路"的旧判断已被 Step 17 推翻**:swizzle 不碰 compute/访存、只改 WG 调度顺序就 +4.4%。说明 occ1 之外还有 L2/调度层的杠杆没挖完。剩余方向:
 
-**重要提醒**: 反复证实"凭计数器猜瓶颈"屡屡出错(LDS/barrier/VALU/LDS-wait 都被证伪过)。**改动前先在当前最优版上做隔离实验或 profile,改动后必对比同会话基线**(热状态会漂移,跨会话数字不可直接比)。
+1. ~~**小矩阵 split-K / tile 自适应**~~ ✅ **已完成(Step 12+13,并入 v17)**。tile-shrink 覆盖目标范围;split-K 只救极瘦矩阵。
+2. ~~**大矩阵峰值(8192³)是死路**~~ ✅ **部分突破(Step 14 V2 / Step 17 swizzle)**。V2 把非 2 幂 N +5~12%;swizzle 把 2 幂方阵 +4.4%。**下一步同类:更细的 L2/CU 调度(SWZ 自适应 band 宽、grid stride、CU-aware launch)可能还有空间——这是新发现的活口子。**
+3. **提 occupancy 但不缩 tile(很难)**:occ1 由 AGPR 256 顶死;部分 acc 走 Arch VGPR(V2 已用此招做 N640)。能否再换 occ2 是 ~17% util 的根因,但 Step 10 已证"加指令就更慢"。
+4. **Epilogue/输出类型(功能性,未做)**: F16/BF16 输出(当前 F32 直写),见 [[mxfp6_output_epilogue]]。test_f16.cpp 原型已删,起点在 git 历史。不影响峰值。
 
-**复现 profile**: 见本会话用法——cp 目标 cpp → 改 main 为单 dispatch(8192³)→ `hipcc -O2 --offload-arch=gfx950` → `/opt/rocm/bin/rocprofv3 -i counters.txt -d out --output-format csv -- ./prof`。旧结果在 `mxfp6_gemm/prof_out/`(对应 test_pipeline.cpp 旧 kernel,已过期)。
+**已证伪、不要重试**:
+- 访存:A 合并/预取/减冗余(v6/v7/v8/v9/v11/v12)。LDS 路线(v12)L2 砍半反而慢。软件预取(v11)藏延迟无用。
+- **减指令/地址算术:v13 ki-unroll 把地址砍半反而 −2.8%(批量爆寄存器,交错杀重叠)。issue-count 不是杠杆。**
 
-**关联 memory**: `mxfp6_big_tile`(突破)、`mxfp6_a_no_lds`(A 加载诊断纠错)、`mxfp6_compiler_waitcnt`(让编译器管 waitcnt)、`mxfp6_pipeline_bottleneck`(旧瓶颈,部分已过期)。
+**重要提醒**: "凭计数器猜瓶颈"屡屡出错(latency/throughput/LDS/barrier/VALU 都被证伪过)。**判定法:藏延迟没用→非latency;砍访存量没用→非throughput;加指令就更慢→issue/compute bound。改动前先隔离实验或 profile,改动后必对比同会话基线**(热漂移,跨会话不可比)。
+
+**复现 profile**: cp 目标 cpp → 改 main 为单 dispatch(8192³)→ `hipcc -O2 --offload-arch=gfx950 -I.` → `/opt/rocm/bin/rocprofv3 --pmc <counters> -d out --output-format csv -- ./prof`。历史交付物在 `mxfp6_gemm/prof_out_v10/`(NFS 备份保留;/tmp 已清理)。gpu-profile skill(full 模式 2-agent)可一键产出 4 件套。
+
+**关联 memory**: [[mxfp6_swizzle_breakthrough]](swizzle 破 2 幂天花板 + v17 整理,最新)、[[mxfp6_big_tile]](V2 大 tile/N640)、[[mxfp6_a_no_lds]](A 加载诊断 + v18 LDS 证伪)、[[mxfp6_pipeline_bottleneck]](v10 profile 数据)、[[mxfp6_compiler_waitcnt]]、[[mxfp6_wave_shape]](4x4)、[[mxfp6_tile_adaptive]]。
