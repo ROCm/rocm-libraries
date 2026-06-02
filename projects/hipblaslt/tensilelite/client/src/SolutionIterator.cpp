@@ -371,6 +371,7 @@ namespace TensileLite
             else
             {
                 std::vector<std::pair<int,double>>   performance;
+                std::vector<origami::Formocast::TieBreakerInfo> tbInfo(m_lastSolutionIdx + 1);
                 origami::Formocast formocast;
                 for (int i = m_firstSolutionIdx; i <= m_lastSolutionIdx; i++)
                 {
@@ -390,6 +391,7 @@ namespace TensileLite
                             formocast.setSolution(sizeMapping);
                             formocast.setHardware(hwInfo);
                             predPerf = formocast.predictedPerformance();
+                            tbInfo[i] = formocast.getTieBreakerInfo();
                             performance.push_back(std::pair(i,predPerf.microSeconds));
                             m_hitrate[i] = predPerf.hitRate;
                             m_predPerf[i] = predPerf;
@@ -421,6 +423,11 @@ namespace TensileLite
                     }
                     else if(performance[i].second <= threshhold)
                     {
+                        if (((tbInfo[performance[i].first].mt0 - formocast.problem.M) > 64) || ((tbInfo[performance[i].first].mt1 - formocast.problem.N) > 64))
+                        {
+                            // std::cout<<"skip: "<<performance[i].second<<" mt0: "<<tbInfo[performance[i].first].mt0<<" mt1: "<<tbInfo[performance[i].first].mt1<<std::endl;
+                            continue;
+                        }
                         m_qSolutionIdx.push(performance[i]);
                     }
                     else

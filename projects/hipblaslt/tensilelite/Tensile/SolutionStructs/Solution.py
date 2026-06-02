@@ -2454,12 +2454,8 @@ class Solution(collections.abc.Mapping):
             break
           else:
             optVW //= 2
-        if state["ProblemType"]["Sparse"]:
-          # sparse gfx1250: Currently disable autoVectorWidthA. VectorWidthA still can be set manually in yaml file.
-          # if isaInfoMap[isa].asmCaps["HasSWMMAC_gfx1250"] and state["ProblemType"]["Sparse"] == 1:
-          #   state["VectorWidthA"] = max(findSparseVectorWidth(2, state["VectorWidthA"]), 1)
-          # else:
-          state["VectorWidthA"] = 1
+        if state["ProblemType"]["Sparse"] == 1:
+          state["VectorWidthA"] = max(findSparseVectorWidth(2, state["VectorWidthA"]), 1)
       else:
         state["VectorWidthA"] = 1
 
@@ -2473,12 +2469,8 @@ class Solution(collections.abc.Mapping):
             break
           else:
             optVW //= 2
-        if state["ProblemType"]["Sparse"]:
-          # sparse gfx1250: Currently disable autoVectorWidthB. VectorWidthB still can be set manually in yaml file.
-          # if isaInfoMap[isa].asmCaps["HasSWMMAC_gfx1250"] and state["ProblemType"]["Sparse"] == 2:
-          #   state["VectorWidthB"] = max(findSparseVectorWidth(2, state["VectorWidthB"]), 1)
-          # else:
-          state["VectorWidthB"] = 1
+        if state["ProblemType"]["Sparse"] == 2:
+          state["VectorWidthB"] = max(findSparseVectorWidth(2, state["VectorWidthB"]), 1)
       else:
         state["VectorWidthB"] = 1
 
