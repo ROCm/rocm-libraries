@@ -135,9 +135,12 @@ class GemmKernelBuilder:
         )
         return kernel_list
 
-    def _list_kernels(self):
-        """Write kernel list to file for CMake to read (with comprehensive validation)"""
-        # Get configurations using comprehensive validation
+    def _get_sampled_kernel_list(self):
+        """Enumerate all valid (tile_config, trait_combo) pairs and apply sampling.
+
+        Returns a list of dicts with keys: name, tile_config, trait_combo.
+        Both _list_kernels and _generate_all_individual should use this
+        to guarantee identical enumeration and sampling."""
         tile_configs = self._get_tile_configs()
         trait_combos = self._generate_trait_combinations()
 
@@ -154,10 +157,8 @@ class GemmKernelBuilder:
                     persistent,
                 ) = trait_combo
 
-                # Create kernel name with proper boolean capitalization
                 kernel_name = f"{self.kernel_name_prefix}_{self.datatype}_{self.layout}_{pipeline}_{epilogue}_{scheduler}_{str(pad_m).capitalize()}_{str(pad_n).capitalize()}_{str(pad_k).capitalize()}_{str(persistent).capitalize()}"
 
-                # Create tile configuration string
                 tile_str = f"{tile_config['tile_m']}x{tile_config['tile_n']}x{tile_config['tile_k']}_"
                 tile_str += f"{tile_config['warp_m']}x{tile_config['warp_n']}x{tile_config['warp_k']}_"
                 tile_str += f"{tile_config['warp_tile_m']}x{tile_config['warp_tile_n']}x{tile_config['warp_tile_k']}"
@@ -172,8 +173,11 @@ class GemmKernelBuilder:
                     }
                 )
 
-        # Apply RFC-compliant sampling (Sobol + LHS + maximin)
-        kernel_list = self._apply_sampling(kernel_list)
+        return self._apply_sampling(kernel_list)
+
+    def _list_kernels(self):
+        """Write kernel list to file for CMake to read (with comprehensive validation)"""
+        kernel_list = self._get_sampled_kernel_list()
 
         # Write kernel count
         with open(
