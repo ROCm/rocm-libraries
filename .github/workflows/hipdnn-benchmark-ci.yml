@@ -135,7 +135,7 @@ jobs:
       - name: Resolve pins
         id: pins
         env:
-          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           THEROCK_REF="${{ inputs.therock_ref }}"
           if [ -z "${THEROCK_REF}" ]; then
@@ -145,30 +145,32 @@ jobs:
           echo "THEROCK_REF=${THEROCK_REF}" >> "$GITHUB_ENV"
 
           # Prebuilt-artifact pin. The manual artifact_run_id input wins when set
-          # (deterministic re-run). Otherwise resolve the LATEST GREEN
-          # ROCm/rocm-libraries `therock-ci` run on develop at job time — that
-          # build uploads the per-component slices (hipdnn, miopenprovider,
-          # base/runtime, blas, miopen) to
-          # s3://therock-ci-artifacts-external/ROCm-rocm-libraries/<run-id>-linux
-          # (public-read/anonymous, no auth). Resolving at job time instead of a
-          # hardcoded run-id avoids the staleness liability: external CI artifacts
-          # age out / are GC'd in days-to-weeks, so the newest green develop run is
-          # always the freshest available. RUN_GITHUB_REPO must be
-          # ROCm/rocm-libraries, not ROCm/TheRock. gh run list works with the
-          # read-scoped github.token for public-repo run listing.
+          # (deterministic re-run). Otherwise resolve the LATEST develop commit
+          # whose ROCm/rocm-libraries `therock-ci` run has the required artifact
+          # group live in S3, via TheRock's find_latest_artifacts. That tool walks
+          # recent develop commits, maps each to its therock-ci workflow run, and
+          # HTTP-HEADs the S3 artifact index to confirm the slices actually exist
+          # at s3://therock-ci-artifacts-external/ROCm-rocm-libraries/<run-id>-linux
+          # (public-read). It uses the GitHub REST API authenticated with the
+          # read-scoped github.token (GITHUB_TOKEN) and is pure-stdlib, so it works
+          # inside the no_rocm container, which has no `gh` CLI (the previous
+          # `gh run list` here exited 127). The finder ships in the prejob
+          # build_tools checkout (ROCm/TheRock default branch). Resolving at job
+          # time avoids the staleness liability: external CI artifacts age out in
+          # days-to-weeks, so the newest develop run with live artifacts is always
+          # freshest. RUN_GITHUB_REPO must be ROCm/rocm-libraries, not ROCm/TheRock.
           ARTIFACT_RUN_ID="${{ inputs.artifact_run_id }}"
           if [ -z "${ARTIFACT_RUN_ID}" ]; then
-            ARTIFACT_RUN_ID="$(gh run list \
-              --repo ROCm/rocm-libraries \
+            ARTIFACT_RUN_ID="$(python3 prejob/build_tools/find_latest_artifacts.py \
+              --repo "${RUN_GITHUB_REPO}" \
               --workflow therock-ci.yml \
+              --platform linux \
               --branch develop \
-              --status success \
-              --json databaseId,headSha,createdAt \
-              -L 1 \
-              --jq '.[0].databaseId')"
+              --artifact-group "${AMDGPU_FAMILY}" \
+              | awk -F': *' '/Workflow run ID:/ {print $2; exit}')"
           fi
           if [ -z "${ARTIFACT_RUN_ID}" ] || [ "${ARTIFACT_RUN_ID}" = "null" ]; then
-            echo "::error::Could not resolve an artifact run-id. The artifact_run_id input was empty and querying the latest green ROCm/rocm-libraries therock-ci run on develop returned nothing. Set a known-good run-id via the artifact_run_id input. Refusing to fall back to github.run_id (a fork/PR run rarely has uploaded artifacts)."
+            echo "::error::Could not resolve an artifact run-id. The artifact_run_id input was empty and find_latest_artifacts found no recent ROCm/rocm-libraries develop therock-ci run with live ${AMDGPU_FAMILY} artifacts in S3. Set a known-good run-id via the artifact_run_id input."
             exit 1
           fi
           echo "Resolved artifact run-id: ${ARTIFACT_RUN_ID}"
