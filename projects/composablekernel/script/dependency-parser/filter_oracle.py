@@ -96,7 +96,7 @@ def reachable_exe_basenames(depmap):
 
 
 def unreachable_tests(depmap, ctest_tests, allow=None):
-    """ctest tests that no file maps to -> the filter can never select them (FN).
+    """ctest tests that no file maps to -> the filter can never select them.
 
     Such a test is a guaranteed false negative: if its sources change, smart-build
     will not run it. Usually caused by a dependency-extraction gap for its TU.
@@ -104,6 +104,30 @@ def unreachable_tests(depmap, ctest_tests, allow=None):
     reach = reachable_exe_basenames(depmap)
     allow = allow or set()
     return sorted(t for t in ctest_tests if t not in reach and t not in allow)
+
+
+def classify_unreachable(depmap, ctest_tests, compiled=None, allow=None):
+    """Split unreachable ctest tests into false negatives vs non-compiled.
+
+    A ctest test backed by a compiled bin/ target but absent from the depmap is a
+    real false negative (extraction gap). A ctest test with NO compiled bin/
+    target (python scripts, try_compile negative tests) can never be mapped by a
+    compile-dependency analysis - it's an always-run class, not an FN.
+
+    Returns (false_negatives, non_compiled). When `compiled` is None (no
+    build.ninja provided) everything unreachable is treated as a potential FN.
+    """
+    reach = reachable_exe_basenames(depmap)
+    allow = allow or set()
+    fn, non_compiled = [], []
+    for t in sorted(ctest_tests):
+        if t in reach or t in allow:
+            continue
+        if compiled is not None and t not in compiled:
+            non_compiled.append(t)
+        else:
+            fn.append(t)
+    return fn, non_compiled
 
 
 def _run_probe(args):
@@ -141,26 +165,41 @@ def _run_reachability(args):
     if args.allowlist and os.path.exists(args.allowlist):
         allow = {ln.strip() for ln in open(args.allowlist)
                  if ln.strip() and not ln.startswith("#")}
-    unreach = unreachable_tests(depmap, ctest_tests, allow)
+    # If build.ninja is given, classify: only tests backed by a compiled bin/
+    # target can be FNs; tests with no bin/ target are non-compiled (always-run).
+    compiled = None
+    if args.ninja and os.path.exists(args.ninja):
+        compiled = set(
+            os.path.basename(e)
+            for e in NinjaTargetParser(args.ninja).parse_executable_mappings()
+        )
+    fn, non_compiled = classify_unreachable(depmap, ctest_tests, compiled, allow)
     result = {
         "n_ctest": len(ctest_tests),
         "n_reachable": len(reachable_exe_basenames(depmap)),
-        "n_unreachable": len(unreach),
-        "unreachable": unreach,
+        "n_false_negatives": len(fn),
+        "false_negatives": fn,
+        "n_non_compiled": len(non_compiled),
+        "non_compiled": non_compiled,
         "allowlisted": sorted(allow),
-        "verdict": "pass" if not unreach else "fail",
+        "classified": compiled is not None,
+        "verdict": "pass" if not fn else "fail",
     }
     if args.output:
         json.dump(result, open(args.output, "w"), indent=2)
 
     print("=== reachability guardrail ===")
-    print(f"ctest tests:     {result['n_ctest']}")
-    print(f"reachable exes:  {result['n_reachable']}")
-    print(f"unreachable:     {result['n_unreachable']} (filter can never select -> FN)")
-    for t in unreach:
+    print(f"ctest tests:      {result['n_ctest']}")
+    print(f"reachable exes:   {result['n_reachable']}")
+    print(f"false negatives:  {result['n_false_negatives']} "
+          f"(compiled test, unreachable -> filter would skip)")
+    for t in fn:
         print(f"  ✗ {t}")
+    if compiled is not None:
+        print(f"non-compiled:     {result['n_non_compiled']} "
+              f"(no bin/ target: python/try_compile; always-run class)")
     if allow:
-        print(f"allowlisted (ignored): {len(allow)}")
+        print(f"allowlisted:      {len(allow)}")
     print(f"verdict: {result['verdict'].upper()}")
     return 0 if result["verdict"] == "pass" else 1
 
@@ -187,6 +226,11 @@ def main():
     )
     rc.add_argument("--depmap", required=True, help="cmake_dependency_mapping.json")
     rc.add_argument("--ctest", required=True, help="ctest -N output")
+    rc.add_argument(
+        "--ninja",
+        help="build.ninja: classify unreachable tests into compiled (FN) vs "
+        "non-compiled (no bin/ target -> always-run, not FN)",
+    )
     rc.add_argument("--allowlist", help="file of known-acceptable unreachable test names")
     rc.add_argument("--output", help="write result JSON here")
 

@@ -87,8 +87,9 @@ ctest -N > ctest_list.txt 2>/dev/null || true
 python3 "${SCRIPT_DIR}/filter_oracle.py" reachability \
     --depmap enhanced_dependency_mapping.json \
     --ctest ctest_list.txt \
+    --ninja build.ninja \
     --output reachability_result.json \
-    || echo "⚠ reachability guardrail found unreachable tests (see reachability_result.json) - continuing"
+    || echo "⚠ reachability guardrail found unreachable compiled tests (see reachability_result.json) - continuing"
 
 # Step 3: Select affected tests
 echo ""

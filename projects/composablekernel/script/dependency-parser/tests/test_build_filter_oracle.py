@@ -107,5 +107,36 @@ class TestReachability(unittest.TestCase):
         self.assertEqual(unreach, [])
 
 
+class TestClassifyUnreachable(unittest.TestCase):
+    def _depmap(self):
+        return {"executable_to_files": {"bin/test_a": ["h.hpp"]}}  # only test_a reachable
+
+    def test_without_ninja_all_unreachable_are_fn(self):
+        # test_b (compiled, unreachable) + test_py (non-compiled) both -> FN when
+        # we have no build.ninja to classify.
+        fn, nc = bfo.classify_unreachable(
+            self._depmap(), {"test_a", "test_b", "test_py"}, compiled=None
+        )
+        self.assertEqual(fn, ["test_b", "test_py"])
+        self.assertEqual(nc, [])
+
+    def test_with_ninja_splits_fn_vs_noncompiled(self):
+        # test_b has a bin/ target (compiled) -> real FN; test_py has none -> non-compiled.
+        compiled = {"test_a", "test_b"}
+        fn, nc = bfo.classify_unreachable(
+            self._depmap(), {"test_a", "test_b", "test_py"}, compiled=compiled
+        )
+        self.assertEqual(fn, ["test_b"])       # compiled + unreachable
+        self.assertEqual(nc, ["test_py"])      # no bin/ target -> always-run class
+
+    def test_allowlist_applies_before_classification(self):
+        compiled = {"test_a", "test_b"}
+        fn, nc = bfo.classify_unreachable(
+            self._depmap(), {"test_b"}, compiled=compiled, allow={"test_b"}
+        )
+        self.assertEqual(fn, [])
+        self.assertEqual(nc, [])
+
+
 if __name__ == "__main__":
     unittest.main()
