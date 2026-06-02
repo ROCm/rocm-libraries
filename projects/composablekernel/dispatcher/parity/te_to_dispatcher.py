@@ -278,25 +278,55 @@ def _translate_impl(
                         "reason": f"unsupported_trait_combo:{pipeline}_{epilogue}_{scheduler}",
                     })
                 continue
-            configs.append(
-                _build_config(
-                    datatype=datatype,
-                    layout=(layout_a, layout_b, layout_c),
-                    gfx_arch=gfx_arch,
-                    tile=tile,
-                    pipeline=pipeline,
-                    epilogue=epilogue,
-                    scheduler=scheduler,
-                    pad_m=bool(pad_m),
-                    pad_n=bool(pad_n),
-                    pad_k=bool(pad_k),
-                    persistent=bool(persistent),
-                    block_size=block_size,
-                    k_block_per_cu=k_block_per_cu,
-                    num_wave_groups=num_wave_groups,
-                    split_k=split_k,
+            if collect_rejections:
+                # In rejection-manifest mode, catch per-combo TranslationErrors
+                # (unsupported pipelines: compv1/compv2/preshufflev1) and add to
+                # the manifest rather than aborting the whole batch.
+                try:
+                    configs.append(
+                        _build_config(
+                            datatype=datatype,
+                            layout=(layout_a, layout_b, layout_c),
+                            gfx_arch=gfx_arch,
+                            tile=tile,
+                            pipeline=pipeline,
+                            epilogue=epilogue,
+                            scheduler=scheduler,
+                            pad_m=bool(pad_m),
+                            pad_n=bool(pad_n),
+                            pad_k=bool(pad_k),
+                            persistent=bool(persistent),
+                            block_size=block_size,
+                            k_block_per_cu=k_block_per_cu,
+                            num_wave_groups=num_wave_groups,
+                            split_k=split_k,
+                        )
+                    )
+                except TranslationError as _te_err:
+                    rejections.append({
+                        "combo": f"{tile}+{pipeline}_{epilogue}_{scheduler}",
+                        "reason": str(_te_err),
+                    })
+            else:
+                configs.append(
+                    _build_config(
+                        datatype=datatype,
+                        layout=(layout_a, layout_b, layout_c),
+                        gfx_arch=gfx_arch,
+                        tile=tile,
+                        pipeline=pipeline,
+                        epilogue=epilogue,
+                        scheduler=scheduler,
+                        pad_m=bool(pad_m),
+                        pad_n=bool(pad_n),
+                        pad_k=bool(pad_k),
+                        persistent=bool(persistent),
+                        block_size=block_size,
+                        k_block_per_cu=k_block_per_cu,
+                        num_wave_groups=num_wave_groups,
+                        split_k=split_k,
+                    )
                 )
-            )
     return configs, rejections
 
 

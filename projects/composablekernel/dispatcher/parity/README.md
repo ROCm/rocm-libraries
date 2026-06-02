@@ -141,6 +141,7 @@ the performance baseline.
 | `dispatcher_capi.h` | (g) | T2.2 — multi-kernel C API declaration (`extern "C"`) |
 | `dispatcher_capi.cpp` | (g) | T2.2 — C API implementation; compiled into `libdispatcher_gemm.so` |
 | `dispatcher_binding.py` | (g) | T2.2 — Python ctypes wrapper (`DispatcherLib`) |
+| `demo_binding.py` | (g) | T2.2 — end-to-end demo: import → list → pick → run → verify |
 | `sweep_runner.py` | (h) | T2.3 — sweep driver writing Parquet with per-combo try/except + resume |
 | `compare_report.py` | (i) | T2.6 — dispatcher vs TE Markdown/HTML report with delta% |
 | `PORTING_DECISIONS.md` | (j) | T2.7 — living document: skipped combos, defaults, methodology |

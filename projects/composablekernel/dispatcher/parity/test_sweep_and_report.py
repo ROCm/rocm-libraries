@@ -593,3 +593,109 @@ class TestAllConfigsTranslate:
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))
+
+
+# ── demo_binding.py structure tests ──────────────────────────────────────────
+
+class TestDemoBinding:
+    """demo_binding.py T2.2 demo script structural tests (no GPU/so required)."""
+
+    def test_demo_file_exists(self):
+        assert (_HERE / "demo_binding.py").exists(), "demo_binding.py must exist"
+
+    def test_demo_has_main(self):
+        src = (_HERE / "demo_binding.py").read_text()
+        assert "def main(" in src, "demo_binding.py must define main()"
+
+    def test_demo_has_run_demo(self):
+        src = (_HERE / "demo_binding.py").read_text()
+        assert "def run_demo(" in src, "demo_binding.py must define run_demo()"
+
+    def test_demo_imports_dispatcher_binding(self):
+        src = (_HERE / "demo_binding.py").read_text()
+        assert "from dispatcher_binding import" in src or "import dispatcher_binding" in src
+
+    def test_demo_handles_missing_so(self):
+        """run_demo() returns non-zero when .so file does not exist (no GPU needed)."""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "demo_binding", _HERE / "demo_binding.py"
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        rc = mod.run_demo("/nonexistent_path/libdispatcher_gemm.so", 512, 512, 512)
+        assert rc != 0, "run_demo must return non-zero when .so is missing"
+
+    def test_demo_list_only_flag_documented(self):
+        src = (_HERE / "demo_binding.py").read_text()
+        assert "list-only" in src or "list_only" in src, \
+            "demo_binding.py must support --list-only flag"
+
+
+# ── rejection CSV CLI tests ───────────────────────────────────────────────────
+
+class TestRejectionCSVCLI:
+    """te_to_dispatcher.py --rejection-csv writes a CSV with expected columns."""
+
+    def test_rejection_csv_written(self, tmp_path):
+        """Running the CLI with --rejection-csv produces a file."""
+        import subprocess
+        cfg = _HERE / "configs" / "single_fp16_rcr.json"
+        csv_out = tmp_path / "rejections.csv"
+        result = subprocess.run(
+            [__import__("sys").executable, str(_HERE / "te_to_dispatcher.py"),
+             str(cfg), "--rejection-csv", str(csv_out)],
+            capture_output=True, text=True
+        )
+        assert result.returncode == 0, f"CLI failed: {result.stderr}"
+        assert csv_out.exists(), "--rejection-csv must create the file"
+
+    def test_rejection_csv_has_header(self, tmp_path):
+        """CSV produced by CLI must have at least a header row."""
+        import subprocess
+        cfg = _HERE / "configs" / "single_fp16_rcr.json"
+        csv_out = tmp_path / "rejections.csv"
+        subprocess.run(
+            [__import__("sys").executable, str(_HERE / "te_to_dispatcher.py"),
+             str(cfg), "--rejection-csv", str(csv_out)],
+            capture_output=True, text=True
+        )
+        content = csv_out.read_text()
+        lines = [l for l in content.splitlines() if l.strip()]
+        assert len(lines) >= 1, "CSV must have at least a header row"
+
+    def test_rejection_csv_for_unsupported_pipeline(self, tmp_path):
+        """A config with an unsupported pipeline produces a rejection row in the CSV."""
+        import subprocess
+        # Config using the tile_config/trait_config format; compv1 is an unsupported pipeline
+        bad_cfg = {
+            "datatype": "fp16", "layout": "rcr", "gpu_target": "gfx942",
+            "block_size": 256, "k_block_per_cu": 1,
+            "tile_config": {
+                "tile_m": {"values": [256]}, "tile_n": {"values": [128]},
+                "tile_k": {"values": [32]},  "warp_m": {"values": [4]},
+                "warp_n": {"values": [1]},   "warp_k": {"values": [1]},
+                "warp_tile_m": {"values": [32]}, "warp_tile_n": {"values": [32]},
+                "warp_tile_k": {"values": [16]},
+            },
+            "trait_config": {
+                "pipeline":   {"values": ["compv1"]},
+                "epilogue":   {"values": ["default"]},
+                "scheduler":  {"values": ["intrawave"]},
+                "pad_m": {"values": [False]}, "pad_n": {"values": [False]},
+                "pad_k": {"values": [False]}, "persistent": {"values": [False]},
+            },
+        }
+        cfg_file = tmp_path / "bad.json"
+        cfg_file.write_text(json.dumps(bad_cfg))
+        csv_out = tmp_path / "rejections.csv"
+        result = subprocess.run(
+            [__import__("sys").executable, str(_HERE / "te_to_dispatcher.py"),
+             str(cfg_file), "--rejection-csv", str(csv_out)],
+            capture_output=True, text=True
+        )
+        assert result.returncode == 0, f"CLI must exit 0 (rejection collected, not fatal): {result.stderr}"
+        assert csv_out.exists(), "--rejection-csv must be written even for unsupported configs"
+        content = csv_out.read_text()
+        lines = [l for l in content.splitlines() if l.strip()]
+        assert len(lines) >= 2, f"Expected header + rejection row, got:\n{content}"
