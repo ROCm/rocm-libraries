@@ -248,18 +248,18 @@ if(NOT HIPBLASLT_ENABLE_YAML)
 endif()
 
 if(NOT ROCM_LIBS_SUPERBUILD)
-    # TODO: Temporarily disabled TheRock origami integration to allow TheRock CI to pass.
-    # Re-enable once origami is available in TheRock.
-    # if(HIPBLASLT_ENABLE_THEROCK)
-    #     find_package(origami REQUIRED)
-    if(FALSE)
-    else()
-        # TODO: This is a temporary solution to prevent the installation of the origami license files.
-        block(SCOPE_FOR VARIABLES)
-            set(ORIGAMI_ENABLE_INSTALL OFF)
-            add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../shared/origami" origami)
-        endblock()
-    endif()
+    # Consume Origami as an installed, findable package. The previous
+    # add_subdirectory("../../shared/origami") fallback rebuilt liborigami.so inside
+    # hipBLASLt's own build tree (and again inside hipSPARSELt, which pulls hipBLASLt
+    # in as a subdirectory), duplicating the library and its exports. find_package
+    # consumes the single installed copy instead.
+    #
+    # This re-enables the integration that #3687 disabled with `if(FALSE)` "until
+    # origami is available in TheRock"; origami is now built and installed both in
+    # TheRock and in the monorepo superbuild (where this NOT ROCM_LIBS_SUPERBUILD
+    # branch is skipped and roc::origami comes from the superbuild's earlier
+    # add_subdirectory(shared/origami)).
+    find_package(origami REQUIRED)
 endif()
 
 # INTERFACE library that owns the public hipblaslt API headers (the in-tree

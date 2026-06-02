@@ -183,7 +183,12 @@ if(HIPSPARSELT_ENABLE_HIP)
         )
     endif()
 
-    set(ORIGAMI_ENABLE_INSTALL OFF)
+    # Origami is now consumed as a findable package by hipBLASLt (which this fork
+    # pulls in below), so it is no longer built as a subproject here; the previous
+    # `set(ORIGAMI_ENABLE_INSTALL OFF)` shim that suppressed the in-tree origami
+    # install is therefore obsolete. Declare the dependency explicitly so the
+    # requirement is owned here rather than discovered implicitly through hipBLASLt.
+    find_package(origami REQUIRED)
     add_subdirectory("${HIPBLASLT_PATH}" hipblaslt)
     # Hide TensileLite symbols to prevent interposition with hipblaslt's copy
     target_compile_definitions(tensilelite-host PRIVATE TENSILE_STATIC_ONLY)
