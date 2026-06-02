@@ -37,6 +37,17 @@ test_categories:
     labels:
       - "full"
 
+  ffm-quick:
+    description: "Small test suite for simulation tests"
+    test_patterns:
+      - "*"
+    exclude:
+    extra_args:
+      - "--simulation=quick"
+    labels:
+      - "ffm-quick"
+      - "ffm-full" # alias to "ffm-quick" for now
+
 execution_settings:
   default_timeout: 600
   timeout_multiplier: 1

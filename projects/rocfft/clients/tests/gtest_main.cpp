@@ -58,7 +58,7 @@ size_t             random_seed;
 std::random_device default_seed_dev;
 // Overall probability of running conventional tests
 double test_prob;
-// Probability of running tests from the emulation suite
+// Probability of running tests from the emulation/simulation suite
 double emulation_prob;
 // Probability of running unit tests
 double unittest_prob;
@@ -341,8 +341,9 @@ int main(int argc, char* argv[])
     app.add_option("--unittest_prob", unittest_prob, "Probability of running individual unit tests")
         ->default_val(1.0)
         ->check(CLI::Range(0.0, 1.0));
-    app.add_option(
-           "--emulation_prob", emulation_prob, "Probability of running individual emulation tests")
+    app.add_option("--emulation_prob,--simulation_prob",
+                   emulation_prob,
+                   "Probability of running individual emulation/simulation tests")
         ->default_val(1.0)
         ->check(CLI::Range(0.0, 1.0));
     app.add_option("--real_prob",
@@ -367,11 +368,14 @@ int main(int argc, char* argv[])
         ->default_val(0.0)
         ->check(CLI::PositiveNumber);
 
+    constexpr auto emulation_quick      = "quick";
     constexpr auto emulation_smoke      = "smoke";
     constexpr auto emulation_regression = "regression";
     constexpr auto emulation_extended   = "extended";
-    app.add_option("--emulation", "Run emulation tests only (targeted scopes)")
-        ->check(CLI::IsMember({emulation_smoke, emulation_regression, emulation_extended}))
+    app.add_option("--emulation,--simulation",
+                   "Run emulation/simulation tests only (targeted scopes)")
+        ->check(CLI::IsMember(
+            {emulation_quick, emulation_smoke, emulation_regression, emulation_extended}))
         ->expected(1)
         ->excludes("--test_prob",
                    "--emulation_prob",
@@ -391,7 +395,17 @@ int main(int argc, char* argv[])
             // Callbacks are not an emulation test target.
             callback_prob_factor = 0;
 
-            if(emulationtype == emulation_smoke)
+            if(emulationtype == emulation_quick)
+            {
+                // Configuration specific for "quick simulation test" category, the whole test run
+                // should complete under 2 hours in the simulation environment (configuration parameters
+                // based on observations)
+                vramgb_limit   = 2;
+                emulation_prob = 0.002;
+                test_prob      = 0;
+                unittest_prob  = 0;
+            }
+            else if(emulationtype == emulation_smoke)
             {
                 // 2GB vram limit, approx 1 minute GPU time with short tests.
                 vramgb_limit   = 2;
