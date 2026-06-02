@@ -288,16 +288,22 @@ struct MXGemmKernel : UniversalGemmKernel<TilePartitioner_, MXGemmPipeline_, Epi
             return false;
         }
 
-        // The Preshuffle scale path anchors its scale windows at K = 0 and does not offset them
-        // per split-K batch, so split-K (k_batch > 1) would read the wrong packed scales. Reject
-        // it until the preshuffle scale windows learn the split-K K-offset.
+        // Preshuffle split-K relies on each split starting on a K-block boundary that is also
+        // aligned to the host-preshuffled scale layout's packed-K granularity, so that the flat-B
+        // and scale windows start at the same logical K. Split boundaries are KPerBlock-aligned
+        // (enforced by the "K % (KPerBlock * k_batch)" check below); it therefore suffices that the
+        // preshuffled scale K-block granularity (ScaleGranularityK * KXdlPackEff * KThreadPerXdl)
+        // divides KPerBlock.
         if constexpr(MXGemmPipeline::Preshuffle)
         {
-            if(kargs.k_batch > 1)
+            constexpr index_t preshuffle_scale_k_granularity =
+                ScaleGranularityK * KXdlPackEff * KThreadPerXdl;
+            if(kargs.k_batch > 1 &&
+               (TilePartitioner::KPerBlock % preshuffle_scale_k_granularity != 0))
             {
                 if(log)
-                    CK_TILE_ERROR("MX GEMM: split-K (k_batch > 1) is not supported with the "
-                                  "preshuffle pipeline.");
+                    CK_TILE_ERROR("MX GEMM: preshuffle split-K requires KPerBlock to be a multiple "
+                                  "of ScaleGranularityK * KXdlPackEff * KThreadPerXdl.");
                 return false;
             }
         }
@@ -462,14 +468,18 @@ struct MXGemmKernel : UniversalGemmKernel<TilePartitioner_, MXGemmPipeline_, Epi
             const auto scale_a_tensor_view = make_tensor_view<address_space_enum::global>(
                 reinterpret_cast<const int32_t*>(scale_a.ptr), scale_a_desc);
 
-            // Preshuffle does not support split-K (k_batch > 1 is rejected in
-            // IsSupportedArgument), so the scale origin stays at K = 0 here.
+            // For split-K (k_batch > 1) advance the scale origin into this k_id's packed-K slice.
+            // The merged-K axis of the preshuffled scale view, merge(scale_packs_k, KThreadPerXdl),
+            // has the same total extent K/(ScaleGranularityK*KXdlPackEff) as the non-preshuffle
+            // layout, and split boundaries are KPerBlock-aligned (see IsSupportedArgument), so the
+            // K-block offset is the same closed form used by the non-preshuffle branch.
+            const index_t k_scale_offset = k_elem_offset / ScaleGranularityK / KXdlPackEff;
             return make_tile_window(
                 scale_a_tensor_view,
                 make_tuple(
                     number<TilePartitioner::MPerBlock / MXdlPackEff>{},
                     number<TilePartitioner::KPerBlock / (ScaleGranularityK * KXdlPackEff)>{}),
-                {i_m / MXdlPackEff, 0});
+                {i_m / MXdlPackEff, k_scale_offset});
         }
         else
         {
@@ -507,7 +517,8 @@ struct MXGemmKernel : UniversalGemmKernel<TilePartitioner_, MXGemmPipeline_, Epi
     CK_TILE_DEVICE static auto
     MakeBFlatBlockWindows(const std::array<const BDataType*, NumBTensor>& bs_ptr,
                           const KernelArgs<ScaleM, ScaleN>& kargs,
-                          const index_t i_n)
+                          const index_t i_n,
+                          const index_t k_elem_offset = 0)
     {
         static_assert(NumBTensor == 1, "MX GEMM preshuffle currently supports one B tensor");
 
@@ -516,6 +527,13 @@ struct MXGemmKernel : UniversalGemmKernel<TilePartitioner_, MXGemmPipeline_, Epi
         constexpr index_t flatKPerBlock = kKPerBlock * kNWarpTile;
         const index_t kFlatKBlocks      = kargs.K / kKPerBlock;
         const index_t kFlatN            = kargs.N / kNWarpTile;
+
+        // For split-K (k_batch > 1) advance the flat-B K origin into this k_id's K slice. The
+        // flat layout stores K as kFlatKBlocks blocks of flatKPerBlock elements each, and split
+        // boundaries are KPerBlock-aligned (enforced in IsSupportedArgument), so the offset lands
+        // on a clean K-block boundary. The universal bs_k_split_offset is not used here: it is
+        // derived from the logical B stride and does not match the preshuffled flat layout.
+        const index_t k_flat_offset = (k_elem_offset / kKPerBlock) * flatKPerBlock;
 
         auto b_flat_tensor_view = [&]() {
             static_assert(flatKPerBlock % MXGemmPipeline::GetVectorSizeB() == 0,
@@ -538,7 +556,8 @@ struct MXGemmKernel : UniversalGemmKernel<TilePartitioner_, MXGemmPipeline_, Epi
                     b_flat_tensor_view,
                     make_tuple(number<MXGemmPipeline::flatNPerWarp>{},
                                number<MXGemmPipeline::flatKPerWarp>{}),
-                    {static_cast<int>(i_n / BlockGemmShape::WarpTile::at(I1)), 0});
+                    {static_cast<int>(i_n / BlockGemmShape::WarpTile::at(I1)),
+                     static_cast<int>(k_flat_offset)});
             },
             number<NumBTensor>{});
     }
@@ -568,14 +587,18 @@ struct MXGemmKernel : UniversalGemmKernel<TilePartitioner_, MXGemmPipeline_, Epi
             const auto scale_b_tensor_view = make_tensor_view<address_space_enum::global>(
                 reinterpret_cast<const int32_t*>(scale_b.ptr), scale_b_desc);
 
-            // Preshuffle does not support split-K (k_batch > 1 is rejected in
-            // IsSupportedArgument), so the scale origin stays at K = 0 here.
+            // For split-K (k_batch > 1) advance the scale origin into this k_id's packed-K slice.
+            // The merged-K axis of the preshuffled scale view, merge(scale_packs_k, KThreadPerXdl),
+            // has the same total extent K/(ScaleGranularityK*KXdlPackEff) as the non-preshuffle
+            // layout, and split boundaries are KPerBlock-aligned (see IsSupportedArgument), so the
+            // K-block offset is the same closed form used by the non-preshuffle branch.
+            const index_t k_scale_offset = k_elem_offset / ScaleGranularityK / KXdlPackEff;
             return make_tile_window(
                 scale_b_tensor_view,
                 make_tuple(
                     number<TilePartitioner::NPerBlock / NXdlPackEff>{},
                     number<TilePartitioner::KPerBlock / (ScaleGranularityK * KXdlPackEff)>{}),
-                {i_n / NXdlPackEff, 0});
+                {i_n / NXdlPackEff, k_scale_offset});
         }
         else
         {
@@ -625,12 +648,30 @@ struct MXGemmKernel : UniversalGemmKernel<TilePartitioner_, MXGemmPipeline_, Epi
     {
         // Create block windows directly, following the new pattern from UniversalGemmKernel
         // i_m and i_n are element offsets (iM * MPerBlock, iN * NPerBlock), not tile indices
-        const auto& a_block_window =
-            Underlying::MakeABlockWindows(as_ptr, kargs, splitk_batch_offset.splitted_k, i_m);
+        const auto& a_block_window = [&]() {
+            if constexpr(MXGemmPipeline::Preshuffle)
+            {
+                // The preshuffle A async-load (MakeMX_AAsyncLoadBytesDramWindow) rebuilds the A view
+                // with a *packed* descriptor, i.e. it assumes the leading (M) stride equals the
+                // view's K extent. That only holds when the extent equals stride_A, which is the
+                // case for k_batch == 1 (splitted_k == K) but NOT for split-K (splitted_k < K):
+                // a packed extent of splitted_k would stride M by splitted_k instead of stride_A and
+                // read the wrong rows (only row 0 lands correctly). Use the full K extent so the
+                // packed M stride matches stride_A. The as_ptr K-offset already selects this k_id's
+                // slice and num_loop bounds the blocks read, so reads stay within
+                // [as_k_split_offset, as_k_split_offset + splitted_k) <= K (in-allocation).
+                return Underlying::MakeABlockWindows(as_ptr, kargs, kargs.K, i_m);
+            }
+            else
+            {
+                return Underlying::MakeABlockWindows(
+                    as_ptr, kargs, splitk_batch_offset.splitted_k, i_m);
+            }
+        }();
         const auto& b_block_window = [&]() {
             if constexpr(MXGemmPipeline::Preshuffle)
             {
-                return MakeBFlatBlockWindows(bs_ptr, kargs, i_n);
+                return MakeBFlatBlockWindows(bs_ptr, kargs, i_n, k_elem_offset);
             }
             else
             {
@@ -740,8 +781,18 @@ struct MXGemmKernel : UniversalGemmKernel<TilePartitioner_, MXGemmPipeline_, Epi
 
             std::array<const BDataType*, NumBTensor> bs_ptr;
             static_for<0, NumBTensor, 1>{}([&](auto i) {
-                bs_ptr[i] = static_cast<const BDataType*>(kargs.bs_ptr[i]) +
-                            splitk_batch_offset.bs_k_split_offset[i] / BPackedSize;
+                if constexpr(MXGemmPipeline::Preshuffle)
+                {
+                    // The preshuffle (flat-B) path applies the per-split K offset to the flat
+                    // window origin in MakeBFlatBlockWindows; bs_k_split_offset is derived from
+                    // the logical B stride and would mis-offset the flat buffer.
+                    bs_ptr[i] = static_cast<const BDataType*>(kargs.bs_ptr[i]);
+                }
+                else
+                {
+                    bs_ptr[i] = static_cast<const BDataType*>(kargs.bs_ptr[i]) +
+                                splitk_batch_offset.bs_k_split_offset[i] / BPackedSize;
+                }
             });
 
             // Dispatch epilogue: when k_batch > 1 each split accumulates a partial result into

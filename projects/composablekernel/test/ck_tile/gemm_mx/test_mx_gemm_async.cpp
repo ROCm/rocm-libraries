@@ -52,6 +52,18 @@ TYPED_TEST(TestMxGemmPreshuffle, Default)
     this->Run(1024, 1024, 1024);
 }
 
+// Split-K for the preshuffle pipeline: each k_id offsets the flat-B window and the
+// host-preshuffled A/B scale windows into its own K slice (and accumulates via atomic-add).
+// K is a multiple of K_Tile * k_batch (= 256 * k_batch); N is a multiple of 512 so the shapes
+// are valid for both the fp4 (N_Tile = 512) and fp8 (N_Tile = 256) preshuffle configs.
+TYPED_TEST(TestMxGemmPreshuffle, SplitK)
+{
+    this->Run(128, 512, 512, /*k_batch=*/2);
+    this->Run(128, 512, 1024, /*k_batch=*/2);
+    this->Run(128, 512, 1024, /*k_batch=*/4);
+    this->Run(256, 512, 2048, /*k_batch=*/4);
+}
+
 // Regression coverage for the MX GEMM correctness fixes (PR #6663): num_loop == 3 hot-loop
 // dispatch, split-K, and M/N padding. Shapes are pinned to fp8 x MX_GemmConfig16 (M_Tile = 64,
 // N_Tile = 128, K_Tile = 256, default comp-async pipeline) so the regressions hit the intended
