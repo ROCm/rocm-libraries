@@ -1137,23 +1137,32 @@ def _build_sdpa_fwd_fake_kernel():
     proof that every ABI slot was bound correctly.
 
     The pointers are declared as ``ptr<i32> global`` views so the body can
-    read an i32 from a few of them (slots 1 / 5 / 9) to prove those
-    pointer slots are wired, and write i32 fingerprint elements into
+    read i32 elements from several of them (slots 1 / 5 / 6 / 9) to prove
+    those pointer slots are wired, and write i32 fingerprint elements into
     output (slot 0). The kernel issues no MFMA / no LDS, so it compiles
     cleanly on any gfx9 target (the POC runs it on gfx90a).
 
     Fingerprint written to output (int32 elements), and what each proves:
 
-      out[0] = num_seqs            (i32 slot 15 bound)
-      out[1] = block_table_stride  (i32 slot 16 bound)
-      out[2] = qq_bias_stride_0    (i32 slot 17 bound)
-      out[3] = bitcast<i32>(scale)   (f32 slot 10 bound)
-      out[4] = bitcast<i32>(k_scale) (f32 slot 11 bound)
-      out[5] = query_ptr[0]          (pointer slot 1 bound)
-      out[6] = block_tables_ptr[0]   (pointer slot 5 bound)
-      out[7] = query_start_len_ptr[0](pointer slot 9 bound)
+      out[0]  = num_seqs            (i32 slot 15 bound)
+      out[1]  = block_table_stride  (i32 slot 16 bound)
+      out[2]  = qq_bias_stride_0    (i32 slot 17 bound)
+      out[3]  = bitcast<i32>(scale)   (f32 slot 10 bound)
+      out[4]  = bitcast<i32>(k_scale) (f32 slot 11 bound)
+      out[5]  = query_ptr[0]          (pointer slot 1 bound)
+      out[6]  = block_tables_ptr[0]   (pointer slot 5 bound)
+      out[7]  = query_start_len_ptr[0](pointer slot 9 bound)
+      out[8]  = block_tables_ptr[1]   (pointer slot 5 bound -- distinct elem)
+      out[9]  = query_start_len_ptr[1](pointer slot 9 bound -- distinct elem)
+      out[10] = seq_lens_ptr[0]       (pointer slot 6 bound)
 
     Slot 0 (output_ptr) is implicitly proven by the readback itself.
+
+    out[6]/out[8] (block_tables) and out[7]/out[9] (query_start_len) read
+    two DISTINCT elements of each array so a host shape whose first elements
+    coincide (e.g. block_tables[0] == cu_seqlens_q[0] == 0) cannot mask a
+    slot-5 <-> slot-9 mis-bind: the second elements differ. out[10] reads
+    seq_lens (slot 6), previously unverified.
     """
     from ck_dsl.core.ir import F32, I32, IRBuilder, PtrType
 
@@ -1171,7 +1180,7 @@ def _build_sdpa_fwd_fake_kernel():
     b.param("value_cache_ptr", i32_ptr, align=16)
     b.param("sink_ptr", i32_ptr, align=16)
     block_tables = b.param("block_tables_ptr", i32_ptr, align=16)
-    b.param("seq_lens_ptr", i32_ptr, align=16)
+    seq_lens = b.param("seq_lens_ptr", i32_ptr, align=16)
     b.param("alibi_slopes_ptr", i32_ptr, align=16)
     b.param("qq_bias_ptr", i32_ptr, align=16)
     query_start_len = b.param("query_start_len_ptr", i32_ptr, align=16)
@@ -1187,6 +1196,7 @@ def _build_sdpa_fwd_fake_kernel():
     tid = b.thread_id_x()
     is_lane0 = b.cmp_eq(tid, b.const_i32(0))
     zero = b.const_i32(0)
+    one = b.const_i32(1)
 
     with b.scf_if(is_lane0):
         # Scalar i32 slots (15, 16, 17): write straight through.
@@ -1204,6 +1214,22 @@ def _build_sdpa_fwd_fake_kernel():
         )
         b.global_store(
             output, b.const_i32(7), b.global_load_i32(query_start_len, zero), align=4
+        )
+        # Second elements of the paged-array pointers (slots 5 / 9) plus
+        # seq_lens (slot 6): these disambiguate each pointer slot
+        # individually so two arrays whose element 0 coincide cannot mask a
+        # cross-slot mis-bind. block_tables has block_table_stride (>= 2)
+        # elements and query_start_len has num_seqs+1 (>= 2) elements on the
+        # dense path, so index 1 is always valid; seq_lens has num_seqs
+        # (>= 1) elements, so index 0 is always valid.
+        b.global_store(
+            output, b.const_i32(8), b.global_load_i32(block_tables, one), align=4
+        )
+        b.global_store(
+            output, b.const_i32(9), b.global_load_i32(query_start_len, one), align=4
+        )
+        b.global_store(
+            output, b.const_i32(10), b.global_load_i32(seq_lens, zero), align=4
         )
 
     return b.kernel

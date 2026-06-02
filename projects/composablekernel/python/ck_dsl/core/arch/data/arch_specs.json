@@ -3,7 +3,7 @@
   "_comment": "CK_DSL-owned architecture SSOT. Hardware facts only (no pipeline/scheduler vocabulary). MFMA atom sets are hardware-verified on alola (see dsl_docs/architecture/multi_arch_data_layout.md). Each MMA row: {family,a,b,c,m,n,k,op_id}; op_id is the opaque backend handle (matches IRBuilder.mfma_* today).",
   "arches": {
     "gfx90a": {
-      "_comment": "CDNA2 (MI200). Cloned from gfx942 for the ALMIOPEN-2002 POC fake-kernel launch test on a dev-on-gfx90a box: the ISA backend already targets gfx90a (isa triple amdgcn-amd-amdhsa--gfx90a) and the trivial fake SDPA kernel issues no MFMA, so the gfx942 MMA catalog/limits are unused. Production gfx950 kernels are gated elsewhere and never compiled for this row.",
+      "_comment": "CDNA2 (MI200). This row exists ONLY to cross-compile the MFMA-free ALMIOPEN-2002 POC fake SDPA kernel for local dev on a gfx90a box: the ISA backend already targets gfx90a (isa triple amdgcn-amd-amdhsa--gfx90a) and the trivial fake kernel issues no MFMA, so the MMA catalog/limits are never consulted. The mma[] list (esp. the fp8/bf8 atoms) was inherited verbatim from gfx942 and is INACCURATE for gfx90a -- MI200 has no fp8/bf8 MFMA -- but it is harmless because real tiled attention is gated off here (has_ds_read_tr=false, so require_tiled_attention_arch rejects this row) and production gfx950 kernels are never compiled for it. Do NOT treat this mma[] list as a hardware fact for gfx90a.",
       "family": "cdna",
       "target_family": "gfx9_mfma",
       "wave_size": 64,
