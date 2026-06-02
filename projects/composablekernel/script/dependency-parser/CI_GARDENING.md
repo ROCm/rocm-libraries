@@ -415,18 +415,30 @@ violated, disable smart build until fixed.
    `build.ninja` on every ninja call, making `ninja -n` exit 0 for any target
    (real or bogus). Do not use `ninja -n` for selection validation.
 
-5. **The depmap, `ctest -N`, and the CI build all come from the same cmake
-   configure** (same options/components). Selection coverage equals configure
-   coverage: a component built by CI but absent from the depmap's configure is
-   unreachable (a false negative); one in the depmap but not built by CI is dead
-   weight. This especially affects **optional, separately-gated components**:
-   - `rocm_ck` (`CK_ENABLE_ROCM_CK`) — tests `rocm_ck_*`,
-   - `codegen` / `composable_kernel_host` (`CK_USE_CODEGEN`, gfx9 only) — tests `codegen_test_*`,
-   - `dispatcher` (its own `add_subdirectory(codegen)` gating).
-   For full coverage, generate the depmap from a configure with the **same
-   component flags CI builds with**, and run `ctest -N` against that same build
-   dir. (Nuance: `codegen` embeds CK headers via `add_embed_library` + hiprtc, so
-   some of its header dependence is runtime/embedded rather than compile-`#include`.)
+5. **Selection coverage equals the configure of the build dir the depmap comes
+   from.** Two distinct cases:
+
+   - **Same-flow gated components** — configured into the *main* build dir that
+     the smart-build depmap + `ctest -N` are generated from (`ck.groovy` enables
+     them right before the smart-build configure): `rocm_ck`
+     (`CK_ENABLE_ROCM_CK`, when `RUN_ROCM_CK_TESTS`) and the experimental builder
+     (`CK_EXPERIMENTAL_BUILDER`, when `RUN_BUILDER_TESTS`). These **are** covered
+     when enabled; the only risk is the depmap configure diverging from the build
+     configure (keep them in lockstep).
+
+   - **Separate-stage components** — built/tested in their *own* build dir by a
+     different Jenkins stage, outside smart-build entirely: `codegen` /
+     `composable_kernel_host` (`CK_USE_CODEGEN`, gfx9; built by
+     `build_client_examples_and_codegen_tests` in `codegen/build`; tests
+     `codegen_test_*`) and `dispatcher`. These are **out of smart-build scope by
+     design** and run as an always-full stage — so they are *not* smart-build
+     false negatives; smart-build neither selects nor claims them. (Nuance:
+     `codegen` embeds CK headers via `add_embed_library` + hiprtc, so part of its
+     header dependence is runtime/embedded rather than compile-`#include` anyway.)
+
+   Rule of thumb: a component built **in the smart-build flow** must be in that
+   flow's depmap configure (else FN); a component built **in its own stage** is
+   covered there, independently.
 
 ---
 
