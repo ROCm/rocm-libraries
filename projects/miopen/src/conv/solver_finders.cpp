@@ -209,7 +209,8 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
                                        const NetworkConfig& network_config,
                                        const AnyInvokeParams& invoke_ctx,
                                        FindCoreResult& core_result,
-                                       bool force_attach_binary)
+                                       bool force_attach_binary,
+                                       bool& non_naive_succeeded)
 {
     std::vector<Solution> ret;
 
@@ -219,15 +220,15 @@ std::vector<Solution> EvaluateInvokers(const Handle& handle,
 
     bool naive_disable       = env::value(MIOPEN_NAIVE_DISABLE_IF_ALT);
     bool using_search_cutoff = env::value(MIOPEN_SEARCH_CUTOFF);
-    // Defer Naive only when a non-Naive alternative exists in the candidate list.
+    // Defer Naive only when a non-Naive alternative exists across all algorithms or this one.
     const bool defer_naive =
-        naive_disable && std::any_of(solutions.begin(), solutions.end(), [](const auto& s) {
-            return s.solver_id.find("Naive") == std::string::npos;
-        });
-    auto selected             = miopen::solver::ConvSolution{miopenStatusUnknownError};
-    auto best                 = std::numeric_limits<float>::max();
-    auto best_invoker         = Invoker{};
-    bool non_naive_succeeded  = false;
+        naive_disable && (non_naive_succeeded ||
+                          std::any_of(solutions.begin(), solutions.end(), [](const auto& s) {
+                              return s.solver_id.find("Naive") == std::string::npos;
+                          }));
+    auto selected     = miopen::solver::ConvSolution{miopenStatusUnknownError};
+    auto best         = std::numeric_limits<float>::max();
+    auto best_invoker = Invoker{};
     std::vector<float> samples;
 
     // Iterate non-Naive solutions first, Naive last
@@ -463,10 +464,17 @@ FindCoreResult FindCore(const AnyInvokeParams& invoke_ctx,
 
     ret.solutions.reserve(total);
 
+    bool non_naive_succeeded = false;
     for(const auto& ss : solutions)
     {
-        auto evaluated = EvaluateInvokers(
-            handle, ss.second, ss.first, network_config, invoke_ctx, ret, force_attach_binary);
+        auto evaluated = EvaluateInvokers(handle,
+                                          ss.second,
+                                          ss.first,
+                                          network_config,
+                                          invoke_ctx,
+                                          ret,
+                                          force_attach_binary,
+                                          non_naive_succeeded);
 
         ret.solutions.insert(ret.solutions.end(),
                              std::make_move_iterator(evaluated.begin()),
