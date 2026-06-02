@@ -32,10 +32,11 @@ Or with pytest:
     pytest projects/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor/tests/test_code.py
 
 These tests pin behaviour that the rest of the adapter (and KernelWriter)
-depend on -- the IR-tree semantics ``add`` / ``replaceItem`` /
-``popFirstNItems`` / ``flatitems`` / parent rebinding must match
-``rocisa::Module`` byte-for-byte so an adapter swap does not silently
-re-order, drop, or re-parent items in the emitted asm.
+depend on -- the code-composition-tree semantics ``add`` /
+``replaceItem`` / ``popFirstNItems`` / ``flatitems`` / parent
+rebinding must match ``rocisa::Module`` byte-for-byte so an adapter
+swap does not silently re-order, drop, or re-parent items in the
+emitted asm.
 
 The ``to_stinky_asm`` test block is gated on a built ``stinkytofu``
 binding and exercises the full left-path lowering pipeline (Module tree
@@ -1440,8 +1441,8 @@ class TestStinkytofuOptional(unittest.TestCase):
 # These pin the rocisa C++ inheritance shape one-for-one:
 #   * ``TextBlock`` / ``Module`` are subclasses of ``Item``
 #     (code.hpp:133 / code.hpp:330).
-#   * Dummy IR-tree nodes (Label / Macro / ValueSet / ...) are also
-#     ``Item`` subclasses via ``make_dummy_class(..., base=Item)``.
+#   * Dummy code-composition nodes (Label / Macro / ValueSet / ...) are
+#     also ``Item`` subclasses via ``make_dummy_class(..., base=Item)``.
 #   * ``StructuredModule`` is a ``Module`` subclass in C++
 #     (code.hpp:469); the dummy here uses ``base=Module`` for the
 #     same shape.
@@ -1493,12 +1494,12 @@ class TestItemInheritanceShape(unittest.TestCase):
 
 
 class TestDummyClassesInheritItem(unittest.TestCase):
-    """Every dummy IR-tree node uses ``base=Item`` (with the exception
-    of ``StructuredModule`` which uses ``base=Module`` and
+    """Every dummy code-composition node uses ``base=Item`` (with the
+    exception of ``StructuredModule`` which uses ``base=Module`` and
     ``BitfieldUnion`` which is intentionally standalone). This is the
     foundation that lets ``Module.findIndexByType(Item)`` /
-    ``isinstance``-based KernelWriter walks see dummies as IR
-    nodes during the bring-up phase."""
+    ``isinstance``-based KernelWriter walks see dummies as
+    composition nodes during the bring-up phase."""
 
     def test_label_is_item(self):
         self.assertIsInstance(Label(), Item)

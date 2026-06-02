@@ -23,7 +23,8 @@
 
 What this file is:
     Mirrors ``rocisa/rocisa/src/base.cpp`` + ``rocisa/include/base.hpp``
-    — IR-tree root types and the process-wide ``rocIsa`` singleton state.
+    — code-composition root types and the process-wide ``rocIsa``
+    singleton state.
 
 What it does (real):
     - ``KernelInfo`` — current kernel ISA + wavefrontSize; picklable for
@@ -45,8 +46,8 @@ What it does (real):
       ``setKernelInfo`` / ``getKernel`` / ``getData`` / ``setData`` /
       ``getVgprIdx`` / ``setVgprIdx`` / ``getVgprMsb`` / ``setVgprMsb`` /
       ``getOutputOptions`` / ``setOutputOptions`` / ``outputNoComment``.
-    - ``Item`` — polymorphic root of the IR tree; concrete class with
-      default ``toString`` / ``prettyPrint`` / ``countType`` /
+    - ``Item`` — polymorphic root of the code composition tree; concrete
+      class with default ``toString`` / ``prettyPrint`` / ``countType`` /
       ``countExactType`` and the seven capability proxies
       (``getAsmCaps`` / ... / ``kernel``) forwarding to the accessors
       above. Mirror of ``rocisa::Item`` (base.hpp:220-297).
@@ -504,7 +505,7 @@ def setVgprMsb(msb: int) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Item base class -- polymorphic root of the IR tree.
+# Item base class -- polymorphic root of the code composition tree.
 # ---------------------------------------------------------------------------
 #
 # Mirrors ``rocisa::Item`` (base.hpp:220-297). Lives at the bottom of
@@ -533,8 +534,8 @@ def setVgprMsb(msb: int) -> None:
 #     target`` to match the C++ ``typeid(*this) == targetType`` semantics.
 
 class Item:
-    """Polymorphic root of the IR tree; mirror of ``rocisa::Item``
-    (base.hpp:220-297).
+    """Polymorphic root of the code composition tree; mirror of
+    ``rocisa::Item`` (base.hpp:220-297).
 
     Concrete (not abstract): ``Item("foo").toString()`` returns ``"foo"``
     and ``Item().prettyPrint()`` returns ``"<class-name> "``; only

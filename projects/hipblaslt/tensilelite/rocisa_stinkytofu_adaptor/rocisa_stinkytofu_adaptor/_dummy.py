@@ -56,8 +56,9 @@ def make_dummy_class(full_name: str, *, base: Type[Any] = object) -> Type[Any]:
     raise AttributeError during the structural-only phase.
 
     ``base`` lets the dummy participate in the real class hierarchy
-    (rocisa C++ has every IR-tree node inheriting from ``Item``). When
-    set, ``isinstance(dummy_instance, base)`` returns ``True`` -- so
+    (rocisa C++ has every code-composition node inheriting from
+    ``Item``). When set, ``isinstance(dummy_instance, base)`` returns
+    ``True`` -- so
     e.g. ``Module.findIndexByType(Item)`` would also match dummy
     Label / ValueSet / Macro nodes that are still pending real
     implementations. The dummy ``__init__`` calls ``super().__init__()``

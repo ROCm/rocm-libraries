@@ -22,9 +22,12 @@
 """Shim for ``rocisa.code``.
 
 What this file is:
-    Mirrors ``rocisa/rocisa/src/code.cpp`` (``init_code``) — IR-tree
-    structural nodes (``Module``, ``KernelBody``, ``Label``, ``RegSet``,
-    ``ValueSet``, ...).
+    Mirrors ``rocisa/rocisa/src/code.cpp`` (``init_code``) — the
+    code-composition components (``Module``, ``KernelBody``, ``Label``,
+    ``RegSet``, ``ValueSet``, ...). These are the structural / control-
+    flow / declarative ``Item`` subclasses that KernelWriter
+    assembles into a kernel; ``Instruction`` subclasses (the
+    operational leaves) live in ``instruction.py``.
 
 What it does (real):
     - ``Module`` / ``TextBlock`` — real Python container nodes that
@@ -635,7 +638,7 @@ class Module(Item):
 
 
 # ---------------------------------------------------------------------------
-# Dummy IR-tree nodes (pending real implementation).
+# Dummy code-composition components (pending real implementation).
 # ---------------------------------------------------------------------------
 #
 # Every dummy below inherits from the real ``Item`` base so:
