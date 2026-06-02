@@ -25,7 +25,7 @@ foreach(_target ${_gtest_targets})
 endforeach()
 
 add_executable(
-    example_provider_tests
+    hipdnn_example_provider_unit_tests
     TestExampleProviderContainer.cpp
     TestReluPlanBuilder.cpp
     TestReluPlan.cpp
@@ -35,7 +35,7 @@ add_executable(
 )
 
 target_link_libraries(
-    example_provider_tests
+    hipdnn_example_provider_unit_tests
     PRIVATE
         GTest::gtest
         GTest::gtest_main
@@ -45,11 +45,11 @@ target_link_libraries(
 )
 
 target_include_directories(
-    example_provider_tests
+    hipdnn_example_provider_unit_tests
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}/../src
 )
 
 include(GoogleTest)
-gtest_discover_tests(example_provider_tests DISCOVERY_MODE PRE_TEST)
+gtest_discover_tests(hipdnn_example_provider_unit_tests DISCOVERY_MODE PRE_TEST)

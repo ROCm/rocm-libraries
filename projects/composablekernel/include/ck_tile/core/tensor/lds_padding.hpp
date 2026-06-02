@@ -7,6 +7,7 @@
 
 #include "ck_tile/core/config.hpp"
 #include "ck_tile/core/numeric/integer.hpp"
+#include "ck_tile/core/numeric/pk_f6.hpp"
 
 // LDS padding helpers.
 //
@@ -16,7 +17,7 @@
 //
 // Scope of the current rule:
 // - Only single-dwordx3-per-LDS-slot types are handled (i.e. sizeof(T) == 12).
-// - Wider layouts that happen to be a multiple of 12 bytes (e.g. pk_fp6_t<32>
+// - Wider layouts that happen to be a multiple of 12 bytes (e.g. pk_fp6x32_t
 //   at 24B, which would require two consecutive dwordx3-to-LDS ops with 12->16
 //   padding between them for a 32B slot) are NOT handled here. A future
 //   pipeline that needs such a layout will have to extend this helper.
@@ -29,17 +30,17 @@
 
 namespace ck_tile {
 
-// Forward declaration for the packed FP6 vector type that currently opts in.
-template <index_t pk_size>
-struct pk_fp6_t;
-
 template <typename T>
 struct needs_lds_pad : std::false_type
 {
 };
 
+// pk_fp6x16_t (= pk_f6_legacy_t<16, f6_kind::fp6>) is the 12-byte packed FP6
+// type consumed by the gfx950 MX scaled-MFMA path. It reaches LDS via the
+// buffer_load_dwordx3 -> LDS async path, which writes a fixed 16-byte
+// per-thread stride, so it opts into the 12 -> 16 padded LDS stride.
 template <>
-struct needs_lds_pad<pk_fp6_t<16>> : std::true_type
+struct needs_lds_pad<pk_fp6x16_t> : std::true_type
 {
 };
 
