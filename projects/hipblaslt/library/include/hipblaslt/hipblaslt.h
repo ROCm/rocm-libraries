@@ -85,7 +85,7 @@
 typedef enum {
   HIPBLASLT_EPILOGUE_DEFAULT = 1,                 /**<No special postprocessing. Scale and quantize the results if necessary.*/
   HIPBLASLT_EPILOGUE_RELU = 2,                    /**<Apply ReLU pointwise transform to the results (``x:=max(x, 0)``)*/
-  HIPBLASLT_EPILOGUE_BIAS = 4,                    /**<Apply (broadcast) bias from the bias vector. The bias vector length must match the number of rows in matrix D, and it must be packed (so the stride between vector elements is one). The bias vector is broadcast to all columns and added before applying the final postprocessing.*/
+  HIPBLASLT_EPILOGUE_BIAS = 4,                    /**<Apply bias from the bias vector, and broadcast to all columns if HIPBLAST_MATMUL_DESC_BIAS_BATCH_STRIDE = 0. The bias vector length must match the number of rows in matrix D, and it must be packed (so the stride between vector elements is one). The bias vector is broadcast to all columns if HIPBLASLT_MATMUL_DESC_BIAS_BATCH_STRIDE is 0 and added before applying the final postprocessing.*/
   HIPBLASLT_EPILOGUE_RELU_BIAS = 6,               /**<Apply bias and then ReLU transform.*/
   HIPBLASLT_EPILOGUE_GELU = 32,                   /**<Apply GELU pointwise transform to the results (``x:=GELU(x)``).*/
   HIPBLASLT_EPILOGUE_GELU_BIAS = 36,              /**<Apply Bias and then GELU transform.*/
@@ -221,6 +221,7 @@ typedef enum {
   HIPBLASLT_MATMUL_DESC_POINTER_MODE = 13,              /**<Specifies that alpha and beta are passed by reference, whether they are scalars on the host or on the device, or device vectors. Default value is: ``HIPBLASLT_POINTER_MODE_HOST`` (on the host). Data type: ``int32_t`` based on ``hipblasLtPointerMode_t``. */
   HIPBLASLT_MATMUL_DESC_AMAX_D_POINTER = 14,           /**<Device pointer to the memory location that on completion will be set to the maximum of the absolute values in the output matrix. Data type: ``void*`` / ``const void*``. */
   HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_DATA_TYPE = 22,    /**<Type of the auxiliary vector in the device memory. Default value is: ``HIPBLASLT_DATATYPE_INVALID`` (using D matrix type). Data type: ``int32_t`` based on ``hipDataType``. */
+  HIPBLASLT_MATMUL_DESC_BIAS_BATCH_STRIDE = 23,              /**<The batch stride of the bias vector pointer in the device memory. This is only applicable for hipblasltBatchMode_t is 0 (Strided Batched GEMM) and hipblasltEpilogue_t is BIAS enabled. Default value is 0 meaning same bias value broadcast across all batches. Data type: ``int32_t``. */
   HIPBLASLT_MATMUL_DESC_A_SCALE_MODE = 31,                   /**<Scaling mode that defines how the matrix scaling factor for matrix A is interpreted. See ``hipblasLtMatmulMatrixScale_t``. */
   HIPBLASLT_MATMUL_DESC_B_SCALE_MODE = 32,                   /**<Scaling mode that defines how the matrix scaling factor for matrix B is interpreted. See ``hipblasLtMatmulMatrixScale_t``. */
   HIPBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT = 100,     /**<Compute input A types. Defines the data type used for the input A of a matrix multiply. */

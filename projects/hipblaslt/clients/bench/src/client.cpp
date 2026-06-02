@@ -516,6 +516,10 @@ try
          bool_switch(&arg.bias_vector)->default_value(false),
          "Apply bias vector")
 
+        ("bias_stride",
+         value<int32_t>(&arg.bias_stride)->default_value(0),
+         "Stride within bias vector for strided batch cases where each batch has unique bias value.")
+
         ("scaleA",
          value<int>(&scaleAFormat)->default_value(0),
          "Apply scale for A buffer. 0 = None, 1 = scalar, 2 = vector, 3 = B32E8, 4 = B16E8, 5 = B32E4M3, 6 = B16E4M3, 7 = B32E5M3, 8 = B16E5M3, 1001 = block_preswizzled_32x8.")
@@ -895,6 +899,13 @@ try
         throw std::invalid_argument("Invalid value for --activation_type " + activation_type);
 
     arg.bias_source = string_to_hipblaslt_bias_source(bias_source);
+
+    if(arg.bias_source == hipblaslt_bias_source::a && arg.bias_stride < arg.M[0] && arg.batch_mode == 0)
+        throw std::invalid_argument("Invalid value for --bias_stride. Bias stride should be >= M when bias source is A and batch_mode is 0.");
+    if(arg.bias_source == hipblaslt_bias_source::b && arg.bias_stride < arg.N[0] && arg.batch_mode == 0)
+        throw std::invalid_argument("Invalid value for --bias_stride. Bias stride should be >= N when bias source is B and batch_mode is 0.");
+    if(arg.bias_source == hipblaslt_bias_source::d && arg.bias_stride > arg.M[0] && arg.batch_mode == 0)
+        throw std::invalid_argument("Invalid value for --bias_stride. Bias stride should be >= M when bias source is D and batch_mode is 0.");
 
     if(!(aux_type == "" || aux_type == "default" || arg.use_e))
         hipblaslt_cerr << "warning: --use_e not set but --aux_type is provided" << std::endl;

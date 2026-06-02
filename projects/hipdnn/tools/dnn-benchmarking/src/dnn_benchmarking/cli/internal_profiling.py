@@ -24,7 +24,7 @@ from pathlib import Path
 
 from ..common.exceptions import GraphLoadError
 from ..config.benchmark_config import MetricsConfig, SuiteConfig
-from ..execution.suite_runner import _run_single_provider_engine
+from ..execution.suite_runner import run_single_provider_engine, set_plugin_path
 from ..graph.loader import GraphLoader
 
 
@@ -49,9 +49,18 @@ def run_internal_profiling(args: argparse.Namespace) -> int:
         )
         return 1
 
+    plugin_path = None
+    if args.plugin_path:
+        if len(args.plugin_path) != 1:
+            print(
+                "internal-profiling-run: expected exactly one --plugin-path",
+                file=sys.stderr,
+            )
+            return 1
+        plugin_path = args.plugin_path[0]
+
     try:
-        if args.plugin_path is not None:
-            hipdnn.set_engine_plugin_paths([str(args.plugin_path)])
+        set_plugin_path(hipdnn, plugin_path)
         handle = hipdnn.Handle()
     except RuntimeError as e:
         print(
@@ -74,11 +83,9 @@ def run_internal_profiling(args: argparse.Namespace) -> int:
     # the inner pass; the parent already collected basic metrics on the
     # timed pass.
     #
-    # `plugin_path` is forwarded so the child's SuiteConfig matches the
-    # parent's. hipdnn.set_engine_plugin_paths above is what actually
-    # loads the plugin today, but any future code that reads
-    # config.plugin_path from inside _run_single_provider_engine would
-    # otherwise silently see None in the child.
+    # `plugin_path` is forwarded so the child SuiteConfig matches the
+    # parent's selected engine/plugin row. The outer suite runner passes
+    # exactly one plugin path for this single-engine subprocess.
     suite_config = SuiteConfig(
         warmup_iters=args.warmup,
         benchmark_iters=args.iters,
@@ -88,11 +95,11 @@ def run_internal_profiling(args: argparse.Namespace) -> int:
         reference_provider="none",
         verbose=False,
         metrics=MetricsConfig(tier="off"),
-        plugin_path=args.plugin_path,
+        plugin_paths=[plugin_path] if plugin_path is not None else None,
     )
 
     try:
-        result = _run_single_provider_engine(
+        result = run_single_provider_engine(
             graph_path=graph_path,
             graph_json_str=json.dumps(graph_json),
             graph_name=graph_json.get("name", graph_path.stem),
@@ -101,6 +108,7 @@ def run_internal_profiling(args: argparse.Namespace) -> int:
             handle=handle,
             provider="profiling-inner",
             engine_id=engine_id,
+            plugin_path=plugin_path,
             ref_provider=None,
             validation_requested=False,
             graph_json=graph_json,

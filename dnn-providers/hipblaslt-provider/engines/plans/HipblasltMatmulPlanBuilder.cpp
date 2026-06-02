@@ -168,14 +168,16 @@ void checkNodeAttrsTensors(
     const auto& cType
         = hipblaslt_utils::findTensorAttributes(tensorMap, matmulAttr.c_tensor_uid()).dataType();
 
-    static constexpr std::array<hipdnn_flatbuffers_sdk::data_objects::DataType, 3> validDataTypes
+    static constexpr std::array<hipdnn_flatbuffers_sdk::data_objects::DataType, 3> VALID_DATA_TYPES
         = {hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
            hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
            hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16};
 
-    if(std::find(validDataTypes.begin(), validDataTypes.end(), aType) == validDataTypes.end()
-       || std::find(validDataTypes.begin(), validDataTypes.end(), bType) == validDataTypes.end()
-       || std::find(validDataTypes.begin(), validDataTypes.end(), cType) == validDataTypes.end())
+    if(std::find(VALID_DATA_TYPES.begin(), VALID_DATA_TYPES.end(), aType) == VALID_DATA_TYPES.end()
+       || std::find(VALID_DATA_TYPES.begin(), VALID_DATA_TYPES.end(), bType)
+              == VALID_DATA_TYPES.end()
+       || std::find(VALID_DATA_TYPES.begin(), VALID_DATA_TYPES.end(), cType)
+              == VALID_DATA_TYPES.end())
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
@@ -219,10 +221,10 @@ void checkNodeAttrsTensors(
             = hipblaslt_utils::findTensorAttributes(tensorMap, biasAttr->out_0_tensor_uid())
                   .dataType();
 
-        if(std::find(validDataTypes.begin(), validDataTypes.end(), biasInType)
-               == validDataTypes.end()
-           || std::find(validDataTypes.begin(), validDataTypes.end(), biasOutType)
-                  == validDataTypes.end())
+        if(std::find(VALID_DATA_TYPES.begin(), VALID_DATA_TYPES.end(), biasInType)
+               == VALID_DATA_TYPES.end()
+           || std::find(VALID_DATA_TYPES.begin(), VALID_DATA_TYPES.end(), biasOutType)
+                  == VALID_DATA_TYPES.end())
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
@@ -245,9 +247,9 @@ void checkComputeTypes(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGrap
                        const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes* biasAttr,
                        const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes* activAttr)
 {
-    uint32_t matmulAttrIdx = 0;
-    uint32_t biasAttrIdx = 1;
-    uint32_t activAttrIdx = (biasAttr != nullptr) ? 2 : 1;
+    uint32_t const matmulAttrIdx = 0;
+    uint32_t const biasAttrIdx = 1;
+    uint32_t const activAttrIdx = (biasAttr != nullptr) ? 2 : 1;
 
     if(graph.getNode(matmulAttrIdx).compute_data_type()
        != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
@@ -299,7 +301,7 @@ bool HipblasltMatmulPlanBuilder::isApplicable(
                             std::get<1>(nodeAttrs),
                             std::get<2>(nodeAttrs),
                             opGraph.getTensorMap());
-        MatmulPlan plan(handle, std::move(params));
+        MatmulPlan const plan(handle, std::move(params));
         return true;
     }
     catch(const std::exception& e)
@@ -323,7 +325,7 @@ size_t HipblasltMatmulPlanBuilder::getWorkspaceSize(
                         std::get<1>(nodeAttrs),
                         std::get<2>(nodeAttrs),
                         opGraph.getTensorMap());
-    MatmulPlan plan(handle, std::move(params));
+    MatmulPlan const plan(handle, std::move(params));
     return plan.getWorkspaceSize(handle);
 }
 
