@@ -18,11 +18,289 @@
 
 #include <rocm_ck/ops/fmha_bwd/common.hpp>
 
+#include <rocm_ck/arch_properties.hpp>
 #include <rocm_ck/datatype_utils.hpp>
 
 #include <cstdint>
+#include <iterator>
 
 namespace rocm_ck {
+
+// ---------------------------------------------------------------------------
+// Tile geometry config (consteval generation)
+// ---------------------------------------------------------------------------
+
+/// Tile geometry for the dQ/dK/dV backward kernel.
+/// All fields are plain integers; the device bridge converts them to
+/// CK Tile sequence<> types. Source of truth: fmha_bwd.py get_dq_dk_dv_tiles().
+struct FmhaBwdDQDKDVTileConfig
+{
+    int hdim_q; // head dimension for Q (lookup key)
+    int hdim_v; // head dimension for V (lookup key)
+
+    // Block tile: <bm0, bn0, bk0, bk1, bk2, bk3, bk4, hdim_q, hdim_v>
+    int bm0, bn0, bk0, bk1, bk2, bk3, bk4;
+
+    // GEMM0/2 (S = Q@K^T, dP = dO@V^T): block warps + warp tile
+    int rm0, rn0, rk0;
+    int wm0, wn0, wk0;
+
+    // GEMM1/3 (dV = P^T@dO, dK = dS^T@Q): block warps + warp tile
+    int rm1, rn1, rk1;
+    int wm1, wn1, wk1;
+
+    // GEMM4 (dQ = dS@K): block warps
+    // GEMM4 warp tile = (wm0, wn0, min(wk0, bk4)) per fmha_bwd.py
+    int rm2, rn2, rk2;
+
+    // Tuning
+    int occupancy; // target occupancy (always >= 1; tuned per config)
+    int max_seq_q; // maximum Q sequence length (0 = unlimited)
+
+    // Derived quantities
+    constexpr int num_warps() const { return rm0 * rn0 * rk0; }
+    constexpr int block_size(GpuTarget target) const { return num_warps() * wavefrontSize(target); }
+};
+
+// ---------------------------------------------------------------------------
+// Base tile table (compact tuning parameters)
+// ---------------------------------------------------------------------------
+
+/// Base tile geometry — the ONLY parameters that are empirically tuned
+/// per (arch, dtype, head-dimension tier). All other tile fields are derived
+/// from these via invariant rules documented below.
+struct FmhaBwdBaseTile
+{
+    int bm0;       // M-dimension block tile
+    int bn0;       // N-dimension block tile
+    int bk4;       // GEMM4 K-unroll (must divide bn0)
+    int occupancy; // target occupancy (always >= 1; tuned per config)
+    int max_seq_q; // maximum Q sequence length (0 = unlimited)
+};
+
+/// Entry in the base tile table: maps a (symmetric) head dimension to its
+/// empirically tuned base tile geometry.
+struct FmhaBwdBaseTileEntry
+{
+    int hdim;
+    FmhaBwdBaseTile tile;
+};
+
+/// GFX9 fp16/bf16 base tiles, indexed by head dimension.
+/// Only symmetric head dims (hdim_q == hdim_v) are supported, so the table is
+/// keyed by that single head dimension; GEMM0 and GEMM2 share the same bm0/bn0
+/// and the same K-unroll (= hdim). Asymmetric pairs are rejected in
+/// getTileConfig and never reach this table.
+// clang-format off
+inline constexpr FmhaBwdBaseTileEntry
+GFX9_FP16_DQDKDV_BASE_TILES[] = {
+    { 32, { 32, 128, 64, 1, 0}},
+    { 64, { 32, 128, 32, 1, 0}},
+    { 96, { 32, 128, 32, 1, 0}},
+    {128, { 16, 128, 32, 1, 0}},
+    {256, { 16,  64, 32, 1, 0}},
+};
+// clang-format on
+
+inline constexpr int GFX9_FP16_DQDKDV_BASE_TILES_COUNT =
+    static_cast<int>(std::size(GFX9_FP16_DQDKDV_BASE_TILES));
+
+// Invariant (see FmhaBwdBaseTile::bk4 doc): bk4 must divide bn0 so the GEMM4
+// K-loop tiles bn0 evenly. Enforce it at compile time across every entry so
+// adding a new row that breaks the invariant fails the build instead of
+// surfacing as an unrelated tile-derivation error.
+static_assert(
+    []() consteval {
+        for(int i = 0; i < GFX9_FP16_DQDKDV_BASE_TILES_COUNT; ++i)
+        {
+            const auto& t = GFX9_FP16_DQDKDV_BASE_TILES[i].tile;
+            if(t.bk4 <= 0 || t.bn0 % t.bk4 != 0)
+                return false;
+        }
+        return true;
+    }(),
+    "GFX9_FP16_DQDKDV_BASE_TILES: every entry must satisfy bn0 % bk4 == 0"
+    " (bk4 divides bn0 — see FmhaBwdBaseTile::bk4 doc)");
+
+// Invariant (see FmhaBwdBaseTile::occupancy doc): the table stores concrete
+// tuned occupancies, never the -1/auto sentinel. The auto path lives in
+// makeSpec (algorithm.block_per_cu == -1 resolves to tile.occupancy), so a
+// stored occupancy must be a usable positive value or that resolution would
+// hand makeSpec a non-positive block_per_cu and trip its positivity guard.
+static_assert(
+    []() consteval {
+        for(int i = 0; i < GFX9_FP16_DQDKDV_BASE_TILES_COUNT; ++i)
+        {
+            if(GFX9_FP16_DQDKDV_BASE_TILES[i].tile.occupancy <= 0)
+                return false;
+        }
+        return true;
+    }(),
+    "GFX9_FP16_DQDKDV_BASE_TILES: every entry must have occupancy >= 1"
+    " (the table stores concrete tuned occupancies; -1/auto is resolved from"
+    " algorithm.block_per_cu in makeSpec, not stored here)");
+
+// ---------------------------------------------------------------------------
+// Tile config generation (consteval derivation)
+// ---------------------------------------------------------------------------
+
+/// Compute the GEMM4 block-warp distribution (rm2, rn2) from (bm0, hdim).
+///
+/// GEMM4 computes dQ = dS @ K with output shape (bm0 x hdim). The 4 warps
+/// (rm2 * rn2, with rk2 = 1) tile that output with a 16x16 warp tile, so the
+/// split is fixed purely by divisibility -- how many 16-wide blocks divide
+/// each output dimension:
+///   (1,4): all four warps along N -- requires hdim % (4*wn0) == 0, i.e. hdim % 64 == 0
+///   (2,2): balanced 2x2 split    -- requires bm0 % (2*wm0) == 0 and hdim % (2*wn0) == 0
+///
+/// These are the only distributions reachable for the supported gfx9 base
+/// tiles (bm0 in {16, 32}); any other (bm0, hdim) is rejected at compile time.
+/// Note this is a divisibility rule, not a head-dimension-size heuristic:
+/// e.g. hdim=64 selects (1,4) while hdim=96 selects (2,2).
+struct Gemm4Warps
+{
+    int rm2;
+    int rn2;
+};
+
+consteval Gemm4Warps computeGemm4Warps(int bm0, int hdim)
+{
+    if(bm0 <= 0)
+        throw "computeGemm4Warps: bm0 must be positive";
+    if(hdim <= 0)
+        throw "computeGemm4Warps: hdim must be positive";
+
+    constexpr int wm0 = 16;
+    constexpr int wn0 = 16;
+
+    // (1,4): all warps along N -- hdim must be divisible by 4*wn0 (= 64).
+    if(bm0 % (1 * wm0) == 0 && hdim % (4 * wn0) == 0)
+        return {1, 4};
+    // (2,2): balanced split -- bm0 divisible by 2*wm0 (= 32), hdim by 2*wn0 (= 32).
+    if(bm0 % (2 * wm0) == 0 && hdim % (2 * wn0) == 0)
+        return {2, 2};
+
+    throw "computeGemm4Warps: no valid GEMM4 warp distribution for (bm0, hdim)"
+          " -- need hdim % 64 == 0 for (1,4), or both bm0 % 32 == 0 and"
+          " hdim % 32 == 0 for (2,2)";
+}
+
+/// Generate a complete tile config from a (symmetric) head dimension and a
+/// base tile. Only symmetric head dimensions are supported (see getTileConfig),
+/// so a single hdim drives both the Q and V head-dim fields and bk0 == bk2.
+///
+/// Invariant derivation rules (from CK Tile pipeline -- always true):
+///   bk0 = hdim    -- GEMM0 (Q@K^T)  K-unroll = QK head dim
+///   bk1 = bm0     -- GEMM1 (P^T@dO) K-unroll = M-dim
+///   bk2 = hdim    -- GEMM2 (dO@V^T) K-unroll = V head dim
+///   bk3 = bm0     -- GEMM3 (dS^T@Q) K-unroll = M-dim
+///
+/// GFX9 fp16/bf16 constants (invariant across all head dims):
+///   GEMM0/2: rm0=1, rn0=4, rk0=1, wm0=16, wn0=16, wk0=32
+///   GEMM1/3: rm1=4, rn1=1, rk1=1, wm1=16, wn1=16, wk1=16
+///   GEMM4:   rk2=1, warp tile = (wm0, wn0, min(wk0, bk4))
+consteval FmhaBwdDQDKDVTileConfig generateTileConfig(int hdim, const FmhaBwdBaseTile base)
+{
+    auto warps = computeGemm4Warps(base.bm0, hdim);
+
+    return FmhaBwdDQDKDVTileConfig{
+        .hdim_q = hdim,
+        .hdim_v = hdim,
+        .bm0    = base.bm0,
+        .bn0    = base.bn0,
+        .bk0    = hdim,     // Rule: GEMM0 K-unroll = hdim
+        .bk1    = base.bm0, // Rule: GEMM1 K-unroll = bm0
+        .bk2    = hdim,     // Rule: GEMM2 K-unroll = hdim
+        .bk3    = base.bm0, // Rule: GEMM3 K-unroll = bm0
+        .bk4    = base.bk4,
+        // GEMM0/2 warps (constant for GFX9 fp16/bf16)
+        .rm0 = 1,
+        .rn0 = 4,
+        .rk0 = 1,
+        .wm0 = 16,
+        .wn0 = 16,
+        .wk0 = 32,
+        // GEMM1/3 warps (constant for GFX9 fp16/bf16)
+        .rm1 = 4,
+        .rn1 = 1,
+        .rk1 = 1,
+        .wm1 = 16,
+        .wn1 = 16,
+        .wk1 = 16,
+        // GEMM4 warps (computed from bm0 and hdim)
+        .rm2       = warps.rm2,
+        .rn2       = warps.rn2,
+        .rk2       = 1,
+        .occupancy = base.occupancy,
+        .max_seq_q = base.max_seq_q,
+    };
+}
+
+/// Look up base tile for a given (symmetric) head dimension.
+consteval FmhaBwdBaseTile getBaseTile(int hdim, DataType dtype, GpuTarget target)
+{
+    // Narrow the failure mode before scanning the table so the compile-time
+    // error string identifies which precondition was violated.
+    if(dtype != DataType::FP16 && dtype != DataType::BF16)
+        throw "getBaseTile: dtype must be FP16 or BF16"
+              " (the only dtypes with populated base-tile entries)";
+
+    constexpr auto gfx9_targets = TargetSet::only(GpuTarget::gfx90a, GpuTarget::gfx942);
+    if(!gfx9_targets.contains(target))
+        throw "getBaseTile: target arch has no base-tile table"
+              " (only gfx90a and gfx942 are currently populated)";
+
+    for(int i = 0; i < GFX9_FP16_DQDKDV_BASE_TILES_COUNT; ++i)
+    {
+        if(GFX9_FP16_DQDKDV_BASE_TILES[i].hdim == hdim)
+            return GFX9_FP16_DQDKDV_BASE_TILES[i].tile;
+    }
+    throw "getBaseTile: no GFX9 FP16/BF16 base-tile entry for this head dimension"
+          " (hdim must be one of {32, 64, 96, 128, 256})";
+}
+
+/// Validate that every GEMM warp tile in `t` maps to a real MFMA/WMMA
+/// instruction shape for (dtype, target). The warp-tile constants are tuned
+/// for the shipped gfx9 fp16/bf16 configs; this guard ensures a future
+/// base-tile edit (e.g. a bk4 < 16 that shrinks GEMM4's k-dim below a legal
+/// MFMA shape) fails the build instead of silently selecting an invalid
+/// instruction. Uses isValidWaveTile() from arch_properties.hpp as the single
+/// source of truth for legal wave shapes.
+consteval void validateWaveTiles(const FmhaBwdDQDKDVTileConfig& t, DataType dtype, GpuTarget target)
+{
+    const int wk4 = (t.wk0 < t.bk4) ? t.wk0 : t.bk4; // GEMM4 k = min(wk0, bk4)
+
+    if(!isValidWaveTile(dtype, t.wm0, t.wn0, t.wk0, target))
+        throw "getTileConfig: GEMM0/2 warp tile (wm0, wn0, wk0) is not a valid"
+              " MFMA/WMMA shape for this dtype/target";
+    if(!isValidWaveTile(dtype, t.wm1, t.wn1, t.wk1, target))
+        throw "getTileConfig: GEMM1/3 warp tile (wm1, wn1, wk1) is not a valid"
+              " MFMA/WMMA shape for this dtype/target";
+    if(!isValidWaveTile(dtype, t.wm0, t.wn0, wk4, target))
+        throw "getTileConfig: GEMM4 warp tile (wm0, wn0, min(wk0, bk4)) is not a"
+              " valid MFMA/WMMA shape for this dtype/target";
+}
+
+/// Look up tile geometry for dQ/dK/dV given problem shape and target arch.
+/// Returns the matching tile config. Throws at compile time if no config exists.
+///
+/// Only symmetric head dimensions (hdim_q == hdim_v) are supported: CK Tile's
+/// fmha_bwd.py get_dq_dk_dv_tiles() defines tuned configs exclusively for
+/// symmetric head dims, so asymmetric combinations have no validated tile and
+/// are rejected here rather than synthesized from an unvalidated extrapolation.
+consteval FmhaBwdDQDKDVTileConfig
+getTileConfig(int hdim_q, int hdim_v, DataType dtype, GpuTarget target)
+{
+    if(hdim_q != hdim_v)
+        throw "FmhaBwdDQDKDV requires hdim_q == hdim_v"
+              " (asymmetric head dimensions are unsupported: CK Tile defines"
+              " tuned dQ/dK/dV tile configs only for symmetric head dims)";
+
+    auto base = getBaseTile(hdim_q, dtype, target);
+    auto cfg  = generateTileConfig(hdim_q, base);
+    validateWaveTiles(cfg, dtype, target);
+    return cfg;
+}
 
 // ---------------------------------------------------------------------------
 // Signature / Algorithm / Config / Kernel
@@ -36,7 +314,6 @@ struct FmhaBwdDQDKDVSignature
     int hdim_q;     // Q/K head dimension: 32, 64, 96, 128, 256
     int hdim_v;     // V head dimension: 32, 64, 96, 128, 256
     FmhaMode mode;  // batch or group
-    FmhaArch arch;  // CK Tile architecture dispatch family
 };
 
 /// Algorithm: describes HOW the kernel executes (feature flags + tuning).
@@ -71,7 +348,6 @@ struct FmhaBwdDQDKDVSpec
     int hdim_q;
     int hdim_v;
     FmhaMode mode;
-    FmhaArch arch;
 
     // From Algorithm -- feature flags
     FmhaBiasType bias_type;
@@ -89,50 +365,6 @@ struct FmhaBwdDQDKDVSpec
     int block_size; // num_warps * warp_size (e.g. 4 * 64 = 256)
     int block_n0;   // kN0: K-sequence tile size (for grid calculation)
 };
-
-struct FmhaBwdDQDKDVTileGeometry
-{
-    int block_size;
-    int block_n0;
-};
-
-constexpr int fmhaBwdDQDKDVDispatchHdim(int hdim_q, int hdim_v)
-{
-    return hdim_q > hdim_v ? hdim_q : hdim_v;
-}
-
-consteval FmhaBwdDQDKDVTileGeometry
-selectFmhaBwdDQDKDVTileGeometry(FmhaArch arch, int hdim_q, int hdim_v)
-{
-    const int hdim = fmhaBwdDQDKDVDispatchHdim(hdim_q, hdim_v);
-
-    switch(arch)
-    {
-    case FmhaArch::GFX9:
-    case FmhaArch::GFX950:
-        switch(hdim)
-        {
-        case 32:
-        case 64:
-        case 96:
-        case 128: return {.block_size = 256, .block_n0 = 128};
-        case 256: return {.block_size = 256, .block_n0 = 64};
-        }
-        break;
-    case FmhaArch::GFX11:
-    case FmhaArch::GFX12:
-        switch(hdim)
-        {
-        case 32:
-        case 64:
-        case 128:
-        case 256: return {.block_size = 128, .block_n0 = 64};
-        }
-        break;
-    }
-
-    throw "unsupported FMHA BWD DqDkDv architecture/head-dimension tile geometry";
-}
 
 // ---------------------------------------------------------------------------
 // Named slot constants for generic rocm_ck::Args
@@ -195,8 +427,8 @@ constexpr int RAW_SCALE      = 0; // f32: attention scale (1/sqrt(hdim))
 constexpr int SCALE          = 1; // f32: raw_scale * log2(e)
 constexpr int NUM_HEAD_Q     = 2; // i32: number of Q heads
 constexpr int NHEAD_RATIO_QK = 3; // i32: Q heads / K heads (for GQA/MQA)
-constexpr int P_UNDROP       = 4; // f32: 1/(1-dropout_rate)
-constexpr int RP_UNDROP      = 5; // f32: 1/p_undrop
+constexpr int P_UNDROP       = 4; // f32: 1/(1-dropout_rate), passed to CK Tile as rp_undrop
+constexpr int RP_UNDROP      = 5; // f32: 1-dropout_rate (keep_prob), used for p_undrop_in_uint8_t
 constexpr int DROP_SEED      = 6; // u64: dropout RNG seed
 constexpr int DROP_OFFSET    = 7; // u64: dropout RNG offset
 // Mask scalar slots -- present only when has_mask=true.
@@ -267,6 +499,11 @@ consteval FmhaBwdDQDKDVSpec makeSpec(FmhaBwdDQDKDVConfig cfg)
        sig.hdim_v != 256)
         throw "hdim_v must be one of {32, 64, 96, 128, 256}";
 
+    // Note: hdim_q == hdim_v is enforced (with a descriptive message) by
+    // getTileConfig() below -- the single source of truth for which head-dim
+    // combinations have a tuned tile. Asymmetric configs are rejected there;
+    // we deliberately do not duplicate that predicate here.
+
     // --- mode validation ---
     // Group mode uses variable-length sequences, which requires padding.
     // Note: unlike OGradDotO/ConvertDQ, DqDkDv does not have a separate
@@ -287,15 +524,17 @@ consteval FmhaBwdDQDKDVSpec makeSpec(FmhaBwdDQDKDVConfig cfg)
     if(algo.pad_hdim_v != 0 && algo.pad_hdim_v != 1 && algo.pad_hdim_v != 8)
         throw "pad_hdim_v must be 0, 1, or 8";
 
-    // --- tile geometry (architecture-dependent) ---
-    const auto tile = selectFmhaBwdDQDKDVTileGeometry(sig.arch, sig.hdim_q, sig.hdim_v);
+    // --- tile geometry (from consteval lookup table) ---
+    // getTileConfig() returns the architecture-specific tile geometry for
+    // the given (hdim_q, hdim_v, dtype, target). Currently only GFX9 fp16/bf16
+    // configs are populated.
+    constexpr GpuTarget target = GpuTarget::gfx942;
+    auto tile                  = getTileConfig(sig.hdim_q, sig.hdim_v, sig.dtype, target);
 
     // --- block_per_cu default ---
     int resolved_block_per_cu = algo.block_per_cu;
     if(resolved_block_per_cu == -1)
-        resolved_block_per_cu = 1; // dQ/dK/dV is register-heavy for all wired
-                                   // hdims (matches F_occupancy=1 for every gfx9
-                                   // row in fmha_bwd.py get_dq_dk_dv_tiles)
+        resolved_block_per_cu = tile.occupancy;
 
     if(resolved_block_per_cu <= 0)
         throw "block_per_cu must be positive (or -1 for auto)";
@@ -306,7 +545,6 @@ consteval FmhaBwdDQDKDVSpec makeSpec(FmhaBwdDQDKDVConfig cfg)
         .hdim_q           = sig.hdim_q,
         .hdim_v           = sig.hdim_v,
         .mode             = sig.mode,
-        .arch             = sig.arch,
         .bias_type        = algo.bias_type,
         .has_bias_grad    = algo.has_bias_grad,
         .has_mask         = algo.has_mask,
@@ -315,8 +553,8 @@ consteval FmhaBwdDQDKDVSpec makeSpec(FmhaBwdDQDKDVConfig cfg)
         .pad_hdim_q       = algo.pad_hdim_q,
         .pad_hdim_v       = algo.pad_hdim_v,
         .block_per_cu     = resolved_block_per_cu,
-        .block_size       = tile.block_size,
-        .block_n0         = tile.block_n0,
+        .block_size       = tile.block_size(target),
+        .block_n0         = tile.bn0,
     };
 
     return k;
@@ -402,6 +640,43 @@ static_assert(fmha_bwd_dqdkdv_slots::requiredTensors(makeSpec(
                       .hdim_q = 128, .hdim_v = 128,
                       .mode = FmhaMode::GROUP},
         .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}})) == 16);
+
+// Multi-hdim build-time canaries: verify makeSpec() compiles for every
+// supported head dimension and selects the correct block_n0 (= base-tile bn0
+// from GFX9_FP16_DQDKDV_BASE_TILES). These guard the BUILD itself -- a tile
+// table drift fails compilation of every TU that includes this shared header,
+// not just the gtest binary. The runtime DqDkDv_FP16_D*_Batch tests cover the
+// same configs with richer diagnostics and also check block_size/block_per_cu.
+static_assert(makeSpec(
+    FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16,
+                      .hdim_q = 32, .hdim_v = 32,
+                      .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}}).block_n0 == 128);
+static_assert(makeSpec(
+    FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16,
+                      .hdim_q = 64, .hdim_v = 64,
+                      .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}}).block_n0 == 128);
+static_assert(makeSpec(
+    FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16,
+                      .hdim_q = 96, .hdim_v = 96,
+                      .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}}).block_n0 == 128);
+static_assert(makeSpec(
+    FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16,
+                      .hdim_q = 128, .hdim_v = 128,
+                      .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}}).block_n0 == 128);
+static_assert(makeSpec(
+    FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16,
+                      .hdim_q = 256, .hdim_v = 256,
+                      .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}}).block_n0 == 64);
 // clang-format on
 
 } // namespace rocm_ck

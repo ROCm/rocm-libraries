@@ -697,8 +697,9 @@ static bool runDqDkDvBatchVariant(const rocm_ck::FmhaBwdDQDKDVVariant& variant,
     // bias-grad / dropout variants from "compilation proof only" to numerical
     // verification requires non-zero inputs and a matching CPU reference,
     // which is intentionally not done here.
-    void* dev_bias  = nullptr;
-    void* dev_dbias = nullptr;
+    void* dev_bias    = nullptr;
+    void* dev_dbias   = nullptr;
+    void* dev_randval = nullptr;
 
     // Deterministic mode launches a persistent grid of num_cus workers
     // (kUsePersistent = is_deterministic && !is_group_mode in CK Tile). Each
@@ -902,6 +903,8 @@ static bool runDqDkDvBatchVariant(const rocm_ck::FmhaBwdDQDKDVVariant& variant,
     // dropout scalars let the kernel launch survive; they do NOT exercise
     // the bias / dropout math. Promoting these variants to PASSED requires
     // non-zero inputs and a matching CPU reference.
+    const bool is_group_mode = (variant.spec.signature.mode == rocm_ck::FmhaMode::GROUP);
+
     if(variant.spec.bias_type == rocm_ck::FmhaBiasType::ELEMENTWISE)
     {
         // Elementwise bias is per-(batch,nhead,seqlen_q,seqlen_k) in dtype.
@@ -909,9 +912,14 @@ static bool runDqDkDvBatchVariant(const rocm_ck::FmhaBwdDQDKDVVariant& variant,
         HIP_CHECK(hipMalloc(&dev_bias, bias_elems * dtype_bytes));
         HIP_CHECK(hipMemset(dev_bias, 0, bias_elems * dtype_bytes));
 
+        // GROUP mode derives per-batch offsets from seqstart_q/seqstart_k and
+        // FmhaBwdGroupModeKargs inherits FmhaBwdCommonBiasKargs (no
+        // batch_stride_bias field); the dev bridge correspondingly skips
+        // the batch stride for GROUP. Mirror that here so the host setup
+        // does not imply a per-batch stride is consumed.
         const int64_t stride_bias       = seqlen_k;
         const int64_t nhead_stride_bias = int64_t(seqlen_q) * seqlen_k;
-        const int64_t batch_stride_bias = int64_t(nhead) * seqlen_q * seqlen_k;
+        const int64_t batch_stride_bias = is_group_mode ? 0 : int64_t(nhead) * seqlen_q * seqlen_k;
 
         setTensor(
             args.tensors[DKV::BIAS],
@@ -937,13 +945,16 @@ static bool runDqDkDvBatchVariant(const rocm_ck::FmhaBwdDQDKDVVariant& variant,
     if(variant.spec.has_bias_grad)
     {
         // dBias has the same shape/layout as the elementwise bias tensor.
+        // GROUP mode: same rationale as the bias batch_stride above --
+        // FmhaBwdCommonBiasGradKargs has no batch_stride_dbias, so zero it
+        // out at the host to mirror the dev bridge guard.
         const size_t dbias_elems = size_t(batch) * nhead * seqlen_q * seqlen_k;
         HIP_CHECK(hipMalloc(&dev_dbias, dbias_elems * dtype_bytes));
         HIP_CHECK(hipMemset(dev_dbias, 0, dbias_elems * dtype_bytes));
 
         const int64_t stride_dbias       = seqlen_k;
         const int64_t nhead_stride_dbias = int64_t(seqlen_q) * seqlen_k;
-        const int64_t batch_stride_dbias = int64_t(nhead) * seqlen_q * seqlen_k;
+        const int64_t batch_stride_dbias = is_group_mode ? 0 : int64_t(nhead) * seqlen_q * seqlen_k;
 
         setTensor(
             args.tensors[DKV::DBIAS],
@@ -961,6 +972,29 @@ static bool runDqDkDvBatchVariant(const rocm_ck::FmhaBwdDQDKDVVariant& variant,
         args.scalars[DKV::RP_UNDROP].f32   = 1.0f;
         args.scalars[DKV::DROP_SEED].u64   = 0;
         args.scalars[DKV::DROP_OFFSET].u64 = 0;
+
+        // RANDVAL is a uint8 buffer per-(batch,nhead,seqlen_q,seqlen_k).
+        // validateArgs() now requires a non-null slot when has_dropout is
+        // set; a zero-filled placeholder satisfies the host guard. Stride
+        // convention matches dqdkdv_dev.hpp: strides[0]=stride_randval,
+        // strides[1]=nhead_stride_randval, strides[2]=batch_stride_randval
+        // (the dev bridge skips batch_stride_randval in GROUP mode).
+        const size_t randval_elems = size_t(batch) * nhead * seqlen_q * seqlen_k;
+        HIP_CHECK(hipMalloc(&dev_randval, randval_elems * sizeof(uint8_t)));
+        HIP_CHECK(hipMemset(dev_randval, 0, randval_elems * sizeof(uint8_t)));
+
+        // GROUP mode: FmhaBwdCommonDropoutKargs has no batch_stride_randval;
+        // zero out to mirror the dev bridge guard (same rationale as bias).
+        const int64_t stride_randval       = seqlen_k;
+        const int64_t nhead_stride_randval = int64_t(seqlen_q) * seqlen_k;
+        const int64_t batch_stride_randval =
+            is_group_mode ? 0 : int64_t(nhead) * seqlen_q * seqlen_k;
+
+        setTensor(
+            args.tensors[DKV::RANDVAL],
+            dev_randval,
+            {static_cast<rocm_ck::index_t>(seqlen_q), static_cast<rocm_ck::index_t>(seqlen_k)},
+            {stride_randval, nhead_stride_randval, batch_stride_randval});
     }
 
     // Debug-only host guard: catch missing required tensor / scalar slots
@@ -1090,8 +1124,9 @@ static bool runDqDkDvBatchVariant(const rocm_ck::FmhaBwdDQDKDVVariant& variant,
     HIP_CHECK(hipFree(dev_dQ_acc));
     HIP_CHECK(hipFree(dev_dK));
     HIP_CHECK(hipFree(dev_dV));
-    HIP_CHECK(hipFree(dev_bias));  // hipFree(nullptr) is a no-op
-    HIP_CHECK(hipFree(dev_dbias)); // hipFree(nullptr) is a no-op
+    HIP_CHECK(hipFree(dev_bias));    // hipFree(nullptr) is a no-op
+    HIP_CHECK(hipFree(dev_dbias));   // hipFree(nullptr) is a no-op
+    HIP_CHECK(hipFree(dev_randval)); // hipFree(nullptr) is a no-op
     unloadKernel(lk);
     return passed;
 }
