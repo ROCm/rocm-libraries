@@ -5952,6 +5952,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                "UseSgprForGRO": kernel["_UseSgprForGRO"],
                                # -1 disables SwInstructionPrefetch in Gfx1250Backend; else scratch pool index
                                "SwPrefetchScratchSgpr": int(self.sgprs.get("SwPrefetchScratch", -1)),
+                               # Cluster-barrier handshake insertion in Gfx1250Backend
+                               # (kernel-scope at O0/O3 + region-scope always when set).
+                               "ClusterBarrier": bool(kernel.get("ClusterBarrier", False)),
+                               # PrefetchGlobalRead value used by InsertClusterBarrierPass
+                               # to gate Rule 1 (LoopCounterL <= PGR+1) and Rule 4
+                               # (LoopCounterL <= PGR). Defaults to 1 when unset.
+                               "PGR": int(kernel.get("PrefetchGlobalRead", 1)),
+                               # PrefetchLocalRead value used by InsertClusterBarrierPass
+                               # to enable Rule 4's PLR=0 fallback: when no `s_barrier_wait -1`
+                               # is found between `End setupNewTile` and the next label, plant
+                               # the gated signal at the end of the section. Defaults to 1
+                               # (fallback off) when unset.
+                               "PLR": int(kernel.get("PrefetchLocalRead", 1)),
                               }
 
       print2(f"StinkyTofu module options: {stinky_module_options}")

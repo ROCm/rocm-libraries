@@ -68,7 +68,10 @@
     X(EnableWaitCntInsertion, bool)       \
     X(VgprMsbMode, int)                   \
     X(EnableSwPrefetchInsertion, bool)    \
-    X(SwPrefetchScratchSgpr, int)
+    X(SwPrefetchScratchSgpr, int)         \
+    X(ClusterBarrier, bool)               \
+    X(PGR, int)                           \
+    X(PLR, int)
 
 namespace stinkytofu {
 /**
