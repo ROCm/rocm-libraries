@@ -37,7 +37,7 @@ using identity = _THRUST_STD::__identity;
 struct identity
 {
   template <typename Tp>
-  THRUST_NODISCARD inline THRUST_HOST_DEVICE constexpr Tp&& operator()(Tp&& t) const noexcept
+  [[nodiscard]] inline THRUST_HOST_DEVICE constexpr Tp&& operator()(Tp&& t) const noexcept
   {
     return ::std::forward<Tp>(t);
   }
