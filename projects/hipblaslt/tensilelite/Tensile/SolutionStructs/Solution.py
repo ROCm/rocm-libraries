@@ -4677,13 +4677,12 @@ class Solution(collections.abc.Mapping):
     if state["ProblemType"]["TLUA"]:
       state["GuaranteeNoPartialA"] = state["AssertFree0ElementMultiple"]%state["GlobalReadVectorWidthA"]==0
     else:
-      # TLU=False: BufferLoad uses SRD limit hardware; flat loads need graShift
-      state["GuaranteeNoPartialA"] = bufferLoad
+      state["GuaranteeNoPartialA"] = True
 
     if state["ProblemType"]["TLUB"]:
       state["GuaranteeNoPartialB"] = state["AssertFree1ElementMultiple"]%state["GlobalReadVectorWidthB"]==0
     else:
-      state["GuaranteeNoPartialB"] = bufferLoad
+      state["GuaranteeNoPartialB"] = True
 
     state["GuaranteeNoPartialMetadata"] = False if state["ProblemType"]["Sparse"] else True
 
