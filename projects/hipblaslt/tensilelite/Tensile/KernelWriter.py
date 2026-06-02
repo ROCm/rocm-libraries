@@ -2870,7 +2870,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
           if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
             module.add(self.tdmApplyStreamKOffsetWaveSeparated(kernel, tensorParametersA["MX"], tensorParametersB["MX"]))
 
-        module.add(self.releaseGlobalReadIncsSgprsAfterTdmWaveSep(kernel))
+        if not self.states.staggerUCode:
+          module.add(self.releaseGlobalReadIncsSgprsAfterTdmWaveSep(kernel))
 
       if (kernel["enableTDMA"] or kernel["enableTDMB"]) and not kernel["ClusterBarrier"]:
         module.add(self.undefineSgpr("WaveIdx"))
@@ -4598,7 +4599,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.add(self.functionEnd(kernel, addLabel=False))
 
     #module.add(preLoop(self, kernel))
-    module.add(mainLoop(self, kernel))
+    module.add(mainLoop(self, kernel, tensorParametersA, tensorParametersB))
 
     # Deallocate offset registers
     for tileInfo in [atileInfo, btileInfo, mxsatileInfo, mxsbtileInfo]:

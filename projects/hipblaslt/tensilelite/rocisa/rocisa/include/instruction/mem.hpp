@@ -1122,6 +1122,52 @@ namespace rocisa
         }
     };
 
+    struct BufferLoadB16 : public MUBUFReadInstruction
+    {
+        BufferLoadB16(const std::shared_ptr<RegisterContainer>& dst,
+                      const std::shared_ptr<RegisterContainer>& vaddr,
+                      const std::shared_ptr<RegisterContainer>& saddr,
+                      const InstructionInput&                   soffset,
+                      std::optional<MUBUFModifiers>             mubuf   = std::nullopt,
+                      const std::string&                        comment = "")
+            : MUBUFReadInstruction(InstType::INST_B16, dst, vaddr, saddr, soffset, mubuf, comment)
+        {
+        }
+
+        BufferLoadB16(const BufferLoadB16& other)
+            : MUBUFReadInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<BufferLoadB16>(*this);
+        }
+    };
+
+    struct BufferLoadU16 : public MUBUFReadInstruction
+    {
+        BufferLoadU16(const std::shared_ptr<RegisterContainer>& dst,
+                      const std::shared_ptr<RegisterContainer>& vaddr,
+                      const std::shared_ptr<RegisterContainer>& saddr,
+                      const InstructionInput&                   soffset,
+                      std::optional<MUBUFModifiers>             mubuf   = std::nullopt,
+                      const std::string&                        comment = "")
+            : MUBUFReadInstruction(InstType::INST_U16, dst, vaddr, saddr, soffset, mubuf, comment)
+        {
+        }
+
+        BufferLoadU16(const BufferLoadU16& other)
+            : MUBUFReadInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<BufferLoadU16>(*this);
+        }
+    };
+
     struct BufferLoadB32 : public MUBUFReadInstruction
     {
         BufferLoadB32(const std::shared_ptr<RegisterContainer>& dst,
