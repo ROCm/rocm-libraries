@@ -22,8 +22,6 @@ struct TileConvVariant32cDense;
 template <DataType DT>
 struct TileConvVariant32cDense<Version::v3, DT>
 {
-    static constexpr auto& configs_map = conv_32c_tile::v3::KernelConfigurations<DT>::configs_map;
-
     static bool is_applicable(const Conv2dParams& par)
     { return conv_32c_tile::v3::is_applicable<DT>(par); }
 
@@ -45,10 +43,9 @@ struct TileConvVariant32cDense<Version::v3, DT>
 // Concrete kernel wrappers — 32c dense (non-grouped)
 // ============================================================================
 
-template <int ConfigIdx, Version Ver = Version::v3, DataType DT = DataType::fp16>
+template <auto Cfg, Version Ver = Version::v3, DataType DT = DataType::fp16>
 struct DirectTileConvForward32CDenseKernel
-    : DirectConvKernel<DirectTileConvForward32CDenseKernel<ConfigIdx, Ver, DT>,
-                       TileConvVariant32cDense<Ver, DT>::configs_map.get(ConfigIdx)>
+    : DirectConvKernel<DirectTileConvForward32CDenseKernel<Cfg, Ver, DT>, Cfg>
 {
     using V = TileConvVariant32cDense<Ver, DT>;
     static constexpr bool kIsFprop = true;
@@ -62,10 +59,9 @@ struct DirectTileConvForward32CDenseKernel
     }
 };
 
-template <int ConfigIdx, Version Ver = Version::v3, DataType DT = DataType::fp16>
+template <auto Cfg, Version Ver = Version::v3, DataType DT = DataType::fp16>
 struct DirectTileConvBwdData32CDenseKernel
-    : DirectConvKernel<DirectTileConvBwdData32CDenseKernel<ConfigIdx, Ver, DT>,
-                       TileConvVariant32cDense<Ver, DT>::configs_map.get(ConfigIdx)>
+    : DirectConvKernel<DirectTileConvBwdData32CDenseKernel<Cfg, Ver, DT>, Cfg>
 {
     using V = TileConvVariant32cDense<Ver, DT>;
     static constexpr bool kIsFprop = false;

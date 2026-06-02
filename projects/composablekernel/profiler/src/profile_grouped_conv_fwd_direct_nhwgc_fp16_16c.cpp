@@ -3,6 +3,8 @@
 
 #include "profiler/direct_conv_instance_registry.hpp"
 #include "profiler/direct_conv_profiler_bridge.hpp"
+#include "ck_tile/ops/direct_convolution/configs/direct_conv_16c_configs.hpp"
+#include "ck_tile/ops/direct_convolution/configs/direct_conv_16c_hip_configs.hpp"
 
 namespace ck_tile::builder::profiling {
 

@@ -22,8 +22,6 @@ struct TileConvVariant32c;
 template <DataType DT>
 struct TileConvVariant32c<Version::v2, DT>
 {
-    static constexpr auto& configs_map = grouped_32c_tile::v2::KernelConfigurations<DT>::configs_map;
-
     static bool is_applicable(const Conv2dParams& par)
     { return grouped_32c_tile::v2::is_applicable<DT>(par); }
 
@@ -43,8 +41,6 @@ struct TileConvVariant32c<Version::v2, DT>
 
 struct HipConvVariant32c
 {
-    static constexpr auto& configs_map = ck_tile::direct_hip_conv::grouped_32c::configs_map;
-
     static bool is_applicable(const Conv2dParams& par)
     { return ck_tile::direct_hip_conv::grouped_32c::is_applicable(par); }
 
@@ -66,10 +62,9 @@ struct HipConvVariant32c
 // Concrete kernel wrappers — 32c
 // ============================================================================
 
-template <int ConfigIdx, Version Ver = Version::v2, DataType DT = DataType::fp16>
+template <auto Cfg, Version Ver = Version::v2, DataType DT = DataType::fp16>
 struct DirectTileConvForward32CKernel
-    : DirectConvKernel<DirectTileConvForward32CKernel<ConfigIdx, Ver, DT>,
-                       TileConvVariant32c<Ver, DT>::configs_map.get(ConfigIdx)>
+    : DirectConvKernel<DirectTileConvForward32CKernel<Cfg, Ver, DT>, Cfg>
 {
     using V = TileConvVariant32c<Ver, DT>;
     static constexpr bool kIsFprop = true;
@@ -83,10 +78,9 @@ struct DirectTileConvForward32CKernel
     }
 };
 
-template <int ConfigIdx, Version Ver = Version::v2, DataType DT = DataType::fp16>
+template <auto Cfg, Version Ver = Version::v2, DataType DT = DataType::fp16>
 struct DirectTileConvBwdData32CKernel
-    : DirectConvKernel<DirectTileConvBwdData32CKernel<ConfigIdx, Ver, DT>,
-                       TileConvVariant32c<Ver, DT>::configs_map.get(ConfigIdx)>
+    : DirectConvKernel<DirectTileConvBwdData32CKernel<Cfg, Ver, DT>, Cfg>
 {
     using V = TileConvVariant32c<Ver, DT>;
     static constexpr bool kIsFprop = false;
@@ -100,10 +94,9 @@ struct DirectTileConvBwdData32CKernel
     }
 };
 
-template <int ConfigIdx>
+template <auto Cfg>
 struct DirectHipConvForward32CFp16Kernel
-    : DirectConvKernel<DirectHipConvForward32CFp16Kernel<ConfigIdx>,
-                       HipConvVariant32c::configs_map.get(ConfigIdx)>
+    : DirectConvKernel<DirectHipConvForward32CFp16Kernel<Cfg>, Cfg>
 {
     using V = HipConvVariant32c;
     static constexpr bool kIsFprop = true;
@@ -111,10 +104,9 @@ struct DirectHipConvForward32CFp16Kernel
     static std::string GetNamePrefix() { return "direct_hip_conv_fp16_fwd_"; }
 };
 
-template <int ConfigIdx>
+template <auto Cfg>
 struct DirectHipConvBwdData32CFp16Kernel
-    : DirectConvKernel<DirectHipConvBwdData32CFp16Kernel<ConfigIdx>,
-                       HipConvVariant32c::configs_map.get(ConfigIdx)>
+    : DirectConvKernel<DirectHipConvBwdData32CFp16Kernel<Cfg>, Cfg>
 {
     using V = HipConvVariant32c;
     static constexpr bool kIsFprop = false;

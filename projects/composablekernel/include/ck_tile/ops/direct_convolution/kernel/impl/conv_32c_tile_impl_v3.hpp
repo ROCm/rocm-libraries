@@ -51,6 +51,118 @@ constexpr int WAVE_SIZE = 64;
 enum class MfmaShape { M16N16K32, M32N32K16 };
 
 // ===================================================================
+// Config — kernel configuration for v3 cross-wave LDS reduction.
+//
+// Parameters:
+//   mfma_shape: M16N16K32 or M32N32K16
+//   waves_per_group() = 1 (each wave is its own C-group)
+//   block_groups() = waves_per_wg
+//   channels_per_group() = mfma_k (32 or 16)
+//   block_c() = waves_per_wg * channels_per_group
+//   block_k_size() = mfma_m (16 or 32 K-output channels; A/C rows)
+//   block_q() = mfma_n (16 or 32 spatial positions; B/C columns)
+//   c_local_count() = waves_per_wg (one cpg slice per wave)
+//
+// MFMA dimension convention (matches hardware lane mapping):
+//   weight operand = A: 16 (or 32) rows × K reduction
+//                    → row index = mfma_m → K-output channel (Fprop) or
+//                                            C-input channel (Dgrad)
+//   input  operand = B: K reduction × 16 (or 32) columns
+//                    → column index = mfma_n → spatial output position
+//   accumulator    = C: rows × columns
+//                    → lane % 16 selects N (column = spatial),
+//                      4 values per lane span M (rows = K-output).
+// ===================================================================
+template <DataType DT = DataType::fp16>
+struct Config
+{
+    static constexpr DataType data_type = DT;
+    MfmaShape mfma_shape = MfmaShape::M16N16K32;
+    int waves_per_wg;
+    int kh = 3;
+    int kw = 3;
+    int n_fold = 8;
+
+    // Number of channels_per_group C-chunks each wave streams through the
+    // same fixed-size LDS buffers. Default 1 reproduces the legacy schedule.
+    // For N > 1, block_c = waves_per_wg * N * cpg but LDS sizes stay at the
+    // N=1 footprint; chunks ping-pong through the input double-buffer and
+    // share the per-wave weight LDS region (loaded sequentially in prologue).
+    // Restricted to mfma_shape == M16N16K32 (see static_assert in
+    // TileConstants).
+    int c_slices_per_wave = 1;
+
+    // Derived from MFMA shape:
+    constexpr int mfma_m() const { return (mfma_shape == MfmaShape::M16N16K32) ? 16 : -1; }
+    constexpr int mfma_n() const { return (mfma_shape == MfmaShape::M16N16K32) ? 16 : -1; }
+    constexpr int mfma_k() const { return (mfma_shape == MfmaShape::M16N16K32) ? 32 : -1; }
+
+    constexpr int channels_per_group() const { return mfma_k(); }
+    constexpr int group_size() const { return channels_per_group(); }
+    constexpr int waves_per_group() const { return 1; }
+    constexpr int block_groups() const { return waves_per_wg; }
+
+    constexpr int num_waves() const { return waves_per_wg; }
+    // Channels in a single in-flight LDS chunk = one input double-buffer
+    // entry = one prologue iteration's weight LDS region.
+    // INVARIANT: block_c() must not scale with c_slices_per_wave — it is
+    // consumed by TileConstantsBase (BLOCK_C8, INPUT_LDS_BUFFER_SIZE_*) and
+    // Weight::WEIGHT_LDS_READ_K, which must stay fixed-size when N grows.
+    constexpr int block_c() const { return channels_per_group() * block_groups(); }
+    // Total C channels covered per workgroup across all chunks.
+    constexpr int total_block_c() const { return block_c() * c_slices_per_wave; }
+    // Spatial output positions per wave = MFMA N (columns of B/C).
+    constexpr int block_q() const { return mfma_n(); }
+    constexpr int block_size() const { return waves_per_wg * WAVE_SIZE; }
+
+    // K-output channels per wave = MFMA M (rows of A/C).
+    // All waves share the same block_k_size K-channels.
+    constexpr int block_k_size() const { return mfma_m(); }
+
+    // Total C-sections per workgroup across all waves and chunks.
+    constexpr int c_local_count() const {
+        return block_groups() * c_slices_per_wave;
+    }
+
+    Direction direction = Direction::Fprop;
+
+    SwizzleType swizzle_type = SwizzleType::None;
+    EpilogueType epilogue = EpilogueType::RegistersToGlobalMemory;
+    int vector_size = 8;
+
+    std::string GetName() const
+    {
+        std::string mfma_str = (mfma_shape == MfmaShape::M32N32K16) ? "32x32x16" : "16x16x32";
+        std::string swizzle_type_str = "_no_swizzle";
+        if (swizzle_type == SwizzleType::CyclicShift)
+        {
+            swizzle_type_str = "_cyclic_shift_swizzle";
+        }
+        else if (swizzle_type == SwizzleType::XOR)
+        {
+            swizzle_type_str = "_xor_swizzle";
+        }
+
+        std::string base = "mfma_" + mfma_str + "_waves_per_wg_" + std::to_string(waves_per_wg) + swizzle_type_str + "_cross_wave_lds_reduce";
+
+        std::string epilogue_suffix;
+        if (epilogue == EpilogueType::RegistersToGlobalMemory)
+        {
+            epilogue_suffix = "_direct_dram_epilogue";
+        }
+        else if (epilogue == EpilogueType::RegistersToLdsToGlobalMemory)
+        {
+            epilogue_suffix = "_lds_staged_epilogue";
+        }
+
+        std::string cspw_suffix =
+            (c_slices_per_wave > 1) ? ("_cspw" + std::to_string(c_slices_per_wave)) : "";
+
+        return base + epilogue_suffix + cspw_suffix;
+    }
+};
+
+// ===================================================================
 // weight_load_to_lds_kyxc — load one c_slice of KYXC weights to LDS.
 //
 // Loads weight[block_k_start : +block_k_size, :, c_slice*cpg : +cpg]
@@ -286,12 +398,10 @@ struct Config
             epilogue_suffix = "_lds_staged_epilogue";
         }
 
-        std::string buf_suffix = (input_buffering == InputBuffering::Single) ? "_single_buf" : "";
-
         std::string cspw_suffix =
             (c_slices_per_wave > 1) ? ("_cspw" + std::to_string(c_slices_per_wave)) : "";
 
-        return base + epilogue_suffix + buf_suffix + cspw_suffix;
+        return base + epilogue_suffix + cspw_suffix;
     }
 };
 

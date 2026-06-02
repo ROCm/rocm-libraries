@@ -7,6 +7,7 @@
 #pragma clang diagnostic ignored "-Wunused-parameter"
 #pragma clang diagnostic ignored "-Wshadow"
 #include "ck_tile/ops/direct_convolution/kernel/direct_conv_32c_dense.hpp"
+#include "ck_tile/ops/direct_convolution/configs/direct_conv_32c_dense_configs.hpp"
 #pragma clang diagnostic pop
 
 constexpr auto v3 = ck_tile::direct_conv::Version::v3;
@@ -29,9 +30,15 @@ constexpr auto v3 = ck_tile::direct_conv::Version::v3;
 struct TileConv32cDenseKernelTraitsV3
 {
     template <int ConfigIdx>
-    using FwdKernel = ck_tile::direct_conv::DirectTileConvForward32CDenseKernel<ConfigIdx, v3>;
+    using FwdKernel = ck_tile::direct_conv::DirectTileConvForward32CDenseKernel<
+        ck_tile::direct_conv::conv_32c_tile::v3::KernelConfigurations<
+            ck_tile::direct_conv::DataType::fp16>::configs_map.get(ConfigIdx),
+        v3>;
     template <int ConfigIdx>
-    using BwdDataKernel = ck_tile::direct_conv::DirectTileConvBwdData32CDenseKernel<ConfigIdx, v3>;
+    using BwdDataKernel = ck_tile::direct_conv::DirectTileConvBwdData32CDenseKernel<
+        ck_tile::direct_conv::conv_32c_tile::v3::KernelConfigurations<
+            ck_tile::direct_conv::DataType::fp16>::configs_map.get(ConfigIdx),
+        v3>;
 };
 
 // --- Fprop, v3 cross-wave LDS reduction ---
