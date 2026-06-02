@@ -427,7 +427,7 @@ class StinkyDAGSchedulerPass : public StinkyInstPass {
                 for (auto it = bb->begin(); it != bb->end(); ++it) {
                     auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
                     if (!inst) continue;
-                    if (isWMMA(*inst) || isSWMMA(*inst)) wmmaIndex[inst] = idx++;
+                    if (isMatrixInstruction(*inst)) wmmaIndex[inst] = idx++;
                 }
             }
         }
