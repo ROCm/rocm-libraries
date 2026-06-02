@@ -44,25 +44,24 @@ std::int32_t narrowToI32(std::int64_t value, const char* fieldName) {
     return static_cast<std::int32_t>(value);
 }
 
-void checkDtypeHalf(const TensorAttributes& t, const char* role) {
-    // The DSL FMHA-forward kernel currently only emits FP16 I/O. Reject
-    // anything else at the adapter boundary so applicability + the
-    // engine selection layer can fall through cleanly to other engines.
-    if (t.data_type() != DataType::HALF) {
+void checkDtypeHalfOrBf16(const TensorAttributes& t, const char* role) {
+    // The unified paged/varlen kernel emits both FP16 and BF16 I/O.
+    // Reject anything else at the adapter boundary so the capability gate
+    // (tryBuildSpec) can decline cleanly and the engine selection layer
+    // can fall through to other engines.
+    if (t.data_type() != DataType::HALF && t.data_type() != DataType::BFLOAT16) {
         std::ostringstream oss;
-        oss << role << " data_type must be HALF (FP16); got " << static_cast<int>(t.data_type());
+        oss << role << " data_type must be HALF (FP16) or BFLOAT16; got "
+            << static_cast<int>(t.data_type());
         throwBadParam(oss.str());
     }
 }
 
-void checkDtypeFloat(const TensorAttributes& t, const char* role) {
-    // The optional forward stats (LSE) output is natural-log values
-    // stored in f32; the kernel writes FLOAT for this tensor.
-    if (t.data_type() != DataType::FLOAT) {
-        std::ostringstream oss;
-        oss << role << " data_type must be FLOAT (f32); got " << static_cast<int>(t.data_type());
-        throwBadParam(oss.str());
-    }
+// Map the (already-validated half-or-bf16) Q dtype to the kernel's dtype
+// string. Q drives codegen; K/V/O are required to match it (checked by
+// the caller).
+const char* dtypeString(const TensorAttributes& t) {
+    return t.data_type() == DataType::BFLOAT16 ? "bf16" : "f16";
 }
 
 void check4dDims(const TensorAttributes& t, const char* role) {
@@ -140,69 +139,55 @@ void checkBshdLayout(const TensorAttributes& t, std::int32_t B, std::int32_t S, 
     }
 }
 
-// Validate the optional forward stats (LSE) output tensor. The kernel
-// writes natural-log LSE as a flat contiguous head-major [B, Hq, Sq]
-// f32 buffer, so:
-//   * dtype must be FLOAT (f32);
-//   * dims must be rank-3 [B, Hq, Sq] (canonical) or rank-4
-//     [B, Hq, Sq, 1] (some frontends carry a trailing unit axis);
-//   * the B/Hq/Sq prefix must match the Q-derived extents;
-//   * the [B, Hq, Sq] dims must be contiguous head-major: strides
-//     {Hq*Sq, Sq, 1} (innermost Sq unit-stride, head stride == Sq,
-//     batch stride == Hq*Sq).
-void checkStatsTensor(const TensorAttributes& stats, std::int32_t B, std::int32_t Hq,
-                      std::int32_t Sq) {
-    checkDtypeFloat(stats, "stats");
+// Derive the paged-KV block size (tokens per physical block) for a real
+// paged graph. hipDNN's SDPA surface has NO dedicated block-size field:
+// paging is expressed only by the Page_table_K/V tensors plus the
+// optional ``max_seq_len_kv`` scalar. The vLLM-style page table is shaped
+// [num_seqs, max_blocks_per_seq], so the block size is recovered as
+//   ceil(max_seq_len_kv / max_blocks_per_seq)
+// then snapped up to the nearest kernel-supported value in {16, 32, 64}.
+//
+// When the page table is not rank-2, or ``max_seq_len_kv`` is absent, the
+// pre-launch block size is genuinely not determinable from the graph
+// alone (the true value lives in the host-side KV-cache allocation). In
+// that case this falls back to a documented default of 16 (the smallest
+// supported block) so the gate still yields a compile-time, kernel-valid
+// block size; Phase 4 real-paged launch correctness validates the actual
+// cache layout against this choice.
+//
+// The result is always one of {16, 32, 64}; a derived value above 64 is
+// declined by the caller (a single physical block cannot exceed the
+// kernel's max block size).
+std::int32_t derivePagedBlockSize(const TensorAttributes& pageTableK,
+                                  const SdpaAdapter::SdpaAttributes& sdpaAttr) {
+    constexpr std::int32_t kDefaultBlockSize = 16;
 
-    // Rank-3 [B, Hq, Sq] is canonical; rank-4 [B, Hq, Sq, 1] is accepted
-    // too. Validate the B/Hq/Sq prefix against Q either way.
-    if (stats.dims() == nullptr || (stats.dims()->size() != 3 && stats.dims()->size() != 4)) {
-        std::ostringstream oss;
-        oss << "stats dims must be rank-3 ([B, Hq, Sq]) or rank-4 ([B, Hq, Sq, 1]); got size "
-            << (stats.dims() == nullptr ? 0u : stats.dims()->size());
-        throwBadParam(oss.str());
-    }
-    const std::uint32_t statsRank = stats.dims()->size();
-    if (statsRank == 4) {
-        auto statsLast = getDim(stats, 3, "stats", "trailing");
-        if (statsLast != 1) {
-            std::ostringstream oss;
-            oss << "stats rank-4 trailing dim (" << statsLast << ") must be 1 ([B, Hq, Sq, 1])";
-            throwBadParam(oss.str());
-        }
+    const bool haveBlocksPerSeq = pageTableK.dims() != nullptr && pageTableK.dims()->size() == 2;
+    if (!haveBlocksPerSeq || !sdpaAttr.max_seq_len_kv().has_value()) {
+        return kDefaultBlockSize;
     }
 
-    auto Bs = getDim(stats, 0, "stats", "B");
-    auto Hq_s = getDim(stats, 1, "stats", "Hq");
-    auto Sq_s = getDim(stats, 2, "stats", "Sq");
-    if (Bs != B || Hq_s != Hq || Sq_s != Sq) {
-        std::ostringstream oss;
-        oss << "stats shape [B, Hq, Sq] must match Q; expected {" << B << ", " << Hq << ", " << Sq
-            << "}, got {" << Bs << ", " << Hq_s << ", " << Sq_s << "}";
-        throwBadParam(oss.str());
+    const std::int64_t maxBlocksPerSeq = pageTableK.dims()->Get(1);
+    const std::int64_t maxSeqLenKv = sdpaAttr.max_seq_len_kv().value();
+    if (maxBlocksPerSeq <= 0 || maxSeqLenKv <= 0) {
+        return kDefaultBlockSize;
     }
 
-    // Contiguous head-major: strides == {Hq*Sq, Sq, 1}. The kernel writes
-    // stats as a flat contiguous [B, Hq, Sq] buffer, so a non-contiguous
-    // layout is rejected.
-    if (stats.strides() == nullptr || stats.strides()->size() != statsRank) {
-        std::ostringstream oss;
-        oss << "stats strides must match its rank (" << statsRank << "); got size "
-            << (stats.strides() == nullptr ? 0u : stats.strides()->size());
-        throwBadParam(oss.str());
+    // ceil(maxSeqLenKv / maxBlocksPerSeq).
+    const std::int64_t raw = (maxSeqLenKv + maxBlocksPerSeq - 1) / maxBlocksPerSeq;
+
+    // Snap up to the nearest supported block size; anything above 64 is
+    // returned as-is so the caller can decline it with a clear reason.
+    if (raw <= 16) {
+        return 16;
     }
-    const std::int64_t statsStrideBatch = stats.strides()->Get(0);
-    const std::int64_t statsStrideHead = stats.strides()->Get(1);
-    const std::int64_t statsStrideSeq = stats.strides()->Get(2);
-    const std::int64_t expectedStatsStrideBatch = static_cast<std::int64_t>(Hq) * Sq;
-    if (statsStrideSeq != 1 || statsStrideHead != Sq ||
-        statsStrideBatch != expectedStatsStrideBatch) {
-        std::ostringstream oss;
-        oss << "stats must be contiguous head-major [B, Hq, Sq]; expected strides {" << Hq * Sq
-            << ", " << Sq << ", 1}, got {" << statsStrideBatch << ", " << statsStrideHead << ", "
-            << statsStrideSeq << "}";
-        throwBadParam(oss.str());
+    if (raw <= 32) {
+        return 32;
     }
+    if (raw <= 64) {
+        return 64;
+    }
+    return narrowToI32(raw, "derived block_size");
 }
 
 }  // namespace
@@ -218,10 +203,21 @@ SdpaSpec SdpaAdapter::buildSpec(const SdpaAttributes& sdpaAttr, const TensorMap&
     check4dDims(V, "V");
     check4dDims(O, "O");
 
-    checkDtypeHalf(Q, "Q");
-    checkDtypeHalf(K, "K");
-    checkDtypeHalf(V, "V");
-    checkDtypeHalf(O, "O");
+    checkDtypeHalfOrBf16(Q, "Q");
+    checkDtypeHalfOrBf16(K, "K");
+    checkDtypeHalfOrBf16(V, "V");
+    checkDtypeHalfOrBf16(O, "O");
+
+    // Q drives codegen; all four I/O tensors must share its dtype so the
+    // single kernel binary is consistent.
+    if (K.data_type() != Q.data_type() || V.data_type() != Q.data_type() ||
+        O.data_type() != Q.data_type()) {
+        std::ostringstream oss;
+        oss << "Q/K/V/O must share one data_type; got Q=" << static_cast<int>(Q.data_type())
+            << " K=" << static_cast<int>(K.data_type()) << " V=" << static_cast<int>(V.data_type())
+            << " O=" << static_cast<int>(O.data_type());
+        throwBadParam(oss.str());
+    }
 
     // Tensor dim convention (rank-4): [B, H, S, D].
     //   Q.dims = [B, Hq,  Sq,  D ]
@@ -308,11 +304,16 @@ SdpaSpec SdpaAdapter::buildSpec(const SdpaAttributes& sdpaAttr, const TensorMap&
         throwBadParam(oss.str());
     }
 
-    // head_size must be one of the kernel-supported values (matches the
-    // DSL's validate_common_spec).
-    if (D != 32 && D != 64 && D != 128 && D != 192 && D != 256) {
+    // head_size must be one of the unified paged kernel's supported
+    // values {64, 128, 256}. This is a deliberate POC narrowing relative
+    // to the prior dense adapter's wider {32, 64, 128, 192, 256}: the
+    // paged tiled-2D kernel only handles {64, 128, 256} (all % 32). Sizes
+    // 32 and 192 are declined.
+    if (D != 64 && D != 128 && D != 256) {
         std::ostringstream oss;
-        oss << "head_size (" << D << ") must be one of {32, 64, 128, 192, 256}";
+        oss << "head_size (" << D
+            << ") must be one of {64, 128, 256} (the unified paged kernel does not support "
+               "32 or 192)";
         throwBadParam(oss.str());
     }
 
@@ -338,85 +339,190 @@ SdpaSpec SdpaAdapter::buildSpec(const SdpaAttributes& sdpaAttr, const TensorMap&
         throwBadParam(oss.str());
     }
 
-    // Mask support: top-left causal or no mask only.
+    // ---- Capability gate: the broad-but-safe variant matrix ----------
+    //
+    // The unified paged/varlen tiled-2D kernel applies causal masking
+    // UNCONDITIONALLY and supports only top-left alignment, an optional
+    // left (causal) window, GQA, sinks, varlen, and real paged KV. Every
+    // throwBadParam below is a CLEAN capability decline: SdpaFwdPlanBuilder
+    // wraps buildSpec in tryBuildSpec, which converts the throw into
+    // isApplicable=false plus the reason string -- there is no separate
+    // return-bool path. NO hybrid dense routing: a variant the single
+    // kernel cannot do is declined, never silently downgraded.
+
+    // -- Masking --
+    //
+    // Alignment is expressed two ways on the surface: the deprecated
+    // ``causal_mask`` / ``causal_mask_bottom_right`` bools and the newer
+    // ``diagonal_alignment`` + ``left_bound`` / ``right_bound`` band. The
+    // gate honours both.
     if (sdpaAttr.alibi_mask()) {
-        throwBadParam("ALiBi mask is not supported");
+        throwBadParam("ALiBi mask not supported");
     }
     if (sdpaAttr.padding_mask()) {
-        throwBadParam("padding mask is not supported");
+        throwBadParam("padding mask not supported");
     }
-    if (sdpaAttr.causal_mask_bottom_right()) {
-        throwBadParam("bottom-right causal mask is not supported (top-left causal only)");
-    }
-    if (sdpaAttr.left_bound().has_value() || sdpaAttr.right_bound().has_value()) {
-        throwBadParam("sliding-window attention (left_bound/right_bound) is not supported");
-    }
-    std::string maskMode = sdpaAttr.causal_mask() ? "causal" : "none";
-
-    // Reject every advanced feature the M1 forward kernel does not model.
     if (sdpaAttr.attn_mask_tensor_uid().has_value()) {
-        throwBadParam("additive attn_mask tensor not supported");
+        throwBadParam("additive attn_mask tensor (bias) not supported");
     }
+
+    // Bottom-right alignment (either spelling) is not supported -- the
+    // kernel only does top-left causal.
+    const bool bottomRight =
+        sdpaAttr.causal_mask_bottom_right() ||
+        sdpaAttr.diagonal_alignment() ==
+            hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment::BOTTOM_RIGHT;
+    if (bottomRight) {
+        throwBadParam(
+            "bottom-right causal mask / diagonal_alignment=BOTTOM_RIGHT not supported "
+            "(top-left causal only)");
+    }
+
+    // A right-side window is not supported: the kernel models only a left
+    // (look-back) causal window. left_bound > 0 selects a sliding window;
+    // left_bound == 0 (or unset) means full causal context.
+    const std::int64_t rightBound =
+        sdpaAttr.right_bound().has_value() ? sdpaAttr.right_bound().value() : 0;
+    if (rightBound != 0) {
+        throwBadParam(
+            "right_bound != 0 not supported; only a left (causal look-back) window is modelled");
+    }
+    const std::int64_t leftBound =
+        sdpaAttr.left_bound().has_value() ? sdpaAttr.left_bound().value() : 0;
+    if (leftBound < 0) {
+        throwBadParam("left_bound must be non-negative");
+    }
+
+    // The kernel applies causal masking unconditionally, so a non-causal
+    // (bidirectional / full-context) request cannot be honoured. Causal is
+    // signalled by the deprecated ``causal_mask`` bool OR a positive left
+    // window (a windowed band is inherently causal here). Anything else --
+    // including the prior "no mask" case -- is declined.
+    const bool causalRequested = sdpaAttr.causal_mask() || leftBound > 0;
+    if (!causalRequested) {
+        throwBadParam(
+            "non-causal/bidirectional attention not supported; the unified paged kernel applies "
+            "causal masking unconditionally (set causal_mask or a left_bound window)");
+    }
+    const std::string maskMode = "causal";
+    const std::int32_t slidingWindow = narrowToI32(leftBound, "left_bound");
+
+    // -- Scale: only the scalar attn_scale is supported (handled at
+    //    extraction); a per-element scale tensor is declined.
     if (sdpaAttr.scale_tensor_uid().has_value()) {
-        throwBadParam("per-element scale tensor not supported");
+        throwBadParam("per-element scale tensor not supported (scalar attn_scale only)");
     }
-    // Opt-in forward stats (LSE) output. The request is signalled either
-    // by ``generate_stats() == true`` or by the presence of a
-    // ``stats_tensor_uid``; either way the output tensor must be provided
-    // so the kernel has somewhere to write. The single combined LSE
-    // output is supported (head-major [B, Hq, Sq] f32 contiguous); the
-    // separate max / sum_exp outputs are not (rejected below). The stats
-    // tensor itself is validated after the Q-derived B/Hq/Sq extents are
-    // known.
+
+    // -- LSE / softmax-stats output. The dense path CAN emit LSE
+    //    (generate_stats, ABI slot 16) but the unified paged kernel emits
+    //    NONE. Declining it here is a deliberate REGRESSION vs the dense
+    //    path (Vidya follow-up); it is never silently dropped.
     const bool wantStats =
         (sdpaAttr.generate_stats().has_value() && sdpaAttr.generate_stats().value()) ||
         sdpaAttr.stats_tensor_uid().has_value();
-    if (wantStats && !sdpaAttr.stats_tensor_uid().has_value()) {
+    if (wantStats) {
         throwBadParam(
-            "generate_stats requested but no stats_tensor_uid provided; the LSE output tensor "
-            "must be supplied");
+            "LSE/stats output (generate_stats) not supported on the unified paged SDPA path "
+            "(regression vs dense; Vidya follow-up)");
     }
-    if (sdpaAttr.seq_len_q_tensor_uid().has_value() ||
-        sdpaAttr.seq_len_kv_tensor_uid().has_value()) {
-        throwBadParam("variable-length sequences not supported");
+    if (sdpaAttr.max_tensor_uid().has_value() || sdpaAttr.sum_exp_tensor_uid().has_value()) {
+        throwBadParam("max/sum_exp outputs not supported");
     }
+
+    // -- Dropout (tensors or probability) is not supported.
     if (sdpaAttr.seed_tensor_uid().has_value() || sdpaAttr.offset_tensor_uid().has_value() ||
         sdpaAttr.dropout_mask_tensor_uid().has_value() ||
-        sdpaAttr.dropout_scale_tensor_uid().has_value()) {
+        sdpaAttr.dropout_scale_tensor_uid().has_value() ||
+        sdpaAttr.dropout_probability().has_value()) {
         throwBadParam("dropout not supported");
     }
-    if (sdpaAttr.page_table_k_tensor_uid().has_value() ||
-        sdpaAttr.page_table_v_tensor_uid().has_value()) {
-        throwBadParam("paged KV not supported");
-    }
+
+    // -- Block mask is not supported.
     if (sdpaAttr.block_mask_tensor_uid().has_value()) {
         throwBadParam("block mask not supported");
     }
-    if (sdpaAttr.sink_token_tensor_uid().has_value()) {
-        throwBadParam("sink tokens not supported");
-    }
-    if (sdpaAttr.max_tensor_uid().has_value() || sdpaAttr.sum_exp_tensor_uid().has_value()) {
-        throwBadParam("max/sum_exp outputs not supported in M1 forward");
-    }
-    // FP8 quantization scales/descales -- FP16-only kernel cannot consume them.
+
+    // -- FP8 quantization scales/descales are deferred (the kernel uses
+    //    scalar k/v/out scales; hipDNN expresses descales as tensors).
     if (sdpaAttr.descale_q_tensor_uid().has_value() ||
         sdpaAttr.descale_k_tensor_uid().has_value() ||
         sdpaAttr.descale_v_tensor_uid().has_value() ||
         sdpaAttr.descale_s_tensor_uid().has_value() || sdpaAttr.scale_s_tensor_uid().has_value() ||
         sdpaAttr.scale_o_tensor_uid().has_value()) {
-        throwBadParam("FP8 descale/scale tensors not supported (FP16 only in M1 forward)");
+        throwBadParam("FP8 descale/scale tensors not supported (deferred)");
     }
     if (sdpaAttr.amax_s_tensor_uid().has_value() || sdpaAttr.amax_o_tensor_uid().has_value()) {
-        throwBadParam("amax_s/amax_o outputs not supported in M1 forward");
+        throwBadParam("amax_s/amax_o outputs not supported");
     }
     if (sdpaAttr.rng_dump_tensor_uid().has_value()) {
         throwBadParam("rng_dump not supported");
     }
-    // Dropout requested via probability (the dropout *tensors* are
-    // already rejected above).
-    if (sdpaAttr.dropout_probability().has_value()) {
-        throwBadParam("dropout not supported");
+
+    // -- Variable-length sequences (cu_seqlens). Accepted: presence of the
+    //    seqlen tensors selects the varlen marshalling path. Both must be
+    //    present together so the kernel has consistent cu_seqlens for Q and
+    //    KV.
+    const bool haveSeqLenQ = sdpaAttr.seq_len_q_tensor_uid().has_value();
+    const bool haveSeqLenKv = sdpaAttr.seq_len_kv_tensor_uid().has_value();
+    if (haveSeqLenQ != haveSeqLenKv) {
+        throwBadParam(
+            "variable-length sequences require both seq_len_q and seq_len_kv tensors; got only "
+            "one");
     }
+    const bool isVarlen = haveSeqLenQ && haveSeqLenKv;
+
+    // -- Paged KV. Accepted when BOTH page tables are present and
+    //    consistent (the kernel takes a single block table). Only one
+    //    present, or a K/V table mismatch, is declined. block_size is
+    //    derived from the page-table layout + max_seq_len_kv and must land
+    //    in {16, 32, 64}.
+    const bool havePageK = sdpaAttr.page_table_k_tensor_uid().has_value();
+    const bool havePageV = sdpaAttr.page_table_v_tensor_uid().has_value();
+    if (havePageK != havePageV) {
+        throwBadParam(
+            "mismatched page_table_k/page_table_v: both must be present for paged KV "
+            "(the kernel takes a single block table)");
+    }
+    bool isPaged = false;
+    std::int32_t blockSize = 0;
+    if (havePageK && havePageV) {
+        const auto& pageTableK =
+            lookupTensor(tensorMap, sdpaAttr.page_table_k_tensor_uid().value(), "page_table_k");
+        const auto& pageTableV =
+            lookupTensor(tensorMap, sdpaAttr.page_table_v_tensor_uid().value(), "page_table_v");
+
+        // The single-table kernel requires K and V page tables to describe
+        // the same block layout (same dims). A divergent layout is a
+        // single-table-vs-two-table mismatch and is declined.
+        const bool dimsMatch = pageTableK.dims() != nullptr && pageTableV.dims() != nullptr &&
+                               pageTableK.dims()->size() == pageTableV.dims()->size();
+        bool extentsMatch = dimsMatch;
+        if (dimsMatch) {
+            for (std::uint32_t i = 0; i < pageTableK.dims()->size(); ++i) {
+                if (pageTableK.dims()->Get(i) != pageTableV.dims()->Get(i)) {
+                    extentsMatch = false;
+                    break;
+                }
+            }
+        }
+        if (!extentsMatch) {
+            throwBadParam(
+                "mismatched page_table_k/page_table_v: the single-table kernel requires identical "
+                "K and V block-table layouts");
+        }
+
+        isPaged = true;
+        blockSize = derivePagedBlockSize(pageTableK, sdpaAttr);
+        if (blockSize != 16 && blockSize != 32 && blockSize != 64) {
+            std::ostringstream oss;
+            oss << "derived paged block_size (" << blockSize << ") must be one of {16, 32, 64}";
+            throwBadParam(oss.str());
+        }
+    }
+
+    // -- Sinks. Accepted: presence of the Sink_token tensor enables the
+    //    kernel's attention-sink path.
+    const bool useSinks = sdpaAttr.sink_token_tensor_uid().has_value();
 
     SdpaSpec spec{};
     spec.problem.B = B;
@@ -457,20 +563,31 @@ SdpaSpec SdpaAdapter::buildSpec(const SdpaAttributes& sdpaAttr, const TensorMap&
                            : (1.0f / std::sqrt(static_cast<float>(D)));
     spec.problem.scale_log2 = attn_scale * kLog2E;
 
-    spec.dtype = "f16";
+    // Dtype string drives codegen ("f16" | "bf16"); Q is the source of
+    // truth (K/V/O were enforced to match above).
+    spec.dtype = dtypeString(Q);
     spec.mask_mode = maskMode;
 
-    // Opt-in forward stats (LSE) output. When requested, validate the
-    // supplied stats tensor (dtype FLOAT, head-major [B, Hq, Sq]
-    // contiguous) here so isApplicable declines a malformed stats request
-    // rather than failing at launch. The stats UID itself is not stored
-    // on the spec -- the plan builder reads it straight off the FB node;
-    // the spec only records that stats are enabled (codegen-relevant).
-    if (wantStats) {
-        const auto& stats = lookupTensor(tensorMap, sdpaAttr.stats_tensor_uid().value(), "stats");
-        checkStatsTensor(stats, B, Hq, Sq);
-    }
-    spec.generate_stats = wantStats;
+    // The unified paged kernel emits no LSE; the gate has already declined
+    // any stats request, so this path never produces stats.
+    spec.generate_stats = false;
+
+    // Unified paged/varlen problem lanes. ``is_paged`` is true for a real
+    // paged graph (the dense-degenerate one-block-per-sequence layout is
+    // synthesized later during marshalling, Task 2c); ``block_size`` is
+    // the derived paged block size (0 when not a real paged graph).
+    spec.is_paged = isPaged;
+    spec.block_size = blockSize;
+    spec.is_varlen = isVarlen;
+    spec.sliding_window = slidingWindow;
+    spec.use_sinks = useSinks;
+
+    // Mirror the problem-driven variant lanes onto the perf knobs so the
+    // analytic policy and the kernel-key mapping see them consistently
+    // (the scorer-driven selection in Task 2b overwrites the perf axes but
+    // these problem-driven lanes stay).
+    spec.knobs.use_sinks = useSinks;
+    spec.knobs.sliding_window = slidingWindow;
 
     return spec;
 }
