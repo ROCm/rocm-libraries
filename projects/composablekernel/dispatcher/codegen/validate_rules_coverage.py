@@ -31,6 +31,7 @@ CONFIGS_DIR = SCRIPT_DIR / "configs" / "grouped_conv"
 sys.path.insert(0, str(SCRIPT_DIR))
 
 from unified_grouped_conv_codegen import (
+    DepthwiseConvKernelConfig,
     GroupedConvKernelConfig,
     GroupedConvVariant,
     StreamKConfig,
@@ -370,13 +371,18 @@ def main():
 
     # Generate from rules (both 2D and 3D to cover all JSON files)
     print(f"\nGenerating configs from rules (arch={args.arch}, datatypes=[fp16, bf16, fp32], ndims=[2,3])...")
-    generated = get_default_configs(
+    all_generated = get_default_configs(
         arch=args.arch,
         variants=selected_variants,
         ndims=[2, 3],
         datatypes=["fp16", "bf16", "fp32"],
+        config_set=args.config_set,
     )
-    print(f"Generated {len(generated)} configs from rules.")
+    # Filter out depthwise configs (validated separately via test_depthwise_tile_math.py)
+    generated = [c for c in all_generated if isinstance(c, GroupedConvKernelConfig)]
+    n_dw = len(all_generated) - len(generated)
+    print(f"Generated {len(generated)} GEMM configs from rules"
+          + (f" (+ {n_dw} depthwise, validated separately)." if n_dw else "."))
 
     # Analyze coverage
     print("\nAnalyzing coverage...")

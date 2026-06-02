@@ -15,6 +15,7 @@ Key source files this is derived from:
 """
 
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Set, Tuple
 
@@ -69,7 +70,7 @@ def _lds_valid(vec: int, sizeof_dtype: float) -> bool:
     return b > 0 and (b & (b - 1)) == 0
 
 
-def _pipeline_wave_ok(
+def _pipeline_wave_valid(
     wave_m: int, wave_n: int, wave_k: int,
     warp_tile_m: int, warp_tile_n: int, warp_tile_k: int,
     pipeline: Optional[str],
@@ -168,14 +169,14 @@ def get_valid_wave_warp_pairs(
 
                 # Normal case: wave_k = 1
                 if (wave_m, wave_n, 1) in supported_wave_combos:
-                    if _pipeline_wave_ok(wave_m, wave_n, 1, warp_m, warp_n, warp_k, pipeline):
+                    if _pipeline_wave_valid(wave_m, wave_n, 1, warp_m, warp_n, warp_k, pipeline):
                         results.append(((wave_m, wave_n, 1), (warp_m, warp_n, warp_k)))
 
                 # Special case: wave_k = 2
                 # Only a small number of tiles use this (e.g. (128,32,32) with warp=(32,32,8)).
                 # Supported on gfx942/gfx950 via the [2,1,2] wave combo.
                 if (wave_m, wave_n, 2) in supported_wave_combos:
-                    if _pipeline_wave_ok(wave_m, wave_n, 2, warp_m, warp_n, warp_k, pipeline):
+                    if _pipeline_wave_valid(wave_m, wave_n, 2, warp_m, warp_n, warp_k, pipeline):
                         results.append(((wave_m, wave_n, 2), (warp_m, warp_n, warp_k)))
 
     return _deduplicate(results)
@@ -338,3 +339,212 @@ def dtype_keys_for_warp_tile_k(warp_tile_k: int) -> List[str]:
     if warp_tile_k in {16, 32, 64, 128}:
         candidates.append("fp8_fp8_fp32")
     return candidates
+
+
+# ---------------------------------------------------------------------------
+# Depthwise Convolution Configuration
+# ---------------------------------------------------------------------------
+
+
+def _ceil_div(a: int, b: int) -> int:
+    """Ceiling integer division."""
+    return (a + b - 1) // b
+
+
+def _ceil_to_multiple(val: int, multiple: int) -> int:
+    """Round up val to the nearest multiple."""
+    if multiple <= 0:
+        return val
+    return _ceil_div(val, multiple) * multiple
+
+
+@dataclass(frozen=True)
+class DepthwiseConfig:
+    """Configuration for a depthwise convolution kernel tile."""
+
+    tile_h: int
+    tile_w: int
+    filt: int
+    str_h: int
+    str_w: int
+    pad_h: int
+    pad_w: int
+    nbatch: int
+    sub_h: int
+    sub_w: int
+    in_vec: int
+    out_vec: int
+
+
+def is_valid_depthwise_config(cfg: DepthwiseConfig, dtype_size: int = 2) -> bool:
+    """Check all depthwise pipeline constraints for a config.
+
+    Implements the 19 constraints from the depthwise pipeline's static_asserts
+    and IsDepthwiseArgumentSupported checks.  Constraints 1-4, 10-12, 18-19 are
+    auto-satisfied by construction (fixed BlockSize=64, Dilation=1, square odd
+    filter, same-padding, and the LDS stride formula).
+
+    Args:
+        cfg: Depthwise configuration to validate.
+        dtype_size: Bytes per element (2 for fp16/bf16, 4 for fp32).
+
+    Returns:
+        True if all constraints are satisfied.
+    """
+    # Constraint 5: filter must be odd
+    if cfg.filt < 1 or cfg.filt % 2 != 1:
+        return False
+
+    # Constraint 6: in_vec and out_vec must be positive powers of 2
+    for v in (cfg.in_vec, cfg.out_vec):
+        if v <= 0 or (v & (v - 1)) != 0:
+            return False
+
+    # Constraint 7: SubTileH <= TileOutH, SubTileW <= TileOutW
+    if cfg.sub_h <= 0 or cfg.sub_w <= 0:
+        return False
+    if cfg.sub_h > cfg.tile_h or cfg.sub_w > cfg.tile_w:
+        return False
+
+    # Constraint 9: StrideW == 1 || StrideW % 2 == 0
+    if cfg.str_w != 1 and cfg.str_w % 2 != 0:
+        return False
+
+    # Constraint 15: PadW > 0
+    if cfg.pad_w <= 0:
+        return False
+
+    # Derived values
+    tile_in_w = cfg.tile_w * cfg.str_w
+    lds_tile_h = cfg.tile_h * cfg.str_h + 2 * cfg.pad_h
+    lds_tile_w = tile_in_w + 2 * cfg.pad_w
+
+    h_repeats = _ceil_div(cfg.tile_h, cfg.sub_h)
+    w_repeats = _ceil_div(cfg.tile_w, cfg.sub_w)
+    total_subtiles = h_repeats * w_repeats
+
+    # Constraint 8: TotalSubTiles <= 64 (BlockSize)
+    if total_subtiles > 64:
+        return False
+
+    tile_per_wave = 64 // total_subtiles
+    if tile_per_wave == 0:
+        return False
+
+    # Constraint 13: NBatch % TilePerWave == 0
+    if cfg.nbatch <= 0 or cfg.nbatch % tile_per_wave != 0:
+        return False
+
+    in_vec_internal = min(cfg.in_vec, 4)
+
+    # Constraint 14: SubTileW * StrideW % InVecInternal == 0
+    if (cfg.sub_w * cfg.str_w) % in_vec_internal != 0:
+        return False
+
+    # LDS stride construction (constraints 10-12 are auto-satisfied)
+    lds_stride_base = _ceil_to_multiple(lds_tile_w, cfg.in_vec)
+    lds_stride_min = lds_tile_w + cfg.pad_w
+    lds_stride = max(lds_stride_base,
+                     _ceil_to_multiple(lds_stride_min, in_vec_internal))
+
+    # Constraint 16: ceil(LdsTileW / InVec) <= 64
+    if _ceil_div(lds_tile_w, cfg.in_vec) > 64:
+        return False
+
+    # Constraint 17: SmemSize <= 65536 bytes
+    lds_tile_size = lds_tile_h * lds_stride
+    smem_size = lds_tile_size * tile_per_wave * dtype_size
+    if smem_size > 65536:
+        return False
+
+    return True
+
+
+def get_valid_depthwise_configs(
+    tile_sizes: List[Tuple[int, int]],
+    filter_sizes: List[int],
+    strides: List[Tuple[int, int]],
+    block_size: int = 64,
+    dtype_size: int = 2,
+) -> List[DepthwiseConfig]:
+    """Generate all valid depthwise configs from parameter space.
+
+    For each combination of tile, filter, and stride, enumerates valid
+    sub-tile, batch, and vector configurations.  Padding is derived from
+    filter size as standard "same" padding: pad = (filt - 1) // 2.
+
+    Args:
+        tile_sizes: List of (tile_h, tile_w) output tile dimensions.
+        filter_sizes: List of square filter sizes (must be odd).
+        strides: List of (stride_h, stride_w) pairs.
+        block_size: Thread block size (default 64).
+        dtype_size: Bytes per element (default 2 for fp16/bf16).
+
+    Returns:
+        List of valid DepthwiseConfig objects (deduplicated).
+    """
+    configs: List[DepthwiseConfig] = []
+    seen: Set[DepthwiseConfig] = set()
+    vec_values = [1, 2, 4, 8]
+
+    for tile_h, tile_w in tile_sizes:
+        # Sub-tile candidates: powers of 2 + divisors of tile dimension
+        sub_h_set: Set[int] = set()
+        sub_w_set: Set[int] = set()
+        v = 1
+        while v <= tile_h:
+            sub_h_set.add(v)
+            v *= 2
+        for d in _pos_divisors(tile_h):
+            sub_h_set.add(d)
+        v = 1
+        while v <= tile_w:
+            sub_w_set.add(v)
+            v *= 2
+        for d in _pos_divisors(tile_w):
+            sub_w_set.add(d)
+
+        sub_h_list = sorted(sub_h_set)
+        sub_w_list = sorted(sub_w_set)
+
+        for filt in filter_sizes:
+            if filt % 2 != 1:
+                continue
+            pad = (filt - 1) // 2
+
+            for str_h, str_w in strides:
+                for sub_h in sub_h_list:
+                    for sub_w in sub_w_list:
+                        # Early prune on total sub-tiles
+                        h_reps = _ceil_div(tile_h, sub_h)
+                        w_reps = _ceil_div(tile_w, sub_w)
+                        total_st = h_reps * w_reps
+                        if total_st > block_size:
+                            continue
+
+                        tile_per_wave = block_size // total_st
+                        if tile_per_wave == 0:
+                            continue
+
+                        # Enumerate nbatch (powers of 2, divisible by tile_per_wave)
+                        nb = 1
+                        while nb <= 128:
+                            if nb % tile_per_wave == 0:
+                                for in_vec in vec_values:
+                                    for out_vec in vec_values:
+                                        cfg = DepthwiseConfig(
+                                            tile_h=tile_h, tile_w=tile_w,
+                                            filt=filt,
+                                            str_h=str_h, str_w=str_w,
+                                            pad_h=pad, pad_w=pad,
+                                            nbatch=nb,
+                                            sub_h=sub_h, sub_w=sub_w,
+                                            in_vec=in_vec, out_vec=out_vec,
+                                        )
+                                        if cfg not in seen and \
+                                                is_valid_depthwise_config(cfg, dtype_size):
+                                            seen.add(cfg)
+                                            configs.append(cfg)
+                            nb *= 2
+
+    return configs

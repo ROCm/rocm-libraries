@@ -14,7 +14,6 @@
 # ---- Configuration (inherits from parent scope) ----
 
 set(DISPATCHER_DIR "${PROJECT_SOURCE_DIR}/dispatcher")
-set(DISPATCHER_CODEGEN "${DISPATCHER_DIR}/codegen/unified_grouped_conv_codegen.py")
 set(DISPATCHER_CONFIG_SET "tests" CACHE STRING "Dispatcher config set: tests or profiler")
 
 # Extract first GPU target for codegen
@@ -23,10 +22,6 @@ string(REPLACE " " ";" _GPU_TARGETS_LIST "${_GPU_TARGETS_SPACE}")
 list(GET _GPU_TARGETS_LIST 0 _GPU_TARGET)
 
 # ---- Variant-to-path mapping tables ----
-
-set(_DISP_CONFIG_SUBDIR_fwd "forward")
-set(_DISP_CONFIG_SUBDIR_bwd_weight "backward_weight")
-set(_DISP_CONFIG_SUBDIR_bwd_data "backward_data")
 
 set(_DISP_GEN_SCRIPT "generate_profiler_kernels.py")
 
@@ -45,14 +40,12 @@ set(_DISP_HEADER_PREFIX_bwd_data "grouped_conv_bwd_data_")
 # =============================================================================
 function(ck_add_dispatcher_conv_instances VARIANT)
   # Look up variant-specific paths
-  set(CONFIG_SUBDIR "${_DISP_CONFIG_SUBDIR_${VARIANT}}")
   set(HEADER_PREFIX "${_DISP_HEADER_PREFIX_${VARIANT}}")
 
-  if(NOT CONFIG_SUBDIR)
+  if(NOT HEADER_PREFIX)
     message(FATAL_ERROR "Unknown dispatcher variant: ${VARIANT}")
   endif()
 
-  set(CONFIG_DIR "${DISPATCHER_DIR}/codegen/configs/grouped_conv/${CONFIG_SUBDIR}")
   set(SCRIPT_PATH "${DISPATCHER_DIR}/scripts/${_DISP_GEN_SCRIPT}")
   set(KERNEL_DIR "${CMAKE_CURRENT_BINARY_DIR}/dispatcher_${VARIANT}_kernels")
   set(TARGET_NAME "ck_dispatcher_grouped_conv_${VARIANT}")
@@ -65,11 +58,9 @@ function(ck_add_dispatcher_conv_instances VARIANT)
   execute_process(
     COMMAND ${Python3_EXECUTABLE} ${SCRIPT_PATH}
             --variant ${VARIANT}
-            --config-dir ${CONFIG_DIR}
-            --codegen ${DISPATCHER_CODEGEN}
             --output-dir ${KERNEL_DIR}
             --arch ${_GPU_TARGET}
-            --config-set ${DISPATCHER_CONFIG_SET}
+            --mode ${DISPATCHER_CONFIG_SET}
     RESULT_VARIABLE ret
     OUTPUT_VARIABLE output
     ERROR_VARIABLE error
