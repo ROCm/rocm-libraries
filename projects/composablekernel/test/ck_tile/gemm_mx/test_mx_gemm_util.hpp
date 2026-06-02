@@ -247,7 +247,7 @@ class TestMxGemmUtil : public ::testing::Test
                          ScaleN,
                          true,
                          false>(args,
-                                ck_tile::stream_config{nullptr, true, 1, 0, 1, true, true, 50});
+                                ck_tile::stream_config{});
         }
         else
         {
@@ -312,7 +312,7 @@ class TestMxGemmUtil : public ::testing::Test
                          ScaleN,
                          true,
                          false>(args,
-                                ck_tile::stream_config{nullptr, true, 1, 0, 1, true, true, 50});
+                                ck_tile::stream_config{});
         }
 
         c_dev_buf.FromDevice(c_host.data());

@@ -189,6 +189,22 @@ struct MXGemmKernel : UniversalGemmKernel<TilePartitioner_, MXGemmPipeline_, Epi
                   "boundary, so partial K tiles produce silently wrong results. Choose K so "
                   "that K is a multiple of KPerBlock * k_batch.");
 
+    // Split-K relies on the row-major SplitKBatchOffset: operator() reads this k_id's K-element
+    // start from as_k_split_offset[0], and the packed-scale / flat-B K offsets are derived from
+    // it. That identity (as_k_split_offset[0] == logical K start) only holds for row-major A.
+    static_assert(std::is_same_v<ALayout, tensor_layout::gemm::RowMajor>,
+                  "MX GEMM kernel assumes row-major A.");
+
+    // Single source of truth for the split-K atomic-add precondition, shared by the runtime
+    // check in IsSupportedArgument and the atomic_add dispatch in operator(). Split-K
+    // accumulates each k_id's partial C tile with atomic_add; the CShuffle epilogue can only
+    // emit atomic_add for fp16/bf16 outputs when the C vector size is even. For an odd vector
+    // size that combination is not instantiated, so such a config cannot run split-K. For all
+    // shipped tile shapes GetVectorSizeC() is even, so this is defensive rather than reachable.
+    static constexpr bool kSplitKAtomicAddSupported =
+        EpiloguePipeline::GetVectorSizeC() % 2 == 0 ||
+        !is_any_of<EDataType, fp16_t, bf16_t>::value;
+
     [[nodiscard]] CK_TILE_HOST static const std::string GetName()
     {
         // clang-format off
@@ -286,6 +302,19 @@ struct MXGemmKernel : UniversalGemmKernel<TilePartitioner_, MXGemmPipeline_, Epi
             if(log)
                 CK_TILE_ERROR("MX GEMM: k_batch must be >= 1.");
             return false;
+        }
+
+        // Split-K needs the atomic_add epilogue; reject configs that cannot emit it (fp16/bf16
+        // output with an odd C vector size) instead of silently skipping the accumulation.
+        if constexpr(!kSplitKAtomicAddSupported)
+        {
+            if(kargs.k_batch > 1)
+            {
+                if(log)
+                    CK_TILE_ERROR("MX GEMM: split-K (k_batch > 1) requires an even C vector size "
+                                  "for fp16/bf16 outputs (atomic_add epilogue constraint).");
+                return false;
+            }
         }
 
         // Preshuffle split-K relies on each split starting on a K-block boundary that is also
@@ -727,20 +756,6 @@ struct MXGemmKernel : UniversalGemmKernel<TilePartitioner_, MXGemmPipeline_, Epi
         return max(MXGemmPipeline::GetSmemSize(), EpiloguePipeline::GetSmemSize());
     }
 
-    // Compute the K-element offset for a given split-K batch id. Matches the formula used by
-    // Underlying::SplitKBatchOffset so that scale windows stay in lock-step with A/B windows.
-    CK_TILE_DEVICE static index_t GetSplitKElemOffset(index_t K, index_t k_batch, index_t k_id)
-    {
-        constexpr auto K1       = BlockGemmShape::WarpTile::at(number<2>{});
-        const index_t num_all   = K / K1;
-        index_t num_full        = num_all % k_batch;
-        num_full                = (num_full == 0) ? k_batch : num_full;
-        const index_t num_iters = max(integer_divide_ceil(num_all, k_batch), 1);
-        const index_t full_k    = num_iters * K1;
-        const index_t partial_k = (num_iters - 1) * K1;
-        return min(k_id, num_full) * full_k + max(k_id - num_full, 0) * partial_k;
-    }
-
     template <class ScaleM, class ScaleN>
     CK_TILE_DEVICE void operator()(KernelArgs<ScaleM, ScaleN> kargs,
                                    int partition_idx = get_block_id()) const
@@ -751,11 +766,6 @@ struct MXGemmKernel : UniversalGemmKernel<TilePartitioner_, MXGemmPipeline_, Epi
         // Allocate shared memory for ping pong buffers
         __shared__ char smem_ptr[GetSmemSize()];
 
-        // k_id selects the split-K batch id. blockIdx.z is 0 only when k_batch == 1; when
-        // k_batch > 1, blockIdx.z selects the active split-K batch in both persistent and
-        // non-persistent modes.
-        const index_t k_id = amd_wave_read_first_lane(blockIdx.z);
-
         // Support both persistent and non-persistent modes
         do
         {
@@ -764,12 +774,15 @@ struct MXGemmKernel : UniversalGemmKernel<TilePartitioner_, MXGemmPipeline_, Epi
             const index_t i_m = amd_wave_read_first_lane(iM * TilePartitioner::MPerBlock);
             const index_t i_n = amd_wave_read_first_lane(iN * TilePartitioner::NPerBlock);
 
-            // SplitKBatchOffset defaults k_id to blockIdx.z, which is what we want here.
+            // SplitKBatchOffset defaults its k_id to blockIdx.z, selecting this split's K slice.
             const SplitKBatchOffset splitk_batch_offset(
                 static_cast<const typename Underlying::KernelArgs&>(kargs));
 
+            // This k_id's logical K-element start. For row-major A (see static_assert above)
+            // as_k_split_offset[0] is exactly that offset, so reuse it rather than recomputing the
+            // split formula; the packed-scale and flat-B K offsets are derived from it.
             const index_t k_elem_offset =
-                amd_wave_read_first_lane(GetSplitKElemOffset(kargs.K, kargs.k_batch, k_id));
+                amd_wave_read_first_lane(splitk_batch_offset.as_k_split_offset[I0]);
 
             EDataType* e_ptr = static_cast<EDataType*>(kargs.e_ptr);
 
@@ -796,9 +809,9 @@ struct MXGemmKernel : UniversalGemmKernel<TilePartitioner_, MXGemmPipeline_, Epi
             });
 
             // Dispatch epilogue: when k_batch > 1 each split accumulates a partial result into
-            // the same C tile, so we need atomic add (universal_gemm_kernel pattern). For atomic
-            // add of fp16/bf16 the epilogue requires even vector size -- guard against invalid
-            // combinations the same way UniversalGemmKernel does.
+            // the same C tile, so we need atomic add (universal_gemm_kernel pattern). The
+            // fp16/bf16 even-vector-size precondition is captured once in kSplitKAtomicAddSupported
+            // and also rejected up front in IsSupportedArgument.
             if(kargs.k_batch == 1)
             {
                 RunMxGemm<memory_operation_enum::set>(as_ptr,
@@ -814,8 +827,7 @@ struct MXGemmKernel : UniversalGemmKernel<TilePartitioner_, MXGemmPipeline_, Epi
             }
             else
             {
-                if constexpr(EpiloguePipeline::GetVectorSizeC() % 2 == 0 ||
-                             !is_any_of<EDataType, fp16_t, bf16_t>::value)
+                if constexpr(kSplitKAtomicAddSupported)
                 {
                     RunMxGemm<memory_operation_enum::atomic_add>(as_ptr,
                                                                  bs_ptr,

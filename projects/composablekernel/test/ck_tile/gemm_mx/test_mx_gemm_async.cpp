@@ -8,7 +8,6 @@ using Row = ck_tile::tensor_layout::gemm::RowMajor;
 using Col = ck_tile::tensor_layout::gemm::ColumnMajor;
 using F4  = ck_tile::pk_fp4_t;
 using F8  = ck_tile::fp8_t;
-using F6  = ck_tile::pk_fp6x16_t;
 
 // clang-format off
 using MxTypes = ::testing::Types<std::tuple<F4, F4, MX_GemmConfig16,         Row, Col, Row>,
@@ -94,6 +93,26 @@ TYPED_TEST(TestMxGemmFp8Regression, HotLoopTailNumLoopThree)
 // K_Tile * k_batch and of WarpTile_K * k_batch (= 128 * k_batch) so every split lands on a
 // packed-scale boundary.
 TYPED_TEST(TestMxGemmFp8Regression, SplitK)
+{
+    this->Run(128, 256, 512, /*k_batch=*/2);
+    this->Run(128, 256, 1024, /*k_batch=*/2);
+    this->Run(128, 256, 1024, /*k_batch=*/4);
+    this->Run(256, 256, 2048, /*k_batch=*/4);
+}
+
+// fp4 split-K (non-preshuffle). Same MX_GemmConfig16 tile shape as the fp8 regression above, so
+// the K alignment requirements are identical; this verifies the packed (BPackedSize = 2) A/B
+// pointer K-offset works under split-K + atomic-add for fp4.
+using MxF4Cfg16Types = ::testing::Types<std::tuple<F4, F4, MX_GemmConfig16, Row, Col, Row>>;
+
+template <typename TypeParam>
+class TestMxGemmFp4Regression : public TestMxGemmUtil<TypeParam>
+{
+};
+
+TYPED_TEST_SUITE(TestMxGemmFp4Regression, MxF4Cfg16Types);
+
+TYPED_TEST(TestMxGemmFp4Regression, SplitK)
 {
     this->Run(128, 256, 512, /*k_batch=*/2);
     this->Run(128, 256, 1024, /*k_batch=*/2);
