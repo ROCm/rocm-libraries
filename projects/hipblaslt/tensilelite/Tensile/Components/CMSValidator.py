@@ -3623,34 +3623,49 @@ def compare_graphs(
     # answers the pipeline-integrity question (both pipelines emitted N
     # LR / M MFMA / etc.) without conflating naming differences.
     #
-    # NOTE — NOT YET FIXED (tracked under rocm-libraries-n7og, P0
-    # blocker on Phase 3 / r62g): the edge layer (edge_keys, below)
-    # still embeds `(producer.identity, consumer.identity, ...)` in
-    # its edge-key tuples and will still divergence-detect on T/X
-    # register naming when the reference and subject pair has any
-    # register-naming drift. Empirically characterized during w5xw
-    # triage on the canonical TF32 4x4 TN (UsePLRPack=True) fixture
-    # against the *Approach A* `build_non_cms_reference` pair: 642
-    # per-(body, render) mismatches break down as 520 (81%) oplb-class
-    # T/X register-naming drift on (ds_read_b128, v_cvt_pk_bf16_f32,
-    # v_mfma_f32_4x4x4_16b_bf16) and 122 (19%) real codegen-branch
-    # divergence (missing SCBranchSCC0 in ML/ML-1 on the CMS side, ~40
-    # extra MFMA + VCvtPkF32toBF16 in NLL on the CMS side). The 19%
-    # are *Approach-A reference noise* (the j4qm class called out at
-    # DEFAULT_SCHEDULER_REFERENCE_DESIGN.md §1.5) — they do NOT
-    # reproduce against the SHADOW pair (`_last_default_capture`,
-    # which has 0 mismatches against `_last_cms_capture` on the same
-    # fixture, since SHADOW is observed inside the same Build #1 that
-    # emits CMS). Per dm4p Phase 2 SHADOW is `ctx.default` (the
-    # canonical reference per design v5) and Approach A is retired in
-    # Phase 4 / u89e. The 81% T/X edge-layer concern remains real and
-    # is what n7og tracks: even on the SHADOW pair, future fixtures
-    # with cross-instance register-naming drift would still trigger
-    # edge-key mismatches here. Closing this requires a complementary
-    # follow-up (likely byte-key matching per the Approach-E reference
-    # in the comments above / `DataflowGraph.edge_keys` docstring).
-    # See n7og description for the design-doc alignment per
-    # DEFAULT_SCHEDULER_REFERENCE_DESIGN.md §1.5, §6 oplb-row.
+    # NOTE — NOT YET FIXED (originally tracked under rocm-libraries-n7og,
+    # superseded by rocm-libraries-udqg per the n7og investigation;
+    # udqg is the active P0 blocker on Phase 3 / r62g).
+    #
+    # The edge layer (`DataflowGraph.edge_keys`, below) still embeds
+    # `(producer.identity, consumer.identity, ...)` in its edge-key
+    # tuples. The n7og bead originally framed the residual as T/X
+    # register-naming drift surfacing through identity.canonical_render,
+    # with a candidate fix of switching to Approach-E byte-key matching.
+    #
+    # The n7og investigation built a multi-fixture probe
+    # (test_n7og_edge_keys_multifixture.py) comparing SHADOW
+    # (`_last_default_capture`) against CMS (`_last_cms_capture`)
+    # edge_keys across three CMS-enabled fixtures:
+    #
+    #   - bpg11-tf32-4x4-tn (UsePLRPack=True): 208 mismatches.
+    #   - oplb-tf32-6x8-tn (UsePLRPack=True): 624 mismatches.
+    #   - bf16-256x256x64-tn (UsePLRPack=False): 0 mismatches.
+    #
+    # Empirical correction to the n7og framing: the failing fixtures
+    # diverge by hundreds of edges with the per-category node-count gate
+    # (above) still PASSING — i.e. it is NOT just register-naming drift,
+    # it is structural edge-count divergence. Diagnostic at the
+    # byte-key level reveals the SHADOW capture's pack-MFMA edges have
+    # `producer_write_byte_key = (('v', -1),)` (the `-1` sentinel from
+    # `_byte_keys_for_resource` when `name_to_idx.get(bare)` returns
+    # None), while CMS edges have real keys like `(('v', 15),)`. The
+    # SHADOW pipeline's `LoopBodyCapture.name_to_idx` is missing the
+    # rotating ValuA/B_T0/X0_I0 pack-buffer bindings under
+    # UsePLRPack+UseMFMAF32XEmulation.
+    #
+    # As a result the Approach-E candidate fix in the n7og bead does
+    # NOT resolve this: switching `edge_keys` to byte-keys leaves the
+    # mismatch in place because the byte-keys themselves are wrong on
+    # the SHADOW side. The principled fix is in the SHADOW capture
+    # pipeline, not at the edge-layer matching basis. That work is
+    # tracked under rocm-libraries-udqg (P0, blocks r62g) — see the
+    # bead description for the scope estimate and the
+    # ScheduleCapture.py:2319 `harvest_name_to_idx` entry point.
+    #
+    # The n7og bead has been closed with this investigation's outcome
+    # (Outcome B per its acceptance criteria); udqg carries the actual
+    # fix.
     from collections import Counter
 
     def _data_flow_category_counts(graph):
