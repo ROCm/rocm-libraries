@@ -202,7 +202,21 @@ jobs:
           # (this exact config built green in 3h56m at ~80% ccache hits), and
           # `--target hipBLASLt` still skips rocBLAS + ~20 unrelated
           # subprojects, which is where the time goes.
-          extra_cmake_options: "-DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ -DhipBLASLt_SANITIZER=ASAN"
+          #
+          # Disable rocprofiler-sdk's OWN tests. hipBLASLt pulls rocprofiler-sdk
+          # as a (marker) dep for roctx; TheRock wires its test toggle to the
+          # global BUILD_TESTING (forced ON by build_configure.py), so it builds
+          # a HIP test kernel (source/lib/tests/codeobj/syncthreads_kernel.bin)
+          # that compiles against the SHARED dist/rocm. Under `--target
+          # hipBLASLt` that shared dist isn't staged with the HIP runtime yet,
+          # so the kernel compile dies with "cannot find HIP runtime ...
+          # --rocm-path". The full `--target therock-archives` build avoids this
+          # only by staging order. We don't need rocprofiler-sdk's tests, so
+          # turn just them off via TheRock's per-subproject override variable
+          # `<target>_CMAKE_ARGS` (therock_subproject.cmake appends it LAST to
+          # the sub-build args, so it overrides the earlier =ON). hipBLASLt's
+          # own gtest stays ON (its HIPBLASLT_BUILD_TESTING is untouched).
+          extra_cmake_options: "-DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ -DhipBLASLt_SANITIZER=ASAN -Drocprofiler-sdk_CMAKE_ARGS=-DROCPROFILER_BUILD_TESTS=OFF"
           BUILD_DIR: build
         run: |
           python3 TheRock/build_tools/github_actions/build_configure.py
