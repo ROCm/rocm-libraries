@@ -7,8 +7,9 @@ Build-filter completeness oracle.
 
 Validates the smart-build selection (the "filter") against the build system's
 ground truth: which test executables actually recompile when a source file
-changes. We don't run tests - the filter's job is to *build* the right tests, and
-the compiler's #include resolution is the authority on what depends on a file.
+changes. The filter's job is to *build* the right tests, so this verifies the
+build - the compiler's #include resolution is the authority on what depends on a
+file.
 
 Workflow (driven by an external sbatch wrapper that does the perturb+build):
   1. SEL(F)  = the filter's prediction: depmap[file] -> executables, intersected
@@ -16,12 +17,13 @@ Workflow (driven by an external sbatch wrapper that does the perturb+build):
   2. TRUE(F) = ground truth: perturb F (e.g. append '#error'), run
                `ninja -k 0 <test targets>`, collect FAILED object files, and map
                them back to executables via build.ninja (same exe<-objects mapping
-               the depmap uses, so the obj->exe step is not what's under test).
+               the depmap uses, so the obj->exe step is a shared given here, not
+               the thing under test).
   3. FN(F)   = TRUE(F) \\ SEL(F)  -> depends on F but the filter would skip = a
                real false negative.
      FP(F)   = SEL(F) \\ TRUE(F)  -> over-selection (safe).
 
-This catches gaps the smart-vs-legacy consistency check cannot: clang -MM
+This catches gaps beyond the smart-vs-legacy consistency check: clang -MM
 extraction failures, build-time generated headers, and (when configured in)
 separate-build components like experimental/rocm_ck.
 """
@@ -126,7 +128,7 @@ def _run_probe(args):
         (args.failed_objects, "--failed-objects"),
     ] + ([(args.ctest, "--ctest")] if args.ctest else []):
         if not os.path.exists(path):
-            print(f"Error: file not found ({label}): {path}", file=sys.stderr)
+            print(f"Error: missing required input ({label}): {path}", file=sys.stderr)
             return 2
 
     with open(args.depmap) as f:
@@ -162,7 +164,7 @@ def _run_probe(args):
 def _run_reachability(args):
     for path, label in [(args.depmap, "--depmap"), (args.ctest, "--ctest")]:
         if not os.path.exists(path):
-            print(f"Error: file not found ({label}): {path}", file=sys.stderr)
+            print(f"Error: missing required input ({label}): {path}", file=sys.stderr)
             return 2
 
     with open(args.depmap) as f:

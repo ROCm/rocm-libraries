@@ -15,9 +15,9 @@
 # Dry-run / smoke mode (DRY_RUN=true or --dry-run/--smoke):
 #   Validates the selected executables against ninja's real target namespace
 #   (`ninja -t targets all`) via main.py validate, writing smoke_result.json -
-#   without invoking the compiler. (`ninja -n` is deliberately NOT used: CK's
-#   GLOB CONFIGURE_DEPENDS regenerates build.ninja on every call, so `ninja -n`
-#   exits 0 for any target.)
+#   without invoking the compiler. Caveat: `ninja -t targets all` is the oracle
+#   because CK's GLOB CONFIGURE_DEPENDS regenerates build.ninja on every call, so
+#   `ninja -n` exits 0 for any name.
 #
 # Exit codes:
 #   0 = Success (build complete, or dry-run validated, or nothing to build)
@@ -124,11 +124,10 @@ if [ "$DRY_RUN" = "true" ]; then
     NUM_TARGETS=$(echo "${BUILD_TARGETS}" | wc -w)
     echo "DRY RUN - validating ${NUM_TARGETS} selected target(s), no compilation"
     # Validate the selection against ninja's real target namespace.
-    # NOTE: `ninja -n <target>` is NOT used as the oracle: CK uses CMake GLOB
-    # CONFIGURE_DEPENDS, so every ninja call regenerates build.ninja and
-    # `ninja -n` then exits 0 for any target (real or bogus). The reliable
-    # oracle is the target list from `ninja -t targets all`.
-    ninja -t targets all > ninja_targets.txt 2>/dev/null || { echo "WARNING: ninja -t targets all failed; cannot validate target namespace"; exit 1; }
+    # Caveat: `ninja -t targets all` is the oracle because CK's GLOB
+    # CONFIGURE_DEPENDS regenerates build.ninja on every call, so `ninja -n`
+    # exits 0 for any name and can't test target existence.
+    ninja -t targets all > ninja_targets.txt 2>/dev/null || { echo "WARNING: ninja -t targets all failed; skipping target-namespace validation"; exit 1; }
     python3 "${SCRIPT_DIR}/main.py" validate \
         tests_to_run.json \
         --ninja-targets ninja_targets.txt \
@@ -137,10 +136,9 @@ if [ "$DRY_RUN" = "true" ]; then
     exit 0
 fi
 
-# Observability (non-fatal): record a structured verdict on whether the selection
-# maps to real ninja targets. This does NOT change build behavior - it only emits
-# smoke_result.json / smoke_result.xml for CI to archive. The build below proceeds
-# regardless of the verdict.
+# Observability (advisory): record a structured verdict on whether the selection
+# maps to real ninja targets. This emits smoke_result.json / smoke_result.xml for
+# CI to archive; the build below proceeds regardless of the verdict.
 echo ""
 echo "Recording selection validation (observability, non-fatal)..."
 ninja -t targets all > ninja_targets.txt 2>/dev/null || true

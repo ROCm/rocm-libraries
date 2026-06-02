@@ -40,12 +40,12 @@ echo "BUILD_DIR: ${BUILD_DIR}"
 echo "CTEST_PARALLEL: ${CTEST_PARALLEL}"
 echo "-----------------------------------------"
 
-# The build phase records the mode in build_mode.env. Its absence means
-# smart_build.sh never ran in this workspace - fail loudly rather than silently
-# testing nothing.
+# The build phase records the mode in build_mode.env; its presence confirms
+# smart_build.sh ran in this workspace. Require it so a skipped build surfaces
+# loudly here instead of silently testing nothing.
 if [ ! -f build_mode.env ]; then
-    echo "Error: build_mode.env not found in ${BUILD_DIR}"
-    echo "smart_build.sh must run before smart_test.sh (same workspace / carried-over build dir)."
+    echo "Error: build_mode.env missing in ${BUILD_DIR}; run smart_build.sh first"
+    echo "(smart_test.sh consumes the build/ dir + selection artifacts it produces.)"
     exit 1
 fi
 
@@ -71,7 +71,7 @@ case "${MODE}" in
         ;;
     selective)
         if [ ! -f tests_to_run.json ]; then
-            echo "Error: tests_to_run.json not found (selective mode expects it from smart_build.sh)"
+            echo "Error: tests_to_run.json missing (selective mode expects it from smart_build.sh)"
             exit 1
         fi
         echo ""

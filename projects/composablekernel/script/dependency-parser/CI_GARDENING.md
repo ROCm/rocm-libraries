@@ -41,7 +41,7 @@ smart_build_ci.sh
 │    → reachability_result.json
 │    verdict FAIL = some compiled tests are unreachable from any file in the
 │                   depmap (filter can never select them → guaranteed FN if
-│                   those tests' sources change). Does NOT abort the build.
+│                   those tests' sources change). Advisory only; build proceeds.
 │
 ├─ main.py select → tests_to_run.json
 │

@@ -517,11 +517,11 @@ class DependencyMapper:
     def normalize_path(self, path: str) -> str:
         """Normalize a file path relative to workspace root.
 
-        Collapses '..' segments first (os.path.normpath) so keys are canonical.
-        Without this, the -MM backend records keys like
-        'tutorial/ck_tile/gemm/01_naive_gemm/../reference_gemm.hpp' which never
-        string-match the canonical paths git reports -> dependent tests are
-        silently not selected (false negatives).
+        Collapses '..' segments first (os.path.normpath) so keys match the
+        canonical paths git reports. Caveat: the -MM backend otherwise emits
+        keys like 'tutorial/ck_tile/gemm/01_naive_gemm/../reference_gemm.hpp'
+        that miss git's view, silently skipping the affected tests (false
+        negatives).
 
         Args:
             path: File path to normalize

@@ -9,7 +9,7 @@
 #   smart_build_ci.sh, and smart_test.sh. Each value is taken from the
 #   environment when set, otherwise a default is applied - so CI (which exports
 #   these via vars/ck.groovy) always wins, and standalone runs get sane defaults.
-#   A script that does not use a given variable simply leaves it set-but-unused.
+#   Unused variables are harmless: each script reads only the subset it needs.
 #
 # Canonical environment-variable reference for the pipeline:
 #   BUILD_DIR            - Build directory                       (default: $(pwd))
@@ -21,7 +21,7 @@
 #   DRY_RUN              - "true" to validate without building   (default: false)
 #   CTEST_PARALLEL       - ctest parallel level                  (default: 4)
 #
-# Not set here (no shared default; handled per script):
+# Set per script (no shared default):
 #   SCRIPT_DIR   - each script computes it from its own BASH_SOURCE
 #   LOG_FILE     - per-script log name (smart_build.log / smart_test.log / ...)
 #   NINJA_JOBS   - required by smart_build.sh (unless DRY_RUN); no default

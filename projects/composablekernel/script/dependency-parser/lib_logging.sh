@@ -8,18 +8,17 @@
 #   Stream the calling script's stdout+stderr to <logfile> as well as the
 #   console, for CI artifact archiving.
 #
-#   A backgrounded tee draining a FIFO (whose PID is waited on at exit) is used
-#   instead of `exec > >(tee)` so the log is fully flushed before the script
-#   exits - the bare process-substitution form does not wait for tee and can
-#   drop the tail (including the final verdict/pass-fail banner).
+#   A backgrounded tee draining a FIFO (whose PID is waited on at exit) flushes
+#   the log fully before the script exits - including the final verdict/pass-fail
+#   banner. (A bare `exec > >(tee)` is not awaited and can drop the tail.)
 #
 #   When _SMART_BUILD_NESTED is set, setup is skipped: the parent already tees a
-#   combined log, so the child's output flows into it in order (and the child's
-#   own log file is intentionally not produced).
+#   combined log, so the child's output flows into it in order (the child's own
+#   log file is then redundant).
 #
-#   Must be called from the top level of a script (not a subshell): it redirects
-#   the current shell's fds and installs an EXIT trap. It replaces any existing
-#   EXIT trap, so do not use it in scripts that need their own EXIT handler.
+#   Call from a script's top level: it redirects the current shell's fds and owns
+#   the EXIT trap (replacing any existing one). Use it where the script lets this
+#   helper own EXIT.
 start_tee_log() {
     local logfile="$1"
     [ -n "${_SMART_BUILD_NESTED:-}" ] && return 0

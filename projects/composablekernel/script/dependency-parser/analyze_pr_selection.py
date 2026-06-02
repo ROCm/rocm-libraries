@@ -168,7 +168,9 @@ def fetch_pr(number, repo=None):
     try:
         out = subprocess.run(cmd, check=True, capture_output=True, text=True).stdout
     except FileNotFoundError as e:
-        raise RuntimeError("gh CLI not found on PATH (needed to fetch PRs)") from e
+        raise RuntimeError(
+            "gh CLI required to fetch PRs - install gh or use --pr-files"
+        ) from e
     except subprocess.CalledProcessError as e:
         raise RuntimeError(
             f"gh failed for PR #{number}: {e.stderr.strip() or e}"
@@ -261,7 +263,7 @@ def main(argv=None):
         parser.error("provide at least one PR number or --pr-files JSON")
     for path, label in [(args.depmap, "--depmap"), (args.ctest, "--ctest")]:
         if not os.path.exists(path):
-            print(f"Error: file not found ({label}): {path}", file=sys.stderr)
+            print(f"Error: missing required input ({label}): {path}", file=sys.stderr)
             return 2
 
     with open(args.depmap) as f:

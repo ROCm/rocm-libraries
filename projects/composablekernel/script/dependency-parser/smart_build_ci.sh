@@ -91,10 +91,10 @@ fi
 
 echo "[OK] Dependency map generated"
 
-# Step 2b: Reachability guardrail (observability, non-fatal).
+# Step 2b: Reachability guardrail (observability, advisory).
 # Flags ctest tests that no file maps to - the filter can never select them, i.e.
 # guaranteed false negatives (usually a dependency-extraction gap). Emits
-# reachability_result.json for CI to archive; does NOT fail the build.
+# reachability_result.json for CI to archive; advisory only, so the build continues.
 echo ""
 echo "Step 2b: Reachability guardrail (non-fatal)..."
 ctest -N > ctest_list.txt 2>/dev/null || true

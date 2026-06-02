@@ -190,7 +190,7 @@ def main():
         [args.ctest] if args.ctest else []
     ):
         if not os.path.exists(path):
-            print(f"Error: file not found: {path}")
+            print(f"Error: missing required input: {path}")
             sys.exit(2)
 
     selected = load_selected_executables(args.tests_json)
