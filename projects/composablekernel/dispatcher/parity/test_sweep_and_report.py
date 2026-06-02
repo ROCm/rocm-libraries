@@ -360,6 +360,48 @@ class TestCompareReportDtypeFilter:
         assert "1024" not in text  # bf16 row filtered out
 
 
+# ── compare_report tile-shape rollup ─────────────────────────────────────────
+
+class TestCompareReportTileRollup:
+    """compare_report includes a 'By tile shape' rollup table."""
+
+    def test_tile_rollup_present(self, tmp_path):
+        import subprocess, sys
+        rows = [
+            dict(_BASE_ROW, tile_m=256, tile_n=128, tile_k=32, M=512),
+            dict(_BASE_ROW, tile_m=256, tile_n=128, tile_k=32, M=1024),
+        ]
+        pq = _make_parquet(rows, tmp_path / "disp.parquet")
+        out = tmp_path / "report.md"
+        result = subprocess.run(
+            [sys.executable, str(_HERE / "compare_report.py"),
+             str(pq), "-o", str(out)],
+            capture_output=True, text=True, cwd=_HERE,
+        )
+        assert result.returncode == 0, result.stderr
+        text = out.read_text()
+        assert "By tile shape" in text
+        assert "256×128×32" in text
+
+    def test_tile_rollup_counts_correctly(self, tmp_path):
+        import subprocess, sys
+        rows = [
+            dict(_BASE_ROW, tile_m=256, tile_n=128, tile_k=32, M=512, verdict="PASSED"),
+            dict(_BASE_ROW, tile_m=256, tile_n=128, tile_k=32, M=1024, verdict="SKIPPED",
+                 tflops=None),
+        ]
+        pq = _make_parquet(rows, tmp_path / "disp.parquet")
+        out = tmp_path / "report.md"
+        subprocess.run(
+            [sys.executable, str(_HERE / "compare_report.py"),
+             str(pq), "-o", str(out)],
+            capture_output=True, text=True, cwd=_HERE,
+        )
+        text = out.read_text()
+        # 1 passed, 1 skipped → 50%
+        assert "50.0%" in text
+
+
 # ── sweep_runner TFLOP/s parser ──────────────────────────────────────────────
 
 class TestHarnessTflopsParser:

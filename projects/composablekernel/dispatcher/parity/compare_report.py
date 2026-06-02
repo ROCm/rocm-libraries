@@ -183,6 +183,15 @@ def _build_markdown(df: pd.DataFrame, disp_path: Path,
     if "pipeline" in df.columns:
         lines.append(_rollup_table(df, "pipeline", "By pipeline"))
         lines.append("")
+    if {"tile_m", "tile_n", "tile_k"}.issubset(df.columns):
+        df_tile = df.copy()
+        df_tile["tile"] = (
+            df_tile["tile_m"].astype(str) + "×"
+            + df_tile["tile_n"].astype(str) + "×"
+            + df_tile["tile_k"].astype(str)
+        )
+        lines.append(_rollup_table(df_tile, "tile", "By tile shape"))
+        lines.append("")
 
     # Per-shape detail table (failures first, then skipped, then passing)
     lines += [
