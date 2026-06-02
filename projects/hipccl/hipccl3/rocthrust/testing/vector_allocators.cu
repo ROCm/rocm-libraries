@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -50,7 +50,7 @@ public:
   }
 
   stateful_allocator(stateful_allocator&& other)
-      : BaseAlloc(std::move(other))
+      : BaseAlloc(_THRUST_STD::move(other))
       , state(other.state)
   {
     other.state = 0;
@@ -170,7 +170,7 @@ void TestVectorAllocatorConstructors()
 
   // FIXME: uncomment this after the vector_base(vector_base&&, const Alloc&)
   // is fixed and implemented
-  // Vector v5(std::move(v3), alloc2);
+  // Vector v5(_THRUST_STD::move(v3), alloc2);
   // ASSERT_EQUAL((v4 == v5), true);
   // ASSERT_EQUAL(v5.get_allocator(), alloc2);
   // ASSERT_EQUAL(Alloc::last_allocated, 1);
@@ -243,7 +243,7 @@ void TestVectorAllocatorPropagateOnMoveAssignment()
     Vector v1(10, alloc1);
     Vector v2(15, alloc2);
 
-    v2 = std::move(v1);
+    v2 = _THRUST_STD::move(v1);
     ASSERT_EQUAL(v2.get_allocator(), alloc1);
     ASSERT_EQUAL(Alloc::last_allocated, 2);
     ASSERT_EQUAL(Alloc::last_deallocated, 2);

@@ -27,7 +27,7 @@
 #endif // no system header
 #include <thrust/system/cpp/vector.h>
 
-#include <utility>
+#include _THRUST_STD_INCLUDE(utility)
 
 THRUST_NAMESPACE_BEGIN
 namespace system
@@ -57,7 +57,7 @@ vector<T, Allocator>::vector(const vector& x)
 
 template <typename T, typename Allocator>
 vector<T, Allocator>::vector(vector&& x)
-    : super_t(std::move(x))
+    : super_t(_THRUST_STD::move(x))
 {}
 
 template <typename T, typename Allocator>
@@ -88,7 +88,7 @@ vector<T, Allocator>& vector<T, Allocator>::operator=(const vector& x)
 template <typename T, typename Allocator>
 vector<T, Allocator>& vector<T, Allocator>::operator=(vector&& x)
 {
-  super_t::operator=(std::move(x));
+  super_t::operator=(_THRUST_STD::move(x));
   return *this;
 }
 

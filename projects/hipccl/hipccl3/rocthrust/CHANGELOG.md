@@ -9,6 +9,10 @@ Documentation for rocThrust available at
 
 * Fixed build failures when libhipcxx is not on the include path. The OMP and TBB backends included `<cuda/std/...>` headers directly and `thrust/unique_ptr.h` included `<compare>` unconditionally. They now use the standard library fallback, and `<compare>` is only included for C++20 and later.
 
+### Changed
+
+* Replaced `std::move` operators to `hip::std` operators.
+
 ### Removed
 
 * Removed `THRUST_NODISCARD`.
