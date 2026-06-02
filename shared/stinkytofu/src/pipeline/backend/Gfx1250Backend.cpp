@@ -70,7 +70,7 @@ void addGfx1250RegionPasses(PassManager& pm, const StinkyAsmModule& module, OptL
     pm.addPass(createCFGBuilderPass());
     if (enableWaitCnt) {
         pm.addPass(createStinkyRemoveWaitCntPass());
-        pm.addPass(createStinkyRemoveNopPass());
+        // pm.addPass(createStinkyRemoveNopPass());
     }
 
     // addPeepholeOptPasses(pm, optLevel);
@@ -78,7 +78,7 @@ void addGfx1250RegionPasses(PassManager& pm, const StinkyAsmModule& module, OptL
     // Instruction scheduling
     pm.addPass(createStinkyBuildImplicitDependencyPass());
     // pm.addPass(createScheduleFirstLRsPass());
-    pm.addPass(createStinkyDAGSchedulerPass());
+    // pm.addPass(createStinkyDAGSchedulerPass());
     // pm.addPass(createScheduleLastLRsPass());
 }
 
@@ -98,7 +98,7 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module) {
     if (optLevel != OptLevel::O0) {
         // -- kernel --
         // strip delay_alu before scheduling
-        pm.addPass(createRemoveDelayAluPass());
+        // pm.addPass(createRemoveDelayAluPass());
 
         PassFeatureConfig passFeatureConfig;
         passFeatureConfig.barrierConfig.unrollMovableBarrier = true;
@@ -133,10 +133,10 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module) {
     pm.addPass(createInsertVgprMsbPass());
     pm.addPass(createCFGBuilderPass());
     pm.addPass(createMemTokenConsistencyCheckPass());
-    if (optLevel != OptLevel::O0) {
-        pm.addPass(createInsertDelayAluPass());
-        pm.addPass(createLoopRegionRemarkPass());
-    }
+    // if (optLevel != OptLevel::O0) {
+    //     pm.addPass(createInsertDelayAluPass());
+    //     pm.addPass(createLoopRegionRemarkPass());
+    // }
     pm.addPass(createEstimateAsmCyclesPass());
     if (moduleOptions.EnableSwPrefetchInsertion) {
         pm.addPass(createSwPrefetchInsertionPass(module));
