@@ -631,8 +631,8 @@ class KernelWriterAssembly(KernelWriter):
   def removeGROffsetsVariableSgprsFromPool(self, kernel):
     module = Module("RemoveGROffsetSgprsFromPool")
 
-    # Wave-separated TDM copies A/B (and MX) incs into tdm*Incs during setup; main loop
-    # uses tdm*Incs only. GlobalReadIncs* are released afterward — do not pin them here.
+    # Wave-separated TDM copies incs into tdm*Incs; main loop uses tdm*Incs only.
+    # GlobalReadIncs* are released after setup (or after stagger when staggerUCode).
     if not self.isTdmWaveSeparated(kernel):
       self.removeSgprVarFromPool("GlobalReadIncsA")
       self.removeSgprVarFromPool("GlobalReadIncsB")
@@ -644,7 +644,12 @@ class KernelWriterAssembly(KernelWriter):
     return module
 
   def releaseGlobalReadIncsSgprsAfterTdmWaveSep(self, kernel):
-    """Return GlobalReadIncs* SGPRs to the pool after tdmSetupIncrementWaveSeparated."""
+    """Return GlobalReadIncs* SGPRs to the pool for wave-separated TDM.
+
+    Call immediately after tdmSetupIncrementWaveSeparated when staggerUCode is false.
+    When staggerUCode is true, defer until after removeStaggerAB (stagger still uses
+    GlobalReadIncs*; see calculateStagger).
+    """
     module = Module("ReleaseGlobalReadIncsAfterTdmWaveSep")
     if not self.isTdmWaveSeparated(kernel):
       return module
@@ -758,21 +763,12 @@ class KernelWriterAssembly(KernelWriter):
       if kernel["ProblemType"]["Sparse"]:
         module.add(self.defineSgpr("WrapUMetadata", 2, wrapAlignment))  # Bytes to add to SrdMetadata to reset address from N-1 iter to AddressMetadata
 
-    isTDM = kernel["enableTDMA"] or kernel["enableTDMB"]
-    isWaveSeparated = prod(kernel["MIWaveGroup"]) >= 2
-    keepStaggerSgprsAlive = self.states.staggerUCode and isTDM
-
-    if self.states.staggerUCode and not keepStaggerSgprsAlive:
       self.addSgprVarToPool("WrapUA")
       self.addSgprVarToPool("WrapUB")
-      if kernel["ProblemType"]["MXBlockA"]:
-        self.addSgprVarToPool("WrapUMXSA")
-      if kernel["ProblemType"]["MXBlockB"]:
-        self.addSgprVarToPool("WrapUMXSB")
 
     if self.states.a.numSgprGlobalReadIncs > 0:
       module.add(self.defineSgpr("GlobalReadIncsA", self.states.a.numSgprGlobalReadIncs))
-      if not (keepStaggerSgprsAlive or isWaveSeparated):
+      if prod(kernel["MIWaveGroup"]) < 2:
         self.addSgprVarToPool("GlobalReadIncsA")
     if kernel["ProblemType"]["MXBlockA"] and self.states.mxsa.numSgprGlobalReadIncs > 0:
       module.add(self.defineSgpr("GlobalReadIncsMXSA", self.states.mxsa.numSgprGlobalReadIncs))
@@ -780,7 +776,7 @@ class KernelWriterAssembly(KernelWriter):
         self.addSgprVarToPool("GlobalReadIncsMXSA")
     if self.states.b.numSgprGlobalReadIncs > 0:
       module.add(self.defineSgpr("GlobalReadIncsB", self.states.b.numSgprGlobalReadIncs))
-      if not (keepStaggerSgprsAlive or isWaveSeparated):
+      if prod(kernel["MIWaveGroup"]) < 2:
         self.addSgprVarToPool("GlobalReadIncsB")
     if kernel["ProblemType"]["MXBlockB"] and self.states.mxsb.numSgprGlobalReadIncs > 0:
       module.add(self.defineSgpr("GlobalReadIncsMXSB", self.states.mxsb.numSgprGlobalReadIncs))
@@ -6193,6 +6189,8 @@ class KernelWriterAssembly(KernelWriter):
 
     if kernel["PrefetchGlobalRead"] >= 3:
       imod.add(labelRemoveSUEnd)
+    # Wave-separated TDM: stagger setup/remove still use GlobalReadIncs*; release here.
+    imod.add(self.releaseGlobalReadIncsSgprsAfterTdmWaveSep(kernel))
     return imod
 
   def removeStagger(self, kernel, tP):
