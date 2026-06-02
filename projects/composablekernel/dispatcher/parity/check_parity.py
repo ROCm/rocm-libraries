@@ -45,7 +45,7 @@ Usage:
 
     # On a GPU node, padding config (different --kernel-set to avoid harness conflict):
     python check_parity.py configs/padding_fp16_rcr.json \
-        --sizes 1024x1024x1024,257x257x256,513x511x64 --kernel-set parity_padding
+        --sizes 1024x1024x1024,257x257x56,513x511x40 --kernel-set parity_padding
 
     # On a GPU node, full dispatcher-vs-TE numerical + performance parity:
     python check_parity.py configs/single_fp16_rcr.json \
@@ -89,6 +89,13 @@ _DRYRUN_VERDICT = "DRYRUN"
 # Number of outer invocations for the performance stage. Medians over N runs
 # reduce the effect of GPU clock transients and OS scheduling jitter.
 _PERF_RUNS = 10
+
+# Subprocess timeouts (seconds). Codegen and builds can take tens of seconds on
+# a loaded machine; GPU kernel invocations should finish in under two minutes.
+_TIMEOUT_IDENTIFIER = 120   # identifier oracle: pure host C++
+_TIMEOUT_CODEGEN    = 300   # unified_gemm_codegen.py: Python template generation
+_TIMEOUT_BUILD      = 600   # hipcc compilation: slow on first run
+_TIMEOUT_GPU_RUN    = 120   # single harness or TE benchmark invocation
 
 
 def _capitalize_bool(b: bool) -> str:
@@ -247,7 +254,11 @@ def stage_identifier(config_path: Path, dry_run: bool) -> bool:
     if dry_run:
         print("  [dry-run] not executed")
         return True
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=_TIMEOUT_IDENTIFIER)
+    except subprocess.TimeoutExpired:
+        print(f"  -> FAIL (timed out after {_TIMEOUT_IDENTIFIER}s)", file=sys.stderr)
+        return False
     sys.stdout.write(proc.stdout)
     sys.stderr.write(proc.stderr)
     ok = proc.returncode == 0
@@ -271,7 +282,11 @@ def drive_codegen(config_path: Path, index: int, output_dir: Path, kernel_set: s
     if dry_run:
         print("  [dry-run] not executed")
         return True, plan
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=_TIMEOUT_CODEGEN)
+    except subprocess.TimeoutExpired:
+        print(f"  -> FAIL (codegen timed out after {_TIMEOUT_CODEGEN}s)", file=sys.stderr)
+        return False, plan
     sys.stdout.write(proc.stdout)
     sys.stderr.write(proc.stderr)
     return proc.returncode == 0, plan
@@ -283,7 +298,11 @@ def build_harness(header: Path, arch: str, dry_run: bool) -> bool:
     if dry_run:
         print("  [dry-run] not executed")
         return True
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=_TIMEOUT_BUILD)
+    except subprocess.TimeoutExpired:
+        print(f"  -> FAIL (build timed out after {_TIMEOUT_BUILD}s)", file=sys.stderr)
+        return False
     sys.stdout.write(proc.stdout)
     sys.stderr.write(proc.stderr)
     return proc.returncode == 0
@@ -300,7 +319,12 @@ def run_harness(sizes: List[Tuple[int, int, int]], dry_run: bool
             print("  [dry-run] not executed")
             results[(m, n, k)] = {"verdict": _DRYRUN_VERDICT, "tflops": None, "detail": ""}
             continue
-        proc = subprocess.run(cmd, capture_output=True, text=True)
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=_TIMEOUT_GPU_RUN)
+        except subprocess.TimeoutExpired:
+            print(f"  -> harness timed out after {_TIMEOUT_GPU_RUN}s", file=sys.stderr)
+            results[(m, n, k)] = {"verdict": "FAILED", "tflops": None, "detail": "timeout"}
+            continue
         sys.stdout.write(proc.stdout)
         if proc.stderr:
             sys.stderr.write(proc.stderr)
@@ -341,7 +365,11 @@ def run_te_benchmark(exe: Path, m: int, n: int, k: int, csv_stub: Path, dry_run:
     if dry_run:
         print("  [dry-run] not executed")
         return {"verdict": _DRYRUN_VERDICT, "tflops": None, "rc": None}
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=_TIMEOUT_GPU_RUN)
+    except subprocess.TimeoutExpired:
+        print(f"  -> TE benchmark timed out after {_TIMEOUT_GPU_RUN}s", file=sys.stderr)
+        return {"verdict": "FAILED", "tflops": None, "rc": None}
     sys.stdout.write(proc.stdout)
     if proc.stderr:
         sys.stderr.write(proc.stderr)
@@ -606,12 +634,17 @@ def main() -> int:
     ap.add_argument("--index", type=int, default=0,
                     help="Which translated config to check per file (default 0)")
     ap.add_argument("--sizes",
-                    default="512x512x512,1024x1024x1024,2048x2048x2048,257x257x257,513x511x33",
+                    default="512x512x512,1024x1024x1024,2048x2048x2048,257x257x56,513x511x40",
                     help="Comma-separated MxNxK problem sizes. "
-                         "257x257x257 is the T1.6 spec-required non-tile-aligned cube that "
-                         "exercises pad_m, pad_n, and pad_k simultaneously; use with "
-                         "configs/padding_fp16_rcr.json (pad_m=pad_n=pad_k=true). "
-                         "513x511x33 additionally stresses larger non-tile-aligned M/N/K.")
+                         "257x257x56 is the T1.6 spec-required non-tile-aligned cube that "
+                         "exercises pad_m, pad_n, and pad_k simultaneously; K=56 is a multiple "
+                         "of 8 (fp16 vector load size) but NOT of 32 (tile_k), so it hits the "
+                         "pad_k code path. Use with configs/padding_fp16_rcr.json "
+                         "(pad_m=pad_n=pad_k=true). K must be a multiple of 8 (vectorSize for "
+                         "fp16) regardless of pad_k; K=257 and K=33 were previously used but "
+                         "are rejected by IsSupportedArgument because 257%%8=1 and 33%%8=1. "
+                         "513x511x40 additionally stresses larger non-tile-aligned M/N/K "
+                         "(K=40: 40%%8=0, 40%%32=8, non-tile-aligned).")
     ap.add_argument("--arch", default="gfx942", help="GPU arch for harness build")
     ap.add_argument("--output-dir", type=Path, default=_HERE / "generated",
                     help="Codegen output directory")

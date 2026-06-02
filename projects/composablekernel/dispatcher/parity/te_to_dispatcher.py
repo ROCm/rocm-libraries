@@ -221,6 +221,13 @@ def _translate_impl(
     k_block_per_cu = data.get("k_block_per_cu", 1)
     num_wave_groups = data.get("num_wave_groups", 1)
     split_k = data.get("split_k", 1)
+    # cpp_identifier_oracle.cpp casts split_k to uint8_t; values > 255 wrap silently.
+    if not (1 <= split_k <= 255):
+        raise TranslationError(
+            f"split_k={split_k} is out of range [1, 255]: "
+            "cpp_identifier_oracle.cpp line 69 casts to uint8_t, so values > 255 "
+            "wrap to 0 and cause a Python/C++ identifier mismatch."
+        )
 
     tc = data.get("tile_config", {})
     tr = data.get("trait_config", {})

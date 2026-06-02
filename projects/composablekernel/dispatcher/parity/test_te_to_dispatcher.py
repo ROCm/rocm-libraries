@@ -303,6 +303,24 @@ class TestUnknownFieldRejection:
             translate(_single_config(datatype="fp4"))
 
 
+class TestSplitKValidation:
+    """split_k > 255 must raise TranslationError (uint8_t overflow in oracle)."""
+
+    def test_split_k_256_raises(self):
+        # cpp_identifier_oracle.cpp casts split_k to uint8_t; 256 wraps to 0.
+        with pytest.raises(TranslationError, match="split_k=256"):
+            translate(_single_config(split_k=256))
+
+    def test_split_k_255_accepted(self):
+        configs = translate(_single_config(split_k=255))
+        assert len(configs) == 1
+        assert configs[0]["signature"]["split_k"] == 255
+
+    def test_split_k_0_raises(self):
+        with pytest.raises(TranslationError, match="split_k=0"):
+            translate(_single_config(split_k=0))
+
+
 class TestInvalidTileDropped:
     """Tiles that fail is_valid() (not divisible) must be silently dropped."""
 
