@@ -81,6 +81,18 @@ def main():
         help="Number of parallel workers (default: 8)"
     )
     parser_cmake.add_argument(
+        "--backend",
+        choices=["mm", "scan-deps"],
+        default="mm",
+        help="Dependency backend: 'mm' (per-file clang -MM, default) or "
+        "'scan-deps' (clang-scan-deps, shares header parsing across TUs)"
+    )
+    parser_cmake.add_argument(
+        "--scan-deps-bin",
+        default="clang-scan-deps",
+        help="Path to clang-scan-deps (used when --backend scan-deps)"
+    )
+    parser_cmake.add_argument(
         "--quiet",
         action="store_true",
         help="Suppress progress output"
@@ -177,6 +189,8 @@ def main():
         cmake_args += ["--workspace-root", args.workspace_root]
         cmake_args += ["--output", args.output]
         cmake_args += ["--parallel", str(args.parallel)]
+        cmake_args += ["--backend", args.backend]
+        cmake_args += ["--scan-deps-bin", args.scan_deps_bin]
         if args.quiet:
             cmake_args.append("--quiet")
         if args.force:

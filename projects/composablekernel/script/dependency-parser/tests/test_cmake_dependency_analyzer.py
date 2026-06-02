@@ -369,6 +369,26 @@ class TestDependencyMapper(unittest.TestCase):
         normalized = mapper.normalize_path("include/ck/ck.hpp")
         self.assertEqual(normalized, "include/ck/ck.hpp")
 
+    def test_normalize_path_collapses_dotdot(self):
+        """'../' segments must be collapsed so keys match git's canonical paths."""
+        from cmake_dependency_analyzer import DependencyMapper
+
+        mapper = DependencyMapper(
+            workspace_root="/ws/projects/composablekernel"
+        )
+        # relative path with ..
+        self.assertEqual(
+            mapper.normalize_path("example/62_convnd_activ/unary/../run.inc"),
+            "example/62_convnd_activ/run.inc",
+        )
+        # absolute workspace path with .. -> stripped + canonical
+        self.assertEqual(
+            mapper.normalize_path(
+                "/ws/projects/composablekernel/tutorial/ck_tile/gemm/01_naive_gemm/../reference_gemm.hpp"
+            ),
+            "tutorial/ck_tile/gemm/reference_gemm.hpp",
+        )
+
     def test_filter_system_files(self):
         """Should filter out system files."""
         from cmake_dependency_analyzer import DependencyMapper
@@ -506,6 +526,89 @@ class TestEdgeCases(unittest.TestCase):
             self.assertEqual(len(exe_to_objects), 0)
         finally:
             shutil.rmtree(temp_dir)
+
+
+class TestScanDepsExtractor(unittest.TestCase):
+    """Tests for the clang-scan-deps backend's output parsing."""
+
+    def test_known_sources_maps_abspath_to_file_key(self):
+        from cmake_dependency_analyzer import ScanDepsExtractor
+
+        e = ScanDepsExtractor()
+        commands = [
+            {"directory": "/build", "file": "/src/a.cpp", "command": "x"},
+            {"directory": "/build", "file": "rel/b.cpp", "command": "x"},
+        ]
+        known = e._known_sources(commands)
+        self.assertEqual(known["/src/a.cpp"], "/src/a.cpp")
+        # relative 'file' resolved against directory, but keyed by original value
+        self.assertEqual(known["/build/rel/b.cpp"], "rel/b.cpp")
+
+    def test_parse_make_output_keys_by_known_source(self):
+        from cmake_dependency_analyzer import ScanDepsExtractor
+
+        e = ScanDepsExtractor()
+        known = {"/w/src/a.cpp": "src/a.cpp"}
+        out = "/build/a.cpp.o: /w/src/a.cpp /w/include/h1.hpp /usr/include/x.h\n"
+        r = e.parse_make_output(out, known)
+        self.assertEqual(
+            r,
+            {"src/a.cpp": ["/w/src/a.cpp", "/w/include/h1.hpp", "/usr/include/x.h"]},
+        )
+
+    def test_parse_make_output_joins_line_continuations(self):
+        from cmake_dependency_analyzer import ScanDepsExtractor
+
+        e = ScanDepsExtractor()
+        known = {"/w/src/a.cpp": "src/a.cpp"}
+        out = "/build/a.cpp.o: /w/src/a.cpp \\\n  /w/include/h1.hpp \\\n  /w/include/h2.hpp\n"
+        r = e.parse_make_output(out, known)
+        self.assertEqual(len(r["src/a.cpp"]), 3)
+        self.assertIn("/w/include/h2.hpp", r["src/a.cpp"])
+
+    def test_parse_make_output_skips_unknown_tu(self):
+        from cmake_dependency_analyzer import ScanDepsExtractor
+
+        e = ScanDepsExtractor()
+        known = {"/w/src/a.cpp": "src/a.cpp"}
+        out = (
+            "/build/a.cpp.o: /w/src/a.cpp /w/include/h1.hpp\n"
+            "/build/z.cpp.o: /w/src/z.cpp /w/include/h9.hpp\n"  # z not in known
+        )
+        r = e.parse_make_output(out, known)
+        self.assertEqual(set(r.keys()), {"src/a.cpp"})
+
+    def test_patch_commands_injects_resource_dir(self):
+        from cmake_dependency_analyzer import ScanDepsExtractor
+
+        e = ScanDepsExtractor()
+        db = [
+            {"directory": "/b", "file": "a.cpp", "command": "amdclang++ -x hip -c a.cpp"},
+            {"directory": "/b", "file": "b.cpp", "arguments": ["amdclang++", "-c", "b.cpp"]},
+        ]
+        patched = e.patch_commands(db, "/rd/clang/23")
+        self.assertIn("-resource-dir=/rd/clang/23", patched[0]["command"])
+        self.assertIn("-resource-dir=/rd/clang/23", patched[1]["arguments"])
+
+    def test_patch_commands_idempotent(self):
+        from cmake_dependency_analyzer import ScanDepsExtractor
+
+        e = ScanDepsExtractor()
+        db = [{"directory": "/b", "file": "a.cpp",
+               "command": "amdclang++ -resource-dir=/existing -c a.cpp"}]
+        patched = e.patch_commands(db, "/rd/clang/23")
+        self.assertEqual(patched[0]["command"].count("-resource-dir"), 1)
+        self.assertIn("-resource-dir=/existing", patched[0]["command"])
+
+    def test_wrapper_and_system_headers_excluded_from_map(self):
+        # The HIP wrapper / resource-dir / system headers must never land in the
+        # final map, regardless of backend (they appear in raw scan output).
+        from cmake_dependency_analyzer import DependencyMapper
+
+        m = DependencyMapper()
+        self.assertFalse(m.is_project_file(
+            "/opt/rocm/core-7.13/lib/llvm/lib/clang/23/include/__clang_hip_runtime_wrapper.h"))
+        self.assertFalse(m.is_project_file("/usr/include/c++/13/cmath"))
 
 
 if __name__ == "__main__":

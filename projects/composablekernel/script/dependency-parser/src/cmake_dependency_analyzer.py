@@ -282,6 +282,153 @@ class DependencyExtractor:
         return source_to_deps
 
 
+class ScanDepsExtractor:
+    """Extracts dependencies for the whole compilation database in one pass.
+
+    Uses `clang-scan-deps -format make`, which shares/caches header preprocessing
+    across translation units instead of re-lexing each TU independently (as the
+    per-file `clang -MM` backend does). Produces the same source -> deps mapping.
+    """
+
+    def __init__(
+        self,
+        scan_deps_bin: str = "clang-scan-deps",
+        jobs: int = 8,
+        timeout: int = 3600,
+        resource_dir: Optional[str] = None,
+    ):
+        self.scan_deps_bin = scan_deps_bin
+        self.jobs = jobs
+        self.timeout = timeout
+        # If None, auto-detect from the compile-db compiler. clang-scan-deps
+        # derives its own resource dir, which for HIP (-x hip) TUs may miss
+        # __clang_hip_runtime_wrapper.h; injecting the compiler's resource dir
+        # into each command fixes it.
+        self.resource_dir = resource_dir
+
+    def detect_resource_dir(self, db: List[Dict]) -> Optional[str]:
+        """Return the compiler's resource dir from the first compile entry."""
+        for entry in db:
+            cmd = entry.get("command")
+            args = entry.get("arguments")
+            compiler = (shlex.split(cmd)[0] if cmd else (args[0] if args else None))
+            if not compiler:
+                continue
+            try:
+                out = subprocess.run(
+                    [compiler, "-print-resource-dir"],
+                    capture_output=True, text=True, timeout=10,
+                )
+                rd = out.stdout.strip()
+                if out.returncode == 0 and rd:
+                    return rd
+            except Exception:
+                continue
+        return None
+
+    def patch_commands(self, db: List[Dict], resource_dir: str) -> List[Dict]:
+        """Append -resource-dir to each command unless already present (pure)."""
+        flag = f"-resource-dir={resource_dir}"
+        patched = []
+        for entry in db:
+            e = dict(entry)
+            if "command" in e:
+                if "-resource-dir" not in e["command"]:
+                    e["command"] = e["command"] + " " + flag
+            elif "arguments" in e:
+                if not any(str(a).startswith("-resource-dir") for a in e["arguments"]):
+                    e["arguments"] = list(e["arguments"]) + [flag]
+            patched.append(e)
+        return patched
+
+    def _known_sources(self, commands: List[Dict]) -> Dict[str, str]:
+        """Map absolute source path -> the 'file' value used as the dep-map key."""
+        known = {}
+        for cmd in commands:
+            f = cmd["file"]
+            base = f if os.path.isabs(f) else os.path.join(cmd["directory"], f)
+            known[os.path.abspath(base)] = f
+        return known
+
+    def parse_make_output(
+        self, text: str, known: Dict[str, str]
+    ) -> Dict[str, List[str]]:
+        """Parse combined `-format make` output into source_to_deps.
+
+        Each rule is `<output>: <source> <headers...>`. We identify the source as
+        the prerequisite that matches a known compile-database source and key the
+        result by that source's 'file' value (so it joins with the ninja
+        obj->source mapping, exactly like the -MM backend).
+        """
+        content = text.replace("\\\n", " ").replace("\\\r\n", " ")
+        source_to_deps: Dict[str, List[str]] = {}
+        for line in content.splitlines():
+            line = line.strip()
+            if not line or ":" not in line:
+                continue
+            _, _, deps_str = line.partition(":")
+            prereqs = [d for d in deps_str.split() if d.strip()]
+            if not prereqs:
+                continue
+            src_key = None
+            for p in prereqs:
+                ap = os.path.abspath(p)
+                if ap in known:
+                    src_key = known[ap]
+                    break
+            if src_key is not None:
+                source_to_deps[src_key] = prereqs
+        return source_to_deps
+
+    def extract_all(
+        self, compile_commands_path: str, commands: List[Dict]
+    ) -> Dict[str, List[str]]:
+        known = self._known_sources(commands)
+
+        # clang-scan-deps derives its own resource dir, which for HIP TUs misses
+        # __clang_hip_runtime_wrapper.h. Inject the compiler's resource dir into
+        # a patched copy of the compilation database so scans succeed.
+        db = json.load(open(compile_commands_path))
+        rd = self.resource_dir or self.detect_resource_dir(db)
+        db_path = compile_commands_path
+        tmp_path = None
+        if rd:
+            patched = self.patch_commands(db, rd)
+            fd, tmp_path = tempfile.mkstemp(prefix="ck_scandeps_cdb_", suffix=".json")
+            with os.fdopen(fd, "w") as f:
+                json.dump(patched, f)
+            db_path = tmp_path
+
+        try:
+            cmd = [
+                self.scan_deps_bin,
+                "-format",
+                "make",
+                "-j",
+                str(self.jobs),
+                "-compilation-database",
+                db_path,
+            ]
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                errors="replace",
+                timeout=self.timeout,
+            )
+            # clang-scan-deps may exit nonzero if some TUs fail to scan, yet
+            # still emit usable rules for the rest. Only hard-fail on no output.
+            if not result.stdout.strip():
+                raise RuntimeError(
+                    f"clang-scan-deps produced no output (rc={result.returncode}): "
+                    f"{result.stderr[:2000]}"
+                )
+            return self.parse_make_output(result.stdout, known)
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
+
 class NinjaTargetParser:
     """Parses ninja build files to get target mappings."""
 
@@ -370,12 +517,19 @@ class DependencyMapper:
     def normalize_path(self, path: str) -> str:
         """Normalize a file path relative to workspace root.
 
+        Collapses '..' segments first (os.path.normpath) so keys are canonical.
+        Without this, the -MM backend records keys like
+        'tutorial/ck_tile/gemm/01_naive_gemm/../reference_gemm.hpp' which never
+        string-match the canonical paths git reports -> dependent tests are
+        silently not selected (false negatives).
+
         Args:
             path: File path to normalize
 
         Returns:
-            Normalized relative path
+            Normalized (canonical) relative path
         """
+        path = os.path.normpath(path)
         if self.workspace_root and path.startswith(self.workspace_root):
             return path[len(self.workspace_root) :]
         return path
@@ -473,6 +627,8 @@ class CMakeDependencyAnalyzer:
         ninja_path: Optional[str],
         workspace_root: str,
         parallel_workers: int = 8,
+        backend: str = "mm",
+        scan_deps_bin: str = "clang-scan-deps",
     ):
         """Initialize the analyzer.
 
@@ -481,11 +637,15 @@ class CMakeDependencyAnalyzer:
             ninja_path: Path to build.ninja
             workspace_root: Root directory of the workspace
             parallel_workers: Number of parallel workers for dependency extraction
+            backend: Dependency backend - "mm" (per-file clang -MM) or "scan-deps"
+            scan_deps_bin: Path to clang-scan-deps (used when backend="scan-deps")
         """
         self.compile_commands_path = compile_commands_path
         self.ninja_path = ninja_path
         self.workspace_root = workspace_root
         self.parallel_workers = parallel_workers
+        self.backend = backend
+        self.scan_deps_bin = scan_deps_bin
 
         # Results
         self.file_to_executables: Dict[str, Set[str]] = {}
@@ -590,15 +750,27 @@ class CMakeDependencyAnalyzer:
             progress_callback("parsing_compile_commands", 1, 1)
 
         # Phase 2: Extract dependencies
-        extractor = DependencyExtractor(parallel_workers=self.parallel_workers)
-
-        def dep_progress(current, total):
+        if self.backend == "scan-deps":
             if progress_callback:
-                progress_callback("extracting_dependencies", current, total)
+                progress_callback("extracting_dependencies", 0, 1)
+            extractor = ScanDepsExtractor(
+                scan_deps_bin=self.scan_deps_bin, jobs=self.parallel_workers
+            )
+            source_to_deps = extractor.extract_all(
+                self.compile_commands_path, commands
+            )
+            if progress_callback:
+                progress_callback("extracting_dependencies", 1, 1)
+        else:
+            extractor = DependencyExtractor(parallel_workers=self.parallel_workers)
 
-        source_to_deps = extractor.extract_batch(
-            commands, progress_callback=dep_progress
-        )
+            def dep_progress(current, total):
+                if progress_callback:
+                    progress_callback("extracting_dependencies", current, total)
+
+            source_to_deps = extractor.extract_batch(
+                commands, progress_callback=dep_progress
+            )
 
         # Phase 3: Parse ninja target mappings
         if progress_callback:
@@ -704,6 +876,18 @@ def main():
         help="Number of parallel workers (default: 8)",
     )
     parser.add_argument(
+        "--backend",
+        choices=["mm", "scan-deps"],
+        default="mm",
+        help="Dependency backend: 'mm' (per-file clang -MM, default) or "
+        "'scan-deps' (clang-scan-deps, shares header parsing across TUs)",
+    )
+    parser.add_argument(
+        "--scan-deps-bin",
+        default="clang-scan-deps",
+        help="Path to clang-scan-deps (used when --backend scan-deps)",
+    )
+    parser.add_argument(
         "--quiet",
         action="store_true",
         help="Suppress progress output",
@@ -725,6 +909,8 @@ def main():
         ninja_path=args.build_ninja,
         workspace_root=args.workspace_root,
         parallel_workers=args.parallel,
+        backend=args.backend,
+        scan_deps_bin=args.scan_deps_bin,
     )
 
     # Check if cache needs regeneration
