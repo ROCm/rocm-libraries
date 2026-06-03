@@ -283,6 +283,13 @@ enum fft_result_placement
     fft_placement_notinplace,
 };
 
+// callback functions
+enum fft_callback_type
+{
+    fft_callback_type_none, // don't run callbacks
+    fft_callback_type_funcptr, // run callbacks specified via device function pointer
+};
+
 inline void validate_or_throw(fft_result_placement placement, const std::string& func_name)
 {
     switch(placement)

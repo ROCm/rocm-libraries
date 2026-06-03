@@ -2870,7 +2870,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
           if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]:
             module.add(self.tdmApplyStreamKOffsetWaveSeparated(kernel, tensorParametersA["MX"], tensorParametersB["MX"]))
 
-        module.add(self.releaseGlobalReadIncsSgprsAfterTdmWaveSep(kernel))
+        if not self.states.staggerUCode:
+          module.add(self.releaseGlobalReadIncsSgprsAfterTdmWaveSep(kernel))
 
       if (kernel["enableTDMA"] or kernel["enableTDMB"]) and not kernel["ClusterBarrier"]:
         module.add(self.undefineSgpr("WaveIdx"))
