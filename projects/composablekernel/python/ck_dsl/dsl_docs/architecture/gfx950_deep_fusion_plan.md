@@ -82,7 +82,7 @@ spatial size:
 ```text
 N=1, H=W=16, C=8, K0=32, K1=24, R=S=3, pool=2x2 stride 2
 pool_tile=4x8
-tile_n=32, tile_k=32
+tile_n=32, tile_k=16
 grid=(1, 2, 1)
 ```
 
@@ -144,7 +144,7 @@ The v1 contract should be stricter than the eventual target:
 The one-CTA constraint was only for bring-up. The current prototype uses
 final-output tile ownership: each CTA owns a rectangular tile of pooled output
 pixels and computes the required conv1 and conv0 source region locally. The
-current tuned prototype uses `pool_tile=4x8`, `tile_n=32`, and `tile_k=32` to
+current tuned prototype uses `pool_tile=4x8`, `tile_n=32`, and `tile_k=16` to
 reduce padded MFMA work for the target `K0=32`, `K1=24` channel topology.
 
 ### Shape Milestones
@@ -165,8 +165,28 @@ shape works":
 4. **Full exercise shape**:
    `N=1, H=2160, W=3840, C=8, K0=32, K1=24, pool output 1080x1920`.
    This is the performance target. Current fp16 prototype timing with
-   `pool_tile=4x8`, `tile_n=32`, `tile_k=32` is about `0.39 ms`
-   (`~130 useful TFLOP/s`) on the local gfx950 run.
+   `pool_tile=4x8`, `tile_n=32`, `tile_k=16` is about `0.357 ms`
+   (`~143 useful TFLOP/s`) in the benchmark harness with 100 warmup iterations.
+
+Input-footprint caching was also prototyped as an opt-in mode. It is
+numerically correct, but slower in the current schedule: for the full target,
+`tile_k=16` without the cache measured about `0.387 ms`, while the cached-input
+variant measured about `0.539 ms`. This suggests the current bottleneck is still
+MFMA scheduling / LDS materialization overhead rather than HBM input bandwidth.
+A direct-footprint variant that avoids materializing the im2col A tile was also
+prototyped and verified. It loads each CTA's unique input footprint into LDS and
+has MFMA A fragments read that footprint directly. It is still slower than the
+baseline (`~0.469 ms` vs `~0.369 ms` in repeat timing) because the current
+implementation uses scalar LDS fragment gathers plus extra coordinate arithmetic.
+Keep it opt-in until the footprint LDS layout is vectorized around the MFMA
+fragment access pattern.
+
+Async / ping-pong loading was tested through the existing conv pipeline knobs.
+`compv4` without async is numerically correct but slightly slower than `mem`
+(`~0.372 ms` vs `~0.365 ms` in repeat timing). `compv4 + async_dma` is not
+numerically correct yet for this fused rectangular-tile carrier, for both
+`tile_k=16` and `tile_k=32`. Keep async disabled until the async loader contract
+is reworked for the custom `m_index_fn` / epilogue override path.
 
 Correctness claims must state which milestone was verified.
 
@@ -406,6 +426,8 @@ Required behavior:
   conv0 output patch, and input halo;
 - support `--arch gfx950`, `--dtype fp16|bf16`, `--verify`, `--bench`, and shape
   overrides for the v1 static shape family.
+- when `--bench` is used, run at least 100 warmup launches before timing so the
+  cache and module state are warm.
 
 The benchmark should compare against a multi-kernel reference pipeline, not just
 against torch eager. The primary metric is avoided intermediate HBM traffic and

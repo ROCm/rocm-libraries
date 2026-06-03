@@ -719,6 +719,29 @@ def build_implicit_gemm_conv(
     arch: str = "gfx950",
     extra_params: Optional[Callable[[IRBuilder], object]] = None,
     m_index_fn: Optional[Callable[[IRBuilder, Value, WarpGrid], Value]] = None,
+    input_cache_setup: Optional[
+        Callable[[IRBuilder, ImplicitGemmConvSpec, WarpGrid, Value], object]
+    ] = None,
+    a_load_override: Optional[
+        Callable[
+            [IRBuilder, ImplicitGemmConvSpec, Value, Value, WarpGrid, object], None
+        ]
+    ] = None,
+    a_operand_override: Optional[
+        Callable[
+            [
+                IRBuilder,
+                ImplicitGemmConvSpec,
+                Value,
+                Value,
+                Value,
+                int,
+                WarpGrid,
+                object,
+            ],
+            Value,
+        ]
+    ] = None,
     epilogue_override: Optional[
         Callable[
             [IRBuilder, ImplicitGemmConvSpec, Sequence[Value], WarpGrid, Value, object],
@@ -910,6 +933,11 @@ def build_implicit_gemm_conv(
     a_rsrc = a_buf_rsrc.rsrc
     b_rsrc = b_buf_rsrc.rsrc
     d_rsrc = d_buf_rsrc.rsrc
+    input_cache_context = (
+        input_cache_setup(b, spec, grid, a_rsrc)
+        if input_cache_setup is not None
+        else None
+    )
 
     # Descriptor callbacks shared by both sync and async paths.
     # `(row, col)` are in the (tile_local M, tile_local K halves)
@@ -1038,13 +1066,16 @@ def build_implicit_gemm_conv(
         # returns the global element offset + validity predicate, so
         # the conv-coord-transform DAG drives the address arithmetic
         # while the loader owns the thread distribution.
-        a_sync_loader.load(
-            b,
-            tid=tid,
-            smem_dst=A_dst,
-            descriptor=a_descriptor,
-            rsrc=a_rsrc,
-        )
+        if a_load_override is not None:
+            a_load_override(b, spec, k_off, A_dst, grid, input_cache_context)
+        else:
+            a_sync_loader.load(
+                b,
+                tid=tid,
+                smem_dst=A_dst,
+                descriptor=a_descriptor,
+                rsrc=a_rsrc,
+            )
         b_sync_loader.load(
             b,
             tid=tid,
@@ -1147,7 +1178,23 @@ def build_implicit_gemm_conv(
                 a_row = b.add(
                     warp_m_off, b.add(b.const_i32(mi * spec.warp_tile_m), m_in_atom)
                 )
-                a_rows.append(_emit_smem_load(b, A_src, a_row, col_base, a_per_lane))
+                if a_operand_override is not None:
+                    a_rows.append(
+                        a_operand_override(
+                            b,
+                            spec,
+                            a_row,
+                            k_off_capture[0],
+                            col_base,
+                            a_per_lane,
+                            grid,
+                            input_cache_context,
+                        )
+                    )
+                else:
+                    a_rows.append(
+                        _emit_smem_load(b, A_src, a_row, col_base, a_per_lane)
+                    )
 
             b_cols = []
             for ni in range(mfmas_n):

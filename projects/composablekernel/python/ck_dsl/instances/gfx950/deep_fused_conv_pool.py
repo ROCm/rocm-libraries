@@ -88,7 +88,7 @@ class Gfx950DeepFusedConvPoolSpec:
     name: str = "ck_dsl_gfx950_deep_fused_conv_pool"
     tile_m: int = 128
     tile_n: int = 32
-    tile_k: int = 32
+    tile_k: int = 16
     pool_tile_h: int = 4
     pool_tile_w: int = 8
     warp_m: int = 2
@@ -96,8 +96,13 @@ class Gfx950DeepFusedConvPoolSpec:
     warp_tile_m: int = 32
     warp_tile_n: int = 32
     warp_tile_k: int = 16
+    pipeline: str = "mem"
+    async_dma: bool = False
+    unroll_k: bool = False
     acc_epilogue: ConvAccumulatorEpilogue = ConvAccumulatorEpilogue(relu=True)
     conv1_epilogue: ConvAccumulatorEpilogue = ConvAccumulatorEpilogue(relu=True)
+    cache_input_footprint: bool = False
+    direct_conv0_from_input_cache: bool = False
 
     @property
     def block_size(self) -> int:
@@ -111,9 +116,15 @@ class Gfx950DeepFusedConvPoolSpec:
             f"pt{self.pool_tile_h}x{self.pool_tile_w}",
             f"w{self.warp_m}x{self.warp_n}",
             f"a{self.warp_tile_m}x{self.warp_tile_n}x{self.warp_tile_k}",
+            f"{self.pipeline}_{'async' if self.async_dma else 'sync'}",
             self.acc_epilogue.tag(),
             self.conv1_epilogue.tag(),
             "cshuffle_conv1_pool",
+            flags={
+                "icache": self.cache_input_footprint,
+                "directa": self.direct_conv0_from_input_cache,
+                "unrollk": self.unroll_k,
+            },
         )
 
     def conv_spec(self) -> ImplicitGemmConvSpec:
@@ -128,8 +139,10 @@ class Gfx950DeepFusedConvPoolSpec:
             warp_tile_m=self.warp_tile_m,
             warp_tile_n=self.warp_tile_n,
             warp_tile_k=self.warp_tile_k,
-            pipeline="mem",
+            pipeline=self.pipeline,
             epilogue="cshuffle",
+            async_dma=self.async_dma,
+            unroll_k=self.unroll_k,
             acc_epilogue=self.acc_epilogue,
         )
 
@@ -151,6 +164,14 @@ def is_valid_spec(
         return False, "v1 supports only 2x2 stride-2 maxpool"
     if p.pool_ho <= 0 or p.pool_wo <= 0:
         return False, "pool output dimensions must be positive"
+    if spec.pipeline not in ("mem", "compv3", "compv4"):
+        return False, f"unsupported pipeline {spec.pipeline!r}"
+    if spec.async_dma and (
+        spec.cache_input_footprint or spec.direct_conv0_from_input_cache
+    ):
+        return False, "async_dma is only supported with the default conv0 A-load path"
+    if spec.unroll_k:
+        return False, "unroll_k is currently incorrect for the fused conv0 carrier"
     if c.N != 1:
         return False, f"v1 tiled schedule supports only N=1 (got N={c.N})"
     if spec.pool_tile_h <= 0 or spec.pool_tile_w <= 0:
@@ -170,10 +191,6 @@ def is_valid_spec(
     if c.K > spec.tile_n:
         return False, (
             f"v1 requires one CTA to own all conv channels: K={c.K} > tile_n={spec.tile_n}"
-        )
-    if c.K > spec.tile_k:
-        return False, (
-            f"v1 1x1 conv requires conv0 channels K0={c.K} <= tile_k={spec.tile_k}"
         )
     if p.conv1_channels > spec.tile_n:
         return False, (
@@ -281,10 +298,10 @@ def _load_conv1_weights_to_lds(
 ) -> Value:
     """Load W1[K1, K0] into a padded row-major LDS tile."""
 
-    w1_smem = b.smem_alloc(F16, [spec.tile_n, spec.tile_k], name_hint="W1_smem")
+    w1_smem = b.smem_alloc(F16, [spec.tile_n, spec.problem.conv.K], name_hint="W1_smem")
     loader = CoalescedTileLoader(
         tile_rows=spec.tile_n,
-        tile_cols=spec.tile_k,
+        tile_cols=spec.problem.conv.K,
         block_size=spec.block_size,
         load_vec=8,
     )
@@ -301,6 +318,155 @@ def _load_conv1_weights_to_lds(
     loader.load(b, tid=grid.tid, smem_dst=w1_smem, descriptor=descriptor, rsrc=w1_rsrc)
     b.sync()
     return w1_smem
+
+
+def _setup_input_footprint_cache(
+    b: IRBuilder,
+    spec: Gfx950DeepFusedConvPoolSpec,
+    a_rsrc: Value,
+    grid: WarpGrid,
+) -> Value:
+    """Load the unique conv0 input footprint for this pooled-output tile."""
+
+    p = spec.problem
+    c = p.conv
+    conv_tile_h = spec.pool_tile_h * p.pool_stride_h
+    conv_tile_w = spec.pool_tile_w * p.pool_stride_w
+    foot_h = conv_tile_h + (c.R - 1) * c.dH
+    foot_w = conv_tile_w + (c.S - 1) * c.dW
+    input_smem = b.smem_alloc(F16, [foot_h * foot_w, c.C], name_hint="InputFoot_smem")
+    total = foot_h * foot_w * c.C
+    elems_per_thread = (total + spec.block_size - 1) // spec.block_size
+    c_total = b.const_i32(total)
+    c_c = b.const_i32(c.C)
+    c_foot_w = b.const_i32(foot_w)
+    c_half_bytes = b.const_i32(2)
+    oob = b.const_i32((1 << 31) - 1)
+    h_base = b.sub(
+        b.mul(b.block_id_y(), b.const_i32(spec.pool_tile_h * p.pool_stride_h)),
+        b.const_i32(c.pH),
+    )
+    w_base = b.sub(
+        b.mul(b.block_id_z(), b.const_i32(spec.pool_tile_w * p.pool_stride_w)),
+        b.const_i32(c.pW),
+    )
+
+    for e in range(elems_per_thread):
+        idx = b.add(b.mul(b.const_i32(e), b.const_i32(spec.block_size)), grid.tid)
+        idx_ok = b.cmp_lt(idx, c_total)
+        safe_idx = b.select(idx_ok, idx, b.const_i32(0))
+        ci = b.mod(safe_idx, c_c)
+        t0 = b.div(safe_idx, c_c)
+        local_w = b.mod(t0, c_foot_w)
+        local_h = b.div(t0, c_foot_w)
+        global_h = b.add(h_base, local_h)
+        global_w = b.add(w_base, local_w)
+        h_ok = b.land(
+            b.cmp_ge(global_h, b.const_i32(0)), b.cmp_lt(global_h, b.const_i32(c.Hi))
+        )
+        w_ok = b.land(
+            b.cmp_ge(global_w, b.const_i32(0)), b.cmp_lt(global_w, b.const_i32(c.Wi))
+        )
+        valid = b.land(idx_ok, b.land(h_ok, w_ok))
+        off_elems = b.add(
+            b.mul(b.add(b.mul(global_h, b.const_i32(c.Wi)), global_w), c_c),
+            ci,
+        )
+        off_bytes = b.mul(off_elems, c_half_bytes)
+        safe_off = b.select(valid, off_bytes, oob)
+        v = b.buffer_load_f16(a_rsrc, safe_off, b.const_i32(0))
+        b.smem_store_f16(input_smem, [t0, ci], v)
+
+    b.sync()
+    return input_smem
+
+
+def _load_conv0_a_tile_from_input_cache(
+    b: IRBuilder,
+    spec: Gfx950DeepFusedConvPoolSpec,
+    conv_spec: ImplicitGemmConvSpec,
+    k_off: Value,
+    a_dst: Value,
+    grid: WarpGrid,
+    input_smem: Value,
+) -> None:
+    """Materialize the conv0 implicit-GEMM A tile from cached input footprint."""
+
+    p = spec.problem
+    c = p.conv
+    conv_tile_w = spec.pool_tile_w * p.pool_stride_w
+    foot_w = conv_tile_w + (c.S - 1) * c.dW
+    total = spec.tile_m * spec.tile_k
+    elems_per_thread = (total + spec.block_size - 1) // spec.block_size
+    c_total = b.const_i32(total)
+    c_tile_k = b.const_i32(spec.tile_k)
+    c_conv_tile_w = b.const_i32(conv_tile_w)
+    c_sc = b.const_i32(c.S * c.C)
+    c_c = b.const_i32(c.C)
+    c_foot_w = b.const_i32(foot_w)
+    c_k_gemm = b.const_i32(c.K_gemm)
+    zero_h = b.trunc_f32_to_f16(b.const_f32(0.0))
+
+    for e in range(elems_per_thread):
+        idx = b.add(b.mul(b.const_i32(e), b.const_i32(spec.block_size)), grid.tid)
+        idx_ok = b.cmp_lt(idx, c_total)
+        safe_idx = b.select(idx_ok, idx, b.const_i32(0))
+        row = b.div(safe_idx, c_tile_k)
+        col = b.mod(safe_idx, c_tile_k)
+        kg = b.add(k_off, col)
+        kg_ok = b.cmp_lt(kg, c_k_gemm)
+
+        local_oh = b.div(row, c_conv_tile_w)
+        local_ow = b.mod(row, c_conv_tile_w)
+        r = b.div(kg, c_sc)
+        rem = b.mod(kg, c_sc)
+        s_col = b.div(rem, c_c)
+        ci = b.mod(rem, c_c)
+        ih = b.add(b.mul(local_oh, b.const_i32(c.sH)), b.mul(r, b.const_i32(c.dH)))
+        iw = b.add(b.mul(local_ow, b.const_i32(c.sW)), b.mul(s_col, b.const_i32(c.dW)))
+        foot_row = b.add(b.mul(ih, c_foot_w), iw)
+        v = b.vec_extract(b.smem_load_vN_f16(input_smem, foot_row, ci, n=1), 0)
+        v = b.select(b.land(idx_ok, kg_ok), v, zero_h)
+        b.smem_store_f16(a_dst, [row, col], v)
+
+
+def _load_conv0_a_operand_from_input_cache(
+    b: IRBuilder,
+    spec: Gfx950DeepFusedConvPoolSpec,
+    row: Value,
+    k_off: Value,
+    col_base: Value,
+    frag_len: int,
+    input_smem: Value,
+) -> Value:
+    """Read one MFMA A operand fragment directly from the cached input footprint."""
+
+    p = spec.problem
+    c = p.conv
+    conv_tile_w = spec.pool_tile_w * p.pool_stride_w
+    foot_w = conv_tile_w + (c.S - 1) * c.dW
+    c_conv_tile_w = b.const_i32(conv_tile_w)
+    c_sc = b.const_i32(c.S * c.C)
+    c_c = b.const_i32(c.C)
+    c_foot_w = b.const_i32(foot_w)
+    c_k_gemm = b.const_i32(c.K_gemm)
+    zero_h = b.trunc_f32_to_f16(b.const_f32(0.0))
+    local_oh = b.div(row, c_conv_tile_w)
+    local_ow = b.mod(row, c_conv_tile_w)
+    elems = []
+    for i in range(frag_len):
+        kg = b.add(k_off, b.add(col_base, b.const_i32(i)))
+        kg_ok = b.cmp_lt(kg, c_k_gemm)
+        r = b.div(kg, c_sc)
+        rem = b.mod(kg, c_sc)
+        s_col = b.div(rem, c_c)
+        ci = b.mod(rem, c_c)
+        ih = b.add(b.mul(local_oh, b.const_i32(c.sH)), b.mul(r, b.const_i32(c.dH)))
+        iw = b.add(b.mul(local_ow, b.const_i32(c.sW)), b.mul(s_col, b.const_i32(c.dW)))
+        foot_row = b.add(b.mul(ih, c_foot_w), iw)
+        raw = b.vec_extract(b.smem_load_vN_f16(input_smem, foot_row, ci, n=1), 0)
+        elems.append(b.select(kg_ok, raw, zero_h))
+    return b.vec_pack(elems, elems[0].type)
 
 
 def _masked_smem_frag_f16(
@@ -342,54 +508,57 @@ def _emit_conv1_1x1_mfma(
     mfmas_m = grid.mfmas_per_warp_m
     mfmas_n = grid.mfmas_per_warp_n
     k_atoms = conv_spec.k_atoms_per_tile_k
+    k_chunks = (spec.problem.conv.K + spec.tile_k - 1) // spec.tile_k
     warp_m_off = grid.warp_m_off(b)
     warp_n_off = grid.warp_n_off(b)
     accs = [b.zero_vec_f32(atom.c_per_lane) for _ in range(mfmas_m * mfmas_n)]
 
-    for kk in range(k_atoms):
-        col_base = b.add(
-            b.mul(k_blk, b.const_i32(atom.a_per_lane)),
-            b.const_i32(kk * conv_spec.warp_tile_k),
-        )
-        a_rows = []
-        for mi in range(mfmas_m):
-            a_row = b.add(
-                warp_m_off,
-                b.add(b.const_i32(mi * atom.m), m_in_atom),
+    for k_chunk in range(k_chunks):
+        chunk_base = k_chunk * spec.tile_k
+        for kk in range(k_atoms):
+            col_base = b.add(
+                b.mul(k_blk, b.const_i32(atom.a_per_lane)),
+                b.const_i32(chunk_base + kk * conv_spec.warp_tile_k),
             )
-            a_rows.append(
-                _masked_smem_frag_f16(
-                    b,
-                    c0_smem,
-                    a_row,
-                    col_base,
-                    atom.a_per_lane,
-                    spec.problem.conv.K,
+            a_rows = []
+            for mi in range(mfmas_m):
+                a_row = b.add(
+                    warp_m_off,
+                    b.add(b.const_i32(mi * atom.m), m_in_atom),
                 )
-            )
-
-        b_cols = []
-        for ni in range(mfmas_n):
-            b_row = b.add(
-                warp_n_off,
-                b.add(b.const_i32(ni * atom.n), n_in_atom),
-            )
-            b_cols.append(
-                _masked_smem_frag_f16(
-                    b,
-                    w1_smem,
-                    b_row,
-                    col_base,
-                    atom.b_per_lane,
-                    spec.problem.conv.K,
+                a_rows.append(
+                    _masked_smem_frag_f16(
+                        b,
+                        c0_smem,
+                        a_row,
+                        col_base,
+                        atom.a_per_lane,
+                        spec.problem.conv.K,
+                    )
                 )
-            )
 
-        flat = 0
-        for mi in range(mfmas_m):
+            b_cols = []
             for ni in range(mfmas_n):
-                accs[flat] = atom.emit(b, a_rows[mi], b_cols[ni], accs[flat])
-                flat += 1
+                b_row = b.add(
+                    warp_n_off,
+                    b.add(b.const_i32(ni * atom.n), n_in_atom),
+                )
+                b_cols.append(
+                    _masked_smem_frag_f16(
+                        b,
+                        w1_smem,
+                        b_row,
+                        col_base,
+                        atom.b_per_lane,
+                        spec.problem.conv.K,
+                    )
+                )
+
+            flat = 0
+            for mi in range(mfmas_m):
+                for ni in range(mfmas_n):
+                    accs[flat] = atom.emit(b, a_rows[mi], b_cols[ni], accs[flat])
+                    flat += 1
 
     return _apply_accumulator_epilogue(b, spec.conv1_epilogue, accs)
 
@@ -483,6 +652,39 @@ def build_deep_fused_conv_pool(spec: Gfx950DeepFusedConvPoolSpec, arch: str = "g
         )
         return b.add(b.mul(global_h, b.const_i32(c.Wo)), global_w)
 
+    def setup_input_cache(
+        b: IRBuilder, conv_spec_: ImplicitGemmConvSpec, grid: WarpGrid, a_rsrc
+    ):
+        return _setup_input_footprint_cache(b, spec, a_rsrc, grid)
+
+    def load_a_tile_from_cache(
+        b: IRBuilder,
+        conv_spec_: ImplicitGemmConvSpec,
+        k_off: Value,
+        a_dst: Value,
+        grid: WarpGrid,
+        cache,
+    ) -> None:
+        if spec.direct_conv0_from_input_cache:
+            return
+        _load_conv0_a_tile_from_input_cache(
+            b, spec, conv_spec_, k_off, a_dst, grid, cache
+        )
+
+    def load_a_operand_from_cache(
+        b: IRBuilder,
+        conv_spec_: ImplicitGemmConvSpec,
+        row: Value,
+        k_off: Value,
+        col_base: Value,
+        frag_len: int,
+        grid: WarpGrid,
+        cache,
+    ) -> Value:
+        return _load_conv0_a_operand_from_input_cache(
+            b, spec, row, k_off, col_base, frag_len, cache
+        )
+
     def epilogue_override(
         b: IRBuilder,
         conv_spec_: ImplicitGemmConvSpec,
@@ -504,5 +706,18 @@ def build_deep_fused_conv_pool(spec: Gfx950DeepFusedConvPoolSpec, arch: str = "g
         arch=arch,
         extra_params=extra_params,
         m_index_fn=m_index_fn,
+        input_cache_setup=(
+            setup_input_cache
+            if (spec.cache_input_footprint or spec.direct_conv0_from_input_cache)
+            else None
+        ),
+        a_load_override=(
+            load_a_tile_from_cache
+            if (spec.cache_input_footprint or spec.direct_conv0_from_input_cache)
+            else None
+        ),
+        a_operand_override=load_a_operand_from_cache
+        if spec.direct_conv0_from_input_cache
+        else None,
         epilogue_override=epilogue_override,
     )

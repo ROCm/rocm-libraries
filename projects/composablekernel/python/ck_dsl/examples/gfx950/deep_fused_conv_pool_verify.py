@@ -70,11 +70,8 @@ def _reference_conv1x1_relu_pool(
     return ref.astype(np.float16)
 
 
-def _verify_artifact(
-    artifact, spec: Gfx950DeepFusedConvPoolSpec, *, seed: int, tol: float
-) -> bool:
+def _make_inputs(spec: Gfx950DeepFusedConvPoolSpec, *, seed: int):
     import numpy as np
-    from ck_dsl.runtime.hip_module import Runtime
 
     conv = spec.problem.conv
     rng = np.random.default_rng(seed)
@@ -98,6 +95,38 @@ def _verify_artifact(
         ),
         dtype=np.float16,
     )
+    return A, B0, W1, Y
+
+
+def _pack_args(A_dev: int, B_dev: int, Y_dev: int, W1_dev: int, A, B0, Y, W1) -> bytes:
+    return struct.pack(
+        "<QQQQiiii",
+        A_dev,
+        B_dev,
+        Y_dev,
+        W1_dev,
+        W1.nbytes,
+        A.nbytes,
+        B0.nbytes,
+        Y.nbytes,
+    )
+
+
+def _useful_flops(spec: Gfx950DeepFusedConvPoolSpec) -> int:
+    conv = spec.problem.conv
+    conv0 = conv.N * conv.Ho * conv.Wo * conv.K * conv.R * conv.S * conv.C
+    conv1 = conv.N * conv.Ho * conv.Wo * spec.problem.conv1_channels * conv.K
+    return 2 * (conv0 + conv1)
+
+
+def _verify_artifact(
+    artifact, spec: Gfx950DeepFusedConvPoolSpec, *, seed: int, tol: float
+) -> bool:
+    import numpy as np
+    from ck_dsl.runtime.hip_module import Runtime
+
+    conv = spec.problem.conv
+    A, B0, W1, Y = _make_inputs(spec, seed=seed)
 
     rt = Runtime()
     mod = rt.load_module(artifact.hsaco)
@@ -111,17 +140,7 @@ def _verify_artifact(
         rt.memcpy_h2d(B_dev, _as_u8_buffer(B0), B0.nbytes)
         rt.memcpy_h2d(W1_dev, _as_u8_buffer(W1), W1.nbytes)
         rt.memset(Y_dev, 0, Y.nbytes)
-        args = struct.pack(
-            "<QQQQiiii",
-            A_dev,
-            B_dev,
-            Y_dev,
-            W1_dev,
-            W1.nbytes,
-            A.nbytes,
-            B0.nbytes,
-            Y.nbytes,
-        )
+        args = _pack_args(A_dev, B_dev, Y_dev, W1_dev, A, B0, Y, W1)
         rt.launch_blocking(
             fn,
             deep_fused_conv_pool_grid(spec),
@@ -151,6 +170,65 @@ def _verify_artifact(
     return bad == 0
 
 
+def _benchmark_artifact(
+    artifact,
+    spec: Gfx950DeepFusedConvPoolSpec,
+    *,
+    seed: int,
+    warmup: int,
+    iters: int,
+) -> float:
+    from ck_dsl.runtime.hip_module import Runtime
+
+    warmup = max(int(warmup), 100)
+    iters = max(int(iters), 1)
+    A, B0, W1, Y = _make_inputs(spec, seed=seed)
+
+    rt = Runtime()
+    mod = rt.load_module(artifact.hsaco)
+    fn = mod.get_function(artifact.kernel_name)
+    grid = deep_fused_conv_pool_grid(spec)
+    block = (spec.block_size, 1, 1)
+    A_dev = rt.alloc(A.nbytes)
+    B_dev = rt.alloc(B0.nbytes)
+    Y_dev = rt.alloc(Y.nbytes)
+    W1_dev = rt.alloc(W1.nbytes)
+    try:
+        rt.memcpy_h2d(A_dev, _as_u8_buffer(A), A.nbytes)
+        rt.memcpy_h2d(B_dev, _as_u8_buffer(B0), B0.nbytes)
+        rt.memcpy_h2d(W1_dev, _as_u8_buffer(W1), W1.nbytes)
+        rt.memset(Y_dev, 0, Y.nbytes)
+        args = _pack_args(A_dev, B_dev, Y_dev, W1_dev, A, B0, Y, W1)
+
+        for _ in range(warmup):
+            rt.launch(fn, grid, block, args)
+        rt.sync()
+
+        start = rt.event()
+        end = rt.event()
+        start.record()
+        for _ in range(iters):
+            rt.launch(fn, grid, block, args)
+        end.record()
+        end.synchronize()
+        ms = start.elapsed_to(end) / iters
+        start.destroy()
+        end.destroy()
+        rt.sync()
+    finally:
+        rt.free(A_dev)
+        rt.free(B_dev)
+        rt.free(Y_dev)
+        rt.free(W1_dev)
+
+    useful_tflops = _useful_flops(spec) / 1e9 / ms
+    print(
+        f"bench: warmup={warmup} iters={iters} mean_ms={ms:.6g} "
+        f"useful_TFLOPS={useful_tflops:.3f}"
+    )
+    return ms
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -162,8 +240,19 @@ def main() -> int:
     parser.add_argument(
         "--verify", action="store_true", help="launch and compare to numpy"
     )
+    parser.add_argument("--bench", action="store_true", help="time kernel launches")
+    parser.add_argument("--warmup", type=int, default=100)
+    parser.add_argument("--iters", type=int, default=100)
     parser.add_argument("--seed", type=int, default=123)
     parser.add_argument("--tol", type=float, default=1e-2)
+    parser.add_argument("--tile-k", type=int, default=16)
+    parser.add_argument(
+        "--pipeline", default="mem", choices=["mem", "compv3", "compv4"]
+    )
+    parser.add_argument("--async-dma", action="store_true")
+    parser.add_argument("--unroll-k", action="store_true")
+    parser.add_argument("--cache-input-footprint", action="store_true")
+    parser.add_argument("--direct-conv0-input-cache", action="store_true")
     parser.add_argument("--n", type=int, default=1)
     parser.add_argument("--h", type=int, default=16)
     parser.add_argument("--w", type=int, default=16)
@@ -222,6 +311,12 @@ def main() -> int:
     problem = FusedConvPoolProblem(conv=conv, conv1_k=args.k1)
     spec = Gfx950DeepFusedConvPoolSpec(
         problem=problem,
+        tile_k=args.tile_k,
+        pipeline=args.pipeline,
+        async_dma=args.async_dma,
+        unroll_k=args.unroll_k,
+        cache_input_footprint=args.cache_input_footprint,
+        direct_conv0_from_input_cache=args.direct_conv0_input_cache,
         warp_tile_m=32,
         warp_tile_n=32,
         warp_tile_k=atom.k,
@@ -310,7 +405,13 @@ def main() -> int:
         f"{t['total']:.2f} ms total"
     )
     print(f"  grid={grid} block=({spec.block_size}, 1, 1)")
-    print(f"  pool_tile={spec.pool_tile_h}x{spec.pool_tile_w}")
+    print(
+        f"  pool_tile={spec.pool_tile_h}x{spec.pool_tile_w} "
+        f"tile_k={spec.tile_k} pipeline={spec.pipeline} async={spec.async_dma} "
+        f"unroll_k={spec.unroll_k} "
+        f"cache_input={spec.cache_input_footprint} "
+        f"direct_input={spec.direct_conv0_from_input_cache}"
+    )
     print(f"  conv0_input={[conv.N, conv.Hi, conv.Wi, conv.C]} conv0_K={conv.K}")
     print(
         f"  conv1_1x1={[conv.N, conv.Ho, conv.Wo, conv.K]} -> K1={problem.conv1_channels}"
@@ -321,6 +422,14 @@ def main() -> int:
     if args.verify:
         if not _verify_artifact(artifact, spec, seed=args.seed, tol=args.tol):
             return 1
+    if args.bench:
+        _benchmark_artifact(
+            artifact,
+            spec,
+            seed=args.seed,
+            warmup=args.warmup,
+            iters=args.iters,
+        )
     return 0
 
 
