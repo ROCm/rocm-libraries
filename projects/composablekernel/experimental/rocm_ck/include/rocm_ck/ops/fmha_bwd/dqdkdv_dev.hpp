@@ -252,10 +252,15 @@ struct FmhaBwdDQDKDVTypes
 ///   tensors[S::LSE]:    ptr, strides=[nhead_stride_lsed, batch_stride_lsed]
 ///   tensors[S::DO]:     ptr, strides=[stride_do, nhead_stride_do, batch_stride_do]
 ///   tensors[S::D]:      ptr, strides=[nhead_stride_lsed, batch_stride_lsed]
-///   tensors[S::DQ_ACC]: ptr, strides=[stride_dq_acc, nhead_stride_dq_acc,
-///                                     batch_stride_dq_acc, split_stride_dq_acc]
+///   tensors[S::DQ_ACC]: ptr = workspace + GetDqAccDataOffset(batch_size);
+///                       dq_acc strides are workspace-derived (no longer packed
+///                       into strides[]) since CK Tile #6152.
 ///   tensors[S::DK]:     ptr, strides=[stride_dk, nhead_stride_dk, batch_stride_dk]
 ///   tensors[S::DV]:     ptr, strides=[stride_dv, nhead_stride_dv, batch_stride_dv]
+///
+///   Deterministic workspace slots (CK Tile #6152):
+///   tensors[S::NSPLITS]:             ptr = workspace + GetDqAccSplitsOffset
+///   tensors[S::DQ_ACC_BATCH_OFFSET]: group+deterministic only; per-batch offsets
 ///
 ///   Optional:
 ///   tensors[S::BIAS]:   ptr, strides=[stride_bias, nhead_stride_bias, batch_stride_bias]
@@ -283,7 +288,6 @@ struct FmhaBwdDQDKDVTypes
 ///
 /// CK Tile stores row strides as index_t (int32). Large strides that
 /// exceed INT32_MAX will be silently truncated -- a known CK Tile limitation.
-/// The nhead_stride_dq_acc is long_index_t (int64).
 ///
 /// Call this from an extern "C" __global__ wrapper.
 template <FmhaBwdDQDKDVSpec K>
@@ -399,12 +403,17 @@ __device__ void runFmhaBwdDQDKDV(Args args)
          nhead_stride_lsed,                                    // nhead_stride_lsed
          nhead_stride_dk,                                      // nhead_stride_dk
          nhead_stride_dv},                                     // nhead_stride_dv
-        {}, // bias placeholder    (EmptyKargs<0> or BiasKargs)
-        {}, // dbias placeholder   (EmptyKargs<1> or BiasGradKargs)
-        {}, // mask placeholder    (EmptyKargs<2> or MaskKargs)
-        {}, // dropout placeholder (EmptyKargs<3> or DropoutKargs)
-        {}, // determ placeholder  (EmptyKargs<4> or DetermKargs; assigned below)
-        {}, // qrqtrdor placeholder (EmptyKargs<5> or QrQtrDorKargs;)
+        // One zero-init placeholder per conditional base, in inheritance order.
+        // Each resolves to its full Kargs when the feature is enabled, else to
+        // an EmptyKargs<N> tag (the N differs between batch/group mode, so it is
+        // intentionally not spelled out here). Populated fields are assigned by
+        // name in the per-feature blocks below.
+        {}, // bias     (BiasKargs / AlibiKargs when enabled)
+        {}, // dbias    (BiasGradKargs when has_bias_grad)
+        {}, // mask     (MaskKargs when has_mask)
+        {}, // dropout  (DropoutKargs when has_dropout)
+        {}, // determ   (DeterministicKargs when is_deterministic; assigned below)
+        {}, // qrqtrdor (QrQtrDorKargs when kUseQrQtrDorPipeline; unused here)
         // Mode-specific tail fields are value-initialized (zero) here and
         // assigned by name in the per-mode block below.
     };
@@ -520,7 +529,7 @@ __device__ void runFmhaBwdDQDKDV(Args args)
         kargs.drop_offset.val               = args.scalars[S::DROP_OFFSET].u64;
         kargs.is_drop_seed_offset_from_host = true;
 
-        kargs.rand_val_ptr         = t_randval.ptr;
+        kargs.rand_val_ptr         = const_cast<void*>(t_randval.ptr);
         kargs.stride_randval       = static_cast<index_t>(t_randval.strides[0]);
         kargs.nhead_stride_randval = static_cast<index_t>(t_randval.strides[1]);
         if constexpr(K.mode == FmhaMode::BATCH)
