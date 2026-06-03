@@ -191,6 +191,22 @@ class TestCoverage(unittest.TestCase):
         self.assertEqual(r["n_edges_covered"], 1)
         self.assertEqual(r["coverage"], 0.5)
 
+    def test_edge_file_test_level_metrics_differ(self):
+        # a.hpp resolves to both its tests; b.hpp misses one of two.
+        pre = {"a.hpp": ["bin/t1", "bin/t2"], "b.hpp": ["bin/t1"]}
+        post = {"a.hpp": ["bin/t1", "bin/t2"], "b.hpp": ["bin/t1", "bin/t2"]}
+        r = bfo.compute_coverage(pre, post)
+        # edge: 3/4 covered
+        self.assertEqual((r["n_edges_covered"], r["n_edges_post"]), (3, 4))
+        self.assertEqual(r["coverage"], 0.75)
+        # file: a.hpp full, b.hpp has a miss -> 1/2
+        self.assertEqual((r["n_files_covered"], r["n_files_with_edges"]), (1, 2))
+        self.assertEqual(r["file_coverage"], 0.5)
+        # test: t1 fully captured, t2 missing on b.hpp -> 1/2
+        self.assertEqual((r["n_tests_covered"], r["n_tests"]), (1, 2))
+        self.assertEqual(r["test_coverage"], 0.5)
+        self.assertEqual(r["tests_with_fn"], ["t2"])  # basenames (ctest test names)
+
 
 class TestCoverageCanon(unittest.TestCase):
     def test_canonical_key_strips_monorepo_prefix(self):

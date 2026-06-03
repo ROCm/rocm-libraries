@@ -823,7 +823,7 @@ def cmake_build(Map conf=[:]){
                             python3 \$DP/main.py cmake-parse compile_commands.json build.ninja --workspace-root ${env.WORKSPACE} --parallel 32 --output pre_depmap.json || true
                             python3 \$DP/main.py parse build.ninja --workspace-root ${env.WORKSPACE} || true
                             ctest -N > ctest_list.txt 2>/dev/null || true
-                            python3 \$DP/filter_oracle.py coverage --pre pre_depmap.json --post enhanced_dependency_mapping.json --ctest ctest_list.txt --output coverage_result.json || true
+                            python3 \$DP/filter_oracle.py coverage --pre pre_depmap.json --post enhanced_dependency_mapping.json --ctest ctest_list.txt --codegen-inventory \$DP/codegen_blindspots.json --output coverage_result.json || true
                         """
                         archiveArtifacts artifacts: "coverage_result.json", allowEmptyArchive: true
                     }

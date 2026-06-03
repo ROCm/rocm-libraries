@@ -84,23 +84,50 @@ def compute_coverage(pre_f2e, post_f2e, ctest_tests=None):
     false_negatives = {}
     n_edges_post = 0
     n_edges_covered = 0
+    # Edge-level coverage is header-weighted (a file->test edge per included
+    # header), so also track file-level (does a file resolve to ALL its tests?)
+    # and test-level (are ALL of a test's source deps captured?) - the latter two
+    # bracket the run-accuracy answer the edge metric overstates.
+    n_files_with_edges = 0
+    n_files_covered = 0
+    tests_post = set()
+    tests_with_fn = set()
     for f, post_exes in post_f2e.items():
         post_set = _ctest_only(post_exes)
         if not post_set:
             continue
+        n_files_with_edges += 1
         pre_set = set(pre_f2e.get(f, []))
         missing = post_set - pre_set
         n_edges_post += len(post_set)
         n_edges_covered += len(post_set & pre_set)
+        tests_post |= {os.path.basename(e) for e in post_set}
         if missing:
             false_negatives[f] = sorted(missing)
+            tests_with_fn |= {os.path.basename(e) for e in missing}
+        else:
+            n_files_covered += 1
 
-    coverage = (n_edges_covered / n_edges_post) if n_edges_post else 1.0
+    def _frac(num, den):
+        return round(num / den, 6) if den else 1.0
+
+    n_tests = len(tests_post)
+    n_tests_covered = n_tests - len(tests_with_fn)
     return {
         "n_files": len(post_f2e),
+        # edge-level (header-weighted; the optimistic bound)
         "n_edges_post": n_edges_post,
         "n_edges_covered": n_edges_covered,
-        "coverage": round(coverage, 6),
+        "coverage": _frac(n_edges_covered, n_edges_post),
+        # file-level: of source files with tests, how many resolve to all of them
+        "n_files_with_edges": n_files_with_edges,
+        "n_files_covered": n_files_covered,
+        "file_coverage": _frac(n_files_covered, n_files_with_edges),
+        # test-level: of tests, how many have every source dep captured (pessimistic)
+        "n_tests": n_tests,
+        "n_tests_covered": n_tests_covered,
+        "test_coverage": _frac(n_tests_covered, n_tests),
+        "tests_with_fn": sorted(tests_with_fn),
         "n_false_negatives": sum(len(v) for v in false_negatives.values()),
         "n_files_with_fn": len(false_negatives),
         "false_negatives": dict(sorted(false_negatives.items())),
@@ -367,19 +394,46 @@ def _run_coverage(args):
 
     result = compute_coverage(pre, post, ctest_tests)
     result["scope"] = "source" if source_only else "all"
+
+    # Backstop-credited view: exclude the codegen-class tests (their generated
+    # sources are owned by the ci_safety_check full-build backstop, not the
+    # depmap). Reported alongside the raw numbers, not instead of them.
+    codegen = []
+    if args.codegen_inventory and os.path.exists(args.codegen_inventory) and ctest_tests:
+        codegen = expand_test_globs(
+            load_codegen_globs(args.codegen_inventory), ctest_tests
+        )
+        credited = compute_coverage(pre, post, set(ctest_tests) - set(codegen))
+        result["n_codegen_tests"] = len(codegen)
+        result["codegen_credited"] = {
+            k: credited[k] for k in (
+                "coverage", "file_coverage", "test_coverage",
+                "n_tests", "n_tests_covered", "n_files_covered",
+                "n_files_with_edges", "n_false_negatives",
+            )
+        }
+
     if args.output:
         with open(args.output, "w") as f:
             json.dump(result, f, indent=2)
 
     print("=== filter coverage (pre-build depmap vs post-build ground truth) ===")
-    print(f"scope:            {result['scope']} (PR-editable source"
+    print(f"scope:        {result['scope']} (PR-editable source"
           f"{'' if source_only else ' + build/system'})")
-    print(f"files (post):     {result['n_files']}")
-    print(f"edges (post):     {result['n_edges_post']}")
-    print(f"covered:          {result['n_edges_covered']}")
-    print(f"coverage:         {result['coverage']:.4f}")
+    print(f"edge coverage: {result['n_edges_covered']}/{result['n_edges_post']} "
+          f"= {result['coverage']:.4f}  (header-weighted; optimistic bound)")
+    print(f"file coverage: {result['n_files_covered']}/{result['n_files_with_edges']} "
+          f"= {result['file_coverage']:.4f}  (files resolving to all their tests)")
+    print(f"test coverage: {result['n_tests_covered']}/{result['n_tests']} "
+          f"= {result['test_coverage']:.4f}  (tests with every source dep captured)")
+    if "codegen_credited" in result:
+        c = result["codegen_credited"]
+        print(f"  [codegen-credited, {result['n_codegen_tests']} codegen tests excluded] "
+              f"file={c['file_coverage']:.4f} test={c['test_coverage']:.4f} "
+              f"FN={c['n_false_negatives']}")
     print(f"false negatives:  {result['n_false_negatives']} "
-          f"(across {result['n_files_with_fn']} files)")
+          f"(across {result['n_files_with_fn']} files; "
+          f"{len(result['tests_with_fn'])} tests)")
     for f, exes in list(result["false_negatives"].items())[:20]:
         print(f"  FN {f} -> {', '.join(exes)}")
     print(f"verdict: {result['verdict'].upper()}")
@@ -443,6 +497,9 @@ def main():
     cov.add_argument("--post", required=True,
                      help="post-build depmap JSON (main.py parse / ninja -t deps)")
     cov.add_argument("--ctest", help="ctest -N output (count only registered-test edges)")
+    cov.add_argument("--codegen-inventory",
+                     help="codegen_blindspots.json; also report a backstop-credited "
+                     "view with the codegen-class tests excluded")
     cov.add_argument("--include-nonsource", action="store_true",
                      help="also count build/ outputs and system headers the depmap "
                      "never tracks (default: PR-editable source only)")
