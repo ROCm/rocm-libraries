@@ -13,48 +13,48 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <string>
 
-#define LOG_ON_HIPBLASLT_FAILURE(status)                                                 \
-    do                                                                                   \
-    {                                                                                    \
-        if(status != HIPBLAS_STATUS_SUCCESS)                                             \
-        {                                                                                \
-            HIPDNN_PLUGIN_LOG_ERROR(                                                     \
-                "hipBLASLt error occurred: "                                             \
-                << hipblaslt_plugin::hipblaslt_utils::hipblas_status_to_string(status)); \
-        }                                                                                \
+#define LOG_ON_HIPBLASLT_FAILURE(status)                                              \
+    do                                                                                \
+    {                                                                                 \
+        if((status) != HIPBLAS_STATUS_SUCCESS)                                        \
+        {                                                                             \
+            HIPDNN_PLUGIN_LOG_ERROR(                                                  \
+                "hipBLASLt error occurred: "                                          \
+                << hipblaslt_plugin::hipblaslt_utils::hipblasStatusToString(status)); \
+        }                                                                             \
     } while(0)
 
-#define THROW_ON_HIPBLASLT_FAILURE(status)                                                     \
-    do                                                                                         \
-    {                                                                                          \
-        if(status != HIPBLAS_STATUS_SUCCESS)                                                   \
-        {                                                                                      \
-            throw hipdnn_plugin_sdk::HipdnnPluginException(                                    \
-                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,                                           \
-                "hipBLASLt error occurred: "                                                   \
-                    + std::string(                                                             \
-                        hipblaslt_plugin::hipblaslt_utils::hipblas_status_to_string(status))); \
-        }                                                                                      \
+#define THROW_ON_HIPBLASLT_FAILURE(status)                                                  \
+    do                                                                                      \
+    {                                                                                       \
+        if((status) != HIPBLAS_STATUS_SUCCESS)                                              \
+        {                                                                                   \
+            throw hipdnn_plugin_sdk::HipdnnPluginException(                                 \
+                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,                                        \
+                "hipBLASLt error occurred: "                                                \
+                    + std::string(                                                          \
+                        hipblaslt_plugin::hipblaslt_utils::hipblasStatusToString(status))); \
+        }                                                                                   \
     } while(0)
 
-#define HIPDNN_PREPEND_MESSAGE_ON_THROW(statement, message)                               \
-    do                                                                                    \
-    {                                                                                     \
-        try                                                                               \
-        {                                                                                 \
-            statement;                                                                    \
-        }                                                                                 \
-        catch(hipdnn_plugin_sdk::HipdnnPluginException error)                             \
-        {                                                                                 \
-            throw hipdnn_plugin_sdk::HipdnnPluginException(error.getStatus(),             \
-                                                           message + error.getMessage()); \
-        }                                                                                 \
+#define HIPDNN_PREPEND_MESSAGE_ON_THROW(statement, message)                                 \
+    do                                                                                      \
+    {                                                                                       \
+        try                                                                                 \
+        {                                                                                   \
+            statement;                                                                      \
+        }                                                                                   \
+        catch(hipdnn_plugin_sdk::HipdnnPluginException error)                               \
+        {                                                                                   \
+            throw hipdnn_plugin_sdk::HipdnnPluginException(error.getStatus(),               \
+                                                           (message) + error.getMessage()); \
+        }                                                                                   \
     } while(0)
 
 namespace hipblaslt_plugin::hipblaslt_utils
 {
 
-inline const char* hipblas_status_to_string(hipblasStatus_t status)
+inline const char* hipblasStatusToString(hipblasStatus_t status)
 {
 #define CASE(x) \
     case x:     \
