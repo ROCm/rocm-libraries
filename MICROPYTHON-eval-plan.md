@@ -23,11 +23,13 @@ parallel candidates (static-CPython embed, C++ rewrite, etc.).
   `ck_dsl` edits as an explicit cost.
 - Provider C++ glue + tests are **accepted as a full rewrite** (POC) — scheduled *last*, after
   the make-or-break risks are retired.
-- **POC target = FMHA forward + backward** (user direction, 2026-06-01), GATED on first reaching
-  confidence that the approach works. Elementwise stays the cheapest *mechanism* proof (G1); the
-  *FMHA* surface is scoped separately because confidence must be calibrated to the real target, not
-  just any slice. We still do *not* try to make all of `ck_dsl` MicroPython-clean — only the FMHA
-  fwd/bwd closure.
+- **POC target = conv implicit GEMM** (user direction, 2026-06-01; supersedes the brief FMHA
+  retarget below). Chosen because the provider **already has the full C++ integration** for it —
+  `ConvImplicitGemmPayload`, the bridge `compile("conv_implicit_gemm", payload, arch)`, and
+  integration tests that validate accuracy vs `CpuFpReferenceConvolution` on gfx1151. So Phase 2
+  (embed MicroPython in the provider) and end-to-end accuracy validation are comparatively cheap.
+  Elementwise stays the cheapest *mechanism* proof (G1 stepping stone); conv is the real target.
+  We still do *not* make all of `ck_dsl` MicroPython-clean — only the conv compile closure.
 
 ## Why the prior "MicroPython impossible" note doesn't end this
 A prior spike concluded full-CPython is required. Re-verified against the live tree: the real
@@ -290,3 +292,18 @@ same open risks apply (re subset, runtime typing). **Confidence checklist for th
 (1) G0 FFI ✓, (2) dataclasses mechanism ✓, (3) FMHA language features ✓ clean, (4) elementwise-G1
 run [pending — flushes re/typing], (5) FMHA fwd+bwd closure imports + builds under the shims
 [pending]. Declare confidence only after (4) and (5).
+
+### POC retarget #2: conv implicit GEMM (supersedes FMHA, 2026-06-01)
+Switched the POC target back to **conv implicit GEMM** because the provider already integrates it
+(C++ `ConvImplicitGemmPayload` + bridge `compile("conv_implicit_gemm", payload, arch)` +
+accuracy-validating integration tests on gfx1151) — far cheaper to take end-to-end than FMHA.
+Entry points: `build_implicit_gemm_conv(spec, arch)`, `is_valid_spec(spec, arch)`,
+`_conv_spec_from_payload` (instances/common/conv_implicit_gemm.py; ConvProblem/ImplicitGemmConvSpec).
+Already known from Phase-1 closure work: conv is heavier than elementwise — it couples
+`conv → helpers.pipeline → schedule → analysis.ir → analysis/__init__ → report →
+`from ..helpers import KernelArtifact`` (package-level), so the analysis/helpers coupling must be
+untangled (trimmed `__init__`s or partial shims). No new language blockers (the whole-ck_dsl scan
+already found zero real match/case and zero async def/await). **Confidence checklist (conv):**
+(1) G0 FFI ✓ (2) dataclasses ✓ (3) language clean ✓ (4) elementwise-G1 run [pending] (5) conv
+closure imports + builds under shims, untangling analysis/helpers coupling [pending]. Then Phase 2
+reuses the existing conv provider integration for end-to-end accuracy on gfx1151.
