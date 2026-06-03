@@ -3,6 +3,7 @@
 
 #include "ExecutionPlanDescriptor.hpp"
 #include "BackendEnumStringUtils.hpp"
+#include "DescriptorAttributeUtils.hpp"
 #include "EngineConfigDescriptor.hpp"
 #include "EngineDescriptor.hpp"
 #include "GraphDescriptor.hpp"
@@ -109,6 +110,15 @@ void ExecutionPlanDescriptor::getAttribute(hipdnnBackendAttributeName_t attribut
     case HIPDNN_ATTR_EXECUTION_PLAN_TENSOR_UIDS_EXT:
         getTensorUids(attributeType, requestedElementCount, elementCount, arrayOfElements);
         break;
+    case HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_GLOBAL_INDEX_EXT:
+        getScalar(getEngineId(),
+                  HIPDNN_TYPE_INT64,
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  "ExecutionPlanDescriptor failed to get engine global index");
+        break;
     case HIPDNN_ATTR_EXECUTION_PLAN_HANDLE:
     case HIPDNN_ATTR_EXECUTION_PLAN_COMPUTED_INTERMEDIATE_UIDS:
     case HIPDNN_ATTR_EXECUTION_PLAN_RUN_ONLY_INTERMEDIATE_UIDS:
@@ -174,6 +184,7 @@ void ExecutionPlanDescriptor::setAttribute(hipdnnBackendAttributeName_t attribut
     case HIPDNN_ATTR_EXECUTION_PLAN_KERNEL_CACHE:
     case HIPDNN_ATTR_EXECUTION_PLAN_DEVICEPROP:
     case HIPDNN_ATTR_EXECUTION_PLAN_TENSOR_UIDS_EXT:
+    case HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_GLOBAL_INDEX_EXT:
     default:
         throw HipdnnException(
             HIPDNN_STATUS_NOT_SUPPORTED,
@@ -366,31 +377,39 @@ void ExecutionPlanDescriptor::serializeBackendPlan(size_t requestedByteSize,
                   "ExecutionPlanDescriptor::serializeBackendPlan() failed: resource manager is "
                   "null.");
 
-    std::vector<uint8_t> pluginPayload;
-    _pluginResourceManager->serializeExecutionContext(
-        _engineId, _executionContext->get(), pluginPayload);
+    // Build and cache the serialized plan once; reuse it for all later
+    // size/fill calls (mirrors GraphDescriptor's _graphSerializedBuffer cache).
+    if(_serializedPlanCache.empty())
+    {
+        std::vector<uint8_t> pluginPayload;
+        _pluginResourceManager->serializeExecutionContext(
+            _engineId, _executionContext->get(), pluginPayload);
 
-    flatbuffers::FlatBufferBuilder builder;
-    auto serializedPluginPayload = builder.CreateVector(pluginPayload);
-    auto serializedTensorUids = builder.CreateVector(_tensorUids);
-    auto executionPlan = hipdnn_flatbuffers_sdk::data_objects::CreateSerializedExecutionPlan(
-        builder,
-        PLAN_SERIALIZATION_VERSION,
-        _engineId,
-        _workspaceSize,
-        serializedTensorUids,
-        serializedPluginPayload,
-        _isOverrideShapeEnabled);
-    builder.Finish(executionPlan);
+        flatbuffers::FlatBufferBuilder builder;
+        auto serializedPluginPayload = builder.CreateVector(pluginPayload);
+        auto serializedTensorUids = builder.CreateVector(_tensorUids);
+        auto executionPlan = hipdnn_flatbuffers_sdk::data_objects::CreateSerializedExecutionPlan(
+            builder,
+            PLAN_SERIALIZATION_VERSION,
+            _engineId,
+            _workspaceSize,
+            serializedTensorUids,
+            serializedPluginPayload,
+            _isOverrideShapeEnabled);
+        builder.Finish(executionPlan);
 
-    *planByteSize = builder.GetSize();
+        _serializedPlanCache.assign(builder.GetBufferPointer(),
+                                    builder.GetBufferPointer() + builder.GetSize());
+    }
+
+    *planByteSize = _serializedPlanCache.size();
     if(serializedPlan != nullptr)
     {
         THROW_IF_LT(requestedByteSize,
-                    builder.GetSize(),
+                    _serializedPlanCache.size(),
                     HIPDNN_STATUS_BAD_PARAM_SIZE_INSUFFICIENT,
                     "Requested buffer size is smaller than the serialized execution plan size.");
-        std::memcpy(serializedPlan, builder.GetBufferPointer(), builder.GetSize());
+        std::memcpy(serializedPlan, _serializedPlanCache.data(), _serializedPlanCache.size());
     }
 }
 

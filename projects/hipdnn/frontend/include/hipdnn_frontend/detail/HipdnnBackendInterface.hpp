@@ -76,6 +76,17 @@ public:
                                                     const uint8_t* serializedPlan,
                                                     size_t planByteSize)
         = 0;
+    virtual hipdnnStatus_t
+        backendGetSerializedBinaryGraphAndPlanExt(hipdnnBackendDescriptor_t graphDescriptor,
+                                                  hipdnnBackendDescriptor_t executionPlanDescriptor,
+                                                  size_t requestedByteSize,
+                                                  size_t* blobByteSize,
+                                                  uint8_t* serializedBlob)
+        = 0;
+    virtual hipdnnStatus_t backendGetSerializedBinaryContentsExt(const uint8_t* serializedBlob,
+                                                                 size_t blobByteSize,
+                                                                 int* contentFlags)
+        = 0;
     virtual void loggingCallbackExt(hipdnnSeverity_t severity, const char* msg) = 0;
 
     virtual hipdnnStatus_t setEnginePluginPathsExt(size_t numPaths,

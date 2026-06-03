@@ -67,6 +67,7 @@
 
 #include <algorithm>
 #include <array>
+#include <optional>
 #include <unordered_set>
 
 #include <hipdnn_backend.h>
@@ -181,8 +182,18 @@ private:
     std::unique_ptr<detail::ScopedHipdnnBackendDescriptor> _graphDesc;
     bool _graphDescFinalized = false;
     std::unique_ptr<detail::ScopedHipdnnBackendDescriptor> _engineConfigDesc;
+
+protected:
+    /// Owns the built execution plan descriptor. Protected so test subclasses
+    /// can assert plan presence.
     std::unique_ptr<detail::ScopedHipdnnBackendDescriptor> _executionPlanDesc;
 
+    /// Engine id backing the current execution plan: captured at plan build, or
+    /// recovered from the plan on deserialize. Queried at serialize time for
+    /// execution-plan-serialization support. Reset when the plan is dropped.
+    std::optional<int64_t> _selectedEngineId;
+
+private:
     std::optional<int64_t> _preferredEngineId;
 
     bool _isOverrideShapeEnabled = false;
@@ -197,6 +208,80 @@ private:
         }
 
         return detail::applyKnobSettingsViaDescriptors(_engineConfigDesc->get(), validatedSettings);
+    }
+
+    /// Assemble the serialized binary representation of the graph.
+    ///
+    /// A serializable built plan is emitted alongside the graph in one container
+    /// blob; otherwise the bare graph blob is emitted, byte-identical to a graph
+    /// that never had a plan built.
+    Error assembleSerializedBlob(std::vector<uint8_t>& data) const
+    {
+        if(!hasValidGraphDesc())
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    "Graph has no backend descriptor. "
+                    "Call build_operation_graph() first, or use the non-const "
+                    "serialize() overload for auto-lowering."};
+        }
+
+        const bool planValid = _executionPlanDesc && _executionPlanDesc->valid();
+        const bool planSerializable = planValid && _selectedEngineId.has_value()
+                                      && engineSupportsPlanSerialization(*_selectedEngineId);
+        if(planSerializable)
+        {
+            size_t blobByteSize = 0;
+            HIPDNN_RETURN_ON_BACKEND_FAILURE(
+                detail::hipdnnBackend()->backendGetSerializedBinaryGraphAndPlanExt(
+                    _graphDesc->get(), _executionPlanDesc->get(), 0, &blobByteSize, nullptr),
+                "Failed to query serialized graph and plan size");
+
+            if(blobByteSize == 0)
+            {
+                return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                        "Backend returned zero-length binary graph and plan"};
+            }
+
+            data.resize(blobByteSize);
+            HIPDNN_RETURN_ON_BACKEND_FAILURE(
+                detail::hipdnnBackend()->backendGetSerializedBinaryGraphAndPlanExt(
+                    _graphDesc->get(),
+                    _executionPlanDesc->get(),
+                    blobByteSize,
+                    &blobByteSize,
+                    data.data()),
+                "Failed to serialize graph and plan");
+
+            return {};
+        }
+
+        if(planValid)
+        {
+            // Plan exists but its engine cannot serialize it; fall through to the
+            // byte-identical legacy bare-graph blob so legacy consumers keep working.
+            HIPDNN_FE_LOG_WARN(
+                "Execution plan was not captured during serialization: the engine "
+                "does not support execution plan serialization; serializing the graph only.");
+        }
+
+        size_t graphByteSize = 0;
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(
+            detail::hipdnnBackend()->backendGetSerializedBinaryGraphExt(
+                _graphDesc->get(), 0, &graphByteSize, nullptr),
+            "Failed to query serialized graph size");
+
+        if(graphByteSize == 0)
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR, "Backend returned zero-length binary graph"};
+        }
+
+        data.resize(graphByteSize);
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(
+            detail::hipdnnBackend()->backendGetSerializedBinaryGraphExt(
+                _graphDesc->get(), graphByteSize, &graphByteSize, data.data()),
+            "Failed to serialize graph");
+
+        return {};
     }
 
     Error validateAndFilterKnobSettings(const std::vector<KnobSetting>& settings,
@@ -401,6 +486,23 @@ private:
         return tensor;
     }
 
+    /// Whether the engine advertises the SUPPORTS_EXECUTION_PLAN_SERIALIZATION
+    /// behavior note. A query error or a missing note returns false, so probing
+    /// the capability never fails a plan build.
+    bool engineSupportsPlanSerialization(int64_t engineId) const
+    {
+        std::vector<BehaviorNote> notes;
+        const Error err = get_behavior_notes_for_engine(engineId, notes);
+        if(err.is_bad())
+        {
+            return false;
+        }
+
+        return std::find(
+                   notes.begin(), notes.end(), BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION)
+               != notes.end();
+    }
+
     Error initializeEngineConfig(hipdnnBackendDescriptor_t engineHeuristicDesc)
     {
         // The backend's SelectionHeuristic::Config built-in honors
@@ -434,9 +536,13 @@ private:
             }
         }
 
-        HIPDNN_FE_LOG_INFO("Selected engine id " << engineIds[selectedIndex]
-                                                 << " for execution plan.");
+        const int64_t selectedEngineId = engineIds[selectedIndex];
+        HIPDNN_FE_LOG_INFO("Selected engine id " << selectedEngineId << " for execution plan.");
         _engineConfigDesc = std::move(engineConfigs[selectedIndex]);
+
+        // Record the engine for the upcoming plan; serialize() queries it for
+        // plan-serialization support.
+        _selectedEngineId = selectedEngineId;
 
         return {ErrorCode::OK, ""};
     }
@@ -464,6 +570,11 @@ private:
                                          "Failed to set engine on the engine config descriptor.");
 
         _engineConfigDesc = std::move(engineConfigDesc);
+
+        // Record the engine for the upcoming plan; serialize() queries it for
+        // plan-serialization support.
+        _selectedEngineId = engineId;
+
         return {ErrorCode::OK, ""};
     }
 
@@ -911,6 +1022,7 @@ protected:
         resetGraphDesc();
         _engineConfigDesc.reset();
         _executionPlanDesc.reset();
+        _selectedEngineId.reset();
         return {};
     }
 
@@ -1244,32 +1356,7 @@ public:
      */
     Error serialize(std::vector<uint8_t>& data) const
     {
-        if(!hasValidGraphDesc())
-        {
-            return {ErrorCode::INVALID_VALUE,
-                    "Graph has no backend descriptor. "
-                    "Call build_operation_graph() first, or use the non-const "
-                    "serialize() overload for auto-lowering."};
-        }
-
-        size_t graphByteSize = 0;
-        HIPDNN_RETURN_ON_BACKEND_FAILURE(
-            detail::hipdnnBackend()->backendGetSerializedBinaryGraphExt(
-                _graphDesc->get(), 0, &graphByteSize, nullptr),
-            "Failed to query serialized graph size");
-
-        if(graphByteSize == 0)
-        {
-            return {ErrorCode::HIPDNN_BACKEND_ERROR, "Backend returned zero-length binary graph"};
-        }
-
-        data.resize(graphByteSize);
-        HIPDNN_RETURN_ON_BACKEND_FAILURE(
-            detail::hipdnnBackend()->backendGetSerializedBinaryGraphExt(
-                _graphDesc->get(), graphByteSize, &graphByteSize, data.data()),
-            "Failed to serialize graph");
-
-        return {};
+        return assembleSerializedBlob(data);
     }
 
     /** @brief Serialize the graph to a binary byte vector, auto-lowering if needed.
@@ -1316,6 +1403,9 @@ public:
      * The backend descriptor is not finalized. Call build_operation_graph()
      * afterwards to finalize for execution.
      *
+     * Any embedded execution plan is dropped (with a warning), as deserializing
+     * it needs a handle. Use from_binary(handle, data) to restore it.
+     *
      * @param data The binary data to deserialize.
      * @return Error indicating success or failure.
      */
@@ -1355,6 +1445,35 @@ public:
         setGraphDesc(std::move(graphDesc), handle != nullptr);
         _engineConfigDesc.reset();
         _executionPlanDesc.reset();
+        _selectedEngineId.reset();
+
+        int flags = 0;
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(
+            detail::hipdnnBackend()->backendGetSerializedBinaryContentsExt(
+                data.data(), data.size(), &flags),
+            "Failed to query serialized blob contents");
+
+        if((flags & HIPDNN_SERIALIZED_CONTENT_EXECUTION_PLAN) != 0)
+        {
+            if(handle != nullptr)
+            {
+                hipdnnBackendDescriptor_t plan = nullptr;
+                HIPDNN_RETURN_ON_BACKEND_FAILURE(
+                    detail::hipdnnBackend()->backendCreateAndDeserializeExecutionPlanExt(
+                        handle, &plan, data.data(), data.size()),
+                    "Failed to deserialize embedded execution plan");
+                _executionPlanDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(plan);
+                // Recover the engine backing the attached plan for the serialize capability gate.
+                _selectedEngineId = detail::getExecutionPlanEngineId(_executionPlanDesc->get());
+            }
+            else
+            {
+                HIPDNN_FE_LOG_WARN(
+                    "Deserialized blob contains an execution plan, but no handle was "
+                    "provided; the embedded plan was dropped. Use the handle overload "
+                    "to restore the plan.");
+            }
+        }
         return {};
     }
 
@@ -1362,6 +1481,9 @@ public:
      *
      * The backend descriptor is not finalized. Call build_operation_graph()
      * afterwards to finalize for execution.
+     *
+     * Any embedded execution plan is dropped (with a warning), as deserializing
+     * it needs a handle. Use deserialize(handle, data) to restore it.
      *
      * @param data The binary data to deserialize.
      * @return Error indicating success or failure.
@@ -1434,6 +1556,8 @@ public:
             "Failed to deserialize compiled plan");
 
         _executionPlanDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(executionPlan);
+        // Recover the engine backing the attached plan for the serialize capability gate.
+        _selectedEngineId = detail::getExecutionPlanEngineId(_executionPlanDesc->get());
         _engineConfigDesc.reset();
         resetGraphDesc();
         _sub_nodes.clear();
@@ -1597,6 +1721,7 @@ public:
         setGraphDesc(std::move(graphDesc), handle != nullptr);
         _engineConfigDesc.reset();
         _executionPlanDesc.reset();
+        _selectedEngineId.reset();
         return {};
     }
 

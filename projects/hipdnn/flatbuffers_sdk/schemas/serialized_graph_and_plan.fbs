@@ -1,0 +1,16 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+namespace hipdnn_flatbuffers_sdk.data_objects;
+
+// Container that bundles an already-serialized binary graph blob with an
+// optional already-serialized execution-plan blob. Both blobs are opaque,
+// self-contained FlatBuffers buffers produced by the existing graph and
+// execution-plan serializers; this container only frames them together.
+table SerializedGraphAndPlan {
+    graph_blob: [ubyte];     // serialized FlatBuffers `Graph` (our serializer always sets it)
+    plan_blob: [ubyte];      // optional serialized `SerializedExecutionPlan`; absent/empty => graph-only
+}
+
+file_identifier "HDGP";
+root_type SerializedGraphAndPlan;
