@@ -83,9 +83,9 @@ def main():
     )
     parser.add_argument(
         "--flush-cache",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         default=True,
-        help="Enable cache flushing (default: True)",
+        help="Enable/disable cache flushing (default: enabled)",
     )
     parser.add_argument(
         "--rotating-count",
