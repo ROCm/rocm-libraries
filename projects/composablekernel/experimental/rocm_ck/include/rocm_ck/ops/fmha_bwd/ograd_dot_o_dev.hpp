@@ -128,6 +128,11 @@ __device__ void runFmhaBwdOGradDotO(Args args)
             {t_o.ptr,                    // o_ptr
              t_do.ptr,                   // do_ptr
              const_cast<void*>(t_d.ptr), // d_ptr (output: TensorArg::ptr is const void*)
+             // lse_ptr: nullptr is safe here -- the LSE load in the OGradDotO pipeline is
+             // gated on (atomic_sink_grad_ptr != nullptr), and we always pass d_sink_ptr =
+             // nullptr (sink-grad disabled), so LSE is never dereferenced. CK Tile still
+             // computes address arithmetic on it unconditionally; a follow-up upstream issue
+             // should skip that math when sink-grad is off so this nullptr goes away entirely.
              nullptr,                    // lse_ptr
              nullptr,                    // sink_ptr
              nullptr,                    // d_sink_ptr
@@ -161,6 +166,11 @@ __device__ void runFmhaBwdOGradDotO(Args args)
             {t_o.ptr,                    // o_ptr
              t_do.ptr,                   // do_ptr
              const_cast<void*>(t_d.ptr), // d_ptr (output: TensorArg::ptr is const void*)
+             // lse_ptr: nullptr is safe here -- the LSE load in the OGradDotO pipeline is
+             // gated on (atomic_sink_grad_ptr != nullptr), and we always pass d_sink_ptr =
+             // nullptr (sink-grad disabled), so LSE is never dereferenced. CK Tile still
+             // computes address arithmetic on it unconditionally; a follow-up upstream issue
+             // should skip that math when sink-grad is off so this nullptr goes away entirely.
              nullptr,                    // lse_ptr
              nullptr,                    // sink_ptr
              nullptr,                    // d_sink_ptr

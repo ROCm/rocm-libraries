@@ -520,7 +520,7 @@ __device__ void runFmhaBwdDQDKDV(Args args)
         kargs.drop_offset.val               = args.scalars[S::DROP_OFFSET].u64;
         kargs.is_drop_seed_offset_from_host = true;
 
-        kargs.rand_val_ptr         = t_randval.ptr;
+        kargs.rand_val_ptr = const_cast<void*>(t_randval.ptr);
         kargs.stride_randval       = static_cast<index_t>(t_randval.strides[0]);
         kargs.nhead_stride_randval = static_cast<index_t>(t_randval.strides[1]);
         if constexpr(K.mode == FmhaMode::BATCH)
