@@ -111,19 +111,19 @@ inline std::optional<BundleMetadata> loadBundleMetadata(const std::filesystem::p
             return std::nullopt;
         };
 
-        meta.generator          = readString("generator");
-        meta.generatorVersion   = readString("generator_version");
-        meta.generatedAt        = readString("generated_at");
-        meta.gpuArchitecture    = readString("gpu_architecture");
-        meta.rocmVersion        = readString("rocm_version");
-        meta.referenceSource    = readString("reference_source");
+        meta.generator = readString("generator");
+        meta.generatorVersion = readString("generator_version");
+        meta.generatedAt = readString("generated_at");
+        meta.gpuArchitecture = readString("gpu_architecture");
+        meta.rocmVersion = readString("rocm_version");
+        meta.referenceSource = readString("reference_source");
         meta.referenceSourceHash = readString("reference_source_hash");
-        meta.referenceStrategy  = readString("reference_strategy");
-        meta.operation          = readString("operation");
-        meta.generationCommand  = readString("generation_command");
-        meta.notes              = readString("notes");
-        meta.seed               = readInt64("seed");
-        meta.minimumVramMb      = readInt64("minimum_vram_mb");
+        meta.referenceStrategy = readString("reference_strategy");
+        meta.operation = readString("operation");
+        meta.generationCommand = readString("generation_command");
+        meta.notes = readString("notes");
+        meta.seed = readInt64("seed");
+        meta.minimumVramMb = readInt64("minimum_vram_mb");
 
         return meta;
     }
