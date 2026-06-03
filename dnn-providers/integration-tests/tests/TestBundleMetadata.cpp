@@ -113,7 +113,7 @@ TEST(TestLoadBundleMetadata, LoadsValidFullMetadata)
         "generated_at": "2026-05-04T18:00:00Z",
         "gpu_architecture": "gfx942",
         "rocm_version": "6.4.0",
-        "reference_source": "cpu",
+        "reference_source": "PyTorch 2.3.0",
         "reference_source_hash": "a3f8c2e1",
         "reference_strategy": "precision_uplift",
         "operation": "conv_fwd",
@@ -131,7 +131,7 @@ TEST(TestLoadBundleMetadata, LoadsValidFullMetadata)
     EXPECT_EQ(meta->generatedAt, "2026-05-04T18:00:00Z");
     EXPECT_EQ(meta->gpuArchitecture, "gfx942");
     EXPECT_EQ(meta->rocmVersion, "6.4.0");
-    EXPECT_EQ(meta->referenceSource, "cpu");
+    EXPECT_EQ(meta->referenceSource, "PyTorch 2.3.0");
     EXPECT_EQ(meta->referenceSourceHash, "a3f8c2e1");
     EXPECT_EQ(meta->referenceStrategy, "precision_uplift");
     EXPECT_EQ(meta->operation, "conv_fwd");
@@ -354,43 +354,40 @@ TEST(TestCheckVramRequirement, SkipsWhenDeviceHasInsufficientVram)
 // checkArchCompatibility — pure guard function
 // ---------------------------------------------------------------------------
 
-TEST(TestCheckArchCompatibility, PassesWhenSourceNotSet)
-{
-    const BundleMetadata meta;
-    // referenceSource is nullopt
-    EXPECT_FALSE(checkArchCompatibility(meta, "gfx942:sramecc+:xnack-").has_value());
-}
-
-TEST(TestCheckArchCompatibility, PassesWhenSourceIsCpu)
-{
-    BundleMetadata meta;
-    meta.referenceSource = "cpu";
-    meta.gpuArchitecture = "gfx1100";
-    // CPU-generated data is arch-independent
-    EXPECT_FALSE(checkArchCompatibility(meta, "gfx942:sramecc+:xnack-").has_value());
-}
-
 TEST(TestCheckArchCompatibility, PassesWhenArchNotSet)
 {
+    // No gpu_architecture → data is portable → pass on any device
+    const BundleMetadata meta;
+    EXPECT_FALSE(checkArchCompatibility(meta, "gfx942:sramecc+:xnack-").has_value());
+}
+
+TEST(TestCheckArchCompatibility, PassesWhenArchNotSetEvenWithReferenceSource)
+{
+    // reference_source is informational — guard only looks at gpu_architecture
     BundleMetadata meta;
-    meta.referenceSource = "gpu";
-    // gpuArchitecture is nullopt
+    meta.referenceSource = "PyTorch 2.3.0";
+    EXPECT_FALSE(checkArchCompatibility(meta, "gfx942:sramecc+:xnack-").has_value());
+}
+
+TEST(TestCheckArchCompatibility, PassesWhenArchIsEmptyString)
+{
+    // Empty gpu_architecture is treated as "not recorded" — data is portable
+    BundleMetadata meta;
+    meta.gpuArchitecture = "";
     EXPECT_FALSE(checkArchCompatibility(meta, "gfx942:sramecc+:xnack-").has_value());
 }
 
 TEST(TestCheckArchCompatibility, PassesWhenDeviceCannotBeQueried)
 {
     BundleMetadata meta;
-    meta.referenceSource = "gpu";
     meta.gpuArchitecture = "gfx942";
-    // empty currentArch means "could not query device"
+    // empty currentArch means "could not query device" — skip disabled
     EXPECT_FALSE(checkArchCompatibility(meta, "").has_value());
 }
 
 TEST(TestCheckArchCompatibility, PassesWhenArchMatches)
 {
     BundleMetadata meta;
-    meta.referenceSource = "gpu";
     meta.gpuArchitecture = "gfx942";
     // "gfx942" is a prefix of "gfx942:sramecc+:xnack-" (followed by ':')
     EXPECT_FALSE(checkArchCompatibility(meta, "gfx942:sramecc+:xnack-").has_value());
@@ -399,7 +396,6 @@ TEST(TestCheckArchCompatibility, PassesWhenArchMatches)
 TEST(TestCheckArchCompatibility, SkipsWhenArchMismatches)
 {
     BundleMetadata meta;
-    meta.referenceSource = "gpu";
     meta.gpuArchitecture = "gfx942";
     auto result = checkArchCompatibility(meta, "gfx1100");
     ASSERT_TRUE(result.has_value());
@@ -410,7 +406,6 @@ TEST(TestCheckArchCompatibility, SkipsWhenArchMismatches)
 TEST(TestCheckArchCompatibility, SkipsWhenArchDoesNotMatch)
 {
     BundleMetadata meta;
-    meta.referenceSource = "gpu";
     meta.gpuArchitecture = "gfx1100";
     auto result = checkArchCompatibility(meta, "gfx942:sramecc+:xnack-");
     ASSERT_TRUE(result.has_value());
@@ -421,38 +416,16 @@ TEST(TestCheckArchCompatibility, RejectsPartialArchName)
     // "gfx94" is a prefix of "gfx942" but not a complete base arch.
     // The guard requires an exact base-arch match (up to the ':' delimiter).
     BundleMetadata meta;
-    meta.referenceSource = "gpu";
     meta.gpuArchitecture = "gfx94";
     EXPECT_TRUE(checkArchCompatibility(meta, "gfx942:sramecc+:xnack-").has_value());
 }
 
-TEST(TestCheckArchCompatibility, PassesWhenArchIsEmptyString)
+TEST(TestCheckArchCompatibility, ReferenceSourceDoesNotAffectGuard)
 {
-    // Empty gpu_architecture is treated as "not recorded" — guard is disabled
+    // reference_source is purely informational — the guard ignores it.
+    // Even with a GPU-sounding source, no gpu_architecture means portable.
     BundleMetadata meta;
-    meta.referenceSource = "gpu";
-    meta.gpuArchitecture = "";
-    // Empty string is treated same as nullopt — guard disabled
-    EXPECT_FALSE(checkArchCompatibility(meta, "gfx942:sramecc+:xnack-").has_value());
-}
-
-TEST(TestCheckArchCompatibility, CpuCheckIsCaseInsensitive)
-{
-    // "CPU" (uppercase) IS treated as cpu — arch guard is disabled.
-    BundleMetadata meta;
-    meta.referenceSource = "CPU";
-    meta.gpuArchitecture = "gfx1100";
-    // "CPU" is case-insensitively "cpu" → treated as CPU source → arch guard skipped
-    EXPECT_FALSE(checkArchCompatibility(meta, "gfx942:sramecc+:xnack-").has_value());
-}
-
-TEST(TestCheckArchCompatibility, NonCpuSourceTriggersArchGuard)
-{
-    // Any source name that is not "cpu" triggers the arch guard.
-    BundleMetadata meta;
-    meta.referenceSource = "miopen";
-    meta.gpuArchitecture = "gfx942";
-    // "miopen" is not "cpu" → arch guard runs → gfx942 matches → passes
+    meta.referenceSource = "AITER 0.1.13";
     EXPECT_FALSE(checkArchCompatibility(meta, "gfx942:sramecc+:xnack-").has_value());
 }
 
@@ -460,7 +433,6 @@ TEST(TestCheckArchCompatibility, PassesWhenBareArchMatchesExactly)
 {
     // Device reports bare arch without feature flags
     BundleMetadata meta;
-    meta.referenceSource = "gpu";
     meta.gpuArchitecture = "gfx942";
     EXPECT_FALSE(checkArchCompatibility(meta, "gfx942").has_value());
 }
@@ -470,7 +442,6 @@ TEST(TestCheckArchCompatibility, PassesWhenFullArchStringMatchesDevice)
     // If metadata stores the full arch string (with feature flags),
     // it matches the same full string from the device.
     BundleMetadata meta;
-    meta.referenceSource = "gpu";
     meta.gpuArchitecture = "gfx942:sramecc+:xnack-";
     EXPECT_FALSE(checkArchCompatibility(meta, "gfx942:sramecc+:xnack-").has_value());
 }
@@ -479,7 +450,6 @@ TEST(TestCheckArchCompatibility, RejectsWhenFeatureFlagsDiffer)
 {
     // Full arch string in metadata with different feature flags on device
     BundleMetadata meta;
-    meta.referenceSource = "gpu";
     meta.gpuArchitecture = "gfx942:sramecc+:xnack-";
     EXPECT_TRUE(checkArchCompatibility(meta, "gfx942:sramecc-:xnack-").has_value());
 }
