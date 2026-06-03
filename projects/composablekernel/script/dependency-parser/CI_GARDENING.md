@@ -135,6 +135,12 @@ If the file is **absent**, `smart_build_ci.sh` crashed before it could write it
 > (`RUN_INDUCTOR_TESTS`), and the downstream (pytorch/aiter/fa), tile-engine, and
 > FMHA stages. The always-run class covers only the non-compiled tests in the default
 > `ctest -N` suite; these separate suites are unaffected by it and by selection.
+>
+> Because `rocm_ck`/`builder` are registered with ctest but built by their own
+> targets, **full mode excludes them** (`ctest -LE ROCM_CK_|BUILDER_SMOKE`, override
+> with `CTEST_FULL_EXCLUDE_LABELS`) so they don't fail as "Not Run". They are not yet
+> built/run inside the smart-build flow — wiring their stages in is a follow-up
+> (sbt-ezy.41); today their coverage depends on the legacy full path / nightly.
 
 ### `reachability_result.json` fields
 
