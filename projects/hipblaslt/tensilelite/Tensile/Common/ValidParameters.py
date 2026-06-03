@@ -1047,11 +1047,12 @@ validParameters = { # we need to make sure this matches develop
     # 3: Use PLR 0.5 for both A and B
     "HalfPLR": [0, 1, 2, 3],
     # Enable iterate-mode TDM
+    # -1: Auto. Enable per-tensor when LBSPP > 1024 B (exceeds pad_interval encoding).
     # 0: Disabled
     # 1: Use iterate-mode for A
     # 2: Use iterate-mode for B
     # 3: Use iterate-mode for both A and B
-    "TDMIterateMode": [0, 1, 2, 3]
+    "TDMIterateMode": [-1, 0, 1, 2, 3]
 }
 
 newMIValidParameters = {

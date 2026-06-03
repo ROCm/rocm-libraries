@@ -2551,24 +2551,36 @@ class Solution(collections.abc.Mapping):
           return
 
       iterModeMask = state["TDMIterateMode"]
-      # ds_load_tr's brute-force layout search keeps LBSPP within pad_interval's
-      # 1024 B limit.
-      if iterModeMask & 1 and state["enableLDSTrA"]:
-        reject(state, printRejectionReason, "TDMIterateMode bit for A set but enableLDSTrA is True")
-        return
-      if iterModeMask & 2 and state["enableLDSTrB"]:
-        reject(state, printRejectionReason, "TDMIterateMode bit for B set but enableLDSTrB is True")
-        return
-      iterModeForce = {"A": bool(iterModeMask & 1), "B": bool(iterModeMask & 2)}
-      for tc in ["A", "B"]:
-        if iterModeForce[tc]:
-          state["_TDMIterateMode%s" % tc] = True
-
-      # Halve auto-derived VW until LBSPP fits the pad_interval 1024 B limit.
       if state["TDMInst"] and state["EnableMatrixInstruction"] and not state["ProblemType"]["Sparse"]:
+        # Stage 1: decide iterate-mode per tensor.
+        if iterModeMask == -1:
+          for tc in ["A", "B"]:
+            if not state["UnrollMajorLDS%s" % tc]:
+              continue
+            vw = state["VectorWidth%s" % tc]
+            bpe_tc = state["ProblemType"]["MacDataType%s" % tc].numBytes()
+            lbspp = roundUpToNearestMultiple(int(state["_DepthU%s" % tc] * bpe_tc * vw), 256)
+            if lbspp > 1024:
+              state["_TDMIterateMode%s" % tc] = True
+          state["TDMIterateMode"] = (1 if state.get("_TDMIterateModeA", False) else 0) | \
+                                    (2 if state.get("_TDMIterateModeB", False) else 0)
+        else:
+          if iterModeMask & 1:
+            if not state["UnrollMajorLDSA"]:
+              reject(state, printRejectionReason, "TDMIterateMode bit for A set but UnrollMajorLDSA is False")
+              return
+            state["_TDMIterateModeA"] = True
+          if iterModeMask & 2:
+            if not state["UnrollMajorLDSB"]:
+              reject(state, printRejectionReason, "TDMIterateMode bit for B set but UnrollMajorLDSB is False")
+              return
+            state["_TDMIterateModeB"] = True
+
+        # Stage 2: for non-iterate tensors, halve auto-derived VW until LBSPP
+        # fits the pad_interval 1024 B limit.
         multiple = 256
         for tc in ["A", "B"]:
-          if iterModeForce[tc]:
+          if state.get("_TDMIterateMode%s" % tc, False):
             continue
           if not state.get("_inputVW%s_was_auto" % tc, False):
             continue
