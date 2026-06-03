@@ -75,10 +75,15 @@ if(TENSILELITE_ENABLE_HOST)
     if(NOT TENSILELITE_BUILD_SHARED_LIBS)
         target_compile_definitions(tensilelite-host PUBLIC TENSILELITEHOST_STATIC)
     endif()
+    # TENSILE_USE_HIP removed: it is unconditionally on (no build option ever
+    # disabled it) and the non-HIP fallbacks it gated were dead, non-compilable
+    # code (e.g. the opaque DistinctType `Half` could not satisfy the
+    # unconditional float->Half cast in KernelArguments.hpp). The public DataTypes_*
+    # headers now define the HIP types unconditionally, so the macro no longer
+    # gates any public type and need not cross the install interface.
     target_compile_definitions(tensilelite-host
         PUBLIC
             $<BUILD_INTERFACE:TENSILE_DEFAULT_SERIALIZATION>
-            $<BUILD_INTERFACE:TENSILE_USE_HIP>
             $<BUILD_INTERFACE:__HIP_HCC_COMPAT_MODE__=1> # if we don't have this we fail tests on 942_304cu
     )
 

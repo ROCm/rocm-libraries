@@ -28,9 +28,7 @@
 
 #include <Tensile/Macros.hpp>
 
-#ifdef TENSILE_USE_HIP
 #include <hip/hip_runtime.h>
-#endif
 
 #include <Tensile/DistinctType.hpp>
 

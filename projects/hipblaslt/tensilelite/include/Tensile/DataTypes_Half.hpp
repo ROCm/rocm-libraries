@@ -28,9 +28,7 @@
 
 #include <Tensile/Macros.hpp>
 
-#ifdef TENSILE_USE_HIP
 #include <hip/hip_runtime.h>
-#endif
 
 #include <Tensile/DistinctType.hpp>
 
@@ -38,20 +36,11 @@ TENSILE_HIDDEN_BEGIN
 
 namespace TensileLite
 {
-#if defined(TENSILE_USE_HIP) || defined(TENSILE_USE_FLOAT16_BUILTIN)
     /**
  * \ingroup DataTypes
  */
     using Half = _Float16;
 #define TENSILE_USE_HALF
-#else
-    /**
- * \ingroup DataTypes
- */
-    struct Half : public DistinctType<uint16_t, Half>
-    {
-    };
-#endif
 } // namespace TensileLite
 
 namespace std
