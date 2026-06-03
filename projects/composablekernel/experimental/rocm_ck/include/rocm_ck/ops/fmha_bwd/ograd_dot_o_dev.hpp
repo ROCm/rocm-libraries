@@ -87,6 +87,13 @@ struct FmhaBwdOGradDotOTypes
 ///
 ///   scalars[S::P_UNDROP].f32 = p_undrop
 ///
+/// Sink-token gradient (CK Tile #5504) is disabled in rocm_ck: lse_ptr,
+/// sink_ptr and d_sink_ptr are all passed as nullptr and nhead as 0. This is
+/// safe: the kernel only *loads* LSE when atomic_sink_grad_ptr != nullptr (i.e.
+/// when d_sink_ptr != nullptr), and the sink-score read is guarded by
+/// sink_ptr != nullptr -- so these null pointers are address-computed but never
+/// dereferenced. nhead only scales the (never-taken) sink index.
+///
 /// Call this from an extern "C" __global__ wrapper.
 template <FmhaBwdOGradDotOSpec K>
 __device__ void runFmhaBwdOGradDotO(Args args)
