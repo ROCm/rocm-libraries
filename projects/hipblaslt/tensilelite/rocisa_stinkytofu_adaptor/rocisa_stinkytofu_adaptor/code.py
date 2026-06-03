@@ -24,7 +24,7 @@
 What this file is:
     Mirrors ``rocisa/rocisa/src/code.cpp`` (``init_code``) — the
     code-composition components (``Module``, ``KernelBody``, ``Label``,
-    ``RegSet``, ``ValueSet``, ...). These are the structural / control-
+    ``ValueSet``, ``RegSet``, ...). These are the structural / control-
     flow / declarative ``Item`` subclasses that KernelWriter
     assembles into a kernel; ``Instruction`` subclasses (the
     operational leaves) live in ``instruction.py``.
@@ -70,10 +70,19 @@ What it does (real):
       matches rocisa byte-for-byte (width-50 padding then
       ``// comment``), gated by ``outputNoComment``.
 
+    - ``ValueSet`` / ``RegSet`` — assembler ``.set <name>, <payload>``
+      leaves. ``ValueSet`` carries an integer ``value`` OR a string
+      ``ref`` (mutually exclusive), with ``offset`` and ``format`` (0
+      = decimal, 1 = hex, -1 = literal). ``RegSet`` adds a ``regType``
+      ("v" / "s" / ...) and side-effects ``setVgprIdx`` on a
+      HasVgprMSB arch -- both at ctor time AND on every ``toString``
+      call, so KernelWriter's in-process index map tracks the latest
+      VGPR allocation as the asm text is emitted.
+
 Not yet done (dummy):
     - Container nodes: ``KernelBody``, ``Label``, ``Macro``,
-      ``StructuredModule``, ``ValueSet``, ``RegSet``,
-      ``BitfieldUnion``, ``SignatureCodeMeta``, ``SignatureBase``.
+      ``StructuredModule``, ``BitfieldUnion``, ``SignatureCodeMeta``,
+      ``SignatureBase``.
 
 Future:
     When this shim grows beyond gfx1250, prefer adding sibling free
@@ -94,7 +103,11 @@ import copy as _copy
 from typing import Any, Iterable, List, Optional, Sequence
 
 from ._dummy import make_dummy_class
-from .base import Item, outputNoComment as _outputNoComment
+from .base import (
+    Item,
+    outputNoComment as _outputNoComment,
+    setVgprIdx as _set_vgpr_idx,
+)
 
 _P = "rocisa.code"
 
@@ -254,6 +267,25 @@ def _format_endif_str(instr: str, comment: str) -> str:
     return f"{instr}{padding} // {comment}\n"
 
 
+def _to_hex_parity(num: int) -> str:
+    """Lowercase hex (no ``0x`` prefix) mirroring rocisa's ``std::hex``
+    cast over an ``int64_t``.
+
+    Used by ``ValueSet.toString`` for the ``format == 1`` branch.
+    Rocisa builds the payload as ``"0x" + std::hex(value + offset)``
+    where the operand is ``int64_t`` and ``std::hex`` prints the raw
+    two's-complement bits with no minus sign. Python's ``f"{-1:x}"``
+    would emit ``"-1"`` instead, diverging for negative inputs. Mask
+    to 64 bits to recover byte-parity.
+
+    Non-negative values are unaffected (the mask is a no-op for any
+    int64_t-representable non-negative value).
+    """
+    if num < 0:
+        num &= 0xFFFFFFFFFFFFFFFF
+    return f"{num:x}"
+
+
 # ---------------------------------------------------------------------------
 # Preprocessor conditional blocks -- ValueIf / ValueElseIf / ValueEndif.
 # ---------------------------------------------------------------------------
@@ -397,6 +429,270 @@ class ValueEndif(Item):
 
     def __repr__(self) -> str:
         return f"ValueEndif({self.comment!r})"
+
+
+# ---------------------------------------------------------------------------
+# Symbol-emission nodes -- ValueSet / RegSet.
+# ---------------------------------------------------------------------------
+#
+# Mirror of rocisa's ``ValueSet`` (assembler ``.set`` directive) and
+# ``RegSet`` (a ``ValueSet`` subclass that also tracks VGPR
+# allocation in the rocIsa singleton for MSB-aware archs).
+#
+# These produce GNU assembler ``.set <name>, <payload>`` lines that
+# KernelWriter sprinkles throughout a kernel to give names to integer
+# constants and register aliases. RegSet adds the convention that
+# ``.set vgprX, N`` ALSO informs the in-process index map of the
+# binding so subsequent ``getVgprIdx()`` lookups see the latest
+# allocation.
+#
+# Parity notes:
+#   * C++ has 3 ValueSet ctors (int / uint32 / string ref) and 2
+#     RegSet ctors (int / string value). Python collapses each into
+#     a single ``__init__`` that dispatches on
+#     ``isinstance(value, str)`` -- this matches what nanobind's
+#     overload resolution does at runtime based on Python type.
+#   * The ``uint32`` overload was a C++-side type-system concern only.
+#     Python ints are arbitrary precision so both routes share the
+#     int path; ``toString`` produces identical output either way.
+#   * ``format`` is a raw int sentinel: ``-1`` = literal, ``0`` =
+#     decimal-with-offset (default), ``1`` = hex-with-offset. Kept
+#     as a plain int (not an IntEnum) to match rocisa's API surface
+#     -- KernelWriter passes 0/1/-1 directly.
+#   * Negative ``value + offset`` with ``format == 1`` mirrors
+#     rocisa's ``std::hex`` over int64_t two's-complement -- see
+#     ``_to_hex_parity``. Non-negative payloads are unaffected.
+#   * ``RegSet.__init__`` AND ``RegSet.toString`` both call
+#     ``setVgprIdx`` when ``regType == "v"`` on a HasVgprMSB arch.
+#     ``toString`` is intentionally NOT pure here: KernelWriter
+#     relies on each emitted ``.set vgprX, N`` line ALSO refreshing
+#     the in-memory index map as the asm text is built.
+#   * ``self.name[4:]`` strips the conventional ``"vgpr"`` prefix
+#     before registering the index. rocisa does not validate that
+#     the prefix is present; neither do we.
+
+class ValueSet(Item):
+    """``.set <name>, <value-or-ref>`` directive; mirror of
+    ``rocisa::ValueSet``.
+
+    Holds either an integer ``value`` OR a string ``ref`` (mutually
+    exclusive); the unused field is ``None``. ``offset`` is added to
+    the payload, and ``format`` controls the rendering:
+
+        ``format == -1``  ->  literal ref / ``str(value)`` (no offset
+                              arithmetic on the value path)
+        ``format ==  0``  ->  decimal ``str(value + offset)`` (default)
+        ``format ==  1``  ->  ``"0x" + hex(value + offset)``
+
+    See ``_to_hex_parity`` for the negative-value byte-parity rules.
+    """
+
+    __slots__ = ("ref", "value", "offset", "format")
+
+    def __init__(
+        self,
+        name: str,
+        value,
+        offset: int = 0,
+        format: int = 0,  # noqa: A002  (matches rocisa's public arg name)
+    ):
+        # Single Python ctor dispatching on the runtime type of
+        # ``value`` -- matches what nanobind's 3-overload resolution
+        # does at runtime. ``isinstance(value, str)`` discriminates
+        # the ref-payload path from the int-payload path; the C++
+        # ``int`` vs ``uint32_t`` overloads collapse into a single
+        # Python int route (arbitrary precision -- no truncation).
+        super().__init__(name=name)
+        if isinstance(value, str):
+            self.ref: Optional[str] = value
+            self.value: Optional[int] = None
+        else:
+            self.ref = None
+            self.value = int(value)
+        self.offset: int = offset
+        self.format: int = format
+
+    def toString(self) -> str:
+        body = f".set {self.name}, "
+        if self.ref is not None:
+            # ref path: ``format == -1`` emits the ref alone; any other
+            # format suffixes ``+<offset>``. (rocisa does NOT short-
+            # circuit ``offset == 0`` to ``ref`` alone -- the literal
+            # ``+0`` is preserved for byte parity with the assembler.)
+            if self.format == -1:
+                body += self.ref
+            else:
+                body += f"{self.ref}+{self.offset}"
+        elif self.value is not None:
+            # value path: ``format == -1`` emits ``str(value)`` with
+            # NO offset arithmetic (mirrors C++ which calls
+            # ``std::to_string(value)`` directly in that branch);
+            # ``format == 0`` adds the offset; ``format == 1`` adds
+            # the offset and emits hex.
+            v = self.value if self.format == -1 else self.value + self.offset
+            if self.format == 1:
+                body += f"0x{_to_hex_parity(v)}"
+            else:
+                body += str(v)
+        # ``ref is None and value is None`` is unreachable under the
+        # ctor invariant (one of the two is always set); rocisa would
+        # dereference an empty optional and crash here.
+        return body + "\n"
+
+    def __deepcopy__(self, memo):
+        if self.ref is not None:
+            clone = ValueSet(self.name, self.ref, self.offset, self.format)
+        else:
+            clone = ValueSet(self.name, self.value, self.offset, self.format)
+        memo[id(self)] = clone
+        return clone
+
+    def __getstate__(self):
+        # 5-tuple: ``(name, ref, value, offset, format)``.
+        return (self.name, self.ref, self.value, self.offset, self.format)
+
+    def __setstate__(self, state) -> None:
+        # Restore slots directly (no side effect to mirror, matching
+        # how ValueIf / ValueElseIf / ValueEndif round-trip).
+        name, ref, value, offset, fmt = state
+        self.name = name
+        self.parent = None
+        self.ref = ref
+        self.value = value
+        self.offset = offset
+        self.format = fmt
+
+    def __repr__(self) -> str:
+        payload = self.ref if self.ref is not None else self.value
+        return (
+            f"ValueSet({self.name!r}, {payload!r}, "
+            f"offset={self.offset}, format={self.format})"
+        )
+
+
+class RegSet(ValueSet):
+    """``.set <name>, <value-or-ref>`` plus VGPR-index tracking;
+    mirror of ``rocisa::RegSet``.
+
+    Adds a ``regType`` field (``"v"`` for VGPR, ``"s"`` for SGPR,
+    etc.) on top of ``ValueSet``. When ``regType == "v"`` AND the
+    active arch has ``HasVgprMSB`` set, BOTH ``__init__`` and every
+    call to ``toString`` invoke ``setVgprIdx`` on the rocIsa
+    singleton so later ``getVgprIdx()`` lookups observe the latest
+    allocation.
+
+    The conventional ``"vgpr"`` prefix on ``name`` (e.g.
+    ``"vgprFoo"``) is stripped before registering -- the key in the
+    index map is ``name[4:]``.
+
+    ``toString`` is intentionally side-effecting: KernelWriter relies
+    on each emitted ``.set vgprX, N`` line refreshing the in-memory
+    index map as the asm text is built, not just at construction
+    time.
+    """
+
+    __slots__ = ("regType",)
+
+    def __init__(
+        self,
+        regType: str,
+        name: str,
+        value,
+        offset: int = 0,
+    ):
+        # No ``format`` parameter at the RegSet ctor surface (matches
+        # rocisa -- the two C++ RegSet ctors only forward
+        # ``(name, value, offset)`` to ValueSet, leaving ``format``
+        # at its default 0). Callers can patch ``self.format``
+        # post-construction; pickle round-trip preserves it.
+        super().__init__(name=name, value=value, offset=offset)
+        self.regType: str = regType
+        if self._vgpr_msb_active():
+            self._set_idx(value, offset)
+
+    def toString(self) -> str:
+        # Re-trigger the index update every time. Mirrors rocisa's
+        # ``RegSet::toString`` which first re-runs ``setIdx`` then
+        # delegates the actual string formatting to ``ValueSet``.
+        if self._vgpr_msb_active():
+            if self.ref is not None:
+                self._set_idx(self.ref, self.offset)
+            elif self.value is not None:
+                self._set_idx(self.value, self.offset)
+        return super().toString()
+
+    def _vgpr_msb_active(self) -> bool:
+        """Cap-gated guard for the ``setVgprIdx`` side effect.
+
+        ``getAsmCaps()`` returns a dict; missing keys default to 0
+        (matches ``std::map<string,int>::operator[]`` which value-
+        initialises on access).
+        """
+        return (
+            self.regType == "v"
+            and bool(self.getAsmCaps().get("HasVgprMSB", 0))
+        )
+
+    def _set_idx(self, value, offset: int) -> None:
+        # Two cases mirror the ``setIdx(int, int)`` and
+        # ``setIdx(string, int)`` C++ overloads:
+        #   * int  value -> store ``value + offset`` directly
+        #   * str  value -> look ``value[4:]`` up in the current
+        #                   vgprIdx map then add offset (the lookup
+        #                   key has the ``"vgpr"`` prefix stripped)
+        #
+        # IMPORTANT: rocisa uses ``std::map<string,int>::operator[]``
+        # for the lookup, which value-initialises missing keys to 0
+        # rather than throwing. KernelWriter's ``macroAndSet`` pattern
+        # ``RegSet("v", "vgprX", "vgprX_BASE", 0)`` deliberately
+        # establishes an alias at offset 0 of a not-yet-registered
+        # base name, so we MUST treat missing keys as 0 to match.
+        if isinstance(value, str):
+            current = self.getVgprIdx()
+            idx = current.get(value[4:], 0) + offset
+        else:
+            idx = int(value) + offset
+        _set_vgpr_idx(self.name[4:], idx)
+
+    def __deepcopy__(self, memo):
+        # Use the int- or string-payload ctor depending on which is
+        # set, then patch ``format`` (RegSet's ctor does not take it).
+        # Mirrors the C++ copy ctor's effect.
+        if self.ref is not None:
+            clone = RegSet(self.regType, self.name, self.ref, self.offset)
+        else:
+            clone = RegSet(self.regType, self.name, self.value, self.offset)
+        clone.format = self.format
+        memo[id(self)] = clone
+        return clone
+
+    def __getstate__(self):
+        # 6-tuple: ``(regType, name, ref, value, offset, format)``.
+        return (
+            self.regType,
+            self.name,
+            self.ref,
+            self.value,
+            self.offset,
+            self.format,
+        )
+
+    def __setstate__(self, state) -> None:
+        # Restore via ``__init__`` (so the ``setVgprIdx`` side effect
+        # fires for ``regType == "v"`` on HasVgprMSB archs, matching
+        # the C++ ``new(&self) RegSet(...)`` placement-new), then
+        # patch ``format`` -- RegSet's ctor does not accept it.
+        regType, name, ref, value, offset, fmt = state
+        payload = ref if ref is not None else value
+        self.__init__(regType, name, payload, offset)
+        self.format = fmt
+
+    def __repr__(self) -> str:
+        payload = self.ref if self.ref is not None else self.value
+        return (
+            f"RegSet({self.regType!r}, {self.name!r}, {payload!r}, "
+            f"offset={self.offset}, format={self.format})"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -829,9 +1125,8 @@ class Module(Item):
 #     prettyPrint / count output during bring-up.
 #
 # Inheritance map (mirror of code.hpp):
-#   Label / Macro / ValueSet / RegSet / SignatureCodeMeta
-#     / SignatureBase / KernelBody   -- ``: Item`` in C++ ⇒
-#     ``base=Item`` here.
+#   Label / Macro / SignatureCodeMeta / SignatureBase / KernelBody
+#     -- ``: Item`` in C++ ⇒ ``base=Item`` here.
 #   StructuredModule -- ``: Module`` in C++ (code.hpp:469). Using
 #     ``base=Module`` here means KernelWriter's
 #     ``self.codes.globalReadA = StructuredModule()`` actually gets a
@@ -845,13 +1140,11 @@ class Module(Item):
 #     is the polymorphic root for the ``SrdUpperValue*`` family.
 #
 # Already real (above this block): TextBlock, Module, ValueIf,
-# ValueElseIf, ValueEndif.
+# ValueElseIf, ValueEndif, ValueSet, RegSet.
 
 Label = make_dummy_class(f"{_P}.Label", base=Item)
 Macro = make_dummy_class(f"{_P}.Macro", base=Item)
 StructuredModule = make_dummy_class(f"{_P}.StructuredModule", base=Module)
-ValueSet = make_dummy_class(f"{_P}.ValueSet", base=Item)
-RegSet = make_dummy_class(f"{_P}.RegSet", base=Item)
 BitfieldUnion = make_dummy_class(f"{_P}.BitfieldUnion")
 SignatureCodeMeta = make_dummy_class(f"{_P}.SignatureCodeMeta", base=Item)
 SignatureBase = make_dummy_class(f"{_P}.SignatureBase", base=Item)

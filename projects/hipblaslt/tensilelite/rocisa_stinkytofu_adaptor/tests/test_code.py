@@ -1507,16 +1507,11 @@ class TestDummyClassesInheritItem(unittest.TestCase):
     def test_macro_is_item(self):
         self.assertIsInstance(Macro(), Item)
 
-    # NB: ValueIf / ValueElseIf / ValueEndif used to be dummies and were
-    # tested here. They became real classes (see TestValueConditionals
-    # below); the isinstance-Item check is preserved there alongside
-    # the rest of their behavioural coverage.
-
-    def test_valueset_is_item(self):
-        self.assertIsInstance(ValueSet(), Item)
-
-    def test_regset_is_item(self):
-        self.assertIsInstance(RegSet(), Item)
+    # NB: ValueIf / ValueElseIf / ValueEndif AND ValueSet / RegSet used
+    # to be dummies and were tested here. They became real classes
+    # (see TestValueConditionals / TestValueSet* / TestRegSet* below);
+    # isinstance-Item coverage is preserved there alongside the rest
+    # of their behavioural tests.
 
     def test_signaturecodemeta_is_item(self):
         self.assertIsInstance(SignatureCodeMeta(), Item)
@@ -1932,6 +1927,476 @@ class TestValueConditionalModuleIntegration(unittest.TestCase):
         clone = copy.deepcopy(m)
         self.assertIsNot(clone, m)
         self.assertEqual(str(clone), str(m))
+
+
+# ===========================================================================
+# Symbol-emission leaves -- ValueSet / RegSet.
+# ===========================================================================
+#
+# Mirror of rocisa's ``ValueSet`` (assembler ``.set`` directive) and
+# ``RegSet`` (a ValueSet subclass that also tracks VGPR allocation
+# in the rocIsa singleton for MSB-aware archs). Byte-for-byte parity
+# matters because KernelWriter sprinkles ``.set`` lines throughout
+# every kernel and any divergence (whitespace, decimal-vs-hex,
+# +offset literal preservation) shows up as a noisy diff against the
+# rocisa baseline.
+
+
+class TestValueSetCtorIntPath(unittest.TestCase):
+    """Single Python ``__init__`` dispatches to the int-payload branch
+    when ``value`` is not a string. Mirrors the ``int`` and
+    ``uint32_t`` C++ ctors which both store the integer in ``value``
+    and leave ``ref`` unset."""
+
+    def test_minimal_construction(self):
+        vs = ValueSet("foo", 42)
+        self.assertEqual(vs.name, "foo")
+        self.assertEqual(vs.value, 42)
+        self.assertIsNone(vs.ref)
+        self.assertEqual(vs.offset, 0)
+        self.assertEqual(vs.format, 0)
+        self.assertIsNone(vs.parent)
+
+    def test_with_offset_and_format(self):
+        vs = ValueSet("bar", 7, 3, 1)
+        self.assertEqual(vs.value, 7)
+        self.assertEqual(vs.offset, 3)
+        self.assertEqual(vs.format, 1)
+
+    def test_keyword_args_match_rocisa_names(self):
+        vs = ValueSet(name="baz", value=5, offset=1, format=-1)
+        self.assertEqual(vs.name, "baz")
+        self.assertEqual(vs.value, 5)
+        self.assertEqual(vs.offset, 1)
+        self.assertEqual(vs.format, -1)
+
+
+class TestValueSetCtorRefPath(unittest.TestCase):
+    """``isinstance(value, str)`` discriminator routes string payloads
+    into the ref-payload branch (mirror of the third C++ ctor)."""
+
+    def test_string_value_stored_as_ref(self):
+        vs = ValueSet("alias", "other_sym")
+        self.assertEqual(vs.ref, "other_sym")
+        self.assertIsNone(vs.value)
+
+    def test_string_value_with_offset_and_format(self):
+        vs = ValueSet("alias", "other_sym", 4, 0)
+        self.assertEqual(vs.ref, "other_sym")
+        self.assertIsNone(vs.value)
+        self.assertEqual(vs.offset, 4)
+        self.assertEqual(vs.format, 0)
+
+
+class TestValueSetToStringValuePath(unittest.TestCase):
+    """``.set <name>, <integer-payload>`` rendering for the three
+    ``format`` codes. Byte-for-byte match required."""
+
+    def test_format_default_zero_emits_value_plus_offset(self):
+        # ``format == 0`` -> decimal ``str(value + offset)``.
+        self.assertEqual(ValueSet("a", 5).toString(), ".set a, 5\n")
+        self.assertEqual(ValueSet("a", 5, 3).toString(), ".set a, 8\n")
+
+    def test_format_minus_one_emits_value_alone(self):
+        # ``format == -1`` -> raw ``str(value)``; offset is NOT applied
+        # on the value path (mirror of C++ which calls
+        # ``std::to_string(value.value())`` directly in that branch).
+        self.assertEqual(
+            ValueSet("a", 100, 5, -1).toString(),
+            ".set a, 100\n",
+        )
+
+    def test_format_one_emits_hex_with_offset(self):
+        # ``format == 1`` -> ``"0x" + hex(value + offset)``, lowercase,
+        # no padding.
+        self.assertEqual(
+            ValueSet("a", 0xFF, 0, 1).toString(),
+            ".set a, 0xff\n",
+        )
+        self.assertEqual(
+            ValueSet("a", 0x10, 0x20, 1).toString(),
+            ".set a, 0x30\n",
+        )
+        self.assertEqual(
+            ValueSet("a", 0, 0, 1).toString(),
+            ".set a, 0x0\n",
+        )
+
+    def test_format_one_negative_uses_64bit_two_complement(self):
+        # rocisa's ``std::hex`` over int64_t prints two's-complement
+        # bits for negatives. ``-1`` -> ``0xffffffffffffffff``.
+        self.assertEqual(
+            ValueSet("a", -1, 0, 1).toString(),
+            ".set a, 0xffffffffffffffff\n",
+        )
+        # ``-2 + 1 = -1`` after offset arithmetic.
+        self.assertEqual(
+            ValueSet("a", -2, 1, 1).toString(),
+            ".set a, 0xffffffffffffffff\n",
+        )
+
+
+class TestValueSetToStringRefPath(unittest.TestCase):
+    """``.set <name>, <ref-payload>`` rendering. ``format == -1`` emits
+    the ref alone; any other format suffixes ``+<offset>`` (including
+    the literal ``+0`` -- not short-circuited)."""
+
+    def test_format_default_appends_plus_offset(self):
+        self.assertEqual(
+            ValueSet("a", "other", 7).toString(),
+            ".set a, other+7\n",
+        )
+
+    def test_format_zero_offset_preserves_plus_zero_literal(self):
+        # rocisa does NOT short-circuit ``offset == 0`` to ``ref``
+        # alone -- the literal ``+0`` is preserved for byte parity.
+        self.assertEqual(
+            ValueSet("a", "other", 0).toString(),
+            ".set a, other+0\n",
+        )
+
+    def test_format_minus_one_emits_ref_alone(self):
+        self.assertEqual(
+            ValueSet("a", "other", 7, -1).toString(),
+            ".set a, other\n",
+        )
+
+    def test_format_one_on_ref_path_still_appends_offset(self):
+        # ``format != -1`` -> ``ref + "+" + str(offset)``. The hex
+        # branch is value-only; for ref+format==1 rocisa just does
+        # the same plain ``+offset`` decimal output.
+        self.assertEqual(
+            ValueSet("a", "other", 3, 1).toString(),
+            ".set a, other+3\n",
+        )
+
+
+class TestValueSetInheritance(unittest.TestCase):
+    """``ValueSet`` is an ``Item`` subclass so Module type-walks /
+    cap proxies / Item defaults all apply."""
+
+    def test_isinstance_item(self):
+        self.assertIsInstance(ValueSet("a", 1), Item)
+
+    def test_str_goes_through_item_toString(self):
+        # ``str(vs)`` must equal ``vs.toString()`` (via Item.__str__).
+        vs = ValueSet("a", 5)
+        self.assertEqual(str(vs), ".set a, 5\n")
+
+
+class TestValueSetPickle(unittest.TestCase):
+    """5-tuple round-trip: ``(name, ref, value, offset, format)``.
+    Both ref and value branches must survive the round-trip with
+    identical ``toString`` output."""
+
+    def test_int_payload_round_trip(self):
+        original = ValueSet("foo", 42, 3, 1)
+        restored = pickle.loads(pickle.dumps(original))
+        self.assertEqual(restored.name, "foo")
+        self.assertEqual(restored.value, 42)
+        self.assertIsNone(restored.ref)
+        self.assertEqual(restored.offset, 3)
+        self.assertEqual(restored.format, 1)
+        self.assertEqual(restored.toString(), original.toString())
+
+    def test_ref_payload_round_trip(self):
+        original = ValueSet("alias", "other", 5, 0)
+        restored = pickle.loads(pickle.dumps(original))
+        self.assertEqual(restored.ref, "other")
+        self.assertIsNone(restored.value)
+        self.assertEqual(restored.offset, 5)
+        self.assertEqual(restored.toString(), original.toString())
+
+
+class TestValueSetDeepCopy(unittest.TestCase):
+    def test_int_payload_independent(self):
+        original = ValueSet("foo", 42, 3, 1)
+        clone = copy.deepcopy(original)
+        self.assertIsNot(clone, original)
+        self.assertEqual(clone.value, 42)
+        self.assertEqual(clone.toString(), original.toString())
+
+    def test_ref_payload_independent(self):
+        original = ValueSet("foo", "other", 3)
+        clone = copy.deepcopy(original)
+        self.assertIsNot(clone, original)
+        self.assertEqual(clone.ref, "other")
+        self.assertEqual(clone.toString(), original.toString())
+
+
+class TestValueSetModuleIntegration(unittest.TestCase):
+    """Module operations (add, str, countType) treat ValueSet leaves
+    correctly -- parent rebind, recursive counting, concatenation."""
+
+    def test_reparented_on_add(self):
+        m = Module()
+        vs = ValueSet("a", 1)
+        m.add(vs)
+        self.assertIs(vs.parent, m)
+
+    def test_module_str_concatenates_toString(self):
+        m = Module()
+        m.add(ValueSet("a", 1))
+        m.add(ValueSet("b", "other", 2))
+        self.assertEqual(str(m), ".set a, 1\n.set b, other+2\n")
+
+    def test_module_countType_finds_valueset(self):
+        m = Module()
+        m.add(ValueSet("a", 1))
+        m.add(ValueSet("b", 2))
+        self.assertEqual(m.countType(ValueSet), 2)
+        # 1 (Module) + 2 (children) = 3 Items.
+        self.assertEqual(m.countType(Item), 3)
+
+
+# ---------------------------------------------------------------------------
+# RegSet -- ValueSet subclass with VGPR-index side effect.
+# ---------------------------------------------------------------------------
+#
+# Tests that exercise the ``setVgprIdx`` side effect MUST isolate the
+# process-wide ``_vgpr_idx`` map and the ``HasVgprMSB`` cap value, or
+# they will leak state into every subsequent test. The mixin below
+# snapshots both at setUp and restores them at tearDown.
+
+
+class _VgprIdxIsolation:
+    """setUp/tearDown helper that snapshots and restores the rocIsa
+    singleton bits that ``RegSet`` mutates (``_vgpr_idx`` and the
+    ``HasVgprMSB`` cap on the active arch)."""
+
+    def setUp(self) -> None:
+        from rocisa_stinkytofu_adaptor import base as _base  # noqa: WPS433
+        self._base = _base
+        # Ensure caps are initialised so getAsmCaps() doesn't raise.
+        from rocisa_stinkytofu_adaptor import rocIsa  # noqa: WPS433
+        rocIsa.getInstance().init((12, 5, 0))
+        self._caps = _base.getAsmCaps()
+        self._saved_hasvgprmsb = self._caps.get("HasVgprMSB", 0)
+        self._saved_vgpr_idx = dict(_base.getVgprIdx())
+
+    def tearDown(self) -> None:
+        if self._saved_hasvgprmsb == 0:
+            self._caps.pop("HasVgprMSB", None)
+        else:
+            self._caps["HasVgprMSB"] = self._saved_hasvgprmsb
+        live = self._base.getVgprIdx()
+        live.clear()
+        live.update(self._saved_vgpr_idx)
+
+
+class TestRegSetCtor(_VgprIdxIsolation, unittest.TestCase):
+    """RegSet ctor accepts ``(regType, name, int_or_str, offset=0)``
+    and stores ``regType`` on top of ValueSet's fields."""
+
+    def test_int_payload(self):
+        self._caps["HasVgprMSB"] = 0  # disable side effect
+        rs = RegSet("s", "sgprFoo", 5)
+        self.assertEqual(rs.regType, "s")
+        self.assertEqual(rs.name, "sgprFoo")
+        self.assertEqual(rs.value, 5)
+        self.assertIsNone(rs.ref)
+        self.assertEqual(rs.offset, 0)
+        self.assertEqual(rs.format, 0)
+
+    def test_string_payload(self):
+        self._caps["HasVgprMSB"] = 0
+        rs = RegSet("s", "sgprFoo", "sgprOther", 3)
+        self.assertEqual(rs.ref, "sgprOther")
+        self.assertIsNone(rs.value)
+        self.assertEqual(rs.offset, 3)
+
+    def test_isinstance_valueset_and_item(self):
+        self._caps["HasVgprMSB"] = 0
+        rs = RegSet("s", "sgprFoo", 5)
+        self.assertIsInstance(rs, ValueSet)
+        self.assertIsInstance(rs, Item)
+
+
+class TestRegSetVgprIdxSideEffect(_VgprIdxIsolation, unittest.TestCase):
+    """When ``regType == "v"`` AND ``HasVgprMSB == 1``, both ``__init__``
+    and ``toString`` MUST refresh ``getVgprIdx()`` with the latest
+    binding (stripping the ``"vgpr"`` prefix from the name)."""
+
+    def test_ctor_sets_index_int_payload(self):
+        self._caps["HasVgprMSB"] = 1
+        RegSet("v", "vgprFoo", 5, 2)
+        self.assertEqual(self._base.getVgprIdx()["Foo"], 7)
+
+    def test_ctor_sets_index_string_payload(self):
+        self._caps["HasVgprMSB"] = 1
+        self._base.getVgprIdx()["Existing"] = 10
+        # ``RegSet("v", "vgprBar", "vgprExisting", 3)`` -> looks up
+        # ``Existing`` (= 10) and registers ``Bar`` = 13.
+        RegSet("v", "vgprBar", "vgprExisting", 3)
+        self.assertEqual(self._base.getVgprIdx()["Bar"], 13)
+
+    def test_ctor_string_payload_missing_key_uses_zero(self):
+        # Mirror of ``std::map<string,int>::operator[]`` which value-
+        # initialises missing keys to 0 instead of throwing.
+        # KernelWriter's ``macroAndSet`` deliberately establishes
+        # ``RegSet("v", "vgprG2LA", "vgprG2LA_BASE", 0)`` BEFORE
+        # ``vgprG2LA_BASE`` has been registered -- rocisa silently
+        # treats the missing key as 0 so the alias resolves to 0+0=0.
+        # If we raise here, KernelWriter crashes mid-kernel.
+        self._caps["HasVgprMSB"] = 1
+        self.assertNotIn("G2LA_BASE", self._base.getVgprIdx())
+        RegSet("v", "vgprG2LA", "vgprG2LA_BASE", 0)
+        self.assertEqual(self._base.getVgprIdx()["G2LA"], 0)
+        # Lookup of a missing key MUST NOT auto-insert into the live
+        # map (rocisa looks up in a copy of the map, so the singleton
+        # is unaffected).
+        self.assertNotIn("G2LA_BASE", self._base.getVgprIdx())
+
+    def test_ctor_string_payload_missing_key_with_offset(self):
+        # Same parity rule but with a non-zero offset -- missing key
+        # contributes 0 to the sum, offset survives.
+        self._caps["HasVgprMSB"] = 1
+        RegSet("v", "vgprTarget", "vgprMissing", 7)
+        self.assertEqual(self._base.getVgprIdx()["Target"], 7)
+
+    def test_toString_re_triggers_setIdx(self):
+        # Construct RegSet, mutate the in-memory map, call toString,
+        # and verify the map was refreshed back to the RegSet's view
+        # of the world.
+        self._caps["HasVgprMSB"] = 1
+        rs = RegSet("v", "vgprFoo", 5, 2)
+        self.assertEqual(self._base.getVgprIdx()["Foo"], 7)
+        # External mutation -- simulate a stale snapshot.
+        self._base.getVgprIdx()["Foo"] = 999
+        # toString must re-set to 7 (mirror of C++ which calls setIdx
+        # at the top of toString).
+        rs.toString()
+        self.assertEqual(self._base.getVgprIdx()["Foo"], 7)
+
+    def test_toString_output_does_not_include_regType(self):
+        # The side-effecting toString delegates string formatting to
+        # ValueSet.toString -- regType must NOT appear in the output.
+        self._caps["HasVgprMSB"] = 1
+        rs = RegSet("v", "vgprFoo", 5)
+        self.assertEqual(rs.toString(), ".set vgprFoo, 5\n")
+
+
+class TestRegSetNoSideEffectWhenDisabled(_VgprIdxIsolation, unittest.TestCase):
+    """The side effect is gated on BOTH ``regType == "v"`` AND
+    ``HasVgprMSB``; missing either skips the index update."""
+
+    def test_sgpr_does_not_set_index(self):
+        self._caps["HasVgprMSB"] = 1
+        before = dict(self._base.getVgprIdx())
+        rs = RegSet("s", "sgprFoo", 5)
+        rs.toString()
+        self.assertEqual(self._base.getVgprIdx(), before)
+
+    def test_vgpr_without_HasVgprMSB_does_not_set_index(self):
+        self._caps["HasVgprMSB"] = 0
+        before = dict(self._base.getVgprIdx())
+        rs = RegSet("v", "vgprFoo", 5)
+        rs.toString()
+        self.assertEqual(self._base.getVgprIdx(), before)
+
+    def test_missing_HasVgprMSB_key_is_safe(self):
+        # Missing key must behave the same as ``0`` (matches C++
+        # ``std::map[]`` value-initialisation).
+        self._caps.pop("HasVgprMSB", None)
+        before = dict(self._base.getVgprIdx())
+        rs = RegSet("v", "vgprFoo", 5)
+        rs.toString()
+        self.assertEqual(self._base.getVgprIdx(), before)
+
+
+class TestRegSetPickle(_VgprIdxIsolation, unittest.TestCase):
+    """6-tuple round-trip ``(regType, name, ref, value, offset, format)``.
+    ``format`` is preserved even though the ctor does not accept it
+    (mirror of C++ which does ``self.format = std::get<5>(t)`` after
+    placement-new)."""
+
+    def test_int_payload_round_trip_preserves_format(self):
+        self._caps["HasVgprMSB"] = 0
+        original = RegSet("s", "sgprFoo", 5, 2)
+        original.format = 1  # mutate post-ctor
+        restored = pickle.loads(pickle.dumps(original))
+        self.assertEqual(restored.regType, "s")
+        self.assertEqual(restored.name, "sgprFoo")
+        self.assertEqual(restored.value, 5)
+        self.assertIsNone(restored.ref)
+        self.assertEqual(restored.offset, 2)
+        self.assertEqual(restored.format, 1)
+        self.assertEqual(restored.toString(), original.toString())
+
+    def test_ref_payload_round_trip(self):
+        self._caps["HasVgprMSB"] = 0
+        original = RegSet("s", "sgprFoo", "sgprOther", 3)
+        restored = pickle.loads(pickle.dumps(original))
+        self.assertEqual(restored.regType, "s")
+        self.assertEqual(restored.ref, "sgprOther")
+        self.assertIsNone(restored.value)
+        self.assertEqual(restored.toString(), original.toString())
+
+    def test_round_trip_re_fires_setIdx_on_HasVgprMSB(self):
+        # ``__setstate__`` MUST re-fire the side effect (matches C++
+        # which restores via placement-new of the RegSet ctor).
+        self._caps["HasVgprMSB"] = 1
+        original = RegSet("v", "vgprFoo", 5, 2)
+        # Clear the map so we can observe the restore re-populating it.
+        self._base.getVgprIdx().clear()
+        pickle.loads(pickle.dumps(original))
+        self.assertEqual(self._base.getVgprIdx()["Foo"], 7)
+
+
+class TestRegSetDeepCopy(_VgprIdxIsolation, unittest.TestCase):
+    def test_int_payload_independent_with_format_preserved(self):
+        self._caps["HasVgprMSB"] = 0
+        original = RegSet("s", "sgprFoo", 5, 2)
+        original.format = 1
+        clone = copy.deepcopy(original)
+        self.assertIsNot(clone, original)
+        self.assertEqual(clone.format, 1)
+        self.assertEqual(clone.toString(), original.toString())
+
+    def test_ref_payload_independent(self):
+        self._caps["HasVgprMSB"] = 0
+        original = RegSet("v", "vgprFoo", "vgprOther", 1)
+        clone = copy.deepcopy(original)
+        self.assertEqual(clone.regType, "v")
+        self.assertEqual(clone.ref, "vgprOther")
+
+
+class TestRegSetModuleIntegration(_VgprIdxIsolation, unittest.TestCase):
+    """Mix RegSet leaves into a Module tree and verify str / countType /
+    parent rebind behave like any other Item subclass."""
+
+    def test_reparented_on_add(self):
+        self._caps["HasVgprMSB"] = 0
+        m = Module()
+        rs = RegSet("s", "sgprFoo", 5)
+        m.add(rs)
+        self.assertIs(rs.parent, m)
+
+    def test_module_str_concatenates_regset_lines(self):
+        self._caps["HasVgprMSB"] = 0
+        m = Module()
+        m.add(RegSet("v", "vgprA", 0))
+        m.add(RegSet("v", "vgprB", "vgprA", 1))
+        self.assertEqual(
+            str(m),
+            ".set vgprA, 0\n.set vgprB, vgprA+1\n",
+        )
+
+    def test_countType_distinguishes_regset_from_valueset(self):
+        # ``countType`` matches by isinstance; RegSet IS a ValueSet so
+        # counting ValueSet must include RegSets too. Counting RegSet
+        # alone must NOT include the plain ValueSet.
+        self._caps["HasVgprMSB"] = 0
+        m = Module()
+        m.add(ValueSet("a", 1))
+        m.add(RegSet("s", "sgprB", 2))
+        m.add(RegSet("v", "vgprC", 3))
+        self.assertEqual(m.countType(ValueSet), 3)
+        self.assertEqual(m.countType(RegSet), 2)
+        # ``countExactType`` must distinguish by exact class -- only
+        # the plain ValueSet matches when targeting ValueSet exactly.
+        self.assertEqual(m.countExactType(ValueSet), 1)
+        self.assertEqual(m.countExactType(RegSet), 2)
 
 
 if __name__ == "__main__":
