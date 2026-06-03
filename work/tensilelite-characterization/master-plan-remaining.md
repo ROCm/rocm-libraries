@@ -68,16 +68,16 @@ package `__init__`.
 - [x] `KernelHelperNaming.py` → naming half covered; init* = codegen (D6)
 - [x] `Common/GlobalParameters.py` 90.0% → 99.1%
 
-### Batch C — mid pure / near-done  (in progress; checkpoint @ 2072 passed)
+### Batch C — mid pure / near-done  ✅ DONE (full -m unit = 2192 passed)
 - [x] `Common/Architectures.py` 83.2% → 97.1%
 - [x] `Hardware.py` 88.2% → 97.6%
 - [x] `Common/Utilities.py` 53.4% → 95.6%
 - [x] `Toolchain/Source.py` 50.0% → 97.6%
 - [x] `Configuration.py` 86.6% → ~92% (dead reflected ops + Attribute AST paths, D9)
-- [ ] `Contractions.py` (544, 84.2%)
-- [ ] `BenchmarkStructs.py` (196, 72.4%)
-- [ ] `Toolchain/Component.py` (107, 70.1%) + `Toolchain/Validators.py` (96, 67.7%)
-- [ ] `TensileBenchmarkCluster.py` (192, 87.5%)
+- [x] `Contractions.py` 84.2% → ~86% (predicate matrix, D10)
+- [x] `BenchmarkStructs.py` 72.4% → (helpers+fork-perms+BenchmarkStep; BenchmarkProcess deferred, D11)
+- [x] `Toolchain/Component.py` 70.1% → 100% line · `Toolchain/Validators.py` 67.7% → 100% line
+- [x] `TensileBenchmarkCluster.py` 87.5% → 99.51% (pinned --results-only BoolOp bug, D12)
 
 ### Batch D — mid, IO/pipeline-leaning
 - [ ] `SolutionLibrary.py` (413, 55.2%)
@@ -116,3 +116,8 @@ package `__init__`.
     Component 39.5→100 · GlobalParameters 90→99.1 · Parallel 39.5→80.6 (D4) ·
     KernelHelperNaming naming-half (D6). Caught + fixed 2 cross-suite state leaks
     (CustomKernels validParameters.update; Parallel n_jobs=1 self-clears globalParameters).
+- Batch C complete — 9 modules, full -m unit 1974 → 2192 passed (no regression). Fresh baseline: coverage/master-baseline-2192.txt.
+  - Architectures 83→97 · Hardware 88→98 · Common/Utilities 53→96 · Toolchain/Source 50→98 ·
+    Configuration 87→92 (D9) · Contractions 84→86 (D10) · BenchmarkStructs 72→partial (D11) ·
+    Toolchain/Validators 68→100 · Toolchain/Component 70→100 · TensileBenchmarkCluster 88→99.5 (D12).
+    Pinned latent bug: ExpressionEvaluator BoolOp ignores 3rd+ `or` operand (D12).
