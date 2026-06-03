@@ -27,6 +27,13 @@
     ]),
   })
 # ---
+# name: test_detect_global_current_isa_public_success
+  tuple(
+    9,
+    4,
+    2,
+  )
+# ---
 # name: test_detect_global_current_isa_success
   tuple(
     9,
@@ -57,4 +64,12 @@
 # ---
 # name: test_isa_to_gfx_hex_step
   'gfx94a'
+# ---
+# name: test_split_archs_no_predicates
+  dict({
+    'archs': list([
+      'gfx942',
+    ]),
+    'preds': None,
+  })
 # ---

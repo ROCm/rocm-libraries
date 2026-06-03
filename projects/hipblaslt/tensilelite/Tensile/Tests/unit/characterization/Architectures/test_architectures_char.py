@@ -74,3 +74,38 @@ def test_detect_global_current_isa_failure(monkeypatch):
 
     monkeypatch.setattr(A, "run", lambda *a, **k: _Proc())
     assert A._detectGlobalCurrentISA("amdgpu-arch", 0) == 3
+
+
+def test_detect_global_current_isa_public_success(monkeypatch, snapshot):
+    class _Proc:
+        returncode = 0
+        stdout = b"gfx942\n"
+
+    monkeypatch.setattr(A, "run", lambda *a, **k: _Proc())
+    assert tuple(A.detectGlobalCurrentISA(0, "amdgpu-arch")) == snapshot
+
+
+def test_detect_global_current_isa_public_failure(monkeypatch):
+    class _Proc:
+        returncode = 5
+        stdout = b""
+
+    monkeypatch.setattr(A, "run", lambda *a, **k: _Proc())
+    with pytest.raises(Exception):
+        A.detectGlobalCurrentISA(0, "amdgpu-arch")
+
+
+def test_split_archs_no_predicates(snapshot):
+    archs, preds = A.splitArchsFromPredicates(["gfx942"])
+    assert {"archs": archs, "preds": preds} == snapshot
+
+
+def test_split_archs_unsupported_raises():
+    with pytest.raises(ValueError):
+        A.splitArchsFromPredicates(["not-a-real-arch"])
+
+
+def test_split_archs_invalid_predicate_raises():
+    # gfx942 is valid, but 'bogus=1' is neither an id= nor cu= predicate.
+    with pytest.raises(ValueError):
+        A.splitArchsFromPredicates(["gfx942[bogus=1]"])
