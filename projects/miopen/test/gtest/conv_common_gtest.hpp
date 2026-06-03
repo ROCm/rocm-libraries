@@ -548,6 +548,9 @@ struct verify_forward_conv : conv_base<T, Tout>
             filter,
             filter.mode != miopenTranspose ? Direction::Forward : Direction::BackwardData};
 
+        static_assert(int(api) >= int(ConvApi::Invalid) && int(api) <= int(ConvApi::Find_2_0),
+                      "Invalid ConvApi value specified.");
+
         switch(api)
         {
         case ConvApi::Immediate:
@@ -933,7 +936,6 @@ struct verify_forward_conv : conv_base<T, Tout>
             }
             break;
         case ConvApi::Invalid: MIOPEN_THROW(miopenStatusInvalidValue);
-        default: MIOPEN_THROW(miopenStatusNotImplemented);
         }
 
         if(count != 0)
