@@ -11057,45 +11057,6 @@ class KernelWriterAssembly(KernelWriter):
     record[0] = True if tc == "A" else False
     record[1] = True if tc == "B" else False
 
-    # For flat (non-buffer) loads, pre-compute max valid address for bounds checking.
-    # For TLU=True, graShift already clamps tile offsets and the main loop
-    # guarantees K is in bounds, so the exec-mask check is redundant.
-    flatLoadMaxAddrVgpr = None
-    flatLoadFullExecSgpr = None
-    if not kernel["BufferLoad"] and tc in ("A", "B") and not tP["tlu"]:
-      with self.allocTmpSgpr(2) as tmpSgprInfo:
-        tmpSgpr = tmpSgprInfo.idx
-        maxAddrSgpr = tmpSgpr
-        dim = len(tP["ia"])-1
-        sizeIdx = tP["ia"][dim]
-        sizeIdxIsSum = sizeIdx in kernel["ProblemType"]["IndicesSummation"]
-        if sizeIdxIsSum:
-          sizeIdx -= kernel["ProblemType"]["NumIndicesC"]
-        imod.header.addComment0("flat addressing - compute max read address for %s" % tc)
-        imod.header.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(maxAddrSgpr+0), sgpr(maxAddrSgpr+1),
-                    sgpr("Sizes%s+%u"%("Sum" if sizeIdxIsSum else "Free", sizeIdx)),
-                    sgpr("Stride%s%s"%(tc, self.states.indexChars[tP['ia'][-1]])),
-                    comment="64b tensor%s size in elements"%tc))
-        imod.header.add(scalarMultiply64Bpe(maxAddrSgpr, maxAddrSgpr, tP["bpeGR"], tmpSgpr, comment="<- tensor%s size in bytes"%tc))
-        imod.header.add(SAddU32(
-            dst=sgpr(maxAddrSgpr+0),
-            src0=sgpr(self.sgprs["AddressA"] if tP["isA"] else self.sgprs["AddressB"]),
-            src1=sgpr(maxAddrSgpr+0),
-            comment="prepend address lower"))
-        imod.header.add(SAddCU32(
-            dst=sgpr(maxAddrSgpr+1),
-            src0=sgpr((self.sgprs["AddressA"] if tP["isA"] else self.sgprs["AddressB"])+1),
-            src1=sgpr(maxAddrSgpr+1),
-            comment="prepend address upper"))
-        flatLoadMaxAddrVgpr = self.vgprPool.checkOutAligned(2, 2, "flatLoadMaxAddr%s"%tc)
-        imod.header.add(VMovB32(dst=vgpr(flatLoadMaxAddrVgpr+0), src=sgpr(maxAddrSgpr+0), comment="maxAddr sgpr->vgpr"))
-        imod.header.add(VMovB32(dst=vgpr(flatLoadMaxAddrVgpr+1), src=sgpr(maxAddrSgpr+1), comment="maxAddr sgpr->vgpr"))
-      flatLoadFullExecSgpr = self.sgprPool.checkOutAligned(self.states.laneSGPRCount, 2, tag="flatLoadFullExec%s"%tc)
-      waveSize = kernel["WavefrontSize"]
-      activeMask = "0xFFFFFFFF" if (waveSize == 32) else "0xFFFFFFFFFFFFFFFF"
-      SMovBX = SMovB32 if (waveSize == 32) else SMovB64
-      imod.header.add(SMovBX(dst=sgpr(flatLoadFullExecSgpr,self.states.laneSGPRCount), src=activeMask, comment="full exec mask for flat load restore"))
-
     def globalReadBody(tP):
       tc = tP["tensorChar"]
       isAB = tc in ("A", "B")
@@ -11257,53 +11218,7 @@ class KernelWriterAssembly(KernelWriter):
                   self.globalread_gpr_record.b.offset.append("0")
                 destVgpr = destVgprPrefix + "+%u"%(g2lIdx + tP["shiftGR"])
 
-                if flatLoadMaxAddrVgpr is not None and tP["glvw"] > 1:
-                  # Flat loads lack hardware partial-OOB support (unlike buffer
-                  # loads with SRD).  A vector-width flat load whose start
-                  # address is in-bounds can still extend past the tensor end,
-                  # faulting on guard pages.  Split the vector into per-element
-                  # loads so each element is individually bounds-checked.
-                  bpeGR = tP["bpeGR"]
-                  rpvElem = bpeGR // self.states.bpr  # VGPRs per element
-                  SOrSaveExecBX = SOrSaveExecB32 if self.states.kernel["WavefrontSize"] == 32 else SOrSaveExecB64
-                  for elemIdx in range(tP["glvw"]):
-                    elemOffset = elemIdx * bpeGR
-                    elemDest = destVgprPrefix + "+%u"%(g2lIdx + tP["shiftGR"] + elemIdx * rpvElem)
-                    loadModule.add(VCmpXLtU64(dst=VCC(),
-                        src0=vgpr(offsetVgpr,2),
-                        src1=vgpr(flatLoadMaxAddrVgpr,2),
-                        comment="flat load elem %u/%u: addr < maxAddr"%(elemIdx, tP["glvw"])))
-                    loadModule.add(self.chooseGlobalRead(False,
-                              bpeGR,
-                              destVgpr=elemDest,
-                              addr0=vgpr(offsetVgpr,2), addr1="",
-                              soffset=0, offset=elemOffset,
-                              glc=isGlc, slc=isSlc, nt=isNT, lds=isLds,
-                              hi16=0,
-                              comment="G -> Reg %u_%u_%u_%u elem%u"%(para, sPara, perp, sPerp, elemIdx)))
-                    loadModule.add(SOrSaveExecBX(dst=VCC(),
-                        src=sgpr(flatLoadFullExecSgpr,self.states.laneSGPRCount),
-                        comment="restore full exec mask"))
-                    if elemIdx < tP["glvw"] - 1:
-                      loadModule.add(VSubU32(
-                          dst=vgpr(flatLoadMaxAddrVgpr+0),
-                          src0=vgpr(flatLoadMaxAddrVgpr+0), src1=bpeGR,
-                          comment="dec maxAddr for next elem bounds check"))
-                  # Restore maxAddr for subsequent loads
-                  totalDec = (tP["glvw"] - 1) * bpeGR
-                  loadModule.add(VAddU32(
-                      dst=vgpr(flatLoadMaxAddrVgpr+0),
-                      src0=vgpr(flatLoadMaxAddrVgpr+0), src1=totalDec,
-                      comment="restore maxAddr after elem-split"))
-                else:
-                  # No bounds checking needed, or glvw==1 — use single load
-                  if flatLoadMaxAddrVgpr is not None:
-                    loadModule.add(VCmpXLtU64(dst=VCC(),
-                        src0=vgpr(offsetVgpr,2),
-                        src1=vgpr(flatLoadMaxAddrVgpr,2),
-                        comment="flat load: addr < maxAddr"))
-
-                  loadModule.add( self.chooseGlobalRead(False, \
+                loadModule.add( self.chooseGlobalRead(False, \
                             bpl, \
                             destVgpr=destVgpr, \
                             addr0=vgpr(offsetVgpr,2), addr1="", \
@@ -11311,12 +11226,6 @@ class KernelWriterAssembly(KernelWriter):
                             glc=isGlc, slc=isSlc, nt=isNT, lds=isLds, \
                             hi16=(kernel["ProblemType"]["MacDataType%s"%tc if not tP["isM"] else "DataType"].isHalf() or kernel["ProblemType"]["MacDataType%s"%tc if not tP["isM"] else "DataType"].isBFloat16()) and loopCnt%2==1, \
                             comment="G -> Reg %u_%u_%u_%u"%(para, sPara, perp, sPerp )))
-
-                  if flatLoadMaxAddrVgpr is not None:
-                    SOrSaveExecBX = SOrSaveExecB32 if self.states.kernel["WavefrontSize"] == 32 else SOrSaveExecB64
-                    loadModule.add(SOrSaveExecBX(dst=VCC(),
-                        src=sgpr(flatLoadFullExecSgpr,self.states.laneSGPRCount),
-                        comment="restore full exec mask"))
       if kernel["ProblemType"]["Sparse"] and kernel["DirectToVgprSparseMetadata"]:
         if tP["is_sparse"]:
           if kernel["PrefetchGlobalRead"] == 1 and unrollLoopIdx % 2 == 0:
@@ -11365,12 +11274,6 @@ class KernelWriterAssembly(KernelWriter):
           imod.middle.add(SMovB32(dst=mgpr(0), src=sgpr("LocalWriteAddrMetadata"),\
                                   comment="DTLM: m0 <- metadata LDS write base"))
         globalReadBody(tPM if tPM else tP["tpsMetadata"])
-
-    # Release flat load exec masking resources
-    if flatLoadMaxAddrVgpr is not None:
-      self.vgprPool.checkIn(flatLoadMaxAddrVgpr)
-    if flatLoadFullExecSgpr is not None:
-      self.sgprPool.checkIn(flatLoadFullExecSgpr)
 
     if self.db["ConservativeWaitCnt"] & 0x1:
         imod.footer.add(SBarrier(comment="debug"))
