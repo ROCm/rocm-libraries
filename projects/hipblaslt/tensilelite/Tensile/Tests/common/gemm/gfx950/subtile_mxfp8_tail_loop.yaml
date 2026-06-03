@@ -21,11 +21,9 @@
 #   * MX scale-mask reuse: comment "FP4 only" gates by
 #     `not isBF16 and self.hasScale` — would also fire for MXFP8.
 #
-# Post-fix expectation (after [SubtileImpl][TailLoop] Skip data K-mask
-# for MX-scaled paths): all PGR=0 and PGR=1 cells PASS (60/60); the
-# 14 remaining failures are all PGR=2 + K%256!=0 (787-2899 wrong out
-# of 65536, ~1-5%), a separate documented issue around the PGR=2
-# prefetch path's interaction with the tail loop.
+# Post-fix expectation (after [SubtileImpl][TailLoop] Fix PGR=2 main-
+# to-tail handoff stale-LDS bug): all 96/96 cells PASS across PGR ∈
+# {0, 1, 2} × PLR ∈ {0, 1} × K ∈ {32, 64, …, 512}.
 #
 #   * KernelWriterAssembly.computeTailLoopSrdLimit MX scale `kPad=256`
 #     for DepthU>256 — may need an FP8-specific value at DU=512.
@@ -54,45 +52,32 @@
 #   Total: 6/96 PASS.
 #
 # Post-fix (after [SubtileImpl] Fix single-DU per_uid_k regression in
-# emit_lr + NLL lr_inc PGR=1 gating, current HEAD):
-#   PGR0 PLR0:  4 PASS / 12 FAIL    (K ∈ {128, 256, 384, 512} pass)
-#   PGR0 PLR1:  4 PASS / 12 FAIL
-#   PGR1 PLR0:  4 PASS / 12 FAIL
-#   PGR1 PLR1:  4 PASS / 12 FAIL
-#   PGR2 PLR0:  3 PASS / 13 FAIL    (K=384 PGR2 FAILs but PGR0/1 PASS)
-#   PGR2 PLR1:  3 PASS / 13 FAIL
-#   Total: 22/96 PASS.
+# emit_lr + NLL lr_inc PGR=1 gating + data K-mask skip for MX paths):
+#   PGR0 PLR0: 16 PASS / 0 FAIL
+#   PGR0 PLR1: 16 PASS / 0 FAIL
+#   PGR1 PLR0: 16 PASS / 0 FAIL
+#   PGR1 PLR1: 16 PASS / 0 FAIL
+#   PGR2 PLR0: 16 PASS / 0 FAIL    (was 3 PASS / 13 FAIL pre-PGR=2 fix)
+#   PGR2 PLR1: 16 PASS / 0 FAIL    (was 3 PASS / 13 FAIL pre-PGR=2 fix)
+#   Total: 96/96 PASS.
 #
-# Pass set is exactly K % MIK == 0, where MIK = MatrixInstK = 128 for FP8.
-# Every K that needs a partial-MIK tail (K ∈ {32, 64, 96, 160, 192, 224,
-# 288, 320, 352, 416, 448, 480}) FAILs.  The MAIN-LOOP regression is
-# resolved (K = N*DU cases now PASS for PGR ∈ {0, 1}); residual failures
-# are tail-only and concentrated where tail % 128 != 0.
-#
-# Tail-loop residual wrong-rate by K (PGR=0 PLR=0, representative):
-#   K=32   188 / 65536  ≈ 0.29%
-#   K=64   347 / 65536  ≈ 0.53%
-#   K=96   333 / 65536  ≈ 0.51%
-#   K=160  297 / 65536  ≈ 0.45%
-#   K=192  157 / 65536  ≈ 0.24%
-#   K=224   81 / 65536  ≈ 0.12%
-#   K=288  340 / 65536  ≈ 0.52%
-#   K=320  412 / 65536  ≈ 0.63%
-#   K=352  333 / 65536  ≈ 0.51%
-#   K=416  169 / 65536  ≈ 0.26%
-#   K=448  387 / 65536  ≈ 0.59%
-#   K=480  385 / 65536  ≈ 0.59%
-#
-# These match the magnitude class of the MXFP4 sibling tail residual
-# (subtile_mxfp4.yaml at MT128x128/DU=256/PGR=1/PLR=1 K=288: 415/65536
-# ≈ 0.63%). Likely root: emit_mask_k non-BF16 branch + MX-scale mask
-# reuse path, neither verified for MXFP8 by PR 7683 itself.
-#
-# PGR=2 specific residual: K=288, 320, 352, 384, 416, 448, 480 all FAIL
-# at PGR=2 PLR=0/1 with 682..4583 wrong values (~1-7% wrong-rate). This
-# is a separate PGR=2-specific tail issue not covered by the main-loop
-# fix; it's likely the wrap-LR forced-drain interaction between PR 7656's
-# `gr_inc and pgr==2` NLL drop and PR 7683's tail-loop entry sequence.
+# Post-PGR=2 fix (final): the [SubtileImpl][TailLoop] PGR=2 main→tail
+# LW_base re-alignment fix in LogicalScheduler.emitMainAndExitLoops
+# (introduced via _emit_pgr2_tail_lw_align, inserted between NLL_C{ui}
+# and the SkipToEnd label) resolves the previously documented PGR=2
+# K∈{288,320,352,384,416,448,480} × PLR{0,1} = 14 failing cells. Root
+# cause was an LDS half-buffer mis-alignment between LW_base (swapped
+# once by PRELOOP, not re-balanced by PGR=2's drop-gr_inc/lr_inc NLL)
+# and the LR vgpr (never swapped on the tail-entering paths), so the
+# tail GR wrote to one half while its LR re-read the prefetched-but-
+# stale data still sitting in the OTHER half — double-counting that
+# stale iteration on top of NLL's iteration. Fix XORs LW_base with
+# sgprSwap{tc} for every live tensor before SkipToEnd on the NLL exit
+# paths only (the K<DU direct-branch-to-SkipToEnd path is unaffected
+# because neither LW nor v2 has been touched on that path). The pure
+# tail-loop residual that previously bound PGR=0/1 cells went away in
+# the [SubtileImpl][TailLoop] Skip data K-mask for MX-scaled paths fix
+# (commit 82be5ef5b3f).
 #
 # Pre-existing v2 regression yamls (subtile_mxfp8_correctness_regression*
 # .yaml MT256x256 multi-DU): unchanged by this fix, still fail kernel
