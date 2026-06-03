@@ -80,12 +80,12 @@ namespace rocisa
 
 namespace TensileLite
 {
-    std::string ToString(rocisa::DataType d);
+    TENSILELITEHOST_EXPORT std::string ToString(rocisa::DataType d);
     /**
  * \ingroup DataTypes
  * \brief Runtime accessible data type metadata
  */
-    struct DataTypeInfo
+    struct TENSILELITEHOST_EXPORT DataTypeInfo
     {
         static DataTypeInfo const& Get(int index);
         static DataTypeInfo const& Get(rocisa::DataType t);
@@ -492,7 +492,7 @@ namespace TensileLite
     }
 #endif // !_WIN32 && TENSILE_USE_FP4
 
-    std::string ToString(ConstantVariant d);
+    TENSILELITEHOST_EXPORT std::string ToString(ConstantVariant d);
     bool        CompareValue(const ConstantVariant& d, double value);
 
     size_t multiplyElementSize(size_t element, float elementSize);

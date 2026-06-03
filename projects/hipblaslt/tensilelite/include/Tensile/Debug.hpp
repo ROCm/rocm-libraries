@@ -46,7 +46,7 @@ namespace TensileLite
     /**
      * @brief Common place for defining flags which enable debug behaviour.
      */
-    class Debug : public LazySingleton<Debug>
+    class TENSILELITEHOST_EXPORT Debug : public LazySingleton<Debug>
     {
     public:
         bool printPropertyEvaluation() const;

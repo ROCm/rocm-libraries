@@ -42,7 +42,7 @@ namespace TensileLite
 {
     namespace hip
     {
-        class SolutionAdapter : public TensileLite::SolutionAdapter
+        class TENSILELITEHOST_EXPORT SolutionAdapter : public TensileLite::SolutionAdapter
         {
         public:
             SolutionAdapter();

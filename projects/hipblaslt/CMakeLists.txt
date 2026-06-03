@@ -427,9 +427,10 @@ if(HIPBLASLT_ENABLE_HOST)
     rocm_install_targets(TARGETS hipblaslt)
 
     rocm_export_targets(
-        TARGETS roc::hipblaslt
+        TARGETS roc::hipblaslt roc::tensilelite-host
         DEPENDS PACKAGE hip
         DEPENDS PACKAGE ${hipblas_target}
+        DEPENDS PACKAGE origami
         NAMESPACE roc::
     )
 

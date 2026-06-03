@@ -223,7 +223,7 @@ namespace TensileLite
      * Can generate `KernelInvocation` objects to solve a particular problem
      * given a set of `ContractionInputs`.
      */
-    class ContractionSolution : public Solution
+    class TENSILELITEHOST_EXPORT ContractionSolution : public Solution
     {
     public:
         using Problem             = ContractionProblemGemm;
@@ -708,7 +708,7 @@ namespace TensileLite
     };
 
     template <typename TAct>
-    void setDeviceUserArgs(std::vector<ContractionSolution::Problem> const& problems,
+    TENSILELITEHOST_EXPORT void setDeviceUserArgs(std::vector<ContractionSolution::Problem> const& problems,
                            ContractionSolution::GroupedInputs const&        inputs,
                            DeviceUserArguments<TAct>*                       args);
 
