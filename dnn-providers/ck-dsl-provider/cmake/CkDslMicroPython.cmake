@@ -12,11 +12,23 @@
 #   CKDSL_MPY_STATIC_LIB    absolute path to libckdsl_micropython.a
 #   CKDSL_MPY_INCLUDE_DIRS  include dirs for TUs that touch the MicroPython API
 #   CKDSL_MPY_COMGR_LIB     resolved libamd_comgr to link
+#   CKDSL_MPY_COMPILE_DEFS  compile definitions every MicroPython-API TU must see
+#                           (must match what build_embed.sh compiles the .a with)
 #
-# Distribution toggle (plan §module-loading): CKDSL_MICROPYTHON_FROZEN selects
-# how ck_dsl ships. Only the frozen mode (modules baked into the .a) is wired
-# today; the on-disk .py / .mpy modes are future work and currently assert.
-option(CKDSL_MICROPYTHON_FROZEN "Freeze ck_dsl/ck_dsl_provider into the plugin" ON)
+# Distribution toggle (plan §module-loading): CKDSL_MICROPYTHON_MODE selects how
+# ck_dsl ships:
+#   frozen  ck_dsl/shims baked into the plugin as frozen bytecode (no filesystem;
+#           default; smallest footprint, slowest to iterate -- editing a .py means
+#           rebuilding + relinking the static lib).
+#   py      ck_dsl/shims shipped as .py files beside the plugin, loaded from the
+#           filesystem at runtime (fast iteration: edit the on-disk .py and rerun).
+#   mpy     same, but pre-compiled to .mpy bytecode (smaller / faster load than .py).
+# py and mpy use MICROPY_READER_POSIX + a real mp_import_stat in the embed port and
+# put the on-disk bundle dir on sys.path (baked CKDSL_BUNDLE_DIR; a production
+# install would relocate the bundle + override that path).
+set(CKDSL_MICROPYTHON_MODE "frozen" CACHE STRING
+    "How ck_dsl ships into the plugin: frozen | py | mpy")
+set_property(CACHE CKDSL_MICROPYTHON_MODE PROPERTY STRINGS frozen py mpy)
 
 # Optional pre-existing MicroPython checkout (offline / reproducible builds).
 # When unset, build_embed.sh clones the pinned commit under the build dir.
@@ -27,11 +39,13 @@ set(CKDSL_MICROPYTHON_DIR "" CACHE PATH
 # (CKDSL_MPY_*) into the calling scope. Call once from the top-level CMakeLists
 # after the ck_dsl Python paths are resolved.
 function(ck_dsl_provider_configure_micropython)
-    if(NOT CKDSL_MICROPYTHON_FROZEN)
+    set(_validModes frozen py mpy)
+    if(NOT CKDSL_MICROPYTHON_MODE IN_LIST _validModes)
         message(FATAL_ERROR
-            "CK DSL provider: only the frozen MicroPython mode is implemented; "
-            "set CKDSL_MICROPYTHON_FROZEN=ON.")
+            "CK DSL provider: CKDSL_MICROPYTHON_MODE must be one of ${_validModes} "
+            "(got '${CKDSL_MICROPYTHON_MODE}').")
     endif()
+    message(STATUS "CK DSL provider MicroPython mode: ${CKDSL_MICROPYTHON_MODE}")
 
     find_program(BASH_PROGRAM bash REQUIRED)
     find_library(CKDSL_AMD_COMGR_LIBRARY amd_comgr REQUIRED
@@ -67,9 +81,25 @@ function(ck_dsl_provider_configure_micropython)
         CK_DSL_SRC=${CK_DSL_PYTHON_PACKAGE_PATH}/ck_dsl
         CK_DSL_PROVIDER_SRC=${CK_DSL_PROVIDER_PYTHON_PACKAGE_PATH}/ck_dsl_provider
         ROCM_PATH=${ROCM_PATH}
+        CKDSL_MODE=${CKDSL_MICROPYTHON_MODE}
     )
     if(CKDSL_MICROPYTHON_DIR)
         list(APPEND _env MPY_DIR=${CKDSL_MICROPYTHON_DIR})
+    endif()
+
+    # Compile definitions every MicroPython-API TU must agree on (the C++ bridge /
+    # interpreter and the .a). Frozen bakes modules in; py/mpy load from disk and
+    # bake the on-disk bundle dir for sys.path (the .a build sets CKDSL_ON_DISK
+    # itself from CKDSL_MODE; here we mirror it for the C++ side + add the path).
+    if(CKDSL_MICROPYTHON_MODE STREQUAL "frozen")
+        set(_compileDefs MICROPY_MODULE_FROZEN_MPY=1 MICROPY_MODULE_FROZEN_STR=1)
+    else()
+        if(CKDSL_MICROPYTHON_MODE STREQUAL "mpy")
+            set(_bundleDir "${_out}/frozen_src_mpy")
+        else()
+            set(_bundleDir "${_out}/frozen_src")
+        endif()
+        set(_compileDefs CKDSL_ON_DISK=1 "CKDSL_BUNDLE_DIR=\"${_bundleDir}\"")
     endif()
 
     add_custom_command(
@@ -77,7 +107,7 @@ function(ck_dsl_provider_configure_micropython)
         COMMAND ${CMAKE_COMMAND} -E env ${_env}
                 ${BASH_PROGRAM} "${_root}/micropython/build_embed.sh"
         DEPENDS ${_deps}
-        COMMENT "Building embedded MicroPython static library (ck_dsl frozen)"
+        COMMENT "Building embedded MicroPython static library (${CKDSL_MICROPYTHON_MODE})"
         VERBATIM
         USES_TERMINAL
     )
@@ -92,4 +122,5 @@ function(ck_dsl_provider_configure_micropython)
         "${_root}/src/micropython" "${_pkg}" "${_pkg}/port" "${_buildEmbed}"
         PARENT_SCOPE)
     set(CKDSL_MPY_COMGR_LIB "${CKDSL_AMD_COMGR_LIBRARY}" PARENT_SCOPE)
+    set(CKDSL_MPY_COMPILE_DEFS "${_compileDefs}" PARENT_SCOPE)
 endfunction()

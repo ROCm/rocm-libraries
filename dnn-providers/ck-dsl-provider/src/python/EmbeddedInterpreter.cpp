@@ -6,6 +6,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdlib>
+#include <cstring>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <mutex>
@@ -14,6 +15,10 @@
 extern "C" {
 #include "port/micropython_embed.h"
 #include "py/stackctrl.h"
+#if defined(CKDSL_ON_DISK) && CKDSL_ON_DISK
+#include "py/objlist.h"
+#include "py/runtime.h"
+#endif
 }
 
 namespace ck_dsl_provider {
@@ -42,6 +47,24 @@ void doInitialize() {
     // setCallStackTop() because calls may arrive on other host threads.
     int stackTopMarker = 0;
     mp_embed_init(heap, kHeapBytes, &stackTopMarker);
+
+#if defined(CKDSL_ON_DISK) && CKDSL_ON_DISK
+    // On-disk modes: the ck_dsl/shims tree ships beside the plugin and is loaded
+    // from the filesystem. Put its (build-time-baked) absolute path on sys.path
+    // so `import ck_dsl_provider` resolves to those files. (A production install
+    // that relocates the bundle would override CKDSL_BUNDLE_DIR.)
+    {
+        const char* bundle = CKDSL_BUNDLE_DIR;
+        nlr_buf_t nlr;
+        if (nlr_push(&nlr) == 0) {
+            mp_obj_list_append(mp_sys_path, mp_obj_new_str(bundle, std::strlen(bundle)));
+            nlr_pop();
+        } else {
+            HIPDNN_PLUGIN_LOG_WARN("EmbeddedInterpreter: failed to add on-disk bundle to sys.path");
+        }
+    }
+    HIPDNN_PLUGIN_LOG_INFO("EmbeddedInterpreter: on-disk module bundle " << CKDSL_BUNDLE_DIR);
+#endif
 
     _initialized.store(true, std::memory_order_release);
     _initializationCount.fetch_add(1, std::memory_order_relaxed);

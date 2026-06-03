@@ -40,9 +40,7 @@ add_dependencies(ck_dsl_provider_impl ${CKDSL_MPY_BUILD_TARGET})
 foreach(_dir IN LISTS CKDSL_MPY_INCLUDE_DIRS)
     target_include_directories(ck_dsl_provider_impl PUBLIC $<BUILD_INTERFACE:${_dir}>)
 endforeach()
-target_compile_definitions(ck_dsl_provider_impl
-    PUBLIC MICROPY_MODULE_FROZEN_MPY=1 MICROPY_MODULE_FROZEN_STR=1
-)
+target_compile_definitions(ck_dsl_provider_impl PUBLIC ${CKDSL_MPY_COMPILE_DEFS})
 
 set_target_properties(ck_dsl_provider_impl PROPERTIES
     CXX_VISIBILITY_PRESET hidden

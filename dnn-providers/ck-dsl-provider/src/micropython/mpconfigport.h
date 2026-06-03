@@ -51,6 +51,24 @@
 #define MICROPY_QSTR_EXTRA_POOL mp_qstr_frozen_const_pool
 #endif
 
+// On-disk distribution modes (CKDSL_ON_DISK): instead of frozen bytecode, load
+// ck_dsl/shims as .py (or .mpy) files from the filesystem beside the plugin.
+// MICROPY_READER_POSIX gives py/reader.c + py/lexer.c a real file reader/lexer;
+// the embed port supplies mp_import_stat (embed_port.c). PERSISTENT_CODE_LOAD
+// lets the import machinery load .mpy files (the mpy mode); harmless for py mode.
+#if defined(CKDSL_ON_DISK) && CKDSL_ON_DISK
+#define MICROPY_READER_POSIX (1)
+#define MICROPY_PERSISTENT_CODE_LOAD (1)
+// .py modules are compiled by the embedded RUNTIME compiler (not mpy-cross), so
+// it must support every syntax ck_dsl uses. CORE_FEATURES leaves several at
+// EXTRA level off; enable the ones ck_dsl needs (f-strings are pervasive). These
+// are parser-only flags (no object-layout impact); harmless in mpy mode.
+#define MICROPY_PY_FSTRINGS (1)
+#define MICROPY_COMP_MODULE_CONST (1)
+#define MICROPY_COMP_TRIPLE_TUPLE_ASSIGN (1)
+#define MICROPY_COMP_RETURN_IF_EXPR (1)
+#endif
+
 // extmod modules ck_dsl needs (compiled in via build.sh, scanned via gen.mk).
 #define MICROPY_PY_RE (1)
 #define MICROPY_PY_RE_MATCH_GROUPS (1)
