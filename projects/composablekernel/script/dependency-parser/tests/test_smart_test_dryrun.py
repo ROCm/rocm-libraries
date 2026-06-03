@@ -34,7 +34,7 @@ class TestAlwaysRunDryRun(unittest.TestCase):
         with open(os.path.join(self.tmp, name), "w") as f:
             f.write(content)
 
-    def _run(self, mode, non_compiled=None, chunks=None):
+    def _run(self, mode, non_compiled=None, chunks=None, extra_env=None):
         self._write("build_mode.env", f"SMART_BUILD_MODE={mode}\n")
         if non_compiled is not None:
             self._write(
@@ -43,10 +43,11 @@ class TestAlwaysRunDryRun(unittest.TestCase):
             )
         if chunks is not None:
             self._write("tests_to_run.json", json.dumps({"regex_chunks": chunks}))
+        env = {**os.environ, "DRY_RUN": "true", "BUILD_DIR": self.tmp,
+               "CTEST_PARALLEL": "4", **(extra_env or {})}
         proc = subprocess.run(
             ["bash", str(SMART_TEST), "--dry-run"],
-            env={**os.environ, "DRY_RUN": "true", "BUILD_DIR": self.tmp,
-                 "CTEST_PARALLEL": "4"},
+            env=env,
             capture_output=True,
             text=True,
         )
@@ -72,6 +73,18 @@ class TestAlwaysRunDryRun(unittest.TestCase):
         # Full runs the whole suite (bare ctest); it must not add the always-run -R.
         self.assertIn("ctest --output-on-failure", out)
         self.assertNotIn(ALWAYS_RUN_RE, out)
+
+    def test_full_excludes_separate_suites_by_default(self):
+        # rocm_ck / builder are registered with ctest but built by their own
+        # targets; full mode must exclude them so they don't fail as "Not Run".
+        rc, out = self._run("full")
+        self.assertEqual(rc, 0)
+        self.assertIn("-LE ROCM_CK_|BUILDER_SMOKE", out)
+
+    def test_full_exclusion_overridable_to_empty(self):
+        rc, out = self._run("full", extra_env={"CTEST_FULL_EXCLUDE_LABELS": ""})
+        self.assertEqual(rc, 0)
+        self.assertNotIn("-LE", out)
 
     def test_none_without_report_is_graceful(self):
         rc, out = self._run("none")  # no reachability_result.json

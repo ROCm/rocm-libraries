@@ -175,6 +175,21 @@ class TestJunit(unittest.TestCase):
 
         self.assertFalse(validate(["bin/a"], {"bin/a"}, mode="selective")["advisory"])
 
+    def test_label_tags_suite_and_classname(self):
+        from validate_selection import render_junit, validate
+
+        result = validate(["bin/a"], {"bin/a"}, mode="full", label="gfx942")
+        self.assertEqual(result["label"], "gfx942")
+        xml = render_junit(result)
+        self.assertIn('classname="smart-build.selection.full.gfx942"', xml)
+        self.assertIn('name="smart-build-selection-full-gfx942"', xml)
+
+    def test_label_without_mode_still_tags(self):
+        from validate_selection import render_junit, validate
+
+        xml = render_junit(validate(["bin/a"], {"bin/a"}, label="gfx950"))
+        self.assertIn('classname="smart-build.selection.gfx950"', xml)
+
 
 class TestCli(unittest.TestCase):
     """End-to-end exit-code checks through main.py validate."""

@@ -82,7 +82,7 @@ def load_ctest_tests(path):
     return tests
 
 
-def validate(selected, valid_targets, ctest_tests=None, mode=None):
+def validate(selected, valid_targets, ctest_tests=None, mode=None, label=None):
     """Check a selection against the known ninja targets (and optionally ctest).
 
     Runs up to two checks and returns a result dict:
@@ -96,6 +96,9 @@ def validate(selected, valid_targets, ctest_tests=None, mode=None):
     actually used: on a full/none build it's an advisory "as-if" computation; only
     on a selective build does it drive what gets built/run. Tagged into the result
     and the JUnit so consumers don't conflate as-if with real selective runs.
+
+    `label` (e.g. the GPU arch), when given, further tags the JUnit so the per-arch
+    smoke results aren't published as indistinguishable duplicate rows in Jenkins.
     """
     invalid_targets = [e for e in selected if e not in valid_targets]
     result = {
@@ -108,6 +111,8 @@ def validate(selected, valid_targets, ctest_tests=None, mode=None):
     if mode is not None:
         result["mode"] = mode
         result["advisory"] = (mode != "selective")
+    if label:
+        result["label"] = label
     if ctest_tests is not None:
         invalid_tests = [
             e for e in selected if os.path.basename(e) not in ctest_tests
@@ -124,7 +129,9 @@ def render_junit(result):
 
     When result carries a `mode`, the suite/classname are tagged with it
     (e.g. smart-build.selection.full) so Jenkins' test-results trend keeps advisory
-    as-if runs (full/none) distinct from real selective runs.
+    as-if runs (full/none) distinct from real selective runs. A `label` (e.g. the
+    GPU arch) is appended too, so per-arch publishes land as distinct rows
+    (smart-build.selection.full.gfx942) instead of duplicate "selection-resolvable".
     """
     failures = []
     for t in result.get("invalid_targets", []):
@@ -133,8 +140,11 @@ def render_junit(result):
         failures.append(("not a registered ctest test", t))
 
     mode = result.get("mode")
-    classname = "smart-build.selection" + (f".{mode}" if mode else "")
-    suite = "smart-build-selection" + (f"-{mode}" if mode else "")
+    label = result.get("label")
+    tag = (f".{mode}" if mode else "") + (f".{label}" if label else "")
+    suite_tag = (f"-{mode}" if mode else "") + (f"-{label}" if label else "")
+    classname = "smart-build.selection" + tag
+    suite = "smart-build-selection" + suite_tag
 
     _attr = {"'": "&apos;", '"': "&quot;"}
     cases = []
@@ -207,6 +217,11 @@ def main():
         help="Tag the result/JUnit with the build mode so advisory as-if runs "
         "(full/none) stay distinct from real selective runs",
     )
+    parser.add_argument(
+        "--label",
+        help="Extra tag for the JUnit suite/classname (e.g. the GPU arch), so "
+        "per-arch publishes land as distinct rows instead of duplicates",
+    )
     args = parser.parse_args()
 
     for path in [args.tests_json, args.ninja_targets] + (
@@ -220,7 +235,7 @@ def main():
     valid_targets = load_ninja_targets(args.ninja_targets)
     ctest_tests = load_ctest_tests(args.ctest) if args.ctest else None
 
-    result = validate(selected, valid_targets, ctest_tests, mode=args.mode)
+    result = validate(selected, valid_targets, ctest_tests, mode=args.mode, label=args.label)
 
     with open(args.output, "w") as f:
         json.dump(result, f, indent=2)

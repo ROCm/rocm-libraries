@@ -141,6 +141,10 @@ fi
 echo ""
 echo "Step 3b: Selection-validity smoke (mode=${ASIF_MODE}, non-fatal)..."
 ninja -t targets all > ninja_targets.txt 2>/dev/null || true
+# Tag the JUnit with the arch (when CI set it) so the per-arch smoke results land
+# as distinct rows instead of indistinguishable duplicate "selection-resolvable".
+LABEL_ARGS=()
+if [ -n "${ARCH_NAME:-}" ]; then LABEL_ARGS=(--label "${ARCH_NAME}"); fi
 python3 "${SCRIPT_DIR}/main.py" validate \
     tests_to_run.json \
     --ninja-targets ninja_targets.txt \
@@ -148,6 +152,7 @@ python3 "${SCRIPT_DIR}/main.py" validate \
     --output smoke_result.json \
     --junit smoke_result.xml \
     --mode "${ASIF_MODE}" \
+    "${LABEL_ARGS[@]}" \
     || echo "WARNING: selection validation flagged issues (see smoke_result.json) - continuing"
 
 # Step 4: Decide the actual build mode (the as-if artifacts above are produced

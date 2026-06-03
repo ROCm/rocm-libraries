@@ -172,6 +172,10 @@ def main():
         "--mode", choices=["full", "selective", "none"],
         help="Tag result/JUnit with the build mode (as-if vs real selective)",
     )
+    parser_validate.add_argument(
+        "--label",
+        help="Extra JUnit tag (e.g. GPU arch) so per-arch publishes are distinct",
+    )
 
     # Code auditing
     parser_audit = subparsers.add_parser(
@@ -227,6 +231,8 @@ def main():
             validate_args += ["--junit", args.junit]
         if args.mode:
             validate_args += ["--mode", args.mode]
+        if args.label:
+            validate_args += ["--label", args.label]
         run_validate_selection(validate_args)
     elif args.command == "audit":
         run_selective_test_filter([args.depmap_json, "--audit"])

@@ -109,7 +109,17 @@ case "${MODE}" in
     full)
         echo ""
         echo "Full mode - running the complete ctest suite..."
-        run_ctest --output-on-failure
+        # Exclude the separate flag-gated suites (rocm_ck, builder): they are
+        # registered with ctest but built by their own targets (check-rocm-ck /
+        # check-builder), not by `ninja tests examples`, so a bare ctest reports
+        # them "Not Run" and fails. They are owned by their own stages (D13).
+        # Override/disable via CTEST_FULL_EXCLUDE_LABELS (empty = no exclusion).
+        CTEST_FULL_EXCLUDE_LABELS="${CTEST_FULL_EXCLUDE_LABELS-ROCM_CK_|BUILDER_SMOKE}"
+        EXCLUDE_ARGS=()
+        if [ -n "${CTEST_FULL_EXCLUDE_LABELS}" ]; then
+            EXCLUDE_ARGS=(-LE "${CTEST_FULL_EXCLUDE_LABELS}")
+        fi
+        run_ctest --output-on-failure "${EXCLUDE_ARGS[@]}"
         echo ""
         echo "[OK] Smart test complete (full mode)"
         exit 0
