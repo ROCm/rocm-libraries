@@ -27,6 +27,56 @@ CTEST_N_OUTPUT = textwrap.dedent("""\
 """)
 
 
+class TestDepmapStripPrefix(unittest.TestCase):
+    def test_no_metadata_defaults_to_project_root(self):
+        # No repo metadata -> documented project-root convention.
+        self.assertEqual(aps.depmap_strip_prefix({"file_to_executables": {}}),
+                         "projects/composablekernel/")
+
+    def test_project_root_workspace(self):
+        d = {"repo": {"workspace_root": "/x/projects/composablekernel"}}
+        self.assertEqual(aps.depmap_strip_prefix(d), "projects/composablekernel/")
+
+    def test_repo_root_workspace_strips_nothing(self):
+        # workspace_root is the repo root -> keys already repo-root-relative.
+        d = {"repo": {"workspace_root": "/tmp/abc/ck"}}
+        self.assertEqual(aps.depmap_strip_prefix(d), "")
+
+    def test_monorepo_type(self):
+        d = {"repo": {"type": "monorepo", "project": "composablekernel"}}
+        self.assertEqual(aps.depmap_strip_prefix(d), "projects/composablekernel/")
+
+
+class TestAnalyzeAdaptsToRoot(unittest.TestCase):
+    PR = {"number": 7, "title": "t",
+          "files": ["projects/composablekernel/include/ck/gemm.hpp"]}
+    CTESTS = {"test_gemm"}
+
+    def test_repo_root_depmap_matches(self):
+        # repo-root keys carry the projects/ prefix; strip_prefix="" keeps the
+        # full PR path so it matches.
+        f2e = {"projects/composablekernel/include/ck/gemm.hpp": ["bin/test_gemm"]}
+        r = aps.analyze_pr(f2e, self.CTESTS, self.PR, strip_prefix="")
+        self.assertEqual(r["selected"], ["bin/test_gemm"])
+        self.assertEqual(r["flags"]["code_files_not_in_depmap"], [])
+
+    def test_project_root_depmap_matches(self):
+        f2e = {"include/ck/gemm.hpp": ["bin/test_gemm"]}
+        r = aps.analyze_pr(f2e, self.CTESTS, self.PR,
+                           strip_prefix="projects/composablekernel/")
+        self.assertEqual(r["selected"], ["bin/test_gemm"])
+
+    def test_wrong_root_flags_unmapped(self):
+        # repo-root keys but we (wrongly) strip the prefix -> no match, surfaced
+        # as an unmapped code file rather than silently selecting nothing.
+        f2e = {"projects/composablekernel/include/ck/gemm.hpp": ["bin/test_gemm"]}
+        r = aps.analyze_pr(f2e, self.CTESTS, self.PR,
+                           strip_prefix="projects/composablekernel/")
+        self.assertEqual(r["selected"], [])
+        self.assertEqual(r["flags"]["code_files_not_in_depmap"],
+                         ["include/ck/gemm.hpp"])
+
+
 class TestIsCodeFile(unittest.TestCase):
     def test_headers_and_sources_are_code(self):
         for ext in [".hpp", ".h", ".cpp", ".cu", ".hip", ".inc", ".tpp"]:

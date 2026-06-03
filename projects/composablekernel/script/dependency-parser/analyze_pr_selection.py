@@ -72,13 +72,44 @@ def is_code_file(path):
     return os.path.splitext(path)[1].lower() in CODE_EXT
 
 
-def analyze_pr(f2e, ctest_tests, pr):
-    """Return the analysis dict for one PR dict (number, title, files)."""
+def depmap_strip_prefix(depmap):
+    """Return the 'projects/<project>/' prefix the depmap keys are relative to.
+
+    PR file paths from gh are always repo-root-relative
+    (projects/composablekernel/...), but depmap keys are relative to the
+    workspace-root cmake-parse was given. Production uses the project root, so keys
+    are project-relative (include/ck/...) and we strip the prefix to match; a
+    repo-root depmap keeps the full path, so we strip nothing. Mirrors
+    selective_test_filter.load_depmap so both tools read the same metadata instead
+    of assuming a fixed root.
+    """
+    repo = depmap.get("repo") if isinstance(depmap, dict) else None
+    if not repo:
+        # No metadata: assume the documented project-root convention (keys like
+        # include/ck/...), matching cmake-parse --workspace-root <project>.
+        return PROJ_PREFIX
+    if repo.get("type") == "monorepo" and repo.get("project"):
+        return f"projects/{repo['project']}/"
+    wr = repo.get("workspace_root")
+    if wr is not None:
+        if "/projects/" in wr:
+            return f"projects/{wr.split('/projects/')[1].rstrip('/').split('/')[0]}/"
+        return ""  # workspace_root is the repo root -> keys already repo-root-relative
+    return PROJ_PREFIX
+
+
+def analyze_pr(f2e, ctest_tests, pr, strip_prefix=PROJ_PREFIX):
+    """Return the analysis dict for one PR dict (number, title, files).
+
+    strip_prefix is removed from each repo-root PR path to form the depmap key
+    (empty for a repo-root depmap). Membership in the project is decided by
+    PROJ_PREFIX so the CK/outside split is independent of the depmap's root.
+    """
     raw_files = pr["files"]
     ck_files, outside = [], []
     for f in raw_files:
         if f.startswith(PROJ_PREFIX):
-            ck_files.append(f[len(PROJ_PREFIX):])
+            ck_files.append(f[len(strip_prefix):] if strip_prefix and f.startswith(strip_prefix) else f)
         else:
             outside.append(f)
 
@@ -267,7 +298,9 @@ def main(argv=None):
             return 2
 
     with open(args.depmap) as f:
-        f2e = json.load(f)["file_to_executables"]
+        depmap = json.load(f)
+    f2e = depmap["file_to_executables"]
+    strip_prefix = depmap_strip_prefix(depmap)
     ctest_tests = load_ctest_tests(args.ctest)
 
     if args.output_dir:
@@ -279,7 +312,7 @@ def main(argv=None):
     for kind, ref in prs:
         try:
             pr = load_pr_file(ref) if kind == "file" else fetch_pr(ref, args.repo)
-            result = analyze_pr(f2e, ctest_tests, pr)
+            result = analyze_pr(f2e, ctest_tests, pr, strip_prefix)
         except (RuntimeError, OSError, ValueError, KeyError) as e:
             print(f"Error processing PR {ref}: {e}", file=sys.stderr)
             failed += 1
@@ -290,6 +323,21 @@ def main(argv=None):
             out = os.path.join(args.output_dir, f"pr_{result['pr']}.json")
             with open(out, "w") as f:
                 json.dump(result, f, indent=2)
+
+    # Convention guard: if every code file across the corpus is unmapped, the
+    # depmap root almost certainly disagrees with the PR paths (e.g. a repo-root
+    # depmap whose keys still carry the projects/<project>/ prefix). Fail loudly
+    # instead of silently reporting 0 selections everywhere.
+    n_code = sum(r["n_code_files"] for r in results)
+    n_unmapped = sum(len(r["flags"]["code_files_not_in_depmap"]) for r in results)
+    if n_code > 0 and n_unmapped == n_code:
+        print(
+            f"WARNING: all {n_code} code files across {len(results)} PR(s) are "
+            "absent from the depmap. The depmap's workspace-root likely disagrees "
+            "with the PR paths - regenerate the depmap from the project root, or "
+            "check repo.workspace_root in the depmap.",
+            file=sys.stderr,
+        )
 
     if args.summary and results:
         write_summary(results, args.summary)

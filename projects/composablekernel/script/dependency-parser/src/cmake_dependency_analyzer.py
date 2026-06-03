@@ -529,9 +529,14 @@ class DependencyMapper:
         Returns:
             Normalized (canonical) relative path
         """
-        path = os.path.normpath(path)
-        if self.workspace_root and path.startswith(self.workspace_root):
-            return path[len(self.workspace_root) :]
+        # Emit forward-slash (posix) keys regardless of host OS so they match
+        # git/gh paths and the depmap consumers. os.sep is '/' on Linux (the
+        # supported platform), so this is a no-op there; on Windows it converts
+        # the backslash keys os.path.normpath would otherwise produce.
+        path = os.path.normpath(path).replace(os.sep, "/")
+        wsr = self.workspace_root.replace(os.sep, "/") if self.workspace_root else self.workspace_root
+        if wsr and path.startswith(wsr):
+            return path[len(wsr) :]
         return path
 
     def is_project_file(self, file_path: str) -> bool:
