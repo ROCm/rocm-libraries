@@ -118,7 +118,12 @@ def _dense_from_storage_bytes(
 def _bfloat16_storage_bytes_to_ndarray(
     data_bytes: bytes, tensor_info: TensorInfo
 ) -> np.ndarray:
-    """Decode raw bfloat16 storage bytes into a dense float32 logical ndarray."""
+    """Decode raw bfloat16 storage bytes into a dense float32 logical ndarray.
+
+    NumPy has no native bfloat16 dtype. The uint16 view is only the on-wire
+    storage encoding; validation compares numeric values, so expose decoded
+    bfloat16 values as float32.
+    """
     storage = np.frombuffer(
         data_bytes, dtype=np.uint16, count=tensor_info.storage_elements
     )

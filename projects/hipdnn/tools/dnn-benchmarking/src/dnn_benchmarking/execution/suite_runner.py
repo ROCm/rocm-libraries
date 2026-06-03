@@ -44,6 +44,8 @@ from ..validation.validator import Validator
 
 _BFLOAT16_RTOL = 1e-2
 _BFLOAT16_ATOL = 1e-2
+_HALF_RTOL = 1e-3
+_HALF_ATOL = 1e-3
 _DEFAULT_RTOL = 1e-5
 _DEFAULT_ATOL = 1e-6
 
@@ -66,7 +68,7 @@ def _default_tolerance_for_output(
     if dtype == "bfloat16":
         return _BFLOAT16_RTOL, _BFLOAT16_ATOL
     if dtype == "half":
-        return 1e-3, 1e-3
+        return _HALF_RTOL, _HALF_ATOL
     return _DEFAULT_RTOL, _DEFAULT_ATOL
 
 

@@ -55,6 +55,8 @@ def _torch_dtype_for_tensor(
 
 
 def _numpy_output_for_tensor(tensor: Any, graph_dtype: Optional[str]) -> np.ndarray:
+    # NumPy has no native bfloat16 dtype. Convert BF16 tensors to float32
+    # numeric values rather than returning their uint16 storage encoding.
     if graph_dtype == "bfloat16":
         return tensor.detach().cpu().to(dtype=tensor.float().dtype).numpy()
     return tensor.detach().cpu().numpy()
