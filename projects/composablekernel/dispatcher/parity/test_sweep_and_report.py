@@ -1562,3 +1562,128 @@ class TestCompareReportRollupAndBuildMarkdown:
         md = _build_markdown(df, Path("disp.parquet"), None, None)
         for section in ("By dtype", "By layout", "By pipeline"):
             assert section in md, f"Missing rollup section: {section}"
+
+
+# ── check_identifier_parity helpers ──────────────────────────────────────────
+
+class TestCheckIdentifierParityHelpers:
+    """Unit tests for _bool_field() and _serialize() in check_identifier_parity.py."""
+
+    def test_bool_field_true(self):
+        from check_identifier_parity import _bool_field
+        assert _bool_field(True) == "1"
+
+    def test_bool_field_false(self):
+        from check_identifier_parity import _bool_field
+        assert _bool_field(False) == "0"
+
+    def test_bool_field_truthy_int(self):
+        from check_identifier_parity import _bool_field
+        assert _bool_field(1) == "1"
+
+    def test_bool_field_falsy_int(self):
+        from check_identifier_parity import _bool_field
+        assert _bool_field(0) == "0"
+
+    def test_serialize_produces_key_value_lines(self):
+        """_serialize() must emit 'key=value' lines, one per field."""
+        from check_identifier_parity import _serialize
+        cfg = translate_file(_HERE / "configs" / "single_fp16_rcr.json")[0]
+        text = _serialize(cfg)
+        lines = [ln for ln in text.splitlines() if ln.strip()]
+        assert all("=" in ln for ln in lines), (
+            "every line from _serialize must be 'key=value'"
+        )
+
+    def test_serialize_contains_required_fields(self):
+        """_serialize() must include all fields the C++ oracle reads."""
+        from check_identifier_parity import _serialize
+        cfg = translate_file(_HERE / "configs" / "single_fp16_rcr.json")[0]
+        text = _serialize(cfg)
+        required_keys = {
+            "dtype_a", "dtype_b", "dtype_c", "dtype_acc",
+            "layout_a", "layout_b", "layout_c",
+            "pipeline", "scheduler", "epilogue",
+            "tile_m", "tile_n", "tile_k",
+            "warp_m", "warp_n", "warp_k",
+            "warp_tile_m", "warp_tile_n", "warp_tile_k",
+            "pad_m", "pad_n", "pad_k", "persistent",
+            "split_k", "gfx_arch",
+        }
+        serialized_keys = {ln.split("=")[0] for ln in text.splitlines() if "=" in ln}
+        missing = required_keys - serialized_keys
+        assert not missing, f"_serialize missing fields: {missing}"
+
+    def test_serialize_bools_as_0_or_1(self):
+        """Boolean fields in serialized output must be '0' or '1', not True/False."""
+        from check_identifier_parity import _serialize
+        cfg = translate_file(_HERE / "configs" / "single_fp16_rcr.json")[0]
+        text = _serialize(cfg)
+        bool_keys = {"pad_m", "pad_n", "pad_k", "persistent", "transpose_a",
+                     "transpose_b", "grouped", "structured_sparsity",
+                     "double_buffer", "preshuffle", "transpose_c"}
+        for ln in text.splitlines():
+            if "=" not in ln:
+                continue
+            k, v = ln.split("=", 1)
+            if k in bool_keys:
+                assert v in ("0", "1"), (
+                    f"field {k!r} must serialize as '0' or '1', got {v!r}"
+                )
+
+    def test_serialize_round_trip_key_values(self):
+        """_serialize output parses back to same dtype_a and split_k."""
+        from check_identifier_parity import _serialize
+        cfg = translate_file(_HERE / "configs" / "single_fp16_rcr.json")[0]
+        text = _serialize(cfg)
+        pairs = dict(ln.split("=", 1) for ln in text.splitlines() if "=" in ln)
+        assert pairs["dtype_a"] == cfg["signature"]["dtype_a"]
+        assert pairs["split_k"] == str(cfg["signature"]["split_k"])
+
+
+# ── multi-combo identifier round-trip (T1.2) ─────────────────────────────────
+
+class TestMultiComboIdentifierRoundTrip:
+    """T1.2 gap: Python encode_identifier over all combinations in multi_fp16_rcr_handful.
+
+    The spec requires checking 'a handful of configs'; multi_fp16_rcr_handful.json
+    (192 combinations) is that handful. The C++ oracle check (requiring g++) runs via
+    check_identifier_parity.py CLI; here we verify Python-side properties.
+    """
+
+    def test_multi_combo_config_translates(self):
+        """multi_fp16_rcr_handful.json must translate to ≥10 combinations."""
+        cfgs = translate_file(_HERE / "configs" / "multi_fp16_rcr_handful.json")
+        assert len(cfgs) >= 10, (
+            f"Expected ≥10 combinations, got {len(cfgs)}"
+        )
+
+    def test_all_combinations_have_unique_identifiers(self):
+        """Every translated combination must produce a unique identifier."""
+        from identifier import encode_identifier
+        cfgs = translate_file(_HERE / "configs" / "multi_fp16_rcr_handful.json")
+        ids = [encode_identifier(cfg) for cfg in cfgs]
+        assert len(ids) == len(set(ids)), (
+            f"{len(ids) - len(set(ids))} duplicate identifiers among {len(ids)} combinations"
+        )
+
+    def test_identifier_format_consistent(self):
+        """All identifiers must follow the fp16_rcr_... naming pattern."""
+        from identifier import encode_identifier
+        cfgs = translate_file(_HERE / "configs" / "multi_fp16_rcr_handful.json")
+        for cfg in cfgs:
+            ident = encode_identifier(cfg)
+            assert ident.startswith("fp16_rcr_"), (
+                f"Identifier must start with 'fp16_rcr_'; got: {ident!r}"
+            )
+
+    def test_serialize_values_match_config_for_sample(self):
+        """_serialize() values must match cfg fields for first/middle/last combo."""
+        from check_identifier_parity import _serialize
+        cfgs = translate_file(_HERE / "configs" / "multi_fp16_rcr_handful.json")
+        for cfg in [cfgs[0], cfgs[len(cfgs) // 2], cfgs[-1]]:
+            text = _serialize(cfg)
+            pairs = dict(ln.split("=", 1) for ln in text.splitlines() if "=" in ln)
+            sig = cfg["signature"]
+            assert pairs["dtype_a"] == sig["dtype_a"]
+            assert pairs["split_k"] == str(sig["split_k"])

@@ -1,6 +1,6 @@
 # Porting Decisions — Tile Engine → Dispatcher GEMM
 
-*Branch: `muozturk/dispatcher-te-parity` · Updated: 2026-06-02 (iteration 12)*
+*Branch: `muozturk/dispatcher-te-parity` · Updated: 2026-06-02 (iteration 17)*
 
 This document captures every non-trivial decision made during the Phase 1 + Phase 2 port.
 It is the reference for "why does this config not exist on the dispatcher side?" or
@@ -142,3 +142,5 @@ are used in `check_parity.py` Stage 3 for the formal 2% gate.
 | 6 | ~~`AccDataType=float` hardcoded in codegen for int8~~ | **DONE** 2026-06-02 — `unified_gemm_codegen.py` now calls `get_acc_dtype_ck()`: `int8`→`int32_t`, others→`float` |
 | 7 | ~~fp8 harness: `type_convert` on host gives wrong values without `CK_TILE_USE_CUSTOM_DATA_TYPE`~~ | **DONE** 2026-06-02 — harness skips numerical verification for fp8/bf8 (`kSkipVerifyForFp8`); reports PASSED+timing |
 | 8 | ~~split_k: `drive_codegen.py` rejected `_splitk4` identifier not matching header filename~~ | **DONE** 2026-06-02 — strip `_splitkN` suffix before filename check; split_k is a runtime param, not in header name |
+| 9 | ~~Test coverage gaps for `check_identifier_parity._bool_field`, `_serialize`~~ | **DONE** 2026-06-02 (iteration 17) — `TestCheckIdentifierParityHelpers` (8 tests): bool serialization, required field set, bool fields emit '0'/'1' not Python True/False, round-trip key-value check. |
+| 10 | ~~T1.2 'handful of configs' gap — multi-combo identifier not tested~~ | **DONE** 2026-06-02 (iteration 17) — `TestMultiComboIdentifierRoundTrip` (4 tests) exercises `multi_fp16_rcr_handful.json` (≥10 combinations): translation, uniqueness, format, serialize round-trip. |
