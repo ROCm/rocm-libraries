@@ -544,7 +544,10 @@ as a follow-up.
 The nightly (develop / `RUN_ALL_UNIT_TESTS=true`) does a clean full `ninja check`,
 which leaves the compiler's real `#include` graph in `.ninja_deps`. A non-fatal
 step then measures how well the smart-build depmap *would have* covered that real
-graph — for free, whole-repo, on the actual configuration:
+graph — for free, whole-repo, on the actual configuration. Each arch stage archives
+`coverage_result_<arch>.json` (tagged via `coverage --label`), and a post step
+merges them into `coverage_aggregate.json` (`coverage-aggregate`: union of false
+negatives, worst-case coverages across arches):
 
 ```
 main.py cmake-parse … --workspace-root $WS --output pre_depmap.json   # the prediction
@@ -594,6 +597,18 @@ To reproduce on any full build dir: run the three commands above in it.
 The Code Red targets for this work item are **≥99% run accuracy** (run the tests a
 change needs) and **≥95% skip accuracy** (skip the tests it doesn't). The procedure
 to (re)produce both numbers:
+
+> **Measurement cadence (by design).** Two signals run on **every** build, cheaply
+> and with no full compile: the **reachability guardrail** (`reachability_result.json`)
+> and the **selection-validity smoke/JUnit** (`smoke_result.xml`, always-on as-if).
+> The **coverage oracle runs only on the full / run-all path** (`runAllUnitTests` =
+> develop branch or `RUN_ALL_UNIT_TESTS`) because it needs the real post-build
+> `#include` graph — a full compile. Running it per-PR would require a full build,
+> defeating selective testing, so the run-accuracy number is harvested free from the
+> nightly. So: **PR builds → reachability + smoke; nightly/develop → coverage.** On a
+> multi-arch run-all build each arch writes `coverage_result_<arch>.json` and a post
+> step merges them into `coverage_aggregate.json` (union of FNs, worst-case
+> coverages).
 
 ### Run accuracy (≥99%) — coverage oracle
 
