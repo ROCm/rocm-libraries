@@ -26,6 +26,7 @@
 
 #include "program_options.hpp"
 
+#include "hipblaslt_bench_options.hpp"
 #include "hipblaslt_data.hpp"
 #include "hipblaslt_datatype2string.hpp"
 #include "hipblaslt_parse_data.hpp"
@@ -631,6 +632,17 @@ try
         value<bool>(&arg.dump_matrix)->default_value(false),
         "Dump input and output matrices to a file.")
 
+        ("sm_count_target",
+         value<int32_t>(&hipblaslt_bench_options::sm_count_target())->default_value(0),
+         "Target compute-unit (CU) count for the matmul kernel selection and "
+         "persistent-grid sizing. 0 (default) means use all CUs the device exposes. "
+         "Negative values are rejected by the library.")
+
+        ("dyn_persistent_tile",
+         value<bool>(&hipblaslt_bench_options::dyn_persistent_tile_enabled())->default_value(false),
+         "Request the hipBLASLt dynamic persistent tile (work-stealing StreamK) scheduler "
+         "via the HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT extension attribute.")
+
         ("help,h", "produces this help message")
 
         ("version", "Prints the version number");
@@ -734,6 +746,12 @@ try
     {
         hipblaslt_cerr << "Currently workgroup mapping only supports api_method mix or cpp."
                        << std::endl;
+        return 1;
+    }
+
+    if(hipblaslt_bench_options::sm_count_target() < 0)
+    {
+        hipblaslt_cerr << "sm_count_target must be >= 0 (0 means \"use all CUs\")." << std::endl;
         return 1;
     }
 
