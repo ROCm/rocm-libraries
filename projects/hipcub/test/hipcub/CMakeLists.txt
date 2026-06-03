@@ -211,7 +211,7 @@ ${TEST_TYPE_SLICE_COUNT} test type slice(s) for test target ${TEST_TARGET}")
   endif()
 
   add_hipcub_test_internal(${TEST_NAME} "${SOURCES}" ${TEST_TARGET})
-  target_include_directories("${TEST_TARGET}" PRIVATE "../../test/hipcub")
+  target_include_directories("${TEST_TARGET}" PRIVATE ".")
   # Re-propagate DLLS_COPIED (see comment in add_hipcub_test).
   if(DEFINED DLLS_COPIED)
     set(DLLS_COPIED "${DLLS_COPIED}" PARENT_SCOPE)

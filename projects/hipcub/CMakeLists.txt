@@ -81,6 +81,14 @@ option(BUILD_OFFLOAD_COMPRESS "Build hipCUB with offload compression" ON)
 option(BUILD_COMPUTE_SANITIZER "Build tests with cuda's compute sanitizer enabled" OFF)
 cmake_dependent_option(USE_SYSTEM_LIB "Use installed hipCUB when building tests" OFF BUILD_TEST OFF)
 
+# Fetch a legacy implementation of hipCUB and use that instead. This option
+# should REALLY not be used and must be removed as soon as possible.
+option(
+  HIPCUB_SWAP_TO_LEGACY_AND_IGNORE_PROJECT_VERSIONING
+  "Swap to a legacy implementation of hipCUB. This should only be used as a last-resort. This option will be removed without warning. Using this option changes behavior that is not reflected by the version number."
+  OFF
+)
+
 # Check and test cuda compiler, defines 'CMAKE_HIP_COMPILER'
 check_language(HIP)
 cmake_dependent_option(USE_HIPCXX "Use CMake HIP language support" OFF CMAKE_HIP_COMPILER OFF)
@@ -192,7 +200,7 @@ endif()
 include(CheckCXXCompilerFlag)
 
 if(BUILD_OFFLOAD_COMPRESS)
-  # We need to pass '-x hip' since check_cxx_compiler_flag assumes c++ and not HIP. 
+  # We need to pass '-x hip' since check_cxx_compiler_flag assumes c++ and not HIP.
   check_cxx_compiler_flag("--offload-compress -x hip" CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
   if(CXX_COMPILER_SUPPORTS_OFFLOAD_COMPRESS)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} --offload-compress")
@@ -202,7 +210,38 @@ if(BUILD_OFFLOAD_COMPRESS)
 endif()
 
 # hipCUB library
-add_subdirectory(hipcub)
+
+if(HIPCUB_SWAP_TO_LEGACY_AND_IGNORE_PROJECT_VERSIONING)
+  message(WARNING "Do rely on HIPCUB_SWAP_TO_LEGACY_AND_IGNORE_PROJECT_VERSIONING! It will be removed without warning!")
+
+  # 'GIT_PATH' is set by including 'cmake/Depedencies.cmake'.
+  if(NOT DEFINED GIT_PATH)
+    message(FATAL_ERROR "Git could not be found on the system!")
+  endif()
+
+  set(HIPCUB_LEGACY_REPO_DIR "${CMAKE_CURRENT_BINARY_DIR}/hipcub-legacy-src")
+  set(HIPCUB_LEGACY_TAG "therock-7.13")
+
+  find_path(FOUND_HIPCUB_LEGACY NAMES "." PATHS "${CMAKE_CURRENT_BINARY_DIR}/hipcub-legacy-src" NO_CACHE NO_DEFAULT_PATH)
+  if(${FOUND_HIPCUB_LEGACY} STREQUAL "FOUND_HIPCUB_LEGACY-NOTFOUND")
+    # If not found, use a sparse checkout to download it.
+    execute_process(COMMAND ${GIT_PATH} clone --branch ${HIPCUB_LEGACY_TAG} --no-checkout --depth=1 --filter=tree:0 https://github.com/ROCm/rocm-libraries.git "${HIPCUB_LEGACY_REPO_DIR}")
+    execute_process(COMMAND ${GIT_PATH} sparse-checkout init --cone
+                    WORKING_DIRECTORY "${HIPCUB_LEGACY_REPO_DIR}")
+    execute_process(COMMAND ${GIT_PATH} sparse-checkout set "projects/hipcub"
+                    WORKING_DIRECTORY "${HIPCUB_LEGACY_REPO_DIR}")
+    execute_process(COMMAND ${GIT_PATH} checkout ${HIPCUB_LEGACY_TAG}
+                    WORKING_DIRECTORY "${HIPCUB_LEGACY_REPO_DIR}")
+  endif()
+  set(HIPCUB_LEGACY_DIR "${HIPCUB_LEGACY_REPO_DIR}/projects/hipcub")
+
+  set(CMAKE_CURRENT_SOURCE_DIR_OLD ${CMAKE_CURRENT_SOURCE_DIR})
+  set(CMAKE_CURRENT_SOURCE_DIR ${HIPCUB_LEGACY_DIR})
+  add_subdirectory(${HIPCUB_LEGACY_DIR}/hipcub)
+  set(CMAKE_CURRENT_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR_OLD})
+else()
+  add_subdirectory(hipcub)
+endif()
 
 if(BUILD_CODE_COVERAGE)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O0 -fprofile-instr-generate -fcoverage-mapping" )
@@ -234,16 +273,20 @@ if(BUILD_TEST)
 
   enable_testing()
   rocm_package_setup_client_component(tests)
-  add_subdirectory(test)
+  if(HIPCUB_SWAP_TO_LEGACY_AND_IGNORE_PROJECT_VERSIONING)
+    add_subdirectory(${HIPCUB_LEGACY_DIR}/test)
+  else()
+    add_subdirectory(test)
+  endif()
 endif()
 
 # Examples
-if(BUILD_EXAMPLE)
+if(BUILD_EXAMPLE AND NOT HIPCUB_SWAP_TO_LEGACY_AND_IGNORE_PROJECT_VERSIONING)
   add_subdirectory(examples)
 endif()
 
 # Benchmarks
-if(BUILD_BENCHMARK AND NOT ONLY_INSTALL)
+if(BUILD_BENCHMARK AND NOT ONLY_INSTALL AND NOT HIPCUB_SWAP_TO_LEGACY_AND_IGNORE_PROJECT_VERSIONING)
   rocm_package_setup_client_component(benchmarks)
   add_subdirectory(benchmark)
 endif()
