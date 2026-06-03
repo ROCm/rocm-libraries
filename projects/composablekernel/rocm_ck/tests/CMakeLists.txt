@@ -91,6 +91,11 @@ add_custom_target(check-rocm-ck
     COMMENT "Running all rocm_ck tests...")
 
 # ---------------------------------------------------------------------------
+# Correctness tests (CPU reference validation + GPU kernel tests)
+# ---------------------------------------------------------------------------
+add_subdirectory(correctness)
+
+# ---------------------------------------------------------------------------
 # Compile-fail tests (expected failures)
 # ---------------------------------------------------------------------------
 add_subdirectory(compile_fail)
