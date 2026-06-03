@@ -1,0 +1,24 @@
+# BEFORE coverage — existing suite only, no characterization tests for
+# Tensile/SolutionStructs/Naming.py yet (captured before the new Naming/ test
+# files were collected; total = 1672 passed, unchanged from the post-
+# ProblemType baseline).
+#
+# NOTE: `--cov=Tensile/SolutionStructs/Naming` (path-prefix) fails to match a
+# single .py file. Used the documented fallback `--cov=Tensile` and grepped the
+# SolutionStructs/Naming.py row.
+#
+# Command:
+#   pytest -m unit --cov=Tensile --cov-config=pyproject.toml \
+#     --cov-report=term-missing Tensile/Tests/unit
+#
+# Naming has no dedicated unit test; it is reached only indirectly. The missing
+# lines are the abbrev type-branches, the _getName option branches, and the
+# shorten/file-base helpers — exactly what this suite targets.
+
+Name                                                      Stmts   Miss Branch BrPart   Cover   Missing
+Tensile/SolutionStructs/Naming.py                           120     21     60     15  75.56%   76, 77->79, 116-125, 135, 138-141, 147, 155, 160->171, 175, 177->182, 186, 189, 194->197, 211, 224
+
+1672 passed, 201 skipped
+
+# Line coverage = (Stmts - Miss) / Stmts = (120 - 21) / 120 = 82.50% line
+# Blended (line+branch, the report's Cover column)            = 75.56%
