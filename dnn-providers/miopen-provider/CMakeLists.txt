@@ -230,20 +230,19 @@ if(NOT WIN32)
 endif()
 
 target_compile_options(miopen_plugin PRIVATE ${MIOPENPROVIDER_WARNING_COMPILE_OPTIONS})
+
 # INSTALL_RPATH applies to the installed plugin only (plain `cmake --install`
 # to ${ROCM_PATH}). It is NOT used by TheRock, which overwrites INSTALL_RPATH
-# with $ORIGIN-relative paths via its global post-subproject hook. Do not set
-# BUILD_WITH_INSTALL_RPATH: that would stamp the install RPATH onto the
-# build-tree .so, causing it to resolve libMIOpen against ${ROCM_PATH}/lib
-# instead of the in-tree build, and would also defeat TheRock's BUILD_RPATH.
+# with $ORIGIN-relative paths via its global post-subproject hook.
 set_target_properties(
     miopen_plugin
     PROPERTIES CXX_VISIBILITY_PRESET hidden
                LIBRARY_OUTPUT_DIRECTORY "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}"
                RUNTIME_OUTPUT_DIRECTORY "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}"
                ARCHIVE_OUTPUT_DIRECTORY "${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}"
-               INSTALL_RPATH "${ROCM_PATH}/lib"
+               INSTALL_RPATH "\$ORIGIN/../..;${ROCM_PATH}/lib"
                INSTALL_RPATH_USE_LINK_PATH TRUE
+               BUILD_WITH_INSTALL_RPATH TRUE
 )
 
 # Set RPATH origin for TheRock integration. The plugin is installed to
