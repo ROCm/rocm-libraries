@@ -26,6 +26,7 @@ for _var, _default in _LOCAL_CACHE_DEFAULTS.items():
 
 from ..common.exceptions import GraphLoadError
 from ..reporting.reporter import Reporter
+from .config_file import apply_config_file
 from .internal_profiling import run_internal_profiling
 from .parser import create_parser
 from .pytorch_runner_cli import run_pytorch_cli
@@ -59,9 +60,12 @@ def _resolve_graphs(args, reporter: Reporter):
 
 def main() -> int:
     """CLI entry point."""
-    parser = create_parser()
+    parser = create_parser(suppress_defaults=True)
     args = parser.parse_args()
-    reporter = Reporter()
+    try:
+        apply_config_file(args)
+    except ValueError as e:
+        parser.error(str(e))
 
     # Backend-specific startup is the authoritative GPU availability check:
     # PyTorch mode requires GPU-enabled torch, while hipDNN mode creates a real
@@ -70,6 +74,9 @@ def main() -> int:
     # and can be absent even when execution is valid.
     if getattr(args, "internal_profiling_run", False):
         return run_internal_profiling(args)
+    if not args.graph:
+        parser.error("--graph is required unless --config provides graphs")
+    reporter = Reporter()
 
     tmpdirs, resolved_files, tarball_source = _resolve_graphs(args, reporter)
     if resolved_files is None:

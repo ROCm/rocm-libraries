@@ -12,6 +12,39 @@ import pytest
 from dnn_benchmarking.execution.timing import GpuTimerInterface
 
 
+def pytest_addoption(parser):
+    parser.addoption(
+        "--profiling-strict",
+        action="store_true",
+        default=False,
+        help=(
+            "run profiling_strict tests that require profiler subprocesses "
+            "to produce real artifacts, not just error/skip diagnostics"
+        ),
+    )
+    parser.addoption(
+        "--dnn-plugin-paths",
+        action="store",
+        default=None,
+        help=(
+            "Comma-separated hipDNN engine plugin directories for GPU tests. "
+            "Each directory must exist and contain at least one .so file."
+        ),
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    if config.getoption("--profiling-strict"):
+        return
+
+    skip_strict = pytest.mark.skip(
+        reason="profiling_strict tests require --profiling-strict"
+    )
+    for item in items:
+        if "profiling_strict" in item.keywords:
+            item.add_marker(skip_strict)
+
+
 class DummyTorchTimer(GpuTimerInterface):
     """Minimal timer implementation for factory tests.
 
@@ -31,19 +64,6 @@ class DummyTorchTimer(GpuTimerInterface):
 
     def elapsed_ms(self) -> float:
         return 0.0
-
-
-def pytest_addoption(parser):
-    """Add dnn-benchmarking test options."""
-    parser.addoption(
-        "--dnn-plugin-paths",
-        action="store",
-        default=None,
-        help=(
-            "Comma-separated hipDNN engine plugin directories for GPU tests. "
-            "Each directory must exist and contain at least one .so file."
-        ),
-    )
 
 
 @pytest.fixture

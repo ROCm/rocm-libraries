@@ -4,6 +4,7 @@
 """Unit tests for suite CLI argument parsing and run_suite() workflow."""
 
 import json
+import importlib
 import os
 import sys
 import tempfile
@@ -24,6 +25,8 @@ from dnn_benchmarking.reporting.suite_results import (
     SuiteMetadata,
     SuiteResult,
 )
+
+MAIN_MODULE = importlib.import_module("dnn_benchmarking.cli.main")
 
 
 def _mock_hipdnn():
@@ -747,9 +750,7 @@ class TestBackendEngineRouting:
         p.write_text(json.dumps({"name": "g", "nodes": [], "tensors": []}))
         return p
 
-    def test_engine_list_with_pytorch_backend_rejected(
-        self
-    ) -> None:
+    def test_engine_list_with_pytorch_backend_rejected(self) -> None:
         from dnn_benchmarking.cli.main import main
 
         with tempfile.TemporaryDirectory() as tmpdir:
