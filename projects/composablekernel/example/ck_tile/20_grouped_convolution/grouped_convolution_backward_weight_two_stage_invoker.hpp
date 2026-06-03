@@ -66,8 +66,8 @@ struct GroupedConvolutionBackwardWeightTwoStageInvoker
             ConvConfig::NumWaveGroups,
             GroupedConvTraitsType::FixedGemmParams::Preshuffle,
             GroupedConvTraitsType::FixedGemmParams::LDSVectorSize,
-            DataCachePrefetchKind::None,
-            DataCachePrefetchKind::None,
+            ck_tile::DataCachePrefetchKind::None,
+            ck_tile::DataCachePrefetchKind::None,
             LargeTensors>;
 
         constexpr auto scheduler = ConvConfig::Scheduler;

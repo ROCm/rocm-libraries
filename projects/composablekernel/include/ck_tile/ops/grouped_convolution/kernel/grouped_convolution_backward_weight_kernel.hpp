@@ -477,7 +477,7 @@ struct GroupedConvolutionBackwardWeightKernel
     using DsDataType  = remove_cvref_t<typename EpiloguePipeline::DsDataType>;
     using WeiDataType = remove_cvref_t<typename EpiloguePipeline::ODataType>;
 
-    static constexpr bool LargeTensors      = GemmPipeline::LargeTensors;
+    static constexpr bool LargeTensors        = GemmPipeline::LargeTensors;
     static constexpr bool IsSplitKSupported   = true;
     static constexpr bool IsStreamK           = is_streamk_partitioner<TilePartitioner>::value;
     static constexpr bool IsComputeV6Pipeline = is_compute_v6_pipeline<GemmPipeline>::value;
