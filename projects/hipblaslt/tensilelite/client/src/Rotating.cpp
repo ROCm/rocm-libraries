@@ -28,7 +28,6 @@
 
 #include <hip/hip_runtime.h>
 #include <iostream>
-#include <math.h>
 
 namespace TensileLite
 {
@@ -53,7 +52,7 @@ namespace TensileLite
         size_t maxNumRotate = 0;
         for (auto& unit : m_rotatingInfo)
         {
-            size_t num = std::ceil((float)rotatingSize / unit.totalSize);
+            size_t num = rotatingCeilDivide(rotatingSize, unit.totalSize);
             unit.rotatingNum = num;
             maxNumRotate = std::max(maxNumRotate, num);
         }
@@ -133,7 +132,7 @@ namespace TensileLite
         }
     }
 
-    std::vector<std::vector<RotatingMemoryUnit>> RotatingMemory::getRotatingMemory() const
+    const std::vector<std::vector<RotatingMemoryUnit>>& RotatingMemory::getRotatingMemory() const
     {
         return m_rotatingMemory;
     }

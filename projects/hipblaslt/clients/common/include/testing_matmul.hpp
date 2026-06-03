@@ -1395,7 +1395,7 @@ void testing_matmul_with_bias(const Arguments& arg,
 
     bool    do_grouped_gemm = arg.grouped_gemm > 0;
     int32_t gemm_count      = std::max(1, arg.grouped_gemm);
-    int64_t rotating        = arg.rotating * 1024 * 1024;
+    int64_t rotating        = static_cast<int64_t>(arg.rotating) * 1024 * 1024;
 
     std::vector<int64_t> M(gemm_count), N(gemm_count), K(gemm_count), lda(gemm_count),
         ldb(gemm_count), ldc(gemm_count), ldd(gemm_count), lde(gemm_count);
@@ -1585,8 +1585,13 @@ void testing_matmul_with_bias(const Arguments& arg,
     gpu_mem_gbytes = static_cast<double>(totalRotatingSizeNeeded) / (1024 * 1024 * 1024);
 
     // Calculating block count
-    int32_t max_iters   = max(arg.cold_iters, arg.iters);
-    int32_t block_count = max(1, min(max_iters, ceil((float)rotating / totalRotatingSizeNeeded)));
+    int32_t max_iters = max(arg.cold_iters, arg.iters);
+    if(totalRotatingSizeNeeded <= 0)
+        throw std::runtime_error("Cannot calculate rotating block count for zero-sized inputs");
+    int64_t requested_block_count
+        = rotating == 0 ? 0 : 1 + (rotating - 1) / totalRotatingSizeNeeded;
+    int32_t block_count = static_cast<int32_t>(
+        std::max<int64_t>(1, std::min<int64_t>(max_iters, requested_block_count)));
     if(rotating > 0)
     {
         hipblaslt_cout << "Rotating buffer " << rotating / (1024 * 1024) << " MiB. "
@@ -3922,22 +3927,17 @@ void testing_matmul_with_bias(const Arguments& arg,
         int number_hot_calls = arg.iters;
         if(number_hot_calls <= 0)
             throw std::runtime_error("hipblaslt-bench timing requires iters > 0");
-        // Default to 10 windows to mirror tensilelite-client's SyncsPerBenchmark
-        // shape in Formocast runs. Set HIPBLASLT_BENCH_TIMING_WINDOWS=1 to keep
-        // the legacy single-window hipblaslt-bench timing behavior.
-        int timingWindows = getEnvNonNegativeInt("HIPBLASLT_BENCH_TIMING_WINDOWS", 10);
-        if(timingWindows > 1)
-        {
-            if(!arg.use_gpu_timer)
-                throw std::runtime_error(
-                    "HIPBLASLT_BENCH_TIMING_WINDOWS requires --use_gpu_timer");
-            if(do_grouped_gemm || !arg.use_ext)
-                throw std::runtime_error(
-                    "HIPBLASLT_BENCH_TIMING_WINDOWS supports non-grouped extension GEMM only");
-            if(number_hot_calls % timingWindows != 0)
-                throw std::runtime_error(
-                    "HIPBLASLT_BENCH_TIMING_WINDOWS requires iters to be divisible by the window count");
-        }
+        // Match tensilelite-client's EnqueuesPerSync hot-window shape when the
+        // extension API can pass timing events directly into each run.
+        const int benchEnqueuesPerSync = getEnvNonNegativeInt("HIPBLASLT_BENCH_EnqueuesPerSync", 5);
+        if(benchEnqueuesPerSync <= 0)
+            throw std::runtime_error("HIPBLASLT_BENCH_EnqueuesPerSync requires a positive value");
+        const bool useBenchTimingWindows = arg.use_gpu_timer && arg.use_ext && !do_grouped_gemm
+                                           && number_hot_calls > benchEnqueuesPerSync;
+        const int timingWindows = useBenchTimingWindows
+                                      ? (number_hot_calls + benchEnqueuesPerSync - 1)
+                                            / benchEnqueuesPerSync
+                                      : 1;
 
         const bool measure_warmup_for_skip = arg.skip_slow_solution_ratio;
         const int warmup_timing_start
@@ -4051,14 +4051,16 @@ void testing_matmul_with_bias(const Arguments& arg,
                     {
                         std::vector<double> hotWindowSamples;
                         hotWindowSamples.reserve(timingWindows);
-                        const int enqueuesPerWindow = number_hot_calls / timingWindows;
                         for(int window = 0; window < timingWindows; window++)
                         {
-                            for(int j = 0; j < enqueuesPerWindow; j++)
+                            const int firstEnqueue = window * benchEnqueuesPerSync;
+                            const int enqueuesInWindow
+                                = std::min(benchEnqueuesPerSync, number_hot_calls - firstEnqueue);
+                            for(int j = 0; j < enqueuesInWindow; j++)
                             {
-                                int  i                  = window * enqueuesPerWindow + j;
+                                int  i                  = firstEnqueue + j;
                                 bool isFirstInWindow    = j == 0;
-                                bool isLastInWindow     = j + 1 == enqueuesPerWindow;
+                                bool isLastInWindow     = j + 1 == enqueuesInWindow;
                                 hipEvent_t startEvent   = isFirstInWindow ? event_gpu_time_start : nullptr;
                                 hipEvent_t stopEvent    = (isLastInWindow && !arg.flush)
                                                               ? event_gpu_time_end
@@ -4079,7 +4081,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                             CHECK_HIP_ERROR(hipEventElapsedTime(
                                 &windowMs, event_gpu_time_start, event_gpu_time_end));
                             const double rawSampleUs
-                                = (static_cast<double>(windowMs) * 1000.0) / enqueuesPerWindow;
+                                = (static_cast<double>(windowMs) * 1000.0) / enqueuesInWindow;
                             hotWindowSamples.push_back(rawSampleUs);
                         }
 
@@ -4095,9 +4097,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                         rawTimingSamples << ']';
                         rawTimingSamplesLine = rawTimingSamples.str();
 
-                        gpu_time_used = TensileLite::ModifiedZ::removeOutliersAndGetMean(
-                                            hotWindowSamples, 2.0)
-                                        * number_hot_calls;
+                        const auto rawSampleUs = TensileLite::ModifiedZ::removeOutliersAndGetMean(
+                            hotWindowSamples, 2.0);
+                        gpu_time_used = rawSampleUs * number_hot_calls;
                     }
                     else
                     {
@@ -4225,7 +4227,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 }
                 else if(arg.use_ext && arg.use_gpu_timer)
                 {
-                    // Already measured per-window above for HIPBLASLT_BENCH_TIMING_WINDOWS.
+                    // Already measured per-window above using HIPBLASLT_BENCH_EnqueuesPerSync.
                 }
                 else
                 {

@@ -278,6 +278,7 @@ namespace TensileLite
                 ("skip-slow-solution-ratio", po::value<float>()->default_value(0.0), "ratio to skip slow solution during warm-up stage")
                 ("min-flops-per-sync",       po::value<size_t>()->default_value(0), "Minimum number of flops per sync to increase stability for small problems.")
                 ("use-gpu-timer",            po::value<bool>()->default_value(true), "Use GPU timer")
+                ("precise-kernel-time",      po::value<bool>()->default_value(false), "Use HIP kernel start/stop timestamps for GPU timing.")
                 ("sleep-percent",            po::value<int>()->default_value(0), "Sleep percentage")
                 ("hardware-monitor",         po::value<bool>()->default_value(true), "Use hardware monitor.")
 
@@ -530,6 +531,7 @@ namespace TensileLite
             DUMP_OPT("skip-slow-solution-ratio", float);
             DUMP_OPT("min-flops-per-sync", size_t);
             DUMP_OPT("use-gpu-timer", bool);
+            DUMP_OPT("precise-kernel-time", bool);
             DUMP_OPT("sleep-percent", int);
             DUMP_OPT("hardware-monitor", bool);
             DUMP_OPT("perf-l2-read-hits", double);
@@ -970,6 +972,7 @@ int main(int argc, const char* argv[])
     int         firstSolutionIdx = args["solution-start-idx"].as<int>();
     int         numSolutions     = args["num-solutions"].as<int>();
     bool        gpuTimer         = args["use-gpu-timer"].as<bool>();
+    bool        preciseKernelTime = args["precise-kernel-time"].as<bool>();
     bool        runKernels       = !args["selection-only"].as<bool>();
     bool        exitOnError      = args["exit-on-error"].as<bool>();
     bool        groupedGemm      = args["grouped-gemm"].as<bool>();
@@ -1184,7 +1187,7 @@ int main(int argc, const char* argv[])
                                                                             stream,
                                                                             warmupStartEvents[0],
                                                                             warmupStopEvents[0],
-                                                                            true));
+                                                                            preciseKernelTime));
                                         for(int i = 1; i < warmupInvocations; i++)
                                         {
                                             size_t kIdx = i % kernels.size();
@@ -1192,7 +1195,7 @@ int main(int argc, const char* argv[])
                                                                                 stream,
                                                                                 warmupStartEvents[i],
                                                                                 warmupStopEvents[i],
-                                                                                true));
+                                                                                preciseKernelTime));
                                         }
                                     }
 
@@ -1217,13 +1220,13 @@ int main(int argc, const char* argv[])
                                                                     stream,
                                                                     ProfilerStartEvents[0],
                                                                     ProfilerStopEvents[0],
-                                                                    true));
+                                                                    preciseKernelTime));
                                 listeners.postProfiler();
 #endif
 
                                 size_t syncs      = listeners.numSyncs();
                                 size_t enq        = listeners.numEnqueuesPerSync();
-                                size_t eventCount = gpuTimer ? kernelInvocationCount : 0;
+                                size_t eventCount = gpuTimer ? 1 : 0;
 
                                 {
                                     ScopedTimer timer("benchmark_runs");
@@ -1231,7 +1234,7 @@ int main(int argc, const char* argv[])
                                     if(enq)
                                         for(int i = 0; i < syncs; i++)
                                         {
-                                            size_t timedInvocations = gpuTimer ? enq : 1;
+                                            size_t timedInvocations = 1;
                                             TimingEvents startEvents(timedInvocations, eventCount);
                                             TimingEvents stopEvents(timedInvocations, eventCount);
 
@@ -1243,11 +1246,17 @@ int main(int argc, const char* argv[])
                                                     = (static_cast<size_t>(i) * enq + j) % kernels.size();
                                                 if(gpuTimer)
                                                 {
-                                                    HIP_CHECK_EXC(adapter.launchKernels(kernels[kIdx],
-                                                                                        stream,
-                                                                                        startEvents[j],
-                                                                                        stopEvents[j],
-                                                                                        true));
+                                                    hipEvent_t startEvent
+                                                        = j == 0 ? startEvents[0][0] : nullptr;
+                                                    hipEvent_t stopEvent
+                                                        = j + 1 == enq ? stopEvents[0][0] : nullptr;
+                                                    HIP_CHECK_EXC(adapter.launchKernels(
+                                                        kernels[kIdx],
+                                                        stream,
+                                                        startEvent,
+                                                        stopEvent,
+                                                        false,
+                                                        preciseKernelTime));
                                                 }
                                                 else
                                                 {

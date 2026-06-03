@@ -26,10 +26,18 @@
 
 #pragma once
 #include <memory>
+#include <stdexcept>
 #include <vector>
 
 namespace TensileLite
 {
+    inline size_t rotatingCeilDivide(size_t numerator, size_t denominator)
+    {
+        if(denominator == 0)
+            throw std::runtime_error("Cannot calculate rotating buffer count for zero-sized inputs");
+        return numerator == 0 ? 0 : 1 + (numerator - 1) / denominator;
+    }
+
     struct RotatingUnitInfo
     {
         std::vector<size_t> sizes;
@@ -50,7 +58,7 @@ namespace TensileLite
         ~RotatingMemory() {}
         void addRotatingSize(std::vector<size_t> sizes);
         void createRotatingMemory(int32_t mode, size_t rotatingSize);
-        std::vector<std::vector<RotatingMemoryUnit>> getRotatingMemory() const;
+        const std::vector<std::vector<RotatingMemoryUnit>>& getRotatingMemory() const;
         std::shared_ptr<void> getData() const;
         size_t getDataSize() const;
         size_t getDataLargestUnitSize() const;
