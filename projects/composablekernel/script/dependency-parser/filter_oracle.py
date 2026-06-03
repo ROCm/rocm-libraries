@@ -313,21 +313,67 @@ def _load_f2e(path):
     return data.get("file_to_executables", data)
 
 
+_MONOREPO_PREFIX = re.compile(r"^projects/[^/]+/")
+
+
+def _canonical_key(key):
+    """Drop a leading monorepo 'projects/<project>/' segment.
+
+    cmake-parse keys are relative to its --workspace-root (repo root in CI ->
+    'projects/composablekernel/...'), while enhanced_ninja_parser always truncates
+    post-build keys to the project root ('include/...'). Canonicalizing both sides
+    to the project root makes the pre/post diff valid regardless of the root each
+    was generated with.
+    """
+    return _MONOREPO_PREFIX.sub("", key)
+
+
+def _is_source_key(key):
+    """True for project source a PR can edit.
+
+    Excludes build outputs - generated sources and vendored deps (gtest, under
+    build/_deps) live under 'build/'; system headers are absolute ('/usr', '/opt').
+    The pre-build depmap never tracks those (clang -MM drops -isystem includes and
+    is_project_file filters system paths), so counting them as misses would
+    understate coverage. Generated-source changes are covered by the codegen
+    backstop (ci_safety_check), not the depmap.
+    """
+    return not key.startswith("build/") and not key.startswith("/")
+
+
+def _canon_f2e(f2e, source_only=False):
+    """Canonicalize keys (and optionally drop non-source keys), merging collisions."""
+    out = {}
+    for k, v in f2e.items():
+        ck = _canonical_key(k)
+        if source_only and not _is_source_key(ck):
+            continue
+        out[ck] = sorted(set(out[ck]) | set(v)) if ck in out else list(v)
+    return out
+
+
 def _run_coverage(args):
     for path, label in [(args.pre, "--pre"), (args.post, "--post")]:
         if not os.path.exists(path):
             print(f"Error: missing required input ({label}): {path}", file=sys.stderr)
             return 2
-    pre = _load_f2e(args.pre)
-    post = _load_f2e(args.post)
+    # Canonicalize both sides to the project root so a repo-root pre depmap and a
+    # project-root post depmap compare correctly. Scope post to PR-editable source
+    # unless --include-nonsource is given.
+    source_only = not args.include_nonsource
+    pre = _canon_f2e(_load_f2e(args.pre))
+    post = _canon_f2e(_load_f2e(args.post), source_only=source_only)
     ctest_tests = load_ctest_tests(args.ctest) if args.ctest else None
 
     result = compute_coverage(pre, post, ctest_tests)
+    result["scope"] = "source" if source_only else "all"
     if args.output:
         with open(args.output, "w") as f:
             json.dump(result, f, indent=2)
 
     print("=== filter coverage (pre-build depmap vs post-build ground truth) ===")
+    print(f"scope:            {result['scope']} (PR-editable source"
+          f"{'' if source_only else ' + build/system'})")
     print(f"files (post):     {result['n_files']}")
     print(f"edges (post):     {result['n_edges_post']}")
     print(f"covered:          {result['n_edges_covered']}")
@@ -387,15 +433,19 @@ def main():
         "coverage",
         help="Diff a pre-build depmap vs the post-build ground truth (no build): "
         "report file->test edges the real build proves but the depmap lacks (FNs)",
-        epilog="Caveat: --pre and --post must be generated with the SAME "
-        "--workspace-root, or path-canonicalization mismatch shows up as spurious "
-        "false negatives.",
+        epilog="Keys are canonicalized to the project root on both sides, so --pre "
+        "and --post may use different --workspace-roots. By default only PR-editable "
+        "source counts (build/ outputs and system headers are excluded); pass "
+        "--include-nonsource for the raw diff.",
     )
     cov.add_argument("--pre", required=True,
-                     help="pre-build depmap JSON (cmake-parse output; same --workspace-root as --post)")
+                     help="pre-build depmap JSON (cmake-parse output)")
     cov.add_argument("--post", required=True,
-                     help="post-build depmap JSON (main.py parse / ninja -t deps; same --workspace-root as --pre)")
+                     help="post-build depmap JSON (main.py parse / ninja -t deps)")
     cov.add_argument("--ctest", help="ctest -N output (count only registered-test edges)")
+    cov.add_argument("--include-nonsource", action="store_true",
+                     help="also count build/ outputs and system headers the depmap "
+                     "never tracks (default: PR-editable source only)")
     cov.add_argument("--output", help="write coverage result JSON here")
 
     args = p.parse_args()

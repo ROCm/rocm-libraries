@@ -192,5 +192,44 @@ class TestCoverage(unittest.TestCase):
         self.assertEqual(r["coverage"], 0.5)
 
 
+class TestCoverageCanon(unittest.TestCase):
+    def test_canonical_key_strips_monorepo_prefix(self):
+        self.assertEqual(
+            bfo._canonical_key("projects/composablekernel/include/ck/x.hpp"),
+            "include/ck/x.hpp",
+        )
+        # already project-root or build/ keys are untouched
+        self.assertEqual(bfo._canonical_key("include/ck/x.hpp"), "include/ck/x.hpp")
+        self.assertEqual(bfo._canonical_key("build/_deps/gtest/x.h"),
+                         "build/_deps/gtest/x.h")
+
+    def test_is_source_key(self):
+        self.assertTrue(bfo._is_source_key("include/ck/x.hpp"))
+        self.assertTrue(bfo._is_source_key("test/foo/bar.cpp"))
+        self.assertFalse(bfo._is_source_key("build/_deps/gtest/x.h"))
+        self.assertFalse(bfo._is_source_key("build/library/gen/inst.cpp"))
+        self.assertFalse(bfo._is_source_key("/usr/include/c++/vector"))
+
+    def test_canon_f2e_source_only_drops_build_and_system(self):
+        f2e = {
+            "projects/composablekernel/include/ck/x.hpp": ["bin/test_a"],
+            "build/_deps/gtest/g.h": ["bin/test_a"],
+            "/usr/include/vector": ["bin/test_a"],
+        }
+        out = bfo._canon_f2e(f2e, source_only=True)
+        self.assertEqual(out, {"include/ck/x.hpp": ["bin/test_a"]})
+
+    def test_compute_coverage_after_canon_aligns_mismatched_roots(self):
+        # pre keyed at repo root, post at project root (the real-world mismatch).
+        pre = {"projects/composablekernel/include/ck/x.hpp": ["bin/test_a"]}
+        post = {"include/ck/x.hpp": ["bin/test_a"]}
+        # Raw diff misses (different keys) ...
+        self.assertEqual(bfo.compute_coverage(pre, post)["coverage"], 0.0)
+        # ... canonicalized, they align.
+        r = bfo.compute_coverage(bfo._canon_f2e(pre), bfo._canon_f2e(post))
+        self.assertEqual(r["coverage"], 1.0)
+        self.assertEqual(r["n_false_negatives"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()
