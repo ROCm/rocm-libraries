@@ -7,11 +7,15 @@
 operator surface, ``ReadWriteTransformDict``, and ``ProjectConfig`` (sections,
 dotted keys, defaults, constraints via the AST ``ExpressionEvaluator``)."""
 
+import ast
 import operator
 
 import pytest
 
-from Tensile.Configuration import Parameter, ProjectConfig, ReadWriteTransformDict
+from Tensile.Configuration import (
+    Parameter, ProjectConfig, ReadWriteTransformDict,
+    CallableParameter, ExpressionEvaluator,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -135,3 +139,69 @@ def test_project_config_constraints_fail():
     cfg.addConstraint("x < 10")
     with pytest.raises(AssertionError):
         cfg.checkConstraints()
+
+
+# --- ExpressionEvaluator + CallableParameter factories ----------------------
+
+def _ev(expr, ctx):
+    r = ExpressionEvaluator().evaluate(ast.parse(expr, mode="exec"), ctx)
+    return r() if callable(r) else r
+
+
+@pytest.mark.parametrize(
+    "expr,ctx,expected",
+    [
+        ("x > 5", {"x": 10}, True),          # Compare / Gt
+        ("x < 5", {"x": 10}, False),         # Compare / Lt
+        ("x + 3", {"x": 4}, 7),              # BinOp / Add
+        ("x * y", {"x": 4, "y": 5}, 20),     # BinOp / Mult
+        ("x and y", {"x": 1, "y": 2}, 2),    # BoolOp / And
+        ("x or y", {"x": 0, "y": 9}, 9),     # BoolOp / Or
+        ("max(x, y)", {"x": 3, "y": 7}, 7),  # Call (2-arg) / max
+        ("min(x, y)", {"x": 3, "y": 7}, 3),  # Call (2-arg) / min
+        ("5", {}, 5),                        # Constant/Num leaf
+        ("'hi'", {}, "hi"),                  # Constant/Str leaf
+        ("x if y > 0 else z", {"x": 1, "y": 1, "z": 2}, 1),   # IfExp (true; test is callable)
+        ("x if y > 0 else z", {"x": 1, "y": -1, "z": 2}, 2),  # IfExp (false)
+    ],
+    ids=["gt", "lt", "add", "mult", "and", "or", "max", "min",
+         "num", "str", "ifexp_t", "ifexp_f"],
+)
+def test_expression_evaluator(expr, ctx, expected):
+    assert _ev(expr, ctx) == expected
+
+
+@pytest.mark.parametrize("expr,ctx,expected",
+                         [("not x", {"x": 0}, True), ("-x", {"x": 5}, -5)],
+                         ids=["not", "usub"])
+def test_expression_evaluator_unary(expr, ctx, expected):
+    assert _ev(expr, ctx) == expected
+
+
+def test_expression_evaluator_name_no_context(capsys):
+    # A name not in context -> prints + returns the name string.
+    r = ExpressionEvaluator().evaluate(ast.parse("undefined_var", mode="exec"), {})
+    assert r == "undefined_var"
+    assert "No context" in capsys.readouterr().out
+
+
+def test_expression_evaluator_assign():
+    ctx = {}
+    ExpressionEvaluator().evaluate(ast.parse("x = 7", mode="exec"), ctx)
+    assert ctx["x"] == 7
+
+
+def test_create_binary_op_custom_function():
+    # op passed as a callable -> the CustomBinaryOp branch.
+    op = CallableParameter.createBinaryOp(3, 4, lambda a, b: a * b + 1)
+    assert op() == 13
+
+
+def test_create_binary_op_bad_func_raises():
+    with pytest.raises(CallableParameter.BadFunc):
+        CallableParameter.createBinaryOp("a", 1, "Add")  # str + int -> TypeError
+
+
+def test_create_unary_op_custom_and_none():
+    assert CallableParameter.createUnaryOp(5, "None")() == 5
+    assert CallableParameter.createUnaryOp(5, lambda v: v + 100)() == 105
