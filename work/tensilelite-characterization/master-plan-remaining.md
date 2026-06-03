@@ -94,11 +94,16 @@ package `__init__`.
 - [x] `TensileCreateLibrary/Run.py` — helper layer pinned (asm codegen out of scope)
 - [x] `LibraryLogic.py` — pure helpers pinned (LogicAnalyzer/generateLogic out of scope)
 
-### Batch F — entry-point CLI scripts (stretch; pure helpers only, document the
-###            argv/fs/subprocess-bound `main()` as resistance)
-- [ ] `TensileMergeLibrary.py` (255, 0%) · `TensileRetuneLibrary.py` (130, 0%)
-- [ ] `TensileUpdateLibrary.py` (97, 0%) · `TensileClientConfig.py` (98, 0%)
-- [ ] `TensileBenchmarkLibraryClient.py` (114, 0%) · `TensileCreateLibrary/__main__.py` (1, 0%)
+### Batch F — entry-point CLI scripts  ✅ DONE (full -m unit = 2466 passed)
+- [x] `TensileMergeLibrary.py` 0% → ~48% (pure helpers; fixSizeInconsistencies dedup bug)
+- [x] `TensileRetuneLibrary.py` 0% → 25% (WorkingPath stack helpers)
+- [x] `TensileBenchmarkLibraryClient.py` 0% → 19% (mean/stddev; median py3 bug)
+- [x] `TensileCreateLibrary/__main__.py` 0% → 100%
+- [x] `TensileLogic/ParseArguments.py` 0% → 100% (discovered)  · `TensileLogic/Run.py` Check/_progress_loop
+- [~] `TensileUpdateLibrary.py` — no cheap pure surface (UpdateLogic needs derived
+      ProblemType/Solution `.state`/`.value` enums); resistance, not tested.
+- [✗] `TensileClientConfig.py` — DEAD module: broken `from .Common import
+      globalParameters` → ImportError, cannot be imported. Skipped (D15).
 
 ### Deferred (documented, not in this plan)
 - `SolutionStructs/Solution.py` slice 3b (derivation config sweep).
@@ -129,3 +134,17 @@ package `__init__`.
     BenchmarkProblems (cache layer) · Tensile (helper layer) ·
     TensileCreateLibrary/Run (helper layer) · LibraryLogic (pure helpers).
     Heavy codegen/analysis bodies documented as resistance per scope.
+- Batch F complete — 5 modules + 2 discovered (TensileLogic/*), full -m unit 2435 → 2466 passed (no regression). Fresh baseline: coverage/master-baseline-2466.txt.
+  - TensileMergeLibrary 0→48 (fixSizeInconsistencies dedup bug) · TensileRetuneLibrary 0→25 ·
+    TensileBenchmarkLibraryClient 0→19 (median py3 bug) · TensileCreateLibrary/__main__ 0→100 ·
+    TensileLogic/ParseArguments 0→100. TensileUpdateLibrary = resistance;
+    TensileClientConfig = dead module (broken import, D15).
+
+## DONE — all realistic modules characterized
+Batches A–F complete. Full -m unit: 1844 → 2466 passed, 201 skipped, no regressions.
+Latent bugs pinned along the way: D12 (BoolOp 3-operand `or`), D14 (skipMI
+formGroups "None"), median() py3 float-index, fixSizeInconsistencies generator-key
+dedup, plus the RegisterPool/Naming/ProblemType findings from earlier goals.
+Documented resistance: asm/codegen (KernelWriter*, Activation emitters,
+BenchmarkProblems/Run/Tensile/LibraryLogic orchestration) per the codegen scope
+exclusion; TensileUpdateLibrary (derived-state); TensileClientConfig (dead).
