@@ -145,10 +145,8 @@ foreach(SOURCE ${PROFILER_OPS})
 endforeach()
 message(VERBOSE "ckProfiler sources: ${PROFILER_SOURCES}")
 
-# Direct conv per-variant instance TUs (always built when builder is enabled,
-# not subject to operator filter since they are support libraries).
 if(SUPPORTED_GPU_TARGETS MATCHES "gfx9")
-  if(CK_EXPERIMENTAL_BUILDER)
+  if(CK_EXPERIMENTAL_BUILDER AND NOT CK_TILE_DISPATCHER)
     list(APPEND PROFILER_SOURCES
         profile_grouped_conv_fwd_direct_nhwgc_fp16_4c.cpp
         profile_grouped_conv_fwd_direct_nhwgc_fp16_16c.cpp

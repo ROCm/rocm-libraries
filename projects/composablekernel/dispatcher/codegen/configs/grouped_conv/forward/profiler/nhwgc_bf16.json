@@ -7171,6 +7171,2682 @@
       "streamk_enabled": false,
       "streamk_reduction_strategy": null,
       "streamk_persistent": false
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 4,
+      "impl": "tile_grouped",
+      "version": "v3",
+      "config": {
+        "waves_c64": 2,
+        "waves_q4": 8,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 309
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 4,
+      "impl": "tile_grouped",
+      "version": "v3",
+      "config": {
+        "waves_c64": 2,
+        "waves_q4": 4,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 310
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 4,
+      "impl": "tile_grouped",
+      "version": "v3",
+      "config": {
+        "waves_c64": 2,
+        "waves_q4": 2,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 311
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 4,
+      "impl": "tile_grouped",
+      "version": "v3",
+      "config": {
+        "waves_c64": 2,
+        "waves_q4": 1,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 312
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 4,
+      "impl": "tile_grouped",
+      "version": "v3",
+      "config": {
+        "waves_c64": 1,
+        "waves_q4": 1,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 313
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 4,
+      "impl": "tile_grouped",
+      "version": "v3",
+      "config": {
+        "waves_c64": 2,
+        "waves_q4": 8,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 314
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 4,
+      "impl": "tile_grouped",
+      "version": "v3",
+      "config": {
+        "waves_c64": 2,
+        "waves_q4": 4,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 315
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 4,
+      "impl": "tile_grouped",
+      "version": "v3",
+      "config": {
+        "waves_c64": 2,
+        "waves_q4": 2,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 316
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 4,
+      "impl": "tile_grouped",
+      "version": "v3",
+      "config": {
+        "waves_c64": 2,
+        "waves_q4": 1,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 317
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 4,
+      "impl": "tile_grouped",
+      "version": "v3",
+      "config": {
+        "waves_c64": 1,
+        "waves_q4": 1,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 318
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 4,
+      "impl": "tile_grouped",
+      "version": "v3",
+      "config": {
+        "waves_c64": 2,
+        "waves_q4": 8,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 319
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 4,
+      "impl": "tile_grouped",
+      "version": "v3",
+      "config": {
+        "waves_c64": 2,
+        "waves_q4": 4,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 320
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 4,
+      "impl": "tile_grouped",
+      "version": "v3",
+      "config": {
+        "waves_c64": 2,
+        "waves_q4": 2,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 321
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 4,
+      "impl": "tile_grouped",
+      "version": "v3",
+      "config": {
+        "waves_c64": 2,
+        "waves_q4": 1,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 322
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 4,
+      "impl": "tile_grouped",
+      "version": "v3",
+      "config": {
+        "waves_c64": 1,
+        "waves_q4": 1,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 323
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 4,
+      "impl": "tile_grouped",
+      "version": "v3",
+      "config": {
+        "waves_c64": 2,
+        "waves_q4": 8,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 324
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 4,
+      "impl": "tile_grouped",
+      "version": "v3",
+      "config": {
+        "waves_c64": 2,
+        "waves_q4": 4,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 325
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 4,
+      "impl": "tile_grouped",
+      "version": "v3",
+      "config": {
+        "waves_c64": 2,
+        "waves_q4": 2,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 326
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 4,
+      "impl": "tile_grouped",
+      "version": "v3",
+      "config": {
+        "waves_c64": 2,
+        "waves_q4": 1,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 327
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 4,
+      "impl": "tile_grouped",
+      "version": "v3",
+      "config": {
+        "waves_c64": 1,
+        "waves_q4": 1,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 328
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 4,
+      "impl": "tile_grouped",
+      "version": "v3",
+      "config": {
+        "waves_c64": 2,
+        "waves_q4": 8,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 329
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 4,
+      "impl": "tile_grouped",
+      "version": "v3",
+      "config": {
+        "waves_c64": 2,
+        "waves_q4": 8,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 330
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 4,
+      "impl": "tile_grouped",
+      "version": "v3",
+      "config": {
+        "waves_c64": 2,
+        "waves_q4": 8,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 2
+      },
+      "id": 331
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 4,
+      "impl": "tile_grouped",
+      "version": "v3",
+      "config": {
+        "waves_c64": 2,
+        "waves_q4": 8,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 1
+      },
+      "id": 332
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 4,
+      "impl": "tile_grouped",
+      "version": "v3",
+      "config": {
+        "waves_c64": 2,
+        "waves_q4": 4,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 2
+      },
+      "id": 333
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 4,
+      "impl": "tile_grouped",
+      "version": "v3",
+      "config": {
+        "waves_c64": 2,
+        "waves_q4": 4,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 1
+      },
+      "id": 334
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 16,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 335
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 8,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 336
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 7,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 337
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 6,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 338
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 5,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 339
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 4,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 340
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 3,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 341
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 2,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 342
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 1,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 343
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 16,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 344
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 8,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 345
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 7,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 346
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 6,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 347
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 5,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 348
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 4,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 349
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 3,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 350
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 2,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 351
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 1,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 352
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 16,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 353
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 8,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 354
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 7,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 355
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 6,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 356
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 5,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 357
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 4,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 358
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 3,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 359
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 2,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 360
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 1,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 361
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 16,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 362
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 8,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 363
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 7,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 364
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 6,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 365
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 5,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 366
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 4,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 367
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 3,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 368
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 2,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 369
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 1,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 370
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 8,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 371
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 8,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 372
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 8,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 4
+      },
+      "id": 373
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 8,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 2
+      },
+      "id": 374
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 8,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 1
+      },
+      "id": 375
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 8,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 1
+      },
+      "id": 376
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 16,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 377
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 8,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 16,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 378
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 16,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 379
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 8,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 380
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 7,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 381
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 6,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 382
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 5,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 383
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 4,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 384
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 3,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 385
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 2,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 386
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 1,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 387
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 16,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 388
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 8,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 389
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 7,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 390
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 6,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 391
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 5,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 392
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 4,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 393
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 3,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 394
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 2,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 395
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 1,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 396
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 16,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 397
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 8,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 398
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 7,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 399
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 6,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 400
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 5,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 401
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 4,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 402
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 3,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 403
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 2,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 404
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 1,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 405
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 16,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 406
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 8,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 407
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 7,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 408
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 6,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 409
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 5,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 410
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 4,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 411
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 3,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 412
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 2,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 413
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 1,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 414
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 8,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 415
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 8,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 416
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 8,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 417
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 8,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 4
+      },
+      "id": 418
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 8,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 2
+      },
+      "id": 419
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 8,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 1
+      },
+      "id": 420
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 16,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 8,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 1
+      },
+      "id": 421
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 16,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 422
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 14,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 423
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 12,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 424
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 10,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 425
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 8,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 426
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 6,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 427
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 4,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 428
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 2,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 429
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 16,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 430
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 14,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 431
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 12,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 432
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 10,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 433
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 8,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 434
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 6,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 435
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 4,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 436
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 2,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 437
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 16,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 438
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 14,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 439
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 12,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 440
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 10,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 441
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 8,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 442
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 6,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 443
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 4,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 444
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 2,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 445
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 16,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 446
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 14,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 447
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 12,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 448
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 10,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 449
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 8,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 450
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 6,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 451
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 4,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 452
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 2,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 453
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 8,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 454
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 8,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 455
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 8,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 16
+      },
+      "id": 456
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 8,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 457
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 8,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 4
+      },
+      "id": 458
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 8,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 2
+      },
+      "id": 459
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 8,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 1
+      },
+      "id": 460
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 8,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 1
+      },
+      "id": 461
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 4,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 462
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_grouped",
+      "version": "v2",
+      "config": {
+        "waves_per_wg": 4,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 463
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_dense",
+      "version": "v3",
+      "config": {
+        "mfma_shape": "M16N16K32",
+        "waves_per_wg": 4,
+        "c_slices_per_wave": 1,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 464
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_dense",
+      "version": "v3",
+      "config": {
+        "mfma_shape": "M16N16K32",
+        "waves_per_wg": 2,
+        "c_slices_per_wave": 1,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 465
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_dense",
+      "version": "v3",
+      "config": {
+        "mfma_shape": "M16N16K32",
+        "waves_per_wg": 4,
+        "c_slices_per_wave": 1,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 466
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_dense",
+      "version": "v3",
+      "config": {
+        "mfma_shape": "M16N16K32",
+        "waves_per_wg": 2,
+        "c_slices_per_wave": 1,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 467
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_dense",
+      "version": "v3",
+      "config": {
+        "mfma_shape": "M16N16K32",
+        "waves_per_wg": 4,
+        "c_slices_per_wave": 1,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 468
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_dense",
+      "version": "v3",
+      "config": {
+        "mfma_shape": "M16N16K32",
+        "waves_per_wg": 2,
+        "c_slices_per_wave": 1,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 469
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_dense",
+      "version": "v3",
+      "config": {
+        "mfma_shape": "M16N16K32",
+        "waves_per_wg": 4,
+        "c_slices_per_wave": 1,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 470
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_dense",
+      "version": "v3",
+      "config": {
+        "mfma_shape": "M16N16K32",
+        "waves_per_wg": 2,
+        "c_slices_per_wave": 1,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 471
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_dense",
+      "version": "v3",
+      "config": {
+        "mfma_shape": "M16N16K32",
+        "waves_per_wg": 4,
+        "c_slices_per_wave": 1,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 472
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_dense",
+      "version": "v3",
+      "config": {
+        "mfma_shape": "M16N16K32",
+        "waves_per_wg": 2,
+        "c_slices_per_wave": 1,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 473
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_dense",
+      "version": "v3",
+      "config": {
+        "mfma_shape": "M16N16K32",
+        "waves_per_wg": 8,
+        "c_slices_per_wave": 1,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 474
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_dense",
+      "version": "v3",
+      "config": {
+        "mfma_shape": "M16N16K32",
+        "waves_per_wg": 8,
+        "c_slices_per_wave": 1,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 475
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_dense",
+      "version": "v3",
+      "config": {
+        "mfma_shape": "M16N16K32",
+        "waves_per_wg": 3,
+        "c_slices_per_wave": 1,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 476
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_dense",
+      "version": "v3",
+      "config": {
+        "mfma_shape": "M16N16K32",
+        "waves_per_wg": 3,
+        "c_slices_per_wave": 1,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 477
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_dense",
+      "version": "v3",
+      "config": {
+        "mfma_shape": "M16N16K32",
+        "waves_per_wg": 5,
+        "c_slices_per_wave": 1,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 478
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_dense",
+      "version": "v3",
+      "config": {
+        "mfma_shape": "M16N16K32",
+        "waves_per_wg": 5,
+        "c_slices_per_wave": 1,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 479
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_dense",
+      "version": "v3",
+      "config": {
+        "mfma_shape": "M16N16K32",
+        "waves_per_wg": 6,
+        "c_slices_per_wave": 1,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 480
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_dense",
+      "version": "v3",
+      "config": {
+        "mfma_shape": "M16N16K32",
+        "waves_per_wg": 6,
+        "c_slices_per_wave": 1,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 481
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_dense",
+      "version": "v3",
+      "config": {
+        "mfma_shape": "M16N16K32",
+        "waves_per_wg": 7,
+        "c_slices_per_wave": 1,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 482
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_dense",
+      "version": "v3",
+      "config": {
+        "mfma_shape": "M16N16K32",
+        "waves_per_wg": 7,
+        "c_slices_per_wave": 1,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 483
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_dense",
+      "version": "v3",
+      "config": {
+        "mfma_shape": "M16N16K32",
+        "waves_per_wg": 8,
+        "c_slices_per_wave": 1,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 484
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_dense",
+      "version": "v3",
+      "config": {
+        "mfma_shape": "M16N16K32",
+        "waves_per_wg": 8,
+        "c_slices_per_wave": 1,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToLdsToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 485
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_dense",
+      "version": "v3",
+      "config": {
+        "mfma_shape": "M16N16K32",
+        "waves_per_wg": 2,
+        "c_slices_per_wave": 2,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 486
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_dense",
+      "version": "v3",
+      "config": {
+        "mfma_shape": "M16N16K32",
+        "waves_per_wg": 2,
+        "c_slices_per_wave": 4,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 487
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_dense",
+      "version": "v3",
+      "config": {
+        "mfma_shape": "M16N16K32",
+        "waves_per_wg": 2,
+        "c_slices_per_wave": 2,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 488
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_dense",
+      "version": "v3",
+      "config": {
+        "mfma_shape": "M16N16K32",
+        "waves_per_wg": 2,
+        "c_slices_per_wave": 2,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 489
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_dense",
+      "version": "v3",
+      "config": {
+        "mfma_shape": "M16N16K32",
+        "waves_per_wg": 4,
+        "c_slices_per_wave": 2,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 490
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_dense",
+      "version": "v3",
+      "config": {
+        "mfma_shape": "M16N16K32",
+        "waves_per_wg": 4,
+        "c_slices_per_wave": 4,
+        "direction": "Fprop",
+        "swizzle_type": "None",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 491
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_dense",
+      "version": "v3",
+      "config": {
+        "mfma_shape": "M16N16K32",
+        "waves_per_wg": 4,
+        "c_slices_per_wave": 2,
+        "direction": "Fprop",
+        "swizzle_type": "CyclicShift",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 492
+    },
+    {
+      "kind": "direct_conv",
+      "channel_family": 32,
+      "impl": "tile_dense",
+      "version": "v3",
+      "config": {
+        "mfma_shape": "M16N16K32",
+        "waves_per_wg": 4,
+        "c_slices_per_wave": 2,
+        "direction": "Fprop",
+        "swizzle_type": "XOR",
+        "epilogue": "RegistersToGlobalMemory",
+        "vector_size": 8
+      },
+      "id": 493
     }
   ]
 }

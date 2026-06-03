@@ -133,6 +133,7 @@ inline void setup_dispatch_context(const void* input_ptr,
     ctx.warmup       = s_conf.cold_niters_;
     ctx.repeat       = s_conf.nrepeat_;
     ctx.benchmarking = s_conf.time_kernel_;
+    ctx.flush_cache  = s_conf.flush_cache_;
     ctx.split_k      = split_k;
 }
 

@@ -441,6 +441,135 @@ class DepthwiseConvKernelConfig:
         )
 
 
+# Enum-valued Config fields: JSON carries the bare enum name, codegen emits the
+# fully-qualified enum value.
+_DIRECT_ENUM_FIELD_NS = {
+    "direction": "ck_tile::direct_conv::Direction",
+    "swizzle_type": "ck_tile::direct_conv::SwizzleType",
+    "epilogue": "ck_tile::direct_conv::EpilogueType",
+    # mfma_shape lives in the dense impl namespace.
+    "mfma_shape": "ck_tile::direct_conv::conv_32c_tile::v3::MfmaShape",
+}
+
+
+@dataclass
+class DirectConvKernelConfig:
+    """Direct (hipconv-ported) convolution kernel configuration.
+
+    A direct-conv instance is described entirely by the JSON config payload:
+    the channel family + impl + version select the kernel wrapper, and the
+    numeric `config` dict provides the full Config struct VALUE (designated
+    initializers) that is passed as the `auto Cfg` non-type template parameter.
+    The generator emits a thin Launcher that wraps the existing
+    Direct{Hip,Tile}Conv{Forward,BwdData}{N}C[Dense]Kernel wrapper.
+    Fields:
+      channel_family: channel family (4, 8, 16, or 32)
+      impl:           "hip" | "tile_grouped" | "tile_dense"
+      version:        "v2" | "v3" | None  (None for hip; dense is always v3)
+      id:             unique instance id (running counter shared with implicit GEMM)
+      config:         dict of family-specific Config fields (numeric/enum)
+      variant:        forward | bwd_data
+      datatype:       "fp16" | "bf16" | "fp32"  (hip is fp16-only)
+    """
+
+    channel_family: int
+    impl: str
+    id: int
+    config: dict = field(default_factory=dict)
+    version: Optional[str] = None
+    variant: GroupedConvVariant = GroupedConvVariant.FORWARD
+    ndim_spatial: int = 2
+    layout: str = "nhwgc"
+    datatype: str = "fp16"
+    arch: str = "gfx950"
+
+    def _variant_str(self) -> str:
+        return {
+            GroupedConvVariant.FORWARD: "fwd",
+            GroupedConvVariant.BACKWARD_DATA: "bwd_data",
+        }[self.variant]
+
+    def _impl_token(self) -> str:
+        """Impl token for the filename stem: hip | tile-grouped | tile-dense.
+
+        Uses a hyphen so that the compound name remains a single
+        underscore-delimited field in the stem, e.g.
+        ``direct_conv_fwd_fp16_nhwgc_2d_tile-grouped_4c_v3_id59``.
+        Each ``_``-separated token maps to exactly one field, making the
+        stem trivially parseable by registration_codegen.py.
+        """
+        return {
+            "hip": "hip",
+            "tile_grouped": "tile-grouped",
+            "tile_dense": "tile-dense",
+        }[self.impl]
+
+    def _dir_token(self) -> str:
+        """'Forward' | 'BwdData' for the kernel class name."""
+        return "Forward" if self.variant == GroupedConvVariant.FORWARD else "BwdData"
+
+    def kernel_class(self) -> str:
+        """Fully-qualified direct-conv kernel wrapper class name."""
+        d = self._dir_token()
+        if self.impl == "hip":
+            return f"ck_tile::direct_conv::DirectHipConv{d}{self.channel_family}CFp16Kernel"
+        if self.impl == "tile_dense":
+            return f"ck_tile::direct_conv::DirectTileConv{d}32CDenseKernel"
+        return f"ck_tile::direct_conv::DirectTileConv{d}{self.channel_family}CKernel"
+
+    def _config_type(self) -> str:
+        """Fully-qualified Config type for this instance (the NTTP type)."""
+        dt_enum = "ck_tile::direct_conv::DataType::" + self.datatype
+        if self.impl == "hip":
+            # hip Config is NOT DataType-templated.
+            return f"ck_tile::direct_hip_conv::grouped_{self.channel_family}c::Config"
+        if self.impl == "tile_dense":
+            return f"ck_tile::direct_conv::conv_32c_tile::v3::Config<{dt_enum}>"
+        return (
+            f"ck_tile::direct_conv::grouped_{self.channel_family}c_tile::"
+            f"{self.version}::Config<{dt_enum}>"
+        )
+
+    @staticmethod
+    def _format_field(key: str, value) -> str:
+        """Render one designated-initializer .key = value expression."""
+        ns = _DIRECT_ENUM_FIELD_NS.get(key)
+        if ns is not None:
+            return f".{key} = {ns}::{value}"
+        return f".{key} = {value}"
+
+    def cfg_value_expr(self) -> str:
+        """The `auto Cfg` template argument: a literal Config{...} VALUE built
+        from the JSON config payload via designated initializers."""
+        inits = ", ".join(
+            self._format_field(k, v) for k, v in self.config.items()
+        )
+        return f"{self._config_type()}{{{inits}}}"
+
+    def kernel_template(self) -> str:
+        """Full templated kernel type: Kernel<Cfg[, Version::vN[, DataType::DT]]>."""
+        cfg = self.cfg_value_expr()
+        cls = self.kernel_class()
+        if self.impl == "hip":
+            return f"{cls}<{cfg}>"
+        ver = f"ck_tile::direct_conv::Version::{self.version}"
+        if self.datatype == "fp16":
+            return f"{cls}<{cfg}, {ver}>"
+        dt = "ck_tile::direct_conv::DataType::" + self.datatype
+        return f"{cls}<{cfg}, {ver}, {dt}>"
+
+    def name(self, datatype: Optional[str] = None) -> str:
+        """Unique kernel stem, e.g.
+        direct_conv_fwd_fp16_nhwgc_2d_tile-grouped_4c_v3_id59."""
+        dt = datatype or self.datatype
+        ver = self.version if self.version else "v0"
+        return (
+            f"direct_conv_{self._variant_str()}_{dt}_{self.layout}"
+            f"_{self.ndim_spatial}d_{self._impl_token()}_{self.channel_family}c_{ver}"
+            f"_id{self.id}"
+        )
+
+
 # ============================================================================
 # Type Mappings
 # ============================================================================
@@ -1483,6 +1612,151 @@ constexpr const char* CONV_{direction_prefix}_KERNEL_NAME = {ns_name}::CONV_{dir
 
 
 # ============================================================================
+# CK Tile Direct Conv Kernel Generator
+# ============================================================================
+
+
+class CKTileDirectConvKernelGenerator:
+    """Generates a thin dispatcher Launcher around an existing direct-conv
+    kernel wrapper (Direct{Hip,Tile}Conv{Forward,BwdData}{N}C[Dense]Kernel).
+
+    The emitted Launcher satisfies the backend run-fn contract
+    (generated_conv_backend.hpp):
+      static float launch(GroupedConv{Fwd,BwdData}HostArgs& args,
+                          const stream_config& sc);
+      static bool  is_supported(const ck_tile::conv::ConvParam& param, int kbatch);
+      static std::string get_instance_string();  (CK_EXPERIMENTAL_BUILDER)
+    """
+
+    def __init__(self, datatype: str):
+        self.datatype = datatype
+
+    def generate(self, config: DirectConvKernelConfig) -> str:
+        kernel_name = config.name(self.datatype)
+        return f"""{self._header(kernel_name, config)}
+{self._launcher(config, kernel_name)}
+"""
+
+    def generate_wrapper(
+        self,
+        config: DirectConvKernelConfig,
+        kernel_path: Path,
+        output_dir: Path,
+    ) -> str:
+        """Generate the dispatcher wrapper header for a direct-conv kernel.
+
+        Direct-conv instances are registered by registration_codegen.py from the
+        kernel NAME, so the wrapper only needs to pull in the kernel header for
+        the include-all + chunked-registration globbing to find it.
+        """
+        kernel_name = config.name(self.datatype)
+        rel_path = kernel_path.relative_to(output_dir)
+        return f"""// SPDX-License-Identifier: MIT
+// Auto-generated direct-conv dispatcher wrapper for: {kernel_name}
+#pragma once
+
+#include "../{rel_path}"
+"""
+
+    def _header(self, kernel_name: str, config: DirectConvKernelConfig) -> str:
+        return f"""// SPDX-License-Identifier: MIT
+// Auto-generated direct convolution dispatcher kernel: {kernel_name}
+// channel_family={config.channel_family}c impl={config.impl} \
+version={config.version} id={config.id} \
+variant={config._variant_str()}
+#pragma once
+
+#include <cstdint>
+#include <string>
+#include <tuple>
+
+#include "ck_tile/core.hpp"
+#include "ck_tile/host/kernel_launch.hpp"
+#include "ck_tile/host/convolution_parameter.hpp"
+#include "ck_tile/ops/grouped_convolution/utils/grouped_conv_host_args.hpp"
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wold-style-cast"
+#pragma clang diagnostic ignored "-Wunused-parameter"
+#pragma clang diagnostic ignored "-Wshadow"
+#include "ck_tile/ops/direct_convolution/kernel/direct_conv_kernels.hpp"
+#pragma clang diagnostic pop
+
+using namespace ck_tile;
+"""
+
+    def _launcher(self, config: DirectConvKernelConfig, kernel_name: str) -> str:
+        # C++ identifiers cannot contain hyphens; replace with underscores.
+        cpp_name = kernel_name.replace("-", "_")
+        ns_name = "ns_" + cpp_name
+        kernel_template = config.kernel_template()
+        is_fwd = config.variant == GroupedConvVariant.FORWARD
+        host_args_type = (
+            "ck_tile::GroupedConvFwdHostArgs<>"
+            if is_fwd
+            else "ck_tile::GroupedConvBwdDataHostArgs"
+        )
+        launcher_alias = (
+            "SelectedConvKernelLauncher"
+            if is_fwd
+            else "SelectedConvBwdDataLauncher"
+        )
+        # For is_supported: build a host-args from a ConvParam with null buffers
+        # (applicability check only inspects shape fields).
+        if is_fwd:
+            mk_args_from_param = (
+                "ck_tile::GroupedConvFwdHostArgs<> args(\n"
+                "            conv_param, nullptr, nullptr, {}, nullptr, k_batch);"
+            )
+        else:
+            mk_args_from_param = (
+                "ck_tile::GroupedConvBwdDataHostArgs args(\n"
+                "            conv_param, nullptr, nullptr, {}, nullptr, k_batch);"
+            )
+        return f"""
+// Kernel type alias and launcher
+namespace {ns_name} {{
+
+using Kernel = {kernel_template};
+
+constexpr const char* CONV_DIRECT_KERNEL_NAME = "{kernel_name}";
+
+struct {cpp_name}_Launcher {{
+    static constexpr index_t NDimSpatial = {config.ndim_spatial};
+
+    static float launch({host_args_type}& args, const stream_config& sc) {{
+        Kernel conv;
+        auto kargs = Kernel::MakeKernelArgs(args);
+        auto result = conv.Run(kargs, sc);
+        return std::get<0>(result) ? std::get<1>(result) : -1.0f;
+    }}
+
+    static bool is_supported(const ck_tile::conv::ConvParam& conv_param, int k_batch) {{
+        {mk_args_from_param}
+        auto kargs = Kernel::MakeKernelArgs(args);
+        return Kernel::IsSupportedArgument(kargs);
+    }}
+
+#ifdef CK_EXPERIMENTAL_BUILDER
+    static std::string get_instance_string() {{
+        return Kernel{{}}.GetInstanceString();
+    }}
+#endif
+}};
+
+using SelectedConvKernelLauncher = {cpp_name}_Launcher;
+
+}} // namespace {ns_name}
+
+using {cpp_name}_Launcher = {ns_name}::{cpp_name}_Launcher;
+
+#ifdef CK_TILE_SINGLE_KERNEL_INCLUDE
+using {launcher_alias} = {cpp_name}_Launcher;
+#endif
+"""
+
+
+# ============================================================================
 # CK Tile Depthwise Conv Kernel Generator
 # ============================================================================
 
@@ -1704,6 +1978,16 @@ class GroupedConvDispatcherWrapperGenerator:
         "fp32": "DataType::FP32",
     }
 
+    def generate_wrapper(
+        self,
+        config: Union[GroupedConvKernelConfig, DepthwiseConvKernelConfig],
+        kernel_path: Path,
+        output_dir: Path,
+    ) -> str:
+        """Uniform wrapper-emission entrypoint (matches the direct-conv
+        generator's generate_wrapper signature). Delegates to generate()."""
+        return self.generate(config, kernel_path, output_dir)
+
     def generate(
         self,
         config: Union[GroupedConvKernelConfig, DepthwiseConvKernelConfig],
@@ -1862,20 +2146,58 @@ def load_depthwise_configs_from_json(
     return configs
 
 
+def build_direct_conv_config(
+    inst: dict,
+    variant: GroupedConvVariant,
+    ndim_spatial: int,
+    layout: str,
+    datatype: str,
+    arch: str,
+) -> DirectConvKernelConfig:
+    """Build one DirectConvKernelConfig from a per-instance JSON entry.
+
+    Per-instance schema (mixed into the grouped_conv instances array):
+      { "kind": "direct_conv", "channel_family": 8, "impl": "tile_grouped",
+        "version": "v2", "id": 59,
+        "config": { <full numeric Config fields, designated-init form> } }
+    """
+    return DirectConvKernelConfig(
+        channel_family=inst["channel_family"],
+        impl=inst["impl"],
+        id=inst["id"],
+        config=inst.get("config", {}),
+        version=inst.get("version"),
+        variant=variant,
+        ndim_spatial=ndim_spatial,
+        layout=layout,
+        datatype=datatype,
+        arch=arch,
+    )
+
+
 def load_configs_from_json(
     config_path: Path,
     arch: str = "gfx942",
     instance_id: Optional[int] = None,
-) -> List[Union[GroupedConvKernelConfig, DepthwiseConvKernelConfig]]:
+    disable_implicit_gemm: bool = False,
+) -> List[Union[GroupedConvKernelConfig, DepthwiseConvKernelConfig, DirectConvKernelConfig]]:
     """Load kernel configurations from a JSON config file.
+
+    Direct-conv instances are mixed into the same grouped_conv instances array
+    and detected via a per-instance "kind"=="direct_conv" discriminator. They
+    are built into DirectConvKernelConfig; all other instances follow the
+    implicit-GEMM path.
 
     Args:
         config_path: Path to JSON config file
         arch: Target GPU architecture
         instance_id: If specified, load only the instance with this ID
+        disable_implicit_gemm: If True, emit ONLY direct-conv instances and
+            skip the implicit-GEMM ones (the DISABLE_IMPLICIT_GEMM_INSTANCES
+            codegen filter).
 
     Returns:
-        List of GroupedConvKernelConfig objects
+        List of kernel config objects (mixed types).
     """
     with open(config_path, "r") as f:
         data = json.load(f)
@@ -1892,6 +2214,11 @@ def load_configs_from_json(
         raise ValueError(f"Unknown variant: {data['variant']}")
 
     if variant == GroupedConvVariant.FORWARD_DEPTHWISE:
+        # Depthwise is neither direct-conv nor implicit-GEMM, but the
+        # DISABLE_IMPLICIT_GEMM_INSTANCES filter (which mirrors the old .inc
+        # behavior of emitting ONLY direct-conv instances) must skip it too.
+        if disable_implicit_gemm:
+            return []
         return load_depthwise_configs_from_json(data, arch, instance_id)
 
     ndim_spatial = data["ndim_spatial"]
@@ -1900,12 +2227,30 @@ def load_configs_from_json(
 
     instances = data["instances"]
     if instance_id is not None:
-        instances = [inst for inst in instances if inst["id"] == instance_id]
+        instances = [
+            inst for inst in instances if inst.get("id") == instance_id
+        ]
         if not instances:
             raise ValueError(f"Instance ID {instance_id} not found in {config_path}")
 
     configs = []
     for inst in instances:
+        # Per-instance direct-conv dispatch: direct-conv instances are mixed
+        # into the same instances array and carry kind=="direct_conv" with a
+        # full numeric Config payload.
+        if inst.get("kind") == "direct_conv":
+            configs.append(
+                build_direct_conv_config(
+                    inst, variant, ndim_spatial, layout, datatype, arch
+                )
+            )
+            continue
+
+        # The DISABLE_IMPLICIT_GEMM_INSTANCES codegen filter: when set, skip
+        # everything except direct-conv instances.
+        if disable_implicit_gemm:
+            continue
+
         # Map specialization to pipeline constraints
         # Specializations like filter1x1_stride1_pad0 don't change the pipeline config
         # but are tracked in the trait for kernel naming and runtime checks
@@ -2222,12 +2567,15 @@ class UnifiedGroupedConvCodegen:
 
     def generate_kernel(
         self,
-        config: Union[GroupedConvKernelConfig, DepthwiseConvKernelConfig],
+        config: Union[GroupedConvKernelConfig, DepthwiseConvKernelConfig, DirectConvKernelConfig],
         datatype: str,
         variant: GroupedConvVariant = GroupedConvVariant.FORWARD,
     ) -> Tuple[Path, Path]:
         """Generate a single kernel file and dispatcher wrapper. Returns (kernel_path, wrapper_path)."""
-        if isinstance(config, DepthwiseConvKernelConfig):
+        if isinstance(config, DirectConvKernelConfig):
+            kernel_gen = CKTileDirectConvKernelGenerator(datatype)
+            wrapper_gen = kernel_gen
+        elif isinstance(config, DepthwiseConvKernelConfig):
             kernel_gen = CKTileDepthwiseConvKernelGenerator(datatype)
             # Depthwise kernels are forward-only, use the forward wrapper generator
             wrapper_gen = GroupedConvDispatcherWrapperGenerator(datatype, GroupedConvVariant.FORWARD)
@@ -2244,7 +2592,7 @@ class UnifiedGroupedConvCodegen:
         filepath.write_text(content)
         self.generated_files.append(filepath)
 
-        wrapper_content = wrapper_gen.generate(config, filepath, self.output_dir)
+        wrapper_content = wrapper_gen.generate_wrapper(config, filepath, self.output_dir)
         wrapper_path = self.wrapper_dir / f"dispatcher_wrapper_{kernel_name}.hpp"
         wrapper_path.write_text(wrapper_content)
         self.generated_wrappers.append(wrapper_path)
@@ -2303,7 +2651,11 @@ namespace ck_tile {{ namespace generated {{
 
         for datatype in datatypes:
             for config in configs:
-                if isinstance(config, DepthwiseConvKernelConfig):
+                if isinstance(config, DirectConvKernelConfig):
+                    # Direct-conv configs are a fixed source-of-truth set;
+                    # skip implicit-GEMM arch filter validation.
+                    valid_tasks.append((config, datatype, config.variant))
+                elif isinstance(config, DepthwiseConvKernelConfig):
                     # Depthwise configs skip arch filter validation (not applicable)
                     valid_tasks.append((config, datatype, GroupedConvVariant.FORWARD_DEPTHWISE))
                 elif self.is_config_valid(config, datatype):
