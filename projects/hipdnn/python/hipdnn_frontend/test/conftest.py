@@ -29,6 +29,10 @@ def _gpu_available():
     return True
 
 
+def pytest_configure(config):
+    config.addinivalue_line("markers", "gpu: test requires a ROCm-capable GPU")
+
+
 def pytest_collection_modifyitems(config, items):
     if _gpu_available():
         return
