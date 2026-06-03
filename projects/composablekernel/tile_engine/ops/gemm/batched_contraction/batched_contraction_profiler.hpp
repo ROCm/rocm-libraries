@@ -242,12 +242,12 @@ class BatchedContractionProfiler
             if constexpr(NUM_D_TENSORS > 0)
             {
                 verified_correct =
-                    compare<AdataType, BDataType, AccDataType, EDataType, DBaseDatType>(
+                    compare<ADataType, BDataType, AccDataType, EDataType, DBaseDataType>(
                         name, K_total, problem.split_k_, e_dev_result, e_host_result);
             }
             else
             {
-                verified_correct = compare_no_d<AdataType, BDataType, AccDataType, EDataType>(
+                verified_correct = compare<ADataType, BDataType, AccDataType, EDataType>(
                     name, K_total, problem.split_k_, e_dev_result, e_host_result);
             }
         }

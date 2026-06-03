@@ -149,12 +149,12 @@ def generateAndArchiveBuildTraceVisualization(String buildTraceFileName) {
             traceFileExists = false
             return
         }
-        
+
         sh """
             echo "post artifact download:"
             ls -la
         """
-        
+
         // Pull image
         def image = "ghcr.io/puppeteer/puppeteer:24.30.0"
         echo "Pulling image: ${image}"
@@ -181,7 +181,7 @@ def generateAndArchiveBuildTraceVisualization(String buildTraceFileName) {
             docker run --rm ${dockerOpts} ${image} node /workspace/capture_build_trace.js
             mv ./workspace/perfetto_snapshot_build.png ./workspace/${imageName}
         """
-        
+
         // Archive the snapshot
         sh """
             mv ./workspace/${imageName} ${imageName}
@@ -193,17 +193,17 @@ def generateAndArchiveBuildTraceVisualization(String buildTraceFileName) {
         sh '''
             # Create build trace filename with build number based on the original filename
             BUILD_TRACE_WITH_NUMBER=$(echo "''' + buildTraceFileName + '''" | sed 's/.json/_''' + sanitizedJobName + '''_''' + env.BUILD_NUMBER + '''_''' + architectureName + '''.json/')
-            
+
             # Convert image to base64
             echo "Converting image to base64..."
             IMAGE_BASE64=$(base64 -w 0 ''' + imageName + ''')
             echo "Image base64 length: ${#IMAGE_BASE64}"
-            
+
             # Convert build trace to base64
             echo "Converting build trace to base64..."
             BUILD_TRACE_BASE64=$(base64 -w 0 ''' + buildTraceFileName + ''')
             echo "Build trace base64 length: ${#BUILD_TRACE_BASE64}"
-            
+
             # Create JSON payload with base64 data
             echo "Creating JSON payload..."
             {
@@ -218,13 +218,13 @@ def generateAndArchiveBuildTraceVisualization(String buildTraceFileName) {
                 printf '    "buildTraceData": "%s"\n' "$BUILD_TRACE_BASE64"
                 printf '}\n'
             } > webhook_payload.json
-            
+
             echo "JSON payload created, size: $(wc -c < webhook_payload.json) bytes"
-            
+
             curl -X POST "${WEBHOOK_URL}" \
             -H "Content-Type: application/json" \
             -d @webhook_payload.json
-            
+
             # Clean up temporary file
             rm -f webhook_payload.json
         '''
@@ -278,7 +278,7 @@ def shouldRunCICheck() {
         /^projects\/composablekernel\/.*\.gitignore$/, // Git ignore files
         /^projects\/composablekernel\/.*\.md$/ // Markdown files
     ]
-    
+
     try {
         // Always run if this is a base branch build
         def baseBranch = "develop"
@@ -307,14 +307,14 @@ def shouldRunCICheck() {
                 fi
             '''
         ).trim().split('\n')
-        
+
         if (changedFiles.size() == 1 && changedFiles[0] == '') {
             echo "No changed files detected - this might be a manual trigger or merge commit, running CI for safety"
             return true
         }
-        
+
         echo "Changed files: ${changedFiles.join(', ')}"
-        
+
         // Separate files into those requiring CI and those that can be skipped
         def filesRequiringCI = []
         def skippedFiles = []
@@ -815,7 +815,7 @@ def cmake_build(Map conf=[:]){
                         rm -f monitor.pid
                     fi
                 """
-                
+
                 // Archive the monitoring logs
                 try {
                     archiveArtifacts artifacts: "logs/*monitor*.log", allowEmptyArchive: true
@@ -1950,6 +1950,9 @@ pipeline {
                                             -D GROUPED_GEMM_TENSORQUANT_LAYOUT="rcr" \
                                             -D GEMM_MULTI_ABD_DATATYPE="fp16" \
                                             -D GEMM_MULTI_ABD_LAYOUT="rcrr" \
+                                            -D MX_GEMM_DATATYPE="fp4;fp8" \
+                                            -D MX_GEMM_LAYOUT="rcr" \
+                                            -D MX_GEMM_CONFIG_FILE="default_ci_config.json" \
                                             -D TILE_ENGINE_SAMPLING_TIER=daily .. && \
                                            ninja -j${nthreads()} benchmark_gemm_universal_all benchmark_gemm_preshuffle_all benchmark_gemm_multi_d_all benchmark_gemm_multi_abd_all benchmark_batched_contraction_all benchmark_grouped_gemm_rowcolquant_all benchmark_grouped_gemm_tensorquant_all  benchmark_gemm_rowcolquant_all && \
                                            python3 ../tile_engine/ops/gemm/gemm_universal/gemm_universal_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json results.json && \
@@ -1959,7 +1962,8 @@ pipeline {
                                            python3 ../tile_engine/ops/gemm/grouped_gemm_quant/grouped_gemm_rowcolquant/grouped_gemm_rowcolquant_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json grouped_gemm_rowcolquant_results.json && \
                                            python3 ../tile_engine/ops/gemm/grouped_gemm_quant/grouped_gemm_tensorquant/grouped_gemm_tensorquant_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json grouped_gemm_tensorquant_results.json && \
                                            python3 ../tile_engine/ops/gemm/block_scale_gemm/gemm_rowcolquant/gemm_rowcolquant_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_rowcolquant_results.json && \
-                                           python3 ../tile_engine/ops/gemm/batched_contraction/batched_contraction_benchmark.py . --problem-configs "g=2;m=1024;n=1024;k=1024" --warmup 5 --repeat 5 --verbose --json batched_contraction_results.json """
+                                           python3 ../tile_engine/ops/gemm/batched_contraction/batched_contraction_benchmark.py . --problem-configs "g=2;m=1024;n=1024;k=1024" --warmup 5 --repeat 5 --verbose --json batched_contraction_results.json && \
+                                           python3 ../tile_engine/ops/gemm/mx_gemm/mx_gemm_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json mx_gemm_results.json """
                     }
                     steps{
                         buildHipClangJobAndReboot(setup_args:setup_args, build_type: 'Release', execute_cmd: execute_args)
