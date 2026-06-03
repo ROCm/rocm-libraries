@@ -18,6 +18,7 @@ target_sources(stinkytofu PRIVATE
     StinkyConfigurableWaitCntPass.cpp
     ScheduleFirstLRsPass.cpp
     StinkyWaitCntInsertionPass.cpp
+    waitcnt/WaitDataflow.cpp
     StinkyRemoveWaitCntPass.cpp
     StinkyRemoveNopPass.cpp
     StinkyBuildImplicitDependencyPass.cpp
