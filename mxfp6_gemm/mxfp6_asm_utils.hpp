@@ -188,11 +188,23 @@ __device__ __forceinline__ void mfma_scale_f32_32x32x64_fp6(
     AccTileA& acc, v6i a, v6i b, int scale_a, int scale_b)
 {
     static_assert(BYTE_SEL == 0, "only BYTE_SEL=0 supported for now");
+#ifdef USE_BUILTIN_MFMA
+    // Intrinsic path (gfx950): emits the SAME v_mfma_scale instruction but as a
+    // compiler-visible MFMA op, so __builtin_amdgcn_sched_group_barrier's MFMA mask
+    // (0x8) can interleave it against VMEM loads. TransposeC: src0=B/scale_b,
+    // src1=A/scale_a (mirrors the inline-asm operand order). FP6 24B operand
+    // zero-padded to int32x8. cbsz=blgp=2 (FP6 E2M3). opsel=0 (scale byte 0).
+    v8i b8{b[0], b[1], b[2], b[3], b[4], b[5], 0, 0};
+    v8i a8{a[0], a[1], a[2], a[3], a[4], a[5], 0, 0};
+    acc.vec = __builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4(
+        b8, a8, acc.vec, 2, 2, 0, scale_b, 0, scale_a);
+#else
     asm volatile(
         "v_mfma_scale_f32_32x32x64_f8f6f4 %0, %1, %2, %0, %3, %4 cbsz:2 blgp:2"
         : "+a"(acc.vec)
         : "v"(b), "v"(a), "v"(scale_b), "v"(scale_a)
     );
+#endif
 }
 
 // MFMA: v6i operands, accumulator in Arch VGPR (ACC_CD=0).
