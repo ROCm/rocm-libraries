@@ -887,8 +887,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
           if kernel["ClusterBarrier"]:
             iterCode.add(clusterBarrierCode)
           iterCode.add(globalReadCode)
-        iterCode.add(waitLWCode)
-        iterCode.add(syncCode)
+          iterCode.add(waitLWCode)
+          iterCode.add(syncCode)
         iterCode.add(localReadCode)
         iterCode.add(localWriteCode)
         iterCode.add(waitCode)
@@ -917,6 +917,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
           if kernel["ClusterBarrier"]:
             iterCode.add(clusterBarrierCode)
           iterCode.add(globalReadCode)
+          iterCode.add(waitLWCode)
+          iterCode.add(syncCode)
         # add rest of the mac here
         iterCode.addItems(macItems)
       else:
