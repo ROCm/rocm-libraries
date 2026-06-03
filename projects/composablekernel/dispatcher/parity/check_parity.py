@@ -681,8 +681,19 @@ def main() -> int:
 
     try:
         overall_rc = 0
-        for config_path in args.configs:
-            rc = run(args, config_path)
+        for i, config_path in enumerate(args.configs):
+            # When multiple configs are given with one --kernel-set, each must use
+            # its own subdirectory so configs don't share harness binaries or
+            # generated headers. Auto-suffix with the stem when >1 config.
+            if len(args.configs) > 1 and args.kernel_set == "parity_single":
+                effective_kernel_set = f"{args.kernel_set}_{config_path.stem}"
+            elif len(args.configs) > 1:
+                effective_kernel_set = f"{args.kernel_set}_{config_path.stem}"
+            else:
+                effective_kernel_set = args.kernel_set
+            run_args = argparse.Namespace(**vars(args))
+            run_args.kernel_set = effective_kernel_set
+            rc = run(run_args, config_path)
             if rc != 0:
                 overall_rc = rc
         return overall_rc
