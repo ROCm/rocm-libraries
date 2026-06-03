@@ -229,7 +229,7 @@ inline std::ostream& operator<<(std::ostream& os, const GLOBALModifiers& mod) {
     // Temporal hint / cache scope for global_prefetch_b8 (gl2-prefetch). Match
     // rocisa GLOBALModifiers::toString(): emit only non-default fields, temporal
     // hint first then scope (e.g. " th:TH_LOAD_NT scope:SCOPE_SE").
-    if (mod.th != TemporalHint::TH_NONE) {
+    if (hasTemporalHint(mod.th)) {
         os << " th:" << toString(mod.th);
     }
     if (mod.scope != MUBUFScope::SCOPE_NONE) {

@@ -232,9 +232,9 @@ namespace rocisa
             {
                 kStr += " offset:" + std::to_string(offset);
             }
-            if(th != TemporalHint::TH_NONE)
+            if(hasTemporalHint(th))
             {
-                kStr += " th:" + rocisa::toString(th);
+                kStr += " th:" + rocisa::toString(th, false);
             }
             if(scope != CacheScope::SCOPE_NONE)
             {

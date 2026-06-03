@@ -228,9 +228,4 @@ void init_enum(nb::module_ m)
         .value("UPPER", rocisa::SaturateCastType::UPPER)
         .value("LOWER", rocisa::SaturateCastType::LOWER)
         .export_values();
-
-    nb::enum_<rocisa::TemporalHint>(m_enum, "TemporalHint")
-        .value("TH_NONE", rocisa::TemporalHint::TH_NONE)
-        .value("TH_LOAD_NT", rocisa::TemporalHint::TH_LOAD_NT)
-        .export_values();
 }

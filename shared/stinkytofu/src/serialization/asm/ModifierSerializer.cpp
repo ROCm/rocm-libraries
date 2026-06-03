@@ -152,7 +152,7 @@ bool serializeVisit(const FLATModifiers& mod, std::ostream& os) {
 // preserves the hint/scope; TH_NONE / SCOPE_NONE are omitted.
 bool serializeVisit(const GLOBALModifiers& mod, std::ostream& os) {
     os << ", mod.global = { offset = " << mod.offset;
-    if (mod.th != TemporalHint::TH_NONE) {
+    if (hasTemporalHint(mod.th)) {
         os << ", th = \"" << toString(mod.th) << "\"";
     }
     if (mod.scope != MUBUFScope::SCOPE_NONE) {

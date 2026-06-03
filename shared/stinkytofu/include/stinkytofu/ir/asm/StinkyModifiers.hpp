@@ -98,24 +98,80 @@ inline MUBUFScope parseMUBUFScope(std::string_view scope) {
     return MUBUFScope::SCOPE_NONE;
 }
 
-// Temporal hint for global_prefetch_b8 (gfx1250 gl2-prefetch). Mirrors rocisa's
-// TemporalHint enum; only the values emitted by TensileLite are modeled.
-enum class TemporalHint : uint8_t {
-    TH_NONE = 0,
-    TH_LOAD_NT = 1,
+// Temporal Hint encoding for gfx1250 memory ops. Mirrors rocisa's TemporalHint
+// enum; values match the ISA TH[2:0] field. LOAD and STORE share encodings but
+// use different assembled names for TH3 and TH7.
+enum class TemporalHint : int8_t {
+    TH_NONE     = -1,
+    TH_RT       = 0,
+    TH_NT       = 1,
+    TH_HT       = 2,
+    TH_LU       = 3,
+    TH_WB       = 3,
+    TH_NT_RT    = 4,
+    TH_RT_NT    = 5,
+    TH_NT_HT    = 6,
+    TH_RESERVED = 7,
+    TH_NT_WB    = 7,
 };
 
-inline std::string_view toString(TemporalHint th) {
+inline bool hasTemporalHint(TemporalHint th) { return th != TemporalHint::TH_NONE; }
+
+// Emits the "TH_LOAD_*" / "TH_STORE_*" mnemonic. Matches rocisa::toString(TemporalHint,
+// bool). Caller picks isStore because LOAD and STORE share TH[2:0] encodings but differ
+// in the assembled name for TH3 and TH7.
+inline std::string toString(TemporalHint th, bool isStore = false) {
+    const std::string prefix = isStore ? "TH_STORE_" : "TH_LOAD_";
     switch (th) {
-        case TemporalHint::TH_LOAD_NT:
-            return "TH_LOAD_NT";
+        case TemporalHint::TH_RT:
+            return prefix + "RT";
+        case TemporalHint::TH_NT:
+            return prefix + "NT";
+        case TemporalHint::TH_HT:
+            return prefix + "HT";
+        case TemporalHint::TH_LU:
+            return isStore ? prefix + "WB" : prefix + "LU";
+        case TemporalHint::TH_NT_RT:
+            return prefix + "NT_RT";
+        case TemporalHint::TH_RT_NT:
+            return prefix + "RT_NT";
+        case TemporalHint::TH_NT_HT:
+            return prefix + "NT_HT";
+        case TemporalHint::TH_RESERVED:
+            return isStore ? prefix + "NT_WB" : prefix + "RESERVED";
         default:
             return "";
     }
 }
 
+// Inverse of toString(): assembly token -> enum. TH3/TH7 use load-only (LU, RESERVED)
+// or store-only (WB, NT_WB) suffixes matching the isStore branch in toString().
 inline TemporalHint parseTemporalHint(std::string_view th) {
-    if (th == "TH_LOAD_NT") return TemporalHint::TH_LOAD_NT;
+    auto parseSuffix = [](std::string_view suffix, bool isStore) -> TemporalHint {
+        if (suffix == "RT") return TemporalHint::TH_RT;
+        if (suffix == "NT") return TemporalHint::TH_NT;
+        if (suffix == "HT") return TemporalHint::TH_HT;
+        if (suffix == "NT_RT") return TemporalHint::TH_NT_RT;
+        if (suffix == "RT_NT") return TemporalHint::TH_RT_NT;
+        if (suffix == "NT_HT") return TemporalHint::TH_NT_HT;
+        if (isStore) {
+            if (suffix == "WB") return TemporalHint::TH_WB;
+            if (suffix == "NT_WB") return TemporalHint::TH_NT_WB;
+        } else {
+            if (suffix == "LU") return TemporalHint::TH_LU;
+            if (suffix == "RESERVED") return TemporalHint::TH_RESERVED;
+        }
+        return TemporalHint::TH_NONE;
+    };
+
+    constexpr std::string_view loadPrefix = "TH_LOAD_";
+    constexpr std::string_view storePrefix = "TH_STORE_";
+    if (th.size() >= loadPrefix.size() && th.compare(0, loadPrefix.size(), loadPrefix) == 0) {
+        return parseSuffix(th.substr(loadPrefix.size()), /*isStore=*/false);
+    }
+    if (th.size() >= storePrefix.size() && th.compare(0, storePrefix.size(), storePrefix) == 0) {
+        return parseSuffix(th.substr(storePrefix.size()), /*isStore=*/true);
+    }
     return TemporalHint::TH_NONE;
 }
 

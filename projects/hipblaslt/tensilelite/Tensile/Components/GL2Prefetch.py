@@ -12,7 +12,7 @@ from math import log2, ceil
 
 class GL2PrefetchLoad(GL2Prefetch):
     asmCaps = {"HasGlobalPrefetch": True}
-    globalModifiers = GLOBALModifiers(th=TemporalHint.TH_LOAD_NT, scope=CacheScope.SCOPE_SE)
+    globalModifiers = GLOBALModifiers(th=TemporalHint.TH_NT, scope=CacheScope.SCOPE_SE)
 
     def __call__(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping):
         pass
