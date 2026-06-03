@@ -101,13 +101,17 @@ inline std::optional<BundleMetadata> loadBundleMetadata(const std::filesystem::p
 
         auto readString = [&](const char* key) -> std::optional<std::string> {
             if(json.contains(key) && json[key].is_string())
+            {
                 return json[key].get<std::string>();
+            }
             return std::nullopt;
         };
 
         auto readInt64 = [&](const char* key) -> std::optional<int64_t> {
             if(json.contains(key) && json[key].is_number_integer())
+            {
                 return json[key].get<int64_t>();
+            }
             return std::nullopt;
         };
 
