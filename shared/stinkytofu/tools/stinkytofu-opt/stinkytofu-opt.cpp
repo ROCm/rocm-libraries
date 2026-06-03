@@ -623,6 +623,10 @@ int main(int argc, char** argv) {
                           << "'\n";
                 continue;
             }
+            if (asmSignature) {
+                func.setMetaData(stinkytofu::kSigTotalVgprsMetaKey,
+                                 static_cast<uint64_t>(asmSignature->kernelDescriptor.totalVgprs));
+            }
 
             stinkytofu::Backend backend(module);
             backend.runOptimization();
@@ -660,6 +664,10 @@ int main(int argc, char** argv) {
                 std::cerr << "Error: Failed to populate function '" << parsedFunc->funcName
                           << "'\n";
                 continue;
+            }
+            if (asmSignature) {
+                func.setMetaData(stinkytofu::kSigTotalVgprsMetaKey,
+                                 static_cast<uint64_t>(asmSignature->kernelDescriptor.totalVgprs));
             }
 
             passManager.run(func);
