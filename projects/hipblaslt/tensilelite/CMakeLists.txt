@@ -14,13 +14,24 @@ if(TENSILELITE_ENABLE_HOST)
     # absorbed into both libhipblaslt.so and libhipsparselt.so. Building it once and
     # sharing it is what structurally prevents the cross-DSO C++ interposition that
     # the old all-hidden OBJECT scheme worked around (PR #6917).
-    # Default to hipBLASLt's own shared/static choice (HIPBLASLT_BUILD_SHARED_LIBS,
-    # defined before this subdirectory), NOT the global BUILD_SHARED_LIBS -- the
-    # latter is only synced to HIPBLASLT_BUILD_SHARED_LIBS later in the parent
-    # CMakeLists, after this subdirectory is added, so it is still empty here and
-    # would silently fall back to STATIC (defeating the single-shared-library dedup).
+    # Track hipBLASLt's own shared/static choice when it owns the host build, but
+    # default to SHARED otherwise. Subtleties this guards against:
+    #  - The global BUILD_SHARED_LIBS is synced to HIPBLASLT_BUILD_SHARED_LIBS only
+    #    LATER in the parent (after this add_subdirectory), so it is empty here.
+    #  - HIPBLASLT_BUILD_SHARED_LIBS itself is defined only under
+    #    if(HIPBLASLT_ENABLE_HOST). hipSPARSELt consumes tensilelite-host with
+    #    HIPBLASLT_ENABLE_HOST OFF, so that variable is UNDEFINED there -- falling
+    #    back to it would build tensilelite-host STATIC and re-absorb it into
+    #    libhipsparselt.so, defeating the single-shared-library dedup. Default ON
+    #    keeps the dedup working for every consumer; a fully-static build can still
+    #    set TENSILELITE_BUILD_SHARED_LIBS=OFF explicitly.
+    if(DEFINED HIPBLASLT_BUILD_SHARED_LIBS)
+        set(_tensilelite_shared_default ${HIPBLASLT_BUILD_SHARED_LIBS})
+    else()
+        set(_tensilelite_shared_default ON)
+    endif()
     option(TENSILELITE_BUILD_SHARED_LIBS
-        "Build tensilelite-host as a shared library." "${HIPBLASLT_BUILD_SHARED_LIBS}")
+        "Build tensilelite-host as a shared library." ${_tensilelite_shared_default})
     # ON in hipBLASLt's standalone build (it owns the install/export); hipSPARSELt
     # sets it OFF in its add_subdirectory(hipblaslt) context so the install rules
     # do not double-fire from the fork.
@@ -40,8 +51,10 @@ if(TENSILELITE_ENABLE_HOST)
             POSITION_INDEPENDENT_CODE ON
             CXX_VISIBILITY_PRESET hidden
             VISIBILITY_INLINES_HIDDEN ON
-            SOVERSION 1
     )
+    # Full SOVERSION + VERSION symlink chain via the ROCm idiom (matches hipBLASLt /
+    # hipSPARSELt / origami), rather than a bare SOVERSION property.
+    rocm_set_soversion(tensilelite-host "1.0")
 
     target_compile_features(tensilelite-host PUBLIC cxx_std_17)
 
@@ -131,18 +144,41 @@ if(TENSILELITE_ENABLE_HOST)
     # header is included (in HIP mode) by the library's translation units.
 
     if(TENSILELITE_ENABLE_INSTALL)
-        # Co-export the shared library through hipBLASLt's existing package: same
-        # hipblaslt-targets export set + namespace, so find_package(hipblaslt) also
-        # yields roc::tensilelite-host (a runtime dependency of roc::hipblaslt) and
-        # libtensilelite-host.so installs alongside libhipblaslt.so for DT_NEEDED
-        # resolution. NOT a new top-level package. Library-only (no FILE_SET): the
-        # headers are an in-tree build interface, not a public install surface.
-        install(TARGETS tensilelite-host
-            EXPORT hipblaslt-targets
-            RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT runtime
-            LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT runtime
-            ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT devel
-        )
+        # Install the shared library so consumers resolve libtensilelite-host.so at
+        # runtime (library-only: the headers are an in-tree build interface, not a
+        # public install surface). When hipBLASLt owns the host build it also owns
+        # the package export, so co-export the target through hipblaslt-targets
+        # (find_package(hipblaslt) then yields roc::tensilelite-host as a runtime
+        # dependency of roc::hipblaslt -- NOT a new top-level package). When a fork
+        # builds hipBLASLt with HIPBLASLT_ENABLE_HOST OFF (hipSPARSELt), the
+        # hipblaslt-targets export is not created, so install the .so without an
+        # EXPORT clause -- it still lands beside the fork's library for DT_NEEDED
+        # resolution.
+        # Which package export set tensilelite-host joins: hipBLASLt's own
+        # (hipblaslt-targets) when it owns the host build; otherwise the consuming
+        # fork names its export via TENSILELITE_HOST_EXPORT_SET (hipSPARSELt sets
+        # hipsparselt-targets) so its exported library, which links the now-SHARED
+        # tensilelite-host, has that dependency in an export set. The fork's package
+        # config must then find_dependency(origami) (tensilelite-host links it PUBLIC).
+        if(HIPBLASLT_ENABLE_HOST)
+            set(_tensilelite_export_set hipblaslt-targets)
+        elseif(DEFINED TENSILELITE_HOST_EXPORT_SET)
+            set(_tensilelite_export_set ${TENSILELITE_HOST_EXPORT_SET})
+        endif()
+        if(DEFINED _tensilelite_export_set)
+            install(TARGETS tensilelite-host
+                EXPORT ${_tensilelite_export_set}
+                RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT runtime
+                LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT runtime
+                ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT devel
+            )
+        else()
+            install(TARGETS tensilelite-host
+                RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT runtime
+                LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT runtime
+                ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT devel
+            )
+        endif()
         set_property(TARGET tensilelite-host APPEND PROPERTY INSTALL_RPATH "$ORIGIN")
     endif()
 
