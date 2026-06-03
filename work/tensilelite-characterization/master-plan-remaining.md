@@ -50,14 +50,14 @@ package `__init__`.
 
 ## Work queue (priority order: cheap/pure → mid → heavy). Check off as done.
 
-### Batch A — tiny / near-done top-ups
-- [ ] `Common/Types.py` (60, 81.7%)
-- [ ] `Properties.py` (57, 80.7%)
-- [ ] `Common/TimingInstrumentation.py` (21, 76.2%)
-- [ ] `Utilities/Decorators/Shared.py` (13, 92.3%) + `Timing.py` (15, 53.3%) + `Profile.py` (25, 44.0%)  *(one suite)*
-- [ ] `Tensile/__init__.py` (9, 88.9%)
-- [ ] `Toolchain/Assembly.py` (47, 93.6%)
-- [ ] `Toolchain/HelperKernelCache.py` (87, 90.8%)
+### Batch A — tiny / near-done top-ups  ✅ DONE (full -m unit = 1890 passed)
+- [x] `Common/Types.py` 81.7% → 100%
+- [x] `Properties.py` 80.7% → 100%
+- [x] `Common/TimingInstrumentation.py` 76.2% → 100% line (96% blended)
+- [x] `Utilities/Decorators/{Shared,Timing,Profile}.py` → 100% (one suite)
+- [x] `Tensile/__init__.py` 88.9% → 100%
+- [x] `Toolchain/Assembly.py` 93.6% → 95.24% line (L82 dead)
+- [x] `Toolchain/HelperKernelCache.py` 90.8% → 99.10% line
 
 ### Batch B — small pure
 - [ ] `Common/RegisterPool.py` (57, 35.1%)
@@ -105,3 +105,8 @@ package `__init__`.
 
 ## Progress log
 (append one line per completed module: `<module> — before% -> after% (N tests), commit <sha>`)
+
+- Batch A complete — 7 modules / 9 source files, +46 tests, full -m unit 1844 → 1890 passed (no regression). Fresh baseline: coverage/master-baseline-1890.txt.
+  - Common/Types 81.7→100 · Properties 80.7→100 · TimingInstrumentation 76.2→100 ·
+    Decorators(Shared/Timing/Profile)→100 · __init__ 88.9→100 ·
+    Toolchain/Assembly 93.6→95.2 · Toolchain/HelperKernelCache 90.8→99.1
