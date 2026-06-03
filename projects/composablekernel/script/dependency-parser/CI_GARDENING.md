@@ -547,6 +547,7 @@ filter_oracle.py coverage --pre pre_depmap.json --post enhanced_dependency_mappi
 
 `coverage_result.json` fields:
 - `coverage` — covered edges / total real edges (toward the ≥99% run-accuracy goal).
+- `scope` — `source` (default) or `all` (with `--include-nonsource`).
 - `false_negatives` — `{file: [tests]}` the real build proves but the depmap lacks
   (extraction gaps the filter would silently skip). The list to drive to zero.
 - `n_edges_post`, `n_edges_covered`, `verdict`.
@@ -554,8 +555,17 @@ filter_oracle.py coverage --pre pre_depmap.json --post enhanced_dependency_mappi
 This is the cheap path to the run-accuracy signal: the expensive build already
 happened nightly; the diff costs `cmake-parse` (minutes) + one `ninja -t deps`
 (~2s). It validates the **compile/`#include`** channel only — runtime/behavioral
-deps (data files, dlopen) are not covered. Both maps must use the **same
-`--workspace-root`** or path mismatch shows up as spurious FNs.
+deps (data files, dlopen) are not covered.
+
+**Keys and scope (D14).** The oracle canonicalizes keys to the project root on
+both sides, so `--pre` and `--post` may use different `--workspace-root`s
+(`cmake-parse` keys follow its workspace-root; `ninja -t deps` keys are always
+project-root). By default coverage counts **PR-editable source only** — `build/`
+outputs, vendored deps (gtest under `build/_deps`) and system headers are excluded
+because the pre-build depmap never tracks them (so they'd otherwise read as a flood
+of spurious FNs, e.g. a ~2.6% vs ~99.97% number). Pass `--include-nonsource` for
+the raw diff. A real gfx942 build measured **99.97%** source coverage, with the
+residual FNs isolated to the `gemm_streamk` build-time codegen cluster.
 
 To reproduce on any full build dir: run the three commands above in it.
 
