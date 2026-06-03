@@ -88,7 +88,7 @@ jobs:
           -DMIOPEN_GPU_SYNC=OFF \
           -DMIOPEN_USE_COMPOSABLEKERNEL=OFF \
           -DCMAKE_PREFIX_PATH=/opt/rocm \
-          -DGPU_TARGETS:STRING="\$GPU_TARGET"
+          -DGPU_TARGETS="${{ env.GPU_TARGET }}"
 
       - name: Build
         run: |
@@ -155,7 +155,7 @@ jobs:
           -DMIOPEN_USE_MLIR=ON \
           -DMIOPEN_GPU_SYNC=OFF \
           -DCMAKE_PREFIX_PATH=/opt/rocm \
-          -DGPU_TARGETS:STRING="\$GPU_TARGET"
+          -DGPU_TARGETS="${{ env.GPU_TARGET }}"
 
       - name: Build
         run: |
@@ -290,7 +290,7 @@ jobs:
           -DMIOPEN_GPU_SYNC=OFF \
           -DMIOPEN_BACKEND=HIPNOGPU \
           -DCMAKE_PREFIX_PATH=/opt/rocm \
-          -DGPU_TARGETS:STRING="\$GPU_TARGET"
+          -DGPU_TARGETS="${{ env.GPU_TARGET }}"
 
       - name: Build MIOpen
         run: |
