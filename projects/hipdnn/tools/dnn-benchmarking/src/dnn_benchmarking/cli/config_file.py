@@ -7,10 +7,10 @@ from __future__ import annotations
 
 import argparse
 import tomllib
-from dataclasses import dataclass
-from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Set
+
+from .parser import CONFIG_FIELDS, OPTION_DESTS_BY_FLAG, ConfigField
 
 
 _CONFIG_ONLY_TOP_LEVEL_KEYS: Set[str] = {
@@ -20,115 +20,17 @@ _CONFIG_ONLY_TOP_LEVEL_KEYS: Set[str] = {
 
 _ALLOWED_ENGINE_KEYS: Set[str] = {"id", "plugin_path"}
 
-_CONFIG_FIELD_RENAMES = {"graph": "graphs"}
-_CONFIG_EXCLUDED_DESTS = {
-    "help",
-    "config",
-    "engine",
-    "internal_profiling_run",
-    "internal_profiling_engine",
-    "internal_profiling_graph",
-}
 
-
-@dataclass(frozen=True)
-class _ConfigField:
-    key: str
-    dest: str
-    kind: str
-    typ: Optional[type] = None
-    choices: Optional[FrozenSet[Any]] = None
-    optional: bool = False
-
-
-@lru_cache(maxsize=1)
-def _parser_actions_by_dest() -> Dict[str, argparse.Action]:
-    from .parser import create_parser
-
-    actions: Dict[str, argparse.Action] = {}
-    for action in create_parser()._actions:
-        actions[action.dest] = action
-    return actions
-
-
-@lru_cache(maxsize=1)
-def _option_dest_map() -> Dict[str, str]:
-    option_dests: Dict[str, str] = {}
-    for action in _parser_actions_by_dest().values():
-        for option in action.option_strings:
-            option_dests[option] = action.dest
-    return option_dests
-
-
-def _is_store_true_action(action: argparse.Action) -> bool:
-    return (
-        getattr(action, "nargs", None) == 0
-        and getattr(action, "const", None) is True
-        and action.default is False
-    )
-
-
-@lru_cache(maxsize=1)
-def _config_fields_by_key() -> Dict[str, _ConfigField]:
-    fields: Dict[str, _ConfigField] = {}
-    for dest, action in _parser_actions_by_dest().items():
-        if dest in _CONFIG_EXCLUDED_DESTS or action.help == argparse.SUPPRESS:
-            continue
-
-        key = _CONFIG_FIELD_RENAMES.get(dest, dest)
-        field = _config_field_from_action(key, action)
-        if field is not None:
-            fields[key] = field
-    return fields
-
-
-def _config_field_from_action(
-    key: str, action: argparse.Action
-) -> Optional[_ConfigField]:
-    dest = action.dest
-    optional = action.default is None
-
-    if dest == "graph":
-        return _ConfigField(key=key, dest=dest, kind="path_list")
-    if dest == "plugin_path":
-        return _ConfigField(key=key, dest=dest, kind="plugin_path")
-    if _is_store_true_action(action):
-        return _ConfigField(key=key, dest=dest, kind="scalar", typ=bool)
-    if action.type is Path:
-        return _ConfigField(key=key, dest=dest, kind="path")
-    if action.choices is not None:
-        typ = action.type if action.type is not None else str
-        return _ConfigField(
-            key=key,
-            dest=dest,
-            kind="choice",
-            typ=typ,
-            choices=frozenset(action.choices),
-            optional=optional,
-        )
-    if action.type in {int, float, str}:
-        return _ConfigField(
-            key=key,
-            dest=dest,
-            kind="scalar",
-            typ=action.type,
-            optional=optional,
-        )
-    return None
-
-
-@lru_cache(maxsize=1)
 def _allowed_top_level_keys() -> Set[str]:
-    return set(_config_fields_by_key()) | _CONFIG_ONLY_TOP_LEVEL_KEYS
+    return {field.key for field in CONFIG_FIELDS} | _CONFIG_ONLY_TOP_LEVEL_KEYS
 
 
 def collect_provided_options(argv: List[str]) -> Set[str]:
     """Return argparse destination names explicitly present in ``argv``."""
-    option_dests = _option_dest_map()
     provided: Set[str] = set()
     for arg in argv:
         option = arg.split("=", 1)[0]
-        dest = option_dests.get(option)
+        dest = OPTION_DESTS_BY_FLAG.get(option)
         if dest is not None and dest != "config":
             provided.add(dest)
     return provided
@@ -176,15 +78,10 @@ def _normalise_config(raw: Dict[str, Any], path: Path) -> Dict[str, Any]:
 
     base_dir = path.parent
     out: Dict[str, Any] = {}
-    for field in _config_fields_by_key().values():
-        if field.kind == "plugin_path":
-            continue
+    for field in CONFIG_FIELDS:
         _copy_config_field(raw, out, field, base_dir)
 
     _normalise_engines(raw, out, base_dir=base_dir)
-    plugin_path_field = _config_fields_by_key().get("plugin_path")
-    if plugin_path_field is not None:
-        _normalise_top_level_plugin_path(raw, out, base_dir=base_dir)
 
     return out
 
@@ -200,7 +97,7 @@ def _reject_unknown_keys(keys: Iterable[str], allowed: Set[str], context: str) -
 def _copy_config_field(
     raw: Dict[str, Any],
     out: Dict[str, Any],
-    field: _ConfigField,
+    field: ConfigField,
     base_dir: Path,
 ) -> None:
     if field.kind == "path_list":
@@ -208,6 +105,9 @@ def _copy_config_field(
         return
     if field.kind == "path":
         _copy_path(raw, out, field.key, dest=field.dest, base_dir=base_dir)
+        return
+    if field.kind == "path_or_path_list":
+        _copy_path_or_path_list(raw, out, field.key, dest=field.dest, base_dir=base_dir)
         return
     if field.kind == "choice":
         if field.typ is None or field.choices is None:
@@ -328,28 +228,30 @@ def _copy_path_list(
     out[dest] = [str(_path_from_config(base_dir, item)) for item in value]
 
 
-def _normalise_top_level_plugin_path(
-    raw: Dict[str, Any], out: Dict[str, Any], *, base_dir: Path
+def _copy_path_or_path_list(
+    raw: Dict[str, Any],
+    out: Dict[str, Any],
+    key: str,
+    *,
+    dest: Optional[str] = None,
+    base_dir: Path,
 ) -> None:
-    if "plugin_path" not in raw:
+    if key not in raw:
         return
-    if "plugin_path" in out:
-        raise ValueError(
-            "Config cannot set both top-level plugin_path and engine plugin_path"
-        )
-    value = raw["plugin_path"]
+    value = raw[key]
+    target = dest or key
     if isinstance(value, str) and value:
-        out["plugin_path"] = [_path_from_config(base_dir, value)]
+        out[target] = [_path_from_config(base_dir, value)]
         return
     if (
         isinstance(value, list)
         and value
         and all(isinstance(item, str) and item for item in value)
     ):
-        out["plugin_path"] = [_path_from_config(base_dir, item) for item in value]
+        out[target] = [_path_from_config(base_dir, item) for item in value]
         return
     raise ValueError(
-        "Config field 'plugin_path' must be a string or non-empty list of strings"
+        f"Config field '{key}' must be a string or non-empty list of strings"
     )
 
 
@@ -387,6 +289,10 @@ def _normalise_engines(
             plugin_paths.append(None)
 
     if any_plugin_path:
+        if "plugin_path" in out:
+            raise ValueError(
+                "Config cannot set both top-level plugin_path and engine plugin_path"
+            )
         if any(p is None for p in plugin_paths):
             raise ValueError(
                 "Every config engine must set plugin_path when any engine does"
