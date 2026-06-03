@@ -91,14 +91,14 @@ if(TENSILELITE_ENABLE_HOST)
         target_compile_definitions(tensilelite-host PUBLIC $<BUILD_INTERFACE:TENSILE_MSGPACK>)
     endif()
 
-    # tensilelite-host is an internal co-exported shared library: its symbols are
-    # exported (so libhipblaslt.so / libhipsparselt.so resolve them at runtime) but
-    # its headers are NOT a public install surface (they were never installed
-    # pre-Phase-2, and their include closure is essentially the whole Tensile tree
-    # -- a narrow public-header API would require decoupling the entry-point headers
-    # from their implementation includes, a separate effort). In-tree consumers
-    # (hipBLASLt, hipSPARSELt, the tensilelite client/tests) include these via the
-    # build interface below; no INSTALL_INTERFACE include is published.
+    # tensilelite-host is a co-exported shared library. Its public headers -- the
+    # curated FILE_SETs declared in include/CMakeLists.txt (the transitive include
+    # closure of the entry-point headers out-of-tree consumers actually use) -- are
+    # installed, and install(TARGETS ... FILE_SET ...) adds the install destination
+    # to the INSTALL_INTERFACE include path automatically, but ONLY when hipBLASLt
+    # owns the host build (single header owner; the hipSPARSELt fork ships
+    # library-only). The build-interface include dirs below serve in-tree consumers
+    # (hipBLASLt, hipSPARSELt, the tensilelite client/tests) in every configuration.
     target_include_directories(tensilelite-host
         PUBLIC
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -136,41 +136,54 @@ if(TENSILELITE_ENABLE_HOST)
     add_subdirectory(src)
     add_subdirectory(include)
 
-    # G4 (header self-containment): VERIFY_INTERFACE_HEADER_SETS is intentionally
-    # NOT enabled. CMake's header-set verification compiles each header as `-x c++`,
-    # but TensileLite's headers are HIP-language headers -- they transitively pull in
-    # <hip/hip_fp8.h> etc. and use HIP builtins (__hip_fp8_e4m3, __half,
-    # __amd_floatx16_storage_t) that only exist under `-x hip` (tensilelite-host's
-    # own .cpp compile with -x hip). A c++-mode verify cannot compile them, and
-    # wiring a permanently-failing all_verify_interface_header_sets into `check`
-    # would break CI. Self-containment is instead enforced by the real build: every
-    # header is included (in HIP mode) by the library's translation units.
+    # G4 (header self-containment): the public surface is now a real PUBLIC FILE_SET
+    # (tensilelite_public_headers, see include/CMakeLists.txt), but
+    # VERIFY_INTERFACE_HEADER_SETS is still intentionally NOT enabled. CMake's
+    # header-set verification compiles each header as `-x c++`, but TensileLite's
+    # headers are HIP-language headers -- they transitively pull in <hip/hip_fp8.h>
+    # etc. and use HIP builtins (__hip_fp8_e4m3, __half, __amd_floatx16_storage_t)
+    # that only exist under `-x hip` (tensilelite-host's own .cpp compile with
+    # -x hip). A c++-mode verify cannot compile them, and wiring a
+    # permanently-failing all_verify_interface_header_sets into `check` would break
+    # CI. Self-containment is instead enforced by the real build: every header is
+    # included (in HIP mode) by the library's translation units.
 
     if(TENSILELITE_ENABLE_INSTALL)
-        # Install the shared library so consumers resolve libtensilelite-host.so at
-        # runtime (library-only: the headers are an in-tree build interface, not a
-        # public install surface). When hipBLASLt owns the host build it also owns
-        # the package export, so co-export the target through hipblaslt-targets
-        # (find_package(hipblaslt) then yields roc::tensilelite-host as a runtime
-        # dependency of roc::hipblaslt -- NOT a new top-level package). When a fork
-        # builds hipBLASLt with HIPBLASLT_ENABLE_HOST OFF (hipSPARSELt), the
-        # hipblaslt-targets export is not created, so install the .so without an
-        # EXPORT clause -- it still lands beside the fork's library for DT_NEEDED
-        # resolution.
-        # Which package export set tensilelite-host joins: hipBLASLt's own
-        # (hipblaslt-targets) when it owns the host build; otherwise the consuming
-        # fork names its export via TENSILELITE_HOST_EXPORT_SET (hipSPARSELt sets
-        # hipsparselt-targets) so its exported library, which links the now-SHARED
-        # tensilelite-host, has that dependency in an export set. The fork's package
-        # config must then find_dependency(origami) (tensilelite-host links it PUBLIC).
+        # Install tensilelite-host so consumers resolve libtensilelite-host.so at
+        # runtime, and co-export it through the owning package (NOT a new top-level
+        # package). Header ownership is single: only the hipBLASLt-owned build
+        # (HIPBLASLT_ENABLE_HOST) installs the public header FILE_SETs; a fork that
+        # builds host with HOST OFF (hipSPARSELt) ships library-only, so the installed
+        # Tensile/*.hpp have one owner and never collide in a shared ROCm prefix.
+        #
+        # Export set: hipBLASLt's own (hipblaslt-targets) when it owns the build;
+        # otherwise the fork names its set via TENSILELITE_HOST_EXPORT_SET (hipSPARSELt
+        # -> hipsparselt-targets) so its exported library, which links the SHARED
+        # tensilelite-host, carries that dependency. The fork's package config must
+        # then find_dependency(origami) (tensilelite-host links it PUBLIC).
         if(HIPBLASLT_ENABLE_HOST)
-            set(_tensilelite_export_set hipblaslt-targets)
-        elseif(DEFINED TENSILELITE_HOST_EXPORT_SET)
-            set(_tensilelite_export_set ${TENSILELITE_HOST_EXPORT_SET})
-        endif()
-        if(DEFINED _tensilelite_export_set)
+            # Owner build: co-export through hipblaslt-targets WITH the public
+            # headers. install(TARGETS ... FILE_SET ...) also adds the include
+            # DESTINATION to the target's INSTALL_INTERFACE include path, so a
+            # post-install find_package(hipblaslt) consumer compiles against the
+            # TensileLite public API.
             install(TARGETS tensilelite-host
-                EXPORT ${_tensilelite_export_set}
+                EXPORT hipblaslt-targets
+                RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT runtime
+                LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT runtime
+                ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT devel
+                FILE_SET tensilelite_public_headers
+                    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT devel
+                FILE_SET tensilelite_generated_headers
+                    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT devel
+            )
+        elseif(DEFINED TENSILELITE_HOST_EXPORT_SET)
+            # Fork build (HOST OFF): library-only co-export. The public headers are
+            # attached PRIVATE in this configuration (include/CMakeLists.txt), so
+            # there is no interface file set to install -- avoiding a colliding
+            # header install in the shared prefix.
+            install(TARGETS tensilelite-host
+                EXPORT ${TENSILELITE_HOST_EXPORT_SET}
                 RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT runtime
                 LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT runtime
                 ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT devel
