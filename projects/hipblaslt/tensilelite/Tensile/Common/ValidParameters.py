@@ -980,6 +980,7 @@ validParameters = { # we need to make sure this matches develop
     "AdaptiveGemmGSUA": [0, 1],
     # 0  : NonTemporalA and NonTemporalB use fixed values from kernel parameters
     # 1  : NonTemporalA and NonTemporalB are determined at runtime based on problem size and stride alignment
+    #      Adaptive selection applies to the main loop only; prefetch (prolog) and tail loop still use the fixed NonTemporalA/B
     "AdaptiveGemmNTAB": [0, 1],
     # Add extra latency to calculate number of MFMA to insert between local read and wait
     # Negative value means reduce interval between local read and wait (for DirectToVgpr only)
