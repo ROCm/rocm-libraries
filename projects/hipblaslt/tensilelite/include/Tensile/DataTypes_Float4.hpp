@@ -41,9 +41,7 @@ namespace TensileLite
 
 #else // _WIN32
 
-#ifdef TENSILE_USE_HIP
 #include <hip/hip_runtime.h>
-#endif
 
 #define HIP_HOST_DEVICE __host__ __device__
 #define HIP_HOST __host__
