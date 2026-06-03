@@ -142,20 +142,26 @@ def _filename_arch_matches_dir(filename: str, base_arch: str) -> bool:
       - in the middle, delimited by `_`:  `TensileLibrary_lazy_gfx942_Mapping.dat`
       - as a cooked variant:              `kernel_gfx942-sramecc+-xnack+.hsaco`
         (target features survive in the filename; base must still match)
+      - dash-delimited inside a dotted name: `Kernels.so-000-gfx90a.hsaco`
+        (Tensile/rocRoller code-object naming)
 
     What we forbid is the WRONG base arch in a sibling dir (e.g. a
     `_gfx950` file under `library/gfx942/`). Anything matching the dir's
     base — alone or carrying additional `-feature[+-]` tokens — passes.
     """
-    # Strip extension(s); chained extensions like `.hsaco.raw` collapse to
-    # the original stem before the first dot.
-    stem = filename.split(".", 1)[0]
-    # Find every `_gfxNNN...` token in the stem (greedy on the arch body,
-    # bounded on the right by `_`, end-of-string, or punctuation).
-    pattern = re.compile(r"_(?P<arch>gfx[a-z0-9]+(?:-[\-+a-z0-9]+)*?)(?=_|$)")
-    for m in pattern.finditer(stem):
+    # Search the WHOLE filename (not just the text before the first dot) for a
+    # gfx arch token delimited on the left by start-of-string or one of [._-],
+    # capturing the base arch plus any cooked `-feature`/`+feature` tail. A
+    # wrong base arch (e.g. a `_gfx950` file under library/gfx942/) matches no
+    # token for gfx942 -> violation, preserving the misplacement check.
+    pattern = re.compile(r"(?:^|[._-])(?P<arch>gfx[0-9a-z]+(?:[-+][0-9a-z]+)*)")
+    for m in pattern.finditer(filename):
         found = m.group("arch")
-        if found == base_arch or found.startswith(base_arch + "-"):
+        if (
+            found == base_arch
+            or found.startswith(base_arch + "-")
+            or found.startswith(base_arch + "+")
+        ):
             return True
     return False
 
