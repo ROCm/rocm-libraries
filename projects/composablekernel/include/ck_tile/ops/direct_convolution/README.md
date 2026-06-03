@@ -75,9 +75,11 @@ Detailed documentation is available at `projects/composablekernel/docs/direct_co
 
 ## Building
 
-The CK Tile direct convolutions are integrated to the CK Profiler and they are included in the profiling runs. This requires that the CMake flag `D CK_EXPERIMENTAL_BUILDER=ON` is defined. 
-Additionally, it is possible to disable the implicit-GEMM instances from the CK Profiler build 
-by defining an additional CMake flag `-D DISABLE_IMPLICIT_GEMM_INSTANCES` (building the implcit-GEMM instances might take a long time). All in all, if the focus in on the direct convolutions, one can run the following CMake configure step
+### Dispatcher codegen (recommended)
+
+The CK Tile Dispatcher is the recommended way to build and profile direct convolution
+kernels. It generates each kernel as a separate compilation unit for better build
+parallelism. Enable it with `CK_TILE_DISPATCHER=ON`:
 
 ```
 cmake                                                                                             \
@@ -85,12 +87,25 @@ cmake                                                                           
   -D CMAKE_CXX_COMPILER=/opt/rocm/bin/hipcc                                                       \
   -D CMAKE_BUILD_TYPE=Release                                                                     \
   -D GPU_TARGETS="gfx950"                                                                         \
-  -D CK_EXPERIMENTAL_BUILDER=ON                                                                   \
+  -D CK_TILE_DISPATCHER=ON                                                                        \
   -D CMAKE_CXX_STANDARD=20                                                                        \
-  -D DISABLE_IMPLICIT_GEMM_INSTANCES=ON                                                           \
   -G Ninja                                                                                        \
   ..
 ```
+
+To build only the direct convolution instances (without implicit-GEMM), set
+`DISABLE_IMPLICIT_GEMM_INSTANCES=ON`. This flag is a codegen filter in the
+Dispatcher pipeline that emits only `kind=direct_conv` instances:
+
+```
+  -D DISABLE_IMPLICIT_GEMM_INSTANCES=ON                                                           \
+```
+
+### CK Builder codegen (legacy)
+
+The CK Builder codegen path (`CK_EXPERIMENTAL_BUILDER=ON`, `CK_TILE_DISPATCHER=OFF`)
+includes only the implicit-GEMM instances. Direct convolution instances are no longer
+part of the CK Builder path — use the Dispatcher codegen instead.
 
 One can speed-up the configuration step by defining additional flags to disable the tile engine and CK examples generation
 
@@ -98,24 +113,6 @@ One can speed-up the configuration step by defining additional flags to disable 
 -D BUILD_CK_TILE_ENGINE=OFF                                                                     \
 -D BUILD_CK_EXAMPLES=OFF                                                                        \
 -D BUILD_CK_TUTORIALS=OFF                                                                       \
-```
-
-Hence, the fastest way to run the configuration step for CK Tile direct convolutions is to run
-
-```
-cmake                                                                                             \
-  -D CMAKE_PREFIX_PATH=/opt/rocm                                                                  \
-  -D CMAKE_CXX_COMPILER=/opt/rocm/bin/hipcc                                                       \
-  -D CMAKE_BUILD_TYPE=Release                                                                     \
-  -D GPU_TARGETS="gfx950"                                                                         \
-  -D CK_EXPERIMENTAL_BUILDER=ON                                                                   \
-  -D CMAKE_CXX_STANDARD=20                                                                        \
-  -D DISABLE_IMPLICIT_GEMM_INSTANCES=ON                                                           \
-  -D BUILD_CK_TILE_ENGINE=OFF                                                                     \
-  -D BUILD_CK_EXAMPLES=OFF                                                                        \
-  -D BUILD_CK_TUTORIALS=OFF                                                                       \
-  -G Ninja                                                                                        \
-  ..
 ```
 
 ## Testing
@@ -145,5 +142,6 @@ There is a [python script](../../../../script/test_direct_conv.py) that runs a s
 This can be used to verify that all instances produce correct results as wel as for testing performance regresion/improvement after refactoring. 
 When the coverage of the CK Tile direct convs is expanded, more cases should be added.
 
-For running the performance script, it might be beneficial to build without the implicit GEMM instances as they are expected to be slower for the cases 
-where direct convolution is applicable.
+For running the performance script, use the Dispatcher codegen build (`CK_TILE_DISPATCHER=ON`).
+To focus on direct convolution only, add `-D DISABLE_IMPLICIT_GEMM_INSTANCES=ON` to the
+Dispatcher build configuration.

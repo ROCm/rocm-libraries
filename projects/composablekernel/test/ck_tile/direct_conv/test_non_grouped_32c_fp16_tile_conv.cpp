@@ -7,7 +7,7 @@
 #pragma clang diagnostic ignored "-Wunused-parameter"
 #pragma clang diagnostic ignored "-Wshadow"
 #include "ck_tile/ops/direct_convolution/kernel/direct_conv_32c_dense.hpp"
-#include "ck_tile/ops/direct_convolution/configs/direct_conv_32c_dense_configs.hpp"
+#include "configs/direct_conv_32c_dense_configs.hpp"
 #pragma clang diagnostic pop
 
 constexpr auto v3 = ck_tile::direct_conv::Version::v3;

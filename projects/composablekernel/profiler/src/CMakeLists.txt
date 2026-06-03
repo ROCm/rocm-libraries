@@ -145,35 +145,10 @@ foreach(SOURCE ${PROFILER_OPS})
 endforeach()
 message(VERBOSE "ckProfiler sources: ${PROFILER_SOURCES}")
 
-if(SUPPORTED_GPU_TARGETS MATCHES "gfx9")
-  if(CK_EXPERIMENTAL_BUILDER AND NOT CK_TILE_DISPATCHER)
-    list(APPEND PROFILER_SOURCES
-        profile_grouped_conv_fwd_direct_nhwgc_fp16_4c.cpp
-        profile_grouped_conv_fwd_direct_nhwgc_fp16_16c.cpp
-        profile_grouped_conv_fwd_direct_nhwgc_fp16_8c.cpp
-        profile_grouped_conv_fwd_direct_nhwgc_fp16_32c.cpp
-        profile_grouped_conv_fwd_direct_nhwgc_bf16_4c.cpp
-        profile_grouped_conv_fwd_direct_nhwgc_bf16_16c.cpp
-        profile_grouped_conv_fwd_direct_nhwgc_bf16_8c.cpp
-        profile_grouped_conv_fwd_direct_nhwgc_bf16_32c.cpp
-        profile_grouped_conv_bwd_data_direct_nhwgc_fp16_4c.cpp
-        profile_grouped_conv_bwd_data_direct_nhwgc_fp16_16c.cpp
-        profile_grouped_conv_bwd_data_direct_nhwgc_fp16_8c.cpp
-        profile_grouped_conv_bwd_data_direct_nhwgc_fp16_32c.cpp
-        profile_grouped_conv_bwd_data_direct_nhwgc_bf16_4c.cpp
-        profile_grouped_conv_bwd_data_direct_nhwgc_bf16_16c.cpp
-        profile_grouped_conv_bwd_data_direct_nhwgc_bf16_8c.cpp
-        profile_grouped_conv_bwd_data_direct_nhwgc_bf16_32c.cpp)
-  endif()
-endif()
-
 set(PROFILER_EXECUTABLE ckProfiler)
 
 add_executable(${PROFILER_EXECUTABLE} ${PROFILER_SOURCES})
 target_compile_options(${PROFILER_EXECUTABLE} PRIVATE -Wno-global-constructors)
-if(DISABLE_IMPLICIT_GEMM_INSTANCES)
-  target_compile_definitions(${PROFILER_EXECUTABLE} PRIVATE DISABLE_IMPLICIT_GEMM_INSTANCES)
-endif()
 # flags to compress the library
 if(NOT WIN32 AND ${hip_VERSION_FLAT} GREATER 600241132)
   message(DEBUG "Adding --offload-compress flag for ${PROFILER_EXECUTABLE}")

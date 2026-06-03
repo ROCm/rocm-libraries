@@ -17,21 +17,18 @@
 #include "ck_tile/builder/conv_builder.hpp"
 #include "tile_profiler_common.hpp"
 #include "tile_profiler_utils.hpp"
-#include "direct_conv_instance_registry.hpp"
 
 namespace ck_tile::builder::profiling {
 
 namespace ckb = ck_tile::builder;
 namespace ckt = ck_tile::builder::test;
 
-#ifndef DISABLE_IMPLICIT_GEMM_INSTANCES
 #include "../../../experimental/grouped_convolution_tile_instances/instances/backward_data/grouped_convolution_backward_data_tile_ndhwgc_fp32.inc"
 #include "../../../experimental/grouped_convolution_tile_instances/instances/backward_data/grouped_convolution_backward_data_tile_nhwgc_fp32.inc"
 #include "../../../experimental/grouped_convolution_tile_instances/instances/backward_data/grouped_convolution_backward_data_tile_nhwgc_bf16.inc"
 #include "../../../experimental/grouped_convolution_tile_instances/instances/backward_data/grouped_convolution_backward_data_tile_nhwgc_fp16.inc"
 #include "../../../experimental/grouped_convolution_tile_instances/instances/backward_data/grouped_convolution_backward_data_tile_ndhwgc_bf16.inc"
 #include "../../../experimental/grouped_convolution_tile_instances/instances/backward_data/grouped_convolution_backward_data_tile_ndhwgc_fp16.inc"
-#endif // DISABLE_IMPLICIT_GEMM_INSTANCES
 
 /// @brief `run_grouped_conv_backward_data_tile_algs()` run all grouped conv bwd data instances.
 ///
@@ -199,55 +196,27 @@ run_grouped_conv_backward_data_tile_algs(const ckt::Args<SIGNATURE>& args,
 
     if constexpr(SIGNATURE == SIGNATURE_NHWGC_FP16_BWD_DATA)
     {
-#ifndef DISABLE_IMPLICIT_GEMM_INSTANCES
 #include "../../experimental/grouped_convolution_tile_instances/instances/backward_data/grouped_convolution_backward_data_tile_nhwgc_fp16_calls.inc"
-#endif // DISABLE_IMPLICIT_GEMM_INSTANCES
-        for(auto fn : get_bwd_data_direct_instances_nhwgc_fp16_4c())
-            run_alg(fn);
-        for(auto fn : get_bwd_data_direct_instances_nhwgc_fp16_16c())
-            run_alg(fn);
-        for(auto fn : get_bwd_data_direct_instances_nhwgc_fp16_8c())
-            run_alg(fn);
-        for(auto fn : get_bwd_data_direct_instances_nhwgc_fp16_32c())
-            run_alg(fn);
     }
     else if constexpr(SIGNATURE == SIGNATURE_NHWGC_BF16_BWD_DATA)
     {
-#ifndef DISABLE_IMPLICIT_GEMM_INSTANCES
 #include "../../experimental/grouped_convolution_tile_instances/instances/backward_data/grouped_convolution_backward_data_tile_nhwgc_bf16_calls.inc"
-#endif // DISABLE_IMPLICIT_GEMM_INSTANCES
-        for(auto fn : get_bwd_data_direct_instances_nhwgc_bf16_4c())
-            run_alg(fn);
-        for(auto fn : get_bwd_data_direct_instances_nhwgc_bf16_16c())
-            run_alg(fn);
-        for(auto fn : get_bwd_data_direct_instances_nhwgc_bf16_8c())
-            run_alg(fn);
-        for(auto fn : get_bwd_data_direct_instances_nhwgc_bf16_32c())
-            run_alg(fn);
     }
     else if constexpr(SIGNATURE == SIGNATURE_NHWGC_FP32_BWD_DATA)
     {
-#ifndef DISABLE_IMPLICIT_GEMM_INSTANCES
 #include "../../experimental/grouped_convolution_tile_instances/instances/backward_data/grouped_convolution_backward_data_tile_nhwgc_fp32_calls.inc"
-#endif // DISABLE_IMPLICIT_GEMM_INSTANCES
     }
     else if constexpr(SIGNATURE == SIGNATURE_NDHWGC_FP16_BWD_DATA)
     {
-#ifndef DISABLE_IMPLICIT_GEMM_INSTANCES
 #include "../../experimental/grouped_convolution_tile_instances/instances/backward_data/grouped_convolution_backward_data_tile_ndhwgc_fp16_calls.inc"
-#endif // DISABLE_IMPLICIT_GEMM_INSTANCES
     }
     else if constexpr(SIGNATURE == SIGNATURE_NDHWGC_BF16_BWD_DATA)
     {
-#ifndef DISABLE_IMPLICIT_GEMM_INSTANCES
 #include "../../experimental/grouped_convolution_tile_instances/instances/backward_data/grouped_convolution_backward_data_tile_ndhwgc_bf16_calls.inc"
-#endif // DISABLE_IMPLICIT_GEMM_INSTANCES
     }
     else if constexpr(SIGNATURE == SIGNATURE_NDHWGC_FP32_BWD_DATA)
     {
-#ifndef DISABLE_IMPLICIT_GEMM_INSTANCES
 #include "../../experimental/grouped_convolution_tile_instances/instances/backward_data/grouped_convolution_backward_data_tile_ndhwgc_fp32_calls.inc"
-#endif // DISABLE_IMPLICIT_GEMM_INSTANCES
     }
     else
     {

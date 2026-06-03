@@ -18,7 +18,7 @@
 #pragma clang diagnostic ignored "-Wshadow"
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/direct_convolution/kernel/impl/conv_32c_tile_impl_v3.hpp"
-#include "ck_tile/ops/direct_convolution/configs/direct_conv_32c_dense_configs.hpp"
+#include "configs/direct_conv_32c_dense_configs.hpp"
 #pragma clang diagnostic pop
 
 #include <hip/hip_fp16.h>

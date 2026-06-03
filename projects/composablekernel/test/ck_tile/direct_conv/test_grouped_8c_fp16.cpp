@@ -8,7 +8,7 @@
 #pragma clang diagnostic ignored "-Wunused-parameter"
 #pragma clang diagnostic ignored "-Wshadow"
 #include "ck_tile/ops/direct_convolution/kernel/direct_conv_8c.hpp"
-#include "ck_tile/ops/direct_convolution/configs/direct_conv_8c_hip_configs.hpp"
+#include "configs/direct_conv_8c_hip_configs.hpp"
 #pragma clang diagnostic pop
 
 struct HipConv8cKernelTraits
