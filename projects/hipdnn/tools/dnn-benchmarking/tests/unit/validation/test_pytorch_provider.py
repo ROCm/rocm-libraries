@@ -659,12 +659,72 @@ class TestPyTorchProviderNewOps:
         np.testing.assert_allclose(outputs[7].data, [[[[2.0]]]], rtol=1e-6)
         np.testing.assert_allclose(outputs[8].data, [[[[6.0]]]], rtol=1e-6)
 
+    @pytest.mark.parametrize(
+        "op_type,inputs,outputs",
+        [
+            (
+                "BatchnormAttributes",
+                {
+                    "x_tensor_uid": 1,
+                    "scale_tensor_uid": 2,
+                    "bias_tensor_uid": 3,
+                    "epsilon_tensor_uid": 4,
+                    "peer_stats_tensor_uid": [99],
+                },
+                {"y_tensor_uid": 5},
+            ),
+            (
+                "BatchnormBackwardAttributes",
+                {
+                    "dy_tensor_uid": 1,
+                    "x_tensor_uid": 2,
+                    "scale_tensor_uid": 3,
+                    "peer_stats_tensor_uid": [99],
+                },
+                {
+                    "dx_tensor_uid": 4,
+                    "dscale_tensor_uid": 5,
+                    "dbias_tensor_uid": 6,
+                },
+            ),
+        ],
+    )
+    def test_batchnorm_peer_stats_rejected(
+        self, op_type: str, inputs: dict, outputs: dict
+    ) -> None:
+        provider = ReferenceProviderRegistry.get_provider("pytorch")
+        graph_json = {
+            "nodes": [
+                {
+                    "type": op_type,
+                    "inputs": inputs,
+                    "outputs": outputs,
+                }
+            ]
+        }
+        input_data = {
+            1: np.array([[[[1.0, 3.0]]]], dtype=np.float32),
+            2: np.array([[[[1.0]]]], dtype=np.float32),
+            3: np.array([[[[0.0]]]], dtype=np.float32),
+            4: np.array([0.0], dtype=np.float32),
+        }
+
+        with pytest.raises(ValueError, match="peer statistics"):
+            provider.compute_reference(graph_json, input_data)
+
     def test_sdpa_forward_matches_torch_and_returns_stats(self) -> None:
         provider = ReferenceProviderRegistry.get_provider("pytorch")
         q = np.array([[[[1.0, 0.0], [0.0, 1.0]]]], dtype=np.float32)
         k = q.copy()
         v = np.array([[[[1.0, 2.0], [3.0, 4.0]]]], dtype=np.float32)
         graph_json = {
+            "tensors": [
+                {"uid": 1, "dims": [1, 1, 2, 2], "data_type": "float"},
+                {"uid": 2, "dims": [1, 1, 2, 2], "data_type": "float"},
+                {"uid": 3, "dims": [1, 1, 2, 2], "data_type": "float"},
+                {"uid": 4, "dims": [1, 1, 2, 2], "data_type": "float"},
+                {"uid": 6, "dims": [1, 1, 2, 1], "data_type": "float"},
+            ],
             "nodes": [
                 {
                     "type": "SdpaAttributes",
@@ -672,7 +732,7 @@ class TestPyTorchProviderNewOps:
                     "outputs": {"o_tensor_uid": 4, "stats_tensor_uid": 6},
                     "attributes": {"dropout_probability": 0.0},
                 }
-            ]
+            ],
         }
 
         outputs = provider.compute_reference(graph_json, {1: q, 2: k, 3: v})
@@ -685,10 +745,12 @@ class TestPyTorchProviderNewOps:
         expected_stats = torch.logsumexp(
             torch.matmul(q_t, k_t.transpose(-2, -1)) / torch.sqrt(torch.tensor(2.0)),
             dim=-1,
+            keepdim=True,
         )
 
         np.testing.assert_allclose(outputs[4].data, expected.numpy(), rtol=1e-6)
         np.testing.assert_allclose(outputs[6].data, expected_stats.numpy(), rtol=1e-6)
+        assert outputs[6].data.shape == (1, 1, 2, 1)
 
     def test_sdpa_bfloat16_uses_graph_dtype(self) -> None:
         provider = ReferenceProviderRegistry.get_provider("pytorch")

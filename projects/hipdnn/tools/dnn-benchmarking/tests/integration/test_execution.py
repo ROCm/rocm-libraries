@@ -348,9 +348,9 @@ class TestExecutionErrors:
     """Tests for execution error handling."""
 
     @pytest.fixture
-    def hipdnn(self):
+    def hipdnn(self, plugin_paths: List[str]):
         """Get hipdnn_frontend module or skip if not available."""
-        return _setup_hipdnn()
+        return _setup_hipdnn(plugin_paths)
 
     def test_execute_without_prepare_raises(
         self, hipdnn, sample_conv_fwd_json: Dict[str, Any]
@@ -392,9 +392,9 @@ class TestPyTorchReferenceValidation:
     """Integration tests for PyTorch reference validation with GPU execution."""
 
     @pytest.fixture
-    def hipdnn(self):
+    def hipdnn(self, plugin_paths: List[str]):
         """Get hipdnn_frontend module or skip if not available."""
-        return _setup_hipdnn()
+        return _setup_hipdnn(plugin_paths)
 
     @pytest.fixture
     def pytorch_provider(self):
