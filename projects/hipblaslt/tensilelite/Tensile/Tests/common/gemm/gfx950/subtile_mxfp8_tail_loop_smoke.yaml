@@ -38,84 +38,80 @@
 # granularity supported under UseSubtileImpl.
 #
 # PR 7781 + PR 7656 + PR 7683 verification status (gfx950, freshly rebuilt
-# tensilelite-client at HEAD of users/bnemanich/mxfp8-tail-loop-test):
+# tensilelite-client at HEAD of users/bnemanich/mxfp8-tail-loop-test).
 #
+# Pre-fix (HEAD ce357febed1, before main-loop regression was diagnosed):
 #   K=128 (full tail, no main): PASS
 #   K=288 (1 main + 32 tail) : FAIL  889 / 16384 wrong (5.4%)
 #   K=512 (2 main, no tail)  : FAIL 1421 / 16384 wrong (8.7%)
 #   K=544 (2 main + 32 tail) : FAIL 1262 / 16384 wrong (7.7%)
 #   K=768 (3 main, no tail)  : FAIL 1977 / 16384 wrong (12.1%)
 #
-# Note: the K=512 and K=768 cases trigger ZERO tail loop iterations
-# (K % DU == 0) yet still fail with wrong-count growing linearly in K.
-# This is NOT the tail loop — it is a main-loop regression that affects
-# MXFP8 MT128x128 / DU=256 at K >= DU, regardless of PGR or PLR.
+# Post-fix (after [SubtileImpl] Fix single-DU per_uid_k regression in
+# emit_lr + NLL lr_inc PGR=1 gating, current HEAD):
+#   K=128 (full tail, no main): PASS
+#   K=288 (1 main + 32 tail) : FAIL   88 / 16384 wrong (0.5%)  <-- tail-only
+#   K=512 (2 main, no tail)  : PASS
+#   K=544 (2 main + 32 tail) : FAIL   63 / 16384 wrong (0.4%)  <-- tail-only
+#   K=768 (3 main, no tail)  : PASS
 #
-# Triage data (held constant: MT128x128, DU=256, MXScaleFormat=1,
-# DataInit=Random, gfx950 / dev0):
+# Main-loop regression diagnosis and fix (the LARGE wrong-counts):
 #
-# 1. Same K, same problem size, different PGR:
-#      PGR=1 PLR=1 K=256: FAIL 681 wrong values
-#      PGR=2 PLR=1 K=256: FAIL 681 wrong values  ← identical count
-#    Different PGR schedules produce IDENTICAL wrong-value counts, which
-#    points away from the SubtileImpl scheduler (the only path PGR varies
-#    over) and toward a kernel-vs-reference disagreement that is constant
-#    in the scheduler choice.
+# Bisecting against origin/users/psandhu/subtile_fp8_min_fix (PR 7656 head)
+# showed the smoke yaml at PR 7656 head ALSO produced exactly 88 / 63 wrong
+# values for K=288 / K=544 (matching the post-fix tail residual) but PASSED
+# K=512 / K=768. The merge of PR 7656 INTO our branch is what broke the
+# main-loop cases — not PR 7781's b937a0c8b3a Reference.cpp fast-path nor
+# PR 7644 / PR 7683 data-init changes. Forcing the slow CPU reference for
+# MX problems (`rejectFast("MX_block")`) reproduced the same wrong counts,
+# ruling out the reference-fast-path hypothesis.
 #
-# 2. DataInitType=AllOnes (1) instead of Random (3): all K PASS.
-#    Random-data sensitivity at K >= DU is consistent with either a CPU
-#    reference path that mismatches the kernel for random MX scales, or
-#    a kernel data-path bug that ones-data masks because 1.0 * 1.0 = 1.0
-#    and the accumulator just counts.
+# Root cause: at the merge `8b5096882e8`, the conflict resolution kept
+# parent-1 (PR 7781)'s `local_k = k % per_uid_k` modulo in
+# `InstructionEmitter.emit_lr` together with parent-2 (PR 7656)'s code
+# elsewhere. Under multi-DU (`numUnroll>1`) the modulo correctly folds k
+# into a uid-local index; under single-DU (`numUnroll==1`, the only mode
+# exercised by MT128 / DU=256) `per_uid_k` resolves to `grGran.k = 1` and
+# the modulo collapses every k>0 to local_k=0, so the wrap-LR loses its
+# subtileK component and reads from the WRONG LDS half (offset:0 instead
+# of offset:16384). Diff of generated assembly between PR 7656 head
+# (passing) and the merged HEAD (failing) showed exactly this — same
+# `s_xor s[sgprLocalWriteBaseAddrA]` was emitted, but the `ds_read_b128`
+# used a different LDS half offset.
 #
-# 3. MXFP4 sibling test, same kernel scheduler, same MT/DU/PGR/PLR
-#    (subtile_mxfp4.yaml-style config):
-#      K=256 (1*DU, no tail): PASS
-#      K=512 (2*DU, no tail): PASS
-#      K=288 (1*DU + tail)  : FAIL  415 / 65536 wrong (0.6%)
-#    MXFP4 main loop is clean and only the tail trips up the validator at
-#    a much smaller error rate. MXFP8's MAIN-LOOP wrong-count is an
-#    order of magnitude larger and grows linearly in K, distinguishing
-#    it from a tail-only or precision-only effect.
+# Companion NLL fix: at the merge, parent-1's
+# `elif em.opType == 'lr_inc' and not src.uid_swap: removed.add(...)` rule
+# was kept WITHOUT parent-2's matching `gr_inc and self.config.pgr == 2`
+# gate. Result: at PGR=1 NLL, gr_inc was kept (advance SRD + swap LW for
+# tail entry, parent-2's design) but lr_inc was dropped (parent-1's
+# design assumed gr_inc was also dropped). Tail-loop entry then read from
+# the wrong LDS half. The lr_inc rule is now gated on `pgr == 2`,
+# matching the gr_inc rule.
 #
-# 4. Pre-existing subtile_mxfp8_correctness_regression.yaml (which the v2
-#    docstring records as 5/5 PASS at ce19b77af42) now fails to compile
-#    one of its solutions with "overflowed resources, errorCode=4, msg=
-#    Occupancy limit, vgprs=289" — a fresh symptom that the merge changed
-#    VGPR pressure on the MT256x256 PGR=1 PLR=0 path.
+# Why "identical wrong-value counts across PGR=1/PGR=2" misled the prior
+# triage: in the broken state, ALL of NLL's emit_lr-emitted reads land
+# in the wrong half regardless of which PGR-shaped wrapper the kernel
+# uses, so PGR doesn't change the failure footprint. The wrong-counts
+# matching across PGR values is the symptom of an emit-time bug in the
+# LR coordinate, not a CPU-reference vs kernel disagreement.
 #
-# Most likely root causes (none confirmed; this is a triage record, not
-# a fix prescription):
+# Residual (88, 63 wrong values at K=288, K=544): pre-existing tail-loop
+# issue that PR 7656 head exhibits identically and that has its sibling
+# in the MXFP4 tail-loop yaml (subtile_mxfp4.yaml § same MT/DU/PGR/PLR:
+# K=288 FAIL 415 / 65536 wrong, ~0.6%). MXFP8 K=288 is 88/16384 = 0.5%,
+# K=544 is 63/16384 = 0.4% — same magnitude class. Likely root in
+# `emit_mask_k` non-BF16 branch (assumes FP4 packing) and/or MX scale
+# mask reuse. Tracked separately from the main-loop fix — the
+# subtile_mxfp4.yaml tail-loop residual is the more direct repro for
+# the next worker who picks up that issue.
 #
-#   * PR 7781 commit b937a0c8b3a "[Reference] Enable fast CPU GEMM path
-#     for MX-scaled problems" enabled a new CPU reference path for
-#     MX-scaled GEMMs. The plan flagged this commit as "straightforward,
-#     no overlap with PR 7656". Behavior with the PR 7656 + PR 7683
-#     merges has not been re-validated and is consistent with a
-#     reference-side regression on MXFP8 random data.
-#
-#   * PR 7644 (#7644, "Exclude F6 from data initialization using
-#     mxDataGenerator") changed `isMXProblem` → `isMXProblemExceptF6` in
-#     DataInitialization.cpp / ReferenceValidator.cpp; the F8 path still
-#     enters mxDataGenerator, but the surrounding restride /
-#     pre-swizzle bookkeeping added by PR 7683 may interact differently
-#     than the plain `isMXProblem` it was tested against.
-#
-#   * PR 7683 added `restrideMXScaleBufferKFast` for K-fast layouts
-#     when compactKBlocks != paddedKBlocks. For K=256 with MX block=32
-#     compactKBlocks=8 already equals paddedKBlocks=8 so the restride
-#     is a no-op; however the surrounding control flow added by the
-#     same patch (around `initializeMXData`) runs unconditionally and
-#     may touch MXFP8 scale buffers in a new way.
-#
-# Status: BLOCKED on this baseline regression. Per plan Step 7, the work
-# scopes beyond a small targeted fix (≤1 commit, ~50 lines) because the
-# failure is in the MAIN LOOP, not the tail loop the plan was meant to
-# enable. The tail-loop emit_mask_k / scale-mask / SRD kPad triage
-# suggested by the plan is moot until the main-loop baseline is restored.
-# Yamls and triage data are committed so the next worker has a starting
-# point (likely action: bisect PR 7781 `b937a0c8b3a` against PR 7656 +
-# PR 7683 to localize the regression).
+# Pre-existing v2 regression yamls (subtile_mxfp8_correctness_regression*
+# .yaml, MT256x256x256 PGR=1 PLR=0 multi-DU): still fail kernel codegen
+# at the post-merge HEAD with `vgprs=289 (Occupancy limit)`. The merge
+# raised VGPR pressure on PR 7781's multi-DU path; this is independent
+# of the main-loop bug fixed here. Per the fix-loop plan: "if the
+# regression is fundamental (PR 7656's design choice), document and
+# skip — the user can route to PR 7656's author".
 ########################################
 
 TestParameters:
