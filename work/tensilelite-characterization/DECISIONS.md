@@ -262,3 +262,25 @@ bug (the `--skipMI` CLI flag is unusable). ADD-ONLY forbids fixing
 **Residual:** 199 stmts, 4 missed → 98% line. Misses are two yaml-representer
 callbacks (representNone/flowSeq, registered but not invoked by these tests) and
 two orchestrator RuntimeError guards (empty solutionIndex / missing solution).
+
+## D15 — TensileClientConfig.py is a dead module (broken import); skip it
+
+**Context:** Batch F. `TensileClientConfig.py` line 28 does
+`from .Common import globalParameters, ... assignGlobalParameters,
+restoreDefaultGlobalParameters, ...`, but `Tensile.Common` does not export
+`globalParameters` (it lives in `Tensile.Common.GlobalParameters`). Importing
+the module raises `ImportError: cannot import name 'globalParameters' from
+'Tensile.Common'`. This is why it sits at 0% coverage — it cannot be imported.
+
+**Decision:** Skip TensileClientConfig.py entirely; document it as broken.
+
+**Why:** It is impossible to import, so it has no live behavior to characterize.
+A test that merely asserts the ImportError would pin environment/packaging
+breakage, not module behavior, and ADD-ONLY forbids fixing the import. The other
+Batch F CLI scripts (TensileMergeLibrary/RetuneLibrary/UpdateLibrary/
+BenchmarkLibraryClient) import fine and are characterized at the pure-helper
+level.
+
+**Rejected alternatives:**
+- *Assert the ImportError* — pins breakage, not behavior; brittle.
+- *Fix the import* — out of scope (ADD-ONLY); belongs in a separate change.
