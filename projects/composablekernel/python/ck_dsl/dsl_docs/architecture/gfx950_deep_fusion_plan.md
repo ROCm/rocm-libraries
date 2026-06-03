@@ -165,8 +165,14 @@ shape works":
 4. **Full exercise shape**:
    `N=1, H=2160, W=3840, C=8, K0=32, K1=24, pool output 1080x1920`.
    This is the performance target. Current fp16 prototype timing with
-   `pool_tile=4x8`, `tile_n=32`, `tile_k=16` is about `0.357 ms`
-   (`~143 useful TFLOP/s`) in the benchmark harness with 100 warmup iterations.
+   `pool_tile=4x8`, `tile_n=32`, `tile_k=16` is about `0.246 ms`
+   (`~207 useful TFLOP/s`) in the benchmark harness with 100 warmup iterations,
+   after vectorizing the conv1 LDS operand reads **and** collapsing the
+   redundant epilogue barriers (was `0.357 ms` / `~143 useful TFLOP/s` with
+   scalar gathers + three barriers; 1.45× cumulative speedup). See
+   `2026-06-03-0439-gfx950-conv1-lds-vectorization-results.md` (conv1 read
+   vectorization, 1.41×) and
+   `2026-06-03-1416-gfx950-barrier-merge-results.md` (barrier-merge, +3%).
 
 Input-footprint caching was also prototyped as an opt-in mode. It is
 numerically correct, but slower in the current schedule: for the full target,

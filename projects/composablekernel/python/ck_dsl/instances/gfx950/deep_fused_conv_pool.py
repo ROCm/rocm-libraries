@@ -18,7 +18,7 @@ materializing intermediates in global memory.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Sequence, Tuple
+from typing import Optional, Sequence, Tuple
 
 from ...core.ir import F16, I32, IRBuilder, PtrType, Value
 from ...helpers.distribution import (
@@ -32,7 +32,10 @@ from ...helpers.layouts import LdsLayout
 from ...helpers.loads import CoalescedTileLoader
 from ...helpers.spec import SignatureBuilder, kernel_name_join
 from ...helpers.tensor_view import make_buffer_resource, make_lds_view
-from ...helpers.mfma_gemm_inner import decode_mfma_lanes
+from ...helpers.mfma_gemm_inner import (
+    decode_mfma_lanes,
+    load_smem_frag_contiguous_f16,
+)
 from ..common.conv_implicit_gemm import (
     ConvAccumulatorEpilogue,
     ConvProblem,
@@ -147,6 +150,77 @@ class Gfx950DeepFusedConvPoolSpec:
         )
 
 
+def make_deep_fused_conv_pool_spec(
+    *,
+    n: int = 1,
+    h: int,
+    w: int,
+    c: int,
+    k0: int,
+    k1: int,
+    r: int = 3,
+    s: int = 3,
+    pool_tile_h: int = 4,
+    pool_tile_w: int = 8,
+    tile_n: int = 32,
+    tile_k: int = 16,
+    warp_m: int = 2,
+    warp_n: int = 1,
+    warp_tile_k: int = 16,
+    pipeline: str = "mem",
+    unroll_k: bool = False,
+    async_dma: bool = False,
+    cache_input_footprint: bool = False,
+    direct_conv0_from_input_cache: bool = False,
+) -> Gfx950DeepFusedConvPoolSpec:
+    """Build a deep-fusion spec, auto-deriving the constrained ``tile_m``.
+
+    ``tile_m`` must equal the rectangular conv tile that backs one pooled-output
+    tile, i.e. ``(pool_tile_h * pool_stride_h) * (pool_tile_w * pool_stride_w)``.
+    Deriving it here keeps callers (verify harness, benchmarks, sweeps) from
+    setting it inconsistently with ``pool_tile_*`` and tripping the validator.
+    """
+
+    conv = ConvProblem(
+        N=n,
+        Hi=h,
+        Wi=w,
+        C=c,
+        K=k0,
+        R=r,
+        S=s,
+        sH=1,
+        sW=1,
+        pH=1,
+        pW=1,
+        dH=1,
+        dW=1,
+    )
+    problem = FusedConvPoolProblem(conv=conv, conv1_k=k1)
+    conv_tile_h = pool_tile_h * problem.pool_stride_h
+    conv_tile_w = pool_tile_w * problem.pool_stride_w
+    tile_m = conv_tile_h * conv_tile_w
+    return Gfx950DeepFusedConvPoolSpec(
+        problem=problem,
+        tile_m=tile_m,
+        tile_n=tile_n,
+        tile_k=tile_k,
+        pool_tile_h=pool_tile_h,
+        pool_tile_w=pool_tile_w,
+        warp_m=warp_m,
+        warp_n=warp_n,
+        warp_tile_m=32,
+        warp_tile_n=32,
+        warp_tile_k=warp_tile_k,
+        pipeline=pipeline,
+        unroll_k=unroll_k,
+        async_dma=async_dma,
+        cache_input_footprint=cache_input_footprint,
+        direct_conv0_from_input_cache=direct_conv0_from_input_cache,
+        acc_epilogue=ConvAccumulatorEpilogue(relu=True),
+    )
+
+
 def is_valid_spec(
     spec: Gfx950DeepFusedConvPoolSpec, arch: str = "gfx950"
 ) -> Tuple[bool, str]:
@@ -170,8 +244,12 @@ def is_valid_spec(
         spec.cache_input_footprint or spec.direct_conv0_from_input_cache
     ):
         return False, "async_dma is only supported with the default conv0 A-load path"
-    if spec.unroll_k:
-        return False, "unroll_k is currently incorrect for the fused conv0 carrier"
+    if spec.unroll_k and spec.async_dma:
+        return False, "unroll_k and async_dma are mutually exclusive K-loop schedules"
+    if spec.unroll_k and (
+        spec.cache_input_footprint or spec.direct_conv0_from_input_cache
+    ):
+        return False, "unroll_k is only supported with the default conv0 A-load path"
     if c.N != 1:
         return False, f"v1 tiled schedule supports only N=1 (got N={c.N})"
     if spec.pool_tile_h <= 0 or spec.pool_tile_w <= 0:
@@ -240,8 +318,15 @@ def _stage_accumulators_to_cshuffle_lds(
     spec: ImplicitGemmConvSpec,
     accs: Sequence[Value],
     grid: WarpGrid,
+    *,
+    sync: bool = True,
 ) -> Value:
-    """Publish MFMA accumulators to a row-major ``[tile_m, tile_n]`` LDS tile."""
+    """Publish MFMA accumulators to a row-major ``[tile_m, tile_n]`` LDS tile.
+
+    ``sync=False`` skips the trailing ``b.sync()`` so the caller can batch this
+    producer barrier with another disjoint-LDS producer (e.g. the W1 load) into
+    a single block-wide barrier before the shared consumer reads both tiles.
+    """
 
     atom = spec.atom
     mfmas_m = grid.mfmas_per_warp_m
@@ -286,7 +371,8 @@ def _stage_accumulators_to_cshuffle_lds(
 
             store_tile_cshuffle(b, c_window, dt, traits=traits, coord_fn=coord_fn)
 
-    b.sync()
+    if sync:
+        b.sync()
     return c_smem
 
 
@@ -295,8 +381,16 @@ def _load_conv1_weights_to_lds(
     spec: Gfx950DeepFusedConvPoolSpec,
     w1_rsrc: Value,
     grid: WarpGrid,
+    *,
+    sync: bool = True,
 ) -> Value:
-    """Load W1[K1, K0] into a padded row-major LDS tile."""
+    """Load W1[K1, K0] into a padded row-major LDS tile.
+
+    ``sync=False`` skips the trailing ``b.sync()`` so the caller can fold this
+    barrier into a single block-wide barrier shared with the conv0 cshuffle
+    stage (the two write disjoint LDS tiles, so one barrier suffices before the
+    conv1 MFMA reads both).
+    """
 
     w1_smem = b.smem_alloc(F16, [spec.tile_n, spec.problem.conv.K], name_hint="W1_smem")
     loader = CoalescedTileLoader(
@@ -316,7 +410,8 @@ def _load_conv1_weights_to_lds(
         return off, valid
 
     loader.load(b, tid=grid.tid, smem_dst=w1_smem, descriptor=descriptor, rsrc=w1_rsrc)
-    b.sync()
+    if sync:
+        b.sync()
     return w1_smem
 
 
@@ -420,8 +515,13 @@ def _load_conv0_a_tile_from_input_cache(
         local_ow = b.mod(row, c_conv_tile_w)
         r = b.div(kg, c_sc)
         rem = b.mod(kg, c_sc)
-        s_col = b.div(rem, c_c)
-        ci = b.mod(rem, c_c)
+        # VALU opt: strength-reduce div/mod by C=8 to shift/mask.
+        if c.C == 8:
+            s_col = b.lshr(rem, b.const_i32(3))
+            ci = b.land(rem, b.const_i32(7))
+        else:
+            s_col = b.div(rem, c_c)
+            ci = b.mod(rem, c_c)
         ih = b.add(b.mul(local_oh, b.const_i32(c.sH)), b.mul(r, b.const_i32(c.dH)))
         iw = b.add(b.mul(local_ow, b.const_i32(c.sW)), b.mul(s_col, b.const_i32(c.dW)))
         foot_row = b.add(b.mul(ih, c_foot_w), iw)
@@ -439,7 +539,14 @@ def _load_conv0_a_operand_from_input_cache(
     frag_len: int,
     input_smem: Value,
 ) -> Value:
-    """Read one MFMA A operand fragment directly from the cached input footprint."""
+    """Read one MFMA A operand fragment directly from the cached input footprint.
+
+    Optimized for VALU address-math reduction:
+    - Hoists row-dependent ``local_oh/local_ow`` out of the per-element loop
+      (computed once per fragment, not once per element).
+    - Strength-reduces div/mod by ``C=8`` (power-of-2) to shift/mask:
+      ``s_col = rem >> 3`` and ``ci = rem & 7`` instead of div/mod.
+    """
 
     p = spec.problem
     c = p.conv
@@ -451,43 +558,79 @@ def _load_conv0_a_operand_from_input_cache(
     c_foot_w = b.const_i32(foot_w)
     c_k_gemm = b.const_i32(c.K_gemm)
     zero_h = b.trunc_f32_to_f16(b.const_f32(0.0))
+
+    # VALU opt 1: hoist row-dependent coordinates out of the per-element loop.
+    # ``row`` is fixed for the entire fragment (one MFMA A operand), so
+    # ``local_oh`` and ``local_ow`` are loop-invariant. Computing them once
+    # saves ``frag_len - 1`` div/mod pairs (7 pairs for ``frag_len=8``).
     local_oh = b.div(row, c_conv_tile_w)
     local_ow = b.mod(row, c_conv_tile_w)
+
+    # Precompute base offset for spatial indexing (also loop-invariant).
+    oh_base = b.mul(local_oh, b.const_i32(c.sH))
+    ow_base = b.mul(local_ow, b.const_i32(c.sW))
+
     elems = []
     for i in range(frag_len):
         kg = b.add(k_off, b.add(col_base, b.const_i32(i)))
         kg_ok = b.cmp_lt(kg, c_k_gemm)
         r = b.div(kg, c_sc)
         rem = b.mod(kg, c_sc)
-        s_col = b.div(rem, c_c)
-        ci = b.mod(rem, c_c)
-        ih = b.add(b.mul(local_oh, b.const_i32(c.sH)), b.mul(r, b.const_i32(c.dH)))
-        iw = b.add(b.mul(local_ow, b.const_i32(c.sW)), b.mul(s_col, b.const_i32(c.dW)))
+
+        # VALU opt 2: strength-reduce div/mod by C=8 (power-of-2) to shift/mask.
+        # Original: ``s_col = div(rem, C)``, ``ci = mod(rem, C)``.
+        # For C=8: ``s_col = rem >> 3``, ``ci = rem & 7``.
+        # This replaces two fp div-by-recip (``v_rcp`` + ``v_div_fixup``) with
+        # one ``v_lshrrev_b32`` and one ``v_and_b32`` — cheaper on VALU.
+        if c.C == 8:
+            s_col = b.lshr(rem, b.const_i32(3))
+            ci = b.land(rem, b.const_i32(7))
+        else:
+            s_col = b.div(rem, c_c)
+            ci = b.mod(rem, c_c)
+
+        ih = b.add(oh_base, b.mul(r, b.const_i32(c.dH)))
+        iw = b.add(ow_base, b.mul(s_col, b.const_i32(c.dW)))
         foot_row = b.add(b.mul(ih, c_foot_w), iw)
         raw = b.vec_extract(b.smem_load_vN_f16(input_smem, foot_row, ci, n=1), 0)
         elems.append(b.select(kg_ok, raw, zero_h))
     return b.vec_pack(elems, elems[0].type)
 
 
-def _masked_smem_frag_f16(
-    b: IRBuilder,
-    smem: Value,
-    row: Value,
-    col_base: Value,
-    frag_len: int,
-    valid_k: int,
-) -> Value:
-    """Load a f16 fragment, zeroing lanes beyond the logical K extent."""
+def _epilogue_is_pool_deferrable(epi: ConvAccumulatorEpilogue) -> bool:
+    """Whether ``epi`` commutes with maxpool so it can be applied after the pool.
 
-    zero_h = b.trunc_f32_to_f16(b.const_f32(0.0))
-    elems = []
-    c_valid_k = b.const_i32(valid_k)
-    for i in range(frag_len):
-        col = b.add(col_base, b.const_i32(i))
-        raw = b.vec_extract(b.smem_load_vN_f16(smem, row, col, n=1), 0)
-        ok = b.cmp_lt(col, c_valid_k)
-        elems.append(b.select(ok, raw, zero_h))
-    return b.vec_pack(elems, elems[0].type)
+    ReLU, bias add, clamp, and non-negative scale are all monotonic
+    non-decreasing, so ``epi(max(xs)) == max(epi(x) for x in xs)``. Applying the
+    epilogue to the pooled result (one value per pooled pixel) instead of to every
+    conv1 accumulator element (4x more for 2x2 pool) cuts the per-element fmax/etc.
+    VALU. A negative scale would turn the outer max into a min, so it is not
+    deferrable.
+    """
+    return epi.scale >= 0.0
+
+
+def _apply_epilogue_scalar(
+    b: IRBuilder, epi: ConvAccumulatorEpilogue, v: Value
+) -> Value:
+    """Apply a static fp32 epilogue to a single scalar value.
+
+    Mirrors the per-lane transform in ``_apply_accumulator_epilogue`` so the
+    deferred-past-pool path is numerically identical to applying it on the accs.
+    """
+    if epi.is_identity():
+        return v
+    if epi.bias != 0.0:
+        v = b.fadd(v, b.const_f32(epi.bias))
+    if epi.scale != 1.0:
+        v = b.fmul(v, b.const_f32(epi.scale))
+    if epi.relu:
+        v = b.fmax(v, b.const_f32(0.0))
+    if epi.clamp_min is not None:
+        v = b.fmax(v, b.const_f32(epi.clamp_min))
+    if epi.clamp_max is not None:
+        v = b.fmin(v, b.const_f32(epi.clamp_max))
+    return v
 
 
 def _emit_conv1_1x1_mfma(
@@ -497,8 +640,14 @@ def _emit_conv1_1x1_mfma(
     c0_smem: Value,
     w1_smem: Value,
     grid: WarpGrid,
+    defer_epilogue: bool = False,
 ) -> Sequence[Value]:
-    """Compute conv1 as a 1x1 GEMM over staged conv0 activations."""
+    """Compute conv1 as a 1x1 GEMM over staged conv0 activations.
+
+    When ``defer_epilogue`` is set, the raw fp32 accumulators are returned and the
+    caller is responsible for applying ``spec.conv1_epilogue`` after the maxpool
+    reduction (valid only when the epilogue is pool-deferrable).
+    """
 
     atom = conv_spec.atom
     decoded = decode_mfma_lanes(b, atom, grid.lane)
@@ -509,6 +658,9 @@ def _emit_conv1_1x1_mfma(
     mfmas_n = grid.mfmas_per_warp_n
     k_atoms = conv_spec.k_atoms_per_tile_k
     k_chunks = (spec.problem.conv.K + spec.tile_k - 1) // spec.tile_k
+    # The valid_k mask only guards a K tail. When the tiling covers K exactly
+    # it is statically dead, so we can skip it and issue wide vector ds_reads.
+    needs_mask = k_chunks * spec.tile_k != spec.problem.conv.K
     warp_m_off = grid.warp_m_off(b)
     warp_n_off = grid.warp_n_off(b)
     accs = [b.zero_vec_f32(atom.c_per_lane) for _ in range(mfmas_m * mfmas_n)]
@@ -527,13 +679,14 @@ def _emit_conv1_1x1_mfma(
                     b.add(b.const_i32(mi * atom.m), m_in_atom),
                 )
                 a_rows.append(
-                    _masked_smem_frag_f16(
+                    load_smem_frag_contiguous_f16(
                         b,
                         c0_smem,
                         a_row,
                         col_base,
                         atom.a_per_lane,
-                        spec.problem.conv.K,
+                        needs_mask=needs_mask,
+                        valid_k=spec.problem.conv.K,
                     )
                 )
 
@@ -544,13 +697,14 @@ def _emit_conv1_1x1_mfma(
                     b.add(b.const_i32(ni * atom.n), n_in_atom),
                 )
                 b_cols.append(
-                    _masked_smem_frag_f16(
+                    load_smem_frag_contiguous_f16(
                         b,
                         w1_smem,
                         b_row,
                         col_base,
                         atom.b_per_lane,
-                        spec.problem.conv.K,
+                        needs_mask=needs_mask,
+                        valid_k=spec.problem.conv.K,
                     )
                 )
 
@@ -560,6 +714,8 @@ def _emit_conv1_1x1_mfma(
                     accs[flat] = atom.emit(b, a_rows[mi], b_cols[ni], accs[flat])
                     flat += 1
 
+    if defer_epilogue:
+        return list(accs)
     return _apply_accumulator_epilogue(b, spec.conv1_epilogue, accs)
 
 
@@ -569,18 +725,45 @@ def _emit_inline_maxpool_from_cshuffle(
     c_smem: Value,
     y_rsrc: Value,
     grid: WarpGrid,
+    epilogue: Optional[ConvAccumulatorEpilogue] = None,
 ) -> None:
-    """Reduce the staged conv tile into final pooled NHWK output."""
+    """Reduce the staged conv tile into final pooled NHWK output.
+
+    When ``epilogue`` is given, it is applied to each pooled fp32 result before
+    the fp16 store (the deferred conv1 epilogue, see
+    ``_epilogue_is_pool_deferrable``).
+    """
 
     p = spec.problem
     out_k = p.conv1_channels
     conv_tile_w = spec.pool_tile_w * p.pool_stride_w
-    total = spec.pool_tile_h * spec.pool_tile_w * out_k
-    elems_per_thread = (total + spec.block_size - 1) // spec.block_size
-    c_total = b.const_i32(total)
-    c_k = b.const_i32(out_k)
+
+    # Lever B: tile the gather by (window, k-block). The 2x2 maxpool corner rows
+    # depend only on the pooled window, not on the channel k, so processing a
+    # contiguous run of ``kvec`` channels per thread amortizes the window decode
+    # and the 4 corner-address computations across kvec channels and folds the
+    # per-channel scalar ``ds_read_u16`` into a single wide ``ds_read_b{32,64}``.
+    # k is the contiguous (column) dim of the row-major [tile_m, tile_n] cshuffle
+    # LDS tile, so a kvec-wide read stays within one row. Pick the largest valid
+    # width that divides out_k while keeping >= half the block's threads active.
+    kvec = 1
+    for cand in (8, 4, 2):
+        if (
+            out_k % cand == 0
+            and (spec.pool_tile_h * spec.pool_tile_w * (out_k // cand))
+            >= spec.block_size // 2
+        ):
+            kvec = cand
+            break
+    kblocks = out_k // kvec
+    total_vec = spec.pool_tile_h * spec.pool_tile_w * kblocks
+    elems_per_thread = (total_vec + spec.block_size - 1) // spec.block_size
+    c_total_vec = b.const_i32(total_vec)
+    c_kblocks = b.const_i32(kblocks)
+    c_kvec = b.const_i32(kvec)
     c_pool_tile_w = b.const_i32(spec.pool_tile_w)
     c_conv_tile_w = b.const_i32(conv_tile_w)
+    c_out_k = b.const_i32(out_k)
     c_half_bytes = b.const_i32(2)
     oob_sentinel = b.const_i32((1 << 31) - 1)
     neg_inf = b.const_f32(-3.4028234663852886e38)
@@ -588,36 +771,143 @@ def _emit_inline_maxpool_from_cshuffle(
     block_pool_w = b.mul(b.block_id_z(), b.const_i32(spec.pool_tile_w))
 
     for e in range(elems_per_thread):
-        local_idx = b.add(b.mul(b.const_i32(e), b.const_i32(spec.block_size)), grid.tid)
-        local_in_range = b.cmp_lt(local_idx, c_total)
-        safe_local_idx = b.select(local_in_range, local_idx, b.const_i32(0))
+        vec_idx = b.add(b.mul(b.const_i32(e), b.const_i32(spec.block_size)), grid.tid)
+        in_range = b.cmp_lt(vec_idx, c_total_vec)
+        safe_vec_idx = b.select(in_range, vec_idx, b.const_i32(0))
 
-        k = b.mod(safe_local_idx, c_k)
-        t0 = b.div(safe_local_idx, c_k)
+        kb = b.mod(safe_vec_idx, c_kblocks)
+        k0 = b.mul(kb, c_kvec)
+        t0 = b.div(safe_vec_idx, c_kblocks)
         local_pwo = b.mod(t0, c_pool_tile_w)
-        t1 = b.div(t0, c_pool_tile_w)
-        local_pho = t1
+        local_pho = b.div(t0, c_pool_tile_w)
         global_pho = b.add(block_pool_h, local_pho)
         global_pwo = b.add(block_pool_w, local_pwo)
-        in_range = local_in_range
 
-        acc = neg_inf
+        accs = [neg_inf] * kvec
         for yy in range(2):
             local_conv_h = b.add(b.mul(local_pho, b.const_i32(2)), b.const_i32(yy))
             for xx in range(2):
                 local_conv_w = b.add(b.mul(local_pwo, b.const_i32(2)), b.const_i32(xx))
                 conv_m_local = b.add(b.mul(local_conv_h, c_conv_tile_w), local_conv_w)
-                v_h = b.vec_extract(b.smem_load_vN_f16(c_smem, conv_m_local, k, n=1), 0)
-                acc = b.fmax(acc, b.cast_to_f32(v_h))
+                v_vec = b.smem_load_vN_f16(c_smem, conv_m_local, k0, n=kvec)
+                for j in range(kvec):
+                    accs[j] = b.fmax(accs[j], b.cast_to_f32(b.vec_extract(v_vec, j)))
 
-        y_h = b.trunc_f32_to_f16(acc)
-        y_off_elems = b.add(
-            b.mul(b.add(b.mul(global_pho, b.const_i32(p.pool_wo)), global_pwo), c_k),
-            k,
+        y_base_elems = b.add(
+            b.mul(
+                b.add(b.mul(global_pho, b.const_i32(p.pool_wo)), global_pwo), c_out_k
+            ),
+            k0,
         )
-        y_off_bytes = b.mul(y_off_elems, c_half_bytes)
-        safe_off = b.select(in_range, y_off_bytes, oob_sentinel)
-        b.buffer_store_f16(y_rsrc, safe_off, b.const_i32(0), y_h)
+        for j in range(kvec):
+            acc = accs[j]
+            if epilogue is not None:
+                acc = _apply_epilogue_scalar(b, epilogue, acc)
+            y_h = b.trunc_f32_to_f16(acc)
+            y_off_bytes = b.mul(b.add(y_base_elems, b.const_i32(j)), c_half_bytes)
+            safe_off = b.select(in_range, y_off_bytes, oob_sentinel)
+            b.buffer_store_f16(y_rsrc, safe_off, b.const_i32(0), y_h)
+
+
+def _maxpool_is_intra_lane(spec: Gfx950DeepFusedConvPoolSpec, grid: WarpGrid) -> bool:
+    """Whether the conv1->maxpool handoff can stay register-resident (no LDS).
+
+    With a single 32x32 MFMA atom per warp and ``warp_n==1``, each lane owns a
+    vec<16> accumulator whose 16 slots tile a 4x4 conv-spatial block for one
+    channel (= ``lane % 32``). For a 2x2 stride-2 pool that block is exactly
+    2x2=4 pool windows, and all four corners of every window live in the *same
+    lane's* accumulator -- so the maxpool reduces purely intra-lane with no
+    cross-lane shuffle and no cshuffle LDS staging. The exact slot decomposition
+    (see ``_emit_inline_maxpool_from_registers``) requires:
+
+      local_conv_h = warp_m_idx*4 + i//4   (warp_m==2 -> 8 conv rows)
+      local_conv_w = (lane//32)*4 + i%4    (conv_tile_w==8 -> 8 conv cols)
+
+    so conv_tile must be 8x8 and tile_m==64. Any other geometry falls back to
+    the LDS gather path (``_emit_inline_maxpool_from_cshuffle``).
+    """
+    p = spec.problem
+    conv_tile_h = spec.pool_tile_h * p.pool_stride_h
+    conv_tile_w = spec.pool_tile_w * p.pool_stride_w
+    return (
+        grid.warp_tile_m == 32
+        and grid.warp_tile_n == 32
+        and grid.mfmas_per_warp_m == 1
+        and grid.mfmas_per_warp_n == 1
+        and grid.warp_n == 1
+        and grid.warp_m == 2
+        and p.pool_stride_h == 2
+        and p.pool_stride_w == 2
+        and conv_tile_h == 8
+        and conv_tile_w == 8
+        and spec.tile_m == 64
+        and p.conv1_channels <= 32
+    )
+
+
+# Pool window (pho_l, pwo_l) -> the four accumulator slots holding its corners.
+# Derived from the 32x32 C-fragment layout: slot = (i//4)*4 + (i%4) with
+# i//4 = pho_l*2 + yy and i%4 = pwo_l*2 + xx over the 2x2 window (yy,xx in 0..1).
+_INTRA_LANE_WINDOW_SLOTS = {
+    (0, 0): (0, 1, 4, 5),
+    (0, 1): (2, 3, 6, 7),
+    (1, 0): (8, 9, 12, 13),
+    (1, 1): (10, 11, 14, 15),
+}
+
+
+def _emit_inline_maxpool_from_registers(
+    b: IRBuilder,
+    spec: Gfx950DeepFusedConvPoolSpec,
+    conv1_accs: Sequence[Value],
+    y_rsrc: Value,
+    grid: WarpGrid,
+    epilogue: Optional[ConvAccumulatorEpilogue] = None,
+) -> None:
+    """Reduce the conv1 accumulators directly into pooled NHWK output.
+
+    Eliminates the conv1->maxpool cshuffle handoff: instead of staging the
+    conv1 accs to LDS and re-gathering, each lane reduces its own vec<16>
+    accumulator. Gated by :func:`_maxpool_is_intra_lane`. When ``epilogue`` is
+    given it is applied once per pooled fp32 result (the deferred conv1
+    epilogue, see :func:`_epilogue_is_pool_deferrable`).
+    """
+
+    p = spec.problem
+    out_k = p.conv1_channels
+    acc_vec = conv1_accs[0]
+
+    channel = b.mod(grid.lane, b.const_i32(32))
+    m_blk = b.div(grid.lane, b.const_i32(32))
+    block_pool_h = b.mul(b.block_id_y(), b.const_i32(spec.pool_tile_h))
+    block_pool_w = b.mul(b.block_id_z(), b.const_i32(spec.pool_tile_w))
+    pho_base = b.add(block_pool_h, b.mul(grid.warp_m_idx, b.const_i32(2)))
+    pwo_base = b.add(block_pool_w, b.mul(m_blk, b.const_i32(2)))
+
+    in_range = b.cmp_lt(channel, b.const_i32(out_k))
+    oob_sentinel = b.const_i32((1 << 31) - 1)
+    c_pool_wo = b.const_i32(p.pool_wo)
+    c_out_k = b.const_i32(out_k)
+    c_half_bytes = b.const_i32(2)
+
+    for pho_l in range(2):
+        gpho = b.add(pho_base, b.const_i32(pho_l))
+        for pwo_l in range(2):
+            gpwo = b.add(pwo_base, b.const_i32(pwo_l))
+            s0, s1, s2, s3 = _INTRA_LANE_WINDOW_SLOTS[(pho_l, pwo_l)]
+            acc = b.fmax(
+                b.fmax(b.vec_extract(acc_vec, s0), b.vec_extract(acc_vec, s1)),
+                b.fmax(b.vec_extract(acc_vec, s2), b.vec_extract(acc_vec, s3)),
+            )
+            if epilogue is not None:
+                acc = _apply_epilogue_scalar(b, epilogue, acc)
+            y_h = b.trunc_f32_to_f16(acc)
+            y_off_elems = b.add(
+                b.mul(b.add(b.mul(gpho, c_pool_wo), gpwo), c_out_k), channel
+            )
+            y_off_bytes = b.mul(y_off_elems, c_half_bytes)
+            safe_off = b.select(in_range, y_off_bytes, oob_sentinel)
+            b.buffer_store_f16(y_rsrc, safe_off, b.const_i32(0), y_h)
 
 
 def build_deep_fused_conv_pool(spec: Gfx950DeepFusedConvPoolSpec, arch: str = "gfx950"):
@@ -637,11 +927,30 @@ def build_deep_fused_conv_pool(spec: Gfx950DeepFusedConvPoolSpec, arch: str = "g
         return make_buffer_resource(b, W1, num_bytes=W1_bytes).rsrc
 
     def m_index_fn(b: IRBuilder, row: Value, _grid: WarpGrid) -> Value:
+        """Conv0 M-index callback: maps tile-local row to global (ho, wo) offset.
+
+        VALU opt: strength-reduce div/mod by ``conv_tile_w`` when it's power-of-2.
+        For the target shape (pool_tile_w=8, pool_stride_w=2), conv_tile_w=16,
+        so ``local_h = row >> 4`` and ``local_w = row & 15`` replace hardware
+        div/mod. This is called **per MFMA A fragment** in the main K-loop, so
+        it's a hot path for conv0 addressing.
+        """
         p = spec.problem
         c = p.conv
         conv_tile_w = spec.pool_tile_w * p.pool_stride_w
-        local_h = b.div(row, b.const_i32(conv_tile_w))
-        local_w = b.mod(row, b.const_i32(conv_tile_w))
+        c_conv_tile_w = b.const_i32(conv_tile_w)
+
+        # Check if conv_tile_w is power-of-2 at compile time and strength-reduce.
+        if conv_tile_w > 0 and (conv_tile_w & (conv_tile_w - 1)) == 0:
+            # Power-of-2: use shift/mask instead of div/mod.
+            shift = (conv_tile_w - 1).bit_length()
+            local_h = b.lshr(row, b.const_i32(shift))
+            local_w = b.land(row, b.const_i32(conv_tile_w - 1))
+        else:
+            # Not power-of-2: fall back to hardware div/mod.
+            local_h = b.div(row, c_conv_tile_w)
+            local_w = b.mod(row, c_conv_tile_w)
+
         global_h = b.add(
             b.mul(b.block_id_y(), b.const_i32(spec.pool_tile_h * p.pool_stride_h)),
             local_h,
@@ -693,13 +1002,42 @@ def build_deep_fused_conv_pool(spec: Gfx950DeepFusedConvPoolSpec, arch: str = "g
         y_rsrc: Value,
         w1_rsrc,
     ) -> None:
-        c_smem = _stage_accumulators_to_cshuffle_lds(b, conv_spec_, accs, grid)
-        w1_smem = _load_conv1_weights_to_lds(b, spec, w1_rsrc, grid)
-        conv1_accs = _emit_conv1_1x1_mfma(b, spec, conv_spec_, c_smem, w1_smem, grid)
-        conv1_smem = _stage_accumulators_to_cshuffle_lds(
-            b, conv_spec_, conv1_accs, grid
+        # Barrier-merge: the conv0 cshuffle stage (writes DeepFusionC_smem) and
+        # the W1 load (writes W1_smem) target disjoint LDS tiles, and the conv1
+        # MFMA below reads both. Emit each producer without its own barrier and
+        # gate the consumer on a single block-wide barrier. This also lets the
+        # W1 global loads overlap the conv0 cshuffle LDS stores (a free partial
+        # W1-hoist) instead of being serialized behind a redundant barrier.
+        c_smem = _stage_accumulators_to_cshuffle_lds(
+            b, conv_spec_, accs, grid, sync=False
         )
-        _emit_inline_maxpool_from_cshuffle(b, spec, conv1_smem, y_rsrc, grid)
+        w1_smem = _load_conv1_weights_to_lds(b, spec, w1_rsrc, grid, sync=False)
+        b.sync()
+        # VALU opt: ReLU/bias/clamp/(scale>=0) are monotonic, so the conv1
+        # epilogue commutes with maxpool. Defer it past the pool to apply it once
+        # per pooled pixel instead of per conv1 accumulator element (~4x fewer
+        # fmax for 2x2 pool). conv1 output is consumed only by the pool, so this
+        # is exact.
+        defer = _epilogue_is_pool_deferrable(spec.conv1_epilogue)
+        conv1_accs = _emit_conv1_1x1_mfma(
+            b, spec, conv_spec_, c_smem, w1_smem, grid, defer_epilogue=defer
+        )
+        deferred_epi = spec.conv1_epilogue if defer else None
+        if _maxpool_is_intra_lane(spec, grid):
+            # Handoff #2 eliminated: each lane's vec<16> conv1 accumulator already
+            # holds the 4 pool windows it owns (intra-lane, no shuffle), so reduce
+            # straight to global output -- skips the second cshuffle staging LDS
+            # store, its barrier, and the gather-side reads/converts.
+            _emit_inline_maxpool_from_registers(
+                b, spec, conv1_accs, y_rsrc, grid, epilogue=deferred_epi
+            )
+        else:
+            conv1_smem = _stage_accumulators_to_cshuffle_lds(
+                b, conv_spec_, conv1_accs, grid
+            )
+            _emit_inline_maxpool_from_cshuffle(
+                b, spec, conv1_smem, y_rsrc, grid, epilogue=deferred_epi
+            )
 
     return build_implicit_gemm_conv(
         conv_spec,

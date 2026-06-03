@@ -884,7 +884,7 @@ def build_implicit_gemm_conv(
     # write into while the MFMA phase reads from the first. Force
     # double-buffering whenever the pipeline opts into async DMA,
     # regardless of the chosen `compv*` flag.
-    double_buffer = spec.pipeline == "compv4" or spec.async_dma
+    double_buffer = spec.pipeline == "compv4" or spec.async_dma or spec.unroll_k
     if double_buffer:
         A_smem2 = b.smem_alloc(
             F16, lds_layout.storage_shape(block_m), name_hint="A_smem2"
@@ -1253,21 +1253,38 @@ def build_implicit_gemm_conv(
     #    but staying well under the 160 KiB LDS budget and the
     #    per-kernel ISA size limits.
     if spec.unroll_k:
-        # Clean Python-level K-loop unrolling
+        # Double-buffered Python-unrolled K-loop software pipeline.
+        #
+        # Stage tile it+1 into the alternate LDS buffer while the MFMA for
+        # tile it reads the current buffer. The buffers are disjoint, so the
+        # next tile's global->LDS writes overlap the current tile's ds_read +
+        # MFMA work instead of being serialized behind a barrier (the bug in
+        # the old single-buffer form, which also omitted the trailing barrier
+        # and thus raced the next load against the current MFMA's LDS reads).
+        #
+        # One barrier per iteration does double duty: it publishes the tile
+        # just prefetched into `nxt` before that tile's MFMA next iteration,
+        # and it orders the current tile's ds_reads ahead of the it+2 prefetch
+        # that reuses the same buffer two iterations later.
         K_iters = (p.K_gemm + block_k - 1) // block_k
         current_accs = [v for _, v in accs]
+        bufs = [(A_smem, B_smem), (A_smem2, B_smem2)]
+
+        # Prologue: stage tile 0 into buffer 0 and publish it.
+        emit_load_phase(b.const_i32(0), bufs[0][0], bufs[0][1])
+        b.sync()
 
         for it in range(K_iters):
-            k_offset = b.const_i32(it * block_k)
-
-            # Load phase: global load → LDS write
-            emit_load_phase(k_offset, A_smem, B_smem)
-            b.sync()  # Barrier after LDS writes (required)
-
-            # MFMA phase: LDS read → MFMA execute
-            # Remove the sync() call to allow ds_read → MFMA overlap
-            current_accs = emit_mfma_phase(A_smem, B_smem, current_accs)
-            # NO sync() here - let next iteration's global loads overlap with tail MFMAs
+            cur = bufs[it % 2]
+            if it + 1 < K_iters:
+                nxt = bufs[(it + 1) % 2]
+                emit_load_phase(b.const_i32((it + 1) * block_k), nxt[0], nxt[1])
+            # The prefetch above clobbered k_off_capture with tile it+1's
+            # offset. Restore tile it's offset so an `a_operand_override`
+            # (if any) addresses the tile actually consumed by this MFMA.
+            k_off_capture[0] = b.const_i32(it * block_k)
+            current_accs = emit_mfma_phase(cur[0], cur[1], current_accs)
+            b.sync()
 
         final_accs = current_accs
     elif not spec.async_dma:
