@@ -1358,11 +1358,11 @@ class TestCkTileGemmABQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGe
             // TODO: Replace with templated lambda when C++20 is available
             auto LaunchKernel = [&](auto RuntimeSplitKTailTag) {
                 constexpr bool RuntimeSplitKTail = decltype(RuntimeSplitKTailTag)::value;
-                using Kernel = ck_tile::QuantGemmKernel<TilePartitioner,
-                                                        GemmPipeline,
-                                                        GemmEpilogue,
-                                                        ck_tile::QuantType::ABQuantGrouped,
-                                                        RuntimeSplitKTail>;
+                using Kernel                     = ck_tile::QuantGemmKernel<TilePartitioner,
+                                                                            GemmPipeline,
+                                                                            GemmEpilogue,
+                                                                            ck_tile::QuantType::ABQuantGrouped,
+                                                                            RuntimeSplitKTail>;
 
                 auto kargs        = Kernel::MakeKernelArgs(args);
                 const dim3 grids  = Kernel::GridSize(args.M, args.N, args.k_batch);
