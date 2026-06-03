@@ -3,236 +3,261 @@
 
 #include "CompileServiceBridge.hpp"
 
-#include <pybind11/stl.h>
-
-#include <cstddef>
 #include <cstring>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
-#include <limits>
-#include <sstream>
+#include <mutex>
 #include <string>
-#include <utility>
 #include <vector>
 
-#include "../runtime/KernelArtifact.hpp"
 #include "EmbeddedInterpreter.hpp"
-#include "PythonError.hpp"
-#include "ckdsl_provider_paths.h"
 
-namespace py = pybind11;
+extern "C" {
+#include "py/builtin.h"
+#include "py/objstr.h"
+#include "py/runtime.h"
+}
+
+// ---------------------------------------------------------------------------
+// nlr / C++ RAII discipline
+//
+// MicroPython signals errors with setjmp/longjmp (nlr), which does NOT unwind
+// C++ stack frames -- any object with a non-trivial destructor created between
+// nlr_push() and the failure point would leak / be skipped. Therefore every
+// nlr-protected region below uses ONLY POD/raw locals (mp_obj_t handles, const
+// char*, fixed arrays). All in-region errors (missing field, bad type) are
+// raised as MicroPython exceptions (mp_raise_*) and caught by the nlr handler,
+// which converts them to HipdnnPluginException AFTER nlr_pop (a normal C++
+// throw, no nlr frame active). C++ objects (std::string / KernelArtifact) are
+// built only after nlr_pop, from the raw locals (valid while the lock is held).
+// ---------------------------------------------------------------------------
 
 namespace ck_dsl_provider {
 
-CompileServiceBridge::~CompileServiceBridge() noexcept {
-    // Drop the py::module_ reference while the GIL is held. Member
-    // destructors run after this body, but by then _module is empty
-    // and its default destructor touches no Python state.
-    try {
-        py::gil_scoped_acquire gil;
-        _module = py::module_();
-    } catch (...) {  // NOLINT(bugprone-empty-catch)
-        // ~noexcept; if GIL acquisition itself throws (interpreter
-        // already torn down by a sibling plugin), we have nothing left
-        // to do but let _module's no-op destructor run.
+namespace {
+
+mp_obj_t marshalValue(const PayloadValue& v);  // fwd
+
+mp_obj_t marshalDict(const PayloadDict& d) {
+    mp_obj_t obj = mp_obj_new_dict(d.size());
+    for (const auto& kv : d) {
+        mp_obj_dict_store(obj, mp_obj_new_str(kv.first.data(), kv.first.size()),
+                          marshalValue(kv.second));
+    }
+    return obj;
+}
+
+mp_obj_t marshalValue(const PayloadValue& v) {
+    switch (v.kind) {
+        case PayloadValue::Kind::Int:
+            return mp_obj_new_int_from_ll(v.intVal);
+        case PayloadValue::Kind::Bool:
+            return mp_obj_new_bool(v.boolVal);
+        case PayloadValue::Kind::Str:
+            return mp_obj_new_str(v.strVal.data(), v.strVal.size());
+        case PayloadValue::Kind::None:
+            return mp_const_none;
+        case PayloadValue::Kind::Dict:
+            return marshalDict(v.dictVal);
+    }
+    return mp_const_none;
+}
+
+// Non-raising dict lookup by string key. Returns MP_OBJ_NULL if absent.
+mp_obj_t dictGet(mp_obj_t dict, const char* key) {
+    mp_map_t* map = mp_obj_dict_get_map(dict);
+    mp_map_elem_t* e = mp_map_lookup(map, mp_obj_new_str(key, strlen(key)), MP_MAP_LOOKUP);
+    return (e == nullptr) ? MP_OBJ_NULL : e->value;
+}
+
+// Required dict lookup; raises a MicroPython KeyError (caught by the nlr
+// handler) if the key is absent.
+mp_obj_t dictGetReq(mp_obj_t dict, const char* key) {
+    mp_obj_t v = dictGet(dict, key);
+    if (v == MP_OBJ_NULL) {
+        mp_raise_msg_varg(&mp_type_KeyError, MP_ERROR_TEXT("compile-service result missing '%s'"),
+                          key);
+    }
+    return v;
+}
+
+void getUint3(mp_obj_t tup, std::uint32_t out[3]) {
+    size_t n = 0;
+    mp_obj_t* items = nullptr;
+    mp_obj_get_array(tup, &n, &items);
+    if (n != 3) {
+        mp_raise_ValueError(MP_ERROR_TEXT("expected a 3-tuple (grid/block)"));
+    }
+    for (size_t i = 0; i < 3; ++i) {
+        out[i] = static_cast<std::uint32_t>(mp_obj_get_int(items[i]));
     }
 }
+
+// POD capture of one arg_schema slot (raw pointers into MicroPython str storage,
+// valid until the next GC / interpreter call; we copy out before then).
+struct RawArg {
+    const char* name;
+    size_t nameLen;
+    const char* kind;
+    size_t kindLen;
+    long size;
+    long align;
+    bool hasSize;
+    bool hasAlign;
+};
+
+constexpr size_t kMaxArgs = 64;
+
+// Format a MicroPython exception into a fixed buffer (no C++ objects in the
+// nlr-protected region) and throw HipdnnPluginException. Never returns.
+[[noreturn]] void raiseFromMpException(mp_obj_t exc, const char* context) {
+    char buf[512];
+    buf[0] = '\0';
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        vstr_t vstr;
+        mp_print_t print;
+        vstr_init_print(&vstr, 200, &print);
+        mp_obj_print_helper(&print, exc, PRINT_EXC);
+        size_t len = vstr_len(&vstr);
+        if (len >= sizeof(buf)) {
+            len = sizeof(buf) - 1;
+        }
+        std::memcpy(buf, vstr_str(&vstr), len);
+        buf[len] = '\0';
+        vstr_clear(&vstr);
+        nlr_pop();
+    }
+    throw hipdnn_plugin_sdk::HipdnnPluginException(
+        HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+        std::string(context) + ": " + (buf[0] != '\0' ? buf : "<python exception>"));
+}
+
+constexpr std::size_t kHsacoMaxBytes = 256ULL * 1024 * 1024;
+
+}  // namespace
 
 CompileServiceBridge::CompileServiceBridge() {
     EmbeddedInterpreter::ensureInitialized();
+    std::lock_guard<std::mutex> lock(EmbeddedInterpreter::interpreterMutex());
 
-    try {
-        py::gil_scoped_acquire gil;
-        py::module_ sys = py::module_::import("sys");
-
-        prependSysPathIdempotent(sys, kCkDslProviderPythonPackagePath);
-        prependSysPathIdempotent(sys, kCkDslPythonPackagePath);
-
-        _module = py::module_::import("ck_dsl_provider.compile_service");
-
-        // Resolve ck_dsl.__file__ for the one-shot INFO log so the
-        // operator can see exactly which source tree the embedded
-        // interpreter actually imported (not just which path CMake
-        // baked in — sys.path could be shadowed by an earlier sibling).
-        std::string ckDslFile;
-        try {
-            py::module_ ckDsl = py::module_::import("ck_dsl");
-            ckDslFile = ckDsl.attr("__file__").cast<std::string>();
-        } catch (const py::error_already_set&) {
-            ckDslFile = "<ck_dsl import failed>";
-        }
-        std::string moduleFile;
-        try {
-            moduleFile = _module.attr("__file__").cast<std::string>();
-        } catch (const py::error_already_set&) {
-            moduleFile = "<unknown>";
-        }
-
-        HIPDNN_PLUGIN_LOG_INFO(
-            "CompileServiceBridge: imported ck_dsl_provider.compile_service from "
-            << moduleFile << ", ck_dsl from " << ckDslFile);
-    } catch (const py::error_already_set& error) {
-        PythonError::raise(error, "CompileServiceBridge::ctor");
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        // Import the package (its __init__ imports .compile_service) then fetch
+        // the submodule. ck_dsl is frozen/bundled, so no sys.path manipulation.
+        mp_obj_t pkg = mp_import_name(qstr_from_str("ck_dsl_provider"), mp_const_none,
+                                      MP_OBJ_NEW_SMALL_INT(0));
+        mp_obj_t mod = mp_load_attr(pkg, qstr_from_str("compile_service"));
+        _module = reinterpret_cast<void*>(mod);  // kept alive by loaded-modules dict
+        nlr_pop();
+    } else {
+        raiseFromMpException(MP_OBJ_FROM_PTR(nlr.ret_val), "CompileServiceBridge::ctor");
     }
+    HIPDNN_PLUGIN_LOG_INFO("CompileServiceBridge: imported frozen ck_dsl_provider.compile_service");
 }
 
-bool CompileServiceBridge::prependSysPathIdempotent(py::module_& sys, std::string_view path) {
-    py::list sysPath = sys.attr("path").cast<py::list>();
-    py::str candidate(path.data(), path.size());
-
-    for (py::handle entry : sysPath) {
-        // Compare as Python str values; entries may be PosixPath in
-        // pathological setups but pure CPython startup uses str.
-        try {
-            if (py::isinstance<py::str>(entry) && entry.cast<std::string>() == std::string(path)) {
-                return false;
-            }
-        } catch (const py::error_already_set&) {
-            // Non-comparable entry: skip and keep scanning.
-            continue;
-        }
-    }
-
-    sysPath.attr("insert")(0, candidate);
-    return true;
-}
-
-py::dict CompileServiceBridge::noopSmoke() {
-    try {
-        py::gil_scoped_acquire gil;
-        py::object result = _module.attr("noop_smoke")();
-        return result.cast<py::dict>();
-    } catch (const py::error_already_set& error) {
-        PythonError::raise(error, "CompileServiceBridge::noopSmoke");
-    }
-}
+CompileServiceBridge::~CompileServiceBridge() noexcept = default;
 
 namespace {
 
-/// Decode a Python int into uint32_t with a clear error context if it
-/// is out of range. Used to translate the (gx, gy, gz) / (bx, by, bz)
-/// tuples emitted by compile_smoke into ``KernelArtifact``'s
-/// GridSpec / BlockSpec fields.
-std::uint32_t castU32(const py::handle& obj, const char* fieldName) {
-    auto wide = obj.cast<long long>();
-    if (wide < 0 || wide > static_cast<long long>(std::numeric_limits<std::uint32_t>::max())) {
-        std::ostringstream oss;
-        oss << "CompileServiceBridge: compile_smoke '" << fieldName << "' value " << wide
-            << " does not fit in uint32_t";
-        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                                                       oss.str());
-    }
-    return static_cast<std::uint32_t>(wide);
-}
+// Run `fn(args...)` returning a dict, and marshal it into a KernelArtifact.
+// `fn`/`args` are produced under the same nlr region. Caller holds the lock.
+KernelArtifact callCompileLike(mp_obj_t module, const char* attr, const mp_obj_t* args,
+                               size_t nArgs, const char* context) {
+    // --- nlr-protected region: POD locals only ---
+    const char* kernelName = nullptr;
+    size_t kernelNameLen = 0;
+    const char* kind = nullptr;
+    size_t kindLen = 0;
+    const char* isa = nullptr;
+    size_t isaLen = 0;
+    bool hasIsa = false;
+    const char* hsaco = nullptr;
+    size_t hsacoLen = 0;
+    std::uint32_t grid[3] = {0, 0, 0};
+    std::uint32_t block[3] = {0, 0, 0};
+    std::uint32_t ldsBytes = 0;
+    RawArg rawArgs[kMaxArgs];
+    size_t nRawArgs = 0;
 
-KernelArtifact::GridSpec gridFromPy(const py::handle& tup) {
-    auto seq = tup.cast<py::sequence>();
-    if (seq.size() != 3) {
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        mp_obj_t fn = mp_load_attr(module, qstr_from_str(attr));
+        mp_obj_t result = mp_call_function_n_kw(fn, nArgs, 0, args);
+
+        hsaco = mp_obj_str_get_data(dictGetReq(result, "hsaco"), &hsacoLen);
+        kernelName = mp_obj_str_get_data(dictGetReq(result, "kernel_name"), &kernelNameLen);
+        kind = mp_obj_str_get_data(dictGetReq(result, "kind"), &kindLen);
+        getUint3(dictGetReq(result, "grid"), grid);
+        getUint3(dictGetReq(result, "block"), block);
+        ldsBytes = static_cast<std::uint32_t>(mp_obj_get_int(dictGetReq(result, "lds_bytes")));
+
+        mp_obj_t isaObj = dictGet(result, "isa");
+        if (isaObj != MP_OBJ_NULL) {
+            isa = mp_obj_str_get_data(isaObj, &isaLen);
+            hasIsa = true;
+        }
+
+        size_t n = 0;
+        mp_obj_t* items = nullptr;
+        mp_obj_get_array(dictGetReq(result, "arg_schema"), &n, &items);
+        if (n > kMaxArgs) {
+            mp_raise_ValueError(MP_ERROR_TEXT("arg_schema too large"));
+        }
+        for (size_t i = 0; i < n; ++i) {
+            mp_obj_t e = items[i];
+            RawArg& a = rawArgs[i];
+            mp_obj_t nameObj = dictGet(e, "name");
+            a.name = (nameObj != MP_OBJ_NULL) ? mp_obj_str_get_data(nameObj, &a.nameLen) : "";
+            if (nameObj == MP_OBJ_NULL) {
+                a.nameLen = 0;
+            }
+            a.kind = mp_obj_str_get_data(dictGetReq(e, "kind"), &a.kindLen);
+            mp_obj_t sizeObj = dictGet(e, "size");
+            a.hasSize = (sizeObj != MP_OBJ_NULL);
+            a.size = a.hasSize ? mp_obj_get_int(sizeObj) : 0;
+            mp_obj_t alignObj = dictGet(e, "align");
+            a.hasAlign = (alignObj != MP_OBJ_NULL);
+            a.align = a.hasAlign ? mp_obj_get_int(alignObj) : 0;
+        }
+        nRawArgs = n;
+        nlr_pop();
+    } else {
+        raiseFromMpException(MP_OBJ_FROM_PTR(nlr.ret_val), context);
+    }
+    // --- nlr region done; safe to build C++ objects from the raw captures ---
+
+    if (hsacoLen > kHsacoMaxBytes) {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-            "CompileServiceBridge: compile_smoke 'grid' must be a 3-tuple");
-    }
-    return KernelArtifact::GridSpec{castU32(seq[0], "grid.x"), castU32(seq[1], "grid.y"),
-                                    castU32(seq[2], "grid.z")};
-}
-
-KernelArtifact::BlockSpec blockFromPy(const py::handle& tup) {
-    auto seq = tup.cast<py::sequence>();
-    if (seq.size() != 3) {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-            "CompileServiceBridge: compile_smoke 'block' must be a 3-tuple");
-    }
-    return KernelArtifact::BlockSpec{castU32(seq[0], "block.x"), castU32(seq[1], "block.y"),
-                                     castU32(seq[2], "block.z")};
-}
-
-std::vector<ArgSchema> argSchemaFromPy(const py::handle& list) {
-    auto seq = list.cast<py::sequence>();
-    std::vector<ArgSchema> out;
-    out.reserve(seq.size());
-    for (std::size_t i = 0; i < seq.size(); ++i) {
-        auto entry = seq[i].cast<py::dict>();
-        if (!entry.contains("kind")) {
-            std::ostringstream oss;
-            oss << "CompileServiceBridge: compile_smoke arg_schema entry " << i
-                << " missing 'kind'";
-            throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                                                           oss.str());
-        }
-        ArgSchema slot;
-        slot.name = entry.contains("name") ? entry["name"].cast<std::string>() : std::string{};
-        slot.kind = parseArgKind(entry["kind"].cast<std::string>());
-        if (entry.contains("size")) {
-            slot.size = static_cast<std::uint16_t>(entry["size"].cast<long>());
-        }
-        if (entry.contains("align")) {
-            slot.align = static_cast<std::uint16_t>(entry["align"].cast<long>());
-        }
-        out.push_back(std::move(slot));
-    }
-    return out;
-}
-
-/// Translate a Python dict (the on-wire shape returned by either
-/// compile_service.compile_smoke or compile_service.compile) into a
-/// C++ ``KernelArtifact``. Caller must hold the GIL.
-///
-/// ``contextTag`` shows up in any thrown HipdnnPluginException so the
-/// operator can tell which entry point produced the malformed dict
-/// (the same dict-shape contract covers both smoke and production).
-KernelArtifact dictToArtifact(const py::dict& resultDict, const char* contextTag) {
-    const char* requiredFields[] = {"hsaco", "kernel_name", "kind",      "grid",
-                                    "block", "lds_bytes",   "arg_schema"};
-    for (const char* field : requiredFields) {
-        if (!resultDict.contains(field)) {
-            std::ostringstream oss;
-            oss << contextTag << ": returned dict is missing '" << field << "'";
-            throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                                                           oss.str());
-        }
+            std::string(context) + ": HSACO blob exceeds size cap");
     }
 
     KernelArtifact artifact;
-    artifact.kernelName = resultDict["kernel_name"].cast<std::string>();
-    artifact.kind = resultDict["kind"].cast<std::string>();
-    artifact.grid = gridFromPy(resultDict["grid"]);
-    artifact.block = blockFromPy(resultDict["block"]);
-    artifact.ldsBytes = castU32(resultDict["lds_bytes"], "lds_bytes");
-    artifact.argSchema = argSchemaFromPy(resultDict["arg_schema"]);
-    if (resultDict.contains("isa")) {
-        artifact.isa = resultDict["isa"].cast<std::string>();
+    artifact.kernelName.assign(kernelName, kernelNameLen);
+    artifact.kind.assign(kind, kindLen);
+    if (hasIsa) {
+        artifact.isa.assign(isa, isaLen);
     }
-
-    // Copy the HSACO bytes out of the py::bytes payload. The caller
-    // holds the GIL so PyBytes_AsStringAndSize is safe; the resulting
-    // std::vector<std::byte> outlives any Python state since it
-    // carries its own storage.
-    auto hsacoBytes = resultDict["hsaco"].cast<py::bytes>();
-    char* buf = nullptr;
-    Py_ssize_t len = 0;
-    if (PyBytes_AsStringAndSize(hsacoBytes.ptr(), &buf, &len) != 0) {
-        // PyBytes_AsStringAndSize sets a Python exception on
-        // failure; convert to py::error_already_set so callers can
-        // funnel through the PythonError translation.
-        throw py::error_already_set();
+    artifact.grid = KernelArtifact::GridSpec{grid[0], grid[1], grid[2]};
+    artifact.block = KernelArtifact::BlockSpec{block[0], block[1], block[2]};
+    artifact.ldsBytes = ldsBytes;
+    artifact.hsaco.resize(hsacoLen);
+    if (hsacoLen > 0) {
+        std::memcpy(artifact.hsaco.data(), hsaco, hsacoLen);
     }
-    // Hard cap: a runaway compile path could otherwise request a
-    // multi-GB allocation that succeeds host-side and then fails
-    // inside hipModuleLoadData -- OOM rather than fail-fast. 256 MB
-    // is two orders of magnitude above the largest realistic HSACO
-    // we expect from ck_dsl (~few MB).
-    constexpr Py_ssize_t kHsacoMaxBytes = 256LL * 1024 * 1024;
-    if (len > kHsacoMaxBytes) {
-        std::ostringstream oss;
-        oss << contextTag << ": HSACO blob is " << len << " bytes; rejecting (max "
-            << kHsacoMaxBytes << ")";
-        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                                                       oss.str());
-    }
-    artifact.hsaco.resize(static_cast<std::size_t>(len));
-    if (len > 0) {
-        std::memcpy(artifact.hsaco.data(), buf, static_cast<std::size_t>(len));
+    artifact.argSchema.reserve(nRawArgs);
+    for (size_t i = 0; i < nRawArgs; ++i) {
+        ArgSchema slot;
+        slot.name.assign(rawArgs[i].name, rawArgs[i].nameLen);
+        slot.kind = parseArgKind(std::string(rawArgs[i].kind, rawArgs[i].kindLen));
+        if (rawArgs[i].hasSize) {
+            slot.size = static_cast<std::uint16_t>(rawArgs[i].size);
+        }
+        if (rawArgs[i].hasAlign) {
+            slot.align = static_cast<std::uint16_t>(rawArgs[i].align);
+        }
+        artifact.argSchema.push_back(std::move(slot));
     }
     return artifact;
 }
@@ -240,74 +265,77 @@ KernelArtifact dictToArtifact(const py::dict& resultDict, const char* contextTag
 }  // namespace
 
 KernelArtifact CompileServiceBridge::compileSmoke(std::string_view arch) {
-    try {
-        py::gil_scoped_acquire gil;
-        py::str archStr(arch.data(), arch.size());
-        py::object result = _module.attr("compile_smoke")(archStr);
-        KernelArtifact artifact =
-            dictToArtifact(result.cast<py::dict>(), "CompileServiceBridge::compileSmoke");
-
-        HIPDNN_PLUGIN_LOG_INFO(
-            "CompileServiceBridge::compileSmoke arch='"
-            << std::string(arch) << "' kernel='" << artifact.kernelName << "' kind='"
-            << artifact.kind << "' hsaco_bytes=" << artifact.hsaco.size() << " grid=("
-            << artifact.grid.x << "," << artifact.grid.y << "," << artifact.grid.z << ") block=("
-            << artifact.block.x << "," << artifact.block.y << "," << artifact.block.z << ")");
-
-        return artifact;
-    } catch (const py::error_already_set& error) {
-        PythonError::raise(error, "CompileServiceBridge::compileSmoke");
+    std::lock_guard<std::mutex> lock(EmbeddedInterpreter::interpreterMutex());
+    mp_obj_t module = reinterpret_cast<mp_obj_t>(_module);
+    mp_obj_t args[1];
+    nlr_buf_t nlr;
+    KernelArtifact artifact;
+    if (nlr_push(&nlr) == 0) {
+        args[0] = mp_obj_new_str(arch.data(), arch.size());
+        nlr_pop();
+    } else {
+        raiseFromMpException(MP_OBJ_FROM_PTR(nlr.ret_val), "CompileServiceBridge::compileSmoke");
     }
+    artifact =
+        callCompileLike(module, "compile_smoke", args, 1, "CompileServiceBridge::compileSmoke");
+    HIPDNN_PLUGIN_LOG_INFO("CompileServiceBridge::compileSmoke arch='"
+                           << std::string(arch) << "' kernel='" << artifact.kernelName
+                           << "' hsaco_bytes=" << artifact.hsaco.size());
+    return artifact;
 }
 
-KernelArtifact CompileServiceBridge::compile(std::string_view opKind, const py::dict& payload,
+KernelArtifact CompileServiceBridge::compile(std::string_view opKind, const PayloadDict& payload,
                                              std::string_view arch) {
-    try {
-        py::gil_scoped_acquire gil;
-        py::str opKindStr(opKind.data(), opKind.size());
-        py::str archStr(arch.data(), arch.size());
-        py::object result = _module.attr("compile")(opKindStr, payload, archStr);
-        KernelArtifact artifact =
-            dictToArtifact(result.cast<py::dict>(), "CompileServiceBridge::compile");
-
-        HIPDNN_PLUGIN_LOG_INFO(
-            "CompileServiceBridge::compile op_kind='"
-            << std::string(opKind) << "' kernel='" << artifact.kernelName << "' kind='"
-            << artifact.kind << "' hsaco_bytes=" << artifact.hsaco.size() << " grid=("
-            << artifact.grid.x << "," << artifact.grid.y << "," << artifact.grid.z << ") block=("
-            << artifact.block.x << "," << artifact.block.y << "," << artifact.block.z << ")");
-
-        return artifact;
-    } catch (const py::error_already_set& error) {
-        PythonError::raise(error, "CompileServiceBridge::compile");
+    std::lock_guard<std::mutex> lock(EmbeddedInterpreter::interpreterMutex());
+    mp_obj_t module = reinterpret_cast<mp_obj_t>(_module);
+    mp_obj_t args[3];
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        args[0] = mp_obj_new_str(opKind.data(), opKind.size());
+        args[1] = marshalDict(payload);
+        args[2] = mp_obj_new_str(arch.data(), arch.size());
+        nlr_pop();
+    } else {
+        raiseFromMpException(MP_OBJ_FROM_PTR(nlr.ret_val), "CompileServiceBridge::compile");
     }
+    KernelArtifact artifact =
+        callCompileLike(module, "compile", args, 3, "CompileServiceBridge::compile");
+    HIPDNN_PLUGIN_LOG_INFO("CompileServiceBridge::compile op_kind='"
+                           << std::string(opKind) << "' kernel='" << artifact.kernelName
+                           << "' hsaco_bytes=" << artifact.hsaco.size());
+    return artifact;
 }
 
 std::pair<bool, std::string> CompileServiceBridge::isApplicable(std::string_view opKind,
-                                                                const py::dict& payload,
+                                                                const PayloadDict& payload,
                                                                 std::string_view arch) {
-    try {
-        py::gil_scoped_acquire gil;
-        py::str opKindStr(opKind.data(), opKind.size());
-        py::str archStr(arch.data(), arch.size());
-        py::object result = _module.attr("is_applicable")(opKindStr, payload, archStr);
+    std::lock_guard<std::mutex> lock(EmbeddedInterpreter::interpreterMutex());
+    mp_obj_t module = reinterpret_cast<mp_obj_t>(_module);
 
-        // The Python side returns a (bool, reason) 2-tuple. Translate
-        // defensively so a contract drift surfaces as a clear provider
-        // error rather than a confusing cast failure deeper in.
-        auto seq = result.cast<py::sequence>();
-        if (seq.size() != 2) {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                "CompileServiceBridge::isApplicable: is_applicable must return a "
-                "(bool, reason) 2-tuple");
+    bool ok = false;
+    const char* reasonPtr = nullptr;
+    size_t reasonLen = 0;
+
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        mp_obj_t args[3] = {mp_obj_new_str(opKind.data(), opKind.size()), marshalDict(payload),
+                            mp_obj_new_str(arch.data(), arch.size())};
+        mp_obj_t fn = mp_load_attr(module, qstr_from_str("is_applicable"));
+        mp_obj_t result = mp_call_function_n_kw(fn, 3, 0, args);
+
+        size_t n = 0;
+        mp_obj_t* items = nullptr;
+        mp_obj_get_array(result, &n, &items);
+        if (n != 2) {
+            mp_raise_ValueError(MP_ERROR_TEXT("is_applicable must return (ok, reason)"));
         }
-        bool ok = seq[0].cast<bool>();
-        std::string reason = seq[1].cast<std::string>();
-        return {ok, std::move(reason)};
-    } catch (const py::error_already_set& error) {
-        PythonError::raise(error, "CompileServiceBridge::isApplicable");
+        ok = mp_obj_is_true(items[0]);
+        reasonPtr = mp_obj_str_get_data(items[1], &reasonLen);
+        nlr_pop();
+    } else {
+        raiseFromMpException(MP_OBJ_FROM_PTR(nlr.ret_val), "CompileServiceBridge::isApplicable");
     }
+    return {ok, std::string(reasonPtr, reasonLen)};
 }
 
 }  // namespace ck_dsl_provider

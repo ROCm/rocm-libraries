@@ -3,73 +3,67 @@
 
 #include "ConvImplicitGemmPayload.hpp"
 
-namespace py = pybind11;
-
 namespace ck_dsl_provider {
 
 namespace {
 
-py::dict convProblemToPayload(const ConvProblem& p) {
-    py::dict d;
-    d["N"] = p.N;
-    d["Hi"] = p.Hi;
-    d["Wi"] = p.Wi;
-    d["C"] = p.C;
-    d["K"] = p.K;
-    d["R"] = p.R;
-    d["S"] = p.S;
-    d["sH"] = p.sH;
-    d["sW"] = p.sW;
-    d["pH"] = p.pH;
-    d["pW"] = p.pW;
-    d["dH"] = p.dH;
-    d["dW"] = p.dW;
-    return d;
+PayloadValue convProblemToPayload(const ConvProblem& p) {
+    PayloadDict d;
+    d.emplace_back("N", PayloadValue::ofInt(p.N));
+    d.emplace_back("Hi", PayloadValue::ofInt(p.Hi));
+    d.emplace_back("Wi", PayloadValue::ofInt(p.Wi));
+    d.emplace_back("C", PayloadValue::ofInt(p.C));
+    d.emplace_back("K", PayloadValue::ofInt(p.K));
+    d.emplace_back("R", PayloadValue::ofInt(p.R));
+    d.emplace_back("S", PayloadValue::ofInt(p.S));
+    d.emplace_back("sH", PayloadValue::ofInt(p.sH));
+    d.emplace_back("sW", PayloadValue::ofInt(p.sW));
+    d.emplace_back("pH", PayloadValue::ofInt(p.pH));
+    d.emplace_back("pW", PayloadValue::ofInt(p.pW));
+    d.emplace_back("dH", PayloadValue::ofInt(p.dH));
+    d.emplace_back("dW", PayloadValue::ofInt(p.dW));
+    return PayloadValue::ofDict(std::move(d));
 }
 
-py::object optionalI32ToPayload(const std::optional<std::int32_t>& v) {
-    return v.has_value() ? py::cast(*v) : py::none();
+PayloadValue optionalI32ToPayload(const std::optional<std::int32_t>& v) {
+    return v.has_value() ? PayloadValue::ofInt(*v) : PayloadValue::ofNone();
 }
 
 }  // namespace
 
-py::dict convImplicitGemmSpecToPayload(const ConvImplicitGemmSpec& spec) {
-    py::dict d;
-    d["problem"] = convProblemToPayload(spec.problem);
-    d["name"] = spec.name;
+PayloadDict convImplicitGemmSpecToPayload(const ConvImplicitGemmSpec& spec) {
+    PayloadDict d;
+    d.emplace_back("problem", convProblemToPayload(spec.problem));
+    d.emplace_back("name", PayloadValue::ofStr(spec.name));
 
-    d["tile_m"] = spec.tile_m;
-    d["tile_n"] = spec.tile_n;
-    d["tile_k"] = spec.tile_k;
+    d.emplace_back("tile_m", PayloadValue::ofInt(spec.tile_m));
+    d.emplace_back("tile_n", PayloadValue::ofInt(spec.tile_n));
+    d.emplace_back("tile_k", PayloadValue::ofInt(spec.tile_k));
 
-    d["warp_m"] = spec.warp_m;
-    d["warp_n"] = spec.warp_n;
+    d.emplace_back("warp_m", PayloadValue::ofInt(spec.warp_m));
+    d.emplace_back("warp_n", PayloadValue::ofInt(spec.warp_n));
 
-    d["warp_tile_m"] = spec.warp_tile_m;
-    d["warp_tile_n"] = spec.warp_tile_n;
-    d["warp_tile_k"] = spec.warp_tile_k;
+    d.emplace_back("warp_tile_m", PayloadValue::ofInt(spec.warp_tile_m));
+    d.emplace_back("warp_tile_n", PayloadValue::ofInt(spec.warp_tile_n));
+    d.emplace_back("warp_tile_k", PayloadValue::ofInt(spec.warp_tile_k));
 
-    d["wave_size"] = spec.wave_size;
+    d.emplace_back("wave_size", PayloadValue::ofInt(spec.wave_size));
 
-    d["pipeline"] = spec.pipeline;
-    d["epilogue"] = spec.epilogue;
-    d["async_dma"] = spec.async_dma;
-    d["unroll_k"] = spec.unroll_k;
+    d.emplace_back("pipeline", PayloadValue::ofStr(spec.pipeline));
+    d.emplace_back("epilogue", PayloadValue::ofStr(spec.epilogue));
+    d.emplace_back("async_dma", PayloadValue::ofBool(spec.async_dma));
+    d.emplace_back("unroll_k", PayloadValue::ofBool(spec.unroll_k));
 
-    d["lds_k_pad"] = optionalI32ToPayload(spec.lds_k_pad);
+    d.emplace_back("lds_k_pad", optionalI32ToPayload(spec.lds_k_pad));
 
-    d["chiplet_swizzle"] = spec.chiplet_swizzle;
-    d["chiplet_wgm"] = spec.chiplet_wgm;
-    d["chiplet_num_xcds"] = spec.chiplet_num_xcds;
-    d["chiplet_chunk_size"] = spec.chiplet_chunk_size;
+    d.emplace_back("chiplet_swizzle", PayloadValue::ofBool(spec.chiplet_swizzle));
+    d.emplace_back("chiplet_wgm", PayloadValue::ofInt(spec.chiplet_wgm));
+    d.emplace_back("chiplet_num_xcds", PayloadValue::ofInt(spec.chiplet_num_xcds));
+    d.emplace_back("chiplet_chunk_size", PayloadValue::ofInt(spec.chiplet_chunk_size));
 
-    d["waves_per_eu"] = optionalI32ToPayload(spec.waves_per_eu);
+    d.emplace_back("waves_per_eu", optionalI32ToPayload(spec.waves_per_eu));
 
-    // Deliberately NOT emitted: ``lds_layout``. The dataclass default
-    // is None and the Python ``effective_lds_layout()`` re-derives it
-    // from async_dma / lds_k_pad / tile_k -- letting the dataclass
-    // own that logic keeps the C++ side free of LdsLayout knowledge
-    // until we have a reason to expose it through the adapter.
+    // Deliberately NOT emitted: ``lds_layout`` (dataclass re-derives it).
     return d;
 }
 

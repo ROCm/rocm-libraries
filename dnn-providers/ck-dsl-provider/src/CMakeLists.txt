@@ -20,7 +20,6 @@ add_library(
     perf/PerfMeasurement.cpp
     python/CompileServiceBridge.cpp
     python/EmbeddedInterpreter.cpp
-    python/PythonError.cpp
     runtime/DeviceArch.cpp
     runtime/HipModule.cpp
     runtime/JitCache.cpp

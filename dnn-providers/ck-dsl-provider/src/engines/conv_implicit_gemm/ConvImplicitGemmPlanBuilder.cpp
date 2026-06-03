@@ -5,7 +5,6 @@
 
 #include <hipdnn_flatbuffers_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
-#include <pybind11/embed.h>
 
 #include <cstdint>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
@@ -24,8 +23,6 @@
 #include "../../python/CompileServiceBridge.hpp"
 #include "../../runtime/DeviceArch.hpp"
 #include "ConvImplicitGemmPlan.hpp"
-
-namespace py = pybind11;
 
 namespace ck_dsl_provider {
 
@@ -140,9 +137,9 @@ bool ConvImplicitGemmPlanBuilder::isApplicable(const ::CkDslHandle& handle,
         }
 
         // arch is an orthogonal compile target, passed alongside the
-        // spec payload (mirroring the DSL) rather than baked into it.
-        py::gil_scoped_acquire gil;
-        py::dict payload = convImplicitGemmSpecToPayload(*spec);
+        // spec payload (mirroring the DSL) rather than baked into it. The bridge
+        // serialises interpreter access internally (no GIL in MicroPython).
+        PayloadDict payload = convImplicitGemmSpecToPayload(*spec);
         std::pair<bool, std::string> verdict = _bridge.isApplicable(opKind(), payload, *arch);
         if (!verdict.first) {
             HIPDNN_PLUGIN_LOG_INFO(
@@ -232,8 +229,7 @@ void ConvImplicitGemmPlanBuilder::buildPlan(
     SignatureHash key = GraphSignature::computeForSpec(opKind(), spec, arch);
 
     auto loader = [spec, arch, this]() -> KernelArtifact {
-        py::gil_scoped_acquire gil;
-        py::dict payload = convImplicitGemmSpecToPayload(spec);
+        PayloadDict payload = convImplicitGemmSpecToPayload(spec);
         return _bridge.compile(opKind(), payload, arch);
     };
 
