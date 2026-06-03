@@ -27,8 +27,11 @@ The expensive toolchain/cap-map build is cached process-wide so many suites
 share one construction.
 """
 
+import contextlib
+import copy
 import functools
 import re
+import shutil
 
 # --- assembly canonicalization ---------------------------------------------
 
@@ -38,6 +41,18 @@ import re
 # token to a stable sequential id by first-appearance order, which preserves the
 # label<->reference correspondence while removing the randomness.
 _RANDOM_LABEL_SUFFIX = re.compile(r"_[A-Z0-9]{16}\b")
+
+# The WMMA matrix-reuse operand (`... matrix_a_reuse` / `matrix_b_reuse`) is a
+# performance hint whose *presence* is rendered from rocisa's internal MMA
+# scheduler state, which carries across kernels in a process. So the same kernel
+# emits the hint or not depending on emit order / warm-state — a benign,
+# correctness-neutral churn (like register numbering). We strip it so goldens
+# key on the stable structure. Documented as a pinned finding in resistance.md.
+_MATRIX_REUSE = re.compile(r" matrix_[ab]_reuse\b")
+
+# Set once the emitter has been driven through one throwaway kernel (see
+# emit_kernels_from_logic) so every returned emit is the warm steady-state.
+_WARMED = False
 
 
 def canonicalize_asm(text):
@@ -51,6 +66,7 @@ def canonicalize_asm(text):
         return None
     if isinstance(text, (bytes, bytearray)):
         text = text.decode(errors="replace")
+    text = _MATRIX_REUSE.sub("", text)
     mapping = {}
 
     def _repl(m):
@@ -88,17 +104,69 @@ def get_isa_info_map():
     return _toolchain()[1]
 
 
+# --- global-state isolation -------------------------------------------------
+#
+# Parsing a logic file / deriving a Solution mutates process-global state
+# (``globalParameters`` and ``validParameters["ISA"]`` via
+# ``assignGlobalParameters``). Left unrestored, that leaks into unrelated tests
+# (e.g. ``test_validateParameterTypes`` compares a precomputed type map against
+# a fresh one over ``validParameters``). Wrap every emit in this context so the
+# harness is a no-op on shared state.
+
+
+@contextlib.contextmanager
+def _isolated_globals():
+    from Tensile.Common.GlobalParameters import globalParameters
+    from Tensile.Common.ValidParameters import validParameters
+
+    saved_gp = copy.deepcopy(dict(globalParameters))
+    saved_vp = copy.deepcopy(dict(validParameters))
+    try:
+        yield
+    finally:
+        globalParameters.clear()
+        globalParameters.update(saved_gp)
+        validParameters.clear()
+        validParameters.update(saved_vp)
+
+
+def _init_rocisa_for(kernel):
+    """Initialize the rocIsa singleton for ``kernel``'s own ISA + wavefront.
+
+    The singleton is process-global; whichever arch emitted last sets its
+    state. Re-initializing per kernel makes each emit independent of order, so
+    the goldens are stable whether a suite runs alone or after others.
+    """
+    import rocisa
+
+    isa = tuple(kernel["ISA"])
+    wavefront = kernel["WavefrontSize"]
+    asmpath = shutil.which("amdclang++") or "/usr/bin/amdclang++"
+    ri = rocisa.rocIsa.getInstance()
+    ri.init(isa, asmpath)
+    ri.setKernel(isa, wavefront)
+    return ri
+
+
 # --- solution / kernel emit -------------------------------------------------
 
 
-def solutions_from_logic(logic_path):
-    """Parse a logic YAML into a list of fully-derived ``Solution`` objects."""
+def _solutions_from_logic_unguarded(logic_path):
     import Tensile.LibraryIO as L
 
     asm = get_assembler()
     lib = L.parseLibraryLogicFile(str(logic_path), asm, False, False, False, get_isa_info_map(), False)
     sols = lib.solutions
     return list(sols.values()) if isinstance(sols, dict) else list(sols)
+
+
+def solutions_from_logic(logic_path):
+    """Parse a logic YAML into a list of fully-derived ``Solution`` objects.
+
+    Runs under global-state isolation so it does not leak into other tests.
+    """
+    with _isolated_globals():
+        return _solutions_from_logic_unguarded(logic_path)
 
 
 def _prepare_kernel(kernel, splitGSU=False):
@@ -128,15 +196,11 @@ def emit_kernels_from_logic(logic_path, splitGSU=False, canonical=True):
     from Tensile.Common.Types import DebugConfig
 
     asm = get_assembler()
-    sols = solutions_from_logic(logic_path)
-    kernels = generateKernelObjectsFromSolutions(sols)
 
-    kwa = KernelWriterAssembly(asm, DebugConfig())
-    data = rocisa.rocIsa.getInstance().getData()
-    outOptions = rocisa.rocIsa.getInstance().getOutputOptions()
-
-    results = []
-    for kernel in kernels:
+    def _emit(kwa, kernel):
+        ri = _init_rocisa_for(kernel)  # independent of any prior arch's state
+        data = ri.getData()
+        outOptions = ri.getOutputOptions()
         base = _prepare_kernel(kernel, splitGSU)
         res = processKernelSource(kwa, data, outOptions, splitGSU, kernel)
         src = res.src
@@ -144,7 +208,26 @@ def emit_kernels_from_logic(logic_path, splitGSU=False, canonical=True):
             src = canonicalize_asm(src)
         elif isinstance(src, (bytes, bytearray)):
             src = src.decode(errors="replace")
-        results.append((base, src, res.err))
+        return base, src, res.err
+
+    results = []
+    with _isolated_globals():
+        sols = _solutions_from_logic_unguarded(logic_path)
+        kernels = generateKernelObjectsFromSolutions(sols)
+        kwa = KernelWriterAssembly(asm, DebugConfig())
+
+        # Steady-state warm-up: the emitter accumulates process-global scheduler
+        # state (e.g. WMMA matrix-reuse tracking) so the very first emit in a
+        # process differs from all subsequent ones. Production always emits in
+        # the warm state; emit one throwaway kernel once so every *returned*
+        # result is the stable steady-state, independent of suite ordering.
+        global _WARMED
+        if not _WARMED and kernels:
+            _emit(kwa, kernels[0])
+            _WARMED = True
+
+        for kernel in kernels:
+            results.append(_emit(kwa, kernel))
 
     results.sort(key=lambda t: t[0])
     return results
