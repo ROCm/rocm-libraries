@@ -515,8 +515,20 @@ def _emitGRLDSSwap_TLU0(tag, tile, ti, writer, kernel):
 @_emitGRPtrUpdate.register(GRTag_2x2)
 def _emitGRPtrUpdate_TLU0(tag, tile, ti, writer, kernel):
   """Advance SRD base pointer by one depthU iteration (depthU * bpe bytes)."""
-  module = Module(f"GR Ptr Update ({ti.tc})")
   tc = ti.tc
+  # TDM path: advance Address{tc} and sync the TDM descriptor instead of SRD.
+  if kernel.get("enableTDM%s" % tc, False):
+    module = Module(f"TDM GR Ptr Update ({tc})")
+    inc = int(ti.depthUBytes)
+    module.addComment0("TDM addr update: %s += %u" % (tc, inc))
+    module.add(SAddU32(dst=sgpr("Address%s" % tc), src0=sgpr("Address%s" % tc), src1=inc))
+    module.add(SAddCU32(dst=sgpr("Address%s+1" % tc), src0=sgpr("Address%s+1" % tc), src1=0))
+    group0 = "tdm%sGroup0" % tc
+    module.add(SMovB64(dst=sgpr("%s+2" % group0, 2), src=sgpr("Address%s" % tc, 2), comment="sync descriptor global addr"))
+    module.add(SOrB32(dst=sgpr("%s+3" % group0), src0=sgpr("%s+3" % group0), src1=hex(2 << 30), comment="restore type field"))
+    return module
+
+  module = Module(f"GR Ptr Update ({tc})")
   inc = int(ti.depthUBytes)
   module.add(SAddU32(dst=sgpr(f"Srd{tc}"), src0=sgpr(f"Srd{tc}"), src1=inc,
              comment=f"{tc}: advance SRD by {inc} bytes"))
@@ -979,15 +991,4 @@ def globalReadLDSBufferSwap(tc, writer, kernel):
 #
 def globalReadPtrUpdates(tc, writer, kernel):
   ti_ = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
-  hasTDM = kernel.get("enableTDM%s" % tc, False)
-  if hasTDM:
-    module = Module()
-    inc = int(ti_.localSubtileGrid[1] * ti_.mmaTileShape[1] * ti_.subtileShape[1] * ti_.bpe)
-    module.addComment0("TDM addr update: %s += %u" % (tc, inc))
-    module.add(SAddU32(dst=sgpr("Address%s" % tc), src0=sgpr("Address%s" % tc), src1=inc))
-    module.add(SAddCU32(dst=sgpr("Address%s+1" % tc), src0=sgpr("Address%s+1" % tc), src1=0))
-    group0 = "tdm%sGroup0" % tc
-    module.add(SMovB64(dst=sgpr("%s+2" % group0, 2), src=sgpr("Address%s" % tc, 2), comment="sync descriptor global addr"))
-    module.add(SOrB32(dst=sgpr("%s+3" % group0), src0=sgpr("%s+3" % group0), src1=hex(2 << 30), comment="restore type field"))
-    return module
   return ti_.emitGRPtrUpdate(writer, kernel)
