@@ -200,3 +200,41 @@ here.
 **Residual coverage:** 192 stmts, 1 miss (line 120, the bare-`except` swallow
 when a task subdir already exists) → 99.51%. Line 120 is a defensive
 already-exists guard not worth a dedicated fixture.
+
+## D13 — Activation.py: pin the pure config/type/numeric layer only; asm codegen is out of scope
+
+**Context:** Activation.py is ~1037 statements. After pinning the pure surface,
+line coverage is 34.1% (up from 16.8%). The remaining ~660 lines are rocisa
+**assembly codegen**: the getXModule emitters (getExp/getGelu/getSigmoid/getTanh/
+getDGelu/getSilu/getSwish/...), CombineInstructions/FuseInstruction and their
+iter helpers, replaceInst/removeOldInst, ConvertCoeffToHex/HolderToGpr/
+createVgprIdxList, and ActivationInline.
+
+**Decision:** Characterize only the pure layer + the asm entry-points that run
+cleanly with dummy vgprs. Do NOT attempt to drive the full asm codegen.
+
+**What is pinned (48 tests):** ActivationAvailable, ActivationTypeRegister.
+typeAvailable, the full ActivationType API (construct/passActivation/
+getAdditionalArgNum/arg-strings/fitSupported/getEnumIndex/getEnumStrList/
+state/repr/str/eq/lt/toEnum), actCacheInfo.isSame, getMagic/getMagicStr/
+HexToStr/addSpace, and ActivationModule defaults/setters/counters/vgprPrefix +
+the working getModule paths (abs/relu/none/clippedrelu/leakyrelu/clamp/drelu)
+and getAllGprUsage for a single type.
+
+**Why:** (a) The codegen/asm/GPU layer is explicitly excluded from this
+characterization effort's scope. (b) In this environment most emitters raise
+immediately — `NameError: 'SelectBit'`/`'VMaxF16'` (half paths for sigmoid/exp/
+gelu/tanh/silu/swish/clamp) and `KeyError: 'TransOpWait'` (single paths for
+gelu/sigmoid/exp/tanh/silu/swish/dgelu/geluscaling). These are missing-symbol /
+ISA-map-dependent codegen paths that cannot be exercised without the full
+KernelWriter/ISA context, so they can be neither run nor meaningfully pinned
+here. Verifying emitted assembly would require exactly the codegen harness the
+scope excludes.
+
+**Rejected alternatives:**
+- *Smoke-call every getModule type* — most raise (see above); would just assert
+  the raises, which pins environment breakage, not behavior.
+- *Build a full rocisa register/ISA context and snapshot emitted asm* — that is
+  codegen characterization, out of scope and high-maintenance.
+
+**Result:** 1037 stmts, 683 missed → 34.1% line. Documented ceiling.
