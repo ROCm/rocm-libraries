@@ -85,14 +85,15 @@ class InstructionEmitter:
             self.tileInfoMap['SA'] = scaleTileInfoA
             self.tileInfoMap['SB'] = scaleTileInfoB
 
-        # Per-uid k-window size: numSubIterK / numUnroll[t] = grGran[t].k
+        # Per-uid K-window: numSubIterK / numUnroll[t].  Single-DU configs
+        # (numUnroll=1) span the full numSubIterK range; multi-DU slices it.
         self._per_uid_k = {
-            'A': config.grA.k,
-            'B': config.grB.k,
+            t: config.numSubIterK // config.numUnroll.get(t, 1)
+            for t in ('A', 'B')
         }
         if self.hasScale:
-            self._per_uid_k['SA'] = config.grSA.k
-            self._per_uid_k['SB'] = config.grSB.k
+            self._per_uid_k['SA'] = config.numSubIterK // config.numUnroll.get('SA', 1)
+            self._per_uid_k['SB'] = config.numSubIterK // config.numUnroll.get('SB', 1)
 
         # Dispatch table — unroll_iter is passed for mfma/lr
         self._dispatch = {

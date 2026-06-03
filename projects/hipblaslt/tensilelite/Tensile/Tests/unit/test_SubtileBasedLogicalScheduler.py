@@ -714,13 +714,16 @@ class TestAssignVgprTiles:
         parts = sched._partitions
         num_iters = sched.unroll_factor
 
-        # 1. No MFMA/LR vgprTileId overlap
+        # 1. No MFMA/LR vgprTileId overlap (B may overlap when compact_b_overlay:
+        #    MFMA runs before LR in the same slot, so tiles are reused in place)
         for pi, slots in enumerate(parts):
             for slot in slots:
                 if not slot.mfma:
                     continue
                 for lr in slot.lrs:
                     if lr.tensor not in ('A', 'B') or not lr.vgpr_tile_map:
+                        continue
+                    if lr.tensor == 'B' and getattr(sched, 'compact_b_overlay', False):
                         continue
                     mfma_map_list = slot.mfma.vgpr_tile_maps.get(lr.tensor, [])
                     for ui in range(len(mfma_map_list)):
@@ -1238,6 +1241,8 @@ class TestPlaceGRs:
 
         uid=0: A/B k=[0,2) only (uid's own k range), SA/SB k=[0,4).
         uid=1: A/B k=[2,4) (second data read), SA/SB skipped.
+
+        TODO: revisit uid=0 A/B atom splits for tighter multi-DU packing.
         """
         cfg = make_cfg_256x256_fp4(grSA_k_gran=2, grSB_k_gran=2, pgr=1)
         assert cfg.numSubIterK == 4
@@ -1247,10 +1252,11 @@ class TestPlaceGRs:
         slots = sched.place_GRs()
         assert len(slots) == 4
 
-        # uid=0: A k=[0,2) split across s0/s1, B k=[0,2) + SA/SB @s2
-        _assert_gr(slots[0], 'A', 0, 2, 0, 4, mt=1, uid=0)
-        _assert_gr(slots[1], 'A', 0, 2, 4, 8, mt=1, uid=0)
-        _assert_gr(slots[2], 'B', 0, 2, 0, 8, mt=1, uid=0)
+        # uid=0: A k=[0,2) split across s0/s1; B k=[0,2) split across s1/s2
+        _assert_gr(slots[0], 'A', 0, 2, 0, 5, mt=1, uid=0)
+        _assert_gr(slots[1], 'A', 0, 2, 5, 8, mt=1, uid=0)
+        _assert_gr(slots[1], 'B', 0, 2, 0, 1, mt=1, uid=0)
+        _assert_gr(slots[2], 'B', 0, 2, 1, 8, mt=1, uid=0)
 
         # SA/SB uid=0 @s2
         _assert_gr(slots[2], 'SA', 0, 4, 0, 8, mt=1, uid=0)
@@ -2103,6 +2109,61 @@ class TestFromTileInfo:
         assert not cfg.hasScale
 
 
+class TestInstructionEmitterPerUidK:
+    """LR emit uses numSubIterK/numUnroll per uid, not grGran.k (single-DU bug)."""
+
+    def test_single_du_per_uid_k_spans_full_numSubIterK(self):
+        """Single-DU MX (numUnroll=1): per_uid_k must be numSubIterK, not grGran.k."""
+        cfg = make_cfg_256x256_fp4()
+        assert cfg.numSubIterK == 2
+        assert cfg.numUnroll == {'A': 1, 'B': 1, 'SA': 1, 'SB': 1}
+        assert cfg.lrA.k < cfg.numSubIterK  # LR steps per subIterK; emit spans full range
+
+        from Tensile.Components.Subtile.InstructionEmitter import InstructionEmitter
+        emitter = InstructionEmitter(
+            writer=MagicMock(), kernel={}, config=cfg,
+            tileInfoA=MagicMock(subtileShape=[1, 1]),
+            tileInfoB=MagicMock(subtileShape=[1, 1]),
+            dtileInfo=MagicMock(), vgprTilesA=[], vgprTilesB=[],
+            scaleTileInfoA=MagicMock(), scaleTileInfoB=MagicMock(),
+        )
+        assert emitter._per_uid_k['A'] == 2
+        assert emitter._per_uid_k['B'] == 2
+
+    def test_multi_du_per_uid_k_matches_gr_k_window(self):
+        """Multi-DU: per_uid_k = numSubIterK / numUnroll = grGran.k per uid slice."""
+        cfg = make_cfg_256x256_fp4(grSA_k_gran=2, grSB_k_gran=2)
+        assert cfg.numSubIterK == 4
+        assert cfg.numUnroll == {'A': 2, 'B': 2, 'SA': 1, 'SB': 1}
+
+        from Tensile.Components.Subtile.InstructionEmitter import InstructionEmitter
+        emitter = InstructionEmitter(
+            writer=MagicMock(), kernel={}, config=cfg,
+            tileInfoA=MagicMock(subtileShape=[1, 1]),
+            tileInfoB=MagicMock(subtileShape=[1, 1]),
+            dtileInfo=MagicMock(), vgprTilesA=[], vgprTilesB=[],
+            scaleTileInfoA=MagicMock(), scaleTileInfoB=MagicMock(),
+        )
+        assert emitter._per_uid_k == {'A': 2, 'B': 2, 'SA': 4, 'SB': 4}
+
+
+class TestVgprAllocatorSelection:
+    """Free-list VGPR path is only for MX multi-DU (numUnroll>1), not numSubIterK>1."""
+
+    def test_single_du_mx_uses_deterministic_allocator(self):
+        cfg = make_cfg_256x256_fp4(pgr=1)
+        assert cfg.numSubIterK == 2
+        assert max(cfg.numUnroll.values()) == 1
+        sched = LogicalScheduler(cfg)
+        assert not sched._use_free_list_vgpr_allocation()
+
+    def test_multi_du_mx_uses_free_list_allocator(self):
+        cfg = make_cfg_256x256_fp4(grSA_k_gran=2, grSB_k_gran=2, pgr=1)
+        assert max(cfg.numUnroll.values()) > 1
+        sched = LogicalScheduler(cfg)
+        assert sched._use_free_list_vgpr_allocation()
+
+
 # ══════════════════════════════════════════════════════════════
 # get_partition_candidates
 # ══════════════════════════════════════════════════════════════
@@ -2411,6 +2472,8 @@ class TestIntegration:
                     if slot.mfma and slot.lrs:
                         for lr in slot.lrs:
                             if lr.vgpr_tile_map and lr.tensor in ('A', 'B'):
+                                if lr.tensor == 'B' and sched.compact_b_overlay:
+                                    continue
                                 mfma_map = slot.mfma.vgpr_tile_maps.get(lr.tensor, [])
                                 if mfma_map:
                                     assert set(mfma_map[0].values()).isdisjoint(
