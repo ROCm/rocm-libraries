@@ -373,7 +373,14 @@ jobs:
       - name: Driver / GPU sanity check
         timeout-minutes: 3
         run: |
-          python ./build_tools/print_driver_gpu_info.py
+          # Use python3: the no_rocm container ships python3 (not a `python`
+          # alias; the old setup_test_environment venv used to provide that).
+          # The dist tree ships amd-smi + rocminfo, so put them and their libs
+          # on the path for a real readout (the script returns 0 even if a tool
+          # is missing, so this stays non-fatal).
+          export PATH="${GITHUB_WORKSPACE}/build/bin:${PATH}"
+          export LD_LIBRARY_PATH="${GITHUB_WORKSPACE}/build/lib:${LD_LIBRARY_PATH:-}"
+          python3 ./build_tools/print_driver_gpu_info.py
 
       - name: ASAN runtime environment
         # Mirrors TheRock's test_component.yml ASAN env block so downstream
@@ -404,7 +411,9 @@ jobs:
           TEST_TYPE: full
         run: |
           mkdir -p ./test_logs
-          python rocm-libraries/test/therock/test_hipblaslt.py 2>&1 | tee ./test_logs/test_output.log
+          # python3: the no_rocm container has no `python` alias (see the driver
+          # step note). test_hipblaslt.py + its is_asan import are pure stdlib.
+          python3 rocm-libraries/test/therock/test_hipblaslt.py 2>&1 | tee ./test_logs/test_output.log
 
   summary:
     name: "hipblaslt ASAN CI Summary"
