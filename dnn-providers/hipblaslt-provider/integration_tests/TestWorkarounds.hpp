@@ -9,6 +9,7 @@
 //
 // ----------------------------------------------------------------------------
 // hipBLASLt gfx12 FP16 trans-trans + bias-fused epilogue gap.
+// Tracking: https://github.com/ROCm/rocm-libraries/issues/8033
 // `hipblasLtMatmulAlgoGetHeuristic` returns 0 algorithms on gfx12 (gfx1200,
 // gfx1201, gfx1250, ...) for the cell:
 //     I/O dtype = FP16
@@ -52,7 +53,8 @@
 #define HIPBLASLT_GFX12_FP16_TT_BIAS_SKIP_MSG                                    \
     "[hipBLASLt gfx12 FP16 T-T + bias] hipblasLtMatmulAlgoGetHeuristic returns " \
     "no solutions for FP16 with transA=T, transB=T and any bias-fused "          \
-    "epilogue on gfx12 — see hipBLASLt upstream issue for status"
+    "epilogue on gfx12 — see "                                                   \
+    "https://github.com/ROCm/rocm-libraries/issues/8033"
 
 namespace hipblaslt_plugin::test_utilities
 {
