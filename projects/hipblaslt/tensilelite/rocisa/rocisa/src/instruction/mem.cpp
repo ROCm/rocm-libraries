@@ -516,6 +516,40 @@ void mem_inst(nb::module_ m_mem)
             return new rocisa::BufferLoadD16B16(self);
         });
 
+    nb::class_<rocisa::BufferLoadB16, rocisa::MUBUFReadInstruction>(m_mem, "BufferLoadB16")
+        .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const InstructionInput&,
+                      std::optional<rocisa::MUBUFModifiers>,
+                      const std::string&>(),
+             nb::arg("dst").none(),
+             nb::arg("vaddr"),
+             nb::arg("saddr"),
+             nb::arg("soffset"),
+             nb::arg("mubuf")   = std::nullopt,
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::BufferLoadB16& self, const nb::dict&) {
+            return new rocisa::BufferLoadB16(self);
+        });
+
+    nb::class_<rocisa::BufferLoadU16, rocisa::MUBUFReadInstruction>(m_mem, "BufferLoadU16")
+        .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const InstructionInput&,
+                      std::optional<rocisa::MUBUFModifiers>,
+                      const std::string&>(),
+             nb::arg("dst").none(),
+             nb::arg("vaddr"),
+             nb::arg("saddr"),
+             nb::arg("soffset"),
+             nb::arg("mubuf")   = std::nullopt,
+             nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::BufferLoadU16& self, const nb::dict&) {
+            return new rocisa::BufferLoadU16(self);
+        });
+
     nb::class_<rocisa::BufferLoadB32, rocisa::MUBUFReadInstruction>(m_mem, "BufferLoadB32")
         .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::shared_ptr<rocisa::RegisterContainer>&,

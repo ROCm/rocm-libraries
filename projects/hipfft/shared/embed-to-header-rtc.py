@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (C) 2021 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -33,7 +33,8 @@ def filename_to_cpp_ident(filename):
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(
-        description="Write embedded C++ generator file")
+        description="Embed contents of a set of files into a C++ header." +
+            "  Strips #include lines for runtime compilation.")
     parser.add_argument('--embed',
                         metavar='file',
                         type=str,
@@ -44,8 +45,8 @@ if __name__ == '__main__':
                         metavar='file',
                         type=str,
                         nargs='+',
-                        required=True,
-                        help='additional files that make up generator logic')
+                        default=[],
+                        help='hash additional files into a checksum in the header')
     parser.add_argument('--output',
                         metavar='file',
                         type=str,

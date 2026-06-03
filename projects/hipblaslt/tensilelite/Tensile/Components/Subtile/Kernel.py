@@ -1197,7 +1197,7 @@ def preLoop(writer, kernel):
 # Subroutine entry point for main loop
 #
 #
-def mainLoop(writer, kernel):
+def mainLoop(writer, kernel, tensorParametersA, tensorParametersB):
   module = Module()
   pgr = kernel["PrefetchGlobalRead"]
   assert pgr in (0, 1, 2), "SubtileBasedKernel only supports PGR=0, PGR=1, and PGR=2, got PGR=%d" % pgr
@@ -1256,9 +1256,38 @@ def mainLoop(writer, kernel):
   scheduler.populate_instructions(
       writer, kernel,
       tileInfoA=tiA, tileInfoB=tiB, dtileInfo=dtileInfo,
-      scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
+      scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB,
+      tensorParametersA=tensorParametersA,
+      tensorParametersB=tensorParametersB)
 
-  module.add(scheduler.emitAllLoops(writer, kernel))
+  module.add(scheduler.emitMainAndExitLoops(writer, kernel))
+
+  # Wrap the tail loop with the runtime K%DU counter setup and skip branch,
+  # mirroring the legacy KernelWriter pattern (KernelWriter.py:5237 / 5618).
+  if not kernel["NoTailLoop"]:
+    module.add(writer.calculateLoopNumIter(
+        kernel, tensorParametersA, tensorParametersB, -1))
+    # Tighten Srd{A,B}+2 OOB limit using the K remainder just computed
+    # (no-op outside UseSubtileImpl A/B). Needed for bf16 (boundary DTL
+    # load) and fp4 (regular tail-loop dwordx4 must see the actual K_rem
+    # to avoid pulling stale OOB-zeroed dwords into LDS).
+    module.add(writer.computeTailLoopSrdLimit(
+        kernel, [tensorParametersA, tensorParametersB]))
+    # MX scale operands: SrdMXS{A,B}+2 tightened with K_pad=256 (host scale
+    # re-scatter granularity from DataInitialization.cpp::rearrangePaddedMXScaleLayout).
+    # No-op when DepthU<=256 since host padding alone already covers K_rem.
+    mxScaleTPs = []
+    if kernel["ProblemType"].get("MXBlockA", 0) > 0 and "MX" in tensorParametersA:
+      mxScaleTPs.append(tensorParametersA["MX"])
+    if kernel["ProblemType"].get("MXBlockB", 0) > 0 and "MX" in tensorParametersB:
+      mxScaleTPs.append(tensorParametersB["MX"])
+    if mxScaleTPs:
+      module.add(writer.computeTailLoopSrdLimit(kernel, mxScaleTPs))
+    module.add(scheduler.emitTailLoop(writer, kernel))
+    module.add(writer.closeLoop(
+        kernel, tensorParametersA, tensorParametersB,
+        -1, None, emitEndLabelOnly=True))
+
   scheduler.deallocVgprTiles(writer)
 
   return module

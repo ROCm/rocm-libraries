@@ -1,5 +1,5 @@
 /******************************************************************************
-* Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+* Copyright (C) 2024 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -624,14 +624,15 @@ void exec_testcases(std::function<AllParams(const std::vector<std::string>&)> ma
         std::vector<void*>                        load_cb_data;
         std::vector<void*>                        store_cb_func;
         std::vector<void*>                        store_cb_data;
-        if(all_params[testcase].run_callbacks)
+        // Set function pointer callbacks at execute time
+        if(all_params[testcase].run_callbacks == fft_callback_type_funcptr)
         {
-            get_rank_load_callbacks(
+            get_rank_load_callbacks_funcptr(
                 all_params[testcase], load_cb_func, load_cb_data, false, all_cb_data);
-            get_rank_store_callbacks(
+            get_rank_store_callbacks_funcptr(
                 all_params[testcase], store_cb_func, store_cb_data, false, all_cb_data);
 
-            auto fft_status = all_params[testcase].set_callbacks(
+            auto fft_status = all_params[testcase].set_funcptr_callbacks(
                 &load_cb_func, &load_cb_data, &store_cb_func, &store_cb_data);
             if(fft_status != fft_status_success)
                 throw std::runtime_error("set callback failure");
