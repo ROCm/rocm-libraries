@@ -297,7 +297,7 @@ jobs:
           retention-days: 7
 
   test:
-    name: "Test hipblaslt ASAN (shard ${{ matrix.shard }} of 6)"
+    name: "Test hipblaslt ASAN (smoke)"
     needs: [setup, build]
     # Consumes the `hipblaslt-asan-trees` artifact the build job uploads (same
     # run). The build's `dist/` tree is a self-contained, runnable layout —
@@ -322,7 +322,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6]
+        # smoke is ~30 cases — a single shard on one 90a runner is plenty.
+        shard: [1]
     defaults:
       run:
         shell: bash
@@ -411,8 +412,11 @@ jobs:
         timeout-minutes: 180
         env:
           SHARD_INDEX: ${{ matrix.shard }}
-          TOTAL_SHARDS: 6
-          TEST_TYPE: full
+          TOTAL_SHARDS: 1
+          # smoke only: the obligation for the hipBLASLt ASAN smoke build.
+          # test_hipblaslt.py maps TEST_TYPE=quick -> --gtest_filter=*smoke*
+          # (the ~30 smoke-category cases), not the full suite.
+          TEST_TYPE: quick
         run: |
           mkdir -p ./test_logs
           # python3: the no_rocm container has no `python` alias (see the driver
