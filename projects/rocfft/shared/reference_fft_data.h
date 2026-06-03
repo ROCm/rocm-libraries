@@ -47,7 +47,7 @@ inline void execute_cpu_fft(const fft_params&            cpu_fft_params,
     // input will be modified.  So we need to modify the copy instead.
     std::vector<hostbuf>  cpu_input_copy(cpu_input.size());
     std::vector<hostbuf>* input_ptr = &cpu_input;
-    if(cpu_fft_params.run_callbacks
+    if(cpu_fft_params.run_callbacks != fft_callback_type_none
        || cpu_fft_params.transform_type == fft_transform_type_real_inverse)
     {
         for(size_t i = 0; i < cpu_input.size(); ++i)
