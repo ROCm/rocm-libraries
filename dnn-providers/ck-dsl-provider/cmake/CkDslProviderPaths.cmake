@@ -7,13 +7,10 @@
 #   2. The provider-local ck_dsl_provider Python package
 #      (dnn-providers/ck-dsl-provider/python/).
 #
-# These paths are baked into a generated header
-# (ckdsl_provider_paths.h) so the embedded interpreter can prepend them
-# to sys.path at startup. Required because:
-#   - ck_dsl has no pyproject.toml / setup.py, so we cannot pip-install
-#     it into the embedded interpreter's site-packages (PREP_FINDINGS §P-4).
-#   - The provider's own Python package is shipped beside the .so, not
-#     into site-packages.
+# These paths feed the MicroPython freeze pipeline (micropython/build_embed.sh
+# via cmake/CkDslMicroPython.cmake): build_bundle.py transforms these two trees
+# and build_frozen.py freezes the resulting closure into the plugin, so ck_dsl
+# resolves with no filesystem / sys.path at runtime.
 #
 # Outputs (set in parent scope):
 #   CK_DSL_PYTHON_PACKAGE_PATH           absolute dir containing ck_dsl/

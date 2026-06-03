@@ -104,21 +104,20 @@ CkDslContainer::CkDslContainer() {
     HIPDNN_PLUGIN_LOG_INFO("Creating CkDslContainer");
 
     // The CK DSL provider drives its compile pipeline through an
-    // embedded CPython interpreter. ensureInitialized() is idempotent
-    // and thread-safe, and the embedded interpreter is intentionally
-    // never finalised (Py_Finalize would tear down state shared with
-    // any sibling plugin that also embeds CPython), so the
-    // initialisation is a per-process action even though
-    // SharedContainerManager may reconstruct this container across
-    // handle generations.
+    // embedded MicroPython interpreter. ensureInitialized() is idempotent
+    // and thread-safe, and the interpreter is intentionally never
+    // deinitialised (mp_embed_deinit would tear down the GC heap +
+    // runtime state for the whole process), so the initialisation is a
+    // per-process action even though SharedContainerManager may
+    // reconstruct this container across handle generations.
     ck_dsl_provider::EmbeddedInterpreter::ensureInitialized();
 
-    // Bring up the Python compile-service bridge before any engines are
+    // Bring up the compile-service bridge before any engines are
     // registered. The bridge is the single boundary through which the
-    // JIT pipeline calls into ck_dsl; constructing it here means the
-    // import + sys.path injection happen exactly once per container
-    // lifetime and any failure surfaces with a clear container-ctor
-    // stack trace rather than deep inside an engine call.
+    // JIT pipeline calls into the frozen ck_dsl; constructing it here
+    // means the module import happens exactly once per container lifetime
+    // and any failure surfaces with a clear container-ctor stack trace
+    // rather than deep inside an engine call.
     _compileServiceBridge = std::make_unique<CompileServiceBridge>();
 
     // Bind to the process-wide JIT cache. The cache outlives the
