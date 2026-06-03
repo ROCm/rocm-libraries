@@ -12,7 +12,12 @@ TEST(ComgrProbeTest, HasComgrSupport) {
 }
 
 TEST(ComgrProbeTest, ValidInstructionAssembles) {
-    EXPECT_TRUE(tryAssembleWithComgr("s_nop 0", "amdgcn-amd-amdhsa--gfx1250", 32));
+    constexpr const char* kIsa = "amdgcn-amd-amdhsa--gfx1250";
+    if (!comgrSupportsIsa(kIsa)) {
+        GTEST_SKIP() << "Installed comgr does not list " << kIsa
+                     << "; skipping assembler round-trip test.";
+    }
+    EXPECT_TRUE(tryAssembleWithComgr("s_nop 0", kIsa, 32));
 }
 
 TEST(ComgrProbeTest, InvalidInstructionFails) {
