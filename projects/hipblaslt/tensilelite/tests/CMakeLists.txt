@@ -64,7 +64,6 @@ target_link_libraries(tensilelite-tests
         ${hipblaslt_msgpack_target}
 )
 
-
 if(HIPBLASLT_ENABLE_MXDATAGENERATOR)
     target_sources(tensilelite-tests
         PRIVATE

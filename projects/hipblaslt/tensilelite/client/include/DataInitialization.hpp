@@ -64,6 +64,12 @@ namespace TensileLite
                 || dt == rocisa::DataType::BFloat8;
         }
 
+        inline bool isMXProblem(const ContractionProblemGemm& problem)
+        {
+            return isMXTensor(problem.a(), problem.mxBlockA())
+                || isMXTensor(problem.b(), problem.mxBlockB());
+        }
+
         inline bool isF6(const TensorDescriptor& tensor)
         {
             auto const dt = tensor.dataType();

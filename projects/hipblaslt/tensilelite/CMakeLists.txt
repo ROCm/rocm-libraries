@@ -1,6 +1,14 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+# Coverage instrumentation for C++ code
+option(TENSILELITE_ENABLE_COVERAGE "Enable code coverage instrumentation" OFF)
+if(TENSILELITE_ENABLE_COVERAGE)
+    message(STATUS "Enabling C++ code coverage instrumentation")
+    add_compile_options(-fprofile-instr-generate -fcoverage-mapping)
+    add_link_options(-fprofile-instr-generate -fcoverage-mapping)
+endif()
+
 add_subdirectory(rocisa)
 
 if(TENSILELITE_ENABLE_AUTOBUILD)
