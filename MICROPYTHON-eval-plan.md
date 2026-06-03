@@ -368,12 +368,49 @@ cosmetic (no codegen impact); MicroPython produces the *exact same compiled conv
 The declares-determinism fix is therefore optional (nice-to-have for IR-text diffs, not needed for
 HSACO equality).
 
-### Remaining for the conv POC (post-confidence)
+### WINDOWS feasibility + Phase-2 architecture decision (2026-06-01)
+**MicroPython `ffi` (`modffi.c`) is `ports/unix` ONLY** — not in the embed port nor the Windows port
+(uses POSIX dlopen/libffi). So any design where MicroPython drives comgr via `ffi` is a **Windows
+dead-end**. The G0/G1b spike used `ffi` for comgr as a Linux convenience to prove the chain — NOT the
+shipping architecture.
+
+Two architectures:
+- **Arch B (spike-style):** MicroPython does codegen + comgr-via-ffi. ❌ Windows (no ffi).
+- **Arch A (CHOSEN):** MicroPython does **codegen only** → returns LLVM IR text; **C++ calls comgr**
+  (links `amd_comgr`). ✅ Windows. Also cleaner (comgr lives in C++ with the HIP/launch code).
+
+**Why Arch A is Windows-viable, with evidence:**
+- The Windows-critical piece is already proven: **G1a's `run_g1.py` codegen uses ZERO ffi** (just
+  `sys` + ck_dsl + pure-Python shims) and produced IR byte-identical to CPython — that IS the Arch-A
+  MicroPython side.
+- The **embed port is portable C** (no dlopen/pthread/unistd) → embeds in the provider DLL on Windows.
+- Codegen path OS touches = only `os.getenv` (transformed) + a `sys.modules` torch check — portable;
+  `arch_specs.json` via `open()` or frozen.
+- `amd_comgr.dll` ships with the Windows ROCm/HIP SDK; C++ calling it mirrors the existing
+  `hipModuleLoadData` launch path that already runs on Windows.
+- **Freeze the ck_dsl bundle into the MicroPython binary** (frozen modules, all ports) → single
+  self-contained, no-filesystem, no-Python-install artifact on Linux AND Windows (the original goal).
+
+**Arch A changes vs current provider:** `compile_service.compile` returns LLVM IR text (+ metadata)
+instead of HSACO; add a **C++ comgr wrapper** (IR→HSACO, cross-platform); `HipModule`/launch unchanged.
+
+**Windows unknowns to verify in Phase 2 (not testable from this Linux box):** build embed port on
+Windows (MSVC/clang) into the DLL; C++ `amd_comgr.dll` calls under Windows HIP SDK; frozen-modules
+build (`mpy-cross` + freeze the transformed bundle); `__file__` absent under frozen → embed/guard
+`arch_specs.json` (already noted in [[ck-dsl-embed-cpython]]).
+
+### Remaining for the conv POC (post-confidence) — built on Arch A
 1. (Optional) sort the emitted declares in `core/lower_llvm.py` for byte-identical IR *text* — NOT
    needed for HSACO equality (proven byte-identical above).
-3. Phase 2: embed MicroPython in the provider C++ (the accepted glue rewrite: replace
-   EmbeddedInterpreter/CompileServiceBridge/PythonError on MicroPython's `mp_*` API; configure heap);
-   marshal the existing conv `py::dict` payload as `mp_obj_t`. Reuse the existing conv provider
-   integration + `CpuFpReferenceConvolution` accuracy oracle on gfx1151 for end-to-end validation.
-4. Package the ck_dsl bundle build (the 4 transforms + trimmed __init__s + comgr-ffi swap) as a
-   real build step; land the field()/star-unpacking/etc. transforms as upstream CK changes.
+2. Phase 2 (Arch A): build MicroPython embed port as a static lib; replace
+   EmbeddedInterpreter/CompileServiceBridge/PythonError on MicroPython's `mp_*` API; configure GC
+   heap (conv needs >2 MB); marshal the existing conv `py::dict` payload as `mp_obj_t`. **MicroPython
+   returns LLVM IR text** (not HSACO).
+3. Phase 2 (Arch A): add a **C++ comgr wrapper** (IR text → HSACO via `amd_comgr`, cross-platform) —
+   the new step replacing Python's comgr; feed its HSACO into the unchanged `HipModule`/launch path.
+4. End-to-end: reuse the existing conv provider integration + `CpuFpReferenceConvolution` accuracy
+   oracle on gfx1151.
+5. Package the ck_dsl bundle build (the 4 transforms + trimmed __init__s) as a real build step
+   (ideally **frozen modules** for a self-contained no-Python-install artifact on Linux+Windows);
+   land the field()/star-unpacking/etc. transforms as upstream CK changes. NOTE: the comgr-ffi swap
+   is NO LONGER part of the bundle under Arch A — comgr moves to C++.
