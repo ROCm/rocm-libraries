@@ -415,12 +415,18 @@ Integration build steps (foundation → provider):
    `build.sh`, `main.c`, `frozen/frozen_test.py`). DONE: config (MINIMUM + sys/sys.modules/sys.path/
    property/double-float + MPZ longint with `MPZ_DIG_SIZE=16`/`MICROPY_PY_SYS_PLATFORM` to match
    mpy-cross & satisfy modsys); the freeze pipeline builds + the embed binary runs Python with the
-   frozen module's **bytecode embedded** and `.frozen` already on `sys.path`. REMAINING (narrow):
-   the manifest registers the module name **with a `.py` suffix** (`mp_frozen_names` = `"frozen_test.py"`)
-   so `import frozen_test` doesn't match (the import searches the extensionless name) — manifest
-   naming fix needed. THEN: raise config to add `re`/`json` (wire `extmod/modre.c`+`modjson.c` into
-   the qstr/moduledefs scan), freeze the 6 shims + the conv codegen closure (~34 ck modules),
-   `__file__`-free arch_specs (freeze the JSON or embed).
+   frozen module's **bytecode embedded** and `.frozen` already on `sys.path`. **UNRESOLVED:**
+   `import frozen_test` returns "module not found" and the root cause is NOT yet pinned. Note:
+   `mp_frozen_names` stores the name WITH `.py` (mpy-tool.py:1718 uses `cm.source_file.str`), BUT
+   `stat_module` (builtinimport.c:111) appends `.py`, so `mp_find_frozen_module("frozen_test.py")`
+   should match — the suffix alone doesn't explain it. (A direct C call to `mp_find_frozen_module`
+   segfaulted — inconclusive, needs runtime context.) Next debug: import DEBUG_printf; verify
+   `frozen_content.c`'s `mp_frozen_names` is the linked symbol (not a weak empty default) and that
+   `MICROPY_MODULE_FROZEN`==1 in the compiled `builtinimport.c`. THEN: add `re`/`json` (wire
+   `extmod/modre.c`+`modjson.c` into the qstr/moduledefs scan), freeze the 6 shims + the conv codegen
+   closure (~34 ck modules), `__file__`-free arch_specs. **This is embed-port *packaging* plumbing —
+   feasibility is already proven via the unix-port spike (G1b: conv DSL→HSACO byte-identical to
+   CPython); the embed step is the self-contained/Windows-ready shipping form, not a feasibility risk.**
 3. C glue (`py/runtime.h`): import the frozen compile entry, call it with the conv payload (build
    `mp_obj_t` dict), get back the **LLVM IR text** (+ grid/block/arg metadata); error translation.
 4. C++ comgr wrapper: IR text → HSACO via `amd_comgr` (cross-platform; same 3-stage chain as the
