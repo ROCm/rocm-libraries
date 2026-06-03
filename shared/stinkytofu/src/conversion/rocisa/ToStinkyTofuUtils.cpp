@@ -142,7 +142,8 @@ stinkytofu::MUBUFModifiers buildMUBUFModifiersForBufferOp(
 stinkytofu::SMEMModifiers convertSMEMModifiers(const rocisa::SMEMModifiers& rocMod,
                                                const std::map<std::string, int>& asmCaps) {
     bool hasSCOPEModifier = asmCaps.count("HasSCOPEModifier") && asmCaps.at("HasSCOPEModifier");
-    return stinkytofu::SMEMModifiers(rocMod.glc, rocMod.nv, rocMod.offset, hasSCOPEModifier);
+    return stinkytofu::SMEMModifiers(rocMod.glc, rocMod.nv != rocisa::NonVolatile::NV_NONE,
+                                     rocMod.offset, hasSCOPEModifier);
 }
 
 stinkytofu::SDelayAluData convertSDelayAluData(const rocisa::SDelayAlu* delayAluInst) {
