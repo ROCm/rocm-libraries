@@ -892,7 +892,7 @@ static bool runDqDkDvBatchVariant(const rocm_ck::FmhaBwdDQDKDVVariant& variant,
     // dropout scalars let the kernel launch survive; they do NOT exercise
     // the bias / dropout math. Promoting these variants to PASSED requires
     // non-zero inputs and a matching CPU reference.
-    const bool is_group_mode = (variant.spec.signature.mode == rocm_ck::FmhaMode::GROUP);
+    const bool is_group_mode = (variant.spec.mode == rocm_ck::FmhaMode::GROUP);
 
     if(variant.spec.bias_type == rocm_ck::FmhaBiasType::ELEMENTWISE)
     {

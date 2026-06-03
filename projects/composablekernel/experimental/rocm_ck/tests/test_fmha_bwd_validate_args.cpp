@@ -115,7 +115,10 @@ TEST(FmhaBwdValidateArgsDeathTest, AbortsOnZeroBatchSizeInDeterministicBatch)
             {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::BATCH},
         .algorithm = {.is_deterministic = true, .pad_hdim_q = 8, .pad_hdim_v = 8}});
 
-    Args args                       = makeValidArgs();
+    static int dummy = 1;
+    Args args        = makeValidArgs();
+    // Deterministic mode also requires the NSPLITS workspace slot.
+    args.tensors[S::NSPLITS]        = {&dummy, makeShape(1), makeStrides(1)};
     args.scalars[S::BATCH_SIZE].i32 = 0; // missing/zero -> abort
     EXPECT_DEATH(validateArgs(args, det_spec), "BATCH_SIZE .* must be positive");
 }

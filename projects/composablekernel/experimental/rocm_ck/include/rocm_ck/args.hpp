@@ -25,8 +25,9 @@ namespace rocm_ck {
 /// Maximum tensor rank. Covers grouped 3D convolution layouts (GNCDHW = rank 6).
 constexpr int kMaxRank = 6;
 
-/// Maximum number of tensor slots. FMHA backward uses ~12 tensors.
-constexpr int kMaxTensors = 16;
+/// Maximum number of tensor slots. FMHA backward (deterministic group) uses
+/// 18 tensors (9 base + bias/dbias/randval + 4 seq* + nsplits + dq_acc_offset).
+constexpr int kMaxTensors = 20;
 
 /// Maximum number of scalar slots. FMHA with masking+dropout needs ~12 scalars.
 constexpr int kMaxScalars = 16;
@@ -64,16 +65,16 @@ union ScalarValue
 /// Slot ordering matches Signature: tensors[i] <-> Signature::tensors[i].
 /// Trivially copyable, standard layout — required for kernarg passing.
 ///
-/// sizeof = 1552 bytes (38% of the 4096-byte HSA kernarg budget).
+/// sizeof = 1904 bytes (47% of the 4096-byte HSA kernarg budget).
 struct Args
 {
-    std::array<TensorArg, kMaxTensors> tensors;   // 16 x 80 = 1280 bytes
+    std::array<TensorArg, kMaxTensors> tensors;   // 20 x 80 = 1600 bytes
     std::array<ScalarValue, kMaxScalars> scalars; // 16 x  8 =  128 bytes
 
     // Batch parameters (0 = unbatched, >0 = batched GEMM with blockIdx.y indexing)
     index_t batch_count = 0; //  4 bytes
     // Per-tensor batch stride in elements (0 = broadcast across batch)
-    std::array<long_index_t, kMaxTensors> batch_strides = {}; // 16 x 8 = 128 bytes
+    std::array<long_index_t, kMaxTensors> batch_strides = {}; // 20 x 8 = 160 bytes
 
     // Workspace pointer for Stream-K partial reduction (nullptr when unused)
     void* workspace_ptr = nullptr; //  8 bytes
@@ -125,7 +126,7 @@ static_assert(sizeof(ScalarValue) == 8, "unexpected ScalarValue size");
 static_assert(std::is_trivially_copyable_v<Args>,
               "Args must be trivially copyable for kernarg passing");
 static_assert(std::is_standard_layout_v<Args>, "Args must be standard layout for kernarg passing");
-static_assert(sizeof(Args) == 1552, "unexpected Args size");
+static_assert(sizeof(Args) == 1904, "unexpected Args size");
 static_assert(alignof(Args) == 8, "unexpected Args alignment");
 
 } // namespace rocm_ck
