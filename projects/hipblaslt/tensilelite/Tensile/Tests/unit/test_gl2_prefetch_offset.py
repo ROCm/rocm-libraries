@@ -28,6 +28,11 @@
 #     (and MXSA/MXSB) cooperatively at the same time, since A is cooperative along
 #     WorkGroup1 / macro-tile-selected by WorkGroup0 and B is the mirror. Each WG
 #     writes to its own output region; the host aggregates across all cx*cy.
+#   - StridedBatched: a batch dim (index 2) maps to WorkGroup2, and
+#     calculateStartAddr folds WorkGroup2 * Stride{tc}K into the base address.
+#     Batched configs launch a 3D [cx, cy, num_batches] grid (wg_z from
+#     ttmp7[31:16]); each batch b is verified against its footprint shifted by
+#     b * Stride{tc}K * bpe.
 #   - Address increment (PGR=2, PGL=2): with PrefetchGlobalRead>1 the start
 #     address is pre-skipped by PGR*inc inside calculateStartAddr, and each
 #     prefetched-ahead iteration advances every address by `inc` (incrementAddr).
@@ -127,10 +132,20 @@ class GL2Config:
                               # address by `inc` each iteration via incrementAddr).
     n_inc: int = 2            # extra incrementAddr stages to verify after the start
                               # addr, i.e. exercise the per-iteration advance.
+    batched: bool = False     # StridedBatched: add a batch dim (index 2 -> wg_z).
+                              # calculateStartAddr then folds WorkGroup2 * Stride{tc}K
+                              # into the base address (the batch-offset path).
+    num_batches: int = 1      # batch extent (grid z). Each batch b shifts the whole
+                              # footprint by b * Stride{tc}K * bpe.
 
     @property
     def n_wg(self):
         return self.cluster[0] * self.cluster[1]
+
+    @property
+    def n_regions(self):
+        # distinct output regions = cooperative cluster wgs * batches (grid z)
+        return self.n_wg * self.num_batches
 
 
 def tensor_dims(spec, cfg):
@@ -176,15 +191,21 @@ CONFIGS = [
     # ---- A + B together, FP8, assorted cluster shapes (incl. [4,4]) ----
     GL2Config("ab_fp8_tlu",          [_A(True, 256),  _B(True, 256)],  cluster=(2, 2)),
     GL2Config("ab_fp8_ntlu",         [_A(False, 256), _B(False, 256)], cluster=(4, 4)),
-    GL2Config("ab_fp8_mixed_layout", [_A(True, 256),  _B(False, 256)], cluster=(2, 4)),
+    # batched=True also exercises the StridedBatched path (WorkGroup2 * Stride{tc}K
+    # folded into the base addr): batch 0 reproduces the non-batched footprint, and
+    # batch >0 verifies the per-batch shift. The grid gains a z extent (wg_z from
+    # ttmp7[31:16]). FP8 (integer bpe) so the batch stride * bpe stays integral.
+    GL2Config("ab_fp8_mixed_layout", [_A(True, 256),  _B(False, 256)], cluster=(2, 4),
+              batched=True, num_batches=3),
     # gl2ncc == 2 for both (coal*bpe == 2*GPS)
     GL2Config("ab_fp8_ncc2",         [_A(True, 512),  _B(True, 512)], depth_u=128, cluster=(4, 2)),
     # ---- A + B with mixed dtypes (F8 x F4) ----
     GL2Config("ab_f8f4_mixed", [_A(True, 256, bpe=1), _B(True, 512, bpe=0.5)],
               depth_u=512, cluster=(1, 2)),
     # ---- A + B + MXSA + MXSB together (full MX problem) ----
+    # batched=True here also covers the StridedBatched path for MX scales (Stride{MXSx}K).
     GL2Config("abmx_fp8",      [_A(True, 256),  _B(True, 256),  _MXSA(256), _MXSB(256)],
-              depth_u=256, mx_block=32, cluster=(2, 2)),
+              depth_u=256, mx_block=32, cluster=(2, 2), batched=True, num_batches=2),
     GL2Config("abmx_fp8_ntlu", [_A(False, 256), _B(False, 256), _MXSA(256), _MXSB(256)],
               depth_u=256, mx_block=32, cluster=(2, 1)),
     # ---- FP4 (bpe=0.5) on A and B, TLU, ncc==1 and (coal*bpe==2*GPS) ncc==2 ----
@@ -210,6 +231,13 @@ CONFIGS = [
 ]
 
 
+def batch_stride_elems(spec, cfg):
+    """Per-tensor batch stride in *elements* (the programmed Stride{tc}K). Arbitrary
+    but fixed and distinct per tensor so the verifier can reproduce the
+    WorkGroup2 * Stride{tc}K * bpe shift and so a cross-tensor stride mixup fails.
+    Chosen even so that stride * bpe is integral for fractional bpe (FP4)."""
+    return {"A": 1_000_002, "B": 2_000_006, "MXSA": 3_000_010, "MXSB": 4_000_014}[spec.tc]
+
 # ---------------------------------------------------------------------------
 # Kernel + writer construction
 # ---------------------------------------------------------------------------
@@ -226,12 +254,13 @@ def _make_kernel(cfg):
     has_mxb = any(t.tc == "MXSB" for t in cfg.tensors)
     return {
         "ProblemType": {
-            "Batched": False,
-            "IndicesBatch": [],
+            "Batched": cfg.batched,
+            "StridedBatched": cfg.batched,
+            "IndicesBatch": [2] if cfg.batched else [],
             "IndicesFree": [0, 1],
             "IndicesSummation": [3],
-            "IndexAssignmentsA": [0, 3],
-            "IndexAssignmentsB": [1, 3],
+            "IndexAssignmentsA": [0, 3, 2] if cfg.batched else [0, 3],
+            "IndexAssignmentsB": [1, 3, 2] if cfg.batched else [1, 3],
             "UseInitialStridesAB": True,
             "MXBlockA": cfg.mx_block if has_mxa else 0,
             "MXBlockB": cfg.mx_block if has_mxb else 0,
@@ -311,8 +340,8 @@ def build_kernel(cfg):
     # ---- named sgprs (resolved via .set; values assigned in the prologue) ----
     w.sgprs["OutPtr"] = w.sgprPool.checkOutAligned(2, 2, "OutPtr", preventOverflow=False)
     shared = ["WorkGroup0", "WorkGroup1", "WorkGroup2"]
-    if cfg.n_wg > 1:
-        shared += ["WGOUT"]   # per-wg output-region shift = linear_wg_id * n_out
+    if cfg.n_regions > 1:
+        shared += ["WGOUT"]   # per-region output shift = linear_wg_id * n_out
     if "A" in subtcs:
         shared += ["StrideAI", "StrideAL", "SizeI"]
     if "B" in subtcs:
@@ -322,6 +351,8 @@ def build_kernel(cfg):
     for t in cfg.tensors:
         w.sgprs[f"Address{t.tc}"] = w.sgprPool.checkOutAligned(2, 2, f"Address{t.tc}", preventOverflow=False)
         w.sgprs[f"GL2PrefetchInc{t.tc}"] = w.sgprPool.checkOutAligned(2, 2, f"GL2PrefetchInc{t.tc}", preventOverflow=False)
+        if cfg.batched:    # batch stride Stride{tc}K (index 2 -> 'K')
+            w.sgprs[f"Stride{t.tc}K"] = w.sgprPool.checkOut(1, f"Stride{t.tc}K", preventOverflow=False)
 
     w.vgprPool.checkOut(1)  # v0 = Serial (workitem id)
 
@@ -329,7 +360,8 @@ def build_kernel(cfg):
     tps = []
     vgpr_sets = {}
     for t in cfg.tensors:
-        tp = {"tensorChar": t.tc, "idx": t.idx, "tlu": t.tlu, "bpeGR": t.bpe, "ia": t.ia}
+        ia = t.ia + [2] if cfg.batched else t.ia   # batch index 2 must be in ia
+        tp = {"tensorChar": t.tc, "idx": t.idx, "tlu": t.tlu, "bpeGR": t.bpe, "ia": ia}
         comp.init(w, kernel, tp)
         assert tp["gl2nc"] == tensor_dims(t, cfg)[3], \
             f"{t.tc}: gl2nc {tp['gl2nc']} != expected {tensor_dims(t, cfg)[3]}"
@@ -350,7 +382,6 @@ def build_kernel(cfg):
     body = Module("body")
     for t, tp in tps:
         body.add(comp.setIncrement(w, kernel, tp))
-    for t, tp in tps:
         body.add(comp.calculateStartAddr(w, kernel, tp))
 
     # ---- prologue ----
@@ -374,23 +405,31 @@ def build_kernel(cfg):
         consts += [("StrideBJ", coal_b), ("StrideBL", coal_b),
                    ("SizeJ", free_dim_size(cfg, "B"))]
     consts += [("WorkGroup0", 0), ("WorkGroup1", 0), ("WorkGroup2", 0)]
+    if cfg.batched:                              # programmed batch stride Stride{tc}K
+        consts += [(f"Stride{t.tc}K", batch_stride_elems(t, cfg)) for t in cfg.tensors]
     for n, v in consts:
         prologue.add(SMovB32(dst=sgpr(n), src=v))
 
+    # gfx1250 carries the workgroup id in ttmp (not s2): wg_x in ttmp9, wg_y in
+    # ttmp7[15:0], wg_z in ttmp7[31:16] (matching the production non-cluster
+    # decode). The cooperative cluster drives WorkGroup0/1; the batch dim drives
+    # WorkGroup2. Each region's linear id is wg_z*(cx*cy) + wg_y*cx + wg_x.
+    cx, cy = cfg.cluster
     if cfg.n_wg > 1:
-        # gfx1250 carries the workgroup id in ttmp (not s2): wg_x in ttmp9, wg_y
-        # in ttmp7[15:0]. Launch a real [cx,cy] grid; each wg drives WorkGroup0
-        # (B-type cooperative / A-type MT-selector) and WorkGroup1 (the mirror),
-        # and writes to its own region linear_id = wg_y*cx + wg_x.
-        cx = cfg.cluster[0]
         prologue.add(TextBlock("  s_mov_b32 s%d, ttmp9\n" % w.sgprs["WorkGroup0"]))
         prologue.add(TextBlock("  s_and_b32 s%d, 0xFFFF, ttmp7\n" % w.sgprs["WorkGroup1"]))
-        prologue.add(TextBlock("  s_mul_i32 s%d, s%d, %d\n"
-                               % (w.sgprs["WGOUT"], w.sgprs["WorkGroup1"], cx)))
-        prologue.add(TextBlock("  s_add_u32 s%d, s%d, s%d\n"
-                               % (w.sgprs["WGOUT"], w.sgprs["WGOUT"], w.sgprs["WorkGroup0"])))
-        prologue.add(TextBlock("  s_mul_i32 s%d, s%d, %d\n"
-                               % (w.sgprs["WGOUT"], w.sgprs["WGOUT"], n_out_per_wg)))
+    if cfg.num_batches > 1:
+        prologue.add(TextBlock("  s_lshr_b32 s%d, ttmp7, 16\n" % w.sgprs["WorkGroup2"]))
+    if cfg.n_regions > 1:
+        # WGOUT = (wg_z*cy + wg_y)*cx + wg_x, then * n_out_per_wg. WorkGroup2 is 0
+        # when not batched and WorkGroup0/1 are 0 without a cluster, so this one
+        # chain covers cluster-only, batch-only, and combined launches.
+        wgout = w.sgprs["WGOUT"]
+        prologue.add(TextBlock("  s_mul_i32 s%d, s%d, %d\n" % (wgout, w.sgprs["WorkGroup2"], cy)))
+        prologue.add(TextBlock("  s_add_u32 s%d, s%d, s%d\n" % (wgout, wgout, w.sgprs["WorkGroup1"])))
+        prologue.add(TextBlock("  s_mul_i32 s%d, s%d, %d\n" % (wgout, wgout, cx)))
+        prologue.add(TextBlock("  s_add_u32 s%d, s%d, s%d\n" % (wgout, wgout, w.sgprs["WorkGroup0"])))
+        prologue.add(TextBlock("  s_mul_i32 s%d, s%d, %d\n" % (wgout, wgout, n_out_per_wg)))
 
     # ---- epilogue: for each stage, export (addr - base) per tensor into its own
     # output region, then incrementAddr to advance to the next stage. ----
@@ -414,7 +453,7 @@ def build_kernel(cfg):
                 else:
                     epi.add(TextBlock("  v_mul_u32_u24 v%d, v0, %d\n" % (off, num_loads)))
                     epi.add(TextBlock("  v_add_nc_u32 v%d, %d, v%d\n" % (off, region + k, off)))
-                if cfg.n_wg > 1:               # shift this wg's results into its own region
+                if cfg.n_regions > 1:          # shift this region's results into its own slice
                     epi.add(TextBlock("  v_add_nc_u32 v%d, s%d, v%d\n"
                                       % (off, w.sgprs["WGOUT"], off)))
                 epi.add(TextBlock("  v_lshlrev_b32 v%d, 2, v%d\n" % (off, off)))
@@ -533,7 +572,7 @@ def inc_bytes(spec, cfg):
     return round(cfg.depth_u * bpe)
 
 
-def expected_offsets(spec, cfg, stage=0):
+def expected_offsets(spec, cfg, stage=0, batch=0):
     """Geometric prefetch footprint: the *set* of byte offsets a tensor's
     prefetch must cover, independent of how threads are allocated to addresses.
 
@@ -541,6 +580,10 @@ def expected_offsets(spec, cfg, stage=0):
     stage 0 is the start address (the calculateStartAddr PGR pre-skip already
     advanced it by PGR*inc), and each later stage adds one incrementAddr. The
     shift is orthogonal to the free-dim edge clamp, so it just translates the set.
+
+    `batch` adds the StridedBatched shift batch * Stride{tc}K * bpe (the
+    WorkGroup2 * batchStride term calculateStartAddr folds into the base
+    address); like the stage shift it is a pure translation of the set.
     Per tensor this is M macro-tiles (MT-selector axis) x ncc coalesced GPS-chunks
     x `perp` perpendicular rows, with the edge-limit clamp min(index, SizeFree-1)
     applied to the coalesced index (TLU/MX) or the perpendicular index (non-TLU).
@@ -566,6 +609,8 @@ def expected_offsets(spec, cfg, stage=0):
     coal_to_mt = (spec.is_mx or spec.tlu)    # MT offset & clamp land in coal (else perp)
     gps_elems = round(GPS / bpe)
     shift = (cfg.pgr + stage) * inc_bytes(spec, cfg)
+    if cfg.batched:
+        shift += batch * round(batch_stride_elems(spec, cfg) * bpe)
     out = set()
     for m in range(M):
         for c in range(ncc):
@@ -580,24 +625,25 @@ def expected_offsets(spec, cfg, stage=0):
     return out
 
 
-def verify_tensor(offsets, spec, cfg, stage, debug=False):
-    """Compare the union of GPU-computed byte offsets for one stage against the
-    geometric prefetch footprint (set-based, edge-clamp aware, shifted by the
-    stage's K increment)."""
-    expected = expected_offsets(spec, cfg, stage)
+def verify_tensor(offsets, spec, cfg, stage, batch=0, debug=False):
+    """Compare the union of GPU-computed byte offsets for one (stage, batch)
+    against the geometric prefetch footprint (set-based, edge-clamp aware,
+    shifted by the stage's K increment and the batch's Stride{tc}K offset)."""
+    expected = expected_offsets(spec, cfg, stage, batch)
     got = set(offsets)
     errors = []
+    tag = f"{spec.tc}[s{stage}b{batch}]"
     missing = sorted(expected - got)
     extra = sorted(got - expected)
     if missing:
-        errors.append(f"{spec.tc}[s{stage}]: missing {missing[:6]}")
+        errors.append(f"{tag}: missing {missing[:6]}")
     if extra:
-        errors.append(f"{spec.tc}[s{stage}]: unexpected {extra[:6]}")
+        errors.append(f"{tag}: unexpected {extra[:6]}")
     if debug:
         _, _, ncc, nc = tensor_dims(spec, cfg)
         M = mt_tiles(spec, cfg)
         clamped = "" if free_dim_size(cfg, spec.subtc) == M * spec.mt else " EDGE"
-        print(f"  {spec.tc:5s}[s{stage}]: ncc={ncc} nc={nc} mt_tiles={M}{clamped} "
+        print(f"  {tag:9s}: ncc={ncc} nc={nc} mt_tiles={M}{clamped} "
               f"inc={inc_bytes(spec, cfg)} expect={len(expected)} unique={len(got)} "
               f"total={len(offsets)} max={max(got) if got else 0}")
     return errors
@@ -614,25 +660,30 @@ def run_config(cfg, tmp_dir, debug=False):
     assemble_kernel(asm, co_path, wavefront_size=None)
 
     base = np.zeros(64 * 1024 * 1024, dtype=np.uint8)   # valid base pointer (contents unused)
-    # Launch a real [cx, cy] grid in one shot. Each wg self-identifies via ttmp
-    # and writes its offsets into region [lin*n_out, (lin+1)*n_out), lin in
-    # [0, cx*cy). Aggregate each tensor's per-region offsets across all wgs, then
-    # check coverage (M macro-tiles) per tensor.
+    # Launch a real [cx, cy, num_batches] grid in one shot. Each wg self-identifies
+    # via ttmp and writes its offsets into region [lin*n_out, (lin+1)*n_out), with
+    # lin = wg_z*(cx*cy) + wg_y*cx + wg_x in [0, n_regions). The batch index is
+    # lin // (cx*cy); offsets are aggregated per (tensor, stage, batch) and each
+    # batch is checked against its own Stride{tc}K-shifted footprint.
     n_wg = cfg.n_wg
-    raw = run_on_gpu(co_path, n_wg * n_out * 4, inputs=(base,),
-                     num_threads=cfg.num_threads, grid=cfg.cluster)
-    vals = struct.unpack(f"{n_wg * n_out}I", raw)
-    # aggregate each (tensor, stage)'s offsets across all cooperative workgroups
-    per = {(t.tc, stage): [] for t, _, stage, _ in layout}
-    for wg in range(n_wg):
-        wg_base = wg * n_out
+    n_regions = cfg.n_regions
+    raw = run_on_gpu(co_path, n_regions * n_out * 4, inputs=(base,),
+                     num_threads=cfg.num_threads,
+                     grid=(cfg.cluster[0], cfg.cluster[1], cfg.num_batches))
+    vals = struct.unpack(f"{n_regions * n_out}I", raw)
+    # aggregate each (tensor, stage, batch)'s offsets across all cooperative wgs
+    per = {(t.tc, stage, b): [] for t, _, stage, _ in layout for b in range(cfg.num_batches)}
+    for lin in range(n_regions):
+        b = lin // n_wg
+        lin_base = lin * n_out
         for t, num_loads, stage, region in layout:
-            start = wg_base + region
-            per[(t.tc, stage)].extend(vals[start: start + cfg.num_threads * num_loads])
+            start = lin_base + region
+            per[(t.tc, stage, b)].extend(vals[start: start + cfg.num_threads * num_loads])
 
     errors = []
     for t, _, stage, _ in layout:
-        errors += verify_tensor(per[(t.tc, stage)], t, cfg, stage, debug=debug)
+        for b in range(cfg.num_batches):
+            errors += verify_tensor(per[(t.tc, stage, b)], t, cfg, stage, b, debug=debug)
     return errors
 
 

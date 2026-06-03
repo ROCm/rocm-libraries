@@ -4987,7 +4987,7 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "ISA %s does not support global prefetch" % isa)
         return
       def isPowerOf2(x):
-        return x & (x - 1) == 0
+        return x > 0 and (x & (x - 1)) == 0
       # Currently we have many power of 2 assumptions for prefetchGL2 address calculation, may remove them in the future
       # Check # threads are power of 2
       if not isPowerOf2(state["NumThreads"]):
@@ -5020,7 +5020,7 @@ class Solution(collections.abc.Mapping):
       if state["StreamK"] != 0:
         reject(state, printRejectionReason, "PrefetchGL2 does not support Stream-K")
         return
-      if not state["ProblemType"]["StridedBatched"]:
+      if state["ProblemType"]["Batched"] and not state["ProblemType"]["StridedBatched"]:
         reject(state, printRejectionReason, "PrefetchGL2 does not support general batch")
         return
       
