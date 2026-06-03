@@ -31,8 +31,9 @@ source /workspace/.venv/bin/activate  # or $DNN_BENCH_WORKSPACE/.venv/bin/activa
 This script handles everything automatically:
 1. Creates a virtual environment under `$DNN_BENCH_WORKSPACE` (defaults to `/workspace`)
 2. Detects the GPU architecture and installs ROCm-compatible PyTorch
-3. Builds hipDNN and the MIOpen, hipBLASLt, and hip-kernel providers when their installed artifacts are missing (or with `--force-build`)
+3. Builds hipDNN and the MIOpen, hipBLASLt, hip-kernel, and CK DSL providers when their installed artifacts are missing (or with `--force-build`)
 4. Installs the hipDNN Python bindings from the hipDNN source tree
+5. Configures the virtual environment to load plugins from the install prefix on activation
 
 ### CUDA Setup
 

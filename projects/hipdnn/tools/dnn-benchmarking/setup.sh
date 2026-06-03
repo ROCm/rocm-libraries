@@ -7,6 +7,7 @@ WORKSPACE_ROOT="$(cd "$HIPDNN_ROOT/../.." && pwd)"
 
 BUILD_DIR="$HIPDNN_ROOT/build"
 INSTALL_DIR="/opt/rocm"
+ROCM_ROOT="${ROCM_PATH:-/opt/rocm}"
 DNN_BENCH_WORKSPACE="${DNN_BENCH_WORKSPACE:-/workspace}"
 mkdir -p "$DNN_BENCH_WORKSPACE"
 export DNN_BENCH_WORKSPACE
@@ -17,6 +18,8 @@ HIP_KERNEL_PROVIDER_DIR="$WORKSPACE_ROOT/dnn-providers/hip-kernel-provider"
 HIP_KERNEL_BUILD_DIR="$HIP_KERNEL_PROVIDER_DIR/build"
 HIPBLASLT_PROVIDER_DIR="$WORKSPACE_ROOT/dnn-providers/hipblaslt-provider"
 HIPBLASLT_BUILD_DIR="$HIPBLASLT_PROVIDER_DIR/build"
+CK_DSL_PROVIDER_DIR="$WORKSPACE_ROOT/dnn-providers/ck-dsl-provider"
+CK_DSL_BUILD_DIR="$CK_DSL_PROVIDER_DIR/build"
 
 FORCE_BUILD=0
 AUTO_YES=0
@@ -50,15 +53,17 @@ PLUGIN_DIR="$INSTALL_DIR/lib/hipdnn_plugins/engines"
 MIOPEN_PLUGIN="$PLUGIN_DIR/libmiopen_plugin.so"
 HIP_KERNEL_PLUGIN="$PLUGIN_DIR/libhip_kernel_provider.so"
 HIPBLASLT_PLUGIN="$PLUGIN_DIR/libhipblaslt_plugin.so"
+CK_DSL_PLUGIN="$PLUGIN_DIR/libck_dsl_provider_plugin.so"
 
 needs_install() {
     [ "$FORCE_BUILD" -eq 1 ] || [ ! -f "$1" ]
 }
 
 if { needs_install "$HIPDNN_CONFIG" || needs_install "$MIOPEN_PLUGIN" \
-    || needs_install "$HIP_KERNEL_PLUGIN" || needs_install "$HIPBLASLT_PLUGIN"; } \
+    || needs_install "$HIP_KERNEL_PLUGIN" || needs_install "$HIPBLASLT_PLUGIN" \
+    || needs_install "$CK_DSL_PLUGIN"; } \
     && [ "$AUTO_YES" -eq 0 ]; then
-    read -r -p "This will install hipDNN to $INSTALL_DIR. Continue? [Y/n] " confirm
+    read -r -p "This will install hipDNN and provider plugins to $INSTALL_DIR. Continue? [Y/n] " confirm
     case "$confirm" in
         [nN]) echo "Aborted."; exit 0 ;;
     esac
@@ -74,18 +79,20 @@ python3 -m venv "$VENV_DIR"
 # shellcheck disable=SC1091
 source "$VENV_DIR/bin/activate"
 
-# Redirect Python's bytecode cache away from the network home directory.
-# The source tree lives on a network filesystem; without this, every import
-# writes/reads .pyc files over the network. Must be injected into the venv
-# activate script so it's set before the interpreter starts (setting it in
-# Python code is too late for that process's own imports).
+# Redirect Python's bytecode cache away from the network home directory, and
+# make the freshly installed hipDNN/provider stack discoverable when the venv
+# is activated. The source tree lives on a network filesystem; without the
+# pycache redirect, every import writes/reads .pyc files over the network. These
+# values must be injected into the venv activate script so they are set before
+# the interpreter starts (setting them in Python code is too late for that
+# process's own imports).
 ACTIVATE_LOCAL="$VENV_DIR/bin/activate.local"
-if [ ! -f "$ACTIVATE_LOCAL" ] || ! grep -q PYTHONPYCACHEPREFIX "$ACTIVATE_LOCAL"; then
-    {
-        echo "export PYTHONPYCACHEPREFIX=$DNN_BENCH_WORKSPACE/pycache"
-        echo "export DNN_BENCH_WORKSPACE=$DNN_BENCH_WORKSPACE"
-    } >> "$ACTIVATE_LOCAL"
-fi
+{
+    echo "export PYTHONPYCACHEPREFIX=$DNN_BENCH_WORKSPACE/pycache"
+    echo "export DNN_BENCH_WORKSPACE=$DNN_BENCH_WORKSPACE"
+    echo "export HIPDNN_PLUGIN_DIR=$PLUGIN_DIR"
+    echo "export LD_LIBRARY_PATH=$INSTALL_DIR/lib:$ROCM_ROOT/lib:\${LD_LIBRARY_PATH:-}"
+} > "$ACTIVATE_LOCAL"
 if ! grep -q "activate.local" "$VENV_DIR/bin/activate"; then
     # shellcheck disable=SC2016
     echo 'source "$(dirname "${BASH_SOURCE[0]}")/activate.local" 2>/dev/null || true' \
@@ -108,9 +115,10 @@ GPU_ARCH=$(detect_gpu_arch)
 case "$GPU_ARCH" in
     gfx90*) INDEX_ARCH="gfx90X" ;;
     gfx94*) INDEX_ARCH="gfx94X" ;;
+    gfx95*) INDEX_ARCH="gfx950" ;;
     *)
         echo "ERROR: Unsupported GPU architecture '${GPU_ARCH:-none}'."
-        echo "Supported: gfx90a (MI200/MI210/MI250), gfx942 (MI300X/MI300A)"
+        echo "Supported: gfx90a (MI200/MI210/MI250), gfx942 (MI300X/MI300A), gfx950"
         exit 1 ;;
 esac
 
@@ -120,9 +128,12 @@ echo "Detected GPU: $GPU_ARCH → installing PyTorch from $INDEX_URL"
 # Install ROCm torch first from its dedicated index. Then editable-install the
 # package; pyproject.toml omits torch (so pip won't touch the already-installed
 # ROCm build) and lists the rest (numpy, pytest, pytest-cov) which resolve
-# cleanly from PyPI.
+# cleanly from PyPI. The CK DSL provider CMake configure also needs pybind11
+# and LightGBM in this same interpreter so it can embed Python and link the
+# SDPA scorer backend.
 pip install --pre torch --index-url "$INDEX_URL"
 pip install -e "$SCRIPT_DIR"
+pip install pybind11 lightgbm
 
 # 2b. Install amdsmi Python bindings if present in the ROCm install.
 # amdsmi is not on PyPI — it ships under /opt/rocm/share/amd_smi/. The
@@ -153,12 +164,13 @@ require_provider_dir() {
 }
 
 BUILT_HIPDNN=0
-if needs_install "$HIPDNN_CONFIG"; then
+if needs_install "$HIPDNN_CONFIG" || needs_install "$CK_DSL_PLUGIN"; then
     echo "Building and installing hipDNN..."
     cmake -S "$HIPDNN_ROOT" -B "$BUILD_DIR" \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
-        -DHIPDNN_SKIP_TESTS=ON
+        -DHIPDNN_SKIP_TESTS=ON \
+        -DHIPDNN_ENABLE_SDPA=ON
     cmake --build "$BUILD_DIR"
     cmake --install "$BUILD_DIR"
     BUILT_HIPDNN=1
@@ -202,6 +214,24 @@ if [ "$BUILT_HIPDNN" -eq 1 ] || needs_install "$HIP_KERNEL_PLUGIN"; then
         -DENABLE_ASM_SDPA_ENGINE=ON
     cmake --build "$HIP_KERNEL_BUILD_DIR"
     cmake --install "$HIP_KERNEL_BUILD_DIR"
+fi
+
+if [ "$BUILT_HIPDNN" -eq 1 ] || needs_install "$CK_DSL_PLUGIN"; then
+    require_provider_dir "ck-dsl-provider" "$CK_DSL_PROVIDER_DIR"
+    echo "Building and installing CK DSL provider..."
+    rm -rf "$CK_DSL_BUILD_DIR"
+    cmake -S "$CK_DSL_PROVIDER_DIR" -B "$CK_DSL_BUILD_DIR" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
+        -DCMAKE_PREFIX_PATH="$INSTALL_DIR;$ROCM_ROOT" \
+        -DROCM_PATH="$ROCM_ROOT" \
+        -DCKDSLPROVIDER_SKIP_TESTS=ON \
+        -DCMAKE_HIP_ARCHITECTURES="$GPU_ARCH" \
+        -DCMAKE_HIP_COMPILER="$ROCM_ROOT/lib/llvm/bin/clang++" \
+        -DCMAKE_HIP_COMPILER_ROCM_ROOT="$ROCM_ROOT" \
+        -DPython3_EXECUTABLE="$VENV_DIR/bin/python"
+    cmake --build "$CK_DSL_BUILD_DIR"
+    cmake --install "$CK_DSL_BUILD_DIR"
 fi
 
 echo ""
