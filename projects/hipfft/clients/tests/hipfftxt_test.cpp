@@ -611,11 +611,11 @@ TEST_P(hipfftxtunitdesc, xtmemcpytest)
     // Return a pair vector containing {gpu index, {batch index, transform indices...}}.
     // Batch and transform indices are buffer-local multi-indices (ie relative to an index starting
     // at {0, ... , 0} on each brick).
-    auto devidx = [](const size_t               splitdim,
-                     const size_t               ngpus,
-                     const std::vector<size_t>& hostidx,
-                     const std::vector<size_t>& databatchlengths) -> std::pair<int, std::vector<size_t>> {
-
+    auto devidx
+        = [](const size_t               splitdim,
+             const size_t               ngpus,
+             const std::vector<size_t>& hostidx,
+             const std::vector<size_t>& databatchlengths) -> std::pair<int, std::vector<size_t>> {
         // The multi-index for the data on the buffer:
         std::vector<size_t> dataidx(databatchlengths.size());
         for(size_t idx = 0; idx < hostidx.size(); ++idx)
@@ -629,16 +629,16 @@ TEST_P(hipfftxtunitdesc, xtmemcpytest)
 
         // The buffer index
         int bufidx = 0;
-        
+
         const auto a = hostidx[splitdim];
         if(a < r * (b + 1))
         {
-            bufidx           = a / (b + 1);
+            bufidx            = a / (b + 1);
             dataidx[splitdim] = a - bufidx * (b + 1);
         }
         else
         {
-            bufidx           = r + (a - r * (b + 1)) / b;
+            bufidx            = r + (a - r * (b + 1)) / b;
             dataidx[splitdim] = a - r * (b + 1) - (bufidx - r) * b;
         }
 
@@ -771,10 +771,8 @@ TEST_P(hipfftxtunitdesc, xtmemcpytest)
 
                 std::stringstream idxstrs;
                 idxstrs << hostidx[0] << " " << hostidx[1] << " " << hostidx[2] << " -> "
-                        << bufidx.first
-                        << " " << bufidx.second[0] << " " << bufidx.second[1]
-                        << " " << bufidx.second[2]
-                        << "\t";
+                        << bufidx.first << " " << bufidx.second[0] << " " << bufidx.second[1] << " "
+                        << bufidx.second[2] << "\t";
 
                 const size_t hostoffset = std::inner_product(
                     std::begin(hostidx), std::end(hostidx), std::begin(hostdiststrides), 0);
@@ -826,10 +824,8 @@ TEST_P(hipfftxtunitdesc, xtmemcpytest)
 
                     std::stringstream idxstrs;
                     idxstrs << hostidx[0] << " " << hostidx[1] << " " << hostidx[2] << " -> "
-                            << bufidx.first << " "
-                            << bufidx.second[0] << " " << bufidx.second[1] << " "
-                            << bufidx.second[2]
-                            << "\t";
+                            << bufidx.first << " " << bufidx.second[0] << " " << bufidx.second[1]
+                            << " " << bufidx.second[2] << "\t";
 
                     const size_t hostoffset = std::inner_product(
                         std::begin(hostidx), std::end(hostidx), std::begin(hostdiststrides), 0);
