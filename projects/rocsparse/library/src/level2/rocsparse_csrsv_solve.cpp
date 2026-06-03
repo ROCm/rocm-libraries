@@ -91,6 +91,30 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_pointer);
     }
 
+    // Guard: allocating the singularity buffer inside a hipGraph capture would
+    // produce a graph-managed allocation freed on hipGraphExecDestroy, leaving
+    // a dangling pointer on subsequent captures of the same kernel graph.
+    // If the buffer is not yet allocated (or is sized incorrectly), and we are
+    // currently inside a stream capture, return rocsparse_status_not_implemented
+    // so the caller can allocate outside capture first.
+    // Typical usage: call rocsparse_csrsv_solve once outside any active capture
+    // to prime the buffer, then record subsequent solves into a hipGraph.
+    {
+        auto*      exact       = csrsv_info->get_singularity_numeric_exact();
+        const bool needs_alloc = (exact->get_position() == nullptr)
+                                 || (exact->get_batch_count() != batch_count)
+                                 || (exact->get_indextype() != A->col_type);
+        if(needs_alloc)
+        {
+            hipStreamCaptureStatus capture_status;
+            RETURN_IF_HIP_ERROR(hipStreamIsCapturing(stream, &capture_status));
+            if(capture_status != hipStreamCaptureStatusNone)
+            {
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+            }
+        }
+    }
+
     csrsv_info->create_singularity_numeric_exact(batch_count, A->col_type, handle->stream);
 
     // If diag type is unit, re-initialize zero pivot to remove structural zeros

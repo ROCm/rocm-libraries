@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the Software), to deal
@@ -392,7 +392,10 @@ rocsparse_status rocsparse_csrsv_clear(rocsparse_handle          handle,
 *  \p trans == \ref rocsparse_operation_transpose is supported.
 *
 *  \note
-*  This routine supports execution in a hipGraph context.
+*  This routine supports execution in a hipGraph context. When the handle stream is in
+*  hipGraph capture, device memory used for singularity detection must already be present in
+*  \p info (for example, from a prior call to \p rocsparse_csrsv_solve outside capture).
+*  Otherwise, the routine returns \ref rocsparse_status_not_implemented.
 *
 *  @param[in]
 *  handle      handle to the rocSPARSE library context queue.
@@ -433,8 +436,10 @@ rocsparse_status rocsparse_csrsv_clear(rocsparse_handle          handle,
 *  \retval     rocsparse_status_arch_mismatch the device is not supported.
 *  \retval     rocsparse_status_internal_error an internal error occurred.
 *  \retval     rocsparse_status_not_implemented
-*              \p trans == \ref rocsparse_operation_conjugate_transpose or
-*              \ref rocsparse_matrix_type != \ref rocsparse_matrix_type_general.
+*              \p trans == \ref rocsparse_operation_conjugate_transpose,
+*              \ref rocsparse_matrix_type != \ref rocsparse_matrix_type_general, or
+*              the handle stream is in hipGraph capture and singularity-detection memory
+*              in \p info has not been allocated yet.
 *
 *  \par Example
 *  Consider the lower triangular \f$m \times m\f$ matrix \f$L\f$, stored in CSR

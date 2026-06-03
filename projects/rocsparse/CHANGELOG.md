@@ -24,6 +24,7 @@ Documentation for rocSPARSE is available at
 * Fix compilation when using `--rocsparse_ILP64`
 * Fix off-by-one heap-buffer-overflow in temporary buffer allocation for `rocsparse_csrsort`, `rocsparse_check_matrix_csr`, and `rocsparse_check_matrix_gebsr` (and their delegating routines `rocsparse_cscsort`, `rocsparse_coosort`, `rocsparse_check_matrix_csc`, and `rocsparse_check_matrix_gebsc`) where the `shift_offsets_kernel` temp buffer was sized for `m` elements instead of `m+1`.
 * Fixed incorrect usage of `rocsparse_conj` in `bsric0` for complex matrices
+* Fixed GPU memory faults in `rocsparse_csrsv_solve` when singularity-detection buffers were allocated during hipGraph stream capture. The routine now returns `rocsparse_status_not_implemented` if capture is active and those buffers are not yet allocated; call `rocsparse_csrsv_solve` once outside capture before recording subsequent solves into a hipGraph.
 
 ### Removed
 * The deprecated C++14 support, which is no longer supported by the rocPRIM dependency.
