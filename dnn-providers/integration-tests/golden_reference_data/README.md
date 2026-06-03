@@ -26,11 +26,13 @@ golden_reference_data/{Tier}/{Operation}/{Layout}/{DataType}/{Name}/
 | `Operation` | PascalCase op name                            | `BatchnormFwdInference` |
 | `Layout`    | `nchw`, `nhwc`, `ncdhw`, `ndhwc`              | `nhwc`             |
 | `DataType`  | `fp16`, `fp32`, `bfp16`, `fp8`, `int8`        | `fp16`             |
-| `Name`      | snake_case descriptive name                   | `resnet50_layer3`  |
+| `Name`      | Descriptive name (PascalCase or snake_case)   | `Small`, `resnet50_layer3` |
 
 ## Pull Data Locally
 
 ```bash
+# From the repo root:
+
 # Pull all bundles
 dvc pull
 
@@ -39,6 +41,8 @@ dvc pull dnn-providers/integration-tests/golden_reference_data/quick/
 ```
 
 CI runs `dvc pull` automatically. You only need this for local development.
+
+> **Note:** DVC commands must be run from the repo root (`rocm-libraries/`), not from a subdirectory.
 
 ## Add a New Bundle
 
@@ -81,7 +85,7 @@ old `.dvc` pointer, and `dvc pull` fetches the previous version.
 
 ```bash
 # 1. Remove DVC tracking
-dvc remove dnn-providers/integration-tests/golden_reference_data/quick/ConvFwd/nhwc/fp16/resnet50_layer3.dvc
+dvc remove dnn-providers/integration-tests/golden_reference_data/quick/ConvFwd/nhwc/fp16/resnet50_layer3
 
 # 2. Delete the data
 rm -rf dnn-providers/integration-tests/golden_reference_data/quick/ConvFwd/nhwc/fp16/resnet50_layer3/
