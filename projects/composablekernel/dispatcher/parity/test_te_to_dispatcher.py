@@ -603,5 +603,136 @@ class TestIdentifierPython:
         assert parts[8] == "False"   # persistent
 
 
+# ── te_kernel_name() regression tests ────────────────────────────────────────
+
+class TestTeKernelName:
+    """Tests for check_parity.te_kernel_name().
+
+    Bug #1 in pr_review_report: te_kernel_name() was missing the _preshuffle
+    suffix for preshufflev2 configs, causing Stage 2 to exit with
+    "expected generated header not found" for all preshuffle configs.
+    This class is the regression guard for that fix.
+    """
+
+    def _cfg_from_translate(self, **kwargs):
+        """Translate a single-combination TE config and return the first result."""
+        return translate(_single_config(**kwargs))[0]
+
+    def test_vanilla_name_no_preshuffle_suffix(self):
+        """compv3 config must NOT have _preshuffle suffix in kernel name."""
+        import sys; sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent))
+        from check_parity import te_kernel_name
+        cfg = self._cfg_from_translate(pipeline="compv3", scheduler="intrawave")
+        name = te_kernel_name(cfg)
+        assert "_preshuffle" not in name, (
+            f"compv3 kernel name must not have _preshuffle suffix: {name!r}"
+        )
+
+    def test_preshufflev2_appends_preshuffle_suffix(self):
+        """preshufflev2 config MUST have _preshuffle suffix (Bug #1 fix)."""
+        import sys; sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent))
+        from check_parity import te_kernel_name
+        cfg = self._cfg_from_translate(pipeline="preshufflev2", scheduler="intrawave")
+        name = te_kernel_name(cfg)
+        assert name.endswith("_preshuffle"), (
+            f"preshufflev2 kernel name must end with _preshuffle (Bug #1 fix): {name!r}"
+        )
+
+    def test_kernel_name_uses_raw_te_scheduler_not_canonical(self):
+        """Kernel name uses raw TE scheduler string, not the canonical form.
+
+        For scheduler 'default': the registry identifier uses 'auto' (canonical),
+        but te_kernel_name() must use 'default' (raw TE string) so the generated
+        header filename gemm_..._default_... can be found on disk.
+        """
+        import sys; sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent))
+        from check_parity import te_kernel_name
+        cfg = self._cfg_from_translate(pipeline="compv3", scheduler="default")
+        name = te_kernel_name(cfg)
+        assert "_default_" in name, (
+            f"te_kernel_name must use raw 'default' scheduler (not 'auto'): {name!r}"
+        )
+        assert "_auto_" not in name, (
+            f"te_kernel_name must NOT use canonical 'auto' scheduler: {name!r}"
+        )
+
+    def test_kernel_name_contains_tile_shape(self):
+        """Kernel name encodes tile shape as MxNxK."""
+        import sys; sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent))
+        from check_parity import te_kernel_name
+        cfg = self._cfg_from_translate(tile_m=256, tile_n=128, tile_k=32)
+        name = te_kernel_name(cfg)
+        assert "256x128x32" in name, (
+            f"te_kernel_name must include tile shape 256x128x32: {name!r}"
+        )
+
+    def test_kernel_name_contains_padding_flags(self):
+        """Padding-enabled kernel name encodes True for pad fields."""
+        import sys; sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent))
+        from check_parity import te_kernel_name
+        cfg = self._cfg_from_translate(pad_m=True, pad_n=True, pad_k=True)
+        name = te_kernel_name(cfg)
+        assert "_True_True_True_" in name, (
+            f"pad_m/n/k=True must appear in kernel name: {name!r}"
+        )
+
+
+# ── parse_sizes() tests ───────────────────────────────────────────────────────
+
+class TestParseSizes:
+    """Tests for check_parity.parse_sizes() — the --sizes CLI argument parser.
+
+    This function converts '512x512x512,1024x1024x1024' into
+    [(512,512,512),(1024,1024,1024)]. Errors here silently skip all sizes.
+    """
+
+    def _parse(self, spec: str):
+        import sys; sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent))
+        from check_parity import parse_sizes
+        return parse_sizes(spec)
+
+    def test_single_size(self):
+        assert self._parse("512x512x512") == [(512, 512, 512)]
+
+    def test_multiple_sizes(self):
+        result = self._parse("512x512x512,1024x1024x1024")
+        assert result == [(512, 512, 512), (1024, 1024, 1024)]
+
+    def test_non_cubic_size(self):
+        result = self._parse("257x257x56")
+        assert result == [(257, 257, 56)]
+
+    def test_whitespace_tolerance(self):
+        result = self._parse("512x512x512, 1024x1024x1024")
+        assert result == [(512, 512, 512), (1024, 1024, 1024)]
+
+    def test_bad_format_raises(self):
+        import pytest
+        with pytest.raises(ValueError, match="bad size"):
+            self._parse("512x512")
+
+    def test_empty_string_raises(self):
+        import pytest
+        with pytest.raises(ValueError):
+            self._parse("")
+
+    def test_default_sizes_parse_cleanly(self):
+        """The actual default --sizes value from check_parity.py must parse."""
+        import sys; sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent))
+        import re
+        src = (__import__("pathlib").Path(__file__).parent / "check_parity.py").read_text()
+        m = re.search(r'default="([^"]+)".*sizes', src)
+        if m is None:
+            m = re.search(r'sizes.*default="([^"]+)"', src)
+        # Extract the size string from the argparse default
+        size_str_match = re.search(
+            r'"(\d+x\d+x\d+(?:,\s*\d+x\d+x\d+)*)"',
+            src[src.find("--sizes"):src.find("--sizes") + 300] if "--sizes" in src else ""
+        )
+        if size_str_match:
+            result = self._parse(size_str_match.group(1))
+            assert len(result) >= 1
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))
