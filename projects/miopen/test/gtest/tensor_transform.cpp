@@ -301,11 +301,17 @@ inline auto GenSmokeTestCases()
 #define NROWS 6
 #define NCOLS 6
 #define LENS_CONTENT NROWS, NCOLS
-#define SUBLENS_CONTENT {NROWS - 2, NCOLS - 2}
+#define SUBLENS_CONTENT      \
+    {                        \
+        NROWS - 2, NCOLS - 2 \
+    }
 #define OFFSET_CONTENT 0
 #else
 #define LENS_CONTENT 32, 32, 16, 16, 16
-#define SUBLENS_CONTENT {32, 8, 10}
+#define SUBLENS_CONTENT \
+    {                   \
+        32, 8, 10       \
+    }
 #define OFFSET_CONTENT 7
 #endif
 
