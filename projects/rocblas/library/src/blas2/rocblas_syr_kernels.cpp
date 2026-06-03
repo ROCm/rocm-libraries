@@ -41,18 +41,12 @@ rocblas_syr_kernel_inc1(rocblas_int    n,
 {
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
         auto alpha = load_scalar(alpha_device_host, batch, stride_alpha);
         if(!alpha)
         {
-#if DEVICE_GRID_YZ_16BIT
-            continue; //iterate to the next batch in the for loop rather than return.
-#else
-        return;
-#endif
+            continue;
         }
 
         const auto* __restrict__ x = load_ptr_batch(xa, batch, shiftx, stridex);
@@ -61,11 +55,7 @@ rocblas_syr_kernel_inc1(rocblas_int    n,
         size_t i = size_t(blockIdx.x) * blockDim.x + threadIdx.x; // linear area index
         if(i >= area)
         {
-#if DEVICE_GRID_YZ_16BIT
-            continue; //iterate to the next batch in the for loop rather than return.
-#else
-        return;
-#endif
+            continue;
         }
 
         size_t ri = !UPPER ? area - 1 - i : i;
@@ -87,9 +77,7 @@ rocblas_syr_kernel_inc1(rocblas_int    n,
         // original algorithm run over rectangular space
         // if(uplo == rocblas_fill_lower ? tx < n && ty <= tx : ty < n && tx <= ty)
         // A[tx + size_t(lda) * ty] += alpha * x[tx] * x[ty];
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 template <bool UPPER, rocblas_int DIM_X, typename T, typename U, typename V, typename W>
@@ -110,18 +98,12 @@ rocblas_syr_kernel(rocblas_int    n,
 {
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
         auto alpha = load_scalar(alpha_device_host, batch, stride_alpha);
         if(!alpha)
         {
-#if DEVICE_GRID_YZ_16BIT
-            continue; //iterate to the next batch in the for loop rather than return.
-#else
-        return;
-#endif
+            continue;
         }
 
         const auto* __restrict__ x = load_ptr_batch(xa, batch, shiftx, stridex);
@@ -130,11 +112,7 @@ rocblas_syr_kernel(rocblas_int    n,
         size_t i = size_t(blockIdx.x) * blockDim.x + threadIdx.x; // linear area index
         if(i >= area)
         {
-#if DEVICE_GRID_YZ_16BIT
-            continue; //iterate to the next batch in the for loop rather than return.
-#else
-        return;
-#endif
+            continue;
         }
 
         size_t ri = !UPPER ? area - 1 - i : i;
@@ -152,10 +130,7 @@ rocblas_syr_kernel(rocblas_int    n,
         }
 
         A[tx + lda * ty] += alpha * x[tx * incx] * x[ty * incx];
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 template <typename T, typename U, typename V, typename W>
