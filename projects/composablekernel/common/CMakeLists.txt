@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# ck_common — header-only common types shared across CK Tile, rocm_ck, and dispatcher.
+# ck_common -- header-only common types shared across CK Tile, rocm_ck, and dispatcher.
 # C++17 with optional C++20 headers (arch_properties). No HIP/device dependencies.
 
 add_library(ck_common INTERFACE)

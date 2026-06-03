@@ -18,20 +18,20 @@
 namespace ck_tile {
 namespace dispatcher {
 
-/// Data types — uses canonical ck_common definition.
+/// Data types -- uses canonical ck_common definition.
 using DataType = ck_common::DataType;
 
-/// Memory layout tags for tensors — uses canonical ck_common definition.
+/// Memory layout tags for tensors -- uses canonical ck_common definition.
 /// Dispatcher names: RowMajor=Row, ColMajor=Col. PackedExternal preserved as-is.
 using LayoutTag = ck_common::Layout;
 
-/// Pipeline variants — uses canonical ck_common definition.
+/// Pipeline variants -- uses canonical ck_common definition.
 using Pipeline = ck_common::Pipeline;
 
-/// Epilogue strategies — uses canonical ck_common definition.
+/// Epilogue strategies -- uses canonical ck_common definition.
 using Epilogue = ck_common::Epilogue;
 
-/// Scheduler types for wave coordination — uses canonical ck_common definition.
+/// Scheduler types for wave coordination -- uses canonical ck_common definition.
 using Scheduler = ck_common::PipelineScheduler;
 
 /// KernelKey: Compile-time kernel configuration metadata

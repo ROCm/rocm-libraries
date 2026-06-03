@@ -831,7 +831,7 @@ if (CK_EXPERIMENTAL_BUILDER)
 endif()
 
 # Common types shared across CK Tile, rocm_ck, and dispatcher.
-# Header-only — no GPU dependency, always available.
+# Header-only -- no GPU dependency, always available.
 add_subdirectory(common)
 
 if(NOT GPU_ARCHS AND USER_GPU_TARGETS AND NOT MIOPEN_REQ_LIBS_ONLY AND NOT HIPTENSOR_REQ_LIBS_ONLY)

@@ -16,7 +16,7 @@ enum struct CastPolicy
     AfterLDSRead,
 };
 
-/// Backward-compatible alias — canonical definition is ck_common::PipelineScheduler.
+/// Backward-compatible alias -- canonical definition is ck_common::PipelineScheduler.
 using GemmPipelineScheduler = ck_common::PipelineScheduler;
 
 enum struct TailNumber

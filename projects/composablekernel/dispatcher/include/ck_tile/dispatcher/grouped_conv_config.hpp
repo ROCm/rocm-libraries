@@ -167,7 +167,7 @@ enum class PipelineVersion
     PRESHUFFLE_V2  // Preshuffle V2 pipeline
 };
 
-/// Pipeline scheduler — uses canonical ck_common definition.
+/// Pipeline scheduler -- uses canonical ck_common definition.
 using PipelineScheduler = ck_common::PipelineScheduler;
 
 enum class GemmPadding
