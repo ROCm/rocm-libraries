@@ -1,0 +1,69 @@
+# SPDX-License-Identifier: MIT
+#
+# CPU-only validation of hipBLASLt hipBLASLt libraries.
+# Script: ROCm/TheRock/build_tools/audit_hipblaslt_libraries.py
+
+name: hipBLASLt Logic Library Audit
+
+on:
+  workflow_call:
+    inputs:
+      therock_ref:
+        description: TheRock commit containing build_tools/audit_hipblaslt_libraries.py.
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: hipBLASLt Logic Library Audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout rocm-libraries
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Detect logic library changes
+        id: changes
+        uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
+        with:
+          filters: |
+            logic:
+              - 'projects/hipblaslt/library/src/amd_detail/rocblaslt/src/Tensile/Logic/**'
+
+      - name: Checkout TheRock (audit scripts)
+        if: steps.changes.outputs.logic == 'true'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ROCm/TheRock
+          ref: ${{ inputs.therock_ref }}
+          path: TheRock
+          sparse-checkout: |
+            build_tools/audit_hipblaslt_libraries.py
+          sparse-checkout-cone-mode: false
+
+      - name: Install Python dependencies
+        if: steps.changes.outputs.logic == 'true'
+        run: python3 -m pip install --upgrade pip pyyaml
+
+      - name: Run hipBLASLt logic library audit
+        if: steps.changes.outputs.logic == 'true'
+        run: |
+          python3 TheRock/build_tools/audit_hipblaslt_libraries.py \
+            --hipblaslt-path "${{ github.workspace }}/projects/hipblaslt" \
+            --report-dir "${{ github.workspace }}/hipblaslt-logic-audit-reports" \
+            --workers 16
+
+      - name: Upload audit reports
+        if: always() && steps.changes.outputs.logic == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: hipblaslt-logic-library-audit
+          path: hipblaslt-logic-audit-reports
+          if-no-files-found: warn
+
+      - name: Skip (no logic library changes)
+        if: steps.changes.outputs.logic != 'true'
+        run: echo "No Tensile Logic/asm_full changes in this event; audit skipped."

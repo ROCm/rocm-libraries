@@ -39,6 +39,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  hipblaslt-logic-library-audit:
+    name: hipBLASLt Logic Library Audit
+    uses: ./.github/workflows/hipblaslt-logic-library-audit.yml
+    with:
+      # Bump when TheRock includes build_tools/audit_hipblaslt_libraries.py.
+      therock_ref: fc468e7381b38b23c1e08d0be0a16804dc1ed514 # branch hipblaslt-library-audit (2026-06-03)
+
   setup:
     name: "Setup"
     runs-on: ubuntu-24.04
@@ -193,6 +200,7 @@ jobs:
     if: always()
     needs:
       - setup
+      - hipblaslt-logic-library-audit
       - therock-ci-linux
       - therock-ci-windows
     runs-on: ubuntu-24.04
