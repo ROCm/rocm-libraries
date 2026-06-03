@@ -52,46 +52,15 @@ list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/llvm ${ROCM_PATH} ${ROCM_PATH}/hip)
 
 find_package(hip REQUIRED)
 
-# --- Embedded Python (libpython + pybind11) ----------------------------------
-# I-2 wires an embedded CPython interpreter into the plugin .so so that
-# the provider can drive the CK DSL compile pipeline at runtime (plan
-# §3.2, Option E + pybind11). The plumbing below mirrors the working
-# spike at WIP/pybind11_rtld_local_spike/.
-#
-# Pin to system Python so a uv-managed Python in ~/.local does not
-# hijack the discovery (which crashes at runtime with "failed to get
-# the Python codec of the filesystem encoding" because uv's stdlib
-# lives at an interpreter-internal path). See PREP_FINDINGS P-3.
-if(NOT DEFINED Python3_ROOT_DIR)
-    set(Python3_ROOT_DIR "/usr")
-endif()
-if(NOT DEFINED Python3_FIND_STRATEGY)
-    set(Python3_FIND_STRATEGY "LOCATION")
-endif()
-find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
-message(STATUS "CK DSL provider Python3: ${Python3_EXECUTABLE} (${Python3_VERSION})")
-
-# pybind11: prefer the standard CMake config; if that fails, fall back
-# to asking the pinned interpreter where its cmake dir is (this is the
-# common case for `pip install --user pybind11`, which lands the
-# cmake config under ~/.local/lib/.../pybind11/share/cmake/pybind11).
-find_package(pybind11 CONFIG QUIET)
-if(NOT pybind11_FOUND)
-    execute_process(
-        COMMAND ${Python3_EXECUTABLE} -m pybind11 --cmakedir
-        OUTPUT_VARIABLE _pybind11_cmakedir
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        RESULT_VARIABLE _pybind11_probe_result
-    )
-    if(NOT _pybind11_probe_result EQUAL 0)
-        message(FATAL_ERROR
-            "pybind11 not found via find_package and `${Python3_EXECUTABLE} -m pybind11 --cmakedir` failed. "
-            "Install with: ${Python3_EXECUTABLE} -m pip install --user pybind11")
-    endif()
-    set(pybind11_DIR "${_pybind11_cmakedir}" CACHE PATH "pybind11 CMake config dir (auto-detected)" FORCE)
-    find_package(pybind11 CONFIG REQUIRED)
-endif()
-message(STATUS "CK DSL provider pybind11: ${pybind11_INCLUDE_DIR} (${pybind11_VERSION})")
+# --- Embedded interpreter ----------------------------------------------------
+# The provider embeds MicroPython (not CPython) to drive the CK DSL compile
+# pipeline at runtime, so it has NO dependency on a system Python install or
+# pybind11. ck_dsl + ck_dsl_provider are frozen into a static library
+# (libckdsl_micropython.a) that the plugin links; comgr is exposed to the
+# interpreter as a native module. See cmake/CkDslMicroPython.cmake and
+# micropython/build_embed.sh. The actual setup happens after the ck_dsl Python
+# paths are resolved (below), then is consumed by src/CMakeLists.txt.
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/CkDslMicroPython.cmake)
 
 # hipdnn SDK dependencies - use targets directly if available (superbuild),
 # otherwise find installed packages (true standalone).
@@ -129,26 +98,16 @@ message(STATUS "CK DSL provider plugin install directory: ${HIPDNN_INSTALL_PLUGI
 file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
 
 # Resolve absolute paths to the in-tree ck_dsl Python package and the
-# provider-local ck_dsl_provider package, then bake them into a
-# generated header that the embedded interpreter uses to prepend them
-# to sys.path (PREP_FINDINGS §P-4).
+# provider-local ck_dsl_provider package. These feed the MicroPython freeze
+# pipeline (build_embed.sh) so it transforms + freezes the right trees.
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/CkDslProviderPaths.cmake)
 ck_dsl_provider_resolve_python_paths()
 
-set(_ckDslPathsHeader "${CMAKE_CURRENT_BINARY_DIR}/include/ckdsl_provider_paths.h")
-configure_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/templates/ckdsl_provider_paths.h.in"
-    "${_ckDslPathsHeader}"
-    @ONLY
-)
+# Configure the embedded-MicroPython static library build. Sets
+# CKDSL_MPY_{BUILD_TARGET,STATIC_LIB,INCLUDE_DIRS,COMGR_LIB} for src/.
+ck_dsl_provider_configure_micropython()
 
 add_subdirectory(src)
-
-# Make the generated path header visible to every TU in the OBJECT
-# library (and therefore to the static + shared downstream targets).
-target_include_directories(ck_dsl_provider_impl
-    PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
-)
 
 # Generate version.h on top of the plugin's OBJECT library so every
 # translation unit sees CK_DSL_PROVIDER_VERSION_STRING.

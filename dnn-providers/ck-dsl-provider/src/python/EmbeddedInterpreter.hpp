@@ -3,33 +3,33 @@
 
 #pragma once
 
-#include <pybind11/embed.h>
-#include <pybind11/pybind11.h>
+#include <mutex>
 
 namespace ck_dsl_provider {
 
-/// Per-process embedded CPython interpreter wrapper.
+/// Per-process embedded MicroPython interpreter wrapper.
 ///
-/// Initialises Python lazily via ``Py_InitializeFromConfig`` with
-/// ``PyConfig_InitIsolatedConfig``. Isolated config rejects the host
-/// process's PYTHONPATH / PYTHONHOME / PYTHONSTARTUP / PYTHONUSERBASE
-/// environment variables, disables user-site-packages, and sets
-/// safe_path -- closing the channel through which a host could
-/// shadow `import ck_dsl` by setting PYTHONPATH before loading the
-/// plugin. The provider's own ck_dsl_provider + ck_dsl trees are
-/// brought onto sys.path explicitly inside
-/// ``CompileServiceBridge::ctor``; no other paths need to be searched
-/// for the JIT compile path.
+/// Initialises MicroPython lazily via ``mp_embed_init`` over a large
+/// process-owned GC heap (no system Python, no filesystem, no
+/// environment). The ck_dsl / ck_dsl_provider Python modules are frozen
+/// into the plugin (or loaded from an on-disk .mpy/.py bundle in the dev
+/// build), so there is no sys.path to harden or shadow: ``import
+/// ck_dsl_provider`` resolves only to the frozen tree. This closes the
+/// channel through which a host could shadow ``import ck_dsl`` by setting
+/// PYTHONPATH before loading the plugin -- the attack surface that the
+/// previous CPython embedding had to defend against does not exist here.
 ///
-/// The interpreter is intentionally never finalised. hipDNN may host
-/// multiple plugins, any of which may also embed CPython, and calling
-/// Py_Finalize() from this plugin would tear down the interpreter
-/// state shared with those siblings.
+/// MicroPython has a single global runtime state and NO GIL. All
+/// interaction with the interpreter must therefore be serialised on
+/// ``interpreterMutex()``. The interpreter is intentionally never
+/// deinitialised: hipDNN may host multiple plugins and the GC heap /
+/// runtime state outlive any single compile.
 ///
-/// If another in-process embedder has initialised CPython before this
-/// plugin loads, ``ensureInitialized`` skips the init path and reuses
-/// the existing interpreter -- the PyConfig hardening only applies if
-/// this plugin is the first embedder to run.
+/// GC note: MicroPython scans the C stack for roots between the current
+/// stack pointer and ``stack_top`` (set at init). Because compile calls
+/// may arrive on different host threads, every entry point that runs
+/// Python code must reset the stack top to its own frame via
+/// ``setCallStackTop`` while holding ``interpreterMutex()``.
 class EmbeddedInterpreter {
    public:
     /// Initialise the embedded interpreter if it has not already been
@@ -38,13 +38,22 @@ class EmbeddedInterpreter {
     static void ensureInitialized();
 
     /// Returns true after the interpreter has been initialised.
-    /// Mainly useful for unit tests; production callers should rely on
-    /// ensureInitialized() and the GIL helpers.
     static bool isInitialized() noexcept;
 
     /// Returns how many times ensureInitialized() has actually performed
     /// initialization (always 0 or 1 in a healthy process). Test helper.
     static unsigned initializationCount() noexcept;
+
+    /// The single lock serialising all interpreter access (no GIL).
+    static std::mutex& interpreterMutex() noexcept;
+
+    /// Reset MicroPython's C-stack root-scanning top to the caller's
+    /// frame. Call once, holding interpreterMutex(), at the top of every
+    /// entry point that runs Python, passing ``__builtin_frame_address(0)``
+    /// so the argument is evaluated in the caller's frame:
+    ///   std::lock_guard<std::mutex> lock(interpreterMutex());
+    ///   EmbeddedInterpreter::setCallStackTop(__builtin_frame_address(0));
+    static void setCallStackTop(void* frame) noexcept;
 
    private:
     EmbeddedInterpreter() = delete;

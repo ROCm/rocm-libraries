@@ -140,6 +140,9 @@ constexpr std::size_t kHsacoMaxBytes = 256ULL * 1024 * 1024;
 CompileServiceBridge::CompileServiceBridge() {
     EmbeddedInterpreter::ensureInitialized();
     std::lock_guard<std::mutex> lock(EmbeddedInterpreter::interpreterMutex());
+    // Reset GC C-stack root scanning to this frame: compile calls may arrive on
+    // different host threads, and MicroPython scans [sp, stack_top] for roots.
+    EmbeddedInterpreter::setCallStackTop(__builtin_frame_address(0));
 
     nlr_buf_t nlr;
     if (nlr_push(&nlr) == 0) {
@@ -266,6 +269,9 @@ KernelArtifact callCompileLike(mp_obj_t module, const char* attr, const mp_obj_t
 
 KernelArtifact CompileServiceBridge::compileSmoke(std::string_view arch) {
     std::lock_guard<std::mutex> lock(EmbeddedInterpreter::interpreterMutex());
+    // Reset GC C-stack root scanning to this frame: compile calls may arrive on
+    // different host threads, and MicroPython scans [sp, stack_top] for roots.
+    EmbeddedInterpreter::setCallStackTop(__builtin_frame_address(0));
     mp_obj_t module = reinterpret_cast<mp_obj_t>(_module);
     mp_obj_t args[1];
     nlr_buf_t nlr;
@@ -287,6 +293,9 @@ KernelArtifact CompileServiceBridge::compileSmoke(std::string_view arch) {
 KernelArtifact CompileServiceBridge::compile(std::string_view opKind, const PayloadDict& payload,
                                              std::string_view arch) {
     std::lock_guard<std::mutex> lock(EmbeddedInterpreter::interpreterMutex());
+    // Reset GC C-stack root scanning to this frame: compile calls may arrive on
+    // different host threads, and MicroPython scans [sp, stack_top] for roots.
+    EmbeddedInterpreter::setCallStackTop(__builtin_frame_address(0));
     mp_obj_t module = reinterpret_cast<mp_obj_t>(_module);
     mp_obj_t args[3];
     nlr_buf_t nlr;
@@ -310,6 +319,9 @@ std::pair<bool, std::string> CompileServiceBridge::isApplicable(std::string_view
                                                                 const PayloadDict& payload,
                                                                 std::string_view arch) {
     std::lock_guard<std::mutex> lock(EmbeddedInterpreter::interpreterMutex());
+    // Reset GC C-stack root scanning to this frame: compile calls may arrive on
+    // different host threads, and MicroPython scans [sp, stack_top] for roots.
+    EmbeddedInterpreter::setCallStackTop(__builtin_frame_address(0));
     mp_obj_t module = reinterpret_cast<mp_obj_t>(_module);
 
     bool ok = false;

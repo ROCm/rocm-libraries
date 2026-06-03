@@ -31,7 +31,17 @@ target_include_directories(ck_dsl_provider_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DI
 target_link_libraries(
     ck_dsl_provider_impl
     PUBLIC hipdnn_plugin_sdk hipdnn_data_sdk hipdnn_flatbuffers_sdk hip::host
-           Python3::Python pybind11::embed
+)
+
+# The bridge + interpreter TUs include the MicroPython C API; they must compile
+# against the generated embed package, so order this OBJECT library's compile
+# after the static lib build and add its include dirs + frozen-module defines.
+add_dependencies(ck_dsl_provider_impl ${CKDSL_MPY_BUILD_TARGET})
+foreach(_dir IN LISTS CKDSL_MPY_INCLUDE_DIRS)
+    target_include_directories(ck_dsl_provider_impl PUBLIC $<BUILD_INTERFACE:${_dir}>)
+endforeach()
+target_compile_definitions(ck_dsl_provider_impl
+    PUBLIC MICROPY_MODULE_FROZEN_MPY=1 MICROPY_MODULE_FROZEN_STR=1
 )
 
 set_target_properties(ck_dsl_provider_impl PROPERTIES
@@ -44,18 +54,30 @@ set_target_properties(ck_dsl_provider_impl PROPERTIES
 # through the .so loader). Not installed.
 add_library(ck_dsl_provider_private STATIC $<TARGET_OBJECTS:ck_dsl_provider_impl>)
 target_include_directories(ck_dsl_provider_private PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+add_dependencies(ck_dsl_provider_private ${CKDSL_MPY_BUILD_TARGET})
 target_link_libraries(
     ck_dsl_provider_private
     PUBLIC hipdnn_plugin_sdk hipdnn_data_sdk hipdnn_flatbuffers_sdk ck_dsl_provider_impl
-           Python3::Python pybind11::embed
+           ${CKDSL_MPY_STATIC_LIB} ${CKDSL_MPY_COMGR_LIB} m
 )
 
 # Shared library: the actual plugin loaded at runtime by hipDNN.
 add_library(ck_dsl_provider_plugin SHARED $<TARGET_OBJECTS:ck_dsl_provider_impl>)
+add_dependencies(ck_dsl_provider_plugin ${CKDSL_MPY_BUILD_TARGET})
 target_link_libraries(
     ck_dsl_provider_plugin
     PRIVATE hipdnn_plugin_sdk hipdnn_data_sdk hipdnn_flatbuffers_sdk hip::host
-            Python3::Python pybind11::embed
+)
+
+# Link the embedded-MicroPython archive whole: the frozen-module table and the
+# native `comgr` module's MP_REGISTER_MODULE record are reached only via
+# generated tables / the import machinery, so members must not be dropped by the
+# archive's pull-on-demand resolution. --exclude-libs=ALL (below) still hides
+# every one of these symbols from the plugin's dynamic export.
+target_link_libraries(
+    ck_dsl_provider_plugin
+    PRIVATE -Wl,--whole-archive ${CKDSL_MPY_STATIC_LIB} -Wl,--no-whole-archive
+            ${CKDSL_MPY_COMGR_LIB} m
 )
 
 if(NOT WIN32)
