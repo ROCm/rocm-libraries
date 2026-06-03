@@ -106,14 +106,14 @@ struct GemmPipelineAgBgCrCompAsyncEightWavesPolicy
     static_assert(warp_num * warp_size == BlockSize, "Wrong!");
 
     static_assert(sizeof(ADataType) == sizeof(BDataType), "Wrong!");
-    static constexpr index_t ElementSize = sizeof(ADataType);
+    static constexpr index_t ElementSize = sizeof(ComputeDataType);
     static constexpr index_t K2          = Problem::VectorLoadSize / ElementSize * PackedSize;
     // We define kDramLoadPackElems as 128 for fp6 because K2 == 16, so in this way we have correct
     // values for K1 (number of contiguous lanes in a row)
     static constexpr index_t kDramLoadPackElems =
-        std::is_same_v<ADataType, pk_fp6x16_t>
+        std::is_same_v<ComputeDataType, pk_fp6x16_t>
             ? kDramLoadPackBytes
-            : kDramLoadPackBytes / sizeof(ADataType) * PackedSize;
+            : kDramLoadPackBytes / sizeof(ComputeDataType) * PackedSize;
     static constexpr index_t PacksPerLdsRow = std::min(kDramLoadPackElems, KPerBlock) / K2;
     static constexpr index_t K1             = PacksPerLdsRow;
     static constexpr index_t K0             = KPerBlock / (K1 * K2);
@@ -362,14 +362,14 @@ struct GemmPipelineAgBgCrCompAsyncEightWavesPolicy
     CK_TILE_DEVICE static constexpr index_t GetSmemSizeA()
     {
         constexpr index_t sizeofType =
-            std::is_same_v<ADataType, pk_fp6x16_t> ? 16 : sizeof(ADataType);
+            std::is_same_v<AComputeDataType, pk_fp6x16_t> ? 16 : sizeof(AComputeDataType);
         constexpr index_t desc_size = MakeALdsBlockDescriptor().get_element_space_size();
         return integer_least_multiple(sizeofType * desc_size / PackedSize, 16);
     }
     CK_TILE_DEVICE static constexpr index_t GetSmemSizeB()
     {
         constexpr index_t sizeofType =
-            std::is_same_v<BDataType, pk_fp6x16_t> ? 16 : sizeof(BDataType);
+            std::is_same_v<BComputeDataType, pk_fp6x16_t> ? 16 : sizeof(BComputeDataType);
         constexpr index_t desc_size = MakeBLdsBlockDescriptor().get_element_space_size();
         return integer_least_multiple(sizeofType * desc_size / PackedSize, 16);
     }
@@ -392,8 +392,8 @@ struct GemmPipelineAgBgCrCompAsyncEightWavesPolicy
         // TODO: Fix for transpose
         constexpr auto wg_attr_num_access = WGAccess;
 
-        using WarpGemm = WarpGemmDispatcher<typename Problem::ADataType,
-                                            typename Problem::BDataType,
+        using WarpGemm = WarpGemmDispatcher<typename Problem::AComputeDataType,
+                                            typename Problem::BComputeDataType,
                                             typename Problem::CDataType,
                                             WarpTile::at(I0),
                                             WarpTile::at(I1),
@@ -403,11 +403,12 @@ struct GemmPipelineAgBgCrCompAsyncEightWavesPolicy
                                             false,
                                             wg_attr_num_access>;
 
-        using BlockGemmPolicy = BlockGemmARegBRegCRegV1CustomPolicy<typename Problem::ADataType,
-                                                                    typename Problem::BDataType,
-                                                                    typename Problem::CDataType,
-                                                                    BlockWarps,
-                                                                    WarpGemm>;
+        using BlockGemmPolicy =
+            BlockGemmARegBRegCRegV1CustomPolicy<typename Problem::AComputeDataType,
+                                                typename Problem::BComputeDataType,
+                                                typename Problem::CDataType,
+                                                BlockWarps,
+                                                WarpGemm>;
 
         return BlockGemmARegBRegCRegEightWavesV1<Problem, BlockGemmPolicy>{};
     }
