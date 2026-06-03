@@ -163,10 +163,19 @@ class InstructionEmitter:
             ti = self.tileInfoMap[tensor]
             vgprTiles = self.vgprTilesA if tensor == 'A' else self.vgprTilesB
             lrGran = self.config.lrA if tensor == 'A' else self.config.lrB
-            per_uid_k = self._per_uid_k[tensor]
+            # PR 7781 / multi-DU added a `per_uid_k` modulo here to fold a
+            # uid's k-window down to the local subtile coordinate. That
+            # modulo is only correct under multi-DU (numUnroll>1); under
+            # single-DU (numUnroll==1, the only configuration exercised
+            # by PR 7656's MT128 / DU=256 path) `per_uid_k = grGran.k`
+            # collapses every k>0 to local_k=0 and the wrap-LR loses the
+            # subtileK index, reading from the wrong LDS half. Use the
+            # unmodulated k for single-DU and only fold under multi-DU.
+            nUnroll = self.config.numUnroll.get(tensor, 1)
+            per_uid_k = self._per_uid_k[tensor] if nUnroll > 1 else None
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, lrGran.mn):
                 for k in range(placement.tiles.subIterK_start, placement.tiles.subIterK_end, lrGran.k):
-                    local_k = k % per_uid_k
+                    local_k = (k % per_uid_k) if per_uid_k is not None else k
                     subtileK = local_k // self.subtileShapeK
                     subIterK_within = local_k % self.subtileShapeK
                     dstTile = vgprTiles[tile_map[tileId]]
