@@ -3,7 +3,6 @@
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
-#include <pybind11/embed.h>
 
 #include <chrono>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
@@ -30,8 +29,6 @@
 #include "runtime/KernelArtifact.hpp"
 
 namespace {
-
-namespace py = pybind11;
 
 using ck_dsl_provider::CkDslContainer;
 using ck_dsl_provider::CkDslContext;
@@ -173,8 +170,8 @@ TEST_F(ConvImplicitGemmPlanBuilderHost, IsApplicableReflectsDeviceArch) {
                           << "; isApplicable should decline";
         return;
     }
-    py::gil_scoped_acquire gil;
-    py::dict payload = ck_dsl_provider::convImplicitGemmSpecToPayload(spec);
+    const ck_dsl_provider::PayloadDict payload =
+        ck_dsl_provider::convImplicitGemmSpecToPayload(spec);
     const bool expected = _container->compileServiceBridge()
                               .isApplicable(ConvImplicitGemmPlanBuilder::opKind(), payload, *arch)
                               .first;
@@ -216,8 +213,8 @@ TEST_F(ConvImplicitGemmPlanBuilderHost, BridgeIsApplicableIsArchAware) {
 
     // arch is a separate argument (an orthogonal compile target, not a
     // spec field) -- the same shape the plan builder uses in production.
-    py::gil_scoped_acquire gil;
-    py::dict payload = ck_dsl_provider::convImplicitGemmSpecToPayload(spec);
+    const ck_dsl_provider::PayloadDict payload =
+        ck_dsl_provider::convImplicitGemmSpecToPayload(spec);
     auto verdictForArch = [&](const char* arch) { return bridge.isApplicable(op, payload, arch); };
 
     auto onGfx950 = verdictForArch("gfx950");
@@ -245,8 +242,8 @@ TEST_P(ConvImplicitGemmExampleCompile, CompilesExampleShape) {
     auto& bridge = _container->compileServiceBridge();
     const char* op = ConvImplicitGemmPlanBuilder::opKind();
 
-    py::gil_scoped_acquire gil;
-    py::dict payload = ck_dsl_provider::convImplicitGemmSpecToPayload(spec);
+    const ck_dsl_provider::PayloadDict payload =
+        ck_dsl_provider::convImplicitGemmSpecToPayload(spec);
 
     auto verdict = bridge.isApplicable(op, payload, arch);
     EXPECT_TRUE(verdict.first) << arch << " applicability: " << verdict.second;
@@ -279,8 +276,8 @@ TEST_F(ConvImplicitGemmPlanBuilderHost, ExecutesExampleShapeOnPresentDevice) {
 
     ck_dsl_provider::KernelArtifact artifact;
     {
-        py::gil_scoped_acquire gil;
-        py::dict payload = ck_dsl_provider::convImplicitGemmSpecToPayload(spec);
+        const ck_dsl_provider::PayloadDict payload =
+            ck_dsl_provider::convImplicitGemmSpecToPayload(spec);
         artifact = _container->compileServiceBridge().compile(ConvImplicitGemmPlanBuilder::opKind(),
                                                               payload, arch);
     }

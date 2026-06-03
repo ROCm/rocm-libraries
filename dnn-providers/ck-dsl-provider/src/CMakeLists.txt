@@ -55,10 +55,13 @@ set_target_properties(ck_dsl_provider_impl PROPERTIES
 add_library(ck_dsl_provider_private STATIC $<TARGET_OBJECTS:ck_dsl_provider_impl>)
 target_include_directories(ck_dsl_provider_private PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 add_dependencies(ck_dsl_provider_private ${CKDSL_MPY_BUILD_TARGET})
+# Whole-archive so executables linking this static lib (the unit + integration
+# tests) also force-include the frozen-module table + native comgr module, just
+# like the plugin .so does.
 target_link_libraries(
     ck_dsl_provider_private
     PUBLIC hipdnn_plugin_sdk hipdnn_data_sdk hipdnn_flatbuffers_sdk ck_dsl_provider_impl
-           ${CKDSL_MPY_STATIC_LIB} ${CKDSL_MPY_COMGR_LIB} m
+           "$<LINK_LIBRARY:WHOLE_ARCHIVE,${CKDSL_MPY_STATIC_LIB}>" ${CKDSL_MPY_COMGR_LIB} m
 )
 
 # Shared library: the actual plugin loaded at runtime by hipDNN.

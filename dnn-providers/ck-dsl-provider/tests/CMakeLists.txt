@@ -32,8 +32,6 @@ target_link_libraries(
             ck_dsl_provider_private
             hipdnn_test_sdk
             hipdnn_plugin_sdk
-            Python3::Python
-            pybind11::embed
             Threads::Threads
 )
 

@@ -48,6 +48,19 @@ spec = ImplicitGemmConvSpec(
 )
 _ = lower_kernel_to_llvm(build_implicit_gemm_conv(spec, arch="gfx950"), arch="gfx950")
 
+# Also capture the compile_smoke (elementwise) closure so the smoke path is
+# frozen alongside conv. compile_smoke uses ElementwiseSpec/build_elementwise;
+# lower (not compile) to pull its lazy imports without needing comgr here.
+from ck_dsl.instances.common.elementwise import (  # noqa: E402
+    ElementwiseSpec,
+    build_elementwise,
+)
+
+_smoke_spec = ElementwiseSpec(
+    op="copy", dtype="f16", block_size=64, vec=2, name="ck_dsl_provider_smoke_copy"
+)
+_ = lower_kernel_to_llvm(build_elementwise(_smoke_spec), arch="gfx950")
+
 # hip_module is the launch-side ctypes layer; the native-backed comgr.py we write
 # below does not import it, so exclude it from the frozen set.
 EXCLUDE = {"ck_dsl/runtime/hip_module.py"}

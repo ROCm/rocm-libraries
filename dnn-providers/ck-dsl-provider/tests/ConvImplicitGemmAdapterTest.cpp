@@ -5,7 +5,6 @@
 #include <gtest/gtest.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
-#include <pybind11/embed.h>
 
 #include <cstdint>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
@@ -17,8 +16,8 @@
 #include "adapters/conv_implicit_gemm/ConvImplicitGemmAdapter.hpp"
 #include "adapters/conv_implicit_gemm/ConvImplicitGemmPayload.hpp"
 #include "adapters/conv_implicit_gemm/ConvImplicitGemmSpec.hpp"
-
-namespace py = pybind11;
+#include "python/CompilePayload.hpp"
+#include "python/CompileServiceBridge.hpp"
 
 namespace {
 
@@ -26,6 +25,18 @@ using ck_dsl_provider::CkDslContainer;
 using ck_dsl_provider::ConvImplicitGemmAdapter;
 using ck_dsl_provider::ConvImplicitGemmSpec;
 using ck_dsl_provider::convImplicitGemmSpecToPayload;
+using ck_dsl_provider::PayloadDict;
+using ck_dsl_provider::PayloadValue;
+
+// Look up a key in an (interpreter-neutral) PayloadDict; nullptr if absent.
+const PayloadValue* payloadFind(const PayloadDict& dict, const char* key) {
+    for (const auto& kv : dict) {
+        if (kv.first == key) {
+            return &kv.second;
+        }
+    }
+    return nullptr;
+}
 
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
@@ -293,14 +304,13 @@ TEST(TestConvImplicitGemmAdapter, RejectsNonHalfDtype) {
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
-/// Payload conversion needs the embedded interpreter. We construct a
-/// CkDslContainer so the per-process interpreter is up, then exercise
-/// the spec -> py::dict translation under the GIL.
+/// The payload->dataclass round-trip test needs the embedded interpreter; we
+/// construct a CkDslContainer so the per-process MicroPython runtime is up and
+/// the frozen ck_dsl modules are importable. (The pure-C++ payload conversion
+/// itself needs no interpreter.)
 class TestConvImplicitGemmPayload : public ::testing::Test {
    protected:
     void SetUp() override {
-        // The container owns the embedded interpreter; constructing
-        // it ensures Py_Initialize has run before we touch any py::*.
         _container = std::make_unique<CkDslContainer>();
     }
 
@@ -311,86 +321,67 @@ TEST_F(TestConvImplicitGemmPayload, PayloadDictForExampleShape) {
     ConvGraphFixture fx;
     auto spec = ConvImplicitGemmAdapter::buildSpec(*fx.convAttr, fx.tensorMap);
 
-    py::gil_scoped_acquire gil;
-    py::dict payload = convImplicitGemmSpecToPayload(spec);
+    const PayloadDict payload = convImplicitGemmSpecToPayload(spec);
 
     // Top-level fields the dataclass takes as kwargs.
-    ASSERT_TRUE(payload.contains("problem"));
-    ASSERT_TRUE(payload.contains("name"));
-    ASSERT_TRUE(payload.contains("tile_m"));
-    ASSERT_TRUE(payload.contains("tile_n"));
-    ASSERT_TRUE(payload.contains("tile_k"));
-    ASSERT_TRUE(payload.contains("warp_tile_m"));
-    ASSERT_TRUE(payload.contains("warp_tile_n"));
-    ASSERT_TRUE(payload.contains("warp_tile_k"));
-    ASSERT_TRUE(payload.contains("epilogue"));
-    ASSERT_TRUE(payload.contains("pipeline"));
-    ASSERT_TRUE(payload.contains("lds_k_pad"));
-    ASSERT_TRUE(payload.contains("waves_per_eu"));
+    ASSERT_NE(payloadFind(payload, "problem"), nullptr);
+    ASSERT_NE(payloadFind(payload, "name"), nullptr);
+    ASSERT_NE(payloadFind(payload, "tile_m"), nullptr);
+    ASSERT_NE(payloadFind(payload, "tile_n"), nullptr);
+    ASSERT_NE(payloadFind(payload, "tile_k"), nullptr);
+    ASSERT_NE(payloadFind(payload, "warp_tile_m"), nullptr);
+    ASSERT_NE(payloadFind(payload, "warp_tile_n"), nullptr);
+    ASSERT_NE(payloadFind(payload, "warp_tile_k"), nullptr);
+    ASSERT_NE(payloadFind(payload, "epilogue"), nullptr);
+    ASSERT_NE(payloadFind(payload, "pipeline"), nullptr);
+    ASSERT_NE(payloadFind(payload, "lds_k_pad"), nullptr);
+    ASSERT_NE(payloadFind(payload, "waves_per_eu"), nullptr);
     // Deliberately NOT present (the dataclass owns the derivation):
-    EXPECT_FALSE(payload.contains("lds_layout"));
+    EXPECT_EQ(payloadFind(payload, "lds_layout"), nullptr);
 
-    EXPECT_EQ(payload["tile_m"].cast<int>(), 64);
-    EXPECT_EQ(payload["tile_k"].cast<int>(), 64);
-    EXPECT_EQ(payload["warp_tile_m"].cast<int>(), 32);
-    EXPECT_EQ(payload["warp_tile_k"].cast<int>(), 16);
-    EXPECT_EQ(payload["epilogue"].cast<std::string>(), "default");
-    EXPECT_EQ(payload["pipeline"].cast<std::string>(), "mem");
-    EXPECT_EQ(payload["name"].cast<std::string>(), "ck_dsl_conv_igemm");
-    EXPECT_FALSE(payload["async_dma"].cast<bool>());
-    EXPECT_TRUE(payload["lds_k_pad"].is_none());
-    EXPECT_TRUE(payload["waves_per_eu"].is_none());
+    EXPECT_EQ(payloadFind(payload, "tile_m")->intVal, 64);
+    EXPECT_EQ(payloadFind(payload, "tile_k")->intVal, 64);
+    EXPECT_EQ(payloadFind(payload, "warp_tile_m")->intVal, 32);
+    EXPECT_EQ(payloadFind(payload, "warp_tile_k")->intVal, 16);
+    EXPECT_EQ(payloadFind(payload, "epilogue")->strVal, "default");
+    EXPECT_EQ(payloadFind(payload, "pipeline")->strVal, "mem");
+    EXPECT_EQ(payloadFind(payload, "name")->strVal, "ck_dsl_conv_igemm");
+    EXPECT_FALSE(payloadFind(payload, "async_dma")->boolVal);
+    EXPECT_EQ(payloadFind(payload, "lds_k_pad")->kind, PayloadValue::Kind::None);
+    EXPECT_EQ(payloadFind(payload, "waves_per_eu")->kind, PayloadValue::Kind::None);
 
     // Nested ConvProblem dict.
-    auto problem = payload["problem"].cast<py::dict>();
-    EXPECT_EQ(problem["N"].cast<int>(), 8);
-    EXPECT_EQ(problem["C"].cast<int>(), 64);
-    EXPECT_EQ(problem["Hi"].cast<int>(), 56);
-    EXPECT_EQ(problem["Wi"].cast<int>(), 56);
-    EXPECT_EQ(problem["K"].cast<int>(), 64);
-    EXPECT_EQ(problem["R"].cast<int>(), 3);
-    EXPECT_EQ(problem["S"].cast<int>(), 3);
-    EXPECT_EQ(problem["sH"].cast<int>(), 1);
-    EXPECT_EQ(problem["pH"].cast<int>(), 1);
-    EXPECT_EQ(problem["dH"].cast<int>(), 1);
+    const PayloadValue* problemVal = payloadFind(payload, "problem");
+    ASSERT_EQ(problemVal->kind, PayloadValue::Kind::Dict);
+    const PayloadDict& problem = problemVal->dictVal;
+    EXPECT_EQ(payloadFind(problem, "N")->intVal, 8);
+    EXPECT_EQ(payloadFind(problem, "C")->intVal, 64);
+    EXPECT_EQ(payloadFind(problem, "Hi")->intVal, 56);
+    EXPECT_EQ(payloadFind(problem, "Wi")->intVal, 56);
+    EXPECT_EQ(payloadFind(problem, "K")->intVal, 64);
+    EXPECT_EQ(payloadFind(problem, "R")->intVal, 3);
+    EXPECT_EQ(payloadFind(problem, "S")->intVal, 3);
+    EXPECT_EQ(payloadFind(problem, "sH")->intVal, 1);
+    EXPECT_EQ(payloadFind(problem, "pH")->intVal, 1);
+    EXPECT_EQ(payloadFind(problem, "dH")->intVal, 1);
 }
 
-TEST_F(TestConvImplicitGemmPayload, RoundTripsThroughPythonDataclass) {
-    // Cross-check: splat the payload into the actual Python
-    // ImplicitGemmConvSpec dataclass. If our field set drifts from
-    // the dataclass (extra/missing field) this fails loudly with a
-    // TypeError -- exactly the divergence canary the plan §3.3 cost-
-    // of-mirroring note asks for.
+TEST_F(TestConvImplicitGemmPayload, CompilesThroughRealDataclass) {
+    // Cross-check: feed the payload through the real ck_dsl
+    // ImplicitGemmConvSpec / ConvProblem dataclasses. compile_service.compile
+    // constructs the spec from this exact field set (and _reject_unexpected
+    // rejects stray keys), so a drift between the C++ payload and the
+    // dataclass fields fails here -- the divergence canary the plan §3.3
+    // cost-of-mirroring note asks for. comgr cross-compiles, so no GPU needed.
     ConvGraphFixture fx;
     auto spec = ConvImplicitGemmAdapter::buildSpec(*fx.convAttr, fx.tensorMap);
 
-    py::gil_scoped_acquire gil;
-    py::dict payload = convImplicitGemmSpecToPayload(spec);
+    const PayloadDict payload = convImplicitGemmSpecToPayload(spec);
+    auto artifact =
+        _container->compileServiceBridge().compile("conv_implicit_gemm", payload, "gfx950");
 
-    // The container already injected ck_dsl onto sys.path via the
-    // compile-service bridge, so this import succeeds.
-    py::module_ conv = py::module_::import("ck_dsl.instances.common.conv_implicit_gemm");
-    py::object ConvProblem = conv.attr("ConvProblem");
-    py::object ImplicitGemmConvSpec = conv.attr("ImplicitGemmConvSpec");
-
-    // Build the nested ConvProblem first (it goes into the spec ctor
-    // as a positional/kwarg). Splatting our nested dict means the
-    // ConvProblem dataclass also enforces field-set parity.
-    py::object problemInst = ConvProblem(**payload["problem"].cast<py::dict>());
-
-    // Reassemble the kwargs the dataclass expects: same dict minus
-    // the nested 'problem' key, plus the constructed ConvProblem.
-    py::dict kwargs = payload.attr("copy")().cast<py::dict>();
-    PyDict_DelItemString(kwargs.ptr(), "problem");
-    kwargs["problem"] = problemInst;
-
-    py::object specInst = ImplicitGemmConvSpec(**kwargs);
-
-    EXPECT_EQ(specInst.attr("tile_k").cast<int>(), 64);
-    EXPECT_EQ(specInst.attr("warp_tile_m").cast<int>(), 32);
-    EXPECT_EQ(specInst.attr("epilogue").cast<std::string>(), "default");
-    EXPECT_EQ(specInst.attr("block_size").cast<int>(), 256);
-    EXPECT_EQ(specInst.attr("problem").attr("Ho").cast<int>(), 56);
+    EXPECT_FALSE(artifact.hsaco.empty()) << "round-tripped payload must compile";
+    EXPECT_NE(artifact.isa.find("gfx950"), std::string::npos);
 }
 
 }  // namespace

@@ -2,21 +2,43 @@
 // SPDX-License-Identifier:  MIT
 
 #include <gtest/gtest.h>
-#include <pybind11/embed.h>
-#include <pybind11/pybind11.h>
 
-#include <string>
+#include <mutex>
 
 #include "python/EmbeddedInterpreter.hpp"
 
-namespace py = pybind11;
+extern "C" {
+#include "py/runtime.h"
+}
+
 using ck_dsl_provider::EmbeddedInterpreter;
 
-// All three tests live in one TestSuite so the call_once init runs once
-// across the suite while still letting each TEST verify a separate
-// behaviour. The std::call_once contract means that the very first test
-// to run is the one that performs initialization; subsequent tests
-// observe initializationCount() == 1 and Py_IsInitialized() == true.
+namespace {
+
+// Import a module by name under the interpreter lock (no GIL in MicroPython),
+// resetting the GC stack top to this frame the same way the bridge does.
+// Returns true if the import succeeds, false if MicroPython raised.
+bool importSucceeds(const char* name) {
+    std::lock_guard<std::mutex> lock(EmbeddedInterpreter::interpreterMutex());
+    EmbeddedInterpreter::setCallStackTop(__builtin_frame_address(0));
+    nlr_buf_t nlr;
+    bool ok = false;
+    if (nlr_push(&nlr) == 0) {
+        mp_obj_t module =
+            mp_import_name(qstr_from_str(name), mp_const_none, MP_OBJ_NEW_SMALL_INT(0));
+        ok = (module != MP_OBJ_NULL);
+        nlr_pop();
+    } else {
+        ok = false;
+    }
+    return ok;
+}
+
+}  // namespace
+
+// The std::call_once init runs once across the suite; the first test to run
+// performs initialization, subsequent tests observe initializationCount() == 1
+// and isInitialized() == true.
 TEST(TestEmbeddedInterpreter, InitializesOnce) {
     const unsigned before = EmbeddedInterpreter::initializationCount();
     EmbeddedInterpreter::ensureInitialized();
@@ -34,44 +56,19 @@ TEST(TestEmbeddedInterpreter, InitializesOnce) {
     EXPECT_TRUE(EmbeddedInterpreter::isInitialized());
 }
 
-TEST(TestEmbeddedInterpreter, CanImportStdlib) {
+// The provider's Python ships frozen into the plugin: importing it proves the
+// frozen module table is linked in and the import machinery resolves it without
+// any filesystem / sys.path.
+TEST(TestEmbeddedInterpreter, ImportsFrozenProviderPackage) {
     EmbeddedInterpreter::ensureInitialized();
-
-    // Acquire the GIL once and drive the import + a trivial json
-    // roundtrip; mirrors the spike at WIP/pybind11_rtld_local_spike/
-    // and proves that the embedded interpreter's sys.path resolves
-    // CPython's stdlib correctly.
-    py::gil_scoped_acquire gil;
-    py::module_ json = py::module_::import("json");
-    ASSERT_FALSE(json.is_none());
-
-    py::dict payload;
-    payload["ok"] = 1;
-    auto encoded = json.attr("dumps")(payload).cast<std::string>();
-    EXPECT_NE(encoded.find("\"ok\""), std::string::npos);
-    EXPECT_NE(encoded.find('1'), std::string::npos);
+    EXPECT_TRUE(importSucceeds("ck_dsl_provider"))
+        << "frozen ck_dsl_provider package must be importable";
 }
 
-TEST(TestEmbeddedInterpreter, SurvivesGilReentry) {
+// A builtin module imports through the same locked path -- and a second import
+// after the first released the lock confirms the mutex is reusable in sequence.
+TEST(TestEmbeddedInterpreter, ImportsBuiltinModule) {
     EmbeddedInterpreter::ensureInitialized();
-
-    // Nested py::gil_scoped_acquire scopes are the canonical pattern
-    // for C++ code that might be called from a context that already
-    // holds the GIL (e.g. a Python-driven callback). They must not
-    // deadlock, must not throw, and must leave the GIL state intact
-    // for the outer scope to keep using the interpreter.
-    {
-        py::gil_scoped_acquire outer;
-        py::module_ sys = py::module_::import("sys");
-        ASSERT_FALSE(sys.is_none());
-        {
-            py::gil_scoped_acquire inner;
-            py::object versionInfo = sys.attr("version_info");
-            auto major = versionInfo.attr("major").cast<int>();
-            EXPECT_EQ(major, 3) << "embedded interpreter must be Python 3.x";
-        }
-        // Outer scope still functional after the inner scope releases.
-        auto executable = sys.attr("executable").cast<std::string>();
-        EXPECT_FALSE(executable.empty());
-    }
+    EXPECT_TRUE(importSucceeds("sys"));
+    EXPECT_TRUE(importSucceeds("sys")) << "interpreter lock must be reusable across calls";
 }
