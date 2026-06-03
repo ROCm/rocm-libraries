@@ -399,3 +399,82 @@ docs/swmmac/
 *Document Version: 2.0 | 2026-06-03*
 *Contact: yan-li1986*
 *License: MIT (code) / CC-BY-4.0 (documentation)*
+
+---
+
+## 6. Optimization Tier Reference / 优化层级对照
+
+### 6.1 Tier Map
+
+```
+ 518 TOPs  K0: ChainPipeline sync
+   │        硬件锁步 — 所有 wave 在 barrier 处同步等待
+   │        原理: 天然的波前同步产生空转气泡 + 瞬态电流尖峰
+   │
+   │ +84%
+   ▼
+ 952 TOPs  K6: StaggeredPipeline (atomicAdd 波散布)
+   │        每个 wave 独立通过 atomicAdd 领取任务, 不再同步等待
+   │        原理: 错开 wave 执行相位 → 消除 barrier 拥堵 + 平滑 di/dt
+   │        (见 PRINCIPLES.md §6.1 StaggeredPipeline)
+   │
+   │ +46%
+   ▼
+1386 TOPs  K6+: Hash Staggering (clock64 哈希波散布)
+   │        用 clock64 硬件时钟做随机种子, 每个 wave 起始相位随机化
+   │        原理: 伪随机错开 → 避免 32-wave 的"同频共振"导致的周期拥堵
+   │        两种变体: clock64 (时间哈希) 和 NOP (指令延迟哈希)
+   │
+   │ +194%
+   ▼
+4080 TOPs  K8: L2-Persistent Counter + 16-chain Full Unroll
+   │        计数器驻留在 L2 cache, 消除 hipMemset 每次清空的 cache 驱逐
+   │        16 条 SWMMAC 链完全展开 — 填满 26-cycle 管线
+   │        原理: L2 持久化 → 计数器零延迟访问
+   │              16-chain → 0 气泡 (26-cycle latency, 16 chains → 1 result/cycle)
+   │        (见 PRINCIPLES.md §4.2 16-chain, §2.4 StaggeredPipeline)
+   │
+   │ +6%
+   ▼
+4326 TOPs  K9: Wave-Level Cooperative Claiming (readfirstlane)
+   │        仅 Lane 0 执行 atomicAdd, readfirstlane 全波广播任务 ID
+   │        原理: 强制 EXEC = 0xFFFFFFFF → 规避 Silent Drop 硬件缺陷
+   │              32 条 lane 全参与 SWMMAC → 零算力蒸发
+   │        (见 PRINCIPLES.md §5 Silent Drop)
+```
+
+### 6.2 Principle-to-Tier Mapping
+
+| Tier | 核心原理 | 解决的问题 | 物理对应 |
+|------|---------|-----------|---------|
+| K0 | 波前同步 | — (baseline) | 晶态: 长程有序但静态 |
+| K6 | 原子散布 | barrier 拥堵 | 液态: 短程有序, 流动态 |
+| K6+ | 哈希随机化 | 同频共振 | 声子非相干散射 |
+| K8 | L2 持久化 + 16-chain | 计数器驱逐 + 管线气泡 | 等离子态: 连续流 |
+| K9 | Wave 级广播 | Silent Drop | 相位正交锁定 |
+
+### 6.3 Reproducibility
+
+所有 bench 文件在 `projects/rocblas/test/swmmac/`:
+
+```bash
+# Compile (use ROCm LLVM 23)
+/opt/rocm/llvm/bin/clang++ -x hip --offload-arch=gfx1200 \
+  -I<rocwmma_headers> -I/opt/rocm/include \
+  -DROCWMMA_WAVE32_MODE=1 -O3 -L/opt/rocm/lib -lamdhip64 \
+  -o bench_xxx bench_xxx.cpp
+
+# Run
+./bench_xxx
+```
+
+### 6.4 Measured Results (ROCm 7.13, gfx1200, RX 9060 XT)
+
+```
+Benchmark              Tier    TOPs    IPC     vs K0
+bench_peak_unified     K0       518   0.089    1.00×
+bench_peak_unified     K6       952   0.163    1.84×
+bench_hash_stagger     K6+     1386   0.238    2.68×
+bench_persistent*      K8/K9   4326   0.742    8.35×
+  * Requires optimized LLVM 23 (WMMA256b + SISchedule + TargetParser patches)
+```

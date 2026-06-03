@@ -28,7 +28,7 @@ static constexpr double TH=5306.0;
 // Shutdown: host sets cnt to negative value.
 __global__ __launch_bounds__(32,2)
 void k_persistent(int32_t*C,const int32_t*A,const int32_t*B,
-                  int L,volatile int* cnt,volatile int* done){
+                  int L,volatile int* cnt, volatile int* flag, volatile int* done){
     int my_work;
     int base=0;
     while(true){
@@ -54,7 +54,8 @@ void k_persistent(int32_t*C,const int32_t*A,const int32_t*B,
         alignas(32)int32_t ac[16][8]={};
         const rocwmma::SwmmacARegsT& ra=*reinterpret_cast<const rocwmma::SwmmacARegsT*>(A+w*2);
         const rocwmma::SwmmacBRegsT& rb=*reinterpret_cast<const rocwmma::SwmmacBRegsT*>(bt);
-        for(int i=0;i<L;++i){#pragma unroll
+        for(int i=0;i<L;++i){
+#pragma unroll
             for(int cc=0;cc<16;++cc){rocwmma::SwmmacAccumT& rc=*reinterpret_cast<rocwmma::SwmmacAccumT*>(ac[cc]);rc=rocwmma::SwmmacI4::exec(ra,rb,rc,0);}
         }
         for(int cc=0;cc<16;++cc)for(int j=0;j<8;++j)C[(w*16+cc)*8+j]=ac[cc][j];
