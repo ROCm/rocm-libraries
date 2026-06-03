@@ -1,28 +1,30 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# hipDNN benchmark smoke gate (ALMIOPEN-1848) — reusable workflow.
+# hipDNN tool CI (ALMIOPEN-1848) — reusable workflow.
 #
 # Invoked as a job from therock-ci-linux.yml, AFTER therock-build-linux, so it
 # runs inside the SAME therock-ci run that built the hipDNN artifacts. That is the
-# whole point of this shape: the benchmark installs the PR's OWN freshly-built
-# ROCm by `github.run_id` (install_rocm_from_artifacts --run-id) — no cross-run
-# artifact resolution, no slice-aware run-id scan. hipDNN is built CONDITIONALLY
+# whole point of this shape: it installs the PR's OWN freshly-built ROCm by
+# `github.run_id` (install_rocm_from_artifacts --run-id) — no cross-run artifact
+# resolution, no slice-aware run-id scan. hipDNN is built CONDITIONALLY
 # (therock_configure_ci only builds changed subtrees), but the caller gates this
 # job on the build matrix actually carrying hipDNN (projects_to_test contains
 # "hipdnn") and on the gfx94X-dcgpu family, so it runs only when there are hipDNN
-# artifacts in this very run to benchmark.
+# artifacts in this very run to exercise.
 #
-# Smoke/health gate only: install the prebuilt hipdnn_frontend wheel from the
-# --tests slice, run dnn_benchmarking over the committed sample graphs on a gfx942
-# GPU, and fail ONLY if the tool itself breaks (non-zero exit, zero passes, or any
-# errored combination). It does NOT validate performance or correctness.
+# Exercises the hipDNN python tools against the prebuilt artifacts on a gfx942 GPU:
+#   * dnn-benchmarking pytest suite (GPU tests run for real; CUDA/slow excluded)
+#   * dnn-convert-shapes pytest suite (CPU-only)
+#   * dnn_benchmarking smoke run over the committed sample graphs, gated on the
+#     tool running end-to-end (non-zero exit, zero passes, or any errored
+#     combination fails). It does NOT validate performance or correctness.
 #
 # Fork policy is owned by the caller (therock-ci): this reusable workflow never
 # defines its own pull_request trigger, so untrusted fork code only reaches the
 # GPU runner if the parent pipeline already admitted it.
 
-name: hipDNN Benchmark CI
+name: hipDNN Tool CI
 
 on:
   workflow_call:
@@ -73,7 +75,10 @@ jobs:
       # The artifacts to install are THIS run's own build outputs.
       RUN_GITHUB_REPO: ${{ github.repository }}
       ARTIFACT_RUN_ID: ${{ github.run_id }}
-      GRAPH_GLOB: projects/hipdnn/tools/dnn-benchmarking/Workloads/*.tar.gz
+      # Committed sample graphs, NOT the DVC Workloads suite: this is a tool-health
+      # smoke gate, so a handful of small graphs keeps it fast. The large DVC
+      # Workloads suite is for offline perf runs, not presubmit.
+      GRAPH_GLOB: projects/hipdnn/tools/dnn-benchmarking/graphs/*.json
       WARMUP: "1"
       ITERS: "1"
       VENV_DIR: ${{ github.workspace }}/.venv
@@ -105,16 +110,21 @@ jobs:
 
       - name: Set up Python venv + base deps
         run: |
+          # The no_rocm_image container ships python3 WITHOUT the python3-venv
+          # package, so `python3 -m venv` fails ("ensurepip is not available").
+          # Install it first (container runs as root) so venv creation gets a
+          # working ensurepip and the downstream bare `pip install` steps work.
+          apt-get update
+          apt-get install -y python3-venv
           python3 -m venv "$VENV_DIR"
           # shellcheck disable=SC1091
           source "$VENV_DIR/bin/activate"
           echo "$VENV_DIR/bin" >> "$GITHUB_PATH"
           echo "VIRTUAL_ENV=$VENV_DIR" >> "$GITHUB_ENV"
           pip install --upgrade pip
-          # dvc[s3] pulls the DVC-tracked benchmark graph suite from the anonymous
-          # public-read remote (s3://therock-dvc/rocm-libraries); it brings its own
-          # boto3/s3fs. boto3 is also needed by install_rocm_from_artifacts.py.
-          pip install boto3 cmake ninja "dvc[s3]"
+          # boto3 is needed by install_rocm_from_artifacts.py. The benchmark runs
+          # over committed sample graphs, so no dvc is needed.
+          pip install boto3 cmake ninja
 
       - name: Fetch prebuilt ROCm by run-id (this run's own build)
         run: |
@@ -189,31 +199,25 @@ jobs:
       - name: Install benchmark tool deps
         run: pip install -e rocm-libraries/projects/hipdnn/tools/dnn-benchmarking
 
-      - name: Pull DVC benchmark graph suite
-        working-directory: rocm-libraries
-        # The benchmark suite (Workloads/*.tar.gz) is DVC-tracked, not committed —
-        # only the *.tar.gz.dvc pointer files are in git. The remote
-        # (s3://therock-dvc/rocm-libraries) is anonymous public-read
-        # (allow_anonymous_login=true in .dvc/config), so no secrets/auth are needed
-        # on the runner. Pull the Workloads pointers explicitly (targeted, so an
-        # unrelated .dvc elsewhere can't drag in extra data), then assert at least one
-        # tarball materialized before benchmarking.
+      - name: Run dnn-benchmarking pytest suite
+        working-directory: rocm-libraries/projects/hipdnn/tools/dnn-benchmarking
+        # Full tool test suite on the GPU runner. GPU/amd tests run for real here;
+        # they self-skip via conftest if no GPU/plugin. Profiler-marker tests mock
+        # their binaries, so no rocprofv3/perf/rocprof-compute install is needed.
+        # Exclude 'nvidia' (CUDA-only) and 'slow' to keep the gate fast.
+        run: python -m pytest -ra -m "not nvidia and not slow"
+
+      - name: Run dnn-convert-shapes pytest suite
+        working-directory: rocm-libraries/projects/hipdnn/tools/dnn-convert-shapes
+        # CPU-only shape-converter tests; pytest ships in the package's [test] extra.
         run: |
-          dvc pull \
-            projects/hipdnn/tools/dnn-benchmarking/Workloads/bnorm_backward.tar.gz.dvc \
-            projects/hipdnn/tools/dnn-benchmarking/Workloads/bnorm_fwd.tar.gz.dvc \
-            projects/hipdnn/tools/dnn-benchmarking/Workloads/conv_dgrad.tar.gz.dvc \
-            projects/hipdnn/tools/dnn-benchmarking/Workloads/conv_fwd.tar.gz.dvc \
-            projects/hipdnn/tools/dnn-benchmarking/Workloads/conv_wgrad.tar.gz.dvc
-          shopt -s nullglob
-          tarballs=(projects/hipdnn/tools/dnn-benchmarking/Workloads/*.tar.gz)
-          if [ ${#tarballs[@]} -eq 0 ]; then
-            echo "::error::dvc pull produced no Workloads/*.tar.gz — DVC remote layout or auth changed"; exit 1
-          fi
-          echo "Materialized ${#tarballs[@]} workload tarball(s): ${tarballs[*]}"
+          pip install -e .[test]
+          python -m pytest -ra
 
       - name: Run benchmark smoke
         working-directory: rocm-libraries
+        # Runs over the committed sample graphs (graphs/*.json); no DVC pull. This
+        # is a fast tool-health gate, not a perf run.
         run: |
           test -d /opt/rocm/lib/hipdnn_plugins/engines || {
             echo "::error::plugin engine dir /opt/rocm/lib/hipdnn_plugins/engines missing — prebuilt artifact layout changed"; exit 1; }
