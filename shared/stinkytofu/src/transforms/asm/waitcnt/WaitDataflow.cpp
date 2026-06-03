@@ -64,6 +64,13 @@ bool isOnSamePipeline(const StinkyInstruction& a, const StinkyInstruction& b) {
     return classifyMemOp(a) == CK_DS && classifyMemOp(b) == CK_DS;
 }
 
+bool hasTokenOverlap(const std::vector<int>& a, const std::vector<int>& b) {
+    for (int t : a) {
+        if (std::find(b.begin(), b.end(), t) != b.end()) return true;
+    }
+    return false;
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -109,22 +116,38 @@ DataflowState WaitDataflow::mergeFromPredecessors(BasicBlock& bb) const {
     DataflowState entry;
     const auto& preds = bb.getPredecessors();
 
-    // Seed one PerPredQueue per pred per counter from that pred's collapsed
-    // exit state. Self-preds (back-edges) are seeded too: at fixed point
-    // the back-edge's exit is the loop body's true exit, which is what the
-    // header should see.
+    // Seed one PerPredQueue per pred per counter from each pred's exit
+    // queues, retagged so the optimizer can identify the direct pred for
+    // tail drains. Self-preds (back-edges) are seeded too: at fixed point
+    // the back-edge's exit is the loop body's true exit, which is what
+    // the header should see.
+    //
+    // Also forward each pred's PhiSummary table -- PHI summaries live with
+    // their defining block but must reach every downstream consumer. If
+    // the same PHI is summarised differently on different paths (transient
+    // during fixed-point iteration), keep the strictest (min) wait per
+    // counter so the consumer stays safe.
     for (BasicBlock* p : preds) {
         auto it = result.exitState.find(p);
         if (it == result.exitState.end()) continue;
         const auto& predState = it->second;
         for (int c = 0; c < CK_Count; ++c) {
-            // Pred's exit is a single collapsed PerPredQueue per counter.
-            // Carry it into bb tagged with the actual predecessor.
             for (const auto& predQ : predState.queues[c]) {
                 PerPredQueue q;
                 q.pred = p;
                 q.ops = predQ.ops;
                 entry.queues[c].push_back(std::move(q));
+            }
+        }
+        for (const auto& kv : predState.phiSummaries) {
+            auto [sit, inserted] = entry.phiSummaries.emplace(kv.first, kv.second);
+            if (!inserted) {
+                for (int c = 0; c < CK_Count; ++c) {
+                    int a = sit->second.waits[c];
+                    int b = kv.second.waits[c];
+                    if (b < 0) continue;
+                    if (a < 0 || b < a) sit->second.waits[c] = b;
+                }
             }
         }
     }
@@ -138,9 +161,13 @@ DataflowState WaitDataflow::mergeFromPredecessors(BasicBlock& bb) const {
 
         const auto& srcs = phi->getSources();
         PhiSummary summary;
+        // Per counter, the PHI's strictest wait is the smallest (countFrom
+        // - 1) across all constrained incoming paths. A consumer that
+        // reads the PHI must drain on every path that carries a memop, so
+        // the shallowest constrained path defines the bound.
         auto recordWait = [&](CounterKind c, int w) {
             if (w < 0) return;
-            if (summary.waits[c] == WaitCountSpec::kUnused || w > summary.waits[c]) {
+            if (summary.waits[c] == WaitCountSpec::kUnused || w < summary.waits[c]) {
                 summary.waits[c] = w;
             }
         };
@@ -265,20 +292,10 @@ void WaitDataflow::transferBlock(BasicBlock& bb, DataflowState& state) {
             if (required[c] == WaitCountSpec::kUnused || w < required[c]) required[c] = w;
         };
 
-        // Per-counter lookup of a single dep's strictest wait across all
-        // per-pred queues: max over preds where the dep is in flight.
-        auto perDepWait = [&](CounterKind c, StinkyInstruction* dep) -> int {
-            int best = -1;
-            for (const auto& q : state.queues[c]) {
-                int n = q.countFrom(dep);
-                if (n > 0) {
-                    int w = n - 1;
-                    if (w > best) best = w;
-                }
-            }
-            return best;
-        };
-
+        // For each src dep on counter @c c that appears in some per-pred
+        // queue, contribute its (countFrom - 1) wait via tightenRequired.
+        // The final required[c] is min over all (dep, pred) hits because
+        // the emitted wait must drain on every constrained path.
         for (StinkyInstruction* src : inst->getSources()) {
             if (src == nullptr) continue;
 
@@ -293,10 +310,15 @@ void WaitDataflow::transferBlock(BasicBlock& bb, DataflowState& state) {
 
             CounterKind c = classifyMemOp(*src);
             if (c == CK_Count) continue;
-            if (isOnSamePipeline(*src, *inst)) continue;
+            // No same-pipeline filter here: an SSA RAW edge (e.g. ds_store
+            // consuming ds_load's vreg output) needs the wait even though
+            // both live on the same hardware FIFO. Same-pipeline only
+            // skips ANTI-deps; see scanDsAntiDeps below.
 
-            int w = perDepWait(c, src);
-            if (w >= 0) tightenRequired(c, w);
+            for (const auto& q : state.queues[c]) {
+                int n = q.countFrom(src);
+                if (n > 0) tightenRequired(c, n - 1);
+            }
         }
 
         auto anyOpInFlight = [&](CounterKind c) {
@@ -306,10 +328,68 @@ void WaitDataflow::transferBlock(BasicBlock& bb, DataflowState& state) {
             return false;
         };
 
-        // Conservative MemTokenData fallbacks. The pseudo-reg UD chain can
-        // only express deps the implicit-dependency pass tagged; an
-        // untagged anchor or producer means we can't prove disjointness,
-        // so we force the matching counter to 0.
+        // WAR-on-LDS / barrier ordering: the SSA def-use chain captures
+        // RAW (consumer's src == producer) but NOT anti-dependencies. An
+        // LDS writer must wait for prior LDS readers on the same token,
+        // and a barrier must wait for any prior DS op on a matching
+        // token. Scan per-pred DS queues for token overlap and treat each
+        // hit as an extra DS dep that flows through tightenRequired.
+        //
+        // Same-pipeline pairs (ds_write writer vs ds_read reader) are
+        // skipped: the DS FIFO orders them in hardware.
+        //
+        // Conservative fallbacks live below: if either side lacks
+        // MemTokenData we cannot prove disjointness and force wait 0.
+        auto scanDsAntiDeps = [&](const StinkyInstruction& anchor,
+                                  const std::vector<int>& anchorTokens,
+                                  bool barrierMode) {
+            for (const auto& q : state.queues[CK_DS]) {
+                const int qsize = static_cast<int>(q.ops.size());
+                for (int idx = 0; idx < qsize; ++idx) {
+                    StinkyInstruction* op = q.ops[idx];
+                    if (op == inst) continue;
+                    // Barrier guards every DS op on a matching token; LDS
+                    // writer guards only readers/atomics.
+                    if (!barrierMode && !isDSRead(*op) && !isDSAtomic(*op)) continue;
+                    if (isOnSamePipeline(anchor, *op)) continue;
+                    auto* opTokens = op->getModifier<MemTokenData>();
+                    bool overlap = (opTokens == nullptr) ||
+                                   hasTokenOverlap(opTokens->tokens, anchorTokens);
+                    if (!overlap) continue;
+                    tightenRequired(CK_DS, qsize - idx - 1);
+                }
+            }
+        };
+
+        if (isLdsWriterAnchor(*inst)) {
+            const auto* tk = inst->getModifier<MemTokenData>();
+            if (tk != nullptr) scanDsAntiDeps(*inst, tk->tokens, /*barrierMode=*/false);
+        }
+        if (isBarrier(*inst)) {
+            const auto* tk = inst->getModifier<MemTokenData>();
+            if (tk != nullptr) scanDsAntiDeps(*inst, tk->tokens, /*barrierMode=*/true);
+        }
+
+        // Tensor-side conservative scan: any tensor_load_to_lds in flight
+        // that lacks MemTokenData cannot be proven disjoint from a tensor
+        // anchor, so treat it as an extra dep. Tagged overlaps are already
+        // covered by the SSA UD chain through LDS<token> pseudo-regs.
+        if (isTensorAnchor(*inst) && inst->getModifier<MemTokenData>() != nullptr) {
+            for (const auto& q : state.queues[CK_Tensor]) {
+                const int qsize = static_cast<int>(q.ops.size());
+                for (int idx = 0; idx < qsize; ++idx) {
+                    StinkyInstruction* op = q.ops[idx];
+                    if (op == inst) continue;
+                    if (op->getModifier<MemTokenData>() == nullptr) {
+                        tightenRequired(CK_Tensor, qsize - idx - 1);
+                    }
+                }
+            }
+        }
+
+        // Conservative MemTokenData fallbacks. An untagged anchor or
+        // untagged producer means we cannot prove disjointness, so we
+        // force the matching counter to 0.
         if (isTensorAnchor(*inst) && inst->getModifier<MemTokenData>() == nullptr &&
             anyOpInFlight(CK_Tensor)) {
             required[CK_Tensor] = 0;
@@ -361,11 +441,11 @@ void WaitDataflow::transferBlock(BasicBlock& bb, DataflowState& state) {
         }
     }
 
-    // Collapse per-pred queues into a single union representative for
-    // successors.
-    for (int c = 0; c < CK_Count; ++c) {
-        collapseToExitView(state.queues[c], &bb);
-    }
+    // Intentionally do NOT collapse per-pred queues at exit: a single
+    // union queue would lose per-pred position info and force downstream
+    // consumers to compute strictly conservative (over-deep) waits. Each
+    // successor's mergeFromPredecessors copies all queues across,
+    // retagging them as via-this-pred.
 }
 
 bool WaitDataflow::solve() {

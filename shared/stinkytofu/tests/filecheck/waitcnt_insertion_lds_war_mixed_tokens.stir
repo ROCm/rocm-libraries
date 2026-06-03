@@ -1,4 +1,4 @@
-# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyWaitCntInsertionPass --print-output
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
 #
 # StinkyWaitCntInsertionPass (gfx1250): WAR-on-LDS with mixed tokens.
 # Two ds_load_b64 with token 0 are followed by two ds_load_b64 with token 1,

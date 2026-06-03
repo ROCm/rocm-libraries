@@ -1,4 +1,4 @@
-# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyWaitCntInsertionPass --print-output
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
 #
 # CFG (tensor ops shown; cbranch is s_cbranch_scc1 to ^p_shallow when SCC0 set):
 #

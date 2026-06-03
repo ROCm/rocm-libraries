@@ -1,4 +1,4 @@
-# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyWaitCntInsertionPass --print-output
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
 #
 # StinkyWaitCntInsertionPass (gfx1250): conservative fallback at the
 # tensor-barrier matching site (Site C) when the barrier itself is

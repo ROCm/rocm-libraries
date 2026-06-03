@@ -1,4 +1,4 @@
-# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyWaitCntInsertionPass --print-output
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
 #
 # Five token-0 ds_load_tr16_b128 reads are followed by four token-1 reads
 # (these belong to a different LDS region and must NOT block the writer),
