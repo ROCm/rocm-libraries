@@ -4,12 +4,14 @@
 #include "EmbeddedInterpreter.hpp"
 
 #include <atomic>
+#include <cstdlib>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <mutex>
-#include <string>
 
-namespace py = pybind11;
+extern "C" {
+#include "port/micropython_embed.h"
+}
 
 namespace ck_dsl_provider {
 
@@ -17,51 +19,32 @@ namespace {
 
 std::once_flag _initFlag;
 std::atomic<unsigned> _initializationCount{0};
+std::atomic<bool> _initialized{false};
+
+// Process-lifetime GC heap. Sized generously for the JIT compile workload
+// (the conv spike peaked well under this); intentionally never freed.
+// TODO(perf): measure the real per-compile peak and/or expose as a provider
+// config knob instead of a fixed reservation.
+constexpr std::size_t kHeapBytes = 512u * 1024u * 1024u;
 
 void doInitialize() {
-    // Guard against another in-process embedder having initialised
-    // CPython before this plugin loaded. If the interpreter is already
-    // up, we cannot retroactively apply isolated config -- we use what
-    // is there.
-    if (Py_IsInitialized() == 0) {
-        PyConfig config;
-        PyConfig_InitIsolatedConfig(&config);
-        // Isolated config defaults to:
-        //   * use_environment = 0    (ignore PYTHONPATH / PYTHONHOME /
-        //                             PYTHONSTARTUP / PYTHONUSERBASE)
-        //   * user_site_directory = 0
-        //   * safe_path = 1          (do not auto-prepend the program
-        //                             directory to sys.path)
-        // The provider's required search paths are injected explicitly
-        // inside CompileServiceBridge::ctor after init.
-        PyStatus status = Py_InitializeFromConfig(&config);
-        PyConfig_Clear(&config);
-        if (PyStatus_Exception(status) != 0) {
-            std::string msg = "EmbeddedInterpreter: Py_InitializeFromConfig failed";
-            if (status.err_msg != nullptr) {
-                msg += std::string(": ") + status.err_msg;
-            }
-            throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                                                           msg);
-        }
-        // Intentionally never Py_Finalize() -- see header.
+    void* heap = std::malloc(kHeapBytes);
+    if (heap == nullptr) {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "EmbeddedInterpreter: failed to allocate MicroPython GC heap");
     }
-    _initializationCount.fetch_add(1, std::memory_order_relaxed);
+    // Record a stack top from this frame. Stack checking is disabled in the
+    // embed mpconfigport (see header), so the exact value is not load-bearing;
+    // mp_embed_init still requires the argument.
+    int stackTop = 0;
+    mp_embed_init(heap, kHeapBytes, &stackTop);
+    // Intentionally never mp_embed_deinit() -- see header.
 
-    try {
-        py::gil_scoped_acquire gil;
-        py::module_ sys = py::module_::import("sys");
-        std::string version = sys.attr("version").cast<std::string>();
-        // sys.executable is intentionally NOT logged: it leaks the
-        // host process's Python install path, which is mildly
-        // fingerprinty in shipped logs. The Python version alone is
-        // sufficient for diagnostic value.
-        HIPDNN_PLUGIN_LOG_INFO("EmbeddedInterpreter: Py_Initialize complete, Python=" << version);
-    } catch (const py::error_already_set& e) {
-        // Initialisation succeeded but introspection failed; log and
-        // carry on. The interpreter itself is up and usable.
-        HIPDNN_PLUGIN_LOG_WARN("EmbeddedInterpreter: post-init introspection failed: " << e.what());
-    }
+    _initialized.store(true, std::memory_order_release);
+    _initializationCount.fetch_add(1, std::memory_order_relaxed);
+    HIPDNN_PLUGIN_LOG_INFO("EmbeddedInterpreter: MicroPython embed init complete ("
+                           << (kHeapBytes >> 20) << " MiB heap)");
 }
 
 }  // namespace
@@ -71,11 +54,18 @@ void EmbeddedInterpreter::ensureInitialized() {
 }
 
 bool EmbeddedInterpreter::isInitialized() noexcept {
-    return Py_IsInitialized() != 0;
+    return _initialized.load(std::memory_order_acquire);
 }
 
 unsigned EmbeddedInterpreter::initializationCount() noexcept {
     return _initializationCount.load(std::memory_order_relaxed);
+}
+
+std::mutex& EmbeddedInterpreter::interpreterMutex() noexcept {
+    // Meyers singleton: one process-wide lock guarding the single MicroPython
+    // runtime state. Constructed on first use, before any bridge call.
+    static std::mutex mutex;
+    return mutex;
 }
 
 }  // namespace ck_dsl_provider
