@@ -49,7 +49,9 @@ if is_asan():
 # ---------------------------------------------------------------------------
 if int(SHARD_INDEX) == 1:
     install_root = Path(THEROCK_BIN_DIR).resolve().parent  # <output>/bin -> <output>
-    validator_dir = THEROCK_DIR / "rocm-libraries" / "projects" / "hipblaslt" / "scripts"
+    validator_dir = (
+        THEROCK_DIR / "rocm-libraries" / "projects" / "hipblaslt" / "scripts"
+    )
     # In case rocm-libraries is not checked out as a sibling (e.g. when
     # running this driver against a standalone hipblaslt build tree),
     # fall back to walking up from this file's location.
@@ -58,6 +60,7 @@ if int(SHARD_INDEX) == 1:
     if (validator_dir / "validate_library_layout.py").is_file():
         sys.path.insert(0, str(validator_dir))
         import validate_library_layout
+
         logging.info(f"++ Layout check on {install_root}")
         violations = validate_library_layout.validate(install_root)
         if violations:
