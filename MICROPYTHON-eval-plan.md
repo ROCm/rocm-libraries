@@ -399,6 +399,27 @@ Windows (MSVC/clang) into the DLL; C++ `amd_comgr.dll` calls under Windows HIP S
 build (`mpy-cross` + freeze the transformed bundle); `__file__` absent under frozen → embed/guard
 `arch_specs.json` (already noted in [[ck-dsl-embed-cpython]]).
 
+### Phase 2 integration progress (Arch A; both Linux AND Windows use Arch A)
+**Embed-port toolchain PROVEN on this box (2026-06-01):** `mpy-cross` builds; the stock
+`ports/embed` example builds + runs. The embed port is bare but `py/` already provides
+`struct`/`collections`/`math`/`io`/`array`/`property`/`generator`; **only `re` + `json` must be
+added from `extmod/`** (`embed.mk` copies just `py/` + `modplatform.h` + gchelper — not extmod, no
+filesystem import → modules must be **frozen** in). `FROZEN_MANIFEST` (mpy-cross + makemanifest) is
+supported by the embed build (mkrules.mk).
+
+Integration build steps (foundation → provider):
+1. ✅ embed toolchain (mpy-cross + bare embed example build/run).
+2. `spike/mp2/`: mpconfigport.h at `EXTRA_FEATURES` + enable re/json/float/longint/property/etc.;
+   add `extmod/modre.c`+`modjson.c`; `manifest.py` freezing the shims + the transformed conv
+   codegen closure (~34 ck modules + 6 shims); `__file__`-free arch_specs (freeze the JSON or embed).
+3. C glue (`py/runtime.h`): import the frozen compile entry, call it with the conv payload (build
+   `mp_obj_t` dict), get back the **LLVM IR text** (+ grid/block/arg metadata); error translation.
+4. C++ comgr wrapper: IR text → HSACO via `amd_comgr` (cross-platform; same 3-stage chain as the
+   ffi spike, but in C++). Validate ELF. → standalone Arch-A end-to-end proof (== Windows-ready form).
+5. Fold into the provider: replace EmbeddedInterpreter/CompileServiceBridge/PythonError with the
+   MicroPython embed + glue; swap CMake off Python3/pybind11; `compile_service.compile` returns IR
+   text; wire C++ comgr → existing HipModule/launch; run conv on gfx1151 vs CpuFpReferenceConvolution.
+
 ### Remaining for the conv POC (post-confidence) — built on Arch A
 1. (Optional) sort the emitted declares in `core/lower_llvm.py` for byte-identical IR *text* — NOT
    needed for HSACO equality (proven byte-identical above).
