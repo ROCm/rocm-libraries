@@ -57,81 +57,17 @@ SetupDescriptors2D(const Shape2D& s, miopenDataType_t dtype, Descriptors& d)
     return SetupDescriptorsImpl<2>(x_dims, w_dims, dtype, d);
 }
 
-// Known CK applicability gaps for 2D large-stride shapes (gfx942).
-// Two failure modes are merged into these lists:
-//
-//   * Sub-INT_MAX shapes where CK has a tile-selection miss for a particular
-//     dtype/shape (pre-existing CK gap, unrelated to large-tensor work).
-//   * Strides >INT_MAX shapes where the filter (correctly) restricts CK
-//     selection to *_Large_Tensor instances. For Fwd, registered Fwd
-//     large-tensor instances cover most shapes but miss the very largest
-//     (16384x16384) across all dtypes. For BwdData and Wrw, no large-tensor
-//     instances are registered yet, so the filter returns an empty candidate
-//     set for every >INT_MAX shape.
-//
-// Each Run* helper skips before calling CompileSolution when is_known_failing
-// returns true (see conv_api_solution_count_large_stride_common.hpp for the
-// rationale). Stale entries here produce only SKIPPED lines in the run
-// summary, never failures, so CK integration is non-blocking -- trim
-// opportunistically as CK adds large-tensor instances.
-bool IsFwdKnownFailing2D(miopenDataType_t dtype, const Shape2D& s)
-{
-    if(s.c != 96 || s.h != s.w || s.n != 1)
-        return false;
-    // Square 14336 fails for all dtypes (existing); square 16384 newly fails
-    // for all dtypes after the filter narrowed CK selection to large_tensor
-    // instances and no registered tile config covers it.
-    if(s.h == 14336 || s.h == 16384)
-        return true;
-    if(dtype == miopenFloat && s.h >= 10240 && s.h <= 14336)
-        return true;
-    return false;
-}
-
-bool IsBwdDataKnownFailing2D(miopenDataType_t /*dtype*/, const Shape2D& s)
-{
-    if(s.n == 1 && s.c == 96 && ((s.h == 4096 && s.w == 8192) || (s.h == 8192 && s.w == 4096)))
-        return true;
-    if(s.c != 96 || s.h != s.w)
-        return false;
-    // Square c=96 shapes: pre-existing 4096..14336 tile-gap range, extended
-    // through 16384 because the large-tensor filter blocks all >INT_MAX
-    // BwdData shapes (no Bwd large-tensor CK instances registered yet).
-    return s.h >= 4096 && s.h <= 16384;
-}
-
-bool IsWrwKnownFailing2D(miopenDataType_t dtype, const Shape2D& s)
-{
-    if(s.c != 96)
-        return false;
-    // Large-tensor filter blocks Wrw at every >INT_MAX shape across all
-    // dtypes. Squares with h >= 4736 are all >INT_MAX (96*h*w > 2^31).
-    if(s.h == s.w && s.h >= 4736 && s.h <= 16384)
-        return true;
-    // Same for the non-square {1,96,8192,4096} and {1,96,4096,8192} (both >INT_MAX).
-    if(s.n == 1 && ((s.h == 8192 && s.w == 4096) || (s.h == 4096 && s.w == 8192)))
-        return true;
-    // FP32 has additional pre-existing tile gaps at sub-INT_MAX squares
-    // (4096, 4608) — these would pass for FP16/BFP16.
-    if(dtype == miopenFloat && s.h == s.w && s.h >= 4096 && s.h < 4736)
-        return true;
-    return false;
-}
-
 void RunFwd(const Shape2D& s, miopenDataType_t dtype)
 {
-    RunCompileFwd(
-        s, dtype, SetupDescriptors2D, IsFwdKnownFailing2D, "ConvHipImplicitGemmGroupFwdXdlops");
+    RunCompileFwd(s, dtype, SetupDescriptors2D, "ConvHipImplicitGemmGroupFwdXdlops");
 }
 void RunBwdData(const Shape2D& s, miopenDataType_t dtype)
 {
-    RunCompileBwdData(
-        s, dtype, SetupDescriptors2D, IsBwdDataKnownFailing2D, "ConvHipImplicitGemmGroupBwdXdlops");
+    RunCompileBwdData(s, dtype, SetupDescriptors2D, "ConvHipImplicitGemmGroupBwdXdlops");
 }
 void RunWrw(const Shape2D& s, miopenDataType_t dtype)
 {
-    RunCompileWrw(
-        s, dtype, SetupDescriptors2D, IsWrwKnownFailing2D, "ConvHipImplicitGemmGroupWrwXdlops");
+    RunCompileWrw(s, dtype, SetupDescriptors2D, "ConvHipImplicitGemmGroupWrwXdlops");
 }
 
 class GPU_ConvApi_SolutionCount2DLargeStride_FP16 : public ::testing::TestWithParam<Shape2D>

@@ -8,16 +8,6 @@
 // descriptor lifecycle, gtest plumbing, and the GTEST_SKIP pattern below are
 // identical, so they live here.
 //
-// Why skip-early for known-failing shapes:
-//   The IsKnownFailing* lists in the .cpp files enumerate shapes that CK
-//   currently rejects (most are >INT_MAX where no large-tensor instance is
-//   registered yet). The helpers skip these shapes *before* calling
-//   CompileSolution, so the failing CK code path never runs and its error
-//   logs stay out of test output. The lists are non-blocking documentation:
-//   when upstream CK fills a gap, the corresponding entry simply becomes
-//   stale and that shape continues to report SKIPPED (never FAILED), so CK
-//   integration cannot break the build. Trim stale entries opportunistically.
-//
 // WrappingPrinter: gtest's default summary lists SKIPPED test names without
 // their GTEST_SKIP() messages. We wrap the default pretty-printer and replace
 // only OnTestIterationEnd so the summary appends each reason inline:
@@ -253,36 +243,30 @@ SetupDescriptorsImpl(const int* x_dims, const int* w_dims, miopenDataType_t dtyp
     return ::testing::AssertionSuccess();
 }
 
-// CI-covered architectures for these sweeps. IsKnownFailing* lists below were
-// hand-tuned for gfx942 CK tile coverage; we only run on arches whose CK
-// coverage has been (or will be) characterized in CI, so non-allowlisted GPUs
-// SKIP instead of emitting stale FAILED lines.
+// CI-covered architectures for these sweeps. We only run on arches whose CK
+// large-tensor tile coverage has been characterized in CI, so non-allowlisted
+// GPUs SKIP instead of emitting stale FAILED lines. gfx115X (RDNA 3.5) is
+// intentionally omitted: the CK *Xdlops solvers target CDNA MFMA, and a
+// gfx1151 CI run produced 26 failures across sub- and >INT_MAX shapes -- re-add
+// once gfx115X CK coverage is characterized.
 inline bool IsArchInCiAllowlist()
 {
-    return IsTestSupportedByDevice(Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950 | Gpu::gfx115X);
+    return IsTestSupportedByDevice(Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950);
 }
 
-// Run* helpers -- templated on Shape, SetupFn (per-rank descriptor wrapper),
-// and KnownFailingFn (per-direction predicate). Direction-specific Compile
-// API call is the only thing that varies between the three.
-//
-// Known-failing shapes are skipped *before* descriptor setup and the
-// CompileSolution call, so the failing CK code path never runs. Diagnostic
-// note: the test framework's parameter machinery prints the shape, so we
-// keep the skip/failure messages terse (solver name only).
+// Run* helpers -- templated on Shape and SetupFn (per-rank descriptor wrapper).
+// Direction-specific Compile API call is the only thing that varies between the
+// three. Diagnostic note: the test framework's parameter machinery prints the
+// shape, so we keep the skip/failure messages terse (solver name only).
 
-template <typename Shape, typename SetupFn, typename KnownFailingFn>
+template <typename Shape, typename SetupFn>
 void RunCompileFwd(const Shape& s,
                    miopenDataType_t dtype,
                    SetupFn setup_fn,
-                   KnownFailingFn is_known_failing,
                    const char* solver_name)
 {
     if(!IsArchInCiAllowlist())
-        GTEST_SKIP() << "Architecture not in CI allowlist (gfx90A/gfx94X/gfx950/gfx115X)";
-
-    if(is_known_failing(dtype, s))
-        GTEST_SKIP() << solver_name << " known-failing (CK applicability gap)";
+        GTEST_SKIP() << "Architecture not in CI allowlist (gfx90A/gfx94X/gfx950)";
 
     Descriptors d;
     ASSERT_TRUE(setup_fn(s, dtype, d));
@@ -292,18 +276,14 @@ void RunCompileFwd(const Shape& s,
     EXPECT_EQ(status, miopenStatusSuccess) << solver_name << " not applicable/compilable";
 }
 
-template <typename Shape, typename SetupFn, typename KnownFailingFn>
+template <typename Shape, typename SetupFn>
 void RunCompileBwdData(const Shape& s,
                        miopenDataType_t dtype,
                        SetupFn setup_fn,
-                       KnownFailingFn is_known_failing,
                        const char* solver_name)
 {
     if(!IsArchInCiAllowlist())
-        GTEST_SKIP() << "Architecture not in CI allowlist (gfx90A/gfx94X/gfx950/gfx115X)";
-
-    if(is_known_failing(dtype, s))
-        GTEST_SKIP() << solver_name << " known-failing (CK applicability gap)";
+        GTEST_SKIP() << "Architecture not in CI allowlist (gfx90A/gfx94X/gfx950)";
 
     Descriptors d;
     ASSERT_TRUE(setup_fn(s, dtype, d));
@@ -314,18 +294,14 @@ void RunCompileBwdData(const Shape& s,
     EXPECT_EQ(status, miopenStatusSuccess) << solver_name << " not applicable/compilable";
 }
 
-template <typename Shape, typename SetupFn, typename KnownFailingFn>
+template <typename Shape, typename SetupFn>
 void RunCompileWrw(const Shape& s,
                    miopenDataType_t dtype,
                    SetupFn setup_fn,
-                   KnownFailingFn is_known_failing,
                    const char* solver_name)
 {
     if(!IsArchInCiAllowlist())
-        GTEST_SKIP() << "Architecture not in CI allowlist (gfx90A/gfx94X/gfx950/gfx115X)";
-
-    if(is_known_failing(dtype, s))
-        GTEST_SKIP() << solver_name << " known-failing (CK applicability gap)";
+        GTEST_SKIP() << "Architecture not in CI allowlist (gfx90A/gfx94X/gfx950)";
 
     Descriptors d;
     ASSERT_TRUE(setup_fn(s, dtype, d));

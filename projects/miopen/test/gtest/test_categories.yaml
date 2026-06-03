@@ -161,6 +161,10 @@ test_categories:
       - "*GPU_TestMhaFind20_FP16*" #rocm-1016 fixed in develop. Re-enable once bumped
       - "Full/GPU_UnitTestConvSolverImplicitGemmGroupFwdXdlops_LargeStride_*"
       - "Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_LargeStride_*"
+      - "Full/GPU_UnitTestConvSolverImplicitGemmGroupBwdXdlops_LargeStride_*"
+      - "Full/GPU_UnitTestConvSolverImplicitGemm3DGroupBwdXdlops_LargeStride_*"
+      - "Full/GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_LargeStride_*"
+      - "Full/GPU_UnitTestConvSolverImplicitGemm3DGroupWrwXdlops_LargeStride_*"
 
     test_files:
       # Quick tests

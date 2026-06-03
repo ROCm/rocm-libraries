@@ -44,9 +44,9 @@ template <TestDataType type>
 miopen::unit_tests::UnitTestConvSolverParams GetTestParams()
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-    // Restricted to gfx90A and gfx94X: covered by CI and manually qualified
-    // for the large-stride kernel-launch path on this shape.
-    Gpu supportedDevices = Gpu::gfx90A | Gpu::gfx94X;
+    // Restricted to gfx90A, gfx94X, and gfx950: covered by CI and manually
+    // qualified for the large-stride kernel-launch path on this shape.
+    Gpu supportedDevices = Gpu::gfx90A | Gpu::gfx94X | Gpu::gfx950;
 #else
     Gpu supportedDevices = Gpu::None;
 #endif
