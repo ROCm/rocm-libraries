@@ -506,7 +506,7 @@ def _resolve_conv_op(spec: ImplicitGemmConvSpec, arch: str):
 # ---------------------------------------------------------------------
 
 
-def make_a_descriptor(p: ConvProblem) -> TensorDescriptor:
+def make_a_descriptor(p: ConvProblem, decompose_m: bool = True) -> TensorDescriptor:
     """Build the (m, k) -> NHWC linear-offset descriptor for the input.
 
     DAG:
@@ -518,6 +518,15 @@ def make_a_descriptor(p: ConvProblem) -> TensorDescriptor:
       + pad('r' lo=0 hi=R):              boundary check
       + pad('s' lo=0 hi=S):              boundary check
 
+    When ``decompose_m`` is ``False`` the leading ``unmerge('m' -> n, ho, wo)``
+    is dropped and the user-facing upper coords become ``(n, ho, wo, k)``
+    directly. This is a strict win for callers that already hold ``(ho, wo)``
+    cheaply (e.g. computed via shift/mask from the tile row): the default
+    chain would re-decompose ``m = ho*Wo + wo`` back into ``(n, ho, wo)`` via
+    two magic divisions (~10 VALU per A coord) — a pure round-trip. Feeding
+    ``(n, ho, wo)`` straight in produces a bit-identical offset while skipping
+    both the caller-side flatten and the descriptor-side magic unmerge.
+
     The two `embed` transforms encode the convolution affine map
     `hi = ho*sH - pH + r*dH` and `wi = wo*sW - pW + s*dW`, with the
     convolution boundary check baked into the descriptor's validity
@@ -528,8 +537,12 @@ def make_a_descriptor(p: ConvProblem) -> TensorDescriptor:
     valid-looking offsets that *cross* into adjacent KRSC rows and
     blend wrong weights into the accumulator.
     """
-    transforms = [
-        unmerge_magic(upper="m", into=["n", "ho", "wo"], dims=[p.N, p.Ho, p.Wo]),
+    transforms = []
+    if decompose_m:
+        transforms.append(
+            unmerge_magic(upper="m", into=["n", "ho", "wo"], dims=[p.N, p.Ho, p.Wo])
+        )
+    transforms += [
         embed(
             upper=["ho", "r"],
             into="hi",
@@ -719,6 +732,9 @@ def build_implicit_gemm_conv(
     arch: str = "gfx950",
     extra_params: Optional[Callable[[IRBuilder], object]] = None,
     m_index_fn: Optional[Callable[[IRBuilder, Value, WarpGrid], Value]] = None,
+    a_mhw_index_fn: Optional[
+        Callable[[IRBuilder, Value, WarpGrid], Tuple[Value, Value, Value]]
+    ] = None,
     input_cache_setup: Optional[
         Callable[[IRBuilder, ImplicitGemmConvSpec, WarpGrid, Value], object]
     ] = None,
@@ -916,7 +932,7 @@ def build_implicit_gemm_conv(
     # The two descriptors used for global loads. The A descriptor is
     # the conv-coord-transform DAG; B is a simple naive (KRSC) +
     # unmerge for K_gemm.
-    A_desc = make_a_descriptor(p)
+    A_desc = make_a_descriptor(p, decompose_m=(a_mhw_index_fn is None))
     B_desc = make_b_descriptor(p)
 
     # CK Tile-style buffer views over A / B / D. ``make_buffer_resource``
@@ -944,12 +960,17 @@ def build_implicit_gemm_conv(
     # coordinate system. The descriptor returns
     # `(element_offset, valid_predicate)`.
     def a_descriptor(b_: IRBuilder, row: Value, col: Value):
+        k_val = b_.add(k_off_capture[0], col)
+        if a_mhw_index_fn is not None:
+            # Decomposed A descriptor: feed (n, ho, wo) straight in, skipping
+            # the m-flatten -> magic-unmerge round-trip (see make_a_descriptor).
+            n_v, ho_v, wo_v = a_mhw_index_fn(b_, row, grid)
+            return A_desc.offset(b_, n=n_v, ho=ho_v, wo=wo_v, k=k_val)
         m_val = (
             m_index_fn(b_, row, grid)
             if m_index_fn is not None
             else b_.add(block_m_off_v, row)
         )
-        k_val = b_.add(k_off_capture[0], col)
         return A_desc.offset(b_, m=m_val, k=k_val)
 
     def b_descriptor(b_: IRBuilder, row: Value, col: Value):

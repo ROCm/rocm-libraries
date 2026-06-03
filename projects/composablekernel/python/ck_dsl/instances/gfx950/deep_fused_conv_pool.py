@@ -961,6 +961,36 @@ def build_deep_fused_conv_pool(spec: Gfx950DeepFusedConvPoolSpec, arch: str = "g
         )
         return b.add(b.mul(global_h, b.const_i32(c.Wo)), global_w)
 
+    def a_mhw_index_fn(b: IRBuilder, row: Value, grid: WarpGrid):
+        """Conv0 A-coord callback: tile-local row -> (n, ho, wo) directly.
+
+        Returns the same (global_h, global_w) that ``m_index_fn`` computes via
+        shift/mask, but as separate coords so the decomposed A descriptor can
+        consume them without re-deriving them. This bypasses the m-flatten here
+        (mul+add) and the descriptor's m -> (n, ho, wo) magic unmerge (~10 VALU
+        per A coord, two magic divisions by Wo and Ho). N==1 for this problem,
+        so n is the constant 0. Bit-identical to the flattened m path.
+        """
+        p = spec.problem
+        conv_tile_w = spec.pool_tile_w * p.pool_stride_w
+        if conv_tile_w > 0 and (conv_tile_w & (conv_tile_w - 1)) == 0:
+            shift = (conv_tile_w - 1).bit_length()
+            local_h = b.lshr(row, b.const_i32(shift))
+            local_w = b.land(row, b.const_i32(conv_tile_w - 1))
+        else:
+            c_conv_tile_w = b.const_i32(conv_tile_w)
+            local_h = b.div(row, c_conv_tile_w)
+            local_w = b.mod(row, c_conv_tile_w)
+        global_h = b.add(
+            b.mul(b.block_id_y(), b.const_i32(spec.pool_tile_h * p.pool_stride_h)),
+            local_h,
+        )
+        global_w = b.add(
+            b.mul(b.block_id_z(), b.const_i32(spec.pool_tile_w * p.pool_stride_w)),
+            local_w,
+        )
+        return b.const_i32(0), global_h, global_w
+
     def setup_input_cache(
         b: IRBuilder, conv_spec_: ImplicitGemmConvSpec, grid: WarpGrid, a_rsrc
     ):
@@ -1044,6 +1074,7 @@ def build_deep_fused_conv_pool(spec: Gfx950DeepFusedConvPoolSpec, arch: str = "g
         arch=arch,
         extra_params=extra_params,
         m_index_fn=m_index_fn,
+        a_mhw_index_fn=a_mhw_index_fn,
         input_cache_setup=(
             setup_input_cache
             if (spec.cache_input_footprint or spec.direct_conv0_from_input_cache)
