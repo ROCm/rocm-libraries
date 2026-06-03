@@ -44,25 +44,57 @@ struct is_std_array<std::array<T, N>> : std::true_type
 };
 
 /**
- * @brief calculates the default strides for a given Discrete Fourier transform (observing row-major
- * convention by default), lower/upper bounds version.
+ * @brief calculates the default strides for a given discrete Fourier transform (observing row-major
+ * convention by default), lower/upper bounds version.  This function assumes 
  */
 template <typename C, std::enable_if_t<std::is_integral_v<typename C::value_type>, bool> = true>
-static C default_strides(fft_transform_type                        dft_type,
-                         fft_result_placement                      placement,
-                         fft_io                                    io,
-                         const C&                                  lower,
-                         const C&                                  upper,
-                         const std::optional<std::vector<size_t>>& dim_order = std::nullopt)
+static C default_brick_strides(fft_transform_type                        dft_type,
+                               fft_result_placement                      placement,
+                               fft_io                                    io,
+                               const C&                                  length,
+                               const C&                                  lower,
+                               const C&                                  upper,
+                               const std::optional<std::vector<size_t>>& dim_order = std::nullopt)
 {
-    if(lower.size() != upper.size())
-        throw std::invalid_argument("Lowers and uppers must be the same length");
+    if(lower.size() != upper.size() || lower.size() != length.size())
+        throw std::invalid_argument("Lowers, uppers, and length must have the same size");
 
-    C lengths;
-    for(size_t i = 0; i < lower.size(); ++i)
-        lengths.push_back(upper[i] - lower[i]);
+    if(length.size() == 0)
+        return {};
+    
+    // The data length may be less than the length if we have Hermitian-symmetric data.
+    C datalength = length;
+    const bool ishermitian = (dft_type == fft_transform_type_real_forward && io == fft_io::fft_io_out) ||
+        (dft_type == fft_transform_type_real_inverse && io == fft_io::fft_io_in);
+    if(ishermitian)
+        datalength[length.size() - 1] = datalength[length.size() - 1] / 2 + 1;
+        
+    // Validate the lower/upper/data-length configuration:
+    for(size_t idx = 0; idx < lower.size(); ++idx)
+    {
+        if(upper[idx] < lower[idx])
+            throw std::invalid_argument("Upper index is below lower index");
+        if(lower[idx] < 0 || upper[idx] < 0)
+            throw std::invalid_argument("Lower or upper index is negative");
+        if(lower[idx] > datalength[idx] || upper[idx]  > datalength[idx])
+            throw std::invalid_argument("Lower or upper index is past length");
+    }
+    
+    // If we are in-place real/complex, then the symmetrized dimension must be full-length.
+    if((dft_type ==  fft_transform_type_real_forward || dft_type ==  fft_transform_type_real_inverse)
+       && placement == fft_result_placement::fft_placement_inplace)
+    {
+        if(upper.back() - lower.back() != datalength.back())
+            throw std::invalid_argument("In-place real/complex transforms may not divide data along real-complex dimension");
+    }
 
-    return default_strides(dft_type, placement, io, lengths, dim_order);
+    C bricklength;
+    for(size_t idx = 0; idx < lower.size(); ++idx)
+    {        
+        bricklength.push_back(upper[idx] - lower[idx]);
+    }
+
+    return default_strides(dft_type, placement, io, bricklength, dim_order);
 }
 
 /**
