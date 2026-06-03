@@ -224,8 +224,8 @@ struct MmaLayoutTestKernel
             for(index_t vi = 0; vi < b_vec_size * MmaOp::BPackedSize; ++vi)
             {
                 // Same considerations as for A (but no compression), see comment above.
-                index_t v     = vi / MmaOp::APackedSize;
-                index_t v_rem = vi % MmaOp::APackedSize;
+                index_t v     = vi / MmaOp::BPackedSize;
+                index_t v_rem = vi % MmaOp::BPackedSize;
                 auto b_coords = BRegMap::calc_matrix_indices_from_lane_vector(lane, vi);
 
                 if(b_coords[0] == n && b_coords[1] == k)

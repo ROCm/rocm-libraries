@@ -149,7 +149,6 @@ struct SparseMmaPipeline : public MmaPipelineBase<sparse::detail::getPipelineFla
 
     // We use these thread_buffer types internally in a number of places, because it allows us to
     // directly select the ext_vectors for individual MmaOp calls.
-    // using AThreadBufType = thread_buffer<typename MmaOp::AVecType, FragsM * FragsK>;
     using BThreadBufType = thread_buffer<typename MmaOp::BVecType, FragsN * FragsK>;
     using CThreadBufType = thread_buffer<typename MmaOp::CVecType, FragsM * FragsN>;
 
@@ -181,7 +180,7 @@ struct SparseMmaPipeline : public MmaPipelineBase<sparse::detail::getPipelineFla
     // ATransformResult is a big ext_vector plus idx, B and C are static_distributed tensors. Fix
     // later TODO.
     template <typename ATransformResult, typename BTensor, typename CTensor>
-    CK_TILE_DEVICE static void execImpl(ATransformResult& a, BTensor& b_tensor, CTensor& c_tensor)
+    CK_TILE_DEVICE static void execImpl(ATransformResult& a, BTensor& b, CTensor& c)
     {
         static_assert(
             detail::is_similiar_distributed_tensor_v<remove_cvref_t<CTensor>, CWarpTensor> &&
@@ -195,8 +194,8 @@ struct SparseMmaPipeline : public MmaPipelineBase<sparse::detail::getPipelineFla
         // Reinterpret the full compressed vector as per-fragment arrays
         auto* a_frags = ck_tile::bit_cast<FragAVecT(*)[FragsK]>(&a_compressed_whole);
 
-        auto& b_buf = reinterpret_cast<const BThreadBufType&>(b_tensor.get_thread_buffer());
-        auto& c_buf = reinterpret_cast<CThreadBufType&>(c_tensor.get_thread_buffer());
+        auto& b_buf = reinterpret_cast<const BThreadBufType&>(b);
+        auto& c_buf = reinterpret_cast<CThreadBufType&>(c);
 
         if constexpr(AccumPolicy == MmaAccumPolicy::ROW_MAJOR)
         {

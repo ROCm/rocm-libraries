@@ -402,9 +402,6 @@ constexpr auto get_compiler_target()
  * will always pick the *first* cmakelists target arch, so there will be issues when compiling for
  * multiple target architectures.
  */
-template <auto V>
-constexpr bool always_false = false;
-
 template <typename = void>
 static constexpr auto getCMakeCompilerTarget()
 {
@@ -441,11 +438,11 @@ static constexpr auto getCMakeCompilerTarget()
     }
     else
     {
-        static_assert(always_false<id>, "CK_CMAKE_TARGET_IDS is HOST or UNKNOWN!\n");
+        static_assert(always_false_v<decltype(id)>, "CK_CMAKE_TARGET_IDS[0] is HOST or UNKNOWN!\n");
         return amdgcn_target<>{};
     }
 #else
-    static_assert(0, "CK_CMAKE_TARGET_IDS was not made available!\n");
+    static_assert(0, "The CK_CMAKE_TARGET_IDS macro was not made available!\n");
     return amdgcn_target<>{};
 #endif
 }

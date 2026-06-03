@@ -131,9 +131,10 @@ static CK_TILE_DEVICE int32_t extract_fragment_idx(const SparseIdxPack<NumIdxWor
 
 /**
  * @class SparseCompressTransform
- * @brief Performs 2:4 structured sparsity compression to the vector v and produces an index mask.
- * @note  Returns a tuple of two. The first element is the vector v with the same scalar type but
- *        its size halved. The second element is the index mask.
+ * @brief Performs 2:4 structured sparsity compression on a static_distributed_tensor representing A
+ *        and produces an index mask.
+ * @note  Returns a tuple of two. The first element is an ext_vector containing all the compressed
+ *        elements. The second element is the index mask.
  */
 template <index_t CompressionRatio>
 struct SparseCompressTransform
@@ -160,8 +161,8 @@ struct SparseCompressTransform
     }
 
     // This function takes A in uncompressed form as a static_distributed tensor and performs an
-    // in-place compression, returning a big ext_vector. It would be a little bit cleaner if it
-    // returned a compressed static_distributed tensor, but this would require access to another
+    // in-place compression, returning a compressed ext_vector. It would be a little bit cleaner if
+    // it returned a compressed static_distributed tensor, but this would require access to another
     // Tile Distr encoding for the compressed one. This would have to be passed down, breaking the
     // MmaPipeline Base API, or calculated in place, which is a bit annoying. TODO.
     template <typename ATensor>

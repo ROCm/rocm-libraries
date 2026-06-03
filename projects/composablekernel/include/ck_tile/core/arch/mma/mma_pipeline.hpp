@@ -151,6 +151,10 @@ struct MmaPipelineBase
         }
         else
         {
+            // Return the unsupported exec. This should print a runtime warning. (amdgcn_mma.hpp)
+            // Code should not reach here, but HOST/DEVICE compile passes are
+            // weirdly intertwined and instead of having constexpr in the calling
+            // site (tests) we do this. See also changes by this commit.
             return Derived::MmaOp::exec({}, {}, {});
         }
     }
@@ -158,7 +162,7 @@ struct MmaPipelineBase
     // Entry point for dense and sparse operations. TODO: Add c_vec = a_vec * b_vec variant.
     // TODO: Parse params with WarpGemmParamsParser<>
     template <typename... Params, typename CTensor, typename ATensor, typename BTensor>
-    CK_TILE_DEVICE void operator()(CTensor& c, const ATensor& a, const BTensor& b)
+    CK_TILE_DEVICE void operator()(CTensor& c, ATensor& a, const BTensor& b) const
     {
         exec(a, b, c);
     }
@@ -202,7 +206,7 @@ struct MmaPipelineBase
         }
         else
         {
-            return Derived::MmaOp::exec({}, {}, {});
+            return Derived::MmaOp::exec({}, {}, {}); // Return unsupported exec. See comment above.
         }
     }
 

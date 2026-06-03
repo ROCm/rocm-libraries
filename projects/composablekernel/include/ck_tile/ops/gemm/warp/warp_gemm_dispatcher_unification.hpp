@@ -147,7 +147,6 @@ template <typename AType,
           bool IsScale16                     = false>
 struct UnificationDispatcher
 {
-    // static_assert(0);
     static_assert(!IsScale16); // TODO: We can't deal with scale16 yet.
 
     // TODO: The dispatcher currently determines whether microscaling intrinsics are requested based
@@ -195,8 +194,6 @@ struct UnificationDispatcher
                                      AttrNumAccessAV,
                                      AttrNumAccessBV>::Type;
 };
-
-// clang-format on
 } // namespace warp_gemm_dispatcher
 } // namespace impl
 } // namespace ck_tile

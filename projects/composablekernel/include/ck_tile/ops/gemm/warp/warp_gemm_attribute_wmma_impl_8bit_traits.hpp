@@ -4,7 +4,6 @@
 #pragma once
 
 #include "warp_gemm_attribute_wmma_impl_base_traits.hpp"
-#include "ck_tile/core.hpp"
 #include "warp_gemm_params.hpp"
 namespace ck_tile {
 

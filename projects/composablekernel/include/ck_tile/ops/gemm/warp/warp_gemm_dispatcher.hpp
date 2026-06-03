@@ -7,7 +7,6 @@
 #include "ck_tile/ops/gemm/warp/warp_gemm_dispatcher_unification.hpp"
 #include "ck_tile/ops/gemm/warp/warp_gemm.hpp"
 #include "ck_tile/ops/gemm/warp/warp_wmma_gemm.hpp"
-#include "ck_tile/core/arch/arch.hpp"
 
 namespace ck_tile {
 
