@@ -93,6 +93,7 @@ dev = [
     "pytest>=5.4.1",
     "pytest-xdist>=1.32.0",
     "pytest-cov",
+    "syrupy",
     "filelock",
     "invoke",
 ]
