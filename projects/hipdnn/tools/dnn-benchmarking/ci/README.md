@@ -20,16 +20,3 @@ It is **not** a performance or correctness gate; it only asserts the benchmark
 tool ran end-to-end without breaking.
 
 Unit tests: `tests/unit/ci/test_check_results.py` (CPU-only, no `gpu` marker).
-
-## `emit_provenance.py`
-
-Writes a `provenance.json` sidecar from GitHub Actions environment variables
-(commit SHA, PR number, run URL, TheRock artifact pin, GPU family, graph glob,
-warmup/iters). `results.json` describes the host/GPU/software environment but
-not the CI identity; the sidecar makes an archived result self-contained.
-
-```bash
-python3 ci/emit_provenance.py provenance.json
-```
-
-Missing env vars are recorded as `null` — provenance never blocks the job.

@@ -239,21 +239,6 @@ jobs:
         working-directory: rocm-libraries
         run: python3 projects/hipdnn/tools/dnn-benchmarking/ci/check_results.py results.json
 
-      - name: Emit provenance sidecar
-        if: always()
-        working-directory: rocm-libraries
-        env:
-          GH_PR_NUMBER: ${{ github.event.pull_request.number }}
-          AMDGPU_FAMILY: ${{ env.AMDGPU_FAMILY }}
-          AMDGPU_TARGETS: ${{ env.AMDGPU_TARGETS }}
-          GRAPH_GLOB: ${{ env.GRAPH_GLOB }}
-          WARMUP: ${{ env.WARMUP }}
-          ITERS: ${{ env.ITERS }}
-          THEROCK_REF: ${{ inputs.therock_ref }}
-          ARTIFACT_RUN_ID: ${{ env.ARTIFACT_RUN_ID }}
-          RUN_GITHUB_REPO: ${{ env.RUN_GITHUB_REPO }}
-        run: python3 projects/hipdnn/tools/dnn-benchmarking/ci/emit_provenance.py provenance.json
-
       - name: Upload benchmark artifacts
         if: always()
         uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
@@ -261,7 +246,6 @@ jobs:
           name: hipdnn-benchmark-results
           path: |
             rocm-libraries/results.json
-            rocm-libraries/provenance.json
             wheelhouse/*.whl
           if-no-files-found: warn
 
