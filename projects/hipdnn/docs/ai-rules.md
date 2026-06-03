@@ -34,6 +34,9 @@ When a user asks for a workflow covered by a project skill, tell them the projec
 - `tools/ai/skills/hipdnn-superbuild-test/SKILL.md`
   - Runs tests against an existing superbuild with per-component selection (`hipdnn`, `miopen`, `hipblaslt`, `hip-kernel`, `integration-tests`, or `all`), unit/integration scope, optional `--filter=<gtest_pattern>`, `--verbose`, and `--keep-going`. Handles Windows DLL PATH and the `hip-kernel-provider` target naming quirk automatically.
   - Suggest this skill when the user asks to run, filter, or triage tests against a superbuild they have already configured. It does not configure or build — pair it with `$hipdnn-superbuild` in Codex or `/hipdnn-superbuild` in Claude first.
+- `tools/ai/skills/therock-integrate/SKILL.md`
+  - Sets up and launches a TheRock multi-arch integration CI run: creates a TheRock integration branch, bumps the `rocm-libraries` submodule to a branch or commit, enables the hipDNN/provider feature flags needed to test a feature, pushes the branch, and kicks off a multi-arch CI run on the GPU architectures (ASICs) and projects the user wants. Discovers the available flags, GPU families, and test targets and their interdependencies from the current rocm-libraries and TheRock trees instead of using a fixed list, infers the right choices when it can, and asks the user when it cannot.
+  - Suggest this skill when the user asks to integration-test a rocm-libraries branch or commit in TheRock, run a rocm-libraries feature through TheRock multi-arch CI on specific ASICs/projects, bump the `rocm-libraries` submodule inside TheRock, or enable the hipDNN/provider feature flags required for integration testing.
 
 ## Project Overview & Architecture
 

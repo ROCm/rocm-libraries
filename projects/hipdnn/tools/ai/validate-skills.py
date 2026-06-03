@@ -133,6 +133,7 @@ def validate_skill(skill: Path) -> list[str]:
         "hipdnn-superbuild",
         "hipdnn-superbuild-test",
         "pr-summary",
+        "therock-integrate",
     }
     if skill.name in claude_commands:
         for field in REQUIRED_CLAUDE_COMMAND_FIELDS:

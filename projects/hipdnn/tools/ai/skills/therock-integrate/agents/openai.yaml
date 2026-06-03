@@ -1,0 +1,4 @@
+interface:
+  display_name: "TheRock Integrate"
+  short_description: "Integration branch, submodule bump, flags, and multi-arch CI launch"
+  default_prompt: "Use $therock-integrate to create a TheRock integration branch, bump the rocm-libraries submodule to a branch or commit, enable the feature flags needed to test it, and launch a multi-arch CI run on the ASICs and projects you want."
