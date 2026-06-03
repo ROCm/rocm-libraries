@@ -408,7 +408,12 @@ filesystem import → modules must be **frozen** in). `FROZEN_MANIFEST` (mpy-cro
 supported by the embed build (mkrules.mk).
 
 Integration build steps (foundation → provider):
-1. ✅ embed toolchain (mpy-cross + bare embed example build/run).
+1. embed toolchain — VERIFIED on this machine only (mpy-cross + bare embed example build+run), but
+   NOT a branch artifact: those builds live under the gitignored `spike/micropython/` clone, so
+   nothing is committed for this step. (Caveat: the committed G1a/G1b scripts also depend on the
+   gitignored MicroPython unix build + the generated `ckbundle/` — reproducing from a fresh checkout
+   needs a setup script, not yet written. TODO: commit `spike/setup.sh` (clone+build MicroPython,
+   build bundle) so the spike is reproducible.)
 2. `spike/mp2/`: mpconfigport.h at `EXTRA_FEATURES` + enable re/json/float/longint/property/etc.;
    add `extmod/modre.c`+`modjson.c`; `manifest.py` freezing the shims + the transformed conv
    codegen closure (~34 ck modules + 6 shims); `__file__`-free arch_specs (freeze the JSON or embed).
