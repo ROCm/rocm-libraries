@@ -43,8 +43,8 @@ ROCSOLVER_BEGIN_NAMESPACE
 /***************** Kernels/Device functions *******************************************/
 /**************************************************************************************/
 
-/***** Kernels to compute work vector *****/
-/******************************************/
+/***** Kernel to compute work vector *****/
+/*****************************************/
 template <int NB_X, typename T, typename U>
 ROCSOLVER_KERNEL void lahr2_computeW_kernel(const rocblas_int mm,
                                             const rocblas_int k,
@@ -128,8 +128,8 @@ ROCSOLVER_KERNEL void lahr2_computeW_kernel(const rocblas_int mm,
     }
 }
 
-/***** Kernels to compute column of Y *****/
-/******************************************/
+/***** Kernel to compute column of Y *****/
+/*****************************************/
 template <typename T, typename U>
 ROCSOLVER_KERNEL void lahr2_computeY_kernel(const rocblas_int mm,
                                             const rocblas_int k,
@@ -221,8 +221,6 @@ ROCSOLVER_KERNEL void lahr2_computeY_kernel(const rocblas_int mm,
         {
             // read x
             j = jj * totalthsc + idc;
-            // sx1 = (j < mm - k - c) ? x1[j] : 0;
-            // sx2 = (j < c) ? x2[j] : 0;
 
             // operation for all rows
             if(i < m && j < mm - k - c)
@@ -250,6 +248,82 @@ ROCSOLVER_KERNEL void lahr2_computeY_kernel(const rocblas_int mm,
     }
 }
 
+/***** Out-of-place TRMV kernel *****/
+/************************************/
+
+// (modified rocblas_trmvn_kernel from rocBLAS)
+template <rocblas_int DIM_X, rocblas_int DIM_Y, bool LOWER, bool UNIT, typename T, typename V, typename U1, typename U2, typename U3>
+ROCSOLVER_KERNEL void __launch_bounds__(DIM_X* DIM_Y)
+    lahr2_trmv_oop_kernel(rocblas_int n,
+                          V alpha,
+                          U1 AA,
+                          const rocblas_int shiftA,
+                          const rocblas_int lda,
+                          const rocblas_stride strideA,
+                          U2 xx,
+                          const rocblas_stride shiftX,
+                          const rocblas_int incx,
+                          const rocblas_stride strideX,
+                          V beta,
+                          U3 yy,
+                          const rocblas_stride shiftY,
+                          const rocblas_int incy,
+                          const rocblas_stride strideY)
+{
+    rocblas_int bid = hipBlockIdx_z;
+    rocblas_int tid = threadIdx.x + threadIdx.y * blockDim.x;
+
+    // tx corresponds to row in block, good for memory coalescing
+    // ty corresponds to column
+    rocblas_int tx = threadIdx.x;
+    rocblas_int ty = threadIdx.y;
+
+    rocblas_int row = blockIdx.x * DIM_X + tx;
+
+    // select batch instance
+    T a = load_scalar(alpha, bid, 0);
+    T b = load_scalar(beta, bid, 0);
+    T* A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
+    T* x = load_ptr_batch<T>(xx, bid, shiftX, strideX);
+    T* y = load_ptr_batch<T>(yy, bid, shiftY, strideY);
+
+    __shared__ T sdata[DIM_X * DIM_Y];
+    T res_A = 0;
+
+    // handle diagonal separately
+    if(ty == 0 && row < n)
+    {
+        if(UNIT)
+            res_A = x[row * incx];
+        else
+            res_A = A[row + row * lda] * x[row * incx];
+    }
+
+    // multiply and sum across columns
+    for(rocblas_int col = ty; col < n; col += DIM_Y)
+    {
+        if(row < n && ((!LOWER && col > row) || (LOWER && col < row)))
+            res_A += A[row + col * lda] * x[col * incx];
+    }
+
+    // move partial sum to shared memory to sum further
+    sdata[tx + ty * DIM_X] = res_A;
+
+    __syncthreads();
+
+    if(tid < DIM_X)
+    {
+        // sum DIM_Y elements to get result
+        for(rocblas_int i = 1; i < DIM_Y; i++)
+            sdata[tid] += sdata[tid + DIM_X * i];
+
+        if(row < n)
+            y[row * incy] = a * sdata[tid] + b * y[row * incy];
+    }
+}
+
+/***** Scale column of T and set diag kernel *****/
+/*************************************************/
 template <int MAX_THDS, typename T, typename I, typename U>
 ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS) lahr2_scale_set_tau(const I j,
                                                                       U FA,
@@ -488,15 +562,15 @@ rocblas_status rocsolver_lahr2_template(rocblas_handle handle,
                                 cast2constType<T>(scalars + 2), 0, A, shiftA + idx2D(k + j, j, lda),
                                 1, strideA, batch_count, (T**)work_workArr);
 
-            // w = V1 * w  (DTRMV lower no-trans unit, in-place on work_vec)
-            rocblasCall_trmv<T>(handle, rocblas_fill_lower, rocblas_operation_none,
-                                rocblas_diagonal_unit, j, A, shiftA + idx2D(k, 0, lda), lda,
-                                strideA, work_vec, 0, 1, stride_work, (T*)work_workArr, stride_work,
-                                batch_count);
-
-            // b1 -= w  (DAXPY with alpha = -1)
-            rocblasCall_axpy<T>(handle, j, cast2constType<T>(scalars), 0, work_vec, 0, 1,
-                                stride_work, A, shiftA + idx2D(k, j, lda), 1, strideA, batch_count);
+            // b2 -= V1 * w
+            constexpr int TRMV_DIM_X = 64;
+            constexpr int TRMV_DIM_Y = ROCSOLVER_ASAN_VALUE(4, 16);
+            ROCSOLVER_LAUNCH_KERNEL(
+                (lahr2_trmv_oop_kernel<TRMV_DIM_X, TRMV_DIM_Y, true, true, T>),
+                dim3((j - 1) / TRMV_DIM_X + 1, 1, batch_count), dim3(TRMV_DIM_X, TRMV_DIM_Y), 0,
+                stream, j, cast2constType<T>(scalars), A, shiftA + idx2D(k, 0, lda), lda, strideA,
+                work_vec, 0, 1, stride_work, cast2constType<T>(scalars + 2), A,
+                shiftA + idx2D(k, j, lda), 1, strideA);
 
             // Restore A(k+j-1, j-1) = EI saved from the previous iteration
             // LAPACK: A(K+I-1, I-1) = EI
