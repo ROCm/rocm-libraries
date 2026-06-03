@@ -204,13 +204,7 @@ class InstructionEmitter:
             return []
         
         if self.kernel.get("enableTDMA", False) and self.kernel.get("enableTDMB", False):
-            # Cap to the number of TDMs between consecutive barriers
-            # (scheduler inflates counts across PGR wraps).
-            numTDMTensors = sum(1 for t in ("A", "B")
-                               if self.kernel.get(f"enableTDM{t}", False))
-            numSubIterK = self.kernel.get("LoopIters", 2)
-            tdmPerBarrier = max(1, numTDMTensors // numSubIterK)
-            tdmCnt = min(counts.A + counts.B + counts.SA + counts.SB, tdmPerBarrier)
+            tdmCnt = counts.A + counts.B + counts.SA + counts.SB
             return [SWaitTensorcnt(tensorcnt=tdmCnt,
                                    comment=f"Wait TDM (tensor_load_to_lds): A={counts.A} B={counts.B} SA={counts.SA} SB={counts.SB}")]
 
