@@ -637,18 +637,22 @@ def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True):
       tileInfo:  TileInfo (for subtileSize, loadRatioGR, sharedVgprLROffset, tc)
       sId0:      Subtile row index (used for offset computation)
       subIterK:  subIterK index within the subtile (maps to mfmaC; subtileShape[0]=1 so mfmaR=0)
-      dstTile:   RegisterTileInfo — destination vgpr tile for the load
+      dstTile:   RegisterTileInfo \u2014 destination vgpr tile for the load
       swizzled:  If True, LDS uses swizzled subtile layout; if False, contiguous K-row layout
+
+  Returns a Module. For tiles with numRegs > 4 (e.g. FP8 8-VGPR tiles), emits
+  multiple ds_read_b128 instructions (one per 4 VGPRs), each using the next
+  sharedVgprLROffset entry.
   """
+  REGS_PER_DS_READ = tileInfo.loadWidthLR // 4  # load width in bytes / 4 bytes per VGPR
+
   # du maps to mfmaC, mfmaR is always 0 (subtileShape[0]=1)
   mfmaId = tileInfo.getSubtileShapeLinearId(subIterK, 0)
-  addrVgpr = tileInfo.sharedVgprLROffset[mfmaId]
 
   if swizzled:
     # Swizzled: GR writes individual subtile K-groups into LDS.
     offsetStride = int(tileInfo.subtileSize)
-    offset = sId0 * offsetStride
-    offset = offset + sId1 * int(tileInfo.globalSubtileGrid[0]) * offsetStride
+    offset = sId0 * offsetStride + sId1 * int(tileInfo.globalSubtileGrid[0]) * offsetStride
   else:
     # Non-swizzled: full DepthU tile is contiguous in LDS with K as the fast
     # dimension.  Each M-row is depthUBytes wide.  A subtile row covers
@@ -663,30 +667,18 @@ def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True):
 
   dstVgpr = dstTile.regList.indices[0]
   numRegs = len(dstTile.regList.indices)
+  numReadsForTile = numRegs // REGS_PER_DS_READ
 
-  if numRegs <= 4:
-    return DSLoadB128(
-      dst=vgpr(dstVgpr, 4),
-      src=vgpr(addrVgpr),
-      ds=DSModifiers(offset=offset),
-      comment="Subtile%s[%u, %u] subIterK=%u" % (tileInfo.tc, sId0, sId1, subIterK))
-
-  # K-split tiles (e.g. WMMA V3 wave32): v0-v3 hold the lo K-half,
-  # v4-v7 hold the hi K-half, separated by instK*bpe/2 bytes in LDS.
-  instK = tileInfo.mmaTileShape[1]
-  hiDelta = int(instK * tileInfo.bpe / 2)
   module = Module()
-  module.add(DSLoadB128(
-      dst=vgpr(dstVgpr, 4),
-      src=vgpr(addrVgpr),
-      ds=DSModifiers(offset=offset),
-      comment="Subtile%s[%u, %u] subIterK=%u (lo)" % (tileInfo.tc, sId0, sId1, subIterK)))
-  module.add(DSLoadB128(
-      dst=vgpr(dstVgpr + 4, 4),
-      src=vgpr(addrVgpr),
-      ds=DSModifiers(offset=offset + hiDelta),
-      comment="Subtile%s[%u, %u] subIterK=%u (hi)" % (tileInfo.tc, sId0, sId1, subIterK)))
+  for readIdx in range(numReadsForTile):
+    addrVgpr = tileInfo.sharedVgprLROffset[mfmaId * numReadsForTile + readIdx]
+    module.add(DSLoadB128(
+        dst=vgpr(dstVgpr + readIdx * REGS_PER_DS_READ, REGS_PER_DS_READ),
+        src=vgpr(addrVgpr),
+        ds=DSModifiers(offset=offset),
+        comment="Subtile%s[%u, %u] subIterK=%u read=%u" % (tileInfo.tc, sId0, sId1, subIterK, readIdx)))
   return module
+
 
 
 def emitSubtileDsRead(writer, kernel, tileInfo, subtileId):
@@ -695,7 +687,7 @@ def emitSubtileDsRead(writer, kernel, tileInfo, subtileId):
   sId0 = subtileId[0]
   sId1 = subtileId[1]
 
-  REGS_PER_DS_READ = 4  # ds_read_b128 always loads exactly 4 vgprs (128 bits)
+  REGS_PER_DS_READ = tileInfo.loadWidthLR // 4  # load width in bytes / 4 bytes per VGPR
   offsetStride = int(tileInfo.subtileSize)
   offset = sId0 * offsetStride + sId1 * int(tileInfo.globalSubtileGrid[0]) * offsetStride
 
