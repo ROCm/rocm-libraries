@@ -8,30 +8,29 @@
 #include <unordered_set>
 #include <vector>
 
-#include <hipdnn_data_sdk/data_objects/batchnorm_backward_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/batchnorm_backward_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_frontend.hpp>
+#include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
+#include <hipdnn_test_sdk/utilities/LoweringTestHelpers.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/TestableGraph.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
 
 #include "test_plugins/TestPluginConstants.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
+using hipdnn_tests::IntegrationTestFixture;
 using hipdnn_tests::toVec;
-using DataTypeSdk = hipdnn_data_sdk::data_objects::DataType;
-using NodeAttrType = hipdnn_data_sdk::data_objects::NodeAttributes;
+using DataTypeSdk = hipdnn_flatbuffers_sdk::data_objects::DataType;
+using NodeAttrType = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
+using hipdnn_tests::buildTensorMap;
+using hipdnn_tests::lowerAndDeserialize;
+using hipdnn_tests::TestableGraphLowering;
 
 namespace
 {
-
-// Exposes protected Graph methods for testing
-class TestableGraph : public Graph
-{
-public:
-    using Graph::build_operation_graph_via_descriptors;
-    using Graph::get_raw_graph_descriptor;
-};
 
 // -- Test constants for BatchnormBackwardGraphRoundTrip --
 
@@ -48,38 +47,13 @@ constexpr std::array<int64_t, 4> K_TENSOR_PARAM_STRIDES = {64, 1, 1, 1};
 
 // Lowers a frontend graph via build_operation_graph_via_descriptors, then
 // retrieves the serialized graph and deserializes it for verification.
-class IntegrationBatchnormBackwardDescriptorLowering : public ::testing::Test
+class IntegrationBatchnormBackwardDescriptorLowering : public IntegrationTestFixture
 {
-protected:
-    void SetUp() override
-    {
-        SKIP_IF_NO_DEVICES();
-
-        ASSERT_EQ(hipInit(0), hipSuccess);
-
-        const std::array<const char*, 1> paths
-            = {hipdnn_tests::plugin_constants::testGoodPluginPath().c_str()};
-        ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
-                      paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
-                  HIPDNN_STATUS_SUCCESS);
-
-        ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
-    }
-
-    void TearDown() override
-    {
-        if(_handle != nullptr)
-        {
-            hipdnnDestroy(_handle);
-        }
-    }
-
-    hipdnnHandle_t _handle = nullptr;
 };
 
 TEST_F(IntegrationBatchnormBackwardDescriptorLowering, BatchnormBackwardGraphRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraph>();
+    auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("TestBnBwdGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
@@ -114,32 +88,8 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLowering, BatchnormBackwardGraphRou
     dscale->set_uid(81).set_output(true).set_name("DScale");
     dbias->set_uid(82).set_output(true).set_name("DBias");
 
-    // -- Validate and lower --
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_operation_graph_via_descriptors(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    // -- Retrieve serialized graph --
-    auto rawDesc = graph->get_raw_graph_descriptor();
-    ASSERT_NE(rawDesc, nullptr);
-
-    size_t serializedSize = 0;
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(rawDesc, 0, &serializedSize, nullptr),
-              HIPDNN_STATUS_SUCCESS);
-    ASSERT_GT(serializedSize, 0u);
-
-    std::vector<uint8_t> serializedData(serializedSize);
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(
-                  rawDesc, serializedSize, &serializedSize, serializedData.data()),
-              HIPDNN_STATUS_SUCCESS);
-
-    // -- Deserialize into GraphT --
-    auto graphFb = hipdnn_data_sdk::data_objects::GetGraph(serializedData.data());
-    ASSERT_NE(graphFb, nullptr);
-    hipdnn_data_sdk::data_objects::GraphT graphT;
-    graphFb->UnPackTo(&graphT);
+    // -- Validate, lower, serialize, and deserialize --
+    auto graphT = lowerAndDeserialize(*graph, _handle);
 
     // -- Verify graph-level attributes --
     EXPECT_EQ(graphT.compute_data_type, DataTypeSdk::FLOAT);
@@ -150,11 +100,7 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLowering, BatchnormBackwardGraphRou
     // dy, x, scale, mean, invVar, dx, dscale, dbias = 8 tensors
     ASSERT_EQ(graphT.tensors.size(), 8u);
 
-    std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributesT*> tensorMap;
-    for(const auto& t : graphT.tensors)
-    {
-        tensorMap[t->uid] = t.get();
-    }
+    auto tensorMap = buildTensorMap(graphT);
 
     // Verify DY tensor
     ASSERT_NE(tensorMap.count(K_TENSOR_DY_UID), 0u);
@@ -213,7 +159,7 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLowering, BatchnormBackwardGraphRou
 
 TEST_F(IntegrationBatchnormBackwardDescriptorLowering, AutoAssignedUidsPreservedInRoundTrip)
 {
-    auto graph = std::make_shared<TestableGraph>();
+    auto graph = std::make_shared<TestableGraphLowering>();
     graph->set_name("AutoUidBnBwdGraph")
         .set_io_data_type(DataType::FLOAT)
         .set_intermediate_data_type(DataType::FLOAT)
@@ -238,26 +184,7 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLowering, AutoAssignedUidsPreserved
     dscale->set_output(true);
     dbias->set_output(true);
 
-    auto result = graph->validate();
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    result = graph->build_operation_graph_via_descriptors(_handle);
-    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
-
-    // Retrieve serialized graph
-    auto rawDesc = graph->get_raw_graph_descriptor();
-    size_t serializedSize = 0;
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(rawDesc, 0, &serializedSize, nullptr),
-              HIPDNN_STATUS_SUCCESS);
-    ASSERT_GT(serializedSize, 0u);
-
-    std::vector<uint8_t> serializedData(serializedSize);
-    ASSERT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(
-                  rawDesc, serializedSize, &serializedSize, serializedData.data()),
-              HIPDNN_STATUS_SUCCESS);
-
-    hipdnn_data_sdk::data_objects::GraphT graphT;
-    hipdnn_data_sdk::data_objects::GetGraph(serializedData.data())->UnPackTo(&graphT);
+    auto graphT = lowerAndDeserialize(*graph, _handle);
 
     // dy, x, scale, dx, dscale, dbias = 6 tensors (no mean/invVar)
     ASSERT_EQ(graphT.tensors.size(), 6u);
@@ -266,7 +193,8 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLowering, AutoAssignedUidsPreserved
     {
         uids.insert(t->uid);
     }
-    EXPECT_EQ(uids.size(), 6u) << "Tensor UIDs are not unique";
+    EXPECT_EQ(uids.size(), 6u)
+        << "Tensor UIDs are not unique"; // NOLINT(readability-implicit-bool-conversion)
 
     // The batchnorm backward operation should reference the auto-assigned UIDs
     ASSERT_EQ(graphT.nodes.size(), 1u);
@@ -275,17 +203,23 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLowering, AutoAssignedUidsPreserved
 
     // Tensor UIDs in the node should match tensors in the graph
     EXPECT_TRUE(uids.count(bnBwd->dy_tensor_uid) > 0)
-        << "DY tensor UID " << bnBwd->dy_tensor_uid << " not found in graph tensors";
+        << "DY tensor UID " << bnBwd->dy_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(bnBwd->x_tensor_uid) > 0)
-        << "X tensor UID " << bnBwd->x_tensor_uid << " not found in graph tensors";
+        << "X tensor UID " << bnBwd->x_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(bnBwd->scale_tensor_uid) > 0)
-        << "Scale tensor UID " << bnBwd->scale_tensor_uid << " not found in graph tensors";
+        << "Scale tensor UID " << bnBwd->scale_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(bnBwd->dx_tensor_uid) > 0)
-        << "DX tensor UID " << bnBwd->dx_tensor_uid << " not found in graph tensors";
+        << "DX tensor UID " << bnBwd->dx_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(bnBwd->dscale_tensor_uid) > 0)
-        << "DScale tensor UID " << bnBwd->dscale_tensor_uid << " not found in graph tensors";
+        << "DScale tensor UID " << bnBwd->dscale_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
     EXPECT_TRUE(uids.count(bnBwd->dbias_tensor_uid) > 0)
-        << "DBias tensor UID " << bnBwd->dbias_tensor_uid << " not found in graph tensors";
+        << "DBias tensor UID " << bnBwd->dbias_tensor_uid
+        << " not found in graph tensors"; // NOLINT(readability-implicit-bool-conversion)
 
     // All six tensor UIDs referenced by the node should be distinct
     const std::unordered_set<int64_t> nodeUids = {bnBwd->dy_tensor_uid,
@@ -294,7 +228,8 @@ TEST_F(IntegrationBatchnormBackwardDescriptorLowering, AutoAssignedUidsPreserved
                                                   bnBwd->dx_tensor_uid,
                                                   bnBwd->dscale_tensor_uid,
                                                   bnBwd->dbias_tensor_uid};
-    EXPECT_EQ(nodeUids.size(), 6u) << "BatchnormBackward node tensor UIDs are not distinct";
+    EXPECT_EQ(nodeUids.size(), 6u)
+        << "BatchnormBackward node tensor UIDs are not distinct"; // NOLINT(readability-implicit-bool-conversion)
 }
 
 } // namespace

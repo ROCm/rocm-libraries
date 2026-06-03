@@ -111,9 +111,9 @@ void expectFullTensorMocksForDesc(Mock_hipdnn_backend& mock,
                         }),
                         Return(HIPDNN_STATUS_SUCCESS)));
 
-    EXPECT_CALL(mock,
-                backendGetAttribute(
-                    fakeDesc, HIPDNN_ATTR_TENSOR_IS_BY_VALUE_EXT, HIPDNN_TYPE_BOOLEAN, 1, _, _))
+    EXPECT_CALL(
+        mock,
+        backendGetAttribute(fakeDesc, HIPDNN_ATTR_TENSOR_IS_BY_VALUE, HIPDNN_TYPE_BOOLEAN, 1, _, _))
         .WillOnce(DoAll(SetArgPointee<4>(int64_t{1}),
                         Invoke([](hipdnnBackendDescriptor_t,
                                   hipdnnBackendAttributeName_t,
@@ -216,9 +216,9 @@ void expectScalarByValueTensorMocks(Mock_hipdnn_backend& mock,
                         }),
                         Return(HIPDNN_STATUS_SUCCESS)));
 
-    EXPECT_CALL(mock,
-                backendGetAttribute(
-                    fakeDesc, HIPDNN_ATTR_TENSOR_IS_BY_VALUE_EXT, HIPDNN_TYPE_BOOLEAN, 1, _, _))
+    EXPECT_CALL(
+        mock,
+        backendGetAttribute(fakeDesc, HIPDNN_ATTR_TENSOR_IS_BY_VALUE, HIPDNN_TYPE_BOOLEAN, 1, _, _))
         .WillOnce(DoAll(SetArgPointee<4>(int64_t{1}),
                         Invoke([](hipdnnBackendDescriptor_t,
                                   hipdnnBackendAttributeName_t,
@@ -394,7 +394,7 @@ TEST_F(TestDescriptorUnpackHelpers, GetDescriptorAttrVecInt32Success)
     hipdnnBackendDescriptor_t desc = nullptr;
     std::vector<int32_t> values;
     auto err = getDescriptorAttrVec(desc,
-                                    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE_EXT,
+                                    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE,
                                     HIPDNN_TYPE_INT32,
                                     values,
                                     "test block_size");
@@ -414,7 +414,7 @@ TEST_F(TestDescriptorUnpackHelpers, GetDescriptorAttrVecInt32ZeroCount)
     hipdnnBackendDescriptor_t desc = nullptr;
     std::vector<int32_t> values;
     auto err = getDescriptorAttrVec(desc,
-                                    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE_EXT,
+                                    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE,
                                     HIPDNN_TYPE_INT32,
                                     values,
                                     "test block_size");
@@ -436,7 +436,7 @@ TEST_F(TestDescriptorUnpackHelpers, GetDescriptorAttrVecInt32CountMismatch)
     hipdnnBackendDescriptor_t desc = nullptr;
     std::vector<int32_t> values;
     auto err = getDescriptorAttrVec(desc,
-                                    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE_EXT,
+                                    HIPDNN_ATTR_OPERATION_BLOCK_SCALE_DEQUANTIZE_BLOCK_SIZE,
                                     HIPDNN_TYPE_INT32,
                                     values,
                                     "test block_size");
@@ -577,6 +577,26 @@ TEST_F(TestUnpackTensorAttributes, UnpackTensorAttributesRestoresPassByValueInt6
     EXPECT_EQ(tensor->get_pass_by_value<int64_t>().value(), K_SCALAR_VALUE);
 }
 
+TEST_F(TestUnpackTensorAttributes, UnpackTensorAttributesRestoresPassByValueBoolean)
+{
+    static constexpr bool K_SCALAR_VALUE = true;
+    expectScalarByValueTensorMocks(
+        *_mockBackend, _fakeDesc, K_UID, HIPDNN_DATA_BOOLEAN, K_SCALAR_VALUE);
+
+    std::shared_ptr<TensorAttributes> tensor;
+    auto err = unpackTensorAttributes(_fakeDesc, tensor);
+
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    ASSERT_NE(tensor, nullptr);
+    EXPECT_EQ(tensor->get_uid(), K_UID);
+    EXPECT_EQ(tensor->get_data_type(), DataType::BOOLEAN);
+    EXPECT_EQ(tensor->get_dim(), (std::vector<int64_t>{1}));
+    EXPECT_EQ(tensor->get_stride(), (std::vector<int64_t>{1}));
+    EXPECT_TRUE(tensor->get_pass_by_value());
+    ASSERT_TRUE(tensor->get_pass_by_value<bool>().has_value());
+    EXPECT_EQ(tensor->get_pass_by_value<bool>().value(), K_SCALAR_VALUE);
+}
+
 TEST_F(TestUnpackTensorAttributes, UnpackTensorAttributesPassByValuePreserves4dDims)
 {
     static constexpr float K_SCALAR_VALUE = 1e-5f;
@@ -673,7 +693,7 @@ TEST_F(TestUnpackTensorAttributes, UnpackTensorAttributesPassByValuePreserves4dD
     // IS_BY_VALUE: true
     EXPECT_CALL(*_mockBackend,
                 backendGetAttribute(
-                    _fakeDesc, HIPDNN_ATTR_TENSOR_IS_BY_VALUE_EXT, HIPDNN_TYPE_BOOLEAN, 1, _, _))
+                    _fakeDesc, HIPDNN_ATTR_TENSOR_IS_BY_VALUE, HIPDNN_TYPE_BOOLEAN, 1, _, _))
         .WillOnce(DoAll(SetArgPointee<4>(int64_t{1}),
                         Invoke([](hipdnnBackendDescriptor_t,
                                   hipdnnBackendAttributeName_t,
@@ -1720,9 +1740,80 @@ TEST_F(TestUnpackTensorAttributes, UnpackTensorAttributesInvalidDataType)
 // unpackGraphDataType tests
 // ---------------------------------------------------------------------------
 
-TEST_F(TestDescriptorUnpackHelpers, UnpackGraphDataTypeBackendFails)
+TEST_F(TestDescriptorUnpackHelpers, UnpackGraphDataTypeAbsentReturnsNotSet)
 {
-    // getDescriptorAttrScalar for the compute data type returns error
+    // Count query reports zero (backend storage is at the UNSET sentinel) -- the
+    // helper must surface this as DataType::NOT_SET with no error.
+    EXPECT_CALL(*_mockBackend, backendGetAttribute(_, _, HIPDNN_TYPE_DATA_TYPE, 0, _, nullptr))
+        .WillOnce(DoAll(SetArgPointee<4>(int64_t{0}), Return(HIPDNN_STATUS_SUCCESS)));
+
+    hipdnnBackendDescriptor_t desc = nullptr;
+    auto [dt, err] = unpackGraphDataType(desc, HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, "compute type");
+
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    EXPECT_EQ(dt, DataType::NOT_SET);
+}
+
+TEST_F(TestDescriptorUnpackHelpers, UnpackGraphDataTypeNotSupportedReturnsNotSet)
+{
+    // Count query returns NOT_SUPPORTED (older backends or genuinely missing
+    // attributes) -- treat the same as count=0.
+    EXPECT_CALL(*_mockBackend, backendGetAttribute(_, _, HIPDNN_TYPE_DATA_TYPE, 0, _, nullptr))
+        .WillOnce(Return(HIPDNN_STATUS_NOT_SUPPORTED));
+
+    hipdnnBackendDescriptor_t desc = nullptr;
+    auto [dt, err] = unpackGraphDataType(desc, HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, "compute type");
+
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    EXPECT_EQ(dt, DataType::NOT_SET);
+}
+
+TEST_F(TestDescriptorUnpackHelpers, UnpackGraphDataTypeCountQueryFails)
+{
+    // Count query reports a backend error -- propagate as HIPDNN_BACKEND_ERROR.
+    EXPECT_CALL(*_mockBackend, backendGetAttribute(_, _, HIPDNN_TYPE_DATA_TYPE, 0, _, nullptr))
+        .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
+    EXPECT_CALL(*_mockBackend, getLastErrorString(_, _)).Times(AnyNumber());
+
+    hipdnnBackendDescriptor_t desc = nullptr;
+    auto [dt, err] = unpackGraphDataType(desc, HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, "compute type");
+
+    EXPECT_TRUE(err.is_bad());
+    EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    EXPECT_EQ(dt, DataType::NOT_SET);
+}
+
+TEST_F(TestDescriptorUnpackHelpers, UnpackGraphDataTypeSuccess)
+{
+    // Count query reports 1, value-fetch returns HIPDNN_DATA_FLOAT -- the
+    // helper must surface DataType::FLOAT with no error.
+    EXPECT_CALL(*_mockBackend, backendGetAttribute(_, _, HIPDNN_TYPE_DATA_TYPE, 0, _, nullptr))
+        .WillOnce(DoAll(SetArgPointee<4>(int64_t{1}), Return(HIPDNN_STATUS_SUCCESS)));
+    EXPECT_CALL(*_mockBackend, backendGetAttribute(_, _, HIPDNN_TYPE_DATA_TYPE, 1, _, Ne(nullptr)))
+        .WillOnce(DoAll(SetArgPointee<4>(int64_t{1}),
+                        Invoke([](hipdnnBackendDescriptor_t,
+                                  hipdnnBackendAttributeName_t,
+                                  hipdnnBackendAttributeType_t,
+                                  int64_t,
+                                  int64_t*,
+                                  void* arrayOfElements) {
+                            auto val = HIPDNN_DATA_FLOAT;
+                            std::memcpy(arrayOfElements, &val, sizeof(hipdnnDataType_t));
+                        }),
+                        Return(HIPDNN_STATUS_SUCCESS)));
+
+    hipdnnBackendDescriptor_t desc = nullptr;
+    auto [dt, err] = unpackGraphDataType(desc, HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, "compute type");
+
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    EXPECT_EQ(dt, DataType::FLOAT);
+}
+
+TEST_F(TestDescriptorUnpackHelpers, UnpackGraphDataTypeValueFetchFails)
+{
+    // Count query succeeds with 1, then the value-fetch call fails.
+    EXPECT_CALL(*_mockBackend, backendGetAttribute(_, _, HIPDNN_TYPE_DATA_TYPE, 0, _, nullptr))
+        .WillOnce(DoAll(SetArgPointee<4>(int64_t{1}), Return(HIPDNN_STATUS_SUCCESS)));
     EXPECT_CALL(*_mockBackend, backendGetAttribute(_, _, HIPDNN_TYPE_DATA_TYPE, 1, _, _))
         .WillOnce(Return(HIPDNN_STATUS_INTERNAL_ERROR));
     EXPECT_CALL(*_mockBackend, getLastErrorString(_, _)).Times(AnyNumber());

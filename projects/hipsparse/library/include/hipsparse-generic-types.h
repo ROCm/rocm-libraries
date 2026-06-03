@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,8 @@
  * ************************************************************************ */
 #ifndef HIPSPARSE_GENERIC_TYPES_H
 #define HIPSPARSE_GENERIC_TYPES_H
+
+#include "hipsparse-version.h"
 
 /*! \ingroup types_module
  *  \brief Generic API opaque structure holding information for a sparse vector.
@@ -58,8 +60,9 @@ typedef void* hipsparseDnVecDescr_t;
  *  \details
  *  The hipSPARSE descriptor is an opaque structure holding information for a sparse matrix. It must
  *  be initialized using either hipsparseCreateCoo() (for COO format), hipsparseCreateCooAoS() (for COO AOS format),
- *  hipsparseCreateCsr() (for CSR format), hipsparseCreateCsc() (for CSC format), or hipsparseCreateBlockedEll()
- *  (for Blocked ELL format). The returned descriptor is used in the hipSPARSE generic APIs involving sparse matrices.
+ *  hipsparseCreateCsr() (for CSR format), hipsparseCreateCsc() (for CSC format), hipsparseCreateBlockedEll()
+ *  (for Blocked ELL format), hipsparseCreateSlicedEll() (for Sliced ELL format), or hipsparseCreateBsr()
+ *  (for BSR format). The returned descriptor is used in the hipSPARSE generic APIs involving sparse matrices.
  *  It should be destroyed at the end using hipsparseDestroySpMat().
  */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 10010)
@@ -194,6 +197,10 @@ typedef enum
     HIPSPARSE_FORMAT_COO_AOS     = 4, /**< Coordinate - array of structures */
     HIPSPARSE_FORMAT_BLOCKED_ELL = 5, /**< Blocked ELL */
     HIPSPARSE_FORMAT_SLICED_ELL  = 6 /**< Sliced ELL */
+#ifdef HIPSPARSE_WITH_SPMV_BSR
+    ,
+    HIPSPARSE_FORMAT_BSR = 7 /**< Block sparse row */
+#endif
 } hipsparseFormat_t;
 #else
 #if(CUDART_VERSION >= 12011)
@@ -302,9 +309,27 @@ typedef enum
     HIPSPARSE_SPMV_CSR_ALG2    = 3,
     HIPSPARSE_SPMV_COO_ALG2    = 4,
     HIPSPARSE_SPMV_SELL_ALG1   = 5
+#ifdef HIPSPARSE_WITH_SPMV_BSR
+    ,
+    HIPSPARSE_SPMV_BSR_ALG1 = 6
+#endif
 } hipsparseSpMVAlg_t;
 #else
-#if(CUDART_VERSION >= 12011)
+#if(CUDART_VERSION >= 13001)
+typedef enum
+{
+    HIPSPARSE_SPMV_ALG_DEFAULT = 0,
+    HIPSPARSE_SPMV_COO_ALG1    = 1,
+    HIPSPARSE_SPMV_CSR_ALG1    = 2,
+    HIPSPARSE_SPMV_CSR_ALG2    = 3,
+    HIPSPARSE_SPMV_COO_ALG2    = 4,
+    HIPSPARSE_SPMV_SELL_ALG1   = 5
+#ifdef HIPSPARSE_WITH_SPMV_BSR
+    ,
+    HIPSPARSE_SPMV_BSR_ALG1 = 6
+#endif
+} hipsparseSpMVAlg_t;
+#elif(CUDART_VERSION >= 12011 && CUDART_VERSION < 13001)
 typedef enum
 {
     HIPSPARSE_SPMV_ALG_DEFAULT = 0,

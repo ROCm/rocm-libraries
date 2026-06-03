@@ -550,27 +550,6 @@ TEST(TestLayerNormNode, InferPropertiesPreservesExplicitOutputShape)
     EXPECT_EQ(y->get_stride(), (std::vector<int64_t>{512, 1}));
 }
 
-TEST(TestLayerNormNode, PackNode)
-{
-    auto x = makeTensor({32, 512});
-    auto attrs = makeMinimalAttrs(x);
-    attrs.set_name("TestLayerNorm");
-
-    const GraphAttributes graphAttrs;
-    const LayerNormNode node(std::move(attrs), graphAttrs);
-
-    flatbuffers::FlatBufferBuilder builder;
-    auto packed = node.pack_node(builder);
-    builder.Finish(packed);
-
-    auto buf = builder.GetBufferPointer();
-    auto fbNode = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Node>(buf);
-
-    EXPECT_EQ(fbNode->name()->str(), "TestLayerNorm");
-    EXPECT_EQ(fbNode->attributes_type(),
-              hipdnn_data_sdk::data_objects::NodeAttributes::LayernormAttributes);
-}
-
 // ============================================================================
 // Pre-validation: Dimension and Scalar Validation Tests
 // ============================================================================

@@ -5,29 +5,30 @@
 
 #include "BatchnormGraphUtils.hpp"
 #include "BatchnormTensorBundles.hpp"
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceBatchnorm.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/DynamicTolerancesBatchNorm.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
-#include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormBwdPlan.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_test_sdk::detail;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_data_sdk::utilities;
-using namespace hipdnn_data_sdk::flatbuffer_utilities;
+using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 using namespace ::testing;
 using namespace hipdnn_sdk_test_utils;
 
 class TestBatchnormBwdPlan : public ::testing::Test
 {
 protected:
-    static void initTensorValues(hipdnn_data_sdk::data_objects::TensorAttributesT& tensorAttr,
-                                 DataType dataType,
-                                 const Tensor<float>& tensor,
-                                 int64_t uid)
+    static void
+        initTensorValues(hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT& tensorAttr,
+                         DataType dataType,
+                         const Tensor<float>& tensor,
+                         int64_t uid)
     {
         tensorAttr.data_type = dataType;
         tensorAttr.dims = tensor.dims();
@@ -80,30 +81,42 @@ TEST_F(TestBatchnormBwdPlan, ExecutePlan)
 
     bwdPlan.execute(variantPack);
 
-    const CpuFpReferenceValidation<float> cpuRefOutputValidation(
-        batchnorm::getToleranceBackward<float>(), batchnorm::getToleranceBackward<float>());
+    // Known ranges from BatchnormBwdTensorBundle constructor:
+    //   dy: [-0.1, 0.1], x: [-1.0, 1.0], scale: [-0.1, 0.1]
+    const auto nhw = dims[0] * dims[2] * dims[3];
 
+    auto dbiasTol
+        = batchnorm::calculateBatchnormBackwardDbiasTolerance<float, float>(-0.1, 0.1, nhw);
+    auto dscaleTol = batchnorm::calculateBatchnormBackwardDscaleTolerance<float, float>(
+        -0.1, 0.1, -1.0, 1.0, nhw);
+    auto dxTol = batchnorm::calculateBatchnormBackwardDxTolerance<float, float>(
+        -0.1, 0.1, -1.0, 1.0, -0.1, 0.1, nhw);
+
+    const CpuFpReferenceValidation<float> dxValidation(dxTol, dxTol);
+    const CpuFpReferenceValidation<float> dscaleValidation(dscaleTol, dscaleTol);
+    const CpuFpReferenceValidation<float> dbiasValidation(dbiasTol, dbiasTol);
+
+    EXPECT_TRUE(dxValidation.allClose(directTensorBundle.dxTensor, planTensorBundle.dxTensor));
     EXPECT_TRUE(
-        cpuRefOutputValidation.allClose(directTensorBundle.dxTensor, planTensorBundle.dxTensor));
-    EXPECT_TRUE(cpuRefOutputValidation.allClose(directTensorBundle.dscaleTensor,
-                                                planTensorBundle.dscaleTensor));
-    EXPECT_TRUE(cpuRefOutputValidation.allClose(directTensorBundle.dbiasTensor,
-                                                planTensorBundle.dbiasTensor));
+        dscaleValidation.allClose(directTensorBundle.dscaleTensor, planTensorBundle.dscaleTensor));
+    EXPECT_TRUE(
+        dbiasValidation.allClose(directTensorBundle.dbiasTensor, planTensorBundle.dbiasTensor));
 }
 
 TEST(TestBatchnormBwdPlanBuilder, PlanConstruction)
 {
-    const std::vector<int64_t> dims = {1, 1, 1, 1};
+    const std::vector<int64_t> dims = {2, 1, 1, 1};
     BatchnormBwdTensorBundle<float, float, float> tensorBundle(dims, 1, TensorLayout::NCHW);
 
     auto graphTuple = buildBatchnormBwdGraph(
         tensorBundle, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
 
     auto& graph = std::get<0>(graphTuple);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
-    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
-                                                                         flatbufferGraph.size());
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        serializedGraph.data(), serializedGraph.size());
 
     const BatchnormBwdPlanBuilder<DataType::FLOAT,
                                   DataType::FLOAT,
@@ -157,30 +170,42 @@ TEST_F(TestBatchnormBwdPlan, ExecutePlanNoStats)
 
     bwdPlan.execute(variantPack);
 
-    const CpuFpReferenceValidation<float> cpuRefOutputValidation(
-        batchnorm::getToleranceBackward<float>(), batchnorm::getToleranceBackward<float>());
+    // Known ranges from BatchnormBwdTensorBundle constructor:
+    //   dy: [-0.1, 0.1], x: [-1.0, 1.0], scale: [-0.1, 0.1]
+    const auto nhw = dims[0] * dims[2] * dims[3];
 
+    auto dbiasTol
+        = batchnorm::calculateBatchnormBackwardDbiasTolerance<float, float>(-0.1, 0.1, nhw);
+    auto dscaleTol = batchnorm::calculateBatchnormBackwardDscaleTolerance<float, float>(
+        -0.1, 0.1, -1.0, 1.0, nhw);
+    auto dxTol = batchnorm::calculateBatchnormBackwardDxTolerance<float, float>(
+        -0.1, 0.1, -1.0, 1.0, -0.1, 0.1, nhw);
+
+    const CpuFpReferenceValidation<float> dxValidation(dxTol, dxTol);
+    const CpuFpReferenceValidation<float> dscaleValidation(dscaleTol, dscaleTol);
+    const CpuFpReferenceValidation<float> dbiasValidation(dbiasTol, dbiasTol);
+
+    EXPECT_TRUE(dxValidation.allClose(directTensorBundle.dxTensor, planTensorBundle.dxTensor));
     EXPECT_TRUE(
-        cpuRefOutputValidation.allClose(directTensorBundle.dxTensor, planTensorBundle.dxTensor));
-    EXPECT_TRUE(cpuRefOutputValidation.allClose(directTensorBundle.dscaleTensor,
-                                                planTensorBundle.dscaleTensor));
-    EXPECT_TRUE(cpuRefOutputValidation.allClose(directTensorBundle.dbiasTensor,
-                                                planTensorBundle.dbiasTensor));
+        dscaleValidation.allClose(directTensorBundle.dscaleTensor, planTensorBundle.dscaleTensor));
+    EXPECT_TRUE(
+        dbiasValidation.allClose(directTensorBundle.dbiasTensor, planTensorBundle.dbiasTensor));
 }
 
 TEST(TestBatchnormBwdPlanBuilder, IsApplicable)
 {
-    const std::vector<int64_t> dims = {1, 1, 1, 1};
+    const std::vector<int64_t> dims = {2, 1, 1, 1};
     BatchnormBwdTensorBundle<float, float, float> tensorBundle(dims, 1, TensorLayout::NCHW);
 
     auto graphTuple = buildBatchnormBwdGraph(
         tensorBundle, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
 
     auto& graph = std::get<0>(graphTuple);
-    auto flatbufferGraph = graph->buildFlatbufferOperationGraph();
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
-    auto graphWrap = hipdnn_data_sdk::flatbuffer_utilities::GraphWrapper(flatbufferGraph.data(),
-                                                                         flatbufferGraph.size());
+    auto graphWrap = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        serializedGraph.data(), serializedGraph.size());
 
     const BatchnormBwdPlanBuilder<DataType::FLOAT,
                                   DataType::FLOAT,

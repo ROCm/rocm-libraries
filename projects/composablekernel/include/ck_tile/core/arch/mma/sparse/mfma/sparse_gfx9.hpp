@@ -3,11 +3,17 @@
 
 #pragma once
 
-#include "ck_tile/core/config.hpp"
 #include "ck_tile/core/arch/arch.hpp"
-#include "ck_tile/core/numeric/vector_type.hpp"
-#include "ck_tile/ops/gemm/warp/warp_gemm_smfmac_impl.hpp"
+#include "ck_tile/core/arch/mma/amdgcn_mma.hpp"
+#include "ck_tile/core/arch/mma/mfma/mfma_traits.hpp"
+#include "ck_tile/core/arch/mma/mma_op_family.hpp"
 #include "ck_tile/core/arch/mma/sparse/sparse_traits.hpp"
+#include "ck_tile/core/config.hpp"
+#include "ck_tile/core/numeric/half.hpp"
+#include "ck_tile/core/numeric/vector_type.hpp"
+#include "ck_tile/core/utility/type_traits.hpp"
+
+#include <type_traits>
 
 namespace ck_tile::core::arch::mma {
 
@@ -30,26 +36,15 @@ struct amdgcn_mma<fp16_t, fp16_t, fp32_t, 16u, 16u, 32u, CtrlFlags, CompilerTarg
 : amdgcn_mma_base<fp16_t, fp16_t, fp32_t, 16u, 16u, 32u, 64u, 8, 1, 1, 1, 1, 4, 1, MfmaOp, MmaOpFamily::SPARSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_smfmac_f32_16x16x32_f16";
+
     CK_TILE_DEVICE static auto
-    exec(AVecType& aVec, BVecType const& bVec, CVecType const& cVec) -> CVecType
+    exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec, int32_t idx) -> CVecType
     {
-        static constexpr index_t ABVecN            = vector_traits<AVecType>::vector_size;
-        static constexpr index_t kCompressionRatio = 2;
-        static constexpr index_t CompressedSize    = ABVecN / kCompressionRatio;
-        using AVecCompressed                       = ext_vector_t<fp16_t, CompressedSize>;
-
-        static_assert(CompressedSize == 4);
-        // TODO: Compressing A on-the-fly should be OK for now, but we need to validate
-        // and evaluate changing this to a transform at a higher level.
-        // aVec not being const can cause problems when running multiple intrinsics.
-        const uint32_t idx = ck_tile::compress_a_impl<fp16_t, CompressedSize>(aVec);
-
-        const AVecCompressed a_vec_pruned = {aVec[0], aVec[1], aVec[2], aVec[3]};
-
         using namespace sparse::detail;
         static constexpr BuiltinParams PARAMS = getBuiltinParams<CtrlFlags::CompressionIndex>();
         return {__builtin_amdgcn_smfmac_f32_16x16x32_f16(
-            a_vec_pruned, bVec, cVec, idx, PARAMS.UseFirstIndex, PARAMS.ByteIndexToOverride)};
+            aVec, bVec, cVec, idx, PARAMS.UseFirstIndex, PARAMS.ByteIndexToOverride)};
     }
 };
 

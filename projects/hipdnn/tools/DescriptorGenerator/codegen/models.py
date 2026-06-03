@@ -7,6 +7,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
+MODE_SENTINEL_VALUES: tuple[str, ...] = ("required", "optional", "none")
+
 
 @dataclass
 class EnumValue:
@@ -19,7 +21,7 @@ class EnumValue:
 
     Attributes:
         name: Backend C-API suffix appended to ``EnumDef.backend_prefix``
-            (e.g., ``"CROSS_CORRELATION"`` → ``HIPDNN_CONVOLUTION_MODE_CROSS_CORRELATION``).
+            (e.g., ``"CROSS_CORRELATION"`` → ``HIPDNN_CROSS_CORRELATION``).
         value: Numeric value in the backend C-API enum typedef.
         sentinel: If True, this value (typically UNSET/NOT_SET) is excluded from the
             backend C-API enum but appears as ``NOT_SET = 0`` in the frontend enum class.
@@ -133,17 +135,7 @@ class TensorField:
 
     @property
     def frontend_setter(self) -> str:
-        """Derive setter method name for unpacker.
-
-        If frontend_getter is set (e.g., "get_x()"), derives "set_x".
-        Otherwise uses "set_{name}".
-        """
-        if self.frontend_getter:
-            # "get_x()" -> "set_x"
-            base = self.frontend_getter.replace("()", "")
-            if base.startswith("get_"):
-                return "set_" + base[4:]
-            return base
+        """Derive setter method name for unpacker."""
         return f"set_{self.name}"
 
 
@@ -158,6 +150,31 @@ def _to_snake_case(pascal: str) -> str:
     s = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", pascal)
     s = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", s)
     return s.lower()
+
+
+def _derive_frontend_setter_name(frontend_getter: str, fallback_field_name: str) -> str:
+    """Derive a frontend setter name from a getter spec.
+
+    "get_foo" / "get_foo()" -> "set_foo"
+    "foo" -> "foo"   # member-access; setter is the member name
+    "" -> "set_<fallback_field_name>"
+    """
+    if frontend_getter:
+        base = frontend_getter.replace("()", "")
+        if base.startswith("get_"):
+            return "set_" + base[4:]
+        return base
+    return f"set_{fallback_field_name}"
+
+
+def _frontend_uses_member_access(frontend_getter: str) -> bool:
+    """True when the frontend getter is a bare member name (no parentheses)."""
+    return bool(frontend_getter) and "(" not in frontend_getter
+
+
+def _frontend_member_name(frontend_getter: str) -> str:
+    """The bare member name, with any trailing ``()`` stripped."""
+    return frontend_getter.replace("()", "")
 
 
 @dataclass
@@ -188,8 +205,12 @@ class DataField:
     # FBS `bool field (optional)` -> fbs_optional: true (Optional<bool>, use setOptionalScalar)
     fbs_optional: bool = False
 
-    # Whether the frontend getter returns std::optional for mode fields.
-    # New codegen-generated frontend getters return optional; hand-written ones may not.
+    # DEPRECATED: the loader now hard-rejects this YAML key
+    # (see ``config_loader._reject_deprecated_field``). The field is
+    # retained on the dataclass so existing call sites compile, but no
+    # successfully-loaded config will ever set it to ``True``.
+    # Optional-return logic is derived from ``fbs_optional`` via the
+    # ``frontend_returns_optional`` property below.
     frontend_getter_returns_optional: bool = False
 
     # Mode-specific config (for conv_mode, pointwise_mode, etc.)
@@ -207,10 +228,65 @@ class DataField:
     # Mode enum definition (for generating new enum plumbing)
     enum_def: Optional[EnumDef] = None
 
+    # Mode-field sentinel-check policy (Task 0.3). One of:
+    #   "required" — finalize sentinel check is emitted; sentinel MUST exist in enum_def
+    #   "optional" — finalize sentinel check is emitted IF a sentinel exists; otherwise
+    #                silently skipped (soft mode for in-flight migrations)
+    #   "none"     — finalize sentinel check is NEVER emitted; enum has no sentinel by design
+    #   None       — unset; resolved by `effective_mode_sentinel` via auto-detection
+    mode_sentinel: Optional[str] = None
+
     @property
     def has_enum_def(self) -> bool:
         """Whether this field has a generatable enum definition."""
         return self.enum_def is not None and len(self.enum_def.values) > 0
+
+    @property
+    def has_sentinel_in_enum_def(self) -> bool:
+        """Whether this field's enum_def contains a sentinel entry.
+
+        A sentinel is detected either by ``EnumValue.sentinel == True`` or by
+        ``name``/``effective_sdk_name`` matching the conventional sentinel
+        names ``NOT_SET`` / ``UNSET``.
+        """
+        if not self.enum_def:
+            return False
+        for v in self.enum_def.values:
+            if v.sentinel:
+                return True
+            if v.name in ("NOT_SET", "UNSET"):
+                return True
+            if v.effective_sdk_name in ("NOT_SET", "UNSET"):
+                return True
+        return False
+
+    @property
+    def effective_mode_sentinel(self) -> str:
+        """Resolved mode-sentinel policy.
+
+        If ``mode_sentinel`` was set explicitly on the YAML, returns that value.
+        Otherwise auto-detects: ``"required"`` when the enum has a sentinel,
+        ``"none"`` when it does not.
+        """
+        if self.mode_sentinel is not None:
+            return self.mode_sentinel
+        return "required" if self.has_sentinel_in_enum_def else "none"
+
+    @property
+    def emit_mode_sentinel_check(self) -> bool:
+        """Whether the finalize() sentinel check should be emitted for this mode field.
+
+        - ``required``: always emit (legacy behavior)
+        - ``optional``: emit only if a sentinel is present in the enum_def
+        - ``none``: never emit
+        """
+        policy = self.effective_mode_sentinel
+        if policy == "none":
+            return False
+        if policy == "optional":
+            return self.has_sentinel_in_enum_def
+        # "required" or anything else falls back to legacy behavior
+        return True
 
     @property
     def effective_sentinel_value(self) -> str:
@@ -249,7 +325,7 @@ class DataField:
 
     @property
     def is_scalar(self) -> bool:
-        return self.type in ("scalar_float", "scalar_int64", "bool")
+        return self.type in ("scalar_float", "scalar_int32", "scalar_int64", "bool")
 
     @property
     def is_optional_scalar(self) -> bool:
@@ -258,11 +334,23 @@ class DataField:
         return self.is_scalar and not self.required
 
     @property
+    def frontend_returns_optional(self) -> bool:
+        """Whether the frontend getter for this field returns ``std::optional<T>``.
+
+        Derived from ``fbs_optional`` alone — when the FBS field is optional,
+        the frontend getter is expected to return ``std::optional<T>``.
+        Replaces the legacy ``frontend_getter_returns_optional`` YAML field,
+        which the loader now hard-rejects.
+        """
+        return self.fbs_optional
+
+    @property
     def cpp_type(self) -> str:
         """C++ type name for the field's element type."""
         type_map = {
             "vector_int64": "int64_t",
             "scalar_float": "float",
+            "scalar_int32": "int32_t",
             "scalar_int64": "int64_t",
             "bool": "bool",
         }
@@ -276,6 +364,7 @@ class DataField:
             "vector_int64": "HIPDNN_TYPE_INT64",
             "enum": "HIPDNN_TYPE_INT64",
             "scalar_float": "HIPDNN_TYPE_FLOAT",
+            "scalar_int32": "HIPDNN_TYPE_INT32",
             "scalar_int64": "HIPDNN_TYPE_INT64",
             "bool": "HIPDNN_TYPE_BOOLEAN",
         }
@@ -307,7 +396,7 @@ class DataField:
         """Frontend C++ type for mode/enum fields.
 
         Returns frontend_type if set, falls back to stripping the SDK namespace
-        from cpp_enum (e.g., 'hipdnn_data_sdk::data_objects::ConvMode' -> 'ConvMode').
+        from cpp_enum (e.g., 'hipdnn_flatbuffers_sdk::data_objects::ConvMode' -> 'ConvMode').
         """
         if self.frontend_type:
             return self.frontend_type
@@ -322,13 +411,60 @@ class DataField:
         If frontend_getter is set (e.g., "get_convolution_mode()"), derives
         "set_convolution_mode". Otherwise uses "set_{name}".
         """
-        if self.frontend_getter:
-            # "get_convolution_mode()" -> "set_convolution_mode"
-            base = self.frontend_getter.replace("()", "")
-            if base.startswith("get_"):
-                return "set_" + base[4:]
-            return base
-        return f"set_{self.name}"
+        return _derive_frontend_setter_name(self.frontend_getter, self.name)
+
+    @property
+    def frontend_uses_member_access(self) -> bool:
+        """True when the frontend exposes this field as a public member, not a method.
+
+        Detected from ``frontend_getter``: bare names like ``"alibi_mask"`` (no
+        parentheses) indicate the in-tree class exposes the field as a public
+        member; method-call syntax like ``"get_alibi_mask()"`` indicates a
+        getter method. Hand-maintained classes such as ``SdpaAttributes``
+        expose ``std::optional<T>`` and ``bool`` members directly. The unpacker
+        emits ``attributes.<member> = value`` instead of
+        ``attributes.set_<member>(value)`` when this is true, which is safer
+        than guessing setter names that may diverge (e.g.
+        ``set_diagonal_band_left_bound`` for the ``left_bound`` member).
+        """
+        return _frontend_uses_member_access(self.frontend_getter)
+
+    @property
+    def frontend_member_name(self) -> str:
+        """Public member name when ``frontend_uses_member_access`` is true.
+
+        Returns the ``frontend_getter`` value with any trailing ``()`` stripped.
+        For non-member fields callers should use ``frontend_getter`` /
+        ``frontend_setter_name`` instead.
+        """
+        return _frontend_member_name(self.frontend_getter)
+
+    @property
+    def mode_converter_returns_optional(self) -> bool:
+        """Whether the frontend→backend mode converter returns ``std::optional<T>``.
+
+        Mode converters return ``std::optional<T>`` when the enum has a
+        sentinel value (so the converter can signal "unsupported/unset" by
+        returning ``std::nullopt``). When ``mode_sentinel`` is explicitly
+        ``"none"`` the enum has no sentinel by design and the converter
+        returns plain ``T`` — so the packer must NOT emit the
+        ``.has_value()`` / ``*deref`` plumbing around the converter result.
+        """
+        return self.is_mode and self.effective_mode_sentinel != "none"
+
+
+@dataclass
+class DataFieldsHelper:
+    """Configuration for shared data field packing/unpacking helpers.
+
+    When set on an OperationConfig, the packer and unpacker templates call
+    the named helper functions instead of emitting per-field inline code.
+    """
+
+    pack_function: str = ""
+    unpack_function: str = ""
+    include: str = ""
+    label: str = ""
 
 
 @dataclass
@@ -348,6 +484,68 @@ class TensorArrayField:
         """Member variable name (e.g., 'peer_stats' -> '_peer_statsDescs')."""
         return f"_{self.name}Descs"
 
+    @property
+    def camel_name(self) -> str:
+        """Field name in camelCase (e.g., 'peer_stats' -> 'peerStats')."""
+        return _to_camel_case(self.name)
+
+    @property
+    def frontend_setter_name(self) -> str:
+        """Derive setter method name for unpacker.
+
+        If frontend_getter is set (e.g., "get_peer_stats()"), derives
+        "set_peer_stats". Otherwise uses "set_{name}".
+        """
+        return _derive_frontend_setter_name(self.frontend_getter, self.name)
+
+
+@dataclass
+class ExtraDataTypeField:
+    """Operation-level ``DataType``-typed attribute beyond ``compute_data_type``.
+
+    Models cases like SDPA's ``mma_core_mode`` — a ``DataType`` value packed
+    via ``setDescriptorAttrDataType`` and unpacked via ``unpackGraphDataType``,
+    optionally gated on a sentinel value (so the attribute is omitted from
+    the descriptor when unset). The frontend exposes the field either via a
+    public member (when ``frontend_getter`` is a bare member name) or a
+    getter/setter pair (when ``frontend_getter`` ends with ``()``).
+    """
+
+    name: str
+    attr_name: str
+    frontend_getter: str = ""
+    sentinel: str = ""
+    error_label: str = ""
+
+    @property
+    def frontend_uses_member_access(self) -> bool:
+        """True when the frontend exposes this field as a public member."""
+        return _frontend_uses_member_access(self.frontend_getter)
+
+    @property
+    def frontend_member_name(self) -> str:
+        """Public member name (only meaningful when member access is used)."""
+        return _frontend_member_name(self.frontend_getter)
+
+    @property
+    def frontend_setter_name(self) -> str:
+        """Derived setter method name (only meaningful when method access is used).
+
+        Mirrors :attr:`DataField.frontend_setter_name` — strips trailing
+        ``()`` and rewrites a leading ``get_`` to ``set_``.
+        """
+        return _derive_frontend_setter_name(self.frontend_getter, self.name)
+
+    @property
+    def camel_name(self) -> str:
+        """camelCase local variable name used in generated code."""
+        return _to_camel_case(self.name)
+
+    @property
+    def effective_error_label(self) -> str:
+        """Sub-label appended to ``op.effective_error_label`` in error strings."""
+        return self.error_label or self.name
+
 
 @dataclass
 class TensorConfig:
@@ -365,6 +563,7 @@ class TestData:
     tensor_configs: dict[str, TensorConfig] = field(default_factory=dict)
     field_values: dict[str, list] = field(default_factory=dict)
     constants_include: str = ""
+    tensor_const_prefix: Optional[str] = None
 
 
 @dataclass
@@ -424,7 +623,6 @@ class ValidationConfig:
 
     required_input_tensors: list[str] = field(default_factory=list)
     required_input_dims: list[str] = field(default_factory=list)
-    dim_consistency_checks: list[dict] = field(default_factory=list)
     custom_checks: list[str] = field(default_factory=list)
 
 
@@ -436,6 +634,18 @@ class FrontendConfig:
     node_class: str = ""
     attributes_class: str = ""
     attributes_include: str = ""
+
+    # Optional override for the basename of the generated Attributes header
+    # (and matching `#include` paths). When unset, the basename is derived from
+    # ``attributes_class`` by stripping the trailing ``Attributes`` suffix.
+    # Use this when the in-tree filename diverges from the C++ class name (e.g.,
+    # class ``ConvFpropAttributes`` lives in file ``ConvolutionFpropAttributes.hpp``)
+    # or when the operation ``name`` would collide with the suffix (e.g.,
+    # ``BatchnormInferenceAttributesVarianceExt`` would otherwise become
+    # ``BatchnormInferenceAttributesVarianceExtAttributes``).
+    # Value is the basename WITHOUT the ``Attributes`` suffix
+    # (e.g., ``"ConvolutionFprop"`` -> filename ``"ConvolutionFpropAttributes.hpp"``).
+    attributes_filename: Optional[str] = None
 
     # Lifting support (unpacker)
     unpacker_function: str = ""
@@ -453,8 +663,70 @@ class FrontendConfig:
     compatibility_typedef: str = ""
 
     @property
+    def effective_attributes_filename(self) -> str:
+        """Basename for the Attributes header WITHOUT the ``Attributes`` suffix.
+
+        Resolution order:
+          1. ``attributes_filename`` if explicitly set on the YAML.
+          2. ``attributes_class`` with the trailing ``Attributes`` stripped
+             (e.g., ``ConvFpropAttributes`` -> ``ConvFprop``).
+          3. ``node_class`` with the trailing ``Node`` stripped
+             (e.g., ``ConvolutionFpropNode`` -> ``ConvolutionFprop``).
+          4. Empty string.
+
+        Mirrors the precedence used by ``OperationConfig._frontend_base_name``
+        (which delegates here): file basenames default to the attributes-class
+        basename, with the explicit ``attributes_filename`` override taking
+        priority for cases where the in-tree filename diverges (e.g., conv,
+        batchnorm_inference_variance_ext).
+        """
+        if self.attributes_filename:
+            return self.attributes_filename
+        if self.attributes_class:
+            cls = self.attributes_class
+            if cls.endswith("Attributes"):
+                return cls[: -len("Attributes")]
+            return cls
+        if self.node_class:
+            cls = self.node_class
+            if cls.endswith("Node"):
+                return cls[: -len("Node")]
+            return cls
+        return ""
+
+    @property
+    def effective_attributes_filename_full(self) -> str:
+        """Full basename for the Attributes header (with ``Attributes`` suffix).
+
+        Equivalent to ``effective_attributes_filename + "Attributes"``. This is the
+        canonical basename used both for the generated ``.hpp`` filename and for
+        any ``#include <hipdnn_frontend/attributes/<basename>.hpp>`` lines.
+        """
+        base = self.effective_attributes_filename
+        if not base:
+            return ""
+        return f"{base}Attributes"
+
+    @property
     def effective_attributes_include(self) -> str:
-        """Include file name for the attributes class."""
+        """Include file name for the attributes class.
+
+        Resolution order (legacy semantics, preserved for back-compat):
+          1. ``attributes_include`` if explicitly set.
+          2. ``node_class`` with the trailing ``Node`` stripped, suffixed with
+             ``Attributes`` (e.g., ``ConvolutionFpropNode`` -> ``ConvolutionFpropAttributes``).
+          3. ``attributes_class``.
+
+        Note: the new canonical accessor for the attributes header basename is
+        ``effective_attributes_filename_full``, which honors the
+        ``attributes_filename`` YAML override and uses ``attributes_class``
+        precedence to match generated output filenames. ``effective_attributes_include``
+        keeps its historical ``node_class``-first precedence so existing configs
+        (which rely on ``attributes_include`` or the node_class-derived include
+        path) continue to render unchanged. Phase 2 will migrate emit sites to
+        ``effective_attributes_filename_full`` as configs adopt
+        ``attributes_filename``.
+        """
         if self.attributes_include:
             return self.attributes_include
         # Derive from node_class: ConvolutionFpropNode -> ConvolutionFpropAttributes
@@ -532,6 +804,9 @@ class OperationConfig:
     tensor_fields: list[TensorField] = field(default_factory=list)
     data_fields: list[DataField] = field(default_factory=list)
     tensor_array_fields: list[TensorArrayField] = field(default_factory=list)
+    extra_data_type_fields: list[ExtraDataTypeField] = field(default_factory=list)
+
+    data_fields_helper: Optional[DataFieldsHelper] = None
 
     has_compute_data_type: bool = True
     compute_data_type_attr: str = ""
@@ -596,7 +871,7 @@ class OperationConfig:
 
     @property
     def fbs_namespace(self) -> str:
-        return "hipdnn_data_sdk::data_objects"
+        return "hipdnn_flatbuffers_sdk::data_objects"
 
     @property
     def fbs_t_type(self) -> str:
@@ -771,47 +1046,114 @@ class OperationConfig:
         ]
 
     @property
+    def mode_field_backend_headers(self) -> list[str]:
+        """Unique backend C-API header filenames for mode fields with converters.
+
+        Used by the packer template to emit ``#include`` directives for the
+        backend enum types referenced by ``backend_converter`` calls (e.g.,
+        ``HipdnnConvolutionMode.h`` for ``toBackendConvMode``). Headers are
+        derived from each mode field's ``enum_def.backend_header`` and
+        deduplicated while preserving first-seen order.
+        """
+        seen: set[str] = set()
+        ordered: list[str] = []
+        for df in self.data_fields:
+            if not df.is_mode or not df.backend_converter:
+                continue
+            if df.enum_def and df.enum_def.backend_header:
+                hdr = df.enum_def.backend_header
+                if hdr not in seen:
+                    seen.add(hdr)
+                    ordered.append(hdr)
+        return ordered
+
+    @property
     def tensor_field_frontend_map(self) -> dict:
         """Maps tensor_field name -> matching FrontendTensorConfig from frontend inputs/outputs.
 
         This enables templates to look up the correct frontend getter/setter for any
-        backend tensor_field, handling cases where names diverge (e.g., tensor_field 'in_0'
-        maps to frontend tensor 'input_0').
+        backend tensor_field. Resolution order:
+
+        1. ``tensor_fields[].frontend_getter`` override (set in YAML). Matches an
+           existing ``FrontendTensorConfig`` whose ``effective_getter_name`` equals
+           the override; otherwise synthesizes a stand-in carrying the override and
+           a derived ``set_<name>`` setter (when the override starts with ``get_``).
+           This handles tensor_fields that are not graph I/O (batchnorm scalars,
+           sdpa stats outputs) and divergent accessors (sdpa ``attn_mask`` →
+           ``get_bias``).
+        2. Exact name match against ``frontend.inputs[].name`` /
+           ``frontend.outputs[].name``.
+        3. Abbreviation fallback (``in_X`` ↔ ``input_X``, ``out_X`` ↔ ``output_X``)
+           so configs like pointwise lift without explicit overrides.
         """
         if not self.frontend.inputs and not self.frontend.outputs:
             return {}
-        result = {}
+        result: dict = {}
         all_frontend = self.frontend.inputs + self.frontend.outputs
         for tf in self.tensor_fields:
-            # Try exact name match first
+            # 1) Override beats name-match. Tolerate a trailing ``()`` on the
+            # stored value so models built directly (bypassing the loader,
+            # e.g., from tests) work the same as loader-built models.
+            override = (
+                tf.frontend_getter.removesuffix("()") if tf.frontend_getter else ""
+            )
+            if override:
+                matched_existing = None
+                for ft in all_frontend:
+                    if ft.effective_getter_name == override:
+                        matched_existing = ft
+                        break
+                if matched_existing is not None:
+                    result[tf.name] = matched_existing
+                else:
+                    # Synthesize a stand-in. The synthetic carries
+                    # ``name=tf.name`` so ``effective_enum_name`` derives from
+                    # the backend tensor name -- safe because the packer/
+                    # unpacker templates only consume ``effective_getter_name``
+                    # / ``effective_setter_name`` / ``camel_name`` / ``name``
+                    # for tensor lookup, not ``effective_enum_name``.
+                    # Derive a setter only when the override follows the
+                    # ``get_<name>`` convention; leave blank otherwise so
+                    # ``effective_setter_name`` falls back to ``set_<name>``
+                    # on the synthetic.
+                    derived_setter = ""
+                    if override.startswith("get_"):
+                        derived_setter = "set_" + override[len("get_") :]
+                    result[tf.name] = FrontendTensorConfig(
+                        name=tf.name,
+                        getter_name=override,
+                        setter_name=derived_setter,
+                    )
+                continue
+            # 2) Exact name match.
+            matched = False
             for ft in all_frontend:
                 if tf.name == ft.name:
                     result[tf.name] = ft
+                    matched = True
                     break
-            else:
-                # Try matching backend getter base to frontend tensor name
-                if tf.frontend_getter:
-                    tf_base = tf.frontend_getter.replace("()", "").replace("get_", "")
-                    for ft in all_frontend:
-                        ft_base = ft.effective_getter_name.replace("get_", "")
-                        if tf_base == ft_base:
-                            result[tf.name] = ft
-                            break
-                        # Handle abbreviated names: in_0 -> input_0, out_0 -> output_0
-                        if (
-                            tf_base.startswith("in_")
-                            and ft_base.startswith("input_")
-                            and tf_base[3:] == ft_base[6:]
-                        ):
-                            result[tf.name] = ft
-                            break
-                        if (
-                            tf_base.startswith("out_")
-                            and ft_base.startswith("output_")
-                            and tf_base[4:] == ft_base[7:]
-                        ):
-                            result[tf.name] = ft
-                            break
+            if matched:
+                continue
+            # 3) Abbreviation-aware fallback:
+            #   in_X  <-> input_X
+            #   out_X <-> output_X
+            for ft in all_frontend:
+                if (
+                    tf.name.startswith("in_")
+                    and ft.name.startswith("input_")
+                    and tf.name[3:] == ft.name[6:]
+                ):
+                    result[tf.name] = ft
+                    matched = True
+                    break
+                if (
+                    tf.name.startswith("out_")
+                    and ft.name.startswith("output_")
+                    and tf.name[4:] == ft.name[7:]
+                ):
+                    result[tf.name] = ft
+                    matched = True
+                    break
         return result
 
     @property
@@ -830,22 +1172,21 @@ class OperationConfig:
 
     @property
     def _frontend_base_name(self) -> str:
-        """Base name for frontend files, derived from attributes_class or name.
+        """Base name for frontend files, derived from the frontend config or name.
+
+        Delegates to ``frontend.effective_attributes_filename`` (which honors the
+        ``attributes_filename`` YAML override) when a frontend basename is
+        resolvable; falls back to the operation ``name`` otherwise.
 
         Examples:
             attributes_class='ConvFpropAttributes' -> 'ConvFprop'
+            attributes_class='ConvFpropAttributes' with attributes_filename='ConvolutionFprop'
+                -> 'ConvolutionFprop'
             attributes_class='' with name='ConvolutionFwd' -> 'ConvolutionFwd'
         """
-        if self.frontend.attributes_class:
-            cls = self.frontend.attributes_class
-            if cls.endswith("Attributes"):
-                return cls[: -len("Attributes")]
-            return cls
-        if self.frontend.node_class:
-            cls = self.frontend.node_class
-            if cls.endswith("Node"):
-                return cls[: -len("Node")]
-            return cls
+        base = self.frontend.effective_attributes_filename
+        if base:
+            return base
         return self.name
 
     @property
@@ -896,9 +1237,12 @@ class OperationConfig:
     def tensor_const_prefix(self) -> str:
         """Prefix for tensor constant names.
 
-        Returns 'K_' for pre-existing constants headers (backward compatible),
+        Returns the explicit override from test_data if set, otherwise
+        'K_' for pre-existing constants headers (backward compatible),
         'K_{NAME}_' for new operations (avoids collisions).
         """
+        if self.test_data and self.test_data.tensor_const_prefix:
+            return self.test_data.tensor_const_prefix
         if self.test_data and self.test_data.constants_include:
             return "K_"
         return f"K_{self.name.upper()}_"

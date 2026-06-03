@@ -4,8 +4,17 @@
 #include "TestPluginCommon.hpp"
 #include "TestPluginEngineIdMap.hpp"
 
-#include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_plugin_sdk/KnobFactory.hpp>
+
+#include <cstdint>
+#include <vector>
+
+// Thread-local storage for raw flatbuffer bytes of each received EngineConfig.
+// Tests read these via the exported getCount/getDataAt/getSizeAt/reset C functions,
+// then unpack to EngineConfigT for direct comparison.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static thread_local std::vector<std::vector<uint8_t>> gReceivedKnobs;
 
 // NOLINTNEXTLINE
 thread_local char
@@ -137,7 +146,8 @@ public:
             flatbuffers::FlatBufferBuilder builder;
 
             // Create knobs vector using KnobFactory
-            std::vector<flatbuffers::Offset<hipdnn_data_sdk::data_objects::Knob>> knobOffsets;
+            std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Knob>>
+                knobOffsets;
 
             if(engineId == hipdnn_tests::plugin_constants::engineId<KnobsPlugin>())
             {
@@ -219,15 +229,16 @@ public:
                 {}));
 
             auto knobsVector = builder.CreateVector(knobOffsets);
-            auto newEngineDetails = hipdnn_data_sdk::data_objects::CreateEngineDetails(
+            auto newEngineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
                 builder, engineId, knobsVector);
             builder.Finish(newEngineDetails);
             auto serializedDetails = builder.Release();
 
-            auto* tempBuffer = new uint8_t[serializedDetails.size()];
-            std::memcpy(tempBuffer, serializedDetails.data(), serializedDetails.size());
+            TestPluginMallocBuffer tempBuffer(std::malloc(serializedDetails.size()));
+            hipdnn_plugin_sdk::throwIfNull(tempBuffer.get());
+            std::memcpy(tempBuffer.get(), serializedDetails.data(), serializedDetails.size());
 
-            engineDetails->ptr = tempBuffer;
+            engineDetails->ptr = tempBuffer.release();
             engineDetails->size = serializedDetails.size();
 
             LOG_API_SUCCESS(apiName, "engineDetails->ptr=" << engineDetails->ptr);
@@ -243,59 +254,62 @@ __attribute__((constructor)) static void initializePlugin()
 
 // Custom API registration that overrides enginePluginGetEngineDetails
 extern "C" {
-hipdnnPluginStatus_t hipdnnPluginGetName(const char** name)
+HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t hipdnnPluginGetName(const char** name)
 {
     return TestPluginBase::pluginGetName(name);
 }
 
-hipdnnPluginStatus_t hipdnnPluginGetVersion(const char** version)
+HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t hipdnnPluginGetVersion(const char** version)
 {
     return TestPluginBase::pluginGetVersion(version);
 }
 
-hipdnnPluginStatus_t hipdnnPluginGetApiVersion(const char** version)
+HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t hipdnnPluginGetApiVersion(const char** version)
 {
     return TestPluginBase::pluginGetApiVersion(version);
 }
 
-hipdnnPluginStatus_t hipdnnPluginGetType(hipdnnPluginType_t* type)
+HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t hipdnnPluginGetType(hipdnnPluginType_t* type)
 {
     return TestPluginBase::pluginGetType(type);
 }
 
-void hipdnnPluginGetLastErrorString(const char** errorStr)
+HIPDNN_TEST_PLUGIN_EXPORT void hipdnnPluginGetLastErrorString(const char** errorStr)
 {
     TestPluginBase::pluginGetLastErrorString(errorStr);
 }
 
-hipdnnPluginStatus_t hipdnnPluginSetLoggingCallback(hipdnnCallback_t callback)
+HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t
+    hipdnnPluginSetLoggingCallback(hipdnnCallback_t callback)
 {
     return TestPluginBase::pluginSetLoggingCallback(callback);
 }
 
-hipdnnPluginStatus_t
+HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnEnginePluginGetAllEngineIds(int64_t* engineIds, uint32_t maxEngines, uint32_t* numEngines)
 {
     return KnobsPlugin::getAllEngineIds(engineIds, maxEngines, numEngines);
 }
 
-hipdnnPluginStatus_t hipdnnEnginePluginCreate(hipdnnEnginePluginHandle_t* handle)
+HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t
+    hipdnnEnginePluginCreate(hipdnnEnginePluginHandle_t* handle)
 {
     return TestPluginBase::enginePluginCreate(handle);
 }
 
-hipdnnPluginStatus_t hipdnnEnginePluginDestroy(hipdnnEnginePluginHandle_t handle)
+HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t
+    hipdnnEnginePluginDestroy(hipdnnEnginePluginHandle_t handle)
 {
     return TestPluginBase::enginePluginDestroy(handle);
 }
 
-hipdnnPluginStatus_t hipdnnEnginePluginSetStream(hipdnnEnginePluginHandle_t handle,
-                                                 hipStream_t stream)
+HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t
+    hipdnnEnginePluginSetStream(hipdnnEnginePluginHandle_t handle, hipStream_t stream)
 {
     return TestPluginBase::enginePluginSetStream(handle, stream);
 }
 
-hipdnnPluginStatus_t
+HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnEnginePluginGetApplicableEngineIds(hipdnnEnginePluginHandle_t handle,
                                              const hipdnnPluginConstData_t* opGraph,
                                              int64_t* engineIds,
@@ -306,38 +320,48 @@ hipdnnPluginStatus_t
 }
 
 // Override to use KnobsPlugin::getEngineDetails
-hipdnnPluginStatus_t hipdnnEnginePluginGetEngineDetails(hipdnnEnginePluginHandle_t handle,
-                                                        int64_t engineId,
-                                                        const hipdnnPluginConstData_t* opGraph,
-                                                        hipdnnPluginConstData_t* engineDetails)
+HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t
+    hipdnnEnginePluginGetEngineDetails(hipdnnEnginePluginHandle_t handle,
+                                       int64_t engineId,
+                                       const hipdnnPluginConstData_t* opGraph,
+                                       hipdnnPluginConstData_t* engineDetails)
 {
     return KnobsPlugin::getEngineDetails(handle, engineId, opGraph, engineDetails);
 }
 
-hipdnnPluginStatus_t hipdnnEnginePluginDestroyEngineDetails(hipdnnEnginePluginHandle_t handle,
-                                                            hipdnnPluginConstData_t* engineDetails)
+HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t hipdnnEnginePluginDestroyEngineDetails(
+    hipdnnEnginePluginHandle_t handle, hipdnnPluginConstData_t* engineDetails)
 {
     return TestPluginBase::enginePluginDestroyEngineDetails(handle, engineDetails);
 }
 
-hipdnnPluginStatus_t hipdnnEnginePluginGetWorkspaceSize(hipdnnEnginePluginHandle_t handle,
-                                                        const hipdnnPluginConstData_t* engineConfig,
-                                                        const hipdnnPluginConstData_t* opGraph,
-                                                        size_t* workspaceSize)
+HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t
+    hipdnnEnginePluginGetWorkspaceSize(hipdnnEnginePluginHandle_t handle,
+                                       const hipdnnPluginConstData_t* engineConfig,
+                                       const hipdnnPluginConstData_t* opGraph,
+                                       size_t* workspaceSize)
 {
+    // Record raw flatbuffer bytes so tests can unpack and compare EngineConfigT directly.
+    if(engineConfig != nullptr && engineConfig->ptr != nullptr && engineConfig->size > 0)
+    {
+        const auto* bytes = static_cast<const uint8_t*>(engineConfig->ptr);
+        gReceivedKnobs.emplace_back(bytes, bytes + engineConfig->size);
+    }
+
     return TestPluginBase::enginePluginGetWorkspaceSize(
         handle, engineConfig, opGraph, workspaceSize);
 }
 
-hipdnnPluginStatus_t hipdnnEnginePluginGetWorkspaceSizeFromExecutionContext(
-    hipdnnEnginePluginHandle_t handle,
-    hipdnnEnginePluginExecutionContext_t executionContext,
-    size_t* workspaceSize)
+HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t
+    hipdnnEnginePluginGetWorkspaceSizeFromExecutionContext(
+        hipdnnEnginePluginHandle_t handle,
+        hipdnnEnginePluginExecutionContext_t executionContext,
+        size_t* workspaceSize)
 {
     return TestPluginBase::enginePluginGetWorkspaceSize(handle, executionContext, workspaceSize);
 }
 
-hipdnnPluginStatus_t
+HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnEnginePluginCreateExecutionContext(hipdnnEnginePluginHandle_t handle,
                                              const hipdnnPluginConstData_t* engineConfig,
                                              const hipdnnPluginConstData_t* opGraph,
@@ -347,14 +371,13 @@ hipdnnPluginStatus_t
         handle, engineConfig, opGraph, executionContext);
 }
 
-hipdnnPluginStatus_t
-    hipdnnEnginePluginDestroyExecutionContext(hipdnnEnginePluginHandle_t handle,
-                                              hipdnnEnginePluginExecutionContext_t executionContext)
+HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t hipdnnEnginePluginDestroyExecutionContext(
+    hipdnnEnginePluginHandle_t handle, hipdnnEnginePluginExecutionContext_t executionContext)
 {
     return TestPluginBase::enginePluginDestroyExecutionContext(handle, executionContext);
 }
 
-hipdnnPluginStatus_t
+HIPDNN_TEST_PLUGIN_EXPORT hipdnnPluginStatus_t
     hipdnnEnginePluginExecuteOpGraph(hipdnnEnginePluginHandle_t handle,
                                      hipdnnEnginePluginExecutionContext_t executionContext,
                                      void* workspace,
@@ -363,5 +386,33 @@ hipdnnPluginStatus_t
 {
     return TestPluginBase::enginePluginExecuteOpGraph(
         handle, executionContext, workspace, deviceBuffers, numDeviceBuffers);
+}
+
+HIPDNN_PLUGIN_EXPORT uint32_t hipdnnTestKnobsPluginGetReceivedKnobsCount()
+{
+    return static_cast<uint32_t>(gReceivedKnobs.size());
+}
+
+HIPDNN_PLUGIN_EXPORT const uint8_t* hipdnnTestKnobsPluginGetReceivedKnobsDataAt(uint32_t index)
+{
+    if(index >= gReceivedKnobs.size())
+    {
+        return nullptr;
+    }
+    return gReceivedKnobs[index].data();
+}
+
+HIPDNN_PLUGIN_EXPORT uint32_t hipdnnTestKnobsPluginGetReceivedKnobsSizeAt(uint32_t index)
+{
+    if(index >= gReceivedKnobs.size())
+    {
+        return 0;
+    }
+    return static_cast<uint32_t>(gReceivedKnobs[index].size());
+}
+
+HIPDNN_PLUGIN_EXPORT void hipdnnTestKnobsPluginResetReceivedKnobs()
+{
+    gReceivedKnobs.clear();
 }
 } // extern "C"

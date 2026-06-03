@@ -41,38 +41,37 @@ operation:
     graph_return_type: "single"
     graph_return_outputs:
       - "c"
+    node_type_enum: "NodeType::MATMUL"
 
   tensor_fields:
     - name: "a"
       fbs_field: "a_tensor_uid"
-      attr_suffix: "A"
+      attr_suffix: "ADESC"
       required: true
-      frontend_getter: "get_a()"
 
     - name: "b"
       fbs_field: "b_tensor_uid"
-      attr_suffix: "B"
+      attr_suffix: "BDESC"
       required: true
-      frontend_getter: "get_b()"
 
     - name: "c"
       fbs_field: "c_tensor_uid"
-      attr_suffix: "C"
+      attr_suffix: "CDESC"
       required: true
-      frontend_getter: "get_c()"
 
   data_fields: []
 
   tensor_array_fields: []
 
   has_compute_data_type: true
-  compute_data_type_attr: "HIPDNN_ATTR_MATMUL_MATH_PREC_EXT"
+  compute_data_type_attr: "HIPDNN_ATTR_MATMUL_COMP_TYPE"
 
-  operation_type_enum: "HIPDNN_OPERATION_TYPE_MATMUL"
+  operation_type_enum: "HIPDNN_OPERATION_TYPE_MATMUL_EXT"
 
   test_data:
     constants_include: "MatmulConstants"
-    tensor_uids: { a: 30, b: 31, c: 32 }
+    tensor_const_prefix: "K_MATMUL_"
+    tensor_uids: { a: 1500, b: 1501, c: 1502 }
     tensor_configs:
       a: { dims: [1, 1, 64, 128], strides: [8192, 8192, 128, 1] }
       b: { dims: [1, 1, 128, 256], strides: [32768, 32768, 256, 1] }

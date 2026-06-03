@@ -77,37 +77,31 @@ operation:
       fbs_field: "x_tensor_uid"
       attr_suffix: "X_EXT"
       required: true
-      frontend_getter: "get_x()"
 
     - name: "mean"
       fbs_field: "mean_tensor_uid"
       attr_suffix: "MEAN_EXT"
       required: true
-      frontend_getter: "get_mean()"
 
     - name: "inv_variance"
       fbs_field: "inv_variance_tensor_uid"
       attr_suffix: "INV_VARIANCE_EXT"
       required: true
-      frontend_getter: "get_inv_variance()"
 
     - name: "scale"
       fbs_field: "scale_tensor_uid"
       attr_suffix: "SCALE_EXT"
       required: true
-      frontend_getter: "get_scale()"
 
     - name: "bias"
       fbs_field: "bias_tensor_uid"
       attr_suffix: "BIAS_EXT"
       required: true
-      frontend_getter: "get_bias()"
 
     - name: "y"
       fbs_field: "y_tensor_uid"
       attr_suffix: "Y_EXT"
       required: true
-      frontend_getter: "get_y()"
 
   data_fields: []
 
@@ -116,7 +110,7 @@ operation:
   has_compute_data_type: true
   compute_data_type_attr: "HIPDNN_ATTR_BATCHNORM_INF_COMP_TYPE_EXT"
 
-  operation_type_enum: "HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE"
+  operation_type_enum: "HIPDNN_OPERATION_TYPE_BATCHNORM_INFERENCE_EXT"
 
   infer_properties:
     strategy: "match_input"

@@ -13,8 +13,9 @@ namespace miopen_plugin
 const miopenBatchNormMode_t MIOPEN_BATCHNORM_MODE_TRAINING = miopenBNSpatial;
 
 BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
-    const hipdnn_data_sdk::data_objects::BatchnormAttributes& attributes,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& attributes,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
     : _x(miopen_utils::createBatchnormTensor(tensorMap, attributes.x_tensor_uid()))
     , _y(miopen_utils::createBatchnormTensor(tensorMap, attributes.y_tensor_uid()))
@@ -60,9 +61,10 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
 }
 
 BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
-    const hipdnn_data_sdk::data_objects::BatchnormAttributes& attributes,
-    const hipdnn_data_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& attributes,
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& pointwiseAttributes,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
     : _x(miopen_utils::createBatchnormTensor(tensorMap, attributes.x_tensor_uid()))
     , _y(miopen_utils::createBatchnormTensor(tensorMap, attributes.y_tensor_uid()))
@@ -262,14 +264,15 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnMiopenHandle& handle,
                                        [[maybe_unused]] void* workspace) const
 {
     // Set tuning policy based on benchmarking flag - RAII ensures restoration
-    ScopedTuningPolicy tuningGuard(handle.miopenHandle, _executionSettings.benchmarkingEnabled());
+    const ScopedTuningPolicy tuningGuard(handle.miopenHandle,
+                                         _executionSettings.benchmarkingEnabled());
 
     float alpha = 1.0f;
     float beta = 0.0f;
 
     // Extract epsilon from pass-by-value tensor attribute (type-safe, no buffer lookup needed)
     // Note: Type validation already done in constructor
-    double epsilon = _trainingParams.epsilonValue();
+    const double epsilon = _trainingParams.epsilonValue();
 
     // Extract momentum from pass-by-value tensor attribute if running stats exist
     double expAvgFactor = 0.0;

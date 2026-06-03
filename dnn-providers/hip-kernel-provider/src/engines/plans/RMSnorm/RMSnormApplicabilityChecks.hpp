@@ -3,36 +3,42 @@
 
 #pragma once
 
-#include <unordered_map>
-#include <vector>
-
-#include <hipdnn_data_sdk/data_objects/rmsnorm_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/tensor_attributes_generated.h>
+#include "engines/plans/ApplicabilityChecks.hpp"
+#include <hipdnn_flatbuffers_sdk/data_objects/rmsnorm_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/rmsnorm_backward_attributes_generated.h>
 
 namespace hip_kernel_provider::rmsnorm
 {
 
-// --- Tensor Descriptor Value Object ---
-
-struct RMSnormTensorDescriptor
+class RMSnormValidator : public IValidator
 {
-    std::vector<int64_t> dims;
-    std::vector<int64_t> strides;
-    std::vector<int64_t> strideOrder;
+private:
+    void checkTensorLayoutsAndDimsSupported() override;
 
-    explicit RMSnormTensorDescriptor(const hipdnn_data_sdk::data_objects::TensorAttributes* attr);
+    void checkTensorDataTypesSupported(const std::vector<int64_t>& ioTensorIds,
+                                       const std::vector<int64_t>& affineTensorIds,
+                                       const std::vector<int64_t>& statTensorIds);
 
-    size_t numDims() const
-    {
-        return dims.size();
-    }
-    bool isPacked() const;
+    void checkTensorShapesSupported(const std::vector<int64_t>& ioTensorIds,
+                                    const std::vector<int64_t>& affineTensorIds,
+                                    const std::vector<int64_t>& statTensorIds);
+
+    static void checkAffineNormalizedShape(const std::vector<int64_t>& affineDims,
+                                           const std::vector<int64_t>& ioDims);
+
+public:
+    RMSnormValidator(
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+            tensorMapLocal)
+        : IValidator(tensorMapLocal) {};
+
+    // --- High-Level Configuration Validators ---
+    void checkTensorConfigSupported(
+        const hipdnn_flatbuffers_sdk::data_objects::RMSNormAttributes& rmsNormAttr);
+
+    void checkBwdTensorConfigSupported(
+        const hipdnn_flatbuffers_sdk::data_objects::RMSNormBackwardAttributes& rmsNormBwdAttr);
 };
-
-// --- High-Level Configuration Validators ---
-void checkRMSnormTensorConfigSupported(
-    const hipdnn_data_sdk::data_objects::RMSNormAttributes& rmsNormAttr,
-    const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
-        tensorMap);
 
 } // namespace hip_kernel_provider::rmsnorm

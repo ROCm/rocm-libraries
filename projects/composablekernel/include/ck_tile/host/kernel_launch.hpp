@@ -15,9 +15,11 @@
 #include <cstddef>
 #include <hip/hip_runtime.h>
 
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-
+#pragma clang diagnostic ignored "-Wlifetime-safety-lifetimebound-violation"
+#endif
 namespace ck_tile {
 
 template <typename T, typename = void>
@@ -27,6 +29,8 @@ inline constexpr bool
     kattr_no_packed_fp32_ops_v<T, std::void_t<decltype(T::kattr_no_packed_fp32_ops)>> =
         T::kattr_no_packed_fp32_ops;
 
+// TODO: rename to something more specific (e.g. kernel_attr_no_packed_fp32) since
+// kernel_attr<bool> only controls the no-packed-fp32-ops flag, not a general attribute bag.
 template <bool no_packed_fp32_ops>
 struct kernel_attr
 {
@@ -34,6 +38,32 @@ struct kernel_attr
     // instructions so that they can be co-executed with matrix operations
     static constexpr bool kattr_no_packed_fp32_ops = no_packed_fp32_ops;
 };
+
+// Compose an architecture tag with kernel attributes.
+// Inherits ArchTag for symbol mangling and adds attribute flags.
+// kernel_attr_for<gfx950_t>              -> gfx950_t  (identity)
+// kernel_attr_for<gfx950_t, kernel_attr<true>> -> unique type with attribute
+namespace detail {
+template <typename ArchTag, typename... Attrs>
+struct kernel_attr_for_impl : ArchTag, Attrs...
+{
+};
+
+template <typename ArchTag, typename... Attrs>
+struct kernel_attr_for_helper
+{
+    using type = kernel_attr_for_impl<ArchTag, Attrs...>;
+};
+
+template <typename ArchTag>
+struct kernel_attr_for_helper<ArchTag>
+{
+    using type = ArchTag;
+};
+} // namespace detail
+
+template <typename ArchTag, typename... Attrs>
+using kernel_attr_for = typename detail::kernel_attr_for_helper<ArchTag, Attrs...>::type;
 
 #if CK_TILE_USE_LAUNCH_BOUNDS
 #define KENTRY_LAUNCH_BOUNDS __launch_bounds__(Kernel::kBlockSize, MinBlockPerCu)
@@ -103,6 +133,41 @@ CK_TILE_HOST auto make_kernel(KernelImpl /*f*/,
         kernel<<<grid_dim, block_dim, lds_byte, s.stream_id_>>>(args...);
     };
 }
+
+//
+// overload of make_kernel: Cluster launch version of make_kernel
+//
+#if CK_TILE_ENABLE_CLUSTER_LAUNCH
+template <int MinBlockPerCu = CK_TILE_MIN_BLOCK_PER_CU, typename KernelImpl, typename... Args>
+CK_TILE_HOST auto make_kernel(KernelImpl /*f*/,
+                              dim3 cluster_dim,
+                              dim3 grid_dim,
+                              dim3 block_dim,
+                              std::size_t lds_byte,
+                              Args... args)
+{
+    const auto kernel = kentry<MinBlockPerCu, KernelImpl, Args...>;
+    return [=](const stream_config& s) {
+        // Set cluster dimensions as launch attributes
+        hipLaunchConfig_t config{};
+        config.gridDim          = grid_dim;
+        config.blockDim         = block_dim;
+        config.dynamicSmemBytes = lds_byte;
+        config.stream           = s.stream_id_;
+
+        hipLaunchAttribute attrs[1];
+        attrs[0].id               = hipLaunchAttributeClusterDimension;
+        attrs[0].val.clusterDim.x = cluster_dim.x;
+        attrs[0].val.clusterDim.y = cluster_dim.y;
+        attrs[0].val.clusterDim.z = cluster_dim.z;
+        config.attrs              = attrs;
+        config.numAttrs           = 1;
+
+        // Launch kernel with cluster attributes
+        return hipLaunchKernelEx(&config, kernel, args...);
+    };
+}
+#endif
 
 template <typename... Callables>
 CK_TILE_HOST void launch_and_check(const stream_config& sc, Callables&&... callables)
@@ -310,4 +375,6 @@ CK_TILE_HOST float launch_kernel_time_mask_flush_cache(const stream_config& s,
 
 } // namespace ck_tile
 
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
+#endif

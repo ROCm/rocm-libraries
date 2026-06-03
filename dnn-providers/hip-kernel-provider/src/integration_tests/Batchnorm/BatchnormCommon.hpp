@@ -10,7 +10,7 @@
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 
-namespace hip_kernel_provider::test_bn_common
+namespace hip_kernel_provider::batchnorm::test::common
 {
 
 struct BatchnormTestCase
@@ -74,4 +74,67 @@ inline std::vector<BatchnormTestCase> getBnFwdInference3dTestCases()
     };
 }
 
-} // namespace hip_kernel_provider::test_bn_common
+inline std::vector<BatchnormTestCase> getBnFwdTrainingSmoke2dTestCases()
+{
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    return {
+        {{2, 3, 1, 1}, seed}, // Minimal case
+        {{32, 3, 1, 14}, seed}, // Typical small training case
+    };
+}
+
+inline std::vector<BatchnormTestCase> getBnFwdTrainingFull2dTestCases()
+{
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    return {
+        {{1, 3, 14, 14}, seed}, // Small batch
+        {{2, 3, 1, 1}, seed}, // Edge case: 1x1 spatial
+        {{8, 16, 28, 28}, seed}, // Medium size
+        {{4, 64, 7, 7}, seed}, // Many channels, smaller spatial
+    };
+}
+
+inline std::vector<BatchnormTestCase> getBnFwdTrainingSmoke3dTestCases()
+{
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    return {
+        {{2, 3, 3, 1, 1}, seed}, // Minimal 3D case
+        {{2, 3, 2, 4, 4}, seed}, // Small case with non-1 spatial dims
+    };
+}
+
+inline std::vector<BatchnormTestCase> getBnFwdTrainingFull3dTestCases()
+{
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    return {
+        {{2, 3, 3, 1, 1}, seed}, // Minimal case
+        {{2, 3, 2, 4, 4}, seed}, // Small case
+        {{16, 3, 8, 14, 14}, seed}, // Larger regression case
+    };
+}
+
+inline std::vector<BatchnormTestCase> getBnBwdSmoke2dTestCases()
+{
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    return {
+        {{2, 3, 1, 1}, seed},
+        {{32, 3, 1, 14}, seed},
+    };
+}
+
+inline std::vector<BatchnormTestCase> getBnBwdSmoke3dTestCases()
+{
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    return {
+        {{2, 3, 3, 1, 1}, seed},
+        {{2, 3, 2, 4, 4}, seed},
+    };
+}
+
+} // namespace hip_kernel_provider::batchnorm::test::common

@@ -3,8 +3,9 @@
 
 #pragma once
 
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_test_sdk/utilities/ConvolutionValidation.hpp>
 #include <hipdnn_test_sdk/utilities/detail/CpuFpReferenceUtilities.hpp>
 #include <stdexcept>
 #include <thread>
@@ -17,9 +18,9 @@ class CpuFpReferenceConvolution
 {
 public:
     // Check if this CPU implementation supports the given node configuration
-    static bool isApplicable(const hipdnn_data_sdk::data_objects::Node& node)
+    static bool isApplicable(const hipdnn_flatbuffers_sdk::data_objects::Node& node)
     {
-        using namespace hipdnn_data_sdk::data_objects;
+        using namespace hipdnn_flatbuffers_sdk::data_objects;
 
         bool validNode = (node.attributes_type() == NodeAttributes::ConvolutionFwdAttributes
                           || node.attributes_type() == NodeAttributes::ConvolutionBwdAttributes);
@@ -434,107 +435,14 @@ private:
                               const std::vector<int64_t>& prePadding,
                               const std::vector<int64_t>& postPadding)
     {
-        // Input validation
         if(x.dims().size() < 3)
         {
             throw std::invalid_argument(
                 "Input tensor must have at least 3 dimensions (N, C, spatial...)");
         }
 
-        if(y.dims().size() < 3)
-        {
-            throw std::invalid_argument(
-                "Output tensor must have at least 3 dimensions (N, C, spatial...)");
-        }
-
-        if(w.dims().size() < 3)
-        {
-            throw std::invalid_argument(
-                "Weight tensor must have at least 3 dimensions ([G*K], C, spatial...)");
-        }
-
-        // Check that all tensors have same number of dimensions
-        if(x.dims().size() != y.dims().size() || x.dims().size() != w.dims().size())
-        {
-            throw std::invalid_argument(
-                "Input, y, and w tensors must have the same number of dimensions");
-        }
-
-        const int64_t nSpatialDims = static_cast<int64_t>(x.dims().size()) - 2;
-
-        if(strides.size() != static_cast<size_t>(nSpatialDims))
-        {
-            throw std::invalid_argument("Strides must have exactly " + std::to_string(nSpatialDims)
-                                        + " elements for " + std::to_string(nSpatialDims)
-                                        + "D spatial convolution");
-        }
-
-        if(dilations.size() != static_cast<size_t>(nSpatialDims))
-        {
-            throw std::invalid_argument("Dilations must have exactly "
-                                        + std::to_string(nSpatialDims) + " elements for "
-                                        + std::to_string(nSpatialDims) + "D spatial convolution");
-        }
-
-        if(prePadding.size() != static_cast<size_t>(nSpatialDims))
-        {
-            throw std::invalid_argument("PrePadding must have exactly "
-                                        + std::to_string(nSpatialDims) + " elements for "
-                                        + std::to_string(nSpatialDims) + "D spatial convolution");
-        }
-
-        if(postPadding.size() != static_cast<size_t>(nSpatialDims))
-        {
-            throw std::invalid_argument("PostPadding must have exactly "
-                                        + std::to_string(nSpatialDims) + " elements for "
-                                        + std::to_string(nSpatialDims) + "D spatial convolution");
-        }
-
-        const auto& xDims = x.dims();
-        const auto& wDims = w.dims();
-        const auto& yDims = y.dims();
-
-        for(int64_t i = 0; i < nSpatialDims; ++i)
-        {
-            auto idx = static_cast<size_t>(i);
-            if(strides[idx] <= 0)
-            {
-                throw std::invalid_argument("Stride values must be positive");
-            }
-
-            if(dilations[idx] <= 0)
-            {
-                throw std::invalid_argument("Dilation values must be positive");
-            }
-
-            if(prePadding[idx] < 0)
-            {
-                throw std::invalid_argument("PrePadding values must be non-negative");
-            }
-
-            if(postPadding[idx] < 0)
-            {
-                throw std::invalid_argument("PostPadding values must be non-negative");
-            }
-
-            // Validate that y dimensions are correct given the padding
-            // Some of this validation could probably be consolidated into the sdk and removed from frontend nodes
-            const int64_t xDim = xDims[idx + 2];
-            const int64_t kernelDim = wDims[idx + 2];
-            const int64_t yDim = yDims[idx + 2];
-
-            const int64_t kernelSize = (dilations[idx] * (kernelDim - 1)) + 1;
-            const int64_t expectedOutputDim
-                = ((xDim + prePadding[idx] + postPadding[idx] - kernelSize) / strides[idx]) + 1;
-
-            if(expectedOutputDim != yDim)
-            {
-                throw std::invalid_argument(
-                    "Output dimension " + std::to_string(yDim) + " at spatial dimension "
-                    + std::to_string(i) + " does not match expected dimension "
-                    + std::to_string(expectedOutputDim) + " given the x parameters.");
-            }
-        }
+        hipdnn_test_sdk::utilities::validateConvolutionParams(
+            x, w, y, strides, dilations, prePadding, postPadding);
     }
 };
 

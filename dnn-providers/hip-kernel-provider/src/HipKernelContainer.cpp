@@ -4,9 +4,18 @@
 #include "HipKernelContainer.hpp"
 #include "CurrentDevicePropertyProvider.hpp"
 #include "engines/HipKernelEngine.hpp"
-#include "engines/plans/BatchnormPlanBuilder.hpp"
+#include "engines/plans/RMSnorm/RMSnormBwdPlanBuilder.hpp"
 #include "engines/plans/RMSnorm/RMSnormPlanBuilder.hpp"
+#include "engines/plans/batchnorm/BatchnormFwdTrainingPlanBuilder.hpp"
+#include "engines/plans/batchnorm/BatchnormPlanBuilder.hpp"
+#include "engines/plans/layernorm/LayernormPlanBuilder.hpp"
 #include "hip/HipKernelCompiler.hpp"
+
+#ifdef HIPDNN_ENGINE_ASM_SDPA
+#include "engines/asm_sdpa_engine/AsmSdpaEngine.hpp"
+#include "engines/asm_sdpa_engine/plans/SdpaBwdPlanBuilder.hpp"
+#include "engines/asm_sdpa_engine/plans/SdpaFwdPlanBuilder.hpp"
+#endif
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
@@ -27,12 +36,32 @@ const std::vector<HipKernelContainer::EngineDefinition>& HipKernelContainer::get
              -> std::unique_ptr<
                  hipdnn_plugin_sdk::IEngine<HipKernelHandle, HipKernelSettings, HipKernelContext>> {
              auto engine = std::make_unique<HipKernelEngine>(HIP_KERNEL_ENGINE_ID);
-             engine->addPlanBuilder(
-                 std::make_unique<BatchnormPlanBuilder>(kernelCompiler, devicePropertyProvider));
+             engine->addPlanBuilder(std::make_unique<batchnorm::BatchnormPlanBuilder>(
+                 kernelCompiler, devicePropertyProvider));
+             engine->addPlanBuilder(std::make_unique<batchnorm::BatchnormFwdTrainingPlanBuilder>(
+                 kernelCompiler, devicePropertyProvider));
              engine->addPlanBuilder(std::make_unique<rmsnorm::RMSnormPlanBuilder>(
                  kernelCompiler, devicePropertyProvider));
+             engine->addPlanBuilder(std::make_unique<rmsnorm::RMSnormBwdPlanBuilder>(
+                 kernelCompiler, devicePropertyProvider));
+             engine->addPlanBuilder(std::make_unique<layernorm::LayernormPlanBuilder>(
+                 kernelCompiler, devicePropertyProvider));
              return engine;
-         }}};
+         }},
+#ifdef HIPDNN_ENGINE_ASM_SDPA
+        // ASM_SDPA_ENGINE
+        {ASM_SDPA_ENGINE_ID,
+         [](const IKernelCompiler& /*kernelCompiler*/,
+            const IDevicePropertyProvider& /*devicePropertyProvider*/)
+             -> std::unique_ptr<
+                 hipdnn_plugin_sdk::IEngine<HipKernelHandle, HipKernelSettings, HipKernelContext>> {
+             auto engine = std::make_unique<asm_sdpa_engine::AsmSdpaEngine>();
+             engine->addPlanBuilder(std::make_unique<asm_sdpa_engine::SdpaFwdPlanBuilder>());
+             engine->addPlanBuilder(std::make_unique<asm_sdpa_engine::SdpaBwdPlanBuilder>());
+             return engine;
+         }},
+#endif
+    };
 
     return s_engineDefinitions;
 }

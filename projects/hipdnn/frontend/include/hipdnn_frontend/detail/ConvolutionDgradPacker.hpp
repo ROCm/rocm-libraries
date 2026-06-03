@@ -4,6 +4,7 @@
 #pragma once
 
 #include <hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp>
+#include <hipdnn_frontend/detail/ConvolutionPackerHelpers.hpp>
 #include <hipdnn_frontend/detail/DescriptorHelpers.hpp>
 
 namespace hipdnn_frontend::detail
@@ -17,7 +18,8 @@ inline Error createConvDgradOperation(
     std::vector<ScopedHipdnnBackendDescriptor>& operations)
 {
     // Create operation descriptor
-    ScopedHipdnnBackendDescriptor opDesc(HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DESCRIPTOR);
+    ScopedHipdnnBackendDescriptor opDesc(
+        HIPDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR);
     if(!opDesc.valid())
     {
         return {ErrorCode::HIPDNN_BACKEND_ERROR,
@@ -26,61 +28,23 @@ inline Error createConvDgradOperation(
 
     // Create tensor descriptors (if needed) and set them on the operation
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DY,
+                                             HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DY,
                                              attributes.get_dy(),
                                              tensorDescs,
                                              "conv dgrad DY"));
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_W,
+                                             HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_W,
                                              attributes.get_w(),
                                              tensorDescs,
                                              "conv dgrad W"));
     HIPDNN_CHECK_ERROR(ensureAndSetTensorRef(opDesc.get(),
-                                             HIPDNN_ATTR_OPERATION_CONVOLUTION_BACKWARD_DX,
+                                             HIPDNN_ATTR_OPERATION_CONVOLUTION_BWD_DATA_DX,
                                              attributes.get_dx(),
                                              tensorDescs,
                                              "conv dgrad DX"));
 
-    // Set conv dgrad parameters
-    HIPDNN_CHECK_ERROR(setDescriptorAttrVec(opDesc.get(),
-                                            HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS,
-                                            HIPDNN_TYPE_INT64,
-                                            attributes.get_pre_padding(),
-                                            "conv dgrad pre_padding"));
-    HIPDNN_CHECK_ERROR(setDescriptorAttrVec(opDesc.get(),
-                                            HIPDNN_ATTR_CONVOLUTION_POST_PADDINGS,
-                                            HIPDNN_TYPE_INT64,
-                                            attributes.get_post_padding(),
-                                            "conv dgrad post_padding"));
-    HIPDNN_CHECK_ERROR(setDescriptorAttrVec(opDesc.get(),
-                                            HIPDNN_ATTR_CONVOLUTION_FILTER_STRIDES,
-                                            HIPDNN_TYPE_INT64,
-                                            attributes.get_stride(),
-                                            "conv dgrad stride"));
-    HIPDNN_CHECK_ERROR(setDescriptorAttrVec(opDesc.get(),
-                                            HIPDNN_ATTR_CONVOLUTION_DILATIONS,
-                                            HIPDNN_TYPE_INT64,
-                                            attributes.get_dilation(),
-                                            "conv dgrad dilation"));
-
-    // Set conv dgrad mode and compute data type
-    auto convMode = hipdnn_frontend::toBackendConvMode(attributes.get_convolution_mode());
-    if(!convMode.has_value())
-    {
-        return {ErrorCode::INVALID_VALUE,
-                std::string("Unsupported conv dgrad mode: ")
-                    + to_string(attributes.get_convolution_mode())};
-    }
-    HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
-                                               HIPDNN_ATTR_CONVOLUTION_CONV_MODE,
-                                               HIPDNN_TYPE_CONVOLUTION_MODE,
-                                               *convMode,
-                                               "conv dgrad mode"));
-
-    HIPDNN_CHECK_ERROR(setDescriptorAttrDataType(opDesc.get(),
-                                                 HIPDNN_ATTR_CONVOLUTION_COMP_TYPE,
-                                                 attributes.compute_data_type,
-                                                 "conv dgrad compute data type"));
+    // Pack shared convolution parameters
+    HIPDNN_CHECK_ERROR(packConvolutionParams(opDesc.get(), attributes, "conv dgrad"));
 
     // Set operation name if provided
     auto& opName = attributes.get_name();

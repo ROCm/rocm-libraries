@@ -102,7 +102,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         nextRunningVariance->set_output(true).set_data_type(intermediateType);
     }
 
-    HIPDNN_FE_CHECK(graph->build(handle));
+    HIPDNN_FE_CHECK_SKIPPABLE(graph->build(handle));
     std::cout << "Graph build successful.\n";
 
     // Allocate tensors for BATCH_STATS_ONLY mode
@@ -209,7 +209,12 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         }
 
         // Execute on CPU using graph executor
-        auto serializedGraph = graph->buildFlatbufferOperationGraph();
+        auto [serializedGraph, serErr] = graph->to_binary();
+        if(serErr.is_bad())
+        {
+            std::cerr << "Failed to serialize graph: " << serErr.get_message() << std::endl;
+            return false;
+        }
         hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor cpuExecutor;
         cpuExecutor.execute(serializedGraph.data(), serializedGraph.size(), cpuVariantPack);
 

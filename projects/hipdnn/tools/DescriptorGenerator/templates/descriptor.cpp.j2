@@ -37,9 +37,11 @@ void {{ op.class_name }}::finalize()
                   "{{ op.class_name }}::finalize() failed: {{ ef.name }} not set");
 {% endfor %}
 {% for cf in op.mode_fields %}
+{% if cf.emit_mode_sentinel_check %}
     THROW_IF_TRUE(_data.{{ cf.fbs_field }} == {{ cf.cpp_enum }}::{{ cf.effective_sentinel_value }},
                   HIPDNN_STATUS_BAD_PARAM,
                   "{{ op.class_name }}::finalize() failed: {{ cf.name }} not set");
+{% endif %}
 {% endfor %}
 
     HipdnnBackendDescriptorImpl<{{ op.class_name }}>::finalize();
@@ -175,7 +177,7 @@ void {{ op.class_name }}::setTensorArrayDesc(hipdnnBackendAttributeName_t attrib
     {
 {% for taf in op.tensor_array_fields %}
     case {{ taf.attr_name }}:
-        setTensorDescriptorArray(_{{ taf.name }}Descs,
+        setTensorDescriptorArray(_{{ taf.camel_name }}Descs,
                                  _data.{{ taf.fbs_field }},
                                  attributeType,
                                  elementCount,
@@ -348,7 +350,7 @@ void {{ op.class_name }}::getTensorArrayDesc(hipdnnBackendAttributeName_t attrib
     {
 {% for taf in op.tensor_array_fields %}
     case {{ taf.attr_name }}:
-        getTensorDescriptorArray(_{{ taf.name }}Descs,
+        getTensorDescriptorArray(_{{ taf.camel_name }}Descs,
                                  attributeType,
                                  requestedElementCount,
                                  elementCount,
@@ -380,7 +382,7 @@ std::vector<std::shared_ptr<TensorDescriptor>>
     }
 {% endfor %}
 {% for taf in op.tensor_array_fields %}
-    result.insert(result.end(), _{{ taf.name }}Descs.begin(), _{{ taf.name }}Descs.end());
+    result.insert(result.end(), _{{ taf.camel_name }}Descs.begin(), _{{ taf.camel_name }}Descs.end());
 {% endfor %}
     return result;
 {% else %}
@@ -483,7 +485,7 @@ std::shared_ptr<{{ op.class_name }}> {{ op.class_name }}::fromNode(
 {% for taf in op.tensor_array_fields %}
     for(auto uid : attrs->{{ taf.fbs_field }})
     {
-        desc->_{{ taf.name }}Descs.push_back(
+        desc->_{{ taf.camel_name }}Descs.push_back(
             findTensorInMap(tensorMap, uid, "{{ op.class_name }}::fromNode: {{ taf.name }}"));
     }
 {% endfor %}

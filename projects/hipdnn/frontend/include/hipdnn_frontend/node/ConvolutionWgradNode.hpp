@@ -3,9 +3,9 @@
 #pragma once
 
 #include "Node.hpp"
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
+#include <hipdnn_frontend/Logging.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/detail/ConvolutionWgradPacker.hpp>
@@ -255,9 +255,15 @@ public:
 
             dwDims[0] = dyDims[1]; // Output channels match dy channels
 
-            // Impossible to infer group count without dw dimensions.
-            // Therefore, assume groups = 1.
-            dwDims[1] = xDims[1]; // Input channels (per group)
+            // Group count cannot be inferred from x and dy alone, so the
+            // inferred dw[1] uses x[1] (i.e. assumes groups = 1). For
+            // grouped convolutions, callers should set dw dimensions
+            // explicitly to avoid an incorrect channel count on the
+            // inferred weight tensor.
+            HIPDNN_FE_LOG_WARN("ConvolutionWgradNode: inferring dw dimensions without an "
+                               "explicit dw shape; assuming groups=1. For grouped "
+                               "convolutions, set dw dimensions explicitly.");
+            dwDims[1] = xDims[1]; // Input channels (per group), assuming groups=1
 
             // Calculate kernel spatial dimensions (k_2, ..., k_n)
             for(size_t i = 2; i < dyDims.size(); ++i)
@@ -356,17 +362,6 @@ public:
         }
 
         return {};
-    }
-
-    flatbuffers::Offset<hipdnn_data_sdk::data_objects::Node>
-        pack_node(flatbuffers::FlatBufferBuilder& builder) const override
-    {
-        return hipdnn_data_sdk::data_objects::CreateNodeDirect(
-            builder,
-            attributes.get_name().c_str(),
-            toSdkType(attributes.compute_data_type),
-            hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionWrwAttributes,
-            attributes.pack_attributes(builder).Union());
     }
 
     Error create_operation(

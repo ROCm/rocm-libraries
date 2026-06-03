@@ -7,9 +7,9 @@
 #include <optional>
 #include <variant>
 
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
-#include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceRMSNorm.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/IGraphNodePlanBuilder.hpp>
@@ -22,14 +22,13 @@ namespace hipdnn_test_sdk::detail
 
 struct RMSNormFwdParams
 {
-    RMSNormFwdParams(const hipdnn_data_sdk::data_objects::TensorAttributes& xAttributes,
-                     const hipdnn_data_sdk::data_objects::TensorAttributes& scaleAttributes,
-                     const hipdnn_data_sdk::data_objects::TensorAttributes& epsilonAttributes,
-                     const hipdnn_data_sdk::data_objects::TensorAttributes& yAttributes,
-                     const hipdnn_data_sdk::data_objects::TensorAttributes* invRmsAttributes
-                     = nullptr,
-                     const hipdnn_data_sdk::data_objects::TensorAttributes* biasAttributes
-                     = nullptr)
+    RMSNormFwdParams(
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& xAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& scaleAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& epsilonAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& yAttributes,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* invRmsAttributes = nullptr,
+        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* biasAttributes = nullptr)
         : xTensor(unpackTensorAttributes(xAttributes))
         , scaleTensor(unpackTensorAttributes(scaleAttributes))
         , epsilonTensor(unpackTensorAttributes(epsilonAttributes))
@@ -43,12 +42,12 @@ struct RMSNormFwdParams
     {
     }
 
-    hipdnn_data_sdk::data_objects::TensorAttributesT xTensor;
-    hipdnn_data_sdk::data_objects::TensorAttributesT scaleTensor;
-    hipdnn_data_sdk::data_objects::TensorAttributesT epsilonTensor;
-    hipdnn_data_sdk::data_objects::TensorAttributesT yTensor;
-    std::optional<hipdnn_data_sdk::data_objects::TensorAttributesT> invRmsTensor;
-    std::optional<hipdnn_data_sdk::data_objects::TensorAttributesT> biasTensor;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT xTensor;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT scaleTensor;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT epsilonTensor;
+    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT yTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> invRmsTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> biasTensor;
 };
 
 template <typename XDataType,
@@ -84,7 +83,7 @@ public:
         auto shallowScaleTensor = createShallowTensor<ScaleDataType>(
             _params.scaleTensor, variantPack.at(_params.scaleTensor.uid));
 
-        const double epsilon = hipdnn_data_sdk::utilities::extractDoubleFromTensorValue(
+        const double epsilon = hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(
             _params.epsilonTensor, "Epsilon");
 
         std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<ScaleDataType>> shallowBiasTensor;
@@ -116,10 +115,10 @@ private:
     RMSNormFwdParams _params;
 };
 
-template <hipdnn_data_sdk::data_objects::DataType XDataTypeEnum,
-          hipdnn_data_sdk::data_objects::DataType ScaleDataTypeEnum,
-          hipdnn_data_sdk::data_objects::DataType OutputDataTypeEnum,
-          hipdnn_data_sdk::data_objects::DataType ComputeDataTypeEnum>
+template <hipdnn_flatbuffers_sdk::data_objects::DataType XDataTypeEnum,
+          hipdnn_flatbuffers_sdk::data_objects::DataType ScaleDataTypeEnum,
+          hipdnn_flatbuffers_sdk::data_objects::DataType OutputDataTypeEnum,
+          hipdnn_flatbuffers_sdk::data_objects::DataType ComputeDataTypeEnum>
 class RMSNormFwdPlanBuilder : public IGraphNodePlanBuilder
 {
 public:
@@ -129,8 +128,9 @@ public:
     using ComputeDataType = utilities::DataTypeToNative<ComputeDataTypeEnum>;
 
     bool isApplicable(
-        const hipdnn_data_sdk::data_objects::Node& node,
-        const std::unordered_map<int64_t, const hipdnn_data_sdk::data_objects::TensorAttributes*>&
+        const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap) const override
     {
         if(node.compute_data_type() != ComputeDataTypeEnum)
@@ -173,8 +173,8 @@ public:
     }
 
     std::unique_ptr<IGraphNodePlanExecutor>
-        buildNodePlan(const hipdnn_data_sdk::flatbuffer_utilities::IGraph& graph,
-                      const hipdnn_data_sdk::data_objects::Node& node) const override
+        buildNodePlan(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
+                      const hipdnn_flatbuffers_sdk::data_objects::Node& node) const override
     {
         const auto* nodeAttributes = node.attributes_as_RMSNormAttributes();
         if(nodeAttributes == nullptr)
@@ -191,16 +191,14 @@ public:
                                   ? tensorMap.at(nodeAttributes->bias_tensor_uid().value())
                                   : nullptr;
 
-        RMSNormFwdParams params(*tensorMap.at(nodeAttributes->x_tensor_uid()),
-                                *tensorMap.at(nodeAttributes->scale_tensor_uid()),
-                                *tensorMap.at(nodeAttributes->epsilon_tensor_uid()),
-                                *tensorMap.at(nodeAttributes->y_tensor_uid()),
-                                invRmsPtr,
-                                biasPtr);
-
         return std::make_unique<
             RMSNormFwdPlan<XDataType, ScaleDataType, OutputDataType, ComputeDataType>>(
-            std::move(params));
+            RMSNormFwdParams(*tensorMap.at(nodeAttributes->x_tensor_uid()),
+                             *tensorMap.at(nodeAttributes->scale_tensor_uid()),
+                             *tensorMap.at(nodeAttributes->epsilon_tensor_uid()),
+                             *tensorMap.at(nodeAttributes->y_tensor_uid()),
+                             invRmsPtr,
+                             biasPtr));
     }
 };
 } // namespace hipdnn_test_sdk::detail

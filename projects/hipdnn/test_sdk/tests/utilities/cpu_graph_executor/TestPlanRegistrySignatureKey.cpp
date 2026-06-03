@@ -8,7 +8,7 @@
 #include <unordered_map>
 
 using namespace hipdnn_test_sdk::detail;
-using hipdnn_data_sdk::data_objects::DataType;
+using hipdnn_flatbuffers_sdk::data_objects::DataType;
 
 TEST(TestPlanRegistrySignatureKey, HashAndEqualityFwdInference)
 {

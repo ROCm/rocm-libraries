@@ -8,6 +8,7 @@
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
 #include <ostream>
 #include <random>
+#include <string>
 #include <vector>
 
 namespace test_bn_common
@@ -17,16 +18,27 @@ struct BatchnormTestCase
 {
     std::vector<int64_t> dims;
     unsigned int seed;
+    std::string note;
 
     BatchnormTestCase(std::vector<int64_t>&& dimsLocal, unsigned int seedLocal)
         : dims(std::move(dimsLocal))
         , seed(seedLocal)
     {
-        if(dims.size() != 4 && dims.size() != 5)
+        if(dims.size() < 3 || dims.size() > 5)
         {
             throw std::invalid_argument(
-                "dims must be either 4D (N, C, H, W) or 5D (N, C, D, H, W)");
+                "dims must be 3D (N, C, L), 4D (N, C, H, W), or 5D (N, C, D, H, W)");
         }
+        note = generateNote();
+    }
+
+    std::string generateNote() const
+    {
+        if(dims[0] > 1)
+        {
+            return "Multi-batch";
+        }
+        return {};
     }
 
     friend std::ostream& operator<<(std::ostream& ss, const BatchnormTestCase& tc)
@@ -34,11 +46,80 @@ struct BatchnormTestCase
         ss << "(dims:";
         hipdnn_data_sdk::utilities::vecToStream(ss, tc.dims);
         ss << " seed:" << tc.seed;
+        if(!tc.note.empty())
+        {
+            ss << " note:" << tc.note;
+        }
         ss << ")";
 
         return ss;
     }
 };
+
+inline std::vector<BatchnormTestCase> getBnFwdInference1dTestCases()
+{
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    return {
+        {{1, 3, 224}, seed},
+        {{2, 16, 512}, seed},
+        {{1, 64, 1024}, seed}, // Longer sequence
+        {{4, 3, 1}, seed}, // Minimal spatial (L=1)
+    };
+}
+
+inline std::vector<BatchnormTestCase> getBnFwdInference1dFullTestCases()
+{
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    return {
+        {{8, 32, 2048}, seed}, // Large sequence
+        {{16, 128, 512}, seed}, // Many channels
+    };
+}
+
+inline std::vector<BatchnormTestCase> getBnBwd1dTestCases()
+{
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    return {
+        {{1, 3, 224}, seed},
+        {{2, 16, 512}, seed},
+        {{1, 64, 1024}, seed},
+        {{4, 3, 1}, seed},
+    };
+}
+
+inline std::vector<BatchnormTestCase> getBnBwd1dFullTestCases()
+{
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    return {
+        {{8, 32, 2048}, seed},
+        {{16, 128, 512}, seed},
+    };
+}
+
+inline std::vector<BatchnormTestCase> getBnFwdTrainingSmoke1dTestCases()
+{
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    return {
+        {{2, 3, 1}, seed}, // B=2, L=1 → B×L=2 > 1
+        {{1, 16, 14}, seed}, // B=1, L=14 → B×L=14 > 1
+    };
+}
+
+inline std::vector<BatchnormTestCase> getBnFwdTrainingFull1dTestCases()
+{
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    return {
+        {{1, 3, 14}, seed}, // Small batch, moderate length
+        {{4, 8, 56}, seed}, // Medium size
+        {{2, 64, 128}, seed}, // Larger
+    };
+}
 
 // This is used for operation tests
 inline std::vector<BatchnormTestCase> getBatchnorm2dTestCases()
@@ -85,6 +166,16 @@ inline std::vector<BatchnormTestCase> getBnFwdInference3dTestCases()
     };
 }
 
+inline std::vector<BatchnormTestCase> getBnFwdInference3dFullTestCases()
+{
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    return {
+        {{1, 16, 8, 112, 112}, seed},
+        {{5, 256, 4, 14, 14}, seed},
+    };
+}
+
 inline std::vector<BatchnormTestCase> getBnBwdTestCases()
 {
     unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
@@ -115,6 +206,16 @@ inline std::vector<BatchnormTestCase> getBnBwd3dTestCases()
     return {
         {{2, 3, 3, 1, 1}, seed},
         {{16, 3, 8, 14, 14}, seed},
+    };
+}
+
+inline std::vector<BatchnormTestCase> getBnBwd3dFullTestCases()
+{
+    unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    return {
+        {{1, 16, 8, 112, 112}, seed},
+        {{5, 256, 4, 14, 14}, seed},
     };
 }
 

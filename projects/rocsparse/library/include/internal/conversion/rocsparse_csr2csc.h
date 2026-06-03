@@ -38,14 +38,14 @@ extern "C" {
 *  required by \ref rocsparse_scsr2csc "rocsparse_Xcsr2csc()".
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  \note
 *  This routine supports execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *  @param[in]
 *  m           number of rows of the sparse CSR matrix.
 *  @param[in]
@@ -66,8 +66,8 @@ extern "C" {
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval     rocsparse_status_invalid_size \p m, \p n or \p nnz is invalid.
-*  \retval     rocsparse_status_invalid_pointer \p csr_row_ptr, \p csr_col_ind or
+*  \retval     rocsparse_status_invalid_size \p m, \p n, or \p nnz is invalid.
+*  \retval     rocsparse_status_invalid_pointer \p csr_row_ptr, \p csr_col_ind, or
 *              \p buffer_size pointer is invalid.
 *  \retval     rocsparse_status_internal_error an internal error occurred.
 */
@@ -82,34 +82,34 @@ rocsparse_status rocsparse_csr2csc_buffer_size(rocsparse_handle     handle,
                                                size_t*              buffer_size);
 
 /*! \ingroup conv_module
-*  \brief Convert a sparse CSR matrix into a sparse CSC matrix
+*  \brief Convert a sparse CSR matrix into a sparse CSC matrix.
 *
 *  \details
 *  \p rocsparse_csr2csc converts a CSR matrix into a CSC matrix. The resulting matrix can also
 *  be seen as the transpose of the input matrix. \p rocsparse_csr2csc can also be used to convert
 *  a CSC matrix into a CSR matrix.
 *
-*  The conversion of a sparse matrix from CSR to CSC format involves two steps. First, the
-*  user calls \ref rocsparse_csr2csc_buffer_size in order to determine the size of the required
-*  tempory storage buffer. The user then allocates this buffer. Secondly, the user calls
-*  \p rocsparse_csr2csc to complete the conversion. Once the conversion is complete, the
-*  user must free the temporary buffer.
+*  The conversion of a sparse matrix from CSR to CSC format involves two steps. First,
+*  call \ref rocsparse_csr2csc_buffer_size to determine the size of the required
+*  tempory storage buffer. Then allocate this buffer. Secondly, call
+*  \p rocsparse_csr2csc to complete the conversion. After the conversion is complete,
+*  free the temporary buffer.
 *
 *  Both \ref rocsparse_csr2csc_buffer_size and \p rocsparse_csr2csc take a \ref rocsparse_action
 *  parameter as input. This \p copy_values parameter decides whether \p csc_row_ind and \p csc_val
 *  are filled during conversion (\ref rocsparse_action_numeric) or whether only \p csc_row_ind is filled
-*  (\ref rocsparse_action_symbolic). Using \ref rocsparse_action_symbolic is useful for example if only
+*  (\ref rocsparse_action_symbolic). Using \ref rocsparse_action_symbolic can be useful, for example, if only
 *  the sparsity pattern is required.
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  \note
 *  This routine supports execution in a hipGraph context.
 *
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *  @param[in]
 *  m           number of rows of the sparse CSR matrix.
 *  @param[in]
@@ -137,14 +137,14 @@ rocsparse_status rocsparse_csr2csc_buffer_size(rocsparse_handle     handle,
 *  @param[in]
 *  idx_base    \ref rocsparse_index_base_zero or \ref rocsparse_index_base_one.
 *  @param[in]
-*  temp_buffer temporary storage buffer allocated by the user, size is returned by
+*  temp_buffer temporary storage buffer allocated by the user. The size is returned by
 *              rocsparse_csr2csc_buffer_size().
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval     rocsparse_status_invalid_size \p m, \p n or \p nnz is invalid.
+*  \retval     rocsparse_status_invalid_size \p m, \p n, or \p nnz is invalid.
 *  \retval     rocsparse_status_invalid_pointer \p csr_val, \p csr_row_ptr,
-*              \p csr_col_ind, \p csc_val, \p csc_row_ind, \p csc_col_ptr or
+*              \p csr_col_ind, \p csc_val, \p csc_row_ind, \p csc_col_ptr, or
 *              \p temp_buffer pointer is invalid.
 *  \retval     rocsparse_status_arch_mismatch the device is not supported.
 *  \retval     rocsparse_status_internal_error an internal error occurred.

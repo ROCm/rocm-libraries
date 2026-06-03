@@ -3,6 +3,7 @@
 
 from itertools import product
 from pathlib import Path
+from typing import Generator
 
 from rrperf.problems import (
     CodeGenRun,
@@ -1191,15 +1192,23 @@ def add_wgm(mapping, suite):
         yield run
 
 
-def addSkipPermlane(suite: list[GEMMRun], value="PreSwizzleScale"):
+def addSkipPermlane(suite: Generator[GEMMRun, None, None], value="PreSwizzleScale"):
     for run in suite:
         run.types.scaleSkipPermlane = value
         yield run
 
 
-def addStreamK(suite, value="Standard"):
+def addStreamK(suite: Generator[GEMMRun, None, None], value="Standard"):
     for run in suite:
         run.streamK = value
+        if run.types.scale_A == "Separate" or run.types.scale_B == "Separate":
+            run.schedulerCost = "LinearWeightedSimpleStreamK"
+        yield run
+
+
+def addLDSBankSwizzle(suite, value="Swizzle"):
+    for run in suite:
+        run.ldsBankSwizzle = value
         yield run
 
 
@@ -1684,6 +1693,10 @@ def fp4_target_d2lds_mi16x16x128_st32x8_pf2x1_both():
     yield from fp4_target_d2lds_mi16x16x128_st32x8_pf2x1_wgm()
 
 
+def fp4_target_d2lds_mi16x16x128_st32x8_pf2x1_wgm_lds_swizzle():
+    yield from addLDSBankSwizzle(fp4_target_d2lds_mi16x16x128_st32x8_pf2x1_wgm())
+
+
 def does_this_fail():
     yield GEMMRun(
         M=4096,
@@ -1804,9 +1817,9 @@ def fp4_d2lds_wgts256x256x256():
         prefetch=True,
         prefetchInFlight=2,
         prefetchLDSFactor=1,
-        prefetchScale=False,
+        prefetchScale=True,
         swizzleScale=True,
-        prefetchMixMemOps=False,
+        prefetchMixMemOps=True,
         scheduler="Priority",
         schedulerCost="LinearWeightedSimple",
         types=TypeParameters(
@@ -1849,6 +1862,10 @@ def fp4_kernels_wgm():
     yield from fp4_single_scale_target_d2lds_mi16x16x128_pf4x1_wgm()
 
 
+def fp4_kernels_wgm_streamk():
+    yield from addStreamK(fp4_kernels_wgm())
+
+
 def fp4_16x16x128_scale_options():
     yield from fp4_target_d2lds_mi16x16x128_pf4x1_wgm()
     yield from addSkipPermlane(fp4_target_d2lds_mi16x16x128_pf4x1_wgm())
@@ -1864,11 +1881,13 @@ def fp4_32x32x64_scale_options():
 def fp4_kernels():
     yield from fp4_kernels_no_wgm()
     yield from fp4_kernels_wgm()
+    yield from fp4_kernels_wgm_streamk()
     yield from fp4_16x16x128_scale_options()
     yield from fp4_32x32x64_scale_options()
     yield from fp4_d2lds_wgts256x256x256()
     yield from fp4_target_d2lds_mi16x16x128_st32x8_pf2x1_pretile()
     yield from fp4_target_d2lds_mi16x16x128_st32x8_pf2x1_pad()
+    yield from test_streamk_fp4()
 
 
 def fp4_kernels_streamk():
@@ -1878,6 +1897,21 @@ def fp4_kernels_streamk():
     yield from addStreamK(fp4_target_d2lds_mi32x32x64_pf4x1())
     yield from addStreamK(fp4_target_d2lds_mi16x16x128_pf4x1())
     yield from addStreamK(fp4_d2lds_wgts256x256x256())
+
+
+def test_streamk_fp4():
+    kernel = fp4_target_d2lds_mi16x16x128_st32x8_pf2x1()
+    kernel = addStreamK(kernel)
+    for k in kernel:
+        k.M = 128
+        k.N = 128
+        k.K = 76800
+        k.mac_m = (64,)
+        k.mac_n = (32,)
+        k.mac_k = (256,)
+        k.prefetchInFlight = 2
+
+        yield k
 
 
 def fp4_target_sweep_wgms():
@@ -2112,6 +2146,7 @@ def mxfp8_target_d2lds_mi16x16x128_pf4x1():
         prefetchMixMemOps=True,
         betaInFma=True,
         scheduler="Priority",
+        schedulerCost="LinearWeightedSimple",
         types=TypeParameters(
             trans_A="T",
             trans_B="N",

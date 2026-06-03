@@ -43,6 +43,8 @@
 
 #include "client/include/Utility.hpp"
 
+#include <Tensile/hip/HipHardware.hpp>
+
 #if __has_include(<filesystem>)
 #include <filesystem>
 namespace fs = std::filesystem;
@@ -228,16 +230,27 @@ int64_t query_device_property(int device_id, hipDeviceProp_t& props)
     }
     else
     {
-        char buf[320];
+        // Get PCI Chip ID from TensileLite's Hardware interface
+        std::string pciChipIdStr = "(not available)";
+        auto        hardware     = TensileLite::hip::GetDevice(device_id);
+        if(hardware && hardware->pciChipId().has_value())
+        {
+            char hexBuf[16];
+            snprintf(hexBuf, sizeof(hexBuf), "0x%x", hardware->pciChipId().value());
+            pciChipIdStr = hexBuf;
+        }
+
+        char buf[384];
         snprintf(buf,
                  sizeof(buf),
-                 "Device ID %d : %s %s\n"
+                 "Device ID %d : %s %s (PCI Chip ID: %s)\n"
                  "with %3.1f GB memory, max. SCLK %d MHz, max. MCLK %d MHz, compute capability "
                  "%d.%d\n"
                  "maxGridDimX %d, sharedMemPerBlock %3.1f KB, maxThreadsPerBlock %d, warpSize %d\n",
                  device_id,
                  props.name,
                  props.gcnArchName,
+                 pciChipIdStr.c_str(),
                  props.totalGlobalMem / 1e9,
                  (int)(props.clockRate / 1000),
                  (int)(props.memoryClockRate / 1000),
@@ -368,17 +381,55 @@ void hipblaslt_print_version()
 /*! \brief write a matrix to file. */
 template <typename T>
 void hipblasltStoreValuesToFile(hipblasOperation_t transA, int row, int col,
-                                int lda, T *A, std::string ADataFile) 
+                                int lda, T *A, std::string ADataFile)
 {
   const int A_row = transA == HIPBLAS_OP_N ? row : col;
   const int A_col = transA == HIPBLAS_OP_N ? col : row;
+
+  std::ofstream FILE(ADataFile);
+
+  FILE << std::scientific << std::setprecision(6);
+  for (int i = 0; i < A_row; i++) {
+    for (int j = 0; j < A_col; j++)
+      FILE << std::setw(15) << std::right << static_cast<double>(A[j * lda + i]);
+    FILE << std::endl;
+  }
+
+  FILE.close();
+}
+
+template <>
+void hipblasltStoreValuesToFile(hipblasOperation_t transA, int row, int col,
+                                int lda, std::complex<float> *A, std::string ADataFile)
+{
+    const int A_row = transA == HIPBLAS_OP_N ? row : col;
+    const int A_col = transA == HIPBLAS_OP_N ? col : row;
 
   std::ofstream FILE(ADataFile);
   
   FILE << std::scientific << std::setprecision(6);
   for (int i = 0; i < A_row; i++) {
     for (int j = 0; j < A_col; j++)
-      FILE  << std::setw(15) << std::right << static_cast<double>(A[j * lda + i]);
+      FILE  << std::setw(15) << std::right << static_cast<double>(std::real(A[j * lda + i])) << " " << static_cast<double>(std::imag(A[j * lda + i])) << "i";
+    FILE << std::endl;
+  }
+
+  FILE.close();
+}
+
+template <>
+void hipblasltStoreValuesToFile(hipblasOperation_t transA, int row, int col,
+                                int lda, std::complex<double> *A, std::string ADataFile)
+{
+    const int A_row = transA == HIPBLAS_OP_N ? row : col;
+    const int A_col = transA == HIPBLAS_OP_N ? col : row;
+
+  std::ofstream FILE(ADataFile);
+  
+  FILE << std::scientific << std::setprecision(6);
+  for (int i = 0; i < A_row; i++) {
+    for (int j = 0; j < A_col; j++)
+      FILE  << std::setw(15) << std::right << static_cast<double>(std::real(A[j * lda + i])) << " " << static_cast<double>(std::imag(A[j * lda + i])) << "i";
     FILE << std::endl;
   }
 
@@ -415,9 +466,16 @@ void hipblasltDispatchValuesToFile(hipblasOperation_t transA, hipDataType T,
   else if (T == HIP_R_8F_E5M2)
     hipblasltStoreValuesToFile(transA, row, col, lda,
                                static_cast<hipblaslt_bf8 *>(hA), ADataFile);
+  else if(T == HIP_C_32F)
+    hipblasltStoreValuesToFile(transA, row, col, lda, static_cast<std::complex<float> *>(hA),
+                               ADataFile);
+  else if (T == HIP_C_64F)
+    hipblasltStoreValuesToFile(transA, row, col, lda, static_cast<std::complex<double> *>(hA),
+                               ADataFile);
   else
     hipblaslt_cout << "This datatype " << T
                    << " is Unsupported and could be added to the if-else "
                       "condition to write to file"
                    << std::endl;
 }
+

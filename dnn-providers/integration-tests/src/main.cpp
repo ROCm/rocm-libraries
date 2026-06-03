@@ -3,7 +3,10 @@
 
 #include <argparse.hpp>
 #include <gtest/gtest.h>
+#include <hip/hip_runtime.h>
 
+#include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_frontend.hpp>
@@ -14,11 +17,15 @@
 #include <string>
 #include <vector>
 
+#include "common/Utilities.hpp"
 #include "harness/SharedHandle.hpp"
+#include "harness/SupportMatrixCollector.hpp"
 #include "harness/TestConfig.hpp"
 
 namespace
 {
+
+using hipdnn_integration_tests::getEngineInfo;
 
 bool engineIsLoaded(hipdnnHandle_t handle, std::string_view targetEngineName)
 {
@@ -30,48 +37,8 @@ bool engineIsLoaded(hipdnnHandle_t handle, std::string_view targetEngineName)
 
     for(size_t i = 0; i < numEngines; ++i)
     {
-        // Two-call pattern: first call queries required buffer sizes
-        size_t engineNameLen = 0;
-        size_t pluginNameLen = 0;
-        size_t versionLen = 0;
-        size_t typeLen = 0;
-        int64_t engineId = 0;
-        hipdnnGetEngineInfo_ext(handle,
-                                i,
-                                &engineId,
-                                nullptr,
-                                &engineNameLen,
-                                nullptr,
-                                &pluginNameLen,
-                                nullptr,
-                                &versionLen,
-                                nullptr,
-                                &typeLen);
-
-        // Second call: ALL four string buffers must be non-null
-        std::string engineName(engineNameLen, '\0');
-        std::string pluginName(pluginNameLen, '\0');
-        std::string version(versionLen, '\0');
-        std::string type(typeLen, '\0');
-        hipdnnGetEngineInfo_ext(handle,
-                                i,
-                                &engineId,
-                                engineName.data(),
-                                &engineNameLen,
-                                pluginName.data(),
-                                &pluginNameLen,
-                                version.data(),
-                                &versionLen,
-                                type.data(),
-                                &typeLen);
-
-        // Trim null terminator
-        if(!engineName.empty() && engineName.back() == '\0')
-        {
-            engineName.pop_back();
-        }
-
-        if(engineName == targetEngineName)
+        auto info = getEngineInfo(handle, i);
+        if(info.engineName == targetEngineName)
         {
             return true;
         }
@@ -83,17 +50,46 @@ bool engineIsLoaded(hipdnnHandle_t handle, std::string_view targetEngineName)
 
 int main(int argc, char** argv) noexcept
 {
+    // Shared hipdnn handle + HIP stream are created below before any fixture
+    // runs, so per-fixture SKIP_IF_NO_DEVICES is too late. Bail early on a
+    // no-GPU runner so ctest reports PASS.
+    int deviceCount = 0;
+    auto deviceStatus = hipGetDeviceCount(&deviceCount);
+    if(deviceStatus == hipErrorNoDevice || deviceCount == 0)
+    {
+        std::cout << "No HIP devices available; skipping " << argv[0] << "\n";
+        return 0;
+    }
+
     try
     {
         // Parse custom arguments before InitGoogleTest to avoid unknown flag warnings
         argparse::ArgumentParser parser(
             "hipdnn_integration_tests", "", argparse::default_arguments::help);
         parser.add_argument("--ta", "--test-article")
-            .required()
-            .help("Full path to the hipdnn engine plugin .so to test");
+            .help("Full path to the hipdnn engine plugin .so to test. "
+                  "Omit to use hipDNN's default plugin discovery.");
         parser.add_argument("--te", "--test-engine")
-            .required()
-            .help("Engine name to test against (e.g., MIOPEN_ENGINE)");
+            .help("Engine name to test against (e.g., MIOPEN_ENGINE). "
+                  "Omit to let hipDNN select the engine.");
+        parser.add_argument("--fail-on-unsupported")
+            .default_value(false)
+            .implicit_value(true)
+            .help("FAIL instead of SKIP when no engine supports a graph");
+        parser.add_argument("--skip-graph-validation")
+            .default_value(false)
+            .implicit_value(true)
+            .help("PASS immediately after confirming engine support, "
+                  "without executing or validating the graph");
+        parser.add_argument("--tc", "--test-config")
+            .help("Path to a TOML configuration file for per-test tolerance overrides.");
+        parser.add_argument("--reference-executor")
+            .help("Reference executor for validation: 'cpu' (default) or 'gpu'. "
+                  "Can also be set via HIPDNN_TEST_REFERENCE_EXECUTOR env var.");
+        parser.add_argument("--generate-support-matrix")
+            .default_value(std::string("support_matrix.md"))
+            .implicit_value(std::string("support_matrix.md"))
+            .help("Generate a markdown support matrix file (default: support_matrix.md).");
 
         std::vector<std::string> remainingArgs;
         try
@@ -107,44 +103,106 @@ int main(int argc, char** argv) noexcept
             return 1;
         }
 
-        auto articlePathArg = parser.get<std::string>("--test-article");
-        auto engineNameArg = parser.get<std::string>("--test-engine");
-
-        // Validate and canonicalize article path (resolves relative paths)
-        std::filesystem::path articlePathObj;
-        try
+        // Parse --test-engine, --fail-on-unsupported, and --test-config arguments
+        std::optional<std::string> engineName;
+        if(parser.is_used("--test-engine"))
         {
-            articlePathObj = std::filesystem::canonical(articlePathArg);
+            engineName = parser.get<std::string>("--test-engine");
         }
-        catch(const std::filesystem::filesystem_error&)
+        auto failOnUnsupported = parser.get<bool>("--fail-on-unsupported");
+        auto skipGraphValidation = parser.get<bool>("--skip-graph-validation");
+
+        std::optional<std::filesystem::path> configPath;
+        if(parser.is_used("--test-config"))
         {
-            std::cerr << "Error: Article path does not exist: " << articlePathArg << '\n';
-            return 1;
+            auto configPathArg = parser.get<std::string>("--test-config");
+            try
+            {
+                configPath = std::filesystem::canonical(configPathArg);
+            }
+            catch(const std::filesystem::filesystem_error&)
+            {
+                std::cerr << "Error: Config path does not exist: " << configPathArg << '\n';
+                return 1;
+            }
         }
 
-        // Set engine plugin path to the plugin file (not the directory)
-        const std::string articlePathStr = articlePathObj.string();
-        const char* pluginPath = articlePathStr.c_str();
-        if(hipdnnSetEnginePluginPaths_ext(1, &pluginPath, HIPDNN_PLUGIN_LOADING_ABSOLUTE)
-           != HIPDNN_STATUS_SUCCESS)
+        // Parse --reference-executor argument (case-insensitive)
+        std::optional<hipdnn_integration_tests::ReferenceExecutorType> refExecType;
+        if(parser.is_used("--reference-executor"))
         {
-            std::cerr << "Error: Failed to set engine plugin path\n";
-            return 1;
+            auto val = parser.get<std::string>("--reference-executor");
+            std::transform(val.begin(), val.end(), val.begin(), [](unsigned char c) {
+                return static_cast<char>(std::tolower(c));
+            });
+            if(val == "gpu")
+            {
+                refExecType = hipdnn_integration_tests::ReferenceExecutorType::GPU;
+            }
+            else if(val == "cpu")
+            {
+                refExecType = hipdnn_integration_tests::ReferenceExecutorType::CPU;
+            }
+            else
+            {
+                std::cerr << "Error: --reference-executor must be 'cpu' or 'gpu'\n";
+                return 1;
+            }
         }
 
-        // Initialize TestConfig with CLI arguments
-        hipdnn_integration_tests::TestConfig::initialize(std::move(articlePathObj),
-                                                         std::move(engineNameArg));
+        // Parse --test-article argument and load explicit plugin if provided
+        std::optional<std::filesystem::path> articlePath;
+        if(parser.is_used("--test-article"))
+        {
+            // Validate and canonicalize article path (resolves relative paths)
+            auto articlePathArg = parser.get<std::string>("--test-article");
+            try
+            {
+                articlePath = std::filesystem::canonical(articlePathArg);
+            }
+            catch(const std::filesystem::filesystem_error&)
+            {
+                std::cerr << "Error: Article path does not exist: " << articlePathArg << '\n';
+                return 1;
+            }
 
-        // Reconstruct argc/argv for GTest from remaining (unknown) args
+            // Set engine plugin path to the plugin file (not the directory)
+            const std::string articlePathStr = articlePath->string();
+            const char* pluginPath = articlePathStr.c_str();
+            if(hipdnnSetEnginePluginPaths_ext(1, &pluginPath, HIPDNN_PLUGIN_LOADING_ABSOLUTE)
+               != HIPDNN_STATUS_SUCCESS)
+            {
+                std::cerr << "Error: Failed to set engine plugin path\n";
+                return 1;
+            }
+        }
+
+        // Enable support matrix generation if requested
+        if(parser.is_used("--generate-support-matrix"))
+        {
+            auto outputFile = parser.get<std::string>("--generate-support-matrix");
+            hipdnn_integration_tests::SupportMatrixCollector::get().setEnabled(true);
+            hipdnn_integration_tests::SupportMatrixCollector::get().setOutputPath(outputFile);
+        }
+
+        hipdnn_integration_tests::TestConfig::initialize(std::move(articlePath),
+                                                         std::move(engineName),
+                                                         failOnUnsupported,
+                                                         skipGraphValidation,
+                                                         std::move(configPath),
+                                                         refExecType);
+
+        // Reconstruct argc/argv for GTest from remaining (unknown) args.
+        // argv[0] (program name) must be first — GTest requires it.
         std::vector<char*> gtestArgv;
-        gtestArgv.reserve(remainingArgs.size() + 1);
+        gtestArgv.reserve(remainingArgs.size() + 2);
+        gtestArgv.push_back(argv[0]);
         for(auto& arg : remainingArgs)
         {
             gtestArgv.push_back(arg.data());
         }
         gtestArgv.push_back(nullptr);
-        auto gtestArgc = static_cast<int>(remainingArgs.size());
+        auto gtestArgc = static_cast<int>(remainingArgs.size()) + 1;
         ::testing::InitGoogleTest(&gtestArgc, gtestArgv.data());
 
         // Initialize test logging infrastructure to forward logs to std::cerr based
@@ -173,19 +231,49 @@ int main(int argc, char** argv) noexcept
         if(hipdnnSetStream(handle, stream) != HIPDNN_STATUS_SUCCESS)
         {
             std::cerr << "Failed to set stream on shared handle\n";
+            static_cast<void>(hipStreamDestroy(stream));
             return 1;
         }
 
-        // Verify target engine is loaded
-        if(!engineIsLoaded(handle, hipdnn_integration_tests::TestConfig::get().getEngineName()))
+        // Verify target engine is loaded (only when --test-engine was provided)
+        if(hipdnn_integration_tests::TestConfig::get().hasEngineName()
+           && !engineIsLoaded(handle, hipdnn_integration_tests::TestConfig::get().getEngineName()))
         {
             std::cerr << "Error: Engine '"
                       << hipdnn_integration_tests::TestConfig::get().getEngineName()
                       << "' is not loaded. Check the plugin path.\n";
+            static_cast<void>(hipStreamDestroy(stream));
             return 1;
         }
 
         const int result = RUN_ALL_TESTS();
+
+        // Generate support matrix if requested
+        if(hipdnn_integration_tests::SupportMatrixCollector::get().isEnabled())
+        {
+            std::vector<std::string> allEngineNames;
+
+            if(hipdnn_integration_tests::TestConfig::get().hasEngineName())
+            {
+                allEngineNames.emplace_back(
+                    hipdnn_integration_tests::TestConfig::get().getEngineName());
+            }
+            else
+            {
+                // Enumerate all loaded engines from the handle
+                size_t numEngines = 0;
+                if(hipdnnGetEngineCount_ext(handle, &numEngines) == HIPDNN_STATUS_SUCCESS)
+                {
+                    for(size_t i = 0; i < numEngines; ++i)
+                    {
+                        auto info = getEngineInfo(handle, i);
+                        allEngineNames.push_back(std::move(info.engineName));
+                    }
+                }
+            }
+
+            hipdnn_integration_tests::SupportMatrixCollector::get().writeMarkdown(allEngineNames);
+        }
 
         // Clean up shared handle and stream
         static_cast<void>(hipStreamDestroy(stream));
