@@ -108,16 +108,22 @@ Imports `functools.lru_cache`, `typing`. Pure numeric padding solvers.
 6. `next-goal-<target>.md` (the `Solution.py` slice campaign, grounded) + commit.
    Mark this checklist done.
 
-## Definition of done checklist
+## Definition of done checklist — COMPLETE
 
-- [ ] `coverage-before.txt` captured (baseline, both rows) BEFORE new tests.
-- [ ] `--cov=Tensile` + grep: **both** `Utilities.py` and `LdsPadding.py` ≥95% line.
-- [ ] `coverage-after.txt` captured; before→after delta in target.md.
-- [ ] Every Tier A/B function has snapshot coverage; any residue documented.
-- [ ] `reject` raise/quiet paths pinned; `getMiInputType` all 3 branches.
-- [ ] resistance.md lists each resisting fn.
-- [ ] recommendations.md: go/no-go on the next target (the `Solution.py` slice
-      campaign vs `Common/GlobalParameters.py`).
-- [ ] full `-m unit` ≥ 1713 passed / 201 skipped, no failures, additive only.
-- [ ] All work committed (atomic, no push); tree clean.
-- [ ] Next goal prompt `next-goal-<target>.md` created and committed.
+- [x] `coverage-before.txt` captured (baseline, both rows) BEFORE new tests.
+      (Utilities 49/23 = 53.06% line; LdsPadding 212/21 = 90.09% line.)
+- [x] `--cov=Tensile` + grep: **both** ≥95% line — **Utilities 100%**,
+      **LdsPadding 100% line**.
+- [x] `coverage-after.txt` captured; before→after delta in target.md
+      (+46.94 / +9.91 pts).
+- [x] Every Tier A/B function has snapshot coverage; the defensive LdsPadding
+      branches unreachable via the public selectors are characterized via direct
+      private-helper tests (documented in resistance.md).
+- [x] `reject` raise/quiet paths pinned; `getMiInputType` all 3 branches.
+- [x] resistance.md: Utilities nothing resisted; LdsPadding 2 residual partial
+      branches + the public-API-unreachable defensive code (direct-tested).
+- [x] recommendations.md: GO → `Solution.py` support-functions slice next; then
+      the cap-coupled `Solution` class slices; defer `GlobalParameters.py`.
+- [x] full `-m unit` = **1769 passed / 201 skipped**, no failures, additive only.
+- [x] All work committed (atomic, no push); tree clean.
+- [x] Next goal prompt `next-goal-solution-support.md` created and committed.
