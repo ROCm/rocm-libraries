@@ -157,12 +157,16 @@ if(HIPSPARSELT_ENABLE_HIP)
     set(HIPBLASLT_ENABLE_CLIENT OFF CACHE BOOL "" FORCE)
     # Builds tensilelite's device libraries (.co/.dat)
     set(HIPBLASLT_ENABLE_DEVICE ${HIPSPARSELT_ENABLE_DEVICE} CACHE BOOL "" FORCE)
-    # Builds tensilelite::tensilelite-host target (the shared libtensilelite-host.so
-    # this fork links). Its install/export is owned by hipBLASLt's package, so keep
-    # it OFF here to avoid double-installing / a dangling hipblaslt-targets export
-    # (hipBLASLt's own export block is gated by HIPBLASLT_ENABLE_HOST, OFF above).
+    # Builds tensilelite::tensilelite-host (the shared libtensilelite-host.so this
+    # fork links). Keep its install ON so libtensilelite-host.so ships in this
+    # package for runtime (DT_NEEDED) resolution -- with HIPBLASLT_ENABLE_HOST OFF,
+    # hipBLASLt's hipblaslt-targets export is not created, so tensilelite-host
+    # installs as a plain shared library (no EXPORT clause; see tensilelite/CMakeLists).
     set(TENSILELITE_ENABLE_HOST ON CACHE BOOL "" FORCE)
-    set(TENSILELITE_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+    set(TENSILELITE_ENABLE_INSTALL ON CACHE BOOL "" FORCE)
+    # Route tensilelite-host into this fork's package export (its exported library
+    # links the SHARED tensilelite-host, so that target must be in an export set).
+    set(TENSILELITE_HOST_EXPORT_SET hipsparselt-targets)
     set(HIPBLASLT_ENABLE_ASAN ${HIPSPARSELT_ENABLE_ASAN} CACHE BOOL "" FORCE)
     set(HIPBLASLT_DEVICE_LIBRARY_PATH "${CMAKE_BINARY_DIR}/Tensile" CACHE PATH "" FORCE)
     # hipSPARSELt does not use ExtOp or MatrixTransform artifacts
@@ -285,6 +289,8 @@ rocm_export_targets(
     DEPENDS
     PACKAGE
     hip
+    PACKAGE
+    origami
 )
 
 if(HIPSPARSELT_ENABLE_CLIENT)
