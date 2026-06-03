@@ -22,30 +22,6 @@ on:
 permissions:
   contents: read
 
-# YAML anchors for steps shared across all build jobs
-.miopen-health-check: &miopen-health-check
-  name: Runner health status
-  run: |
-    echo "=== OS ==="
-    head -2 /etc/os-release
-    echo "=== CPU ==="
-    lscpu | grep -E 'Model name|^CPU\(s\)'
-    echo "=== Memory ==="
-    free -h | grep Mem
-    echo "=== Disk ==="
-    df -h /
-
-.miopen-checkout: &miopen-checkout
-  name: Checkout repository
-  uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-  with:
-    sparse-checkout: |
-      .dvc
-      .github
-      cmake
-      projects/miopen
-      shared/ctest
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
   cancel-in-progress: true
@@ -64,8 +40,26 @@ jobs:
     env:
       GPU_TARGET: gfx942
     steps:
-      - *miopen-health-check
-      - *miopen-checkout
+      - name: Runner health status
+        run: |
+          echo "=== OS ==="
+          head -2 /etc/os-release
+          echo "=== CPU ==="
+          lscpu | grep -E 'Model name|^CPU\(s\)'
+          echo "=== Memory ==="
+          free -h | grep Mem
+          echo "=== Disk ==="
+          df -h /
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            .dvc
+            .github
+            cmake
+            projects/miopen
+            shared/ctest
 
       - name: Configure build
         run: |
@@ -105,8 +99,26 @@ jobs:
     env:
       GPU_TARGET: gfx942
     steps:
-      - *miopen-health-check
-      - *miopen-checkout
+      - name: Runner health status
+        run: |
+          echo "=== OS ==="
+          head -2 /etc/os-release
+          echo "=== CPU ==="
+          lscpu | grep -E 'Model name|^CPU\(s\)'
+          echo "=== Memory ==="
+          free -h | grep Mem
+          echo "=== Disk ==="
+          df -h /
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            .dvc
+            .github
+            cmake
+            projects/miopen
+            shared/ctest
 
       - name: Configure build
         run: |
@@ -142,8 +154,26 @@ jobs:
       fail-fast: true
     runs-on: azure-linux-scale-rocm
     steps:
-      - *miopen-health-check
-      - *miopen-checkout
+      - name: Runner health status
+        run: |
+          echo "=== OS ==="
+          head -2 /etc/os-release
+          echo "=== CPU ==="
+          lscpu | grep -E 'Model name|^CPU\(s\)'
+          echo "=== Memory ==="
+          free -h | grep Mem
+          echo "=== Disk ==="
+          df -h /
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            .dvc
+            .github
+            cmake
+            projects/miopen
+            shared/ctest
 
       - name: Configure build
         run: |
@@ -182,8 +212,26 @@ jobs:
     env:
       GPU_TARGET: gfx942
     steps:
-      - *miopen-health-check
-      - *miopen-checkout
+      - name: Runner health status
+        run: |
+          echo "=== OS ==="
+          head -2 /etc/os-release
+          echo "=== CPU ==="
+          lscpu | grep -E 'Model name|^CPU\(s\)'
+          echo "=== Memory ==="
+          free -h | grep Mem
+          echo "=== Disk ==="
+          df -h /
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            .dvc
+            .github
+            cmake
+            projects/miopen
+            shared/ctest
 
       - name: Configure build
         run: |
