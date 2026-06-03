@@ -1,0 +1,23 @@
+# AFTER coverage — full `-m unit` suite WITH the new Naming characterization
+# suite (conftest + 1 test file, 41 tests, 36 snapshots).
+#
+# Command (same as before; --cov=Tensile path-mode + grep the row):
+#   pytest -m unit --cov=Tensile --cov-config=pyproject.toml \
+#     --cov-report=term-missing Tensile/Tests/unit
+
+Name                                                      Stmts   Miss Branch BrPart   Cover   Missing
+Tensile/SolutionStructs/Naming.py                           120      1     60      1  98.89%   141
+
+1713 passed, 201 skipped
+
+# Line coverage = (Stmts - Miss) / Stmts = (120 - 1) / 120 = 99.17% line
+# Blended (line+branch, the report's Cover column)            = 98.89%
+#
+# Before -> After: 82.50% -> 99.17% line (+16.67 pts); 21 -> 1 missing stmts.
+# No regression: 1672 -> 1713 passed (+41 new tests), 201 skipped unchanged.
+# Additive only (new files under Tensile/Tests/unit/characterization/Naming/).
+#
+# The 1 residual line-miss (L141) is a provably-unreachable defensive raise in
+# getParameterValueAbbreviation (a composite value always matches tuple/list/
+# dict first). See resistance.md, which also records a characterized latent bug
+# (getKernelNameMin splitGSU=True + GSU>1/-1 -> TypeError, pinned via raises).
