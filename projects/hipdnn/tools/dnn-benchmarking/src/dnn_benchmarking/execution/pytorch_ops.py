@@ -228,6 +228,15 @@ def _channel_values(tensor: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
     return values
 
 
+def _reject_peer_stats(node: Dict[str, Any], operation: str) -> None:
+    peer_stats = _node_param(node, "peer_stats_tensor_uid", None)
+    if peer_stats is None:
+        return
+    if isinstance(peer_stats, (list, tuple)) and len(peer_stats) == 0:
+        return
+    raise ValueError(f"{operation} does not support peer statistics")
+
+
 def _channel_broadcast(values: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
     return values.reshape([1, values.numel()] + [1] * (x.ndim - 2)).to(device=x.device)
 
@@ -482,7 +491,7 @@ def _sdpa_stats(
             device=scores.device,
         ).tril()
         scores = scores.masked_fill(~causal, float("-inf"))
-    return torch.logsumexp(scores, dim=-1)
+    return torch.logsumexp(scores, dim=-1, keepdim=True)
 
 
 # -----------------------------------------------------------------------------
@@ -667,6 +676,7 @@ def handle_batchnorm_training(
     graph_json: Dict[str, Any],
 ) -> None:
     """Handle batchnorm forward training."""
+    _reject_peer_stats(node, "Batchnorm forward training")
     x_uid = _required_input_uid(node, "x_tensor_uid")
     scale_uid = _required_input_uid(node, "scale_tensor_uid")
     bias_uid = _required_input_uid(node, "bias_tensor_uid")
@@ -730,6 +740,7 @@ def handle_batchnorm_backward(
     graph_json: Dict[str, Any],
 ) -> None:
     """Handle batchnorm backward."""
+    _reject_peer_stats(node, "Batchnorm backward")
     dy_uid = _required_input_uid(node, "dy_tensor_uid")
     x_uid = _required_input_uid(node, "x_tensor_uid")
     scale_uid = _required_input_uid(node, "scale_tensor_uid")
