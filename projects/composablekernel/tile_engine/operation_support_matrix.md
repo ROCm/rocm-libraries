@@ -9,6 +9,7 @@
 | GEMM | batched_gemm<br>example: 16_batched_gemm/ | ❌ | | | | | | | ❌ | | | | ❌ | ❌ | ❌ | ❌ |
 | GEMM | batched_contraction<br>example: 41_batched_contraction/ | ✅ | | | | | | | ✅ | | | | ✅ | ✅ | ✅ | ❌ |
 | GEMM | block_scale_gemm/gemm_rowcolquant [9]<br>engine: block_scale_gemm/gemm_rowcolquant/<br>example: 38_block_scale_gemm/ | | ✅ | | ✅ | | | | ✅ | | | | ❌ | ✅ | ✅ | ✅ |
+ | GEMM | block_scale_gemm/gemm_tensor_quant [9]<br>engine: block_scale_gemm/gemm_tensor_quant/<br>example: 38_block_scale_gemm/ | | ✅ | | ✅ | | | | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ |
 | GEMM | flatmm<br>example: 18_flatmm/ | ❌ | ❌ | ❌ | ❌ | | ❌ | ❌ | ❌ | | | | ❌ | ❌ | ❌ | ❌ |
 | GEMM | gemm_multi_abd<br>example: 22_gemm_multi_abd/ | ✅ | | | | | | | ✅ | | | | ✅ | ✅ | ✅ | ✅ |
 | GEMM | gemm_quant | | ❌ | | ❌ | | | | ❌ | | | | ❌ | ❌ | ❌ | ❌ |
