@@ -36,6 +36,14 @@ HEADER_SIZE = 16  # 4 (magic) + 4 (version) + 8 (toc_offset)
 VARIANTS = [
     # --- OGradDotO variants ---
     {
+        "name": "fmha_bwd_ograd_dot_o_fp16_d32_batch",
+        "family": "ograd_dot_o",
+        "dtype": "fp16",
+        "hdim_v": 32,
+        "mode": "batch",
+        "block_size": 64,
+    },
+    {
         "name": "fmha_bwd_ograd_dot_o_fp16_d128_batch",
         "family": "ograd_dot_o",
         "dtype": "fp16",
@@ -56,6 +64,22 @@ VARIANTS = [
         "family": "ograd_dot_o",
         "dtype": "fp16",
         "hdim_v": 64,
+        "mode": "batch",
+        "block_size": 64,
+    },
+    {
+        "name": "fmha_bwd_ograd_dot_o_fp16_d96_batch",
+        "family": "ograd_dot_o",
+        "dtype": "fp16",
+        "hdim_v": 96,
+        "mode": "batch",
+        "block_size": 64,
+    },
+    {
+        "name": "fmha_bwd_ograd_dot_o_fp16_d256_batch",
+        "family": "ograd_dot_o",
+        "dtype": "fp16",
+        "hdim_v": 256,
         "mode": "batch",
         "block_size": 64,
     },
@@ -85,6 +109,60 @@ VARIANTS = [
     },
     # --- DqDkDv variants ---
     {
+        "name": "fmha_bwd_dqdkdv_fp16_d32_batch",
+        "family": "dqdkdv",
+        "dtype": "fp16",
+        "hdim_q": 32,
+        "hdim_v": 32,
+        "mode": "batch",
+        "block_size": 256,
+    },
+    {
+        "name": "fmha_bwd_dqdkdv_bf16_d32_batch",
+        "family": "dqdkdv",
+        "dtype": "bf16",
+        "hdim_q": 32,
+        "hdim_v": 32,
+        "mode": "batch",
+        "block_size": 256,
+    },
+    {
+        "name": "fmha_bwd_dqdkdv_fp16_d64_batch",
+        "family": "dqdkdv",
+        "dtype": "fp16",
+        "hdim_q": 64,
+        "hdim_v": 64,
+        "mode": "batch",
+        "block_size": 256,
+    },
+    {
+        "name": "fmha_bwd_dqdkdv_bf16_d64_batch",
+        "family": "dqdkdv",
+        "dtype": "bf16",
+        "hdim_q": 64,
+        "hdim_v": 64,
+        "mode": "batch",
+        "block_size": 256,
+    },
+    {
+        "name": "fmha_bwd_dqdkdv_fp16_d96_batch",
+        "family": "dqdkdv",
+        "dtype": "fp16",
+        "hdim_q": 96,
+        "hdim_v": 96,
+        "mode": "batch",
+        "block_size": 256,
+    },
+    {
+        "name": "fmha_bwd_dqdkdv_bf16_d96_batch",
+        "family": "dqdkdv",
+        "dtype": "bf16",
+        "hdim_q": 96,
+        "hdim_v": 96,
+        "mode": "batch",
+        "block_size": 256,
+    },
+    {
         "name": "fmha_bwd_dqdkdv_fp16_d128_batch",
         "family": "dqdkdv",
         "dtype": "fp16",
@@ -103,19 +181,36 @@ VARIANTS = [
         "block_size": 256,
     },
     {
+        "name": "fmha_bwd_dqdkdv_fp16_d256_batch",
+        "family": "dqdkdv",
+        "dtype": "fp16",
+        "hdim_q": 256,
+        "hdim_v": 256,
+        "mode": "batch",
+        "block_size": 256,
+    },
+    {
+        "name": "fmha_bwd_dqdkdv_bf16_d256_batch",
+        "family": "dqdkdv",
+        "dtype": "bf16",
+        "hdim_q": 256,
+        "hdim_v": 256,
+        "mode": "batch",
+        "block_size": 256,
+    },
+    {
         "name": "fmha_bwd_dqdkdv_fp16_d128_batch_cmask",
         "family": "dqdkdv",
         "dtype": "fp16",
         "hdim_q": 128,
         "hdim_v": 128,
         "mode": "batch",
-        "has_mask": True,
+        "mask_type": "top_left_causal",
         "block_size": 256,
     },
-    # _cmask_br and _swa share the compiled spec with _cmask. They are packed
-    # under distinct names so the loader can select mask geometry by variant
-    # name; the actual top-left/bottom-right/sliding-window selection happens
-    # at runtime via the WINDOW_SIZE_LEFT/RIGHT and MASK_TYPE scalar slots.
+    # _cmask_br and _swa share the compiled spec shape with _cmask but are
+    # disambiguated by mask_type. The window pair is set at runtime per
+    # family (causal: -1/0; sliding-window: 64/64).
     {
         "name": "fmha_bwd_dqdkdv_fp16_d128_batch_cmask_br",
         "family": "dqdkdv",
@@ -123,7 +218,7 @@ VARIANTS = [
         "hdim_q": 128,
         "hdim_v": 128,
         "mode": "batch",
-        "has_mask": True,
+        "mask_type": "bottom_right_causal",
         "block_size": 256,
     },
     {
@@ -133,7 +228,7 @@ VARIANTS = [
         "hdim_q": 128,
         "hdim_v": 128,
         "mode": "batch",
-        "has_mask": True,
+        "mask_type": "generic",
         "block_size": 256,
     },
     {
@@ -171,7 +266,7 @@ VARIANTS = [
         "hdim_q": 128,
         "hdim_v": 128,
         "mode": "group",
-        "has_mask": True,
+        "mask_type": "top_left_causal",
         "block_size": 256,
     },
     {
@@ -304,7 +399,7 @@ VARIANTS = [
         "hdim_q": 128,
         "hdim_v": 128,
         "mode": "batch",
-        "has_mask": True,
+        "mask_type": "top_left_causal",
         "is_deterministic": True,
         "block_size": 256,
     },

@@ -33,7 +33,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <numeric>
-#include <string_view>
 #include <vector>
 
 // Namespace aliases for named slot constants.
@@ -865,36 +864,26 @@ static bool runDqDkDvBatchVariant(const rocm_ck::FmhaBwdDQDKDVVariant& variant,
     assert(batch > 0);
     args.scalars[DKV::BATCH_SIZE].i32 = static_cast<int32_t>(batch);
 
-    // Mask geometry is variant-specific. The compiled spec is identical for
-    // _cmask, _cmask_br, and _swa — geometry is selected at runtime via the
-    // WINDOW_SIZE_LEFT/RIGHT and MASK_TYPE scalar slots.
-    // GenericAttentionMaskEnum: 0=NO_MASK, 1=MASK_FROM_TOP_LEFT,
-    //                           2=MASK_FROM_BOTTOM_RIGHT, 3=MASK_GENERIC.
-    // Use ends_with (not find) so a future variant whose name merely contains
-    // "_swa" or "_cmask_br" as a non-suffix substring won't be misclassified.
-    if(variant.spec.has_mask)
+    // Mask geometry is driven entirely by the spec's mask_type enum (AE-1).
+    // The compiled spec is shared across _cmask, _cmask_br, and _swa --
+    // family selection happens at runtime via MASK_TYPE, and the window
+    // pair distinguishes causal (unlimited left, no future tokens) from
+    // sliding-window attention.
+    if(rocm_ck::hasMask(variant.spec))
     {
-        const std::string_view name(variant.name);
-        if(name.ends_with("_swa"))
+        args.scalars[DKV::MASK_TYPE].i32 = static_cast<int32_t>(variant.spec.mask_type);
+        if(variant.spec.mask_type == rocm_ck::FmhaMaskType::GENERIC)
         {
-            // Sliding-window attention with both-side limits.
+            // Sliding-window attention. Window size is hardcoded today;
+            // surfacing it on the spec is tracked as a follow-up (AE-3).
             args.scalars[DKV::WINDOW_SIZE_LEFT].i32  = 64;
             args.scalars[DKV::WINDOW_SIZE_RIGHT].i32 = 64;
-            args.scalars[DKV::MASK_TYPE].i32         = 3; // MASK_GENERIC
-        }
-        else if(name.ends_with("_cmask_br"))
-        {
-            // Bottom-right causal: unlimited left, no future tokens.
-            args.scalars[DKV::WINDOW_SIZE_LEFT].i32  = -1;
-            args.scalars[DKV::WINDOW_SIZE_RIGHT].i32 = 0;
-            args.scalars[DKV::MASK_TYPE].i32         = 2; // MASK_FROM_BOTTOM_RIGHT
         }
         else
         {
-            // Default: top-left causal (preserves _cmask and _cmask_det).
+            // TOP_LEFT_CAUSAL and BOTTOM_RIGHT_CAUSAL share the causal window.
             args.scalars[DKV::WINDOW_SIZE_LEFT].i32  = -1;
             args.scalars[DKV::WINDOW_SIZE_RIGHT].i32 = 0;
-            args.scalars[DKV::MASK_TYPE].i32         = 1; // MASK_FROM_TOP_LEFT
         }
     }
 
@@ -1379,12 +1368,41 @@ int main(int argc, char** argv)
             continue;
         }
 
+        // The host runner builds Q/K/V/dO and the CPU reference at the fixed
+        // HDIM_Q/HDIM_V of the d128 baseline data set. Variants compiled for a
+        // different head dimension (d32/d96/d256) have a tile shape that does
+        // not match these buffers, so launching them against this data would
+        // read out of bounds. For those, confirm the kernel built, packed, and
+        // exposes its entrypoint (compile/pack proof via loadKernel) and skip
+        // the numerical launch -- their host-side spec is already covered by
+        // tests/test_fmha_bwd_compat.cpp. Building per-hdim reference data for a
+        // full numerical run is left as a separate task.
+        if(v.spec.hdim_q != HDIM_Q || v.spec.hdim_v != HDIM_V)
+        {
+            LoadedKernel lk;
+            if(loadKernel(archive, v.name, gpu_arch.c_str(), lk))
+            {
+                unloadKernel(lk);
+                std::printf("  %s: OK (compile/pack proof only; hdim=%d != host "
+                            "data hdim=%d, launch skipped)\n",
+                            v.name,
+                            v.spec.hdim_q,
+                            HDIM_Q);
+            }
+            else
+            {
+                std::printf("  %s: FAILED (kernel missing from archive)\n", v.name);
+                all_passed = false;
+            }
+            continue;
+        }
+
         // Determine whether to verify numerically.
         // Plain batch fp16/bf16 variants with no mask, no dropout,
         // no deterministic flag get full verification.
         // Others are compilation proof only.
         bool is_plain_batch =
-            (!v.spec.has_mask && !v.spec.has_dropout && !v.spec.is_deterministic &&
+            (!rocm_ck::hasMask(v.spec) && !v.spec.has_dropout && !v.spec.is_deterministic &&
              v.spec.bias_type == rocm_ck::FmhaBiasType::NONE);
 
         bool passed = runDqDkDvBatchVariant(v,

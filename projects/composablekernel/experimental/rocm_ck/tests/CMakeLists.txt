@@ -94,7 +94,7 @@ set_tests_properties(test_fmha_bwd_compat PROPERTIES LABELS "rocm_ck")
 add_dependencies(rocm_ck_tests test_fmha_bwd_compat)
 
 # =============================================================================
-# FMHA BWD consteval test (SWA / sliding-window configs; needs registry.hpp)
+# FMHA BWD consteval test (tile-config dispatch + SWA/mask slots; needs registry.hpp)
 # =============================================================================
 
 add_executable(test_fmha_bwd_consteval test_fmha_bwd_consteval.cpp)

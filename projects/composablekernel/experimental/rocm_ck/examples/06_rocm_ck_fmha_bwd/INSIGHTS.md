@@ -82,7 +82,7 @@ typename T::Kargs kargs{
     {},  // deterministic
     /* batch-mode: 8 stride fields */
 };
-if constexpr(K.has_mask) {
+if constexpr(hasMask(K)) {
     kargs.window_size_left  = -1;
     kargs.window_size_right = 0;  // causal
     kargs.mask_type = MASK_FROM_TOP_LEFT;
@@ -102,8 +102,9 @@ args.scalars[S::MASK_TYPE].i32         = static_cast<int>(
 ```
 
 The device bridge reads these scalars and assigns them to `kargs` after
-the aggregate init -- the spec-time `has_mask` flag only gates which
-inheritance base is active, not the runtime mask shape.
+the aggregate init -- the spec-time `mask_type` enum only gates which
+inheritance base is active (NO_MASK vs any other family), not the
+runtime mask shape itself.
 
 ### 1D Tensor Stride Convention
 
