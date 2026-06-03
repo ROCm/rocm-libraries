@@ -1,0 +1,20 @@
+# BEFORE coverage — existing suite (incl. SolutionSupport + SolutionClass) only,
+# no SolutionDerivation tests yet. Total = 1818 passed.
+#
+# SLICE 3 of the Solution.py campaign: the parameter-derivation statics
+# (setGlobalReadVectorWidth, setGlobalLoadTileDimClassic,
+# checkAndAssignWaveSeparateGlobalRead, isVgprForLocalReadPackingDoable,
+# isDirectToVgprDoable, isDirectToLdsDoable, getMIOutputInfo,
+# assignProblemIndependentDerivedParameters, assignDerivedParameters).
+# Whole file 3272 stmts at 38.81% line at baseline.
+#
+# Command:
+#   pytest -m unit --cov=Tensile --cov-config=pyproject.toml \
+#     --cov-report=term-missing Tensile/Tests/unit
+
+Name                                                      Stmts   Miss Branch BrPart   Cover
+Tensile/SolutionStructs/Solution.py                         3272   1978   2234    433  34.89%
+
+1818 passed, 201 skipped
+
+# Whole-file line = (3272 - 1978) / 3272 = 38.81% line ; blended 34.89%
