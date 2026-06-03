@@ -102,20 +102,22 @@ inline MUBUFScope parseMUBUFScope(std::string_view scope) {
 // enum; values match the ISA TH[2:0] field. LOAD and STORE share encodings but
 // use different assembled names for TH3 and TH7.
 enum class TemporalHint : int8_t {
-    TH_NONE     = -1,
-    TH_RT       = 0,
-    TH_NT       = 1,
-    TH_HT       = 2,
-    TH_LU       = 3,
-    TH_WB       = 3,
-    TH_NT_RT    = 4,
-    TH_RT_NT    = 5,
-    TH_NT_HT    = 6,
+    TH_NONE = -1,
+    TH_RT = 0,
+    TH_NT = 1,
+    TH_HT = 2,
+    TH_LU = 3,
+    TH_WB = 3,
+    TH_NT_RT = 4,
+    TH_RT_NT = 5,
+    TH_NT_HT = 6,
     TH_RESERVED = 7,
-    TH_NT_WB    = 7,
+    TH_NT_WB = 7,
 };
 
-inline bool hasTemporalHint(TemporalHint th) { return th != TemporalHint::TH_NONE; }
+inline bool hasTemporalHint(TemporalHint th) {
+    return th != TemporalHint::TH_NONE;
+}
 
 // Emits the "TH_LOAD_*" / "TH_STORE_*" mnemonic. Matches rocisa::toString(TemporalHint,
 // bool). Caller picks isStore because LOAD and STORE share TH[2:0] encodings but differ
