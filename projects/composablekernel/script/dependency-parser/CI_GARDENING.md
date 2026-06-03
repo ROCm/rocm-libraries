@@ -111,6 +111,24 @@ build's **Artifacts** tab and look for these files.
 If the file is **absent**, `smart_build_ci.sh` crashed before it could write it
 (e.g., CMake not configured). Check `smart_build_ci.log`.
 
+> **Always-run class (non-compiled tests):** some ctest tests have no compiled
+> `bin/` target — python script tests and `try_compile` tests. No source file maps
+> to them, so the selector can never pick them. `smart_test.sh` runs this class on
+> every `selective` and `none` build (in addition to the selected chunks), sourced
+> automatically from `reachability_result.json` `non_compiled`. `full` covers them
+> via the whole suite. The set is auto-derived: a newly added python test is picked
+> up on the next build with no script edit. (If the reachability guardrail was
+> skipped — e.g. `ctest -N` empty, see §4.6 — the class is empty and `smart_test.sh`
+> logs that it found none.)
+
+> **Scope: smart-build's test universe is `ctest -N`.** A test is covered exactly
+> when it's registered with ctest via `add_test(...)` in a `CMakeLists.txt` —
+> compiled tests by file→target mapping, non-compiled ones via the always-run class
+> above. A test that isn't registered with ctest is run by its own CI stage, not by
+> `smart_test.sh` (a full `ctest` run wouldn't run it either). Adding a test the
+> standard way (`add_test`) also edits a `CMakeLists.txt`, which the safety check
+> (§7) treats as a full build, so it runs in the PR that introduces it.
+
 ### `reachability_result.json` fields
 
 ```json
@@ -119,7 +137,7 @@ If the file is **absent**, `smart_build_ci.sh` crashed before it could write it
   "n_reachable": 614,      // tests the filter can possibly select
   "n_false_negatives": 0,  // compiled tests the filter can NEVER select (alarm if >0)
   "false_negatives": [],
-  "n_non_compiled": 37,    // python/try_compile tests — always-run class, not FNs
+  "n_non_compiled": 37,    // python/try_compile tests — always-run class (run in selective/none), not FNs
   "non_compiled": [...],
   "allowlisted": [],       // tests suppressed via --allowlist (see §5)
   "classified": true,      // true = build.ninja was provided for classification
