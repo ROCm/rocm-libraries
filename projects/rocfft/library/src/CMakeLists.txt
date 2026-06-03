@@ -99,7 +99,7 @@ add_subdirectory( device )
 #
 
 # script that produces an include file
-set( kgen_embed_command ${CMAKE_SOURCE_DIR}/library/src/device/kernel-generator-embed-cpp.py )
+set( kgen_embed_command ${CMAKE_SOURCE_DIR}/shared/embed-to-header-rtc.py )
 
 # location of the generated source file
 set( kgen_embed_cpp ${CMAKE_BINARY_DIR}/library/src/device/kernel-generator-embed.cpp )
@@ -148,7 +148,7 @@ set( kgen_logic_files
      ${CMAKE_SOURCE_DIR}/shared/rocfft_complex.h
 
      # python code that does the embedding
-     ${CMAKE_SOURCE_DIR}/library/src/device/kernel-generator-embed-cpp.py
+     ${kgen_embed_command}
 
      # python code that decides kernel parameters
      ${CMAKE_SOURCE_DIR}/library/src/device/kernel-generator.py

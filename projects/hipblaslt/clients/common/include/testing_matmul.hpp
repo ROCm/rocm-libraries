@@ -223,14 +223,17 @@ std::vector<float> mx_type_to_f32(T* buf, S* sbuf, size_t row, size_t col, size_
     return ref;
 }
 
-std::vector<float> mx_type_to_f32(hipDataType    type,
-                                  hipDataType    stype,
-                                  HipHostBuffer& buf,
-                                  HipHostBuffer& sbuf,
-                                  size_t         row,
-                                  size_t         col,
-                                  size_t         srow,
-                                  size_t         scol)
+// Raw-pointer overload so callers can pass per-batch offsets into packed
+// (sub-byte) data buffers via uint8_t* arithmetic without taking a sub-view
+// of HipHostBuffer.
+std::vector<float> mx_type_to_f32(hipDataType type,
+                                  hipDataType stype,
+                                  void*       buf_ptr,
+                                  void*       sbuf_ptr,
+                                  size_t      row,
+                                  size_t      col,
+                                  size_t      srow,
+                                  size_t      scol)
 {
     switch(type)
     {
@@ -238,8 +241,12 @@ std::vector<float> mx_type_to_f32(hipDataType    type,
         switch(stype)
         {
         case HIP_R_8F_UE8M0:
-            return mx_type_to_f32(
-                buf.as<hipblaslt_f8>(), sbuf.as<hipblaslt_e8>(), row, col, srow, scol);
+            return mx_type_to_f32(reinterpret_cast<hipblaslt_f8*>(buf_ptr),
+                                  reinterpret_cast<hipblaslt_e8*>(sbuf_ptr),
+                                  row,
+                                  col,
+                                  srow,
+                                  scol);
         default:
             hipblaslt_cerr << "Error type in mx_type_to_f32()" << std::endl;
             throw std::runtime_error("Error type in mx_type_to_f32()");
@@ -248,8 +255,12 @@ std::vector<float> mx_type_to_f32(hipDataType    type,
         switch(stype)
         {
         case HIP_R_8F_UE8M0:
-            return mx_type_to_f32(
-                buf.as<hipblaslt_bf8>(), sbuf.as<hipblaslt_e8>(), row, col, srow, scol);
+            return mx_type_to_f32(reinterpret_cast<hipblaslt_bf8*>(buf_ptr),
+                                  reinterpret_cast<hipblaslt_e8*>(sbuf_ptr),
+                                  row,
+                                  col,
+                                  srow,
+                                  scol);
         default:
             hipblaslt_cerr << "Error type in mx_type_to_f32()" << std::endl;
             throw std::runtime_error("Error type in mx_type_to_f32()");
@@ -259,8 +270,12 @@ std::vector<float> mx_type_to_f32(hipDataType    type,
         switch(stype)
         {
         case HIP_R_8F_UE8M0:
-            return mx_type_to_f32(
-                buf.as<hipblaslt_f6x16>(), sbuf.as<hipblaslt_e8>(), row, col, srow, scol);
+            return mx_type_to_f32(reinterpret_cast<hipblaslt_f6x16*>(buf_ptr),
+                                  reinterpret_cast<hipblaslt_e8*>(sbuf_ptr),
+                                  row,
+                                  col,
+                                  srow,
+                                  scol);
         default:
             hipblaslt_cerr << "Error type in mx_type_to_f32()" << std::endl;
             throw std::runtime_error("Error type in mx_type_to_f32()");
@@ -271,8 +286,12 @@ std::vector<float> mx_type_to_f32(hipDataType    type,
         switch(stype)
         {
         case HIP_R_8F_UE8M0:
-            return mx_type_to_f32(
-                buf.as<hipblaslt_bf6x16>(), sbuf.as<hipblaslt_e8>(), row, col, srow, scol);
+            return mx_type_to_f32(reinterpret_cast<hipblaslt_bf6x16*>(buf_ptr),
+                                  reinterpret_cast<hipblaslt_e8*>(sbuf_ptr),
+                                  row,
+                                  col,
+                                  srow,
+                                  scol);
         default:
             hipblaslt_cerr << "Error type in mx_type_to_f32()" << std::endl;
             throw std::runtime_error("Error type in mx_type_to_f32()");
@@ -283,17 +302,29 @@ std::vector<float> mx_type_to_f32(hipDataType    type,
         switch(stype)
         {
         case HIP_R_8F_UE8M0:
-            return mx_type_to_f32(
-                buf.as<hipblaslt_f4x2>(), sbuf.as<hipblaslt_e8>(), row, col, srow, scol);
+            return mx_type_to_f32(reinterpret_cast<hipblaslt_f4x2*>(buf_ptr),
+                                  reinterpret_cast<hipblaslt_e8*>(sbuf_ptr),
+                                  row,
+                                  col,
+                                  srow,
+                                  scol);
         case HIP_R_8F_E4M3:
-            return mx_type_to_f32(
-                buf.as<hipblaslt_f4x2>(), sbuf.as<hipblaslt_f8>(), row, col, srow, scol);
+            return mx_type_to_f32(reinterpret_cast<hipblaslt_f4x2*>(buf_ptr),
+                                  reinterpret_cast<hipblaslt_f8*>(sbuf_ptr),
+                                  row,
+                                  col,
+                                  srow,
+                                  scol);
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wswitch"
         case HIP_R_8F_E5M3_EXT:
 #pragma GCC diagnostic pop
-            return mx_type_to_f32(
-                buf.as<hipblaslt_f4x2>(), sbuf.as<hipblaslt_e5m3>(), row, col, srow, scol);
+            return mx_type_to_f32(reinterpret_cast<hipblaslt_f4x2*>(buf_ptr),
+                                  reinterpret_cast<hipblaslt_e5m3*>(sbuf_ptr),
+                                  row,
+                                  col,
+                                  srow,
+                                  scol);
         default:
             hipblaslt_cerr << "Error type in mx_type_to_f32()" << std::endl;
             throw std::runtime_error("Error type in mx_type_to_f32()");
@@ -303,6 +334,18 @@ std::vector<float> mx_type_to_f32(hipDataType    type,
         hipblaslt_cerr << "Error type in mx_type_to_f32()" << std::endl;
         throw std::runtime_error("Error type in mx_type_to_f32()");
     }
+}
+
+std::vector<float> mx_type_to_f32(hipDataType    type,
+                                  hipDataType    stype,
+                                  HipHostBuffer& buf,
+                                  HipHostBuffer& sbuf,
+                                  size_t         row,
+                                  size_t         col,
+                                  size_t         srow,
+                                  size_t         scol)
+{
+    return mx_type_to_f32(type, stype, buf.buf(), sbuf.buf(), row, col, srow, scol);
 }
 
 template <typename T>
@@ -1511,11 +1554,15 @@ std::tuple<hipDataType, hipDataType> derive_unset_compute_input_type(const Argum
 //   transB=T scaleB: scale is N x (K/MX)  -> kAlongRows = false
 //
 // Returns the total number of elements in the swizzled (potentially padded) buffer.
-size_t swizzle_mx_scale(HipHostBuffer& scaleBuf,
-                        size_t         scaleRows,
-                        size_t         scaleCols,
-                        size_t         MXBlock,
-                        bool           kAlongRows)
+// Raw-pointer overload so callers can pass per-batch offsets into the scale
+// buffer via uint8_t* arithmetic. hScaleA/B hold num_batches scale blocks
+// concatenated (size_scale*Vec[i] bytes each), and each block must be swizzled
+// independently.
+size_t swizzle_mx_scale(void*  scalePtr,
+                        size_t scaleRows,
+                        size_t scaleCols,
+                        size_t MXBlock,
+                        bool   kAlongRows)
 {
     using Tensor = Tensor::Manipulation::Tensor;
     size_t dimk = 128 / MXBlock;
@@ -1550,7 +1597,7 @@ size_t swizzle_mx_scale(HipHostBuffer& scaleBuf,
         auto kDim  = scaleRows; // K/MX
 
         auto tmpTensor = Tensor({mnDim, kDim}, sizeof(uint8_t));
-        memcpy(tmpTensor.as<void>(), scaleBuf.buf(), mnDim * kDim);
+        memcpy(tmpTensor.as<void>(), scalePtr, mnDim * kDim);
 
         // Pad kDim (K/MX, the fast dim) to multiple of dimk
         ::Tensor::Manipulation::Shape paddedShape{mnDim, (kDim + dimk - 1) / dimk * dimk};
@@ -1565,7 +1612,7 @@ size_t swizzle_mx_scale(HipHostBuffer& scaleBuf,
         Tensor permuted = permute(paddedTensor, {1, 0, 2});
 
         auto totalElements = permuted.getDesc().flattenSize();
-        memcpy(scaleBuf.buf(), permuted.as<void>(), totalElements);
+        memcpy(scalePtr, permuted.as<void>(), totalElements);
         return totalElements;
     }
     else
@@ -1577,7 +1624,7 @@ size_t swizzle_mx_scale(HipHostBuffer& scaleBuf,
         auto mnDim = scaleRows; // M
 
         auto tmpTensor = Tensor({kDim, mnDim}, sizeof(uint8_t));
-        memcpy(tmpTensor.as<void>(), scaleBuf.buf(), kDim * mnDim);
+        memcpy(tmpTensor.as<void>(), scalePtr, kDim * mnDim);
 
         // Pad mnDim (M, the fast dim) to multiple of dimk
         ::Tensor::Manipulation::Shape paddedShape{kDim, (mnDim + dimk - 1) / dimk * dimk};
@@ -1592,9 +1639,19 @@ size_t swizzle_mx_scale(HipHostBuffer& scaleBuf,
         Tensor permuted = permute(paddedTensor, {1, 0, 2});
 
         auto totalElements = permuted.getDesc().flattenSize();
-        memcpy(scaleBuf.buf(), permuted.as<void>(), totalElements);
+        memcpy(scalePtr, permuted.as<void>(), totalElements);
         return totalElements;
     }
+}
+
+// Convenience overload: swizzle a single scale block held by a HipHostBuffer.
+size_t swizzle_mx_scale(HipHostBuffer& scaleBuf,
+                        size_t         scaleRows,
+                        size_t         scaleCols,
+                        size_t         MXBlock,
+                        bool           kAlongRows)
+{
+    return swizzle_mx_scale(scaleBuf.buf(), scaleRows, scaleCols, MXBlock, kAlongRows);
 }
 
 
@@ -2912,43 +2969,87 @@ void testing_matmul_with_bias(const Arguments& arg,
                                         false,
                                         stream));
 
-        // Build CPU reference from unswizzled scale before mutating the buffer
-        if(isBlockScaling(arg.scaleA))
-            refA.emplace_back(mx_type_to_f32(TiA,
-                                             scaleDataType(arg.scaleA),
-                                             hA[i],
-                                             hScaleA[i],
-                                             A_row[i],
-                                             A_col[i],
-                                             scaleA_row,
-                                             scaleA_col));
-        if(isBlockScaling(arg.scaleB))
-            refB.emplace_back(mx_type_to_f32(TiB,
-                                             scaleDataType(arg.scaleB),
-                                             hB[i],
-                                             hScaleB[i],
-                                             B_row[i],
-                                             B_col[i],
-                                             scaleB_row,
-                                             scaleB_col));
-
-        // Swizzle MX scale on CPU and upload to GPU (unconditional — kernel always expects swizzled)
+        // Build CPU reference for every batch from the unswizzled data/scale
+        // before mutating the scale buffer. The cblas_gemm validation loop
+        // below offsets refA/refB by stride_* * batchIdx, so we must cover
+        // all num_batches batches (otherwise batchIdx>0 reads past end).
         if(isBlockScaling(arg.scaleA))
         {
-            size_t scaleA_r = A_row[i] / scaleA_row;
-            size_t scaleA_c = A_col[i] / scaleA_col;
-            size_t MXBlockA = blockSize(arg.scaleA);
+            size_t dataBatchBytesA
+                = (num_batches[i] > 1) ? elementsToBytes(stride_a[i], TiA) : 0;
+            size_t scaleBatchBytesA = (num_batches[i] > 1) ? size_scaleAVec[i] : 0;
+            std::vector<float> refAAll;
+            refAAll.reserve(static_cast<size_t>(A_row[i]) * A_col[i] * num_batches[i]);
+            for(int64_t b = 0; b < num_batches[i]; ++b)
+            {
+                auto* dataPtr  = reinterpret_cast<uint8_t*>(hA[i].buf()) + b * dataBatchBytesA;
+                auto* scalePtr = reinterpret_cast<uint8_t*>(hScaleA[i].buf()) + b * scaleBatchBytesA;
+                auto  batchRef = mx_type_to_f32(TiA,
+                                               scaleDataType(arg.scaleA),
+                                               dataPtr,
+                                               scalePtr,
+                                               A_row[i],
+                                               A_col[i],
+                                               scaleA_row,
+                                               scaleA_col);
+                refAAll.insert(refAAll.end(), batchRef.begin(), batchRef.end());
+            }
+            refA.emplace_back(std::move(refAAll));
+        }
+        if(isBlockScaling(arg.scaleB))
+        {
+            size_t dataBatchBytesB
+                = (num_batches[i] > 1) ? elementsToBytes(stride_b[i], TiB) : 0;
+            size_t scaleBatchBytesB = (num_batches[i] > 1) ? size_scaleBVec[i] : 0;
+            std::vector<float> refBAll;
+            refBAll.reserve(static_cast<size_t>(B_row[i]) * B_col[i] * num_batches[i]);
+            for(int64_t b = 0; b < num_batches[i]; ++b)
+            {
+                auto* dataPtr  = reinterpret_cast<uint8_t*>(hB[i].buf()) + b * dataBatchBytesB;
+                auto* scalePtr = reinterpret_cast<uint8_t*>(hScaleB[i].buf()) + b * scaleBatchBytesB;
+                auto  batchRef = mx_type_to_f32(TiB,
+                                               scaleDataType(arg.scaleB),
+                                               dataPtr,
+                                               scalePtr,
+                                               B_row[i],
+                                               B_col[i],
+                                               scaleB_row,
+                                               scaleB_col);
+                refBAll.insert(refBAll.end(), batchRef.begin(), batchRef.end());
+            }
+            refB.emplace_back(std::move(refBAll));
+        }
+
+        // Swizzle MX scale on CPU and upload to GPU (unconditional — kernel always expects swizzled).
+        // hScaleA/B hold num_batches scale blocks concatenated (size_scale*Vec[i] bytes each,
+        // padding already included), so swizzle every batch in place before uploading; otherwise
+        // batches 1..N-1 stay un-swizzled and the kernel reads them with a swizzled layout (wrong / OOB).
+        if(isBlockScaling(arg.scaleA))
+        {
+            size_t scaleA_r    = A_row[i] / scaleA_row;
+            size_t scaleA_c    = A_col[i] / scaleA_col;
+            size_t MXBlockA    = blockSize(arg.scaleA);
             bool   kAlongRowsA = (transA == HIPBLAS_OP_T);
-            swizzle_mx_scale(hScaleA[i], scaleA_r, scaleA_c, MXBlockA, kAlongRowsA);
+            for(int64_t b = 0; b < num_batches[i]; ++b)
+            {
+                auto* scalePtr
+                    = reinterpret_cast<uint8_t*>(hScaleA[i].buf()) + b * size_scaleAVec[i];
+                swizzle_mx_scale(scalePtr, scaleA_r, scaleA_c, MXBlockA, kAlongRowsA);
+            }
             CHECK_HIP_ERROR(synchronize(dScaleA[i], hScaleA[i], block_count));
         }
         if(isBlockScaling(arg.scaleB))
         {
-            size_t scaleB_r = B_row[i] / scaleB_row;
-            size_t scaleB_c = B_col[i] / scaleB_col;
-            size_t MXBlockB = blockSize(arg.scaleB);
+            size_t scaleB_r    = B_row[i] / scaleB_row;
+            size_t scaleB_c    = B_col[i] / scaleB_col;
+            size_t MXBlockB    = blockSize(arg.scaleB);
             bool   kAlongRowsB = (transB == HIPBLAS_OP_N);
-            swizzle_mx_scale(hScaleB[i], scaleB_r, scaleB_c, MXBlockB, kAlongRowsB);
+            for(int64_t b = 0; b < num_batches[i]; ++b)
+            {
+                auto* scalePtr
+                    = reinterpret_cast<uint8_t*>(hScaleB[i].buf()) + b * size_scaleBVec[i];
+                swizzle_mx_scale(scalePtr, scaleB_r, scaleB_c, MXBlockB, kAlongRowsB);
+            }
             CHECK_HIP_ERROR(synchronize(dScaleB[i], hScaleB[i], block_count));
         }
 #endif

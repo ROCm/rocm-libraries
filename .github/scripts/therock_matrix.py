@@ -2,6 +2,7 @@
 This dictionary is used to map specific file directory changes to the corresponding build flag and tests
 """
 
+import copy
 import os
 
 subtree_to_project_map = {
@@ -155,6 +156,10 @@ dependency_graph = {
 def collect_projects_to_run(subtrees):
     platform = os.getenv("PLATFORM")
     projects = set()
+    # Make a deep copy of project_map to avoid modifying the original
+    local_project_map = copy.deepcopy(project_map)
+    local_additional_options = copy.deepcopy(additional_options)
+
     # collect the associated subtree to project
     for subtree in subtrees:
         if subtree in subtree_to_project_map:
@@ -162,25 +167,25 @@ def collect_projects_to_run(subtrees):
 
     for project in list(projects):
         # Check if an optional math component was included.
-        if project in additional_options:
-            project_options_to_add = additional_options[project]
+        if project in local_additional_options:
+            project_options_to_add = local_additional_options[project]
 
             project_to_add = project_options_to_add["project_to_add"]
-            # If `project_to_add` is in included, add options to the existing `project_map` entry
+            # If `project_to_add` is in included, add options to the existing `local_project_map` entry
             if project_to_add in projects:
-                project_map[project_to_add]["cmake_options"].extend(
+                local_project_map[project_to_add]["cmake_options"].extend(
                     project_options_to_add["cmake_options"]
                 )
-                project_map[project_to_add]["projects_to_test"].extend(
+                local_project_map[project_to_add]["projects_to_test"].extend(
                     project_options_to_add["projects_to_test"]
                 )
             # If `project_to_add` is not included, only run build and tests for the optional project
             else:
                 projects.add(project_to_add)
-                project_map[project_to_add]["cmake_options"] = project_options_to_add[
-                    "cmake_options"
-                ]
-                project_map[project_to_add]["projects_to_test"] = (
+                local_project_map[project_to_add]["cmake_options"] = (
+                    project_options_to_add["cmake_options"]
+                )
+                local_project_map[project_to_add]["projects_to_test"] = (
                     project_options_to_add["projects_to_test"]
                 )
 
@@ -192,24 +197,24 @@ def collect_projects_to_run(subtrees):
             for dependency in dependency_graph[project]:
                 # If the dependency is also included, let's combine to avoid overlap
                 if dependency in projects:
-                    project_map[project]["cmake_options"].extend(
-                        project_map[dependency]["cmake_options"]
+                    local_project_map[project]["cmake_options"].extend(
+                        local_project_map[dependency]["cmake_options"]
                     )
-                    project_map[project]["projects_to_test"].extend(
-                        project_map[dependency]["projects_to_test"]
+                    local_project_map[project]["projects_to_test"].extend(
+                        local_project_map[dependency]["projects_to_test"]
                     )
                     to_remove_from_project_map.append(dependency)
 
     # if dependency is included in projects and parent is found, we delete the dependency as the parent will build and test
     for to_remove_item in to_remove_from_project_map:
         projects.remove(to_remove_item)
-        del project_map[to_remove_item]
+        del local_project_map[to_remove_item]
 
     # retrieve the subtrees to checkout, cmake options to build, and projects to test
     project_to_run = []
     for project in projects:
-        if project in project_map:
-            project_map_data = project_map.get(project)
+        if project in local_project_map:
+            project_map_data = local_project_map.get(project)
 
             # Check if platform-based additional flags are needed
             if (
