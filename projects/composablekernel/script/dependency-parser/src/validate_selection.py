@@ -131,7 +131,7 @@ def render_junit(result):
     (e.g. smart-build.selection.full) so Jenkins' test-results trend keeps advisory
     as-if runs (full/none) distinct from real selective runs. A `label` (e.g. the
     GPU arch) is appended too, so per-arch publishes land as distinct rows
-    (smart-build.selection.full.gfx942) instead of duplicate "selection-resolvable".
+    (smart-build.selection.full.gfx942) instead of duplicate rows.
     """
     failures = []
     for t in result.get("invalid_targets", []):
@@ -157,9 +157,14 @@ def render_junit(result):
                 f"    </testcase>"
             )
     else:
+        # Include the label in the leaf case name too, so the per-arch publishes
+        # read as distinct rows (all-selected-targets-exist (gfx942)) rather than
+        # four identical entries in the Jenkins test list. The name states what the
+        # pass asserts: every selected target resolves to a real ninja target.
+        case_name = "all-selected-targets-exist" + (f" ({label})" if label else "")
         cases.append(
             f'    <testcase classname="{classname}" '
-            'name="selection-resolvable"/>'
+            f'name="{escape(case_name, _attr)}"/>'
         )
 
     n_failures = len(failures)

@@ -183,6 +183,8 @@ class TestJunit(unittest.TestCase):
         xml = render_junit(result)
         self.assertIn('classname="smart-build.selection.full.gfx942"', xml)
         self.assertIn('name="smart-build-selection-full-gfx942"', xml)
+        # the leaf case name carries the arch too, so the row isn't a duplicate
+        self.assertIn('name="all-selected-targets-exist (gfx942)"', xml)
 
     def test_label_without_mode_still_tags(self):
         from validate_selection import render_junit, validate

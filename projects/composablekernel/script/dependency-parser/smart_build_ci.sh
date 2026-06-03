@@ -142,7 +142,7 @@ echo ""
 echo "Step 3b: Selection-validity smoke (mode=${ASIF_MODE}, non-fatal)..."
 ninja -t targets all > ninja_targets.txt 2>/dev/null || true
 # Tag the JUnit with the arch (when CI set it) so the per-arch smoke results land
-# as distinct rows instead of indistinguishable duplicate "selection-resolvable".
+# as distinct rows instead of indistinguishable duplicate pass entries.
 LABEL_ARGS=()
 if [ -n "${ARCH_NAME:-}" ]; then LABEL_ARGS=(--label "${ARCH_NAME}"); fi
 python3 "${SCRIPT_DIR}/main.py" validate \
