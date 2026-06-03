@@ -84,7 +84,9 @@ s = s.replace("import json\n", "")  # json.load patched out; embed has no json m
 open(tp, "w").write(s)
 assert "_EMBEDDED_DOC" in open(tp).read(), "target.py patch failed"
 
-# 5. Entry module the C host imports + calls; returns the conv LLVM IR text.
+# 5. Entry module the C host imports + calls. Mirrors ck_dsl's flow: lower to IR,
+#    then call comgr (exposed as a native module) -> returns the HSACO bytes, like
+#    runtime/comgr.py would. So the C host gets a HSACO, not IR text.
 with open(os.path.join(FROZEN, "ckdsl_entry.py"), "w") as f:
     f.write(
         "from ck_dsl.instances.common.conv_implicit_gemm import (\n"
@@ -96,8 +98,10 @@ with open(os.path.join(FROZEN, "ckdsl_entry.py"), "w") as f:
         "                            sH=1, sW=1, pH=1, pW=1, dH=1, dW=1),\n"
         "        tile_m=64, tile_n=64, tile_k=64, warp_m=2, warp_n=2,\n"
         "        warp_tile_m=32, warp_tile_n=32, warp_tile_k=16)\n"
-        "    return lower_kernel_to_llvm(\n"
+        "    ir = lower_kernel_to_llvm(\n"
         "        build_implicit_gemm_conv(spec, arch='gfx950'), arch='gfx950')\n"
+        "    import comgr  # native C++ module exposed to the interpreter\n"
+        "    return comgr.build_hsaco(ir, 'amdgcn-amd-amdhsa--gfx950', ['-O3'])\n"
     )
 
 n = sum(len(fs) for _, _, fs in os.walk(FROZEN))
