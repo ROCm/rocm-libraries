@@ -15,6 +15,9 @@ import shutil
 ROOT = "/home/dahawkin/repo/worktrees/ck-dsl-provider-micropython"
 SRC = ROOT + "/projects/composablekernel/python/ck_dsl"
 DST = ROOT + "/spike/mp1/ckbundle/ck_dsl"
+# Provider-local Python package (the real compile entry: ck_dsl_provider.compile_service).
+PROVIDER_SRC = ROOT + "/dnn-providers/ck-dsl-provider/python/ck_dsl_provider"
+PROVIDER_DST = ROOT + "/spike/mp1/ckbundle/ck_dsl_provider"
 
 # Heavy package __init__s replaced with empty stubs (eager-import roots).
 TRIM_INITS = [
@@ -206,6 +209,10 @@ def _transform_file(path):
     # frozen __init__s. Since the shim doesn't enforce immutability, plain setattr is
     # equivalent: object.__setattr__(self, n, v) -> setattr(self, n, v).
     src2 = src.replace("object.__setattr__(", "setattr(")
+    # Embed MicroPython's builtin `time` has no perf_counter (and a builtin can't be
+    # shadowed by a frozen shim). compile_kernel uses it only for diagnostic timings,
+    # so zero them out: time.perf_counter() -> 0.0.
+    src2 = src2.replace("time.perf_counter()", "0.0")
     text_changed = src2 != src
     src = src2
     try:
@@ -228,15 +235,20 @@ def main():
         shutil.rmtree(os.path.dirname(DST))
     os.makedirs(os.path.dirname(DST), exist_ok=True)
     shutil.copytree(SRC, DST)
+    # Provider package alongside ck_dsl (skip any __pycache__).
+    shutil.copytree(
+        PROVIDER_SRC, PROVIDER_DST, ignore=shutil.ignore_patterns("__pycache__")
+    )
 
     n = 0
-    for dirpath, _, files in os.walk(DST):
-        if "/examples/" in dirpath + "/" or dirpath.endswith("/examples"):
-            continue
-        for fn in files:
-            if fn.endswith(".py"):
-                _transform_file(os.path.join(dirpath, fn))
-                n += 1
+    for root in (DST, PROVIDER_DST):
+        for dirpath, _, files in os.walk(root):
+            if "/examples/" in dirpath + "/" or dirpath.endswith("/examples"):
+                continue
+            for fn in files:
+                if fn.endswith(".py"):
+                    _transform_file(os.path.join(dirpath, fn))
+                    n += 1
     print("transformed %d .py files" % n)
 
     for rel in TRIM_INITS:

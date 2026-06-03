@@ -4,6 +4,7 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$HERE"
+python3 "$HERE/../mp1/build_bundle.py"
 python3 build_frozen.py
 make -f gen.mk micropython-embed-package
 make -f gen.mk build-embed/frozen_content.c
