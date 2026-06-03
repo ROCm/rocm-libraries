@@ -8,6 +8,7 @@ suite can run on CPU-only machines without spurious failures.
 """
 
 import functools
+import warnings
 
 import pytest
 
@@ -31,7 +32,12 @@ def _gpu_available():
 def pytest_collection_modifyitems(config, items):
     if _gpu_available():
         return
+    gpu_items = [item for item in items if "gpu" in item.keywords]
+    if gpu_items:
+        warnings.warn(
+            f"No ROCm-capable GPU available; skipping {len(gpu_items)} gpu test(s).",
+            stacklevel=1,
+        )
     skip_gpu = pytest.mark.skip(reason="no ROCm-capable GPU available")
-    for item in items:
-        if "gpu" in item.keywords:
-            item.add_marker(skip_gpu)
+    for item in gpu_items:
+        item.add_marker(skip_gpu)
