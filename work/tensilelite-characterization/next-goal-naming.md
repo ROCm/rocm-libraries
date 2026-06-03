@@ -112,16 +112,21 @@ so a `ProblemType` is cheap to build.
 6. AFTER coverage + `coverage-after.txt` + no-regression confirmation.
 7. `next-goal-<target>.md` (grounded) + commit. Mark this checklist done.
 
-## Definition of done checklist
+## Definition of done checklist — COMPLETE
 
-- [ ] `coverage-before.txt` captured (baseline) and committed BEFORE new tests.
-- [ ] `--cov=Tensile` + grep `Naming.py` row ≥95% line.
-- [ ] `coverage-after.txt` captured; before→after delta in target.md.
-- [ ] Every Tier A/B function has snapshot coverage; Tier C documented.
-- [ ] Raise / shorten-long / custom-kernel paths pinned.
-- [ ] resistance.md lists each resisting fn.
-- [ ] recommendations.md: go/no-go on the next target (a `Solution.py` slice vs
-      `Utilities.py`+`LdsPadding.py` top-up vs `GlobalParameters.py`).
-- [ ] full `-m unit` ≥ 1672 passed / 201 skipped, no failures, additive only.
-- [ ] All work committed (atomic, no push); tree clean.
-- [ ] Next goal prompt `next-goal-<target>.md` created and committed.
+- [x] `coverage-before.txt` captured (baseline) and committed BEFORE new tests.
+      (120 stmts, 21 miss = 82.50% line; `--cov=Tensile` + grep fallback.)
+- [x] `--cov=Tensile` + grep `Naming.py` row ≥95% line — **99.17% line**
+      (120 stmts, 1 miss).
+- [x] `coverage-after.txt` captured; before→after delta in target.md (+16.67 pts).
+- [x] Every Tier A/B function has snapshot coverage (abbrev helpers, `_getName`
+      via the wrappers, `getKeyNoInternalArgs`, `shortenFileBase`/file-base).
+- [x] Raise / shorten-long / custom-kernel paths pinned; also **characterized a
+      latent bug** (`getKernelNameMin` splitGSU=True + GSU>1/-1 → TypeError).
+- [x] resistance.md: 1 unreachable line (L141 dead raise) + the characterized
+      TypeError bug + mutate-restore notes.
+- [x] recommendations.md: GO → `SolutionStructs/Utilities.py` + `LdsPadding.py`
+      top-up next; then the sliced `Solution.py` campaign; defer `GlobalParameters`.
+- [x] full `-m unit` = **1713 passed / 201 skipped**, no failures, additive only.
+- [x] All work committed (atomic, no push); tree clean.
+- [x] Next goal prompt `next-goal-solutionstructs-utils.md` created and committed.
