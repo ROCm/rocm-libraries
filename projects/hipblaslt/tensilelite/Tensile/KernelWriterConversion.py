@@ -110,11 +110,6 @@ class KernelWriterConversion(KernelWriterBase):
     kStr += "  " + self.datatype + " * W;" + self.endLine
     kStr += "  " + ptrStr + " * " + bStr + "C;" + self.endLine
 
-    # Batch offsets for General Batched GEMM
-    if not self.state["ProblemType"]["GroupedGemm"]:
-      kStr += "  int64_t batchOffsetD;" + self.endLine
-      kStr += "  int64_t batchOffsetC;" + self.endLine
-
     # bias
     if self.state["ProblemType"]["UseBias"]:
       if (not self.state["ProblemType"]["Gradient"]):
@@ -196,6 +191,11 @@ class KernelWriterConversion(KernelWriterBase):
 
     if enableFactorDim:
       kStr += "  unsigned int factorDim;%s" % (self.endLine)
+
+    # Batch offsets for General Batched GEMM
+    if not self.state["ProblemType"]["GroupedGemm"]:
+      kStr += "  int64_t batchOffsetD;" + self.endLine
+      kStr += "  int64_t batchOffsetC;" + self.endLine
 
     # argument structure end
     kStr += "};" + self.endLine
