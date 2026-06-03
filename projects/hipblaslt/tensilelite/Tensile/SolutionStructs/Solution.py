@@ -51,6 +51,7 @@ from Tensile.Components.CustomSchedule import hasCustomSchedule
 from ..Component import TensorDataMover
 from ..Components.TensorDataMover import TensorDataMoverLoad
 from .Utilities import reject, roundupRatio, pvar
+from .Validators.MXScaleFormat import validateMXScaleFormatCombination
 
 
 def _deriveAndValidateMXScaleLayoutAndTransport(state, asmCaps, archCaps, printRejectionReason):
@@ -199,6 +200,8 @@ _skipTypeCheck = {
     "F32XdlMathOp",  # Also converted to DataType
 }
 
+_cacheHintTensors = ("A", "B", "C", "D", "E", "MXSA", "MXSB", "WS", "Metadata")
+_cacheHintLoadTensors = ("A", "B", "C", "E", "MXSA", "MXSB", "WS", "Metadata")
 
 # Module-level collector that accumulates type mismatches across all Solution
 # instances during a build.  Key is (param_name, actual_type_name,
@@ -694,8 +697,7 @@ class Solution(collections.abc.Mapping):
     # set ASEM=minASEMforMX for not TLUA or not TLUB
     # so far, kernel code can support 16, but host code cannot hanlde it
     # TODO: enable 16 (or less)
-    # TODO: enable less than 256 for Subtile
-    minASEMforMX = 32 if not state["UseSubtileImpl"] else 256
+    minASEMforMX = 32
     if (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]) and \
        ((not state["ProblemType"]["TLUA"]) or (not state["ProblemType"]["TLUB"])):
       if state["AssertSummationElementMultiple"] % minASEMforMX != 0:
@@ -876,7 +878,7 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "UseSubtileImpl=1 does not support ScheduleIterAlg")
       if state["StreamK"] == 0:
         reject(state, printRejectionReason, "UseSubtileImpl=1 supports StreamK only (no support for GSU)")
-      if state["StreamK"] != 3:
+      if state["StreamK"] != 3 and state["StreamK"] != 4:
         reject(state, printRejectionReason, "UseSubtileImpl=1 requires StreamK=3 (DP-before-SK mode)")
       if state["DebugStreamK"] != 0:
         reject(state, printRejectionReason, "UseSubtileImpl=1 does not support DebugStreamK (must be 0)")
@@ -1518,12 +1520,19 @@ class Solution(collections.abc.Mapping):
       if state["_ScheduleIterAlg"] not in (2, 3) and not isSia0TdmPgr:
         reject(state, printRejectionReason, "ScheduleIterAlg not supported with Stream-K")
       if state["StreamKAtomic"] == 1:
+        if state["StreamK"] == 4:
+          reject(state, printRejectionReason, "Atomic Stream-K is not supported with dynamic work queue mode")
         if not state["ProblemType"]["DataType"].isSingle():
           reject(state, printRejectionReason, "Atomic Stream-K currently only tested for SGEMM")
         if not state["BufferStore"]:
           reject(state, printRejectionReason, "Atomic Stream-K requires BufferStore")
         if state["LocalSplitU"] > 1:
           reject(state, printRejectionReason, "Atomic Stream-K not working with LocalSplitU")
+      if state["DebugPersistentKernelLoopForever"] and state["StreamK"] not in (1, 2, 3):
+        # Mode 4 exits via KernelEnd in graWorkGroup, so the flag would no-op.
+        reject(state, printRejectionReason,
+               "DebugPersistentKernelLoopForever requires StreamK in {1,2,3} (got %d)"
+               % state["StreamK"])
       if not state["Valid"]:
         print2("in assignDerivedParameters, state['Valid'] = False")
         return
@@ -1533,6 +1542,7 @@ class Solution(collections.abc.Mapping):
       state["StreamKXCCMapping"] = 0
       state["StreamKFixupTreeReduction"] = 0
       state["DebugStreamK"] = 0
+      state["DebugPersistentKernelLoopForever"] = False
 
     computeBytes = int(state["ProblemType"]["ComputeDataType"].numBytes())
     state["_WorkspaceSizePerElemC"] = computeBytes
@@ -1550,11 +1560,36 @@ class Solution(collections.abc.Mapping):
       print2("in assignDerivedParameters, state['Valid'] = False")
       return
 
-    if not isaInfoMap[isa].asmCaps["HasNTModifier"]:
-      # force to disable nt flag if it is not supported by arch
+    if not isaInfoMap[isa].asmCaps["HasNTModifier"] and not isaInfoMap[isa].asmCaps.get("HasTHModifier", False):
       for ch in ["", "A", "B", "C", "D", "E", "WS", "Metadata"]:
         if state["NonTemporal%s"%ch] >= 4:
           state["NonTemporal%s"%ch] -= 4
+
+    if state["TemporalHint"] != -1:
+      for ch in _cacheHintTensors:
+        state["TemporalHint%s"%ch] = state["TemporalHint"]
+
+    if state["NonVolatile"] != -1:
+      for ch in _cacheHintTensors:
+        state["NonVolatile%s"%ch] = state["NonVolatile"]
+
+    if not isaInfoMap[isa].asmCaps.get("HasTHModifier", False):
+      unsupportedTH = [
+        "TemporalHint%s"%ch for ch in _cacheHintTensors
+        if state["TemporalHint%s"%ch] != 0
+      ]
+      if unsupportedTH:
+        reject(state, printRejectionReason, "TemporalHint is not supported on this platform (%s)" % ", ".join(unsupportedTH))
+        return
+
+    if not isaInfoMap[isa].asmCaps.get("HasNVModifier", False):
+      unsupportedNV = [
+        "NonVolatile%s"%ch for ch in _cacheHintTensors
+        if state["NonVolatile%s"%ch] != 0
+      ]
+      if unsupportedNV:
+        reject(state, printRejectionReason, "NonVolatile is not supported on this platform (%s)" % ", ".join(unsupportedNV))
+        return
 
     if state["WavefrontSize"] == 32 and not isaInfoMap[isa].archCaps["HasWave32"]:
       reject(state, printRejectionReason, "WavefrontSize=32 not supported for ISA {}".format(isa))
@@ -1732,6 +1767,43 @@ class Solution(collections.abc.Mapping):
       state["NonTemporalC"] = state["NonTemporal"]
       state["NonTemporalD"] = state["NonTemporal"]
       state["NonTemporalMetadata"] = state["NonTemporal"]
+
+    if isaInfoMap[isa].asmCaps.get("HasTHModifier", False):
+      droppedNT = sorted(
+        "NonTemporal%s"%ch for ch in ("",) + _cacheHintTensors
+        if state["NonTemporal%s"%ch] >= 4
+      )
+      if droppedNT:
+        printWarning(
+          "gfx1250 ignores the NonTemporal nt bit (0x4) on %s; use TemporalHint*=1 (TH_NT) for non-temporal hints."
+          % ", ".join(droppedNT)
+        )
+
+      reservedLoadHints = [
+        "TemporalHint%s"%ch for ch in _cacheHintLoadTensors
+        if state["TemporalHint%s"%ch] == 7
+      ]
+      if reservedLoadHints:
+        reject(
+          state,
+          printRejectionReason,
+          "TemporalHint=7 is reserved for loads (%s)" % ", ".join(reservedLoadHints),
+        )
+        return
+
+      # TODO: Remove this reject once amdclang++ supports SCOPE_SYS with LU/WB hints.
+      invalidScopeParams = [
+        "NonTemporal%s"%ch for ch in _cacheHintTensors
+        if state["TemporalHint%s"%ch] == 3 and state["NonTemporal%s"%ch] & 0x3 == 0x3
+      ]
+      if invalidScopeParams:
+        reject(
+          state,
+          printRejectionReason,
+          "TemporalHint=3 maps to LU/WB and is not valid with SCOPE_SYS (%s)"
+          % ", ".join(invalidScopeParams),
+        )
+        return
 
     # Init vars early since there are early-exit return statements below
     # tentative init for UseGeneralizedNLCOneA/B
@@ -2189,6 +2261,17 @@ class Solution(collections.abc.Mapping):
         state,
         isaInfoMap[isa].asmCaps,
         isaInfoMap[isa].archCaps,
+        printRejectionReason):
+      return
+
+    # MX scale-format combination validation. Rejects candidates whose joint
+    # (A type, A scale, B type, B scale) tuple is not legal on gfx1250's
+    # WMMA_V3 MX path (see `Validators.MXScaleFormat.validateMXScaleFormatCombination`
+    # / ROCm/llvm-project#2634). Gated on HasWMMA_V3 so non-gfx1250 arches
+    # are unaffected.
+    if not validateMXScaleFormatCombination(
+        state,
+        isaInfoMap[isa].asmCaps,
         printRejectionReason):
       return
 
@@ -3740,10 +3823,13 @@ class Solution(collections.abc.Mapping):
       bGlobalReadVectorWidthMetadata = state["GlobalReadVectorWidthMetadata"]
       glvwMlimit = 16
       if state["GlobalReadVectorWidthMetadata"] < glvwMlimit:
+        # If SolutionIndex is present and non-negative, this means we are during TensileCreateLibrary stage
+        # Don't print rejection reason for the first attempt to expand GRVWM.
+        _printRejectionReason = (state.get("SolutionIndex", -1) == -1) and printRejectionReason
         if state["ProblemType"]["Sparse"] == 2:
           GlobalReadVectorWidth = min(state["GlobalReadVectorWidthMetadata"] * state["NumLoadsPerpendicularB"], depthUM, glvwMlimit) #sum all need read
           tvm = totalElementsM // GlobalReadVectorWidth
-          if not Solution.setGlobalReadVectorWidth(state, "Metadata", tvm, GlobalReadVectorWidth, printRejectionReason):
+          if not Solution.setGlobalReadVectorWidth(state, "Metadata", tvm, GlobalReadVectorWidth, _printRejectionReason):
             #fallback
             tvm = totalElementsM // bGlobalReadVectorWidthMetadata
             Solution.setGlobalReadVectorWidth(state, "Metadata", tvm, bGlobalReadVectorWidthMetadata, printRejectionReason)
@@ -3752,11 +3838,10 @@ class Solution(collections.abc.Mapping):
           if GlobalReadVectorWidthMetadata == 0:
             GlobalReadVectorWidthMetadata = 1
           totalVectorsCoalescedM = totalElementsCoalescedM // GlobalReadVectorWidthMetadata
-          totalVectorsM = totalElementsM // GlobalReadVectorWidthMetadata
         else:
           GlobalReadVectorWidth = min(state["GlobalReadVectorWidthMetadata"] * state["NumLoadsPerpendicularA"], depthUM, glvwMlimit) #sum all need read
           tvm = totalElementsM // GlobalReadVectorWidth
-          if not Solution.setGlobalReadVectorWidth(state, "Metadata", tvm, GlobalReadVectorWidth, printRejectionReason):
+          if not Solution.setGlobalReadVectorWidth(state, "Metadata", tvm, GlobalReadVectorWidth, _printRejectionReason):
             #fallback
             tvm = totalElementsM // bGlobalReadVectorWidthMetadata
             Solution.setGlobalReadVectorWidth(state, "Metadata", tvm, bGlobalReadVectorWidthMetadata, printRejectionReason)
@@ -3765,7 +3850,6 @@ class Solution(collections.abc.Mapping):
           if GlobalReadVectorWidthMetadata == 0:
             GlobalReadVectorWidthMetadata = 1
           totalVectorsCoalescedM = totalElementsCoalescedM // GlobalReadVectorWidthMetadata
-          totalVectorsM = totalElementsM // GlobalReadVectorWidthMetadata
 
       if not Solution.setGlobalLoadTileDimClassic(state, "Metadata", state["NumLoadsMetadata"], \
           totalVectorsCoalescedM, totalElementsPerpM, depthUM, printRejectionReason):
@@ -4592,6 +4676,19 @@ class Solution(collections.abc.Mapping):
          state["EnableMatrixInstruction"] and state["StorePriorityOpt"] and \
          state["ProblemType"]["DataType"].isDouble():
       state["LdsInitCVgprs"] = True
+
+    # Resolve InitCIterWmma (-1=auto, 0=disable, 1=force enable).
+    autoInitCIterWmma = state["EnableMatrixInstruction"] and not state["LdsInitCVgprs"] \
+                        and not state["ForceUnrollSubIter"] \
+                        and not state["ProblemType"]["DataType"].isComplex() \
+                        and not state["ProblemType"]["Sparse"] \
+                        and isaInfoMap[isa].asmCaps.get("HasWMMA_AccImmZero", False)
+    if state["InitCIterWmma"] == -1:
+      state["InitCIterWmma"] = 1 if autoInitCIterWmma else 0
+    elif state["InitCIterWmma"] == 1 and not autoInitCIterWmma:
+      reject(state, printRejectionReason,
+             "InitCIterWmma=1 requires EnableMatrixInstruction/HasWMMA_AccImmZero, and not LdsInitCVgprs/ForceUnrollSubIter/Complex/Sparse")
+      return
 
     # force MIArchVgpr when using WMMA
     if state["EnableMatrixInstruction"] and isaInfoMap[isa].asmCaps["HasWMMA"]:

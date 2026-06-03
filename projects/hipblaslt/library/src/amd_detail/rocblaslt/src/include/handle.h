@@ -199,7 +199,9 @@ struct _rocblaslt_matmul_desc
 
     float act0 = 0.f;
     float act1 = 0.f;
-
+    // Added this new bias_stride parameter to capture the stride in bias vector to get unique bias vector for each batch in strided batch case. 
+    // Default value is 0 which means same bias vector will be used across all batches (broadcast).
+    int32_t bias_stride = 0;
     std::shared_ptr<void> m_data; // Tensile data
 
     void copy(const _rocblaslt_matmul_desc& src)
@@ -229,6 +231,7 @@ struct _rocblaslt_matmul_desc
         this->scale_type            = src.scale_type;
         this->act0                  = src.act0;
         this->act1                  = src.act1;
+        this->bias_stride           = src.bias_stride;
     }
 };
 
