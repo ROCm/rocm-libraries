@@ -105,9 +105,9 @@ bool DataflowState::operator==(const DataflowState& other) const {
 // WaitDataflow
 // ---------------------------------------------------------------------------
 
-WaitDataflow::WaitDataflow(Function& func, const DominanceInfo& /*domInfo*/,
+WaitDataflow::WaitDataflow(Function& /*func*/, const DominanceInfo& /*domInfo*/,
                            const std::vector<BasicBlock*>& rpo)
-    : func(func), rpo(rpo) {
+    : rpo(rpo) {
     const unsigned n = static_cast<unsigned>(rpo.size());
     iterationCap = std::min<unsigned>(64u, std::max<unsigned>(8u, 2u * n));
 }
@@ -246,25 +246,6 @@ void trimQueues(std::vector<PerPredQueue>& qs, int keep) {
 void appendToAllPaths(std::vector<PerPredQueue>& qs, StinkyInstruction* op) {
     if (qs.empty()) qs.push_back(PerPredQueue{});
     for (auto& q : qs) q.ops.push_back(op);
-}
-
-// Collapse per-pred queues for a counter into a single union queue tagged
-// with @p selfBlock. Order is first-occurrence across paths, walking
-// per-pred queues in their existing order. This is what successors will
-// seed their own per-pred queue from.
-void collapseToExitView(std::vector<PerPredQueue>& qs, BasicBlock* selfBlock) {
-    std::deque<StinkyInstruction*> u;
-    std::unordered_set<StinkyInstruction*> seen;
-    for (const auto& q : qs) {
-        for (StinkyInstruction* op : q.ops) {
-            if (seen.insert(op).second) u.push_back(op);
-        }
-    }
-    qs.clear();
-    PerPredQueue out;
-    out.pred = selfBlock;
-    out.ops = std::move(u);
-    qs.push_back(std::move(out));
 }
 
 }  // namespace

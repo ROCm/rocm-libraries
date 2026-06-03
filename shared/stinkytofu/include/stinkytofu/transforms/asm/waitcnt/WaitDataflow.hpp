@@ -141,7 +141,6 @@ class WaitDataflow {
     }
 
    private:
-    Function& func;
     const std::vector<BasicBlock*>& rpo;
     DataflowResult result;
 
