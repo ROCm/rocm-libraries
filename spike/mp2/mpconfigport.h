@@ -19,6 +19,9 @@
 #define MICROPY_PY_SYS (1)
 #define MICROPY_PY_SYS_MODULES (1)
 #define MICROPY_PY_SYS_PATH (1)  // frozen modules are searched via a ".frozen" sys.path entry
+
+// Required so import searches sys.path / frozen modules (off at MINIMUM rom level).
+#define MICROPY_ENABLE_EXTERNAL_IMPORT (1)
 #define MICROPY_PY_SYS_PLATFORM "embed"
 
 // Doubles for ck_dsl arithmetic. Big ints via MPZ — frozen .mpy from mpy-cross
@@ -29,3 +32,9 @@
 
 // @property is used by the dataclasses/pathlib shims and ck_dsl.
 #define MICROPY_PY_BUILTINS_PROPERTY (1)
+
+// Chain the frozen modules' qstr pool onto the runtime qstr pool, so frozen
+// bytecode's qstr indices resolve (else find_qstr asserts). Standard freezing wiring.
+#if MICROPY_MODULE_FROZEN_MPY
+#define MICROPY_QSTR_EXTRA_POOL mp_qstr_frozen_const_pool
+#endif
