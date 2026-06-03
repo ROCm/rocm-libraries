@@ -43,8 +43,93 @@ ROCSOLVER_BEGIN_NAMESPACE
 /***************** Kernels/Device functions *******************************************/
 /**************************************************************************************/
 
-/***** Kernels to compute the column of Y *****/
-/**********************************************/
+/***** Kernels to compute work vector *****/
+/******************************************/
+template <int NB_X, typename T, typename U>
+ROCSOLVER_KERNEL void lahr2_computeW_kernel(const rocblas_int mm,
+                                            const rocblas_int k,
+                                            const rocblas_int c,
+                                            U AA,
+                                            const rocblas_int shiftA,
+                                            const rocblas_int lda,
+                                            const rocblas_stride strideA,
+                                            T* workA,
+                                            const rocblas_stride strideblk)
+{
+    rocblas_int bid = blockIdx.z;
+    rocblas_int tx = threadIdx.x;
+    rocblas_int i = blockIdx.x;
+
+    T* A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
+    T* y = workA + bid * strideblk;
+
+    /* ------------------------
+    formulate gemv + trmv problem:
+
+        components:
+            y  = work vector
+            A1 = A(k:k+c-1, 0:c-1) (unit lower tri.)
+            A2 = Y(k+c:mm-1, 0:c-1)
+            x1 = A(k:k+c-1, c)
+            x2 = A(k+c:mm-1, c)
+
+        operation:
+            y = A1' * x1 + A2' * x2
+    ------------------------ */
+
+    int n = mm - k;
+    // int m = c;
+    T* a = A + idx2D(k, 0, lda);
+    T* x = A + idx2D(k, c, lda);
+    T* y0 = x + i;
+
+    if(i + tx + 1 < n)
+    {
+        a += (i + tx + 1);
+        x += (i + tx + 1);
+    }
+
+    a += i * size_t(lda);
+
+    T res = 0;
+
+    __shared__ T sdata[NB_X];
+
+    // partial sums
+    rocblas_int ni = n - i - 1;
+    rocblas_int n_full = (ni / NB_X) * NB_X;
+
+    for(rocblas_int j = 0; j < n_full; j += NB_X)
+        res += conj(a[j]) * x[j];
+
+    if(tx + n_full < ni)
+        res += conj(a[n_full]) * x[n_full];
+
+    // reduction of partial sums
+    res += shift_left(res, 1);
+    res += shift_left(res, 2);
+    res += shift_left(res, 4);
+    res += shift_left(res, 8);
+    res += shift_left(res, 16);
+    if(warpSize > 32)
+        res += shift_left(res, 32);
+    if(tx % warpSize == 0)
+        sdata[tx / warpSize] = res;
+    __syncthreads();
+    if(tx == 0)
+    {
+        for(rocblas_int k = 1; k < NB_X / warpSize; k++)
+            res += sdata[k];
+    }
+
+    if(tx == 0)
+    {
+        y[i] = y0[0] + res;
+    }
+}
+
+/***** Kernels to compute column of Y *****/
+/******************************************/
 template <typename T, typename U>
 ROCSOLVER_KERNEL void lahr2_computeY_kernel(const rocblas_int mm,
                                             const rocblas_int k,
@@ -331,12 +416,12 @@ rocblas_status rocsolver_lahr2_template(rocblas_handle handle,
     // Grid/block for copy_mat (vector copy: m=j, n=1 -> simple 1D launch)
     // Computed inline where needed.
 
-    // thread config for update Y kernel.
-    rocblas_int thr_updates = BS2;
-    rocblas_int thc_updates = BS2;
-    rocblas_int grr_updates = (n - 1) / thr_updates + 1;
-    rocblas_int grc_updates = 1;
-    size_t lmemsize_updates = sizeof(T) * (thr_updates * thc_updates);
+    // thread config for compute kernels.
+    rocblas_int thr_computeY = BS2;
+    rocblas_int thc_computeY = BS2;
+    rocblas_int grr_computeY = (n - 1) / thr_computeY + 1;
+    rocblas_int grc_computeY = 1;
+    size_t computeY_lmemsize = sizeof(T) * (thr_computeY * thc_computeY);
 
     // -----------------------------------------------------------------------
     // Main loop: i = 1..NB (LAPACK 1-based) -> j = 0..nb-1 (0-based)
@@ -385,26 +470,11 @@ rocblas_status rocsolver_lahr2_template(rocblas_handle handle,
             //     b1 -= V1 * w           (DTRMV lower no-trans unit + DAXPY)
             // ----------------------------------------------------------------
 
-            // w = b1  (DCOPY: copy A(k:k+j-1, j) -> work_vec[0:j-1])
-            {
-                rocblas_int grid_x = (j - 1) / 64 + 1;
-                ROCSOLVER_LAUNCH_KERNEL((copy_mat<T, U, T*>), dim3(grid_x, 1, batch_count),
-                                        dim3(64, 1, 1), 0, stream, j, 1, A, shiftA + idx2D(k, j, lda),
-                                        1, strideA, work_vec, 0, 1, stride_work);
-            }
-
-            // w = V1^H * w  (DTRMV lower ^H unit, in-place on work_vec)
-            rocblasCall_trmv<T>(handle, rocblas_fill_lower, rocblas_operation_conjugate_transpose,
-                                rocblas_diagonal_unit, j, A, shiftA + idx2D(k, 0, lda), lda,
-                                strideA, work_vec, 0, 1, stride_work, (T*)work_workArr, stride_work,
-                                batch_count);
-
-            // w += V2^H * b2
-            rocblasCall_gemv<T>(handle, rocblas_operation_conjugate_transpose, n - k - j, j,
-                                cast2constType<T>(scalars + 2), 0, A, shiftA + idx2D(k + j, 0, lda),
-                                lda, strideA, A, shiftA + idx2D(k + j, j, lda), 1, strideA,
-                                cast2constType<T>(scalars + 2), 0, work_vec, 0, 1, stride_work,
-                                batch_count, (T**)work_workArr);
+            // w = V^H * b
+            static constexpr int NB = 256;
+            ROCSOLVER_LAUNCH_KERNEL((lahr2_computeW_kernel<NB, T>), dim3(j, 1, batch_count),
+                                    dim3(NB), 0, stream, n, k, j, A, shiftA, lda, strideA, work_vec,
+                                    stride_work);
 
             // w = T^H * w  (DTRMV upper ^H non-unit)
             rocblasCall_trmv<T>(handle, rocblas_fill_upper, rocblas_operation_conjugate_transpose,
@@ -458,10 +528,10 @@ rocblas_status rocsolver_lahr2_template(rocblas_handle handle,
         }
 
         // Y(k:n-1, j) = t * (A(k:n-1, j+1:n-k) * A(k+j:n-1, j) - Y(k:n-1, 0:j-1) * T(0:j-1, j))
-        ROCSOLVER_LAUNCH_KERNEL(lahr2_computeY_kernel<T>, dim3(grr_updates, grc_updates, batch_count),
-                                dim3(thr_updates, thc_updates, 1), lmemsize_updates, stream, n, k,
-                                j, A, shiftA, lda, strideA, Y, shiftY, ldy, strideY, Tmat, 0, ldt,
-                                strideN, tau, strideT);
+        ROCSOLVER_LAUNCH_KERNEL(
+            lahr2_computeY_kernel<T>, dim3(grr_computeY, grc_computeY, batch_count),
+            dim3(thr_computeY, thc_computeY), computeY_lmemsize, stream, n, k, j, A, shiftA, lda,
+            strideA, Y, shiftY, ldy, strideY, Tmat, 0, ldt, strideN, tau, strideT);
 
         // --------------------------------------------------------------------
         // Compute T(0:j, j)
