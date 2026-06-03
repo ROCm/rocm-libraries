@@ -62,8 +62,8 @@ namespace waitcnt {
 enum CounterKind { CK_DS = 0, CK_Buffer = 1, CK_Tensor = 2, CK_Count = 3 };
 
 /// One queue of in-flight memops on a given counter, tagged by the CFG
-/// predecessor it was seeded from. The "wait value" for op @c o at index
-/// @c i with size @c n is @c n - i - 1.
+/// predecessor it was seeded from. For an op OP at index I in a queue of
+/// size N, the wait value is N - I - 1.
 ///
 /// At block entry there is one entry per CFG predecessor. At block exit
 /// the per-pred queues are collapsed to a single entry (pred = the block
@@ -97,7 +97,7 @@ struct PhiSummary {
 /// Per-block dataflow lattice element. Stored separately for entry and exit
 /// so the solver can detect convergence on exit while merging into entry.
 ///
-/// @c queues[c] is a list of per-pred queues at block entry, mutated during
+/// queues[c] is a list of per-pred queues at block entry, mutated during
 /// transferBlock, and collapsed to a single union entry at block exit.
 struct DataflowState {
     std::array<std::vector<PerPredQueue>, CK_Count> queues;
@@ -153,12 +153,12 @@ class WaitDataflow {
     bool capHit = false;
     unsigned iterationCap = 0;
 
-    /// Build entry state for @p bb by seeding one per-pred queue per CFG
+    /// Build entry state for BB by seeding one per-pred queue per CFG
     /// predecessor (skipping self-preds, whose collapsed exit may contain
     /// loads issued AFTER the consumer on the loop body).
     DataflowState mergeFromPredecessors(BasicBlock& bb) const;
 
-    /// Walk @p bb in program order, mutating @p state. After the walk the
+    /// Walk BB in program order, mutating STATE. After the walk the
     /// per-pred queues are collapsed to a single union per counter.
     void transferBlock(BasicBlock& bb, DataflowState& state);
 };

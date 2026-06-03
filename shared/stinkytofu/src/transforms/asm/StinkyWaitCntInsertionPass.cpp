@@ -81,14 +81,10 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
         buildUseDefChain(func, domInfo, /*clearExisting=*/true, /*includePseudo=*/true);
         const auto& rpo = AM.getResult<BBIndexAnalysis>(func).rpo;
 
-        // Run the dataflow only over blocks the pass context approves.
-        std::vector<BasicBlock*> processedRpo;
-        processedRpo.reserve(rpo.size());
-        for (BasicBlock* bb : rpo) {
-            if (passCtx.shouldProcessBasicBlock(*bb)) processedRpo.push_back(bb);
-        }
-
-        WaitDataflow df(func, domInfo, processedRpo);
+        // The dataflow must see every block so a skipped pred still
+        // contributes its in-flight state to successors. PassContext
+        // gating only applies to IR mutation below.
+        WaitDataflow df(func, domInfo, rpo);
         df.solve();
         WaitInsertionPlan plan = df.materializePlan();
 
@@ -97,7 +93,7 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
         for (auto* opt : optimizers) opt->rewrite(plan, df.getResult(), func);
 
         emitWaits(func, passCtx, arch, plan);
-        removePHIs(passCtx, processedRpo);
+        removePHIs(passCtx, rpo);
         return preserveCFGAnalyses();
     }
 
