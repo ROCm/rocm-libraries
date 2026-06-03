@@ -293,6 +293,10 @@ LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH pytest
 
 # Only GPU tests
 LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH pytest -m gpu
+
+# GPU tests with explicit hipDNN engine plugin directories
+LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH pytest -m gpu \
+  --dnn-plugin-paths /path/to/hipdnn_plugins/engines
 ```
 
 ### GPU Tests
@@ -305,6 +309,10 @@ source /workspace/.venv/bin/activate  # or $DNN_BENCH_WORKSPACE/.venv/bin/activa
 # Run tests with ROCm libraries available
 LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH pytest
 ```
+
+GPU tests auto-discover provider build-tree and `/opt/rocm` plugin installs. Use
+`--dnn-plugin-paths` with a comma-separated directory list when testing custom
+engine plugin builds.
 
 **Note:** Set `LD_LIBRARY_PATH=/opt/rocm/lib` when running GPU tests to ensure hipdnn_frontend can load ROCm libraries.
 
