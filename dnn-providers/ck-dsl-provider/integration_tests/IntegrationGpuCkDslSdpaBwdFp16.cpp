@@ -253,10 +253,18 @@ TEST_P(IntegrationGpuCkDslSdpaBwdFp16Gpu, Sdpa) {
         /*attnScaleValue=*/std::nullopt, /*lse=*/&tensorStats, /*attnMask=*/nullptr,
         /*causalMask=*/cse.causal);
 
-    // Force D->H so host reads see the kernel's writes.
+    // Force D->H so host reads see the kernel's writes. markDeviceModified()
+    // flags the host copy stale; the actual sync happens on the next
+    // NON-const hostData() access. compareGrad below reads through a
+    // ``const Tensor&`` (const hostData() cannot trigger the copy and would
+    // throw "host memory is out of date"), so drive the D->H sync here on the
+    // non-const tensors first.
     tensorDQGpu.memory().markDeviceModified();
     tensorDKGpu.memory().markDeviceModified();
     tensorDVGpu.memory().markDeviceModified();
+    (void)tensorDQGpu.memory().hostData();
+    (void)tensorDKGpu.memory().hostData();
+    (void)tensorDVGpu.memory().hostData();
 
     // FP16 inputs + f32 accumulation: bwd gradients accumulate across the
     // kv sequence, so use a slightly looser tolerance than the forward
