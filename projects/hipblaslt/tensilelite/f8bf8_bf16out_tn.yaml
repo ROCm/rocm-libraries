@@ -1,0 +1,190 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+GlobalParameters:
+  SyncsPerBenchmark: 1
+  NumElementsToValidate: 0
+  KernelTime: False
+  NewClient: 2
+  BoundsCheck: False
+  PrintSolutionRejectionReason: True
+  ValidationMaxToPrint: 4      # maximum number of mismatches to print
+  ValidationPrintValids: False # print matches too
+  PruneSparseMode: 0
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeD: 2
+  DataInitTypeMXSA: 3
+  DataInitTypeMXSB: 3
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  # PrintTensorC: 1
+  # PrintTensorD: 1
+  # PrintTensorRef: 1
+  NumWarmups: 2
+  EnqueuesPerSync: 10
+  PrintWinnersOnly: True
+  MinKForGSU: 1
+  Architecture: gfx1250
+  KeepBuildTmp: True
+  PrintLevel: 2
+  UseGPUTimer: False
+  MaxLDS: 327680
+  DeviceLDS: 327680
+
+
+BenchmarkProblems:
+  -
+    - # ProblemType, TN
+      OperationType: GEMM
+      DataType: F8B8
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseScaleAB: "Scalar"
+      UseBias: 0
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [1]
+        - MatrixInstruction:
+          #- [16, 16, 128, 1,  1,  2, 2,  2, 2]
+          - [16, 16, 128, 1,  1,  2, 4,  2, 2]
+          - [16, 16, 128, 1,  1,  4, 2,  2, 2]
+          - [16, 16, 128, 1,  1,  4, 4,  2, 2]
+          - [16, 16, 128, 1,  1,  4, 8,  2, 2]
+          - [16, 16, 128, 1,  1,  4, 7,  2, 2]
+          - [16, 16, 128, 1,  1,  8, 4,  2, 2]
+          - [16, 16, 128, 1,  1,  7, 4,  2, 2]
+          - [16, 16, 128, 1,  1,  8, 8,  2, 2]
+        - HalfPLR: [0,1,2,3]
+        - DepthU: [256]
+        - TDMInst: [3]
+          #- TDMSplit: [False, True]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LDSTrInst: [False]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [1]
+        - ClusterDim: [[1,1],[2,2],[2,4], [4,2],[4,4]]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [0]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 4096, 1, 32768]
+          - Exact: [512, 8192, 1, 32768]
+          - Exact: [512, 16384, 1, 32768]
+          - Exact: [512, 32768, 1, 4096]
+          - Exact: [512, 32768, 1, 8192]
+          - Exact: [512, 32768, 1, 16384]
+          - Exact: [1536, 4096, 1, 24576]
+          - Exact: [1536, 8192, 1, 24576]
+          - Exact: [1536, 16384, 1, 24576]
+          - Exact: [1536, 24576, 1, 4096]
+          - Exact: [1536, 24576, 1, 8192]
+          - Exact: [1536, 24576, 1, 16384]
+          - Exact: [2048, 1024, 1, 7168]
+          - Exact: [2048, 2048, 1, 7168]
+          - Exact: [2048, 4096, 1, 7168]
+          - Exact: [2048, 7168, 1, 1024]
+          - Exact: [2048, 7168, 1, 2048]
+          - Exact: [2048, 7168, 1, 4096]
+          - Exact: [2048, 7168, 1, 8192]
+          - Exact: [2048, 7168, 1, 16384]
+          - Exact: [2048, 8192, 1, 7168]
+          - Exact: [2048, 16384, 1, 7168]
+          - Exact: [7168, 576, 1, 4096]
+          - Exact: [7168, 576, 1, 8192]
+          - Exact: [7168, 576, 1, 16384]
+          - Exact: [7168, 1024, 1, 4096]
+          - Exact: [7168, 1536, 1, 4096]
+          - Exact: [7168, 1536, 1, 8192]
+          - Exact: [7168, 1536, 1, 16384]
+          - Exact: [7168, 2048, 1, 4096]
+          - Exact: [7168, 4096, 1, 576]
+          - Exact: [7168, 4096, 1, 1024]
+          - Exact: [7168, 4096, 1, 1536]
+          - Exact: [7168, 4096, 1, 2048]
+          - Exact: [7168, 4096, 1, 4096]
+          - Exact: [7168, 4096, 1, 8192]
+          - Exact: [7168, 4096, 1, 16384]
+          - Exact: [7168, 4096, 1, 36864]
+          - Exact: [7168, 8192, 1, 576]
+          - Exact: [7168, 8192, 1, 1536]
+          - Exact: [7168, 8192, 1, 4096]
+          - Exact: [7168, 8192, 1, 36864]
+          - Exact: [7168, 16384, 1, 576]
+          - Exact: [7168, 16384, 1, 1536]
+          - Exact: [7168, 16384, 1, 4096]
+          - Exact: [7168, 16384, 1, 36864]
+          - Exact: [7168, 36864, 1, 4096]
+          - Exact: [7168, 36864, 1, 8192]
+          - Exact: [7168, 36864, 1, 16384]
+          - Exact: [14336, 4096, 1, 7168]
+          - Exact: [14336, 7168, 1, 4096]
+          - Exact: [14336, 7168, 1, 8192]
+          - Exact: [14336, 7168, 1, 16384]
+          - Exact: [14336, 8192, 1, 7168]
+          - Exact: [14336, 16384, 1, 7168]
+          - Exact: [16384, 4096, 1, 7168]
+          - Exact: [16384, 7168, 1, 4096]
+          - Exact: [16384, 7168, 1, 8192]
+          - Exact: [16384, 7168, 1, 16384]
+          - Exact: [16384, 8192, 1, 7168]
+          - Exact: [16384, 16384, 1, 7168]
+          - Exact: [18432, 4096, 1, 7168]
+          - Exact: [18432, 7168, 1, 4096]
+          - Exact: [18432, 7168, 1, 8192]
+          - Exact: [18432, 7168, 1, 16384]
+          - Exact: [18432, 8192, 1, 7168]
+          - Exact: [18432, 16384, 1, 7168]
+          - Exact: [1536, 2048, 1, 4096] ##qwen3
+          - Exact: [1536, 4096, 1, 4096]
+          - Exact: [1536, 8192, 1, 4096]
+          - Exact: [4096, 2048, 1, 3072]
+          - Exact: [4096, 4096, 1, 3072]
+          - Exact: [4096, 4096, 1, 9216]
+          - Exact: [4096, 8192, 1, 3072]
+          - Exact: [4096, 8192, 1, 9216]
+          - Exact: [4096, 16384, 1, 9216]
+          - Exact: [8192, 4096, 1, 4096]
+          - Exact: [8192, 8192, 1, 4096]
+          - Exact: [8192, 16384, 1, 4096]
+
+LibraryLogic:
+    ScheduleName: "gfx1250"
+    DeviceNames: ["Device 0073"]
+    ArchitectureName: "gfx1250"
+    LibraryType: "GridBased"
+
+LibraryClient:
+
