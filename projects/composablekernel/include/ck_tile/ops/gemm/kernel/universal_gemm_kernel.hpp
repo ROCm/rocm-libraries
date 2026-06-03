@@ -469,7 +469,8 @@ struct UniversalGemmKernel
         else
         {
             const index_t max_active_wgs = num_cu * occupancy;
-            return KernelArgs{hostArgs, max_active_wgs};
+            const int num_xccs           = get_num_xccs();
+            return KernelArgs{hostArgs, max_active_wgs, num_xccs};
         }
     }
 
@@ -1715,10 +1716,12 @@ struct UniversalGemmKernel
         __shared__ char smem_ptr_0[GetSmemSize()];
 
         index_t block_idx   = ck_tile::get_block_1d_id();
+        index_t grid_size   = kargs.tile_partitioner.grid_size().x;
         index_t dp_num_loop = kargs.tile_partitioner.get_iters_per_tile();
         index_t dp_ctas     = kargs.tile_partitioner.get_dp_ctas();
         bool is_dp_ctas     = block_idx < kargs.tile_partitioner.get_dp_ctas();
 
+        block_idx = kargs.tile_partitioner.remap_xcd(block_idx, grid_size, kargs.num_xccs);
         // Check if has the data parallel section
         if(is_dp_ctas)
         {
@@ -1867,7 +1870,9 @@ struct UniversalGemmKernel
         __shared__ char smem_ptr_0[GetSmemSize()];
 
         index_t block_idx   = ck_tile::get_block_1d_id();
+        index_t grid_size   = kargs.tile_partitioner.grid_size().x;
         index_t dp_num_loop = kargs.tile_partitioner.get_iters_per_tile();
+        block_idx = kargs.tile_partitioner.remap_xcd(block_idx, grid_size, kargs.num_xccs);
 
         // Data-parallel section
         for(index_t tile_idx = block_idx; tile_idx < kargs.tile_partitioner.get_dp_tiles();
