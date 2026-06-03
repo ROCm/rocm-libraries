@@ -249,3 +249,26 @@ limitation, independent of FFI (G0 passed) and of shim fidelity.
 
 **Verdict:** G1 is NOT cleared. udataclasses (the chosen approach) cannot work as-is. The decision
 between routes 1/2/3 is strategic and changes MicroPython's cost vs the parallel candidates.
+
+### G1 UPDATE (2026-06-01): ck_dsl is changeable → dataclasses SOLVED
+User confirmed ck_dsl can be modified (CK team in the loop; changes to support a new interpreter
+are expected). That selects **Route 1** and unblocks dataclasses. Two findings refined the approach:
+- `udataclasses` is a poor fit: even with `= field()` it generates a **keyword-only `__init__`**
+  (`ES("copy")` fails) and sorts fields **alphabetically**, so adopting it would force converting
+  every positional dataclass construction in ck_dsl to keyword — far more invasive than needed.
+- **Switched to a custom shim** (`spike/mp1/shims/dataclasses.py`, ~150 lines, no `exec`):
+  declaration order via a field-creation counter; positional+keyword `__init__`; required fields;
+  `default`/`default_factory`; frozen (eq/hash/immutability); `eq`/`repr`/`fields`/`replace`/
+  `asdict`/`astuple`; single-level field inheritance. (Ordered fields stored as an explicit tuple,
+  since MicroPython dict `.values()` is unordered.) **Validated byte-identical to CPython** across
+  all of the above on both interpreters (`spike/mp1/test_dc_custom.py`).
+- **Required ck_dsl change (the Route-1 cost):** every dataclass field declared with an explicit
+  `name: T = field(...)` (required) or `field(default=...)` (optional) so it lands in `__dict__`
+  (MicroPython erases bare annotations). Mechanical + automatable; CK team adopts it. Backward-
+  compatible with CPython dataclasses. Blast radius (core path): ir.py 97 + arch/target.py 53 +
+  more across 228 dataclasses — automate with an AST transform.
+
+**Dataclasses no longer blocks G1.** Remaining to reach G1: other small shims (typing/enum/
+lru_cache/pathlib), apply the field() transform to the elementwise slice, wire comgr-ffi +
+trimmed `__init__`s, run elementwise under MicroPython, byte-compare LLVM IR vs CPython. Open
+risks still to hit: MicroPython `re` subset; runtime `typing` usage; any other language gaps.
