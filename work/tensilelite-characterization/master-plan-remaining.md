@@ -79,12 +79,12 @@ package `__init__`.
 - [x] `Toolchain/Component.py` 70.1% → 100% line · `Toolchain/Validators.py` 67.7% → 100% line
 - [x] `TensileBenchmarkCluster.py` 87.5% → 99.51% (pinned --results-only BoolOp bug, D12)
 
-### Batch D — mid, IO/pipeline-leaning
-- [ ] `SolutionLibrary.py` (413, 55.2%)
-- [ ] `SolutionSelectionLibrary.py` (109, 7.3%)
-- [ ] `Utilities/merge.py` (314, 15.3%)
-- [ ] `Activation.py` (1037, 16.8%)  *(large table)*
-- [ ] `TensileCreateLibrary/ParseArguments.py` (65, 12.3%)
+### Batch D — mid, IO/pipeline-leaning  ✅ DONE (full -m unit = 2337 passed)
+- [x] `SolutionLibrary.py` 55.2% → 97.1% line
+- [x] `SolutionSelectionLibrary.py` 7.3% → 100% line
+- [x] `Utilities/merge.py` 15.3% → 97.8% line
+- [x] `Activation.py` 16.8% → 34.1% line (pure layer; asm codegen out of scope, D13)
+- [x] `TensileCreateLibrary/ParseArguments.py` 12.3% → 100% line
 
 ### Batch E — heavy / lower-yield (partial + documented where it resists)
 - [ ] `BenchmarkProblems.py` (366, 59.8%)
@@ -121,3 +121,6 @@ package `__init__`.
     Configuration 87→92 (D9) · Contractions 84→86 (D10) · BenchmarkStructs 72→partial (D11) ·
     Toolchain/Validators 68→100 · Toolchain/Component 70→100 · TensileBenchmarkCluster 88→99.5 (D12).
     Pinned latent bug: ExpressionEvaluator BoolOp ignores 3rd+ `or` operand (D12).
+- Batch D complete — 5 modules, full -m unit 2192 → 2337 passed (no regression). Fresh baseline: coverage/master-baseline-2337.txt.
+  - SolutionSelectionLibrary 7→100 · ParseArguments 12→100 · merge 15→97.8 ·
+    SolutionLibrary 55→97.1 · Activation 17→34 (pure layer; asm out of scope, D13).
