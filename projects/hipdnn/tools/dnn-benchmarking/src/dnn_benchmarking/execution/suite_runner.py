@@ -42,6 +42,52 @@ from ..validation.reference_provider import (
 from ..validation.validator import Validator
 
 
+_BFLOAT16_RTOL = 1e-2
+_BFLOAT16_ATOL = 1e-2
+_HALF_RTOL = 1e-3
+_HALF_ATOL = 1e-3
+_DEFAULT_RTOL = 1e-5
+_DEFAULT_ATOL = 1e-6
+
+
+def _output_node_types(graph_json: Dict[str, Any]) -> Dict[int, str]:
+    output_to_node: Dict[int, str] = {}
+    for node in graph_json.get("nodes", []):
+        node_type = str(node.get("type", ""))
+        for uid in (node.get("outputs") or {}).values():
+            if uid is not None:
+                output_to_node[int(uid)] = node_type
+    return output_to_node
+
+
+def _default_tolerance_for_output(
+    tensor_info: Any,
+    output_node_type: Optional[str],
+) -> tuple[float, float]:
+    dtype = str(getattr(tensor_info, "data_type", "float")).lower()
+    if dtype == "bfloat16":
+        return _BFLOAT16_RTOL, _BFLOAT16_ATOL
+    if dtype == "half":
+        return _HALF_RTOL, _HALF_ATOL
+    return _DEFAULT_RTOL, _DEFAULT_ATOL
+
+
+def _fallback_tolerance_for_config(config: SuiteConfig) -> tuple[float, float]:
+    """Return explicit tolerances, or the default float tolerance for reporting."""
+    return config.tolerance_override or (_DEFAULT_RTOL, _DEFAULT_ATOL)
+
+
+def _tolerance_for_output(
+    config: SuiteConfig,
+    tensor_info: Any,
+    output_node_type: Optional[str],
+) -> tuple[float, float]:
+    override = config.tolerance_override
+    if override is not None:
+        return override
+    return _default_tolerance_for_output(tensor_info, output_node_type)
+
+
 def _resolve_engine_name(engine_id: int) -> str:
     """Resolve an engine ID to its registered name.
 
@@ -99,6 +145,7 @@ def _engine_setup_error_result(
     error_message: str,
 ) -> ProviderEngineResult:
     """Build a per-engine error row for plugin-path/handle setup failures."""
+    rtol, atol = _fallback_tolerance_for_config(config)
     return ProviderEngineResult(
         provider=provider,
         engine_id=engine_id,
@@ -106,7 +153,7 @@ def _engine_setup_error_result(
         plugin_path=str(plugin_path) if plugin_path is not None else None,
         error_message=error_message,
         correctness=CorrectnessResult.failed(
-            rtol=config.rtol, atol=config.atol, error_message=error_message
+            rtol=rtol, atol=atol, error_message=error_message
         ),
     )
 
@@ -193,10 +240,12 @@ def _check_correctness(
         ref_outputs = ref_provider.compute_reference(graph_json, input_data)
 
         # Delegate per-output comparison to Validator and aggregate results.
-        validator = Validator(rtol=config.rtol, atol=config.atol)
+        output_node_types = _output_node_types(graph_json)
         all_passed = True
         worst_abs_diff = 0.0
         worst_rel_diff = 0.0
+        used_rtol = 0.0
+        used_atol = 0.0
 
         output_count = 0
         for ti in tensor_infos:
@@ -208,11 +257,29 @@ def _check_correctness(
                 continue
 
             if ti.uid not in ref_outputs:
-                continue
+                rtol, atol = _tolerance_for_output(
+                    config, ti, output_node_types.get(ti.uid)
+                )
+                return CorrectnessResult(
+                    execution_success=True,
+                    tolerance_match=False,
+                    rtol=rtol,
+                    atol=atol,
+                    error_message=(
+                        f"Reference provider '{ref_provider.name}' did not produce "
+                        f"output tensor UID {ti.uid}"
+                    ),
+                )
 
+            rtol, atol = _tolerance_for_output(
+                config, ti, output_node_types.get(ti.uid)
+            )
+            validator = Validator(rtol=rtol, atol=atol)
             expected = ref_outputs[ti.uid].data
             result = validator.validate(actual, ti, reference_data=expected)
             output_count += 1
+            used_rtol = max(used_rtol, rtol)
+            used_atol = max(used_atol, atol)
 
             if not result.passed:
                 all_passed = False
@@ -223,32 +290,31 @@ def _check_correctness(
                 worst_rel_diff = result.max_rel_diff
 
         if output_count == 0:
-            # Validation was requested but nothing comparable surfaced
-            # (e.g. reference omitted every output). Treat as failure
-            # so --validate stays a hard gate.
+            rtol, atol = _fallback_tolerance_for_config(config)
             return CorrectnessResult(
                 execution_success=True,
                 tolerance_match=False,
-                rtol=config.rtol,
-                atol=config.atol,
+                rtol=rtol,
+                atol=atol,
                 error_message="No output tensors to compare",
             )
 
         return CorrectnessResult(
             execution_success=True,
             tolerance_match=all_passed,
-            rtol=config.rtol,
-            atol=config.atol,
+            rtol=used_rtol,
+            atol=used_atol,
             max_abs_diff=worst_abs_diff,
             max_rel_diff=worst_rel_diff,
         )
 
     except (ValueError, RuntimeError, ExecutionError) as e:
+        rtol, atol = _fallback_tolerance_for_config(config)
         return CorrectnessResult(
             execution_success=True,
             tolerance_match=False,
-            rtol=config.rtol,
-            atol=config.atol,
+            rtol=rtol,
+            atol=atol,
             error_message=str(e),
         )
 
@@ -310,6 +376,7 @@ def run_graph_all_providers(
             )
             engine_ids = discovery_executor.discover_engines(handle)
         except UnsupportedGraphError as e:
+            rtol, atol = _fallback_tolerance_for_config(config)
             return GraphResult(
                 graph_name=graph_name,
                 graph_path=str(graph_path),
@@ -320,13 +387,14 @@ def run_graph_all_providers(
                         status="skipped",
                         skip_reason=str(e),
                         correctness=CorrectnessResult.failed(
-                            rtol=config.rtol, atol=config.atol, error_message=str(e)
+                            rtol=rtol, atol=atol, error_message=str(e)
                         ),
                     )
                 ],
             )
         except (ExecutionError, RuntimeError) as e:
             msg = str(e)
+            rtol, atol = _fallback_tolerance_for_config(config)
             return GraphResult(
                 graph_name=graph_name,
                 graph_path=str(graph_path),
@@ -337,7 +405,7 @@ def run_graph_all_providers(
                         status="error",
                         error_message=f"Engine discovery failed: {msg}",
                         correctness=CorrectnessResult.failed(
-                            rtol=config.rtol, atol=config.atol, error_message=msg
+                            rtol=rtol, atol=atol, error_message=msg
                         ),
                     )
                 ],
@@ -595,29 +663,33 @@ def run_single_provider_engine(
                 )
 
             if ref_provider is not None:
+                bm.zero_outputs()
+                executor.execute_once(handle, variant_pack)
                 result.correctness = _check_correctness(
                     bm, tensor_infos, graph_json, ref_provider, config
                 )
             elif validation_requested:
+                rtol, atol = _fallback_tolerance_for_config(config)
                 # User asked for validation but the reference provider
                 # didn't support this graph. Treat as a correctness
                 # failure so --validate stays a hard gate.
                 result.correctness = CorrectnessResult(
                     execution_success=True,
                     tolerance_match=False,
-                    rtol=config.rtol,
-                    atol=config.atol,
+                    rtol=rtol,
+                    atol=atol,
                     error_message=(
                         f"Reference provider '{config.reference_provider}' "
                         f"does not support this graph"
                     ),
                 )
             else:
+                rtol, atol = _fallback_tolerance_for_config(config)
                 result.correctness = CorrectnessResult(
                     execution_success=True,
                     tolerance_match=None,
-                    rtol=config.rtol,
-                    atol=config.atol,
+                    rtol=rtol,
+                    atol=atol,
                     error_message="No reference provider requested",
                 )
 
@@ -676,8 +748,9 @@ def run_single_provider_engine(
         result.e2e_stats = None
         result.status = "skipped"
         result.skip_reason = str(e)
+        rtol, atol = _fallback_tolerance_for_config(config)
         result.correctness = CorrectnessResult.failed(
-            rtol=config.rtol, atol=config.atol, error_message=str(e)
+            rtol=rtol, atol=atol, error_message=str(e)
         )
         return result
 
@@ -688,8 +761,9 @@ def run_single_provider_engine(
         result.e2e_stats = None
         result.status = "error"
         result.error_message = error_msg
+        rtol, atol = _fallback_tolerance_for_config(config)
         result.correctness = CorrectnessResult.failed(
-            rtol=config.rtol, atol=config.atol, error_message=error_msg
+            rtol=rtol, atol=atol, error_message=error_msg
         )
         return result
 
@@ -700,7 +774,8 @@ def run_single_provider_engine(
         result.e2e_stats = None
         result.status = "error"
         result.error_message = error_msg
+        rtol, atol = _fallback_tolerance_for_config(config)
         result.correctness = CorrectnessResult.failed(
-            rtol=config.rtol, atol=config.atol, error_message=error_msg
+            rtol=rtol, atol=atol, error_message=error_msg
         )
         return result

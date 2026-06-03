@@ -5,7 +5,7 @@
 
 import json
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 import numpy as np
 import pytest
@@ -16,7 +16,7 @@ from dnn_benchmarking.graph import GraphLoader
 from dnn_benchmarking.validation import ArrayComparator, ReferenceProviderRegistry
 
 
-def _setup_hipdnn():
+def _setup_hipdnn(plugin_paths: List[str]):
     """Import hipdnn_frontend with plugin path configured, or skip."""
     try:
         import torch
@@ -29,22 +29,7 @@ def _setup_hipdnn():
     try:
         import hipdnn_frontend
 
-        # Auto-discover and set plugin path
-        project_root = Path(__file__).parent.parent.parent
-        candidates = [
-            project_root.parent.parent.parent.parent
-            / "dnn-providers"
-            / "miopen-provider"
-            / "build"
-            / "lib"
-            / "hipdnn_plugins"
-            / "engines",
-            Path("/opt/rocm/lib/hipdnn_plugins/engines"),
-        ]
-        for p in candidates:
-            if p.is_dir() and any(p.glob("*.so")):
-                hipdnn_frontend.set_engine_plugin_paths([str(p)])
-                break
+        hipdnn_frontend.set_engine_plugin_paths(plugin_paths)
 
         hipdnn_frontend.Handle()
         return hipdnn_frontend
@@ -57,9 +42,9 @@ class TestExecution:
     """Integration tests for graph execution requiring GPU."""
 
     @pytest.fixture
-    def hipdnn(self):
+    def hipdnn(self, plugin_paths: List[str]):
         """Get hipdnn_frontend module or skip if not available."""
-        return _setup_hipdnn()
+        return _setup_hipdnn(plugin_paths)
 
     def test_executor_prepare(
         self, hipdnn, sample_conv_fwd_json: Dict[str, Any]

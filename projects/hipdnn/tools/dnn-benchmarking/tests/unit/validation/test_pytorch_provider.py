@@ -391,6 +391,13 @@ class TestPyTorchProviderGraphSupport:
         assert "ConvolutionFwdAttributes" in supported
         assert "MatmulAttributes" in supported
         assert "PointwiseAttributes" in supported
+        assert "ConvolutionBwdAttributes" in supported
+        assert "ConvolutionWrwAttributes" in supported
+        assert "BatchnormAttributes" in supported
+        assert "BatchnormInferenceAttributes" in supported
+        assert "BatchnormInferenceAttributesVarianceExt" in supported
+        assert "BatchnormBackwardAttributes" in supported
+        assert "SdpaAttributes" in supported
 
 
 class TestPyTorchProviderErrors:
@@ -434,3 +441,315 @@ class TestPyTorchProviderErrors:
             provider.compute_reference(graph_json, input_data)
 
         assert "unsupported" in str(exc_info.value).lower()
+
+
+class TestPyTorchProviderNewOps:
+    """Reference correctness for newly supported hipDNN operation types."""
+
+    def test_matmul_batched_broadcast(self) -> None:
+        provider = ReferenceProviderRegistry.get_provider("pytorch")
+        graph_json = {
+            "nodes": [
+                {
+                    "type": "MatmulAttributes",
+                    "inputs": {"a_tensor_uid": 1, "b_tensor_uid": 2},
+                    "outputs": {"c_tensor_uid": 3},
+                }
+            ]
+        }
+        a = np.arange(24, dtype=np.float32).reshape(2, 3, 4)
+        b = np.arange(20, dtype=np.float32).reshape(1, 4, 5)
+        outputs = provider.compute_reference(graph_json, {1: a, 2: b})
+
+        np.testing.assert_allclose(
+            outputs[3].data,
+            torch.matmul(torch.from_numpy(a), torch.from_numpy(b)).numpy(),
+        )
+
+    def test_conv_dgrad_and_wgrad(self) -> None:
+        provider = ReferenceProviderRegistry.get_provider("pytorch")
+        common_params = {
+            "conv_mode": "CROSS_CORRELATION",
+            "pre_padding": [0, 0],
+            "post_padding": [0, 0],
+            "stride": [1, 1],
+            "dilation": [1, 1],
+        }
+        dgrad_graph = {
+            "tensors": [{"uid": 3, "dims": [1, 1, 4, 4]}],
+            "nodes": [
+                {
+                    "type": "ConvolutionBwdAttributes",
+                    "inputs": {"dy_tensor_uid": 1, "w_tensor_uid": 2},
+                    "outputs": {"dx_tensor_uid": 3},
+                    "parameters": common_params,
+                }
+            ],
+        }
+        wrw_graph = {
+            "tensors": [{"uid": 4, "dims": [1, 1, 2, 2]}],
+            "nodes": [
+                {
+                    "type": "ConvolutionWrwAttributes",
+                    "inputs": {"x_tensor_uid": 3, "dy_tensor_uid": 1},
+                    "outputs": {"dw_tensor_uid": 4},
+                    "parameters": common_params,
+                }
+            ],
+        }
+        dy = np.ones((1, 1, 3, 3), dtype=np.float32)
+        w = np.ones((1, 1, 2, 2), dtype=np.float32)
+        x = np.arange(16, dtype=np.float32).reshape(1, 1, 4, 4)
+
+        dgrad = provider.compute_reference(dgrad_graph, {1: dy, 2: w})[3].data
+        wrw = provider.compute_reference(wrw_graph, {1: dy, 3: x})[4].data
+
+        np.testing.assert_allclose(
+            dgrad,
+            torch.nn.grad.conv2d_input(
+                (1, 1, 4, 4), torch.from_numpy(w), torch.from_numpy(dy)
+            ).numpy(),
+        )
+        np.testing.assert_allclose(
+            wrw,
+            torch.nn.grad.conv2d_weight(
+                torch.from_numpy(x), (1, 1, 2, 2), torch.from_numpy(dy)
+            ).numpy(),
+        )
+
+    def test_batchnorm_training_saved_and_running_stats(self) -> None:
+        provider = ReferenceProviderRegistry.get_provider("pytorch")
+        graph_json = {
+            "nodes": [
+                {
+                    "type": "BatchnormAttributes",
+                    "inputs": {
+                        "x_tensor_uid": 1,
+                        "scale_tensor_uid": 2,
+                        "bias_tensor_uid": 3,
+                        "epsilon_tensor_uid": 4,
+                        "prev_running_mean_tensor_uid": 5,
+                        "prev_running_variance_tensor_uid": 6,
+                        "momentum_tensor_uid": 7,
+                    },
+                    "outputs": {
+                        "y_tensor_uid": 8,
+                        "mean_tensor_uid": 9,
+                        "inv_variance_tensor_uid": 10,
+                        "next_running_mean_tensor_uid": 11,
+                        "next_running_variance_tensor_uid": 12,
+                    },
+                }
+            ]
+        }
+        x = np.array([[[[1.0, 3.0]]]], dtype=np.float32)
+        input_data = {
+            1: x,
+            2: np.array([[[[1.0]]]], dtype=np.float32),
+            3: np.array([[[[0.0]]]], dtype=np.float32),
+            4: np.array([0.0], dtype=np.float32),
+            5: np.array([[[[10.0]]]], dtype=np.float32),
+            6: np.array([[[[20.0]]]], dtype=np.float32),
+            7: np.array([0.5], dtype=np.float32),
+        }
+
+        outputs = provider.compute_reference(graph_json, input_data)
+
+        np.testing.assert_allclose(outputs[8].data, [[[[-1.0, 1.0]]]], rtol=1e-6)
+        np.testing.assert_allclose(outputs[9].data, [[[[2.0]]]], rtol=1e-6)
+        np.testing.assert_allclose(outputs[10].data, [[[[1.0]]]], rtol=1e-6)
+        np.testing.assert_allclose(outputs[11].data, [[[[6.0]]]], rtol=1e-6)
+        np.testing.assert_allclose(outputs[12].data, [[[[11.0]]]], rtol=1e-6)
+
+    def test_batchnorm_inference_variance(self) -> None:
+        provider = ReferenceProviderRegistry.get_provider("pytorch")
+        graph_json = {
+            "nodes": [
+                {
+                    "type": "BatchnormInferenceAttributesVarianceExt",
+                    "inputs": {
+                        "x_tensor_uid": 1,
+                        "mean_tensor_uid": 2,
+                        "variance_tensor_uid": 3,
+                        "scale_tensor_uid": 4,
+                        "bias_tensor_uid": 5,
+                        "epsilon_tensor_uid": 6,
+                    },
+                    "outputs": {"y_tensor_uid": 7},
+                }
+            ]
+        }
+        outputs = provider.compute_reference(
+            graph_json,
+            {
+                1: np.array([[[[3.0]]]], dtype=np.float32),
+                2: np.array([[[[1.0]]]], dtype=np.float32),
+                3: np.array([[[[4.0]]]], dtype=np.float32),
+                4: np.array([[[[2.0]]]], dtype=np.float32),
+                5: np.array([[[[1.0]]]], dtype=np.float32),
+                6: np.array([0.0], dtype=np.float32),
+            },
+        )
+
+        np.testing.assert_allclose(outputs[7].data, [[[[3.0]]]], rtol=1e-6)
+
+    def test_batchnorm_inference_mean_inv_variance(self) -> None:
+        provider = ReferenceProviderRegistry.get_provider("pytorch")
+        graph_json = {
+            "nodes": [
+                {
+                    "type": "BatchnormInferenceAttributes",
+                    "inputs": {
+                        "x_tensor_uid": 1,
+                        "mean_tensor_uid": 2,
+                        "inv_variance_tensor_uid": 3,
+                        "scale_tensor_uid": 4,
+                        "bias_tensor_uid": 5,
+                    },
+                    "outputs": {"y_tensor_uid": 6},
+                }
+            ]
+        }
+        outputs = provider.compute_reference(
+            graph_json,
+            {
+                1: np.array([[[[3.0]]]], dtype=np.float32),
+                2: np.array([[[[1.0]]]], dtype=np.float32),
+                3: np.array([[[[0.5]]]], dtype=np.float32),
+                4: np.array([[[[2.0]]]], dtype=np.float32),
+                5: np.array([[[[1.0]]]], dtype=np.float32),
+            },
+        )
+
+        np.testing.assert_allclose(outputs[6].data, [[[[3.0]]]], rtol=1e-6)
+
+    def test_batchnorm_backward_outputs_expected_reductions(self) -> None:
+        provider = ReferenceProviderRegistry.get_provider("pytorch")
+        graph_json = {
+            "nodes": [
+                {
+                    "type": "BatchnormBackwardAttributes",
+                    "inputs": {
+                        "dy_tensor_uid": 1,
+                        "x_tensor_uid": 2,
+                        "mean_tensor_uid": 3,
+                        "inv_variance_tensor_uid": 4,
+                        "scale_tensor_uid": 5,
+                    },
+                    "outputs": {
+                        "dx_tensor_uid": 6,
+                        "dscale_tensor_uid": 7,
+                        "dbias_tensor_uid": 8,
+                    },
+                }
+            ]
+        }
+        outputs = provider.compute_reference(
+            graph_json,
+            {
+                1: np.array([[[[2.0, 4.0]]]], dtype=np.float32),
+                2: np.array([[[[1.0, 3.0]]]], dtype=np.float32),
+                3: np.array([[[[2.0]]]], dtype=np.float32),
+                4: np.array([[[[1.0]]]], dtype=np.float32),
+                5: np.array([[[[1.0]]]], dtype=np.float32),
+            },
+        )
+
+        np.testing.assert_allclose(outputs[6].data, [[[[0.0, 0.0]]]], rtol=1e-6)
+        np.testing.assert_allclose(outputs[7].data, [[[[2.0]]]], rtol=1e-6)
+        np.testing.assert_allclose(outputs[8].data, [[[[6.0]]]], rtol=1e-6)
+
+    def test_sdpa_forward_matches_torch_and_returns_stats(self) -> None:
+        provider = ReferenceProviderRegistry.get_provider("pytorch")
+        q = np.array([[[[1.0, 0.0], [0.0, 1.0]]]], dtype=np.float32)
+        k = q.copy()
+        v = np.array([[[[1.0, 2.0], [3.0, 4.0]]]], dtype=np.float32)
+        graph_json = {
+            "nodes": [
+                {
+                    "type": "SdpaAttributes",
+                    "inputs": {"q_tensor_uid": 1, "k_tensor_uid": 2, "v_tensor_uid": 3},
+                    "outputs": {"o_tensor_uid": 4, "stats_tensor_uid": 6},
+                    "attributes": {"dropout_probability": 0.0},
+                }
+            ]
+        }
+
+        outputs = provider.compute_reference(graph_json, {1: q, 2: k, 3: v})
+        q_t = torch.from_numpy(q)
+        k_t = torch.from_numpy(k)
+        v_t = torch.from_numpy(v)
+        expected = torch.nn.functional.scaled_dot_product_attention(
+            q_t, k_t, v_t, dropout_p=0.0
+        )
+        expected_stats = torch.logsumexp(
+            torch.matmul(q_t, k_t.transpose(-2, -1)) / torch.sqrt(torch.tensor(2.0)),
+            dim=-1,
+        )
+
+        np.testing.assert_allclose(outputs[4].data, expected.numpy(), rtol=1e-6)
+        np.testing.assert_allclose(outputs[6].data, expected_stats.numpy(), rtol=1e-6)
+
+    def test_sdpa_bfloat16_uses_graph_dtype(self) -> None:
+        provider = ReferenceProviderRegistry.get_provider("pytorch")
+        q = np.array([[[[0.10, 0.20], [0.30, 0.40]]]], dtype=np.float32)
+        k = np.array([[[[0.50, 0.60], [0.70, 0.80]]]], dtype=np.float32)
+        v = np.array([[[[0.90, 0.25], [0.125, 0.75]]]], dtype=np.float32)
+        graph_json = {
+            "tensors": [
+                {"uid": 1, "dims": [1, 1, 2, 2], "data_type": "bfloat16"},
+                {"uid": 2, "dims": [1, 1, 2, 2], "data_type": "bfloat16"},
+                {"uid": 3, "dims": [1, 1, 2, 2], "data_type": "bfloat16"},
+                {"uid": 4, "dims": [1, 1, 2, 2], "data_type": "bfloat16"},
+            ],
+            "nodes": [
+                {
+                    "type": "SdpaAttributes",
+                    "inputs": {"q_tensor_uid": 1, "k_tensor_uid": 2, "v_tensor_uid": 3},
+                    "outputs": {"o_tensor_uid": 4},
+                    "attributes": {"dropout_probability": 0.0},
+                }
+            ],
+        }
+
+        outputs = provider.compute_reference(graph_json, {1: q, 2: k, 3: v})
+        expected = torch.nn.functional.scaled_dot_product_attention(
+            torch.from_numpy(q).to(torch.bfloat16),
+            torch.from_numpy(k).to(torch.bfloat16),
+            torch.from_numpy(v).to(torch.bfloat16),
+            dropout_p=0.0,
+        ).to(torch.float32)
+
+        assert outputs[4].data.dtype == np.float32
+        np.testing.assert_array_equal(outputs[4].data, expected.numpy())
+
+    @pytest.mark.parametrize(
+        "optional_output",
+        [
+            "max_tensor_uid",
+            "sum_exp_tensor_uid",
+            "rng_dump_tensor_uid",
+            "amax_s_tensor_uid",
+            "amax_o_tensor_uid",
+        ],
+    )
+    def test_sdpa_forward_rejects_unsupported_optional_outputs(
+        self, optional_output: str
+    ) -> None:
+        provider = ReferenceProviderRegistry.get_provider("pytorch")
+        q = np.array([[[[1.0, 0.0], [0.0, 1.0]]]], dtype=np.float32)
+        k = q.copy()
+        v = np.array([[[[1.0, 2.0], [3.0, 4.0]]]], dtype=np.float32)
+        graph_json = {
+            "nodes": [
+                {
+                    "type": "SdpaAttributes",
+                    "inputs": {"q_tensor_uid": 1, "k_tensor_uid": 2, "v_tensor_uid": 3},
+                    "outputs": {"o_tensor_uid": 4, optional_output: 5},
+                    "attributes": {"dropout_probability": 0.0},
+                }
+            ]
+        }
+
+        with pytest.raises(ValueError, match=optional_output):
+            provider.compute_reference(graph_json, {1: q, 2: k, 3: v})

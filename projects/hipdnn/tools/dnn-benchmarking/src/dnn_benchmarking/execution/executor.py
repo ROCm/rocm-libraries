@@ -228,6 +228,17 @@ class Executor:
 
         self._init_time_ms = t.elapsed_ms
 
+    def execute_once(self, handle: Any, variant_pack: Dict[int, int]) -> None:
+        """Execute the prepared graph once without collecting timings."""
+        if self._graph is None:
+            raise ExecutionError("Graph not prepared. Call prepare() first.")
+        if self._workspace is not None:
+            self._workspace.zeros()
+
+        result = self._graph.execute(handle, variant_pack, self._workspace_ptr)
+        if result.is_bad():
+            raise ExecutionError(f"Graph execution failed: {result.get_message()}")
+
     def warmup(self, handle: Any, variant_pack: Dict[int, int]) -> None:
         """Run warmup iterations (timing discarded).
 

@@ -25,7 +25,7 @@ TORCH_DTYPE_MAP = {
 NUMPY_DTYPE_MAP = {
     "float": np.float32,
     "half": np.float16,
-    "bfloat16": np.float16,  # numpy doesn't have bfloat16
+    "bfloat16": np.float32,  # numpy doesn't have bfloat16
     "double": np.float64,
     "int8": np.int8,
     "int32": np.int32,
@@ -66,12 +66,36 @@ class PyTorchCudaBufferManager:
                 continue
 
             dtype = TORCH_DTYPE_MAP.get(tensor_info.data_type.lower(), torch.float32)
-            tensor = torch.empty(
-                tensor_info.dims,
-                dtype=dtype,
-                device=self._device,
-            )
+            if tensor_info.is_pass_by_value:
+                value = torch.tensor(
+                    [tensor_info.value], dtype=dtype, device=self._device
+                )
+                self._tensors[tensor_info.uid] = value
+                self._host_data[tensor_info.uid] = np.asarray([tensor_info.value])
+                continue
+
+            if tensor_info.strides:
+                tensor = torch.empty_strided(
+                    tensor_info.dims,
+                    tensor_info.strides,
+                    dtype=dtype,
+                    device=self._device,
+                )
+            else:
+                tensor = torch.empty(
+                    tensor_info.dims,
+                    dtype=dtype,
+                    device=self._device,
+                )
             self._tensors[tensor_info.uid] = tensor
+
+    @staticmethod
+    def _host_numpy(tensor: torch.Tensor) -> np.ndarray:
+        """Copy a tensor to numpy using the validation representation."""
+        host = tensor.detach().cpu()
+        if host.dtype == torch.bfloat16:
+            return host.to(dtype=torch.float32).numpy()
+        return host.numpy()
 
     def fill_inputs_random(self, seed: Optional[int] = None) -> None:
         """Fill input tensor buffers with random data.
@@ -87,6 +111,9 @@ class PyTorchCudaBufferManager:
             if tensor_info.is_output or tensor_info.is_virtual:
                 continue
 
+            if tensor_info.is_pass_by_value:
+                continue
+
             tensor = self._tensors.get(tensor_info.uid)
             if tensor is None:
                 continue
@@ -95,11 +122,11 @@ class PyTorchCudaBufferManager:
             np_dtype = NUMPY_DTYPE_MAP.get(tensor_info.data_type.lower(), np.float32)
             data = np.random.uniform(0.0, 1.0, tensor_info.dims).astype(np_dtype)
 
-            # Store host data for potential validation
-            self._host_data[tensor_info.uid] = data
-
-            # Copy to CUDA tensor
+            # Copy to CUDA tensor, then store the logical value that is actually
+            # present after device dtype conversion (BF16 is represented as FP32
+            # in numpy because numpy has no native bfloat16 dtype).
             tensor.copy_(torch.from_numpy(data))
+            self._host_data[tensor_info.uid] = self._host_numpy(tensor)
 
     def zero_outputs(self) -> None:
         """Zero output tensor buffers."""
@@ -132,7 +159,7 @@ class PyTorchCudaBufferManager:
         if tensor is None:
             return None
 
-        return tensor.detach().cpu().numpy()
+        return self._host_numpy(tensor)
 
     def get_input_data(self, uid: int) -> Optional[np.ndarray]:
         """Get the host-side input data for a tensor.

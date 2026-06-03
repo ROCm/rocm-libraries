@@ -238,3 +238,133 @@ class TestPyTorchOpsSupportsGraph:
         assert "Unknown1" in unsupported
         assert "Unknown2" in unsupported
         assert "ConvolutionFwdAttributes" not in unsupported
+
+
+class TestPyTorchOpsNewHandlers:
+    """Registration and focused correctness checks for hipDNN op references."""
+
+    @pytest.mark.parametrize(
+        "op_type",
+        [
+            "ConvolutionBwdAttributes",
+            "ConvolutionWrwAttributes",
+            "BatchnormAttributes",
+            "BatchnormInferenceAttributes",
+            "BatchnormInferenceAttributesVarianceExt",
+            "BatchnormBackwardAttributes",
+            "SdpaAttributes",
+        ],
+    )
+    def test_get_handler_returns_handler_for_new_ops(self, op_type: str) -> None:
+        assert callable(pytorch_ops.get_handler(op_type))
+
+    def test_conv_dgrad_matches_torch_grad(self) -> None:
+        graph_json = {
+            "tensors": [
+                {"uid": 1, "dims": [1, 1, 3, 3]},
+                {"uid": 2, "dims": [1, 1, 2, 2]},
+                {"uid": 3, "dims": [1, 1, 4, 4]},
+            ],
+            "nodes": [
+                {
+                    "type": "ConvolutionBwdAttributes",
+                    "inputs": {"dy_tensor_uid": 1, "w_tensor_uid": 2},
+                    "outputs": {"dx_tensor_uid": 3},
+                    "parameters": {
+                        "conv_mode": "CROSS_CORRELATION",
+                        "pre_padding": [0, 0],
+                        "post_padding": [0, 0],
+                        "stride": [1, 1],
+                        "dilation": [1, 1],
+                    },
+                }
+            ],
+        }
+        dy = torch.ones(1, 1, 3, 3)
+        w = torch.ones(1, 1, 2, 2)
+        tensors = {1: dy, 2: w}
+        pytorch_ops.execute_graph(graph_json, tensors)
+
+        expected = torch.nn.grad.conv2d_input((1, 1, 4, 4), w, dy)
+        torch.testing.assert_close(tensors[3], expected)
+
+    def test_conv_wgrad_matches_torch_grad(self) -> None:
+        graph_json = {
+            "tensors": [
+                {"uid": 1, "dims": [1, 1, 4, 4]},
+                {"uid": 2, "dims": [1, 1, 3, 3]},
+                {"uid": 3, "dims": [1, 1, 2, 2]},
+            ],
+            "nodes": [
+                {
+                    "type": "ConvolutionWrwAttributes",
+                    "inputs": {"x_tensor_uid": 1, "dy_tensor_uid": 2},
+                    "outputs": {"dw_tensor_uid": 3},
+                    "parameters": {
+                        "conv_mode": "CROSS_CORRELATION",
+                        "pre_padding": [0, 0],
+                        "post_padding": [0, 0],
+                        "stride": [1, 1],
+                        "dilation": [1, 1],
+                    },
+                }
+            ],
+        }
+        x = torch.arange(16, dtype=torch.float32).reshape(1, 1, 4, 4)
+        dy = torch.ones(1, 1, 3, 3)
+        tensors = {1: x, 2: dy}
+        pytorch_ops.execute_graph(graph_json, tensors)
+
+        expected = torch.nn.grad.conv2d_weight(x, (1, 1, 2, 2), dy)
+        torch.testing.assert_close(tensors[3], expected)
+
+    def test_batchnorm_backward_outputs_expected_reductions(self) -> None:
+        graph_json = {
+            "nodes": [
+                {
+                    "type": "BatchnormBackwardAttributes",
+                    "inputs": {
+                        "dy_tensor_uid": 1,
+                        "x_tensor_uid": 2,
+                        "mean_tensor_uid": 3,
+                        "inv_variance_tensor_uid": 4,
+                        "scale_tensor_uid": 5,
+                    },
+                    "outputs": {
+                        "dx_tensor_uid": 6,
+                        "dscale_tensor_uid": 7,
+                        "dbias_tensor_uid": 8,
+                    },
+                }
+            ]
+        }
+        x = torch.tensor([[[[1.0, 3.0]]]])
+        dy = torch.tensor([[[[2.0, 4.0]]]])
+        tensors = {
+            1: dy,
+            2: x,
+            3: torch.tensor([[[[2.0]]]]),
+            4: torch.tensor([[[[1.0]]]]),
+            5: torch.tensor([[[[1.0]]]]),
+        }
+
+        pytorch_ops.execute_graph(graph_json, tensors)
+
+        torch.testing.assert_close(tensors[7], torch.tensor([[[[2.0]]]]))
+        torch.testing.assert_close(tensors[8], torch.tensor([[[[6.0]]]]))
+        torch.testing.assert_close(tensors[6], torch.zeros(1, 1, 1, 2))
+
+    def test_sdpa_nonzero_dropout_raises(self) -> None:
+        graph_json = {
+            "nodes": [
+                {
+                    "type": "SdpaAttributes",
+                    "inputs": {"q_tensor_uid": 1, "k_tensor_uid": 2, "v_tensor_uid": 3},
+                    "outputs": {"o_tensor_uid": 4},
+                    "attributes": {"dropout_probability": 0.5},
+                }
+            ]
+        }
+        q = torch.randn(1, 1, 2, 4)
+        with pytest.raises(ValueError, match="Nonzero SDPA dropout"):
+            pytorch_ops.execute_graph(graph_json, {1: q, 2: q, 3: q})
