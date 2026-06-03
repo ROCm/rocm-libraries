@@ -349,7 +349,7 @@ int main(int argc, char* argv[])
     app.add_option("--callback_prob",
                    callback_prob_factor,
                    "Probability multiplier for running individual callback transforms")
-        ->default_val(0.1)
+        ->default_val(0.0)
         ->check(CLI::NonNegativeNumber);
     app.add_option("--max_hipfftw_test_len",
                    max_length_for_hipfftw_test,
@@ -423,9 +423,10 @@ int main(int argc, char* argv[])
     auto* non_token = app.add_option_group("Token Conflict", "Options excluded by --token");
     non_token->excludes(opt_token);
     // Declare the supported options. Some option pointers are declared to track passed opts.
-    non_token->add_flag("--callback", "Inject load/store callbacks")->each([&](const std::string&) {
-        manual_params.run_callbacks = true;
-    });
+    non_token
+        ->add_flag(
+            "--callback", manual_params.run_callbacks, "Inject load/store callbacks: none, funcptr")
+        ->default_val("none");
     non_token
         ->add_option("--auto_allocation",
                      manual_params.auto_allocate,

@@ -3,9 +3,9 @@
 
 """Suite runner for per-graph engine iteration with granular timing.
 
-Iterates the engine IDs discovered for a graph via
-``Graph.get_ranked_engine_ids`` (real runtime discovery, no hardcoded engine
-lists). For each engine, captures separated CPU build time, GPU kernel time,
+Uses explicit ``--engine`` IDs in caller order when provided; otherwise
+discovers ranked engine IDs for the graph via ``Graph.get_ranked_engine_ids``.
+For each engine, captures separated CPU build time, GPU kernel time,
 and E2E wall-clock time. Performs correctness validation by comparing GPU
 output against a reference provider via ArrayComparator.
 """
@@ -20,6 +20,14 @@ from ..config.benchmark_config import BenchmarkConfig, SuiteConfig
 from ..execution.buffer_manager import BufferManager
 from ..execution.executor import Executor
 from ..execution.timing import Timer
+from ..metrics import (
+    CpuTimeProbe,
+    GpuSmiProbe,
+    compute_flops,
+    compute_io_bytes,
+    derive_throughputs,
+)
+from ..metrics._diagnostic import warn_once
 from ..reporting.reporter import Reporter
 from ..reporting.statistics import BenchmarkStats
 from ..reporting.suite_results import (
@@ -41,6 +49,12 @@ def _resolve_engine_name(engine_id: int) -> str:
     isn't registered (returns empty string), falls back to a hex display
     string so callers always have something printable.
 
+    Unexpected exceptions (plugin import error, registry corruption)
+    emit a one-shot warning to stderr so a silent fallback doesn't hide
+    a real plugin-init bug — the hex fallback only changes the artifact
+    path and reporting label, but the underlying error usually indicates
+    a broader registry problem worth surfacing.
+
     Args:
         engine_id: int engine ID.
 
@@ -53,9 +67,48 @@ def _resolve_engine_name(engine_id: int) -> str:
         name = hipdnn.engine_id_to_name(engine_id)
         if name:
             return name
-    except Exception:
-        pass
+    except Exception as e:
+        from ..metrics._diagnostic import warn_once
+
+        warn_once(
+            "suite_runner",
+            f"engine_id_to_name failed for {engine_id:#x}: {e}; "
+            "falling back to hex display string",
+        )
     return f"engine_{engine_id:#x}"
+
+
+def set_plugin_path(
+    hipdnn: Any, plugin_path: Optional[Path], loading_mode: Optional[Any] = None
+) -> None:
+    """Set the process-wide hipDNN plugin search path for the next handle."""
+    if plugin_path is None:
+        return
+    paths = [str(plugin_path)]
+    if loading_mode is None:
+        hipdnn.set_engine_plugin_paths(paths)
+    else:
+        hipdnn.set_engine_plugin_paths(paths, loading_mode)
+
+
+def _engine_setup_error_result(
+    provider: str,
+    engine_id: int,
+    plugin_path: Optional[Path],
+    config: SuiteConfig,
+    error_message: str,
+) -> ProviderEngineResult:
+    """Build a per-engine error row for plugin-path/handle setup failures."""
+    return ProviderEngineResult(
+        provider=provider,
+        engine_id=engine_id,
+        status="error",
+        plugin_path=str(plugin_path) if plugin_path is not None else None,
+        error_message=error_message,
+        correctness=CorrectnessResult.failed(
+            rtol=config.rtol, atol=config.atol, error_message=error_message
+        ),
+    )
 
 
 def _get_reference_provider(
@@ -231,59 +284,64 @@ def run_graph_all_providers(
 
     validation_requested = config.reference_provider != "none"
 
-    # Discover engines via real backend heuristics. A discovery failure
-    # is a graph-level error (record it and stop iterating engines), but
-    # "no engine configurations available" / "not supported" messages are
-    # really an unsupported-graph signal -- record as skipped so the
-    # suite exit code stays 0 when nothing is wrong, just nothing to run.
-    discovery_config = BenchmarkConfig(
-        graph_path=graph_path,
-        warmup_iters=config.warmup_iters,
-        benchmark_iters=config.benchmark_iters,
-    )
-    try:
-        discovery_executor = Executor(
-            graph_json_str=graph_json_str,
-            config=discovery_config,
-            gpu_backend=config.gpu_backend,
-        )
-        engine_ids = discovery_executor.discover_engines(handle)
-    except UnsupportedGraphError as e:
-        return GraphResult(
-            graph_name=graph_name,
-            graph_path=str(graph_path),
-            results=[
-                ProviderEngineResult(
-                    provider="unknown",
-                    engine_id=0,
-                    status="skipped",
-                    skip_reason=str(e),
-                    correctness=CorrectnessResult.failed(
-                        rtol=config.rtol, atol=config.atol, error_message=str(e)
-                    ),
-                )
-            ],
-        )
-    except (ExecutionError, RuntimeError) as e:
-        msg = str(e)
-        return GraphResult(
-            graph_name=graph_name,
-            graph_path=str(graph_path),
-            results=[
-                ProviderEngineResult(
-                    provider="unknown",
-                    engine_id=0,
-                    status="error",
-                    error_message=f"Engine discovery failed: {msg}",
-                    correctness=CorrectnessResult.failed(
-                        rtol=config.rtol, atol=config.atol, error_message=msg
-                    ),
-                )
-            ],
-        )
-
     if config.engine_filter is not None:
-        engine_ids = [e for e in engine_ids if e in config.engine_filter]
+        # Explicit --engine is a selection, not a post-discovery filter. Keep the
+        # caller's order so per-engine plugin paths are deterministic.
+        engine_ids = list(config.engine_filter)
+    else:
+        # Discover engines via real backend heuristics. A discovery failure is a
+        # graph-level error (record it and stop iterating engines), but "no
+        # engine configurations available" / "not supported" messages are
+        # really an unsupported-graph signal.
+        discovery_config = BenchmarkConfig(
+            graph_path=graph_path,
+            warmup_iters=config.warmup_iters,
+            benchmark_iters=config.benchmark_iters,
+        )
+        try:
+            if handle is None:
+                import hipdnn_frontend as hipdnn
+
+                handle = hipdnn.Handle()
+            discovery_executor = Executor(
+                graph_json_str=graph_json_str,
+                config=discovery_config,
+                gpu_backend=config.gpu_backend,
+            )
+            engine_ids = discovery_executor.discover_engines(handle)
+        except UnsupportedGraphError as e:
+            return GraphResult(
+                graph_name=graph_name,
+                graph_path=str(graph_path),
+                results=[
+                    ProviderEngineResult(
+                        provider="unknown",
+                        engine_id=0,
+                        status="skipped",
+                        skip_reason=str(e),
+                        correctness=CorrectnessResult.failed(
+                            rtol=config.rtol, atol=config.atol, error_message=str(e)
+                        ),
+                    )
+                ],
+            )
+        except (ExecutionError, RuntimeError) as e:
+            msg = str(e)
+            return GraphResult(
+                graph_name=graph_name,
+                graph_path=str(graph_path),
+                results=[
+                    ProviderEngineResult(
+                        provider="unknown",
+                        engine_id=0,
+                        status="error",
+                        error_message=f"Engine discovery failed: {msg}",
+                        correctness=CorrectnessResult.failed(
+                            rtol=config.rtol, atol=config.atol, error_message=msg
+                        ),
+                    )
+                ],
+            )
 
     if not engine_ids:
         return GraphResult(
@@ -297,34 +355,86 @@ def run_graph_all_providers(
                     error_message=(
                         "No engines discovered for graph"
                         if config.engine_filter is None
-                        else "No discovered engines matched --engine filter"
+                        else "No engines selected for graph"
                     ),
                 )
             ],
         )
-
+    engine_selections = config.engine_selections_for(engine_ids)
     ref_provider = _get_reference_provider(config, graph_json)
 
+    # Compute analytical metrics once per graph — they're a function of
+    # the graph shape only and don't change across engines. Both calls
+    # are pure-Python and microsecond-cheap, but no point repeating
+    # them per engine. Failures route through warn_once and yield None.
+    analytical_flops: Optional[int] = None
+    analytical_flops_partial = False
+    analytical_io_bytes: Optional[int] = None
+    if config.metrics.basic_enabled:
+        try:
+            analytical_flops, analytical_flops_partial = compute_flops(graph_json)
+        except Exception as e:
+            warn_once("analytical", f"compute_flops failed for {graph_name}: {e}")
+        try:
+            analytical_io_bytes = compute_io_bytes(tensor_infos)
+        except Exception as e:
+            warn_once("analytical", f"compute_io_bytes failed for {graph_name}: {e}")
+
     pe_results: List[ProviderEngineResult] = []
-    for engine_id in engine_ids:
+    for selection in engine_selections:
+        engine_id = selection.engine_id
+        engine_plugin_path = selection.plugin_path
         engine_name = _resolve_engine_name(engine_id)
-        if reporter is not None:
-            reporter.print_engine_start(engine_name)
+        engine_handle = handle
         with Timer() as t:
-            pe_result = _run_single_provider_engine(
+            if engine_handle is None:
+                try:
+                    import hipdnn_frontend as hipdnn
+
+                    set_plugin_path(
+                        hipdnn,
+                        engine_plugin_path,
+                        hipdnn.PluginLoadingMode.ABSOLUTE,
+                    )
+                    engine_handle = hipdnn.Handle()
+                except (ImportError, RuntimeError, ValueError, OSError) as e:
+                    pe_result = _engine_setup_error_result(
+                        provider=engine_name,
+                        engine_id=engine_id,
+                        plugin_path=engine_plugin_path,
+                        config=config,
+                        error_message=str(e),
+                    )
+                    pe_result.elapsed_time_ms = t.elapsed_ms
+                    if reporter is not None:
+                        reporter.print_engine_start(engine_name)
+                        reporter.print_engine_result(pe_result)
+                    pe_results.append(pe_result)
+                    continue
+
+            if reporter is not None:
+                reporter.print_engine_start(engine_name)
+
+            pe_result = run_single_provider_engine(
                 graph_path=graph_path,
                 graph_json_str=graph_json_str,
                 graph_name=graph_name,
                 tensor_infos=tensor_infos,
                 config=config,
-                handle=handle,
+                handle=engine_handle,
                 provider=engine_name,
                 engine_id=engine_id,
+                plugin_path=engine_plugin_path,
                 ref_provider=ref_provider,
                 validation_requested=validation_requested,
                 graph_json=graph_json,
+                analytical_flops=analytical_flops,
+                analytical_flops_partial=analytical_flops_partial,
+                analytical_io_bytes=analytical_io_bytes,
             )
         pe_result.elapsed_time_ms = t.elapsed_ms
+        if engine_plugin_path is not None:
+            pe_result.plugin_path = str(engine_plugin_path)
         if reporter is not None:
             reporter.print_engine_result(pe_result)
         pe_results.append(pe_result)
@@ -337,7 +447,67 @@ def run_graph_all_providers(
     )
 
 
-def _run_single_provider_engine(
+def _collect_basic_metrics_post_loop(
+    result: ProviderEngineResult,
+    cpu_time_probe: Optional[CpuTimeProbe],
+    benchmark_iters: int,
+    analytical_flops: Optional[int],
+    analytical_flops_partial: bool,
+    analytical_io_bytes: Optional[int],
+) -> None:
+    """Populate the basic always-on metric fields on ``result``.
+
+    Called once after the timed loop when ``metrics.tier == "basic"``.
+    Pulled out of :func:`run_single_provider_engine` to keep that
+    function focused on the timed loop itself; the basic-tier book
+    keeping is otherwise just a long sequence of conditionals on
+    intermediate results.
+    """
+    if cpu_time_probe is not None and cpu_time_probe.delta is not None:
+        # Per-iter microseconds is the interpretable unit: the loop
+        # total is dominated by Python dispatch cost, and per-iter
+        # lets users compare directly against the kernel mean (also
+        # reported per-iter).
+        iters = max(benchmark_iters, 1)
+        result.cpu_user_time_per_iter_us = (
+            cpu_time_probe.delta.user_time_ms * 1000.0 / iters
+        )
+        result.cpu_kernel_time_per_iter_us = (
+            cpu_time_probe.delta.kernel_time_ms * 1000.0 / iters
+        )
+
+    # Analytical totals were computed once at the graph level; propagate
+    # them onto every engine's result so JSON consumers don't have to
+    # look up across structures.
+    result.analytical_flops = analytical_flops
+    result.analytical_flops_partial = analytical_flops_partial
+    result.analytical_io_bytes = analytical_io_bytes
+
+    # Derived throughputs use the *arithmetic mean* of post-warmup kernel
+    # timings — no trimming, no outlier rejection. A single noisy iter
+    # (context switch, thermal throttle) skews the headline number; for
+    # tighter signal use gpu_kernel_stats.min_ms or p95_ms.
+    kernel_mean = (
+        result.gpu_kernel_stats.mean_ms if result.gpu_kernel_stats is not None else None
+    )
+    tflops, gbytes = derive_throughputs(
+        analytical_flops, analytical_io_bytes, kernel_mean
+    )
+    result.derived_tflops_per_s = tflops
+    result.derived_gbytes_per_s = gbytes
+
+    # VRAM is sampled here (still inside the BufferManager context, so
+    # workspace + I/O buffers are still allocated). This is the only
+    # amdsmi field we expose per-engine — see ProviderEngineResult
+    # docstring.
+    try:
+        snap = GpuSmiProbe().snapshot()
+        result.vram_used_mb = snap.get("vram_used_mb")
+    except Exception as e:
+        warn_once("gpu_smi", f"vram snapshot failed: {e}")
+
+
+def run_single_provider_engine(
     graph_path: Path,
     graph_json_str: str,
     graph_name: str,
@@ -346,9 +516,13 @@ def _run_single_provider_engine(
     handle: Any,
     provider: str,
     engine_id: int,
+    plugin_path: Optional[Path],
     ref_provider: Optional[ReferenceProvider],
     validation_requested: bool,
     graph_json: Dict[str, Any],
+    analytical_flops: Optional[int] = None,
+    analytical_flops_partial: bool = False,
+    analytical_io_bytes: Optional[int] = None,
 ) -> ProviderEngineResult:
     """Execute a single engine for a graph (single attempt)."""
     # Initialise the result conservatively as an error and mutate fields as
@@ -358,6 +532,8 @@ def _run_single_provider_engine(
         engine_id=engine_id,
         status="error",
     )
+
+    metrics_basic = config.metrics.basic_enabled
 
     try:
         bench_config = BenchmarkConfig(
@@ -374,6 +550,8 @@ def _run_single_provider_engine(
         )
         executor.prepare(handle, engine_id=engine_id)
         result.cpu_build_time_ms = executor.init_time_ms
+        if metrics_basic:
+            result.workspace_bytes = executor.workspace_size
 
         with BufferManager(tensor_infos) as bm:
             bm.allocate_all()
@@ -383,14 +561,37 @@ def _run_single_provider_engine(
             variant_pack = bm.create_variant_pack()
             executor.warmup(handle, variant_pack)
 
-            bench_result = executor.benchmark(
-                handle, variant_pack, graph_name=graph_name
-            )
+            # Wrap the timed loop with always-on host probes when basic
+            # tier is enabled. The probes are designed to be no-cost on
+            # the GPU side: CPU-time sampling is two read-only kernel
+            # calls before/after the loop, and the amdsmi snapshot fires
+            # once after the benchmark returns. Failures inside probes
+            # are swallowed and surface as None fields on the result.
+            cpu_time_probe = CpuTimeProbe() if metrics_basic else None
+            if cpu_time_probe is not None:
+                cpu_time_probe.__enter__()
+            try:
+                bench_result = executor.benchmark(
+                    handle, variant_pack, graph_name=graph_name
+                )
+            finally:
+                if cpu_time_probe is not None:
+                    cpu_time_probe.__exit__(None, None, None)
 
             result.e2e_stats = BenchmarkStats.from_timings(bench_result.e2e_timings)
             if bench_result.has_kernel_timings:
                 result.gpu_kernel_stats = BenchmarkStats.from_timings(
                     bench_result.kernel_timings
+                )
+
+            if metrics_basic:
+                _collect_basic_metrics_post_loop(
+                    result=result,
+                    cpu_time_probe=cpu_time_probe,
+                    benchmark_iters=config.benchmark_iters,
+                    analytical_flops=analytical_flops,
+                    analytical_flops_partial=analytical_flops_partial,
+                    analytical_io_bytes=analytical_io_bytes,
                 )
 
             if ref_provider is not None:
@@ -418,6 +619,52 @@ def _run_single_provider_engine(
                     rtol=config.rtol,
                     atol=config.atol,
                     error_message="No reference provider requested",
+                )
+
+        # BufferManager context has exited — I/O buffers are freed.
+        # Drop the executor reference too so its workspace allocation
+        # is released before the profiling subprocess fires. Without
+        # this, the inner profiling process allocates its own VRAM on
+        # top of the parent's still-pinned workspace, which roughly
+        # doubles peak VRAM and can OOM on large graphs that fit fine
+        # on the headline run.
+        del executor
+
+        # Opt-in profiling pass — runs *after* the timed pass and
+        # always-on probes (so profiler overhead can't pollute the
+        # headline numbers) and *after* the bm/executor teardown above
+        # (so the subprocess gets the full VRAM headroom the parent
+        # had). The orchestrator handles tool-missing / paranoid /
+        # parse failures internally and never raises; we still wrap
+        # defensively because anything bubbling out would mark a
+        # successful timed run as failed.
+        if config.metrics.opt_in_pass_requested:
+            try:
+                from ..metrics.profiling_orchestrator import (
+                    run_profiling_passes,
+                )
+
+                extra = run_profiling_passes(
+                    graph_path=graph_path,
+                    engine_id=engine_id,
+                    # `provider` is the human-readable engine name set
+                    # by run_graph_all_providers (see
+                    # ``_resolve_engine_name``) — use it for the
+                    # per-engine output subdirectory so the artifact
+                    # path doesn't carry the 19-digit engine ID hash.
+                    engine_name=provider,
+                    seed=config.seed,
+                    warmup_iters=config.warmup_iters,
+                    benchmark_iters=config.benchmark_iters,
+                    metrics_config=config.metrics,
+                    plugin_path=plugin_path,
+                )
+                if extra:
+                    result.extra_metrics = extra
+            except Exception as e:
+                warn_once(
+                    "profiling_orchestrator",
+                    f"profiling pass failed: {type(e).__name__}: {e}",
                 )
 
         result.status = "success"

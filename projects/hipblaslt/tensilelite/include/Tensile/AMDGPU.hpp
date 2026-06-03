@@ -255,6 +255,8 @@ namespace TensileLite
         int         skGridMultiplier         = 1;
         int         skFixedGrid              = 0;
         int         skFullTiles              = 1;
+        int         skTiles                  = -1;
+        int         skSplit                  = -1;
         int         fixedWGM                 = std::numeric_limits<int>::max();
         size_t      fixedWGMXCC              = std::numeric_limits<size_t>::max();
         size_t      fixedWGMXCCCHUNK         = std::numeric_limits<size_t>::max();
@@ -322,6 +324,20 @@ namespace TensileLite
         {
             static const char* envStr = std::getenv("TENSILE_STREAMK_FULL_TILES");
             static const int   value  = (envStr == NULL ? 1 : std::atoi(envStr));
+            return value;
+        }
+
+        const int getSKTiles() const
+        {
+            static const char* envStr = std::getenv("TENSILE_STREAMK_TILES");
+            static const int   value  = (envStr == NULL ? -1 : std::atoi(envStr));
+            return value;
+        }
+
+        const int getSKSplit() const
+        {
+            static const char* envStr = std::getenv("TENSILE_STREAMK_SPLIT");
+            static const int   value  = (envStr == NULL ? -1 : std::atoi(envStr));
             return value;
         }
 
