@@ -59,14 +59,14 @@ package `__init__`.
 - [x] `Toolchain/Assembly.py` 93.6% → 95.24% line (L82 dead)
 - [x] `Toolchain/HelperKernelCache.py` 90.8% → 99.10% line
 
-### Batch B — small pure
-- [ ] `Common/RegisterPool.py` (57, 35.1%)
-- [ ] `Common/Parallel.py` (124, 39.5%)
-- [ ] `Component.py` (124, 39.5%)
-- [ ] `CustomKernels.py` (49, 24.5%)
-- [ ] `CustomYamlLoader.py` (117, 59.0%)
-- [ ] `KernelHelperNaming.py` (175, 42.3%)
-- [ ] `Common/GlobalParameters.py` (220, 90.0%)  *(kickoff: next-goal-globalparameters.md)*
+### Batch B — small pure  ✅ DONE (full -m unit = 1974 passed)
+- [x] `Common/RegisterPool.py` 35.1% → 100%
+- [x] `Common/Parallel.py` 39.5% → ~80.6% (fork paths out of scope, D4)
+- [x] `Component.py` 39.5% → 100%
+- [x] `CustomKernels.py` 24.5% → 100%
+- [x] `CustomYamlLoader.py` 59.0% → 97.4%
+- [x] `KernelHelperNaming.py` → naming half covered; init* = codegen (D6)
+- [x] `Common/GlobalParameters.py` 90.0% → 99.1%
 
 ### Batch C — mid pure / near-done
 - [ ] `Common/Types.py` already in A; `Common/Architectures.py` (173, 83.2%)
@@ -110,3 +110,8 @@ package `__init__`.
   - Common/Types 81.7→100 · Properties 80.7→100 · TimingInstrumentation 76.2→100 ·
     Decorators(Shared/Timing/Profile)→100 · __init__ 88.9→100 ·
     Toolchain/Assembly 93.6→95.2 · Toolchain/HelperKernelCache 90.8→99.1
+- Batch B complete — 7 modules, +84 tests, full -m unit 1890 → 1974 passed (no regression). Fresh baseline: coverage/master-baseline-1974.txt.
+  - RegisterPool 35.1→100 · CustomKernels 24.5→100 · CustomYamlLoader 59→97.4 ·
+    Component 39.5→100 · GlobalParameters 90→99.1 · Parallel 39.5→80.6 (D4) ·
+    KernelHelperNaming naming-half (D6). Caught + fixed 2 cross-suite state leaks
+    (CustomKernels validParameters.update; Parallel n_jobs=1 self-clears globalParameters).
