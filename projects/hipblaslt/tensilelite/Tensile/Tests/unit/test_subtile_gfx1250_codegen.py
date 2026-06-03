@@ -185,8 +185,8 @@ class TestGfx1250SubtileCodegen:
         result = emitSingleDsRead(tiA, 0, 0, 0, tile)
         asm = str(result)
         assert asm.count("ds_load_b128") == 2
-        assert "(lo)" in asm
-        assert "(hi)" in asm
+        assert "read=0" in asm
+        assert "read=1" in asm
 
     # -- selectDGeometry wave32 --
 
