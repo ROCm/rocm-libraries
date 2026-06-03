@@ -1,0 +1,34 @@
+# AFTER coverage — full `-m unit` suite WITH the new SolutionDerivation suite
+# (conftest + 1 test file, 26 tests, 13 snapshots).
+#
+# Command (same as before; --cov=Tensile path-mode + grep the row):
+#   pytest -m unit --cov=Tensile --cov-config=pyproject.toml \
+#     --cov-report=term-missing Tensile/Tests/unit
+
+Name                                                      Stmts   Miss Branch BrPart   Cover
+Tensile/SolutionStructs/Solution.py                         3272   1926   2234    443  36.45%
+
+1844 passed, 201 skipped
+
+# Whole-file line = (3272 - 1926) / 3272 = 41.14% line ; blended 36.45%
+# Before -> After (whole file): 38.81% -> 41.14% line (+2.33 pts; 52 more lines).
+# No regression: 1818 -> 1844 passed (+26 new tests), 201 skipped unchanged.
+#
+# SLICE 3 RESULT (per targeted static):
+#   setGlobalReadVectorWidth (L922-940)               : fully covered
+#   checkAndAssignWaveSeparateGlobalRead (L1062-1069) : fully covered
+#   getMIOutputInfo (L554-571)                        : MFMA path covered; the
+#       WMMA branches (L564-569) are cap-gated to non-gfx942 ISAs -> unreachable
+#       with the gfx942 fixture's isaInfoMap (documented in resistance.md).
+#   isVgprForLocalReadPackingDoable (L1075-1090)      : covered except the
+#       HasEccHalf=False arm (L1083) -- gfx942 has EccHalf (documented).
+#   assignProblemIndependentDerivedParameters (L576-919): happy path + SIA=4
+#       reject covered; many alternate-config branches remain.
+#   assignDerivedParameters (L1419-2487)              : preamble + early guard
+#       covered; the giant body remains.
+#   isDirectToVgprDoable / isDirectToLdsDoable        : real-state outcome +
+#       early rejects covered; the deep reject matrices remain.
+#
+# The deep reject matrices (DTV/DTL) and the giant assign* body need a full
+# dtype/ISA/MI config sweep (and additional ISAs for the WMMA/EccHalf arms) --
+# a further increment (slice 3b). See resistance.md / recommendations.md.
