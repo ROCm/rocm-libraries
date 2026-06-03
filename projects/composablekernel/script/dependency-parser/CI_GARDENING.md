@@ -23,32 +23,29 @@ or because a safety check fails — it falls back to a full `ninja check`.
 
 ## 2. Decision tree
 
+The selection pipeline runs on **every** build (an "as-if" computation, advisory);
+the safety check only decides the final build mode at the end.
+
 ```
 smart_build_ci.sh
 │
-├─ ci_safety_check.sh exits 1?  ──YES──► full build  (build_mode.env = full)
-│    (CMakeLists, *.cmake, or
-│     dependency-parser files
-│     changed in this PR)
+├─ ci_safety_check.sh → remember FULL_REQUIRED (0/1); do NOT exit yet
+│    (full when this PR changes CMakeLists / *.cmake / dependency-parser /
+│     codegen inputs, or FORCE_CI / stale cache)
 │
-├─ compile_commands.json missing? ──YES──► exit 1 (CMake not configured)
-├─ build.ninja missing?           ──YES──► exit 1
+├─ compile_commands.json / build.ninja missing? ──YES──► full build, exit 1
 │
-├─ cmake-parse (main.py cmake-parse) produces enhanced_dependency_mapping.json
+│  ── as-if pipeline (runs every build, advisory) ──
+├─ cmake-parse → enhanced_dependency_mapping.json   (missing → full, exit 1)
+├─ reachability guardrail → reachability_result.json (non-fatal)
+├─ select → tests_to_run.json                        (missing → full, exit 1)
+├─ validate (--junit) → smoke_result.json + smoke_result.xml (non-fatal)
+│    so the selective path + JUnit are exercised + published even on full builds
 │
-├─ Step 2b: reachability guardrail (non-fatal observability)
-│    ctest -N → filter_oracle.py reachability
-│    → reachability_result.json
-│    verdict FAIL = some compiled tests are unreachable from any file in the
-│                   depmap (filter can never select them → guaranteed FN if
-│                   those tests' sources change). Advisory only; build proceeds.
-│
-├─ main.py select → tests_to_run.json
-│
-├─ 0 tests selected? ──YES──► exit 0  (build_mode.env = none)
-│                              (no build, no test run)
-│
-└─ build targets extracted → build_targets.txt
+│  ── decide actual build mode ──
+├─ FULL_REQUIRED? ──YES──► full build, exit 1 (as-if above was advisory)
+├─ 0 tests selected? ──YES──► exit 0 (build_mode.env = none; no build/test)
+└─ else ──► build_mode.env = selective; build_targets.txt = selected targets
                               build_mode.env = selective
 ```
 
@@ -70,6 +67,12 @@ build's **Artifacts** tab and look for these files.
 | `reachability_result.json` | Guardrail verdict — which ctest tests are unreachable | Ongoing FN monitoring |
 | `smoke_result.json` | Whether every selected target is a real ninja target | Selection drift detection |
 | `smoke_result.xml` | JUnit version of `smoke_result.json` | Published to Jenkins test results |
+
+> **Always-on as-if:** `smart_build_ci.sh` computes the selection + selection-validity
+> smoke (`smoke_result.json/.xml`) and reachability on **every** build, full or
+> selective — so JUnit is published and the selective path is exercised on every
+> run. JUnit is published in the **Smart Build** stage (the smoke is produced there),
+> so it lands even if the Smart Test stage later fails.
 
 > **Two stages:** the pipeline runs `smart_build.sh` (Smart Build stage) then
 > `smart_test.sh` (Smart Test stage). A **build** failure and a **test** failure
