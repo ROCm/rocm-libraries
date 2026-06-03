@@ -149,3 +149,18 @@ derived-solution states that match the exact serialized format is brittle.
 and add-only-risky; synthesize derived states by hand — fragile (must match the
 full post-derivation key set). Net: a partial like the Solution.py slices; a
 "Contractions matrix" slice could finish it given more fixtures.
+
+## D11 — `BenchmarkStructs.py`: BenchmarkProcess builder deferred
+**Decision:** Cover the pure helpers (getDefaultsForMissingParameters,
+separateParameters, checkCDBufferAndStrides), the fork-permutation cartesian
+product (constructForkPermutations/constructLazyForkPermutations), and
+BenchmarkStep; document `BenchmarkProcess` (the config->benchmark-steps
+integration builder, L83-235) as needing full benchmark configs.
+**Why:** `BenchmarkProcess.__init__`/`getConfigParameters`/
+`convertParametersToSteps` consume a complete benchmark config (problemType +
+problemSizeGroup with BenchmarkCommonParameters/ForkParameters/ProblemSizes/...)
+and build ProblemType/ProblemSizes/steps — an integration path better covered by
+an end-to-end benchmark-config fixture than hand-built dicts.
+**Alternatives rejected:** hand-author a full benchmark config — large/brittle;
+out of proportion to the per-module budget. Net: a partial; an integration
+fixture would finish it.
