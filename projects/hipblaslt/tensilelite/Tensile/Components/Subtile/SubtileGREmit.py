@@ -43,7 +43,6 @@ from math import ceil, log, log2, prod
 from rocisa.code import Label
 from ...Common import INDEX_CHARS
 from ...Common.DataType import DataType
-from ...Components.TensorDataMover import TensorDataMoverLoad
 
 
 ################################################################################
@@ -1062,6 +1061,7 @@ def tdmGlobalOffsetSubtile(writer, kernel, tP):
 
 def initTDMDescriptorSubtile(writer, kernel, tP):
   """Subtile variant of initTDMDescriptor()."""
+  from ...Components.TensorDataMover import TensorDataMoverLoad
   comp = TensorDataMoverLoad.find(writer)
   tc = tP['tensorChar']
   ti = tP["idx"]
