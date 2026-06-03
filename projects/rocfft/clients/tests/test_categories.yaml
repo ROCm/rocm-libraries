@@ -1,0 +1,47 @@
+# rocFFT Test Categories Configuration
+#
+
+test_categories:
+  quick:
+    description: "Smoke - rocfft-test --smoketest (target: ~5 min)"
+    test_patterns:
+      - "*"
+    exclude:
+    extra_args:
+      - "--smoketest"
+    labels:
+      - "quick"
+
+  standard:
+    description: "Pre-checkin - rocfft-test --test_prob 0.02"
+    test_patterns:
+      - "*"
+    exclude:
+      - "*multi_gpu*"
+    extra_args:
+      - "--test_prob"
+      - "0.02"
+    labels:
+    #Same tests run for comprehensive and full categories
+      - "standard"
+      - "comprehensive"
+
+  full:
+    description: "Includes all tests including multigpu"
+    test_patterns:
+      - "*"
+    exclude:
+    extra_args:
+      - "--test_prob"
+      - "0.02"
+    labels:
+      - "full"
+
+execution_settings:
+  default_timeout: 600
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 600           # 10 min  
+    standard: 3600       # 1 hour  
+    comprehensive: 14400 # 4 hours 
+    full: 43200          # 12 hours 

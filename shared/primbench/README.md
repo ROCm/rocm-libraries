@@ -373,12 +373,11 @@ Benchmarks that have been noisy for more than 10 seconds are automatically timed
 
 To reduce noise and ensure consistent timings, primbench ensures the GPU is within a stable temperature range. Cold GPUs boost and inflate performance; hot GPUs throttle and add variance.
 
-Before benchmarking a specialization, primbench:
+Before benchmarking a batch, primbench:
 
 * Warms the GPU to ≥ 50 °C (`--min-gpu-temp`).
 * Cools it if it exceeds 60 °C (`--max-gpu-temp`).
 
-primbench currently does not cool down the GPU *while* benchmarking a specialization, but this may be changed in the future.
 
 Temperatures are read using AMD SMI/NVML. Warming uses short GPU workloads; cooling waits until the GPU naturally drops back into range. If either process takes more than 60 seconds, primbench aborts (`--max-warming-secs`, `--max-cooling-secs`).
 

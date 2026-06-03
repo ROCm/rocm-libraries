@@ -6,7 +6,6 @@ import copy
 import os
 
 subtree_to_project_map = {
-    "dnn-providers/fusilli-provider": "fusilli-provider",
     "dnn-providers/hipblaslt-provider": "hipblaslt-provider",
     "dnn-providers/hip-kernel-provider": "hip-kernel-provider",
     "dnn-providers/miopen-provider": "miopen-provider",
@@ -56,6 +55,7 @@ project_map = {
             "-DTHEROCK_ENABLE_MIOPEN=ON",
             "-DTHEROCK_ENABLE_MIOPENPROVIDER=ON",
             "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
+            "-DTHEROCK_COMPOSABLE_KERNEL_FOR_MIOPEN_ONLY=ON",
         ],
         "projects_to_test": ["miopen", "miopenprovider"],
     },
@@ -69,16 +69,6 @@ project_map = {
             "-DHIP_KERNEL_PROVIDER_ENABLE=ON",
         ],
         "projects_to_test": ["hipkernelprovider"],
-    },
-    "dnn-provider-integration-tests": {
-        "cmake_options": [
-            "-DTHEROCK_ENABLE_HIPDNN_INTEGRATION_TESTS=ON",
-        ],
-        "projects_to_test": ["hipdnn-integration-tests"],
-    },
-    "fusilli-provider": {
-        "cmake_options": ["-DTHEROCK_ENABLE_IREE_LIBS=ON"],
-        "projects_to_test": ["fusilliprovider"],
     },
 }
 
@@ -111,7 +101,7 @@ additional_options = {
             "-DTHEROCK_ENABLE_HIPDNN_SAMPLES=ON",
             "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
             "-DTHEROCK_ENABLE_HIPDNN_INTEGRATION_TESTS=ON",
-            "-DTHEROCK_ENABLE_IREE_LIBS=ON",
+            "-DTHEROCK_COMPOSABLE_KERNEL_FOR_MIOPEN_ONLY=ON",
         ],
         "projects_to_test": [
             "hipdnn",
@@ -121,7 +111,6 @@ additional_options = {
             "hipblasltprovider",
             "hipkernelprovider",
             "hipdnn-integration-tests",
-            "fusilliprovider",
         ],
         "project_to_add": "miopen",
     },
@@ -129,8 +118,18 @@ additional_options = {
         "cmake_options": [
             "-DTHEROCK_ENABLE_MIOPENPROVIDER=ON",
             "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
+            "-DTHEROCK_ENABLE_HIPDNN_INTEGRATION_TESTS=ON",
         ],
         "projects_to_test": ["miopenprovider"],
+        "project_to_add": "miopen",
+    },
+    "dnn-provider-integration-tests": {
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_HIPDNN_INTEGRATION_TESTS=ON",
+            "-DTHEROCK_ENABLE_MIOPENPROVIDER=ON",
+            "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
+        ],
+        "projects_to_test": ["hipdnn-integration-tests", "miopenprovider"],
         "project_to_add": "miopen",
     },
     "hipblaslt-provider": {
@@ -150,7 +149,7 @@ additional_options = {
 # If a project has dependencies that are also being built, we combine build options and test options
 # This way, there will be no S3 upload overlap and we save redundant builds
 dependency_graph = {
-    "miopen": ["blas", "rand", "fusilli-provider"],
+    "miopen": ["blas", "rand"],
 }
 
 # When these subtrees change, also activate the given optional matrix project so
@@ -164,9 +163,6 @@ def collect_projects_to_run(subtrees):
     platform = os.getenv("PLATFORM")
     projects = set()
     # Work on per-call deep copies so module-level state stays immutable across calls.
-    # Without this, the function would extend lists, replace values, and delete keys
-    # in `project_map` / `additional_options`, breaking any second call in the same
-    # process (and forcing tests to `importlib.reload` between cases).
     local_project_map = copy.deepcopy(project_map)
     local_additional_options = copy.deepcopy(additional_options)
 
@@ -185,7 +181,7 @@ def collect_projects_to_run(subtrees):
             project_options_to_add = local_additional_options[project]
 
             project_to_add = project_options_to_add["project_to_add"]
-            # If `project_to_add` is in included, add options to the existing `project_map` entry
+            # If `project_to_add` is in included, add options to the existing `local_project_map` entry
             if project_to_add in projects:
                 local_project_map[project_to_add]["cmake_options"].extend(
                     project_options_to_add["cmake_options"]

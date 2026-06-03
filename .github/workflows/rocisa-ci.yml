@@ -24,10 +24,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  setup:
+    name: "Setup"
+    runs-on: ubuntu-24.04
+    outputs:
+      docker-image: ${{ steps.env.outputs.docker-image }}
+      linux-runner: ${{ steps.env.outputs.linux-runner }}
+      windows-runner: ${{ steps.env.outputs.windows-runner }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/actions/ci-env
+      - uses: ./.github/actions/ci-env
+        id: env
+
   Linux:
-    runs-on: azure-linux-scale-rocm
+    needs: setup
+    runs-on: ${{ needs.setup.outputs.linux-runner }}
     container:
-      image: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:48492540591673fdc8d51beb89bde41e7ba13cbb528f643c0a481ba42c4058f2
+      image: ${{ needs.setup.outputs.docker-image }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -44,7 +59,8 @@ jobs:
           test_path: test
 
   Windows:
-    runs-on: azure-windows-scale-rocm
+    needs: setup
+    runs-on: ${{ needs.setup.outputs.windows-runner }}
     defaults:
       run:
         shell: bash
