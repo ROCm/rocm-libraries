@@ -164,3 +164,39 @@ an end-to-end benchmark-config fixture than hand-built dicts.
 **Alternatives rejected:** hand-author a full benchmark config — large/brittle;
 out of proportion to the per-module budget. Net: a partial; an integration
 fixture would finish it.
+
+## D12 — TensileBenchmarkCluster: pin the `--results-only` constraint crash rather than asserting clean workflow steps
+
+**Context:** While characterizing `TensileBenchmarkCluster`, the `--results-only`
+flag (alone) raises `AssertionError: Constraint evaluation failed: RunDeployStep
+or RunBenchmarkStep or RunResultsStep` during construction.
+
+**Root cause (real latent bug):** `ExpressionEvaluator`'s `BoolOp` handler
+(`Configuration.py:651-652`) only evaluates `node.values[0]` and
+`node.values[1]`, ignoring `values[2:]`. Python parses `a or b or c` as a single
+`BoolOp(Or, values=[a,b,c])`, so the constraint collapses to `a or b`. With
+`--results-only` only the *third* operand (`RunResultsStep`) is True, so the
+constraint evaluates `False or False` → fails. `--deploy-only`, `--run-only`,
+and `--run-and-results-only` happen to leave one of the first two operands True,
+so they survive.
+
+**Decision:** Pin the actual behavior — a test asserting `--results-only` raises
+`AssertionError` — instead of asserting the (intended-but-unreachable) workflow
+tuple `(False, False, True)`.
+
+**Why:** Characterization tests must encode what the code *does today*, not what
+it should do. Flagging this as a real bug (3+ operand boolean constraints whose
+truth depends on the 3rd+ operand are mis-evaluated) is more valuable than a
+green test that hides it. ADD-ONLY constraint forbids fixing `Configuration.py`
+here.
+
+**Rejected alternatives:**
+- *Assert the clean tuple* — would fail (construction raises) and misrepresent
+  behavior.
+- *Skip the flag entirely* — loses the documentation of a real, user-facing bug.
+- *Fix the BoolOp evaluator* — out of scope (ADD-ONLY) and belongs in a separate
+  change with its own regression coverage.
+
+**Residual coverage:** 192 stmts, 1 miss (line 120, the bare-`except` swallow
+when a task subdir already exists) → 99.51%. Line 120 is a defensive
+already-exists guard not worth a dedicated fixture.
