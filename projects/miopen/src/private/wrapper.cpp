@@ -17,9 +17,28 @@
 // public header.
 //
 // Stub formatting (one '{' alone on a column-0 line per stub) is load-
-// bearing for that count check — preserve it when editing.
+// bearing for that count check — preserve it when editing. Helper functions
+// and namespaces in this file MUST keep their opening `{` on the same line
+// as the signature/keyword to avoid being miscounted as stubs.
+//
+// ALMIOPEN-1965 de-risk: when MIOPEN_HIPDNN_FORWARDING=enabled at runtime,
+// the miopenCreate / miopenDestroy stubs additionally open / close a paired
+// hipDNN handle so the end-to-end MIOpen->hipDNN handle lifecycle is
+// exercised through the wrapper that Phase 2 will extend with per-op routing.
+// MIOPEN_HIPDNN_FORWARDING_TIMING=1 prints cold-start (first hipdnnCreate)
+// and warm-start (subsequent) latency to stderr for the AC2 benchmark.
 
 #include <miopen/miopen.h>
+
+#include <hipdnn_backend.h>
+
+#include <atomic>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <mutex>
+#include <string_view>
+#include <unordered_map>
 
 extern "C" const char* miopenGetErrorString_impl(miopenStatus_t error);
 extern "C" miopenStatus_t miopenGetVersion_impl(size_t* major, size_t* minor, size_t* patch);
@@ -1961,12 +1980,83 @@ extern "C" miopenStatus_t miopenGetVersion(size_t* major, size_t* minor, size_t*
     return miopenGetVersion_impl(major, minor, patch);
 }
 
+// ---- ALMIOPEN-1965 hipDNN forwarding de-risk helpers --------------------
+// All braces here intentionally on the signature/keyword line so the
+// investigation_q4_stub_count CTest (which counts `{` alone on column 0)
+// continues to see exactly one match per public stub below.
+// clang-format off
+namespace { // keep `{` on this line — see comment above
+inline bool hipdnn_forwarding_enabled() {
+    static const bool enabled = [] {
+        const char* v = std::getenv("MIOPEN_HIPDNN_FORWARDING");
+        return v != nullptr && std::string_view{v} == std::string_view{"enabled"};
+    }();
+    return enabled;
+}
+inline bool hipdnn_timing_enabled() {
+    static const bool enabled = [] {
+        const char* v = std::getenv("MIOPEN_HIPDNN_FORWARDING_TIMING");
+        return v != nullptr && std::string_view{v} == std::string_view{"1"};
+    }();
+    return enabled;
+}
+inline std::mutex& hipdnn_handle_map_mutex() {
+    static std::mutex m;
+    return m;
+}
+inline std::unordered_map<miopenHandle_t, hipdnnHandle_t>& hipdnn_handle_map() {
+    static std::unordered_map<miopenHandle_t, hipdnnHandle_t> m;
+    return m;
+}
+inline std::atomic<unsigned>& hipdnn_create_seq() {
+    static std::atomic<unsigned> n{0};
+    return n;
+}
+inline void log_timing(const char* phase, long long ns) {
+    std::fprintf(stderr, "[MIOpen->hipDNN] %s: %lld ns\n", phase, ns);
+}
+} // namespace
+// clang-format on
+
 // clang-format off
 // Keep this stub multi-line: investigation_q4_stub_count CTest counts `{` on
 // column 0 to enforce stub/header parity. See tools/wrapper/check_stub_count.cmake.
+// ALMIOPEN-1965: when MIOPEN_HIPDNN_FORWARDING=enabled, also open a paired
+// hipDNN handle and stash it keyed on the miopen handle so miopenDestroy can
+// release it. Failures to open hipDNN are non-fatal — the miopen handle is
+// still returned to the caller; only a stderr line is emitted (Phase 2 will
+// translate this into a routing-policy decision per RFC §4.4).
 extern "C" miopenStatus_t miopenCreate(miopenHandle_t* handle)
 {
-    return miopenCreate_impl(handle);
+    const miopenStatus_t s = miopenCreate_impl(handle);
+    if(s == miopenStatusSuccess && handle != nullptr && *handle != nullptr &&
+       hipdnn_forwarding_enabled())
+    {
+        hipdnnHandle_t h = nullptr;
+        const auto t0    = std::chrono::steady_clock::now();
+        const hipdnnStatus_t hs = hipdnnCreate(&h);
+        const auto t1    = std::chrono::steady_clock::now();
+        if(hs == HIPDNN_STATUS_SUCCESS && h != nullptr)
+        {
+            std::lock_guard<std::mutex> g{hipdnn_handle_map_mutex()};
+            hipdnn_handle_map().emplace(*handle, h);
+            if(hipdnn_timing_enabled())
+            {
+                const auto ns =
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
+                const unsigned seq = hipdnn_create_seq().fetch_add(1) + 1;
+                log_timing(seq == 1 ? "hipdnnCreate cold" : "hipdnnCreate warm", ns);
+            }
+        }
+        else
+        {
+            std::fprintf(stderr,
+                         "[MIOpen->hipDNN] hipdnnCreate failed (status=%d); "
+                         "continuing with MIOpen-only handle\n",
+                         static_cast<int>(hs));
+        }
+    }
+    return s;
 }
 // clang-format on
 
@@ -1976,10 +2066,47 @@ extern "C" miopenStatus_t miopenCreateWithStream(miopenHandle_t* handle,
     return miopenCreateWithStream_impl(handle, stream);
 }
 
+// clang-format off
+// ALMIOPEN-1965: tear down the paired hipDNN handle (if any) before forwarding
+// to the impl. Map lookup is the only steady-state cost when forwarding is
+// disabled — the env check short-circuits before touching the mutex.
 extern "C" miopenStatus_t miopenDestroy(miopenHandle_t handle)
 {
+    if(hipdnn_forwarding_enabled())
+    {
+        hipdnnHandle_t paired = nullptr;
+        {
+            std::lock_guard<std::mutex> g{hipdnn_handle_map_mutex()};
+            auto& m  = hipdnn_handle_map();
+            auto it  = m.find(handle);
+            if(it != m.end())
+            {
+                paired = it->second;
+                m.erase(it);
+            }
+        }
+        if(paired != nullptr)
+        {
+            const auto t0 = std::chrono::steady_clock::now();
+            const hipdnnStatus_t hs = hipdnnDestroy(paired);
+            const auto t1 = std::chrono::steady_clock::now();
+            if(hipdnn_timing_enabled())
+            {
+                const auto ns =
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
+                log_timing("hipdnnDestroy", ns);
+            }
+            if(hs != HIPDNN_STATUS_SUCCESS)
+            {
+                std::fprintf(stderr,
+                             "[MIOpen->hipDNN] hipdnnDestroy failed (status=%d)\n",
+                             static_cast<int>(hs));
+            }
+        }
+    }
     return miopenDestroy_impl(handle);
 }
+// clang-format on
 
 extern "C" miopenStatus_t miopenSetStream(miopenHandle_t handle, miopenAcceleratorQueue_t streamID)
 {

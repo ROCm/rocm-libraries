@@ -896,6 +896,15 @@ if(MIOPEN_ENABLE_HIPDNN_WRAPPER)
         target_link_libraries(MIOpen PRIVATE "-Wl,--exclude-libs,ALL")
     endif()
 
+    # ALMIOPEN-1965 de-risk: wrapper.cpp opens/closes a paired hipDNN handle
+    # inside miopenCreate/miopenDestroy when MIOPEN_HIPDNN_FORWARDING=enabled
+    # at runtime. The link is PRIVATE — hipdnn_backend symbols are consumed by
+    # the wrapper alone and do not flow to MIOpen consumers. The DSO cycle is
+    # broken structurally because hipDNN's miopen-provider links MIOpen_private
+    # (not the wrapper); see dnn-providers/miopen-provider/CMakeLists.txt.
+    find_package(hipdnn_backend CONFIG REQUIRED)
+    target_link_libraries(MIOpen PRIVATE hipdnn_backend)
+
     # Apply the rename header to MIOpen_private sources only, via -include.
     # MIOPEN_BUILDING_PRIVATE gates the header's hard #error guard.
     target_compile_definitions(MIOpen_private PRIVATE MIOPEN_BUILDING_PRIVATE)
