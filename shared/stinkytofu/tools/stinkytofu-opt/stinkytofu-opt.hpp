@@ -31,6 +31,7 @@
 #include "stinkytofu/pipeline/ScopeAdaptor.hpp"
 #include "stinkytofu/support/DebugPrintInstrumentation.hpp"
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
+#include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/DeadCodeEliminationPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
@@ -42,9 +43,11 @@
 #include "stinkytofu/transforms/asm/RemoveDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/ScheduleFirstLRsPass.hpp"
 #include "stinkytofu/transforms/asm/ScheduleLastLRsPass.hpp"
+#include "stinkytofu/transforms/asm/SetMatrixReusePass.hpp"
 #include "stinkytofu/transforms/asm/StinkyBuildImplicitDependencyPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyConfigurableWaitCntPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
+#include "stinkytofu/transforms/asm/StinkyRemoveNopPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
 
@@ -59,14 +62,17 @@ struct PassInfo {
 // List of available passes
 const std::vector<PassInfo> availablePasses = {
     {"StinkyDAGSchedulerPass", []() { return createStinkyDAGSchedulerPass(); }},
+    {"SetMatrixReusePass", []() { return createSetMatrixReusePass(); }},
     {"StinkyUnrollWaitCntPass", []() { return createStinkyUnrollWaitCntPass(); }},
     {"StinkyBuildImplicitDependencyPass",
      []() { return createStinkyBuildImplicitDependencyPass(); }},
     {"StinkyRemoveWaitCntPass", []() { return createStinkyRemoveWaitCntPass(); }},
+    {"StinkyRemoveNopPass", []() { return createStinkyRemoveNopPass(); }},
     {"StinkyWaitCntInsertionPass", []() { return createStinkyWaitCntInsertionPass(); }},
     {"ScheduleLastLRsPass", []() { return createScheduleLastLRsPass(); }},
     {"ScheduleFirstLRsPass", []() { return createScheduleFirstLRsPass(); }},
     {"BuildUseDefChainPass", []() { return createBuildUseDefChainPass(); }},
+    {"CFGBuilderPass", []() { return createCFGBuilderPass(); }},
     {"DumpStinkyFunctionPass",
      []() { return createDumpStinkyFunctionPass({.stirPath = "dump_function.stir"}); }},
     {"PeepholeOptimizationPass", []() { return createPeepholeOptimizationPass(); }},

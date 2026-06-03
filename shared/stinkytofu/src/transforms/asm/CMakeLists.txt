@@ -15,10 +15,12 @@ target_sources(stinkytofu PRIVATE
     LegalizationUtils.cpp
     ScheduleLastLRsPass.cpp
     StinkyDAGSchedulerPass.cpp
+    SetMatrixReusePass.cpp
     StinkyConfigurableWaitCntPass.cpp
     ScheduleFirstLRsPass.cpp
     StinkyWaitCntInsertionPass.cpp
     StinkyRemoveWaitCntPass.cpp
+    StinkyRemoveNopPass.cpp
     StinkyBuildImplicitDependencyPass.cpp
     MemTokenConsistencyCheckPass.cpp
     InsertVgprMsbPass.cpp

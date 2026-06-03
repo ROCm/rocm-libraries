@@ -45,8 +45,10 @@
 #include "stinkytofu/transforms/asm/RemoveDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/ScheduleFirstLRsPass.hpp"
 #include "stinkytofu/transforms/asm/ScheduleLastLRsPass.hpp"
+#include "stinkytofu/transforms/asm/SetMatrixReusePass.hpp"
 #include "stinkytofu/transforms/asm/StinkyBuildImplicitDependencyPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyDAGSchedulerPass.hpp"
+#include "stinkytofu/transforms/asm/StinkyRemoveNopPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
 #include "stinkytofu/transforms/asm/SwPrefetchInsertionPass.hpp"
@@ -68,6 +70,7 @@ void addGfx1250RegionPasses(PassManager& pm, const StinkyAsmModule& module, OptL
     pm.addPass(createCFGBuilderPass());
     if (enableWaitCnt) {
         pm.addPass(createStinkyRemoveWaitCntPass());
+        pm.addPass(createStinkyRemoveNopPass());
     }
 
     // addPeepholeOptPasses(pm, optLevel);
@@ -134,6 +137,8 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module) {
         pm.addPass(createLoopRegionRemarkPass());
     }
     pm.addPass(createEstimateAsmCyclesPass());
+    // Whole-kernel reuse on final instruction order (O0 and O1+; after scheduler + VGPR MSB).
+    pm.addPass(createSetMatrixReusePass());
     if (moduleOptions.EnableSwPrefetchInsertion) {
         pm.addPass(createSwPrefetchInsertionPass(module));
     }
