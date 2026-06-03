@@ -642,7 +642,15 @@ def main():
         }
 
         trait_parts = args.trait_combo.split("_")
-        trait_combo = tuple(trait_parts[:7])
+        trait_combo = (
+            trait_parts[0],  # pipeline
+            trait_parts[1],  # epilogue
+            trait_parts[2],  # scheduler
+            trait_parts[3] == "True",  # pad_m
+            trait_parts[4] == "True",  # pad_n
+            trait_parts[5] == "True",  # pad_k
+            trait_parts[6] == "True",  # persistent
+        )
 
         builder._generate_kernel_instance(tile_config, trait_combo)
     elif args.gen_all_individual:

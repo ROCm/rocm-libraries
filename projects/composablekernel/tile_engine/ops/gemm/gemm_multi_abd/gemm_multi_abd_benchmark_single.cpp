@@ -34,8 +34,8 @@ inline auto create_args(int argc, char* argv[])
         .insert("split_k", "1", "The split value for k dimension. Default is 1.")
         .insert("verify",
                 "1",
-                "for validation on GPU. Default is 1, validation on CPU, as validation on GPU is "
-                "not supported.")
+                "Default is 1, validation on CPU, as validation on GPU is "
+                "not supported. 0 for no validation.")
         .insert("log",
                 "false",
                 "Whether output kernel instance information or not. Possible values are true or "

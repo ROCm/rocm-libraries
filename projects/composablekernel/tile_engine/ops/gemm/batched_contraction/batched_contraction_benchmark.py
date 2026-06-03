@@ -543,7 +543,7 @@ def main():
         "--repeat", type=int, default=100, help="Number of benchmark iterations"
     )
     parser.add_argument(
-        "--flush-cache", action="store_true", default=True, help="Enable cache flushing"
+        "--flush-cache", action="store_true", help="Enable cache flushing"
     )
     parser.add_argument(
         "--rotating-count", type=int, default=1000, help="Cache rotation count"
