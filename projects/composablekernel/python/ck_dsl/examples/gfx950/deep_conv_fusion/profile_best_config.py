@@ -21,7 +21,7 @@ from ck_dsl.instances.gfx950.deep_fused_conv_pool import (
     is_valid_spec,
     make_deep_fused_conv_pool_spec,
 )
-from ck_dsl.examples.gfx950.deep_fused_conv_pool_verify import (
+from ck_dsl.examples.gfx950.deep_conv_fusion.deep_fused_conv_pool_verify import (
     _make_inputs,
     _reference_conv1x1_relu_pool,
     _pack_args,

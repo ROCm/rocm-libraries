@@ -5,7 +5,7 @@ Status snapshot 2026-06-03 17:53.
 Re-captured `rocprofv3` 1.1.0 counters on the **lever-C** kernel (conv1->maxpool
 handoff eliminated, register-resident pool) and probed whether async global
 loads can push past the VALU wall. Same pmc groups and single-dispatch target
-(`ck_dsl.examples.gfx950.profile_best_config`) as the `2026-06-03-1620` note, so
+(`ck_dsl.examples.gfx950.deep_conv_fusion.profile_best_config`) as the `2026-06-03-1620` note, so
 columns are directly comparable.
 
 Config: `pool_tile=4x4 tile_m=64 tile_n=32 tile_k=32 warp=2x1 mem async=False`,
@@ -108,10 +108,10 @@ not VALU and not cheaply eliminable.
 
 ```text
 HIP_VISIBLE_DEVICES=1 rocprofv3 -i pmc.txt -d <outdir> -o leverC -f csv -- \
-  python3 -m ck_dsl.examples.gfx950.profile_best_config
+  python3 -m ck_dsl.examples.gfx950.deep_conv_fusion.profile_best_config
 
 async probe:
-  run_config from ck_dsl.examples.gfx950.compare_pool_tile_configs
+  run_config from ck_dsl.examples.gfx950.deep_conv_fusion.compare_pool_tile_configs
   make_spec(4,4,32,32,2,1, async_dma=True)
 
 raw csv: .rocprofv3/best_4x4_tk32_leverC_20260603-174656/pmc_*/leverC_counter_collection.csv

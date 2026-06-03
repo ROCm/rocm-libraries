@@ -31,7 +31,7 @@ focused on tile ownership, on-chip producer/consumer flow, and inline pooling.
 ## Implemented Fused Graph
 
 The checked-in prototype is `instances/gfx950/deep_fused_conv_pool.py`, with the
-verification/emission harness in `examples/gfx950/deep_fused_conv_pool_verify.py`.
+verification/emission harness in `examples/gfx950/deep_conv_fusion/deep_fused_conv_pool_verify.py`.
 It is gfx950-only and shape-specialized.
 
 The implemented single-kernel graph is:

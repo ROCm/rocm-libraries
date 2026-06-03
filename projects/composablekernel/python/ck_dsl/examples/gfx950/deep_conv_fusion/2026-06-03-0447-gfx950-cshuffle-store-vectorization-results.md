@@ -158,7 +158,7 @@ while correctness stays `bad=0`.
 
 ```text
 # verify + bench (unchanged from prior)
-<venv>/python -m ck_dsl.examples.gfx950.deep_fused_conv_pool_verify \
+<venv>/python -m ck_dsl.examples.gfx950.deep_conv_fusion.deep_fused_conv_pool_verify \
   --verify --bench --h 2160 --w 3840 --c 8 --k0 32 --k1 24 \
   --warmup 100 --iters 200
 

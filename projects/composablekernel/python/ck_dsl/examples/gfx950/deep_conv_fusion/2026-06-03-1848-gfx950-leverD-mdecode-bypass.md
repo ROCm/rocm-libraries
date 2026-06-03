@@ -99,7 +99,7 @@ miss.
 
 ```text
 verify + bench:
-  HIP_VISIBLE_DEVICES=1 python3 -m ck_dsl.examples.gfx950.compare_pool_tile_configs
+  HIP_VISIBLE_DEVICES=1 python3 -m ck_dsl.examples.gfx950.deep_conv_fusion.compare_pool_tile_configs
 
 ISA check:
   compile spec (pool_tile=4x4 tk32 tn32 warp 2x1) -> hsaco

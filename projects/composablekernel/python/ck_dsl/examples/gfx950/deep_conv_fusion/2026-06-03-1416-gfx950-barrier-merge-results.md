@@ -164,12 +164,12 @@ while correctness stays `bad=0`.
 
 ```text
 # verify + bench (device 1 for parallel prototyping)
-HIP_VISIBLE_DEVICES=1 <venv>/python -m ck_dsl.examples.gfx950.deep_fused_conv_pool_verify \
+HIP_VISIBLE_DEVICES=1 <venv>/python -m ck_dsl.examples.gfx950.deep_conv_fusion.deep_fused_conv_pool_verify \
   --verify --bench --h 2160 --w 3840 --c 8 --k0 32 --k1 24 \
   --warmup 100 --iters 200
 
 # counters (same pmc groups as the 0406 baseline and 0439 vec-read notes)
 HIP_VISIBLE_DEVICES=1 rocprofv3 -i pmc.txt -d <outdir> -o barrier -f csv -- \
-  <venv>/python -m ck_dsl.examples.gfx950.deep_fused_conv_pool_verify \
+  <venv>/python -m ck_dsl.examples.gfx950.deep_conv_fusion.deep_fused_conv_pool_verify \
   --verify --h 2160 --w 3840 --c 8 --k0 32 --k1 24
 ```

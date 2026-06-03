@@ -210,7 +210,7 @@ Recommended v1 placement:
 
 ```text
 instances/gfx950/deep_fused_conv_pool.py
-examples/gfx950/deep_fused_conv_pool_verify.py
+examples/gfx950/deep_conv_fusion/deep_fused_conv_pool_verify.py
 ```
 
 Promotion to `instances/common/` should be a follow-up, not a requirement for
@@ -417,7 +417,7 @@ The following are explicitly out of scope for the gfx950 v1 proof:
 Add a gfx950 verification harness with a pure torch / numpy reference:
 
 ```text
-examples/gfx950/deep_fused_conv_pool_verify.py
+examples/gfx950/deep_conv_fusion/deep_fused_conv_pool_verify.py
 ```
 
 Required behavior:

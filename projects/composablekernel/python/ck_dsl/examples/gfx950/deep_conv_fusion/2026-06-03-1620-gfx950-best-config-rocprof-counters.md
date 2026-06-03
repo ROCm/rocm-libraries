@@ -5,7 +5,7 @@ Status snapshot from 2026-06-03 16:20.
 This note re-captures `rocprofv3` 1.1.0 hardware counters on the **current best**
 config, superseding the `2026-06-03-0406` baseline counters which profiled the
 older `pool_tile=4x8 / tile_m=128 / tile_k=16` kernel. Captured via
-`ck_dsl.examples.gfx950.profile_best_config` (single verified blocking dispatch),
+`ck_dsl.examples.gfx950.deep_conv_fusion.profile_best_config` (single verified blocking dispatch),
 same pmc groups as the prior note.
 
 ## Config Measured
@@ -316,10 +316,10 @@ eliminable. Levers A, B, C all banked.
 
 ```text
 single-dispatch target:
-  ck_dsl/examples/gfx950/profile_best_config.py
+  ck_dsl/examples/gfx950/deep_conv_fusion/profile_best_config.py
 
 HIP_VISIBLE_DEVICES=1 rocprofv3 -i pmc.txt -d <outdir> -o best -f csv -- \
-  <venv>/python -m ck_dsl.examples.gfx950.profile_best_config
+  <venv>/python -m ck_dsl.examples.gfx950.deep_conv_fusion.profile_best_config
 
 pmc groups: same as 2026-06-03-0406 note.
 raw csv: .rocprofv3/best_4x4_tk32_20260603-161920/pmc_*/best_counter_collection.csv

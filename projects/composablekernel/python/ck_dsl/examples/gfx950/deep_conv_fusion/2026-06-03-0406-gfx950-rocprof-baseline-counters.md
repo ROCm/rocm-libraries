@@ -160,6 +160,6 @@ pmc groups (one per line, each a single collection pass):
   SQ_INSTS_LDS_LOAD SQ_INSTS_LDS_STORE SQ_INSTS_VALU_MFMA_F16
 
 rocprofv3 -i pmc.txt -d <outdir> -o baseline -f csv -- \
-  <venv>/python -m ck_dsl.examples.gfx950.deep_fused_conv_pool_verify \
+  <venv>/python -m ck_dsl.examples.gfx950.deep_conv_fusion.deep_fused_conv_pool_verify \
   --verify --h 2160 --w 3840 --c 8 --k0 32 --k1 24
 ```
