@@ -1,0 +1,8 @@
+# The ROCm artifacts tree (~8.3 GB) is fetched into this dir as the docker
+# build context (see README.md section 1). Never commit it. Only Dockerfile
+# + README.md + this .gitignore are tracked.
+artifacts/
+
+# Build byproducts
+build.log
+*.log
