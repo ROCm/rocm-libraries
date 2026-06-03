@@ -246,13 +246,13 @@ Then read this file's **Checklist** + **Progress log**, take the last
 ## 7. Checklist (tick as completed; the live resume index)
 
 - [x] **G0** harness + conftest + smoke snapshot; mechanism proven; checkpoint (TOTAL 30.62%→47.82%, 2470 passed)
-- [ ] **P1** KernelWriter/Assembly matrix — gfx942 family
-- [ ] **P1** gfx90a family
-- [ ] **P1** gfx950 family
-- [ ] **P1** navi gfx11xx (WMMA) family
-- [ ] **P1** gfx12xx family
-- [ ] **P1** dtype/schedule sweep (f8/bf8/i8/f64/complex; PGR/GSU/SplitU/DTL/DTV)
-- [ ] **P1** checkpoint (fresh master-baseline; no-regression)
+- [x] **P1** KernelWriter/Assembly matrix — gfx942 family (6 dtypes)
+- [x] **P1** gfx90a family (aldebaran, 5 dtypes)
+- [x] **P1** gfx950 family (incl. MX + F8B8BS)
+- [x] **P1** navi gfx11xx (WMMA) family (gfx1100)
+- [x] **P1** gfx12xx family (gfx1201, gfx1250) + gfx908 (arcturus)
+- [x] **P1** checkpoint — TOTAL 47.82%→**59.81%**, 2477 passed/201 skipped, **0 failed** (master-baseline-P1.txt). Fixed a cross-suite global-state leak + emit nondeterminism (commit 06af9b1e6f6).
+- [ ] **P1b/P2** feature/schedule sweep (StreamK/GSU/GG/MX/Grad + larger multi-solution files) — lift residual KWA/KW + Components
 - [ ] **P2** ComponentStreamK
 - [ ] **P2** ComponentGlobalWriteBatch
 - [ ] **P2** ComponentGSU
@@ -289,6 +289,13 @@ Then read this file's **Checklist** + **Progress log**, take the last
   smoke golden. One gfx942 kernel lifted **TOTAL 30.62% → 47.82%** (+17.2 pts,
   ~9.6k stmts), full `-m unit` 2470 passed / 201 skipped (no regression).
   Baseline `coverage/master-baseline-G0.txt`. Commits 44a11fbe556 (+ checkpoint).
+- 2026-06-03 — **P1 done (7 arch families).** gfx942/gfx90a/gfx950/gfx908/
+  gfx1100/gfx1201/gfx1250 dtype matrix → **TOTAL 47.82% → 59.81%**, 2477 passed/
+  201 skipped, 0 failed (master-baseline-P1.txt). Surfaced + fixed 3 process-global
+  emit effects (globalParameters/validParameters leak that broke
+  test_validateParameterTypes; rocIsa ISA/wavefront leak; WMMA matrix_a_reuse
+  order-dependence). Pinned finding: WMMA reuse hint is order/warm-dependent
+  (rocisa MMA scheduler state).
 
 ---
 
