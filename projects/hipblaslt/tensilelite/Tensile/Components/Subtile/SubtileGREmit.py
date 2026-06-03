@@ -24,7 +24,9 @@ from rocisa.container import DPPModifiers, EXEC, MUBUFModifiers, VCC, vgpr, sgpr
 from rocisa.enum import RegisterType
 from rocisa.instruction import (
     BufferLoadB128,
-    SAddCU32, SAddU32, SMovB32, SMovB64, SMulI32, SNop, SOrB32, SXorB32,
+    SAddCU32, SAddU32, SAndB32, SMovB32, SMovB64, SMulI32, SNop, SOrB32, SXorB32,
+    SCBranchSCC1, SCmpEQU32, SEndpgm,
+    SLShiftLeftB64, SLShiftRightB32,
     VAddU32, VAndB32, VCmpXEqU32,
     VLShiftLeftB32, VLShiftRightB32, VMovB32,
     TensorLoadToLds,
@@ -36,6 +38,12 @@ from .SubtileGeometry import (
     GRTag_1x1, GRTag_1x2, GRTag_2x2, GRTag_TLU1,
 )
 from .SubtileScaleEmit import emitScaleGRLDSSwap
+
+from math import ceil, log, log2, prod
+from rocisa.code import Label
+from ...Common import INDEX_CHARS
+from ...Common.DataType import DataType
+from ...Components.TensorDataMover import TensorDataMoverLoad
 
 
 ################################################################################
@@ -985,6 +993,188 @@ def globalReadLDSBufferSwap(tc, writer, kernel):
   else:
     ti_ = writer.states.mxsa.tileInfo if tc == 'MXSA' else writer.states.mxsb.tileInfo
     return emitScaleGRLDSSwap(ti_, writer, kernel)
+
+
+
+################################################################################
+# TDM subtile functions (global offset, descriptor init, StreamK offset)
+################################################################################
+
+def tdmGlobalOffsetSubtile(writer, kernel, tP):
+  """Axis-aware per-wave global address for subtile TDM."""
+  tc = tP["tensorChar"]
+  ti = tP["idx"]
+  bpe = tP["bpeGR"]
+  tlu = tP["tlu"]
+  mt = kernel[f"MacroTile{ti}"]
+  wavelen = kernel["WavefrontSize"]
+  wgM, wgN = kernel["MIWaveGroup"]
+  numWavesThisAxis = wgM if ti == 0 else wgN
+  mod = Module(f"TDM Global Offset Subtile {tc}")
+
+  with writer.allocTmpSgpr(3) as tmpSgprRes:
+    tmp = tmpSgprRes.idx
+    waveOff = tmpSgprRes.idx + 2
+
+    tileStride = writer.strideRef(tc, ti)
+    mod.add(SMulI32(dst=sgpr(tmp), src0=tileStride, src1=int(mt * bpe),
+                     comment=f"stride * MT({mt}) * bpe({bpe})"))
+    mod.add(SMulI32(dst=sgpr(tmp), src0=sgpr(tmp), src1=sgpr(f"WorkGroup{ti}"),
+                     comment="*= wgId"))
+
+    if numWavesThisAxis > 1:
+      mod.add(VReadfirstlaneB32(dst=sgpr(waveOff), src=vgpr("Serial"), comment="first tId"))
+      mod.add(SLShiftRightB32(dst=sgpr(waveOff), src=sgpr(waveOff),
+                               shiftHex=hex(int(ceil(log2(wavelen)))), comment=f"wId = tId / {wavelen}"))
+      if ti == 0 and wgN > 1:
+        mod.add(SAndB32(dst=sgpr(waveOff), src0=sgpr(waveOff), src1=wgM - 1,
+                         comment=f"waveIdM = waveId %% {wgM}"))
+      elif ti == 1 and wgM > 1:
+        mod.add(SLShiftRightB32(dst=sgpr(waveOff), src=sgpr(waveOff),
+                                 shiftHex=hex(int(ceil(log2(wgM)))), comment=f"waveIdN = waveId / {wgM}"))
+      tileStrideSep = writer.strideRef(tc, 3) if tlu else writer.strideRef(tc, ti)
+      mod.add(SMulI32(dst=sgpr(waveOff), src0=sgpr(waveOff), src1=int(mt // numWavesThisAxis * bpe),
+                       comment=f"waveOff = waveId_axis * {mt // numWavesThisAxis} * {bpe}"))
+      mod.add(SMulI32(dst=sgpr(waveOff), src0=sgpr(waveOff), src1=tileStrideSep,
+                       comment="waveOff *= stride"))
+      mod.add(SAddU32(dst=sgpr(tmp), src0=sgpr(tmp), src1=sgpr(waveOff), comment="+= waveOff"))
+
+    mod.add(SAddU32(dst=sgpr(f"Address{tc}"), src0=sgpr(f"Address{tc}"), src1=sgpr(tmp),
+                     comment=f"+= offset(lo)"))
+    mod.add(SAddCU32(dst=sgpr(f"Address{tc}+1"), src0=sgpr(f"Address{tc}+1"), src1=0,
+                      comment=f"+= offset(hi)"))
+
+    if kernel["ProblemType"]["Batched"] and kernel["ProblemType"]["StridedBatched"]:
+      ia = tP["ia"]
+      batchStrideName = f"Stride{tc}{writer.states.indexChars[ia[2]]}"
+      mod.addModuleAsFlatItems(writer.s_mul_u64_u32(sgpr(tmp), sgpr(tmp+1),
+                                                     sgpr(batchStrideName), sgpr("WorkGroup2"),
+                                                     comment="Batch: Stride*WG"))
+      mod.add(SLShiftLeftB64(dst=sgpr(tmp, 2), src=sgpr(tmp, 2),
+                              shiftHex=int(log2(bpe)), comment="scale by bpe"))
+      mod.add(SAddU32(dst=sgpr(f"Address{tc}"), src0=sgpr(tmp), src1=sgpr(f"Address{tc}"),
+                       comment="+= batch(lo)"))
+      mod.add(SAddCU32(dst=sgpr(f"Address{tc}+1"), src0=sgpr(tmp+1), src1=sgpr(f"Address{tc}+1"),
+                        comment="+= batch(hi)"))
+
+  return mod
+
+
+def initTDMDescriptorSubtile(writer, kernel, tP):
+  """Subtile variant of initTDMDescriptor()."""
+  comp = TensorDataMoverLoad.find(writer)
+  tc = tP['tensorChar']
+  ti = tP["idx"]
+  tileChar = tP["tileChar"]
+  mod = Module(f"Init TDM Descriptor Subtile {tc}")
+
+  def descSgprName(idx):
+    assert idx < 2
+    return f"tdm{tc}Group{idx}"
+
+  def strideRefName():
+    return f"Stride{tc}{tileChar}"
+
+  def sizeRefName(idx):
+    idxChar = INDEX_CHARS[idx]
+    return f"Size{idxChar}"
+
+  dtype = kernel["ProblemType"][f"DataType{tc}"]
+  mt = kernel[f"MacroTile{ti}"]
+  du = kernel["DepthU"]
+  bpe = tP["bpeGR"]
+  numWaves = prod(kernel["MIWaveGroup"])
+  wavelen = kernel["WavefrontSize"]
+  wgM, wgN = kernel["MIWaveGroup"]
+  numWavesThisAxis = wgM if ti == 0 else wgN
+
+  # Use subtile LDS offsets from writer state (not kernel["LdsOffset{tc}"])
+  ldsOffsetMap = {
+    'A': writer.ldsStartOffsetA,
+    'B': writer.ldsStartOffsetB,
+  }
+  ldsConstOffset = ldsOffsetMap.get(tc, 0)
+
+  sizeTile0, sizeTile1 = du, mt
+  ldsBlockSizePerPad = kernel[f"LdsBlockSizePerPad{tc}"]
+  ldsPadSize = int(kernel[f"LdsPad{tc}"] * bpe)
+  # TDM hardware padding not yet validated for subtile; assert until enabled in calcLdsPad.
+  assert ldsPadSize == 0, f"Subtile TDM padding not yet supported (LdsPad{tc}={kernel[f'LdsPad{tc}']})"
+
+  mod.add(comp.initOperands(descSgprName(0), descSgprName(1), None, None))
+  mod.add(comp.setDataType(dtype, descSgprName(1)))
+  mod.add(comp.setGlobalAddr(descSgprName(0), f"Address{tc}"))
+
+  with writer.allocTmpSgpr(1) as tmpSgprRes:
+    waveOffsetSgprIdx = tmpSgprRes.idx
+    mod.add(VReadfirstlaneB32(sgpr(waveOffsetSgprIdx), vgpr("Serial"), "first tId"))
+    mod.add(SLShiftRightB32(sgpr(waveOffsetSgprIdx), ceil(log2(wavelen)), sgpr(waveOffsetSgprIdx), "wId=fTid // wavelen"))
+    # Decompose wave ID to axis component for multi-wave
+    if numWavesThisAxis < numWaves:
+      if ti == 0 and wgN > 1:
+        mod.add(SAndB32(dst=sgpr(waveOffsetSgprIdx), src0=sgpr(waveOffsetSgprIdx), src1=wgM - 1,
+                         comment=f"waveIdM = waveId %% {wgM}"))
+      elif ti == 1 and wgM > 1:
+        mod.add(SLShiftRightB32(dst=sgpr(waveOffsetSgprIdx), src=sgpr(waveOffsetSgprIdx),
+                                 shiftHex=hex(int(ceil(log2(wgM)))), comment=f"waveIdN = waveId / {wgM}"))
+    if ldsBlockSizePerPad != 0 and ldsPadSize != 0:
+      tileBytes = round(mt // numWavesThisAxis * du * bpe)
+      padBytes = tileBytes // ldsBlockSizePerPad * ldsPadSize
+      mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), tileBytes + padBytes,
+              f"woffset = wId * ({tileBytes}+{padBytes})"))
+    else:
+      mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), round(mt // numWavesThisAxis * du * bpe),
+              "woffset = wId * (mt // numWaves * du * bpe)"))
+    mod.add(SAddU32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), ldsConstOffset,
+            f"ldsOffset = woffset + {ldsConstOffset} (subtile LDS offset for {tc})"))
+    mod.add(comp.setLdsAddr(descSgprName(0), sgpr(waveOffsetSgprIdx)))
+    # Save LDS offset to tracking SGPR for runtime double-buffer swap
+    ldsTrackSgpr = f"tdmLdsAddr{tc}"
+    mod.add(SMovB32(dst=sgpr(ldsTrackSgpr), src=sgpr(waveOffsetSgprIdx), comment=f"init {ldsTrackSgpr} for buffer tracking"))
+    # Compute swap mask: swapMask = addr XOR (addr + ldsTotalSize)
+    # Used by globalReadLDSBufferSwap to toggle between buffer 0 and buffer 1.
+    swapMaskSgpr = f"tdmLdsSwapMask{tc}"
+    ldsTotalSize = writer.ldsTotalSize
+    mod.add(SAddU32(dst=sgpr(swapMaskSgpr), src0=sgpr(waveOffsetSgprIdx), src1=ldsTotalSize, comment=f"addr + ldsTotalSize({ldsTotalSize})"))
+    mod.add(SXorB32(dst=sgpr(swapMaskSgpr), src0=sgpr(waveOffsetSgprIdx), src1=sgpr(swapMaskSgpr), comment=f"swapMask = addr XOR (addr + ldsTotalSize)"))
+  sizeShifter = 1 if dtype.isFloat4() else 0
+  sizeShifterDim = sizeShifter
+
+  mod.add(comp.setIterationEnabled(descSgprName(1), False))
+  mod.add(comp.setPadding(descSgprName(1), ldsBlockSizePerPad, ldsPadSize))
+  mod.add(comp.setTensorDim0(descSgprName(1), sizeRefName(3), writer, sizeShifterDim))
+  mod.add(comp.setTensorDim1(descSgprName(1), sizeRefName(ti), writer))
+
+  sizeShifterTile = sizeShifter
+  mod.add(comp.setTensorTile0(descSgprName(1), sizeTile0, writer, sizeShifterTile))
+  mod.add(comp.setTensorTile1(descSgprName(1), sizeTile1 // numWavesThisAxis, writer))
+  mod.add(comp.setTensorStride0(descSgprName(1), strideRefName(), sizeShifterTile))
+  return mod
+
+
+def tdmApplyStreamKOffsetSubtile(writer, kernel, tP):
+  """Assert StreamKLocalStart == 0 for subtile TDM path.
+
+  StreamK=3 (Two-Tile) aligns WG iteration ranges to tile boundaries,
+  so StreamKLocalStart is always 0.  The TDM descriptor is already
+  initialized with the correct Address{tc} and does not need updating.
+
+  If a future StreamK mode breaks this invariant, Address{tc} would need
+  to be offset and the TDM descriptor synced (s_mov_b64 + s_or_b32).
+  """
+  tc = tP["tensorChar"]
+  mod = Module(f"TDM StreamK K-offset subtile {tc}")
+  # Assert StreamKLocalStart == 0 at runtime
+  mod.addComment0(f"Assert: StreamKLocalStart == 0 (subtile TDM {tc})")
+  mod.add(SCmpEQU32(src0=sgpr("StreamKLocalStart"), src1=0,
+                    comment="subtile TDM requires tile-aligned WG starts"))
+  assertLabel = Label(f"SK_Assert_OK_{tc}", "")
+  mod.add(SCBranchSCC1(labelName=assertLabel.getLabelName(),
+                       comment="OK: StreamKLocalStart == 0"))
+  # Trap if invariant violated
+  mod.add(SEndpgm(comment=f"FATAL: StreamKLocalStart != 0 for subtile TDM {tc}"))
+  mod.add(assertLabel)
+  return mod
 
 ##################################################
 # Subroutine to update ptrs
