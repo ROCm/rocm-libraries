@@ -151,17 +151,19 @@ mxfp6_gemm/
 ├── mxfp6_preprocess.hpp     # 量化/反量化, B 转置, scale 重排+合并, B pre-shuffle
 ├── mxfp6_reference.hpp      # CPU golden reference GEMM
 ├── mxfp6_asm_utils.hpp      # GPU ASM: MFMA(inline asm, AccVGPR/Arch VGPR), LDS, store
-│                            #   + USE_BUILTIN_MFMA 宏分支(Step 22, inert/生产不定义, 走原 asm)
+├── mxfp6_lds.hpp            # ★LDS 深 K kernel (lds_gemm_db) + tile_scale + K-tail
+│                            #   256x256/KT192 双缓冲/32x32x64; v18 与 test_lds 共用
 ├── test_reference.cpp       # CPU 单元测试 (162 pass) — ground truth
-├── test_pipeline_v17.cpp    # ★生产 kernel + dispatcher: tile-shrink + V2(N640) +
-│                            #   occ1 2×双缓冲(NPW_V==0)/copy-prefetch(V2) + 4x4 + L2 swizzle
-├── profile_v17.cpp          # 单 dispatch profiling 驱动 (CLI: warmup repeat; 硬连 8192³/swz16)
-├── exp_interleave.cpp       # Step22 交错实验(SB_MASK/USE_SGB 宏); 全证伪, 留作参考
+├── test_pipeline_v18.cpp    # ★生产 dispatcher = V17 tiles + LDS(TLDS) cost-model 路由
+├── test_pipeline_v17.cpp    # 前生产 (register-direct, 无 LDS) — LDS-free 基线
+├── test_lds.cpp             # LDS 独立 dev/correctness 驱动 (含 K-tail 测试)
+├── probe_glds.cpp           # global_load_lds_dwordx4 LDS 布局探针 (lane*16 实测)
+├── profile_v17.cpp          # 单 dispatch profiling 驱动 (CLI: warmup repeat)
 ├── profile_out/             # full-mode profile 交付物 (md/annotated.asm/raw.asm/rcv tar.gz)
 ├── Makefile / counters.txt / .gitignore
 ```
 
-历史迭代 v2~v15/v18、脚手架、实验全部删除（演进见 Step 1–22 与关联 memory；代码可从 git 历史取回）。`*.tar.gz` 与二进制在 `.gitignore`，只在 /tmp + NFS。Step 22 唯一生产文件改动 = `mxfp6_asm_utils.hpp` 的 `USE_BUILTIN_MFMA` 宏分支（12 行，生产不定义→走原 inline asm，行为不变；留作已验证的 intrinsic 等价路径）；exp_interleave.cpp + 实验二进制(exp_sgb/tp_builtin)未提交。
+生产 = v18(commit 5f2d824)+ mxfp6_lds.hpp。历史迭代 + 脚手架 + Step22 实验(exp_interleave/exp_sgb/tp_builtin)+ Step23 hybrid 死代码全部删除（演进见 Step 1–23 与关联 memory；代码可从 git 历史取回）。`*.tar.gz` 与二进制在 `.gitignore`。
 
 **Git**：分支 `zhewan/ck/mxfp6-standalone`。本轮因本地（06-02，v17-only consolidated）与远端（06-01，含旧探索文件的并行重组）分叉，按用户决定 **force-push 本地覆盖远端**（远端颗粒化 commit 历史被丢弃，内容上本地更新/等价）。NFS 备份 = `/home/AMD/zhewan/rocm-libraries-ck/mxfp6_gemm/`（含 profile_out + 两份 RCV trace）。
 
