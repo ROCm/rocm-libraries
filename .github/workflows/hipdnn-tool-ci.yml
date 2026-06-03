@@ -131,9 +131,10 @@ jobs:
           echo "$VENV_DIR/bin" >> "$GITHUB_PATH"
           echo "VIRTUAL_ENV=$VENV_DIR" >> "$GITHUB_ENV"
           pip install --upgrade pip
-          # boto3 is needed by install_rocm_from_artifacts.py. The benchmark runs
+          # boto3 + pyzstd are needed by install_rocm_from_artifacts.py (pyzstd
+          # decompresses the zstd-compressed artifact slices). The benchmark runs
           # over committed sample graphs, so no dvc is needed.
-          pip install boto3 cmake ninja
+          pip install boto3 pyzstd cmake ninja
 
       - name: Fetch prebuilt ROCm by run-id (this run's own build)
         run: |
