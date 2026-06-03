@@ -101,10 +101,13 @@ if ! bash "${SCRIPT_DIR}/smart_build_ci.sh"; then
         exit 0
     fi
 
-    echo "WARNING: Full build mode - building all test executables"
-    # Build only (no run): the `tests` target aggregates every test executable
-    # (add_dependencies(tests <test>)). Test execution happens in smart_test.sh.
-    ninja -j${NINJA_JOBS} tests
+    echo "Full build mode - building all test + example executables"
+    # Build only (no run): `tests` + `examples` together cover every ctest-run
+    # executable. Examples are EXCLUDE_FROM_ALL and attached to `check`/`examples`
+    # (not to `tests` or the default `all`), so `tests` alone leaves them unbuilt
+    # and the full ctest run in smart_test.sh would mark them "Not Run". This
+    # matches what the old `ninja check` built (check's deps = tests + examples).
+    ninja -j${NINJA_JOBS} tests examples
     process_ninja_trace
     echo ""
     echo "[OK] Smart build complete (full mode - all tests built)"
