@@ -157,9 +157,16 @@ solver::Id PickGroup2d(int direction)
     }
 }
 
-} // namespace
+solver::Id ApplyOverlay(solver::Id base,
+                        int direction,
+                        DType dtype,
+                        const conv::ProblemDescription& problem);
+bool ShouldAbstain(solver::Id chosen,
+                   int direction,
+                   DType dtype,
+                   const conv::ProblemDescription& problem);
 
-solver::Id PickSolver(const conv::ProblemDescription& problem)
+solver::Id PickBase(const conv::ProblemDescription& problem)
 {
     if(problem.GetConv().mode != miopenConvolution)
         return {};
@@ -215,6 +222,58 @@ solver::Id PickSolver(const conv::ProblemDescription& problem)
         if(direction == 1 && (dtype == DType::Fp16 || dtype == DType::Bfp16) && g == 1 && fy == 1 &&
            fx == 1 && fz == 1 && sh == 1 && sw == 1 && sd == 1)
             return Ids().gemm_fwd_1x1_s1;
+        // iter277: fz>=2 fy=1 n=1 -> Gemm-by-direction.
+        if(fz >= 2 && fy == 1 && n == 1)
+        {
+            switch(direction)
+            {
+            case 1: return Ids().gemm_fwd_rest;
+            case 2: return Ids().gemm_bwd_rest;
+            case 4: return Ids().gemm_wrw_universal;
+            default: return Ids().group_bwd;
+            }
+        }
+        // iter273: bf16 fz>=2 fy=1 -> 3DGroup (not Gemm).
+        if(fz >= 2 && dtype == DType::Bfp16 && fy == 1)
+            return Pick3d(direction);
+        // iter268: real 3D (fz>=2) -> Gemm-by-direction.
+        if(fz >= 2)
+        {
+            switch(direction)
+            {
+            case 1: return Ids().gemm_fwd_rest;
+            case 2: return Ids().gemm_bwd_rest;
+            case 4: return Ids().gemm_wrw_universal;
+            default: return Ids().group_bwd;
+            }
+        }
+        // iter269: degenerate-3D (fz=1) depth>=2 n=1 -> Gemm-by-direction; 1x1x1 -> Gemm1x1.
+        const int depth_in = static_cast<int>(problem.GetInDepth());
+        if(depth_in >= 2 && n == 1)
+        {
+            const bool is_1x1x1 = (fy == 1 && fx == 1 && fz == 1);
+            if(is_1x1x1)
+            {
+                switch(direction)
+                {
+                case 1: return Ids().gemm_fwd_1x1_s1;
+                case 2: return Ids().gemm_bwd_1x1_s1;
+                case 4: return Ids().gemm_wrw_1x1_s1;
+                default: return Ids().group_bwd;
+                }
+            }
+            switch(direction)
+            {
+            case 1: return Ids().gemm_fwd_rest;
+            case 2: return Ids().gemm_bwd_rest;
+            case 4: return Ids().gemm_wrw_universal;
+            default: return Ids().group_bwd;
+            }
+        }
+        // iter274: dir=1 first-conv 3x3 stride-2 (depth=1 fz=1 g=1 c<=5 n<=128) -> NAIVE_FWD.
+        if(direction == 1 && depth_in == 1 && fz == 1 && fy == 3 && fx == 3 && g == 1 && c <= 5 &&
+           sh == 2 && sw == 2 && n <= 128)
+            return Ids().naive_fwd;
         return Pick3d(direction);
     }
 
@@ -253,6 +312,16 @@ solver::Id PickSolver(const conv::ProblemDescription& problem)
     // iter172: dir=2 bf16 g=1 NCHW 1x1 s=2 oc>=4*c -> GROUP_BWD.
     if(direction == 2 && dtype == DType::Bfp16 && g == 1 && out_l != "NHWC" && fy == 1 && fx == 1 &&
        sh == 2 && sw == 2 && c > 0 && oc >= 4 * c)
+        return Ids().group_bwd;
+
+    // iter258: dir=2 fp16 g=1 NCHW 1x1 s=2 oc>=2c c<=128 hw>=700 n>=128 -> GROUP_BWD.
+    if(direction == 2 && dtype == DType::Fp16 && g == 1 && out_l != "NHWC" && fy == 1 && fx == 1 &&
+       sh == 2 && sw == 2 && oc >= 2 * c && c <= 128 && hw >= 700 && n >= 128)
+        return Ids().group_bwd;
+
+    // iter260: dir=2 bf16 mirror of iter258.
+    if(direction == 2 && dtype == DType::Bfp16 && g == 1 && out_l != "NHWC" && fy == 1 && fx == 1 &&
+       sh == 2 && sw == 2 && oc >= 2 * c && c <= 128 && hw >= 700 && n >= 128)
         return Ids().group_bwd;
 
     // iter133/136: dir=2 g=1 NCHW 1x1 s=2 squeeze/expand by dtype -> GEMM_BWD_1X1_S2.
@@ -298,6 +367,9 @@ solver::Id PickSolver(const conv::ProblemDescription& problem)
             if(c >= 256 && hw <= 49)
                 return Ids().group_fwd;
         }
+        // iter261: fp16 c>=1024 oc<=192 hw<=49 n>=128 -> GEMM_FWD_1X1_S1 (carve back from iter157).
+        if(dtype == DType::Fp16 && c >= 1024 && oc <= 192 && hw <= 49 && n >= 128)
+            return Ids().gemm_fwd_1x1_s1;
         // iter157: fp16 128<=c<=2048 16<=hw<=128 -> GROUP_FWD.
         if(dtype == DType::Fp16 && 128 <= c && c <= 2048 && 16 <= hw && hw <= 128)
             return Ids().group_fwd;
@@ -342,6 +414,16 @@ solver::Id PickSolver(const conv::ProblemDescription& problem)
     // iter195: dir=1 bf16 g=1 NCHW tiny-c narrow-w -> NAIVE_FWD.
     if(direction == 1 && dtype == DType::Bfp16 && g == 1 && out_l != "NHWC" && c <= 4 && w <= 4)
         return Ids().naive_fwd;
+
+    // iter264: dir=2 fp32 g=1 NCHW 3x3 s=1 c>=768 oc<=192 hw<=300 -> WINO_RX_G1.
+    if(direction == 2 && dtype == DType::Fp32 && g == 1 && out_l != "NHWC" && fy == 3 && fx == 3 &&
+       sh == 1 && sw == 1 && c >= 768 && oc <= 192 && hw <= 300)
+        return Ids().winograd_rx_g1;
+
+    // iter265: dir=2 fp16 g=1 NCHW 3x3 s=1 c>=2*oc oc<=192 hw<=300 -> WINO_RX_G1.
+    if(direction == 2 && dtype == DType::Fp16 && g == 1 && out_l != "NHWC" && fy == 3 && fx == 3 &&
+       sh == 1 && sw == 1 && c >= 2 * oc && oc <= 192 && hw <= 300)
+        return Ids().winograd_rx_g1;
 
     // iter249: dir=2 fp16 g=1 NCHW 3x3 s=1 oc=510 -> WINO_RX_G1.
     if(direction == 2 && dtype == DType::Fp16 && g == 1 && out_l != "NHWC" && fy == 3 && fx == 3 &&
@@ -474,10 +556,8 @@ solver::Id PickSolver(const conv::ProblemDescription& problem)
        sh == 2 && sw == 2 && h >= 64 && w >= 64)
         return Ids().winograd_rx_g1;
 
-    // iter167: dir=1 bf16 g=1 NCHW 3x3 s=1 n=1 huge-spatial -> NAIVE_FWD.
-    if(direction == 1 && dtype == DType::Bfp16 && g == 1 && out_l != "NHWC" && fy == 3 && fx == 3 &&
-       sh == 1 && sw == 1 && n == 1 && ((h >= 2048 && w >= 2048) || hw >= 4194304LL))
-        return Ids().naive_fwd;
+    // iter268: REMOVED iter167 (dir=1 bf16 3x3 s=1 n=1 huge-spatial -> NAIVE_FWD).
+    // 5/29 data refresh: GroupFwd is now best on 33/38 of this cohort; fall through.
 
     // iter238: dir=2 fp16 g=1 NCHW 3x3 s=2 c==oc<=64 -> WINO_RX_G1.
     if(direction == 2 && dtype == DType::Fp16 && g == 1 && out_l != "NHWC" && fy == 3 && fx == 3 &&
@@ -489,27 +569,26 @@ solver::Id PickSolver(const conv::ProblemDescription& problem)
        sh == 1 && sw == 1 && h >= 32 && w >= 32)
         return Ids().winograd_rx_g1;
 
-    // iter163: dir=1 fp32 g=1 NCHW 3x3 s=1 h>=2048 n<=1 -> NAIVE_FWD.
-    if(direction == 1 && dtype == DType::Fp32 && g == 1 && out_l != "NHWC" && fy == 3 && fx == 3 &&
-       sh == 1 && sw == 1 && h >= 2048 && n <= 1)
-        return Ids().naive_fwd;
-
-    // iter170: dir=1 fp32 g=1 NCHW 3x3 s=1 n=1 1280<=h<2048 w>=1280 (or huge hw) -> NAIVE_FWD.
-    if(direction == 1 && dtype == DType::Fp32 && g == 1 && out_l != "NHWC" && fy == 3 && fx == 3 &&
-       sh == 1 && sw == 1 && n == 1 &&
-       ((1280 <= h && h < 2048 && w >= 1280) || hw >= 4194304LL))
-        return Ids().naive_fwd;
+    // iter268: REMOVED iter163 + iter170 (dir=1 fp32 3x3 s=1 large-spatial n<=1 -> NAIVE_FWD).
+    // 5/29 refresh: GroupFwd now best on 25/44 (iter163) and 30/49 (iter170);
+    // Naive sumlog +116/+139 vs Group +5/+8. Fall through to default GROUP_FWD.
 
     // iter255: dir=1 fp32 g=1 NCHW 1x1 s=2 c>=2048 oc<=c/2 hw<=64 -> GROUP_FWD.
     if(direction == 1 && dtype == DType::Fp32 && g == 1 && out_l != "NHWC" && fy == 1 && fx == 1 &&
        sh == 2 && sw == 2 && c >= 2048 && oc * 2 <= c && hw <= 64)
         return Ids().group_fwd;
 
-    // iter210/213/217/251: dir=1 fp32 g=1 NCHW 1x1 s=2 -> GEMM_FWD_1X1_S2.
+    // iter210/213/217/251/266: dir=1 fp32 g=1 NCHW 1x1 s=2 -> GEMM_FWD_1X1_S2.
     if(direction == 1 && dtype == DType::Fp32 && g == 1 && out_l != "NHWC" && fy == 1 && fx == 1 &&
        sh == 2 && sw == 2 &&
-       (n >= 4 || (c >= 1024 && oc >= c) || (n <= 2 && hw >= 100000)))
+       (n >= 4 || (c >= 1024 && oc >= c) || (n <= 2 && hw >= 100000) ||
+        (c == 256 && oc == 512 && n == 2 && hw >= 40000)))
         return Ids().gemm_fwd_1x1_s2;
+
+    // iter257: dir=4 fp16 g=1 NCHW 3x3 s=1 oc>=256 oc%32!=0 -> WRW_NHWC (odd-channel reroute).
+    if(direction == 4 && dtype == DType::Fp16 && g == 1 && out_l != "NHWC" && fy == 3 && fx == 3 &&
+       sh == 1 && sw == 1 && oc >= 256 && (oc % 32) != 0)
+        return Ids().wrw_nhwc;
 
     // iter247: dir=4 fp32 g=1 NCHW 3x3 s=1 oc=720 n<=2 hw<=9000 -> GEMM_WRW.
     if(direction == 4 && dtype == DType::Fp32 && g == 1 && out_l != "NHWC" && fy == 3 && fx == 3 &&
@@ -640,6 +719,21 @@ solver::Id PickSolver(const conv::ProblemDescription& problem)
     if(direction == 2 && dtype == DType::Fp16 && g == 1 && out_l != "NHWC" && fy == 1 && fx == 1 &&
        sh == 1 && sw == 1 && oc <= 64 && c <= 32)
         return Ids().winograd_rx_g1;
+
+    // iter262: dir=2 bf16 g=1 NCHW 1x1 s=1 n<=16 c+oc>=2048 hw>=200 -> GEMM_BWD_1X1_S1.
+    if(direction == 2 && dtype == DType::Bfp16 && g == 1 && out_l != "NHWC" && fy == 1 && fx == 1 &&
+       sh == 1 && sw == 1 && n <= 16 && (c + oc) >= 2048 && hw >= 200)
+        return Ids().gemm_bwd_1x1_s1;
+
+    // iter263: dir=2 fp16 mirror of iter262 with hw>=256.
+    if(direction == 2 && dtype == DType::Fp16 && g == 1 && out_l != "NHWC" && fy == 1 && fx == 1 &&
+       sh == 1 && sw == 1 && n <= 16 && (c + oc) >= 2048 && hw >= 256)
+        return Ids().gemm_bwd_1x1_s1;
+
+    // iter259: dir=2 bf16 g=1 NCHW 1x1 s=1 oc<=8 -> GEMM_BWD_1X1_S1 (carve from iter201).
+    if(direction == 2 && dtype == DType::Bfp16 && g == 1 && out_l != "NHWC" && fy == 1 && fx == 1 &&
+       sh == 1 && sw == 1 && oc <= 8)
+        return Ids().gemm_bwd_1x1_s1;
 
     // iter201: dir=2 fp16/bf16 g=1 NCHW 1x1 s=1 n<=16 -> GROUP_BWD.
     if(direction == 2 && (dtype == DType::Fp16 || dtype == DType::Bfp16) && g == 1 &&
@@ -1300,6 +1394,542 @@ solver::Id PickSolver(const conv::ProblemDescription& problem)
         return Ids().fwd_nhwc;
 
     return PickGroup2d(direction);
+}
+
+// Helper: does the C++ runtime's in_layout look like the parquet's "NaN"?
+// In production, ComputeInLayout always populates a non-empty layout string,
+// so this is effectively always false. Overlay/abstain entries gated on NaN
+// in_layout are dead at runtime; we still gate them via this helper to match
+// the Python contract exactly.
+bool LayoutNaN(const conv::ProblemDescription& p) { return p.GetInLayout().empty(); }
+
+bool LayoutNCHW(const conv::ProblemDescription& p) { return p.GetInLayout() == "NCHW"; }
+
+bool LayoutNHWC(const conv::ProblemDescription& p) { return p.GetInLayout() == "NHWC"; }
+
+solver::Id ApplyOverlay(solver::Id base,
+                        int direction,
+                        DType dtype,
+                        const conv::ProblemDescription& problem)
+{
+    const auto& IDS    = Ids();
+    const bool is2d    = problem.Is2d();
+    const bool is3d    = problem.Is3d();
+    const int g        = static_cast<int>(problem.GetGroupCount());
+    const int fy       = static_cast<int>(problem.GetWeightsHeight());
+    const int fx       = static_cast<int>(problem.GetWeightsWidth());
+    const int sh       = static_cast<int>(problem.GetKernelStrideH());
+    const int sw       = static_cast<int>(problem.GetKernelStrideW());
+    const int dilh     = static_cast<int>(problem.GetDilationH());
+    const int dilw     = static_cast<int>(problem.GetDilationW());
+    const int c        = static_cast<int>(problem.GetInChannels());
+    const int oc       = static_cast<int>(problem.GetOutChannels());
+    const int h        = static_cast<int>(problem.GetInHeight());
+    const int w        = static_cast<int>(problem.GetInWidth());
+    const int n        = static_cast<int>(problem.GetBatchSize());
+    const long long hw = static_cast<long long>(h) * w;
+    const bool nan_l   = LayoutNaN(problem);
+    const bool nchw_l  = LayoutNCHW(problem);
+    const bool nhwc_l  = LayoutNHWC(problem);
+
+    // 1st overlay: dir2 fp16 GROUP_BWD -> WINO_RX_G1 (small-oc + narrow-width + small-batch).
+    if(base == IDS.group_bwd && direction == 2 && dtype == DType::Fp16 &&
+       oc <= 160 && w <= 14 && n <= 8 && g == 1)
+        return IDS.winograd_rx_g1;
+    // iter276: dir=4 fp32 GROUP_WRW g>1 3x3 s=1 n<=2 -> GEMM_WRW (must precede next overlay).
+    if(base == IDS.group_wrw && direction == 4 && dtype == DType::Fp32 &&
+       g > 1 && is2d && fy == 3 && fx == 3 && sh == 1 && sw == 1 && n <= 2)
+        return IDS.gemm_wrw_universal;
+    // dir4 fp32 GROUP_WRW -> WINO_RX_G1: 3x3 s=1 tiny-batch hw<=600.
+    if(base == IDS.group_wrw && direction == 4 && dtype == DType::Fp32 &&
+       fy == 3 && fx == 3 && sh == 1 && sw == 1 && n <= 2 && hw <= 600)
+        return IDS.winograd_rx_g1;
+    // iter288: dir=4 fp32 GROUP_WRW n=1 hw<=4096 fy>=3 -> GEMM_WRW.
+    if(base == IDS.group_wrw && direction == 4 && dtype == DType::Fp32 &&
+       n == 1 && hw <= 4096 && fy >= 3)
+        return IDS.gemm_wrw_universal;
+    // dir1 fp32 GEMM_FWD_1X1_S1 -> GROUP_FWD: oc<=64 n<=1.
+    if(base == IDS.gemm_fwd_1x1_s1 && direction == 1 && dtype == DType::Fp32 &&
+       oc <= 64 && n <= 1)
+        return IDS.group_fwd;
+    // dir2 fp32 GROUP_BWD -> WINO_RX_G1: 3x3 s=1 g=1 oc<=96.
+    if(base == IDS.group_bwd && direction == 2 && dtype == DType::Fp32 &&
+       g == 1 && sh == 1 && sw == 1 && fy == 3 && fx == 3 && oc <= 96)
+        return IDS.winograd_rx_g1;
+    // dir4 bf16 GROUP_WRW -> GEMM_WRW_1X1_S1: 1x1 s=1 n==2 hw<=256.
+    if(base == IDS.group_wrw && direction == 4 && dtype == DType::Bfp16 &&
+       fy == 1 && fx == 1 && sh == 1 && sw == 1 && n == 2 && hw <= 256)
+        return IDS.gemm_wrw_1x1_s1;
+    // iter268: dir1 fp32/bf16 huge-spatial 3x3 s=1 n=1 g=1 out_layout!=NHWC -> GROUP_FWD.
+    if(direction == 1 && (dtype == DType::Fp32 || dtype == DType::Bfp16) &&
+       (base == IDS.gemm_fwd_rest || base == IDS.fwd_nhwc || base == IDS.winograd_rx_g1) &&
+       g == 1 && is2d && problem.GetOutLayout() != "NHWC" && fy == 3 && fx == 3 && sh == 1 &&
+       sw == 1 && n == 1 && hw >= 2500000LL)
+        return IDS.group_fwd;
+    // iter268b: dir1 fp16/bf16 GROUP_FWD 3x3 s=1 n<=2 g=1 NaN-layout hw>=786432 -> GemmFwdRest.
+    if(base == IDS.group_fwd && direction == 1 &&
+       (dtype == DType::Fp16 || dtype == DType::Bfp16) && g == 1 && is2d && nan_l &&
+       fy == 3 && fx == 3 && sh == 1 && sw == 1 && n <= 2 && hw >= 786432LL)
+        return IDS.gemm_fwd_rest;
+    // iter269b: dir1 all-dtypes FWD_NHWC|GROUP_FWD fy in (5,7) fx in (5,7) n=1 g=1 NaN c>3 -> GemmFwdRest.
+    if(direction == 1 && (base == IDS.fwd_nhwc || base == IDS.group_fwd) && g == 1 && is2d &&
+       nan_l && (fy == 5 || fy == 7) && (fx == 5 || fx == 7) && n == 1 && c > 3)
+        return IDS.gemm_fwd_rest;
+    // iter270 fp32 g any: dir=2 fp32 GROUP_BWD n=1 NaN fy>1 -> GemmBwdRest.
+    if(base == IDS.group_bwd && direction == 2 && dtype == DType::Fp32 &&
+       n == 1 && is2d && nan_l && fy > 1)
+        return IDS.gemm_bwd_rest;
+    // iter270 fp16/bf16 narrowed to g>1: dir=2 GROUP_BWD n=1 NaN fy>1 g>1 -> GemmBwdRest.
+    if(base == IDS.group_bwd && direction == 2 &&
+       (dtype == DType::Fp16 || dtype == DType::Bfp16) &&
+       n == 1 && is2d && nan_l && fy > 1 && g > 1)
+        return IDS.gemm_bwd_rest;
+    // iter295 fp32: dir=2 GROUP_BWD n=1 NaN 1x1 g>1 -> GEMM_BWD_1X1_S1.
+    if(base == IDS.group_bwd && direction == 2 && dtype == DType::Fp32 &&
+       n == 1 && is2d && nan_l && fy == 1 && fx == 1 && g > 1)
+        return IDS.gemm_bwd_1x1_s1;
+    // iter295b fp16/bf16: same predicate plus oc not in {128,192}.
+    if(base == IDS.group_bwd && direction == 2 &&
+       (dtype == DType::Fp16 || dtype == DType::Bfp16) &&
+       n == 1 && is2d && nan_l && fy == 1 && fx == 1 && oc != 128 && oc != 192 && g > 1)
+        return IDS.gemm_bwd_1x1_s1;
+    // iter272: dir=1 fp32 WINO_RX_G1 g=1 3x3 s=1 h=w=28 c==oc>=256 -> GROUP_FWD.
+    if(base == IDS.winograd_rx_g1 && direction == 1 && dtype == DType::Fp32 &&
+       g == 1 && is2d && fy == 3 && fx == 3 && sh == 1 && h == 28 && w == 28 &&
+       c == oc && c >= 256)
+        return IDS.group_fwd;
+    // iter271b non-1x1: dir=1 GROUP_FWD n=1 NaN g in {2,4,8,16} not 1x1 -> GemmFwdRest.
+    if(base == IDS.group_fwd && direction == 1 &&
+       (dtype == DType::Fp32 || dtype == DType::Fp16 || dtype == DType::Bfp16) &&
+       n == 1 && is2d && nan_l && (g == 2 || g == 4 || g == 8 || g == 16) &&
+       !(fy == 1 && fx == 1))
+        return IDS.gemm_fwd_rest;
+    // iter271b 1x1: dir=1 GROUP_FWD n=1 NaN g in {2,4,8,16} 1x1 -> GEMM_FWD_1X1_S1.
+    if(base == IDS.group_fwd && direction == 1 &&
+       (dtype == DType::Fp32 || dtype == DType::Fp16 || dtype == DType::Bfp16) &&
+       n == 1 && is2d && nan_l && (g == 2 || g == 4 || g == 8 || g == 16) &&
+       fy == 1 && fx == 1)
+        return IDS.gemm_fwd_1x1_s1;
+    // iter271 non-1x1: dir=4 GROUP_WRW n=1 NaN g in {2,4,8,16} not 1x1 -> GemmWrwUniversal.
+    if(base == IDS.group_wrw && direction == 4 &&
+       (dtype == DType::Fp32 || dtype == DType::Fp16 || dtype == DType::Bfp16) &&
+       n == 1 && is2d && nan_l && (g == 2 || g == 4 || g == 8 || g == 16) &&
+       !(fy == 1 && fx == 1))
+        return IDS.gemm_wrw_universal;
+    // iter271 1x1: dir=4 GROUP_WRW n=1 NaN g in {2,4,8,16} 1x1 -> GEMM_WRW_1X1_S1.
+    if(base == IDS.group_wrw && direction == 4 &&
+       (dtype == DType::Fp32 || dtype == DType::Fp16 || dtype == DType::Bfp16) &&
+       n == 1 && is2d && nan_l && (g == 2 || g == 4 || g == 8 || g == 16) &&
+       fy == 1 && fx == 1)
+        return IDS.gemm_wrw_1x1_s1;
+    // iter278: dir=4 bf16 GROUP_WRW n=1 -> GEMM_WRW (g in {32,64} OR (sh=1 fy>=3 hw<=50000)).
+    if(base == IDS.group_wrw && direction == 4 && dtype == DType::Bfp16 && n == 1 && is2d &&
+       ((g == 32 || g == 64) || (sh == 1 && fy >= 3 && hw <= 50000LL)))
+        return IDS.gemm_wrw_universal;
+    // iter279: dir=4 fp16 GROUP_WRW n=1 -> GEMM_WRW (g in {32,64} OR (sh=1 fy>=5 hw<=50000)).
+    if(base == IDS.group_wrw && direction == 4 && dtype == DType::Fp16 && n == 1 && is2d &&
+       ((g == 32 || g == 64) || (sh == 1 && fy >= 5 && hw <= 50000LL)))
+        return IDS.gemm_wrw_universal;
+    // iter280: dir=1 bf16 GROUP_FWD n=1 -> GemmFwdRest (g in {32,64} OR (sh=1 fy>=5)).
+    if(base == IDS.group_fwd && direction == 1 && dtype == DType::Bfp16 && n == 1 && is2d &&
+       ((g == 32 || g == 64) || (sh == 1 && fy >= 5)))
+        return IDS.gemm_fwd_rest;
+    // iter281: dir=1 fp16 GROUP_FWD n=1 NaN -> GemmFwdRest.
+    if(base == IDS.group_fwd && direction == 1 && dtype == DType::Fp16 && n == 1 && is2d && nan_l &&
+       ((g == 32 || g == 64) ||
+        (sh == 1 && fy >= 3) ||
+        (sh == 2 && fy == 3 && hw > 50000LL)))
+        return IDS.gemm_fwd_rest;
+    // iter282: dir=1 fp32 GROUP_FWD n=1 -> GemmFwdRest (g in {32,64} OR (sh=1 fy>=5)).
+    if(base == IDS.group_fwd && direction == 1 && dtype == DType::Fp32 && n == 1 && is2d &&
+       ((g == 32 || g == 64) || (sh == 1 && fy >= 5)))
+        return IDS.gemm_fwd_rest;
+    // iter290: dir=1 fp16 GROUP_FWD g=1 NCHW 1x1 s=1 h=w=1 -> ASM_FWD_NHWC.
+    if(base == IDS.group_fwd && direction == 1 && dtype == DType::Fp16 && g == 1 && is2d &&
+       nchw_l && fy == 1 && fx == 1 && sh == 1 && sw == 1 && h == 1 && w == 1)
+        return IDS.fwd_nhwc;
+    // iter298: dir=4 bf16 GROUP_WRW g=1 NCHW 1x1 s=1 h=w=1 -> ASM_WRW_NHWC.
+    if(base == IDS.group_wrw && direction == 4 && dtype == DType::Bfp16 && g == 1 && is2d &&
+       nchw_l && fy == 1 && fx == 1 && sh == 1 && sw == 1 && h == 1 && w == 1)
+        return IDS.wrw_nhwc;
+    // iter299: dir=1 bf16 GROUP_FWD g=1 NCHW 1x1 s=1 h=w=1 -> ASM_FWD_NHWC.
+    if(base == IDS.group_fwd && direction == 1 && dtype == DType::Bfp16 && g == 1 && is2d &&
+       nchw_l && fy == 1 && fx == 1 && sh == 1 && sw == 1 && h == 1 && w == 1)
+        return IDS.fwd_nhwc;
+    // iter301: dir=2 bf16 GROUP_BWD g=1 NCHW 1x1 s=1 h=w=1 -> ASM_BWD_NHWC.
+    if(base == IDS.group_bwd && direction == 2 && dtype == DType::Bfp16 && g == 1 && is2d &&
+       nchw_l && fy == 1 && fx == 1 && sh == 1 && sw == 1 && h == 1 && w == 1)
+        return IDS.bwd_nhwc;
+    // iter302: dir=1 fp16 NHWC WINO_3X2 -> GROUP_FWD.
+    if(base == IDS.winograd_3x2 && direction == 1 && dtype == DType::Fp16 && is2d && nhwc_l)
+        return IDS.group_fwd;
+    // iter292: dir=1 fp16 GROUP_FWD g=1 NCHW c<=3 -> ASM_FWD_NHWC.
+    if(base == IDS.group_fwd && direction == 1 && dtype == DType::Fp16 && g == 1 && is2d &&
+       nchw_l && c <= 3)
+        return IDS.fwd_nhwc;
+    // iter297: dir=1 bf16 mirror of iter292.
+    if(base == IDS.group_fwd && direction == 1 && dtype == DType::Bfp16 && g == 1 && is2d &&
+       nchw_l && c <= 3)
+        return IDS.fwd_nhwc;
+    // iter291: dir=1 fp16 GROUP_FWD g=1 NCHW fy==fx>=2 sh=2 sw=2 -> GemmFwdRest.
+    if(base == IDS.group_fwd && direction == 1 && dtype == DType::Fp16 && g == 1 && is2d &&
+       nchw_l && fy == fx && fy >= 2 && sh == 2 && sw == 2)
+        return IDS.gemm_fwd_rest;
+    // iter289: dir=1 fp16 GROUP_FWD g=1 NCHW 1x1 s=1 -> GEMM_FWD_1X1_S1.
+    if(base == IDS.group_fwd && direction == 1 && dtype == DType::Fp16 && g == 1 && is2d &&
+       nchw_l && fy == 1 && fx == 1 && sh == 1 && sw == 1)
+        return IDS.gemm_fwd_1x1_s1;
+    // iter325: dir=1 fp16 GROUP_FWD g=1 NCHW 3x3 s=1 c>=512 -> ASM_FWD_NHWC (precedes iter303).
+    if(base == IDS.group_fwd && direction == 1 && dtype == DType::Fp16 && is2d && nchw_l && g == 1 &&
+       fy == 3 && fx == 3 && sh == 1 && c >= 512)
+        return IDS.fwd_nhwc;
+    // iter303 (narrowed by iter325): dir=1 fp16 GROUP_FWD g=1 NCHW 3x3 s=1 c<512 hw<16384 -> WINO_RX_G1.
+    if(base == IDS.group_fwd && direction == 1 && dtype == DType::Fp16 && g == 1 && is2d &&
+       nchw_l && fy == 3 && fx == 3 && sh == 1 && sw == 1 && c < 512 && hw < 16384)
+        return IDS.winograd_rx_g1;
+    // iter326: dir=1 fp16 WINO_3X2 NaN g=1 h=w=1 -> GROUP_FWD.
+    if(base == IDS.winograd_3x2 && direction == 1 && dtype == DType::Fp16 && is2d && nan_l &&
+       g == 1 && h == 1 && w == 1)
+        return IDS.group_fwd;
+    // iter324: dir=2 fp16/bf16 GROUP_BWD n=1 NaN g=1 fy>=3 h=w=28 -> GemmBwdRest.
+    if(base == IDS.group_bwd && direction == 2 &&
+       (dtype == DType::Fp16 || dtype == DType::Bfp16) &&
+       is2d && nan_l && n == 1 && g == 1 && fy >= 3 && h == 28 && w == 28)
+        return IDS.gemm_bwd_rest;
+    // iter323: dir=1 fp32 GROUP_FWD n=1 NaN g=1 h==w in {56,112} -> GemmFwdRest.
+    if(base == IDS.group_fwd && direction == 1 && dtype == DType::Fp32 && is2d && nan_l &&
+       n == 1 && g == 1 && h == w && (h == 56 || h == 112))
+        return IDS.gemm_fwd_rest;
+    // iter322: dir=1 bf16 GROUP_FWD n=1 NaN g=1 3x3 sh=2 -> GemmFwdRest.
+    if(base == IDS.group_fwd && direction == 1 && dtype == DType::Bfp16 && is2d && nan_l &&
+       n == 1 && g == 1 && fy == 3 && fx == 3 && sh == 2)
+        return IDS.gemm_fwd_rest;
+    // iter321: dir=1 fp16 GROUP_FWD n=1 NCHW g=1 1x1 -> ASM_FWD_NHWC.
+    if(base == IDS.group_fwd && direction == 1 && dtype == DType::Fp16 && is2d && nchw_l &&
+       n == 1 && g == 1 && fy == 1 && fx == 1)
+        return IDS.fwd_nhwc;
+    // iter320: dir=2 bf16 GROUP_BWD n=1 NaN g=1 c>=64 h>=112 -> ASM_BWD_NHWC.
+    if(base == IDS.group_bwd && direction == 2 && dtype == DType::Bfp16 && is2d && nan_l &&
+       n == 1 && g == 1 && c >= 64 && h >= 112)
+        return IDS.bwd_nhwc;
+    // iter319: dir=2 fp16 GROUP_BWD n=1 NaN g=1 c>=64 h>=112 -> ASM_BWD_NHWC.
+    if(base == IDS.group_bwd && direction == 2 && dtype == DType::Fp16 && is2d && nan_l &&
+       n == 1 && g == 1 && c >= 64 && h >= 112)
+        return IDS.bwd_nhwc;
+    // iter318: dir=1 fp32/bf16 GROUP_FWD n=1 NaN g=1 h=w=28 -> GemmFwdRest.
+    if(base == IDS.group_fwd && direction == 1 &&
+       (dtype == DType::Fp32 || dtype == DType::Bfp16) &&
+       is2d && nan_l && n == 1 && g == 1 && h == 28 && w == 28)
+        return IDS.gemm_fwd_rest;
+    // iter317: dir=2 fp32 GROUP_BWD n=1 NaN g=1 h>=56 -> ASM_BWD_NHWC.
+    if(base == IDS.group_bwd && direction == 2 && dtype == DType::Fp32 && is2d && nan_l &&
+       n == 1 && g == 1 && h >= 56)
+        return IDS.bwd_nhwc;
+    // iter316: dir=4 fp32 GROUP_WRW n=1 NaN g=1 h=w=112 -> ASM_WRW_NHWC.
+    if(base == IDS.group_wrw && direction == 4 && dtype == DType::Fp32 && is2d && nan_l &&
+       n == 1 && g == 1 && h == 112 && w == 112)
+        return IDS.wrw_nhwc;
+    // iter315/327: dir=1 fp16 ASM_FWD_NHWC NCHW c<=3 g=1 fy>=3 sh>=2 n<=2 -> GemmFwdRest.
+    if(base == IDS.fwd_nhwc && direction == 1 && dtype == DType::Fp16 && is2d && nchw_l &&
+       n <= 2 && c <= 3 && g == 1 && fy >= 3 && sh >= 2)
+        return IDS.gemm_fwd_rest;
+    // iter314: dir=1 bf16 GROUP_FWD 1x1 s=1 n=1 NaN g=1 -> GEMM_FWD_1X1_S1.
+    if(base == IDS.group_fwd && direction == 1 && dtype == DType::Bfp16 && is2d && nan_l &&
+       n == 1 && g == 1 && fy == 1 && fx == 1 && sh == 1 && sw == 1)
+        return IDS.gemm_fwd_1x1_s1;
+    // iter311: dir=2 fp16/fp32 ASM_BWD_NHWC h=w=1 -> GROUP_BWD.
+    if(base == IDS.bwd_nhwc && direction == 2 &&
+       (dtype == DType::Fp16 || dtype == DType::Fp32) && is2d && h == 1 && w == 1)
+        return IDS.group_bwd;
+    // iter310: dir=1 bf16 GEMM_FWD_1X1_S1 NCHW g=1 c<=3 h=w=1 -> NAIVE_FWD.
+    if(base == IDS.gemm_fwd_1x1_s1 && direction == 1 && dtype == DType::Bfp16 && is2d && nchw_l &&
+       g == 1 && c <= 3 && h == 1 && w == 1)
+        return IDS.naive_fwd;
+    // iter309: dir=2 fp32 GROUP_BWD 3x3 sh=2 g=1 NaN c<=3 256<=hw<1024 -> WINO_RX_G1.
+    if(base == IDS.group_bwd && direction == 2 && dtype == DType::Fp32 && is2d && nan_l &&
+       g == 1 && c <= 3 && fy == 3 && fx == 3 && sh == 2 && hw >= 256 && hw < 1024)
+        return IDS.winograd_rx_g1;
+    // iter308: dir=4 fp32 ASM_WRW_NHWC 3x3 sh=1 n<=4 g=1 h<=8 NaN -> WINO_RX_G1.
+    if(base == IDS.wrw_nhwc && direction == 4 && dtype == DType::Fp32 && is2d && nan_l && g == 1 &&
+       fy == 3 && fx == 3 && sh == 1 && n <= 4 && h <= 8)
+        return IDS.winograd_rx_g1;
+    // iter307: dir=2 fp32 NAIVE_BWD 3x3 s=1 g=1 c==1 NaN -> WINO_RX_G1.
+    if(base == IDS.naive_bwd && direction == 2 && dtype == DType::Fp32 && is2d && nan_l && c == 1 &&
+       fy == 3 && fx == 3 && sh == 1 && sw == 1 && g == 1)
+        return IDS.winograd_rx_g1;
+    // iter306: WINO_RX_G1 base + dilation>1 -> reroute to Group by direction.
+    if(base == IDS.winograd_rx_g1 &&
+       (dtype == DType::Fp16 || dtype == DType::Fp32 || dtype == DType::Bfp16) &&
+       (dilh > 1 || dilw > 1))
+    {
+        if(direction == 1) return IDS.group_fwd;
+        if(direction == 2) return IDS.group_bwd;
+        if(direction == 4) return IDS.group_wrw;
+    }
+    // iter332: dir=2 fp32 GROUP_BWD 3x3 sh=1 g=1 NaN h=w=8 n in {32,256} -> WINO_RX_G1.
+    if(base == IDS.group_bwd && direction == 2 && dtype == DType::Fp32 && is2d && nan_l && g == 1 &&
+       fy == 3 && sh == 1 && h == 8 && w == 8 && (n == 32 || n == 256))
+        return IDS.winograd_rx_g1;
+    // dir=1 bf16 GROUP_FWD 1x1 sh=1 NaN g=1 h=w in {14,28} n in {16,64} -> GEMM_FWD_1X1_S1.
+    if(base == IDS.group_fwd && direction == 1 && dtype == DType::Bfp16 && is2d && nan_l && g == 1 &&
+       fy == 1 && fx == 1 && sh == 1 && (h == 14 || h == 28) && h == w && (n == 16 || n == 64))
+        return IDS.gemm_fwd_1x1_s1;
+    // dir=2 bf16 GEMM_BWD_1X1_S1 NCHW g=1 1x1 sh=1 h=w=14 n=64 -> GROUP_BWD.
+    if(base == IDS.gemm_bwd_1x1_s1 && direction == 2 && dtype == DType::Bfp16 && is2d && nchw_l &&
+       g == 1 && fy == 1 && fx == 1 && sh == 1 && h == 14 && w == 14 && n == 64)
+        return IDS.group_bwd;
+    // dir=4 fp32 ASM_WRW_NHWC NaN g=1 1x1 sh=1 h=w=1 n=2 -> NAIVE_WRW. (No NAIVE_WRW Id; use Wino_G1 instead? skip — keep semantic by emitting wrw via gemm fall-back.)
+    // The Python returns "ConvDirectNaiveConvWrw" which is NaiveWrw; we have no
+    // SolverIds member for it. Add inline.
+    {
+        static const solver::Id NAIVE_WRW("ConvDirectNaiveConvWrw");
+        if(base == IDS.wrw_nhwc && direction == 4 && dtype == DType::Fp32 && is2d && nan_l && g == 1 &&
+           fy == 1 && fx == 1 && sh == 1 && h == 1 && w == 1 && n == 2)
+            return NAIVE_WRW;
+    }
+    // dir=1 bf16 GEMM_FWD_1X1_S1 NCHW g=1 1x1 sh=1 h=w=56 n=64 -> GROUP_FWD.
+    if(base == IDS.gemm_fwd_1x1_s1 && direction == 1 && dtype == DType::Bfp16 && is2d && nchw_l &&
+       g == 1 && fy == 1 && fx == 1 && sh == 1 && h == 56 && w == 56 && n == 64)
+        return IDS.group_fwd;
+    // iter331: dir=2 fp16 GEMM_BWD_1X1_S1 NaN g=1 1x1 sh=1 h=w=7 n=128 -> GROUP_BWD.
+    if(base == IDS.gemm_bwd_1x1_s1 && direction == 2 && dtype == DType::Fp16 && is2d && nan_l &&
+       g == 1 && fy == 1 && fx == 1 && sh == 1 && h == 7 && w == 7 && n == 128)
+        return IDS.group_bwd;
+    // dir=4 fp16 GROUP_WRW NaN g=1 1x1 sh=1 h=w=7 n<=2 -> WINO_RX_G1.
+    if(base == IDS.group_wrw && direction == 4 && dtype == DType::Fp16 && is2d && nan_l && g == 1 &&
+       fy == 1 && fx == 1 && sh == 1 && h == 7 && w == 7 && n <= 2)
+        return IDS.winograd_rx_g1;
+    // dir=4 fp32 ASM_WRW_NHWC NaN g=1 1x1 sh=1 h=w=7 n<=4 -> WINO_RX_G1.
+    if(base == IDS.wrw_nhwc && direction == 4 && dtype == DType::Fp32 && is2d && nan_l && g == 1 &&
+       fy == 1 && fx == 1 && sh == 1 && h == 7 && w == 7 && n <= 4)
+        return IDS.winograd_rx_g1;
+    // dir=4 fp16 GROUP_WRW NaN g=1 1x1 sh=1 h=w=28 n=2 -> GEMM_WRW_1X1_S1.
+    if(base == IDS.group_wrw && direction == 4 && dtype == DType::Fp16 && is2d && nan_l && g == 1 &&
+       fy == 1 && fx == 1 && sh == 1 && h == 28 && w == 28 && n == 2)
+        return IDS.gemm_wrw_1x1_s1;
+    // dir=4 fp32 GROUP_WRW NaN g=1 1x1 sh=1 h=w=56 n=1 -> GEMM_WRW_1X1_S1.
+    if(base == IDS.group_wrw && direction == 4 && dtype == DType::Fp32 && is2d && nan_l && g == 1 &&
+       fy == 1 && fx == 1 && sh == 1 && h == 56 && w == 56 && n == 1)
+        return IDS.gemm_wrw_1x1_s1;
+    // dir=2 bf16 GROUP_BWD NaN g=1 1x1 sh=1 h=w=28 n=16 -> GEMM_BWD_1X1_S1.
+    if(base == IDS.group_bwd && direction == 2 && dtype == DType::Bfp16 && is2d && nan_l && g == 1 &&
+       fy == 1 && fx == 1 && sh == 1 && h == 28 && w == 28 && n == 16)
+        return IDS.gemm_bwd_1x1_s1;
+    // iter330: bf16 ASM_FWD_NHWC scalar 1x1 NCHW -> GEMM_FWD_1X1_S1.
+    if(base == IDS.fwd_nhwc && direction == 1 && dtype == DType::Bfp16 && is2d && nchw_l && g == 1 &&
+       fy == 1 && fx == 1 && sh == 1 && h == 1 && w == 1)
+        return IDS.gemm_fwd_1x1_s1;
+    // bf16 ASM_BWD_NHWC scalar 1x1 NCHW -> GEMM_BWD_1X1_S1.
+    if(base == IDS.bwd_nhwc && direction == 2 && dtype == DType::Bfp16 && is2d && nchw_l && g == 1 &&
+       fy == 1 && fx == 1 && sh == 1 && h == 1 && w == 1)
+        return IDS.gemm_bwd_1x1_s1;
+    // fp32 GROUP_BWD 3x3 sh=1 g=1 NaN h=w in {15,27} -> WINO_RX_G1.
+    if(base == IDS.group_bwd && direction == 2 && dtype == DType::Fp32 && is2d && nan_l && g == 1 &&
+       fy == 3 && sh == 1 && ((h == 15 && w == 15) || (h == 27 && w == 27)))
+        return IDS.winograd_rx_g1;
+    // fp16 GROUP_WRW 3x3 sh=1 g=1 NaN h=w=5 -> WINO_RX_G1.
+    if(base == IDS.group_wrw && direction == 4 && dtype == DType::Fp16 && is2d && nan_l && g == 1 &&
+       fy == 3 && sh == 1 && h == 5 && w == 5)
+        return IDS.winograd_rx_g1;
+    // bf16 ASM_FWD_NHWC h=24 w=16 NCHW -> NAIVE_FWD.
+    if(base == IDS.fwd_nhwc && direction == 1 && dtype == DType::Bfp16 && is2d && nchw_l && g == 1 &&
+       fy == 1 && sh == 1 && h == 24 && w == 16)
+        return IDS.naive_fwd;
+    // iter329: dir=2 bf16 GEMM_BWD_1X1_S1 NCHW h=24 w=16 fy=1 sh=1 g=1 -> GROUP_BWD.
+    if(base == IDS.gemm_bwd_1x1_s1 && direction == 2 && dtype == DType::Bfp16 && is2d && nchw_l &&
+       g == 1 && fy == 1 && fx == 1 && sh == 1 && h == 24 && w == 16)
+        return IDS.group_bwd;
+    // iter328: dir=1 fp32 3D-fake first-conv c=3 h=32 fy=3 fz=1 depth=1 NaN g=1 -> NAIVE_FWD.
+    if(base == IDS.group_3d_fwd && direction == 1 && dtype == DType::Fp32 && is3d && nan_l &&
+       g == 1 && c == 3 && fy == 3 && h == 32)
+    {
+        const int fz_ = static_cast<int>(problem.GetWeightsDepth());
+        const int depth_ = static_cast<int>(problem.GetInDepth());
+        if(fz_ == 1 && depth_ == 1)
+            return IDS.naive_fwd;
+    }
+    // iter304: dir=2 fp32 NAIVE_BWD depthwise 3x3 sh=2 n<=4 NaN -> GemmBwdRest.
+    if(base == IDS.naive_bwd && direction == 2 && dtype == DType::Fp32 && is2d && nan_l && n <= 4 &&
+       fy == 3 && fx == 3 && sh == 2 && sw == 2 && g >= 64 && c == oc)
+        return IDS.gemm_bwd_rest;
+
+    return base;
+}
+
+bool ShouldAbstain(solver::Id chosen,
+                   int direction,
+                   DType dtype,
+                   const conv::ProblemDescription& problem)
+{
+    const auto& IDS    = Ids();
+    const int g        = static_cast<int>(problem.GetGroupCount());
+    const int fy       = static_cast<int>(problem.GetWeightsHeight());
+    const int fx       = static_cast<int>(problem.GetWeightsWidth());
+    const int sh       = static_cast<int>(problem.GetKernelStrideH());
+    const int c        = static_cast<int>(problem.GetInChannels());
+    const int oc       = static_cast<int>(problem.GetOutChannels());
+    const int h        = static_cast<int>(problem.GetInHeight());
+    const int w        = static_cast<int>(problem.GetInWidth());
+    const int n        = static_cast<int>(problem.GetBatchSize());
+    const bool nan_l   = LayoutNaN(problem);
+    const bool nchw_l  = LayoutNCHW(problem);
+    (void)g; (void)fx; (void)c; (void)oc; (void)n; (void)nan_l;
+
+    static const solver::Id NAIVE_WRW("ConvDirectNaiveConvWrw");
+    (void)NAIVE_WRW;
+
+    // Whole-cohort abstentions (top1 < TunaNet baseline). iter337-339.
+    auto whole = [&](int dr, DType dt, const solver::Id& ch) {
+        return direction == dr && dtype == dt && chosen == ch;
+    };
+    if(whole(2, DType::Fp16, IDS.winograd_3x2)) return true;
+    if(whole(2, DType::Bfp16, IDS.bwd_nhwc))    return true;
+    if(whole(2, DType::Fp16, IDS.winograd_2x3)) return true;
+    if(whole(1, DType::Fp32, IDS.fft))          return true;
+    if(whole(4, DType::Bfp16, IDS.wrw_nhwc))    return true;
+    if(whole(2, DType::Fp32, IDS.winograd_2x3)) return true;
+    if(whole(2, DType::Fp32, IDS.winograd_3x2)) return true;
+    if(whole(4, DType::Fp16, IDS.gemm_wrw_universal)) return true;
+    if(whole(1, DType::Bfp16, IDS.fwd_nhwc))    return true;
+    if(whole(1, DType::Fp16, IDS.fwd_nhwc))     return true;
+    if(whole(1, DType::Fp32, IDS.fwd_nhwc))     return true;
+    if(whole(4, DType::Bfp16, IDS.gemm_wrw_universal)) return true;
+    if(whole(2, DType::Fp32, IDS.fft))          return true;
+    // iter337
+    if(whole(1, DType::Fp16, IDS.gemm_fwd_rest))  return true;
+    if(whole(1, DType::Bfp16, IDS.gemm_fwd_rest)) return true;
+    if(whole(1, DType::Fp32, IDS.gemm_fwd_rest))  return true;
+    if(whole(4, DType::Fp32, IDS.wrw_nhwc))       return true;
+    if(whole(4, DType::Fp32, IDS.gemm_wrw_1x1_s1)) return true;
+    // iter338
+    if(whole(2, DType::Fp32, IDS.group_bwd))      return true;
+    if(whole(4, DType::Fp32, IDS.winograd_rx_g1)) return true;
+    if(whole(1, DType::Fp32, IDS.group_fwd))      return true;
+    if(whole(2, DType::Fp16, IDS.gemm_bwd_1x1_s2))return true;
+    if(whole(2, DType::Fp16, IDS.winograd_rx_g1)) return true;
+    if(whole(4, DType::Fp16, IDS.winograd_rx_g1)) return true;
+    if(whole(2, DType::Fp32, IDS.gemm_bwd_rest))  return true;
+    if(whole(2, DType::Fp16, IDS.gemm_bwd_rest))  return true;
+    if(whole(2, DType::Bfp16, IDS.gemm_bwd_1x1_s2))return true;
+    if(whole(2, DType::Bfp16, IDS.gemm_bwd_rest)) return true;
+    if(whole(1, DType::Fp32, IDS.gemm_fwd_1x1_s2)) return true;
+    if(whole(4, DType::Fp16, IDS.wrw_nhwc))       return true;
+    if(whole(1, DType::Bfp16, IDS.gemm_fwd_1x1_s1)) return true;
+    if(whole(1, DType::Fp32, IDS.winograd_rx_g1)) return true;
+    // iter339
+    if(whole(4, DType::Fp32, IDS.gemm_wrw_universal)) return true;
+    if(whole(2, DType::Fp16, IDS.gemm_bwd_1x1_s1)) return true;
+    if(whole(2, DType::Fp16, IDS.group_bwd))      return true;
+    if(whole(1, DType::Fp32, IDS.gemm_fwd_1x1_s1)) return true;
+    if(whole(2, DType::Bfp16, IDS.gemm_bwd_1x1_s1)) return true;
+    if(whole(1, DType::Fp16, IDS.gemm_fwd_1x1_s1)) return true;
+    if(whole(4, DType::Fp32, IDS.group_3d_wrw))   return true;
+    if(whole(1, DType::Bfp16, IDS.group_3d_fwd))  return true;
+    if(whole(4, DType::Bfp16, IDS.gemm_wrw_1x1_s1)) return true;
+    if(whole(4, DType::Fp16, IDS.gemm_wrw_1x1_s1)) return true;
+    if(whole(2, DType::Fp32, IDS.gemm_bwd_1x1_s1)) return true;
+    if(whole(2, DType::Fp32, IDS.winograd_rx_g1)) return true;
+
+    // ----------------------------------------------------------------------
+    // Sub-cohort abstentions: tight (h,w,fy,sh) bucket carves.
+    // Only NCHW/NHWC variants reach C++ runtime (in_layout is never NaN here).
+    auto sub = [&](int dr, DType dt, const solver::Id& ch) {
+        return direction == dr && dtype == dt && chosen == ch;
+    };
+
+    // bf16 GEMM_FWD_1X1_S1 NCHW h=24 w=16 fy=1 sh=1
+    if(sub(1, DType::Bfp16, IDS.gemm_fwd_1x1_s1) && nchw_l && h == 24 && w == 16 && fy == 1 &&
+       sh == 1)
+        return true;
+    // bf16 GEMM_FWD_1X1_S1 NCHW h=w=16 fy=1 sh=1
+    if(sub(1, DType::Bfp16, IDS.gemm_fwd_1x1_s1) && nchw_l && h == 16 && w == 16 && fy == 1 &&
+       sh == 1)
+        return true;
+    // bf16 GROUP_BWD NCHW h=w=4 fy=1 sh=1
+    if(sub(2, DType::Bfp16, IDS.group_bwd) && nchw_l && h == 4 && w == 4 && fy == 1 && sh == 1)
+        return true;
+    // bf16 GROUP_BWD NCHW h=192 w=128 fy=1 sh=2
+    if(sub(2, DType::Bfp16, IDS.group_bwd) && nchw_l && h == 192 && w == 128 && fy == 1 && sh == 2)
+        return true;
+    // bf16 GROUP_FWD NCHW h=192 w=128 fy=1 sh=2
+    if(sub(1, DType::Bfp16, IDS.group_fwd) && nchw_l && h == 192 && w == 128 && fy == 1 && sh == 2)
+        return true;
+    // bf16 GROUP_FWD NCHW h=w=192 fy=1 sh=1: not in source — skip.
+    // bf16 GROUP_FWD NCHW h=48 w=32 fy=1 sh=1 (iter344)
+    if(sub(1, DType::Bfp16, IDS.group_fwd) && nchw_l && h == 48 && w == 32 && fy == 1 && sh == 1)
+        return true;
+    // bf16 GROUP_FWD NCHW h=w in {14,28,56} fy=1 sh=1 (iter342)
+    if(sub(1, DType::Bfp16, IDS.group_fwd) && nchw_l && fy == 1 && sh == 1 && h == w &&
+       (h == 14 || h == 28 || h == 56))
+        return true;
+    // bf16 GROUP_FWD NCHW h=225 w=225 fy=1 sh=1, h=48 w=32 fy=1 sh=2, h=8 w=32 fy=1 sh=1 (iter343)
+    if(sub(1, DType::Bfp16, IDS.group_fwd) && nchw_l && fy == 1 &&
+       ((h == 225 && w == 225 && sh == 1) || (h == 48 && w == 32 && sh == 2) ||
+        (h == 8 && w == 32 && sh == 1)))
+        return true;
+    // bf16 GROUP_BWD NCHW h=48 w=32 fy=3 sh=1 (iter345)
+    if(sub(2, DType::Bfp16, IDS.group_bwd) && nchw_l && h == 48 && w == 32 && fy == 3 && sh == 1)
+        return true;
+    // bf16 GROUP_WRW NCHW h=1 w=30 fy=1 sh=1 (iter345)
+    if(sub(4, DType::Bfp16, IDS.group_wrw) && nchw_l && h == 1 && w == 30 && fy == 1 && sh == 1)
+        return true;
+    // bf16 GROUP_WRW NCHW h=48 w=32 fy=1 sh=1 (iter342)
+    if(sub(4, DType::Bfp16, IDS.group_wrw) && nchw_l && fy == 1 && sh == 1 && h == 48 && w == 32)
+        return true;
+    // bf16 GROUP_WRW NCHW h=8 w=32 fy=1 sh=1 (rules.py:3630)
+    if(sub(4, DType::Bfp16, IDS.group_wrw) && nchw_l && fy == 1 && sh == 1 && h == 8 && w == 32)
+        return true;
+    // bf16 GROUP_WRW NCHW h=100 w=1 fy=4 sh=4 (rules.py:3874)
+    if(sub(4, DType::Bfp16, IDS.group_wrw) && nchw_l && fy == 4 && sh == 4 && h == 100 && w == 1)
+        return true;
+    // bf16 GROUP_FWD NCHW h=96 w=64 fy=1 sh=2 (rules.py:3726)
+    if(sub(1, DType::Bfp16, IDS.group_fwd) && nchw_l && fy == 1 && sh == 2 && h == 96 && w == 64)
+        return true;
+    // bf16 GROUP_FWD NCHW h=w=19 fy=1 sh=1 (rules.py:3732)
+    if(sub(1, DType::Bfp16, IDS.group_fwd) && nchw_l && fy == 1 && sh == 1 && h == 19 && w == 19)
+        return true;
+    // bf16 GROUP_FWD NCHW h=192 w=128 fy=1 sh=1 (rules.py:3849)
+    if(sub(1, DType::Bfp16, IDS.group_fwd) && nchw_l && fy == 1 && sh == 1 && h == 192 && w == 128)
+        return true;
+    // bf16 GROUP_BWD common h=w in {7,8,14,28,56} fy=1 fx=1 sh=1 (iter342 any layout)
+    if(sub(2, DType::Bfp16, IDS.group_bwd) && fy == 1 && fx == 1 && sh == 1 && h == w &&
+       (h == 7 || h == 8 || h == 14 || h == 28 || h == 56))
+        return true;
+    // bf16 GROUP_BWD NCHW h=48 w=32 fy=1 sh=1 (iter342)
+    if(sub(2, DType::Bfp16, IDS.group_bwd) && nchw_l && fy == 1 && sh == 1 && h == 48 && w == 32)
+        return true;
+    // fp16 GROUP_WRW common h=w in {7,14,17,28,56} fy=1 fx=1 sh=1 (iter342)
+    if(sub(4, DType::Fp16, IDS.group_wrw) && fy == 1 && fx == 1 && sh == 1 && h == w &&
+       (h == 7 || h == 14 || h == 17 || h == 28 || h == 56))
+        return true;
+    // bf16 GROUP_WRW common h=w in {7,28} fy=1 fx=1 sh=1 (iter342)
+    if(sub(4, DType::Bfp16, IDS.group_wrw) && fy == 1 && fx == 1 && sh == 1 && h == w &&
+       (h == 7 || h == 28))
+        return true;
+    // iter345: fp32 GROUP_WRW NaN h=w in {8,17,55,57,64} fy=1 sh=1  (NaN-only — skip at runtime)
+    // iter345: bf16 GROUP_BWD NaN h=w=17 fy=1 sh=1 — NaN-only — skip.
+
+    return false;
+}
+
+} // namespace
+
+solver::Id PickSolver(const conv::ProblemDescription& problem)
+{
+    if(problem.GetConv().mode != miopenConvolution)
+        return {};
+    if(!problem.Is2d() && !problem.Is3d())
+        return {};
+
+    const int direction = GetDirInt(problem);
+    const DType dtype   = GetDType(problem);
+    solver::Id base     = PickBase(problem);
+    if(!base.IsValid())
+        return {};
+    solver::Id chosen = ApplyOverlay(base, direction, dtype, problem);
+    if(ShouldAbstain(chosen, direction, dtype, problem))
+        return {};
+    return chosen;
 }
 
 } // namespace gfx950
