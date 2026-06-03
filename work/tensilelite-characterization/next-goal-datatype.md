@@ -138,17 +138,23 @@ trivially. `rocisa.enum.DataTypeEnum` is the only dependency (already built).
    recommendations.md (grounded in inspection) + commit. Mark this checklist
    done.
 
-## Definition of done checklist
+## Definition of done checklist — COMPLETE
 
-- [ ] `coverage-before.txt` captured (baseline) and committed BEFORE new tests.
-- [ ] `--cov=Tensile` + grep `DataType.py` row ≥95% line.
-- [ ] `coverage-after.txt` captured; before→after delta in target.md.
-- [ ] Every Tier A method has snapshot coverage; any Tier B documented.
-- [ ] Invalid-input / assert paths pinned via `pytest.raises`.
-- [ ] resistance.md lists each resisting fn (expect: `toDevice` non-HIP assert
-      if treated as defensive, `_populateLookupTable` dup-guard).
-- [ ] recommendations.md: go/no-go on the next target (`ValidParameters` vs a
-      `Problem.py` ProblemType slice).
-- [ ] full `-m unit` ≥ 1443 passed / 201 skipped, no failures, additive only.
-- [ ] All work committed (atomic, no push); tree clean.
-- [ ] Next goal prompt `next-goal-<target>.md` created and committed.
+- [x] `coverage-before.txt` captured (baseline) and committed BEFORE new tests.
+      (161 stmts, 41 miss = 74.53% line; `--cov=Tensile` + grep fallback used.)
+- [x] `--cov=Tensile` + grep `DataType.py` row ≥95% line — **100.00% line and
+      branch** (161 stmts, 0 miss, 24 branch, 0 partial).
+- [x] `coverage-after.txt` captured; before→after delta in target.md (+25.47
+      pts line).
+- [x] Every Tier A method has snapshot coverage (introspected predicate matrix
+      + converters + numeric + state/dunder + lookup); no Tier B remained.
+- [x] Invalid-input / assert paths pinned via `pytest.raises` (RuntimeError,
+      KeyError, AssertionError, TypeError, both `_populateLookupTable` guards).
+- [x] resistance.md: **nothing resisted** — documents why every defensive
+      raise / asserted branch / table guard was reachable + out-of-scope
+      `total_ordering` generated methods.
+- [x] recommendations.md: GO → `Common/ValidParameters.py` next (pure table
+      builders + validators), then a `Problem.py` ProblemType slice.
+- [x] full `-m unit` = **1526 passed / 201 skipped**, no failures, additive only.
+- [x] All work committed (atomic, no push); tree clean.
+- [x] Next goal prompt `next-goal-validparameters.md` created and committed.
