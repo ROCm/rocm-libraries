@@ -1,0 +1,28 @@
+# AFTER coverage — full `-m unit` suite WITH the new ProblemType slice suite
+# (conftest + 3 test files, 109 tests, 97 snapshots).
+#
+# Command (same as before; --cov=Tensile path-mode + grep the row):
+#   pytest -m unit --cov=Tensile --cov-config=pyproject.toml \
+#     --cov-report=term-missing Tensile/Tests/unit
+#
+# SLICE NOTE: this is a slice of a 1382-LOC file, but nearly the whole file IS
+# the slice (ProblemSizeRange/Problem/Exact*/ProblemSizes(Mock)/getRealDataType/
+# problemTypeToEnum/validate/ProblemType/getBias), so the whole-file number is
+# the slice number here. ≥95% line met.
+
+Name                                                      Stmts   Miss Branch BrPart   Cover   Missing
+Tensile/SolutionStructs/Problem.py                          601     18    332     23  95.61%   257, 859, 870, 875, 997-998, 1081, 1109, 1118, 1130, 1136, 1188-1193 (+ 11 partial branches)
+
+1672 passed, 201 skipped
+
+# Line coverage = (Stmts - Miss) / Stmts = (601 - 18) / 601 = 97.00% line
+# Blended (line+branch, the report's Cover column)            = 95.61%
+#
+# Before -> After: 60.07% -> 97.00% line (+36.93 pts); 240 -> 18 missing stmts.
+# No regression: 1563 -> 1672 passed (+109 new tests), 201 skipped unchanged.
+# Additive only (new files under Tensile/Tests/unit/characterization/ProblemType/).
+#
+# The 18 residual line-misses are all provably unreachable / dead code in this
+# slice (post-first-raise dead branches, the attribute-bug isGEMM, GEMM-invariant
+# index-validation raises, the dead UseE elif, and the unreachable Index01
+# ordering branch) — see resistance.md for the line-by-line accounting.
