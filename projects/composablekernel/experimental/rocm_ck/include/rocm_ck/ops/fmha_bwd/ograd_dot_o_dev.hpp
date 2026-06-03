@@ -87,6 +87,13 @@ struct FmhaBwdOGradDotOTypes
 ///
 ///   scalars[S::P_UNDROP].f32 = p_undrop
 ///
+/// Sink-token gradient (CK Tile #5504) is disabled in rocm_ck: lse_ptr,
+/// sink_ptr and d_sink_ptr are all passed as nullptr and nhead as 0. This is
+/// safe: the kernel only *loads* LSE when atomic_sink_grad_ptr != nullptr (i.e.
+/// when d_sink_ptr != nullptr), and the sink-score read is guarded by
+/// sink_ptr != nullptr -- so these null pointers are address-computed but never
+/// dereferenced. nhead only scales the (never-taken) sink index.
+///
 /// Call this from an extern "C" __global__ wrapper.
 template <FmhaBwdOGradDotOSpec K>
 __device__ void runFmhaBwdOGradDotO(Args args)
@@ -128,9 +135,9 @@ __device__ void runFmhaBwdOGradDotO(Args args)
             {t_o.ptr,                    // o_ptr
              t_do.ptr,                   // do_ptr
              const_cast<void*>(t_d.ptr), // d_ptr (output: TensorArg::ptr is const void*)
-             nullptr,                    // lse_ptr
-             nullptr,                    // sink_ptr
-             nullptr,                    // d_sink_ptr
+             nullptr,                    // lse_ptr    (sink grad disabled; see note above)
+             nullptr,                    // sink_ptr   (disabled)
+             nullptr,                    // d_sink_ptr (disabled -> LSE never loaded)
              p_undrop,                   // p_undrop
              -1,                         // seqlen_q (updated per-batch)
              hdim_v,                     // hdim_v
@@ -161,9 +168,9 @@ __device__ void runFmhaBwdOGradDotO(Args args)
             {t_o.ptr,                    // o_ptr
              t_do.ptr,                   // do_ptr
              const_cast<void*>(t_d.ptr), // d_ptr (output: TensorArg::ptr is const void*)
-             nullptr,                    // lse_ptr
-             nullptr,                    // sink_ptr
-             nullptr,                    // d_sink_ptr
+             nullptr,                    // lse_ptr    (sink grad disabled; see note above)
+             nullptr,                    // sink_ptr   (disabled)
+             nullptr,                    // d_sink_ptr (disabled -> LSE never loaded)
              p_undrop,                   // p_undrop
              seqlen_q,                   // seqlen_q
              hdim_v,                     // hdim_v
