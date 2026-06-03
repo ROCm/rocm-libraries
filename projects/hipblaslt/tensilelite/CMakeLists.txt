@@ -76,14 +76,18 @@ if(TENSILELITE_ENABLE_HOST)
         target_compile_definitions(tensilelite-host PUBLIC $<BUILD_INTERFACE:TENSILE_MSGPACK>)
     endif()
 
+    # tensilelite-host is an internal co-exported shared library: its symbols are
+    # exported (so libhipblaslt.so / libhipsparselt.so resolve them at runtime) but
+    # its headers are NOT a public install surface (they were never installed
+    # pre-Phase-2, and their include closure is essentially the whole Tensile tree
+    # -- a narrow public-header API would require decoupling the entry-point headers
+    # from their implementation includes, a separate effort). In-tree consumers
+    # (hipBLASLt, hipSPARSELt, the tensilelite client/tests) include these via the
+    # build interface below; no INSTALL_INTERFACE include is published.
     target_include_directories(tensilelite-host
         PUBLIC
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-            # Generated tensilelitehost/export.h lives here; public headers include
-            # it, so the build-tree generated-include root is part of the public
-            # build interface (installed copy resolves via INSTALL_INTERFACE below).
             $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
-            $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     )
 
     target_link_libraries(tensilelite-host
@@ -116,69 +120,28 @@ if(TENSILELITE_ENABLE_HOST)
     add_subdirectory(src)
     add_subdirectory(include)
 
-    # Public header contract (§6.2.2): the narrow set of entry-point headers plus
-    # the generated export header. Everything else attached in include/src is
-    # PRIVATE and never installed. Named file set so G4 can verify exactly this set.
-    target_sources(tensilelite-host
-        PUBLIC
-        FILE_SET tensilelite_public_headers TYPE HEADERS
-        BASE_DIRS
-            "${CMAKE_CURRENT_SOURCE_DIR}/include"
-            "${CMAKE_CURRENT_BINARY_DIR}/include"
-        FILES
-            "${CMAKE_CURRENT_SOURCE_DIR}/include/Tensile/Tensile.hpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/include/Tensile/TensorDescriptor.hpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/include/Tensile/Contractions.hpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/include/Tensile/DataTypes.hpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/include/Tensile/Debug.hpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/include/Tensile/EmbeddedLibrary.hpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/include/Tensile/MasterSolutionLibrary.hpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/include/Tensile/PlaceholderLibrary.hpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/include/Tensile/SolutionLibrary.hpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/include/Tensile/Serialization.hpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/include/Tensile/Utils.hpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/include/Tensile/hip/HipHardware.hpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/include/Tensile/hip/HipSolutionAdapter.hpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/include/Tensile/hip/HipUtils.hpp"
-            "${CMAKE_CURRENT_BINARY_DIR}/include/tensilelitehost/export.h"
-    )
-    # MessagePack.hpp is a public entry point only in the msgpack build (the
-    # installed library is msgpack-only; YAML is a local-dev-only option, §6.2).
-    if(NOT HIPBLASLT_ENABLE_YAML)
-        target_sources(tensilelite-host
-            PUBLIC
-            FILE_SET tensilelite_public_headers TYPE HEADERS
-            BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include"
-            FILES "${CMAKE_CURRENT_SOURCE_DIR}/include/Tensile/msgpack/MessagePack.hpp"
-        )
-    endif()
-
     # G4 (header self-containment): VERIFY_INTERFACE_HEADER_SETS is intentionally
-    # NOT enabled here. CMake's header-set verification compiles each header as
-    # `-x c++`, but TensileLite's public headers are HIP-language headers -- they
-    # transitively pull in <hip/hip_fp8.h> etc. and use HIP builtins
-    # (__hip_fp8_e4m3, __half, __amd_floatx16_storage_t) that only exist under
-    # `-x hip` (tensilelite-host's own .cpp are compiled with -x hip). A c++-mode
-    # verify therefore cannot compile them, and wiring a permanently-failing
-    # all_verify_interface_header_sets into `check` would break CI. Self-containment
-    # is instead enforced by the real build: every public header is included (in HIP
-    # mode) by the library's translation units. A HIP-mode header-set verify is a
-    # possible follow-up if CMake gains per-header-set language control.
+    # NOT enabled. CMake's header-set verification compiles each header as `-x c++`,
+    # but TensileLite's headers are HIP-language headers -- they transitively pull in
+    # <hip/hip_fp8.h> etc. and use HIP builtins (__hip_fp8_e4m3, __half,
+    # __amd_floatx16_storage_t) that only exist under `-x hip` (tensilelite-host's
+    # own .cpp compile with -x hip). A c++-mode verify cannot compile them, and
+    # wiring a permanently-failing all_verify_interface_header_sets into `check`
+    # would break CI. Self-containment is instead enforced by the real build: every
+    # header is included (in HIP mode) by the library's translation units.
 
     if(TENSILELITE_ENABLE_INSTALL)
-        # Co-export through hipBLASLt's existing package: same hipblaslt-targets
-        # export set + namespace, so find_package(hipblaslt) yields both
-        # roc::hipblaslt and roc::tensilelite-host. NOT a new top-level package.
-        # Installed explicitly (not via rocm_install_targets) because the wrapper
-        # cannot forward FILE_SET, and a file-set-bearing target must install its
-        # file set in the same call that adds it to the export.
+        # Co-export the shared library through hipBLASLt's existing package: same
+        # hipblaslt-targets export set + namespace, so find_package(hipblaslt) also
+        # yields roc::tensilelite-host (a runtime dependency of roc::hipblaslt) and
+        # libtensilelite-host.so installs alongside libhipblaslt.so for DT_NEEDED
+        # resolution. NOT a new top-level package. Library-only (no FILE_SET): the
+        # headers are an in-tree build interface, not a public install surface.
         install(TARGETS tensilelite-host
             EXPORT hipblaslt-targets
             RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT runtime
             LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT runtime
             ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}" COMPONENT devel
-            FILE_SET tensilelite_public_headers
-                DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT devel
         )
         set_property(TARGET tensilelite-host APPEND PROPERTY INSTALL_RPATH "$ORIGIN")
     endif()
