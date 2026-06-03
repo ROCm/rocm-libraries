@@ -49,9 +49,9 @@
 
 // Single source for the skip message — referenced by the override and by the
 // predicate tests so wording stays in sync.
-#define HIPBLASLT_GFX12_FP16_TT_BIAS_SKIP_MSG                                  \
-    "[hipBLASLt gfx12 FP16 T-T + bias] hipblasLtMatmulAlgoGetHeuristic returns "\
-    "no solutions for FP16 with transA=T, transB=T and any bias-fused "        \
+#define HIPBLASLT_GFX12_FP16_TT_BIAS_SKIP_MSG                                    \
+    "[hipBLASLt gfx12 FP16 T-T + bias] hipblasLtMatmulAlgoGetHeuristic returns " \
+    "no solutions for FP16 with transA=T, transB=T and any bias-fused "          \
     "epilogue on gfx12 — see hipBLASLt upstream issue for status"
 
 namespace hipblaslt_plugin::test_utilities
