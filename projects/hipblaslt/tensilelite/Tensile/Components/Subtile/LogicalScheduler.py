@@ -3230,6 +3230,55 @@ class LogicalScheduler:
         module.addComment0(f"{label} end")
         return module
 
+    def _emit_pgr2_tail_lw_align(self, kernel):
+        """Re-align LW_base to LR vgpr's half for the tail loop entry.
+
+        PGR=2 NLL drops gr_inc/lr_inc (so the post-NGLL→NLL path matches
+        the post-MAINLOOP+NGLL→NLL invariant). Side-effect on the tail
+        path: at every NLL exit the cumulative LW_base swap count is
+        always one MORE than the LR vgpr swap count (PRELOOP's +1 LW
+        swap is never balanced by a v2 swap). The tail body's GR therefore
+        writes to one LDS half while its LR reads the OTHER — when that
+        OTHER half still holds stale prefetched data (PGR=2 always
+        prefetches a 2nd iter into the alternate half), the tail
+        re-accumulates that stale iter on top of NLL's iter →
+        double-counting it (~1-7% wrong values at MT128x128 DU=256
+        K∈{288,320,…,480}).
+
+        Fix: XOR LW_base once with sgprSwap{tc} for every live tensor
+        right before the tail-entry endLabel, but only on NLL exit paths
+        (so the K<DU direct-branch-to-endLabel path, where neither LW
+        nor v2 has been touched, is unaffected). After the XOR,
+        LW_base.parity == v2.parity, so the tail GR writes to and the
+        tail LR reads from the SAME LDS half — the tail's own GR
+        overwrites the stale data (or with SrdA already past K_end,
+        overwrites with SRD-clipped zeros that contribute nothing through
+        the MX zero-padded scale).
+        """
+        from rocisa.code import Module
+        from rocisa.instruction import SXorB32
+        from rocisa.container import sgpr
+
+        module = Module("Pgr2TailLwAlign")
+        if self.config.pgr != 2 or kernel.get("NoTailLoop"):
+            return module
+        tensors = ['A', 'B']
+        if self.config.hasScale:
+            tensors.extend(['MXSA', 'MXSB'])
+        module.addComment1(
+            "PGR=2 tail entry: re-align LW_base with LR vgpr "
+            "(undo PRELOOP's odd LW swap so tail GR writes to the half "
+            "tail LR reads from, not the stale prefetched half).")
+        for tc in tensors:
+            lwName = f"LocalWriteBaseAddr{tc}"
+            swapName = f"Swap{tc}"
+            module.add(SXorB32(
+                dst=sgpr(lwName),
+                src0=sgpr(lwName),
+                src1=sgpr(swapName),
+                comment=f"PGR=2 tail align: undo PRELOOP LW swap for {tc}"))
+        return module
+
     def emitMainAndExitLoops(self, writer, kernel):
         """Emit preloop + mainloop + NGLL + NLL exit paths (no tail).
 
@@ -3313,6 +3362,9 @@ class LogicalScheduler:
         module.addComment0(f"NLL_C{last}")
         module.add(self._emitLoop(writer, kernel, f"NLL_C{last}",
                                   self._nll_per_unroll[nll_ft]))
+        # PGR=2: realign LW_base to LR vgpr's half before falling to tail
+        # (no-op for PGR<2 and for kernels without a tail loop).
+        module.add(self._emit_pgr2_tail_lw_align(kernel))
         module.add(SBranch(labelName=endLabel.getLabelName(),
                            comment="skip other exit paths"))
 
@@ -3328,6 +3380,8 @@ class LogicalScheduler:
             module.addComment0(f"NLL_C{ui}")
             module.add(self._emitLoop(writer, kernel, f"NLL_C{ui}",
                                       self._nll_per_unroll[nll_idx]))
+            # PGR=2: realign LW_base before tail (see _emit_pgr2_tail_lw_align).
+            module.add(self._emit_pgr2_tail_lw_align(kernel))
             if ui < uf - 2:
                 module.add(SBranch(labelName=endLabel.getLabelName(),
                                    comment="skip other exit paths"))
