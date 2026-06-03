@@ -1,0 +1,109 @@
+You are continuing an ongoing engineering task on branch `muozturk/dispatcher-te-parity` in the rocm-libraries repo. The working directory is:
+
+  /home/AMD/muozturk/New_project/rocm-libraries/projects/composablekernel/dispatcher/parity/
+
+The task: prove that the CK Dispatcher reproduces the CK Tile Engine for GEMM — same registry identifier (byte-for-byte, Python vs C++), same generated header, same numerical output, same throughput within 2%.
+
+---
+
+## What has been done (iterations 1-15)
+
+The PR is https://github.com/ROCm/rocm-libraries/pull/7875
+
+All "Must Fix" and "Should Fix" items from pr7875_analysis.pdf have been addressed.
+All 10 improve_advice.pdf recommended next steps have been implemented.
+
+**Test counts as of iteration 15 start:**
+- `test_te_to_dispatcher.py`: 60 tests
+- `test_sweep_and_report.py`: 87 tests
+- Total: 147 tests, all passing
+
+**What each test file covers:**
+- `test_te_to_dispatcher.py`: translation logic, identifier encoding, double_buffer, te_kernel_name(), parse_sizes()
+- `test_sweep_and_report.py`: drive_codegen assertions, PORTING_DECISIONS.md content, check_parity spec constants, parse_harness_output(), compare_report tile-shape rollup
+
+**Verified on GPU (gfx942/MI300X):**
+- fp16 rcr (single + padding), bf16, fp8 (timing only), int8, split_k=4 — all PASSED
+
+---
+
+## What is STILL UNTESTED (gap analysis, iteration 15)
+
+These public functions have zero test coverage:
+
+### check_parity.py
+- `parse_te_csv(csv_path)` — lines 214-242 — reads TE benchmark CSV, returns dict or None
+- `te_benchmark_name(cfg)` — line 141 — `f"benchmark_gemm_universal_{te_kernel_name(cfg)}"`
+- `dispatcher_header_path(output_dir, kernel_set, cfg)` — line 137
+
+### compare_report.py
+- `_verdict_icon(v)` — line 94 — PASSED→✅, FAILED→❌, SKIPPED→⏭
+- `_fmt_tflops(v)` — line 107 — float→"85.87", NaN→"—"
+- `_fmt_delta(v)` — line 113 — float→"+1.2%", NaN→"—"
+- `_merge(disp, te)` — line 57 — joins dispatcher and TE dataframes
+- `_md_to_html(md)` — line 228 — Markdown → HTML
+
+### sweep_runner.py
+- `_kernel_name(cfg)` — lines 312-327 — EXACT MIRROR of te_kernel_name() but in sweep_runner; same _preshuffle suffix risk; COMPLETELY UNTESTED
+- `_make_row(...)` — line 330 — builds Parquet row dict
+- `_load_done_keys(path)` — crash-safe resume logic
+- `_append_row(path, row)` — Parquet append logic
+
+---
+
+## Your job
+
+Continue the gap-closing loop:
+
+1. Read `test_sweep_and_report.py` and `test_te_to_dispatcher.py` to see current test structure
+2. Read the source files being tested (`check_parity.py`, `compare_report.py`, `sweep_runner.py`) to understand the functions
+3. Add new test classes for the untested functions above, prioritizing:
+   a. `TestParseTeCsv` (parse_te_csv is used in Stage 2 adjudication — high risk if broken)
+   b. `TestSweepRunnerKernelName` (_kernel_name mirrors te_kernel_name — same _preshuffle risk in a different file)
+   c. `TestCompareReportFormatHelpers` (_fmt_tflops, _fmt_delta, _verdict_icon — pure functions, easy to test)
+   d. `TestMakeRow` (_make_row Parquet schema correctness)
+4. Run `python -m pytest test_te_to_dispatcher.py test_sweep_and_report.py -q` to verify all pass
+5. If tests pass, git add + git commit with message:
+   `[CK_TILE] Iteration 15: add parse_te_csv, sweep_runner._kernel_name, format-helper tests`
+6. git push origin muozturk/dispatcher-te-parity
+7. Post a PR comment summarizing what was added (use `gh pr comment 7875 --body "..."`)
+
+Then continue gap analysis and repeat until no untested public functions remain.
+
+---
+
+## Key architectural decisions to know
+
+- **Two kinds of name**: registry identifier (canonical, scheduler "default"→"auto") vs kernel/file name (raw TE strings). Swapping them causes silent wrong-kernel dispatch.
+- **`_preshuffle` suffix**: te_kernel_name() and sweep_runner._kernel_name() must append `_preshuffle` for pipeline == "preshufflev2". This was Bug #1; it's now in te_kernel_name() but sweep_runner._kernel_name() is untested.
+- **preshufflev2 double_buffer**: NOT A BUG — codegen and translator agree (both set True). Documented in §2 of PORTING_DECISIONS.md and tested in TestDoubleBuffer.test_preshufflev2_sets_double_buffer.
+- **Performance spec**: _PERF_RUNS=10, perf_tol=0.02, median of 10 outer runs, GPU timer.
+- **Skipped combos**: compv1/compv2/preshufflev1 (no codegen path), interwave+compv3 (unsupported trait), split_k>255 (uint8_t overflow).
+
+---
+
+## File locations
+
+All source files are in:
+  /home/AMD/muozturk/New_project/rocm-libraries/projects/composablekernel/dispatcher/parity/
+
+Key files:
+  check_parity.py       — 3-stage orchestrator
+  compare_report.py     — dispatcher vs TE Markdown/HTML report
+  sweep_runner.py       — T2.3 sweep driver
+  te_to_dispatcher.py   — TE JSON → dispatcher config
+  PORTING_DECISIONS.md  — living doc of decisions
+  test_te_to_dispatcher.py   — 60 tests
+  test_sweep_and_report.py   — 87 tests
+
+---
+
+## Done criteria for this task
+
+The PR is "done" when:
+- All public functions in check_parity.py, compare_report.py, sweep_runner.py, te_to_dispatcher.py have test coverage
+- All tests pass locally
+- PORTING_DECISIONS.md §8 has no open (non-struck-through) items except GPU-gated ones
+- PR comment summarizing coverage is posted
+
+GPU-gated items (T2.4, T2.5 full sweeps) remain blocked until libdispatcher_gemm.so is compiled on gfx942 — that is out of scope for this session.

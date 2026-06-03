@@ -944,3 +944,331 @@ class TestCompareReportTileShapeRollup:
         assert "By tile" in text or "tile" in text.lower(), (
             "compare_report.py must emit a tile-shape rollup"
         )
+
+
+# ── parse_te_csv unit tests ───────────────────────────────────────────────────
+
+class TestParseTeCsv:
+    """check_parity.parse_te_csv() reads the last CSV data row correctly."""
+
+    def test_missing_file_returns_none(self, tmp_path):
+        from check_parity import parse_te_csv
+        assert parse_te_csv(tmp_path / "nonexistent.csv") is None
+
+    def test_header_only_returns_none(self, tmp_path):
+        """A CSV with no data row (only header) must return None."""
+        from check_parity import parse_te_csv
+        f = tmp_path / "te.csv"
+        f.write_text("latency(ms),tflops,bandwidth(GB/s)\n")
+        assert parse_te_csv(f) is None
+
+    def test_empty_file_returns_none(self, tmp_path):
+        from check_parity import parse_te_csv
+        f = tmp_path / "te.csv"
+        f.write_text("")
+        assert parse_te_csv(f) is None
+
+    def test_parses_latency_and_tflops(self, tmp_path):
+        """Standard TE CSV format: header + one data row."""
+        from check_parity import parse_te_csv
+        f = tmp_path / "te.csv"
+        f.write_text("latency(ms),tflops,bandwidth(GB/s)\n0.0250,85.87,1234.5\n")
+        result = parse_te_csv(f)
+        assert result is not None
+        assert abs(result["latency_ms"] - 0.0250) < 1e-6
+        assert abs(result["tflops"] - 85.87) < 1e-4
+        assert abs(result["bandwidth"] - 1234.5) < 0.1
+
+    def test_returns_last_row(self, tmp_path):
+        """When multiple data rows exist, the LAST row's values are used."""
+        from check_parity import parse_te_csv
+        f = tmp_path / "te.csv"
+        f.write_text(
+            "latency(ms),tflops,bandwidth(GB/s)\n"
+            "0.0100,10.0,500.0\n"
+            "0.0250,85.87,1234.5\n"
+        )
+        result = parse_te_csv(f)
+        assert result is not None
+        assert abs(result["tflops"] - 85.87) < 1e-4, (
+            "parse_te_csv must return the last data row, not the first"
+        )
+
+    def test_prefix_match_for_column_names(self, tmp_path):
+        """Column matching is prefix-based; 'latency(ms)' starts with 'latency'."""
+        from check_parity import parse_te_csv
+        f = tmp_path / "te.csv"
+        f.write_text("latency(ms),tflops(fp16),bandwidth(GB/s)\n0.025,85.0,1000.0\n")
+        result = parse_te_csv(f)
+        assert result is not None
+        assert result["tflops"] is not None
+
+    def test_missing_column_returns_none_value(self, tmp_path):
+        """If a column is absent, its key maps to None (not KeyError)."""
+        from check_parity import parse_te_csv
+        f = tmp_path / "te.csv"
+        f.write_text("latency(ms),tflops\n0.025,85.0\n")
+        result = parse_te_csv(f)
+        assert result is not None
+        assert result["bandwidth"] is None
+
+    def test_non_numeric_value_returns_none(self, tmp_path):
+        """Unparseable float in a cell returns None for that key."""
+        from check_parity import parse_te_csv
+        f = tmp_path / "te.csv"
+        f.write_text("latency(ms),tflops,bandwidth(GB/s)\n0.025,N/A,1000.0\n")
+        result = parse_te_csv(f)
+        assert result is not None
+        assert result["tflops"] is None
+
+
+# ── sweep_runner._kernel_name unit tests ─────────────────────────────────────
+
+class TestSweepRunnerKernelName:
+    """sweep_runner._kernel_name mirrors te_kernel_name — same _preshuffle risk.
+
+    Bug #1 in check_parity.te_kernel_name was the missing _preshuffle suffix for
+    preshufflev2.  sweep_runner._kernel_name has the same logic in a separate file
+    and needs the same guard tested independently.
+    """
+
+    def _make_cfg(self, pipeline="compv3", scheduler="intrawave"):
+        """Minimal cfg dict accepted by sweep_runner._kernel_name."""
+        return {
+            "_te": {
+                "datatype": "fp16",
+                "layout": "rcr",
+                "pipeline": pipeline,
+                "epilogue": "default",
+                "scheduler": scheduler,
+            },
+            "algorithm": {
+                "pad_m": False, "pad_n": False, "pad_k": False, "persistent": False,
+                "tile_m": 256, "tile_n": 128, "tile_k": 32,
+                "warp_m": 4, "warp_n": 1, "warp_k": 1,
+                "warp_tile_m": 32, "warp_tile_n": 32, "warp_tile_k": 16,
+            },
+            "signature": {"split_k": 1},
+        }
+
+    def test_vanilla_name_no_preshuffle_suffix(self):
+        """compv3 pipeline must NOT append _preshuffle."""
+        import sweep_runner
+        cfg = self._make_cfg(pipeline="compv3")
+        name = sweep_runner._kernel_name(cfg)
+        assert not name.endswith("_preshuffle"), (
+            f"compv3 kernel name must not end with _preshuffle; got: {name}"
+        )
+
+    def test_preshufflev2_appends_preshuffle_suffix(self):
+        """preshufflev2 pipeline MUST append _preshuffle (Bug #1 guard)."""
+        import sweep_runner
+        cfg = self._make_cfg(pipeline="preshufflev2")
+        name = sweep_runner._kernel_name(cfg)
+        assert name.endswith("_preshuffle"), (
+            f"preshufflev2 kernel name must end with _preshuffle; got: {name}"
+        )
+
+    def test_name_contains_tile_shape(self):
+        """Tile dimensions must appear in the kernel name."""
+        import sweep_runner
+        cfg = self._make_cfg()
+        name = sweep_runner._kernel_name(cfg)
+        assert "256x128x32" in name
+        assert "4x1x1" in name
+        assert "32x32x16" in name
+
+    def test_name_contains_padding_flags(self):
+        """Padding flags (False/True) must appear as 'False'/'True' in name."""
+        import sweep_runner
+        cfg = self._make_cfg()
+        name = sweep_runner._kernel_name(cfg)
+        assert "False_False_False_False" in name
+
+    def test_name_matches_check_parity_te_kernel_name(self):
+        """sweep_runner._kernel_name must produce the same string as check_parity.te_kernel_name."""
+        import sweep_runner
+        from check_parity import te_kernel_name
+        cfg = self._make_cfg(pipeline="compv3")
+        assert sweep_runner._kernel_name(cfg) == te_kernel_name(cfg), (
+            "sweep_runner._kernel_name and check_parity.te_kernel_name must agree"
+        )
+
+    def test_preshufflev2_matches_check_parity(self):
+        """Both implementations must agree on _preshuffle suffix for preshufflev2."""
+        import sweep_runner
+        from check_parity import te_kernel_name
+        cfg = self._make_cfg(pipeline="preshufflev2")
+        assert sweep_runner._kernel_name(cfg) == te_kernel_name(cfg)
+
+
+# ── compare_report format helper unit tests ───────────────────────────────────
+
+class TestCompareReportFormatHelpers:
+    """Pure-function coverage for _verdict_icon, _fmt_tflops, _fmt_delta."""
+
+    def test_verdict_icon_passed(self):
+        from compare_report import _verdict_icon
+        assert _verdict_icon("PASSED") == "✅"
+
+    def test_verdict_icon_failed(self):
+        from compare_report import _verdict_icon
+        assert _verdict_icon("FAILED") == "❌"
+
+    def test_verdict_icon_error(self):
+        from compare_report import _verdict_icon
+        assert _verdict_icon("ERROR") == "❌"
+
+    def test_verdict_icon_skipped(self):
+        from compare_report import _verdict_icon
+        assert _verdict_icon("SKIPPED") == "⏭"
+
+    def test_verdict_icon_dryrun(self):
+        from compare_report import _verdict_icon
+        assert _verdict_icon("DRYRUN") == "⏭"
+
+    def test_verdict_icon_none_returns_dash(self):
+        from compare_report import _verdict_icon
+        import pandas as pd
+        assert _verdict_icon(None) == "—"
+        assert _verdict_icon(float("nan")) == "—"
+        assert _verdict_icon(pd.NA) == "—"
+
+    def test_fmt_tflops_float(self):
+        from compare_report import _fmt_tflops
+        assert _fmt_tflops(85.868) == "85.87"
+
+    def test_fmt_tflops_none(self):
+        from compare_report import _fmt_tflops
+        assert _fmt_tflops(None) == "—"
+
+    def test_fmt_tflops_nan(self):
+        from compare_report import _fmt_tflops
+        import math
+        assert _fmt_tflops(float("nan")) == "—"
+
+    def test_fmt_delta_positive(self):
+        from compare_report import _fmt_delta
+        assert _fmt_delta(1.23) == "+1.2%"
+
+    def test_fmt_delta_negative(self):
+        from compare_report import _fmt_delta
+        assert _fmt_delta(-3.5) == "-3.5%"
+
+    def test_fmt_delta_zero(self):
+        from compare_report import _fmt_delta
+        assert _fmt_delta(0.0) == "+0.0%"
+
+    def test_fmt_delta_none(self):
+        from compare_report import _fmt_delta
+        assert _fmt_delta(None) == "—"
+
+    def test_fmt_delta_nan(self):
+        from compare_report import _fmt_delta
+        assert _fmt_delta(float("nan")) == "—"
+
+
+# ── sweep_runner._make_row schema tests ───────────────────────────────────────
+
+class TestMakeRow:
+    """_make_row() produces a dict with the correct Parquet schema keys."""
+
+    def _make_cfg(self):
+        return {
+            "_te": {
+                "datatype": "fp16",
+                "layout": "rcr",
+                "pipeline": "compv3",
+                "epilogue": "default",
+                "scheduler": "intrawave",
+            },
+            "algorithm": {
+                "pipeline": "compv3", "scheduler": "intrawave", "epilogue": "default",
+                "pad_m": False, "pad_n": False, "pad_k": False, "persistent": False,
+                "tile_m": 256, "tile_n": 128, "tile_k": 32,
+                "warp_m": 4, "warp_n": 1, "warp_k": 1,
+                "warp_tile_m": 32, "warp_tile_n": 32, "warp_tile_k": 16,
+                "block_size": 256, "double_buffer": False, "preshuffle": False,
+                "transpose_c": False, "num_wave_groups": 1, "k_block_per_cu": 1,
+            },
+            "signature": {
+                "split_k": 1,
+                "dtype_a": "fp16", "dtype_b": "fp16", "dtype_acc": "fp32",
+                "dtype_c": "fp16", "layout_a": "row", "layout_b": "col",
+                "layout_c": "row", "transpose_a": False, "transpose_b": False,
+                "grouped": False, "elementwise_op": "passthrough",
+                "num_d_tensors": 0, "structured_sparsity": False,
+            },
+        }
+
+    def test_required_columns_present(self):
+        """Row must have all columns required by compare_report._load_parquet."""
+        import sweep_runner
+        cfg = self._make_cfg()
+        row = sweep_runner._make_row(
+            Path("configs/single_fp16_rcr.json"), 0, cfg,
+            512, 512, 512, "PASSED", 10.5, "", "",
+        )
+        required = {
+            "config_file", "config_index", "identifier", "kernel_name",
+            "datatype", "layout", "pipeline", "scheduler",
+            "tile_m", "tile_n", "tile_k", "split_k",
+            "pad_m", "pad_n", "pad_k", "persistent",
+            "M", "N", "K", "verdict", "tflops", "error_msg", "stage_failed", "ts",
+        }
+        missing = required - set(row.keys())
+        assert not missing, f"_make_row missing columns: {missing}"
+
+    def test_problem_dimensions_stored(self):
+        import sweep_runner
+        cfg = self._make_cfg()
+        row = sweep_runner._make_row(
+            Path("c.json"), 0, cfg, 1024, 768, 512, "PASSED", 85.0, "", ""
+        )
+        assert row["M"] == 1024
+        assert row["N"] == 768
+        assert row["K"] == 512
+
+    def test_verdict_and_tflops_stored(self):
+        import sweep_runner
+        cfg = self._make_cfg()
+        row = sweep_runner._make_row(
+            Path("c.json"), 0, cfg, 512, 512, 512, "FAILED", None, "OOM", "stage2"
+        )
+        assert row["verdict"] == "FAILED"
+        assert row["tflops"] is None
+        assert row["error_msg"] == "OOM"
+        assert row["stage_failed"] == "stage2"
+
+    def test_identifier_matches_encode_identifier(self):
+        """Row's identifier field must equal encode_identifier(cfg)."""
+        import sweep_runner
+        from identifier import encode_identifier
+        cfg = self._make_cfg()
+        row = sweep_runner._make_row(
+            Path("c.json"), 0, cfg, 512, 512, 512, "PASSED", 10.0, "", ""
+        )
+        assert row["identifier"] == encode_identifier(cfg)
+
+    def test_kernel_name_has_no_preshuffle_for_compv3(self):
+        """compv3 rows must not have _preshuffle in kernel_name."""
+        import sweep_runner
+        cfg = self._make_cfg()
+        row = sweep_runner._make_row(
+            Path("c.json"), 0, cfg, 512, 512, 512, "PASSED", 10.0, "", ""
+        )
+        assert "_preshuffle" not in row["kernel_name"]
+
+    def test_ts_is_iso_utc(self):
+        """Timestamp must be a valid ISO 8601 string (for Parquet ordering)."""
+        import sweep_runner
+        from datetime import datetime, timezone
+        cfg = self._make_cfg()
+        row = sweep_runner._make_row(
+            Path("c.json"), 0, cfg, 512, 512, 512, "PASSED", 10.0, "", ""
+        )
+        ts = row["ts"]
+        assert isinstance(ts, str)
+        # Must parse as a datetime
+        parsed = datetime.fromisoformat(ts)
+        assert parsed.tzinfo is not None, "ts must be timezone-aware (UTC)"
