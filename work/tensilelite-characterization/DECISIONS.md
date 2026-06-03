@@ -63,3 +63,29 @@ implementations set used by the kernel writers. Also note the
 `from .Components import *` at the end of `Component.py` shadows the module-level
 `LocalRead` name, so the real class is reached via the `Component.LocalRead`
 attribute.
+
+## D4 — `Common/Parallel.py`: accept <95% (fork/process-pool paths)
+**Decision:** Characterize the pure helpers + single-threaded + `n_jobs=1`
+in-process paths of `Parallel.py` (→ ~81% line) and **document the rest as
+resistance**, accepting this module below the 95% bar.
+**Why:** the uncovered lines are the real parallel-execution paths —
+`ProcessingPool` (multiprocessing.Pool), `ParallelMapReturnAsGenerator`
+(ProcessPoolExecutor), the joblib generator-return branch, and the Windows-only
+`os.name=="nt"` branch. These fork/spawn OS processes; exercising them in a unit
+test is flaky (pickling, fork-in-pytest, CI nondeterminism, slow) and tests the
+OS scheduler more than our code. joblib `n_jobs=1` and `multiprocessing.dummy`
+(threads) ARE covered because they run in-process.
+**Alternatives rejected:** (a) run real `multiprocessing.Pool(2)` /
+`ProcessPoolExecutor` with module-level picklable funcs — covers the lines but
+is flaky and slow; rejected (same rationale as excluding the codegen surface);
+(b) deep-monkeypatch multiprocessing — would assert our mocks, not real
+behaviour; rejected. Net: Parallel.py is an honest <95% module, like the
+out-of-scope codegen set.
+
+## D5 — recurring submodule-shadowing gotcha
+**Observation (not a fork, but recorded):** several `Tensile` packages re-export
+a class that shadows a same-named submodule attribute, so
+`import Tensile.X.Foo as F` binds the *class*, not the module. Hit for
+`SolutionStructs.Solution`, `Component` (LocalRead), and `Common.Parallel`
+(joblib `Parallel`). **Standard fix applied everywhere:**
+`F = importlib.import_module("Tensile.X.Foo")`.
