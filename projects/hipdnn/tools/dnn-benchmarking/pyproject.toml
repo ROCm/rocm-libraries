@@ -50,5 +50,5 @@ markers = [
     "rocprofv3: requires rocprofv3 binary on PATH",
     "perf: requires Linux perf binary on PATH and perf_event_paranoid <= 1",
     "rocprof_compute: requires rocprof-compute binary on PATH",
-    "profiling_strict: stricter profiling assertions (requires the slice to carry real payload, not just round-trip a skip)",
+    "profiling_strict: stricter profiling assertions; skipped unless pytest is run with --profiling-strict",
 ]
