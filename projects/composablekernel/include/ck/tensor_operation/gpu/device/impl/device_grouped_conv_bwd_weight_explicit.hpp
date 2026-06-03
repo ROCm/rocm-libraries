@@ -53,9 +53,13 @@ struct DeviceGroupedConvBwdWeight_Explicit
     static constexpr auto I1 = Number<1>{};
     static constexpr auto I2 = Number<2>{};
 
-    static constexpr bool IsTwoStageNeeded =
-        sizeof(WeiDataType) % 4 != 0 &&
-        DeviceGemmV3Op::CDEShuffleBlockTransferScalarPerVectors_::At(I0) % 2 != 0;
+    // Keep split-k partials in fp32: route every sub-4-byte (fp16/bf16) weight
+    // output through the two-stage path. That path accumulates the per-split
+    // partials in an fp32 workspace (TwoStageIntermediateType = the GEMM's fp32 C
+    // output) and casts once at the end, instead of bf16 atomic-adding each
+    // partial into the bf16 weight buffer -- the latter loses precision that
+    // scales with split_k (see issue #8029).
+    static constexpr bool IsTwoStageNeeded = sizeof(WeiDataType) % 4 != 0;
 
     using DeviceOp                 = DeviceGroupedConvBwdWeight_Explicit;
     using TwoStageIntermediateType = typename DeviceGemmV3Op::CDataType_;
