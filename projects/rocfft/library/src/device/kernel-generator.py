@@ -117,10 +117,10 @@ def merge_kernel_list(kernels, all_precisions):
     batch_err_msg = "Error: invalid batch in kernel configuration: \n"
     batch_range_err_msg = "Error: invalid batch range in kernel configuration: \n"
 
-    get_batch_range = lambda kernel, min_batch, max_batch: range(
+    get_batch_range = lambda kernel: range(
         kernel.batch_low
-        if hasattr(kernel, 'batch_low') else min_batch, kernel.batch_high
-        if hasattr(kernel, 'batch_high') else max_batch)
+        if hasattr(kernel, 'batch_low') else 1, kernel.batch_high
+        if hasattr(kernel, 'batch_high') else sys.maxsize)
 
     is_empty_batch = lambda kernel: (not hasattr(kernel, 'batch_low') and
                                      not hasattr(kernel, 'batch_high'))
@@ -193,17 +193,13 @@ def merge_kernel_list(kernels, all_precisions):
                 key = (get_kernel_key(kernel_cpy), kernel_cpy.precision,
                        kernel_cpy.transform_type)
 
-                min_batch = 1
-                max_batch = sys.maxsize
-
                 # check if the key is already in the dictionary
                 if key not in d:
                     # if the key is not in the dictionary, add it to the dictionary
                     d[key] = list()
                     # if the batch is not empty, add the batch to the list
                     if not is_empty_batch(kernel_cpy):
-                        d[key].append(
-                            get_batch_range(kernel_cpy, min_batch, max_batch))
+                        d[key].append(get_batch_range(kernel_cpy))
 
                     r.append(kernel_cpy)
                 else:
@@ -213,8 +209,7 @@ def merge_kernel_list(kernels, all_precisions):
                         print(dup_err_msg + str(kernel))
                         sys.exit(1)
                     else:
-                        new_range = get_batch_range(kernel_cpy, min_batch,
-                                                    max_batch)
+                        new_range = get_batch_range(kernel_cpy)
                         for curr_range in d[key]:
                             # check if the new range intersects with the current range
                             if new_range.start <= curr_range.stop and new_range.stop >= curr_range.start:
