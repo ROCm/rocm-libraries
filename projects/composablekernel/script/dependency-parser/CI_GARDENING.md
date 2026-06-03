@@ -121,13 +121,20 @@ If the file is **absent**, `smart_build_ci.sh` crashed before it could write it
 > skipped — e.g. `ctest -N` empty, see §4.6 — the class is empty and `smart_test.sh`
 > logs that it found none.)
 
-> **Scope: smart-build's test universe is `ctest -N`.** A test is covered exactly
-> when it's registered with ctest via `add_test(...)` in a `CMakeLists.txt` —
-> compiled tests by file→target mapping, non-compiled ones via the always-run class
-> above. A test that isn't registered with ctest is run by its own CI stage, not by
-> `smart_test.sh` (a full `ctest` run wouldn't run it either). Adding a test the
-> standard way (`add_test`) also edits a `CMakeLists.txt`, which the safety check
-> (§7) treats as a full build, so it runs in the PR that introduces it.
+> **Scope: smart-build's test universe is the default `ctest -N` suite.** A test is
+> covered exactly when it's registered with ctest via `add_test(...)` in a
+> `CMakeLists.txt` — compiled tests by file→target mapping, non-compiled ones via the
+> always-run class above. Adding a test the standard way (`add_test`) also edits a
+> `CMakeLists.txt`, which the safety check (§7) treats as a full build, so it runs in
+> the PR that introduces it.
+>
+> Some CK test suites run **outside** `smart_test.sh`, in their own flag-gated
+> Jenkins stages/targets, and are governed by those flags rather than by selection:
+> `ninja check-rocm-ck` (`RUN_ROCM_CK_TESTS`), `ninja check-builder`
+> (`RUN_BUILDER_TESTS`), inductor codegen via `script/run_inductor_tests.sh`
+> (`RUN_INDUCTOR_TESTS`), and the downstream (pytorch/aiter/fa), tile-engine, and
+> FMHA stages. The always-run class covers only the non-compiled tests in the default
+> `ctest -N` suite; these separate suites are unaffected by it and by selection.
 
 ### `reachability_result.json` fields
 
