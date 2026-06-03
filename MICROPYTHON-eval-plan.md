@@ -340,3 +340,28 @@ None fatal — all handled by shims + automated transforms.
 MicroPython IR to the Phase-0 comgr-ffi → HSACO (mechanism already proven in G0); the declares
 determinism fix for byte-identity; then the **conv** slice (untangle analysis/helpers coupling,
 apply the same transforms, re-run — conv may surface more `re` patterns / stdlib).
+
+### G1 CONV ACHIEVED (2026-06-01) — CONFIDENCE GATE MET
+MicroPython runs the **full conv implicit-GEMM codegen** (`build_implicit_gemm_conv` +
+`lower_kernel_to_llvm`, `spike/mp1/run_conv.py`) and emits **43,542 bytes of LLVM IR identical to
+CPython** — same length, same checksum, `sort`-identical (only ~10 `declare` lines reordered, the
+same dict-iteration nondeterminism as elementwise). Notes:
+- The feared `analysis`/`helpers` coupling **resolved itself**: trimming `analysis/__init__` cut
+  the import chain to `report.py` (which was the only thing doing `from ..helpers import ...`).
+- Conv needed a **larger GC heap** — MicroPython unix default is 2 MB; conv OOM'd until run with
+  `-X heapsize=1024M`. The embedded interpreter must be configured with an adequate heap (trivial).
+- No new language/stdlib blockers beyond the elementwise set; the same shims + 4 transforms suffice.
+
+**Every confidence-checklist item is green** (G0 FFI; dataclasses; language; elementwise IR==CPython;
+conv IR==CPython). **Verdict: confident MicroPython can run the conv compile path.** Trigger met to
+commit to the conv POC.
+
+### Remaining for the conv POC (post-confidence)
+1. Determinism: sort the emitted declares in `core/lower_llvm.py` → byte-identical IR (1-line CK change).
+2. G1b: chain the MicroPython conv IR into the Phase-0 comgr-ffi → HSACO (end-to-end in one process).
+3. Phase 2: embed MicroPython in the provider C++ (the accepted glue rewrite: replace
+   EmbeddedInterpreter/CompileServiceBridge/PythonError on MicroPython's `mp_*` API; configure heap);
+   marshal the existing conv `py::dict` payload as `mp_obj_t`. Reuse the existing conv provider
+   integration + `CpuFpReferenceConvolution` accuracy oracle on gfx1151 for end-to-end validation.
+4. Package the ck_dsl bundle build (the 4 transforms + trimmed __init__s + comgr-ffi swap) as a
+   real build step; land the field()/star-unpacking/etc. transforms as upstream CK changes.
