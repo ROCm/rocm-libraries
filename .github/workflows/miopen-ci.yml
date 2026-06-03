@@ -62,6 +62,15 @@ jobs:
             projects/miopen
             shared/ctest
 
+      - name: Pull DVC files for rocm-libraries # LOGNAME details here https://github.com/ROCm/rocm-libraries/pull/1617
+        run: |
+          if command -v dvc &> /dev/null; then
+            echo "dvc detected"
+          else
+            echo "Warning, dvc not detected!"
+          fi
+          LOGNAME=github-runner dvc pull -v
+
       - name: Configure build
         run: |
           export PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH
@@ -79,7 +88,7 @@ jobs:
           -DMIOPEN_GPU_SYNC=OFF \
           -DMIOPEN_USE_COMPOSABLEKERNEL=OFF \
           -DCMAKE_PREFIX_PATH=/opt/rocm \
-          -DGPU_TARGETS="$GPU_TARGET"
+          -DGPU_TARGETS:STRING="\$GPU_TARGET"
 
       - name: Build
         run: |
@@ -121,6 +130,15 @@ jobs:
             cmake
             projects/miopen
             shared/ctest
+            
+      - name: Pull DVC files for rocm-libraries # LOGNAME details here https://github.com/ROCm/rocm-libraries/pull/1617
+        run: |
+          if command -v dvc &> /dev/null; then
+            echo "dvc detected"
+          else
+            echo "Warning, dvc not detected!"
+          fi
+          LOGNAME=github-runner dvc pull -v
 
       - name: Configure build
         run: |
@@ -137,7 +155,7 @@ jobs:
           -DMIOPEN_USE_MLIR=ON \
           -DMIOPEN_GPU_SYNC=OFF \
           -DCMAKE_PREFIX_PATH=/opt/rocm \
-          -DGPU_TARGETS="$GPU_TARGET"
+          -DGPU_TARGETS:STRING="\$GPU_TARGET"
 
       - name: Build
         run: |
@@ -177,6 +195,15 @@ jobs:
             cmake
             projects/miopen
             shared/ctest
+            
+      - name: Pull DVC files for rocm-libraries # LOGNAME details here https://github.com/ROCm/rocm-libraries/pull/1617
+        run: |
+          if command -v dvc &> /dev/null; then
+            echo "dvc detected"
+          else
+            echo "Warning, dvc not detected!"
+          fi
+          LOGNAME=github-runner dvc pull -v
 
       - name: Configure build
         run: |
@@ -236,6 +263,15 @@ jobs:
             cmake
             projects/miopen
             shared/ctest
+            
+      - name: Pull DVC files for rocm-libraries # LOGNAME details here https://github.com/ROCm/rocm-libraries/pull/1617
+        run: |
+          if command -v dvc &> /dev/null; then
+            echo "dvc detected"
+          else
+            echo "Warning, dvc not detected!"
+          fi
+          LOGNAME=github-runner dvc pull -v
 
       - name: Configure build
         run: |
@@ -254,7 +290,7 @@ jobs:
           -DMIOPEN_GPU_SYNC=OFF \
           -DMIOPEN_BACKEND=HIPNOGPU \
           -DCMAKE_PREFIX_PATH=/opt/rocm \
-          -DGPU_TARGETS="$GPU_TARGET"
+          -DGPU_TARGETS:STRING="\$GPU_TARGET"
 
       - name: Build MIOpen
         run: |
