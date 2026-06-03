@@ -23,8 +23,11 @@ parallel candidates (static-CPython embed, C++ rewrite, etc.).
   `ck_dsl` edits as an explicit cost.
 - Provider C++ glue + tests are **accepted as a full rewrite** (POC) — scheduled *last*, after
   the make-or-break risks are retired.
-- **Default scope: minimal POC slice** — the single conv compile path the integration test
-  already exercises on gfx1151. We do *not* try to make all of `ck_dsl` MicroPython-clean.
+- **POC target = FMHA forward + backward** (user direction, 2026-06-01), GATED on first reaching
+  confidence that the approach works. Elementwise stays the cheapest *mechanism* proof (G1); the
+  *FMHA* surface is scoped separately because confidence must be calibrated to the real target, not
+  just any slice. We still do *not* try to make all of `ck_dsl` MicroPython-clean — only the FMHA
+  fwd/bwd closure.
 
 ## Why the prior "MicroPython impossible" note doesn't end this
 A prior spike concluded full-CPython is required. Re-verified against the live tree: the real
@@ -272,3 +275,18 @@ are expected). That selects **Route 1** and unblocks dataclasses. Two findings r
 lru_cache/pathlib), apply the field() transform to the elementwise slice, wire comgr-ffi +
 trimmed `__init__`s, run elementwise under MicroPython, byte-compare LLVM IR vs CPython. Open
 risks still to hit: MicroPython `re` subset; runtime `typing` usage; any other language gaps.
+
+### POC retarget: FMHA forward + backward (scoping, 2026-06-01)
+Entry points exist: `build_fmha_fwd_mfma(spec: FmhaMfmaSpec, arch)` (instances/common/fmha_mfma.py)
+and `build_fmha_bwd(spec: FmhaBwdSpec, arch)` (instances/common/fmha_bwd.py); also the unified
+attention builders (`build_unified_attention_2d/3d`, `UnifiedAttentionProblem/2DSpec/3DSpec`).
+**No new language-level blockers:** zero real `match`/`case` statements and zero `async def`/
+`await` anywhere in ck_dsl (the grep hits were the word "match" in comments and "async DMA"/
+`use_async_kv` identifiers). Generators (`yield`) are used but MicroPython supports them.
+FMHA's incremental cost over elementwise is **breadth, not new blockers**: a much larger import
+closure (helpers/attention, mfma_attention, mfma_attention_bwd, fusion_*, pipeline, distribution,
+mfma_gemm_inner, …) → more `= field()` conversions and more modules that must import cleanly. The
+same open risks apply (re subset, runtime typing). **Confidence checklist for the FMHA POC:**
+(1) G0 FFI ✓, (2) dataclasses mechanism ✓, (3) FMHA language features ✓ clean, (4) elementwise-G1
+run [pending — flushes re/typing], (5) FMHA fwd+bwd closure imports + builds under the shims
+[pending]. Declare confidence only after (4) and (5).
