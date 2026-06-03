@@ -29,16 +29,19 @@ class FrozenInstanceError(AttributeError):
 
 
 class Field:
-    def __init__(self, default=MISSING, default_factory=MISSING):
+    def __init__(self, default=MISSING, default_factory=MISSING, init=True):
         self.default = default
         self.default_factory = default_factory
+        self.init = init
         self.name = None
         self.order = _counter[0]
         _counter[0] += 1
 
 
-def field(default=MISSING, default_factory=MISSING):
-    return Field(default=default, default_factory=default_factory)
+def field(default=MISSING, default_factory=MISSING, init=True, **_ignored):
+    # _ignored absorbs repr/hash/compare/metadata/kw_only — accepted for
+    # dataclasses API compatibility but not modelled by this shim.
+    return Field(default=default, default_factory=default_factory, init=init)
 
 
 _FIELDS = "__dataclass_fields__"
@@ -65,18 +68,22 @@ def _collect(cls):
 
 
 def _make_init(fields, frozen):
+    init_fields = [f for f in fields if f.init]
+
     def __init__(self, *args, **kwargs):
-        if len(args) > len(fields):
-            raise TypeError("__init__() takes at most %d positional args" % len(fields))
+        if len(args) > len(init_fields):
+            raise TypeError(
+                "__init__() takes at most %d positional args" % len(init_fields)
+            )
         values = {}
         for i, a in enumerate(args):
-            values[fields[i].name] = a
+            values[init_fields[i].name] = a
         for k, v in kwargs.items():
             if k in values:
                 raise TypeError("got multiple values for argument '%s'" % k)
             values[k] = v
         for f in fields:
-            if f.name in values:
+            if f.init and f.name in values:
                 val = values[f.name]
             elif f.default is not MISSING:
                 val = f.default
@@ -145,11 +152,15 @@ def _process(cls, frozen, eq, order):
                 delattr(cls, f.name)
             except Exception:
                 pass
-    cls.__init__ = _make_init(fields, frozen)
-    cls.__repr__ = _make_repr(cls, fields)
-    if eq:
+    # Respect user-defined dunders (CPython dataclass does not overwrite an
+    # __init__/__eq__/__repr__ the class already defines itself).
+    if "__init__" not in cls.__dict__:
+        cls.__init__ = _make_init(fields, frozen)
+    if "__repr__" not in cls.__dict__:
+        cls.__repr__ = _make_repr(cls, fields)
+    if eq and "__eq__" not in cls.__dict__:
         cls.__eq__ = _make_eq(fields)
-        if frozen:
+        if frozen and "__hash__" not in cls.__dict__:
             cls.__hash__ = _make_hash(fields)
     if frozen:
         cls.__setattr__ = _frozen_setattr

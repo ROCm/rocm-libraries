@@ -3,3 +3,5 @@ micropython/
 *.hsaco
 mp1/dl/
 mp1/shims/udataclasses/
+mp1/ckbundle/
+mp1/*.ll

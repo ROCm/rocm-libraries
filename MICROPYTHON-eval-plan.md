@@ -307,3 +307,36 @@ already found zero real match/case and zero async def/await). **Confidence check
 (1) G0 FFI ✓ (2) dataclasses ✓ (3) language clean ✓ (4) elementwise-G1 run [pending] (5) conv
 closure imports + builds under shims, untangling analysis/helpers coupling [pending]. Then Phase 2
 reuses the existing conv provider integration for end-to-end accuracy on gfx1151.
+
+### G1a ACHIEVED (2026-06-01): MicroPython runs elementwise codegen → IR matches CPython
+MicroPython runs ck_dsl's **full elementwise `lower_kernel_to_llvm`** and emits LLVM IR that is
+**semantically identical to CPython** — same length (3037), same checksum, and `sort`-identical
+line-for-line. The ONLY difference is the position of one `declare` line: declares come from the
+`_INTRINSIC_DECLS` dict (core/lower_llvm.py) collected unordered, and MicroPython iterates
+dict/set in a different order. Byte-identity needs a one-line determinism fix (sort the emitted
+declares). The `re`-subset and runtime-`typing` risks are **cleared for this slice** — lower_llvm
+uses `re` and it ran correctly under MicroPython.
+
+Harness = a processed `ck_dsl` **bundle** (`spike/mp1/`, gitignored copy) built by
+`spike/mp1/build_bundle.py`; run by `spike/mp1/run_g1.py` under both interpreters.
+
+**Shims written** (`spike/mp1/shims/`, all validated): `dataclasses` (custom, order-preserving),
+`typing`, `functools` (lru_cache), `pathlib` (str subclass, no `__new__`), `__future__`,
+`itertools` (product/accumulate). Built-in in MicroPython: `re`/`json`/`math`/`struct`/`collections`.
+
+**ck_dsl source transforms needed** (automated in build_bundle.py — these are the Route-1 changes
+the CK team would adopt): (1) every dataclass field → explicit `= field(...)`; (2) PEP-448
+star-unpacking in list/tuple displays `[a,*b,c]` → `[a]+list(b)+[c]` (MicroPython lacks it,
+~62 sites); (3) `open(x)` → `open(str(x))` (MicroPython open rejects str subclasses); (4)
+`os.environ.get(...)` → `os.getenv(...)` (MicroPython `os` has no `environ`, is read-only).
+Plus the determinism fix (sort declares) for byte-identity.
+
+**MicroPython language/runtime limits hit & handled:** no class `__annotations__`; no PEP-448
+displays; `str` has no `__new__` and `open()` rejects str subclasses; builtin `os` is read-only and
+lacks `environ`; no `__future__`/`itertools`/`dataclasses`/`typing`/`functools`/`pathlib` modules.
+None fatal — all handled by shims + automated transforms.
+
+**Confidence: high for the mechanism.** Remaining to full conv-POC confidence: (G1b) feed the
+MicroPython IR to the Phase-0 comgr-ffi → HSACO (mechanism already proven in G0); the declares
+determinism fix for byte-identity; then the **conv** slice (untangle analysis/helpers coupling,
+apply the same transforms, re-run — conv may surface more `re` patterns / stdlib).
