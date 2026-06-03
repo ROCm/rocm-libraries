@@ -16,22 +16,22 @@
 namespace miopen_plugin
 {
 
-class MiopenPointwisePlan : public hipdnn_plugin_sdk::IPlan<HipdnnMiopenHandle>
+class MiopenReluPlan : public hipdnn_plugin_sdk::IPlan<HipdnnMiopenHandle>
 {
 public:
-    MiopenPointwisePlan(
+    MiopenReluPlan(
         const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& attributes,
         const std::unordered_map<int64_t,
                                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap);
 
-    MiopenPointwisePlan(const MiopenPointwisePlan&) = delete;
-    MiopenPointwisePlan& operator=(const MiopenPointwisePlan&) = delete;
+    MiopenReluPlan(const MiopenReluPlan&) = delete;
+    MiopenReluPlan& operator=(const MiopenReluPlan&) = delete;
 
-    MiopenPointwisePlan(MiopenPointwisePlan&&) = delete;
-    MiopenPointwisePlan& operator=(MiopenPointwisePlan&&) = delete;
+    MiopenReluPlan(MiopenReluPlan&&) = delete;
+    MiopenReluPlan& operator=(MiopenReluPlan&&) = delete;
 
-    ~MiopenPointwisePlan() override = default;
+    ~MiopenReluPlan() override = default;
 
     size_t getWorkspaceSize(const HipdnnMiopenHandle& handle) const override;
 

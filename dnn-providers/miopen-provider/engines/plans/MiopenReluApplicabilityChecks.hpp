@@ -12,20 +12,19 @@
 namespace miopen_plugin
 {
 
-namespace pointwise_applicability
+namespace relu_applicability
 {
 
-bool isSupported(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph);
+bool isReluSupported(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph);
 
-void checkPointwiseModeSupported(
-    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& attrs);
+void checkReluModeSupported(const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& attrs);
 
-void checkPointwiseTensorsSupported(
+void checkReluTensorsSupported(
     const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& attrs,
     const std::unordered_map<int64_t,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap);
 
-} // namespace pointwise_applicability
+} // namespace relu_applicability
 
 } // namespace miopen_plugin

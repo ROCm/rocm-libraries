@@ -8,12 +8,12 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include "MiopenUtils.hpp"
-#include "engines/plans/MiopenPointwiseApplicabilityChecks.hpp"
+#include "engines/plans/MiopenReluApplicabilityChecks.hpp"
 
 namespace miopen_plugin
 {
 
-namespace pointwise_applicability
+namespace relu_applicability
 {
 
 using hipdnn_flatbuffers_sdk::data_objects::DataType;
@@ -21,26 +21,26 @@ using hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
 using hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes;
 using hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
 
-void checkPointwiseModeSupported(const PointwiseAttributes& attrs)
+void checkReluModeSupported(const PointwiseAttributes& attrs)
 {
     if(attrs.operation() != PointwiseMode::RELU_FWD)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Pointwise plan builder: unsupported pointwise mode. "
-            "Supported modes for standalone pointwise: RELU_FWD");
+            "Relu plan builder: unsupported pointwise mode. "
+            "Supported mode: RELU_FWD");
     }
 
     if(attrs.relu_lower_clip() && *attrs.relu_lower_clip() != 0.f && !attrs.relu_upper_clip())
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Pointwise plan builder: RELU_FWD with non-zero lower_clip and no upper_clip "
+            "Relu plan builder: RELU_FWD with non-zero lower_clip and no upper_clip "
             "is not supported");
     }
 }
 
-void checkPointwiseTensorsSupported(
+void checkReluTensorsSupported(
     const PointwiseAttributes& attrs,
     const std::unordered_map<int64_t,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
@@ -55,8 +55,7 @@ void checkPointwiseTensorsSupported(
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Pointwise plan builder: input and output tensors must be non-virtual for a "
-            "standalone pointwise operation");
+            "Relu plan builder: input and output tensors must be non-virtual");
     }
 
     const auto inputDtype = inputTensor.data_type();
@@ -67,14 +66,14 @@ void checkPointwiseTensorsSupported(
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Pointwise plan builder: only FLOAT and HALF IO dtypes are supported");
+            "Relu plan builder: only FLOAT and HALF IO dtypes are supported");
     }
 
     if(inputDtype != outputDtype)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Pointwise plan builder: input and output tensors must have the same data type");
+            "Relu plan builder: input and output tensors must have the same data type");
     }
 
     const auto* inputDims = inputTensor.dims();
@@ -82,8 +81,8 @@ void checkPointwiseTensorsSupported(
 
     if(inputDims == nullptr || outputDims == nullptr)
     {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Pointwise plan builder: tensor dims are null");
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                       "Relu plan builder: tensor dims are null");
     }
 
     const auto rank = inputDims->size();
@@ -92,7 +91,7 @@ void checkPointwiseTensorsSupported(
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            std::string("Pointwise plan builder: tensor rank must be between 1 and 4, got ")
+            std::string("Relu plan builder: tensor rank must be between 1 and 4, got ")
                 + std::to_string(rank));
     }
 
@@ -112,16 +111,16 @@ void checkPointwiseTensorsSupported(
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Pointwise plan builder: input and output tensors must have the same element count");
+            "Relu plan builder: input and output tensors must have the same element count");
     }
 }
 
-bool isSupported(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph)
+bool isReluSupported(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph)
 {
     if(opGraph.nodeCount() != 1)
     {
         HIPDNN_PLUGIN_LOG_INFO(
-            "Pointwise plan builder is applicable only for single-node graphs. Graph has "
+            "Relu plan builder is applicable only for single-node graphs. Graph has "
             << opGraph.nodeCount() << " nodes");
         return false;
     }
@@ -129,14 +128,14 @@ bool isSupported(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opG
     if(!opGraph.hasOnlySupportedAttributes(
            std::set<NodeAttributes>{NodeAttributes::PointwiseAttributes}))
     {
-        HIPDNN_PLUGIN_LOG_INFO("Pointwise plan builder is not applicable for this graph");
+        HIPDNN_PLUGIN_LOG_INFO("Relu plan builder is not applicable for this graph");
         return false;
     }
 
     if(opGraph.getNode(0).compute_data_type() != DataType::FLOAT)
     {
         HIPDNN_PLUGIN_LOG_INFO(
-            "Pointwise plan builder only supports nodes with an fp32 compute_data_type");
+            "Relu plan builder only supports nodes with an fp32 compute_data_type");
         return false;
     }
 
@@ -144,8 +143,8 @@ bool isSupported(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opG
 
     try
     {
-        checkPointwiseModeSupported(attrs);
-        checkPointwiseTensorsSupported(attrs, opGraph.getTensorMap());
+        checkReluModeSupported(attrs);
+        checkReluTensorsSupported(attrs, opGraph.getTensorMap());
     }
     catch(const std::exception& e)
     {
@@ -156,6 +155,6 @@ bool isSupported(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opG
     return true;
 }
 
-} // namespace pointwise_applicability
+} // namespace relu_applicability
 
 } // namespace miopen_plugin

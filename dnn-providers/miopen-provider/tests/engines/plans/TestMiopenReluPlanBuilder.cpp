@@ -10,7 +10,7 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "HipdnnMiopenHandle.hpp"
-#include "engines/plans/MiopenPointwisePlanBuilder.hpp"
+#include "engines/plans/MiopenReluPlanBuilder.hpp"
 
 using namespace miopen_plugin;
 using namespace hipdnn_test_sdk::utilities;
@@ -259,7 +259,7 @@ flatbuffers::FlatBufferBuilder
 
 } // namespace
 
-class TestMiopenPointwisePlanBuilder : public ::testing::Test
+class TestMiopenReluPlanBuilder : public ::testing::Test
 {
 protected:
     void SetUp() override
@@ -268,12 +268,12 @@ protected:
         _dummyHandle = std::make_unique<HipdnnMiopenHandle>();
     }
 
-    MiopenPointwisePlanBuilder _planBuilder;
+    MiopenReluPlanBuilder _planBuilder;
     std::unique_ptr<HipdnnMiopenHandle> _dummyHandle;
     MockEngineConfig _mockEngineConfig;
 };
 
-TEST_F(TestMiopenPointwisePlanBuilder, IsApplicableReturnsFalseForMultiNodeGraph)
+TEST_F(TestMiopenReluPlanBuilder, IsApplicableReturnsFalseForMultiNodeGraph)
 {
     MockGraph mockGraph;
     EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(2));
@@ -281,7 +281,7 @@ TEST_F(TestMiopenPointwisePlanBuilder, IsApplicableReturnsFalseForMultiNodeGraph
     EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, mockGraph));
 }
 
-TEST_F(TestMiopenPointwisePlanBuilder, IsApplicableReturnsFalseForUnsupportedAttributes)
+TEST_F(TestMiopenReluPlanBuilder, IsApplicableReturnsFalseForUnsupportedAttributes)
 {
     MockGraph mockGraph;
     EXPECT_CALL(mockGraph, nodeCount()).WillRepeatedly(::testing::Return(1));
@@ -291,7 +291,7 @@ TEST_F(TestMiopenPointwisePlanBuilder, IsApplicableReturnsFalseForUnsupportedAtt
     EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, mockGraph));
 }
 
-TEST_F(TestMiopenPointwisePlanBuilder, IsApplicableReturnsTrueForValidReluFwdGraph)
+TEST_F(TestMiopenReluPlanBuilder, IsApplicableReturnsTrueForValidReluFwdGraph)
 {
     auto builder
         = createPointwiseGraph(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD);
@@ -300,7 +300,7 @@ TEST_F(TestMiopenPointwisePlanBuilder, IsApplicableReturnsTrueForValidReluFwdGra
     EXPECT_TRUE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
-TEST_F(TestMiopenPointwisePlanBuilder, IsApplicableReturnsFalseForUnsupportedMode)
+TEST_F(TestMiopenReluPlanBuilder, IsApplicableReturnsFalseForUnsupportedMode)
 {
     auto builder = createPointwiseGraph(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ADD);
     GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
@@ -308,7 +308,7 @@ TEST_F(TestMiopenPointwisePlanBuilder, IsApplicableReturnsFalseForUnsupportedMod
     EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
-TEST_F(TestMiopenPointwisePlanBuilder, IsApplicableReturnsFalseForNonFloatComputeType)
+TEST_F(TestMiopenReluPlanBuilder, IsApplicableReturnsFalseForNonFloatComputeType)
 {
     auto builder
         = createPointwiseGraph(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
@@ -318,7 +318,7 @@ TEST_F(TestMiopenPointwisePlanBuilder, IsApplicableReturnsFalseForNonFloatComput
     EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
-TEST_F(TestMiopenPointwisePlanBuilder, IsApplicableReturnsFalseForVirtualInputTensor)
+TEST_F(TestMiopenReluPlanBuilder, IsApplicableReturnsFalseForVirtualInputTensor)
 {
     auto builder
         = createPointwiseGraph(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
@@ -330,7 +330,7 @@ TEST_F(TestMiopenPointwisePlanBuilder, IsApplicableReturnsFalseForVirtualInputTe
     EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
-TEST_F(TestMiopenPointwisePlanBuilder, IsApplicableReturnsFalseForVirtualOutputTensor)
+TEST_F(TestMiopenReluPlanBuilder, IsApplicableReturnsFalseForVirtualOutputTensor)
 {
     auto builder
         = createPointwiseGraph(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
@@ -342,7 +342,7 @@ TEST_F(TestMiopenPointwisePlanBuilder, IsApplicableReturnsFalseForVirtualOutputT
     EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
-TEST_F(TestMiopenPointwisePlanBuilder, GetMaxWorkspaceSizeReturnsZero)
+TEST_F(TestMiopenReluPlanBuilder, GetMaxWorkspaceSizeReturnsZero)
 {
     auto builder
         = createPointwiseGraph(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD);
@@ -352,7 +352,7 @@ TEST_F(TestMiopenPointwisePlanBuilder, GetMaxWorkspaceSizeReturnsZero)
     EXPECT_EQ(_planBuilder.getMaxWorkspaceSize(*_dummyHandle, graph, settings), 0u);
 }
 
-TEST_F(TestMiopenPointwisePlanBuilder, GetCustomKnobsReturnsEmpty)
+TEST_F(TestMiopenReluPlanBuilder, GetCustomKnobsReturnsEmpty)
 {
     auto builder
         = createPointwiseGraph(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD);
@@ -362,7 +362,7 @@ TEST_F(TestMiopenPointwisePlanBuilder, GetCustomKnobsReturnsEmpty)
     EXPECT_TRUE(knobs.empty());
 }
 
-TEST_F(TestMiopenPointwisePlanBuilder, BuildPlanDoesNotThrowForValidGraph)
+TEST_F(TestMiopenReluPlanBuilder, BuildPlanDoesNotThrowForValidGraph)
 {
     auto builder
         = createPointwiseGraph(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD);
@@ -373,7 +373,7 @@ TEST_F(TestMiopenPointwisePlanBuilder, BuildPlanDoesNotThrowForValidGraph)
     EXPECT_NO_THROW(_planBuilder.buildPlan(*_dummyHandle, graph, _mockEngineConfig, ctx));
 }
 
-TEST_F(TestMiopenPointwisePlanBuilder, IsApplicableReturnsTrueForHalfIoDtype)
+TEST_F(TestMiopenReluPlanBuilder, IsApplicableReturnsTrueForHalfIoDtype)
 {
     auto builder
         = createPointwiseGraphWithIoDtype(hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
@@ -382,7 +382,7 @@ TEST_F(TestMiopenPointwisePlanBuilder, IsApplicableReturnsTrueForHalfIoDtype)
     EXPECT_TRUE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
-TEST_F(TestMiopenPointwisePlanBuilder, IsApplicableReturnsFalseForBfloat16IoDtype)
+TEST_F(TestMiopenReluPlanBuilder, IsApplicableReturnsFalseForBfloat16IoDtype)
 {
     auto builder
         = createPointwiseGraphWithIoDtype(hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
@@ -391,7 +391,7 @@ TEST_F(TestMiopenPointwisePlanBuilder, IsApplicableReturnsFalseForBfloat16IoDtyp
     EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
-TEST_F(TestMiopenPointwisePlanBuilder, IsApplicableReturnsTrueForRank1Tensor)
+TEST_F(TestMiopenReluPlanBuilder, IsApplicableReturnsTrueForRank1Tensor)
 {
     std::vector<int64_t> dims = {16};
     std::vector<int64_t> strides = {1};
@@ -401,7 +401,7 @@ TEST_F(TestMiopenPointwisePlanBuilder, IsApplicableReturnsTrueForRank1Tensor)
     EXPECT_TRUE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
-TEST_F(TestMiopenPointwisePlanBuilder, IsApplicableReturnsFalseForRank5Tensor)
+TEST_F(TestMiopenReluPlanBuilder, IsApplicableReturnsFalseForRank5Tensor)
 {
     std::vector<int64_t> dims = {1, 2, 3, 4, 5};
     std::vector<int64_t> strides = {120, 60, 20, 5, 1};
@@ -411,7 +411,7 @@ TEST_F(TestMiopenPointwisePlanBuilder, IsApplicableReturnsFalseForRank5Tensor)
     EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
-TEST_F(TestMiopenPointwisePlanBuilder, IsApplicableReturnsFalseForMismatchedElementCount)
+TEST_F(TestMiopenReluPlanBuilder, IsApplicableReturnsFalseForMismatchedElementCount)
 {
     std::vector<int64_t> inputDims = {1, 3, 4, 4};
     std::vector<int64_t> inputStrides = {48, 16, 4, 1};
@@ -423,7 +423,7 @@ TEST_F(TestMiopenPointwisePlanBuilder, IsApplicableReturnsFalseForMismatchedElem
     EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
-TEST_F(TestMiopenPointwisePlanBuilder, IsApplicableReturnsTrueForReluWithUpperClip)
+TEST_F(TestMiopenReluPlanBuilder, IsApplicableReturnsTrueForReluWithUpperClip)
 {
     auto builder = createReluGraphWithParams(flatbuffers::nullopt, 1.0f, flatbuffers::nullopt);
     GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
@@ -431,7 +431,7 @@ TEST_F(TestMiopenPointwisePlanBuilder, IsApplicableReturnsTrueForReluWithUpperCl
     EXPECT_TRUE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
-TEST_F(TestMiopenPointwisePlanBuilder, IsApplicableReturnsTrueForReluWithLowerClipSlope)
+TEST_F(TestMiopenReluPlanBuilder, IsApplicableReturnsTrueForReluWithLowerClipSlope)
 {
     auto builder = createReluGraphWithParams(flatbuffers::nullopt, flatbuffers::nullopt, 0.1f);
     GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
@@ -439,7 +439,7 @@ TEST_F(TestMiopenPointwisePlanBuilder, IsApplicableReturnsTrueForReluWithLowerCl
     EXPECT_TRUE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
-TEST_F(TestMiopenPointwisePlanBuilder, IsApplicableReturnsTrueForReluWithLowerAndUpperClip)
+TEST_F(TestMiopenReluPlanBuilder, IsApplicableReturnsTrueForReluWithLowerAndUpperClip)
 {
     auto builder = createReluGraphWithParams(-1.0f, 1.0f, flatbuffers::nullopt);
     GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
@@ -447,7 +447,7 @@ TEST_F(TestMiopenPointwisePlanBuilder, IsApplicableReturnsTrueForReluWithLowerAn
     EXPECT_TRUE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }
 
-TEST_F(TestMiopenPointwisePlanBuilder, IsApplicableReturnsFalseForReluWithNonZeroLowerClipOnly)
+TEST_F(TestMiopenReluPlanBuilder, IsApplicableReturnsFalseForReluWithNonZeroLowerClipOnly)
 {
     auto builder = createReluGraphWithParams(0.5f, flatbuffers::nullopt, flatbuffers::nullopt);
     GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());

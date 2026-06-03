@@ -15,17 +15,17 @@
 namespace miopen_plugin
 {
 
-class MiopenPointwisePlanBuilder : public hipdnn_plugin_sdk::IPlanBuilder<HipdnnMiopenHandle,
-                                                                          HipdnnMiopenSettings,
-                                                                          HipdnnMiopenContext>
+class MiopenReluPlanBuilder : public hipdnn_plugin_sdk::IPlanBuilder<HipdnnMiopenHandle,
+                                                                     HipdnnMiopenSettings,
+                                                                     HipdnnMiopenContext>
 {
 public:
-    MiopenPointwisePlanBuilder() = default;
-    ~MiopenPointwisePlanBuilder() override = default;
+    MiopenReluPlanBuilder() = default;
+    ~MiopenReluPlanBuilder() override = default;
 
     // Disallow copy and assignment
-    MiopenPointwisePlanBuilder(const MiopenPointwisePlanBuilder&) = delete;
-    MiopenPointwisePlanBuilder& operator=(const MiopenPointwisePlanBuilder&) = delete;
+    MiopenReluPlanBuilder(const MiopenReluPlanBuilder&) = delete;
+    MiopenReluPlanBuilder& operator=(const MiopenReluPlanBuilder&) = delete;
 
     bool isApplicable(
         const HipdnnMiopenHandle& handle,
