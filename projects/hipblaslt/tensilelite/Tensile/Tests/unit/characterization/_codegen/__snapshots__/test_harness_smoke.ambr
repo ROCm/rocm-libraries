@@ -1,0 +1,11 @@
+# serializer version: 1
+# name: test_emit_golden_digest
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bjlk_HSS_BH_Bias_HA_S_SAV_UserArgs_MT3JHO0obGJcjpXm13wGrmE3byfI45Od8PmpTYnKnvpvOE=',
+      'err': 0,
+      'n_lines': 3522,
+      'sha256': '85662ca459620fb10d24090e7f62f78314473be5642cf4da758f128dbd0bacd0',
+    }),
+  ])
+# ---
