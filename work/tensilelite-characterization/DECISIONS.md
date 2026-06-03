@@ -89,3 +89,17 @@ a class that shadows a same-named submodule attribute, so
 `SolutionStructs.Solution`, `Component` (LocalRead), and `Common.Parallel`
 (joblib `Parallel`). **Standard fix applied everywhere:**
 `F = importlib.import_module("Tensile.X.Foo")`.
+
+## D6 — `KernelHelperNaming.py`: cover the naming half, accept <95%
+**Decision:** Characterize the pure naming/orchestration surface
+(`KernelHelperEnum`, `kernelObjectNameCallables`, the five `*Names` functions)
+and **document the `init*` object-construction functions (L110-240) as
+out-of-scope codegen** — accepting the module at ~34% line.
+**Why:** the `init*` functions construct `KernelWriter{BetaOnly,Conversion,
+ActivationEnumHeader,ActivationFunction,Reduction}` instances — the GPU
+code-emit classes excluded by D0. They are ~half the module and are not
+unit-characterizable without the full kernel-writer machinery.
+**Alternatives rejected:** (a) construct the KernelWriter* objects — pulls the
+out-of-scope codegen surface into the unit tests; rejected; (b) drop the module
+entirely — rejected: the `*Names` functions encode the real kernel-naming
+contract and are worth pinning. Net: a partial module like `Parallel`.
