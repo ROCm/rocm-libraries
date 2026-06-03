@@ -85,35 +85,14 @@ source "$VENV_DIR/bin/activate"
 # pycache redirect, every import writes/reads .pyc files over the network. These
 # values must be injected into the venv activate script so they are set before
 # the interpreter starts (setting them in Python code is too late for that
-# process's own imports). The ROCm SDK wheel paths keep CK DSL's ctypes-loaded
-# COMGR/HIP runtime aligned with PyTorch's ROCm wheel; otherwise the process can
-# load two LLVM/COMGR copies and abort during JIT compilation.
+# process's own imports).
 ACTIVATE_LOCAL="$VENV_DIR/bin/activate.local"
 cat > "$ACTIVATE_LOCAL" <<EOF
 export PYTHONPYCACHEPREFIX=$DNN_BENCH_WORKSPACE/pycache
 export DNN_BENCH_WORKSPACE=$DNN_BENCH_WORKSPACE
 export HIPDNN_PLUGIN_DIR=$PLUGIN_DIR
-
-_rocm_site="\$VIRTUAL_ENV/lib/python\$(python - <<'PY'
-import sys
-print(f"{sys.version_info.major}.{sys.version_info.minor}")
-PY
-)/site-packages"
-_rocm_core="\$_rocm_site/_rocm_sdk_core"
-_rocm_libs=""
-for _candidate in "\$_rocm_site"/_rocm_sdk_libraries_*; do
-    if [ -d "\$_candidate/lib" ]; then
-        _rocm_libs="\$_candidate/lib:\$_rocm_libs"
-    fi
-done
-if [ -f "\$_rocm_core/lib/libamd_comgr.so.3" ]; then
-    export CK_DSL_COMGR_LIB="\$_rocm_core/lib/libamd_comgr.so.3"
-fi
-if [ -f "\$_rocm_core/lib/libamdhip64.so.7" ]; then
-    export CK_DSL_HIP_LIB="\$_rocm_core/lib/libamdhip64.so.7"
-fi
-export LD_LIBRARY_PATH=$INSTALL_DIR/lib:\${_rocm_libs}\$_rocm_core/lib:\$_rocm_core/lib/llvm/lib:$ROCM_ROOT/lib:\${LD_LIBRARY_PATH:-}
-unset _rocm_site _rocm_core _rocm_libs _candidate
+unset CK_DSL_COMGR_LIB CK_DSL_HIP_LIB
+export LD_LIBRARY_PATH=$INSTALL_DIR/lib:$ROCM_ROOT/lib:\${LD_LIBRARY_PATH:-}
 EOF
 if ! grep -q "activate.local" "$VENV_DIR/bin/activate"; then
     # shellcheck disable=SC2016
@@ -122,7 +101,10 @@ if ! grep -q "activate.local" "$VENV_DIR/bin/activate"; then
 fi
 export PYTHONPYCACHEPREFIX="$DNN_BENCH_WORKSPACE/pycache"
 
-# 2. Detect GPU architecture and install ROCm PyTorch from the matching nightly index.
+# 2. Detect GPU architecture for provider builds and install CPU-only PyTorch for
+# reference validation. Keeping torch CPU-only avoids loading PyTorch's ROCm SDK
+# wheel stack into the same process as the CK DSL provider, so CK DSL can use the
+# container's /opt/rocm HIP/COMGR stack consistently.
 detect_gpu_arch() {
     local arch
     if command -v rocm_agent_enumerator &>/dev/null; then
@@ -135,25 +117,21 @@ detect_gpu_arch() {
 
 GPU_ARCH=$(detect_gpu_arch)
 case "$GPU_ARCH" in
-    gfx90*) INDEX_ARCH="gfx90X" ;;
-    gfx94*) INDEX_ARCH="gfx94X" ;;
-    gfx95*) INDEX_ARCH="gfx950" ;;
+    gfx90* | gfx94* | gfx95*) ;;
     *)
         echo "ERROR: Unsupported GPU architecture '${GPU_ARCH:-none}'."
         echo "Supported: gfx90a (MI200/MI210/MI250), gfx942 (MI300X/MI300A), gfx950"
         exit 1 ;;
 esac
 
-INDEX_URL="https://rocm.nightlies.amd.com/v2-staging/${INDEX_ARCH}-dcgpu/"
-echo "Detected GPU: $GPU_ARCH → installing PyTorch from $INDEX_URL"
+echo "Detected GPU: $GPU_ARCH → installing CPU-only PyTorch for reference validation"
 
-# Install ROCm torch first from its dedicated index. Then editable-install the
-# package; pyproject.toml omits torch (so pip won't touch the already-installed
-# ROCm build) and lists the rest (numpy, pytest, pytest-cov) which resolve
-# cleanly from PyPI. The CK DSL provider CMake configure also needs pybind11
-# and LightGBM in this same interpreter so it can embed Python and link the
-# SDPA scorer backend.
-pip install --pre torch --index-url "$INDEX_URL"
+# Install CPU-only torch, then editable-install the package. pyproject.toml omits
+# torch (so pip won't replace this explicit CPU wheel) and lists the rest (numpy,
+# pytest, pytest-cov) which resolve cleanly from PyPI. The CK DSL provider CMake
+# configure also needs pybind11 and LightGBM in this same interpreter so it can
+# embed Python and link the SDPA scorer backend.
+pip install torch --index-url https://download.pytorch.org/whl/cpu
 pip install -e "$SCRIPT_DIR"
 pip install pybind11 lightgbm
 
@@ -188,6 +166,9 @@ require_provider_dir() {
 BUILT_HIPDNN=0
 if needs_install "$HIPDNN_CONFIG" || needs_install "$CK_DSL_PLUGIN"; then
     echo "Building and installing hipDNN..."
+    if [ "$FORCE_BUILD" -eq 1 ]; then
+        rm -rf "$BUILD_DIR"
+    fi
     cmake -S "$HIPDNN_ROOT" -B "$BUILD_DIR" \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \

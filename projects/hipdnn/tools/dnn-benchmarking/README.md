@@ -15,7 +15,7 @@ This tool loads serialized hipDNN graphs, executes them via installed hipDNN eng
 - numpy
 - hipdnn_frontend (installed hipDNN Python bindings)
 - AMD GPU with ROCm + hipDNN provider plugins for the graphs under test
-- PyTorch *(optional)* — ROCm or CUDA build enables GPU kernel-event timing, the `--backend pytorch` executor, and the `--validate pytorch` reference provider. Not listed in `pyproject.toml` because it must come from the ROCm/CUDA nightly index.
+- PyTorch *(optional)* — CPU builds enable the `--validate pytorch` reference provider; ROCm or CUDA builds additionally enable GPU kernel-event timing and the `--backend pytorch` executor. Not listed in `pyproject.toml` because accelerator builds must come from the ROCm/CUDA indexes.
 
 ## Installation
 
@@ -30,7 +30,7 @@ source /workspace/.venv/bin/activate  # or $DNN_BENCH_WORKSPACE/.venv/bin/activa
 
 This script handles everything automatically:
 1. Creates a virtual environment under `$DNN_BENCH_WORKSPACE` (defaults to `/workspace`)
-2. Detects the GPU architecture and installs ROCm-compatible PyTorch
+2. Detects the GPU architecture and installs CPU-only PyTorch for reference validation
 3. Builds hipDNN and the MIOpen, hipBLASLt, hip-kernel, and CK DSL providers when their installed artifacts are missing (or with `--force-build`)
 4. Installs the hipDNN Python bindings from the hipDNN source tree
 5. Configures the virtual environment to load plugins from the install prefix on activation
