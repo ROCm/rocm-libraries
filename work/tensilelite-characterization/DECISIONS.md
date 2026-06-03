@@ -133,3 +133,19 @@ exhaustive coverage needs an AST-node matrix (BinOp/BoolOp/Compare/Name/Num/…)
 **Alternatives rejected:** force the dead reflected branches via `__radd__`
 internals — impossible without a Parameter left operand; build the full AST
 matrix now — deferred as Configuration-slice-2. Net: a partial module.
+
+## D10 — `Contractions.py`: predicate/serialization matrix deferred (~86%)
+**Decision:** Cover the index value classes + `ProblemType` (indexNames/
+operationIdentifier/placeholderStr/predicates) + `SizeMapping`/
+`InternalArgsSupport`/`ProblemPredicate.CompoundPredicates` from the one vendored
+gfx942-HSS fixture; accept ~86% combined and document the rest.
+**Why:** the remaining branches are `ProblemPredicate.FromOriginalKeyPair`/
+`CompoundPredicates` + `Solution`/`SizeMapping.FromOriginalState` arms that fire
+only for *other* problem configurations (sparse, activation, bias variants,
+batched, double/complex dtypes, GSU algorithms, ...). Exercising them needs a
+MATRIX of varied logic fixtures; only one is vendored, and hand-authoring
+derived-solution states that match the exact serialized format is brittle.
+**Alternatives rejected:** vendor many more logic YAMLs — large/out of proportion
+and add-only-risky; synthesize derived states by hand — fragile (must match the
+full post-derivation key set). Net: a partial like the Solution.py slices; a
+"Contractions matrix" slice could finish it given more fixtures.
