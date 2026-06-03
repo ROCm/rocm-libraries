@@ -157,8 +157,12 @@ if(HIPSPARSELT_ENABLE_HIP)
     set(HIPBLASLT_ENABLE_CLIENT OFF CACHE BOOL "" FORCE)
     # Builds tensilelite's device libraries (.co/.dat)
     set(HIPBLASLT_ENABLE_DEVICE ${HIPSPARSELT_ENABLE_DEVICE} CACHE BOOL "" FORCE)
-    # Builds tensilelite::tensilelite-host target
+    # Builds tensilelite::tensilelite-host target (the shared libtensilelite-host.so
+    # this fork links). Its install/export is owned by hipBLASLt's package, so keep
+    # it OFF here to avoid double-installing / a dangling hipblaslt-targets export
+    # (hipBLASLt's own export block is gated by HIPBLASLT_ENABLE_HOST, OFF above).
     set(TENSILELITE_ENABLE_HOST ON CACHE BOOL "" FORCE)
+    set(TENSILELITE_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
     set(HIPBLASLT_ENABLE_ASAN ${HIPSPARSELT_ENABLE_ASAN} CACHE BOOL "" FORCE)
     set(HIPBLASLT_DEVICE_LIBRARY_PATH "${CMAKE_BINARY_DIR}/Tensile" CACHE PATH "" FORCE)
     # hipSPARSELt does not use ExtOp or MatrixTransform artifacts
@@ -188,8 +192,12 @@ if(HIPSPARSELT_ENABLE_HIP)
     # hipBLASLt now consumes origami via find_package(origami REQUIRED) in its own
     # CMakeLists.txt, so the shim is gone and origami is no longer duplicated here.
     add_subdirectory("${HIPBLASLT_PATH}" hipblaslt)
-    # Hide TensileLite symbols to prevent interposition with hipblaslt's copy
-    target_compile_definitions(tensilelite-host PRIVATE TENSILE_STATIC_ONLY)
+    # NOTE (Phase 2): the previous
+    #   target_compile_definitions(tensilelite-host PRIVATE TENSILE_STATIC_ONLY)
+    # symbol-hiding workaround is gone. tensilelite-host is now a single shared
+    # library that both hipBLASLt and hipSPARSELt link, so there is no second copy
+    # to interpose with -- the reach-in that hid TensileLite's symbols (the §3.4
+    # smoking gun) is no longer needed.
     endblock()
 endif()
 

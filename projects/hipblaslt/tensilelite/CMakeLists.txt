@@ -153,6 +153,18 @@ if(TENSILELITE_ENABLE_HOST)
         )
     endif()
 
+    # G4 (header self-containment): VERIFY_INTERFACE_HEADER_SETS is intentionally
+    # NOT enabled here. CMake's header-set verification compiles each header as
+    # `-x c++`, but TensileLite's public headers are HIP-language headers -- they
+    # transitively pull in <hip/hip_fp8.h> etc. and use HIP builtins
+    # (__hip_fp8_e4m3, __half, __amd_floatx16_storage_t) that only exist under
+    # `-x hip` (tensilelite-host's own .cpp are compiled with -x hip). A c++-mode
+    # verify therefore cannot compile them, and wiring a permanently-failing
+    # all_verify_interface_header_sets into `check` would break CI. Self-containment
+    # is instead enforced by the real build: every public header is included (in HIP
+    # mode) by the library's translation units. A HIP-mode header-set verify is a
+    # possible follow-up if CMake gains per-header-set language control.
+
     if(TENSILELITE_ENABLE_INSTALL)
         # Co-export through hipBLASLt's existing package: same hipblaslt-targets
         # export set + namespace, so find_package(hipblaslt) yields both
