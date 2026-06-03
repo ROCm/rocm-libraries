@@ -120,9 +120,11 @@ struct SupportsResult {
 /// injected score callable. The callable receives the candidate's
 /// ``FmhaKernelKey`` (built via ``knobsToKernelKey``) and returns a
 /// scalar score (higher is better). The highest-scoring combo is
-/// returned; ties are broken by enumeration order (the first combo with
-/// the maximal score wins), which is stable because ``enumerateCandidates``
-/// is deterministic.
+/// returned. On an EXACT score tie the ``use_mfma_32x32`` candidate wins
+/// (the model has no warp-atom feature, so the mfma32 / non-mfma32 variants
+/// of a combo score identically; the 32x32x16 atom is oracle-best on the
+/// targeted shapes); any remaining tie falls to enumeration order. Stable
+/// because ``enumerateCandidates`` is deterministic.
 ///
 /// ``candidates`` must be non-empty (the caller guarantees at least one
 /// buildable combo, or falls back to the analytic pick).

@@ -57,9 +57,9 @@ def _smoke_arg_schema() -> List[Dict[str, Any]]:
     """Schema for the elementwise-copy smoke kernel signature.
 
     Kernel ABI is ``(A: ptr<f16>, C: ptr<f16>, N: i32)`` as built by
-    ``ck_dsl.instances.elementwise.build_elementwise`` for a unary op
+    ``ck_dsl.instances.common.elementwise.build_elementwise`` for a unary op
     (see ``ElementwiseSpec`` docstring + ``build_elementwise`` body in
-    ``ck_dsl/instances/elementwise.py``). The C++ ``LaunchAbi`` packs
+    ``ck_dsl/instances/common/elementwise.py``). The C++ ``LaunchAbi`` packs
     args back-to-back honouring each slot's ``align`` -- exactly the
     layout the AMDGPU calling convention expects when args are handed
     to ``hipModuleLaunchKernel`` via ``HIP_LAUNCH_PARAM_BUFFER_*``.

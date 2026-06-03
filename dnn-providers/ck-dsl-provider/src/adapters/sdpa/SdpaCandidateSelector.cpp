@@ -141,8 +141,9 @@ SupportsResult supportsTiled2d(const SdpaSelectionProblem& problem, const SdpaPe
     // its tiles in LDS; comgr CODEGEN (CODEGEN_BC_TO_RELOCATABLE) rejects a
     // kernel whose static group segment exceeds the gfx950 LDS capacity
     // (163840 B / 160 KB; arch_specs.json gfx950 lds_capacity_bytes). This
-    // mirrors the kernel's actual smem_alloc footprint
-    // (attention_tiled_2d.py:1011-1100, bpe=2 for fp16/bf16):
+    // mirrors the kernel's actual smem_alloc footprint (the smem_alloc calls
+    // in attention_tiled_2d.py build_unified_attention_2d_tiled; kept in
+    // lockstep with that file's supports_tiled_2d LDS gate, bpe=2 fp16/bf16):
     //   K_lds  = 2*T*hd*bpe   (double-buffered async load)
     //   V_lds  =   T*hd*bpe   (single-buffered)
     //   P_lds  = BLOCK_M*(T+8)*bpe  (score tile; +8 pad)
