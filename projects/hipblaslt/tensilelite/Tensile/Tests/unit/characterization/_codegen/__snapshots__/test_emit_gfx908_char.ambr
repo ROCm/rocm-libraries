@@ -1,0 +1,49 @@
+# serializer version: 1
+# name: test_gfx908_emit_digests
+  list([
+    dict({
+      'file': 'BBS.yaml',
+      'kernels': list([
+        dict({
+          'basename': 'Cijk_Ailk_Bljk_BBS_BH_Bias_HA_S_SAV_MT64x16x32_MmqXYfh_s4nZD4vubuCflbPwE3t6plQlUM_sVqiwfeDI=',
+          'err': 0,
+          'n_lines': 2830,
+          'sha256': '35f9c771ef30d5e82566685c08e3456df3abd815d35c2047eb91b90829007bac',
+        }),
+      ]),
+    }),
+    dict({
+      'file': 'HHS.yaml',
+      'kernels': list([
+        dict({
+          'basename': 'Cijk_Ailk_Bljk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT6TIpjM9hVu0WMmXyG_gfouHgAPZEeudtith4d-Nq-s4E=',
+          'err': 0,
+          'n_lines': 2755,
+          'sha256': '6f5cb6e940127e6875df6d47561ae6ce8c0b5826458f327ce18514bee632be15',
+        }),
+      ]),
+    }),
+    dict({
+      'file': 'HSS.yaml',
+      'kernels': list([
+        dict({
+          'basename': 'Cijk_Ailk_Bjlk_HSS_BH_Bias_HA_S_SAV_UserArgs_MT11rwROk5WoktsWi95EcjE0DfDcPnVGzCcmTXFQGUeYis=',
+          'err': 0,
+          'n_lines': 4870,
+          'sha256': 'ae0dfc5420555f4753a77a76419ed7f3555dbcef715a2572b38dc8c62e7987d8',
+        }),
+      ]),
+    }),
+    dict({
+      'file': 'SB.yaml',
+      'kernels': list([
+        dict({
+          'basename': 'Cijk_Alik_Bjlk_S_B_Bias_HA_S_SAV_UserArgs_MT32x3MykrJxp8C5SA9k6As79ha58pMdoF9oQMK4wmnzMQMPM=',
+          'err': 0,
+          'n_lines': 3643,
+          'sha256': '90287b8158eb637b0bd6ca6c103072a9fab4442261694898755527bc0fcf4fb4',
+        }),
+      ]),
+    }),
+  ])
+# ---
