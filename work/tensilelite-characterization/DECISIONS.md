@@ -41,3 +41,25 @@ constraint makes per-module regression practically impossible.
 information for a trivial 100% module.
 **Alternative rejected:** the full 5-file deliverable per module (as used for the
 large standalone targets) — rejected as disproportionate for 9-60 stmt modules.
+
+## D3 — Testing `Component` find/match without polluting the global registry
+**Decision:** Define private isolated `_CharBase`/`_CharNest*` Component
+subclasses in the test module to drive `matches`/`findAll`/`find`/`versions`
+(single-match, >1-match RuntimeError, nested-abstract recursion) deterministically;
+test `LocalRead._getLdsReadMemToken`/`_emitLdsRead` by calling them **unbound**
+with stub self/writer/module (no subclass needed).
+**Why:** `ComponentMeta` auto-registers every subclass into its base's
+`implementations`. Production searches always start at a real subtype
+(`Component.<RealSubtype>.find`), never at `Component.findAll`, so private impls
+parented at `Component`/`_CharBase` never appear in a real search — the mutation
+is additive and inert. The unbound-call trick covers the codegen LocalRead
+helpers without registering a concrete LocalRead (which would join the real
+LocalRead search set).
+**Alternatives rejected:** (a) exercise the real registered components with a
+fake writer — rejected: match results are nondeterministic across environments
+and the >1-match error can't be forced reliably; (b) register a concrete
+LocalRead subclass — rejected: it would pollute the real `LocalRead`
+implementations set used by the kernel writers. Also note the
+`from .Components import *` at the end of `Component.py` shadows the module-level
+`LocalRead` name, so the real class is reached via the `Component.LocalRead`
+attribute.
