@@ -1,0 +1,26 @@
+# BEFORE coverage — existing suite only, no characterization tests for
+# Tensile/Common/ValidParameters.py yet (captured before the new
+# ValidParameters/ test files were collected; total = 1526 passed, unchanged
+# from the post-DataType baseline).
+#
+# NOTE: `--cov=Tensile/Common/ValidParameters` (path-prefix) fails to match a
+# single .py file. Used the documented fallback `--cov=Tensile` and grepped the
+# Common/ValidParameters.py row (see next-goal-validparameters.md).
+#
+# Command:
+#   pytest -m unit --cov=Tensile --cov-config=pyproject.toml \
+#     --cov-report=term-missing Tensile/Tests/unit
+#
+# The existing unit suite already exercises the makeValid* table builders and
+# the validParameters dict (they run during Solution/parameter validation), so
+# the entire missing surface is the three validators at the tail of the file
+# (checkSpaceFillAlgoIsValid / checkSpaceFillAlgoWGMIsValid /
+# checkParametersAreValid) — exactly what this suite targets.
+
+Name                                                      Stmts   Miss Branch BrPart   Cover   Missing
+Tensile/Common/ValidParameters.py                           169     33     84      6  76.68%   1078-1089, 1092-1106, 1113, 1115, 1118, 1126-1132, 1134, 1136
+
+1526 passed, 201 skipped
+
+# Line coverage = (Stmts - Miss) / Stmts = (169 - 33) / 169 = 80.47% line
+# Blended (line+branch, the report's Cover column)            = 76.68%
