@@ -133,17 +133,41 @@ Provenance and calibration data is stored in a **separate companion file** (`{Na
 
 ```json
 {
+  "format_version": 1,
   "generator": "reference_data_scripts/batchnorm_inference.py",
+  "generator_version": "1.0.0",
   "generated_at": "2026-05-11T14:30:00Z",
-  "reference_source": "PyTorch 2.3.0",
+  "gpu_architecture": "gfx942",
+  "rocm_version": "6.4.0",
+  "reference_source": "cpu",
+  "reference_source_hash": "a3f8c2e1",
   "reference_strategy": "precision_uplift",
   "generation_command": "python generate_batchnorm_reference.py --name typical",
-  "rocm_version": "6.4.0",
-  "notes": "baseline for RFC 0011 migration"
+  "notes": "baseline for RFC 0011 migration",
+  "seed": 42,
+  "minimum_vram_mb": 8192
 }
 ```
 
-The `generator`, `reference_source`, and `reference_strategy` fields are mandatory — the pre-commit bundle verifier rejects bundles without them. Remaining fields are optional. Generator scripts populate the metadata file automatically.
+**Field reference:**
+
+| Field | Required | Type | Purpose |
+|-------|----------|------|---------|
+| `format_version` | Yes | integer | Schema version. Must be `1`. Reader rejects files with missing or unsupported versions to allow future schema evolution. |
+| `generator` | Yes | string | Path to the script that produced this bundle. |
+| `generator_version` | No | string | Version of the generator script. |
+| `generated_at` | No | string | ISO 8601 timestamp of generation. |
+| `gpu_architecture` | No | string | GPU arch that generated the data (e.g. `"gfx942"`). Used by the arch compatibility guard — when `reference_source` is not `"cpu"`, the runner skips the test if the current device doesn't match. |
+| `rocm_version` | No | string | ROCm version used during generation. |
+| `reference_source` | Yes | string | What computed the reference output: `"cpu"` for CPU-based references (architecture-independent), or a GPU library name (e.g. `"miopen"`) for GPU-based references (architecture-dependent). |
+| `reference_source_hash` | No | string | Commit hash or checksum of the reference source for traceability. |
+| `reference_strategy` | Yes | string | How reference precision was chosen (see table below). |
+| `generation_command` | No | string | Full command line used to generate the bundle. |
+| `notes` | No | string | Free-text notes for humans. |
+| `seed` | No | integer | RNG seed used for input generation. Enables reproducible regeneration. |
+| `minimum_vram_mb` | No | integer | Minimum device VRAM in MB required to run this bundle. The runner skips the test if the device has less. |
+
+Unknown fields are ignored by the reader, so generators may include additional fields without breaking compatibility.
 
 `reference_strategy` records how the reference precision was chosen (see [Generation Pipeline](#generation-pipeline)):
 
