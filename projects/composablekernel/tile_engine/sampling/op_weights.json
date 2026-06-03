@@ -6,7 +6,7 @@
     "gemm_preshuffle": 0.21,
     "gemm_multi_d": 0.14,
     "grouped_gemm": 0.10,
-    "batched_contraction": 0.09,
+    "batched_contraction": 0.08,
     "gemm_multi_abd": 0.09,
     "gemm_rowcolquant": 0.08,
     "mx_gemm": 0.05
