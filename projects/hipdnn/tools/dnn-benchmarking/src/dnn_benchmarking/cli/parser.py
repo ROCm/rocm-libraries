@@ -237,7 +237,9 @@ CLI_OPTIONS: tuple[CliOption, ...] = (
         metavar="PROVIDER",
         group="Reference Validation",
         help="Reference provider for validation (default: none). "
-        "Options: pytorch, cpu_plugin, none",
+        "Options: pytorch, cpu_plugin, none. "
+        "With pytorch, suite output includes a timed reference row when "
+        "PyTorch GPU execution is available.",
         config_key="validate",
         config_kind=ConfigKind.CHOICE,
         config_type=str,
@@ -467,6 +469,7 @@ PyTorch Backend (GPU via PyTorch):
 Reference Validation:
   dnn-benchmark -g ./graph.json --validate pytorch
   dnn-benchmark -g ./graph.json --validate pytorch --rtol 1e-3
+  dnn-benchmark -g ./graph.json --validate pytorch -v  # includes PyTorch timing row when available
 
 Engine Comparison:
   dnn-benchmark -g ./graph.json --engine 1,2,3

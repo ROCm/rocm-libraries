@@ -10,6 +10,7 @@ and E2E wall-clock time. Performs correctness validation by comparing GPU
 output against a reference provider via ArrayComparator.
 """
 
+from dataclasses import dataclass
 import json
 import sys
 from pathlib import Path
@@ -17,7 +18,7 @@ from typing import Any, Dict, List, Optional
 
 from ..common.exceptions import ExecutionError, UnsupportedGraphError
 from ..config.benchmark_config import BenchmarkConfig, SuiteConfig
-from ..execution.buffer_manager import BufferManager
+from ..execution.buffer_manager import BufferManager, generate_input_data
 from ..execution.executor import Executor
 from ..execution.timing import Timer
 from ..metrics import (
@@ -36,6 +37,7 @@ from ..reporting.suite_results import (
     ProviderEngineResult,
 )
 from ..validation.reference_provider import (
+    ReferenceOutput,
     ReferenceProvider,
     ReferenceProviderRegistry,
 )
@@ -48,6 +50,14 @@ _HALF_RTOL = 1e-3
 _HALF_ATOL = 1e-3
 _DEFAULT_RTOL = 1e-5
 _DEFAULT_ATOL = 1e-6
+
+
+@dataclass
+class _TimedReferenceRun:
+    """Timed validation-provider row plus reusable reference outputs."""
+
+    result: ProviderEngineResult
+    outputs: Optional[Dict[int, ReferenceOutput]]
 
 
 def _output_node_types(graph_json: Dict[str, Any]) -> Dict[int, str]:
@@ -206,40 +216,17 @@ def _check_correctness(
     buffer_manager: BufferManager,
     tensor_infos: list,
     graph_json: Dict[str, Any],
-    ref_provider: ReferenceProvider,
+    ref_outputs: Dict[int, ReferenceOutput],
+    reference_provider_name: str,
     config: SuiteConfig,
 ) -> CorrectnessResult:
-    """Perform correctness comparison between GPU output and reference.
+    """Compare GPU outputs against precomputed reference outputs.
 
-    Compares GPU output against reference provider output using
-    ArrayComparator. Validation was requested by caller (we are inside
-    the ``ref_provider is not None`` branch), so when no outputs are
-    comparable we report ``tolerance_match=False`` rather than silently
-    passing.
-
-    Args:
-        buffer_manager: Buffer manager with output data from GPU execution.
-        tensor_infos: List of TensorInfo objects for the graph.
-        graph_json: Parsed graph JSON dictionary.
-        ref_provider: Reference provider for computing expected output.
-        config: Suite configuration with tolerance settings.
-
-    Returns:
-        CorrectnessResult with tolerance_match populated from comparison.
+    Reference providers are executed once per graph by the suite runner. This
+    helper only compares a single hipDNN engine's outputs against that cached
+    reference output map.
     """
     try:
-        # Collect input data
-        input_data: Dict[int, Any] = {}
-        for ti in tensor_infos:
-            if not ti.is_virtual and not ti.is_output:
-                data = buffer_manager.get_input_data(ti.uid)
-                if data is not None:
-                    input_data[ti.uid] = data
-
-        # Compute reference output
-        ref_outputs = ref_provider.compute_reference(graph_json, input_data)
-
-        # Delegate per-output comparison to Validator and aggregate results.
         output_node_types = _output_node_types(graph_json)
         all_passed = True
         worst_abs_diff = 0.0
@@ -266,8 +253,8 @@ def _check_correctness(
                     rtol=rtol,
                     atol=atol,
                     error_message=(
-                        f"Reference provider '{ref_provider.name}' did not produce "
-                        f"output tensor UID {ti.uid}"
+                        f"Reference provider '{reference_provider_name}' did not "
+                        f"produce output tensor UID {ti.uid}"
                     ),
                 )
 
@@ -317,6 +304,139 @@ def _check_correctness(
             atol=atol,
             error_message=str(e),
         )
+
+
+def _reference_unavailable_correctness(
+    config: SuiteConfig, error_message: str
+) -> CorrectnessResult:
+    rtol, atol = _fallback_tolerance_for_config(config)
+    return CorrectnessResult(
+        execution_success=True,
+        tolerance_match=False,
+        rtol=rtol,
+        atol=atol,
+        error_message=error_message,
+    )
+
+
+def _reference_row_correctness(config: SuiteConfig) -> CorrectnessResult:
+    rtol, atol = _fallback_tolerance_for_config(config)
+    return CorrectnessResult(
+        execution_success=True,
+        tolerance_match=None,
+        rtol=rtol,
+        atol=atol,
+        error_message="Reference provider timing row; no comparison performed",
+    )
+
+
+def _compute_reference_outputs_once(
+    ref_provider: ReferenceProvider,
+    graph_json: Dict[str, Any],
+    input_data: Dict[int, Any],
+) -> tuple[Optional[Dict[int, ReferenceOutput]], Optional[str]]:
+    try:
+        return ref_provider.compute_reference(graph_json, input_data), None
+    except (ImportError, ValueError, RuntimeError, ExecutionError) as e:
+        return None, str(e)
+
+
+def _pytorch_reference_outputs_from_buffer(
+    buffer_manager: Any,
+) -> Dict[int, ReferenceOutput]:
+    outputs: Dict[int, ReferenceOutput] = {}
+    for tensor_info in buffer_manager.get_output_tensors():
+        data = buffer_manager.get_output_data(tensor_info.uid)
+        if data is not None:
+            outputs[tensor_info.uid] = ReferenceOutput(
+                data=data,
+                tensor_uid=tensor_info.uid,
+            )
+    return outputs
+
+
+def _run_timed_pytorch_reference(
+    graph_path: Path,
+    graph_json: Dict[str, Any],
+    graph_name: str,
+    tensor_infos: list,
+    config: SuiteConfig,
+    input_data: Dict[int, Any],
+    analytical_flops: Optional[int],
+    analytical_flops_partial: bool,
+    analytical_io_bytes: Optional[int],
+) -> _TimedReferenceRun:
+    """Run PyTorch once as a timed validation-provider reference row."""
+    result = ProviderEngineResult(
+        provider="pytorch",
+        engine_id=0,
+        status="skipped",
+        role="reference",
+    )
+    outputs: Optional[Dict[int, ReferenceOutput]] = None
+
+    with Timer() as elapsed_timer:
+        try:
+            from ..execution.pytorch_buffer_manager import PyTorchCudaBufferManager
+            from ..execution.pytorch_executor import PyTorchCudaExecutor
+
+            bench_config = BenchmarkConfig(
+                graph_path=graph_path,
+                warmup_iters=config.warmup_iters,
+                benchmark_iters=config.benchmark_iters,
+                engine_id=0,
+            )
+            executor = PyTorchCudaExecutor(graph_json, bench_config)
+            executor.prepare()
+            result.cpu_build_time_ms = executor.init_time_ms
+
+            with PyTorchCudaBufferManager(tensor_infos) as buffer_manager:
+                buffer_manager.allocate_all()
+                buffer_manager.load_input_data(input_data)
+                buffer_manager.zero_outputs()
+
+                tensors = buffer_manager.get_tensors()
+                executor.warmup(tensors)
+
+                cpu_time_probe = (
+                    CpuTimeProbe() if config.metrics.basic_enabled else None
+                )
+                if cpu_time_probe is not None:
+                    cpu_time_probe.__enter__()
+                try:
+                    bench_result = executor.benchmark(tensors, graph_name=graph_name)
+                finally:
+                    if cpu_time_probe is not None:
+                        cpu_time_probe.__exit__(None, None, None)
+
+                result.e2e_stats = BenchmarkStats.from_timings(bench_result.e2e_timings)
+                if bench_result.has_kernel_timings:
+                    result.gpu_kernel_stats = BenchmarkStats.from_timings(
+                        bench_result.kernel_timings
+                    )
+
+                if config.metrics.basic_enabled:
+                    _collect_basic_metrics_post_loop(
+                        result=result,
+                        cpu_time_probe=cpu_time_probe,
+                        benchmark_iters=config.benchmark_iters,
+                        analytical_flops=analytical_flops,
+                        analytical_flops_partial=analytical_flops_partial,
+                        analytical_io_bytes=analytical_io_bytes,
+                    )
+
+                buffer_manager.zero_outputs()
+                executor.execute_once(tensors)
+                outputs = _pytorch_reference_outputs_from_buffer(buffer_manager)
+
+            result.correctness = _reference_row_correctness(config)
+            result.status = "success"
+
+        except Exception as e:
+            result.skip_reason = str(e)
+
+    result.elapsed_time_ms = elapsed_timer.elapsed_ms
+    return _TimedReferenceRun(result=result, outputs=outputs)
 
 
 def run_graph_all_providers(
@@ -430,6 +550,9 @@ def run_graph_all_providers(
         )
     engine_selections = config.engine_selections_for(engine_ids)
     ref_provider = _get_reference_provider(config, graph_json)
+    graph_input_data = generate_input_data(tensor_infos, config.seed)
+    reference_outputs: Optional[Dict[int, ReferenceOutput]] = None
+    reference_error: Optional[str] = None
 
     # Compute analytical metrics once per graph — they're a function of
     # the graph shape only and don't change across engines. Both calls
@@ -449,6 +572,32 @@ def run_graph_all_providers(
             warn_once("analytical", f"compute_io_bytes failed for {graph_name}: {e}")
 
     pe_results: List[ProviderEngineResult] = []
+    if ref_provider is not None and config.reference_provider == "pytorch":
+        if reporter is not None:
+            reporter.print_engine_start("pytorch reference")
+        timed_reference = _run_timed_pytorch_reference(
+            graph_path=graph_path,
+            graph_json=graph_json,
+            graph_name=graph_name,
+            tensor_infos=tensor_infos,
+            config=config,
+            input_data=graph_input_data,
+            analytical_flops=analytical_flops,
+            analytical_flops_partial=analytical_flops_partial,
+            analytical_io_bytes=analytical_io_bytes,
+        )
+        reference_outputs = timed_reference.outputs
+        if reporter is not None:
+            reporter.print_engine_result(timed_reference.result)
+        pe_results.append(timed_reference.result)
+
+    if ref_provider is not None and reference_outputs is None:
+        reference_outputs, reference_error = _compute_reference_outputs_once(
+            ref_provider,
+            graph_json,
+            graph_input_data,
+        )
+
     for selection in engine_selections:
         engine_id = selection.engine_id
         engine_plugin_path = selection.plugin_path
@@ -493,7 +642,9 @@ def run_graph_all_providers(
                 provider=engine_name,
                 engine_id=engine_id,
                 plugin_path=engine_plugin_path,
-                ref_provider=ref_provider,
+                reference_outputs=reference_outputs,
+                reference_error=reference_error,
+                input_data=graph_input_data,
                 validation_requested=validation_requested,
                 graph_json=graph_json,
                 analytical_flops=analytical_flops,
@@ -585,7 +736,9 @@ def run_single_provider_engine(
     provider: str,
     engine_id: int,
     plugin_path: Optional[Path],
-    ref_provider: Optional[ReferenceProvider],
+    reference_outputs: Optional[Dict[int, ReferenceOutput]],
+    reference_error: Optional[str],
+    input_data: Dict[int, Any],
     validation_requested: bool,
     graph_json: Dict[str, Any],
     analytical_flops: Optional[int] = None,
@@ -623,7 +776,7 @@ def run_single_provider_engine(
 
         with BufferManager(tensor_infos) as bm:
             bm.allocate_all()
-            bm.fill_inputs_random(seed=config.seed)
+            bm.load_input_data(input_data)
             bm.zero_outputs()
 
             variant_pack = bm.create_variant_pack()
@@ -662,26 +815,26 @@ def run_single_provider_engine(
                     analytical_io_bytes=analytical_io_bytes,
                 )
 
-            if ref_provider is not None:
+            if reference_outputs is not None:
                 bm.zero_outputs()
                 executor.execute_once(handle, variant_pack)
                 result.correctness = _check_correctness(
-                    bm, tensor_infos, graph_json, ref_provider, config
+                    bm,
+                    tensor_infos,
+                    graph_json,
+                    reference_outputs,
+                    config.reference_provider,
+                    config,
                 )
             elif validation_requested:
-                rtol, atol = _fallback_tolerance_for_config(config)
-                # User asked for validation but the reference provider
-                # didn't support this graph. Treat as a correctness
-                # failure so --validate stays a hard gate.
-                result.correctness = CorrectnessResult(
-                    execution_success=True,
-                    tolerance_match=False,
-                    rtol=rtol,
-                    atol=atol,
-                    error_message=(
-                        f"Reference provider '{config.reference_provider}' "
-                        f"does not support this graph"
-                    ),
+                error_message = reference_error or (
+                    f"Reference provider '{config.reference_provider}' "
+                    f"does not support this graph"
+                )
+                # User asked for validation but no reference output was usable.
+                # Treat as a correctness failure so --validate stays a hard gate.
+                result.correctness = _reference_unavailable_correctness(
+                    config, error_message
                 )
             else:
                 rtol, atol = _fallback_tolerance_for_config(config)

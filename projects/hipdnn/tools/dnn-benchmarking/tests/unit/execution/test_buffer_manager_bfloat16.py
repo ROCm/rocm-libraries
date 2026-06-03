@@ -19,7 +19,9 @@ from dnn_benchmarking.execution.buffer_manager import (
     _bfloat16_bytes_to_ndarray,
     _bfloat16_storage_bytes_to_ndarray,
     _f32_to_bf16_bytes,
+    _encode_bfloat16_dense_to_storage_bytes,
     _generate_bfloat16_bytes,
+    generate_input_data,
 )
 from dnn_benchmarking.graph.tensor_info import TensorInfo
 
@@ -322,3 +324,80 @@ class TestStridedTensorStorage:
             np.asarray([1e-5], dtype=np.float64),
         )
         assert tensor.uid not in buffer_manager._buffers
+
+
+class TestGraphScopedInputData:
+    """Shared input maps preserve dtype, stride, and pass-by-value semantics."""
+
+    def test_same_seed_produces_same_input_map(self) -> None:
+        tensor = _make_bf16_input_tensor(uid=21)
+
+        first = generate_input_data([tensor], seed=123)
+        second = generate_input_data([tensor], seed=123)
+
+        np.testing.assert_array_equal(first[tensor.uid], second[tensor.uid])
+        assert first[tensor.uid].dtype == np.float32
+
+    def test_bfloat16_values_are_decoded_numeric_float32(self) -> None:
+        tensor = _make_bf16_input_tensor(uid=22)
+
+        input_data = generate_input_data([tensor], seed=456)
+        encoded = _encode_bfloat16_dense_to_storage_bytes(
+            input_data[tensor.uid], tensor
+        )
+        decoded = _bfloat16_storage_bytes_to_ndarray(encoded, tensor)
+
+        assert input_data[tensor.uid].dtype == np.float32
+        np.testing.assert_array_equal(input_data[tensor.uid], decoded)
+
+    def test_pass_by_value_scalar_is_included_without_device_buffer(self) -> None:
+        tensor = TensorInfo(
+            uid=23,
+            name="epsilon",
+            dims=[1],
+            strides=[1],
+            data_type="double",
+            is_virtual=False,
+            value=1e-5,
+        )
+
+        input_data = generate_input_data([tensor], seed=1)
+        buffer_manager = BufferManager([tensor])
+        buffer_manager._buffers[99] = MagicMock()
+        buffer_manager.load_input_data(input_data)
+
+        np.testing.assert_array_equal(
+            input_data[tensor.uid],
+            np.asarray([1e-5], dtype=np.float64),
+        )
+        np.testing.assert_array_equal(
+            buffer_manager.get_input_data(tensor.uid),
+            input_data[tensor.uid],
+        )
+        assert tensor.uid not in buffer_manager._buffers
+
+    def test_load_input_data_copies_strided_storage(self) -> None:
+        tensor = TensorInfo(
+            uid=24,
+            name="padded",
+            dims=[2, 3],
+            strides=[4, 1],
+            data_type="float",
+            is_virtual=False,
+        )
+        input_data = {
+            tensor.uid: np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float32)
+        }
+        buffer_manager = BufferManager([tensor])
+        mock_buffer = MagicMock()
+        buffer_manager._buffers[tensor.uid] = mock_buffer
+
+        buffer_manager.load_input_data(input_data)
+
+        raw = mock_buffer.copy_from_host.call_args[0][0]
+        storage = np.frombuffer(raw, dtype=np.float32)
+        np.testing.assert_array_equal(storage[0:3], input_data[tensor.uid][0])
+        np.testing.assert_array_equal(storage[4:7], input_data[tensor.uid][1])
+        np.testing.assert_array_equal(
+            buffer_manager.get_input_data(tensor.uid), input_data[tensor.uid]
+        )

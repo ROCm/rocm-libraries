@@ -11,7 +11,9 @@ import numpy as np
 import pytest
 
 from dnn_benchmarking.config import BenchmarkConfig
+from dnn_benchmarking.config.benchmark_config import MetricsConfig, SuiteConfig
 from dnn_benchmarking.execution import BufferManager, Executor
+from dnn_benchmarking.execution.suite_runner import run_graph_all_providers
 from dnn_benchmarking.graph import GraphLoader
 from dnn_benchmarking.validation import ArrayComparator, ReferenceProviderRegistry
 
@@ -471,6 +473,41 @@ class TestPyTorchReferenceValidation:
             assert (
                 result.passed
             ), f"hipDNN output does not match PyTorch reference: {result.message}"
+
+    def test_suite_validate_pytorch_reports_timed_reference_row(
+        self,
+        hipdnn,
+        sample_conv_fwd_json: Dict[str, Any],
+    ) -> None:
+        """Suite validation reports PyTorch and hipDNN timing rows side by side."""
+        loader = GraphLoader()
+        tensor_infos = loader.extract_tensor_info(sample_conv_fwd_json)
+        config = SuiteConfig(
+            warmup_iters=1,
+            benchmark_iters=2,
+            seed=42,
+            reference_provider="pytorch",
+            metrics=MetricsConfig(tier="off"),
+        )
+
+        result = run_graph_all_providers(
+            graph_path=Path("/test/graph.json"),
+            graph_json=sample_conv_fwd_json,
+            tensor_infos=tensor_infos,
+            config=config,
+            handle=hipdnn.Handle(),
+        )
+
+        reference_rows = [row for row in result.results if row.role == "reference"]
+        engine_rows = [row for row in result.results if row.role == "engine"]
+
+        assert len(reference_rows) == 1
+        assert reference_rows[0].provider == "pytorch"
+        assert reference_rows[0].status == "success"
+        assert reference_rows[0].e2e_stats is not None
+        assert reference_rows[0].gpu_kernel_stats is not None
+        assert engine_rows
+        assert any(row.status == "success" for row in engine_rows)
 
     @pytest.mark.xfail(reason="MIOpen plugin doesn't support pointwise operations yet")
     def test_relu_validates_against_pytorch(self, hipdnn, pytorch_provider) -> None:

@@ -151,7 +151,7 @@ python -m dnn_benchmarking --config sample_configs/config.toml.example --iters 5
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--validate` | Reference provider for correctness validation: `pytorch`, `cpu_plugin`, or `none` | `none` |
+| `--validate` | Reference provider for correctness validation: `pytorch`, `cpu_plugin`, or `none`. `--validate pytorch` also reports a timed PyTorch reference row when PyTorch GPU execution is available. | `none` |
 
 #### Suite Options
 
@@ -325,4 +325,4 @@ LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH pytest --profiling-strict -m prof
 ## Limitations
 
 - CPU reference validation is not yet implemented (CPU reference plugin not yet available in Python bindings)
-- Engine comparison reports engines side by side only; use `--validate` for reference-output correctness checks.
+- Engine comparison and timed validation-provider rows are reported side by side. Reference rows are timing baselines and are not counted as hipDNN engine pass/fail combinations.
