@@ -96,10 +96,12 @@ with open(os.path.join(FROZEN, "ck_dsl/core/arch/_arch_specs_embedded.py"), "w")
 # 4. Patch target.py off __file__/open/json onto the embedded dict.
 tp = os.path.join(FROZEN, "ck_dsl/core/arch/target.py")
 s = open(tp).read()
+# NB: match the source verbatim (black formats string literals with double
+# quotes); a silent no-match here would leave a dangling _EMBEDDED_DOC.
 s = s.replace(
-    "_DATA_FILE = Path(__file__).parent / 'data' / 'arch_specs.json'",
+    '_DATA_FILE = Path(__file__).parent / "data" / "arch_specs.json"',
     "from ._arch_specs_embedded import DOC as _EMBEDDED_DOC\n"
-    "_DATA_FILE = Path('arch_specs.json')  # name only; data is embedded",
+    '_DATA_FILE = Path("arch_specs.json")  # name only; data is embedded',
 )
 s = s.replace(
     "    with open(str(_DATA_FILE)) as fh:\n        doc = json.load(fh)\n",
@@ -107,7 +109,13 @@ s = s.replace(
 )
 s = s.replace("import json\n", "")  # json.load patched out; embed has no json module
 open(tp, "w").write(s)
-assert "_EMBEDDED_DOC" in open(tp).read(), "target.py patch failed"
+# Assert on the IMPORT, not just the name: the doc=_EMBEDDED_DOC replace alone
+# would satisfy a bare-name check even if the import injection silently failed.
+patched = open(tp).read()
+assert (
+    "from ._arch_specs_embedded import DOC as _EMBEDDED_DOC" in patched
+), "target.py arch_specs patch failed (import not injected -- source format drift?)"
+assert "json.load" not in patched, "target.py still references json.load after patch"
 
 # 4b. Swap ck_dsl's runtime/comgr.py backend to the native `comgr` module. This is
 #     the actual ck_dsl change for Arch A: comgr.py keeps its interface

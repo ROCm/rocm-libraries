@@ -37,6 +37,11 @@
 #define MICROPY_PY_BUILTINS_FROZENSET (1)
 #define MICROPY_CPYTHON_COMPAT (1)
 
+// object.__setattr__ — ck_dsl's frozen-dataclass __init__s use it (the canonical
+// CPython idiom for setting fields on a frozen instance). Enabling it lets the
+// source run unmodified instead of being rewritten to setattr() at bundle time.
+#define MICROPY_PY_DELATTR_SETATTR (1)
+
 // No filesystem: keep io/open out (CORE_FEATURES would enable them).
 #define MICROPY_PY_IO (1)
 
