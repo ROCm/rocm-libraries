@@ -31,56 +31,70 @@
 # MT128x128).
 #
 # PR 7781 + PR 7656 + PR 7683 verification status (gfx950, freshly rebuilt
-# tensilelite-client at HEAD of users/bnemanich/mxfp8-tail-loop-test):
+# tensilelite-client at HEAD of users/bnemanich/mxfp8-tail-loop-test).
 #
 # Solution-rejection accounting (PrintSolutionRejectionReason=True):
 #   12 nominal solutions → 8 after SolutionStructs → 6 after KernelWriter.
 #   Effective sweep ran 6 ForkParameter combos × 16 K values = 96 cells.
 #
-# Aggregate per (PGR, PLR):
-#   PGR0 PLR0:  1 PASS / 15 FAIL
+# Pre-fix (HEAD ce357febed1, before main-loop regression was diagnosed):
+#   PGR0 PLR0:  1 PASS / 15 FAIL    (only K=128 passed)
 #   PGR0 PLR1:  1 PASS / 15 FAIL
 #   PGR1 PLR0:  1 PASS / 15 FAIL
 #   PGR1 PLR1:  1 PASS / 15 FAIL
 #   PGR2 PLR0:  1 PASS / 15 FAIL
 #   PGR2 PLR1:  1 PASS / 15 FAIL
+#   Total: 6/96 PASS.
 #
-# The only PASS across all 96 cells is M=N=256 / K=128. Every K from 32
-# up to 512 in step 32 FAILS regardless of PGR or PLR. That includes
-# K < DU=256 tail-only cases (K=32, 64, 96, 160, 192, 224) — so the
-# failure is not specifically tail-loop, nor specifically main-loop;
-# it is broad across the MXFP8 SubtileImpl path post-merge.
+# Post-fix (after [SubtileImpl] Fix single-DU per_uid_k regression in
+# emit_lr + NLL lr_inc PGR=1 gating, current HEAD):
+#   PGR0 PLR0:  4 PASS / 12 FAIL    (K ∈ {128, 256, 384, 512} pass)
+#   PGR0 PLR1:  4 PASS / 12 FAIL
+#   PGR1 PLR0:  4 PASS / 12 FAIL
+#   PGR1 PLR1:  4 PASS / 12 FAIL
+#   PGR2 PLR0:  3 PASS / 13 FAIL    (K=384 PGR2 FAILs but PGR0/1 PASS)
+#   PGR2 PLR1:  3 PASS / 13 FAIL
+#   Total: 22/96 PASS.
 #
-# Companion data points (see subtile_mxfp8_tail_loop_smoke.yaml docstring
-# for full triage write-up):
-#   * Identical wrong-value counts across PGR=1 / PGR=2 at the same K
-#     point to a kernel-vs-reference disagreement, not a scheduler bug.
-#   * DataInitType=AllOnes makes the smoke yaml PASS at all K, while
-#     DataInitType=Random fails — random-MX-data sensitivity.
-#   * MXFP4 at the same MT/DU/PGR/PLR PASSes K=256 and K=512 but FAILs
-#     K=288 (tail) with a tiny 0.6% wrong-rate; MXFP8 main loop wrong-
-#     rate is an order of magnitude larger and grows linearly in K.
-#   * Pre-existing subtile_mxfp8_correctness_regression.yaml (docstring
-#     records 5/5 PASS at ce19b77af42) now fails kernel-generation
-#     with "overflowed resources, vgprs=289" on its MT256x256 PGR=1
-#     PLR=0 solution.
+# Pass set is exactly K % MIK == 0, where MIK = MatrixInstK = 128 for FP8.
+# Every K that needs a partial-MIK tail (K ∈ {32, 64, 96, 160, 192, 224,
+# 288, 320, 352, 416, 448, 480}) FAILs.  The MAIN-LOOP regression is
+# resolved (K = N*DU cases now PASS for PGR ∈ {0, 1}); residual failures
+# are tail-only and concentrated where tail % 128 != 0.
 #
-# Most likely root causes (none confirmed; see smoke yaml docstring for
-# the full hypothesis chain):
-#   * PR 7781 b937a0c8b3a "[Reference] Enable fast CPU GEMM path for
-#     MX-scaled problems" was untested for MXFP8 + the PR 7656 / PR 7683
-#     merges; the failure surface is consistent with a reference-side
-#     regression activated by the new fast path.
-#   * PR 7644 (`isMXProblem` → `isMXProblemExceptF6`) + PR 7683 restride
-#     bookkeeping interact in a path the F8 init was not re-tested on.
+# Tail-loop residual wrong-rate by K (PGR=0 PLR=0, representative):
+#   K=32   188 / 65536  ≈ 0.29%
+#   K=64   347 / 65536  ≈ 0.53%
+#   K=96   333 / 65536  ≈ 0.51%
+#   K=160  297 / 65536  ≈ 0.45%
+#   K=192  157 / 65536  ≈ 0.24%
+#   K=224   81 / 65536  ≈ 0.12%
+#   K=288  340 / 65536  ≈ 0.52%
+#   K=320  412 / 65536  ≈ 0.63%
+#   K=352  333 / 65536  ≈ 0.51%
+#   K=416  169 / 65536  ≈ 0.26%
+#   K=448  387 / 65536  ≈ 0.59%
+#   K=480  385 / 65536  ≈ 0.59%
 #
-# Status: BLOCKED on this baseline regression. Per plan Step 7, the work
-# scopes beyond a small targeted fix (≤1 commit, ~50 lines) because the
-# failure is wider than the tail loop the plan was meant to enable.
-# Tail-specific triage (emit_mask_k non-BF16 branch / scale-mask gate /
-# `computeTailLoopSrdLimit` MX `kPad`) is moot until the MXFP8 main-loop
-# baseline is restored. This yaml is committed so the next worker has a
-# repro and the per-K result matrix already gathered.
+# These match the magnitude class of the MXFP4 sibling tail residual
+# (subtile_mxfp4.yaml at MT128x128/DU=256/PGR=1/PLR=1 K=288: 415/65536
+# ≈ 0.63%). Likely root: emit_mask_k non-BF16 branch + MX-scale mask
+# reuse path, neither verified for MXFP8 by PR 7683 itself.
+#
+# PGR=2 specific residual: K=288, 320, 352, 384, 416, 448, 480 all FAIL
+# at PGR=2 PLR=0/1 with 682..4583 wrong values (~1-7% wrong-rate). This
+# is a separate PGR=2-specific tail issue not covered by the main-loop
+# fix; it's likely the wrap-LR forced-drain interaction between PR 7656's
+# `gr_inc and pgr==2` NLL drop and PR 7683's tail-loop entry sequence.
+#
+# Pre-existing v2 regression yamls (subtile_mxfp8_correctness_regression*
+# .yaml MT256x256 multi-DU): unchanged by this fix, still fail kernel
+# codegen with `vgprs=289 (Occupancy limit)`. Documented as a separate
+# regression in the smoke-yaml docstring.
+#
+# Root cause + fix narrative is in the smoke yaml docstring; the patch
+# touches `Components/Subtile/InstructionEmitter.py:emit_lr` and
+# `Components/Subtile/LogicalScheduler.py:build_nll`.
 ########################################
 
 TestParameters:
