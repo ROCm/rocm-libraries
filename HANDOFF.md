@@ -106,7 +106,9 @@ occ1 合并 VGPR 池（arch+acc=512）在 N512 只用 388/512，闲 124 arch VGP
 
 **踩坑(关键)**：① scale 是头号杀手(naive -19%);typed scale load 和 inline-asm glds 有 **vmcnt 冲突**(编译器为 typed load 插 wait 会 drain 在飞的 glds prefetch)→ 解法 = **asm 手动 vmcnt + tile-grouped 布局 + 单条 dwordx{SUBS} 宽 load**(每 tile scale 6 条→2 条 vmem op,1503→1669)。② 深 K 整除约束:KT192 不整除 K=8192 曾丢 K 尾算假象 → **K padding 补零**到 KT 倍数(多 0.78% 无用算)。③ buf 双缓冲须编译期选(2× ping-pong),动态 saR[kt&1] 会 spill。④ SUBS≤4(scale dwordx4 上限,KT≤256)。
 
-**深 K 已榨到头**：KT192 DB 16-acc(1677)是对称 LDS 天花板。KT256 single(丢重叠)1224 / KT256 DB 只能配 8-acc(962-984) / KT128 DB(1465) 全更差。唯一更深活口 = A-LDS-deep + B-direct 非对称 hybrid(未做,Step 24)。
+**深 K 已榨到头**：KT192 DB 16-acc(1677)是对称 LDS 天花板。KT256 single(丢重叠)1224 / KT256 DB 只能配 8-acc(962-984) / KT128 DB(1465) 全更差。
+- **(2) A-LDS-deep + B-direct 非对称 hybrid 证伪**(`test_lds.cpp` lds_gemm_hyb,8/8 正确但 **828 « 1677**):编译器在 A 的 LDS 读前自动插 vmcnt(0) 全 drain(asm 实测 15 条),把在飞的 B asm load + prefetch 一起 drain → B 暴露、串行。**任何混合 glds+直读都被这个 vmcnt(0) 废掉;全 LDS 对称是架构最优。**(⚠️机制纠正:对称快不是手动相对 vmcnt——`wait_vmcnt(20)` 因 helper 只支持 0-4 是 no-op——而是编译器 vmcnt(0) drain + prefetch 提前一 tile→drain 便宜+深 K 少 drain。)
+- **(3) K-tail 替代 padding 做了但反而慢**(per-k64 KT64 单缓冲 tail,8/8 正确,**1635 < padding 1671 ~2%**):tail 低效 > padding 0.78% 浪费。**生产 v18 保留 K padding**;K-tail 留作 no-padded-buffers 可选 fallback(mxfp6_lds.hpp,门控+sA_plain/sB_plain,rem=0 跳过向后兼容)。
 
 **集成**:`test_pipeline_v18.cpp` 把 LDS 作为 cost model 新 tile(TLDS, eff=1.05, WG=(M/256)(N/256))。LDS 用 plain B + tiled scale + K pad,V17 用 preshuffled B + coalesced scale,A 共用→prep 分两路。设备代码抽 `mxfp6_lds.hpp` 共用(test_lds.cpp 是 LDS 实验驱动)。glds 布局探针 = `probe_glds.cpp`。见 memory [[mxfp6-lds-paradigm]] [[mxfp6-glds-layout]]。
 

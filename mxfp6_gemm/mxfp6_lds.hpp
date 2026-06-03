@@ -113,7 +113,12 @@ template <int M_TILE, int N_TILE, int K_TILE, int WAVES_M, int WAVES_N, int MIN_
 __global__ void __launch_bounds__(256, MIN_OCC)
     lds_gemm_db(const void* __restrict__ A, const void* __restrict__ B,
                 const uint8_t* __restrict__ sA, const uint8_t* __restrict__ sB,
-                float* __restrict__ D, int N, int k_iters, int A_rs, int B_rs) {
+                float* __restrict__ D, int N, int k_iters, int A_rs, int B_rs,
+                const uint8_t* __restrict__ sA_plain = nullptr,
+                const uint8_t* __restrict__ sB_plain = nullptr) {
+    // sA_plain/sB_plain = lane-ordered (un-tiled) scales [tile][k64][64], used ONLY by
+    // the K-tail (k_iters not a multiple of SUBS). If k_iters % SUBS == 0 the tail is
+    // skipped and these may be null (back-compat with the K-padded callers).
     constexpr int KT_BYTES = K_TILE * 6 / 8;
     constexpr int A_CPR    = KT_BYTES / 16;
     constexpr int SUBS     = K_TILE / 64;
@@ -243,6 +248,34 @@ __global__ void __launch_bounds__(256, MIN_OCC)
             compute(0, sa0, sb0);
             __syncthreads();
         }
+    }
+
+    // K-tail: remaining k64 when k_iters % SUBS != 0 (lets callers run arbitrary K
+    // WITHOUT padded A/B buffers). Each leftover k64 is a 64-K slab (KT64, single
+    // buffer, naive lane-ordered scales). MEASURED: ~2% SLOWER than K padding @8192^3
+    // (1635 vs 1671) — the KT64 single-buffer tail is less efficient than letting the
+    // padding's extra k64 ride an efficient deep tile. So the production path (v18)
+    // PADS K; this tail is the no-padded-buffers fallback. Gated to tiles whose KT64
+    // cooperative load divides the WG evenly (256*3,512*3 ok; 128*3 not).
+    if constexpr (M_TILE * 3 % 256 == 0 && N_TILE * 3 % 256 == 0)
+    for (int kc = k_tiles * SUBS; kc < k_iters; kc++) {
+        load_tile_lds<M_TILE, 48, 3>(smem, 0, Ag, A_rs, kc * 48, wave, lane);
+        load_tile_lds<N_TILE, 48, 3>(smem, M_TILE * 48, Bg, B_rs, kc * 48, wave, lane);
+        wait_vmcnt(0); __syncthreads();
+#pragma unroll
+        for (int mi = 0; mi < M_PW; mi++) {
+            int blk = wm * M_PW + mi;
+            v6i a = read_op<48>(smem, 0, blk, 0, lane);
+            int sav = sA_plain[(size_t)((wg_m * MB + blk) * k_iters + kc) * 64 + lane];
+#pragma unroll
+            for (int ni = 0; ni < N_PW; ni++) {
+                int bblk = wn * N_PW + ni;
+                v6i b = read_op<48>(smem, M_TILE * 48, bblk, 0, lane);
+                int sbv = sB_plain[(size_t)((wg_n * NB + bblk) * k_iters + kc) * 64 + lane];
+                mfma_scale_f32_32x32x64_fp6<0>(acc[mi][ni], a, b, sav, sbv);
+            }
+        }
+        __syncthreads();
     }
 
 #pragma unroll
