@@ -25,12 +25,14 @@ template <ck::index_t NDimSpatial,
           typename WeiElementwiseOperation,
           typename OutElementwiseOperation,
           typename DeviceGemmV3Ops,
-          typename BaseOp>
+          typename BaseOp,
+          typename DeviceGemmV3OpsDirect = DeviceGemmV3Ops>
 void add_explicit_gemm_device_operation_instances(
     std::vector<std::unique_ptr<BaseOp>>& op_instances)
 {
     ck::static_for<0, std::tuple_size_v<DeviceGemmV3Ops>, 1>{}([&](auto i) {
-        using DeviceGemmOp = std::tuple_element_t<i, DeviceGemmV3Ops>;
+        using DeviceGemmOp       = std::tuple_element_t<i, DeviceGemmV3Ops>;
+        using DeviceGemmOpDirect = std::tuple_element_t<i, DeviceGemmV3OpsDirect>;
 
         using NewOpInstance = DeviceGroupedConvBwdWeight_Explicit<NDimSpatial,
                                                                   InLayout,
@@ -42,7 +44,8 @@ void add_explicit_gemm_device_operation_instances(
                                                                   InElementwiseOperation,
                                                                   WeiElementwiseOperation,
                                                                   OutElementwiseOperation,
-                                                                  DeviceGemmOp>;
+                                                                  DeviceGemmOp,
+                                                                  DeviceGemmOpDirect>;
 
         static_assert(std::is_base_of_v<BaseOp, NewOpInstance>,
                       "NewOpInstance must derive from BaseOp");

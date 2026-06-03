@@ -34,7 +34,13 @@ void add_device_grouped_convnd_bwd_weight_xdl_bf16_bf16_bf16_exp_odd_mn_instance
         PassThrough,
         device_gemm_xdl_universal_km_kn_mn_irregular_odd_mn_instances<BF16,
                                                                       Intrawave,
-                                                                      GemmMNKPadding>>(instances);
+                                                                      GemmMNKPadding>
+        /*two-stage, C=F32*/,
+        device_gemm_xdl_universal_km_kn_mn_irregular_odd_mn_instances<BF16,
+                                                                      Intrawave,
+                                                                      GemmMNKPadding,
+                                                                      BF16>
+        /*direct, C=bf16*/>(instances);
 }
 
 void add_device_grouped_convnd_bwd_weight_xdl_bf16_bf16_bf16_exp_odd_mn_instances(
@@ -62,7 +68,13 @@ void add_device_grouped_convnd_bwd_weight_xdl_bf16_bf16_bf16_exp_odd_mn_instance
         PassThrough,
         device_gemm_xdl_universal_km_kn_mn_irregular_odd_mn_instances<BF16,
                                                                       Intrawave,
-                                                                      GemmMNKPadding>>(instances);
+                                                                      GemmMNKPadding>
+        /*two-stage, C=F32*/,
+        device_gemm_xdl_universal_km_kn_mn_irregular_odd_mn_instances<BF16,
+                                                                      Intrawave,
+                                                                      GemmMNKPadding,
+                                                                      BF16>
+        /*direct, C=bf16*/>(instances);
 }
 
 } // namespace instance

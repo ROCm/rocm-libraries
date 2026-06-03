@@ -32,7 +32,9 @@ void add_device_grouped_convnd_bwd_weight_xdl_bf16_bf16_bf16_exp_mem_v2_default_
         PassThrough,
         PassThrough,
         PassThrough,
-        device_gemm_xdl_universal_km_kn_mn_mem_instances<BF16, Interwave, GemmDefault>>(instances);
+        device_gemm_xdl_universal_km_kn_mn_mem_instances<BF16, Interwave, GemmDefault> /*two-stage, C=F32*/,
+        device_gemm_xdl_universal_km_kn_mn_mem_instances<BF16, Interwave, GemmDefault, BF16> /*direct, C=bf16*/>(
+        instances);
 }
 
 void add_device_grouped_convnd_bwd_weight_xdl_bf16_bf16_bf16_exp_mem_v2_default_instances(
@@ -58,7 +60,9 @@ void add_device_grouped_convnd_bwd_weight_xdl_bf16_bf16_bf16_exp_mem_v2_default_
         PassThrough,
         PassThrough,
         PassThrough,
-        device_gemm_xdl_universal_km_kn_mn_mem_instances<BF16, Interwave, GemmDefault>>(instances);
+        device_gemm_xdl_universal_km_kn_mn_mem_instances<BF16, Interwave, GemmDefault> /*two-stage, C=F32*/,
+        device_gemm_xdl_universal_km_kn_mn_mem_instances<BF16, Interwave, GemmDefault, BF16> /*direct, C=bf16*/>(
+        instances);
 }
 
 } // namespace instance

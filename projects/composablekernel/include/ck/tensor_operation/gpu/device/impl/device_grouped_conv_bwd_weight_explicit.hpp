@@ -32,7 +32,8 @@ template <ck::index_t NDimSpatial,
           typename InElementwiseOperation,
           typename WeiElementwiseOperation,
           typename OutElementwiseOperation,
-          typename DeviceGemmV3Op>
+          typename DeviceGemmV3Op,
+          typename DeviceGemmV3OpDirect = DeviceGemmV3Op>
 struct DeviceGroupedConvBwdWeight_Explicit
     : public DeviceGroupedConvBwdWeight<NDimSpatial,
                                         InLayout,
@@ -53,16 +54,30 @@ struct DeviceGroupedConvBwdWeight_Explicit
     static constexpr auto I1 = Number<1>{};
     static constexpr auto I2 = Number<2>{};
 
-    // Keep split-k partials in fp32: route every sub-4-byte (fp16/bf16) weight
-    // output through the two-stage path. That path accumulates the per-split
-    // partials in an fp32 workspace (TwoStageIntermediateType = the GEMM's fp32 C
-    // output) and casts once at the end, instead of bf16 atomic-adding each
-    // partial into the bf16 weight buffer -- the latter loses precision that
-    // scales with split_k (see issue #8029).
-    static constexpr bool IsTwoStageNeeded = sizeof(WeiDataType) % 4 != 0;
+    // Keep split-k partials in fp32 ONLY when a cross-split reduction happens.
+    //
+    // For sub-4-byte (fp16/bf16) weights, atomic-adding each per-split partial
+    // into the bf16 weight buffer loses precision that scales with split_k (see
+    // issue #8029). The two-stage path accumulates the per-split partials in an
+    // fp32 workspace (TwoStageIntermediateType = the two-stage GEMM's fp32 C
+    // output) and casts once at the end -- but it only matters when split_k > 1.
+    //
+    // DeviceGemmV3Op       = the fp32-C GEMM used for the two-stage (workspace)
+    //                        path.
+    // DeviceGemmV3OpDirect = a GEMM whose C == WeiDataType, used to write the
+    //                        weight buffer directly when split_k == 1 (no
+    //                        cross-split reduction, so no precision loss).
+    static constexpr bool IsTwoStageCapable = sizeof(WeiDataType) % 4 != 0; // bf16/fp16
+    // A real direct GEMM writes the weight dtype straight out. When no distinct
+    // direct GEMM is supplied (default), it equals DeviceGemmV3Op (fp32 C), so
+    // HasDirectPath is false for bf16/fp16 and they always take the fp32 workspace
+    // two-stage path (unchanged behavior). For fp32 weights DeviceGemmV3Op already
+    // has C==fp32==WeiDataType so it is its own direct path.
+    static constexpr bool HasDirectPath =
+        is_same_v<typename DeviceGemmV3OpDirect::CDataType_, WeiDataType>;
 
     using DeviceOp                 = DeviceGroupedConvBwdWeight_Explicit;
-    using TwoStageIntermediateType = typename DeviceGemmV3Op::CDataType_;
+    using TwoStageIntermediateType = typename DeviceGemmV3Op::CDataType_; // fp32
 
     static constexpr index_t ElementwiseBlockSize = 256;
     static constexpr index_t ElemsPerBlock        = 256;
@@ -102,7 +117,8 @@ struct DeviceGroupedConvBwdWeight_Explicit
 
     struct Argument : public BaseArgument, public ArgumentSplitK
     {
-        using GemmArgument = typename DeviceGemmV3Op::Argument;
+        using GemmArgument       = typename DeviceGemmV3Op::Argument;
+        using DirectGemmArgument = typename DeviceGemmV3OpDirect::Argument;
 
         Argument(const InDataType* p_in_grid,
                  WeiDataType* p_wei_grid,
@@ -151,7 +167,7 @@ struct DeviceGroupedConvBwdWeight_Explicit
                       end(e_g_k_c_xs_lengths),
                       begin(filter_spatial_lengths_));
 
-            if constexpr(IsTwoStageNeeded)
+            if constexpr(IsTwoStageCapable)
             {
                 if(split_k < 0)
                 {
@@ -188,7 +204,11 @@ struct DeviceGroupedConvBwdWeight_Explicit
             }
             k_batch_ = clamp_gemm_k_batch(k_batch_);
 
-            if constexpr(IsTwoStageNeeded)
+            // Two-stage (fp32 workspace) GEMM arg. Built whenever the op is
+            // two-stage capable; only actually launched when k_batch_ > 1 (or
+            // when there is no direct path). E pointer is set to the workspace
+            // at launch time via SetEPointer.
+            if constexpr(IsTwoStageCapable)
             {
                 const index_t merged_filter_dims = std::accumulate(begin(e_g_k_c_xs_lengths),
                                                                    end(e_g_k_c_xs_lengths),
@@ -247,11 +267,44 @@ struct DeviceGroupedConvBwdWeight_Explicit
                                                   wei_element_op,
                                                   k_batch_};
             }
+
+            // Direct GEMM arg: writes the weight buffer (WeiDataType) straight
+            // out, no workspace. Only type-correct to build with p_wei_grid when
+            // HasDirectPath (DeviceGemmV3OpDirect::CDataType_ == WeiDataType).
+            // When defaulted (no distinct direct GEMM) the two members share the
+            // same type and direct_gemm_args is never used at runtime.
+            if constexpr(HasDirectPath)
+            {
+                direct_gemm_args = DirectGemmArgument{p_out_grid,
+                                                      p_in_grid,
+                                                      {},
+                                                      p_wei_grid,
+                                                      M,
+                                                      N,
+                                                      K,
+                                                      StrideOut,
+                                                      StrideIn,
+                                                      {},
+                                                      StrideWei,
+                                                      StrideBatchOut,
+                                                      StrideBatchIn,
+                                                      {},
+                                                      StrideBatchWei,
+                                                      BatchSize,
+                                                      out_element_op,
+                                                      in_element_op,
+                                                      wei_element_op,
+                                                      k_batch_};
+            }
+            else
+            {
+                direct_gemm_args = explicit_gemm_args; // same type when defaulted; never used
+            }
         }
 
         std::size_t GetWorkspaceETensorSizeBytes() const
         {
-            if constexpr(IsTwoStageNeeded)
+            if constexpr(IsTwoStageCapable)
             {
                 return sizeof(TwoStageIntermediateType) * elementwise_desc_.GetElementSpaceSize();
             }
@@ -263,17 +316,24 @@ struct DeviceGroupedConvBwdWeight_Explicit
 
         std::size_t GetWorkspaceSizeBytes() const
         {
-            if constexpr(IsTwoStageNeeded)
+            // Only the two-stage path needs the fp32 workspace, and it is only
+            // taken at runtime when there is a real cross-split reduction:
+            //   - no direct path  -> always two-stage
+            //   - has direct path -> two-stage only when k_batch_ > 1
+            // At split_k == 1 with a direct path we write the weight buffer
+            // directly, so no workspace is required.
+            if constexpr(IsTwoStageCapable)
             {
-                return GetWorkspaceETensorSizeBytes();
+                if(HasDirectPath ? (k_batch_ > 1) : true)
+                {
+                    return GetWorkspaceETensorSizeBytes();
+                }
             }
-            else
-            {
-                return 0;
-            }
+            return 0;
         }
 
         GemmArgument explicit_gemm_args;
+        DirectGemmArgument direct_gemm_args;
         std::array<ck::index_t, NDimSpatial> filter_spatial_lengths_;
         const std::array<ck::index_t, NDimSpatial>& conv_filter_strides_;
         const std::array<ck::index_t, NDimSpatial>& input_left_pads_;
@@ -293,41 +353,55 @@ struct DeviceGroupedConvBwdWeight_Explicit
 
         float Run(const Argument& arg, const StreamConfig& stream_config = StreamConfig{})
         {
-            if constexpr(IsTwoStageNeeded)
+            if constexpr(IsTwoStageCapable)
             {
-                // Modify to use workspace as output
-                GemmArgument explicit_gemm_args_with_workspace = arg.explicit_gemm_args;
-                explicit_gemm_args_with_workspace.template SetEPointer<TwoStageIntermediateType>(
-                    arg.p_workspace_);
-                float avg_time =
-                    explicit_gemm_op.Run(explicit_gemm_args_with_workspace, stream_config);
-                const index_t grid_size =
-                    arg.elementwise_block_2_ctile_map_.CalculateGridSize(arg.elementwise_desc_);
-                const auto kernel = kernel_elementwise<GridwiseElementwiseCast,
-                                                       ck::Tuple<CElementwiseGridDesc>,
-                                                       ck::Tuple<CElementwiseGridDesc>,
-                                                       ck::Tuple<const TwoStageIntermediateType*>,
-                                                       ck::Tuple<WeiDataType*>,
-                                                       Block2TileMapElementwise,
-                                                       WeiElementwiseOperation>;
+                // Two-stage (fp32 workspace) only when there is a real
+                // cross-split reduction. With a direct path available, split_k==1
+                // writes the weight buffer directly (no workspace, no cast).
+                const bool two_stage = HasDirectPath ? (arg.k_batch_ > 1) : true;
+                if(two_stage)
+                {
+                    // Modify to use workspace as output
+                    GemmArgument explicit_gemm_args_with_workspace = arg.explicit_gemm_args;
+                    explicit_gemm_args_with_workspace.template SetEPointer<TwoStageIntermediateType>(
+                        arg.p_workspace_);
+                    float avg_time =
+                        explicit_gemm_op.Run(explicit_gemm_args_with_workspace, stream_config);
+                    const index_t grid_size =
+                        arg.elementwise_block_2_ctile_map_.CalculateGridSize(arg.elementwise_desc_);
+                    const auto kernel =
+                        kernel_elementwise<GridwiseElementwiseCast,
+                                           ck::Tuple<CElementwiseGridDesc>,
+                                           ck::Tuple<CElementwiseGridDesc>,
+                                           ck::Tuple<const TwoStageIntermediateType*>,
+                                           ck::Tuple<WeiDataType*>,
+                                           Block2TileMapElementwise,
+                                           WeiElementwiseOperation>;
 
-                avg_time += launch_and_time_kernel(
-                    stream_config,
-                    kernel,
-                    dim3(grid_size),
-                    dim3(ElementwiseBlockSize),
-                    0,
-                    make_tuple(arg.elementwise_desc_),
-                    make_tuple(arg.elementwise_desc_),
-                    make_tuple(static_cast<const TwoStageIntermediateType*>(arg.p_workspace_)),
-                    make_tuple(arg.p_wei_grid_),
-                    arg.elementwise_block_2_ctile_map_,
-                    element_wise::PassThrough{});
-                return avg_time;
+                    avg_time += launch_and_time_kernel(
+                        stream_config,
+                        kernel,
+                        dim3(grid_size),
+                        dim3(ElementwiseBlockSize),
+                        0,
+                        make_tuple(arg.elementwise_desc_),
+                        make_tuple(arg.elementwise_desc_),
+                        make_tuple(static_cast<const TwoStageIntermediateType*>(arg.p_workspace_)),
+                        make_tuple(arg.p_wei_grid_),
+                        arg.elementwise_block_2_ctile_map_,
+                        element_wise::PassThrough{});
+                    return avg_time;
+                }
+                else
+                {
+                    // bf16/fp16 split_k==1: direct write, zero overhead.
+                    return direct_gemm_op.Run(arg.direct_gemm_args, stream_config);
+                }
             }
             else
             {
-                return explicit_gemm_op.Run(arg.explicit_gemm_args, stream_config);
+                // fp32: direct single-stage write.
+                return direct_gemm_op.Run(arg.direct_gemm_args, stream_config);
             }
         }
 
@@ -338,6 +412,7 @@ struct DeviceGroupedConvBwdWeight_Explicit
         }
 
         typename DeviceGemmV3Op::Invoker explicit_gemm_op;
+        typename DeviceGemmV3OpDirect::Invoker direct_gemm_op;
     };
 
     static constexpr bool IsValidCompilationParameter()
@@ -392,7 +467,13 @@ struct DeviceGroupedConvBwdWeight_Explicit
                 return false;
             }
         }
-        if constexpr(IsTwoStageNeeded)
+        // Whether this argument actually runs the two-stage (fp32 workspace)
+        // path at runtime. With a direct path, split_k==1 takes the direct path
+        // and needs neither packed filter nor a workspace.
+        const bool runs_two_stage =
+            IsTwoStageCapable && (HasDirectPath ? (arg.k_batch_ > 1) : true);
+
+        if(runs_two_stage)
         {
             if(!arg.is_filter_data_packed)
             {
@@ -419,8 +500,16 @@ struct DeviceGroupedConvBwdWeight_Explicit
         if(arg.stride_overflow)
             return false;
 
-        // Gridwise GEMM size
-        return DeviceGemmV3Op::IsSupportedArgument(arg.explicit_gemm_args);
+        // Gridwise GEMM size: the two-stage path validates the fp32-C GEMM;
+        // the direct path validates the WeiDataType-C GEMM.
+        if(runs_two_stage)
+        {
+            return DeviceGemmV3Op::IsSupportedArgument(arg.explicit_gemm_args);
+        }
+        else
+        {
+            return DeviceGemmV3OpDirect::IsSupportedArgument(arg.direct_gemm_args);
+        }
     }
 
     bool IsSupportedArgument(const BaseArgument* p_arg) override
@@ -646,7 +735,14 @@ struct DeviceGroupedConvBwdWeight_Explicit
 
         // clang-format off
         str << "DeviceGroupedConvBwdWeight_Explicit_Xdl"
-            << "<" << DeviceGemmV3Op{}.GetTypeString() << ">";
+            << "<" << DeviceGemmV3Op{}.GetTypeString();
+        // Only append the direct GEMM for instances that actually have a distinct
+        // split_k==1 direct path, so untouched instances keep their type string.
+        if constexpr(HasDirectPath && IsTwoStageCapable)
+        {
+            str << " | direct:" << DeviceGemmV3OpDirect{}.GetTypeString();
+        }
+        str << ">";
         // clang-format on
 
         return str.str();
