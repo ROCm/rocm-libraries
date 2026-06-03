@@ -972,7 +972,7 @@ def validate_gemm(
     layout: str,
     gpu_target: str,
     trait_name: str = None,
-) -> bool:
+) -> Tuple[bool, str]:
     # GEMM Validation
     warp_size = get_warp_size_for_gpu(gpu_target)
 
@@ -1034,7 +1034,7 @@ def validate_gemm_mx(
     layout: str,
     gpu_target: str,
     trait_name: str = None,
-) -> bool:
+) -> Tuple[bool, str]:
     # MX GEMM uses the scaled MFMA path from ck_tile example 42.
     if layout.lower() != "rcr":
         return False, "MX GEMM currently supports only rcr layout"
@@ -1097,7 +1097,7 @@ def validate_gemm_preshuffle(
     layout: str,
     gpu_target: str,
     trait_name: str = None,
-) -> bool:
+) -> Tuple[bool, str]:
     # Preshuffle Validations
     warp_size = get_warp_size_for_gpu(gpu_target)
 
