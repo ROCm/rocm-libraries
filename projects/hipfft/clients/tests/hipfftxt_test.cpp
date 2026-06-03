@@ -608,36 +608,41 @@ TEST_P(hipfftxtunitdesc, xtmemcpytest)
         return databatchlengths;
     };
 
-    // Return a vector containing {gpu index, batch index, transform indices...}.
-    // Batch and transform indices are buffer-local multi-index (ie relative to an index starting at
-    // {0, ... , 0} on each brick).
+    // Return a pair vector containing {gpu index, {batch index, transform indices...}}.
+    // Batch and transform indices are buffer-local multi-indices (ie relative to an index starting
+    // at {0, ... , 0} on each brick).
     auto devidx = [](const size_t               splitdim,
                      const size_t               ngpus,
                      const std::vector<size_t>& hostidx,
-                     const std::vector<size_t>& databatchlengths) -> std::vector<size_t> {
-        std::vector<size_t> ret(databatchlengths.size() + 1, 0);
+                     const std::vector<size_t>& databatchlengths) -> std::pair<int, std::vector<size_t>> {
+
+        // The multi-index for the data on the buffer:
+        std::vector<size_t> dataidx(databatchlengths.size());
         for(size_t idx = 0; idx < hostidx.size(); ++idx)
         {
             if(idx != splitdim)
-                ret[idx + 1] = hostidx[idx];
+                dataidx[idx] = hostidx[idx];
         }
         const auto l = databatchlengths[splitdim];
         const auto b = l / ngpus; // Elements per gpu in splitdim (if no remainder).
         const auto r = l - b * ngpus; // Remainder
 
+        // The buffer index
+        int bufidx = 0;
+        
         const auto a = hostidx[splitdim];
         if(a < r * (b + 1))
         {
-            ret[0]            = a / (b + 1);
-            ret[splitdim + 1] = a - ret[0] * (b + 1);
+            bufidx           = a / (b + 1);
+            dataidx[splitdim] = a - bufidx * (b + 1);
         }
         else
         {
-            ret[0]            = r + (a - r * (b + 1)) / b;
-            ret[splitdim + 1] = a - r * (b + 1) - (ret[0] - r) * b;
+            bufidx           = r + (a - r * (b + 1)) / b;
+            dataidx[splitdim] = a - r * (b + 1) - (bufidx - r) * b;
         }
 
-        return ret;
+        return std::make_pair(bufidx, dataidx);
     };
 
     // Fine, let's do a copy test and see what happens.
@@ -766,14 +771,16 @@ TEST_P(hipfftxtunitdesc, xtmemcpytest)
 
                 std::stringstream idxstrs;
                 idxstrs << hostidx[0] << " " << hostidx[1] << " " << hostidx[2] << " -> "
-                        << bufidx[0] << " " << bufidx[1] << " " << bufidx[2] << " " << bufidx[3]
+                        << bufidx.first
+                        << " " << bufidx.second[0] << " " << bufidx.second[1]
+                        << " " << bufidx.second[2]
                         << "\t";
 
                 const size_t hostoffset = std::inner_product(
                     std::begin(hostidx), std::end(hostidx), std::begin(hostdiststrides), 0);
-                const auto   igpu      = bufidx[0];
-                const size_t gpuoffset = std::inner_product(std::begin(bufidx) + 1,
-                                                            std::end(bufidx),
+                const auto   igpu      = bufidx.first;
+                const size_t gpuoffset = std::inner_product(std::begin(bufidx.second),
+                                                            std::end(bufidx.second),
                                                             std::begin(brick_diststrides[igpu]),
                                                             0);
                 if(isreal)
@@ -819,14 +826,16 @@ TEST_P(hipfftxtunitdesc, xtmemcpytest)
 
                     std::stringstream idxstrs;
                     idxstrs << hostidx[0] << " " << hostidx[1] << " " << hostidx[2] << " -> "
-                            << bufidx[0] << " " << bufidx[1] << " " << bufidx[2] << " " << bufidx[3]
+                            << bufidx.first << " "
+                            << bufidx.second[0] << " " << bufidx.second[1] << " "
+                            << bufidx.second[2]
                             << "\t";
 
                     const size_t hostoffset = std::inner_product(
                         std::begin(hostidx), std::end(hostidx), std::begin(hostdiststrides), 0);
-                    const auto   igpu      = bufidx[0];
-                    const size_t gpuoffset = std::inner_product(std::begin(bufidx) + 1,
-                                                                std::end(bufidx),
+                    const auto   igpu      = bufidx.first;
+                    const size_t gpuoffset = std::inner_product(std::begin(bufidx.second),
+                                                                std::end(bufidx.second),
                                                                 std::begin(brick_diststrides[igpu]),
                                                                 0);
                     if(isreal)
