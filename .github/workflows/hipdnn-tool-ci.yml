@@ -108,15 +108,19 @@ jobs:
           sparse-checkout: build_tools
           path: TheRock
 
+      # The no_rocm_image container's system python3 lacks the python3-venv
+      # package (`python3 -m venv` -> "ensurepip is not available") and the job
+      # runs as a NON-root user, so apt-get cannot install it. Use setup-python,
+      # which ships its own Python with a working ensurepip — same approach as
+      # the sibling therock-test-packages job that runs in this container.
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
       - name: Set up Python venv + base deps
         run: |
-          # The no_rocm_image container ships python3 WITHOUT the python3-venv
-          # package, so `python3 -m venv` fails ("ensurepip is not available").
-          # Install it first (container runs as root) so venv creation gets a
-          # working ensurepip and the downstream bare `pip install` steps work.
-          apt-get update
-          apt-get install -y python3-venv
-          python3 -m venv "$VENV_DIR"
+          python -m venv "$VENV_DIR"
           # shellcheck disable=SC1091
           source "$VENV_DIR/bin/activate"
           echo "$VENV_DIR/bin" >> "$GITHUB_PATH"
