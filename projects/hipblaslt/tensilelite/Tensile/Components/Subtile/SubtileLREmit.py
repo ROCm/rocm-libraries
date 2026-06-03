@@ -408,9 +408,17 @@ def _computeLROffset(module, kernel, tileInfo, colOffset, rowOffset):
   ldsKBytes = subIterKBytes if kernel.get("SubtileLdsSwizzle") else tileInfo.depthUBytes
   blockSize = ldsKBytes // loadWidth
 
+  # Each ds_load_b128 fills REGS_PER_DS_READ VGPRs.  Tiles with more VGPRs
+  # (e.g. 8-VGPR wave32 BF16 or wave64 FP8) need multiple reads.  Consecutive
+  # LR offset entries advance by colsPerRead = numMFMACols / numReadsForTile
+  # so entries within the same MMA tile cover equal K sub-portions.
+  REGS_PER_DS_READ = loadWidth // 4
+  numReadsForTile = tileInfo.geometry.lr.mmaLayout.vgprs // REGS_PER_DS_READ
+  colsPerRead = numMFMACols // numReadsForTile
+
   module.add(VMovB32(dst=vgpr(tileInfo.sharedVgprLROffset[0]), src=vgpr(colOffset), comment="%s: laneId"%tc))
   for vgprId in range(1, len(tileInfo.sharedVgprLROffset)):
-    module.add(VAddU32(dst=vgpr(tileInfo.sharedVgprLROffset[vgprId]), src0=vgpr(tileInfo.sharedVgprLROffset[vgprId-1]), src1=hex(numMFMACols), comment="%s: colOffset for MFMA %u of subtile"%(tc, vgprId)))
+    module.add(VAddU32(dst=vgpr(tileInfo.sharedVgprLROffset[vgprId]), src0=vgpr(tileInfo.sharedVgprLROffset[vgprId-1]), src1=hex(colsPerRead), comment="%s: colOffset for read %u"%(tc, vgprId)))
     module.add(VAndB32(dst=vgpr(tileInfo.sharedVgprLROffset[vgprId]), src0=vgpr(tileInfo.sharedVgprLROffset[vgprId]), src1=hex(blockSize-1), comment="%s: colOffset = colOffset %% block_size"%tc))
 
   for vgprId in range(0, len(tileInfo.sharedVgprLROffset)):
