@@ -300,7 +300,9 @@ from .sparse_iter import (
 from .pipeline import SoftwarePipeline
 from .i4_dequant import (
     dequant_i4_byte_to_bf8_pair,
+    dequant_i4_byte_to_f16_pair,
     dequant_i4_byte_to_fp8_pair,
+    unpack_i4_byte_to_pair_f16,
     unpack_i4_byte_to_pair_f32,
     unpack_i4_byte_to_pair_i32,
     unpack_i4_byte_to_pair_i8,
@@ -628,7 +630,9 @@ __all__ = [
     "quantize_scalar_f32",
     # i4 packed-weight dequant
     "dequant_i4_byte_to_bf8_pair",
+    "dequant_i4_byte_to_f16_pair",
     "dequant_i4_byte_to_fp8_pair",
+    "unpack_i4_byte_to_pair_f16",
     "unpack_i4_byte_to_pair_f32",
     "unpack_i4_byte_to_pair_i32",
     "unpack_i4_byte_to_pair_i8",

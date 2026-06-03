@@ -83,6 +83,29 @@
         {"family": "wmma", "a": "fp16", "b": "fp16", "c": "fp32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_f32_16x16x16_f16"},
         {"family": "wmma", "a": "bf16", "b": "bf16", "c": "fp32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_f32_16x16x16_bf16"}
       ]
+    },
+    "gfx1201": {
+      "_comment": "RDNA4 (Navi 48). WAVE32, WMMA not MFMA. Datalayout/triple inherited from RDNA3 backend (RDNA buffer SRD word3 0x31014000 + contiguous gfx11 waitcnt). WMMA 16x16x16 ABI differs from gfx11: NO cross-half operand duplication, A/B are <8 x half> per lane (intrinsic v8f16/v8i16), builtin __builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12; output column-distributed acc[j]=matrix[(lane/16)*8+j][lane%16]. Lane maps HYPOTHESIS — verify with examples/gfx1201/wmma_probe.py before trusting matmul_nbits.",
+      "family": "rdna",
+      "target_family": "gfx12_rdna",
+      "wave_size": 32,
+      "lds_capacity_bytes": 65536,
+      "vmcnt_bits": 6,
+      "memory": {
+        "has_async_lds": false,
+        "has_ds_read_tr": false,
+        "buffer_load_max_dwords": 4
+      },
+      "limits": {
+        "max_threads_per_block": 1024,
+        "vgprs": 256,
+        "agprs": 0,
+        "sgprs": 106
+      },
+      "mma": [
+        {"family": "wmma", "a": "fp16", "b": "fp16", "c": "fp32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_gfx12_f32_16x16x16_f16"},
+        {"family": "wmma", "a": "bf16", "b": "bf16", "c": "fp32", "m": 16, "n": 16, "k": 16, "op_id": "wmma_gfx12_f32_16x16x16_bf16"}
+      ]
     }
   }
 }

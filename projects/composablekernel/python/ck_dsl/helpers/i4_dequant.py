@@ -46,9 +46,11 @@ from .quant import quantize_scalar_f32
 
 __all__ = [
     "dequant_i4_byte_to_bf8_pair",
+    "dequant_i4_byte_to_f16_pair",
     "dequant_i4_byte_to_fp8_pair",
     "unpack_fp4_byte_to_pair_f32",
     "unpack_fp6_bytes_to_quad_f32",
+    "unpack_i4_byte_to_pair_f16",
     "unpack_i4_byte_to_pair_f32",
     "unpack_i4_byte_to_pair_i8",
 ]
@@ -117,6 +119,45 @@ def unpack_i4_byte_to_pair_f32(b: IRBuilder, packed_byte: Value) -> Tuple[Value,
     """One byte of packed i4 -> two f32 values (signed, in ``[-8, 7]``)."""
     low_i32, high_i32 = unpack_i4_byte_to_pair_i32(b, packed_byte)
     return b.sitofp_f32(low_i32), b.sitofp_f32(high_i32)
+
+
+def unpack_i4_byte_to_pair_f16(b: IRBuilder, packed_byte: Value) -> Tuple[Value, Value]:
+    """One byte of packed i4 -> two f16 values (signed, in ``[-8, 7]``).
+
+    f16 sibling of :func:`unpack_i4_byte_to_pair_f32`. The i4 range is
+    exactly representable in f16, so this is a lossless ``sitofp`` to f32
+    followed by a ``trunc`` to f16 (the AMDGPU backend has no direct
+    int->f16 convert for the WMMA input dtype).
+    """
+    low_f32, high_f32 = unpack_i4_byte_to_pair_f32(b, packed_byte)
+    return b.trunc_f32_to_f16(low_f32), b.trunc_f32_to_f16(high_f32)
+
+
+def dequant_i4_byte_to_f16_pair(
+    b: IRBuilder,
+    packed_byte: Value,
+    *,
+    scale: Value,
+) -> Tuple[Value, Value]:
+    """Full i4 -> f16 dequant for one packed byte (WMMA prep).
+
+    Pipeline (per element)::
+
+        i32 = sext(sign_extract(byte, 4-bit field))
+        f32 = sitofp(i32)
+        f16 = trunc_f32_to_f16(f32 * scale)
+
+    Returns ``(low_f16, high_f16)`` ready to feed ``wmma_f32_16x16x16_f16``.
+    Unlike the fp8 / bf8 siblings this multiplies by the *forward* per-group
+    ``scale`` (not an inverse) because the i4 weights are being reconstructed
+    to their original magnitude, not re-quantised. The multiply runs in f32
+    and the result is truncated once to f16 so the WMMA atom sees its native
+    input dtype.
+    """
+    low_f32, high_f32 = unpack_i4_byte_to_pair_f32(b, packed_byte)
+    low_f16 = b.trunc_f32_to_f16(b.fmul(low_f32, scale))
+    high_f16 = b.trunc_f32_to_f16(b.fmul(high_f32, scale))
+    return low_f16, high_f16
 
 
 def dequant_i4_byte_to_fp8_pair(

@@ -244,6 +244,17 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x16.bf16.v8f32.v16i16("
         "<16 x i16>, <16 x i16>, <8 x float>)"
     ),
+    # RDNA4 (gfx12) WMMA — wave32 16x16x16. No cross-half operand duplication:
+    # A/B are <8 x half> / <8 x i16> per lane (vs <16 x ...> on gfx11). Emission
+    # goes through Gfx12RdnaBackend.emit_wmma.
+    "wmma.gfx12.f32.16x16x16.f16": (
+        "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x16.f16.v8f32.v8f16("
+        "<8 x half>, <8 x half>, <8 x float>)"
+    ),
+    "wmma.gfx12.f32.16x16x16.bf16": (
+        "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x16.bf16.v8f32.v8i16("
+        "<8 x i16>, <8 x i16>, <8 x float>)"
+    ),
     "mfma.f32.16x16x16f16": (
         "declare <4 x float> @llvm.amdgcn.mfma.f32.16x16x16f16("
         "<4 x half>, <4 x half>, <4 x float>, "
