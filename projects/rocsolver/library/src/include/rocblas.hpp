@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -1595,6 +1595,77 @@ rocblas_status rocblasCall_trmm(rocblas_handle handle,
         handle, side, uplo, transA, diag, m, n, alpha, stride_alpha, A, offsetA, lda, strideA,
         cast2constType<T>(workArr), offsetB, ldb, strideB, cast2constPointer<T>(workArr), offsetB,
         ldb, strideB, batch_count);
+}
+
+// trmm out-of-place
+template <typename T>
+rocblas_status rocblasCall_trmm(rocblas_handle handle,
+                                rocblas_side side,
+                                rocblas_fill uplo,
+                                rocblas_operation transA,
+                                rocblas_diagonal diag,
+                                rocblas_int m,
+                                rocblas_int n,
+                                const T* alpha,
+                                rocblas_stride stride_alpha,
+                                const T* A,
+                                rocblas_stride offsetA,
+                                rocblas_int lda,
+                                rocblas_stride strideA,
+                                const T* B,
+                                rocblas_stride offsetB,
+                                rocblas_int ldb,
+                                rocblas_stride strideB,
+                                T* C,
+                                rocblas_stride offsetC,
+                                rocblas_int ldc,
+                                rocblas_stride strideC,
+                                rocblas_int batch_count,
+                                T** workArr = nullptr)
+{
+    // TODO: How to get alpha for trace logging
+    ROCBLAS_ENTER("trmm", "side:", side, "uplo:", uplo, "trans:", transA, "diag:", diag, "m:", m,
+                  "n:", n, "shiftA:", offsetA, "lda:", lda, "shiftB:", offsetB, "ldb:", ldb,
+                  "shiftC:", offsetC, "ldc:", ldc, "bc:", batch_count);
+
+    return rocblas_internal_trmm_template(handle, side, uplo, transA, diag, m, n, alpha,
+                                          stride_alpha, A, offsetA, lda, strideA, B, offsetB, ldb,
+                                          strideB, C, offsetC, ldc, strideC, batch_count);
+}
+
+template <typename T>
+rocblas_status rocblasCall_trmm(rocblas_handle handle,
+                                rocblas_side side,
+                                rocblas_fill uplo,
+                                rocblas_operation transA,
+                                rocblas_diagonal diag,
+                                rocblas_int m,
+                                rocblas_int n,
+                                const T* alpha,
+                                rocblas_stride stride_alpha,
+                                const T* const* A,
+                                rocblas_stride offsetA,
+                                rocblas_int lda,
+                                rocblas_stride strideA,
+                                const T* const* B,
+                                rocblas_stride offsetB,
+                                rocblas_int ldb,
+                                rocblas_stride strideB,
+                                T* const* C,
+                                rocblas_stride offsetC,
+                                rocblas_int ldc,
+                                rocblas_stride strideC,
+                                rocblas_int batch_count,
+                                T** workArr = nullptr)
+{
+    // TODO: How to get alpha for trace logging
+    ROCBLAS_ENTER("trmm", "side:", side, "uplo:", uplo, "trans:", transA, "diag:", diag, "m:", m,
+                  "n:", n, "shiftA:", offsetA, "lda:", lda, "shiftB:", offsetB, "ldb:", ldb,
+                  "shiftC:", offsetC, "ldc:", ldc, "bc:", batch_count);
+
+    return rocblas_internal_trmm_batched_template(
+        handle, side, uplo, transA, diag, m, n, alpha, stride_alpha, A, offsetA, lda, strideA, B,
+        offsetB, ldb, strideB, C, offsetC, ldc, strideC, batch_count);
 }
 
 // syr2/her2

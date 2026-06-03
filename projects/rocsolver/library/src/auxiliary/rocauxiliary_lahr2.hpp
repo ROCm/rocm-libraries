@@ -567,15 +567,6 @@ rocblas_status rocsolver_lahr2_template(rocblas_handle handle,
     // ------------------------------------------------------------------------
     if(k > 0)
     {
-        // Y(0:k-1, 0:nb-1) = A(0:k-1, 1:nb)
-        {
-            rocblas_int bx = (k - 1) / 32 + 1;
-            rocblas_int by = (nb - 1) / 32 + 1;
-            ROCSOLVER_LAUNCH_KERNEL((copy_mat<T, U, T*>), dim3(bx, by, batch_count),
-                                    dim3(32, 32, 1), 0, stream, k, nb, A, shiftA + idx2D(0, 1, lda),
-                                    lda, strideA, Y, shiftY, ldy, strideY);
-        }
-
         // rocblas_internal_trmm_template may recursively call rocblas_internal_gemm_64 with
         // host-side beta constants (&beta_1<T>). If the handle is in device pointer mode those
         // host addresses are misinterpreted as device pointers, corrupting results.  Switch to
@@ -583,10 +574,11 @@ rocblas_status rocsolver_lahr2_template(rocblas_handle handle,
         static const T one = T(1);
         rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
 
-        // Y(0:k-1,:) *= V1  (right trmm: Y = Y * V1, V1 = A(k:k+nb-1, 0:nb-1) lower unit)
+        // Y(0:k-1,:) = A(0:k-1, 1:nb) * A(k:k+nb-1, 0:nb-1) (lower unit right trmm)
         rocblasCall_trmm<T>(handle, rocblas_side_right, rocblas_fill_lower, rocblas_operation_none,
                             rocblas_diagonal_unit, k, nb, &one, 0, A, shiftA + idx2D(k, 0, lda),
-                            lda, strideA, Y, shiftY, ldy, strideY, batch_count, (T**)work_workArr);
+                            lda, strideA, A, shiftA + idx2D(0, 1, lda), lda, strideA, Y, shiftY,
+                            ldy, strideY, batch_count, (T**)work_workArr);
 
         if(n > k + nb)
         {
