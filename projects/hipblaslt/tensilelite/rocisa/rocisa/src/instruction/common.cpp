@@ -642,6 +642,7 @@ void common_inst(nb::module_ m_common)
              nb::arg("clusterBarrier") = false,
              nb::arg("comment") = "")
         .def("getParams", &rocisa::SBarrier::getParams)
+        .def_prop_ro("isClusterBarrier", &rocisa::SBarrier::getClusterBarrier)
         .def("__str__", &rocisa::SBarrier::toString)
         .def("__deepcopy__",
              [](const rocisa::SBarrier& self, nb::dict&) { return new rocisa::SBarrier(self); });

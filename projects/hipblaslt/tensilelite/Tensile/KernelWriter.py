@@ -37,7 +37,7 @@ from rocisa.instruction import BufferLoadB128, BufferLoadB192, BufferLoadB32, Bu
   FlatLoadB64, FlatStoreB128, FlatStoreB32, FlatStoreB64, Instruction, MacroInstruction, \
   MFMAInstruction, MXMFMAInstruction, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpEQU32, SCmpLeU32, \
   SMFMAInstruction, SNop, SEndpgm, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, SLShiftRightB32, \
-  SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpEQU32, VCndMaskB32, VMovB64, VNop, VReadfirstlaneB32, \
+  SLongBranchPositive, TensorLoadToLds, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpEQU32, VCndMaskB32, VMovB64, VNop, VReadfirstlaneB32, \
   Instruction
 from rocisa.register import RegisterPool
 from rocisa.enum import RegisterType, DataTypeEnum
@@ -52,7 +52,7 @@ from .SolutionStructs import Solution, isPackedIndex
 from .SolutionStructs.Utilities import getMiInputType
 from .AsmMemoryInstruction import MemoryInstruction
 from .Activation import ActivationModule
-from .Common import printWarning, roundUp, print2, DebugConfig, DataDirection, \
+from .Common import printExit, printWarning, roundUp, print2, DebugConfig, DataDirection, \
   INDEX_CHARS, IsaVersion, log2
 from .Common.GlobalParameters import globalParameters
 from Tensile.SolutionStructs.Naming import getKernelNameMin
@@ -2994,6 +2994,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     module.addComment2("End setupNewTile")
 
+    self._assertBarrierToLoadInvariant(kernel, module, "prefetch (setupNewTile)")
     return module
 
   ##############################################################################
@@ -3531,6 +3532,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         NLLindexLast = (NLLindex == NLLnum - 1)
         module.add(self.closeLoop(kernel, tensorParametersA, tensorParametersB, -2, finalLoop, skipCondJumpCounter=u, NLLindexLast=NLLindexLast))
 
+    self._assertBarrierToLoadInvariant(kernel, module, "noLoadLoopBody")
     return module
 
   ##############################################################################
@@ -4423,6 +4425,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # initC (no EPS, no HalfPLR): closeLoop(finalLoop=False) does dec + exit-check
           module.add(self.closeLoop(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, finalLoop=False, oddLabel=False))
 
+    self._assertBarrierToLoadInvariant(kernel, module, "loopBody")
     return module
 
   ##############################################################################
@@ -9592,6 +9595,27 @@ class KernelWriter(metaclass=abc.ABCMeta):
       return tdmWait(self.states, kernel, tPA, tPB, skipGlobalRead, comment)
     return wait(self.states, kernel, tPA, tPB, skipGlobalRead, \
       skipLocalWrite, skipLocalRead, self.db["ConservativeWaitCnt"], comment, skipGlobalReadInst)
+
+  ##############################################################################
+  # Region invariant: SBarriers must not exceed TensorLoadToLds count.
+  # On TDM-capable hardware StinkyTofu's DAG scheduler and waitcnt insertion
+  # pass rely on a token-per-load bookkeeping scheme that extra barriers break.
+  # Devs occasionally fix a bug by adding a barrier instead of fixing the
+  # instruction order; this catches that at generation time.
+  ##############################################################################
+  def _assertBarrierToLoadInvariant(self, kernel, module, regionName):
+    if not (kernel["enableTDMA"] or kernel["enableTDMB"]):
+      return
+    items = module.flatitems()
+    barriers = sum(1 for i in items if isinstance(i, SBarrier) and not i.isClusterBarrier)
+    loads    = sum(1 for i in items if isinstance(i, TensorLoadToLds))
+    if barriers > loads:
+      printExit(
+        "%s: emitted %u SBarrier but only %u TensorLoadToLds (kernel: %s). "
+        "Extra barriers in this region corrupt StinkyTofu's DAG/waitcnt token "
+        "bookkeeping. Fix the instruction sequence instead of adding a barrier."
+        % (regionName, barriers, loads, self.states.kernelName)
+      )
 
   ##############################################################################
   # SyncThreads
