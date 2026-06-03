@@ -552,12 +552,22 @@ main.py parse build.ninja --workspace-root $WS                        # -> enhan
 filter_oracle.py coverage --pre pre_depmap.json --post enhanced_dependency_mapping.json --ctest ctest_list.txt --output coverage_result.json
 ```
 
-`coverage_result.json` fields:
-- `coverage` — covered edges / total real edges (toward the ≥99% run-accuracy goal).
+`coverage_result.json` fields (three framings — see below for which to cite):
+- `coverage` — **edge-level**: covered `file→test` edges / total. Header-weighted
+  (a heavily-included header is one edge per dependent test), so it's the optimistic
+  bound — not the headline run-accuracy number.
+- `file_coverage` — **file-level**: of source files with tests, the fraction that
+  resolve to *all* their tests. The decision-relevant view (a PR changes files).
+- `test_coverage` — **test-level**: of tests, the fraction with *every* source dep
+  captured. Pessimistic (one missing edge fails the whole test); maps most literally
+  to the "≥99% running needed tests" criterion.
+- `codegen_credited` (with `--codegen-inventory`) — the file/test numbers with the
+  codegen-class tests excluded (their generated sources are the §7 backstop's job,
+  not the depmap's).
 - `scope` — `source` (default) or `all` (with `--include-nonsource`).
-- `false_negatives` — `{file: [tests]}` the real build proves but the depmap lacks
-  (extraction gaps the filter would silently skip). The list to drive to zero.
-- `n_edges_post`, `n_edges_covered`, `verdict`.
+- `false_negatives` — `{file: [tests]}` the real build proves but the depmap lacks;
+  `tests_with_fn` — the affected test names. The lists to drive to zero.
+- `n_edges_*`, `n_files_*`, `n_tests_*`, `verdict`.
 
 This is the cheap path to the run-accuracy signal: the expensive build already
 happened nightly; the diff costs `cmake-parse` (minutes) + one `ninja -t deps`
@@ -570,9 +580,10 @@ both sides, so `--pre` and `--post` may use different `--workspace-root`s
 project-root). By default coverage counts **PR-editable source only** — `build/`
 outputs, vendored deps (gtest under `build/_deps`) and system headers are excluded
 because the pre-build depmap never tracks them (so they'd otherwise read as a flood
-of spurious FNs, e.g. a ~2.6% vs ~99.97% number). Pass `--include-nonsource` for
-the raw diff. A real gfx942 build measured **99.97%** source coverage, with the
-residual FNs isolated to the `gemm_streamk` build-time codegen cluster.
+of spurious FNs — e.g. ~2.6% with them vs ~99.97% edge-level without). Pass
+`--include-nonsource` for the raw diff. A real gfx942 build measured **file 99.81% /
+test 97.72%** raw (edge-level 99.97%), and **100% / 100% crediting the codegen
+backstop** — the residual FNs are all the `gemm_streamk` build-time codegen cluster.
 
 To reproduce on any full build dir: run the three commands above in it.
 
@@ -595,15 +606,19 @@ python3 $DP/main.py cmake-parse compile_commands.json build.ninja --workspace-ro
 python3 $DP/main.py parse build.ninja --workspace-root .          # -> enhanced_dependency_mapping.json
 ctest -N > ctest_list.txt
 python3 $DP/filter_oracle.py coverage --pre pre_depmap.json --post enhanced_dependency_mapping.json \
-    --ctest ctest_list.txt --output coverage_result.json
+    --ctest ctest_list.txt --codegen-inventory $DP/codegen_blindspots.json --output coverage_result.json
 ```
 
-Read `coverage_result.json`: `coverage` is the run-accuracy number (`scope: source`,
-PR-editable files only — see D14); `false_negatives` lists the files to drive to
-zero. Keys are canonicalized, so `--pre`/`--post` workspace-roots need not match.
-A GPU isn't required — the build only needs to **compile** (`ninja tests`), not run.
-Latest: **99.97%** on a gfx942 build, residual FNs all in the `gemm_streamk` codegen
-cluster (now safety-backstopped, §7).
+Cite the **test-level** number (`test_coverage`) against the ≥99% criterion, and the
+**file-level** (`file_coverage`) as the practical "did each changed file get all its
+tests" view; the edge-level `coverage` is header-weighted and overstates. `false_negatives`
+/ `tests_with_fn` list what to drive to zero. With `--codegen-inventory`, the
+`codegen_credited` block reports the numbers with the codegen-class excluded (those
+are the §7 backstop's responsibility). Keys are canonicalized, so `--pre`/`--post`
+workspace-roots need not match. A GPU isn't required — the build only needs to
+**compile** (`ninja tests`), not run.
+Latest (gfx942): **file 99.81% / test 97.72%** raw → **100% / 100%** crediting the
+codegen backstop; all residual FNs are the `gemm_streamk` codegen cluster (§7).
 
 ### Skip accuracy (≥95%) — PR-corpus audit
 
