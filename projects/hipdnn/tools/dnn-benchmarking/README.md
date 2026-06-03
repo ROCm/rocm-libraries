@@ -100,22 +100,31 @@ The extraction progress is reported on stderr:
 Extracted 42 graph(s) from ./Workloads/conv_workloads.tar.gz
 ```
 
-### A/B Testing
+### Engine Comparison
 
-Compare two different plugin/engine configurations and validate accuracy:
+Run multiple engines by passing comma-separated engine IDs. Plugin paths may be
+a single shared directory or a comma-separated list matching `--engine` order.
 
 ```bash
-# Compare two different engines on the default plugin
-dnn-benchmark --graph ./graphs/sample_conv_fwd.json --AId 1 --BId 2
+# Compare two engines on the default plugin path
+python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json \
+  --engine 1,2
 
-# Compare two different plugins with specific engine IDs
-dnn-benchmark --graph ./graphs/sample_conv_fwd.json \
-  --APath /path/to/pluginA --AId 1 \
-  --BPath /path/to/pluginB --BId 2
+# Compare two plugin directories with specific engine IDs
+python -m dnn_benchmarking --graph ./graphs/sample_conv_fwd.json \
+  --engine 1,2 \
+  --plugin-path /path/to/pluginA,/path/to/pluginB
+```
 
-# With custom tolerance for accuracy comparison
-dnn-benchmark --graph ./graphs/sample_conv_fwd.json \
-  --AId 1 --BId 2 --rtol 1e-3 --atol 1e-6
+### Config Files
+
+Use `--config` for repeatable benchmark recipes. CLI flags override config
+values, so a recipe can be reused with per-run workload or iteration changes.
+Relative paths in a config file are resolved from that config file's directory.
+
+```bash
+python -m dnn_benchmarking --config sample_configs/basic.toml.example --graph ./graphs/sample_conv_fwd.json
+python -m dnn_benchmarking --config sample_configs/config.toml.example --iters 500
 ```
 
 ### CLI Options
@@ -124,7 +133,8 @@ dnn-benchmark --graph ./graphs/sample_conv_fwd.json \
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--graph`, `-g` | Path to a JSON graph file, glob pattern (e.g. `'graphs/*.json'`), or tarball (`.tar`, `.tar.gz`, `.tgz`, `.tar.bz2`, `.tar.xz`) containing JSON graph files | Required |
+| `--graph`, `-g` | Path to a JSON graph file, glob pattern (e.g. `'graphs/*.json'`), or tarball (`.tar`, `.tar.gz`, `.tgz`, `.tar.bz2`, `.tar.xz`) containing JSON graph files | Required unless provided by `--config` |
+| `--config` | TOML benchmark recipe; CLI flags override config values | None |
 | `--warmup`, `-w` | Number of warmup iterations | 10 |
 | `--iters`, `-i` | Number of benchmark iterations | 100 |
 | `--engine`, `-e` | Engine ID or comma-separated list (e.g. `1` or `1,2,3`); default = all discovered engines | None |
@@ -142,28 +152,17 @@ dnn-benchmark --graph ./graphs/sample_conv_fwd.json \
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--validate` | Reference provider for correctness validation: `pytorch`, `cpu_plugin`, or `none` | `none` |
+| `--validate` | Reference provider for correctness validation: `pytorch`, `cpu_plugin`, or `none`. `--validate pytorch` also reports a timed PyTorch reference row when PyTorch GPU execution is available. | `none` |
 
 #### Suite Options
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--plugin-path` | Path to directory containing hipDNN engine plugin `.so` files | None (system default) |
-
-#### A/B Testing Options
-
-| Option | Description | Default |
-|--------|-------------|---------|
-| `--APath` | Plugin path for configuration A | None (default) |
-| `--AId` | Engine ID for configuration A | Required for A/B |
-| `--BPath` | Plugin path for configuration B | None (default) |
-| `--BId` | Engine ID for configuration B | Required for A/B |
-
-**Note**: A/B testing mode is enabled when both `--AId` and `--BId` are specified.
+| `--plugin-path` | Plugin directory, or comma-separated plugin directories matching `--engine` order | None (system default) |
 
 #### Comparison Options
 
-Used by A/B testing, reference validation, and suite-mode tolerance checks.
+Used by reference validation and suite-mode tolerance checks.
 
 | Option | Description | Default |
 |--------|-------------|---------|
@@ -317,7 +316,14 @@ engine plugin builds.
 
 **Note:** Set `LD_LIBRARY_PATH=/opt/rocm/lib` when running GPU tests to ensure hipdnn_frontend can load ROCm libraries.
 
+Strict profiling tests that require real profiler artifacts are skipped by
+default. Run them explicitly on a known-good profiling host:
+
+```bash
+LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH pytest --profiling-strict -m profiling_strict
+```
+
 ## Limitations
 
 - CPU reference validation is not yet implemented (CPU reference plugin not yet available in Python bindings)
-- A/B testing uses `np.allclose()` for accuracy comparison between configurations
+- Engine comparison and timed validation-provider rows are reported side by side. Reference rows are timing baselines and are not counted as hipDNN engine pass/fail combinations.

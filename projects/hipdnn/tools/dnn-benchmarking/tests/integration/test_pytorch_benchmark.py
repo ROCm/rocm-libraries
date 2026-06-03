@@ -10,6 +10,7 @@ import pytest
 
 from dnn_benchmarking.config.benchmark_config import BenchmarkConfig
 from dnn_benchmarking.execution import pytorch_ops
+from dnn_benchmarking.execution.buffer_manager import generate_input_data
 from dnn_benchmarking.execution.pytorch_buffer_manager import PyTorchCudaBufferManager
 from dnn_benchmarking.execution.pytorch_executor import (
     PyTorchCudaExecutor,
@@ -134,6 +135,25 @@ class TestPyTorchCudaBufferManager:
         for uid in data1:
             if data1[uid] is not None and data2[uid] is not None:
                 assert np.allclose(data1[uid], data2[uid])
+
+    def test_load_input_data_uses_shared_input_map(self, sample_conv_graph):
+        """Pre-generated inputs can be loaded without regenerating per run."""
+        if not _is_torch_available():
+            pytest.skip("PyTorch GPU not available")
+
+        graph_json, _ = sample_conv_graph
+        loader = GraphLoader()
+        tensor_infos = loader.extract_tensor_info(graph_json)
+        input_data = generate_input_data(tensor_infos, seed=123)
+
+        with PyTorchCudaBufferManager(tensor_infos) as buffer_manager:
+            buffer_manager.allocate_all()
+            buffer_manager.load_input_data(input_data)
+
+            for uid, expected in input_data.items():
+                actual = buffer_manager.get_input_data(uid)
+                if actual is not None:
+                    assert actual.shape == expected.shape
 
 
 class TestPyTorchCudaExecutor:

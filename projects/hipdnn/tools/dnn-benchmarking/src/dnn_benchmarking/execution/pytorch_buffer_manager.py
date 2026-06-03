@@ -9,6 +9,7 @@ import numpy as np
 import torch
 
 from ..graph.tensor_info import TensorInfo
+from .buffer_manager import generate_input_data
 
 # Map data type strings to torch dtypes
 TORCH_DTYPE_MAP = {
@@ -19,17 +20,6 @@ TORCH_DTYPE_MAP = {
     "int8": torch.int8,
     "int32": torch.int32,
     "uint8": torch.uint8,
-}
-
-# Map data type strings to numpy dtypes (for random generation)
-NUMPY_DTYPE_MAP = {
-    "float": np.float32,
-    "half": np.float16,
-    "bfloat16": np.float32,  # numpy doesn't have bfloat16
-    "double": np.float64,
-    "int8": np.int8,
-    "int32": np.int32,
-    "uint8": np.uint8,
 }
 
 
@@ -97,6 +87,33 @@ class PyTorchCudaBufferManager:
             return host.to(dtype=torch.float32).numpy()
         return host.numpy()
 
+    def load_input_data(self, input_data: Dict[int, np.ndarray]) -> None:
+        """Copy pre-generated graph input data into CUDA tensors.
+
+        The host-to-device copy happens before timing starts so PyTorch
+        reference rows preserve the same timing semantics as hipDNN rows.
+        """
+        for tensor_info in self._tensor_infos:
+            if tensor_info.is_output or tensor_info.is_virtual:
+                continue
+
+            data = input_data.get(tensor_info.uid)
+            if data is None:
+                if tensor_info.is_pass_by_value:
+                    data = np.asarray([tensor_info.value])
+                else:
+                    raise ValueError(
+                        f"Missing input data for tensor UID {tensor_info.uid}"
+                    )
+
+            tensor = self._tensors.get(tensor_info.uid)
+            if tensor is None:
+                continue
+
+            host_tensor = torch.from_numpy(np.asarray(data))
+            tensor.copy_(host_tensor.to(dtype=tensor.dtype, device=self._device))
+            self._host_data[tensor_info.uid] = self._host_numpy(tensor)
+
     def fill_inputs_random(self, seed: Optional[int] = None) -> None:
         """Fill input tensor buffers with random data.
 
@@ -104,29 +121,9 @@ class PyTorchCudaBufferManager:
             seed: Optional random seed for reproducibility.
         """
         if seed is not None:
-            np.random.seed(seed)
             torch.manual_seed(seed)
 
-        for tensor_info in self._tensor_infos:
-            if tensor_info.is_output or tensor_info.is_virtual:
-                continue
-
-            if tensor_info.is_pass_by_value:
-                continue
-
-            tensor = self._tensors.get(tensor_info.uid)
-            if tensor is None:
-                continue
-
-            # Generate random data on CPU (for reproducibility with numpy)
-            np_dtype = NUMPY_DTYPE_MAP.get(tensor_info.data_type.lower(), np.float32)
-            data = np.random.uniform(0.0, 1.0, tensor_info.dims).astype(np_dtype)
-
-            # Copy to CUDA tensor, then store the logical value that is actually
-            # present after device dtype conversion (BF16 is represented as FP32
-            # in numpy because numpy has no native bfloat16 dtype).
-            tensor.copy_(torch.from_numpy(data))
-            self._host_data[tensor_info.uid] = self._host_numpy(tensor)
+        self.load_input_data(generate_input_data(self._tensor_infos, seed))
 
     def zero_outputs(self) -> None:
         """Zero output tensor buffers."""

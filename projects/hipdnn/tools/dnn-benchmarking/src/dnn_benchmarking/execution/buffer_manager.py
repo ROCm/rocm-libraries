@@ -151,6 +151,45 @@ def _encode_bfloat16_dense_to_storage_bytes(
     return storage.tobytes()
 
 
+def generate_input_data(
+    tensor_infos: List[TensorInfo], seed: Optional[int] = None
+) -> Dict[int, np.ndarray]:
+    """Generate one graph-scoped logical input map.
+
+    Returned arrays use the validation representation consumed by both hipDNN
+    and reference providers: dense logical ndarrays keyed by tensor UID. BF16
+    values are generated as FP32, rounded through BF16 storage, then decoded
+    back to numeric FP32 because NumPy has no native bfloat16 dtype.
+    """
+    rng = np.random.RandomState(seed)
+    input_data: Dict[int, np.ndarray] = {}
+
+    for tensor_info in tensor_infos:
+        if tensor_info.is_output or tensor_info.is_virtual:
+            continue
+
+        dtype_key = tensor_info.data_type.lower()
+        if tensor_info.is_pass_by_value:
+            dtype = DTYPE_MAP.get(dtype_key, np.float32)
+            input_data[tensor_info.uid] = np.asarray([tensor_info.value], dtype=dtype)
+            continue
+
+        if dtype_key == "bfloat16":
+            data_f32 = rng.uniform(0.0, 1.0, tensor_info.dims).astype(np.float32)
+            raw_bytes = _encode_bfloat16_dense_to_storage_bytes(data_f32, tensor_info)
+            input_data[tensor_info.uid] = _bfloat16_storage_bytes_to_ndarray(
+                raw_bytes, tensor_info
+            )
+            continue
+
+        dtype = DTYPE_MAP.get(dtype_key, np.float32)
+        input_data[tensor_info.uid] = rng.uniform(0.0, 1.0, tensor_info.dims).astype(
+            dtype
+        )
+
+    return input_data
+
+
 class BufferManager:
     """Manages device buffer allocation and data transfer for graph execution.
 
@@ -234,6 +273,39 @@ class BufferManager:
         if buffer:
             buffer.copy_from_host(raw_bytes)
 
+    def load_input_data(self, input_data: Dict[int, np.ndarray]) -> None:
+        """Copy pre-generated graph input data into device buffers.
+
+        Input generation and host-to-device copies are intentionally separate
+        from benchmark timing. Call this after ``allocate_all`` and before
+        creating the variant pack.
+        """
+        if not self._buffers:
+            raise ExecutionError("Buffers not allocated. Call allocate_all() first.")
+
+        for tensor_info in self._tensor_infos:
+            if tensor_info.is_output or tensor_info.is_virtual:
+                continue
+
+            data = input_data.get(tensor_info.uid)
+            if data is None:
+                if tensor_info.is_pass_by_value:
+                    dtype = DTYPE_MAP.get(tensor_info.data_type.lower(), np.float32)
+                    self._host_data[tensor_info.uid] = np.asarray(
+                        [tensor_info.value], dtype=dtype
+                    )
+                    continue
+                raise ExecutionError(
+                    f"Missing input data for tensor UID {tensor_info.uid}"
+                )
+
+            if tensor_info.is_pass_by_value:
+                dtype = DTYPE_MAP.get(tensor_info.data_type.lower(), np.float32)
+                self._host_data[tensor_info.uid] = np.asarray(data, dtype=dtype)
+                continue
+
+            self._copy_logical_data_to_buffer(tensor_info.uid, data)
+
     def fill_inputs_random(self, seed: Optional[int] = None) -> None:
         """Fill input tensor buffers with random data.
 
@@ -246,27 +318,7 @@ class BufferManager:
         if not self._buffers:
             raise ExecutionError("Buffers not allocated. Call allocate_all() first.")
 
-        rng = np.random.RandomState(seed)
-
-        for tensor_info in self._tensor_infos:
-            if tensor_info.is_output or tensor_info.is_virtual:
-                continue
-
-            if tensor_info.is_pass_by_value:
-                dtype = DTYPE_MAP.get(tensor_info.data_type.lower(), np.float32)
-                self._host_data[tensor_info.uid] = np.asarray(
-                    [tensor_info.value], dtype=dtype
-                )
-                continue
-
-            dtype_key = tensor_info.data_type.lower()
-            if dtype_key == "bfloat16":
-                data = rng.uniform(0.0, 1.0, tensor_info.dims).astype(np.float32)
-            else:
-                dtype = DTYPE_MAP.get(dtype_key, np.float32)
-                data = rng.uniform(0.0, 1.0, tensor_info.dims).astype(dtype)
-
-            self._copy_logical_data_to_buffer(tensor_info.uid, data)
+        self.load_input_data(generate_input_data(self._tensor_infos, seed))
 
     def zero_outputs(self) -> None:
         """Zero output tensor buffers.

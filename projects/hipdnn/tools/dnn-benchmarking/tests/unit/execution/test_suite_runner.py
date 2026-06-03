@@ -23,6 +23,7 @@ from dnn_benchmarking.reporting.suite_results import (
     GraphResult,
     ProviderEngineResult,
 )
+from dnn_benchmarking.validation.reference_provider import ReferenceOutput
 
 
 def _make_tensor_info(
@@ -30,6 +31,9 @@ def _make_tensor_info(
     is_output: bool = False,
     is_virtual: bool = False,
     data_type: str = "float",
+    dims=None,
+    strides=None,
+    value=None,
 ):
     """Create a mock TensorInfo object."""
     ti = MagicMock()
@@ -37,6 +41,12 @@ def _make_tensor_info(
     ti.is_output = is_output
     ti.is_virtual = is_virtual
     ti.data_type = data_type
+    ti.dims = dims or [1]
+    ti.strides = strides or []
+    ti.value = value
+    ti.is_pass_by_value = value is not None
+    ti.storage_elements = 1
+    ti.size_bytes = 4
     return ti
 
 
@@ -753,25 +763,181 @@ class TestCorrectnessChecking:
         assert r.correctness.execution_success is False
         assert r.correctness.tolerance_match is None
 
+    @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
+    @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
+    @patch("dnn_benchmarking.execution.suite_runner._check_correctness")
+    @patch("dnn_benchmarking.execution.suite_runner.Executor")
+    @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
+    def test_reference_outputs_computed_once_for_multiple_engines(
+        self,
+        mock_bm_cls,
+        mock_exec_cls,
+        mock_check_corr,
+        mock_get_ref,
+        mock_resolve_name,
+    ):
+        """Reference provider runs once per graph and feeds every engine."""
+        mock_resolve_name.side_effect = lambda eid: f"engine_{eid}"
+        ref_outputs = {
+            2: ReferenceOutput(data=np.array([1.0], dtype=np.float32), tensor_uid=2)
+        }
+        ref_provider = MagicMock()
+        ref_provider.name = "cpu_plugin"
+        ref_provider.compute_reference.return_value = ref_outputs
+        mock_get_ref.return_value = ref_provider
+        mock_check_corr.return_value = CorrectnessResult(
+            execution_success=True,
+            tolerance_match=True,
+            rtol=1e-5,
+            atol=1e-6,
+        )
+        mock_exec_cls.side_effect = _make_exec_factory(engine_ids=[1, 2])
+        mock_bm_cls.return_value = _make_bm_mock()
+
+        result = run_graph_all_providers(
+            graph_path=Path("test.json"),
+            graph_json=_make_graph_json(),
+            tensor_infos=[_make_tensor_info(1), _make_tensor_info(2, is_output=True)],
+            config=_make_config(reference_provider="cpu_plugin"),
+            handle=MagicMock(),
+        )
+
+        assert [r.engine_id for r in result.results] == [1, 2]
+        assert ref_provider.compute_reference.call_count == 1
+        assert mock_check_corr.call_count == 2
+        for call_args in mock_check_corr.call_args_list:
+            assert call_args.args[3] is ref_outputs
+
+    @patch("dnn_benchmarking.execution.suite_runner._run_timed_pytorch_reference")
+    @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
+    @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
+    @patch("dnn_benchmarking.execution.suite_runner._check_correctness")
+    @patch("dnn_benchmarking.execution.suite_runner.Executor")
+    @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
+    def test_validate_pytorch_adds_timed_reference_row(
+        self,
+        mock_bm_cls,
+        mock_exec_cls,
+        mock_check_corr,
+        mock_get_ref,
+        mock_resolve_name,
+        mock_timed_reference,
+    ):
+        """--validate pytorch adds a timed reference row and reuses its outputs."""
+        mock_resolve_name.return_value = "engine_1"
+        ref_outputs = {
+            2: ReferenceOutput(data=np.array([1.0], dtype=np.float32), tensor_uid=2)
+        }
+        ref_provider = MagicMock()
+        ref_provider.name = "pytorch"
+        mock_get_ref.return_value = ref_provider
+        timed_result = ProviderEngineResult(
+            provider="pytorch",
+            engine_id=0,
+            status="success",
+            role="reference",
+            e2e_stats=BenchmarkStats.from_timings([2.0]),
+            gpu_kernel_stats=BenchmarkStats.from_timings([1.0]),
+        )
+        mock_timed_reference.return_value = MagicMock(
+            result=timed_result,
+            outputs=ref_outputs,
+        )
+        mock_check_corr.return_value = CorrectnessResult(
+            execution_success=True,
+            tolerance_match=True,
+            rtol=1e-5,
+            atol=1e-6,
+        )
+        mock_exec_cls.side_effect = _make_exec_factory(engine_ids=[1])
+        mock_bm_cls.return_value = _make_bm_mock()
+
+        result = run_graph_all_providers(
+            graph_path=Path("test.json"),
+            graph_json=_make_graph_json(),
+            tensor_infos=[_make_tensor_info(1), _make_tensor_info(2, is_output=True)],
+            config=_make_config(reference_provider="pytorch"),
+            handle=MagicMock(),
+        )
+
+        assert [r.role for r in result.results] == ["reference", "engine"]
+        assert result.results[0].provider == "pytorch"
+        assert result.results[0].status == "success"
+        ref_provider.compute_reference.assert_not_called()
+        assert mock_check_corr.call_args.args[3] is ref_outputs
+
+    @patch("dnn_benchmarking.execution.suite_runner._run_timed_pytorch_reference")
+    @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
+    @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
+    @patch("dnn_benchmarking.execution.suite_runner._check_correctness")
+    @patch("dnn_benchmarking.execution.suite_runner.Executor")
+    @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
+    def test_validate_pytorch_falls_back_when_timed_reference_skips(
+        self,
+        mock_bm_cls,
+        mock_exec_cls,
+        mock_check_corr,
+        mock_get_ref,
+        mock_resolve_name,
+        mock_timed_reference,
+    ):
+        """A skipped timed PyTorch row does not prevent CPU reference fallback."""
+        mock_resolve_name.return_value = "engine_1"
+        ref_outputs = {
+            2: ReferenceOutput(data=np.array([1.0], dtype=np.float32), tensor_uid=2)
+        }
+        ref_provider = MagicMock()
+        ref_provider.name = "pytorch"
+        ref_provider.compute_reference.return_value = ref_outputs
+        mock_get_ref.return_value = ref_provider
+        skipped_result = ProviderEngineResult(
+            provider="pytorch",
+            engine_id=0,
+            status="skipped",
+            role="reference",
+            skip_reason="PyTorch GPU not available",
+        )
+        mock_timed_reference.return_value = MagicMock(
+            result=skipped_result,
+            outputs=None,
+        )
+        mock_check_corr.return_value = CorrectnessResult(
+            execution_success=True,
+            tolerance_match=True,
+            rtol=1e-5,
+            atol=1e-6,
+        )
+        mock_exec_cls.side_effect = _make_exec_factory(engine_ids=[1])
+        mock_bm_cls.return_value = _make_bm_mock()
+
+        result = run_graph_all_providers(
+            graph_path=Path("test.json"),
+            graph_json=_make_graph_json(),
+            tensor_infos=[_make_tensor_info(1), _make_tensor_info(2, is_output=True)],
+            config=_make_config(reference_provider="pytorch"),
+            handle=MagicMock(),
+        )
+
+        assert result.results[0].role == "reference"
+        assert result.results[0].status == "skipped"
+        assert ref_provider.compute_reference.call_count == 1
+        assert mock_check_corr.call_args.args[3] is ref_outputs
+
 
 class TestCheckCorrectnessOutputCount:
     """_check_correctness returns tolerance_match=False when no outputs are comparable."""
 
     def test_no_outputs_returns_false(self):
         bm = MagicMock()
-        bm.get_input_data.return_value = None
         bm.get_output_data.return_value = None
-
-        ref_provider = MagicMock()
-        ref_provider.compute_reference.return_value = {}
-        ref_provider.name = "pytorch"
 
         config = SuiteConfig(reference_provider="pytorch")
         result = _check_correctness(
             buffer_manager=bm,
             tensor_infos=[],
             graph_json=_make_graph_json(),
-            ref_provider=ref_provider,
+            ref_outputs={},
+            reference_provider_name="pytorch",
             config=config,
         )
 
@@ -781,12 +947,7 @@ class TestCheckCorrectnessOutputCount:
 
     def test_missing_reference_output_returns_false(self):
         bm = MagicMock()
-        bm.get_input_data.return_value = None
         bm.get_output_data.return_value = np.array([0.0], dtype=np.float32)
-
-        ref_provider = MagicMock()
-        ref_provider.compute_reference.return_value = {}
-        ref_provider.name = "pytorch"
 
         result = _check_correctness(
             buffer_manager=bm,
@@ -799,7 +960,8 @@ class TestCheckCorrectnessOutputCount:
                     }
                 ]
             },
-            ref_provider=ref_provider,
+            ref_outputs={},
+            reference_provider_name="pytorch",
             config=SuiteConfig(reference_provider="pytorch"),
         )
 
@@ -808,14 +970,14 @@ class TestCheckCorrectnessOutputCount:
 
     def test_zero_bf16_sdpa_forward_output_uses_bfloat16_tolerance(self):
         bm = MagicMock()
-        bm.get_input_data.return_value = None
         bm.get_output_data.return_value = np.zeros((2,), dtype=np.float32)
 
-        ref_output = MagicMock()
-        ref_output.data = np.ones((2,), dtype=np.float32)
-        ref_provider = MagicMock()
-        ref_provider.compute_reference.return_value = {7: ref_output}
-        ref_provider.name = "pytorch"
+        ref_outputs = {
+            7: ReferenceOutput(
+                data=np.ones((2,), dtype=np.float32),
+                tensor_uid=7,
+            )
+        }
 
         result = _check_correctness(
             buffer_manager=bm,
@@ -830,7 +992,8 @@ class TestCheckCorrectnessOutputCount:
                     }
                 ]
             },
-            ref_provider=ref_provider,
+            ref_outputs=ref_outputs,
+            reference_provider_name="pytorch",
             config=SuiteConfig(reference_provider="pytorch"),
         )
 
@@ -840,14 +1003,14 @@ class TestCheckCorrectnessOutputCount:
 
     def test_single_explicit_tolerance_overrides_both_values(self):
         bm = MagicMock()
-        bm.get_input_data.return_value = None
         bm.get_output_data.return_value = np.array([1.0], dtype=np.float32)
 
-        ref_output = MagicMock()
-        ref_output.data = np.array([1.1], dtype=np.float32)
-        ref_provider = MagicMock()
-        ref_provider.compute_reference.return_value = {7: ref_output}
-        ref_provider.name = "pytorch"
+        ref_outputs = {
+            7: ReferenceOutput(
+                data=np.array([1.1], dtype=np.float32),
+                tensor_uid=7,
+            )
+        }
 
         result = _check_correctness(
             buffer_manager=bm,
@@ -860,7 +1023,8 @@ class TestCheckCorrectnessOutputCount:
                     }
                 ]
             },
-            ref_provider=ref_provider,
+            ref_outputs=ref_outputs,
+            reference_provider_name="pytorch",
             config=SuiteConfig(reference_provider="pytorch", rtol=0.25),
         )
 

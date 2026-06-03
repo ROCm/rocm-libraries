@@ -94,6 +94,18 @@ class PyTorchCudaExecutor:
             self._execute_graph(tensors)
             torch.cuda.synchronize()
 
+    def execute_once(self, tensors: Dict[int, torch.Tensor]) -> None:
+        """Execute the graph once and synchronize.
+
+        Used after timed loops to collect clean reference outputs without
+        including output zeroing or extraction in benchmark timings.
+        """
+        if not self._prepared:
+            raise PyTorchExecutionError("Executor not prepared. Call prepare() first.")
+
+        self._execute_graph(tensors)
+        torch.cuda.synchronize()
+
     def benchmark(
         self,
         tensors: Dict[int, torch.Tensor],
