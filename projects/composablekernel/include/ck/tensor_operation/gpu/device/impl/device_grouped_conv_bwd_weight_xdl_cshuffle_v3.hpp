@@ -1770,9 +1770,9 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
         }
         else
         {
-            const bool stride_ovf = tensor_exceeds_2gb(b_g_n_c_wis_lengths) ||
-                                    tensor_exceeds_2gb(e_g_k_c_xs_lengths) ||
-                                    tensor_exceeds_2gb(a_g_n_k_wos_lengths);
+            const bool stride_ovf = tensor_exceeds_2gb<BDataType>(b_g_n_c_wis_lengths) ||
+                                    tensor_exceeds_2gb<CDataType>(e_g_k_c_xs_lengths) ||
+                                    tensor_exceeds_2gb<ADataType>(a_g_n_k_wos_lengths);
 
             std::array<index_t, NDimSpatial + 3> b_g_n_c_wis_lengths_i32;
             std::array<index_t, NDimSpatial + 3> b_g_n_c_wis_strides_i32;
@@ -1951,9 +1951,9 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
         }
         else
         {
-            const bool stride_ovf = tensor_exceeds_2gb(b_g_n_c_wis_lengths) ||
-                                    tensor_exceeds_2gb(e_g_k_c_xs_lengths) ||
-                                    tensor_exceeds_2gb(a_g_n_k_wos_lengths);
+            const bool stride_ovf = tensor_exceeds_2gb<BDataType>(b_g_n_c_wis_lengths) ||
+                                    tensor_exceeds_2gb<CDataType>(e_g_k_c_xs_lengths) ||
+                                    tensor_exceeds_2gb<ADataType>(a_g_n_k_wos_lengths);
 
             std::array<index_t, NDimSpatial + 3> b_g_n_c_wis_lengths_i32;
             std::array<index_t, NDimSpatial + 3> b_g_n_c_wis_strides_i32;
@@ -2009,6 +2009,17 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
     {
         auto str = std::stringstream();
 
+        std::map<BlockGemmPipelineScheduler, std::string> BlkGemmPipelineSchedulerToString{
+            {BlockGemmPipelineScheduler::Intrawave, "Intrawave"},
+            {BlockGemmPipelineScheduler::Interwave, "Interwave"}};
+
+        std::map<BlockGemmPipelineVersion, std::string> BlkGemmPipelineVersionToString{
+            {BlockGemmPipelineVersion::v1, "v1"},
+            {BlockGemmPipelineVersion::v2, "v2"},
+            {BlockGemmPipelineVersion::v3, "v3"},
+            {BlockGemmPipelineVersion::v4, "v4"},
+            {BlockGemmPipelineVersion::v5, "v5"}};
+
         // clang-format off
         str << "DeviceGroupedConvBwdWeight_Xdl_CShuffleV3";
 
@@ -2042,6 +2053,15 @@ struct DeviceGroupedConvBwdWeight_Xdl_CShuffleV3
             << CBlockTransferScalarPerVector_NWaveNPerXdl;
             if constexpr(NumGroupsToMerge > 1) 
                 str << ", " << NumGroupsToMerge;
+            if constexpr(LargeTensors) {
+                // Should be added for all instances but due to backward compatiblity,
+                // there is a lack of this information for other instances than Large
+                // Tensors.
+                str << ", BlkGemmPipelineScheduler: "
+                << BlkGemmPipelineSchedulerToString[BlkGemmPipeSched] << ", "
+                << "BlkGemmPipelineVersion: "
+                << BlkGemmPipelineVersionToString[BlkGemmPipelineVer];
+            }
             str << ">";
         // clang-format on
 

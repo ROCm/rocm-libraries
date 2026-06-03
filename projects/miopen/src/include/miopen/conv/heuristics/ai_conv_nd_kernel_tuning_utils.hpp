@@ -154,6 +154,48 @@ struct SolverHeuristicConfig
     }
 };
 
+/**
+ * @brief Configuration state for heuristic initialization results
+ *
+ * This struct holds the output state from AI heuristics. It's designed to be
+ * passed by reference to the centralized heuristics function, which will
+ * populate it with results. It is also used by the non-AI fallback path, so
+ * it must be available regardless of MIOPEN_ENABLE_AI_KERNEL_TUNING.
+ */
+struct HeuristicInitState
+{
+    std::vector<std::string>& valid_kernels;
+    int& index;
+    int& split_k;
+    std::string& kernel_id;
+
+    HeuristicInitState(std::vector<std::string>& vk, int& idx, int& sk, std::string& kid)
+        : valid_kernels(vk), index(idx), split_k(sk), kernel_id(kid)
+    {
+    }
+
+    void Reset(bool uses_split_k)
+    {
+        index     = 0;
+        kernel_id = "";
+        split_k   = uses_split_k ? 1 : 0;
+    }
+
+    void SetResult(int idx, int sk, bool uses_split_k)
+    {
+        index   = idx;
+        split_k = sk;
+        if(uses_split_k && idx >= 0 && idx < static_cast<int>(valid_kernels.size()))
+        {
+            kernel_id = valid_kernels[idx] + "+" + std::to_string(sk);
+        }
+        else if(idx >= 0 && idx < static_cast<int>(valid_kernels.size()))
+        {
+            kernel_id = valid_kernels[idx];
+        }
+    }
+};
+
 } // namespace conv
 } // namespace solver
 } // namespace miopen
@@ -256,47 +298,6 @@ RunParameterPredictionModel(
 // ============================================================================
 // Centralized AI Heuristics Runner
 // ============================================================================
-
-/**
- * @brief Configuration state for heuristic initialization results
- *
- * This struct holds the output state from AI heuristics. It's designed to be
- * passed by reference to the centralized heuristics function, which will
- * populate it with results.
- */
-struct HeuristicInitState
-{
-    std::vector<std::string>& valid_kernels;
-    int& index;
-    int& split_k;
-    std::string& kernel_id;
-
-    HeuristicInitState(std::vector<std::string>& vk, int& idx, int& sk, std::string& kid)
-        : valid_kernels(vk), index(idx), split_k(sk), kernel_id(kid)
-    {
-    }
-
-    void Reset(bool uses_split_k)
-    {
-        index     = 0;
-        kernel_id = "";
-        split_k   = uses_split_k ? 1 : 0;
-    }
-
-    void SetResult(int idx, int sk, bool uses_split_k)
-    {
-        index   = idx;
-        split_k = sk;
-        if(uses_split_k && idx >= 0 && idx < static_cast<int>(valid_kernels.size()))
-        {
-            kernel_id = valid_kernels[idx] + "+" + std::to_string(sk);
-        }
-        else if(idx >= 0 && idx < static_cast<int>(valid_kernels.size()))
-        {
-            kernel_id = valid_kernels[idx];
-        }
-    }
-};
 
 // ============================================================================
 // Generic Helper Template for KTN Lambda Functions

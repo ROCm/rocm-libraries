@@ -901,6 +901,28 @@ validParameters = { # we need to make sure this matches develop
     "NonTemporalWS": list(range(0, 8)),
     "NonTemporalMetadata": list(range(0, 8)),
     "NonTemporal": list(range(-1, 8)),
+    # gfx1250-only temporal-hint modifier.
+    "TemporalHint": list(range(-1, 8)),
+    "TemporalHintE": list(range(0, 8)),
+    "TemporalHintD": list(range(0, 8)),
+    "TemporalHintC": list(range(0, 8)),
+    "TemporalHintA": list(range(0, 8)),
+    "TemporalHintMXSA": list(range(0, 8)),
+    "TemporalHintB": list(range(0, 8)),
+    "TemporalHintMXSB": list(range(0, 8)),
+    "TemporalHintWS": list(range(0, 8)),
+    "TemporalHintMetadata": list(range(0, 8)),
+    # gfx1250-only non-volatile memory modifier.
+    "NonVolatile": [-1, 0, 1],
+    "NonVolatileE": [0, 1],
+    "NonVolatileD": [0, 1],
+    "NonVolatileC": [0, 1],
+    "NonVolatileA": [0, 1],
+    "NonVolatileMXSA": [0, 1],
+    "NonVolatileB": [0, 1],
+    "NonVolatileMXSB": [0, 1],
+    "NonVolatileWS": [0, 1],
+    "NonVolatileMetadata": [0, 1],
     # Group together unroll iterations inside the unroll loop.
     # For example, InnerUnroll=2 will fetch LDS for two unroll iterations
     "InnerUnroll": [1, 2, 4, 8, 16, 32, 64],
@@ -948,6 +970,11 @@ validParameters = { # we need to make sure this matches develop
     "ConvertAfterDS": [False, True],
     # Force disable shadow init to release more sgpr in preloop
     "ForceDisableShadowInit": [False, True],
+    # Use WMMA/MFMA with src C=0 to initialize C accumulators (skipping v_mov initC).
+    # -1: auto-detect
+    #  0: force disable
+    #  1: force enable (rejected if the auto-disable conditions are met)
+    "InitCIterWmma": [-1, 0, 1],
     # Enable LDS Transpose Instruction
     "LDSTrInst": [False, True],
     # False: Use LocalSplitU. Number of WorkGroup[2] WorkItems (wave or thread) will compute the same output elements (matrix D) along different
