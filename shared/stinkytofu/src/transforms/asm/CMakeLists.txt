@@ -15,6 +15,7 @@ target_sources(stinkytofu PRIVATE
     LegalizationUtils.cpp
     ScheduleLastLRsPass.cpp
     StinkyDAGSchedulerPass.cpp
+    SetMatrixReusePass.cpp
     StinkyConfigurableWaitCntPass.cpp
     ScheduleFirstLRsPass.cpp
     StinkyWaitCntInsertionPass.cpp
