@@ -68,14 +68,15 @@ package `__init__`.
 - [x] `KernelHelperNaming.py` → naming half covered; init* = codegen (D6)
 - [x] `Common/GlobalParameters.py` 90.0% → 99.1%
 
-### Batch C — mid pure / near-done
-- [ ] `Common/Types.py` already in A; `Common/Architectures.py` (173, 83.2%)
-- [ ] `Hardware.py` (152, 88.2%)
-- [ ] `Properties.py` already in A; `Contractions.py` (544, 84.2%)
-- [ ] `Configuration.py` (491, 86.6%)
+### Batch C — mid pure / near-done  (in progress; checkpoint @ 2072 passed)
+- [x] `Common/Architectures.py` 83.2% → 97.1%
+- [x] `Hardware.py` 88.2% → 97.6%
+- [x] `Common/Utilities.py` 53.4% → 95.6%
+- [x] `Toolchain/Source.py` 50.0% → 97.6%
+- [x] `Configuration.py` 86.6% → ~92% (dead reflected ops + Attribute AST paths, D9)
+- [ ] `Contractions.py` (544, 84.2%)
 - [ ] `BenchmarkStructs.py` (196, 72.4%)
-- [ ] `Common/Utilities.py` (249, 53.4%)
-- [ ] `Toolchain/Component.py` (107, 70.1%) + `Toolchain/Validators.py` (96, 67.7%) + `Toolchain/Source.py` (66, 50.0%)
+- [ ] `Toolchain/Component.py` (107, 70.1%) + `Toolchain/Validators.py` (96, 67.7%)
 - [ ] `TensileBenchmarkCluster.py` (192, 87.5%)
 
 ### Batch D — mid, IO/pipeline-leaning
