@@ -299,10 +299,10 @@ CK_TILE_HOST void reference_gemm_fused_aquant(const HostTensor<ADataType>& a_m_k
                 max_abs       = std::max(max_abs, std::abs(v));
             }
 
-            // if(max_abs == 0.0f)
-            // {
-            max_abs = 1.0f;
-            // }
+            if(max_abs == 0.0f)
+            {
+                max_abs = 1.0f;
+            }
 
             aq_m_aqk(m, k_group) = ck_tile::type_convert<AQDataType>(max_abs) * fp8_inv_range;
         }

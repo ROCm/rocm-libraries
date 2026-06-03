@@ -320,25 +320,27 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
                                           AQDstStaticTileDistribution>::get_thread_buffer_size();
             static_assert(thread_buf_size == aq_thread_buf_size);
 
-            set_tile(aq_block_tile, 1.f * fp8_inv_range);
+            // Copy the first lanes values to all threads
             static_for<0, thread_buf_size, 1>{}([&](auto i) {
-                // Copy the first lanes values to all threads
+                
                 float abs_max = amd_wave_read_first_lane(aq_reduce.get_thread_buffer()[i]);
-                // if(abs_max == 0.f)
-                // {
-                abs_max = 1.f;
-                // };
+                if(abs_max == 0.f)
+                {
+                    abs_max = 1.f;
+                };
                 aq_block_tile.get_thread_buffer()[i] =
                     type_convert<AQDataType>(abs_max * fp8_inv_range);
             });
 
+            // Apply scales and convert data to the original block tile distribution
             auto a_raw_tile = make_static_distributed_tensor<ADataType>(ADstStaticTileDist{});
             load_tile(a_raw_tile, a_dram_window);
+
             sweep_tile(aq_block_tile, [&](auto aq_idx) {
                 constexpr auto m_idx       = aq_idx[number<0>{}];
                 constexpr auto k_group_idx = aq_idx[number<1>{}];
 
-                const float scale_value = type_convert<float>(aq_block_tile(aq_idx));
+                const AQDataType scale_value = aq_block_tile(aq_idx);
 
                 static_for<0, AQuantGroupSize::kK, 1>{}([&](auto kk) {
                     constexpr auto k_idx =
@@ -347,37 +349,10 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
 
                     constexpr auto a_idx = make_tuple(m_idx, k_idx);
 
-                    float raw_a_value   = type_convert<float>(a_raw_tile(a_idx));
+                    AQDataType raw_a_value   = type_convert<AQDataType>(a_raw_tile(a_idx));
                     a_block_tile(a_idx) = type_convert<fp8_t>(raw_a_value / scale_value);
                 });
             });
-            // Apply scales and convert data to the original block tile distribution
-            // sweep_tile(a_block_tile, [&](auto idx) {
-            //     // constexpr auto m_idx = idx[number<0>{}];
-            //     // constexpr auto k_idx = idx[number<1>{}];
-            //     // constexpr auto k     = getIdx(k_idx);
-
-            //     constexpr auto x_idx = [&]() {
-            //         return get_x_indices_from_distributed_indices(ADstStaticTileDist{}, idx);
-            //     }();
-            //     constexpr auto m = x_idx[number<0>{}];
-            //     constexpr auto k = x_idx[number<1>{}];
-
-            //     constexpr auto k_group_idx =
-            //         tile_distributed_index<k / number<AQuantGroupSize::kK>{}>{};
-
-            //     // constexpr auto m     = getIdx(m_idx);
-            //     // constexpr auto grouped_k_idx =
-            //     //     tile_distributed_index<k % number<AQuantGroupSize::kK>{}>{};
-            //     // constexpr auto m_reduce =
-            //     //     tile_distributed_index<m * KPerBlockAQ + k /
-            //     //     number<AQuantGroupSize::kK>{}>{};
-
-            //     // auto raw_a_value  = a_reduce(make_tuple(m_reduce, grouped_k_idx));
-            //     float raw_a_value = type_convert<float>(a_raw_tile(idx));
-            //     auto scale_value  = aq_block_tile(make_tuple(m, k_group_idx));
-            //     a_block_tile(idx) = type_convert<fp8_t>(raw_a_value / scale_value);
-            // });
         }
 
         template <typename BDramWindow, typename BBlockTile_>
