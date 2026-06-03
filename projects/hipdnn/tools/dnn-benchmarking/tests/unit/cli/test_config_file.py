@@ -3,14 +3,14 @@
 
 """Unit tests for dnn-benchmark TOML config files."""
 
-import json
 import importlib
+import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from dnn_benchmarking.cli.config_file import apply_config_file, collect_provided_options
+from dnn_benchmarking.cli.config_file import apply_config_file
 from dnn_benchmarking.cli.parser import create_parser
 from dnn_benchmarking.reporting.reporter import Reporter
 
@@ -20,12 +20,30 @@ def _write_config(path: Path, text: str) -> Path:
     return path
 
 
-def test_collect_provided_options_handles_long_short_and_equals() -> None:
-    provided = collect_provided_options(
-        ["--config", "cfg.toml", "-g", "g.json", "--iters=10", "-v"]
+def _parse_with_config(argv: list[str]):
+    args = create_parser(suppress_defaults=True).parse_args(argv)
+    apply_config_file(args)
+    return args
+
+
+def test_cli_abbreviations_are_treated_as_explicit_overrides(tmp_path: Path) -> None:
+    config = _write_config(
+        tmp_path / "bench.toml",
+        """
+version = 1
+graphs = ["from_config.json"]
+warmup = 3
+iters = 7
+""",
     )
 
-    assert provided == {"graph", "iters", "verbose"}
+    args = _parse_with_config(
+        ["--config", str(config), "--graph", "from_cli.json", "--iter", "11"]
+    )
+
+    assert args.graph == ["from_cli.json"]
+    assert args.warmup == 3
+    assert args.iters == 11
 
 
 def test_config_populates_args_when_cli_does_not_override(tmp_path: Path) -> None:
@@ -49,9 +67,8 @@ id = 1
 plugin_path = "/plugins/a"
 """,
     )
-    args = create_parser().parse_args(["--config", str(config)])
 
-    apply_config_file(args, provided=set())
+    args = _parse_with_config(["--config", str(config)])
 
     assert args.graph == [
         str(tmp_path / "graphs/a.json"),
@@ -74,11 +91,10 @@ graphs = ["from_config.json"]
 iters = 7
 """,
     )
-    args = create_parser().parse_args(
+
+    args = _parse_with_config(
         ["--config", str(config), "--graph", "from_cli.json", "--iters", "11"]
     )
-
-    apply_config_file(args, provided={"graph", "iters"})
 
     assert args.graph == ["from_cli.json"]
     assert args.iters == 11
@@ -98,12 +114,10 @@ plugin_path = "/plugins/b"
 [[engines]]
 id = 1
 plugin_path = "/plugins/a"
-
 """,
     )
-    args = create_parser().parse_args(["--config", str(config), "--engine", "9,8"])
 
-    apply_config_file(args, provided={"engine"})
+    args = _parse_with_config(["--config", str(config), "--engine", "9,8"])
 
     assert args.engine == [9, 8]
     assert args.plugin_path is None
@@ -121,10 +135,10 @@ graphs = ["g.json"]
 baseline = "missing"
 """,
     )
-    args = create_parser().parse_args(["--config", str(config)])
+    args = create_parser(suppress_defaults=True).parse_args(["--config", str(config)])
 
     with pytest.raises(ValueError, match="Unknown config field: comparison"):
-        apply_config_file(args, provided=set())
+        apply_config_file(args)
 
 
 def test_engine_config_uses_ids_without_display_labels(tmp_path: Path) -> None:
@@ -141,9 +155,8 @@ id = 2
 id = 1
 """,
     )
-    args = create_parser().parse_args(["--config", str(config)])
 
-    apply_config_file(args, provided=set())
+    args = _parse_with_config(["--config", str(config)])
 
     assert args.engine == [2, 1]
     assert not hasattr(args, "_config_engine_names")
@@ -164,10 +177,10 @@ plugin_path = "/plugins/a"
 id = 2
 """,
     )
-    args = create_parser().parse_args(["--config", str(config)])
+    args = create_parser(suppress_defaults=True).parse_args(["--config", str(config)])
 
     with pytest.raises(ValueError, match="Every config engine must set plugin_path"):
-        apply_config_file(args, provided=set())
+        apply_config_file(args)
 
 
 @pytest.mark.parametrize(
@@ -188,10 +201,10 @@ graphs = ["g.json"]
 {body}
 """,
     )
-    args = create_parser().parse_args(["--config", str(config)])
+    args = create_parser(suppress_defaults=True).parse_args(["--config", str(config)])
 
     with pytest.raises(ValueError, match=f"Unknown config field: {field}"):
-        apply_config_file(args, provided=set())
+        apply_config_file(args)
 
 
 @pytest.mark.parametrize(
@@ -216,10 +229,10 @@ id = 1
 {body}
 """,
     )
-    args = create_parser().parse_args(["--config", str(config)])
+    args = create_parser(suppress_defaults=True).parse_args(["--config", str(config)])
 
     with pytest.raises(ValueError, match=f"Unknown config engine 0 field: {field}"):
-        apply_config_file(args, provided=set())
+        apply_config_file(args)
 
 
 @pytest.mark.parametrize(
@@ -243,10 +256,10 @@ graphs = ["g.json"]
 {field} = {value}
 """,
     )
-    args = create_parser().parse_args(["--config", str(config)])
+    args = create_parser(suppress_defaults=True).parse_args(["--config", str(config)])
 
     with pytest.raises(ValueError, match=f"Config field '{field}' must be one of"):
-        apply_config_file(args, provided=set())
+        apply_config_file(args)
 
 
 def test_bool_is_rejected_for_integer_config_fields(tmp_path: Path) -> None:
@@ -258,10 +271,10 @@ graphs = ["g.json"]
 iters = true
 """,
     )
-    args = create_parser().parse_args(["--config", str(config)])
+    args = create_parser(suppress_defaults=True).parse_args(["--config", str(config)])
 
     with pytest.raises(ValueError, match="Config field 'iters' must be int"):
-        apply_config_file(args, provided=set())
+        apply_config_file(args)
 
 
 def test_config_paths_are_relative_to_config_file(tmp_path: Path) -> None:
@@ -277,9 +290,8 @@ plugin_path = "../plugins"
 profiling_output_dir = "profiles"
 """,
     )
-    args = create_parser().parse_args(["--config", str(config)])
 
-    apply_config_file(args, provided=set())
+    args = _parse_with_config(["--config", str(config)])
 
     assert args.graph == [str(config_dir / "../graphs/g.json")]
     assert args.output == config_dir / "results/out.json"
@@ -291,9 +303,7 @@ def test_sample_configs_parse_and_reference_existing_graphs() -> None:
     root = Path(__file__).resolve().parents[3]
 
     full_config = root / "sample_configs" / "config.toml.example"
-    full_args = create_parser().parse_args(["--config", str(full_config)])
-
-    apply_config_file(full_args, provided=set())
+    full_args = _parse_with_config(["--config", str(full_config)])
 
     assert full_args.graph
     for graph in full_args.graph:
@@ -301,11 +311,9 @@ def test_sample_configs_parse_and_reference_existing_graphs() -> None:
 
     basic_config = root / "sample_configs" / "basic.toml.example"
     graph = root / "graphs" / "sample_conv_fwd.json"
-    basic_args = create_parser().parse_args(
+    basic_args = _parse_with_config(
         ["--config", str(basic_config), "--graph", str(graph)]
     )
-
-    apply_config_file(basic_args, provided={"graph"})
 
     assert basic_args.graph == [str(graph)]
     assert basic_args.warmup == 10
@@ -356,7 +364,6 @@ id = 2
 
 [[engines]]
 id = 1
-
 """,
     )
     mock_benchmark.return_value = 0

@@ -8,9 +8,9 @@ from __future__ import annotations
 import argparse
 import tomllib
 from pathlib import Path
-from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Set
+from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Optional, Set, cast
 
-from .parser import CONFIG_FIELDS, OPTION_DESTS_BY_FLAG, ConfigField
+from .parser import CONFIG_OPTIONS, OPTION_DEFAULTS, CliOption, ConfigKind
 
 
 _CONFIG_ONLY_TOP_LEVEL_KEYS: Set[str] = {
@@ -22,38 +22,36 @@ _ALLOWED_ENGINE_KEYS: Set[str] = {"id", "plugin_path"}
 
 
 def _allowed_top_level_keys() -> Set[str]:
-    return {field.key for field in CONFIG_FIELDS} | _CONFIG_ONLY_TOP_LEVEL_KEYS
+    return {
+        cast(str, option.config_key) for option in CONFIG_OPTIONS
+    } | _CONFIG_ONLY_TOP_LEVEL_KEYS
 
 
-def collect_provided_options(argv: List[str]) -> Set[str]:
-    """Return argparse destination names explicitly present in ``argv``."""
-    provided: Set[str] = set()
-    for arg in argv:
-        option = arg.split("=", 1)[0]
-        dest = OPTION_DESTS_BY_FLAG.get(option)
-        if dest is not None and dest != "config":
-            provided.add(dest)
-    return provided
+def apply_config_file(args: argparse.Namespace) -> None:
+    """Merge ``args.config`` into parsed CLI args without overriding CLI values.
 
-
-def apply_config_file(args: argparse.Namespace, provided: Set[str]) -> None:
-    """Merge ``args.config`` into parsed CLI args without overriding CLI values."""
+    ``args`` must come from ``create_parser(suppress_defaults=True)`` for the
+    CLI path. In that mode ``vars(args)`` contains only explicitly supplied
+    public options, so argparse itself decides option spellings/abbreviations.
+    """
+    provided = set(vars(args))
     config_path = getattr(args, "config", None)
-    if config_path is None:
-        return
+    overrides: Dict[str, Any] = {}
+    if config_path is not None:
+        path = Path(config_path)
+        raw = _load_toml(path)
+        overrides = _normalise_config(raw, path)
 
-    path = Path(config_path)
-    raw = _load_toml(path)
-    overrides = _normalise_config(raw, path)
+    if "engine" in provided or "plugin_path" in provided:
+        overrides.pop("engine", None)
+        overrides.pop("plugin_path", None)
 
-    engine_overridden = "engine" in provided or "plugin_path" in provided
-    for key, value in overrides.items():
-        if key in {"engine", "plugin_path"}:
-            if engine_overridden:
-                continue
-        elif key in provided:
-            continue
-        setattr(args, key, value)
+    merged = dict(OPTION_DEFAULTS)
+    merged.update(overrides)
+    merged.update(vars(args))
+
+    vars(args).clear()
+    vars(args).update(merged)
 
 
 def _load_toml(path: Path) -> Dict[str, Any]:
@@ -78,8 +76,8 @@ def _normalise_config(raw: Dict[str, Any], path: Path) -> Dict[str, Any]:
 
     base_dir = path.parent
     out: Dict[str, Any] = {}
-    for field in CONFIG_FIELDS:
-        _copy_config_field(raw, out, field, base_dir)
+    for option in CONFIG_OPTIONS:
+        _copy_config_field(raw, out, option, base_dir)
 
     _normalise_engines(raw, out, base_dir=base_dir)
 
@@ -94,47 +92,89 @@ def _reject_unknown_keys(keys: Iterable[str], allowed: Set[str], context: str) -
     raise ValueError(f"Unknown {context} {label}: {', '.join(unknown)}")
 
 
+ConfigFieldHandler = Callable[[Dict[str, Any], Dict[str, Any], CliOption, Path], None]
+
+
 def _copy_config_field(
     raw: Dict[str, Any],
     out: Dict[str, Any],
-    field: ConfigField,
+    option: CliOption,
     base_dir: Path,
 ) -> None:
-    if field.kind == "path_list":
-        _copy_path_list(raw, out, src=field.key, dest=field.dest, base_dir=base_dir)
-        return
-    if field.kind == "path":
-        _copy_path(raw, out, field.key, dest=field.dest, base_dir=base_dir)
-        return
-    if field.kind == "path_or_path_list":
-        _copy_path_or_path_list(raw, out, field.key, dest=field.dest, base_dir=base_dir)
-        return
-    if field.kind == "choice":
-        if field.typ is None or field.choices is None:
-            raise AssertionError(f"Invalid config field metadata for {field.key}")
-        _copy_choice(
-            raw,
-            out,
-            field.key,
-            field.choices,
-            typ=field.typ,
-            dest=field.dest,
-            optional=field.optional,
-        )
-        return
-    if field.kind == "scalar":
-        if field.typ is None:
-            raise AssertionError(f"Invalid config field metadata for {field.key}")
-        _copy_scalar(
-            raw,
-            out,
-            field.key,
-            field.typ,
-            dest=field.dest,
-            optional=field.optional,
-        )
-        return
-    raise AssertionError(f"Unsupported config field kind: {field.kind}")
+    kind = cast(ConfigKind, option.config_kind)
+    _COPY_FIELD_HANDLERS[kind](raw, out, option, base_dir)
+
+
+def _copy_scalar_field(
+    raw: Dict[str, Any], out: Dict[str, Any], option: CliOption, _base_dir: Path
+) -> None:
+    _copy_scalar(
+        raw,
+        out,
+        cast(str, option.config_key),
+        cast(type, option.config_type),
+        dest=option.dest,
+        optional=option.config_optional,
+    )
+
+
+def _copy_choice_field(
+    raw: Dict[str, Any], out: Dict[str, Any], option: CliOption, _base_dir: Path
+) -> None:
+    _copy_choice(
+        raw,
+        out,
+        cast(str, option.config_key),
+        cast(FrozenSet[Any], option.choices),
+        typ=cast(type, option.config_type),
+        dest=option.dest,
+        optional=option.config_optional,
+    )
+
+
+def _copy_path_field(
+    raw: Dict[str, Any], out: Dict[str, Any], option: CliOption, base_dir: Path
+) -> None:
+    _copy_path(
+        raw,
+        out,
+        cast(str, option.config_key),
+        dest=option.dest,
+        base_dir=base_dir,
+    )
+
+
+def _copy_path_list_field(
+    raw: Dict[str, Any], out: Dict[str, Any], option: CliOption, base_dir: Path
+) -> None:
+    _copy_path_list(
+        raw,
+        out,
+        src=cast(str, option.config_key),
+        dest=option.dest,
+        base_dir=base_dir,
+    )
+
+
+def _copy_path_or_path_list_field(
+    raw: Dict[str, Any], out: Dict[str, Any], option: CliOption, base_dir: Path
+) -> None:
+    _copy_path_or_path_list(
+        raw,
+        out,
+        cast(str, option.config_key),
+        dest=option.dest,
+        base_dir=base_dir,
+    )
+
+
+_COPY_FIELD_HANDLERS: dict[ConfigKind, ConfigFieldHandler] = {
+    ConfigKind.SCALAR: _copy_scalar_field,
+    ConfigKind.CHOICE: _copy_choice_field,
+    ConfigKind.PATH: _copy_path_field,
+    ConfigKind.PATH_LIST: _copy_path_list_field,
+    ConfigKind.PATH_OR_PATH_LIST: _copy_path_or_path_list_field,
+}
 
 
 def _copy_scalar(

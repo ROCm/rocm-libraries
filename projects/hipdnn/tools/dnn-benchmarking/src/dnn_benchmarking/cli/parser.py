@@ -5,26 +5,24 @@
 
 import argparse
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Any, FrozenSet, List, Optional
 
 
-@dataclass(frozen=True)
-class ConfigField:
-    """Config-file metadata for one public CLI-backed option."""
+class ConfigKind(str, Enum):
+    """Config-file value normalization strategies."""
 
-    key: str
-    dest: str
-    kind: str
-    typ: Optional[type] = None
-    choices: Optional[FrozenSet[Any]] = None
-    optional: bool = False
-    options: tuple[str, ...] = ()
+    SCALAR = "scalar"
+    CHOICE = "choice"
+    PATH = "path"
+    PATH_LIST = "path_list"
+    PATH_OR_PATH_LIST = "path_or_path_list"
 
 
 @dataclass(frozen=True)
-class _CliOption:
-    """Single source of truth for public CLI options and config fields."""
+class CliOption:
+    """Single source of truth for one public CLI option."""
 
     flags: tuple[str, ...]
     help: str
@@ -37,22 +35,26 @@ class _CliOption:
     choices: Optional[FrozenSet[Any]] = None
     group: Optional[str] = None
     config_key: Optional[str] = None
-    config_kind: Optional[str] = None
+    config_kind: Optional[ConfigKind] = None
     config_type: Optional[type] = None
     config_optional: bool = False
 
-    def config_field(self) -> Optional[ConfigField]:
-        if self.config_key is None or self.config_kind is None:
-            return None
-        return ConfigField(
-            key=self.config_key,
-            dest=self.dest,
-            kind=self.config_kind,
-            typ=self.config_type,
-            choices=self.choices,
-            optional=self.config_optional,
-            options=self.flags,
-        )
+    def __post_init__(self) -> None:
+        if (self.config_key is None) != (self.config_kind is None):
+            raise ValueError(
+                f"{self.dest}: config_key and config_kind must be set together"
+            )
+        if self.config_kind in {ConfigKind.SCALAR, ConfigKind.CHOICE}:
+            if self.config_type is None:
+                raise ValueError(
+                    f"{self.dest}: {self.config_kind.value} requires config_type"
+                )
+        if self.config_kind is ConfigKind.CHOICE and self.choices is None:
+            raise ValueError(f"{self.dest}: choice config fields require choices")
+
+    @property
+    def is_configurable(self) -> bool:
+        return self.config_key is not None
 
 
 def _parse_engine_list(s: str) -> List[int]:
@@ -98,8 +100,8 @@ _METRICS_TIER_CHOICES = frozenset({"basic", "off"})
 _EMIT_TRACE_CHOICES = frozenset({"pftrace", "kineto"})
 _PMC_CHOICES = frozenset({"basic", "memory", "flops", "all"})
 
-_CLI_OPTIONS: tuple[_CliOption, ...] = (
-    _CliOption(
+CLI_OPTIONS: tuple[CliOption, ...] = (
+    CliOption(
         flags=("--graph", "-g"),
         dest="graph",
         nargs="+",
@@ -109,16 +111,16 @@ _CLI_OPTIONS: tuple[_CliOption, ...] = (
         "A directory is searched recursively for .json files. "
         "Shell expansion (e.g., Workloads/BNorm/*) is accepted directly.",
         config_key="graphs",
-        config_kind="path_list",
+        config_kind=ConfigKind.PATH_LIST,
     ),
-    _CliOption(
+    CliOption(
         flags=("--config",),
         dest="config",
         parser_type=Path,
         metavar="PATH",
         help="TOML benchmark recipe. CLI flags override config values.",
     ),
-    _CliOption(
+    CliOption(
         flags=("--warmup", "-w"),
         dest="warmup",
         parser_type=int,
@@ -126,10 +128,10 @@ _CLI_OPTIONS: tuple[_CliOption, ...] = (
         metavar="N",
         help="Number of warmup iterations (default: 10)",
         config_key="warmup",
-        config_kind="scalar",
+        config_kind=ConfigKind.SCALAR,
         config_type=int,
     ),
-    _CliOption(
+    CliOption(
         flags=("--iters", "-i"),
         dest="iters",
         parser_type=int,
@@ -137,10 +139,10 @@ _CLI_OPTIONS: tuple[_CliOption, ...] = (
         metavar="N",
         help="Number of benchmark iterations (default: 100)",
         config_key="iters",
-        config_kind="scalar",
+        config_kind=ConfigKind.SCALAR,
         config_type=int,
     ),
-    _CliOption(
+    CliOption(
         flags=("--engine", "-e"),
         dest="engine",
         parser_type=_parse_engine_list,
@@ -148,18 +150,18 @@ _CLI_OPTIONS: tuple[_CliOption, ...] = (
         help="Engine ID or comma-separated list of IDs to run "
         "(default: all discovered engines). Examples: -e 1, -e 1,2,3",
     ),
-    _CliOption(
+    CliOption(
         flags=("--seed", "-s"),
         dest="seed",
         parser_type=int,
         metavar="SEED",
         help="Random seed for reproducible input data (default: None)",
         config_key="seed",
-        config_kind="scalar",
+        config_kind=ConfigKind.SCALAR,
         config_type=int,
         config_optional=True,
     ),
-    _CliOption(
+    CliOption(
         flags=("--backend", "-b"),
         dest="backend",
         parser_type=str,
@@ -169,10 +171,10 @@ _CLI_OPTIONS: tuple[_CliOption, ...] = (
         help="Execution backend (default: hipdnn). "
         "Options: hipdnn (AMD GPU via hipDNN), pytorch (GPU via PyTorch)",
         config_key="backend",
-        config_kind="choice",
+        config_kind=ConfigKind.CHOICE,
         config_type=str,
     ),
-    _CliOption(
+    CliOption(
         flags=("--output", "-o"),
         dest="output",
         parser_type=Path,
@@ -180,9 +182,9 @@ _CLI_OPTIONS: tuple[_CliOption, ...] = (
         group="Output",
         help="Export benchmark results to JSON file for offline comparison",
         config_key="output",
-        config_kind="path",
+        config_kind=ConfigKind.PATH,
     ),
-    _CliOption(
+    CliOption(
         flags=("-v", "--verbose"),
         dest="verbose",
         action="store_true",
@@ -191,10 +193,10 @@ _CLI_OPTIONS: tuple[_CliOption, ...] = (
         help="Show detailed per-engine breakdown for each graph "
         "(default: summary table)",
         config_key="verbose",
-        config_kind="scalar",
+        config_kind=ConfigKind.SCALAR,
         config_type=bool,
     ),
-    _CliOption(
+    CliOption(
         flags=("--rtol",),
         dest="rtol",
         parser_type=float,
@@ -203,10 +205,10 @@ _CLI_OPTIONS: tuple[_CliOption, ...] = (
         group="Reference Comparison",
         help="Relative tolerance for output comparison (default: 1e-5)",
         config_key="rtol",
-        config_kind="scalar",
+        config_kind=ConfigKind.SCALAR,
         config_type=float,
     ),
-    _CliOption(
+    CliOption(
         flags=("--atol",),
         dest="atol",
         parser_type=float,
@@ -215,10 +217,10 @@ _CLI_OPTIONS: tuple[_CliOption, ...] = (
         group="Reference Comparison",
         help="Absolute tolerance for output comparison (default: 1e-8)",
         config_key="atol",
-        config_kind="scalar",
+        config_kind=ConfigKind.SCALAR,
         config_type=float,
     ),
-    _CliOption(
+    CliOption(
         flags=("--validate",),
         dest="validate",
         parser_type=str,
@@ -229,10 +231,10 @@ _CLI_OPTIONS: tuple[_CliOption, ...] = (
         help="Reference provider for validation (default: none). "
         "Options: pytorch, cpu_plugin, none",
         config_key="validate",
-        config_kind="choice",
+        config_kind=ConfigKind.CHOICE,
         config_type=str,
     ),
-    _CliOption(
+    CliOption(
         flags=("--plugin-path",),
         dest="plugin_path",
         parser_type=_parse_plugin_path_list,
@@ -244,9 +246,9 @@ _CLI_OPTIONS: tuple[_CliOption, ...] = (
             "shared by all selected engines."
         ),
         config_key="plugin_path",
-        config_kind="path_or_path_list",
+        config_kind=ConfigKind.PATH_OR_PATH_LIST,
     ),
-    _CliOption(
+    CliOption(
         flags=("--metrics-tier",),
         dest="metrics_tier",
         parser_type=str,
@@ -261,10 +263,10 @@ _CLI_OPTIONS: tuple[_CliOption, ...] = (
             "runtime cost. 'off' disables all extra metric collection."
         ),
         config_key="metrics_tier",
-        config_kind="choice",
+        config_kind=ConfigKind.CHOICE,
         config_type=str,
     ),
-    _CliOption(
+    CliOption(
         flags=("--emit-trace",),
         dest="emit_trace",
         parser_type=str,
@@ -278,11 +280,11 @@ _CLI_OPTIONS: tuple[_CliOption, ...] = (
             "Adds ~1 extra workload run (~5%% kernel-time overhead)."
         ),
         config_key="emit_trace",
-        config_kind="choice",
+        config_kind=ConfigKind.CHOICE,
         config_type=str,
         config_optional=True,
     ),
-    _CliOption(
+    CliOption(
         flags=("--pmc",),
         dest="pmc",
         parser_type=str,
@@ -296,11 +298,11 @@ _CLI_OPTIONS: tuple[_CliOption, ...] = (
             "run (~30%% wallclock overhead)."
         ),
         config_key="pmc",
-        config_kind="choice",
+        config_kind=ConfigKind.CHOICE,
         config_type=str,
         config_optional=True,
     ),
-    _CliOption(
+    CliOption(
         flags=("--pmc-allow-multipass",),
         dest="pmc_allow_multipass",
         action="store_true",
@@ -313,10 +315,10 @@ _CLI_OPTIONS: tuple[_CliOption, ...] = (
             "hang for minutes on sub-second workloads."
         ),
         config_key="pmc_allow_multipass",
-        config_kind="scalar",
+        config_kind=ConfigKind.SCALAR,
         config_type=bool,
     ),
-    _CliOption(
+    CliOption(
         flags=("--perf",),
         dest="perf",
         action="store_true",
@@ -329,10 +331,10 @@ _CLI_OPTIONS: tuple[_CliOption, ...] = (
             "Adds ~1 extra workload run."
         ),
         config_key="perf",
-        config_kind="scalar",
+        config_kind=ConfigKind.SCALAR,
         config_type=bool,
     ),
-    _CliOption(
+    CliOption(
         flags=("--roofline",),
         dest="roofline",
         action="store_true",
@@ -347,10 +349,10 @@ _CLI_OPTIONS: tuple[_CliOption, ...] = (
             "Adds ~3 extra workload runs."
         ),
         config_key="roofline",
-        config_kind="scalar",
+        config_kind=ConfigKind.SCALAR,
         config_type=bool,
     ),
-    _CliOption(
+    CliOption(
         flags=("--profiling-output-dir",),
         dest="profiling_output_dir",
         parser_type=Path,
@@ -362,9 +364,9 @@ _CLI_OPTIONS: tuple[_CliOption, ...] = (
             "./profiling-output/<utc-timestamp>/."
         ),
         config_key="profiling_output_dir",
-        config_kind="path",
+        config_kind=ConfigKind.PATH,
     ),
-    _CliOption(
+    CliOption(
         flags=("--profiling-timeout",),
         dest="profiling_timeout",
         parser_type=int,
@@ -380,28 +382,30 @@ _CLI_OPTIONS: tuple[_CliOption, ...] = (
             "multi-pass PMC replay). Pass 0 to disable the timeout."
         ),
         config_key="profiling_timeout",
-        config_kind="scalar",
+        config_kind=ConfigKind.SCALAR,
         config_type=int,
     ),
 )
 
-CONFIG_FIELDS: tuple[ConfigField, ...] = tuple(
-    field for option in _CLI_OPTIONS if (field := option.config_field()) is not None
+CONFIG_OPTIONS: tuple[CliOption, ...] = tuple(
+    option for option in CLI_OPTIONS if option.is_configurable
 )
 
-OPTION_DESTS_BY_FLAG: dict[str, str] = {
-    flag: option.dest for option in _CLI_OPTIONS for flag in option.flags
+OPTION_DEFAULTS: dict[str, Any] = {
+    option.dest: option.default for option in CLI_OPTIONS
 }
 
 
 def _add_cli_option(
     parser: argparse.ArgumentParser,
-    groups: dict[str, argparse._ArgumentGroup],
-    option: _CliOption,
+    groups: dict[str, Any],
+    option: CliOption,
+    *,
+    suppress_defaults: bool,
 ) -> None:
     target = groups.get(option.group, parser)
     kwargs: dict[str, Any] = {
-        "default": option.default,
+        "default": argparse.SUPPRESS if suppress_defaults else option.default,
         "help": option.help,
     }
     if option.dest:
@@ -419,8 +423,13 @@ def _add_cli_option(
     target.add_argument(*option.flags, **kwargs)
 
 
-def create_parser() -> argparse.ArgumentParser:
+def create_parser(*, suppress_defaults: bool = False) -> argparse.ArgumentParser:
     """Create the argument parser for dnn-benchmark CLI.
+
+    Args:
+        suppress_defaults: When True, absent public options are omitted from
+            the parsed namespace. The CLI entry point uses this so config-file
+            values can be merged as ``defaults < config < explicit CLI``.
 
     Returns:
         Configured ArgumentParser.
@@ -478,8 +487,8 @@ Tarball Input:
         "Suite Options": parser.add_argument_group("Suite Options"),
         "Metrics": parser.add_argument_group("Metrics"),
     }
-    for option in _CLI_OPTIONS:
-        _add_cli_option(parser, groups, option)
+    for option in CLI_OPTIONS:
+        _add_cli_option(parser, groups, option, suppress_defaults=suppress_defaults)
 
     # --roofline-data-type intentionally absent: rocprof-compute only
     # accepts it under `analyze`, not `profile`. The profile run captures
