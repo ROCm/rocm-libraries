@@ -7,6 +7,8 @@
 .s-file config/assembly parsing and validation, driven over crafted .s files in
 a tmp directory."""
 
+import contextlib
+
 import pytest
 
 from Tensile.CustomKernels import (
@@ -36,6 +38,20 @@ def _write(d, name, contents):
     p = d / (name + ".s")
     p.write_text(contents)
     return p
+
+
+@contextlib.contextmanager
+def _isolate_valid_parameters():
+    # getCustomKernelConfig does `validParameters.update(newMIValidParameters)`,
+    # a permanent global mutation. Snapshot + restore so the roster other suites
+    # (ValidParameters/Naming/SolutionClass) snapshot is left untouched.
+    from Tensile.Common.ValidParameters import validParameters
+    saved = dict(validParameters)
+    try:
+        yield
+    finally:
+        validParameters.clear()
+        validParameters.update(saved)
 
 
 def test_is_custom_kernel_config():
@@ -84,7 +100,8 @@ def test_read_custom_kernel_config_bad_yaml_raises(tmp_path):
 
 def test_get_custom_kernel_config_ok(tmp_path, snapshot):
     _write(tmp_path, "k", _VALID_S)
-    cfg = getCustomKernelConfig("k", {"Extra": 9}, directory=str(tmp_path))
+    with _isolate_valid_parameters():
+        cfg = getCustomKernelConfig("k", {"Extra": 9}, directory=str(tmp_path))
     assert {
         "KernelLanguage": cfg["KernelLanguage"],
         "CustomKernelName": cfg["CustomKernelName"],
