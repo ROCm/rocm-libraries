@@ -103,3 +103,15 @@ unit-characterizable without the full kernel-writer machinery.
 out-of-scope codegen surface into the unit tests; rejected; (b) drop the module
 entirely — rejected: the `*Names` functions encode the real kernel-naming
 contract and are worth pinning. Net: a partial module like `Parallel`.
+
+## D7 — pre-existing unstaged `env/Dockerfile` rewrite (left untouched)
+**Decision:** Leave the modified `work/tensilelite-characterization/env/Dockerfile`
+unstaged/uncommitted; do not commit it and do not discard it.
+**Why:** it is a substantial content rewrite (TheRock CI run base, reproducible
+image) that this characterization sweep did not author and that is unrelated to
+any test module. Committing it would bundle unrelated work into a per-module
+commit; discarding it could destroy someone's WIP. My commits stage only
+specific test-suite paths, so it will not be swept in accidentally.
+**Alternatives rejected:** (a) commit it — out of scope, violates the
+per-module-commit intent; (b) `git checkout` it — risks losing authored work I
+can't attribute. Surfaced to the user instead.
