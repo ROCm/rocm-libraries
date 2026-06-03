@@ -23,20 +23,24 @@ namespace hipdnn_test_sdk::utilities
 /// Metadata read from a {Name}.meta.json companion file alongside a golden
 /// reference bundle ({Name}.json + {Name}.tensor{uid}.bin).
 ///
-/// All fields inside the `metadata` object are optional. A missing field means
-/// "not recorded" — the system must behave correctly without it. The only
-/// required field is `format_version` at the top level.
+/// All fields are at the top level of the JSON object (RFC 0011 §4.1).
+/// Every field except `format_version` is optional. A missing field means
+/// "not recorded" — the system must behave correctly without it.
 struct BundleMetadata
 {
     int formatVersion = 1;
 
+    std::optional<std::string> generator;
     std::optional<std::string> generatorVersion;
-    std::optional<std::string> createdAt;
+    std::optional<std::string> generatedAt;
     std::optional<std::string> gpuArchitecture;
     std::optional<std::string> rocmVersion;
-    std::optional<std::string> referenceExecutor;
-    std::optional<std::string> referenceExecutorHash;
+    std::optional<std::string> referenceSource;
+    std::optional<std::string> referenceSourceHash;
+    std::optional<std::string> referenceStrategy;
     std::optional<std::string> operation;
+    std::optional<std::string> generationCommand;
+    std::optional<std::string> notes;
     std::optional<int64_t> seed;
     std::optional<int64_t> minimumVramMb;
 };
@@ -58,8 +62,7 @@ inline std::filesystem::path metaJsonPath(const std::filesystem::path& bundleJso
 /// bundles simply have no metadata). Returns std::nullopt with a warning log
 /// if the file exists but cannot be parsed or has an unsupported
 /// format_version. Never throws.
-inline std::optional<BundleMetadata> loadBundleMetadata(
-    const std::filesystem::path& bundleJsonPath)
+inline std::optional<BundleMetadata> loadBundleMetadata(const std::filesystem::path& bundleJsonPath)
 {
     auto path = metaJsonPath(bundleJsonPath);
 
@@ -96,36 +99,31 @@ inline std::optional<BundleMetadata> loadBundleMetadata(
         BundleMetadata meta;
         meta.formatVersion = version;
 
-        if(json.contains("metadata") && json["metadata"].is_object())
-        {
-            const auto& m = json["metadata"];
+        auto readString = [&](const char* key) -> std::optional<std::string> {
+            if(json.contains(key) && json[key].is_string())
+                return json[key].get<std::string>();
+            return std::nullopt;
+        };
 
-            auto readString = [&](const char* key) -> std::optional<std::string> {
-                if(m.contains(key) && m[key].is_string())
-                {
-                    return m[key].get<std::string>();
-                }
-                return std::nullopt;
-            };
+        auto readInt64 = [&](const char* key) -> std::optional<int64_t> {
+            if(json.contains(key) && json[key].is_number_integer())
+                return json[key].get<int64_t>();
+            return std::nullopt;
+        };
 
-            auto readInt64 = [&](const char* key) -> std::optional<int64_t> {
-                if(m.contains(key) && m[key].is_number_integer())
-                {
-                    return m[key].get<int64_t>();
-                }
-                return std::nullopt;
-            };
-
-            meta.generatorVersion = readString("generator_version");
-            meta.createdAt = readString("created_at");
-            meta.gpuArchitecture = readString("gpu_architecture");
-            meta.rocmVersion = readString("rocm_version");
-            meta.referenceExecutor = readString("reference_executor");
-            meta.referenceExecutorHash = readString("reference_executor_hash");
-            meta.operation = readString("operation");
-            meta.seed = readInt64("seed");
-            meta.minimumVramMb = readInt64("minimum_vram_mb");
-        }
+        meta.generator          = readString("generator");
+        meta.generatorVersion   = readString("generator_version");
+        meta.generatedAt        = readString("generated_at");
+        meta.gpuArchitecture    = readString("gpu_architecture");
+        meta.rocmVersion        = readString("rocm_version");
+        meta.referenceSource    = readString("reference_source");
+        meta.referenceSourceHash = readString("reference_source_hash");
+        meta.referenceStrategy  = readString("reference_strategy");
+        meta.operation          = readString("operation");
+        meta.generationCommand  = readString("generation_command");
+        meta.notes              = readString("notes");
+        meta.seed               = readInt64("seed");
+        meta.minimumVramMb      = readInt64("minimum_vram_mb");
 
         return meta;
     }
@@ -167,8 +165,8 @@ inline std::optional<std::string> checkVramRequirement(const BundleMetadata& met
     }
     if(deviceTotalVramMb < static_cast<std::size_t>(*meta.minimumVramMb))
     {
-        return "Bundle requires " + std::to_string(*meta.minimumVramMb)
-               + " MB VRAM but device has " + std::to_string(deviceTotalVramMb) + " MB";
+        return "Bundle requires " + std::to_string(*meta.minimumVramMb) + " MB VRAM but device has "
+               + std::to_string(deviceTotalVramMb) + " MB";
     }
     return std::nullopt;
 }
@@ -178,21 +176,21 @@ inline std::optional<std::string> checkVramRequirement(const BundleMetadata& met
 /// always passes this check.
 ///
 /// Passes (returns nullopt) when:
-///   - referenceExecutor is not set or is "cpu" (case-insensitive)
+///   - referenceSource is not set or is "cpu" (case-insensitive)
 ///   - gpuArchitecture is not set or is empty in metadata
 ///   - currentArch is empty (device could not be queried — skip disabled)
 ///   - currentArch matches gpuArchitecture at the base level (before ':' suffix)
 inline std::optional<std::string> checkArchCompatibility(const BundleMetadata& meta,
                                                          const std::string& currentArch)
 {
-    if(!meta.referenceExecutor)
+    if(!meta.referenceSource)
     {
         return std::nullopt;
     }
     // Case-insensitive: "cpu", "CPU", "Cpu" etc. are all treated as CPU reference.
     // CPU-generated golden data is architecture-independent.
     {
-        std::string execLower = *meta.referenceExecutor;
+        std::string execLower = *meta.referenceSource;
         for(auto& c : execLower)
         {
             c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
@@ -213,9 +211,10 @@ inline std::optional<std::string> checkArchCompatibility(const BundleMetadata& m
     // Match if currentArch starts with gpuArchitecture followed by ':' or end-of-string.
     // e.g., metadata "gfx942" matches device "gfx942:sramecc+:xnack-".
     const auto& metaArch = *meta.gpuArchitecture;
-    const bool archMatches = currentArch.size() >= metaArch.size()
-        && currentArch.compare(0, metaArch.size(), metaArch) == 0
-        && (currentArch.size() == metaArch.size() || currentArch[metaArch.size()] == ':');
+    const bool archMatches
+        = currentArch.size() >= metaArch.size()
+          && currentArch.compare(0, metaArch.size(), metaArch) == 0
+          && (currentArch.size() == metaArch.size() || currentArch[metaArch.size()] == ':');
     if(!archMatches)
     {
         return "Golden data generated on " + *meta.gpuArchitecture + " but current GPU is "
