@@ -140,6 +140,16 @@ def drive(
         Path(tmp.name).unlink(missing_ok=True)
         return 0
 
+    # Purge any stale primary kernel headers (gemm_*.hpp at set_dir level) before
+    # invoking codegen.  Without this, a second run with a different config into the
+    # same kernel-set directory accumulates two headers and the count assertion below
+    # fires a false-positive error.  dispatcher_wrappers/ is recreated by codegen
+    # so we do not need to touch it.
+    set_dir_pre = output_dir / kernel_set
+    if set_dir_pre.exists():
+        for stale in set_dir_pre.glob("gemm_*.hpp"):
+            stale.unlink()
+
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True)
     finally:
