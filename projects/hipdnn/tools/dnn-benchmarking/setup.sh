@@ -85,14 +85,36 @@ source "$VENV_DIR/bin/activate"
 # pycache redirect, every import writes/reads .pyc files over the network. These
 # values must be injected into the venv activate script so they are set before
 # the interpreter starts (setting them in Python code is too late for that
-# process's own imports).
+# process's own imports). The ROCm SDK wheel paths keep CK DSL's ctypes-loaded
+# COMGR/HIP runtime aligned with PyTorch's ROCm wheel; otherwise the process can
+# load two LLVM/COMGR copies and abort during JIT compilation.
 ACTIVATE_LOCAL="$VENV_DIR/bin/activate.local"
-{
-    echo "export PYTHONPYCACHEPREFIX=$DNN_BENCH_WORKSPACE/pycache"
-    echo "export DNN_BENCH_WORKSPACE=$DNN_BENCH_WORKSPACE"
-    echo "export HIPDNN_PLUGIN_DIR=$PLUGIN_DIR"
-    echo "export LD_LIBRARY_PATH=$INSTALL_DIR/lib:$ROCM_ROOT/lib:\${LD_LIBRARY_PATH:-}"
-} > "$ACTIVATE_LOCAL"
+cat > "$ACTIVATE_LOCAL" <<EOF
+export PYTHONPYCACHEPREFIX=$DNN_BENCH_WORKSPACE/pycache
+export DNN_BENCH_WORKSPACE=$DNN_BENCH_WORKSPACE
+export HIPDNN_PLUGIN_DIR=$PLUGIN_DIR
+
+_rocm_site="\$VIRTUAL_ENV/lib/python\$(python - <<'PY'
+import sys
+print(f"{sys.version_info.major}.{sys.version_info.minor}")
+PY
+)/site-packages"
+_rocm_core="\$_rocm_site/_rocm_sdk_core"
+_rocm_libs=""
+for _candidate in "\$_rocm_site"/_rocm_sdk_libraries_*; do
+    if [ -d "\$_candidate/lib" ]; then
+        _rocm_libs="\$_candidate/lib:\$_rocm_libs"
+    fi
+done
+if [ -f "\$_rocm_core/lib/libamd_comgr.so.3" ]; then
+    export CK_DSL_COMGR_LIB="\$_rocm_core/lib/libamd_comgr.so.3"
+fi
+if [ -f "\$_rocm_core/lib/libamdhip64.so.7" ]; then
+    export CK_DSL_HIP_LIB="\$_rocm_core/lib/libamdhip64.so.7"
+fi
+export LD_LIBRARY_PATH=$INSTALL_DIR/lib:\${_rocm_libs}\$_rocm_core/lib:\$_rocm_core/lib/llvm/lib:$ROCM_ROOT/lib:\${LD_LIBRARY_PATH:-}
+unset _rocm_site _rocm_core _rocm_libs _candidate
+EOF
 if ! grep -q "activate.local" "$VENV_DIR/bin/activate"; then
     # shellcheck disable=SC2016
     echo 'source "$(dirname "${BASH_SOURCE[0]}")/activate.local" 2>/dev/null || true' \

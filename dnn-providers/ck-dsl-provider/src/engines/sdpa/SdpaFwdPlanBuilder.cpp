@@ -97,6 +97,12 @@ std::int32_t chooseDegenerateBlockSize(std::int32_t skv) {
     }
     return 16;
 }
+void finalizeDenseBlockSize(SdpaSpec& spec) {
+    if (!spec.is_paged && spec.block_size == 0) {
+        spec.block_size = chooseDegenerateBlockSize(spec.problem.Skv);
+    }
+}
+
 
 /// Normalise the spec's dtype spelling ("f16") to the kernel's
 /// ("fp16") that ``SdpaSelectionProblem`` and the heuristic expect.
@@ -154,6 +160,12 @@ bool SdpaFwdPlanBuilder::isApplicable(const ::CkDslHandle& handle,
         HIPDNN_PLUGIN_LOG_INFO("SdpaFwdPlanBuilder::isApplicable rejected graph: " << reason);
         return false;
     }
+
+    // Dense graphs reach the unified paged kernel through a degenerate
+    // one-block-per-sequence layout. Finalise that implicit block_size before
+    // calling the DSL applicability predicate so isApplicable and buildPlan
+    // validate the same payload.
+    finalizeDenseBlockSize(*spec);
 
     // Arch + DSL-validity gate. A spec valid on gfx950 can be invalid on
     // another arch, so validate against the device arch via the DSL's
@@ -258,9 +270,7 @@ void SdpaFwdPlanBuilder::buildPlan(const ::CkDslHandle& handle,
     // 1. Finalise block_size for the dense path so the scorer and the
     //    cache key see a concrete value. Real paged graphs already carry
     //    a block_size from the adapter; leave those as-is.
-    if (!spec.is_paged && spec.block_size == 0) {
-        spec.block_size = chooseDegenerateBlockSize(spec.problem.Skv);
-    }
+    finalizeDenseBlockSize(spec);
 
     // 2. Build the selection problem from the finalised spec.
     const SdpaSelectionProblem selProblem = buildSelectionProblem(spec);
