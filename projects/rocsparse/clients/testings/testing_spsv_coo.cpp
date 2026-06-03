@@ -1,5 +1,5 @@
 /* ************************************************************************
-* Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -204,11 +204,23 @@ void testing_spsv_coo(const Arguments& arg)
     {
         // Solve on host
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
+        // Prime singularity buffer outside graph capture (Option C contract for csrsv_solve).
+        if(arg.graph_test)
+        {
+            CHECK_ROCSPARSE_ERROR(rocsparse_spsv(
+                handle, trans_A, &halpha, A, x, y1, ttype, alg, compute, &buffer_size, dbuffer));
+        }
         CHECK_ROCSPARSE_ERROR(testing::rocsparse_spsv(
             handle, trans_A, &halpha, A, x, y1, ttype, alg, compute, &buffer_size, dbuffer));
 
         // Solve on device
         CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_device));
+        // Prime singularity buffer outside graph capture (Option C contract for csrsv_solve).
+        if(arg.graph_test)
+        {
+            CHECK_ROCSPARSE_ERROR(rocsparse_spsv(
+                handle, trans_A, dalpha, A, x, y2, ttype, alg, compute, &buffer_size, dbuffer));
+        }
         CHECK_ROCSPARSE_ERROR(testing::rocsparse_spsv(
             handle, trans_A, dalpha, A, x, y2, ttype, alg, compute, &buffer_size, dbuffer));
 
