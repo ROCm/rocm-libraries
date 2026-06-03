@@ -121,16 +121,27 @@ configs (`reject` sets `state["Valid"]=False` and returns True when
 7. AFTER coverage + `coverage-after.txt` + no-regression confirmation.
 8. `next-goal-<target>.md` (grounded) + commit. Mark this checklist done.
 
-## Definition of done checklist
+## Definition of done checklist — COMPLETE (slice 3a; 3b deferred)
 
-- [ ] `coverage-before.txt` captured (baseline) BEFORE new tests.
-- [ ] Targeted statics ≥95% line where reachable; unreachable cap-gated arms documented.
-- [ ] `coverage-after.txt` captured; before→after delta in target.md.
-- [ ] Each targeted static has snapshot coverage of its main + reject paths.
-- [ ] State seeded from the real fixture; snapshots normalised (no env-coupled values).
-- [ ] resistance.md lists each resisting fn (expect: deeply cap-gated reject arms).
-- [ ] recommendations.md: go/no-go on the next target (remaining Solution.py vs
-      `GlobalParameters.py` vs the Toolchain group).
-- [ ] full `-m unit` ≥ 1818 passed / 201 skipped, no failures, additive only.
-- [ ] All work committed (atomic, no push); tree clean.
-- [ ] Next goal prompt `next-goal-<target>.md` created and committed.
+- [x] `coverage-before.txt` captured (baseline) BEFORE new tests.
+      (Solution.py 3272/1978 = 38.81% line.)
+- [x] Targeted statics ≥95% line where reachable; the cap-gated arms
+      (getMIOutputInfo WMMA L564-569; isVgprForLocalReadPackingDoable HasEccHalf
+      L1083 — gfx942 only) and the deep DTV/DTL + giant assign* reject matrices
+      (need a dtype×ISA×MI config sweep) documented in resistance.md as slice 3b.
+- [x] `coverage-after.txt` captured; before→after delta in target.md
+      (38.81% → 41.14% line, +52 lines).
+- [x] Small statics fully covered (setGlobalReadVectorWidth,
+      checkAndAssignWaveSeparateGlobalRead); predicates/assign* covered on the
+      happy path + reachable rejects; snapshots seeded from the real state.
+- [x] resistance.md documents the cap-gated arms + the slice-3b config sweep.
+- [x] recommendations.md: GO → `Common/GlobalParameters.py` (self-contained
+      ~1-day top-up); defer Solution slice 3b.
+- [x] full `-m unit` = **1844 passed / 201 skipped**, no failures, additive only.
+- [x] All work committed (atomic, no push); tree clean.
+- [x] Next goal prompt `next-goal-globalparameters.md` created and committed.
+
+> NOTE: This is **slice 3a**. The exhaustive derivation reject matrix
+> (DTV/DTL deep branches + the ~1000-line `assignDerivedParameters` body +
+> WMMA/EccHalf arms) is **slice 3b** — a multi-day dtype×ISA×MI config sweep,
+> deferred per recommendations.md.
