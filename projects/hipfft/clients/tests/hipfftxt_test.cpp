@@ -24,10 +24,9 @@
 #include <complex>
 #include <gtest/gtest.h>
 
+#include "../../shared/rocfft_hip.h"
 #include "../../shared/test_params.h"
 #include "../hipfft_params.h"
-#include "../../shared/rocfft_hip.h"
-
 
 #ifdef __HIP_PLATFORM_NVIDIA__
 DISABLE_WARNING_PUSH
@@ -509,7 +508,7 @@ TEST_P(hipfftxtunitdesc, xtmemcpytest)
     // Initialize desc buffers to zero:
     for(const auto igpu : gpus)
     {
-        const auto device = mydesc->descriptor->GPUs[igpu];
+        const auto           device = mydesc->descriptor->GPUs[igpu];
         rocfft_scoped_device dev(device);
 
         const auto bufsize = mydesc->descriptor->size[igpu];

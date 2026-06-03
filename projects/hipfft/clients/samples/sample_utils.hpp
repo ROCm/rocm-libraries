@@ -78,7 +78,7 @@ inline void sneakyc2c(std::vector<std::complex<Tfloat>>& cinput,
     // Implemented only for single and double precision.
     static_assert(std::is_same_v<Tfloat, float> || std::is_same_v<Tfloat, double>,
                   "Tfloat must be a float or double.");
-    
+
     hipError_t hip_rt;
     using fftctype
         = std::conditional_t<std::is_same_v<Tfloat, float>, hipfftComplex, hipfftDoubleComplex>;
@@ -96,10 +96,8 @@ inline void sneakyc2c(std::vector<std::complex<Tfloat>>& cinput,
         throw std::runtime_error("hipMemcpy failed");
     hipfftHandle plan{};
     auto         hipfft_rt = HIPFFT_SUCCESS;
-    hipfft_rt              = hipfftPlan2d(&plan,
-                                          Nx,
-                                          Ny,
-                                          std::is_same_v<Tfloat, float> ? HIPFFT_C2C : HIPFFT_Z2Z);
+    hipfft_rt
+        = hipfftPlan2d(&plan, Nx, Ny, std::is_same_v<Tfloat, float> ? HIPFFT_C2C : HIPFFT_Z2Z);
     if(hipfft_rt != HIPFFT_SUCCESS)
         throw std::runtime_error("hipfftPlan2d failed");
     if constexpr(std::is_same_v<Tfloat, float>)
@@ -108,7 +106,7 @@ inline void sneakyc2c(std::vector<std::complex<Tfloat>>& cinput,
         hipfft_rt = hipfftExecZ2Z(plan, x, x, -direction);
     else
         throw std::runtime_error("Unsupported precision");
-    
+
     if(hipfft_rt != HIPFFT_SUCCESS)
         throw std::runtime_error("hipfftExec failed");
     hip_rt = hipMemcpy(cinput.data(), x, complex_bytes, hipMemcpyDeviceToHost);

@@ -61,14 +61,15 @@ static C default_brick_strides(fft_transform_type                        dft_typ
 
     if(length.size() == 0)
         return {};
-    
+
     // The data length may be less than the length if we have Hermitian-symmetric data.
-    C datalength = length;
-    const bool ishermitian = (dft_type == fft_transform_type_real_forward && io == fft_io::fft_io_out) ||
-        (dft_type == fft_transform_type_real_inverse && io == fft_io::fft_io_in);
+    C          datalength = length;
+    const bool ishermitian
+        = (dft_type == fft_transform_type_real_forward && io == fft_io::fft_io_out)
+          || (dft_type == fft_transform_type_real_inverse && io == fft_io::fft_io_in);
     if(ishermitian)
         datalength[length.size() - 1] = datalength[length.size() - 1] / 2 + 1;
-        
+
     // Validate the lower/upper/data-length configuration:
     for(size_t idx = 0; idx < lower.size(); ++idx)
     {
@@ -76,21 +77,22 @@ static C default_brick_strides(fft_transform_type                        dft_typ
             throw std::invalid_argument("Upper index is below lower index");
         if(lower[idx] < 0 || upper[idx] < 0)
             throw std::invalid_argument("Lower or upper index is negative");
-        if(lower[idx] > datalength[idx] || upper[idx]  > datalength[idx])
+        if(lower[idx] > datalength[idx] || upper[idx] > datalength[idx])
             throw std::invalid_argument("Lower or upper index is past length");
     }
-    
+
     // If we are in-place real/complex, then the symmetrized dimension must be full-length.
-    if((dft_type ==  fft_transform_type_real_forward || dft_type ==  fft_transform_type_real_inverse)
+    if((dft_type == fft_transform_type_real_forward || dft_type == fft_transform_type_real_inverse)
        && placement == fft_result_placement::fft_placement_inplace)
     {
         if(upper.back() - lower.back() != datalength.back())
-            throw std::invalid_argument("In-place real/complex transforms may not divide data along real-complex dimension");
+            throw std::invalid_argument("In-place real/complex transforms may not divide data "
+                                        "along real-complex dimension");
     }
 
     C bricklength;
     for(size_t idx = 0; idx < lower.size(); ++idx)
-    {        
+    {
         bricklength.push_back(upper[idx] - lower[idx]);
     }
 

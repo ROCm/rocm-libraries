@@ -581,8 +581,8 @@ static void hipfftxt_bricks(const std::vector<size_t>& batchlength,
         }
         brick.field_upper[splitdim] = brick.field_lower[splitdim] + bricksplitlen;
 
-        brick.brick_stride
-            = default_brick_strides(dft_type, placement, io, batchlength, brick.field_lower, brick.field_upper);
+        brick.brick_stride = default_brick_strides(
+            dft_type, placement, io, batchlength, brick.field_lower, brick.field_upper);
     }
 }
 
