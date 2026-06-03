@@ -303,7 +303,34 @@ cmake                                                                           
   ..
 ```
 
-By default, the Dispatcher generates a smaller `tests` set of kernels. To generate a full `profiler` set of 
-kernels, use CMake flag `-D DISPATCHER_CONFIG_SET=profiler` at the configuration step.
+### Dispatcher config sets: `tests` vs `profiler`
+
+The Dispatcher codegen ships two sets of JSON configuration files for each variant (forward, backward data, backward weight):
+
+| Config set | Location | Description |
+|---|---|---|
+| `tests` (default) | `dispatcher/codegen/configs/grouped_conv/<variant>/tests/` | Smaller subset for CI and correctness validation. Faster build times. |
+| `profiler` | `dispatcher/codegen/configs/grouped_conv/<variant>/profiler/` | Full instance set for performance tuning. Includes all implicit-GEMM tile configurations. |
+
+Both sets include the same direct-conv kernel instances; the difference is in the number of implicit-GEMM configurations.
+
+Toggle between the two sets with the CMake flag `DISPATCHER_CONFIG_SET`:
+```bash
+# Default — tests set (smaller, faster build)
+cmake -D DISPATCHER_CONFIG_SET=tests ...
+
+# Full profiler set
+cmake -D DISPATCHER_CONFIG_SET=profiler ...
+```
+
+### Building only direct-conv instances
+
+To build only direct-conv kernel instances and skip all implicit-GEMM instances, use the `DISABLE_IMPLICIT_GEMM_INSTANCES` flag:
+```bash
+cmake -D DISABLE_IMPLICIT_GEMM_INSTANCES=ON ...
+```
+This filters at the codegen level: only instances with `"kind": "direct_conv"` are emitted from the JSON configs. Implicit-GEMM and depthwise instances are skipped entirely. The backward weight variant (which has no direct-conv kernels) emits an empty registration stub so the build still links.
+
+### Building only CK Tile profiler targets
 
 To build only the CK Tile profiler, one can use an additional flag `-DCK_PROFILER_OP_FILTER="_tile"`.

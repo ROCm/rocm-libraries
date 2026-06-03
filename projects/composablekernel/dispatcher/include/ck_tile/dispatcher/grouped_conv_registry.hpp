@@ -41,6 +41,7 @@ struct ConvDispatchBuffers
     int warmup             = 3;
     int repeat             = 10;
     bool benchmarking      = true;
+    bool flush_cache       = false;
     int split_k            = 1;
 };
 

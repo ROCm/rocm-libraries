@@ -24,19 +24,21 @@ namespace ck_tile::builder::profiling {
 /// @brief Dispatcher-based `run_grouped_conv_backward_data_tile_algs()`.
 /// Iterates all registered dispatcher kernels instead of builder-generated .inc files.
 template <auto SIGNATURE>
-std::tuple<bool, float, std::string, int, int>
+std::tuple<bool, float, float, float, std::string, int, int>
 run_grouped_conv_backward_data_tile_algs(const ckt::Args<SIGNATURE>& args,
                                          const std::string& split_k,
                                          const index_t instance_index,
                                          const ckt::Inputs<SIGNATURE>& inputs,
                                          const ckt::Outputs<SIGNATURE>& outputs,
                                          const ck_tile::stream_config& s_conf,
-                                         bool do_verification)
+                                         bool do_verification = true)
 {
     using DataType = DeduceDataType<SIGNATURE>;
 
     bool dummy_run_executed = false;
     float best_avg_time     = std::numeric_limits<float>::max();
+    float best_tflops       = std::numeric_limits<float>::min();
+    float best_gbs          = std::numeric_limits<float>::min();
     std::string best_op_name;
     int best_split_k                = 0;
     ck::index_t best_instance_index = -1;
@@ -138,6 +140,12 @@ run_grouped_conv_backward_data_tile_algs(const ckt::Args<SIGNATURE>& args,
             }
             if(valid)
             {
+                const float tflops =
+                    static_cast<float>(conv_param.GetFlops()) / 1.E9 / avg_time;
+                const float gb_per_sec =
+                    static_cast<float>(
+                        conv_param.template GetByte<DataType, DataType, DataType>()) /
+                    1.E6 / avg_time;
                 if(avg_time < best_avg_time)
                 {
                     best_avg_time       = avg_time;
@@ -145,16 +153,23 @@ run_grouped_conv_backward_data_tile_algs(const ckt::Args<SIGNATURE>& args,
                     best_split_k        = k_batch;
                     best_instance_index = num_kernel - 1;
                 }
+                best_tflops        = std::max(best_tflops, tflops);
+                best_gbs           = std::max(best_gbs, gb_per_sec);
                 const char* prefix = do_verification ? "[Valid]" : "[Not Validated]";
-                std::cout << prefix << " Perf: " << std::setw(10) << avg_time << " ms," << " "
-                          << op_name << " (instance " << num_kernel - 1 << "), SplitK " << k_batch
-                          << std::endl;
+                std::cout << prefix << " Perf: " << std::setw(10) << avg_time << " ms, " << tflops
+                          << " TFlops, " << gb_per_sec << " GB/s, " << op_name << " (instance "
+                          << num_kernel - 1 << "), SplitK " << k_batch << std::endl;
             }
         }
     }
 
-    return std::make_tuple(
-        all_instances_valid, best_avg_time, best_op_name, best_split_k, best_instance_index);
+    return std::make_tuple(all_instances_valid,
+                           best_avg_time,
+                           best_tflops,
+                           best_gbs,
+                           best_op_name,
+                           best_split_k,
+                           best_instance_index);
 }
 
 } // namespace ck_tile::builder::profiling

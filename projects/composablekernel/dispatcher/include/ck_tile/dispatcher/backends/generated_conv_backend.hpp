@@ -89,6 +89,7 @@ inline GroupedConvKernelInstance::RunFn make_conv_fwd_run_fn()
         sc.cold_niters_  = ctx.benchmarking ? ctx.warmup : 0;
         sc.nrepeat_      = ctx.benchmarking ? ctx.repeat : 1;
         sc.is_gpu_timer_ = ctx.benchmarking;
+        sc.flush_cache_  = ctx.flush_cache;
         return LauncherType::launch(args, sc);
     };
 }
@@ -116,6 +117,7 @@ inline GroupedConvKernelInstance::RunFn make_conv_bwd_data_run_fn()
         sc.cold_niters_  = ctx.benchmarking ? ctx.warmup : 0;
         sc.nrepeat_      = ctx.benchmarking ? ctx.repeat : 1;
         sc.is_gpu_timer_ = ctx.benchmarking;
+        sc.flush_cache_  = ctx.flush_cache;
         return LauncherType::launch(args, sc);
     };
 }
@@ -143,6 +145,7 @@ inline GroupedConvKernelInstance::RunFn make_conv_bwd_weight_run_fn()
         sc.cold_niters_  = ctx.benchmarking ? ctx.warmup : 0;
         sc.nrepeat_      = ctx.benchmarking ? ctx.repeat : 1;
         sc.is_gpu_timer_ = ctx.benchmarking;
+        sc.flush_cache_  = ctx.flush_cache;
         return LauncherType::launch(args, sc);
     };
 }

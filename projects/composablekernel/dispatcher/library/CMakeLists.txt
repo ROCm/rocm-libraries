@@ -22,6 +22,15 @@ string(REPLACE ";" " " _GPU_TARGETS_SPACE "${GPU_TARGETS}")
 string(REPLACE " " ";" _GPU_TARGETS_LIST "${_GPU_TARGETS_SPACE}")
 list(GET _GPU_TARGETS_LIST 0 _GPU_TARGET)
 
+# ---- Build options ----
+
+# When ON, emit ONLY the direct-conv (kind==direct_conv) instances and skip the
+# implicit-GEMM ones. Direct-conv and implicit-GEMM now share the same JSON
+# config files and OBJECT libraries, so this is a CODEGEN FILTER passed through
+# to generate_profiler_kernels.py (--disable-implicit-gemm), not a target switch.
+option(DISABLE_IMPLICIT_GEMM_INSTANCES
+       "Codegen filter: emit only direct-conv instances, skip implicit-GEMM" OFF)
+
 # ---- Variant-to-path mapping tables ----
 
 set(_DISP_CONFIG_SUBDIR_fwd "forward")
@@ -33,6 +42,11 @@ set(_DISP_GEN_SCRIPT "generate_profiler_kernels.py")
 set(_DISP_HEADER_PREFIX_fwd "grouped_conv_fwd_")
 set(_DISP_HEADER_PREFIX_bwd_weight "grouped_conv_bwd_weight_")
 set(_DISP_HEADER_PREFIX_bwd_data "grouped_conv_bwd_data_")
+
+# Direct-conv header prefix per variant (empty for bwd_weight: no direct kernels).
+set(_DISP_DIRECT_PREFIX_fwd "direct_conv_fwd_")
+set(_DISP_DIRECT_PREFIX_bwd_weight "")
+set(_DISP_DIRECT_PREFIX_bwd_data "direct_conv_bwd_data_")
 
 
 # =============================================================================
@@ -47,6 +61,7 @@ function(ck_add_dispatcher_conv_instances VARIANT)
   # Look up variant-specific paths
   set(CONFIG_SUBDIR "${_DISP_CONFIG_SUBDIR_${VARIANT}}")
   set(HEADER_PREFIX "${_DISP_HEADER_PREFIX_${VARIANT}}")
+  set(DIRECT_PREFIX "${_DISP_DIRECT_PREFIX_${VARIANT}}")
 
   if(NOT CONFIG_SUBDIR)
     message(FATAL_ERROR "Unknown dispatcher variant: ${VARIANT}")
@@ -62,6 +77,12 @@ function(ck_add_dispatcher_conv_instances VARIANT)
   # triggers a full reconfigure. Wipe the kernel dir first to remove stale files.
   file(REMOVE_RECURSE ${KERNEL_DIR})
   file(MAKE_DIRECTORY ${KERNEL_DIR})
+  # Pass the DISABLE_IMPLICIT_GEMM_INSTANCES codegen filter through to the
+  # generator so only direct-conv instances are emitted when it is ON.
+  set(_DISP_DISABLE_FLAG "")
+  if(DISABLE_IMPLICIT_GEMM_INSTANCES)
+    set(_DISP_DISABLE_FLAG "--disable-implicit-gemm")
+  endif()
   execute_process(
     COMMAND ${Python3_EXECUTABLE} ${SCRIPT_PATH}
             --variant ${VARIANT}
@@ -70,6 +91,7 @@ function(ck_add_dispatcher_conv_instances VARIANT)
             --output-dir ${KERNEL_DIR}
             --arch ${_GPU_TARGET}
             --config-set ${DISPATCHER_CONFIG_SET}
+            ${_DISP_DISABLE_FLAG}
     RESULT_VARIABLE ret
     OUTPUT_VARIABLE output
     ERROR_VARIABLE error
@@ -81,7 +103,13 @@ function(ck_add_dispatcher_conv_instances VARIANT)
   message(STATUS "Dispatcher ${VARIANT} kernels generated (config set: ${DISPATCHER_CONFIG_SET}): ${output}")
 
   # --- Step 2: Create .cpp wrappers for each generated kernel header ---
-  file(GLOB _KERNEL_HEADERS "${KERNEL_DIR}/${HEADER_PREFIX}*.hpp")
+  # Compile BOTH the implicit-GEMM (HEADER_PREFIX) and the direct-conv
+  # (DIRECT_PREFIX) kernel headers emitted for this variant.
+  set(_HEADER_GLOBS "${KERNEL_DIR}/${HEADER_PREFIX}*.hpp")
+  if(DIRECT_PREFIX)
+    list(APPEND _HEADER_GLOBS "${KERNEL_DIR}/${DIRECT_PREFIX}*.hpp")
+  endif()
+  file(GLOB _KERNEL_HEADERS ${_HEADER_GLOBS})
   set(_KERNEL_SOURCES "")
   foreach(HEADER ${_KERNEL_HEADERS})
     get_filename_component(STEM ${HEADER} NAME_WE)
@@ -92,11 +120,6 @@ function(ck_add_dispatcher_conv_instances VARIANT)
     list(APPEND _KERNEL_SOURCES ${WRAPPER_CPP})
   endforeach()
 
-  if(NOT _KERNEL_SOURCES)
-    message(WARNING "Dispatcher ${VARIANT}: no kernel sources generated, skipping target creation")
-    return()
-  endif()
-
   # --- Step 3: Add chunked registration .cpp files ---
   file(GLOB _REG_CPPS "${KERNEL_DIR}/register_*.cpp")
   foreach(REG_CPP ${_REG_CPPS})
@@ -105,6 +128,11 @@ function(ck_add_dispatcher_conv_instances VARIANT)
       COMPILE_OPTIONS "-Wno-ctad-maybe-unsupported;-Wno-old-style-cast"
     )
   endforeach()
+
+  if(NOT _KERNEL_SOURCES)
+    message(WARNING "Dispatcher ${VARIANT}: no sources generated, skipping target creation")
+    return()
+  endif()
 
   # --- Step 4: Create OBJECT library ---
   add_library(${TARGET_NAME} OBJECT ${_KERNEL_SOURCES})
@@ -141,8 +169,16 @@ endfunction()
 
 
 # =============================================================================
-# Create all three dispatcher instance libraries
+# Create dispatcher instance libraries
 # =============================================================================
+# Each variant compiles both implicit-GEMM and direct-conv kernels from the same
+# grouped_conv config tree. DISABLE_IMPLICIT_GEMM_INSTANCES is applied inside the
+# codegen (--disable-implicit-gemm), which then emits only direct-conv kernels;
+# the bwd_weight target has zero kernel wrappers in that mode but still compiles
+# the registration stub (empty register_all_grouped_conv_bwd_weight_kernels).
+if(DISABLE_IMPLICIT_GEMM_INSTANCES)
+  message(STATUS "DISABLE_IMPLICIT_GEMM_INSTANCES=ON: emitting direct-conv instances only")
+endif()
 ck_add_dispatcher_conv_instances(fwd)
 ck_add_dispatcher_conv_instances(bwd_weight)
 ck_add_dispatcher_conv_instances(bwd_data)

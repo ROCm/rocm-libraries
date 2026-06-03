@@ -27,7 +27,7 @@ from registration_codegen import generate_chunked_registration
 
 VARIANT_CONFIG = {
     "fwd": {
-        "glob_pattern": "grouped_conv_fwd_*.hpp",
+        "glob_patterns": ["grouped_conv_fwd_*.hpp", "direct_conv_fwd_*.hpp"],
         "include_all_header": "include_all_grouped_conv_fwd_kernels.hpp",
         "description": "forward",
         "op_enum": "GroupedConvOp::Forward",
@@ -36,7 +36,7 @@ VARIANT_CONFIG = {
         "register_fn_name": "register_all_grouped_conv_fwd_kernels",
     },
     "bwd_data": {
-        "glob_pattern": "grouped_conv_bwd_data_*.hpp",
+        "glob_patterns": ["grouped_conv_bwd_data_*.hpp", "direct_conv_bwd_data_*.hpp"],
         "include_all_header": "include_all_grouped_conv_bwd_data_kernels.hpp",
         "description": "backward data",
         "op_enum": "GroupedConvOp::BackwardData",
@@ -45,7 +45,7 @@ VARIANT_CONFIG = {
         "register_fn_name": "register_all_grouped_conv_bwd_data_kernels",
     },
     "bwd_weight": {
-        "glob_pattern": "grouped_conv_bwd_weight_*.hpp",
+        "glob_patterns": ["grouped_conv_bwd_weight_*.hpp"],
         "include_all_header": "include_all_grouped_conv_bwd_weight_kernels.hpp",
         "description": "backward weight",
         "op_enum": "GroupedConvOp::BackwardWeight",
@@ -56,13 +56,15 @@ VARIANT_CONFIG = {
 }
 
 
-def generate_kernels_from_config(config_file, output_dir, arch):
+def generate_kernels_from_config(config_file, output_dir, arch, disable_implicit_gemm=False):
     """Generate kernels for a single JSON config via direct Python API."""
     import json
     from unified_grouped_conv_codegen import UnifiedGroupedConvCodegen, load_configs_from_json
 
     try:
-        configs = load_configs_from_json(config_file, arch=arch)
+        configs = load_configs_from_json(
+            config_file, arch=arch, disable_implicit_gemm=disable_implicit_gemm
+        )
         # Extract datatype from JSON config (matches old --config-file behavior)
         with open(config_file, "r") as f:
             config_data = json.load(f)
@@ -77,10 +79,18 @@ def generate_kernels_from_config(config_file, output_dir, arch):
         return False
 
 
-def collect_kernel_headers(output_dir, glob_pattern):
-    """Collect all generated .hpp kernel headers matching the variant pattern."""
-    headers = sorted(Path(output_dir).glob(glob_pattern))
-    return headers
+def collect_kernel_headers(output_dir, glob_patterns):
+    """Collect all generated .hpp kernel headers matching the variant patterns.
+
+    glob_patterns is a list of glob strings (e.g. grouped_conv_fwd_*.hpp plus
+    direct_conv_fwd_*.hpp); their union is returned, sorted and de-duplicated.
+    """
+    out = Path(output_dir)
+    seen = {}
+    for pattern in glob_patterns:
+        for h in out.glob(pattern):
+            seen[h.name] = h
+    return [seen[name] for name in sorted(seen)]
 
 
 def generate_include_all_header(headers, output_dir, header_filename, description):
@@ -111,6 +121,12 @@ def main():
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--arch", default="gfx950")
     parser.add_argument("--config-set", default="tests", choices=["tests", "profiler"])
+    parser.add_argument(
+        "--disable-implicit-gemm",
+        action="store_true",
+        help="Emit ONLY direct-conv (kind==direct_conv) instances and skip the "
+        "implicit-GEMM ones (the DISABLE_IMPLICIT_GEMM_INSTANCES codegen filter).",
+    )
 
     args = parser.parse_args()
     cfg = VARIANT_CONFIG[args.variant]
@@ -140,19 +156,33 @@ def main():
     success = True
     for config_file in json_configs:
         print(f"Generating from {config_file.name}...")
-        if not generate_kernels_from_config(config_file, output_dir, args.arch):
+        if not generate_kernels_from_config(
+            config_file, output_dir, args.arch,
+            disable_implicit_gemm=args.disable_implicit_gemm,
+        ):
             success = False
 
     if not success:
         print("ERROR: Some kernel generations failed", file=sys.stderr)
         sys.exit(1)
 
-    headers = collect_kernel_headers(output_dir, cfg["glob_pattern"])
+    headers = collect_kernel_headers(output_dir, cfg["glob_patterns"])
     print(f"Found {len(headers)} generated kernel headers")
 
-    if not headers:
+    if not headers and not args.disable_implicit_gemm:
         print("ERROR: No kernel headers generated", file=sys.stderr)
         sys.exit(1)
+
+    # Even when a variant legitimately has zero kernels (e.g. bwd_weight under
+    # --disable-implicit-gemm, which has no direct-conv instances), we still emit
+    # the include-all header and the registration .cpp. The latter defines an
+    # empty register_all_grouped_conv_<variant>_kernels() so the symbol the
+    # dispatcher profiler header references is always satisfied at link time.
+    if not headers and args.disable_implicit_gemm:
+        print(
+            f"No kernels for variant '{args.variant}' under "
+            f"--disable-implicit-gemm; emitting empty registration stub."
+        )
 
     generate_include_all_header(headers, output_dir, cfg["include_all_header"], cfg["description"])
     generate_chunked_registration(

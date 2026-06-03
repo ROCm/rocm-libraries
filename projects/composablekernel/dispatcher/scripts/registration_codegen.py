@@ -90,8 +90,59 @@ def parse_depthwise_kernel_metadata(kname):
     }
 
 
+def parse_direct_conv_kernel_metadata(kname):
+    """Extract metadata from a direct-conv kernel header filename stem.
+
+    Direct-conv kernels are named:
+      direct_conv_{fwd|bwd_data}_{fp16|bf16|fp32}_{layout}_{ndim}d_{impl}_{N}c_{ver}_id{id}
+    where {impl} is one of: hip | tile-grouped | tile-dense.
+    The impl token uses a hyphen so that compound names remain a single
+    underscore-delimited field, keeping the stem trivially parseable.
+    e.g. direct_conv_fwd_fp16_nhwgc_2d_tile-grouped_4c_v3_id59
+         direct_conv_bwd_data_bf16_nhwgc_2d_tile-dense_32c_v3_id102
+         direct_conv_fwd_fp16_nhwgc_2d_hip_4c_v0_id80
+
+    Returns a dict with "is_direct_conv": True plus the parsed identity.
+    """
+    ndim = 3 if "_3d_" in kname else 2
+
+    dtype = "fp16"
+    for dt in ["fp16", "bf16", "fp32"]:
+        if f"_{dt}_" in kname:
+            dtype = dt
+            break
+
+    layout = "nhwgc"
+    for lay in ["nhwgc", "ndhwgc"]:
+        if f"_{lay}_" in kname:
+            layout = lay
+            break
+
+    m = re.search(r"_(hip|tile-grouped|tile-dense)_(\d+)c_(v\d+)_id(\d+)$", kname)
+    if not m:
+        raise ValueError(f"Unrecognized direct-conv kernel name: {kname}")
+    impl = m.group(1)
+    channel_family = int(m.group(2))
+    version = m.group(3)
+    instance_id = int(m.group(4))
+
+    return {
+        "is_direct_conv": True,
+        "ndim": ndim,
+        "dtype": dtype,
+        "layout": layout,
+        "impl": impl,
+        "channel_family": channel_family,
+        "version": version,
+        "id": instance_id,
+    }
+
+
 def parse_kernel_metadata(kname):
     """Extract metadata from a kernel header filename stem."""
+    # Route direct (hipconv-ported) kernels to specialized parser
+    if kname.startswith("direct_conv_"):
+        return parse_direct_conv_kernel_metadata(kname)
     # Route depthwise kernels to specialized parser
     if "_depthwise_" in kname:
         return parse_depthwise_kernel_metadata(kname)
@@ -214,6 +265,35 @@ def _make_depthwise_conv_key(meta):
     ]
 
 
+def _make_direct_conv_key(meta):
+    """Generate C++ key assignment lines for a direct-conv kernel.
+
+    Direct conv does not map onto the GEMM tile/wave/warp/pipeline key fields, so
+    rather than abusing those fields to encode identity we set ONLY the fields the
+    profiler filter needs (dtype/layout/ndim_spatial; op + arch are set by the
+    caller) and place the FULL unique identity into a single key.specialization
+    marker string. The marker alone makes each direct-conv key distinct (the
+    registry eq/hash both include specialization). pipeline="direct" tags the
+    family so a direct key can never alias an implicit-GEMM key sharing defaults.
+    All GEMM-shaped fields are left at their struct defaults (neutral).
+    """
+    # Build unique marker from the full parsed metadata.  The combination of
+    # impl + channel_family + version + id is guaranteed unique per JSON file.
+    marker = (
+        f"direct_{meta['impl']}_{meta['channel_family']}c"
+        f"_{meta['version']}_id{meta['id']}"
+    )
+    return [
+        f'        key.dtype_in     = "{meta["dtype"]}";',
+        f'        key.dtype_wei    = "{meta["dtype"]}";',
+        f'        key.dtype_out    = "{meta["dtype"]}";',
+        f'        key.layout       = "{meta["layout"]}";',
+        f"        key.ndim_spatial = {meta['ndim']};",
+        f'        key.pipeline     = "direct";',
+        f'        key.specialization = "{marker}";',
+    ]
+
+
 def _make_implicit_gemm_conv_key(meta):
     """Generate C++ key assignment lines for an implicit GEMM-based conv kernel."""
     return [
@@ -251,10 +331,13 @@ def _make_implicit_gemm_conv_key(meta):
 def make_registration_block(kname, global_idx, op_enum, run_fn_maker, is_supported_fn_maker):
     """Generate C++ registration code for a single kernel."""
     meta = parse_kernel_metadata(kname)
-    ns = f"ns_{kname}"
-    launcher = f"{ns}::{kname}_Launcher"
+    # C++ identifiers cannot contain hyphens; replace with underscores.
+    cpp_name = kname.replace("-", "_")
+    ns = f"ns_{cpp_name}"
+    launcher = f"{ns}::{cpp_name}_Launcher"
     ndim = meta["ndim"]
     is_depthwise = meta.get("is_depthwise", False)
+    is_direct_conv = meta.get("is_direct_conv", False)
 
     lines = []
     lines.append(f"    // Kernel {global_idx}: {kname}")
@@ -262,7 +345,9 @@ def make_registration_block(kname, global_idx, op_enum, run_fn_maker, is_support
     lines.append(f"        GroupedConvKernelKey key;")
     lines.append(f"        key.op           = {op_enum};")
 
-    if is_depthwise:
+    if is_direct_conv:
+        lines.extend(_make_direct_conv_key(meta))
+    elif is_depthwise:
         lines.extend(_make_depthwise_conv_key(meta))
     else:
         lines.extend(_make_implicit_gemm_conv_key(meta))
