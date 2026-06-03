@@ -17,7 +17,7 @@ for the rules while the policy abstraction is introduced. The body of
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import ClassVar, List, Tuple
 
 from ...core.arch import ArchTarget
@@ -25,8 +25,8 @@ from ...core.arch import ArchTarget
 
 @dataclass(frozen=True)
 class ValidationResult:
-    ok: bool
-    reason: str = "ok"
+    ok: bool = field()
+    reason: str = field(default="ok")
 
     @staticmethod
     def accept() -> "ValidationResult":

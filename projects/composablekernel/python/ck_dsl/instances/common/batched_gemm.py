@@ -71,13 +71,13 @@ class BatchedGemmSpec(WarpTileBlockSizeMixin):
     won't fit, but the kernel itself doesn't bake it in.
     """
 
-    name: str
-    tile: TileSpec
+    name: str = field()
+    tile: TileSpec = field()
     trait: TraitSpec = field(default_factory=TraitSpec)
-    wave_size: int = 64
-    block_size: int = 0
-    batch_size: int = 0
-    dtype: str = "fp16"
+    wave_size: int = field(default=64)
+    block_size: int = field(default=0)
+    batch_size: int = field(default=0)
+    dtype: str = field(default="fp16")
 
     def __post_init__(self) -> None:
         self._init_block_size()

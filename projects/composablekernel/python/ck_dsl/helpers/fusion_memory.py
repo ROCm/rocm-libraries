@@ -22,7 +22,7 @@ This module bridges :class:`FusionPlan` to the runtime
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from .fusion_ir import FusionPlan
@@ -57,12 +57,12 @@ class WorkspaceAllocation:
         lifetimes don't overlap.
     """
 
-    tensor_name: str
-    first_region: int
-    last_region: int
-    shape: Tuple[int, ...]
-    dtype: str
-    slot_name: str
+    tensor_name: str = field()
+    first_region: int = field()
+    last_region: int = field()
+    shape: Tuple[int, ...] = field()
+    dtype: str = field()
+    slot_name: str = field()
 
     def overlaps(self, other: "WorkspaceAllocation") -> bool:
         return not (

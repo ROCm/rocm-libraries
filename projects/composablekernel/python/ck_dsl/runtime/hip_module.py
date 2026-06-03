@@ -23,7 +23,7 @@ import ctypes
 import glob
 import os
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 
@@ -132,7 +132,7 @@ def _candidate_lib_paths(stem: str, env_var: str, sonames: List[str]) -> List[st
       4. Bare ``lib<stem>.so`` for the dynamic linker's search path.
     """
     paths: List[str] = []
-    override = os.environ.get(env_var)
+    override = os.getenv(env_var)
     if override:
         paths.append(override)
     bundled = _torch_bundled_lib(stem)
@@ -146,7 +146,7 @@ def _candidate_lib_paths(stem: str, env_var: str, sonames: List[str]) -> List[st
         # bare DLL name (resolved via the default DLL search path). The
         # comgr DLL carries a version suffix, so glob it.
         for root_env in ("HIP_PATH", "ROCM_PATH"):
-            root = os.environ.get(root_env)
+            root = os.getenv(root_env)
             if not root:
                 continue
             bindir = os.path.join(root, "bin")
@@ -371,7 +371,7 @@ def get_device_arch(device: int = 0) -> Optional[str]:
 
 @dataclass
 class Module:
-    handle: _HipModuleHandle
+    handle: _HipModuleHandle = field()
 
     def get_function(self, name: str) -> _HipFunctionHandle:
         fn = _HipFunctionHandle()
@@ -387,7 +387,7 @@ class Module:
 
 @dataclass
 class Event:
-    handle: _HipEventHandle
+    handle: _HipEventHandle = field()
 
     def record(self, stream: int = 0) -> None:
         _check(_hipEventRecord(self.handle, ctypes.c_void_p(stream)), "hipEventRecord")

@@ -37,7 +37,7 @@ For block sizes that don't fit the wave-aligned shape we fall back to
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, Tuple
 
 from ...core.ir import F32, I32, IRBuilder, KernelDef, PtrType, Value
@@ -77,13 +77,13 @@ ReduceOp = Literal["sum", "max", "min", "mean", "prod"]
 class Reduce2DSpec:
     """One row-reduction instance."""
 
-    n_per_block: int
-    op: ReduceOp = "sum"
-    block_size: int = 256
-    vec: int = 4
-    dtype: DType = "f16"
-    wave_size: int = 64
-    name: str = "ck_dsl_reduce2d"
+    n_per_block: int = field()
+    op: ReduceOp = field(default="sum")
+    block_size: int = field(default=256)
+    vec: int = field(default=4)
+    dtype: DType = field(default="f16")
+    wave_size: int = field(default=64)
+    name: str = field(default="ck_dsl_reduce2d")
 
     @property
     def elems_per_thread(self) -> int:

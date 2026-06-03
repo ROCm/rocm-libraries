@@ -19,7 +19,7 @@ prompt); the split-KV variant for single-token decode lives in
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Tuple
 
 from ...core.ir import KernelDef
@@ -40,11 +40,11 @@ __all__ = [
 
 @dataclass(frozen=True)
 class FmhaFwdPagedPrefillSpec:
-    common: FmhaCommonSpec
-    page_block_size: int
-    max_blocks_per_seq: int
-    batch: int
-    name: str = "ck_dsl_fmha_fwd_paged_prefill"
+    common: FmhaCommonSpec = field()
+    page_block_size: int = field()
+    max_blocks_per_seq: int = field()
+    batch: int = field()
+    name: str = field(default="ck_dsl_fmha_fwd_paged_prefill")
     # P67: when ``use_mfma_body=True``, the kernel swaps the
     # warp-distributed ``fmha_warp_fwd_inner_body`` for
     # :func:`ck_dsl.helpers.mfma_attention.mfma_attention_fwd_inner_body`.
@@ -53,7 +53,7 @@ class FmhaFwdPagedPrefillSpec:
     # paged-row callback so the page-table indirection plumbs in
     # without a body change. ~10-30× speedup on production paged-
     # prefill workloads (long-context, batched).
-    use_mfma_body: bool = False
+    use_mfma_body: bool = field(default=False)
 
     def kernel_name(self) -> str:
         s = self.common.shape

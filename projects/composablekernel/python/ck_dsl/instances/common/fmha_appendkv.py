@@ -13,7 +13,7 @@ LLaMA-style RoPE caches).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Tuple
 
 from ...core.ir import F32, I32, IRBuilder, KernelDef, PtrType
@@ -55,11 +55,11 @@ __all__ = [
 
 @dataclass(frozen=True)
 class FmhaAppendKvSpec:
-    common: FmhaCommonSpec
-    batch: int
-    rotary: RotarySpec | None = None
-    block_size: int = 256
-    name: str = "ck_dsl_fmha_appendkv"
+    common: FmhaCommonSpec = field()
+    batch: int = field()
+    rotary: RotarySpec | None = field(default=None)
+    block_size: int = field(default=256)
+    name: str = field(default="ck_dsl_fmha_appendkv")
 
     def kernel_name(self) -> str:
         s = self.common.shape

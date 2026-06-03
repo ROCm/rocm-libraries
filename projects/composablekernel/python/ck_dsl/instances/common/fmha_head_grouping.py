@@ -16,7 +16,7 @@ reads its K/V head ``hk = hq // (HQ / HK)``. This is what
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Tuple
 
 from ...helpers.mfma_attention import (
@@ -40,10 +40,10 @@ __all__ = [
 
 @dataclass(frozen=True)
 class FmhaFwdHeadGroupingSpec:
-    common: FmhaCommonSpec
-    seqlen_q: int
-    seqlen_k: int
-    name: str = "ck_dsl_fmha_fwd_head_grouping"
+    common: FmhaCommonSpec = field()
+    seqlen_q: int = field()
+    seqlen_k: int = field()
+    name: str = field(default="ck_dsl_fmha_fwd_head_grouping")
 
     def kernel_name(self) -> str:
         s = self.common.shape

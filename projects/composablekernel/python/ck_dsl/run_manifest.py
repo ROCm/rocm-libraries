@@ -23,7 +23,7 @@ import json
 import ctypes
 import os
 import struct
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -40,12 +40,12 @@ except ImportError:
 
 @dataclass
 class RunSummary:
-    ms: float
-    tflops: float
-    gbps: float
-    max_abs_diff: float = 0.0
-    bad_count: int = 0
-    total: int = 0
+    ms: float = field()
+    tflops: float = field()
+    gbps: float = field()
+    max_abs_diff: float = field(default=0.0)
+    bad_count: int = field(default=0)
+    total: int = field(default=0)
 
 
 def _require_numpy():

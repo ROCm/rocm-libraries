@@ -50,7 +50,7 @@ What we cover today:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Mapping, Tuple
 
 from ...core.ir import F32, I32, IRBuilder, KernelDef, PtrType, Value
@@ -138,11 +138,11 @@ class MoeSortingSpec:
     ABI compatibility with the CK Tile reference).
     """
 
-    tokens: int
-    topk: int
-    experts: int
-    block_size: int = 256
-    name: str = "ck_dsl_moe_sorting"
+    tokens: int = field()
+    topk: int = field()
+    experts: int = field()
+    block_size: int = field(default=256)
+    name: str = field(default="ck_dsl_moe_sorting")
 
     @property
     def total_pairs(self) -> int:
@@ -826,14 +826,14 @@ class MoeSortingLauncher:
     memset is needed.
     """
 
-    spec: MoeSortingSpec
-    name_prefix: str = "moe_sorting"
+    spec: MoeSortingSpec = field()
+    name_prefix: str = field(default="moe_sorting")
     # Target GPU for the lazy ``compile_kernel`` calls. ``None`` resolves
     # to the running device and falls back to ``"gfx950"`` (see
     # :func:`_resolve_launch_arch`). The MoE sort kernels emit no MFMA,
     # so they build identically on gfx942 and gfx950; threading ``arch``
     # only keeps the lowered ISA matched to the launch target.
-    arch: "str | None" = None
+    arch: "str | None" = field(default=None)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "_launchers", None)

@@ -44,7 +44,7 @@ kernels.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, List, Optional, Sequence
 
 from ..core.ir import IRBuilder, Value
@@ -73,8 +73,8 @@ class RowChunkSweepResult:
       ``elems_per_thread / vec``.
     """
 
-    cached: List[Value]
-    chunks_per_thread: int
+    cached: List[Value] = field()
+    chunks_per_thread: int = field()
 
 
 def sweep_row_chunks(

@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Tuple
 
 from .fusion_ir import FusionGraph, FusionPlan, FusionRegion
@@ -13,10 +13,10 @@ from .fusion_ir import FusionGraph, FusionPlan, FusionRegion
 
 @dataclass(frozen=True)
 class RegionCost:
-    bytes_saved: int
-    extra_ops_per_element: int
-    kernels_saved: int
-    estimated_vgprs: int
+    bytes_saved: int = field()
+    extra_ops_per_element: int = field()
+    kernels_saved: int = field()
+    estimated_vgprs: int = field()
 
     def score(self) -> int:
         return (

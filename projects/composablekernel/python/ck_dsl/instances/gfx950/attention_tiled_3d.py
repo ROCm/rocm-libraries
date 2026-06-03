@@ -25,7 +25,7 @@ This module re-uses every MFMA / async DMA / softmax helper from the
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
 from ...core.ir import (
@@ -104,26 +104,26 @@ class UnifiedAttention3DTiledSpec:
     knob exactly as AITER's ``select_3d_config`` derives it.
     """
 
-    head_size: int
-    block_size: int
-    num_query_heads: int
-    num_kv_heads: int
-    dtype: str
-    use_sinks: bool
-    sliding_window: int
-    has_softcap: bool
-    num_segments: int
-    use_alibi: bool = False
-    use_qq_bias: bool = False
-    num_seqs: int = 0
+    head_size: int = field()
+    block_size: int = field()
+    num_query_heads: int = field()
+    num_kv_heads: int = field()
+    dtype: str = field()
+    use_sinks: bool = field()
+    sliding_window: int = field()
+    has_softcap: bool = field()
+    num_segments: int = field()
+    use_alibi: bool = field(default=False)
+    use_qq_bias: bool = field(default=False)
+    num_seqs: int = field(default=0)
     # AMDGPU occupancy hint (``"amdgpu-waves-per-eu"``). Attention is
     # register-pressure-bound; setting this to 2 or 3 tightens the
     # VGPR allocation in exchange for higher occupancy. ``None`` keeps
     # the LLVM heuristic.
-    waves_per_eu: Optional[int] = None
+    waves_per_eu: Optional[int] = field(default=None)
     # FP8 K/V cache (mirrors UnifiedAttention2DTiledSpec.kv_storage_dtype).
     # See that spec's docstring for the semantics.
-    kv_storage_dtype: Optional[str] = None
+    kv_storage_dtype: Optional[str] = field(default=None)
 
     def __post_init__(self):
         if self.kv_storage_dtype is not None and self.kv_storage_dtype != "fp8e4m3":
@@ -948,14 +948,14 @@ def build_unified_attention_3d_tiled(
 
 @dataclass(frozen=True)
 class UnifiedAttentionReduceTiledSpec:
-    head_size: int
-    num_query_heads: int
-    num_kv_heads: int
-    dtype: str
-    num_segments: int
+    head_size: int = field()
+    num_query_heads: int = field()
+    num_kv_heads: int = field()
+    dtype: str = field()
+    num_segments: int = field()
     # AMDGPU occupancy hint (``"amdgpu-waves-per-eu"``). ``None`` keeps
     # the LLVM backend's heuristic.
-    waves_per_eu: Optional[int] = None
+    waves_per_eu: Optional[int] = field(default=None)
 
     @property
     def dtype_ir(self) -> Type:

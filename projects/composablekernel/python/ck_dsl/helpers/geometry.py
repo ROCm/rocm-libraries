@@ -44,7 +44,7 @@ question. They are integers (compile-time), not IR values.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Union
 
 from ..core.ir import IRBuilder, Value
@@ -56,30 +56,30 @@ class WarpGrid:
     """Block geometry + per-thread IR values, frozen after `bind`."""
 
     # ---- compile-time geometry ----
-    tile_m: int
-    tile_n: int
-    tile_k: int
+    tile_m: int = field()
+    tile_n: int = field()
+    tile_k: int = field()
 
-    warp_m: int
-    warp_n: int
-    warp_k: int = 1
+    warp_m: int = field()
+    warp_n: int = field()
+    warp_k: int = field(default=1)
 
-    warp_tile_m: int = 16
-    warp_tile_n: int = 16
-    warp_tile_k: int = 16
+    warp_tile_m: int = field(default=16)
+    warp_tile_n: int = field(default=16)
+    warp_tile_k: int = field(default=16)
 
-    wave_size: int = 64
+    wave_size: int = field(default=64)
 
     # ---- runtime IR values, populated by `bind` ----
-    tid: Optional[Value] = None
-    lane: Optional[Value] = None
-    warp_id: Optional[Value] = None
-    warp_m_idx: Optional[Value] = None
-    warp_n_idx: Optional[Value] = None
-    warp_k_idx: Optional[Value] = None
-    block_m_off: Optional[Value] = None
-    block_n_off: Optional[Value] = None
-    block_k_off: Optional[Value] = None
+    tid: Optional[Value] = field(default=None)
+    lane: Optional[Value] = field(default=None)
+    warp_id: Optional[Value] = field(default=None)
+    warp_m_idx: Optional[Value] = field(default=None)
+    warp_n_idx: Optional[Value] = field(default=None)
+    warp_k_idx: Optional[Value] = field(default=None)
+    block_m_off: Optional[Value] = field(default=None)
+    block_n_off: Optional[Value] = field(default=None)
+    block_k_off: Optional[Value] = field(default=None)
 
     # ---- compile-time derived ----
 

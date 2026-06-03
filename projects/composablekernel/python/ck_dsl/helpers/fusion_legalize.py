@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Tuple
 
 from .fusion_ir import FusionGraph, FusionOp
@@ -13,9 +13,9 @@ from .fusion_ir import FusionGraph, FusionOp
 
 @dataclass(frozen=True)
 class LegalResult:
-    ok: bool
-    reasons: Tuple[str, ...] = ()
-    warnings: Tuple[str, ...] = ()
+    ok: bool = field()
+    reasons: Tuple[str, ...] = field(default=())
+    warnings: Tuple[str, ...] = field(default=())
 
     @classmethod
     def success(cls, warnings=()) -> "LegalResult":

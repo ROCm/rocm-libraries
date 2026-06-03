@@ -90,13 +90,13 @@ class GemmMultiAbdSpec:
     time equivalent to the stock per-element form).
     """
 
-    base: UniversalGemmSpec
+    base: UniversalGemmSpec = field()
     a_operands: Tuple[AOperand, ...] = field(default_factory=lambda: (("A", "fp16"),))
     b_operands: Tuple[BOperand, ...] = field(default_factory=lambda: (("B", "fp16"),))
-    d_operands: Tuple[DOperand, ...] = ()
-    d_dtype: str = "fp16"
-    name: str = "ck_dsl_gemm_multi_abd"
-    d_load_kind: "DLoadKind" = "vector"
+    d_operands: Tuple[DOperand, ...] = field(default=())
+    d_dtype: str = field(default="fp16")
+    name: str = field(default="ck_dsl_gemm_multi_abd")
+    d_load_kind: "DLoadKind" = field(default="vector")
 
     @property
     def num_a(self) -> int:

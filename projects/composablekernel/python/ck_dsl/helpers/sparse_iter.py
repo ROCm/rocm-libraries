@@ -23,7 +23,7 @@ keyed by the strategy.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable
 
 from ..core.ir import IRBuilder, PtrType, Value
@@ -51,8 +51,8 @@ class BlockSparseSpec:
     Element stride to advance one q_block in the mask tensor.
     """
 
-    num_k_blocks: int
-    stride_q_block: int
+    num_k_blocks: int = field()
+    stride_q_block: int = field()
 
     def __post_init__(self):
         if self.num_k_blocks <= 0:
@@ -79,8 +79,8 @@ class VsaSparseSpec:
     Element stride into the LUT to advance one q_block.
     """
 
-    max_blocks_per_q: int
-    stride_q_block: int
+    max_blocks_per_q: int = field()
+    stride_q_block: int = field()
 
     def __post_init__(self):
         if self.max_blocks_per_q <= 0:

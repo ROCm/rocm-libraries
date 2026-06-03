@@ -49,7 +49,7 @@ pass `None` to skip the mask.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Optional, Sequence, Tuple
 
 from ..core.ir import F16, IRBuilder, Value
@@ -90,8 +90,8 @@ class DirectEpilogue:
     `CShuffleEpilogue` instead.
     """
 
-    atom: MfmaAtom
-    grid: WarpGrid
+    atom: MfmaAtom = field()
+    grid: WarpGrid = field()
 
     @property
     def _row_stride_per_slot(self) -> int:
@@ -314,17 +314,17 @@ class CShuffleEpilogue:
          output rows.
     """
 
-    atom: MfmaAtom
-    grid: WarpGrid
-    store_vec: int = 8  # halves per wide store
-    smem_name_hint: str = "C_smem"
+    atom: MfmaAtom = field()
+    grid: WarpGrid = field()
+    store_vec: int = field(default=8)  # halves per wide store
+    smem_name_hint: str = field(default="C_smem")
     # P41: output dtype the per-thread wide store produces. ``"f16"`` is
     # the default and uses the f16 ``buffer_store_vN_f16`` intrinsic;
     # ``"bf16"`` swaps the LDS staging element type to bf16 and
     # uses the matching store; ``"fp8e4m3"`` / ``"bf8e5m2"`` emit
     # 1-byte stores via ``global_store_vN`` (no buffer-store fp8
     # intrinsic exists today on the AMDGPU LLVM target).
-    out_dtype: str = "f16"
+    out_dtype: str = field(default="f16")
 
     @classmethod
     def from_grid(

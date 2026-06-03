@@ -13,14 +13,14 @@ from __future__ import annotations
 
 import ctypes
 import struct
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, List, Mapping, Sequence, Tuple
 
 
 @dataclass(frozen=True)
 class TorchLaunchSummary:
-    ms: float
-    attempts: int
+    ms: float = field()
+    attempts: int = field()
 
 
 def _require_torch():

@@ -82,7 +82,7 @@ Pass-2 vector-store recipe:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Literal, Tuple
 
 from ...core.ir import F32, I32, IRBuilder, KernelDef, PtrType, Value
@@ -188,14 +188,14 @@ DType = Literal["f16", "bf16"]
 class SmoothQuantSpec:
     """One concrete SmoothQuant kernel configuration."""
 
-    n_per_block: int
-    dtype: DType = "f16"
-    out_dtype: QDType = "i8"
-    block_size: int = 256
-    vec: int = 4
-    save_yscale: bool = True
-    wave_size: int = 64
-    name: str = "ck_dsl_smoothquant"
+    n_per_block: int = field()
+    dtype: DType = field(default="f16")
+    out_dtype: QDType = field(default="i8")
+    block_size: int = field(default=256)
+    vec: int = field(default=4)
+    save_yscale: bool = field(default=True)
+    wave_size: int = field(default=64)
+    name: str = field(default="ck_dsl_smoothquant")
 
     @property
     def elems_per_thread(self) -> int:

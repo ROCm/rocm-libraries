@@ -33,7 +33,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 @dataclass(frozen=True)
 class Type:
-    name: str
+    name: str = field()
 
     def __repr__(self) -> str:
         return self.name
@@ -134,8 +134,8 @@ def _mma_c_frag_len(op_id: str) -> int:
 
 @dataclass(frozen=True)
 class VectorType(Type):
-    elem: Type
-    count: int
+    elem: Type = field()
+    count: int = field()
 
     def __init__(self, elem: Type, count: int) -> None:
         object.__setattr__(self, "name", f"vec<{elem.name}x{count}>")
@@ -145,8 +145,8 @@ class VectorType(Type):
 
 @dataclass(frozen=True)
 class PtrType(Type):
-    pointee: Type
-    space: str
+    pointee: Type = field()
+    space: str = field()
 
     def __init__(self, pointee: Type, space: str) -> None:
         object.__setattr__(self, "name", f"ptr<{pointee.name},{space}>")
@@ -156,8 +156,8 @@ class PtrType(Type):
 
 @dataclass(frozen=True)
 class SmemType(Type):
-    elem: Type
-    shape: Tuple[int, ...]
+    elem: Type = field()
+    shape: Tuple[int, ...] = field()
 
     def __init__(self, elem: Type, shape: Sequence[int]) -> None:
         shape = tuple(int(x) for x in shape)
@@ -172,9 +172,9 @@ class SmemType(Type):
 
 @dataclass
 class Value:
-    name: str
-    type: Type
-    op: Optional["Op"] = None
+    name: str = field()
+    type: Type = field()
+    op: Optional["Op"] = field(default=None)
 
     def __repr__(self) -> str:
         return self.name
@@ -189,12 +189,12 @@ class Value:
 
 @dataclass
 class Op:
-    name: str
+    name: str = field()
     operands: List[Value] = field(default_factory=list)
     results: List[Value] = field(default_factory=list)
     attrs: Dict[str, Any] = field(default_factory=dict)
     regions: List["Region"] = field(default_factory=list)
-    loc: Optional[str] = None
+    loc: Optional[str] = field(default=None)
 
     @property
     def result(self) -> Value:
@@ -211,22 +211,22 @@ class Op:
 
 @dataclass
 class Region:
-    label: str
+    label: str = field()
     ops: List[Op] = field(default_factory=list)
 
 
 @dataclass
 class Param:
-    name: str
-    type: Type
+    name: str = field()
+    type: Type = field()
     attrs: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class KernelDef:
-    name: str
-    params: List[Param]
-    body: Region
+    name: str = field()
+    params: List[Param] = field()
+    body: Region = field()
     attrs: Dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -987,7 +987,7 @@ class IRBuilder:
             raise ValueError(f"unknown ordering {ordering!r}")
         return self._op(
             "tile.lds_atomic_add",
-            [smem, *indices, value],
+            [smem] + list(indices) + [value],
             [value.type],
             attrs={
                 "elem_type": value.type.name,
@@ -1378,7 +1378,7 @@ class IRBuilder:
     ) -> None:
         self._op(
             "tile.smem_store",
-            [smem, *indices, value],
+            [smem] + list(indices) + [value],
             attrs={"rank": len(indices), "elem_type": "f16"},
         )
 
@@ -1405,7 +1405,7 @@ class IRBuilder:
             # Single-element store; route through the scalar `tile.smem_store`.
             self._op(
                 "tile.smem_store",
-                [smem, *indices, value],
+                [smem] + list(indices) + [value],
                 attrs={"rank": len(indices), "elem_type": value.type.name},
             )
             return
@@ -1429,7 +1429,7 @@ class IRBuilder:
         )
         self._op(
             "tile.smem_store_vN",
-            [smem, *indices, value],
+            [smem] + list(indices) + [value],
             attrs={
                 "rank": len(indices),
                 "elem_type": elem_name,
@@ -1483,7 +1483,7 @@ class IRBuilder:
             raise ValueError("smem_load_vN needs at least one index")
         return self._op(
             "tile.smem_load_vN",
-            [smem, *indices],
+            [smem] + list(indices),
             [VectorType(dtype, n)],
             attrs={"elem_type": dtype.name, "vec": n, "rank": len(indices)},
             result_name_hint=f"av{n}",
@@ -1538,7 +1538,7 @@ class IRBuilder:
         hint = _MMA_RESULT_HINT.get(op_id, "acc")
         return self._op(
             "tile.mma",
-            [a, b, c, *extra],
+            [a, b, c] + list(extra),
             [VectorType(c_elem, c_frag_len)],
             attrs={"op_id": op_id},
             result_name_hint=hint,
@@ -2340,7 +2340,7 @@ class IRBuilder:
             raise ValueError("ds_read_tr16_b64 needs at least one index")
         return self._op(
             "tile.ds_read_tr16_b64",
-            [smem, *indices],
+            [smem] + list(indices),
             [VectorType(dtype, 4)],
             attrs={"rank": len(indices), "elem_type": dtype.name},
             result_name_hint="tr16",
@@ -2365,7 +2365,7 @@ class IRBuilder:
             raise ValueError("ds_read_tr16_b128 needs at least one index")
         return self._op(
             "tile.ds_read_tr16_b128",
-            [smem, *indices],
+            [smem] + list(indices),
             [VectorType(dtype, 8)],
             attrs={"rank": len(indices), "elem_type": dtype.name},
             result_name_hint="tr16w",
@@ -2390,7 +2390,7 @@ class IRBuilder:
             raise ValueError("ds_read_tr_b8 needs at least one index")
         return self._op(
             "tile.ds_read_tr_b8",
-            [smem, *indices],
+            [smem] + list(indices),
             [VectorType(dtype, 8)],
             attrs={"dtype": dtype.name},
             result_name_hint="tr8",
@@ -2819,7 +2819,7 @@ class IRBuilder:
             raise ValueError(f"smem_store_vN_f32 n must be 1, 2, or 4 (got {n})")
         self._op(
             "tile.smem_store_vN_f32",
-            [smem, *indices, value],
+            [smem] + list(indices) + [value],
             attrs={"rank": len(indices), "elem_type": "f32", "vec": n},
         )
 
@@ -2830,7 +2830,7 @@ class IRBuilder:
             raise ValueError("smem_load_vN_f32 needs at least one index")
         return self._op(
             "tile.smem_load_vN_f32",
-            [smem, *indices],
+            [smem] + list(indices),
             [VectorType(F32, n)],
             attrs={"elem_type": "f32", "vec": n, "rank": len(indices)},
             result_name_hint=f"av{n}f32",
@@ -3055,7 +3055,7 @@ class IRBuilder:
         results = [Value(self._fresh("for"), v.type) for v in iter_vars]
         op = Op(
             name="scf.for",
-            operands=[lower, upper, step, *iter_inits],
+            operands=[lower, upper, step] + list(iter_inits),
             attrs={
                 "iv": iv.name,
                 "iv_type": lower.type.name,

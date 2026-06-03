@@ -236,8 +236,8 @@ class BiasAdd(EpilogueOp):
     param; the same value is broadcast across every M-row.
     """
 
-    param_name: str = "bias"
-    dtype: Any = F16  # IR Type or any input accepted by ``dtype_to_ir``
+    param_name: str = field(default="bias")
+    dtype: Any = field(default=F16)  # IR Type or any input accepted by ``dtype_to_ir``
 
     def _ir_dtype(self) -> Type:
         return dtype_to_ir(self.dtype)
@@ -278,7 +278,7 @@ class BiasAdd(EpilogueOp):
 class ReLU(EpilogueOp):
     """Element-wise ``max(v, 0)``. No extra params."""
 
-    dtype: Any = F16
+    dtype: Any = field(default=F16)
 
     def _ir_dtype(self) -> Type:
         return dtype_to_ir(self.dtype)
@@ -294,8 +294,8 @@ class ReLU(EpilogueOp):
 class Scale(EpilogueOp):
     """Element-wise multiply by a scalar constant baked into the kernel."""
 
-    scale: float
-    dtype: Any = F16
+    scale: float = field()
+    dtype: Any = field(default=F16)
 
     def _ir_dtype(self) -> Type:
         return dtype_to_ir(self.dtype)
@@ -332,7 +332,7 @@ class GELU(EpilogueOp):
     accuracy, then casts back to the surrounding ``dtype``.
     """
 
-    dtype: Any = F16
+    dtype: Any = field(default=F16)
 
     def _ir_dtype(self) -> Type:
         return dtype_to_ir(self.dtype)
@@ -362,7 +362,7 @@ class SiLU(EpilogueOp):
     in f32 for accuracy.
     """
 
-    dtype: Any = F16
+    dtype: Any = field(default=F16)
 
     def _ir_dtype(self) -> Type:
         return dtype_to_ir(self.dtype)
@@ -386,9 +386,9 @@ class Clamp(EpilogueOp):
     before a downstream cast.
     """
 
-    lo: float
-    hi: float
-    dtype: Any = F16
+    lo: float = field()
+    hi: float = field()
+    dtype: Any = field(default=F16)
 
     def _ir_dtype(self) -> Type:
         return dtype_to_ir(self.dtype)
@@ -414,8 +414,8 @@ class Cast(EpilogueOp):
     the original element type.
     """
 
-    src_dtype: Any = F16
-    dst_dtype: Any = F16
+    src_dtype: Any = field(default=F16)
+    dst_dtype: Any = field(default=F16)
 
     def _src(self) -> Type:
         return dtype_to_ir(self.src_dtype)
@@ -455,8 +455,8 @@ class ResidualAdd(EpilogueOp):
     elements share a vector store.
     """
 
-    param_name: str = "residual"
-    dtype: Any = F16
+    param_name: str = field(default="residual")
+    dtype: Any = field(default=F16)
 
     def _ir_dtype(self) -> Type:
         return dtype_to_ir(self.dtype)
@@ -510,8 +510,8 @@ class ResidualMul(EpilogueOp):
     where ``v`` is the second projection of an MLP.
     """
 
-    param_name: str = "residual_mul"
-    dtype: Any = F16
+    param_name: str = field(default="residual_mul")
+    dtype: Any = field(default=F16)
 
     def _ir_dtype(self) -> Type:
         return dtype_to_ir(self.dtype)
@@ -562,8 +562,8 @@ class FusedEpilogue:
     use.
     """
 
-    ops: Tuple[EpilogueOp, ...]
-    dtype: Any = F16
+    ops: Tuple[EpilogueOp, ...] = field()
+    dtype: Any = field(default=F16)
     # Populated lazily during kernel build: maps param_name -> SSA value.
     _live_params: Dict[str, Value] = field(default_factory=dict, repr=False)
 
@@ -707,13 +707,13 @@ class FusionPlan:
         pointwise plans, ``reduce_op`` for reductions).
     """
 
-    pattern: str
-    a_arg_name: str
-    b_arg_name: str
-    bias_arg_name: Optional[str]
-    epilogue_template: FusedEpilogue
-    explanation: str
-    residual_arg_names: Tuple[str, ...] = ()
+    pattern: str = field()
+    a_arg_name: str = field()
+    b_arg_name: str = field()
+    bias_arg_name: Optional[str] = field()
+    epilogue_template: FusedEpilogue = field()
+    explanation: str = field()
+    residual_arg_names: Tuple[str, ...] = field(default=())
     extra_attrs: Dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> Dict[str, Any]:

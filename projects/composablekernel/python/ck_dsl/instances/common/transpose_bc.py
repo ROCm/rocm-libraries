@@ -136,7 +136,7 @@ Validation contract:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, Tuple
 
 from ...core.ir import I32, IRBuilder, KernelDef, PtrType
@@ -170,13 +170,13 @@ class TransposeBcSpec:
     writes per lane).
     """
 
-    tile_m: int = 64
+    tile_m: int = field(default=64)
     """Output rows processed per CTA."""
 
-    tile_n: int = 64
+    tile_n: int = field(default=64)
     """Output columns processed per CTA."""
 
-    vec: int = 8
+    vec: int = field(default=8)
     """Halves per global vector op (= sub-tile side length).
 
     Each lane's sub-tile is ``vec x vec`` halves: ``vec`` rows of
@@ -193,8 +193,8 @@ class TransposeBcSpec:
     are also supported but waste lane bandwidth on small problems.
     """
 
-    dtype: DType = "f16"
-    use_buffer_io: bool = False
+    dtype: DType = field(default="f16")
+    use_buffer_io: bool = field(default=False)
     """Use AMDGPU raw buffer-resource loads/stores for fp16.
 
     This matches CK Tile's ``buffer_load_dwordx4`` / ``buffer_store_dwordx4``
@@ -204,7 +204,7 @@ class TransposeBcSpec:
     shapes, so the default stays on flat global ops and callers can
     opt in per shape.
     """
-    name: str = "ck_dsl_transpose_bc"
+    name: str = field(default="ck_dsl_transpose_bc")
 
     @property
     def lanes_per_row(self) -> int:

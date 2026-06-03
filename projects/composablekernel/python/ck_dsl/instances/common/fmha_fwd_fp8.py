@@ -16,7 +16,7 @@ bf16), not in fp8.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, Optional, Tuple
 
 from ...core.ir import KernelDef
@@ -42,10 +42,10 @@ KvFp8DType = Literal["fp8e4m3", "bf8e5m2"]
 
 @dataclass(frozen=True)
 class FmhaFwdFp8Spec:
-    common: FmhaCommonSpec
-    kv_dtype: KvFp8DType = "fp8e4m3"
-    seqlen_q: int = 1
-    seqlen_k: int = 0
+    common: FmhaCommonSpec = field()
+    kv_dtype: KvFp8DType = field(default="fp8e4m3")
+    seqlen_q: int = field(default=1)
+    seqlen_k: int = field(default=0)
     # G3: by default the K/V bytes are interpreted as OCP fp8
     # (e4m3fn / e5m2), which matches gfx950 / gfx11 hardware decode but
     # NOT the gfx942 (gfx9_mfma) native e4m3fnuz / e5m2fnuz decode. Set
@@ -54,7 +54,7 @@ class FmhaFwdFp8Spec:
     # gfx9_mfma target. This flag does not change the emitted IR (the
     # ``cvt.f32.fp8`` intrinsic is the same); it only gates the
     # arch-validity check so OCP bytes are not silently mis-decoded.
-    fp8_fnuz: bool = False
+    fp8_fnuz: bool = field(default=False)
     # gfx950 occupancy hint (``"amdgpu-waves-per-eu"``). The fp8 MFMA
     # body is VGPR-bound: with the LLVM default the kernel allocates
     # ~138 arch-VGPR + ~42 AGPR (the AGPR copies are accumulator
@@ -66,8 +66,8 @@ class FmhaFwdFp8Spec:
     # with no spill. Measured ~12% faster on a (HD=128, HQ=HK=8,
     # Q=512, K=2048) gfx950 shape (178 -> 157 us, warmup15/iters50,
     # median of 5). ``None`` keeps the LLVM heuristic.
-    waves_per_eu: Optional[int] = 4
-    name: str = "ck_dsl_fmha_fwd_fp8"
+    waves_per_eu: Optional[int] = field(default=4)
+    name: str = field(default="ck_dsl_fmha_fwd_fp8")
 
     def kernel_name(self) -> str:
         s = self.common.shape

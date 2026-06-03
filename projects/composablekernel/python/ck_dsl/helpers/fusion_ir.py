@@ -25,15 +25,15 @@ Strides = Tuple[Optional[int], ...]
 class FusionTensor:
     """A logical tensor value in the fusion planner."""
 
-    name: str
-    shape: Shape
-    dtype: str
-    layout: str = "contiguous"
-    strides: Strides = ()
-    producer: Optional[str] = None
-    users: Tuple[str, ...] = ()
-    is_input: bool = False
-    is_output: bool = False
+    name: str = field()
+    shape: Shape = field()
+    dtype: str = field()
+    layout: str = field(default="contiguous")
+    strides: Strides = field(default=())
+    producer: Optional[str] = field(default=None)
+    users: Tuple[str, ...] = field(default=())
+    is_input: bool = field(default=False)
+    is_output: bool = field(default=False)
 
     def with_user(self, op_name: str) -> "FusionTensor":
         if op_name in self.users:
@@ -45,7 +45,7 @@ class FusionTensor:
             layout=self.layout,
             strides=self.strides,
             producer=self.producer,
-            users=tuple([*self.users, op_name]),
+            users=tuple(list(self.users) + [op_name]),
             is_input=self.is_input,
             is_output=self.is_output,
         )
@@ -55,22 +55,22 @@ class FusionTensor:
 class FusionOp:
     """A normalized graph operation."""
 
-    name: str
-    kind: str
-    inputs: Tuple[str, ...]
-    outputs: Tuple[str, ...]
+    name: str = field()
+    kind: str = field()
+    inputs: Tuple[str, ...] = field()
+    outputs: Tuple[str, ...] = field()
     attrs: Dict[str, Any] = field(default_factory=dict)
-    side_effects: bool = False
+    side_effects: bool = field(default=False)
 
 
 @dataclass(frozen=True)
 class FusionGraph:
     """A normalized DAG of :class:`FusionTensor` and :class:`FusionOp`."""
 
-    tensors: Dict[str, FusionTensor]
-    ops: Dict[str, FusionOp]
-    inputs: Tuple[str, ...]
-    outputs: Tuple[str, ...]
+    tensors: Dict[str, FusionTensor] = field()
+    ops: Dict[str, FusionOp] = field()
+    inputs: Tuple[str, ...] = field()
+    outputs: Tuple[str, ...] = field()
 
     def topological_ops(self) -> List[FusionOp]:
         # FX capture already produces topological order; all builders
@@ -112,23 +112,23 @@ class FusionGraph:
 class FusionRegion:
     """A scheduled region that will lower to one kernel or pipeline stage."""
 
-    name: str
-    kind: str
-    op_names: Tuple[str, ...]
-    inputs: Tuple[str, ...]
-    outputs: Tuple[str, ...]
+    name: str = field()
+    kind: str = field()
+    op_names: Tuple[str, ...] = field()
+    inputs: Tuple[str, ...] = field()
+    outputs: Tuple[str, ...] = field()
     attrs: Dict[str, Any] = field(default_factory=dict)
-    lowerer: Optional[str] = None
+    lowerer: Optional[str] = field(default=None)
 
 
 @dataclass(frozen=True)
 class FusionPlan:
     """Top-level fusion plan after scheduling."""
 
-    graph: FusionGraph
-    regions: Tuple[FusionRegion, ...]
-    workspaces: Tuple[str, ...] = ()
-    explanation: Tuple[str, ...] = ()
+    graph: FusionGraph = field()
+    regions: Tuple[FusionRegion, ...] = field()
+    workspaces: Tuple[str, ...] = field(default=())
+    explanation: Tuple[str, ...] = field(default=())
 
     def as_dict(self) -> Dict[str, Any]:
         return {

@@ -57,7 +57,7 @@ GEMM it is modelled on. Tuning (LDS K/V staging, ping-pong) is a follow-on.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Tuple
 
 from ...core.ir import F16, F32, I32, IRBuilder, KernelDef, PtrType
@@ -84,12 +84,12 @@ class WmmaFmhaFwdSpec:
     only carries the compile-time tile facts.
     """
 
-    head_size: int
-    num_query_heads: int
-    num_kv_heads: int = 0  # 0 -> equal to num_query_heads (MHA)
-    dtype: str = "fp16"
-    mask_mode: str = "none"  # "none" | "causal"
-    sliding_window: int = 0
+    head_size: int = field()
+    num_query_heads: int = field()
+    num_kv_heads: int = field(default=0)  # 0 -> equal to num_query_heads (MHA)
+    dtype: str = field(default="fp16")
+    mask_mode: str = field(default="none")  # "none" | "causal"
+    sliding_window: int = field(default=0)
     # Opt lever (see examples/gfx1151/attention case study): staging the K-tile's
     # V rows through LDS for the PV B-operand cuts global loads ~3.3x but is a
     # consistent 1.5-1.8x *regression* on gfx1151 -- the PV B-operand is an
@@ -97,8 +97,8 @@ class WmmaFmhaFwdSpec:
     # strided reads while adding a barrier this single-wave-per-CTA kernel has no
     # occupancy to hide, whereas the baseline gather stays cache-resident.
     # Default off (the measured winner); kept togglable for the A/B study.
-    v_lds_stage: bool = False
-    name: str = "ck_dsl_wmma_fmha_fwd"
+    v_lds_stage: bool = field(default=False)
+    name: str = field(default="ck_dsl_wmma_fmha_fwd")
 
     def __post_init__(self) -> None:
         if self.dtype not in ("fp16", "f16"):

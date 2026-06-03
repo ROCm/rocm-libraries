@@ -59,7 +59,7 @@ Composition with existing helpers:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Literal, Optional, Sequence, Tuple, Union
 
 from ..core.ir import IRBuilder, Type, Value
@@ -112,9 +112,9 @@ class TensorDescriptor:
     folded away.
     """
 
-    shape: Tuple[int, ...]
-    strides: Tuple[StrideElem, ...]
-    dtype: Type
+    shape: Tuple[int, ...] = field()
+    strides: Tuple[StrideElem, ...] = field()
+    dtype: Type = field()
 
     def __post_init__(self) -> None:
         if len(self.shape) != len(self.strides):
@@ -229,15 +229,15 @@ class BufferResource:
     :func:`make_buffer_view` to get the standard load/store API.
     """
 
-    rsrc: Value
+    rsrc: Value = field()
     """The 128-bit buffer descriptor (``<4 x i32>``)."""
 
-    soffset: Value
+    soffset: Value = field()
     """A scalar byte offset added to every load/store; typically
     :func:`IRBuilder.const_i32(0)`. Non-zero lets one rsrc serve
     several waves with disjoint sub-regions."""
 
-    num_bytes: int = 0
+    num_bytes: int = field(default=0)
     """The size of the underlying buffer in bytes. Informational
     today; kept so a future ``BufferResource`` could carry validity
     metadata for assertions."""
@@ -289,13 +289,13 @@ class TensorView:
     indices; the view collapses them to a flat element offset.
     """
 
-    base: Any
+    base: Any = field()
     """For ``addr_space in {"global", "lds"}``: the pointer (an SSA
     :class:`Value`). For ``addr_space == "buffer"``: the
     :class:`BufferResource` describing the bounds-checked region."""
 
-    desc: TensorDescriptor
-    addr_space: AddrSpace = "global"
+    desc: TensorDescriptor = field()
+    addr_space: AddrSpace = field(default="global")
 
     @property
     def dtype(self) -> Type:
@@ -374,8 +374,12 @@ class TensorView:
         return b.global_load(self.base, off, dtype=self.dtype)
 
     def store_scalar(
-        self, b: IRBuilder, indices: Sequence[Value], value: Value,
-        *, align: Optional[int] = None,
+        self,
+        b: IRBuilder,
+        indices: Sequence[Value],
+        value: Value,
+        *,
+        align: Optional[int] = None,
     ) -> None:
         """Scalar store. ``value.type`` must match ``self.dtype``.
 
@@ -804,9 +808,9 @@ class TileWindow:
     parent view, which keeps the data-flow analysis clean.
     """
 
-    view: TensorView
-    lengths: Tuple[int, ...]
-    origin: Tuple[Value, ...]
+    view: TensorView = field()
+    lengths: Tuple[int, ...] = field()
+    origin: Tuple[Value, ...] = field()
 
     def __post_init__(self) -> None:
         if len(self.lengths) != self.view.rank:
@@ -856,7 +860,10 @@ class TileWindow:
         return self.view.load_scalar(b, self._global_indices(b, local_indices))
 
     def store_scalar(
-        self, b: IRBuilder, *local_indices: Value, value: Value,
+        self,
+        b: IRBuilder,
+        *local_indices: Value,
+        value: Value,
         align: Optional[int] = None,
     ) -> None:
         self.view.store_scalar(
@@ -1128,9 +1135,9 @@ class TensorCoordinate:
     LoadStoreTraits engine.
     """
 
-    desc: TensorDescriptor
-    index: Tuple[Value, ...]
-    _offset: Optional[Value] = None
+    desc: TensorDescriptor = field()
+    index: Tuple[Value, ...] = field()
+    _offset: Optional[Value] = field(default=None)
 
     @classmethod
     def unevaluated(
@@ -1349,9 +1356,9 @@ class TransformCoordinate:
     re-query ``rich_desc.offset`` at the absolute index).
     """
 
-    desc: Any  # ck_dsl.helpers.transforms.TensorDescriptor
-    index: Tuple[Tuple[str, Value], ...]  # ordered (name, value) pairs
-    _offset: Optional[Value] = None
+    desc: Any = field()  # ck_dsl.helpers.transforms.TensorDescriptor
+    index: Tuple[Tuple[str, Value], ...] = field()  # ordered (name, value) pairs
+    _offset: Optional[Value] = field(default=None)
 
     def index_map(self) -> dict:
         """Return the upper index as a ``{name: Value}`` dict."""

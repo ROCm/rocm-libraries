@@ -55,17 +55,17 @@ class IOSpecRule:
     already returns, so adopting it is a one-line replacement.
     """
 
-    dtype: str
-    block_size: int
-    vec: int
+    dtype: str = field()
+    block_size: int = field()
+    vec: int = field()
     # When set, enforce ``n_per_block % (block_size * vec) == 0``.
-    n_per_block: Optional[int] = None
+    n_per_block: Optional[int] = field(default=None)
     # When set, cap ``n_per_block / block_size`` (= elems-per-thread).
-    max_elems_per_thread: Optional[int] = None
+    max_elems_per_thread: Optional[int] = field(default=None)
 
-    allowed_dtypes: Tuple[str, ...] = ("f16", "fp16", "bf16")
-    allowed_block_sizes: Tuple[int, ...] = (64, 128, 256, 512, 1024)
-    allowed_vecs: Tuple[int, ...] = (2, 4, 8)
+    allowed_dtypes: Tuple[str, ...] = field(default=("f16", "fp16", "bf16"))
+    allowed_block_sizes: Tuple[int, ...] = field(default=(64, 128, 256, 512, 1024))
+    allowed_vecs: Tuple[int, ...] = field(default=(2, 4, 8))
 
 
 def validate_io(rule: IOSpecRule) -> Tuple[bool, str]:
@@ -157,7 +157,7 @@ def kernel_name_join(
                          flags={"smv": True})
         # -> "ck_dsl_layernorm2d_fwd_f16_N4096_b256_v8_smv"
     """
-    body = "_".join(p for p in (prefix, *parts) if p)
+    body = "_".join(p for p in tuple([prefix] + list(parts)) if p)
     if flags:
         for name, on in flags.items():
             if on:

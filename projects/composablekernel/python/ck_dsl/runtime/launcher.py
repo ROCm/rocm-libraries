@@ -91,7 +91,7 @@ from __future__ import annotations
 import contextvars
 import time as _time
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterator, Mapping, Optional, Sequence, Tuple
 
 from .hip_module import Runtime
@@ -165,7 +165,7 @@ class LaunchSummary:
     launcher itself stays free of timing-mode branching.
     """
 
-    launches: int
+    launches: int = field()
 
 
 @dataclass
@@ -177,7 +177,7 @@ class LaunchConfig:
     signature) is immutable after construction.
     """
 
-    stream: int = 0
+    stream: int = field(default=0)
     """HIP stream handle. ``0`` is auto-resolved to
     ``int(torch.cuda.current_stream().cuda_stream)`` via
     :func:`resolve_stream` so torch's caching allocator can see the
@@ -185,17 +185,17 @@ class LaunchConfig:
     ``torch.cuda.current_stream().cuda_stream`` itself) to override.
     """
 
-    grid: Tuple[int, int, int] = (1, 1, 1)
+    grid: Tuple[int, int, int] = field(default=(1, 1, 1))
     """3D launch grid (number of CTAs in each dim)."""
 
-    block: Tuple[int, int, int] = (64, 1, 1)
+    block: Tuple[int, int, int] = field(default=(64, 1, 1))
     """3D block dim (threads per CTA). Default is a single wave64."""
 
-    shared_bytes: int = 0
+    shared_bytes: int = field(default=0)
     """Dynamic LDS bytes requested at launch (in addition to the
     kernel's statically-declared LDS)."""
 
-    fence: bool = True
+    fence: bool = field(default=True)
     """Event-synchronize on this launch's completion before returning.
 
     Mirrors CK Tile's ``launch_kernel`` contract: every launch is
@@ -265,13 +265,13 @@ class StreamConfig:
     paths without per-language massaging.
     """
 
-    stream_id: int = 0
-    time_kernel: bool = False
-    log_level: int = 0
-    cold_niters: int = 3
-    nrepeat: int = 10
-    is_gpu_timer: bool = True
-    flush_cache: bool = False
+    stream_id: int = field(default=0)
+    time_kernel: bool = field(default=False)
+    log_level: int = field(default=0)
+    cold_niters: int = field(default=3)
+    nrepeat: int = field(default=10)
+    is_gpu_timer: bool = field(default=True)
+    flush_cache: bool = field(default=False)
 
 
 @dataclass(frozen=True)
@@ -285,10 +285,10 @@ class WorkspaceSpec:
     report and validate total scratch usage before launching.
     """
 
-    name: str
-    shape: Tuple[int, ...]
-    dtype: Any
-    device: Any
+    name: str = field()
+    shape: Tuple[int, ...] = field()
+    dtype: Any = field()
+    device: Any = field()
 
     def numel(self) -> int:
         n = 1
@@ -563,12 +563,12 @@ class PipelineLauncher:
 class _Slot:
     """One named workspace slot inside a :class:`WorkspacePool`."""
 
-    name: str
-    tensor: Any  # torch.Tensor; not typed to avoid the import at module-load
-    shape: Tuple[int, ...]
-    capacity_numel: int
-    dtype: Any
-    device: Any
+    name: str = field()
+    tensor: Any = field()  # torch.Tensor; not typed to avoid the import at module-load
+    shape: Tuple[int, ...] = field()
+    capacity_numel: int = field()
+    dtype: Any = field()
+    device: Any = field()
 
 
 class WorkspacePool:

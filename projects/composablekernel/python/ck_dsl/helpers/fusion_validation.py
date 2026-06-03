@@ -44,9 +44,9 @@ class BackendTiming:
     output (zero for the reference itself).
     """
 
-    name: str
-    ms: float
-    max_abs: float = 0.0
+    name: str = field()
+    ms: float = field()
+    max_abs: float = field(default=0.0)
 
     def as_dict(self) -> Dict[str, Any]:
         return {"name": self.name, "ms": float(self.ms), "max_abs": float(self.max_abs)}
@@ -62,12 +62,12 @@ class ValidationReport:
     ``timings`` is the same list of :class:`BackendTiming` rows.
     """
 
-    graph_hash: str
-    correctness: Dict[str, float]
-    timings: Tuple[BackendTiming, ...]
-    pattern: str = ""
-    shape: Tuple[int, ...] = ()
-    dtype: str = ""
+    graph_hash: str = field()
+    correctness: Dict[str, float] = field()
+    timings: Tuple[BackendTiming, ...] = field()
+    pattern: str = field(default="")
+    shape: Tuple[int, ...] = field(default=())
+    dtype: str = field(default="")
 
     def fastest(self) -> BackendTiming:
         return min(self.timings, key=lambda t: t.ms)
@@ -105,9 +105,9 @@ class BenchmarkCase:
     indexed by name.
     """
 
-    name: str
-    ref_fn: Callable[..., Any]
-    make_inputs: Callable[[Tuple[int, ...], str], Tuple[Any, ...]]
+    name: str = field()
+    ref_fn: Callable[..., Any] = field()
+    make_inputs: Callable[[Tuple[int, ...], str], Tuple[Any, ...]] = field()
     backends: Dict[str, Callable[..., Any]] = field(default_factory=dict)
 
 

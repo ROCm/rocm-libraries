@@ -80,7 +80,7 @@ Limitations of v1
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, Tuple
 
 from ...core.ir import BF16, F16, I32, IRBuilder, KernelDef, PtrType
@@ -134,14 +134,14 @@ class MfmaGemmSpec:
     CDNA3 cards.
     """
 
-    M: int
-    N: int
-    K: int
-    dtype: DType = "f16"
-    tile_m: int = 16
-    tile_n: int = 16
-    kpack: bool = True
-    name: str = "ck_dsl_mfma_gemm"
+    M: int = field()
+    N: int = field()
+    K: int = field()
+    dtype: DType = field(default="f16")
+    tile_m: int = field(default=16)
+    tile_n: int = field(default=16)
+    kpack: bool = field(default=True)
+    name: str = field(default="ck_dsl_mfma_gemm")
 
     @property
     def atom(self) -> MfmaAtom:

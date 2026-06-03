@@ -59,19 +59,19 @@ from .instances import UniversalGemmSpec, build_universal_gemm
 class BuildRecord:
     """One spec's build outcome."""
 
-    name: str
-    spec_dict: Dict[str, object]
-    ok: bool
-    error: str = ""
-    hsaco_path: str = ""
-    hsaco_bytes: int = 0
-    block_m: int = 0
-    block_n: int = 0
-    block_k: int = 0
-    threads_per_block: int = 0
-    ir_build_ms: float = 0.0
-    ir_lower_ms: float = 0.0
-    comgr_ms: float = 0.0
+    name: str = field()
+    spec_dict: Dict[str, object] = field()
+    ok: bool = field()
+    error: str = field(default="")
+    hsaco_path: str = field(default="")
+    hsaco_bytes: int = field(default=0)
+    block_m: int = field(default=0)
+    block_n: int = field(default=0)
+    block_k: int = field(default=0)
+    threads_per_block: int = field(default=0)
+    ir_build_ms: float = field(default=0.0)
+    ir_lower_ms: float = field(default=0.0)
+    comgr_ms: float = field(default=0.0)
     elf_meta: Dict[str, int] = field(default_factory=dict)
 
     @property

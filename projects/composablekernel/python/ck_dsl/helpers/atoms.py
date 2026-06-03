@@ -31,7 +31,7 @@ reworking the kernel builders.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, Tuple
 
 from ..core.arch import ArchTarget, LayoutMap, MmaOp
@@ -57,16 +57,16 @@ class MfmaAtom:
     output element.
     """
 
-    m: int
-    n: int
-    k: int
-    a_per_lane: int
-    b_per_lane: int
-    c_per_lane: int
-    dtype_in: str
-    dtype_out: str
+    m: int = field()
+    n: int = field()
+    k: int = field()
+    a_per_lane: int = field()
+    b_per_lane: int = field()
+    c_per_lane: int = field()
+    dtype_in: str = field()
+    dtype_out: str = field()
     """Logical name used in error messages and the manifest schema."""
-    name: str
+    name: str = field()
 
     # ---- factory class methods (the only supported atoms today) ----
 
@@ -607,17 +607,17 @@ class WmmaAtom:
     :meth:`IRBuilder.mma`.
     """
 
-    m: int
-    n: int
-    k: int
-    a_per_lane: int
-    b_per_lane: int
-    c_per_lane: int
-    dtype_in: str
-    dtype_out: str
-    name: str
-    family: str = "wmma"
-    wave_size: int = 32
+    m: int = field()
+    n: int = field()
+    k: int = field()
+    a_per_lane: int = field()
+    b_per_lane: int = field()
+    c_per_lane: int = field()
+    dtype_in: str = field()
+    dtype_out: str = field()
+    name: str = field()
+    family: str = field(default="wmma")
+    wave_size: int = field(default=32)
 
     # ---- factory class methods ----
 

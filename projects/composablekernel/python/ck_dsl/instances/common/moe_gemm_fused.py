@@ -341,11 +341,11 @@ class _MoeOperand:
     scalar.
     """
 
-    global_view: object
-    lds_view: object
-    smem: Value
-    load_b: Optional[object] = None
-    store_scalar_ok: bool = True
+    global_view: object = field()
+    lds_view: object = field()
+    smem: Value = field()
+    load_b: Optional[object] = field(default=None)
+    store_scalar_ok: bool = field(default=True)
 
 
 class _MoeKloopPlan:
@@ -664,13 +664,13 @@ class FusedGateUpSiluGemmSpec:
     size.
     """
 
-    name: str
-    tile: TileSpec
+    name: str = field()
+    tile: TileSpec = field()
     trait: TraitSpec = field(default_factory=lambda: TraitSpec(epilogue="default"))
-    wave_size: int = 64
-    block_size: int = 0
-    dtype: str = "fp16"
-    grouped: bool = False
+    wave_size: int = field(default=64)
+    block_size: int = field(default=0)
+    dtype: str = field(default="fp16")
+    grouped: bool = field(default=False)
 
     def __post_init__(self) -> None:
         if self.block_size == 0:
@@ -1102,13 +1102,13 @@ class FusedInterleavedGateUpSiluGemmSpec:
     ``BlockExpertIds == -1`` and skips all work (active-tile gate).
     """
 
-    name: str
-    tile: TileSpec
+    name: str = field()
+    tile: TileSpec = field()
     trait: TraitSpec = field(default_factory=lambda: TraitSpec(epilogue="default"))
-    wave_size: int = 64
-    block_size: int = 0
-    dtype: str = "fp16"
-    grouped: bool = False
+    wave_size: int = field(default=64)
+    block_size: int = field(default=0)
+    dtype: str = field(default="fp16")
+    grouped: bool = field(default=False)
 
     def __post_init__(self) -> None:
         if self.block_size == 0:
@@ -1595,13 +1595,13 @@ class FusedDownReduceGemmSpec:
     ``SortedTokenIds == -1`` and are skipped.
     """
 
-    name: str
-    tile: TileSpec
+    name: str = field()
+    tile: TileSpec = field()
     trait: TraitSpec = field(default_factory=lambda: TraitSpec(epilogue="default"))
-    wave_size: int = 64
-    block_size: int = 0
-    dtype: str = "fp16"
-    grouped: bool = False
+    wave_size: int = field(default=64)
+    block_size: int = field(default=0)
+    dtype: str = field(default="fp16")
+    grouped: bool = field(default=False)
 
     def __post_init__(self) -> None:
         if self.block_size == 0:
@@ -1968,12 +1968,12 @@ class FusedDownSiluReduceGemmSpec:
     Reference: CK Tile ``fused_moegemm_pipeline_flatmm_uk.hpp``.
     """
 
-    name: str
-    tile: TileSpec
+    name: str = field()
+    tile: TileSpec = field()
     trait: TraitSpec = field(default_factory=lambda: TraitSpec(epilogue="default"))
-    wave_size: int = 64
-    block_size: int = 0
-    dtype: str = "fp16"
+    wave_size: int = field(default=64)
+    block_size: int = field(default=0)
+    dtype: str = field(default="fp16")
 
     def __post_init__(self) -> None:
         if self.block_size == 0:

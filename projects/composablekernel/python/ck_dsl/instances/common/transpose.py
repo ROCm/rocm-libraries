@@ -88,7 +88,7 @@ What we cover today:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, Tuple
 
 from ...core.ir import I32, IRBuilder, KernelDef, PtrType
@@ -171,13 +171,13 @@ useful for cache-bound stencil-style ops). The default
 
 @dataclass(frozen=True)
 class Transpose2DSpec:
-    tile_m: int = 64
-    tile_n: int = 64
-    vec: int = 8
-    dtype: DType = "f16"
-    lds_pad: int = 8
-    grid_order: GridOrder = "row"
-    name: str = "ck_dsl_transpose2d"
+    tile_m: int = field(default=64)
+    tile_n: int = field(default=64)
+    vec: int = field(default=8)
+    dtype: DType = field(default="f16")
+    lds_pad: int = field(default=8)
+    grid_order: GridOrder = field(default="row")
+    name: str = field(default="ck_dsl_transpose2d")
 
     @property
     def block_size(self) -> int:

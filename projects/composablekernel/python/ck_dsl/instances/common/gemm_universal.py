@@ -79,15 +79,15 @@ from ...helpers.tensor_view import make_global_view, make_tile_window
 class TileSpec:
     """Mirror of CK's `TileConfig`."""
 
-    tile_m: int
-    tile_n: int
-    tile_k: int
-    warp_m: int
-    warp_n: int
-    warp_k: int = 1
-    warp_tile_m: int = 32
-    warp_tile_n: int = 32
-    warp_tile_k: int = 16
+    tile_m: int = field()
+    tile_n: int = field()
+    tile_k: int = field()
+    warp_m: int = field()
+    warp_n: int = field()
+    warp_k: int = field(default=1)
+    warp_tile_m: int = field(default=32)
+    warp_tile_n: int = field(default=32)
+    warp_tile_k: int = field(default=16)
 
     @property
     def mfmas_per_warp_m(self) -> int:
@@ -144,18 +144,18 @@ class TraitSpec:
       (or a ``(min, max)`` tuple) when targeting two workgroups per CU.
     """
 
-    pipeline: Pipeline = "compv4"
-    scheduler: Scheduler = "intrawave"
-    epilogue: Epilogue = "cshuffle"
-    pad_m: bool = False
-    pad_n: bool = False
-    pad_k: bool = False
-    persistent: bool = False
-    chiplet_swizzle: bool = False
-    chiplet_wgm: int = 8
-    chiplet_num_xcds: int = 8
-    chiplet_chunk_size: int = 64
-    waves_per_eu: Optional[int] = None
+    pipeline: Pipeline = field(default="compv4")
+    scheduler: Scheduler = field(default="intrawave")
+    epilogue: Epilogue = field(default="cshuffle")
+    pad_m: bool = field(default=False)
+    pad_n: bool = field(default=False)
+    pad_k: bool = field(default=False)
+    persistent: bool = field(default=False)
+    chiplet_swizzle: bool = field(default=False)
+    chiplet_wgm: int = field(default=8)
+    chiplet_num_xcds: int = field(default=8)
+    chiplet_chunk_size: int = field(default=64)
+    waves_per_eu: Optional[int] = field(default=None)
     # P40: when True, the kernel expects the B operand pre-shuffled by
     # the host into the layout :func:`ck_dsl.helpers.preshuffle.
     # host_preshuffle_layout` produces, and the per-lane B-load uses
@@ -163,7 +163,7 @@ class TraitSpec:
     # (one ``buffer_load_dwordx4`` per K-tile vs the per-K-element
     # strided scalar loads of the column-major path). The flag-free
     # default keeps the canonical strided-scalar load.
-    preshuffle_b: bool = False
+    preshuffle_b: bool = field(default=False)
     # P41: DirectToLDS (DTLA/DTLB). When True, the global -> LDS load
     # phase emits ``raw.ptr.buffer.load.lds`` (one instruction per chunk;
     # hardware writes the dword payload straight into LDS) instead of
@@ -172,13 +172,13 @@ class TraitSpec:
     # tuned kernels like ``MT16x16x512`` on gfx950. Constraints inherited
     # from :class:`AsyncTileLoader`: per-lane payload must be 4 / 12 / 16
     # bytes (dwords in {1,3,4}; dwords=2 is rejected by the intrinsic).
-    direct_to_lds: bool = False
+    direct_to_lds: bool = field(default=False)
     # Per-operand cache hints when direct_to_lds is True. Default mirrors
     # rocBLAS skinny-M behaviour: A is small (M*K halves) and reused
     # across CTAs through L2 -> CACHE_ALL; B is the 32 MiB weight matrix,
     # one-shot streamed -> CACHE_STREAM.
-    dtl_cache_a: int = 0  # CACHE_ALL
-    dtl_cache_b: int = 2  # CACHE_STREAM
+    dtl_cache_a: int = field(default=0)  # CACHE_ALL
+    dtl_cache_b: int = field(default=2)  # CACHE_STREAM
     # Prefetch ping-pong on top of direct_to_lds. Allocates two LDS buffers
     # per operand and issues next-iter DTLA loads while current-iter MFMAs
     # run, then waits with ``s_waitcnt vmcnt(loads_in_flight)`` so only the
@@ -186,7 +186,7 @@ class TraitSpec:
     # ``direct_to_lds=True``. Doubles LDS usage (knocks 2 WGs/CU down to 1
     # at typical tile sizes) but hides the global-load latency that
     # otherwise serialises every K-tile.
-    dtl_prefetch: bool = False
+    dtl_prefetch: bool = field(default=False)
     # MoE active-tile early-exit. When True (only honored in
     # ``batched=True`` mode), the kernel takes two extra args
     # (``SortedTokenIds: ptr<i32>``, ``slot_size: i32``) and at CTA
@@ -197,7 +197,7 @@ class TraitSpec:
     # MFMAs, LDS reads, and HBM stores. Enables CK Tile-style
     # "expert-by-expert" MoE dispatch over a static grid that's
     # padded to the worst-case ``experts`` size.
-    active_tile_skip: bool = False
+    active_tile_skip: bool = field(default=False)
     # LDS K-padding: extra columns added to each AB LDS row so the per-row
     # byte stride is not a power-of-two multiple of the bank count, breaking
     # the stride-based bank-conflict pattern on the MFMA ds_reads (gfx950 has
@@ -210,38 +210,38 @@ class TraitSpec:
     # ``lds_swizzle`` (zero LDS cost). Kept as an opt-in knob for shapes/dtypes
     # where the trade may pay. Non-DTL only (the direct-to-LDS path computes
     # flat byte offsets that assume a contiguous block_k stride).
-    lds_k_pad: int = 0
+    lds_k_pad: int = field(default=0)
     # LDS XOR swizzle (st_16x32-style): toggle the 32-byte column group on
     # rows with bit 3 set so consecutive-row MFMA ds_reads hit different banks.
     # ZERO LDS overhead (unlike lds_k_pad). Applied identically to the LDS
     # store and ds_read columns -> bit-exact. Measured ~+3% on square fp16/bf16.
     # Default off (golden-gate-safe). Non-DTL only; 2-byte dtypes.
-    lds_swizzle: bool = False
+    lds_swizzle: bool = field(default=False)
 
 
 @dataclass(frozen=True)
 class DataSpec:
     """Element / accumulator / layout choice. Today: f16 in, f16 out, f32 acc, RCR."""
 
-    dtype_a: str = "fp16"
-    dtype_b: str = "fp16"
-    dtype_c: str = "fp16"
-    dtype_acc: str = "fp32"
-    layout: str = "RCR"
+    dtype_a: str = field(default="fp16")
+    dtype_b: str = field(default="fp16")
+    dtype_c: str = field(default="fp16")
+    dtype_acc: str = field(default="fp32")
+    layout: str = field(default="RCR")
 
 
 @dataclass(frozen=True)
 class UniversalGemmSpec(WarpTileBlockSizeMixin):
-    name: str
-    tile: TileSpec
+    name: str = field()
+    tile: TileSpec = field()
     trait: TraitSpec = field(default_factory=TraitSpec)
     data: DataSpec = field(default_factory=DataSpec)
-    wave_size: int = 64
+    wave_size: int = field(default=64)
     # If None, derived from `warp_m * warp_n * warp_k * wave_size`
     # (the only valid value per CK's `gemm_validation_utils.py` line 605:
     # `BlockSize = NumWarps * warp_size`). We expose it so an over-rider
     # can force a specific block_size for autotuning experiments.
-    block_size: int = 0
+    block_size: int = field(default=0)
     # When True, the kernel reads ``block_id_z`` as the batch index and
     # picks up three extra i64 stride args (``stride_a``, ``stride_b``,
     # ``stride_c``) that scale the per-batch pointer offset. The grid
@@ -249,7 +249,7 @@ class UniversalGemmSpec(WarpTileBlockSizeMixin):
     # difference between the non-batched ``build_universal_gemm`` and the
     # batched form -- the MFMA / LDS body is shared verbatim so the
     # batched kernel inherits the same correctness + perf as the base.
-    batched: bool = False
+    batched: bool = field(default=False)
 
     def __post_init__(self) -> None:
         self._init_block_size()

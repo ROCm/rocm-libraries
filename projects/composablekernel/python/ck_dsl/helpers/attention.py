@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import math
 from typing import Tuple
 
@@ -20,21 +20,21 @@ def next_power_of_2(x: int) -> int:
 
 @dataclass(frozen=True)
 class Attention2DConfig:
-    BLOCK_M: int
-    BLOCK_Q: int
-    TILE_SIZE: int
-    num_warps: int
-    num_stages: int
-    waves_per_eu: int = 2
+    BLOCK_M: int = field()
+    BLOCK_Q: int = field()
+    TILE_SIZE: int = field()
+    num_warps: int = field()
+    num_stages: int = field()
+    waves_per_eu: int = field(default=2)
 
 
 @dataclass(frozen=True)
 class Attention3DConfig:
-    TILE_SIZE: int
-    NUM_SEGMENTS_PER_SEQ: int
-    num_warps: int
-    num_stages: int
-    waves_per_eu: int = 2
+    TILE_SIZE: int = field()
+    NUM_SEGMENTS_PER_SEQ: int = field()
+    num_warps: int = field()
+    num_stages: int = field()
+    waves_per_eu: int = field(default=2)
 
 
 def select_2d_config(
@@ -120,11 +120,11 @@ def select_3d_config(
 class PagedKvDescriptor:
     """Address helper for `[num_blocks, block_size, num_kv_heads, head]` KV."""
 
-    block_size: int
-    stride_0: int
-    stride_1: int
-    stride_2: int
-    stride_3: int
+    block_size: int = field()
+    stride_0: int = field()
+    stride_1: int = field()
+    stride_2: int = field()
+    stride_3: int = field()
 
     def offset(
         self,
@@ -205,9 +205,9 @@ class OnlineSoftmaxState:
     `block_tile_reduce` helpers.
     """
 
-    m: Value
-    l_sum: Value
-    acc: Value
+    m: Value = field()
+    l_sum: Value = field()
+    acc: Value = field()
 
     def update(self, b: IRBuilder, score: Value, value: Value) -> "OnlineSoftmaxState":
         new_m = b.fmax(self.m, score)

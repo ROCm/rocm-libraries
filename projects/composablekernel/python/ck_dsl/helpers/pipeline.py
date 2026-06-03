@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Optional, Sequence, Tuple, Union
 
 from ..core.ir import IRBuilder
@@ -154,13 +154,13 @@ class SoftwarePipeline:
         Pairs with ``sync_lds_only()`` barriers that don't drain VMEM.
     """
 
-    num_iters: int
-    double_buffer: bool = True
-    wait_vmcnt: bool = False
-    sync_after_wait: bool = True
-    sync_before_issue: bool = True
-    overlap_vmcnt: bool = False
-    num_buffers: int = 0  # 0 = derive from double_buffer (legacy)
+    num_iters: int = field()
+    double_buffer: bool = field(default=True)
+    wait_vmcnt: bool = field(default=False)
+    sync_after_wait: bool = field(default=True)
+    sync_before_issue: bool = field(default=True)
+    overlap_vmcnt: bool = field(default=False)
+    num_buffers: int = field(default=0)  # 0 = derive from double_buffer (legacy)
 
     def run_ping_pong(
         self,

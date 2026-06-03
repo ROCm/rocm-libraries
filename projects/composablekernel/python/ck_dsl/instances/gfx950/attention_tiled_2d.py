@@ -39,7 +39,7 @@ Correctness contract (validated against `aiter.op_tests.triton_tests.attention`
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import math
 from typing import Optional, Tuple
 
@@ -149,29 +149,29 @@ _warp_xor_reduce_sum_32lane = warp_xor_reduce_sum_32lane
 
 @dataclass(frozen=True)
 class UnifiedAttention2DTiledSpec:
-    head_size: int
-    block_size: int
-    num_query_heads: int
-    num_kv_heads: int
-    dtype: str
-    use_sinks: bool
-    sliding_window: int
-    has_softcap: bool
-    use_alibi: bool = False
-    use_qq_bias: bool = False
-    num_seqs: int = 0
+    head_size: int = field()
+    block_size: int = field()
+    num_query_heads: int = field()
+    num_kv_heads: int = field()
+    dtype: str = field()
+    use_sinks: bool = field()
+    sliding_window: int = field()
+    has_softcap: bool = field()
+    use_alibi: bool = field(default=False)
+    use_qq_bias: bool = field(default=False)
+    num_seqs: int = field(default=0)
     # Number of wave64 warps per CTA. `BLOCK_M = num_warps * 16` rows are
     # processed per CTA, with each warp owning its own 16-row slice. The
     # online softmax stays per-warp (no cross-warp reduction); the savings
     # come from amortising the Q load, async K/V loads, P_lds publish, and
     # cshuffle epilogue across more lanes. Default `1` preserves the
     # original single-warp behaviour bit-for-bit.
-    num_warps: int = 1
+    num_warps: int = field(default=1)
     # AMDGPU occupancy hint (``"amdgpu-waves-per-eu"``). Attention is
     # register-pressure-bound; setting this to 2 or 3 forces the
     # backend to tighten VGPR allocation in exchange for higher
     # occupancy. ``None`` keeps the LLVM heuristic.
-    waves_per_eu: Optional[int] = None
+    waves_per_eu: Optional[int] = field(default=None)
     # FP8 K/V cache. When ``"fp8e4m3"``, the kernel takes K/V cache
     # pointers as ``ptr<fp8e4m3, global>`` (1 byte/element), uses a
     # sync per-thread load that emits ``cvt_fp8_to_f32 -> fmul k_scale
@@ -180,7 +180,7 @@ class UnifiedAttention2DTiledSpec:
     # ``raw_ptr_buffer_load_lds`` cannot intercept the scale step. Q is
     # still passed in the working dtype (``self.dtype``), and the rest
     # of the kernel (MFMA, softmax, epilogue) is unchanged.
-    kv_storage_dtype: Optional[str] = None
+    kv_storage_dtype: Optional[str] = field(default=None)
     # FP8 K-in-LDS path (ULP-identical to default, faster). When True
     # (and ``kv_storage_dtype='fp8e4m3'``) the kernel stages K as raw
     # fp8 in LDS instead of dequant-then-store-bf16. Specifically:
@@ -210,12 +210,12 @@ class UnifiedAttention2DTiledSpec:
     # bits, so Q quantisation produced max_abs 0.5-2.7 vs Triton's <0.02
     # baseline -- nowhere near ULP. The flag is retained for the LDS
     # win and the bf16 math is preserved.
-    use_fp8_mfma_qk: bool = False
+    use_fp8_mfma_qk: bool = field(default=False)
     # Native fp8 PV MFMA. When True, V remains in raw fp8 LDS and
     # softmax probabilities are quantised to fp8 (P*240) before PV.
     # This avoids quantising Q/K for the QK softmax path, so it is the
     # safer FlyDSL-inspired subset: exact bf16 QK logits, native fp8 PV.
-    use_fp8_mfma_pv: bool = False
+    use_fp8_mfma_pv: bool = field(default=False)
     # Experimental in-place improvement for the existing 16x16x32 path:
     # keep softmax P in registers and permute the MFMA-C distribution into
     # the PV MFMA-A distribution, instead of publishing P to P_lds and
@@ -223,7 +223,7 @@ class UnifiedAttention2DTiledSpec:
     # as the 32x32 rewrite, but applies to the current production geometry.
     # v1 is intentionally restricted to bf16/no-bias/no-window until parity
     # is proven broadly.
-    use_register_pv: bool = False
+    use_register_pv: bool = field(default=False)
     # ``T`` (per-CTA-iter KV-tile size in tokens). When ``None``, the
     # kernel uses ``T = block_size`` (one paged-KV cache block per
     # iter, matching the AITER decode path). Setting ``tile_size > block_size``
@@ -234,7 +234,7 @@ class UnifiedAttention2DTiledSpec:
     # of ``block_size`` (so the descriptor's multi-block decomposition
     # is well-defined) and ``T * head_size >= num_warps * 64 * 8``
     # (the async-DMA call carries one wave's lane-contiguous payload).
-    tile_size: Optional[int] = None
+    tile_size: Optional[int] = field(default=None)
     # Per-warp M-dimension tile size. Default is one ``MFMA_M`` atom
     # (16 rows) per warp. Setting this to 32 stacks two ``MFMA_M=16``
     # atoms per warp so each warp's QK / PV phase processes twice the
@@ -257,7 +257,7 @@ class UnifiedAttention2DTiledSpec:
     # future workloads (e.g. HD=128 or shapes with different LDS
     # budgets) where the trade-off might flip. See
     # ``/workspace/probe_blockm32_perf.py`` for the sweep.
-    block_m_per_warp: int = 16
+    block_m_per_warp: int = field(default=16)
     # Migrate the in-place tiled 2D kernel from the old 16x16x32 MFMA
     # geometry to the CK Tile / Triton long-prefill geometry:
     #
@@ -271,7 +271,7 @@ class UnifiedAttention2DTiledSpec:
     # production kernel available until the new layout is fully parity-
     # clean. Once the migration is complete, this becomes the default for
     # long-prefill and the old 16x16x32 body can be removed.
-    use_mfma_32x32: bool = False
+    use_mfma_32x32: bool = field(default=False)
     # Experimental orientation for the 32x32 migration. The first 32x32
     # prototype computed ``S = Q @ K^T`` and therefore still needed a
     # cross-lane reduction over K columns. Triton/CK Tile's efficient
@@ -279,40 +279,40 @@ class UnifiedAttention2DTiledSpec:
     # one lane owns one query column and 16 key positions, so the softmax
     # K-axis mostly lives in registers. This flag tracks that orientation
     # independently while it is brought up.
-    use_transposed_qk_32x32: bool = False
+    use_transposed_qk_32x32: bool = field(default=False)
     # Transposed 32x32 softmax has one online-softmax state per query lane,
     # not one per output-dimension accumulator register. Keep a single m/l
     # loop-carried state and broadcast alpha across the 16 output regs.
-    use_transposed_scalar_state: bool = False
+    use_transposed_scalar_state: bool = field(default=False)
     # Hoist query-row invariants used by the transposed 32x32 score/mask path
     # out of the per-reg/per-tile score loop.
-    use_transposed_invariant_hoist: bool = False
+    use_transposed_invariant_hoist: bool = field(default=False)
     # Compute query-row mask invariants once per KV iteration for the
     # transposed 32x32 path, instead of once per score register.
-    use_transposed_mask_once: bool = False
+    use_transposed_mask_once: bool = field(default=False)
     # Experiment: orient PV so each 32-lane half consumes only P rows it owns
     # and read matching V rows through two half-local transpose LDS reads. This
     # targets the transposed path's lane^32 P fetches.
-    use_transposed_half_local_pv: bool = False
+    use_transposed_half_local_pv: bool = field(default=False)
     # Opt-in scheduling cleanup for the 32x32 path: skip the legacy 16x16 Q
     # register gather and its Q_ALIAS_K drain barrier. R4 consumes Q32_reg
     # exclusively, so the old Q_reg values are dead on that path.
-    use_mfma32_skip_legacy_qreg: bool = False
+    use_mfma32_skip_legacy_qreg: bool = field(default=False)
     # No-SW/no-bias transposed-softmax experiment: collapse the causal and
     # prefix masks into one per-score compare against min(causal, prefix_tail)
     # and hoist the MFMA row base used by all 16 score registers in a lane.
-    use_transposed_mask_limit: bool = False
+    use_transposed_mask_limit: bool = field(default=False)
     # Experimental two-KV-tile online-softmax group for the transposed 32x32 R4
     # path. The prototype computes S/P for two consecutive KV tiles against one
     # shared m_new, then runs PV for both tiles while scaling the loop-carried
     # output accumulator only once. Kept opt-in until parity/perf are proven.
-    use_grouped_kv2_softmax: bool = False
+    use_grouped_kv2_softmax: bool = field(default=False)
     # Prototype fast path for the paged-KV byte descriptor on the hot R4 shape:
     # bf16, h64kv8, HD=64, BS=32, T=64, nw=4. In that geometry each async DMA
     # call covers exactly one 32-token cache block, so the K/V loaders can emit
     # two direct block-table loads per tile and simple shift/add byte arithmetic
     # instead of the generic TensorDescriptor transform DAG.
-    use_fast_paged_kv_desc: bool = False
+    use_fast_paged_kv_desc: bool = field(default=False)
     # 64-bit paged-KV addressing. The default load path puts the full byte
     # offset (incl. ``physical_block * block_stride``) in a 32-bit buffer
     # voffset, which overflows for paged caches > 2 GiB (~65 K bf16 / ~131 K
@@ -321,16 +321,16 @@ class UnifiedAttention2DTiledSpec:
     # within-block voffset) so any cache size is addressable. It costs a
     # per-call ``make_buffer_rsrc`` so the dispatcher only enables it when the
     # cache actually exceeds the 2 GiB cap (see _enable_i64_kv_addr).
-    use_i64_kv_addr: bool = False
+    use_i64_kv_addr: bool = field(default=False)
     # Experimental schedule: issue the current V async copy immediately after
     # the iter-start K drain/barrier, before QK. This gives V the whole QK plus
     # softmax window to arrive; the next-K prefetch is still issued after QK so
     # the partial wait before PV can leave only next K pending.
-    use_early_v_schedule: bool = False
+    use_early_v_schedule: bool = field(default=False)
     # Backend residency experiment for accumulator-touching 32x32 attention:
     # request zero AGPR allocation so LLVM selects VGPR-form MFMA and avoids
     # AGPR<->VGPR copies around the online-softmax/PV accumulator scaling.
-    use_agpr_alloc_zero: bool = False
+    use_agpr_alloc_zero: bool = field(default=False)
 
     def __post_init__(self):
         if self.num_warps not in (1, 2, 4, 8):

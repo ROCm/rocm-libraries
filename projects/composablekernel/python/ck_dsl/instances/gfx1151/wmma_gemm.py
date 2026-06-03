@@ -40,7 +40,7 @@ fragment ABI; new gfx1151 GEMM work should go through the unified builder.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ...core.ir import F16, I32, IRBuilder, KernelDef, PtrType
 
@@ -55,12 +55,12 @@ class WmmaGemmSpec:
     """A gfx1151 WMMA GEMM instance. M/N/K are runtime kernel args; the spec
     only carries the dtype and a name (the tile is the fixed 16x16x16 WMMA)."""
 
-    name: str = "ck_dsl_wmma_gemm"
-    dtype: str = "fp16"
+    name: str = field(default="ck_dsl_wmma_gemm")
+    dtype: str = field(default="fp16")
     # Dispatch-order toggle (perf-only; correctness-neutral). True maps
     # ``block_id.x -> M-tile`` (grid_order "MN"); False maps
     # ``block_id.x -> N-tile`` (grid_order "NM", the universal-GEMM order).
-    block_x_is_m: bool = True
+    block_x_is_m: bool = field(default=True)
 
     def __post_init__(self) -> None:
         if self.dtype != "fp16":

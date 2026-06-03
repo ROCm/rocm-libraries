@@ -69,7 +69,7 @@ addressing.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, replace, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from ..core.ir import F16, I32, I64, IRBuilder, Type, Value
@@ -89,9 +89,9 @@ class CoordVar:
     boundary-check predicates that produced this coord.
     """
 
-    name: str
-    value: Value
-    valid: Optional[Value] = None
+    name: str = field()
+    value: Value = field()
+    valid: Optional[Value] = field(default=None)
 
 
 def _and(b: IRBuilder, p: Optional[Value], q: Optional[Value]) -> Optional[Value]:
@@ -247,8 +247,8 @@ class PassThrough(Transform):
     while transforming another part.
     """
 
-    upper: Tuple[str, ...]
-    lower: Tuple[str, ...]
+    upper: Tuple[str, ...] = field()
+    lower: Tuple[str, ...] = field()
 
     def __init__(self, upper_name: str, lower_name: Optional[str] = None) -> None:
         object.__setattr__(self, "upper", (upper_name,))
@@ -279,10 +279,10 @@ class Pad(Transform):
     affine arithmetic (which lives in `embed`).
     """
 
-    upper: Tuple[str, ...]
-    lower: Tuple[str, ...]
-    lo: int
-    hi: int
+    upper: Tuple[str, ...] = field()
+    lower: Tuple[str, ...] = field()
+    lo: int = field()
+    hi: int = field()
 
     def __init__(self, coord_name: str, lo: int, hi: int) -> None:
         object.__setattr__(self, "upper", (coord_name,))
@@ -325,12 +325,12 @@ class Embed(Transform):
                   offset=0, lo=0, hi=Wi)
     """
 
-    upper: Tuple[str, ...]
-    lower: Tuple[str, ...]
-    strides: Tuple[int, ...]
-    offset: int
-    lo: int
-    hi: int
+    upper: Tuple[str, ...] = field()
+    lower: Tuple[str, ...] = field()
+    strides: Tuple[int, ...] = field()
+    offset: int = field()
+    lo: int = field()
+    hi: int = field()
 
     def __init__(
         self,
@@ -407,9 +407,9 @@ class Merge(Transform):
     `k = r*S*C + s*C + c` mappings.
     """
 
-    upper: Tuple[str, ...]
-    lower: Tuple[str, ...]
-    dims: Tuple[int, ...]
+    upper: Tuple[str, ...] = field()
+    lower: Tuple[str, ...] = field()
+    dims: Tuple[int, ...] = field()
 
     def __init__(self, upper: Sequence[str], into: str, dims: Sequence[int]) -> None:
         if len(upper) != len(dims):
@@ -471,9 +471,9 @@ class Unmerge(Transform):
     from k, the way a hand-written implicit-GEMM kernel does manually.
     """
 
-    upper: Tuple[str, ...]
-    lower: Tuple[str, ...]
-    dims: Tuple[int, ...]
+    upper: Tuple[str, ...] = field()
+    lower: Tuple[str, ...] = field()
+    dims: Tuple[int, ...] = field()
 
     def __init__(
         self, upper_name: str, lowers: Sequence[str], dims: Sequence[int]
@@ -528,9 +528,9 @@ class UnmergeMagicDiv(Transform):
     the documented 31-bit unsigned range.
     """
 
-    upper: Tuple[str, ...]
-    lower: Tuple[str, ...]
-    dims: Tuple[int, ...]
+    upper: Tuple[str, ...] = field()
+    lower: Tuple[str, ...] = field()
+    dims: Tuple[int, ...] = field()
 
     def __init__(
         self, upper_name: str, lowers: Sequence[str], dims: Sequence[int]
@@ -588,9 +588,9 @@ class UnmergeDivMod(Transform):
     cshuffle-epilogue LDS descriptor chain, which names this transform.
     """
 
-    upper: Tuple[str, ...]
-    lower: Tuple[str, ...]
-    dims: Tuple[int, ...]
+    upper: Tuple[str, ...] = field()
+    lower: Tuple[str, ...] = field()
+    dims: Tuple[int, ...] = field()
 
     def __init__(
         self, upper_name: str, lowers: Sequence[str], dims: Sequence[int]
@@ -640,10 +640,10 @@ class XorT(Transform):
     of the closed-form byte table in ``helpers/layouts.py``.
     """
 
-    upper: Tuple[str, ...]
-    lower: Tuple[str, ...]
-    length1: int
-    apply_modulo: bool
+    upper: Tuple[str, ...] = field()
+    lower: Tuple[str, ...] = field()
+    length1: int = field()
+    apply_modulo: bool = field()
 
     def __init__(
         self,
@@ -689,10 +689,10 @@ class Slice(Transform):
     no boundary check on its own; the enclosing tile window bounds it.)
     """
 
-    upper: Tuple[str, ...]
-    lower: Tuple[str, ...]
-    begin: int
-    end: int
+    upper: Tuple[str, ...] = field()
+    lower: Tuple[str, ...] = field()
+    begin: int = field()
+    end: int = field()
 
     def __init__(
         self, coord_name: str, *, begin: int, end: int, into: Optional[str] = None
@@ -724,9 +724,9 @@ class Freeze(Transform):
     chain (the "pin a dim to a constant" idiom done with offset adds today).
     """
 
-    upper: Tuple[str, ...]
-    lower: Tuple[str, ...]
-    low_idx: int
+    upper: Tuple[str, ...] = field()
+    lower: Tuple[str, ...] = field()
+    low_idx: int = field()
 
     def __init__(self, into: str, *, low_idx: int) -> None:
         object.__setattr__(self, "upper", ())
@@ -753,9 +753,9 @@ class Insert(Transform):
     naive layout does not see.
     """
 
-    upper: Tuple[str, ...]
-    lower: Tuple[str, ...]
-    length: int
+    upper: Tuple[str, ...] = field()
+    lower: Tuple[str, ...] = field()
+    length: int = field()
 
     def __init__(self, coord_name: str, *, length: int) -> None:
         object.__setattr__(self, "upper", (coord_name,))
@@ -779,9 +779,9 @@ class Replicate(Transform):
     broadcast. Used for paged-KV / norm broadcast dims.
     """
 
-    upper: Tuple[str, ...]
-    lower: Tuple[str, ...]
-    lengths: Tuple[int, ...]
+    upper: Tuple[str, ...] = field()
+    lower: Tuple[str, ...] = field()
+    lengths: Tuple[int, ...] = field()
 
     def __init__(self, uppers: Sequence[str], *, lengths: Sequence[int]) -> None:
         if len(uppers) != len(lengths):
@@ -808,9 +808,9 @@ class Modulo(Transform):
     ``[0, up_length)`` and the lower is its residue mod ``modulus``.
     """
 
-    upper: Tuple[str, ...]
-    lower: Tuple[str, ...]
-    modulus: int
+    upper: Tuple[str, ...] = field()
+    lower: Tuple[str, ...] = field()
+    modulus: int = field()
 
     def __init__(
         self, coord_name: str, *, modulus: int, into: Optional[str] = None
@@ -838,9 +838,9 @@ class Offset(Transform):
     length and merely biases the index, as CK Tile's ``offset`` does.
     """
 
-    upper: Tuple[str, ...]
-    lower: Tuple[str, ...]
-    offset_length: int
+    upper: Tuple[str, ...] = field()
+    lower: Tuple[str, ...] = field()
+    offset_length: int = field()
 
     def __init__(
         self, coord_name: str, *, offset_length: int, into: Optional[str] = None
@@ -877,9 +877,9 @@ class RightPad(Transform):
     ck_dsl :class:`Pad` is validity-only with explicit ``lo``/``hi``).
     """
 
-    upper: Tuple[str, ...]
-    lower: Tuple[str, ...]
-    low_length: int
+    upper: Tuple[str, ...] = field()
+    lower: Tuple[str, ...] = field()
+    low_length: int = field()
 
     def __init__(self, coord_name: str, *, low_length: int) -> None:
         object.__setattr__(self, "upper", (coord_name,))
@@ -910,9 +910,9 @@ class LeftPad(Transform):
     pad variant CK Tile uses, distinct from the validity-only :class:`Pad`.
     """
 
-    upper: Tuple[str, ...]
-    lower: Tuple[str, ...]
-    left_pad: int
+    upper: Tuple[str, ...] = field()
+    lower: Tuple[str, ...] = field()
+    left_pad: int = field()
 
     def __init__(
         self, coord_name: str, *, left_pad: int, into: Optional[str] = None
@@ -1072,10 +1072,10 @@ class PadDynamic(Transform):
     incoming validity.
     """
 
-    upper: Tuple[str, ...]
-    lower: Tuple[str, ...]
-    lo: Any
-    hi: Any
+    upper: Tuple[str, ...] = field()
+    lower: Tuple[str, ...] = field()
+    lo: Any = field()
+    hi: Any = field()
 
     def __init__(
         self,
@@ -1143,8 +1143,8 @@ class Indirect(Transform):
     whole paged-KV addressing collapse into one descriptor chain.
     """
 
-    upper: Tuple[str, ...]
-    lower: Tuple[str, ...]
+    upper: Tuple[str, ...] = field()
+    lower: Tuple[str, ...] = field()
 
     def __init__(
         self,
@@ -1255,17 +1255,17 @@ class TensorDescriptor:
     `(i32_offset, optional_i1_valid)` pair.
     """
 
-    name: str
+    name: str = field()
     # The "naive" base coord names + their bounds (for default valid)
-    base_names: Tuple[str, ...]
-    base_lengths: Tuple[int, ...]
-    base_strides: Tuple[int, ...]
+    base_names: Tuple[str, ...] = field()
+    base_lengths: Tuple[int, ...] = field()
+    base_strides: Tuple[int, ...] = field()
     # The chain of transforms, in order from naive (closest to base)
     # to upper (closest to user). When computing offset(), we start
     # with user coords and walk through transforms in reverse order.
-    chain: Tuple[Transform, ...] = ()
+    chain: Tuple[Transform, ...] = field(default=())
     # The user-facing coord names at the current top of the chain
-    upper_names: Tuple[str, ...] = ()
+    upper_names: Tuple[str, ...] = field(default=())
 
     @classmethod
     def naive(

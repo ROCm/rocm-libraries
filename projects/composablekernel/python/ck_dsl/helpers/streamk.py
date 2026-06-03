@@ -47,7 +47,7 @@ itself in .
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import NamedTuple
 
@@ -82,9 +82,9 @@ class StreamKPartition:
     decode helper needs.
     """
 
-    m_tiles: int  # ceil(M / tile_m); the number of M tiles
-    n_tiles: int  # ceil(N / tile_n)
-    k_iters: int  # K / tile_k
+    m_tiles: int = field()  # ceil(M / tile_m); the number of M tiles
+    n_tiles: int = field()  # ceil(N / tile_n)
+    k_iters: int = field()  # K / tile_k
 
     @property
     def num_macro_tiles(self) -> int:

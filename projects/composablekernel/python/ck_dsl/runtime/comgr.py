@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import ctypes
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
 from .hip_module import _IS_WINDOWS, _LazyFn, _add_dll_dir, _candidate_lib_paths
@@ -177,9 +177,9 @@ def _check(s: int, where: str) -> None:
 
 @dataclass
 class ComgrTimings:
-    bc: float = 0.0
-    relocatable: float = 0.0
-    executable: float = 0.0
+    bc: float = field(default=0.0)
+    relocatable: float = field(default=0.0)
+    executable: float = field(default=0.0)
 
     @property
     def total(self) -> float:

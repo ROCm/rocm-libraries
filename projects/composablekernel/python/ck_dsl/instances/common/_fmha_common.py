@@ -30,7 +30,7 @@ binds equally well to either body.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Literal, Optional, Tuple
 
 from ...core.ir import F32, I32, IRBuilder, KernelDef, PtrType, Value
@@ -57,11 +57,11 @@ FmhaMaskMode = Literal["none", "causal", "sliding_window", "alibi", "custom"]
 class FmhaShape:
     """Shape bundle used by every FMHA flavour."""
 
-    head_size: int
-    num_query_heads: int
-    num_kv_heads: int
-    block_size_q: int = 16
-    block_size_k: int = 64
+    head_size: int = field()
+    num_query_heads: int = field()
+    num_kv_heads: int = field()
+    block_size_q: int = field(default=16)
+    block_size_k: int = field(default=64)
 
     @property
     def num_queries_per_kv(self) -> int:
@@ -77,15 +77,15 @@ class FmhaShape:
 class FmhaCommonSpec:
     """Common-knob bundle shared across the FMHA variants."""
 
-    shape: FmhaShape
-    dtype: str = "f16"
-    scale_log2: float = 0.0
-    mask_mode: FmhaMaskMode = "none"
-    sliding_window: int = 0
-    use_softcap: bool = False
-    use_rotary: bool = False
-    use_dropout: bool = False
-    use_sinks: bool = False
+    shape: FmhaShape = field()
+    dtype: str = field(default="f16")
+    scale_log2: float = field(default=0.0)
+    mask_mode: FmhaMaskMode = field(default="none")
+    sliding_window: int = field(default=0)
+    use_softcap: bool = field(default=False)
+    use_rotary: bool = field(default=False)
+    use_dropout: bool = field(default=False)
+    use_sinks: bool = field(default=False)
 
     @property
     def head_size(self) -> int:

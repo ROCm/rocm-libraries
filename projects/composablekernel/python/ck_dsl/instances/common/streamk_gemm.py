@@ -60,7 +60,7 @@ consumer that proves they compose correctly.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, Tuple
 
 from ...core.ir import F16, F32, I32, IRBuilder, KernelDef, PtrType, Value
@@ -94,22 +94,22 @@ class StreamKGemmSpec:
     ``blocks_per_cu`` size the persistent launch grid.
     """
 
-    M: int
-    N: int
-    K: int
+    M: int = field()
+    N: int = field()
+    K: int = field()
     # ``tile_m`` / ``tile_n`` / ``tile_k`` now bind to the MFMA atom
     # shape: for the default 16x16x16 f16 atom, ``tile_k`` must be a
     # multiple of 16. The v1 scalar inner allowed arbitrary tile_k;
     # the MFMA path can use any ``tile_k = N * atom.k`` (N MFMA
     # invocations per macro tile). Larger ``tile_k`` reduces the
     # atomic_add frequency at the cost of slightly more K-loop trip.
-    tile_m: int = 16
-    tile_n: int = 16
-    tile_k: int = 16
-    dtype: DType = "f16"
-    num_cus: int = 304  # MI300X / MI355X default
-    blocks_per_cu: int = 1
-    reduction: StreamKReductionStrategy = StreamKReductionStrategy.Atomic
+    tile_m: int = field(default=16)
+    tile_n: int = field(default=16)
+    tile_k: int = field(default=16)
+    dtype: DType = field(default="f16")
+    num_cus: int = field(default=304)  # MI300X / MI355X default
+    blocks_per_cu: int = field(default=1)
+    reduction: StreamKReductionStrategy = field(default=StreamKReductionStrategy.Atomic)
     # ``persistent`` selects between the two macro-tile dispatch modes:
     #   False (default) -> grid = (num_macro_tiles, 1, 1); each CTA owns
     #                       exactly one ``(m_tile, n_tile, k_iter)`` and
@@ -121,8 +121,8 @@ class StreamKGemmSpec:
     #                       :func:`persistent_tile_for_each`. This is
     #                       CK Tile's persistent DP dispatcher pattern
     #                       (``streamk_common.hpp::StreamKDispatch``).
-    persistent: bool = False
-    name: str = "ck_dsl_streamk_gemm"
+    persistent: bool = field(default=False)
+    name: str = field(default="ck_dsl_streamk_gemm")
 
     @property
     def partition(self) -> StreamKPartition:

@@ -111,13 +111,13 @@ class FlatMMSpec(WarpTileBlockSizeMixin):
       can be built ahead of the v2 kernel landing.
     """
 
-    tile: TileSpec
+    tile: TileSpec = field()
     trait: TraitSpec = field(default_factory=TraitSpec)
-    wave_size: int = 64
-    block_size: int = 0
-    batch_size: int = 0
-    preshuffle_b: bool = False
-    name: str = "ck_dsl_flatmm"
+    wave_size: int = field(default=64)
+    block_size: int = field(default=0)
+    batch_size: int = field(default=0)
+    preshuffle_b: bool = field(default=False)
+    name: str = field(default="ck_dsl_flatmm")
 
     def __post_init__(self) -> None:
         self._init_block_size()

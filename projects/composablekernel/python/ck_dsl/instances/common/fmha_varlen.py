@@ -24,7 +24,7 @@ K-base offset).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Tuple
 
 from ...helpers.mfma_attention import (
@@ -50,11 +50,11 @@ __all__ = [
 class FmhaFwdVarlenSpec:
     """One concrete FMHA-fwd-varlen configuration."""
 
-    common: FmhaCommonSpec
-    max_seqlen_q: int
-    max_seqlen_k: int
-    batch: int
-    name: str = "ck_dsl_fmha_fwd_varlen"
+    common: FmhaCommonSpec = field()
+    max_seqlen_q: int = field()
+    max_seqlen_k: int = field()
+    batch: int = field()
+    name: str = field(default="ck_dsl_fmha_fwd_varlen")
 
     def kernel_name(self) -> str:
         s = self.common.shape

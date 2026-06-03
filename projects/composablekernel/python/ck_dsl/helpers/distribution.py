@@ -116,12 +116,12 @@ class TileDistributionEncoding:
       (otherwise the R sweep is degenerate).
     """
 
-    Rs: Tuple[int, ...] = ()
-    Hs: Tuple[Tuple[int, ...], ...] = ()
-    Ps2RHs_major: Tuple[Tuple[int, ...], ...] = ()
-    Ps2RHs_minor: Tuple[Tuple[int, ...], ...] = ()
-    Ys2RHs_major: Tuple[int, ...] = ()
-    Ys2RHs_minor: Tuple[int, ...] = ()
+    Rs: Tuple[int, ...] = field(default=())
+    Hs: Tuple[Tuple[int, ...], ...] = field(default=())
+    Ps2RHs_major: Tuple[Tuple[int, ...], ...] = field(default=())
+    Ps2RHs_minor: Tuple[Tuple[int, ...], ...] = field(default=())
+    Ys2RHs_major: Tuple[int, ...] = field(default=())
+    Ys2RHs_minor: Tuple[int, ...] = field(default=())
 
     def __post_init__(self) -> None:
         if len(self.Ps2RHs_major) != len(self.Ps2RHs_minor):
@@ -292,9 +292,11 @@ class TileDistributionEncoding:
 class _HBucketRef:
     """One mapping from an H bucket to either a P or a Y position."""
 
-    kind: str  # "P" or "Y"
-    outer_idx: int  # P dim index or Y dim index
-    inner_idx: int = 0  # sub-position within Ps2RHs[outer_idx] (only used for P)
+    kind: str = field()  # "P" or "Y"
+    outer_idx: int = field()  # P dim index or Y dim index
+    inner_idx: int = field(
+        default=0
+    )  # sub-position within Ps2RHs[outer_idx] (only used for P)
 
 
 @dataclass(frozen=True)
@@ -307,7 +309,7 @@ class TileDistribution:
     reconstruction is O(num_X * max_H_depth) at emission time.
     """
 
-    encoding: TileDistributionEncoding
+    encoding: TileDistributionEncoding = field()
     # Map (x_dim, level) -> contributor reference.
     _contributors: Tuple[Tuple[_HBucketRef, ...], ...] = field(repr=False)
 
@@ -543,9 +545,9 @@ class StaticDistributedTensor:
     place via sweep, write back via window.store()".
     """
 
-    distribution: TileDistribution
-    dtype: Type
-    storage: List[Optional[Value]]
+    distribution: TileDistribution = field()
+    dtype: Type = field()
+    storage: List[Optional[Value]] = field()
 
     @property
     def num_elements(self) -> int:
@@ -707,9 +709,9 @@ class LoadStoreTraits:
     issued loads share spatial locality.
     """
 
-    distribution: TileDistribution
-    vector_dim_y: int
-    scalar_per_vector: int
+    distribution: TileDistribution = field()
+    vector_dim_y: int = field()
+    scalar_per_vector: int = field()
 
     @property
     def num_access(self) -> int:
@@ -1715,7 +1717,10 @@ def store_wmma_acc(
         if transform is not None:
             val = transform(b, val, r, row, col)
         window.store_scalar(
-            b, *lead, row, b.add(c_off, col),
+            b,
+            *lead,
+            row,
+            b.add(c_off, col),
             value=b.cast_f32_to(val, window.dtype),
             align=align,
         )
@@ -1748,10 +1753,12 @@ class WmmaTensor:
     the issue-bound kernel at one instruction per tile op.
     """
 
-    atom: object  # WmmaAtom (duck-typed to avoid an atoms<->distribution cycle)
-    role: str
-    value: Value
-    arch: str = "gfx1151"
+    atom: object = (
+        field()
+    )  # WmmaAtom (duck-typed to avoid an atoms<->distribution cycle)
+    role: str = field()
+    value: Value = field()
+    arch: str = field(default="gfx1151")
 
     @classmethod
     def zero_acc(cls, b: IRBuilder, atom, *, arch: str = "gfx1151") -> "WmmaTensor":
@@ -1839,7 +1846,14 @@ def store_wmma_tile(
 ) -> None:
     """Tile-level wrapper over :func:`store_wmma_acc` for the O epilogue."""
     store_wmma_acc(
-        b, window, acc.atom, lane, acc.value,
-        arch=acc.arch, col_offset=col_offset, lead=lead,
-        align=align, transform=transform,
+        b,
+        window,
+        acc.atom,
+        lane,
+        acc.value,
+        arch=acc.arch,
+        col_offset=col_offset,
+        lead=lead,
+        align=align,
+        transform=transform,
     )

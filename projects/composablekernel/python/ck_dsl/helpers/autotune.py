@@ -102,8 +102,8 @@ class AutotuneConfig:
         ``config.extra``.
     """
 
-    spec: Any
-    name: str
+    spec: Any = field()
+    name: str = field()
     extra: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -111,9 +111,9 @@ class AutotuneConfig:
 class AutotuneResult:
     """One row of the autotune sweep's measurement table."""
 
-    config_name: str
-    ms_per_iter: float
-    error: Optional[str] = None
+    config_name: str = field()
+    ms_per_iter: float = field()
+    error: Optional[str] = field(default=None)
 
     @property
     def is_ok(self) -> bool:
@@ -124,14 +124,14 @@ class AutotuneResult:
 class AutotuneKey:
     """Stable multi-level cache key for fusion/kernel autotuning."""
 
-    graph_hash: str
-    shape: Tuple[Any, ...]
-    dtype: str
-    layout: str = "RCR"
-    arch: str = "gfx950"
-    compiler: str = "comgr"
-    lowerer: str = "unknown"
-    spec_hash: str = "any"
+    graph_hash: str = field()
+    shape: Tuple[Any, ...] = field()
+    dtype: str = field()
+    layout: str = field(default="RCR")
+    arch: str = field(default="gfx950")
+    compiler: str = field(default="comgr")
+    lowerer: str = field(default="unknown")
+    spec_hash: str = field(default="any")
 
     def as_tuple(self) -> Tuple[Any, ...]:
         return (

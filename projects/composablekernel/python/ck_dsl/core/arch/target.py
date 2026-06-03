@@ -108,9 +108,9 @@ class LayoutMap:
     the arithmetic through the supplied builder.
     """
 
-    role: str
-    frag_len: int
-    wave_size: int
+    role: str = field()
+    frag_len: int = field()
+    wave_size: int = field()
     fn: _LaneCoordFn = field(repr=False)
 
     def coord(self, builder: Any, lane: Any, slot: int) -> Tuple[Any, Any]:
@@ -147,18 +147,18 @@ class MmaOp:
     the accessor until a map is added.
     """
 
-    family: str  # "mma" | "wmma"
-    a_dtype: str
-    b_dtype: str
-    c_dtype: str
-    m: int
-    n: int
-    k: int
-    op_id: str
-    a_frag_len: int = 0
-    b_frag_len: int = 0
-    c_frag_len: int = 0
-    wave_size: int = 64
+    family: str = field()  # "mma" | "wmma"
+    a_dtype: str = field()
+    b_dtype: str = field()
+    c_dtype: str = field()
+    m: int = field()
+    n: int = field()
+    k: int = field()
+    op_id: str = field()
+    a_frag_len: int = field(default=0)
+    b_frag_len: int = field(default=0)
+    c_frag_len: int = field(default=0)
+    wave_size: int = field(default=64)
     # Layout maps are kept off the public field list (repr=False, compare=False)
     # so two MmaOps with the same shape still compare equal regardless of the
     # closure identity of their maps.
@@ -413,13 +413,13 @@ class _FragInfo:
     """Per-op_id fragment metadata: per-lane vector lengths, wave size, and the
     (optional) lane/slot coordinate functions for A / B / accumulator."""
 
-    a_frag_len: int
-    b_frag_len: int
-    c_frag_len: int
-    wave_size: int
-    a_fn: _LaneCoordFn = None
-    b_fn: _LaneCoordFn = None
-    c_fn: _LaneCoordFn = None
+    a_frag_len: int = field()
+    b_frag_len: int = field()
+    c_frag_len: int = field()
+    wave_size: int = field()
+    a_fn: _LaneCoordFn = field(default=None)
+    b_fn: _LaneCoordFn = field(default=None)
+    c_fn: _LaneCoordFn = field(default=None)
 
 
 # op_id -> physical fragment metadata. Frag lengths are populated for every
@@ -496,17 +496,17 @@ def _frag_info(op_id: str) -> _FragInfo:
 
 @dataclass(frozen=True)
 class MemoryCapabilities:
-    has_async_lds: bool
-    has_ds_read_tr: bool
-    buffer_load_max_dwords: int
+    has_async_lds: bool = field()
+    has_ds_read_tr: bool = field()
+    buffer_load_max_dwords: int = field()
 
 
 @dataclass(frozen=True)
 class ResourceLimits:
-    max_threads_per_block: int
-    vgprs: int
-    agprs: int
-    sgprs: int
+    max_threads_per_block: int = field()
+    vgprs: int = field()
+    agprs: int = field()
+    sgprs: int = field()
 
 
 class MmaCatalog:
@@ -632,15 +632,15 @@ class MmaCatalog:
 class ArchTarget:
     """Hardware-facts surface for one gfx target. Frozen; cheap to pass around."""
 
-    gfx: str
-    family: str
-    target_family: str
-    wave_size: int
-    lds_capacity_bytes: int
-    vmcnt_bits: int
-    mma: MmaCatalog
-    memory: MemoryCapabilities
-    limits: ResourceLimits
+    gfx: str = field()
+    family: str = field()
+    target_family: str = field()
+    wave_size: int = field()
+    lds_capacity_bytes: int = field()
+    vmcnt_bits: int = field()
+    mma: MmaCatalog = field()
+    memory: MemoryCapabilities = field()
+    limits: ResourceLimits = field()
 
     # --- identity ---------------------------------------------------------
     @property
@@ -680,7 +680,7 @@ class ArchTarget:
 def _load_specs() -> Dict[str, dict]:
     # Pin UTF-8: the embedded interpreter defaults to the ASCII codec, and
     # arch_specs.json contains non-ASCII bytes.
-    with open(_DATA_FILE, encoding="utf-8") as fh:
+    with open(str(_DATA_FILE), encoding="utf-8") as fh:
         doc = json.load(fh)
     return doc["arches"]
 

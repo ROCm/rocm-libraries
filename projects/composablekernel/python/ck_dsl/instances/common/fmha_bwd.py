@@ -22,7 +22,7 @@ spec's ``mask_mode`` consistently with the forward pass.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Tuple
 
 from ...core.ir import KernelDef
@@ -44,16 +44,16 @@ __all__ = [
 
 @dataclass(frozen=True)
 class FmhaBwdSpec:
-    common: FmhaCommonSpec
-    seqlen_q: int
-    seqlen_k: int
-    name: str = "ck_dsl_fmha_bwd"
+    common: FmhaCommonSpec = field()
+    seqlen_q: int = field()
+    seqlen_k: int = field()
+    name: str = field(default="ck_dsl_fmha_bwd")
     # P69: when True, the kernel uses the new
     # :mod:`ck_dsl.helpers.mfma_attention_bwd` MFMA-tiled body
     # (``mfma_attention_bwd_dq_dk_dv_inner_body``) instead of the
     # warp-distributed scalar inner. Same parity contract; ~32× density
     # for the QK / dP MFMAs once the kernel body wires it up.
-    use_mfma_body: bool = False
+    use_mfma_body: bool = field(default=False)
     # P70: ``output_grad_dtype`` selects the gradient atomic accumulator
     # dtype. ``"f32"`` (default) routes through
     # ``global_atomic_add_f32``; ``"bf16"`` routes through
@@ -61,7 +61,7 @@ class FmhaBwdSpec:
     # The bf16 path is a real numerical change so callers gate on
     # parity; H=256 workloads that are atomic-engine-bound see the
     # biggest relative improvement.
-    output_grad_dtype: str = "f32"
+    output_grad_dtype: str = field(default="f32")
 
     def kernel_name(self) -> str:
         s = self.common.shape

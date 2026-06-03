@@ -41,7 +41,7 @@ Implementation:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Literal, Tuple
 
 from ...core.ir import F32, I32, IRBuilder, KernelDef, PtrType, Value
@@ -78,15 +78,15 @@ DType = Literal["f16", "bf16"]
 class AddRmsnorm2DRdquantSpec:
     """One concrete fused add + RMSNorm + round-quant configuration."""
 
-    n_per_block: int
-    dtype: DType = "f16"
-    out_dtype: QDType = "i8"
-    block_size: int = 256
-    vec: int = 4
-    save_residual: bool = True  # write x = a + b to ``X``
-    save_yscale: bool = True  # write per-row scale to ``YScale``
-    wave_size: int = 64
-    name: str = "ck_dsl_add_rmsnorm2d_rdquant"
+    n_per_block: int = field()
+    dtype: DType = field(default="f16")
+    out_dtype: QDType = field(default="i8")
+    block_size: int = field(default=256)
+    vec: int = field(default=4)
+    save_residual: bool = field(default=True)  # write x = a + b to ``X``
+    save_yscale: bool = field(default=True)  # write per-row scale to ``YScale``
+    wave_size: int = field(default=64)
+    name: str = field(default="ck_dsl_add_rmsnorm2d_rdquant")
 
     @property
     def elems_per_thread(self) -> int:

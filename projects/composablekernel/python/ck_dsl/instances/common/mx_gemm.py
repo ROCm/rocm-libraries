@@ -52,7 +52,7 @@ surface.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, Tuple
 
 from ...core.ir import F32, I8, I32, IRBuilder, KernelDef, PtrType
@@ -77,14 +77,14 @@ MxMantissaDType = Literal["fp8e4m3", "bf8e5m2"]
 class MxGemmSpec:
     """One concrete MX GEMM kernel configuration."""
 
-    M: int
-    N: int
-    K: int
-    mantissa_dtype: MxMantissaDType = "fp8e4m3"
-    group_k: int = 32  # MX spec: shared-exponent block size
-    block_tile_m: int = 16
-    block_tile_n: int = 16
-    name: str = "ck_dsl_mx_gemm"
+    M: int = field()
+    N: int = field()
+    K: int = field()
+    mantissa_dtype: MxMantissaDType = field(default="fp8e4m3")
+    group_k: int = field(default=32)  # MX spec: shared-exponent block size
+    block_tile_m: int = field(default=16)
+    block_tile_n: int = field(default=16)
+    name: str = field(default="ck_dsl_mx_gemm")
     # P77: row-aware scale correctness mode. The historical
     # ``per_input_row=True`` (default) loads ``AScale[m_in_atom +
     # m_tile_base, kg]`` per lane and applies it to the lane's
@@ -98,7 +98,7 @@ class MxGemmSpec:
     # so each lane sees the scale matching its actual output row.
     # Defaults to True for backwards compatibility; flip to False
     # on real per-row varying-scale workloads.
-    per_input_row: bool = True
+    per_input_row: bool = field(default=True)
 
     @property
     def atom(self) -> MfmaAtom:

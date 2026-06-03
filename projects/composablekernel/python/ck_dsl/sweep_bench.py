@@ -34,13 +34,13 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 @dataclass
 class RunResult:
-    name: str
-    M: int
-    N: int
-    K: int
+    name: str = field()
+    M: int = field()
+    N: int = field()
+    K: int = field()
     runs: List[float] = field(default_factory=list)  # per-attempt TFLOPS
-    correct: bool = False
-    error: str = ""
+    correct: bool = field(default=False)
+    error: str = field(default="")
 
     @property
     def median_tflops(self) -> float:
@@ -58,7 +58,7 @@ class RunResult:
 
 def _maybe_sudo(cmd: List[str]) -> List[str]:
     s = shutil.which("sudo")
-    if s and os.environ.get("CK_DSL_USE_SUDO", "1") != "0":
+    if s and os.getenv("CK_DSL_USE_SUDO", "1") != "0":
         return [s, "-n"] + cmd
     return cmd
 
@@ -102,7 +102,7 @@ def _run_launcher(
     if (
         launcher is None
         and shutil.which("sudo")
-        and os.environ.get("CK_DSL_USE_SUDO", "1") != "0"
+        and os.getenv("CK_DSL_USE_SUDO", "1") != "0"
     ):
         args = [
             shutil.which("sudo"),

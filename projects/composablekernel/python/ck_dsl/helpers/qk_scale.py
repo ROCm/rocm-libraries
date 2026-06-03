@@ -24,7 +24,7 @@ either at kernel-build time.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 from ..core.ir import F32, IRBuilder, PtrType, Value
@@ -61,11 +61,11 @@ class QkScaleSpec:
     the common contiguous case.
     """
 
-    layout: QkScaleLayout
-    scale_block: int = 0
-    stride_batch: int = 0
-    stride_head: int = 0
-    stride_block: int = 1
+    layout: QkScaleLayout = field()
+    scale_block: int = field(default=0)
+    stride_batch: int = field(default=0)
+    stride_head: int = field(default=0)
+    stride_block: int = field(default=1)
 
     def __post_init__(self):
         if self.layout not in ("per_head", "per_block"):

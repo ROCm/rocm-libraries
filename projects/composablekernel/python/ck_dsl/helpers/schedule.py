@@ -29,7 +29,7 @@ both wave-level prio bookends and intrawave group barriers.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 from ..analysis.ir import LlvmIrStats
@@ -95,39 +95,39 @@ class HotLoopInstList:
     """
 
     # --- raw geometry inputs (mirrors the C++ template params) ---
-    block_size: int
-    m_per_block: int
-    n_per_block: int
-    k_per_block: int
-    a_buffer_load_width: int
-    b_buffer_load_width: int
-    a_lds_write_width: int
-    b_lds_write_width: int
-    a_lds_read_width: int
-    b_lds_read_width: int
-    m_repeat: int
-    n_repeat: int
-    m_per_xdl: int
-    n_per_xdl: int
-    k_per_xdl: int
-    a_dtype_bytes: int
-    b_dtype_bytes: int
-    a_packed_size: int
-    b_packed_size: int
-    mfma_cycle: int
-    is_f4f6: bool
+    block_size: int = field()
+    m_per_block: int = field()
+    n_per_block: int = field()
+    k_per_block: int = field()
+    a_buffer_load_width: int = field()
+    b_buffer_load_width: int = field()
+    a_lds_write_width: int = field()
+    b_lds_write_width: int = field()
+    a_lds_read_width: int = field()
+    b_lds_read_width: int = field()
+    m_repeat: int = field()
+    n_repeat: int = field()
+    m_per_xdl: int = field()
+    n_per_xdl: int = field()
+    k_per_xdl: int = field()
+    a_dtype_bytes: int = field()
+    b_dtype_bytes: int = field()
+    a_packed_size: int = field()
+    b_packed_size: int = field()
+    mfma_cycle: int = field()
+    is_f4f6: bool = field()
 
     # --- derived instruction counts (filled by from_geometry) ---
-    wave_num_m: int
-    wave_num_n: int
-    wave_size: int
-    a_buffer_load_inst_num: int
-    b_buffer_load_inst_num: int
-    a_lds_write_inst_num: int
-    b_lds_write_inst_num: int
-    a_lds_read_inst_num: int
-    b_lds_read_inst_num: int
-    c_mfma_inst_num: int
+    wave_num_m: int = field()
+    wave_num_n: int = field()
+    wave_size: int = field()
+    a_buffer_load_inst_num: int = field()
+    b_buffer_load_inst_num: int = field()
+    a_lds_write_inst_num: int = field()
+    b_lds_write_inst_num: int = field()
+    a_lds_read_inst_num: int = field()
+    b_lds_read_inst_num: int = field()
+    c_mfma_inst_num: int = field()
 
     @classmethod
     def from_geometry(
@@ -306,12 +306,12 @@ class SchedulePolicy:
             interwave ping-pong (default high=1, low=0; matches CK Tile).
     """
 
-    name: str = "mem"
-    emit_hints: bool = False
-    setprio_level: Optional[int] = None
-    mode: str = "default"
-    compute_high_prio: int = 1
-    compute_low_prio: int = 0
+    name: str = field(default="mem")
+    emit_hints: bool = field(default=False)
+    setprio_level: Optional[int] = field(default=None)
+    mode: str = field(default="default")
+    compute_high_prio: int = field(default=1)
+    compute_low_prio: int = field(default=0)
 
     @classmethod
     def for_pipeline(cls, pipeline: str) -> "SchedulePolicy":

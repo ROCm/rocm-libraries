@@ -68,7 +68,7 @@ matmuls per wave — letting one wave process 16 groups simultaneously
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Tuple
 
 from ...core.ir import (
@@ -92,16 +92,16 @@ class DirectConvProblem:
       D: NHWK fp16, `[N, H, W, groups*kpg]`
     """
 
-    N: int
-    H: int
-    W: int
-    groups: int
-    cpg: int  # channels per group
-    kpg: int  # filters per group (= cpg in the bake-off)
-    KH: int = 3
-    KW: int = 3
-    PAD: int = 1
-    stride: int = 1
+    N: int = field()
+    H: int = field()
+    W: int = field()
+    groups: int = field()
+    cpg: int = field()  # channels per group
+    kpg: int = field()  # filters per group (= cpg in the bake-off)
+    KH: int = field(default=3)
+    KW: int = field(default=3)
+    PAD: int = field(default=1)
+    stride: int = field(default=1)
 
     @property
     def total_c(self) -> int:
@@ -153,13 +153,13 @@ class DirectConv16cSpec:
         (KH for a 3x3 conv).
     """
 
-    problem: DirectConvProblem
-    name: str = "direct_conv_16c"
-    block_q: int = 16
-    block_groups: int = 8
-    wave_size: int = 64
-    double_buffer: bool = True
-    fold_k32: bool = True
+    problem: DirectConvProblem = field()
+    name: str = field(default="direct_conv_16c")
+    block_q: int = field(default=16)
+    block_groups: int = field(default=8)
+    wave_size: int = field(default=64)
+    double_buffer: bool = field(default=True)
+    fold_k32: bool = field(default=True)
 
     @property
     def threads_per_block(self) -> int:
@@ -749,11 +749,11 @@ class DirectConv4cSpec:
     convolution groups, so a single wave processes 16 groups at once.
     """
 
-    problem: DirectConvProblem
-    name: str = "direct_conv_4c"
-    block_q: int = 4
-    block_groups: int = 16
-    wave_size: int = 64
+    problem: DirectConvProblem = field()
+    name: str = field(default="direct_conv_4c")
+    block_q: int = field(default=4)
+    block_groups: int = field(default=16)
+    wave_size: int = field(default=64)
 
     @property
     def threads_per_block(self) -> int:

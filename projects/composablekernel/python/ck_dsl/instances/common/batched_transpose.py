@@ -52,7 +52,7 @@ naturally as the descriptor's per-batch stride.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, Tuple
 
 from ...core.ir import I32, IRBuilder, KernelDef, PtrType
@@ -80,12 +80,12 @@ class BatchedTranspose2DSpec:
     batch index at runtime.
     """
 
-    tile_m: int = 64
-    tile_n: int = 64
-    vec: int = 8
-    dtype: DType = "f16"
-    lds_pad: int = 8
-    name: str = "ck_dsl_batched_transpose2d"
+    tile_m: int = field(default=64)
+    tile_n: int = field(default=64)
+    vec: int = field(default=8)
+    dtype: DType = field(default="f16")
+    lds_pad: int = field(default=8)
+    name: str = field(default="ck_dsl_batched_transpose2d")
 
     @property
     def block_size(self) -> int:

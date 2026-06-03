@@ -44,7 +44,7 @@ preshuffle layout has to package.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Tuple
 
 from ..core.ir import IRBuilder, Value
@@ -67,9 +67,11 @@ class PreshuffleBSpec:
     ``block_n * block_k * elem_bytes``.
     """
 
-    block_n: int
-    block_k: int
-    elem_bytes: int = 1  # 1 for fp8/bf8/i8; 2 for f16/bf16; 0.5 for i4 (use 1 with 2-per-byte packing)
+    block_n: int = field()
+    block_k: int = field()
+    elem_bytes: int = field(
+        default=1
+    )  # 1 for fp8/bf8/i8; 2 for f16/bf16; 0.5 for i4 (use 1 with 2-per-byte packing)
 
     @property
     def tile_bytes(self) -> int:

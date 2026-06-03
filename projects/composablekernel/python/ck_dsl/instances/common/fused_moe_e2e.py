@@ -376,25 +376,25 @@ class FusedMoeForwardSpec:
     so callers configure one spec per problem shape.
     """
 
-    tokens: int
-    experts: int
-    topk: int
-    hidden: int
-    intermediate: int
-    dtype: str = "f16"
+    tokens: int = field()
+    experts: int = field()
+    topk: int = field()
+    hidden: int = field()
+    intermediate: int = field()
+    dtype: str = field(default="f16")
 
-    streaming_block_size: int = 256
-    streaming_vec: int = 8  # widest fp16 vector (16 bytes); halves the
+    streaming_block_size: int = field(default=256)
+    streaming_vec: int = field(default=8)  # widest fp16 vector (16 bytes); halves the
     # global-load instruction count vs the v1 vec=4 default. Bandwidth-
     # bound streaming kernels (gather / silu_mul / topk_reduce) benefit
     # measurably; the constraint is hidden % vec == 0 and intermediate %
     # vec == 0, which holds for every typical MoE shape (multiples of
     # 64 or 128).
-    sort_block_size: int = 64
-    router_block_size: int = 64
+    sort_block_size: int = field(default=64)
+    router_block_size: int = field(default=64)
 
     gemm_tile: TileSpec = field(default_factory=_default_gemm_tile)
-    arch: "str | None" = None
+    arch: "str | None" = field(default=None)
     """Target GPU architecture for kernel compilation.
 
     ``None`` (default) resolves to the running device via
@@ -406,8 +406,8 @@ class FusedMoeForwardSpec:
     (the default f16/bf16 tiles use gfx950-only WIDE atoms, which would
     crash comgr on gfx942).
     """
-    name: str = "ck_dsl_fused_moe_forward"
-    use_experimental_fused_gate_up_silu: bool = False
+    name: str = field(default="ck_dsl_fused_moe_forward")
+    use_experimental_fused_gate_up_silu: bool = field(default=False)
     """Use the experimental dual-B MFMA gate+up+silu kernel.
 
     Default False because measurements on MI355X show the graph-
@@ -415,7 +415,7 @@ class FusedMoeForwardSpec:
     streaming kernel) is faster today. The experimental kernel is
     correctness-clean and kept as a research/tuning target.
     """
-    use_experimental_interleaved_gate_up_silu: bool = True
+    use_experimental_interleaved_gate_up_silu: bool = field(default=True)
     """Use interleaved gate/up GEMM + SiLU epilogue.
 
     Packs gate/up weights as adjacent N columns (gate_i, up_i), runs a
@@ -432,7 +432,7 @@ class FusedMoeForwardSpec:
     False. The dual-B experimental path (``use_experimental_fused_*``)
     takes precedence if both flags are set.
     """
-    use_experimental_fused_down_reduce: bool = True
+    use_experimental_fused_down_reduce: bool = field(default=True)
     """Use the down-GEMM + topk-reduce fused kernel (default on).
 
     Computes down GEMM and performs the weighted f32 atomic-add into
@@ -454,7 +454,7 @@ class FusedMoeForwardSpec:
     Parity is byte-identical to the two-kernel path (max_abs unchanged).
     Set False to restore the legacy DownOut + separate topk_reduce path.
     """
-    use_experimental_static_scatter_gather: bool = False
+    use_experimental_static_scatter_gather: bool = field(default=False)
     """Fuse static scatter and gather into one streaming kernel.
 
     Correctness-clean but slower on MI355X in measurements:
@@ -462,7 +462,7 @@ class FusedMoeForwardSpec:
     loses to the older two-kernel ``scatter -> gather`` sequence's
     memory pattern. Kept opt-in for further tuning.
     """
-    preshuffle_w_down: bool = False
+    preshuffle_w_down: bool = field(default=False)
     """Pre-shuffle ``W_down`` and use a ``preshuffle_b=True`` BatchedGemm
     for the down stage.
 
@@ -485,7 +485,7 @@ class FusedMoeForwardSpec:
       result is cached against ``W_down.data_ptr()`` so steady-state
       cost is zero.
     """
-    preshuffle_w_gate_up_packed: bool = False
+    preshuffle_w_gate_up_packed: bool = field(default=False)
     """Pre-shuffle the packed gate+up weights and use a
     ``preshuffle_b=True`` BatchedGemm for the gate-up stage when the
     packed (non-interleaved) path is selected.
@@ -493,7 +493,7 @@ class FusedMoeForwardSpec:
     Only takes effect when ``use_experimental_interleaved_gate_up_silu``
     is False (i.e. the ``gu_concat`` packed path is active).
     """
-    preshuffle_w_gate_up_interleaved: bool = False
+    preshuffle_w_gate_up_interleaved: bool = field(default=False)
     """Pre-shuffle the interleaved gate+up weights and use a
     ``preshuffle_b=True`` interleaved gate-up GEMM kernel.
 
@@ -503,7 +503,7 @@ class FusedMoeForwardSpec:
     weight tensor ``WGateUp[e, 2*i, :] = W_gate[e, i, :];
     WGateUp[e, 2*i+1, :] = W_up[e, i, :]``.
     """
-    use_grouped_gemm: bool = True
+    use_grouped_gemm: bool = field(default=True)
     """Use the grouped sorted-token GEMM dispatch for the dynamic path.
 
     The default (batched) dynamic path pads every expert's GEMM slot to a
@@ -532,7 +532,7 @@ class FusedMoeForwardSpec:
     Only affects the dynamic (host-roundtrip) path; the static / decode
     path is unchanged.
     """
-    active_tile_skip_gemms: bool = True
+    active_tile_skip_gemms: bool = field(default=True)
     """Use ``trait.active_tile_skip=True`` MoE GEMM kernels.
 
     Default-on after tuning on MI355X (gfx950): inactive expert slots

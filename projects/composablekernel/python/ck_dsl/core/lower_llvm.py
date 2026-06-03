@@ -136,7 +136,7 @@ def _detect_llvm_flavor() -> str:
     raising on a typo. Each step is wrapped in :func:`try` so a
     misconfigured environment never crashes import.
     """
-    env = os.environ.get("CK_DSL_LLVM_FLAVOR", "").strip().lower()
+    env = os.getenv("CK_DSL_LLVM_FLAVOR", "").strip().lower()
     if env in (LLVM_FLAVOR_LLVM20, LLVM_FLAVOR_LLVM22):
         return env
     torch_ver = _torch_hip_version()
@@ -671,9 +671,9 @@ def _smem_storage_type(t: SmemType) -> str:
 
 @dataclass
 class _Block:
-    label: str
+    label: str = field()
     lines: List[str] = field(default_factory=list)
-    terminated: bool = False
+    terminated: bool = field(default=False)
 
     def emit(self, line: str) -> None:
         if self.terminated:

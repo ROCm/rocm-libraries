@@ -10,7 +10,7 @@ spread, and keep correctness separate from timing unless requested.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 import statistics
 from typing import Iterable, List, Optional, Sequence
@@ -20,13 +20,13 @@ from typing import Iterable, List, Optional, Sequence
 class BenchmarkSummary:
     """Summary statistics over repeated `run_manifest` measurements."""
 
-    ms: Sequence[float]
-    tflops: Sequence[float]
-    gbps: Sequence[float]
-    max_abs_diff: float = 0.0
-    bad_count: int = 0
-    total: int = 0
-    discarded_first: bool = False
+    ms: Sequence[float] = field()
+    tflops: Sequence[float] = field()
+    gbps: Sequence[float] = field()
+    max_abs_diff: float = field(default=0.0)
+    bad_count: int = field(default=0)
+    total: int = field(default=0)
+    discarded_first: bool = field(default=False)
 
     @property
     def attempts(self) -> int:

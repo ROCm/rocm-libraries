@@ -24,7 +24,7 @@ visible delta vs the C++ reference is essentially three lines of code.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, Tuple
 
 from ...core.ir import F32, I32, IRBuilder, KernelDef, PtrType
@@ -59,13 +59,13 @@ DType = Literal["f16", "bf16"]
 class RMSNorm2DSpec:
     """One RMSNorm2D forward instance."""
 
-    n_per_block: int
-    block_size: int = 256
-    vec: int = 4
-    dtype: DType = "f16"
-    save_inv_rms: bool = False
-    wave_size: int = 64
-    name: str = "ck_dsl_rmsnorm2d_fwd"
+    n_per_block: int = field()
+    block_size: int = field(default=256)
+    vec: int = field(default=4)
+    dtype: DType = field(default="f16")
+    save_inv_rms: bool = field(default=False)
+    wave_size: int = field(default=64)
+    name: str = field(default="ck_dsl_rmsnorm2d_fwd")
 
     @property
     def elems_per_thread(self) -> int:

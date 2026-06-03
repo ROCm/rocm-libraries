@@ -47,7 +47,7 @@ sign-flip instead of a one-op ``v_sub``.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, Tuple
 
 from ...core.ir import I32, IRBuilder, KernelDef, PtrType, Value
@@ -83,11 +83,11 @@ DType = Literal["f16", "bf16"]
 class ElementwiseSpec:
     """One elementwise kernel instance."""
 
-    op: str
-    dtype: DType = "f16"
-    block_size: int = 256
-    vec: int = 8
-    name: str = "ck_dsl_elementwise"
+    op: str = field()
+    dtype: DType = field(default="f16")
+    block_size: int = field(default=256)
+    vec: int = field(default=8)
+    name: str = field(default="ck_dsl_elementwise")
 
     def is_unary(self) -> bool:
         return self.op in (

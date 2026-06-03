@@ -57,7 +57,7 @@ Optimization notes (mirror the sibling :mod:`smoothquant`):
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Literal, Optional, Tuple
 
 from ...core.ir import F32, I32, IRBuilder, KernelDef, PtrType, Value
@@ -150,23 +150,23 @@ DType = Literal["f16", "bf16"]
 class MoeSmoothQuantSpec:
     """One concrete MoE-SmoothQuant kernel configuration."""
 
-    n_per_block: int  # the hidden dim N (compile-time)
-    topk: int  # router top-k
-    experts: int  # total experts
-    dtype: DType = "f16"
-    out_dtype: QDType = "i8"
-    block_size: int = 256
-    vec: int = 4
-    save_yscale: bool = True
-    wave_size: int = 64
-    name: str = "ck_dsl_moe_smoothquant"
+    n_per_block: int = field()  # the hidden dim N (compile-time)
+    topk: int = field()  # router top-k
+    experts: int = field()  # total experts
+    dtype: DType = field(default="f16")
+    out_dtype: QDType = field(default="i8")
+    block_size: int = field(default=256)
+    vec: int = field(default=4)
+    save_yscale: bool = field(default=True)
+    wave_size: int = field(default=64)
+    name: str = field(default="ck_dsl_moe_smoothquant")
     # P79: compile-time ``tokens`` (optional). When set, the
     # ``(i_topk, i_token) = (out_row / tokens, out_row % tokens)``
     # decode replaces the runtime ``div`` / ``mod`` with a Hacker's-
     # Delight ``v_mul_hi_u32`` pair. Trade-off: one specialised
     # kernel per (tokens) value the caller wants to hit; for static
     # batches this is a strict win.
-    tokens: Optional[int] = None
+    tokens: Optional[int] = field(default=None)
 
     @property
     def elems_per_thread(self) -> int:

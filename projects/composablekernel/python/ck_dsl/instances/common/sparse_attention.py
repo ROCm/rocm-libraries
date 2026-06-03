@@ -42,7 +42,7 @@ Both predicates are powered by an **LDS-staged mask bitmap**:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Tuple
 
 from ...core.ir import I8, IRBuilder, KernelDef, Value
@@ -94,12 +94,12 @@ def _magic_div(b: IRBuilder, dividend: Value, divisor: int) -> Value:
 class JengaSparseSpec:
     """One Jenga block-sparse attention configuration."""
 
-    common: FmhaCommonSpec
-    seqlen_q: int
-    seqlen_k: int
-    block_q: int = 1
-    block_k: int = 64
-    name: str = "ck_dsl_jenga_sparse_attn"
+    common: FmhaCommonSpec = field()
+    seqlen_q: int = field()
+    seqlen_k: int = field()
+    block_q: int = field(default=1)
+    block_k: int = field(default=64)
+    name: str = field(default="ck_dsl_jenga_sparse_attn")
 
     @property
     def num_q_blocks(self) -> int:
@@ -128,19 +128,19 @@ class JengaSparseSpec:
 class VsaSparseSpec:
     """One variable-size sparse attention configuration."""
 
-    common: FmhaCommonSpec
-    seqlen_q: int
-    seqlen_k: int
-    block_q: int = 1
-    block_k: int = 64
-    max_blocks_per_q: int = 32
-    name: str = "ck_dsl_vsa_sparse_attn"
+    common: FmhaCommonSpec = field()
+    seqlen_q: int = field()
+    seqlen_k: int = field()
+    block_q: int = field(default=1)
+    block_k: int = field(default=64)
+    max_blocks_per_q: int = field(default=32)
+    name: str = field(default="ck_dsl_vsa_sparse_attn")
     # P89: when ``max_blocks_per_q <= wave_size = 64``, the scatter
     # pass can use a single uniform ``wave_ballot`` + LDS write per
     # chunk instead of the per-chunk ``scf.if``. Defaults to True
     # because most VSA workloads stay below the wave cap; falls back
     # to the legacy chunked form when ``max_blocks_per_q > 64``.
-    use_wave_ballot_scatter: bool = True
+    use_wave_ballot_scatter: bool = field(default=True)
 
     @property
     def num_q_blocks(self) -> int:

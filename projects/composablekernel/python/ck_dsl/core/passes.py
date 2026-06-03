@@ -10,7 +10,7 @@ Loads, stores, barriers, async copies, and MFMA ops are never moved or removed.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Mapping, Optional, Tuple
 
 from .ir import KernelDef, Op, Region, Type, Value
@@ -18,9 +18,9 @@ from .ir import KernelDef, Op, Region, Type, Value
 
 @dataclass(frozen=True)
 class PassStats:
-    constants_folded: int = 0
-    common_subexpressions: int = 0
-    dead_ops_removed: int = 0
+    constants_folded: int = field(default=0)
+    common_subexpressions: int = field(default=0)
+    dead_ops_removed: int = field(default=0)
 
     def __add__(self, other: "PassStats") -> "PassStats":
         return PassStats(

@@ -33,7 +33,7 @@ the spec surface the multi-warp + cshuffle hoist consumes verbatim.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Tuple
 
 from ...core.ir import KernelDef
@@ -64,10 +64,10 @@ class FmhaMfmaSpec:
     via a derived spec that overrides the grid computation.
     """
 
-    common: FmhaCommonSpec
-    seqlen_q: int
-    seqlen_k: int
-    name: str = "ck_dsl_fmha_fwd_mfma"
+    common: FmhaCommonSpec = field()
+    seqlen_q: int = field()
+    seqlen_k: int = field()
+    name: str = field(default="ck_dsl_fmha_fwd_mfma")
 
     def kernel_name(self) -> str:
         s = self.common.shape

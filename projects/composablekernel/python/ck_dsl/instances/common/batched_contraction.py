@@ -117,12 +117,12 @@ class BatchedContractionSpec:
     total ``batch`` axis at runtime.
     """
 
-    tile: TileSpec
+    tile: TileSpec = field()
     batch_shape: Tuple[int, ...] = field(default_factory=tuple)
     trait: TraitSpec = field(default_factory=TraitSpec)
-    wave_size: int = 64
-    block_size: int = 0
-    name: str = "ck_dsl_batched_contraction"
+    wave_size: int = field(default=64)
+    block_size: int = field(default=0)
+    name: str = field(default="ck_dsl_batched_contraction")
 
     def __post_init__(self) -> None:
         if self.block_size == 0:
@@ -420,7 +420,8 @@ def _build_contraction_descriptor(
     t_names = tuple(f"{trailing_name}{i}" for i in range(len(trailing_shape)))
     base_names = g_names + l_names + t_names
     base_lengths = tuple(
-        int(d) for d in (*batch_shape, *leading_shape, *trailing_shape)
+        int(d)
+        for d in tuple(list(batch_shape) + list(leading_shape) + list(trailing_shape))
     )
     if strides is None:
         base_strides = _row_major_strides(base_lengths)

@@ -59,13 +59,13 @@ from ..runtime.comgr import build_hsaco_from_llvm_ir
 class KernelArtifact:
     """The compiled output of one `compile_kernel(...)` call."""
 
-    kernel: KernelDef
-    ir_text: str
-    llvm_text: str
-    hsaco: bytes
+    kernel: KernelDef = field()
+    ir_text: str = field()
+    llvm_text: str = field()
+    hsaco: bytes = field()
     timings: Dict[str, float] = field(default_factory=dict)
     pass_stats: PassStats = field(default_factory=PassStats)
-    isa: str = "amdgcn-amd-amdhsa--gfx950"
+    isa: str = field(default="amdgcn-amd-amdhsa--gfx950")
 
     @property
     def kernel_name(self) -> str:
@@ -218,15 +218,9 @@ def compile_kernel_via_hipcc(
         hsaco_path = Path(td) / f"{stem}.hsaco"
         src_path.write_text(hip_src, encoding="utf-8")
         proc = subprocess.run(
-            [
-                "hipcc",
-                f"--offload-arch={arch}",
-                "--genco",
-                *flags,
-                str(src_path),
-                "-o",
-                str(hsaco_path),
-            ],
+            ["hipcc", f"--offload-arch={arch}", "--genco"]
+            + list(flags)
+            + [str(src_path), "-o", str(hsaco_path)],
             capture_output=True,
             text=True,
             timeout=timeout_s,

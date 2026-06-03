@@ -51,7 +51,7 @@ mode. We aim to beat that on the same shape.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace as dc_replace
+from dataclasses import dataclass, replace as dc_replace, field
 from typing import Callable, List, Optional, Sequence, Tuple
 
 from ...core.ir import (
@@ -97,19 +97,19 @@ class ConvProblem:
       K_gemm = R * S * C
     """
 
-    N: int
-    Hi: int
-    Wi: int
-    C: int
-    K: int
-    R: int
-    S: int
-    sH: int = 1
-    sW: int = 1
-    pH: int = 0
-    pW: int = 0
-    dH: int = 1
-    dW: int = 1
+    N: int = field()
+    Hi: int = field()
+    Wi: int = field()
+    C: int = field()
+    K: int = field()
+    R: int = field()
+    S: int = field()
+    sH: int = field(default=1)
+    sW: int = field(default=1)
+    pH: int = field(default=0)
+    pW: int = field(default=0)
+    dH: int = field(default=1)
+    dW: int = field(default=1)
 
     @property
     def Ho(self) -> int:
@@ -148,11 +148,11 @@ class ConvAccumulatorEpilogue:
     conv instance. The default is identity, preserving the historical conv IR.
     """
 
-    bias: float = 0.0
-    scale: float = 1.0
-    relu: bool = False
-    clamp_min: Optional[float] = None
-    clamp_max: Optional[float] = None
+    bias: float = field(default=0.0)
+    scale: float = field(default=1.0)
+    relu: bool = field(default=False)
+    clamp_min: Optional[float] = field(default=None)
+    clamp_max: Optional[float] = field(default=None)
 
     def is_identity(self) -> bool:
         return (
@@ -232,11 +232,11 @@ class ImplicitGemmConvSpec:
                                 conflict effects in sweeps.
     """
 
-    problem: ConvProblem
-    name: str = "conv_igemm"
+    problem: ConvProblem = field()
+    name: str = field(default="conv_igemm")
 
-    tile_m: int = 64
-    tile_n: int = 64
+    tile_m: int = field(default=64)
+    tile_n: int = field(default=64)
     # tile_k=64 + the 32x32x16 atom is the measured-best default on gfx950:
     # for the bake-off shape (N8 C64 K64) it ties the old tk128/16x16x32
     # default, and for compute-bound shapes (e.g. N16 C256 K256) it is ~1.4x
@@ -244,41 +244,41 @@ class ImplicitGemmConvSpec:
     # tests, probes, hip_lowering_parity, verify_dsl_docs) already override to
     # this config; the stale tk128/16x16x32 default only penalised callers who
     # relied on the dataclass defaults.
-    tile_k: int = 64
+    tile_k: int = field(default=64)
 
-    warp_m: int = 2
-    warp_n: int = 2
+    warp_m: int = field(default=2)
+    warp_n: int = field(default=2)
 
-    warp_tile_m: int = 32
-    warp_tile_n: int = 32
-    warp_tile_k: int = 16
+    warp_tile_m: int = field(default=32)
+    warp_tile_n: int = field(default=32)
+    warp_tile_k: int = field(default=16)
 
-    wave_size: int = 64
+    wave_size: int = field(default=64)
 
-    pipeline: str = "mem"
-    epilogue: str = "default"
-    async_dma: bool = False
-    unroll_k: bool = False  # NEW: Clean Python-level K-loop unrolling
-    lds_k_pad: Optional[int] = None
-    lds_layout: Optional[LdsLayout] = None
+    pipeline: str = field(default="mem")
+    epilogue: str = field(default="default")
+    async_dma: bool = field(default=False)
+    unroll_k: bool = field(default=False)  # NEW: Clean Python-level K-loop unrolling
+    lds_k_pad: Optional[int] = field(default=None)
+    lds_layout: Optional[LdsLayout] = field(default=None)
     # Chiplet-aware grid swizzle (multi-XCD L2 locality). When True,
     # the kernel flattens its 2D blockIdx into a linear WGID, runs it
     # through ``chiplet_aware_super_tile`` (compile-time variant — conv
     # tile counts are derived from the problem shape so they are known
     # statically), and uses the remapped (pid_m, pid_n) for tile offsets.
-    chiplet_swizzle: bool = False
-    chiplet_wgm: int = 8
-    chiplet_num_xcds: int = 8
-    chiplet_chunk_size: int = 64
+    chiplet_swizzle: bool = field(default=False)
+    chiplet_wgm: int = field(default=8)
+    chiplet_num_xcds: int = field(default=8)
+    chiplet_chunk_size: int = field(default=64)
     # AMDGPU occupancy hint: emits ``amdgpu-waves-per-eu`` on the
     # kernel attribute list. ``None`` keeps the backend's default.
-    waves_per_eu: Optional[int] = None
+    waves_per_eu: Optional[int] = field(default=None)
     # P87: K0/K1 split for implicit-GEMM conv. Set ``k0_k1_split=True``
     # to drive :class:`ck_dsl.helpers.loads.CoalescedTileLoader`'s
     # ``inner_dim`` parameter (P33) so the loader processes whole C
     # rows contiguously and the MFMA loop iterates ``kk`` over K1
     # only. ``None`` (default) keeps the legacy flat-K behaviour.
-    k0_k1_split: bool = False
+    k0_k1_split: bool = field(default=False)
     # P86: grouped convolution. ``groups > 1`` uses the descriptor
     # DAG's ``unmerge('group', into=...)`` to recover the per-group
     # `(C/groups, K/groups)` slabs so each group's GEMM stays
@@ -286,11 +286,11 @@ class ImplicitGemmConvSpec:
     # ``GroupedConvolutionForward`` shape; for ``groups == 1`` (the
     # default) the descriptor reduces to the flat-conv form and the
     # kernel emits the same code as before.
-    groups: int = 1
+    groups: int = field(default=1)
     # Static accumulator epilogue used by the gfx950 deep-fusion prototype.
     # It composes simple fp32 VALU transforms directly on MFMA accumulator
     # fragments before the existing direct/cshuffle store path.
-    acc_epilogue: ConvAccumulatorEpilogue = ConvAccumulatorEpilogue()
+    acc_epilogue: ConvAccumulatorEpilogue = field(default_factory=ConvAccumulatorEpilogue)
 
     @property
     def block_size(self) -> int:

@@ -40,7 +40,7 @@ Pipeline notes:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, Tuple
 
 from ...core.ir import F16, I32, IRBuilder, KernelDef, PtrType
@@ -72,12 +72,12 @@ class Img2ColSpec:
     threads (one per output element). The product must be <= 1024.
     """
 
-    problem: ConvProblem
-    dtype: DType = "f16"
-    block_tile_m: int = 8
-    block_tile_k: int = 128
-    vec_k: int = 8
-    name: str = "ck_dsl_img2col"
+    problem: ConvProblem = field()
+    dtype: DType = field(default="f16")
+    block_tile_m: int = field(default=8)
+    block_tile_k: int = field(default=128)
+    vec_k: int = field(default=8)
+    name: str = field(default="ck_dsl_img2col")
 
     @property
     def block_size(self) -> int:

@@ -27,7 +27,7 @@ must move into the *consumer* (the MFMA's ds_read address math) —
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
 from ..core.ir import IRBuilder, Value
@@ -77,11 +77,11 @@ class LdsLayout:
     (legacy placeholder).
     """
 
-    logical_cols: int
-    k_pad: int = 0
-    swizzle: Optional[str] = None
-    requires_packed_async: bool = False
-    swizzle_stages: Tuple[Tuple[int, int, int], ...] = ()
+    logical_cols: int = field()
+    k_pad: int = field(default=0)
+    swizzle: Optional[str] = field(default=None)
+    requires_packed_async: bool = field(default=False)
+    swizzle_stages: Tuple[Tuple[int, int, int], ...] = field(default=())
 
     @classmethod
     def padded_k(cls, logical_cols: int, k_pad: int = 8) -> "LdsLayout":
@@ -267,8 +267,8 @@ class TransposeLdsReader:
     read.
     """
 
-    K: int
-    M: int = 16
+    K: int = field()
+    M: int = field(default=16)
 
     @property
     def k_lanes(self) -> int:
@@ -296,11 +296,11 @@ class TransposeLdsReader:
 class _BoundTransposeLdsReader:
     """SSA values produced by :meth:`TransposeLdsReader.bind`."""
 
-    reader: TransposeLdsReader
-    lane: Value
-    lane_div_16: Value
-    lane_div_4_mod_4: Value
-    col: Value
+    reader: TransposeLdsReader = field()
+    lane: Value = field()
+    lane_div_16: Value = field()
+    lane_div_4_mod_4: Value = field()
+    col: Value = field()
 
     def row(self, b: IRBuilder, *, k_offset: int, read: int = 0) -> Value:
         """The ``row`` LDS index for one ``ds_read_b64_tr_b16`` call.

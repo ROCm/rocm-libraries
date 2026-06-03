@@ -22,23 +22,23 @@ from typing import Dict, Mapping, Optional
 class IsaStats:
     """Instruction-family counts from final AMDGPU ISA text."""
 
-    mfma: int = 0
-    mfma_dest_vgpr: int = 0
-    mfma_dest_agpr: int = 0
-    mfma_c_vgpr: int = 0
-    mfma_c_agpr: int = 0
-    accvgpr_read: int = 0
-    accvgpr_write: int = 0
-    buffer_load: int = 0
-    buffer_store: int = 0
-    buffer_load_lds: int = 0
-    ds_read: int = 0
-    ds_write: int = 0
-    s_barrier: int = 0
-    s_waitcnt: int = 0
-    sched_barrier: int = 0
-    valu: int = 0
-    salu: int = 0
+    mfma: int = field(default=0)
+    mfma_dest_vgpr: int = field(default=0)
+    mfma_dest_agpr: int = field(default=0)
+    mfma_c_vgpr: int = field(default=0)
+    mfma_c_agpr: int = field(default=0)
+    accvgpr_read: int = field(default=0)
+    accvgpr_write: int = field(default=0)
+    buffer_load: int = field(default=0)
+    buffer_store: int = field(default=0)
+    buffer_load_lds: int = field(default=0)
+    ds_read: int = field(default=0)
+    ds_write: int = field(default=0)
+    s_barrier: int = field(default=0)
+    s_waitcnt: int = field(default=0)
+    sched_barrier: int = field(default=0)
+    valu: int = field(default=0)
+    salu: int = field(default=0)
 
     def as_dict(self) -> Dict[str, int]:
         return {
@@ -66,13 +66,13 @@ class IsaStats:
 class ResourceInfo:
     """Resource metadata from AMDHSA code-object notes or disassembly."""
 
-    vgpr_count: Optional[int] = None
-    agpr_count: Optional[int] = None
-    sgpr_count: Optional[int] = None
-    lds_bytes: Optional[int] = None
-    scratch_bytes: Optional[int] = None
-    wavefront_size: Optional[int] = None
-    workgroup_size_hint: Optional[int] = None
+    vgpr_count: Optional[int] = field(default=None)
+    agpr_count: Optional[int] = field(default=None)
+    sgpr_count: Optional[int] = field(default=None)
+    lds_bytes: Optional[int] = field(default=None)
+    scratch_bytes: Optional[int] = field(default=None)
+    wavefront_size: Optional[int] = field(default=None)
+    workgroup_size_hint: Optional[int] = field(default=None)
     raw: Mapping[str, int] = field(default_factory=dict)
 
     def as_dict(self) -> Dict[str, Optional[int]]:
@@ -91,11 +91,11 @@ class ResourceInfo:
 class HsacoAnalysis:
     """Static analysis result for one HSACO file."""
 
-    path: Path
-    isa: IsaStats
-    resources: ResourceInfo
-    objdump_text: str = ""
-    readelf_text: str = ""
+    path: Path = field()
+    isa: IsaStats = field()
+    resources: ResourceInfo = field()
+    objdump_text: str = field(default="")
+    readelf_text: str = field(default="")
 
 
 _AMDHSA_KV_RE = re.compile(r"\.?(amdhsa_[A-Za-z0-9_]+)\s+([0-9]+)")

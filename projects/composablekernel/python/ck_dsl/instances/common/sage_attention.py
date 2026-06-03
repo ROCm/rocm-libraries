@@ -52,7 +52,7 @@ Two physical kernels back the four modes:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, Tuple
 
 from ...core.ir import (
@@ -121,20 +121,20 @@ def _magic_div(b: IRBuilder, dividend: Value, divisor: int) -> Value:
 class SageAttentionSpec:
     """One concrete Sage attention configuration."""
 
-    common: FmhaCommonSpec
-    quant_mode: SageQuantMode
-    q_scale: QkScaleSpec
-    k_scale: QkScaleSpec
-    seqlen_q: int
-    seqlen_k: int
-    name: str = "ck_dsl_sage_attention"
+    common: FmhaCommonSpec = field()
+    quant_mode: SageQuantMode = field()
+    q_scale: QkScaleSpec = field()
+    k_scale: QkScaleSpec = field()
+    seqlen_q: int = field()
+    seqlen_k: int = field()
+    name: str = field(default="ck_dsl_sage_attention")
     # P90: per-block scale outer loop. When ``True`` and ``scale_block
     # > BLOCK_K * 4`` (typical), the K-loop is wrapped in an outer
     # loop over ``(seqlen_k / scale_block)`` scale blocks, each
     # hosting ``scale_block / BLOCK_K`` K-tiles. ``k_scale`` is
     # loaded once per outer iteration instead of every K-tile.
     # Saves a per-iter f32 scale load when scale_block is large.
-    use_outer_scale_loop: bool = False
+    use_outer_scale_loop: bool = field(default=False)
 
     def kernel_name(self) -> str:
         s = self.common.shape

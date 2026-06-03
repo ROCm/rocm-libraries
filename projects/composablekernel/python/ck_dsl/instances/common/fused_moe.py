@@ -63,7 +63,7 @@ Limitations of v1 (tracked in the wave plan):
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Literal, Mapping, Tuple
 
 from ...core.ir import F32, I32, IRBuilder, KernelDef, PtrType
@@ -236,21 +236,21 @@ class FusedMoeSpec:
     Kernel-name prefix; phase tag is appended per kernel.
     """
 
-    tokens: int
-    experts: int
-    topk: int
-    hidden: int
-    intermediate: int
-    dtype: DType = "f16"
-    block_size: int = 256
-    vec: int = 4
-    name: str = "ck_dsl_fused_moe"
+    tokens: int = field()
+    experts: int = field()
+    topk: int = field()
+    hidden: int = field()
+    intermediate: int = field()
+    dtype: DType = field(default="f16")
+    block_size: int = field(default=256)
+    vec: int = field(default=4)
+    name: str = field(default="ck_dsl_fused_moe")
     # P72: when True, ``build_moe_topk_weighted_reduce`` emits the
     # bf16-accumulator path that uses
     # :meth:`IRBuilder.global_atomic_add_pk_bf16` for halved atomic
     # contention vs the f32 atomic. The output ``Y`` becomes bf16
     # instead of f32. Real numerical change; callers gate on parity.
-    bf16_accumulator: bool = False
+    bf16_accumulator: bool = field(default=False)
 
     @property
     def total_pairs(self) -> int:
@@ -1150,8 +1150,8 @@ class FusedMoeLauncher:
     inspect the call graph or drive their own dispatch.
     """
 
-    spec: FusedMoeSpec
-    name_prefix: str = "fused_moe"
+    spec: FusedMoeSpec = field()
+    name_prefix: str = field(default="fused_moe")
     # Target GPU for the lazy ``compile_kernel`` calls. ``None`` resolves
     # to the running device (``runtime.hip_module.get_device_arch()``)
     # and falls back to ``"gfx950"`` when no device is visible (static
@@ -1159,7 +1159,7 @@ class FusedMoeLauncher:
     # here (gather / silu_mul / topk_reduce) emit no MFMA, so they build
     # identically on gfx942 and gfx950 -- threading ``arch`` only keeps
     # the lowered ISA matched to the launch target.
-    arch: "str | None" = None
+    arch: "str | None" = field(default=None)
 
     def __post_init__(self) -> None:
         # Lazy KernelLauncher cache: built on first :meth:`run` /

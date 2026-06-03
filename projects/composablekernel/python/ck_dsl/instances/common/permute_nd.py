@@ -76,7 +76,7 @@ from __future__ import annotations
 
 import functools
 import operator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, Tuple
 
 from ...core.ir import BF16, F16, IRBuilder, KernelDef, PtrType
@@ -101,11 +101,11 @@ class PermuteSpec:
     ``y_shape[d] = x_shape[perm[d]]``.
     """
 
-    x_shape: Tuple[int, ...]
-    perm: Tuple[int, ...]
-    dtype: DType = "f16"
-    block_size: int = 256
-    name: str = "ck_dsl_permute"
+    x_shape: Tuple[int, ...] = field()
+    perm: Tuple[int, ...] = field()
+    dtype: DType = field(default="f16")
+    block_size: int = field(default=256)
+    name: str = field(default="ck_dsl_permute")
 
     @property
     def rank(self) -> int:

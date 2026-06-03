@@ -46,7 +46,7 @@ read), not by handing the intrinsic a swizzled destination pointer.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Optional, Tuple
 
 from ..core.ir import I64, IRBuilder, Value
@@ -76,14 +76,16 @@ class CoalescedTileLoader:
     col`) and implicit-GEMM conv (`A_desc.offset(row, col)`).
     """
 
-    tile_rows: int
-    tile_cols: int
-    block_size: int
-    load_vec: int  # halves per thread per chunk
+    tile_rows: int = field()
+    tile_cols: int = field()
+    block_size: int = field()
+    load_vec: int = field()  # halves per thread per chunk
     use_buffer_rsrc: bool = (
-        True  # use buffer_load_vN (bounds-checked); False uses raw ptr
+        field(default=True)  # use buffer_load_vN (bounds-checked); False uses raw ptr
     )
-    oob_sentinel: int = (1 << 31) - 1  # voffset used when valid=False (clamped to 0)
+    oob_sentinel: int = field(
+        default=(1 << 31) - 1
+    )  # voffset used when valid=False (clamped to 0)
     # P33: when the descriptor's K axis is internally a (K0, K1) split
     # (e.g. implicit-GEMM ``K0=R*S × K1=C`` for NHWC convs), set
     # ``inner_dim`` to the K1 extent. The loader keeps emitting one
@@ -92,7 +94,7 @@ class CoalescedTileLoader:
     # ``embed(h, w)`` valid-checks (loop-invariant over the C inner
     # dim) hoist out of the loop. ``None`` (default) is the legacy
     # flat-K behaviour.
-    inner_dim: Optional[int] = None
+    inner_dim: Optional[int] = field(default=None)
 
     @classmethod
     def choose_vec(
@@ -284,14 +286,14 @@ class AsyncTileLoader:
         # now safe to read A_smem
     """
 
-    tile_rows: int
-    tile_cols: int
-    block_size: int
-    wave_size: int
-    dwords: int  # 1, 3, or 4
-    chunks_total: int  # tile_rows * tile_cols / (dwords * 2)
-    chunks_per_pass: int  # = block_size
-    passes: int  # ceil(chunks_total / block_size)
+    tile_rows: int = field()
+    tile_cols: int = field()
+    block_size: int = field()
+    wave_size: int = field()
+    dwords: int = field()  # 1, 3, or 4
+    chunks_total: int = field()  # tile_rows * tile_cols / (dwords * 2)
+    chunks_per_pass: int = field()  # = block_size
+    passes: int = field()  # ceil(chunks_total / block_size)
 
     @classmethod
     def choose_dwords(
@@ -405,9 +407,9 @@ class AsyncTileLoader:
 class AsyncTileLoaderSlot:
     """Bound `AsyncTileLoader`: ready to `issue` for a specific K-iter."""
 
-    loader: AsyncTileLoader
-    smem_dst: Value
-    per_wave_lds_base: Value  # i64; lane 0 of the wave writes here
+    loader: AsyncTileLoader = field()
+    smem_dst: Value = field()
+    per_wave_lds_base: Value = field()  # i64; lane 0 of the wave writes here
 
     def issue(
         self,
@@ -518,7 +520,7 @@ class AsyncPingPongLoader:
     Reference: ``include/ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qr_ks_vs_async.hpp``.
     """
 
-    loader: AsyncTileLoader
+    loader: AsyncTileLoader = field()
 
     def emit_pipeline(
         self,

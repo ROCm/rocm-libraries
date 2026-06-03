@@ -19,13 +19,13 @@ from .isa import IsaStats, ResourceInfo, analyze_hsaco
 class VariantReport:
     """One fully measured kernel variant."""
 
-    name: str
-    spec: Mapping[str, Any]
-    artifact: KernelArtifact
-    benchmark: Optional[BenchmarkSummary] = None
+    name: str = field()
+    spec: Mapping[str, Any] = field()
+    artifact: KernelArtifact = field()
+    benchmark: Optional[BenchmarkSummary] = field(default=None)
     llvm: LlvmIrStats = field(default_factory=LlvmIrStats)
-    isa: Optional[IsaStats] = None
-    resources: Optional[ResourceInfo] = None
+    isa: Optional[IsaStats] = field(default=None)
+    resources: Optional[ResourceInfo] = field(default=None)
 
     @classmethod
     def from_artifact(

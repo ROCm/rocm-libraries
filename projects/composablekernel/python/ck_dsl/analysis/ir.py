@@ -11,7 +11,7 @@ sanity check that a DSL feature actually lowered to the intended primitive.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import re
 from typing import Dict
 
@@ -20,23 +20,23 @@ from typing import Dict
 class LlvmIrStats:
     """Instruction-family counts from AMDGPU LLVM IR text."""
 
-    mfma_calls: int = 0
-    mfma_16x16x16: int = 0
-    mfma_16x16x32: int = 0
-    mfma_32x32x8: int = 0
-    mfma_32x32x16: int = 0
-    mfma_4x4x4: int = 0
-    raw_buffer_load_calls: int = 0
-    raw_buffer_store_calls: int = 0
-    async_buffer_load_lds_calls: int = 0
-    global_vector_loads: int = 0
-    global_vector_stores: int = 0
-    smem_vector_loads: int = 0
-    smem_vector_stores: int = 0
-    barriers: int = 0
-    waitcnts: int = 0
-    sched_group_barriers: int = 0
-    sched_barriers: int = 0
+    mfma_calls: int = field(default=0)
+    mfma_16x16x16: int = field(default=0)
+    mfma_16x16x32: int = field(default=0)
+    mfma_32x32x8: int = field(default=0)
+    mfma_32x32x16: int = field(default=0)
+    mfma_4x4x4: int = field(default=0)
+    raw_buffer_load_calls: int = field(default=0)
+    raw_buffer_store_calls: int = field(default=0)
+    async_buffer_load_lds_calls: int = field(default=0)
+    global_vector_loads: int = field(default=0)
+    global_vector_stores: int = field(default=0)
+    smem_vector_loads: int = field(default=0)
+    smem_vector_stores: int = field(default=0)
+    barriers: int = field(default=0)
+    waitcnts: int = field(default=0)
+    sched_group_barriers: int = field(default=0)
+    sched_barriers: int = field(default=0)
 
     def as_dict(self) -> Dict[str, int]:
         return {

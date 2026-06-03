@@ -39,7 +39,7 @@ scalar inner (1 MAC / cycle / lane) to MFMA (256 MACs / cycle / lane).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable, Optional, Tuple
 
 from ..core.ir import F16, F32, BF16, IRBuilder, Value
@@ -143,10 +143,10 @@ class LaneDecode:
     decode and apply their own address math.
     """
 
-    lane: Value
-    m_in_atom: Value
-    n_in_atom: Value
-    k_blk: Value
+    lane: Value = field()
+    m_in_atom: Value = field()
+    n_in_atom: Value = field()
+    k_blk: Value = field()
 
 
 def decode_mfma_lanes(b: IRBuilder, atom: MfmaAtom, lane: Value) -> LaneDecode:

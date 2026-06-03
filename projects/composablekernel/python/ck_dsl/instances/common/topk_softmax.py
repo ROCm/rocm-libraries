@@ -47,7 +47,7 @@ What we cover today:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, Tuple
 
 from ...core.ir import F32, I32, IRBuilder, KernelDef, PtrType, Value
@@ -159,12 +159,12 @@ _NEG_INF_F32 = -3.4028234663852886e38
 class TopkSoftmaxSpec:
     """One concrete topk-softmax kernel configuration."""
 
-    n_per_row: int  # N — entries per row (experts for MoE)
-    k: int  # K — top-k count
-    dtype: DType = "f32"  # input X dtype
-    out_dtype: DType = "f32"  # output Y dtype
-    block_size: int = 64
-    name: str = "ck_dsl_topk_softmax"
+    n_per_row: int = field()  # N — entries per row (experts for MoE)
+    k: int = field()  # K — top-k count
+    dtype: DType = field(default="f32")  # input X dtype
+    out_dtype: DType = field(default="f32")  # output Y dtype
+    block_size: int = field(default=64)
+    name: str = field(default="ck_dsl_topk_softmax")
     # P91: cross-wave packed argmax for ``block_size > 64``. When
     # True, the per-wave wave-XOR butterfly produces a packed
     # ``(val, idx)`` per wave, the per-wave packs land in
@@ -173,7 +173,7 @@ class TopkSoftmaxSpec:
     # the legacy form does for BS > 64. Defaults to False because
     # the cross-wave merge has higher register pressure on small
     # BS — opt in for ``block_size in {128, 256}``.
-    cross_wave_argmax: bool = False
+    cross_wave_argmax: bool = field(default=False)
 
     @property
     def elems_per_thread(self) -> int:

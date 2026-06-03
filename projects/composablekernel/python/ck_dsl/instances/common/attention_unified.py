@@ -10,7 +10,7 @@ until every required primitive and correctness/perf path is present.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, replace, field
 from typing import Dict, Optional, Tuple
 
 from ...core.ir import BF16, F16, F32, I32, IRBuilder, KernelDef, PtrType, Type, Value
@@ -68,28 +68,28 @@ _apply_softcap = apply_softcap_log2
 
 @dataclass(frozen=True)
 class UnifiedAttentionProblem:
-    total_q: int
-    num_seqs: int
-    num_query_heads: int
-    num_kv_heads: int
-    head_size: int
-    block_size: int
-    max_seqlen_q: int
-    max_seqlen_k: int
-    dtype: str
-    q_dtype: Optional[str] = None
-    sliding_window: int = 0
-    softcap: float = 0.0
-    use_sinks: bool = False
-    use_alibi: bool = False
-    use_qq_bias: bool = False
-    use_fp8: bool = False
-    num_sms: int = 120
+    total_q: int = field()
+    num_seqs: int = field()
+    num_query_heads: int = field()
+    num_kv_heads: int = field()
+    head_size: int = field()
+    block_size: int = field()
+    max_seqlen_q: int = field()
+    max_seqlen_k: int = field()
+    dtype: str = field()
+    q_dtype: Optional[str] = field(default=None)
+    sliding_window: int = field(default=0)
+    softcap: float = field(default=0.0)
+    use_sinks: bool = field(default=False)
+    use_alibi: bool = field(default=False)
+    use_qq_bias: bool = field(default=False)
+    use_fp8: bool = field(default=False)
+    num_sms: int = field(default=120)
     # AMDGPU occupancy hint ("amdgpu-waves-per-eu"). The 2D-tiled and
     # 3D-tiled specs both honour this knob; the scalar paths ignore it
     # because they already fit at 1 wave per workgroup. ``None`` keeps
     # the LLVM backend's heuristic choice.
-    waves_per_eu: Optional[int] = None
+    waves_per_eu: Optional[int] = field(default=None)
     # Compile backend for the tiled 2D path:
     #   - ``None`` (default): auto-pick. Uses the LLVM-direct
     #     pipeline (``compile_kernel``) except for large prefill
@@ -100,12 +100,12 @@ class UnifiedAttentionProblem:
     #   - ``"hipcc"``: always lower to HIP C++ and compile via hipcc
     #     (~450ms compile but ~5% faster on long-running kernels).
     # See ``probe_hip_lowering.py`` for the per-shape comparison.
-    compile_backend: Optional[str] = None
+    compile_backend: Optional[str] = field(default=None)
     # Number of physical blocks in the paged KV cache (``k.shape[0]``). Used
     # only to decide whether the i32 buffer voffset can address the whole
     # cache; 0 means "unknown" (assume small / fast i32 path). The
     # dispatcher fills this from the K tensor when available.
-    num_kv_blocks: int = 0
+    num_kv_blocks: int = field(default=0)
 
     @property
     def num_queries_per_kv(self) -> int:
@@ -1828,8 +1828,8 @@ def run_unified_attention_torch(
 
 @dataclass(frozen=True)
 class UnifiedAttention2DSpec:
-    problem: UnifiedAttentionProblem
-    name: str = "ck_dsl_unified_attention_2d_scalar"
+    problem: UnifiedAttentionProblem = field()
+    name: str = field(default="ck_dsl_unified_attention_2d_scalar")
 
     @property
     def dtype_ir(self) -> Type:
@@ -2051,8 +2051,8 @@ def build_unified_attention_2d(spec: UnifiedAttention2DSpec) -> KernelDef:
 
 @dataclass(frozen=True)
 class UnifiedAttention3DSpec(UnifiedAttention2DSpec):
-    name: str = "ck_dsl_unified_attention_3d_scalar"
-    num_segments: int = 8
+    name: str = field(default="ck_dsl_unified_attention_3d_scalar")
+    num_segments: int = field(default=8)
 
     def kernel_name(self) -> str:
         from ...helpers.spec import kernel_name_join
@@ -2191,9 +2191,9 @@ def build_unified_attention_3d(spec: UnifiedAttention3DSpec) -> KernelDef:
 
 @dataclass(frozen=True)
 class UnifiedAttentionReduceSpec:
-    problem: UnifiedAttentionProblem
-    num_segments: int
-    name: str = "ck_dsl_unified_attention_reduce_scalar"
+    problem: UnifiedAttentionProblem = field()
+    num_segments: int = field()
+    name: str = field(default="ck_dsl_unified_attention_reduce_scalar")
 
     @property
     def dtype_ir(self) -> Type:

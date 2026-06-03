@@ -57,7 +57,7 @@ Implementation notes:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, Tuple
 
 from ...core.ir import F16, I32, IRBuilder, KernelDef, PtrType, Value
@@ -86,20 +86,20 @@ PoolOp = Literal["max", "avg", "sum"]
 class PoolingProblem:
     """2D pooling shape parameters (NHWC input / output)."""
 
-    N: int
-    H: int
-    W: int
-    C: int
+    N: int = field()
+    H: int = field()
+    W: int = field()
+    C: int = field()
 
-    Y: int  # window height
-    X: int  # window width
+    Y: int = field()  # window height
+    X: int = field()  # window width
 
-    sH: int = 1  # stride
-    sW: int = 1
-    pH: int = 0  # left pad (also used as right pad for now)
-    pW: int = 0
-    dH: int = 1  # dilation
-    dW: int = 1
+    sH: int = field(default=1)  # stride
+    sW: int = field(default=1)
+    pH: int = field(default=0)  # left pad (also used as right pad for now)
+    pW: int = field(default=0)
+    dH: int = field(default=1)  # dilation
+    dW: int = field(default=1)
 
     @property
     def Ho(self) -> int:
@@ -130,25 +130,25 @@ class Pooling2DSpec:
     ``C`` must be divisible by ``vec`` (validated at spec time).
     """
 
-    problem: PoolingProblem
-    dtype: DType = "f16"
-    op: PoolOp = "max"
-    block_size: int = 256
-    vec: int = 1
-    name: str = "ck_dsl_pooling2d"
+    problem: PoolingProblem = field()
+    dtype: DType = field(default="f16")
+    op: PoolOp = field(default="max")
+    block_size: int = field(default=256)
+    vec: int = field(default=1)
+    name: str = field(default="ck_dsl_pooling2d")
     # P81: when > 1, each thread owns one (c, ho) tile of multiple wo
     # outputs instead of just one wo. Lets the descriptor reuse
     # ``hi = ho*sH + y*dH`` across ``wo``. Defaults to 1 (one wo per
     # thread, the historical layout); flip to 2/4/8 to amortise the
     # per-output-window math across multiple outputs.
-    tile_n: int = 1
+    tile_n: int = field(default=1)
     # P82: when ``Block_N > 1`` (multiple lanes share a window's K-axis
     # reduction), the inner reduction benefits from the warp-XOR +
     # cross-warp shape used in :mod:`ck_dsl.helpers.reduction`. Today
     # one thread owns one output so the reduction is a register chain;
     # ``use_warp_xor_reduce=True`` opts into the wave butterfly when
     # ``tile_n`` widens lane work-per-output.
-    use_warp_xor_reduce: bool = False
+    use_warp_xor_reduce: bool = field(default=False)
 
     def kernel_name(self) -> str:
         return kernel_name_join(

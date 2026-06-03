@@ -49,7 +49,7 @@ Limitations of v1:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, Tuple
 
 from ..core.ir import F32, IRBuilder, PtrType, Value
@@ -87,9 +87,9 @@ class RotarySpec:
     stride equals ``H/2`` (in elements).
     """
 
-    head_size: int
-    layout: RotaryLayout = "half"
-    table_stride_pos: int = 0  # 0 = compute as head_size // 2
+    head_size: int = field()
+    layout: RotaryLayout = field(default="half")
+    table_stride_pos: int = field(default=0)  # 0 = compute as head_size // 2
 
     def __post_init__(self):
         if self.head_size <= 0 or self.head_size % 2 != 0:

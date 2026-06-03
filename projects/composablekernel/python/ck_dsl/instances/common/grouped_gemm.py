@@ -73,7 +73,7 @@ changing their input plumbing.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Iterable, List, Sequence, Tuple
 
 from ...core.ir import KernelDef
@@ -98,12 +98,12 @@ class GroupedGemmProblem:
     major B, row-major C), matching ``build_universal_gemm``.
     """
 
-    M: int
-    N: int
-    K: int
-    A_ptr: int
-    B_ptr: int
-    C_ptr: int
+    M: int = field()
+    N: int = field()
+    K: int = field()
+    A_ptr: int = field()
+    B_ptr: int = field()
+    C_ptr: int = field()
 
 
 @dataclass(frozen=True)
@@ -116,12 +116,12 @@ class GroupedGemmSpec(WarpTileBlockSizeMixin):
     current implementation does not pad).
     """
 
-    name: str
-    tile: TileSpec
-    trait: TraitSpec
-    wave_size: int = 64
-    block_size: int = 0
-    dtype: str = "fp16"
+    name: str = field()
+    tile: TileSpec = field()
+    trait: TraitSpec = field()
+    wave_size: int = field(default=64)
+    block_size: int = field(default=0)
+    dtype: str = field(default="fp16")
 
     def __post_init__(self) -> None:
         self._init_block_size()

@@ -68,9 +68,9 @@ class BuiltRegion:
     lowerer-specific metadata (e.g. ``vec`` for elementwise).
     """
 
-    launcher: Any
-    spec: Any
-    block_size: int
+    launcher: Any = field()
+    spec: Any = field()
+    block_size: int = field()
     extra: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -98,7 +98,7 @@ class RegionLowerer(Protocol):
 class LoweringRegistry:
     """Map scheduled region kinds to lowerers."""
 
-    _lowerers: Dict[str, RegionLowerer]
+    _lowerers: Dict[str, RegionLowerer] = field()
 
     def __init__(self) -> None:
         self._lowerers = {}

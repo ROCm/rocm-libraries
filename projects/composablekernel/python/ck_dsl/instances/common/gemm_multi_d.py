@@ -171,7 +171,7 @@ class _MultiDEpilogue(FusedEpilogue):
 
     _residual_kinds: Tuple[Optional[str], ...] = field(default_factory=tuple)
     _residual_dtypes: Tuple[Optional[Type], ...] = field(default_factory=tuple)
-    _load_kind: str = "vector"
+    _load_kind: str = field(default="vector")
 
     @classmethod
     def from_ops(
@@ -308,11 +308,11 @@ class GemmMultiDSpec:
     materialising the D vector.
     """
 
-    base: UniversalGemmSpec
-    d_operands: Tuple[DOp, ...]
-    d_dtype: str = "fp16"
-    name: str = "ck_dsl_gemm_multi_d"
-    d_load_kind: DLoadKind = "vector"
+    base: UniversalGemmSpec = field()
+    d_operands: Tuple[DOp, ...] = field()
+    d_dtype: str = field(default="fp16")
+    name: str = field(default="ck_dsl_gemm_multi_d")
+    d_load_kind: DLoadKind = field(default="vector")
 
     @property
     def num_d(self) -> int:

@@ -52,7 +52,7 @@ the pieces a v2 MFMA-based body composes.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, Tuple
 
 from ...core.ir import F32, I32, IRBuilder, KernelDef, PtrType
@@ -86,21 +86,21 @@ class BlockScaleGemmSpec:
     default.
     """
 
-    M: int
-    N: int
-    K: int
-    quant_mode: QuantMode = "bquant"
-    mantissa_dtype: MantissaDType = "fp8e4m3"
-    preshuffle_b: bool = False
-    group_size_mnk: Tuple[int, int, int] = (1, 1, 128)
-    block_tile_m: int = 16
-    block_tile_n: int = 16
-    name: str = "ck_dsl_block_scale_gemm"
+    M: int = field()
+    N: int = field()
+    K: int = field()
+    quant_mode: QuantMode = field(default="bquant")
+    mantissa_dtype: MantissaDType = field(default="fp8e4m3")
+    preshuffle_b: bool = field(default=False)
+    group_size_mnk: Tuple[int, int, int] = field(default=(1, 1, 128))
+    block_tile_m: int = field(default=16)
+    block_tile_n: int = field(default=16)
+    name: str = field(default="ck_dsl_block_scale_gemm")
     # P77 sibling: per-output-row scale broadcast, same shape as
     # :class:`ck_dsl.instances.common.mx_gemm.MxGemmSpec.per_input_row`.
     # Defaults to True for backwards compat; flip on per-row
     # varying-scale workloads.
-    per_input_row: bool = True
+    per_input_row: bool = field(default=True)
 
     @property
     def atom(self) -> MfmaAtom:

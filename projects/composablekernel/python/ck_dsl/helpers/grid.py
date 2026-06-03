@@ -25,7 +25,7 @@ remap happens at the *top* of every kernel body.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Tuple
 
 from ..core.ir import IRBuilder, Value
@@ -114,8 +114,8 @@ def chiplet_transform_chunked(
 class SuperTileSwizzleResult:
     """Tile (row, col) decomposition produced by :func:`super_tile_swizzle`."""
 
-    row: Value  # i32 SSA, M-tile index
-    col: Value  # i32 SSA, N-tile index
+    row: Value = field()  # i32 SSA, M-tile index
+    col: Value = field()  # i32 SSA, N-tile index
 
 
 def super_tile_swizzle(
