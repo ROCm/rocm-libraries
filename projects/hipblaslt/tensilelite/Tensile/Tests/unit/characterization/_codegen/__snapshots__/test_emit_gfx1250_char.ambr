@@ -1,0 +1,38 @@
+# serializer version: 1
+# name: test_gfx1250_emit_digests
+  list([
+    dict({
+      'file': 'BBS.yaml',
+      'kernels': list([
+        dict({
+          'basename': 'Cijk_Ailk_Bjlk_BBS_BH_Bias_A_UserArgs_MT16x16x32ktN5j-apIM6nkuh8vZ7WoFtZFyvkrp_9xN49-eOV4Ew=',
+          'err': 0,
+          'n_lines': 5999,
+          'sha256': '62a09c94aab4e0e8246d710b647cd7ff4e075d3c3ec22d851e6bf8a9b9198202',
+        }),
+      ]),
+    }),
+    dict({
+      'file': 'HHS.yaml',
+      'kernels': list([
+        dict({
+          'basename': 'Cijk_Ailk_Bjlk_HHS_BH_Bias_A_UserArgs_MT16x16x32ktN5j-apIM6nkuh8vZ7WoFtZFyvkrp_9xN49-eOV4Ew=',
+          'err': 0,
+          'n_lines': 5930,
+          'sha256': 'e23b45460e54a921666bfca673460657c741195a9321d1ab78b1a9f837be9a0c',
+        }),
+      ]),
+    }),
+    dict({
+      'file': 'SB.yaml',
+      'kernels': list([
+        dict({
+          'basename': 'Cijk_Ailk_Bjlk_S_MX_B_Bias_SB_HA_S_SAB_SAV_UserALANdKdq75zGhWHZk-NYnuXibJbfdScqM70EuB27dvas=',
+          'err': 0,
+          'n_lines': 5200,
+          'sha256': 'c154706ddbc841f691e47c8ce1e6854eb4949d284654b5075d6d0b80e6c41e21',
+        }),
+      ]),
+    }),
+  ])
+# ---
