@@ -4,11 +4,13 @@
 # Pre-submit GPU emulation tests for TensileLite gfx1250 common GEMM tests.
 #
 # Dispatches to an external CI workflow that builds ROCm from the PR's commit
-# and runs GPU emulation tests on gfx1250.
+# and runs GPU emulation tests on gfx1250. Test selection (e.g. "common GEMM")
+# is owned by the downstream psdb-trigger handler.
 #
-# Required secrets (configured by repo admin):
-#   GPU_EMU_DISPATCH_PAT  — GitHub PAT with `repo` scope on the target repository
-#   GPU_EMU_DISPATCH_REPO — Target repository in "org/repo" format
+# Required secrets:
+#   GPU_EMU_DISPATCH_PAT  — GitHub PAT with `repo` scope on the target repo
+#   GPU_EMU_DISPATCH_REPO — Target repository in "org/repo" format (secret to
+#                           avoid exposing internal infrastructure in public logs)
 #
 # Required variable:
 #   GPU_EMU_DISPATCH_ENABLED — Set to "true" to enable dispatch (kill switch)
@@ -21,28 +23,43 @@ on:
     branches: [develop]
     paths:
       - "projects/hipblaslt/tensilelite/**"
+      - ".github/workflows/gpu-emu-presubmit.yml"
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   dispatch-gpu-tests:
     name: Dispatch gfx1250 emulation tests
     if: >-
-      !github.event.pull_request.draft &&
-      vars.GPU_EMU_DISPATCH_ENABLED == 'true'
-    runs-on: ubuntu-latest
+      !github.event.pull_request.draft
+      && vars.GPU_EMU_DISPATCH_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     steps:
       - name: Trigger GPU emulation build and tests
         env:
           GH_TOKEN: ${{ secrets.GPU_EMU_DISPATCH_PAT }}
+          DISPATCH_REPO: ${{ secrets.GPU_EMU_DISPATCH_REPO }}
+          COMMIT: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          gh api "repos/${{ secrets.GPU_EMU_DISPATCH_REPO }}/dispatches" \
-            -f event_type=psdb-trigger \
-            -f "client_payload={
-              \"repo\": \"rocm-libraries\",
-              \"commit\": \"${{ github.event.pull_request.head.sha }}\",
-              \"pr_number\": \"${{ github.event.pull_request.number }}\",
-              \"families\": \"gfx1250\",
-              \"component_list\": \"tensilelite\"
-            }"
+          set -euo pipefail
+          jq -n \
+            --arg commit    "$COMMIT" \
+            --arg pr_number "$PR_NUMBER" \
+            '{
+               event_type: "psdb-trigger",
+               client_payload: {
+                 repo: "rocm-libraries",
+                 commit: $commit,
+                 pr_number: $pr_number,
+                 families: "gfx1250",
+                 component_list: "tensilelite"
+               }
+             }' \
+          | gh api "repos/$DISPATCH_REPO/dispatches" --input -
