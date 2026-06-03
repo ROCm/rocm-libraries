@@ -175,21 +175,20 @@ mxfp6_gemm/
 
 ## Next Steps
 
-**当前生产 = v17 + occ1 双缓冲。8192³ ~1628（~17.6% 峰值）；非 2 幂目标形状靠 V2（8192×5120 ~1740）。Step 22 定盘：已近此设计实用上限，调参/调度无空间；要上台阶须换范式。**
+**当前生产 = v18（V17 tiles + LDS 深 K）。8192³ ~1671（~18% 峰值），大对齐方阵 +1.6~3.9% vs V17；非 2 幂形状仍靠 V2（8192×5120 ~1720）。换范式(Step 23)成功——但已近此访存模式 + occ1 的实用天花板,且已赢参考实现 CK。**
 
-1. ~~小矩阵 tile 自适应 / split-K~~ ✅ 已完成（Step 12-13，并入 v17）。
-2. ~~更细的 L2/CU 调度~~ / ~~救 cold 半程~~ / ~~occupancy~~：**Step 22 全部排除** —— L2 已 91% 命中、非带宽瓶颈、occ2 已证伪、调度交错证伪。这些不再是活口子。
-3. **★ 换范式：A 走 async DMA + LDS 复用**（追 CK 的 ~2× 的唯一路）。当前每个 K 从 global 重读 A → 算/载比天然低一倍。CK MX flatmm 用 `global_load_lds`(async)→`ds_read` 让 A 在 LDS 复用、B 直读、IGLP 调度，做到 ~35% 峰值。⚠️ occ1 下 A-LDS 的一个 VGPR-roundtrip 变体（v18）曾 −18~32%，但那是带 VGPR 中转+双 barrier 的版本，与 async `global_load_lds`（零 VGPR 中转，见 [[mxfp6_a_matrix_shuffle]]）不同。**用户已要求评估此路 + 下载 CK 1.1.0/ROCm7.0 源码对照。**
-4. **Epilogue 输出类型**（功能性，未做）：F16/BF16 输出（当前 F32 直写），见 [[mxfp6_output_epilogue]]。不影响峰值。
-5. **V2 路径也用双缓冲**（次要，当前门控排除）：N576 曾测 ping-pong +5.7% 但样本少；可按 tile 细化门控再测。
+1. ~~小矩阵 tile 自适应 / split-K~~ ✅(Step 12-13)。~~换范式 LDS 复用~~ ✅(Step 23, 但不是追 CK——CK mxfp6 实测**不如** V17,旧"追 CK 2×"前提作废)。
+2. **⭐ Warp specialization(生产者-消费者)= 唯一可能上台阶的真前沿(未试)**。根本约束:16 acc = 256 AccVGPR = 强制 occ1 = 单 wave 暴露延迟,这是 18% 天花板的本质,调参绕不开。思路:4 waves/WG 里 1 个专做 DMA 生产者(只发 glds 喂 LDS)+ 3 个消费者(只从 LDS 做 MFMA),解耦 load 发射与 MFMA。Hopper/CUTLASS 范式,这个 kernel 没试过。**潜在显著收益,但复杂(每 wave 不同代码+barrier 协调)、CDNA4 无 TMA、有真实失败风险(可能 +0 也可能 +10%)。要赌上台阶就投这个。**
+3. **Epilogue 输出类型**(功能性,未做):F16/BF16(当前 F32 直写),见 [[mxfp6_output_epilogue]]。不影响峰值。
+4. **V2 路径也用双缓冲 / V2+LDS**(次要):当前 V2(N640/576)走 V17 copy-prefetch;能否也吃 LDS 深 K 未试。
 
 **已证伪、不要重试**：
-- 访存：A 合并/LDS(v6-v12,**v18 VGPR-roundtrip 版**)、软件预取藏延迟(v11)、减地址算术(v13)。LDS-VGPR-中转 在 occ1 big-tile 负优化（但 async `global_load_lds` 零中转版未试 = Next Step #3）。
-- **让编译器把 copy-prefetch 的 load-wait 下沉到 MFMA 之后**：源码重排/去 volatile/builtin MFMA/sched_barrier/显式 waitcnt/same-iter —— 6 种全失败（Step 21）。唯一解 = 2×双缓冲直接消费。
-- **对称 ping-pong**：occ1 喂不动两个 warm buffer，−1.8%（Step 21）。当前非对称 2×展开才是最优。
-- **load 发射交错**（Step 22）：sched_barrier(0/1) −8~13%、sched_group_barrier 细交错 −88%。破坏 ping-pong in-flight overlap。官方 Cliff Notes Lesson 10 = sched_group_barrier 只 advisory。**全 clustered 即最优。**
-- **occupancy（occ2）**（Step 10 + Step 22 复核）：occ2 N256=1230 « occ1 N512=1628。tile 砍半算/载比变差，得不偿失。
+- **深 K 这条线已穷尽(Step 23)**:对称 LDS 最优 = 256×256 KT192 双缓冲(1671);KT256 single(丢重叠)1224、KT256 DB 只能 8-acc(962-984)、KT128 DB(1465)、**A-LDS/B-direct hybrid 828**(编译器 vmcnt(0) drain 废掉混合)、**K-tail 比 padding 慢 2%**(1635 vs 1671)全更差。
+- **混合 glds(LDS)+ 直读(寄存器)**:编译器在 LDS 读前自动插 vmcnt(0) 全 drain → 直读侧暴露、串行。要么全 LDS 要么全寄存器。
+- **CK 的 16×16×128 MFMA**:FLOPs/指令半 + 操作数带宽/FLOP 翻倍,密度错;CK mxfp6 慢部分因此。坚持 32×32×64。
+- 访存:A 合并/LDS-VGPR-中转(v6-v12/v18)、软件预取藏延迟(v11)、减地址算术(v13)、6 种 load-wait 下沉(Step 21)、对称 ping-pong(Step 21)、load 发射交错(Step 22)。
+- **occupancy(occ2)**:occ2 8-acc 小 tile(1452,LDS 版)« occ1 16-acc 大 tile(1671)。tile 砍半算/载比变差。occ1 由 16 acc(256 AccVGPR)强制。
 
-**关键定盘数据（Step 22，8192³）**：L2 命中 91.3%、HBM 645GB/s(10%峰值,非带宽瓶颈)、SQ_WAIT 1.9×SQ_BUSY(latency-bound)、暴露延迟=9% L2 miss 尾(每条 880cyc 捅破 512cyc MFMA 窗口)。vs CK MXFP6 ≈ 0.5×（架构范式差）。见 memory [[mxfp6_l2_sq_measurement]] [[mxfp6_load_issue_stall]] [[ref_confluence_gfx950_gemm]]。
+**关键定盘数据（Step 22，8192³）**：L2 命中 91.3%、HBM 645GB/s(10%峰值,非带宽瓶颈)、SQ_WAIT 1.9×SQ_BUSY(latency-bound)、暴露延迟=9% L2 miss 尾(每条 880cyc 捅破 512cyc MFMA 窗口)。⚠️ Step 22 当时的"vs CK MXFP6 ≈ 0.5×"**已作废**——那张 2026-05-04 截图很可能是 CK MXFP8/配置不同;Step 23 实测 **CK mxfp6 不如 V17/v18**,我们反而更快。见 memory [[mxfp6_l2_sq_measurement]] [[mxfp6_load_issue_stall]] [[mxfp6-lds-paradigm]]。
 
 **判定法（屡试不爽的纠错经验）**：凭计数器猜瓶颈屡屡出错（latency/throughput/LDS/barrier/VALU/issue-count 全被证伪过）。**藏延迟没用→非 latency；砍访存量没用→非 throughput；加指令就更慢→issue/compute bound。** 改动前先隔离实验或 profile，改动后必对比**同会话**基线（热漂移，跨会话不可比）。MFMA util 用墙钟法或 bench %-of-peak，别信 SQ 比值（聚合口径不一致）。
