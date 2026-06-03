@@ -153,6 +153,7 @@ set(rocblas_ex_source_no_tensile
     blas_ex/rocblas_gemmt_batched.cpp
     blas_ex/rocblas_gemmt_strided_batched.cpp
     blas_ex/rocblas_gemmt_kernels.cpp
+    blas_ex/rocblas_swmmac.cpp
 
     # these require may use Tensile or source gemm
     blas_ex/rocblas_gemm_ex.cpp
