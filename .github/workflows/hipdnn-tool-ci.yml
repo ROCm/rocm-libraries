@@ -82,7 +82,12 @@ jobs:
       WARMUP: "1"
       ITERS: "1"
       VENV_DIR: ${{ github.workspace }}/.venv
-      LD_LIBRARY_PATH: /opt/rocm/lib
+      # The container runs as a NON-root user, so the default /opt/rocm is not
+      # writable (install_rocm_from_artifacts.py mkdir -> PermissionError). Install
+      # into a workspace-relative dir instead, matching the sibling component-test
+      # jobs (setup_test_environment uses ./build).
+      ROCM_PATH: ${{ github.workspace }}/therock
+      LD_LIBRARY_PATH: ${{ github.workspace }}/therock/lib
     steps:
       - name: Fetch TheRock build_tools for pre-job cleanup
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -144,15 +149,14 @@ jobs:
           # and every combination is skipped -> the gate fails with
           # pass_combinations=0. --flatten (set by install_rocm_from_artifacts for
           # run-id installs) strips the ml-libs/<comp>/stage prefix so the engine
-          # lands at /opt/rocm/lib/hipdnn_plugins/engines/.
+          # lands at ${ROCM_PATH}/lib/hipdnn_plugins/engines/.
           python3 TheRock/build_tools/install_rocm_from_artifacts.py \
             --run-id "${ARTIFACT_RUN_ID}" \
             --run-github-repo "${RUN_GITHUB_REPO}" \
             --amdgpu-family "${AMDGPU_FAMILY}" \
             --amdgpu-targets "${AMDGPU_TARGETS}" \
-            --output-dir /opt/rocm \
+            --output-dir "${ROCM_PATH}" \
             --hipdnn --miopenprovider --tests --blas --miopen
-          echo "ROCM_PATH=/opt/rocm" >> "$GITHUB_ENV"
 
       - name: Driver / GPU sanity check
         timeout-minutes: 3
@@ -167,10 +171,10 @@ jobs:
         run: |
           # The hipdnn_frontend Python bindings ship PREBUILT inside the --tests
           # artifact slice. install_rocm_from_artifacts.py --flatten lands the staged
-          # files at /opt/rocm/share/hipdnn/python/hipdnn_frontend. Repack them into a
-          # wheel with TheRock's repack script and install — do NOT compile in-job.
+          # files at ${ROCM_PATH}/share/hipdnn/python/hipdnn_frontend. Repack them into
+          # a wheel with TheRock's repack script and install — do NOT compile in-job.
           # The repack script lives on the TheRock ref passed in via therock_ref.
-          PKG_DIR=/opt/rocm/share/hipdnn/python/hipdnn_frontend
+          PKG_DIR="${ROCM_PATH}/share/hipdnn/python/hipdnn_frontend"
           if [ ! -d "${PKG_DIR}" ]; then
             echo "::error::Prebuilt hipdnn_frontend bindings not found at ${PKG_DIR}. The TheRock hipDNN-python-wheel publishing dependency (which ships the bindings into the --tests slice) is not present on this run. Ensure the publishing change has landed and the build matrix includes the --tests slice."
             exit 1
@@ -185,17 +189,17 @@ jobs:
         # torch's ROCm wheel bundles libhipdnn_backend.so in its _rocm_sdk_libraries_*
         # companion package. With RTLD_GLOBAL the frontend can bind to that stale copy
         # instead of the prebuilt-TheRock backend it was built against -> ABI mismatch
-        # crash. Overwrite it with the /opt/rocm backend. Mirrors
+        # crash. Overwrite it with the prebuilt-TheRock backend. Mirrors
         # dnn-benchmarking/setup.sh. Guarded so it no-ops if either path is absent.
         #
         # Stays defensive even with the prebuilt-wheel flow: the benchmark lazily
         # imports torch during timing (timing.py), so torch's bundled backend can
-        # still shadow the prebuilt /opt/rocm backend via RTLD_GLOBAL.
+        # still shadow the prebuilt-TheRock backend via RTLD_GLOBAL.
         run: |
           WHEEL_BACKEND=$(find "$VENV_DIR" -path '*/_rocm_sdk_libraries_*/lib/libhipdnn_backend.so' 2>/dev/null | head -1)
-          if [ -n "${WHEEL_BACKEND}" ] && [ -f /opt/rocm/lib/libhipdnn_backend.so ]; then
+          if [ -n "${WHEEL_BACKEND}" ] && [ -f "${ROCM_PATH}/lib/libhipdnn_backend.so" ]; then
             echo "Patching ${WHEEL_BACKEND}"
-            cp /opt/rocm/lib/libhipdnn_backend.so "${WHEEL_BACKEND}"
+            cp "${ROCM_PATH}/lib/libhipdnn_backend.so" "${WHEEL_BACKEND}"
           else
             echo "No bundled backend to patch (wheel_backend='${WHEEL_BACKEND}'); skipping."
           fi
@@ -223,12 +227,12 @@ jobs:
         # Runs over the committed sample graphs (graphs/*.json); no DVC pull. This
         # is a fast tool-health gate, not a perf run.
         run: |
-          test -d /opt/rocm/lib/hipdnn_plugins/engines || {
-            echo "::error::plugin engine dir /opt/rocm/lib/hipdnn_plugins/engines missing — prebuilt artifact layout changed"; exit 1; }
+          test -d "${ROCM_PATH}/lib/hipdnn_plugins/engines" || {
+            echo "::error::plugin engine dir ${ROCM_PATH}/lib/hipdnn_plugins/engines missing — prebuilt artifact layout changed"; exit 1; }
           python -m dnn_benchmarking \
             --graph "${GRAPH_GLOB}" \
             --warmup "${WARMUP}" --iters "${ITERS}" \
-            --plugin-path /opt/rocm/lib/hipdnn_plugins/engines \
+            --plugin-path "${ROCM_PATH}/lib/hipdnn_plugins/engines" \
             --output results.json
 
       - name: Gate-check results.json
