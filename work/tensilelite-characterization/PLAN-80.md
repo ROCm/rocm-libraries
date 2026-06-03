@@ -245,7 +245,7 @@ Then read this file's **Checklist** + **Progress log**, take the last
 
 ## 7. Checklist (tick as completed; the live resume index)
 
-- [ ] **G0** harness + conftest + smoke snapshot; mechanism proven; checkpoint
+- [x] **G0** harness + conftest + smoke snapshot; mechanism proven; checkpoint (TOTAL 30.62%→47.82%, 2470 passed)
 - [ ] **P1** KernelWriter/Assembly matrix — gfx942 family
 - [ ] **P1** gfx90a family
 - [ ] **P1** gfx950 family
@@ -285,6 +285,10 @@ Then read this file's **Checklist** + **Progress log**, take the last
 - 2026-06-03 — Plan authored. Baseline measured: **TOTAL 30.62%**
   (`coverage/CURRENT-full-package.txt`), full `-m unit` = 2466 passed / 201
   skipped. Codegen-cluster = ~28k of 36.3k missing → the target mass.
+- 2026-06-03 — **G0 done.** CPU-only emit harness (`_codegen/`) + canonicalizer +
+  smoke golden. One gfx942 kernel lifted **TOTAL 30.62% → 47.82%** (+17.2 pts,
+  ~9.6k stmts), full `-m unit` 2470 passed / 201 skipped (no regression).
+  Baseline `coverage/master-baseline-G0.txt`. Commits 44a11fbe556 (+ checkpoint).
 
 ---
 
