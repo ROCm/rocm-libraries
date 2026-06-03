@@ -328,21 +328,15 @@ TEST(TargetSet, WavefrontSizeUniformForCDNA) { EXPECT_EQ(TargetSet::cdna().wavef
 
 TEST(TargetSet, WavefrontSizeUniformForRDNA) { EXPECT_EQ(TargetSet::rdna().wavefront_size(), 32); }
 
-TEST(TargetSet, WavefrontSizeThrowsOnMixedCDNAAndRDNA)
+TEST(TargetSetDeathTest, WavefrontSizeTrapsOnMixedCDNAAndRDNA)
 {
-    constexpr auto mixed = TargetSet::all();
-    // wavefront_size() should throw when set mixes wave64 (CDNA) and wave32 (RDNA)
-    bool caught = false;
-    try
-    {
-        int wf = mixed.wavefront_size();
-        (void)wf; // suppress unused warning if exception is not thrown
-    }
-    catch(...)
-    {
-        caught = true;
-    }
-    EXPECT_TRUE(caught);
+    // wavefront_size() traps when set mixes wave64 (CDNA) and wave32 (RDNA)
+    EXPECT_DEATH(
+        {
+            auto mixed = TargetSet::all();
+            (void)mixed.wavefront_size();
+        },
+        "");
 }
 
 TEST(TargetSet, IsAllCdnaPredicateWorks)

@@ -111,14 +111,20 @@ struct TargetSet
     static constexpr int bitIndex(GpuTarget target)
     {
         if(target >= GpuTarget::_count)
-            throw "GpuTarget out of range -- value must be a valid enum member, not _count";
+        {
+            // GpuTarget out of range -- value must be a valid enum member, not '_count'
+            CK_COMMON_TRAP();
+        }
         return static_cast<int>(target);
     }
 
     static constexpr GpuTarget targetAt(int index)
     {
         if(index < 0 || index >= NUM_TARGETS)
-            throw "TargetSet index out of range [0, NUM_TARGETS)";
+        {
+            // TargetSet index out of range [0, NUM_TARGETS)
+            CK_COMMON_TRAP();
+        }
         return static_cast<GpuTarget>(index);
     }
 
@@ -242,7 +248,10 @@ struct TargetSet
     constexpr int wavefront_size() const
     {
         if(is_empty())
-            throw "wavefront_size() called on empty TargetSet";
+        {
+            // wavefront_size() called on empty TargetSet
+            CK_COMMON_TRAP();
+        }
 
         int wf = -1;
         for(int i = 0; i < NUM_TARGETS; ++i)
@@ -253,10 +262,12 @@ struct TargetSet
             if(wf == -1)
                 wf = target_wf;
             else if(wf != target_wf)
-                throw "wavefront_size() requires all targets in the set to have "
-                      "the same wavefront size -- this set mixes wave64 (CDNA) and "
-                      "wave32 (RDNA) targets. Split with intersect_with(cdna()) or "
-                      "intersect_with(rdna()).";
+            {
+                // wavefront_size() requires all targets in the set to have the same
+                // wavefront size -- this set mixes wave64 (CDNA) and wave32 (RDNA)
+                // targets. Split with intersect_with(cdna()) or intersect_with(rdna()).
+                CK_COMMON_TRAP();
+            }
         }
         return wf;
     }
@@ -271,7 +282,10 @@ struct TargetSet
     constexpr GpuTarget single_target() const
     {
         if(!is_single_target())
-            throw "single_target() requires exactly one target in the set";
+        {
+            // single_target() requires exactly one target in the set
+            CK_COMMON_TRAP();
+        }
         return targetAt(std::countr_zero(bits));
     }
 

@@ -81,9 +81,9 @@ add_compile_fail_test(tensor_no_name        "Tensor entry has metadata but no na
 add_compile_fail_test(too_many_ops          "excess elements in struct initializer")
 
 # -- arch_properties.hpp --
-add_compile_fail_test(target_set_mixed_wave       "wavefront_size.*requires all targets")
+add_compile_fail_test(target_set_mixed_wave       "wavefront_size.*CK_COMMON_TRAP")
 add_compile_fail_test(fp8_ocp_unsupported         "FP8_OCP.*not yet supported")
-add_compile_fail_test(empty_target_set_wavefront  "wavefront_size.*called on empty")
+add_compile_fail_test(empty_target_set_wavefront  "wavefront_size.*CK_COMMON_TRAP")
 
 # -- fixed_string.hpp --
 add_compile_fail_test(tensor_name_too_long  "FixedString.*exceeds capacity")
