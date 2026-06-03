@@ -1,4 +1,4 @@
-# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyWaitCntInsertionPass --print-output
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
 #
 # StinkyWaitCntInsertionPass (gfx1250): WAR-on-LDS redundancy elision.
 # Two token-0 ds_load_b64 instructions feed a wmma via def-use (RAW), forcing
