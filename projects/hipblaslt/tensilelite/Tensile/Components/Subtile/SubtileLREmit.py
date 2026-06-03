@@ -611,9 +611,7 @@ def _lraTileAssignment_legacy(writer, kernel):
   # TDM loads the full DepthU tile at once, so the LDS M-row stride is
   # depthUBytes (the complete K row), not subIterKBytes (one subtile K-group).
   # Non-TDM GR writes individual subtile K-groups, so subIterKBytes is correct there.
-  hasTDM = kernel.get("enableTDMA", False) and kernel.get("enableTDMB", False)
-  ldsRowStride = tileInfoA.depthUBytes if hasTDM else subIterKBytes
-  module.add(VLShiftLeftB32(dst=vgpr(rowOffset), shiftHex=hex(ldsRowStride.bit_length()-1), src=vgpr(lane16), comment="offsetRow = %d*lane16" % ldsRowStride))
+  module.add(VLShiftLeftB32(dst=vgpr(rowOffset), shiftHex=hex(ldsKBytes.bit_length()-1), src=vgpr(lane16), comment="offsetRow = %d*lane16" % ldsKBytes))
   _computeLROffset(module, kernel, tileInfoA, colOffset, rowOffset)
   _computeLROffset(module, kernel, tileInfoB, colOffset, rowOffset)
   writer.vgprPool.checkIn(tmpVgpr)
