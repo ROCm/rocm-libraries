@@ -3,8 +3,8 @@
 
 """Tests for the hidden --internal-profiling-run sub-mode.
 
-The sub-mode must short-circuit gpu_check, skip Reporter output, and
-delegate to suite_runner.run_single_provider_engine for the named
+The sub-mode must skip Reporter output and delegate to
+suite_runner.run_single_provider_engine for the named
 (graph, engine). These tests focus on the wiring (parser flags,
 quiet reporter, error paths) rather than running an actual workload.
 """

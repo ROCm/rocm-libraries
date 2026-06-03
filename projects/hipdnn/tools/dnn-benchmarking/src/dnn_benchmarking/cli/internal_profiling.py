@@ -10,8 +10,8 @@ profiler expects a fresh process tree and a clean address space — that
 is how kernel-trace / PMC counters scope what they record.
 
 Short-circuits relative to the full CLI:
-  * No ``gpu_check`` — the parent already verified GPU availability.
-  * No engine discovery — the parent passed the exact engine ID.
+  * No backend startup checks — the parent already constructed the
+    hipDNN handle and passed the exact engine ID.
   * No Reporter console output — the profiler scrapes stderr and writes
     its own files; chatty stdout only confuses log capture.
   * No always-on metrics, no JSON output.
