@@ -68,6 +68,18 @@ jobs:
               -DGPU_TARGETS="gfx942"
             build_target: --target miopen_gtest --target package
 
+          - name: MIOpen Build HIP Package Check
+            job_id: hipnogpu-package-check
+            cmake_extra_flags: >-
+              -DCMAKE_BUILD_TYPE=release
+              -DBUILD_DEV=OFF
+              -DMIOPEN_TEST_DISCRETE=OFF
+              -DMIOPEN_USE_MLIR=ON
+              -DMIOPEN_GPU_SYNC=OFF
+              -DMIOPEN_BACKEND=HIPNOGPU
+              -DCMAKE_PREFIX_PATH=/opt/rocm
+            build_target: --target miopen_gtest --target package --target miopen_gtest_check
+
           - name: MIOpen HipNoGPU Debug Build-Only
             job_id: no-gpu-debug-build
             cmake_extra_flags: >-
