@@ -2271,7 +2271,18 @@ class LogicalScheduler:
                         # PGR=1: keep gr_inc — it advances SRD + swaps LW for
                         # tail entry (PRELOOP's single GR did neither).
                         removed.add(em.moduleId)
-                    elif em.opType == 'lr_inc' and not src.uid_swap:
+                    elif em.opType == 'lr_inc' and self.config.pgr == 2 and not src.uid_swap:
+                        # PGR=2: matching the gr_inc drop, NLL must drop the
+                        # MT-transition lr_inc too. uid_swap=True lr_incs
+                        # are within-iter (multi-DU ping-pong) and survive.
+                        # PGR=1: KEEP lr_inc — it pairs with the kept gr_inc
+                        # to advance the LR pointer for tail-loop entry.
+                        # The merge of PR 7781 + PR 7656 had this rule
+                        # ungated by pgr (parent-1 inheritance) which then
+                        # conflicted with parent-2's "drop gr_inc only at
+                        # PGR=2" — at PGR=1 single-DU GR advanced but LR
+                        # didn't, leaving tail-loop reading from the wrong
+                        # LDS half on random MX data.
                         removed.add(em.moduleId)
 
                 # Zero inflight counts on remaining WaitGR.
