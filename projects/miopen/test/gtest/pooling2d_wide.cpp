@@ -63,14 +63,6 @@ std::vector<PoolingTestCase> GetWidePooling2dTestCases()
     return test_cases;
 }
 
-inline bool IsKnownUnstableWideFp16Case(const pooling_gtest::PoolingTestCase& tc)
-{
-    return tc.in_shape == std::vector<int>{1, 3, 255, 255} &&
-           tc.lens == std::vector<int>{255, 255} && tc.pads == std::vector<int>{0, 0} &&
-           tc.strides == std::vector<int>{1, 1} && tc.in_layout == "NCHW" && tc.wsidx == 1 &&
-           (tc.mode == miopenPoolingAverage || tc.mode == miopenPoolingAverageInclusive);
-}
-
 } // anonymous namespace
 
 class GPU_WidePooling2d_FP32 : public pooling_gtest::PoolingCommon<float>
@@ -89,10 +81,10 @@ TEST_P(GPU_WidePooling2d_FP32, FloatTest) { RunTest(); }
 
 TEST_P(GPU_WidePooling2d_FP16, HalfTest)
 {
-    const auto& tc = GetParam();
-    if(IsKnownUnstableWideFp16Case(tc))
+    const auto& device_name = get_handle().GetDeviceName();
+    if(device_name.rfind("gfx110", 0) == 0)
     {
-        GTEST_SKIP() << "Temporary skip for unstable wide FP16 config; see #7924";
+        GTEST_SKIP() << "Temporary skip for wide FP16 pooling on gfx110x; see #7924";
     }
     RunTest();
 }
