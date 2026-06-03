@@ -134,7 +134,7 @@ jobs:
           sparse-checkout-cone-mode: true
 
       - name: Checkout TheRock
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6.0.2
         with:
           repository: ROCm/TheRock
           path: TheRock
