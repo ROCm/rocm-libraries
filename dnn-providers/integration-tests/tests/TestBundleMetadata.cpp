@@ -354,14 +354,14 @@ TEST(TestCheckVramRequirement, SkipsWhenDeviceHasInsufficientVram)
 // checkArchCompatibility — pure guard function
 // ---------------------------------------------------------------------------
 
-TEST(TestCheckArchCompatibility, PassesWhenExecutorNotSet)
+TEST(TestCheckArchCompatibility, PassesWhenSourceNotSet)
 {
     const BundleMetadata meta;
     // referenceSource is nullopt
     EXPECT_FALSE(checkArchCompatibility(meta, "gfx942:sramecc+:xnack-").has_value());
 }
 
-TEST(TestCheckArchCompatibility, PassesWhenExecutorIsCpu)
+TEST(TestCheckArchCompatibility, PassesWhenSourceIsCpu)
 {
     BundleMetadata meta;
     meta.referenceSource = "cpu";
@@ -442,13 +442,13 @@ TEST(TestCheckArchCompatibility, CpuCheckIsCaseInsensitive)
     BundleMetadata meta;
     meta.referenceSource = "CPU";
     meta.gpuArchitecture = "gfx1100";
-    // "CPU" is case-insensitively "cpu" → treated as CPU executor → arch guard skipped
+    // "CPU" is case-insensitively "cpu" → treated as CPU source → arch guard skipped
     EXPECT_FALSE(checkArchCompatibility(meta, "gfx942:sramecc+:xnack-").has_value());
 }
 
-TEST(TestCheckArchCompatibility, NonCpuExecutorTriggersArchGuard)
+TEST(TestCheckArchCompatibility, NonCpuSourceTriggersArchGuard)
 {
-    // Any executor name that is not "cpu" triggers the arch guard.
+    // Any source name that is not "cpu" triggers the arch guard.
     BundleMetadata meta;
     meta.referenceSource = "miopen";
     meta.gpuArchitecture = "gfx942";

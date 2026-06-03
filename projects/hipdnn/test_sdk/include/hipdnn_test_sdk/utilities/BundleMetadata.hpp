@@ -194,12 +194,12 @@ inline std::optional<std::string> checkArchCompatibility(const BundleMetadata& m
     // Case-insensitive: "cpu", "CPU", "Cpu" etc. are all treated as CPU reference.
     // CPU-generated golden data is architecture-independent.
     {
-        std::string execLower = *meta.referenceSource;
-        for(auto& c : execLower)
+        std::string sourceLower = *meta.referenceSource;
+        for(auto& c : sourceLower)
         {
             c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         }
-        if(execLower == "cpu")
+        if(sourceLower == "cpu")
         {
             return std::nullopt;
         }
