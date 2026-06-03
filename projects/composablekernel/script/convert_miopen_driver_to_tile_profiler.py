@@ -2,29 +2,89 @@
 # SPDX-License-Identifier: MIT
 
 # Convert miopen driver command to ck Profiler
-# Example: python3 ../script/convert_miopen_driver_to_profiler.py
-# /opt/rocm/bin/MIOpenDriver conv -n 32 -c 64 -H 28 -W 28 -k 64 -y 3 -x 3
-# -p 1 -q 1 -u 2 -v 2 -l 1 -j 1 -m conv -g 32 -F 1 -t 1
+# Example (single command mode):
+#   python3 ../script/convert_miopen_driver_to_tile_profiler.py
+#   /opt/rocm/bin/MIOpenDriver conv -n 32 -c 64 -H 28 -W 28 -k 64 -y 3 -x 3
+#   -p 1 -q 1 -u 2 -v 2 -l 1 -j 1 -m conv -g 32 -F 1 -t 1
+#
+# Example (batch mode):
+#   python3 ../script/convert_miopen_driver_to_tile_profiler.py
+#   --input-file commands.txt --output-file results.txt
 
 import argparse
 import subprocess
+import shlex
+import sys
+from io import StringIO
 
 
-def init_const_args(args):
-    args.ck_profiler_cmd = "../build/bin/ckProfiler"
+def init_const_args(args, profiler_path=None):
+    args.ck_profiler_cmd = profiler_path if profiler_path else "../build/bin/ckProfiler"
     # use decimal values
     args.init_method = 2
     # don't print tensor values
     args.log_value = 0
 
 
-def run_ck_profiler_cmd(cmd):
-    print("ckProfiler command:")
-    cmd_concatenated_str = ""
-    for arg in cmd:
-        cmd_concatenated_str += arg + " "
-    print(cmd_concatenated_str)
-    subprocess.run(cmd)
+def filter_to_best_config(output):
+    """Filter output to only show the best configuration section."""
+    if not output:
+        return output
+
+    lines = output.split('\n')
+    result_lines = []
+    in_best_config = False
+    no_instance_found = False
+
+    valid_prefixes = ('Best configuration parameters:', 'name:', 'avg_time:', 'tflops:', 'GB/s:')
+
+    if len(lines) > 1:
+        for line in lines:
+            if 'Best configuration parameters:' in line:
+                in_best_config = True
+
+            if in_best_config:
+                stripped = line.strip()
+                # Detect sentinel value (FLT_MAX) that indicates no applicable instance
+                if stripped.startswith('avg_time:') and '3.40282e+38' in stripped:
+                    no_instance_found = True
+                if stripped.startswith('Error:') or stripped.startswith('max err:'):
+                    continue
+                if stripped == '' or any(stripped.startswith(p) for p in valid_prefixes):
+                    result_lines.append(line)
+                elif stripped and not any(stripped.startswith(p) for p in valid_prefixes):
+                    continue
+
+    while result_lines and not result_lines[-1].strip():
+        result_lines.pop()
+
+    if no_instance_found:
+        return "No applicable instance found"
+
+    return '\n'.join(result_lines) if result_lines else output
+
+
+def run_ck_profiler_cmd(cmd, capture_output=False):
+    cmd_concatenated_str = " ".join(cmd)
+
+    if capture_output:
+        output = StringIO()
+        output.write("ckProfiler command:\n")
+        output.write(cmd_concatenated_str + "\n")
+        stderr_text = ""
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            output.write(result.stdout)
+            if result.stderr:
+                stderr_text = result.stderr
+        except Exception as e:
+            stderr_text = f"Error running command: {e}\n"
+        return (output.getvalue(), stderr_text)
+    else:
+        print("ckProfiler command:")
+        print(cmd_concatenated_str)
+        subprocess.run(cmd)
+        return None
 
 
 def parse_layouts(args):
@@ -112,7 +172,7 @@ def add_conv_params_to_cmd(args, cmd):
         exit(1)
 
 
-def run_ck_grouped_conv_fwd(args):
+def run_ck_grouped_conv_fwd(args, capture_output=False):
     args.ck_profier_op = "grouped_conv_fwd_tile"
     parse_data_type(args)
     parse_layouts(args)
@@ -134,15 +194,15 @@ def run_ck_grouped_conv_fwd(args):
     if args.list_instances:
         cmd += ["--list-instances"]
 
-    run_ck_profiler_cmd(cmd)
+    return run_ck_profiler_cmd(cmd, capture_output)
 
 
-def run_ck_grouped_conv_bwd_data(args):
+def run_ck_grouped_conv_bwd_data(args, capture_output=False):
     args.ck_profier_op = "grouped_conv_bwd_data_tile"
     parse_data_type(args)
     parse_layouts(args)
-    # Test all split K value from the list {1, 2, 4, 8, 32, 64, 128}
-    args.split_k_value = -1
+    # Only test split-K = 1.
+    args.split_k_value = 1
 
     cmd = [str(args.ck_profiler_cmd), str(args.ck_profier_op)]
     cmd += [str(args.data_type), str(args.layout)]
@@ -154,17 +214,17 @@ def run_ck_grouped_conv_bwd_data(args):
     add_conv_params_to_cmd(args, cmd)
 
     cmd += [str(args.split_k_value)]
-    
+
     # Add optional named arguments
     if args.instance != -1:
         cmd += ["--instance", str(args.instance)]
     if args.list_instances:
         cmd += ["--list-instances"]
-    
-    run_ck_profiler_cmd(cmd)
+
+    return run_ck_profiler_cmd(cmd, capture_output)
 
 
-def run_ck_grouped_conv_bwd_weight(args):
+def run_ck_grouped_conv_bwd_weight(args, capture_output=False):
     args.ck_profier_op = "grouped_conv_bwd_weight_tile"
     parse_data_type(args)
     parse_layouts(args)
@@ -181,14 +241,14 @@ def run_ck_grouped_conv_bwd_weight(args):
     add_conv_params_to_cmd(args, cmd)
 
     cmd += [str(args.split_k_value)]
-    
+
     # Add optional named arguments
     if args.instance != -1:
         cmd += ["--instance", str(args.instance)]
     if args.list_instances:
         cmd += ["--list-instances"]
-    
-    run_ck_profiler_cmd(cmd)
+
+    return run_ck_profiler_cmd(cmd, capture_output)
 
 
 # Get name of miopen driver, remove it from unknown
@@ -210,29 +270,186 @@ def process_miopen_driver_name(args, unknown):
         exit(1)
 
 
-def run_ck_profiler(args):
+def run_ck_profiler(args, capture_output=False):
     # MIOpen get number of channel per all groups, CK profiler get number of
     # channel per group
     args.in_channels = int(args.in_channels / args.group_count)
     args.out_channels = int(args.out_channels / args.group_count)
 
+    outputs = []
+    stderr_lines = []
+
     if args.forw == 0 or args.forw == 1 or args.forw == 3 or args.forw == 5:
-        run_ck_grouped_conv_fwd(args)
+        result = run_ck_grouped_conv_fwd(args, capture_output)
+        if capture_output and result:
+            outputs.append(result[0])
+            if result[1]:
+                stderr_lines.append(result[1])
     if args.forw == 0 or args.forw == 2 or args.forw == 3 or args.forw == 6:
-        run_ck_grouped_conv_bwd_data(args)
+        result = run_ck_grouped_conv_bwd_data(args, capture_output)
+        if capture_output and result:
+            outputs.append(result[0])
+            if result[1]:
+                stderr_lines.append(result[1])
     if args.forw == 0 or args.forw == 4 or args.forw == 5 or args.forw == 6:
-        run_ck_grouped_conv_bwd_weight(args)
+        result = run_ck_grouped_conv_bwd_weight(args, capture_output)
+        if capture_output and result:
+            outputs.append(result[0])
+            if result[1]:
+                stderr_lines.append(result[1])
+
+    if capture_output:
+        return ("\n".join(outputs), "\n".join(stderr_lines))
+    return None
+
+
+def process_single_command(command_line, parser, capture_output=False, profiler_path=None, verbose=False, gpu_verify=False):
+    """Process a single MIOpen driver command line."""
+    try:
+        argv = shlex.split(command_line)
+    except ValueError as e:
+        error_msg = f"Error parsing command line: {e}\n"
+        if capture_output:
+            return error_msg
+        print(error_msg)
+        return None
+
+    args, unknown = parser.parse_known_args(argv)
+    init_const_args(args, profiler_path)
+    process_miopen_driver_name(args, unknown)
+
+    if gpu_verify:
+        args.verify = 2
+
+    if not capture_output:
+        print("Ignored args:")
+        print(unknown)
+
+    result = run_ck_profiler(args, capture_output)
+
+    if capture_output and result:
+        output_str, stderr_str = result
+        if verbose:
+            return output_str + (f"\nSTDERR:\n{stderr_str}" if stderr_str else "")
+        filtered = filter_to_best_config(output_str)
+        if stderr_str:
+            filtered += f"\nSTDERR:\n{stderr_str}"
+        return filtered
+
+    return result
+
+
+def process_batch_file(input_file, output_file, parser, profiler_path=None, verbose=False, start_line=0, gpu_verify=False):
+    """Process a batch file of MIOpen driver commands."""
+    try:
+        try:
+            with open(input_file, 'r', encoding='utf-8') as f_in:
+                lines = f_in.readlines()
+        except UnicodeDecodeError:
+            with open(input_file, 'r', encoding='utf-16') as f_in:
+                lines = f_in.readlines()
+    except IOError as e:
+        print(f"Error reading input file '{input_file}': {e}")
+        sys.exit(1)
+
+    total_lines = len(lines)
+
+    try:
+        f_out = open(output_file, 'w')
+    except IOError as e:
+        print(f"Error opening output file '{output_file}': {e}")
+        sys.exit(1)
+
+    try:
+        if start_line > 1:
+            print(f"Continuing from command {start_line} (skipping first {start_line - 1} commands)")
+            lines = lines[start_line - 1:]
+            total_lines -= (start_line - 1)
+
+        for i, line in enumerate(lines, 0):
+            line = line.strip()
+
+            if not line or line.startswith('#'):
+                continue
+
+            print(f"Processing command {i}/{total_lines}: {line[:80]}...")
+
+            f_out.write(f"{'='*80}\n")
+            f_out.write(f"Input command: {line}\n")
+            f_out.write(f"{'='*80}\n")
+
+            output = process_single_command(
+                line, parser,
+                capture_output=True,
+                profiler_path=profiler_path,
+                verbose=verbose,
+                gpu_verify=gpu_verify,
+            )
+            if output:
+                f_out.write(output)
+                f_out.write("\n")
+            f_out.write("\n")
+
+            f_out.flush()
+
+        print(f"\nResults written to '{output_file}'")
+    finally:
+        f_out.close()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         prog="converter",
-        description="Convert miopen driver command to ck Profiler"
-        "\nExample: python3 "
-        "../script/convert_miopen_driver_to_profiler.py "
+        description="Convert miopen driver command to ck tile Profiler"
+        "\nExample (single command): python3 "
+        "../script/convert_miopen_driver_to_tile_profiler.py "
         "/opt/rocm/bin/MIOpenDriver conv -n 32 -c 64 -H 28 -W 28 "
         "-k 64 -y 3 -x 3 -p 1 -q 1 -u 1 -v 1 -l 1 -j 1 -m conv -g "
-        "32 -F 1 -t 1",
+        "32 -F 1 -t 1"
+        "\nExample (batch mode): python3 "
+        "../script/convert_miopen_driver_to_tile_profiler.py "
+        "--input-file commands.txt --output-file results.txt",
+    )
+    parser.add_argument(
+        "--input-file",
+        type=str,
+        required=False,
+        default=None,
+        help="Input file containing MIOpen driver commands (one per line). "
+        "Enables batch mode.",
+    )
+    parser.add_argument(
+        "--output-file",
+        type=str,
+        required=False,
+        default=None,
+        help="Output file to store profiler results (required with --input-file).",
+    )
+    parser.add_argument(
+        "--profiler-path",
+        type=str,
+        required=False,
+        default=None,
+        help="Path to ckProfiler executable (default: ../build/bin/ckProfiler).",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        default=False,
+        help="Show full profiler output. Default shows only best configuration.",
+    )
+    parser.add_argument(
+        "--continue-from",
+        type=int,
+        required=False,
+        default=0,
+        help="Line number to continue from in batch mode (default: 0).",
+    )
+    parser.add_argument(
+        "--gpu-verify",
+        action="store_true",
+        default=False,
+        help="Use GPU verification (passes verify=2 to ckProfiler, overriding the -V flag).",
     )
     parser.add_argument(
         "-in_layout",
@@ -498,9 +715,41 @@ if __name__ == "__main__":
         help="List valid instances without running",
     )
 
-    args, unknown = parser.parse_known_args()
-    init_const_args(args)
-    process_miopen_driver_name(args, unknown)
-    print("Ignored args:")
-    print(unknown)
-    run_ck_profiler(args)
+    preliminary_args, _ = parser.parse_known_args()
+
+    if preliminary_args.input_file is not None:
+        # Batch mode
+        if preliminary_args.output_file is None:
+            print("Error: --output-file is required when using --input-file")
+            sys.exit(1)
+
+        print(f"Batch mode: Reading commands from '{preliminary_args.input_file}'")
+        profiler_path = preliminary_args.profiler_path
+        if profiler_path:
+            print(f"Using profiler: '{profiler_path}'")
+        if not preliminary_args.verbose:
+            print("Output mode: best configuration only (use --verbose for full output)")
+        if preliminary_args.gpu_verify:
+            print("GPU verification enabled (verify=2)")
+        process_batch_file(
+            preliminary_args.input_file,
+            preliminary_args.output_file,
+            parser,
+            profiler_path,
+            preliminary_args.verbose,
+            preliminary_args.continue_from,
+            preliminary_args.gpu_verify,
+        )
+    else:
+        # Single command mode
+        args, unknown = parser.parse_known_args()
+        profiler_path = args.profiler_path
+        if profiler_path:
+            print(f"Using profiler: '{profiler_path}'")
+        init_const_args(args, profiler_path)
+        process_miopen_driver_name(args, unknown)
+        if args.gpu_verify:
+            args.verify = 2
+        print("Ignored args:")
+        print(unknown)
+        run_ck_profiler(args)
