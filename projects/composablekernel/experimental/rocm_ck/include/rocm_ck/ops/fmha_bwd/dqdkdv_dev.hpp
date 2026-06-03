@@ -110,9 +110,30 @@ struct FmhaBwdDQDKDVTypes
     // targets (gfx10/11/12) the same NumWarps would yield BlockSize=128,
     // breaking the BlockTile arithmetic and warp-level intrinsics encoded
     // into the pipeline. Refuse to compile this bridge on non-gfx9 targets.
+    //
+    // Toolchain compatibility for the wavefront-size predefine:
+    //   - clang <=22 exposes __AMDGCN_WAVEFRONT_SIZE (and later also the
+    //     double-underscore __AMDGCN_WAVEFRONT_SIZE__ during the transition);
+    //   - clang >=23 dropped both predefines, so fall back to the gfx9 arch
+    //     macro -- gfx9 (CDNA) is wave64 by construction, which is exactly the
+    //     property this guard requires. wave32 targets (gfx10/11/12) define
+    //     __GFX10__/__GFX11__/__GFX12__ instead and hit the #else, rejecting
+    //     the bridge as intended.
+#if defined(__AMDGCN_WAVEFRONT_SIZE__)
+    static_assert(__AMDGCN_WAVEFRONT_SIZE__ == 64,
+                  "FmhaBwdDQDKDV bridge requires wave64 (gfx9). The hardcoded "
+                  "BlockSize=256 / NumWarps=4 tile config assumes warp_size=64.");
+#elif defined(__AMDGCN_WAVEFRONT_SIZE)
     static_assert(__AMDGCN_WAVEFRONT_SIZE == 64,
                   "FmhaBwdDQDKDV bridge requires wave64 (gfx9). The hardcoded "
                   "BlockSize=256 / NumWarps=4 tile config assumes warp_size=64.");
+#elif defined(__GFX9__)
+    // gfx9 is wave64 by construction; no value to assert.
+#else
+    static_assert(false,
+                  "FmhaBwdDQDKDV bridge requires wave64 (gfx9): target is not "
+                  "gfx9 and no __AMDGCN_WAVEFRONT_SIZE predefine is available.");
+#endif
 
     // --- Tile shape (hardcoded for d128 gfx9 -- Config 4 from fmha_bwd.py) ---
     //
