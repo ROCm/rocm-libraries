@@ -1,0 +1,115 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+
+name: MIOpen CI
+
+on:
+  push:
+    branches:
+      - develop
+      - release/therock-*
+    paths:
+      - 'projects/miopen/**'
+      - '.github/workflows/miopen-ci.yml'
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'projects/miopen/**'
+      - '.github/workflows/miopen-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  miopen-no-ck-build:
+    name: MIOpen Hip Debug NOCK Build-Only
+    permissions:
+      id-token: write
+    container:
+      image: rocm/miopen-dev:latest
+      options: -v /runner/config:/home/awsconfig/
+    strategy:
+      fail-fast: true
+    runs-on: azure-linux-scale-rocm
+    env:
+      GPU_TARGET: gfx94X-dcgpu
+    steps:
+      - name: Runner health status
+        run: |
+          echo "=== OS ==="
+          cat /etc/os-release | head -2
+          echo "=== CPU ==="
+          lscpu | grep -E 'Model name|^CPU\(s\)'
+          echo "=== Memory ==="
+          free -h | grep Mem
+          echo "=== Disk ==="
+          df -h /
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            .dvc
+            .github
+            cmake
+            projects/miopen
+
+      - name: Configure build
+        run: |
+          export PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH
+          export CXX=/opt/rocm/llvm/bin/clang++
+          export CXXFLAGS=-Werror
+          rm -rf projects/miopen/install
+          mkdir projects/miopen/install
+          cmake -S projects/miopen -B build \
+          -DMIOPEN_TEST_FLAGS=' --disable-verification-cache ' \
+          -DCMAKE_BUILD_TYPE=debug \
+          -DCMAKE_CXX_FLAGS_DEBUG='-g -fno-omit-frame-pointer -fsanitize=undefined -fno-sanitize-recover=undefined -Wno-option-ignored ' \
+          -DBUILD_DEV=OFF \
+          -DCMAKE_INSTALL_PREFIX=$(pwd)/projects/miopen/install \
+          -DMIOPEN_USE_MLIR=OFF \
+          -DMIOPEN_GPU_SYNC=OFF \
+          -DMIOPEN_USE_COMPOSABLEKERNEL=OFF \
+          -DCMAKE_PREFIX_PATH=/opt/rocm \
+          -DGPU_TARGETS="$GPU_TARGET"
+
+      - name: Build
+        run: |
+          export LLVM_PATH=/opt/rocm/llvm
+          export CTEST_PARALLEL_LEVEL=4
+          cmake --build build --target install -j$(nproc)
+
+  # miopen-hip-package-build:
+
+  # miopen-no-gpu-debug-build:
+
+  # miopen-tuna-fin-build:
+
+  miopen_build_summary:
+    name: MIOpen CI Summary
+    if: always()
+    needs:
+      - miopen-no-ck-build
+      # - miopen-hip-package-build
+      # - miopen-no-gpu-debug-build
+      # - miopen-tuna-fin-build
+    
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Report results
+        run: |
+          echo '${{ toJson(needs) }}'
+          FAILED_JOBS="$(echo '${{ toJson(needs) }}' \
+            | jq --raw-output \
+            'map_values(select(.result!="success" and .result!="skipped")) | keys | join(",")' \
+          )"
+          if [[ "${FAILED_JOBS}" != "" ]]; then
+            echo "Failed jobs: ${FAILED_JOBS}"
+            exit 1
+          fi
