@@ -94,6 +94,7 @@ BenchmarkProblems:
         - DirectToVgprB: [False]
         - WavefrontSize: [32]
         - ClusterDim: [[1, 1], [2, 2], [2, 3], [4, 2]]
+        - ClusterBarrier: [True]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:
@@ -158,6 +159,7 @@ BenchmarkProblems:
         - ExpandPointerSwap: [0]
         - GroupLoadStore: [False]
         - ClusterDim: [[1, 1], [2, 2], [2, 3]]
+        - ClusterBarrier: [True]
       BenchmarkForkParameters:
       JoinParameters:
       BenchmarkJoinParameters:

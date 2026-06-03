@@ -57,16 +57,12 @@ enum TensorType
 using TensorVariant = std::variant<tensor<float>, tensor<int64_t>>;
 struct TensorStruct
 {
-    // support only two types for now - float and int64.
-    TensorStruct(TensorType type, unsigned int n, unsigned int h, unsigned int s, unsigned int d)
-    {
-        switch(type)
-        {
-        case TensorType::Float: tensorVariant = tensor<float>(n, h, s, d); break;
-        case TensorType::Int64: tensorVariant = tensor<int64_t>(n, h, s, d); break;
-        default: assert(false); // not supported
-        }
-    }
+    template <TensorType Type>
+    TensorStruct(std::integral_constant<TensorType, Type>,
+                 unsigned int n,
+                 unsigned int h,
+                 unsigned int s,
+                 unsigned int d);
 
     TensorStruct(const TensorVariant& var) { tensorVariant = var; }
 
@@ -155,6 +151,26 @@ struct TensorStruct
 
     Allocator::ManageDataPtr gpuBuffer;
 };
+
+template <>
+TensorStruct::TensorStruct(std::integral_constant<TensorType, TensorType::Float>,
+                           unsigned int n,
+                           unsigned int h,
+                           unsigned int s,
+                           unsigned int d)
+    : tensorVariant(tensor<float>(n, h, s, d))
+{
+}
+
+template <>
+TensorStruct::TensorStruct(std::integral_constant<TensorType, TensorType::Int64>,
+                           unsigned int n,
+                           unsigned int h,
+                           unsigned int s,
+                           unsigned int d)
+    : tensorVariant(tensor<int64_t>(n, h, s, d))
+{
+}
 
 typedef std::unique_ptr<TensorStruct> TensorStructPtr;
 
@@ -333,8 +349,12 @@ private:
                                unsigned int s = 1,
                                unsigned int d = 1)
     {
-        tensors[id] = std::make_unique<TensorStruct>(
-            IsInt64TensorId(id) ? TensorType::Int64 : TensorType::Float, n, h, s, d);
+        if(IsInt64TensorId(id))
+            tensors[id] = std::make_unique<TensorStruct>(
+                std::integral_constant<TensorType, TensorType::Int64>{}, n, h, s, d);
+        else
+            tensors[id] = std::make_unique<TensorStruct>(
+                std::integral_constant<TensorType, TensorType::Float>{}, n, h, s, d);
 
         EXPECT_EQUAL(
             miopenSetProblemTensorDescriptor(problem, id, &tensors[id]->GetTensorDescriptor()),
