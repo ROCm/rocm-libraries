@@ -97,11 +97,16 @@ jobs:
         id: rtd
         env:
           RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
+          FOLDER_NAME: ${{ steps.extract.outputs.project_name }}
         run: |
           branch_name="${{ steps.pr.outputs.branch }}"
           # Generate slug like 'user-me-my_test_branch' from 'user/me/my_test_branch'
           version_slug="${branch_name//\//-}"
-          project_slug="advanced-micro-devices-${{ steps.extract.outputs.project_name }}"
+
+          # Load the map and look up the rtd_slug by rtd_alias
+          project_slug=$(jq -r --arg folder_name "$FOLDER_NAME" \
+            '.projects[] | select(.folder == $folder_name) | .rtd_slug' \
+            .github/docs-config.json)
 
           echo "version_slug=$version_slug" >> $GITHUB_OUTPUT
           echo "project_slug=$project_slug" >> $GITHUB_OUTPUT
