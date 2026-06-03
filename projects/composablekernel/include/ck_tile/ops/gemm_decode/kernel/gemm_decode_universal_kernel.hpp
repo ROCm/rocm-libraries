@@ -25,7 +25,9 @@ namespace ck_tile {
 //
 // Other constraints:
 //   - kOutputAxis = SmallM
-//   - kMPerWarp = kNPerWarp = 1
+//   - kMPerWarp >= 1, kNPerWarp >= 1: each warp computes a kMPerWarp x
+//     kNPerWarp output tile. kMPerWarp > 1 reuses each B row across the M
+//     rows held in registers (B-reuse), the dual of the kNPerWarp A-reuse.
 //   - kWarpsPerBlock = 1
 //   - kBPreshuffle = false                (P4 hook reserved)
 //   - kHasBias is honoured: when true, the [N] bias vector is added in
@@ -61,8 +63,10 @@ struct GemmDecodeUniversalKernel : public GemmDecodeNumeric
 
     static_assert(kOutputAxis == GemmDecodeOutputAxis::SmallM,
                   "GemmDecodeUniversalKernel P0 supports only SmallM orientation.");
-    static_assert(kMPerWarp == 1 && kNPerWarp == 1,
-                  "GemmDecodeUniversalKernel P0 supports only kMPerWarp = kNPerWarp = 1.");
+    static_assert(kMPerWarp >= 1,
+                  "GemmDecodeUniversalKernel requires kMPerWarp >= 1.");
+    static_assert(kNPerWarp >= 1,
+                  "GemmDecodeUniversalKernel requires kNPerWarp >= 1.");
     static_assert(Problem::kWarpsPerBlock == 1,
                   "GemmDecodeUniversalKernel P0 expects exactly one warp per block.");
     static_assert(kIsUnscaled || kIsPerTensor,
@@ -144,7 +148,7 @@ struct GemmDecodeUniversalKernel : public GemmDecodeNumeric
 
     CK_TILE_HOST static constexpr auto GridSize(const Kargs& hargs)
     {
-        return dim3(static_cast<uint32_t>(hargs.M),
+        return dim3(static_cast<uint32_t>(integer_divide_ceil(hargs.M, kMPerWarp)),
                     static_cast<uint32_t>(integer_divide_ceil(hargs.N, kNPerWarp)),
                     static_cast<uint32_t>(hargs.k_batch));
     }
@@ -193,10 +197,10 @@ struct GemmDecodeUniversalKernel : public GemmDecodeNumeric
         {
             return fail("GemmDecodeUniversalKernel requires N divisible by kNPerWarp.");
         }
-        if(kargs.M % kMPerWarp != 0)
-        {
-            return fail("GemmDecodeUniversalKernel requires M divisible by kMPerWarp.");
-        }
+        // M need not be divisible by kMPerWarp: the kernel launches
+        // ceil(M / kMPerWarp) row-blocks, clamps the tail block's A-row loads
+        // in-bounds, and masks those rows in the epilogue, so any runtime M is
+        // valid.
         if(kargs.k_batch > 1 && (kargs.N % 2 != 0))
         {
             // The scalar atomic-add helper widens to a 32-bit pair; an odd N
@@ -234,14 +238,14 @@ struct GemmDecodeUniversalKernel : public GemmDecodeNumeric
     {
         constexpr index_t kTileN = get_warp_size() * kVector;
 
-        // (m, n_block) recovery. With the chiplet-swizzle path enabled,
+        // (m_block, n_block) recovery. With the chiplet-swizzle path enabled,
         // the hardware (blockIdx.x, blockIdx.y) pair is treated as a flat
         // wgid, remapped through the XCD-aware permutation, and then
         // unflattened so consecutive logical wgids land on the same XCD's
         // L2 slice. k_id stays on blockIdx.z and is *not* part of the
-        // remap: each split-K shard has its own contiguous (m, n_block)
+        // remap: each split-K shard has its own contiguous (m_block, n_block)
         // sweep and can independently benefit from the chunked layout.
-        index_t m;
+        index_t m_block;
         index_t n_block;
         if constexpr(Problem::kChipletSwizzle)
         {
@@ -255,19 +259,20 @@ struct GemmDecodeUniversalKernel : public GemmDecodeNumeric
                                                     num_m_blocks * num_n_blocks,
                                                     Problem::kChipletNumXcds,
                                                     Problem::kChipletChunkSize);
-            m       = logical_wgid % num_m_blocks;
+            m_block = logical_wgid % num_m_blocks;
             n_block = logical_wgid / num_m_blocks;
         }
         else
         {
-            m       = static_cast<index_t>(blockIdx.x);
+            m_block = static_cast<index_t>(blockIdx.x);
             n_block = static_cast<index_t>(blockIdx.y);
         }
+        const index_t m_base  = m_block * kMPerWarp;
         const index_t n_base  = n_block * kNPerWarp;
         const index_t k_id    = static_cast<index_t>(blockIdx.z);
         const index_t k_batch = kargs.k_batch;
 
-        if(m >= kargs.M || n_base >= kargs.N)
+        if(m_base >= kargs.M || n_base >= kargs.N)
             return;
 
         // Distribute kTileN-sized iterations across k_batch shards. When
@@ -306,24 +311,53 @@ struct GemmDecodeUniversalKernel : public GemmDecodeNumeric
             number<kVector>{},
             number<1>{});
 
-        auto a_window = make_tile_window(
-            a_view,
-            make_tuple(number<1>{}, number<kTileN>{}),
-            {m, k_offset},
-            Policy::template MakeOutputTileDistribution<Problem>());
-        auto b_window = make_tile_window(
-            b_view,
-            make_tuple(number<1>{}, number<kTileN>{}),
-            {n_base, k_offset},
-            Policy::template MakeOutputTileDistribution<Problem>());
+        // kMPerWarp activation-row windows. Each warp owns a
+        // kMPerWarp x kNPerWarp output tile: A[m_base+jm, :] is loaded once per
+        // K-iteration and reused across the kNPerWarp B rows (the A-reuse from
+        // A1), and -- the key win over the old per-row grid -- each
+        // B[n_base+jn, :] vector is loaded once and reused across the kMPerWarp
+        // A rows held in registers (B-reuse). This is the dual of the kNPerWarp
+        // A-reuse and the structural trick behind FlyDSL/MFMA's flat-in-M
+        // curve (they reuse a 16-row A-fragment across N; we reuse B across
+        // kMPerWarp rows in VGPRs), so B traffic drops from ~M*N*K to ~N*K and
+        // the kernel stops scaling with M.
+        //
+        // Tail block: when m_base + jm >= M the row is clamped to M-1 so the
+        // global load stays in-bounds; that row's result is dropped by the
+        // masked epilogue.
+        auto a_windows = generate_tuple(
+            [&](auto jm) {
+                index_t a_row = m_base + jm.value;
+                if(a_row >= kargs.M)
+                    a_row = kargs.M - 1;
+                return make_tile_window(
+                    a_view,
+                    make_tuple(number<1>{}, number<kTileN>{}),
+                    {a_row, k_offset},
+                    Policy::template MakeOutputTileDistribution<Problem>());
+            },
+            number<kMPerWarp>{});
 
-        ComputeDataType acc = type_convert<ComputeDataType>(0.0f);
+        // kMPerWarp x kNPerWarp output accumulators, row-major in
+        // (jm * kNPerWarp + jn).
+        array<ComputeDataType, kMPerWarp * kNPerWarp> acc;
+        static_for<0, kMPerWarp * kNPerWarp, 1>{}([&](auto idx) {
+            acc(idx) = type_convert<ComputeDataType>(0.0f);
+        });
+
+        // One persistent B window per N output, all moved together each iter.
+        auto b_windows = generate_tuple(
+            [&](auto jn) {
+                return make_tile_window(
+                    b_view,
+                    make_tuple(number<1>{}, number<kTileN>{}),
+                    {n_base + jn.value, k_offset},
+                    Policy::template MakeOutputTileDistribution<Problem>());
+            },
+            number<kNPerWarp>{});
 
         for(index_t i = 0; i < num_iter; ++i)
         {
-            auto a_tile = load_tile(a_window);
-            auto b_tile = load_tile(b_window);
-
             if constexpr(Problem::kUseDot2)
             {
                 static_assert(std::is_same_v<ComputeDataType, float>,
@@ -333,88 +367,146 @@ struct GemmDecodeUniversalKernel : public GemmDecodeNumeric
                               "GemmDecodeUniversalKernel dot2 path requires kVector "
                               "divisible by 2.");
 
-                // Sweep kVector/2 BF16x2 pairs. For BF16/FP16 inputs, each pair is
-                // already one uint32_t in the tile thread buffer; for FP8 inputs we
-                // have one uint32_t per 4 FP8s (kVector/4 words) and split each
-                // word into two BF16x2 pairs via fp8x2_to_bf16x2.
-                static_for<0, kVector / 2, 1>{}([&](auto ipair) {
-                    uint32_t a_pair;
-                    uint32_t b_pair;
-                    if constexpr(std::is_same_v<ADataType, fp8_t>)
-                    {
-                        constexpr index_t word = ipair.value / 2;
-                        constexpr index_t sel  = ipair.value % 2;
-                        a_pair = fp8x2_to_bf16x2<sel>(
-                            a_tile.get_thread_buffer().template get_as<uint32_t>(
-                                number<word>{}));
-                        b_pair = fp8x2_to_bf16x2<sel>(
-                            b_tile.get_thread_buffer().template get_as<uint32_t>(
-                                number<word>{}));
-                    }
-                    else
-                    {
-                        // BF16/FP16: each pair is one uint32_t holding two halfs.
-                        a_pair = a_tile.get_thread_buffer().template get_as<uint32_t>(ipair);
-                        b_pair = b_tile.get_thread_buffer().template get_as<uint32_t>(ipair);
-                    }
-                    acc = dot2_bf16_packed_add(acc, a_pair, b_pair);
+                // Dequantize each A row into kVector/2 BF16x2 register pairs
+                // once; a_pairs[jm*(kVector/2)+ipair] is reused across the
+                // kNPerWarp B rows below.
+                array<uint32_t, kMPerWarp*(kVector / 2)> a_pairs;
+                static_for<0, kMPerWarp, 1>{}([&](auto jm) {
+                    auto a_tile = load_tile(a_windows[jm]);
+                    static_for<0, kVector / 2, 1>{}([&](auto ipair) {
+                        constexpr index_t slot = jm.value * (kVector / 2) + ipair.value;
+                        if constexpr(std::is_same_v<ADataType, fp8_t>)
+                        {
+                            constexpr index_t word = ipair.value / 2;
+                            constexpr index_t sel  = ipair.value % 2;
+                            a_pairs(number<slot>{}) = fp8x2_to_bf16x2<sel>(
+                                a_tile.get_thread_buffer().template get_as<uint32_t>(
+                                    number<word>{}));
+                        }
+                        else
+                        {
+                            a_pairs(number<slot>{}) =
+                                a_tile.get_thread_buffer().template get_as<uint32_t>(ipair);
+                        }
+                    });
+                });
+
+                // Each B row is loaded and dequantized once, then reused across
+                // all kMPerWarp accumulators -- the B-reuse win.
+                static_for<0, kNPerWarp, 1>{}([&](auto jn) {
+                    auto b_tile = load_tile(b_windows[jn]);
+                    array<uint32_t, kVector / 2> b_pairs;
+                    static_for<0, kVector / 2, 1>{}([&](auto ipair) {
+                        if constexpr(std::is_same_v<BDataType, fp8_t>)
+                        {
+                            constexpr index_t word = ipair.value / 2;
+                            constexpr index_t sel  = ipair.value % 2;
+                            b_pairs(ipair) = fp8x2_to_bf16x2<sel>(
+                                b_tile.get_thread_buffer().template get_as<uint32_t>(
+                                    number<word>{}));
+                        }
+                        else
+                        {
+                            b_pairs(ipair) =
+                                b_tile.get_thread_buffer().template get_as<uint32_t>(ipair);
+                        }
+                    });
+                    static_for<0, kMPerWarp, 1>{}([&](auto jm) {
+                        constexpr index_t acc_idx = jm.value * kNPerWarp + jn.value;
+                        static_for<0, kVector / 2, 1>{}([&](auto ipair) {
+                            constexpr index_t slot = jm.value * (kVector / 2) + ipair.value;
+                            acc(number<acc_idx>{}) = dot2_bf16_packed_add(
+                                acc[number<acc_idx>{}], a_pairs[number<slot>{}],
+                                b_pairs[ipair]);
+                        });
+                    });
                 });
             }
             else
             {
-                constexpr auto spans = decltype(a_tile)::get_distributed_spans();
-                sweep_tile_span(spans[number<1>{}], [&](auto idx1) {
-                    constexpr auto idx = make_tuple(make_tuple(), idx1);
-                    const auto a_val = type_convert<ComputeDataType>(a_tile[idx]);
-                    const auto b_val = type_convert<ComputeDataType>(b_tile[idx]);
-                    acc += a_val * b_val;
+                // Plain path: load all kMPerWarp A rows once, then reuse each B
+                // row across them.
+                auto a_tiles = generate_tuple(
+                    [&](auto jm) { return load_tile(a_windows[jm]); },
+                    number<kMPerWarp>{});
+                static_for<0, kNPerWarp, 1>{}([&](auto jn) {
+                    auto b_tile = load_tile(b_windows[jn]);
+                    static_for<0, kMPerWarp, 1>{}([&](auto jm) {
+                        constexpr index_t acc_idx = jm.value * kNPerWarp + jn.value;
+                        auto a_tile          = a_tiles[jm];
+                        constexpr auto spans = decltype(a_tile)::get_distributed_spans();
+                        sweep_tile_span(spans[number<1>{}], [&](auto idx1) {
+                            constexpr auto idx = make_tuple(make_tuple(), idx1);
+                            const auto a_val = type_convert<ComputeDataType>(a_tile[idx]);
+                            const auto b_val = type_convert<ComputeDataType>(b_tile[idx]);
+                            acc(number<acc_idx>{}) += a_val * b_val;
+                        });
+                    });
                 });
             }
 
-            move_tile_window(a_window, {0, kTileN});
-            move_tile_window(b_window, {0, kTileN});
+            static_for<0, kMPerWarp, 1>{}([&](auto jm) {
+                move_tile_window(a_windows[jm], {0, kTileN});
+            });
+            static_for<0, kNPerWarp, 1>{}([&](auto jn) {
+                move_tile_window(b_windows[jn], {0, kTileN});
+            });
         }
 
-        acc = wavefront_reduce_sum(acc);
+        static_for<0, kMPerWarp * kNPerWarp, 1>{}([&](auto idx) {
+            acc(idx) = wavefront_reduce_sum(acc[idx]);
+        });
 
         if(get_lane_id() == 0)
         {
-            const index_t n = n_base;
-            // PerTensor: fold the two scalar scales into the reduced acc.
-            if constexpr(kIsPerTensor)
-            {
-                acc = acc * x_scale_val * w_scale_val;
-            }
+            auto* p_c = static_cast<CDataType*>(kargs.p_c);
 
-            // Bias: add bias[n] to the first split-K shard only so that the
-            // atomicAdd partials sum to (bias + sum_k a*b). Mirrors
-            // wvSplitK*'s in-kernel bias add. Bias dtype follows CDataType.
-            //
-            // Implementation note: this is a single scalar load by lane 0, in
-            // the same lane-0-only block that does the scalar store / atomic-
-            // add to C. Using a tile_window over a [N] vector for a single
-            // element would be pure overhead, so we read the pointer directly
-            // - matching the style of the C epilogue below.
-            if constexpr(kHasBias)
-            {
-                if(k_id == 0)
-                {
-                    const auto* p_bias  = static_cast<const CDataType*>(kargs.p_bias);
-                    const auto bias_val = type_convert<ComputeDataType>(p_bias[n]);
-                    acc += bias_val;
-                }
-            }
+            static_for<0, kMPerWarp, 1>{}([&](auto jm) {
+                const index_t m_row = m_base + jm.value;
+                // Tail block: rows >= M were clamped on load and are dropped
+                // here. The grid is ceil(N / kNPerWarp) and N % kNPerWarp == 0
+                // is enforced, so every n below is in range.
+                if(m_row >= kargs.M)
+                    return;
 
-            auto* p_c            = static_cast<CDataType*>(kargs.p_c);
-            const auto out_value = type_convert<CDataType>(acc);
-            if(k_batch == 1)
-            {
-                p_c[m * kargs.stride_c + n] = out_value;
-            }
-            else
-            {
-                gemm_decode_atomic_add(p_c + m * kargs.stride_c + n, out_value);
-            }
+                static_for<0, kNPerWarp, 1>{}([&](auto jn) {
+                    const index_t n           = n_base + jn.value;
+                    constexpr index_t acc_idx = jm.value * kNPerWarp + jn.value;
+                    ComputeDataType out_acc   = acc[number<acc_idx>{}];
+
+                    // PerTensor: fold the two scalar scales into the reduced acc.
+                    if constexpr(kIsPerTensor)
+                    {
+                        out_acc = out_acc * x_scale_val * w_scale_val;
+                    }
+
+                    // Bias: add bias[n] to the first split-K shard only so the
+                    // atomicAdd partials sum to (bias + sum_k a*b). Mirrors
+                    // wvSplitK*'s in-kernel bias add. Bias dtype follows CDataType.
+                    if constexpr(kHasBias)
+                    {
+                        if(k_id == 0)
+                        {
+                            const auto* p_bias =
+                                static_cast<const CDataType*>(kargs.p_bias);
+                            const auto bias_val =
+                                type_convert<ComputeDataType>(p_bias[n]);
+                            out_acc += bias_val;
+                        }
+                    }
+
+                    const auto out_value = type_convert<CDataType>(out_acc);
+                    if(k_batch == 1)
+                    {
+                        p_c[m_row * kargs.stride_c + n] = out_value;
+                    }
+                    else
+                    {
+                        gemm_decode_atomic_add(p_c + m_row * kargs.stride_c + n,
+                                               out_value);
+                    }
+                });
+            });
         }
     }
 };

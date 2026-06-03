@@ -103,7 +103,9 @@ template <typename ADataType,
           bool    kHasBias        = false,
           bool    kChipletSwizzle = false,
           index_t kChipletNumXcds = 8,
-          index_t kChipletChunk   = 8>
+          index_t kChipletChunk   = 8,
+          index_t kNPerWarp       = 1,
+          index_t kMPerWarp       = 1>
 ::testing::AssertionResult RunUnscaledCase(const std::string& test_name,
                                            const DecodeShape& shape,
                                            index_t            k_batch)
@@ -120,8 +122,8 @@ template <typename ADataType,
                                               /*kVector=*/8,
                                               /*kUseDot2=*/false,
                                               /*kUsePackedFp32=*/false,
-                                              /*kMPerWarp=*/1,
-                                              /*kNPerWarp=*/1,
+                                              kMPerWarp,
+                                              kNPerWarp,
                                               GemmDecodeOutputAxis::SmallM,
                                               kHasBias,
                                               /*kWarpsPerBlock=*/1,
@@ -309,7 +311,9 @@ void ReferenceGemmPerTensor(const HostTensor<ADataType>& a,
 template <typename ADataType,
           typename BDataType,
           typename CDataType,
-          bool kHasBias = false>
+          bool    kHasBias  = false,
+          index_t kNPerWarp = 1,
+          index_t kMPerWarp = 1>
 ::testing::AssertionResult RunFp8PerTensorCase(const std::string& test_name,
                                                const DecodeShape& shape,
                                                index_t            k_batch)
@@ -326,8 +330,8 @@ template <typename ADataType,
                                               /*kVector=*/16,
                                               /*kUseDot2=*/true,
                                               /*kUsePackedFp32=*/false,
-                                              /*kMPerWarp=*/1,
-                                              /*kNPerWarp=*/1,
+                                              kMPerWarp,
+                                              kNPerWarp,
                                               GemmDecodeOutputAxis::SmallM,
                                               kHasBias,
                                               /*kWarpsPerBlock=*/1>;
@@ -552,6 +556,127 @@ TEST(GemmDecodeUniversalChipletSwizzle, Bf16Bf16Match)
                                            DecodeShape{1, 4096, 7168}, 2)));
 }
 
+// N-tile register reuse: one warp computes kNPerWarp adjacent output columns
+// by loading the shared A row once and reusing it against kNPerWarp B rows.
+// The result must match the FP32 reference exactly as for kNPerWarp = 1.
+TEST(GemmDecodeUniversalNReuse, Bf16Bf16)
+{
+    const std::vector<DecodeShape> shapes{
+        DecodeShape{1, 512, 7168},
+        DecodeShape{1, 4096, 7168},
+        DecodeShape{4, 4096, 7168},
+    };
+    for(const auto& s : shapes)
+    {
+        EXPECT_TRUE((RunUnscaledCase<bf16_t, bf16_t, bf16_t, /*kHasBias=*/false,
+                                     /*kChipletSwizzle=*/false, /*kChipletNumXcds=*/8,
+                                     /*kChipletChunk=*/8, /*kNPerWarp=*/2>(
+            "BF16 NPerWarp=2", s, 1)));
+        EXPECT_TRUE((RunUnscaledCase<bf16_t, bf16_t, bf16_t, /*kHasBias=*/false,
+                                     /*kChipletSwizzle=*/false, /*kChipletNumXcds=*/8,
+                                     /*kChipletChunk=*/8, /*kNPerWarp=*/4>(
+            "BF16 NPerWarp=4", s, 1)));
+    }
+    // N-reuse must compose with split-K (atomic-add) and with bias.
+    EXPECT_TRUE((RunUnscaledCase<bf16_t, bf16_t, bf16_t, /*kHasBias=*/false,
+                                 /*kChipletSwizzle=*/false, /*kChipletNumXcds=*/8,
+                                 /*kChipletChunk=*/8, /*kNPerWarp=*/4>(
+        "BF16 NPerWarp=4 split=2", DecodeShape{2, 4096, 7168}, 2)));
+    EXPECT_TRUE((RunUnscaledCase<bf16_t, bf16_t, bf16_t, /*kHasBias=*/true,
+                                 /*kChipletSwizzle=*/false, /*kChipletNumXcds=*/8,
+                                 /*kChipletChunk=*/8, /*kNPerWarp=*/2>(
+        "BF16 NPerWarp=2 bias", DecodeShape{1, 4096, 7168}, 1)));
+}
+
+// N-reuse composed with the chiplet swizzle: the grid is now
+// ceil(N / kNPerWarp) wide on the n axis, so this also checks the
+// flatten/unflatten still lands every (m, n_block).
+TEST(GemmDecodeUniversalNReuse, Bf16Bf16WithSwizzle)
+{
+    const std::vector<DecodeShape> shapes{
+        DecodeShape{1, 4096, 7168},
+        DecodeShape{4, 8192, 7168},
+    };
+    for(const auto& s : shapes)
+    {
+        EXPECT_TRUE((RunUnscaledCase<bf16_t, bf16_t, bf16_t, /*kHasBias=*/false,
+                                     /*kChipletSwizzle=*/true, /*kChipletNumXcds=*/8,
+                                     /*kChipletChunk=*/8, /*kNPerWarp=*/4>(
+            "BF16 swizzle+NPerWarp=4", s, 1)));
+    }
+}
+
+// M-tile register reuse (B-reuse): one warp computes kMPerWarp adjacent output
+// rows, loading each B row once and reusing it against the kMPerWarp A rows
+// held in registers. The non-divisible M shapes exercise the
+// ceil(M / kMPerWarp) tail block: out-of-range A rows are clamped on load and
+// masked out in the epilogue, so the result must still match the FP32
+// reference exactly.
+TEST(GemmDecodeUniversalMReuse, Bf16Bf16)
+{
+    // kMPerWarp = 2, including M = 3 (one masked tail row).
+    const std::vector<DecodeShape> shapes_mp2{
+        DecodeShape{2, 4096, 7168},
+        DecodeShape{3, 4096, 7168},
+        DecodeShape{8, 8192, 7168},
+    };
+    for(const auto& s : shapes_mp2)
+    {
+        EXPECT_TRUE((RunUnscaledCase<bf16_t, bf16_t, bf16_t, /*kHasBias=*/false,
+                                     /*kChipletSwizzle=*/false, /*kChipletNumXcds=*/8,
+                                     /*kChipletChunk=*/8, /*kNPerWarp=*/1, /*kMPerWarp=*/2>(
+            "BF16 MPerWarp=2", s, 1)));
+    }
+    // kMPerWarp = 4, including M = 5 and 7 (three / one masked tail rows).
+    const std::vector<DecodeShape> shapes_mp4{
+        DecodeShape{4, 4096, 7168},
+        DecodeShape{5, 4096, 7168},
+        DecodeShape{7, 8192, 7168},
+    };
+    for(const auto& s : shapes_mp4)
+    {
+        EXPECT_TRUE((RunUnscaledCase<bf16_t, bf16_t, bf16_t, /*kHasBias=*/false,
+                                     /*kChipletSwizzle=*/false, /*kChipletNumXcds=*/8,
+                                     /*kChipletChunk=*/8, /*kNPerWarp=*/1, /*kMPerWarp=*/4>(
+            "BF16 MPerWarp=4", s, 1)));
+    }
+
+    // Combined M- and N-reuse (2x2 and 4x2 register tiles), with bias.
+    EXPECT_TRUE((RunUnscaledCase<bf16_t, bf16_t, bf16_t, /*kHasBias=*/false,
+                                 /*kChipletSwizzle=*/false, /*kChipletNumXcds=*/8,
+                                 /*kChipletChunk=*/8, /*kNPerWarp=*/2, /*kMPerWarp=*/2>(
+        "BF16 MxN=2x2", DecodeShape{3, 4096, 7168}, 1)));
+    EXPECT_TRUE((RunUnscaledCase<bf16_t, bf16_t, bf16_t, /*kHasBias=*/true,
+                                 /*kChipletSwizzle=*/false, /*kChipletNumXcds=*/8,
+                                 /*kChipletChunk=*/8, /*kNPerWarp=*/2, /*kMPerWarp=*/4>(
+        "BF16 MxN=4x2 bias", DecodeShape{6, 4096, 7168}, 1)));
+
+    // B-reuse must compose with split-K (atomic-add) including a tail block.
+    EXPECT_TRUE((RunUnscaledCase<bf16_t, bf16_t, bf16_t, /*kHasBias=*/false,
+                                 /*kChipletSwizzle=*/false, /*kChipletNumXcds=*/8,
+                                 /*kChipletChunk=*/8, /*kNPerWarp=*/1, /*kMPerWarp=*/4>(
+        "BF16 MPerWarp=4 split=2", DecodeShape{6, 4096, 7168}, 2)));
+}
+
+// B-reuse composed with the chiplet swizzle: the grid is now
+// ceil(M / kMPerWarp) tall on the m axis, so this checks the flatten/unflatten
+// still lands every (m_block, n_block) when both axes are register-tiled,
+// including a tail block (M = 5, kMPerWarp = 2).
+TEST(GemmDecodeUniversalMReuse, Bf16Bf16WithSwizzle)
+{
+    const std::vector<DecodeShape> shapes{
+        DecodeShape{4, 4096, 7168},
+        DecodeShape{5, 8192, 7168},
+    };
+    for(const auto& s : shapes)
+    {
+        EXPECT_TRUE((RunUnscaledCase<bf16_t, bf16_t, bf16_t, /*kHasBias=*/false,
+                                     /*kChipletSwizzle=*/true, /*kChipletNumXcds=*/8,
+                                     /*kChipletChunk=*/8, /*kNPerWarp=*/2, /*kMPerWarp=*/2>(
+            "BF16 swizzle+MxN=2x2", s, 1)));
+    }
+}
+
 #ifdef CK_TILE_USE_OCP_FP8
 
 namespace {
@@ -772,6 +897,41 @@ TEST(GemmDecodeUniversalFp8, Fp8Fp8ToFp16PerTensorMatrix)
 TEST(GemmDecodeUniversalFp8, Fp8Fp8ToBf16PerTensorBiasMatrix)
 {
     RunFp8PerTensorMatrix<fp8_t, fp8_t, bf16_t, /*kHasBias=*/true>("FP8/FP8/BF16+bias");
+}
+
+// N-reuse on the dot2 FP8 path: the shared A row is dequantized into BF16x2
+// register pairs once and reused against kNPerWarp B rows. Exercises the
+// fp8x2_to_bf16x2 a_pairs precompute + per-N b_pair reuse.
+TEST(GemmDecodeUniversalFp8, Fp8NReuse)
+{
+    const std::vector<DecodeShape> shapes{
+        DecodeShape{1, 4096, 7168},
+        DecodeShape{4, 8192, 7168},
+    };
+    for(const auto& s : shapes)
+    {
+        EXPECT_TRUE((RunFp8PerTensorCase<fp8_t, fp8_t, bf16_t, /*kHasBias=*/false,
+                                         /*kNPerWarp=*/2>("FP8 NPerWarp=2", s, 1)));
+        EXPECT_TRUE((RunFp8PerTensorCase<fp8_t, fp8_t, bf16_t, /*kHasBias=*/true,
+                                         /*kNPerWarp=*/4>("FP8 NPerWarp=4+bias", s, 1)));
+    }
+}
+
+// B-reuse on the dot2 FP8 path: each B row is dequantized into BF16x2 register
+// pairs once and reused across the kMPerWarp A rows, whose pairs are flat-
+// indexed by jm*(kVector/2)+ipair. Includes a tail block (M not divisible by
+// kMPerWarp) and a combined 2x2 M/N tile with bias.
+TEST(GemmDecodeUniversalFp8, Fp8MReuse)
+{
+    EXPECT_TRUE((RunFp8PerTensorCase<fp8_t, fp8_t, bf16_t, /*kHasBias=*/false,
+                                     /*kNPerWarp=*/1, /*kMPerWarp=*/2>(
+        "FP8 MPerWarp=2", DecodeShape{4, 8192, 7168}, 1)));
+    EXPECT_TRUE((RunFp8PerTensorCase<fp8_t, fp8_t, bf16_t, /*kHasBias=*/false,
+                                     /*kNPerWarp=*/1, /*kMPerWarp=*/4>(
+        "FP8 MPerWarp=4 tail", DecodeShape{5, 8192, 7168}, 1)));
+    EXPECT_TRUE((RunFp8PerTensorCase<fp8_t, fp8_t, bf16_t, /*kHasBias=*/true,
+                                     /*kNPerWarp=*/2, /*kMPerWarp=*/2>(
+        "FP8 MxN=2x2+bias", DecodeShape{3, 4096, 7168}, 1)));
 }
 
 TEST(GemmDecodeBlockscaleFp8, Fp8Fp8ToBf16BlockscaleMatrix)

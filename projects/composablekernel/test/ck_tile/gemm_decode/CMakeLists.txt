@@ -15,4 +15,11 @@ if(GPU_TARGETS MATCHES "gfx9|gfx11|gfx12")
     set_target_properties(bench_gemm_decode_chiplet_swizzle PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin)
     set_source_files_properties(bench_chiplet_swizzle.cpp PROPERTIES LANGUAGE HIP)
+
+    # R1: M=1..16 best-config sweep, emits CSV for the FlyDSL comparison.
+    add_executable(bench_gemm_decode_msweep bench_msweep.cpp)
+    target_link_libraries(bench_gemm_decode_msweep PRIVATE utility)
+    set_target_properties(bench_gemm_decode_msweep PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/bin)
+    set_source_files_properties(bench_msweep.cpp PROPERTIES LANGUAGE HIP)
 endif()
