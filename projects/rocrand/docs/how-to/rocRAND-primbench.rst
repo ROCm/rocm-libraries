@@ -6,9 +6,9 @@
 Benchmarking with primbench
 *****************************
 
-primbench is a single-header `HIP <https://rocm.docs.amd.com/projects/HIP/en/latest/index.html>`_ benchmarking library for rocRAND that outputs detailed benchmarking information in JSON format.
+primbench is a single-header `HIP <https://rocm.docs.amd.com/projects/HIP/en/latest/index.html>`_ benchmarking library for rocRAND that outputs detailed benchmarking information in JSON format or, optionally, in CSV format.
 
-primbench requires `HIP <https://rocm.docs.amd.com/projects/HIP/en/latest/index.html>`_ and C++17 or later. `AMD SMI <https://rocm.docs.amd.com/projects/amdsmi/en/latest/index.html>`_ is required on Linux for temperature monitoring and control.
+primbench requires `HIP <https://rocm.docs.amd.com/projects/HIP/en/latest/index.html>`_ and C++17 or later. `AMD SMI <https://rocm.docs.amd.com/projects/amdsmi/en/latest/index.html>`_ is required for temperature monitoring and control.
 
 .. note:: 
 
@@ -25,7 +25,7 @@ For example, in |copy_benchmark.cpp|_ the ``char`` and ``long long`` types are g
   PRIMBENCH_REGISTER_TYPE(char, "char")
   PRIMBENCH_REGISTER_TYPE(long long, "long long")
 
-Registering also lets you provide alternate names for your types. For example, you could register ``long long`` to "longx2":
+Registering also lets you provide alternate names for your types. For example, you could register ``long long`` as "longx2":
 
 .. code:: cpp
 
@@ -35,7 +35,7 @@ Both the ``meta()`` and ``run()`` functions in ``primbench::benchmark_interface`
 
 The ``meta`` function returns metadata as a JSON object.
 
-The returned JSON object must include a value for the ``algo`` key. The ``algo`` key sets the name of the algorithm being benchmarked.
+The returned JSON object must include a value for the ``algo`` key. The ``algo`` key sets the name of the algorithm being benchmarked. This will be the name used in the JSON output.
 
 For example, from ``copy_benchmark.cpp``:
 
