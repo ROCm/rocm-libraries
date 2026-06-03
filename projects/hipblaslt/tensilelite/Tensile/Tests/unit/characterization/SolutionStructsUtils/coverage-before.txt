@@ -1,0 +1,24 @@
+# BEFORE coverage — existing suite only, no characterization tests for the
+# grouped Utilities.py + LdsPadding.py target yet (captured before the new
+# SolutionStructsUtils/ test files were collected; total = 1713 passed,
+# unchanged from the post-Naming baseline).
+#
+# NOTE: path-prefix --cov on a single .py file does not match; used the
+# documented fallback `--cov=Tensile` and grepped the two rows.
+#
+# Command:
+#   pytest -m unit --cov=Tensile --cov-config=pyproject.toml \
+#     --cov-report=term-missing Tensile/Tests/unit
+#
+# Utilities has a thin existing test (test_SolutionStructsUtilities.py) so its
+# baseline is low; LdsPadding has test_LdsPadding.py so its baseline is already
+# high — this grouped target tops both to >=95% line.
+
+Name                                                      Stmts   Miss Branch BrPart   Cover   Missing
+Tensile/SolutionStructs/Utilities.py                         49     23     30      3  46.84%   63, 75-78, 80->exit, 86, 92-101, 104-113
+Tensile/SolutionStructs/LdsPadding.py                       212     21     98      9  86.45%   113, 122->exit, 147, 169, 243, 250, 301-314, 388, 405
+
+1713 passed, 201 skipped
+
+# Utilities.py  : line = (49 - 23) / 49  = 53.06% line ; blended 46.84%
+# LdsPadding.py : line = (212 - 21) / 212 = 90.09% line ; blended 86.45%
