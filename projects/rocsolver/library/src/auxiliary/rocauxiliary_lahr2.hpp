@@ -39,25 +39,151 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
+/**************************************************************************************/
+/***************** Kernels/Device functions *******************************************/
+/**************************************************************************************/
+
+/***** Kernels to compute the column of Y *****/
+/**********************************************/
+template <typename T, typename U>
+ROCSOLVER_KERNEL void lahr2_computeY_kernel(const rocblas_int mm,
+                                            const rocblas_int k,
+                                            const rocblas_int c,
+                                            U AA,
+                                            const rocblas_int shiftA,
+                                            const rocblas_int lda,
+                                            const rocblas_stride strideA,
+                                            T* YA,
+                                            const rocblas_int shiftY,
+                                            const rocblas_int ldy,
+                                            const rocblas_stride strideY,
+                                            T* FA,
+                                            const rocblas_int shiftF,
+                                            const rocblas_int ldf,
+                                            const rocblas_stride strideF,
+                                            T* tauA,
+                                            const rocblas_stride strideP)
+{
+    int bid = hipBlockIdx_z;
+    int bidr = hipBlockIdx_x;
+    int bidc = hipBlockIdx_y;
+    int tidr = hipThreadIdx_x;
+    int tidc = hipThreadIdx_y;
+    int threadsr = hipBlockDim_x;
+    int threadsc = hipBlockDim_y;
+    int groupsr = hipGridDim_x;
+    int groupsc = hipGridDim_y;
+    int totalthsr = groupsr * threadsr;
+    int totalthsc = groupsc * threadsc;
+    int idc = bidc * threadsc + tidc;
+    int idr = bidr * threadsr + tidr;
+
+    // select batch instance
+    T* A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
+    T* Y = load_ptr_batch<T>(YA, bid, shiftY, strideY);
+    T* F = load_ptr_batch<T>(FA, bid, shiftF, strideF);
+    T* tau = tauA + bid * strideP;
+
+    /* ------------------------
+    formulate gemv problem:
+
+        components:
+            y  = Y(k:mm-1, c)
+            A1 = A(k:mm-1, c+1:mm-1)
+            A2 = Y(k:mm-1, 0:c-1)
+            x1 = A(k+c:mm-k, c)
+            x2 = F(0:c-1, c)
+            t  = tau(c)
+
+        operation:
+            y = t * (A1 * x1 - A2 * x2)
+    ------------------------ */
+    int m = mm - k;
+    int n = std::max((mm - k - c), c);
+    T* y = Y + idx2D(k, c, ldy);
+    T* A1 = A + idx2D(k, c + 1, lda);
+    int lda1 = lda;
+    T* A2 = Y + idx2D(k, 0, ldy);
+    int lda2 = ldy;
+    T* x1 = A + idx2D(k + c, c, lda);
+    T* x2 = F + idx2D(0, c, ldf);
+    T* t = tau + c;
+
+    // rpgr and rpgc are the number of rounds a group should run
+    // to cover all the rows and columns, respectively
+    int ngrp = (m - 1) / threadsr + 1;
+    int rpgr = (ngrp - 1) / groupsr + 1;
+    ngrp = (n - 1) / threadsc + 1;
+    int rpgc = (ngrp - 1) / groupsc + 1;
+    int i, j;
+
+    // Registers/LDS:
+    // ac, acs -> accumulator
+    // sx -> hold the elements of 'x'
+    extern __shared__ double smem[]; //min size should be threadsr x threadsc
+    T* acs = reinterpret_cast<T*>(smem);
+    T ac;
+    T sx1, sx2;
+
+    for(int ii = 0; ii < rpgr; ++ii)
+    {
+        i = ii * totalthsr + idr;
+
+        // read y
+        ac = 0;
+
+        for(int jj = 0; jj < rpgc; ++jj)
+        {
+            // read x
+            j = jj * totalthsc + idc;
+            // sx1 = (j < mm - k - c) ? x1[j] : 0;
+            // sx2 = (j < c) ? x2[j] : 0;
+
+            // operation for all rows
+            if(i < m && j < mm - k - c)
+                ac += A1[i + j * lda1] * x1[j];
+            if(i < m && j < c)
+                ac -= A2[i + j * lda2] * x2[j];
+        }
+        acs[tidr + tidc * threadsr] = ac;
+        __syncthreads();
+
+        // group reduction
+        for(int r = threadsc / 2; r > 0; r /= 2)
+        {
+            if(tidc < r)
+            {
+                ac += acs[tidr + (tidc + r) * threadsr];
+                acs[tidr + tidc * threadsr] = ac;
+            }
+            __syncthreads();
+        }
+
+        // write groups results in temp array for further reduction
+        if(tidc == 0 && i < m)
+            y[i] = ac * t[0];
+    }
+}
+
 template <int MAX_THDS, typename T, typename I, typename U>
 ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS) lahr2_scale_set_tau(const I j,
-                                                                       U FF,
-                                                                       const rocblas_stride shiftF,
-                                                                       const rocblas_stride strideF,
-                                                                       T* tauA,
-                                                                       const rocblas_stride strideP)
+                                                                      U FA,
+                                                                      const rocblas_stride shiftF,
+                                                                      const rocblas_stride strideF,
+                                                                      T* tauA,
+                                                                      const rocblas_stride strideP)
 {
     const auto bid = blockIdx.z;
     const auto tid = threadIdx.x;
 
     // select batch instance
-    T* F = load_ptr_batch<T>(FF, bid, shiftF, strideF);
+    T* F = load_ptr_batch<T>(FA, bid, shiftF, strideF);
     T* tau = load_ptr_batch<T>(tauA, bid, 0, strideP);
 
     const T t = *tau;
 
     I i;
-    for(i = tid; i < j; i+=MAX_THDS)
+    for(i = tid; i < j; i += MAX_THDS)
     {
         F[i] *= -t;
     }
@@ -205,6 +331,13 @@ rocblas_status rocsolver_lahr2_template(rocblas_handle handle,
     // Grid/block for copy_mat (vector copy: m=j, n=1 -> simple 1D launch)
     // Computed inline where needed.
 
+    // thread config for update Y kernel.
+    rocblas_int thr_updates = BS2;
+    rocblas_int thc_updates = BS2;
+    rocblas_int grr_updates = (n - 1) / thr_updates + 1;
+    rocblas_int grc_updates = 1;
+    size_t lmemsize_updates = sizeof(T) * (thr_updates * thc_updates);
+
     // -----------------------------------------------------------------------
     // Main loop: i = 1..NB (LAPACK 1-based) -> j = 0..nb-1 (0-based)
     // All matrix indices below are 0-based. Mapping to LAPACK 1-based:
@@ -297,37 +430,23 @@ rocblas_status rocsolver_lahr2_template(rocblas_handle handle,
 
             // Restore A(k+j-1, j-1) = EI saved from the previous iteration
             // LAPACK: A(K+I-1, I-1) = EI
-            ROCSOLVER_LAUNCH_KERNEL((restore_diag<T>), dim3(batch_count, 1, 1),
-                                    dim3(1, 1, 1), 0, stream, (S*)norms, j - 1, stride_norm, A,
-                                    shiftA + idx2D(k + j - 1, j - 1, lda), lda, strideA, (rocblas_int)1);
+            ROCSOLVER_LAUNCH_KERNEL((restore_diag<T>), dim3(batch_count, 1, 1), dim3(1, 1, 1), 0,
+                                    stream, (S*)norms, j - 1, stride_norm, A,
+                                    shiftA + idx2D(k + j - 1, j - 1, lda), lda, strideA,
+                                    (rocblas_int)1);
         }
 
         // --------------------------------------------------------------------
         // Generate Householder reflector H(j+1) to annihilate A(k+j+1:n-1, j)
         //  - Save EI = A(k+j, j) into norms[j], then set A(k+j, j) = 1
         // --------------------------------------------------------------------
-        rocsolver_larfg_template(handle, n - k - j, A, shiftA + idx2D(k + j, j, lda),
-                                 (S*)norms, j, stride_norm,
-                                 A, shiftA + idx2D(std::min(k + j + 1, n - 1), j, lda),
+        rocsolver_larfg_template(handle, n - k - j, A, shiftA + idx2D(k + j, j, lda), (S*)norms, j,
+                                 stride_norm, A, shiftA + idx2D(std::min(k + j + 1, n - 1), j, lda),
                                  1, strideA, tau + j, strideT, batch_count, (T*)work_workArr, norms);
 
         // --------------------------------------------------------------------
         // Compute Y(k:n-1, j)
-        // LAPACK:
-        //   DGEMV('N', N-K, N-K-I+1, ONE, A(K+1,I+1), LDA, A(K+I,I), 1, ZERO, Y(K+1,I), 1)
-        //   [if I>1]:
-        //     DGEMV('T', N-K-I+1, I-1, ONE, A(K+I,1), LDA, A(K+I,I), 1, ZERO, T(1,I), 1)
-        //     DGEMV('N', N-K, I-1, -ONE, Y(K+1,1), LDY, T(1,I), 1, ONE, Y(K+1,I), 1)
-        //   DSCAL(N-K, TAU(I), Y(K+1,I), 1)
         // --------------------------------------------------------------------
-
-        // Y(k:n-1, j) = A(k:n-1, j+1:n-1) * A(k+j:n-1, j)
-        rocblasCall_gemv<T>(handle, rocblas_operation_none, n - k, n - k - j,
-                            cast2constType<T>(scalars + 2), 0, A, shiftA + idx2D(k, j + 1, lda),
-                            lda, strideA, A, shiftA + idx2D(k + j, j, lda), 1, strideA,
-                            cast2constType<T>(scalars + 1), 0, Y, shiftY + idx2D(k, j, ldy), 1,
-                            strideY, batch_count, (T**)work_workArr);
-
         if(j > 0)
         {
             // T(0:j-1, j) = A(k+j:n-1, 0:j-1)^H * A(k+j:n-1, j)
@@ -336,31 +455,22 @@ rocblas_status rocsolver_lahr2_template(rocblas_handle handle,
                                 lda, strideA, A, shiftA + idx2D(k + j, j, lda), 1, strideA,
                                 cast2constType<T>(scalars + 1), 0, Tmat, idx2D(0, j, ldt), 1,
                                 strideN, batch_count, (T**)work_workArr);
-
-            // Y(k:n-1, j) -= Y(k:n-1, 0:j-1) * T(0:j-1, j)
-            rocblasCall_gemv<T>(handle, rocblas_operation_none, n - k, j,
-                                cast2constType<T>(scalars), 0, Y, shiftY + idx2D(k, 0, ldy), ldy,
-                                strideY, Tmat, idx2D(0, j, ldt), 1, strideN,
-                                cast2constType<T>(scalars + 2), 0, Y, shiftY + idx2D(k, j, ldy), 1,
-                                strideY, batch_count, (T**)work_workArr);
         }
 
-        // Y(k:n-1, j) *= tau(j)
-        rocblasCall_scal<T>(handle, n - k, tau + j, strideT, Y, shiftY + idx2D(k, j, ldy), 1,
-                            strideY, batch_count);
+        // Y(k:n-1, j) = t * (A(k:n-1, j+1:n-k) * A(k+j:n-1, j) - Y(k:n-1, 0:j-1) * T(0:j-1, j))
+        ROCSOLVER_LAUNCH_KERNEL(lahr2_computeY_kernel<T>, dim3(grr_updates, grc_updates, batch_count),
+                                dim3(thr_updates, thc_updates, 1), lmemsize_updates, stream, n, k,
+                                j, A, shiftA, lda, strideA, Y, shiftY, ldy, strideY, Tmat, 0, ldt,
+                                strideN, tau, strideT);
 
         // --------------------------------------------------------------------
         // Compute T(0:j, j)
-        // LAPACK:
-        //   DSCAL(I-1, -TAU(I), T(1,I), 1)
-        //   DTRMV('U','N','N', I-1, T, LDT, T(1,I), 1)
-        //   T(I,I) = TAU(I)
         // --------------------------------------------------------------------
 
         // T(0:j-1, j) *= -tau(j) and T(j, j) = tau(j)
-        ROCSOLVER_LAUNCH_KERNEL((lahr2_scale_set_tau<BS1, T>),
-                                dim3(1, 1, batch_count), dim3(BS1, 1, 1), 0,
-                                stream, j, Tmat, idx2D(0, j, ldt), strideN, tau + j, strideT);
+        ROCSOLVER_LAUNCH_KERNEL((lahr2_scale_set_tau<BS1, T>), dim3(1, 1, batch_count),
+                                dim3(BS1, 1, 1), 0, stream, j, Tmat, idx2D(0, j, ldt), strideN,
+                                tau + j, strideT);
         if(j > 0)
         {
             // T(0:j-1, j) = T(0:j-1, 0:j-1) * T(0:j-1, j)  (upper non-unit)
@@ -372,8 +482,8 @@ rocblas_status rocsolver_lahr2_template(rocblas_handle handle,
     }
 
     // Restore A(k+nb-1, nb-1) = EI  (LAPACK: A(K+NB, NB) = EI, 1-based)
-    ROCSOLVER_LAUNCH_KERNEL((restore_diag<T>), dim3(batch_count, 1, 1),
-                            dim3(1, 1, 1), 0, stream, (S*)norms, nb - 1, stride_norm, A,
+    ROCSOLVER_LAUNCH_KERNEL((restore_diag<T>), dim3(batch_count, 1, 1), dim3(1, 1, 1), 0, stream,
+                            (S*)norms, nb - 1, stride_norm, A,
                             shiftA + idx2D(k + nb - 1, nb - 1, lda), lda, strideA, (rocblas_int)1);
 
     // ------------------------------------------------------------------------
