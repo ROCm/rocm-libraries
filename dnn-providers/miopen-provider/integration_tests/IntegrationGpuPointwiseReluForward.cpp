@@ -64,6 +64,8 @@ protected:
 
 using IntegrationGpuPointwiseReluFwdNchwFp32 = PointwiseReluForward<float>;
 
+using IntegrationGpuPointwiseReluFwdNchwFp16 = PointwiseReluForward<half>;
+
 } // namespace
 
 TEST_P(IntegrationGpuPointwiseReluFwdNchwFp32, Correctness)
@@ -71,6 +73,15 @@ TEST_P(IntegrationGpuPointwiseReluFwdNchwFp32, Correctness)
     runGraphTest(1e-5f, TensorLayout::NCHW);
 }
 
+TEST_P(IntegrationGpuPointwiseReluFwdNchwFp16, Correctness)
+{
+    runGraphTest(1e-3f, TensorLayout::NCHW);
+}
+
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuPointwiseReluFwdNchwFp32,
+                         testing::ValuesIn(getPointwiseTestCases()));
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuPointwiseReluFwdNchwFp16,
                          testing::ValuesIn(getPointwiseTestCases()));

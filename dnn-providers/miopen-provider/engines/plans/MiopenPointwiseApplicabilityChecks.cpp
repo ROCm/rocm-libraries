@@ -135,7 +135,7 @@ bool isSupported(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opG
 
     if(opGraph.getNode(0).compute_data_type() != DataType::FLOAT)
     {
-        HIPDNN_PLUGIN_LOG_ERROR(
+        HIPDNN_PLUGIN_LOG_INFO(
             "Pointwise plan builder only supports nodes with an fp32 compute_data_type");
         return false;
     }
