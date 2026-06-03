@@ -8,6 +8,8 @@ GEMM_PIPELINES = ["mem", "compv3", "compv4"]
 
 GEMM_PRESHUFFLE_PIPELINES = ["preshufflev2"]
 
+GEMM_ROWCOLQUANT_PIPELINES = ["compv3"]
+
 LAYOUT_MAP = {
     "r": "ck_tile::tensor_layout::gemm::RowMajor",
     "c": "ck_tile::tensor_layout::gemm::ColumnMajor",
@@ -234,7 +236,6 @@ def is_trait_combination_valid(
         kernel_name_prefix == "gemm_rowcolquant"
         or kernel_name_prefix == "grouped_gemm_rowcolquant"
         or kernel_name_prefix == "grouped_gemm_tensorquant"
-        or kernel_name_prefix == "gemm_rowcolquant"
     ):
         # rowcolquant and tensorquant only supports compv3 + intrawave + cshuffle
         if pipeline != "compv3" or scheduler != "intrawave" or epilogue != "cshuffle":
@@ -1111,7 +1112,7 @@ def validate_gemm_rowcol_tensor_quant(
     layout: str,
     gpu_target: str,
 ) -> Tuple[bool, str]:
-    """Validate RowColQuant / TensorQUant GEMM-specific constraints."""
+    """Validate RowColQuant / TensorQuant GEMM-specific constraints."""
     whole_workgroup_cover_valid, whole_workgroup_cover_error = (
         validate_whole_wg_cover_configuration(
             tile_m,
@@ -1140,11 +1141,10 @@ def validate_gemm_rowcol_tensor_quant(
             expected_k = 64 if warp_tile_m == 32 else 128
         else:
             expected_k = 32 if warp_tile_m == 32 else 64
-
         if warp_tile_k != expected_k:
             return False, (
                 f"For {a_datatype} on {gpu_target}, warp_tile_m={warp_tile_m} "
                 f"requires warp_tile_k={expected_k}, got warp_tile_k={warp_tile_k}"
             )
 
-        return True, ""
+    return True, ""
