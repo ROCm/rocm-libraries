@@ -3,20 +3,13 @@
 
 import os
 import sys
-<<<<<<< HEAD
-=======
 import json
 import csv
->>>>>>> 1b46bdce50 (grouped gemm rowcolquant tile engine support)
 import time
 import argparse
 import importlib.util
 from pathlib import Path
-<<<<<<< HEAD
 from typing import List, Dict, Tuple
-=======
-from typing import List, Dict, Tuple, Optional
->>>>>>> 1b46bdce50 (grouped gemm rowcolquant tile engine support)
 
 
 def _import_gemm_benchmark():
@@ -132,25 +125,6 @@ class GroupedRowColQuantGemmBenchmark(GemmBenchmark):
 
         return results
 
-<<<<<<< HEAD
-=======
-    def find_best_kernel(
-        self, results: List[Dict], metric: str = "tflops"
-    ) -> Optional[Dict]:
-        """Find the best performing kernel based on metric."""
-        if not results:
-            return None
-
-        if metric == "tflops":
-            return max(results, key=lambda x: x.get("tflops", 0))
-        elif metric == "time_ms":
-            return min(results, key=lambda x: x.get("time_ms", float("inf")))
-        elif metric == "bandwidth_gb_s":
-            return max(results, key=lambda x: x.get("bandwidth_gb_s", 0))
-        else:
-            raise ValueError(f"Unknown metric: {metric}")
-
->>>>>>> 1b46bdce50 (grouped gemm rowcolquant tile engine support)
     def benchmark_sweep(
         self,
         problem_sizes: List[Tuple[int, int, int]],
@@ -191,11 +165,7 @@ class GroupedRowColQuantGemmBenchmark(GemmBenchmark):
                     all_results.extend(results)
 
                     # Find best kernel for this configuration
-<<<<<<< HEAD
                     best = benchmark_utils.find_best_kernel(results)
-=======
-                    best = self.find_best_kernel(results)
->>>>>>> 1b46bdce50 (grouped gemm rowcolquant tile engine support)
                     if best:
                         key = f"g{group_count}_m{m}_n{n}_k{k}_kbatch{kbatch}"
                         best_kernels[key] = best
@@ -207,8 +177,6 @@ class GroupedRowColQuantGemmBenchmark(GemmBenchmark):
         self.results = all_results
         return best_kernels
 
-<<<<<<< HEAD
-=======
     def export_csv(self, filename: str):
         """Export all results to CSV."""
         if not self.results:
@@ -398,7 +366,6 @@ class GroupedRowColQuantGemmBenchmark(GemmBenchmark):
         print(f"  - Best bandwidth: {max(bandwidth_values, default=0):.2f} GB/s")
         print(f"  - Best latency: {min(latency_values, default=0):.2f}ms")
 
->>>>>>> 1b46bdce50 (grouped gemm rowcolquant tile engine support)
 
 def main():
     parser = argparse.ArgumentParser(
@@ -504,17 +471,10 @@ def main():
 
     # Export results
     if benchmark.results:
-<<<<<<< HEAD
         benchmark_utils.export_csv(benchmark.results, args.csv)
         benchmark_utils.export_best_kernels(best_kernels, args.best)
         if args.json:
             benchmark_utils.export_json(benchmark.results, args.json, best_kernels)
-=======
-        benchmark.export_csv(args.csv)
-        benchmark.export_best_kernels(best_kernels, args.best)
-        if args.json:
-            benchmark.export_json(args.json, best_kernels)
->>>>>>> 1b46bdce50 (grouped gemm rowcolquant tile engine support)
 
     print("\nBenchmark complete!")
     return 0

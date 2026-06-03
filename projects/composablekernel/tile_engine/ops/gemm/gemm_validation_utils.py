@@ -559,32 +559,36 @@ def is_tile_config_valid(
             logging.debug(f"Warp tile validation failed: {warp_tile_error}")
             return False
 
-
     # Additional operator-specific validation (runs after pipeline validation)
-    if kernel_name_prefix == "gemm_rowcolquant" or kernel_name_prefix == "grouped_gemm_rowcolquant" or kernel_name_prefix == "grouped_gemm_tensorquant":
-        rowcol_tensor_quant_valid, rowcol_tensor_quant_valid_error = validate_gemm_rowcol_tensor_quant(
-            tile_m,
-            tile_n,
-            tile_k,
-            warp_m,
-            warp_n,
-            warp_k,
-            warp_tile_m,
-            warp_tile_n,
-            warp_tile_k,
-            a_datatype,
-            b_datatype,
-            c_datatype,
-            pipeline,
-            layout,
-            gpu_target,
+    if (
+        kernel_name_prefix == "gemm_rowcolquant"
+        or kernel_name_prefix == "grouped_gemm_rowcolquant"
+        or kernel_name_prefix == "grouped_gemm_tensorquant"
+    ):
+        rowcol_tensor_quant_valid, rowcol_tensor_quant_valid_error = (
+            validate_gemm_rowcol_tensor_quant(
+                tile_m,
+                tile_n,
+                tile_k,
+                warp_m,
+                warp_n,
+                warp_k,
+                warp_tile_m,
+                warp_tile_n,
+                warp_tile_k,
+                a_datatype,
+                b_datatype,
+                c_datatype,
+                pipeline,
+                layout,
+                gpu_target,
+            )
         )
-        if not rowcol_tensor_quant_valid_error:
+        if not rowcol_tensor_quant_valid:
             logging.debug(
                 f"GEMM RowColQuant/TensorQuant validation failed: {rowcol_tensor_quant_valid_error}"
             )
             return False
-
 
     return True
 
@@ -1090,7 +1094,7 @@ def validate_m0_m1_m2_configuration(
         return False, f"Error in M0/M1/M2 validation: {str(e)}"
 
 
-def validate_gemm_rowcolquant_tensorquant(
+def validate_gemm_rowcol_tensor_quant(
     tile_m: int,
     tile_n: int,
     tile_k: int,
@@ -1107,7 +1111,7 @@ def validate_gemm_rowcolquant_tensorquant(
     layout: str,
     gpu_target: str,
 ) -> Tuple[bool, str]:
-    """Validate RowColQuant GEMM-specific constraints."""
+    """Validate RowColQuant / TensorQUant GEMM-specific constraints."""
     whole_workgroup_cover_valid, whole_workgroup_cover_error = (
         validate_whole_wg_cover_configuration(
             tile_m,
@@ -1128,7 +1132,7 @@ def validate_gemm_rowcolquant_tensorquant(
     if warp_tile_m != warp_tile_n:
         return False, (
             f"warp_tile_m({warp_tile_m}) must be equal to warp_tile_n({warp_tile_n}) "
-            f"(MFMA requirement for RowColQuant)"
+            f"(MFMA requirement for RowColQuant / TensorQuant)"
         )
 
     if a_datatype in ["fp8", "bf8"]:
@@ -1144,4 +1148,3 @@ def validate_gemm_rowcolquant_tensorquant(
             )
 
         return True, ""
-

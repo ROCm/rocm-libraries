@@ -367,7 +367,6 @@ class GemmKernelBuilder:
             layout,
             self.gpu_target,
             self.kernel_name_prefix,
-            self.kernel_name_prefix,
         )
 
     def _generate_trait_combinations(self):
@@ -404,9 +403,6 @@ class GemmKernelBuilder:
         combinations = []
         for combo in all_combinations:
             pipeline, epilogue, scheduler = combo[:3]
-            if is_trait_combination_valid(
-                pipeline, epilogue, scheduler, self.kernel_name_prefix
-            ):
             if is_trait_combination_valid(
                 pipeline, epilogue, scheduler, self.kernel_name_prefix
             ):
