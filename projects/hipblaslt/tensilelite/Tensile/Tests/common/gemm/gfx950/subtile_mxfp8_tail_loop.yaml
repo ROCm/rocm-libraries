@@ -20,6 +20,13 @@
 #     need a different mask stride.
 #   * MX scale-mask reuse: comment "FP4 only" gates by
 #     `not isBF16 and self.hasScale` — would also fire for MXFP8.
+#
+# Post-fix expectation (after [SubtileImpl][TailLoop] Skip data K-mask
+# for MX-scaled paths): all PGR=0 and PGR=1 cells PASS (60/60); the
+# 14 remaining failures are all PGR=2 + K%256!=0 (787-2899 wrong out
+# of 65536, ~1-5%), a separate documented issue around the PGR=2
+# prefetch path's interaction with the tail loop.
+#
 #   * KernelWriterAssembly.computeTailLoopSrdLimit MX scale `kPad=256`
 #     for DepthU>256 — may need an FP8-specific value at DU=512.
 #

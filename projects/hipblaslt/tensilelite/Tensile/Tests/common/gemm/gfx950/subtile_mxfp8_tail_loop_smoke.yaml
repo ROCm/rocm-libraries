@@ -47,13 +47,17 @@
 #   K=544 (2 main + 32 tail) : FAIL 1262 / 16384 wrong (7.7%)
 #   K=768 (3 main, no tail)  : FAIL 1977 / 16384 wrong (12.1%)
 #
-# Post-fix (after [SubtileImpl] Fix single-DU per_uid_k regression in
-# emit_lr + NLL lr_inc PGR=1 gating, current HEAD):
+# Post-main-loop-fix (after [SubtileImpl] Fix single-DU per_uid_k
+# regression in emit_lr + NLL lr_inc PGR=1 gating):
 #   K=128 (full tail, no main): PASS
 #   K=288 (1 main + 32 tail) : FAIL   88 / 16384 wrong (0.5%)  <-- tail-only
 #   K=512 (2 main, no tail)  : PASS
 #   K=544 (2 main + 32 tail) : FAIL   63 / 16384 wrong (0.4%)  <-- tail-only
 #   K=768 (3 main, no tail)  : PASS
+#
+# Post-data-mask-fix (after [SubtileImpl][TailLoop] Skip data K-mask
+# for MX-scaled paths; rely on host scale zero-pad to neutralise OOB):
+#   K=128 PASS, K=288 PASS, K=512 PASS, K=544 PASS, K=768 PASS  (5/5)
 #
 # Main-loop regression diagnosis and fix (the LARGE wrong-counts):
 #
@@ -95,15 +99,21 @@
 # matching across PGR values is the symptom of an emit-time bug in the
 # LR coordinate, not a CPU-reference vs kernel disagreement.
 #
-# Residual (88, 63 wrong values at K=288, K=544): pre-existing tail-loop
-# issue that PR 7656 head exhibits identically and that has its sibling
-# in the MXFP4 tail-loop yaml (subtile_mxfp4.yaml § same MT/DU/PGR/PLR:
-# K=288 FAIL 415 / 65536 wrong, ~0.6%). MXFP8 K=288 is 88/16384 = 0.5%,
-# K=544 is 63/16384 = 0.4% — same magnitude class. Likely root in
-# `emit_mask_k` non-BF16 branch (assumes FP4 packing) and/or MX scale
-# mask reuse. Tracked separately from the main-loop fix — the
-# subtile_mxfp4.yaml tail-loop residual is the more direct repro for
-# the next worker who picks up that issue.
+# Residual fix: the 88/63 K%MIK!=0 mismatches at K=288/K=544 turned
+# out to be a HW-level interaction between the data K-mask V_AND chain
+# and the v_mfma_scale_f32_16x16x128_f8f6f4 operand bypass on gfx950.
+# Forcing the data K-mask to AND-with-(-1) (i.e. no-op masking)
+# eliminated the residual; ANDing with the cmp-derived per-lane mask
+# (sometimes 0, sometimes -1) introduced ~0.5% wrong outputs even
+# though the mask logic was per-lane correct. The fix in
+# InstructionEmitter.emit_mask_k SKIPS the data K-mask entirely for
+# MX-scaled paths (hasScale=True): host-side zero-padding of the MX
+# scale tensor already makes every out-of-bound K-group multiply by
+# scale = E8M0 0x00 ≈ 2^-127, underflowing those contributions to 0
+# in the FP32 accumulator. Plain non-MX FP8 (no scale) keeps the data
+# K-mask, since its unit-scale fallback (E8M0 0x7F = 1.0) does NOT
+# zero OOB contributions. Cross-validated on the matching MXFP4
+# tail-loop configs: K=288, 320, 480, 512 all pass post-fix.
 #
 # Pre-existing v2 regression yamls (subtile_mxfp8_correctness_regression*
 # .yaml, MT256x256x256 PGR=1 PLR=0 multi-DU): still fail kernel codegen
