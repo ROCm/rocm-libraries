@@ -121,9 +121,8 @@ __device__ void runFmhaBwdConvertDQ(Args args)
     namespace S = fmha_bwd_convert_dq_slots;
 
     // --- Unpack generic Args using named slot constants ---
-    const TensorArg& t_dq_acc  = args.tensors[S::DQ_ACC];
-    const TensorArg& t_dq      = args.tensors[S::DQ];
-    const TensorArg& t_nsplits = args.tensors[S::nsplitsSlot(K)];
+    const TensorArg& t_dq_acc = args.tensors[S::DQ_ACC];
+    const TensorArg& t_dq     = args.tensors[S::DQ];
 
     // Dimensions from tensor metadata
     const index_t seqlen_q = t_dq_acc.lengths[0];
@@ -136,7 +135,8 @@ __device__ void runFmhaBwdConvertDQ(Args args)
     const index_t stride_dq       = static_cast<index_t>(t_dq.strides[0]);
     const index_t nhead_stride_dq = static_cast<index_t>(t_dq.strides[1]);
 
-    const index_t* nsplits_ptr = reinterpret_cast<const index_t*>(t_nsplits.ptr);
+    // nsplits_ptr (S::nsplitsSlot) is read only on the deterministic path below
+    // so a non-deterministic instantiation does not carry an unused slot.
 
     // --- Construct CK Tile Kargs via aggregate initialization ---
     if constexpr(K.mode == FmhaMode::GROUP)
@@ -153,7 +153,7 @@ __device__ void runFmhaBwdConvertDQ(Args args)
         const long_index_t* dq_acc_batch_offset_ptr =
             reinterpret_cast<const long_index_t*>(t_dq_acc_batch_offset.ptr);
 
-        const typename T::Kargs kargs{
+        typename T::Kargs kargs{
             // FmhaBwdConvertQGradCommonKargs base
             {t_dq_acc.ptr,                // dq_acc_ptr
              const_cast<void*>(t_dq.ptr), // dq_ptr (output, see const_cast note)
@@ -163,9 +163,12 @@ __device__ void runFmhaBwdConvertDQ(Args args)
              hdim_q,                      // hdim_q
              stride_dq,                   // stride_dq
              nhead_stride_dq},            // nhead_stride_dq
-            // FmhaBwdConvertQGradDeterministicKargs (always present for
-            // deterministic ConvertDQ; conditional_t resolves to this)
-            {nsplits_ptr}, // nsplits_ptr
+            // Deterministic base: FmhaBwdConvertQGradDeterministicKargs when
+            // K.is_deterministic, else FmhaBwdConvertQGradEmptyKargs<0>.
+            // Zero-init here and set nsplits_ptr by name below so the
+            // non-deterministic instantiation still compiles (an empty base
+            // cannot take {nsplits_ptr}).
+            {},
             // FmhaBwdConvertQGradGroupModeKargs extension
             reinterpret_cast<const int32_t*>(t_seqstart_q.ptr),
             reinterpret_cast<const int32_t*>(t_seqstart_k.ptr),
@@ -174,6 +177,9 @@ __device__ void runFmhaBwdConvertDQ(Args args)
             nullptr, // cu_seqlen_q_ptr (unused)
             nullptr, // cu_seqlen_k_ptr (unused)
             dq_acc_batch_offset_ptr};
+        if constexpr(K.is_deterministic)
+            kargs.nsplits_ptr =
+                reinterpret_cast<const index_t*>(args.tensors[S::nsplitsSlot(K)].ptr);
         (void)seqlen_q;
         (void)seqlen_k;
         typename T::Kernel{}(kargs);
@@ -183,7 +189,7 @@ __device__ void runFmhaBwdConvertDQ(Args args)
         // Batch mode: fixed-length sequences
         const index_t batch_stride_dq = static_cast<index_t>(t_dq.strides[2]);
 
-        const typename T::Kargs kargs{
+        typename T::Kargs kargs{
             // FmhaBwdConvertQGradCommonKargs base
             {t_dq_acc.ptr,                // dq_acc_ptr
              const_cast<void*>(t_dq.ptr), // dq_ptr (output, see const_cast note)
@@ -193,12 +199,18 @@ __device__ void runFmhaBwdConvertDQ(Args args)
              hdim_q,                      // hdim_q
              stride_dq,                   // stride_dq
              nhead_stride_dq},            // nhead_stride_dq
-            // FmhaBwdConvertQGradDeterministicKargs (always present for
-            // deterministic ConvertDQ; conditional_t resolves to this)
-            {nsplits_ptr}, // nsplits_ptr
+            // Deterministic base: FmhaBwdConvertQGradDeterministicKargs when
+            // K.is_deterministic, else FmhaBwdConvertQGradEmptyKargs<0>.
+            // Zero-init here and set nsplits_ptr by name below so the
+            // non-deterministic instantiation still compiles (an empty base
+            // cannot take {nsplits_ptr}).
+            {},
             // FmhaBwdConvertQGradBatchModeKargs extension
             batch_stride_dq // batch_stride_dq
         };
+        if constexpr(K.is_deterministic)
+            kargs.nsplits_ptr =
+                reinterpret_cast<const index_t*>(args.tensors[S::nsplitsSlot(K)].ptr);
         typename T::Kernel{}(kargs);
     }
 }
