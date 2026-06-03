@@ -59,6 +59,7 @@ jobs:
             .github
             cmake
             projects/miopen
+            shared/ctest
 
       - name: Configure build
         run: |
