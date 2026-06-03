@@ -662,13 +662,13 @@ def main():
         # Parse trait combo
         trait_parts = args.trait_combo.split("_")
         trait_combo = (
-            trait_parts[0],
-            trait_parts[1],
-            trait_parts[2],
-            trait_parts[3],
-            trait_parts[4],
-            trait_parts[5],
-            trait_parts[6],
+            trait_parts[0],  # pipeline
+            trait_parts[1],  # epilogue
+            trait_parts[2],  # scheduler
+            trait_parts[3] == "True",  # pad_m
+            trait_parts[4] == "True",  # pad_n
+            trait_parts[5] == "True",  # pad_k
+            trait_parts[6] == "True",  # persistent
         )
 
         builder._generate_kernel_instance(tile_config, trait_combo)

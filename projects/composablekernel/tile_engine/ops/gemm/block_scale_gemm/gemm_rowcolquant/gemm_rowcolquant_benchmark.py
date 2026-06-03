@@ -89,7 +89,6 @@ def main():
     parser.add_argument(
         "--flush-cache",
         action="store_true",
-        default=True,
         help="Enable cache flushing (default: True)",
     )
     parser.add_argument(
