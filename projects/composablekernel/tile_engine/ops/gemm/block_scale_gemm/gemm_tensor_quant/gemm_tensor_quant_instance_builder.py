@@ -40,7 +40,10 @@ class GemmTensorQuantKernelBuilder(GemmKernelBuilder):
         )
 
     def _generate_kernel_instance(self, tile_config, trait_combo, kernel_name):
-        pipeline, _, scheduler, pad_m, pad_n, pad_k, _ = trait_combo
+        pipeline, epilogue, scheduler, pad_m, pad_n, pad_k, persistent = trait_combo
+        if epilogue != "cshuffle" or persistent:
+            raise ValueError("Unsupported gemm_tensor_quant epilogue/persistent configuration")
+
         if not self._validate_tile_config(
             tile_config["tile_m"],
             tile_config["tile_n"],
