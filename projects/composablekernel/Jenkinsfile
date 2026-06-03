@@ -811,6 +811,8 @@ pipeline {
                             ck.generateAndArchiveBuildTraceVisualization("ck_build_trace_gfx90a.json")
                             ck.generateAndArchiveBuildTraceVisualization("ck_build_trace_gfx942.json")
                             ck.generateAndArchiveBuildTraceVisualization("ck_build_trace_gfx950.json")
+                            // Merge per-arch coverage results (run-all builds) into one aggregate.
+                            ck.aggregateCoverageResults()
                         }
                         cleanWs()
                     }

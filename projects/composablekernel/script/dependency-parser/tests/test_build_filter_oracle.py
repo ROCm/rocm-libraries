@@ -247,5 +247,37 @@ class TestCoverageCanon(unittest.TestCase):
         self.assertEqual(r["n_false_negatives"], 0)
 
 
+class TestCoverageAggregate(unittest.TestCase):
+    def _r(self, label, fn=None, tests_fn=None, edge=1.0, file=1.0, test=1.0, verdict="pass"):
+        return {"label": label, "coverage": edge, "file_coverage": file,
+                "test_coverage": test, "n_false_negatives": sum(len(v) for v in (fn or {}).values()),
+                "false_negatives": fn or {}, "tests_with_fn": tests_fn or [], "verdict": verdict}
+
+    def test_worst_case_and_union(self):
+        r1 = self._r("gfx942", {"a.hpp": ["t1", "t2"]}, ["t1", "t2"],
+                     edge=0.99, file=0.98, test=0.95, verdict="fail")
+        r2 = self._r("gfx950")
+        a = bfo.aggregate_coverage([r1, r2])
+        self.assertEqual(a["n_arches"], 2)
+        self.assertEqual(a["worst_test_coverage"], 0.95)
+        self.assertEqual(a["worst_file_coverage"], 0.98)
+        self.assertEqual(a["tests_with_fn"], ["t1", "t2"])
+        self.assertEqual(a["false_negatives"], {"a.hpp": ["t1", "t2"]})
+        self.assertEqual(a["verdict"], "fail")
+
+    def test_union_merges_same_file_across_arches(self):
+        r1 = self._r("a", {"x.hpp": ["t1"]}, ["t1"], verdict="fail")
+        r2 = self._r("b", {"x.hpp": ["t2"]}, ["t2"], verdict="fail")
+        a = bfo.aggregate_coverage([r1, r2])
+        self.assertEqual(a["false_negatives"], {"x.hpp": ["t1", "t2"]})
+        self.assertEqual(a["n_false_negatives"], 2)
+        self.assertEqual(a["n_files_with_fn"], 1)
+
+    def test_all_pass(self):
+        a = bfo.aggregate_coverage([self._r("a"), self._r("b")])
+        self.assertEqual(a["verdict"], "pass")
+        self.assertEqual(a["n_false_negatives"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()

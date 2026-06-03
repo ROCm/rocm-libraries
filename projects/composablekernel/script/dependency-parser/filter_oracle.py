@@ -394,6 +394,8 @@ def _run_coverage(args):
 
     result = compute_coverage(pre, post, ctest_tests)
     result["scope"] = "source" if source_only else "all"
+    if args.label:
+        result["label"] = args.label
 
     # Backstop-credited view: exclude the codegen-class tests (their generated
     # sources are owned by the ci_safety_check full-build backstop, not the
@@ -438,6 +440,77 @@ def _run_coverage(args):
         print(f"  FN {f} -> {', '.join(exes)}")
     print(f"verdict: {result['verdict'].upper()}")
     return 0 if result["verdict"] == "pass" else 1
+
+
+def aggregate_coverage(results):
+    """Merge per-arch coverage results into one cross-arch view.
+
+    A test/edge missed on ANY arch is a real blind spot, so false negatives are
+    unioned; the headline coverages are the worst (min) across arches. `results`
+    is a list of per-arch coverage dicts (each tagged with `label`).
+    """
+    per_arch, union_fn, union_tests_fn = [], {}, set()
+    worst = {"coverage": 1.0, "file_coverage": 1.0, "test_coverage": 1.0}
+    any_fail = False
+    for r in results:
+        per_arch.append({
+            "label": r.get("label", "?"),
+            "coverage": r.get("coverage"),
+            "file_coverage": r.get("file_coverage"),
+            "test_coverage": r.get("test_coverage"),
+            "n_false_negatives": r.get("n_false_negatives", 0),
+            "verdict": r.get("verdict"),
+        })
+        for f, tests in (r.get("false_negatives") or {}).items():
+            union_fn.setdefault(f, set()).update(tests)
+        union_tests_fn.update(r.get("tests_with_fn") or [])
+        for k in worst:
+            v = r.get(k)
+            if v is not None:
+                worst[k] = min(worst[k], v)
+        any_fail = any_fail or r.get("verdict") == "fail"
+    return {
+        "n_arches": len(results),
+        "per_arch": per_arch,
+        "worst_edge_coverage": worst["coverage"],
+        "worst_file_coverage": worst["file_coverage"],
+        "worst_test_coverage": worst["test_coverage"],
+        "false_negatives": {f: sorted(t) for f, t in sorted(union_fn.items())},
+        "n_false_negatives": sum(len(t) for t in union_fn.values()),
+        "n_files_with_fn": len(union_fn),
+        "tests_with_fn": sorted(union_tests_fn),
+        "n_tests_with_fn": len(union_tests_fn),
+        "verdict": "fail" if any_fail else "pass",
+    }
+
+
+def _run_coverage_aggregate(args):
+    results = []
+    for path in args.inputs:
+        if not os.path.exists(path):
+            print(f"Warning: skipping missing input: {path}", file=sys.stderr)
+            continue
+        with open(path) as f:
+            results.append(json.load(f))
+    if not results:
+        print("Error: no coverage result inputs found", file=sys.stderr)
+        return 2
+    agg = aggregate_coverage(results)
+    if args.output:
+        with open(args.output, "w") as f:
+            json.dump(agg, f, indent=2)
+    print("=== filter coverage (aggregate across %d arch(es)) ===" % agg["n_arches"])
+    for a in agg["per_arch"]:
+        print("  %-12s edge=%.4f file=%.4f test=%.4f FN=%d" % (
+            a["label"], a["coverage"] or 0, a["file_coverage"] or 0,
+            a["test_coverage"] or 0, a["n_false_negatives"]))
+    print("worst-case: edge=%.4f file=%.4f test=%.4f" % (
+        agg["worst_edge_coverage"], agg["worst_file_coverage"],
+        agg["worst_test_coverage"]))
+    print("union false negatives: %d edges, %d files, %d tests" % (
+        agg["n_false_negatives"], agg["n_files_with_fn"], agg["n_tests_with_fn"]))
+    print("verdict: %s" % agg["verdict"].upper())
+    return 0 if agg["verdict"] == "pass" else 1
 
 
 def main():
@@ -497,6 +570,9 @@ def main():
     cov.add_argument("--post", required=True,
                      help="post-build depmap JSON (main.py parse / ninja -t deps)")
     cov.add_argument("--ctest", help="ctest -N output (count only registered-test edges)")
+    cov.add_argument("--label",
+                     help="tag the result with this label (e.g. GPU arch) so per-arch "
+                     "results can be aggregated")
     cov.add_argument("--codegen-inventory",
                      help="codegen_blindspots.json; also report a backstop-credited "
                      "view with the codegen-class tests excluded")
@@ -504,6 +580,14 @@ def main():
                      help="also count build/ outputs and system headers the depmap "
                      "never tracks (default: PR-editable source only)")
     cov.add_argument("--output", help="write coverage result JSON here")
+
+    agg = sub.add_parser(
+        "coverage-aggregate",
+        help="Merge per-arch coverage result JSONs into one cross-arch view "
+        "(union of false negatives; worst-case coverages)",
+    )
+    agg.add_argument("inputs", nargs="+", help="per-arch coverage_result_*.json files")
+    agg.add_argument("--output", help="write aggregate JSON here")
 
     args = p.parse_args()
     if args.command == "probe":
@@ -514,6 +598,8 @@ def main():
         sys.exit(_run_codegen_allowlist(args))
     elif args.command == "coverage":
         sys.exit(_run_coverage(args))
+    elif args.command == "coverage-aggregate":
+        sys.exit(_run_coverage_aggregate(args))
 
 
 if __name__ == "__main__":

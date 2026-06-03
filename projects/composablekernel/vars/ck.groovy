@@ -100,6 +100,33 @@ def checkoutComposableKernel()
     ''').trim()
 }
 
+def aggregateCoverageResults() {
+    // Merge the per-arch coverage_result_<arch>.json the run-all build stages
+    // archived into one cross-arch coverage_aggregate.json (union of false
+    // negatives, worst-case coverages). Runs in a post step on a nogpu node.
+    try {
+        checkoutComposableKernel()
+        copyArtifacts(
+            projectName: env.JOB_NAME,
+            selector: specific(env.BUILD_NUMBER),
+            filter: "coverage_result_*.json",
+            optional: true
+        )
+        def files = sh(
+            script: "ls coverage_result_*.json 2>/dev/null | tr '\\n' ' '",
+            returnStdout: true
+        ).trim()
+        if (!files) {
+            echo "No per-arch coverage results to aggregate (selective/PR build?)"
+            return
+        }
+        sh "python3 projects/composablekernel/script/dependency-parser/filter_oracle.py coverage-aggregate ${files} --output coverage_aggregate.json || true"
+        archiveArtifacts artifacts: "coverage_aggregate.json", allowEmptyArchive: true
+    } catch (Exception e) {
+        echo "Coverage aggregation skipped: ${e.getMessage()}"
+    }
+}
+
 def generateAndArchiveBuildTraceVisualization(String buildTraceFileName) {
     try {
         checkoutComposableKernel()
@@ -823,9 +850,9 @@ def cmake_build(Map conf=[:]){
                             python3 \$DP/main.py cmake-parse compile_commands.json build.ninja --workspace-root ${env.WORKSPACE} --parallel 32 --output pre_depmap.json || true
                             python3 \$DP/main.py parse build.ninja --workspace-root ${env.WORKSPACE} || true
                             ctest -N > ctest_list.txt 2>/dev/null || true
-                            python3 \$DP/filter_oracle.py coverage --pre pre_depmap.json --post enhanced_dependency_mapping.json --ctest ctest_list.txt --codegen-inventory \$DP/codegen_blindspots.json --output coverage_result.json || true
+                            python3 \$DP/filter_oracle.py coverage --pre pre_depmap.json --post enhanced_dependency_mapping.json --ctest ctest_list.txt --codegen-inventory \$DP/codegen_blindspots.json --label ${arch_name} --output coverage_result_${arch_name}.json || true
                         """
-                        archiveArtifacts artifacts: "coverage_result.json", allowEmptyArchive: true
+                        archiveArtifacts artifacts: "coverage_result_${arch_name}.json", allowEmptyArchive: true
                     }
                     else{ //do not run tests on gfx1250, just build everything
                         echo "Building for gfx1250"
