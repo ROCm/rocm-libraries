@@ -120,7 +120,34 @@ __global__ void __launch_bounds__(256, MIN_OCC)
     // before ki's MFMAs overlaps the ~876cyc load latency via MLP (+1~15%). Compile-time
     // double buffer (dynamic reg-array index spills). For occ>=2 tiles (N128/N256) the 2nd
     // wave already hides latency, so the extra prefetch registers only cut occupancy -> skip.
-    if constexpr (MIN_OCC == 1) {
+    if constexpr (MIN_OCC == 1 && NPW_V == 0) {
+        // Compile-time 2x-unrolled PING-PONG double buffer (static buffers, no dynamic
+        // reg-array index -> no spill). Each do_mfma consumes a buffer loaded a full
+        // half-iteration earlier, so the compiler ties its vmcnt to THAT buffer's
+        // (mostly-complete) loads while the other buffer's freshly-issued loads stay in
+        // flight (vmcnt stays high) and overlap the MFMA cluster — real load/MFMA overlap.
+        // Supersedes the copy-based depth-1 prefetch (else-if below), whose next->current
+        // copy hid the load->MFMA dependency from the compiler, forcing a full vmcnt(0)
+        // drain BEFORE every MFMA cluster (zero overlap). Pure-AGPR tiles only (N512/swz):
+        // measured +2.5~5.7% (8192^3: 1559->1632). The V2 mixed-acc tiles (NPW_V>0) keep
+        // the copy-prefetch — ping-pong's doubled buffers regress 8192x5120 ~-1.8% there
+        // (extra acc_v Arch-VGPR pressure). See profile_out/mxfp6_v17_profile.md §7.
+        v6i a0[M_PER_WAVE], b0[NPW], a1[M_PER_WAVE], b1[NPW];
+        int sa0[M_PER_WAVE], sb0[NPW], sa1[M_PER_WAVE], sb1[NPW];
+        ld_a(a0, 0); ld_b(b0, 0); ld_sa(sa0, 0); ld_sb(sb0, 0);  // prologue: buf0 = ki0
+        int ki = 0;
+        for (; ki + 1 < k_iters; ki += 2) {
+            ld_a(a1, ki + 1); ld_b(b1, ki + 1); ld_sa(sa1, ki + 1); ld_sb(sb1, ki + 1);
+            do_mfma(a0, b0, sa0, sb0);
+            if (ki + 2 < k_iters) {
+                ld_a(a0, ki + 2); ld_b(b0, ki + 2); ld_sa(sa0, ki + 2); ld_sb(sb0, ki + 2);
+            }
+            do_mfma(a1, b1, sa1, sb1);
+        }
+        if (ki < k_iters) do_mfma(a0, b0, sa0, sb0);  // odd-k tail (buf0 already loaded)
+    } else if constexpr (MIN_OCC == 1) {
+        // V2 mixed-accumulator tiles (NPW_V>0): copy-based depth-1 prefetch (no overlap,
+        // but ping-pong's register doubling regresses these — keep the proven path).
         v6i ac[M_PER_WAVE], bc[NPW]; int sac[M_PER_WAVE], sbc[NPW];
         ld_a(ac, 0); ld_b(bc, 0); ld_sa(sac, 0); ld_sb(sbc, 0);
         for (int ki = 0; ki < k_iters; ki++) {

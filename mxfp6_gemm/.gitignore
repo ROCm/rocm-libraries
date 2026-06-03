@@ -7,8 +7,13 @@
 *.build.log
 test_pipeline_v17
 test_reference
+profile_v17
+profile_v17.0.host-*
+profile_v17.*.hipv4-*
 # profiler / tooling output
 prof_out*/
 .rocprofv3/
 compile_commands.json
 .vscode/
+# large profiler trace archive (regenerable; kept on NFS, not in git)
+profile_out/*.tar.gz
