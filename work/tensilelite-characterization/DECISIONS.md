@@ -263,24 +263,54 @@ bug (the `--skipMI` CLI flag is unusable). ADD-ONLY forbids fixing
 callbacks (representNone/flowSeq, registered but not invoked by these tests) and
 two orchestrator RuntimeError guards (empty solutionIndex / missing solution).
 
-## D15 — TensileClientConfig.py is a dead module (broken import); skip it
+## D15 — TensileClientConfig: dead code, REMOVED (final)
 
-**Context:** Batch F. `TensileClientConfig.py` line 28 does
-`from .Common import globalParameters, ... assignGlobalParameters,
-restoreDefaultGlobalParameters, ...`, but `Tensile.Common` does not export
-`globalParameters` (it lives in `Tensile.Common.GlobalParameters`). Importing
-the module raises `ImportError: cannot import name 'globalParameters' from
-'Tensile.Common'`. This is why it sits at 0% coverage — it cannot be imported.
+**Final verdict (2026-06-03, with the user):** `TensileClientConfig` is dead
+code and has been removed. The earlier two readings in this entry were both
+wrong on the conclusion; this records the corrected reasoning and the outcome.
 
-**Decision:** Skip TensileClientConfig.py entirely; document it as broken.
+**What was removed:**
+- `Tensile/TensileClientConfig.py` (the module)
+- `Tensile/bin/TensileClientConfig` (the launcher)
+- the `"TensileClientConfig"` entry in `cmake/tensilelite_auto_build.cmake`
+  `VALID_BINS`
 
-**Why:** It is impossible to import, so it has no live behavior to characterize.
-A test that merely asserts the ImportError would pin environment/packaging
-breakage, not module behavior, and ADD-ONLY forbids fixing the import. The other
-Batch F CLI scripts (TensileMergeLibrary/RetuneLibrary/UpdateLibrary/
-BenchmarkLibraryClient) import fine and are characterized at the pure-helper
-level.
+**Why it is dead (evidence):**
+- *No in-tree caller.* Following `invoke` / the build / QuickTune / the tuning
+  docs, the client-config writing done during tuning goes through
+  `ClientWriter.writeClientConfig` / `writeClientConfigIni` (driven by
+  `bin/Tensile` → `Tensile.py` → `BenchmarkProblems.py`). Nothing calls the
+  standalone `TensileClientConfig.main()` / `bin/TensileClientConfig`. The two
+  share the "ClientConfig" name but are different code paths — the source of the
+  earlier "it's used in tuning" confusion.
+- *Not shipped.* `MANIFEST.in` packages only `bin/Tensile` and
+  `bin/TensileCreateLibrary`; `[project.scripts]` registers only `Tensile`.
+- *Unimportable anyway.* `TensileClientConfig.py:29` still did
+  `from .Common import ... assignGlobalParameters, restoreDefaultGlobalParameters`,
+  the pre-refactor flat path. After `Tensile.Common` became a package those
+  funcs live in `Common/GlobalParameters.py` and are not re-exported by
+  `Common/__init__.py` (which only star-imports Constants/Parallel/Types/
+  Utilities), so the import raised `ImportError`. (Sibling entrypoints —
+  `Tensile.py`, `GenerateSummations`, `TensileUpdateLibrary`,
+  `TensileRetuneLibrary` — were migrated to `.Common.GlobalParameters`; this one
+  was missed.) A second latent break existed too: `:176` called
+  `assignGlobalParameters(globalParams)` with one arg against the current
+  two-arg `(config, isaInfoMap)` signature.
 
-**Rejected alternatives:**
-- *Assert the ImportError* — pins breakage, not behavior; brittle.
-- *Fix the import* — out of scope (ADD-ONLY); belongs in a separate change.
+**Validation:** full `-m unit` (`Tensile/Tests/unit`, in `tensilelite-char:repro`)
+= **2466 passed / 201 skipped both before and after** the removal — no
+regression. This is a real source deletion (departs from the ADD-ONLY rule of
+the characterization pass) committed separately as a cleanup, at the user's
+explicit direction.
+
+**History of this entry (do not repeat):**
+- v1 — "dead module, skip; assert nothing." WRONG reasoning (called it dead only
+  because the import failed, without checking callers/packaging).
+- v2 — "live tuning entrypoint, broken by refactor, restore it (~2 lines)." Also
+  WRONG: there is no caller and it is not shipped, so there was nothing live to
+  restore. The `writeClientConfig*` path (which *is* live) was conflated with it.
+- v3 (this) — dead code, verified by caller/packaging/import analysis, removed
+  with a green suite on both sides.
+
+**Not touched:** `shared/tensile/Tensile/TensileClientConfig.py` — a separate
+vendored full-Tensile tree (different `ClientWriter` signatures), out of scope.
