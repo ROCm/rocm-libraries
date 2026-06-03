@@ -1507,14 +1507,10 @@ class TestDummyClassesInheritItem(unittest.TestCase):
     def test_macro_is_item(self):
         self.assertIsInstance(Macro(), Item)
 
-    def test_valueendif_is_item(self):
-        self.assertIsInstance(ValueEndif(), Item)
-
-    def test_valueif_is_item(self):
-        self.assertIsInstance(ValueIf(), Item)
-
-    def test_valueelseif_is_item(self):
-        self.assertIsInstance(ValueElseIf(), Item)
+    # NB: ValueIf / ValueElseIf / ValueEndif used to be dummies and were
+    # tested here. They became real classes (see TestValueConditionals
+    # below); the isinstance-Item check is preserved there alongside
+    # the rest of their behavioural coverage.
 
     def test_valueset_is_item(self):
         self.assertIsInstance(ValueSet(), Item)
@@ -1665,6 +1661,277 @@ class TestStructuredModuleDummyBehaviour(unittest.TestCase):
         sm = StructuredModule()
         sm.add(TextBlock("x"))
         self.assertEqual(sm.findIndexByType(TextBlock), 0)
+
+
+# ===========================================================================
+# Preprocessor conditional blocks -- ValueIf / ValueElseIf / ValueEndif.
+# ===========================================================================
+#
+# Mirror of rocisa's ``ValueIf`` / ``ValueElseIf`` / ``ValueEndif``.
+# KernelWriter uses these to gate macro / kernel-text sections at
+# assemble time -- byte-for-byte parity matters because the GNU
+# assembler is strict about ``.if`` / ``.elseif`` / ``.endif``
+# placement, and the ``.endif`` comment alignment is the only
+# difference between a clean diff and a noisy one when comparing
+# adapter output to the rocisa baseline.
+
+
+class TestValueIfConstruction(unittest.TestCase):
+    """``ValueIf`` ctor + toString format + Item integration."""
+
+    def test_construction_positional(self):
+        vi = ValueIf("foo == 1")
+        self.assertEqual(vi.value, "foo == 1")
+
+    def test_construction_keyword(self):
+        # KernelWriterAssembly.py:1855 -- ``ValueIf(value="0")``.
+        vi = ValueIf(value="0")
+        self.assertEqual(vi.value, "0")
+
+    def test_name_is_class_name_not_value(self):
+        # ``Item.name`` is the literal class name, NOT the condition
+        # expression -- KernelWriter's ``findNamedItem`` searches by
+        # name; this parity guarantees those searches match between
+        # the two backends.
+        self.assertEqual(ValueIf("foo == 1").name, "ValueIf")
+
+    def test_parent_starts_none(self):
+        self.assertIsNone(ValueIf("x").parent)
+
+    def test_isinstance_item(self):
+        # The whole point of inheriting Item in Commit Y: standard
+        # type-walks see ValueIf as a code-composition node.
+        self.assertIsInstance(ValueIf("x"), Item)
+
+    def test_toString_format(self):
+        # ``".if " + value + "\\n"``. The trailing newline matters
+        # because Module.toString concatenates child toString()
+        # outputs verbatim.
+        self.assertEqual(ValueIf("a == b").toString(), ".if a == b\n")
+
+    def test_toString_empty_value(self):
+        # C++ doesn't reject empty value; produces ".if \n".
+        # KernelWriter never does this in practice but parity is
+        # cheap so we keep it.
+        self.assertEqual(ValueIf("").toString(), ".if \n")
+
+    def test_str_delegates_to_toString(self):
+        # Inherited Item.__str__ -> self.toString().
+        self.assertEqual(str(ValueIf("k > 0")), ".if k > 0\n")
+
+
+class TestValueElseIfConstruction(unittest.TestCase):
+    """``ValueElseIf`` -- mirror of ``ValueIf`` with ``.elseif`` prefix."""
+
+    def test_construction(self):
+        vei = ValueElseIf("y == 2")
+        self.assertEqual(vei.value, "y == 2")
+        self.assertEqual(vei.name, "ValueElseIf")
+        self.assertIsNone(vei.parent)
+
+    def test_isinstance_item(self):
+        self.assertIsInstance(ValueElseIf("x"), Item)
+
+    def test_toString_format(self):
+        # ``".elseif " + value + "\\n"``.
+        self.assertEqual(
+            ValueElseIf("\\useGR == 0").toString(),
+            ".elseif \\useGR == 0\n",
+        )
+
+    def test_str_delegates_to_toString(self):
+        self.assertEqual(str(ValueElseIf("a")), ".elseif a\n")
+
+
+class TestValueEndifConstruction(unittest.TestCase):
+    """``ValueEndif`` -- ``.endif`` with optional trailing comment."""
+
+    def test_construction_default_comment(self):
+        # Default ``comment=""`` matches the most common KernelWriter
+        # call site (a bare ``ValueEndif()`` closing an .if block).
+        ve = ValueEndif()
+        self.assertEqual(ve.comment, "")
+        self.assertEqual(ve.name, "ValueEndif")
+
+    def test_construction_positional_comment(self):
+        # KernelWriterAssembly.py:1827 -- ``ValueEndif("overflowed
+        # resources")``.
+        ve = ValueEndif("overflowed resources")
+        self.assertEqual(ve.comment, "overflowed resources")
+
+    def test_construction_keyword_comment(self):
+        # CustomSchedule.py:493 -- ``ValueEndif(comment="EndIf %s"
+        # % macroGuard)``.
+        ve = ValueEndif(comment="EndIf foo")
+        self.assertEqual(ve.comment, "EndIf foo")
+
+    def test_isinstance_item(self):
+        self.assertIsInstance(ValueEndif(), Item)
+
+
+class TestValueEndifToStringFormatting(unittest.TestCase):
+    """ValueEndif's ``toString`` mirrors rocisa's ``formatStr``
+    byte-for-byte. The padding-to-column-50 behaviour is the only
+    non-trivial bit in this batch; we pin it explicitly because
+    production-build diffs against the rocisa baseline would
+    otherwise show as spurious whitespace changes."""
+
+    def test_empty_comment_no_padding(self):
+        # rocisa formatStr: empty comment -> ".endif\n" with no
+        # padding (avoids trailing-whitespace lines).
+        self.assertEqual(ValueEndif().toString(), ".endif\n")
+        self.assertEqual(ValueEndif("").toString(), ".endif\n")
+
+    def test_nonempty_comment_padded_to_column_50(self):
+        # ``.endif`` is 6 chars, so 44 spaces are appended to reach
+        # column 50, then ``" // closing\n"``. Total line length:
+        # 6 + 44 + 4 + 7 + 1 = 62 chars.
+        out = ValueEndif("closing").toString()
+        expected = ".endif" + " " * 44 + " // closing\n"
+        self.assertEqual(out, expected)
+        self.assertEqual(len(out), 62)
+        # The ``//`` must land at exactly column 51 (0-indexed),
+        # the same column rocisa instruction lines target.
+        self.assertEqual(out.index("//"), 51)
+
+    def test_long_instr_no_negative_padding(self):
+        # The ``max(0, 50 - len)`` guard in _format_endif_str
+        # protects against the unlikely future case where the
+        # instruction string itself exceeds width 50. We exercise
+        # it via the private helper directly since ValueEndif's
+        # instr is always ``.endif`` (6 chars).
+        from rocisa_stinkytofu_adaptor.code import _format_endif_str
+        out = _format_endif_str("X" * 55, "tail")
+        # No padding (negative clamped to 0), so the comment is
+        # appended immediately after the long instr.
+        self.assertEqual(out, "X" * 55 + " // tail\n")
+
+    def test_outputNoComment_suppresses_comment(self):
+        # When the rocIsa output-options flag is set, ValueEndif
+        # drops the comment AND the padding -- matches rocisa's
+        # ``formatStr`` ``noComment=True`` branch (falls through to
+        # ``formattedStr + "\n"``).
+        from rocisa_stinkytofu_adaptor import rocIsa  # noqa: WPS433
+        opts = rocIsa.getInstance().getOutputOptions()
+        saved = opts.outputNoComment
+        try:
+            opts.outputNoComment = True
+            self.assertEqual(
+                ValueEndif("would be suppressed").toString(),
+                ".endif\n",
+            )
+        finally:
+            opts.outputNoComment = saved
+
+
+class TestValueConditionalPickle(unittest.TestCase):
+    """Pickle round-trip preserves the single string field on each of
+    the three classes. Mirrors rocisa's pickle hooks which serialise
+    just the value/comment string."""
+
+    def test_valueif_pickle_round_trip(self):
+        original = ValueIf("count > 0")
+        restored = pickle.loads(pickle.dumps(original))
+        self.assertIsInstance(restored, ValueIf)
+        self.assertEqual(restored.value, "count > 0")
+        self.assertEqual(restored.name, "ValueIf")
+        self.assertIsNone(restored.parent)
+        self.assertEqual(restored.toString(), original.toString())
+
+    def test_valueelseif_pickle_round_trip(self):
+        original = ValueElseIf("y == 2")
+        restored = pickle.loads(pickle.dumps(original))
+        self.assertIsInstance(restored, ValueElseIf)
+        self.assertEqual(restored.value, "y == 2")
+        self.assertEqual(restored.toString(), original.toString())
+
+    def test_valueendif_pickle_round_trip_with_comment(self):
+        original = ValueEndif("EndIf guard")
+        restored = pickle.loads(pickle.dumps(original))
+        self.assertIsInstance(restored, ValueEndif)
+        self.assertEqual(restored.comment, "EndIf guard")
+        self.assertEqual(restored.toString(), original.toString())
+
+    def test_valueendif_pickle_round_trip_default(self):
+        # The bare ``ValueEndif()`` case picks up the default "".
+        restored = pickle.loads(pickle.dumps(ValueEndif()))
+        self.assertEqual(restored.comment, "")
+
+
+class TestValueConditionalDeepCopy(unittest.TestCase):
+    """deepcopy yields a fresh instance with the same string payload
+    and no shared mutable state, matching rocisa's copy ctor."""
+
+    def test_valueif_deepcopy(self):
+        original = ValueIf("x")
+        clone = copy.deepcopy(original)
+        self.assertIsNot(clone, original)
+        self.assertIsInstance(clone, ValueIf)
+        self.assertEqual(clone.value, "x")
+
+    def test_valueelseif_deepcopy(self):
+        original = ValueElseIf("y")
+        clone = copy.deepcopy(original)
+        self.assertIsNot(clone, original)
+        self.assertEqual(clone.value, "y")
+
+    def test_valueendif_deepcopy(self):
+        original = ValueEndif("c")
+        clone = copy.deepcopy(original)
+        self.assertIsNot(clone, original)
+        self.assertEqual(clone.comment, "c")
+
+
+class TestValueConditionalModuleIntegration(unittest.TestCase):
+    """A full ``.if`` / ``.elseif`` / ``.endif`` block built inside a
+    Module reproduces the CustomSchedule.py:448-466 pattern. The
+    emitted string must concatenate the three children verbatim
+    (each child supplies its own trailing newline)."""
+
+    def _build_if_elseif_endif_module(self) -> Module:
+        m = Module("conditional")
+        m.add(ValueIf("\\useGR == 1"))
+        m.add(ValueElseIf("\\useGR == 0"))
+        m.add(ValueEndif("EndIf useGR"))
+        return m
+
+    def test_module_toString_concatenates_block(self):
+        out = str(self._build_if_elseif_endif_module())
+        expected = (
+            ".if \\useGR == 1\n"
+            ".elseif \\useGR == 0\n"
+            ".endif" + " " * 44 + " // EndIf useGR\n"
+        )
+        self.assertEqual(out, expected)
+
+    def test_reparented_on_add(self):
+        # Item.parent must be set to the containing Module on add()
+        # -- the same parent-rebind invariant exercised for TextBlock
+        # and sub-Modules elsewhere in this file.
+        m = Module()
+        vi = ValueIf("x")
+        m.add(vi)
+        self.assertIs(vi.parent, m)
+
+    def test_countType_recurses_into_conditionals(self):
+        m = self._build_if_elseif_endif_module()
+        # 3 children, none of them Modules; countType(Item) on m:
+        # 1 (Module) + 3 (children) = 4.
+        self.assertEqual(m.countType(Item), 4)
+        # Targeting individual conditional types:
+        self.assertEqual(m.countType(ValueIf), 1)
+        self.assertEqual(m.countType(ValueElseIf), 1)
+        self.assertEqual(m.countType(ValueEndif), 1)
+
+    def test_deepcopy_module_with_conditionals_preserves_block(self):
+        # Cloning a Module containing ValueIf/ElseIf/Endif must
+        # round-trip the emitted block exactly -- ParallelMap2-style
+        # workers rely on this if they ever decide to deepcopy a
+        # Module subtree (rare but legal).
+        m = self._build_if_elseif_endif_module()
+        clone = copy.deepcopy(m)
+        self.assertIsNot(clone, m)
+        self.assertEqual(str(clone), str(m))
 
 
 if __name__ == "__main__":

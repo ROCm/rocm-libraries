@@ -62,11 +62,18 @@ What it does (real):
       Other ISAs are intentionally not supported today — the rocisa →
       stinkytofu adapter is gfx1250-only.
 
+    - ``ValueIf`` / ``ValueElseIf`` / ``ValueEndif`` — GNU assembler
+      preprocessor-conditional leaves (``.if`` / ``.elseif`` /
+      ``.endif``). KernelWriter uses these to gate macro / kernel-text
+      sections at assemble time (CustomSchedule.py:448-508,
+      KernelWriterAssembly.py:1827). ``ValueEndif``'s comment formatting
+      matches rocisa byte-for-byte (width-50 padding then
+      ``// comment``), gated by ``outputNoComment``.
+
 Not yet done (dummy):
     - Container nodes: ``KernelBody``, ``Label``, ``Macro``,
-      ``StructuredModule``, ``ValueIf`` / ``ValueElseIf`` / ``ValueEndif``,
-      ``ValueSet``, ``RegSet``, ``BitfieldUnion``, ``SignatureCodeMeta``,
-      ``SignatureBase``.
+      ``StructuredModule``, ``ValueSet``, ``RegSet``,
+      ``BitfieldUnion``, ``SignatureCodeMeta``, ``SignatureBase``.
 
 Future:
     When this shim grows beyond gfx1250, prefer adding sibling free
@@ -219,6 +226,177 @@ def _block_newline(comment: str) -> str:
 def _block_3line(comment: str) -> str:
     """``_block`` followed by a trailing blank line."""
     return _block(comment) + "\n"
+
+
+def _format_endif_str(instr: str, comment: str) -> str:
+    """Format an instruction line with an optional trailing comment.
+
+    Used by ``ValueEndif.toString`` for the ``.endif [// <comment>]``
+    rendering. Layout rules:
+
+      * ``comment`` empty OR ``_outputNoComment()`` returns True ->
+        ``"{instr}\\n"`` with no padding.
+      * Otherwise: ``instr`` is right-padded with spaces to width 50
+        (``max(0, 50 - len(instr))`` spaces), then ``" // {comment}\\n"``
+        is appended. Padding width 50 matches the column where rocisa
+        instruction lines align their trailing ``// ...`` notes.
+
+    Currently used only by ``ValueEndif``; Phase 5 (assembly emit)
+    will need the full surface (including an ``outputInlineAsm``
+    branch that wraps the instruction string in ``"...\\n\\t"`` for
+    inline-asm output). When that lands, lift this into a public
+    ``format.py`` module; for now keeping it private to ``code.py``
+    keeps the surface area minimal.
+    """
+    if not comment or _outputNoComment():
+        return instr + "\n"
+    padding = " " * max(0, 50 - len(instr))
+    return f"{instr}{padding} // {comment}\n"
+
+
+# ---------------------------------------------------------------------------
+# Preprocessor conditional blocks -- ValueIf / ValueElseIf / ValueEndif.
+# ---------------------------------------------------------------------------
+#
+# Mirror of rocisa's ``ValueIf`` / ``ValueElseIf`` / ``ValueEndif``.
+# These produce the GNU assembler preprocessor directives ``.if`` /
+# ``.elseif`` / ``.endif`` that KernelWriter uses to gate macro /
+# kernel-text sections at assemble time (CustomSchedule.py:448-508
+# chains them; KernelWriterAssembly.py:1827 uses a single ValueEndif
+# for the "overflowed resources" guard).
+#
+# Parity notes:
+#   * ``Item.name`` is set to the CLASS NAME ("ValueIf" / ... ) rather
+#     than to the condition expression -- matches rocisa's ctors which
+#     pass ``Item("ValueIf")``. This means
+#     ``findNamedItem("ValueIf")`` matches every ValueIf node in a
+#     Module; KernelWriter doesn't rely on that today but the parity
+#     keeps any future searcher behaviour identical.
+#   * Subclasses of ``Item`` -- ``__str__`` / ``prettyPrint`` /
+#     ``countType`` / ``countExactType`` / 7 cap-proxy methods all
+#     come from Item's defaults. We override only ``toString``,
+#     ``__deepcopy__``, ``__getstate__``, ``__setstate__`` -- the
+#     same four overrides rocisa's nanobind binding wires up
+#     explicitly.
+#   * ValueIf / ValueElseIf store a ``value`` (the condition
+#     expression); ValueEndif stores a ``comment`` and uses
+#     ``_format_endif_str`` to byte-match rocisa's ``formatStr``
+#     padding semantics.
+
+class ValueIf(Item):
+    """``.if <value>`` directive; mirror of ``rocisa::ValueIf``."""
+
+    __slots__ = ("value",)
+
+    def __init__(self, value: str):
+        # ``Item.name`` is the literal "ValueIf" (class name), NOT the
+        # condition expression -- matches rocisa's ctor.
+        super().__init__(name="ValueIf")
+        self.value: str = value
+
+    def toString(self) -> str:
+        # Raw ``.if`` + value + newline; no padding / comment support
+        # (the condition expression IS the trailing payload on this
+        # line).
+        return f".if {self.value}\n"
+
+    def __deepcopy__(self, memo):
+        # Copy ctor -- a fresh ValueIf with the same value.
+        clone = ValueIf(self.value)
+        memo[id(self)] = clone
+        return clone
+
+    def __getstate__(self) -> str:
+        # Pickle just the value string.
+        return self.value
+
+    def __setstate__(self, state: str) -> None:
+        # Rebuild as ``ValueIf(value)``. Have to populate Item-
+        # inherited slots manually since ``__init__`` isn't called
+        # by the pickle machinery.
+        self.name = "ValueIf"
+        self.parent = None
+        self.value = state
+
+    def __repr__(self) -> str:
+        return f"ValueIf({self.value!r})"
+
+
+class ValueElseIf(Item):
+    """``.elseif <value>`` directive; mirror of ``rocisa::ValueElseIf``."""
+
+    __slots__ = ("value",)
+
+    def __init__(self, value: str):
+        # ``Item.name`` is the literal "ValueElseIf" (class name), NOT
+        # the condition expression -- matches rocisa's ctor.
+        super().__init__(name="ValueElseIf")
+        self.value: str = value
+
+    def toString(self) -> str:
+        # Raw ``.elseif`` + value + newline.
+        return f".elseif {self.value}\n"
+
+    def __deepcopy__(self, memo):
+        clone = ValueElseIf(self.value)
+        memo[id(self)] = clone
+        return clone
+
+    def __getstate__(self) -> str:
+        return self.value
+
+    def __setstate__(self, state: str) -> None:
+        self.name = "ValueElseIf"
+        self.parent = None
+        self.value = state
+
+    def __repr__(self) -> str:
+        return f"ValueElseIf({self.value!r})"
+
+
+class ValueEndif(Item):
+    """``.endif [// <comment>]`` directive; mirror of
+    ``rocisa::ValueEndif``.
+
+    The comment is padding-aligned to column 50 to match how rocisa
+    instruction lines align their trailing ``// ...`` notes, and is
+    suppressed entirely when ``outputNoComment`` is set (see
+    ``_format_endif_str`` for the exact rules).
+    """
+
+    __slots__ = ("comment",)
+
+    def __init__(self, comment: str = ""):
+        # Default ``comment=""`` matches the most common KernelWriter
+        # call site (a bare ``ValueEndif()`` closing an .if block);
+        # ``Item.name`` is the literal "ValueEndif" -- matches rocisa's
+        # ctor.
+        super().__init__(name="ValueEndif")
+        self.comment: str = comment
+
+    def toString(self) -> str:
+        # ``.endif`` + optional ``// <comment>`` padded to column 50;
+        # gated by ``outputNoComment``. See ``_format_endif_str`` for
+        # the byte-level rules.
+        return _format_endif_str(".endif", self.comment)
+
+    def __deepcopy__(self, memo):
+        clone = ValueEndif(self.comment)
+        memo[id(self)] = clone
+        return clone
+
+    def __getstate__(self) -> str:
+        # Pickle just the comment string (which is "" for the bare-
+        # ``ValueEndif()`` common case).
+        return self.comment
+
+    def __setstate__(self, state: str) -> None:
+        self.name = "ValueEndif"
+        self.parent = None
+        self.comment = state
+
+    def __repr__(self) -> str:
+        return f"ValueEndif({self.comment!r})"
 
 
 # ---------------------------------------------------------------------------
@@ -651,27 +829,27 @@ class Module(Item):
 #     prettyPrint / count output during bring-up.
 #
 # Inheritance map (mirror of code.hpp):
-#   Label / Macro / ValueEndif / ValueIf / ValueElseIf
-#     / ValueSet / RegSet / SignatureCodeMeta / SignatureBase
-#     / KernelBody   -- ``: Item`` in C++ ⇒ ``base=Item`` here.
+#   Label / Macro / ValueSet / RegSet / SignatureCodeMeta
+#     / SignatureBase / KernelBody   -- ``: Item`` in C++ ⇒
+#     ``base=Item`` here.
 #   StructuredModule -- ``: Module`` in C++ (code.hpp:469). Using
 #     ``base=Module`` here means KernelWriter's
 #     ``self.codes.globalReadA = StructuredModule()`` actually gets a
 #     working ``.add() / .items() / .appendModule(...)`` surface
 #     during bring-up instead of silent no-ops. The "structured"
 #     part (separate header/body/footer modules) is the only thing
-#     missing; Commit Z makes it real.
+#     missing; a follow-up commit makes it real.
 #   BitfieldUnion -- standalone polymorphic root in C++
 #     (code.hpp:928, NOT a subclass of Item). Kept ``base=object``
 #     so ``isinstance(bf, Item)`` correctly stays False; the C++ class
 #     is the polymorphic root for the ``SrdUpperValue*`` family.
+#
+# Already real (above this block): TextBlock, Module, ValueIf,
+# ValueElseIf, ValueEndif.
 
 Label = make_dummy_class(f"{_P}.Label", base=Item)
 Macro = make_dummy_class(f"{_P}.Macro", base=Item)
 StructuredModule = make_dummy_class(f"{_P}.StructuredModule", base=Module)
-ValueEndif = make_dummy_class(f"{_P}.ValueEndif", base=Item)
-ValueIf = make_dummy_class(f"{_P}.ValueIf", base=Item)
-ValueElseIf = make_dummy_class(f"{_P}.ValueElseIf", base=Item)
 ValueSet = make_dummy_class(f"{_P}.ValueSet", base=Item)
 RegSet = make_dummy_class(f"{_P}.RegSet", base=Item)
 BitfieldUnion = make_dummy_class(f"{_P}.BitfieldUnion")
