@@ -150,18 +150,24 @@ pure-Python over dicts + `DataType` (now fully pinned) + `ActivationType`.
 7. Final coverage run + `coverage-after.txt` + no-regression confirmation.
 8. Create `next-goal-<target>.md` (grounded) + commit. Mark this checklist done.
 
-## Definition of done checklist
+## Definition of done checklist — COMPLETE
 
-- [ ] `coverage-before.txt` captured (baseline) and committed BEFORE new tests.
-- [ ] Slice symbols ≥95% line (file % will be lower — demonstrate via Missing
-      column that residual misses are out-of-slice; document in target.md).
-- [ ] `coverage-after.txt` captured; before→after delta in target.md.
-- [ ] Every targeted Tier A/B symbol has snapshot coverage; Tier C documented.
-- [ ] `ProblemType` snapshots are normalised (no live objects/paths/versions).
-- [ ] resistance.md lists each resisting fn (expect: deep `assignDerivedParameters`
-      branches needing self-consistent op/index configs).
-- [ ] recommendations.md: go/no-go on the next target (rest of Problem/Solution
-      core vs `Common/GlobalParameters.py`).
-- [ ] full `-m unit` ≥ 1563 passed / 201 skipped, no failures, additive only.
-- [ ] All work committed (atomic, no push); tree clean.
-- [ ] Next goal prompt `next-goal-<target>.md` created and committed.
+- [x] `coverage-before.txt` captured (baseline) and committed BEFORE new tests.
+      (601 stmts, 240 miss = 60.07% line; `--cov=Tensile` + grep fallback.)
+- [x] Slice symbols ≥95% line — **97.00% line** (601 stmts, 18 miss). Nearly the
+      whole file IS the slice; the 18 residual misses are dead/unreachable
+      (documented line-by-line in resistance.md).
+- [x] `coverage-after.txt` captured; before→after delta in target.md (+36.93 pts).
+- [x] Every targeted Tier A/B symbol has snapshot coverage (helpers,
+      ProblemType ×42 configs + Mapping/eq/hash/raises, ProblemSizes family).
+- [x] `ProblemType` snapshots normalised (object-free state view via conftest
+      `norm`; minimal YAML-mirroring configs).
+- [x] resistance.md lists each resisting line (post-raise dead code, attribute-
+      bug `isGEMM`, GEMM-invariant index raises, dead `UseE` elif, unreachable
+      `Index01` else, `__ne__` NotImplemented).
+- [x] recommendations.md: GO → `SolutionStructs/Naming.py` next, then a
+      `Utilities.py`+`LdsPadding.py` top-up; defer sliced `Solution.py` and
+      env-coupled `GlobalParameters.py`.
+- [x] full `-m unit` = **1672 passed / 201 skipped**, no failures, additive only.
+- [x] All work committed (atomic, no push); tree clean.
+- [x] Next goal prompt `next-goal-naming.md` created and committed.
