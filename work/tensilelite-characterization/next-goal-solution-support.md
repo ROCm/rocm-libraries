@@ -116,16 +116,22 @@ the env (the module is imported by the existing suite).
 6. `next-goal-<target>.md` (the cap-coupled `Solution` class slice, grounded) +
    commit. Mark this checklist done.
 
-## Definition of done checklist
+## Definition of done checklist — COMPLETE
 
-- [ ] `coverage-before.txt` captured (baseline) BEFORE new tests.
-- [ ] Slice symbols ≥95% line (file % lower — demonstrate residual is out-of-slice).
-- [ ] `coverage-after.txt` captured; before→after delta in target.md.
-- [ ] Every targeted Tier A/B symbol has snapshot coverage; Tier C documented.
-- [ ] Collector isolated (clear/capture/restore); `printExit` paths pinned.
-- [ ] resistance.md lists each resisting fn.
-- [ ] recommendations.md: go/no-go on the next slice (the cap-coupled `Solution`
-      class construction/derivation, with `isaInfoMap`/`assembler` fixtures).
-- [ ] full `-m unit` ≥ 1769 passed / 201 skipped, no failures, additive only.
-- [ ] All work committed (atomic, no push); tree clean.
-- [ ] Next goal prompt `next-goal-<target>.md` created and committed.
+- [x] `coverage-before.txt` captured (baseline) BEFORE new tests.
+      (whole-file 3272/2045 = 37.50% line; slice symbols largely uncovered.)
+- [x] Slice symbols ≥95% line — **100% line+branch on L165-439** (AFTER Missing
+      column's first entry is L473, inside the out-of-slice Solution class).
+- [x] `coverage-after.txt` captured; before→after delta in target.md.
+- [x] Every targeted Tier A/B symbol has snapshot coverage (collector machinery,
+      validate/print, Fbs, the 3 arg dataclasses, index helpers).
+- [x] Collector isolated (clear/capture/restore); `printExit` paths pinned via
+      `pytest.raises(SystemExit)`.
+- [x] resistance.md: nothing in-slice resisted; documents the cap-boundary
+      scoping + the `importlib` submodule-shadowing gotcha.
+- [x] recommendations.md: GO → Solution class slice 2 (construction + Mapping +
+      simple statics, with isaInfoMap/assembler fixtures); GlobalParameters as
+      the quicker alternative.
+- [x] full `-m unit` = **1800 passed / 201 skipped**, no failures, additive only.
+- [x] All work committed (atomic, no push); tree clean.
+- [x] Next goal prompt `next-goal-solution-class.md` created and committed.
