@@ -61,7 +61,7 @@ void benchmark_single(const ck_tile::ArgParser& arg_parser)
                      arg_parser.get_bool("json_output")};
 
     // Get the profiler instance
-    auto& profiler = MXGemmProfiler::GemmProfiler::instance(setting);
+    auto& profiler = MXGemmProfiler::instance(setting);
 
     try
     {
