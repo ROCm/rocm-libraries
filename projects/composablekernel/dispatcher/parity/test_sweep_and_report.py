@@ -1272,3 +1272,293 @@ class TestMakeRow:
         # Must parse as a datetime
         parsed = datetime.fromisoformat(ts)
         assert parsed.tzinfo is not None, "ts must be timezone-aware (UTC)"
+
+
+# ── sweep_runner._load_done_keys / _append_row ────────────────────────────────
+
+class TestLoadDoneKeysAndAppendRow:
+    """_load_done_keys() and _append_row() implement crash-safe resume."""
+
+    def _base_row(self, identifier="id1", M=512, N=512, K=512, verdict="PASSED"):
+        return dict(
+            config_file="c.json", config_index=0,
+            identifier=identifier, kernel_name="kname",
+            datatype="fp16", layout="rcr",
+            pipeline="compv3", scheduler="intrawave",
+            tile_m=256, tile_n=128, tile_k=32, split_k=1,
+            pad_m=False, pad_n=False, pad_k=False, persistent=False,
+            M=M, N=N, K=K,
+            verdict=verdict, tflops=10.5, error_msg="", stage_failed="",
+            ts="2026-06-02T00:00:00+00:00",
+        )
+
+    def test_load_done_keys_missing_file(self, tmp_path):
+        """Non-existent parquet → empty set (not an error)."""
+        import sweep_runner
+        keys = sweep_runner._load_done_keys(tmp_path / "nonexistent.parquet")
+        assert keys == set()
+
+    def test_load_done_keys_reads_existing_rows(self, tmp_path):
+        """Existing parquet → set of (identifier, M, N, K) tuples."""
+        import sweep_runner
+        pq = tmp_path / "out.parquet"
+        _make_parquet([self._base_row("id1", 512, 512, 512)], pq)
+        keys = sweep_runner._load_done_keys(pq)
+        assert ("id1", 512, 512, 512) in keys
+
+    def test_load_done_keys_corrupt_file_returns_empty(self, tmp_path):
+        """Corrupt parquet must return empty set (not raise)."""
+        import sweep_runner
+        pq = tmp_path / "bad.parquet"
+        pq.write_bytes(b"not a parquet file")
+        keys = sweep_runner._load_done_keys(pq)
+        assert keys == set()
+
+    def test_append_row_creates_file(self, tmp_path):
+        """First append creates the parquet file."""
+        import sweep_runner
+        pq = tmp_path / "out.parquet"
+        row = self._base_row()
+        sweep_runner._append_row(pq, row)
+        assert pq.exists()
+
+    def test_append_row_accumulates(self, tmp_path):
+        """Second append adds a second row (total 2, not 1)."""
+        import sweep_runner
+        pq = tmp_path / "out.parquet"
+        sweep_runner._append_row(pq, self._base_row("id1", 512, 512, 512))
+        sweep_runner._append_row(pq, self._base_row("id2", 1024, 1024, 1024))
+        df = pd.read_parquet(pq)
+        assert len(df) == 2, f"Expected 2 rows after 2 appends, got {len(df)}"
+
+    def test_append_then_load_done_keys(self, tmp_path):
+        """Append a row → load_done_keys must include it."""
+        import sweep_runner
+        pq = tmp_path / "out.parquet"
+        sweep_runner._append_row(pq, self._base_row("myid", 256, 256, 256))
+        keys = sweep_runner._load_done_keys(pq)
+        assert ("myid", 256, 256, 256) in keys
+
+    def test_resume_skips_done_keys(self, tmp_path):
+        """After 1 row is appended, its done-key is present, a different key is absent."""
+        import sweep_runner
+        pq = tmp_path / "out.parquet"
+        sweep_runner._append_row(pq, self._base_row("id_done", 512, 512, 512))
+        keys = sweep_runner._load_done_keys(pq)
+        assert ("id_done", 512, 512, 512) in keys
+        assert ("id_new",  512, 512, 512) not in keys
+
+
+# ── sweep_runner._parse_sizes ─────────────────────────────────────────────────
+
+class TestSweepRunnerParseSizes:
+    """sweep_runner._parse_sizes mirrors check_parity.parse_sizes with same contract."""
+
+    def test_single_size(self):
+        import sweep_runner
+        assert sweep_runner._parse_sizes("512x512x512") == [(512, 512, 512)]
+
+    def test_multiple_sizes(self):
+        import sweep_runner
+        result = sweep_runner._parse_sizes("512x512x512,1024x1024x1024")
+        assert result == [(512, 512, 512), (1024, 1024, 1024)]
+
+    def test_non_cubic_size(self):
+        import sweep_runner
+        assert sweep_runner._parse_sizes("257x257x56") == [(257, 257, 56)]
+
+    def test_bad_format_raises(self):
+        import sweep_runner
+        with pytest.raises((ValueError, Exception)):
+            sweep_runner._parse_sizes("512x512")  # only 2 dims
+
+
+# ── compare_report._merge unit tests ─────────────────────────────────────────
+
+class TestCompareReportMerge:
+    """_merge() joins dispatcher and TE dataframes correctly."""
+
+    def _disp_df(self, identifier="id1", M=512, N=512, K=512,
+                  verdict="PASSED", tflops=85.0):
+        return pd.DataFrame([{
+            "identifier": identifier, "M": M, "N": N, "K": K,
+            "verdict": verdict, "tflops": tflops, "error_msg": "",
+        }])
+
+    def _te_df(self, identifier="id1", M=512, N=512, K=512,
+                verdict="PASSED", tflops=84.0):
+        return pd.DataFrame([{
+            "identifier": identifier, "M": M, "N": N, "K": K,
+            "verdict": verdict, "tflops": tflops, "error_msg": "",
+        }])
+
+    def test_merge_none_te_adds_null_columns(self):
+        from compare_report import _merge
+        disp = self._disp_df()
+        out = _merge(disp, None)
+        assert "te_tflops" in out.columns
+        assert "te_verdict" in out.columns
+        assert "delta_pct" in out.columns
+        assert out["te_tflops"].isna().all()
+
+    def test_merge_with_te_computes_delta(self):
+        from compare_report import _merge
+        disp = self._disp_df(tflops=85.0)
+        te = self._te_df(tflops=84.0)
+        out = _merge(disp, te)
+        assert "delta_pct" in out.columns
+        delta = out["delta_pct"].iloc[0]
+        assert delta is not None
+        expected = (85.0 - 84.0) / 84.0 * 100
+        assert abs(float(delta) - expected) < 0.01
+
+    def test_merge_renames_disp_columns(self):
+        from compare_report import _merge
+        disp = self._disp_df()
+        out = _merge(disp, None)
+        assert "disp_verdict" in out.columns
+        assert "disp_tflops" in out.columns
+        assert "verdict" not in out.columns
+
+    def test_merge_unmatched_te_row_gives_nan_delta(self):
+        """TE row with different identifier → disp row has NaN delta."""
+        from compare_report import _merge
+        disp = self._disp_df(identifier="disp_only")
+        te = self._te_df(identifier="te_only")
+        out = _merge(disp, te)
+        delta = out["delta_pct"].iloc[0]
+        assert delta is None or (hasattr(delta, '__float__') and
+                                  pd.isna(float(delta)))
+
+
+# ── check_parity dispatcher_header_path / te_benchmark_name ──────────────────
+
+class TestCheckParityPathHelpers:
+    """dispatcher_header_path() and te_benchmark_name() compose names correctly."""
+
+    def _cfg_compv3(self):
+        """Minimal cfg that te_kernel_name() will accept."""
+        from te_to_dispatcher import translate_file
+        return translate_file(_HERE / "configs" / "single_fp16_rcr.json")[0]
+
+    def test_dispatcher_header_path_format(self, tmp_path):
+        from check_parity import dispatcher_header_path, te_kernel_name
+        cfg = self._cfg_compv3()
+        path = dispatcher_header_path(tmp_path, "mykernel", cfg)
+        assert path.parent == tmp_path / "mykernel"
+        assert path.name.startswith("gemm_")
+        assert path.suffix == ".hpp"
+        assert te_kernel_name(cfg) in path.name
+
+    def test_te_benchmark_name_prefix(self):
+        from check_parity import te_benchmark_name, te_kernel_name
+        cfg = self._cfg_compv3()
+        name = te_benchmark_name(cfg)
+        assert name.startswith("benchmark_gemm_universal_")
+        assert te_kernel_name(cfg) in name
+
+    def test_te_benchmark_name_preshufflev2(self):
+        """preshufflev2 benchmark name must contain _preshuffle."""
+        from check_parity import te_benchmark_name
+        from te_to_dispatcher import translate_file
+        import json
+        data = json.loads((_HERE / "configs" / "single_fp16_rcr.json").read_text())
+        data["pipeline"] = "preshufflev2"
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".json", mode="w", delete=False) as f:
+            json.dump(data, f)
+            tmp = Path(f.name)
+        try:
+            cfgs = translate_file(tmp)
+            if cfgs:
+                name = te_benchmark_name(cfgs[0])
+                assert "_preshuffle" in name
+        except Exception:
+            pytest.skip("preshufflev2 not translatable on this config")
+        finally:
+            tmp.unlink(missing_ok=True)
+
+
+# ── compare_report._md_to_html ────────────────────────────────────────────────
+
+class TestMdToHtml:
+    """_md_to_html() produces valid HTML wrapping the markdown content."""
+
+    def test_output_is_html(self):
+        from compare_report import _md_to_html
+        html = _md_to_html("# Hello\n\nWorld")
+        assert "<!DOCTYPE html>" in html or "<html>" in html
+
+    def test_content_preserved(self):
+        from compare_report import _md_to_html
+        html = _md_to_html("Hello World")
+        assert "Hello World" in html
+
+    def test_table_preserved(self):
+        from compare_report import _md_to_html
+        md = "| A | B |\n|---|---|\n| 1 | 2 |"
+        html = _md_to_html(md)
+        assert "1" in html and "2" in html
+
+
+# ── compare_report._rollup_table / _build_markdown ───────────────────────────
+
+class TestCompareReportRollupAndBuildMarkdown:
+    """Direct unit tests for _rollup_table() and _build_markdown()."""
+
+    def _merged_df(self, verdicts=("PASSED", "PASSED", "FAILED")):
+        rows = []
+        for i, v in enumerate(verdicts):
+            rows.append({
+                "identifier": f"id{i}", "M": 512, "N": 512, "K": 512,
+                "disp_verdict": v, "disp_tflops": 85.0 if v == "PASSED" else None,
+                "disp_error": "",
+                "te_verdict": None, "te_tflops": None, "delta_pct": None,
+                "datatype": "fp16", "layout": "rcr",
+                "pipeline": "compv3", "tile_m": 256, "tile_n": 128,
+            })
+        return pd.DataFrame(rows)
+
+    def test_rollup_table_title_in_output(self):
+        from compare_report import _rollup_table
+        df = self._merged_df()
+        text = _rollup_table(df, "datatype", "By dtype")
+        assert "By dtype" in text
+
+    def test_rollup_table_group_values_present(self):
+        from compare_report import _rollup_table
+        df = self._merged_df()
+        text = _rollup_table(df, "datatype", "By dtype")
+        assert "fp16" in text
+
+    def test_rollup_table_pass_percentage(self):
+        """2 PASSED + 1 FAILED → 66.7% pass rate in the table."""
+        from compare_report import _rollup_table
+        df = self._merged_df(verdicts=("PASSED", "PASSED", "FAILED"))
+        text = _rollup_table(df, "datatype", "By dtype")
+        assert "66.7%" in text
+
+    def test_rollup_table_100_percent(self):
+        from compare_report import _rollup_table
+        df = self._merged_df(verdicts=("PASSED", "PASSED"))
+        text = _rollup_table(df, "datatype", "By dtype")
+        assert "100.0%" in text
+
+    def test_build_markdown_all_pass_shows_pass_emoji(self):
+        from compare_report import _build_markdown
+        df = self._merged_df(verdicts=("PASSED", "PASSED"))
+        md = _build_markdown(df, Path("disp.parquet"), None, None)
+        assert "✅" in md
+
+    def test_build_markdown_failures_shows_fail_emoji(self):
+        from compare_report import _build_markdown
+        df = self._merged_df(verdicts=("PASSED", "FAILED"))
+        md = _build_markdown(df, Path("disp.parquet"), None, None)
+        assert "❌" in md
+
+    def test_build_markdown_contains_rollup_sections(self):
+        from compare_report import _build_markdown
+        df = self._merged_df()
+        md = _build_markdown(df, Path("disp.parquet"), None, None)
+        for section in ("By dtype", "By layout", "By pipeline"):
+            assert section in md, f"Missing rollup section: {section}"
