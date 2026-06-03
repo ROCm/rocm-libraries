@@ -23,15 +23,21 @@
 #pragma once
 
 // Forward dataflow that computes, for every basic block, the set of
-// asynchronous memory ops still in flight at block exit, per hardware
-// counter. Source-of-truth for the wait-count insertion pass.
+// asynchronous memory ops still in flight at exit, per hardware counter.
+// Source-of-truth for the wait-count insertion pass.
 //
-// One queue per counter (ds / buffer / tensor), populated by walking each
-// block in program order. Cross-block flow is handled by an ordered
-// intersection at merges (drop ops not present on every pred). PHI nodes
-// of pseudo-reg memtokens are summarised into a small per-PHI record so
-// downstream consumers can look up a single representative wait per
-// counter.
+// State shape: each block holds one queue per CFG predecessor per counter
+// during its in-block walk. Per-pred queues let a consumer at a join
+// compute the strictest required wait as max-over-preds, which is the
+// only sound choice (a single union or intersection would either drop
+// deps still in flight on one path or over-drain every path).
+//
+// Block exit is collapsed to a single union queue per counter so
+// successors treat us as one predecessor. The optimizer layer can still
+// read each pred's collapsed exit queue to recover per-pred path lengths.
+//
+// PHIs of pseudo-reg memtokens are summarised into a PhiSummary so
+// downstream consumers look up a single representative wait per counter.
 //
 // The solver iterates until per-block exit states stop changing or until
 // a hard iteration cap is hit; on cap-hit it falls back to s_wait_* 0
@@ -55,21 +61,27 @@ namespace waitcnt {
 /// Hardware counters we track. Index matches arrays in DataflowState.
 enum CounterKind { CK_DS = 0, CK_Buffer = 1, CK_Tensor = 2, CK_Count = 3 };
 
-/// Per-counter queue of in-flight memops in issue order. The "wait value"
-/// for an op @c o at queue index @c i with size @c n is @c n - i - 1.
-struct CounterQueue {
+/// One queue of in-flight memops on a given counter, tagged by the CFG
+/// predecessor it was seeded from. The "wait value" for op @c o at index
+/// @c i with size @c n is @c n - i - 1.
+///
+/// At block entry there is one entry per CFG predecessor. At block exit
+/// the per-pred queues are collapsed to a single entry (pred = the block
+/// itself) so successors see this block as one predecessor.
+struct PerPredQueue {
+    BasicBlock* pred = nullptr;
     std::deque<StinkyInstruction*> ops;
 
     int countFrom(StinkyInstruction* op) const;
-    bool operator==(const CounterQueue& other) const {
-        return ops == other.ops;
+    bool operator==(const PerPredQueue& other) const {
+        return pred == other.pred && ops == other.ops;
     }
 };
 
 /// Summary of what a PHI of pseudo-reg memtokens implies for a consumer:
 /// the strictest wait per counter across every incoming CFG path. A field
 /// equal to WaitCountSpec::kUnused means the PHI imposes no constraint on
-/// that counter (e.g. all incoming sources were VALU or already drained).
+/// that counter (e.g. all incoming sources were VALU).
 struct PhiSummary {
     int waits[CK_Count] = {WaitCountSpec::kUnused, WaitCountSpec::kUnused,
                            WaitCountSpec::kUnused};
@@ -84,8 +96,11 @@ struct PhiSummary {
 
 /// Per-block dataflow lattice element. Stored separately for entry and exit
 /// so the solver can detect convergence on exit while merging into entry.
+///
+/// @c queues[c] is a list of per-pred queues at block entry, mutated during
+/// transferBlock, and collapsed to a single union entry at block exit.
 struct DataflowState {
-    std::array<CounterQueue, CK_Count> queues;
+    std::array<std::vector<PerPredQueue>, CK_Count> queues;
     std::unordered_map<StinkyInstruction*, PhiSummary> phiSummaries;
 
     bool operator==(const DataflowState& other) const;
@@ -116,34 +131,36 @@ class WaitDataflow {
     /// the plan in place.
     WaitInsertionPlan materializePlan() const;
 
-    const DataflowResult& result() const {
-        return result_;
+    const DataflowResult& getResult() const {
+        return result;
     }
 
     /// Iteration cap. Public so tests can override.
     void setIterationCap(unsigned cap) {
-        iterationCap_ = cap;
+        iterationCap = cap;
     }
 
    private:
-    Function& func_;
-    const std::vector<BasicBlock*>& rpo_;
-    DataflowResult result_;
+    Function& func;
+    const std::vector<BasicBlock*>& rpo;
+    DataflowResult result;
 
     /// Plan recorded by the last transfer pass: each block's list of
     /// (anchor, WaitCountSpec) pairs in program order. Populated by
     /// transferBlock(); consumed by materializePlan().
     std::unordered_map<const BasicBlock*, std::vector<std::pair<StinkyInstruction*, WaitCountSpec>>>
-        emitPlan_;
+        emitPlan;
 
-    bool capHit_ = false;
-    unsigned iterationCap_ = 0;
+    bool capHit = false;
+    unsigned iterationCap = 0;
 
-    /// Compute @c InState for @p bb by intersecting predecessors' OutStates.
+    /// Build entry state for @p bb by seeding one per-pred queue per CFG
+    /// predecessor (skipping self-preds, whose collapsed exit may contain
+    /// loads issued AFTER the consumer on the loop body).
     DataflowState mergeFromPredecessors(BasicBlock& bb) const;
 
-    /// Walk @p bb in program order, updating @p state and recording any
-    /// emitted waits into emitPlan_[&bb].
+    /// Walk @p bb in program order, mutating @p state. After the walk the
+    /// per-pred queues are collapsed to a single union per counter.
     void transferBlock(BasicBlock& bb, DataflowState& state);
 };
 
