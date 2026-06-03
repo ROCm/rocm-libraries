@@ -166,10 +166,10 @@ Used by A/B testing, reference validation, and suite-mode tolerance checks.
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--rtol` | Relative tolerance for output comparison. Overrides dtype-aware defaults when set. | dtype-aware |
-| `--atol` | Absolute tolerance for output comparison. Overrides dtype-aware defaults when set. | dtype-aware |
+| `--rtol` | Relative tolerance for output comparison. Overrides dtype-aware defaults when set; if set without `--atol`, also applies as absolute tolerance. | dtype-aware |
+| `--atol` | Absolute tolerance for output comparison. Overrides dtype-aware defaults when set; if set without `--rtol`, also applies as relative tolerance. | dtype-aware |
 
-Automatic validation tolerances are dtype-aware. BF16 outputs use `rtol=1e-2`, `atol=1e-2`; this allows BF16 output quantization and accumulation-order differences without letting an all-zero gradient buffer pass against ordinary nonzero gradients.
+Automatic validation tolerances are dtype-aware. BF16 outputs use `rtol=1e-2`, `atol=1e-2`; this allows BF16 output quantization and accumulation-order differences without letting an all-zero output pass against an ordinary nonzero reference.
 
 ## Output
 

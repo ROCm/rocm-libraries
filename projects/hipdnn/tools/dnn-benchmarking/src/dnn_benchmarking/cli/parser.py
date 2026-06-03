@@ -181,14 +181,20 @@ Tarball Input:
         type=float,
         default=None,
         metavar="TOL",
-        help="Relative tolerance for output comparison (default: dtype-aware)",
+        help=(
+            "Relative tolerance for output comparison (default: dtype-aware; "
+            "if set without --atol, also used as absolute tolerance)"
+        ),
     )
     comparison_group.add_argument(
         "--atol",
         type=float,
         default=None,
         metavar="TOL",
-        help="Absolute tolerance for output comparison (default: dtype-aware)",
+        help=(
+            "Absolute tolerance for output comparison (default: dtype-aware; "
+            "if set without --rtol, also used as relative tolerance)"
+        ),
     )
 
     # Reference Validation arguments

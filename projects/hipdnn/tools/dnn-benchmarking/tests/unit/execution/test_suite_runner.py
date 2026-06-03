@@ -378,8 +378,9 @@ class TestSuiteConfigValidation:
         assert config.warmup_iters == 5
         assert config.benchmark_iters == 10
         assert config.engine_filter is None
-        assert config.rtol == 1e-5
-        assert config.atol == 1e-8
+        assert config.rtol is None
+        assert config.atol is None
+        assert config.tolerance_override is None
         assert config.gpu_backend == "auto"
         assert config.reference_provider == "none"
 
@@ -836,6 +837,36 @@ class TestCheckCorrectnessOutputCount:
         assert result.tolerance_match is False
         assert result.rtol == pytest.approx(1e-2)
         assert result.atol == pytest.approx(1e-2)
+
+    def test_single_explicit_tolerance_overrides_both_values(self):
+        bm = MagicMock()
+        bm.get_input_data.return_value = None
+        bm.get_output_data.return_value = np.array([1.0], dtype=np.float32)
+
+        ref_output = MagicMock()
+        ref_output.data = np.array([1.1], dtype=np.float32)
+        ref_provider = MagicMock()
+        ref_provider.compute_reference.return_value = {7: ref_output}
+        ref_provider.name = "pytorch"
+
+        result = _check_correctness(
+            buffer_manager=bm,
+            tensor_infos=[_make_tensor_info(7, is_output=True, data_type="bfloat16")],
+            graph_json={
+                "nodes": [
+                    {
+                        "type": "SdpaAttributes",
+                        "outputs": {"o_tensor_uid": 7},
+                    }
+                ]
+            },
+            ref_provider=ref_provider,
+            config=SuiteConfig(reference_provider="pytorch", rtol=0.25),
+        )
+
+        assert result.tolerance_match is True
+        assert result.rtol == pytest.approx(0.25)
+        assert result.atol == pytest.approx(0.25)
 
 
 class TestResolveEngineName:
