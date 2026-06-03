@@ -144,17 +144,24 @@ surface is the `makeValid*` builders + the three validators.
    recommendations.md (grounded in inspection) + commit. Mark this checklist
    done.
 
-## Definition of done checklist
+## Definition of done checklist — COMPLETE
 
-- [ ] `coverage-before.txt` captured (baseline) and committed BEFORE new tests.
-- [ ] `--cov=Tensile` + grep `ValidParameters.py` row ≥95% line.
-- [ ] `coverage-after.txt` captured; before→after delta in target.md.
-- [ ] Every Tier A function has snapshot coverage; any Tier B documented.
-- [ ] Validator reject paths pinned via `pytest.raises` (incl. the `>32`-combos
+- [x] `coverage-before.txt` captured (baseline) and committed BEFORE new tests.
+      (169 stmts, 33 miss = 80.47% line; `--cov=Tensile` + grep fallback used.)
+- [x] `--cov=Tensile` + grep `ValidParameters.py` row ≥95% line — **100.00%
+      line and branch** (169 stmts, 0 miss, 84 branch, 0 partial).
+- [x] `coverage-after.txt` captured; before→after delta in target.md (+19.53
+      pts line).
+- [x] Every Tier A function has snapshot coverage (builders via normalised
+      summaries + lru_cache identity; validParameters roster + structure; all
+      three validators); no Tier B remained.
+- [x] Validator reject paths pinned via `pytest.raises` (incl. the `>32`-combos
       message variant and the `SpaceFillingAlgo`/`SFCWGM` sub-validators).
-- [ ] resistance.md lists each resisting fn (expect few/none — pure module).
-- [ ] recommendations.md: go/no-go on the next target (`Problem.py` ProblemType
-      slice vs `Common/GlobalParameters.py`).
-- [ ] full `-m unit` ≥ 1526 passed / 201 skipped, no failures, additive only.
-- [ ] All work committed (atomic, no push); tree clean.
-- [ ] Next goal prompt `next-goal-<target>.md` created and committed.
+- [x] resistance.md: **nothing resisted** — documents the synthetic-validParams
+      branch isolation, first-line-only pinning of the 138-key error message,
+      and the size-driven summary technique.
+- [x] recommendations.md: GO → `SolutionStructs/Problem.py` ProblemType slice
+      next (pure, clean imports), defer env-coupled `Common/GlobalParameters.py`.
+- [x] full `-m unit` = **1563 passed / 201 skipped**, no failures, additive only.
+- [x] All work committed (atomic, no push); tree clean.
+- [x] Next goal prompt `next-goal-problemtype.md` created and committed.
