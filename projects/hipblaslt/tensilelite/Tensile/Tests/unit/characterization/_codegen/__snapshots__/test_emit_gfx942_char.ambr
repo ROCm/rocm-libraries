@@ -30,6 +30,17 @@
       ]),
     }),
     dict({
+      'file': 'DTV.yaml',
+      'kernels': list([
+        dict({
+          'basename': 'Cijk_Alik_Bljk_BBS_STA_BH_UserArgs_MT512x128x64_6zETDopqC4UaeGpZApGStcgupy7dtZ_Hf0NZxtsxIdQ=',
+          'err': 0,
+          'n_lines': 61926,
+          'sha256': 'ce3017d6a44aecd03189de658834efadfab92ea699454875680807f013a5ec74',
+        }),
+      ]),
+    }),
+    dict({
       'file': 'F8N_multi.yaml',
       'kernels': list([
         dict({

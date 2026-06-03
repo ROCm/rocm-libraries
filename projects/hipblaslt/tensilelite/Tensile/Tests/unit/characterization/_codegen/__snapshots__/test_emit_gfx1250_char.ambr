@@ -13,6 +13,17 @@
       ]),
     }),
     dict({
+      'file': 'F4_MX.yaml',
+      'kernels': list([
+        dict({
+          'basename': 'Cijk_Alik_Bljk_F4BS_MXAE8B32_MXBE8B32_BH_Bias_HAcZ_ghtHd3JcLBvtoSkmU3mGBYhKHxp1Hf7JfduZV9T0=',
+          'err': 0,
+          'n_lines': 19593,
+          'sha256': 'aa58c3010d19aecebb51cbbcf8f64582186f740888ae83d47869fee85ba625d3',
+        }),
+      ]),
+    }),
+    dict({
       'file': 'HHS.yaml',
       'kernels': list([
         dict({
@@ -29,8 +40,8 @@
         dict({
           'basename': 'Cijk_Ailk_Bjlk_S_MX_B_Bias_SB_HA_S_SAB_SAV_UserALANdKdq75zGhWHZk-NYnuXibJbfdScqM70EuB27dvas=',
           'err': 0,
-          'n_lines': 5200,
-          'sha256': 'f51586d4813ae526594250af01fd93247f49068632918a7e8800933be1af6cbf',
+          'n_lines': 5206,
+          'sha256': 'dde788d788da7f44a719bcaaad995ff2866c7045f8bc81ba4da457e1bc22851b',
         }),
       ]),
     }),

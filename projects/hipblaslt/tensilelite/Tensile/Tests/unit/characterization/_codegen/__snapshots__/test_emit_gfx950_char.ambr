@@ -13,6 +13,17 @@
       ]),
     }),
     dict({
+      'file': 'DTL.yaml',
+      'kernels': list([
+        dict({
+          'basename': 'Custom_Cijk_Alik_Bljk_HHS_BH_MT256x256x64_MI16x16x1_UserArgs_shortname0_gfx950',
+          'err': 0,
+          'n_lines': 20086,
+          'sha256': '957e6328183b05d8f0e636b0673371144e18c9bee518c770b78c251d8983f8d4',
+        }),
+      ]),
+    }),
+    dict({
       'file': 'F8B8BS.yaml',
       'kernels': list([
         dict({
@@ -58,6 +69,17 @@
       ]),
     }),
     dict({
+      'file': 'I8_GSU.yaml',
+      'kernels': list([
+        dict({
+          'basename': 'Cijk_Ailk_Bjlk_I8I8S_BH_Bias_HA_S_SAV_UserArgs_McpaIItieZmMVfnfq8SP9xXXTJaM9XVlPMyzH5OdWMAo=',
+          'err': 0,
+          'n_lines': 16980,
+          'sha256': '80e1f52e723314ee96a0f94d97abd8fb6109c91673a41ee2f9c4d83590fc30f7',
+        }),
+      ]),
+    }),
+    dict({
       'file': 'MX.yaml',
       'kernels': list([
         dict({
@@ -98,6 +120,17 @@
           'err': 0,
           'n_lines': 195788,
           'sha256': 'f01755b27bfaddbb590070def63deb3c50fb6b107e38bae83d70a3aa07e71239',
+        }),
+      ]),
+    }),
+    dict({
+      'file': 'WaveSplitK.yaml',
+      'kernels': list([
+        dict({
+          'basename': 'Cijk_Alik_Bjlk_HHS_BH_Bias_HA_S_SAV_UserArgs_MT3aDf6DCqUiWrsq_KGqqCJZ28MLMjCiAzBneCUQhqhz0o=',
+          'err': 0,
+          'n_lines': 6442,
+          'sha256': '3de43365a200d471d773294036caed3025c81467e641ce01dc2509a43e09b1d1',
         }),
       ]),
     }),
