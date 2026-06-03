@@ -143,7 +143,6 @@ function(ck_add_dispatcher_conv_instances VARIANT)
   )
   target_compile_options(${TARGET_NAME} PRIVATE
     -DCK_TILE_FLOAT_TO_BFLOAT16_DEFAULT=0
-    -mllvm -enable-noalias-to-md-conversion=0
     -Wno-undefined-func-template
     -Wno-float-equal
     -Wno-header-hygiene
