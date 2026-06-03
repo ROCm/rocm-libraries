@@ -356,9 +356,21 @@ same dict-iteration nondeterminism as elementwise). Notes:
 conv IR==CPython). **Verdict: confident MicroPython can run the conv compile path.** Trigger met to
 commit to the conv POC.
 
+### G1b ACHIEVED (2026-06-01): conv → HSACO end-to-end in MicroPython, byte-identical to CPython
+`spike/mp1/run_g1b.py` runs the WHOLE conv compile path in one MicroPython process with no CPython:
+conv DSL → `lower_kernel_to_llvm` (43,542 B IR) → `comgr_ffi.build_hsaco_from_llvm_ir` → **8,808 B
+HSACO** (valid ELF64, OS/ABI AMD HSA, Machine AMD GPU, gfx950). `spike/mp1/comgr_ffi.py` is the
+module form of the Phase-0 comgr-ffi (the `runtime/comgr` replacement). Run with
+`LD_LIBRARY_PATH=/opt/rocm-7.2.4/lib ... -X heapsize=1024M`.
+**Strengthening check (`spike/mp1/compile_ll.py`):** compiling BOTH the MicroPython IR and the
+CPython IR through comgr yields **byte-identical HSACOs** — so the declare-ordering diff is purely
+cosmetic (no codegen impact); MicroPython produces the *exact same compiled conv kernel* as CPython.
+The declares-determinism fix is therefore optional (nice-to-have for IR-text diffs, not needed for
+HSACO equality).
+
 ### Remaining for the conv POC (post-confidence)
-1. Determinism: sort the emitted declares in `core/lower_llvm.py` → byte-identical IR (1-line CK change).
-2. G1b: chain the MicroPython conv IR into the Phase-0 comgr-ffi → HSACO (end-to-end in one process).
+1. (Optional) sort the emitted declares in `core/lower_llvm.py` for byte-identical IR *text* — NOT
+   needed for HSACO equality (proven byte-identical above).
 3. Phase 2: embed MicroPython in the provider C++ (the accepted glue rewrite: replace
    EmbeddedInterpreter/CompileServiceBridge/PythonError on MicroPython's `mp_*` API; configure heap);
    marshal the existing conv `py::dict` payload as `mp_obj_t`. Reuse the existing conv provider
