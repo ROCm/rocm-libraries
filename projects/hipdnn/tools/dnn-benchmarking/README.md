@@ -305,6 +305,13 @@ LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH pytest
 
 **Note:** Set `LD_LIBRARY_PATH=/opt/rocm/lib` when running GPU tests to ensure hipdnn_frontend can load ROCm libraries.
 
+Strict profiling tests that require real profiler artifacts are skipped by
+default. Run them explicitly on a known-good profiling host:
+
+```bash
+LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH pytest --profiling-strict -m profiling_strict
+```
+
 ## Limitations
 
 - CPU reference validation is not yet implemented (CPU reference plugin not yet available in Python bindings)

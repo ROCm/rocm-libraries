@@ -55,6 +55,13 @@ LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH pytest --cov=dnn_benchmarking tes
 
 Test markers: `gpu` (requires GPU), `slow` (slow integration tests).
 
+Strict profiling tests that require real profiler artifacts are skipped by
+default. Run them explicitly on a known-good profiling host:
+
+```bash
+LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH pytest --profiling-strict -m profiling_strict
+```
+
 ## Running the Tool
 
 Single-graph and multi-graph runs share one execution path. Default output is a
