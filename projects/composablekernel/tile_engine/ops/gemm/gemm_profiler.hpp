@@ -11,6 +11,7 @@
 #include <functional>
 #include <tuple>
 #include <utility>
+#include <type_traits>
 
 #include "ck_tile/host/device_prop.hpp"
 #include "ck_tile/ops/gemm.hpp"
