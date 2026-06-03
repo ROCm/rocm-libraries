@@ -7710,8 +7710,7 @@ class KernelWriterAssembly(KernelWriter):
               evenIterCode.add(self.localWriteSwapOffsets(kernel, True, tPB["MX"]))
             evenIterCode.add(self.localWriteSwapOffsets(kernel, True, tPB))
             #swap local write memory token
-            self.states.ldsWriteTokenIdx = \
-              self.states.memTokenLdsBuffer1 if self.states.ldsWriteTokenIdx == self.states.memTokenLdsBuffer0 else self.states.memTokenLdsBuffer0
+            self.states.tokenMgr.swapWrite()
         else:
           if kernel["ClusterBarrier"]:
             evenIterPreCode.add(SBarrier(True, True, True, "cluster_barrier wait"))
@@ -10935,7 +10934,7 @@ class KernelWriterAssembly(KernelWriter):
     
     if tc == "A" and kernel["enableTDMA"]:
       comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
-      comp.setMemToken([self.states.ldsTensorTokenIdx])
+      comp.setMemToken([self.states.tokenMgr.tensor])
       if self.states.inTailLoop and not kernel["1LDSBuffer"] and kernel["StreamK"]:
         ldsAddrSgprName = comp.getLdsAddrSgprName("tdmAGroup0")
         clearMask = ~kernel["LdsOffsetA_Blk"] & 0xFFFFFFFF
@@ -10958,7 +10957,7 @@ class KernelWriterAssembly(KernelWriter):
 
     if tc == "MXSA" and kernel["enableTDMA"]:
       comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
-      comp.setMemToken([self.states.ldsTensorTokenIdx])
+      comp.setMemToken([self.states.tokenMgr.tensor])
       if kernel["ProblemType"]["MXBlockA"]:
         if self.states.inTailLoop and not kernel["1LDSBuffer"] and kernel["StreamK"]:
           ldsAddrSgprName = comp.getLdsAddrSgprName("tdmMXSAGroup0")
@@ -10970,7 +10969,7 @@ class KernelWriterAssembly(KernelWriter):
 
     if tc == "Metadata" and kernel["enableTDMMetadata"]:
       comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
-      comp.setMemToken([self.states.ldsTensorTokenIdx])
+      comp.setMemToken([self.states.tokenMgr.tensor])
       imod.add(comp.issueLoad("tdmMetadataGroup0", "tdmMetadataGroup1", None, None))
       return imod 
 
@@ -10978,7 +10977,7 @@ class KernelWriterAssembly(KernelWriter):
       #TODO: TDM refactor, wave separated TDM only issues 1 tensor load
       if numWaves == 1:
         comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
-        comp.setMemToken([self.states.ldsTensorTokenIdx])
+        comp.setMemToken([self.states.tokenMgr.tensor])
         if self.states.inTailLoop and not kernel["1LDSBuffer"] and kernel["StreamK"]:
           ldsAddrSgprName = comp.getLdsAddrSgprName("tdmBGroup0")
           clearMask = ~kernel["LdsOffsetA_Blk"] & 0xFFFFFFFF
@@ -11003,7 +11002,7 @@ class KernelWriterAssembly(KernelWriter):
       #TODO: TDM refactor, wave separated TDM only issues 1 tensor load
       if prod(kernel["MIWaveGroup"]) == 1:
         comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
-        comp.setMemToken([self.states.ldsTensorTokenIdx])
+        comp.setMemToken([self.states.tokenMgr.tensor])
         if self.states.inTailLoop and not kernel["1LDSBuffer"] and kernel["StreamK"]:
           ldsAddrSgprName = comp.getLdsAddrSgprName("tdmMXSBGroup0")
           clearMask = ~kernel["LdsOffsetA_Blk"] & 0xFFFFFFFF
@@ -12334,7 +12333,7 @@ class KernelWriterAssembly(KernelWriter):
                 printExit("Unsupported combination DataType%s (%s) -> DataType (%s)"%(tc, kernel["ProblemType"]["DataType%s"%tc].toChar(), kernel["ProblemType"]["MacDataType%s"%tc].toChar()))
 
             LocalWriteX = tP["localWriteInstruction"].getInst(isHigh16Bits)
-            localWriteMemToken = [self.states.ldsWriteTokenIdx]
+            localWriteMemToken = [self.states.tokenMgr.write]
             if len(localWriteMemToken) == 1:
               memTokenComment = "sync LDS%u"%(localWriteMemToken[0])
             else:

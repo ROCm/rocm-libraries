@@ -220,7 +220,7 @@ class LocalRead(Component):
     """
     def _getLdsReadMemToken(self, writer, kernel, tP):
         from rocisa.container import MemTokenData
-        tok = writer.states.ldsReadTokenIdx
+        tok = writer.states.tokenMgr.read
         return MemTokenData([tok]), tok
 
     def _emitLdsRead(self, writer, kernel, tP, LocalReadX, dst, src, ds, module, comment=""):
