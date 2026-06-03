@@ -7,6 +7,28 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 ### Added
 
 * Complex datatype support for gfx942 and gfx950.
+* `hipblasLtSetSmCountTarget()` / `hipblasLtGetSmCountTarget()` handle-level
+  helpers (the analogue of cuBLAS's `cublasSetSmCountTarget` /
+  `cublasGetSmCountTarget`). `int32_t`, default `0` meaning "use all
+  compute units"; negative values are rejected with
+  `HIPBLAS_STATUS_INVALID_VALUE`.
+* `HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET` matmul-descriptor attribute and
+  `HIPBLASLT_MATMUL_PREF_SM_COUNT_TARGET` preference attribute (same
+  semantics). When a per-matmul / per-preference value is non-zero it
+  takes precedence over the handle-level value. Lets callers convey an
+  estimate of how many CUs hipBLASLt should target for kernel selection
+  and persistent-grid sizing — useful when another kernel (e.g. RCCL)
+  is co-running on the device or when a persistent grid should be sized
+  for a known CU budget. (This is a hint, not a CU reservation.)
+* `HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT` extension attribute
+  (`int32_t` boolean, default `0`) and matching C++ ext methods
+  `hipblaslt_ext::GemmPreference::setDynPersistentTileEnabled()` /
+  `getDynPersistentTileEnabled()`. Opts the matmul in to the hipBLASLt
+  dynamic persistent tile (work-stealing StreamK) scheduler. Exposed
+  via the `ext` API (no analogue in the base cuBLAS / cuBLASLt API).
+* `hipblaslt-bench` `--sm_count_target` and `--dyn_persistent_tile` CLI
+  options that forward the values into the matmul descriptor before
+  launch.
 
 ## hipBLASLt 1.3.0
 

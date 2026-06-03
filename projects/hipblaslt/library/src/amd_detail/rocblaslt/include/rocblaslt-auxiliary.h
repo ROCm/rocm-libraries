@@ -79,6 +79,41 @@ rocblaslt_status rocblaslt_create(rocblaslt_handle* handle);
 rocblaslt_status rocblaslt_destroy(const rocblaslt_handle handle);
 
 /*! \ingroup aux_module
+ *  \brief Set the handle-level SM-count-target override.
+ *
+ *  \details
+ *  Mirrors the semantics of cuBLAS's \c cublasSetSmCountTarget on the
+ *  hipBLASLt handle. ``0`` (the default) means "no override". Negative
+ *  values are rejected with \c rocblaslt_status_invalid_value.
+ *
+ *  @param[in]
+ *  handle           the handle to the rocBLASLt library context.
+ *  @param[in]
+ *  sm_count_target  target compute-unit count, ``0`` for "use all CUs".
+ *
+ *  \retval rocblaslt_status_success            value stored.
+ *  \retval rocblaslt_status_invalid_handle     \p handle is invalid.
+ *  \retval rocblaslt_status_invalid_value      \p sm_count_target is negative.
+ */
+rocblaslt_status rocblaslt_set_sm_count_target(rocblaslt_handle handle,
+                                               int32_t          sm_count_target);
+
+/*! \ingroup aux_module
+ *  \brief Return the handle-level SM-count-target override.
+ *
+ *  @param[in]
+ *  handle           the handle to the rocBLASLt library context.
+ *  @param[out]
+ *  sm_count_target  receives the previously stored value (``0`` if never set).
+ *
+ *  \retval rocblaslt_status_success            value returned.
+ *  \retval rocblaslt_status_invalid_handle     \p handle is invalid.
+ *  \retval rocblaslt_status_invalid_value      \p sm_count_target is null.
+ */
+rocblaslt_status rocblaslt_get_sm_count_target(rocblaslt_handle handle,
+                                               int32_t*         sm_count_target);
+
+/*! \ingroup aux_module
  *  \brief Create a descriptor for matrix
  *  \details
  *  \p rocblaslt_matrix_layout_create creates a matrix descriptor It initializes
