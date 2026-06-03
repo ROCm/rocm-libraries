@@ -1,2 +1,0 @@
-#include "grouped_convolution_backward_data_tile_nhwgc_bf16_calls_4c_16c.inc"
-#include "grouped_convolution_backward_data_tile_nhwgc_bf16_calls_8c_32c.inc"

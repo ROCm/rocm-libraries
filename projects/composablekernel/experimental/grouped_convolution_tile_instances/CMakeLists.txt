@@ -1,10 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-option(DISABLE_IMPLICIT_GEMM_INSTANCES
-       "Skip compilation of implicit-GEMM conv instances (direct conv instances only)"
-       OFF)
-
 if(GPU_TARGETS MATCHES "gfx9")
   if(NOT DISABLE_IMPLICIT_GEMM_INSTANCES)
     # Generate instances using python script if instance directories don't exist

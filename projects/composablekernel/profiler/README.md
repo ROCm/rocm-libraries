@@ -323,13 +323,15 @@ cmake -D DISPATCHER_CONFIG_SET=tests ...
 cmake -D DISPATCHER_CONFIG_SET=profiler ...
 ```
 
-### Building only direct-conv instances
+### Building only direct-conv instances (Dispatcher codegen only)
 
-To build only direct-conv kernel instances and skip all implicit-GEMM instances, use the `DISABLE_IMPLICIT_GEMM_INSTANCES` flag:
+To build only direct-conv kernel instances and skip all implicit-GEMM instances, use the `DISABLE_IMPLICIT_GEMM_INSTANCES` flag with the Dispatcher codegen (`CK_TILE_DISPATCHER=ON`):
 ```bash
-cmake -D DISABLE_IMPLICIT_GEMM_INSTANCES=ON ...
+cmake -D CK_TILE_DISPATCHER=ON -D DISABLE_IMPLICIT_GEMM_INSTANCES=ON ...
 ```
 This filters at the codegen level: only instances with `"kind": "direct_conv"` are emitted from the JSON configs. Implicit-GEMM and depthwise instances are skipped entirely. The backward weight variant (which has no direct-conv kernels) emits an empty registration stub so the build still links.
+
+Note: The CK Builder codegen path (`CK_TILE_DISPATCHER=OFF`) no longer includes direct convolution instances. Use the Dispatcher codegen for direct-conv profiling.
 
 ### Building only CK Tile profiler targets
 

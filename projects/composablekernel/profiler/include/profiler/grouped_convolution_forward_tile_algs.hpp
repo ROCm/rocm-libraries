@@ -16,7 +16,6 @@
 #include "ck_tile/builder/testing/conv/reference.hpp"
 #include "ck_tile/builder/conv_builder.hpp"
 #include "tile_profiler_common.hpp"
-#include "direct_conv_instance_registry.hpp"
 
 #define ENABLE_BUILDER_VALIDATE 1
 
@@ -25,7 +24,6 @@ namespace ck_tile::builder::profiling {
 namespace ckb = ck_tile::builder;
 namespace ckt = ck_tile::builder::test;
 
-#ifndef DISABLE_IMPLICIT_GEMM_INSTANCES
 #include "../../experimental/grouped_convolution_tile_instances/instances/forward/grouped_convolution_forward_tile_nhwgc_fp32.inc"
 #include "../../experimental/grouped_convolution_tile_instances/instances/forward/grouped_convolution_forward_tile_nhwgc_bf16.inc"
 #include "../../experimental/grouped_convolution_tile_instances/instances/forward/grouped_convolution_forward_tile_nhwgc_fp16.inc"
@@ -35,7 +33,6 @@ namespace ckt = ck_tile::builder::test;
 #include "../../experimental/grouped_convolution_tile_instances/instances/forward/grouped_convolution_forward_tile_ngchw_depthwise_fp32.inc"
 #include "../../experimental/grouped_convolution_tile_instances/instances/forward/grouped_convolution_forward_tile_ngchw_depthwise_fp16.inc"
 #include "../../experimental/grouped_convolution_tile_instances/instances/forward/grouped_convolution_forward_tile_ngchw_depthwise_bf16.inc"
-#endif // DISABLE_IMPLICIT_GEMM_INSTANCES
 
 template <auto SIGNATURE>
 void run_cpu_validation(const ckt::Args<SIGNATURE>& args,
@@ -185,73 +182,39 @@ run_grouped_conv_forward_tile_algs(const ckt::Args<SIGNATURE>& args,
 
     if constexpr(SIGNATURE == SIGNATURE_NHWGC_FP16_FWD)
     {
-#ifndef DISABLE_IMPLICIT_GEMM_INSTANCES
 #include "../../experimental/grouped_convolution_tile_instances/instances/forward/grouped_convolution_forward_tile_nhwgc_fp16_calls.inc"
-#endif // DISABLE_IMPLICIT_GEMM_INSTANCES
-        for(auto fn : get_fwd_direct_instances_nhwgc_fp16_4c())
-            run_alg(fn);
-        for(auto fn : get_fwd_direct_instances_nhwgc_fp16_16c())
-            run_alg(fn);
-        for(auto fn : get_fwd_direct_instances_nhwgc_fp16_8c())
-            run_alg(fn);
-        for(auto fn : get_fwd_direct_instances_nhwgc_fp16_32c())
-            run_alg(fn);
     }
     else if constexpr(SIGNATURE == SIGNATURE_NHWGC_BF16_FWD)
     {
-#ifndef DISABLE_IMPLICIT_GEMM_INSTANCES
 #include "../../experimental/grouped_convolution_tile_instances/instances/forward/grouped_convolution_forward_tile_nhwgc_bf16_calls.inc"
-#endif // DISABLE_IMPLICIT_GEMM_INSTANCES
-        for(auto fn : get_fwd_direct_instances_nhwgc_bf16_4c())
-            run_alg(fn);
-        for(auto fn : get_fwd_direct_instances_nhwgc_bf16_16c())
-            run_alg(fn);
-        for(auto fn : get_fwd_direct_instances_nhwgc_bf16_8c())
-            run_alg(fn);
-        for(auto fn : get_fwd_direct_instances_nhwgc_bf16_32c())
-            run_alg(fn);
     }
     else if constexpr(SIGNATURE == SIGNATURE_NHWGC_FP32_FWD)
     {
-#ifndef DISABLE_IMPLICIT_GEMM_INSTANCES
 #include "../../experimental/grouped_convolution_tile_instances/instances/forward/grouped_convolution_forward_tile_nhwgc_fp32_calls.inc"
-#endif // DISABLE_IMPLICIT_GEMM_INSTANCES
     }
     else if constexpr(SIGNATURE == SIGNATURE_NDHWGC_FP16_FWD)
     {
-#ifndef DISABLE_IMPLICIT_GEMM_INSTANCES
 #include "../../experimental/grouped_convolution_tile_instances/instances/forward/grouped_convolution_forward_tile_ndhwgc_fp16_calls.inc"
-#endif // DISABLE_IMPLICIT_GEMM_INSTANCES
     }
     else if constexpr(SIGNATURE == SIGNATURE_NDHWGC_BF16_FWD)
     {
-#ifndef DISABLE_IMPLICIT_GEMM_INSTANCES
 #include "../../experimental/grouped_convolution_tile_instances/instances/forward/grouped_convolution_forward_tile_ndhwgc_bf16_calls.inc"
-#endif // DISABLE_IMPLICIT_GEMM_INSTANCES
     }
     else if constexpr(SIGNATURE == SIGNATURE_NDHWGC_FP32_FWD)
     {
-#ifndef DISABLE_IMPLICIT_GEMM_INSTANCES
 #include "../../experimental/grouped_convolution_tile_instances/instances/forward/grouped_convolution_forward_tile_ndhwgc_fp32_calls.inc"
-#endif // DISABLE_IMPLICIT_GEMM_INSTANCES
     }
     else if constexpr(SIGNATURE == SIGNATURE_NGCHW_FP16_FWD)
     {
-#ifndef DISABLE_IMPLICIT_GEMM_INSTANCES
 #include "../../experimental/grouped_convolution_tile_instances/instances/forward/grouped_convolution_forward_tile_ngchw_depthwise_fp16_calls.inc"
-#endif // DISABLE_IMPLICIT_GEMM_INSTANCES    
     }
     else if constexpr(SIGNATURE == SIGNATURE_NGCHW_BF16_FWD)
     {
-#ifndef DISABLE_IMPLICIT_GEMM_INSTANCES
 #include "../../experimental/grouped_convolution_tile_instances/instances/forward/grouped_convolution_forward_tile_ngchw_depthwise_bf16_calls.inc"
-#endif // DISABLE_IMPLICIT_GEMM_INSTANCES
     }
     else if constexpr(SIGNATURE == SIGNATURE_NGCHW_FP32_FWD)
     {
-#ifndef DISABLE_IMPLICIT_GEMM_INSTANCES
 #include "../../experimental/grouped_convolution_tile_instances/instances/forward/grouped_convolution_forward_tile_ngchw_depthwise_fp32_calls.inc"
-#endif // DISABLE_IMPLICIT_GEMM_INSTANCES 
     }
     else
     {

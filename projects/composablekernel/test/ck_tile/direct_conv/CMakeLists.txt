@@ -3,6 +3,9 @@
 
 message("-- Adding: test/ck_tile/direct_conv/")
 
+# Direct conv config headers.
+include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+
 # Unit tests (CPU-only, compile with HIP for type support)
 add_gtest_executable(test_direct_conv_mathutil test_mathutil.cpp)
 add_gtest_executable(test_direct_conv_params test_conv_params.cpp)

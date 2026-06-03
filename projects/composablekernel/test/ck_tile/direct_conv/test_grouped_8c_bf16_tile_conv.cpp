@@ -7,7 +7,7 @@
 #pragma clang diagnostic ignored "-Wunused-parameter"
 #pragma clang diagnostic ignored "-Wshadow"
 #include "ck_tile/ops/direct_convolution/kernel/direct_conv_8c.hpp"
-#include "ck_tile/ops/direct_convolution/configs/direct_conv_8c_configs.hpp"
+#include "configs/direct_conv_8c_configs.hpp"
 #pragma clang diagnostic pop
 
 constexpr auto v2 = ck_tile::direct_conv::Version::v2;
