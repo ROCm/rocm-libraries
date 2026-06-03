@@ -116,8 +116,8 @@ struct FmhaBwdDQDKDVTypes
     // breaking the BlockTile arithmetic and warp-level intrinsics encoded
     // into the pipeline. Refuse to compile this bridge on non-gfx9 targets.
     static_assert(__AMDGCN_WAVEFRONT_SIZE == 64,
-                  "FmhaBwdDQDKDV bridge requires wave64 (gfx9). The hardcoded "
-                  "BlockSize=256 / NumWarps=4 tile config assumes warp_size=64.");
+                  "FmhaBwdDQDKDV bridge requires wave64 (gfx9). "
+                  "Add GFX11/GFX12 tile configs to enable wave32 targets.");
 
     // --- Tile shape (gfx9 d32/d96/d128/d256 configs from fmha_bwd.py) ---
     //
@@ -174,12 +174,12 @@ struct FmhaBwdDQDKDVTypes
                                                                                   256>>>>;
 
     // Gemm0 & Gemm2: compute S = Q @ K^T and dP = dO @ V^T
-    using Gemm0BlockWarps = ck_tile::sequence<1, 4, 1>;
-    using Gemm0WarpTile   = ck_tile::sequence<16, 16, 32>;
+    using Gemm0BlockWarps = ck_tile::sequence<kTile.rm0, kTile.rn0, kTile.rk0>;
+    using Gemm0WarpTile   = ck_tile::sequence<kTile.wm0, kTile.wn0, kTile.wk0>;
 
     // Gemm1 & Gemm3: compute dV = P^T @ dO and dK = dS^T @ Q
-    using Gemm1BlockWarps = ck_tile::sequence<4, 1, 1>;
-    using Gemm1WarpTile   = ck_tile::sequence<16, 16, 16>;
+    using Gemm1BlockWarps = ck_tile::sequence<kTile.rm1, kTile.rn1, kTile.rk1>;
+    using Gemm1WarpTile   = ck_tile::sequence<kTile.wm1, kTile.wn1, kTile.wk1>;
 
     // Gemm4: compute dQ = dS @ K
     using Gemm4BlockWarps = std::conditional_t<kIsD32 || kIsD96,
@@ -200,7 +200,7 @@ struct FmhaBwdDQDKDVTypes
                                                 Gemm1WarpTile, // Gemm3 (same as G1)
                                                 Gemm4BlockWarps,
                                                 Gemm4WarpTile, // Gemm4
-                                                0>;            // kMaxSeqLenQ (0 = unlimited)
+                                                kTile.max_seq_q>;
 
     // --- Mask type ---
     // has_mask=true  -> GenericAttentionMask<true, true> (full masking)
@@ -211,11 +211,11 @@ struct FmhaBwdDQDKDVTypes
 
     // --- Dropout type ---
     // BlockDropoutBwd<IsDropout, IsWG32, IsStoreRandval>
-    // All wired gfx9 configs use wm0=16, so IsWG32=false -> wg16 variant.
+    // IsWG32 = (wm0 >= 32). All current gfx9 configs use wm0=16 → false.
     // We never store randval in backward (IsStoreRandval=false).
     using Dropout = ck_tile::BlockDropoutBwd<K.has_dropout,
-                                             false,  // IsWG32 = false (wm0=16)
-                                             false>; // IsStoreRandval = false
+                                             (kTile.wm0 >= 32), // IsWG32
+                                             false>;            // IsStoreRandval = false
 
     // --- Pipeline problem ---
     static constexpr bool kIsGroupMode = (K.mode == FmhaMode::GROUP);
@@ -322,8 +322,8 @@ struct FmhaBwdDQDKDVTypes
 ///   scalars[S::SCALE].f32     = raw_scale * log2(e)
 ///
 ///   (dropout only):
-///   scalars[S::P_UNDROP].f32    = 1/(1-dropout_rate)
-///   scalars[S::RP_UNDROP].f32   = 1/p_undrop  (== 1 - dropout_rate)
+///   scalars[S::P_UNDROP].f32    = 1/(1-dropout_rate) (CK Tile rp_undrop)
+///   scalars[S::RP_UNDROP].f32   = 1 - dropout_rate   (keep_prob)
 ///   scalars[S::DROP_SEED].u64   = dropout RNG seed
 ///   scalars[S::DROP_OFFSET].u64 = dropout RNG offset
 ///
@@ -494,14 +494,10 @@ __device__ void runFmhaBwdDQDKDV(Args args)
     // Bias / dbias batch_stride_* and dropout batch_stride_randval fields
     // exist only on the BATCH-mode arms of the optional kargs. Guarding by
     // K.mode prevents referencing absent members in GROUP mode. CK Tile's
-    // GROUP-mode bias/dbias kargs derive batch offsets from seqstart_q_ptr,
-    // so the host-supplied batch_stride is unused there.
-    //
-    // The GROUP path here is exercised only by the plain-feature variant
-    // shipped today (fmha_bwd_dqdkdv_fp16_d128_group). The compile-time
-    // branches below are correct for any future GROUP variant that enables
-    // an optional feature, but those combinations are not numerically
-    // verified by the current example -- they remain compilation-only.
+    // GROUP-mode optional kargs use the common forms instead: bias/dbias are
+    // addressed through stride + nhead_stride without batch_stride, dropout
+    // uses randval stride + nhead_stride without batch_stride_randval, and
+    // batch offsets come from seqstart_q_ptr / seqstart_k_ptr.
 
     if constexpr(K.bias_type == FmhaBiasType::ELEMENTWISE)
     {
@@ -510,7 +506,9 @@ __device__ void runFmhaBwdDQDKDV(Args args)
         kargs.stride_bias       = static_cast<index_t>(t_bias.strides[0]);
         kargs.nhead_stride_bias = static_cast<index_t>(t_bias.strides[1]);
         if constexpr(K.mode == FmhaMode::BATCH)
+        {
             kargs.batch_stride_bias = static_cast<index_t>(t_bias.strides[2]);
+        }
     }
     else if constexpr(K.bias_type == FmhaBiasType::ALIBI)
     {
@@ -526,7 +524,9 @@ __device__ void runFmhaBwdDQDKDV(Args args)
         kargs.stride_dbias       = static_cast<index_t>(t_dbias.strides[0]);
         kargs.nhead_stride_dbias = static_cast<index_t>(t_dbias.strides[1]);
         if constexpr(K.mode == FmhaMode::BATCH)
+        {
             kargs.batch_stride_dbias = static_cast<index_t>(t_dbias.strides[2]);
+        }
     }
 
     if constexpr(K.has_mask)
@@ -539,8 +539,18 @@ __device__ void runFmhaBwdDQDKDV(Args args)
 
     if constexpr(K.has_dropout)
     {
-        const float p_undrop  = args.scalars[S::P_UNDROP].f32;
-        const float rp_undrop = args.scalars[S::RP_UNDROP].f32;
+        const TensorArg& t_randval = args.tensors[S::RANDVAL];
+        // rocm_ck's historical slot names are inverted relative to CK Tile's
+        // kargs naming: P_UNDROP stores the reciprocal keep probability used
+        // as CK Tile's rp_undrop, while RP_UNDROP stores the keep probability
+        // used for the uint8 dropout threshold. (Prior to PR #7534 these two
+        // slots were assigned reversed -- kargs.rp_undrop received the keep
+        // probability instead of its reciprocal -- which produced incorrect
+        // gradient scaling for any non-trivial dropout rate. The bug was
+        // masked because every landed host caller wrote 1.0 to both slots,
+        // making the swap unobservable in tests.)
+        const float rp_undrop = args.scalars[S::P_UNDROP].f32;
+        const float p_undrop  = args.scalars[S::RP_UNDROP].f32;
         kargs.rp_undrop       = rp_undrop;
         kargs.scale_rp_undrop = rp_undrop * raw_scale;
         // Clamp before the uint8_t cast: out-of-range float-to-int
@@ -554,12 +564,13 @@ __device__ void runFmhaBwdDQDKDV(Args args)
         kargs.drop_offset.val               = args.scalars[S::DROP_OFFSET].u64;
         kargs.is_drop_seed_offset_from_host = true;
 
-        // randval is never stored in the backward pass.
-        kargs.rand_val_ptr         = nullptr;
-        kargs.stride_randval       = 0;
-        kargs.nhead_stride_randval = 0;
+        kargs.rand_val_ptr         = t_randval.ptr;
+        kargs.stride_randval       = static_cast<index_t>(t_randval.strides[0]);
+        kargs.nhead_stride_randval = static_cast<index_t>(t_randval.strides[1]);
         if constexpr(K.mode == FmhaMode::BATCH)
-            kargs.batch_stride_randval = 0;
+        {
+            kargs.batch_stride_randval = static_cast<index_t>(t_randval.strides[2]);
+        }
     }
 
     if constexpr(K.is_deterministic)
