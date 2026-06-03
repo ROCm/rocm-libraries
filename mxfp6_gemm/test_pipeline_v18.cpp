@@ -34,11 +34,11 @@ static constexpr int LDS_MT = 256, LDS_NT = 256, LDS_KT = 192;
 // SWZ=16 on N512 when N>=8192 (full n-band) keeps B hot in L2: +0.8~4.4% — notably
 // breaks the pow2-square plateau (8192^3: 1491 -> 1557). See choose_swz.
 template <int M_TILE, int NPW_A, int NPW_V, int N_WAVES, int MIN_OCC, int WAVES_M = 2,
-          int WAVES_N = 2, int SWZ = 0>
+          int WAVES_N = 2, int SWZ = 0, typename OutT = float>
 __global__ void __launch_bounds__(256, MIN_OCC)
     mxfp6_gemm_pipeline(const void* __restrict__ A_packed, const void* __restrict__ B_shuffled,
                         const uint8_t* __restrict__ scale_A, const uint8_t* __restrict__ scale_B,
-                        float* __restrict__ D, int D_stride, int k_iters, int A_row_stride) {
+                        OutT* __restrict__ D, int D_stride, int k_iters, int A_row_stride) {
     constexpr int M_PER_WAVE = (M_TILE / 32) / WAVES_M;
     constexpr int NPW = NPW_A + NPW_V;
     constexpr int N_TILE = WAVES_N * NPW * 32;
@@ -186,12 +186,12 @@ __global__ void __launch_bounds__(256, MIN_OCC)
 #pragma unroll
         for (int ni = 0; ni < NPW_A; ni++) {
             int n = wg_n * N_TILE + (wave_n * NPW + ni) * 32;
-            store_acc_f32(D, D_stride, acc_a[mi][ni], m, n);
+            store_acc_t<OutT>(D, D_stride, acc_a[mi][ni].vec, m, n);
         }
 #pragma unroll
         for (int ni = 0; ni < NPW_V; ni++) {
             int n = wg_n * N_TILE + (wave_n * NPW + NPW_A + ni) * 32;
-            store_acc_f32(D, D_stride, acc_v[mi][ni], m, n);
+            store_acc_t<OutT>(D, D_stride, acc_v[mi][ni].vec, m, n);
         }
     }
 }
@@ -286,48 +286,56 @@ static Tile choose_tile(int M, int N) {
 // ---- B preshuffle for a given N_TILE-agnostic 32-col block layout (reuse preshuffle_B) ----
 // preprocess provides preshuffle_B producing 1536B/32-col-tile; tile index uses 32-col blocks.
 
+// Host-side OutT -> float (for validating F16/BF16 dispatch output vs F32 reference).
+static inline float out_to_float(float x) { return x; }
+static inline float out_to_float(__half x) { return __half2float(x); }
+static inline float out_to_float(__hip_bfloat16 x) { return __bfloat162float(x); }
+
+template <typename OutT = float>
 static void launch(Tile t, bool square, int swz, int M, int N, int K, const void* dA,
-                   const void* dB, const uint8_t* dsA, const uint8_t* dsB, float* dD, int prb) {
+                   const void* dB, const uint8_t* dsA, const uint8_t* dsB, OutT* dD, int prb) {
     dim3 block(256);
     int kit = K / 64;
     switch (t) {
         case T128: {
             dim3 g(M / 128, N / 128);
-            mxfp6_gemm_pipeline<128, 2, 0, 4, 4><<<g, block>>>(dA, dB, dsA, dsB, dD, N, kit, prb);
+            mxfp6_gemm_pipeline<128, 2, 0, 4, 4, 2, 2, 0, OutT><<<g, block>>>(dA, dB, dsA, dsB, dD, N, kit, prb);
             break;
         }
         case T256: {
             dim3 g(M / 128, N / 256);
-            mxfp6_gemm_pipeline<128, 4, 0, 4, 2><<<g, block>>>(dA, dB, dsA, dsB, dD, N, kit, prb);
+            mxfp6_gemm_pipeline<128, 4, 0, 4, 2, 2, 2, 0, OutT><<<g, block>>>(dA, dB, dsA, dsB, dD, N, kit, prb);
             break;
         }
         case T512: {
             dim3 g(M / 128, N / 512);
             if (square)  // 4x4: WAVES_M=1, WAVES_N=4, NPW_A=4
-                mxfp6_gemm_pipeline<128, 4, 0, 4, 1, 1, 4><<<g, block>>>(dA, dB, dsA, dsB, dD, N, kit, prb);
+                mxfp6_gemm_pipeline<128, 4, 0, 4, 1, 1, 4, 0, OutT><<<g, block>>>(dA, dB, dsA, dsB, dD, N, kit, prb);
             else if (swz == 16)  // 2x8 + L2-aware swizzle (large square grids)
-                mxfp6_gemm_pipeline<128, 8, 0, 4, 1, 2, 2, 16><<<g, block>>>(dA, dB, dsA, dsB, dD, N, kit, prb);
+                mxfp6_gemm_pipeline<128, 8, 0, 4, 1, 2, 2, 16, OutT><<<g, block>>>(dA, dB, dsA, dsB, dD, N, kit, prb);
             else         // 2x8: default WAVES_M=2, WAVES_N=2, NPW_A=8
-                mxfp6_gemm_pipeline<128, 8, 0, 4, 1><<<g, block>>>(dA, dB, dsA, dsB, dD, N, kit, prb);
+                mxfp6_gemm_pipeline<128, 8, 0, 4, 1, 2, 2, 0, OutT><<<g, block>>>(dA, dB, dsA, dsB, dD, N, kit, prb);
             break;
         }
         case T576: {
             dim3 g(M / 128, N / 576);
-            mxfp6_gemm_pipeline<128, 8, 1, 4, 1><<<g, block>>>(dA, dB, dsA, dsB, dD, N, kit, prb);
+            mxfp6_gemm_pipeline<128, 8, 1, 4, 1, 2, 2, 0, OutT><<<g, block>>>(dA, dB, dsA, dsB, dD, N, kit, prb);
             break;
         }
         case T640: {
             dim3 g(M / 128, N / 640);
-            mxfp6_gemm_pipeline<128, 8, 2, 4, 1><<<g, block>>>(dA, dB, dsA, dsB, dD, N, kit, prb);
+            mxfp6_gemm_pipeline<128, 8, 2, 4, 1, 2, 2, 0, OutT><<<g, block>>>(dA, dB, dsA, dsB, dD, N, kit, prb);
             break;
         }
+        case TLDS: break;  // handled by lds_launch
     }
 }
 
 // mpw/npw = per-wave M/N blocks of the launched config; drive scale_A/scale_B coalesce groups.
+template <typename OutT = float>
 static void prep(int M, int N, int K, int mpw, int npw, std::vector<float>& Af,
                  std::vector<float>& Bf, void** dA, void** dB, uint8_t** dsA, uint8_t** dsB,
-                 float** dD, int* prb) {
+                 OutT** dD, int* prb) {
     QuantizedMatrix Aq = quantize_to_mxfp6(Af.data(), M, K);
     QuantizedMatrix Bq = preprocess_B(Bf.data(), K, N);
     PreprocessedScale saP = preprocess_scale(Aq.scales.data(), M, K);
@@ -339,7 +347,7 @@ static void prep(int M, int N, int K, int mpw, int npw, std::vector<float>& Af,
     hipMalloc(dB, pbB.data.size());
     hipMalloc(dsA, saC.data.size());
     hipMalloc(dsB, sbC.data.size());
-    hipMalloc(dD, (size_t)M * N * 4);
+    hipMalloc(dD, (size_t)M * N * sizeof(OutT));
     hipMemcpy(*dA, Aq.packed_data.data(), Aq.packed_data.size(), hipMemcpyHostToDevice);
     hipMemcpy(*dB, pbB.data.data(), pbB.data.size(), hipMemcpyHostToDevice);
     hipMemcpy(*dsA, saC.data.data(), saC.data.size(), hipMemcpyHostToDevice);
@@ -348,23 +356,25 @@ static void prep(int M, int N, int K, int mpw, int npw, std::vector<float>& Af,
 }
 
 // ---- LDS deep-K path (separate layout: plain B + tiled scales + K padding) ----
-template <int SWZ>
+template <int SWZ, typename OutT = float>
 static void lds_launch_t(int M, int N, int Kp, const void* dA, const void* dB,
-                         const uint8_t* dsA, const uint8_t* dsB, float* dD, int A_rs, int B_rs) {
+                         const uint8_t* dsA, const uint8_t* dsB, OutT* dD, int A_rs, int B_rs) {
     dim3 g(M / LDS_MT, N / LDS_NT), blk(256);
     int lds = 2 * (LDS_MT * (LDS_KT * 6 / 8) + LDS_NT * (LDS_KT * 6 / 8));
-    lds_gemm_db<LDS_MT, LDS_NT, LDS_KT, 2, 2, 1, SWZ, true>
+    lds_gemm_db<LDS_MT, LDS_NT, LDS_KT, 2, 2, 1, SWZ, true, OutT>
         <<<g, blk, lds>>>(dA, dB, dsA, dsB, dD, N, Kp / 64, A_rs, B_rs);
 }
+template <typename OutT = float>
 static void lds_launch(int swz, int M, int N, int Kp, const void* dA, const void* dB,
-                       const uint8_t* dsA, const uint8_t* dsB, float* dD, int A_rs, int B_rs) {
-    if (swz == 16) lds_launch_t<16>(M, N, Kp, dA, dB, dsA, dsB, dD, A_rs, B_rs);
-    else           lds_launch_t<0>(M, N, Kp, dA, dB, dsA, dsB, dD, A_rs, B_rs);
+                       const uint8_t* dsA, const uint8_t* dsB, OutT* dD, int A_rs, int B_rs) {
+    if (swz == 16) lds_launch_t<16, OutT>(M, N, Kp, dA, dB, dsA, dsB, dD, A_rs, B_rs);
+    else           lds_launch_t<0, OutT>(M, N, Kp, dA, dB, dsA, dsB, dD, A_rs, B_rs);
 }
 // Prep for the LDS kernel: A packed (shared format), B PLAIN [N][K] (not preshuffled),
 // scales tile-grouped. K padded to a multiple of LDS_KT with zeros (no effect on result).
+template <typename OutT = float>
 static void lds_prep(int M, int N, int K, std::vector<float>& Af, std::vector<float>& Bf,
-                     void** dA, void** dB, uint8_t** dsA, uint8_t** dsB, float** dD,
+                     void** dA, void** dB, uint8_t** dsA, uint8_t** dsB, OutT** dD,
                      int* A_rs, int* B_rs, int* Kp_out) {
     int Kp = ((K + LDS_KT - 1) / LDS_KT) * LDS_KT;
     constexpr int M_PW = (LDS_MT / 32) / 2, N_PW = (LDS_NT / 32) / 2;  // 4,4
@@ -382,7 +392,7 @@ static void lds_prep(int M, int N, int K, std::vector<float>& Af, std::vector<fl
     hipMalloc(dB, Bq.packed_data.size());
     hipMalloc(dsA, saC.data.size());
     hipMalloc(dsB, sbC.data.size());
-    hipMalloc(dD, (size_t)M * N * 4);
+    hipMalloc(dD, (size_t)M * N * sizeof(OutT));
     hipMemcpy(*dA, Aq.packed_data.data(), Aq.packed_data.size(), hipMemcpyHostToDevice);
     hipMemcpy(*dB, Bq.packed_data.data(), Bq.packed_data.size(), hipMemcpyHostToDevice);
     hipMemcpy(*dsA, saC.data.data(), saC.data.size(), hipMemcpyHostToDevice);
@@ -391,6 +401,7 @@ static void lds_prep(int M, int N, int K, std::vector<float>& Af, std::vector<fl
     *B_rs = Bq.packed_row_bytes;
     *Kp_out = Kp;
 }
+template <typename OutT = float>
 static bool lds_correct(int M, int N, int K, int swz) {
     std::mt19937 rng(5);
     std::uniform_real_distribution<float> d(-2, 2);
@@ -401,35 +412,37 @@ static bool lds_correct(int M, int N, int K, int swz) {
     QuantizedMatrix Bq = preprocess_B(Bf.data(), K, N);
     std::vector<float> Dref((size_t)M * N);
     mxfp6_gemm_ref(Aq, Bq, Dref.data(), M, K, N);
-    void *dA, *dB; uint8_t *dsA, *dsB; float* dD;
+    void *dA, *dB; uint8_t *dsA, *dsB; OutT* dD;
     int A_rs, B_rs, Kp;
-    lds_prep(M, N, K, Af, Bf, &dA, &dB, &dsA, &dsB, &dD, &A_rs, &B_rs, &Kp);
-    hipMemset(dD, 0, (size_t)M * N * 4);
-    lds_launch(swz, M, N, Kp, dA, dB, dsA, dsB, dD, A_rs, B_rs);
+    lds_prep<OutT>(M, N, K, Af, Bf, &dA, &dB, &dsA, &dsB, &dD, &A_rs, &B_rs, &Kp);
+    hipMemset(dD, 0, (size_t)M * N * sizeof(OutT));
+    lds_launch<OutT>(swz, M, N, Kp, dA, dB, dsA, dsB, dD, A_rs, B_rs);
     if (hipDeviceSynchronize() != hipSuccess) {
         printf("  err %s\n", hipGetErrorString(hipGetLastError())); return false;
     }
-    std::vector<float> Dg((size_t)M * N);
-    hipMemcpy(Dg.data(), dD, (size_t)M * N * 4, hipMemcpyDeviceToHost);
+    std::vector<OutT> Dg((size_t)M * N);
+    hipMemcpy(Dg.data(), dD, (size_t)M * N * sizeof(OutT), hipMemcpyDeviceToHost);
     float e = 0, mx = 0;
     for (size_t i = 0; i < (size_t)M * N; i++) {
-        e = fmaxf(e, fabsf(Dg[i] - Dref[i])); mx = fmaxf(mx, fabsf(Dref[i]));
+        e = fmaxf(e, fabsf(out_to_float(Dg[i]) - Dref[i])); mx = fmaxf(mx, fabsf(Dref[i]));
     }
+    float tol = (sizeof(OutT) == 4 ? 1e-2f : 2e-2f) * fmaxf(1.f, mx);
     printf("  LDS%s M=%d N=%d K=%d: err=%.3e %s\n", swz ? "[swz]" : "", M, N, K, e,
-           e < 1e-2f * fmaxf(1.f, mx) ? "PASS" : "FAIL");
+           e < tol ? "PASS" : "FAIL");
     hipFree(dA); hipFree(dB); hipFree(dsA); hipFree(dsB); hipFree(dD);
-    return e < 1e-2f * fmaxf(1.f, mx);
+    return e < tol;
 }
+template <typename OutT = float>
 static double lds_bench(int M, int N, int K, int swz) {
     std::mt19937 rng(42);
     std::uniform_real_distribution<float> d(-1, 1);
     std::vector<float> Af((size_t)M * K), Bf((size_t)K * N);
     for (auto& x : Af) x = d(rng);
     for (auto& x : Bf) x = d(rng);
-    void *dA, *dB; uint8_t *dsA, *dsB; float* dD;
+    void *dA, *dB; uint8_t *dsA, *dsB; OutT* dD;
     int A_rs, B_rs, Kp;
-    lds_prep(M, N, K, Af, Bf, &dA, &dB, &dsA, &dsB, &dD, &A_rs, &B_rs, &Kp);
-    auto run = [&] { lds_launch(swz, M, N, Kp, dA, dB, dsA, dsB, dD, A_rs, B_rs); };
+    lds_prep<OutT>(M, N, K, Af, Bf, &dA, &dB, &dsA, &dsB, &dD, &A_rs, &B_rs, &Kp);
+    auto run = [&] { lds_launch<OutT>(swz, M, N, Kp, dA, dB, dsA, dsB, dD, A_rs, B_rs); };
     for (int i = 0; i < 10; i++) run();
     hipDeviceSynchronize();
     double best = 1e30;
@@ -446,8 +459,9 @@ static double lds_bench(int M, int N, int K, int swz) {
     return 2.0 * M * N * K / (best * 1e-3) / 1e12;
 }
 
+template <typename OutT = float>
 static bool correct(int M, int N, int K, Tile t, bool square, int swz = 0) {
-    if (t == TLDS) return lds_correct(M, N, K, swz);
+    if (t == TLDS) return lds_correct<OutT>(M, N, K, swz);
     std::mt19937 rng(5);
     std::uniform_real_distribution<float> d(-2, 2);
     std::vector<float> Af((size_t)M * K), Bf((size_t)K * N);
@@ -459,35 +473,37 @@ static bool correct(int M, int N, int K, Tile t, bool square, int swz = 0) {
     mxfp6_gemm_ref(Aq, Bq, Dref.data(), M, K, N);
     void *dA, *dB;
     uint8_t *dsA, *dsB;
-    float* dD;
+    OutT* dD;
     int prb, mpw, npw;
     shape_of(t, square, mpw, npw);
-    prep(M, N, K, mpw, npw, Af, Bf, &dA, &dB, &dsA, &dsB, &dD, &prb);
-    hipMemset(dD, 0, (size_t)M * N * 4);
-    launch(t, square, swz, M, N, K, dA, dB, dsA, dsB, dD, prb);
+    prep<OutT>(M, N, K, mpw, npw, Af, Bf, &dA, &dB, &dsA, &dsB, &dD, &prb);
+    hipMemset(dD, 0, (size_t)M * N * sizeof(OutT));
+    launch<OutT>(t, square, swz, M, N, K, dA, dB, dsA, dsB, dD, prb);
     if (hipDeviceSynchronize() != hipSuccess) {
         printf("  err %s\n", hipGetErrorString(hipGetLastError()));
         return false;
     }
-    std::vector<float> Dg((size_t)M * N);
-    hipMemcpy(Dg.data(), dD, (size_t)M * N * 4, hipMemcpyDeviceToHost);
+    std::vector<OutT> Dg((size_t)M * N);
+    hipMemcpy(Dg.data(), dD, (size_t)M * N * sizeof(OutT), hipMemcpyDeviceToHost);
     float e = 0, mx = 0;
     for (size_t i = 0; i < (size_t)M * N; i++) {
-        e = fmaxf(e, fabsf(Dg[i] - Dref[i]));
+        e = fmaxf(e, fabsf(out_to_float(Dg[i]) - Dref[i]));
         mx = fmaxf(mx, fabsf(Dref[i]));
     }
+    float tol = (sizeof(OutT) == 4 ? 1e-2f : 2e-2f) * fmaxf(1.f, mx);
     printf("  %s%s%s M=%d N=%d K=%d: err=%.3e %s\n", tile_nm(t), square ? "[4x4]" : "",
-           swz ? "[swz]" : "", M, N, K, e, e < 1e-2f * fmaxf(1.f, mx) ? "PASS" : "FAIL");
+           swz ? "[swz]" : "", M, N, K, e, e < tol ? "PASS" : "FAIL");
     hipFree(dA);
     hipFree(dB);
     hipFree(dsA);
     hipFree(dsB);
     hipFree(dD);
-    return e < 1e-2f * fmaxf(1.f, mx);
+    return e < tol;
 }
 
+template <typename OutT = float>
 static double bench(int M, int N, int K, Tile t, bool square, int swz = 0) {
-    if (t == TLDS) return lds_bench(M, N, K, swz);
+    if (t == TLDS) return lds_bench<OutT>(M, N, K, swz);
     std::mt19937 rng(42);
     std::uniform_real_distribution<float> d(-1, 1);
     std::vector<float> Af((size_t)M * K), Bf((size_t)K * N);
@@ -495,11 +511,11 @@ static double bench(int M, int N, int K, Tile t, bool square, int swz = 0) {
     for (auto& x : Bf) x = d(rng);
     void *dA, *dB;
     uint8_t *dsA, *dsB;
-    float* dD;
+    OutT* dD;
     int prb, mpw, npw;
     shape_of(t, square, mpw, npw);
-    prep(M, N, K, mpw, npw, Af, Bf, &dA, &dB, &dsA, &dsB, &dD, &prb);
-    for (int i = 0; i < 10; i++) launch(t, square, swz, M, N, K, dA, dB, dsA, dsB, dD, prb);
+    prep<OutT>(M, N, K, mpw, npw, Af, Bf, &dA, &dB, &dsA, &dsB, &dD, &prb);
+    for (int i = 0; i < 10; i++) launch<OutT>(t, square, swz, M, N, K, dA, dB, dsA, dsB, dD, prb);
     hipDeviceSynchronize();
     double best = 1e30;
     for (int r = 0; r < 4; r++) {
@@ -507,7 +523,7 @@ static double bench(int M, int N, int K, Tile t, bool square, int swz = 0) {
         hipEventCreate(&a);
         hipEventCreate(&b);
         hipEventRecord(a);
-        for (int i = 0; i < 20; i++) launch(t, square, swz, M, N, K, dA, dB, dsA, dsB, dD, prb);
+        for (int i = 0; i < 20; i++) launch<OutT>(t, square, swz, M, N, K, dA, dB, dsA, dsB, dD, prb);
         hipEventRecord(b);
         hipDeviceSynchronize();
         float ms = 0;
@@ -589,5 +605,34 @@ int main() {
                         bsw ? "[swz]" : "", best);
     }
     printf("\n%d/%d OPT, %d MISS\n", opt, opt + miss, miss);
+
+    // ---- End-to-end F16 / BF16 output through the SAME dispatcher ----
+    // Routing (choose_tile) is output-type-independent; only the store type differs.
+    // (1) Correctness per tile at small shapes (cheap CPU reference); (2) perf via the
+    // full dispatcher at 8192-class shapes (bench only, no CPU ref). Half ~6% slower:
+    // gfx950 stores F32 straight from AccVGPR; half needs AccVGPR->VGPR->convert->store.
+    printf("\n=== End-to-end F16/BF16 correctness (per tile, small shapes) ===\n");
+    C ce[] = {{256, 512, 256, T512, false, 0}, {256, 256, 256, T256, false, 0},
+              {256, 640, 256, T640, false, 0}, {512, 512, 1024, TLDS, false, 0}};
+    int e2e_ok = 0, e2e_tot = 0;
+    for (auto& c : ce) {
+        e2e_tot += 2;
+        e2e_ok += correct<__half>(c.M, c.N, c.K, c.t, c.sq, c.swz);
+        e2e_ok += correct<__hip_bfloat16>(c.M, c.N, c.K, c.t, c.sq, c.swz);
+    }
+    printf("%d/%d\n", e2e_ok, e2e_tot);
+
+    printf("\n=== End-to-end dispatch perf: F32 / F16 / BF16 (choose_tile) ===\n");
+    S e2e[] = {{8192, 8192, 8192}, {8192, 4096, 8192}, {8192, 5120, 8192}};
+    for (auto& s : e2e) {
+        Tile pk = choose_tile(s.M, s.N);
+        bool sq = choose_square(pk, s.M, s.N);
+        int sw = choose_swz(pk, s.M, s.N);
+        double f32 = bench<float>(s.M, s.N, s.K, pk, sq, sw);
+        double f16 = bench<__half>(s.M, s.N, s.K, pk, sq, sw);
+        double bf16 = bench<__hip_bfloat16>(s.M, s.N, s.K, pk, sq, sw);
+        printf("M=%-4d N=%-4d K=%-5d pick=%s%s%s | F32=%.0f F16=%.0f BF16=%.0f\n", s.M, s.N, s.K,
+               tile_nm(pk), sq ? "[4x4]" : "", sw ? "[swz]" : "", f32, f16, bf16);
+    }
     return 0;
 }

@@ -1,6 +1,9 @@
 #pragma once
 #include <hip/hip_runtime.h>
+#include <hip/hip_fp16.h>
+#include <hip/hip_bf16.h>
 #include <cstdint>
+#include <type_traits>
 
 namespace mxfp6 {
 
@@ -262,6 +265,41 @@ __device__ __forceinline__ void store_acc_f32(
         int n = g * 8 + m_half * 4;
         *reinterpret_cast<float4*>(&row[n]) =
             make_float4(acc.vec[g*4], acc.vec[g*4+1], acc.vec[g*4+2], acc.vec[g*4+3]);
+    }
+}
+
+// ---- Templated epilogue: F32 accumulators -> OutT (float / __half / __hip_bfloat16) ----
+//
+// Same TransposeC layout as store_acc_f32: each lane holds 1 M-row × 16 N-cols as 4
+// groups of 4 consecutive N. float -> float4 (16B) store; half/bf16 -> 4 values = 8B
+// (int2) store. Works for both AccTileV and AccTileA (gfx950 global_store reads either
+// register file), taking acc.vec directly.
+template <typename OutT>
+__device__ __forceinline__ void store_acc_t(
+    OutT* __restrict__ D, int D_stride, const v16f& acc,
+    int m_tile_base, int n_tile_base)
+{
+    int lane = threadIdx.x % 64;
+    int m = m_tile_base + (lane % 32);
+    int m_half = lane / 32;
+    OutT* row = &D[(size_t)m * D_stride + n_tile_base];
+
+    #pragma unroll
+    for (int g = 0; g < 4; g++) {
+        int n = g * 8 + m_half * 4;
+        if constexpr (std::is_same<OutT, float>::value) {
+            *reinterpret_cast<float4*>(&row[n]) =
+                make_float4(acc[g*4], acc[g*4+1], acc[g*4+2], acc[g*4+3]);
+        } else if constexpr (std::is_same<OutT, __half>::value) {
+            // Packed F32->F16 (v_cvt_pk_fp16): two halfs/instr, no stack array.
+            *reinterpret_cast<__half2*>(&row[n])     = __floats2half2_rn(acc[g*4],   acc[g*4+1]);
+            *reinterpret_cast<__half2*>(&row[n + 2]) = __floats2half2_rn(acc[g*4+2], acc[g*4+3]);
+        } else {  // __hip_bfloat16
+            *reinterpret_cast<__hip_bfloat162*>(&row[n]) =
+                __float22bfloat162_rn(make_float2(acc[g*4], acc[g*4+1]));
+            *reinterpret_cast<__hip_bfloat162*>(&row[n + 2]) =
+                __float22bfloat162_rn(make_float2(acc[g*4+2], acc[g*4+3]));
+        }
     }
 }
 

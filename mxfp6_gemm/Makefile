@@ -17,8 +17,18 @@ test_pipeline_v18: test_pipeline_v18.cpp $(HEADERS)
 test_pipeline_v17: test_pipeline_v17.cpp $(filter-out mxfp6_lds.hpp, $(HEADERS))
 	$(HIPCC) $(HIPFLAGS) $< -o $@
 
-# LDS deep-K kernel dev/sweep driver (paradigm experiments: depth, tile, occ).
+# LDS deep-K kernel dev/sweep driver (paradigm experiments: depth, tile, occ + F16/BF16).
 test_lds: test_lds.cpp $(HEADERS)
+	$(HIPCC) $(HIPFLAGS) $< -o $@
+
+# Warp-specialization experiment (producer/consumer, LDS flag ring). DISPROVEN — kept
+# as a documented reference (loses to symmetric double-buffer; see HANDOFF Step 24).
+test_ws: test_ws.cpp $(HEADERS)
+	$(HIPCC) $(HIPFLAGS) $< -o $@
+
+# Single-dispatch profiling driver for the production LDS kernel (PMC/ATT/RCV capture).
+# Usage: ./profile_lds [warmup] [repeat]  (0 1 = one dispatch; 3 10 = timed benchmark).
+profile_lds: profile_lds.cpp $(HEADERS)
 	$(HIPCC) $(HIPFLAGS) $< -o $@
 
 # CPU reference (ground-truth validator, no HIP).
@@ -32,6 +42,7 @@ test_gpu: test_pipeline_v18
 	./test_pipeline_v18
 
 clean:
-	rm -f test_pipeline_v18 test_pipeline_v17 test_lds test_reference
+	rm -f test_pipeline_v18 test_pipeline_v17 test_lds test_ws profile_lds test_reference \
+	      *.bc *.hipi *.s *.o *-resolution.txt *.0.hipv4-* *.0.host-*
 
 .PHONY: test_cpu test_gpu clean

@@ -9,6 +9,7 @@
 - **生产 kernel = `mxfp6_gemm/test_pipeline_v18.cpp`**（v18 = v17 dispatcher + **LDS 深 K 范式**作为新 tile 候选 TLDS）。LDS kernel 在 `mxfp6_gemm/mxfp6_lds.hpp`。v17（`test_pipeline_v17.cpp`）保留作 LDS-free 基线。
 - **换范式成功（Step 23, 06-03）**：寄存器直读不再是天花板。**LDS 深 K 暂存**（256×256, KT192 双缓冲, 32×32×64, 深 K 窗口 1536cyc > load 880cyc）在大对齐方阵打赢 V17：**8192³ 1671(+3.1%)**、4096² +3.4%、8192×4096 +1.6%、4096×8192 +1.7%、2048×8192 +3.9%。dispatcher cost model 自动只在填满 CU 的大方阵选 LDS,小矩阵/V2 形状(5120/7680/9216)回退 V17。**12/12 OPT, 10/10 正确, 零回归**。
 - v17 部分(仍是非 LDS 形状的最优)：8192³ ~1620 N512[swz];非 2 幂 8192×5120 ≈ 1720 N640[V2]。
+- **最新(Step 24, 06-03)= Warp specialization 证伪**：5-wave 生产者-消费者机器全部跑通 (LDS flag ring + 跨-wave glds 可见性,6/6 正确,CDNA4 可行且新颖) 但**等强度输给对称双缓冲 −29%** (WS 1044 vs baseline 1473)。被 ① producer 占 SIMD 损 MFMA + ② HIP 统一寄存器分配锁死 consumer 8-acc(16-acc 不可达) + ③ spin/flag 开销 三重打死。HANDOFF 此前标的"唯一上台阶前沿"已穷尽。**1671(v18 LDS 深K) = 实用天花板。** 实验隔离在 `test_ws.cpp` (未碰生产)。
 - **上轮进展**：full-mode profile 定位到 occ1 下 load/MFMA 零 overlap → 用**编译期 2×展开双缓冲（occ1, NPW_V==0）**取代旧的 copy-based depth-1 预取，8192³ **1557→1628（+4.5%）**。correctness 8/8 err=0，dispatch 12/12 OPT，无 spill。已 push（force-push 到 `zhewan/ck/mxfp6-standalone`）+ 同步 NFS。
 - **最新进展（本轮 06-03）= 瓶颈定盘 + 与 CK 对标，无代码改动并入生产**：用户从 RCV 观察到 global_load 发射 stall。彻查结论（Step 22）：**load 发射 stall 不可独立解，是 occ1 latency 天花板的症状**；三法交错全证伪（sched_barrier −8~13%、sched_group_barrier+intrinsic MFMA **−88%**）。轻量 PMC 实测（非 ATT）定盘：**L2 命中 91.3%、HBM 仅 ~10% 带宽（非带宽瓶颈）、等待 1.9× 发射（latency-bound）、occ2 已证伪**；暴露延迟来自 9% L2 miss 尾（每条 880cyc 捅破 512cyc MFMA 窗口）。**与 CK MXFP6 对标：我们 ≈ 0.5×**（8192³ 1632=17.7% vs CK 3200=34.7%）—— 差距是**架构范式**（CK 用 async DMA+LDS 复用 A，我们每个 K 从 global 重读 A），不是调参能补的。
 - **⚠️ 已证伪、别重试**：① 教科书「对称 ping-pong」occ1 反而 −1.8%（Step 21）；② 6 种让编译器把 load-wait 下沉到 MFMA 之后的手段全失败（Step 21）；③ **任何 load 发射交错**（sched_barrier/sched_group_barrier，破坏 ping-pong 的 in-flight overlap，vmcnt 从 24/22 塌到 0/1）—— 官方 CK Cliff Notes Lesson 10 也确认 sched_group_barrier 只是 advisory（Step 22）。
@@ -112,6 +113,37 @@ occ1 合并 VGPR 池（arch+acc=512）在 N512 只用 388/512，闲 124 arch VGP
 
 **集成**:`test_pipeline_v18.cpp` 把 LDS 作为 cost model 新 tile(TLDS, eff=1.05, WG=(M/256)(N/256))。LDS 用 plain B + tiled scale + K pad,V17 用 preshuffled B + coalesced scale,A 共用→prep 分两路。设备代码抽 `mxfp6_lds.hpp` 共用(test_lds.cpp 是 LDS 实验驱动)。glds 布局探针 = `probe_glds.cpp`。见 memory [[mxfp6-lds-paradigm]] [[mxfp6-glds-layout]]。
 
+### Step 24 ❌ Warp specialization (生产者-消费者) 证伪：输给对称双缓冲 (06-03)
+
+推进 HANDOFF Next Step #2 (唯一未试前沿)。**机器全部跑通但性能输,这条路堵死。**
+
+**先验两个硬约束 (动手前实测)**：① **gfx950 无 split/named barrier** (`s_barrier_signal`/`s_barrier_wait` 汇编报错)→ 生产者-消费者握手只能 **LDS flag 轮询** (volatile 读 + __threadfence_block), 无 Hopper mbarrier。② **HIP 寄存器全 block 统一分配** → producer wave 即使 0 MFMA 也被强制预留 consumer 的 AGPR。
+
+**机器成功 (里程碑0/1 ✅,实验在 `mxfp6_gemm/test_ws.cpp`,`lds_gemm_ws` kernel)**：5-wave (1 producer + 4 consumer)，LDS ring buffer + per-slot `fill`/`drain` flag (单调计数避 ABA)。producer 单 wave 发 `global_load_lds` 填 ring → vmcnt(0) → fence → 写 fill; consumer spin `fill[s]>=c` → ds_read → 16/8 MFMA → atomicAdd drain。**正确性 6/6 err=0** —— 关键赌注 (producer 的 glds 数据在 vmcnt(0) 后对**其他 wave** 可见,无需 syncthreads) **成立**。这套 CDNA4 生产者-消费者机制可行且新颖。
+
+**性能证伪 (决定性等强度对照)**：同 128×256 8-acc KT128、同会话同 harness：**WS 1044 vs baseline `lds_gemm_db` 1473 = −29%** (WS 还多用一个 wave 仍输)。三个独立失败原因：
+1. **MFMA 吞吐损失**：producer 第5 wave 占一个 SIMD 不做 MFMA,且与 consumer0 **共享 SIMD** (5 waves on 4 SIMDs) → 有效 MFMA < 4 波;baseline 4 个满 MFMA 波。
+2. **寄存器税锁死 8-acc**：共享 SIMD 上 2 个 wave (uniform 分配) 各 ≤128 AGPR & ≤128 arch 才能并存 → consumer 最多 8 AGPR-acc,**16-acc 不可达** (256×256 混合 acc 尝试: 编译器把 12-AGPR 请求压回 8 → 错值 FAIL)。所以 WS 8-acc 天花板 1233 (KT192 d2),连 16-acc baseline(1600-1671) 都够不到。
+3. spin-wait 烧 issue 槽 + flag 往返/atomicAdd 开销。
+
+**"深 ring 藏 L2-miss 尾" 假设不成立**：depth 加深无效 (128×256 KT128 d3=d4=1050;KT64 d4=846≈d6=842),真瓶颈是 per-buffer sync 开销 (大 KT 才帮:KT64 846 < KT128 1050 < KT192 1233)。对称双缓冲已把延迟藏得够好。**注**:若未来 HW 有 per-wave 寄存器重分配 (Hopper setmaxnreg) WS 也许能到 16-acc;CDNA4 没有。**1671 (v18) 仍是天花板。** 见 memory [[mxfp6-warp-spec]]。
+
+### Step 25 ✅ Epilogue 输出类型 F16/BF16 (HANDOFF Next Step #3, 06-03)
+
+`store_acc_t<OutT>` (mxfp6_asm_utils.hpp): `if constexpr` 按 OutT 选路径。F32 → `float4` 直存 (gfx950 global_store 从 AccVGPR 直读,零 arch VGPR); F16/BF16 → packed 转换 (`__floats2half2_rn`/`__float22bfloat162_rn` 一条指令转 2 个) 直存 `__half2`/`__hip_bfloat162`。两个生产 kernel 加 `typename OutT=float` 模板参数 (`lds_gemm_db`, `mxfp6_gemm_pipeline`),默认 float → 现有 launch/dispatcher **零改动零回归** (v18 10/10 OPT 验证)。
+
+正确性 (vs F32 reference): F32 err=0, F16 err≈3-6e-2, BF16 err≈0.25-0.5 (都 PASS,半精度舍入)。
+
+**dispatcher 端到端已接 (同 Step)**: v18 全链路模板化 (`launch`/`lds_launch`/`prep`/`lds_prep`/`correct`/`bench` 都 `typename OutT=float`),choose_tile 路由与输出类型无关。**float 路径零回归** (10/10 correct, dispatch OPT 不变); **F16/BF16 端到端 8/8 correct**。验证在 test_pipeline_v18.cpp 末两节。
+
+**性能 (生产 K-padded 路径)**: F16/BF16 **不慢甚至略快** vs F32。v18 端到端 @8192³(LDS[swz]) F32 1675/F16 1709/BF16 1711(+2%,半带宽 store); 8192×4096 1710/1715/1700; 8192×5120 1747/1734/1708 — 全噪声内或略快。**⚠️ test_lds 的 −6%(F16 1551 vs F32 1630)是 K-tail(无 padding) dev 路径特有产物,不是生产路径** (K-tail 的 KT64 单缓冲尾 + VGPR floor 440→500 调度更差;生产 padded 主循环无此问题)。
+
+### Step 26 ❌ 裸计数 manual vmcnt 证伪 (06-03, 无代码并入生产)
+
+最后一个未试的微杠杆 (Next Step #4 残项): deep-K 双缓冲的 `wait_vmcnt(LPT_TOT)` 因 helper 只支持 0-4 是 no-op,overlap 实际靠编译器自插 vmcnt(0) drain。探针: 加 `wait_vmcnt_n<N>` (`s_waitcnt vmcnt(%c0)`, 任意计数到 63) 换成真·相对 vmcnt(20),想让 NEXT tile 的 load 在 current compute 期间留在飞。
+
+**结果: 无效。** 8192³ K-tail 1633→1627 (噪声内,6/6 仍正确)。asm 实锤机制: 即便加了显式 vmcnt(20),编译器**仍在每个 ds_read 前自插 vmcnt(0)** (kernel 内 **10× vmcnt(0) vs 我的 2× vmcnt(20)**) → 我的相对 wait 只是被后面的 vmcnt(0) 盖掉的冗余。要让 prefetch 真留在飞必须**压制编译器的 vmcnt(0)** = 全-asm ds_read,Step 21 已六法证伪 (race/无收益)。**确认: occ1 单 wave 的 overlap 已是编译器 vmcnt(0)-drain + 提前一 tile 预取的最优,无手动空间。** 已 revert,仅留 NOTE 注释。
+
 ---
 
 ## 🔑 核心技术要点
@@ -177,10 +209,11 @@ mxfp6_gemm/
 
 **当前生产 = v18（V17 tiles + LDS 深 K）。8192³ ~1671（~18% 峰值），大对齐方阵 +1.6~3.9% vs V17；非 2 幂形状仍靠 V2（8192×5120 ~1720）。换范式(Step 23)成功——但已近此访存模式 + occ1 的实用天花板,且已赢参考实现 CK。**
 
-1. ~~小矩阵 tile 自适应 / split-K~~ ✅(Step 12-13)。~~换范式 LDS 复用~~ ✅(Step 23, 但不是追 CK——CK mxfp6 实测**不如** V17,旧"追 CK 2×"前提作废)。
-2. **⭐ Warp specialization(生产者-消费者)= 唯一可能上台阶的真前沿(未试)**。根本约束:16 acc = 256 AccVGPR = 强制 occ1 = 单 wave 暴露延迟,这是 18% 天花板的本质,调参绕不开。思路:4 waves/WG 里 1 个专做 DMA 生产者(只发 glds 喂 LDS)+ 3 个消费者(只从 LDS 做 MFMA),解耦 load 发射与 MFMA。Hopper/CUTLASS 范式,这个 kernel 没试过。**潜在显著收益,但复杂(每 wave 不同代码+barrier 协调)、CDNA4 无 TMA、有真实失败风险(可能 +0 也可能 +10%)。要赌上台阶就投这个。**
-3. **Epilogue 输出类型**(功能性,未做):F16/BF16(当前 F32 直写),见 [[mxfp6_output_epilogue]]。不影响峰值。
-4. **V2 路径也用双缓冲 / V2+LDS**(次要):当前 V2(N640/576)走 V17 copy-prefetch;能否也吃 LDS 深 K 未试。
+1. ~~小矩阵 tile 自适应 / split-K~~ ✅(Step 12-13)。~~换范式 LDS 复用~~ ✅(Step 23)。~~Warp specialization~~ ❌(Step 24, 证伪——见下)。
+2. ~~**Warp specialization(生产者-消费者)**~~ ❌ **已证伪(Step 24)**:机器全部跑通 (LDS flag ring + 跨-wave glds 可见性,6/6 正确) 但 **等强度输给对称双缓冲 −29%** (WS 1044 vs baseline 1473 @128×256 8-acc)。三因:producer 占 SIMD 损 MFMA 吞吐 + HIP 统一寄存器分配把 consumer 锁死 8-acc(16-acc 不可达) + spin/flag 开销。CDNA4 无 per-wave 寄存器重分配 (Hopper setmaxnreg),此路堵死。**这是 HANDOFF 此前标的"唯一上台阶前沿",现已穷尽 → 1671 是实用天花板。**
+3. ~~**Epilogue 输出类型**~~ ✅ **完成(Step 25, 含 dispatcher 端到端)**:`store_acc_t<OutT>` + 两个生产 kernel + 整个 v18 dispatcher 全链路 `typename OutT=float` 模板化,支持 F32/F16/BF16。float 零回归(10/10 correct);F16/BF16 端到端 8/8 correct。**生产 K-padded 路径里 F16/BF16 不慢甚至略快**(@8192³ F32 1675/F16 1709/BF16 1711);旧"慢 6%"只是 test_lds K-tail dev 路径产物,已订正。见 [[mxfp6-output-epilogue]]。
+4. **V2 路径也用双缓冲 / V2+LDS**(次要,低优):V2 双缓冲已证伪(Step 20 −1.8%);仅剩 V2+LDS-深K+混合acc 未试,但概率低(占满 256AGPR+深K operands 再加 acc_v 极可能 spill)、价值窄(只非2幂N,且 V2 本就是那些形状最优 1739)。
+5. **(若还想榨性能) 剩下的全是窄路**:LDS 命中 91→99% (swizzle 已近天花板)、persistent kernel + lifetime-aware rasterization (主要救非2幂的 grid-tail,pow2 已无 tail→窄)、或接受 18% 即实用上限。**无明显大杠杆剩余。** 真正上台阶需要的深复用解耦在 gfx950 结构性堵死(warp-spec 寄存器税 Step24 / 编译器 vmcnt(0) drain Step21+26),非调参可解。
 
 **已证伪、不要重试**：
 - **深 K 这条线已穷尽(Step 23)**:对称 LDS 最优 = 256×256 KT192 双缓冲(1671);KT256 single(丢重叠)1224、KT256 DB 只能 8-acc(962-984)、KT128 DB(1465)、**A-LDS/B-direct hybrid 828**(编译器 vmcnt(0) drain 废掉混合)、**K-tail 比 padding 慢 2%**(1635 vs 1671)全更差。

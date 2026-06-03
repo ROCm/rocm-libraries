@@ -109,11 +109,11 @@ __device__ __forceinline__ void issue_tile(char* smem, uint32_t lds_base, const 
 // vmcnt(LPT) after issuing the prefetch drains cur's LPT loads (vmcnt decrements
 // in issue order) while nxt's LPT stay in flight -> real load/compute overlap.
 template <int M_TILE, int N_TILE, int K_TILE, int WAVES_M, int WAVES_N, int MIN_OCC = 1,
-          int SWZ = 0, bool DB = true>
+          int SWZ = 0, bool DB = true, typename OutT = float>
 __global__ void __launch_bounds__(256, MIN_OCC)
     lds_gemm_db(const void* __restrict__ A, const void* __restrict__ B,
                 const uint8_t* __restrict__ sA, const uint8_t* __restrict__ sB,
-                float* __restrict__ D, int N, int k_iters, int A_rs, int B_rs,
+                OutT* __restrict__ D, int N, int k_iters, int A_rs, int B_rs,
                 const uint8_t* __restrict__ sA_plain = nullptr,
                 const uint8_t* __restrict__ sB_plain = nullptr) {
     // sA_plain/sB_plain = lane-ordered (un-tiled) scales [tile][k64][64], used ONLY by
@@ -215,6 +215,14 @@ __global__ void __launch_bounds__(256, MIN_OCC)
         }
     };
 
+    // NOTE: wait_vmcnt(LPT_TOT) below is a no-op for LPT_TOT>4 (the helper only emits
+    // 0-4). The real load/compute overlap comes from the COMPILER's own vmcnt(0) drain
+    // before each ds_read + prefetching one tile ahead (drain is cheap because deep K
+    // amortizes it). PROBED (Step 26): swapping in a true relative vmcnt(LPT_TOT) via an
+    // arbitrary-count s_waitcnt changed nothing (8192^3 1633->1627, noise) — the compiler
+    // STILL inserts its own vmcnt(0) before every ds_read (asm: 10x vmcnt(0) vs 2x
+    // vmcnt(20)), so the explicit relative wait is a redundant extra. Suppressing the
+    // compiler drain needs full-asm ds_read, disproven 6 ways in Step 21.
     int sa0[SUBS][NDA], sa1[SUBS][NDA], sb0[SUBS][NDB], sb1[SUBS][NDB];
     if constexpr (DB) {
         // 2x-unrolled ping-pong: buf0 for even tiles, buf1 for odd. Compile-time
@@ -284,7 +292,7 @@ __global__ void __launch_bounds__(256, MIN_OCC)
 #pragma unroll
         for (int ni = 0; ni < N_PW; ni++) {
             int n = wg_n * N_TILE + (wn * N_PW + ni) * 32;
-            store_acc_f32(D, N, acc[mi][ni], m, n);
+            store_acc_t<OutT>(D, N, acc[mi][ni].vec, m, n);
         }
     }
 }

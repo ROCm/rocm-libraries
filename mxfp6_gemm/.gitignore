@@ -5,14 +5,22 @@
 *.out
 *.hipfb
 *.build.log
+*.bc
+*.hipi
+*.out.resolution.txt
+*.0.hipv4-*
+*.0.host-*
 test_pipeline_v18
 test_pipeline_v17
 test_lds
+test_ws
 test_reference
 probe_glds
 exp_sgb
+exp_interleave
 tp_builtin
 profile_v17
+profile_lds
 profile_v17.0.host-*
 profile_v17.*.hipv4-*
 # profiler / tooling output
