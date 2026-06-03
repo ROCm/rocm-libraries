@@ -216,7 +216,7 @@ struct _rocsparselt_matmul_descr
         matrix_B     = rhs.matrix_B->clone();
         matrix_C     = rhs.matrix_C->clone();
         matrix_D     = rhs.matrix_D->clone();
-        gate_residual_desc = rhs.gate_residual_desc->clone();
+        gate_residual_desc = rhs.gate_residual_desc ? rhs.gate_residual_desc->clone() : nullptr;
         is_reference = false;
         is_init      = (uintptr_t)handle;
     };
