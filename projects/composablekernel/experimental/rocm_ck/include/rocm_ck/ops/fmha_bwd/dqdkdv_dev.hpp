@@ -169,7 +169,10 @@ struct FmhaBwdDQDKDVTypes
 
     // --- Pipeline problem ---
     static constexpr bool kIsGroupMode = (K.mode == FmhaMode::GROUP);
-    static constexpr bool kUseTrLoad   = false; // non-trload for gfx9
+    // TrLoad is a gfx950-only feature (TargetSet::trload_eligible()) and is not
+    // wired yet: getTileConfig is always called with tr_load = false and no
+    // gfx950 TrLoad tiles exist. Selection stays non-TrLoad for every target.
+    static constexpr bool kUseTrLoad = false;
 
     using PipelineProblem = ck_tile::BlockFmhaBwdPipelineProblem<QDataType,
                                                                  KDataType,
