@@ -126,8 +126,12 @@ class InstructionEmitter:
                     scaleBTile = self.vgprTilesSB[tile_maps['SB'][scaleGroupB]]
                     scaleAVgpr = next(iter(scaleATile))
                     scaleBVgpr = next(iter(scaleBTile))
-                    sAsel = (a % 2) + 2 * subIterK
-                    sBsel = (b % 2) + 2 * subIterK
+                    mShapeA = self.tileInfoMap['SA'].lrSubtileShape[0]
+                    mShapeB = self.tileInfoMap['SB'].lrSubtileShape[0]
+                    kShapeA = self.tileInfoMap['SA'].lrSubtileShape[1]
+                    kShapeB = self.tileInfoMap['SB'].lrSubtileShape[1]
+                    sAsel = (a % mShapeA) + mShapeA * (subIterK % kShapeA)
+                    sBsel = (b % mShapeB) + mShapeB * (subIterK % kShapeB)
                 else:
                     scaleAVgpr = scaleBVgpr = -1
                     sAsel = sBsel = 0
@@ -161,12 +165,12 @@ class InstructionEmitter:
             ti = self.tileInfoMap[tensor]
             lrGran = self.config.lrSA if tensor == 'SA' else self.config.lrSB
             vgprTilesScale = self.vgprTilesSA if tensor == 'SA' else self.vgprTilesSB
-            groupStride = lrGran.mn * ti.subtileSize
-            subtileK = placement.tiles.subIterK_start // self.subtileShapeK
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, lrGran.mn):
                 scaleGroupIdx = tileId // lrGran.mn
                 groupKey = scaleGroupIdx * lrGran.mn
-                dsOffset = groupStride * (scaleGroupIdx * (self.config.numSubIterK // self.subtileShapeK) + subtileK)
+                kGroupIdx = placement.tiles.subIterK_start // ti.lrSubtileShape[1]
+                numKGroups = ti.lrLocalSubtileGrid[1]
+                dsOffset = int(ti.lrSubtileSize) * (scaleGroupIdx * numKGroups + kGroupIdx)
                 vdst = next(iter(vgprTilesScale[tile_map[groupKey]]))
                 module.add(DSLoadB32(
                     dst=vgpr(vdst),
