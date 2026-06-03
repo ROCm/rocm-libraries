@@ -205,13 +205,12 @@ VARIANTS = [
         "hdim_q": 128,
         "hdim_v": 128,
         "mode": "batch",
-        "has_mask": True,
+        "mask_type": "top_left_causal",
         "block_size": 256,
     },
-    # _cmask_br and _swa share the compiled spec with _cmask. They are packed
-    # under distinct names so the loader can select mask geometry by variant
-    # name; the actual top-left/bottom-right/sliding-window selection happens
-    # at runtime via the WINDOW_SIZE_LEFT/RIGHT and MASK_TYPE scalar slots.
+    # _cmask_br and _swa share the compiled spec shape with _cmask but are
+    # disambiguated by mask_type. The window pair is set at runtime per
+    # family (causal: -1/0; sliding-window: 64/64).
     {
         "name": "fmha_bwd_dqdkdv_fp16_d128_batch_cmask_br",
         "family": "dqdkdv",
@@ -219,7 +218,7 @@ VARIANTS = [
         "hdim_q": 128,
         "hdim_v": 128,
         "mode": "batch",
-        "has_mask": True,
+        "mask_type": "bottom_right_causal",
         "block_size": 256,
     },
     {
@@ -229,7 +228,7 @@ VARIANTS = [
         "hdim_q": 128,
         "hdim_v": 128,
         "mode": "batch",
-        "has_mask": True,
+        "mask_type": "generic",
         "block_size": 256,
     },
     {
@@ -267,7 +266,7 @@ VARIANTS = [
         "hdim_q": 128,
         "hdim_v": 128,
         "mode": "group",
-        "has_mask": True,
+        "mask_type": "top_left_causal",
         "block_size": 256,
     },
     {
@@ -400,7 +399,7 @@ VARIANTS = [
         "hdim_q": 128,
         "hdim_v": 128,
         "mode": "batch",
-        "has_mask": True,
+        "mask_type": "top_left_causal",
         "is_deterministic": True,
         "block_size": 256,
     },
