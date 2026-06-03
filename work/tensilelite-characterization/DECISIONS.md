@@ -115,3 +115,21 @@ specific test-suite paths, so it will not be swept in accidentally.
 **Alternatives rejected:** (a) commit it — out of scope, violates the
 per-module-commit intent; (b) `git checkout` it — risks losing authored work I
 can't attribute. Surfaced to the user instead.
+
+## D9 — `Configuration.py`: operators/ProjectConfig covered; AST evaluator deferred
+**Decision:** Cover the `Parameter` operator surface, `ReadWriteTransformDict`,
+and `ProjectConfig` (sections/dotted-get/defaults/constraints); **document** (a)
+the reflected-operator `isinstance(lhs, Parameter)` branches as DEAD and (b) the
+`ExpressionEvaluator` AST walker + `CallableParameter`/`createBinaryOp` as a
+deferred expression-machinery slice. Accept Configuration <95% combined.
+**Why (a):** Python only dispatches `__radd__`/`__rlt__`/... when the LEFT
+operand is not a `Parameter`, so inside those methods `lhs` is never a
+`Parameter` — that branch is unreachable via real operators (the reflected
+*comparison* dunders aren't auto-called at all; Python uses the opposite
+operator). They are pinned by explicit calls where meaningful, else dead.
+**Why (b):** `ExpressionEvaluator.evaluate` is a ~70-line `ast` node walker;
+exhaustive coverage needs an AST-node matrix (BinOp/BoolOp/Compare/Name/Num/…)
+— a focused slice, disproportionate to this sweep's per-module budget.
+**Alternatives rejected:** force the dead reflected branches via `__radd__`
+internals — impossible without a Parameter left operand; build the full AST
+matrix now — deferred as Configuration-slice-2. Net: a partial module.
