@@ -1,0 +1,4 @@
+# All binary tensor data must go through DVC, never committed to git directly.
+# DVC also generates per-directory .gitignore files for each tracked bundle,
+# but this rule acts as a catch-all safety net.
+*.bin
