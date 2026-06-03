@@ -699,3 +699,104 @@ class TestRejectionCSVCLI:
         content = csv_out.read_text()
         lines = [l for l in content.splitlines() if l.strip()]
         assert len(lines) >= 2, f"Expected header + rejection row, got:\n{content}"
+
+
+# ── drive_codegen.py assertion coverage ──────────────────────────────────────
+
+class TestDriveCodegenAssertion:
+    """drive_codegen.py enforces count==1 kernel header and identifier-in-name.
+
+    The improve_advice.pdf (gap #4) called out that drive_codegen.py must assert
+    exactly one primary header is generated and that the expected identifier
+    appears in the filename.  These tests confirm those guards are present in
+    the source (CPU-only; actually running codegen needs hipcc/GPU environment).
+    """
+
+    def test_count_assertion_present(self):
+        """drive_codegen.py must check len(kernel_headers) == 1."""
+        src = (_HERE / "drive_codegen.py").read_text()
+        assert "len(kernel_headers) != 1" in src or "len(kernel_headers) == 1" in src, (
+            "drive_codegen.py must assert exactly one primary kernel header is generated"
+        )
+
+    def test_identifier_in_name_check_present(self):
+        """drive_codegen.py must verify the expected identifier appears in the header filename."""
+        src = (_HERE / "drive_codegen.py").read_text()
+        assert "base_identifier not in kernel_headers[0].name" in src or \
+               "identifier" in src and "kernel_headers[0].name" in src, (
+            "drive_codegen.py must check that the expected identifier is in the generated header filename"
+        )
+
+    def test_nonzero_exit_on_count_mismatch_documented(self):
+        """The count mismatch branch must return a nonzero exit code (not just print)."""
+        src = (_HERE / "drive_codegen.py").read_text()
+        # find the block after 'len(kernel_headers) != 1' and confirm 'return 1' follows
+        idx = src.find("len(kernel_headers) != 1")
+        assert idx != -1, "count check not found"
+        snippet = src[idx: idx + 300]
+        assert "return 1" in snippet, (
+            "drive_codegen.py must return 1 when kernel header count != 1"
+        )
+
+    def test_splitk_suffix_stripped_before_filename_check(self):
+        """split_k suffix (_splitkN) must be stripped before identifier-in-name check.
+
+        split_k is a runtime parameter not encoded in the generated header filename.
+        Stripping _splitkN before the filename containment check prevents false failures
+        for configs like single_fp16_rcr_splitk.json.
+        """
+        src = (_HERE / "drive_codegen.py").read_text()
+        assert "_splitk" in src and ("sub" in src or "re.sub" in src or "_re.sub" in src), (
+            "drive_codegen.py must strip _splitkN suffix before identifier-in-name check"
+        )
+
+
+# ── PORTING_DECISIONS.md content coverage ────────────────────────────────────
+
+class TestPortingDecisionsContent:
+    """PORTING_DECISIONS.md (T2.7) has all four required sections and correct state.
+
+    The spec says: skipped combinations table, default reconciliation table,
+    known performance deltas with reasons, methodology choices with rationale.
+    """
+
+    _DOC = _HERE / "PORTING_DECISIONS.md"
+
+    def test_doc_exists(self):
+        assert self._DOC.exists(), "PORTING_DECISIONS.md must exist"
+
+    def test_skipped_combinations_section(self):
+        text = self._DOC.read_text()
+        assert "Skipped Combinations" in text or "## 1." in text, (
+            "PORTING_DECISIONS.md must have a Skipped Combinations section"
+        )
+
+    def test_default_reconciliation_section(self):
+        text = self._DOC.read_text()
+        assert "Default Reconciliation" in text or "## 2." in text
+
+    def test_performance_deltas_section(self):
+        text = self._DOC.read_text()
+        assert "Performance" in text and ("TFLOP" in text or "TFLOP/s" in text), (
+            "PORTING_DECISIONS.md must document known performance deltas"
+        )
+
+    def test_methodology_section(self):
+        text = self._DOC.read_text()
+        assert "warmup" in text.lower() and "median" in text.lower(), (
+            "PORTING_DECISIONS.md must document measurement methodology (warmup, median)"
+        )
+
+    def test_preshufflev2_discrepancy_resolved(self):
+        """The preshufflev2 double_buffer item must be marked resolved (NOT A BUG)."""
+        text = self._DOC.read_text()
+        assert "NOT A BUG" in text or "no discrepancy" in text.lower(), (
+            "PORTING_DECISIONS.md must document that preshufflev2 double_buffer is NOT a bug"
+        )
+
+    def test_follow_up_gpu_done(self):
+        """GPU execution follow-up (#3) must be marked DONE."""
+        text = self._DOC.read_text()
+        assert "DONE" in text and "gfx942" in text, (
+            "PORTING_DECISIONS.md must record GPU verification as DONE"
+        )

@@ -1,14 +1,15 @@
 # Porting Decisions — Tile Engine → Dispatcher GEMM
 
-*Branch: `muozturk/dispatcher-te-parity` · Updated: 2026-06-02 (iteration 8)*
+*Branch: `muozturk/dispatcher-te-parity` · Updated: 2026-06-02 (iteration 12)*
 
 This document captures every non-trivial decision made during the Phase 1 + Phase 2 port.
 It is the reference for "why does this config not exist on the dispatcher side?" or
 "why does this perf number differ from tile_engine?"
 
-> **Review status:** This document has been through 8 iterations of automated testing and
-> manual review. Every section has been validated against the running code and GPU results.
-> A maintainer can use it to understand the port state without additional context.
+> **Review status:** Phase 1 (identifier + single-kernel numerical/perf on `rcr` fp16/bf16/fp8/int8/split_k)
+> is GPU-verified on gfx942. Phase 2 is partial: `sweep_runner.py`/`compare_report.py` run, but the T2.2
+> C-API `.so` has **not** been built or exercised end-to-end (see §8 Follow-up #2). Treat the §6 status
+> table as the source of truth per-config; do not read "implemented" as "verified."
 
 ---
 
@@ -125,7 +126,7 @@ are used in `check_parity.py` Stage 3 for the formal 2% gate.
 | **Incremental resume via done-key set** | Full sweeps take O(hours); crash-safety requires not redoing finished rows |
 | **Per-combination try/except in sweep_runner.py** | Some (kernel, problem) pairs will fail; the runner must log and continue, not abort the whole sweep |
 | **Markdown + HTML output for compare_report.py** | Markdown is human-readable in PRs and CI logs; HTML for richer rendering; same content produced by one flag |
-| **T2.2 C API implemented** | `dispatcher_capi.h` (interface), `dispatcher_capi.cpp` (KernelEntry registry + all 7 extern "C" functions), `dispatcher_binding.py` (Python ctypes `DispatcherLib`). Build: `hipcc -fPIC -shared -o libdispatcher_gemm.so dispatcher_capi.cpp -I<ck_include> -include register_all_kernels.hpp`. |
+| **T2.2 C API drafted (not yet built)** | `dispatcher_capi.h` (interface), `dispatcher_capi.cpp` (KernelEntry registry + all 7 extern "C" functions), `dispatcher_binding.py` (Python ctypes `DispatcherLib`). Intended build: `hipcc -fPIC -shared -o libdispatcher_gemm.so dispatcher_capi.cpp -I<ck_include> -include register_all_kernels.hpp`. **The `.so` has not been compiled and the round-trip has not been run** — `register_all_kernels.hpp` is not emitted by any committed script. See Follow-up #2; T2.2 done-criteria remain unmet. |
 
 ---
 
@@ -134,7 +135,7 @@ are used in `check_parity.py` Stage 3 for the formal 2% gate.
 | # | Issue | Priority |
 |---|---|---|
 | 1 | ~~`double_buffer=True` for `preshufflev2` in translator vs `False` in codegen~~ | **NOT A BUG** — codegen (`unified_gemm_codegen.py`) sets `DoubleSmemBuffer=True` for `preshufflev2` too; translator matches. Earlier claim cited a stale line number. |
-| 2 | ~~T2.2: multi-kernel Python binding (C API + `.so` + ctypes wrapper)~~ | **DONE** 2026-06-02 — `dispatcher_capi.h`, `dispatcher_capi.cpp`, `dispatcher_binding.py` added |
+| 2 | T2.2: multi-kernel Python binding (C API + `.so` + ctypes wrapper) | **CODE WRITTEN, NOT YET PROVEN** — `dispatcher_capi.h/.cpp` + `dispatcher_binding.py` exist, but the `.so` has not been compiled and no end-to-end run (Python loads `.so` → lists kernels → runs a real GEMM → verifies the numpy C array) has been demonstrated. The build depends on a codegen-emitted `register_all_kernels.hpp` that is not produced by any committed script. T2.2 done-criteria are **unmet** until that round-trip runs on a GPU node. |
 | 3 | ~~GPU execution on gfx942 node to get T1.5–T1.7 PASSED status~~ | **DONE** 2026-06-02 — all sizes PASSED on gfx942 (MI300X) |
 | 4 | Generalize harness strides beyond `rcr` | Low — all current configs use `rcr`; needs parametric stride builder |
 | 5 | Add `split_k > 255` range check to `cpp_identifier_oracle.cpp` | Low — `TranslationError` prevents the bad value from reaching the oracle |
