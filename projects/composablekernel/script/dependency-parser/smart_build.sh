@@ -96,7 +96,7 @@ export _SMART_BUILD_NESTED=1
 if ! bash "${SCRIPT_DIR}/smart_build_ci.sh"; then
     # Full build required (exit code 1 from smart_build_ci.sh)
     if [ "$DRY_RUN" = "true" ]; then
-        echo "DRY RUN - full build mode: no selection to validate (everything is built)"
+        echo "DRY RUN - full build mode (actual build skipped); as-if selection + smoke computed by smart_build_ci"
         echo "[OK] Dry run complete (full build mode)"
         exit 0
     fi
@@ -122,36 +122,14 @@ if [ "$BUILD_TARGETS" = "none" ]; then
     exit 0
 fi
 
-# Step 3: Build only affected targets
+# Step 3: Build only affected targets.
+# smart_build_ci.sh already ran the as-if selection + the selection-validity smoke
+# (smoke_result.json/.xml) on this build, so we just build here.
 if [ "$DRY_RUN" = "true" ]; then
     NUM_TARGETS=$(echo "${BUILD_TARGETS}" | wc -w)
-    echo "DRY RUN - validating ${NUM_TARGETS} selected target(s), no compilation"
-    # Validate the selection against ninja's real target namespace.
-    # Caveat: `ninja -t targets all` is the oracle because CK's GLOB
-    # CONFIGURE_DEPENDS regenerates build.ninja on every call, so `ninja -n`
-    # exits 0 for any name and can't test target existence.
-    ninja -t targets all > ninja_targets.txt 2>/dev/null || { echo "WARNING: ninja -t targets all failed; skipping target-namespace validation"; exit 1; }
-    python3 "${SCRIPT_DIR}/main.py" validate \
-        tests_to_run.json \
-        --ninja-targets ninja_targets.txt \
-        --output smoke_result.json \
-        --junit smoke_result.xml
-    echo "[OK] Dry run complete - selection validated against ninja target namespace"
+    echo "[OK] Dry run complete - ${NUM_TARGETS} target(s) selected; smoke verdict in smoke_result.json (no compilation)"
     exit 0
 fi
-
-# Observability (advisory): record a structured verdict on whether the selection
-# maps to real ninja targets. This emits smoke_result.json / smoke_result.xml for
-# CI to archive; the build below proceeds regardless of the verdict.
-echo ""
-echo "Recording selection validation (observability, non-fatal)..."
-ninja -t targets all > ninja_targets.txt 2>/dev/null || true
-python3 "${SCRIPT_DIR}/main.py" validate \
-    tests_to_run.json \
-    --ninja-targets ninja_targets.txt \
-    --output smoke_result.json \
-    --junit smoke_result.xml \
-    || echo "WARNING: selection validation flagged issues (see smoke_result.json) - continuing with build"
 
 echo "[OK] Selective build - building only affected targets"
 echo "Building targets: ${BUILD_TARGETS}"

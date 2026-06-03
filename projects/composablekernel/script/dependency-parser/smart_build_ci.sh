@@ -46,60 +46,54 @@ echo "BASE_BRANCH: ${BASE_BRANCH}"
 echo "PARALLEL: ${PARALLEL}"
 echo "-----------------------------------------"
 
-# Step 1: Run CI safety check
+# Step 1: CI safety check decides whether a *selective* build is safe. We capture
+# the decision but do NOT exit yet: the selection pipeline below runs on EVERY
+# build (an advisory "as-if" computation), so the selective path + JUnit are
+# exercised and published even when the actual build will be full. The exit code
+# at the end still drives the real build (1 = full, 0 = selective/none).
 echo "Step 1: Running CI safety check..."
 cd "${BUILD_DIR}"
 
+FULL_REQUIRED=0
 if ! bash "${SCRIPT_DIR}/ci_safety_check.sh"; then
-    echo "CI safety check failed - full build required"
+    FULL_REQUIRED=1
+    echo "CI safety check: full build required"
+else
+    echo "[OK] CI safety check: selective build eligible"
+fi
+
+# Inputs needed for both the as-if selection and the build itself.
+if [ ! -f "compile_commands.json" ] || [ ! -f "build.ninja" ]; then
+    echo "Error: compile_commands.json / build.ninja not found in ${BUILD_DIR}"
+    echo "Make sure cmake configured with -G Ninja -DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
     echo "full" > build_targets.txt
     echo "SMART_BUILD_MODE=full" > build_mode.env
     exit 1
 fi
 
-echo "[OK] CI safety check passed - selective build enabled"
-
-# Step 2: Generate dependency map
+# Step 2: Generate dependency map (always, for the as-if selection)
 echo ""
 echo "Step 2: Generating dependency map..."
-if [ ! -f "compile_commands.json" ]; then
-    echo "Error: compile_commands.json not found in ${BUILD_DIR}"
-    echo "Make sure cmake configure has been run with -DCMAKE_EXPORT_COMPILE_COMMANDS=ON"
-    echo "SMART_BUILD_MODE=full" > build_mode.env
-    exit 1
-fi
-
-if [ ! -f "build.ninja" ]; then
-    echo "Error: build.ninja not found in ${BUILD_DIR}"
-    echo "Make sure cmake configure has been run with -G Ninja"
-    echo "SMART_BUILD_MODE=full" > build_mode.env
-    exit 1
-fi
-
 python3 "${SCRIPT_DIR}/main.py" cmake-parse \
     compile_commands.json \
     build.ninja \
     --workspace-root "${WORKSPACE_ROOT}" \
     --parallel ${PARALLEL} \
-    --output enhanced_dependency_mapping.json
+    --output enhanced_dependency_mapping.json \
+    || echo "WARNING: cmake-parse failed - as-if selection unavailable, will fall back to full"
 
 if [ ! -f "enhanced_dependency_mapping.json" ]; then
-    echo "Error: Failed to generate enhanced_dependency_mapping.json"
+    echo "Depmap unavailable - full build"
+    echo "full" > build_targets.txt
     echo "SMART_BUILD_MODE=full" > build_mode.env
     exit 1
 fi
-
 echo "[OK] Dependency map generated"
 
-# Step 2b: Reachability guardrail (observability, advisory).
-# Flags ctest tests that no file maps to - the filter can never select them, i.e.
-# guaranteed false negatives (usually a dependency-extraction gap). Emits
-# reachability_result.json for CI to archive; advisory only, so the build continues.
+# Step 2b: Reachability guardrail (advisory).
 echo ""
 echo "Step 2b: Reachability guardrail (non-fatal)..."
 ctest -N > ctest_list.txt 2>/dev/null || true
-# Guard: if ctest -N produced no test lines the guardrail would trivially pass
-# (empty intersection), giving a false green. Skip it and warn instead.
 if ! grep -q "Test #" ctest_list.txt 2>/dev/null; then
     echo "WARNING: ctest -N returned no tests (not yet configured or wrong CWD?) - skipping reachability guardrail"
 else
@@ -112,7 +106,7 @@ else
         || echo "WARNING: reachability guardrail found unreachable compiled tests (see reachability_result.json) - continuing"
 fi
 
-# Step 3: Select affected tests
+# Step 3: Select affected tests (the as-if selection)
 echo ""
 echo "Step 3: Selecting affected tests..."
 python3 "${SCRIPT_DIR}/main.py" select \
@@ -120,58 +114,55 @@ python3 "${SCRIPT_DIR}/main.py" select \
     origin/${BASE_BRANCH} \
     HEAD \
     --ctest-only \
-    --output tests_to_run.json
+    --output tests_to_run.json \
+    || echo "WARNING: select failed - will fall back to full"
 
 if [ ! -f "tests_to_run.json" ]; then
-    echo "Error: Failed to generate tests_to_run.json"
+    echo "Selection unavailable - full build"
+    echo "full" > build_targets.txt
+    echo "SMART_BUILD_MODE=full" > build_mode.env
+    exit 1
+fi
+num_tests=$(jq -r '.tests_to_run | length' tests_to_run.json 2>/dev/null || echo "0")
+jq -r '.executables[]' tests_to_run.json 2>/dev/null | tr '\n' ' ' > selected_targets.txt
+echo "[OK] As-if selection: ${num_tests} tests"
+
+# Step 3b: Selection-validity smoke (advisory) - exercises the validate gate and
+# publishes JUnit on every build, full or selective.
+echo ""
+echo "Step 3b: Selection-validity smoke (non-fatal)..."
+ninja -t targets all > ninja_targets.txt 2>/dev/null || true
+python3 "${SCRIPT_DIR}/main.py" validate \
+    tests_to_run.json \
+    --ninja-targets ninja_targets.txt \
+    --ctest ctest_list.txt \
+    --output smoke_result.json \
+    --junit smoke_result.xml \
+    || echo "WARNING: selection validation flagged issues (see smoke_result.json) - continuing"
+
+# Step 4: Decide the actual build mode (the as-if artifacts above are produced
+# regardless; only the build target set depends on this).
+echo ""
+if [ "${FULL_REQUIRED}" -eq 1 ]; then
+    echo "Result: FULL build (safety check) - as-if selection above is advisory only"
+    echo "full" > build_targets.txt
     echo "SMART_BUILD_MODE=full" > build_mode.env
     exit 1
 fi
 
-# Step 4: Check if any tests were selected
-num_tests=$(jq -r '.tests_to_run | length' tests_to_run.json 2>/dev/null || echo "0")
-echo "[OK] Selected ${num_tests} tests"
-
 if [ "${num_tests}" -eq 0 ]; then
-    echo ""
-    echo "========================================="
-    echo "Result: No tests affected by changes"
-    echo "========================================="
+    echo "Result: No tests affected by changes - nothing to build"
     echo "none" > build_targets.txt
     echo "SMART_BUILD_MODE=none" > build_mode.env
     exit 0
 fi
 
-# Step 5: Extract build targets (executables)
-echo ""
-echo "Step 5: Extracting build targets..."
-jq -r '.executables[]' tests_to_run.json | tr '\n' ' ' > build_targets.txt
-
+cp selected_targets.txt build_targets.txt
 num_targets=$(jq -r '.executables | length' tests_to_run.json)
-echo "[OK] Generated ${num_targets} build targets"
-
 echo "SMART_BUILD_MODE=selective" > build_mode.env
-
-# Display summary
-echo ""
-echo "========================================="
-echo "Smart Build Summary"
-echo "========================================="
-echo "Tests to run: ${num_tests}"
-echo "Build targets: ${num_targets}"
-echo "Output files:"
-echo "  - tests_to_run.json (test selection)"
-echo "  - build_targets.txt (ninja targets)"
-echo "  - build_mode.env (SMART_BUILD_MODE=selective)"
-echo "  - smart_build_ci.log (full run log)"
-echo "========================================="
-
-# Show first few targets for verification
-echo ""
+echo "Result: SELECTIVE build - ${num_targets} targets"
 echo "Sample build targets (first 5):"
-# Use tr+awk rather than nested head to avoid SIGPIPE under set -e
 tr ' ' '\n' < build_targets.txt | awk 'NR<=5'
-
 echo ""
 echo "[OK] Smart build preparation complete"
 exit 0

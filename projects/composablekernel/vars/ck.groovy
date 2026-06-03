@@ -794,14 +794,17 @@ def cmake_build(Map conf=[:]){
                             export NINJA_FTIME_TRACE=false
                             bash ../script/dependency-parser/smart_build.sh
                         """
-                        // Observability: persist the selection decision, its
-                        // validation verdict, and the build-phase log.
-                        archiveArtifacts artifacts: "tests_to_run.json,build_targets.txt,build_mode.env,smoke_result.json,reachability_result.json,smart_build_ci.log,smart_build.log", allowEmptyArchive: true
+                        // Observability: persist the as-if selection decision, its
+                        // validation verdict, and the build-phase log. smart_build_ci.sh
+                        // computes the selection + smoke (smoke_result.xml) on EVERY
+                        // build, so publish JUnit here (in the build stage) - that way
+                        // it lands regardless of whether the test stage later fails.
+                        archiveArtifacts artifacts: "tests_to_run.json,build_targets.txt,build_mode.env,smoke_result.json,smoke_result.xml,reachability_result.json,smart_build_ci.log,smart_build.log", allowEmptyArchive: true
+                        junit testResults: "smoke_result.xml", allowEmptyResults: true
                     }
                     stage("Smart Test (${arch_name})") {
                         sh "bash ../script/dependency-parser/smart_test.sh"
                         archiveArtifacts artifacts: "smart_test.log", allowEmptyArchive: true
-                        junit testResults: "smoke_result.xml", allowEmptyResults: true
                     }
                 }
                 else{ //run all tests
