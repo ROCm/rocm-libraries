@@ -155,12 +155,11 @@ struct ResultComparisonTest : public ::testing::Test
 {
 };
 
-// Note: Half (_Float16) is excluded because it lacks RTTI support (typeinfo),
-// which GTest's TYPED_TEST_SUITE requires for GetTypeName<>().
 using SupportedTypes = ::testing::Types<float,
                                         double,
                                         std::complex<float>,
                                         std::complex<double>,
+                                        Half,
                                         BFloat16,
                                         Float8,
                                         BFloat8,
