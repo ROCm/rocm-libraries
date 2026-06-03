@@ -408,15 +408,19 @@ filesystem import → modules must be **frozen** in). `FROZEN_MANIFEST` (mpy-cro
 supported by the embed build (mkrules.mk).
 
 Integration build steps (foundation → provider):
-1. embed toolchain — VERIFIED on this machine only (mpy-cross + bare embed example build+run), but
-   NOT a branch artifact: those builds live under the gitignored `spike/micropython/` clone, so
-   nothing is committed for this step. (Caveat: the committed G1a/G1b scripts also depend on the
-   gitignored MicroPython unix build + the generated `ckbundle/` — reproducing from a fresh checkout
-   needs a setup script, not yet written. TODO: commit `spike/setup.sh` (clone+build MicroPython,
-   build bundle) so the spike is reproducible.)
-2. `spike/mp2/`: mpconfigport.h at `EXTRA_FEATURES` + enable re/json/float/longint/property/etc.;
-   add `extmod/modre.c`+`modjson.c`; `manifest.py` freezing the shims + the transformed conv
-   codegen closure (~34 ck modules + 6 shims); `__file__`-free arch_specs (freeze the JSON or embed).
+1. ✅ embed toolchain — committed + reproducible via `spike/setup.sh` (clones+builds MicroPython
+   unix port + mpy-cross, builds+runs the bare embed example, regenerates ckbundle). The MicroPython
+   clone/builds + ckbundle stay git-ignored; setup.sh is the committed recipe.
+2. IN PROGRESS — `spike/mp2/` embed build (committed: `mpconfigport.h`, `manifest.py`, `gen.mk`,
+   `build.sh`, `main.c`, `frozen/frozen_test.py`). DONE: config (MINIMUM + sys/sys.modules/sys.path/
+   property/double-float + MPZ longint with `MPZ_DIG_SIZE=16`/`MICROPY_PY_SYS_PLATFORM` to match
+   mpy-cross & satisfy modsys); the freeze pipeline builds + the embed binary runs Python with the
+   frozen module's **bytecode embedded** and `.frozen` already on `sys.path`. REMAINING (narrow):
+   the manifest registers the module name **with a `.py` suffix** (`mp_frozen_names` = `"frozen_test.py"`)
+   so `import frozen_test` doesn't match (the import searches the extensionless name) — manifest
+   naming fix needed. THEN: raise config to add `re`/`json` (wire `extmod/modre.c`+`modjson.c` into
+   the qstr/moduledefs scan), freeze the 6 shims + the conv codegen closure (~34 ck modules),
+   `__file__`-free arch_specs (freeze the JSON or embed).
 3. C glue (`py/runtime.h`): import the frozen compile entry, call it with the conv payload (build
    `mp_obj_t` dict), get back the **LLVM IR text** (+ grid/block/arg metadata); error translation.
 4. C++ comgr wrapper: IR text → HSACO via `amd_comgr` (cross-platform; same 3-stage chain as the

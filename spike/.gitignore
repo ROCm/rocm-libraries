@@ -5,3 +5,6 @@ mp1/dl/
 mp1/shims/udataclasses/
 mp1/ckbundle/
 mp1/*.ll
+mp2/micropython_embed/
+mp2/build-embed/
+mp2/embed_ckdsl
