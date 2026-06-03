@@ -116,7 +116,7 @@ def compile_smoke() -> dict:
         logging only; gfx950 is the only target the DSL supports today.
     """
     from ck_dsl.helpers.compile import compile_kernel
-    from ck_dsl.instances.elementwise import ElementwiseSpec, build_elementwise
+    from ck_dsl.instances.common.elementwise import ElementwiseSpec, build_elementwise
 
     # The simplest cleanly-compiling instance: FP16 copy, single warp.
     # Keeping block_size small (one wave) and vec small (one 32-bit
