@@ -1,12 +1,15 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+# NOTE: the public entry-point headers (Tensile.hpp, TensorDescriptor.hpp,
+# Contractions.hpp, DataTypes.hpp, Debug.hpp, EmbeddedLibrary.hpp,
+# MasterSolutionLibrary.hpp, PlaceholderLibrary.hpp, SolutionLibrary.hpp,
+# Serialization.hpp, Utils.hpp, hip/Hip{Hardware,SolutionAdapter,Utils}.hpp,
+# msgpack/MessagePack.hpp) are NOT listed here -- they live in the PUBLIC
+# `tensilelite_public_headers` FILE_SET defined in ../CMakeLists.txt. Everything
+# below is PRIVATE implementation detail: compiled-in / tracked, never installed.
 target_sources(tensilelite-host
     PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/hip/HipHardware.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/hip/HipSolutionAdapter.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/hip/HipUtils.hpp"
-
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Serialization/Base.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Serialization/Containers.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Serialization/ContractionPredicates.hpp"
@@ -40,19 +43,15 @@ target_sources(tensilelite-host
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/ContractionProblem_fwd.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/ContractionSolution.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/ContractionSolution_fwd.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Contractions.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/DataTypes.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/DataTypes_BFloat16.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/DataTypes_Float8_BFloat8.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/DataTypes_Half.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/DataTypes_Int8.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/DataTypes_Int8x4.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/DataTypes_XFloat32.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Debug.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Distance.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/DistinctType.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/EmbeddedData.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/EmbeddedLibrary.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/ExactLogicLibrary.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/FreeSizeLibrary.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/GranularitySelectionLibrary.hpp"
@@ -63,29 +62,22 @@ target_sources(tensilelite-host
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MLPClassificationLibrary.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Macros.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MapLibrary.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MasterSolutionLibrary.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MatchingLibrary.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/PerformanceMetricTypes.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/PlaceholderLibrary.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Predicates.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/ProblemKey.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Properties.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/PropertyMatching.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/ScalarValueTypes.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Serialization.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/SingleSolutionLibrary.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Singleton.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/SolutionLibrary.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/SolutionLibrary_fwd.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/SolutionMapLibrary.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Tensile.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Tensile_fwd.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/TensorDescriptor.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/TensorDescriptor_Detail.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/TensorDescriptor_fwd.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/TensorOps.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/TensorOps_fwd.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Utils.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/geom.hpp"
 )
 
@@ -99,6 +91,5 @@ else()
     target_sources(tensilelite-host
         PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/msgpack/Loading.hpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/msgpack/MessagePack.hpp"
     )
 endif()

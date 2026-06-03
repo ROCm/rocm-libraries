@@ -38,11 +38,15 @@
 // expands to nothing and visibility falls back to the platform default; on
 // those platforms the relevant ABI hazard does not exist in the same form.
 
-#if defined(__GNUC__) || defined(__clang__)
-#define TENSILE_API __attribute__((visibility("hidden")))
-#else
-#define TENSILE_API
-#endif
+// PHASE 2: tensilelite-host is now a single shared library (libtensilelitehost.so)
+// that every consumer links, rather than an OBJECT library statically composed
+// into multiple consumer DSOs. With a single definition there is nothing to
+// interpose, so the PR #6917 "hide everything" scheme is replaced by the standard
+// generate_export_header model: TENSILE_API maps to TENSILELITEHOST_EXPORT (default
+// visibility on the marked public API under the target's hidden global preset; the
+// correct dllexport/dllimport on Windows; empty for static builds).
+#include <tensilelitehost/export.h>
+#define TENSILE_API TENSILELITEHOST_EXPORT
 
 // TENSILE_HIDDEN_BEGIN / TENSILE_HIDDEN_END wrap a region of declarations
 // (typically a `namespace TensileLite { ... }` block in a public header) and
@@ -61,10 +65,10 @@
 //
 // On compilers without GCC visibility pragmas, both macros expand to nothing.
 
-#if defined(__GNUC__) || defined(__clang__)
-#define TENSILE_HIDDEN_BEGIN _Pragma("GCC visibility push(hidden)")
-#define TENSILE_HIDDEN_END   _Pragma("GCC visibility pop")
-#else
+// Obsolete under the single-shared-library model (see above): the public API is
+// now exported per-symbol via TENSILE_API/TENSILELITEHOST_EXPORT and everything
+// else is hidden by the target's CXX_VISIBILITY_PRESET. These remain defined as
+// no-ops so the existing wrapped regions keep compiling; they no longer force
+// hidden visibility. (Going-forward cleanup removes the call sites.)
 #define TENSILE_HIDDEN_BEGIN
 #define TENSILE_HIDDEN_END
-#endif

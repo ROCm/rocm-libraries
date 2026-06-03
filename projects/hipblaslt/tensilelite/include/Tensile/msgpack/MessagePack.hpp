@@ -94,7 +94,7 @@ namespace TensileLite
             static const bool value = true;
         };
 
-        void objectToMap(const msgpack::object&                            object,
+        TENSILELITEHOST_EXPORT void objectToMap(const msgpack::object&                            object,
                          std::unordered_map<std::string, msgpack::object>& map);
 
         struct MessagePackInput

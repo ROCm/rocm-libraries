@@ -61,9 +61,9 @@ namespace TensileLite
             virtual std::string archName() const override;
         };
 
-        std::shared_ptr<Hardware> GetCurrentDevice();
-        std::shared_ptr<Hardware> GetDevice(int deviceId);
-        std::shared_ptr<Hardware> GetDevice(hipDeviceProp_t const& prop, int deviceId);
+        TENSILELITEHOST_EXPORT std::shared_ptr<Hardware> GetCurrentDevice();
+        TENSILELITEHOST_EXPORT std::shared_ptr<Hardware> GetDevice(int deviceId);
+        TENSILELITEHOST_EXPORT std::shared_ptr<Hardware> GetDevice(hipDeviceProp_t const& prop, int deviceId);
     } // namespace hip
 } // namespace TensileLite
 

@@ -444,7 +444,7 @@ namespace TensileLite
         bool m_isOutput = false;
     };
 
-    std::ostream& operator<<(std::ostream& stream, const TensorDescriptor& t);
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, const TensorDescriptor& t);
 
     template <typename T>
     void WriteTensor1D(std::ostream&           stream,

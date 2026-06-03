@@ -108,6 +108,13 @@ namespace TensileLite
         return nullptr;
     }
 
+    // Explicit instantiations of the public LoadLibrary* entry points. clang does
+    // not propagate the template declarations' TENSILELITEHOST_EXPORT (default)
+    // visibility to explicit instantiation definitions, so force default visibility
+    // here to keep them in the shared library's exported ABI.
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC visibility push(default)
+#endif
     template std::shared_ptr<SolutionLibrary<ContractionProblemGemm, ContractionSolution>>
         LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(std::string const& filename);
 
@@ -118,5 +125,8 @@ namespace TensileLite
     template std::shared_ptr<SolutionLibrary<ContractionProblemGemm, ContractionSolution>>
         LoadLibraryData<ContractionProblemGemm, ContractionSolution>(
             std::vector<uint8_t> const& data);
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC visibility pop
+#endif
 #endif
 } // namespace TensileLite
