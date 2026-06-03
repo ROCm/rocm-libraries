@@ -86,13 +86,13 @@ package `__init__`.
 - [x] `Activation.py` 16.8% → 34.1% line (pure layer; asm codegen out of scope, D13)
 - [x] `TensileCreateLibrary/ParseArguments.py` 12.3% → 100% line
 
-### Batch E — heavy / lower-yield (partial + documented where it resists)
-- [ ] `BenchmarkProblems.py` (366, 59.8%)
-- [ ] `ParallelExecution.py` (124, 10.5%)
-- [ ] `Tensile.py` (367, 43.1%)
-- [ ] `TensileCreateLibrary/Run.py` (529, 35.5%)
-- [ ] `LibraryLogic.py` (944, 5.1%)
-- [ ] `TensileLibLogicToYaml.py` (199, 16.6%)
+### Batch E — heavy / lower-yield  ✅ DONE (full -m unit = 2435 passed)
+- [x] `ParallelExecution.py` 10.5% → 96.8% line
+- [x] `TensileLibLogicToYaml.py` 16.6% → 98% line (pinned skipMI formGroups bug, D14)
+- [x] `BenchmarkProblems.py` — cache-helper layer pinned (build/run codegen out of scope)
+- [x] `Tensile.py` — helper layer pinned (Tensile()/executeStepsInConfig out of scope)
+- [x] `TensileCreateLibrary/Run.py` — helper layer pinned (asm codegen out of scope)
+- [x] `LibraryLogic.py` — pure helpers pinned (LogicAnalyzer/generateLogic out of scope)
 
 ### Batch F — entry-point CLI scripts (stretch; pure helpers only, document the
 ###            argv/fs/subprocess-bound `main()` as resistance)
@@ -124,3 +124,8 @@ package `__init__`.
 - Batch D complete — 5 modules, full -m unit 2192 → 2337 passed (no regression). Fresh baseline: coverage/master-baseline-2337.txt.
   - SolutionSelectionLibrary 7→100 · ParseArguments 12→100 · merge 15→97.8 ·
     SolutionLibrary 55→97.1 · Activation 17→34 (pure layer; asm out of scope, D13).
+- Batch E complete — 6 modules, full -m unit 2337 → 2435 passed (no regression). Fresh baseline: coverage/master-baseline-2435.txt.
+  - ParallelExecution 10→97 · TensileLibLogicToYaml 17→98 (D14 skipMI bug) ·
+    BenchmarkProblems (cache layer) · Tensile (helper layer) ·
+    TensileCreateLibrary/Run (helper layer) · LibraryLogic (pure helpers).
+    Heavy codegen/analysis bodies documented as resistance per scope.
