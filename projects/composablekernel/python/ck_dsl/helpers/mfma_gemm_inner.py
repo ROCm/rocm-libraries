@@ -51,6 +51,7 @@ __all__ = [
     "decode_mfma_lanes",
     "load_a_row_major_contiguous",
     "load_b_col_strided_scalars",
+    "load_smem_frag_contiguous_f16",
     "mfma_atom_for_dtype",
     "mfma_k_loop",
     "mfma_k_loop_dynamic_K",
@@ -316,6 +317,52 @@ def load_b_col_strided_scalars(
         )
         out = b.vec_insert(out, s, j)
     return out
+
+
+def load_smem_frag_contiguous_f16(
+    b: IRBuilder,
+    smem: Value,
+    row: Value,
+    col_base: Value,
+    frag_len: int,
+    *,
+    needs_mask: bool,
+    valid_k: int = 0,
+) -> Value:
+    """Read a contiguous f16 MFMA operand fragment from an LDS tile.
+
+    The fragment is ``smem[row, col_base : col_base + frag_len]``. When the
+    caller proves the columns are in-bounds (``needs_mask=False``), this
+    issues a *single* wide vector ``ds_read`` for the fragment. Otherwise it
+    falls back to ``frag_len`` scalar reads with a per-element
+    ``col < valid_k`` mask that zero-fills out-of-range lanes.
+
+    ``needs_mask`` is the caller's responsibility because whether the fragment
+    crosses the K tail depends on ``col_base`` (a runtime value) relative to
+    K, not on ``frag_len`` alone. A typical static test for a K-tiled loop is
+    ``needs_mask = (k_chunks * tile_k != K)``.
+
+    The fast path requires a plain row-major (non-swizzled, ``k_pad=0``) LDS
+    tile so a contiguous column run maps to a single ``ds_read_b{16,32,64,
+    128}``; ``frag_len`` must be one of ``{2, 4, 8}`` for the wide read.
+    Prefer this over per-element scalar gathers when staging conv/GEMM
+    operands through C-shuffle LDS: it cuts LDS load-instruction count and
+    average LDS latency, and removes the dead masking VALU when there is no
+    K tail. See ``dsl_docs/architecture`` rocprof notes for the measured win.
+    """
+
+    if not needs_mask and frag_len in (2, 4, 8):
+        return b.smem_load_vN_f16(smem, row, col_base, n=frag_len)
+
+    zero_h = b.trunc_f32_to_f16(b.const_f32(0.0))
+    elems = []
+    c_valid_k = b.const_i32(valid_k)
+    for i in range(frag_len):
+        col = b.add(col_base, b.const_i32(i))
+        raw = b.vec_extract(b.smem_load_vN_f16(smem, row, col, n=1), 0)
+        ok = b.cmp_lt(col, c_valid_k)
+        elems.append(b.select(ok, raw, zero_h))
+    return b.vec_pack(elems, elems[0].type)
 
 
 def mfma_k_loop(

@@ -52,7 +52,7 @@ mode. We aim to beat that on the same shape.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace as dc_replace
-from typing import List, Optional, Sequence, Tuple
+from typing import Callable, List, Optional, Sequence, Tuple
 
 from ...core.ir import (
     F16,
@@ -137,6 +137,47 @@ class ConvProblem:
 
     def short(self) -> str:
         return f"N{self.N}H{self.Hi}W{self.Wi}C{self.C}_K{self.K}R{self.R}S{self.S}"
+
+
+@dataclass(frozen=True)
+class ConvAccumulatorEpilogue:
+    """Static fp32 accumulator transform applied before the conv store.
+
+    This is intentionally narrower than ``helpers.fuse.FusedEpilogue``:
+    it runs directly on MFMA accumulator fragments inside the hand-authored
+    conv instance. The default is identity, preserving the historical conv IR.
+    """
+
+    bias: float = 0.0
+    scale: float = 1.0
+    relu: bool = False
+    clamp_min: Optional[float] = None
+    clamp_max: Optional[float] = None
+
+    def is_identity(self) -> bool:
+        return (
+            self.bias == 0.0
+            and self.scale == 1.0
+            and not self.relu
+            and self.clamp_min is None
+            and self.clamp_max is None
+        )
+
+    def tag(self) -> str:
+        if self.is_identity():
+            return ""
+        pieces: List[str] = []
+        if self.bias != 0.0:
+            pieces.append(f"bias{self.bias:g}")
+        if self.scale != 1.0:
+            pieces.append(f"scale{self.scale:g}")
+        if self.relu:
+            pieces.append("relu")
+        if self.clamp_min is not None or self.clamp_max is not None:
+            lo = "-inf" if self.clamp_min is None else f"{self.clamp_min:g}"
+            hi = "inf" if self.clamp_max is None else f"{self.clamp_max:g}"
+            pieces.append(f"clamp{lo}to{hi}")
+        return "epi_" + "_".join(pieces)
 
 
 @dataclass(frozen=True)
@@ -246,6 +287,10 @@ class ImplicitGemmConvSpec:
     # default) the descriptor reduces to the flat-conv form and the
     # kernel emits the same code as before.
     groups: int = 1
+    # Static accumulator epilogue used by the gfx950 deep-fusion prototype.
+    # It composes simple fp32 VALU transforms directly on MFMA accumulator
+    # fragments before the existing direct/cshuffle store path.
+    acc_epilogue: ConvAccumulatorEpilogue = ConvAccumulatorEpilogue()
 
     @property
     def block_size(self) -> int:
@@ -278,6 +323,7 @@ class ImplicitGemmConvSpec:
             f"w{self.warp_m}x{self.warp_n}",
             f"a{self.warp_tile_m}x{self.warp_tile_n}x{self.warp_tile_k}",
             f"{self.pipeline}_{self.epilogue}",
+            self.acc_epilogue.tag(),
             flags={"async": self.async_dma},
         )
 
@@ -305,6 +351,15 @@ class ImplicitGemmConvSpec:
             raise ValueError(
                 "async_dma requires lds_k_pad to be 0/None because "
                 "raw_ptr_buffer_load_lds writes a packed lane-contiguous tile"
+            )
+        if (
+            self.acc_epilogue.clamp_min is not None
+            and self.acc_epilogue.clamp_max is not None
+            and self.acc_epilogue.clamp_min > self.acc_epilogue.clamp_max
+        ):
+            raise ValueError(
+                "acc_epilogue clamp_min must be <= clamp_max "
+                f"(got {self.acc_epilogue.clamp_min} > {self.acc_epilogue.clamp_max})"
             )
 
     def effective_lds_layout(self) -> LdsLayout:
@@ -451,7 +506,7 @@ def _resolve_conv_op(spec: ImplicitGemmConvSpec, arch: str):
 # ---------------------------------------------------------------------
 
 
-def make_a_descriptor(p: ConvProblem) -> TensorDescriptor:
+def make_a_descriptor(p: ConvProblem, decompose_m: bool = True) -> TensorDescriptor:
     """Build the (m, k) -> NHWC linear-offset descriptor for the input.
 
     DAG:
@@ -463,6 +518,15 @@ def make_a_descriptor(p: ConvProblem) -> TensorDescriptor:
       + pad('r' lo=0 hi=R):              boundary check
       + pad('s' lo=0 hi=S):              boundary check
 
+    When ``decompose_m`` is ``False`` the leading ``unmerge('m' -> n, ho, wo)``
+    is dropped and the user-facing upper coords become ``(n, ho, wo, k)``
+    directly. This is a strict win for callers that already hold ``(ho, wo)``
+    cheaply (e.g. computed via shift/mask from the tile row): the default
+    chain would re-decompose ``m = ho*Wo + wo`` back into ``(n, ho, wo)`` via
+    two magic divisions (~10 VALU per A coord) — a pure round-trip. Feeding
+    ``(n, ho, wo)`` straight in produces a bit-identical offset while skipping
+    both the caller-side flatten and the descriptor-side magic unmerge.
+
     The two `embed` transforms encode the convolution affine map
     `hi = ho*sH - pH + r*dH` and `wi = wo*sW - pW + s*dW`, with the
     convolution boundary check baked into the descriptor's validity
@@ -473,8 +537,12 @@ def make_a_descriptor(p: ConvProblem) -> TensorDescriptor:
     valid-looking offsets that *cross* into adjacent KRSC rows and
     blend wrong weights into the accumulator.
     """
-    transforms = [
-        unmerge_magic(upper="m", into=["n", "ho", "wo"], dims=[p.N, p.Ho, p.Wo]),
+    transforms = []
+    if decompose_m:
+        transforms.append(
+            unmerge_magic(upper="m", into=["n", "ho", "wo"], dims=[p.N, p.Ho, p.Wo])
+        )
+    transforms += [
         embed(
             upper=["ho", "r"],
             into="hi",
@@ -576,6 +644,51 @@ def _emit_smem_load(b: IRBuilder, smem: Value, row: Value, col: Value, n: int) -
     return b.smem_load_vN_f16(smem, row, col, n=n)
 
 
+def _apply_accumulator_epilogue(
+    b: IRBuilder,
+    epilogue: ConvAccumulatorEpilogue,
+    accs: Sequence[Value],
+) -> List[Value]:
+    """Apply a static fp32 epilogue to each accumulator fragment.
+
+    The transform is scalar per accumulator lane, then packed back into the
+    original vector width so the existing direct/cshuffle epilogues can consume
+    the result unchanged.
+    """
+
+    if epilogue.is_identity():
+        return list(accs)
+
+    out: List[Value] = []
+    c_zero = b.const_f32(0.0)
+    c_bias = b.const_f32(epilogue.bias) if epilogue.bias != 0.0 else None
+    c_scale = b.const_f32(epilogue.scale) if epilogue.scale != 1.0 else None
+    c_clamp_min = (
+        b.const_f32(epilogue.clamp_min) if epilogue.clamp_min is not None else None
+    )
+    c_clamp_max = (
+        b.const_f32(epilogue.clamp_max) if epilogue.clamp_max is not None else None
+    )
+
+    for acc in accs:
+        elems: List[Value] = []
+        for i in range(acc.type.count):
+            v = b.vec_extract(acc, i)
+            if c_bias is not None:
+                v = b.fadd(v, c_bias)
+            if c_scale is not None:
+                v = b.fmul(v, c_scale)
+            if epilogue.relu:
+                v = b.fmax(v, c_zero)
+            if c_clamp_min is not None:
+                v = b.fmax(v, c_clamp_min)
+            if c_clamp_max is not None:
+                v = b.fmin(v, c_clamp_max)
+            elems.append(v)
+        out.append(b.vec_pack(elems, elems[0].type))
+    return out
+
+
 def _emit_frag_smem_load(
     b: IRBuilder,
     src: Value,
@@ -615,7 +728,42 @@ def _choose_load_vec(spec: ImplicitGemmConvSpec) -> int:
 
 
 def build_implicit_gemm_conv(
-    spec: ImplicitGemmConvSpec, arch: str = "gfx950"
+    spec: ImplicitGemmConvSpec,
+    arch: str = "gfx950",
+    extra_params: Optional[Callable[[IRBuilder], object]] = None,
+    m_index_fn: Optional[Callable[[IRBuilder, Value, WarpGrid], Value]] = None,
+    a_mhw_index_fn: Optional[
+        Callable[[IRBuilder, Value, WarpGrid], Tuple[Value, Value, Value]]
+    ] = None,
+    input_cache_setup: Optional[
+        Callable[[IRBuilder, ImplicitGemmConvSpec, WarpGrid, Value], object]
+    ] = None,
+    a_load_override: Optional[
+        Callable[
+            [IRBuilder, ImplicitGemmConvSpec, Value, Value, WarpGrid, object], None
+        ]
+    ] = None,
+    a_operand_override: Optional[
+        Callable[
+            [
+                IRBuilder,
+                ImplicitGemmConvSpec,
+                Value,
+                Value,
+                Value,
+                int,
+                WarpGrid,
+                object,
+            ],
+            Value,
+        ]
+    ] = None,
+    epilogue_override: Optional[
+        Callable[
+            [IRBuilder, ImplicitGemmConvSpec, Sequence[Value], WarpGrid, Value, object],
+            None,
+        ]
+    ] = None,
 ) -> KernelDef:
     """Build the IR for one implicit-GEMM conv instance.
 
@@ -649,6 +797,7 @@ def build_implicit_gemm_conv(
     A = b.param("A", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
     Bp = b.param("B", PtrType(F16, "global"), noalias=True, readonly=True, align=16)
     D = b.param("D", PtrType(F16, "global"), noalias=True, writeonly=True, align=16)
+    extra_context = extra_params(b) if extra_params is not None else None
     A_bytes = b.param("A_bytes", I32)
     B_bytes = b.param("B_bytes", I32)
     D_bytes = b.param("D_bytes", I32)
@@ -751,7 +900,7 @@ def build_implicit_gemm_conv(
     # write into while the MFMA phase reads from the first. Force
     # double-buffering whenever the pipeline opts into async DMA,
     # regardless of the chosen `compv*` flag.
-    double_buffer = spec.pipeline == "compv4" or spec.async_dma
+    double_buffer = spec.pipeline == "compv4" or spec.async_dma or spec.unroll_k
     if double_buffer:
         A_smem2 = b.smem_alloc(
             F16, lds_layout.storage_shape(block_m), name_hint="A_smem2"
@@ -783,7 +932,7 @@ def build_implicit_gemm_conv(
     # The two descriptors used for global loads. The A descriptor is
     # the conv-coord-transform DAG; B is a simple naive (KRSC) +
     # unmerge for K_gemm.
-    A_desc = make_a_descriptor(p)
+    A_desc = make_a_descriptor(p, decompose_m=(a_mhw_index_fn is None))
     B_desc = make_b_descriptor(p)
 
     # CK Tile-style buffer views over A / B / D. ``make_buffer_resource``
@@ -800,14 +949,28 @@ def build_implicit_gemm_conv(
     a_rsrc = a_buf_rsrc.rsrc
     b_rsrc = b_buf_rsrc.rsrc
     d_rsrc = d_buf_rsrc.rsrc
+    input_cache_context = (
+        input_cache_setup(b, spec, grid, a_rsrc)
+        if input_cache_setup is not None
+        else None
+    )
 
     # Descriptor callbacks shared by both sync and async paths.
     # `(row, col)` are in the (tile_local M, tile_local K halves)
     # coordinate system. The descriptor returns
     # `(element_offset, valid_predicate)`.
     def a_descriptor(b_: IRBuilder, row: Value, col: Value):
-        m_val = b_.add(block_m_off_v, row)
         k_val = b_.add(k_off_capture[0], col)
+        if a_mhw_index_fn is not None:
+            # Decomposed A descriptor: feed (n, ho, wo) straight in, skipping
+            # the m-flatten -> magic-unmerge round-trip (see make_a_descriptor).
+            n_v, ho_v, wo_v = a_mhw_index_fn(b_, row, grid)
+            return A_desc.offset(b_, n=n_v, ho=ho_v, wo=wo_v, k=k_val)
+        m_val = (
+            m_index_fn(b_, row, grid)
+            if m_index_fn is not None
+            else b_.add(block_m_off_v, row)
+        )
         return A_desc.offset(b_, m=m_val, k=k_val)
 
     def b_descriptor(b_: IRBuilder, row: Value, col: Value):
@@ -924,13 +1087,16 @@ def build_implicit_gemm_conv(
         # returns the global element offset + validity predicate, so
         # the conv-coord-transform DAG drives the address arithmetic
         # while the loader owns the thread distribution.
-        a_sync_loader.load(
-            b,
-            tid=tid,
-            smem_dst=A_dst,
-            descriptor=a_descriptor,
-            rsrc=a_rsrc,
-        )
+        if a_load_override is not None:
+            a_load_override(b, spec, k_off, A_dst, grid, input_cache_context)
+        else:
+            a_sync_loader.load(
+                b,
+                tid=tid,
+                smem_dst=A_dst,
+                descriptor=a_descriptor,
+                rsrc=a_rsrc,
+            )
         b_sync_loader.load(
             b,
             tid=tid,
@@ -1033,7 +1199,23 @@ def build_implicit_gemm_conv(
                 a_row = b.add(
                     warp_m_off, b.add(b.const_i32(mi * spec.warp_tile_m), m_in_atom)
                 )
-                a_rows.append(_emit_smem_load(b, A_src, a_row, col_base, a_per_lane))
+                if a_operand_override is not None:
+                    a_rows.append(
+                        a_operand_override(
+                            b,
+                            spec,
+                            a_row,
+                            k_off_capture[0],
+                            col_base,
+                            a_per_lane,
+                            grid,
+                            input_cache_context,
+                        )
+                    )
+                else:
+                    a_rows.append(
+                        _emit_smem_load(b, A_src, a_row, col_base, a_per_lane)
+                    )
 
             b_cols = []
             for ni in range(mfmas_n):
@@ -1092,21 +1274,38 @@ def build_implicit_gemm_conv(
     #    but staying well under the 160 KiB LDS budget and the
     #    per-kernel ISA size limits.
     if spec.unroll_k:
-        # Clean Python-level K-loop unrolling
+        # Double-buffered Python-unrolled K-loop software pipeline.
+        #
+        # Stage tile it+1 into the alternate LDS buffer while the MFMA for
+        # tile it reads the current buffer. The buffers are disjoint, so the
+        # next tile's global->LDS writes overlap the current tile's ds_read +
+        # MFMA work instead of being serialized behind a barrier (the bug in
+        # the old single-buffer form, which also omitted the trailing barrier
+        # and thus raced the next load against the current MFMA's LDS reads).
+        #
+        # One barrier per iteration does double duty: it publishes the tile
+        # just prefetched into `nxt` before that tile's MFMA next iteration,
+        # and it orders the current tile's ds_reads ahead of the it+2 prefetch
+        # that reuses the same buffer two iterations later.
         K_iters = (p.K_gemm + block_k - 1) // block_k
         current_accs = [v for _, v in accs]
+        bufs = [(A_smem, B_smem), (A_smem2, B_smem2)]
+
+        # Prologue: stage tile 0 into buffer 0 and publish it.
+        emit_load_phase(b.const_i32(0), bufs[0][0], bufs[0][1])
+        b.sync()
 
         for it in range(K_iters):
-            k_offset = b.const_i32(it * block_k)
-
-            # Load phase: global load → LDS write
-            emit_load_phase(k_offset, A_smem, B_smem)
-            b.sync()  # Barrier after LDS writes (required)
-
-            # MFMA phase: LDS read → MFMA execute
-            # Remove the sync() call to allow ds_read → MFMA overlap
-            current_accs = emit_mfma_phase(A_smem, B_smem, current_accs)
-            # NO sync() here - let next iteration's global loads overlap with tail MFMAs
+            cur = bufs[it % 2]
+            if it + 1 < K_iters:
+                nxt = bufs[(it + 1) % 2]
+                emit_load_phase(b.const_i32((it + 1) * block_k), nxt[0], nxt[1])
+            # The prefetch above clobbered k_off_capture with tile it+1's
+            # offset. Restore tile it's offset so an `a_operand_override`
+            # (if any) addresses the tile actually consumed by this MFMA.
+            k_off_capture[0] = b.const_i32(it * block_k)
+            current_accs = emit_mfma_phase(cur[0], cur[1], current_accs)
+            b.sync()
 
         final_accs = current_accs
     elif not spec.async_dma:
@@ -1148,11 +1347,14 @@ def build_implicit_gemm_conv(
         )
 
     # ---- epilogue ----
+    final_accs = _apply_accumulator_epilogue(b, spec.acc_epilogue, final_accs)
     # Both ``DirectEpilogue`` and ``CShuffleEpilogue`` consume the bound
     # :class:`WarpGrid`, which carries the per-warp / per-block / per-lane
     # SSA values plus the tile origins. The conv-specific bit is the
     # D-descriptor address callback.
-    if spec.epilogue == "cshuffle":
+    if epilogue_override is not None:
+        epilogue_override(b, spec, final_accs, grid, d_rsrc, extra_context)
+    elif spec.epilogue == "cshuffle":
         _emit_cshuffle_epilogue(b, spec, final_accs, grid, d_rsrc)
     elif op.family == "wmma":
         # WMMA (RDNA) direct epilogue still uses the explicit per-warp/lane

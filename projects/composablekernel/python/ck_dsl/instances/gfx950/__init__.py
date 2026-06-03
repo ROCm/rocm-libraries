@@ -10,3 +10,12 @@ kernels belong in ``instances/common/``.
 
 See ``dsl_docs/architecture/multi_arch_data_layout.md``.
 """
+
+from .deep_fused_conv_pool import (  # noqa: F401
+    FusedConvPoolProblem,
+    Gfx950DeepFusedConvPoolSpec,
+    build_deep_fused_conv_pool,
+    deep_fused_conv_pool_grid,
+    deep_fused_conv_pool_signature,
+    is_valid_spec as is_valid_deep_fused_conv_pool_spec,
+)
