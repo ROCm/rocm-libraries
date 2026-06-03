@@ -239,7 +239,7 @@ using BQLayout = ck_tile::tensor_layout::gemm::ColumnMajor;
 
             HIP_CHECK_ERROR(hipMemcpyWithStream(kargs_ptr,
                                                 kargs.data(),
-                                                Kernel::GetWorkSpaceSize(gemm_descs),
+                                                kargs.size() * sizeof(ck_tile::QuantGemmTransKernelArg),
                                                 hipMemcpyHostToDevice,
                                                 stream.stream_id_));
 

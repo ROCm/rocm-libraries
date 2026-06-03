@@ -5,7 +5,7 @@ set(GROUPED_GEMM_TENSORQUANT_DATATYPE "fp8;bf8" CACHE STRING "List of datatypes 
 set(GROUPED_GEMM_TENSORQUANT_LAYOUT "rcr" CACHE STRING "List of layout for Grouped TensorQuant GEMM (semicolon-separated)")
 set(GROUPED_GEMM_TENSORQUANT_CONFIG_FILE "" CACHE STRING "Custom config file name (without path, must be in configs/ folder)")
 option(ENABLE_CCACHE_GROUPED_GEMM_TENSORQUANT "Enable ccache for Grouped TensorQuant GEMM ops compilation" OFF)
-set(GROUPED_GEMM_TENSORQUANT_MAX_INSTANCES "" CACHE STRING "Max kernel instances per (dtype, layout) combo (empy = no cap)")
+set(GROUPED_GEMM_TENSORQUANT_MAX_INSTANCES "" CACHE STRING "Max kernel instances per (dtype, layout) combo (empty = no cap)")
 
 # Store the directory path for use in functions
 set(GROUPED_GEMM_TENSORQUANT_SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR})
@@ -14,7 +14,7 @@ set(GROUPED_GEMM_TENSORQUANT_SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR})
 function(create_individual_grouped_gemm_tensorquant_target datatype layout trait tile_config config_json)
     # Use the parent scope GROUPED_GEMM_TENSORQUANT_GPU_TARGETS_INDIVIDUAL variable
     if(NOT GROUPED_GEMM_TENSORQUANT_GPU_TARGETS_INDIVIDUAL)
-        message(FATAL_ERROR "BUG: create_individual_grouped_gemm_tensorquant_target calle with no GPU targets")
+        message(FATAL_ERROR "BUG: create_individual_grouped_gemm_tensorquant_target called with no GPU targets")
     endif()
 
     set(target_name "benchmark_grouped_gemm_tensorquant_${datatype}_${layout}_${trait}_${tile_config}")
