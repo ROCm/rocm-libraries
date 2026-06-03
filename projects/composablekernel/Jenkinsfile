@@ -1901,13 +1901,12 @@ pipeline {
                                             -D GROUPED_GEMM_TENSORQUANT_LAYOUT="rcr \
                                             -D GEMM_MULTI_ABD_DATATYPE="fp16" \
                                             -D GEMM_MULTI_ABD_LAYOUT="rcrr" \
+                                            -D GROUPED_GEMM_ROWCOLQUANT_DATATYPE="fp8;bf8" \
+                                            -D GROUPED_GEMM_ROWCOLQUANT_LAYOUT="rcr" \
+                                            -D GROUPED_GEMM_TENSORQUANT_DATATYPE="fp8;bf8" \
+                                            -D GROUPED_GEMM_TENSORQUANT_LAYOUT="rcr" \
                                             -D TILE_ENGINE_SAMPLING_TIER=daily .. && \
-                                           ninja -j${nthreads()} benchmark_gemm_universal_all benchmark_gemm_preshuffle_all benchmark_gemm_multi_d_all benchmark_gemm_streamk_all benchmark_grouped_gemm_all benchmark_gemm_multi_abd_all benchmark_batched_contraction_all benchmark_grouped_gemm_rowcolquant_all benchmark_grouped_gemm_tensorquant_all benchmark_gemm_rowcolquant_all && \
-<<<<<<< HEAD
-                                           ninja -j${nthreads()} benchmark_gemm_universal_all benchmark_gemm_preshuffle_all benchmark_gemm_multi_d_all benchmark_gemm_streamk_all benchmark_grouped_gemm_all benchmark_gemm_multi_abd_all benchmark_batched_contraction_all benchmark_gemm_rowcolquant_all benchmark_grouped_gemm_rowcolquant_all && \
-=======
-                                           ninja -j${nthreads()} benchmark_gemm_universal_all benchmark_gemm_preshuffle_all benchmark_gemm_multi_d_all benchmark_gemm_streamk_all benchmark_grouped_gemm_all benchmark_grouped_gemm_rowcolquant_all benchmark_grouped_gemm_tensorquant_all && \
->>>>>>> 1525d40915 (add tensorquant to the tile engine)
+                                           ninja -j${nthreads()} benchmark_gemm_universal_all benchmark_gemm_preshuffle_all benchmark_gemm_multi_d_all benchmark_gemm_streamk_all benchmark_grouped_gemm_all benchmark_gemm_multi_abd_all benchmark_batched_contraction_all benchmark_gemm_rowcolquant_all benchmark_grouped_gemm_rowcolquant_all  benchmark_grouped_gemm_tensorquant_all && \
                                            python3 ../tile_engine/ops/gemm/gemm_universal/gemm_universal_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_universal_results.json && \
                                            python3 ../tile_engine/ops/gemm/gemm_preshuffle/gemm_preshuffle_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json results.json && \
                                            python3 ../tile_engine/ops/gemm/gemm_multi_d/gemm_multi_d_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json results.json && \
@@ -1919,13 +1918,10 @@ pipeline {
                                            python3 ../tile_engine/ops/gemm/gemm_multi_abd/gemm_multi_abd_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json multi_abd_results.json && \
                                            python3 ../tile_engine/ops/gemm/block_scale_gemm/gemm_rowcolquant/gemm_rowcolquant_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_rowcolquant_results.json && \
                                            python3 ../tile_engine/ops/gemm/batched_contraction/batched_contraction_benchmark.py . --problem-configs "g=2;m=1024;n=1024;k=1024" --warmup 5 --repeat 5 --verbose --json batched_contraction_results.json && \
-                                           python3 ../tile_engine/ops/gemm/grouped_gemm_quant/grouped_gemm_rowcolquant/grouped_gemm_rowcolquant_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json grouped_gemm_rowcolquant_results.json """
-
-                                           
-=======
                                            python3 ../tile_engine/ops/gemm/grouped_gemm_quant/grouped_gemm_rowcolquant/grouped_gemm_rowcolquant_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json grouped_gemm_rowcolquant_results.json && \
                                            python3 ../tile_engine/ops/gemm/grouped_gemm_quant/grouped_gemm_tensorquant/grouped_gemm_tensorquant_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json grouped_gemm_tensorquant_results.json """
->>>>>>> 1525d40915 (add tensorquant to the tile engine)
+
+
                     }
                     steps{
                         buildHipClangJobAndReboot(setup_args:setup_args, build_type: 'Release', execute_cmd: execute_args)
@@ -1962,6 +1958,10 @@ pipeline {
                                             -D GROUPED_GEMM_TENSORQUANT_LAYOUT="rcr \
                                             -D GEMM_MULTI_ABD_DATATYPE="fp16" \
                                             -D GEMM_MULTI_ABD_LAYOUT="rcrr" \
+                                            -D GROUPED_GEMM_ROWCOLQUANT_DATATYPE="fp8;bf8" \
+                                            -D GROUPED_GEMM_ROWOCLQUANT_LAYOUT="rcr" \
+                                            -D GROUPED_GEMM_TENSORQUANT_DATATYPE="fp8;bf8" \
+                                            -D GROUPED_GEMM_TENSORQUANT_LAYOUT="rcr" \
                                             -D TILE_ENGINE_SAMPLING_TIER=daily .. && \
                                            ninja -j${nthreads()} benchmark_gemm_universal_all benchmark_gemm_preshuffle_all benchmark_gemm_multi_d_all benchmark_gemm_multi_abd_all benchmark_batched_contraction_all benchmark_grouped_gemm_rowcolquant_all benchmark_grouped_gemm_tensorquant_all  benchmark_gemm_rowcolquant_all && \
 <<<<<<< HEAD
@@ -1974,16 +1974,8 @@ pipeline {
                                            python3 ../tile_engine/ops/gemm/grouped_gemm_quant/grouped_gemm_tensorquant/grouped_gemm_tensorquant_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json grouped_gemm_tensorquant_results.json && \
                                            python3 ../tile_engine/ops/gemm/block_scale_gemm/gemm_rowcolquant/gemm_rowcolquant_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json gemm_rowcolquant_results.json && \
                                            python3 ../tile_engine/ops/gemm/batched_contraction/batched_contraction_benchmark.py . --problem-configs "g=2;m=1024;n=1024;k=1024" --warmup 5 --repeat 5 --verbose --json batched_contraction_results.json && \
-                                           python3 ../tile_engine/ops/gemm/grouped_gemm_quant/grouped_gemm_rowcolquant/grouped_gemm_rowcolquant_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json grouped_gemm_rowcolquant_results.json """
-
-=======
-                                           ninja -j${nthreads()} benchmark_gemm_universal_all benchmark_gemm_preshuffle_all benchmark_gemm_multi_d_all benchmark_grouped_gemm_rowcolquant_all benchmark_grouped_gemm_tensorquant_all && \
-                                           python3 ../tile_engine/ops/gemm/gemm_universal/gemm_universal_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json results.json && \
-                                           python3 ../tile_engine/ops/gemm/gemm_preshuffle/gemm_preshuffle_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json results.json && \
-                                           python3 ../tile_engine/ops/gemm/gemm_multi_d/gemm_multi_d_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json results.json && \
                                            python3 ../tile_engine/ops/gemm/grouped_gemm_quant/grouped_gemm_rowcolquant/grouped_gemm_rowcolquant_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json grouped_gemm_rowcolquant_results.json && \
                                            python3 ../tile_engine/ops/gemm/grouped_gemm_quant/grouped_gemm_tensorquant/grouped_gemm_tensorquant_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json grouped_gemm_tensorquant_results.json """
->>>>>>> 1525d40915 (add tensorquant to the tile engine)
                     }
                     steps{
                         buildHipClangJobAndReboot(setup_args:setup_args, build_type: 'Release', execute_cmd: execute_args)
@@ -2014,6 +2006,10 @@ pipeline {
                                             -D GEMM_ROWCOLQUANT_LAYOUT="rcr" \
                                             -D GEMM_MULTI_ABD_DATATYPE="fp16" \
                                             -D GEMM_MULTI_ABD_LAYOUT="rcrr" \
+                                            -D GROUPED_GEMM_ROWCOLQUANT_DATATYPE="fp8;bf8" \
+                                            -D GROUPED_GEMM_ROWOCLQUANT_LAYOUT="rcr" \
+                                            -D GROUPED_GEMM_TENSORQUANT_DATATYPE="fp8;bf8" \
+                                            -D GROUPED_GEMM_TENSORQUANT_LAYOUT="rcr" \
                                             -D TILE_ENGINE_SAMPLING_TIER=daily .. && \
                                            ninja -j${nthreads()} benchmark_gemm_universal_all benchmark_gemm_multi_abd_all benchmark_grouped_gemm_rowcolquant_all benchmark_grouped_gemm_tensorquant_all benchmark_gemm_rowcolquant_all && \
 <<<<<<< HEAD

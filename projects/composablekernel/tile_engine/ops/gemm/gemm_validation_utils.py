@@ -231,7 +231,8 @@ def is_trait_combination_valid(
 ) -> bool:
     """Check if a trait combination is valid."""
     if (
-        kernel_name_prefix == "grouped_gemm_rowcolquant"
+        kernel_name_prefix == "gemm_rowcolquant"
+        or kernel_name_prefix == "grouped_gemm_rowcolquant"
         or kernel_name_prefix == "grouped_gemm_tensorquant"
         or kernel_name_prefix == "gemm_rowcolquant"
     ):
@@ -558,56 +559,6 @@ def is_tile_config_valid(
             logging.debug(f"Warp tile validation failed: {warp_tile_error}")
             return False
 
-    # Additional operator-specific validation (runs after pipeline validation)
-<<<<<<< HEAD
-    if kernel_name_prefix == "gemm_rowcolquant" or kernel_name_prefix == "grouped_gemm_rowcolquant" or kernel_name_prefix == "grouped_gemm_tensorquant":
-        rowcolquant_valid, rowcolquant_valid_error = validate_gemm_rowcolquant(
-            tile_m,
-            tile_n,
-            tile_k,
-            warp_m,
-            warp_n,
-            warp_k,
-            warp_tile_m,
-            warp_tile_n,
-            warp_tile_k,
-            a_datatype,
-            b_datatype,
-            c_datatype,
-            pipeline,
-            layout,
-            gpu_target,
-=======
-
-    if (
-        kernel_name_prefix == "grouped_gemm_rowcolquant"
-        or kernel_name_prefix == "grouped_gemm_tensorquant"
-    ):
-        rowcol_tensor_quant_valid, rowcol_tensor_quant_valid_error = (
-            validate_gemm_rowcolquant_tensorquant(
-                tile_m,
-                tile_n,
-                tile_k,
-                warp_m,
-                warp_n,
-                warp_k,
-                warp_tile_m,
-                warp_tile_n,
-                warp_tile_k,
-                a_datatype,
-                b_datatype,
-                c_datatype,
-                pipeline,
-                layout,
-                gpu_target,
-            )
->>>>>>> 1525d40915 (add tensorquant to the tile engine)
-        )
-        if not rowcol_tensor_quant_valid:
-            logging.debug(
-                f"GEMM RowColQuant/TensorQuant validation failed: {rowcol_tensor_quant_valid_error}"
-            )
-            return False
 
     # Additional operator-specific validation (runs after pipeline validation)
     if kernel_name_prefix == "gemm_rowcolquant" or kernel_name_prefix == "grouped_gemm_rowcolquant" or kernel_name_prefix == "grouped_gemm_tensorquant":
@@ -630,9 +581,10 @@ def is_tile_config_valid(
         )
         if not rowcol_tensor_quant_valid_error:
             logging.debug(
-                f"GEMM RowColQuant validation failed: {rowcol_tensor_quant_valid_error}"
+                f"GEMM RowColQuant/TensorQuant validation failed: {rowcol_tensor_quant_valid_error}"
             )
             return False
+
 
     return True
 
@@ -1138,11 +1090,7 @@ def validate_m0_m1_m2_configuration(
         return False, f"Error in M0/M1/M2 validation: {str(e)}"
 
 
-<<<<<<< HEAD
-def validate_gemm_rowcolquant_tensoquant(
-=======
 def validate_gemm_rowcolquant_tensorquant(
->>>>>>> 1525d40915 (add tensorquant to the tile engine)
     tile_m: int,
     tile_n: int,
     tile_k: int,
