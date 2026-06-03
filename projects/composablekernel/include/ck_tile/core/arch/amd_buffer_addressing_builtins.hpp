@@ -1157,17 +1157,17 @@ llvm_amdgcn_raw_buffer_load_fp16(int32x4_t srsrc,
                                  index_t soffset,
                                  index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.load.f16");
 
-CK_TILE_DEVICE_EXTERN fp16x2_t llvm_amdgcn_raw_buffer_load_fp16x2(
-    int32x4_t srsrc,
-    index_t voffset,
-    index_t soffset,
-    index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.load.v2f16");
+CK_TILE_DEVICE_EXTERN fp16x2_t
+llvm_amdgcn_raw_buffer_load_fp16x2(int32x4_t srsrc,
+                                   index_t voffset,
+                                   index_t soffset,
+                                   index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.load.v2f16");
 
-CK_TILE_DEVICE_EXTERN fp16x4_t llvm_amdgcn_raw_buffer_load_fp16x4(
-    int32x4_t srsrc,
-    index_t voffset,
-    index_t soffset,
-    index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.load.v4f16");
+CK_TILE_DEVICE_EXTERN fp16x4_t
+llvm_amdgcn_raw_buffer_load_fp16x4(int32x4_t srsrc,
+                                   index_t voffset,
+                                   index_t soffset,
+                                   index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.load.v4f16");
 
 // buffer load fp32
 CK_TILE_DEVICE_EXTERN float
@@ -1176,17 +1176,17 @@ llvm_amdgcn_raw_buffer_load_fp32(int32x4_t srsrc,
                                  index_t soffset,
                                  index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.load.f32");
 
-CK_TILE_DEVICE_EXTERN fp32x2_t llvm_amdgcn_raw_buffer_load_fp32x2(
-    int32x4_t srsrc,
-    index_t voffset,
-    index_t soffset,
-    index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.load.v2f32");
+CK_TILE_DEVICE_EXTERN fp32x2_t
+llvm_amdgcn_raw_buffer_load_fp32x2(int32x4_t srsrc,
+                                   index_t voffset,
+                                   index_t soffset,
+                                   index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.load.v2f32");
 
-CK_TILE_DEVICE_EXTERN fp32x4_t llvm_amdgcn_raw_buffer_load_fp32x4(
-    int32x4_t srsrc,
-    index_t voffset,
-    index_t soffset,
-    index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.load.v4f32");
+CK_TILE_DEVICE_EXTERN fp32x4_t
+llvm_amdgcn_raw_buffer_load_fp32x4(int32x4_t srsrc,
+                                   index_t voffset,
+                                   index_t soffset,
+                                   index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.load.v4f32");
 
 // buffer store i8
 CK_TILE_DEVICE_EXTERN void
@@ -1218,19 +1218,19 @@ llvm_amdgcn_raw_buffer_store_i16(int16_t vdata,
                                  index_t soffset,
                                  index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.store.i16");
 
-CK_TILE_DEVICE_EXTERN void llvm_amdgcn_raw_buffer_store_i16x2(
-    int16x2_t vdata,
-    int32x4_t rsrc,
-    index_t voffset,
-    index_t soffset,
-    index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.store.v2i16");
+CK_TILE_DEVICE_EXTERN void
+llvm_amdgcn_raw_buffer_store_i16x2(int16x2_t vdata,
+                                   int32x4_t rsrc,
+                                   index_t voffset,
+                                   index_t soffset,
+                                   index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.store.v2i16");
 
-CK_TILE_DEVICE_EXTERN void llvm_amdgcn_raw_buffer_store_i16x4(
-    int16x4_t vdata,
-    int32x4_t rsrc,
-    index_t voffset,
-    index_t soffset,
-    index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.store.v4i16");
+CK_TILE_DEVICE_EXTERN void
+llvm_amdgcn_raw_buffer_store_i16x4(int16x4_t vdata,
+                                   int32x4_t rsrc,
+                                   index_t voffset,
+                                   index_t soffset,
+                                   index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.store.v4i16");
 
 // buffer store i32
 CK_TILE_DEVICE_EXTERN void
@@ -1248,33 +1248,33 @@ llvm_amdgcn_raw_buffer_store_ui16(uint16_t vdata,
                                   index_t soffset,
                                   index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.store.i16");
 
-CK_TILE_DEVICE_EXTERN void llvm_amdgcn_raw_buffer_store_ui16x2(
-    uint16x2_t vdata,
-    int32x4_t rsrc,
-    index_t voffset,
-    index_t soffset,
-    index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.store.v2i16");
+CK_TILE_DEVICE_EXTERN void
+llvm_amdgcn_raw_buffer_store_ui16x2(uint16x2_t vdata,
+                                    int32x4_t rsrc,
+                                    index_t voffset,
+                                    index_t soffset,
+                                    index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.store.v2i16");
 
-CK_TILE_DEVICE_EXTERN void llvm_amdgcn_raw_buffer_store_ui16x4(
-    uint16x4_t vdata,
-    int32x4_t rsrc,
-    index_t voffset,
-    index_t soffset,
-    index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.store.v4i16");
+CK_TILE_DEVICE_EXTERN void
+llvm_amdgcn_raw_buffer_store_ui16x4(uint16x4_t vdata,
+                                    int32x4_t rsrc,
+                                    index_t voffset,
+                                    index_t soffset,
+                                    index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.store.v4i16");
 
-CK_TILE_DEVICE_EXTERN void llvm_amdgcn_raw_buffer_store_i32x2(
-    int32x2_t vdata,
-    int32x4_t rsrc,
-    index_t voffset,
-    index_t soffset,
-    index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.store.v2i32");
+CK_TILE_DEVICE_EXTERN void
+llvm_amdgcn_raw_buffer_store_i32x2(int32x2_t vdata,
+                                   int32x4_t rsrc,
+                                   index_t voffset,
+                                   index_t soffset,
+                                   index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.store.v2i32");
 
-CK_TILE_DEVICE_EXTERN void llvm_amdgcn_raw_buffer_store_i32x3_(
-    int32x3_t vdata,
-    int32x4_t rsrc,
-    index_t voffset,
-    index_t soffset,
-    index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.store.v3i32");
+CK_TILE_DEVICE_EXTERN void
+llvm_amdgcn_raw_buffer_store_i32x3_(int32x3_t vdata,
+                                    int32x4_t rsrc,
+                                    index_t voffset,
+                                    index_t soffset,
+                                    index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.store.v3i32");
 
 CK_TILE_DEVICE_EXTERN void llvm_amdgcn_raw_buffer_store_i32x3(dwordx3_union vdata,
                                                               int32x4_t rsrc,
@@ -1288,12 +1288,12 @@ CK_TILE_DEVICE_EXTERN void llvm_amdgcn_raw_buffer_store_i32x3(dwordx3_union vdat
     llvm_amdgcn_raw_buffer_store_i32x3_(v_reg, rsrc, voffset, soffset, 0);
 };
 
-CK_TILE_DEVICE_EXTERN void llvm_amdgcn_raw_buffer_store_i32x4(
-    int32x4_t vdata,
-    int32x4_t rsrc,
-    index_t voffset,
-    index_t soffset,
-    index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.store.v4i32");
+CK_TILE_DEVICE_EXTERN void
+llvm_amdgcn_raw_buffer_store_i32x4(int32x4_t vdata,
+                                   int32x4_t rsrc,
+                                   index_t voffset,
+                                   index_t soffset,
+                                   index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.store.v4i32");
 
 // buffer store fp16
 CK_TILE_DEVICE_EXTERN void
@@ -1303,19 +1303,19 @@ llvm_amdgcn_raw_buffer_store_fp16(_Float16 vdata,
                                   index_t soffset,
                                   index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.store.f16");
 
-CK_TILE_DEVICE_EXTERN void llvm_amdgcn_raw_buffer_store_fp16x2(
-    fp16x2_t vdata,
-    int32x4_t rsrc,
-    index_t voffset,
-    index_t soffset,
-    index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.store.v2f16");
+CK_TILE_DEVICE_EXTERN void
+llvm_amdgcn_raw_buffer_store_fp16x2(fp16x2_t vdata,
+                                    int32x4_t rsrc,
+                                    index_t voffset,
+                                    index_t soffset,
+                                    index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.store.v2f16");
 
-CK_TILE_DEVICE_EXTERN void llvm_amdgcn_raw_buffer_store_fp16x4(
-    fp16x4_t vdata,
-    int32x4_t rsrc,
-    index_t voffset,
-    index_t soffset,
-    index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.store.v4f16");
+CK_TILE_DEVICE_EXTERN void
+llvm_amdgcn_raw_buffer_store_fp16x4(fp16x4_t vdata,
+                                    int32x4_t rsrc,
+                                    index_t voffset,
+                                    index_t soffset,
+                                    index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.store.v4f16");
 
 // buffer store fp32
 CK_TILE_DEVICE_EXTERN void
@@ -1325,19 +1325,19 @@ llvm_amdgcn_raw_buffer_store_fp32(float vdata,
                                   index_t soffset,
                                   index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.store.f32");
 
-CK_TILE_DEVICE_EXTERN void llvm_amdgcn_raw_buffer_store_fp32x2(
-    fp32x2_t vdata,
-    int32x4_t rsrc,
-    index_t voffset,
-    index_t soffset,
-    index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.store.v2f32");
+CK_TILE_DEVICE_EXTERN void
+llvm_amdgcn_raw_buffer_store_fp32x2(fp32x2_t vdata,
+                                    int32x4_t rsrc,
+                                    index_t voffset,
+                                    index_t soffset,
+                                    index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.store.v2f32");
 
-CK_TILE_DEVICE_EXTERN void llvm_amdgcn_raw_buffer_store_fp32x4(
-    fp32x4_t vdata,
-    int32x4_t rsrc,
-    index_t voffset,
-    index_t soffset,
-    index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.store.v4f32");
+CK_TILE_DEVICE_EXTERN void
+llvm_amdgcn_raw_buffer_store_fp32x4(fp32x4_t vdata,
+                                    int32x4_t rsrc,
+                                    index_t voffset,
+                                    index_t soffset,
+                                    index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.store.v4f32");
 
 // buffer atomic-add fp16
 CK_TILE_DEVICE_EXTERN fp16x2_t llvm_amdgcn_raw_buffer_atomic_add_fp16x2(
@@ -1373,12 +1373,12 @@ CK_TILE_DEVICE_EXTERN float llvm_amdgcn_raw_buffer_atomic_add_fp32(
     index_t glc_slc) __asm("llvm.amdgcn.raw.buffer.atomic.fadd.f32");
 
 // buffer atomic-max fp64
-CK_TILE_DEVICE_EXTERN double llvm_amdgcn_raw_buffer_atomic_max_fp64(
-    double vdata,
-    int32x4_t rsrc, // dst_wave_buffer_resource
-    int voffset,    // dst_thread_addr_offset
-    int soffset,    // dst_wave_addr_offset
-    int glc_slc) __asm("llvm.amdgcn.raw.buffer.atomic.fmax.f64");
+CK_TILE_DEVICE_EXTERN double
+llvm_amdgcn_raw_buffer_atomic_max_fp64(double vdata,
+                                       int32x4_t rsrc, // dst_wave_buffer_resource
+                                       int voffset,    // dst_thread_addr_offset
+                                       int soffset,    // dst_wave_addr_offset
+                                       int glc_slc) __asm("llvm.amdgcn.raw.buffer.atomic.fmax.f64");
 
 // Direct loads from global to LDS.
 CK_TILE_DEVICE_EXTERN void
