@@ -25,9 +25,6 @@ class TestCkTileMxGemmPipelineWmmaBase : public TestCkTileMxGemmPipeline<Tuple, 
 
 #if defined(CK_USE_GFX1250)
         using DeviceIp = ck_tile::gfx125_t;
-#else
-#error "Unsupported architecture for WMMA MX GEMM"
-#endif
 
         return ck_tile::has_wmma_traits_v<DeviceIp,
                                           typename Base::ADataType,
@@ -36,6 +33,9 @@ class TestCkTileMxGemmPipelineWmmaBase : public TestCkTileMxGemmPipeline<Tuple, 
                                           ck_tile::constant<Base::M_Warp_Tile>::value,
                                           ck_tile::constant<Base::N_Warp_Tile>::value,
                                           ck_tile::constant<Base::K_Warp_Tile>::value>;
+#else
+        return true;
+#endif
     }
 
     private:

@@ -558,7 +558,7 @@ struct MXGemmPipelineAgBgCrCompAsyncDefaultPolicy
             tile_distribution_encoding<sequence<NWarp>,
                                        tuple<sequence<MWarp, MIterPerWarp_packed, MPerXdl>,
                                              sequence<KIterPerWarp_packed, K_Lane, KPerLane>>,
-                                       tuple<sequence<0, 1>, sequence<2, 1>>,
+                                       tuple<sequence<1, 0>, sequence<2, 1>>,
                                        tuple<sequence<0, 0>, sequence<1, 2>>,
                                        sequence<2, 1, 2>,
                                        sequence<0, 1, 2>>{});

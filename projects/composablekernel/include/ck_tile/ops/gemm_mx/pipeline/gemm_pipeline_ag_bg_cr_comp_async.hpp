@@ -18,7 +18,7 @@ namespace ck_tile {
 template <typename Problem>
 struct BaseMXGemmPipelineAgBgCrCompAsync
 {
-    static constexpr index_t PrefetchStages  = 2;
+    static constexpr index_t PrefetchStages  = 3;
     static constexpr index_t PrefillStages   = 1;
     static constexpr index_t GlobalBufferNum = 1;
 
@@ -38,7 +38,7 @@ struct BaseMXGemmPipelineAgBgCrCompAsync
         {
             return TailNumber::One;
         }
-        if(num_loop % PrefetchStages == 1)
+        if(num_loop % PrefetchStages == 0)
         {
             return TailNumber::Three;
         }
@@ -735,8 +735,8 @@ struct MXGemmPipelineAgBgCrCompAsync : public BaseMXGemmPipelineAgBgCrCompAsync<
                 a_element_func,
                 b_dram_block_window_tmp,
                 b_element_func,
-                scale_a_window,
-                scale_b_window,
+                scale_a_window[number<0>{}],
+                scale_b_window[number<0>{}],
                 num_loop,
                 smem,
                 smem + smem_size);
@@ -769,8 +769,8 @@ struct MXGemmPipelineAgBgCrCompAsync : public BaseMXGemmPipelineAgBgCrCompAsync<
                 element_wise::PassThrough{},
                 make_tuple(b_dram_block_window_tmp),
                 element_wise::PassThrough{},
-                scale_a_window,
-                scale_b_window,
+                scale_a_window[number<0>{}],
+                scale_b_window[number<0>{}],
                 num_loop,
                 smem,
                 smem + smem_size);

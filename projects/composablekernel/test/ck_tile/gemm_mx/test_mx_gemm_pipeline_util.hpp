@@ -44,9 +44,9 @@ constexpr ck_tile::index_t get_k_warp_tile()
 #endif
 #else
     if constexpr(M_Warp_Tile == 32)
-        return 16;
+        return 64;
     else
-        return 32;
+        return 128;
 #endif
 }
 
@@ -71,7 +71,8 @@ auto calculate_rtol_atol(const ck_tile::index_t K,
 enum struct MxGemmPipelineType
 {
     CompTDMV1,
-    CompTDMV2
+    CompTDMV2,
+    CompAsync
 };
 
 template <MxGemmPipelineType PT, typename Problem>
@@ -95,10 +96,36 @@ struct MxGemmPipelineTypeSelector<MxGemmPipelineType::CompTDMV2, Problem>
     static constexpr auto GetName() { return "GemmPipelineAgBgCrCompTDMV2"; }
 };
 
+template <typename Problem>
+struct MxGemmPipelineTypeSelector<MxGemmPipelineType::CompAsync, Problem>
+{
+    using base_pipeline = ck_tile::BaseMXGemmPipelineAgBgCrCompAsync<Problem>;
+    using pipeline      = ck_tile::MXGemmPipelineAgBgCrCompAsync<Problem>;
+
+    static constexpr auto GetName() { return "GemmPipelineAgBgCrCompAsync"; }
+};
+
 template <MxGemmPipelineType PT, typename Problem>
 struct MxGemmEpilogueTypeSelector
 {
+};
+
+template <typename Problem>
+struct MxGemmEpilogueTypeSelector<MxGemmPipelineType::CompTDMV1, Problem>
+{
     using epilogue = ck_tile::TdmEpilogue<Problem>;
+};
+
+template <typename Problem>
+struct MxGemmEpilogueTypeSelector<MxGemmPipelineType::CompTDMV2, Problem>
+{
+    using epilogue = ck_tile::TdmEpilogue<Problem>;
+};
+
+template <typename Problem>
+struct MxGemmEpilogueTypeSelector<MxGemmPipelineType::CompAsync, Problem>
+{
+    using epilogue = ck_tile::CShuffleEpilogue<Problem>;
 };
 
 template <MxGemmPipelineType PT>
@@ -178,6 +205,52 @@ void preShuffleScaleBuffer_gfx1250(const ScaleType* src,
     }
 }
 
+template <ck_tile::index_t MNPack      = 2,
+          ck_tile::index_t KPack       = 2,
+          ck_tile::index_t XdlMNThread = 16,
+          ck_tile::index_t XdlKThread  = 4,
+          typename ScaleType>
+void preShuffleScaleBuffer_gfx950(const ScaleType* src,
+                                  ScaleType* packed,
+                                  ck_tile::index_t MN,
+                                  ck_tile::index_t K_scale,
+                                  bool kLast)
+{
+    const ck_tile::index_t MN_packed = MN / MNPack;
+    const ck_tile::index_t K_packed  = K_scale / KPack;
+
+    for(ck_tile::index_t packed_mn = 0; packed_mn < MN_packed; packed_mn++)
+    {
+        for(ck_tile::index_t packed_k = 0; packed_k < K_packed; packed_k++)
+        {
+            ck_tile::index_t mn_lane  = packed_mn % XdlMNThread;
+            ck_tile::index_t mn_group = packed_mn / XdlMNThread;
+            ck_tile::index_t k_lane   = packed_k % XdlKThread;
+            ck_tile::index_t k_group  = packed_k / XdlKThread;
+            for(ck_tile::index_t ik = 0; ik < KPack; ik++)
+            {
+                for(ck_tile::index_t imn = 0; imn < MNPack; imn++)
+                {
+                    ck_tile::index_t byteIdx = ik * MNPack + imn;
+                    ck_tile::index_t orig_mn =
+                        mn_group * XdlMNThread * MNPack + imn * XdlMNThread + mn_lane;
+                    ck_tile::index_t orig_k =
+                        k_group * XdlKThread * KPack + ik * XdlKThread + k_lane;
+
+                    ck_tile::index_t inputIndex =
+                        kLast ? orig_k + orig_mn * K_scale : orig_mn + orig_k * MN;
+                    ScaleType v = src[inputIndex];
+                    ck_tile::index_t outputIndex =
+                        byteIdx + (packed_mn % XdlMNThread) * MNPack * KPack +
+                        packed_k * XdlMNThread * MNPack * KPack +
+                        (packed_mn / XdlMNThread) * XdlMNThread * MNPack * KPack * K_packed;
+                    packed[outputIndex] = v;
+                }
+            }
+        }
+    }
+}
+
 template <typename Tuple, typename Derived>
 class TestCkTileMxGemmPipeline : public ::testing::Test
 {
@@ -215,15 +288,15 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
 
     static constexpr ck_tile::index_t ScaleBlockSize = std::tuple_element_t<16, Tuple>{};
 
+    static constexpr ck_tile::index_t M_Warp = 2;
+    static constexpr ck_tile::index_t N_Warp = 2;
+    static constexpr ck_tile::index_t K_Warp = 1;
+
     protected:
     template <bool PadM, bool PadN, bool PadK, bool Preshuffle>
     void invoke_mx_gemm(const ck_tile::MxGemmHostArgs<1, 1, 0>& args,
                         const ck_tile::stream_config& s)
     {
-        constexpr ck_tile::index_t M_Warp = 2;
-        constexpr ck_tile::index_t N_Warp = 2;
-        constexpr ck_tile::index_t K_Warp = 1;
-
         // if cluster launch is enabled, set cluster dim to 2x2x1
         constexpr ck_tile::index_t kClusterSizeM =
             std::conditional_t<ClusterLaunch, ck_tile::number<2>, ck_tile::number<1>>{};
@@ -326,7 +399,8 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
                                              1,                /*BlockedXDLN_PerWarp_*/
                                              DoubleSmemBuffer, /*DoubleSmemBuffer*/
                                              AComputeDataType, /*AComputeDataType_*/
-                                             BComputeDataType /*BComputeDataType_*/>>::epilogue;
+                                             BComputeDataType, /*BComputeDataType_*/
+                                             !preshuffle>>::epilogue;
 
         using Kernel = ck_tile::MxGemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
         auto kargs   = Kernel::MakeKernelArgs(args);
@@ -423,7 +497,7 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
         constexpr index_t ScaleShuffleAlign = 32;
         const index_t scale_padded_M        = integer_least_multiple(
             static_cast<index_t>(M),
-            static_cast<index_t>(ck_tile::max(M_Warp_Tile, ScaleShuffleAlign)));
+            static_cast<index_t>(ck_tile::max(M_Tile, ScaleShuffleAlign)));
 
         HostTensor<AScaleDataType> scale_a(
             {static_cast<std::size_t>(scale_padded_M), static_cast<std::size_t>(num_scale_k)},
@@ -493,6 +567,7 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
             {static_cast<std::size_t>(N), static_cast<std::size_t>(num_scale_k)},
             {static_cast<std::size_t>(num_scale_k), static_cast<std::size_t>(1)});
 
+#if defined(CK_USE_GFX1250)
         // Pre-shuffle for gfx1250 (WaveSize=32, WMMA)
         // Scales start in natural tensor layout and are pre-shuffled into the device layout
         // for both scale block sizes (the shuffle is the identity for ScaleBlockSize==16,
@@ -501,6 +576,29 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
             scale_a.mData.data(), scale_a_shuffled.mData.data(), scale_padded_M, num_scale_k);
         preShuffleScaleBuffer_gfx1250<BScaleDataType, ScaleBlockSize, true>(
             scale_b.mData.data(), scale_b_shuffled.mData.data(), N, num_scale_k);
+#else
+        constexpr ck_tile::index_t MPerXdl      = M_Warp_Tile;
+        constexpr ck_tile::index_t NPerXdl      = N_Warp_Tile;
+        constexpr ck_tile::index_t KPerXdl      = K_Warp_Tile;
+        constexpr ck_tile::index_t MIterPerWarp = M_Tile / (M_Warp * MPerXdl);
+        constexpr ck_tile::index_t NIterPerWarp = N_Tile / (N_Warp * NPerXdl);
+        constexpr ck_tile::index_t KIterPerWarp = K_Tile / KPerXdl;
+
+        constexpr ck_tile::index_t MXdlPackEff =
+            (MIterPerWarp >= 2 && MIterPerWarp % 2 == 0) ? 2 : 1;
+        constexpr ck_tile::index_t NXdlPackEff =
+            (NIterPerWarp >= 2 && NIterPerWarp % 2 == 0) ? 2 : 1;
+        constexpr ck_tile::index_t KXdlPackEff =
+            (KIterPerWarp >= 2 && KIterPerWarp % 2 == 0) ? 2 : 1;
+
+        constexpr ck_tile::index_t XdlMNThread = M_Warp_Tile;
+        constexpr ck_tile::index_t XdlKThread  = 64 / XdlMNThread;
+        preShuffleScaleBuffer_gfx950<MXdlPackEff, KXdlPackEff, XdlMNThread, XdlKThread>(
+            scale_a.mData.data(), scale_a_shuffled.mData.data(), scale_padded_M, num_scale_k, true);
+
+        preShuffleScaleBuffer_gfx950<NXdlPackEff, KXdlPackEff, XdlMNThread, XdlKThread>(
+            scale_b.mData.data(), scale_b_shuffled.mData.data(), N, num_scale_k, true);
+#endif
 
         // Allocate device memory
         DeviceMem a_m_k_dev_buf(a_m_k.get_element_space_size_in_bytes());
