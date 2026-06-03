@@ -664,9 +664,9 @@ class TileInfo:
     # MXScaleTilePair offset registers
     # should be managed by scale-specific alloc in SubtileScaleEmit.py
     if isinstance(self.geometry, MXScaleTilePair):
-      self._sharedVgprGROffset = [writer.vgprPool.checkOut(1)]
-      self._sharedVgprLROffset = [writer.vgprPool.checkOut(1)]
-      self._sharedVgprLROffsetSwap = [writer.vgprPool.checkOut(1)]
+      self._sharedVgprGROffset = [writer.vgprPool.checkOut(1, tag="allocOffsetRegisters_sharedVgprGROffset")]
+      self._sharedVgprLROffset = [writer.vgprPool.checkOut(1, tag="allocOffsetRegisters_sharedVgprLROffset")]
+      self._sharedVgprLROffsetSwap = [writer.vgprPool.checkOut(1, tag="allocOffsetRegisters_sharedVgprLROffsetSwap")]
 
   def allocVgprTileRegisters_legacy(self, writer, kernel):
     """Allocate data tile registers for A/B/D MMA operands.
@@ -694,7 +694,7 @@ class TileInfo:
       self.vgprTiles.append(RegisterTileInfo(pool, regType))
       if i % numMMATilesPerReg != 0:
         continue
-      vstart = pool.checkOutAligned(numDword, numDword)
+      vstart = pool.checkOutAligned(numDword, numDword, tag="allocVgprTileRegisters_legacy_vstart")
       for k in range(numDword):
         self.vgprTiles[-1].append(vstart + k)
 
@@ -892,7 +892,7 @@ def _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, isAgpr):
   numMfma = totalRegs // regsPerMfma
 
   if numMfma > 0:
-    tmpVgpr = writer.vgprPool.checkOutAligned(2, 2)
+    tmpVgpr = writer.vgprPool.checkOutAligned(2, 2, tag="zeroRegRange_tmpVgpr")
     module.add(VMovB64(dst=vgpr(tmpVgpr, 2), src=0, comment=""))
     module.add(SNop(waitState=1, comment="wait for vgpr to be ready before MFMA"))
     for i in range(numMfma):
@@ -1050,7 +1050,7 @@ def emitMfmaInstruction(writer, kernel, vgprTileA, vgprTileB, vgprTileC, vgprTil
                                    comment=comment))
     else:
       # Fallback: hardcoded scale 0x7f (scale=1.0 for all elements)
-      tmpVgprScale = writer.vgprPool.checkOut(1)
+      tmpVgprScale = writer.vgprPool.checkOut(1, tag="emitMfmaInstruction_tmpVgprScale")
       module.add(VMovB32(dst=vgpr(tmpVgprScale), src=hex(0x7f7f7f7f), comment="hardcoded scale 0x7f (E8M0)"))
       module.add(MXMFMAInstruction(instType=mxInstType, accType=InstType.INST_F32, variant=[16,16,miK,1], \
                                    acc=dAccAlias(vgprDStart,opDSize), \

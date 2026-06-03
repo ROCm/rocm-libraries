@@ -2557,7 +2557,7 @@ class LogicalScheduler:
                 tile = RegisterTileInfo(writer.vgprPool)
                 for j in range(0, numRegs, 4):
                     blockSize = min(4, numRegs - j)
-                    vstart = writer.vgprPool.checkOutAligned(blockSize, blockSize)
+                    vstart = writer.vgprPool.checkOutAligned(blockSize, blockSize, tag="allocVgprTiles_vstart")
                     for k in range(blockSize):
                         tile.append(vstart + k)
                 tiles.append(tile)
@@ -2731,7 +2731,7 @@ class LogicalScheduler:
                 tile = RegisterTileInfo(writer.vgprPool)
                 for j in range(0, numRegs, 4):
                     blockSize = min(4, numRegs - j)
-                    vstart = writer.vgprPool.checkOutAligned(blockSize, blockSize)
+                    vstart = writer.vgprPool.checkOutAligned(blockSize, blockSize, tag="reallocTailTilesFlat_vstart")
                     for k in range(blockSize):
                         tile.append(vstart + k)
                 tiles.append(tile)
