@@ -72,3 +72,68 @@ dtype_combos = [
     {io="fp32", compute="fp32", intermediate="fp32"},
 ]
 layouts = [""]
+[[supported]]
+arch = "gfx942"
+platform = "linux"
+
+[[supported.matchers]]
+op_chains = [
+    "Batchnorm",
+    "Batchnorm + Pointwise:RELU_FWD[lower_clip,upper_clip]",
+    "Batchnorm + Pointwise:RELU_FWD[lower_clip]",
+    "Batchnorm + Pointwise:RELU_FWD[upper_clip]",
+    "BatchnormInference + Pointwise:RELU_FWD",
+    "BatchnormInference + Pointwise:RELU_FWD[lower_clip,upper_clip]",
+    "BatchnormInference + Pointwise:RELU_FWD[lower_clip]",
+    "BatchnormInference + Pointwise:RELU_FWD[upper_clip]",
+    "BatchnormInferenceVarianceExt",
+    "BatchnormInferenceVarianceExt + Pointwise:RELU_FWD",
+    "BatchnormInferenceVarianceExt + Pointwise:RELU_FWD[lower_clip,upper_clip]",
+    "BatchnormInferenceVarianceExt + Pointwise:RELU_FWD[lower_clip]",
+    "BatchnormInferenceVarianceExt + Pointwise:RELU_FWD[upper_clip]",
+    "BatchnormInferenceVarianceExt[multi_batch] + Pointwise:RELU_FWD[lower_clip,upper_clip]",
+    "BatchnormInferenceVarianceExt[multi_batch] + Pointwise:RELU_FWD[lower_clip]",
+    "BatchnormInferenceVarianceExt[multi_batch] + Pointwise:RELU_FWD[upper_clip]",
+    "BatchnormInference[multi_batch] + Pointwise:RELU_FWD[lower_clip,upper_clip]",
+    "BatchnormInference[multi_batch] + Pointwise:RELU_FWD[lower_clip]",
+    "BatchnormInference[multi_batch] + Pointwise:RELU_FWD[upper_clip]",
+]
+dtype_combos = [
+    {io="bf16", compute="fp32", intermediate="fp32"},
+    {io="fp16", compute="fp32", intermediate="fp32"},
+    {io="fp32", compute="fp32", intermediate="fp32"},
+]
+layouts = ["NCHW", "NHWC"]
+
+[[supported.matchers]]
+op_chains = [
+    "BatchnormBackward",
+    "BatchnormBackward[multi_batch]",
+    "BatchnormInference",
+    "BatchnormInferenceVarianceExt[multi_batch]",
+    "BatchnormInferenceVarianceExt[multi_batch] + Pointwise:RELU_FWD",
+    "BatchnormInference[multi_batch]",
+    "BatchnormInference[multi_batch] + Pointwise:RELU_FWD",
+    "Batchnorm[multi_batch]",
+    "Batchnorm[multi_batch] + Pointwise:RELU_FWD",
+    "Batchnorm[multi_batch] + Pointwise:RELU_FWD[lower_clip,upper_clip]",
+    "Batchnorm[multi_batch] + Pointwise:RELU_FWD[lower_clip]",
+    "Batchnorm[multi_batch] + Pointwise:RELU_FWD[upper_clip]",
+]
+dtype_combos = [
+    {io="bf16", compute="fp32", intermediate="fp32"},
+    {io="fp16", compute="fp32", intermediate="fp32"},
+    {io="fp32", compute="fp32", intermediate="fp32"},
+]
+layouts = ["NCDHW", "NCHW", "NDHWC", "NHWC"]
+
+[[supported.matchers]]
+op_chains = [
+    "RmsNorm",
+]
+dtype_combos = [
+    {io="bf16", compute="fp32", intermediate="fp32"},
+    {io="fp16", compute="fp32", intermediate="fp32"},
+    {io="fp32", compute="fp32", intermediate="fp32"},
+]
+layouts = [""]

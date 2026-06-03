@@ -119,3 +119,197 @@ dtype_combos = [
     {io="fp32", compute="fp32", intermediate="fp32"},
 ]
 layouts = ["NCDHW", "NCHW", "NDHWC", "NHWC"]
+[[supported]]
+arch = "gfx942"
+platform = "linux"
+
+[[supported.matchers]]
+op_chains = [
+    "Batchnorm",
+    "Batchnorm + Pointwise:RELU_FWD[lower_clip,upper_clip]",
+    "Batchnorm + Pointwise:RELU_FWD[lower_clip]",
+    "Batchnorm + Pointwise:RELU_FWD[upper_clip]",
+    "BatchnormInference + Pointwise:RELU_FWD",
+    "BatchnormInferenceVarianceExt",
+    "BatchnormInferenceVarianceExt + Pointwise:RELU_FWD",
+    "BatchnormInferenceVarianceExt[multi_batch] + Pointwise:RELU_FWD[lower_clip,upper_clip]",
+    "BatchnormInferenceVarianceExt[multi_batch] + Pointwise:RELU_FWD[lower_clip]",
+    "BatchnormInferenceVarianceExt[multi_batch] + Pointwise:RELU_FWD[upper_clip]",
+    "BatchnormInference[multi_batch] + Pointwise:RELU_FWD[lower_clip,upper_clip]",
+    "BatchnormInference[multi_batch] + Pointwise:RELU_FWD[lower_clip]",
+    "BatchnormInference[multi_batch] + Pointwise:RELU_FWD[upper_clip]",
+]
+dtype_combos = [
+    {io="bf16", compute="fp32", intermediate="fp32"},
+    {io="fp16", compute="fp32", intermediate="fp32"},
+    {io="fp32", compute="fp32", intermediate="fp32"},
+]
+layouts = ["NCHW", "NCL", "NHWC", "NLC"]
+
+[[supported.matchers]]
+op_chains = [
+    "Batchnorm + Pointwise:RELU_FWD",
+]
+dtype_combos = [
+    {io="bf16", compute="fp32", intermediate="fp32"},
+    {io="fp16", compute="fp32", intermediate="fp32"},
+    {io="fp32", compute="fp32", intermediate="fp32"},
+]
+layouts = ["NCL", "NLC"]
+
+[[supported.matchers]]
+op_chains = [
+    "BatchnormBackward",
+    "BatchnormBackward[multi_batch]",
+    "BatchnormInference",
+    "BatchnormInferenceVarianceExt[multi_batch]",
+    "BatchnormInferenceVarianceExt[multi_batch] + Pointwise:RELU_FWD",
+    "BatchnormInference[multi_batch]",
+    "BatchnormInference[multi_batch] + Pointwise:RELU_FWD",
+    "Batchnorm[multi_batch]",
+    "Batchnorm[multi_batch] + Pointwise:RELU_FWD",
+    "Batchnorm[multi_batch] + Pointwise:RELU_FWD[lower_clip,upper_clip]",
+    "Batchnorm[multi_batch] + Pointwise:RELU_FWD[lower_clip]",
+    "Batchnorm[multi_batch] + Pointwise:RELU_FWD[upper_clip]",
+]
+dtype_combos = [
+    {io="bf16", compute="fp32", intermediate="fp32"},
+    {io="fp16", compute="fp32", intermediate="fp32"},
+    {io="fp32", compute="fp32", intermediate="fp32"},
+]
+layouts = ["NCDHW", "NCHW", "NCL", "NDHWC", "NHWC", "NLC"]
+
+[[supported.matchers]]
+op_chains = [
+    "BatchnormInference + Pointwise:RELU_FWD[lower_clip,upper_clip]",
+    "BatchnormInference + Pointwise:RELU_FWD[lower_clip]",
+    "BatchnormInference + Pointwise:RELU_FWD[upper_clip]",
+    "BatchnormInferenceVarianceExt + Pointwise:RELU_FWD[lower_clip,upper_clip]",
+    "BatchnormInferenceVarianceExt + Pointwise:RELU_FWD[lower_clip]",
+    "BatchnormInferenceVarianceExt + Pointwise:RELU_FWD[upper_clip]",
+]
+dtype_combos = [
+    {io="bf16", compute="fp32", intermediate="fp32"},
+    {io="fp16", compute="fp32", intermediate="fp32"},
+    {io="fp32", compute="fp32", intermediate="fp32"},
+]
+layouts = ["NCHW", "NHWC"]
+
+[[supported.matchers]]
+op_chains = [
+    "ConvDgrad",
+    "ConvDgrad[1x1,multi_batch]",
+    "ConvDgrad[1x1]",
+    "ConvDgrad[grouped,multi_batch,padding,stride,dilation]",
+    "ConvDgrad[grouped,padding]",
+    "ConvDgrad[non_square,padding]",
+    "ConvDgrad[padding,dilation]",
+    "ConvDgrad[padding,stride]",
+    "ConvDgrad[padding]",
+    "ConvFprop",
+    "ConvFprop[1x1,multi_batch]",
+    "ConvFprop[1x1]",
+    "ConvFprop[grouped,multi_batch,padding,stride,dilation]",
+    "ConvFprop[grouped,padding]",
+    "ConvFprop[non_square,padding]",
+    "ConvFprop[padding,dilation]",
+    "ConvFprop[padding,stride]",
+    "ConvFprop[padding]",
+    "ConvWgrad",
+    "ConvWgrad[1x1,multi_batch]",
+    "ConvWgrad[1x1]",
+    "ConvWgrad[grouped,multi_batch,padding,stride,dilation]",
+    "ConvWgrad[grouped,padding]",
+    "ConvWgrad[non_square,padding]",
+    "ConvWgrad[padding,dilation]",
+    "ConvWgrad[padding,stride]",
+    "ConvWgrad[padding]",
+]
+dtype_combos = [
+    {io="bf16", compute="fp32", intermediate="bf16"},
+    {io="fp16", compute="fp32", intermediate="fp16"},
+    {io="fp32", compute="fp32", intermediate="fp32"},
+]
+layouts = ["NCDHW", "NCHW", "NDHWC", "NHWC"]
+
+[[supported.matchers]]
+op_chains = [
+    "ConvFprop + Pointwise:ADD + Pointwise:RELU_FWD",
+    "ConvFprop + Pointwise:ADD + Pointwise:RELU_FWD[lower_clip,upper_clip]",
+    "ConvFprop + Pointwise:ADD + Pointwise:RELU_FWD[lower_clip]",
+    "ConvFprop + Pointwise:ADD + Pointwise:RELU_FWD[upper_clip]",
+    "ConvFprop + Pointwise:RELU_FWD",
+    "ConvFprop + Pointwise:RELU_FWD[lower_clip,upper_clip]",
+    "ConvFprop + Pointwise:RELU_FWD[lower_clip]",
+    "ConvFprop + Pointwise:RELU_FWD[upper_clip]",
+    "ConvFprop[1x1,multi_batch] + Pointwise:ADD + Pointwise:RELU_FWD",
+    "ConvFprop[1x1,multi_batch] + Pointwise:ADD + Pointwise:RELU_FWD[lower_clip,upper_clip]",
+    "ConvFprop[1x1,multi_batch] + Pointwise:ADD + Pointwise:RELU_FWD[lower_clip]",
+    "ConvFprop[1x1,multi_batch] + Pointwise:ADD + Pointwise:RELU_FWD[upper_clip]",
+    "ConvFprop[1x1,multi_batch] + Pointwise:RELU_FWD",
+    "ConvFprop[1x1,multi_batch] + Pointwise:RELU_FWD[lower_clip,upper_clip]",
+    "ConvFprop[1x1,multi_batch] + Pointwise:RELU_FWD[lower_clip]",
+    "ConvFprop[1x1,multi_batch] + Pointwise:RELU_FWD[upper_clip]",
+    "ConvFprop[1x1] + Pointwise:ADD + Pointwise:RELU_FWD",
+    "ConvFprop[1x1] + Pointwise:ADD + Pointwise:RELU_FWD[lower_clip,upper_clip]",
+    "ConvFprop[1x1] + Pointwise:ADD + Pointwise:RELU_FWD[lower_clip]",
+    "ConvFprop[1x1] + Pointwise:ADD + Pointwise:RELU_FWD[upper_clip]",
+    "ConvFprop[1x1] + Pointwise:RELU_FWD",
+    "ConvFprop[1x1] + Pointwise:RELU_FWD[lower_clip,upper_clip]",
+    "ConvFprop[1x1] + Pointwise:RELU_FWD[lower_clip]",
+    "ConvFprop[1x1] + Pointwise:RELU_FWD[upper_clip]",
+    "ConvFprop[grouped,multi_batch,padding,stride,dilation] + Pointwise:ADD + Pointwise:RELU_FWD",
+    "ConvFprop[grouped,multi_batch,padding,stride,dilation] + Pointwise:ADD + Pointwise:RELU_FWD[lower_clip,upper_clip]",
+    "ConvFprop[grouped,multi_batch,padding,stride,dilation] + Pointwise:ADD + Pointwise:RELU_FWD[lower_clip]",
+    "ConvFprop[grouped,multi_batch,padding,stride,dilation] + Pointwise:ADD + Pointwise:RELU_FWD[upper_clip]",
+    "ConvFprop[grouped,multi_batch,padding,stride,dilation] + Pointwise:RELU_FWD",
+    "ConvFprop[grouped,multi_batch,padding,stride,dilation] + Pointwise:RELU_FWD[lower_clip,upper_clip]",
+    "ConvFprop[grouped,multi_batch,padding,stride,dilation] + Pointwise:RELU_FWD[lower_clip]",
+    "ConvFprop[grouped,multi_batch,padding,stride,dilation] + Pointwise:RELU_FWD[upper_clip]",
+    "ConvFprop[grouped,padding] + Pointwise:ADD + Pointwise:RELU_FWD",
+    "ConvFprop[grouped,padding] + Pointwise:ADD + Pointwise:RELU_FWD[lower_clip,upper_clip]",
+    "ConvFprop[grouped,padding] + Pointwise:ADD + Pointwise:RELU_FWD[lower_clip]",
+    "ConvFprop[grouped,padding] + Pointwise:ADD + Pointwise:RELU_FWD[upper_clip]",
+    "ConvFprop[grouped,padding] + Pointwise:RELU_FWD",
+    "ConvFprop[grouped,padding] + Pointwise:RELU_FWD[lower_clip,upper_clip]",
+    "ConvFprop[grouped,padding] + Pointwise:RELU_FWD[lower_clip]",
+    "ConvFprop[grouped,padding] + Pointwise:RELU_FWD[upper_clip]",
+    "ConvFprop[non_square,padding] + Pointwise:ADD + Pointwise:RELU_FWD",
+    "ConvFprop[non_square,padding] + Pointwise:ADD + Pointwise:RELU_FWD[lower_clip,upper_clip]",
+    "ConvFprop[non_square,padding] + Pointwise:ADD + Pointwise:RELU_FWD[lower_clip]",
+    "ConvFprop[non_square,padding] + Pointwise:ADD + Pointwise:RELU_FWD[upper_clip]",
+    "ConvFprop[non_square,padding] + Pointwise:RELU_FWD",
+    "ConvFprop[non_square,padding] + Pointwise:RELU_FWD[lower_clip,upper_clip]",
+    "ConvFprop[non_square,padding] + Pointwise:RELU_FWD[lower_clip]",
+    "ConvFprop[non_square,padding] + Pointwise:RELU_FWD[upper_clip]",
+    "ConvFprop[padding,dilation] + Pointwise:ADD + Pointwise:RELU_FWD",
+    "ConvFprop[padding,dilation] + Pointwise:ADD + Pointwise:RELU_FWD[lower_clip,upper_clip]",
+    "ConvFprop[padding,dilation] + Pointwise:ADD + Pointwise:RELU_FWD[lower_clip]",
+    "ConvFprop[padding,dilation] + Pointwise:ADD + Pointwise:RELU_FWD[upper_clip]",
+    "ConvFprop[padding,dilation] + Pointwise:RELU_FWD",
+    "ConvFprop[padding,dilation] + Pointwise:RELU_FWD[lower_clip,upper_clip]",
+    "ConvFprop[padding,dilation] + Pointwise:RELU_FWD[lower_clip]",
+    "ConvFprop[padding,dilation] + Pointwise:RELU_FWD[upper_clip]",
+    "ConvFprop[padding,stride] + Pointwise:ADD + Pointwise:RELU_FWD",
+    "ConvFprop[padding,stride] + Pointwise:ADD + Pointwise:RELU_FWD[lower_clip,upper_clip]",
+    "ConvFprop[padding,stride] + Pointwise:ADD + Pointwise:RELU_FWD[lower_clip]",
+    "ConvFprop[padding,stride] + Pointwise:ADD + Pointwise:RELU_FWD[upper_clip]",
+    "ConvFprop[padding,stride] + Pointwise:RELU_FWD",
+    "ConvFprop[padding,stride] + Pointwise:RELU_FWD[lower_clip,upper_clip]",
+    "ConvFprop[padding,stride] + Pointwise:RELU_FWD[lower_clip]",
+    "ConvFprop[padding,stride] + Pointwise:RELU_FWD[upper_clip]",
+    "ConvFprop[padding] + Pointwise:ADD + Pointwise:RELU_FWD",
+    "ConvFprop[padding] + Pointwise:ADD + Pointwise:RELU_FWD[lower_clip,upper_clip]",
+    "ConvFprop[padding] + Pointwise:ADD + Pointwise:RELU_FWD[lower_clip]",
+    "ConvFprop[padding] + Pointwise:ADD + Pointwise:RELU_FWD[upper_clip]",
+    "ConvFprop[padding] + Pointwise:RELU_FWD",
+    "ConvFprop[padding] + Pointwise:RELU_FWD[lower_clip,upper_clip]",
+    "ConvFprop[padding] + Pointwise:RELU_FWD[lower_clip]",
+    "ConvFprop[padding] + Pointwise:RELU_FWD[upper_clip]",
+]
+dtype_combos = [
+    {io="bf16", compute="fp32", intermediate="fp32"},
+    {io="fp16", compute="fp32", intermediate="fp32"},
+    {io="fp32", compute="fp32", intermediate="fp32"},
+]
+layouts = ["NCDHW", "NCHW", "NDHWC", "NHWC"]
