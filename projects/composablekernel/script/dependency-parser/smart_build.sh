@@ -134,7 +134,8 @@ if [ "$DRY_RUN" = "true" ]; then
     python3 "${SCRIPT_DIR}/main.py" validate \
         tests_to_run.json \
         --ninja-targets ninja_targets.txt \
-        --output smoke_result.json
+        --output smoke_result.json \
+        --junit smoke_result.xml
     echo "[OK] Dry run complete - selection validated against ninja target namespace"
     exit 0
 fi

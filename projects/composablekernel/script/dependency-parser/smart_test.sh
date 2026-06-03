@@ -27,6 +27,23 @@ source "${SCRIPT_DIR}/lib_env.sh"
 init_smart_build_env
 LOG_FILE="${BUILD_DIR}/smart_test.log"
 
+# --dry-run prints the ctest command(s) that would run, without executing them
+# (GPU-free verification of the full/selective/none dispatch).
+DRY_RUN="${DRY_RUN:-false}"
+for arg in "$@"; do
+    case "$arg" in
+        --dry-run) DRY_RUN=true ;;
+    esac
+done
+# run_ctest <args...>: execute ctest, or just print it under DRY_RUN.
+run_ctest() {
+    if [ "$DRY_RUN" = "true" ]; then
+        echo "DRY RUN would run: CTEST_PARALLEL_LEVEL=${CTEST_PARALLEL} ctest $*"
+    else
+        CTEST_PARALLEL_LEVEL=${CTEST_PARALLEL} ctest "$@"
+    fi
+}
+
 # shellcheck source=lib_logging.sh
 source "${SCRIPT_DIR}/lib_logging.sh"
 start_tee_log "${LOG_FILE}"
@@ -64,7 +81,7 @@ case "${MODE}" in
     full)
         echo ""
         echo "Full mode - running the complete ctest suite..."
-        CTEST_PARALLEL_LEVEL=${CTEST_PARALLEL} ctest --output-on-failure
+        run_ctest --output-on-failure
         echo ""
         echo "[OK] Smart test complete (full mode)"
         exit 0
@@ -81,12 +98,12 @@ case "${MODE}" in
 
         if [ "$NUM_CHUNKS" -eq 1 ]; then
             TEST_REGEX=$(jq -r '.regex_chunks[0]' tests_to_run.json)
-            CTEST_PARALLEL_LEVEL=${CTEST_PARALLEL} ctest --output-on-failure -R "${TEST_REGEX}"
+            run_ctest --output-on-failure -R "${TEST_REGEX}"
         else
             for ((i=0; i<NUM_CHUNKS; i++)); do
                 TEST_REGEX=$(jq -r ".regex_chunks[$i]" tests_to_run.json)
                 echo "Running test chunk $((i+1))/${NUM_CHUNKS}"
-                CTEST_PARALLEL_LEVEL=${CTEST_PARALLEL} ctest --output-on-failure -R "${TEST_REGEX}"
+                run_ctest --output-on-failure -R "${TEST_REGEX}"
             done
         fi
         echo ""
