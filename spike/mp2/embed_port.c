@@ -15,3 +15,15 @@ mp_lexer_t* mp_lexer_new_from_file(qstr filename) {
     (void)filename;
     mp_raise_NotImplementedError(MP_ERROR_TEXT("filesystem source import not supported"));
 }
+
+#include "py/mperrno.h"
+
+// No filesystem: open() exists (so ck_dsl's `try: open(...) except OSError` paths
+// fall back cleanly) but always fails.
+static mp_obj_t embed_builtin_open(size_t n_args, const mp_obj_t* args, mp_map_t* kwargs) {
+    (void)n_args;
+    (void)args;
+    (void)kwargs;
+    mp_raise_OSError(MP_ENOENT);
+}
+MP_DEFINE_CONST_FUN_OBJ_KW(mp_builtin_open_obj, 1, embed_builtin_open);

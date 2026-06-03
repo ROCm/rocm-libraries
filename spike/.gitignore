@@ -8,3 +8,4 @@ mp1/*.ll
 mp2/micropython_embed/
 mp2/build-embed/
 mp2/embed_ckdsl
+mp2/frozen_src/

@@ -91,7 +91,10 @@ def _make_init(fields, frozen):
                 val = f.default_factory()
             else:
                 raise TypeError("missing required argument: '%s'" % f.name)
-            object.__setattr__(self, f.name, val)
+            # Plain setattr: MicroPython's embed `object` has no __setattr__, and
+            # we don't install a frozen __setattr__ blocker (immutability is not
+            # enforced — ck_dsl relies on hashability/eq, not on frozen raising).
+            setattr(self, f.name, val)
         post = getattr(self, "__post_init__", None)
         if post is not None:
             post()
@@ -162,9 +165,9 @@ def _process(cls, frozen, eq, order):
         cls.__eq__ = _make_eq(fields)
         if frozen and "__hash__" not in cls.__dict__:
             cls.__hash__ = _make_hash(fields)
-    if frozen:
-        cls.__setattr__ = _frozen_setattr
-        cls.__delattr__ = _frozen_delattr
+    # NOTE: frozen does NOT install a __setattr__/__delattr__ blocker — MicroPython's
+    # embed `object` has no __setattr__ to bypass it in __init__. Immutability is not
+    # enforced; frozen only adds __hash__ (ck_dsl relies on hashability/eq).
     return cls
 
 

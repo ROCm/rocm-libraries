@@ -13,8 +13,8 @@ def lru_cache(maxsize=128, typed=False):
             cache[key] = r
             return r
 
-        wrapper.cache_clear = cache.clear
-        wrapper.__wrapped__ = fn
+        # NOTE: no wrapper.cache_clear/__wrapped__ attrs — embed MicroPython
+        # functions don't support attribute assignment (MICROPY_PY_FUNCTION_ATTRS off).
         return wrapper
 
     # Bare @lru_cache (no parens): maxsize is actually the function.

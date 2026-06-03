@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Build the mp2 embed integration binary. Regenerates the embed package + frozen
-# content, then compiles it with main.c. (Outputs are git-ignored.)
+# Build the mp2 embed integration binary: generate the conv codegen frozen tree,
+# the embed package + frozen content, then compile with main.c. (Outputs git-ignored.)
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$HERE"
+python3 build_frozen.py
 make -f gen.mk micropython-embed-package
 make -f gen.mk build-embed/frozen_content.c
 mapfile -t SRCS < <(find micropython_embed -name '*.c')

@@ -7,7 +7,7 @@
 
 // Minimal base (disables optional extmod modules the bare embed port doesn't
 // compile); we raise features incrementally as the bundle needs them.
-#define MICROPY_CONFIG_ROM_LEVEL (MICROPY_CONFIG_ROM_LEVEL_MINIMUM)
+#define MICROPY_CONFIG_ROM_LEVEL (MICROPY_CONFIG_ROM_LEVEL_CORE_FEATURES)
 
 #define MICROPY_ENABLE_COMPILER (1)
 #define MICROPY_ENABLE_GC (1)
@@ -33,6 +33,13 @@
 // @property is used by the dataclasses/pathlib shims and ck_dsl.
 #define MICROPY_PY_BUILTINS_PROPERTY (1)
 
+// ck_dsl + the dataclasses shim need __dict__/__bases__/__name__ (off at MINIMUM).
+#define MICROPY_PY_BUILTINS_FROZENSET (1)
+#define MICROPY_CPYTHON_COMPAT (1)
+
+// No filesystem: keep io/open out (CORE_FEATURES would enable them).
+#define MICROPY_PY_IO (1)
+
 // Chain the frozen modules' qstr pool onto the runtime qstr pool, so frozen
 // bytecode's qstr indices resolve (else find_qstr asserts). Standard freezing wiring.
 #if MICROPY_MODULE_FROZEN_MPY
@@ -45,3 +52,9 @@
 #define MICROPY_PY_RE_MATCH_SPAN_START_END (1)
 #define MICROPY_PY_RE_SUB (1)
 #define MICROPY_PY_BUILTINS_BYTEARRAY (1)
+
+// str methods ck_dsl uses that CORE_FEATURES leaves off (pure-str, no deps).
+#define MICROPY_PY_BUILTINS_STR_PARTITION (1)
+#define MICROPY_PY_BUILTINS_STR_CENTER (1)
+#define MICROPY_PY_BUILTINS_STR_COUNT (1)
+#define MICROPY_PY_BUILTINS_STR_SPLITLINES (1)

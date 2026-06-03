@@ -202,6 +202,12 @@ def _ensure_field_import(tree):
 def _transform_file(path):
     with open(path) as f:
         src = f.read()
+    # MicroPython's embed `object` has no __setattr__; ck_dsl uses it in hand-written
+    # frozen __init__s. Since the shim doesn't enforce immutability, plain setattr is
+    # equivalent: object.__setattr__(self, n, v) -> setattr(self, n, v).
+    src2 = src.replace("object.__setattr__(", "setattr(")
+    text_changed = src2 != src
+    src = src2
     try:
         tree = ast.parse(src)
     except SyntaxError as e:
@@ -211,6 +217,7 @@ def _transform_file(path):
     x.visit(tree)
     if x.changed:
         _ensure_field_import(tree)
+    if x.changed or text_changed:
         ast.fix_missing_locations(tree)
         with open(path, "w") as f:
             f.write(ast.unparse(tree))
