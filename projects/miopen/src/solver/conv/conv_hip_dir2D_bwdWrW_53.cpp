@@ -88,9 +88,9 @@ bool ConvHipBwdWrW53::IsApplicable(const ExecutionContext& ctx,
            // loop.
            // Remind that input is output, output is input.
            (problem.GetInHeight() ==
-            problem.GetOutHeight() + 2U * problem.GetPadH() - problem.GetWeightsHeight() + 1) &&
+            problem.GetOutHeight() + 2 * problem.GetPadH() - problem.GetWeightsHeight() + 1) &&
            (problem.GetInWidth() ==
-            problem.GetOutWidth() + 2U * problem.GetPadW() - problem.GetWeightsWidth() + 1) &&
+            problem.GetOutWidth() + 2 * problem.GetPadW() - problem.GetWeightsWidth() + 1) &&
 
            // Avoid LDS over-allocation
            GetSolution(ctx, problem).Succeeded();
