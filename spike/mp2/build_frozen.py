@@ -84,6 +84,28 @@ s = s.replace("import json\n", "")  # json.load patched out; embed has no json m
 open(tp, "w").write(s)
 assert "_EMBEDDED_DOC" in open(tp).read(), "target.py patch failed"
 
+# 4b. Swap ck_dsl's runtime/comgr.py backend to the native `comgr` module. This is
+#     the actual ck_dsl change for Arch A: comgr.py keeps its interface
+#     (build_hsaco_from_llvm_ir -> (hsaco, timings)) but its body calls the native
+#     C++ comgr instead of ctypes -> libamd_comgr. ck_dsl's flow is otherwise intact.
+os.makedirs(os.path.join(FROZEN, "ck_dsl/runtime"), exist_ok=True)
+open(os.path.join(FROZEN, "ck_dsl/runtime/__init__.py"), "w").write(
+    "# trimmed for MicroPython bundle\n"
+)
+open(os.path.join(FROZEN, "ck_dsl/runtime/comgr.py"), "w").write(
+    "# Native-backed comgr for the embed build: same interface as the ctypes\n"
+    "# original, but the backend is the C++ `comgr` module exposed to the interpreter.\n\n\n"
+    "class ComgrError(RuntimeError):\n    pass\n\n\n"
+    "class ComgrTimings:\n"
+    "    def __init__(self):\n"
+    "        self.bc = 0.0\n        self.relocatable = 0.0\n        self.executable = 0.0\n\n"
+    "    @property\n    def total(self):\n        return self.bc + self.relocatable + self.executable\n\n\n"
+    "def build_hsaco_from_llvm_ir(ir_text, isa='amdgcn-amd-amdhsa--gfx950', options=None):\n"
+    "    import comgr\n"
+    "    hsaco = comgr.build_hsaco(ir_text, isa, list(options or ['-O3']))\n"
+    "    return hsaco, ComgrTimings()\n"
+)
+
 # 5. Entry module the C host imports + calls. Mirrors ck_dsl's flow: lower to IR,
 #    then call comgr (exposed as a native module) -> returns the HSACO bytes, like
 #    runtime/comgr.py would. So the C host gets a HSACO, not IR text.
@@ -100,8 +122,12 @@ with open(os.path.join(FROZEN, "ckdsl_entry.py"), "w") as f:
         "        warp_tile_m=32, warp_tile_n=32, warp_tile_k=16)\n"
         "    ir = lower_kernel_to_llvm(\n"
         "        build_implicit_gemm_conv(spec, arch='gfx950'), arch='gfx950')\n"
-        "    import comgr  # native C++ module exposed to the interpreter\n"
-        "    return comgr.build_hsaco(ir, 'amdgcn-amd-amdhsa--gfx950', ['-O3'])\n"
+        "    # ck_dsl flow: go through runtime/comgr.py (now native-backed), not the\n"
+        "    # native module directly -- exactly how ck_dsl/helpers/compile.py calls it.\n"
+        "    from ck_dsl.runtime.comgr import build_hsaco_from_llvm_ir\n"
+        "    hsaco, _timings = build_hsaco_from_llvm_ir(\n"
+        "        ir, isa='amdgcn-amd-amdhsa--gfx950', options=['-O3'])\n"
+        "    return hsaco\n"
     )
 
 n = sum(len(fs) for _, _, fs in os.walk(FROZEN))
