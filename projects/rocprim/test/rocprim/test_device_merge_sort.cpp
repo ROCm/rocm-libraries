@@ -527,10 +527,7 @@ TEST(RocprimDeviceSortTests, LargeIndices)
                                                rocprim::identity<key_type>());
 
         key_type* d_output;
-        if (!memcheck.alloc_device_bytes(size * sizeof(*d_output)))
-        {
-            break;
-        }
+        MEMCHECK_OR_BREAK_ALLOC_DEVICE_BYTES(size * sizeof(*d_output))
         hipError_t malloc_status = common::hipMallocHelper(&d_output, size * sizeof(*d_output));
         if(malloc_status == hipErrorOutOfMemory)
         {
@@ -560,10 +557,7 @@ TEST(RocprimDeviceSortTests, LargeIndices)
         ASSERT_GT(temp_storage_size_bytes, 0);
 
         // allocate temporary storage
-        if (!memcheck.alloc_device_bytes(temp_storage_size_bytes))
-        {
-            break;
-        }
+        MEMCHECK_OR_BREAK_ALLOC_DEVICE_BYTES(temp_storage_size_bytes)
         malloc_status = common::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes);
         if(malloc_status == hipErrorOutOfMemory)
         {
@@ -586,10 +580,7 @@ TEST(RocprimDeviceSortTests, LargeIndices)
         HIP_CHECK(hipDeviceSynchronize());
 
         // Copy output to host
-        if (!memcheck.alloc_host<key_type>(size))
-        {
-            break;
-        }
+        MEMCHECK_OR_BREAK_ALLOC_HOST(key_type, size)
         std::vector<key_type> output(size);
         HIP_CHECK(hipMemcpy(output.data(),
                             d_output,

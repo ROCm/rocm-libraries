@@ -1303,10 +1303,7 @@ inline void sort_keys_large_sizes()
 
         test_utils::MemCheck memcheck;
 
-        if (!memcheck.alloc_device<key_type>(size))
-        {
-            break;
-        }
+        MEMCHECK_OR_BREAK_ALLOC_DEVICE(key_type, size)
         common::device_ptr<key_type> d_keys;
         if(!d_keys.resize_with_memory_check(size))
         {
@@ -1315,10 +1312,7 @@ inline void sort_keys_large_sizes()
         }
 
         // Generate data
-        if(!memcheck.alloc_host<key_type>(size))
-        {
-            break;
-        }
+        MEMCHECK_OR_BREAK_ALLOC_HOST(key_type, size)
         std::vector<key_type> keys_input(size);
         std::iota(keys_input.begin(), keys_input.end(), 0);
         d_keys.store(keys_input);
@@ -1334,10 +1328,7 @@ inline void sort_keys_large_sizes()
                                            stream));
         ASSERT_GT(temporary_storage_bytes, 0U);
 
-        if (!memcheck.alloc_device_bytes(temporary_storage_bytes))
-        {
-            break;
-        }
+        MEMCHECK_OR_BREAK_ALLOC_DEVICE_BYTES(temporary_storage_bytes)
         common::device_ptr<void> d_temporary_storage;
         if(!d_temporary_storage.resize_with_memory_check(temporary_storage_bytes))
         {
@@ -1354,10 +1345,7 @@ inline void sort_keys_large_sizes()
                                            end_bit,
                                            stream));
 
-        if (!memcheck.alloc_host_bytes(d_keys.msize()))
-        {
-            break;
-        }
+        MEMCHECK_OR_BREAK_ALLOC_HOST_BYTES(d_keys.msize())
         const auto keys_output = d_keys.load();
 
         // Check if output values are as expected

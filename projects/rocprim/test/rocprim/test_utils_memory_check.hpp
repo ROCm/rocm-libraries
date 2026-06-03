@@ -208,5 +208,19 @@ private:
     float padding_factor;
 };
 
+// For brevity, these macros assume your MemCheck instance is named 'memcheck'
+#define MEMCHECK_OR_BREAK_ALLOC_DEVICE(T, size) \
+    if (!memcheck.alloc_device<T>(size)) { break; }
+
+#define MEMCHECK_OR_BREAK_ALLOC_DEVICE_BYTES(size) \
+    if (!memcheck.alloc_device_bytes(size)) { break; }
+
+#define MEMCHECK_OR_BREAK_ALLOC_HOST(T, size) \
+    if (!memcheck.alloc_host<T>(size)) { break; }
+
+#define MEMCHECK_OR_BREAK_ALLOC_HOST_BYTES(size) \
+    if (!memcheck.alloc_host_bytes(size)) { break; }
+
 }
+
 #endif // TEST_TEST_UTILS_MEMORY_CHECK_HPP_
