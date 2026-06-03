@@ -60,14 +60,13 @@ int main()
               << "howmany: " << howmany << "\n"
               << "istride: " << istride << "\tostride: " << ostride << "\n"
               << "inembed: " << inembed[0] << " " << inembed[1] << " " << inembed[2] << "\n"
-              << "onembed: " << onembed[0] << " " << inembed[1] << " " << onembed[2] << "\n"
+              << "onembed: " << onembed[0] << " " << onembed[1] << " " << onembed[2] << "\n"
               << "idist: " << idist << "\todist: " << odist << "\n"
               << "inbytes: " << total_inbytes << "\toutbytes: " << total_outbytes << "\n"
               << std::endl;
 
     std::cout << "input:\n";
     std::vector<float> indata(howmany * idist);
-    std::fill(indata.begin(), indata.end(), 0.0);
     for(int idxb = 0; idxb < howmany; ++idxb)
     {
         for(int idx0 = 0; idx0 < n[0]; ++idx0)
@@ -118,7 +117,6 @@ int main()
                                odist,
                                HIPFFT_R2C, // Use HIPFFT_D2Z for double-precsion.
                                howmany);
-    std::cout << hipfft_rt << std::endl;
     if(hipfft_rt != HIPFFT_SUCCESS)
         throw std::runtime_error("failed to create plan");
 
