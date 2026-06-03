@@ -145,15 +145,22 @@ These have hundreds of cap-gated `reject()` branches and need a config matrix.
 7. `next-goal-<target>.md` (slice 3: derivation/reject machinery, grounded) +
    commit. Mark this checklist done.
 
-## Definition of done checklist
+## Definition of done checklist — COMPLETE
 
-- [ ] `coverage-before.txt` captured (baseline) BEFORE new tests.
-- [ ] Targeted symbols ≥95% line (file % lower — demonstrate residual out-of-slice).
-- [ ] `coverage-after.txt` captured; before→after delta in target.md.
-- [ ] Every targeted Tier A/B symbol has snapshot coverage; deferred symbols documented.
-- [ ] Solution state snapshots normalised (no live objects / paths / rocm_version).
-- [ ] resistance.md lists each resisting fn (expect: deep reject-heavy derivation deferred).
-- [ ] recommendations.md: go/no-go on slice 3 (derivation/reject) vs `GlobalParameters.py`.
-- [ ] full `-m unit` ≥ 1800 passed / 201 skipped, no failures, additive only.
-- [ ] All work committed (atomic, no push); tree clean.
-- [ ] Next goal prompt `next-goal-<target>.md` created and committed.
+- [x] `coverage-before.txt` captured (baseline) BEFORE new tests.
+      (whole-file 3272/2002 = 38.81% line; targeted surface largely uncovered.)
+- [x] Targeted symbols ≥95% line — the slice-2 **surface** symbols (Mapping,
+      identity, simple statics, getKernels) are fully covered; only the dead
+      `__ne__` L5229 remains. Whole-file 39.55% (derivation = slice 3).
+- [x] `coverage-after.txt` captured; before→after delta in target.md.
+- [x] Every targeted Tier A/B symbol has snapshot coverage; deferred derivation
+      symbols documented (slice 3).
+- [x] Solution state snapshots normalised (schema + curated stable fields; no
+      env-coupled values / rocm_version).
+- [x] resistance.md: dead `__ne__` L5229; the two pipeline-dependent kernel
+      accessors (AttributeError); the slice-3 deferral.
+- [x] recommendations.md: GO → Solution slice 3 (derivation/reject machinery);
+      `GlobalParameters.py` as a smaller intermediate win.
+- [x] full `-m unit` = **1818 passed / 201 skipped**, no failures, additive only.
+- [x] All work committed (atomic, no push); tree clean.
+- [x] Next goal prompt `next-goal-solution-derivation.md` created and committed.
