@@ -383,5 +383,126 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicable_PrefersBottomRightCausalOverWindowBo
     EXPECT_EQ(maskType, plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL);
 }
 
+// Modern bounds-trio path (no deprecated boolean set). An unset bound is treated
+// as unbounded (-1), so a partially specified trio still derives the mask it
+// describes.
+
+TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_RightZeroLeftUnsetDerivesTopLeftCausal)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    // The canonical causal request: left unbounded (unset) with right_bound=0.
+    // An unset left bound must be read as unbounded, not as "no mask".
+    auto builder = createSdpaFwdGraphWithMask(
+        /*causalMask=*/false,
+        /*causalMaskBottomRight=*/false,
+        flatbuffers::nullopt,
+        flatbuffers::Optional<int64_t>(0),
+        DiagonalAlignment::TOP_LEFT);
+
+    plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
+    EXPECT_NO_THROW(maskType = classifyMask(builder));
+    EXPECT_EQ(maskType, plan_utils::MaskType::TOP_LEFT_CAUSAL);
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_RightZeroBottomRightDerivesBottomRightCausal)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    // Same causal request with bottom-right diagonal alignment.
+    auto builder = createSdpaFwdGraphWithMask(
+        /*causalMask=*/false,
+        /*causalMaskBottomRight=*/false,
+        flatbuffers::nullopt,
+        flatbuffers::Optional<int64_t>(0),
+        DiagonalAlignment::BOTTOM_RIGHT);
+
+    plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
+    EXPECT_NO_THROW(maskType = classifyMask(builder));
+    EXPECT_EQ(maskType, plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL);
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_ExplicitCausalBoundsDeriveTopLeftCausal)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    // Explicit unbounded-left (left=-1) with right_bound=0 matches the unset case.
+    auto builder = createSdpaFwdGraphWithMask(
+        /*causalMask=*/false,
+        /*causalMaskBottomRight=*/false,
+        flatbuffers::Optional<int64_t>(-1),
+        flatbuffers::Optional<int64_t>(0),
+        DiagonalAlignment::TOP_LEFT);
+
+    plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
+    EXPECT_NO_THROW(maskType = classifyMask(builder));
+    EXPECT_EQ(maskType, plan_utils::MaskType::TOP_LEFT_CAUSAL);
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_BothUnsetDerivesNoMask)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    auto builder = createSdpaFwdGraphWithMask(
+        /*causalMask=*/false,
+        /*causalMaskBottomRight=*/false,
+        flatbuffers::nullopt,
+        flatbuffers::nullopt,
+        DiagonalAlignment::TOP_LEFT);
+
+    plan_utils::MaskType maskType = plan_utils::MaskType::WINDOW_GENERIC;
+    EXPECT_NO_THROW(maskType = classifyMask(builder));
+    EXPECT_EQ(maskType, plan_utils::MaskType::NO_MASK);
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_BothUnboundedDerivesNoMask)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    auto builder = createSdpaFwdGraphWithMask(
+        /*causalMask=*/false,
+        /*causalMaskBottomRight=*/false,
+        flatbuffers::Optional<int64_t>(-1),
+        flatbuffers::Optional<int64_t>(-1),
+        DiagonalAlignment::TOP_LEFT);
+
+    plan_utils::MaskType maskType = plan_utils::MaskType::WINDOW_GENERIC;
+    EXPECT_NO_THROW(maskType = classifyMask(builder));
+    EXPECT_EQ(maskType, plan_utils::MaskType::NO_MASK);
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_SymmetricWindowDerivesWindowGeneric)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    auto builder = createSdpaFwdGraphWithMask(
+        /*causalMask=*/false,
+        /*causalMaskBottomRight=*/false,
+        flatbuffers::Optional<int64_t>(64),
+        flatbuffers::Optional<int64_t>(64),
+        DiagonalAlignment::TOP_LEFT);
+
+    plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
+    EXPECT_NO_THROW(maskType = classifyMask(builder));
+    EXPECT_EQ(maskType, plan_utils::MaskType::WINDOW_GENERIC);
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_LeftOnlyDerivesWindowGeneric)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    // A bounded left with an unset (unbounded) right is a one-sided window.
+    auto builder = createSdpaFwdGraphWithMask(
+        /*causalMask=*/false,
+        /*causalMaskBottomRight=*/false,
+        flatbuffers::Optional<int64_t>(64),
+        flatbuffers::nullopt,
+        DiagonalAlignment::TOP_LEFT);
+
+    plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
+    EXPECT_NO_THROW(maskType = classifyMask(builder));
+    EXPECT_EQ(maskType, plan_utils::MaskType::WINDOW_GENERIC);
+}
+
 } // namespace
 } // namespace asm_sdpa_engine

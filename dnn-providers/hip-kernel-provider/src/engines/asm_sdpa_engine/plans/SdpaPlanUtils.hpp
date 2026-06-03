@@ -60,11 +60,14 @@ enum class MaskType : int
 // Guaranteeing the two parameter sets agree belongs in the hipDNN frontend; this
 // helper only resolves which source wins for dispatch.
 //
-// Absence-awareness limitation: the generated flatbuffer accessors expose the
-// causal_mask* fields as plain bool defaulting to false, with no has_*()
-// accessor. "Explicitly false" and "unset" are therefore indistinguishable; a
-// false bool is treated as "not requested". left_bound / right_bound are
-// flatbuffers::Optional, so their presence is detectable via has_value().
+// Absence-awareness: the generated flatbuffer accessors expose the causal_mask*
+// fields as plain bool defaulting to false, with no has_*() accessor.
+// "Explicitly false" and "unset" are therefore indistinguishable; a false bool
+// is treated as "not requested". left_bound / right_bound are
+// flatbuffers::Optional, but an unset bound is treated as unbounded (-1) to
+// match the canonical convention used across the SDPA path, so a partially
+// specified trio (e.g. only right_bound = 0) still derives a mask rather than
+// silently falling back to NO_MASK.
 template <typename SdpaAttrsT>
 MaskType getMaskType(const SdpaAttrsT& attrs)
 {
@@ -93,26 +96,22 @@ MaskType getMaskType(const SdpaAttrsT& attrs)
         return MaskType::BOTTOM_RIGHT_CAUSAL;
     }
 
-    // No deprecated boolean set: the modern bounds trio is authoritative. When
-    // the bounds are not both set the trio is silent and the mask is NO_MASK.
-    if(attrs.left_bound().has_value() && attrs.right_bound().has_value())
+    // No deprecated boolean set: the modern bounds trio is authoritative. An
+    // unset bound means unbounded, represented here as -1, so a partially
+    // specified trio still resolves to the mask it describes.
+    const int64_t left = attrs.left_bound().has_value() ? attrs.left_bound().value() : -1;
+    const int64_t right = attrs.right_bound().has_value() ? attrs.right_bound().value() : -1;
+    if(left == -1 && right == -1) // both unbounded
     {
-        const int64_t left = attrs.left_bound().value();
-        const int64_t right = attrs.right_bound().value();
-        if(left == -1 && right == -1) // both unbounded
-        {
-            return MaskType::NO_MASK;
-        }
-        if(left == -1 && right == 0) // causal: attend up to the diagonal
-        {
-            return attrs.diagonal_alignment() == DiagonalAlignment::BOTTOM_RIGHT
-                       ? MaskType::BOTTOM_RIGHT_CAUSAL
-                       : MaskType::TOP_LEFT_CAUSAL;
-        }
-        return MaskType::WINDOW_GENERIC; // anything else is a sliding window
+        return MaskType::NO_MASK;
     }
-
-    return MaskType::NO_MASK;
+    if(left == -1 && right == 0) // causal: attend up to the diagonal
+    {
+        return attrs.diagonal_alignment() == DiagonalAlignment::BOTTOM_RIGHT
+                   ? MaskType::BOTTOM_RIGHT_CAUSAL
+                   : MaskType::TOP_LEFT_CAUSAL;
+    }
+    return MaskType::WINDOW_GENERIC; // anything else is a sliding window
 }
 
 // =============================================================================
