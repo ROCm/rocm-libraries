@@ -52,37 +52,60 @@
 
 using namespace stinkytofu;
 
-// Structure to hold pass information
+// Structure to hold pass information.
+//
+// The creator receives the comma-separated argument list that was supplied
+// via `--PassName=arg1,arg2`. Passes that don't accept arguments simply
+// ignore the vector. Each pass is responsible for documenting and parsing
+// its own arguments (typically simple flag-name strings or key=value pairs).
 struct PassInfo {
     const char* name;
-    std::function<std::unique_ptr<Pass>()> creator;
+    std::function<std::unique_ptr<Pass>(const std::vector<std::string>& args)> creator;
 };
+
+// Helper: returns true if `args` contains the literal flag name `flag`
+// (case-sensitive, exact match).
+inline bool hasPassArg(const std::vector<std::string>& args, const char* flag) {
+    for (const auto& a : args)
+        if (a == flag) return true;
+    return false;
+}
 
 // List of available passes
 const std::vector<PassInfo> availablePasses = {
-    {"StinkyDAGSchedulerPass", []() { return createStinkyDAGSchedulerPass(); }},
-    {"StinkyUnrollWaitCntPass", []() { return createStinkyUnrollWaitCntPass(); }},
+    {"StinkyDAGSchedulerPass", [](const auto&) { return createStinkyDAGSchedulerPass(); }},
+    {"StinkyUnrollWaitCntPass", [](const auto&) { return createStinkyUnrollWaitCntPass(); }},
     {"StinkyBuildImplicitDependencyPass",
-     []() { return createStinkyBuildImplicitDependencyPass(); }},
-    {"StinkyRemoveWaitCntPass", []() { return createStinkyRemoveWaitCntPass(); }},
-    {"StinkyRemoveNopPass", []() { return createStinkyRemoveNopPass(); }},
-    {"StinkyWaitCntInsertionPass", []() { return createStinkyWaitCntInsertionPass(); }},
-    {"ScheduleLastLRsPass", []() { return createScheduleLastLRsPass(); }},
-    {"ScheduleFirstLRsPass", []() { return createScheduleFirstLRsPass(); }},
-    {"BuildUseDefChainPass", []() { return createBuildUseDefChainPass(); }},
-    {"CFGBuilderPass", []() { return createCFGBuilderPass(); }},
+     [](const auto&) { return createStinkyBuildImplicitDependencyPass(); }},
+    {"StinkyRemoveWaitCntPass", [](const auto&) { return createStinkyRemoveWaitCntPass(); }},
+    {"StinkyRemoveNopPass", [](const auto&) { return createStinkyRemoveNopPass(); }},
+    {"StinkyWaitCntInsertionPass", [](const auto&) { return createStinkyWaitCntInsertionPass(); }},
+    {"ScheduleLastLRsPass", [](const auto&) { return createScheduleLastLRsPass(); }},
+    {"ScheduleFirstLRsPass", [](const auto&) { return createScheduleFirstLRsPass(); }},
+    // BuildUseDefChainPass accepts:
+    //   includePseudo    — also build chains for pseudo registers (memtokens)
+    //   noClearExisting  — keep any existing PHIs/chains
+    {"BuildUseDefChainPass",
+     [](const std::vector<std::string>& args) {
+         bool clearExisting = !hasPassArg(args, "noClearExisting");
+         bool includePseudo = hasPassArg(args, "includePseudo");
+         return createBuildUseDefChainPass(clearExisting, includePseudo);
+     }},
+    {"CFGBuilderPass", [](const auto&) { return createCFGBuilderPass(); }},
     {"DumpStinkyFunctionPass",
-     []() { return createDumpStinkyFunctionPass({.stirPath = "dump_function.stir"}); }},
-    {"PeepholeOptimizationPass", []() { return createPeepholeOptimizationPass(); }},
-    {"DeadCodeEliminationPass", []() { return createDeadCodeEliminationPass(); }},
-    {"RedundantMovEliminationPass", []() { return createRedundantMovEliminationPass(); }},
-    {"StinkyIRVerifierPass", []() { return createStinkyIRVerifierPass(); }},
-    {"RemoveDelayAluPass", []() { return createRemoveDelayAluPass(); }},
-    {"InsertDelayAluPass", []() { return createInsertDelayAluPass(); }},
-    {"LoopRegionRemarkPass", []() { return createLoopRegionRemarkPass(); }},
-    {"MemTokenConsistencyCheckPass", []() { return createMemTokenConsistencyCheckPass(); }},
-    {"RaiseVgprMsbPass", []() { return createRaiseVgprMsbPass(); }},
-    {"InsertVgprMsbPass", []() { return createInsertVgprMsbPass(); }},
+     [](const auto&) { return createDumpStinkyFunctionPass({.stirPath = "dump_function.stir"}); }},
+    {"PeepholeOptimizationPass", [](const auto&) { return createPeepholeOptimizationPass(); }},
+    {"DeadCodeEliminationPass", [](const auto&) { return createDeadCodeEliminationPass(); }},
+    {"RedundantMovEliminationPass",
+     [](const auto&) { return createRedundantMovEliminationPass(); }},
+    {"StinkyIRVerifierPass", [](const auto&) { return createStinkyIRVerifierPass(); }},
+    {"RemoveDelayAluPass", [](const auto&) { return createRemoveDelayAluPass(); }},
+    {"InsertDelayAluPass", [](const auto&) { return createInsertDelayAluPass(); }},
+    {"LoopRegionRemarkPass", [](const auto&) { return createLoopRegionRemarkPass(); }},
+    {"MemTokenConsistencyCheckPass",
+     [](const auto&) { return createMemTokenConsistencyCheckPass(); }},
+    {"RaiseVgprMsbPass", [](const auto&) { return createRaiseVgprMsbPass(); }},
+    {"InsertVgprMsbPass", [](const auto&) { return createInsertVgprMsbPass(); }},
 };
 
 /**
