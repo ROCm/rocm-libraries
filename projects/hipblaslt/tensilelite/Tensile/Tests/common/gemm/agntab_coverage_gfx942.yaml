@@ -55,7 +55,7 @@ GlobalParameters:
 
 BenchmarkProblems:
   # =================================================================
-  # Adaptive (heuristic-driven) coverage -- PGR=2 path: 4 transpose x 3 sizes
+  # Adaptive coverage -- PGR=2 path: 4 transpose x 3 sizes
   # =================================================================
   - # NN adaptive (PGR=2)
     - OperationType: GEMM

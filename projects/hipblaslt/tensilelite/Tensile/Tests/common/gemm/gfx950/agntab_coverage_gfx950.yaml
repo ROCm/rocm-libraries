@@ -109,9 +109,48 @@ GlobalParameters:
       - Exact: [ 464,  1872, 1, 6736] # AGNTAB+SK=3 store-path state selection regression
       - Exact: [1024,  1024, 1, 1024] # AGNTAB+SK=3 workspace/partial-store regression
 
+.SuppressNllBase: &suppress_nll_base
+  CustomKernels:
+  InitialSolutionParameters:
+  BenchmarkCommonParameters:
+    - KernelLanguage: ["Assembly"]
+  ForkParameters:
+    - MatrixInstruction:
+      - [16, 16, 32, 1, 1, 6, 4, 2, 2] # MT192x128, 4 waves; MFMA bf16 16x16x32
+      - [32, 32, 16, 1, 1, 1, 5, 4, 1] # MT128x160, 4 waves; MFMA bf16 32x32x16
+    - DepthU: [64]
+    - 1LDSBuffer: [-1]
+    - ExpandPointerSwap: [0]
+    - StaggerU: [16]
+    - TransposeLDS: [0]
+    - WorkGroupMapping: [1]
+    - WorkGroupMappingXCC: [8]
+    - DirectToLds: [0]            # DTL requires PGR>=2, incompatible with PGR=1
+    - GlobalReadVectorWidthA: [8]
+    - GlobalReadVectorWidthB: [8]
+    - LocalReadVectorWidth: [8]
+    # ============ feature axes under test ============
+    - PrefetchGlobalRead: [1]     # required for SuppressNoLoadLoop
+    - AdaptiveGemm: [0, 1]
+    - AdaptiveGemmGSUA: [0, 1]
+    - AdaptiveGemmNTAB: [0, 1]
+    - OptNoLoadLoop: [0, 1]
+    - SuppressNoLoadLoop: [False, True]
+    - TailloopInNll: [False]      # True forces SuppressNoLoadLoop=False
+    # - UseSubtileImpl: [0, 1]
+    - Groups:
+      - - GlobalSplitU: -1
+          StreamK:      0
+  BenchmarkJoinParameters:
+  BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [128,    128, 1, 128]  # baseline       -> NTA0_NTB0  (loopIters=2; 'enough' is False)
+      - Exact: [65536,  128, 1, 192]  # NTA4 fires     -> NTA4_NTB0  (skinnyA, longA, K/DU=3 > 2)
+      - Exact: [128,  16384, 1, 256]  # NTB4 fires     -> NTA0_NTB4  (skinnyB, longB, K/DU=4 > 2)
+
 BenchmarkProblems:
   # =================================================================
-  # Adaptive (heuristic-driven) coverage -- PGR=2 path: 4 transpose x 3 sizes
+  # Adaptive coverage -- PGR=2 path: 4 transpose x 3 sizes
   # =================================================================
   - # NN adaptive (PGR=2)
     - OperationType: GEMM
@@ -211,3 +250,54 @@ BenchmarkProblems:
       UseBeta: True
       Batched: True
     - <<: *adaptive_base_dtl
+
+  # =================================================================
+  # SuppressNoLoadLoop coverage -- PGR=1, no DTL: 4 transpose
+  # =================================================================
+  - # NN suppress-NLL (PGR=1)
+    - OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - <<: *suppress_nll_base
+
+  - # TN suppress-NLL (PGR=1)
+    - OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - <<: *suppress_nll_base
+
+  - # NT suppress-NLL (PGR=1)
+    - OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+    - <<: *suppress_nll_base
+
+  - # TT suppress-NLL (PGR=1)
+    - OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+    - <<: *suppress_nll_base

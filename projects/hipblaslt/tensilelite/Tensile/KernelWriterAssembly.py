@@ -5790,7 +5790,8 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["SuppressNoLoadLoop"]:
       loopChar = self.states.indexChars[ \
           kernel["ProblemType"]["IndicesSummation"][self.states.unrollIdx]]
-      lastIterEnd = Label("LoopEnd%s"%loopChar, "")
+      strNtab = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTA0_NTB0"
+      lastIterEnd = Label("LoopEnd%s%s"%(loopChar, strNtab), "")
     else:
       lastIterEnd = Label("PrefetchGlobalLastIterEnd", "")
 
@@ -9509,7 +9510,8 @@ class KernelWriterAssembly(KernelWriter):
           if kernel["SuppressNoLoadLoop"]:
             loopChar = self.states.indexChars[ \
                 kernel["ProblemType"]["IndicesSummation"][self.states.unrollIdx]]
-            lastIterEnd = Label("LoopEnd%s"%loopChar, "")
+            strNtab = "" if kernel["AdaptiveGemmNTAB"] == 0 else "_NTA0_NTB0"
+            lastIterEnd = Label("LoopEnd%s%s"%(loopChar, strNtab), "")
             module.add(SCBranchSCC1(labelName=lastIterEnd.getLabelName(), \
                        comment="skip to unrollLoop end loop%s iter b/c numIter==0" % loopChar))
           else:
