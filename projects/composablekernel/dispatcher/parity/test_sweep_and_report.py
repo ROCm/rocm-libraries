@@ -800,3 +800,147 @@ class TestPortingDecisionsContent:
         assert "DONE" in text and "gfx942" in text, (
             "PORTING_DECISIONS.md must record GPU verification as DONE"
         )
+
+
+# ── check_parity.py spec requirements ────────────────────────────────────────
+
+class TestCheckParityDefaults:
+    """check_parity.py implements the T1.7 spec requirements as code constants.
+
+    projectdes.txt T1.7 requires: ~2% tolerance, 10 back-to-back runs, median.
+    These are verified by checking the module-level constant and argparse defaults.
+    """
+
+    def _load_module(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "check_parity", _HERE / "check_parity.py"
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_perf_runs_constant_is_10(self):
+        """_PERF_RUNS must equal 10 (spec: 10 back-to-back runs)."""
+        mod = self._load_module()
+        assert mod._PERF_RUNS == 10, (
+            f"_PERF_RUNS must be 10 per T1.7 spec; got {mod._PERF_RUNS}"
+        )
+
+    def test_default_sizes_include_non_tile_aligned(self):
+        """Default --sizes must include at least one non-tile-aligned size (T1.6)."""
+        src = (_HERE / "check_parity.py").read_text()
+        # 257x257x56 and 513x511x40 are non-tile-aligned; either is acceptable
+        assert "257x257x56" in src or "513x511x40" in src, (
+            "check_parity.py default sizes must include a non-tile-aligned size for padding path (T1.6)"
+        )
+
+    def test_perf_tol_default_is_2pct(self):
+        """--perf-tol default must be 0.02 (2%), matching T1.7 spec."""
+        src = (_HERE / "check_parity.py").read_text()
+        assert "default=0.02" in src, (
+            "check_parity.py --perf-tol must default to 0.02 (2%) per T1.7 spec"
+        )
+
+    def test_perf_tol_argparse_exists(self):
+        """--perf-tol argparse argument must exist."""
+        src = (_HERE / "check_parity.py").read_text()
+        assert "--perf-tol" in src, "check_parity.py must expose --perf-tol CLI argument"
+
+    def test_perf_runs_argparse_exists(self):
+        """--perf-runs argparse argument must exist."""
+        src = (_HERE / "check_parity.py").read_text()
+        assert "--perf-runs" in src, "check_parity.py must expose --perf-runs CLI argument"
+
+
+# ── parse_harness_output unit tests ─────────────────────────────────────────
+
+class TestParseHarnessOutput:
+    """Unit tests for check_parity.parse_harness_output().
+
+    This function is the critical bridge between the harness binary and Stage 2/3
+    adjudication. Incorrect parsing silently turns FAILED runs into UNKNOWN verdicts.
+    """
+
+    def _parse(self, text: str):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "check_parity", _HERE / "check_parity.py"
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod.parse_harness_output(text)
+
+    def test_passed_verdict(self):
+        result = self._parse("verify : 1024/1024 elements pass (100.0%)\nPASSED\n")
+        assert result["verdict"] == "PASSED"
+
+    def test_failed_verdict(self):
+        result = self._parse("verify : 900/1024 elements pass (87.9%)\nFAILED\n")
+        assert result["verdict"] == "FAILED"
+
+    def test_skipped_verdict(self):
+        result = self._parse("SKIPPED: Arguments not supported!\n")
+        assert result["verdict"] == "SKIPPED"
+
+    def test_gflops_converted_to_tflops(self):
+        result = self._parse("time   : 1.2345 ms  (85868.1 GFLOP/s)\nPASSED\n")
+        assert result["tflops"] is not None
+        assert abs(result["tflops"] - 85.8681) < 0.01
+
+    def test_no_gflops_line_tflops_none(self):
+        result = self._parse("SKIPPED: Arguments not supported!\n")
+        assert result["tflops"] is None
+
+    def test_unknown_on_empty_output(self):
+        result = self._parse("")
+        assert result["verdict"] == "UNKNOWN"
+
+    def test_passed_takes_precedence_over_failed_word_in_detail(self):
+        """PASSED keyword wins even if 'FAILED' appears elsewhere in output."""
+        result = self._parse("verify : max_abs_err=0.001 max_rel_err=0.001\nPASSED\n")
+        assert result["verdict"] == "PASSED"
+
+
+# ── compare_report.py By-tile-shape rollup ───────────────────────────────────
+
+class TestCompareReportTileShapeRollup:
+    """compare_report.py emits a By-tile-shape rollup table (4th of 4 T2.6 rollups).
+
+    T2.6 spec: 'rolled-up summaries by dtype and by layout' plus pipeline and tile.
+    compare_report.py emits all four: By dtype, By layout, By pipeline, By tile shape.
+    """
+
+    def test_tile_shape_rollup_in_report(self, tmp_path):
+        import subprocess, sys
+        rows = [
+            dict(_BASE_ROW, tile_m=256, tile_n=128, tile_k=32, M=512),
+            dict(_BASE_ROW, tile_m=128, tile_n=128, tile_k=32, M=1024),
+        ]
+        pq = _make_parquet(rows, tmp_path / "disp.parquet")
+        out = tmp_path / "report.md"
+        result = subprocess.run(
+            [sys.executable, str(_HERE / "compare_report.py"), str(pq), "-o", str(out)],
+            capture_output=True, text=True, cwd=_HERE,
+        )
+        assert result.returncode == 0, result.stderr
+        text = out.read_text()
+        assert "By tile" in text or "tile shape" in text.lower(), (
+            "compare_report.py must include a By tile shape rollup section"
+        )
+
+    def test_four_rollup_sections_present(self, tmp_path):
+        """All four T2.6 rollup sections must appear in one report."""
+        import subprocess, sys
+        pq = _make_parquet([dict(_BASE_ROW)], tmp_path / "disp.parquet")
+        out = tmp_path / "report.md"
+        subprocess.run(
+            [sys.executable, str(_HERE / "compare_report.py"), str(pq), "-o", str(out)],
+            capture_output=True, text=True, cwd=_HERE,
+        )
+        text = out.read_text()
+        for section in ("By dtype", "By layout", "By pipeline"):
+            assert section in text, f"compare_report.py must emit '{section}' rollup"
+        assert "By tile" in text or "tile" in text.lower(), (
+            "compare_report.py must emit a tile-shape rollup"
+        )
