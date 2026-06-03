@@ -92,6 +92,8 @@ _MMA_C_FRAG_LEN: Dict[str, int] = {
     "mfma_scale_f32_16x16x128_f8f6f4": 4,
     "wmma_f32_16x16x16_f16": 8,
     "wmma_f32_16x16x16_bf16": 8,
+    "wmma_gfx12_f32_16x16x16_f16": 8,
+    "wmma_gfx12_f32_16x16x16_bf16": 8,
 }
 
 # op_id -> the ``result_name_hint`` the legacy ISA-named method used. Most atoms
@@ -1436,6 +1438,27 @@ class IRBuilder:
         this op. Thin wrapper over :meth:`mma`.
         """
         return self.mma("wmma_f32_16x16x16_bf16", a, b, c)
+
+    def wmma_gfx12_f32_16x16x16_f16(self, a: Value, b: Value, c: Value) -> Value:
+        """RDNA4 (gfx12) WMMA: D[16x16] += A[16x16] * B[16x16], f16 in / f32 acc.
+
+        Unlike RDNA3/3.5, gfx12 drops the cross-half operand duplication: per
+        lane ``a`` and ``b`` are ``<8 x half>`` and the accumulator ``c`` /
+        result are ``<8 x float>``. Fragment layout (lane ``l``): ``a`` = row
+        ``l%16`` K=``(l//16)*8 + i``, ``b`` = col ``l%16`` K=``(l//16)*8 + i``;
+        result is column-distributed, slot ``i`` = ``(row (l//16)*8 + i,
+        col l%16)``. Lowered via :meth:`ck_dsl.core.isa.Gfx12RdnaBackend.emit_wmma`
+        (intrinsic ``...v8f32.v8f16``). Thin wrapper over :meth:`mma`.
+        """
+        return self.mma("wmma_gfx12_f32_16x16x16_f16", a, b, c)
+
+    def wmma_gfx12_f32_16x16x16_bf16(self, a: Value, b: Value, c: Value) -> Value:
+        """RDNA4 (gfx12) WMMA bf16 variant. Same ``<8 x half>``-style fragment
+        layout as :meth:`wmma_gfx12_f32_16x16x16_f16` but with ``<8 x bfloat>``
+        operands bitcast to ``<8 x i16>`` for the intrinsic
+        ``llvm.amdgcn.wmma.f32.16x16x16.bf16.v8f32.v8i16``. Thin wrapper over
+        :meth:`mma`."""
+        return self.mma("wmma_gfx12_f32_16x16x16_bf16", a, b, c)
 
     def mfma_f32_16x16x16_f16(self, a: Value, b: Value, c: Value) -> Value:
         return self.mma("mfma_f32_16x16x16_f16", a, b, c)

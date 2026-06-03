@@ -365,6 +365,18 @@ from .common.block_scale_gemm import (  # noqa: F401
     build_block_scale_gemm,
     is_valid_spec as is_valid_block_scale_gemm_spec,
 )
+from .common.matmul_nbits import (  # noqa: F401
+    MatMulNBitsFamily,
+    MatMulNBitsSpec,
+    build_matmul_nbits,
+    dequant_i4_weights as dequant_matmul_nbits_weights,
+    is_valid_spec as is_valid_matmul_nbits_spec,
+    matmul_nbits_grid,
+    matmul_nbits_outer_tiles,
+    matmul_nbits_reference,
+    matmul_nbits_signature,
+    pack_i4_weights_for_matmul_nbits,
+)
 from .common.mx_gemm import (  # noqa: F401
     MxGemmSpec,
     MxMantissaDType,

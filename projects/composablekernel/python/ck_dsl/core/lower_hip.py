@@ -248,7 +248,7 @@ class _Lowerer:
         uses the contiguous layout. Selection keys off the resolved
         :class:`ArchTarget` ``target_family`` so CDNA output is unchanged.
         """
-        if self.arch.target_family == "gfx11_rdna":
+        if self.arch.target_family in ("gfx11_rdna", "gfx12_rdna"):
             return _encode_waitcnt_gfx11(vmcnt, expcnt, lgkmcnt)
         return _encode_waitcnt_gfx9_10(vmcnt, expcnt, lgkmcnt)
 
@@ -516,6 +516,16 @@ class _Lowerer:
         a, b, c = op.operands
         self._emit(
             f"f32x8 {_name(op.result)} = __builtin_amdgcn_wmma_f32_16x16x16_f16_w32("
+            f"{_name(a)}, {_name(b)}, {_name(c)});"
+        )
+
+    def _op_tile_wmma_gfx12_f32_16x16x16_f16(self, op: Op) -> None:
+        # RDNA4 builtin: distinct ``_gfx12`` suffix, 8-wide operands.
+        self._require_wmma_arch("wmma_gfx12_f32_16x16x16_f16")
+        a, b, c = op.operands
+        self._emit(
+            f"f32x8 {_name(op.result)} = "
+            f"__builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12("
             f"{_name(a)}, {_name(b)}, {_name(c)});"
         )
 

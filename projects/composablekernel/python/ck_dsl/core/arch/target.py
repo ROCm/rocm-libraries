@@ -314,6 +314,46 @@ def _wmma_b_16x16(builder, lane, slot):
     return builder.const_i32(slot), col
 
 
+# --- RDNA4 (gfx12) WMMA 16x16x16 lane maps ------------------------------------
+# RDNA4 dropped the RDNA3/3.5 cross-half duplication: A/B fragments are
+# ``<8 x half>`` per lane (not <16 x half>), and the K dimension is split across
+# the two lane-halves (lanes 0-15 carry K 0..7, lanes 16-31 carry K 8..15). The
+# accumulator is column-distributed (CDNA/MFMA-style): lanes index columns,
+# registers index rows. These maps are the *hypothesis* verified empirically by
+# examples/gfx1201/wmma_probe.py before matmul_nbits is trusted on gfx1201.
+def _wmma_gfx12_acc_16x16(builder, lane, slot):
+    """RDNA4 WMMA 16x16x16 accumulator (wave32): ``<8 x float>`` per lane;
+    slot ``i`` -> ``(row (lane // 16) * 8 + i, col lane % 16)``. Returns
+    ``(row, col)``."""
+    c16 = builder.const_i32(16)
+    col = builder.mod(lane, c16)
+    half = builder.div(lane, c16)
+    row = builder.add(builder.mul(half, builder.const_i32(8)), builder.const_i32(slot))
+    return row, col
+
+
+def _wmma_gfx12_a_16x16(builder, lane, slot):
+    """RDNA4 WMMA 16x16x16 A operand (wave32): lane ``l`` holds row ``l % 16``;
+    the ``<8 x half>`` fragment slot ``i`` is K=``(l // 16) * 8 + i``. Returns
+    ``(row, k)``."""
+    c16 = builder.const_i32(16)
+    row = builder.mod(lane, c16)
+    k_half = builder.div(lane, c16)
+    k = builder.add(builder.mul(k_half, builder.const_i32(8)), builder.const_i32(slot))
+    return row, k
+
+
+def _wmma_gfx12_b_16x16(builder, lane, slot):
+    """RDNA4 WMMA 16x16x16 B operand (wave32): lane ``l`` holds col ``l % 16``;
+    the ``<8 x half>`` fragment slot ``i`` is K=``(l // 16) * 8 + i``. Returns
+    ``(k, col)``."""
+    c16 = builder.const_i32(16)
+    col = builder.mod(lane, c16)
+    k_half = builder.div(lane, c16)
+    k = builder.add(builder.mul(k_half, builder.const_i32(8)), builder.const_i32(slot))
+    return k, col
+
+
 @dataclass(frozen=True)
 class _FragInfo:
     """Per-op_id fragment metadata: per-lane vector lengths, wave size, and the
@@ -366,6 +406,15 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
     # element type / intrinsic mangling differ — operands lower as <16 x i16>).
     "wmma_f32_16x16x16_bf16": _FragInfo(
         16, 16, 8, 32, _wmma_a_16x16, _wmma_b_16x16, _wmma_acc_16x16
+    ),
+    # --- WMMA f16 / bf16 (wave32, RDNA4 / gfx12) -------------------------------
+    # No cross-half duplication: A/B are <8 x half> per lane; column-distributed
+    # accumulator. Lane maps verified by examples/gfx1201/wmma_probe.py.
+    "wmma_gfx12_f32_16x16x16_f16": _FragInfo(
+        8, 8, 8, 32, _wmma_gfx12_a_16x16, _wmma_gfx12_b_16x16, _wmma_gfx12_acc_16x16
+    ),
+    "wmma_gfx12_f32_16x16x16_bf16": _FragInfo(
+        8, 8, 8, 32, _wmma_gfx12_a_16x16, _wmma_gfx12_b_16x16, _wmma_gfx12_acc_16x16
     ),
 }
 

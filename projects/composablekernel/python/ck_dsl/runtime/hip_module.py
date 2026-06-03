@@ -250,6 +250,9 @@ def _b(name: str, *argtypes, restype=ctypes.c_int) -> _LazyFn:
 
 # HIP function table.
 _hipGetErrorString = _b("hipGetErrorString", ctypes.c_int, restype=ctypes.c_char_p)
+_hipInit = _b("hipInit", ctypes.c_uint)
+_hipSetDevice = _b("hipSetDevice", ctypes.c_int)
+_hipGetDevice = _b("hipGetDevice", ctypes.POINTER(ctypes.c_int))
 _hipModuleLoadData = _b(
     "hipModuleLoadData", ctypes.POINTER(_HipModuleHandle), ctypes.c_void_p
 )
@@ -305,6 +308,32 @@ def _check(s: int, where: str) -> None:
     if s != 0:
         msg = _hipGetErrorString(s)
         raise HipError(f"{where}: hipError({s}) {msg.decode() if msg else ''}")
+
+
+_hip_inited = False
+
+
+def _ensure_hip_init() -> None:
+    """Establish a HIP primary context exactly once.
+
+    Without this, a fresh ctypes-only python process (no torch import,
+    no prior HIP call) sees `hipModuleLoadData` return hipErrorNoDevice
+    even though the GPU is visible to `rocminfo` — the runtime simply
+    hasn't bound a device yet. Torch users get this for free as a side
+    effect of `import torch`; the manifest-runner path doesn't.
+    """
+    global _hip_inited
+    if _hip_inited:
+        return
+    _check(_hipInit(0), "hipInit")
+    # Preserve a device the hosting process already selected (e.g. torch did
+    # `hipSetDevice(N)`); only bind device 0 when no device is current yet.
+    # hipGetDevice succeeds once a context exists, so a failure here means no
+    # device is bound and we fall back to 0.
+    cur = ctypes.c_int(-1)
+    if _hipGetDevice(ctypes.byref(cur)) != HIP_SUCCESS or cur.value < 0:
+        _check(_hipSetDevice(0), "hipSetDevice")
+    _hip_inited = True
 
 
 def get_device_arch(device: int = 0) -> Optional[str]:
@@ -436,6 +465,7 @@ class Runtime:
     _pending_args: "Dict[int, List[Tuple[Tuple[Any, ...], Optional[Event]]]]" = {}
 
     def load_module(self, blob: bytes) -> Module:
+        _ensure_hip_init()
         buf = (ctypes.c_ubyte * len(blob)).from_buffer_copy(blob)
         handle = _HipModuleHandle()
         _check(
