@@ -53,7 +53,7 @@ jobs:
       - name: Checkout TheRock repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: "reboss/TheRock" # WIP: using fork for rocsolver test filter changes
+          repository: "ROCm/TheRock"
           path: "TheRock"
           ref: ${{ inputs.therock_ref }}
 
