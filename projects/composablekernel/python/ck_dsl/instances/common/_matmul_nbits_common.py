@@ -31,6 +31,7 @@ from ...helpers.spec import (
     SignatureBuilder,
     WarpTileBlockSizeMixin,
     ceil_div_grid,
+    derive_block_size,
     kernel_name_join,
 )
 from .gemm_universal import TileSpec
@@ -224,11 +225,13 @@ def validate_common_spec(spec: MatMulNBitsSpec, arch: str = V1_ARCH) -> Tuple[bo
         if spec.K % t.tile_k:
             return False, f"K ({spec.K}) must be divisible by tile_k ({t.tile_k})"
 
-    # block_size = warp_m * warp_n * wave_size (warp_k folds into the K loop).
-    expected_bs = spec.tile.warp_m * spec.tile.warp_n * spec.wave_size
+    # block_size = warp_m * warp_n * warp_k * wave_size, matching the canonical
+    # derivation in helpers/spec.py::derive_block_size (the source of the spec's
+    # own block_size). Omitting warp_k here would falsely reject any warp_k != 1.
+    expected_bs = derive_block_size(spec.tile, spec.wave_size)
     if expected_bs != spec.block_size:
         return False, (
-            f"block_size {spec.block_size} != warp_m*warp_n*wave_size = "
+            f"block_size {spec.block_size} != warp_m*warp_n*warp_k*wave_size = "
             f"{expected_bs}"
         )
     if spec.block_size > target.max_threads_per_block:

@@ -212,9 +212,20 @@ def _matmul_nbits_problem(
     packed = (low | (high << 4)).astype(np.uint8)
     C = np.empty((M, N), dtype=np.float16)
 
+    block_m = int(manifest["block_m"])
+    # The WMMA matmul_nbits kernels assume every tile_m row is in-bounds for the
+    # A loads; partial-M tail handling is not implemented. A non-multiple M would
+    # make the last tile read A out of bounds, so reject it here rather than
+    # launch a kernel that reads past the buffer.
+    if M % block_m:
+        raise ValueError(
+            f"M ({M}) must be divisible by block_m ({block_m}); partial-M tiles "
+            "are not supported by the matmul_nbits kernels"
+        )
+
     grid = (
         (N + int(manifest["block_n"]) - 1) // int(manifest["block_n"]),
-        (M + int(manifest["block_m"]) - 1) // int(manifest["block_m"]),
+        (M + block_m - 1) // block_m,
         1,
     )
     block = (int(manifest["threads_per_block"]), 1, 1)

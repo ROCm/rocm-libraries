@@ -150,5 +150,10 @@ def build_wmma_gemm(spec: WmmaGemmSpec, arch: str = "gfx1201") -> KernelDef:
 
 
 def wmma_gemm_grid(M: int, N: int):
-    """Launch grid (gx, gy, 1) for problem (M, N): one wave per 16x16 tile."""
-    return ((M + _WMMA_M - 1) // _WMMA_M, (N + _WMMA_N - 1) // _WMMA_N, 1)
+    """Launch grid (gx, gy, 1) for problem (M, N): one wave per 16x16 tile.
+
+    Matches the kernel's block mapping (``block_id.x -> N-tile``,
+    ``block_id.y -> M-tile``): ``gx`` tiles N, ``gy`` tiles M. Swapping these is
+    invisible for square M=N but launches the wrong grid for non-square shapes.
+    """
+    return ((N + _WMMA_N - 1) // _WMMA_N, (M + _WMMA_M - 1) // _WMMA_M, 1)

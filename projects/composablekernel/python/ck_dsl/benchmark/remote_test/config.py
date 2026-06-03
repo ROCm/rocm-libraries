@@ -47,9 +47,11 @@ class RemoteHost:
 
 
 _REMOTE_HOST = os.environ.get("CKDSL_REMOTE_HOST", "")
-# Always default to the `yraparti` SSH userid (alola login). Override with
-# CKDSL_REMOTE_USER if ever needed, but do not fall back to alias mode.
-_REMOTE_USER = os.environ.get("CKDSL_REMOTE_USER", "yraparti")
+# Default to empty so the orchestrator stays portable. With no CKDSL_REMOTE_USER
+# set, CKDSL_REMOTE_HOST is treated as an ~/.ssh/config alias (user, key,
+# ProxyJump, etc. all come from ssh_config). Set CKDSL_REMOTE_USER to opt into
+# explicit user@host mode when pointing at a bare hostname.
+_REMOTE_USER = os.environ.get("CKDSL_REMOTE_USER", "")
 _ALIAS_MODE = bool(_REMOTE_HOST) and not _REMOTE_USER
 
 # In alias mode, leave ssh_key empty so ssh_config's IdentityFile wins.

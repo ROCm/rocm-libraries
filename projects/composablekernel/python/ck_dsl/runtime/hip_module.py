@@ -252,6 +252,7 @@ def _b(name: str, *argtypes, restype=ctypes.c_int) -> _LazyFn:
 _hipGetErrorString = _b("hipGetErrorString", ctypes.c_int, restype=ctypes.c_char_p)
 _hipInit = _b("hipInit", ctypes.c_uint)
 _hipSetDevice = _b("hipSetDevice", ctypes.c_int)
+_hipGetDevice = _b("hipGetDevice", ctypes.POINTER(ctypes.c_int))
 _hipModuleLoadData = _b(
     "hipModuleLoadData", ctypes.POINTER(_HipModuleHandle), ctypes.c_void_p
 )
@@ -325,7 +326,13 @@ def _ensure_hip_init() -> None:
     if _hip_inited:
         return
     _check(_hipInit(0), "hipInit")
-    _check(_hipSetDevice(0), "hipSetDevice")
+    # Preserve a device the hosting process already selected (e.g. torch did
+    # `hipSetDevice(N)`); only bind device 0 when no device is current yet.
+    # hipGetDevice succeeds once a context exists, so a failure here means no
+    # device is bound and we fall back to 0.
+    cur = ctypes.c_int(-1)
+    if _hipGetDevice(ctypes.byref(cur)) != HIP_SUCCESS or cur.value < 0:
+        _check(_hipSetDevice(0), "hipSetDevice")
     _hip_inited = True
 
 
