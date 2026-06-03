@@ -73,6 +73,13 @@ build's **Artifacts** tab and look for these files.
 > selective — so JUnit is published and the selective path is exercised on every
 > run. JUnit is published in the **Smart Build** stage (the smoke is produced there),
 > so it lands even if the Smart Test stage later fails.
+>
+> **As-if vs real (mode tag):** the smoke carries the build mode so advisory
+> computations aren't mistaken for what ran. `smoke_result.json` has
+> `"mode": full|selective|none` + `"advisory": true|false` (advisory on full/none),
+> and the JUnit suite/classname is tagged (`smart-build.selection.<mode>`) so the
+> Jenkins test-results trend keeps as-if (full/none) runs distinct from real
+> selective ones.
 
 > **Two stages:** the pipeline runs `smart_build.sh` (Smart Build stage) then
 > `smart_test.sh` (Smart Test stage). A **build** failure and a **test** failure

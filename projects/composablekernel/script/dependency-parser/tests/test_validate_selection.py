@@ -153,6 +153,28 @@ class TestJunit(unittest.TestCase):
         self.assertIn('failures="0"', xml)
         self.assertNotIn("<failure", xml)
 
+    def test_no_mode_keeps_untagged_classname(self):
+        from validate_selection import render_junit, validate
+
+        xml = render_junit(validate(["bin/a"], {"bin/a"}))
+        self.assertIn('classname="smart-build.selection"', xml)
+        self.assertIn('name="smart-build-selection"', xml)
+
+    def test_mode_tags_suite_and_classname(self):
+        from validate_selection import render_junit, validate
+
+        result = validate(["bin/a"], {"bin/a"}, mode="full")
+        self.assertEqual(result["mode"], "full")
+        self.assertTrue(result["advisory"])
+        xml = render_junit(result)
+        self.assertIn('classname="smart-build.selection.full"', xml)
+        self.assertIn('name="smart-build-selection-full"', xml)
+
+    def test_selective_mode_is_not_advisory(self):
+        from validate_selection import validate
+
+        self.assertFalse(validate(["bin/a"], {"bin/a"}, mode="selective")["advisory"])
+
 
 class TestCli(unittest.TestCase):
     """End-to-end exit-code checks through main.py validate."""

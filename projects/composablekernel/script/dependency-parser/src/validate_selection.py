@@ -82,7 +82,7 @@ def load_ctest_tests(path):
     return tests
 
 
-def validate(selected, valid_targets, ctest_tests=None):
+def validate(selected, valid_targets, ctest_tests=None, mode=None):
     """Check a selection against the known ninja targets (and optionally ctest).
 
     Runs up to two checks and returns a result dict:
@@ -91,6 +91,11 @@ def validate(selected, valid_targets, ctest_tests=None):
                   registered ctest test.
     The verdict is "pass" only if all applicable checks hold (an empty selection
     passes); otherwise "fail", with the offending names listed.
+
+    `mode` (full|selective|none), when given, records whether this selection was
+    actually used: on a full/none build it's an advisory "as-if" computation; only
+    on a selective build does it drive what gets built/run. Tagged into the result
+    and the JUnit so consumers don't conflate as-if with real selective runs.
     """
     invalid_targets = [e for e in selected if e not in valid_targets]
     result = {
@@ -100,6 +105,9 @@ def validate(selected, valid_targets, ctest_tests=None):
         "n_invalid_targets": len(invalid_targets),
         "invalid_targets": invalid_targets,
     }
+    if mode is not None:
+        result["mode"] = mode
+        result["advisory"] = (mode != "selective")
     if ctest_tests is not None:
         invalid_tests = [
             e for e in selected if os.path.basename(e) not in ctest_tests
@@ -112,26 +120,35 @@ def validate(selected, valid_targets, ctest_tests=None):
 
 
 def render_junit(result):
-    """Render a minimal JUnit XML report for the validation result."""
+    """Render a minimal JUnit XML report for the validation result.
+
+    When result carries a `mode`, the suite/classname are tagged with it
+    (e.g. smart-build.selection.full) so Jenkins' test-results trend keeps advisory
+    as-if runs (full/none) distinct from real selective runs.
+    """
     failures = []
     for t in result.get("invalid_targets", []):
         failures.append(("not a ninja target", t))
     for t in result.get("invalid_tests", []):
         failures.append(("not a registered ctest test", t))
 
+    mode = result.get("mode")
+    classname = "smart-build.selection" + (f".{mode}" if mode else "")
+    suite = "smart-build-selection" + (f"-{mode}" if mode else "")
+
     _attr = {"'": "&apos;", '"': "&quot;"}
     cases = []
     if failures:
         for reason, name in failures:
             cases.append(
-                f'    <testcase classname="smart-build.selection" '
+                f'    <testcase classname="{classname}" '
                 f'name="{escape(name, _attr)}">\n'
                 f'      <failure message="{escape(reason, _attr)}"/>\n'
                 f"    </testcase>"
             )
     else:
         cases.append(
-            '    <testcase classname="smart-build.selection" '
+            f'    <testcase classname="{classname}" '
             'name="selection-resolvable"/>'
         )
 
@@ -139,7 +156,7 @@ def render_junit(result):
     body = "\n".join(cases)
     return (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
-        f'<testsuite name="smart-build-selection" tests="{max(len(cases), 1)}" '
+        f'<testsuite name="{suite}" tests="{max(len(cases), 1)}" '
         f'failures="{n_failures}">\n'
         f"{body}\n"
         "</testsuite>\n"
@@ -184,6 +201,12 @@ def main():
         "--junit",
         help="Optional path to write a JUnit XML report",
     )
+    parser.add_argument(
+        "--mode",
+        choices=["full", "selective", "none"],
+        help="Tag the result/JUnit with the build mode so advisory as-if runs "
+        "(full/none) stay distinct from real selective runs",
+    )
     args = parser.parse_args()
 
     for path in [args.tests_json, args.ninja_targets] + (
@@ -197,7 +220,7 @@ def main():
     valid_targets = load_ninja_targets(args.ninja_targets)
     ctest_tests = load_ctest_tests(args.ctest) if args.ctest else None
 
-    result = validate(selected, valid_targets, ctest_tests)
+    result = validate(selected, valid_targets, ctest_tests, mode=args.mode)
 
     with open(args.output, "w") as f:
         json.dump(result, f, indent=2)

@@ -168,6 +168,10 @@ def main():
     parser_validate.add_argument(
         "--junit", help="Optional path to write a JUnit XML report"
     )
+    parser_validate.add_argument(
+        "--mode", choices=["full", "selective", "none"],
+        help="Tag result/JUnit with the build mode (as-if vs real selective)",
+    )
 
     # Code auditing
     parser_audit = subparsers.add_parser(
@@ -221,6 +225,8 @@ def main():
         validate_args += ["--output", args.output]
         if args.junit:
             validate_args += ["--junit", args.junit]
+        if args.mode:
+            validate_args += ["--mode", args.mode]
         run_validate_selection(validate_args)
     elif args.command == "audit":
         run_selective_test_filter([args.depmap_json, "--audit"])

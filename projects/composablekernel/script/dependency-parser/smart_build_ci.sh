@@ -128,9 +128,18 @@ jq -r '.executables[]' tests_to_run.json 2>/dev/null | tr '\n' ' ' > selected_ta
 echo "[OK] As-if selection: ${num_tests} tests"
 
 # Step 3b: Selection-validity smoke (advisory) - exercises the validate gate and
-# publishes JUnit on every build, full or selective.
+# publishes JUnit on every build, full or selective. Tag with the mode this
+# selection will be used in (full/none = advisory as-if; selective = real) so the
+# JUnit trend keeps them distinct.
+if [ "${FULL_REQUIRED}" -eq 1 ]; then
+    ASIF_MODE=full
+elif [ "${num_tests}" -eq 0 ]; then
+    ASIF_MODE=none
+else
+    ASIF_MODE=selective
+fi
 echo ""
-echo "Step 3b: Selection-validity smoke (non-fatal)..."
+echo "Step 3b: Selection-validity smoke (mode=${ASIF_MODE}, non-fatal)..."
 ninja -t targets all > ninja_targets.txt 2>/dev/null || true
 python3 "${SCRIPT_DIR}/main.py" validate \
     tests_to_run.json \
@@ -138,6 +147,7 @@ python3 "${SCRIPT_DIR}/main.py" validate \
     --ctest ctest_list.txt \
     --output smoke_result.json \
     --junit smoke_result.xml \
+    --mode "${ASIF_MODE}" \
     || echo "WARNING: selection validation flagged issues (see smoke_result.json) - continuing"
 
 # Step 4: Decide the actual build mode (the as-if artifacts above are produced
