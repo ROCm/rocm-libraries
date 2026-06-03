@@ -2743,7 +2743,12 @@ class LogicalScheduler:
                         # tail entry (PRELOOP's single GR did neither).
                         removed.add(em.moduleId)
                     elif (em.opType == 'lr_inc' and not src.isUnrollSwap
-                          and self._is_multi_du()):
+                          and (self.config.pgr == 2 or self._is_multi_du())):
+                        # PGR=2: drop MT-transition lr_inc to match gr_inc drop;
+                        # isUnrollSwap lr_incs are within-iter ping-pong.
+                        # PGR=1 single-DU: keep lr_inc for tail-loop entry.
+                        # PGR=1 multi-DU: drop iteration-boundary lr_inc (develop
+                        # keeps them for single-DU; multi-DU NLL differs).
                         removed.add(em.moduleId)
 
                 has_lr = any(em.opType == 'lr' and em.moduleId not in removed
