@@ -318,26 +318,26 @@ struct BlockFmhaPipelineQRKSVSAsyncJenga
         {
             if(!block_relation_onehot[i_total_loops])
             {
-                i_total_loops++;
-                if(i_total_loops < num_total_loop)
-                {
-                    // move K tile windows
-                    move_tile_window(k_dram_block_window, {kN0, 0});
-                    k_dram_window.set_window_origin(k_dram_block_window.get_window_origin());
-
-                    if(block_relation_onehot[i_total_loops])
-                    {
-                        async_load_tile_raw(k_lds_store(LdsSeq.at(number<0>{})),
-                                            k_dram_window,
-                                            number<-1>{},
-                                            k_oob_ck,
-                                            k_pre_np);
-                    }
-                    move_tile_window(k_dram_window, {0, kK0});
-                    move_tile_window(v_dram_window, {0, kN0});
-                    continue;
-                }
-                break;
+                // scan-ahead: find the next active block in one shot
+                index_t next = i_total_loops + 1;
+                while(next < num_total_loop && !block_relation_onehot[next])
+                    next++;
+                if(next >= num_total_loop)
+                    break;
+                const index_t delta = next - i_total_loops;
+                i_total_loops       = next;
+                // jump K/V windows to the next active block
+                move_tile_window(k_dram_block_window, {kN0 * delta, 0});
+                k_dram_window.set_window_origin(k_dram_block_window.get_window_origin());
+                move_tile_window(v_dram_window, {0, kN0 * delta});
+                // immediately prefetch the active K tile
+                async_load_tile_raw(k_lds_store(LdsSeq.at(number<0>{})),
+                                    k_dram_window,
+                                    number<-1>{},
+                                    k_oob_ck,
+                                    k_pre_np);
+                move_tile_window(k_dram_window, {0, kK0});
+                continue;
             }
 
             // STAGE 1, QK gemm
@@ -430,6 +430,12 @@ struct BlockFmhaPipelineQRKSVSAsyncJenga
                 s.get_tile_distribution()); // Pcompute{j}
 
             __builtin_amdgcn_sched_barrier(0x7F);
+            // Ensure gemm_0's LDS reads (K tile) from all threads are completed before V store
+            // Only needed when K tail and V use the same LDS buffer
+            if constexpr(LdsSeq.at(number<k0_loops - 1>{}) == LdsSeq.at(number<k0_loops>{}))
+            {
+                __builtin_amdgcn_s_barrier();
+            }
             // store & prefetch next v, after the max reduction
             auto v_shuffle_tmp = make_static_distributed_tensor<VDataType>(
                 Policy::template MakeShuffledVRegBlockDescriptor<Problem>());

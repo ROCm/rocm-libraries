@@ -11,10 +11,34 @@
 
 namespace ck_tile {
 
-// a variation of qr/ks/vs, where we use async copy to load k (potentially v in the future)
-template <typename Problem_, typename Policy_ = BlockFmhaPipelineQRKSVSAsyncDefaultPolicy>
-struct BlockFmhaPipelineQRKSVSAsyncVSA
+// PV-skip mode enum. kPerWave = per-wavefront butterfly vote. kPerBlock =
+// block-wide consensus vote (matches upstream SpargeAttn kPerBlock semantics).
+// kNone disables the skip path entirely (AST removed). Legacy bool
+// `kEnablePVSkip_=true` maps to kPerWave; `false` maps to kNone (via codegen).
+enum class PVSkipMode : int
 {
+    kNone     = 0,
+    kPerWave  = 1,
+    kPerBlock = 2,
+};
+
+// Sparge variant of qr/ks/vs/async pipeline. Cloned from BlockFmhaPipelineQRKSVSAsyncVSA;
+// adds PV-skip per Q-tile (SpargeAttn paper 4.4). Kept as a separate file so the original
+// _vsa.hpp can remain frozen as an A/B baseline.
+//
+// INVARIANT: V load / V->LDS store / cp_async pipeline stay UNCONDITIONAL in
+// both per-wave and per-block modes — only the gemm_1 is gated.
+template <typename Problem_,
+          typename Policy_        = BlockFmhaPipelineQRKSVSAsyncDefaultPolicy,
+          PVSkipMode kPVSkipMode_ = PVSkipMode::kPerWave>
+struct BlockFmhaPipelineQRKSVSAsyncSparge
+{
+    static constexpr PVSkipMode kPVSkipMode = kPVSkipMode_;
+    // Legacy alias: true iff any PV-skip mode (per-wave or per-block) is active.
+    // Kept so existing `if constexpr (kEnablePVSkip)` reads still compile.
+    static constexpr bool kEnablePVSkip   = (kPVSkipMode_ != PVSkipMode::kNone);
+    static constexpr bool kPerBlockPVSkip = (kPVSkipMode_ == PVSkipMode::kPerBlock);
+
     using Problem               = remove_cvref_t<Problem_>;
     using Policy                = remove_cvref_t<Policy_>;
     using QDataType             = remove_cvref_t<typename Problem::QDataType>;
@@ -131,7 +155,20 @@ struct BlockFmhaPipelineQRKSVSAsyncVSA
 
     static constexpr const char* name = "qr_async";
 
+    // Per-block PV-skip needs one int32 LDS slot to broadcast the AND-vote
+    // result across waves. Reserved at the TAIL of the pipeline's LDS budget
+    // (after the existing K + V allocations). Always reserved (4 B vs the
+    // multi-kB K/V tiles is negligible) so the smem layout stays uniform.
+    static constexpr ck_tile::index_t kPerBlockVoteSlotBytes = 4;
+
     CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetSmemSize()
+    {
+        return Policy::template GetSmemSize<Problem>() + kPerBlockVoteSlotBytes;
+    }
+
+    // Byte offset of the per-block vote flag from `smem_ptr`. Lives just past
+    // the policy's K+V smem footprint.
+    CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetPerBlockVoteSlotOffset()
     {
         return Policy::template GetSmemSize<Problem>();
     }
@@ -149,11 +186,21 @@ struct BlockFmhaPipelineQRKSVSAsyncVSA
                int kv_blocks,
                FmhaMask mask,
                float scale_s,
+               float pv_threshold, // SpargeAttn PV-skip threshold; see §2 of pv_skip plan
                const AttentionVariant& variant,
                const AttentionVariantParams& variant_params,
                const BlockIndices& block_indices,
                void* smem_ptr) const
     {
+        if constexpr(!kEnablePVSkip)
+        {
+            (void)pv_threshold; // silence unused-param when PV-skip is compiled out
+        }
+        // PV-skip control is a compile-time gate (kEnablePVSkip). When false
+        // the AST contains no vote / scalar gate / extra LDS, and codegen
+        // converges with _vsa.hpp's FmhaFwdVSAKernel.
+        // Runtime fast-path: pv_threshold == +1e30 sentinel disables the skip
+        // via one scalar (sgpr) branch inside the `if constexpr` block.
         static_assert(
             std::is_same_v<QDataType, remove_cvref_t<typename QDramBlockWindowTmp::DataType>> &&
                 std::is_same_v<KDataType, remove_cvref_t<typename KDramBlockWindowTmp::DataType>> &&
@@ -393,7 +440,10 @@ struct BlockFmhaPipelineQRKSVSAsyncVSA
             {
                 __builtin_amdgcn_s_barrier();
             }
-            // store & prefetch next v, after the max reduction
+            // store & prefetch next v, after the max reduction.
+            // INVARIANT: V->LDS store and the next-V DRAM load are
+            // UNCONDITIONAL — per-warp PV-skip cannot gate them (cross-warp
+            // shared LDS state).
             if constexpr(std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>)
             {
                 auto v_shuffle_tmp = make_static_distributed_tensor<VDataType>(
@@ -426,6 +476,100 @@ struct BlockFmhaPipelineQRKSVSAsyncVSA
             }
             __builtin_amdgcn_sched_barrier(0);
 
+            // PV-SKIP per Q-tile (SpargeAttn §4.4).
+            // Per-warp predicate gates ONLY the per-row, VGPR-private work
+            // (exp2 -> p_compute, rowsum, l += rowsum_p). INVARIANT: V load /
+            // V->LDS store / gemm_1 / every s_barrier / block_sync_lds stay
+            // UNCONDITIONAL (cross-warp LDS dep). On warp_skip we zero this
+            // warp's owned rows of p_compute so the unconditional gemm_1
+            // contributes 0 to o_acc. alpha-rescale (l *= tmp, o *= tmp) still
+            // applies.
+            // Skip iff: scale_s * (m_local - m_old) + pv_threshold <= 0
+            // (m_local / m_old are warp-uniform after block_tile_reduce_sync).
+            // Per-warp PV-skip predicate. Only declared when kEnablePVSkip;
+            // wrapped in a lambda so the false instantiation contains nothing.
+            auto compute_warp_skip = [&]() {
+                if constexpr(kEnablePVSkip)
+                {
+                    // C3-lite scalar fast-path: pv_threshold == +1e30 sentinel
+                    // disables skip; runtime cost is a single sgpr branch.
+                    if(pv_threshold >= 1e29f)
+                        return false;
+                    // Per-row predicate: warp-AND over rows this warp owns.
+                    int warp_skip_int      = 1;
+                    constexpr auto m_spans = decltype(m_local)::get_distributed_spans();
+                    sweep_tile_span(m_spans[number<0>{}], [&](auto idx0) {
+                        constexpr auto i_idx = make_tuple(idx0);
+                        const float diff     = scale_s * (static_cast<float>(m_local[i_idx]) -
+                                                      static_cast<float>(m_old[i_idx]));
+                        if(!(diff + pv_threshold <= 0.0f))
+                            warp_skip_int = 0;
+                    });
+                    // Warp-level AND reduce (wave=64 on gfx942; xor butterfly).
+                    // No LDS, no s_barrier, no cross-warp dependency.
+                    warp_skip_int &= __shfl_xor(warp_skip_int, 32);
+                    warp_skip_int &= __shfl_xor(warp_skip_int, 16);
+                    warp_skip_int &= __shfl_xor(warp_skip_int, 8);
+                    warp_skip_int &= __shfl_xor(warp_skip_int, 4);
+                    warp_skip_int &= __shfl_xor(warp_skip_int, 2);
+                    warp_skip_int &= __shfl_xor(warp_skip_int, 1);
+                    return warp_skip_int != 0;
+                }
+                else
+                {
+                    return false;
+                }
+            };
+            const bool warp_skip = compute_warp_skip();
+
+            // Per-block PV-skip — block-wide AND vote over warp_skip.
+            // Protocol:
+            //   1. Wave-0 lane-0 inits an LDS sentinel slot to 1.
+            //   2. Each wave's lane-0 atomicAnd's its warp_skip int into the slot.
+            //   3. block_sync_lds() rendezvous; all lanes read the slot back.
+            // Cost: 1 LDS init + 1 atomicAnd + 1 block_sync_lds + 1 LDS load.
+            // Slot at `smem_ptr + GetPerBlockVoteSlotOffset()` (past policy K+V
+            // budget — see GetSmemSize override). No interaction with LdsSeq
+            // rotation slots.
+            // INVARIANT (per-wave and per-block): V load / V->LDS store /
+            // cp_async pipeline stay UNCONDITIONAL.
+            bool block_skip = false;
+            if constexpr(kPerBlockPVSkip)
+            {
+                // Carve a 4-byte uint32 slot at the LDS tail. The cast is safe:
+                // GetSmemSize() bumped the smem_ptr allocation by 4 bytes (see
+                // pipeline override above), so the slot is dedicated to this
+                // pipeline instance and never reused by K/V tiles.
+                auto* vote_slot = reinterpret_cast<uint32_t*>(static_cast<char*>(smem_ptr) +
+                                                              GetPerBlockVoteSlotOffset());
+
+                const int lane_id = threadIdx.x % warpSize;
+                const int warp_id = threadIdx.x / warpSize;
+
+                // Initialise the sentinel to 1 (skip-everything) before any
+                // wave votes. Only one thread does the init; the subsequent
+                // block_sync_lds() makes it visible to all waves.
+                if(warp_id == 0 && lane_id == 0)
+                {
+                    *vote_slot = 1u;
+                }
+                block_sync_lds();
+
+                // Each wave contributes its warp_skip (already wave-uniform
+                // after the butterfly in compute_warp_skip). Lane 0 of each
+                // wave issues the atomicAnd; other lanes are idle. The atomic
+                // is on LDS (s_or_b32 / ds_and_b32), much cheaper than global.
+                if(lane_id == 0)
+                {
+                    atomicAnd(vote_slot, warp_skip ? 1u : 0u);
+                }
+                block_sync_lds();
+
+                // Broadcast the consensus back to every lane.
+                const uint32_t consensus = *vote_slot;
+                block_skip               = (consensus != 0u);
+            }
+
             static const auto get_validated_m = [](SMPLComputeDataType raw_m) {
                 if constexpr(FmhaMask::IsMasking)
                 {
@@ -439,6 +583,14 @@ struct BlockFmhaPipelineQRKSVSAsyncVSA
                 }
             };
 
+            // exp2 -> p_compute and rowsum_p.
+            // kEnablePVSkip + warp_skip: zero this warp's owned rows of
+            // p_compute so the unconditional gemm_1 contributes zero to o_acc,
+            // and skip the rowsum.
+            // Per-block mode uses block_skip (uniform across waves) and also
+            // skips gemm_1 itself (guard at the gemm_1 site below). The
+            // p_compute zeroing remains so rowsum_p -> 0 and `l += rowsum_p`
+            // is a no-op.
             constexpr auto p_spans = decltype(p_compute)::get_distributed_spans();
             sweep_tile_span(p_spans[number<0>{}], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
@@ -447,10 +599,26 @@ struct BlockFmhaPipelineQRKSVSAsyncVSA
 #endif
                 sweep_tile_span(p_spans[number<1>{}], [&](auto idx1) {
                     constexpr auto i_j_idx = make_tuple(idx0, idx1);
+                    if constexpr(kPerBlockPVSkip)
+                    {
+                        if(block_skip)
+                        {
+                            p_compute(i_j_idx) = SMPLComputeDataType{0};
+                            return;
+                        }
+                    }
+                    else if constexpr(kEnablePVSkip)
+                    {
+                        if(warp_skip)
+                        {
+                            p_compute(i_j_idx) = SMPLComputeDataType{0};
+                            return;
+                        }
+                    }
 #if CK_TILE_FMHA_FWD_FAST_EXP2
                     p_compute(i_j_idx) = exp2(scale_s * s[i_j_idx] - row_max);
 #else
-                    p_compute(i_j_idx)     = exp(s[i_j_idx] - get_validated_m(m[i_idx]));
+                    p_compute(i_j_idx) = exp(s[i_j_idx] - get_validated_m(m[i_idx]));
 #endif
                 });
             });
@@ -459,7 +627,11 @@ struct BlockFmhaPipelineQRKSVSAsyncVSA
                 p_compute, sequence<1>{}, f_sum, SMPLComputeDataType{0}); // rowsum(Pcompute{j})
 
             block_tile_reduce_sync(rowsum_p, f_sum, bool_constant<false>{});
-            // l{j}, Oacc{j}
+
+            // l{j}, Oacc{j}: alpha rescale of l / o always runs.
+            //                When warp_skip, rowsum_p is already 0 for this
+            //                warp's owned rows (p_compute zeroed above), so
+            //                `l += rowsum_p` is a no-op — no extra branch needed.
             constexpr auto o_spans = decltype(o_acc)::get_distributed_spans();
             sweep_tile_span(o_spans[number<0>{}], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
@@ -488,50 +660,84 @@ struct BlockFmhaPipelineQRKSVSAsyncVSA
                     return cast_tile<PDataType>(p_compute);
             }();
 
-            // STAGE 3, KV gemm
-            if constexpr(k1_loops > 1)
+            // STAGE 3, KV gemm — always runs (block-wide LDS dep; per-warp
+            // skipping has been absorbed by zeroing p_compute rows above).
             {
-                static_for<0, k1_loops - 1, 1>{}([&](auto i_k1) {
-                    if constexpr(i_k1 != 0 && i_k1 < k1_loops - 1)
-                    {
-                        v_buf = load_tile(
-                            v_dram_window, number<-1>{}, bool_constant<false>{}); // load next v_buf
-                    }
-                    block_sync_lds();
-                    gemm_1(o_acc,
-                           get_slice_tile(
-                               p, sequence<0, i_k1 * kK1>{}, sequence<kM0, (i_k1 + 1) * kK1>{}),
-                           get_slice_tile(
-                               v_lds_window,
-                               sequence<(LdsSeq.at(number<k0_loops + i_k1>{})) * kN1, 0>{},
-                               sequence<(LdsSeq.at(number<k0_loops + i_k1>{}) + 1) * kN1, kK1>{}));
+                if constexpr(k1_loops > 1)
+                {
+                    static_for<0, k1_loops - 1, 1>{}([&](auto i_k1) {
+                        if constexpr(i_k1 != 0 && i_k1 < k1_loops - 1)
+                        {
+                            v_buf = load_tile(v_dram_window,
+                                              number<-1>{},
+                                              bool_constant<false>{}); // load next v_buf
+                        }
+                        // block_sync_lds() stays UNCONDITIONAL — it is the
+                        // workgroup barrier the V->LDS rotation chain requires
+                        // (idiom catalog §3.1 / §4.1). Only the gemm_1 MFMA is
+                        // gated on block_skip when in per-block mode.
+                        block_sync_lds();
+                        if constexpr(kPerBlockPVSkip)
+                        {
+                            if(!block_skip)
+                            {
+                                gemm_1(
+                                    o_acc,
+                                    get_slice_tile(p,
+                                                   sequence<0, i_k1 * kK1>{},
+                                                   sequence<kM0, (i_k1 + 1) * kK1>{}),
+                                    get_slice_tile(
+                                        v_lds_window,
+                                        sequence<(LdsSeq.at(number<k0_loops + i_k1>{})) * kN1, 0>{},
+                                        sequence<(LdsSeq.at(number<k0_loops + i_k1>{}) + 1) * kN1,
+                                                 kK1>{}));
+                            }
+                        }
+                        else
+                        {
+                            gemm_1(o_acc,
+                                   get_slice_tile(p,
+                                                  sequence<0, i_k1 * kK1>{},
+                                                  sequence<kM0, (i_k1 + 1) * kK1>{}),
+                                   get_slice_tile(
+                                       v_lds_window,
+                                       sequence<(LdsSeq.at(number<k0_loops + i_k1>{})) * kN1, 0>{},
+                                       sequence<(LdsSeq.at(number<k0_loops + i_k1>{}) + 1) * kN1,
+                                                kK1>{}));
+                        }
 
-                    if constexpr(std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>)
-                    {
-                        auto v_shuffle_tmp = make_static_distributed_tensor<VDataType>(
-                            Policy::template MakeShuffledVRegBlockDescriptor<Problem>());
-                        shuffle_tile(v_shuffle_tmp, v_buf);
-                        auto v_lds_window_tmp = get_slice_tile(
-                            v_lds_window,
-                            sequence<(LdsSeq.at(number<k0_loops + i_k1 + 1>{})) * kN1, 0>{},
-                            sequence<(LdsSeq.at(number<k0_loops + i_k1 + 1>{}) + 1) * kN1, kK1>{});
-                        store_tile(v_lds_window_tmp, v_shuffle_tmp);
-                    }
-                    else
-                    {
-                        auto v_lds_window_tmp = get_slice_tile(
-                            v_lds_window,
-                            sequence<(LdsSeq.at(number<k0_loops + i_k1 + 1>{})) * kN1, 0>{},
-                            sequence<(LdsSeq.at(number<k0_loops + i_k1 + 1>{}) + 1) * kN1, kK1>{});
-                        store_tile(v_lds_window_tmp, v_buf);
-                    }
-                    if constexpr(i_k1 < k1_loops - 1)
-                        move_tile_window(v_dram_window, {0, kK1});
-                });
+                        if constexpr(std::is_same_v<VLayout,
+                                                    ck_tile::tensor_layout::gemm::RowMajor>)
+                        {
+                            auto v_shuffle_tmp = make_static_distributed_tensor<VDataType>(
+                                Policy::template MakeShuffledVRegBlockDescriptor<Problem>());
+                            shuffle_tile(v_shuffle_tmp, v_buf);
+                            auto v_lds_window_tmp = get_slice_tile(
+                                v_lds_window,
+                                sequence<(LdsSeq.at(number<k0_loops + i_k1 + 1>{})) * kN1, 0>{},
+                                sequence<(LdsSeq.at(number<k0_loops + i_k1 + 1>{}) + 1) * kN1,
+                                         kK1>{});
+                            store_tile(v_lds_window_tmp, v_shuffle_tmp);
+                        }
+                        else
+                        {
+                            auto v_lds_window_tmp = get_slice_tile(
+                                v_lds_window,
+                                sequence<(LdsSeq.at(number<k0_loops + i_k1 + 1>{})) * kN1, 0>{},
+                                sequence<(LdsSeq.at(number<k0_loops + i_k1 + 1>{}) + 1) * kN1,
+                                         kK1>{});
+                            store_tile(v_lds_window_tmp, v_buf);
+                        }
+                        if constexpr(i_k1 < k1_loops - 1)
+                            move_tile_window(v_dram_window, {0, kK1});
+                    });
+                }
             }
             i_total_loops++;
             if(i_total_loops < num_total_loop)
             {
+                // V load runs unconditionally under redesign D, so no skip
+                // compensation needed (same offset arithmetic as _vsa.hpp).
                 move_tile_window(v_dram_window, {0, kN0 * (block_idx - 1)});
                 move_tile_window(k_dram_block_window, {kN0 * block_idx, 0});
                 k_dram_window.set_window_origin(k_dram_block_window.get_window_origin());
@@ -546,16 +752,37 @@ struct BlockFmhaPipelineQRKSVSAsyncVSA
                                     k_pre_np);
                 move_tile_window(k_dram_window, {0, kK0});
             }
-            // tail
+            // tail — gemm_1 runs unconditionally under redesign D (per-wave).
+            // Per-block mode gates the MFMA on block_skip; block_sync_lds
+            // still runs UNCONDITIONALLY (workgroup barrier for LDS rotation).
             {
                 block_sync_lds();
-                gemm_1(
-                    o_acc,
-                    get_slice_tile(p, sequence<0, (k1_loops - 1) * kK1>{}, sequence<kM0, kN0>{}),
-                    get_slice_tile(
-                        v_lds_window,
-                        sequence<(LdsSeq.at(number<k0_loops + k1_loops - 1>{})) * kN1, 0>{},
-                        sequence<(LdsSeq.at(number<k0_loops + k1_loops - 1>{}) + 1) * kN1, kK1>{}));
+                if constexpr(kPerBlockPVSkip)
+                {
+                    if(!block_skip)
+                    {
+                        gemm_1(
+                            o_acc,
+                            get_slice_tile(
+                                p, sequence<0, (k1_loops - 1) * kK1>{}, sequence<kM0, kN0>{}),
+                            get_slice_tile(
+                                v_lds_window,
+                                sequence<(LdsSeq.at(number<k0_loops + k1_loops - 1>{})) * kN1, 0>{},
+                                sequence<(LdsSeq.at(number<k0_loops + k1_loops - 1>{}) + 1) * kN1,
+                                         kK1>{}));
+                    }
+                }
+                else
+                {
+                    gemm_1(o_acc,
+                           get_slice_tile(
+                               p, sequence<0, (k1_loops - 1) * kK1>{}, sequence<kM0, kN0>{}),
+                           get_slice_tile(
+                               v_lds_window,
+                               sequence<(LdsSeq.at(number<k0_loops + k1_loops - 1>{})) * kN1, 0>{},
+                               sequence<(LdsSeq.at(number<k0_loops + k1_loops - 1>{}) + 1) * kN1,
+                                        kK1>{}));
+                }
             }
         } while(i_total_loops < num_total_loop);
 

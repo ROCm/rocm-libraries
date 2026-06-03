@@ -9,6 +9,7 @@
 #include "ck_tile/ops/fmha.hpp"
 
 #include "01_fmha/mask.hpp"
+#include "sparge_hyperparam.hpp"
 
 #include <type_traits>
 #include <utility>
@@ -272,7 +273,7 @@ struct fmha_jenga_fwd_traits
     std::string data_type;
     bool is_v_rowmajor;
     mask_enum mask_type;
-    // TODO: padding check is inside this api
+    int bm0 = 0; // preferred Q-tile size; 0 = don't care (dispatch picks largest)
 };
 
 float fmha_jenga_fwd(fmha_jenga_fwd_traits, fmha_jenga_fwd_args, const ck_tile::stream_config&);
@@ -280,7 +281,12 @@ float fmha_jenga_fwd(fmha_jenga_fwd_traits, fmha_jenga_fwd_args, const ck_tile::
 template <typename Traits_>
 float fmha_jenga_fwd_(const ck_tile::stream_config&, fmha_jenga_fwd_args);
 
-float fmha_jenga_fwd(fmha_jenga_fwd_args, const ck_tile::stream_config&);
+template <typename Traits_>
+void fmha_jenga_fwd_oneshot_(const ck_tile::stream_config&, fmha_jenga_fwd_args);
+
+void fmha_jenga_fwd_oneshot(fmha_jenga_fwd_traits,
+                            fmha_jenga_fwd_args,
+                            const ck_tile::stream_config&);
 
 // VSA uses the same traits structure as Jenga; aliases for clarity
 template <ck_tile::index_t HDim_,
@@ -325,4 +331,147 @@ float fmha_vsa_fwd(fmha_vsa_fwd_traits, fmha_vsa_fwd_args, const ck_tile::stream
 template <typename Traits_>
 float fmha_vsa_fwd_(const ck_tile::stream_config&, fmha_vsa_fwd_args);
 
-float fmha_vsa_fwd(fmha_vsa_fwd_args, const ck_tile::stream_config&);
+template <typename Traits_>
+void fmha_vsa_fwd_oneshot_(const ck_tile::stream_config&, fmha_vsa_fwd_args);
+
+void fmha_vsa_fwd_oneshot(fmha_vsa_fwd_traits, fmha_vsa_fwd_args, const ck_tile::stream_config&);
+
+// sparge: same args as vsa plus a scalar PV-skip threshold (Step 1).
+struct fmha_sparge_fwd_args
+{
+    const void* q_ptr;
+    const void* k_ptr;
+    const void* v_ptr;
+    const void* lut_ptr; // delta-encoded K-block indices per Q-block, int32 [B,H,Q_blk,K_blk]
+    const void* valid_block_num_ptr; // valid K-block count per Q-block, int32 [B,H,Q_blk]
+    void* o_ptr;
+
+    ck_tile::index_t seqlen_q;
+    ck_tile::index_t seqlen_k;
+    ck_tile::index_t batch;
+    ck_tile::index_t max_seqlen_q;
+    ck_tile::index_t hdim_q;
+    ck_tile::index_t hdim_v;
+    ck_tile::index_t nhead_q;
+    ck_tile::index_t nhead_k;
+
+    float scale_s;
+
+    ck_tile::index_t stride_q;
+    ck_tile::index_t stride_k;
+    ck_tile::index_t stride_v;
+    ck_tile::index_t stride_o;
+    ck_tile::index_t nhead_stride_q;
+    ck_tile::index_t nhead_stride_k;
+    ck_tile::index_t nhead_stride_v;
+    ck_tile::index_t nhead_stride_o;
+    ck_tile::index_t batch_stride_q;
+    ck_tile::index_t batch_stride_k;
+    ck_tile::index_t batch_stride_v;
+    ck_tile::index_t batch_stride_o;
+
+    ck_tile::index_t window_size_left;
+    ck_tile::index_t window_size_right;
+    ck_tile::index_t mask_type;
+
+    sparge_attn_hyperparam_args hp{};
+};
+
+template <typename FmhaKernel>
+auto fmha_fwd_create_kargs_and_grids(fmha_sparge_fwd_args args)
+{
+    assert(args.nhead_q % args.nhead_k == 0);
+    auto kargs = FmhaKernel::MakeKargs(args.q_ptr,
+                                       args.k_ptr,
+                                       args.v_ptr,
+                                       args.lut_ptr,
+                                       args.valid_block_num_ptr,
+                                       args.o_ptr,
+                                       args.seqlen_q,
+                                       args.seqlen_k,
+                                       args.hdim_q,
+                                       args.hdim_v,
+                                       args.nhead_q,
+                                       args.nhead_q / args.nhead_k,
+                                       args.scale_s,
+                                       args.hp.pv_threshold,
+                                       args.stride_q,
+                                       args.stride_k,
+                                       args.stride_v,
+                                       args.stride_o,
+                                       args.nhead_stride_q,
+                                       args.nhead_stride_k,
+                                       args.nhead_stride_v,
+                                       args.nhead_stride_o,
+                                       args.batch_stride_q,
+                                       args.batch_stride_k,
+                                       args.batch_stride_v,
+                                       args.batch_stride_o,
+                                       args.window_size_left,
+                                       args.window_size_right,
+                                       args.mask_type,
+                                       // per-head dispatch extras
+                                       args.hp.pv_threshold_per_head_ptr,
+                                       args.hp.head_remap_ptr,
+                                       args.hp.nhead_in_launch);
+
+    const ck_tile::index_t grid_nhead =
+        (args.hp.head_remap_ptr != nullptr && args.hp.nhead_in_launch > 0) ? args.hp.nhead_in_launch
+                                                                           : args.nhead_q;
+    dim3 grids = FmhaKernel::GridSize(args.batch, grid_nhead, args.max_seqlen_q, args.hdim_v);
+    return ck_tile::make_tuple(kargs, grids);
+}
+
+template <ck_tile::index_t HDim_,
+          typename DataType_,
+          ck_tile::index_t kM0_,
+          ck_tile::index_t kN0_,
+          ck_tile::index_t kK0_,
+          ck_tile::index_t kN1_,
+          ck_tile::index_t kK1_,
+          ck_tile::index_t kK0BlockLength_,
+          bool kIsVLayoutRowMajor_,
+          ck_tile::BlockFmhaPipelineEnum FmhaPipelineEnum_,
+          bool kHasLogitsSoftCap_,
+          typename FmhaMask_,
+          bool kPadS_,
+          bool kPadSK_,
+          bool kPadD_,
+          bool kPadDv_,
+          bool kUseTrLoad_>
+using fmha_sparge_fwd_traits_ = fmha_jenga_fwd_traits_<HDim_,
+                                                       DataType_,
+                                                       kM0_,
+                                                       kN0_,
+                                                       kK0_,
+                                                       kN1_,
+                                                       kK1_,
+                                                       kK0BlockLength_,
+                                                       kIsVLayoutRowMajor_,
+                                                       FmhaPipelineEnum_,
+                                                       kHasLogitsSoftCap_,
+                                                       FmhaMask_,
+                                                       kPadS_,
+                                                       kPadSK_,
+                                                       kPadD_,
+                                                       kPadDv_,
+                                                       kUseTrLoad_>;
+
+using fmha_sparge_fwd_traits = fmha_jenga_fwd_traits;
+
+float fmha_sparge_fwd(fmha_sparge_fwd_traits, fmha_sparge_fwd_args, const ck_tile::stream_config&);
+
+// PV-skip mode is a template non-type param so codegen emits all 3
+// instantiations from the same source tree. Host dispatch
+// (fmha_sparge_fwd_api.cpp) selects the specialization based on
+// fmha_sparge_fwd_args::hp.pv_mode_compile at runtime.
+//   0 = kNone, 1 = kPerWave, 2 = kPerBlock  (matches ck_tile::PVSkipMode).
+template <typename Traits_, int kPVMode>
+float fmha_sparge_fwd_(const ck_tile::stream_config&, fmha_sparge_fwd_args);
+
+template <typename Traits_, int kPVMode>
+void fmha_sparge_fwd_oneshot_(const ck_tile::stream_config&, fmha_sparge_fwd_args);
+
+void fmha_sparge_fwd_oneshot(fmha_sparge_fwd_traits,
+                             fmha_sparge_fwd_args,
+                             const ck_tile::stream_config&);
