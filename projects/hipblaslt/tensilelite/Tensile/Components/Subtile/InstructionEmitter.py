@@ -155,9 +155,9 @@ class InstructionEmitter:
                     subtileK = k // self.subtileShapeK
                     subIterK_within = k % self.subtileShapeK
                     dstTile = vgprTiles[tile_map[tileId]]
-                    hasTDM = self.kernel.get("enableTDMA", False) and self.kernel.get("enableTDMB", False)
+                    swizzled = bool(self.kernel.get("SubtileLdsSwizzle"))
                     module.add(emitSingleDsRead(
-                        ti, tileId, subtileK, subIterK_within, dstTile, hasTDM=hasTDM))
+                        ti, tileId, subtileK, subIterK_within, dstTile, swizzled=swizzled))
         elif tensor in ('SA', 'SB'):
             tc = 'MXSA' if tensor == 'SA' else 'MXSB'
             ti = self.tileInfoMap[tensor]

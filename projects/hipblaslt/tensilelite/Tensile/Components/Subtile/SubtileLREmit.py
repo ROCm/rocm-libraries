@@ -402,11 +402,10 @@ def _computeLROffset(module, kernel, tileInfo, colOffset, rowOffset):
   subIterKBytes = tileInfo.subIterKBytes
   loadWidth = tileInfo.loadWidthLR
   numMFMACols = int(tileInfo.mmaTileShape[1] * tileInfo.bpe) // loadWidth  # TN case only
-  # TDM loads the full DepthU tile at once, so the LDS K-row is depthUBytes wide.
-  # The column block size must span the full K-row so subIterK offsets don't
-  # alias (wrap) prematurely.
-  hasTDM = kernel.get("enableTDMA", False) and kernel.get("enableTDMB", False)
-  ldsKBytes = tileInfo.depthUBytes if hasTDM else subIterKBytes
+  # Without LDS swizzling (e.g. TDM), the full DepthU tile is contiguous in LDS,
+  # so the K-row is depthUBytes wide.  With swizzling, GR writes individual
+  # subtile K-groups, so the effective K-row is subIterKBytes.
+  ldsKBytes = subIterKBytes if kernel.get("SubtileLdsSwizzle") else tileInfo.depthUBytes
   blockSize = ldsKBytes // loadWidth
 
   module.add(VMovB32(dst=vgpr(tileInfo.sharedVgprLROffset[0]), src=vgpr(colOffset), comment="%s: laneId"%tc))
@@ -588,9 +587,8 @@ def _lraTileAssignment_legacy(writer, kernel):
   mi_m = tileInfoA.mmaTileShape[0]
   loadWidth = tileInfoA.loadWidthLR
   ldsRowBankSize = writer.states.archCaps["LDSBankCount"] * writer.states.archCaps["LDSBankWidth"]
-  # TDM: full DepthU row in LDS; non-TDM: one subtile K-group
-  hasTDM = kernel.get("enableTDMA", False) and kernel.get("enableTDMB", False)
-  ldsKBytes = tileInfoA.depthUBytes if hasTDM else subIterKBytes
+  # With LDS swizzling (gfx950), K-row is one subtile group; without, full DepthU.
+  ldsKBytes = subIterKBytes if kernel.get("SubtileLdsSwizzle") else tileInfoA.depthUBytes
   numRowsPerLDSBanks = ldsRowBankSize // ldsKBytes
   blockSize = ldsKBytes // loadWidth
   tmpVgpr = writer.vgprPool.checkOut(6)
@@ -599,7 +597,7 @@ def _lraTileAssignment_legacy(writer, kernel):
   module.add(VLShiftRightB32(dst=vgpr(lane16Group), shiftHex=hex(mi_m.bit_length()-1), src=vgpr(lane16Group), comment="lane16Group"))
   module.add(VAndB32(dst=vgpr(lane16), src0=vgpr("Serial"), src1=mi_m-1, comment="laneId %% 16"))
   module.add(VMovB32(dst=vgpr(colOffset), src=vgpr(lane16Group), comment="colOffset = lane16Group"))
-  if kernel.get("ISA") == (9, 5, 0):
+  if kernel.get("SubtileLdsSwizzle"):
     module.add(VLShiftRightB32(dst=vgpr(rotation), shiftHex=hex(numRowsPerLDSBanks.bit_length()-1), src=vgpr(lane16), comment="lds_row_id"))
     module.add(VLShiftRightB32(dst=vgpr(rotation), shiftHex=hex(1), src=vgpr(rotation), comment="(lds_row_id //2 )"))
     module.add(VLShiftLeftB32(dst=vgpr(rotation), shiftHex=hex(1), src=vgpr(rotation), comment="rotation=(lds_row_id //2) * 2"))
@@ -608,9 +606,8 @@ def _lraTileAssignment_legacy(writer, kernel):
     module.add(VPermlane16SwapB32(dst=vgpr(colOffset), src=vgpr(colOffset), comment="apply swizzling"))
     setExecMask(module, writer, -1, -1)
   module.add(VAndB32(dst=vgpr(colOffset), src0=vgpr(colOffset), src1=hex(blockSize-1), comment="colOffset = colOffset %% blockSize"))
-  # TDM loads the full DepthU tile at once, so the LDS M-row stride is
-  # depthUBytes (the complete K row), not subIterKBytes (one subtile K-group).
-  # Non-TDM GR writes individual subtile K-groups, so subIterKBytes is correct there.
+  # Without swizzling, the LDS M-row stride is depthUBytes (contiguous K row).
+  # With swizzling, GR writes individual subtile K-groups, so subIterKBytes applies.
   module.add(VLShiftLeftB32(dst=vgpr(rowOffset), shiftHex=hex(ldsKBytes.bit_length()-1), src=vgpr(lane16), comment="offsetRow = %d*lane16" % ldsKBytes))
   _computeLROffset(module, kernel, tileInfoA, colOffset, rowOffset)
   _computeLROffset(module, kernel, tileInfoB, colOffset, rowOffset)
@@ -630,7 +627,7 @@ def localReadResetOffsetsSubtile(writer, kernel):
   return module
 
 
-def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, hasTDM=False):
+def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True):
   """Emit DSLoadB128 instruction(s) for one MMA tile within a subtile.
 
   For wave32 tiles with 8 VGPRs, emits two DSLoadB128 instructions
@@ -641,14 +638,19 @@ def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, hasTDM=False):
       sId0:      Subtile row index (used for offset computation)
       subIterK:  subIterK index within the subtile (maps to mfmaC; subtileShape[0]=1 so mfmaR=0)
       dstTile:   RegisterTileInfo — destination vgpr tile for the load
-      hasTDM:    If True, use TDM-aware LDS offset (contiguous K-row layout)
+      swizzled:  If True, LDS uses swizzled subtile layout; if False, contiguous K-row layout
   """
   # du maps to mfmaC, mfmaR is always 0 (subtileShape[0]=1)
   mfmaId = tileInfo.getSubtileShapeLinearId(subIterK, 0)
   addrVgpr = tileInfo.sharedVgprLROffset[mfmaId]
 
-  if hasTDM:
-    # TDM loads the full DepthU tile contiguously in LDS with K as the fast
+  if swizzled:
+    # Swizzled: GR writes individual subtile K-groups into LDS.
+    offsetStride = int(tileInfo.subtileSize)
+    offset = sId0 * offsetStride
+    offset = offset + sId1 * int(tileInfo.globalSubtileGrid[0]) * offsetStride
+  else:
+    # Non-swizzled: full DepthU tile is contiguous in LDS with K as the fast
     # dimension.  Each M-row is depthUBytes wide.  A subtile row covers
     # subtileShape[0] * instM M-rows, so stride = that * depthUBytes.
     instM = int(tileInfo.mmaTileShape[0])
@@ -658,10 +660,6 @@ def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, hasTDM=False):
     depthUBytes = int(tileInfo.depthUBytes)
     offsetStride = subtileShapeM * instM * depthUBytes
     offset = sId0 * offsetStride + sId1 * subtileShapeK * instK * int(tileInfo.bpe)
-  else:
-    offsetStride = int(tileInfo.subtileSize)
-    offset = sId0 * offsetStride
-    offset = offset + sId1 * int(tileInfo.globalSubtileGrid[0]) * offsetStride
 
   dstVgpr = dstTile.regList.indices[0]
   numRegs = len(dstTile.regList.indices)
