@@ -1,0 +1,27 @@
+# BEFORE coverage — existing suite only, no characterization tests for the
+# Solution.py support slice yet (captured before the new SolutionSupport/ test
+# files were collected; total = 1769 passed, unchanged from the post-
+# SolutionStructsUtils baseline).
+#
+# SLICE TARGET: this is the FIRST slice of the large Solution.py campaign — the
+# pure support-functions head (L165-439). The whole file is 3272 stmts at 37.50%
+# line (the cap-coupled Solution class L444+ is OUT of slice and stays low).
+# The targeted-slice lines missing at baseline:
+#   240-245 (mergeTypeMismatchCollector), 357-362 (FactorDimArgs),
+#   375-384 (BiasTypeArgs), 396 (activationSetting), 405-420 (ActivationArgs),
+#   432-439 (isExtractableIndex), and the 182->179 branch.
+# (validateParameterTypes / printTypeMismatchSummary / _getExpectedTypes are
+#  already exercised indirectly by the existing suite.)
+#
+# Command:
+#   pytest -m unit --cov=Tensile --cov-config=pyproject.toml \
+#     --cov-report=term-missing Tensile/Tests/unit
+
+Name                                                      Stmts   Miss Branch BrPart   Cover   Missing
+Tensile/SolutionStructs/Solution.py                         3272   2045   2234    436  32.78%   (whole file; slice L165-439 — see note above)
+
+1769 passed, 201 skipped
+
+# Whole-file line = (3272 - 2045) / 3272 = 37.50% line ; blended 32.78%
+# The slice goal is >=95% line on the TARGETED symbols (L165-439), demonstrated
+# in coverage-after.txt via the Missing column (residual misses are out-of-slice).
