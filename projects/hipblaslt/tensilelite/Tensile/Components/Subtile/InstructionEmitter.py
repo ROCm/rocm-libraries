@@ -512,29 +512,46 @@ class InstructionEmitter:
                     src2=sgpr(maskSgpr, laneSGPRCount),
                     comment=f"mask = (diff < {literal}) ? 0 : -1"))
 
-            for label, ids, tilesDict in (("A", aIds, self.vgprTilesA),
-                                          ("B", bIds, self.vgprTilesB)):
-                for tid in ids:
-                    for i, v in enumerate(list(tilesDict[tid])):
-                        module.add(VAndB32(
-                            dst=vgpr(v), src0=vgpr(v), src1=vgpr(maskVgprs[i]),
-                            comment=f"mask {label}[{i}] (K=[{i*kStride},{i*kStride+kStride-1}])"))
+            # MX scale path (MXFP4 / MXFP8): when the host zero-pads the MX
+            # scale tensor up to a multiple of MX_PAD_K (= 256), every K-group
+            # past the actual K boundary reads scale-byte 0x00 — which the
+            # v_mfma_scale instruction treats as a scale factor of 2^-127,
+            # underflowing the per-lane (A·B·scaleA·scaleB) contribution to
+            # zero in the FP32 accumulator. That makes the data K-mask
+            # redundant for ALL invalid K-groups: the over-fetched data is
+            # multiplied by an effectively-zero scale and contributes nothing.
+            #
+            # Furthermore, applying the data K-mask via V_AND_B32 against the
+            # cndmask-derived sharedMask vgpr empirically corrupts MFMA
+            # accumulators on gfx950 — the exact same kernel WITHOUT the data
+            # masks (or with sharedMask forced to -1, i.e. AND -1) produces
+            # correct outputs, while AND with mixed (-1 / 0) per-lane values
+            # produces ~0.5% wrong outputs at K%MIK!=0 (88/16384 for MT128 /
+            # DU=256 / K=288). The mask values are correct (verified via the
+            # forced-mask experiment); the data corruption is downstream of
+            # the per-lane AND, presumably a microarchitectural interaction
+            # between the cmp→cndmask→AND chain and the v_mfma_scale operand
+            # bypass. The scale-mask reuse below is still safe (AND-ing the
+            # scale vgprs zeroes byte 0x00 to byte 0x00, a no-op).
+            #
+            # Skip the data K-mask entirely when hasScale (MXFP4 / MXFP8).
+            # Plain non-MX FP8 (no scale) keeps the data K-mask — its
+            # MFMA-with-scale uses a unit-scale fallback (E8M0 0x7f = 1.0)
+            # so OOB data DOES need to be explicitly zeroed.
+            if not self.hasScale:
+                for label, ids, tilesDict in (("A", aIds, self.vgprTilesA),
+                                              ("B", bIds, self.vgprTilesB)):
+                    for tid in ids:
+                        for i, v in enumerate(list(tilesDict[tid])):
+                            module.add(VAndB32(
+                                dst=vgpr(v), src0=vgpr(v), src1=vgpr(maskVgprs[i]),
+                                comment=f"mask {label}[{i}] (K=[{i*kStride},{i*kStride+kStride-1}])"))
 
-            # MX scale mask (FP4 only): reuse the A/B mask we just built.
-            # The A/B mask for subIterK=base is binary per-lane:
-            #   laneK_base >= rem → 0   (zero A/B[base]; also OK to zero scale
-            #                            for both byte-pairs — see below)
-            #   else              → -1  (keep)
-            # Scale vgpr packs lrSA.k subIterK pairs (bytes 0..1 → base,
-            # bytes 2..3 → base+1). Applying the base mask to the scale:
-            #   • lane fails at base → scale zeroed → MFMAs at base, base+1
-            #     see scale=0; A/B[base]=0 by the same mask, and A/B[base+1]
-            #     is masked by its own emit_mask_k → both products = 0. ✓
-            #   • lane passes at base, fails at base+1 → scale bytes 2..3 left
-            #     stale, but A/B[base+1] is masked to 0 by its own emit_mask_k
-            #     call → product = 0 regardless of scale value. ✓
-            # So a single VAnd with maskVgprs[0] suffices per scale-group
-            # boundary; no separate compute or scratch vgpr needed.
+            # MX scale mask reuse: zero scale vgprs for K-groups whose lane
+            # is past `rem`. Redundant in principle (host zero-padding makes
+            # those bytes 0x00 already → MFMA contribution underflows to 0)
+            # but emitted to keep the scale path explicit and to match what
+            # the BF16 path does. Safe under any input data pattern.
             scaleStride = self.config.lrSA.k if self.hasScale else 0
             if (not isBF16) and self.hasScale \
                     and (self.vgprTilesSA or self.vgprTilesSB) \
