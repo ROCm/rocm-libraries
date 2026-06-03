@@ -71,11 +71,14 @@ fi
 
 # Codegen inputs: a change to a generator script/template maps to no test via
 # #include analysis (the depmap has generated.cpp -> headers, never
-# generate.py -> generated.cpp), so a selective build could silently skip the
+# generate*.py -> generated.cpp), so a selective build could silently skip the
 # affected tests. Force a full build. This is the backstop for the codegen blind
 # spot inventoried in script/dependency-parser/codegen_blindspots.json, and holds
-# even when that inventory lags behind a newly added generator.
-CODEGEN_PATTERN="projects/composablekernel/.*/generate\.py$|projects/composablekernel/cmake/.*\.in$"
+# even when that inventory lags behind a newly added generator. The name glob
+# covers generate.py and its siblings (generate_test_files.py, generate_instances.py,
+# generate_dispatcher_registration.py, ...) - matching extra generators only
+# over-triggers full builds, it never risks a missed test.
+CODEGEN_PATTERN="projects/composablekernel/.*/generate[A-Za-z0-9_]*\.py$|projects/composablekernel/cmake/.*\.in$"
 
 if echo "$CHANGED_FILES" | grep -qE "${CODEGEN_PATTERN}"; then
     FORCE_FULL_BUILD=true

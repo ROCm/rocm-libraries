@@ -406,6 +406,7 @@ branch, so merged-in develop commits don't trigger a false positive).
 | `**/*.cmake`, `**/*.cmake.in` | CMake module/config changes |
 | `script/dependency-parser/**` | The tooling itself changed; can't trust its own output |
 | `script/cmake/**` | CMake helper scripts |
+| `**/generate*.py`, `cmake/*.in` | Codegen inputs (D11): generated sources aren't tracked pre-build, and a generator-input change maps to no test via `#include`. Glob covers `generate.py` + siblings (`generate_test_files.py`, `generate_instances.py`, …) |
 | `setup.py`, `pyproject.toml` | Python build config |
 | dependency cache (`cmake_dependency_mapping.json`) older than 7 days | Stale cache; force a fresh full build |
 | `FORCE_CI=true` env var | Nightly/scheduled builds always run everything |
@@ -571,7 +572,55 @@ To reproduce on any full build dir: run the three commands above in it.
 
 ---
 
-## 11. Contacts and escalation
+## 11. Measuring the exit criteria
+
+The Code Red targets for this work item are **≥99% run accuracy** (run the tests a
+change needs) and **≥95% skip accuracy** (skip the tests it doesn't). The procedure
+to (re)produce both numbers:
+
+### Run accuracy (≥99%) — coverage oracle
+
+The number comes from `filter_oracle.py coverage` (§10), normally harvested free
+from the nightly full build. To produce it on demand from any completed build dir:
+
+```
+DP=script/dependency-parser
+python3 $DP/main.py cmake-parse compile_commands.json build.ninja --workspace-root . --output pre_depmap.json
+python3 $DP/main.py parse build.ninja --workspace-root .          # -> enhanced_dependency_mapping.json
+ctest -N > ctest_list.txt
+python3 $DP/filter_oracle.py coverage --pre pre_depmap.json --post enhanced_dependency_mapping.json \
+    --ctest ctest_list.txt --output coverage_result.json
+```
+
+Read `coverage_result.json`: `coverage` is the run-accuracy number (`scope: source`,
+PR-editable files only — see D14); `false_negatives` lists the files to drive to
+zero. Keys are canonicalized, so `--pre`/`--post` workspace-roots need not match.
+A GPU isn't required — the build only needs to **compile** (`ninja tests`), not run.
+Latest: **99.97%** on a gfx942 build, residual FNs all in the `gemm_streamk` codegen
+cluster (now safety-backstopped, §7).
+
+### Skip accuracy (≥95%) — PR-corpus audit
+
+```
+python3 script/dependency-parser/analyze_pr_selection.py <PR> [<PR> ...] \
+    --depmap enhanced_dependency_mapping.json --ctest ctest_list.txt \
+    --repo ROCm/rocm-libraries --summary summary.json
+```
+
+Per PR it prints `sel` (tests selected) / `code` (CK code files changed) /
+`not_in_map` (files the depmap didn't see → potential under-selection). A healthy
+result is a small `sel` relative to the full suite with `not_in_map=0`; broad
+core-header changes legitimately fan out. The tool reads the depmap's
+`repo.workspace_root` to match paths and **warns loudly if every code file is
+unmapped** (a depmap-root mismatch). It reports selection behavior + blind-spot
+flags, not a ground-truth %; pair it with `validate_pr.sh` for a per-PR certificate.
+
+Record the dated numbers on the Confluence design page ("How we measure"); keep
+this runbook to the *procedure*, not point-in-time results.
+
+---
+
+## 12. Contacts and escalation
 
 - Smart-build tooling is in `projects/composablekernel/script/dependency-parser/`
 - Unit tests: `uv run pytest tests/` (requires `uv sync` once)

@@ -11,7 +11,7 @@
     "Used by: filter_oracle.py codegen-allowlist (marks these tests as a known",
     "codegen class in the reachability guardrail). Correctness for B2 does NOT",
     "depend on this file being complete - ci_safety_check.sh forces a full build on",
-    "any */generate.py or cmake/*.in change as a backstop.",
+    "any */generate*.py or cmake/*.in change as a backstop.",
     "Add an entry when you add a generator. Paths are relative to projects/composablekernel.",
     "test_globs use shell-style wildcards matched against `ctest -N` names."
   ],
@@ -50,6 +50,11 @@
       "input": "test/ck_tile/rmsnorm2d/generate.py",
       "test_globs": ["test_ck_tile_rmsnorm2d_*", "test_ck_tile_add_rmsnorm2d_*"],
       "note": "rmsnorm2d test blobs (target_sources of generated .cpp)"
+    },
+    {
+      "input": "test/ck_tile/gemm_streamk/generate_test_files.py",
+      "test_globs": ["test_ck_tile_streamk_*"],
+      "note": "Generates the gemm_streamk test case .inc/.hpp at build time; the coverage oracle isolates its FNs here. Generator name is generate_test_files.py (not generate.py), now covered by the broadened safety-check glob."
     },
     {
       "input": "cmake/instantiate_shard.in",
