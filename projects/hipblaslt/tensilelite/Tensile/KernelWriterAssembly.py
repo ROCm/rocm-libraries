@@ -2212,10 +2212,6 @@ class KernelWriterAssembly(KernelWriter):
       self.states.batchOffsetBKernArgOffset = sgprOffset
       sgprOffset += 8
       self.argLoader.setOffset(sgprOffset)
-      # TODO: remove below before merging the PR!
-      # Debug: write kernel arg offsets to file for verification
-      with open("/tmp/kernel_batch_offset_debug.txt", "a") as f:
-        f.write(f"{self.states.kernelName}: D@{self.states.batchOffsetDKernArgOffset}, C@{self.states.batchOffsetCKernArgOffset}, A@{self.states.batchOffsetAKernArgOffset}, B@{self.states.batchOffsetBKernArgOffset}\n")
 
     return kernelArgs
 
