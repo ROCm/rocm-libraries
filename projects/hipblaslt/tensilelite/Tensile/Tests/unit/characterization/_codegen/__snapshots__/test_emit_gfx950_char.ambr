@@ -7,8 +7,8 @@
         dict({
           'basename': 'Cijk_Alik_Bjlk_BBS_BH_Bias_AuxB_HA_S_SAV_UserArgcALwhMJEeyle33rtx7pANbu4DR5DG3J-arNvfvXoJH8=',
           'err': 0,
-          'n_lines': 4219,
-          'sha256': '77baecc226d51d202b1fe6ae8a337a24032fd7b28b2fc9e367f6335a6eaa9c3b',
+          'n_lines': 4225,
+          'sha256': '2d4ff64f4eb20b27ca7d3048d55bae106c25d0bd0b6bb9dbd61e86cecd4a08d4',
         }),
       ]),
     }),
@@ -69,6 +69,17 @@
       ]),
     }),
     dict({
+      'file': 'MX_StreamK.yaml',
+      'kernels': list([
+        dict({
+          'basename': 'Cijk_Alik_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT4T9wpFmGrN-5qy-eHvmVK2NmUfVoFfNiIMJyPzcaMqgk=',
+          'err': 0,
+          'n_lines': 15171,
+          'sha256': '2dee63e127beacfe1c2fe41ea958f188ba014802f1abbac001aa12c43ed3ab43',
+        }),
+      ]),
+    }),
+    dict({
       'file': 'SB.yaml',
       'kernels': list([
         dict({
@@ -76,6 +87,17 @@
           'err': 0,
           'n_lines': 61391,
           'sha256': '190ee0d244586d977c4a700c311438e61b7f2d8da8c640e45faf6a413c9b7461',
+        }),
+      ]),
+    }),
+    dict({
+      'file': 'StreamK_F8F8S.yaml',
+      'kernels': list([
+        dict({
+          'basename': 'Cijk_Alik_Bljk_F8F8S_BH_Bias_HA_S_SAV_UserArgs_MGZQdA8Tpor2zLhMl05g2BfvBxjsnGDyUCWNFjvF5ubU=',
+          'err': 0,
+          'n_lines': 195788,
+          'sha256': 'f01755b27bfaddbb590070def63deb3c50fb6b107e38bae83d70a3aa07e71239',
         }),
       ]),
     }),
