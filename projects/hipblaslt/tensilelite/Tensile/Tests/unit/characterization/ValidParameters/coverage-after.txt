@@ -1,0 +1,20 @@
+# AFTER coverage — full `-m unit` suite WITH the new ValidParameters
+# characterization suite (2 test files, 37 tests, 26 snapshots).
+#
+# Command (same as before; --cov=Tensile path-mode + grep the row):
+#   pytest -m unit --cov=Tensile --cov-config=pyproject.toml \
+#     --cov-report=term-missing Tensile/Tests/unit
+#
+# Result: full line AND branch coverage on the module.
+
+Name                                                      Stmts   Miss Branch BrPart   Cover   Missing
+Tensile/Common/ValidParameters.py                           169      0     84      0 100.00%
+
+1563 passed, 201 skipped
+
+# Line coverage = (Stmts - Miss) / Stmts = (169 - 0) / 169 = 100.00% line
+# Blended (line+branch, the report's Cover column)            = 100.00%
+#
+# Before -> After: 80.47% -> 100.00% line (+19.53 pts); 33 -> 0 missing stmts.
+# No regression: 1526 -> 1563 passed (+37 new tests), 201 skipped unchanged.
+# Additive only (new files under Tensile/Tests/unit/characterization/ValidParameters/).
