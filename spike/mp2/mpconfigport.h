@@ -38,3 +38,10 @@
 #if MICROPY_MODULE_FROZEN_MPY
 #define MICROPY_QSTR_EXTRA_POOL mp_qstr_frozen_const_pool
 #endif
+
+// extmod modules ck_dsl needs (compiled in via build.sh, scanned via gen.mk).
+#define MICROPY_PY_RE (1)
+#define MICROPY_PY_RE_MATCH_GROUPS (1)
+#define MICROPY_PY_RE_MATCH_SPAN_START_END (1)
+#define MICROPY_PY_RE_SUB (1)
+#define MICROPY_PY_BUILTINS_BYTEARRAY (1)
