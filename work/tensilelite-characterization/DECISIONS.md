@@ -238,3 +238,27 @@ scope excludes.
   codegen characterization, out of scope and high-maintenance.
 
 **Result:** 1037 stmts, 683 missed → 34.1% line. Documented ceiling.
+
+## D14 — TensileLibLogicToYaml: pin the formGroups("None") crash on the skipMI / MI-disabled path
+
+**Context:** `formForkParams(sol, skipMI=True)` (or any solution with
+`EnableMatrixInstruction` falsy) sets `temp = "None"` (a *string*) and then calls
+`forkData.append(formGroups(temp))`. `formGroups` does `temp.items()`, which on a
+str raises `AttributeError`. So the entire skipMI / MI-disabled code path is
+currently broken, and `TensileLibLogicToYaml(..., skipMI=True)` crashes too.
+
+**Decision:** Pin the crash (assert `AttributeError`) instead of asserting a
+"None"-sentinel Group, and drive the orchestrator / fork tests through the
+MI-enabled (`skipMI=False` + `EnableMatrixInstruction=True`) path which works.
+
+**Why:** Characterization records present behavior; this is a real, user-facing
+bug (the `--skipMI` CLI flag is unusable). ADD-ONLY forbids fixing
+`formGroups`/`formForkParams`.
+
+**Rejected alternatives:**
+- *Assert a "None" group is produced* — fails; misrepresents behavior.
+- *Skip the path* — loses documentation of a real bug on a public CLI flag.
+
+**Residual:** 199 stmts, 4 missed → 98% line. Misses are two yaml-representer
+callbacks (representNone/flowSeq, registered but not invoked by these tests) and
+two orchestrator RuntimeError guards (empty solutionIndex / missing solution).
