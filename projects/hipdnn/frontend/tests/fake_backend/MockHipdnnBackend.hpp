@@ -108,6 +108,24 @@ public:
         getLoadedEnginePluginPathsExt,
         (hipdnnHandle_t handle, size_t* numPluginPaths, char** pluginPaths, size_t* maxStringLen),
         ());
+    MOCK_METHOD(hipdnnStatus_t,
+                getHeuristicPolicyCount,
+                (hipdnnHandle_t handle, size_t* numPolicies),
+                (override));
+    MOCK_METHOD(hipdnnStatus_t,
+                getHeuristicPolicyInfo,
+                (hipdnnHandle_t handle,
+                 size_t policyIndex,
+                 int64_t* policyId,
+                 char* policyName,
+                 size_t* policyNameLen,
+                 char* pluginName,
+                 size_t* pluginNameLen,
+                 char* pluginVersion,
+                 size_t* pluginVersionLen,
+                 char* apiVersion,
+                 size_t* apiVersionLen),
+                (override));
 };
 
 // NOLINTEND
