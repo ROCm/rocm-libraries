@@ -26,7 +26,13 @@ COMPONENTS = {
     ],
 }
 
-WORKFLOW_FILE = ".github/workflows/component-ci.yml"
+# Paths that affect every component's CI run: the workflow, this script,
+# and the shared ci-env action. A change here re-triggers all components.
+INFRA_PATHS = [
+    ".github/workflows/component-ci.yml",
+    ".github/scripts/component_ci.py",
+    ".github/actions/ci-env/**",
+]
 
 
 # detect_changed_components is not shared with therock_configure_ci.py because
@@ -36,7 +42,7 @@ WORKFLOW_FILE = ".github/workflows/component-ci.yml"
 def detect_changed_components(changed_files: set[str]) -> dict[str, bool]:
     results = {}
     for key, patterns in COMPONENTS.items():
-        all_patterns = patterns + [WORKFLOW_FILE]
+        all_patterns = patterns + INFRA_PATHS
         results[key] = matches_paths(changed_files, all_patterns)
     return results
 

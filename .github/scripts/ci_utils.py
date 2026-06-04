@@ -5,15 +5,21 @@ import logging
 import os
 import subprocess
 import time
-from typing import Iterable, Mapping
+from typing import Callable, Iterable, Mapping, Tuple, Type, TypeVar
+
+F = TypeVar("F", bound=Callable[..., object])
 
 logging.basicConfig(level=logging.INFO)
 
 
-def retry(max_attempts, delay_seconds, exceptions):
+def retry(
+    max_attempts: int,
+    delay_seconds: float,
+    exceptions: Tuple[Type[BaseException], ...],
+) -> Callable[[F], F]:
     """Retry decorator with exponential backoff."""
 
-    def decorator(func):
+    def decorator(func: F) -> F:
         def wrapper(*args, **kwargs):
             attempt = 0
             while attempt < max_attempts:
