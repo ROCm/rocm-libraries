@@ -16,6 +16,12 @@
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/pipeline/PassBuilder.hpp"
 
+#ifdef _WIN32
+#define HELLOWORLD_EXPORT __declspec(dllexport)
+#else
+#define HELLOWORLD_EXPORT __attribute__((visibility("default")))
+#endif
+
 namespace stinkytofu {
-void registerHelloWorldPassPlugin();
+HELLOWORLD_EXPORT void registerHelloWorldPassPlugin();
 }  // namespace stinkytofu
