@@ -72,7 +72,9 @@ enum struct MxGemmPipelineType
 {
     CompTDMV1,
     CompTDMV2,
-    CompAsync
+    CompAsync,
+    CompEightWaves,
+    WeightPreshuffle
 };
 
 template <MxGemmPipelineType PT, typename Problem>
@@ -105,6 +107,24 @@ struct MxGemmPipelineTypeSelector<MxGemmPipelineType::CompAsync, Problem>
     static constexpr auto GetName() { return "GemmPipelineAgBgCrCompAsync"; }
 };
 
+template <typename Problem>
+struct MxGemmPipelineTypeSelector<MxGemmPipelineType::CompEightWaves, Problem>
+{
+    using base_pipeline = ck_tile::BaseGemmPipelineAgBgCrCompV3<Problem>;
+    using pipeline      = ck_tile::MXGemmPipelineAgBgCrCompAsyncEightWaves<Problem>;
+
+    static constexpr auto GetName() { return "GemmPipelineAgBgCrCompEightWaves"; }
+};
+
+template <typename Problem>
+struct MxGemmPipelineTypeSelector<MxGemmPipelineType::WeightPreshuffle, Problem>
+{
+    using base_pipeline = ck_tile::BaseWeightPreshufflePipelineAGmemBGmemCRegV2<Problem>;
+    using pipeline      = ck_tile::MXGemmPreshufflePipelineAGmemBGmemCRegV1<Problem>;
+
+    static constexpr auto GetName() { return "GemmPipelineAgBgCrWeightPreshuffle"; }
+};
+
 template <MxGemmPipelineType PT, typename Problem>
 struct MxGemmEpilogueTypeSelector
 {
@@ -128,6 +148,18 @@ struct MxGemmEpilogueTypeSelector<MxGemmPipelineType::CompAsync, Problem>
     using epilogue = ck_tile::CShuffleEpilogue<Problem>;
 };
 
+template <typename Problem>
+struct MxGemmEpilogueTypeSelector<MxGemmPipelineType::CompEightWaves, Problem>
+{
+    using epilogue = ck_tile::CShuffleEpilogue<Problem>;
+};
+
+template <typename Problem>
+struct MxGemmEpilogueTypeSelector<MxGemmPipelineType::WeightPreshuffle, Problem>
+{
+    using epilogue = ck_tile::CShuffleEpilogue<Problem>;
+};
+
 template <MxGemmPipelineType PT>
 struct MxGemmPipelineDefaultParams
 {
@@ -135,6 +167,15 @@ struct MxGemmPipelineDefaultParams
     static constexpr bool PadN       = false;
     static constexpr bool PadK       = false;
     static constexpr bool Preshuffle = false;
+};
+
+template <>
+struct MxGemmPipelineDefaultParams<MxGemmPipelineType::WeightPreshuffle>
+{
+    static constexpr bool PadM       = false;
+    static constexpr bool PadN       = false;
+    static constexpr bool PadK       = false;
+    static constexpr bool Preshuffle = true;
 };
 
 /// @brief Pre-shuffle scale buffer for gfx1250 wmma mx scale instruction.
@@ -216,8 +257,9 @@ void preShuffleScaleBuffer_gfx950(const ScaleType* src,
                                   ck_tile::index_t K_scale,
                                   bool kLast)
 {
-    const ck_tile::index_t MN_packed = MN / MNPack;
-    const ck_tile::index_t K_packed  = K_scale / KPack;
+    const ck_tile::index_t MN_packed             = MN / MNPack;
+    const ck_tile::index_t K_packed              = K_scale / KPack;
+    constexpr ck_tile::index_t NumScalesPerDword = 4 / sizeof(ScaleType);
 
     for(ck_tile::index_t packed_mn = 0; packed_mn < MN_packed; packed_mn++)
     {
@@ -241,15 +283,24 @@ void preShuffleScaleBuffer_gfx950(const ScaleType* src,
                         kLast ? orig_k + orig_mn * K_scale : orig_mn + orig_k * MN;
                     ScaleType v = src[inputIndex];
                     ck_tile::index_t outputIndex =
-                        byteIdx + (packed_mn % XdlMNThread) * MNPack * KPack +
-                        packed_k * XdlMNThread * MNPack * KPack +
-                        (packed_mn / XdlMNThread) * XdlMNThread * MNPack * KPack * K_packed;
+                        byteIdx + (packed_mn % XdlMNThread) * NumScalesPerDword +
+                        packed_k * XdlMNThread * NumScalesPerDword +
+                        (packed_mn / XdlMNThread) * XdlMNThread * NumScalesPerDword * K_packed;
                     packed[outputIndex] = v;
                 }
             }
         }
     }
 }
+
+template <ck_tile::index_t N_Warp_Tile_, ck_tile::index_t K_Warp_Tile_, typename Type_>
+struct Config
+{
+    static constexpr ck_tile::index_t N_Warp_Tile = N_Warp_Tile_;
+    static constexpr ck_tile::index_t K_Warp_Tile = K_Warp_Tile_;
+    static constexpr ck_tile::index_t BContiguousItemsPerAccess =
+        std::is_same_v<Type_, ck_tile::pk_fp4_t> ? 32 : 16;
+};
 
 template <typename Tuple, typename Derived>
 class TestCkTileMxGemmPipeline : public ::testing::Test
@@ -288,8 +339,12 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
 
     static constexpr ck_tile::index_t ScaleBlockSize = std::tuple_element_t<16, Tuple>{};
 
-    static constexpr ck_tile::index_t M_Warp = 2;
-    static constexpr ck_tile::index_t N_Warp = 2;
+    static constexpr ck_tile::index_t M_Warp =
+        PipelineType == MxGemmPipelineType::WeightPreshuffle
+            ? 1
+            : (PipelineType == MxGemmPipelineType::CompEightWaves ? 4 : 2);
+    static constexpr ck_tile::index_t N_Warp =
+        PipelineType == MxGemmPipelineType::WeightPreshuffle ? 4 : 2;
     static constexpr ck_tile::index_t K_Warp = 1;
 
     protected:
@@ -313,11 +368,13 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
         constexpr bool DoubleSmemBuffer = true; // TDM pipeline requires double smem buffer
 
 #if defined(CK_USE_GFX1250)
+        constexpr ck_tile::index_t BlockedXDLNPerWarp = 1;
         constexpr bool TransposeC =
             std::is_same_v<CLayout, ck_tile::tensor_layout::gemm::RowMajor> &&
             M_Warp_Tile == N_Warp_Tile;
 #else
-        constexpr bool TransposeC = false;
+        constexpr ck_tile::index_t BlockedXDLNPerWarp = Preshuffle ? 2 : 1;
+        constexpr bool TransposeC                     = false;
 #endif
         static constexpr bool StructuredSparsity = false;
         static constexpr bool NumWaveGroup       = 1;
@@ -393,13 +450,13 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
                                              N_Warp_Tile,
                                              K_Warp_Tile,
                                              UniversalGemmProblem::TransposeC,
-                                             1,                /*kNumWaveGroups_*/
-                                             false,            /*FixedVectorSize_*/
-                                             1,                /*VectorSizeC_*/
-                                             1,                /*BlockedXDLN_PerWarp_*/
-                                             DoubleSmemBuffer, /*DoubleSmemBuffer*/
-                                             AComputeDataType, /*AComputeDataType_*/
-                                             BComputeDataType, /*BComputeDataType_*/
+                                             1,                  /*kNumWaveGroups_*/
+                                             false,              /*FixedVectorSize_*/
+                                             1,                  /*VectorSizeC_*/
+                                             BlockedXDLNPerWarp, /*BlockedXDLN_PerWarp_*/
+                                             DoubleSmemBuffer,   /*DoubleSmemBuffer*/
+                                             AComputeDataType,   /*AComputeDataType_*/
+                                             BComputeDataType,   /*BComputeDataType_*/
                                              !preshuffle>>::epilogue;
 
         using Kernel = ck_tile::MxGemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
@@ -559,6 +616,7 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
         }
 
         // Pre-shuffle scale buffers for the hardware
+#if defined(CK_USE_GFX1250)
         HostTensor<AScaleDataType> scale_a_shuffled(
             {static_cast<std::size_t>(scale_padded_M), static_cast<std::size_t>(num_scale_k)},
             {static_cast<std::size_t>(num_scale_k), static_cast<std::size_t>(1)});
@@ -567,7 +625,6 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
             {static_cast<std::size_t>(N), static_cast<std::size_t>(num_scale_k)},
             {static_cast<std::size_t>(num_scale_k), static_cast<std::size_t>(1)});
 
-#if defined(CK_USE_GFX1250)
         // Pre-shuffle for gfx1250 (WaveSize=32, WMMA)
         // Scales start in natural tensor layout and are pre-shuffled into the device layout
         // for both scale block sizes (the shuffle is the identity for ScaleBlockSize==16,
@@ -593,6 +650,17 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
 
         constexpr ck_tile::index_t XdlMNThread = M_Warp_Tile;
         constexpr ck_tile::index_t XdlKThread  = 64 / XdlMNThread;
+
+        HostTensor<AScaleDataType> scale_a_shuffled(
+            {static_cast<std::size_t>(scale_padded_M / MXdlPackEff * 2),
+             static_cast<std::size_t>(num_scale_k / KXdlPackEff * 2)},
+            {static_cast<std::size_t>(num_scale_k / KXdlPackEff * 2), static_cast<std::size_t>(1)});
+
+        HostTensor<BScaleDataType> scale_b_shuffled(
+            {static_cast<std::size_t>(N / NXdlPackEff * 2),
+             static_cast<std::size_t>(num_scale_k / KXdlPackEff * 2)},
+            {static_cast<std::size_t>(num_scale_k / KXdlPackEff * 2), static_cast<std::size_t>(1)});
+
         preShuffleScaleBuffer_gfx950<MXdlPackEff, KXdlPackEff, XdlMNThread, XdlKThread>(
             scale_a.mData.data(), scale_a_shuffled.mData.data(), scale_padded_M, num_scale_k, true);
 
@@ -602,37 +670,67 @@ class TestCkTileMxGemmPipeline : public ::testing::Test
 
         // Allocate device memory
         DeviceMem a_m_k_dev_buf(a_m_k.get_element_space_size_in_bytes());
-        DeviceMem b_k_n_dev_buf(b_k_n.get_element_space_size_in_bytes());
         DeviceMem c_m_n_dev_buf(c_m_n_dev_result.get_element_space_size_in_bytes());
         DeviceMem scale_a_dev_buf(scale_a_shuffled.get_element_space_size_in_bytes());
         DeviceMem scale_b_dev_buf(scale_b_shuffled.get_element_space_size_in_bytes());
 
         // Upload data to device
         a_m_k_dev_buf.ToDevice(a_m_k.data());
-        b_k_n_dev_buf.ToDevice(b_k_n.data());
         c_m_n_dev_buf.SetZero();
         c_m_n_dev_result.SetZero();
         scale_a_dev_buf.ToDevice(scale_a_shuffled.data());
         scale_b_dev_buf.ToDevice(scale_b_shuffled.data());
 
-        // Create MxGemmHostArgs
-        ck_tile::MxGemmHostArgs<1, 1, 0> args(
-            {static_cast<const void*>(a_m_k_dev_buf.GetDeviceBuffer())},
-            {static_cast<const void*>(scale_a_dev_buf.GetDeviceBuffer())},
-            {static_cast<const void*>(b_k_n_dev_buf.GetDeviceBuffer())},
-            {static_cast<const void*>(scale_b_dev_buf.GetDeviceBuffer())},
-            {},
-            c_m_n_dev_buf.GetDeviceBuffer(),
-            kbatch,
-            M,
-            N,
-            K,
-            {stride_A},
-            {stride_B},
-            {},
-            stride_C);
+        if constexpr(Preshuffle)
+        {
+            const auto b_shuffled =
+                ck_tile::shuffle_b<Config<N_Warp_Tile, K_Warp_Tile, BDataType>>(b_k_n);
+            DeviceMem b_k_n_dev_buf(b_shuffled.get_element_space_size_in_bytes());
+            b_k_n_dev_buf.ToDevice(b_shuffled.data());
 
-        invoke_mx_gemm<PadM, PadN, PadK, Preshuffle>(args, stream_config{nullptr, false});
+            // Create MxGemmHostArgs
+            ck_tile::MxGemmHostArgs<1, 1, 0> args(
+                {static_cast<const void*>(a_m_k_dev_buf.GetDeviceBuffer())},
+                {static_cast<const void*>(scale_a_dev_buf.GetDeviceBuffer())},
+                {static_cast<const void*>(b_k_n_dev_buf.GetDeviceBuffer())},
+                {static_cast<const void*>(scale_b_dev_buf.GetDeviceBuffer())},
+                {},
+                c_m_n_dev_buf.GetDeviceBuffer(),
+                kbatch,
+                M,
+                N,
+                K,
+                {stride_A},
+                {stride_B},
+                {},
+                stride_C);
+
+            invoke_mx_gemm<PadM, PadN, PadK, Preshuffle>(args, stream_config{nullptr, false});
+        }
+        else
+        {
+            DeviceMem b_k_n_dev_buf(b_k_n.get_element_space_size_in_bytes());
+            b_k_n_dev_buf.ToDevice(b_k_n.data());
+
+            // Create MxGemmHostArgs
+            ck_tile::MxGemmHostArgs<1, 1, 0> args(
+                {static_cast<const void*>(a_m_k_dev_buf.GetDeviceBuffer())},
+                {static_cast<const void*>(scale_a_dev_buf.GetDeviceBuffer())},
+                {static_cast<const void*>(b_k_n_dev_buf.GetDeviceBuffer())},
+                {static_cast<const void*>(scale_b_dev_buf.GetDeviceBuffer())},
+                {},
+                c_m_n_dev_buf.GetDeviceBuffer(),
+                kbatch,
+                M,
+                N,
+                K,
+                {stride_A},
+                {stride_B},
+                {},
+                stride_C);
+
+            invoke_mx_gemm<PadM, PadN, PadK, Preshuffle>(args, stream_config{nullptr, false});
+        }
 
         c_m_n_dev_buf.FromDevice(c_m_n_dev_result.data());
 

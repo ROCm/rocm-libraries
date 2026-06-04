@@ -710,17 +710,52 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
     template <typename ADramBlockWindowTmp,
               typename BFlatBlockWindowTmp,
               typename ScaleADramBlockWindowTmp,
+              typename ScaleBDramBlockWindowTmp,
+              typename AElementFunction,
+              typename BElementFunction>
+    CK_TILE_DEVICE auto operator()(const ADramBlockWindowTmp& a_copy_dram_window_tmp,
+                                   const AElementFunction&,
+                                   const BFlatBlockWindowTmp& b_flat_dram_block_window_tmp,
+                                   const BElementFunction&,
+                                   const ScaleADramBlockWindowTmp& scale_a_window,
+                                   const ScaleBDramBlockWindowTmp& scale_b_window,
+                                   index_t num_loop,
+                                   void* __restrict__ p_smem) const
+    {
+        constexpr index_t smem_size = PipelinePolicy::template GetSmemSize<Problem>();
+        const auto smem             = reinterpret_cast<uint8_t*>(p_smem);
+        const bool has_hot_loop     = Base::BlockHasHotloop(num_loop);
+        const auto tail_num         = Base::GetBlockLoopTailNum(num_loop);
+
+        const auto RunPipeline = [&](auto hot_loop_, auto tail_num_) {
+            return PipelineImpl<Scheduler>{}.template operator()<hot_loop_.value, tail_num_.value>(
+                a_copy_dram_window_tmp[number<0>{}],
+                b_flat_dram_block_window_tmp[number<0>{}],
+                scale_a_window[number<0>{}],
+                scale_b_window[number<0>{}],
+                num_loop,
+                smem,
+                smem + smem_size);
+        };
+
+        return Base::TailHandler(RunPipeline, has_hot_loop, tail_num);
+    }
+
+    template <typename ADramBlockWindowTmp,
+              typename BFlatBlockWindowTmp,
+              typename ScaleADramBlockWindowTmp,
               typename ScaleBDramBlockWindowTmp>
     CK_TILE_DEVICE auto operator()(const ADramBlockWindowTmp& a_copy_dram_window_tmp,
                                    const BFlatBlockWindowTmp& b_flat_dram_block_window_tmp,
                                    const ScaleADramBlockWindowTmp& scale_a_window,
                                    const ScaleBDramBlockWindowTmp& scale_b_window,
                                    index_t num_loop,
-                                   void* __restrict__ p_smem_ping,
-                                   void* __restrict__ p_smem_pong) const
+                                   void* __restrict__ p_smem) const
     {
-        const bool has_hot_loop = Base::BlockHasHotloop(num_loop);
-        const auto tail_num     = Base::GetBlockLoopTailNum(num_loop);
+        constexpr index_t smem_size = PipelinePolicy::template GetSmemSize<Problem>();
+        const auto smem             = reinterpret_cast<uint8_t*>(p_smem);
+        const bool has_hot_loop     = Base::BlockHasHotloop(num_loop);
+        const auto tail_num         = Base::GetBlockLoopTailNum(num_loop);
 
         const auto RunPipeline = [&](auto hot_loop_, auto tail_num_) {
             return PipelineImpl<Scheduler>{}.template operator()<hot_loop_.value, tail_num_.value>(
@@ -729,8 +764,8 @@ struct MXGemmPreshufflePipelineAGmemBGmemCRegV1
                 scale_a_window,
                 scale_b_window,
                 num_loop,
-                p_smem_ping,
-                p_smem_pong);
+                smem,
+                smem + smem_size);
         };
 
         return Base::TailHandler(RunPipeline, has_hot_loop, tail_num);

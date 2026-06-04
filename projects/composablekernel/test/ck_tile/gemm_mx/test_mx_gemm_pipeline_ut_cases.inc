@@ -14,7 +14,7 @@ TYPED_TEST(TEST_SUITE_NAME, SingleTile)
 TYPED_TEST(TEST_SUITE_NAME, SmallM)
 {
     std::vector<int> Ms{1, 2, 4, 8, 16};
-    constexpr int N = 64;
+    constexpr int N = TestFixture::N_Tile;
     std::vector<int> Ks;
     // K must be multiple of ScaleBlockSize (16 or 32) and K_Tile
     for(auto K_count : {2, 3, 4})

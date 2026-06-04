@@ -91,6 +91,8 @@ struct MxGemmKernel
     using BaseKernel::APackedSize;
     using BaseKernel::BPackedSize;
 
+    using BaseKernel::I1;
+
     using AElementWise = remove_cvref_t<typename MxGemmPipeline::AElementWise>;
     using BElementWise = remove_cvref_t<typename MxGemmPipeline::BElementWise>;
 
@@ -279,6 +281,45 @@ struct MxGemmKernel
         return scale_b_block_window;
     }
 
+    CK_TILE_DEVICE static auto
+    MakeBFlatBlockWindows(const std::array<const BDataType*, NumBTensor>& bs_ptr,
+                          const KernelArgs& kargs,
+                          const index_t i_n)
+    {
+        static_assert(NumBTensor == 1, "MX GEMM preshuffle currently supports one B tensor");
+
+        constexpr index_t kKPerBlock    = MxGemmPipeline::kKPerBlock;
+        constexpr index_t kNWarpTile    = BlockGemmShape::WarpTile::at(I1);
+        constexpr index_t flatKPerBlock = kKPerBlock * kNWarpTile;
+        const index_t kFlatKBlocks      = kargs.K / kKPerBlock;
+        const index_t kFlatN            = kargs.N / kNWarpTile;
+
+        auto b_flat_tensor_view = [&]() {
+            static_assert(flatKPerBlock % MxGemmPipeline::GetVectorSizeB() == 0,
+                          "wrong! vector size for preshuffled B tensor");
+            auto naive_desc = make_naive_tensor_descriptor_packed(
+                make_tuple(kFlatN, kFlatKBlocks, number<flatKPerBlock>{}));
+            auto desc = transform_tensor_descriptor(
+                naive_desc,
+                make_tuple(make_pass_through_transform(kFlatN),
+                           make_merge_transform_v3_division_mod(
+                               make_tuple(kFlatKBlocks, number<flatKPerBlock>{}))),
+                make_tuple(sequence<0>{}, sequence<1, 2>{}),
+                make_tuple(sequence<0>{}, sequence<1>{}));
+            return make_tensor_view<address_space_enum::global>(bs_ptr[number<0>{}], desc);
+        }();
+
+        return generate_tuple(
+            [&](auto) {
+                return make_tile_window(
+                    b_flat_tensor_view,
+                    make_tuple(number<MxGemmPipeline::flatNPerWarp>{},
+                               number<MxGemmPipeline::flatKPerWarp>{}),
+                    {static_cast<int>(i_n / BlockGemmShape::WarpTile::at(I1)), 0});
+            },
+            number<NumBTensor>{});
+    }
+
     CK_TILE_DEVICE static void RunGemm(const std::array<const ADataType*, NumATensor>& as_ptr,
                                        const std::array<const BDataType*, NumBTensor>& bs_ptr,
                                        const std::array<const void*, NumDTensor>& ds_ptr,
@@ -308,8 +349,17 @@ struct MxGemmKernel
 
         const auto& as_block_window = BaseKernel::MakeABlockWindows(
             as_ptr, kargs, splitk_batch_offset.splitted_k, block_idx_m);
-        const auto& bs_block_window = BaseKernel::MakeBBlockWindows(
-            bs_ptr, kargs, splitk_batch_offset.splitted_k, block_idx_n);
+        const auto& bs_block_window = [&]() {
+            if constexpr(MxGemmPipeline::Preshuffle)
+            {
+                return MakeBFlatBlockWindows(bs_ptr, kargs, block_idx_n);
+            }
+            else
+            {
+                return BaseKernel::MakeBBlockWindows(
+                    bs_ptr, kargs, splitk_batch_offset.splitted_k, block_idx_n);
+            }
+        }();
         const auto& ds_block_window =
             BaseKernel::MakeDBlockWindows(ds_ptr, kargs, block_idx_m, block_idx_n);
         const auto& scale_a_block_window = MakeScaleABlockWindow(as_scale_ptr, kargs, block_idx_m);

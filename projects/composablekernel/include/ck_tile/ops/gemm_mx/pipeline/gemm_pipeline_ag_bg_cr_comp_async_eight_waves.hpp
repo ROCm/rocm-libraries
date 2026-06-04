@@ -206,11 +206,46 @@ struct MXGemmPipelineAgBgCrCompAsyncEightWaves : public BaseGemmPipelineAgBgCrCo
                                                             num_loop,
                                                             a_dram_block_window_tmp,
                                                             b_dram_block_window_tmp,
-                                                            scale_a_window,
-                                                            scale_b_window,
+                                                            scale_a_window[number<0>{}],
+                                                            scale_b_window[number<0>{}],
                                                             hot_loop_scheduler);
         }
     };
+
+    template <typename AsDramBlockWindowTmp,
+              typename BsDramBlockWindowTmp,
+              typename AElementFunction,
+              typename BElementFunction,
+              typename ScaleADramBlockWindowTmp,
+              typename ScaleBDramBlockWindowTmp,
+              typename std::enable_if_t<is_detected<is_tuple, AsDramBlockWindowTmp>::value &&
+                                            is_detected<is_tuple, BsDramBlockWindowTmp>::value,
+                                        bool>* = nullptr>
+    CK_TILE_DEVICE auto operator()(const AsDramBlockWindowTmp& a_dram_block_window_tmp,
+                                   const AElementFunction& a_element_func,
+                                   const BsDramBlockWindowTmp& b_dram_block_window_tmp,
+                                   const BElementFunction& b_element_func,
+                                   const ScaleADramBlockWindowTmp& scale_a_window,
+                                   const ScaleBDramBlockWindowTmp& scale_b_window,
+                                   index_t num_loop,
+                                   void* p_smem) const
+    {
+        const bool has_hot_loop = Base::BlockHasHotloop(num_loop);
+        const auto tail_number  = Base::GetBlockLoopTailNum(num_loop);
+        const auto RunPipeline  = [&](auto hot_loop_, auto tail_num_) {
+            return PipelineImpl<Scheduler>{}.template operator()<hot_loop_.value, tail_num_.value>(
+                a_dram_block_window_tmp[number<0>{}],
+                a_element_func,
+                b_dram_block_window_tmp[number<0>{}],
+                b_element_func,
+                scale_a_window,
+                scale_b_window,
+                num_loop,
+                p_smem);
+        };
+
+        return Base::TailHandler(RunPipeline, has_hot_loop, tail_number);
+    }
 
     template <typename AsDramBlockWindowTmp,
               typename BsDramBlockWindowTmp,

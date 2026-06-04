@@ -18,12 +18,17 @@ using Intrawave = ck_tile::integral_constant<ck_tile::GemmPipelineScheduler,
 using CompTDMV1 = ck_tile::integral_constant<MxGemmPipelineType, MxGemmPipelineType::CompTDMV1>;
 using CompTDMV2 = ck_tile::integral_constant<MxGemmPipelineType, MxGemmPipelineType::CompTDMV2>;
 using CompAsync = ck_tile::integral_constant<MxGemmPipelineType, MxGemmPipelineType::CompAsync>;
+using CompEightWaves =
+    ck_tile::integral_constant<MxGemmPipelineType, MxGemmPipelineType::CompEightWaves>;
+using WeightPreshuffle =
+    ck_tile::integral_constant<MxGemmPipelineType, MxGemmPipelineType::WeightPreshuffle>;
 
 using I16  = ck_tile::number<16>;
 using I32  = ck_tile::number<32>;
 using I64  = ck_tile::number<64>;
 using I128 = ck_tile::number<128>;
 using I256 = ck_tile::number<256>;
+using I512 = ck_tile::number<512>;
 
 using ClusterEnable  = std::true_type;
 using ClusterDisable = std::false_type;
@@ -80,6 +85,11 @@ using KernelTypesMxGemmCompTDMWmma = ::testing::Types<
 >;
 
 using KernelTypesMxGemmCompAsync = ::testing::Types<
-    std::tuple<    Row,     Col,     Row,       F8,        F8,    E8M0,  E8M0,      F32,       F16,        I64,        I64,          I256,       I16,        I16, Intrawave,        CompAsync>
+    std::tuple<    Row,     Col,     Row,       F8,        F8,    E8M0,  E8M0,      F32,       F16,        I64,        I64,          I256,       I16,        I16, Intrawave,        CompAsync>,
+    std::tuple<    Row,     Col,     Row,       F4,        F4,    E8M0,  E8M0,      F32,       F16,        I64,        I64,          I256,       I16,        I16, Intrawave,        CompAsync>,
+    std::tuple<    Row,     Col,     Row,       F8,        F8,    E8M0,  E8M0,      F32,       F16,       I128,       I256,          I128,       I16,        I16, Intrawave,        CompEightWaves>,
+    std::tuple<    Row,     Col,     Row,       F4,        F4,    E8M0,  E8M0,      F32,       F16,       I128,       I256,          I128,       I16,        I16, Intrawave,        CompEightWaves>,
+    std::tuple<    Row,     Col,     Row,       F8,        F8,    E8M0,  E8M0,      F32,       F16,       I128,       I256,          I256,       I16,        I16, Intrawave,        WeightPreshuffle>,
+    std::tuple<    Row,     Col,     Row,       F4,        F4,    E8M0,  E8M0,      F32,       F16,       I128,       I512,          I256,       I16,        I16, Intrawave,        WeightPreshuffle>
 >;
 // clang-format on
