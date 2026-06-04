@@ -514,18 +514,15 @@ void SdpaBwdPlan::execute(const HipKernelHandle& handle,
 
         const unsigned int gdxPost = (mhaArgs.seqlen_q + K_TS_DQ - 1) / K_TS_DQ;
 
-        if(!launchKernel("SDPA backward DQ_CONVERT",
-                         _postKernel->function(),
-                         &postArgs,
-                         sizeof(postArgs),
-                         gdxPost,
-                         mhaArgs.nhead_q,
-                         mhaArgs.batch,
-                         K_BWD_BLOCK_DIM,
-                         stream))
-        {
-            return;
-        }
+        launchKernel("SDPA backward DQ_CONVERT",
+                     _postKernel->function(),
+                     &postArgs,
+                     sizeof(postArgs),
+                     gdxPost,
+                     mhaArgs.nhead_q,
+                     mhaArgs.batch,
+                     K_BWD_BLOCK_DIM,
+                     stream);
     }
 }
 
