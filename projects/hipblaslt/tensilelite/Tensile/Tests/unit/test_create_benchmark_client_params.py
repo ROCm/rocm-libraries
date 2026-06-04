@@ -85,6 +85,17 @@ def captured_call(monkeypatch):
         captured["kwargs"] = kwargs
 
     monkeypatch.setattr("Tensile.ClientWriter.writeClientConfigIni", _capture)
+
+    # CreateBenchmarkClientParametersForSizes now runs the passed problemTypeDict
+    # through ContractionsProblemType.FromOriginalState, which requires a full
+    # problem-type state (TotalIndices, IndicesSummation, ...). These tests cover
+    # only per-base libraryFile routing (see _stub_problem_type_dict's note), and
+    # the resulting problemType is merely forwarded to the patched
+    # writeClientConfigIni, so stub the parse out with a sentinel.
+    monkeypatch.setattr(
+        "Tensile.ClientWriter.ContractionsProblemType.FromOriginalState",
+        lambda d: object(),
+    )
     return captured
 
 
