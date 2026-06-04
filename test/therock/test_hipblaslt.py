@@ -43,20 +43,22 @@ if is_asan():
 # offending file BEFORE the gtest tries to load anything.
 #
 # This is hipblaslt-specific by construction: the validator lives under
-# projects/hipblaslt/scripts/ and this driver runs only for the hipblaslt
+# projects/hipblaslt/tools/scripts/ and this driver runs only for the hipblaslt
 # test component. The check fires only on the first shard (it's a
 # filesystem walk; running it once per shard is wasted work).
 # ---------------------------------------------------------------------------
 if int(SHARD_INDEX) == 1:
     install_root = Path(THEROCK_BIN_DIR).resolve().parent  # <output>/bin -> <output>
     validator_dir = (
-        THEROCK_DIR / "rocm-libraries" / "projects" / "hipblaslt" / "scripts"
+        THEROCK_DIR / "rocm-libraries" / "projects" / "hipblaslt" / "tools" / "scripts"
     )
     # In case rocm-libraries is not checked out as a sibling (e.g. when
     # running this driver against a standalone hipblaslt build tree),
     # fall back to walking up from this file's location.
     if not (validator_dir / "validate_library_layout.py").is_file():
-        validator_dir = SCRIPT_DIR.parent.parent / "projects" / "hipblaslt" / "scripts"
+        validator_dir = (
+            SCRIPT_DIR.parent.parent / "projects" / "hipblaslt" / "tools" / "scripts"
+        )
     if (validator_dir / "validate_library_layout.py").is_file():
         sys.path.insert(0, str(validator_dir))
         import validate_library_layout

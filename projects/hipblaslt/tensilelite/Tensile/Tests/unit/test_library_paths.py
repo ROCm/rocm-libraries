@@ -47,8 +47,8 @@ from Tensile.TensileCreateLibrary.Run import (
 # The path-based auto-marker in Tensile/Tests/conftest.py only fires when
 # pytest is invoked from that root; the coverage tox env runs
 # `pytest -m unit Tensile/Tests/unit` and would silently skip this file
-# without the explicit declaration (matches test_helper_cache.py /
-# test_datFileIntegrity.py convention).
+# without the explicit declaration (matches the test_helper_cache.py
+# convention).
 pytestmark = pytest.mark.unit
 
 
