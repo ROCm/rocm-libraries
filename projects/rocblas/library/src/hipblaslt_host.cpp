@@ -108,7 +108,6 @@ namespace
         if(status != expect)
         {
             rocblas_internal_ostream msg;
-            std::cout << "Received unexpected hipBLAS status: " << status << std::endl;
             print_if_verbose(msg << "rocBLAS error received at " << __FILE__ << ":" << __LINE__
                                  << std::endl);
             return rocblas_status_internal_error;
