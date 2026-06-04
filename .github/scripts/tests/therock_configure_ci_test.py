@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import os
 import sys
 import unittest
@@ -294,6 +295,26 @@ class ConfigureCITest(unittest.TestCase):
             {"is_pull_request": True, "base_ref": "HEAD^"}
         )
 
+        self.assertEqual(plan.benchmark, therock_configure_ci.BenchmarkMode.OFF)
+
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_benchmark_skip_therockci_label_does_not_run(self, mock_get_modified):
+        # skip-therockci is an explicit opt-out of ALL CI. A hipDNN code change
+        # would otherwise build hipDNN and run the benchmark in run-id mode; the
+        # label must force it off.
+        mock_get_modified.return_value = [
+            "projects/hipdnn/backend/src/engine.cpp",
+        ]
+
+        plan = therock_configure_ci.retrieve_projects(
+            {
+                "is_pull_request": True,
+                "base_ref": "HEAD^",
+                "pr_labels": json.dumps({"labels": [{"name": "skip-therockci"}]}),
+            }
+        )
+
+        self.assertEqual(plan.projects, [])
         self.assertEqual(plan.benchmark, therock_configure_ci.BenchmarkMode.OFF)
 
     def test_parse_test_labels_single_project(self):

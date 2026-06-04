@@ -308,7 +308,9 @@ def retrieve_projects(args):
 
         if "skip-therockci" in pr_labels:
             logging.info("`skip-therockci` label was added, skipping CI")
-            return CIPlan([], test_type, skipped_mode)
+            # Explicit opt-out of all CI -> the benchmark must not run either,
+            # regardless of whether only tool paths changed.
+            return CIPlan([], test_type, BenchmarkMode.OFF)
 
     subtrees = get_changed_path_projects(modified_paths)
 
