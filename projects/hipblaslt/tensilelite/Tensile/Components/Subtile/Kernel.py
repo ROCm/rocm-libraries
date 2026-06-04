@@ -899,27 +899,39 @@ class RegisterTileInfo:
 
 
 def _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, isAgpr):
-  """Zero a contiguous register range using MFMA for blocks of 16, scalar writes for remainder."""
-  tileAlias = accvgpr if isAgpr else vgpr
-  tileCopyInst = VAccvgprWrite if isAgpr else VMovB32
-  regsPerMfma = 16
-  numMfma = totalRegs // regsPerMfma
+  """Zero a contiguous register range using MFMA (16/inst) or WMMA (8/inst)."""
+  useWmma = writer.states.asmCaps.get("HasWMMA_AccImmZero", False)
+  tileAlias = vgpr if useWmma else (accvgpr if isAgpr else vgpr)
+  tileCopyInst = VMovB32 if useWmma else (VAccvgprWrite if isAgpr else VMovB32)
 
-  if numMfma > 0:
+  if useWmma:
+    regsPerInst = 8
+    instType, accType = InstType.INST_F32, InstType.INST_F32
+    variant = [16, 16, 4, 1]
+    acc2_kwargs = {"acc2_imm": 0}
+  else:
+    regsPerInst = 16
+    instType, accType = InstType.INST_I8, InstType.INST_I32
+    variant = [32, 32, 16, 1]
+    acc2_kwargs = {"acc2": 0}
+
+  numInst = totalRegs // regsPerInst
+
+  if numInst > 0:
     tmpVgpr = writer.vgprPool.checkOutAligned(2, 2)
-    module.add(VMovB64(dst=vgpr(tmpVgpr, 2), src=0, comment=""))
-    module.add(SNop(waitState=1, comment="wait for vgpr to be ready before MFMA"))
-    for i in range(numMfma):
-      r = firstReg + i * regsPerMfma
-      module.add(MFMAInstruction(instType=InstType.INST_I8, accType=InstType.INST_I32,
-                                 variant=[32, 32, 16, 1], mfma1k=False,
-                                 acc=tileAlias(r, regsPerMfma),
+    module.add(VMovB64(dst=vgpr(tmpVgpr, 2), src=0, comment="zero A/B"))
+    module.add(SNop(waitState=1, comment="wait for vgpr before matrix inst"))
+    for i in range(numInst):
+      r = firstReg + i * regsPerInst
+      module.add(MFMAInstruction(instType=instType, accType=accType,
+                                 variant=variant, mfma1k=False,
+                                 acc=tileAlias(r, regsPerInst),
                                  a=vgpr(tmpVgpr, 2), b=vgpr(tmpVgpr, 2),
-                                 acc2=0,
-                                 comment="init%s: [%u:%u]"%(tileInfo.tc, r, r + regsPerMfma - 1)))
+                                 **acc2_kwargs,
+                                 comment="init%s: [%u:%u]"%(tileInfo.tc, r, r + regsPerInst - 1)))
     writer.vgprPool.checkIn(tmpVgpr)
 
-  for i in range(numMfma * regsPerMfma, totalRegs):
+  for i in range(numInst * regsPerInst, totalRegs):
     module.add(tileCopyInst(dst=tileAlias(firstReg + i), src=0, comment="init%s"%(tileInfo.tc)))
 
 def initVgprTilesToZero(writer, kernel, tileInfo):
@@ -928,14 +940,6 @@ def initVgprTilesToZero(writer, kernel, tileInfo):
   module.addComment0("Init %s vgprTiles to zero"%(tileInfo.tc))
 
   if not tileInfo.vgprTiles:
-    return module
-
-  # No MFMA available for fast zeroing, use scalar moves
-  if not writer.states.asmCaps["HasMFMA"]:
-    tileAlias = vgpr
-    for tile in tileInfo.vgprTiles:
-      for reg in tile.regList.indices:
-        module.add(VMovB32(dst=tileAlias(reg), src=0, comment="init%s" % tileInfo.tc))
     return module
 
   # Group contiguous tiles by pool type (agpr vs vgpr) since D tiles can use both

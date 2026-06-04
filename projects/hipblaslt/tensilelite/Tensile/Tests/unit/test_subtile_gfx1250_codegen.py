@@ -98,7 +98,7 @@ def _create_writer_gfx1250(kernel):
         b=SimpleNamespace(tileInfo=tiB),
         regCaps={"MaxSgpr": 106, "MaxVgpr": 256, "PhysicalMaxVgpr": 512},
         archCaps={"LDSBankCount": 64, "LDSBankWidth": 4},
-        asmCaps={"HasMFMA": False},
+        asmCaps={"HasMFMA": False, "HasWMMA_AccImmZero": True},
         subtileLdsSwizzle=False,
     )
     readSize = 2 * tiA.subtileSize
@@ -199,8 +199,8 @@ class TestGfx1250SubtileCodegen:
 
     # -- initVgprTilesToZero scalar fallback --
 
-    def test_zero_tiles_scalar_fallback(self):
-        """Without MFMA, tile zeroing uses scalar v_mov_b32."""
+    def test_zero_tiles_wmma(self):
+        """gfx1250 tile zeroing uses v_wmma_f32_16x16x4_f32 with acc2_imm=0."""
         _init_rocisa_gfx1250()
         from Tensile.Components.Subtile.Kernel import initVgprTilesToZero
         kernel = _create_gfx1250_kernel(32, 32)
@@ -210,8 +210,8 @@ class TestGfx1250SubtileCodegen:
         tiA.allocVgprTileRegisters_legacy(writer, kernel)
         module = initVgprTilesToZero(writer, kernel, tiA)
         asm = str(module)
-        assert "v_mov_b32" in asm
-        assert "mfma" not in asm.lower()
+        assert "v_wmma_f32_16x16x4_f32" in asm
+        assert ", 0" in asm  # acc2_imm=0
 
     # -- globalReadLDSBufferSwap TDM path --
 
