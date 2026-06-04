@@ -9,7 +9,6 @@ import shutil
 import sys
 import re
 
-from rocm_docs import ROCmDocs
 
 # We need to add the location of the rocrand Python module to the PATH
 # in order to build the documentation of that module
@@ -28,25 +27,44 @@ shutil.copy2('../library/src/fortran/README.md', './fortran-api-reference.md')
 # for PDF output on Read the Docs
 project = "rocRAND Documentation"
 author = "Advanced Micro Devices, Inc."
-copyright = "Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved."
+copyright = "Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved."
 version = version_number
 release = version_number
 
 external_toc_path = "./sphinx/_toc.yml"
 external_projects_current_project = "rocrand"
 
-docs_core = ROCmDocs(left_nav_title)
-docs_core.run_doxygen(doxygen_root="doxygen", doxygen_path="doxygen/xml")
-docs_core.enable_api_reference()
-docs_core.setup()
-
-external_projects_current_project = "rocrand"
-
-for sphinx_var in ROCmDocs.SPHINX_VARS:
-    globals()[sphinx_var] = getattr(docs_core, sphinx_var)
-
 # Suppresses "WARNING: toctree directive not expected with external-toc"
 # Ideally suppression wouldn't be needed; see sphinx-external-toc#36
 suppress_warnings = ["etoc.toctree"]
 
 cpp_id_attributes = ["__forceinline__", "__device__", "__host__", "ROCRANDAPI"]
+
+doxygen_root = "doxygen"
+doxysphinx_enabled = True
+doxygen_project = {
+    "name": "doxygen",
+    "path": "doxygen/xml",
+}
+
+html_theme = "rocm_docs_theme"
+html_theme_options = {
+    "announcement": f"This is ROCm 7.13.0 technology preview release documentation. For the latest production stream release, refer to <a id='rocm-banner' href='https://rocm.docs.amd.com/en/latest/'>ROCm documentation</a>.",
+    "flavor": "generic",
+    "header_title": f"ROCm™ 7.13.0 Preview",
+    "header_link": f"https://rocm.docs.amd.com/en/7.13.0-preview/index.html",
+    "version_list_link": "",
+    "nav_secondary_items": {
+        "GitHub": "https://github.com/ROCm/ROCm",
+        "Community": "https://github.com/ROCm/ROCm/discussions",
+        "Blogs": "https://rocm.blogs.amd.com/",
+        "System and Infra Docs": "https://instinct.docs.amd.com/",
+        "Support": "https://github.com/ROCm/ROCm/issues/new/choose",
+    },
+    "link_main_doc": False,
+}
+
+extensions = [
+    "rocm_docs", 
+    "rocm_docs.doxygen",
+]
