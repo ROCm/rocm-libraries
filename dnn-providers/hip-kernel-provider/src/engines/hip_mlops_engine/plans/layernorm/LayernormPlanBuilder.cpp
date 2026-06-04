@@ -11,6 +11,7 @@
 #include "compilation/IKernelCompiler.hpp"
 #include "device/IDevicePropertyProvider.hpp"
 #include "engines/hip_mlops_engine/plans/layernorm/LayernormApplicabilityChecks.hpp"
+#include "engines/hip_mlops_engine/plans/layernorm/LayernormBwdPlan.hpp"
 #include "engines/hip_mlops_engine/plans/layernorm/LayernormFwdPlan.hpp"
 
 namespace hip_kernel_provider::layernorm
@@ -57,7 +58,9 @@ bool LayernormPlanBuilder::isApplicable(
 
         if(!opGraph.hasOnlySupportedAttributes(
                std::set<hipdnn_flatbuffers_sdk::data_objects::NodeAttributes>{
-                   hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::LayernormAttributes}))
+                   hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::LayernormAttributes,
+                   hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::
+                       LayernormBackwardAttributes}))
         {
             HIPDNN_PLUGIN_LOG_INFO("Layernorm plan builder is not applicable for this graph");
             return false;
@@ -72,6 +75,10 @@ bool LayernormPlanBuilder::isApplicable(
             {
             case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::LayernormAttributes:
                 validator.checkTensorConfigSupported(*node.attributes_as_LayernormAttributes());
+                break;
+            case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::LayernormBackwardAttributes:
+                validator.checkTensorConfigSupported(
+                    *node.attributes_as_LayernormBackwardAttributes());
                 break;
             default:
                 throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
@@ -125,6 +132,24 @@ void buildPlanFwd([[maybe_unused]] const Handle& handle,
     executionContext.setPlan(std::move(plan));
 }
 
+void buildPlanBwd([[maybe_unused]] const Handle& handle,
+                  const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+                  const hipdnn_flatbuffers_sdk::flatbuffer_utilities::INodeWrapper& nodeWrapper,
+                  const IKernelCompiler& kernelCompiler,
+                  const IDevicePropertyProvider& devicePropertyProvider,
+                  Context& executionContext)
+{
+    const auto& attr
+        = nodeWrapper
+              .attributesAs<hipdnn_flatbuffers_sdk::data_objects::LayernormBackwardAttributes>();
+
+    LayernormBwdParams params(attr, opGraph.getTensorMap());
+    auto plan = std::make_unique<LayernormBwdPlan>(std::move(params));
+    plan->compile(kernelCompiler, devicePropertyProvider.getDeviceProperties());
+
+    executionContext.setPlan(std::move(plan));
+}
+
 } // namespace
 
 void LayernormPlanBuilder::initializeExecutionSettings(
@@ -146,9 +171,33 @@ void LayernormPlanBuilder::buildPlan(
     const auto& nodeWrapper = opGraph.getNodeWrapper(0);
     const auto nodeName = nodeWrapper.name();
 
-    HIPDNN_PLUGIN_LOG_INFO("Building layernorm fwd plan for node: " << nodeName);
-    buildPlanFwd(
-        handle, opGraph, nodeWrapper, _kernelCompiler, _devicePropertyProvider, executionContext);
+    switch(nodeWrapper.attributesType())
+    {
+    case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::LayernormAttributes:
+        HIPDNN_PLUGIN_LOG_INFO("Building layernorm fwd plan for node: " << nodeName);
+        buildPlanFwd(handle,
+                     opGraph,
+                     nodeWrapper,
+                     _kernelCompiler,
+                     _devicePropertyProvider,
+                     executionContext);
+        break;
+    case hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::LayernormBackwardAttributes:
+        HIPDNN_PLUGIN_LOG_INFO("Building layernorm bwd plan for node: " << nodeName);
+        buildPlanBwd(handle,
+                     opGraph,
+                     nodeWrapper,
+                     _kernelCompiler,
+                     _devicePropertyProvider,
+                     executionContext);
+        break;
+    default:
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Unsupported node type for layernorm plan builder: "
+                + std::string(
+                    hipdnn_flatbuffers_sdk::data_objects::toString(nodeWrapper.attributesType())));
+    }
 }
 
 std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> LayernormPlanBuilder::getCustomKnobs(
