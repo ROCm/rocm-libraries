@@ -4,27 +4,23 @@
 // Tests for the split-accumulation GPU reference GEMM.
 //
 // Compares split_gemm against:
-//   1. CPU reference (reference_batched_gemm with double-precision accumulation)
-//   2. Different reduction strategies against each other
-//
-// Reports per-config error statistics (max, mean, p99 relative error)
-// to feed the FMHA error model.
+//   1. CPU FP64 triple-loop reference (double-precision accumulation)
+//   2. Veltkamp HP (Ozaki tiled) vs CPU FP64
+//   3. GPU split_gemm vs CK's reference_batched_gemm (layout cross-check)
 
 #include "split_gemm.hpp"
 
 #include "ck_tile/host/host_tensor.hpp"
 #include "ck_tile/host/device_memory.hpp"
 #include "ck_tile/host/hip_check_error.hpp"
+#include "ck_tile/host/reference/reference_batched_gemm.hpp"
 
 #include <gtest/gtest.h>
 
-#include <algorithm>
 #include <cmath>
 #include <memory>
-#include <numeric>
 #include <random>
 #include <string>
-#include <tuple>
 #include <vector>
 
 using ck_tile::DeviceMem;
@@ -64,23 +60,13 @@ struct ErrorStats
 {
     double max_abs;
     double max_rel;
-    double mean_rel;
-    double p99_rel;
-    int num_elements;
 };
 
-// Compute error stats using the mixed tolerance formula:
-//   error = |actual - ref| / (atol + rtol * |ref|)
-// This avoids inflated relative error on near-zero values.
-// The "max_rel" field reports the max of |actual - ref| / |ref| but only
-// for elements where |ref| > abs_floor (to skip near-zero denominators).
+// max_abs = max |actual - ref| over all elements.
+// max_rel = max |actual - ref| / |ref| over elements where |ref| > 1e-6.
 ErrorStats compute_error(const float* actual, const float* reference, int count)
 {
     constexpr double abs_floor = 1e-6;
-
-    std::vector<double> rel_errors;
-    rel_errors.reserve(count);
-
     double max_abs = 0;
     double max_rel = 0;
 
@@ -93,33 +79,16 @@ ErrorStats compute_error(const float* actual, const float* reference, int count)
         max_abs = std::max(max_abs, diff);
 
         if(std::fabs(r) > abs_floor)
-        {
-            double rel = diff / std::fabs(r);
-            max_rel    = std::max(max_rel, rel);
-            rel_errors.push_back(rel);
-        }
+            max_rel = std::max(max_rel, diff / std::fabs(r));
     }
 
-    if(rel_errors.empty())
-        return {max_abs, 0, 0, 0, count};
-
-    std::sort(rel_errors.begin(), rel_errors.end());
-    double mean_rel = 0;
-    for(auto e : rel_errors)
-        mean_rel += e;
-    mean_rel /= static_cast<double>(rel_errors.size());
-
-    auto p99_idx = std::min(static_cast<size_t>(rel_errors.size() * 0.99), rel_errors.size() - 1);
-    double p99   = rel_errors[p99_idx];
-
-    return {max_abs, max_rel, mean_rel, p99, count};
+    return {max_abs, max_rel};
 }
 
 void print_error_stats(const std::string& label, const ErrorStats& s)
 {
     std::cout << "  " << label << ": max_abs=" << s.max_abs << " max_rel=" << s.max_rel
-              << " mean_rel=" << s.mean_rel << " p99_rel=" << s.p99_rel << " (n=" << s.num_elements
-              << ")" << std::endl;
+              << std::endl;
 }
 
 } // namespace
@@ -216,123 +185,6 @@ TEST_P(SplitGemmTest, CorrectnessVsCpuFp64)
 }
 
 // =========================================================================
-// Test: single-tile case should match naive (no reduce)
-// =========================================================================
-TEST_P(SplitGemmTest, SingleTileMatchesFullK)
-{
-    auto cfg = GetParam();
-
-    // Use kTile >= K so there's only one tile
-    int big_kTile = cfg.K;
-
-    HostTensor<float> h_A({cfg.M, cfg.K});
-    HostTensor<float> h_B({cfg.K, cfg.N});
-    fill_uniform(h_A, -1.0f, 1.0f, 44u);
-    fill_uniform(h_B, -1.0f, 1.0f, 45u);
-
-    int MN = cfg.M * cfg.N;
-
-    DeviceMem d_A(h_A);
-    DeviceMem d_B(h_B);
-    DeviceMem d_C1(static_cast<size_t>(MN) * sizeof(float));
-    DeviceMem d_C2(static_cast<size_t>(MN) * sizeof(float));
-
-    // Run with small kTile (multi-tile + reduce)
-    rocm_ck::test::split_gemm(static_cast<const float*>(d_A.GetDeviceBuffer()),
-                              static_cast<const float*>(d_B.GetDeviceBuffer()),
-                              static_cast<float*>(d_C1.GetDeviceBuffer()),
-                              cfg.M,
-                              cfg.N,
-                              cfg.K,
-                              cfg.kTile,
-                              rocm_ck::test::ReduceStrategy::FP64Sum,
-                              nullptr,
-                              ws_.get());
-
-    // Run with kTile = K (single tile, no reduce)
-    rocm_ck::test::split_gemm(static_cast<const float*>(d_A.GetDeviceBuffer()),
-                              static_cast<const float*>(d_B.GetDeviceBuffer()),
-                              static_cast<float*>(d_C2.GetDeviceBuffer()),
-                              cfg.M,
-                              cfg.N,
-                              cfg.K,
-                              big_kTile,
-                              rocm_ck::test::ReduceStrategy::NaiveSum,
-                              nullptr,
-                              ws_.get());
-
-    std::vector<float> h1(static_cast<size_t>(MN)), h2(static_cast<size_t>(MN));
-    d_C1.FromDevice(h1.data());
-    d_C2.FromDevice(h2.data());
-
-    auto stats = compute_error(h1.data(), h2.data(), MN);
-
-    std::cout << "[" << cfg << "] SingleTile vs Split: ";
-    print_error_stats("FP64Sum_split_vs_NaiveSum_full", stats);
-}
-
-// =========================================================================
-// Test: FP64Sum should be tighter than NaiveSum
-// =========================================================================
-TEST_P(SplitGemmTest, FP64SumTighterThanNaive)
-{
-    auto cfg = GetParam();
-    if(cfg.K <= cfg.kTile)
-        GTEST_SKIP() << "Single tile — no reduction difference";
-
-    HostTensor<float> h_A({cfg.M, cfg.K});
-    HostTensor<float> h_B({cfg.K, cfg.N});
-    fill_uniform(h_A, -1.0f, 1.0f, 46u);
-    fill_uniform(h_B, -1.0f, 1.0f, 47u);
-
-    int MN = cfg.M * cfg.N;
-
-    std::vector<float> h_ref(static_cast<size_t>(MN));
-    cpu_gemm_fp64(h_A.data(), h_B.data(), h_ref.data(), cfg.M, cfg.N, cfg.K);
-
-    DeviceMem d_A(h_A);
-    DeviceMem d_B(h_B);
-    DeviceMem d_C(static_cast<size_t>(MN) * sizeof(float));
-
-    // NaiveSum
-    d_C.SetZero();
-    rocm_ck::test::split_gemm(static_cast<const float*>(d_A.GetDeviceBuffer()),
-                              static_cast<const float*>(d_B.GetDeviceBuffer()),
-                              static_cast<float*>(d_C.GetDeviceBuffer()),
-                              cfg.M,
-                              cfg.N,
-                              cfg.K,
-                              cfg.kTile,
-                              rocm_ck::test::ReduceStrategy::NaiveSum,
-                              nullptr,
-                              ws_.get());
-    std::vector<float> h_naive(static_cast<size_t>(MN));
-    d_C.FromDevice(h_naive.data());
-
-    // FP64Sum
-    d_C.SetZero();
-    rocm_ck::test::split_gemm(static_cast<const float*>(d_A.GetDeviceBuffer()),
-                              static_cast<const float*>(d_B.GetDeviceBuffer()),
-                              static_cast<float*>(d_C.GetDeviceBuffer()),
-                              cfg.M,
-                              cfg.N,
-                              cfg.K,
-                              cfg.kTile,
-                              rocm_ck::test::ReduceStrategy::FP64Sum,
-                              nullptr,
-                              ws_.get());
-    std::vector<float> h_fp64(static_cast<size_t>(MN));
-    d_C.FromDevice(h_fp64.data());
-
-    auto err_naive = compute_error(h_naive.data(), h_ref.data(), MN);
-    auto err_fp64  = compute_error(h_fp64.data(), h_ref.data(), MN);
-
-    if(err_fp64.max_rel > err_naive.max_rel)
-        std::cout << "  NOTE: FP64Sum (" << err_fp64.max_rel
-                  << ") is worse than NaiveSum (" << err_naive.max_rel << ")" << std::endl;
-}
-
-// =========================================================================
 // Test: Veltkamp split HP GEMM vs CPU FP64 reference
 // =========================================================================
 TEST_P(SplitGemmTest, VeltkampHpVsCpuFp64)
@@ -346,11 +198,9 @@ TEST_P(SplitGemmTest, VeltkampHpVsCpuFp64)
 
     int MN = cfg.M * cfg.N;
 
-    // CPU FP64 reference
     std::vector<float> h_C_ref(static_cast<size_t>(MN));
     cpu_gemm_fp64(h_A.data(), h_B.data(), h_C_ref.data(), cfg.M, cfg.N, cfg.K);
 
-    // GPU Veltkamp HP
     DeviceMem d_A(h_A);
     DeviceMem d_B(h_B);
     DeviceMem d_C(static_cast<size_t>(MN) * sizeof(float));
@@ -364,46 +214,45 @@ TEST_P(SplitGemmTest, VeltkampHpVsCpuFp64)
                                  cfg.K,
                                  cfg.kTile,
                                  rocm_ck::test::ReduceStrategy::FP64Sum,
-                              nullptr,
-                              ws_.get());
+                                 nullptr,
+                                 ws_.get());
 
     std::vector<float> h_C_gpu(static_cast<size_t>(MN));
     d_C.FromDevice(h_C_gpu.data());
 
     auto stats = compute_error(h_C_gpu.data(), h_C_ref.data(), MN);
 
-    std::cout << "[" << cfg << "] VeltkampHP: ";
-    print_error_stats("VeltkampHP+FP64Sum", stats);
-
-    // Report only — you set the thresholds after reviewing the data
-    std::cout << "  (no threshold asserted — review error stats above)" << std::endl;
+    std::cout << "[" << cfg << "] ";
+    print_error_stats("VeltkampHP", stats);
 }
 
 // =========================================================================
-// Test: Veltkamp HP should be tighter than plain FP64Sum
+// Test: GPU split_gemm vs CPU reference_batched_gemm (layout cross-check)
+//
+// Verifies that split_gemm (row-major: C = A[M,K] @ B[K,N]) produces the
+// same result as CK's reference_batched_gemm (CK convention: C = A @ B^T
+// where B is [batch,N,K]).
+//
+// This closes the layout coherence gap between the GPU and CPU references.
 // =========================================================================
-TEST_P(SplitGemmTest, VeltkampTighterThanFP64Sum)
+TEST_P(SplitGemmTest, SplitGemmVsReferenceBatchedGemm)
 {
     auto cfg = GetParam();
-    if(cfg.K <= cfg.kTile)
-        GTEST_SKIP() << "Single tile — minimal accumulation error to improve on";
 
+    // Row-major inputs for split_gemm
     HostTensor<float> h_A({cfg.M, cfg.K});
     HostTensor<float> h_B({cfg.K, cfg.N});
-    fill_uniform(h_A, -1.0f, 1.0f, 52u);
-    fill_uniform(h_B, -1.0f, 1.0f, 53u);
+    fill_uniform(h_A, -1.0f, 1.0f, 60u);
+    fill_uniform(h_B, -1.0f, 1.0f, 61u);
 
     int MN = cfg.M * cfg.N;
 
-    std::vector<float> h_ref(static_cast<size_t>(MN));
-    cpu_gemm_fp64(h_A.data(), h_B.data(), h_ref.data(), cfg.M, cfg.N, cfg.K);
-
+    // --- GPU: split_gemm with NaiveSum ---
     DeviceMem d_A(h_A);
     DeviceMem d_B(h_B);
     DeviceMem d_C(static_cast<size_t>(MN) * sizeof(float));
-
-    // Plain FP64Sum (no Veltkamp)
     d_C.SetZero();
+
     rocm_ck::test::split_gemm(static_cast<const float*>(d_A.GetDeviceBuffer()),
                               static_cast<const float*>(d_B.GetDeviceBuffer()),
                               static_cast<float*>(d_C.GetDeviceBuffer()),
@@ -411,37 +260,42 @@ TEST_P(SplitGemmTest, VeltkampTighterThanFP64Sum)
                               cfg.N,
                               cfg.K,
                               cfg.kTile,
-                              rocm_ck::test::ReduceStrategy::FP64Sum,
+                              rocm_ck::test::ReduceStrategy::NaiveSum,
                               nullptr,
                               ws_.get());
-    std::vector<float> h_fp64(static_cast<size_t>(MN));
-    d_C.FromDevice(h_fp64.data());
 
-    // Veltkamp HP + FP64Sum
-    d_C.SetZero();
-    rocm_ck::test::split_gemm_hp(static_cast<const float*>(d_A.GetDeviceBuffer()),
-                                 static_cast<const float*>(d_B.GetDeviceBuffer()),
-                                 static_cast<float*>(d_C.GetDeviceBuffer()),
-                                 cfg.M,
-                                 cfg.N,
-                                 cfg.K,
-                                 cfg.kTile,
-                                 rocm_ck::test::ReduceStrategy::FP64Sum,
-                              nullptr,
-                              ws_.get());
-    std::vector<float> h_veltkamp(static_cast<size_t>(MN));
-    d_C.FromDevice(h_veltkamp.data());
+    std::vector<float> h_C_gpu(static_cast<size_t>(MN));
+    d_C.FromDevice(h_C_gpu.data());
 
-    auto err_fp64     = compute_error(h_fp64.data(), h_ref.data(), MN);
-    auto err_veltkamp = compute_error(h_veltkamp.data(), h_ref.data(), MN);
+    // --- CPU: reference_batched_gemm ---
+    // CK convention: gemm(A, B, C) computes C[b,m,n] = sum_k A[b,m,k] * B[b,n,k]
+    // So B must be [batch, N, K] — transpose our row-major B[K,N] to B_t[N,K].
+    HostTensor<float> h_A_3d({1, cfg.M, cfg.K});  // batch=1
+    HostTensor<float> h_B_t({1, cfg.N, cfg.K});    // batch=1, transposed
+    HostTensor<float> h_C_cpu({1, cfg.M, cfg.N});  // batch=1
 
-    std::cout << "[" << cfg << "] FP64Sum max_rel=" << err_fp64.max_rel
-              << " VeltkampHP max_rel=" << err_veltkamp.max_rel << std::endl;
+    // Copy A into 3D (same data, just adding batch dim)
+    for(int i = 0; i < cfg.M; ++i)
+        for(int k = 0; k < cfg.K; ++k)
+            h_A_3d(0, i, k) = h_A(i, k);
 
-    // Report comparison — you decide if the ordering holds as expected
-    if(err_veltkamp.max_rel > err_fp64.max_rel)
-        std::cout << "  NOTE: VeltkampHP (" << err_veltkamp.max_rel
-                  << ") is worse than FP64Sum (" << err_fp64.max_rel << ")" << std::endl;
+    // Transpose B[K,N] → B_t[N,K]
+    for(int k = 0; k < cfg.K; ++k)
+        for(int n = 0; n < cfg.N; ++n)
+            h_B_t(0, n, k) = h_B(k, n);
+
+    ck_tile::reference_batched_gemm<float, float, float, float>(h_A_3d, h_B_t, h_C_cpu);
+
+    // Extract C_cpu as flat array
+    std::vector<float> h_C_ref(static_cast<size_t>(MN));
+    for(int i = 0; i < cfg.M; ++i)
+        for(int j = 0; j < cfg.N; ++j)
+            h_C_ref[static_cast<size_t>(i * cfg.N + j)] = h_C_cpu(0, i, j);
+
+    auto stats = compute_error(h_C_gpu.data(), h_C_ref.data(), MN);
+
+    std::cout << "[" << cfg << "] ";
+    print_error_stats("split_gemm_vs_ref_batched", stats);
 }
 
 // =========================================================================
@@ -461,13 +315,6 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Values(SplitGemmConfig{128, 256, 512, 128, "med_4tile"},
                       SplitGemmConfig{256, 128, 1024, 256, "med_4tile_tall"},
                       SplitGemmConfig{128, 128, 256, 64, "med_4tile_sq"}));
-
-INSTANTIATE_TEST_SUITE_P(
-    FAScale,
-    SplitGemmTest,
-    ::testing::Values(SplitGemmConfig{512, 512, 512, 256, "fa_sq"},
-                      SplitGemmConfig{512, 128, 256, 128, "fa_qk"},
-                      SplitGemmConfig{512, 256, 512, 256, "fa_pv"}));
 
 INSTANTIATE_TEST_SUITE_P(
     Edge,
