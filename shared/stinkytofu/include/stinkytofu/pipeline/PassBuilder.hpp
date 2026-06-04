@@ -77,13 +77,31 @@ class STINKYTOFU_EXPORT PassBuilder {
     void applyExtensionPoint(PipelineExtensionPoint EP, PassManager& PM,
                              StinkyAsmModule& module) const;
 
+    /// Factory type: creates a pass given a module reference.
+    /// Plugins that need module data (e.g., pluginDataI64/Str) use this signature.
+    using PassFactory = std::function<std::unique_ptr<Pass>(StinkyAsmModule&)>;
+
     /// Register a named pass factory.  Plugins call this at static init
     /// or module init time so that Python can refer to passes by name.
-    static void registerNamedPassFactory(const std::string& name,
-                                         std::function<std::unique_ptr<Pass>()> factory);
+    static void registerNamedPassFactory(const std::string& name, PassFactory factory);
 
     /// Create a pass by name.  Returns nullptr if the name is not registered.
-    static std::unique_ptr<Pass> createPassByName(const std::string& name);
+    static std::unique_ptr<Pass> createPassByName(const std::string& name, StinkyAsmModule& module);
+
+    /// Load all plugin shared libraries from the given directory.
+    /// Each .so must export `extern "C" void registerPlugin()`.
+    /// Loaded plugins call registerNamedPassFactory() during their
+    /// registerPlugin() to make their passes available by name.
+    static void loadPluginsFromDirectory(const std::string& dirPath);
+
+    /// Load a single plugin shared library.
+    static bool loadPlugin(const std::string& path);
+
+    /// Explicitly close all loaded plugin handles.
+    /// C++ callers should invoke this before shutdown.
+    /// Python callers should NOT call this — plugin handles are
+    /// cleaned up by the OS when the process exits.
+    static void unloadPlugins();
 
    private:
     std::unordered_map<int, std::vector<ExtensionCallback>> callbacks_;

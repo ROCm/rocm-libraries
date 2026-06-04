@@ -22,6 +22,7 @@
  * ************************************************************************ */
 #include <gtest/gtest.h>
 
+#include "HelloWorldPass.hpp"
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/pipeline/PassBuilder.hpp"
 
@@ -124,16 +125,21 @@ TEST(PassBuilderTest, DifferentExtensionPointsAreIndependent) {
 
 TEST(PassBuilderTest, NamedPassFactoryRegisterAndCreate) {
     int counter = 0;
-    PassBuilder::registerNamedPassFactory(
-        "TestCounterPass", [&counter]() { return std::make_unique<CounterPass>(counter); });
+    PassBuilder::registerNamedPassFactory("TestCounterPass", [&counter](StinkyAsmModule&) {
+        return std::make_unique<CounterPass>(counter);
+    });
 
-    auto pass = PassBuilder::createPassByName("TestCounterPass");
+    StinkyAsmModule::ModuleOptions opts{};
+    StinkyAsmModule module("test", {12, 5, 0}, opts);
+    auto pass = PassBuilder::createPassByName("TestCounterPass", module);
     ASSERT_NE(pass, nullptr);
     EXPECT_STREQ(pass->getName(), "CounterPass");
 }
 
 TEST(PassBuilderTest, CreateUnknownPassReturnsNull) {
-    auto pass = PassBuilder::createPassByName("NonExistentPass");
+    StinkyAsmModule::ModuleOptions opts{};
+    StinkyAsmModule module("test", {12, 5, 0}, opts);
+    auto pass = PassBuilder::createPassByName("NonExistentPass", module);
     EXPECT_EQ(pass, nullptr);
 }
 
@@ -186,4 +192,32 @@ TEST(PluginDataTest, PassBuilderAccessFromModule) {
     module.getPassBuilder().applyExtensionPoint(PipelineExtensionPoint::InnerRegionEnd, pm, module);
     pm.run(module.getFunction());
     EXPECT_EQ(counter, 1);
+}
+
+// --- HelloWorldPass example plugin integration test ---
+
+TEST(PluginIntegrationTest, HelloWorldPassReadsAndWritesPluginData) {
+    registerHelloWorldPassPlugin();
+
+    StinkyAsmModule::ModuleOptions opts{};
+    StinkyAsmModule module("test", {12, 5, 0}, opts);
+
+    module.setPluginDataStr("greeting", "Hello from test!");
+    module.getPassBuilder().registerAtExtensionPoint(
+        PipelineExtensionPoint::AfterRegionPasses, [](PassManager& PM, StinkyAsmModule& mod) {
+            PM.addPass(PassBuilder::createPassByName("HelloWorldPass", mod));
+        });
+
+    PassManager pm;
+    module.getPassBuilder().applyExtensionPoint(PipelineExtensionPoint::AfterRegionPasses, pm,
+                                                module);
+    pm.run(module.getFunction());
+
+    EXPECT_EQ(module.getPluginDataI64("pass_executed"), 1);
+    EXPECT_EQ(module.getPluginDataStr("greeting_result"), "executed: Hello from test!");
+
+    // C++ callers should call unloadPlugins() before shutdown to dlclose
+    // any dynamically loaded plugins. Not strictly needed here since the
+    // plugin was linked at compile time, but demonstrates the API.
+    PassBuilder::unloadPlugins();
 }

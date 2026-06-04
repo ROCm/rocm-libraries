@@ -130,3 +130,37 @@ class TestRegisterPassAtExtensionPoint:
         st.setPluginDataI64("testKey", 123)
         st.runOptimizationPipeline()
         assert st.getPluginDataI64("testKey") == 123
+
+
+class TestHelloWorldPassIntegration:
+    """End-to-end test: dynamically load HelloWorldPass plugin, set
+    plugin data, run pipeline, verify the pass executed."""
+
+    @pytest.fixture(autouse=True)
+    def _load_plugin(self):
+        import glob
+        import os
+        plugin_dir = os.path.join(os.path.dirname(rocisa.__file__), "plugins")
+        candidates = glob.glob(os.path.join(plugin_dir, "*helloworld*"))
+        if not candidates:
+            pytest.skip("HelloWorldPass plugin .so not found at " + plugin_dir)
+        rocisa.loadPlugin(candidates[0])
+
+    def test_hello_world_pass_executes(self):
+        st = _make_stinky_module()
+        st.setPluginDataStr("greeting", "Hello from rocisa test!")
+        st.registerPassAtExtensionPoint(
+            rocisa.EP_AfterRegionPasses, "HelloWorldPass"
+        )
+        st.runOptimizationPipeline()
+        assert st.getPluginDataI64("pass_executed") == 1
+        assert st.getPluginDataStr("greeting_result") == "executed: Hello from rocisa test!"
+
+    def test_hello_world_pass_default_greeting(self):
+        st = _make_stinky_module()
+        st.registerPassAtExtensionPoint(
+            rocisa.EP_AfterRegionPasses, "HelloWorldPass"
+        )
+        st.runOptimizationPipeline()
+        assert st.getPluginDataI64("pass_executed") == 1
+        assert st.getPluginDataStr("greeting_result") == "executed: Hello from plugin!"

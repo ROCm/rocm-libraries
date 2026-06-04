@@ -103,6 +103,7 @@ list(TRANSFORM UNIT_TEST_FILES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 add_executable(unit_tests ${TEST_MAIN} ${UNIT_TEST_FILES})
 target_link_libraries(unit_tests PRIVATE stinkytofu-warnings)
 target_link_libraries(unit_tests PUBLIC ${TEST_LINK_LIBS})
+target_link_libraries(unit_tests PRIVATE stinkytofu-plugin-helloworld)
 target_include_directories(unit_tests PRIVATE ${TEST_INCLUDE_DIRS})
 add_dependencies(unit_tests tablegen_generated)
 

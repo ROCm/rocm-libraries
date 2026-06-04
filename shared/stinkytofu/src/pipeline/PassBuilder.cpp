@@ -22,6 +22,23 @@
  * ************************************************************************ */
 #include "stinkytofu/pipeline/PassBuilder.hpp"
 
+#include "stinkytofu/Version.h"
+
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <dlfcn.h>
+#endif
+
+#include <filesystem>
+#include <iostream>
+
+#ifndef _WIN32
+#define STINKYTOFU_SONAME "libstinkytofu.so." STINKYTOFU_STRINGIFY_(STINKYTOFU_VERSION_MAJOR)
+#define STINKYTOFU_STRINGIFY_(x) STINKYTOFU_STRINGIFY__(x)
+#define STINKYTOFU_STRINGIFY__(x) #x
+#endif
+
 namespace stinkytofu {
 
 void PassBuilder::registerAtExtensionPoint(PipelineExtensionPoint EP, ExtensionCallback CB) {
@@ -38,8 +55,11 @@ void PassBuilder::applyExtensionPoint(PipelineExtensionPoint EP, PassManager& PM
 }
 
 struct PassBuilder::FactoryRegistry {
-    std::unordered_map<std::string, std::function<std::unique_ptr<Pass>()>> factories;
+    std::unordered_map<std::string, PassFactory> factories;
+    std::vector<void*> loadedPlugins;
     std::mutex mu;
+
+    ~FactoryRegistry() = default;
 };
 
 PassBuilder::FactoryRegistry& PassBuilder::getFactoryRegistry() {
@@ -47,21 +67,95 @@ PassBuilder::FactoryRegistry& PassBuilder::getFactoryRegistry() {
     return registry;
 }
 
-void PassBuilder::registerNamedPassFactory(const std::string& name,
-                                           std::function<std::unique_ptr<Pass>()> factory) {
+void PassBuilder::registerNamedPassFactory(const std::string& name, PassFactory factory) {
     auto& reg = getFactoryRegistry();
     std::lock_guard<std::mutex> lock(reg.mu);
     reg.factories[name] = std::move(factory);
 }
 
-std::unique_ptr<Pass> PassBuilder::createPassByName(const std::string& name) {
+std::unique_ptr<Pass> PassBuilder::createPassByName(const std::string& name,
+                                                    StinkyAsmModule& module) {
     auto& reg = getFactoryRegistry();
     std::lock_guard<std::mutex> lock(reg.mu);
     auto it = reg.factories.find(name);
     if (it == reg.factories.end()) {
         return nullptr;
     }
-    return it->second();
+    return it->second(module);
+}
+
+bool PassBuilder::loadPlugin(const std::string& path) {
+#ifdef _WIN32
+    HMODULE handle = LoadLibraryA(path.c_str());
+    if (!handle) {
+        std::cerr << "PassBuilder: failed to load plugin '" << path << "': error code "
+                  << GetLastError() << std::endl;
+        return false;
+    }
+
+    using RegisterFn = void (*)();
+    auto* registerFn = reinterpret_cast<RegisterFn>(GetProcAddress(handle, "registerPlugin"));
+    if (!registerFn) {
+        std::cerr << "PassBuilder: plugin '" << path << "' does not export registerPlugin()"
+                  << std::endl;
+        FreeLibrary(handle);
+        return false;
+    }
+#else
+    // Promote the already-loaded libstinkytofu to RTLD_GLOBAL so the plugin
+    // resolves stinkytofu symbols from the host's copy, not a second one.
+    // RTLD_NOLOAD prevents loading a new copy — it only changes visibility.
+    dlopen(STINKYTOFU_SONAME, RTLD_NOW | RTLD_NOLOAD | RTLD_GLOBAL);
+
+    void* handle = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
+    if (!handle) {
+        std::cerr << "PassBuilder: failed to load plugin '" << path << "': " << dlerror()
+                  << std::endl;
+        return false;
+    }
+
+    using RegisterFn = void (*)();
+    auto* registerFn = reinterpret_cast<RegisterFn>(dlsym(handle, "registerPlugin"));
+    if (!registerFn) {
+        std::cerr << "PassBuilder: plugin '" << path
+                  << "' does not export registerPlugin(): " << dlerror() << std::endl;
+        dlclose(handle);
+        return false;
+    }
+#endif
+
+    registerFn();
+
+    auto& reg = getFactoryRegistry();
+    std::lock_guard<std::mutex> lock(reg.mu);
+    reg.loadedPlugins.push_back(reinterpret_cast<void*>(handle));
+    return true;
+}
+
+void PassBuilder::loadPluginsFromDirectory(const std::string& dirPath) {
+    namespace fs = std::filesystem;
+    if (!fs::exists(dirPath) || !fs::is_directory(dirPath)) return;
+
+    for (const auto& entry : fs::directory_iterator(dirPath)) {
+        if (!entry.is_regular_file()) continue;
+        auto ext = entry.path().extension().string();
+        if (ext == ".so" || ext == ".dll") {
+            loadPlugin(entry.path().string());
+        }
+    }
+}
+
+void PassBuilder::unloadPlugins() {
+    auto& reg = getFactoryRegistry();
+    std::lock_guard<std::mutex> lock(reg.mu);
+    for (auto* handle : reg.loadedPlugins) {
+#ifdef _WIN32
+        FreeLibrary(reinterpret_cast<HMODULE>(handle));
+#else
+        dlclose(handle);
+#endif
+    }
+    reg.loadedPlugins.clear();
 }
 
 }  // namespace stinkytofu

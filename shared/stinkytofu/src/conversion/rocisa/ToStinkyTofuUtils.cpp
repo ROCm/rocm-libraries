@@ -1107,6 +1107,11 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
     m.attr("EP_InnerRegionEnd") = static_cast<int>(PipelineExtensionPoint::InnerRegionEnd);
     m.attr("EP_AfterRegionPasses") = static_cast<int>(PipelineExtensionPoint::AfterRegionPasses);
 
+    m.def("loadPlugin", &PassBuilder::loadPlugin, nb::arg("path"),
+          "Load a plugin shared library (.so) that exports registerPlugin()");
+    m.def("loadPluginsFromDirectory", &PassBuilder::loadPluginsFromDirectory, nb::arg("dirPath"),
+          "Load all plugin .so files from a directory");
+
     // Bind isSupportedByStinkyTofu to check if the architecture is supported by StinkyTofu
     m.def(
         "isSupportedByStinkyTofu",
@@ -1184,8 +1189,9 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
         void registerPassAtExtensionPoint(int ep, const std::string& passName) {
             module_->getPassBuilder().registerAtExtensionPoint(
                 static_cast<PipelineExtensionPoint>(ep),
-                [passName](PassManager& PM, StinkyAsmModule&) {
-                    PM.addPass(PassBuilder::createPassByName(passName));
+                [passName](PassManager& PM, StinkyAsmModule& module) {
+                    auto pass = PassBuilder::createPassByName(passName, module);
+                    if (pass) PM.addPass(std::move(pass));
                 });
         }
 

@@ -89,8 +89,9 @@ NB_MODULE(_stinkytofu, m) {
             [](StinkyAsmModule& self, int ep, const std::string& passName) {
                 self.getPassBuilder().registerAtExtensionPoint(
                     static_cast<PipelineExtensionPoint>(ep),
-                    [passName](PassManager& PM, StinkyAsmModule&) {
-                        PM.addPass(PassBuilder::createPassByName(passName));
+                    [passName](PassManager& PM, StinkyAsmModule& module) {
+                        auto pass = PassBuilder::createPassByName(passName, module);
+                        if (pass) PM.addPass(std::move(pass));
                     });
             },
             nb::arg("extensionPoint"), nb::arg("passName"),
