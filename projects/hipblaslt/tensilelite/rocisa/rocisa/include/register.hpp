@@ -347,7 +347,7 @@ namespace rocisa
                 if(preventOverflow)
                 {
                     throw std::runtime_error("RegisterPool::checkOutAligned: register '"
-                        + tag + "' (" + std::to_string(size) + ", " = std::to_string(alignment) +
+                        + tag + "' (" + std::to_string(size) + ", " + std::to_string(alignment) +
                         ") overflow prevented by preventOverflow flag");
                 }
                 size_t start = m_pool.size();
