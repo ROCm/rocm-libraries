@@ -42,63 +42,24 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # - name: MIOpen Hip Debug NOCK Build-Only
-          #   job_id: no-ck-build
-          #   cmake_extra_flags: >-
-          #     -DCMAKE_BUILD_TYPE=debug
-          #     -DCMAKE_CXX_FLAGS_DEBUG='-g -fno-omit-frame-pointer -fsanitize=undefined -fno-sanitize-recover=undefined -Wno-option-ignored '
-          #     -DBUILD_DEV=OFF
-          #     -DMIOPEN_USE_MLIR=OFF
-          #     -DMIOPEN_GPU_SYNC=OFF
-          #     -DMIOPEN_USE_COMPOSABLEKERNEL=OFF
-          #     -DCMAKE_INSTALL_PREFIX=$(pwd)/projects/miopen/install
-          #     -DCMAKE_PREFIX_PATH=/opt/rocm
-          #     -DGPU_TARGETS="gfx942"
-          #   build_target: --target install
+          - name: MIOpen Hip Debug NOCK Build-Only
+            job_id: no-ck-build
+            cmake_extra_flags: >-
+              -DCMAKE_BUILD_TYPE=debug
+              -DCMAKE_CXX_FLAGS_DEBUG='-g -fno-omit-frame-pointer -fsanitize=undefined -fno-sanitize-recover=undefined -Wno-option-ignored '
+              -DBUILD_DEV=OFF
+              -DMIOPEN_USE_MLIR=OFF
+              -DMIOPEN_GPU_SYNC=OFF
+              -DMIOPEN_USE_COMPOSABLEKERNEL=OFF
+              -DCMAKE_INSTALL_PREFIX=$(pwd)/projects/miopen/install
+              -DCMAKE_PREFIX_PATH=/opt/rocm
+              -DGPU_TARGETS="gfx942"
+            build_target: --target install
 
-          # - name: MIOpen Build Hip Package
-          #   job_id: hip-package-build
-          #   cmake_extra_flags: >-
-          #     -DCMAKE_BUILD_TYPE=release
-          #     -DBUILD_DEV=OFF
-          #     -DMIOPEN_TEST_DISCRETE=OFF
-          #     -DMIOPEN_USE_MLIR=ON
-          #     -DMIOPEN_GPU_SYNC=OFF
-          #     -DCMAKE_PREFIX_PATH=/opt/rocm
-          #     -DGPU_TARGETS="gfx942"
-          #   build_target: --target miopen_gtest --target package
-
-          # - name: MIOpen HipNoGPU Debug Build-Only
-          #   job_id: no-gpu-debug-build
-          #   cmake_extra_flags: >-
-          #     -DCMAKE_BUILD_TYPE=debug
-          #     -DCMAKE_CXX_FLAGS_DEBUG='-g -fno-omit-frame-pointer -fsanitize=undefined -fno-sanitize-recover=undefined -Wno-option-ignored '
-          #     -DBUILD_DEV=ON
-          #     -DMIOPEN_USE_MLIR=OFF
-          #     -DMIOPEN_GPU_SYNC=OFF
-          #     -DMIOPEN_BACKEND=HIPNOGPU
-          #     -DMIOPEN_INSTALL_CXX_HEADERS=ON
-          #     -DCMAKE_PREFIX_PATH=/opt/rocm
-          #   build_target: ""
-
-          # - name: MIOpen Tuna Fin Build-Only
-          #   job_id: tuna-fin-build
-          #   cmake_extra_flags: >-
-          #     -DCMAKE_BUILD_TYPE=release
-          #     -DBUILD_DEV=OFF
-          #     -DMIOPEN_INSTALL_CXX_HEADERS=ON
-          #     -DCMAKE_INSTALL_PREFIX=$(pwd)/projects/miopen/install
-          #     -DMIOPEN_USE_MLIR=ON
-          #     -DMIOPEN_GPU_SYNC=OFF
-          #     -DMIOPEN_BACKEND=HIPNOGPU
-          #     -DCMAKE_PREFIX_PATH=/opt/rocm
-          #     -DGPU_TARGETS="gfx942"
-          #   build_target: --target install --target all
-
-          # Runs miopen_gtest_check (binary listing + naming convention validation) using
-          # rocjitsu's KMD LD_PRELOAD interposer to satisfy HIP device init without a real GPU.
-          - name: MIOpen GTest Check (rocjitsu)
-            job_id: gtest-check-rocjitsu
+          # Builds the HIP package and runs miopen_gtest_check via rocjitsu KMD interposer
+          # to validate the gtest binary and test naming conventions without a physical GPU.
+          - name: MIOpen Build Hip Package
+            job_id: hip-package-build
             cmake_extra_flags: >-
               -DCMAKE_BUILD_TYPE=release
               -DBUILD_DEV=OFF
@@ -107,7 +68,34 @@ jobs:
               -DMIOPEN_GPU_SYNC=OFF
               -DCMAKE_PREFIX_PATH=/opt/rocm
               -DGPU_TARGETS="gfx942"
-            build_target: --target miopen_gtest
+            build_target: --target miopen_gtest --target package
+
+          - name: MIOpen HipNoGPU Debug Build-Only
+            job_id: no-gpu-debug-build
+            cmake_extra_flags: >-
+              -DCMAKE_BUILD_TYPE=debug
+              -DCMAKE_CXX_FLAGS_DEBUG='-g -fno-omit-frame-pointer -fsanitize=undefined -fno-sanitize-recover=undefined -Wno-option-ignored '
+              -DBUILD_DEV=ON
+              -DMIOPEN_USE_MLIR=OFF
+              -DMIOPEN_GPU_SYNC=OFF
+              -DMIOPEN_BACKEND=HIPNOGPU
+              -DMIOPEN_INSTALL_CXX_HEADERS=ON
+              -DCMAKE_PREFIX_PATH=/opt/rocm
+            build_target: ""
+
+          - name: MIOpen Tuna Fin Build-Only
+            job_id: tuna-fin-build
+            cmake_extra_flags: >-
+              -DCMAKE_BUILD_TYPE=release
+              -DBUILD_DEV=OFF
+              -DMIOPEN_INSTALL_CXX_HEADERS=ON
+              -DCMAKE_INSTALL_PREFIX=$(pwd)/projects/miopen/install
+              -DMIOPEN_USE_MLIR=ON
+              -DMIOPEN_GPU_SYNC=OFF
+              -DMIOPEN_BACKEND=HIPNOGPU
+              -DCMAKE_PREFIX_PATH=/opt/rocm
+              -DGPU_TARGETS="gfx942"
+            build_target: --target install --target all
 
     runs-on: azure-linux-scale-rocm
     steps:
@@ -143,7 +131,7 @@ jobs:
           LOGNAME=github-runner dvc pull -v
 
       - name: Checkout rocjitsu
-        if: matrix.job_id == 'gtest-check-rocjitsu'
+        if: matrix.job_id == 'hip-package-build'
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ROCm/rocm-systems
@@ -152,7 +140,7 @@ jobs:
             emulation/rocjitsu
 
       - name: Build rocjitsu KMD
-        if: matrix.job_id == 'gtest-check-rocjitsu'
+        if: matrix.job_id == 'hip-package-build'
         run: |
           apt-get update && apt-get install -y libdrm-dev
           cmake -S rocm-systems/emulation/rocjitsu -B rocjitsu-build \
@@ -187,7 +175,7 @@ jobs:
         run: cmake --build build-fin --target install -j$(nproc)
 
       - name: Run miopen_gtest_check (rocjitsu)
-        if: matrix.job_id == 'gtest-check-rocjitsu'
+        if: matrix.job_id == 'hip-package-build'
         run: |
           export RJ_CONFIG=$(pwd)/rocm-systems/emulation/rocjitsu/configs/amdgpu_cdna3_kmd.json
           LD_PRELOAD=$(pwd)/rocjitsu-build/lib/rocjitsu/src/rocjitsu/kmd/librocjitsu_kmd.so \
