@@ -36,9 +36,17 @@ from unittest.mock import MagicMock
 def makeTileInfo(tc, kernel):
     """Compatibility wrapper: select geometry from kernel config and return TileInfo."""
     fp4 = kernel["ProblemType"].get("MXBlockA", 0) > 0
+    bpeA = kernel["ProblemType"]["DataTypeA"].numBytes()
+    fp8 = (not fp4) and bpeA == 1
+    if fp4:
+        ab_geo = AB_B4
+    elif fp8:
+        ab_geo = AB_B8
+    else:
+        ab_geo = AB_B16
     _geo = {
-        'A': AB_B4 if fp4 else AB_B16,
-        'B': AB_B4 if fp4 else AB_B16,
+        'A': ab_geo,
+        'B': ab_geo,
         'MXSA': MXSA_B4,
         'MXSB': MXSB_B4,
         'D': CD_F32,
@@ -2344,7 +2352,7 @@ if __name__ == "__main__":
     parser.add_argument("--mt1", type=int, default=256, help="MacroTile1 (default: 256)")
     parser.add_argument("--du", type=int, default=None,
                         help="DepthU (default: 64 for bf16, 512 for fp4)")
-    parser.add_argument("--dtype", choices=["bf16", "fp4"], default="bf16",
+    parser.add_argument("--dtype", choices=["bf16", "fp4", "fp8"], default="bf16",
                         help="Data type (default: bf16)")
     parser.add_argument("--partition-size", type=str, default="0x0",
                         help="partitionSize as MxN in MFMA tiles (0 = full dim, default: 0x0)")
@@ -2357,8 +2365,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     fp4 = args.dtype == "fp4"
+    fp8 = args.dtype == "fp8"
     if args.du is None:
-        args.du = 512 if fp4 else 64
+        args.du = 512 if fp4 else (128 if fp8 else 64)
 
     wg_parts = args.wg.lower().split("x")
     if len(wg_parts) != 2:
@@ -2370,17 +2379,26 @@ if __name__ == "__main__":
         parser.error(f"--partition-size must be MxN (e.g. 10x2), got: {args.partition_size}")
     partSizeM, partSizeN = int(ps_parts[0]), int(ps_parts[1])
 
-    kernel = create_kernel(args.mt0, args.mt1, fp4=fp4, depthU=args.du,
-                           miWaveGroup=list(waveGroup))
-    tiA = makeTileInfo('A', kernel)
-    tiB = makeTileInfo('B', kernel)
+    if fp8:
+        kernel = create_kernel_fp8(args.mt0, args.mt1, waveGroup, depthU=args.du)
+        tiA = TileInfo(AB_B8, 'A', None, kernel)
+        tiB = TileInfo(AB_B8, 'B', None, kernel)
+    else:
+        kernel = create_kernel(args.mt0, args.mt1, fp4=fp4, depthU=args.du,
+                               miWaveGroup=list(waveGroup))
+        tiA = makeTileInfo('A', kernel)
+        tiB = makeTileInfo('B', kernel)
     scaleTiA = makeTileInfo('MXSA', kernel) if fp4 else None
     scaleTiB = makeTileInfo('MXSB', kernel) if fp4 else None
 
-    # Mirror Kernel.py:1139-1140 — gr granularity widens to (2,2) when the
-    # tile's GR load ratio exceeds 1.0.
-    grA = ReadGranularity(mn=1, k=2) if tiA.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
-    grB = ReadGranularity(mn=1, k=2) if tiB.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
+    if fp8:
+        grA = ReadGranularity(mn=tiA.subtileShape[0], k=tiA.subtileShape[1])
+        grB = ReadGranularity(mn=tiB.subtileShape[0], k=tiB.subtileShape[1])
+    else:
+        # Mirror Kernel.py:1139-1140 — gr granularity widens to (2,2) when the
+        # tile's GR load ratio exceeds 1.0.
+        grA = ReadGranularity(mn=1, k=2) if tiA.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
+        grB = ReadGranularity(mn=1, k=2) if tiB.loadRatioGR <= 1.0 else ReadGranularity(mn=2, k=2)
 
     cfg_kwargs = dict(
         numMFMATilesM=tiA.localMMATileGrid[0],
@@ -2439,6 +2457,17 @@ if __name__ == "__main__":
         print(f"  {title}")
         print(f"{'=' * 60}")
         print(output)
+        if title == "Assign VGPR tiles":
+            numVgpr = sched.getNumVgpr(tiA, tiB,
+                                       scaleTileInfoA=scaleTiA,
+                                       scaleTileInfoB=scaleTiB)
+            bd = sched._lastNumVgprBreakdown
+            print(f"VGPRs needed: {numVgpr} "
+                  f"(mainloop={bd['mainloopTotal']}, tail={bd['tailTotal']})")
+            print(f"  perTile: {bd['perTile']}")
+            print(f"  mainloopPeaks: {bd['mainloopPeaks']}")
+            print(f"  tailPeaks:     {bd['tailPeaks']}")
+            print()
         if args.interactive and i < len(steps) - 1:
             input("Press Enter for next step...")
 
@@ -2446,6 +2475,9 @@ if __name__ == "__main__":
 
     sched.allocVgprTiles(writer, tiA, tiB,
                          scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
+
+    if fp8 and kernel.get("MatrixInstK") == 128:
+        kernel["_subtileUnitScaleVgpr"] = writer.vgprPool.checkOut(1)
 
     sched.populate_instructions(
         writer, kernel,
