@@ -598,7 +598,7 @@ TEST_P(hipfftxtunitdesc, xtmemcpytest)
 
     // Compute the per-buffer data length, split in dimension splitdim.  If the data isn't perfectly
     // divisible, then any remainder is distributed between lower-index devices.
-    auto devbatchlength = [](const size_t               splitdim,
+    auto devdatabatchlength = [](const size_t               splitdim,
                              const size_t               ngpus,
                              const std::vector<size_t>& hostdatabatchlengths,
                              const size_t               igpu) -> std::vector<size_t> {
@@ -697,20 +697,21 @@ TEST_P(hipfftxtunitdesc, xtmemcpytest)
     }
 
     // Each brick gets it own special set of strides.
-    std::vector<std::vector<size_t>> brick_batchlengths(gpus.size());
+    std::vector<std::vector<size_t>> brick_databatchlengths(gpus.size());
     std::vector<std::vector<size_t>> brick_diststrides(gpus.size());
 
     for(size_t igpu = 0; igpu < gpus.size(); ++igpu)
     {
-        brick_batchlengths[igpu] = devbatchlength(splitdim, ngpus, hostdatabatchlengths, igpu);
+        brick_databatchlengths[igpu]
+            = devdatabatchlength(splitdim, ngpus, hostdatabatchlengths, igpu);
         std::vector<size_t> brick_batches;
         brick_batches.insert(brick_batches.end(),
-                             brick_batchlengths[igpu].begin(),
-                             brick_batchlengths[igpu].begin() + 1);
-        std::vector<size_t> brick_lengths;
-        brick_lengths.insert(brick_lengths.end(),
-                             brick_batchlengths[igpu].begin() + 1,
-                             brick_batchlengths[igpu].end());
+                             brick_databatchlengths[igpu].begin(),
+                             brick_databatchlengths[igpu].begin() + 1);
+        std::vector<size_t> brick_datalengths;
+        brick_datalengths.insert(brick_datalengths.end(),
+                                 brick_databatchlengths[igpu].begin() + 1,
+                                 brick_databatchlengths[igpu].end());
 
         std::vector<size_t> brick_distances;
         std::vector<size_t> brick_strides;
@@ -719,16 +720,17 @@ TEST_P(hipfftxtunitdesc, xtmemcpytest)
             brick_distances = default_distances(fft_transform_type_complex_forward,
                                                 placement,
                                                 fft_io_in,
-                                                brick_lengths,
+                                                brick_datalengths,
                                                 brick_batches);
             brick_strides   = default_strides(
-                fft_transform_type_complex_forward, placement, fft_io_in, brick_lengths);
+                fft_transform_type_complex_forward, placement, fft_io_in, brick_datalengths);
         }
         else
         {
             brick_distances
-                = default_distances(dft_type, placement, fft_io_in, brick_lengths, brick_batches);
-            brick_strides = default_strides(dft_type, placement, fft_io_in, brick_lengths);
+                = default_distances(dft_type, placement, fft_io_in, brick_datalengths,
+                                    brick_batches);
+            brick_strides = default_strides(dft_type, placement, fft_io_in, brick_datalengths);
         }
 
         brick_diststrides[igpu] = brick_distances;
@@ -743,7 +745,7 @@ TEST_P(hipfftxtunitdesc, xtmemcpytest)
         {
             std::cout << igpu << "\n";
             std::cout << "\tbrick batch/length:";
-            for(const auto val : brick_batchlengths[igpu])
+            for(const auto val : brick_databatchlengths[igpu])
                 std::cout << " " << val;
             std::cout << "\n";
             std::cout << "\tbrick dist/stride:";
@@ -771,8 +773,8 @@ TEST_P(hipfftxtunitdesc, xtmemcpytest)
 
                 std::stringstream idxstrs;
                 idxstrs << hostidx[0] << " " << hostidx[1] << " " << hostidx[2] << " -> "
-                        << bufidx.first << " " << bufidx.second[0] << " " << bufidx.second[1] << " "
-                        << bufidx.second[2] << "\t";
+                        << bufidx.second[0] << " " << bufidx.second[1] << " " << bufidx.second[2]
+                        << " in buffer " << bufidx.first << "\t";
 
                 const size_t hostoffset = std::inner_product(
                     std::begin(hostidx), std::end(hostidx), std::begin(hostdiststrides), 0);
@@ -823,9 +825,15 @@ TEST_P(hipfftxtunitdesc, xtmemcpytest)
                     const auto bufidx = devidx(splitdim, ngpus, hostidx, hostdatabatchlengths);
 
                     std::stringstream idxstrs;
-                    idxstrs << hostidx[0] << " " << hostidx[1] << " " << hostidx[2] << " -> "
-                            << bufidx.first << " " << bufidx.second[0] << " " << bufidx.second[1]
-                            << " " << bufidx.second[2] << "\t";
+                    idxstrs << hostidx[0] << " "
+                            << hostidx[1] << " "
+                            << hostidx[2] << " "
+                            << hostidx[3] << " -> "
+                            << bufidx.second[0] << " "
+                            << bufidx.second[1] << " "
+                            << bufidx.second[2] << " "
+                            << bufidx.second[3]
+                            << " in buffer " << bufidx.first << " " << "\t";
 
                     const size_t hostoffset = std::inner_product(
                         std::begin(hostidx), std::end(hostidx), std::begin(hostdiststrides), 0);
