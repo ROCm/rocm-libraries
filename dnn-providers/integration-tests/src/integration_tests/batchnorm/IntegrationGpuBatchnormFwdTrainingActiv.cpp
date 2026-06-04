@@ -250,6 +250,8 @@ protected:
                           GraphTensorBundle& bundle,
                           unsigned int seed) override
     {
+        bundle.sentinelFillOutputTensors();
+
         // X input: default range
         bundle.tensors.at(BatchnormFwdTrainingActivTensorIds::X_UID)
             ->fillTensorWithRandomValues(-1.0f, 1.0f, seed);

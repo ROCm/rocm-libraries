@@ -140,7 +140,7 @@ def syncThreads(kernel, archCaps, asmCaps, comment="", skipForceWaitcnt0=False, 
     if kernel["NumThreads"] > kernel["WavefrontSize"]:
         if asmCaps["SeparateVscnt"]:
             imod.add(SWaitCnt(dscnt=0, comment="extra navi wait"))
-        elif kernel["ScheduleIterAlg"] == 2 \
+        elif kernel["_ScheduleIterAlg"] == 2 \
           or kernel["PrefetchGlobalRead"] >= 2 \
           or skipForceWaitcnt0:
             imod.addComment("Skip force waitcnt0")

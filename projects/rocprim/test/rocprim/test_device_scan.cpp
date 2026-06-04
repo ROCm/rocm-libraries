@@ -1282,57 +1282,33 @@ void testLargeIndicesInclusiveScan()
 
 TEST(RocprimDeviceScanTests, LargeIndicesInclusiveScan)
 {
-#if defined(__SANITIZE_ADDRESS__)
-    GTEST_SKIP() << "Skip LargeIndices test under ASan";
-#endif
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
 
-#if HAS_VALGRIND_H
-    //Disable large tests to reduce valgrind run time
-    if(RUNNING_ON_VALGRIND)
-        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
-#endif // HAS_VALGRIND_H
     testLargeIndicesInclusiveScan();
 }
 
 TEST(RocprimDeviceScanTests, LargeIndicesInclusiveScanWithGraphs)
 {
-#if defined(__SANITIZE_ADDRESS__)
-    GTEST_SKIP() << "Skip LargeIndices test under ASan";
-#endif
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
 
-#if HAS_VALGRIND_H
-    //Disable large tests to reduce valgrind run time
-    if(RUNNING_ON_VALGRIND)
-        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
-#endif // HAS_VALGRIND_H
     testLargeIndicesInclusiveScan<true>();
 }
 
 TEST(RocprimDeviceScanTests, LargeIndicesInclusiveScanWithInitialValue)
 {
-#if defined(__SANITIZE_ADDRESS__)
-    GTEST_SKIP() << "Skip LargeIndices test under ASan";
-#endif
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
 
-#if HAS_VALGRIND_H
-    //Disable large tests to reduce valgrind run time
-    if(RUNNING_ON_VALGRIND)
-        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
-#endif // HAS_VALGRIND_H
     testLargeIndicesInclusiveScan<false, true>();
 }
 
 TEST(RocprimDeviceScanTests, LargeIndicesInclusiveScanWithInitialValueAndGraphs)
 {
-#if defined(__SANITIZE_ADDRESS__)
-    GTEST_SKIP() << "Skip LargeIndices test under ASan";
-#endif
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
 
-#if HAS_VALGRIND_H
-    //Disable large tests to reduce valgrind run time
-    if(RUNNING_ON_VALGRIND)
-        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
-#endif // HAS_VALGRIND_H
     testLargeIndicesInclusiveScan<true, true>();
 }
 
@@ -1418,29 +1394,17 @@ void testLargeIndicesExclusiveScan()
 
 TEST(RocprimDeviceScanTests, LargeIndicesExclusiveScan)
 {
-#if defined(__SANITIZE_ADDRESS__)
-    GTEST_SKIP() << "Skip LargeIndices test under ASan";
-#endif
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
 
-#if HAS_VALGRIND_H
-    //Disable large tests to reduce valgrind run time
-    if(RUNNING_ON_VALGRIND)
-        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
-#endif // HAS_VALGRIND_H
     testLargeIndicesExclusiveScan();
 }
 
 TEST(RocprimDeviceScanTests, LargeIndicesExclusiveScanWithGraphs)
 {
-#if defined(__SANITIZE_ADDRESS__)
-    GTEST_SKIP() << "Skip LargeIndices test under ASan";
-#endif
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
 
-#if HAS_VALGRIND_H
-    //Disable large tests to reduce valgrind run time
-    if(RUNNING_ON_VALGRIND)
-        GTEST_SKIP() << "Skipping LargeIndices test under Valgrind";
-#endif // HAS_VALGRIND_H
     testLargeIndicesExclusiveScan<true>();
 }
 

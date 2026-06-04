@@ -71,6 +71,14 @@ for i in validMacroTileSides:
         validMacroTiles.append([i, j])
 validTT = 32
 
+maxWGsInCluster = 16
+# 2D [x, y] only — z is always 1 (hardcoded in HipSolutionAdapter); C++ uses dim3 for HIP API compat.
+validClusterDimensions = []
+for i in range(1, maxWGsInCluster + 1):
+  for j in range(1, maxWGsInCluster + 1):
+    if i * j <= maxWGsInCluster:
+      validClusterDimensions.append([i, j])
+
 @lru_cache
 def makeValidWorkGroups():
     validWorkGroups = []
@@ -409,6 +417,10 @@ validParameters = { # we need to make sure this matches develop
     #  2: DirectToLds A only (no DTLB)
     #  3: DirectToLds B only (no DTLA)
     "DirectToLds": [0, 1, 2, 3],
+    # DirectToLds for sparse metadata.
+    # Requires DirectToLds on the dense side (B if Sparse==2 else A),
+    # and GlobalReadVectorWidthMetadata ∈ {4, 16} (16 needs HasDirectToLdsx4).
+    "DirectToLdsMetadata": [0, 1],
     # Enable subtile-based kernel implementation for MX FP4 (gfx950 only).
     # When True, uses a subtile scheduling strategy with DTL global reads and
     # an optimized storeD path. Automatically forced False on non-gfx950.
@@ -765,7 +777,7 @@ validParameters = { # we need to make sure this matches develop
     #   1 = 1 WG per CU (default), for example. 2 will launch WGs = 2 x CU count.
     # The priority of these environment variables is defined as follows:
     # TENSILE_STREAMK_FIXED_GRID > TENSILE_STREAMK_DYNAMIC_GRID > TENSILE_STREAMK_MAX_CUS > TENSILE_STREAMK_GRID_MULTIPLIER
-    "StreamK": [0, 1, 2, 3],
+    "StreamK": [0, 1, 2, 3, 4],
     # Determines if StreamK kernel uses atomics
     # 0: uses workspace to store partial tiles, accumulate in deterministic fix-up step
     # 1: uses atomics to accumulate partial tiles
@@ -788,6 +800,10 @@ validParameters = { # we need to make sure this matches develop
     #   2 = No partials
     #   3 = Nofixup and no partials
     "DebugStreamK": [0, 1, 2, 3],
+    # Persistent-kernel debug: when True, the persistent loop never exits.
+    # Used as a co-tenant load kernel for contended-perf benchmarking.
+    # Termination is via process death. Requires StreamK = 1, 2, or 3.
+    "DebugPersistentKernelLoopForever": [False, True],
     # Controls desired width (#elements) for loads from global memory -> LDS.
     # and eliminates the pointer unshift logic
     # -1 : Set GlobalReadVectorWidth =  VectorWidth
@@ -818,7 +834,7 @@ validParameters = { # we need to make sure this matches develop
     # Typically matching 16 bytes is good choice since the stores will be optimally coalesced with 16 bytes/WI.
     # Using a VW too large which results in >16bytes/thread isn't supported
     # For MFMA non SourceSwap: this parameter didn't take effect
-    # -1 means set vw to largest localReadWidth according to MIWaveTile
+    # -1 means set vw to largest localReadWidth according to MIWaveTile, LDS padding and LDS capacity
     "VectorWidthA": [-1, 1, 2, 3, 4, 6, 8],
     "VectorWidthB": [-1, 1, 2, 3, 4, 6, 8],
     # If 0, store 1 element per instruction.
@@ -890,6 +906,28 @@ validParameters = { # we need to make sure this matches develop
     "NonTemporalWS": list(range(0, 8)),
     "NonTemporalMetadata": list(range(0, 8)),
     "NonTemporal": list(range(-1, 8)),
+    # gfx1250-only temporal-hint modifier.
+    "TemporalHint": list(range(-1, 8)),
+    "TemporalHintE": list(range(0, 8)),
+    "TemporalHintD": list(range(0, 8)),
+    "TemporalHintC": list(range(0, 8)),
+    "TemporalHintA": list(range(0, 8)),
+    "TemporalHintMXSA": list(range(0, 8)),
+    "TemporalHintB": list(range(0, 8)),
+    "TemporalHintMXSB": list(range(0, 8)),
+    "TemporalHintWS": list(range(0, 8)),
+    "TemporalHintMetadata": list(range(0, 8)),
+    # gfx1250-only non-volatile memory modifier.
+    "NonVolatile": [-1, 0, 1],
+    "NonVolatileE": [0, 1],
+    "NonVolatileD": [0, 1],
+    "NonVolatileC": [0, 1],
+    "NonVolatileA": [0, 1],
+    "NonVolatileMXSA": [0, 1],
+    "NonVolatileB": [0, 1],
+    "NonVolatileMXSB": [0, 1],
+    "NonVolatileWS": [0, 1],
+    "NonVolatileMetadata": [0, 1],
     # Group together unroll iterations inside the unroll loop.
     # For example, InnerUnroll=2 will fetch LDS for two unroll iterations
     "InnerUnroll": [1, 2, 4, 8, 16, 32, 64],
@@ -937,6 +975,11 @@ validParameters = { # we need to make sure this matches develop
     "ConvertAfterDS": [False, True],
     # Force disable shadow init to release more sgpr in preloop
     "ForceDisableShadowInit": [False, True],
+    # Use WMMA/MFMA with src C=0 to initialize C accumulators (skipping v_mov initC).
+    # -1: auto-detect
+    #  0: force disable
+    #  1: force enable (rejected if the auto-disable conditions are met)
+    "InitCIterWmma": [-1, 0, 1],
     # Enable LDS Transpose Instruction
     "LDSTrInst": [False, True],
     # False: Use LocalSplitU. Number of WorkGroup[2] WorkItems (wave or thread) will compute the same output elements (matrix D) along different
@@ -957,8 +1000,8 @@ validParameters = { # we need to make sure this matches develop
     # 1  : enable  CMS, is set to 0 if not supported
     "UseCustomMainLoopSchedule" : [-1, 0, 1],
     "AdaptiveGemm": [0, 1],
-    # 0  : MB and MBSK generate different assembly code
-    # 1  : MB and MBSK generate same assembly code
+    # 0  : disable
+    # 1  : merge MB and MBSK assembly code and select best GW path in runtime
     "AdaptiveGemmGSUA": [0, 1],
     # Add extra latency to calculate number of MFMA to insert between local read and wait
     # Negative value means reduce interval between local read and wait (for DirectToVgpr only)
@@ -1019,6 +1062,17 @@ validParameters = { # we need to make sure this matches develop
     #   "Auto":        triggers defaulting in Solution.assignDerivedParameters. The default is
     #                  TDM iff TDMInst != 0, otherwise BufferLoad.
     "MXLoadInst": ["Auto", "TDM", "BufferLoad", "GlobalLoad"],
+    # Enable cluster barrier.
+    "ClusterBarrier": [False, True],
+    # Cluster dimension. Clusters have up to 16 work-groups in a cluster, but each work-group in a
+    # cluster runs on a separate WGP.
+    "ClusterDim": validClusterDimensions,
+    # Enable PLR 0.5 to save vgprs
+    # 0: Disabled
+    # 1: Use PLR 0.5 for A
+    # 2: Use PLR 0.5 for B
+    # 3: Use PLR 0.5 for both A and B
+    "HalfPLR": [0, 1, 2, 3]
 }
 
 newMIValidParameters = {

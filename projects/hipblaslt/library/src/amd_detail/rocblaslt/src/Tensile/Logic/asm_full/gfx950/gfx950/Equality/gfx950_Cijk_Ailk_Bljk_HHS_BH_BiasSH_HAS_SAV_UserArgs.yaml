@@ -1,8 +1,8 @@
 - {MinimumRequiredVersion: 5.0.0}
 - gfx950
-- gfx950
+- {Architecture: gfx950, CUCount: 256}
 - [Device 75a0]
-- Activation: 1
+- Activation: True
   ActivationComputeDataType: 0
   ActivationNoGuard: false
   ActivationType: hipblaslt_all
