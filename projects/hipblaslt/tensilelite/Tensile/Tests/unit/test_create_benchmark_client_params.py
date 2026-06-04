@@ -126,10 +126,9 @@ def test_archs_provided_uses_libraryDir_per_base(tmp_path, captured_call, monkey
         archs=[cooked],
     )
 
-    # Positional libraryFile is the 14th positional arg (index 13) per the
-    # current writeClientConfigIni signature; verify it points at the
-    # per-base path with the .dat extension (msgpack format).
-    libraryFile = captured_call["args"][13]
+    # writeClientConfigIni receives libraryFile as a keyword arg; verify it
+    # points at the per-base path with the .dat extension (msgpack format).
+    libraryFile = captured_call["kwargs"]["libraryFile"]
     assert libraryFile == os.path.join(str(tmp_path), "library", "gfx942", "TensileLibrary.dat")
 
 
@@ -150,7 +149,7 @@ def test_archs_provided_yaml_extension(tmp_path, captured_call, monkeypatch):
         archs=["gfx942"],
     )
 
-    libraryFile = captured_call["args"][13]
+    libraryFile = captured_call["kwargs"]["libraryFile"]
     assert libraryFile.endswith(os.path.join("library", "gfx942", "TensileLibrary.yaml"))
 
 
@@ -175,7 +174,7 @@ def test_archs_none_falls_back_to_singleArchDir(tmp_path, captured_call, monkeyp
         archs=None,
     )
 
-    libraryFile = captured_call["args"][13]
+    libraryFile = captured_call["kwargs"]["libraryFile"]
     assert libraryFile == os.path.join(str(tmp_path), "library", "gfx950", "TensileLibrary.dat")
 
 
