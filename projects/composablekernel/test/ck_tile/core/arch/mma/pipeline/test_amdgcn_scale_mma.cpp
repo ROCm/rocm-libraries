@@ -82,7 +82,7 @@ TEST(ScaleMMATrait, ScaleMfmaGfx950Specialization)
 // TODO: It seems like the ExecSignature concept (and hence MmaOpI) can not be made to work for a
 // templated device function for some reason. Disable test for now and fix this once we are using
 // the variadic template pack for flags...
-#if CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER && 0 
+#if CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER && 0
 template <typename AType,
           typename BType,
           typename CType,
