@@ -12,8 +12,9 @@ Layout (RCR, f16 in / f32 acc / f16 out; matches the ``run_manifest`` gemm
 reference ``C = A @ B.T`` with A row-major ``M×K`` and B row-major ``N×K``):
 
   * One wave (32 lanes) computes one ``16×16`` output tile; grid is
-    ``(ceil(M/16), ceil(N/16))`` with ``block_id.x -> M-tile, block_id.y ->
-    N-tile`` (manifest ``grid_order="MN"``), ``threads_per_block=32``.
+    ``(ceil(N/16), ceil(M/16))`` with ``block_id.x -> N-tile, block_id.y ->
+    M-tile`` — the canonical host-launcher convention shared with the universal
+    GEMM, ``run_manifest``, and the gfx1201 WMMA kernel — ``threads_per_block=32``.
   * Per K-step (stride 16) each lane loads its WMMA operand fragments
     **directly from global** (no LDS): a ``<16 x half>`` A-row fragment and a
     ``<16 x half>`` B-row fragment, per the hardware-verified gfx1151 layout
@@ -127,8 +128,8 @@ def build_wmma_gemm(spec: WmmaGemmSpec, arch: str = "gfx1151") -> KernelDef:
     frag = b.mod(lane, c16)  # lane%16: A-frag row, B-frag row, output col
     half = b.div(lane, c16)  # lane/16: 0 or 1, selects even/odd output rows
 
-    m0 = b.mul(b.block_id_x(), c16)  # output-tile row base
-    n0 = b.mul(b.block_id_y(), c16)  # output-tile col base
+    m0 = b.mul(b.block_id_y(), c16)  # output-tile row base (M); block_id.y -> M
+    n0 = b.mul(b.block_id_x(), c16)  # output-tile col base (N); block_id.x -> N
 
     # Per-lane global row bases (element offsets, row-major):
     #   A[m0+frag][k] = (m0+frag)*K + k ;  B[n0+frag][k] = (n0+frag)*K + k
@@ -158,5 +159,7 @@ def build_wmma_gemm(spec: WmmaGemmSpec, arch: str = "gfx1151") -> KernelDef:
 
 
 def wmma_gemm_grid(M: int, N: int):
-    """Launch grid (gx, gy, 1) for problem (M, N): one wave per 16x16 tile."""
-    return ((M + _WMMA_M - 1) // _WMMA_M, (N + _WMMA_N - 1) // _WMMA_N, 1)
+    """Launch grid (gx, gy, 1) for problem (M, N): one wave per 16x16 tile.
+    gx -> N-tile, gy -> M-tile (matches the kernel's block-id mapping and
+    the canonical host launcher)."""
+    return ((N + _WMMA_N - 1) // _WMMA_N, (M + _WMMA_M - 1) // _WMMA_M, 1)

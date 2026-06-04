@@ -24,8 +24,12 @@ _CKDSL_ROOT = pathlib.Path(__file__).resolve().parents[1] / "ck_dsl"
 
 class TestArchTarget(unittest.TestCase):
     def test_known_arches(self):
-        # CDNA (gfx942/gfx950, MFMA) + RDNA3.5 (gfx1151, WMMA/wave32).
-        self.assertEqual(set(known_arches()), {"gfx942", "gfx950", "gfx1151"})
+        # CDNA (gfx942/gfx950, MFMA) + RDNA3.5 (gfx1151) + RDNA4 (gfx1201),
+        # WMMA/wave32, plus the gfx11-generic generic RDNA3 target.
+        self.assertEqual(
+            set(known_arches()),
+            {"gfx942", "gfx950", "gfx1151", "gfx1201", "gfx11-generic"},
+        )
 
     def test_gfx1151_rdna_facts(self):
         t = ArchTarget.from_gfx("gfx1151")
