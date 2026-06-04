@@ -10,28 +10,28 @@ leaving placeholders.
 
 *As a <role>, I want <goal> so that <reason>.*
 
-h3. Acceptance Criteria
-* <criterion>
-* <...>
+### Acceptance Criteria
+- <criterion>
+- <...>
 
-h3. Functional Requirements
-* <concrete, codebase-grounded requirement>
-* <...>
+### Functional Requirements
+- <concrete, codebase-grounded requirement>
+- <...>
 
-h3. Non-functional Requirements
-* <performance / maintainability / compatibility target, or "None">
+### Non-functional Requirements
+- <performance / maintainability / compatibility target, or "None">
 
-h3. Dependencies
-* <linked item(s), or "None">
+### Dependencies
+- <linked item(s), or "None">
 
 <!-- ===== Task description ===== -->
 *Derived from RFC: <rfc title> — <section reference>*
 
 <what the work is and why it's needed>
 
-h3. Definition of done
-* <checkable outcome>
-* <...>
+### Definition of done
+- <checkable outcome>
+- <...>
 
-h3. Dependencies
-* <linked item(s), or "None">
+### Dependencies
+- <linked item(s), or "None">

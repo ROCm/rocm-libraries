@@ -85,7 +85,7 @@ Otherwise continue.
 2. **First run / missing config.** If `config.json` is absent or a field is blank:
    - If `projectKey` is unknown, ask for it (optionally list candidates via `jira_get_all_projects`).
    - Offer the project's real components via `jira_get_project_components`, and find candidate epics via `jira_search` (e.g. `project = <KEY> AND issuetype = Epic AND statusCategory != Done`).
-3. **Confirm with the user** via `AskUserQuestion` (defaults pre-filled from config):
+3. **Confirm with the user** by asking directly (state the defaults pre-filled from config so they can accept or override):
    - **Component** — which component the work belongs to.
    - **Epic** — which epic to link the items under (epic key).
    - **Labels** — labels to apply to every item.

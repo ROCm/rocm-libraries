@@ -1,8 +1,8 @@
 ---
 name: rfc-backlog
 description: Turn a technical RFC into an actionable backlog of JIRA stories and tasks, grounded in the codebase the RFC affects. Derives unified, independently-shippable work items (each with a user-story sentence, acceptance criteria, functional and non-functional requirements), presents them for review, then — unless run as a dry run — collects component/epic/label defaults and creates the tickets in JIRA. Use when you have an approved or near-approved RFC and need to plan the implementation as trackable work.
-argument-hint: "[<path-or-pr>] [--dry-run]"
-allowed-tools: Read, Grep, Glob, Bash, WebFetch, mcp__jira-atlassian-hub-local__jira_get_all_projects, mcp__jira-atlassian-hub-local__jira_get_project_components, mcp__jira-atlassian-hub-local__jira_search, mcp__jira-atlassian-hub-local__jira_create_issue, mcp__jira-atlassian-hub-local__jira_link_to_epic, mcp__jira-atlassian-hub-local__jira_get_issue
+argument-hint: "[<rfc-path>] [--dry-run]"
+allowed-tools: Read, Write, Edit, Grep, Glob, Bash, WebFetch, mcp__jira-atlassian-hub-local__jira_get_all_projects, mcp__jira-atlassian-hub-local__jira_get_project_components, mcp__jira-atlassian-hub-local__jira_search, mcp__jira-atlassian-hub-local__jira_create_issue, mcp__jira-atlassian-hub-local__jira_link_to_epic, mcp__jira-atlassian-hub-local__jira_get_issue
 ---
 
 # RFC → Backlog Skill
