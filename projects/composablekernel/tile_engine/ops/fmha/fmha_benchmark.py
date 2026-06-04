@@ -71,10 +71,18 @@ def _compute_result(
     max_err = 0.0
     status = "OK"
     if ref is not None and output is not None:
-        max_err = float(np.abs(output.astype(np.float32) - ref).max())
+        out_f = output.astype(np.float32)
+        max_err = float(np.abs(out_f - ref).max())
         atol, rtol = dtype_tol
         tol = atol + rtol * np.abs(ref).max()
         status = "PASS" if max_err < tol else "FAIL"
+        # Guard against broken kernels that emit all-zeros or NaN/Inf while the
+        # reference is non-trivial (e.g. the bk0=128 all-zero-output bug). A loose
+        # tolerance would otherwise let these silently "PASS".
+        if not np.all(np.isfinite(out_f)):
+            status = "NAN"
+        elif float(np.abs(out_f).max()) == 0.0 and float(np.abs(ref).max()) > 0.0:
+            status = "ZERO"
 
     splits_tag = f"  [ns={ns}]" if api_family == "splitkv" else ""
     display_name = f"{config.name}{splits_tag}"
@@ -483,15 +491,17 @@ def main():
         "mxfp8": np.float16,
         "mxfp4": np.float16,
     }
-    # Tolerance per dtype: (atol, rtol)
+    # Tolerance per dtype: (atol, rtol). FP8 uses AITER's max-abs-diff guard of
+    # 0.055 (op_tests/test_batch_prefill.py verify_fp8_output): real FP8 quant +
+    # paged K/V upload + per-token/head descales make this a meaningful check.
     _DTYPE_TOL = {
         "fp16": (1e-3, 1e-3),
         "bf16": (1e-2, 1e-2),
         "fp32": (1e-5, 1e-5),
-        "fp8": (16.0, 0.0),
-        "fp8bf16": (16.0, 0.0),
-        "fp8fp32": (16.0, 0.0),
-        "bf8": (16.0, 0.0),
+        "fp8": (0.055, 0.0),
+        "fp8bf16": (0.055, 0.0),
+        "fp8fp32": (0.055, 0.0),
+        "bf8": (0.055, 0.0),
         "mxfp8": (16.0, 0.0),
         "mxfp4": (32.0, 0.0),
     }
@@ -614,7 +624,15 @@ def main():
                     run_kwargs["kv_lookup"] = _KV_LOOKUP_INT.get(
                         config.kv_lookup_table, 1
                     )
-                    run_kwargs["qscale_type"] = _QSCALE_INT.get(config.qscale, 0)
+                    qs_int = _QSCALE_INT.get(config.qscale, 0)
+                    run_kwargs["qscale_type"] = qs_int
+                    # Enable real FP8 quant + paged K/V upload + descales so the
+                    # kernel output can be meaningfully verified (PER_TOKEN_HEAD).
+                    run_kwargs["verify_fp8"] = int(
+                        (not args.no_verify)
+                        and qs_int == 5
+                        and config.data_type.startswith("fp8")
+                    )
                 bench_jobs.append(
                     (config, setup, run_kwargs, ns, api_family, is_causal)
                 )

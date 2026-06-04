@@ -9,6 +9,7 @@
 // foreign calls, so single-threaded usage must be enforced by the caller.
 
 #include <hip/hip_runtime.h>
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
@@ -1443,6 +1444,10 @@ int fmha_dispatcher_run_batch_prefill(const void* q_host,
                                       int has_sink,
                                       int skip_min_seqlen_q,
                                       int qscale_type_int,
+                                      int verify_fp8,
+                                      const float* q_descale_in,
+                                      const float* k_descale_in,
+                                      const float* v_descale_in,
                                       float* time_ms_out)
 {
     if(!g_initialized)
@@ -1531,6 +1536,18 @@ int fmha_dispatcher_run_batch_prefill(const void* q_host,
     std::vector<float> q_descale_host(q_descale_count, 1.0f);
     std::vector<float> k_descale_host(k_descale_count, 1.0f);
     std::vector<float> v_descale_host(v_descale_count, 1.0f);
+    // Verification mode: use caller-supplied per-token/per-head descales (computed
+    // from the same FP8 quantization the host applied to Q/K/V) instead of the
+    // 1.0 placeholders used for pure latency benchmarking.
+    if(verify_fp8)
+    {
+        if(q_descale_in && q_descale_count > 0)
+            std::copy(q_descale_in, q_descale_in + q_descale_count, q_descale_host.begin());
+        if(k_descale_in && k_descale_count > 0)
+            std::copy(k_descale_in, k_descale_in + k_descale_count, k_descale_host.begin());
+        if(v_descale_in && v_descale_count > 0)
+            std::copy(v_descale_in, v_descale_in + v_descale_count, v_descale_host.begin());
+    }
 
     fmha_batch_prefill_args args{};
 
@@ -1581,8 +1598,20 @@ int fmha_dispatcher_run_batch_prefill(const void* q_host,
     }
 
     HIP_CHECK(hipMemcpy(q_dev, q_host, q_bytes, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemset(k_dev, 0, kv_page_bytes));
-    HIP_CHECK(hipMemset(v_dev, 0, kv_page_bytes));
+    if(verify_fp8 && k_host && v_host)
+    {
+        // Verification mode: upload the real FP8 paged K/V the host packed (in the
+        // dispatcher's paged byte layout) so the kernel computes a meaningful result
+        // we can compare against the FP32 reference. hipMemcpyDefault auto-detects
+        // host vs device source via unified addressing.
+        HIP_CHECK(hipMemcpy(k_dev, k_host, kv_page_bytes, hipMemcpyDefault));
+        HIP_CHECK(hipMemcpy(v_dev, v_host, kv_page_bytes, hipMemcpyDefault));
+    }
+    else
+    {
+        HIP_CHECK(hipMemset(k_dev, 0, kv_page_bytes));
+        HIP_CHECK(hipMemset(v_dev, 0, kv_page_bytes));
+    }
     HIP_CHECK(hipMemset(o_dev, 0, o_bytes));
 
     if(q_descale_count > 0)

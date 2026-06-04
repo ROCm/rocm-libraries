@@ -390,6 +390,123 @@ def cpu_attention_fwd(
     return np.matmul(P, V)
 
 
+def quantize_pack_per_token_head(Q, K, V, page_size, fp8_fnuz=False, layout="linear"):
+    """FP8 PER_TOKEN_HEAD quantize + pack into the dispatcher's paged byte layout.
+
+    Mirrors AITER's per_token_per_head quantization (op_tests/test_batch_prefill.py):
+      Q/K descale = abs_max(over head_dim) / fp8_max   -> per (token, head)
+      V descale   = abs_max(over tokens+head_dim) / fp8_max -> per kv-head
+
+    Inputs (numpy, any float dtype):
+      Q [B, Hq, Sq, D]   K [B, Hk, Sk, D]   V [B, Hk, Sk, Dv]
+
+    Returns a dict of contiguous host buffers laid out to match the C++ batch-prefill
+    strides (see fmha_dispatcher_run_batch_prefill):
+      q_fp8     uint8 [B*Sq, Hq, D]                  (stride_q = Hq*D)
+      k_fp8     uint8 [total_pages, Hk, page_size, D]   (stride_k = D, nhead_stride = page_size*D)
+      v_fp8     uint8 [total_pages, Hk, page_size, Dv]
+      q_descale f32   [B*Sq, Hq]
+      k_descale f32   [total_pages, page_size, Hk]
+      v_descale f32   [Hk]
+    """
+    import torch
+
+    fp8 = torch.float8_e4m3fnuz if fp8_fnuz else torch.float8_e4m3fn
+    fp8_max = float(torch.finfo(fp8).max)
+
+    B, Hq, Sq, D = Q.shape
+    _, Hk, Sk, Dv = V.shape
+    pps = (Sk + page_size - 1) // page_size
+    total_pages = B * pps
+    Sk_pad = pps * page_size
+
+    qt = torch.from_numpy(np.ascontiguousarray(Q.astype(np.float32)))
+    kt = torch.from_numpy(np.ascontiguousarray(K.astype(np.float32)))
+    vt = torch.from_numpy(np.ascontiguousarray(V.astype(np.float32)))
+
+    # --- Q: per-token-per-head ---
+    q_descale = (qt.abs().amax(dim=-1).clamp(min=1e-12) / fp8_max)  # [B,Hq,Sq]
+    q_fp8 = (qt / q_descale.unsqueeze(-1)).to(fp8)                  # [B,Hq,Sq,D]
+
+    # --- K: per-token-per-head ---
+    k_descale = (kt.abs().amax(dim=-1).clamp(min=1e-12) / fp8_max)  # [B,Hk,Sk]
+    k_fp8 = (kt / k_descale.unsqueeze(-1)).to(fp8)                  # [B,Hk,Sk,D]
+
+    # --- V: per-head ---
+    v_descale = (vt.abs().amax(dim=(0, 2, 3)).clamp(min=1e-12) / fp8_max)  # [Hk]
+    v_fp8 = (vt / v_descale.view(1, Hk, 1, 1)).to(fp8)             # [B,Hk,Sk,Dv]
+
+    def _u8(t):
+        return t.contiguous().view(torch.uint8).cpu().numpy()
+
+    # Q -> [B*Sq, Hq, D] and descale [B*Sq, Hq]
+    q_pack = q_fp8.permute(0, 2, 1, 3).contiguous().reshape(B * Sq, Hq, D)
+    q_desc = q_descale.permute(0, 2, 1).contiguous().reshape(B * Sq, Hq)
+
+    # fp8 vector size = 16 bytes / 1 byte = 16 (used by the "vectorized" swizzle).
+    kvs = 16
+
+    def _logical_paged(fp8_t, dim):
+        # fp8_t [B,Hk,Sk,dim] -> pad Sk -> logical [total_pages, page_size, Hk, dim]
+        padded = torch.zeros(B, Hk, Sk_pad, dim, dtype=fp8_t.dtype)
+        padded[:, :, :Sk, :] = fp8_t
+        return (
+            padded.view(B, Hk, pps, page_size, dim)
+            .permute(0, 2, 3, 1, 4)  # [B, pps, page_size, Hk, dim]
+            .contiguous()
+            .reshape(total_pages, page_size, Hk, dim)
+        )
+
+    def _pack_descale(descale_t):
+        # [B,Hk,Sk] -> logical descale [total_pages, page_size, Hk] (layout-invariant)
+        dpad = torch.ones(B, Hk, Sk_pad, dtype=descale_t.dtype)
+        dpad[:, :, :Sk] = descale_t
+        return (
+            dpad.view(B, Hk, pps, page_size)
+            .permute(0, 2, 3, 1)
+            .contiguous()
+            .reshape(total_pages, page_size, Hk)
+        )
+
+    def _pack_k(fp8_t):
+        base = _logical_paged(fp8_t, D)  # [pages, ps, Hk, D]
+        if layout == "vectorized":
+            # AITER vectorize_kv_cache (K): [pages, ps, Hk, D] ->
+            #   [pages, ps, Hk, D//kvs, kvs] -> permute(0,2,3,1,4)
+            return (
+                base.view(total_pages, page_size, Hk, D // kvs, kvs)
+                .permute(0, 2, 3, 1, 4)
+                .contiguous()
+            )
+        # "linear": dispatcher head-major within page [pages, Hk, ps, D]
+        return base.permute(0, 2, 1, 3).contiguous()
+
+    def _pack_v(fp8_t):
+        base = _logical_paged(fp8_t, Dv)  # [pages, ps, Hk, Dv]
+        if layout == "vectorized":
+            # AITER vectorize_kv_cache (V): [pages, ps, Hk, Dv] ->
+            #   [pages, ps//kvs, kvs, Hk, Dv] -> permute(0,3,1,4,2)
+            return (
+                base.view(total_pages, page_size // kvs, kvs, Hk, Dv)
+                .permute(0, 3, 1, 4, 2)
+                .contiguous()
+            )
+        return base.permute(0, 2, 1, 3).contiguous()
+
+    k_paged = _pack_k(k_fp8)
+    v_paged = _pack_v(v_fp8)
+    k_desc = _pack_descale(k_descale)
+
+    return {
+        "q_fp8": np.ascontiguousarray(_u8(q_pack)),
+        "k_fp8": np.ascontiguousarray(_u8(k_paged)),
+        "v_fp8": np.ascontiguousarray(_u8(v_paged)),
+        "q_descale": np.ascontiguousarray(q_desc.cpu().numpy().astype(np.float32)),
+        "k_descale": np.ascontiguousarray(k_desc.cpu().numpy().astype(np.float32)),
+        "v_descale": np.ascontiguousarray(v_descale.cpu().numpy().astype(np.float32)),
+    }
+
+
 def cpu_attention_fwd_with_intermediates(
     Q: np.ndarray, K: np.ndarray, V: np.ndarray, scale: float
 ) -> tuple:
@@ -630,7 +747,11 @@ class FmhaDispatcherLib:
             ctypes.c_int,  # has_sink
             ctypes.c_int,  # skip_min_seqlen_q
             ctypes.c_int,  # qscale_type (0=no,1=pertensor,3=kv_blockscale,5=per_token_head)
-            ctypes.POINTER(ctypes.c_float),
+            ctypes.c_int,  # verify_fp8 (1=upload real FP8 K/V + descales)
+            ctypes.POINTER(ctypes.c_float),  # q_descale_in (nullable)
+            ctypes.POINTER(ctypes.c_float),  # k_descale_in (nullable)
+            ctypes.POINTER(ctypes.c_float),  # v_descale_in (nullable)
+            ctypes.POINTER(ctypes.c_float),  # time_ms_out
         ]
         lib.fmha_dispatcher_run_batch_prefill.restype = ctypes.c_int
 
@@ -950,10 +1071,51 @@ class FmhaRunner:
             elif api_family == "batch_prefill":
                 skip_min_sq = kwargs.get("skip_min_seqlen_q", 0)
                 qscale_type = kwargs.get("qscale_type", 0)
+                # Verification mode: for FP8 PER_TOKEN_HEAD, quantize Q/K/V to FP8,
+                # pack K/V into the dispatcher's paged byte layout, and pass real
+                # per-token/per-head descales so the kernel computes a result that
+                # can be checked against the FP32 reference. Otherwise descales stay
+                # 1.0 and K/V are zeroed (pure latency benchmarking).
+                verify_fp8 = (
+                    int(kwargs.get("verify_fp8", 0))
+                    and qscale_type == 5
+                    and data_type.startswith("fp8")
+                )
+                q_arg, k_arg, v_arg = d_q, d_k, d_v
+                qd_ptr = kd_ptr = vd_ptr = None
+                _f32p = ctypes.POINTER(ctypes.c_float)
+                _keepalive = []
+                if verify_fp8:
+                    # The kernels are compiled with -DCK_TILE_USE_OCP_FP8 for all
+                    # gfx9 archs (see fmha_compile_flags), so the kernel interprets
+                    # fp8 bits as OCP e4m3 regardless of the hardware's native fp8
+                    # format (gfx942/MI308 is natively FNUZ). Quantize with the SAME
+                    # format the kernel was built for, else dequant is mis-scaled.
+                    arch = str(getattr(self, "_arch", "") or "")
+                    fp8_fnuz = arch.startswith("gfx9") and "-DCK_TILE_USE_OCP_FP8" not in (
+                        fmha_compile_flags(arch)
+                    )
+                    # kv_layout: 0=vectorized (swizzled), 1=linear.
+                    pack_layout = "vectorized" if kv_layout == 0 else "linear"
+                    packed = quantize_pack_per_token_head(
+                        Q, K, V, page_size, fp8_fnuz=fp8_fnuz, layout=pack_layout
+                    )
+                    self._hip.hipMemcpy(
+                        d_q,
+                        packed["q_fp8"].ctypes.data,
+                        packed["q_fp8"].nbytes,
+                        self.HIP_MEMCPY_H2D,
+                    )
+                    _keepalive = list(packed.values())
+                    k_arg = packed["k_fp8"].ctypes.data
+                    v_arg = packed["v_fp8"].ctypes.data
+                    qd_ptr = packed["q_descale"].ctypes.data_as(_f32p)
+                    kd_ptr = packed["k_descale"].ctypes.data_as(_f32p)
+                    vd_ptr = packed["v_descale"].ctypes.data_as(_f32p)
                 rc = lib.fmha_dispatcher_run_batch_prefill(
-                    d_q,
-                    d_k,
-                    d_v,
+                    q_arg,
+                    k_arg,
+                    v_arg,
                     d_o,
                     prob.batch,
                     prob.nhead_q,
@@ -976,8 +1138,13 @@ class FmhaRunner:
                     has_sink,
                     skip_min_sq,
                     qscale_type,
+                    int(bool(verify_fp8)),
+                    qd_ptr,
+                    kd_ptr,
+                    vd_ptr,
                     ctypes.byref(time_ms),
                 )
+                del _keepalive
             else:
                 rc = lib.fmha_dispatcher_run_fwd(
                     d_q,
@@ -1015,8 +1182,26 @@ class FmhaRunner:
 
             self._hip.hipMemcpy(O_c.ctypes.data, d_o, O_c.nbytes, self.HIP_MEMCPY_D2H)
 
+            # batch_prefill (group mode) writes O as [total_q, nhead_q, hdim_v]
+            # i.e. token-major [B, Sq, Hq, Dv]; and for fp8bf16 the element type is
+            # bf16, not fp16. Reinterpret the raw bytes as bf16 and transpose to the
+            # canonical [B, Hq, Sq, Dv] so callers/verification see correct values.
+            if api_family == "batch_prefill" and data_type == "fp8bf16":
+                B, Hq, Sq, Dv = (
+                    prob.batch,
+                    prob.nhead_q,
+                    prob.seqlen_q,
+                    prob.hdim_v,
+                )
+                flat = O_c.view(np.uint16).reshape(B, Sq, Hq, Dv)
+                O_c = np.ascontiguousarray(
+                    (flat.astype(np.uint32) << 16)
+                    .view(np.float32)
+                    .transpose(0, 2, 1, 3)
+                )
+
             # Convert bf16 output (uint16) back to float32 for comparison
-            if data_type == "bf16":
+            elif data_type == "bf16":
                 O_c = _bf16_to_float32(O_c)
 
             # appendkv is a memory op (KV cache copy), not compute -- no TFLOPS
@@ -1377,8 +1562,25 @@ def setup_fmha_dispatcher(
     lib_name = f"libdispatcher_fmha_{config.name}.so"
     lib_path = output_dir / lib_name
 
-    # Cache hit: .so already exists, just load
-    if lib_path.exists():
+    # Cache hit: .so already exists AND is newer than the ctypes source. The
+    # mtime guard prevents loading a stale .so with an outdated C ABI after
+    # fmha_ctypes_lib.cpp changes (mismatched argtypes -> stack corruption /
+    # segfault), which a bare existence check would silently allow. When stale,
+    # remove the .so and ctypes object so the compile/link steps below rebuild
+    # them (kernel .cpp/.o don't depend on the ctypes source).
+    cache_valid = lib_path.exists()
+    if cache_valid and ctypes_src.exists():
+        try:
+            cache_valid = lib_path.stat().st_mtime >= ctypes_src.stat().st_mtime
+        except OSError:
+            cache_valid = False
+        if not cache_valid:
+            for stale in (lib_path, output_dir / "fmha_ctypes_lib.o"):
+                try:
+                    stale.unlink()
+                except OSError:
+                    pass
+    if cache_valid:
         try:
             runner = FmhaRunner.from_library(str(lib_path), config.gfx_arch)
             return FmhaSetupResult(
@@ -1563,6 +1765,20 @@ def setup_multiple_fmha_dispatchers(
     def _codegen(cfg):
         out = output_dir / f"fmha_jit_{cfg.name}"
         lib_path = out / f"libdispatcher_fmha_{cfg.name}.so"
+        # Staleness guard: if the cached .so predates the ctypes source, its C ABI
+        # may be outdated (mismatched argtypes -> stack corruption / segfault).
+        # Remove the stale .so and ctypes object so the compile/link stages below
+        # rebuild them (kernel .cpp/.o don't depend on the ctypes source).
+        if (
+            lib_path.exists()
+            and ctypes_src.exists()
+            and lib_path.stat().st_mtime < ctypes_src.stat().st_mtime
+        ):
+            for stale in (lib_path, out / "fmha_ctypes_lib.o"):
+                try:
+                    stale.unlink()
+                except OSError:
+                    pass
         # Fast path: .so exists, register result and skip
         if lib_path.exists():
             results[cfg.name] = FmhaSetupResult(
