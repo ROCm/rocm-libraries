@@ -298,13 +298,13 @@ def retrieve_projects(args):
             test_type = label_test_type
             logging.info(f"Test type overridden by label: {test_type}")
 
-        # If only skippable paths were modified, skip CI. A tool-only PR still
-        # runs the benchmark (nightly install), even though the build is skipped.
-        skipped_mode = BenchmarkMode.NIGHTLY if tool_changed else BenchmarkMode.OFF
-        # If only skippable paths were modified and no test labels, skip CI
+        # If only skippable paths were modified and no test labels, skip CI. A
+        # tool-only PR still runs the benchmark (nightly install) even though the
+        # build is skipped.
         if not contains_non_skippable_files and not label_projects:
             logging.info("Only skippable paths were modified, skipping CI")
-            return CIPlan([], test_type, skipped_mode)
+            benchmark = BenchmarkMode.NIGHTLY if tool_changed else BenchmarkMode.OFF
+            return CIPlan([], test_type, benchmark)
 
         if "skip-therockci" in pr_labels:
             logging.info("`skip-therockci` label was added, skipping CI")
