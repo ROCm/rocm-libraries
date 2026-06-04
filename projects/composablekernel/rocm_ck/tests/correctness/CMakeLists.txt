@@ -25,3 +25,30 @@ add_test(NAME rocm_ck_cpu_ref_validation COMMAND rocm_ck_cpu_ref_validation)
 set_tests_properties(rocm_ck_cpu_ref_validation PROPERTIES
     LABELS "ROCM_CK_CORRECTNESS"
 )
+
+# ---------------------------------------------------------------------------
+# Split-accumulation GPU reference GEMM (GPU required)
+# ---------------------------------------------------------------------------
+add_executable(rocm_ck_split_gemm_test
+    split_gemm.hip
+    reduce_kernels.hip
+    test_split_gemm.hip
+)
+target_link_libraries(rocm_ck_split_gemm_test PRIVATE
+    rocm_ck GTest::gtest_main GTest::gmock hip::device
+)
+target_compile_options(rocm_ck_split_gemm_test PRIVATE
+    -Wall -Werror
+    -Wno-global-constructors
+    -Wno-undef
+    -Wno-zero-as-null-pointer-constant
+)
+target_include_directories(rocm_ck_split_gemm_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../include
+)
+add_test(NAME rocm_ck_split_gemm_test COMMAND rocm_ck_split_gemm_test)
+set_tests_properties(rocm_ck_split_gemm_test PROPERTIES
+    LABELS "ROCM_CK_KERNEL"
+)
