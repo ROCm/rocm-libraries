@@ -1917,6 +1917,23 @@ Tests:
   unit_check: 1
   gpu_arch_exclude: '11\d\d|12[^5]\d'
 
+- name: matmul_bias_stride
+  category: pre_checkin
+  function:
+    matmul: *real_precisions
+  matrix_size:
+    - {M: 128, N: 128, K: 128, bias_stride: 128}
+    - {M: 128, N: 128, K: 128, bias_stride: 150}
+    - {M: 129, N: 129, K: 129, bias_stride: 129}
+    - {M: 129, N: 129, K: 129, bias_stride: 250}
+  transA_transB: *transA_transB_range
+  alpha: 1
+  beta: [ 0.0, 2.0 ]
+  bias_vector: [0, 1]
+  activation_type: [relu, none]
+  batch_count: [1, 5]
+  gpu_arch_exclude: '11\d\d|12[^5]\d'
+
 - name: matmul_dgelu_bias
   category: pre_checkin
   function:
@@ -2980,6 +2997,28 @@ Tests:
   M: [128, 256, 192, 320]
   N: [128, 256, 192, 320]
   K: [512, 1024]
+  transA: T
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  batch_count: [1, 2]
+  initialization: trig_float
+  unit_check: 0
+  norm_check: 1
+  requested_solution_num: 1
+  gpu_arch: '950'
+
+# K multiple of 32 (tail loop) — preswizzled scales 1001
+- name: matmul_subtile_fp4_k32_multiple
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+    - { a_type: f4_r, b_type: f4_r, c_type: f16_r, d_type: f16_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+    - { a_type: f4_r, b_type: f4_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 1001, scaleB: 1001, scale_type: f32_r}
+  M: [128, 256]
+  N: [128, 256]
+  K: [32, 64, 96, 128, 160, 192, 224, 288, 320]
   transA: T
   transB: N
   alpha: 1.0

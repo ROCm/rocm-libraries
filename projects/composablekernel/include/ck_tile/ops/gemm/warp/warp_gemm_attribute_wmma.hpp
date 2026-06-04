@@ -154,6 +154,19 @@ struct CTransposedWarpDstrEncodingTrait
         typename Impl::kCTYs2RHsMinor>;
 };
 
+namespace detail {
+template <typename T, typename = void>
+struct mx_type_enable_or_void
+{
+    using type = void;
+};
+template <typename T>
+struct mx_type_enable_or_void<T, std::void_t<typename T::MXTypeEnableType>>
+{
+    using type = typename T::MXTypeEnableType;
+};
+} // namespace detail
+
 template <typename WarpGemmAttributeWmmaImpl_,
           bool kTransC                       = false,
           WGAttrNumAccessEnum AttrNumAccessA = WGAttrNumAccessEnum::Single,
@@ -162,18 +175,21 @@ struct WarpGemmAttributeWmma
 {
     using Impl = remove_cvref_t<WarpGemmAttributeWmmaImpl_>;
 
-    // When kTransC is true and A/B types differ, we need an impl with swapped types
-    using TransposedImpl =
-        std::conditional_t<kTransC &&
-                               !std::is_same_v<typename Impl::ADataType, typename Impl::BDataType>,
-                           WarpGemmAttributeWmmaImpl<WmmaTraits<typename Impl::TraitsType::ArchType,
-                                                                typename Impl::BDataType,
-                                                                typename Impl::ADataType,
-                                                                typename Impl::CDataType,
-                                                                Impl::kM,
-                                                                Impl::kN,
-                                                                Impl::kK>>,
-                           Impl>;
+    // When kTransC is true and A/B types differ, we need an impl with swapped types.
+    // Propagate MXTypeEnable (e.g., WmmaScale16Tag) so the transposed impl uses the
+    // same WmmaTraits specialization family.
+    using TransposedImpl = std::conditional_t<
+        kTransC && !std::is_same_v<typename Impl::ADataType, typename Impl::BDataType>,
+        WarpGemmAttributeWmmaImpl<
+            WmmaTraits<typename Impl::TraitsType::ArchType,
+                       typename Impl::BDataType,
+                       typename Impl::ADataType,
+                       typename Impl::CDataType,
+                       Impl::kM,
+                       Impl::kN,
+                       Impl::kK,
+                       typename detail::mx_type_enable_or_void<typename Impl::TraitsType>::type>>,
+        Impl>;
 
     using ADataType = typename Impl::ADataType;
     using BDataType = typename Impl::BDataType;
@@ -234,12 +250,12 @@ struct WarpGemmAttributeWmma
     }
 
     // c_vec += a_vec * b_vec
-    template <typename... Params>
+    template <typename... Params, typename AScaleType, typename BScaleType>
     CK_TILE_DEVICE void operator()(CVecType& c_vec,
                                    const AVecType& a_vec,
-                                   const int32_t& a_scale,
+                                   const AScaleType& a_scale,
                                    const BVecType& b_vec,
-                                   const int32_t& b_scale) const
+                                   const BScaleType& b_scale) const
     {
         if constexpr(kTransC)
         {
@@ -253,11 +269,11 @@ struct WarpGemmAttributeWmma
     }
 
     // c_vec = a_vec * b_vec
-    template <typename... Params>
+    template <typename... Params, typename AScaleType, typename BScaleType>
     CK_TILE_DEVICE CVecType operator()(const AVecType& a_vec,
-                                       const int32_t& a_scale,
+                                       const AScaleType& a_scale,
                                        const BVecType& b_vec,
-                                       const int32_t& b_scale) const
+                                       const BScaleType& b_scale) const
     {
         if constexpr(kTransC)
         {

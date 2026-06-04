@@ -851,6 +851,91 @@ struct BlockFmhaPipelineQRKSVS
                 }
             };
 
+            // Conditional rescaling: skip o_acc rescale when correction factor
+            // exp2(acc_scale_log2) is negligible (< exp2(-8) ≈ 0.004, below BF16
+            // precision). Adapted from FlashAttention-4 (Tri Dao, 2025).
+            // Eliminates 70-90% of rescale operations in practice.
+            //
+            // For skip rows we stabilize P with m_old (the previous max) instead of
+            // the new max m_j, so P is computed directly in the m_{j-1} frame and no
+            // post-correction sweep is needed. For rescale rows we use m_j as usual.
+            // FP8 quant modes (PERTENSOR/BLOCKSCALE/etc.) cast P to FP8 after
+            // softmax. In the skip branch P is computed with m_old, so P can
+            // exceed the FP8 representable range and saturate, corrupting the
+            // P*V GEMM. Disable skip for all FP8 paths (threshold 0).
+            static constexpr SMPLComputeDataType kRescaleThreshold =
+                type_convert<SMPLComputeDataType>(
+                    QScaleEnum == BlockAttentionQuantScaleEnum::NO_SCALE ? 8.0f : 0.0f);
+
+            // Per-row stabilizer: m_old for skip rows, m_j for rescale rows.
+            auto m_stab =
+                make_static_distributed_tensor<SMPLComputeDataType>(m.get_tile_distribution());
+            // Per-row rescale factor (exp2 of acc_scale_log2); only valid when
+            // needs_rescale[i] is true.
+            auto rescale_factor =
+                make_static_distributed_tensor<SMPLComputeDataType>(m.get_tile_distribution());
+            auto needs_rescale = make_static_distributed_tensor<bool>(m.get_tile_distribution());
+            set_tile(needs_rescale, false);
+
+            constexpr auto m_spans = decltype(m)::get_distributed_spans();
+            sweep_tile_span(m_spans[number<0>{}], [&](auto idx0) {
+                constexpr auto i_idx = make_tuple(idx0);
+#if CK_TILE_FMHA_FWD_FAST_EXP2
+                const auto acc_scale_log2 = [&]() {
+                    if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
+                                 BiasEnum == BlockAttentionBiasEnum::ALIBI)
+                    {
+                        return m_old[i_idx] - get_validated_m(m[i_idx]);
+                    }
+                    else
+                    {
+                        if constexpr(kHasLogitsSoftCap)
+                        {
+                            return m_old[i_idx] - get_validated_m(m[i_idx]);
+                        }
+                        else
+                        {
+                            auto row_max = scale_s * get_validated_m(m[i_idx]);
+                            return scale_s * m_old[i_idx] - row_max;
+                        }
+                    }
+                }();
+
+                const bool need_rescale =
+                    (acc_scale_log2 < type_convert<SMPLComputeDataType>(-kRescaleThreshold));
+
+                if(need_rescale)
+                {
+                    rescale_factor(i_idx) = fmha_fast_exp2(acc_scale_log2);
+                    m_stab(i_idx)         = m[i_idx];
+                    needs_rescale(i_idx)  = true;
+                }
+                else
+                {
+                    // Skip branch: stabilize P with m_old so P is already in
+                    // m_{j-1} frame; restore m to m_old for downstream iterations.
+                    m_stab(i_idx) = m_old[i_idx];
+                    m(i_idx)      = m_old[i_idx];
+                }
+#else
+                const auto diff = m_old[i_idx] - get_validated_m(m[i_idx]);
+                const bool need_rescale =
+                    (diff < type_convert<SMPLComputeDataType>(-kRescaleThreshold));
+
+                if(need_rescale)
+                {
+                    rescale_factor(i_idx) = exp(diff);
+                    m_stab(i_idx)         = m[i_idx];
+                    needs_rescale(i_idx)  = true;
+                }
+                else
+                {
+                    m_stab(i_idx) = m_old[i_idx];
+                    m(i_idx)      = m_old[i_idx];
+                }
+#endif
+            });
+
             constexpr auto p_spans = decltype(p_compute)::get_distributed_spans();
             sweep_tile_span(p_spans[number<0>{}], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
@@ -858,7 +943,7 @@ struct BlockFmhaPipelineQRKSVS
                 // For BLOCKSCALE: precompute (m - shift) once per row
                 // Bias/Alibi/SoftCap: exp2(s - m + shift) = exp2(s - (m - shift))
                 // else: exp2(scale_s*s - scale_s*m + shift) = exp2(scale_s*s - (scale_s*m - shift))
-                auto validated_m = get_validated_m(m[i_idx]);
+                auto validated_m = get_validated_m(m_stab[i_idx]);
                 auto row_max     = scale_s * validated_m;
                 if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::BLOCKSCALE)
                 {
@@ -891,7 +976,7 @@ struct BlockFmhaPipelineQRKSVS
                         }
                     }
 #else
-                    p_compute(i_j_idx)     = exp(s[i_j_idx] - get_validated_m(m[i_idx]));
+                    p_compute(i_j_idx)     = exp(s[i_j_idx] - get_validated_m(m_stab[i_idx]));
 #endif
                 });
             });
@@ -901,60 +986,12 @@ struct BlockFmhaPipelineQRKSVS
 
             block_tile_reduce_sync(rowsum_p, f_sum, bool_constant<false>{});
             // l{j}, Oacc{j}
-            // Conditional rescaling: skip o_acc rescale when the correction factor
-            // is negligible. exp2(-8) = 0.004, below BF16 minimum representable
-            // precision, so rescaling by less than this is a no-op at output precision.
-            // Adapted from FlashAttention-4 (Tri Dao, 2025).
-            // Eliminates 70-90% of rescale operations in practice.
-            // FP8 quant modes cast P to FP8 after softmax. In the skip
-            // branch P can exceed the FP8 representable range, corrupting
-            // the P*V GEMM. Disable skip for all FP8 paths (threshold 0).
-            static constexpr SMPLComputeDataType kRescaleThreshold =
-                type_convert<SMPLComputeDataType>(
-                    QScaleEnum == BlockAttentionQuantScaleEnum::NO_SCALE ? 8.0f : 0.0f);
-
-            auto p_row_correction =
-                make_static_distributed_tensor<SMPLComputeDataType>(m.get_tile_distribution());
-            set_tile(p_row_correction, type_convert<SMPLComputeDataType>(1.0f));
-            auto needs_p_correction =
-                make_static_distributed_tensor<bool>(m.get_tile_distribution());
-            set_tile(needs_p_correction, false);
-
             constexpr auto o_spans = decltype(o_acc)::get_distributed_spans();
             sweep_tile_span(o_spans[number<0>{}], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
-
-                // FAST_EXP2 keeps `m` in log2-space and folds `scale_s` into
-                // the difference for the bias-free / no-softcap path; the
-                // other paths and the non-FAST_EXP2 build use the natural-log
-                // difference directly.
-                const auto diff = [&]() {
-                    if constexpr(kFastExp2 &&
-                                 BiasEnum != BlockAttentionBiasEnum::ELEMENTWISE_BIAS &&
-                                 BiasEnum != BlockAttentionBiasEnum::ALIBI && !kHasLogitsSoftCap)
-                    {
-                        const auto row_max = scale_s * get_validated_m(m[i_idx]);
-                        return scale_s * m_old[i_idx] - row_max;
-                    }
-                    else
-                    {
-                        return m_old[i_idx] - get_validated_m(m[i_idx]);
-                    }
-                }();
-
-                const auto safe_exp = [](auto x) {
-                    if constexpr(kFastExp2)
-                        return fmha_fast_exp2(x);
-                    else
-                        return exp(x);
-                };
-
-                const bool need_rescale =
-                    (diff < type_convert<SMPLComputeDataType>(-kRescaleThreshold));
-
-                if(need_rescale)
+                if(needs_rescale[i_idx])
                 {
-                    const auto tmp = safe_exp(diff);
+                    const auto tmp = rescale_factor[i_idx];
                     l(i_idx)       = tmp * l[i_idx] + rowsum_p[i_idx];
                     sweep_tile_span(o_spans[number<1>{}], [&](auto idx1) {
                         constexpr auto i_j_idx = make_tuple(idx0, idx1);
@@ -963,29 +1000,8 @@ struct BlockFmhaPipelineQRKSVS
                 }
                 else
                 {
-                    // Keep o_acc in m_old's frame (skip rescale).
-                    // P was computed in m_new's frame, so correct it before
-                    // the PV GEMM by exp(m_new - m_old) (or exp2 in
-                    // log2-space).
-                    const auto correction     = safe_exp(-diff);
-                    l(i_idx)                  = l[i_idx] + rowsum_p[i_idx] * correction;
-                    m(i_idx)                  = m_old[i_idx];
-                    p_row_correction(i_idx)   = correction;
-                    needs_p_correction(i_idx) = true;
-                }
-            });
-
-            // Apply per-row P correction for skip-rescale rows: convert P from
-            // m_j frame to m_{j-1} frame before the P*V GEMM.
-            sweep_tile_span(p_spans[number<0>{}], [&](auto idx0) {
-                constexpr auto i_idx = make_tuple(idx0);
-                if(needs_p_correction[i_idx])
-                {
-                    const auto corr = p_row_correction[i_idx];
-                    sweep_tile_span(p_spans[number<1>{}], [&](auto idx1) {
-                        constexpr auto i_j_idx = make_tuple(idx0, idx1);
-                        p_compute(i_j_idx) *= corr;
-                    });
+                    // Skip: P already in m_{j-1} frame, no o_acc rescale needed.
+                    l(i_idx) = l[i_idx] + rowsum_p[i_idx];
                 }
             });
 
