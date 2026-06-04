@@ -71,7 +71,7 @@ class GemmKernelBuilder:
 
         from sampling.sampler import sample_feasible_set
         from sampling.seed import make_seed
-        from sampling.feasible_set import GEMM_AXES
+        from sampling.feasible_set import GEMM_STREAMK_AXES
 
         effective_seed = make_seed(
             self.seed, self.gpu_target, self.datatype, self.layout
@@ -95,6 +95,7 @@ class GemmKernelBuilder:
                     "pipeline": pipeline,
                     "epilogue": epilogue,
                     "scheduler": scheduler,
+                    "reduction_strategy": reduction_strategy,
                     "pad_m": pad_m,
                     "pad_n": pad_n,
                     "pad_k": pad_k,
@@ -107,7 +108,7 @@ class GemmKernelBuilder:
             flat_items,
             self.max_instances,
             effective_seed,
-            GEMM_AXES,
+            GEMM_STREAMK_AXES,
         )
 
         kernel_list = [kernel_list[i] for i in selected_indices]
