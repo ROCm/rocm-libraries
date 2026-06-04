@@ -11,6 +11,7 @@ using ::rocm_ck::dqdkdv_grid_size;
 using ::rocm_ck::FmhaBiasType;
 using ::rocm_ck::FmhaBwdDQDKDVAlgorithm;
 using ::rocm_ck::FmhaBwdDQDKDVConfig;
+using ::rocm_ck::FmhaMaskType;
 using ::rocm_ck::FmhaMode;
 using ::rocm_ck::makeSpec;
 namespace S = ::rocm_ck::fmha_bwd_dqdkdv_slots;
@@ -24,7 +25,7 @@ TEST(FmhaBwdDqDkDv, AlgorithmDefaults)
     constexpr FmhaBwdDQDKDVAlgorithm algo{};
     EXPECT_EQ(algo.bias_type, FmhaBiasType::NONE);
     EXPECT_FALSE(algo.has_bias_grad);
-    EXPECT_FALSE(algo.has_mask);
+    EXPECT_EQ(algo.mask_type, FmhaMaskType::NO_MASK);
     EXPECT_FALSE(algo.has_dropout);
     EXPECT_FALSE(algo.is_deterministic);
     EXPECT_EQ(algo.pad_hdim_q, 0);
@@ -51,7 +52,7 @@ TEST(FmhaBwdDqDkDv, MakeSpecBaseline)
     EXPECT_EQ(k.mode, FmhaMode::BATCH);
     EXPECT_EQ(k.bias_type, FmhaBiasType::NONE);
     EXPECT_FALSE(k.has_bias_grad);
-    EXPECT_FALSE(k.has_mask);
+    EXPECT_EQ(k.mask_type, FmhaMaskType::NO_MASK);
     EXPECT_FALSE(k.has_dropout);
     EXPECT_FALSE(k.is_deterministic);
     EXPECT_EQ(k.pad_hdim_q, 8);
@@ -74,26 +75,17 @@ TEST(FmhaBwdDqDkDv, MakeSpecBF16)
 
 TEST(FmhaBwdDqDkDv, MakeSpecAllHdimsQ)
 {
-    // Test all supported hdim_q values. Each must be a separate constexpr
-    // variable because makeSpec is consteval -- cannot use a runtime loop.
-    constexpr auto k32 =
-        makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
-                                                   .hdim_q = 32,
-                                                   .hdim_v = 128,
-                                                   .mode   = FmhaMode::BATCH},
-                                     .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
-    constexpr auto k64 =
-        makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
-                                                   .hdim_q = 64,
-                                                   .hdim_v = 128,
-                                                   .mode   = FmhaMode::BATCH},
-                                     .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
-    constexpr auto k96 =
-        makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
-                                                   .hdim_q = 96,
-                                                   .hdim_v = 128,
-                                                   .mode   = FmhaMode::BATCH},
-                                     .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+    // Test all supported hdim_q values (symmetric: hdim_q == hdim_v required).
+    // Each must be a separate constexpr variable because makeSpec is consteval.
+    constexpr auto k32 = makeSpec(FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 32, .hdim_v = 32, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+    constexpr auto k64 = makeSpec(FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 64, .hdim_v = 64, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+    constexpr auto k96 = makeSpec(FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 96, .hdim_v = 96, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
     constexpr auto k128 =
         makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
                                                    .hdim_q = 128,
@@ -103,7 +95,7 @@ TEST(FmhaBwdDqDkDv, MakeSpecAllHdimsQ)
     constexpr auto k256 =
         makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
                                                    .hdim_q = 256,
-                                                   .hdim_v = 128,
+                                                   .hdim_v = 256,
                                                    .mode   = FmhaMode::BATCH},
                                      .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
 
@@ -116,26 +108,17 @@ TEST(FmhaBwdDqDkDv, MakeSpecAllHdimsQ)
 
 TEST(FmhaBwdDqDkDv, MakeSpecAllHdimsV)
 {
-    // Test all supported hdim_v values. Each must be a separate constexpr
-    // variable because makeSpec is consteval -- cannot use a runtime loop.
-    constexpr auto k32 =
-        makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
-                                                   .hdim_q = 128,
-                                                   .hdim_v = 32,
-                                                   .mode   = FmhaMode::BATCH},
-                                     .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
-    constexpr auto k64 =
-        makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
-                                                   .hdim_q = 128,
-                                                   .hdim_v = 64,
-                                                   .mode   = FmhaMode::BATCH},
-                                     .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
-    constexpr auto k96 =
-        makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
-                                                   .hdim_q = 128,
-                                                   .hdim_v = 96,
-                                                   .mode   = FmhaMode::BATCH},
-                                     .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+    // Test all supported hdim_v values (symmetric: hdim_q == hdim_v required).
+    // Each must be a separate constexpr variable because makeSpec is consteval.
+    constexpr auto k32 = makeSpec(FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 32, .hdim_v = 32, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+    constexpr auto k64 = makeSpec(FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 64, .hdim_v = 64, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
+    constexpr auto k96 = makeSpec(FmhaBwdDQDKDVConfig{
+        .signature = {.dtype = DataType::FP16, .hdim_q = 96, .hdim_v = 96, .mode = FmhaMode::BATCH},
+        .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
     constexpr auto k128 =
         makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
                                                    .hdim_q = 128,
@@ -144,7 +127,7 @@ TEST(FmhaBwdDqDkDv, MakeSpecAllHdimsV)
                                      .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
     constexpr auto k256 =
         makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
-                                                   .hdim_q = 128,
+                                                   .hdim_q = 256,
                                                    .hdim_v = 256,
                                                    .mode   = FmhaMode::BATCH},
                                      .algorithm = {.pad_hdim_q = 8, .pad_hdim_v = 8}});
@@ -161,8 +144,9 @@ TEST(FmhaBwdDqDkDv, MakeSpecWithMask)
     constexpr auto k = makeSpec(FmhaBwdDQDKDVConfig{
         .signature =
             {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::BATCH},
-        .algorithm = {.has_mask = true, .pad_hdim_q = 8, .pad_hdim_v = 8}});
-    EXPECT_TRUE(k.has_mask);
+        .algorithm = {
+            .mask_type = FmhaMaskType::TOP_LEFT_CAUSAL, .pad_hdim_q = 8, .pad_hdim_v = 8}});
+    EXPECT_NE(k.mask_type, FmhaMaskType::NO_MASK);
 }
 
 TEST(FmhaBwdDqDkDv, MakeSpecWithDropout)
@@ -335,21 +319,27 @@ TEST(FmhaBwdDqDkDv, ScalarSlotIndicesFixed)
 
 TEST(FmhaBwdDqDkDv, RequiredScalarsWithMask)
 {
-    // has_mask alone: needs WINDOW_SIZE_LEFT/RIGHT + MASK_TYPE (slots 8..10) -> 11
+    // mask_type alone: needs WINDOW_SIZE_LEFT/RIGHT + MASK_TYPE (slots 8..10) -> 11
     constexpr auto k = makeSpec(FmhaBwdDQDKDVConfig{
         .signature =
             {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::BATCH},
-        .algorithm = {.has_mask = true, .pad_hdim_q = 8, .pad_hdim_v = 8}});
+        .algorithm = {
+            .mask_type = FmhaMaskType::TOP_LEFT_CAUSAL, .pad_hdim_q = 8, .pad_hdim_v = 8}});
     EXPECT_EQ(S::requiredScalars(k), 11);
 }
 
 TEST(FmhaBwdDqDkDv, RequiredScalarsWithMaskAndDropout)
 {
-    // has_mask + has_dropout: mask slots (8..10) are highest -> 11
-    constexpr auto k = makeSpec(FmhaBwdDQDKDVConfig{
-        .signature =
-            {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::BATCH},
-        .algorithm = {.has_mask = true, .has_dropout = true, .pad_hdim_q = 8, .pad_hdim_v = 8}});
+    // mask_type + has_dropout: mask slots (8..10) are highest -> 11
+    constexpr auto k =
+        makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
+                                                   .hdim_q = 128,
+                                                   .hdim_v = 128,
+                                                   .mode   = FmhaMode::BATCH},
+                                     .algorithm = {.mask_type   = FmhaMaskType::TOP_LEFT_CAUSAL,
+                                                   .has_dropout = true,
+                                                   .pad_hdim_q  = 8,
+                                                   .pad_hdim_v  = 8}});
     EXPECT_EQ(S::requiredScalars(k), 11);
 }
 
@@ -405,11 +395,12 @@ TEST(FmhaBwdDqDkDv, RequiredTensorsWithMask)
 {
     // Mask only adds scalar slots (window sizes + mask_type), not tensor slots.
     // Guardrail: a regression that accidentally bumped requiredTensors when
-    // has_mask is enabled would over-allocate tensor entries.
+    // mask is enabled would over-allocate tensor entries.
     constexpr auto k = makeSpec(FmhaBwdDQDKDVConfig{
         .signature =
             {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::BATCH},
-        .algorithm = {.has_mask = true, .pad_hdim_q = 8, .pad_hdim_v = 8}});
+        .algorithm = {
+            .mask_type = FmhaMaskType::TOP_LEFT_CAUSAL, .pad_hdim_q = 8, .pad_hdim_v = 8}});
     EXPECT_EQ(S::requiredTensors(k), 9);
 }
 

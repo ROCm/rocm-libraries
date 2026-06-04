@@ -143,7 +143,7 @@ TEST(FmhaBwdConvertDQ, RequiredTensorsBatch)
     constexpr auto k = makeSpec(FmhaBwdConvertDQConfig{
         .signature = {.dtype = DataType::FP16, .hdim_q = 128, .mode = FmhaMode::BATCH},
         .algorithm = {}});
-    EXPECT_EQ(S::requiredTensors(k), 2);
+    EXPECT_EQ(S::requiredTensors(k), 3);
 }
 
 TEST(FmhaBwdConvertDQ, RequiredTensorsGroup)
@@ -151,7 +151,7 @@ TEST(FmhaBwdConvertDQ, RequiredTensorsGroup)
     constexpr auto k = makeSpec(FmhaBwdConvertDQConfig{
         .signature = {.dtype = DataType::FP16, .hdim_q = 128, .mode = FmhaMode::GROUP},
         .algorithm = {}});
-    EXPECT_EQ(S::requiredTensors(k), 6);
+    EXPECT_EQ(S::requiredTensors(k), 8);
 }
 
 TEST(FmhaBwdConvertDQ, RequiredScalarsAlways0)

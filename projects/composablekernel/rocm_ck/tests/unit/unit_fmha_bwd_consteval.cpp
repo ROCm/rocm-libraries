@@ -22,6 +22,7 @@ using ::rocm_ck::DataType;
 using ::rocm_ck::FmhaBiasType;
 using ::rocm_ck::FmhaBwdDQDKDVConfig;
 using ::rocm_ck::FmhaBwdDQDKDVSpec;
+using ::rocm_ck::FmhaMaskType;
 using ::rocm_ck::FmhaMode;
 using ::rocm_ck::makeSpec;
 using ::rocm_ck::usesBatchSizeSlot;
@@ -55,7 +56,7 @@ TEST(FmhaBwdConsteval, SWA_AllFieldsMatchCMask)
     EXPECT_EQ(k_swa.mode, k_cmask.mode);
     EXPECT_EQ(k_swa.bias_type, k_cmask.bias_type);
     EXPECT_EQ(k_swa.has_bias_grad, k_cmask.has_bias_grad);
-    EXPECT_EQ(k_swa.has_mask, k_cmask.has_mask);
+    EXPECT_EQ(k_swa.mask_type, k_cmask.mask_type);
     EXPECT_EQ(k_swa.has_dropout, k_cmask.has_dropout);
     EXPECT_EQ(k_swa.is_deterministic, k_cmask.is_deterministic);
     EXPECT_EQ(k_swa.pad_hdim_q, k_cmask.pad_hdim_q);
@@ -78,7 +79,7 @@ TEST(FmhaBwdConsteval, CMaskBR_AllFieldsMatchCMask)
     EXPECT_EQ(k_br.mode, k_cmask.mode);
     EXPECT_EQ(k_br.bias_type, k_cmask.bias_type);
     EXPECT_EQ(k_br.has_bias_grad, k_cmask.has_bias_grad);
-    EXPECT_EQ(k_br.has_mask, k_cmask.has_mask);
+    EXPECT_EQ(k_br.mask_type, k_cmask.mask_type);
     EXPECT_EQ(k_br.has_dropout, k_cmask.has_dropout);
     EXPECT_EQ(k_br.is_deterministic, k_cmask.is_deterministic);
     EXPECT_EQ(k_br.pad_hdim_q, k_cmask.pad_hdim_q);
@@ -98,11 +99,15 @@ TEST(FmhaBwdConsteval, MaskedSpec_RequiredScalars_DeterministicBatch)
 {
     // Deterministic batch mode adds BATCH_SIZE slot (index 11) -> 12 scalars.
     // This dominates the mask slots (index 10) -> 11 scalars.
-    constexpr auto k = makeSpec(FmhaBwdDQDKDVConfig{
-        .signature =
-            {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::BATCH},
-        .algorithm = {
-            .has_mask = true, .is_deterministic = true, .pad_hdim_q = 8, .pad_hdim_v = 8}});
+    constexpr auto k =
+        makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
+                                                   .hdim_q = 128,
+                                                   .hdim_v = 128,
+                                                   .mode   = FmhaMode::BATCH},
+                                     .algorithm = {.mask_type = FmhaMaskType::TOP_LEFT_CAUSAL,
+                                                   .is_deterministic = true,
+                                                   .pad_hdim_q       = 8,
+                                                   .pad_hdim_v       = 8}});
 
     EXPECT_EQ(S::requiredScalars(k), 12);
 }
@@ -111,11 +116,15 @@ TEST(FmhaBwdConsteval, MaskedSpec_RequiredScalars_DeterministicGroup)
 {
     // Group mode does not use the BATCH_SIZE slot (kernel derives batch count
     // from seqstart pointers), so mask slots dominate -> 11 scalars.
-    constexpr auto k = makeSpec(FmhaBwdDQDKDVConfig{
-        .signature =
-            {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::GROUP},
-        .algorithm = {
-            .has_mask = true, .is_deterministic = true, .pad_hdim_q = 8, .pad_hdim_v = 8}});
+    constexpr auto k =
+        makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
+                                                   .hdim_q = 128,
+                                                   .hdim_v = 128,
+                                                   .mode   = FmhaMode::GROUP},
+                                     .algorithm = {.mask_type = FmhaMaskType::TOP_LEFT_CAUSAL,
+                                                   .is_deterministic = true,
+                                                   .pad_hdim_q       = 8,
+                                                   .pad_hdim_v       = 8}});
 
     EXPECT_EQ(S::requiredScalars(k), 11);
 }
@@ -127,11 +136,15 @@ TEST(FmhaBwdConsteval, MaskedSpec_RequiredScalars_DeterministicGroup)
 TEST(FmhaBwdConsteval, MaskedSpec_UsesBatchSizeSlot_WhenDeterministicBatch)
 {
     // Deterministic + batch mode -> uses BATCH_SIZE slot.
-    constexpr auto k = makeSpec(FmhaBwdDQDKDVConfig{
-        .signature =
-            {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::BATCH},
-        .algorithm = {
-            .has_mask = true, .is_deterministic = true, .pad_hdim_q = 8, .pad_hdim_v = 8}});
+    constexpr auto k =
+        makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
+                                                   .hdim_q = 128,
+                                                   .hdim_v = 128,
+                                                   .mode   = FmhaMode::BATCH},
+                                     .algorithm = {.mask_type = FmhaMaskType::TOP_LEFT_CAUSAL,
+                                                   .is_deterministic = true,
+                                                   .pad_hdim_q       = 8,
+                                                   .pad_hdim_v       = 8}});
 
     EXPECT_TRUE(usesBatchSizeSlot(k));
 }
@@ -139,11 +152,15 @@ TEST(FmhaBwdConsteval, MaskedSpec_UsesBatchSizeSlot_WhenDeterministicBatch)
 TEST(FmhaBwdConsteval, MaskedSpec_DoesNotUseBatchSizeSlot_WhenDeterministicGroup)
 {
     // Deterministic + group mode -> does NOT use BATCH_SIZE slot.
-    constexpr auto k = makeSpec(FmhaBwdDQDKDVConfig{
-        .signature =
-            {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::GROUP},
-        .algorithm = {
-            .has_mask = true, .is_deterministic = true, .pad_hdim_q = 8, .pad_hdim_v = 8}});
+    constexpr auto k =
+        makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::FP16,
+                                                   .hdim_q = 128,
+                                                   .hdim_v = 128,
+                                                   .mode   = FmhaMode::GROUP},
+                                     .algorithm = {.mask_type = FmhaMaskType::TOP_LEFT_CAUSAL,
+                                                   .is_deterministic = true,
+                                                   .pad_hdim_q       = 8,
+                                                   .pad_hdim_v       = 8}});
 
     EXPECT_FALSE(usesBatchSizeSlot(k));
 }
@@ -155,7 +172,8 @@ TEST(FmhaBwdConsteval, MaskedSpec_DoesNotUseBatchSizeSlot_WhenNonDeterministic)
     constexpr auto k = makeSpec(FmhaBwdDQDKDVConfig{
         .signature =
             {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::BATCH},
-        .algorithm = {.has_mask = true, .pad_hdim_q = 8, .pad_hdim_v = 8}});
+        .algorithm = {
+            .mask_type = FmhaMaskType::TOP_LEFT_CAUSAL, .pad_hdim_q = 8, .pad_hdim_v = 8}});
 
     EXPECT_FALSE(usesBatchSizeSlot(k));
 }
@@ -170,7 +188,8 @@ TEST(FmhaBwdConsteval, MaskedSpec_RequiredTensors_UnchangedForGroup)
     constexpr auto k = makeSpec(FmhaBwdDQDKDVConfig{
         .signature =
             {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::GROUP},
-        .algorithm = {.has_mask = true, .pad_hdim_q = 8, .pad_hdim_v = 8}});
+        .algorithm = {
+            .mask_type = FmhaMaskType::TOP_LEFT_CAUSAL, .pad_hdim_q = 8, .pad_hdim_v = 8}});
 
     EXPECT_EQ(S::requiredTensors(k), 16);
 }
@@ -184,23 +203,28 @@ TEST(FmhaBwdConsteval, MaskedSpec_BF16_WithMask)
     constexpr auto k = makeSpec(FmhaBwdDQDKDVConfig{
         .signature =
             {.dtype = DataType::BF16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::BATCH},
-        .algorithm = {.has_mask = true, .pad_hdim_q = 8, .pad_hdim_v = 8}});
+        .algorithm = {
+            .mask_type = FmhaMaskType::TOP_LEFT_CAUSAL, .pad_hdim_q = 8, .pad_hdim_v = 8}});
 
     EXPECT_EQ(k.dtype, DataType::BF16);
-    EXPECT_TRUE(k.has_mask);
+    EXPECT_NE(k.mask_type, FmhaMaskType::NO_MASK);
     EXPECT_EQ(S::requiredScalars(k), 11);
 }
 
 TEST(FmhaBwdConsteval, MaskedSpec_BF16_WithMaskAndDeterministic)
 {
-    constexpr auto k = makeSpec(FmhaBwdDQDKDVConfig{
-        .signature =
-            {.dtype = DataType::BF16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::BATCH},
-        .algorithm = {
-            .has_mask = true, .is_deterministic = true, .pad_hdim_q = 8, .pad_hdim_v = 8}});
+    constexpr auto k =
+        makeSpec(FmhaBwdDQDKDVConfig{.signature = {.dtype  = DataType::BF16,
+                                                   .hdim_q = 128,
+                                                   .hdim_v = 128,
+                                                   .mode   = FmhaMode::BATCH},
+                                     .algorithm = {.mask_type = FmhaMaskType::TOP_LEFT_CAUSAL,
+                                                   .is_deterministic = true,
+                                                   .pad_hdim_q       = 8,
+                                                   .pad_hdim_v       = 8}});
 
     EXPECT_EQ(k.dtype, DataType::BF16);
-    EXPECT_TRUE(k.has_mask);
+    EXPECT_NE(k.mask_type, FmhaMaskType::NO_MASK);
     EXPECT_TRUE(k.is_deterministic);
     EXPECT_EQ(S::requiredScalars(k), 12);
 }

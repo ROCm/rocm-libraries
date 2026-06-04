@@ -190,10 +190,10 @@ consteval Gemm4Warps computeGemm4Warps(int bm0, int hdim)
 /// so a single hdim drives both the Q and V head-dim fields and bk0 == bk2.
 ///
 /// Invariant derivation rules (from CK Tile pipeline -- always true):
-///   bk0 = hdim    -- GEMM0 (Q@K^T)  K-unroll = QK head dim
-///   bk1 = bm0     -- GEMM1 (P^T@dO) K-unroll = M-dim
-///   bk2 = hdim    -- GEMM2 (dO@V^T) K-unroll = V head dim
-///   bk3 = bm0     -- GEMM3 (dS^T@Q) K-unroll = M-dim
+//    bk0 = hdim    -- GEMM0 (Q*K^T)  K-unroll = QK head dim
+//    bk1 = bm0     -- GEMM1 (P^T*dO) K-unroll = M-dim
+//    bk2 = hdim    -- GEMM2 (dO*V^T) K-unroll = V head dim
+//    bk3 = bm0     -- GEMM3 (dS^T*Q) K-unroll = M-dim
 ///
 /// GFX9 fp16/bf16 constants (invariant across all head dims):
 ///   GEMM0/2: rm0=1, rn0=4, rk0=1, wm0=16, wn0=16, wk0=32

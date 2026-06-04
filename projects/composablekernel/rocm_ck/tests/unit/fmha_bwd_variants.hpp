@@ -87,7 +87,7 @@ static constexpr FmhaBwdDQDKDVVariant ALL_DQDKDV_VARIANTS[] = {
          .signature = {.dtype = DataType::FP16,
                        .hdim_q = 128, .hdim_v = 128,
                        .mode = FmhaMode::BATCH},
-         .algorithm = {.has_mask = true,
+         .algorithm = {.mask_type = FmhaMaskType::TOP_LEFT_CAUSAL,
                        .pad_hdim_q = 8, .pad_hdim_v = 8}})},
     // Bottom-right causal: same compiled spec as _cmask. The mask_type is
     // selected at runtime via args.scalars[fmha_bwd_dqdkdv_slots::MASK_TYPE].
@@ -99,7 +99,7 @@ static constexpr FmhaBwdDQDKDVVariant ALL_DQDKDV_VARIANTS[] = {
          .signature = {.dtype = DataType::FP16,
                        .hdim_q = 128, .hdim_v = 128,
                        .mode = FmhaMode::BATCH},
-         .algorithm = {.has_mask = true,
+         .algorithm = {.mask_type = FmhaMaskType::TOP_LEFT_CAUSAL,
                        .pad_hdim_q = 8, .pad_hdim_v = 8}})},
     // Sliding-window attention: same compiled spec as _cmask. window_size_left
     // and window_size_right are runtime-parametrized via scalar slots.
@@ -107,7 +107,7 @@ static constexpr FmhaBwdDQDKDVVariant ALL_DQDKDV_VARIANTS[] = {
          .signature = {.dtype = DataType::FP16,
                        .hdim_q = 128, .hdim_v = 128,
                        .mode = FmhaMode::BATCH},
-         .algorithm = {.has_mask = true,
+         .algorithm = {.mask_type = FmhaMaskType::TOP_LEFT_CAUSAL,
                        .pad_hdim_q = 8, .pad_hdim_v = 8}})},
     {"fmha_bwd_dqdkdv_fp16_d128_batch_det", makeSpec(FmhaBwdDQDKDVConfig{
          .signature = {.dtype = DataType::FP16,
@@ -129,7 +129,7 @@ static constexpr FmhaBwdDQDKDVVariant ALL_DQDKDV_VARIANTS[] = {
          .signature = {.dtype = DataType::FP16,
                        .hdim_q = 128, .hdim_v = 128,
                        .mode = FmhaMode::GROUP},
-         .algorithm = {.has_mask = true,
+         .algorithm = {.mask_type = FmhaMaskType::TOP_LEFT_CAUSAL,
                        .pad_hdim_q = 8, .pad_hdim_v = 8}})},
     {"fmha_bwd_dqdkdv_fp16_d128_group_det", makeSpec(FmhaBwdDQDKDVConfig{
          .signature = {.dtype = DataType::FP16,
@@ -210,7 +210,7 @@ static constexpr FmhaBwdDQDKDVVariant ALL_DQDKDV_VARIANTS[] = {
          .signature = {.dtype = DataType::FP16,
                        .hdim_q = 128, .hdim_v = 128,
                        .mode = FmhaMode::BATCH},
-         .algorithm = {.has_mask = true,
+         .algorithm = {.mask_type = FmhaMaskType::TOP_LEFT_CAUSAL,
                        .is_deterministic = true,
                        .pad_hdim_q = 8, .pad_hdim_v = 8}})},
 };
