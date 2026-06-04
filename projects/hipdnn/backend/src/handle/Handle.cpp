@@ -52,6 +52,6 @@ std::string hipdnnHandle::toString() const
     str += ", "
            + (_pluginResourceManager != nullptr ? _pluginResourceManager->toString()
                                                 : "pluginResourceManager=null");
-    str += "}";
+    str += '}';
     return str;
 }
