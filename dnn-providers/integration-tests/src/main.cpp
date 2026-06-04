@@ -3,6 +3,7 @@
 
 #include <argparse.hpp>
 #include <gtest/gtest.h>
+#include <hip/hip_runtime.h>
 
 #include <algorithm>
 #include <cctype>
@@ -49,6 +50,17 @@ bool engineIsLoaded(hipdnnHandle_t handle, std::string_view targetEngineName)
 
 int main(int argc, char** argv) noexcept
 {
+    // Shared hipdnn handle + HIP stream are created below before any fixture
+    // runs, so per-fixture SKIP_IF_NO_DEVICES is too late. Bail early on a
+    // no-GPU runner so ctest reports PASS.
+    int deviceCount = 0;
+    auto deviceStatus = hipGetDeviceCount(&deviceCount);
+    if(deviceStatus == hipErrorNoDevice || deviceCount == 0)
+    {
+        std::cout << "No HIP devices available; skipping " << argv[0] << "\n";
+        return 0;
+    }
+
     try
     {
         // Parse custom arguments before InitGoogleTest to avoid unknown flag warnings
