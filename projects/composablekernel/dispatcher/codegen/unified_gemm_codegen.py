@@ -198,6 +198,7 @@ class GemmVariant(Enum):
     STANDARD = "standard"
     PRESHUFFLE = "preshuffle"
     MULTI_D = "multi_d"
+    GROUPED = "grouped"
 
 
 # TileConfig imported from codegen_common
@@ -340,6 +341,8 @@ class KernelNaming:
             name += "_preshuffle"
         elif config.variant == GemmVariant.MULTI_D:
             name += f"_multid_{config.elementwise_op}_d{config.num_d_tensors}"
+        elif config.variant == GemmVariant.GROUPED:
+            name += "_grouped"
 
         return name
 
@@ -387,6 +390,13 @@ class CKTileKernelGenerator:
             includes += """
 #include "ck_tile/ops/elementwise/unary_element_wise_operation.hpp"
 #include "ck_tile/ops/gemm/kernel/gemm_multi_d_kernel.hpp"
+"""
+
+        if config.variant == GemmVariant.GROUPED:
+            includes += """
+#include <vector>
+#include <hip/hip_runtime.h>
+#include "ck_tile/ops/gemm/kernel/grouped_gemm_kernel.hpp"
 """
 
         if config.preshuffle:
@@ -545,6 +555,8 @@ using AccDataType = float;
         """Generate launch function"""
         if config.variant == GemmVariant.MULTI_D:
             return self._launch_function_multi_d(config)
+        if config.variant == GemmVariant.GROUPED:
+            return self._launch_function_grouped(config)
         if config.preshuffle:
             return self._launch_function_preshuffle(config)
         return self._launch_function_standard(config)
@@ -590,6 +602,58 @@ using AccDataType = float;
             ave_time = launch_kernel(stream,
                 make_kernel<kBlockPerCu>(GemmKernel{{}}, grids, blocks, 0, kargs));
             
+            return ave_time;
+        }};
+
+        BaseGemmPipeline::TailHandler(Run, has_hot_loop, tail_num);
+        return ave_time;
+    }}"""
+
+    def _launch_function_grouped(self, config: KernelConfig) -> str:
+        """Generate launch function for grouped GEMM"""
+        return f"""
+    static float launch(const std::vector<ck_tile::GroupedGemmHostArgs<>>& gemm_descs,
+                        const stream_config& stream) {{
+        const index_t num_groups = gemm_descs.size();
+        if(num_groups == 0) return 0.0f;
+
+        const index_t k_grain = TileK;
+        const index_t K_split = (gemm_descs[0].K + k_grain - 1) / k_grain * TileK;
+        const index_t num_loop = TilePartitioner::GetLoopNum(K_split);
+        const bool has_hot_loop = BaseGemmPipeline::BlockHasHotloop(num_loop);
+        const TailNumber tail_num = BaseGemmPipeline::GetBlockLoopTailNum(num_loop);
+
+        float ave_time{{0}};
+
+        constexpr auto scheduler = {self.tm.SCHEDULER_TO_CK[config.trait.scheduler]};
+
+        using UniversalGemmProblem = UniversalGemmPipelineProblem<
+            ADataType, BDataType, AccDataType, TileShape,
+            TileGemmUniversalTraits<kPadM, kPadN, kPadK, DoubleSmemBuffer,
+                                    ALayout, BLayout, CLayout, TransposeC,
+                                    UseStructuredSparsity, UsePersistentKernel,
+                                    NumWaveGroups, Preshuffle>,
+            scheduler>;
+
+        using GemmPipeline = {self.tm.PIPELINE_TO_CK[config.trait.pipeline]}<UniversalGemmProblem>;
+        {self._epilogue_code(config)}
+
+        using GemmKernel = ck_tile::GroupedGemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
+
+        const auto Run = [&](const auto has_hot_loop_, const auto tail_number_) {{
+            auto kargs = GemmKernel::MakeKernelArgs(gemm_descs);
+
+            if (!GemmKernel::IsSupportedArgument(kargs)) {{
+                throw std::runtime_error("Arguments not supported!");
+            }}
+
+            const dim3 grids  = GemmKernel::GridSize(gemm_descs);
+            const dim3 blocks = GemmKernel::BlockSize();
+
+            constexpr int kBlockPerCu = {config.k_block_per_cu};
+            ave_time = launch_kernel(stream,
+                make_kernel<kBlockPerCu>(GemmKernel{{}}, grids, blocks, 0, kargs));
+
             return ave_time;
         }};
 
@@ -1018,7 +1082,7 @@ class UnifiedGemmCodegen:
         """Get all configurations for a variant
 
         Args:
-            variant: GEMM variant (STANDARD, PRESHUFFLE, MULTI_D)
+            variant: GEMM variant (STANDARD, PRESHUFFLE, MULTI_D, GROUPED)
 
         Returns:
             List of valid kernel configurations for the variant
@@ -1078,6 +1142,11 @@ class UnifiedGemmCodegen:
                             d_layout=self.d_layout,  # Use extracted D layout
                         )
                     )
+
+            elif variant == GemmVariant.GROUPED:
+                # Grouped GEMM uses the same tile/trait configs as STANDARD —
+                # the only difference is the kernel type (GroupedGemmKernel vs GemmKernel)
+                configs.append(KernelConfig(tile=tile, trait=trait, variant=variant))
 
         return configs
 
@@ -1154,6 +1223,7 @@ class UnifiedGemmCodegen:
                 GemmVariant.STANDARD: OperatorType.GEMM,
                 GemmVariant.PRESHUFFLE: OperatorType.GEMM_PRESHUFFLE,
                 GemmVariant.MULTI_D: OperatorType.GEMM_MULTI_D,
+                GemmVariant.GROUPED: OperatorType.GEMM_GROUPED,
             }
             operator = variant_to_operator.get(variant, OperatorType.GEMM)
 
