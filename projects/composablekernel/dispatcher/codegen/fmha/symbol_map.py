@@ -143,6 +143,7 @@ QSCALE_CANONICAL = {
     "pertensor": "pertensor",
     "blockscale": "blockscale",
     "kv_blockscale": "kv_blockscale",
+    "per_token_head": "per_token_head",
 }
 
 QSCALE_TO_CPP = {
@@ -150,6 +151,7 @@ QSCALE_TO_CPP = {
     "pertensor": "ck_tile::BlockAttentionQuantScaleEnum::PERTENSOR",
     "blockscale": "ck_tile::BlockAttentionQuantScaleEnum::BLOCKSCALE",
     "kv_blockscale": "ck_tile::BlockAttentionQuantScaleEnum::KV_BLOCKSCALE",
+    "per_token_head": "ck_tile::BlockAttentionQuantScaleEnum::PER_TOKEN_HEAD",
 }
 
 QSCALE_TO_INT = {
@@ -157,6 +159,7 @@ QSCALE_TO_INT = {
     "pertensor": 1,
     "blockscale": 2,
     "kv_blockscale": 3,
+    "per_token_head": 5,
 }
 
 # Rotary embedding type → canonical form and C++ enum.

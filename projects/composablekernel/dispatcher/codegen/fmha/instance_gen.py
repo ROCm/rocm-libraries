@@ -1230,7 +1230,7 @@ def get_batch_prefill_pipelines(
     elif dtype == "fp8bf16":
         for logits, qscale, mask, bias, kvl, kvt in itertools.product(
             BOOLS,
-            ["pertensor", "kv_blockscale"],
+            ["pertensor", "kv_blockscale", "per_token_head"],
             MASKS,
             ["no"],
             ["vectorized", "linear"],
@@ -1516,6 +1516,7 @@ def expand_sweep(
     allowed_logits = _allow("logits")
     allowed_sink = _allow("sink")
     allowed_paged_kv = _allow("paged_kv")
+    allowed_qscale = _allow("qscale")
 
     # block_per_cu: int or list of ints to sweep
     bpc_entry = trait_cfg.get("block_per_cu", {})
@@ -1591,6 +1592,7 @@ def expand_sweep(
                     allowed_masks,
                     allowed_biases,
                     restrict_hdims=restrict_hdims,
+                    allowed_qscale=allowed_qscale,
                 )
         else:
             raise ValueError(f"Exhaustive mode not supported for variant {variant!r}")
@@ -1643,6 +1645,7 @@ def expand_sweep(
             allowed_masks,
             allowed_biases,
             restrict_hdims=restrict_hdims,
+            allowed_qscale=allowed_qscale,
         )
     elif variant == "bwd":
         configs = _expand_bwd(
@@ -2377,7 +2380,13 @@ def _expand_appendkv(arch, dtypes, receipt, restrict_hdims=None):
 
 
 def _expand_batch_prefill(
-    arch, dtypes, receipt, allowed_masks, allowed_biases, restrict_hdims=None
+    arch,
+    dtypes,
+    receipt,
+    allowed_masks,
+    allowed_biases,
+    restrict_hdims=None,
+    allowed_qscale=None,
 ):
     configs = []
     page_sizes = [1, 16, 1024]
@@ -2402,6 +2411,8 @@ def _expand_batch_prefill(
                     if allowed_masks is not None and mm not in allowed_masks:
                         continue
                     if allowed_biases is not None and mb not in allowed_biases:
+                        continue
+                    if allowed_qscale is not None and spec.qscale not in allowed_qscale:
                         continue
                     for ps in page_sizes:
                         if ps == 1 and spec.kv_memory_layout != "linear":

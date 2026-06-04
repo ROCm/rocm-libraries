@@ -629,6 +629,7 @@ class FmhaDispatcherLib:
             ctypes.c_int,  # has_logits
             ctypes.c_int,  # has_sink
             ctypes.c_int,  # skip_min_seqlen_q
+            ctypes.c_int,  # qscale_type (0=no,1=pertensor,3=kv_blockscale,5=per_token_head)
             ctypes.POINTER(ctypes.c_float),
         ]
         lib.fmha_dispatcher_run_batch_prefill.restype = ctypes.c_int
@@ -948,6 +949,7 @@ class FmhaRunner:
                 )
             elif api_family == "batch_prefill":
                 skip_min_sq = kwargs.get("skip_min_seqlen_q", 0)
+                qscale_type = kwargs.get("qscale_type", 0)
                 rc = lib.fmha_dispatcher_run_batch_prefill(
                     d_q,
                     d_k,
@@ -973,6 +975,7 @@ class FmhaRunner:
                     has_logits,
                     has_sink,
                     skip_min_sq,
+                    qscale_type,
                     ctypes.byref(time_ms),
                 )
             else:

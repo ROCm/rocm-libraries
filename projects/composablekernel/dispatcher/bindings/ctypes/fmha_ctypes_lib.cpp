@@ -1442,6 +1442,7 @@ int fmha_dispatcher_run_batch_prefill(const void* q_host,
                                       int has_logits,
                                       int has_sink,
                                       int skip_min_seqlen_q,
+                                      int qscale_type_int,
                                       float* time_ms_out)
 {
     if(!g_initialized)
@@ -1467,6 +1468,9 @@ int fmha_dispatcher_run_batch_prefill(const void* q_host,
     void *lse_dev = nullptr, *seqstart_q_dev = nullptr;
     void *kv_indptr_dev = nullptr, *kv_page_indices_dev = nullptr, *kv_last_page_dev = nullptr;
     void *seqlen_k_dev = nullptr, *bias_dev = nullptr, *sink_dev = nullptr;
+    // FP8 descale buffers (allocated only for quantized qscale modes).
+    void *q_descale_dev = nullptr, *k_descale_dev = nullptr, *v_descale_dev = nullptr;
+    const auto qscale_type = static_cast<quant_scale_enum>(qscale_type_int);
 
     fmha_batch_prefill_traits traits{};
     traits.hdim_q              = hdim_q;
@@ -1481,7 +1485,7 @@ int fmha_dispatcher_run_batch_prefill(const void* q_host,
     traits.has_logits_soft_cap = (has_logits != 0);
     traits.skip_min_seqlen_q   = (skip_min_seqlen_q != 0);
     traits.has_sink            = (has_sink != 0);
-    traits.qscale_type         = quant_scale_enum::no_scale;
+    traits.qscale_type         = qscale_type;
     traits.kv_memory_layout =
         static_cast<ck_tile::BlockAttentionKVCacheMemoryLayoutEnum>(kv_layout_int);
     traits.kv_lookup_table =
@@ -1502,6 +1506,31 @@ int fmha_dispatcher_run_batch_prefill(const void* q_host,
     for(int b = 0; b < batch; ++b)
         last_page[b] = seqlen_k - (pages_per_seq - 1) * page_block_size;
     std::vector<int> sk_vec(batch, seqlen_k);
+
+    // FP8 descale host buffers. Filled with 1.0 -- exact values do not affect
+    // kernel timing, only numerics; this harness benchmarks latency/TFLOPS.
+    const int total_q = batch * seqlen_q;
+    int64_t q_descale_count = 0, k_descale_count = 0, v_descale_count = 0;
+    if(qscale_type == quant_scale_enum::per_token_head)
+    {
+        q_descale_count = static_cast<int64_t>(total_q) * nhead_q;
+        k_descale_count = static_cast<int64_t>(total_pages) * page_block_size * nhead_k;
+        v_descale_count = nhead_k;
+    }
+    else if(qscale_type == quant_scale_enum::kv_blockscale)
+    {
+        q_descale_count = 1;
+        k_descale_count = static_cast<int64_t>(total_pages) * nhead_k;
+        v_descale_count = static_cast<int64_t>(total_pages) * nhead_k;
+    }
+    else if(qscale_type == quant_scale_enum::pertensor ||
+            qscale_type == quant_scale_enum::blockscale)
+    {
+        q_descale_count = k_descale_count = v_descale_count = 1;
+    }
+    std::vector<float> q_descale_host(q_descale_count, 1.0f);
+    std::vector<float> k_descale_host(k_descale_count, 1.0f);
+    std::vector<float> v_descale_host(v_descale_count, 1.0f);
 
     fmha_batch_prefill_args args{};
 
@@ -1556,13 +1585,38 @@ int fmha_dispatcher_run_batch_prefill(const void* q_host,
     HIP_CHECK(hipMemset(v_dev, 0, kv_page_bytes));
     HIP_CHECK(hipMemset(o_dev, 0, o_bytes));
 
+    if(q_descale_count > 0)
+    {
+        HIP_CHECK(hipMalloc(&q_descale_dev, q_descale_count * sizeof(float)));
+        HIP_CHECK(hipMemcpy(q_descale_dev,
+                            q_descale_host.data(),
+                            q_descale_count * sizeof(float),
+                            hipMemcpyHostToDevice));
+    }
+    if(k_descale_count > 0)
+    {
+        HIP_CHECK(hipMalloc(&k_descale_dev, k_descale_count * sizeof(float)));
+        HIP_CHECK(hipMemcpy(k_descale_dev,
+                            k_descale_host.data(),
+                            k_descale_count * sizeof(float),
+                            hipMemcpyHostToDevice));
+    }
+    if(v_descale_count > 0)
+    {
+        HIP_CHECK(hipMalloc(&v_descale_dev, v_descale_count * sizeof(float)));
+        HIP_CHECK(hipMemcpy(v_descale_dev,
+                            v_descale_host.data(),
+                            v_descale_count * sizeof(float),
+                            hipMemcpyHostToDevice));
+    }
+
     args.q_ptr           = q_dev;
     args.k_ptr           = k_dev;
     args.v_ptr           = v_dev;
     args.bias_ptr        = bias_dev;
-    args.q_descale_ptr   = nullptr;
-    args.k_descale_ptr   = nullptr;
-    args.v_descale_ptr   = nullptr;
+    args.q_descale_ptr   = q_descale_dev;
+    args.k_descale_ptr   = k_descale_dev;
+    args.v_descale_ptr   = v_descale_dev;
     args.rand_val_ptr    = nullptr;
     args.lse_ptr         = lse_dev;
     args.o_ptr           = o_dev;
@@ -1613,14 +1667,39 @@ int fmha_dispatcher_run_batch_prefill(const void* q_host,
     args.batch_stride_randval = 0;
     args.batch_stride_lse     = static_cast<int64_t>(nhead_q) * seqlen_q;
     args.batch_stride_o       = 0;
+    // Causal masks (top_left=1, bottom_right=2) require window_size_right=0 so the
+    // kernel applies the causal boundary and skips fully-masked K blocks. Leaving it
+    // at -1 makes make_generic_attention_mask_from_lr_window expand the right window
+    // to seqlen_k-1 (i.e. FULL attention), doubling the work vs the causal FLOP count
+    // and halving reported TFLOPS. -1 (no limit) is only correct for no_mask/generic.
     args.window_size_left     = -1;
-    args.window_size_right    = -1;
+    args.window_size_right    = (mask_type_int == 1 || mask_type_int == 2) ? 0 : -1;
     args.sink_size            = 0;
     args.mask_type            = mask_type_int;
     args.p_drop               = has_dropout ? 0.2f : 0.0f;
     args.s_randval            = false;
     args.drop_seed_offset     = has_dropout ? std::make_pair(uint64_t(1), uint64_t(0))
                                             : std::make_pair(uint64_t(0), uint64_t(0));
+
+    // Descale strides per quantization mode.
+    if(qscale_type == quant_scale_enum::per_token_head)
+    {
+        // q_descale: [total_q, nhead_q]; k_descale: [num_total_pages, page_block_size, nhead_k];
+        // v_descale: [nhead_k]. P-scale is left disabled (optional per-q-head path).
+        args.stride_q_descale_token       = nhead_q;
+        args.nhead_stride_q_descale       = 1;
+        args.nblock_stride_k_descale_page = static_cast<int64_t>(page_block_size) * nhead_k;
+        args.stride_k_descale_token       = nhead_k;
+        args.nhead_stride_k_descale       = 1;
+        args.nhead_stride_v_descale       = 1;
+        args.p_scale_ptr                  = nullptr;
+    }
+    else if(qscale_type == quant_scale_enum::kv_blockscale)
+    {
+        // k_descale/v_descale: [num_total_pages, nhead_k].
+        args.nblock_stride_kv_block_descale = nhead_k;
+        args.nhead_stride_kv_block_descale  = 1;
+    }
 
     try
     {
@@ -1667,6 +1746,9 @@ cleanup:
     safe_hip_free(seqlen_k_dev);
     safe_hip_free(bias_dev);
     safe_hip_free(sink_dev);
+    safe_hip_free(q_descale_dev);
+    safe_hip_free(k_descale_dev);
+    safe_hip_free(v_descale_dev);
     return rc;
 }
 

@@ -555,6 +555,15 @@ def main():
         print(f"  {'-' * 145}")
 
         _BIAS_INT = {"no": 0, "bias": 1, "alibi": 2}
+        _QSCALE_INT = {
+            "no": 0,
+            "pertensor": 1,
+            "blockscale": 2,
+            "kv_blockscale": 3,
+            "per_token_head": 5,
+        }
+        _KV_MEMORY_LAYOUT_INT = {"vectorized": 0, "linear": 1}
+        _KV_LOOKUP_INT = {"vllm": 0, "sglang": 1}
 
         # Build list of (config, setup, run_kwargs, ns) jobs for benchmarking
         bench_jobs = []
@@ -595,6 +604,17 @@ def main():
                 )
                 if api_family == "splitkv":
                     run_kwargs["num_splits"] = ns
+                if api_family == "batch_prefill":
+                    # Forward compile-time template params (page layout) and the
+                    # FP8 quant mode so the host allocates matching descale buffers.
+                    run_kwargs["page_size"] = config.page_size
+                    run_kwargs["kv_layout"] = _KV_MEMORY_LAYOUT_INT.get(
+                        config.kv_memory_layout, 0
+                    )
+                    run_kwargs["kv_lookup"] = _KV_LOOKUP_INT.get(
+                        config.kv_lookup_table, 1
+                    )
+                    run_kwargs["qscale_type"] = _QSCALE_INT.get(config.qscale, 0)
                 bench_jobs.append(
                     (config, setup, run_kwargs, ns, api_family, is_causal)
                 )

@@ -782,9 +782,11 @@ using fmha_trait = ck_tile::TileFmhaBatchPrefillTraits<{_bool_cpp(pad[0])},
                                                        {_qscale_cpp(sig["qscale"])},
                                                        {alg["block_per_cu"]},
                                                        false,
+                                                       {_bool_cpp(sig["sink"])},
                                                        {sig["page_size"]},
                                                        {_kv_memory_cpp(sig["kv_memory_layout"])},
-                                                       {_kv_lookup_cpp(sig["kv_lookup_table"])}>;
+                                                       {_kv_lookup_cpp(sig["kv_lookup_table"])},
+                                                       {"ck_tile::BlockAttentionKVCacheLoadModeEnum::GLOBAL_LOAD_LDS" if sig["page_size"] < tile[1] else "ck_tile::BlockAttentionKVCacheLoadModeEnum::BUFFER_LOAD"}>;
 using fmha_variant = ck_tile::ComposedAttention<{_bool_cpp(sig["logits"])} * ck_tile::LOGITS_SOFT_CAP,
                                                 CK_TILE_FMHA_FWD_FAST_EXP2>;
 using fmha_mask = {_mask_cpp(sig["mask"])};
@@ -833,9 +835,11 @@ using trait = fmha_fwd_batch_prefill_traits_<{sig["hdim_q"]},
                                              {_bool_cpp(pad[3])},
                                              false,
                                              false,
+                                             {_bool_cpp(sig["sink"])},
                                              {sig["page_size"]},
                                              {_kv_memory_cpp(sig["kv_memory_layout"])},
-                                             {_kv_lookup_cpp(sig["kv_lookup_table"])}>;
+                                             {_kv_lookup_cpp(sig["kv_lookup_table"])},
+                                             {"ck_tile::BlockAttentionKVCacheLoadModeEnum::GLOBAL_LOAD_LDS" if sig["page_size"] < tile[1] else "ck_tile::BlockAttentionKVCacheLoadModeEnum::BUFFER_LOAD"}>;
 }} // namespace {ns}
 
 template <>
