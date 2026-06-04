@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     June 2017
- * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -147,7 +147,7 @@ ROCSOLVER_KERNEL void lahr2_computeY_kernel(const rocblas_int mm,
                                             const rocblas_int ldf,
                                             const rocblas_stride strideF,
                                             T* tauA,
-                                            const rocblas_stride strideP)
+                                            const rocblas_stride strideT)
 {
     int bid = hipBlockIdx_z;
     int bidr = hipBlockIdx_x;
@@ -167,7 +167,7 @@ ROCSOLVER_KERNEL void lahr2_computeY_kernel(const rocblas_int mm,
     T* A = load_ptr_batch<T>(AA, bid, shiftA, strideA);
     T* Y = load_ptr_batch<T>(YA, bid, shiftY, strideY);
     T* F = load_ptr_batch<T>(FA, bid, shiftF, strideF);
-    T* tau = tauA + bid * strideP;
+    T* tau = tauA + bid * strideT;
 
     /* ------------------------
     formulate gemv problem:
@@ -330,14 +330,14 @@ ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS) lahr2_scale_set_tau(const I j,
                                                                       const rocblas_stride shiftF,
                                                                       const rocblas_stride strideF,
                                                                       T* tauA,
-                                                                      const rocblas_stride strideP)
+                                                                      const rocblas_stride strideT)
 {
     const auto bid = blockIdx.z;
     const auto tid = threadIdx.x;
 
     // select batch instance
     T* F = load_ptr_batch<T>(FA, bid, shiftF, strideF);
-    T* tau = load_ptr_batch<T>(tauA, bid, 0, strideP);
+    T* tau = load_ptr_batch<T>(tauA, bid, 0, strideT);
 
     const T t = *tau;
 
@@ -388,14 +388,14 @@ void rocsolver_lahr2_getMemorySize(const rocblas_int n,
     size_t larfg_norms;
     rocsolver_larfg_getMemorySize<T>(n - k, batch_count, &s2, &larfg_norms);
 
-    // norms[] stores nb EI values per batch (subdiagonal elements displaced by larfg)
+    // norms[] stores nb values per batch (subdiagonal elements displaced by larfg)
     *size_norms = std::max(larfg_norms, sizeof(T) * nb * batch_count);
 
     // work_workArr also used as trmv scratch (length nb per batch)
     *size_work_workArr = std::max({s1, s2, sizeof(T) * nb * batch_count});
 
     // separate w vector buffer (length nb per batch) for the update step trmv operations,
-    // kept separate from Tmat to avoid rocblas aliasing checks
+    // kept separate from F to avoid rocblas aliasing checks
     *size_work_vec = sizeof(T) * nb * batch_count;
 }
 
@@ -405,11 +405,11 @@ rocblas_status rocsolver_lahr2_argCheck(rocblas_handle handle,
                                         const rocblas_int k,
                                         const rocblas_int nb,
                                         const rocblas_int lda,
-                                        const rocblas_int ldt,
+                                        const rocblas_int ldf,
                                         const rocblas_int ldy,
                                         U A,
                                         T* tau,
-                                        T* Tmat,
+                                        T* F,
                                         U Y,
                                         const rocblas_int batch_count = 1)
 {
@@ -419,9 +419,9 @@ rocblas_status rocsolver_lahr2_argCheck(rocblas_handle handle,
     // N/A
 
     // 2. invalid size
-    // n=0 or n=1: quick return, not an error (LAPACK: IF(N.LE.1) RETURN)
+    // n=0 or n=1: quick return, not an error
     if(n < 0 || k < 1 || nb < 1 || (n > 1 && (k >= n || nb > n - k)) || lda < std::max(1, n)
-       || ldt < nb || ldy < std::max(1, n) || batch_count < 0)
+       || ldf < nb || ldy < std::max(1, n) || batch_count < 0)
         return rocblas_status_invalid_size;
 
     // skip pointer check if querying memory size
@@ -432,7 +432,7 @@ rocblas_status rocsolver_lahr2_argCheck(rocblas_handle handle,
     // n=0 is a quick return (no pointers needed)
     if(!n)
         return rocblas_status_success;
-    if(!A || !tau || !Tmat || !Y)
+    if(!A || !tau || !F || !Y)
         return rocblas_status_invalid_pointer;
 
     return rocblas_status_continue;
@@ -449,9 +449,9 @@ rocblas_status rocsolver_lahr2_template(rocblas_handle handle,
                                         const rocblas_stride strideA,
                                         T* tau,
                                         const rocblas_stride strideT,
-                                        T* Tmat,
-                                        const rocblas_int ldt,
-                                        const rocblas_stride strideN,
+                                        T* F,
+                                        const rocblas_int ldf,
+                                        const rocblas_stride strideF,
                                         U Y,
                                         const rocblas_int shiftY,
                                         const rocblas_int ldy,
@@ -463,10 +463,10 @@ rocblas_status rocsolver_lahr2_template(rocblas_handle handle,
                                         T* work_vec)
 {
     ROCSOLVER_ENTER("lahr2", "n:", n, "k:", k, "nb:", nb, "shiftA:", shiftA, "lda:", lda,
-                    "ldt:", ldt, "shiftY:", shiftY, "ldy:", ldy, "bc:", batch_count);
+                    "ldf:", ldf, "shiftY:", shiftY, "ldy:", ldy, "bc:", batch_count);
     using S = decltype(std::real(T{}));
 
-    // quick return (LAPACK: IF( N.LE.1 ) RETURN)
+    // quick return
     if(n <= 1 || nb == 0 || batch_count == 0)
         return rocblas_status_success;
 
@@ -479,16 +479,14 @@ rocblas_status rocsolver_lahr2_template(rocblas_handle handle,
 
     // scalars[0] = -1,  scalars[1] = 0,  scalars[2] = 1
     // work_vec: dedicated length-nb w vector per batch for the update step.
-    // Kept separate from Tmat to avoid rocblas aliasing checks in trmv.
+    // Kept separate from F to avoid rocblas aliasing checks in trmv.
     // stride_work: per-batch stride for both work_vec and the trmv scratch (work_workArr).
     rocblas_stride stride_work = rocblas_stride(nb);
+
+    // norms[j] = A(k+j, j) saved before larfg sets it to 1, restored at
+    // the start of the next iteration (or after the loop for j=nb-1).
+    // stride_work: per-batch stride for norms.
     rocblas_stride stride_norm = rocblas_stride(nb);
-
-    // norms[] stores EI values: norms[j] = A(k+j, j) saved before larfg sets it to 1,
-    // restored at the start of the next iteration (or after the loop for j=nb-1).
-
-    // Grid/block for copy_mat (vector copy: m=j, n=1 -> simple 1D launch)
-    // Computed inline where needed.
 
     // thread config for compute kernels.
     rocblas_int thr_computeY = BS2;
@@ -497,13 +495,9 @@ rocblas_status rocsolver_lahr2_template(rocblas_handle handle,
     rocblas_int grc_computeY = 1;
     size_t computeY_lmemsize = sizeof(T) * (thr_computeY * thc_computeY);
 
-    // -----------------------------------------------------------------------
-    // Main loop: i = 1..NB (LAPACK 1-based) -> j = 0..nb-1 (0-based)
-    // All matrix indices below are 0-based. Mapping to LAPACK 1-based:
-    //   LAPACK A(K+1, I)  ->  A[k + j,     j]      (diagonal pivot)
-    //   LAPACK A(K+1, 1)  ->  A[k,         0]      (start of panel)
-    //   LAPACK Y(K+1, I)  ->  Y[k,         j]
-    // -----------------------------------------------------------------------
+    // ------------------------------------------------------------------------
+    //                                Main loop
+    // ------------------------------------------------------------------------
     for(rocblas_int j = 0; j < nb; ++j)
     {
         if(j > 0)
@@ -512,7 +506,6 @@ rocblas_status rocsolver_lahr2_template(rocblas_handle handle,
             // Update A(k:n-1, j):
             //
             // (a) A(k:n-1, j) -= Y(k:n-1, 0:j-1) * conj(A(k+j-1, 0:j-1))
-            //     LAPACK: DGEMV('N', N-K, I-1, -ONE, Y(K+1,1), LDY, A(K+I-1,1), LDA, ONE, A(K+1,I), 1)
             // ----------------------------------------------------------------
             if(COMPLEX)
                 rocsolver_lacgv_template<T>(handle, j, A, shiftA + idx2D(k + j - 1, 0, lda), lda,
@@ -530,18 +523,17 @@ rocblas_status rocsolver_lahr2_template(rocblas_handle handle,
 
             // ----------------------------------------------------------------
             // (b) Apply (I - V*T^H*V^H) to A(k:n-1, j) from the left.
-            //     Uses Tmat(:, nb-1) as workspace w (length j).
+            //     Uses work_vec as workspace w (length j).
             //
             //     V = A(k:n-1, 0:j-1), split as:
             //       V1 = A(k:k+j-1, 0:j-1)   -- unit lower triangular
             //       V2 = A(k+j:n-1, 0:j-1)
             //     b = A(k:n-1, j) = [b1; b2]
             //
-            //     w  = V1^H * b1         (DCOPY + DTRMV lower ^H unit)
-            //     w += V2^H * b2         (DGEMV ^T)
-            //     w  = T^H * w           (DTRMV upper ^H non-unit)
-            //     b2 -= V2 * w           (DGEMV no-trans)
-            //     b1 -= V1 * w           (DTRMV lower no-trans unit + DAXPY)
+            //     w  = V1^H * b1 + V2^H * b2 = V^H * b (GEMV + TRMV lower ^H unit)
+            //     w  = T^H * w                         (TRMV upper ^H non-unit)
+            //     b2 -= V2 * w                         (GEMV)
+            //     b1 -= V1 * w                         (TRMV lower unit out-of-place)
             // ----------------------------------------------------------------
 
             // w = V^H * b
@@ -550,9 +542,9 @@ rocblas_status rocsolver_lahr2_template(rocblas_handle handle,
                                     dim3(NB), 0, stream, n, k, j, A, shiftA, lda, strideA, work_vec,
                                     stride_work);
 
-            // w = T^H * w  (DTRMV upper ^H non-unit)
+            // w = T^H * w  (TRMV upper ^H non-unit)
             rocblasCall_trmv<T>(handle, rocblas_fill_upper, rocblas_operation_conjugate_transpose,
-                                rocblas_diagonal_non_unit, j, Tmat, 0, ldt, strideN, work_vec, 0, 1,
+                                rocblas_diagonal_non_unit, j, F, 0, ldf, strideF, work_vec, 0, 1,
                                 stride_work, (T*)work_workArr, stride_work, batch_count);
 
             // b2 -= V2 * w
@@ -572,8 +564,7 @@ rocblas_status rocsolver_lahr2_template(rocblas_handle handle,
                 work_vec, 0, 1, stride_work, cast2constType<T>(scalars + 2), A,
                 shiftA + idx2D(k, j, lda), 1, strideA);
 
-            // Restore A(k+j-1, j-1) = EI saved from the previous iteration
-            // LAPACK: A(K+I-1, I-1) = EI
+            // Restore A(k+j-1, j-1) = norms[j-1] saved from the previous iteration
             ROCSOLVER_LAUNCH_KERNEL((restore_diag<T>), dim3(batch_count, 1, 1), dim3(1, 1, 1), 0,
                                     stream, (S*)norms, j - 1, stride_norm, A,
                                     shiftA + idx2D(k + j - 1, j - 1, lda), lda, strideA,
@@ -582,7 +573,7 @@ rocblas_status rocsolver_lahr2_template(rocblas_handle handle,
 
         // --------------------------------------------------------------------
         // Generate Householder reflector H(j+1) to annihilate A(k+j+1:n-1, j)
-        //  - Save EI = A(k+j, j) into norms[j], then set A(k+j, j) = 1
+        //  - Set norms[j] = A(k+j, j), then set A(k+j, j) = 1
         // --------------------------------------------------------------------
         rocsolver_larfg_template(handle, n - k - j, A, shiftA + idx2D(k + j, j, lda), (S*)norms, j,
                                  stride_norm, A, shiftA + idx2D(std::min(k + j + 1, n - 1), j, lda),
@@ -597,15 +588,15 @@ rocblas_status rocsolver_lahr2_template(rocblas_handle handle,
             rocblasCall_gemv<T>(handle, rocblas_operation_conjugate_transpose, n - k - j, j,
                                 cast2constType<T>(scalars + 2), 0, A, shiftA + idx2D(k + j, 0, lda),
                                 lda, strideA, A, shiftA + idx2D(k + j, j, lda), 1, strideA,
-                                cast2constType<T>(scalars + 1), 0, Tmat, idx2D(0, j, ldt), 1,
-                                strideN, batch_count, (T**)work_workArr);
+                                cast2constType<T>(scalars + 1), 0, F, idx2D(0, j, ldf), 1, strideF,
+                                batch_count, (T**)work_workArr);
         }
 
         // Y(k:n-1, j) = t * (A(k:n-1, j+1:n-k) * A(k+j:n-1, j) - Y(k:n-1, 0:j-1) * T(0:j-1, j))
         ROCSOLVER_LAUNCH_KERNEL(
             lahr2_computeY_kernel<T>, dim3(grr_computeY, grc_computeY, batch_count),
             dim3(thr_computeY, thc_computeY), computeY_lmemsize, stream, n, k, j, A, shiftA, lda,
-            strideA, Y, shiftY, ldy, strideY, Tmat, 0, ldt, strideN, tau, strideT);
+            strideA, Y, shiftY, ldy, strideY, F, 0, ldf, strideF, tau, strideT);
 
         // --------------------------------------------------------------------
         // Compute T(0:j, j)
@@ -613,31 +604,24 @@ rocblas_status rocsolver_lahr2_template(rocblas_handle handle,
 
         // T(0:j-1, j) *= -tau(j) and T(j, j) = tau(j)
         ROCSOLVER_LAUNCH_KERNEL((lahr2_scale_set_tau<BS1, T>), dim3(1, 1, batch_count),
-                                dim3(BS1, 1, 1), 0, stream, j, Tmat, idx2D(0, j, ldt), strideN,
+                                dim3(BS1, 1, 1), 0, stream, j, F, idx2D(0, j, ldf), strideF,
                                 tau + j, strideT);
         if(j > 0)
         {
             // T(0:j-1, j) = T(0:j-1, 0:j-1) * T(0:j-1, j)  (upper non-unit)
             rocblasCall_trmv<T>(handle, rocblas_fill_upper, rocblas_operation_none,
-                                rocblas_diagonal_non_unit, j, Tmat, 0, ldt, strideN, Tmat,
-                                idx2D(0, j, ldt), 1, strideN, (T*)work_workArr, stride_work,
-                                batch_count);
+                                rocblas_diagonal_non_unit, j, F, 0, ldf, strideF, F, idx2D(0, j, ldf),
+                                1, strideF, (T*)work_workArr, stride_work, batch_count);
         }
     }
 
-    // Restore A(k+nb-1, nb-1) = EI  (LAPACK: A(K+NB, NB) = EI, 1-based)
+    // Restore A(k+nb-1, nb-1) = norms[nb-1]
     ROCSOLVER_LAUNCH_KERNEL((restore_diag<T>), dim3(batch_count, 1, 1), dim3(1, 1, 1), 0, stream,
                             (S*)norms, nb - 1, stride_norm, A,
                             shiftA + idx2D(k + nb - 1, nb - 1, lda), lda, strideA, (rocblas_int)1);
 
     // ------------------------------------------------------------------------
-    // Compute Y(0:k-1, 0:nb-1)  (top k rows of Y, LAPACK post-loop block)
-    // LAPACK:
-    //   DLACPY('ALL', K, NB, A(1,2), LDA, Y, LDY)
-    //   DTRMM('R','L','N','U', K, NB, ONE, A(K+1,1), LDA, Y, LDY)
-    //   if N > K+NB:
-    //     DGEMM('N','N', K, NB, N-K-NB, ONE, A(1,2+NB), LDA, A(K+1+NB,1), LDA, ONE, Y, LDY)
-    //   DTRMM('R','U','N','N', K, NB, ONE, T, LDT, Y, LDY)
+    // Compute Y(0:k-1, 0:nb-1)  (top k rows of Y)
     // ------------------------------------------------------------------------
     if(k > 0)
     {
@@ -648,7 +632,7 @@ rocblas_status rocsolver_lahr2_template(rocblas_handle handle,
         static const T one = T(1);
         rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
 
-        // Y(0:k-1,:) = A(0:k-1, 1:nb) * A(k:k+nb-1, 0:nb-1) (lower unit right trmm)
+        // Y(0:k-1,:) = A(0:k-1, 1:nb) * A(k:k+nb-1, 0:nb-1)  (right trmm, lower unit)
         rocblasCall_trmm<T>(handle, rocblas_side_right, rocblas_fill_lower, rocblas_operation_none,
                             rocblas_diagonal_unit, k, nb, &one, 0, A, shiftA + idx2D(k, 0, lda),
                             lda, strideA, A, shiftA + idx2D(0, 1, lda), lda, strideA, Y, shiftY,
@@ -665,7 +649,7 @@ rocblas_status rocsolver_lahr2_template(rocblas_handle handle,
 
         // Y(0:k-1,:) *= T  (right trmm: Y = Y * T, upper non-unit)
         rocblasCall_trmm<T>(handle, rocblas_side_right, rocblas_fill_upper, rocblas_operation_none,
-                            rocblas_diagonal_non_unit, k, nb, &one, 0, Tmat, 0, ldt, strideN, Y,
+                            rocblas_diagonal_non_unit, k, nb, &one, 0, F, 0, ldf, strideF, Y,
                             shiftY, ldy, strideY, batch_count, (T**)work_workArr);
     }
 

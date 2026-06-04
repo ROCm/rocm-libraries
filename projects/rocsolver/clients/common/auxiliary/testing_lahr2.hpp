@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -280,7 +280,7 @@ void testing_lahr2(Arguments& argus)
     rocblas_local_handle handle;
     rocblas_int n = argus.get<rocblas_int>("n");
     rocblas_int k = argus.get<rocblas_int>("k", 1);
-    rocblas_int nb = argus.get<rocblas_int>("nb", std::min(10, n - k + 1));
+    rocblas_int nb = argus.get<rocblas_int>("nb", std::max(0, n - k + 1));
     rocblas_int lda = argus.get<rocblas_int>("lda", n);
     rocblas_int ldt = argus.get<rocblas_int>("ldt", nb);
     rocblas_int ldy = argus.get<rocblas_int>("ldy", n);
