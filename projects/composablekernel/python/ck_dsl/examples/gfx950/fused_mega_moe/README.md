@@ -10,34 +10,6 @@ fused-MoE kernel. This README is the runbook-style log of how the
 fp8 kernel went from **0.872 ms → 0.124 ms (T1 decode, ~7.1×)** — every lever
 that was kept, every lever that was reverted, and why.
 
-> **Headline correction (GRID-DISPATCH pass).** The campaign long concluded the
-> residual ~1.5× to hand-tuned asm was an irreducible **hand-tuned-asm codegen** ceiling. That was
-> wrong about the *dominant* T1 residual: the 1:1 ISA comparison drove the inner loop to
-> **100% ISA-identical** with hand-tuned asm and it was *still* ~1.5× slower — proving the gap
-> was not the inner loop. The real T1 residual was **grid dispatch**: our harness
-> padded `grid.y` to a fixed 8 m-blocks, but at T1 only 2 experts are active, so 6 of
-> 8 thread-groups were empty padding (**224 TGs vs hand-tuned asm's 56 — a 4× over-launch**).
-> The **active-tile-skip / de-pad grid** (`grid.y = Σ_e ceil(count_e/tile_m)`, the
-> production `_forward_dynamic` formula ported into the in-scope harness grid
-> function) closed it: **0.157 → 0.131 ms, grid (28,8,1) → (28,2,1)**, then **~1.25×
-> hand-tuned asm**. A follow-up **PERSISTENT-KERNEL** pass attacked the named T1 residual
-> directly — the per-TG / kernel-launch / grid-dispatch overhead on a tiny kernel —
-> by launching a fixed resident grid and looping each TG over multiple work-items
-> with per-item accumulator/quant/barrier re-init: **T1 0.131 → 0.124 ms (~1.21×
-> hand-tuned asm)**, and it **improved T8 to 0.144 ms** (still beating hand-tuned asm's *persistent*
-> T8 of 0.173). Persistent **shaved** the T1 dispatch residual but did **not** fully
-> close it — the remaining ~1.21× is the fixed per-TG prologue + launch floor on a
-> kernel this small (an in-scope-irreducible dispatch floor, not codegen). The XCD8
-> locality remap and the persistent-grid-size sweep were both tried and reverted
-> (neutral at decode-T1's 56-work-item count — the active-expert weights already fit
-> L2). See Appendix A → **GRID-DISPATCH** and **PERSISTENT-KERNEL**.
-
-> All numbers: MI355X (gfx950), ROCm 7.2, canonical decode shape
-> **T=1, E=8, K=2, H=4096, I=7168**, fp8 e4m3 block-scale, **kernel-only** (no
-> router/sort), warm best-of-N. **Only same-session ratios are valid** — the box
-> thermally throttles ~25–30%, so absolute ms drift between sessions; compare a
-> kernel against the hand-tuned asm/baseline number measured *in the same run*.
-
 ## What this example shows
 
 - A correct, single-kernel fused MoE (gate+up GEMM → SiLU → **Hidden kept in
