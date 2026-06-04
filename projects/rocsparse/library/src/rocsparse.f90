@@ -42,6 +42,16 @@ module rocsparse
             type(c_ptr) :: handle
         end function rocsparse_create_handle
 
+        function rocsparse_create_handle_with_stream(handle, stream) &
+                bind(c, name = 'rocsparse_create_handle_with_stream')
+            use rocsparse_enums
+            use iso_c_binding
+            implicit none
+            integer(kind(rocsparse_status_success)) :: rocsparse_create_handle_with_stream
+            type(c_ptr) :: handle
+            type(c_ptr), value :: stream
+        end function rocsparse_create_handle_with_stream
+
         function rocsparse_destroy_handle(handle) &
                 bind(c, name = 'rocsparse_destroy_handle')
             use rocsparse_enums

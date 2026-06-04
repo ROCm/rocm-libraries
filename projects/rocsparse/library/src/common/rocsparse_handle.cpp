@@ -38,11 +38,20 @@ ROCSPARSE_KERNEL(1) void init_kernel(){};
  * Uses function-try-block to ensure cleanup of partially-allocated GPU resources
  * if an exception is thrown during initialization.
  ******************************************************************************/
-_rocsparse_handle::_rocsparse_handle()
+_rocsparse_handle::_rocsparse_handle(hipStream_t user_stream)
 {
     try
     {
         ROCSPARSE_ROUTINE_TRACE;
+
+        // Associate the handle with the user-provided stream before any
+        // stream-ordered setup work is enqueued. When user_stream is the
+        // default value (0) this preserves the historical behavior; when a
+        // non-default stream is supplied, all warm-up work below is routed
+        // onto that stream so handle creation never touches the default
+        // (NULL) stream and therefore never implicitly synchronizes with the
+        // user's other streams.
+        this->stream = user_stream;
 
         // Default device is active device
         THROW_IF_HIP_ERROR(hipGetDevice(&device));

@@ -55,6 +55,32 @@ ROCSPARSE_EXPORT
 rocsparse_status rocsparse_create_handle(rocsparse_handle* handle);
 
 /*! \ingroup aux_module
+ *  \brief Create a rocSPARSE handle on a user-defined stream.
+ *
+ *  \details
+ *  \p rocsparse_create_handle_with_stream behaves like \ref rocsparse_create_handle,
+ *  but associates the handle with the user-provided \p stream before performing any
+ *  setup work. All stream-ordered initialization is then enqueued on \p stream rather
+ *  than the default (NULL) stream. Because the default stream implicitly synchronizes
+ *  with all other streams on the device, using a dedicated stream prevents handle
+ *  creation from blocking work the user has already enqueued on their own streams.
+ *  The handle should be destroyed at the end using rocsparse_destroy_handle().
+ *
+ *  @param[out]
+ *  handle  the pointer to the handle to the rocSPARSE library context.
+ *  @param[in]
+ *  stream  the user-defined stream to associate with the handle and to use for
+ *          all stream-ordered setup work during creation.
+ *
+ *  \retval rocsparse_status_success the initialization succeeded.
+ *  \retval rocsparse_status_invalid_handle \p handle pointer is invalid.
+ *  \retval rocsparse_status_internal_error an internal error occurred.
+ */
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_create_handle_with_stream(rocsparse_handle* handle,
+                                                     hipStream_t       stream);
+
+/*! \ingroup aux_module
  *  \brief Destroy a rocSPARSE handle.
  *
  *  \details

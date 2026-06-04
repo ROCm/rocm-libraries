@@ -589,6 +589,30 @@ catch(...)
 // LCOV_EXCL_STOP
 
 /********************************************************************************
+ * \brief rocsparse_create_handle_with_stream creates the rocsparse library
+ * context on a user-defined stream. All stream-ordered setup work performed
+ * during creation is enqueued on the provided stream (which also becomes the
+ * handle stream), so handle creation never touches the default (NULL) stream
+ * and never implicitly blocks work the user has enqueued on their own streams.
+ *******************************************************************************/
+rocsparse_status rocsparse_create_handle_with_stream(rocsparse_handle* handle, hipStream_t stream)
+try
+{
+    ROCSPARSE_ROUTINE_TRACE;
+
+    ROCSPARSE_CHECKARG_POINTER(0, handle);
+    *handle = new _rocsparse_handle(stream);
+    rocsparse::log_trace(*handle, "rocsparse_create_handle_with_stream", stream);
+    return rocsparse_status_success;
+    // LCOV_EXCL_START
+}
+catch(...)
+{
+    RETURN_ROCSPARSE_EXCEPTION();
+}
+// LCOV_EXCL_STOP
+
+/********************************************************************************
  * \brief destroy handle
  *******************************************************************************/
 rocsparse_status rocsparse_destroy_handle(rocsparse_handle handle)
