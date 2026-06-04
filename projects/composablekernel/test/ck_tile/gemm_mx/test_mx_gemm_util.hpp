@@ -158,7 +158,8 @@ class TestMxGemmUtil : public ::testing::Test
         return packed;
     }
 
-    void Run(ck_tile::index_t M, ck_tile::index_t N, ck_tile::index_t K, ck_tile::index_t k_batch = 1)
+    void
+    Run(ck_tile::index_t M, ck_tile::index_t N, ck_tile::index_t K, ck_tile::index_t k_batch = 1)
     {
         const ck_tile::index_t scale_k_size = K / 32;
         const ck_tile::index_t stride_A =
@@ -246,8 +247,7 @@ class TestMxGemmUtil : public ::testing::Test
                          ScaleM,
                          ScaleN,
                          true,
-                         false>(args,
-                                ck_tile::stream_config{});
+                         false>(args, ck_tile::stream_config{});
         }
         else
         {
@@ -311,8 +311,7 @@ class TestMxGemmUtil : public ::testing::Test
                          ScaleM,
                          ScaleN,
                          true,
-                         false>(args,
-                                ck_tile::stream_config{});
+                         false>(args, ck_tile::stream_config{});
         }
 
         c_dev_buf.FromDevice(c_host.data());

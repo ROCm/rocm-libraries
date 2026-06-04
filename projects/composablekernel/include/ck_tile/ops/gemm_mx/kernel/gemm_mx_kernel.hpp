@@ -196,8 +196,7 @@ struct MXGemmKernel : UniversalGemmKernel<TilePartitioner_, MXGemmPipeline_, Epi
     // size that combination is not instantiated, so such a config cannot run split-K. For all
     // shipped tile shapes GetVectorSizeC() is even, so this is defensive rather than reachable.
     static constexpr bool kSplitKAtomicAddSupported =
-        EpiloguePipeline::GetVectorSizeC() % 2 == 0 ||
-        !is_any_of<EDataType, fp16_t, bf16_t>::value;
+        EpiloguePipeline::GetVectorSizeC() % 2 == 0 || !is_any_of<EDataType, fp16_t, bf16_t>::value;
 
     [[nodiscard]] CK_TILE_HOST static const std::string GetName()
     {
@@ -590,12 +589,11 @@ struct MXGemmKernel : UniversalGemmKernel<TilePartitioner_, MXGemmPipeline_, Epi
 
         return generate_tuple(
             [&](auto) {
-                return make_tile_window(
-                    b_flat_tensor_view,
-                    make_tuple(number<MXGemmPipeline::flatNPerWarp>{},
-                               number<MXGemmPipeline::flatKPerWarp>{}),
-                    {static_cast<int>(i_n / BlockGemmShape::WarpTile::at(I1)),
-                     static_cast<int>(k_flat_offset)});
+                return make_tile_window(b_flat_tensor_view,
+                                        make_tuple(number<MXGemmPipeline::flatNPerWarp>{},
+                                                   number<MXGemmPipeline::flatKPerWarp>{}),
+                                        {static_cast<int>(i_n / BlockGemmShape::WarpTile::at(I1)),
+                                         static_cast<int>(k_flat_offset)});
             },
             number<NumBTensor>{});
     }
@@ -689,14 +687,14 @@ struct MXGemmKernel : UniversalGemmKernel<TilePartitioner_, MXGemmPipeline_, Epi
         const auto& a_block_window = [&]() {
             if constexpr(MXGemmPipeline::Preshuffle)
             {
-                // The preshuffle A async-load (MakeMX_AAsyncLoadBytesDramWindow) rebuilds the A view
-                // with a *packed* descriptor, i.e. it assumes the leading (M) stride equals the
-                // view's K extent. That only holds when the extent equals stride_A, which is the
-                // case for k_batch == 1 (splitted_k == K) but NOT for split-K (splitted_k < K):
-                // a packed extent of splitted_k would stride M by splitted_k instead of stride_A and
-                // read the wrong rows (only row 0 lands correctly). Use the full K extent so the
-                // packed M stride matches stride_A. The as_ptr K-offset already selects this k_id's
-                // slice and num_loop bounds the blocks read, so reads stay within
+                // The preshuffle A async-load (MakeMX_AAsyncLoadBytesDramWindow) rebuilds the A
+                // view with a *packed* descriptor, i.e. it assumes the leading (M) stride equals
+                // the view's K extent. That only holds when the extent equals stride_A, which is
+                // the case for k_batch == 1 (splitted_k == K) but NOT for split-K (splitted_k < K):
+                // a packed extent of splitted_k would stride M by splitted_k instead of stride_A
+                // and read the wrong rows (only row 0 lands correctly). Use the full K extent so
+                // the packed M stride matches stride_A. The as_ptr K-offset already selects this
+                // k_id's slice and num_loop bounds the blocks read, so reads stay within
                 // [as_k_split_offset, as_k_split_offset + splitted_k) <= K (in-allocation).
                 return Underlying::MakeABlockWindows(as_ptr, kargs, kargs.K, i_m);
             }
