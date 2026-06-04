@@ -250,6 +250,18 @@ public:
         log_arguments(*handle->log_bench_os, " ", std::forward<Ts>(xs)..., atomics_str);
     }
 
+    // if kernel-select logging is turned on with
+    // (handle->layer_mode & rocblas_layer_mode_log_kernel_select) != 0
+    // log_kernel_select emits one space-separated line per internal GEMM sub-problem to the
+    // trace stream. The line is formatted like a rocblas-bench invocation so it can be copied
+    // and replayed directly; trailing kernel-selection metadata is conventionally placed in a
+    // `# source=... kernel=... fallback_from=... parent_api=...` comment by the caller.
+    template <typename... Ts>
+    void log_kernel_select(rocblas_handle handle, Ts&&... xs)
+    {
+        log_arguments(*handle->log_trace_os, " ", std::forward<Ts>(xs)...);
+    }
+
     // if profile logging is turned on with
     // (handle->layer_mode & rocblas_layer_mode_log_profile) != 0
     // log_profile will call rocblas_internal_argument_profile to profile actual arguments,

@@ -33,6 +33,7 @@
 #include "hipblaslt_host.hpp"
 #endif
 
+#include "int64_helpers.hpp"
 #include "logging.hpp"
 #include "tensile_host.hpp"
 
@@ -709,7 +710,9 @@ namespace
                 rocblas_layer_mode layer_mode
                     = static_cast<rocblas_layer_mode>(strtol(str_layer_mode, 0, 0));
 
-                if(layer_mode & (rocblas_layer_mode_log_trace | rocblas_layer_mode_log_internal))
+                if(layer_mode
+                   & (rocblas_layer_mode_log_trace | rocblas_layer_mode_log_internal
+                      | rocblas_layer_mode_log_kernel_select))
                 {
                     char buf[256];
                     rocblas_get_version_string(buf, 256);
@@ -1234,6 +1237,15 @@ rocblas_status runContractionProblem(const RocblasContractionProblem<Ti, To, Tc>
     rocblas_status status            = rocblas_status_internal_error;
     bool           hipblaslt_backend = false;
 
+    // Per-sub-problem kernel-selection state, consumed by rocblas_layer_mode_log_kernel_select (0x10).
+    // Capture is gated by the layer bit to avoid the std::string copy of solution->name() when off.
+    const bool kernel_select_logging
+        = prob.handle->layer_mode & rocblas_layer_mode_log_kernel_select;
+    bool        hipblaslt_attempted      = false;
+    int32_t     selected_hipblaslt_index = -1;
+    std::string selected_tensile_name;
+    int64_t     selected_tensile_index = -1;
+
     bool solutionBased = algo == rocblas_gemm_algo_solution_index;
     bool hipBLASLtOnly = false, TensileOnly = false;
     bool useDefaultSolution = rocblas_default_solution_index(solution_index);
@@ -1249,12 +1261,17 @@ rocblas_status runContractionProblem(const RocblasContractionProblem<Ti, To, Tc>
 #ifdef BUILD_WITH_HIPBLASLT
         if(useHipBLASLt(prob))
         {
+            hipblaslt_attempted = true;
             try
             {
                 rocblas_int hipblaslt_idx = map_index_rocblas_to_hipblaslt(solution_index);
 
                 rocblas_internal_ostream msg;
-                auto hipblasltResult = runContractionProblemHipBlasLT(prob, algo, hipblaslt_idx);
+                auto                     hipblasltResult = runContractionProblemHipBlasLT(
+                    prob,
+                    algo,
+                    hipblaslt_idx,
+                    kernel_select_logging ? &selected_hipblaslt_index : nullptr);
 
                 if(hipblasltResult == rocblas_status_success || (solutionBased && hipBLASLtOnly))
                 {
@@ -1316,6 +1333,12 @@ rocblas_status runContractionProblem(const RocblasContractionProblem<Ti, To, Tc>
 
             if(!solution && fallbackTensileProblem(tensile_prob))
                 solution = library->findBestSolution(tensile_prob, *hardware, fitness_query);
+
+            if(solution && kernel_select_logging)
+            {
+                selected_tensile_name  = solution->name();
+                selected_tensile_index = solution->index;
+            }
 
             if(!solution)
             {
@@ -1426,6 +1449,93 @@ rocblas_status runContractionProblem(const RocblasContractionProblem<Ti, To, Tc>
                          prob.col_stride_c,
                          (void*)prob.D,
                          prob.col_stride_d);
+    }
+
+    // ROCBLAS_LAYER=0x10 (rocblas_layer_mode_log_kernel_select):
+    // one rocblas-bench-replayable line per internal GEMM sub-problem, with kernel-selection
+    // metadata in a trailing `#` comment so the line itself remains copy-pasteable.
+    if(kernel_select_logging && status == rocblas_status_success)
+    {
+        std::string alphas, betas;
+        (void)rocblas_internal_log_bench_alpha_beta_ex(
+            rocblas_datatype_from_type<Tc>, prob.alpha, prob.beta, alphas, betas);
+
+        const char* source   = hipblaslt_backend ? "hipblaslt" : "tensile";
+        const char* fallback = (hipblaslt_attempted && !hipblaslt_backend) ? "hipblaslt" : "none";
+        const char* parent_api
+            = prob.handle->current_api_name ? prob.handle->current_api_name : "unknown";
+
+        rocblas_internal_ostream kernel_field;
+        if(hipblaslt_backend)
+            kernel_field << "kernel=hipblaslt_algo_index=" << selected_hipblaslt_index;
+        else if(!selected_tensile_name.empty())
+            kernel_field << "kernel=" << selected_tensile_name
+                         << " tensile_index=" << selected_tensile_index;
+        else
+            kernel_field << "kernel=unknown";
+
+        rocblas_internal_ostream source_field;
+        source_field << "# source=" << source;
+
+        rocblas_internal_ostream fallback_field;
+        fallback_field << "fallback_from=" << fallback;
+
+        rocblas_internal_ostream parent_field;
+        parent_field << "parent_api=" << parent_api;
+
+        rocblas_internal_logger logger;
+        logger.log_kernel_select(prob.handle,
+                                 ROCBLAS_API_BENCH " -f gemm_strided_batched_ex",
+                                 "--transposeA",
+                                 rocblas_transpose_letter(prob.trans_a),
+                                 "--transposeB",
+                                 rocblas_transpose_letter(prob.trans_b),
+                                 "-m",
+                                 prob.m,
+                                 "-n",
+                                 prob.n,
+                                 "-k",
+                                 prob.k,
+                                 alphas,
+                                 "--a_type",
+                                 rocblas_datatype_string(rocblas_datatype_from_type<Ti>),
+                                 "--lda",
+                                 prob.col_stride_a,
+                                 "--stride_a",
+                                 prob.batch_stride_a,
+                                 "--b_type",
+                                 rocblas_datatype_string(rocblas_datatype_from_type<Ti>),
+                                 "--ldb",
+                                 prob.col_stride_b,
+                                 "--stride_b",
+                                 prob.batch_stride_b,
+                                 betas,
+                                 "--c_type",
+                                 rocblas_datatype_string(rocblas_datatype_from_type<To>),
+                                 "--ldc",
+                                 prob.col_stride_c,
+                                 "--stride_c",
+                                 prob.batch_stride_c,
+                                 "--d_type",
+                                 rocblas_datatype_string(rocblas_datatype_from_type<To>),
+                                 "--ldd",
+                                 prob.col_stride_d,
+                                 "--stride_d",
+                                 prob.batch_stride_d,
+                                 "--batch_count",
+                                 prob.batch_count,
+                                 "--compute_type",
+                                 rocblas_datatype_string(rocblas_datatype_from_type<Tc>),
+                                 "--algo",
+                                 (int)algo,
+                                 "--solution_index",
+                                 solution_index,
+                                 "--flags",
+                                 (uint32_t)prob.flags,
+                                 source_field.str(),
+                                 kernel_field.str(),
+                                 fallback_field.str(),
+                                 parent_field.str());
     }
 
     return status;

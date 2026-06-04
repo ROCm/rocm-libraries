@@ -45,7 +45,8 @@
 template <typename Ti, typename To, typename Tc>
 rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti, To, Tc>& problem,
                                               rocblas_gemm_algo algo = rocblas_gemm_algo_standard,
-                                              int32_t           solution_index = 0);
+                                              int32_t           solution_index          = 0,
+                                              int32_t*          selected_algo_index_out = nullptr);
 
 template <typename Ti, typename To, typename Tc>
 rocblas_status getAllSolutionsHipBlasLT(const RocblasContractionProblem<Ti, To, Tc>& prob,

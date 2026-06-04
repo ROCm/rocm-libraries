@@ -5,6 +5,10 @@ rocBLAS documentation is available at
 
 ## rocBLAS 5.5.0
 
+### Added
+
+* `ROCBLAS_LAYER=0x10` (`rocblas_layer_mode_log_kernel_select`): emits a `rocblas-bench`-replayable line per internal GEMM sub-problem, annotated with the selected kernel name/index and the source backend (`hipblaslt`, `tensile`, or `source`). Useful for decomposing higher-level BLAS3 calls (`trsm`, `trmm`, `syrk`, ...) into individually benchmarkable kernels without parsing `TENSILE_DB`. Lines also carry `fallback_from=` and `parent_api=` for context.
+
 ## rocBLAS 5.4.0
 
 ### Added

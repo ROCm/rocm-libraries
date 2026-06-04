@@ -31,7 +31,9 @@
 
 #include "check_numerics_matrix.hpp"
 #include "handle.hpp"
+#include "int64_helpers.hpp"
 #include "logging.hpp"
+#include "utility.hpp"
 
 /*
  * ===========================================================================
@@ -162,6 +164,83 @@ rocblas_status rocblas_internal_gemm(rocblas_handle    handle,
                          LOG_TRACE_SCALAR_VALUE(handle, beta),
                          C,
                          ldc);
+    }
+
+    // ROCBLAS_LAYER=0x10 (rocblas_layer_mode_log_kernel_select): bench-style line for the
+    // source-GEMM fallback path. Reached when Tensile returned not_implemented (or BUILD_WITH_TENSILE
+    // is off), so fallback_from is "tensile" when Tensile was built in, else "none".
+    if(handle->layer_mode & rocblas_layer_mode_log_kernel_select)
+    {
+#ifdef BUILD_WITH_TENSILE
+        const char* fallback = "tensile";
+#else
+        const char* fallback = "none";
+#endif
+        const char* parent_api
+            = handle->current_api_name ? handle->current_api_name : "unknown";
+
+        rocblas_internal_ostream kernel_field;
+        kernel_field << "kernel=rocblas_gemm_source_solution_64";
+        rocblas_internal_ostream source_field;
+        source_field << "# source=source";
+        rocblas_internal_ostream fallback_field;
+        fallback_field << "fallback_from=" << fallback;
+        rocblas_internal_ostream parent_field;
+        parent_field << "parent_api=" << parent_api;
+
+        rocblas_internal_logger logger;
+        logger.log_kernel_select(handle,
+                                 ROCBLAS_API_BENCH " -f gemm_strided_batched_ex",
+                                 "--transposeA",
+                                 rocblas_transpose_letter(trans_a),
+                                 "--transposeB",
+                                 rocblas_transpose_letter(trans_b),
+                                 "-m",
+                                 m,
+                                 "-n",
+                                 n,
+                                 "-k",
+                                 k,
+                                 LOG_BENCH_SCALAR_VALUE(handle, alpha),
+                                 "--a_type",
+                                 rocblas_precision_string<TScal>,
+                                 "--lda",
+                                 lda,
+                                 "--stride_a",
+                                 stride_a,
+                                 "--b_type",
+                                 rocblas_precision_string<TScal>,
+                                 "--ldb",
+                                 ldb,
+                                 "--stride_b",
+                                 stride_b,
+                                 LOG_BENCH_SCALAR_VALUE(handle, beta),
+                                 "--c_type",
+                                 rocblas_precision_string<TScal>,
+                                 "--ldc",
+                                 ldc,
+                                 "--stride_c",
+                                 stride_c,
+                                 "--d_type",
+                                 rocblas_precision_string<TScal>,
+                                 "--ldd",
+                                 ldc,
+                                 "--stride_d",
+                                 stride_c,
+                                 "--batch_count",
+                                 batch_count,
+                                 "--compute_type",
+                                 rocblas_precision_string<TScal>,
+                                 "--algo",
+                                 0,
+                                 "--solution_index",
+                                 0,
+                                 "--flags",
+                                 0,
+                                 source_field.str(),
+                                 kernel_field.str(),
+                                 fallback_field.str(),
+                                 parent_field.str());
     }
 
     if(k == 0 || (alpha && *alpha == 0))
