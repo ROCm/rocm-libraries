@@ -261,7 +261,7 @@ class ConfigureCITest(unittest.TestCase):
     @patch("therock_configure_ci.get_modified_paths")
     def test_benchmark_tool_only_runs_nightly(self, mock_get_modified):
         # A tool-only PR is skippable (no build) but still runs the benchmark in
-        # nightly mode: run_benchmark true, benchmark_projects empty.
+        # nightly mode.
         mock_get_modified.return_value = [
             "projects/hipdnn/tools/dnn-benchmarking/src/main.py",
         ]
@@ -271,8 +271,7 @@ class ConfigureCITest(unittest.TestCase):
         )
 
         self.assertEqual(plan.projects, [])
-        self.assertTrue(plan.run_benchmark)
-        self.assertEqual(plan.benchmark_projects, "")
+        self.assertEqual(plan.benchmark, therock_configure_ci.BenchmarkMode.NIGHTLY)
 
     @patch("therock_configure_ci.get_modified_paths")
     def test_benchmark_hipdnn_change_runs_run_id(self, mock_get_modified):
@@ -285,8 +284,7 @@ class ConfigureCITest(unittest.TestCase):
             {"is_pull_request": True, "base_ref": "HEAD^"}
         )
 
-        self.assertTrue(plan.run_benchmark)
-        self.assertEqual(plan.benchmark_projects, "hipdnn")
+        self.assertEqual(plan.benchmark, therock_configure_ci.BenchmarkMode.RUN_ID)
 
     @patch("therock_configure_ci.get_modified_paths")
     def test_benchmark_unrelated_change_does_not_run(self, mock_get_modified):
@@ -296,8 +294,7 @@ class ConfigureCITest(unittest.TestCase):
             {"is_pull_request": True, "base_ref": "HEAD^"}
         )
 
-        self.assertFalse(plan.run_benchmark)
-        self.assertEqual(plan.benchmark_projects, "")
+        self.assertEqual(plan.benchmark, therock_configure_ci.BenchmarkMode.OFF)
 
 
 if __name__ == "__main__":

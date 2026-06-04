@@ -10,6 +10,7 @@ import json
 import logging
 import subprocess
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 import sys
 from therock_matrix import subtree_to_project_map, collect_projects_to_run
@@ -28,17 +29,24 @@ logging.basicConfig(level=logging.INFO)
 SCRIPT_DIR = Path(__file__).resolve().parent
 
 
+class BenchmarkMode(Enum):
+    """How (if at all) the hipDNN benchmark smoke gate runs this event."""
+
+    # This run built hipDNN -> install its freshly-built artifacts by run-id.
+    RUN_ID = "run-id"
+    # hipDNN not built (e.g. tool-only change) -> install latest-nightly dist.
+    NIGHTLY = "nightly"
+    # Benchmark does not run.
+    OFF = "off"
+
+
 @dataclass
 class CIPlan:
     """Result of resolving a CI event into work to run."""
 
     projects: list
     test_type: str
-    # Whether the hipDNN benchmark smoke gate runs at all.
-    run_benchmark: bool
-    # "hipdnn" -> run-id install (this run built hipDNN); "" -> latest-nightly.
-    # Forwarded verbatim to the reusable's projects_to_test input.
-    benchmark_projects: str
+    benchmark: BenchmarkMode
 
 
 # Paths matching any of these patterns are considered to have no influence over
@@ -216,13 +224,14 @@ def retrieve_projects(args):
 
         # If only skippable paths were modified, skip CI. A tool-only PR still
         # runs the benchmark (nightly install), even though the build is skipped.
+        skipped_mode = BenchmarkMode.NIGHTLY if tool_changed else BenchmarkMode.OFF
         if not contains_non_skippable_files:
             logging.info("Only skippable paths were modified, skipping CI")
-            return CIPlan([], test_type, tool_changed, "")
+            return CIPlan([], test_type, skipped_mode)
 
         if "skip-therockci" in pr_labels:
             logging.info("`skip-therockci` label was added, skipping CI")
-            return CIPlan([], test_type, tool_changed, "")
+            return CIPlan([], test_type, skipped_mode)
 
     subtrees = get_changed_path_projects(modified_paths)
 
@@ -249,26 +258,36 @@ def retrieve_projects(args):
 
     project_to_run = collect_projects_to_run(subtrees)
 
-    # run-id mode when this run actually builds hipDNN; otherwise nightly. The
-    # mode is carried to the reusable as projects_to_test ("hipdnn" vs "").
+    # run-id when this run actually builds hipDNN; nightly when only a tool
+    # changed; off otherwise.
     hipdnn_built = any("hipdnn" in p["projects_to_test"] for p in project_to_run)
-    run_benchmark = hipdnn_built or tool_changed
-    benchmark_projects = "hipdnn" if hipdnn_built else ""
+    if hipdnn_built:
+        benchmark = BenchmarkMode.RUN_ID
+    elif tool_changed:
+        benchmark = BenchmarkMode.NIGHTLY
+    else:
+        benchmark = BenchmarkMode.OFF
 
-    return CIPlan(project_to_run, test_type, run_benchmark, benchmark_projects)
+    return CIPlan(project_to_run, test_type, benchmark)
 
 
 def run(args):
     platform = args.get("platform")
     plan = retrieve_projects(args)
     build_runs_on = select_build_runner(platform)
+    # RUN_ID carries "hipdnn" to the reusable's projects_to_test (keys its
+    # HIPDNN_BUILT install switch); NIGHTLY/OFF carry "".
     set_github_output(
         {
             f"{platform}_projects": json.dumps(plan.projects),
             "test_type": plan.test_type,
             "build_runs_on": build_runs_on,
-            "run_hipdnn_benchmark": "true" if plan.run_benchmark else "false",
-            "hipdnn_benchmark_projects": plan.benchmark_projects,
+            "run_hipdnn_benchmark": (
+                "true" if plan.benchmark != BenchmarkMode.OFF else "false"
+            ),
+            "hipdnn_benchmark_projects": (
+                "hipdnn" if plan.benchmark == BenchmarkMode.RUN_ID else ""
+            ),
         }
     )
 
