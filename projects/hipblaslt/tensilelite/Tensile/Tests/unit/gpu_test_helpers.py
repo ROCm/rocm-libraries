@@ -26,8 +26,6 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TENSILE_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", ".."))
 sys.path.insert(0, TENSILE_ROOT)
 
-from hip import hip, hiprtc  # type: ignore
-
 from unittest.mock import MagicMock
 from types import SimpleNamespace
 from dataclasses import dataclass
@@ -586,6 +584,8 @@ def run_on_gpu(co_path, output_size, inputs=(), scalars=(), lds_size=0, num_thre
     Returns:
         bytes: Raw output buffer contents.
     """
+    from hip import hip  # type: ignore
+
     if num_threads is None:
         num_threads = NUM_THREADS
     hip_check(hip.hipInit(0))
