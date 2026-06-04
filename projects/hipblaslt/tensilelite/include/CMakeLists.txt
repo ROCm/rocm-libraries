@@ -144,6 +144,15 @@ if(HIPBLASLT_ENABLE_HOST)
     # (tensilelitehost/export.h, pulled in by the public Tensile/Macros.hpp) is a
     # second header set rooted at the build tree. Both are installed by the
     # install(TARGETS ... FILE_SET ...) call in ../CMakeLists.txt.
+    # The public Tensile headers expose rocisa::DataType (Tensile/DataTypes.hpp
+    # includes <rocisa/include/enum.hpp>), so the one rocisa header that leaks into
+    # the public surface must ship with them. rocisa-cpp is header-only (INTERFACE)
+    # and otherwise build-interface only; enum.hpp is self-contained (only <string>),
+    # so a single curated header rooted at the rocisa source tree installs under
+    # <prefix>/include/rocisa/include/ and resolves via the include path the export
+    # already carries -- no rocisa co-export or find_dependency needed. Single-owner
+    # like the Tensile headers: only this hipBLASLt-owned build installs it.
+    get_filename_component(_rocisa_include_root "${CMAKE_CURRENT_SOURCE_DIR}/../rocisa" ABSOLUTE)
     target_sources(tensilelite-host
         PUBLIC
             FILE_SET tensilelite_public_headers TYPE HEADERS
@@ -152,6 +161,9 @@ if(HIPBLASLT_ENABLE_HOST)
             FILE_SET tensilelite_generated_headers TYPE HEADERS
                 BASE_DIRS "${CMAKE_CURRENT_BINARY_DIR}"
                 FILES "${CMAKE_CURRENT_BINARY_DIR}/tensilelitehost/export.h"
+            FILE_SET rocisa_public_headers TYPE HEADERS
+                BASE_DIRS "${_rocisa_include_root}"
+                FILES "${_rocisa_include_root}/rocisa/include/enum.hpp"
     )
 else()
     # Fork build (e.g. hipSPARSELt, HOST OFF): no header install. Attach the public
