@@ -208,9 +208,9 @@ __global__ void __launch_bounds__(256, MIN_OCC)
 #endif
             }
 #pragma unroll
-            for (int mi = 0; mi < M_PW; mi++)
+            for (int ni = 0; ni < N_PW; ni++)  // N-major: B-operand reuse (outer)
 #pragma unroll
-                for (int ni = 0; ni < N_PW; ni++)
+                for (int mi = 0; mi < M_PW; mi++)
                     mfma_scale_f32_32x32x64_fp6<0>(acc[mi][ni], a[mi], b[ni], sav[mi], sbv[ni]);
         }
     };

@@ -42,12 +42,12 @@ int main(int argc, char** argv) {
 
     void *dA, *dB;
     uint8_t *dsA, *dsB;
-    float* dD;
+    __half* dD;  // perf default = FP16 (production output type)
     hipMalloc(&dA, Aq.packed_data.size());
     hipMalloc(&dB, Bq.packed_data.size());
     hipMalloc(&dsA, saC.data.size());
     hipMalloc(&dsB, sbC.data.size());
-    hipMalloc(&dD, (size_t)M * N * 4);
+    hipMalloc(&dD, (size_t)M * N * sizeof(__half));
     hipMemcpy(dA, Aq.packed_data.data(), Aq.packed_data.size(), hipMemcpyHostToDevice);
     hipMemcpy(dB, Bq.packed_data.data(), Bq.packed_data.size(), hipMemcpyHostToDevice);
     hipMemcpy(dsA, saC.data.data(), saC.data.size(), hipMemcpyHostToDevice);
@@ -57,7 +57,7 @@ int main(int argc, char** argv) {
     dim3 g(M / MT, N / NT), blk(256);
     int lds = 2 * (MT * (KT * 6 / 8) + NT * (KT * 6 / 8));
     auto launch = [&] {
-        lds_gemm_db<MT, NT, KT, WM, WN, 1, SWZ, true>
+        lds_gemm_db<MT, NT, KT, WM, WN, 1, SWZ, true, __half>
             <<<g, blk, lds>>>(dA, dB, dsA, dsB, dD, N, Kp / 64, A_rs, B_rs);
     };
 

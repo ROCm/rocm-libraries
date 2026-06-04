@@ -221,9 +221,12 @@ static bool choose_square(Tile, int, int) { return false; }
 // short and it's neutral-to-negative (-0.6~2.1%), so gate strictly on N. (M is irrelevant:
 // at tiny M the remap degenerates to the identity mapping, so it never hurts.)
 static int choose_swz(Tile t, int M, int N) {
-    // LDS 256-tile: swz16 (n-band L2 reuse) pays off when N>=M (enough n-blocks to
-    // populate the band as WGs walk down M); for M>N it hurts (-1.3%). Measured.
-    if (t == TLDS) return (N >= M) ? 16 : 0;
+    // LDS 256-tile: swz16 (n-band L2 reuse) pays off only for WIDE shapes N>M (enough
+    // n-blocks to populate the band as WGs walk down M; 2048x8192 +7.6%). For M>N it
+    // hurts. NOTE (FP16 perf default, 06-03): on SQUARE grids (N==M) swz now flips
+    // NEGATIVE (8192^3 -0.8%, 4096^2 -1.2%, both stable over 2 runs) -> exclude N==M.
+    // The F32-era rule was N>=M; FP16's half store retraffics L2 so the square case lost.
+    if (t == TLDS) return (N > M) ? 32 : 0;  // swz32 beats swz16 on all LDS-routed shapes
     if (t != T512) return 0;
     return (N / 512 >= 16) ? 16 : 0;
 }
@@ -367,8 +370,9 @@ static void lds_launch_t(int M, int N, int Kp, const void* dA, const void* dB,
 template <typename OutT = float>
 static void lds_launch(int swz, int M, int N, int Kp, const void* dA, const void* dB,
                        const uint8_t* dsA, const uint8_t* dsB, OutT* dD, int A_rs, int B_rs) {
-    if (swz == 16) lds_launch_t<16, OutT>(M, N, Kp, dA, dB, dsA, dsB, dD, A_rs, B_rs);
-    else           lds_launch_t<0, OutT>(M, N, Kp, dA, dB, dsA, dsB, dD, A_rs, B_rs);
+    if      (swz == 32) lds_launch_t<32, OutT>(M, N, Kp, dA, dB, dsA, dsB, dD, A_rs, B_rs);
+    else if (swz == 16) lds_launch_t<16, OutT>(M, N, Kp, dA, dB, dsA, dsB, dD, A_rs, B_rs);
+    else                lds_launch_t<0, OutT>(M, N, Kp, dA, dB, dsA, dsB, dD, A_rs, B_rs);
 }
 // Prep for the LDS kernel: A packed (shared format), B PLAIN [N][K] (not preshuffled),
 // scales tile-grouped. K padded to a multiple of LDS_KT with zeros (no effect on result).
@@ -501,7 +505,8 @@ static bool correct(int M, int N, int K, Tile t, bool square, int swz = 0) {
     return e < tol;
 }
 
-template <typename OutT = float>
+// Perf default = FP16 (production output type); correctness still validates in F32.
+template <typename OutT = __half>
 static double bench(int M, int N, int K, Tile t, bool square, int swz = 0) {
     if (t == TLDS) return lds_bench<OutT>(M, N, K, swz);
     std::mt19937 rng(42);
@@ -555,7 +560,7 @@ int main() {
               {512, 1280, 512, T640, false, 0}, {256, 256, 256, T256, false, 0},
               {256, 128, 256, T128, false, 0},
               {512, 512, 1024, TLDS, false, 0},      // LDS deep-K (K padded 1024->1152)
-              {512, 8192, 1024, TLDS, false, 16}};   // LDS + swz16
+              {512, 8192, 1024, TLDS, false, 32}};   // LDS + swz32 (was swz16)
     for (auto& c : cs) {
         tot++;
         if (correct(c.M, c.N, c.K, c.t, c.sq, c.swz)) ok++;
@@ -563,7 +568,7 @@ int main() {
     printf("%d/%d\n", ok, tot);
     if (ok != tot) return 1;
 
-    printf("\n=== Dispatch + benchmark (heuristic (tile,shape) vs all) ===\n");
+    printf("\n=== Dispatch + benchmark (heuristic (tile,shape) vs all) [FP16 output] ===\n");
     struct S {
         int M, N, K;
     };

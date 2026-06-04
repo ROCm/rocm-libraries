@@ -91,8 +91,9 @@ static bool correct(int M, int N, int K) {
     return ok;
 }
 
+// Perf default = FP16 (production output type); correctness still validates in F32.
 template <int MT, int NT, int KT, int WM, int WN, int OCC = 1, int SWZ = 0, bool DB = true,
-          typename OutT = float>
+          typename OutT = __half>
 static double bench(int M, int N, int K) {
     std::mt19937 rng(42);
     std::uniform_real_distribution<float> d(-1, 1);
@@ -158,6 +159,8 @@ int main() {
     ok += correct<128, 256, 256, 2, 2, 1, 0, false>(256, 512, 1024); tot++;  // 8acc KT256 single
     ok += correct<256, 256, 192, 2, 2, 1, 0, true>(512, 512, 1024); tot++;   // KT192 DB (K-tail: rem=1 k64)
     ok += correct<256, 256, 192, 2, 2, 1, 16, true>(512, 8192, 1024); tot++; // KT192 DB swz16
+    ok += correct<256, 256, 192, 2, 2, 1, 32, true>(512, 8192, 1024); tot++; // KT192 DB swz32
+    ok += correct<256, 256, 192, 2, 2, 1, 32, true>(512, 512,  1024); tot++; // KT192 DB swz32 small-N
     printf("%d/%d\n", ok, tot);
 #ifndef NOSCALE
     if (ok != tot) return 1;
@@ -185,5 +188,42 @@ int main() {
     printf("  F32  @8192^3 : %.0f\n", bench<256, 256, 192, 2, 2, 1, 16, true, float>(8192, 8192, 8192));
     printf("  F16  @8192^3 : %.0f\n", bench<256, 256, 192, 2, 2, 1, 16, true, __half>(8192, 8192, 8192));
     printf("  BF16 @8192^3 : %.0f\n", bench<256, 256, 192, 2, 2, 1, 16, true, __hip_bfloat16>(8192, 8192, 8192));
+
+    // (5) SWZ retune sweep: V17-tuned SWZ=16 may not be optimal for the LDS kernel's
+    // 256x256 layout. Data shows SWZ=0 (plain) beats SWZ=16 at 8192^3. Test new
+    // widths {8,12,24,32} alongside {0,16} at the LDS-routed shapes.
+    // Any NEW SWZ beating best(swz0,swz16) by >=1% is a dispatcher-variant candidate.
+    printf("\n=== (5) SWZ sweep: 256x256 KT192 DB __half N-major ===\n");
+    printf("             SWZ=0   SWZ=8  SWZ=12  SWZ=16  SWZ=24  SWZ=32\n");
+    {
+        double v0  = bench<256,256,192,2,2,1, 0,true,__half>(8192,8192,8192);
+        double v8  = bench<256,256,192,2,2,1, 8,true,__half>(8192,8192,8192);
+        double v12 = bench<256,256,192,2,2,1,12,true,__half>(8192,8192,8192);
+        double v16 = bench<256,256,192,2,2,1,16,true,__half>(8192,8192,8192);
+        double v24 = bench<256,256,192,2,2,1,24,true,__half>(8192,8192,8192);
+        double v32 = bench<256,256,192,2,2,1,32,true,__half>(8192,8192,8192);
+        printf("  8192x8192: %6.0f  %6.0f  %6.0f  %6.0f  %6.0f  %6.0f\n",
+               v0, v8, v12, v16, v24, v32);
+    }
+    {
+        double v0  = bench<256,256,192,2,2,1, 0,true,__half>(4096,8192,8192);
+        double v8  = bench<256,256,192,2,2,1, 8,true,__half>(4096,8192,8192);
+        double v12 = bench<256,256,192,2,2,1,12,true,__half>(4096,8192,8192);
+        double v16 = bench<256,256,192,2,2,1,16,true,__half>(4096,8192,8192);
+        double v24 = bench<256,256,192,2,2,1,24,true,__half>(4096,8192,8192);
+        double v32 = bench<256,256,192,2,2,1,32,true,__half>(4096,8192,8192);
+        printf("  4096x8192: %6.0f  %6.0f  %6.0f  %6.0f  %6.0f  %6.0f\n",
+               v0, v8, v12, v16, v24, v32);
+    }
+    {
+        double v0  = bench<256,256,192,2,2,1, 0,true,__half>(2048,8192,8192);
+        double v8  = bench<256,256,192,2,2,1, 8,true,__half>(2048,8192,8192);
+        double v12 = bench<256,256,192,2,2,1,12,true,__half>(2048,8192,8192);
+        double v16 = bench<256,256,192,2,2,1,16,true,__half>(2048,8192,8192);
+        double v24 = bench<256,256,192,2,2,1,24,true,__half>(2048,8192,8192);
+        double v32 = bench<256,256,192,2,2,1,32,true,__half>(2048,8192,8192);
+        printf("  2048x8192: %6.0f  %6.0f  %6.0f  %6.0f  %6.0f  %6.0f\n",
+               v0, v8, v12, v16, v24, v32);
+    }
     return 0;
 }
