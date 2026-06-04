@@ -4868,6 +4868,18 @@ class Solution(collections.abc.Mapping):
         state["PrefetchLocalRead"] = min(state["PrefetchLocalRead"], state["LoopIters"]-1)
         if state["LoopIters"] % (state["PrefetchLocalRead"]+1) != 0:
           reject(state, "dot2 kernel does not support LoopIters(%u) %% (PLR+1)(%u) != 0" % (state["LoopIters"], state["PrefetchLocalRead"]+1))
+      else:
+        # Plain non-MI ThreadTile MAC kernels: PrefetchLocalRead > 1 produces INCORRECT results.
+        # The non-MI lgkmcnt wait scheduling in KernelWriter._makeSubIterSchedule (else branch,
+        # ~L2534) lacks prefetch-depth accounting: at PLR>=2 (numVgprBuffer=PLR+1>=3) the MAC's
+        # s_waitcnt is too permissive and the MAC can execute against a local-read buffer whose
+        # ds_load has not retired -> stale LDS -> wrong output. Verified on gfx1151: PLR=2 gives
+        # 128/128 incorrect (both scalar MAC and VOPD), PLR=1 PASSES. A proper fix requires
+        # porting the MI branch's dataAtIter/skipReadsIter prefetch-depth accounting into the
+        # non-MI lgkmcnt path (complicated by numItersPLR = PLR % LoopIters); until then we clamp
+        # to <=1 so a fast-but-wrong PLR>=2 kernel can never be generated for non-MI MAC.
+        if state["PrefetchLocalRead"] > 1:
+          state["PrefetchLocalRead"] = 1
 
     # reject iterations are not enough to use wider local read
     if state["EnableMatrixInstruction"] and state["PrefetchLocalRead"] > 0:
