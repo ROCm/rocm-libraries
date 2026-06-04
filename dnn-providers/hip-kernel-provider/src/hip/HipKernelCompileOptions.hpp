@@ -27,21 +27,8 @@ public:
         const hipDeviceProp_t& deviceProps,
         const std::optional<hip_kernel_utils::ActivationMode>& optActivationMode = std::nullopt)
     {
-        auto rocmPath
-            = hipdnn_data_sdk::utilities::trim(hipdnn_data_sdk::utilities::getEnv("ROCM_PATH"));
-        if(!rocmPath.empty())
-        {
-            auto rocmIncludeArg = std::string("-I") + rocmPath + "/include";
-            _baseCompileOptions.emplace_back(rocmIncludeArg);
-            HIPDNN_PLUGIN_LOG_INFO(
-                "HipKernelProvider: HIPRTC compile ROCm include path: " << rocmIncludeArg);
-        }
-        else
-        {
-            HIPDNN_PLUGIN_LOG_WARN(
-                "HipKernelProvider: ROCM_PATH is not set, HIPRTC compile might fail if "
-                "ROCm headers are not in include paths");
-        }
+        // Kernels use C++17 features (if constexpr, scoped-enum brace-init).
+        _baseCompileOptions.emplace_back("-std=c++17");
 
         // Add device arch to compile options
         _baseCompileOptions.emplace_back(std::string("--offload-arch=") + deviceProps.gcnArchName);
@@ -52,7 +39,7 @@ public:
         // Add activation options if activation is fused
         if(optActivationMode.has_value())
         {
-            int nrnOpId = static_cast<int>(optActivationMode.value());
+            const int nrnOpId = static_cast<int>(optActivationMode.value());
             add("HIP_PLUGIN_NRN_OP_ID", nrnOpId);
         }
     }
@@ -72,7 +59,7 @@ public:
         {
             std::string option = "-D";
             option += name;
-            option += "=";
+            option += '=';
             option += value;
             compileOptions.emplace_back(std::move(option));
         }

@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -104,29 +104,26 @@ const static std::vector<std::vector<size_t>> ooffset_range = {{0, 0}, {1, 1}};
 auto forward_transform_types
     = {fft_transform_type_complex_forward, fft_transform_type_real_forward};
 
-INSTANTIATE_TEST_SUITE_P(
-#ifdef _WIN32
-    DISABLED_callback_no_offset,
-#else
-    callback,
-#endif
-    accuracy_test,
-    ::testing::ValuesIn(param_generator_base(test_prob,
-                                             forward_transform_types,
-                                             callback_sizes,
-                                             precision_range_sp_dp,
-                                             batch_range,
-                                             generate_types,
-                                             stride_range,
-                                             stride_range,
-                                             ioffset_range_zero,
-                                             ooffset_range_zero,
-                                             place_range,
-                                             false,
-                                             true)),
-    accuracy_test::TestName);
-
+// function pointer callbacks need -fgpu-rdc, but that causes build
+// nondeterminism in kpack
 INSTANTIATE_TEST_SUITE_P(DISABLED_callback,
+                         accuracy_test,
+                         ::testing::ValuesIn(param_generator_base(test_prob,
+                                                                  forward_transform_types,
+                                                                  callback_sizes,
+                                                                  precision_range_sp_dp,
+                                                                  batch_range,
+                                                                  generate_types,
+                                                                  stride_range,
+                                                                  stride_range,
+                                                                  ioffset_range_zero,
+                                                                  ooffset_range_zero,
+                                                                  place_range,
+                                                                  false,
+                                                                  callbacks_full)),
+                         accuracy_test::TestName);
+
+INSTANTIATE_TEST_SUITE_P(DISABLED_callback_offset,
                          accuracy_test,
                          ::testing::ValuesIn(param_generator_base(test_prob,
                                                                   forward_transform_types,
@@ -140,7 +137,7 @@ INSTANTIATE_TEST_SUITE_P(DISABLED_callback,
                                                                   ooffset_range,
                                                                   place_range,
                                                                   false,
-                                                                  true)),
+                                                                  callbacks_full)),
                          accuracy_test::TestName);
 
 // one of the obvious use cases for callbacks is to implement result

@@ -213,7 +213,7 @@ std::string ReductionOperationDescriptor::toString() const
     str += (_data.is_deterministic ? "true" : "false");
     str += ", compute_data_type=";
     str += hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(_computeDataType);
-    str += "}";
+    str += '}';
     return str;
 }
 

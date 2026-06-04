@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -524,14 +524,14 @@ public:
                                static_cast<size_t>(0),
                                [](size_t s, const fft_field& f) { return s + f.bricks.size(); });
     }
-    fft_status set_callbacks(std::vector<void*>* load_cb_func,
-                             std::vector<void*>* load_cb_data,
-                             std::vector<void*>* store_cb_func,
-                             std::vector<void*>* store_cb_data,
-                             size_t              load_cb_shared_mem_bytes  = 0,
-                             size_t              store_cb_shared_mem_bytes = 0) override
+    fft_status set_funcptr_callbacks(std::vector<void*>* load_cb_func,
+                                     std::vector<void*>* load_cb_data,
+                                     std::vector<void*>* store_cb_func,
+                                     std::vector<void*>* store_cb_data,
+                                     size_t              load_cb_shared_mem_bytes  = 0,
+                                     size_t              store_cb_shared_mem_bytes = 0) override
     {
-        if(run_callbacks)
+        if(run_callbacks == fft_callback_type_funcptr)
         {
             if(!hipfft_transform_type)
                 throw std::runtime_error("callbacks require a valid hipfftType");
@@ -846,10 +846,10 @@ public:
     }
 
     // call the hipFFT APIs to distribute data to multiple GPUs
-    void multi_gpu_prepare(std::vector<hostbuf>& /* unused */,
-                           std::vector<gpubuf>& ibuffer,
-                           std::vector<void*>&  pibuffer,
-                           std::vector<void*>&  pobuffer) override
+    void multi_gpu_prepare(const std::vector<hostbuf>& /* unused */,
+                           const std::vector<gpubuf>& ibuffer,
+                           std::vector<void*>&        pibuffer,
+                           std::vector<void*>&        pobuffer) override
     {
         if(multiGPU <= 1)
             return;

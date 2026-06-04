@@ -74,6 +74,8 @@ TIMING_HIERARCHY = {
                 "python_wsol_prepare_cache": {},
                 "python_wsol_prepare_nocache": {},
             },
+            "python_wsol_header": {},
+            "python_wsol_dump": {},
         },
         "python_client_execution": {
             "hip_initialization": {},
@@ -95,6 +97,7 @@ TIMING_HIERARCHY = {
                 "validate_gpu_sync": {},
                 "validate_gpu_readback": {},
                 "validate_element_comparison": {},
+                "validate_mismatch_printing": {},
             },
             "gpu_input_preparation": {},
             "gpu_input_reset": {},

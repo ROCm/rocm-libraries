@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -77,6 +77,7 @@ class DataInitName(Enum):
   TrigIndCos = 24
   TrigIndAbsSin = 25
   TrigIndAbsCos = 26
+  UniformLowPrecision = 27
 
 class ClientLogLevel(Enum):
   Error = 0
@@ -213,6 +214,10 @@ def runNewClient(scriptPath, clientParametersPath, cxxCompiler: str, cCompiler: 
   iniFile = "--config-file={}".format(clientParametersPath)
   args = [clientExe, iniFile]
 
+  # Add MX scale format if set
+  if globalParameters["MXScaleFormat"]:
+    args.extend(["--mx-scale-format", str(globalParameters["MXScaleFormat"])])
+
   try:
     subprocess.run(args, check=True)
   except (subprocess.CalledProcessError, OSError) as e:
@@ -328,8 +333,9 @@ def writeRunScript(path, forBenchmark, enableTileSelection, cxxCompiler: str, cC
 
     clientExe = getClientExecutablePath()
     timingFlag = " --timing-instrumentation" if globalParameters["TimingInstrumentation"] else ""
+    mxScaleFormatFlag = " --mx-scale-format {}".format(globalParameters["MXScaleFormat"]) if globalParameters["MXScaleFormat"] else ""
     for configFile in configPaths:
-      runScriptFile.write("{} --config-file {}{}\n".format(clientExe, configFile, timingFlag))
+      runScriptFile.write("{} --config-file {}{}{}\n".format(clientExe, configFile, timingFlag, mxScaleFormatFlag))
     runScriptFile.write("ERR2=$?\n\n")
 
     runScriptFile.write("""
@@ -351,8 +357,9 @@ fi
         runScriptFile.write("%s -d 0 --resetclocks\n" % globalParameters["ROCmSMIPath"])
         runScriptFile.write("%s -d 0 --setfan 50\n" % globalParameters["ROCmSMIPath"])
   else:
+    mxScaleFormatFlag = " --mx-scale-format {}".format(globalParameters["MXScaleFormat"]) if globalParameters["MXScaleFormat"] else ""
     for configFile in configPaths:
-      runScriptFile.write("{} --config-file {} --best-solution 1\n".format(getClientExecutablePath(), configFile))
+      runScriptFile.write("{} --config-file {} --best-solution{}\n".format(getClientExecutablePath(), configFile, mxScaleFormatFlag))
 
   if os.name != "nt":
     runScriptFile.write("exit $ERR\n")
@@ -551,7 +558,7 @@ def pruneModeName(mode):
     if mode == 5: return 'Prune0X0X'
     if mode == 6: return 'Prune00XX'
 
-def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs, activationArgs, icacheFlushArgs, problemType, sourceDir, codeObjectFiles, resultsFileName, parametersFilePath, deviceId: int, gfxName: str, libraryFile=None, probSolMap={}):
+def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs, activationArgs, icacheFlushArgs, problemType, sourceDir, codeObjectFiles, resultsFileName, parametersFilePath, deviceId: int, gfxName: str, libraryFile, probSolMap={}):
 
     assert os.path.exists(sourceDir), f"sourceDir={sourceDir} does not exist"
 
@@ -559,9 +566,6 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         def param(key, value):
             f.write("{}={}\n".format(key, value))
 
-        if libraryFile is None:
-          libraryFilename = "TensileLibrary.yaml" if globalParameters["LibraryFormat"] == "yaml" else "TensileLibrary.dat"
-          libraryFile = os.path.join(sourceDir, "library", libraryFilename)
         param("library-file", libraryFile)
 
         for coFile in codeObjectFiles:
@@ -728,11 +732,14 @@ def writeClientConfig(
       deviceId: int,
       gfxName: str,
       configBase = "ClientParameters",
-      libraryFile = None,
-      probSolMap = {}
+      *,
+      libraryFile,
+      probSolMap = {},
+      sourceDir = None
     ):
 
-    sourceDir = os.path.join(stepBaseDir, "source")
+    if sourceDir is None:
+        sourceDir = os.path.join(stepBaseDir, "source")
 
     if tileAwareSelection:
       filename = os.path.join(sourceDir, "%s_Granularity.ini"%configBase)
@@ -770,7 +777,9 @@ def CreateBenchmarkClientParametersForSizes(libraryRootPath, problemSizes, dataF
       problemTypeDict = metaData["ProblemType"]
       problemType = ContractionsProblemType.FromOriginalState(problemTypeDict)
 
-    writeClientConfigIni(True, problemSizes, "", "", "", "", problemType, libraryRootPath, codeObjectFiles, dataFilePath, configFile, deviceId, gfxName)
+    libraryExt = ".yaml" if globalParameters["LibraryFormat"] == "yaml" else ".dat"
+    libraryFile = str(libraryPath / ("TensileLibrary" + libraryExt))
+    writeClientConfigIni(True, problemSizes, "", "", "", "", problemType, libraryRootPath, codeObjectFiles, dataFilePath, configFile, deviceId, gfxName, libraryFile=libraryFile)
 
 def getClientExecutablePath():
   clientExe = globalParameters.get("PrebuiltClient")

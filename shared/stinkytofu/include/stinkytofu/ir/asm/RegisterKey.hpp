@@ -56,4 +56,22 @@ inline RegKey toRegKey(const StinkyRegister& reg, unsigned offset = 0) {
     return {reg.reg.type, reg.reg.idx + offset};
 }
 
+/// Check if two registers are the same.
+/// @param reg1 The first register.
+/// @param reg2 The second register.
+/// @return True if the two registers are the same, false otherwise.
+inline bool isSameRegister(const StinkyRegister& reg1, const StinkyRegister& reg2) {
+    return toRegKey(reg1) == toRegKey(reg2);
+}
+
+/// Invoke fn(RegKey) for each DWORD in a register operand.
+/// Skips non-register operands (literals, immediates).
+template <typename Fn>
+void forEachRegUnit(const StinkyRegister& reg, Fn&& fn) {
+    if (reg.dataType != StinkyRegister::Type::Register) return;
+    for (unsigned i = 0; i < reg.reg.num; ++i) {
+        fn(toRegKey(reg, i));
+    }
+}
+
 }  // namespace stinkytofu

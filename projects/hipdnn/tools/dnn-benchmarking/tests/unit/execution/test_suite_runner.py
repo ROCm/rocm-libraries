@@ -4,7 +4,7 @@
 """Unit tests for suite_runner module."""
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -13,10 +13,9 @@ from dnn_benchmarking.execution.suite_runner import (
     _resolve_engine_name,
     _get_reference_provider,
     _check_correctness,
-    _is_support_error,
 )
-from dnn_benchmarking.config.benchmark_config import SuiteConfig
-from dnn_benchmarking.common.exceptions import ExecutionError
+from dnn_benchmarking.config.benchmark_config import MetricsConfig, SuiteConfig
+from dnn_benchmarking.common.exceptions import ExecutionError, UnsupportedGraphError
 from dnn_benchmarking.reporting.statistics import BenchmarkStats
 from dnn_benchmarking.reporting.suite_results import (
     CorrectnessResult,
@@ -182,13 +181,13 @@ class TestRunGraphAllProviders:
         mock_get_ref,
         mock_resolve_name,
     ):
-        """An ExecutionError that looks like a support-check failure is recorded as skipped."""
+        """An UnsupportedGraphError is recorded as skipped."""
         mock_resolve_name.return_value = "engine_0"
         mock_get_ref.return_value = None
 
         mock_exec_cls.side_effect = _make_exec_factory(
             engine_ids=[0],
-            prepare_side_effect=ExecutionError(
+            prepare_side_effect=UnsupportedGraphError(
                 "Backend support check failed: not supported"
             ),
         )
@@ -313,11 +312,10 @@ class TestDiscoveryFailure:
         assert "No engines discovered" in result.results[0].error_message
 
     @patch("dnn_benchmarking.execution.suite_runner.Executor")
-    def test_no_engines_runtime_error_recorded_as_skipped(self, mock_exec_cls):
-        """C++ binding throws RuntimeError when no engines support the graph;
-        we classify that as 'skipped' (unsupported) rather than 'error'."""
+    def test_no_engines_unsupported_error_recorded_as_skipped(self, mock_exec_cls):
+        """UnsupportedGraphError during discovery is recorded as skipped."""
         mock_exec_cls.side_effect = _make_exec_factory(
-            discover_side_effect=RuntimeError(
+            discover_side_effect=UnsupportedGraphError(
                 "Failed to get ranked engine ids: No engine configurations available for the graph."
             )
         )
@@ -335,10 +333,22 @@ class TestDiscoveryFailure:
         assert r.status == "skipped"
         assert "No engine configurations" in (r.skip_reason or "")
 
+    @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
+    @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
     @patch("dnn_benchmarking.execution.suite_runner.Executor")
-    def test_engine_filter_excludes_everything(self, mock_exec_cls):
-        """When engine_filter excludes every discovered engine, surface as error."""
+    @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
+    def test_engine_filter_runs_explicit_id_without_discovery(
+        self,
+        mock_bm_cls,
+        mock_exec_cls,
+        mock_get_ref,
+        mock_resolve_name,
+    ):
+        """Explicit --engine IDs run in CLI order without discovery filtering."""
+        mock_resolve_name.side_effect = lambda eid: f"engine_{eid}"
+        mock_get_ref.return_value = None
         mock_exec_cls.side_effect = _make_exec_factory(engine_ids=[0, 1])
+        mock_bm_cls.return_value = _make_bm_mock()
 
         result = run_graph_all_providers(
             graph_path=Path("test.json"),
@@ -349,8 +359,8 @@ class TestDiscoveryFailure:
         )
 
         assert len(result.results) == 1
-        assert result.results[0].status == "error"
-        assert "filter" in result.results[0].error_message.lower()
+        assert result.results[0].status == "success"
+        assert result.results[0].engine_id == 99
 
 
 class TestSuiteConfigValidation:
@@ -413,32 +423,6 @@ class TestSuiteConfigValidation:
             SuiteConfig(reference_provider=provider)
 
 
-class TestIsSupportError:
-    """Tests for _is_support_error keyword classification."""
-
-    def test_support_check_failed_is_support_error(self):
-        assert _is_support_error("Backend support check failed: bad config") is True
-
-    def test_not_supported_is_support_error(self):
-        assert _is_support_error("Operation not supported on this engine") is True
-
-    def test_unsupported_is_support_error(self):
-        assert _is_support_error("unsupported tensor layout") is True
-
-    def test_no_engine_is_support_error(self):
-        assert _is_support_error("no engine available for this graph") is True
-
-    def test_case_insensitive(self):
-        assert _is_support_error("UNSUPPORTED") is True
-        assert _is_support_error("Not Supported") is True
-
-    def test_unrelated_error_not_support_error(self):
-        assert _is_support_error("out of memory") is False
-
-    def test_empty_string_not_support_error(self):
-        assert _is_support_error("") is False
-
-
 class TestEngineFilter:
     """Tests for engine filter behavior."""
 
@@ -482,7 +466,7 @@ class TestEngineFilter:
         mock_get_ref,
         mock_resolve_name,
     ):
-        """engine_filter=[1, 3, 99]: engines 1 and 3 run; 99 (not discovered) is dropped."""
+        """engine_filter=[1, 3, 99] runs exactly those IDs in caller order."""
         mock_resolve_name.side_effect = lambda eid: f"engine_{eid}"
         mock_get_ref.return_value = None
 
@@ -497,8 +481,91 @@ class TestEngineFilter:
             handle=MagicMock(),
         )
 
-        engine_ids = sorted(r.engine_id for r in result.results)
-        assert engine_ids == [1, 3]
+        engine_ids = [r.engine_id for r in result.results]
+        assert engine_ids == [1, 3, 99]
+
+    @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
+    @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
+    @patch("dnn_benchmarking.execution.suite_runner.Executor")
+    @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
+    def test_same_engine_runs_with_distinct_plugin_paths(
+        self,
+        mock_bm_cls,
+        mock_exec_cls,
+        mock_get_ref,
+        mock_resolve_name,
+    ):
+        """Repeated engine IDs are separate ordered selections."""
+        mock_resolve_name.side_effect = lambda eid: f"engine_{eid}"
+        mock_get_ref.return_value = None
+        mock_exec_cls.side_effect = _make_exec_factory(has_kernel_timings=True)
+        mock_bm_cls.return_value = _make_bm_mock()
+        hipdnn = MagicMock()
+        hipdnn.PluginLoadingMode.ABSOLUTE = "absolute"
+        hipdnn.Handle.side_effect = [MagicMock(), MagicMock()]
+
+        with patch.dict("sys.modules", {"hipdnn_frontend": hipdnn}):
+            result = run_graph_all_providers(
+                graph_path=Path("test.json"),
+                graph_json=_make_graph_json(),
+                tensor_infos=[_make_tensor_info(1)],
+                config=_make_config(
+                    engine_filter=[1, 1],
+                    plugin_paths=[Path("/plugins/a"), Path("/plugins/b")],
+                ),
+                handle=None,
+            )
+
+        assert [r.engine_id for r in result.results] == [1, 1]
+        assert [r.plugin_path for r in result.results] == [
+            "/plugins/a",
+            "/plugins/b",
+        ]
+        hipdnn.set_engine_plugin_paths.assert_has_calls(
+            [
+                call(["/plugins/a"], "absolute"),
+                call(["/plugins/b"], "absolute"),
+            ]
+        )
+
+    @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
+    @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
+    @patch("dnn_benchmarking.execution.suite_runner.Executor")
+    @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
+    def test_per_engine_handle_creation_failure_records_error_result(
+        self,
+        mock_bm_cls,
+        mock_exec_cls,
+        mock_get_ref,
+        mock_resolve_name,
+    ):
+        """A later per-engine handle failure records an error row and continues."""
+        mock_resolve_name.side_effect = lambda eid: f"engine_{eid}"
+        mock_get_ref.return_value = None
+        mock_exec_cls.side_effect = _make_exec_factory(has_kernel_timings=True)
+        mock_bm_cls.return_value = _make_bm_mock()
+        hipdnn = MagicMock()
+        hipdnn.PluginLoadingMode.ABSOLUTE = "absolute"
+        hipdnn.Handle.side_effect = [MagicMock(), RuntimeError("bad plugin")]
+
+        with patch.dict("sys.modules", {"hipdnn_frontend": hipdnn}):
+            result = run_graph_all_providers(
+                graph_path=Path("test.json"),
+                graph_json=_make_graph_json(),
+                tensor_infos=[_make_tensor_info(1)],
+                config=_make_config(
+                    engine_filter=[1, 2],
+                    plugin_paths=[Path("/plugins/a"), Path("/plugins/b")],
+                ),
+                handle=None,
+            )
+
+        assert [r.status for r in result.results] == ["success", "error"]
+        assert result.results[0].plugin_path == "/plugins/a"
+        assert result.results[1].plugin_path == "/plugins/b"
+        assert "bad plugin" in (result.results[1].error_message or "")
+        assert result.results[1].correctness is not None
+        assert result.results[1].correctness.execution_success is False
 
 
 class TestNoRetryOnFailure:
@@ -724,3 +791,173 @@ class TestResolveEngineName:
 
         with patch("builtins.__import__", side_effect=fake_import):
             assert _resolve_engine_name(0xABC) == "engine_0xabc"
+
+
+class TestProfilingPassInvocation:
+    """suite_runner.py:521-542 calls the profiling orchestrator after the
+    timed pass when any opt-in metric is requested. The orchestrator's
+    payload lands on result.extra_metrics; orchestrator exceptions must
+    not bubble out as engine errors."""
+
+    def _setup_mocks(self, mock_exec_cls, mock_bm_cls, mock_get_ref, mock_resolve_name):
+        mock_resolve_name.side_effect = lambda eid: f"engine_{eid}"
+        mock_get_ref.return_value = None
+        mock_exec_cls.side_effect = _make_exec_factory(
+            engine_ids=[0], has_kernel_timings=True
+        )
+        mock_bm_cls.return_value = _make_bm_mock()
+
+    @patch("dnn_benchmarking.metrics.profiling_orchestrator.run_profiling_passes")
+    @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
+    @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
+    @patch("dnn_benchmarking.execution.suite_runner.Executor")
+    @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
+    def test_orchestrator_called_once_and_payload_lands_in_extra_metrics(
+        self,
+        mock_bm_cls,
+        mock_exec_cls,
+        mock_get_ref,
+        mock_resolve_name,
+        mock_orch,
+    ):
+        self._setup_mocks(mock_exec_cls, mock_bm_cls, mock_get_ref, mock_resolve_name)
+        payload = {
+            "pmc": {"set": "basic", "counters": {"GRBM_GUI_ACTIVE": {"sum": 1.0}}}
+        }
+        mock_orch.return_value = payload
+
+        config = _make_config(metrics=MetricsConfig(tier="basic", pmc_set="basic"))
+        result = run_graph_all_providers(
+            graph_path=Path("test.json"),
+            graph_json=_make_graph_json(),
+            tensor_infos=[_make_tensor_info(1), _make_tensor_info(2, is_output=True)],
+            config=config,
+            handle=MagicMock(),
+        )
+
+        # The orchestrator runs exactly once per (graph, engine). Two
+        # calls here would catch the duplicate-block bug fixed in
+        # commit 196a0fb33ca.
+        assert mock_orch.call_count == 1
+        assert len(result.results) == 1
+        assert result.results[0].extra_metrics == payload
+
+    @patch("dnn_benchmarking.metrics.profiling_orchestrator.run_profiling_passes")
+    @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
+    @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
+    @patch("dnn_benchmarking.execution.suite_runner.Executor")
+    @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
+    def test_orchestrator_not_called_when_no_opt_in_flag(
+        self,
+        mock_bm_cls,
+        mock_exec_cls,
+        mock_get_ref,
+        mock_resolve_name,
+        mock_orch,
+    ):
+        self._setup_mocks(mock_exec_cls, mock_bm_cls, mock_get_ref, mock_resolve_name)
+
+        # Default MetricsConfig() — basic tier, no opt-in source set.
+        config = _make_config(metrics=MetricsConfig())
+        result = run_graph_all_providers(
+            graph_path=Path("test.json"),
+            graph_json=_make_graph_json(),
+            tensor_infos=[_make_tensor_info(1), _make_tensor_info(2, is_output=True)],
+            config=config,
+            handle=MagicMock(),
+        )
+
+        mock_orch.assert_not_called()
+        assert result.results[0].extra_metrics is None
+
+    @patch("dnn_benchmarking.metrics.profiling_orchestrator.run_profiling_passes")
+    @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
+    @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
+    @patch("dnn_benchmarking.execution.suite_runner.Executor")
+    @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
+    def test_orchestrator_exception_does_not_fail_engine(
+        self,
+        mock_bm_cls,
+        mock_exec_cls,
+        mock_get_ref,
+        mock_resolve_name,
+        mock_orch,
+        capsys,
+    ):
+        """Orchestrator failure (tool missing, parse error, anything) must
+        keep the timed pass's status='success' — the headline timing data
+        already exists; profiling is best-effort."""
+        self._setup_mocks(mock_exec_cls, mock_bm_cls, mock_get_ref, mock_resolve_name)
+        mock_orch.side_effect = RuntimeError("rocprofv3 missing")
+
+        config = _make_config(metrics=MetricsConfig(tier="basic", pmc_set="basic"))
+        result = run_graph_all_providers(
+            graph_path=Path("test.json"),
+            graph_json=_make_graph_json(),
+            tensor_infos=[_make_tensor_info(1), _make_tensor_info(2, is_output=True)],
+            config=config,
+            handle=MagicMock(),
+        )
+
+        # Engine still passes; extra_metrics stays None.
+        assert result.results[0].status == "success"
+        assert result.results[0].extra_metrics is None
+        # warn_once writes to stderr.
+        captured = capsys.readouterr()
+        assert "profiling pass failed" in captured.err
+        assert "rocprofv3 missing" in captured.err
+
+    @patch("dnn_benchmarking.metrics.profiling_orchestrator.run_profiling_passes")
+    @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
+    @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
+    @patch("dnn_benchmarking.execution.suite_runner.Executor")
+    @patch("dnn_benchmarking.execution.suite_runner.BufferManager")
+    def test_orchestrator_runs_after_buffermanager_teardown(
+        self,
+        mock_bm_cls,
+        mock_exec_cls,
+        mock_get_ref,
+        mock_resolve_name,
+        mock_orch,
+    ):
+        """Profiling pass must fire *after* the BufferManager context
+        exits — only then are the parent's I/O buffers and the
+        executor's workspace freed. Without this ordering, the inner
+        profiling subprocess allocates its own VRAM on top of the
+        parent's still-pinned tensors, which roughly doubles peak VRAM
+        and can OOM on large graphs that fit fine on the headline run.
+        """
+        self._setup_mocks(mock_exec_cls, mock_bm_cls, mock_get_ref, mock_resolve_name)
+
+        # Track __exit__ vs orchestrator invocation order via shared list.
+        order: list[str] = []
+        bm_instance = mock_bm_cls.return_value
+        original_exit = bm_instance.__exit__
+
+        def tracking_exit(*args, **kwargs):
+            order.append("bm_exit")
+            return original_exit(*args, **kwargs)
+
+        bm_instance.__exit__ = tracking_exit
+
+        def tracking_orch(**kwargs):
+            order.append("orch")
+            return {"pmc": {"set": "basic"}}
+
+        mock_orch.side_effect = tracking_orch
+
+        config = _make_config(metrics=MetricsConfig(tier="basic", pmc_set="basic"))
+        run_graph_all_providers(
+            graph_path=Path("test.json"),
+            graph_json=_make_graph_json(),
+            tensor_infos=[_make_tensor_info(1), _make_tensor_info(2, is_output=True)],
+            config=config,
+            handle=MagicMock(),
+        )
+
+        # Strict ordering: bm context must exit BEFORE the orchestrator
+        # runs. Reversing this (the pre-fix state) is the bug.
+        assert order == [
+            "bm_exit",
+            "orch",
+        ], f"profiling must run after BufferManager teardown; got {order}"

@@ -27,6 +27,7 @@
 #include <string>
 #include <vector>
 
+#include "stinkytofu/Export.hpp"
 #include "stinkytofu/support/Diagnostic.hpp"
 
 namespace stinkytofu {
@@ -62,7 +63,7 @@ struct RewriteStmt {
         Remove        // remove $inst
     };
 
-    Kind kind;
+    Kind kind{Kind::CreateInst};
     std::string lhs;                    // Left-hand side variable (for CreateInst, BuiltinCall)
     std::string opcode;                 // Opcode (for CreateInst)
     std::string function;               // Function name (for BuiltinCall)
@@ -160,7 +161,7 @@ struct Pattern {
 
 /// Parser for StinkyTofu pattern definition files.
 /// Reuses the existing IRLexer for tokenization.
-class PatternParser {
+class STINKYTOFU_EXPORT PatternParser {
    public:
     /// Construct a parser from an existing lexer.
     /// The lexer must have already been initialized and lex() called.
@@ -246,12 +247,12 @@ struct PatternParseResult {
 /// @return Vector of parsed patterns (empty if parsing failed)
 /// @note This function does not expose parse errors. Use parsePatternFileWithDiagnostics() to
 /// access diagnostics.
-std::vector<Pattern> parsePatternFile(const std::string& filename);
+STINKYTOFU_EXPORT std::vector<Pattern> parsePatternFile(const std::string& filename);
 
 /// Parse a pattern file and return patterns with diagnostic information.
 /// This is a convenience function that creates a lexer and parser.
 /// @param filename Path to the pattern file
 /// @return A PatternParseResult containing parsed patterns and any diagnostics (errors/warnings).
-PatternParseResult parsePatternFileWithDiagnostics(const std::string& filename);
+STINKYTOFU_EXPORT PatternParseResult parsePatternFileWithDiagnostics(const std::string& filename);
 
 }  // namespace stinkytofu
