@@ -16,7 +16,7 @@ Organized by pass:
 """
 import pytest
 from Tensile.Components.Subtile.Kernel import (
-    TileInfo, AB_B16, AB_B4, MXSA_B4, MXSB_B4, CD_F32,
+    TileInfo, AB_B8, AB_B16, AB_B4, MXSA_B4, MXSB_B4, CD_F32,
 )
 from Tensile.Components.Subtile.LogicalScheduler import (
     LogicalScheduler,
@@ -195,6 +195,57 @@ def make_cfg_bf16_pgr1(MT0=256, MT1=256, depthU=128, partSizeM=0, partSizeN=0):
         partitionSizeM=partSizeM,
         partitionSizeN=partSizeN,
         pgr=1,
+    )
+
+
+def create_kernel_fp8(MT0, MT1, waveGroup, depthU=128):
+    """Create a plain FP8 kernel config (bpe=1, matrixInstK=128, no MX scale)."""
+    dtype = _mock_dtype(1)
+    return {
+        "DepthU": depthU,
+        "_DepthUA": depthU,
+        "_DepthUB": depthU,
+        "MacroTileA": MT0,
+        "MacroTileB": MT1,
+        "MacroTile0": MT0,
+        "MacroTile1": MT1,
+        "MatrixInstM": 16,
+        "MatrixInstN": 16,
+        "MatrixInstK": 128,
+        "MIWaveGroup": list(waveGroup),
+        "WavefrontSize": 64,
+        "SourceSwap": False,
+        "MIArchVgpr": False,
+        "NonTemporalA": 0,
+        "NonTemporalB": 0,
+        "NonTemporalMXSA": 0,
+        "NonTemporalMXSB": 0,
+        "ProblemType": {
+            "DataTypeA": dtype,
+            "DataTypeB": dtype,
+            "ComputeDataType": _mock_dtype(4),
+        },
+    }
+
+
+def make_cfg_fp8(MT0, MT1, waveGroup, depthU=128, pgr=2):
+    """Build plain FP8 config (AB_B8, matrixInstK=128, no scale tensors).
+
+    GR granularity matches production: mn=subtileShape[0]=1, k=subtileShape[1]=1.
+    With DU=128 and matrixInstK=128: numSubIterK=1, flat_len=numPartitions.
+    """
+    kernel = create_kernel_fp8(MT0, MT1, waveGroup, depthU)
+    tiA = TileInfo(AB_B8, 'A', None, kernel)
+    tiB = TileInfo(AB_B8, 'B', None, kernel)
+    return SchedulerConfig(
+        numMFMATilesM=tiA.localMMATileGrid[0],
+        numMFMATilesN=tiB.localMMATileGrid[0],
+        numSubIterK=tiA.localMMATileGrid[1],
+        lrA=ReadGranularity(mn=1, k=1),
+        lrB=ReadGranularity(mn=1, k=1),
+        grA=ReadGranularity(mn=tiA.subtileShape[0], k=tiA.subtileShape[1]),
+        grB=ReadGranularity(mn=tiB.subtileShape[0], k=tiB.subtileShape[1]),
+        pgr=pgr,
     )
 
 
@@ -1454,6 +1505,64 @@ class TestComputeInflightLoads:
         assert lr_a1.preOps[0].wait_gr_counts.B == 9
         assert lr_a1.preOps[0].wait_gr_counts.SA == 1
         assert lr_a1.preOps[0].wait_gr_counts.SB == 1
+
+    def test_fp8_DU128_asymmetric_A_lt_B(self):
+        """FP8 DU=128, MT=128x192, waveGroup=(2,2), PGR=2.
+
+        Regression for _compute_inflight_loads bug (commit 055ecc8):
+        With flat_len=1 (1 partition × 1 subIterK), wraps_needed=1
+        (cross-MT dep), consumer_flat==dep_flat==0, the old wrap-counting
+        code walked the single slot twice instead of once — overcounting all
+        GRs in the slot as extra inflight.
+
+        Correct behavior: walk exactly wraps_needed*flat_len=1 step; on the
+        final step stop immediately at the dep GR (A), yielding A=0.  The B
+        GRs that were emitted after A (higher sort key) are still counted.
+
+        Old (buggy) counts for LR A: A=4, B=12.
+        New (correct) counts for LR A: A=0, B=6.
+        """
+        cfg = make_cfg_fp8(128, 192, waveGroup=(2, 2))
+        assert cfg.numSubIterK == 1, "FP8 DU=128 / matrixInstK=128 → single subIterK"
+        sched = LogicalScheduler(cfg)
+        sched.remove_cross_deps()
+
+        s0 = sched._partitions[0][0]
+
+        # LR A: dep is GR A (emitted first → last in reverse order).
+        # All B GRs (emitted after A, encountered first in backward walk) are inflight.
+        lr_a = _get_lr(s0, 'A')
+        assert lr_a.preOps[0].wait_gr_counts.A == 0
+        assert lr_a.preOps[0].wait_gr_counts.B == 6  # 6 B tiles in MT192 / wg2
+
+        # LR B: dep is GR B (emitted last → first in reverse order); nothing after it.
+        lr_b = _get_lr(s0, 'B')
+        assert lr_b.preOps[0].wait_gr_counts.A == 0
+        assert lr_b.preOps[0].wait_gr_counts.B == 0
+
+    def test_fp8_DU128_asymmetric_A_gt_B(self):
+        """FP8 DU=128, MT=448x64, waveGroup=(4,1), PGR=2.
+
+        Same _compute_inflight_loads regression as test_fp8_DU128_asymmetric_A_lt_B
+        but with more A tiles than B tiles (7A vs 4B).
+
+        Old (buggy) counts for LR A: A=7, B=8.
+        New (correct) counts for LR A: A=0, B=4.
+        """
+        cfg = make_cfg_fp8(448, 64, waveGroup=(4, 1))
+        assert cfg.numSubIterK == 1
+        sched = LogicalScheduler(cfg)
+        sched.remove_cross_deps()
+
+        s0 = sched._partitions[0][0]
+
+        lr_a = _get_lr(s0, 'A')
+        assert lr_a.preOps[0].wait_gr_counts.A == 0
+        assert lr_a.preOps[0].wait_gr_counts.B == 4  # 4 B tiles in MT64 / wg1
+
+        lr_b = _get_lr(s0, 'B')
+        assert lr_b.preOps[0].wait_gr_counts.A == 0
+        assert lr_b.preOps[0].wait_gr_counts.B == 0
 
 
 # ══════════════════════════════════════════════════════════════
