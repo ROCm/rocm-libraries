@@ -11,7 +11,6 @@
 #include "split_gemm.hpp"
 
 #include "ck_tile/host/host_tensor.hpp"
-#include "ck_tile/host/device_memory.hpp"
 #include "ck_tile/host/hip_check_error.hpp"
 #include "ck_tile/host/reference/reference_batched_gemm.hpp"
 
@@ -21,9 +20,9 @@
 #include <memory>
 #include <random>
 #include <string>
+#include <thread>
 #include <vector>
 
-using ck_tile::DeviceMem;
 using ck_tile::HostTensor;
 
 namespace {
@@ -35,8 +34,11 @@ void fill_uniform(HostTensor<float>& t, float lo, float hi, unsigned seed)
     t.ForEach([&](auto& self, auto idx) { self(idx) = dist(rng); });
 }
 
-// CPU FP64 reference GEMM: C = A @ B with double-precision accumulation.
-// A [M,K] row-major, B [K,N] row-major, C [M,N] row-major.
+// CPU FP64 reference GEMM with CK convention: C[i,j] = sum_k A[i,k] * B[j,k]
+//   A is [M, K] row-major (stride = K)
+//   B is [N, K] row-major (stride = K)  ← CK convention
+//   C is [M, N] row-major (stride = N)
+// Parallelized over M rows.
 void cpu_gemm_fp64(const float* A,
                    const float* B,
                    float* C,
@@ -44,16 +46,31 @@ void cpu_gemm_fp64(const float* A,
                    int N,
                    int K)
 {
-    for(int i = 0; i < M; ++i)
+    unsigned num_threads = std::max(1u, std::thread::hardware_concurrency());
+    std::vector<std::thread> threads(num_threads);
+
+    for(unsigned t = 0; t < num_threads; ++t)
     {
-        for(int j = 0; j < N; ++j)
-        {
-            double acc = 0.0;
-            for(int k = 0; k < K; ++k)
-                acc += static_cast<double>(A[i * K + k]) * static_cast<double>(B[k * N + j]);
-            C[i * N + j] = static_cast<float>(acc);
-        }
+        int i_begin = static_cast<int>(static_cast<long>(t) * M / num_threads);
+        int i_end   = static_cast<int>(static_cast<long>(t + 1) * M / num_threads);
+
+        threads[t] = std::thread([=]() {
+            for(int i = i_begin; i < i_end; ++i)
+            {
+                for(int j = 0; j < N; ++j)
+                {
+                    double acc = 0.0;
+                    for(int k = 0; k < K; ++k)
+                        acc += static_cast<double>(A[i * K + k]) *
+                               static_cast<double>(B[j * K + k]);
+                    C[i * N + j] = static_cast<float>(acc);
+                }
+            }
+        });
     }
+
+    for(auto& th : threads)
+        th.join();
 }
 
 struct ErrorStats
@@ -110,17 +127,17 @@ std::ostream& operator<<(std::ostream& os, const SplitGemmConfig& c)
 class SplitGemmTest : public ::testing::TestWithParam<SplitGemmConfig>
 {
 protected:
-    std::unique_ptr<rocm_ck::test::SplitGemmWorkspace> ws_;
+    static std::unique_ptr<rocm_ck::test::SplitGemmWorkspace> ws_;
 
-    void SetUp() override
+    static void SetUpTestSuite()
     {
-        // Allocate workspace for the worst-case config across all tiers.
-        // max M=512, N=512, K=1024, min kTile=32
         ws_ = std::make_unique<rocm_ck::test::SplitGemmWorkspace>(512, 512, 1024, 32);
     }
 
-    void TearDown() override { ws_.reset(); }
+    static void TearDownTestSuite() { ws_.reset(); }
 };
+
+std::unique_ptr<rocm_ck::test::SplitGemmWorkspace> SplitGemmTest::ws_;
 
 // =========================================================================
 // Test: split_gemm correctness vs CPU FP64 reference
@@ -129,24 +146,18 @@ TEST_P(SplitGemmTest, CorrectnessVsCpuFp64)
 {
     auto cfg = GetParam();
 
-    // Host tensors — row-major [M,K], [K,N], [M,N]
     HostTensor<float> h_A({cfg.M, cfg.K});
-    HostTensor<float> h_B({cfg.K, cfg.N});
-
+    HostTensor<float> h_B({cfg.N, cfg.K});
     fill_uniform(h_A, -1.0f, 1.0f, 42u);
     fill_uniform(h_B, -1.0f, 1.0f, 43u);
 
     int MN = cfg.M * cfg.N;
 
-    // CPU FP64 reference
     std::vector<float> h_C_ref(static_cast<size_t>(MN));
     cpu_gemm_fp64(h_A.data(), h_B.data(), h_C_ref.data(), cfg.M, cfg.N, cfg.K);
 
-    // GPU split_gemm
-    DeviceMem d_A(h_A);
-    DeviceMem d_B(h_B);
-    DeviceMem d_C(static_cast<size_t>(MN) * sizeof(float));
-    d_C.SetZero();
+    HIP_CHECK_ERROR(hipMemcpy(ws_->d_A, h_A.data(), h_A.get_element_space_size_in_bytes(), hipMemcpyHostToDevice));
+    HIP_CHECK_ERROR(hipMemcpy(ws_->d_B, h_B.data(), h_B.get_element_space_size_in_bytes(), hipMemcpyHostToDevice));
 
     struct StrategyCase
     {
@@ -164,20 +175,13 @@ TEST_P(SplitGemmTest, CorrectnessVsCpuFp64)
 
     for(const auto& tc : cases)
     {
-        d_C.SetZero();
-        rocm_ck::test::split_gemm(static_cast<const float*>(d_A.GetDeviceBuffer()),
-                                  static_cast<const float*>(d_B.GetDeviceBuffer()),
-                                  static_cast<float*>(d_C.GetDeviceBuffer()),
-                                  cfg.M,
-                                  cfg.N,
-                                  cfg.K,
-                                  cfg.kTile,
-                                  tc.strategy,
-                                  nullptr,
-                                  ws_.get());
+        HIP_CHECK_ERROR(hipMemset(ws_->d_C, 0, static_cast<size_t>(MN) * sizeof(float)));
+        rocm_ck::test::split_gemm(ws_->d_A, ws_->d_B, ws_->d_C,
+                                  cfg.M, cfg.N, cfg.K, cfg.kTile,
+                                  tc.strategy, nullptr, ws_.get());
 
         std::vector<float> h_C_gpu(static_cast<size_t>(MN));
-        d_C.FromDevice(h_C_gpu.data());
+        HIP_CHECK_ERROR(hipMemcpy(h_C_gpu.data(), ws_->d_C, static_cast<size_t>(MN) * sizeof(float), hipMemcpyDeviceToHost));
 
         auto stats = compute_error(h_C_gpu.data(), h_C_ref.data(), MN);
         print_error_stats(tc.name, stats);
@@ -192,7 +196,7 @@ TEST_P(SplitGemmTest, VeltkampHpVsCpuFp64)
     auto cfg = GetParam();
 
     HostTensor<float> h_A({cfg.M, cfg.K});
-    HostTensor<float> h_B({cfg.K, cfg.N});
+    HostTensor<float> h_B({cfg.N, cfg.K});
     fill_uniform(h_A, -1.0f, 1.0f, 50u);
     fill_uniform(h_B, -1.0f, 1.0f, 51u);
 
@@ -201,24 +205,17 @@ TEST_P(SplitGemmTest, VeltkampHpVsCpuFp64)
     std::vector<float> h_C_ref(static_cast<size_t>(MN));
     cpu_gemm_fp64(h_A.data(), h_B.data(), h_C_ref.data(), cfg.M, cfg.N, cfg.K);
 
-    DeviceMem d_A(h_A);
-    DeviceMem d_B(h_B);
-    DeviceMem d_C(static_cast<size_t>(MN) * sizeof(float));
-    d_C.SetZero();
+    HIP_CHECK_ERROR(hipMemcpy(ws_->d_A, h_A.data(), h_A.get_element_space_size_in_bytes(), hipMemcpyHostToDevice));
+    HIP_CHECK_ERROR(hipMemcpy(ws_->d_B, h_B.data(), h_B.get_element_space_size_in_bytes(), hipMemcpyHostToDevice));
+    HIP_CHECK_ERROR(hipMemset(ws_->d_C, 0, static_cast<size_t>(MN) * sizeof(float)));
 
-    rocm_ck::test::split_gemm_hp(static_cast<const float*>(d_A.GetDeviceBuffer()),
-                                 static_cast<const float*>(d_B.GetDeviceBuffer()),
-                                 static_cast<float*>(d_C.GetDeviceBuffer()),
-                                 cfg.M,
-                                 cfg.N,
-                                 cfg.K,
-                                 cfg.kTile,
+    rocm_ck::test::split_gemm_hp(ws_->d_A, ws_->d_B, ws_->d_C,
+                                 cfg.M, cfg.N, cfg.K, cfg.kTile,
                                  rocm_ck::test::ReduceStrategy::FP64Sum,
-                                 nullptr,
-                                 ws_.get());
+                                 nullptr, ws_.get());
 
     std::vector<float> h_C_gpu(static_cast<size_t>(MN));
-    d_C.FromDevice(h_C_gpu.data());
+    HIP_CHECK_ERROR(hipMemcpy(h_C_gpu.data(), ws_->d_C, static_cast<size_t>(MN) * sizeof(float), hipMemcpyDeviceToHost));
 
     auto stats = compute_error(h_C_gpu.data(), h_C_ref.data(), MN);
 
@@ -227,66 +224,51 @@ TEST_P(SplitGemmTest, VeltkampHpVsCpuFp64)
 }
 
 // =========================================================================
-// Test: GPU split_gemm vs CPU reference_batched_gemm (layout cross-check)
+// Test: GPU split_gemm vs CPU reference_batched_gemm
 //
-// Verifies that split_gemm (row-major: C = A[M,K] @ B[K,N]) produces the
-// same result as CK's reference_batched_gemm (CK convention: C = A @ B^T
-// where B is [batch,N,K]).
-//
-// This closes the layout coherence gap between the GPU and CPU references.
+// Both use CK convention: C[m,n] = sum_k A[m,k] * B[n,k].
+// Same layout, same math — only difference is accumulation order
+// (GPU tiled vs CPU sequential).
 // =========================================================================
 TEST_P(SplitGemmTest, SplitGemmVsReferenceBatchedGemm)
 {
     auto cfg = GetParam();
 
-    // Row-major inputs for split_gemm
     HostTensor<float> h_A({cfg.M, cfg.K});
-    HostTensor<float> h_B({cfg.K, cfg.N});
+    HostTensor<float> h_B({cfg.N, cfg.K});
     fill_uniform(h_A, -1.0f, 1.0f, 60u);
     fill_uniform(h_B, -1.0f, 1.0f, 61u);
 
     int MN = cfg.M * cfg.N;
 
-    // --- GPU: split_gemm with NaiveSum ---
-    DeviceMem d_A(h_A);
-    DeviceMem d_B(h_B);
-    DeviceMem d_C(static_cast<size_t>(MN) * sizeof(float));
-    d_C.SetZero();
+    // --- GPU: split_gemm ---
+    HIP_CHECK_ERROR(hipMemcpy(ws_->d_A, h_A.data(), h_A.get_element_space_size_in_bytes(), hipMemcpyHostToDevice));
+    HIP_CHECK_ERROR(hipMemcpy(ws_->d_B, h_B.data(), h_B.get_element_space_size_in_bytes(), hipMemcpyHostToDevice));
+    HIP_CHECK_ERROR(hipMemset(ws_->d_C, 0, static_cast<size_t>(MN) * sizeof(float)));
 
-    rocm_ck::test::split_gemm(static_cast<const float*>(d_A.GetDeviceBuffer()),
-                              static_cast<const float*>(d_B.GetDeviceBuffer()),
-                              static_cast<float*>(d_C.GetDeviceBuffer()),
-                              cfg.M,
-                              cfg.N,
-                              cfg.K,
-                              cfg.kTile,
+    rocm_ck::test::split_gemm(ws_->d_A, ws_->d_B, ws_->d_C,
+                              cfg.M, cfg.N, cfg.K, cfg.kTile,
                               rocm_ck::test::ReduceStrategy::NaiveSum,
-                              nullptr,
-                              ws_.get());
+                              nullptr, ws_.get());
 
     std::vector<float> h_C_gpu(static_cast<size_t>(MN));
-    d_C.FromDevice(h_C_gpu.data());
+    HIP_CHECK_ERROR(hipMemcpy(h_C_gpu.data(), ws_->d_C, static_cast<size_t>(MN) * sizeof(float), hipMemcpyDeviceToHost));
 
-    // --- CPU: reference_batched_gemm ---
-    // CK convention: gemm(A, B, C) computes C[b,m,n] = sum_k A[b,m,k] * B[b,n,k]
-    // So B must be [batch, N, K] — transpose our row-major B[K,N] to B_t[N,K].
-    HostTensor<float> h_A_3d({1, cfg.M, cfg.K});  // batch=1
-    HostTensor<float> h_B_t({1, cfg.N, cfg.K});    // batch=1, transposed
-    HostTensor<float> h_C_cpu({1, cfg.M, cfg.N});  // batch=1
+    // --- CPU: reference_batched_gemm (batch=1 wrapper) ---
+    HostTensor<float> h_A_3d({1, cfg.M, cfg.K});
+    HostTensor<float> h_B_3d({1, cfg.N, cfg.K});
+    HostTensor<float> h_C_cpu({1, cfg.M, cfg.N});
 
-    // Copy A into 3D (same data, just adding batch dim)
     for(int i = 0; i < cfg.M; ++i)
         for(int k = 0; k < cfg.K; ++k)
             h_A_3d(0, i, k) = h_A(i, k);
 
-    // Transpose B[K,N] → B_t[N,K]
-    for(int k = 0; k < cfg.K; ++k)
-        for(int n = 0; n < cfg.N; ++n)
-            h_B_t(0, n, k) = h_B(k, n);
+    for(int n = 0; n < cfg.N; ++n)
+        for(int k = 0; k < cfg.K; ++k)
+            h_B_3d(0, n, k) = h_B(n, k);
 
-    ck_tile::reference_batched_gemm<float, float, float, float>(h_A_3d, h_B_t, h_C_cpu);
+    ck_tile::reference_batched_gemm<float, float, float, float>(h_A_3d, h_B_3d, h_C_cpu);
 
-    // Extract C_cpu as flat array
     std::vector<float> h_C_ref(static_cast<size_t>(MN));
     for(int i = 0; i < cfg.M; ++i)
         for(int j = 0; j < cfg.N; ++j)

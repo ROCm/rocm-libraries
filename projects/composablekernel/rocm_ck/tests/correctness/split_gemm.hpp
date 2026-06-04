@@ -53,6 +53,14 @@ struct SplitGemmWorkspace
     float* sum_buf = nullptr;
     float* err_buf = nullptr;
 
+    // Test I/O buffers (reusable across test cases)
+    float* d_A = nullptr;
+    float* d_B = nullptr;
+    float* d_C = nullptr;
+    size_t d_A_bytes = 0;
+    size_t d_B_bytes = 0;
+    size_t d_C_bytes = 0;
+
     // Allocate for the worst-case config.
     // max_num_tiles = ceil(max_K / min_kTile) — pass the largest num_tiles you'll use.
     SplitGemmWorkspace(int max_M, int max_N, int max_K, int min_kTile);
@@ -62,12 +70,15 @@ struct SplitGemmWorkspace
     SplitGemmWorkspace& operator=(const SplitGemmWorkspace&) = delete;
 };
 
-/// C[M,N] = A[M,K] @ B[K,N]
+/// C[M,N] = sum_k A[M,K] * B[N,K]   (CK convention: B is [N,K], not [K,N])
 ///
-/// All pointers are device memory, row-major layout.
+/// All pointers are device memory.
+///   A is [M, K] row-major (stride = K)
+///   B is [N, K] row-major (stride = K)  ← same as reference_batched_gemm
+///   C is [M, N] row-major (stride = N)
+///
 /// K is split into tiles of kTile. Each tile produces a partial product
-/// via a naive one-thread-per-element GPU kernel. The partials are then
-/// reduced by the chosen strategy.
+/// via a GPU kernel. The partials are reduced by the chosen strategy.
 ///
 /// If ws is non-null, uses pre-allocated workspace. Otherwise allocates
 /// and frees internally (slower).

@@ -43,6 +43,14 @@ SplitGemmWorkspace::SplitGemmWorkspace(int max_M, int max_N, int max_K, int min_
     HIP_CHECK_ERROR(hipMalloc(&p3, MN * sizeof(float)));
     HIP_CHECK_ERROR(hipMalloc(&sum_buf, MN * sizeof(float)));
     HIP_CHECK_ERROR(hipMalloc(&err_buf, MN * sizeof(float)));
+
+    // Test I/O buffers
+    d_A_bytes = MK * sizeof(float);
+    d_B_bytes = static_cast<size_t>(std::max(MK, KN)) * sizeof(float); // max(M*K, N*K)
+    d_C_bytes = MN * sizeof(float);
+    HIP_CHECK_ERROR(hipMalloc(&d_A, d_A_bytes));
+    HIP_CHECK_ERROR(hipMalloc(&d_B, d_B_bytes));
+    HIP_CHECK_ERROR(hipMalloc(&d_C, d_C_bytes));
 }
 
 SplitGemmWorkspace::~SplitGemmWorkspace()
@@ -58,13 +66,19 @@ SplitGemmWorkspace::~SplitGemmWorkspace()
     (void)hipFree(p3);
     (void)hipFree(sum_buf);
     (void)hipFree(err_buf);
+    (void)hipFree(d_A);
+    (void)hipFree(d_B);
+    (void)hipFree(d_C);
 }
 
 // =========================================================================
 // Tile GEMM kernel
 // =========================================================================
 
-// Row-major: partial[i,j] = sum_{k in tile} A[i,k] * B[k,j]
+// CK convention: C[i,j] = sum_{k in tile} A[i,k] * B[j,k]
+//   A is [M, K_full] row-major (stride = K_full)
+//   B is [N, K_full] row-major (stride = K_full)  ← CK convention: B is [N,K]
+//   partial is [M, N] row-major (stride = N)
 __global__ void tile_gemm_kernel(const float* __restrict__ A,
                                  const float* __restrict__ B,
                                  float* __restrict__ partial,
@@ -85,7 +99,7 @@ __global__ void tile_gemm_kernel(const float* __restrict__ A,
     for(int k = 0; k < K_tile; ++k)
     {
         int gk = k_offset + k;
-        acc += A[row * K_full + gk] * B[gk * N + col];
+        acc += A[row * K_full + gk] * B[col * K_full + gk];
     }
     partial[row * N + col] = acc;
 }
