@@ -1381,16 +1381,6 @@ CK_TILE_DEVICE_EXTERN double llvm_amdgcn_raw_buffer_atomic_max_fp64(
     int glc_slc) __asm("llvm.amdgcn.raw.buffer.atomic.fmax.f64.v4i32");
 
 // Direct loads from global to LDS.
-#if __clang_major__ >= 21 && __clang_major__ < 23
-CK_TILE_DEVICE_EXTERN void
-llvm_amdgcn_raw_buffer_load_lds(int32x4_t rsrc,
-                                as3_uint32_ptr lds_ptr,
-                                index_t size,
-                                index_t voffset,
-                                index_t soffset,
-                                index_t offset,
-                                index_t aux) __asm("llvm.amdgcn.raw.buffer.load.lds.v4i32");
-#else
 CK_TILE_DEVICE_EXTERN void
 llvm_amdgcn_raw_buffer_load_lds(int32x4_t rsrc,
                                 as3_uint32_ptr lds_ptr,
@@ -1399,7 +1389,6 @@ llvm_amdgcn_raw_buffer_load_lds(int32x4_t rsrc,
                                 index_t soffset,
                                 index_t offset,
                                 index_t aux) __asm("llvm.amdgcn.raw.buffer.load.lds");
-#endif
 
 template <unsigned num_dwords, bool pre_nop = false>
 CK_TILE_DEVICE void async_buffer_load_dwordxn_v(void* smem,
@@ -2869,17 +2858,18 @@ __device__ void amd_async_global_load_to_lds(CK_TILE_LDS_ADDR T* smem_ptr,
                                              index_t global_offset,
                                              bool is_valid_element)
 {
-    // currently only support to b8, b32, b64, b128 when one async copy
-    static_assert((std::is_same_v<T, double> && (N == 1 || N == 2)) ||
-                      (std::is_same_v<T, float> && (N == 1 || N == 2 || N == 4)) ||
-                      (std::is_same_v<T, int32_t> && (N == 1 || N == 2 || N == 4)) ||
-                      (std::is_same_v<T, half_t> && (N == 2 || N == 4 || N == 8)) ||
-                      (std::is_same_v<T, bf16_t> && (N == 2 || N == 4 || N == 8)) ||
-                      (std::is_same_v<T, fp8_t> && (N == 1 || N == 4 || N == 8 || N == 16)) ||
-                      (std::is_same_v<T, bf8_t> && (N == 1 || N == 4 || N == 8 || N == 16)) ||
-                      (std::is_same_v<T, int8_t> && (N == 1 || N == 4 || N == 8 || N == 16)) ||
-                      (std::is_same_v<T, uint8_t> && (N == 1 || N == 4 || N == 8 || N == 16)),
-                  "wrong! not implemented");
+    // currently only support to b8, b32, b64, b96 (b64+b32), b128 when one async copy
+    static_assert(
+        (std::is_same_v<T, double> && (N == 1 || N == 2)) ||
+            (std::is_same_v<T, float> && (N == 1 || N == 2 || N == 4)) ||
+            (std::is_same_v<T, int32_t> && (N == 1 || N == 2 || N == 3 || N == 4)) ||
+            (std::is_same_v<T, half_t> && (N == 2 || N == 4 || N == 8)) ||
+            (std::is_same_v<T, bf16_t> && (N == 2 || N == 4 || N == 8)) ||
+            (std::is_same_v<T, fp8_t> && (N == 1 || N == 4 || N == 8 || N == 16)) ||
+            (std::is_same_v<T, bf8_t> && (N == 1 || N == 4 || N == 8 || N == 16)) ||
+            (std::is_same_v<T, int8_t> && (N == 1 || N == 4 || N == 8 || N == 12 || N == 16)) ||
+            (std::is_same_v<T, uint8_t> && (N == 1 || N == 4 || N == 8 || N == 12 || N == 16)),
+        "wrong! not implemented");
 
 #if defined(__gfx125__)
 #if CK_TILE_USE_AMD_LDS_DIRECT_LOAD_INLINE_ASM
@@ -2981,6 +2971,63 @@ __device__ void amd_async_global_load_to_lds(CK_TILE_LDS_ADDR T* smem_ptr,
                 async_llvm_detail::make_async_load_ptrs<async_llvm_detail::async_load_type_t<8>>(
                     global_ptr, smem_ptr + static_offset);
             *lds_write_ptr = 0;
+        }
+        return;
+    }
+    else if constexpr(bytes_in_instr == 12)
+    {
+        // gfx1250 has no global_load_async_to_lds_b96; synthesize a 12-byte (dwordx3)
+        // async LDS load from a b64 (bytes 0-7) + b32 (bytes 8-11) pair. Both halves
+        // share the same global_ptr / smem_ptr base; only the immediate offset and
+        // destination word size differ. Used by pk_fp6_legacy_t<16> A-tile loads in
+        // the v1 mx-flatmm pipeline.
+        auto [glb_ptr_b64, lds_ptr_b64] =
+            async_llvm_detail::make_async_load_ptrs<async_llvm_detail::async_load_type_t<8>>(
+                global_ptr + global_offset - static_offset, smem_ptr);
+        auto [glb_ptr_b32, lds_ptr_b32] =
+            async_llvm_detail::make_async_load_ptrs<async_llvm_detail::async_load_type_t<4>>(
+                global_ptr + global_offset - static_offset, smem_ptr);
+        if(is_valid_element)
+        {
+            if constexpr(use_asm_path)
+            {
+                asm volatile(
+                    "global_load_async_to_lds_b64 %0, %1, %2, offset:%3\n\t" ::"v"(
+                        static_cast<uint32_t>(reinterpret_cast<uint64_t>(lds_ptr_b64))),
+                    "v"(static_cast<uint32_t>((global_offset - static_offset) * sizeof(T))),
+                    "s"(reinterpret_cast<uint64_t>(global_ptr)),
+                    "n"(static_cast<uint32_t>(static_offset * sizeof(T)))
+                    : "memory");
+                asm volatile(
+                    "global_load_async_to_lds_b32 %0, %1, %2, offset:%3\n\t" ::"v"(
+                        static_cast<uint32_t>(reinterpret_cast<uint64_t>(lds_ptr_b32))),
+                    "v"(static_cast<uint32_t>((global_offset - static_offset) * sizeof(T))),
+                    "s"(reinterpret_cast<uint64_t>(global_ptr)),
+                    "n"(static_cast<uint32_t>((static_offset + 8) * sizeof(T)))
+                    : "memory");
+            }
+            else
+            {
+                __builtin_amdgcn_global_load_async_to_lds_b64(glb_ptr_b64,
+                                                              lds_ptr_b64,
+                                                              static_offset * sizeof(T),
+                                                              static_cast<index_t>(coherence));
+                __builtin_amdgcn_global_load_async_to_lds_b32(glb_ptr_b32,
+                                                              lds_ptr_b32,
+                                                              (static_offset + 8) * sizeof(T),
+                                                              static_cast<index_t>(coherence));
+            }
+        }
+        else
+        {
+            auto [unused_b64, lds_write_ptr_b64] =
+                async_llvm_detail::make_async_load_ptrs<async_llvm_detail::async_load_type_t<8>>(
+                    global_ptr, smem_ptr + static_offset);
+            *lds_write_ptr_b64 = 0;
+            auto [unused_b32, lds_write_ptr_b32] =
+                async_llvm_detail::make_async_load_ptrs<async_llvm_detail::async_load_type_t<4>>(
+                    global_ptr, smem_ptr + static_offset + 8);
+            *lds_write_ptr_b32 = 0;
         }
         return;
     }
@@ -3355,21 +3402,15 @@ amd_tdm_load(const TDMDescriptor<DataType, TensorRank, IsGatherMode>& descriptor
     static constexpr auto I1 = number<1>{};
     static constexpr auto I2 = number<2>{};
     static constexpr auto I3 = number<3>{};
-    if constexpr(TensorRank == 2 && !IsGatherMode)
-    {
-        auto tdm_desc_grp = descriptor.getResourceDescriptorGroup2();
-        __builtin_amdgcn_tensor_load_to_lds_d2(
-            tdm_desc_grp.get(I0), tdm_desc_grp.get(I1), static_cast<index_t>(coherence));
-    }
-    else
-    {
-        auto tdm_desc_grp = descriptor.getResourceDescriptorGroup4();
-        __builtin_amdgcn_tensor_load_to_lds(tdm_desc_grp.get(I0),
-                                            tdm_desc_grp.get(I1),
-                                            tdm_desc_grp.get(I2),
-                                            tdm_desc_grp.get(I3),
-                                            static_cast<index_t>(coherence));
-    }
+    static constexpr auto I4 = number<4>{};
+
+    auto tdm_desc_grp = descriptor.getResourceDescriptorGroup();
+    __builtin_amdgcn_tensor_load_to_lds(tdm_desc_grp.get(I0),
+                                        tdm_desc_grp.get(I1),
+                                        tdm_desc_grp.get(I2),
+                                        tdm_desc_grp.get(I3),
+                                        tdm_desc_grp.get(I4),
+                                        static_cast<index_t>(coherence));
 #else
     ignore = descriptor;
 #endif
@@ -3387,21 +3428,15 @@ amd_tdm_store(const TDMDescriptor<DataType, TensorRank, IsGatherMode>& descripto
     static constexpr auto I1 = number<1>{};
     static constexpr auto I2 = number<2>{};
     static constexpr auto I3 = number<3>{};
-    if constexpr(TensorRank == 2 && !IsGatherMode)
-    {
-        auto tdm_desc_grp = descriptor.getResourceDescriptorGroup2();
-        __builtin_amdgcn_tensor_store_from_lds_d2(
-            tdm_desc_grp.get(I0), tdm_desc_grp.get(I1), static_cast<index_t>(coherence));
-    }
-    else
-    {
-        auto tdm_desc_grp = descriptor.getResourceDescriptorGroup4();
-        __builtin_amdgcn_tensor_store_from_lds(tdm_desc_grp.get(I0),
-                                               tdm_desc_grp.get(I1),
-                                               tdm_desc_grp.get(I2),
-                                               tdm_desc_grp.get(I3),
-                                               static_cast<index_t>(coherence));
-    }
+    static constexpr auto I4 = number<4>{};
+
+    auto tdm_desc_grp = descriptor.getResourceDescriptorGroup();
+    __builtin_amdgcn_tensor_store_from_lds(tdm_desc_grp.get(I0),
+                                           tdm_desc_grp.get(I1),
+                                           tdm_desc_grp.get(I2),
+                                           tdm_desc_grp.get(I3),
+                                           tdm_desc_grp.get(I4),
+                                           static_cast<index_t>(coherence));
 #else
     ignore = descriptor;
 #endif

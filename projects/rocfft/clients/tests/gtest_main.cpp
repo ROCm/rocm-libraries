@@ -451,9 +451,9 @@ int main(int argc, char* argv[])
             n_random_tests = 10;
         });
 
-    app.add_flag("--callback", "Inject load/store callbacks")->each([&](const std::string&) {
-        manual_params.run_callbacks = true;
-    });
+    app.add_flag(
+           "--callback", manual_params.run_callbacks, "Inject load/store callbacks: none, funcptr")
+        ->default_val("none");
 
     app.add_option("--seed", random_seed, "Random seed; if unset, use an actual random seed")
         ->default_val(default_seed_dev());
@@ -838,28 +838,7 @@ TEST(manual, vs_fftw) // MANUAL TESTS HERE
     {
         fft_vs_reference(params);
     }
-    catch(std::bad_alloc&)
-    {
-        GTEST_SKIP() << "host memory allocation failure";
-    }
-    catch(const HOSTBUF_MEM_USAGE& e)
-    {
-        // explicitly clear test cache
-        reference_fft_data_t::clear_cache();
-        GTEST_SKIP() << e.what();
-    }
-    catch(const DEVICEBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(ROCFFT_SKIP& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(ROCFFT_FAIL& e)
-    {
-        GTEST_FAIL() << e.what();
-    }
+    ROCFFT_CATCH_TEST_EXCEPTIONS;
 }
 
 TEST(manual, bitwise_reproducibility) // MANUAL TESTS HERE
@@ -886,25 +865,7 @@ TEST(manual, bitwise_reproducibility) // MANUAL TESTS HERE
     {
         bitwise_repro(params);
     }
-    catch(const std::bad_alloc&)
-    {
-        GTEST_SKIP() << "host memory allocation failure";
-    }
-    catch(const ROCFFT_SKIP& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(const ROCFFT_FAIL& e)
-    {
-        GTEST_FAIL() << e.what();
-    }
-    catch(const HOSTBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
-    catch(const DEVICEBUF_MEM_USAGE& e)
-    {
-        GTEST_SKIP() << e.what();
-    }
+    ROCFFT_CATCH_TEST_EXCEPTIONS;
+
     SUCCEED();
 }
