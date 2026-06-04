@@ -280,7 +280,7 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
 
             auto aq_reduce = blockreduce.template MakeYBlockTile<decltype(a_reduce)>();
 
-            set_tile(aq_reduce, ReduceOp::AbsMax::GetIdentityValue<float>());
+            set_tile(aq_reduce, ReduceOp::AbsMax::GetIdentityValue<AQDataType>());
 
             blockreduce(a_reduce, aq_reduce, reduce_func);
             blockreduce_sync(aq_reduce, reduce_func);
@@ -296,7 +296,7 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
 
             // Copy the first lanes values to all threads
             static_for<0, thread_buf_size, 1>{}([&](auto i) {
-                float abs_max = amd_wave_read_first_lane(aq_reduce.get_thread_buffer()[i]);
+                AQDataType abs_max = amd_wave_read_first_lane(aq_reduce.get_thread_buffer()[i]);
                 if(abs_max == 0.f)
                 {
                     abs_max = 1.f;

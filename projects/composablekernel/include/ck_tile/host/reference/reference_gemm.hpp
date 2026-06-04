@@ -281,8 +281,8 @@ CK_TILE_HOST void reference_gemm_fused_aquant(const HostTensor<ADataType>& a_m_k
     HostTensor<AQDataType> aq_m_aqk(
         ck_tile::host_tensor_descriptor(AQM, AQK, AQK, ck_tile::bool_constant<true>{}));
 
-    const AQDataType fp8_inv_range = 1.f / (type_convert<AQDataType>(numeric<fp8_t>::max()) -
-                                            type_convert<AQDataType>(numeric<fp8_t>::min()));
+    const float fp8_inv_range = 1.f / (type_convert<float>(numeric<fp8_t>::max()) -
+                                       type_convert<float>(numeric<fp8_t>::min()));
 
     for(std::size_t m = 0; m < M; ++m)
     {
@@ -291,12 +291,12 @@ CK_TILE_HOST void reference_gemm_fused_aquant(const HostTensor<ADataType>& a_m_k
             const std::size_t k_begin = k_group * AQuantGroupSize::kK;
             const std::size_t k_end   = std::min<std::size_t>(k_begin + AQuantGroupSize::kK, K);
 
-            float max_abs = 0.0f;
+            AQDataType max_abs = 0.0f;
 
             for(std::size_t k = k_begin; k < k_end; ++k)
             {
-                const float v = ck_tile::type_convert<float>(a_m_k(m, k));
-                max_abs       = std::max(max_abs, std::abs(v));
+                const AQDataType v = ck_tile::type_convert<AQDataType>(a_m_k(m, k));
+                max_abs            = std::max(max_abs, std::abs(v));
             }
 
             if(max_abs == 0.0f)
@@ -304,7 +304,7 @@ CK_TILE_HOST void reference_gemm_fused_aquant(const HostTensor<ADataType>& a_m_k
                 max_abs = 1.0f;
             }
 
-            aq_m_aqk(m, k_group) = ck_tile::type_convert<AQDataType>(max_abs) * fp8_inv_range;
+            aq_m_aqk(m, k_group) = ck_tile::type_convert<AQDataType>(max_abs * fp8_inv_range);
         }
     }
 
