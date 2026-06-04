@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -88,13 +88,7 @@ inline auto scan_impl(void*               temporary_storage,
 
             using Selector = scan_config_selector<AccType>;
 
-            detail::target_arch target_arch;
-            ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-
-            gpu target_gpu;
-            ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
-
-            const target current_target(target_arch, target_gpu);
+            const target current_target(stream);
 
             const auto params = get_config<Selector>(Config{}, current_target);
 
@@ -200,9 +194,9 @@ inline auto scan_impl(void*               temporary_storage,
                         std::cout << "items_per_block " << items_per_block << '\n';
                     }
 
-                    auto lookback_scan_kernel = [=](auto arch_config)
+                    auto lookback_scan_kernel = [=](auto target_config)
                     {
-                        lookback_scan_kernel_impl<decltype(arch_config),
+                        lookback_scan_kernel_impl<decltype(target_config),
                                                   Determinism,
                                                   Exclusive,
                                                   UseInitialValue>(
@@ -253,21 +247,34 @@ inline auto scan_impl(void*               temporary_storage,
                     start = std::chrono::steady_clock::now();
                 }
 
-                auto single_scan_kernel = [=](auto arch_config) mutable
+                auto single_scan_kernel = [=](auto target_config) mutable
                 {
-                    static constexpr scan_config_params params = decltype(arch_config)::params;
+                    using TargetConfig                         = decltype(target_config);
+                    static constexpr scan_config_params params = TargetConfig::params;
 
                     constexpr unsigned int block_size       = params.kernel_config.block_size;
                     constexpr unsigned int items_per_thread = params.kernel_config.items_per_thread;
 
-                    using block_load_type = ::rocprim::
-                        block_load<AccType, block_size, items_per_thread, params.block_load_method>;
+                    using block_load_type  = ::rocprim::block_load<AccType,
+                                                                   block_size,
+                                                                   items_per_thread,
+                                                                   params.block_load_method,
+                                                                   1,
+                                                                   1,
+                                                                   TargetConfig::wavefront>;
                     using block_store_type = ::rocprim::block_store<AccType,
                                                                     block_size,
                                                                     items_per_thread,
-                                                                    params.block_store_method>;
-                    using block_scan_type
-                        = ::rocprim::block_scan<AccType, block_size, params.block_scan_method>;
+                                                                    params.block_store_method,
+                                                                    1,
+                                                                    1,
+                                                                    TargetConfig::wavefront>;
+                    using block_scan_type  = ::rocprim::block_scan<AccType,
+                                                                   block_size,
+                                                                   params.block_scan_method,
+                                                                   1,
+                                                                   1,
+                                                                   TargetConfig::wavefront>;
 
                     ROCPRIM_SHARED_MEMORY union
                     {
@@ -364,6 +371,8 @@ inline auto scan_impl(void*               temporary_storage,
 /// \parblock
 /// In this example a device-level inclusive sum operation is performed on an array of
 /// integer values (<tt>short</tt>s are scanned into <tt>int</tt>s).
+///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_scan.cpp).
 ///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>

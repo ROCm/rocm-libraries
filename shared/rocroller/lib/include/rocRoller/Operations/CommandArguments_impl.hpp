@@ -13,8 +13,6 @@ namespace rocRoller
         {
         case ArgumentType::Value:
             return "Value";
-        case ArgumentType::Limit:
-            return "Limit";
         case ArgumentType::Size:
             return "Size";
         case ArgumentType::Stride:
@@ -54,6 +52,25 @@ namespace rocRoller
 
     template <CCommandArgumentValue T>
     void CommandArguments::setArgument(Operations::OperationTag op, ArgumentType argType, T value)
+    {
+        setArgument<T>(op, argType, -1, value);
+    }
+
+    inline void CommandArguments::setArgument(Operations::OperationTag    op,
+                                              ArgumentType                argType,
+                                              int                         dimension,
+                                              CommandArgumentValue const& value)
+    {
+        auto visitor = [&](auto value) {
+            using T = typename std::decay_t<decltype(value)>;
+            setArgument<T>(op, argType, dimension, value);
+        };
+        std::visit(visitor, value);
+    }
+
+    inline void CommandArguments::setArgument(Operations::OperationTag    op,
+                                              ArgumentType                argType,
+                                              CommandArgumentValue const& value)
     {
         setArgument(op, argType, -1, value);
     }

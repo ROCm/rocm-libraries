@@ -7,7 +7,7 @@
 #include <sstream>
 
 #include "ck_tile/core.hpp"
-#include "ck_tile/ops/common/load_interleaved_pk_type.hpp"
+#include "ck_tile/ops/common/load_and_convert_tile.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_universal_pipeline_ag_bg_cr_policy.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_ag_bg_cr_scheduler.hpp"
 #include "ck_tile/ops/gemm/pipeline/wp_pipeline_agmem_bgmem_creg_v2.hpp"
@@ -19,16 +19,17 @@ namespace ck_tile {
 template <typename Problem, typename PipelinePolicy = GemmWPABQuantPipelineAgBgCrPolicy>
 struct WPABQuantBPipelineAgBgCrV2 : public WeightPreshufflePipelineAGmemBGmemCRegV2<Problem>
 {
-    using Base            = WeightPreshufflePipelineAGmemBGmemCRegV2<Problem>;
-    using ADataType       = remove_cvref_t<typename Problem::ADataType>;
-    using AQDataType      = remove_cvref_t<typename Problem::AQDataType>;
-    using BDataType       = remove_cvref_t<typename Problem::BDataType>;
-    using BQDataType      = remove_cvref_t<typename Problem::BQDataType>;
-    using CDataType       = remove_cvref_t<typename Problem::CDataType>;
-    using ComputeDataType = remove_cvref_t<typename Problem::ComputeDataType>;
-    using BlockGemmShape  = remove_cvref_t<typename Problem::BlockGemmShape>;
-    using AQuantGroupSize = remove_cvref_t<typename Problem::AQuantGroupSize>;
-    using BQuantGroupSize = remove_cvref_t<typename Problem::BQuantGroupSize>;
+    using Base             = WeightPreshufflePipelineAGmemBGmemCRegV2<Problem>;
+    using ADataType        = remove_cvref_t<typename Problem::ADataType>;
+    using AQDataType       = remove_cvref_t<typename Problem::AQDataType>;
+    using BDataType        = remove_cvref_t<typename Problem::BDataType>;
+    using BQDataType       = remove_cvref_t<typename Problem::BQDataType>;
+    using CDataType        = remove_cvref_t<typename Problem::CDataType>;
+    using AComputeDataType = remove_cvref_t<typename Problem::AComputeDataType>;
+    using BComputeDataType = remove_cvref_t<typename Problem::BComputeDataType>;
+    using BlockGemmShape   = remove_cvref_t<typename Problem::BlockGemmShape>;
+    using AQuantGroupSize  = remove_cvref_t<typename Problem::AQuantGroupSize>;
+    using BQuantGroupSize  = remove_cvref_t<typename Problem::BQuantGroupSize>;
 
     using ALayout  = remove_cvref_t<typename Problem::ALayout>;
     using BLayout  = remove_cvref_t<typename Problem::BLayout>;
@@ -72,6 +73,9 @@ struct WPABQuantBPipelineAgBgCrV2 : public WeightPreshufflePipelineAGmemBGmemCRe
 
     using Base::m_preload;
 
+    using Base::WarpTileK;
+    using Base::WarpTileM;
+
     static constexpr index_t VectorLoadSize = Problem::VectorLoadSize;
 
     static constexpr index_t NPerBlock = BlockGemmShape::kN;
@@ -108,14 +112,10 @@ struct WPABQuantBPipelineAgBgCrV2 : public WeightPreshufflePipelineAGmemBGmemCRe
                       concat('x', kPadM, kPadN, kPadK), AQuantGroupSize::GetName(), BQuantGroupSize::GetName());
         // clang-format on
     }
-    /**
-     * @tparam nloop The number of iterations in the hot loop,
-     * used to normalize scheduling costs.
-     */
+
     template <index_t nloop>
     CK_TILE_HOST_DEVICE static constexpr auto HotLoopScheduler()
     {
-        static_assert(nloop > 0, "nloop must be greater than 0");
         // Estimated number of VMEM vector loads for A per block:
         //   total A bytes / (threads per block * vector width)
         constexpr index_t Aload_inst =
@@ -138,13 +138,12 @@ struct WPABQuantBPipelineAgBgCrV2 : public WeightPreshufflePipelineAGmemBGmemCRe
         // Total VMEM load instructions (A + B + quant data)
         constexpr index_t buffer_load_inst = Aload_inst + Bload_inst + BQload_inst;
         // Approximate number of LDS reads per block
-        constexpr index_t ds_read_inst = kMPerBlock / kLdsInstCycle / nloop;
+        constexpr index_t ds_read_inst = kMPerBlock / kLdsInstCycle;
         // Approximate number of LDS writes per block
         // (e.g., writing A from VMEM into LDS once per A load)
         constexpr index_t ds_write_inst = Aload_inst;
         // Number of MFMA instructions per wave for one block tile:
-        constexpr index_t mfma_inst =
-            ((kMPerBlock / WG::kM) / nloop) * ((kNPerBlock / WG::kN) / nloop);
+        constexpr index_t mfma_inst = (kMPerBlock / WG::kM) * (kNPerBlock / WG::kN);
         // How often (in MFMA units) we should insert DS (LDS) operations.
         constexpr index_t ds_rep = mfma_inst / (ds_read_inst + ds_write_inst);
         // How often (in MFMA units) we should insert VMEM buffer loads.
@@ -181,7 +180,7 @@ struct WPABQuantBPipelineAgBgCrV2 : public WeightPreshufflePipelineAGmemBGmemCRe
                 }
                 // Always mark some VALU work in the loop to reflect auxiliary scalar
                 // or vector ALU instructions that coexist with MFMA (Blockscale calculation).
-                __builtin_amdgcn_sched_group_barrier(LLVMSchedGroupMask::VALU, 4, 0); // VALU
+                __builtin_amdgcn_sched_group_barrier(LLVMSchedGroupMask::VALU, 2, 0); // VALU
             });
         });
         __builtin_amdgcn_sched_barrier(0);
@@ -267,9 +266,30 @@ struct WPABQuantBPipelineAgBgCrV2 : public WeightPreshufflePipelineAGmemBGmemCRe
                              {0, 0},
                              a_dram_tile_distribution);
 
-        // ping-pong window for A LDS
+// ping-pong window for A LDS
+#ifdef __gfx125__
+        constexpr index_t MWarpBlock = WarpTileM / 16;
+
+        constexpr index_t KLane      = get_warp_size() / 16;
+        constexpr index_t KPerThread = WarpTileK / KLane;
+
+        constexpr index_t PackedSize    = numeric_traits<typename Problem::ADataType>::PackedSize;
+        constexpr index_t MaxVecSize    = 16 / sizeof(ADataType) * PackedSize;
+        constexpr index_t KItemsPerLoad = min(MaxVecSize, KPerThread);
+        constexpr index_t KFragment     = KPerThread / KItemsPerLoad;
+        constexpr auto a_block_inner_dstr_encoding = tile_distribution_encoding<
+            sequence<>,
+            tuple<sequence<MWarpBlock, 16>, sequence<KFragment, KLane, KItemsPerLoad>>,
+            tuple<sequence<2, 1>>,
+            tuple<sequence<1, 1>>,
+            sequence<1, 2, 2>,
+            sequence<0, 0, 2>>{};
+
+        auto a_warp_tile_distribution = make_static_tile_distribution(a_block_inner_dstr_encoding);
+#else
         auto a_warp_tile_distribution =
             make_static_tile_distribution(typename WG::AWarpDstrEncoding{});
+#endif
 
         auto a_warp_window_ping_tmp =
             make_tile_window(a_lds_block_ping,
@@ -293,22 +313,22 @@ struct WPABQuantBPipelineAgBgCrV2 : public WeightPreshufflePipelineAGmemBGmemCRe
             MIterPerWarp>
             a_warp_windows_pong;
 
-        static_for<0, MIterPerWarp, 1>{}([&](auto mIter) {
-            static_for<0, KIterPerWarp, 1>{}([&](auto kIter) {
-                a_warp_windows_ping(mIter)(kIter) = a_warp_window_ping_tmp;
+        static_ford<sequence<MIterPerWarp, KIterPerWarp>>{}([&](auto mk) {
+            constexpr auto mIter              = number<mk[number<0>{}]>{};
+            constexpr auto kIter              = number<mk[number<1>{}]>{};
+            a_warp_windows_ping(mIter)(kIter) = a_warp_window_ping_tmp;
 
-                move_tile_window(a_warp_windows_ping(mIter)(kIter),
-                                 {mIter * MPerBlockPerIter, kIter * KPerBlockPerIter});
-            });
+            move_tile_window(a_warp_windows_ping(mIter)(kIter),
+                             {mIter * MPerBlockPerIter, kIter * KPerBlockPerIter});
         });
 
-        static_for<0, MIterPerWarp, 1>{}([&](auto mIter) {
-            static_for<0, KIterPerWarp, 1>{}([&](auto kIter) {
-                a_warp_windows_pong(mIter)(kIter) = a_warp_window_pong_tmp;
+        static_ford<sequence<MIterPerWarp, KIterPerWarp>>{}([&](auto mk) {
+            constexpr auto mIter              = number<mk[number<0>{}]>{};
+            constexpr auto kIter              = number<mk[number<1>{}]>{};
+            a_warp_windows_pong(mIter)(kIter) = a_warp_window_pong_tmp;
 
-                move_tile_window(a_warp_windows_pong(mIter)(kIter),
-                                 {mIter * MPerBlockPerIter, kIter * KPerBlockPerIter});
-            });
+            move_tile_window(a_warp_windows_pong(mIter)(kIter),
+                             {mIter * MPerBlockPerIter, kIter * KPerBlockPerIter});
         });
 
         // Block GEMM
@@ -327,7 +347,7 @@ struct WPABQuantBPipelineAgBgCrV2 : public WeightPreshufflePipelineAGmemBGmemCRe
                 b_flat_distribution);
 
         using BTypeToUse =
-            mixed_prec_compute_type_from_input_t<BDataType, ADataType, ComputeDataType>;
+            mixed_prec_compute_type_from_input_t<BDataType, ADataType, AComputeDataType>;
         using BTileType = decltype(make_static_distributed_tensor<BTypeToUse>(b_flat_distribution));
 
         // pingpong buffer for B
@@ -371,16 +391,16 @@ struct WPABQuantBPipelineAgBgCrV2 : public WeightPreshufflePipelineAGmemBGmemCRe
         move_tile_window(a_copy_dram_window, {0, kKPerBlock});
 
         // prefetch B
-        static_for<0, NIterPerWarp, 1>{}([&](auto nIter) {
-            static_for<0, KIterPerWarp, 1>{}([&](auto kIter) {
-                b_flat_dram_windows(nIter)(kIter) = b_flat_dram_window;
+        static_ford<sequence<NIterPerWarp, KIterPerWarp>>{}([&](auto nk) {
+            constexpr auto nIter              = number<nk[number<0>{}]>{};
+            constexpr auto kIter              = number<nk[number<1>{}]>{};
+            b_flat_dram_windows(nIter)(kIter) = b_flat_dram_window;
 
-                move_tile_window(b_flat_dram_windows(nIter)(kIter),
-                                 {nIter * flatNPerWarp, kIter * flatKPerWarp});
+            move_tile_window(b_flat_dram_windows(nIter)(kIter),
+                             {nIter * flatNPerWarp, kIter * flatKPerWarp});
 
-                load_int4_tile<BDataType, BTypeToUse, UnaryOpSize_>(
-                    b_warp_tensor_ping(nIter)(kIter), b_flat_dram_windows(nIter)(kIter));
-            });
+            load_and_convert_tile<UnaryOpSize_>(b_warp_tensor_ping(nIter)(kIter),
+                                                b_flat_dram_windows(nIter)(kIter));
         });
         // move B window to next flat K
         move_tile_window(b_flat_dram_window, {0, BlockGemmShape::flatKPerBlock});
@@ -409,6 +429,7 @@ struct WPABQuantBPipelineAgBgCrV2 : public WeightPreshufflePipelineAGmemBGmemCRe
 
         // Prefetch A1
         a_block_tile = load_tile(a_copy_dram_window);
+        // move A window to next k
         move_tile_window(a_copy_dram_window, {0, kKPerBlock});
 
         // initialize C
@@ -417,8 +438,6 @@ struct WPABQuantBPipelineAgBgCrV2 : public WeightPreshufflePipelineAGmemBGmemCRe
         block_sync_lds();
 
         // preload A00,A10 from lds
-        using ATypeToUse =
-            mixed_prec_compute_type_from_input_t<ADataType, BDataType, ComputeDataType>;
         using ATileType =
             decltype(make_static_distributed_tensor<BTypeToUse>(a_warp_tile_distribution));
         statically_indexed_array<ATileType, m_preload> a_warp_tensor;
@@ -426,7 +445,7 @@ struct WPABQuantBPipelineAgBgCrV2 : public WeightPreshufflePipelineAGmemBGmemCRe
         static_for<0, m_preload, 1>{}([&](auto loadIter) {
             constexpr auto mIter = loadIter % MIterPerWarp;
             constexpr auto kIter = loadIter / MIterPerWarp;
-            load_int4_tile<ADataType, ATypeToUse, UnaryOpSize_>(
+            load_and_convert_tile<UnaryOpSize_>(
                 a_warp_tensor(loadIter), a_warp_windows_ping(number<mIter>{})(number<kIter>{}));
         });
         __builtin_amdgcn_sched_barrier(0);
@@ -437,7 +456,7 @@ struct WPABQuantBPipelineAgBgCrV2 : public WeightPreshufflePipelineAGmemBGmemCRe
         while(iCounter > 0)
         {
             __builtin_amdgcn_sched_barrier(0);
-            // Prefill A(2i+1) ds_write
+            // Prefill A(2i+1)
             a_block_tile_tmp = tile_elementwise_in(a_element_func, a_block_tile);
             store_tile(a_copy_lds_window_pong, a_block_tile_tmp);
 
@@ -454,48 +473,42 @@ struct WPABQuantBPipelineAgBgCrV2 : public WeightPreshufflePipelineAGmemBGmemCRe
                                     bq_block_tile,
                                     a_warp_windows_ping);
             // prefetch B(2i+1)
-            static_for<0, KIterPerWarp, 1>{}([&](auto kIter) {
-                static_for<0, NIterPerWarp, 1>{}([&](auto nIter) {
-                    b_flat_dram_windows(nIter)(kIter) = b_flat_dram_window;
+            static_ford<sequence<KIterPerWarp, NIterPerWarp>>{}([&](auto kn) {
+                constexpr auto kIter              = number<kn[number<0>{}]>{};
+                constexpr auto nIter              = number<kn[number<1>{}]>{};
+                b_flat_dram_windows(nIter)(kIter) = b_flat_dram_window;
 
-                    move_tile_window(b_flat_dram_windows(nIter)(kIter),
-                                     {nIter * flatNPerWarp, kIter * flatKPerWarp});
-                    load_int4_tile<BDataType, BTypeToUse, UnaryOpSize_>(
-                        b_warp_tensor_pong(nIter)(kIter), b_flat_dram_windows(nIter)(kIter));
-                });
+                move_tile_window(b_flat_dram_windows(nIter)(kIter),
+                                 {nIter * flatNPerWarp, kIter * flatKPerWarp});
+                load_and_convert_tile<UnaryOpSize_>(b_warp_tensor_pong(nIter)(kIter),
+                                                    b_flat_dram_windows(nIter)(kIter));
             });
             move_tile_window(b_flat_dram_window, {0, BlockGemmShape::flatKPerBlock});
-
-            // prefetch Q(2i+1)
             aq_block_tile_2 = load_tile(aq_copy_dram_window);
             move_tile_window(aq_copy_dram_window, {0, KPerBlockAQ});
             bq_block_tile_2 = load_tile(bq_copy_dram_window);
             move_tile_window(bq_copy_dram_window, bq_dram_tile_window_step);
-
-            // Preload A(2i+1) ds_read
             static_for<0, m_preload, 1>{}([&](auto loadIter) {
                 constexpr auto mIter = loadIter % MIterPerWarp;
                 constexpr auto kIter = loadIter / MIterPerWarp;
-                load_int4_tile<ADataType, ATypeToUse, UnaryOpSize_>(
+                load_and_convert_tile<UnaryOpSize_>(
                     a_warp_tensor(loadIter), a_warp_windows_pong(number<mIter>{})(number<kIter>{}));
             });
 
             // Next K
 
             // prefetch B(2i+2)
-            static_for<0, KIterPerWarp, 1>{}([&](auto kIter) {
-                static_for<0, NIterPerWarp, 1>{}([&](auto nIter) {
-                    b_flat_dram_windows(nIter)(kIter) = b_flat_dram_window;
+            static_ford<sequence<KIterPerWarp, NIterPerWarp>>{}([&](auto kn) {
+                constexpr auto kIter              = number<kn[number<0>{}]>{};
+                constexpr auto nIter              = number<kn[number<1>{}]>{};
+                b_flat_dram_windows(nIter)(kIter) = b_flat_dram_window;
 
-                    move_tile_window(b_flat_dram_windows(nIter)(kIter),
-                                     {nIter * flatNPerWarp, kIter * flatKPerWarp});
-                    load_int4_tile<BDataType, BTypeToUse, UnaryOpSize_>(
-                        b_warp_tensor_ping(nIter)(kIter), b_flat_dram_windows(nIter)(kIter));
-                });
+                move_tile_window(b_flat_dram_windows(nIter)(kIter),
+                                 {nIter * flatNPerWarp, kIter * flatKPerWarp});
+                load_and_convert_tile<UnaryOpSize_>(b_warp_tensor_ping(nIter)(kIter),
+                                                    b_flat_dram_windows(nIter)(kIter));
             });
             move_tile_window(b_flat_dram_window, {0, BlockGemmShape::flatKPerBlock});
-
-            // prefetch Q(2i+1)
             aq_block_tile = load_tile(aq_copy_dram_window);
             move_tile_window(aq_copy_dram_window, {0, KPerBlockAQ});
             bq_block_tile = load_tile(bq_copy_dram_window);
@@ -517,11 +530,11 @@ struct WPABQuantBPipelineAgBgCrV2 : public WeightPreshufflePipelineAGmemBGmemCRe
                                     aq_block_tile_2,
                                     bq_block_tile_2,
                                     a_warp_windows_pong);
-            // Preload A(2i+2) ds_read
+
             static_for<0, m_preload, 1>{}([&](auto loadIter) {
                 constexpr auto mIter = loadIter % MIterPerWarp;
                 constexpr auto kIter = loadIter / MIterPerWarp;
-                load_int4_tile<ADataType, ATypeToUse, UnaryOpSize_>(
+                load_and_convert_tile<UnaryOpSize_>(
                     a_warp_tensor(loadIter), a_warp_windows_ping(number<mIter>{})(number<kIter>{}));
             });
             iCounter--;
@@ -532,16 +545,16 @@ struct WPABQuantBPipelineAgBgCrV2 : public WeightPreshufflePipelineAGmemBGmemCRe
         if constexpr(TailNum == TailNumber::Even)
         {
             // prefetch B(loopK)
-            static_for<0, KIterPerWarp, 1>{}([&](auto kIter) {
-                static_for<0, NIterPerWarp, 1>{}([&](auto nIter) {
-                    b_flat_dram_windows(nIter)(kIter) = b_flat_dram_window;
+            static_ford<sequence<KIterPerWarp, NIterPerWarp>>{}([&](auto kn) {
+                constexpr auto kIter              = number<kn[number<0>{}]>{};
+                constexpr auto nIter              = number<kn[number<1>{}]>{};
+                b_flat_dram_windows(nIter)(kIter) = b_flat_dram_window;
 
-                    move_tile_window(b_flat_dram_windows(nIter)(kIter),
-                                     {nIter * flatNPerWarp, kIter * flatKPerWarp});
+                move_tile_window(b_flat_dram_windows(nIter)(kIter),
+                                 {nIter * flatNPerWarp, kIter * flatKPerWarp});
 
-                    load_int4_tile<BDataType, BTypeToUse, UnaryOpSize_>(
-                        b_warp_tensor_pong(nIter)(kIter), b_flat_dram_windows(nIter)(kIter));
-                });
+                load_and_convert_tile<UnaryOpSize_>(b_warp_tensor_pong(nIter)(kIter),
+                                                    b_flat_dram_windows(nIter)(kIter));
             });
             aq_block_tile_2 = load_tile(aq_copy_dram_window);
             bq_block_tile_2 = load_tile(bq_copy_dram_window);
@@ -557,11 +570,11 @@ struct WPABQuantBPipelineAgBgCrV2 : public WeightPreshufflePipelineAGmemBGmemCRe
                                     aq_block_tile,
                                     bq_block_tile,
                                     a_warp_windows_ping);
-            // Preload A ds_read
+
             static_for<0, m_preload, 1>{}([&](auto loadIter) {
                 constexpr auto mIter = loadIter % MIterPerWarp;
                 constexpr auto kIter = loadIter / MIterPerWarp;
-                load_int4_tile<ADataType, ATypeToUse, UnaryOpSize_>(
+                load_and_convert_tile<UnaryOpSize_>(
                     a_warp_tensor(loadIter), a_warp_windows_pong(number<mIter>{})(number<kIter>{}));
             });
 

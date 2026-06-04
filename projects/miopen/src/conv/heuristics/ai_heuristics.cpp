@@ -316,7 +316,7 @@ public:
         }
         if(problem.GetDilationH() != problem.GetDilationW())
         {
-            MIOPEN_LOG_I2("TunaNet Inapplicable: Dilation must be 1");
+            MIOPEN_LOG_I2("TunaNet Inapplicable: Dilation must be equal along all axes");
             return false;
         }
         if(problem.GetBias() != 0)
@@ -409,7 +409,7 @@ public:
         }
         if(problem.GetDilationH() != problem.GetDilationW())
         {
-            MIOPEN_LOG_I2("TunaNet Inapplicable: Dilation must be 1");
+            MIOPEN_LOG_I2("TunaNet Inapplicable: Dilation must be equal along all axes");
             return false;
         }
         if(problem.GetBias() != 0)
@@ -479,17 +479,40 @@ protected:
     }
 };
 
+/**
+ * @brief Check if device has legacy TunaNet model support (2D only)
+ * @param device GPU device name (e.g., "gfx908", "gfx90a")
+ * @return true if legacy 2D TunaNet models exist for this device
+ */
+static bool HasLegacyTunaNetSupport(const std::string& device)
+{
+    // Legacy 2D TunaNet models exist for these architectures only
+    return (device == "gfx908" || device == "gfx90a");
+}
+
+/**
+ * @brief Check if device has ND TunaNet model support (2D and 3D)
+ * @param device GPU device name (e.g., "gfx942", "gfx950")
+ * @return true if ND TunaNet models exist for this device
+ */
+static bool HasNDTunaNetSupport(const std::string& device)
+{
+    // ND TunaNet models (supporting both 2D and 3D) exist for these architectures
+    return (device == "gfx942" || device == "gfx950");
+}
+
 std::unique_ptr<Model> GetModel(const std::string& device)
 {
-    // 2D models only - 3D models handled separately in PredictSolver
-    if(device == "gfx950")
-        return std::make_unique<Gfx942Model>(); // use gfx942 model for gfx950 until we have a
-                                                // gfx950 model
-    if(device == "gfx942")
-        return std::make_unique<Gfx942Model>();
+    // Legacy 2D models only - caller should check HasLegacyTunaNetSupport() first
+    // No default fallback to avoid using inappropriate models for unsupported architectures
     if(device == "gfx90a")
         return std::make_unique<Gfx90aModel>();
-    return std::make_unique<Gfx908Model>(); // default model if GPU-specific model is not available
+    if(device == "gfx908")
+        return std::make_unique<Gfx908Model>();
+
+    // No model for unsupported architectures - return nullptr to trigger WTI fallback
+    MIOPEN_LOG_I2("No legacy TunaNet model for device: " << device);
+    return nullptr;
 }
 
 /**
@@ -539,9 +562,9 @@ GetCachedPrediction(const conv::ProblemDescription& problem, const std::string& 
  */
 void StorePredictionCache(const conv::ProblemDescription& problem,
                           const std::string& device,
-                          bool is3d,
                           std::vector<std::any>& any_sol)
 {
+    const bool is3d      = problem.Is3d();
     std::string est_name = is3d ? (":memory:3d_" + device) : (":memory:" + device);
     auto& db             = AnyRamDb::GetCached(est_name);
     db.StoreRecord(problem, any_sol);
@@ -565,10 +588,10 @@ struct PredictionResult
  */
 PredictionResult ProcessPredictions(const std::vector<float>& predictions,
                                     const std::unordered_map<size_t, std::string>& solver_map,
-                                    bool is3d)
+                                    bool use_nd)
 {
     // Debug: Print raw prediction probabilities
-    const std::string model_type = is3d ? "3D " : "";
+    const std::string model_type = use_nd ? "ND " : "";
 
     // Log individual solver predictions with scores
     if(miopen::IsLogging(LoggingLevel::Info2) && !solver_map.empty())
@@ -641,6 +664,26 @@ PredictionResult ProcessPredictions(const std::vector<float>& predictions,
     return result;
 }
 
+static void PromoteSolverToFront(PredictionResult& result, const char* solver_name)
+{
+    const auto solver_id = solver::Id{solver_name};
+    if(!solver_id.IsValid())
+        return;
+
+    const auto target = solver_id.Value();
+    const auto it     = std::find(result.solver_ids.begin(), result.solver_ids.end(), target);
+    if(it == result.solver_ids.end() || it == result.solver_ids.begin())
+        return;
+
+    result.solver_ids.erase(it);
+    result.solver_ids.insert(result.solver_ids.begin(), target);
+
+    result.any_solver_ids.clear();
+    result.any_solver_ids.reserve(result.solver_ids.size());
+    for(const auto id : result.solver_ids)
+        result.any_solver_ids.push_back(id);
+}
+
 /**
  * @brief Common logic for running TunaNet prediction and caching results
  * @param problem Convolution problem description
@@ -653,17 +696,24 @@ PredictionResult ProcessPredictions(const std::vector<float>& predictions,
 static std::vector<uint64_t>
 ProcessAndCachePredictions(const conv::ProblemDescription& problem,
                            const std::string& device,
-                           bool is3d,
+                           const bool& use_nd,
                            const std::vector<float>& predictions,
                            const std::unordered_map<size_t, std::string>& solver_map)
 {
-    const std::string model_type = is3d ? "3D " : "";
+    const std::string model_type = use_nd ? "ND " : "";
 
     // Process predictions (sort by probability, filter invalid solvers)
-    auto result = ProcessPredictions(predictions, solver_map, is3d);
+    auto result = ProcessPredictions(predictions, solver_map, use_nd);
+
+    // TunaNet override: promote GemmBwdRest for point-output backward-data problems
+    if(problem.Is3d() && conv::IsBwdDataPointOutput3dStrideEqFilter(problem))
+    {
+        PromoteSolverToFront(result, "GemmBwdRest");
+        MIOPEN_LOG_I2("TunaNet override: promoting GemmBwdRest for point-output backward-data");
+    }
 
     // Cache results for future use
-    StorePredictionCache(problem, device, is3d, result.any_solver_ids);
+    StorePredictionCache(problem, device, result.any_solver_ids);
 
     // Log results if verbose logging enabled
     if(miopen::IsLogging(LoggingLevel::Info2))
@@ -682,81 +732,86 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
                                     const std::string& device)
 {
     const bool is3d = problem.Is3d();
+    const bool is2d = problem.Is2d();
 
     // Check cache FIRST - avoids expensive model creation if we have cached results
-    auto cached_result = GetCachedPrediction(problem, device, is3d);
-    if(!cached_result.empty())
     {
-        return cached_result;
+        auto cached_result = GetCachedPrediction(problem, device, is3d);
+        if(!cached_result.empty())
+            return cached_result;
     }
 
-    if(is3d)
+    // Strategy:
+    // 1. Try ND model first (for gfx942/gfx950, supports both 2D and 3D)
+    // 2. Fall back to legacy model (for gfx908/gfx90a, 2D only)
+    // 3. Return empty vector to trigger WTI fallback for unsupported architectures
+
+    // Try ND model first (preferred for gfx942/gfx950)
+    if((is2d || is3d) && HasNDTunaNetSupport(device))
     {
-        // 3D path: Use TunaNet3D model
-        std::unique_ptr<conv3d::Model3D> model = conv3d::Get3DModel(device);
-        if(!model || !model->IsProblemSupported(problem, ctx))
+        int dim                        = is3d ? 3 : 2;
+        std::unique_ptr<ModelND> model = GetNDModel(device, dim);
+
+        if(model && model->IsProblemSupported(problem, ctx))
         {
-            return {}; // Fallback: empty vector
+            MIOPEN_LOG_I2("Evaluating ND TunaNet for " << device);
+            std::vector<float> predictions = model->Forward(problem);
+            return ProcessAndCachePredictions(
+                problem, device, true, predictions, model->GetSolverMap());
         }
-
-        MIOPEN_LOG_I2("Evaluating 3D TunaNet");
-        std::vector<float> predictions = model->Forward(problem);
-
-        return ProcessAndCachePredictions(
-            problem, device, true, predictions, model->GetSolverMap());
+        // If ND model failed for this architecture, don't try legacy - go to WTI
+        MIOPEN_LOG_I2("ND TunaNet not applicable for this problem on " << device);
+        return {};
     }
-    else
+
+    // Fall back to legacy 2D model (for gfx908/gfx90a only)
+    if(is2d && HasLegacyTunaNetSupport(device))
     {
-        // 2D path: Use original TunaNet model
         std::unique_ptr<Model> model = GetModel(device);
-        if(!model || !model->IsProblemSupported(problem, ctx))
+
+        if(model && model->IsProblemSupported(problem, ctx))
         {
-            return {}; // Fallback: empty vector
+            MIOPEN_LOG_I2("Evaluating legacy TunaNet for " << device);
+            std::vector<float> predictions = model->Forward(problem);
+            return ProcessAndCachePredictions(
+                problem, device, false, predictions, model->metadata.solver_map);
         }
-
-        MIOPEN_LOG_I2("Evaluating TunaNet");
-        std::vector<float> predictions = model->Forward(problem);
-
-        return ProcessAndCachePredictions(
-            problem, device, false, predictions, model->metadata.solver_map);
+        MIOPEN_LOG_I2("Legacy TunaNet not applicable for this problem on " << device);
+        return {};
     }
+
+    // No TunaNet model available for this device/problem combination
+    // Return empty vector to trigger WTI fallback
+    MIOPEN_LOG_I2("No TunaNet model available for " << device << ", falling back to WTI");
+    return {};
 }
 
-} // namespace immed_mode
+// MetadataND implementation moved to metadata_nd.cpp
 
-/**
- * @brief 3D convolution AI heuristics namespace
- *
- * This namespace contains classes and functions for 3D convolution AI heuristics
- * using TunaNet3D neural networks to predict optimal solvers for 3D convolution
- * operations (NCDHW layout).
- */
-namespace conv3d {
-
-// Metadata3D implementation moved to metadata_3d.cpp
-
-class TunaNet3DModel : public Model3D
+class TunaNetNDModel : public ModelND
 {
 private:
     const std::string device_name; // Device name (e.g., "gfx942", "gfx950")
 
 public:
-    Metadata3D metadata;
+    MetadataND metadata;
 
-    explicit TunaNet3DModel(const std::string& device)
-        : device_name(device), metadata(Metadata3D(device))
+    explicit TunaNetNDModel(const std::string& device, const int& dim)
+        : device_name(device), metadata(MetadataND(device, dim))
     {
-        MIOPEN_LOG_I2("TunaNet3DModel initialized for device: " << device_name);
+        MIOPEN_LOG_I2("TunaNetNDModel initialized for device: " << device_name << " dim: " << dim);
     }
 
     std::vector<float> Forward(const conv::ProblemDescription& problem) const override
     {
         std::vector<float> features = ToFeatures(problem);
-        MIOPEN_LOG_I2("TunaNet3DModel: Extracted " << features.size() << " features");
+        MIOPEN_LOG_I2("TunaNetNDModel: Extracted " << features.size() << " features");
 
-        // Use fdeep to run TunaNet3D inference
-        const std::string model_path = Model3DPath(device_name);
-        const auto model             = fdeep::load_model(model_path);
+        // Use fdeep to run TunaNetND inference
+        const int dim                = problem.Is3d() ? 3 : 2;
+        const std::string model_path = ModelNDPath(device_name, dim);
+        const auto model             = fdeep::load_model(model_path, true, fdeep::dev_null_logger);
+        MIOPEN_LOG_I2("TunaNetNDModel: Loaded fdeep model from " << model_path << ".");
 
         // Convert features to fdeep tensor
         const auto input_tensor = fdeep::tensor(fdeep::tensor_shape(features.size()), features);
@@ -764,7 +819,7 @@ public:
 
         // Extract predictions from result
         const auto predictions = result[0].to_vector();
-        MIOPEN_LOG_I2("TunaNet3DModel: TunaNet3D returned " << predictions.size()
+        MIOPEN_LOG_I2("TunaNetNDModel: TunaNetND returned " << predictions.size()
                                                             << " predictions");
         return predictions;
     }
@@ -777,11 +832,29 @@ public:
     bool IsProblemSupported(const conv::ProblemDescription& problem,
                             const ExecutionContext& /*ctx*/) const override
     {
-        if(!problem.Is3d())
+        // Get the model's spatial dimension
+        const int model_dim = metadata.GetSpatialDim();
+
+        // Check if problem dimension matches model dimension
+        if(model_dim == 3 && !problem.Is3d())
         {
+            MIOPEN_LOG_I2("TunaNetND 3D model cannot handle 2D problem");
             return false;
         }
-        MIOPEN_LOG_I2("3D problem supported by TunaNet3DModel");
+        if(model_dim == 2 && !problem.Is2d())
+        {
+            MIOPEN_LOG_I2("TunaNetND 2D model cannot handle 3D problem");
+            return false;
+        }
+
+        // Reject problems that are neither 2D nor 3D
+        if(!problem.Is3d() && !problem.Is2d())
+        {
+            MIOPEN_LOG_I2("Problem is neither 2D nor 3D");
+            return false;
+        }
+
+        MIOPEN_LOG_I2("Problem dimension matches TunaNetND model dimension");
         return true;
     }
 
@@ -790,102 +863,174 @@ protected:
     {
         const bool isFwd = problem.GetDirection() == conv::Direction::Forward;
 
-        std::vector<float> features = {
-            // Input dimensions
-            static_cast<float>(isFwd ? problem.GetInChannels()
-                                     : problem.GetOutChannels()),                     // in_channels
-            static_cast<float>(isFwd ? problem.GetInDepth() : problem.GetOutDepth()), // in_d
-            static_cast<float>(isFwd ? problem.GetInHeight() : problem.GetOutHeight()), // in_h
-            static_cast<float>(isFwd ? problem.GetInWidth() : problem.GetOutWidth()),   // in_w
+        std::vector<float> features = {};
+        if(problem.Is2d()) // 2d version as in the
+        {
+            features = {
+                // Input dimensions
+                static_cast<float>(isFwd ? problem.GetInChannels()
+                                         : problem.GetOutChannels()), // in_channels
+                static_cast<float>(isFwd ? problem.GetInHeight() : problem.GetOutHeight()), // in_h
+                static_cast<float>(isFwd ? problem.GetInWidth() : problem.GetOutWidth()),   // in_w
 
-            // Output dimensions
-            static_cast<float>(isFwd ? problem.GetOutChannels()
-                                     : problem.GetInChannels()), // out_channels
-            static_cast<float>(isFwd ? problem.GetOutDepth() : problem.GetInDepth()),   // out_d
-            static_cast<float>(isFwd ? problem.GetOutHeight() : problem.GetInHeight()), // out_h
-            static_cast<float>(isFwd ? problem.GetOutWidth() : problem.GetInWidth()),   // out_w
+                // Output dimensions
+                static_cast<float>(isFwd ? problem.GetOutChannels()
+                                         : problem.GetInChannels()), // out_channels
+                static_cast<float>(isFwd ? problem.GetOutHeight() : problem.GetInHeight()), // out_h
+                static_cast<float>(isFwd ? problem.GetOutWidth() : problem.GetInWidth()),   // out_w
 
-            // Filter dimensions
-            static_cast<float>(problem.GetWeightsDepth()),  // fil_d
-            static_cast<float>(problem.GetWeightsHeight()), // fil_h
-            static_cast<float>(problem.GetWeightsWidth()),  // fil_w
+                // Filter dimensions
+                static_cast<float>(problem.GetWeightsHeight()), // fil_h
+                static_cast<float>(problem.GetWeightsWidth()),  // fil_w
 
-            // Padding
-            static_cast<float>(problem.GetPadD()), // pad_d
-            static_cast<float>(problem.GetPadH()), // pad_h
-            static_cast<float>(problem.GetPadW()), // pad_w
+                // Padding
+                static_cast<float>(problem.GetPadH()), // pad_h
+                static_cast<float>(problem.GetPadW()), // pad_w
 
-            // Stride
-            static_cast<float>(problem.GetKernelStrideD()), // stride_d
-            static_cast<float>(problem.GetKernelStrideH()), // stride_h
-            static_cast<float>(problem.GetKernelStrideW()), // stride_w
+                // Stride
+                static_cast<float>(problem.GetKernelStrideH()), // stride_h
+                static_cast<float>(problem.GetKernelStrideW()), // stride_w
 
-            // Batch size
-            static_cast<float>(problem.GetOutBatchSize()), // batchsize
+                // Dilation
+                static_cast<float>(problem.GetDilationH()), // dilation_h
+                static_cast<float>(problem.GetDilationW()), // dilation_w
 
-            // Layout encodings
-            static_cast<float>(metadata.EncodeInLayout(problem.GetInLayout())),       // in_layout
-            static_cast<float>(metadata.EncodeFilLayout(problem.GetWeightsLayout())), // fil_layout
-            static_cast<float>(metadata.EncodeOutLayout(problem.GetOutLayout())),     // out_layout
+                // Batch size
+                static_cast<float>(problem.GetOutBatchSize()), // batchsize
 
-            // Precision encoding
-            static_cast<float>(metadata.EncodePrecision(problem.GetInDataType())), // precision
+                // Layout encodings
+                static_cast<float>(metadata.EncodeInLayout(problem.GetInLayout())), // in_layout
+                static_cast<float>(
+                    metadata.EncodeFilLayout(problem.GetWeightsLayout())),            // fil_layout
+                static_cast<float>(metadata.EncodeOutLayout(problem.GetOutLayout())), // out_layout
 
-            // Direction encoding
-            static_cast<float>(metadata.EncodeDirection(problem.GetDirection())), // direction
+                // Precision encoding
+                static_cast<float>(metadata.EncodePrecision(problem.GetInDataType())), // precision
 
-            // Group count
-            static_cast<float>(problem.GetGroupCount()), // group_count
-        };
+                // Direction encoding
+                static_cast<float>(metadata.EncodeDirection(problem.GetDirection())), // direction
 
-        MIOPEN_LOG_I2("TunaNet3DModel: Extracted " << features.size() << " features");
+                // Group count
+                static_cast<float>(problem.GetGroupCount()), // group_count
+            };
+        }
+        else if(problem.Is3d())
+        {
+            features = {
+                // Input dimensions
+                static_cast<float>(isFwd ? problem.GetInChannels()
+                                         : problem.GetOutChannels()), // in_channels
+                static_cast<float>(isFwd ? problem.GetInDepth() : problem.GetOutDepth()),   // in_d
+                static_cast<float>(isFwd ? problem.GetInHeight() : problem.GetOutHeight()), // in_h
+                static_cast<float>(isFwd ? problem.GetInWidth() : problem.GetOutWidth()),   // in_w
+
+                // Output dimensions
+                static_cast<float>(isFwd ? problem.GetOutChannels()
+                                         : problem.GetInChannels()), // out_channels
+                static_cast<float>(isFwd ? problem.GetOutDepth() : problem.GetInDepth()),   // out_d
+                static_cast<float>(isFwd ? problem.GetOutHeight() : problem.GetInHeight()), // out_h
+                static_cast<float>(isFwd ? problem.GetOutWidth() : problem.GetInWidth()),   // out_w
+
+                // Filter dimensions
+                static_cast<float>(problem.GetWeightsDepth()),  // fil_d
+                static_cast<float>(problem.GetWeightsHeight()), // fil_h
+                static_cast<float>(problem.GetWeightsWidth()),  // fil_w
+
+                // Padding
+                static_cast<float>(problem.GetPadD()), // pad_d
+                static_cast<float>(problem.GetPadH()), // pad_h
+                static_cast<float>(problem.GetPadW()), // pad_w
+
+                // Stride
+                static_cast<float>(problem.GetKernelStrideD()), // stride_d
+                static_cast<float>(problem.GetKernelStrideH()), // stride_h
+                static_cast<float>(problem.GetKernelStrideW()), // stride_w
+
+                // Batch size
+                static_cast<float>(problem.GetOutBatchSize()), // batchsize
+
+                // Layout encodings
+                static_cast<float>(metadata.EncodeInLayout(problem.GetInLayout())), // in_layout
+                static_cast<float>(
+                    metadata.EncodeFilLayout(problem.GetWeightsLayout())),            // fil_layout
+                static_cast<float>(metadata.EncodeOutLayout(problem.GetOutLayout())), // out_layout
+
+                // Precision encoding
+                static_cast<float>(metadata.EncodePrecision(problem.GetInDataType())), // precision
+
+                // Direction encoding
+                static_cast<float>(metadata.EncodeDirection(problem.GetDirection())), // direction
+
+                // Group count
+                static_cast<float>(problem.GetGroupCount()), // group_count
+            };
+        }
+        else
+        {
+            MIOPEN_LOG_I2("Unsupported problem type for ND feature extraction");
+        }
+
+        MIOPEN_LOG_I2("TunaNetNDModel: Extracted " << features.size() << " features");
         return features;
     }
 
-    static std::string Model3DPath(const std::string& device)
+    static std::string ModelNDPath(const std::string& device, const int& dim)
     {
-        const auto file_path = GetSystemDbPath() / (device + "_3d.tn.model");
+        auto file_path = GetSystemDbPath();
+
+        if(dim == 3)
+        {
+            file_path = file_path / (device + "_3d.tn.model");
+        }
+        else if(dim == 2)
+        {
+            file_path = file_path / (device + ".tn.model");
+        }
+        else
+        {
+            MIOPEN_LOG_I2("Unsupported dim:" << dim);
+        }
+
         if(!fs::exists(file_path))
         {
             MIOPEN_THROW(miopenStatusInternalError,
-                         "Unable to load 3D AI model file: " + file_path.string());
+                         "Unable to load ND AI model file: " + file_path.string());
         }
         return file_path.string();
     }
 };
 
-std::unique_ptr<Model3D> Get3DModel(const std::string& device)
+std::unique_ptr<ModelND> GetNDModel(const std::string& device, const int& dim)
 {
-    MIOPEN_LOG_I2("Get3DModel called for device: " << device);
+    MIOPEN_LOG_I2("GetNDModel called for device: " << device << " dim: " << dim);
 
-    // List of devices with 3D TunaNet models
-    // Note: gfx942 included for testing purposes (no dedicated 3D model yet)
-    if(device == "gfx942" || device == "gfx950")
+    // Check if device is supported using the centralized helper function
+    if(!HasNDTunaNetSupport(device))
     {
-        try
-        {
-            // Pass device name to constructor - it will append "_3d" internally
-            auto model = std::make_unique<TunaNet3DModel>(device);
-            MIOPEN_LOG_I2("Successfully created 3D model for device: " << device);
-            return model;
-        }
-        catch(const std::exception& e)
-        {
-            MIOPEN_LOG_E("Exception during 3D model construction: " << e.what());
-            return nullptr;
-        }
-        catch(...)
-        {
-            MIOPEN_LOG_E("Unknown exception during 3D model construction");
-            return nullptr;
-        }
+        MIOPEN_LOG_I2("Device " << device << " not supported for ND models");
+        return nullptr;
     }
 
-    MIOPEN_LOG_I2("Device " << device << " not supported for 3D models");
-    return nullptr;
+    try
+    {
+        // Pass device name to constructor - it will append "_3d" internally if 3D
+        auto model = std::make_unique<TunaNetNDModel>(device, dim);
+        MIOPEN_LOG_I2("Successfully created ND model for device: " << device);
+        return model;
+    }
+    catch(const std::exception& e)
+    {
+        MIOPEN_LOG_E("Exception during ND model construction: " << e.what());
+        return nullptr;
+    }
+    catch(...)
+    {
+        MIOPEN_LOG_E("Unknown exception during ND model construction");
+        return nullptr;
+    }
 }
 
-} // namespace conv3d
+} // namespace immed_mode
 
 #endif // MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
 
@@ -1138,6 +1283,8 @@ std::vector<float> EncodeInputFeaturesWithFdeep(const std::vector<float>& featur
     std::string key = arch + "_" + solver + "_input_encoder";
     std::string path =
         (GetSystemDbPath() / (arch + "_" + solver + "_input_encoder.tn.model")).string();
+
+    MIOPEN_LOG_I2("Loading a Two-towers submodel from: " << path);
     auto tensors = GetFdeepModel(path, key).predict({input_tensor});
     if(tensors.empty())
         MIOPEN_THROW(miopenStatusInternalError, "Input encoder returned empty tensor list");
@@ -1158,6 +1305,7 @@ EncodeKernelConfigsWithFdeep(const std::vector<std::vector<float>>& encoded_cand
     std::string path =
         (GetSystemDbPath() / (arch + "_" + solver + "_kernel_config_encoder.tn.model")).string();
 
+    MIOPEN_LOG_I2("Loading a Two-towers submodel from: " << path);
     const auto& model = GetFdeepModel(path, key);
 
     // By default, use predict_multi (multi-threaded); use single-threaded loop only if env var is

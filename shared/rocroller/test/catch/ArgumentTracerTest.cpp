@@ -98,13 +98,14 @@ namespace ArgumentTracerTest
 
         auto kgraph = KG::translate(command);
 
-        kgraph = rocRollerTest::transform<KG::LowerLinear>(kgraph, context.get());
-        kgraph = rocRollerTest::transform<KG::CleanArguments>(kgraph, context.get(), command);
-        kgraph = rocRollerTest::transform<KG::UpdateWavefrontParameters>(kgraph, commandParameters);
-        kgraph = rocRollerTest::transform<KG::SetWorkitemCount>(kgraph, context.get());
-        kgraph = rocRollerTest::transform<KG::AddDeallocateArguments>(kgraph, context.get());
-        kgraph = rocRollerTest::transform<KG::SetWorkitemCount>(kgraph, context.get());
-        kgraph = rocRollerTest::transform<KG::RemoveSetCoordinate>(kgraph);
+        kgraph = transform<KG::UpdateParameters>(kgraph, commandParameters);
+        kgraph = transform<KG::LowerLinear>(kgraph, context.get());
+        kgraph = transform<KG::CleanArguments>(kgraph, context.get(), command);
+        kgraph = transform<KG::UpdateWavefrontParameters>(kgraph, commandParameters);
+        kgraph = transform<KG::SetWorkitemCount>(kgraph, context.get());
+        kgraph = transform<KG::AddDeallocateArguments>(kgraph, context.get());
+        kgraph = transform<KG::SetWorkitemCount>(kgraph, context.get());
+        kgraph = transform<KG::RemoveSetCoordinate>(kgraph);
 
         auto hasUserMapping = [](KG::KernelGraph const& kg, int userDim) {
             auto pred
@@ -243,9 +244,10 @@ namespace ArgumentTracerTest
 
         auto kgraph = KG::translate(command);
 
-        kgraph = rocRollerTest::transform<KG::LowerLinear>(kgraph, context.get());
-        kgraph = rocRollerTest::transform<KG::UpdateWavefrontParameters>(kgraph, commandParameters);
-        kgraph = rocRollerTest::transform<KG::CleanArguments>(kgraph, context.get(), command);
+        kgraph = transform<KG::UpdateParameters>(kgraph, commandParameters);
+        kgraph = transform<KG::LowerLinear>(kgraph, context.get());
+        kgraph = transform<KG::UpdateWavefrontParameters>(kgraph, commandParameters);
+        kgraph = transform<KG::CleanArguments>(kgraph, context.get(), command);
 
         // Add a new unused argument
         context->kernel()->addArgument(
@@ -254,7 +256,7 @@ namespace ArgumentTracerTest
         // Ensure the unused arg has been added to the kernel successfully
         CHECK_NOTHROW(context->kernel()->findArgument("unusedArg"));
 
-        kgraph = rocRollerTest::transform<KG::AddDeallocateArguments>(kgraph, context.get());
+        kgraph = transform<KG::AddDeallocateArguments>(kgraph, context.get());
 
         // Verify unused argument is removed after AddDeallocateArguments by
         // checking an error is thrown when finding it in the kernel.

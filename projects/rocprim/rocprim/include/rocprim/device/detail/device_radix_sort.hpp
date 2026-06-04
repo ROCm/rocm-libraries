@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -222,9 +222,10 @@ struct radix_digit_count_helper
     }
 };
 
-template<unsigned int BlockSize,
-         unsigned int ItemsPerThread,
-         bool         Descending,
+template<unsigned int            BlockSize,
+         unsigned int            ItemsPerThread,
+         bool                    Descending,
+         arch::wavefront::target TargetWaveSize,
          class Key,
          class Value>
 struct radix_sort_single_helper
@@ -234,7 +235,17 @@ struct radix_sort_single_helper
     using key_type   = Key;
     using value_type = Value;
 
-    using sort_type = ::rocprim::block_radix_sort<key_type, BlockSize, ItemsPerThread, value_type>;
+    using sort_type
+        = ::rocprim::block_radix_sort<key_type,
+                                      BlockSize,
+                                      ItemsPerThread,
+                                      value_type,
+                                      1,
+                                      1,
+                                      0,
+                                      block_radix_rank_algorithm::default_for_radix_sort,
+                                      block_padding_hint::lds_occupancy_bound,
+                                      TargetWaveSize>;
 
     static constexpr bool with_values = !std::is_same<value_type, ::rocprim::empty_type>::value;
 
@@ -339,6 +350,7 @@ template<unsigned int BlockSize,
          class Key,
          class Value,
          class Offset,
+         arch::wavefront::target    TargetWaveSize,
          block_radix_rank_algorithm RadixRankAlgorithm = block_radix_rank_algorithm::match>
 struct radix_sort_and_scatter_helper
 {
@@ -349,7 +361,13 @@ struct radix_sort_and_scatter_helper
 
     using key_codec
         = decltype(::rocprim::traits::get<Key>().template radix_key_codec<Descending>());
-    using radix_rank_type = ::rocprim::block_radix_rank<BlockSize, RadixBits, RadixRankAlgorithm>;
+    using radix_rank_type = ::rocprim::block_radix_rank<BlockSize,
+                                                        RadixBits,
+                                                        RadixRankAlgorithm,
+                                                        1,
+                                                        1,
+                                                        block_padding_hint::avoid_conflicts,
+                                                        TargetWaveSize>;
 
     static constexpr bool load_warp_striped
         = RadixRankAlgorithm == block_radix_rank_algorithm::match;
@@ -585,6 +603,7 @@ struct radix_sort_and_scatter_helper
 template<unsigned int BlockSize,
          unsigned int ItemsPerThread,
          bool         Descending,
+         arch::wavefront::target    TargetWaveSize,
          class KeysInputIterator,
          class KeysOutputIterator,
          class ValuesInputIterator,
@@ -602,8 +621,12 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void sort_single(KeysInputIterator    keys_i
     using key_type   = typename std::iterator_traits<KeysInputIterator>::value_type;
     using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
 
-    using sort_single_helper
-        = radix_sort_single_helper<BlockSize, ItemsPerThread, Descending, key_type, value_type>;
+    using sort_single_helper = radix_sort_single_helper<BlockSize,
+                                                        ItemsPerThread,
+                                                        Descending,
+                                                        TargetWaveSize,
+                                                        key_type,
+                                                        value_type>;
 
     ROCPRIM_SHARED_MEMORY typename sort_single_helper::storage_type storage;
 
@@ -811,7 +834,7 @@ struct onesweep_histograms_helper
     // Upper bound, this value does not take into account the actual size of the number of bits
     // that are to be considered in the radix sort.
     static constexpr unsigned int max_digit_places
-        = ::rocprim::detail::ceiling_div(sizeof(KeyType) * 8, RadixBits);
+        = ::rocprim::detail::ceiling_div(total_bits, RadixBits);
     static constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
     static constexpr unsigned int digits_per_thread
         = ::rocprim::detail::ceiling_div(radix_size, BlockSize);
@@ -828,11 +851,10 @@ struct onesweep_histograms_helper
         counter_type histogram[histogram_counters];
     };
 
-    ROCPRIM_DEVICE ROCPRIM_INLINE
-    unsigned int
+    static constexpr unsigned int
         get_counter(const unsigned stripe_index, const unsigned int place, const unsigned int digit)
     {
-        return (place * radix_size + digit) * atomic_stripes + stripe_index;
+        return (((place * radix_size) + digit) * atomic_stripes) + stripe_index;
     }
 
     ROCPRIM_DEVICE ROCPRIM_INLINE
@@ -880,47 +902,51 @@ struct onesweep_histograms_helper
             key_codec::encode_inplace(keys[i], decomposer);
         }
 
-        if constexpr(AllBits)
+        // We will be writing to the histogram stored in LDS.
+        static_assert(histogram_counters
+                      > get_counter(atomic_stripes - 1, max_digit_places - 1, radix_size - 1));
+
+        ROCPRIM_UNROLL
+        for(auto i = 0u; i < ItemsPerThread; ++i)
         {
+            // We iterate over places and early exit if we reach our
+            // end bit earlier. This simplifies the logic and allows
+            // the loop to be unrolled even with dynamic bit ranges.
+            //
+            // We also assume that end_bit <= total_bits here. Else,
+            // the behavior is undefined.
             ROCPRIM_UNROLL
-            for(unsigned int i = 0; i < ItemsPerThread; ++i)
+            for(auto place = 0u; place < max_digit_places; ++place)
             {
-                ROCPRIM_UNROLL
-                for(unsigned int bit = 0, place = 0; bit < sizeof(KeyType) * 8;
-                    bit += RadixBits, ++place)
+                const auto bit = (place * RadixBits) + begin_bit;
+                if constexpr(!AllBits)
                 {
-                    const unsigned int pos = i * BlockSize + flat_id;
-                    if(IsFull || pos < valid_count)
+                    // Begin and end bit do not cover all radix bits.
+                    // We must therefore consistently check if we're
+                    // still within bounds.
+                    if(bit >= end_bit)
                     {
-                        const unsigned int digit
-                            = key_codec::extract_digit(keys[i],
-                                                       bit,
-                                                       min(RadixBits, end_bit - bit),
-                                                       decomposer);
-                        atomic_add(&storage.histogram[get_counter(stripe, place, digit)], 1);
+                        break;
                     }
                 }
-            }
-        }
-        else
-        {
-            ROCPRIM_UNROLL
-            for(unsigned int i = 0; i < ItemsPerThread; ++i)
-            {
-                for(unsigned int bit = begin_bit, place = 0; bit < end_bit;
-                    bit += RadixBits, ++place)
+
+                const auto pos = (i * BlockSize) + flat_id;
+                if constexpr(!IsFull)
                 {
-                    const unsigned int pos = i * BlockSize + flat_id;
-                    if(IsFull || pos < valid_count)
+                    // Only check for out-of-bounds on non-full blocks.
+                    if(pos >= valid_count)
                     {
-                        const unsigned int digit
-                            = key_codec::extract_digit(keys[i],
-                                                       bit,
-                                                       min(RadixBits, end_bit - bit),
-                                                       decomposer);
-                        atomic_add(&storage.histogram[get_counter(stripe, place, digit)], 1);
+                        continue;
                     }
                 }
+
+                const auto digit = key_codec::extract_digit(keys[i],
+                                                            bit,
+                                                            min(RadixBits, end_bit - bit),
+                                                            decomposer);
+
+                const auto histogram_offset = get_counter(stripe, place, digit);
+                atomic_add(&storage.histogram[histogram_offset], 1);
             }
         }
 
@@ -1015,11 +1041,19 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void onesweep_histograms(KeysInputIterator  
     }
 }
 
-template<unsigned int BlockSize, unsigned int RadixBits, class Offset>
+template<unsigned int            BlockSize,
+         unsigned int            RadixBits,
+         arch::wavefront::target TargetWaveSize,
+         class Offset>
 ROCPRIM_DEVICE
 void onesweep_scan_histograms(Offset* global_digit_offsets)
 {
-    using block_scan_type = block_scan<Offset, BlockSize>;
+    using block_scan_type = block_scan<Offset,
+                                       BlockSize,
+                                       block_scan_algorithm::default_algorithm,
+                                       1,
+                                       1,
+                                       TargetWaveSize>;
 
     constexpr unsigned int radix_size       = 1u << RadixBits;
     constexpr unsigned int items_per_thread = ::rocprim::detail::ceiling_div(radix_size, BlockSize);
@@ -1096,6 +1130,7 @@ template<class Key,
          unsigned int               RadixBits,
          bool                       Descending,
          block_radix_rank_algorithm RadixRankAlgorithm,
+         arch::wavefront::target    TargetWaveSize,
          class Decomposer,
          class BlockIdWrapper>
 struct onesweep_iteration_helper
@@ -1106,7 +1141,13 @@ struct onesweep_iteration_helper
 
     using key_codec
         = decltype(::rocprim::traits::get<Key>().template radix_key_codec<Descending>());
-    using radix_rank_type = ::rocprim::block_radix_rank<BlockSize, RadixBits, RadixRankAlgorithm>;
+    using radix_rank_type = ::rocprim::block_radix_rank<BlockSize,
+                                                        RadixBits,
+                                                        RadixRankAlgorithm,
+                                                        1,
+                                                        1,
+                                                        block_padding_hint::avoid_conflicts,
+                                                        TargetWaveSize>;
 
     static constexpr bool load_warp_striped
         = RadixRankAlgorithm == block_radix_rank_algorithm::match;
@@ -1474,6 +1515,7 @@ template<unsigned int               BlockSize,
          unsigned int               RadixBits,
          bool                       Descending,
          block_radix_rank_algorithm RadixRankAlgorithm,
+         arch::wavefront::target    TargetWaveSize,
          class KeysInputIterator,
          class KeysOutputIterator,
          class ValuesInputIterator,
@@ -1507,6 +1549,7 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void
                                                                      RadixBits,
                                                                      Descending,
                                                                      RadixRankAlgorithm,
+                                                                     TargetWaveSize,
                                                                      Decomposer,
                                                                      BlockIdWrapper>;
 

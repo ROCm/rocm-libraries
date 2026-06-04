@@ -459,11 +459,14 @@ namespace rocRoller
          * @param graph Kernel graph containing the loads
          * @param colouring Maps operations to unroll values
          * @param nonSwizzleLoads Non-WAVE_SWIZZLE loads used as position anchors
+         * @param kLoopLoadSet Loads that are inside the K loop (used to distinguish
+         *                     pre-loop loads from K loop body loads)
          * @return PrefetchPositions indexed by sub-iteration
          */
-        PrefetchPositions DeterminePrefetchPositions(KernelGraph const&      graph,
-                                                     UnrollColouring const&  colouring,
-                                                     std::vector<int> const& nonSwizzleLoads)
+        PrefetchPositions DeterminePrefetchPositions(KernelGraph const&             graph,
+                                                     UnrollColouring const&         colouring,
+                                                     std::vector<int> const&        nonSwizzleLoads,
+                                                     std::unordered_set<int> const& kLoopLoadSet)
         {
             std::vector<int>   prefetchPosition;
             std::vector<int>   exchangePosition;
@@ -477,11 +480,10 @@ namespace rocRoller
                 auto unrollKDim = graph.mapper.get<Unroll>(loadTag, rocRoller::KLOOP_UNROLL);
                 auto subiter    = unrollMap.at(unrollKDim);
 
-                // Detect if we've entered the K loop
+                // Detect if we've entered the K loop (not just any ForLoopOp)
                 if(!isInsideLoop)
                 {
-                    auto maybeForLoop = findContainingOperation<ForLoopOp>(loadTag, graph);
-                    if(maybeForLoop)
+                    if(kLoopLoadSet.contains(loadTag))
                         isInsideLoop = true;
                 }
 
@@ -606,8 +608,10 @@ namespace rocRoller
             if(swizzleLoads.empty())
                 return;
 
+            std::unordered_set<int> kLoopLoadSet(loopLoads.begin(), loopLoads.end());
+
             auto [prefetchPosition, exchangePosition]
-                = DeterminePrefetchPositions(graph, colouring, nonSwizzleLoads);
+                = DeterminePrefetchPositions(graph, colouring, nonSwizzleLoads, kLoopLoadSet);
 
             for(auto const loadTag : swizzleLoads)
             {
@@ -624,7 +628,8 @@ namespace rocRoller
                 replaceWith(graph, topOp, graph.control.addElement(NOP()), false);
                 nextIterPrefetch[subiter].push_back(topOp);
 
-                if(context->kernelOptions()->scaleSkipPermlane)
+                if(context->kernelOptions()->scaleSkipPermlane
+                   != rocRoller::ScaleSkipPermlaneMode::None)
                 {
                     auto [copyTag, destMacTileTag]
                         = CreateCopy(graph, context, loadTag, macTileTag, copyInfo);

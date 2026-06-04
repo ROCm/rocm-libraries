@@ -1,29 +1,10 @@
-################################################################################
-#
-# MIT License
-#
-# Copyright (c) 2017 Advanced Micro Devices, Inc.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-#
-################################################################################
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
 cmake_minimum_required( VERSION 3.15 )
+
+#Add a name for the rocm-libraries location
+set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../")
 
 if (POLICY CMP0074)
   cmake_policy(SET CMP0074 NEW)
@@ -71,6 +52,27 @@ if(NOT WIN32)
     set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE PATH "")
 endif()
 
+# Default to a ROCm Clang toolchain when the user hasn't supplied one. When we
+# provide the default, treat this as a standalone build and pull third-party
+# deps via FetchContent (see cmake/ThirdParty.cmake).
+#
+# CMake limitation: the toolchain file is processed *before* this CMakeLists.txt
+# is evaluated, so this assignment only takes effect on subsequent `cmake`
+# invocations (the cache value is then picked up). On the very first configure
+# run the toolchain file is not applied. Re-running `cmake` from the same build
+# directory (or passing -DCMAKE_TOOLCHAIN_FILE=... explicitly) activates it.
+if(NOT CMAKE_TOOLCHAIN_FILE AND NOT DEFINED ENV{CMAKE_TOOLCHAIN_FILE})
+    set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/ClangToolChain.cmake"
+        CACHE FILEPATH "Toolchain file")
+    set(_MIOPEN_STANDALONE_DEFAULT ON)
+else()
+    set(_MIOPEN_STANDALONE_DEFAULT OFF)
+endif()
+option(MIOPEN_STANDALONE_BUILD
+    "Fetch third-party dependencies via FetchContent for a standalone build"
+    ${_MIOPEN_STANDALONE_DEFAULT})
+unset(_MIOPEN_STANDALONE_DEFAULT)
+
 project(MIOpen CXX)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -106,6 +108,10 @@ option(BUILD_SHARED_LIBS "Create shared libraries" ON)
 
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 
+if(MIOPEN_STANDALONE_BUILD)
+    include(cmake/ThirdParty.cmake)
+endif()
+
 if(MIOPEN_ENABLE_SQLITE)
     # MIOpen now depends on SQLite as well
     find_package(SQLite3 REQUIRED)
@@ -129,16 +135,13 @@ if(MIOPEN_INCBIN)
     enable_language(ASM)
 endif()
 
-option(MIOPEN_WORKAROUND_USE_BOOST_FILESYSTEM "Workaround: Use boost::filesystem instead of std::filesystem" OFF)
-message(STATUS "MIOPEN_WORKAROUND_USE_BOOST_FILESYSTEM ${MIOPEN_WORKAROUND_USE_BOOST_FILESYSTEM}")
-
 # Strip symbols for release
 if(MIOPEN_STRIP_SYMBOLS AND NOT WIN32 AND NOT APPLE)
     set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -s")
     set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -s")
 endif()
 
-rocm_setup_version(VERSION 3.5.1)
+rocm_setup_version(VERSION 3.5.2)
 
 include(TargetFlags)
 
@@ -159,7 +162,7 @@ else()
     set(MIOPEN_DEFAULT_BACKEND "OpenCL")
 endif()
 
-if(NOT WIN32 AND NOT MIOPEN_WORKAROUND_USE_BOOST_FILESYSTEM)
+if(NOT WIN32)
     include(CheckCXXLinkerFlag)
     check_cxx_linker_flag(-lstdc++fs HAS_LIB_STD_FILESYSTEM)
 endif()
@@ -209,8 +212,7 @@ set( MIOPEN_BACKEND ${MIOPEN_DEFAULT_BACKEND} CACHE STRING
 set_property( CACHE MIOPEN_BACKEND PROPERTY STRINGS
     OpenCL HIP HIPOC HIPNOGPU)
     
-# On Windows, internal symbols are only exported when BUILD_TESTING=true. As a result, building driver with BUILD_TESTING=false will result in failure.
-set_var_to_condition(MIOPEN_BUILD_DRIVER_DEFAULT (NOT MIOPEN_EMBED_BUILD) AND (NOT (MIOPEN_BACKEND STREQUAL "HIPNOGPU")) AND ((NOT WIN32) OR BUILD_TESTING))  
+set_var_to_condition(MIOPEN_BUILD_DRIVER_DEFAULT (NOT MIOPEN_EMBED_BUILD) AND (NOT (MIOPEN_BACKEND STREQUAL "HIPNOGPU")))
 option(MIOPEN_BUILD_DRIVER "Build MIOpenDriver (and use it in tests)" ${MIOPEN_BUILD_DRIVER_DEFAULT})
 message(STATUS "MIOPEN_BUILD_DRIVER: ${MIOPEN_BUILD_DRIVER}" )
 
@@ -274,7 +276,11 @@ option(MIOPEN_USE_COMPOSABLEKERNEL "Enable MIOpen to use composable kernels for 
 if(MIOPEN_BACKEND_OPENCL)
     set(MIOPEN_USE_COMPOSABLEKERNEL OFF)
 endif()
+option(MIOPEN_CK_UNBUNDLE_PER_ARCH
+    "Generate per-architecture CK static archives for MIOpenCKGroupedConv_<arch> shared libraries"
+    OFF)
 message(STATUS "Enable Composable Kernels: ${MIOPEN_USE_COMPOSABLEKERNEL}")
+message(STATUS "Enable per-arch CK unbundling: ${MIOPEN_CK_UNBUNDLE_PER_ARCH}")
 
 set_var_to_condition(MIOPEN_USE_COMGR_DEFAULT (NOT DEFINED MIOPEN_BACKEND_OPENCL) AND (NOT (MIOPEN_BACKEND STREQUAL "HIPNOGPU")))
 option(MIOPEN_USE_COMGR "Use comgr to build kernels instead of offline tools" ${MIOPEN_USE_COMGR_DEFAULT})
@@ -356,6 +362,78 @@ if( MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_B
             find_package(composable_kernel 1.0.0 COMPONENTS device_conv_operations)
         endif()
     endif()
+
+    # Arch name sanitization for CMake target names (used by ck_impl and unbundling)
+    function(miopen_sanitize_arch ARCH OUT_VAR)
+        string(REPLACE ":" "_" _r "${ARCH}")
+        string(REPLACE "+" "p" _r "${_r}")
+        string(REPLACE "-" "_" _r "${_r}")
+        set(${OUT_VAR} "${_r}" PARENT_SCOPE)
+    endfunction()
+
+    # --- Optional per-architecture CK archive unbundling ---
+    if(MIOPEN_USE_COMPOSABLEKERNEL AND MIOPEN_CK_UNBUNDLE_PER_ARCH)
+        # Unbundle the fat libdevice_conv_operations.a into per-arch .a files
+        # so each per-target MIOpen .so can link only the CK code it needs.
+
+        # Find unbundling tools
+        find_program(MIOPEN_OFFLOAD_BUNDLER clang-offload-bundler
+            HINTS ${CMAKE_HIP_COMPILER_TOOLKIT_ROOT}/bin
+                  ${ROCM_PATH}/llvm/bin
+                  /opt/rocm/llvm/bin)
+        find_program(MIOPEN_LLVM_OBJCOPY llvm-objcopy
+            HINTS ${CMAKE_HIP_COMPILER_TOOLKIT_ROOT}/bin
+                  ${ROCM_PATH}/llvm/bin
+                  /opt/rocm/llvm/bin)
+
+        if(NOT MIOPEN_OFFLOAD_BUNDLER OR NOT MIOPEN_LLVM_OBJCOPY)
+            message(FATAL_ERROR "Per-arch CK unbundling requires clang-offload-bundler and llvm-objcopy")
+        endif()
+
+        # Get the fat archive path
+        if(MIOPEN_BUILD_CK)
+            set(CK_FAT_ARCHIVE_TARGET device_conv_operations)
+            set(CK_FAT_ARCHIVE_PATH $<TARGET_FILE:device_conv_operations>)
+        else()
+            set(CK_FAT_ARCHIVE_PATH $<TARGET_FILE:composable_kernel::device_conv_operations>)
+            set(CK_FAT_ARCHIVE_TARGET composable_kernel::device_conv_operations)
+        endif()
+
+        set(CK_PER_ARCH_DIR "${CMAKE_CURRENT_BINARY_DIR}/lib")
+
+        foreach(arch IN LISTS GPU_TARGETS)
+            miopen_sanitize_arch("${arch}" arch_safe)
+            set(target_name "ck_conv_${arch_safe}")
+
+            # Skip if already created (GPU_TARGETS may contain duplicates)
+            if(TARGET ${target_name})
+                continue()
+            endif()
+
+            set(per_arch_lib "${CK_PER_ARCH_DIR}/libdevice_conv_operations_${arch_safe}.a")
+
+            add_custom_command(
+                OUTPUT "${per_arch_lib}"
+                DEPENDS ${CK_FAT_ARCHIVE_TARGET}
+                COMMAND ${CMAKE_COMMAND}
+                    -DFAT_ARCHIVE=${CK_FAT_ARCHIVE_PATH}
+                    -DARCH=${arch}
+                    -DOUTPUT=${per_arch_lib}
+                    -DBUNDLER=${MIOPEN_OFFLOAD_BUNDLER}
+                    -DAR=${CMAKE_AR}
+                    -DLLVM_OBJCOPY=${MIOPEN_LLVM_OBJCOPY}
+                    -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/unbundle_archive.cmake
+                COMMENT "Unbundling CK conv operations for ${arch}"
+            )
+
+            add_custom_target(${target_name}_unbundle ALL DEPENDS "${per_arch_lib}")
+            add_library(${target_name} STATIC IMPORTED GLOBAL)
+            set_target_properties(${target_name} PROPERTIES IMPORTED_LOCATION "${per_arch_lib}")
+            add_dependencies(${target_name} ${target_name}_unbundle)
+
+        endforeach()
+    endif() # optional per-arch CK unbundling
+
     if( MIOPEN_BACKEND STREQUAL "HIPNOGPU")
         set(MIOPEN_MODE_NOGPU 1)
     endif()
@@ -493,10 +571,6 @@ if(MIOPEN_USE_HIPRTC)
     find_package(hiprtc REQUIRED)
     message(STATUS "Build with hiprtc ${hiprtc_VERSION} ${hiprtc_DIR}")
 endif()
-
-option(Boost_USE_STATIC_LIBS "Use boost static libraries" ON)
-add_definitions(-DBOOST_ALL_NO_LIB=1)
-find_package(Boost REQUIRED COMPONENTS filesystem CONFIG)
 
 find_path(HALF_INCLUDE_DIR half/half.hpp)
 message(STATUS "HALF_INCLUDE_DIR: ${HALF_INCLUDE_DIR}")
@@ -726,6 +800,7 @@ elseif(MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPNOGPU")
 endif()
 
 include(ClangTidy)
+# TODO: Remove the -nogpulib workaround once clang-tidy version is bumped to clang-tidy-23+
 enable_clang_tidy(
     CHECKS
         ${MIOPEN_TIDY_CHECKS}
@@ -734,6 +809,8 @@ enable_clang_tidy(
         "\.hpp$"
     EXTRA_ARGS
         -DMIOPEN_USE_CLANG_TIDY
+        -D__builtin_elementwise_exp10=__builtin_elementwise_exp
+        -nogpulib
 )
 
 include(CppCheck)
@@ -767,6 +844,9 @@ enable_cppcheck(
         *:*src/sqlite/*.cpp
         *:*.cl
         *:*src/kernels/*.h
+        # MIOpenConvFwd_LxL_11.cpp is a HIP kernel file compiled at runtime with -D defines;
+        # cppcheck evaluates undefined macros as 0, causing false array-size errors.
+        *:*src/kernels/MIOpenConvFwd_LxL_11.cpp
         knownConditionTrueFalse:*src/kernels/static_composable_kernel/*/*
         redundantAssignment:*src/kernels/static_composable_kernel/*/*
         unreadVariable:*src/kernels/static_composable_kernel/*/*

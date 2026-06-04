@@ -759,19 +759,36 @@ struct DeviceGroupedConvFwdMultipleD_Xdl_CShuffle_Large_Tensor
                     CDEElementwiseOperation,
                     ComputePtrOffsetOfStridedBatch<I1, I1, NumDTensor>,
                     has_main_loop>;
-
-                return launch_and_time_kernel(stream_config,
-                                              kernel,
-                                              dim3(gdx, gdy, gdz),
-                                              dim3(BlockSize),
-                                              0,
-                                              arg.gemm_desc_kernel_args_,
-                                              arg.gemms_count_,
-                                              arg.a_element_op_,
-                                              arg.b_element_op_,
-                                              arg.cde_element_op_,
-                                              arg.compute_ptr_offset_of_groups_,
-                                              arg.compute_ptr_offset_of_n_);
+                if(stream_config.flush_cache)
+                {
+                    return launch_and_time_kernel_flush_cache(stream_config,
+                                                              kernel,
+                                                              dim3(gdx, gdy, gdz),
+                                                              dim3(BlockSize),
+                                                              0,
+                                                              arg.gemm_desc_kernel_args_,
+                                                              arg.gemms_count_,
+                                                              arg.a_element_op_,
+                                                              arg.b_element_op_,
+                                                              arg.cde_element_op_,
+                                                              arg.compute_ptr_offset_of_groups_,
+                                                              arg.compute_ptr_offset_of_n_);
+                }
+                else
+                {
+                    return launch_and_time_kernel(stream_config,
+                                                  kernel,
+                                                  dim3(gdx, gdy, gdz),
+                                                  dim3(BlockSize),
+                                                  0,
+                                                  arg.gemm_desc_kernel_args_,
+                                                  arg.gemms_count_,
+                                                  arg.a_element_op_,
+                                                  arg.b_element_op_,
+                                                  arg.cde_element_op_,
+                                                  arg.compute_ptr_offset_of_groups_,
+                                                  arg.compute_ptr_offset_of_n_);
+                }
             };
 
             if(GridwiseGemm::CalculateHasMainKBlockLoop(K))
@@ -858,6 +875,14 @@ struct DeviceGroupedConvFwdMultipleD_Xdl_CShuffle_Large_Tensor
                                       BComputeDataType,
                                       Wave32MaxMNPerXDL,
                                       Wave32MaxMNPerXDL>())
+        {
+            return false;
+        }
+        if(!is_xdl_wmma_k_supported<AComputeDataType, KPerBlock, AK1>())
+        {
+            return false;
+        }
+        if(!is_xdl_wmma_k_supported<BComputeDataType, KPerBlock, BK1>())
         {
             return false;
         }

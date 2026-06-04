@@ -42,7 +42,8 @@ bool profile_grouped_conv_fwd_outelementop_impl(int do_verification,
                                                 int init_method,
                                                 bool do_log,
                                                 bool time_kernel,
-                                                const ck::utils::conv::ConvParam& conv_param)
+                                                const ck::utils::conv::ConvParam& conv_param,
+                                                index_t instance_index = -1)
 {
     auto pass = true;
 
@@ -150,6 +151,27 @@ bool profile_grouped_conv_fwd_outelementop_impl(int do_verification,
     std::cout << "scale_in: " << scale_in << std::endl;
     std::cout << "scale_wei: " << scale_wei << std::endl;
     std::cout << "scale_out: " << scale_out << std::endl;
+
+    using DeviceOp = ck::tensor_operation::device::DeviceGroupedConvFwdMultipleABD<NDimSpatial,
+                                                                                   InLayout,
+                                                                                   WeiLayout,
+                                                                                   ck::Tuple<>,
+                                                                                   OutLayout,
+                                                                                   InDataType,
+                                                                                   WeiDataType,
+                                                                                   ck::Tuple<>,
+                                                                                   OutDataType,
+                                                                                   InElementOp,
+                                                                                   WeiElementOp,
+                                                                                   OutElementOp,
+                                                                                   AComputeType,
+                                                                                   BComputeType>;
+
+    // get device op instances
+    const auto op_ptrs = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
+        DeviceOp>::GetInstances();
+
+    std::cout << "ckProfiler found " << op_ptrs.size() << " instances" << std::endl;
 
     // run reference op
     if(do_verification == 1)
@@ -355,14 +377,15 @@ bool profile_grouped_conv_fwd_outelementop_impl(int do_verification,
                                                                                    AComputeType,
                                                                                    BComputeType>;
 
-    // get device op instances
-    const auto op_ptrs = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
-        DeviceOp>::GetInstances();
-
-    std::cout << "ckProfiler found " << op_ptrs.size() << " instances" << std::endl;
-
-    for(auto& op_ptr : op_ptrs)
+    for(size_t i = 0; i < op_ptrs.size(); i++)
     {
+        if((instance_index != -1) && (instance_index != static_cast<int>(i)))
+        {
+            // skip test if instance_index is specified
+            continue;
+        }
+        auto& op_ptr = op_ptrs[i];
+
         auto argument_ptr = op_ptr->MakeArgumentPointer(in_device_buf.GetDeviceBuffer(),
                                                         wei_device_buf.GetDeviceBuffer(),
                                                         {},

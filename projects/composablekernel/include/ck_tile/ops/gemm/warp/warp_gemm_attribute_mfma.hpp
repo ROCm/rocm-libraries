@@ -11,19 +11,61 @@ namespace ck_tile {
 // Number of groups of consecutive elements to fill in a ABKLane
 enum class WGAttrNumAccessEnum
 {
-    Single  = 1,
-    Double  = 2,
-    Quad    = 4,
-    Invalid = -1
+    Single = 1,
+    Double = 2,
+    Quad   = 4,
+    Octa   = 8,
+    // the below PackedFlag is used in packed data type with tr_load
+    PackedFlag   = 0x8000,
+    PackedSingle = PackedFlag | Single,
+    PackedDouble = PackedFlag | Double,
+    PackedQuad   = PackedFlag | Quad,
+    PackedOcta   = PackedFlag | Octa,
+    Default      = 0,
+    Invalid      = -1
+};
+
+template <WGAttrNumAccessEnum AttrNumAccess>
+struct get_wgattr_num_access
+{
+    private:
+    static constexpr index_t getAccesses()
+    {
+        if constexpr(AttrNumAccess == WGAttrNumAccessEnum::Single)
+        {
+            return 1;
+        }
+        else if constexpr(AttrNumAccess == WGAttrNumAccessEnum::Double)
+        {
+            return 2;
+        }
+        else if constexpr(AttrNumAccess == WGAttrNumAccessEnum::Quad)
+        {
+            return 4;
+        }
+        else
+        {
+            static_assert(false, "unsupported AttrNumAccess");
+            return 0;
+        }
+    }
+
+    public:
+    static constexpr auto value = getAccesses();
 };
 
 template <typename WarpGemmAttributeMfmaImpl_,
-          WGAttrNumAccessEnum AttrNumAccess_ = WGAttrNumAccessEnum::Single>
+          WGAttrNumAccessEnum AttrNumAccessA_ = WGAttrNumAccessEnum::Single,
+          WGAttrNumAccessEnum AttrNumAccessB_ = AttrNumAccessA_>
 struct WarpGemmAttributeMfma
 {
-    using Impl                           = remove_cvref_t<WarpGemmAttributeMfmaImpl_>;
-    static constexpr auto AttrNumAccess  = AttrNumAccess_;
-    static constexpr auto AttrNumAccessV = static_cast<index_t>(AttrNumAccess);
+    using Impl                            = remove_cvref_t<WarpGemmAttributeMfmaImpl_>;
+    static constexpr auto AttrNumAccessA  = AttrNumAccessA_;
+    static constexpr auto AttrNumAccessAV = get_wgattr_num_access<AttrNumAccessA>::value;
+    static constexpr auto AttrNumAccessB  = AttrNumAccessB_;
+    static constexpr auto AttrNumAccessBV = get_wgattr_num_access<AttrNumAccessB>::value;
+
+    static constexpr bool UsePackNumAccess = AttrNumAccessA != AttrNumAccessB;
 
     using ADataType = typename Impl::ADataType;
     using BDataType = typename Impl::BDataType;
@@ -37,6 +79,8 @@ struct WarpGemmAttributeMfma
     static constexpr index_t kN          = Impl::kN;
     static constexpr index_t kK          = Impl::kK;
     static constexpr index_t kKPerThread = Impl::kABKPerLane;
+    static constexpr index_t kAKPack     = Impl::kABKPerLane;
+    static constexpr index_t kBKPack     = Impl::kABKPerLane;
     static constexpr index_t kCMLane     = Impl::kCMLane;
 
     CK_TILE_HOST_DEVICE static constexpr auto get_num_of_access() { return 1; }
@@ -44,12 +88,13 @@ struct WarpGemmAttributeMfma
     static_assert(Impl::kAMBlock == 1 && Impl::kBNBlock == 1,
                   "Multi-block WarpGemmAttributeMfmaImpl is not supported");
 
-    template <index_t kMNLane>
+    template <index_t kMNLane, index_t AttrNumAccessV_>
     static constexpr auto get_warp_dstr_encoding()
     {
-        static_assert(kKPerThread % AttrNumAccessV == 0,
+        static_assert(kKPerThread % AttrNumAccessV_ == 0,
                       "kKPerThread must be divisible by NumAccess");
-        if constexpr(AttrNumAccessV == 1)
+        if constexpr(AttrNumAccessV_ == 1)
+        {
             return tile_distribution_encoding<
                 sequence<>,
                 tuple<sequence<kMNLane>, sequence<Impl::kABKLane, Impl::kABKPerLane>>,
@@ -57,18 +102,48 @@ struct WarpGemmAttributeMfma
                 tuple<sequence<0, 0>>,
                 sequence<2>,
                 sequence<1>>{};
+        }
         else
-            return tile_distribution_encoding<
-                sequence<>,
-                tuple<sequence<kMNLane>,
-                      sequence<AttrNumAccessV, Impl::kABKLane, Impl::kABKPerLane / AttrNumAccessV>>,
-                tuple<sequence<2, 1>>,
-                tuple<sequence<1, 0>>,
-                sequence<2, 2>,
-                sequence<0, 2>>{};
+        {
+            // AttrNumAccess splits the kABKPerLane
+            // We can split them but still have them contiguous (packed) or have them interleaved.
+            // The reason to split the dimension but still have it packed is to match load transpose
+            // encoding when A and B use different AttrNumAccess (they have different types in LDS)
+            // Example
+            // A: 16bit, B: 8bit
+            // Load transpose B: lane0 -> K=0..7 (only 1 instruction)
+            // Load transpose A: lane0 -> K=0..3 first instruction, K=4..7 second instruction
+            // In this way the data in register are consistent between A and B
+            if constexpr(UsePackNumAccess)
+            {
+                return tile_distribution_encoding<
+                    sequence<>,
+                    tuple<sequence<kMNLane>,
+                          sequence<Impl::kABKLane,
+                                   AttrNumAccessV_,
+                                   Impl::kABKPerLane / AttrNumAccessV_>>,
+                    tuple<sequence<2, 1>>,
+                    tuple<sequence<0, 0>>,
+                    sequence<2, 2>,
+                    sequence<1, 2>>{};
+            }
+            else
+            {
+                return tile_distribution_encoding<
+                    sequence<>,
+                    tuple<sequence<kMNLane>,
+                          sequence<AttrNumAccessV_,
+                                   Impl::kABKLane,
+                                   Impl::kABKPerLane / AttrNumAccessV_>>,
+                    tuple<sequence<2, 1>>,
+                    tuple<sequence<1, 0>>,
+                    sequence<2, 2>,
+                    sequence<0, 2>>{};
+            }
+        }
     }
-    using AWarpDstrEncoding = decltype(get_warp_dstr_encoding<Impl::kAMLane>());
-    using BWarpDstrEncoding = decltype(get_warp_dstr_encoding<Impl::kBNLane>());
+    using AWarpDstrEncoding = decltype(get_warp_dstr_encoding<Impl::kAMLane, AttrNumAccessAV>());
+    using BWarpDstrEncoding = decltype(get_warp_dstr_encoding<Impl::kBNLane, AttrNumAccessBV>());
 
     using CWarpDstrEncoding = tile_distribution_encoding<
         sequence<>,
@@ -80,55 +155,57 @@ struct WarpGemmAttributeMfma
         sequence<0, 2>>;
 
     // c_vec += a_vec * b_vec
-    template <bool post_nop_ = false>
-    CK_TILE_DEVICE void operator()(CVecType& c_vec,
-                                   const AVecType& a_vec,
-                                   const BVecType& b_vec,
-                                   bool_constant<post_nop_> = {}) const
+    template <typename... Params>
+    CK_TILE_DEVICE void
+    operator()(CVecType& c_vec, const AVecType& a_vec, const BVecType& b_vec) const
     {
-        Impl{}(c_vec, a_vec, b_vec, bool_constant<post_nop_>{});
+        Impl{}.template operator()<Params...>(c_vec, a_vec, b_vec);
     }
 
     // c_vec += a_vec * b_vec
-    template <index_t opselA, index_t opselB, bool post_nop_ = false>
+    template <typename... Params>
     CK_TILE_DEVICE void operator()(CVecType& c_vec,
                                    const AVecType& a_vec,
                                    const int32_t& a_scale,
                                    const BVecType& b_vec,
-                                   const int32_t& b_scale,
-                                   bool_constant<post_nop_> = {}) const
+                                   const int32_t& b_scale) const
     {
-        Impl{}.template operator()<opselA, opselB>(
-            c_vec, a_vec, a_scale, b_vec, b_scale, bool_constant<post_nop_>{});
+        Impl{}.template operator()<Params...>(c_vec, a_vec, a_scale, b_vec, b_scale);
     }
 
     // c_vec = a_vec * b_vec
+    template <typename... Params>
     CK_TILE_DEVICE CVecType operator()(const AVecType& a_vec, const BVecType& b_vec) const
     {
-        return Impl{}(a_vec, b_vec);
+        return Impl{}.template operator()<Params...>(a_vec, b_vec);
     }
 
     // c_vec = a_vec * b_vec
-    template <index_t opselA, index_t opselB>
+    template <typename... Params>
     CK_TILE_DEVICE CVecType operator()(const AVecType& a_vec,
                                        const int32_t& a_scale,
                                        const BVecType& b_vec,
                                        const int32_t& b_scale) const
     {
-        return Impl{}.template operator()<opselA, opselB>(a_vec, a_scale, b_vec, b_scale);
+        return Impl{}.template operator()<Params...>(a_vec, a_scale, b_vec, b_scale);
     }
 };
 
 template <typename WarpGemmAttributeMfmaImpl_,
           index_t kKIter,
-          WGAttrNumAccessEnum AttrNumAccess_ = WGAttrNumAccessEnum::Single>
+          WGAttrNumAccessEnum AttrNumAccessA_ = WGAttrNumAccessEnum::Single,
+          WGAttrNumAccessEnum AttrNumAccessB_ = AttrNumAccessA_>
 struct WarpGemmAttributeMfmaIterateK
 {
     static_assert(kKIter > 0, "wrong!");
 
-    using Impl                           = remove_cvref_t<WarpGemmAttributeMfmaImpl_>;
-    static constexpr auto AttrNumAccess  = AttrNumAccess_;
-    static constexpr auto AttrNumAccessV = static_cast<index_t>(AttrNumAccess);
+    using Impl                            = remove_cvref_t<WarpGemmAttributeMfmaImpl_>;
+    static constexpr auto AttrNumAccessA  = AttrNumAccessA_;
+    static constexpr auto AttrNumAccessAV = get_wgattr_num_access<AttrNumAccessA>::value;
+    static constexpr auto AttrNumAccessB  = AttrNumAccessB_;
+    static constexpr auto AttrNumAccessBV = get_wgattr_num_access<AttrNumAccessB>::value;
+
+    static constexpr bool UsePackNumAccess = AttrNumAccessA != AttrNumAccessB;
 
     using ADataType = typename Impl::ADataType;
     using BDataType = typename Impl::BDataType;
@@ -144,6 +221,8 @@ struct WarpGemmAttributeMfmaIterateK
     static constexpr index_t kN          = Impl::kN;
     static constexpr index_t kK          = Impl::kK * kKIter;
     static constexpr index_t kKPerThread = Impl::kABKPerLane * kKIter;
+    static constexpr index_t kAKPack     = Impl::kABKPerLane * kKIter;
+    static constexpr index_t kBKPack     = Impl::kABKPerLane * kKIter;
     static constexpr index_t kCMLane     = Impl::kCMLane;
 
     CK_TILE_HOST_DEVICE static constexpr auto get_num_of_access() { return kKIter; }
@@ -151,14 +230,15 @@ struct WarpGemmAttributeMfmaIterateK
     static_assert(Impl::kAMBlock == 1 || Impl::kBNBlock == 1,
                   "Multi-block on both M & N directions is not supported");
 
-    template <index_t kMNLane, index_t kMNBlock, index_t kNMBlock>
+    template <index_t kMNLane, index_t kMNBlock, index_t kNMBlock, index_t AttrNumAccessV_>
     CK_TILE_DEVICE static constexpr auto get_warp_dstr_encoding()
     {
         if constexpr(kMNBlock == 1 && kNMBlock == 1)
         {
-            static_assert(kKPerThread % AttrNumAccessV == 0,
+            static_assert(kKPerThread % AttrNumAccessV_ == 0,
                           "kKPerThread must be divisible by NumAccess");
-            if constexpr(AttrNumAccessV == 1)
+            if constexpr(AttrNumAccessV_ == 1)
+            {
                 return tile_distribution_encoding<
                     sequence<>,
                     tuple<sequence<kMNLane>, sequence<Impl::kABKLane, Impl::kABKPerLane * kKIter>>,
@@ -166,21 +246,40 @@ struct WarpGemmAttributeMfmaIterateK
                     tuple<sequence<0, 0>>,
                     sequence<2>,
                     sequence<1>>{};
+            }
             else
-                return tile_distribution_encoding<
-                    sequence<>,
-                    tuple<sequence<kMNLane>,
-                          sequence<AttrNumAccessV,
-                                   Impl::kABKLane,
-                                   Impl::kABKPerLane * kKIter / AttrNumAccessV>>,
-                    tuple<sequence<2, 1>>,
-                    tuple<sequence<1, 0>>,
-                    sequence<2, 2>,
-                    sequence<0, 2>>{};
+            {
+                if constexpr(UsePackNumAccess)
+                {
+                    return tile_distribution_encoding<
+                        sequence<>,
+                        tuple<sequence<kMNLane>,
+                              sequence<Impl::kABKLane,
+                                       AttrNumAccessV_,
+                                       Impl::kABKPerLane * kKIter / AttrNumAccessV_>>,
+                        tuple<sequence<2, 1>>,
+                        tuple<sequence<0, 0>>,
+                        sequence<2, 2>,
+                        sequence<1, 2>>{};
+                }
+                else
+                {
+                    return tile_distribution_encoding<
+                        sequence<>,
+                        tuple<sequence<kMNLane>,
+                              sequence<AttrNumAccessV_,
+                                       Impl::kABKLane,
+                                       Impl::kABKPerLane * kKIter / AttrNumAccessV_>>,
+                        tuple<sequence<2, 1>>,
+                        tuple<sequence<1, 0>>,
+                        sequence<2, 2>,
+                        sequence<0, 2>>{};
+                }
+            }
         }
         else if constexpr(kMNBlock == 1 && 1 < kNMBlock)
         {
-            static_assert(AttrNumAccessV == 1,
+            static_assert(AttrNumAccessV_ == 1,
                           "Multiple access is not supported when using multi-block");
             // each M/N blocks share the same data
             return tile_distribution_encoding<
@@ -193,7 +292,7 @@ struct WarpGemmAttributeMfmaIterateK
         }
         else if constexpr(1 < kMNBlock && kNMBlock == 1)
         {
-            static_assert(AttrNumAccessV == 1,
+            static_assert(AttrNumAccessV_ == 1,
                           "Multiple access is not supported when using multi-block");
             // single block to multi-block thread mapping
             return tile_distribution_encoding<
@@ -245,43 +344,44 @@ struct WarpGemmAttributeMfmaIterateK
         }
     }
 
-    using AWarpDstrEncoding =
-        decltype(get_warp_dstr_encoding<Impl::kAMLane, Impl::kAMBlock, Impl::kBNBlock>());
-    using BWarpDstrEncoding =
-        decltype(get_warp_dstr_encoding<Impl::kBNLane, Impl::kBNBlock, Impl::kAMBlock>());
+    using AWarpDstrEncoding = decltype(get_warp_dstr_encoding<Impl::kAMLane,
+                                                              Impl::kAMBlock,
+                                                              Impl::kBNBlock,
+                                                              AttrNumAccessAV>());
+    using BWarpDstrEncoding = decltype(get_warp_dstr_encoding<Impl::kBNLane,
+                                                              Impl::kBNBlock,
+                                                              Impl::kAMBlock,
+                                                              AttrNumAccessBV>());
     using CWarpDstrEncoding = decltype(get_cwarp_dstr_encoding());
 
     // c_vec += a_vec * b_vec
-    template <bool post_nop_ = false>
-    CK_TILE_DEVICE void operator()(CVecType& c_vec,
-                                   const AVecType& a_vec,
-                                   const BVecType& b_vec,
-                                   bool_constant<post_nop_> = {}) const
+    template <typename... Params>
+    CK_TILE_DEVICE void
+    operator()(CVecType& c_vec, const AVecType& a_vec, const BVecType& b_vec) const
     {
-        static_for<0, kKIter, 1>{}([&](auto iKIter) { operator()(c_vec, a_vec, b_vec, iKIter); });
+        static_for<0, kKIter, 1>{}(
+            [&](auto iKIter) { operator()<Params...>(c_vec, a_vec, b_vec, iKIter); });
     }
 
-    template <index_t iKIter, bool post_nop_ = false>
-    CK_TILE_DEVICE void operator()(CVecType& c_vec,
-                                   const AVecType& a_vec,
-                                   const BVecType& b_vec,
-                                   number<iKIter>,
-                                   bool_constant<post_nop_> = {}) const
+    template <typename... Params, index_t iKIter>
+    CK_TILE_DEVICE void
+    operator()(CVecType& c_vec, const AVecType& a_vec, const BVecType& b_vec, number<iKIter>) const
     {
         using buf_a = thread_buffer<typename Impl::AVecType, kKIter>;
         using buf_b = thread_buffer<typename Impl::BVecType, kKIter>;
 
         static_assert(iKIter < kKIter);
 
-        Impl{}(c_vec,
-               reinterpret_cast<const buf_a&>(a_vec)
-                   .template get_as<typename Impl::AVecType>()[iKIter],
-               reinterpret_cast<const buf_b&>(b_vec)
-                   .template get_as<typename Impl::BVecType>()[iKIter],
-               bool_constant<post_nop_>{});
+        Impl{}.template operator()<Params...>(
+            c_vec,
+            reinterpret_cast<const buf_a&>(a_vec)
+                .template get_as<typename Impl::AVecType>()[iKIter],
+            reinterpret_cast<const buf_b&>(b_vec)
+                .template get_as<typename Impl::BVecType>()[iKIter]);
     }
 
     // c_vec = a_vec * b_vec
+    template <typename... Params>
     CK_TILE_DEVICE CVecType operator()(const AVecType& a_vec, const BVecType& b_vec) const
     {
         constexpr auto I0 = number<0>{};
@@ -289,12 +389,13 @@ struct WarpGemmAttributeMfmaIterateK
         using buf_b       = thread_buffer<typename Impl::BVecType, kKIter>;
 
         // c = a * b
-        auto c_vec = Impl{}(
+        auto c_vec = Impl{}.template operator()<Params...>(
             reinterpret_cast<const buf_a&>(a_vec).template get_as<typename Impl::AVecType>()[I0],
             reinterpret_cast<const buf_b&>(b_vec).template get_as<typename Impl::BVecType>()[I0]);
 
         // c += a * b
-        static_for<1, kKIter, 1>{}([&](auto iKIter) { operator()(c_vec, a_vec, b_vec, iKIter); });
+        static_for<1, kKIter, 1>{}(
+            [&](auto iKIter) { operator()<Params...>(c_vec, a_vec, b_vec, iKIter); });
 
         return c_vec;
     }
@@ -320,6 +421,7 @@ struct WarpGemmAttributeMfmaTransposedCDistribution
     static constexpr index_t kN          = Impl::kM;
     static constexpr index_t kK          = Impl::kK;
     static constexpr index_t kKPerThread = Impl::kABKPerLane;
+    static constexpr index_t kKPack      = Impl::kABKPerLane;
     static constexpr index_t kCMLane     = Impl::kCMLane;
 
     CK_TILE_HOST_DEVICE static constexpr auto get_num_of_access() { return 1; }
@@ -342,21 +444,31 @@ struct WarpGemmAttributeMfmaTransposedCDistribution
         sequence<0, 2>>;
 
     // c_vec += a_vec * b_vec
-    template <bool post_nop_ = false>
-    CK_TILE_DEVICE void operator()(CVecType& c_vec,
-                                   const AVecType& a_vec,
-                                   const BVecType& b_vec,
-                                   bool_constant<post_nop_> = {}) const
+    template <typename... Params>
+    CK_TILE_DEVICE void
+    operator()(CVecType& c_vec, const AVecType& a_vec, const BVecType& b_vec) const
     {
         // swap A and B
-        Impl{}(c_vec, b_vec, a_vec, bool_constant<post_nop_>{});
+        Impl{}.template operator()<Params..., SwapReuse_<true>>(c_vec, b_vec, a_vec);
+    }
+
+    template <typename... Params>
+    CK_TILE_DEVICE void operator()(CVecType& c_vec,
+                                   const AVecType& a_vec,
+                                   const int32_t& a_scale,
+                                   const BVecType& b_vec,
+                                   const int32_t& b_scale) const
+    {
+        // swap A and B
+        Impl{}.template operator()<Params...>(c_vec, b_vec, b_scale, a_vec, a_scale);
     }
 
     // c_vec = a_vec * b_vec
+    template <typename... Params>
     CK_TILE_DEVICE CVecType operator()(const AVecType& a_vec, const BVecType& b_vec) const
     {
         // swap A and B
-        return Impl{}(b_vec, a_vec);
+        return Impl{}.template operator()<Params..., SwapReuse_<true>>(b_vec, a_vec);
     }
 };
 
@@ -377,6 +489,7 @@ struct WarpGemmAttributeMfmaTransposedCDistribution_SwizzleB
     static constexpr index_t kN          = Impl::kM;
     static constexpr index_t kK          = Impl::kK;
     static constexpr index_t kKPerThread = Impl::kABKPerLane;
+    static constexpr index_t kKPack      = Impl::kABKPerLane;
     static constexpr index_t SFactor     = SFactor_; // group how many CM1 together
 
     CK_TILE_HOST_DEVICE static constexpr auto get_num_of_access() { return 1; }
@@ -435,22 +548,32 @@ struct WarpGemmAttributeMfmaTransposedCDistribution_SwizzleB
         sequence<2, 2>,
         sequence<0, 2>>;
 #endif
-    template <bool post_nop_ = false>
     // c_vec += a_vec * b_vec
-    CK_TILE_DEVICE void operator()(CVecType& c_vec,
-                                   const AVecType& a_vec,
-                                   const BVecType& b_vec,
-                                   bool_constant<post_nop_> = {}) const
+    template <typename... Params>
+    CK_TILE_DEVICE void
+    operator()(CVecType& c_vec, const AVecType& a_vec, const BVecType& b_vec) const
     {
         // swap A and B
-        Impl{}(c_vec, b_vec, a_vec, bool_constant<post_nop_>{});
+        Impl{}.template operator()<Params..., SwapReuse_<true>>(c_vec, b_vec, a_vec);
+    }
+
+    template <typename... Params>
+    CK_TILE_DEVICE void operator()(CVecType& c_vec,
+                                   const AVecType& a_vec,
+                                   const int32_t& a_scale,
+                                   const BVecType& b_vec,
+                                   const int32_t& b_scale) const
+    {
+        // swap A and B
+        Impl{}.template operator()<Params...>(c_vec, b_vec, b_scale, a_vec, a_scale);
     }
 
     // c_vec = a_vec * b_vec
+    template <typename... Params>
     CK_TILE_DEVICE CVecType operator()(const AVecType& a_vec, const BVecType& b_vec) const
     {
         // swap A and B
-        return Impl{}(b_vec, a_vec);
+        return Impl{}.template operator()<Params..., SwapReuse_<true>>(b_vec, a_vec);
     }
 };
 
@@ -477,6 +600,8 @@ struct WarpGemmAttributeMfmaIterateKAndTransposedCDistribution
     static constexpr index_t kN          = Impl::kM;
     static constexpr index_t kK          = Impl::kK * kKIter;
     static constexpr index_t kKPerThread = Impl::kABKPerLane * kKIter;
+    static constexpr index_t kAKPack     = Impl::kABKPerLane * kKIter;
+    static constexpr index_t kBKPack     = Impl::kABKPerLane * kKIter;
 
     CK_TILE_HOST_DEVICE static constexpr auto get_num_of_access() { return kKIter; }
 
@@ -528,37 +653,34 @@ struct WarpGemmAttributeMfmaIterateKAndTransposedCDistribution
     using CWarpDstrEncoding = decltype(get_cwarp_dstr_encoding());
 
     // c_vec += a_vec * b_vec
-    template <bool post_nop_ = false>
-    CK_TILE_DEVICE void operator()(CVecType& c_vec,
-                                   const AVecType& a_vec,
-                                   const BVecType& b_vec,
-                                   bool_constant<post_nop_> = {}) const
+    template <typename... Params>
+    CK_TILE_DEVICE void
+    operator()(CVecType& c_vec, const AVecType& a_vec, const BVecType& b_vec) const
     {
-        static_for<0, kKIter, 1>{}([&](auto iKIter) { operator()(c_vec, a_vec, b_vec, iKIter); });
+        static_for<0, kKIter, 1>{}(
+            [&](auto iKIter) { operator()<Params...>(c_vec, a_vec, b_vec, iKIter); });
     }
 
-    template <index_t iKIter, bool post_nop_ = false>
+    template <typename... Params, index_t iKIter>
     // c_vec += a_vec * b_vec
-    CK_TILE_DEVICE void operator()(CVecType& c_vec,
-                                   const AVecType& a_vec,
-                                   const BVecType& b_vec,
-                                   number<iKIter>,
-                                   bool_constant<post_nop_> = {}) const
+    CK_TILE_DEVICE void
+    operator()(CVecType& c_vec, const AVecType& a_vec, const BVecType& b_vec, number<iKIter>) const
     {
         using buf_a = thread_buffer<typename Impl::AVecType, kKIter>;
         using buf_b = thread_buffer<typename Impl::BVecType, kKIter>;
 
         static_assert(iKIter < kKIter);
         // swap A and B, value and type
-        Impl{}(c_vec,
-               reinterpret_cast<const buf_b&>(b_vec)
-                   .template get_as<typename Impl::BVecType>()[iKIter],
-               reinterpret_cast<const buf_a&>(a_vec)
-                   .template get_as<typename Impl::AVecType>()[iKIter],
-               bool_constant<post_nop_>{});
+        Impl{}.template operator()<Params...>(
+            c_vec,
+            reinterpret_cast<const buf_b&>(b_vec)
+                .template get_as<typename Impl::BVecType>()[iKIter],
+            reinterpret_cast<const buf_a&>(a_vec)
+                .template get_as<typename Impl::AVecType>()[iKIter]);
     }
 
     // c_vec = a_vec * b_vec
+    template <typename... Params>
     CK_TILE_DEVICE CVecType operator()(const AVecType& a_vec, const BVecType& b_vec) const
     {
         constexpr auto I0 = number<0>{};
@@ -566,11 +688,12 @@ struct WarpGemmAttributeMfmaIterateKAndTransposedCDistribution
         using buf_b       = thread_buffer<typename Impl::BVecType, kKIter>;
 
         // swap A and B, value and type
-        auto c_vec = Impl{}(
+        auto c_vec = Impl{}.template operator()<Params..., SwapReuse_<true>>(
             reinterpret_cast<const buf_b&>(b_vec).template get_as<typename Impl::BVecType>()[I0],
             reinterpret_cast<const buf_a&>(a_vec).template get_as<typename Impl::AVecType>()[I0]);
 
-        static_for<1, kKIter, 1>{}([&](auto iKIter) { operator()(c_vec, a_vec, b_vec, iKIter); });
+        static_for<1, kKIter, 1>{}(
+            [&](auto iKIter) { operator()<Params...>(c_vec, a_vec, b_vec, iKIter); });
 
         return c_vec;
     }
@@ -596,6 +719,7 @@ struct WarpGemmAttributeMfmaIterateKAndTransposedCDistribution_SwizzleB
     static constexpr index_t kN          = Impl::kM;
     static constexpr index_t kK          = Impl::kK * kKIter;
     static constexpr index_t kKPerThread = Impl::kABKPerLane * kKIter;
+    static constexpr index_t kKPack      = Impl::kABKPerLane * kKIter;
     static constexpr index_t SFactor     = SFactor_; // group how many CM1 together
 
     CK_TILE_HOST_DEVICE static constexpr auto get_num_of_access() { return kKIter; }
@@ -655,37 +779,34 @@ struct WarpGemmAttributeMfmaIterateKAndTransposedCDistribution_SwizzleB
         sequence<0, 2>>;
 #endif
     // c_vec += a_vec * b_vec
-    template <bool post_nop_ = false>
-    CK_TILE_DEVICE void operator()(CVecType& c_vec,
-                                   const AVecType& a_vec,
-                                   const BVecType& b_vec,
-                                   bool_constant<post_nop_> = {}) const
+    template <typename... Params>
+    CK_TILE_DEVICE void
+    operator()(CVecType& c_vec, const AVecType& a_vec, const BVecType& b_vec) const
     {
         // swap A and B, value and type
-        static_for<0, kKIter, 1>{}([&](auto iKIter) { operator()(c_vec, a_vec, b_vec, iKIter); });
+        static_for<0, kKIter, 1>{}(
+            [&](auto iKIter) { operator()<Params...>(c_vec, a_vec, b_vec, iKIter); });
     }
 
-    template <index_t iKIter, bool post_nop_ = false>
-    CK_TILE_DEVICE void operator()(CVecType& c_vec,
-                                   const AVecType& a_vec,
-                                   const BVecType& b_vec,
-                                   number<iKIter>,
-                                   bool_constant<post_nop_> = {}) const
+    template <typename... Params, index_t iKIter>
+    CK_TILE_DEVICE void
+    operator()(CVecType& c_vec, const AVecType& a_vec, const BVecType& b_vec, number<iKIter>) const
     {
         using buf_a = thread_buffer<typename Impl::AVecType, kKIter>;
         using buf_b = thread_buffer<typename Impl::BVecType, kKIter>;
 
         static_assert(iKIter < kKIter);
         // swap A and B, value and type
-        Impl{}(c_vec,
-               reinterpret_cast<const buf_b&>(b_vec)
-                   .template get_as<typename Impl::BVecType>()[iKIter],
-               reinterpret_cast<const buf_a&>(a_vec)
-                   .template get_as<typename Impl::AVecType>()[iKIter],
-               bool_constant<post_nop_>{});
+        Impl{}.template operator()<Params..., SwapReuse_<true>>(
+            c_vec,
+            reinterpret_cast<const buf_b&>(b_vec)
+                .template get_as<typename Impl::BVecType>()[iKIter],
+            reinterpret_cast<const buf_a&>(a_vec)
+                .template get_as<typename Impl::AVecType>()[iKIter]);
     }
 
     // c_vec = a_vec * b_vec
+    template <typename... Params>
     CK_TILE_DEVICE CVecType operator()(const AVecType& a_vec, const BVecType& b_vec) const
     {
         using buf_a       = thread_buffer<typename Impl::AVecType, kKIter>;
@@ -697,7 +818,8 @@ struct WarpGemmAttributeMfmaIterateKAndTransposedCDistribution_SwizzleB
             reinterpret_cast<const buf_b&>(b_vec).template get_as<typename Impl::BVecType>()[I0],
             reinterpret_cast<const buf_a&>(a_vec).template get_as<typename Impl::AVecType>()[I0]);
 
-        static_for<1, kKIter, 1>{}([&](auto iKIter) { operator()(c_vec, a_vec, b_vec, iKIter); });
+        static_for<1, kKIter, 1>{}(
+            [&](auto iKIter) { operator()<Params...>(c_vec, a_vec, b_vec, iKIter); });
 
         return c_vec;
     }
@@ -722,6 +844,7 @@ struct WarpGemmAttributeMfmaIterateK_SwizzleA
     static constexpr index_t kN          = Impl::kN;
     static constexpr index_t kK          = Impl::kK * kKIter;
     static constexpr index_t kKPerThread = Impl::kABKPerLane * kKIter;
+    static constexpr index_t kKPack      = Impl::kABKPerLane * kKIter;
     static constexpr index_t SFactor     = SFactor_; // group how many CM1 together
 
     CK_TILE_HOST_DEVICE static constexpr auto get_num_of_access() { return kKIter; }
@@ -759,36 +882,33 @@ struct WarpGemmAttributeMfmaIterateK_SwizzleA
         sequence<0, 2>>;
 
     // c_vec += a_vec * b_vec
-    template <bool post_nop_ = false>
-    CK_TILE_DEVICE void operator()(CVecType& c_vec,
-                                   const AVecType& a_vec,
-                                   const BVecType& b_vec,
-                                   bool_constant<post_nop_> = {}) const
+    template <typename... Params>
+    CK_TILE_DEVICE void
+    operator()(CVecType& c_vec, const AVecType& a_vec, const BVecType& b_vec) const
     {
-        static_for<0, kKIter, 1>{}([&](auto iKIter) { operator()(c_vec, a_vec, b_vec, iKIter); });
+        static_for<0, kKIter, 1>{}(
+            [&](auto iKIter) { operator()<Params...>(c_vec, a_vec, b_vec, iKIter); });
     }
 
-    template <index_t iKIter, bool post_nop_ = false>
-    CK_TILE_DEVICE void operator()(CVecType& c_vec,
-                                   const AVecType& a_vec,
-                                   const BVecType& b_vec,
-                                   number<iKIter>,
-                                   bool_constant<post_nop_> = {}) const
+    template <typename... Params, index_t iKIter>
+    CK_TILE_DEVICE void
+    operator()(CVecType& c_vec, const AVecType& a_vec, const BVecType& b_vec, number<iKIter>) const
     {
         using buf_a = thread_buffer<typename Impl::AVecType, kKIter>;
         using buf_b = thread_buffer<typename Impl::BVecType, kKIter>;
 
         static_assert(iKIter < kKIter);
 
-        Impl{}(c_vec,
-               reinterpret_cast<const buf_a&>(a_vec)
-                   .template get_as<typename Impl::AVecType>()[iKIter],
-               reinterpret_cast<const buf_b&>(b_vec)
-                   .template get_as<typename Impl::BVecType>()[iKIter],
-               bool_constant<post_nop_>{});
+        Impl{}.template operator()<Params...>(
+            c_vec,
+            reinterpret_cast<const buf_a&>(a_vec)
+                .template get_as<typename Impl::AVecType>()[iKIter],
+            reinterpret_cast<const buf_b&>(b_vec)
+                .template get_as<typename Impl::BVecType>()[iKIter]);
     }
 
     // c_vec = a_vec * b_vec
+    template <typename... Params>
     CK_TILE_DEVICE CVecType operator()(const AVecType& a_vec, const BVecType& b_vec) const
     {
         constexpr auto I0 = number<0>{};
@@ -799,7 +919,8 @@ struct WarpGemmAttributeMfmaIterateK_SwizzleA
             reinterpret_cast<const buf_a&>(a_vec).template get_as<typename Impl::AVecType>()[I0],
             reinterpret_cast<const buf_b&>(b_vec).template get_as<typename Impl::BVecType>()[I0]);
 
-        static_for<1, kKIter, 1>{}([&](auto iKIter) { operator()(c_vec, a_vec, b_vec, iKIter); });
+        static_for<1, kKIter, 1>{}(
+            [&](auto iKIter) { operator()<Params...>(c_vec, a_vec, b_vec, iKIter); });
 
         return c_vec;
     }

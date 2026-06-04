@@ -1,28 +1,5 @@
-################################################################################
-#
-# MIT License
-#
-# Copyright (c) 2017 Advanced Micro Devices, Inc.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-#
-################################################################################
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
 
 cmake_policy(SET CMP0057 NEW)
 
@@ -109,6 +86,7 @@ set( MIOpen_Source
     ctc_api.cpp
     db.cpp
     db_record.cpp
+    demangle.cpp
     driver_arguments.cpp
     dropout.cpp
     dropout_api.cpp
@@ -127,22 +105,6 @@ set( MIOpen_Source
     getitem_api.cpp
     glu/problem_description.cpp
     glu_api.cpp
-    graphapi/convolution.cpp
-    graphapi/conv_bias_res_add_activ_forward_executor.cpp
-    graphapi/engine.cpp
-    graphapi/enginecfg.cpp
-    graphapi/engineheur.cpp
-    graphapi/execution_plan.cpp
-    graphapi/find_engine.cpp
-    graphapi/graphapi.cpp
-    graphapi/matmul.cpp
-    graphapi/opgraph.cpp
-    graphapi/pointwise.cpp
-    graphapi/reduction.cpp
-    graphapi/reshape.cpp
-    graphapi/rng.cpp
-    graphapi/tensor.cpp
-    graphapi/variant_pack.cpp
     groupnorm_api.cpp
     groupnorm/problem_description.cpp
     handle_api.cpp
@@ -242,7 +204,7 @@ set( MIOpen_Source
     solver/conv/conv_direct_naive_conv_bwd.cpp
     solver/conv/conv_direct_naive_conv_fwd.cpp
     solver/conv/conv_direct_naive_conv_wrw.cpp
-    solver/conv/conv_hip_implicit_gemm_bwd_data_xdlops.cpp
+
     solver/conv/conv_hip_implicit_gemm_bwd_v1r1.cpp
     solver/conv/conv_hip_implicit_gemm_bwd_v1r1_xdlops.cpp
     solver/conv/conv_hip_implicit_gemm_bwd_v4r1.cpp
@@ -252,10 +214,10 @@ set( MIOpen_Source
     solver/conv/conv_hip_implicit_gemm_fwd_v4r4_xdlops.cpp
     solver/conv/conv_hip_implicit_gemm_fwd_v4r4_xdlops_padded_gemm.cpp
     solver/conv/conv_hip_implicit_gemm_fwd_v4r5_xdlops.cpp
-    solver/conv/conv_hip_implicit_gemm_fwd_xdlops.cpp
     solver/conv/conv_hip_implicit_gemm_grouped_fwd_xdlops.cpp
     solver/conv/conv_hip_implicit_gemm_grouped_bwd_xdlops.cpp
     solver/conv/conv_hip_implicit_gemm_grouped_wrw_xdlops.cpp
+    solver/ck_impl_lib_loader.cpp
     solver/conv/conv_hip_implicit_gemm_3d_grouped_fwd_xdlops.cpp
     solver/conv/conv_hip_implicit_gemm_3d_grouped_wrw_xdlops.cpp
     solver/conv/conv_hip_implicit_gemm_3d_grouped_bwd_xdlops.cpp
@@ -271,14 +233,10 @@ set( MIOpen_Source
     solver/conv/conv_mlir_igemm_wrw.cpp
     solver/conv/conv_mlir_igemm_wrw_xdlops.cpp
     solver/conv/conv_multipass_wino3x3WrW.cpp
-    solver/conv/conv_ocl_dir2D_bwdWrW_1x1.cpp
-    solver/conv/conv_ocl_dir2D_bwdWrW_2.cpp
-    solver/conv/conv_ocl_dir2D_bwdWrW_53.cpp
-    solver/conv/conv_ocl_dir2D11x11.cpp
+    solver/conv/conv_hip_dir2D_bwdWrW_53.cpp
+    solver/conv/conv_hip_dir2D11x11.cpp
     solver/conv/conv_ocl_dir2Dfwd.cpp
     solver/conv/conv_ocl_dir2Dfwd_exhaustive_search.cpp
-    solver/conv/conv_ocl_dir2Dfwd1x1.cpp
-    solver/conv/conv_ocl_dir2Dfwdgen.cpp
     solver/conv/conv_wino_fury_RxS.cpp
     solver/conv/conv_wino_rage_RxS.cpp
     solver/conv/conv_winoRxS.cpp
@@ -288,6 +246,7 @@ set( MIOpen_Source
     solver/conv/gemm_common.cpp
     solver/conv/gemm_wrw.cpp
     solver/conv/conv_ck_grouped_conv_fwd.cpp
+    solver/conv/conv_3d_depthwise_fwd.cpp
     solver/conv_asm_1x1u_bias_activ_fused.cpp
     solver/conv_bin_winoRxS_fused.cpp
     solver/conv_ck_igemm_grp_fwd_activ_fused.cpp
@@ -303,6 +262,7 @@ set( MIOpen_Source
     solver/kthvalue/forward_kthvalue.cpp
     solver/layernorm/backward_layernorm.cpp
     solver/layernorm/backward_t5layernorm.cpp
+    solver/layernorm/common_layernorm.cpp
     solver/layernorm/forward_addlayernorm.cpp
     solver/layernorm/forward_layernorm.cpp
     solver/layernorm/forward_t5layernorm.cpp
@@ -351,13 +311,14 @@ set( MIOpen_Source
     tensor_api.cpp
     transformers_adam_w_api.cpp
     seq_tensor.cpp
+    unique_path.cpp
 )
 
 if(MIOPEN_ENABLE_AI_KERNEL_TUNING OR MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
     list(APPEND MIOpen_Source conv/heuristics/ai_heuristics.cpp)
-    list(APPEND MIOpen_Source conv/heuristics/metadata_3d.cpp)
+    list(APPEND MIOpen_Source conv/heuristics/metadata_nd.cpp)
     list(APPEND MIOpen_Source conv/heuristics/ai_candidate_selection.cpp)
-    list(APPEND MIOpen_Source conv/heuristics/ai_conv_3d_kernel_tuning_utils.cpp)
+    list(APPEND MIOpen_Source conv/heuristics/ai_conv_nd_kernel_tuning_utils.cpp)
     list(APPEND MIOpen_Source anyramdb.cpp)
 endif()
 
@@ -569,6 +530,7 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         ${GPU_REFERENCE_KERNEL_ASM}
         ${GPU_BATCHED_TRANSPOSE_KERNEL_HIP}
         ${GPU_GENERAL_TENSOR_REORDER_KERNEL_HIP_SOURCE}
+        kernels/miopen_conv3d_depthwise_fwd.cpp
         kernels/MIOpenAdam.cpp
         kernels/MIOpenAddLayerNorm.cpp
         kernels/MIOpenCat.cpp
@@ -585,14 +547,13 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/MIOpenBatchNormBwdPerAct.cpp
         kernels/MIOpenConvDirUni.cl
         kernels/MIOpenConvDirBatchNormActiv.cl
-        kernels/MIOpenConvDirGenFwd.cl
         kernels/MIOpenGLU.cpp
         kernels/MIOpenGroupNorm.cpp
         kernels/MIOpenGetitem.cpp
         kernels/MIOpenKthvalue.cpp
         kernels/MIOpenLayerNorm.cpp
-        kernels/MIOpenLRNBwd.cl
-        kernels/MIOpenLRNFwd.cl
+        kernels/MIOpenLRNBwd.cpp
+        kernels/MIOpenLRNFwd.cpp
         kernels/MIOpenMultiMarginLoss.cpp
         kernels/MIOpenNeuron.cpp
         kernels/MIOpenPReLU.cpp
@@ -601,9 +562,7 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/MIOpenPoolingBwdND.cpp
         kernels/MIOpenPoolingForwardNaive.cpp
         kernels/MIOpenPoolingND.cpp
-        kernels/MIOpenConv1x1S.cl
-        kernels/MIOpenConv1x1J1.cl
-        kernels/MIOpenConv1x1J1_stride.cl
+
         kernels/MIOpenReduceCalculation.cpp
         kernels/MIOpenReduceExtreme.cpp
         kernels/MIOpenReduceSum.cpp
@@ -616,18 +575,14 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/MIOpenUpSample.cpp
         kernels/MIOpenUtilKernels4.cpp
         kernels/MIOpenUtilKernels5.cpp
-        kernels/MIOpenVecAdd.cpp
-        kernels/MIOpenVecAddOCL.cl
         kernels/MIOpenIm2d2Col.cpp
         kernels/MIOpenIm3d2Col.cpp
         kernels/MIOpenCol2Im2d.cpp
         kernels/MIOpenCol2Im3d.cpp
-        kernels/MIOpenConvBwdWrWS2.cl
-        kernels/MIOpenGroupConvBwdWrWS2.cl
-        kernels/MIOpenConvBwdWrW_LxG_P53.cl
-        kernels/MIOpenGroupConvBwdWrW_LxG_P53.cl
-        kernels/MIOpenConvBwdWrW1x1_PAD_read4.cl
-        kernels/MIOpenConvFwd_LxL_11.cl
+        kernels/MIOpenConvBwdWrW_LxG_P53Hip.cpp
+        kernels/MIOpenGroupConvBwdWrW_LxG_P53Hip.cpp
+        kernels/MIOpenConvFwd_LxL_11.cpp
+
         kernels/MIOpenConvFFT.cpp
         kernels/MIOpenRNNHiddenStateUpdate.cpp
         kernels/bugzilla_34765_detect.s
@@ -695,7 +650,6 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/Conv_Winograd_v40_6_0_fp32_f3x2_dilation2.s
         kernels/Conv_Winograd_v40_6_0_fp32_f3x2_stride1.s
         kernels/Conv_Winograd_v40_6_0_fp32_f3x2_stride2.s
-        kernels/MIOpenConvBwdBias.cl
         kernels/MIOpenBatchNormActivInfer.cpp
         kernels/MIOpenCTCLoss.cpp
         kernels/MIOpenDropoutHIP.cpp
@@ -835,12 +789,19 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
                 set(KERNEL_SRC_ASM_PATH ${PROJECT_BINARY_DIR}/inlined_kernels/batch_${KERNELS_BATCH_ID}.S)
                 set(KERNEL_SRC_BIN_PATH ${PROJECT_BINARY_DIR}/inlined_kernels/batch_${KERNELS_BATCH_ID}.bin)
 
+                # Generate response file for this batch to avoid command line length limits
+                set(KERNEL_RESPONSE_FILE ${PROJECT_BINARY_DIR}/inlined_kernels/batch_${KERNELS_BATCH_ID}_files.txt)
+                file(WRITE ${KERNEL_RESPONSE_FILE} "")
+                foreach(kernel_file ${KERNELS_BATCH})
+                    file(APPEND ${KERNEL_RESPONSE_FILE} "${kernel_file}\n")
+                endforeach()
+
                 if(MIOPEN_INCBIN)
                     add_custom_command(
                         OUTPUT ${KERNEL_SRC_HPP_PATH} ${KERNEL_SRC_ASM_PATH} ${KERNEL_SRC_BIN_PATH}
                         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                        DEPENDS addkernels ${KERNELS_BATCH} ${KERNEL_INCLUDES}
-                        COMMAND $<TARGET_FILE:addkernels> -asm ${KERNEL_SRC_ASM_PATH} ${KERNEL_SRC_BIN_PATH} -target ${KERNEL_SRC_HPP_PATH} -extern ${EXTRA_OPTIONS} -source ${KERNELS_BATCH}
+                        DEPENDS addkernels ${KERNELS_BATCH} ${KERNEL_INCLUDES} ${KERNEL_RESPONSE_FILE}
+                        COMMAND $<TARGET_FILE:addkernels> -asm ${KERNEL_SRC_ASM_PATH} ${KERNEL_SRC_BIN_PATH} -target ${KERNEL_SRC_HPP_PATH} -extern ${EXTRA_OPTIONS} @${KERNEL_RESPONSE_FILE}
                         COMMENT "Inlining kernels batch #${KERNELS_BATCH_ID}${MESSAGE_SUFFIX}"
                         )
                     list(APPEND MIOpen_Source ${KERNEL_SRC_HPP_PATH} ${KERNEL_SRC_ASM_PATH})
@@ -848,8 +809,8 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
                     add_custom_command(
                         OUTPUT ${KERNEL_SRC_HPP_PATH}
                         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                        DEPENDS addkernels ${KERNELS_BATCH} ${KERNEL_INCLUDES}
-                        COMMAND $<TARGET_FILE:addkernels> -target ${KERNEL_SRC_HPP_PATH} -extern ${EXTRA_OPTIONS} -source ${KERNELS_BATCH}
+                        DEPENDS addkernels ${KERNELS_BATCH} ${KERNEL_INCLUDES} ${KERNEL_RESPONSE_FILE}
+                        COMMAND $<TARGET_FILE:addkernels> -target ${KERNEL_SRC_HPP_PATH} -extern ${EXTRA_OPTIONS} @${KERNEL_RESPONSE_FILE}
                         COMMENT "Inlining kernels batch #${KERNELS_BATCH_ID}${MESSAGE_SUFFIX}"
                         )
                     configure_file(kernels/kernels_batch.cpp.in ${KERNEL_SRC_CPP_PATH})
@@ -933,33 +894,26 @@ target_include_directories(MIOpen PUBLIC
 )
 
 if(MIOPEN_USE_COMPOSABLEKERNEL)
-    if(MIOPEN_BUILD_CK )
-        # the aliased target doesnt exist when we build CK inline as part of MIOPEN.  The aliased target only is not
-        # global when you build it so we dont have access to it.
-        set(MIOPEN_CK_LINK_FLAGS device_conv_operations hip::host)
-
-        # The include directories also dont propagate correctly when using the non aliased targets.
-        # Manually including them fixes this problem for inline builds.
-        target_include_directories(MIOpen SYSTEM PRIVATE
-            ${MIOPEN_CK_INCLUDE_DIR}
-            ${MIOPEN_CK_BUILD_INCLUDE_DIR}
-            ${MIOPEN_CK_LIBRARY_INCLUDE_DIR})
-    else()
-        # Use the aliased targets when we pull CK from /opt/rocm or other place on disc.
-        set(MIOPEN_CK_LINK_FLAGS composable_kernel::device_conv_operations hip::host)
-        
+    if(MIOPEN_BUILD_CK)
         if(MIOPEN_CK_BUILDER_EXPERIMENTAL)
-            add_subdirectory(kernels/ck_builder)
-            list(APPEND MIOPEN_CK_LINK_FLAGS ck_builder)
             add_definitions(-DCK_EXPERIMENTAL_BUILDER)
         endif()
     endif()
-    if(GPU_TARGETS MATCHES "gfx942" OR GPU_TARGETS MATCHES "gfx950")
-        target_compile_definitions(MIOpen PRIVATE CK_ENABLE_TF32)
-    endif()
-    if(GPU_TARGETS MATCHES "gfx950")
-        target_compile_definitions(MIOpen PRIVATE CK_USE_GFX95)
-    endif()
+
+    # Build per-GPU-target CK grouped conv shared libraries
+    add_subdirectory(ck_impl)
+endif()
+
+# Proxy target that bundles MIOpen linkage with build-order dependencies on the
+# CK plugin shared libraries (MIOpenCKGroupedConv_*.so).  Internal consumers
+# (tests, driver, speedtests) link this instead of MIOpen directly so that
+# building any single executable also builds the plugins it loads via dlopen.
+# When CK is disabled, CK_PLUGIN_TARGETS is empty and this is a plain
+# pass-through to MIOpen.
+add_library(MIOpen_with_plugins INTERFACE)
+target_link_libraries(MIOpen_with_plugins INTERFACE MIOpen)
+if(CK_PLUGIN_TARGETS)
+    add_dependencies(MIOpen_with_plugins ${CK_PLUGIN_TARGETS})
 endif()
 
 if(WIN32)
@@ -970,7 +924,7 @@ endif()
 target_include_directories(MIOpen SYSTEM PUBLIC $<BUILD_INTERFACE:${HALF_INCLUDE_DIR}>)
 # Workaround : change in rocm-cmake was causing linking error so had to add ${CMAKE_DL_LIBS}
 #               We can remove ${CMAKE_DL_LIBS} once root cause is identified.
-target_link_libraries(MIOpen PRIVATE ${CMAKE_DL_LIBS} Threads::Threads BZip2::BZip2 ${MIOPEN_CK_LINK_FLAGS})
+target_link_libraries(MIOpen PRIVATE ${CMAKE_DL_LIBS} Threads::Threads BZip2::BZip2)
 miopen_generate_export_header(MIOpen)
 
 if(WIN32)
@@ -978,13 +932,9 @@ if(WIN32)
     target_link_libraries(MIOpen PRIVATE ntdll)
 endif()
 
+generate_export_header(MIOpen BASE_NAME MIOPEN_INTERNALS EXPORT_FILE_NAME ${CMAKE_BINARY_DIR}/include/miopen/export_internals.h)
+
 if(BUILD_TESTING)
-    # On Windows, export selected internal symbols only when tests are built. The officially released
-    # binaries must not have internals exposed because doing so violates the threats model requirements.
-    # We cannot use the CMake property CMAKE_EXPORT_ALL_SYMBOLS here because the number of automatically
-    # exported symbols exceeds the maximum allowed number in a DLL library (64K).
-    # See details here: https://learn.microsoft.com/en-us/cpp/build/exporting-from-a-dll?view=msvc-170
-    generate_export_header(MIOpen BASE_NAME MIOPEN_INTERNALS EXPORT_FILE_NAME ${CMAKE_BINARY_DIR}/include/miopen/export_internals.h)
     target_compile_definitions(MIOpen PUBLIC $<BUILD_INTERFACE:MIOPEN_BUILD_TESTING>)
 endif()
 
@@ -1011,8 +961,8 @@ endif()
 
 ############################################################
 # MIOpen depends on OpenCL
-if( MIOPEN_BACKEND STREQUAL "OpenCL")
-    MESSAGE( STATUS "MIOpen linking OpenCL: ${OPENCL_INCLUDE_DIRS}" )
+if(MIOPEN_BACKEND STREQUAL "OpenCL")
+    message(STATUS "MIOpen linking OpenCL: ${OPENCL_INCLUDE_DIRS}" )
     target_include_directories(MIOpen SYSTEM PUBLIC ${OPENCL_INCLUDE_DIRS} )
     target_link_libraries( MIOpen PUBLIC ${OPENCL_LIBRARIES} )
     list(APPEND PACKAGE_DEPENDS PACKAGE OpenCL)
@@ -1072,27 +1022,9 @@ endif()
 target_link_libraries(MIOpen PRIVATE nlohmann_json::nlohmann_json)
 target_link_libraries(MIOpen INTERFACE $<BUILD_INTERFACE:nlohmann_json::nlohmann_json>)
 
-target_internal_library(MIOpen Boost::filesystem)
-list(APPEND PACKAGE_STATIC_DEPENDS PACKAGE Boost COMPONENTS filesystem)
 if(NOT WIN32 AND NOT APPLE)
-    file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/lib.def "
-MIOPEN_${MIOPEN_BACKEND}_1
-{
-global:
-    miopen*;
-    extern \"C++\" {
-        miopen::*;
-    };
-local:
-    *boost*;
-    extern \"C++\" {
-        std::*;
-    };
-};
-")
-    target_link_libraries(MIOpen PRIVATE "-Wl,--version-script=${CMAKE_CURRENT_BINARY_DIR}/lib.def")
     target_link_libraries(MIOpen PRIVATE "-Wl,--exclude-libs,ALL")
-    # set_target_properties(MIOpen PROPERTIES CXX_VISIBILITY_PRESET hidden)
+    set_target_properties(MIOpen PROPERTIES CXX_VISIBILITY_PRESET hidden)
     set_target_properties(MIOpen PROPERTIES VISIBILITY_INLINES_HIDDEN 1)
 endif()
 #######################################
@@ -1102,14 +1034,6 @@ if(MIOPEN_ENABLE_SQLITE)
     target_link_libraries(MIOpen INTERFACE  $<BUILD_INTERFACE:SQLite::SQLite3>)
 endif()
 ############################################################
-# MIOpen depends on librt for Boost.Interprocess
-if(NOT WIN32 AND NOT APPLE)
-    find_library(LIBRT rt)
-    if(LIBRT)
-        message(STATUS "Librt: " ${LIBRT})
-        target_internal_library(MIOpen ${LIBRT})
-    endif()
-endif()
 
 if(MIOPEN_USE_ROCTRACER)
     target_include_directories(MIOpen PRIVATE ${ROCTRACER_INCLUDE_DIR})

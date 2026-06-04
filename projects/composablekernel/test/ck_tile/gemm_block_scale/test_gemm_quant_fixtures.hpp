@@ -7,16 +7,6 @@
 #include "ck_tile/host/permute_pk_int4.hpp"
 #include "ck_tile/host/tensor_shuffle_utils.hpp"
 
-template <bool is_8bit>
-constexpr ck_tile::index_t get_k_warp_tile()
-{
-#if CK_TILE_USE_WMMA
-    return 16;
-#else
-    return is_8bit ? 64 : 32;
-#endif
-}
-
 struct GemmConfigBase
 {
     static constexpr bool kPadM = false;
@@ -78,35 +68,38 @@ struct GemmConfigPrefillIntrawave : public GemmConfigBase
     static constexpr auto Scheduler          = ck_tile::GemmPipelineScheduler::Intrawave;
 };
 
-struct GemmConfigPrefillInterwave : public GemmConfigBase
-{
-    static constexpr ck_tile::index_t M_Tile = 128;
-    static constexpr ck_tile::index_t N_Tile = 128;
-    static constexpr ck_tile::index_t K_Tile = 128;
-    static constexpr auto Scheduler          = ck_tile::GemmPipelineScheduler::Interwave;
-};
-
 struct GemmConfigDecodeIntrawave : public GemmConfigBase
 {
     static constexpr ck_tile::index_t M_Tile = 16;
     static constexpr ck_tile::index_t N_Tile = 64;
     static constexpr ck_tile::index_t K_Tile = 256;
-    static constexpr auto Scheduler          = ck_tile::GemmPipelineScheduler::Intrawave;
+    // Workaround for ROCm 7.13 compiler codegen regression on gfx1201 (RDNA4).
+    // AQuantGemmPipelineAgBgCrMem always uses the Intrawave pipeline implementation
+    // regardless of this value, but the Scheduler enum changes the Problem type identity,
+    // causing a different template instantiation. The Intrawave instantiation triggers
+    // incorrect ISA generation (wrong global instruction scheduling in the hot loop),
+    // producing ~3% wrong values for FP8/BF8 AQuant GEMM with K > K_Tile.
+    // Setting Interwave creates a different instantiation that gets correct codegen.
+    // Revert to Intrawave once the compiler is fixed.
+    static constexpr auto Scheduler = ck_tile::GemmPipelineScheduler::Interwave;
 };
 
-struct GemmConfigDecodeInterwave : public GemmConfigBase
-{
-    static constexpr ck_tile::index_t M_Tile = 16;
-    static constexpr ck_tile::index_t N_Tile = 64;
-    static constexpr ck_tile::index_t K_Tile = 256;
-    static constexpr auto Scheduler          = ck_tile::GemmPipelineScheduler::Interwave;
-};
-
-struct GemmConfigMxFp4 : public GemmConfigBase
+struct GemmConfigMx : public GemmConfigBase
 {
     static constexpr ck_tile::index_t M_Tile = 128;
     static constexpr ck_tile::index_t N_Tile = 128;
     static constexpr ck_tile::index_t K_Tile = 128;
+};
+
+// This configuration uses K_Warp_Tile = 64 on CDNA. In this way, on gfx950 we can use
+// LDS load transpose on matrix B (FP4) because the instruction requires each
+// lane to load 16 4bits elements
+struct GemmConfigMxFP4 : public GemmConfigBase
+{
+    static constexpr ck_tile::index_t M_Tile      = 128;
+    static constexpr ck_tile::index_t N_Tile      = 128;
+    static constexpr ck_tile::index_t K_Tile      = 128;
+    static constexpr ck_tile::index_t K_Warp_Tile = get_k_warp_tile<true>();
 };
 
 struct GemmConfigPreshuffleQuant : public GemmConfigBase
@@ -147,6 +140,10 @@ struct GemmConfigPreshuffleBPrefill : public GemmConfigPrefill
     static constexpr bool PreshuffleB      = true;
     static constexpr bool DoubleSmemBuffer = true;
 };
+struct GemmConfigPreshuffleBPrefillTransposeC : public GemmConfigPreshuffleBPrefill
+{
+    static constexpr bool TransposeC = true;
+};
 
 struct GemmConfigPreshuffleQuantPrefill : public GemmConfigPrefill
 {
@@ -159,14 +156,45 @@ struct GemmConfigPreshuffleBPrefillTiledPermuteN : public GemmConfigPreshuffleBP
     static constexpr bool TiledMMAPermuteN = N_Repeat % 2 == 0;
 };
 
+template <bool TransposeC_ = false>
 struct GemmConfigPreshuffleBPreshuffleQuantPrefill : public GemmConfigPreshuffleBPrefill
 {
     static constexpr bool BPreshuffleQuant = true;
+    static constexpr bool TransposeC       = TransposeC_;
 };
 
+template <bool TransposeC_ = false>
 struct GemmConfigPreshuffleBPreshuffleQuantDecode : public GemmConfigPreshuffleBDecode
 {
     static constexpr bool BPreshuffleQuant = true;
+    static constexpr bool TransposeC       = TransposeC_;
+};
+
+struct GemmConfigPreshuffleB_ABQuant_Prefill : public GemmConfigPreshuffleBPrefill
+{
+    static constexpr bool TransposeC = true;
+};
+
+struct GemmConfigEightWaves : public GemmConfigBase
+{
+    static constexpr ck_tile::index_t M_Warp = 4;
+    static constexpr ck_tile::index_t N_Warp = 2; // NWarps == 2 for ping-pong!
+    static constexpr ck_tile::index_t K_Warp = 1;
+
+    static constexpr ck_tile::index_t M_Tile = 192;
+    static constexpr ck_tile::index_t N_Tile = 128 * N_Warp;
+    static constexpr ck_tile::index_t K_Tile = 128 * K_Warp;
+
+    static constexpr ck_tile::index_t K_Warp_Tile =
+        ck_tile::get_k_warp_tile<ck_tile::fp8_t, M_Warp_Tile, true>();
+
+    static constexpr bool kPadK      = false;
+    static constexpr bool TransposeC = true;
+};
+
+struct GemmConfigEightWaves_PreshuffleB : public GemmConfigEightWaves
+{
+    static constexpr bool PreshuffleB = true;
 };
 
 template <typename Tuple>
@@ -342,6 +370,7 @@ class TestCkTileGemmAQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGem
                                                                      AccDataType,
                                                                      CodegenGemmShape,
                                                                      CodegenGemmTraits,
+                                                                     ComputeDataType,
                                                                      ComputeDataType>;
 
         using BaseGemmPipeline = ck_tile::BaseGemmPipelineAgBgCrCompV3<GemmPipelineProblem>;
@@ -666,8 +695,7 @@ class TestCkTileGemmBQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGem
                                   ck_tile::index_t k_batch = 1)
     {
         const ck_tile::index_t stride_A = K;
-        const ck_tile::index_t stride_B =
-            std::is_same_v<BDataType, ck_tile::pk_fp4_raw_t> ? (K / 2) : K;
+        const ck_tile::index_t stride_B = K;
         const ck_tile::index_t stride_C = N;
 
         // BQuant uses block/grouped quantization for B matrix
@@ -678,24 +706,36 @@ class TestCkTileGemmBQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGem
         // Generate test data
         ck_tile::HostTensor<ADataType> a_m_k(
             ck_tile::host_tensor_descriptor(M, K, stride_A, this->is_row_major(ALayout{})));
-        ck_tile::HostTensor<BDataType> b_k_n(ck_tile::host_tensor_descriptor(
-            std::is_same_v<BDataType, ck_tile::pk_fp4_raw_t> ? K / 2 : K,
-            N,
-            stride_B,
-            this->is_row_major(BLayout{})));
+        ck_tile::HostTensor<BDataType> b_k_n(
+            ck_tile::host_tensor_descriptor(K, N, stride_B, this->is_row_major(BLayout{})));
         ck_tile::HostTensor<QDataType> bq_bqk_bqn(
             ck_tile::host_tensor_descriptor(BQK, BQN, stride_BQ, this->is_row_major(BQLayout{})));
 
         // Initialize data with random values
         ck_tile::FillUniformDistribution<ADataType>{-0.5f, 0.5f}(a_m_k);
-        if constexpr(std::is_same_v<BDataType, ck_tile::pk_fp4_raw_t>)
+        if constexpr(std::is_same_v<BDataType, ck_tile::pk_fp4_t>)
         {
             ck_tile::FillUniformDistribution<BDataType>{-5.0f, 5.0f}(b_k_n);
-            ck_tile::FillUniformDistribution<QDataType>{125.f, 130.f}(bq_bqk_bqn);
         }
         else
         {
             ck_tile::FillUniformDistribution<BDataType>{0.f, 1.f}(b_k_n);
+        }
+
+        if constexpr(std::is_same_v<QDataType, ck_tile::e8m0_t>)
+        {
+            auto gen_scales = [&](auto& scales, float range_min, float range_max) {
+                // e8m0_t is basically an exponent of float32
+                ck_tile::HostTensor<float> pow2(scales.get_lengths());
+                ck_tile::FillUniformDistributionIntegerValue<float>{range_min, range_max}(pow2);
+                scales.ForEach([&](auto& self, const auto& i) {
+                    self(i) = static_cast<QDataType>(std::exp2(pow2(i)));
+                });
+            };
+            gen_scales(bq_bqk_bqn, -2, 2);
+        }
+        else
+        {
             ck_tile::FillUniformDistribution<QDataType>{-1.0f, 1.0f}(bq_bqk_bqn);
         }
 
@@ -780,14 +820,15 @@ class TestCkTileGemmBQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGem
         c_m_n_host_ref.SetZero();
 
         // Run reference BQuant implementation
-        if constexpr(std::is_same_v<BDataType, ck_tile::pk_fp4_raw_t>)
-            ck_tile::reference_mxfp4gemm_quant<ADataType,
-                                               QDataType,
-                                               BDataType,
-                                               AccDataType,
-                                               CDataType,
-                                               QuantGroupSize,
-                                               false>(a_m_k, bq_bqk_bqn, b_k_n, c_m_n_host_ref);
+        if constexpr(std::is_same_v<QDataType, ck_tile::e8m0_t>)
+            ck_tile::reference_mx_gemm_bquant<ADataType,
+                                              QDataType,
+                                              BDataType,
+                                              AccDataType,
+                                              CDataType,
+                                              QuantGroupSize,
+                                              BLayout,
+                                              false>(a_m_k, bq_bqk_bqn, b_k_n, c_m_n_host_ref);
         else
             ck_tile::reference_gemm_quant<ADataType,
                                           QDataType,
@@ -839,6 +880,7 @@ class TestCkTileGemmBQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGem
                                                                      AccDataType,
                                                                      CodegenGemmShape,
                                                                      CodegenGemmTraits,
+                                                                     ComputeDataType,
                                                                      ComputeDataType>;
 
         using BaseGemmPipeline = std::conditional_t<
@@ -852,8 +894,11 @@ class TestCkTileGemmBQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGem
         const ck_tile::TailNumber tail_num = BaseGemmPipeline::GetBlockLoopTailNum(num_loop);
 
         const auto Run = [&](const auto has_hot_loop_, const auto tail_number_) {
-            constexpr bool has_hot_loop_v = has_hot_loop_.value;
-            constexpr auto tail_number_v  = tail_number_.value;
+            constexpr bool has_hot_loop_v  = has_hot_loop_.value;
+            constexpr auto tail_number_v   = tail_number_.value;
+            constexpr auto b_cast_policy_v = std::is_same_v<ADataType, BDataType>
+                                                 ? ck_tile::CastPolicy::BeforeLDSWrite
+                                                 : ck_tile::CastPolicy::AfterLDSRead;
 
             using PipelineProblem =
                 ck_tile::GemmBQuantPipelineProblem<ADataType,
@@ -866,38 +911,59 @@ class TestCkTileGemmBQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGem
                                                    ComputeDataType,
                                                    ck_tile::GemmPipelineScheduler::Intrawave,
                                                    has_hot_loop_v,
-                                                   tail_number_v>;
+                                                   tail_number_v,
+                                                   b_cast_policy_v>;
 
             using GemmPipeline = std::conditional_t<
                 PreshuffleB == false,
-                std::conditional_t<std::is_same_v<BDataType, ck_tile::pk_fp4_raw_t>,
-                                   ck_tile::MxFp4GemmPipelineAgBgCrCompV3<PipelineProblem>,
+                std::conditional_t<std::is_same_v<QDataType, ck_tile::e8m0_t>,
+                                   ck_tile::MicroscaleGemmPipelineAgBgCrCompV3<PipelineProblem>,
                                    ck_tile::BQuantGemmPipelineAgBgCrCompV3<PipelineProblem>>,
                 ck_tile::WPQuantBPipelineAgBgCrV2<PipelineProblem>>;
 
-            using GemmEpilogue = ck_tile::CShuffleEpilogue<ck_tile::CShuffleEpilogueProblem<
-                ADataType,
-                std::conditional_t<std::is_same_v<BDataType, ck_tile::pk_fp4_raw_t>,
-                                   ADataType,
-                                   BDataType>,
-                ck_tile::tuple<>,
-                AccDataType,
-                CDataType,
-                ck_tile::tuple<>,
-                CLayout,
-                ck_tile::element_wise::PassThrough,
-                TilePartitioner::MPerBlock,
-                TilePartitioner::NPerBlock,
-                Base::M_Warp,
-                Base::N_Warp,
-                Base::M_Warp_Tile,
-                Base::N_Warp_Tile,
-                Base::K_Warp_Tile,
-                false, // transpose_c
-                1,
-                false,
-                1,
-                TiledMMAPermuteN>>;
+            // clang-format off
+            using BTypeForEpilogue =
+                std::conditional_t<std::is_same_v<BDataType, ck_tile::pk_fp4_t>, ADataType, BDataType>;
+            // clang-format on
+
+            using GemmEpilogue = std::conditional_t<
+                TiledMMAPermuteN,
+                ck_tile::PermuteNEpilogue<
+                    ck_tile::PermuteNEpilogueProblem<ADataType,
+                                                     BTypeForEpilogue,
+                                                     ck_tile::tuple<>,
+                                                     AccDataType,
+                                                     CDataType,
+                                                     ck_tile::tuple<>,
+                                                     CLayout,
+                                                     ck_tile::element_wise::PassThrough,
+                                                     TilePartitioner::MPerBlock,
+                                                     TilePartitioner::NPerBlock,
+                                                     Base::M_Warp,
+                                                     Base::N_Warp,
+                                                     Base::M_Warp_Tile,
+                                                     Base::N_Warp_Tile,
+                                                     Base::K_Warp_Tile,
+                                                     false, // transpose_c
+                                                     false,
+                                                     1>>,
+                ck_tile::CShuffleEpilogue<
+                    ck_tile::CShuffleEpilogueProblem<ADataType,
+                                                     BTypeForEpilogue,
+                                                     ck_tile::tuple<>,
+                                                     AccDataType,
+                                                     CDataType,
+                                                     ck_tile::tuple<>,
+                                                     CLayout,
+                                                     ck_tile::element_wise::PassThrough,
+                                                     TilePartitioner::MPerBlock,
+                                                     TilePartitioner::NPerBlock,
+                                                     Base::M_Warp,
+                                                     Base::N_Warp,
+                                                     Base::M_Warp_Tile,
+                                                     Base::N_Warp_Tile,
+                                                     Base::K_Warp_Tile,
+                                                     false>>>; // transpose_c
 
             using Kernel = ck_tile::QuantGemmKernel<TilePartitioner,
                                                     GemmPipeline,
@@ -953,12 +1019,20 @@ class TestCkTileGemmABQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGe
     void SetUpQuantTypeSpecific() {}
     void TearDownQuantTypeSpecific() {}
 
-    void run_test_with_validation(ck_tile::index_t M, ck_tile::index_t N, ck_tile::index_t K)
+    void run_test_with_validation(ck_tile::index_t M,
+                                  ck_tile::index_t N,
+                                  ck_tile::index_t K,
+                                  ck_tile::index_t k_batch      = 1,
+                                  ck_tile::index_t stride_B_pad = 0)
     {
         const ck_tile::index_t stride_A =
             ck_tile::get_default_stride(M, K, 0, this->is_row_major(ALayout{}));
+        // stride_B_pad lets a test exercise a B tensor whose leading-dim stride is
+        // larger than the packed value (e.g. row-aligned padding). The host tensor,
+        // device buffer, and kernel args are all built with this padded stride so
+        // the kernel must honor the runtime stride to address B correctly.
         const ck_tile::index_t stride_B =
-            ck_tile::get_default_stride(K, N, 0, this->is_row_major(BLayout{}));
+            ck_tile::get_default_stride(K, N, 0, this->is_row_major(BLayout{})) + stride_B_pad;
         const ck_tile::index_t stride_C =
             ck_tile::get_default_stride(M, N, 0, this->is_row_major(CLayout{}));
 
@@ -1026,7 +1100,7 @@ class TestCkTileGemmABQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGe
             else
             {
                 printf("PreshuffleB without TiledMMAPermuteN\n");
-                b_k_n_dev = ck_tile::shuffle_b<GemmConfig>(b_k_n);
+                b_k_n_dev = ck_tile::shuffle_b_v0<GemmConfig>(b_k_n);
             }
         }
         if constexpr(std::is_same_v<BDataType, ck_tile::pk_int4_t>)
@@ -1064,6 +1138,13 @@ class TestCkTileGemmABQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGe
             bq_bqk_bqn_dev_buf.ToDevice(bq_bqk_bqn.data());
         }
 
+        // For split-K (k_batch > 1), the kernel uses atomic_add to accumulate partial results
+        // into C. Zero the output buffer before launching so atomic additions start from zero.
+        if(k_batch > 1)
+        {
+            c_m_n_dev_buf.SetZero();
+        }
+
         // Create args for kernel execution
         ck_tile::QuantGemmHostArgs args{
             a_m_k_dev_buf.GetDeviceBuffer(),      // a_ptr
@@ -1071,7 +1152,7 @@ class TestCkTileGemmABQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGe
             c_m_n_dev_buf.GetDeviceBuffer(),      // c_ptr
             aq_m_aqk_dev_buf.GetDeviceBuffer(),   // aq_ptr (scales)
             bq_bqk_bqn_dev_buf.GetDeviceBuffer(), // bq_ptr (scales)
-            1,                                    // k_batch
+            k_batch,                              // k_batch
             M,
             N,
             K,   // M, N, K
@@ -1109,12 +1190,12 @@ class TestCkTileGemmABQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGe
             ck_tile::host_tensor_descriptor(M, N, stride_C, this->is_row_major(CLayout{})));
         c_m_n_dev_buf.FromDevice(c_m_n_dev_result.mData.data());
 
-        // Calculate error tolerances
+        // Calculate error tolerances (adjusted for split-K accumulation error)
         const float max_accumulated_value =
             *std::max_element(c_m_n_host_ref.mData.begin(), c_m_n_host_ref.mData.end());
         const auto rtol_atol =
             this->template calculate_rtol_atol<ADataType, BDataType, AccDataType, CDataType>(
-                K, 1, max_accumulated_value);
+                K, k_batch, max_accumulated_value);
 
         // Validate results
         bool pass = ck_tile::check_err(c_m_n_dev_result,
@@ -1124,7 +1205,7 @@ class TestCkTileGemmABQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGe
                                        rtol_atol.at(ck_tile::number<1>{}));
 
         EXPECT_TRUE(pass) << "ABQuantGrouped validation failed with M=" << M << ", N=" << N
-                          << ", K=" << K;
+                          << ", K=" << K << ", k_batch=" << k_batch;
 
         if(!pass)
         {
@@ -1141,27 +1222,51 @@ class TestCkTileGemmABQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGe
     void run_quant_gemm_impl(const ck_tile::QuantGemmHostArgs& args,
                              const ck_tile::stream_config& s)
     {
+
+        static_assert(std::is_same_v<CLayout, ck_tile::tensor_layout::gemm::RowMajor>);
+        constexpr bool IS_FP8BLOCKSCALE = BQuantGroupSize::kN == 128 &&
+                                          (std::is_same_v<ADataType, ck_tile::fp8_t> ||
+                                           std::is_same_v<ADataType, ck_tile::bf8_t>) &&
+                                          (std::is_same_v<BDataType, ck_tile::fp8_t> ||
+                                           std::is_same_v<BDataType, ck_tile::bf8_t>);
+        constexpr bool transpose_c = CodegenGemmTraits::TransposeC;
+        constexpr bool eight_waves =
+#ifdef CK_GFX950_SUPPORT
+            IS_FP8BLOCKSCALE &&
+            (GemmConfig::M_Warp * GemmConfig::N_Warp * GemmConfig::K_Warp == 8) &&
+            GemmConfig::K_Warp_Tile == 128;
+#else
+            false;
+#endif
         using GemmPipelineProblem = ck_tile::GemmPipelineProblemBase<ADataType,
                                                                      BDataType,
                                                                      AccDataType,
                                                                      CodegenGemmShape,
                                                                      CodegenGemmTraits,
+                                                                     ComputeDataType,
                                                                      ComputeDataType>;
 
-        using BaseGemmPipeline = std::conditional_t<
-            PreshuffleB == true,
-            ck_tile::BaseWeightPreshufflePipelineAGmemBGmemCRegV2<GemmPipelineProblem>,
-            ck_tile::BaseGemmPipelineAgBgCrCompV3<GemmPipelineProblem>>;
+        constexpr auto base_gemm_pipeline = []() {
+            if constexpr(eight_waves)
+                return ck_tile::BaseGemmPipelineAgBgCrCompV3<GemmPipelineProblem>{};
+            else if constexpr(PreshuffleB)
+                return ck_tile::BaseWeightPreshufflePipelineAGmemBGmemCRegV2<GemmPipelineProblem>{};
+            else if constexpr(IS_FP8BLOCKSCALE)
+                return ck_tile::BaseGemmPipelineAgBgCrCompV3<GemmPipelineProblem>{};
+            else
+                return ck_tile::BaseGemmPipelineAgBgCrCompV3<GemmPipelineProblem>{};
+        }();
+        using BaseGemmPipeline = std::decay_t<decltype(base_gemm_pipeline)>;
 
-        const ck_tile::index_t K_split  = (args.K + Base::K_Tile - 1) / Base::K_Tile * Base::K_Tile;
-        const ck_tile::index_t num_loop = TilePartitioner::GetLoopNum(K_split);
-        const bool has_hot_loop         = BaseGemmPipeline::BlockHasHotloop(num_loop);
+        const ck_tile::index_t K_split =
+            ck_tile::integer_least_multiple(args.K, GemmConfig::K_Tile);
+        const ck_tile::index_t num_loop    = TilePartitioner::GetLoopNum(K_split);
+        const bool has_hot_loop            = BaseGemmPipeline::BlockHasHotloop(num_loop);
         const ck_tile::TailNumber tail_num = BaseGemmPipeline::GetBlockLoopTailNum(num_loop);
 
         const auto Run = [&](const auto has_hot_loop_, const auto tail_number_) {
             constexpr bool has_hot_loop_v = has_hot_loop_.value;
             constexpr auto tail_number_v  = tail_number_.value;
-            constexpr bool transpose_c    = CodegenGemmTraits::TransposeC;
 
             using PipelineProblem =
                 ck_tile::GemmABQuantPipelineProblem<ADataType,
@@ -1179,32 +1284,51 @@ class TestCkTileGemmABQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGe
                                                     has_hot_loop_v,
                                                     tail_number_v>;
 
-            using GemmPipeline =
-                std::conditional_t<PreshuffleB == true,
+            using GemmPipeline = std::conditional_t<
+                eight_waves,
+                ck_tile::ABQuantGemmPipelineAgBgCrEightWaves<PipelineProblem>,
+                std::conditional_t<PreshuffleB,
                                    ck_tile::WPABQuantBPipelineAgBgCrV2<PipelineProblem>,
-                                   ck_tile::ABQuantGemmPipelineAgBgCrCompV3<PipelineProblem>>;
+                                   ck_tile::ABQuantGemmPipelineAgBgCrCompV3<PipelineProblem>>>;
 
-            using GemmEpilogue = ck_tile::CShuffleEpilogue<
-                ck_tile::CShuffleEpilogueProblem<typename PipelineProblem::ComputeDataType,
-                                                 typename PipelineProblem::ComputeDataType,
-                                                 ck_tile::tuple<>,
-                                                 AccDataType,
-                                                 CDataType,
-                                                 ck_tile::tuple<>,
-                                                 CLayout,
-                                                 ck_tile::element_wise::PassThrough,
-                                                 TilePartitioner::MPerBlock,
-                                                 TilePartitioner::NPerBlock,
-                                                 Base::M_Warp,
-                                                 Base::N_Warp,
-                                                 Base::M_Warp_Tile,
-                                                 Base::N_Warp_Tile,
-                                                 Base::K_Warp_Tile,
-                                                 transpose_c,
-                                                 1,
-                                                 false,
-                                                 1,
-                                                 TiledMMAPermuteN>>;
+            using GemmEpilogue = std::conditional_t<
+                TiledMMAPermuteN,
+                ck_tile::PermuteNEpilogue<
+                    ck_tile::PermuteNEpilogueProblem<typename PipelineProblem::AComputeDataType,
+                                                     typename PipelineProblem::BComputeDataType,
+                                                     ck_tile::tuple<>,
+                                                     AccDataType,
+                                                     CDataType,
+                                                     ck_tile::tuple<>,
+                                                     CLayout,
+                                                     ck_tile::element_wise::PassThrough,
+                                                     TilePartitioner::MPerBlock,
+                                                     TilePartitioner::NPerBlock,
+                                                     Base::M_Warp,
+                                                     Base::N_Warp,
+                                                     Base::M_Warp_Tile,
+                                                     Base::N_Warp_Tile,
+                                                     Base::K_Warp_Tile,
+                                                     transpose_c,
+                                                     false,
+                                                     1>>,
+                ck_tile::CShuffleEpilogue<
+                    ck_tile::CShuffleEpilogueProblem<typename PipelineProblem::AComputeDataType,
+                                                     typename PipelineProblem::BComputeDataType,
+                                                     ck_tile::tuple<>,
+                                                     AccDataType,
+                                                     CDataType,
+                                                     ck_tile::tuple<>,
+                                                     CLayout,
+                                                     ck_tile::element_wise::PassThrough,
+                                                     TilePartitioner::MPerBlock,
+                                                     TilePartitioner::NPerBlock,
+                                                     Base::M_Warp,
+                                                     Base::N_Warp,
+                                                     Base::M_Warp_Tile,
+                                                     Base::N_Warp_Tile,
+                                                     Base::K_Warp_Tile,
+                                                     transpose_c>>>;
 
             using Kernel = ck_tile::QuantGemmKernel<TilePartitioner,
                                                     GemmPipeline,
@@ -1219,9 +1343,9 @@ class TestCkTileGemmABQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGe
             {
                 throw std::runtime_error("Arguments not supported for ABQuant kernel");
             }
-
+            using k_attr_t = ck_tile::kernel_attr<eight_waves>;
             ck_tile::launch_kernel(s,
-                                   ck_tile::make_kernel<GemmConfigBase::kBlockPerCu>(
+                                   ck_tile::make_kernel<GemmConfigBase::kBlockPerCu, k_attr_t>(
                                        Kernel{}, grids, blocks, 0, kargs));
         };
 
@@ -1381,6 +1505,7 @@ class TestCkTileGemmRowColQuant
                                                                      AccDataType,
                                                                      CodegenGemmShape,
                                                                      CodegenGemmTraits,
+                                                                     ComputeDataType,
                                                                      ComputeDataType>;
 
         using BaseGemmPipeline = ck_tile::BaseGemmPipelineAgBgCrCompV3<GemmPipelineProblem>;
@@ -1595,6 +1720,7 @@ class TestCkTileGemmTensorQuant
                                                                      AccDataType,
                                                                      CodegenGemmShape,
                                                                      CodegenGemmTraits,
+                                                                     ComputeDataType,
                                                                      ComputeDataType>;
 
         using BaseGemmPipeline = ck_tile::BaseGemmPipelineAgBgCrCompV3<GemmPipelineProblem>;

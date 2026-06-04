@@ -4,7 +4,7 @@
 #pragma once
 
 #include "ck_tile/core.hpp"
-#include "ck_tile/ops/common/load_interleaved_pk_type.hpp"
+#include "ck_tile/ops/common/load_and_convert_tile.hpp"
 #include "ck_tile/host/concat.hpp"
 #include "ck_tile/ops/gemm/pipeline/wp_pipeline_agmem_bgmem_creg_base_policy.hpp"
 
@@ -34,6 +34,7 @@ struct BaseWeightPreshufflePipelineAGmemBGmemCRegV2
     CK_TILE_HOST_DEVICE static auto
     TailHandler(const RunFunction& run_func, bool has_hot_loop, TailNumber tail_number)
     {
+#if !defined(CK_TILE_FORCE_SINGLE_TAIL_HANDLER)
         if(has_hot_loop)
         {
             if(tail_number == TailNumber::Odd)
@@ -60,6 +61,11 @@ struct BaseWeightPreshufflePipelineAGmemBGmemCRegV2
                                 integral_constant<TailNumber, TailNumber::Even>{});
             }
         }
+#else
+        ignore = has_hot_loop;
+        ignore = tail_number;
+        return run_func(bool_constant<true>{}, integral_constant<TailNumber, TailNumber::Even>{});
+#endif
     }
 };
 
@@ -627,8 +633,7 @@ struct WeightPreshufflePipelineAGmemBGmemCRegV2
             // // Prefetch A0
             Base::GlobalPrefetch(a_global_tile, a_copy_dram_window, a_dram_tile_window_step);
 
-            Base::template GlobalPrefetch<BDataType, BTypeToUse, UnaryOpSize_>(
-                b_global_tile[0], b_flat_dram_window, b_dram_tile_window_step);
+            Base::GlobalPrefetch(b_global_tile[0], b_flat_dram_window, b_dram_tile_window_step);
 
             // Prefill A0
             Base::LocalPrefill(a_copy_lds_windows[I0], a_global_tile);
@@ -652,7 +657,7 @@ struct WeightPreshufflePipelineAGmemBGmemCRegV2
                 do
                 {
                     {
-                        Base::template GlobalPrefetch<BDataType, BTypeToUse, UnaryOpSize_>(
+                        Base::GlobalPrefetch(
                             b_global_tile[1], b_flat_dram_window, b_dram_tile_window_step);
                         Base::LocalPrefill(a_copy_lds_windows[I1], a_global_tile);
                         Base::GlobalPrefetch(
@@ -666,7 +671,7 @@ struct WeightPreshufflePipelineAGmemBGmemCRegV2
                         HotLoopScheduler();
                     }
                     {
-                        Base::template GlobalPrefetch<BDataType, BTypeToUse, UnaryOpSize_>(
+                        Base::GlobalPrefetch(
                             b_global_tile[0], b_flat_dram_window, b_dram_tile_window_step);
                         Base::LocalPrefill(a_copy_lds_windows[I0], a_global_tile);
                         Base::GlobalPrefetch(
@@ -687,7 +692,7 @@ struct WeightPreshufflePipelineAGmemBGmemCRegV2
             if constexpr(TailNum == TailNumber::Even)
             {
                 {
-                    Base::template GlobalPrefetch<BDataType, BTypeToUse, UnaryOpSize_>(
+                    Base::GlobalPrefetch(
                         b_global_tile[1], b_flat_dram_window, b_dram_tile_window_step);
                     Base::LocalPrefill(a_copy_lds_windows[I1], a_global_tile);
                     block_weight_preshuffle(

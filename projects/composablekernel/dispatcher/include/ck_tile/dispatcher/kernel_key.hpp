@@ -46,6 +46,7 @@ enum class Pipeline : std::uint8_t
     CompV3,       // Compute pipeline v3
     CompV4,       // Compute pipeline v4 (double buffering)
     CompV5,       // Compute pipeline v5
+    CompV6,       // Compute pipeline v6
     PreShuffleV1, // Weight preshuffle pipeline v1
     PreShuffleV2  // Weight preshuffle pipeline v2 (optimized)
 };
@@ -140,6 +141,11 @@ struct KernelKey
         bool preshuffle;              // Preshuffle (for weight preshuffle variants)
         bool transpose_c;             // TransposeC
         std::uint8_t num_wave_groups; // NumWaveGroups
+
+        // Padding support flags (kPadM, kPadN, kPadK in generated kernels)
+        bool pad_m = true; // Support arbitrary M dimensions via padding
+        bool pad_n = true; // Support arbitrary N dimensions via padding
+        bool pad_k = true; // Support arbitrary K dimensions via padding
     } algorithm;
 
     std::string gfx_arch; // e.g. "gfx942", "gfx90a", "gfx908"
@@ -185,7 +191,10 @@ struct KernelKey
                         algorithm.double_buffer,
                         algorithm.preshuffle,
                         algorithm.transpose_c,
-                        algorithm.num_wave_groups);
+                        algorithm.num_wave_groups,
+                        algorithm.pad_m,
+                        algorithm.pad_n,
+                        algorithm.pad_k);
     }
 
     /// Equality comparison
@@ -279,6 +288,7 @@ inline std::string to_string(Pipeline pipeline)
     case Pipeline::CompV3: return "compv3";
     case Pipeline::CompV4: return "compv4";
     case Pipeline::CompV5: return "compv5";
+    case Pipeline::CompV6: return "compv6";
     case Pipeline::PreShuffleV1: return "preshufflev1";
     case Pipeline::PreShuffleV2: return "preshufflev2";
     default: return "unknown";
@@ -300,6 +310,8 @@ inline Pipeline string_to_pipeline(const std::string& str)
         return Pipeline::CompV4;
     if(str == "compv5")
         return Pipeline::CompV5;
+    if(str == "compv6")
+        return Pipeline::CompV6;
     if(str == "preshufflev1")
         return Pipeline::PreShuffleV1;
     if(str == "preshufflev2")
@@ -397,8 +409,14 @@ inline std::string KernelKey::encode_identifier() const
 
     // Include pipeline, scheduler, epilogue for uniqueness
     oss << to_string(algorithm.pipeline) << "_";
-    oss << to_string(algorithm.scheduler) << "_";
     oss << to_string(algorithm.epilogue) << "_";
+    oss << to_string(algorithm.scheduler) << "_";
+
+    // Match tile_engine naming: padding flags (True/False) then persistent flag
+    oss << (algorithm.pad_m ? "True" : "False") << "_";
+    oss << (algorithm.pad_n ? "True" : "False") << "_";
+    oss << (algorithm.pad_k ? "True" : "False") << "_";
+    oss << (algorithm.persistent ? "True" : "False") << "_";
 
     // Match tile_engine naming: tile_m x tile_n x tile_k _ warp_m x warp_n x warp_k _
     // warp_tile_m x warp_tile_n x warp_tile_k
@@ -406,9 +424,6 @@ inline std::string KernelKey::encode_identifier() const
         << "_" << unsigned(algorithm.wave_shape.m) << "x" << unsigned(algorithm.wave_shape.n) << "x"
         << unsigned(algorithm.wave_shape.k) << "_" << unsigned(algorithm.warp_tile_shape.m) << "x"
         << unsigned(algorithm.warp_tile_shape.n) << "x" << unsigned(algorithm.warp_tile_shape.k);
-
-    // Add trait flags
-    oss << "_" << (algorithm.persistent ? "persist" : "nopers");
 
     if(signature.split_k > 1)
         oss << "_splitk" << unsigned(signature.split_k);

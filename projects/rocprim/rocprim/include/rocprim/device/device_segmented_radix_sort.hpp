@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -156,19 +156,14 @@ inline hipError_t segmented_radix_sort_impl(
 
     using Selector = segmented_radix_sort_config_selector<key_type, value_type>;
 
-    detail::target_arch target_arch;
-    ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-
-    gpu target_gpu;
-    ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
-
-    const target current_target(target_arch, target_gpu);
+    const target current_target(stream);
 
     const auto params = get_config<Selector>(Config{}, current_target);
 
     static constexpr bool with_values = !std::is_same<value_type, ::rocprim::empty_type>::value;
-    const bool            partitioning_allowed     = params.warp_sort_config.partitioning_allowed;
-    const unsigned int    max_small_segment_length = params.warp_sort_config.items_per_thread_small
+
+    const bool         config_allows_partitioning = params.warp_sort_config.partitioning_allowed;
+    const unsigned int max_small_segment_length   = params.warp_sort_config.items_per_thread_small
                                                   * params.warp_sort_config.logical_warp_size_small;
     const unsigned int small_segments_per_block = params.warp_sort_config.block_size_small
                                                   / params.warp_sort_config.logical_warp_size_small;
@@ -200,8 +195,22 @@ inline hipError_t segmented_radix_sort_impl(
     const unsigned int iterations         = ::rocprim::detail::ceiling_div(bits, params.radix_bits);
     const bool         to_output          = with_double_buffer || (iterations - 1) % 2 == 0;
     is_result_in_output                   = (iterations % 2 == 0) != to_output;
-    const bool do_partitioning
-        = partitioning_allowed && segments >= params.warp_sort_config.partitioning_threshold;
+
+    // Check if the stream is a graph capture. Partitioning is not allowed under graph
+    // capture since the number, since the launch parameters are dependend on the results
+    // of partioning.
+    //
+    // This has implications on performance under graph capture and should be investigated
+    // in the future.
+    bool is_graph_capture;
+    ROCPRIM_RETURN_ON_ERROR(::rocprim::detail::is_graph_capture(stream, is_graph_capture));
+
+    // We only allow partitioning if:
+    //   - The config allows it,
+    //   - The number of segments is significant enough, and
+    //   - We are not a graph capture.
+    const bool do_partitioning = config_allows_partitioning && !is_graph_capture
+                                 && segments >= params.warp_sort_config.partitioning_threshold;
 
     const size_t medium_segment_indices_size = three_way_partitioning ? segments : 0;
     const size_t segment_count_output_size   = three_way_partitioning ? 2 : 1;
@@ -338,9 +347,9 @@ inline hipError_t segmented_radix_sort_impl(
             {
                 start = std::chrono::steady_clock::now();
             }
-            auto segmented_sort_large_kernel = [=](auto arch_config)
+            auto segmented_sort_large_kernel = [=](auto target_config)
             {
-                segmented_sort_large<decltype(arch_config), Descending>(
+                segmented_sort_large<decltype(target_config), Descending>(
                     keys_input,
                     keys_tmp,
                     keys_output,
@@ -376,9 +385,9 @@ inline hipError_t segmented_radix_sort_impl(
             {
                 start = std::chrono::steady_clock::now();
             }
-            auto segmented_sort_medium_kernel = [=](auto arch_config)
+            auto segmented_sort_medium_kernel = [=](auto target_config)
             {
-                segmented_sort_medium<decltype(arch_config), Descending>(
+                segmented_sort_medium_or_small<decltype(target_config), Descending, false>(
                     keys_input,
                     keys_tmp,
                     keys_output,
@@ -417,9 +426,9 @@ inline hipError_t segmented_radix_sort_impl(
             {
                 start = std::chrono::steady_clock::now();
             }
-            auto segmented_sort_small_kernel = [=](auto arch_config)
+            auto segmented_sort_small_kernel = [=](auto target_config)
             {
-                segmented_sort_small<decltype(arch_config), Descending>(
+                segmented_sort_medium_or_small<decltype(target_config), Descending, true>(
                     keys_input,
                     keys_tmp,
                     keys_output,
@@ -457,20 +466,20 @@ inline hipError_t segmented_radix_sort_impl(
         {
             start = std::chrono::steady_clock::now();
         }
-        auto segmented_sort_kernel = [=](auto arch_config)
+        auto segmented_sort_kernel = [=](auto target_config)
         {
-            segmented_sort<decltype(arch_config), Descending>(keys_input,
-                                                              keys_tmp,
-                                                              keys_output,
-                                                              values_input,
-                                                              values_tmp,
-                                                              values_output,
-                                                              to_output,
-                                                              begin_offsets,
-                                                              end_offsets,
-                                                              iterations,
-                                                              begin_bit,
-                                                              end_bit);
+            segmented_sort<decltype(target_config), Descending>(keys_input,
+                                                                keys_tmp,
+                                                                keys_output,
+                                                                values_input,
+                                                                values_tmp,
+                                                                values_output,
+                                                                to_output,
+                                                                begin_offsets,
+                                                                end_offsets,
+                                                                iterations,
+                                                                begin_bit,
+                                                                end_bit);
         };
 
         ROCPRIM_RETURN_ON_ERROR(
@@ -549,6 +558,8 @@ inline hipError_t segmented_radix_sort_impl(
 /// \parblock
 /// In this example a device-level ascending radix sort is performed on an array of
 /// \p float values.
+///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_segmented_radix_sort.cpp).
 ///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>

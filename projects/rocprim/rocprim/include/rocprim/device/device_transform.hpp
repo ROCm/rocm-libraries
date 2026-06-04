@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -67,13 +67,7 @@ inline hipError_t transform_impl(InputIterator     input,
         return hipSuccess;
     }
 
-    detail::target_arch target_arch;
-    ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-
-    detail::gpu target_gpu;
-    ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
-
-    const target current_target(target_arch, target_gpu);
+    const target current_target(stream);
 
     const auto params = get_config<Selector>(Config{}, current_target);
 
@@ -109,9 +103,9 @@ inline hipError_t transform_impl(InputIterator     input,
         {
             start = std::chrono::steady_clock::now();
         }
-        auto transform_kernel = [=](auto arch_config)
+        auto transform_kernel = [=](auto target_config)
         {
-            constexpr auto params = decltype(arch_config)::params;
+            constexpr auto params = decltype(target_config)::params;
 
             detail::transform_kernel_impl<IsPointer,
                                           params.kernel_config.block_size,
@@ -167,6 +161,8 @@ inline hipError_t transform_impl(InputIterator     input,
 /// \parblock
 /// In this example a device-level transform operation is performed on an array of
 /// integer values (<tt>short</tt>s are transformed into <tt>int</tt>s).
+///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_search.cpp).
 ///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>

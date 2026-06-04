@@ -8,6 +8,10 @@
 #include "ck_tile/ops/batched_contraction/utils/tensor_descriptor_utils.hpp"
 #include "ck_tile/ops/gemm/kernel/universal_gemm_kernel.hpp"
 
+#if __clang_major__ >= 23
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+#endif
 /**
  * @file batched_contraction_kernel.hpp
  * @brief Batched Tensor Contraction Operations
@@ -29,7 +33,7 @@
  * **E[G₀,G₁,...,M₀,M₁,...,N₀,N₁,...] = epilogue_op(C, D₀, D₁, D₂, ...)**
  *
  * Where:
- * **C[G₀,G₁,...,M₀,M₁,...,N₀,N₁,...] = Σ_{K₀,K₁,...} A[G₀,G₁,...,M₀,M₁,...,K₀,K₁,...] ×
+ * **C[G₀,G₁,...,M₀,M₁,...,N₀,N₁,...] = Σ_{K₀,K₁,...} A[G₀,G₁,...,M₀,M₁,...,K₀,K₁,...] x
  * B[G₀,G₁,...,N₀,N₁,...,K₀,K₁,...]**
  *
  * Where:
@@ -46,16 +50,16 @@
  * to the dot product computation in matrix multiplication.
  *
  * **Dimension Flattening Strategy**:
- * - **M dimensions** (from tensor A) → Flattened into matrix rows (M_total)
- * - **N dimensions** (from tensor B) → Flattened into matrix columns (N_total)
- * - **K dimensions** (contraction dims) → Flattened into inner dimension (K_total)
- * - **G dimensions** (batch dims) → Handled through batch processing
+ * - **M dimensions** (from tensor A) -> Flattened into matrix rows (M_total)
+ * - **N dimensions** (from tensor B) -> Flattened into matrix columns (N_total)
+ * - **K dimensions** (contraction dims) -> Flattened into inner dimension (K_total)
+ * - **G dimensions** (batch dims) -> Handled through batch processing
  *
  * **Mathematical Transformation**:
  * ```
- * Original: E[g,m₀,m₁,n₀,n₁] = Σ_{k₀,k₁} A[g,m₀,m₁,k₀,k₁] × B[g,n₀,n₁,k₀,k₁]
- * Flattened: E[g,M,N] = Σ_K A[g,M,K] × B[g,N,K]  (where M=m₀×m₁, N=n₀×n₁, K=k₀×k₁)
- * GEMM Form: E = A × Bᵀ
+ * Original: E[g,m₀,m₁,n₀,n₁] = Σ_{k₀,k₁} A[g,m₀,m₁,k₀,k₁] x B[g,n₀,n₁,k₀,k₁]
+ * Flattened: E[g,M,N] = Σ_K A[g,M,K] x B[g,N,K]  (where M=m₀xm₁, N=n₀xn₁, K=k₀xk₁)
+ * GEMM Form: E = A x Bᵀ
  *
  * **Why This Approach Is Optimal**:
  * Rather than implementing tensor contraction from scratch, this kernel leverages the highly
@@ -364,10 +368,7 @@ struct BatchedContractionKernel
 
     /// @brief Returns the GPU block size for kernel launch.
     /// @return 3D block dimensions for GPU kernel execution
-    CK_TILE_HOST static constexpr auto GetBlockSize()
-    {
-        return dim3(UniversalGemmKernel::kBlockSize);
-    }
+    CK_TILE_HOST static constexpr auto GetBlockSize() { return UniversalGemmKernel::BlockSize(); }
 
     CK_TILE_HOST static constexpr auto GridSize(const KernelArgs& kargs)
     {
@@ -687,3 +688,7 @@ struct BatchedContractionKernel
 };
 
 } // namespace ck_tile
+
+#if __clang_major__ >= 23
+#pragma clang diagnostic pop
+#endif

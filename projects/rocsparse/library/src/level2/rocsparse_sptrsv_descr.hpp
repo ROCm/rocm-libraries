@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -37,10 +37,15 @@ protected:
     rocsparse_datatype                     m_compute_datatype;
     rocsparse_analysis_policy              m_analysis_policy;
     std::shared_ptr<_rocsparse_csrsv_info> m_csrsv_info;
+    rocsparse_format                       m_format{};
 
 public:
+    int64_t m_batch_count{};
     ~_rocsparse_sptrsv_descr();
     _rocsparse_sptrsv_descr();
+
+    rocsparse_format get_format() const;
+    void             set_format(rocsparse_format format);
 
     rocsparse_sptrsv_stage get_stage() const;
     rocsparse_sptrsv_alg   get_alg() const;

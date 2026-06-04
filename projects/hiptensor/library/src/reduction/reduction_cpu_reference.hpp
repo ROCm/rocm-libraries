@@ -31,19 +31,20 @@
 
 #include <hiptensor/hiptensor.h>
 
-hiptensorStatus_t hiptensorReductionReference(const void*                       alpha,
-                                              const void*                       A,
-                                              const hiptensorTensorDescriptor_t descA,
-                                              const int32_t                     modeA[],
-                                              const hiptensorOperator_t         opA,
-                                              const void*                       beta,
-                                              const void*                       C,
-                                              const hiptensorTensorDescriptor_t descC,
-                                              const int32_t                     modeC[],
-                                              const hiptensorOperator_t         opC,
-                                              void*                             D,
-                                              const hiptensorTensorDescriptor_t descD,
-                                              const int32_t                     modeD[],
-                                              hiptensorOperator_t               opReduce,
-                                              hiptensorComputeDescriptor_t      typeCompute,
-                                              hipStream_t                       stream);
+HIPTENSOR_EXPORT hiptensorStatus_t
+    hiptensorReductionReference(const void*                       alpha,
+                                const void*                       A,
+                                const hiptensorTensorDescriptor_t descA,
+                                const int32_t                     modeA[],
+                                const hiptensorOperator_t         opA,
+                                const void*                       beta,
+                                const void*                       C,
+                                const hiptensorTensorDescriptor_t descC,
+                                const int32_t                     modeC[],
+                                const hiptensorOperator_t         opC,
+                                void*                             D,
+                                const hiptensorTensorDescriptor_t descD,
+                                const int32_t                     modeD[],
+                                hiptensorOperator_t               opReduce,
+                                hiptensorComputeDescriptor_t      typeCompute,
+                                hipStream_t                       stream);

@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -135,13 +135,7 @@ hipError_t reduce_by_key_impl_wrapped_config(void*                     temporary
     ROCPRIM_RETURN_ON_ERROR(std::visit(
         [&](auto use_sleepy_scan, auto use_atomic_block_id)
         {
-            detail::target_arch target_arch;
-            ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-
-            gpu target_gpu;
-            ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
-
-            const target current_target(target_arch, target_gpu);
+            const target current_target(stream);
 
             const auto params = get_config<Selector>(Config{}, current_target);
 
@@ -256,9 +250,9 @@ hipError_t reduce_by_key_impl_wrapped_config(void*                     temporary
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("reduce_by_key_init_kernel",
                                                             number_of_blocks_launch,
                                                             start);
-                auto kernel = [=](auto arch_config)
+                auto kernel = [=](auto target_config)
                 {
-                    reduce_by_key::kernel_impl<decltype(arch_config), Determinism>(
+                    reduce_by_key::kernel_impl<decltype(target_config), Determinism>(
                         keys_input + offset,
                         values_input + offset,
                         unique_output,
@@ -408,6 +402,8 @@ hipError_t reduce_by_key_impl(void*                     temporary_storage,
 /// \parblock
 /// In this example a device-level sum operation is performed on an array of
 /// integer values and integer keys.
+///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_reduce_by_key.cpp).
 ///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>

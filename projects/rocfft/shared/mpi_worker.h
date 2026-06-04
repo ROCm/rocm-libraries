@@ -1,5 +1,5 @@
 /******************************************************************************
-* Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+* Copyright (C) 2024 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -122,6 +122,7 @@ static void gather_field_v(MPI_Comm                                  mpi_comm,
 
     // work out how much to receive from each rank and where
     std::vector<int> recvcounts(static_cast<size_t>(mpi_size));
+    size_t           send_count = 0;
     std::vector<int> displs(static_cast<size_t>(mpi_size));
     // loop over each rank's bricks
     size_t elem_total = 0;
@@ -136,13 +137,30 @@ static void gather_field_v(MPI_Comm                                  mpi_comm,
         recvcounts[current_rank] = rank_elems;
         displs[current_rank]     = elem_total;
         elem_total += rank_elems;
+        if(range.first->rank == mpi_rank)
+            send_count = rank_elems;
     }
 
     // gather brick(s) to rank 0 (to host memory)
     auto mpi_type = get_mpi_type(elem_size);
+    // make sure init/execution kernels are done before sending data
+    const auto hip_status = hipDeviceSynchronize();
+    // check that all buffers are at least as large as they need
+    // for what the process is expected to send
+    const bool local_buffer_is_too_small
+        = send_count > 0
+          && (local_bricks.empty() || send_count > local_bricks.begin()->second.size() / elem_size);
+    bool global_check = hip_status != hipSuccess || local_buffer_is_too_small;
+    MPI_Allreduce(MPI_IN_PLACE, &global_check, 1, MPI_CXX_BOOL, MPI_LOR, mpi_comm);
+    if(global_check)
+    {
+        throw std::runtime_error(
+            "Device synchronization failed on some process or its local buffer is too small for "
+            "the number of elements it's expected to send");
+    }
 
     MPI_Gatherv(local_bricks.empty() ? nullptr : local_bricks.begin()->second.data(),
-                local_bricks.empty() ? 0 : local_bricks.begin()->second.size() / elem_size,
+                send_count,
                 mpi_type,
                 recvbuf.data(),
                 recvcounts.data(),
@@ -444,19 +462,17 @@ static void
 template <typename Tfloat>
 void execute_reference_fft(const fft_params& params, std::vector<hostbuf>& input)
 {
-    auto cpu_plan = fftw_plan_via_rocfft<Tfloat>(params.length,
-                                                 params.istride,
-                                                 params.ostride,
-                                                 params.nbatch,
-                                                 params.idist,
-                                                 params.odist,
-                                                 params.transform_type,
-                                                 input,
-                                                 input);
+    fftw_plan_wrapper_t<Tfloat> cpu_plan = fftw_plan_via_rocfft<Tfloat>(params.length,
+                                                                        params.istride,
+                                                                        params.ostride,
+                                                                        params.nbatch,
+                                                                        params.idist,
+                                                                        params.odist,
+                                                                        params.transform_type,
+                                                                        input,
+                                                                        input);
 
     fftw_run<Tfloat>(params.transform_type, cpu_plan, input, input);
-
-    fftw_destroy_plan_type(cpu_plan);
 }
 
 bool   use_fftw_wisdom = false;
@@ -608,25 +624,15 @@ void exec_testcases(std::function<AllParams(const std::vector<std::string>&)> ma
         std::vector<void*>                        load_cb_data;
         std::vector<void*>                        store_cb_func;
         std::vector<void*>                        store_cb_data;
-        if(all_params[testcase].run_callbacks)
+        // Set function pointer callbacks at execute time
+        if(all_params[testcase].run_callbacks == fft_callback_type_funcptr)
         {
-            auto runtime_err_handler
-                = [&](const std::string& msg) { throw std::runtime_error(msg); };
+            get_rank_load_callbacks_funcptr(
+                all_params[testcase], load_cb_func, load_cb_data, false, all_cb_data);
+            get_rank_store_callbacks_funcptr(
+                all_params[testcase], store_cb_func, store_cb_data, false, all_cb_data);
 
-            get_rank_load_callbacks(all_params[testcase],
-                                    load_cb_func,
-                                    load_cb_data,
-                                    runtime_err_handler,
-                                    false,
-                                    all_cb_data);
-            get_rank_store_callbacks(all_params[testcase],
-                                     store_cb_func,
-                                     store_cb_data,
-                                     runtime_err_handler,
-                                     false,
-                                     all_cb_data);
-
-            auto fft_status = all_params[testcase].set_callbacks(
+            auto fft_status = all_params[testcase].set_funcptr_callbacks(
                 &load_cb_func, &load_cb_data, &store_cb_func, &store_cb_data);
             if(fft_status != fft_status_success)
                 throw std::runtime_error("set callback failure");

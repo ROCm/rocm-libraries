@@ -21,6 +21,7 @@
  * ************************************************************************ */
 #pragma once
 
+#include "asan_helpers.hpp"
 #include "check_numerics_matrix.hpp"
 #include "check_numerics_vector.hpp"
 #include "device_macros.hpp"
@@ -100,19 +101,14 @@ rocblas_her2_kernel(bool           is_upper,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
         auto*       A = load_ptr_batch(Aa, batch, shift_A, stride_A);
         const auto* x = load_ptr_batch(xa, batch, shift_x, stride_x);
         const auto* y = load_ptr_batch(ya, batch, shift_y, stride_y);
 
         rocblas_her2_kernel_calc(is_upper, n, area, alpha, x, incx, y, incy, A, lda);
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 /**
@@ -150,7 +146,7 @@ rocblas_status rocblas_her2_launcher(rocblas_handle handle,
 
     int batches = handle->getBatchGridDim((int)batch_count);
 
-    static constexpr int HER2_DIM_X = 512;
+    static constexpr int HER2_DIM_X = rocblas::conditional_v<rocblas_enable_asan, 256, 512>;
 
     size_t nitems = (size_t)n * (n + 1) / 2;
 

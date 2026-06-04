@@ -10,6 +10,7 @@
 #include <rocRoller/CodeGen/Instruction_fwd.hpp>
 #include <rocRoller/CodeGen/WaitCount.hpp>
 #include <rocRoller/Context_fwd.hpp>
+#include <rocRoller/Utilities/EnumArray.hpp>
 #include <rocRoller/Utilities/EnumBitset.hpp>
 
 namespace rocRoller
@@ -30,23 +31,24 @@ namespace rocRoller
          */
         struct InstructionStatus
         {
-            unsigned int stallCycles = 0;
+            unsigned int stallCycles      = 0;
+            unsigned int additionalCycles = 0;
             WaitCount    waitCount;
             unsigned int nops = 0;
 
             unsigned int reusedOperands = 0;
 
             /// The new length of each of the queues.
-            std::array<int, GPUWaitQueueType::Count> waitLengths;
+            EnumArray<int, GPUWaitQueueType> waitLengths;
 
             /// How many new registers of each type must be allocated?
-            std::array<int, static_cast<size_t>(Register::Type::Count)> allocatedRegisters;
+            EnumArray<int, Register::Type> allocatedRegisters;
 
             /// How many free registers of each type will remain?
-            std::array<int, static_cast<size_t>(Register::Type::Count)> remainingRegisters;
+            EnumArray<int, Register::Type> remainingRegisters;
 
             /// How much does this instruction add to the high water mark of allocated registers?
-            std::array<int, static_cast<size_t>(Register::Type::Count)> highWaterMarkRegistersDelta;
+            EnumArray<int, Register::Type> highWaterMarkRegistersDelta;
 
             /// Will this cause an out-of-registers error?
             EnumBitset<Register::Type> outOfRegisters;
@@ -108,6 +110,17 @@ namespace rocRoller
             //> This observer is required in ctx, determined at runtime.
             {
                 a.runtimeRequired()
+                } -> std::convertible_to<bool>;
+        };
+
+        template <typename T>
+        concept CObserverRuntimeWithContext = requires(T a, ContextPtr const& ctx)
+        {
+            requires CObserver<T>;
+
+            //> This observer requires ctx to determine if it's required at runtime.
+            {
+                a.runtimeRequired(ctx)
                 } -> std::convertible_to<bool>;
         };
 

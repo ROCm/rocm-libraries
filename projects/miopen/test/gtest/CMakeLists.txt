@@ -29,10 +29,13 @@ if(MIOPEN_BACKEND_OPENCL)
   list(APPEND SKIP_TESTS dumpTensorTest.cpp)
 endif()
 
-if(MIOPEN_CK_BUILDER_EXPERIMENTAL)
-    add_definitions(-DCK_EXPERIMENTAL_BUILDER)
-else()
-    list(APPEND SKIP_TESTS ck_builder_xdl.cpp ck_builder_shared.cpp)
+# Add files to SKIP_TESTS when ASAN packaging is enabled.  These are temporary until a fix is found for
+# the hang that occurs with CK kernels.
+if(THEROCK_SANITIZER STREQUAL "ASAN")
+    # Disable tests temporarily due to a bug that cause a hang when using CK kernels while Address Sanitizer is enabled.
+    list(APPEND SKIP_TESTS bad_fusion_plan.cpp cba_find2_infer.cpp cba_infer.cpp ck_builder_shared.cpp ck_builder_xdl.cpp conv_activ_infer.cpp conv_ai_3d_kernel_tuning_utils.cpp conv_ck_igemm_fwd_v6r1_dlops_nchw.cpp conv_hip_igemm_xdlops.cpp conv_igemm_mlir_xdlops_bwd_wrw.cpp conv_igemm_mlir_xdlops_fwd.cpp find_2_conv.cpp find_db.cpp fused_conv_bias_res_add_activ.cpp graphapi_conv_bias_res_add_activ_fwd.cpp group_conv_deterministic_split_k.cpp group_conv2d_fwd.cpp group_conv2d_bwd.cpp group_conv2d_wrw.cpp group_conv3d_fwd.cpp group_conv3d_bwd.cpp group_conv3d_wrw.cpp find_mode_trust_verify.cpp kernel_tuning_net.cpp miopendriver_conv_immed.cpp miopendriver_conv2d_trans.cpp miopendriver_gemm.cpp miopendriver_regression_big_tensor.cpp miopendriver_regression_big_tensor.cpp miopendriver_regression_half_gfx9.cpp miopendriver_regression_half.cpp perf_config_HipImplicitGemm3DGroupFwdXdlops.cpp smoke_solver_ConvCkIgemmFwdV6r1DlopsNchw.cpp unit_conv_solver_ConvAsmImplicitGemmGTCDynamicBwdXdlops.cpp unit_conv_solver_ConvAsmImplicitGemmGTCDynamicFwdXdlops.cpp unit_conv_solver_ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC.cpp unit_conv_solver_ConvAsmImplicitGemmGTCDynamicWrwXdlops.cpp unit_conv_solver_ConvCkGroupedConvFwd.cpp unit_conv_solver_ConvHipImplicitGemm3DGroupBwdXdlops.cpp unit_conv_solver_ConvHipImplicitGemm3DGroupFwdXdlops.cpp unit_conv_solver_ConvHipImplicitGemm3DGroupWrwXdlops.cpp unit_conv_solver_ConvHipImplicitGemmBwdDataV1R1Xdlops.cpp unit_conv_solver_ConvHipImplicitGemmBwdDataV4R1Xdlops.cpp unit_conv_solver_ConvHipImplicitGemmFwdXdlops.cpp unit_conv_solver_ConvHipImplicitGemmGroupBwdXdlops.cpp unit_conv_solver_ConvHipImplicitGemmForwardV4R4Xdlops.cpp unit_conv_solver_ConvHipImplicitGemmForwardV4R5Xdlops.cpp unit_conv_solver_ConvHipImplicitGemmForwardV4R4Xdlops_Padded_Gemm.cpp unit_conv_solver_ConvHipImplicitGemmWrwV4R4Xdlops.cpp unit_conv_solver_ConvHipImplicitGemmWrwV4R4Xdlops_Padded_Gemm.cpp unit_conv_solver_ConvHipImplicitGemmBwdXdlops.cpp unit_conv_solver_ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC.cpp unit_conv_solver_ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC.cpp unit_conv_solver_ConvHipImplicitGemmGroupFwdXdlops.cpp unit_conv_solver_ConvHipImplicitGemmGroupWrwXdlops.cpp unit_implicitgemm_ck_util.cpp smoke_solver_ConvAsmImplicitGemmGTCDynamicXdlopsNHWC_fp32_fp16.cpp smoke_solver_ConvAsmImplicitGemmGTCDynamicXdlopsNHWC_bf16.cpp)
+    # temporarily disable due to test failures
+    list(APPEND SKIP_TESTS unit_conv_solver_ConvWinoRageRxS.cpp)
 endif()
 
 function(add_gtest_negative_filter NEGATIVE_FILTER_TO_ADD)
@@ -77,14 +80,10 @@ function(add_gtest TEST_NAME TEST_CPP)
 
   # Workaround : change in rocm-cmake was causing linking error so had to add ${CMAKE_DL_LIBS}
   #               We can remove ${CMAKE_DL_LIBS} once root cause is identified.
-  target_link_libraries(${TEST_NAME} ${CMAKE_DL_LIBS} GTest::gtest GTest::gtest_main GTest::gmock MIOpen ${Boost_LIBRARIES} hip::host )
+  # MIOpen_with_plugins ensures CK plugin .so's are built alongside the test
+  target_link_libraries(${TEST_NAME} ${CMAKE_DL_LIBS} GTest::gtest GTest::gtest_main GTest::gmock MIOpen_with_plugins hip::host )
   if(NOT MIOPEN_EMBED_DB STREQUAL "")
       target_link_libraries(${TEST_NAME} $<BUILD_INTERFACE:miopen_data>)
-  endif()
-
-  if(MIOPEN_CK_BUILDER_EXPERIMENTAL)
-    find_package(composable_kernel 1.0.0 COMPONENTS device_conv_operations)
-    target_link_libraries(${TEST_NAME} ck_builder composable_kernel::device_conv_operations)
   endif()
 
   if(MIOPEN_TEST_DISCRETE)
@@ -99,10 +98,6 @@ function(add_gtest TEST_NAME TEST_CPP)
       set(MIOPEN_GTEST_PREFIX "")
     else()
       set(MIOPEN_GTEST_PREFIX "Smoke")
-    endif()
-
-    if (NOT MIOPEN_TEST_MLIR)
-        add_gtest_negative_filter("*MLIRTest*")
     endif()
 
     if (NOT MIOPEN_TEST_DBSYNC)
@@ -152,10 +147,6 @@ function(add_gtest TEST_NAME TEST_CPP)
       set(MIOPEN_GTEST_PREFIX "Smoke")
     endif()
 
-    if (NOT MIOPEN_TEST_MLIR)
-        add_gtest_negative_filter("*MLIRTest*")
-    endif()
-
     if (NOT MIOPEN_TEST_DBSYNC)
         add_gtest_negative_filter("*DBSync*")
     endif()
@@ -176,6 +167,10 @@ function(add_gtest TEST_NAME TEST_CPP)
         add_gtest_negative_filter("Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_32") # Temporarily disabled until gfx1151 CI nodes have fw 31 or higher installed
         add_gtest_negative_filter("Smoke/GPU_BNFWDTrainLarge2D_FP32.BnV2LargeFWD_TrainCKfp32/NCHW_BNSpatial_testBNAPIV2_Dim_2_test_id_64") # Temporarily disabled until gfx1151 CI nodes have fw 31 or higher installed
         add_gtest_negative_filter("*SerialRun3D*") # These FP32 SerialRun3D tests use so much memory that they have a risk of timing out the machine during tests
+    endif()
+
+    if(MIOPEN_TEST_GFX94X)
+        add_gtest_negative_filter("Full/GPU_LstmMSRnn_FP32.TestFloat/1095") # Disable flaky test ALMIOPEN-1926
     endif()
 
     # when building the single gtest, add them in a sharded manner
@@ -220,7 +215,7 @@ endforeach()
 # Otherwise, all files in ${SOURCES} are rebuilt for each test.
 add_library(miopen_gtest_common STATIC ${SOURCES})
 target_include_directories(miopen_gtest_common PRIVATE ../ ../../src/kernels)
-target_link_libraries(miopen_gtest_common PRIVATE GTest::gtest MIOpen)
+target_link_libraries(miopen_gtest_common PRIVATE GTest::gtest GTest::gmock MIOpen)
 if(WIN32)
   # Refer to https://en.cppreference.com/w/cpp/language/types for details.
   target_compile_options(miopen_gtest_common PRIVATE $<BUILD_INTERFACE:$<$<CXX_COMPILER_ID:Clang>:-U__LP64__>>)
@@ -280,3 +275,32 @@ endif()
 
 message(STATUS "gtest env: MIOPEN_USER_DB_PATH=${CMAKE_CURRENT_BINARY_DIR}")
 message(STATUS "gtest env: MIOPEN_TEST_COMPOSABLEKERNEL=${MIOPEN_TEST_COMPOSABLEKERNEL}")
+
+# Create install-time test file for distribution
+set(INSTALL_TEST_FILE "${CMAKE_CURRENT_BINARY_DIR}/install_CTestTestfile.cmake")
+file(WRITE "${INSTALL_TEST_FILE}"
+[=[
+# This is a test file generated by MIOpen for install time.
+# Tests are defined with relative paths to work in the installed location.
+]=]
+)
+
+#Enable the test categories in test_categories.yaml
+include(${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake)
+if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
+        message(STATUS "YAML-based test categorization")
+        apply_test_category_labels(miopen_gtest "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml" "${PROJECT_BINARY_DIR}/${DATABASE_INSTALL_DIR}" "${INSTALL_TEST_FILE}")
+else()
+        message(STATUS "No test categorization (YAML missing)")
+endif()
+
+# Install CTestTestfile.cmake to bin/MIOpen/ subdirectory for TheRock distribution
+if( NOT ENABLE_ASAN_PACKAGING )
+  install(
+      FILES "${INSTALL_TEST_FILE}"
+      DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}"
+      COMPONENT tests
+      RENAME "CTestTestfile.cmake"
+  )
+endif()
+

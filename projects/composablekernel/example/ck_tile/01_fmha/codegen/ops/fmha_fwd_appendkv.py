@@ -408,14 +408,19 @@ class KernelComponentFactoryGfx12(KernelComponentFactoryBase):
     arch = ArchTrait("gfx12")
 
 
+class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
+    arch = ArchTrait("gfx125")
+
+
 def get_factory(target: str):
     # Place more specific architectures first
 
     if target.startswith("gfx9"):
         return KernelComponentFactoryGfx9
-
     if target.startswith("gfx11"):
         return KernelComponentFactoryGfx11
+    if target.startswith("gfx125"):
+        return KernelComponentFactoryGfx125
     if target.startswith("gfx12"):
         return KernelComponentFactoryGfx12
 
@@ -515,5 +520,5 @@ def list_blobs(
             targets, kernel_filter, receipt, mask_impl, optdim_list
         )
         for kernel in kernels:
-            f.write(str(file_path.parent / GEN_DIR / kernel.filename) + "\n")
-        f.write(str(file_path.parent / GEN_DIR / FMHA_FWD_APPENDKV_API_FILENAME) + "\n")
+            f.write((file_path.parent / GEN_DIR / kernel.filename).as_posix() + "\n")
+        f.write((file_path.parent / GEN_DIR / FMHA_FWD_APPENDKV_API_FILENAME).as_posix() + "\n")

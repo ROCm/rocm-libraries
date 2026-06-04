@@ -3,6 +3,8 @@
 
 #include <rocRoller/KernelOptions.hpp>
 #include <rocRoller/KernelOptions_detail.hpp>
+#include <rocRoller/Parameters/Solution/LDSBankSwizzleMode.hpp>
+#include <rocRoller/Parameters/Solution/ScaleSkipPermlaneMode.hpp>
 
 #include <rocRoller/AssertOpKinds.hpp>
 #include <rocRoller/Utilities/Settings.hpp>
@@ -10,6 +12,20 @@
 
 namespace rocRoller
 {
+    std::string toString(DSObserverType type)
+    {
+        switch(type)
+        {
+        case DSObserverType::DSMEMObserver:
+            return "DSMEMObserver";
+        case DSObserverType::WeightlessDSMemObserver:
+            return "WeightlessDSMemObserver";
+        case DSObserverType::Count:
+        default:
+            return "Unknown";
+        }
+    }
+
     static void increaseRegisterLimit(KernelOptionValues& values)
     {
         if(Settings::Get(Settings::NoRegisterLimits))
@@ -114,7 +130,7 @@ namespace rocRoller
 
     std::string toString(KernelOptionValues const& values)
     {
-        static_assert(sizeof(KernelOptionValues) == 72,
+        static_assert(sizeof(KernelOptionValues) == 88,
                       "Edit the toString() function when adding a kernel option!");
 
         std::string rv = "Kernel Options:\n";
@@ -129,7 +145,8 @@ namespace rocRoller
         ShowOption(alwaysWaitAfterStore);
         ShowOption(alwaysWaitBeforeBranch);
         ShowOption(alwaysWaitZeroBeforeBarrier);
-        ShowOption(preloadKernelArguments);
+        ShowOption(systemPreloadedKernelArguments);
+        ShowOption(lazyLoadKernelArguments);
         ShowOption(maxACCVGPRs);
         ShowOption(maxSGPRs);
         ShowOption(maxVGPRs);
@@ -140,16 +157,17 @@ namespace rocRoller
         ShowOption(assertWaitCntState);
         ShowOption(setNextFreeVGPRToMax);
         ShowOption(deduplicateArguments);
-        ShowOption(lazyAddArguments);
         ShowOption(minLaunchTimeExpressionComplexity);
         ShowOption(maxConcurrentSubExpressions);
         Show("maxConcurrentControlOps",
              values.maxConcurrentControlOps ? std::to_string(*values.maxConcurrentControlOps)
                                             : "none");
+        ShowString(dsObserver);
         ShowOption(enableFullDivision);
-        ShowOption(scaleSkipPermlane);
+        ShowString(scaleSkipPermlane);
         ShowString(assertOpKind);
         ShowOption(removeSetCoordinate);
+        ShowString(ldsSwizzleMode);
 
 #undef Show
 #undef ShowOption

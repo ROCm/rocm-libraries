@@ -178,10 +178,8 @@ struct AQuantGemmPipelineAgBgCrMem : public BaseGemmPipelineAgBgCrMem<Problem>
                             ADramWindow& a_dram_window,
                             const DramTileWindowStep& dram_tile_window_step)
         {
-            using DestDataType            = typename ABlockTile_::DataType;
-            using SrcDataType             = typename ADramWindow::Base::TileWindowBase::DataType;
             constexpr index_t UnaryOpSize = 8;
-            load_int4_tile<SrcDataType, DestDataType, UnaryOpSize>(a_block_tile, a_dram_window);
+            load_and_convert_tile<UnaryOpSize>(a_block_tile, a_dram_window);
             move_tile_window(a_dram_window, dram_tile_window_step);
         }
 
@@ -232,10 +230,9 @@ struct AQuantGemmPipelineAgBgCrMem : public BaseGemmPipelineAgBgCrMem<Problem>
                           "B block window has incorrect lengths for defined BLayout!");
 
             // A/B tiles in LDS - using the same approach as regular gemm pipeline
-            auto ab_lds_blocks =
-                Base::template GetABLdsTensorViews<OverrideADataType, BDataType>(p_smem);
-            auto& a_lds_block = ab_lds_blocks.at(I0{});
-            auto& b_lds_block = ab_lds_blocks.at(I1{});
+            auto ab_lds_blocks = Base::GetABLdsTensorViews(p_smem);
+            auto& a_lds_block  = ab_lds_blocks.at(I0{});
+            auto& b_lds_block  = ab_lds_blocks.at(I1{});
 
             // Tile distribution for load from lds
             constexpr auto a_lds_load_tile_distr =

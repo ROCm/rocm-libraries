@@ -28,7 +28,7 @@
 #include <hip/hip_runtime.h>
 #endif
 
-#if defined(__AMDGCN__) && !(MIO_BN_GFX103X || MIO_BN_GFX110X || MIO_BN_GFX120X || MIO_BN_GFX115X)
+#if defined(__AMDGCN__) && !(MIO_BN_GFX103X || MIO_BN_GFX110X || MIO_BN_GFX115X || MIO_BN_GFX120X)
 #define MIOPEN_USE_AMDGCN 1
 #else
 #define MIOPEN_USE_AMDGCN 0
@@ -160,18 +160,7 @@ __forceinline__ __device__ void activbwdspatial(const T* __restrict__ x,
         }
         __syncthreads();
 
-        __shared__ FLOAT_ACCUM lcl_data_x2[LDS_SIZE];
-        __shared__ FLOAT_ACCUM lcl_data_y2[LDS_SIZE];
-        if constexpr(MIOPEN_USE_AMDGCN)
-        {
-            miopen::reduction::gcn_reduce2<FLOAT_ACCUM, LDS_SIZE>(
-                ds, db, CVT_FP32_2ACCUM(1.0f), lcl_data_x2, lcl_data_y2, lid);
-        }
-        else
-        {
-            miopen::reduction::lds_reduce2<FLOAT_ACCUM, LDS_SIZE>(
-                ds, db, CVT_FP32_2ACCUM(1.0f), lcl_data_x2, lcl_data_y2, lid);
-        }
+        miopen::reduction::reduce2<FLOAT_ACCUM, LOCAL_SIZE_X>(ds, db, CVT_FP32_2ACCUM(1.0f), lid);
 
         if(lid < SEGMENT)
         {
@@ -362,18 +351,7 @@ __forceinline__ __device__ void activbwdspatial(const T* __restrict__ x,
 
         __syncthreads();
 
-        __shared__ FLOAT_ACCUM lcl_data_x2[LDS_SIZE];
-        __shared__ FLOAT_ACCUM lcl_data_y2[LDS_SIZE];
-        if constexpr(MIOPEN_USE_AMDGCN)
-        {
-            miopen::reduction::gcn_reduce2<FLOAT_ACCUM, LDS_SIZE>(
-                ds, db, CVT_FP32_2ACCUM(1.0f), lcl_data_x2, lcl_data_y2, lid);
-        }
-        else
-        {
-            miopen::reduction::lds_reduce2<FLOAT_ACCUM, LDS_SIZE>(
-                ds, db, CVT_FP32_2ACCUM(1.0f), lcl_data_x2, lcl_data_y2, lid);
-        }
+        miopen::reduction::reduce2<FLOAT_ACCUM, LOCAL_SIZE_X>(ds, db, CVT_FP32_2ACCUM(1.0f), lid);
 
         tmp3 = scale * inv_variance * CVT_FP32_2ACCUM(1.0f / (MIO_BN_NHW));
         __syncthreads();
@@ -404,6 +382,22 @@ __forceinline__ __device__ void activbwdspatial(const T* __restrict__ x,
                 FLOAT_ACCUM tmp2 = -xhat * ds;
                 values[j]        = tmp3 * (tmp2 + tmp1);
             }
+
+            // Synchronization is not required for correctness but enhances performance.
+            //
+            // Loop is memory bound as it iterates across all the batches in the tensor,
+            // and has memory access strides of CHW size once all the elements in a single
+            // sample have been processed, which may be large.
+            //
+            // `__syncthreads()` helps to coalesce memory accesses as each work-item accesses
+            // adjacent elements to its neighbours on the same loop iteration, leading to contiguous
+            // memory access across all the waves in a workgroup. By keeping all the waves on the
+            // same loop iteration it prevents waves on different loop iterations from stalling
+            // as they wait for memory.
+            //
+            // This can be seen by profiling the kernel with rocprofv3 and comparing the
+            // `TCP_PENDING_STALL_CYCLES_sum` counter and also looking at a thread trace in
+            // compute viewer and seeing the impact on occupancy.
             __syncthreads();
             for(unsigned int j = 0; j < MAX_READ; ++j)
             {
@@ -500,18 +494,7 @@ __forceinline__ __device__ void activbwdspatial(const T* __restrict__ x,
 
         __syncthreads();
 
-        __shared__ FLOAT_ACCUM lcl_data_x2[LDS_SIZE];
-        __shared__ FLOAT_ACCUM lcl_data_y2[LDS_SIZE];
-        if constexpr(MIOPEN_USE_AMDGCN)
-        {
-            miopen::reduction::gcn_reduce2<FLOAT_ACCUM, LDS_SIZE>(
-                ds, db, CVT_FP32_2ACCUM(1.0f), lcl_data_x2, lcl_data_y2, lid);
-        }
-        else
-        {
-            miopen::reduction::lds_reduce2<FLOAT_ACCUM, LDS_SIZE>(
-                ds, db, CVT_FP32_2ACCUM(1.0f), lcl_data_x2, lcl_data_y2, lid);
-        }
+        miopen::reduction::reduce2<FLOAT_ACCUM, LOCAL_SIZE_X>(ds, db, CVT_FP32_2ACCUM(1.0f), lid);
         __syncthreads();
 
         // Group level reduction

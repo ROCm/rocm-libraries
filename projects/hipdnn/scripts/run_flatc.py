@@ -5,19 +5,80 @@ import sys
 import subprocess
 import shutil
 import os
+import re
 
-# Needs to subscribe to HIPDNN_FLATBUFFERS_VERSION CMake variable
-REQUIRED_VER = "25.9.23"
+
+_HIPDNN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _read_required_version(cmake_file=None):
+    """Read HIPDNN_FLATBUFFERS_VERSION from projects/hipdnn/CMakeLists.txt
+    so the script stays in sync with the single source of truth.
+    """
+    if cmake_file is None:
+        cmake_file = os.path.join(_HIPDNN_DIR, "CMakeLists.txt")
+    pattern = re.compile(
+        r'set\s*\(\s*HIPDNN_FLATBUFFERS_VERSION\s+"([^"]+)"', re.IGNORECASE
+    )
+    with open(cmake_file, encoding="utf-8") as f:
+        for line in f:
+            match = pattern.search(line)
+            if match:
+                return match.group(1)
+    raise RuntimeError(
+        f"Could not find HIPDNN_FLATBUFFERS_VERSION in {cmake_file}. "
+        "Update run_flatc.py if the cache variable was renamed or moved."
+    )
+
+
+def _read_flatc_flags(flags_file=None):
+    """Read the shared flatc flag list. Single source of truth lives in
+    cmake/flatc_flags.txt and is also consumed by FlatBuffersGenerate.cmake.
+    Lines starting with '#' and blank lines are ignored. The C++ output mode
+    (--cpp) is implied by the consumer and is NOT in the file.
+    """
+    if flags_file is None:
+        flags_file = os.path.join(_HIPDNN_DIR, "cmake", "flatc_flags.txt")
+    flags = []
+    with open(flags_file, encoding="utf-8") as f:
+        for line in f:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            flags.append(stripped)
+    if not flags:
+        raise RuntimeError(
+            f"No flatc flags parsed from {flags_file}. The shared flag list "
+            "is empty or all lines were filtered out."
+        )
+    return flags
+
+
+REQUIRED_VER = _read_required_version()
+FLATC_EXTRA_FLAGS = _read_flatc_flags()
+
+# Supported SDKs and their namespace paths for generated output
+SDKS = {
+    "data_sdk": "hipdnn_data_sdk",
+    "flatbuffers_sdk": "hipdnn_flatbuffers_sdk",
+}
+
+
+def detect_sdk(schema_path):
+    """Detect which SDK a schema file belongs to based on its path."""
+    normalized = schema_path.replace("\\", "/")
+    for sdk_dir, namespace in SDKS.items():
+        if f"/{sdk_dir}/schemas/" in normalized or normalized.startswith(
+            f"{sdk_dir}/schemas/"
+        ):
+            return sdk_dir, namespace
+    return None, None
 
 
 def main():
     """Run flatc compiler on FlatBuffers schema files on Linux or Windows."""
     # Get the directory where this script is located
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    schemas_dir = os.path.join(script_dir, "..", "data_sdk", "schemas")
-    output_dir = os.path.join(
-        script_dir, "..", "data_sdk", "include", "hipdnn_data_sdk", "data_objects"
-    )
 
     # Find flatc in PATH and prepare to validate its version
     flatc_path = shutil.which("flatc")
@@ -51,6 +112,22 @@ def main():
         sys.exit(1)
 
     for f in sys.argv[1:]:
+        sdk_dir, namespace = detect_sdk(f)
+        if sdk_dir is None:
+            print(f"WARNING: Cannot determine SDK for {f}, skipping", file=sys.stderr)
+            continue
+
+        schemas_dir = os.path.join(script_dir, "..", sdk_dir, "schemas")
+
+        output_dir = os.path.join(
+            script_dir,
+            "..",
+            sdk_dir,
+            "include",
+            namespace,
+            "data_objects",
+        )
+
         try:
             subprocess.run(
                 [
@@ -58,11 +135,7 @@ def main():
                     "-I",
                     schemas_dir,
                     "--cpp",
-                    "--gen-object-api",
-                    "--gen-mutable",
-                    "--gen-compare",
-                    "--defaults-json",
-                    "--scoped-enums",
+                    *FLATC_EXTRA_FLAGS,
                     "-o",
                     output_dir,
                     f,

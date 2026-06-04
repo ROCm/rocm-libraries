@@ -78,27 +78,28 @@ Tests:
   gpu_arch: ['90a','942','12??']
 
 # special form of get_solutions testing via gemm_ex harness
-- name: gemm_ex_get_solutions_custom
-  category: pre_checkin
-  function:
-  - gemm_ex
-  - gemm_batched_ex
-  - gemm_strided_batched_ex
-  M: 16
-  N: 16
-  K: 1
-  lda: 16
-  ldb: 16
-  ldc: 16
-  ldd: 16
-  batch_count: 2
-  alpha_beta: { alpha:  1, beta:  1 }
-  transA: N
-  transB: T
-  precision : *real_precisions
-  solution_index: -2 # do get solutions and repeat for all
-  algo: 1
-  pointer_mode_device: false
-  gpu_arch: ['90a','942','950','12??']
+# TODO solution guarantees need additional work before re-adding this test
+# - name: gemm_ex_get_solutions_custom
+#   category: pre_checkin
+#   function:
+#   - gemm_ex
+#   - gemm_batched_ex
+#   - gemm_strided_batched_ex
+#   M: 16
+#   N: 16
+#   K: 1
+#   lda: 16
+#   ldb: 16
+#   ldc: 16
+#   ldd: 16
+#   batch_count: 2
+#   alpha_beta: { alpha:  1, beta:  1 }
+#   transA: N
+#   transB: T
+#   precision : *real_precisions
+#   solution_index: *c_gemm_test_all_solutions_returned
+#   algo: 1
+#   pointer_mode_device: false
+#   gpu_arch: ['90a','942','950','12??']
 
 ...

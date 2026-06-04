@@ -15,8 +15,10 @@ if(TENSILELITE_ENABLE_HOST)
     set_target_properties(tensilelite-host
         PROPERTIES
             POSITION_INDEPENDENT_CODE ON
+            CXX_VISIBILITY_PRESET hidden
+            VISIBILITY_INLINES_HIDDEN ON
     )
-    target_compile_options(tensilelite-host PUBLIC -fvisibility=hidden)
+
     target_compile_features(tensilelite-host PUBLIC cxx_std_17)
     target_compile_definitions(tensilelite-host
         PUBLIC
@@ -25,15 +27,13 @@ if(TENSILELITE_ENABLE_HOST)
             $<BUILD_INTERFACE:__HIP_HCC_COMPAT_MODE__=1> # if we don't have this we fail tests on 942_304cu
     )
 
-    if(HIPBLASLT_ENABLE_LLVM)
+    if(HIPBLASLT_ENABLE_YAML)
         target_link_libraries(tensilelite-host PRIVATE LLVMObjectYAML)
         target_include_directories(tensilelite-host PRIVATE ${LLVM_INCLUDE_DIRS})
-        target_compile_definitions(tensilelite-host PUBLIC TENSILE_YAML)
-    endif()
-
-    if(HIPBLASLT_ENABLE_MSGPACK)
+        target_compile_definitions(tensilelite-host PUBLIC $<BUILD_INTERFACE:TENSILE_YAML>)
+    else()
         target_link_libraries(tensilelite-host PRIVATE ${hipblaslt_msgpack_target})
-        target_compile_definitions(tensilelite-host PUBLIC $<BUILD_INTERFACE:TENSILE_MSGPACK>) # make TENSILELITE_MSGPACK
+        target_compile_definitions(tensilelite-host PUBLIC $<BUILD_INTERFACE:TENSILE_MSGPACK>)
     endif()
 
     target_include_directories(tensilelite-host
@@ -52,10 +52,27 @@ if(TENSILELITE_ENABLE_HOST)
             hip::device
     )
 
+    include(CheckCXXSourceCompiles)
+    set(CMAKE_REQUIRED_INCLUDES ${HIP_INCLUDE_DIRS})
+    set(CMAKE_REQUIRED_LIBRARIES hip::device)
+    check_cxx_source_compiles("
+        #include <hip/hip_runtime.h>
+        int main() {
+            hipLaunchAttributeID id = hipLaunchAttributeClusterDimension;
+            return 0;
+        }
+    " HIP_HAS_CLUSTER_LAUNCH)
+    if(HIP_HAS_CLUSTER_LAUNCH)
+        target_compile_definitions(tensilelite-host PRIVATE HIP_HAS_CLUSTER_LAUNCH)
+    endif()
+
     add_subdirectory(src)
     add_subdirectory(include)
 
     if(TENSILELITE_ENABLE_CLIENT)
+        # mxDataGenerator bootstrap and `hipblaslt::mxdatagen` helper target
+        # live in projects/hipblaslt/CMakeLists.txt and are guaranteed to be
+        # available before this subdirectory is processed.
         add_subdirectory(client)
     endif()
 

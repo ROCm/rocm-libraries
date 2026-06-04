@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,7 +26,10 @@
 void _rocsparse_csrilu0_info::copy(const _rocsparse_csrilu0_info* that, hipStream_t stream)
 {
     this->rocsparse::trm_data_t::copy(that, stream);
-    this->rocsparse::singular_info_t::copy_singular_info_async(that, stream);
+    this->m_singularity_numeric_exact.copy_singular_info_async(&that->m_singularity_numeric_exact,
+                                                               stream);
+    this->m_singularity_numeric_near.copy_singular_info_async(&that->m_singularity_numeric_near,
+                                                              stream);
     THROW_IF_HIP_ERROR(hipStreamSynchronize(stream));
 }
 _rocsparse_csrilu0_info::~_rocsparse_csrilu0_info() {}

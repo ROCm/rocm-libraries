@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -69,11 +69,7 @@ hipError_t
     ROCPRIM_RETURN_ON_ERROR(std::visit(
         [&](auto use_atomic_block_id)
         {
-            target_arch target_arch;
-            ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-            gpu target_gpu;
-            ROCPRIM_RETURN_ON_ERROR(host_target_gpu(stream, target_gpu));
-            const target current_target(target_arch, target_gpu);
+            const target current_target(stream);
 
             const auto             params         = get_config<selector>(Config{}, current_target);
             constexpr unsigned int num_partitions = 3;
@@ -241,6 +237,8 @@ hipError_t
 /// \parblock
 /// In this example a device-level nth_element is performed where input keys are
 ///   represented by an array of unsigned integers.
+///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_nth_element.cpp).
 ///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>

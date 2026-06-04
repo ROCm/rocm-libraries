@@ -20,6 +20,7 @@
  *
  * ************************************************************************ */
 
+#include "asan_helpers.hpp"
 #include "device_macros.hpp"
 #include "handle.hpp"
 #include "rocblas_dgmm.hpp"
@@ -46,10 +47,8 @@ rocblas_dgmm_kernel(rocblas_int    m,
     rocblas_int tx    = blockIdx.x * DIM_X + threadIdx.x;
     uint32_t    batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         //looping over ty
         for(rocblas_int ty = blockIdx.y * DIM_Y + threadIdx.y; ty < n && tx < m;
@@ -68,10 +67,7 @@ rocblas_dgmm_kernel(rocblas_int    m,
                 C[tx + ldc * ty] = A[tx + lda * ty] * X[tx * incx];
             }
         }
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 template <int DIM_X, int DIM_Y, bool side_right, typename TConstPtr, typename TPtr>
@@ -92,7 +88,7 @@ rocblas_dgmm_gfx942_kernel(rocblas_int    m,
                            rocblas_stride stride_C)
 {
 // gfx942 kernels
-#if defined(__gfx942__)
+#if defined(__SPIRV__) || defined(__gfx942__)
 
     rocblas_int tx = (blockIdx.x * DIM_X + threadIdx.x) * 2;
     rocblas_int ty = blockIdx.y * DIM_Y + threadIdx.y;
@@ -215,7 +211,7 @@ rocblas_status rocblas_internal_dgmm_launcher(rocblas_handle handle,
                || ((is_double || is_complex_float) && m > dcdgmm_gfx942_m_lower_threshold)))
         {
             static constexpr int DGMM_DIM_X = 32;
-            static constexpr int DGMM_DIM_Y = 32;
+            static constexpr int DGMM_DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 8, 32>;
 
             rocblas_int blocksX = (m - 1) / (DGMM_DIM_X * 2) + 1;
             rocblas_int blocksY = (n - 1) / DGMM_DIM_Y + 1;
@@ -248,7 +244,7 @@ rocblas_status rocblas_internal_dgmm_launcher(rocblas_handle handle,
                || ((is_double || is_complex_float) && m > dcdgmm_gfx942_m_lower_threshold)))
         {
             static constexpr int DGMM_DIM_X = 32;
-            static constexpr int DGMM_DIM_Y = 32;
+            static constexpr int DGMM_DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 8, 32>;
 
             rocblas_int blocksX = (m - 1) / (DGMM_DIM_X * 2) + 1;
             rocblas_int blocksY = (n - 1) / DGMM_DIM_Y + 1;

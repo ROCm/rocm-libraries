@@ -31,6 +31,7 @@ set(roclapack_test_source
   # linear systems solvers
   lapack/getri_gtest.cpp
   lapack/getrs_gtest.cpp
+  lapack/getrs_npvt_gtest.cpp
   lapack/gesv_gtest.cpp
   lapack/potrs_gtest.cpp
   lapack/posv_gtest.cpp
@@ -44,6 +45,8 @@ set(roclapack_test_source
   lapack/getrf_large_gtest.cpp
   lapack/potf2_potrf_gtest.cpp
   lapack/sytf2_sytrf_gtest.cpp
+  lapack/sytrs_gtest.cpp
+  lapack/sytrs2_gtest.cpp
   lapack/geblttrf_gtest.cpp
   # orthogonal factorizations
   lapack/geqr2_geqrf_gtest.cpp
@@ -85,6 +88,7 @@ set(rocauxiliary_test_source
   auxiliary/larfb_gtest.cpp
   # norm and condition number
   auxiliary/lange_gtest.cpp
+  auxiliary/gecon_gtest.cpp
   # plane rotations
   auxiliary/lasr_gtest.cpp
   # orthonormal/unitary matrices
@@ -142,6 +146,7 @@ set(others_test_source
   memory_model_gtest.cpp
   # rocsolver logging
   logging_gtest.cpp
+  asan_helpers_gtest.cpp
   # helpers
   #common/client_environment_helpers.cpp
 )

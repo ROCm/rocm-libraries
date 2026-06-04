@@ -3,7 +3,7 @@
 
 #include <gtest/gtest.h>
 #include <hipblaslt/hipblaslt.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -13,6 +13,7 @@
 
 using namespace hipblaslt_plugin;
 using namespace hipdnn_plugin_sdk;
+using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 using namespace hipdnn_test_sdk::utilities;
 
 class TestGpuMatmulPlan : public ::testing::Test
@@ -39,7 +40,7 @@ TEST(TestMatmulParams, InitializesAllTensorsFromValidGraph)
 {
     // Create a valid matmul graph
     auto builder = createValidMatmulGraph();
-    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
     // Get the matmul node and attributes
     const auto& node = graph.getNode(0);
@@ -47,27 +48,134 @@ TEST(TestMatmulParams, InitializesAllTensorsFromValidGraph)
     ASSERT_NE(attrs, nullptr);
 
     // Construct params
-    MatmulParams params(*attrs, graph.getTensorMap());
+    MatmulParams const params(*attrs, graph.getTensorMap());
 
     // All required tensors should be accessible
     EXPECT_NO_THROW(params.a());
     EXPECT_NO_THROW(params.b());
     EXPECT_NO_THROW(params.c());
     EXPECT_NO_THROW(params.desc());
+    EXPECT_FALSE(params.biasUid().has_value());
+}
+
+TEST(TestMatmulParams, InitializesWithBiasAndActivation)
+{
+    auto builder = createValidMatmulBiasActivGraph(
+        {4, 8},
+        {8, 1},
+        {8, 5},
+        {5, 1},
+        {4, 5},
+        {5, 1},
+        true,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GELU_APPROX_TANH_FWD);
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+
+    auto* matmulAttrs = graph.getNode(0).attributes_as_MatmulAttributes();
+    auto* biasAttrs = graph.getNode(1).attributes_as_PointwiseAttributes();
+    auto* activAttrs = graph.getNode(2).attributes_as_PointwiseAttributes();
+    ASSERT_NE(matmulAttrs, nullptr);
+    ASSERT_NE(biasAttrs, nullptr);
+    ASSERT_NE(activAttrs, nullptr);
+
+    MatmulParams const params(*matmulAttrs, biasAttrs, activAttrs, graph.getTensorMap());
+
+    EXPECT_NO_THROW(params.a());
+    EXPECT_NO_THROW(params.b());
+    EXPECT_NO_THROW(params.c());
+    EXPECT_NO_THROW(params.desc());
+    EXPECT_TRUE(params.biasUid().has_value());
+}
+
+TEST(TestMatmulParams, InitializesWithActivationOnly)
+{
+    auto builder = createValidMatmulBiasActivGraph(
+        {4, 8},
+        {8, 1},
+        {8, 5},
+        {5, 1},
+        {4, 5},
+        {5, 1},
+        false,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
+        0.0f);
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+
+    auto* matmulAttrs = graph.getNode(0).attributes_as_MatmulAttributes();
+    auto* activAttrs = graph.getNode(1).attributes_as_PointwiseAttributes();
+    ASSERT_NE(matmulAttrs, nullptr);
+    ASSERT_NE(activAttrs, nullptr);
+
+    MatmulParams const params(*matmulAttrs, nullptr, activAttrs, graph.getTensorMap());
+
+    EXPECT_NO_THROW(params.a());
+    EXPECT_NO_THROW(params.b());
+    EXPECT_NO_THROW(params.c());
+    EXPECT_FALSE(params.biasUid().has_value());
+}
+
+TEST(TestMatmulParams, InitializesWithBiasOnly)
+{
+    auto builder = createValidMatmulBiasActivGraph(
+        {4, 8},
+        {8, 1},
+        {8, 5},
+        {5, 1},
+        {4, 5},
+        {5, 1},
+        true,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::UNSET);
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+
+    auto* matmulAttrs = graph.getNode(0).attributes_as_MatmulAttributes();
+    auto* biasAttrs = graph.getNode(1).attributes_as_PointwiseAttributes();
+    ASSERT_NE(matmulAttrs, nullptr);
+    ASSERT_NE(biasAttrs, nullptr);
+
+    MatmulParams const params(*matmulAttrs, biasAttrs, nullptr, graph.getTensorMap());
+
+    EXPECT_NO_THROW(params.a());
+    EXPECT_NO_THROW(params.b());
+    EXPECT_NO_THROW(params.c());
+    EXPECT_NO_THROW(params.desc());
+    EXPECT_TRUE(params.biasUid().has_value());
+}
+
+TEST(TestMatmulParams, BiasUidMatchesBiasTensor)
+{
+    auto builder = createValidMatmulBiasActivGraph(
+        {4, 8},
+        {8, 1},
+        {8, 5},
+        {5, 1},
+        {4, 5},
+        {5, 1},
+        true,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::UNSET);
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+
+    auto* matmulAttrs = graph.getNode(0).attributes_as_MatmulAttributes();
+    auto* biasAttrs = graph.getNode(1).attributes_as_PointwiseAttributes();
+
+    MatmulParams const params(*matmulAttrs, biasAttrs, nullptr, graph.getTensorMap());
+
+    ASSERT_TRUE(params.biasUid().has_value());
+    // The bias UID should correspond to a tensor in the graph's tensor map
+    EXPECT_NE(graph.getTensorMap().find(params.biasUid().value()), graph.getTensorMap().end());
 }
 
 TEST(TestMatmulParams, RowMajor)
 {
     // Row-major storage has stride[last] == 1
-    std::vector<int64_t> aDims = {4, 8};
-    std::vector<int64_t> aStrides = {8, 1}; // Row-major
-    std::vector<int64_t> bDims = {8, 5};
-    std::vector<int64_t> bStrides = {5, 1}; // Row-major
-    std::vector<int64_t> cDims = {4, 5};
-    std::vector<int64_t> cStrides = {5, 1};
+    std::vector<int64_t> const aDims = {4, 8};
+    std::vector<int64_t> const aStrides = {8, 1}; // Row-major
+    std::vector<int64_t> const bDims = {8, 5};
+    std::vector<int64_t> const bStrides = {5, 1}; // Row-major
+    std::vector<int64_t> const cDims = {4, 5};
+    std::vector<int64_t> const cStrides = {5, 1};
 
     auto builder = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
-    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_MatmulAttributes();
@@ -80,15 +188,15 @@ TEST(TestMatmulParams, RowMajor)
 TEST(TestMatmulParams, ColumnMajor)
 {
     // Column-major storage has stride[last-1] == 1
-    std::vector<int64_t> aDims = {4, 8};
-    std::vector<int64_t> aStrides = {1, 4}; // Column-major
-    std::vector<int64_t> bDims = {8, 5};
-    std::vector<int64_t> bStrides = {1, 8}; // Column-major
-    std::vector<int64_t> cDims = {4, 5};
-    std::vector<int64_t> cStrides = {5, 1};
+    std::vector<int64_t> const aDims = {4, 8};
+    std::vector<int64_t> const aStrides = {1, 4}; // Column-major
+    std::vector<int64_t> const bDims = {8, 5};
+    std::vector<int64_t> const bStrides = {1, 8}; // Column-major
+    std::vector<int64_t> const cDims = {4, 5};
+    std::vector<int64_t> const cStrides = {5, 1};
 
     auto builder = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
-    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_MatmulAttributes();
@@ -101,15 +209,15 @@ TEST(TestMatmulParams, ColumnMajor)
 TEST(TestMatmulParams, BatchBroadcastWithABatchOne)
 {
     // [1, M, K] x [2, K, N] -> [2, M, N]
-    std::vector<int64_t> aDims = {1, 4, 8};
-    std::vector<int64_t> aStrides = {32, 8, 1};
-    std::vector<int64_t> bDims = {2, 8, 5};
-    std::vector<int64_t> bStrides = {40, 5, 1};
-    std::vector<int64_t> cDims = {2, 4, 5};
-    std::vector<int64_t> cStrides = {20, 5, 1};
+    std::vector<int64_t> const aDims = {1, 4, 8};
+    std::vector<int64_t> const aStrides = {32, 8, 1};
+    std::vector<int64_t> const bDims = {2, 8, 5};
+    std::vector<int64_t> const bStrides = {40, 5, 1};
+    std::vector<int64_t> const cDims = {2, 4, 5};
+    std::vector<int64_t> const cStrides = {20, 5, 1};
 
     auto builder = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
-    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_MatmulAttributes();
@@ -122,15 +230,15 @@ TEST(TestMatmulParams, BatchBroadcastWithABatchOne)
 TEST(TestMatmulParams, BatchBroadcastWithBBatchOne)
 {
     // [3, M, K] x [1, K, N] -> [3, M, N]
-    std::vector<int64_t> aDims = {3, 4, 8};
-    std::vector<int64_t> aStrides = {32, 8, 1};
-    std::vector<int64_t> bDims = {1, 8, 5};
-    std::vector<int64_t> bStrides = {40, 5, 1};
-    std::vector<int64_t> cDims = {3, 4, 5};
-    std::vector<int64_t> cStrides = {20, 5, 1};
+    std::vector<int64_t> const aDims = {3, 4, 8};
+    std::vector<int64_t> const aStrides = {32, 8, 1};
+    std::vector<int64_t> const bDims = {1, 8, 5};
+    std::vector<int64_t> const bStrides = {40, 5, 1};
+    std::vector<int64_t> const cDims = {3, 4, 5};
+    std::vector<int64_t> const cStrides = {20, 5, 1};
 
     auto builder = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
-    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_MatmulAttributes();
@@ -143,15 +251,15 @@ TEST(TestMatmulParams, BatchBroadcastWithBBatchOne)
 TEST(TestMatmulParams, ThrowsOnDifferentRanks)
 {
     // [M, K] x [2, K, N] -> [2, M, N]
-    std::vector<int64_t> aDims = {4, 8};
-    std::vector<int64_t> aStrides = {8, 1};
-    std::vector<int64_t> bDims = {2, 8, 5};
-    std::vector<int64_t> bStrides = {40, 5, 1};
-    std::vector<int64_t> cDims = {2, 4, 5};
-    std::vector<int64_t> cStrides = {20, 5, 1};
+    std::vector<int64_t> const aDims = {4, 8};
+    std::vector<int64_t> const aStrides = {8, 1};
+    std::vector<int64_t> const bDims = {2, 8, 5};
+    std::vector<int64_t> const bStrides = {40, 5, 1};
+    std::vector<int64_t> const cDims = {2, 4, 5};
+    std::vector<int64_t> const cStrides = {20, 5, 1};
 
     auto builder = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
-    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_MatmulAttributes();
@@ -164,15 +272,15 @@ TEST(TestMatmulParams, ThrowsOnDifferentRanks)
 TEST(TestMatmulParams, ThrowsOnIncompatibleBatchDimensions)
 {
     // [2, M, K] x [3, K, N] -> [3, M, N]
-    std::vector<int64_t> aDims = {2, 4, 8};
-    std::vector<int64_t> aStrides = {32, 8, 1};
-    std::vector<int64_t> bDims = {3, 8, 5};
-    std::vector<int64_t> bStrides = {40, 5, 1};
-    std::vector<int64_t> cDims = {3, 4, 5};
-    std::vector<int64_t> cStrides = {20, 5, 1};
+    std::vector<int64_t> const aDims = {2, 4, 8};
+    std::vector<int64_t> const aStrides = {32, 8, 1};
+    std::vector<int64_t> const bDims = {3, 8, 5};
+    std::vector<int64_t> const bStrides = {40, 5, 1};
+    std::vector<int64_t> const cDims = {3, 4, 5};
+    std::vector<int64_t> const cStrides = {20, 5, 1};
 
     auto builder = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
-    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_MatmulAttributes();
@@ -185,15 +293,15 @@ TEST(TestMatmulParams, ThrowsOnIncompatibleBatchDimensions)
 TEST(TestMatmulParams, ThrowsOnOutputBatchMismatch)
 {
     // [2, M, K] x [2, K, N] -> [3, M, N]
-    std::vector<int64_t> aDims = {2, 4, 8};
-    std::vector<int64_t> aStrides = {32, 8, 1};
-    std::vector<int64_t> bDims = {2, 8, 5};
-    std::vector<int64_t> bStrides = {40, 5, 1};
-    std::vector<int64_t> cDims = {3, 4, 5};
-    std::vector<int64_t> cStrides = {20, 5, 1};
+    std::vector<int64_t> const aDims = {2, 4, 8};
+    std::vector<int64_t> const aStrides = {32, 8, 1};
+    std::vector<int64_t> const bDims = {2, 8, 5};
+    std::vector<int64_t> const bStrides = {40, 5, 1};
+    std::vector<int64_t> const cDims = {3, 4, 5};
+    std::vector<int64_t> const cStrides = {20, 5, 1};
 
     auto builder = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
-    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_MatmulAttributes();
@@ -206,15 +314,15 @@ TEST(TestMatmulParams, ThrowsOnOutputBatchMismatch)
 TEST(TestMatmulParams, ThrowsOnOutputBatchSmallerThanMax)
 {
     // [1, M, K] x [3, K, N] -> [2, M, N]
-    std::vector<int64_t> aDims = {1, 4, 8};
-    std::vector<int64_t> aStrides = {32, 8, 1};
-    std::vector<int64_t> bDims = {3, 8, 5};
-    std::vector<int64_t> bStrides = {40, 5, 1};
-    std::vector<int64_t> cDims = {2, 4, 5};
-    std::vector<int64_t> cStrides = {20, 5, 1};
+    std::vector<int64_t> const aDims = {1, 4, 8};
+    std::vector<int64_t> const aStrides = {32, 8, 1};
+    std::vector<int64_t> const bDims = {3, 8, 5};
+    std::vector<int64_t> const bStrides = {40, 5, 1};
+    std::vector<int64_t> const cDims = {2, 4, 5};
+    std::vector<int64_t> const cStrides = {20, 5, 1};
 
     auto builder = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
-    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_MatmulAttributes();
@@ -226,15 +334,15 @@ TEST(TestMatmulParams, ThrowsOnOutputBatchSmallerThanMax)
 TEST(TestMatmulParams, Tensor4DBroadcastWithUnitBatchB)
 {
     // [3, 3, m, k] x [1, 1, k, n] -> [3, 3, m, n]
-    std::vector<int64_t> aDims = {3, 3, 4, 8};
-    std::vector<int64_t> aStrides = {96, 32, 8, 1};
-    std::vector<int64_t> bDims = {1, 1, 8, 5};
-    std::vector<int64_t> bStrides = {40, 40, 5, 1};
-    std::vector<int64_t> cDims = {3, 3, 4, 5};
-    std::vector<int64_t> cStrides = {60, 20, 5, 1};
+    std::vector<int64_t> const aDims = {3, 3, 4, 8};
+    std::vector<int64_t> const aStrides = {96, 32, 8, 1};
+    std::vector<int64_t> const bDims = {1, 1, 8, 5};
+    std::vector<int64_t> const bStrides = {40, 40, 5, 1};
+    std::vector<int64_t> const cDims = {3, 3, 4, 5};
+    std::vector<int64_t> const cStrides = {60, 20, 5, 1};
 
     auto builder = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
-    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_MatmulAttributes();
@@ -247,15 +355,15 @@ TEST(TestMatmulParams, Tensor4DBroadcastWithUnitBatchB)
 TEST(TestMatmulParams, Tensor4DThrowsOnIncompatibleBatch)
 {
     // [3, 3, m, k] x [1, 3, k, n] -> [3, 3, m, n]
-    std::vector<int64_t> aDims = {3, 3, 4, 8};
-    std::vector<int64_t> aStrides = {96, 32, 8, 1};
-    std::vector<int64_t> bDims = {1, 3, 8, 5};
-    std::vector<int64_t> bStrides = {120, 40, 5, 1};
-    std::vector<int64_t> cDims = {3, 3, 4, 5};
-    std::vector<int64_t> cStrides = {60, 20, 5, 1};
+    std::vector<int64_t> const aDims = {3, 3, 4, 8};
+    std::vector<int64_t> const aStrides = {96, 32, 8, 1};
+    std::vector<int64_t> const bDims = {1, 3, 8, 5};
+    std::vector<int64_t> const bStrides = {120, 40, 5, 1};
+    std::vector<int64_t> const cDims = {3, 3, 4, 5};
+    std::vector<int64_t> const cStrides = {60, 20, 5, 1};
 
     auto builder = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
-    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_MatmulAttributes();
@@ -268,15 +376,15 @@ TEST(TestMatmulParams, Tensor4DThrowsOnIncompatibleBatch)
 TEST(TestMatmulParams, Tensor4DThrowsOnOutputBatchMismatch)
 {
     // [3, 1, m, k] x [1, 3, k, n] -> [3, 3, m, n]
-    std::vector<int64_t> aDims = {3, 1, 4, 8};
-    std::vector<int64_t> aStrides = {32, 32, 8, 1};
-    std::vector<int64_t> bDims = {1, 3, 8, 5};
-    std::vector<int64_t> bStrides = {120, 40, 5, 1};
-    std::vector<int64_t> cDims = {3, 3, 4, 5};
-    std::vector<int64_t> cStrides = {60, 20, 5, 1};
+    std::vector<int64_t> const aDims = {3, 1, 4, 8};
+    std::vector<int64_t> const aStrides = {32, 32, 8, 1};
+    std::vector<int64_t> const bDims = {1, 3, 8, 5};
+    std::vector<int64_t> const bStrides = {120, 40, 5, 1};
+    std::vector<int64_t> const cDims = {3, 3, 4, 5};
+    std::vector<int64_t> const cStrides = {60, 20, 5, 1};
 
     auto builder = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
-    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_MatmulAttributes();
@@ -290,7 +398,7 @@ TEST_F(TestGpuMatmulPlan, CreatesPlanWithValidGraph)
 {
     // Create a valid matmul graph
     auto builder = createValidMatmulGraph();
-    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
     // Get the matmul node and attributes
     const auto& node = graph.getNode(0);
@@ -308,14 +416,14 @@ TEST_F(TestGpuMatmulPlan, PlanReturnsValidWorkspaceSize)
 {
     // Create a valid matmul graph
     auto builder = createValidMatmulGraph();
-    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_MatmulAttributes();
     ASSERT_NE(attrs, nullptr);
 
     MatmulParams params(*attrs, graph.getTensorMap());
-    MatmulPlan plan(_handle, std::move(params));
+    MatmulPlan const plan(_handle, std::move(params));
 
     // Workspace size should be >= 0
     EXPECT_GE(plan.getWorkspaceSize(_handle), 0u);
@@ -324,15 +432,15 @@ TEST_F(TestGpuMatmulPlan, PlanReturnsValidWorkspaceSize)
 TEST_F(TestGpuMatmulPlan, CreatesPlanWithColumnMajorInputs)
 {
     // Column-major strides
-    std::vector<int64_t> aDims = {4, 8};
-    std::vector<int64_t> aStrides = {1, 4}; // Column-major
-    std::vector<int64_t> bDims = {8, 5};
-    std::vector<int64_t> bStrides = {1, 8}; // Column-major
-    std::vector<int64_t> cDims = {4, 5};
-    std::vector<int64_t> cStrides = {5, 1};
+    std::vector<int64_t> const aDims = {4, 8};
+    std::vector<int64_t> const aStrides = {1, 4}; // Column-major
+    std::vector<int64_t> const bDims = {8, 5};
+    std::vector<int64_t> const bStrides = {1, 8}; // Column-major
+    std::vector<int64_t> const cDims = {4, 5};
+    std::vector<int64_t> const cStrides = {5, 1};
 
     auto builder = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
-    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_MatmulAttributes();
@@ -347,15 +455,15 @@ TEST_F(TestGpuMatmulPlan, CreatesPlanWithColumnMajorInputs)
 TEST_F(TestGpuMatmulPlan, CreatesPlanWithLargerMatrices)
 {
     // Larger matrices for testing
-    std::vector<int64_t> aDims = {64, 128};
-    std::vector<int64_t> aStrides = {128, 1};
-    std::vector<int64_t> bDims = {128, 256};
-    std::vector<int64_t> bStrides = {256, 1};
-    std::vector<int64_t> cDims = {64, 256};
-    std::vector<int64_t> cStrides = {256, 1};
+    std::vector<int64_t> const aDims = {64, 128};
+    std::vector<int64_t> const aStrides = {128, 1};
+    std::vector<int64_t> const bDims = {128, 256};
+    std::vector<int64_t> const bStrides = {256, 1};
+    std::vector<int64_t> const cDims = {64, 256};
+    std::vector<int64_t> const cStrides = {256, 1};
 
     auto builder = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
-    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_MatmulAttributes();
@@ -370,15 +478,15 @@ TEST_F(TestGpuMatmulPlan, CreatesPlanWithLargerMatrices)
 TEST_F(TestGpuMatmulPlan, CreatesPlanWithBatchedMatmul)
 {
     // Batched matmul: [batch, M, K] x [batch, K, N] -> [batch, M, N]
-    std::vector<int64_t> aDims = {2, 4, 8};
-    std::vector<int64_t> aStrides = {32, 8, 1};
-    std::vector<int64_t> bDims = {2, 8, 5};
-    std::vector<int64_t> bStrides = {40, 5, 1};
-    std::vector<int64_t> cDims = {2, 4, 5};
-    std::vector<int64_t> cStrides = {20, 5, 1};
+    std::vector<int64_t> const aDims = {2, 4, 8};
+    std::vector<int64_t> const aStrides = {32, 8, 1};
+    std::vector<int64_t> const bDims = {2, 8, 5};
+    std::vector<int64_t> const bStrides = {40, 5, 1};
+    std::vector<int64_t> const cDims = {2, 4, 5};
+    std::vector<int64_t> const cStrides = {20, 5, 1};
 
     auto builder = createValidMatmulGraph(aDims, aStrides, bDims, bStrides, cDims, cStrides);
-    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_MatmulAttributes();
@@ -393,12 +501,12 @@ TEST_F(TestGpuMatmulPlan, CreatesPlanWithBatchedMatmul)
 TEST_F(TestGpuMatmulPlan, CreatesPlanWithHalfPrecision)
 {
     // Half precision matmul
-    std::vector<int64_t> aDims = {16, 32};
-    std::vector<int64_t> aStrides = {32, 1};
-    std::vector<int64_t> bDims = {32, 64};
-    std::vector<int64_t> bStrides = {64, 1};
-    std::vector<int64_t> cDims = {16, 64};
-    std::vector<int64_t> cStrides = {64, 1};
+    std::vector<int64_t> const aDims = {16, 32};
+    std::vector<int64_t> const aStrides = {32, 1};
+    std::vector<int64_t> const bDims = {32, 64};
+    std::vector<int64_t> const bStrides = {64, 1};
+    std::vector<int64_t> const cDims = {16, 64};
+    std::vector<int64_t> const cStrides = {64, 1};
 
     auto builder = createValidMatmulGraph(aDims,
                                           aStrides,
@@ -406,8 +514,8 @@ TEST_F(TestGpuMatmulPlan, CreatesPlanWithHalfPrecision)
                                           bStrides,
                                           cDims,
                                           cStrides,
-                                          hipdnn_data_sdk::data_objects::DataType::HALF);
-    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+                                          hipdnn_flatbuffers_sdk::data_objects::DataType::HALF);
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_MatmulAttributes();
@@ -422,12 +530,12 @@ TEST_F(TestGpuMatmulPlan, CreatesPlanWithHalfPrecision)
 TEST_F(TestGpuMatmulPlan, CreatesPlanWithBFloat16)
 {
     // BFloat16 matmul
-    std::vector<int64_t> aDims = {16, 32};
-    std::vector<int64_t> aStrides = {32, 1};
-    std::vector<int64_t> bDims = {32, 64};
-    std::vector<int64_t> bStrides = {64, 1};
-    std::vector<int64_t> cDims = {16, 64};
-    std::vector<int64_t> cStrides = {64, 1};
+    std::vector<int64_t> const aDims = {16, 32};
+    std::vector<int64_t> const aStrides = {32, 1};
+    std::vector<int64_t> const bDims = {32, 64};
+    std::vector<int64_t> const bStrides = {64, 1};
+    std::vector<int64_t> const cDims = {16, 64};
+    std::vector<int64_t> const cStrides = {64, 1};
 
     auto builder = createValidMatmulGraph(aDims,
                                           aStrides,
@@ -435,8 +543,8 @@ TEST_F(TestGpuMatmulPlan, CreatesPlanWithBFloat16)
                                           bStrides,
                                           cDims,
                                           cStrides,
-                                          hipdnn_data_sdk::data_objects::DataType::BFLOAT16);
-    GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+                                          hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
 
     const auto& node = graph.getNode(0);
     auto* attrs = node.attributes_as_MatmulAttributes();
@@ -446,4 +554,180 @@ TEST_F(TestGpuMatmulPlan, CreatesPlanWithBFloat16)
 
     // Create plan - should not throw
     EXPECT_NO_THROW(MatmulPlan(_handle, std::move(params)));
+}
+
+TEST_F(TestGpuMatmulPlan, CreatesPlanWithBiasAndGelu)
+{
+    auto builder = createValidMatmulBiasActivGraph(
+        {4, 8},
+        {8, 1},
+        {8, 5},
+        {5, 1},
+        {4, 5},
+        {5, 1},
+        true,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GELU_APPROX_TANH_FWD);
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+
+    auto* matmulAttrs = graph.getNode(0).attributes_as_MatmulAttributes();
+    auto* biasAttrs = graph.getNode(1).attributes_as_PointwiseAttributes();
+    auto* activAttrs = graph.getNode(2).attributes_as_PointwiseAttributes();
+    ASSERT_NE(matmulAttrs, nullptr);
+    ASSERT_NE(biasAttrs, nullptr);
+    ASSERT_NE(activAttrs, nullptr);
+
+    MatmulParams params(*matmulAttrs, biasAttrs, activAttrs, graph.getTensorMap());
+
+    EXPECT_NO_THROW(MatmulPlan(_handle, std::move(params)));
+}
+
+TEST_F(TestGpuMatmulPlan, CreatesPlanWithBiasAndRelu)
+{
+    auto builder = createValidMatmulBiasActivGraph(
+        {4, 8},
+        {8, 1},
+        {8, 5},
+        {5, 1},
+        {4, 5},
+        {5, 1},
+        true,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
+        0.0f);
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+
+    auto* matmulAttrs = graph.getNode(0).attributes_as_MatmulAttributes();
+    auto* biasAttrs = graph.getNode(1).attributes_as_PointwiseAttributes();
+    auto* activAttrs = graph.getNode(2).attributes_as_PointwiseAttributes();
+    ASSERT_NE(matmulAttrs, nullptr);
+    ASSERT_NE(biasAttrs, nullptr);
+    ASSERT_NE(activAttrs, nullptr);
+
+    MatmulParams params(*matmulAttrs, biasAttrs, activAttrs, graph.getTensorMap());
+
+    EXPECT_NO_THROW(MatmulPlan(_handle, std::move(params)));
+}
+
+TEST_F(TestGpuMatmulPlan, CreatesPlanWithActivationOnly)
+{
+    auto builder = createValidMatmulBiasActivGraph(
+        {4, 8},
+        {8, 1},
+        {8, 5},
+        {5, 1},
+        {4, 5},
+        {5, 1},
+        false,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
+        0.0f);
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+
+    auto* matmulAttrs = graph.getNode(0).attributes_as_MatmulAttributes();
+    auto* activAttrs = graph.getNode(1).attributes_as_PointwiseAttributes();
+    ASSERT_NE(matmulAttrs, nullptr);
+    ASSERT_NE(activAttrs, nullptr);
+
+    MatmulParams params(*matmulAttrs, nullptr, activAttrs, graph.getTensorMap());
+
+    EXPECT_NO_THROW(MatmulPlan(_handle, std::move(params)));
+}
+
+TEST_F(TestGpuMatmulPlan, CreatesPlanWithBiasAndSwish)
+{
+    auto builder = createValidMatmulBiasActivGraph(
+        {4, 8},
+        {8, 1},
+        {8, 5},
+        {5, 1},
+        {4, 5},
+        {5, 1},
+        true,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SWISH_FWD,
+        std::nullopt,
+        std::nullopt,
+        1.0f);
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+
+    auto* matmulAttrs = graph.getNode(0).attributes_as_MatmulAttributes();
+    auto* biasAttrs = graph.getNode(1).attributes_as_PointwiseAttributes();
+    auto* activAttrs = graph.getNode(2).attributes_as_PointwiseAttributes();
+    ASSERT_NE(matmulAttrs, nullptr);
+    ASSERT_NE(biasAttrs, nullptr);
+    ASSERT_NE(activAttrs, nullptr);
+
+    MatmulParams params(*matmulAttrs, biasAttrs, activAttrs, graph.getTensorMap());
+
+    EXPECT_NO_THROW(MatmulPlan(_handle, std::move(params)));
+}
+
+TEST_F(TestGpuMatmulPlan, CreatesPlanWithBiasOnly)
+{
+    auto builder = createValidMatmulBiasActivGraph(
+        {4, 8},
+        {8, 1},
+        {8, 5},
+        {5, 1},
+        {4, 5},
+        {5, 1},
+        true,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::UNSET);
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+
+    auto* matmulAttrs = graph.getNode(0).attributes_as_MatmulAttributes();
+    auto* biasAttrs = graph.getNode(1).attributes_as_PointwiseAttributes();
+    ASSERT_NE(matmulAttrs, nullptr);
+    ASSERT_NE(biasAttrs, nullptr);
+
+    MatmulParams params(*matmulAttrs, biasAttrs, nullptr, graph.getTensorMap());
+
+    EXPECT_NO_THROW(MatmulPlan(_handle, std::move(params)));
+}
+
+TEST_F(TestGpuMatmulPlan, PlanReturnValidWorkspaceSizeWithBiasOnly)
+{
+    auto builder = createValidMatmulBiasActivGraph(
+        {4, 8},
+        {8, 1},
+        {8, 5},
+        {5, 1},
+        {4, 5},
+        {5, 1},
+        true,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::UNSET);
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+
+    auto* matmulAttrs = graph.getNode(0).attributes_as_MatmulAttributes();
+    auto* biasAttrs = graph.getNode(1).attributes_as_PointwiseAttributes();
+    ASSERT_NE(matmulAttrs, nullptr);
+    ASSERT_NE(biasAttrs, nullptr);
+
+    MatmulParams params(*matmulAttrs, biasAttrs, nullptr, graph.getTensorMap());
+    MatmulPlan const plan(_handle, std::move(params));
+
+    EXPECT_GE(plan.getWorkspaceSize(_handle), 0u);
+}
+
+TEST_F(TestGpuMatmulPlan, PlanReturnValidWorkspaceSizeWithBiasActivation)
+{
+    auto builder = createValidMatmulBiasActivGraph(
+        {4, 8},
+        {8, 1},
+        {8, 5},
+        {5, 1},
+        {4, 5},
+        {5, 1},
+        true,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GELU_APPROX_TANH_FWD);
+    GraphWrapper const graph(builder.GetBufferPointer(), builder.GetSize());
+
+    auto* matmulAttrs = graph.getNode(0).attributes_as_MatmulAttributes();
+    auto* biasAttrs = graph.getNode(1).attributes_as_PointwiseAttributes();
+    auto* activAttrs = graph.getNode(2).attributes_as_PointwiseAttributes();
+    ASSERT_NE(matmulAttrs, nullptr);
+    ASSERT_NE(biasAttrs, nullptr);
+    ASSERT_NE(activAttrs, nullptr);
+
+    MatmulParams params(*matmulAttrs, biasAttrs, activAttrs, graph.getTensorMap());
+    MatmulPlan const plan(_handle, std::move(params));
+
+    EXPECT_GE(plan.getWorkspaceSize(_handle), 0u);
 }
