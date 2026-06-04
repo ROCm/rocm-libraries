@@ -423,9 +423,10 @@ int main(int argc, char* argv[])
     auto* non_token = app.add_option_group("Token Conflict", "Options excluded by --token");
     non_token->excludes(opt_token);
     // Declare the supported options. Some option pointers are declared to track passed opts.
-    non_token->add_flag("--callback", "Inject load/store callbacks")->each([&](const std::string&) {
-        manual_params.run_callbacks = true;
-    });
+    non_token
+        ->add_flag(
+            "--callback", manual_params.run_callbacks, "Inject load/store callbacks: none, funcptr")
+        ->default_val("none");
     non_token
         ->add_option("--auto_allocation",
                      manual_params.auto_allocate,

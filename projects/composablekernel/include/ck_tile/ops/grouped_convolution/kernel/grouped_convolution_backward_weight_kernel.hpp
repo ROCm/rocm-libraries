@@ -35,6 +35,15 @@ struct is_streamk_partitioner<StreamKTilePartitioner<Shape, S, P>> : std::true_t
 {
 };
 
+template <typename T>
+struct is_compute_v6_pipeline : std::false_type
+{
+};
+template <typename Problem, typename Policy>
+struct is_compute_v6_pipeline<GemmPipelineAgBgCrCompV6<Problem, Policy>> : std::true_type
+{
+};
+
 template <typename... Args>
 CK_TILE_HOST void LogInfo(Args&&... args) noexcept
 {
@@ -447,15 +456,30 @@ struct GroupedConvolutionBackwardWeightKernel
     using GemmDsLayout                  = remove_cvref_t<typename EpiloguePipeline::DsLayout>;
     static constexpr index_t NumDTensor = GroupedConvTraitsType_::NumDTensor;
 
-    static constexpr index_t kBlockSize = GemmPipeline::BlockSize;
+    // For wavelet, LaunchBlockSize > BlockSize. Use LaunchBlockSize for kernel launch.
+    template <typename T, typename = void>
+    struct has_launch_block_size : std::false_type
+    {
+    };
+    template <typename T>
+    struct has_launch_block_size<T, std::void_t<decltype(T::LaunchBlockSize)>> : std::true_type
+    {
+    };
+    static constexpr index_t kBlockSize = []() {
+        if constexpr(has_launch_block_size<GemmPipeline>::value)
+            return GemmPipeline::LaunchBlockSize;
+        else
+            return GemmPipeline::BlockSize;
+    }();
 
     using OutDataType = remove_cvref_t<typename GemmPipeline::ADataType>;
     using InDataType  = remove_cvref_t<typename GemmPipeline::BDataType>;
     using DsDataType  = remove_cvref_t<typename EpiloguePipeline::DsDataType>;
     using WeiDataType = remove_cvref_t<typename EpiloguePipeline::ODataType>;
 
-    static constexpr bool IsSplitKSupported = true;
-    static constexpr bool IsStreamK         = is_streamk_partitioner<TilePartitioner>::value;
+    static constexpr bool IsSplitKSupported   = true;
+    static constexpr bool IsStreamK           = is_streamk_partitioner<TilePartitioner>::value;
+    static constexpr bool IsComputeV6Pipeline = is_compute_v6_pipeline<GemmPipeline>::value;
 
     using GroupedConvBwdWeightKernelArgsSpecialized =
         std::conditional_t<IsStreamK,
@@ -675,6 +699,30 @@ struct GroupedConvolutionBackwardWeightKernel
         {
             LogInfo("k_batch must be at least one. Ensure argument is created via MakeKernelArgs.");
             return false;
+        }
+
+        // V6 pipeline requires num_loop >= PrefetchStages + 1 = 4
+        // Otherwise it produces incorrect results (num_loop=1) or is just inefficient (num_loop=2
+        // or 3).
+        if constexpr(IsComputeV6Pipeline)
+        {
+            const index_t num_loop =
+                integer_divide_ceil(kargs.GemmK, kargs.k_batch * TilePartitioner::KPerBlock);
+            constexpr int num_loop_threashold = GemmPipeline_::PrefetchStages + 1;
+            if(num_loop < num_loop_threashold)
+            {
+                LogInfo("For V6 pipeline, GemmK / (k_batch * KPerBlock) must be >= ",
+                        num_loop_threashold,
+                        ". Now GemmK is ",
+                        kargs.GemmK,
+                        ", k_batch is ",
+                        kargs.k_batch,
+                        ", KPerBlock is ",
+                        number<TilePartitioner::KPerBlock>{},
+                        ", num_loop is ",
+                        num_loop);
+                return false;
+            }
         }
 
         if constexpr(!std::is_same_v<typename EpiloguePipeline::ODataType, float> &&
@@ -995,6 +1043,22 @@ struct GroupedConvolutionBackwardWeightKernel
             {block_idx_k, block_idx_m});
     }
 
+    // SFINAE helper: detect GemmPipeline::IsWavelet
+    template <typename T, typename = void>
+    struct has_is_wavelet : std::false_type
+    {
+    };
+    template <typename T>
+    struct has_is_wavelet<T, std::void_t<decltype(T::IsWavelet)>> : std::true_type
+    {
+    };
+    static constexpr bool kIsWavelet = []() {
+        if constexpr(has_is_wavelet<GemmPipeline>::value)
+            return GemmPipeline::IsWavelet;
+        else
+            return false;
+    }();
+
     /**
      * @brief Runs single GEMM problem cooperatively by whole workgroup.
      *
@@ -1027,23 +1091,55 @@ struct GroupedConvolutionBackwardWeightKernel
         const auto& c_block_tile = GemmPipeline{}.template operator()(
             a_block_window, b_block_window, num_loop, smem_ptr_0);
 
-        // Run Epilogue Pipeline with k_batch dispatching
-        if(kargs.k_batch == 1)
+        if constexpr(kIsWavelet)
         {
-            auto c_block_window = MakeCBlockWindow<memory_operation_enum::set>(
-                c_ptr, kargs, block_idx_m, block_idx_n);
-
-            EpiloguePipeline{}(c_block_window, c_block_tile, d_block_window, smem_ptr_0);
+            // Wavelet: math waves run the epilogue, load waves run matching barriers
+            if(GemmPipeline::IsMathWave())
+            {
+                if(kargs.k_batch == 1)
+                {
+                    auto c_block_window = MakeCBlockWindow<memory_operation_enum::set>(
+                        c_ptr, kargs, block_idx_m, block_idx_n);
+                    EpiloguePipeline{}(c_block_window, c_block_tile, d_block_window, smem_ptr_0);
+                }
+                else
+                {
+                    if constexpr(!(GroupedConvTraitsType_::VectorSizeC % 2 != 0 &&
+                                   is_any_of<WeiDataType, fp16_t, bf16_t>::value))
+                    {
+                        auto c_block_window = MakeCBlockWindow<memory_operation_enum::atomic_add>(
+                            c_ptr, kargs, block_idx_m, block_idx_n);
+                        EpiloguePipeline{}(
+                            c_block_window, c_block_tile, d_block_window, smem_ptr_0);
+                    }
+                }
+            }
+            else
+            {
+                // Load waves: match epilogue barrier count to avoid deadlock
+                EpiloguePipeline::RunBarrierStub();
+            }
         }
         else
         {
-            if constexpr(!(GroupedConvTraitsType_::VectorSizeC % 2 != 0 &&
-                           is_any_of<WeiDataType, fp16_t, bf16_t>::value))
+            // Standard (non-wavelet) path
+            if(kargs.k_batch == 1)
             {
-                auto c_block_window = MakeCBlockWindow<memory_operation_enum::atomic_add>(
+                auto c_block_window = MakeCBlockWindow<memory_operation_enum::set>(
                     c_ptr, kargs, block_idx_m, block_idx_n);
 
                 EpiloguePipeline{}(c_block_window, c_block_tile, d_block_window, smem_ptr_0);
+            }
+            else
+            {
+                if constexpr(!(GroupedConvTraitsType_::VectorSizeC % 2 != 0 &&
+                               is_any_of<WeiDataType, fp16_t, bf16_t>::value))
+                {
+                    auto c_block_window = MakeCBlockWindow<memory_operation_enum::atomic_add>(
+                        c_ptr, kargs, block_idx_m, block_idx_n);
+
+                    EpiloguePipeline{}(c_block_window, c_block_tile, d_block_window, smem_ptr_0);
+                }
             }
         }
     }
