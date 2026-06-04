@@ -858,9 +858,6 @@ def cmake_build(Map conf=[:]){
                         echo "Building for gfx1250"
                         sh "ninja -j${nt}"
                     }
-                    if (params.RUN_ROCM_CK_TESTS) {
-                        sh 'ninja check-rocm-ck'
-                    }
                     if(params.BUILD_PACKAGES || params.BUILD_INSTANCES_ONLY){
                         echo "Build ckProfiler packages"
                         sh 'ninja -j64 package'
@@ -868,8 +865,20 @@ def cmake_build(Map conf=[:]){
                         stash includes: "composablekernel-ckprofiler**.deb", name: "profiler_package_${arch_name}"
                     }
                 }
-                if (params.RUN_BUILDER_TESTS && !setup_args.contains("-DCK_CXX_STANDARD=") && !setup_args.contains("gfx10") && !setup_args.contains("gfx11")) {
-                    sh 'ninja check-builder'
+                // rocm_ck and builder are separate flag-gated suites: registered with
+                // ctest but built by their own targets (check-rocm-ck/check-builder),
+                // not by `ninja tests examples`, so smart_test excludes them. Run them
+                // here as dedicated per-arch stages (visible, independent pass/fail) in
+                // BOTH the smart and run-all paths. gfx1250 is build-only (no GPU run).
+                if (params.RUN_ROCM_CK_TESTS && !setup_args.contains("gfx1250")) {
+                    stage("rocm_ck Tests (${arch_name})") {
+                        sh 'ninja check-rocm-ck'
+                    }
+                }
+                if (params.RUN_BUILDER_TESTS && !setup_args.contains("-DCK_CXX_STANDARD=") && !setup_args.contains("gfx10") && !setup_args.contains("gfx11") && !setup_args.contains("gfx1250")) {
+                    stage("Builder Tests (${arch_name})") {
+                        sh 'ninja check-builder'
+                    }
                 }
             }
         }

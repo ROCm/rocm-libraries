@@ -137,10 +137,12 @@ If the file is **absent**, `smart_build_ci.sh` crashed before it could write it
 > `ctest -N` suite; these separate suites are unaffected by it and by selection.
 >
 > Because `rocm_ck`/`builder` are registered with ctest but built by their own
-> targets, **full mode excludes them** (`ctest -LE ROCM_CK_|BUILDER_SMOKE`, override
-> with `CTEST_FULL_EXCLUDE_LABELS`) so they don't fail as "Not Run". They are not yet
-> built/run inside the smart-build flow — wiring their stages in is a follow-up
-> (sbt-ezy.41); today their coverage depends on the legacy full path / nightly.
+> targets, **full-mode `smart_test` excludes them** (`ctest -LE ROCM_CK_|BUILDER_SMOKE`,
+> override with `CTEST_FULL_EXCLUDE_LABELS`) so they don't fail as "Not Run". They run
+> instead as **dedicated per-arch stages** — `rocm_ck Tests (<arch>)` (gated by
+> `RUN_ROCM_CK_TESTS`) and `Builder Tests (<arch>)` (gated by `RUN_BUILDER_TESTS`,
+> excluding gfx10/gfx11/gfx1250) — in both the smart and run-all paths, each running
+> its own `ninja check-rocm-ck` / `check-builder` (build + labeled ctest).
 
 ### `reachability_result.json` fields
 
