@@ -1,3 +1,0 @@
-# WIP is a scratch area; logs and build trees regenerate on every run.
-*.log
-*/build/
