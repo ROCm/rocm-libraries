@@ -22,9 +22,12 @@
  * ************************************************************************ */
 #include <gtest/gtest.h>
 
-#include "HelloWorldPass.hpp"
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/pipeline/PassBuilder.hpp"
+
+#ifndef STINKYTOFU_PLUGIN_HELLOWORLD_PATH
+#include "HelloWorldPass.hpp"
+#endif
 
 using namespace stinkytofu;
 
@@ -195,9 +198,15 @@ TEST(PluginDataTest, PassBuilderAccessFromModule) {
 }
 
 // --- HelloWorldPass example plugin integration test ---
+// LLVM-style: shared builds load the plugin dynamically via loadPlugin(),
+// static builds link the OBJECT lib and call registerHelloWorldPassPlugin() directly.
 
 TEST(PluginIntegrationTest, HelloWorldPassReadsAndWritesPluginData) {
+#ifdef STINKYTOFU_PLUGIN_HELLOWORLD_PATH
+    ASSERT_TRUE(PassBuilder::loadPlugin(STINKYTOFU_PLUGIN_HELLOWORLD_PATH));
+#else
     registerHelloWorldPassPlugin();
+#endif
 
     StinkyAsmModule::ModuleOptions opts{};
     StinkyAsmModule module("test", {12, 5, 0}, opts);
@@ -205,7 +214,8 @@ TEST(PluginIntegrationTest, HelloWorldPassReadsAndWritesPluginData) {
     module.setPluginDataStr("greeting", "Hello from test!");
     module.getPassBuilder().registerAtExtensionPoint(
         PipelineExtensionPoint::AfterRegionPasses, [](PassManager& PM, StinkyAsmModule& mod) {
-            PM.addPass(PassBuilder::createPassByName("HelloWorldPass", mod));
+            auto pass = PassBuilder::createPassByName("HelloWorldPass", mod);
+            if (pass) PM.addPass(std::move(pass));
         });
 
     PassManager pm;
@@ -216,8 +226,5 @@ TEST(PluginIntegrationTest, HelloWorldPassReadsAndWritesPluginData) {
     EXPECT_EQ(module.getPluginDataI64("pass_executed"), 1);
     EXPECT_EQ(module.getPluginDataStr("greeting_result"), "executed: Hello from test!");
 
-    // C++ callers should call unloadPlugins() before shutdown to dlclose
-    // any dynamically loaded plugins. Not strictly needed here since the
-    // plugin was linked at compile time, but demonstrates the API.
     PassBuilder::unloadPlugins();
 }
