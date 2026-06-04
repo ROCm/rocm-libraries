@@ -8,13 +8,21 @@ same work the make pipeline did, but drives MicroPython's own build tools
 (makeqstrdefs.py / makeqstrdata.py / makemoduledefs.py / make_root_pointers.py /
 makeversionhdr.py / makemanifest.py) directly instead of via make.
 
+mpy-cross (needed by the frozen/mpy modes) is itself built from the pinned
+MicroPython source here, make-free, by reusing the same genhdr machinery -- so
+it is obtained the same way on every platform and is guaranteed to match the
+pinned runtime's .mpy format + compiler (no released pip wheel matches our pin,
+which needs newer-than-released f-string support for the codegen). Supply
+CKDSL_MPY_CROSS_BIN / MPY_CROSS to use a prebuilt one instead.
+
 Pipeline (all out-of-source, under $OUT_DIR):
-  1. ensure a MicroPython checkout (clone @ pin if absent) + resolve mpy-cross
-  2. build_bundle.py  : stage ck_dsl + ck_dsl_provider -> bundle
-  3. build_frozen.py  : capture the codegen closure -> frozen_src
-  4. generate the embed package (py/ sources + genhdr) -- the de-made embed.mk
-  5. frozen mode only : makemanifest.py -> frozen_content.c (uses mpy-cross)
-  6. compile the embed C + (frozen) frozen_content.c into libckdsl_micropython.a
+  1. ensure a MicroPython checkout (clone @ pin if absent)
+  2. (frozen/mpy) build mpy-cross from source
+  3. build_bundle.py  : stage ck_dsl + ck_dsl_provider -> bundle
+  4. build_frozen.py  : capture the codegen closure -> frozen_src
+  5. generate the embed package (py/ sources + genhdr) -- the de-made embed.mk
+  6. frozen mode only : makemanifest.py -> frozen_content.c (uses mpy-cross)
+  7. compile the embed C + (frozen) frozen_content.c into libckdsl_micropython.a
 
 Inputs come from the environment (CMake supplies them); sensible defaults let it
 run standalone for debugging. See cmake/CkDslMicroPython.cmake.
@@ -66,6 +74,7 @@ BUILD_DIR = OUT_DIR / "build-embed"
 GENHDR = BUILD_DIR / "genhdr"
 OBJ_DIR = OUT_DIR / "obj"
 LIB = OUT_DIR / "libckdsl_micropython.a"
+MPYX_BUILD = OUT_DIR / "mpy-cross-build"
 
 
 def run(cmd, **kw):
@@ -78,7 +87,6 @@ def run_out(cmd, **kw):
     ).stdout
 
 
-# --- 1. MicroPython source + mpy-cross -------------------------------------
 def ensure_micropython():
     if not (MPY_DIR / ".git").is_dir():
         print(f"== cloning MicroPython @ {MPY_COMMIT}")
@@ -94,127 +102,29 @@ def ensure_micropython():
         run(["git", "-C", MPY_DIR, "checkout", "--quiet", MPY_COMMIT])
 
 
-def mpy_format_version():
-    """The .mpy format version this MicroPython pin expects (MPY_VERSION)."""
-    text = (MPY_DIR / "py" / "persistentcode.h").read_text()
-    m = re.search(r"#define\s+MPY_VERSION\s+\(?(\d+)", text)
-    return int(m.group(1)) if m else None
+# --- genhdr generation (the de-made embed.mk / mkrules.mk qstr pipeline) -----
+def generate_genhdr(
+    header_build, cflags, qstr_gen_flags, qstr_sources, qstr_defs_files
+):
+    """Produce mpversion.h / qstrdefs.generated.h / moduledefs.h / root_pointers.h
+    in header_build, by driving MicroPython's own qstr tools (no make). Shared by
+    the embed package and the mpy-cross build.
 
-
-def assert_mpy_cross_compatible(mpy_cross_cmd):
-    """Compile a trivial module and check the .mpy version byte matches the pin --
-    guards the pip-wheel path (frozen/mpy reject a mismatched .mpy at load)."""
-    want = mpy_format_version()
-    if want is None:
-        return
-    probe_py = OUT_DIR / "_mpyprobe.py"
-    probe_mpy = OUT_DIR / "_mpyprobe.mpy"
-    probe_py.write_text("x = 1\n")
-    run(mpy_cross_cmd + ["-o", probe_mpy, probe_py])
-    got = probe_mpy.read_bytes()[1] if probe_mpy.stat().st_size >= 2 else None
-    probe_py.unlink(missing_ok=True)
-    probe_mpy.unlink(missing_ok=True)
-    if got != want:
-        raise SystemExit(
-            f"mpy-cross .mpy version {got} != MicroPython pin {MPY_COMMIT} expects {want}. "
-            f"Install an mpy-cross matching the pin (pip install 'mpy-cross==<matching>'), "
-            f"or set CKDSL_MPY_CROSS_BIN to a compatible binary."
-        )
-
-
-def resolve_mpy_cross():
-    """Return the argv prefix to invoke mpy-cross (frozen/mpy modes only).
-
-    Tiered: explicit binary -> native build (Unix; same pinned source, guaranteed
-    .mpy match) -> pip 'mpy_cross' wheel (Windows primary; version-checked) ->
-    mingw32-make build -> actionable error.
+    cflags          base CFLAGS (incl. -I for mpconfigport.h, and any frozen defines)
+    qstr_gen_flags  scan-only extra flags (-DNO_QSTR [+ -DCKDSL_ON_DISK])
+    qstr_sources    sources to scan for qstrs/modules/root-pointers (a safe superset)
+    qstr_defs_files extra QSTR_DEFS to cat into qstrdefs.generated (e.g. qstrdefsport.h)
     """
-    explicit = os.environ.get("CKDSL_MPY_CROSS_BIN") or os.environ.get("MPY_CROSS")
-    if explicit and Path(explicit).exists():
-        return [explicit]
-
-    native = MPY_DIR / "mpy-cross" / "build" / ("mpy-cross" + EXE)
-    if not IS_WINDOWS and shutil.which("make"):
-        print("== building mpy-cross (make)")
-        run(
-            ["make", "-C", MPY_DIR / "mpy-cross", "-j", JOBS], stdout=subprocess.DEVNULL
-        )
-        if native.exists():
-            return [str(native)]
-    if native.exists():
-        return [str(native)]
-
-    try:
-        import mpy_cross  # noqa: F401  (the PyPI wheel)
-
-        cmd = [sys.executable, "-m", "mpy_cross"]
-        print("== using mpy-cross from the 'mpy_cross' PyPI wheel")
-        assert_mpy_cross_compatible(cmd)
-        return cmd
-    except ImportError:
-        pass
-
-    if shutil.which("mingw32-make"):
-        print("== building mpy-cross (mingw32-make)")
-        run(["mingw32-make", "-C", MPY_DIR / "mpy-cross"])
-        if native.exists():
-            return [str(native)]
-
-    raise SystemExit(
-        "mpy-cross is required for the 'frozen'/'mpy' modes but could not be obtained.\n"
-        "  - install the prebuilt wheel: pip install mpy-cross   (must match MicroPython "
-        f"pin {MPY_COMMIT}), or\n"
-        "  - set CKDSL_MPY_CROSS_BIN to a compatible mpy-cross binary, or\n"
-        "  - install GNU make / mingw32-make so it can be built from source."
-    )
-
-
-# --- 4. Embed package + genhdr (replaces embed.mk / mkrules.mk) -------------
-def embed_cflags(on_disk):
-    """CFLAGS the qstr scan + qstrdefs preprocess use. Mirrors embed.mk:
-    CFLAGS += -I. -I$(TOP) -I$(BUILD) -I$(EMBED_PORT)  (-I. == PROVIDER_C_DIR,
-    where mpconfigport.h lives). -Werror is dropped vs embed.mk: it matters only
-    for compiling, and the qstr scan runs cpp -E over many sources."""
-    flags = [
-        f"-I{PROVIDER_C_DIR}",
-        f"-I{MPY_DIR}",
-        f"-I{BUILD_DIR}",
-        f"-I{MPY_DIR / 'ports' / 'embed'}",
-        "-std=c99",
-    ]
-    if not on_disk:
-        # Frozen build: make adds these to global CFLAGS, so the qstr scan sees
-        # the frozen-only qstrs (e.g. MP_QSTR_.frozen in runtime.c, gated by
-        # MICROPY_MODULE_FROZEN_MPY). They also enable mpconfigport's
-        # MICROPY_QSTR_EXTRA_POOL.
-        flags += ["-DMICROPY_MODULE_FROZEN_MPY", "-DMICROPY_MODULE_FROZEN_STR"]
-    return flags
-
-
-def generate_embed_package(on_disk):
     py_src = MPY_DIR / "py"
-    embed_port = MPY_DIR / "ports" / "embed"
-    GENHDR.mkdir(parents=True, exist_ok=True)
+    header_build.mkdir(parents=True, exist_ok=True)
 
     def tool(name):
         return py_src / name
 
-    cflags = embed_cflags(on_disk)
-    qstr_gen_flags = ["-DNO_QSTR"] + (["-DCKDSL_ON_DISK=1"] if on_disk else [])
-
     # mpversion.h must exist BEFORE the qstr scan: it is a QSTR_GLOBAL_REQUIREMENT
-    # in make (some sources, e.g. modsys.c, #include genhdr/mpversion.h
-    # unconditionally, even under -DNO_QSTR).
-    run([sys.executable, tool("makeversionhdr.py"), GENHDR / "mpversion.h"])
+    # in make (some sources #include genhdr/mpversion.h unconditionally).
+    run([sys.executable, tool("makeversionhdr.py"), header_build / "mpversion.h"])
 
-    # SRC_QSTR: a SUPERSET of make's PY_CORE_O sources -- every py/*.c plus
-    # extmod/modre.c and the provider's modcomgr.c. Over-scanning is safe (extra
-    # qstrs are harmless; only missing one would break the pool), and it avoids
-    # having to replicate make's config-conditional PY_CORE_O_BASENAME exactly.
-    sources = sorted(str(p) for p in py_src.glob("*.c"))
-    sources += [str(MPY_DIR / "extmod" / "modre.c"), str(PROVIDER_C_DIR / "modcomgr.c")]
-
-    print("== qstr scan (makeqstrdefs.py pp)")
     run(
         [
             sys.executable,
@@ -223,25 +133,24 @@ def generate_embed_package(on_disk):
             CC,
             "-E",
             "output",
-            GENHDR / "qstr.i.last",
+            header_build / "qstr.i.last",
             "cflags",
             *cflags,
             *qstr_gen_flags,
             "cxxflags",
             "sources",
-            *sources,
+            *qstr_sources,
             "dependencies",
             "changed_sources",
-            *sources,
+            *qstr_sources,
         ]
     )
 
-    # split + cat for each extraction mode -> the .collected files.
     collected = {
-        "qstr": GENHDR / "qstrdefs.collected.h",
-        "module": GENHDR / "moduledefs.collected",
-        "root_pointer": GENHDR / "root_pointers.collected",
-        "compress": GENHDR / "compressed.collected",
+        "qstr": header_build / "qstrdefs.collected.h",
+        "module": header_build / "moduledefs.collected",
+        "root_pointer": header_build / "root_pointers.collected",
+        "compress": header_build / "compressed.collected",
     }
     for mode, out_file in collected.items():
         run(
@@ -250,8 +159,8 @@ def generate_embed_package(on_disk):
                 tool("makeqstrdefs.py"),
                 "split",
                 mode,
-                GENHDR / "qstr.i.last",
-                GENHDR / mode,
+                header_build / "qstr.i.last",
+                header_build / mode,
                 "_",
             ]
         )
@@ -262,38 +171,143 @@ def generate_embed_package(on_disk):
                 "cat",
                 mode,
                 "_",
-                GENHDR / mode,
+                header_build / mode,
                 out_file,
             ]
         )
 
-    # qstrdefs.generated.h: cat(py/qstrdefs.h + collected) | sed | cpp | sed -> makeqstrdata.
-    # The two seds (reimplemented as regex) wrap/unwrap Q(...) lines so cpp leaves
-    # them intact while expanding any conditionals. Uses base CFLAGS (NOT the
-    # NO_QSTR/CKDSL_ON_DISK scan flags) -- matching py.mk's $(CPP) $(CFLAGS).
-    qd = (py_src / "qstrdefs.h").read_text() + collected["qstr"].read_text()
+    # qstrdefs.generated.h: cat(py/qstrdefs.h + <port qstrdefs> + collected) | sed |
+    # cpp | sed -> makeqstrdata. The seds (regex here) wrap/unwrap Q(...) so cpp
+    # leaves them intact while expanding conditionals. Uses base CFLAGS (no scan
+    # flags), matching py.mk's $(CPP) $(CFLAGS).
+    qd = (py_src / "qstrdefs.h").read_text()
+    for extra in qstr_defs_files:
+        qd += Path(extra).read_text()
+    qd += collected["qstr"].read_text()
     qd = re.sub(r"(?m)^(Q\(.*)$", r'"\1"', qd)
     pre = run_out([CC, "-E", *cflags, "-"], input=qd.encode()).decode()
     pre = re.sub(r'(?m)^"(Q\(.*\))"$', r"\1", pre)
-    (GENHDR / "qstrdefs.preprocessed.h").write_text(pre)
-    (GENHDR / "qstrdefs.generated.h").write_bytes(
+    (header_build / "qstrdefs.preprocessed.h").write_text(pre)
+    (header_build / "qstrdefs.generated.h").write_bytes(
         run_out(
             [
                 sys.executable,
                 tool("makeqstrdata.py"),
-                GENHDR / "qstrdefs.preprocessed.h",
+                header_build / "qstrdefs.preprocessed.h",
             ]
         )
     )
-
-    (GENHDR / "moduledefs.h").write_bytes(
+    (header_build / "moduledefs.h").write_bytes(
         run_out([sys.executable, tool("makemoduledefs.py"), collected["module"]])
     )
-    (GENHDR / "root_pointers.h").write_bytes(
+    (header_build / "root_pointers.h").write_bytes(
         run_out(
             [sys.executable, tool("make_root_pointers.py"), collected["root_pointer"]]
         )
     )
+
+
+# --- mpy-cross built from the pinned source (make-free, every platform) ------
+def resolve_mpy_cross():
+    """Path to an mpy-cross matching the pin. Prefer an explicitly supplied binary
+    (CKDSL_MPY_CROSS_BIN / MPY_CROSS); otherwise build it from source. No released
+    pip wheel matches our pin (the codegen needs newer-than-released f-strings),
+    so building from source is the portable, guaranteed-compatible option."""
+    explicit = os.environ.get("CKDSL_MPY_CROSS_BIN") or os.environ.get("MPY_CROSS")
+    if explicit and Path(explicit).exists():
+        return str(explicit)
+    return build_mpy_cross()
+
+
+def build_mpy_cross():
+    mxdir = MPY_DIR / "mpy-cross"
+    py_src = MPY_DIR / "py"
+    prog = MPYX_BUILD / ("mpy-cross" + EXE)
+    print("== building mpy-cross from source (make-free)")
+
+    # mpy-cross compiles the py core + main.c/gccollect.c with its own config
+    # (mpy-cross/mpconfigport.h, qstrdefsport.h). Include dirs mirror its Makefile:
+    # -I<mpy-cross dir> -I<TOP> -I<build dir>.
+    cflags = [
+        f"-I{mxdir}",
+        f"-I{MPY_DIR}",
+        f"-I{MPYX_BUILD}",
+        "-std=gnu99",
+        "-Og",
+        "-fno-common",
+        "-Wall",
+    ]
+    py_c = sorted(str(p) for p in py_src.glob("*.c"))
+    src_c = [
+        str(mxdir / "main.c"),
+        str(mxdir / "gccollect.c"),
+        str(MPY_DIR / "shared/runtime/gchelper_generic.c"),
+    ]
+    if IS_WINDOWS:
+        src_c.append(str(MPY_DIR / "ports/windows/fmode.c"))
+
+    # genhdr for mpy-cross (its qstr pool), then compile + link an executable.
+    generate_genhdr(
+        MPYX_BUILD / "genhdr",
+        cflags,
+        ["-DNO_QSTR"],
+        py_c + [str(mxdir / "main.c")],
+        [str(mxdir / "qstrdefsport.h")],
+    )
+
+    obj_dir = MPYX_BUILD / "obj"
+    if obj_dir.exists():
+        shutil.rmtree(obj_dir)
+    obj_dir.mkdir(parents=True, exist_ok=True)
+    objs = []
+    for i, src in enumerate(py_c + src_c):
+        obj = obj_dir / f"{i:03d}_{Path(src).stem}.o"
+        run([CC, *cflags, "-c", src, "-o", obj])
+        objs.append(obj)
+    link = [CC, "-o", prog, *objs]
+    if not IS_WINDOWS:
+        link.append("-lm")
+    run(link)
+    print(f"== mpy-cross built: {prog}")
+    return str(prog)
+
+
+# --- embed package + genhdr (replaces embed.mk / mkrules.mk) -----------------
+def embed_cflags(on_disk):
+    """CFLAGS the qstr scan + qstrdefs preprocess use. Mirrors embed.mk:
+    -I. (== PROVIDER_C_DIR, where mpconfigport.h lives) -I$(TOP) -I$(BUILD)
+    -I$(EMBED_PORT). -Werror dropped vs embed.mk (it matters only for compiling)."""
+    flags = [
+        f"-I{PROVIDER_C_DIR}",
+        f"-I{MPY_DIR}",
+        f"-I{BUILD_DIR}",
+        f"-I{MPY_DIR / 'ports' / 'embed'}",
+        "-std=c99",
+    ]
+    if not on_disk:
+        # Frozen build: make adds these to global CFLAGS so the qstr scan sees the
+        # frozen-only qstrs (e.g. MP_QSTR_.frozen in runtime.c). They also enable
+        # mpconfigport's MICROPY_QSTR_EXTRA_POOL.
+        flags += ["-DMICROPY_MODULE_FROZEN_MPY", "-DMICROPY_MODULE_FROZEN_STR"]
+    return flags
+
+
+def generate_embed_package(on_disk):
+    py_src = MPY_DIR / "py"
+    embed_port = MPY_DIR / "ports" / "embed"
+
+    cflags = embed_cflags(on_disk)
+    qstr_gen_flags = ["-DNO_QSTR"] + (["-DCKDSL_ON_DISK=1"] if on_disk else [])
+
+    # SRC_QSTR: a SUPERSET of make's PY_CORE_O sources -- every py/*.c plus
+    # extmod/modre.c and the provider's modcomgr.c. Over-scanning is safe (extra
+    # qstrs are harmless; only a missing one would break the pool) and avoids
+    # replicating make's config-conditional PY_CORE_O_BASENAME exactly.
+    sources = sorted(str(p) for p in py_src.glob("*.c"))
+    sources += [str(MPY_DIR / "extmod" / "modre.c"), str(PROVIDER_C_DIR / "modcomgr.c")]
+
+    print("== generate embed genhdr")
+    generate_genhdr(GENHDR, cflags, qstr_gen_flags, sources, [])
 
     # Assemble micropython_embed/ (the package the .a compiles from).
     print("== assemble embed package")
@@ -315,25 +329,12 @@ def generate_embed_package(on_disk):
         shutil.copy2(f, PKG_DIR / "port")
 
 
-def freeze_modules(mpy_cross_cmd):
+def freeze_modules(mpy_cross):
     """makemanifest.py -> frozen_content.c (frozen mode). Mirrors mkrules.mk."""
     print("== freeze modules (makemanifest.py)")
     e = dict(os.environ)
-    e["MICROPY_MPYCROSS"] = mpy_cross_cmd[-1] if len(mpy_cross_cmd) == 1 else ""
+    e["MICROPY_MPYCROSS"] = str(mpy_cross)
     e["CKDSL_FROZEN_DIR"] = str(FROZEN_DIR)
-    # The wheel path (python -m mpy_cross) has no single-binary path; makemanifest
-    # invokes MICROPY_MPYCROSS as one executable, so a wheel needs a shim. When
-    # mpy_cross_cmd isn't a lone binary, write a tiny launcher.
-    if len(mpy_cross_cmd) != 1:
-        shim = OUT_DIR / ("mpy_cross_shim" + (".bat" if IS_WINDOWS else ""))
-        if IS_WINDOWS:
-            shim.write_text(f'@echo off\r\n"{mpy_cross_cmd[0]}" -m mpy_cross %*\r\n')
-        else:
-            shim.write_text(
-                f'#!/usr/bin/env bash\nexec "{mpy_cross_cmd[0]}" -m mpy_cross "$@"\n'
-            )
-            shim.chmod(0o755)
-        e["MICROPY_MPYCROSS"] = str(shim)
     # Mirror make's MANIFEST_VARIABLES (MICROPY_MANIFEST_*): MPY_DIR + PORT_DIR are
     # used; MPY_LIB_DIR + BOARD_DIR must still be present (manifestfile.py indexes
     # MPY_LIB_DIR directly) -- empty disables micropython-lib loading.
@@ -359,7 +360,7 @@ def freeze_modules(mpy_cross_cmd):
     )
 
 
-# --- 6. Compile the static library -----------------------------------------
+# --- compile the static library ---------------------------------------------
 def compile_lib(on_disk, frozen):
     if OBJ_DIR.exists():
         shutil.rmtree(OBJ_DIR)
@@ -418,7 +419,7 @@ def main():
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
     ensure_micropython()
-    mpy_cross_cmd = resolve_mpy_cross() if CKDSL_MODE in ("frozen", "mpy") else None
+    mpy_cross = resolve_mpy_cross() if CKDSL_MODE in ("frozen", "mpy") else None
 
     print("== build_bundle.py")
     run(
@@ -448,7 +449,7 @@ def main():
     generate_embed_package(on_disk)
 
     if frozen:
-        freeze_modules(mpy_cross_cmd)
+        freeze_modules(mpy_cross)
     elif CKDSL_MODE == "mpy":
         mpy_out = OUT_DIR / "frozen_src_mpy"
         if mpy_out.exists():
@@ -457,7 +458,7 @@ def main():
         for py in FROZEN_DIR.rglob("*.py"):
             dst = mpy_out / py.relative_to(FROZEN_DIR).with_suffix(".mpy")
             dst.parent.mkdir(parents=True, exist_ok=True)
-            run(mpy_cross_cmd + ["-o", dst, py])
+            run([mpy_cross, "-o", dst, py])
 
     compile_lib(on_disk, frozen)
 

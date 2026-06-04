@@ -143,12 +143,13 @@ function(ck_dsl_provider_configure_micropython)
     set(CKDSL_MPY_BUNDLE_DIR "${_bundleDir}" PARENT_SCOPE)
     set(CKDSL_MPY_BUNDLE_INSTALL_DIRNAME "${_bundleInstallDirname}" PARENT_SCOPE)
 
-    # mpy-cross built by build_embed.py (in CKDSL_MICROPYTHON_DIR if given, else the
-    # cloned checkout under the build dir). The compat lint uses it to compile-check
-    # every module with the real MicroPython compiler when it is available.
-    if(CKDSL_MICROPYTHON_DIR)
-        set(CKDSL_MPY_CROSS "${CKDSL_MICROPYTHON_DIR}/mpy-cross/build/mpy-cross" PARENT_SCOPE)
+    # mpy-cross built from source by build_embed.py (always under the build dir, the
+    # same way on every platform), unless a prebuilt one was supplied. The compat
+    # lint uses it to compile-check every module with the real MicroPython compiler.
+    if(DEFINED ENV{CKDSL_MPY_CROSS_BIN})
+        set(CKDSL_MPY_CROSS "$ENV{CKDSL_MPY_CROSS_BIN}" PARENT_SCOPE)
     else()
-        set(CKDSL_MPY_CROSS "${_out}/micropython/mpy-cross/build/mpy-cross" PARENT_SCOPE)
+        set(CKDSL_MPY_CROSS "${_out}/mpy-cross-build/mpy-cross${CMAKE_EXECUTABLE_SUFFIX}"
+            PARENT_SCOPE)
     endif()
 endfunction()

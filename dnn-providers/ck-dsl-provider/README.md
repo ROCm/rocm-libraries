@@ -280,13 +280,18 @@ That driver is a **cross-platform Python script** — it needs only Python
 and a C compiler (no `bash`, no GNU `make`), so it builds on Windows as
 well as Linux/macOS. It drives MicroPython's own build tools directly to
 generate the qstr/genhdr headers and (frozen mode) `frozen_content.c`.
-`mpy-cross` (needed by `frozen`/`mpy`, not `py`) is taken from a
-build-supplied binary, then `pip install mpy-cross`, then a native build,
-in that order. The on-disk modes load through the embed port's filesystem
-importer and are installed beside the plugin (resolved at runtime via
-`dladdr`). `CKDSL_MICROPYTHON_DIR` can point the build at an existing
-MicroPython checkout instead of cloning the pinned commit; `MPY_CROSS` /
-`CKDSL_MPY_CROSS_BIN` can supply an explicit `mpy-cross`.
+`mpy-cross` (needed by `frozen`/`mpy`, not `py`) is **built from the same
+pinned MicroPython source, make-free, the same way on every platform** —
+reusing the driver's genhdr machinery. This is deliberate: no released
+`mpy-cross` pip wheel matches the pin (the `ck_dsl` codegen emits braces
+via f-strings whose parsing only exists in MicroPython newer than any
+release — which is why the pin is a dev commit), so a source build is the
+only portable, format- and compiler-compatible option. The on-disk modes
+load through the embed port's filesystem importer and are installed beside
+the plugin (resolved at runtime via `dladdr`). `CKDSL_MICROPYTHON_DIR` can
+point the build at an existing MicroPython checkout instead of cloning the
+pinned commit; `MPY_CROSS` / `CKDSL_MPY_CROSS_BIN` can supply a prebuilt
+`mpy-cross` to skip the source build.
 
 The `ck_dsl` source is kept directly MicroPython-compatible (it is no
 longer rewritten at build time): every `@dataclass` field is explicit
