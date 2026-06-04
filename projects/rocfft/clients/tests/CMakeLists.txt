@@ -380,6 +380,50 @@ set_target_properties(rtc_helper_crash
 
 rocm_install(TARGETS rocfft-test rtc_helper_crash COMPONENT tests)
 
+# ---------------------------------------------------------------------------
+# rocfft-device-test: standalone tests for the header-only device FFT library
+# (<rocfft/device/fft.hpp>).  Intentionally depends only on HIP + GoogleTest;
+# it does not link roc::rocfft, FFTW, OpenMP, or SQLite.
+# ---------------------------------------------------------------------------
+add_executable( rocfft-device-test device_fft_test.cpp )
+
+# The device FFT library is header-only and lives under library/include.
+target_include_directories( rocfft-device-test
+  PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/include
+  )
+
+# Mirror rocfft-test: build device code with -O3 to match the optimization
+# level of the library's pre-generated device functions.
+target_compile_options( rocfft-device-test PRIVATE
+  $<$<NOT:$<COMPILE_LANGUAGE:C>>:-Xarch_device -O3> )
+
+# Reuse the GTest discovery already performed for rocfft-test above.
+if( GTest_FOUND )
+  target_link_libraries( rocfft-device-test PRIVATE GTest::gtest )
+else()
+  add_dependencies( rocfft-device-test gtest )
+  target_include_directories( rocfft-device-test PRIVATE ${GTEST_INCLUDE_DIRS} )
+  target_link_libraries( rocfft-device-test PRIVATE ${GTEST_LIBRARIES} )
+endif()
+
+target_link_libraries( rocfft-device-test PRIVATE hip::device )
+
+set_target_properties( rocfft-device-test PROPERTIES
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+  RUNTIME_OUTPUT_DIRECTORY ${TESTS_OUT_DIR}
+  )
+
+rocm_install( TARGETS rocfft-device-test COMPONENT tests )
+
+# CTest registration for rocfft-device-test.  This is sparse-checkout safe: it
+# does not depend on the shared YAML categorization helper (which is absent in a
+# projects/rocfft-only checkout).  LABELS let smoke CI filter this target.
+enable_testing()
+add_test( NAME rocfft-device-test COMMAND rocfft-device-test )
+set_tests_properties( rocfft-device-test PROPERTIES LABELS "quick;device" )
+
 #Ctest based Test Filter Standardization using test_categories.yaml
 
 set( _ROCFFT_TEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml" )
