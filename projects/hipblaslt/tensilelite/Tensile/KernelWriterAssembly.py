@@ -18199,11 +18199,6 @@ class KernelWriterAssembly(KernelWriter):
 
     return mod
 
-  def initTDMDescriptorSubtile(self, kernel: Mapping, tP: Mapping) -> Module:
-    """Subtile variant of initTDMDescriptor(). Delegates to SubtileGREmit."""
-    from .Components.Subtile.SubtileGREmit import initTDMDescriptorSubtile as _initTDMDescriptorSubtile
-    return _initTDMDescriptorSubtile(self, kernel, tP)
-
   def initTDMDescriptorWaveSeparatedImpl(self, kernel, tP) -> Module:
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
     tc: str = tP['tensorChar']
@@ -18394,11 +18389,6 @@ class KernelWriterAssembly(KernelWriter):
     tc: str = tP['tensorChar']
     return comp.calculateStartAddr(self, kernel, tP, f"Address{tc}")
 
-  def tdmGlobalOffsetSubtile(self, kernel: Mapping, tP: Mapping) -> Module:
-    """Axis-aware per-wave global address for subtile TDM. Delegates to SubtileGREmit."""
-    from .Components.Subtile.SubtileGREmit import tdmGlobalOffsetSubtile as _tdmGlobalOffsetSubtile
-    return _tdmGlobalOffsetSubtile(self, kernel, tP)
-
   def tdmGlobalOffsetWaveSeparated(self, kernel: Mapping, tPA: Mapping, tPB: Mapping) -> Module:
     mod = Module("TDM Global Offset Wave Separated")
     comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
@@ -18436,11 +18426,6 @@ class KernelWriterAssembly(KernelWriter):
                        comment="Apply StreamK K-offset to TDM global addr"))
 
     return mod
-
-  def tdmApplyStreamKOffsetSubtile(self, kernel: Mapping, tP: Mapping) -> Module:
-    """Assert StreamKLocalStart == 0 for subtile TDM. Delegates to SubtileGREmit."""
-    from .Components.Subtile.SubtileGREmit import tdmApplyStreamKOffsetSubtile as _tdmApplyStreamKOffsetSubtile
-    return _tdmApplyStreamKOffsetSubtile(self, kernel, tP)
 
   def tdmIncrementAB(self, kernel, tP, loopIdx=None, prefetchIndex=0) -> Module:
     # Subtile uses per-wave descriptors, so multi-wave is valid here

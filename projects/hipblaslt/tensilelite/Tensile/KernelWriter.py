@@ -2633,7 +2633,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if not tdmInited:
           module.add(self.tdmGlobalOffset(kernel, tensorParametersA))
           if kernel["UseSubtileImpl"]:
-            module.add(self.initTDMDescriptorSubtile(kernel, tensorParametersA))
+            module.add(initTDMDescriptorSubtile(self, kernel, tensorParametersA))
           else:
             module.add(self.initTDMDescriptor(kernel, tensorParametersA))
       else:
@@ -2667,7 +2667,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if not tdmInited:
           module.add(self.tdmGlobalOffset(kernel, tensorParametersB))
           if kernel["UseSubtileImpl"]:
-            module.add(self.initTDMDescriptorSubtile(kernel, tensorParametersB))
+            module.add(initTDMDescriptorSubtile(self, kernel, tensorParametersB))
           else:
             module.add(self.initTDMDescriptor(kernel, tensorParametersB))
       else:
@@ -4603,10 +4603,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.addComment("Allocating v%s for %s LR Swap"%(str(tileInfo.sharedVgprLROffsetSwap), tileInfo.tc))
 
     if hasTDM:
-      module.add(self.tdmGlobalOffsetSubtile(kernel, tensorParametersA))
-      module.add(self.initTDMDescriptorSubtile(kernel, tensorParametersA))
-      module.add(self.tdmGlobalOffsetSubtile(kernel, tensorParametersB))
-      module.add(self.initTDMDescriptorSubtile(kernel, tensorParametersB))
+      module.add(tdmGlobalOffsetSubtile(self, kernel, tensorParametersA))
+      module.add(initTDMDescriptorSubtile(self, kernel, tensorParametersA))
+      module.add(tdmGlobalOffsetSubtile(self, kernel, tensorParametersB))
+      module.add(initTDMDescriptorSubtile(self, kernel, tensorParametersB))
     if not hasTDM:
       module.add(graTileAssignment(self, kernel))
     module.add(lraTileAssignment(self, kernel))
@@ -4622,8 +4622,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # calculateLoopNumIter sets StreamKLocalStart; offset Address{A,B} so
     # TDM reads from the correct K-slice when StreamK splits K across WGs.
     if hasTDM and kernel["StreamK"]:
-      module.add(self.tdmApplyStreamKOffsetSubtile(kernel, tensorParametersA))
-      module.add(self.tdmApplyStreamKOffsetSubtile(kernel, tensorParametersB))
+      module.add(tdmApplyStreamKOffsetSubtile(self, kernel, tensorParametersA))
+      module.add(tdmApplyStreamKOffsetSubtile(self, kernel, tensorParametersB))
 
     # Allocate A/B data tile VGPRs before D-tile so they get low VGPR indices.
     # On HasVgprMSB archs this places A/B in bank 0.
@@ -9785,12 +9785,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
     assert False, "Should be overrided"
 
   def tdmApplyStreamKOffsetWaveSeparated(self, kernel, tPA, tPB) -> Module:
-    assert False, "Should be overrided"
-
-  def tdmApplyStreamKOffsetSubtile(self, kernel, tP) -> Module:
-    assert False, "Should be overrided"
-
-  def tdmGlobalOffsetSubtile(self, kernel, tP) -> Module:
     assert False, "Should be overrided"
 
   def tdmIncrementAB(self, kernel, tP, loopIdx=None, prefetchIndex=0) -> Module:
