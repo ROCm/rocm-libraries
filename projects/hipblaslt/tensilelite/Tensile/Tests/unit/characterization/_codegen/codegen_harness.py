@@ -179,13 +179,17 @@ def _prepare_kernel(kernel, splitGSU=False):
     return base
 
 
-def emit_kernels_from_logic(logic_path, splitGSU=False, canonical=True):
+def emit_kernels_from_logic(logic_path, splitGSU=False, canonical=True, limit=None):
     """Emit assembly for every unique kernel produced by ``logic_path``.
 
     Returns a list of ``(basename, source, err)`` tuples, sorted by basename for
     stable ordering. ``source`` is canonicalized assembly text when
     ``canonical`` is True (the default). ``err`` is the emitter return code
     (0 == ok); a nonzero ``err`` is itself real covered behavior worth pinning.
+
+    ``limit`` caps the number of kernels emitted (after a stable sort by kernel
+    name) — used to draw a few representative kernels from very large tuned
+    logic files (e.g. the StreamK corpus) without emitting thousands.
     """
     import rocisa
     from Tensile.TensileCreateLibrary.Run import (
@@ -194,6 +198,7 @@ def emit_kernels_from_logic(logic_path, splitGSU=False, canonical=True):
     )
     from Tensile.KernelWriterAssembly import KernelWriterAssembly
     from Tensile.Common.Types import DebugConfig
+    from Tensile.SolutionStructs.Naming import getKernelFileBase
 
     asm = get_assembler()
 
@@ -214,6 +219,9 @@ def emit_kernels_from_logic(logic_path, splitGSU=False, canonical=True):
     with _isolated_globals():
         sols = _solutions_from_logic_unguarded(logic_path)
         kernels = generateKernelObjectsFromSolutions(sols)
+        if limit is not None:
+            # stable subset by kernel name so the cap is deterministic
+            kernels = sorted(kernels, key=lambda k: getKernelFileBase(splitGSU, k))[:limit]
         kwa = KernelWriterAssembly(asm, DebugConfig())
 
         # Steady-state warm-up: the emitter accumulates process-global scheduler
