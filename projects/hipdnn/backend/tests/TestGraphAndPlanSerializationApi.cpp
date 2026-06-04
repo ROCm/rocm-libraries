@@ -177,6 +177,26 @@ public:
         return {builder.GetBufferPointer(), builder.GetBufferPointer() + builder.GetSize()};
     }
 
+    // Produces a buffer that carries the HDGP file identifier yet fails the
+    // FlatBuffers verifier. Truncating a valid container keeps the identifier in
+    // bytes [4, 8) (so it is still recognized as a graph-and-plan container)
+    // while leaving the root offset pointing past the end of the buffer.
+    std::vector<uint8_t> makeIdentifiedButCorruptContainer() const
+    {
+        auto graphBlob = makeBareGraphBlob();
+        auto planBlob = makeBarePlanBlob();
+        auto valid = makeContainer({graphBlob.data(), graphBlob.data() + graphBlob.size()},
+                                   {planBlob.data(), planBlob.data() + planBlob.size()});
+
+        // 16 bytes retains the 8-byte header (root offset + identifier) and a
+        // few more bytes, while dropping the graph and plan vectors the offsets
+        // point at; the container embeds both blobs so it is always far larger.
+        std::vector<uint8_t> corrupt(valid.begin(), valid.begin() + 16);
+        EXPECT_GE(corrupt.size(), 8u);
+        EXPECT_TRUE(fbs::SerializedGraphAndPlanBufferHasIdentifier(corrupt.data()));
+        return corrupt;
+    }
+
     // Verifies a deserialized graph descriptor reconstructs the conv-fprop
     // op-graph emitted by createValidGraph(): same tensors, nodes, attributes.
     static void verifyDeserializedGraphMatchesSource(hipdnnBackendDescriptor_t desc)
@@ -473,6 +493,15 @@ TEST_F(TestGraphAndPlanSerializationApi, QueryContentsGarbageWithoutIdentifierTr
     EXPECT_EQ(flags, HIPDNN_SERIALIZED_CONTENT_GRAPH);
 }
 
+TEST_F(TestGraphAndPlanSerializationApi, QueryContentsIdentifiedButCorruptContainerRejected)
+{
+    auto corrupt = makeIdentifiedButCorruptContainer();
+
+    int flags = -1;
+    EXPECT_EQ(hipdnnBackendGetSerializedBinaryContents_ext(corrupt.data(), corrupt.size(), &flags),
+              HIPDNN_STATUS_BAD_PARAM);
+}
+
 TEST_F(TestGraphAndPlanSerializationApi, QueryContentsBarePlanBlobTreatedAsLegacyGraph)
 {
     // A bare SerializedExecutionPlan blob declares no file_identifier, so the
@@ -544,6 +573,16 @@ TEST_F(TestGraphAndPlanSerializationApi, DeserializeGraphRejectsContainerWithEmp
     EXPECT_EQ(
         hipdnnBackendCreateAndDeserializeGraph_ext(&rawDesc, container.data(), container.size()),
         HIPDNN_STATUS_BAD_PARAM);
+    EXPECT_EQ(rawDesc, nullptr);
+}
+
+TEST_F(TestGraphAndPlanSerializationApi, DeserializeGraphIdentifiedButCorruptContainerRejected)
+{
+    auto corrupt = makeIdentifiedButCorruptContainer();
+
+    hipdnnBackendDescriptor_t rawDesc = nullptr;
+    EXPECT_EQ(hipdnnBackendCreateAndDeserializeGraph_ext(&rawDesc, corrupt.data(), corrupt.size()),
+              HIPDNN_STATUS_BAD_PARAM);
     EXPECT_EQ(rawDesc, nullptr);
 }
 
@@ -652,6 +691,28 @@ TEST_F(TestGraphAndPlanSerializationApi,
                   &rawDesc,
                   container.data(),
                   container.size()),
+              HIPDNN_STATUS_BAD_PARAM);
+    EXPECT_EQ(rawDesc, nullptr);
+}
+
+TEST_F(TestGraphAndPlanSerializationApi,
+       DeserializeExecutionPlanIdentifiedButCorruptContainerRejected)
+{
+    auto corrupt = makeIdentifiedButCorruptContainer();
+
+    // The corrupt container is rejected during verification, before the resource
+    // manager is consulted, so the mock is permissive.
+    NiceMock<MockHandle> mockHandle;
+    EXPECT_CALL(mockHandle, getPluginResourceManager())
+        .Times(AtMost(1))
+        .WillRepeatedly(Return(_mockEnginePluginResourceManager));
+
+    hipdnnBackendDescriptor_t rawDesc = nullptr;
+    EXPECT_EQ(hipdnnBackendCreateAndDeserializeExecutionPlan_ext(
+                  reinterpret_cast<hipdnnHandle_t>(&mockHandle),
+                  &rawDesc,
+                  corrupt.data(),
+                  corrupt.size()),
               HIPDNN_STATUS_BAD_PARAM);
     EXPECT_EQ(rawDesc, nullptr);
 }
