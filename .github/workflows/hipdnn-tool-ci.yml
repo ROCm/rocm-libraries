@@ -185,11 +185,6 @@ jobs:
         timeout-minutes: 3
         run: python3 TheRock/build_tools/print_driver_gpu_info.py
 
-      - name: Install torch (ROCm nightly)
-        run: |
-          pip install --pre torch \
-            --index-url "https://rocm.nightlies.amd.com/v2-staging/${AMDGPU_FAMILY}/"
-
       - name: Repack + install prebuilt hipdnn_frontend wheel
         run: |
           # The hipdnn_frontend Python bindings ship PREBUILT inside the --tests
@@ -208,35 +203,26 @@ jobs:
             --wheel-dir wheelhouse
           pip install --no-deps wheelhouse/hipdnn_frontend-*.whl
 
-      - name: Patch torch's bundled libhipdnn_backend.so
-        # torch's ROCm wheel bundles libhipdnn_backend.so in its _rocm_sdk_libraries_*
-        # companion package. With RTLD_GLOBAL the frontend can bind to that stale copy
-        # instead of the prebuilt-TheRock backend it was built against -> ABI mismatch
-        # crash. Overwrite it with the prebuilt-TheRock backend. Mirrors
-        # dnn-benchmarking/setup.sh. Guarded so it no-ops if either path is absent.
-        #
-        # Stays defensive even with the prebuilt-wheel flow: the benchmark lazily
-        # imports torch during timing (timing.py), so torch's bundled backend can
-        # still shadow the prebuilt-TheRock backend via RTLD_GLOBAL.
-        run: |
-          WHEEL_BACKEND=$(find "$VENV_DIR" -path '*/_rocm_sdk_libraries_*/lib/libhipdnn_backend.so' 2>/dev/null | head -1)
-          if [ -n "${WHEEL_BACKEND}" ] && [ -f "${ROCM_PATH}/lib/libhipdnn_backend.so" ]; then
-            echo "Patching ${WHEEL_BACKEND}"
-            cp "${ROCM_PATH}/lib/libhipdnn_backend.so" "${WHEEL_BACKEND}"
-          else
-            echo "No bundled backend to patch (wheel_backend='${WHEEL_BACKEND}'); skipping."
-          fi
-
       - name: Install benchmark tool deps
         run: pip install -e rocm-libraries/projects/hipdnn/tools/dnn-benchmarking
 
       - name: Run dnn-benchmarking pytest suite
         working-directory: rocm-libraries/projects/hipdnn/tools/dnn-benchmarking
-        # Full tool test suite on the GPU runner. GPU/amd tests run for real here;
-        # they self-skip via conftest if no GPU/plugin. Profiler-marker tests mock
-        # their binaries, so no rocprofv3/perf/rocprof-compute install is needed.
-        # Exclude 'nvidia' (CUDA-only) and 'slow' to keep the gate fast.
-        run: python -m pytest -ra -m "not nvidia and not slow"
+        # Tool test suite on the GPU runner. GPU/amd tests run for real here; they
+        # self-skip via conftest if no GPU/plugin. Profiler-marker tests mock their
+        # binaries, so no rocprofv3/perf/rocprof-compute install is needed. Exclude
+        # 'nvidia' (CUDA-only) and 'slow' to keep the gate fast.
+        #
+        # torch is NOT installed in this job (the smoke run uses hipdnn_frontend +
+        # numpy and degrades GPU timing to CPU wall-clock when torch is absent).
+        # The two pytorch-backend integration tests import torch at module top, so
+        # they would fail at COLLECTION (before the -m marker filter runs) — ignore
+        # them by path. test_gpu_timing_cuda is CUDA-only anyway; test_pytorch_benchmark
+        # covers the separate --backend pytorch path, not exercised by the smoke gate.
+        run: |
+          python -m pytest -ra -m "not nvidia and not slow" \
+            --ignore=tests/integration/test_pytorch_benchmark.py \
+            --ignore=tests/integration/test_gpu_timing_cuda.py
 
       - name: Run dnn-convert-shapes pytest suite
         working-directory: rocm-libraries/projects/hipdnn/tools/dnn-convert-shapes
@@ -261,16 +247,6 @@ jobs:
       - name: Gate-check results.json
         working-directory: rocm-libraries
         run: python3 projects/hipdnn/tools/dnn-benchmarking/ci/check_results.py results.json
-
-      - name: Upload benchmark artifacts
-        if: always()
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
-        with:
-          name: hipdnn-benchmark-results
-          path: |
-            rocm-libraries/results.json
-            wheelhouse/*.whl
-          if-no-files-found: warn
 
       - name: Post-job GPU process cleanup
         if: always()
