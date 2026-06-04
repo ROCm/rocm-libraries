@@ -222,7 +222,7 @@ class GSUOff(GSU):
           m = -m
 
         if writer.states.globalReadIncsUseVgpr:
-            with writer.allocTmpSgpr(2, tag="GSU Off graIncrements_tmpSgprInfo") as tmpSgprInfo:
+            with writer.allocTmpSgpr(2, tag="GSUOff_graIncrements_tmpSgprInfo") as tmpSgprInfo:
                 tmpSgpr = tmpSgprInfo.idx
                 module.add(SMovB32(dst=sgpr(tmpSgpr+0), src="DepthU*%d"%(tP["bpeGR"]), comment="DepthU*Bpe"))
                 module.add(SMulI32(dst=sgpr(tmpSgpr+0), src0=sgpr(tmpSgpr+0), src1=stride, \
@@ -439,7 +439,7 @@ class GSUOn(GSU):
         isMirrorIdx = dimIdx in kernel["ProblemType"]["MirrorDims%s"%tc]
 
         if writer.states.globalReadIncsUseVgpr:
-            with writer.allocTmpSgpr(3, tag="GSU On graIncrements_tmpSgprInfo") as tmpSgprInfo:
+            with writer.allocTmpSgpr(3, tag="GSUOn_graIncrements_tmpSgprInfo") as tmpSgprInfo:
                 tmpSgpr = tmpSgprInfo.idx
                 gsuSgpr = tmpSgpr + 2
                 du = kernel["_DepthU%s"%tc]
@@ -462,7 +462,7 @@ class GSUOn(GSU):
                     dst=vgpr("GlobalReadIncs%s+%u+1"%(tc, 2*loopIdx)), \
                     src=sgpr(tmpSgpr+1)))
         else:
-            with writer.allocTmpSgpr(2, tag="GSU On graIncrements_tmpSgprInfo2") as tmpSgprInfo:
+            with writer.allocTmpSgpr(2, tag="GSUOn_graIncrements_tmpSgprInfo2") as tmpSgprInfo:
                 incr = sgpr("GlobalReadIncs%s+%u"%(tc, loopIdx))
                 tmpSgpr = tmpSgprInfo.idx
                 gsuSgpr = tmpSgpr + 1

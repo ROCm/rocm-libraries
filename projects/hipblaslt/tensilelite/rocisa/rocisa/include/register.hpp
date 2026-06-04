@@ -430,14 +430,15 @@ namespace rocisa
                 {
                     errorMessage += tag + " ";
                 }
-                throw std::invalid_argument("RegisterPool::checkOutMulti(" + errorMessage + ") Sizes and tags must have the same length");
+                throw std::invalid_argument("RegisterPool::checkOutMulti(sizes.size()=" + std::to_string(sizes.size()) + ", tags.size()=" + std::to_string(tags.size()) + ", tags=" + errorMessage + ") Sizes and tags must have the same length");
             }
             size_t totalSize = 0;
             for(const auto& s : sizes)
             {
                 totalSize += s;
             }
-            size_t idx = checkOutAligned(totalSize, alignment, "", false);
+            std::string multiTag = "multi_" + tags[0] + "_" + std::to_string(tags.size());
+            size_t idx = checkOutAligned(totalSize, alignment, multiTag, false);
             // Overwrite the checkOutSize information
             m_checkOutSize.erase(idx);
             std::vector<size_t> idxVec;

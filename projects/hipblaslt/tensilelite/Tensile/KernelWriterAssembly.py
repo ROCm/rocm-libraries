@@ -7787,7 +7787,7 @@ class KernelWriterAssembly(KernelWriter):
               # inc *= kernel["MatrixInstK"]
 
             if not (tP["isA"] and kernel["DirectToVgprA"] or tP["isB"] and kernel["DirectToVgprB"]): # no local read code if DirectToVgpr is enabled
-              with self.allocTmpSgpr(1, tag="closeLoop_tmpSgprInfo") as tmpSgprInfo:
+              with self.allocTmpSgpr(1, tag="closeLoop_tmpSgprInfo2") as tmpSgprInfo:
                 stmp = tmpSgprInfo.idx
                 module.add(SMovB32(dst=sgpr(stmp), src=int(inc), comment="tailloop lds offset"))
                 module.add(SMulI32(dst=sgpr(stmp), src0=sgpr("OrigLoopCounter"), src1=sgpr(stmp), comment="scale by mul"))
@@ -7811,7 +7811,7 @@ class KernelWriterAssembly(KernelWriter):
       waveSize = kernel["WavefrontSize"]
       module.addComment1("restore full exec mask")
 
-      with self.allocTmpSgpr(sgprCnt, tag="closeLoop_tmpSgprInfo") as tmpSgprInfo:
+      with self.allocTmpSgpr(sgprCnt, tag="closeLoop_tmpSgprInfo3") as tmpSgprInfo:
         fullExec = tmpSgprInfo.idx
         activeMask    = "0xFFFFFFFF" if (waveSize == 32) else "0xFFFFFFFFFFFFFFFF"
         SMovBX        = SMovB32 if (waveSize == 32) else SMovB64
