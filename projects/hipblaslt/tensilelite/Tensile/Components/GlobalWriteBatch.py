@@ -635,8 +635,15 @@ class GlobalWriteBatchWriter:
               loadInputCode.add(gateLoadMod)
             else:
               module.add(gateLoadMod)
+          elif self.ss.optSingleColVgpr:
+            # opt + multi-dtype: gate load is hoisted to ONE GateType dispatch after
+            # the prolog loop (see _emitHoistedGateLoadPhase). On opt, gate uses its
+            # own shared-col base + compile-time immediate offset (independent of D),
+            # so the per-dtype cmp can wrap the element loop once instead of per element.
+            pass
           else:
-            # Multi-dtype prolog dispatcher: per-dtype emitLdChange + readInput,
+            # no-opt (edge) multi-dtype: per-dtype dispatcher PER ELEMENT (gate
+            # borrows D's per-element addr, so it must stay interleaved here).
             # all using THIS element's fresh mask. The dispatcher tail-branches
             # to a common "GateLoad_End" label per element.
             labels = self.parentWriter.labels
@@ -745,6 +752,10 @@ class GlobalWriteBatchWriter:
           module.add(VAddU32(vgpr(self.parentWriter.vgprs.storeRemapCoord1), vgpr(self.parentWriter.vgprs.storeRemapCoord1), vgpr(self.tmpVgpr), "shift storeRemap coord1"))
 
     module.add(loadInputCode)
+
+    # opt + multi-dtype gate: emit the gate prolog load as ONE GateType dispatch
+    # (the per-element loop above skipped it on the opt path).
+    self._emitHoistedGateLoadPhase(module, bufferOOB)
 
     # Restore SrdC+2 = BufferOOB after subtile NonEdge C-load OOB gating (which may have set it to 0).
     if self.beta and not self.edge:
@@ -997,6 +1008,53 @@ class GlobalWriteBatchWriter:
       raise RuntimeError(
           "GateResidual: unsupported gate dtype %s" % str(gateDtype))
     return cvtMod
+
+  def _emitHoistedGateLoadPhase(self, module: Module, bufferOOB):
+    """opt + multi-dtype only: emit the gate prolog load with ONE GateType dispatch
+    wrapping the element loop, instead of a per-element cmp chain. Valid only on the
+    optSingleColVgpr path where gate uses its own shared-col base + compile-time
+    immediate offsets (independent of D's per-element address)."""
+    if not (self.parentWriter.states.useGateResidual and
+            (self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1)):
+      return
+    if not self.ss.optSingleColVgpr:
+      return  # no-opt path keeps the per-element dispatcher in the prolog loop
+    gateList = list(self.kernel["ProblemType"].get("GateResidualDataTypeList", []))
+    if len(gateList) <= 1:
+      return  # single-dtype is loaded inline in the prolog loop
+
+    labels = self.parentWriter.labels
+    endLabel = Label(labels.getNameInc("GateLoadAll_End"), "")
+    typeLabels = [Label(labels.getNameInc("GateLoadAll_%s"%g.toNameAbbrev()), "") for g in gateList]
+    typeLabels.append(endLabel)
+    savedBpe = self.parentWriter.states.bpeGate
+    for i, nextLabel in enumerate(typeLabels[1:]):
+      gDtype = gateList[i]
+      module.add(typeLabels[i])
+      module.add(self.parentWriter.getSCMPKInstruction(
+          "LGU32", "GateType", gDtype.value, comment="GateType != %u"%gDtype.value))
+      module.add(SCBranchSCC1(nextLabel.getLabelName(), "Branch if true (try next gate dtype)"))
+      bpe = max(1, int(self.parentWriter.states.bpr * gDtype.numRegisters()))
+      self.parentWriter.states.bpeGate = bpe
+      self.ss.singleColGateAddrUpdated = False
+      seen = set()
+      for ei, element in enumerate(self.batchElements):
+        addrCalc = self.ss.elementAddr[ei]
+        dataGate = self.ss.elementDataGate[ei]
+        if dataGate == 0 or dataGate in seen:
+          continue
+        seen.add(dataGate)
+        addrGateVgpr = addrCalc.addrGateVgpr  # opt: gate's own sharedColGateVgprs
+        addrCalc.globalOffsetGate = addrCalc.coordOffset0 * bpe
+        module.add(addrCalc.emitLdChange(
+            self.kernel, self.ss, 'Gate', self.edge, self.beta, self.ss.elementMask[ei],
+            bufferOOB, (ei == 0), self.tmpVgpr, self.tmpSgpr, addrGateVgpr, self.addrD, 0))
+        module.add(self.parentWriter.readInput(
+            self.kernel, self.ss, 'Gate', gDtype, addrCalc, element[3], dataGate,
+            self.gwvw, addrGateVgpr, self.tmpS01))
+      module.add(SBranch(labelName=endLabel.getLabelName(), comment="Branch to GateLoadAll end"))
+    module.add(endLabel)
+    self.parentWriter.states.bpeGate = savedBpe
 
   def _emitGateCvtAllPhase(self, module: Module):
     """Multi-dtype Gate: convert ALL loaded gate values to f32 in ONE GateType
