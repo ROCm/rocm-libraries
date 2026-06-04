@@ -36,7 +36,7 @@ from rocisa.instruction import BufferLoadB128, BufferLoadB192, BufferLoadB32, Bu
   DSStoreB32, DSStoreB64, DSStoreB8, DSStoreInstruction, FlatLoadB128, FlatLoadB192, FlatLoadB32, \
   FlatLoadB64, FlatStoreB128, FlatStoreB32, FlatStoreB64, Instruction, MacroInstruction, \
   MFMAInstruction, MXMFMAInstruction, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpEQU32, SCmpLeU32, \
-  SMFMAInstruction, SNop, SEndpgm, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, SLShiftRightB32, \
+  SMFMAInstruction, SNop, SEndpgm, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, SLShiftRightB32, TensorLoadToLds, \
   SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpEQU32, VCndMaskB32, VMovB64, VNop, VReadfirstlaneB32, \
   Instruction
 from rocisa.register import RegisterPool
@@ -5333,6 +5333,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
             module.add(self.noLoadLoop(kernel, tensorParametersA, tensorParametersB, isOptNLL=False, isNGLL=False, pack=deepCopyPack, packPre=deepCopyPackPre, NLLindex=NLLindex, NLLnum=NLLnum))
             self.restoreLocalPointers(kernel, tensorParametersA, tensorParametersB)
 
+    self.postMainLoopBarrierCheckAndReset(kernel, module)
+
     if self.states.actualSummationLoops>1 and self.states.staggerUCode:
       module.addComment1("remove stagger offsets")
       module.add(self.removeStaggerAB(kernel, tensorParametersA, tensorParametersB))
@@ -9604,6 +9606,138 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if self.do["Sync"]:
       return syncThreads(kernel, self.states.archCaps, self.states.asmCaps, comment, skipForceWaitcnt0=skipForceWaitcnt0, memoryToken=memoryToken)
     return Module("SyncThreads (Empty)")
+
+  ##############################################################################
+  # PostMainLoopBarrierCheckAndReset
+  # Rebuild SBarrier placement by memory-token read/write phase transitions.
+  ##############################################################################
+  def postMainLoopBarrierCheckAndReset(self, kernel, rootModule):
+    """
+    Rebuild SBarrier placement from dynamic memory-token usage:
+      - Token count is discovered from instruction token API at runtime
+      - tensor_load / ds_write => write access
+      - ds_read => read access
+      - Writing -> Read transition: insert barrier, state=Reading
+      - Reading -> Write transition: insert barrier, state=Writing
+    """
+    numWaves = kernel["NumThreads"] // kernel["WavefrontSize"]
+    stOptLevel = kernel.get("_StinkyTofuOptLevel", 0)
+    scheduleIterAlg = kernel.get("_ScheduleIterAlg", self.states.scheduleIterAlg)
+    if stOptLevel != 3 or scheduleIterAlg != 0:
+      print(f"[postMainLoopBarrierCheckAndReset] skip: _StinkyTofuOptLevel={stOptLevel}, _ScheduleIterAlg={scheduleIterAlg} (expect 3 and 0)")
+      return
+    if not kernel["enableTDMA"] or not kernel["enableTDMB"]:
+      print(f"[postMainLoopBarrierCheckAndReset] skip: enableTDMA={kernel['enableTDMA']}, enableTDMB={kernel['enableTDMB']} (both must be True)")
+      return
+    if numWaves == 1:
+      print(f"[postMainLoopBarrierCheckAndReset] skip: numWaves={numWaves} (must be > 1)")
+      return
+
+    # Pass-1: remove existing barriers first.
+    modulesToScan = [rootModule]
+    while modulesToScan:
+      currentModule = modulesToScan.pop()
+      keptItems = []
+      for item in currentModule.items():
+        if isinstance(item, Module):
+          modulesToScan.append(item)
+          keptItems.append(item)
+        elif isinstance(item, SBarrier):
+          continue
+        else:
+          keptItems.append(item)
+      currentModule.setItems(keptItems)
+
+    # Pass-2: insert barriers by token state transitions.
+    tokenState = {}
+    branchTokenStateSnapshot = {}
+
+    def _isOptNllEndLabelName(labelName):
+      return isinstance(labelName, str) and "OptNLL_End" in labelName
+
+    def _classifyTokenAccess(inst: Instruction):
+      # tensor_load / ds_write => write, ds_read => read
+      if isinstance(inst, DSStoreInstruction):
+        return "write"
+      if isinstance(inst, TensorLoadToLds):
+        return "write"
+      if isinstance(inst, DSLoadInstruction):
+        return "read"
+      return None
+
+    def _getTokenList(inst: Instruction):
+      # Prefer generic token API if present; fallback to mem-token API.
+      if hasattr(inst, "getToken"):
+        tokenObj = inst.getToken()
+        if tokenObj is not None:
+          if isinstance(tokenObj, (list, tuple)):
+            return list(tokenObj)
+          if hasattr(tokenObj, "tokens"):
+            return list(tokenObj.tokens)
+          return [tokenObj]
+
+      if hasattr(inst, "getMemToken"):
+        memTokenObj = inst.getMemToken()
+        if memTokenObj is not None and hasattr(memTokenObj, "tokens"):
+          return list(memTokenObj.tokens)
+      return []
+
+    def _rewriteModuleInOrder(mod: Module):
+      rewrittenItems = []
+      for item in mod.items():
+        if hasattr(item, "getLabelName"):
+          labelName = item.getLabelName()
+          if _isOptNllEndLabelName(labelName) and labelName in branchTokenStateSnapshot:
+            # recover token state from the snapshot
+            tokenState.clear()
+            tokenState.update(deepcopy(branchTokenStateSnapshot[labelName]))
+          rewrittenItems.append(item)
+          continue
+
+        if isinstance(item, Module):
+          _rewriteModuleInOrder(item)
+          rewrittenItems.append(item)
+          continue
+        if not isinstance(item, Instruction):
+          rewrittenItems.append(item)
+          continue
+
+        branchLabelName = getattr(item, "labelName", None)
+        if _isOptNllEndLabelName(branchLabelName) and branchLabelName not in branchTokenStateSnapshot:
+          # Save token state at the first branch to OptNLL_End.
+          branchTokenStateSnapshot[branchLabelName] = deepcopy(tokenState)
+
+        access = _classifyTokenAccess(item)
+        tokens = _getTokenList(item)
+        if access is None or not tokens:
+          rewrittenItems.append(item)
+          continue
+
+        barrierTokens = []
+        for token in tokens:
+          state = tokenState.get(token, "standby")
+          if access == "read" and state == "writing":
+            barrierTokens.append(token)
+          elif access == "write" and state == "reading":
+            barrierTokens.append(token)
+
+        if barrierTokens:
+          uniqueTokens = sorted(set(barrierTokens))
+          syncComments = ", ".join([f"sync LDS{token}" for token in uniqueTokens])
+          barrier = SBarrier(comment=f"auto token transition barrier, {syncComments}")
+          barrier.setMemToken(MemTokenData(uniqueTokens))
+          rewrittenItems.append(barrier)
+
+        nextState = "writing" if access == "write" else "reading"
+        for token in tokens:
+          tokenState[token] = nextState
+
+        rewrittenItems.append(item)
+
+      mod.setItems(rewrittenItems)
+
+    _rewriteModuleInOrder(rootModule)
+    return
 
   ##############################################################################
   #
