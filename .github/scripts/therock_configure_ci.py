@@ -275,19 +275,14 @@ def run(args):
     platform = args.get("platform")
     plan = retrieve_projects(args)
     build_runs_on = select_build_runner(platform)
-    # RUN_ID carries "hipdnn" to the reusable's projects_to_test (keys its
-    # HIPDNN_BUILT install switch); NIGHTLY/OFF carry "".
+    # Emit the benchmark mode as its enum value ("run-id"/"nightly"/"off").
+    # therock-ci.yml maps it to the job gate and the reusable's projects_to_test.
     set_github_output(
         {
             f"{platform}_projects": json.dumps(plan.projects),
             "test_type": plan.test_type,
             "build_runs_on": build_runs_on,
-            "run_hipdnn_benchmark": (
-                "true" if plan.benchmark != BenchmarkMode.OFF else "false"
-            ),
-            "hipdnn_benchmark_projects": (
-                "hipdnn" if plan.benchmark == BenchmarkMode.RUN_ID else ""
-            ),
+            "benchmark_mode": plan.benchmark.value,
         }
     )
 

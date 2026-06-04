@@ -51,8 +51,7 @@ jobs:
       test_type: ${{ steps.linux_projects.outputs.test_type }}
       linux_package_targets: ${{ steps.configure_linux.outputs.package_targets }}
       windows_package_targets: ${{ steps.configure_windows.outputs.package_targets }}
-      run_hipdnn_benchmark: ${{ steps.linux_projects.outputs.run_hipdnn_benchmark }}
-      hipdnn_benchmark_projects: ${{ steps.linux_projects.outputs.hipdnn_benchmark_projects }}
+      benchmark_mode: ${{ steps.linux_projects.outputs.benchmark_mode }}
       benchmark_runs_on: ${{ steps.benchmark_runner.outputs.benchmark_runs_on }}
     steps:
       - name: Checkout code
@@ -201,27 +200,27 @@ jobs:
       build_runs_on: ${{ needs.setup.outputs.windows_build_runs_on }}
 
   hipdnn-benchmark:
-    name: hipDNN benchmark (${{ needs.setup.outputs.hipdnn_benchmark_projects == '' && 'nightly' || 'run-id' }})
+    name: hipDNN benchmark (${{ needs.setup.outputs.benchmark_mode }})
     permissions:
       contents: read
       id-token: write
     needs: [setup, therock-ci-linux]
-    # Single benchmark entry point. !cancelled() lets the tool-only case run even
-    # though therock-ci-linux is skipped (skip != failure); the run-id case
-    # (projects == 'hipdnn') additionally requires the build to have succeeded so
-    # this run's freshly-built artifacts exist to install. Also requires a
-    # resolved gfx94X-dcgpu runner.
+    # Single benchmark entry point. !cancelled() lets the nightly (tool-only) case
+    # run even though therock-ci-linux is skipped (skip != failure); the run-id
+    # case additionally requires the build to have succeeded so this run's
+    # freshly-built artifacts exist to install. Also requires a resolved
+    # gfx94X-dcgpu runner.
     if: >-
       ${{ !cancelled() &&
-          needs.setup.outputs.run_hipdnn_benchmark == 'true' &&
+          needs.setup.outputs.benchmark_mode != 'off' &&
           needs.setup.outputs.benchmark_runs_on != '' &&
-          (needs.setup.outputs.hipdnn_benchmark_projects == '' ||
+          (needs.setup.outputs.benchmark_mode == 'nightly' ||
            needs['therock-ci-linux'].result == 'success') }}
     uses: ./.github/workflows/hipdnn-tool-ci.yml
     secrets: inherit
     with:
       therock_ref: ${{ needs.setup.outputs.therock_ref }}
-      projects_to_test: ${{ needs.setup.outputs.hipdnn_benchmark_projects }}
+      projects_to_test: ${{ needs.setup.outputs.benchmark_mode == 'run-id' && 'hipdnn' || '' }}
       amdgpu_families: "gfx94X-dcgpu"
       test_runs_on: ${{ needs.setup.outputs.benchmark_runs_on }}
       platform: "linux"
