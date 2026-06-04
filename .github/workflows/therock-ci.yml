@@ -147,6 +147,7 @@ jobs:
       # where the build matrix is empty).
       - name: Extract benchmark runner
         id: benchmark_runner
+        if: ${{ steps.linux_projects.outputs.benchmark_mode != 'off' }}
         env:
           BENCHMARK_FAMILY: gfx94X-dcgpu
           BENCHMARK_MODE: ${{ steps.linux_projects.outputs.benchmark_mode }}
@@ -157,8 +158,9 @@ jobs:
             <<<'${{ steps.configure_linux.outputs.package_targets }}')"
           # A requested benchmark that resolves no runner must fail loudly, not
           # skip green: an empty test_machine means the family was renamed or
-          # dropped from the matrix and the gate would silently vanish.
-          if [ "${BENCHMARK_MODE}" != "off" ] && [ -z "${runner}" ]; then
+          # dropped from the matrix and the gate would silently vanish. The step's
+          # if-gate already guarantees mode != off here.
+          if [ -z "${runner}" ]; then
             echo "::error::benchmark mode='${BENCHMARK_MODE}' but no runner resolved for ${BENCHMARK_FAMILY}; matrix family renamed or removed?"
             exit 1
           fi
