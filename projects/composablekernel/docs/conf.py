@@ -9,8 +9,6 @@
 
 import re
 
-from rocm_docs import ROCmDocs
-
 html_theme_options = {"flavor": "list"}
 
 with open('../CMakeLists.txt', encoding='utf-8') as f:
@@ -29,9 +27,6 @@ release = version_number
 
 external_toc_path = "./sphinx/_toc.yml"
 
-docs_core = ROCmDocs(left_nav_title)
-docs_core.setup()
-
 external_projects_current_project = "composable_kernel"
 
 mathjax3_config = {
@@ -42,10 +37,24 @@ mathjax3_config = {
     }
 }
 
-for sphinx_var in ROCmDocs.SPHINX_VARS:
-    globals()[sphinx_var] = getattr(docs_core, sphinx_var)
+html_theme = "rocm_docs_theme"
+html_theme_options = {
+    "announcement": f"This is ROCm 7.13.0 technology preview release documentation. For the latest production stream release, refer to <a id='rocm-banner' href='https://rocm.docs.amd.com/en/latest/'>ROCm documentation</a>.",
+    "flavor": "generic",
+    "header_title": f"ROCm™ 7.13.0 Preview",
+    "header_link": f"https://rocm.docs.amd.com/en/7.13.0-preview/index.html",
+    "version_list_link": "",
+    "nav_secondary_items": {
+        "GitHub": "https://github.com/ROCm/ROCm",
+        "Community": "https://github.com/ROCm/ROCm/discussions",
+        "Blogs": "https://rocm.blogs.amd.com/",
+        "System and Infra Docs": "https://instinct.docs.amd.com/",
+        "Support": "https://github.com/ROCm/ROCm/issues/new/choose",
+    },
+    "link_main_doc": False,
+}
 
-extensions += ['sphinxcontrib.bibtex']
+extensions = ['sphinxcontrib.bibtex', "rocm_docs"]
 bibtex_bibfiles = ['refs.bib']
 
 cpp_id_attributes = ["__global__", "__device__", "__host__"]
