@@ -10,8 +10,7 @@ with pluggable scheduling rules.
 from typing import List, Tuple, Optional
 from rocisa.code import Module
 from rocisa.instruction import SWaitCnt, MFMAInstruction, MXMFMAInstruction, \
-    LocalReadInstruction, GlobalReadInstruction, CommonInstruction, \
-    SWaitTensorcnt, TensorLoadToLds
+    LocalReadInstruction, GlobalReadInstruction, CommonInstruction
 
 
 class _SlotPlacer:
@@ -152,8 +151,6 @@ _MIN_MFMA_GAP_DS_READ_TO_WAIT = 4
 _isDsRead = lambda x: isinstance(x, LocalReadInstruction)
 _isBufferLoad = lambda x: isinstance(x, GlobalReadInstruction)
 _isWaitCnt = lambda x: isinstance(x, SWaitCnt)
-_isTensorLoad = lambda x: isinstance(x, TensorLoadToLds)
-_isWaitTensorcnt = lambda x: isinstance(x, SWaitTensorcnt)
 _isM0Update = lambda x: isinstance(x, CommonInstruction) and hasattr(x, 'dst') and hasattr(x.dst, 'regType') and x.dst.regType == 'm'
 
 
@@ -430,20 +427,11 @@ def instructionSchedule(emittedModules):
     # Post-pass: adjust vmcnt of any SWaitCnt to account for buffer_loads
     # that the scheduler placed before it within this subIterK.
     bufLoadCount = 0
-    tdmLoadCount = 0
     for inst in scheduled.flatitems():
         if _isBufferLoad(inst):
             bufLoadCount += 1
         elif _isWaitCnt(inst) and inst.vlcnt >= 0:
             if getattr(inst, 'adjustVmcnt', True):
                 inst.vlcnt += bufLoadCount
-        if _isTensorLoad(inst):
-            tdmLoadCount += 1
-        elif _isWaitTensorcnt(inst):
-            # Adjust tensorcnt for any tensor_load_to_lds the scheduler
-            # placed before this wait within the same subIterK.
-            params = inst.getParams()
-            if len(params) > 0:
-                params[0] = params[0] + tdmLoadCount
 
     return scheduled
