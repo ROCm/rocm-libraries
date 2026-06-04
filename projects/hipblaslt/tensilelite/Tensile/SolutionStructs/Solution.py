@@ -811,8 +811,9 @@ class Solution(collections.abc.Mapping):
 
     state["MfmaInitCVgprs"] = False
     # Enable UseSubtileImpl on gfx950 and gfx1250; ignore user request on other ISAs.
-    isgfx950 = state["ISA"] == IsaVersion(9,5,0)
-    isgfx1250 = state["ISA"] == IsaVersion(12,5,0)
+    isa = tuple(state["ISA"])
+    isgfx950 = isa[:2] == (9, 5)
+    isgfx1250 = isa[:2] == (12, 5)
     state["UseSubtileImpl"] = state["UseSubtileImpl"] and (isgfx950 or isgfx1250)
 
     # LDS swizzling (rotation + permlane16 swap) for subtile bank conflict avoidance.
