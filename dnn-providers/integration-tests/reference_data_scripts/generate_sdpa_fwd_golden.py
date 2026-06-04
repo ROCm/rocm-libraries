@@ -270,8 +270,15 @@ def validate_against_aiter(
     """Cross-check golden output against AITER fmha_v3_fwd GPU kernel.
 
     Layout:
-      - Golden data uses BHSD (batch, heads, seq, dim)
+      - Golden data uses BHSD (batch, heads, seq, dim) — PyTorch SDPA convention
       - AITER fmha_v3_fwd uses BSHD (batch, seq, heads, dim) — transpose dims 1,2
+
+    Why transpose instead of stride manipulation:
+      AITER's Python fmha_v3_fwd API requires contiguous BSHD tensors — it does
+      not accept arbitrary strides. The hip-kernel-provider's C++ path, by contrast,
+      passes raw per-axis strides (s_Seqs, s_Hs, s_Bs) to the kernel and handles
+      any layout without transposing. These are two different interfaces to the same
+      ASM kernel: Python API enforces BSHD shape, C++ path is stride-agnostic.
     """
 
     try:
