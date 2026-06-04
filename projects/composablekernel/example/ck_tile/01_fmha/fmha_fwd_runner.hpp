@@ -759,6 +759,34 @@ fwd_result fmha_fwd_run(mode_enum mode,
         ck_tile::index_t num_kv_blocks =
             ck_tile::integer_divide_ceil(max_seqlen_k, block_mask_config.block_size_kv);
         ck_tile::print_block_mask_stats(block_mask_host, num_q_blocks, num_kv_blocks);
+
+        // Low-sparsity fallback guard.
+        // The per-block skip only pays off when enough KV blocks are masked: it still
+        // pays a per-block mask-check + partial KV traffic, so below ~50% masked the
+        // overhead exceeds the work saved and the masked run is *slower* than dense.
+        // Measured on MI350X/gfx950 (d=128, s=8192): 25% masked = 0.84x (slower!),
+        // 50% = 1.10x, 75% = 1.65x, 90% = 2.65x. So when the realized masked-block
+        // fraction is below kBlockMaskMinSparsity, fall back to the dense path
+        // (block_mask_ptr = nullptr, zero-overhead) instead of regressing.
+        // NOTE: this is a host-side example-runner policy; production callers that pass
+        // their own block_mask should apply the same density check before enabling it.
+        constexpr float kBlockMaskMinSparsity = 0.5f;
+        ck_tile::index_t active_blocks        = 0;
+        for(ck_tile::index_t qi = 0; qi < num_q_blocks; qi++)
+            for(ck_tile::index_t ki = 0; ki < num_kv_blocks; ki++)
+                if(block_mask_host(qi, ki) != 0)
+                    active_blocks++;
+        const float realized_sparsity =
+            1.0f - static_cast<float>(active_blocks) / (num_q_blocks * num_kv_blocks);
+        if(realized_sparsity < kBlockMaskMinSparsity)
+        {
+            std::cout << "[block_mask] realized sparsity " << (realized_sparsity * 100.0f)
+                      << "% < " << (kBlockMaskMinSparsity * 100.0f)
+                      << "% threshold -> falling back to dense (skip overhead would exceed "
+                         "savings)"
+                      << std::endl;
+            block_mask_config.pattern = ck_tile::BlockMaskPattern::None;
+        }
     }
 
     auto [rotary_cos_host, rotary_sin_host] = generate_rotary_cos_sin<KDataType>(
