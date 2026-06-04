@@ -361,7 +361,8 @@ void rocsolver_lahr2_getMemorySize(const rocblas_int n,
                                    size_t* size_scalars,
                                    size_t* size_work_workArr,
                                    size_t* size_norms,
-                                   size_t* size_work_vec)
+                                   size_t* size_work_vec,
+                                   size_t* size_beta)
 {
     // if quick return no workspace needed
     if(n <= 1 || nb == 0 || batch_count == 0)
@@ -370,6 +371,7 @@ void rocsolver_lahr2_getMemorySize(const rocblas_int n,
         *size_work_workArr = 0;
         *size_norms = 0;
         *size_work_vec = 0;
+        *size_beta = 0;
         return;
     }
 
@@ -385,11 +387,7 @@ void rocsolver_lahr2_getMemorySize(const rocblas_int n,
         s1 = 0;
 
     // extra requirements for calling larfg
-    size_t larfg_norms;
-    rocsolver_larfg_getMemorySize<T>(n - k, batch_count, &s2, &larfg_norms);
-
-    // norms[] stores nb values per batch (subdiagonal elements displaced by larfg)
-    *size_norms = std::max(larfg_norms, sizeof(T) * nb * batch_count);
+    rocsolver_larfg_getMemorySize<T>(n - k, batch_count, &s2, size_norms);
 
     // work_workArr also used as trmv scratch (length nb per batch)
     *size_work_workArr = std::max({s1, s2, sizeof(T) * nb * batch_count});
@@ -397,6 +395,9 @@ void rocsolver_lahr2_getMemorySize(const rocblas_int n,
     // separate w vector buffer (length nb per batch) for the update step trmv operations,
     // kept separate from F to avoid rocblas aliasing checks
     *size_work_vec = sizeof(T) * nb * batch_count;
+
+    // beta: one scalar per batch instance
+    *size_beta = sizeof(T) * batch_count;
 }
 
 template <typename T, typename U>
@@ -460,7 +461,8 @@ rocblas_status rocsolver_lahr2_template(rocblas_handle handle,
                                         T* scalars,
                                         void* work_workArr,
                                         T* norms,
-                                        T* work_vec)
+                                        T* work_vec,
+                                        T* beta)
 {
     ROCSOLVER_ENTER("lahr2", "n:", n, "k:", k, "nb:", nb, "shiftA:", shiftA, "lda:", lda,
                     "ldf:", ldf, "shiftY:", shiftY, "ldy:", ldy, "bc:", batch_count);
@@ -479,14 +481,13 @@ rocblas_status rocsolver_lahr2_template(rocblas_handle handle,
 
     // scalars[0] = -1,  scalars[1] = 0,  scalars[2] = 1
     // work_vec: dedicated length-nb w vector per batch for the update step.
-    // Kept separate from F to avoid rocblas aliasing checks in trmv.
     // stride_work: per-batch stride for both work_vec and the trmv scratch (work_workArr).
     rocblas_stride stride_work = rocblas_stride(nb);
 
-    // norms[j] = A(k+j, j) saved before larfg sets it to 1, restored at
+    // beta = A(k+j, j) saved before larfg sets it to 1, restored at
     // the start of the next iteration (or after the loop for j=nb-1).
-    // stride_work: per-batch stride for norms.
-    rocblas_stride stride_norm = rocblas_stride(nb);
+    // stride_beta: per-batch stride for beta.
+    rocblas_stride stride_beta = rocblas_stride(1);
 
     // thread config for compute kernels.
     rocblas_int thr_computeY = BS2;
@@ -564,19 +565,19 @@ rocblas_status rocsolver_lahr2_template(rocblas_handle handle,
                 work_vec, 0, 1, stride_work, cast2constType<T>(scalars + 2), A,
                 shiftA + idx2D(k, j, lda), 1, strideA);
 
-            // Restore A(k+j-1, j-1) = norms[j-1] saved from the previous iteration
+            // Restore A(k+j-1, j-1) = beta saved from the previous iteration
             ROCSOLVER_LAUNCH_KERNEL((restore_diag<T>), dim3(batch_count, 1, 1), dim3(1, 1, 1), 0,
-                                    stream, (S*)norms, j - 1, stride_norm, A,
+                                    stream, (S*)beta, 0, stride_beta, A,
                                     shiftA + idx2D(k + j - 1, j - 1, lda), lda, strideA,
                                     (rocblas_int)1);
         }
 
         // --------------------------------------------------------------------
         // Generate Householder reflector H(j+1) to annihilate A(k+j+1:n-1, j)
-        //  - Set norms[j] = A(k+j, j), then set A(k+j, j) = 1
+        //  - Set beta = A(k+j, j), then set A(k+j, j) = 1
         // --------------------------------------------------------------------
-        rocsolver_larfg_template(handle, n - k - j, A, shiftA + idx2D(k + j, j, lda), (S*)norms, j,
-                                 stride_norm, A, shiftA + idx2D(std::min(k + j + 1, n - 1), j, lda),
+        rocsolver_larfg_template(handle, n - k - j, A, shiftA + idx2D(k + j, j, lda), (S*)beta, 0,
+                                 stride_beta, A, shiftA + idx2D(std::min(k + j + 1, n - 1), j, lda),
                                  1, strideA, tau + j, strideT, batch_count, (T*)work_workArr, norms);
 
         // --------------------------------------------------------------------
@@ -615,10 +616,10 @@ rocblas_status rocsolver_lahr2_template(rocblas_handle handle,
         }
     }
 
-    // Restore A(k+nb-1, nb-1) = norms[nb-1]
+    // Restore A(k+nb-1, nb-1) = beta
     ROCSOLVER_LAUNCH_KERNEL((restore_diag<T>), dim3(batch_count, 1, 1), dim3(1, 1, 1), 0, stream,
-                            (S*)norms, nb - 1, stride_norm, A,
-                            shiftA + idx2D(k + nb - 1, nb - 1, lda), lda, strideA, (rocblas_int)1);
+                            (S*)beta, 0, stride_beta, A, shiftA + idx2D(k + nb - 1, nb - 1, lda),
+                            lda, strideA, (rocblas_int)1);
 
     // ------------------------------------------------------------------------
     // Compute Y(0:k-1, 0:nb-1)  (top k rows of Y)

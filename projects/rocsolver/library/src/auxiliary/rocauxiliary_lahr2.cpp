@@ -37,19 +37,19 @@ rocblas_status rocsolver_lahr2_impl(rocblas_handle handle,
                                     T* A,
                                     const rocblas_int lda,
                                     T* tau,
-                                    T* Tmat,
-                                    const rocblas_int ldt,
+                                    T* F,
+                                    const rocblas_int ldf,
                                     T* Y,
                                     const rocblas_int ldy)
 {
-    ROCSOLVER_ENTER_TOP("lahr2", "-n", n, "-k", k, "--nb", nb, "--lda", lda, "--ldt", ldt, "--ldy",
+    ROCSOLVER_ENTER_TOP("lahr2", "-n", n, "-k", k, "--nb", nb, "--lda", lda, "--ldt", ldf, "--ldy",
                         ldy);
 
     if(!handle)
         return rocblas_status_invalid_handle;
 
     // argument checking
-    rocblas_status st = rocsolver_lahr2_argCheck(handle, n, k, nb, lda, ldt, ldy, A, tau, Tmat, Y);
+    rocblas_status st = rocsolver_lahr2_argCheck(handle, n, k, nb, lda, ldf, ldy, A, tau, F, Y);
     if(st != rocblas_status_continue)
         return st;
 
@@ -60,7 +60,7 @@ rocblas_status rocsolver_lahr2_impl(rocblas_handle handle,
     // normal (non-batched non-strided) execution
     rocblas_stride strideA = 0;
     rocblas_stride strideT = 0;
-    rocblas_stride strideN = 0;
+    rocblas_stride strideF = 0;
     rocblas_stride strideY = 0;
     rocblas_int batch_count = 1;
 
@@ -69,20 +69,23 @@ rocblas_status rocsolver_lahr2_impl(rocblas_handle handle,
     size_t size_scalars;
     // size of arrays of pointers (for batched cases) and re-usable workspace
     size_t size_work_workArr;
-    // extra requirements for calling LARFG and EI value storage
+    // extra requirements for calling LARFG
     size_t size_norms;
-    // dedicated w vector buffer for update step (separate from Tmat to avoid aliasing)
+    // dedicated w vector buffer for update step (separate from F to avoid aliasing)
     size_t size_work_vec;
-    rocsolver_lahr2_getMemorySize<false, T>(n, k, nb, batch_count, &size_scalars,
-                                            &size_work_workArr, &size_norms, &size_work_vec);
+    // one scalar beta per batch instance
+    size_t size_beta;
+    rocsolver_lahr2_getMemorySize<false, T>(n, k, nb, batch_count, &size_scalars, &size_work_workArr,
+                                            &size_norms, &size_work_vec, &size_beta);
 
     if(rocblas_is_device_memory_size_query(handle))
         return rocblas_set_optimal_device_memory_size(handle, size_scalars, size_work_workArr,
-                                                      size_norms, size_work_vec);
+                                                      size_norms, size_work_vec, size_beta);
 
     // memory workspace allocation
-    void *scalars, *work_workArr, *norms, *work_vec;
-    rocblas_device_malloc mem(handle, size_scalars, size_work_workArr, size_norms, size_work_vec);
+    void *scalars, *work_workArr, *norms, *work_vec, *beta;
+    rocblas_device_malloc mem(handle, size_scalars, size_work_workArr, size_norms, size_work_vec,
+                              size_beta);
 
     if(!mem)
         return rocblas_status_memory_error;
@@ -91,13 +94,14 @@ rocblas_status rocsolver_lahr2_impl(rocblas_handle handle,
     work_workArr = mem[1];
     norms = mem[2];
     work_vec = mem[3];
+    beta = mem[4];
     if(size_scalars > 0)
         init_scalars(handle, (T*)scalars);
 
     // execution
-    return rocsolver_lahr2_template<T>(handle, n, k, nb, A, shiftA, lda, strideA, tau, strideT,
-                                       Tmat, ldt, strideN, Y, shiftY, ldy, strideY, batch_count,
-                                       (T*)scalars, work_workArr, (T*)norms, (T*)work_vec);
+    return rocsolver_lahr2_template<T>(handle, n, k, nb, A, shiftA, lda, strideA, tau, strideT, F,
+                                       ldf, strideF, Y, shiftY, ldy, strideY, batch_count,
+                                       (T*)scalars, work_workArr, (T*)norms, (T*)work_vec, (T*)beta);
 }
 
 ROCSOLVER_END_NAMESPACE
