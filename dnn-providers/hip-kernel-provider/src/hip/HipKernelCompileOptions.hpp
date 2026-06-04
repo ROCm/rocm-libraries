@@ -59,7 +59,7 @@ public:
         {
             std::string option = "-D";
             option += name;
-            option += "=";
+            option += '=';
             option += value;
             compileOptions.emplace_back(std::move(option));
         }
