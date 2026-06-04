@@ -2602,9 +2602,16 @@ class Solution(collections.abc.Mapping):
           depthUA = depthUA // 2
           depthUM = depthUA if state["DirectToVgprSparseMetadata"] else depthUA // 4
       if state["MXScaleFormat"] == "HostPreSwizzle":
-        swizzleSize1 = 256
         mxBlock = state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]
-        if mxBlock:
+        # MXFP8 subtile (AB_B8): 256B K swizzle tiles → dataDU=128 < DepthU=256.
+        # MXFP4/BF16 subtile (AB_B4/B16) use a different data layout; keep full DepthU.
+        enableMultiDu = (
+          state.get("UseSubtileImpl")
+          and state.get("_ABTilePairA") == "AB_B8"
+          and state.get("_ABTilePairB") == "AB_B8"
+        )
+        if mxBlock and enableMultiDu:
+          swizzleSize1 = 256
           dataDU = depthU * state["MatrixInstK"] // swizzleSize1
           if dataDU < depthU and max(state["MacroTileA"], state["MacroTileB"]) > dataDU:
             depthUA = dataDU
