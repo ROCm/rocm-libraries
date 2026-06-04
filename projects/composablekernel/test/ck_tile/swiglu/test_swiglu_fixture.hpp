@@ -242,12 +242,19 @@ struct TestParams
 
             if(stream_config.log_level_ > 0)
             {
+                constexpr auto maj_str = [](bool is_row_major) -> std::string {
+                    return is_row_major ? " (Row major)" : " (Col major)";
+                };
+
+                auto [m_, n_, k_] = shape.mnk_lengths();
                 std::cout << "Launching kernel with args: \n"
                           << "  grid:  " << grid_size.x << ", " << grid_size.y << ", "
                           << grid_size.z << " \n " << "  block: " << block_size.x << ", "
                           << block_size.y << ", " << block_size.z << " \n"
-                          << "  shape: " << shape << " \n " << "  block_per_cu: " << BlockPerCu_
-                          << " \n ";
+                          << "  block_per_cu: " << BlockPerCu_ << " \n"
+                          << "  A: " << m_ << " x " << k_ << maj_str(shape.a_is_row_major) << "\n"
+                          << "  B: " << k_ << " x " << n_ << maj_str(shape.b_is_row_major) << "\n"
+                          << "  C: " << m_ << " x " << n_ << maj_str(shape.c_is_row_major) << "\n";
             }
 
             auto kernel_callable =

@@ -42,27 +42,6 @@ struct SwiGLUShape
     {
         return {a_is_row_major, b_is_row_major, c_is_row_major};
     }
-
-    friend std::ostream& operator<<(std::ostream& stream, const SwiGLUShape& shape)
-    {
-        constexpr auto maj_str = [](bool is_row_major) -> std::string {
-            return is_row_major ? " (Row major)" : " (Col major)";
-        };
-
-        auto [m_, n_, k_] = shape.mnk_lengths();
-        stream << "SwiGLUShape: \n"
-               << "  A: " << m_ << " x " << k_ << maj_str(shape.a_is_row_major) << "\n"
-               << "  B: " << k_ << " x " << n_ << maj_str(shape.b_is_row_major) << "\n"
-               << "  C: " << m_ << " x " << n_ << maj_str(shape.c_is_row_major) << "\n";
-        return stream;
-    }
-
-    [[nodiscard]] auto to_string() const -> std::string
-    {
-        std::stringstream stream;
-        stream << *this;
-        return stream.str();
-    }
 };
 
 [[nodiscard]] static inline auto get_flops(const SwiGLUShape& shape) -> std::size_t
