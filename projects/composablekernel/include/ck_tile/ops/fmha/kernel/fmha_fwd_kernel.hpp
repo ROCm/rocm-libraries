@@ -318,6 +318,13 @@ struct FmhaFwdKernel
         ck_tile::index_t nhead_stride_q_descale = 0;
         ck_tile::index_t nhead_stride_k_descale = 0;
         ck_tile::index_t nhead_stride_v_descale = 0;
+
+        // Descale granularity: rows of Q / cols of KV that share one scale. The host
+        // lays out the descale buffer and reference at this size (and the group
+        // seqstart is cumulative in these units), so the kernel must index descales
+        // here rather than at the kernel tile size kN0 (which equals it only for d>=128).
+        ck_tile::index_t block_scale_size_q  = 1;
+        ck_tile::index_t block_scale_size_kv = 1;
     };
 
     struct FmhaFwdBatchPerBlockKargs : FmhaFwdCommonPerBlockKargs
@@ -669,6 +676,21 @@ struct FmhaFwdKernel
         }
         else if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::PERBLOCK)
         {
+            // PERBLOCK reads ONE descale per kernel tile (kM0 rows of Q, kN0 cols of
+            // K/V), so the host-chosen descale granularity must be >= and a multiple
+            // of the tile sizes. This lets the host size the descale buffer from
+            // block_scale_size_q/kv alone, without knowing the kernel tiles kM0/kN0.
+            constexpr index_t kM0 = FmhaPipeline::kM0;
+            constexpr index_t kN0 = FmhaPipeline::kN0;
+            if(block_scale_size_q < kM0 || block_scale_size_q % kM0 != 0)
+                throw std::invalid_argument(
+                    "PERBLOCK: block_scale_size_q (" + std::to_string(block_scale_size_q) +
+                    ") must be >= kM0 (" + std::to_string(kM0) + ") and an integer multiple of it");
+            if(block_scale_size_kv < kN0 || block_scale_size_kv % kN0 != 0)
+                throw std::invalid_argument(
+                    "PERBLOCK: block_scale_size_kv (" + std::to_string(block_scale_size_kv) +
+                    ") must be >= kN0 (" + std::to_string(kN0) + ") and an integer multiple of it");
+
             kargs.q_descale_ptr = q_descale_ptr;
             kargs.k_descale_ptr = k_descale_ptr;
             kargs.v_descale_ptr = v_descale_ptr;
@@ -684,6 +706,9 @@ struct FmhaFwdKernel
             kargs.batch_stride_q_descale = batch_stride_q_descale;
             kargs.batch_stride_k_descale = batch_stride_k_descale;
             kargs.batch_stride_v_descale = batch_stride_v_descale;
+
+            kargs.block_scale_size_q  = block_scale_size_q;
+            kargs.block_scale_size_kv = block_scale_size_kv;
         }
         if constexpr(kHasDropout)
         {
@@ -1155,6 +1180,21 @@ struct FmhaFwdKernel
         }
         else if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::PERBLOCK)
         {
+            // PERBLOCK reads ONE descale per kernel tile (kM0 rows of Q, kN0 cols of
+            // K/V), so the host-chosen descale granularity must be >= and a multiple
+            // of the tile sizes. This lets the host size the descale buffer from
+            // block_scale_size_q/kv alone, without knowing the kernel tiles kM0/kN0.
+            constexpr index_t kM0 = FmhaPipeline::kM0;
+            constexpr index_t kN0 = FmhaPipeline::kN0;
+            if(block_scale_size_q < kM0 || block_scale_size_q % kM0 != 0)
+                throw std::invalid_argument(
+                    "PERBLOCK: block_scale_size_q (" + std::to_string(block_scale_size_q) +
+                    ") must be >= kM0 (" + std::to_string(kM0) + ") and an integer multiple of it");
+            if(block_scale_size_kv < kN0 || block_scale_size_kv % kN0 != 0)
+                throw std::invalid_argument(
+                    "PERBLOCK: block_scale_size_kv (" + std::to_string(block_scale_size_kv) +
+                    ") must be >= kN0 (" + std::to_string(kN0) + ") and an integer multiple of it");
+
             kargs.q_descale_ptr = q_descale_ptr;
             kargs.k_descale_ptr = k_descale_ptr;
             kargs.v_descale_ptr = v_descale_ptr;
@@ -1166,6 +1206,9 @@ struct FmhaFwdKernel
             kargs.nhead_stride_q_descale = nhead_stride_q_descale;
             kargs.nhead_stride_k_descale = nhead_stride_k_descale;
             kargs.nhead_stride_v_descale = nhead_stride_v_descale;
+
+            kargs.block_scale_size_q  = block_scale_size_q;
+            kargs.block_scale_size_kv = block_scale_size_kv;
 
             kargs.block_scale_seqstart_q_ptr =
                 reinterpret_cast<const int32_t*>(block_scale_seqstart_q_ptr);
@@ -2423,12 +2466,14 @@ struct FmhaFwdKernel
                             kargs.nhead_stride_v_descale +
                         batch_offset_v_descale;
 
-                    // Per-block: fuse Q descale into scale_s
-                    constexpr ck_tile::index_t kM0 = FmhaPipeline::kM0;
-                    constexpr ck_tile::index_t kN0 = FmhaPipeline::kN0;
-                    size_t q_idx                   = i_m0 / kM0;
-                    float q_descale                = q_descale_ptr[q_idx];
-                    float fused_scale_s            = kargs.scale_s * q_descale;
+                    // Per-block: fuse Q descale into scale_s. Index the descale buffer at
+                    // the host's descale granularity (block_scale_size_q/kv, per-block), NOT
+                    // the kernel tile size kN0 — those agree only for d>=128. For d<128
+                    // (e.g. d=64, kN0=64) using the tile size mis-indexes the per-128-block
+                    // descale buffer. This mirrors what BLOCKSCALE already passes above.
+                    size_t q_idx        = i_m0 / kargs.block_scale_size_q;
+                    float q_descale     = q_descale_ptr[q_idx];
+                    float fused_scale_s = kargs.scale_s * q_descale;
 
                     float scale_p =
                         ck_tile::type_convert<float>(ck_tile::numeric<PDataType>::max());
@@ -2468,7 +2513,7 @@ struct FmhaFwdKernel
                                                 dropout,
                                                 k_descale_ptr,
                                                 v_descale_ptr,
-                                                kN0,
+                                                kargs.block_scale_size_kv,
                                                 make_null_tile_window(make_tuple()),
                                                 make_null_tile_window(make_tuple()),
                                                 make_null_tile_window(make_tuple()));

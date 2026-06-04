@@ -931,6 +931,11 @@ fwd_result fmha_fwd_run(mode_enum mode,
         float k_dtype_max = ck_tile::type_convert<float>(ck_tile::numeric<KDataType>::max());
         float v_dtype_max = ck_tile::type_convert<float>(ck_tile::numeric<VDataType>::max());
 
+        // qkv_max = 3.0 is the assumed pre-quantization absmax of Q/K/V used to derive
+        // the descale factors (descale = qkv_max / dtype_max). It bounds the descale to
+        // the [0, qkv_max] range the FP8-cast inputs were generated in (init=3), keeping
+        // the dequantized values representative. Reused by the pertensor/blockscale/perblock
+        // fill branches below for consistency.
         float qkv_max     = 3.f;
         q_descale_host(0) = qkv_max / q_dtype_max;
         k_descale_host(0) = qkv_max / k_dtype_max;
@@ -1459,6 +1464,13 @@ fwd_result fmha_fwd_run(mode_enum mode,
                     args.block_scale_seqstart_k_ptr =
                         (mode == mode_enum::group ? block_scale_seqstart_k_buf.GetDeviceBuffer()
                                                   : nullptr);
+
+                    // Descale granularity (rows of Q / cols of KV per scale). The host buffer,
+                    // host reference, and group seqstart are all laid out per-block at this
+                    // size, so the kernel must index descales at the same granularity rather
+                    // than at the kernel tile size kN0 (which only equals it when d>=128).
+                    args.block_scale_size_q  = block_scale_size_q_;
+                    args.block_scale_size_kv = block_scale_size_kv_;
                 }
 
                 args.rand_val_ptr = randval_buf.GetDeviceBuffer();
