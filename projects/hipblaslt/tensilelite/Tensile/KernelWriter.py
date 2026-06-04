@@ -3076,23 +3076,91 @@ class KernelWriter(metaclass=abc.ABCMeta):
     def emitTensorLoadUsesStagger(tP):
       return self.states.staggerUCode and kernel["BufferLoad"] and usesCanonicalSrd(tP)
 
+    def tensorGlobalReadOffsetInfo(tP):
+      tc = tP["tensorChar"]
+      if tc == "A":
+        return self.startVgprGlobalReadOffsetA, self.states.a.numVgprGlobalReadOffsets
+      if tc == "B":
+        return self.startVgprGlobalReadOffsetB, self.states.b.numVgprGlobalReadOffsets
+      if tc == "MXSA":
+        return self.startVgprGlobalReadOffsetMXSA, self.states.mxsa.numVgprGlobalReadOffsets
+      if tc == "MXSB":
+        return self.startVgprGlobalReadOffsetMXSB, self.states.mxsb.numVgprGlobalReadOffsets
+      return None, 0
+
+    def refreshesShiftPtrGlobalReadOffsets(tP):
+      if not (kernel["BufferLoad"] and usesCanonicalSrd(tP)):
+        return False
+      if kernel.get("EdgeType") != "ShiftPtr" or kernel["_UseSgprForGRO"]:
+        return False
+      if kernel["enableTDMA"] or kernel["enableTDMB"]:
+        return False
+      _, count = tensorGlobalReadOffsetInfo(tP)
+      return count > 0
+
+    def copyGlobalReadOffsets(dstBase, srcBase, tP, comment):
+      tc = tP["tensorChar"]
+      _, count = tensorGlobalReadOffsetInfo(tP)
+      for i in range(count):
+        module.add(VMovB32(dst=vgpr(dstBase + i) if dstBase is not None else vgpr("GlobalReadOffset%s+%u" % (tc, i)),
+                           src=vgpr(srcBase + i) if srcBase is not None else vgpr("GlobalReadOffset%s+%u" % (tc, i)),
+                           comment="%s vgprGlobalReadOffset%s+%u" % (comment, tc, i)))
+
+    def checkpointGlobalReadOffsets(tP, tag):
+      _, count = tensorGlobalReadOffsetInfo(tP)
+      tmpVgpr = self.vgprPool.checkOutAligned(count, 1, tag)
+      copyGlobalReadOffsets(tmpVgpr, None, tP, "checkpoint current")
+      return tmpVgpr
+
+    def restoreGlobalReadOffsets(tP, tmpVgpr):
+      copyGlobalReadOffsets(None, tmpVgpr, tP, "restore current")
+      self.vgprPool.checkIn(tmpVgpr)
+
+    def refreshShiftPtrGlobalReadOffsets(tP):
+      tc = tP["tensorChar"]
+      module.addComment1("PAP: refresh next-tile ShiftPtr global-read offsets %s" % tc)
+      module.add(self.lwaTileAssignment(kernel, tP))
+      module.add(self.graTileAssignment(kernel, tP))
+      module.add(self.graUnrollAssignment(kernel, tP))
+      module.add(self.graTileOffsets(kernel, tP))
+      module.add(self.graUnrollOffsets(kernel, tP))
+      if tc in ["A", "B"]:
+        if not (kernel["BufferLoad"] and kernel["GuaranteeNoPartial%s" % tc]) \
+          and not kernel["UseGeneralizedNLCOne%s" % tc] and not tP["isSwizzled"]:
+          module.add(self.graShift(kernel, tP))
+      elif tc in ["MXSA", "MXSB"]:
+        parentTc = "A" if tc == "MXSA" else "B"
+        if not (kernel["BufferLoad"] and kernel["GuaranteeNoPartial%s" % parentTc]) \
+          and not kernel["UseGeneralizedNLCOne%s" % parentTc] and not tP["isSwizzled"]:
+          parentTP = tensorParametersA if tc == "MXSA" else tensorParametersB
+          module.add(self.graShiftMX(kernel, tP, parentTP))
+      module.add(self.graAddresses(kernel, tP))
+      module.add(self.graFinalOffsets(kernel, tP))
+
+    def emitFirstPgrLoad(tP, skipWait):
+      if emitTensorLoadUsesStagger(tP):
+        module.add(self.calculateStagger(kernel, tP))
+      moduleTmp = self.directToLdsM0Update(kernel, 0, tP, skipWait)
+      module.add(replaceHolder(moduleTmp, 0))
+      module.add(self.globalReadDo(kernel, 0, tP))
+
     def emitTensorLoad(tP, skipWait=False):
       tc = tP["tensorChar"]
       module.addComment1("PAP: next-tile addresses and first-PGR load %s" % tc)
       if kernel["BufferLoad"] and usesCanonicalSrd(tP):
         with self.allocTmpSgpr(4, 2, "PAP%sSrdSnapshot" % tc) as tmpSgprInfo:
           checkpointDescriptorState(tP, tmpSgprInfo.idx)
-          module.add(self.graAddresses(kernel, tP))
-          if emitTensorLoadUsesStagger(tP):
-            module.add(self.calculateStagger(kernel, tP))
-          moduleTmp = self.directToLdsM0Update(kernel, 0, tP, skipWait)
-          module.add(replaceHolder(moduleTmp, 0))
-          module.add(self.globalReadDo(kernel, 0, tP))
+          if refreshesShiftPtrGlobalReadOffsets(tP):
+            tmpVgpr = checkpointGlobalReadOffsets(tP, "PAP%sGROSnapshot" % tc)
+            refreshShiftPtrGlobalReadOffsets(tP)
+            emitFirstPgrLoad(tP, skipWait)
+            restoreGlobalReadOffsets(tP, tmpVgpr)
+          else:
+            module.add(self.graAddresses(kernel, tP))
+            emitFirstPgrLoad(tP, skipWait)
           restoreDescriptorState(tP, tmpSgprInfo.idx)
       else:
-        moduleTmp = self.directToLdsM0Update(kernel, 0, tP, skipWait)
-        module.add(replaceHolder(moduleTmp, 0))
-        module.add(self.globalReadDo(kernel, 0, tP))
+        emitFirstPgrLoad(tP, skipWait)
 
     # StreamK PAP contract:
     #   Durable state: issued first-PGR loads for the next persistent iteration,

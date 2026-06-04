@@ -10,6 +10,8 @@ from contextlib import contextmanager
 from types import SimpleNamespace
 
 from rocisa.code import Module
+from rocisa.enum import RegisterType
+from rocisa.register import RegisterPool
 
 from Tensile.KernelWriter import KernelWriter
 import Tensile.KernelWriterAssembly as kwa_module
@@ -22,9 +24,16 @@ def _module_with_comment(name, comment):
     return module
 
 
+def _tensor_module(name, comment, tensor_parameters):
+    tc = tensor_parameters["tensorChar"]
+    return _module_with_comment("%s_%s" % (name, tc), "%s %s" % (comment, tc))
+
+
 class _ClassicPapWriter:
     def __init__(self, *, version=(9, 5, 0), use64b_shadow=False, use64b_shadow_mx=False):
         self.states = SimpleNamespace(
+            a=SimpleNamespace(numVgprGlobalReadOffsets=2),
+            b=SimpleNamespace(numVgprGlobalReadOffsets=2),
             ldsTensorTokenIdx=0,
             memTokenLdsBuffer0=0,
             memTokenLdsBuffer1=1,
@@ -35,6 +44,9 @@ class _ClassicPapWriter:
             version=version,
         )
         self._next_tmp_sgpr = 100
+        self.vgprPool = _TrackingRegisterPool(RegisterType.Vgpr)
+        self.startVgprGlobalReadOffsetA = 200
+        self.startVgprGlobalReadOffsetB = 210
 
     @contextmanager
     def allocTmpSgpr(self, size, alignment=1, tag=""):
@@ -54,20 +66,42 @@ class _ClassicPapWriter:
     def declareStaggerParms(self, kernel):
         return _module_with_comment("declareStaggerParms", "unit: declare stagger")
 
+    def lwaTileAssignment(self, kernel, tensor_parameters):
+        return _tensor_module("lwaTileAssignment", "unit: LWA tile", tensor_parameters)
+
+    def graTileAssignment(self, kernel, tensor_parameters):
+        return _tensor_module("graTileAssignment", "unit: tile assignment", tensor_parameters)
+
+    def graUnrollAssignment(self, kernel, tensor_parameters):
+        return _tensor_module("graUnrollAssignment", "unit: unroll assignment", tensor_parameters)
+
+    def graTileOffsets(self, kernel, tensor_parameters):
+        return _tensor_module("graTileOffsets", "unit: tile offsets", tensor_parameters)
+
+    def graUnrollOffsets(self, kernel, tensor_parameters):
+        return _tensor_module("graUnrollOffsets", "unit: unroll offsets", tensor_parameters)
+
+    def graShift(self, kernel, tensor_parameters):
+        return _tensor_module("graShift", "unit: shift", tensor_parameters)
+
     def graAddresses(self, kernel, tensor_parameters):
-        return _module_with_comment("graAddresses", "unit: GRA %s" % tensor_parameters["tensorChar"])
+        return _tensor_module("graAddresses", "unit: GRA", tensor_parameters)
+
+    def graFinalOffsets(self, kernel, tensor_parameters):
+        return _tensor_module("graFinalOffsets", "unit: final offsets", tensor_parameters)
 
     def calculateStagger(self, kernel, tensor_parameters):
-        return _module_with_comment("calculateStagger", "unit: stagger %s" % tensor_parameters["tensorChar"])
+        return _tensor_module("calculateStagger", "unit: stagger", tensor_parameters)
 
     def directToLdsM0Update(self, kernel, offset, tensor_parameters, skipWait=False):
-        return _module_with_comment(
+        return _tensor_module(
             "directToLdsM0Update",
             "unit: M0 %s skipWait=%s" % (tensor_parameters["tensorChar"], skipWait),
+            tensor_parameters,
         )
 
     def globalReadDo(self, kernel, offset, tensor_parameters):
-        return _module_with_comment("globalReadDo", "unit: GR %s" % tensor_parameters["tensorChar"])
+        return _tensor_module("globalReadDo", "unit: GR", tensor_parameters)
 
     def papDtlSaveLdsBank(self, kernel, tensor_parameters_a, tensor_parameters_b):
         return _module_with_comment("papDtlSaveLdsBank", "unit: save DTL LDS bank")
@@ -76,22 +110,19 @@ class _ClassicPapWriter:
 _ClassicPapWriter.setupPrefetchAcrossPersistentLoads = KernelWriter.setupPrefetchAcrossPersistentLoads
 
 
-class _StubSgprPool:
-    def checkOutAligned(self, *args, **kwargs):
-        return 40
-
-    def checkIn(self, *args, **kwargs):
-        pass
-
-
-class _StubVgprPool:
-    def __init__(self):
+class _TrackingRegisterPool(RegisterPool):
+    def __init__(self, register_type):
+        super().__init__(0, register_type, defaultPreventOverflow=False, printRP=False)
+        self.checked_out = []
         self.checked_in = []
 
-    def checkOutAligned(self, *args, **kwargs):
-        return 70
+    def checkOutAligned(self, size, alignment=1, tag="", *args, **kwargs):
+        base = super().checkOutAligned(size, alignment, tag, *args, **kwargs)
+        self.checked_out.append((base, size, tag))
+        return base
 
     def checkIn(self, vgpr):
+        super().checkIn(vgpr)
         self.checked_in.append(vgpr)
 
 
@@ -108,7 +139,7 @@ class _ClassicPapWrapperWriter:
     def __init__(self):
         self.labels = _StubLabels()
         self.states = SimpleNamespace(unrollIdx=0)
-        self.vgprPool = _StubVgprPool()
+        self.vgprPool = _TrackingRegisterPool(RegisterType.Vgpr)
 
     def isPrefetchAcrossPersistentEnabled(self, kernel):
         return True
@@ -157,6 +188,12 @@ def _classic_kernel(**overrides):
             "MXBlockB": 0,
             "Sparse": 0,
         },
+        "EdgeType": "None",
+        "GuaranteeNoPartialA": False,
+        "GuaranteeNoPartialB": False,
+        "UseGeneralizedNLCOneA": False,
+        "UseGeneralizedNLCOneB": False,
+        "_UseSgprForGRO": False,
         "enableTDMA": False,
         "enableTDMB": False,
     }
@@ -165,11 +202,11 @@ def _classic_kernel(**overrides):
 
 
 def _tensor_parameters(with_mx=False):
-    tpa = {"tensorChar": "A"}
-    tpb = {"tensorChar": "B"}
+    tpa = {"tensorChar": "A", "isSwizzled": False}
+    tpb = {"tensorChar": "B", "isSwizzled": False}
     if with_mx:
-        tpa["MX"] = {"tensorChar": "MXSA"}
-        tpb["MX"] = {"tensorChar": "MXSB"}
+        tpa["MX"] = {"tensorChar": "MXSA", "isSwizzled": False}
+        tpb["MX"] = {"tensorChar": "MXSB", "isSwizzled": False}
     return tpa, tpb
 
 
@@ -179,6 +216,21 @@ def _module_items(module):
 
 def _module_index(items, name):
     return next(i for i, item in enumerate(items) if isinstance(item, Module) and item.name == name)
+
+
+def _instruction_indices(items, instruction_type, *, dst_contains=None, src_contains=None):
+    indices = []
+    for i, item in enumerate(items):
+        if not isinstance(item, instruction_type):
+            continue
+        dst = str(getattr(item, "dst", ""))
+        srcs = [str(item_src) for item_src in getattr(item, "srcs", [])]
+        if dst_contains is not None and dst_contains not in dst:
+            continue
+        if src_contains is not None and not any(src_contains in src for src in srcs):
+            continue
+        indices.append(i)
+    return indices
 
 
 def _instruction_index(items, instruction_type, dst, src):
@@ -196,16 +248,19 @@ def test_classic_pap_primes_mx_first_pgr_group_before_marking_primed():
     kernel = _classic_kernel(ProblemType={"MXBlockA": 32, "MXBlockB": 32, "Sparse": 0})
     tpa, tpb = _tensor_parameters(with_mx=True)
 
-    asm = str(writer.setupPrefetchAcrossPersistentLoads(kernel, tpa, tpb))
+    module = writer.setupPrefetchAcrossPersistentLoads(kernel, tpa, tpb)
+    items = _module_items(module)
 
-    assert "unit: GR A" in asm
-    assert "unit: GR MXSA" in asm
-    assert "unit: GR MXSB" in asm
-    assert "unit: GR B" in asm
-    assert asm.index("unit: GR A") < asm.index("unit: GR MXSA")
-    assert asm.index("unit: GR MXSA") < asm.index("unit: GR MXSB")
-    assert asm.index("unit: GR MXSB") < asm.index("unit: GR B")
-    assert asm.index("unit: GR B") < asm.index("first PGR group for next persistent iter prefetched")
+    gr_a = _module_index(items, "globalReadDo_A")
+    gr_mxsa = _module_index(items, "globalReadDo_MXSA")
+    gr_mxsb = _module_index(items, "globalReadDo_MXSB")
+    gr_b = _module_index(items, "globalReadDo_B")
+    primed = _instruction_index(items, kwa_module.SMovB32, "s[sgprSkPrefetchPrimed]", "1")
+
+    assert gr_a < gr_mxsa
+    assert gr_mxsa < gr_mxsb
+    assert gr_mxsb < gr_b
+    assert gr_b < primed
 
 
 def test_classic_pap_restores_gfx1250_shadow_limit_descriptor_encoding():
@@ -213,13 +268,51 @@ def test_classic_pap_restores_gfx1250_shadow_limit_descriptor_encoding():
     kernel = _classic_kernel(ProblemType={"MXBlockA": 32, "MXBlockB": 32, "Sparse": 0})
     tpa, tpb = _tensor_parameters(with_mx=True)
 
-    asm = str(writer.setupPrefetchAcrossPersistentLoads(kernel, tpa, tpb))
+    module = writer.setupPrefetchAcrossPersistentLoads(kernel, tpa, tpb)
+    items = _module_items(module)
 
-    assert "checkpoint ShadowLimitA" in asm
-    assert "restore ShadowLimitA" in asm
-    assert "checkpoint ShadowLimitMXSA" in asm
-    assert "restore ShadowLimitMXSA" in asm
-    assert asm.count("Shift num records for gfx125x") == 4
+    assert _instruction_indices(items, kwa_module.SMovB64, src_contains="ShadowLimitA+0")
+    assert _instruction_indices(items, kwa_module.SMovB64, dst_contains="ShadowLimitA+0")
+    assert _instruction_indices(items, kwa_module.SMovB64, src_contains="ShadowLimitMXSA+0")
+    assert _instruction_indices(items, kwa_module.SMovB64, dst_contains="ShadowLimitMXSA+0")
+    assert len(_instruction_indices(items, kwa_module.SLShiftRightB32, dst_contains="Srd")) == 4
+
+
+def test_classic_pap_shiftptr_refreshes_and_restores_gro_for_next_tile_loads():
+    writer = _ClassicPapWriter()
+    kernel = _classic_kernel(EdgeType="ShiftPtr")
+    tpa, tpb = _tensor_parameters()
+
+    module = writer.setupPrefetchAcrossPersistentLoads(kernel, tpa, tpb)
+    items = _module_items(module)
+    gro_snapshot_bases = {
+        tag: base for base, _, tag in writer.vgprPool.checked_out if tag.endswith("GROSnapshot")
+    }
+
+    for tc in ("A", "B"):
+        snapshot_base = gro_snapshot_bases["PAP%sGROSnapshot" % tc]
+        checkpoint = _instruction_index(
+            items,
+            kwa_module.VMovB32,
+            "v%u" % snapshot_base,
+            "v[vgprGlobalReadOffset%s+0]" % tc,
+        )
+        refresh = _module_index(items, "lwaTileAssignment_%s" % tc)
+        first_load = _module_index(items, "globalReadDo_%s" % tc)
+        restore = _instruction_index(
+            items,
+            kwa_module.VMovB32,
+            "v[vgprGlobalReadOffset%s+0]" % tc,
+            "v%u" % snapshot_base,
+        )
+
+        assert checkpoint < refresh
+        assert refresh < first_load
+        assert first_load < restore
+
+    gro_snapshots = [tag for _, _, tag in writer.vgprPool.checked_out if tag.endswith("GROSnapshot")]
+    assert gro_snapshots == ["PAPAGROSnapshot", "PAPBGROSnapshot"]
+    assert len(writer.vgprPool.checked_in) == len(gro_snapshots)
 
 
 def test_classic_pap_saves_direct_to_lds_bank_state_after_priming():
@@ -227,11 +320,12 @@ def test_classic_pap_saves_direct_to_lds_bank_state_after_priming():
     kernel = _classic_kernel(DirectToLdsA=True)
     tpa, tpb = _tensor_parameters()
 
-    asm = str(writer.setupPrefetchAcrossPersistentLoads(kernel, tpa, tpb))
+    module = writer.setupPrefetchAcrossPersistentLoads(kernel, tpa, tpb)
+    items = _module_items(module)
+    primed = _instruction_index(items, kwa_module.SMovB32, "s[sgprSkPrefetchPrimed]", "1")
+    save_lds_bank = _module_index(items, "papDtlSaveLdsBank")
 
-    assert "first PGR group for next persistent iter prefetched" in asm
-    assert "unit: save DTL LDS bank" in asm
-    assert asm.index("first PGR group for next persistent iter prefetched") < asm.index("unit: save DTL LDS bank")
+    assert primed < save_lds_bank
     assert writer.states.ldsTensorTokenIdx == writer.states.memTokenLdsBuffer1
 
 
@@ -251,19 +345,21 @@ def test_classic_pap_checkpoints_loop_counters_in_vgprs_around_next_tile_recount
         module = kwa_module.KernelWriterAssembly.prefetchAcrossPersistent(writer, kernel, tpa, tpb)
         items = _module_items(module)
 
-        loop_checkpoint = _instruction_index(items, kwa_module.VMovB32, "v70", "s[sgprLoopCounterL]")
-        orig_loop_checkpoint = _instruction_index(items, kwa_module.VMovB32, "v71", "s[sgprOrigLoopCounter]")
+        loop_vgpr = next(base for base, _, tag in writer.vgprPool.checked_out if tag == "PAP loop counters")
+        orig_loop_vgpr = loop_vgpr + 1
+        loop_checkpoint = _instruction_index(items, kwa_module.VMovB32, "v%u" % loop_vgpr, "s[sgprLoopCounterL]")
+        orig_loop_checkpoint = _instruction_index(items, kwa_module.VMovB32, "v%u" % orig_loop_vgpr, "s[sgprOrigLoopCounter]")
         calculate_loop_num_iter = _module_index(items, "calculateLoopNumIter")
         setup_pap_loads = _module_index(items, "setupPrefetchAcrossPersistentLoads")
-        loop_restore = _instruction_index(items, kwa_module.VReadfirstlaneB32, "s[sgprLoopCounterL]", "v70")
-        orig_loop_restore = _instruction_index(items, kwa_module.VReadfirstlaneB32, "s[sgprOrigLoopCounter]", "v71")
+        loop_restore = _instruction_index(items, kwa_module.VReadfirstlaneB32, "s[sgprLoopCounterL]", "v%u" % loop_vgpr)
+        orig_loop_restore = _instruction_index(items, kwa_module.VReadfirstlaneB32, "s[sgprOrigLoopCounter]", "v%u" % orig_loop_vgpr)
 
         assert loop_checkpoint < calculate_loop_num_iter
         assert orig_loop_checkpoint < calculate_loop_num_iter
         assert calculate_loop_num_iter < setup_pap_loads
         assert setup_pap_loads < loop_restore
         assert loop_restore < orig_loop_restore
-        assert writer.vgprPool.checked_in == [70]
+        assert writer.vgprPool.checked_in == [loop_vgpr]
     finally:
         kwa_module.Component.StreamK.find = original_find
 
@@ -281,13 +377,13 @@ def test_classic_pap_can_skip_internal_barrier_after_caller_sync():
         )
         tpa, tpb = _tensor_parameters()
 
-        with_barrier = str(kwa_module.KernelWriterAssembly.prefetchAcrossPersistent(
-            writer, kernel, tpa, tpb, skipBarrier=False))
-        without_barrier = str(kwa_module.KernelWriterAssembly.prefetchAcrossPersistent(
-            writer, kernel, tpa, tpb, skipBarrier=True))
+        with_barrier = kwa_module.KernelWriterAssembly.prefetchAcrossPersistent(
+            writer, kernel, tpa, tpb, skipBarrier=False)
+        without_barrier = kwa_module.KernelWriterAssembly.prefetchAcrossPersistent(
+            writer, kernel, tpa, tpb, skipBarrier=True)
 
-        assert "PAP: sync before next-tile prefetch" in with_barrier
-        assert "PAP: sync before next-tile prefetch" not in without_barrier
+        assert _instruction_indices(_module_items(with_barrier), kwa_module.SBarrier)
+        assert not _instruction_indices(_module_items(without_barrier), kwa_module.SBarrier)
     finally:
         kwa_module.Component.StreamK.find = original_find
 
@@ -310,17 +406,19 @@ def test_streamk_pap_next_tile_setup_applies_default_wgm_remap():
         )
 
         writer = SimpleNamespace(
-            sgprPool=_StubSgprPool(),
+            sgprPool=RegisterPool(0, RegisterType.Sgpr, defaultPreventOverflow=False, printRP=False),
             states=SimpleNamespace(WGMTransformLevels=-1),
         )
         kernel = {"SpaceFillingAlgo": []}
 
-        asm = str(streamk.prefetchAcrossPersistentSetupNextTile(writer, kernel, {"tensorChar": "A"}, {"tensorChar": "B"}))
+        module = streamk.prefetchAcrossPersistentSetupNextTile(writer, kernel, {"tensorChar": "A"}, {"tensorChar": "B"})
+        items = _module_items(module)
 
-        assert "unit: tile index" in asm
-        assert "unit: index to WG" in asm
-        assert "unit: default WGM remap" in asm
-        assert asm.index("unit: index to WG") < asm.index("unit: default WGM remap")
+        tile_index = _module_index(items, "skTileIndex")
+        index_to_wg = _module_index(items, "skIndexToWG")
+        default_wgm = _module_index(items, "DefaultWGM")
+        assert tile_index < index_to_wg
+        assert index_to_wg < default_wgm
     finally:
         wgm_algos.DefaultWGM = original_default_wgm
 
@@ -343,17 +441,19 @@ def test_streamk_pap_next_tile_setup_applies_space_filling_wgm_remap():
         )
 
         writer = SimpleNamespace(
-            sgprPool=_StubSgprPool(),
+            sgprPool=RegisterPool(0, RegisterType.Sgpr, defaultPreventOverflow=False, printRP=False),
             states=SimpleNamespace(WGMTransformLevels=-1),
         )
         kernel = {"SpaceFillingAlgo": [{"foo": "bar"}]}
 
-        asm = str(streamk.prefetchAcrossPersistentSetupNextTile(writer, kernel, {"tensorChar": "A"}, {"tensorChar": "B"}))
+        module = streamk.prefetchAcrossPersistentSetupNextTile(writer, kernel, {"tensorChar": "A"}, {"tensorChar": "B"})
+        items = _module_items(module)
 
-        assert "unit: tile index" in asm
-        assert "unit: index to WG" in asm
-        assert "unit: space-filling WGM remap" in asm
-        assert asm.index("unit: index to WG") < asm.index("unit: space-filling WGM remap")
+        tile_index = _module_index(items, "skTileIndex")
+        index_to_wg = _module_index(items, "skIndexToWG")
+        space_filling_wgm = _module_index(items, "SpaceFillingCurveWalk")
+        assert tile_index < index_to_wg
+        assert index_to_wg < space_filling_wgm
         assert writer.states.WGMTransformLevels == 1
     finally:
         wgm_algos.SpaceFillingCurveWalk = original_space_filling

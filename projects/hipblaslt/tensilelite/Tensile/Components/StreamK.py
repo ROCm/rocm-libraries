@@ -2213,7 +2213,7 @@ class StreamKOff(StreamK):
         module = Module("StreamK Off graWorkGroup")
         return module
 
-    def prefetchAcrossPersistentSetupNextTile(self, writer, kernel, tPA, tPB):
+    def prefetchAcrossPersistentSetupNextTile(self, writer, kernel, tPA, tPB, skipLroReset=False):
         module = Module("StreamK Off prefetchAcrossPersistentSetupNextTile")
         return module
 
