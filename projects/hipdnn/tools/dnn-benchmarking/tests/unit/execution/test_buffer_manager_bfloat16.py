@@ -32,6 +32,12 @@ def _bf16_uint16(values: np.ndarray) -> np.ndarray:
     return np.frombuffer(raw, dtype=np.uint16).reshape(values.shape)
 
 
+def _bf16_words_to_f32(words: np.ndarray, shape: list[int]) -> np.ndarray:
+    """Decode bf16 uint16 words into dense float32 values."""
+    f32_bits = words.astype(np.uint32) << np.uint32(16)
+    return f32_bits.view(np.float32).reshape(shape)
+
+
 class TestF32ToBf16RoundtripRNE:
     """Roundtrip and exactness tests for the RNE conversion."""
 
@@ -189,6 +195,26 @@ class TestTorchParity:
 
         assert numpy_bytes == torch_bytes
 
+    def test_rounding_cases_match_torch_bfloat16(self) -> None:
+        torch = pytest.importorskip("torch")
+
+        bits = np.array(
+            [
+                0x3F8080FF,  # low bits > half: rounds up to 0x3F81
+                0x3F807FFF,  # low bits < half: rounds down to 0x3F80
+                0x3F808000,  # exact tie, even bf16 LSB: stays at 0x3F80
+                0x3F818000,  # exact tie, odd bf16 LSB: rounds up to 0x3F82
+            ],
+            dtype=np.uint32,
+        )
+        x = bits.view(np.float32)
+        numpy_bytes = _f32_to_bf16_bytes(x)
+
+        torch_bf16 = torch.from_numpy(x.copy()).bfloat16().contiguous()
+        torch_bytes = torch_bf16.view(torch.uint8).cpu().numpy().tobytes()
+
+        assert numpy_bytes == torch_bytes
+
 
 def _make_bf16_input_tensor(uid: int = 1) -> TensorInfo:
     return TensorInfo(
@@ -263,6 +289,39 @@ class TestFillInputsRandomReproducibility:
             buffer_manager.get_input_data(tensor.uid), expected_host
         )
 
+    def test_bfloat16_get_output_data_decodes_device_bytes(self) -> None:
+        tensor = TensorInfo(
+            uid=9,
+            name="bf16_output",
+            dims=[2, 3],
+            strides=[],
+            data_type="bfloat16",
+            is_virtual=False,
+            is_output=True,
+        )
+        words = np.array(
+            [
+                0x3F80,  # 1.0
+                0x4000,  # 2.0
+                0xBF80,  # -1.0
+                0x0000,  # +0.0
+                0x8000,  # -0.0
+                0x7F80,  # +inf
+            ],
+            dtype=np.uint16,
+        )
+        mock_buffer = MagicMock()
+        mock_buffer.copy_to_host.return_value = words.tobytes()
+        buffer_manager = BufferManager([tensor])
+        buffer_manager._buffers[tensor.uid] = mock_buffer
+
+        output = buffer_manager.get_output_data(tensor.uid)
+
+        assert output is not None
+        assert output.dtype == np.float32
+        np.testing.assert_array_equal(output, _bf16_words_to_f32(words, tensor.dims))
+        mock_buffer.copy_to_host.assert_called_once_with()
+
 
 class TestStridedTensorStorage:
     """Stride-aware storage footprint and host-copy tests."""
@@ -303,6 +362,37 @@ class TestStridedTensorStorage:
         assert len(raw) == tensor.size_bytes
         np.testing.assert_array_equal(storage[0:3], host[0])
         np.testing.assert_array_equal(storage[4:7], host[1])
+
+    def test_bfloat16_strided_storage_roundtrips_with_padding(self) -> None:
+        tensor = TensorInfo(
+            uid=14,
+            name="bf16_padded",
+            dims=[2, 3],
+            strides=[4, 1],
+            data_type="bfloat16",
+            is_virtual=False,
+        )
+        data = np.array(
+            [
+                [1.00390625, 1.0078125, -2.25],
+                [0.33398438, -0.0, 4.5],
+            ],
+            dtype=np.float32,
+        )
+        raw = _encode_bfloat16_dense_to_storage_bytes(data, tensor)
+        storage = np.frombuffer(raw, dtype=np.uint16)
+        expected_words = _bf16_uint16(data)
+
+        assert len(raw) == tensor.size_bytes
+        np.testing.assert_array_equal(storage[0:3], expected_words[0])
+        assert storage[3] == 0
+        np.testing.assert_array_equal(storage[4:7], expected_words[1])
+
+        decoded = _bfloat16_storage_bytes_to_ndarray(raw, tensor)
+        np.testing.assert_array_equal(
+            decoded,
+            _bf16_words_to_f32(expected_words.reshape(-1), tensor.dims),
+        )
 
     def test_pass_by_value_tensor_uses_embedded_scalar(self) -> None:
         tensor = TensorInfo(

@@ -474,6 +474,54 @@ class TestPyTorchReferenceValidation:
                 result.passed
             ), f"hipDNN output does not match PyTorch reference: {result.message}"
 
+    def test_conv_fwd_bfloat16_validates_against_pytorch_when_supported(
+        self,
+        hipdnn,
+        sample_conv_fwd_json: Dict[str, Any],
+    ) -> None:
+        """BF16 hipDNN output decode validates against a BF16 PyTorch reference."""
+        graph_json = json.loads(json.dumps(sample_conv_fwd_json))
+        graph_json["name"] = "sample_conv_fwd_bfloat16"
+        graph_json["compute_data_type"] = "float"
+        graph_json["io_data_type"] = "bfloat16"
+        graph_json["intermediate_data_type"] = "bfloat16"
+        for tensor in graph_json["tensors"]:
+            tensor["data_type"] = "bfloat16"
+
+        loader = GraphLoader()
+        tensor_infos = loader.extract_tensor_info(graph_json)
+        config = SuiteConfig(
+            warmup_iters=1,
+            benchmark_iters=1,
+            seed=42,
+            reference_provider="pytorch",
+            metrics=MetricsConfig(tier="off"),
+        )
+
+        result = run_graph_all_providers(
+            graph_path=Path("/test/graph_bfloat16.json"),
+            graph_json=graph_json,
+            tensor_infos=tensor_infos,
+            config=config,
+            handle=hipdnn.Handle(),
+        )
+
+        engine_rows = [row for row in result.results if row.role == "engine"]
+        successful_rows = [row for row in engine_rows if row.status == "success"]
+        if not successful_rows:
+            reasons = "; ".join(
+                row.skip_reason or row.error_message or "no details"
+                for row in engine_rows
+            )
+            pytest.skip(
+                f"No hipDNN engine supports BF16 conv validation graph: {reasons}"
+            )
+
+        assert any(
+            row.correctness is not None and row.correctness.passed
+            for row in successful_rows
+        )
+
     def test_suite_validate_pytorch_reports_timed_reference_row(
         self,
         hipdnn,

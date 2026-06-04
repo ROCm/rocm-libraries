@@ -174,6 +174,45 @@ class TestPyTorchProviderMatmul:
         # A @ I = A
         assert np.allclose(outputs[3].data, a)
 
+    def test_matmul_bfloat16_uses_graph_dtype_and_returns_float32(self) -> None:
+        torch = pytest.importorskip("torch")
+        provider = ReferenceProviderRegistry.get_provider("pytorch")
+        graph_json = {
+            "tensors": [
+                {"uid": 1, "name": "a", "dims": [2, 3], "data_type": "bfloat16"},
+                {"uid": 2, "name": "b", "dims": [3, 2], "data_type": "bfloat16"},
+                {"uid": 3, "name": "c", "dims": [2, 2], "data_type": "bfloat16"},
+            ],
+            "nodes": [
+                {
+                    "type": "MatmulAttributes",
+                    "inputs": {"a_tensor_uid": 1, "b_tensor_uid": 2},
+                    "outputs": {"c_tensor_uid": 3},
+                }
+            ],
+        }
+        a = np.array(
+            [[1.00390625, -2.25, 0.33398438], [4.5, 1.0078125, -0.5]],
+            dtype=np.float32,
+        )
+        b = np.array(
+            [[0.25, -1.5], [2.0, 0.75], [-3.0, 1.25]],
+            dtype=np.float32,
+        )
+
+        outputs = provider.compute_reference(graph_json, {1: a, 2: b})
+        expected = (
+            torch.matmul(
+                torch.from_numpy(a).to(dtype=torch.bfloat16),
+                torch.from_numpy(b).to(dtype=torch.bfloat16),
+            )
+            .float()
+            .numpy()
+        )
+
+        assert outputs[3].data.dtype == np.float32
+        np.testing.assert_array_equal(outputs[3].data, expected)
+
 
 class TestPyTorchProviderPointwise:
     """Tests for pointwise operations."""
