@@ -42,7 +42,7 @@ namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 
 /// Example conv shape from plan §4: N=8, H=W=56, C=64, K=64, R=S=3,
 /// stride=1, pad=1, dilation=1. FP16. NHWC physical layout; logical
-/// NCHW dims per the hipDNN convention (see PREP_FINDINGS P-6).
+/// NCHW dims per the hipDNN convention.
 struct ExampleShape {
     static constexpr std::int64_t N = 8;
     static constexpr std::int64_t C = 64;

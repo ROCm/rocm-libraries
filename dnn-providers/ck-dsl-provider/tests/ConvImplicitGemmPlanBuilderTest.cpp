@@ -360,7 +360,7 @@ TEST_F(ConvImplicitGemmPlanBuilderGpu, BuildPlanCachesOnSecondCall) {
     EXPECT_EQ(planBuilder.cacheForTesting().size(), 1u);
 
     // Confirm the loaded kernel matches the example naming convention
-    // emitted by build_implicit_gemm_conv (see PREP_FINDINGS P-5).
+    // emitted by build_implicit_gemm_conv.
     auto kernelName = concretePlan1->moduleForTesting().kernelName();
     EXPECT_NE(kernelName.find("ck_dsl_conv_igemm"), std::string::npos)
         << "unexpected kernel name: " << kernelName;

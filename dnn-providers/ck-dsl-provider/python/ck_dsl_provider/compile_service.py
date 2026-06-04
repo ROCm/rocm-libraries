@@ -112,7 +112,7 @@ def compile_smoke(arch: str) -> dict:
         Dynamic shared-memory bytes (``sharedMemBytes`` arg). Zero for
         this kernel; the field exists so future kernels that need
         dynamic LDS can populate it without changing the wire shape
-        (the launcher.cpp gap noted in PREP_FINDINGS P-1).
+        (the launcher.cpp per-kind packing gap).
 
     ``arg_schema`` (list[dict])
         Per-arg metadata used by the C++ ``LaunchAbi::pack`` to lay out

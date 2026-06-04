@@ -16,8 +16,8 @@ namespace ck_dsl_provider {
 
 /// Summary statistics for one measurement run.
 ///
-/// Both ``minUs`` and ``medianUs`` are reported per PREP_FINDINGS P-7:
-/// min is the best-case, median is the robust typical, and the plan
+/// Both ``minUs`` and ``medianUs`` are reported: min is the best-case,
+/// median is the robust typical, and the plan
 /// uses median for the TFLOPS calculation so it isn't swayed by a
 /// single fast outlier.
 ///
@@ -101,7 +101,7 @@ class PerfMeasurement {
     PerfResult measure(LaunchFn&& launchFn, double flops, hipStream_t stream);
 
     /// Emit a single-line ``[CkDslPerf]`` log via
-    /// HIPDNN_PLUGIN_LOG_INFO. Format (matches PREP_FINDINGS P-7):
+    /// HIPDNN_PLUGIN_LOG_INFO. Format:
     ///
     ///   [CkDslPerf] tag=<tag> warmup=N iters=M min_us=X.X median_us=Y.Y tflops=Z.Z
     ///

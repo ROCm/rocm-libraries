@@ -88,8 +88,8 @@ std::int64_t convOutputDim(std::int64_t in, std::int64_t pad, std::int64_t dil, 
 /// already proves -- the plan-builder + plan-execute path here is
 /// the exact same code the backend would call after dlopen.
 ///
-/// Tensor layout convention (PREP_FINDINGS P-6 + miopen-provider
-/// precedent): host-side tensors carry logical NCHW dims for X/Y and
+/// Tensor layout convention (miopen-provider precedent): host-side
+/// tensors carry logical NCHW dims for X/Y and
 /// logical KCRS for W, with physical NHWC strides on top. The DSL
 /// kernel reads/writes the same NHWC memory layout; the CPU reference
 /// iterates logical dims and resolves via strides, so a direct
@@ -208,7 +208,7 @@ TEST_P(IntegrationGpuCkDslConvFp16Gpu, Conv) {
     tensorYGpu.memory().markDeviceModified();
     (void)tensorYGpu.memory().hostData();
 
-    // Tolerance bound (per plan §1 + PREP_FINDINGS): expected error
+    // Tolerance bound (per plan §1): expected error
     // for K_gemm random-uniform fp16 accumulations is roughly
     // sqrt(K_gemm) * fp16_eps * |max_input * max_weight|, which for the
     // shapes here stays well under 1e-3. We use a generous 5e-2

@@ -105,8 +105,8 @@ ConvImplicitGemmSpec ConvImplicitGemmAdapter::buildSpec(const ConvolutionFwdAttr
     checkDtypeFp16(W, "W");
     checkDtypeFp16(Y, "Y");
 
-    // Tensor dim convention (PREP_FINDINGS P-6 + miopen-provider
-    // precedent): TensorAttributes::dims is the logical NCHW order
+    // Tensor dim convention (miopen-provider precedent):
+    // TensorAttributes::dims is the logical NCHW order
     // regardless of physical layout. NHWC strides describe the
     // memory layout but the dims index by logical axis. So
     //   X.dims = [N, C, Hi, Wi]

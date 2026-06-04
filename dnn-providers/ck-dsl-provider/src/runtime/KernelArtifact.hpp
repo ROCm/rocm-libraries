@@ -16,9 +16,8 @@ namespace ck_dsl_provider {
 /// ``HIP_LAUNCH_PARAM_BUFFER_*`` "extras" path, which expects a
 /// contiguous byte buffer laid out the same way the AMDGPU host-side
 /// calling convention would lay the args. Natural-alignment, no
-/// padding beyond what each slot's ``align`` demands. See
-/// PREP_FINDINGS P-1 for the launcher.cpp's hardcoded per-kind packing
-/// this generalises.
+/// padding beyond what each slot's ``align`` demands. This
+/// generalises the launcher.cpp's hardcoded per-kind packing.
 ///
 /// The Python compile service emits one ArgSchema per kernel parameter
 /// (see ``ck_dsl_provider.compile_service.compile_smoke``); the C++

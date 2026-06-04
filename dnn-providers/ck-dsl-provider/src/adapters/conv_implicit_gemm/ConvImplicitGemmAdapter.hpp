@@ -17,7 +17,7 @@ namespace ck_dsl_provider {
 /// Walks a single hipDNN ConvolutionFwd node plus the surrounding
 /// tensor map and produces a fully-populated ``ConvImplicitGemmSpec``.
 ///
-/// The ~15 graph-derived fields per plan §4 + PREP_FINDINGS P-5 are:
+/// The ~15 graph-derived fields per plan §4 are:
 ///   * 13 ConvProblem fields: N, Hi, Wi, C, K, R, S, sH, sW, pH, pW,
 ///     dH, dW (extracted from X/W tensor dims + the conv-fwd attrs'
 ///     stride/padding/dilation)
