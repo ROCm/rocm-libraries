@@ -113,6 +113,41 @@
       ]),
     }),
     dict({
+      'file': 'StreamK_B8F8.yaml',
+      'kernels': list([
+        dict({
+          'basename': 'Cijk_Alik_Bljk_B8F8_BH_Bias_HA_S_SAB_SAV_UserArgDg3hgtiBVmi-HOfwCFj6U5L2eE6I1mEzxAgVPumD8pQ=',
+          'err': 0,
+          'n_lines': 181620,
+          'sha256': '2ffe06a782c37010b798d559556d8e589ac92a7d0a4672ffb5321d4c42665262',
+        }),
+        dict({
+          'basename': 'Cijk_Alik_Bljk_B8F8_BH_Bias_HA_S_SAB_SAV_UserArgEJmfH_JDzNoGaESKDqdoW0tcWUjLbLkU5HBNpdGXSG4=',
+          'err': 0,
+          'n_lines': 131172,
+          'sha256': '452b8bf27552b75e79dfdfa09469692b8d0f6db3df10deeab5a4f365835b519f',
+        }),
+        dict({
+          'basename': 'Cijk_Alik_Bljk_B8F8_BH_Bias_HA_S_SAB_SAV_UserArgUNleQh3-oQ_3vgdVBeGRarnYhCxHqElVzb5QOWY1Bng=',
+          'err': 0,
+          'n_lines': 150415,
+          'sha256': '46012e3a957f549d7d05c7176a0eae9972d68b72295f9eb85025069dfdb8af34',
+        }),
+        dict({
+          'basename': 'Cijk_Alik_Bljk_B8F8_BH_Bias_HA_S_SAB_SAV_UserArgWEur5NvF5obTCoMVXvM2TX6kSqwFqMxvm6aOYwX6jVU=',
+          'err': 0,
+          'n_lines': 142637,
+          'sha256': 'dcdfd0fd2cebf69886e465d2eb1e35156723c86fa498be9416909066d5b4abf6',
+        }),
+        dict({
+          'basename': 'Cijk_Alik_Bljk_B8F8_BH_Bias_HA_S_SAB_SAV_UserArgqhANR79vkuokwP6VlnpRYtX3TGsCodn5RiYBuOAjLtI=',
+          'err': 0,
+          'n_lines': 184654,
+          'sha256': '80e5ff383adef2e4d314ea3e093695eabd81bad33793a764af9c29c74bd7ca6b',
+        }),
+      ]),
+    }),
+    dict({
       'file': 'StreamK_F8F8S.yaml',
       'kernels': list([
         dict({

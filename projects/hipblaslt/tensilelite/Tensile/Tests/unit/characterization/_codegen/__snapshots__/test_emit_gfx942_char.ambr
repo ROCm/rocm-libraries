@@ -131,6 +131,23 @@
       ]),
     }),
     dict({
+      'file': 'LSU_MX.yaml',
+      'kernels': list([
+        dict({
+          'basename': 'Cijk_Alik_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT1VevJhILlSy_P3KabUGDTy267XCa3Pixm47dM6X9B_UI=',
+          'err': 0,
+          'n_lines': 5471,
+          'sha256': '711c48a9c717fa570c62b9438da410c516fafcc03860cf5ca8b7841421bdd984',
+        }),
+        dict({
+          'basename': 'Cijk_Alik_Bjlk_S_MX_B_Bias_HA_S_SAV_UserArgs_MT1W3BLE1GqWHANoxMvTLpCktNB638lM4roU32IBHKyJo8=',
+          'err': 0,
+          'n_lines': 3403,
+          'sha256': '74cfee50aafe3856e170d6aac3c1474bd1745afba79937ca5adee0498c6917e3',
+        }),
+      ]),
+    }),
+    dict({
       'file': 'MX.yaml',
       'kernels': list([
         dict({
