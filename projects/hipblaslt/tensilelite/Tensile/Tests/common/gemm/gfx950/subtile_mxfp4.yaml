@@ -83,7 +83,7 @@ BenchmarkProblems:
         - DepthU: [256]                 # 2*MI_K = 2*128
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [0, 3]
+        - StreamK: [3]
         - StaggerU: [0]
         - UseSubtileImpl: [1]
       BenchmarkJoinParameters:
@@ -161,7 +161,7 @@ BenchmarkProblems:
         - DepthU: [512]                 # 4*MI_K; K must be mult of 512
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [0, 3]
+        - StreamK: [3]
         - StaggerU: [0]
         - UseSubtileImpl: [1]
       BenchmarkJoinParameters:
@@ -225,7 +225,7 @@ BenchmarkProblems:
         - DepthU: [256]                 # 2*MI_K = 2*128
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [0, 3]
+        - StreamK: [3]
         - StaggerU: [0]
         - UseSubtileImpl: [1]
       BenchmarkJoinParameters:
@@ -292,7 +292,7 @@ BenchmarkProblems:
         - DepthU: [256]
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [0, 3]
+        - StreamK: [3]
         - StaggerU: [0]
         - UseSubtileImpl: [1]
       BenchmarkJoinParameters:
@@ -341,7 +341,7 @@ BenchmarkProblems:
         - DepthU: [256]                 # 2*MI_K = 2*128
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [0, 3]
+        - StreamK: [3]
         - StaggerU: [0]
         - UseSubtileImpl: [1]
       BenchmarkJoinParameters:
@@ -413,7 +413,7 @@ BenchmarkProblems:
         - DepthU: [256]
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [0, 3]
+        - StreamK: [3]
         - StaggerU: [0]
         - UseSubtileImpl: [1]
       BenchmarkJoinParameters:
@@ -466,7 +466,7 @@ BenchmarkProblems:
         - DepthU: [256]
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [0, 3]
+        - StreamK: [3]
         - StaggerU: [0]
         - UseSubtileImpl: [1]
       BenchmarkJoinParameters:
@@ -697,7 +697,7 @@ BenchmarkProblems:
         - DepthU: [256]
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [0, 3]
+        - StreamK: [3]
         - StaggerU: [0]
         - UseSubtileImpl: [1]
       BenchmarkJoinParameters:

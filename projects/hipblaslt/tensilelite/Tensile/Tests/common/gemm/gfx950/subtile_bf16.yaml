@@ -140,7 +140,7 @@ BenchmarkProblems:
         - DepthU: [64]                  # 2*MI_K = 2*32
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [0, 3]
+        - StreamK: [3]
         - StaggerU: [0]
         - UseSubtileImpl: [1]
       BenchmarkJoinParameters:
@@ -240,7 +240,7 @@ BenchmarkProblems:
         - DepthU: [128, 192]            # > 2*MI_K; K must be mult of LCM(128,192)=384
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [0, 3]
+        - StreamK: [3]
         - StaggerU: [0]
         - UseSubtileImpl: [1]
       BenchmarkJoinParameters:
@@ -291,7 +291,7 @@ BenchmarkProblems:
         - DepthU: [64]                  # 2*MI_K = 2*32
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [0, 3]
+        - StreamK: [3]
         - StaggerU: [0]
         - UseSubtileImpl: [1]
       BenchmarkJoinParameters:
@@ -499,7 +499,7 @@ BenchmarkProblems:
         - DepthU: [64]
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [0, 3]
+        - StreamK: [3]
         - StaggerU: [0]
         - UseSubtileImpl: [1]
       BenchmarkJoinParameters:
@@ -606,7 +606,7 @@ BenchmarkProblems:
         - DepthU: [64]
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
-        - StreamK: [0, 3]
+        - StreamK: [3]
         - StaggerU: [0]
         - UseSubtileImpl: [1]
       BenchmarkJoinParameters:
