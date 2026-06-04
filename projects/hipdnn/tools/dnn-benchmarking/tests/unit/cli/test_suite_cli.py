@@ -4,6 +4,7 @@
 """Unit tests for suite CLI argument parsing and run_suite() workflow."""
 
 import json
+import importlib
 import os
 import sys
 import tempfile
@@ -24,6 +25,8 @@ from dnn_benchmarking.reporting.suite_results import (
     SuiteMetadata,
     SuiteResult,
 )
+
+MAIN_MODULE = importlib.import_module("dnn_benchmarking.cli.main")
 
 
 def _mock_hipdnn():
@@ -127,8 +130,8 @@ class TestMainRouting:
             paths.append(str(p))
         return paths
 
-    @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
-    @patch("dnn_benchmarking.cli.main.run_suite_cli")
+    @patch.object(MAIN_MODULE, "gpu_is_available", return_value=True)
+    @patch.object(MAIN_MODULE, "run_suite_cli")
     def test_multi_file_glob_routes_to_orchestrator(
         self, mock_orchestrate: MagicMock, mock_gpu: MagicMock
     ) -> None:
@@ -154,8 +157,8 @@ class TestMainRouting:
             assert len(graph_paths) == 3
             assert result == 0
 
-    @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
-    @patch("dnn_benchmarking.cli.main.run_suite_cli")
+    @patch.object(MAIN_MODULE, "gpu_is_available", return_value=True)
+    @patch.object(MAIN_MODULE, "run_suite_cli")
     def test_single_file_also_routes_to_orchestrator(
         self, mock_orchestrate: MagicMock, mock_gpu: MagicMock
     ) -> None:
@@ -180,7 +183,7 @@ class TestMainRouting:
             assert len(graph_paths) == 1
             assert result == 0
 
-    @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
+    @patch.object(MAIN_MODULE, "gpu_is_available", return_value=True)
     @patch("dnn_benchmarking.cli.suite_runner_cli.run_suite_benchmark")
     def test_verbose_flag_propagates_to_suite_config(
         self, mock_benchmark: MagicMock, mock_gpu: MagicMock
@@ -199,7 +202,7 @@ class TestMainRouting:
         suite_config = mock_benchmark.call_args.kwargs["config"]
         assert suite_config.verbose is True
 
-    @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
+    @patch.object(MAIN_MODULE, "gpu_is_available", return_value=True)
     @patch("dnn_benchmarking.cli.suite_runner_cli.run_suite_benchmark")
     def test_engine_list_propagates_to_suite_config(
         self, mock_benchmark: MagicMock, mock_gpu: MagicMock
@@ -221,7 +224,7 @@ class TestMainRouting:
         suite_config = mock_benchmark.call_args.kwargs["config"]
         assert suite_config.engine_filter == [1, 2]
 
-    @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
+    @patch.object(MAIN_MODULE, "gpu_is_available", return_value=True)
     @patch("dnn_benchmarking.cli.suite_runner_cli.run_suite_benchmark")
     def test_plugin_paths_propagate_to_suite_config(
         self, mock_benchmark: MagicMock, mock_gpu: MagicMock
@@ -251,7 +254,7 @@ class TestMainRouting:
         assert suite_config.engine_filter == [2, 1]
         assert suite_config.plugin_paths == [Path("/plugins/b"), Path("/plugins/a")]
 
-    @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
+    @patch.object(MAIN_MODULE, "gpu_is_available", return_value=True)
     @patch("dnn_benchmarking.cli.suite_runner_cli.run_suite_benchmark")
     def test_same_engine_plugin_paths_propagate_as_ordered_selections(
         self, mock_benchmark: MagicMock, mock_gpu: MagicMock
@@ -307,9 +310,9 @@ class TestMainRouting:
         reporter.print_error.assert_called_once()
         assert "entry count" in reporter.print_error.call_args[0][0]
 
-    @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
-    @patch("dnn_benchmarking.cli.main.run_pytorch_cli")
-    @patch("dnn_benchmarking.cli.main.run_suite_cli")
+    @patch.object(MAIN_MODULE, "gpu_is_available", return_value=True)
+    @patch.object(MAIN_MODULE, "run_pytorch_cli")
+    @patch.object(MAIN_MODULE, "run_suite_cli")
     def test_pytorch_backend_single_file_uses_pytorch_path(
         self,
         mock_orchestrate: MagicMock,
@@ -334,7 +337,7 @@ class TestMainRouting:
             mock_orchestrate.assert_not_called()
             assert result == 0
 
-    @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
+    @patch.object(MAIN_MODULE, "gpu_is_available", return_value=True)
     def test_pytorch_backend_multi_file_rejected(self, mock_gpu: MagicMock) -> None:
         """--backend pytorch with a glob exits 1 (suite not supported)."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -351,8 +354,8 @@ class TestMainRouting:
 
             assert result == 1
 
-    @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
-    @patch("dnn_benchmarking.cli.main.run_suite_cli")
+    @patch.object(MAIN_MODULE, "gpu_is_available", return_value=True)
+    @patch.object(MAIN_MODULE, "run_suite_cli")
     def test_recursive_glob_matches_nested_directories(
         self, mock_orchestrate: MagicMock, mock_gpu: MagicMock
     ) -> None:
@@ -757,7 +760,7 @@ class TestBackendEngineRouting:
         p.write_text(json.dumps({"name": "g", "nodes": [], "tensors": []}))
         return p
 
-    @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
+    @patch.object(MAIN_MODULE, "gpu_is_available", return_value=True)
     def test_engine_list_with_pytorch_backend_rejected(
         self, mock_gpu: MagicMock
     ) -> None:
@@ -780,7 +783,7 @@ class TestBackendEngineRouting:
                 result = main()
         assert result == 1
 
-    @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=True)
+    @patch.object(MAIN_MODULE, "gpu_is_available", return_value=True)
     @patch("dnn_benchmarking.cli.pytorch_runner_cli.run_pytorch_benchmark")
     def test_single_engine_with_pytorch_backend_accepted(
         self, mock_run_pytorch: MagicMock, mock_gpu: MagicMock
@@ -975,8 +978,8 @@ class TestValidationStartupGate:
 class TestNoGpuDetected:
     """main() returns 1 when no GPU is detected (check is centralized in main)."""
 
-    @patch("dnn_benchmarking.cli.main._resolve_graphs")
-    @patch("dnn_benchmarking.cli.main.gpu_is_available", return_value=False)
+    @patch.object(MAIN_MODULE, "_resolve_graphs")
+    @patch.object(MAIN_MODULE, "gpu_is_available", return_value=False)
     def test_main_returns_one_when_no_gpu(
         self, mock_gpu: MagicMock, mock_resolve: MagicMock
     ) -> None:
