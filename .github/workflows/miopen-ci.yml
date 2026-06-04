@@ -181,6 +181,7 @@ jobs:
       - name: Build rocjitsu KMD
         if: matrix.job_id == 'gtest-check-rocjitsu'
         run: |
+          apt-get install -y libdrm-dev
           cmake -S rocm-systems/emulation/rocjitsu -B rocjitsu-build \
             -DCMAKE_BUILD_TYPE=Release
           cmake --build rocjitsu-build --target rocjitsu_kmd_shim -j$(nproc)
