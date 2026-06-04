@@ -539,6 +539,149 @@ class TestPyTorchProviderNewOps:
         np.testing.assert_allclose(outputs[6].data, expected_stats.numpy(), rtol=1e-6)
         assert outputs[6].data.shape == (1, 1, 2, 1)
 
+    def test_sdpa_causal_forward_matches_torch_and_returns_masked_stats(self) -> None:
+        provider = ReferenceProviderRegistry.get_provider("pytorch")
+        q = np.array([[[[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]]], dtype=np.float32)
+        k = q.copy()
+        v = np.array([[[[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]]]], dtype=np.float32)
+        graph_json = {
+            "tensors": [
+                {"uid": 1, "dims": [1, 1, 3, 2], "data_type": "float"},
+                {"uid": 2, "dims": [1, 1, 3, 2], "data_type": "float"},
+                {"uid": 3, "dims": [1, 1, 3, 2], "data_type": "float"},
+                {"uid": 4, "dims": [1, 1, 3, 2], "data_type": "float"},
+                {"uid": 6, "dims": [1, 1, 3, 1], "data_type": "float"},
+            ],
+            "nodes": [
+                {
+                    "type": "SdpaAttributes",
+                    "inputs": {"q_tensor_uid": 1, "k_tensor_uid": 2, "v_tensor_uid": 3},
+                    "outputs": {"o_tensor_uid": 4, "stats_tensor_uid": 6},
+                    "attributes": {"causal_mask": True, "dropout_probability": 0.0},
+                }
+            ],
+        }
+
+        outputs = provider.compute_reference(graph_json, {1: q, 2: k, 3: v})
+        q_t = torch.from_numpy(q)
+        k_t = torch.from_numpy(k)
+        v_t = torch.from_numpy(v)
+        expected = torch.nn.functional.scaled_dot_product_attention(
+            q_t, k_t, v_t, dropout_p=0.0, is_causal=True
+        )
+        scores = torch.matmul(q_t, k_t.transpose(-2, -1)) / torch.sqrt(
+            torch.tensor(2.0)
+        )
+        causal = torch.ones(3, 3, dtype=torch.bool).tril()
+        expected_stats = torch.logsumexp(
+            scores.masked_fill(~causal, float("-inf")), dim=-1, keepdim=True
+        )
+
+        np.testing.assert_allclose(outputs[4].data, expected.numpy(), rtol=1e-6)
+        np.testing.assert_allclose(outputs[6].data, expected_stats.numpy(), rtol=1e-6)
+
+    def test_sdpa_additive_attention_mask_matches_torch(self) -> None:
+        provider = ReferenceProviderRegistry.get_provider("pytorch")
+        q = np.array([[[[1.0, 0.0], [0.0, 1.0]]]], dtype=np.float32)
+        k = q.copy()
+        v = np.array([[[[1.0, 2.0], [3.0, 4.0]]]], dtype=np.float32)
+        mask = np.array([[[[0.0, -100.0], [0.0, 0.0]]]], dtype=np.float32)
+        graph_json = {
+            "tensors": [
+                {"uid": 1, "dims": [1, 1, 2, 2], "data_type": "float"},
+                {"uid": 2, "dims": [1, 1, 2, 2], "data_type": "float"},
+                {"uid": 3, "dims": [1, 1, 2, 2], "data_type": "float"},
+                {"uid": 4, "dims": [1, 1, 2, 2], "data_type": "float"},
+                {"uid": 5, "dims": [1, 1, 2, 2], "data_type": "float"},
+            ],
+            "nodes": [
+                {
+                    "type": "SdpaAttributes",
+                    "inputs": {
+                        "q_tensor_uid": 1,
+                        "k_tensor_uid": 2,
+                        "v_tensor_uid": 3,
+                        "attn_mask_tensor_uid": 5,
+                    },
+                    "outputs": {"o_tensor_uid": 4},
+                    "attributes": {"dropout_probability": 0.0},
+                }
+            ],
+        }
+
+        outputs = provider.compute_reference(graph_json, {1: q, 2: k, 3: v, 5: mask})
+        expected = torch.nn.functional.scaled_dot_product_attention(
+            torch.from_numpy(q),
+            torch.from_numpy(k),
+            torch.from_numpy(v),
+            attn_mask=torch.from_numpy(mask),
+            dropout_p=0.0,
+        )
+
+        np.testing.assert_allclose(outputs[4].data, expected.numpy(), rtol=1e-6)
+
+    def test_sdpa_gqa_matches_repeated_key_value_heads(self) -> None:
+        provider = ReferenceProviderRegistry.get_provider("pytorch")
+        q = np.arange(16, dtype=np.float32).reshape(1, 2, 2, 4) / 10.0
+        k = np.arange(8, dtype=np.float32).reshape(1, 1, 2, 4) / 11.0
+        v = np.arange(8, dtype=np.float32).reshape(1, 1, 2, 4) / 13.0
+        graph_json = {
+            "tensors": [
+                {"uid": 1, "dims": [1, 2, 2, 4], "data_type": "float"},
+                {"uid": 2, "dims": [1, 1, 2, 4], "data_type": "float"},
+                {"uid": 3, "dims": [1, 1, 2, 4], "data_type": "float"},
+                {"uid": 4, "dims": [1, 2, 2, 4], "data_type": "float"},
+            ],
+            "nodes": [
+                {
+                    "type": "SdpaAttributes",
+                    "inputs": {"q_tensor_uid": 1, "k_tensor_uid": 2, "v_tensor_uid": 3},
+                    "outputs": {"o_tensor_uid": 4},
+                    "attributes": {"dropout_probability": 0.0},
+                }
+            ],
+        }
+
+        outputs = provider.compute_reference(graph_json, {1: q, 2: k, 3: v})
+        expected = torch.nn.functional.scaled_dot_product_attention(
+            torch.from_numpy(q),
+            torch.from_numpy(k).repeat_interleave(2, dim=-3),
+            torch.from_numpy(v).repeat_interleave(2, dim=-3),
+            dropout_p=0.0,
+        )
+
+        np.testing.assert_allclose(outputs[4].data, expected.numpy(), rtol=1e-6)
+
+    def test_sdpa_attention_scale_value_matches_torch(self) -> None:
+        provider = ReferenceProviderRegistry.get_provider("pytorch")
+        q = np.array([[[[1.0, 0.0], [0.0, 1.0]]]], dtype=np.float32)
+        k = q.copy()
+        v = np.array([[[[1.0, 2.0], [3.0, 4.0]]]], dtype=np.float32)
+        graph_json = {
+            "nodes": [
+                {
+                    "type": "SdpaAttributes",
+                    "inputs": {"q_tensor_uid": 1, "k_tensor_uid": 2, "v_tensor_uid": 3},
+                    "outputs": {"o_tensor_uid": 4},
+                    "attributes": {
+                        "attn_scale_value": 0.25,
+                        "dropout_probability": 0.0,
+                    },
+                }
+            ],
+        }
+
+        outputs = provider.compute_reference(graph_json, {1: q, 2: k, 3: v})
+        expected = torch.nn.functional.scaled_dot_product_attention(
+            torch.from_numpy(q),
+            torch.from_numpy(k),
+            torch.from_numpy(v),
+            dropout_p=0.0,
+            scale=0.25,
+        )
+
+        np.testing.assert_allclose(outputs[4].data, expected.numpy(), rtol=1e-6)
+
     def test_sdpa_bfloat16_uses_graph_dtype(self) -> None:
         provider = ReferenceProviderRegistry.get_provider("pytorch")
         q = np.array([[[[0.10, 0.20], [0.30, 0.40]]]], dtype=np.float32)
@@ -602,3 +745,106 @@ class TestPyTorchProviderNewOps:
 
         with pytest.raises(ValueError, match=optional_output):
             provider.compute_reference(graph_json, {1: q, 2: k, 3: v})
+
+    @pytest.mark.parametrize(
+        "optional_input",
+        [
+            "seq_len_q_tensor_uid",
+            "seq_len_kv_tensor_uid",
+            "seed_tensor_uid",
+            "offset_tensor_uid",
+            "dropout_mask_tensor_uid",
+            "dropout_scale_tensor_uid",
+            "page_table_k_tensor_uid",
+            "page_table_v_tensor_uid",
+            "block_mask_tensor_uid",
+            "sink_token_tensor_uid",
+            "descale_q_tensor_uid",
+            "descale_k_tensor_uid",
+            "descale_v_tensor_uid",
+            "descale_s_tensor_uid",
+            "scale_s_tensor_uid",
+            "scale_o_tensor_uid",
+        ],
+    )
+    def test_sdpa_forward_rejects_unsupported_optional_inputs(
+        self, optional_input: str
+    ) -> None:
+        provider = ReferenceProviderRegistry.get_provider("pytorch")
+        q = np.array([[[[1.0, 0.0], [0.0, 1.0]]]], dtype=np.float32)
+        graph_json = {
+            "nodes": [
+                {
+                    "type": "SdpaAttributes",
+                    "inputs": {
+                        "q_tensor_uid": 1,
+                        "k_tensor_uid": 2,
+                        "v_tensor_uid": 3,
+                        optional_input: 5,
+                    },
+                    "outputs": {"o_tensor_uid": 4},
+                    "attributes": {"dropout_probability": 0.0},
+                }
+            ],
+        }
+
+        with pytest.raises(ValueError, match=optional_input):
+            provider.compute_reference(
+                graph_json,
+                {1: q, 2: q, 3: q, 5: np.array([1], dtype=np.int32)},
+            )
+
+    @pytest.mark.parametrize(
+        "attributes,match",
+        [
+            ({"alibi_mask": True}, "alibi/padding"),
+            ({"padding_mask": True}, "alibi/padding"),
+            ({"causal_mask_bottom_right": True}, "bottom-right causal"),
+            ({"diagonal_alignment": "BOTTOM_RIGHT"}, "TOP_LEFT"),
+            ({"left_bound": 1}, "sliding-window"),
+            ({"right_bound": 1}, "sliding-window"),
+        ],
+    )
+    def test_sdpa_forward_rejects_unsupported_attributes(
+        self, attributes: dict, match: str
+    ) -> None:
+        provider = ReferenceProviderRegistry.get_provider("pytorch")
+        q = np.array([[[[1.0, 0.0], [0.0, 1.0]]]], dtype=np.float32)
+        graph_json = {
+            "nodes": [
+                {
+                    "type": "SdpaAttributes",
+                    "inputs": {"q_tensor_uid": 1, "k_tensor_uid": 2, "v_tensor_uid": 3},
+                    "outputs": {"o_tensor_uid": 4},
+                    "attributes": {"dropout_probability": 0.0, **attributes},
+                }
+            ],
+        }
+
+        with pytest.raises(ValueError, match=match):
+            provider.compute_reference(graph_json, {1: q, 2: q, 3: q})
+
+    def test_sdpa_forward_rejects_attn_mask_with_causal_mask(self) -> None:
+        provider = ReferenceProviderRegistry.get_provider("pytorch")
+        q = np.array([[[[1.0, 0.0], [0.0, 1.0]]]], dtype=np.float32)
+        graph_json = {
+            "nodes": [
+                {
+                    "type": "SdpaAttributes",
+                    "inputs": {
+                        "q_tensor_uid": 1,
+                        "k_tensor_uid": 2,
+                        "v_tensor_uid": 3,
+                        "attn_mask_tensor_uid": 5,
+                    },
+                    "outputs": {"o_tensor_uid": 4},
+                    "attributes": {"causal_mask": True, "dropout_probability": 0.0},
+                }
+            ],
+        }
+
+        with pytest.raises(ValueError, match="both attn_mask and causal_mask"):
+            provider.compute_reference(
+                graph_json,
+                {1: q, 2: q, 3: q, 5: np.zeros((1, 1, 2, 2), dtype=np.float32)},
+            )

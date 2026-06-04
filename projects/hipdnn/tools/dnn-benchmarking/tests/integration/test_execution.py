@@ -522,6 +522,50 @@ class TestPyTorchReferenceValidation:
             for row in successful_rows
         )
 
+    @pytest.mark.parametrize("graph_name", ["sample_sdpa.json", "sample_mha_sdpa.json"])
+    def test_sdpa_validates_against_pytorch_when_supported(
+        self,
+        hipdnn,
+        graph_name: str,
+    ) -> None:
+        """Supported SDPA engines validate against the PyTorch reference."""
+        graph_path = Path(__file__).parent.parent.parent / "graphs" / graph_name
+        loader = GraphLoader()
+        graph_json = loader.load_json(graph_path)
+        tensor_infos = loader.extract_tensor_info(graph_json)
+        config = SuiteConfig(
+            warmup_iters=1,
+            benchmark_iters=1,
+            seed=42,
+            reference_provider="pytorch",
+            metrics=MetricsConfig(tier="off"),
+        )
+
+        result = run_graph_all_providers(
+            graph_path=graph_path,
+            graph_json=graph_json,
+            tensor_infos=tensor_infos,
+            config=config,
+            handle=hipdnn.Handle(),
+        )
+
+        reference_rows = [row for row in result.results if row.role == "reference"]
+        engine_rows = [row for row in result.results if row.role == "engine"]
+        successful_rows = [row for row in engine_rows if row.status == "success"]
+        if not successful_rows:
+            reasons = "; ".join(
+                row.skip_reason or row.error_message or "no details"
+                for row in engine_rows
+            )
+            pytest.skip(f"No hipDNN engine supports {graph_name}: {reasons}")
+
+        assert len(reference_rows) == 1
+        assert reference_rows[0].status == "success"
+        assert any(
+            row.correctness is not None and row.correctness.passed
+            for row in successful_rows
+        )
+
     def test_suite_validate_pytorch_reports_timed_reference_row(
         self,
         hipdnn,
