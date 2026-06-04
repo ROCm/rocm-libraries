@@ -147,6 +147,7 @@ void PassBuilder::loadPluginsFromDirectory(const std::string& dirPath) {
 void PassBuilder::unloadPlugins() {
     auto& reg = getFactoryRegistry();
     std::lock_guard<std::mutex> lock(reg.mu);
+    reg.factories.clear();
     for (auto* handle : reg.loadedPlugins) {
 #ifdef _WIN32
         FreeLibrary(reinterpret_cast<HMODULE>(handle));

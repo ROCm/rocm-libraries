@@ -218,10 +218,12 @@ TEST(PluginIntegrationTest, HelloWorldPassReadsAndWritesPluginData) {
             if (pass) PM.addPass(std::move(pass));
         });
 
-    PassManager pm;
-    module.getPassBuilder().applyExtensionPoint(PipelineExtensionPoint::AfterRegionPasses, pm,
-                                                module);
-    pm.run(module.getFunction());
+    {
+        PassManager pm;
+        module.getPassBuilder().applyExtensionPoint(PipelineExtensionPoint::AfterRegionPasses, pm,
+                                                    module);
+        pm.run(module.getFunction());
+    }
 
     EXPECT_EQ(module.getPluginDataI64("pass_executed"), 1);
     EXPECT_EQ(module.getPluginDataStr("greeting_result"), "executed: Hello from test!");
