@@ -436,6 +436,10 @@ static constexpr auto getCMakeCompilerTarget()
     {
         return make_amdgcn_gfx12_target<id>();
     }
+    else if constexpr(id == amdgcn_target_id::GFX1250)
+    {
+        return make_amdgcn_gfx12_target<id>(); // TODO: This should not be a GFX12 target.
+    }
     else
     {
         static_assert(always_false_v<decltype(id)>, "CK_CMAKE_TARGET_IDS[0] is HOST or UNKNOWN!\n");
