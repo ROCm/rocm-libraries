@@ -204,7 +204,9 @@ jobs:
           pip install --no-deps wheelhouse/hipdnn_frontend-*.whl
 
       - name: Install benchmark tool deps
-        run: pip install -e rocm-libraries/projects/hipdnn/tools/dnn-benchmarking
+        # The [test] extra brings pytest + pytest-cov for the pytest step below;
+        # the smoke run itself needs only the core deps (numpy + psutil).
+        run: pip install -e "rocm-libraries/projects/hipdnn/tools/dnn-benchmarking[test]"
 
       - name: Run dnn-benchmarking pytest suite
         working-directory: rocm-libraries/projects/hipdnn/tools/dnn-benchmarking

@@ -17,7 +17,8 @@ Benchmarking and validation tool for hipDNN graphs. Loads JSON-serialized hipDNN
 
 # Manual setup for ROCm/AMD GPU development (gfx90X or gfx94X)
 pip install --pre torch --index-url https://rocm.nightlies.amd.com/v2-staging/gfx94X-dcgpu/
-pip install -e .                              # package + PyPI deps (numpy, pytest)
+pip install -e .                              # package + runtime PyPI deps (numpy, psutil)
+pip install -e .[test]                        # add test deps (pytest, pytest-cov)
 
 # hipDNN bindings must be installed separately from your hipDNN build
 cd /path/to/hipdnn/python && pip install -e . --no-deps

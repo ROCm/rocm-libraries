@@ -107,7 +107,7 @@ echo "Detected GPU: $GPU_ARCH → installing PyTorch from $INDEX_URL"
 # ROCm build) and lists the rest (numpy, pytest, pytest-cov) which resolve
 # cleanly from PyPI.
 pip install --pre torch --index-url "$INDEX_URL"
-pip install -e "$SCRIPT_DIR"
+pip install -e "$SCRIPT_DIR[test]"
 
 # 2b. Install amdsmi Python bindings if present in the ROCm install.
 # amdsmi is not on PyPI — it ships under /opt/rocm/share/amd_smi/. The
