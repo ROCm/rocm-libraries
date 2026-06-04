@@ -12,6 +12,11 @@
     "codegen class in the reachability guardrail). Correctness for B2 does NOT",
     "depend on this file being complete - ci_safety_check.sh forces a full build on",
     "any */generate*.py or cmake/*.in change as a backstop.",
+    "Root cause is two-part: some add_custom_commands already carry DEPENDS <script>",
+    "(e.g. 01_fmha, gemm_streamk) and some don't, but the gap persists even with",
+    "DEPENDS because the depmap never parses ninja's CUSTOM_COMMAND edges (it uses the",
+    "#include graph + exe<->object only). Retiring this stopgap needs BOTH complete",
+    "DEPENDS upstream AND a depmap that chains generator-input -> output -> exe.",
     "Add an entry when you add a generator. Paths are relative to projects/composablekernel.",
     "test_globs use shell-style wildcards matched against `ctest -N` names."
   ],

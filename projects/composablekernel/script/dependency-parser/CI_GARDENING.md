@@ -343,10 +343,19 @@ python3 filter_oracle.py codegen-allowlist \
     --inventory codegen_blindspots.json --ctest ctest_list.txt
 ```
 
-> Root-cause note: CK's codegen `add_custom_command`s omit `DEPENDS <script>`, so
-> the ninja graph doesn't carry the generator→output edge (also a latent
-> incremental-build gap). The proper fix is upstream in CMake; this inventory +
-> backstop is the interim workaround. See the Test Filtering design page.
+> Root-cause note (two-part — `DEPENDS` alone is not enough). The codegen
+> `add_custom_command`s are **mixed**: some already carry `DEPENDS <script>` (e.g.
+> `01_fmha`, `gemm_streamk`), some don't (e.g. `layernorm2d`/`rmsnorm2d`). But the
+> blind spot persists *even where `DEPENDS` is present* (streamk has it and was still
+> a coverage FN), because the depmap never reads ninja's `CUSTOM_COMMAND` edges — it
+> uses the `#include` graph (`clang -MM` on `compile_commands.json`) + exe↔object
+> (`NinjaTargetParser`), so `generate.py`/templates are never keys in
+> `file_to_executables`. The proper fix is therefore: (1) complete `DEPENDS` on every
+> codegen command (also fixes incremental rebuilds), **and** (2) teach the depmap to
+> parse `build <out>: CUSTOM_COMMAND | <inputs>` and chain generator-input → output →
+> object → exe. With both, this inventory + the `generate*.py` backstop can be retired
+> (the `cmake/*.in` `configure_file` case is configure-time, so it stays). See the
+> Test Filtering design page (D11).
 
 ---
 
