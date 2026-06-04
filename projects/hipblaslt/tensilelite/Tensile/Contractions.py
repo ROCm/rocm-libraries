@@ -774,7 +774,7 @@ class SizeMapping:
                    LocalSplitU              = d["LocalSplitU"],
                    DirectToLdsA             = dtlA,
                    DirectToLdsB             = dtlB,
-                   ExpertSchedulingMode     = d['ExpertSchedulingMode'],
+                   ExpertSchedulingMode     = d.get('ExpertSchedulingMode', 0),
                    clusterDim               = d['ClusterDim']
                    )
     @classmethod

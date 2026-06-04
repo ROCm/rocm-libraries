@@ -1967,7 +1967,7 @@ namespace TensileLite
                     break;
                 case CustomArgSemantic::StrideScaleA0:
                 {
-                    size_t scaleStride = problem.boundSize(0) / problem.mxBlockA();
+                    size_t scaleStride = problem.mxsa().strides()[1];
                     rv.args.appendCustomType("StrideScaleA0", scaleStride, arg.type);
                     break;
                 }
@@ -1981,7 +1981,7 @@ namespace TensileLite
                 }
                 case CustomArgSemantic::StrideScaleB0:
                 {
-                    size_t scaleStride = problem.boundSize(0) / problem.mxBlockB();
+                    size_t scaleStride = problem.mxsb().strides()[1];
                     rv.args.appendCustomType("StrideScaleB0", scaleStride, arg.type);
                     break;
                 }
