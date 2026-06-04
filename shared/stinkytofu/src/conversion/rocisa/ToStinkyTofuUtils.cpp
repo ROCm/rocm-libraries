@@ -1095,7 +1095,11 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
     };
 
     // Auto-detect the loopWithPrefetch region: from the first global read or
-    // tensor load item up to and including Module("loopBody").
+    // tensor load item up to and including the LAST Module("loopBody").
+    // AdaptiveGemmNTAB emits the main loop multiple times (one Module("loopBody")
+    // per NT body); the region must span all of them, not just the first, so the
+    // whole multi-body main loop is scheduled. For non-AGNTAB kernels there is
+    // exactly one "loopBody", so this matches the previous single-body behavior.
     int pgrStartIdx = -1;
     int loopBodyIdx = -1;
     for (int i = 0; i < static_cast<int>(module.itemList.size()); ++i) {
@@ -1105,8 +1109,7 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
         }
         if (const auto* subMod = dynamic_cast<const rocisa::Module*>(item.get())) {
             if (subMod->name == "loopBody") {
-                loopBodyIdx = i;
-                break;
+                loopBodyIdx = i;  // keep updating: take the last (AGNTAB: N bodies)
             }
         }
     }
@@ -1172,7 +1175,8 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
     static const std::string kScope = "expertScheduleMode2";
 
     // Traverse top-level items, injecting the loopWithPrefetch group name
-    // for items in the detected prefetch region [pgrStartIdx, loopBodyIdx].
+    // for items in the detected prefetch region [pgrStartIdx, loopBodyIdx]
+    // (spans all AGNTAB main-loop bodies when present).
     for (int i = 0; i < static_cast<int>(module.itemList.size()); ++i) {
         const auto& item = module.itemList[i];
         const bool inPGR = hasPGR && (i >= pgrStartIdx && i <= loopBodyIdx);

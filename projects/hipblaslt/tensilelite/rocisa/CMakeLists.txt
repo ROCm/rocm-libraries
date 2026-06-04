@@ -6,7 +6,9 @@
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     cmake_minimum_required(VERSION 3.25)
 
-    include(${CMAKE_CURRENT_LIST_DIR}/../../../../cmake/modules/default_amdclang.cmake)
+    if(EXISTS ${CMAKE_CURRENT_LIST_DIR}/../../../../cmake/modules/default_amdclang.cmake)
+        include(${CMAKE_CURRENT_LIST_DIR}/../../../../cmake/modules/default_amdclang.cmake)
+    endif()
 
     project(rocisa LANGUAGES CXX)
     set(ROCISA_STANDALONE ON)
