@@ -30,8 +30,70 @@
 #include "rocblaslt_mat_utils.hpp"
 #include "tensile_host.hpp"
 #include <array>
+#include <cstdlib>
 
 #include <hip/hip_runtime_api.h>
+
+// --- Auto-pad mitigation for the DRAM channel-camping cliff (prototype, env-gated) ---
+// When a leading dimension's BYTE stride is a multiple of 4096, column accesses camp
+// onto a small subset of DRAM channels/MALL partitions -> large bandwidth loss
+// (measured ~2.9x on gfx1151). Since lda/ldb are not part of the kernel-selection key,
+// the fix cannot be shipped via tuned logic; here we transparently relayout A/B into a
+// padded scratch buffer whose byte stride is off the 4096 boundary, then run the GEMM
+// on the padded copy. Gated behind HIPBLASLT_PAD_CAMPED_LD (default OFF); falls back to
+// the unpadded path on any failure or when the guard rejects the shape.
+namespace
+{
+    inline size_t hipDataTypeSizeBytes(hipDataType t)
+    {
+        switch(t)
+        {
+        case HIP_R_64F:
+            return 8;
+        case HIP_R_32F:
+        case HIP_R_32I:
+            return 4;
+        case HIP_R_16F:
+        case HIP_R_16BF:
+            return 2;
+        case HIP_R_8I:
+        case HIP_R_8F_E4M3:
+        case HIP_R_8F_E5M2:
+            return 1;
+        default:
+            return 0;
+        }
+    }
+
+    inline bool ldByteStrideCamped(int64_t ld, size_t elem)
+    {
+        return ld > 0 && elem > 0 && (((uint64_t)ld * elem) % 4096 == 0);
+    }
+
+    // Smallest pad (in elements, multiple of 16 for vector-width friendliness) that lands
+    // the new byte stride >= 64 B off every 4096 multiple. Returns 0 if none found.
+    inline int64_t choosePadElements(int64_t ld, size_t elem)
+    {
+        for(int64_t p = 16; p <= 4096; p += 16)
+        {
+            if(p * (int64_t)elem < 64)
+                continue;
+            uint64_t r = ((uint64_t)(ld + p) * elem) % 4096;
+            if(r >= 64 && r <= 4032)
+                return p;
+        }
+        return 0;
+    }
+
+    inline bool autopadCampedLdEnabled()
+    {
+        static const bool enabled = []() {
+            const char* e = getenv("HIPBLASLT_PAD_CAMPED_LD");
+            return e && e[0] && e[0] != '0';
+        }();
+        return enabled;
+    }
+}
 
 #ifdef __cplusplus
 extern "C" {
@@ -163,6 +225,87 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
     {
         workspaceSizeInBytes = std::min<size_t>(workspaceSizeInBytes, algo->max_workspace_bytes);
     }
+
+    // --- Auto-pad mitigation (prototype, env-gated, default OFF) ---
+    // Effective A/B pointers + strides handed to the problem. Replaced with padded copies
+    // below if a camped leading dimension is detected and the guard accepts the shape.
+    const void* A_eff             = A;
+    const void* B_eff             = B;
+    int64_t     lda_eff           = lda;
+    int64_t     ldb_eff           = ldb;
+    int64_t     batch_stride_a_eff = batch_stride_a;
+    int64_t     batch_stride_b_eff = batch_stride_b;
+    void*       padBufA           = nullptr;
+    void*       padBufB           = nullptr;
+
+    if(autopadCampedLdEnabled() && !swizzleA && !swizzleB && !grouped_gemm
+       && matA->order == HIPBLASLT_ORDER_COL && matB->order == HIPBLASLT_ORDER_COL)
+    {
+        const size_t elemA  = hipDataTypeSizeBytes(type_a);
+        const size_t elemB  = hipDataTypeSizeBytes(type_b);
+        const int    nbatch = num_batches_a;
+
+        // Guard: only worth a relayout when K is large enough that GEMM reuse dominates
+        // the one-time copy cost. Small-K / memory-light shapes fall through unchanged.
+        const int64_t K_MIN = 4096;
+        const bool    sizeOk = (k >= K_MIN) && (nbatch >= 1);
+
+        // Pad an operand: allocate A'(ld'*cols*batch), strided-copy each column, repoint.
+        auto tryPad = [&](const void* src,
+                          int64_t      ld,
+                          size_t       elem,
+                          uint64_t     rows,
+                          uint64_t     cols,
+                          int64_t      batch_stride,
+                          void**       outBuf,
+                          const void** outPtr,
+                          int64_t*     outLd,
+                          int64_t*     outBatchStride) -> bool {
+            if(!src || elem == 0 || !ldByteStrideCamped(ld, elem))
+                return false;
+            const int64_t pad = choosePadElements(ld, elem);
+            if(pad <= 0)
+                return false;
+            const int64_t ldNew     = ld + pad;
+            const int64_t bsNew     = ldNew * (int64_t)cols;
+            const size_t  bytesTotal = (size_t)bsNew * elem * (size_t)nbatch;
+            void*         buf        = nullptr;
+            if(hipMallocAsync(&buf, bytesTotal, stream) != hipSuccess || !buf)
+                return false;
+            for(int b = 0; b < nbatch; ++b)
+            {
+                const char* s = (const char*)src + (size_t)b * batch_stride * elem;
+                char*       d = (char*)buf + (size_t)b * bsNew * elem;
+                if(hipMemcpy2DAsync(d,
+                                    (size_t)ldNew * elem,
+                                    s,
+                                    (size_t)ld * elem,
+                                    rows * elem,
+                                    cols,
+                                    hipMemcpyDeviceToDevice,
+                                    stream)
+                   != hipSuccess)
+                {
+                    (void)hipFreeAsync(buf, stream);
+                    return false;
+                }
+            }
+            *outBuf         = buf;
+            *outPtr         = buf;
+            *outLd          = ldNew;
+            *outBatchStride = bsNew;
+            return true;
+        };
+
+        if(sizeOk)
+        {
+            tryPad(A, lda, elemA, matA->m, matA->n, batch_stride_a, &padBufA, &A_eff, &lda_eff,
+                   &batch_stride_a_eff);
+            tryPad(B, ldb, elemB, matB->m, matB->n, batch_stride_b, &padBufB, &B_eff, &ldb_eff,
+                   &batch_stride_b_eff);
+        }
+    }
+
     RocblasltContractionProblem problem{opA,
                                         opB,
                                         m,
@@ -170,15 +313,15 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
                                         k,
                                         alpha,
                                         type_a,
-                                        A,
+                                        A_eff,
                                         nullptr,
-                                        lda,
-                                        batch_stride_a,
+                                        lda_eff,
+                                        batch_stride_a_eff,
                                         type_b,
-                                        B,
+                                        B_eff,
                                         nullptr,
-                                        ldb,
-                                        batch_stride_b,
+                                        ldb_eff,
+                                        batch_stride_b_eff,
                                         beta,
                                         type_c,
                                         C,
@@ -225,6 +368,13 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
                                         matmul_descr->bias_stride};
 
     rocblaslt_status st = runContractionProblem(handle, algo, problem, gemmData);
+
+    // Stream-ordered free of any padded scratch: enqueued AFTER the GEMM on the same
+    // stream, so the buffers stay alive until the GEMM (and the copies) complete.
+    if(padBufA)
+        (void)hipFreeAsync(padBufA, stream);
+    if(padBufB)
+        (void)hipFreeAsync(padBufB, stream);
 
     if(st == rocblaslt_status_success)
     {
