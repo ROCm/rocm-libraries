@@ -29,6 +29,7 @@
 #include "../device/kernels/common.h"
 #include "function_map_key.h"
 #include <functional>
+#include <map>
 #include <optional>
 #include <sstream>
 #include <unordered_map>
@@ -108,9 +109,6 @@ struct FFTKernel
 
     PartialPassParams pp_params;
 
-    std::optional<size_t> batch_low;
-    std::optional<size_t> batch_high;
-
     FFTKernel()                 = default;
     FFTKernel(const FFTKernel&) = default;
 
@@ -129,9 +127,7 @@ struct FFTKernel
               unsigned int                off_dim            = 0,
               unsigned int                pp_tpt             = 0,
               std::vector<unsigned int>&& pp_factors_curr    = std::vector<unsigned int>(),
-              std::vector<unsigned int>&& pp_factors_other   = std::vector<unsigned int>(),
-              std::optional<size_t>&&     batch_low          = std::nullopt,
-              std::optional<size_t>&&     batch_high         = std::nullopt)
+              std::vector<unsigned int>&& pp_factors_other   = std::vector<unsigned int>())
         : factors(factors)
         , transforms_per_block(tpb)
         , workgroup_size(wgs)
@@ -141,8 +137,6 @@ struct FFTKernel
         , direct_to_from_reg(direct_to_from_reg)
         , aot_rtc(aot_rtc)
         , pp_params(scheme, current_dim, off_dim, pp_tpt, pp_factors_curr, pp_factors_other)
-        , batch_low(batch_low)
-        , batch_high(batch_high)
     {
     }
 
@@ -154,8 +148,6 @@ struct FFTKernel
         , use_3steps_large_twd(config.use_3steps_large_twd)
         , half_lds(config.half_lds)
         , direct_to_from_reg(config.direct_to_from_reg)
-        , batch_low(config.batch_low)
-        , batch_high(config.batch_high)
     {
     }
 
@@ -169,15 +161,13 @@ struct FFTKernel
         config.half_lds              = half_lds;
         config.direct_to_from_reg    = direct_to_from_reg;
         config.factors               = factors;
-        config.batch_low             = batch_low;
-        config.batch_high            = batch_high;
 
         return config;
     }
 };
 
-typedef std::unordered_multimap<FMKey, FMKey, SimpleHash>       FPKeyMap;
-typedef std::unordered_multimap<PPFMKey, PPFMKey, SimpleHashPP> PPFPKeyMap;
+typedef std::unordered_multimap<FMKey, FMKey, SimpleHash> FPKeyMap;
+typedef std::multimap<PPFMKey, PPFMKey>                   PPFPKeyMap;
 
 typedef std::unordered_multimap<FMKey, FFTKernel, SimpleHash>                    FPMap;
 typedef std::unordered_multimap<PPFMKey, std::array<FFTKernel, 2>, SimpleHashPP> PPFPMap;
@@ -231,44 +221,45 @@ class function_pool
     PPFPKeyMap::const_iterator
         find_pp_key_in_map(const PPFPKeyMap& fmap, const PPFMKey& key, const size_t& batch) const
     {
-        // NOTE: The kernels obtainable from equal_range(key) are guaranteed to have non-overlapping
-        // batch ranges. This is enforced by the kernel-generator.py script. So we can simply check
-        // if the input batch is within the range of the kernel. If the input batch is not within range
-        //  but there is a kernel that matches the key and has no specified batch_low and batch_high,
-        // then we return the key to that kernel.
-        auto range = fmap.equal_range(key);
-        auto best  = fmap.end();
-        for(auto it = range.first; it != range.second; ++it)
-        {
-            if((it->second.kernel_config_1.batch_low != it->second.kernel_config_2.batch_low)
-               || (it->second.kernel_config_1.batch_high != it->second.kernel_config_2.batch_high))
-                throw std::runtime_error(
-                    "Batch low and high values for the two partial-pass kernels "
-                    "are not the same");
+        // Entries that share key's (lengths, precision, transform_type, scheme, gcn_arch_name)
+        // prefix are stored contiguously and ordered by ascending batch_low, and the kernel
+        // generator guarantees their batch ranges are disjoint. The only entry that can contain
+        // batch is therefore the one with the greatest batch_low <= batch, which we locate with a
+        // single O(log n) binary search before confirming batch falls within its upper bound.
 
-            // get batch configuration from the pair
-            const auto batch_low  = it->second.kernel_config_1.batch_low;
-            const auto batch_high = it->second.kernel_config_1.batch_high;
+        // Probe for the first entry whose batch_low is strictly greater than batch: same prefix,
+        // with every field after batch_low set to its smallest value so lower_bound() stops on the
+        // first entry of the group whose batch_low exceeds batch.
+        auto probe_key       = key;
+        probe_key.batch_low  = batch >= std::numeric_limits<size_t>::max()
+                                   ? std::numeric_limits<size_t>::max()
+                                   : static_cast<size_t>(batch) + 1;
+        probe_key.batch_high = 0;
 
-            // check if the input batch is within the range of the kernel
-            if((batch_low.has_value() || batch_high.has_value())
-               && ((batch_low.has_value() ? batch >= batch_low.value() : true)
-                   && (batch_high.has_value() ? batch <= batch_high.value() : true)))
-            {
-                // found exact match within the range
-                best = it;
-                break; // return the best kernel
-            }
-            else if(!batch_low.has_value() && !batch_high.has_value())
-            {
-                // currently the best match, but may need to check
-                // other kernels to see if there is an exact match
-                // within the range
-                best = it;
-            }
-        }
+        auto it = fmap.lower_bound(probe_key);
+        if(it == fmap.begin())
+            return fmap.end();
 
-        return best;
+        // The candidate is the entry just before the probe position. By construction it has the
+        // greatest batch_low <= batch (when it belongs to this key's prefix group).
+        --it;
+        const auto& mapped_key = it->second;
+
+        // Reject the candidate if it belongs to a different prefix or batch is above its range.
+        if(batch > mapped_key.batch_high
+           || std::tie(mapped_key.lengths,
+                       mapped_key.precision,
+                       mapped_key.transform_type,
+                       mapped_key.scheme,
+                       mapped_key.gcn_arch_name)
+                  != std::tie(key.lengths,
+                              key.precision,
+                              key.transform_type,
+                              key.scheme,
+                              key.gcn_arch_name))
+            return fmap.end();
+
+        return it;
     }
 
     template <typename TKey, typename TKeyPool>

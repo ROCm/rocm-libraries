@@ -64,28 +64,23 @@ struct KernelConfig
     rocfft_array_type iAryType   = rocfft_array_type_complex_interleaved;
     rocfft_array_type oAryType   = rocfft_array_type_complex_interleaved;
 
-    std::optional<unsigned int> batch_low;
-    std::optional<unsigned int> batch_high;
-
     KernelConfig()                    = default;
     KernelConfig(const KernelConfig&) = default;
 
-    KernelConfig(bool                        use_3steps,
-                 std::vector<size_t>&&       factors,
-                 int                         tpb,
-                 int                         wgs,
-                 std::array<int, 2>&&        tpt,
-                 bool                        half_lds              = false,
-                 bool                        direct_to_from_reg    = false,
-                 bool                        intrinsic_buffer_inst = false,
-                 EmbeddedType                ebType                = EmbeddedType::NONE,
-                 int                         direction             = -1,
-                 int                         static_dim            = 0,
-                 PlacementCode               placement             = PC_UNSET,
-                 rocfft_array_type           iAryType   = rocfft_array_type_complex_interleaved,
-                 rocfft_array_type           oAryType   = rocfft_array_type_complex_interleaved,
-                 std::optional<unsigned int> batch_low  = std::nullopt,
-                 std::optional<unsigned int> batch_high = std::nullopt)
+    KernelConfig(bool                  use_3steps,
+                 std::vector<size_t>&& factors,
+                 int                   tpb,
+                 int                   wgs,
+                 std::array<int, 2>&&  tpt,
+                 bool                  half_lds              = false,
+                 bool                  direct_to_from_reg    = false,
+                 bool                  intrinsic_buffer_inst = false,
+                 EmbeddedType          ebType                = EmbeddedType::NONE,
+                 int                   direction             = -1,
+                 int                   static_dim            = 0,
+                 PlacementCode         placement             = PC_UNSET,
+                 rocfft_array_type     iAryType = rocfft_array_type_complex_interleaved,
+                 rocfft_array_type     oAryType = rocfft_array_type_complex_interleaved)
         : use_3steps_large_twd(use_3steps)
         , half_lds(half_lds)
         , direct_to_from_reg(direct_to_from_reg)
@@ -100,8 +95,6 @@ struct KernelConfig
         , placement(placement)
         , iAryType(iAryType)
         , oAryType(oAryType)
-        , batch_low(batch_low)
-        , batch_high(batch_high)
     {
     }
 
@@ -116,9 +109,7 @@ struct KernelConfig
                         transforms_per_block,
                         workgroup_size,
                         threads_per_transform,
-                        factors,
-                        batch_low,
-                        batch_high)
+                        factors)
                == std::tie(rhs.use_3steps_large_twd,
                            rhs.half_lds,
                            rhs.direct_to_from_reg,
@@ -126,9 +117,7 @@ struct KernelConfig
                            rhs.transforms_per_block,
                            rhs.workgroup_size,
                            rhs.threads_per_transform,
-                           rhs.factors,
-                           rhs.batch_low,
-                           rhs.batch_high);
+                           rhs.factors);
     }
 
     bool operator<(const KernelConfig& rhs) const
@@ -140,9 +129,7 @@ struct KernelConfig
                         transforms_per_block,
                         workgroup_size,
                         threads_per_transform,
-                        factors,
-                        batch_low,
-                        batch_high)
+                        factors)
                < std::tie(rhs.use_3steps_large_twd,
                           rhs.half_lds,
                           rhs.direct_to_from_reg,
@@ -150,9 +137,7 @@ struct KernelConfig
                           rhs.transforms_per_block,
                           rhs.workgroup_size,
                           rhs.threads_per_transform,
-                          rhs.factors,
-                          rhs.batch_low,
-                          rhs.batch_high);
+                          rhs.factors);
     }
 
     std::string Print() const
@@ -173,17 +158,6 @@ struct KernelConfig
             ss << COMMA << factor;
             COMMA = ", ";
         }
-        if(batch_low.has_value())
-            ss << "], batch_low: " << batch_low.value();
-        else
-            ss << "], batch_low: "
-               << "n/a";
-
-        if(batch_high.has_value())
-            ss << "], batch_high: " << batch_high.value();
-        else
-            ss << "], batch_high: "
-               << "n/a";
 
         ss << "}";
 
@@ -222,8 +196,6 @@ namespace std
 
             for(auto& v : factors_max_len)
                 h ^= std::hash<size_t>{}(v);
-            h ^= std::hash<std::optional<unsigned int>>{}(config.batch_low);
-            h ^= std::hash<std::optional<unsigned int>>{}(config.batch_high);
             return h;
         }
     };
@@ -351,8 +323,8 @@ struct FMKeyBase
 //    Since we didn't have the KernelConfig before, so, when getting the default kernels
 //    from the function_pool, the kernel_config "variable" would be a default EmptyConfig().
 //    But actually, the config is defined in the kernel-generator.py, so we are still able to
-//    know how the "EmptyConfig" can be mapped to a non-empty config (in kernel-gerator.py)
-//    (And that is what exactly "fuction_pool::insert_default_entry()" and
+//    know how the "EmptyConfig" can be mapped to a non-empty config (in kernel-generator.py)
+//    (And that is what exactly "function_pool::insert_default_entry()" and
 //                               "function_pool::get_actual_key()"" is doing
 //
 
@@ -549,6 +521,8 @@ struct PPFMKey : public FMKeyBase
             rocfft_precision      precision,
             rocfft_transform_type transform_type,
             ComputeScheme         scheme          = CS_3D_PP,
+            size_t                batch_low       = 1,
+            size_t                batch_high      = std::numeric_limits<size_t>::max(),
             KernelConfig          kernel_config_1 = KernelConfig::EmptyConfig(),
             KernelConfig          kernel_config_2 = KernelConfig::EmptyConfig(),
             std::string           gcn_arch_name   = get_curr_gcn_arch_name())
@@ -556,6 +530,8 @@ struct PPFMKey : public FMKeyBase
         , kernel_config_1(kernel_config_1)
         , kernel_config_2(kernel_config_2)
         , transform_type(transform_type)
+        , batch_low(batch_low)
+        , batch_high(batch_high)
     {
     }
 
@@ -567,16 +543,20 @@ struct PPFMKey : public FMKeyBase
                         precision,
                         transform_type,
                         scheme,
+                        gcn_arch_name,
+                        batch_low,
+                        batch_high,
                         kernel_config_1,
-                        kernel_config_2,
-                        gcn_arch_name)
+                        kernel_config_2)
                == std::tie(rhs.lengths,
                            rhs.precision,
                            rhs.transform_type,
                            rhs.scheme,
+                           rhs.gcn_arch_name,
+                           rhs.batch_low,
+                           rhs.batch_high,
                            rhs.kernel_config_1,
-                           rhs.kernel_config_2,
-                           rhs.gcn_arch_name);
+                           rhs.kernel_config_2);
     }
 
     bool operator!=(const PPFMKey& rhs) const
@@ -584,22 +564,35 @@ struct PPFMKey : public FMKeyBase
         return !((*this) == rhs);
     }
 
+    // NOTE: The field ordering below is a contract relied upon by
+    // function_pool::find_pp_key_in_map(). The non-batch identity fields
+    // (lengths, precision, transform_type, scheme, gcn_arch_name) MUST be
+    // compared first so that entries sharing the same identity are stored
+    // contiguously in the ordered PP key map, and batch_low/batch_high MUST
+    // come immediately after them (before kernel_config_1/kernel_config_2) so
+    // that those contiguous entries are sorted by ascending batch range. The
+    // binary-search probe in find_pp_key_in_map() depends on exactly this
+    // order; keep the two in sync if you change it.
     bool operator<(const PPFMKey& rhs) const
     {
         return std::tie(lengths,
                         precision,
                         transform_type,
                         scheme,
+                        gcn_arch_name,
+                        batch_low,
+                        batch_high,
                         kernel_config_1,
-                        kernel_config_2,
-                        gcn_arch_name)
+                        kernel_config_2)
                < std::tie(rhs.lengths,
                           rhs.precision,
                           rhs.transform_type,
                           rhs.scheme,
+                          rhs.gcn_arch_name,
+                          rhs.batch_low,
+                          rhs.batch_high,
                           rhs.kernel_config_1,
-                          rhs.kernel_config_2,
-                          rhs.gcn_arch_name);
+                          rhs.kernel_config_2);
     }
 
     static PPFMKey EmptyPPFMKey()
@@ -615,6 +608,8 @@ struct PPFMKey : public FMKeyBase
     }
 
     rocfft_transform_type transform_type{};
+    size_t                batch_low  = 1;
+    size_t                batch_high = std::numeric_limits<size_t>::max();
 };
 
 // Hash function for PPFMKey.
@@ -631,6 +626,8 @@ struct SimpleHashPP
         h ^= std::hash<KernelConfig>{}(p.kernel_config_1);
         h ^= std::hash<KernelConfig>{}(p.kernel_config_2);
         h ^= std::hash<std::string>{}(p.gcn_arch_name);
+        h ^= std::hash<size_t>{}(p.batch_low);
+        h ^= std::hash<size_t>{}(p.batch_high);
 
         return h;
     }
