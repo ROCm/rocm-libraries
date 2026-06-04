@@ -23,8 +23,9 @@ filters = ["Full/*BatchnormBackwardCalcStats3d*.Correctness/0"]
 atol = 0.002
 rtol = 0.012
 
-# ROCm/rocm-libraries#8029 — intermittent incorrect bf16 3D conv weight-grad
-# in MIOpen's ConvHipImplicitGemm3DGroupWrwXdlops solver (CK split-k path).
+# ROCm/rocm-libraries#8029 — Due to split-k, conv WRW can cause reduced accuracy
+# ROCm/rocm-libraries#8030 — conv-wgrad switched from dynamic per-shape
+# tolerances to a fixed 0.2 → flaky CI failures
 # Both failing cases share the same shape (1x1x1 filter, batched, ref=0.691406
 # at DW[0,0,0,0,0]) and produce a nondeterministic ~2x-wrong value at that
 # element only. Across 100-pass sweep: case 14 fails ~45% with peak abs diff
