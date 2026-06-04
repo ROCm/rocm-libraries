@@ -68,6 +68,13 @@ struct StinkyAsmModule::Impl {
     // Total instruction encoding size in bytes (for .amdhsa_inst_pref_size). -1 if not set.
     int64_t totalInstructionBytes = -1;
 
+    // Plugin data: opaque key-value stores for pass plugins.
+    std::unordered_map<std::string, int64_t> pluginDataI64;
+    std::unordered_map<std::string, std::string> pluginDataStr;
+
+    // Per-module pass builder for plugin pass registration.
+    PassBuilder passBuilder;
+
     Impl(const std::string& name, const std::array<int, 3>& arch) : name(name), arch(arch) {
         // Create a single BasicBlock to hold all instructions
         function.createBasicBlock("entry");
@@ -215,6 +222,33 @@ void StinkyAsmModule::setTotalInstructionBytes(int64_t totalBytes) {
 
 int64_t StinkyAsmModule::getTotalInstructionBytes() const {
     return pImpl->totalInstructionBytes;
+}
+
+void StinkyAsmModule::setPluginDataI64(const std::string& key, int64_t value) {
+    pImpl->pluginDataI64[key] = value;
+}
+
+int64_t StinkyAsmModule::getPluginDataI64(const std::string& key, int64_t defaultVal) const {
+    auto it = pImpl->pluginDataI64.find(key);
+    return it != pImpl->pluginDataI64.end() ? it->second : defaultVal;
+}
+
+void StinkyAsmModule::setPluginDataStr(const std::string& key, const std::string& value) {
+    pImpl->pluginDataStr[key] = value;
+}
+
+std::string StinkyAsmModule::getPluginDataStr(const std::string& key,
+                                              const std::string& defaultVal) const {
+    auto it = pImpl->pluginDataStr.find(key);
+    return it != pImpl->pluginDataStr.end() ? it->second : defaultVal;
+}
+
+PassBuilder& StinkyAsmModule::getPassBuilder() {
+    return pImpl->passBuilder;
+}
+
+const PassBuilder& StinkyAsmModule::getPassBuilder() const {
+    return pImpl->passBuilder;
 }
 
 }  // namespace stinkytofu

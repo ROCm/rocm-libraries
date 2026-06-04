@@ -86,7 +86,7 @@ void addGfx1250RegionPasses(PassManager& pm, const StinkyAsmModule& module, OptL
 /// TODO: EnableWaitCntInsertion is a per-pass toggle for the
 /// bring-up phase. Once the pipeline stabilizes, pass selection should
 /// be controlled by OptLevel.
-bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module) {
+bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBuilder& PB) {
     const auto& moduleOptions = module.getModuleOptions();
     const OptLevel optLevel = static_cast<OptLevel>(
         std::max(0, std::min(moduleOptions.OptLevel, static_cast<int>(OptLevel::O3))));
@@ -99,6 +99,7 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module) {
         // -- kernel --
         // strip delay_alu before scheduling
         pm.addPass(createRemoveDelayAluPass());
+        PB.applyExtensionPoint(PipelineExtensionPoint::BeforeRegionPasses, pm, module);
 
         PassFeatureConfig passFeatureConfig;
         passFeatureConfig.barrierConfig.unrollMovableBarrier = true;
@@ -119,7 +120,9 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module) {
             configurePassOrderSnapshot(innerPM, snapshotCollector);
             configureDebugOutput(innerPM, moduleOptions, "loopWithPrefetch+noLoadLoopBody",
                                  debugStreams);
+            PB.applyExtensionPoint(PipelineExtensionPoint::InnerRegionBegin, innerPM, module);
             addGfx1250RegionPasses(innerPM, module, optLevel, moduleOptions.EnableWaitCntInsertion);
+            PB.applyExtensionPoint(PipelineExtensionPoint::InnerRegionEnd, innerPM, module);
             if (moduleOptions.EnableWaitCntInsertion) {
                 innerPM.addPass(createStinkyWaitCntInsertionPass());
             }
@@ -127,6 +130,8 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module) {
                 module, {"loopWithPrefetch", "noLoadLoopBody"}, std::move(innerPM)));
         }
     }
+
+    PB.applyExtensionPoint(PipelineExtensionPoint::AfterRegionPasses, pm, module);
 
     // -- kernel --
     pm.addPass(createInsertVgprMsbPass());
