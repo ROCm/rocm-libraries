@@ -30,7 +30,6 @@ TYPED_TEST_SUITE(TestMxGemm, MxTypes);
 
 TYPED_TEST(TestMxGemm, Default)
 {
-    // No M/N/K padding so we use 128x256x256 as smallest dimensions
     this->Run(128, 512, 256);
     this->Run(256, 512, 512);
     this->Run(1024, 1024, 1024);

@@ -185,6 +185,7 @@ auto shuffle_b_permuteN(const ck_tile::HostTensor<T>& t,
     }
     else
     {
+        assert(NRepeat % BlockedXDLNPerWarp == 0);
         constexpr int KLane = ck_tile::get_warp_size() / GemmConfig::N_Warp_Tile;
         constexpr int ItemsPerAccess =
             std::min(detail::b_contiguous_items_per_access<GemmConfig, T>::value,

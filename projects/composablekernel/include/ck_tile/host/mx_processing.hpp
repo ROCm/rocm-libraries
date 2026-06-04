@@ -30,7 +30,7 @@ auto packScalesMNxK(const HostTensor<e8m0_t>& src, const bool kLast)
     {
         for(index_t packed_k = 0; packed_k < K_packed; packed_k++)
         {
-            int32_t val      = 0;
+            uint32_t val     = 0;
             index_t mn_lane  = packed_mn % XdlMNThread;
             index_t mn_group = packed_mn / XdlMNThread;
             index_t k_lane   = packed_k % XdlKThread;
@@ -44,10 +44,10 @@ auto packScalesMNxK(const HostTensor<e8m0_t>& src, const bool kLast)
                     index_t orig_k  = k_group * XdlKThread * KPack + ik * XdlKThread + k_lane;
 
                     e8m0_t v = kLast ? src(orig_mn, orig_k) : src(orig_k, orig_mn);
-                    val |= (static_cast<int32_t>(v.get()) << (byteIdx * 8));
+                    val |= (static_cast<uint32_t>(v.get()) << (byteIdx * 8));
                 }
             }
-            packed(packed_mn, packed_k) = val;
+            packed(packed_mn, packed_k) = static_cast<int32_t>(val);
         }
     }
     return packed;
@@ -68,6 +68,7 @@ auto preShuffleScale(ck_tile::HostTensor<dtype>& src, const bool kLast)
     HostTensor<dtype> shuffled(HostTensorDescriptor({static_cast<std::size_t>(MNPadded * K)},
                                                     {static_cast<std::size_t>(1)}));
 
+    assert(K % (KXdlPack * XdlKThread) == 0);
     const index_t K0 = K / KXdlPack / XdlKThread;
 
     for(index_t n = 0; n < MNPadded; ++n)
@@ -89,8 +90,14 @@ auto preShuffleScale(ck_tile::HostTensor<dtype>& src, const bool kLast)
                                         k1 * MNXdlPack * KXdlPack * XdlMNThread +
                                         n1 * MNXdlPack * KXdlPack + k2 * MNXdlPack + n2;
 
-            dtype v               = kLast ? src(n, k) : src(k, n);
-            shuffled(outputIndex) = n < MN ? v : dtype{};
+            if(n < MN)
+            {
+                shuffled(outputIndex) = kLast ? src(n, k) : src(k, n);
+            }
+            else
+            {
+                shuffled(outputIndex) = dtype{};
+            }
         }
     }
 
@@ -113,6 +120,7 @@ auto preShuffleScalePermuteN(const HostTensor<dtype>& src, const bool kLast)
     HostTensor<dtype> shuffled(HostTensorDescriptor({static_cast<std::size_t>(MNPadded * K)},
                                                     {static_cast<std::size_t>(1)}));
 
+    assert(K % (KXdlPack * XdlKThread) == 0);
     const index_t K0 = K / KXdlPack / XdlKThread;
 
     for(index_t n = 0; n < MNPadded; ++n)
@@ -141,12 +149,18 @@ auto preShuffleScalePermuteN(const HostTensor<dtype>& src, const bool kLast)
                 k1 * MNXdlPack * KXdlPack * XdlMNThread + k2 * MNXdlPack +
                 n4 * MNXdlPack * KXdlPack * XdlMNThread * XdlKThread * K0 * NWarp + n3;
 
-            dtype v               = kLast ? src(n, k) : src(k, n);
-            shuffled(outputIndex) = n < MN ? v : dtype{};
+            if(n < MN)
+            {
+                shuffled(outputIndex) = kLast ? src(n, k) : src(k, n);
+            }
+            else
+            {
+                shuffled(outputIndex) = dtype{};
+            }
         }
     }
 
     return shuffled;
 }
 
-}; // namespace ck_tile
+} // namespace ck_tile
