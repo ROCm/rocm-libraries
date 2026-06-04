@@ -816,9 +816,6 @@ class Solution(collections.abc.Mapping):
     isgfx1250 = isa[:2] == (12, 5)
     state["UseSubtileImpl"] = state["UseSubtileImpl"] and (isgfx950 or isgfx1250)
 
-    # LDS swizzling (rotation + permlane16 swap) for subtile bank conflict avoidance.
-    # Currently only implemented for gfx950; TDM (gfx1250) does not use swizzling.
-    state["SubtileLdsSwizzle"] = state["UseSubtileImpl"] and isgfx950
     if isgfx950 and (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]) and not state["UseSubtileImpl"]:
         reject(state, printRejectionReason, "gfx950 MX requires UseSubtileImpl")
 

@@ -6136,6 +6136,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # ISA version, such as 803
     version = tuple(kernel["ISA"])
     isgfx950 = kernel["ISA"][:2] == (9, 5)
+    # LDS swizzling for subtile bank-conflict avoidance (gfx950 only;
+    # gfx1250 TDM uses a different LDS layout without swizzling).
+    kernel["SubtileLdsSwizzle"] = kernel.get("UseSubtileImpl", False) and isgfx950
     ti = rocIsa.getInstance()
     ti.setKernel(version, kernel["WavefrontSize"])
 
