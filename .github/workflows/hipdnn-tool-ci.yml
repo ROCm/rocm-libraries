@@ -1,17 +1,15 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# hipDNN tool CI (ALMIOPEN-1848) — platform-agnostic reusable workflow.
+# hipDNN tool CI (ALMIOPEN-1848) — Linux reusable workflow.
 #
-# Invoked from therock-ci-{linux,windows}.yml after the matching therock-build
-# job, so it installs the PR's OWN freshly-built ROCm by github.run_id. Tool-only
-# PRs (hipDNN not rebuilt this run) fall back to the latest nightly dist tarball.
-# Runs the dnn-benchmarking + dnn-convert-shapes pytest suites and a benchmark
-# smoke run over the committed sample graphs (tool-health gate, not perf).
+# Invoked from therock-ci.yml after the matching therock-build job, so it
+# installs the PR's OWN freshly-built ROCm by github.run_id. Tool-only PRs
+# (hipDNN not rebuilt this run) fall back to the latest nightly dist tarball.
+# Runs the dnn-benchmarking + dnn-convert-shapes pytest suites; the benchmark
+# smoke gate is a gpu/amd pytest in the suite (tool-health, not perf).
 #
-# UNVERIFIED on Windows: plugin lands at lib/hipdnn_plugins/engines/ as a .dll
-# with deps on PATH; --tests slice ships the frontend bindings; a Windows GPU
-# runner exists for the family.
+# Windows is intentionally out of scope until verified locally.
 
 name: hipDNN Tool CI
 
@@ -34,10 +32,6 @@ on:
         description: "GPU test runner label."
         type: string
         required: true
-      platform:
-        description: '"linux" or "windows".'
-        type: string
-        required: true
 
 permissions:
   contents: read
@@ -47,11 +41,9 @@ jobs:
     name: hipDNN benchmark smoke (${{ inputs.amdgpu_families }})
     runs-on: ${{ inputs.test_runs_on }}
     timeout-minutes: 60
-    # null (not '') is what GitHub treats as "no container": Linux runs in the
-    # no_rocm container, Windows on the host VM.
     container:
-      image: ${{ inputs.platform == 'linux' && 'ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98' || null }}
-      options: ${{ inputs.platform == 'linux' && '--ipc host --group-add video --device /dev/kfd --device /dev/dri --group-add 993 --group-add 992 --group-add 110 --env-file /etc/podinfo/gha-gpu-isolation-settings' || null }}
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      options: --ipc host --group-add video --device /dev/kfd --device /dev/dri --group-add 993 --group-add 992 --group-add 110 --env-file /etc/podinfo/gha-gpu-isolation-settings
     defaults:
       run:
         shell: bash
@@ -63,13 +55,8 @@ jobs:
       VENV_DIR: ${{ github.workspace }}/.venv
       # Container runs non-root, so the default /opt/rocm is not writable.
       ROCM_PATH: ${{ github.workspace }}/therock
-      # Linux .so discovery; ignored on Windows (which uses PATH instead).
       LD_LIBRARY_PATH: ${{ github.workspace }}/therock/lib
     steps:
-      - name: Configure git for long paths (Windows)
-        if: ${{ runner.os == 'Windows' }}
-        run: git config --global core.longpaths true
-
       - name: Fetch TheRock build_tools for pre-job cleanup
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -79,14 +66,7 @@ jobs:
 
       # GPU test runners are persistent/shared, so clear stray GPU processes from
       # the previous tenant before, and ours after.
-      - name: Pre-job GPU process cleanup (Windows)
-        if: ${{ runner.os == 'Windows' }}
-        timeout-minutes: 5
-        shell: powershell
-        run: . '${{ github.workspace }}\prejob\build_tools\github_actions\cleanup_processes.ps1'
-
-      - name: Pre-job GPU process cleanup (Linux)
-        if: ${{ runner.os == 'Linux' }}
+      - name: Pre-job GPU process cleanup
         timeout-minutes: 5
         run: bash ./prejob/build_tools/github_actions/cleanup_processes.sh
 
@@ -94,6 +74,9 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           path: rocm-libraries
+          # Only the tool sources are needed; the engine plugins ship in the
+          # prebuilt ROCm install, not from this checkout.
+          sparse-checkout: projects/hipdnn/tools
 
       - name: Checkout TheRock build_tools at pinned ref
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -113,18 +96,13 @@ jobs:
       - name: Set up Python venv + base deps
         run: |
           python -m venv "$VENV_DIR"
-          if [ "$RUNNER_OS" = "Windows" ]; then VENV_BIN="$VENV_DIR/Scripts"; else VENV_BIN="$VENV_DIR/bin"; fi
           # shellcheck disable=SC1091
-          source "$VENV_BIN/activate"
-          echo "$VENV_BIN" >> "$GITHUB_PATH"
+          source "$VENV_DIR/bin/activate"
+          echo "$VENV_DIR/bin" >> "$GITHUB_PATH"
           echo "VIRTUAL_ENV=$VENV_DIR" >> "$GITHUB_ENV"
           python -m pip install --upgrade pip
           # boto3 + pyzstd: install_rocm_from_artifacts.py decompresses zstd slices.
           pip install boto3 pyzstd cmake ninja
-
-      - name: Put ROCm bin on PATH for DLL discovery (Windows)
-        if: ${{ runner.os == 'Windows' }}
-        run: echo "${ROCM_PATH}/bin" >> "$GITHUB_PATH"
 
       - name: Fetch prebuilt ROCm (this run's build, or latest nightly fallback)
         run: |
@@ -186,13 +164,7 @@ jobs:
           pip install -e .[test]
           python -m pytest -ra
 
-      - name: Post-job GPU process cleanup (Windows)
-        if: ${{ always() && runner.os == 'Windows' }}
-        timeout-minutes: 5
-        shell: powershell
-        run: . '${{ github.workspace }}\TheRock\build_tools\github_actions\cleanup_processes.ps1'
-
-      - name: Post-job GPU process cleanup (Linux)
-        if: ${{ always() && runner.os == 'Linux' }}
+      - name: Post-job GPU process cleanup
+        if: ${{ always() }}
         timeout-minutes: 5
         run: bash ./TheRock/build_tools/github_actions/cleanup_processes.sh

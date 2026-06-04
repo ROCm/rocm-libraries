@@ -217,9 +217,6 @@ jobs:
 
   hipdnn-benchmark:
     name: hipDNN benchmark (${{ needs.setup.outputs.benchmark_mode }})
-    permissions:
-      contents: read
-      id-token: write
     needs: [setup, therock-ci-linux]
     # Single benchmark entry point. !cancelled() lets the nightly (tool-only) case
     # run even though therock-ci-linux is skipped (skip != failure); the run-id
@@ -239,7 +236,6 @@ jobs:
       projects_to_test: ${{ needs.setup.outputs.benchmark_mode == 'run-id' && 'hipdnn' || '' }}
       amdgpu_families: "gfx94X-dcgpu"
       test_runs_on: ${{ needs.setup.outputs.benchmark_runs_on }}
-      platform: "linux"
 
   therock_ci_summary:
     name: TheRock CI Summary
