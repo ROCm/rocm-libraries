@@ -77,8 +77,7 @@ rocsparse_status rocsparse_create_handle(rocsparse_handle* handle);
  *  \retval rocsparse_status_internal_error an internal error occurred.
  */
 ROCSPARSE_EXPORT
-rocsparse_status rocsparse_create_handle_with_stream(rocsparse_handle* handle,
-                                                     hipStream_t       stream);
+rocsparse_status rocsparse_create_handle_with_stream(rocsparse_handle* handle, hipStream_t stream);
 
 /*! \ingroup aux_module
  *  \brief Destroy a rocSPARSE handle.
