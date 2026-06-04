@@ -5,13 +5,19 @@ Kernel Python DSL (`ck_dsl`).
 
 ## What it does
 
-The provider links against `libpython3` and pybind11 and embeds a
-CPython interpreter inside the plugin `.so`. A thin Python compile
-service (`ck_dsl_provider/compile_service.py`) is invoked from C++
-through a `CompileServiceBridge`, which dispatches on `op_kind`,
-builds a `ck_dsl` dataclass from a typed payload dict, calls
-`ck_dsl.helpers.compile.compile_kernel`, and returns HSACO bytes
-plus the launch metadata the C++ side needs.
+The provider embeds a **MicroPython** interpreter inside the plugin
+`.so` — it has **no dependency on a system Python installation or on
+pybind11**. The `ck_dsl` / `ck_dsl_provider` Python ships with the
+plugin: frozen into the `.so` by default, or as `.py` / `.mpy` files
+beside it (see [Distribution modes](#distribution-modes)). A thin Python
+compile service (`ck_dsl_provider/compile_service.py`) is invoked from
+C++ through a `CompileServiceBridge`, which dispatches on `op_kind`,
+builds a `ck_dsl` dataclass from a typed payload, calls
+`ck_dsl.helpers.compile.compile_kernel`, and returns HSACO bytes plus
+the launch metadata the C++ side needs. The LLVM-IR → HSACO step runs
+through `comgr` (libamd_comgr), exposed to the interpreter as a native
+`comgr` module so `ck_dsl` keeps its existing compile flow without any
+ctypes / FFI.
 
 A graph-key JIT cache (`JitCache`) memoises the compile result per
 process. Subsequent calls with the same logical shape return the
@@ -27,7 +33,7 @@ and 3D conv.
 
 ### At a glance
 
-The plugin embeds a CPython interpreter and turns a hipDNN conv graph
+The plugin embeds a MicroPython interpreter and turns a hipDNN conv graph
 into a launchable GPU kernel by calling the `ck_dsl` Python DSL. The
 expensive compile happens **once per (shape, arch)**; a process-wide
 `JitCache` short-circuits every repeat request to a ready `HipModule`.
@@ -40,7 +46,7 @@ flowchart LR
         direction TB
         Front["Engine + Adapter<br/>validate graph,<br/>build spec, detect arch"]
         Cache["JitCache<br/>key = shape + arch"]
-        Py["Embedded Python<br/>ck_dsl → HSACO"]
+        Py["Embedded MicroPython<br/>ck_dsl → HSACO<br/>(native comgr)"]
         Mod["HipModule"]
     end
 
@@ -62,7 +68,7 @@ flowchart TB
     Spec["build spec +<br/>arch-validate (DSL)"]
     Key["key = shape + arch"]
     Q{"in JitCache?"}
-    Compile["embedded Python:<br/>ck_dsl compiles HSACO<br/>(once per shape + arch)"]
+    Compile["embedded MicroPython:<br/>ck_dsl compiles HSACO<br/>(once per shape + arch)"]
     Mod["HipModule"]
     Exec["execute → launch on GPU"]
 
@@ -124,12 +130,13 @@ flowchart TB
         end
 
         subgraph pybound["Python boundary"]
-            Interp["EmbeddedInterpreter<br/>(isolated CPython)"]
+            Interp["EmbeddedInterpreter<br/>(embedded MicroPython,<br/>interpreter lock — no GIL)"]
             Bridge["CompileServiceBridge<br/>isApplicable / compile<br/>(opKind, payload, arch)"]
+            Comgr["native comgr module<br/>(libamd_comgr): IR → HSACO"]
         end
     end
 
-    subgraph pysrc["Trusted Python source (sys.path)"]
+    subgraph pysrc["ck_dsl modules<br/>(frozen in the .so, or on-disk bundle)"]
         Service["ck_dsl_provider.compile_service"]
         DSL["ck_dsl<br/>(build + compile_kernel)"]
     end
@@ -154,8 +161,10 @@ flowchart TB
     Arch -.arch.-> Bridge
     Payload -.payload dict.-> Bridge
     Bridge --> Interp
-    Bridge -->|GIL| Service
+    Bridge -->|import + call| Service
     Service --> DSL
+    DSL -.lower → IR.-> Comgr
+    Comgr -.HSACO.-> DSL
     DSL -.HSACO + metadata.-> Bridge
     Bridge --> Artifact --> Module
     Cache --> Module
@@ -196,7 +205,7 @@ sequenceDiagram
     Bld->>Arch: detectDeviceArch(stream)
     Arch-->>Bld: gfx token (nullopt → decline)
     Bld->>Adp: applyArchCodegenConfig(spec, arch)
-    Bld->>Br: isApplicable(opKind, payload, arch)  [GIL]
+    Bld->>Br: isApplicable(opKind, payload, arch)  [lock]
     Br-->>Bld: applicable? (DSL is_valid_spec)
 
     SDK->>Eng: initializeExecutionContext(graph)
@@ -209,7 +218,7 @@ sequenceDiagram
     Bld->>Cache: getOrLoad(key, loader)
 
     alt cache miss
-        Cache->>Br: compile(opKind, payload, arch)  [GIL]
+        Cache->>Br: compile(opKind, payload, arch)  [lock]
         Br->>Py: compile(op_kind, payload, arch)
         Py-->>Br: dict{hsaco, kernel_name, grid, block, arg_schema, ...}
         Br-->>Cache: KernelArtifact
@@ -232,28 +241,64 @@ sequenceDiagram
 
 ## Trust boundary
 
-The Python source tree that this plugin loads from is part of the
-plugin's trust boundary. The CMake-baked `sys.path` entries
-(`CK_DSL_PYTHON_PACKAGE_PATH`, `CK_DSL_PROVIDER_PYTHON_PACKAGE_PATH`)
-must have the same permissions as the `.so` itself: world-readable,
-not user-writable. Anyone able to write to those directories can
-substitute the Python source that runs inside `compile()` and
-therefore the HSACO bytes that reach `hipModuleLoadData`.
+The Python that runs inside `compile()` is part of the plugin's trust
+boundary — whoever controls it controls the HSACO bytes that reach
+`hipModuleLoadData`.
 
-The embedded interpreter is brought up with
-`PyConfig_InitIsolatedConfig` so the host process's `PYTHONPATH`,
-`PYTHONHOME`, `PYTHONSTARTUP`, and `PYTHONUSERBASE` environment
-variables do not influence import resolution. If a sibling embedder
-has already initialised CPython when the plugin loads, the existing
-interpreter is reused (the isolated-config hardening only applies if
-this plugin is the first embedder).
+In the default **frozen** mode the `ck_dsl` / `ck_dsl_provider` modules
+are compiled into the `.so` as frozen bytecode. There is no external
+Python source, no `sys.path`, and no filesystem import, so the trust
+boundary is exactly the `.so` itself — the same surface as any other
+shared library.
+
+In the on-disk **py** / **mpy** modes the modules ship as files in a
+bundle directory beside the plugin (`CKDSL_BUNDLE_DIR`, added to
+`sys.path` at startup). That directory must have the same permissions as
+the `.so`: world-readable, not user-writable. Anyone able to write to it
+can substitute the code that runs inside `compile()`.
+
+Because the interpreter is MicroPython, the CPython environment-injection
+surface does not exist: there is no `PYTHONPATH` / `PYTHONHOME` /
+`PYTHONSTARTUP` / `PYTHONUSERBASE` influence on import resolution, and
+the interpreter has its own process-owned GC heap (no shared CPython
+runtime to inherit from a sibling embedder).
+
+## Distribution modes
+
+How `ck_dsl` ships into the plugin is selected at configure time with
+`-DCKDSL_MICROPYTHON_MODE=<mode>`:
+
+| Mode | What ships | Trade-off |
+|------|------------|-----------|
+| `frozen` (default) | `ck_dsl` + shims frozen into the `.so` as bytecode | Self-contained, smallest surface; editing a `.py` means rebuilding + relinking the static lib. |
+| `py` | `.py` files in a bundle dir beside the plugin | Fast iteration — edit the on-disk `.py` and rerun, no relink. |
+| `mpy` | pre-compiled `.mpy` bytecode beside the plugin | Like `py`, but smaller / faster to load. |
+
+All three modes are built from the same source by the embed build
+(`micropython/build_embed.sh`, wired via `cmake/CkDslMicroPython.cmake`).
+The on-disk modes load through the embed port's filesystem importer; the
+bundle path is baked at build time and a relocating install would
+override it. `CKDSL_MICROPYTHON_DIR` can point the build at an existing
+MicroPython checkout instead of cloning the pinned commit.
+
+The `ck_dsl` source is kept directly MicroPython-compatible (it is no
+longer rewritten at build time): every `@dataclass` field is explicit
+`= field(...)`, displays avoid PEP-448 star-unpacking, and `os.getenv` /
+`object.__setattr__` are used in place of the constructs MicroPython
+lacks. The compatibility lint below guards against regressions.
 
 ## Tests
 
 - `ninja ck-dsl-provider-unit-check` — host-only + GPU-gated unit
   suite covering the interpreter, bridge, adapter, payload
   round-trip, signature, cache, plan-builder, launch ABI, and
-  perf-measurement helpers.
+  perf-measurement helpers. Also runs the **MicroPython-compatibility
+  lint** (`micropython/check_compat.py`): it fails if a construct the
+  embed can't handle (a bare `@dataclass` field, PEP-448 display,
+  `os.environ`, `match`/`async`) creeps into the `ck_dsl` sources, and —
+  when `mpy-cross` is available — additionally compiles every module
+  with the real MicroPython compiler. Runnable standalone too:
+  `python3 micropython/check_compat.py [--mpy-cross PATH] <dir>...`.
 - `ninja ck-dsl-provider-integration-check` — end-to-end conv-fwd
   across a set of shapes on whatever DSL-supported device is present
   (gfx942 / gfx950 / gfx1151), comparing against
@@ -275,5 +320,7 @@ questions are recorded in the implementation plan:
 
 This document is the source of truth for the Milestone 1 goal and
 non-goals, the runtime embedded-Python architecture, and the rationale
-behind decisions such as the embedded interpreter, pybind11 binding,
-and provider-local compile service that are summarised above.
+behind decisions such as the embedded interpreter and provider-local
+compile service that are summarised above. (Note: that plan predates the
+move to MicroPython and still describes the original embedded-CPython /
+pybind11 design; this README reflects the current implementation.)
