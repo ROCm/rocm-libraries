@@ -466,29 +466,40 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
 
             tile_elementwise_inout([](auto& c) { c = 0; }, c_block_tile);
 
-            if constexpr(is_a_col_major && !is_a_load_tr_v())
-            {
-                auto a_shuffle_tmp = make_static_distributed_tensor<OverrideADataType>(
-                    Policy::template MakeShuffledARegTileDistribution<Problem>());
-                transpose_tile2d(a_shuffle_tmp, a_block_tile);
-                Base::LocalPrefill(a_copy_lds_window, a_shuffle_tmp, a_element_func);
-            }
-            else
-            {
-                Base::LocalPrefill(a_copy_lds_window, a_block_tile, a_element_func);
-            }
+            // Pre-compute LDS store window coordinates
+            constexpr auto a_store_dstr = ABlockTileDistr{};
+            constexpr auto b_store_dstr = []() {
+                if constexpr(is_b_row_major && !is_b_load_tr_v())
+                    return decltype(make_static_distributed_tensor<BDataType>(
+                        Policy::template MakeShuffledBRegTileDistribution<
+                            Problem>()))::get_tile_distribution();
+                else
+                    return BBlockTileDistr{};
+            }();
+            auto a_lds_store_window =
+                Base::MakeDistributedLdsStoreWindow(a_copy_lds_window, a_store_dstr);
+            auto b_lds_store_window =
+                Base::MakeDistributedLdsStoreWindow(b_copy_lds_window, b_store_dstr);
 
-            if constexpr(is_b_row_major && !is_b_load_tr_v())
-            {
-                auto b_shuffle_tmp = make_static_distributed_tensor<OverrideBDataType>(
-                    Policy::template MakeShuffledBRegTileDistribution<Problem>());
-                transpose_tile2d(b_shuffle_tmp, b_block_tile);
-                Base::LocalPrefill(b_copy_lds_window, b_shuffle_tmp, b_element_func);
-            }
-            else
-            {
-                Base::LocalPrefill(b_copy_lds_window, b_block_tile, b_element_func);
-            }
+            auto store_a_to_lds = [&](const auto& src) {
+                Base::LocalStore(a_lds_store_window, src);
+            };
+            auto store_b_to_lds = [&](const auto& src) {
+                if constexpr(is_b_row_major && !is_b_load_tr_v())
+                {
+                    auto b_shuffle_tmp = make_static_distributed_tensor<BDataType>(
+                        Policy::template MakeShuffledBRegTileDistribution<Problem>());
+                    transpose_tile2d(b_shuffle_tmp, src);
+                    Base::LocalStore(b_lds_store_window, b_shuffle_tmp);
+                }
+                else
+                {
+                    Base::LocalStore(b_lds_store_window, src);
+                }
+            };
+
+            store_a_to_lds(a_block_tile);
+            store_b_to_lds(b_block_tile);
 
             LoadAndQuantizeATile(a_block_tile, aq_block_tile[AQIdx + 1], a_copy_dram_window);
             move_tile_window(a_copy_dram_window, a_dram_tile_window_step);
@@ -511,30 +522,8 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
                 {
                     block_sync_lds();
 
-                    if constexpr(is_a_col_major && !is_a_load_tr_v())
-                    {
-                        // Note: ABDataType PkInt4/PkFp4 gets converted during loading earlier
-                        auto a_shuffle_tmp = make_static_distributed_tensor<OverrideADataType>(
-                            Policy::template MakeShuffledARegTileDistribution<Problem>());
-                        transpose_tile2d(a_shuffle_tmp, a_block_tile);
-                        Base::LocalPrefill(a_copy_lds_window, a_shuffle_tmp, a_element_func);
-                    }
-                    else
-                    {
-                        Base::LocalPrefill(a_copy_lds_window, a_block_tile, a_element_func);
-                    }
-                    if constexpr(is_b_row_major && !is_b_load_tr_v())
-                    {
-                        // Note: BDataType PkInt4/PkFp4 gets converted during loading earlier
-                        auto b_shuffle_tmp = make_static_distributed_tensor<OverrideBDataType>(
-                            Policy::template MakeShuffledBRegTileDistribution<Problem>());
-                        transpose_tile2d(b_shuffle_tmp, b_block_tile);
-                        Base::LocalPrefill(b_copy_lds_window, b_shuffle_tmp, b_element_func);
-                    }
-                    else
-                    {
-                        Base::LocalPrefill(b_copy_lds_window, b_block_tile, b_element_func);
-                    }
+                    store_a_to_lds(a_block_tile);
+                    store_b_to_lds(b_block_tile);
 
                     LoadAndQuantizeATile(
                         a_block_tile, aq_block_tile[(AQIdx + 2) % 3], a_copy_dram_window);
@@ -588,30 +577,9 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
                 AQIdx = (AQIdx + 1) % 3;
                 BQIdx = (BQIdx + 1) % 2;
 
-                if constexpr(is_a_col_major && !is_a_load_tr_v())
-                {
-                    // Note: ADataType gets converted during loading from PkInt4/PkFp4
-                    auto a_shuffle_tmp = make_static_distributed_tensor<OverrideADataType>(
-                        Policy::template MakeShuffledARegTileDistribution<Problem>());
-                    transpose_tile2d(a_shuffle_tmp, a_block_tile);
-                    Base::LocalPrefill(a_copy_lds_window, a_shuffle_tmp, a_element_func);
-                }
-                else
-                {
-                    Base::LocalPrefill(a_copy_lds_window, a_block_tile, a_element_func);
-                }
-                if constexpr(is_b_row_major && !is_b_load_tr_v())
-                {
-                    // Note: BDataType gets converted during loading from PkInt4
-                    auto b_shuffle_tmp = make_static_distributed_tensor<OverrideBDataType>(
-                        Policy::template MakeShuffledBRegTileDistribution<Problem>());
-                    transpose_tile2d(b_shuffle_tmp, b_block_tile);
-                    Base::LocalPrefill(b_copy_lds_window, b_shuffle_tmp, b_element_func);
-                }
-                else
-                {
-                    Base::LocalPrefill(b_copy_lds_window, b_block_tile, b_element_func);
-                }
+                store_a_to_lds(a_block_tile);
+                store_b_to_lds(b_block_tile);
+
                 block_sync_lds();
                 block_gemm.LocalPrefetch(
                     a_lds_gemm_window, b_lds_gemm_window, is_a_load_tr_v, is_b_load_tr_v);
