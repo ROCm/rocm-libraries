@@ -322,7 +322,6 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
 
             // Copy the first lanes values to all threads
             static_for<0, thread_buf_size, 1>{}([&](auto i) {
-                
                 float abs_max = amd_wave_read_first_lane(aq_reduce.get_thread_buffer()[i]);
                 if(abs_max == 0.f)
                 {
@@ -333,6 +332,7 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
             });
 
             // Apply scales and convert data to the original block tile distribution
+            // The A data needs to be loaded again to have the values for the correct threads.
             auto a_raw_tile = make_static_distributed_tensor<ADataType>(ADstStaticTileDist{});
             load_tile(a_raw_tile, a_dram_window);
 
@@ -346,11 +346,10 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
                     constexpr auto k_idx =
                         tile_distributed_index<getIdx(k_group_idx) * AQuantGroupSize::kK +
                                                kk.value>{};
-
                     constexpr auto a_idx = make_tuple(m_idx, k_idx);
 
-                    AQDataType raw_a_value   = type_convert<AQDataType>(a_raw_tile(a_idx));
-                    a_block_tile(a_idx) = type_convert<fp8_t>(raw_a_value / scale_value);
+                    AQDataType raw_a_value = type_convert<AQDataType>(a_raw_tile(a_idx));
+                    a_block_tile(a_idx)    = type_convert<fp8_t>(raw_a_value / scale_value);
                 });
             });
         }
