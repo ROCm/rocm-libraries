@@ -359,11 +359,11 @@ class ConfigSectionGenerator:
             'BenchmarkProblems': [[self._problem_type, benchmark_common]],
             'LibraryLogic': self._library_logic,
             '#LibraryClient': '',
-            'Backend': "Ductile" if is_ga else "Tensile"
+            'Backend': {"Name": "Ductile"} if is_ga else {"Name": "Tensile"}
         }
 
         if is_ga:
-            tuning_config['ductile'] = self._build_ductile(
+            tuning_config['Backend']["Config"] = self._build_ductile(
                 fork_params, 
                 sizes, 
                 config_name,

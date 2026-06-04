@@ -314,15 +314,6 @@ def run(
             with open(self.config, "w") as f:
                 f.write(content)
 
-            backend = yaml.safe_load(content).get("Backend", "Ductile")
-            if backend == "Tensile":
-                binary = hipblaslt_path / "tensilelite/Tensile/bin/Tensile"
-            elif backend == "Ductile":
-                binary = TD_PATH / "Ductile/bin/Ductile"
-            else:
-                raise ValueError(f"'Backend' must be one of (Ductile, Tensile), got '{backend}'")
-            logger.debug(f"Selected backend={backend} binary={binary} for config={self.config_name}")
-
             self.build_dir.mkdir(parents=True, exist_ok=True)
             (self.build_dir / ".running").write_text(f"device={self.device}\nslot={self.slot_id}\n")
 
@@ -330,7 +321,7 @@ def run(
             with open(self.build_dir / f"{self.config_name}-tensilelite.log", "w") as f:
                 proc = subprocess.Popen(
                     [
-                        str(binary),
+                        hipblaslt_path / "tensilelite/Tensile/bin/Tensile",
                         self.config,
                         self.build_dir,
                         "--prebuilt-client",

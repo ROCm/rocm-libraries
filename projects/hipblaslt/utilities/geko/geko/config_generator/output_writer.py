@@ -114,9 +114,7 @@ class TuningConfigWriter:
         if '#LibraryClient' in config:
             lines.append('#LibraryClient: \n')
         if 'Backend' in config:
-            lines.append(f'Backend: {config["Backend"]}\n')
-        if 'ductile' in config:
-            lines.extend(self._write_ductile(config['ductile']))
+            lines.extend(self._write_backend(config['Backend']))
         lines.append(f'# End of {Path(filepath).name} \n')
 
         with open(filepath, 'w') as f:
@@ -250,16 +248,22 @@ class TuningConfigWriter:
                     lines.append(f"    - {key}: {val}\n")
         return lines
 
-    def _write_ductile(self, ductile: Dict[str, Any]) -> List[str]:
+    def _write_backend(self, backend: Dict[str, Any]) -> List[str]:
         """Serialize GA ``ductile`` block: scalar keys plus ``weights`` list."""
-        simple = {k: v for k, v in ductile.items() if k != 'weights'}
-        lines = ['ductile:\n'] + self._write_mapping(simple)
-        if "weights" not in ductile:
+        simple = {k: v for k, v in backend.items() if k != 'Config'}
+        lines = ['Backend:\n'] + self._write_mapping(simple)
+        if "Config" not in backend:
             return lines
-        lines.append('  weights:\n')
-        for weight_dict in ductile.get('weights', []):
+        
+        simple = {k: v for k, v in backend["Config"].items() if k != 'weights'}
+        lines.extend(['  Config:\n'] + self._write_mapping(simple, indent=4))
+
+        if "weights" not in backend["Config"]:
+            return lines
+        lines.append('    weights:\n')
+        for weight_dict in backend["Config"].get('weights', []):
             for key, val in weight_dict.items():
-                lines.append(f"  - {key}: {val}\n")
+                lines.append(f"      - {key}: {val}\n")
         return lines
 
 
