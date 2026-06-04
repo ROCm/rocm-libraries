@@ -51,6 +51,6 @@ extensions += [
 ]
 
 mermaid_output_format = "raw"
-#bibtex_bibfiles = ['refs.bib']
+bibtex_bibfiles = ["refs.bib"]
 
 cpp_id_attributes = ["__global__", "__device__", "__host__"]
