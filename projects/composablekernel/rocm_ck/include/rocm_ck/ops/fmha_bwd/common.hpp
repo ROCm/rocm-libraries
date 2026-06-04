@@ -39,4 +39,27 @@ enum class FmhaBiasType
     ALIBI
 };
 
+/// Attention mask family.
+///
+/// Integer values must match ck_tile::GenericAttentionMaskEnum so the device
+/// bridge can forward the spec-time enum to the kernel via a static_cast
+/// without a translation table (see dqdkdv_dev.hpp's MASK_TYPE scalar wiring).
+///
+/// Both causal variants describe a sliding window with left=-1 (unbounded
+/// past) and right=0 (no lookahead). The two flavours differ in where the
+/// causal diagonal is anchored when seqlen_q != seqlen_k:
+///   * TOP_LEFT     -- diagonal at (0, 0); standard "predict next token".
+///   * BOTTOM_RIGHT -- diagonal at (seqlen_q-1, seqlen_k-1); used when the
+///                     query is the *tail* of a longer cached K/V (decode).
+/// GENERIC selects ck_tile's runtime (left, right, top-left/bottom-right)
+/// window descriptor and is intended for sliding-window / xformer-style
+/// attention. NO_MASK disables masking at compile time.
+enum class FmhaMaskType
+{
+    NO_MASK             = 0,
+    TOP_LEFT_CAUSAL     = 1,
+    BOTTOM_RIGHT_CAUSAL = 2,
+    GENERIC             = 3,
+};
+
 } // namespace rocm_ck

@@ -100,54 +100,62 @@ struct FmhaBwdDQDKDVTypes
                                               K.has_bias_grad, // kHasBiasGrad
                                               K.block_per_cu>; // kBlockPerCu
 
-    // Guard: tile geometry is only valid for d128. Other hdim values need
-    // different tile configs (see fmha_bwd.py get_dq_dk_dv_tiles()).
-    static_assert(K.hdim_q == 128 && K.hdim_v == 128,
-                  "Tile geometry is hardcoded for d128. Other hdim values "
-                  "require different tile configs.");
-
-    // Guard: BlockSize=256 with NumWarps=4 assumes wave64 (gfx9). On wave32
-    // targets (gfx10/11/12) the same NumWarps would yield BlockSize=128,
-    // breaking the BlockTile arithmetic and warp-level intrinsics encoded
-    // into the pipeline. Refuse to compile this bridge on non-gfx9 targets.
+    // Guard: wave64 (gfx9) only. The tile configs currently populated in
+    // getTileConfig() assume wavefrontSize=64. On wave32 targets (gfx10/11/12)
+    // the block_size arithmetic and warp-level intrinsics would be wrong.
+    //
+    // Toolchain compatibility for the wavefront-size predefine:
+    //   - clang <=22 exposes __AMDGCN_WAVEFRONT_SIZE (and, during the
+    //     transition, also the double-underscore __AMDGCN_WAVEFRONT_SIZE__);
+    //   - clang >=23 dropped both predefines, so fall back to the gfx9 arch
+    //     macro -- gfx9 (CDNA) is wave64 by construction. wave32 targets
+    //     (gfx10/11/12) define __GFX10__/__GFX11__/__GFX12__ instead and hit
+    //     the #else, rejecting the bridge as intended.
 #if defined(__AMDGCN_WAVEFRONT_SIZE__)
     static_assert(__AMDGCN_WAVEFRONT_SIZE__ == 64,
-                  "FmhaBwdDQDKDV bridge requires wave64 (gfx9). The hardcoded "
-                  "BlockSize=256 / NumWarps=4 tile config assumes warp_size=64.");
+                  "FmhaBwdDQDKDV bridge requires wave64 (gfx9). "
+                  "Add GFX11/GFX12 tile configs to enable wave32 targets.");
 #elif defined(__AMDGCN_WAVEFRONT_SIZE)
     static_assert(__AMDGCN_WAVEFRONT_SIZE == 64,
-                  "FmhaBwdDQDKDV bridge requires wave64 (gfx9). The hardcoded "
-                  "BlockSize=256 / NumWarps=4 tile config assumes warp_size=64.");
-#elif !defined(__GFX9__)
-#error "Cannot determine wavefront size. This bridge requires gfx9 (wave64)."
+                  "FmhaBwdDQDKDV bridge requires wave64 (gfx9). "
+                  "Add GFX11/GFX12 tile configs to enable wave32 targets.");
+#elif defined(__GFX9__)
+    // gfx9 is wave64 by construction; no value to assert.
+#else
+    static_assert(false,
+                  "FmhaBwdDQDKDV bridge requires wave64 (gfx9): target is not "
+                  "gfx9 and no __AMDGCN_WAVEFRONT_SIZE predefine is available.");
 #endif
 
-    // --- Tile shape (hardcoded for d128 gfx9 -- Config 4 from fmha_bwd.py) ---
-    //
-    // From the gfx9 tile table for fp16/bf16 d128:
-    //   bm0=16, bn0=128, bk0=128, bk1=16, bk2=128, bk3=16, bk4=32
-    //   bhdq=128, bhdv=128
-    //
-    //   Gemm0/Gemm2 block_warps: <1, 4, 1>  warp_tile: <16, 16, 32>
-    //   Gemm1/Gemm3 block_warps: <4, 1, 1>  warp_tile: <16, 16, 16>
-    //   Gemm4       block_warps: <1, 4, 1>  warp_tile: <16, 16, min(32, 32)>
-    //
-    //   NumWarps = 4, BlockSize = 256, maxSeqLenQ = 0 (unlimited)
-    //
-    // BlockTile: sequence<bm0, bn0, bk0, bk1, bk2, bk3, bk4, bhdq, bhdv>
-    using BlockTile = ck_tile::sequence<16, 128, 128, 16, 128, 16, 32, 128, 128>;
+    // --- Tile shape (from consteval lookup table) ---
+    // getTileConfig() returns the architecture-specific tile geometry for
+    // the given (hdim_q, hdim_v, dtype). The device bridge reads plain
+    // integer fields and converts them to CK Tile sequence<> types.
+    static constexpr auto kTile = getTileConfig(K.hdim_q, K.hdim_v, K.dtype, GpuTarget::gfx942);
+
+    using BlockTile = ck_tile::sequence<kTile.bm0,
+                                        kTile.bn0,
+                                        kTile.bk0,
+                                        kTile.bk1,
+                                        kTile.bk2,
+                                        kTile.bk3,
+                                        kTile.bk4,
+                                        K.hdim_q,
+                                        K.hdim_v>;
 
     // Gemm0 & Gemm2: compute S = Q @ K^T and dP = dO @ V^T
-    using Gemm0BlockWarps = ck_tile::sequence<1, 4, 1>;
-    using Gemm0WarpTile   = ck_tile::sequence<16, 16, 32>;
+    using Gemm0BlockWarps = ck_tile::sequence<kTile.rm0, kTile.rn0, kTile.rk0>;
+    using Gemm0WarpTile   = ck_tile::sequence<kTile.wm0, kTile.wn0, kTile.wk0>;
 
     // Gemm1 & Gemm3: compute dV = P^T @ dO and dK = dS^T @ Q
-    using Gemm1BlockWarps = ck_tile::sequence<4, 1, 1>;
-    using Gemm1WarpTile   = ck_tile::sequence<16, 16, 16>;
+    using Gemm1BlockWarps = ck_tile::sequence<kTile.rm1, kTile.rn1, kTile.rk1>;
+    using Gemm1WarpTile   = ck_tile::sequence<kTile.wm1, kTile.wn1, kTile.wk1>;
 
     // Gemm4: compute dQ = dS @ K
-    using Gemm4BlockWarps = ck_tile::sequence<1, 4, 1>;
-    using Gemm4WarpTile   = ck_tile::sequence<16, 16, 32>;
+    using Gemm4BlockWarps = ck_tile::sequence<kTile.rm2, kTile.rn2, kTile.rk2>;
+    // GEMM4 warp tile = (wm0, wn0, min(wk0, bk4)) per fmha_bwd.py
+    static constexpr int kGemm4Wk = (kTile.wk0 < kTile.bk4) ? kTile.wk0 : kTile.bk4;
+    using Gemm4WarpTile           = ck_tile::sequence<kTile.wm0, kTile.wn0, kGemm4Wk>;
 
     // TileFmhaBwdShape: 5 GEMMs with their block_warps and warp_tiles
     //   G0=G2 (S/dP), G1=G3 (dV/dK), G4 (dQ)
@@ -161,13 +169,13 @@ struct FmhaBwdDQDKDVTypes
                                                 Gemm1BlockWarps,
                                                 Gemm1WarpTile, // Gemm3 (same as G1)
                                                 Gemm4BlockWarps,
-                                                Gemm4WarpTile, // Gemm4
-                                                0>;            // kMaxSeqLenQ (0 = unlimited)
+                                                Gemm4WarpTile,    // Gemm4
+                                                kTile.max_seq_q>; // kMaxSeqLenQ
 
     // --- Mask type ---
-    // has_mask=true  -> GenericAttentionMask<true, true> (full masking)
-    // has_mask=false -> GenericAttentionMask<false>      (no masking)
-    using Mask = std::conditional_t<K.has_mask,
+    // mask_type != NO_MASK -> GenericAttentionMask<true, true> (full masking)
+    // mask_type == NO_MASK -> GenericAttentionMask<false>      (no masking)
+    using Mask = std::conditional_t<hasMask(K),
                                     ck_tile::GenericAttentionMask<true, true>,
                                     ck_tile::GenericAttentionMask<false>>;
 
@@ -419,6 +427,7 @@ __device__ void runFmhaBwdDQDKDV(Args args)
         {}, // mask placeholder    (EmptyKargs<2> or MaskKargs)
         {}, // dropout placeholder (EmptyKargs<3> or DropoutKargs)
         {}, // determ placeholder  (EmptyKargs<4> or DetermKargs)
+        {}, // qrqtrdor (QrQtrDorKargs when kUseQrQtrDorPipeline; unused here)
         // Mode-specific tail fields are value-initialized (zero) here and
         // assigned by name in the per-mode block below.
     };
@@ -437,18 +446,26 @@ __device__ void runFmhaBwdDQDKDV(Args args)
         kargs.seqlen_k_ptr    = reinterpret_cast<const int32_t*>(args.tensors[S::SEQLEN_K].ptr);
         kargs.cu_seqlen_q_ptr = nullptr;
         kargs.cu_seqlen_k_ptr = nullptr;
+        // dq_acc_batch_offset_ptr: per-batch workspace offset table, populated
+        // via workspace. nullptr when !is_deterministic (host won't populate
+        // the slot and DqDkDv kernel doesn't read it).
+        if constexpr(K.is_deterministic)
+            kargs.dq_acc_batch_offset_ptr =
+                reinterpret_cast<const long_index_t*>(args.tensors[S::DQ_ACC_BATCH_OFFSET].ptr);
+        else
+            kargs.dq_acc_batch_offset_ptr = nullptr;
     }
     else
     {
         // Fixed-length sequences: per-batch strides for every tensor.
-        kargs.batch_stride_q      = static_cast<index_t>(t_q.strides[2]);
-        kargs.batch_stride_k      = static_cast<index_t>(t_k.strides[2]);
-        kargs.batch_stride_v      = static_cast<index_t>(t_v.strides[2]);
-        kargs.batch_stride_do     = static_cast<index_t>(t_do.strides[2]);
-        kargs.batch_stride_lsed   = static_cast<index_t>(t_lse.strides[1]);
-        kargs.batch_stride_dq_acc = t_dq_acc.strides[2]; // long_index_t
-        kargs.batch_stride_dk     = static_cast<index_t>(t_dk.strides[2]);
-        kargs.batch_stride_dv     = static_cast<index_t>(t_dv.strides[2]);
+        // dq_acc layout derived from workspace via nsplits_ptr
+        kargs.batch_stride_q    = static_cast<index_t>(t_q.strides[2]);
+        kargs.batch_stride_k    = static_cast<index_t>(t_k.strides[2]);
+        kargs.batch_stride_v    = static_cast<index_t>(t_v.strides[2]);
+        kargs.batch_stride_do   = static_cast<index_t>(t_do.strides[2]);
+        kargs.batch_stride_lsed = static_cast<index_t>(t_lse.strides[1]);
+        kargs.batch_stride_dk   = static_cast<index_t>(t_dk.strides[2]);
+        kargs.batch_stride_dv   = static_cast<index_t>(t_dv.strides[2]);
     }
 
     // --- Optional feature fields (single set of if-constexpr branches) ---
@@ -491,7 +508,7 @@ __device__ void runFmhaBwdDQDKDV(Args args)
         }
     }
 
-    if constexpr(K.has_mask)
+    if constexpr(hasMask(K))
     {
         kargs.window_size_left  = args.scalars[S::WINDOW_SIZE_LEFT].i32;
         kargs.window_size_right = args.scalars[S::WINDOW_SIZE_RIGHT].i32;
@@ -526,7 +543,7 @@ __device__ void runFmhaBwdDQDKDV(Args args)
         kargs.drop_offset.val               = args.scalars[S::DROP_OFFSET].u64;
         kargs.is_drop_seed_offset_from_host = true;
 
-        kargs.rand_val_ptr         = t_randval.ptr;
+        kargs.rand_val_ptr         = const_cast<void*>(t_randval.ptr);
         kargs.stride_randval       = static_cast<index_t>(t_randval.strides[0]);
         kargs.nhead_stride_randval = static_cast<index_t>(t_randval.strides[1]);
         if constexpr(K.mode == FmhaMode::BATCH)
@@ -537,14 +554,14 @@ __device__ void runFmhaBwdDQDKDV(Args args)
 
     if constexpr(K.is_deterministic)
     {
-        kargs.split_stride_dq_acc = static_cast<index_t>(t_dq_acc.strides[3]);
-        // Newer CK Tile upstream gained a persistent kernel for the
-        // deterministic+BATCH path that requires kargs.batch to be set. The
-        // CK Tile shipped with this build (rocm7.1.1) does not have that
-        // FmhaBwdDeterministicKargs::batch field yet, so we cannot assign
-        // it here. usesBatchSizeSlot()/BATCH_SIZE remain wired through the
-        // host API in anticipation of the upstream bump, and the validator
-        // will exercise that path via the host-only tests.
+        // FmhaBwdDeterministicKargs = {batch, nsplits_ptr}.
+        // - batch: only used by the persistent batch-mode kernel (computes
+        //   total_heads = batch * nhead_q). In group mode the value is
+        //   ignored. Sourced from S::BATCH_SIZE scalar.
+        // - nsplits_ptr: workspace + GetDqAccSplitsOffset, pre-filled by
+        //   PrepareWorkspaceHost.
+        kargs.batch = (K.mode == FmhaMode::BATCH) ? args.scalars[S::BATCH_SIZE].i32 : index_t{0};
+        kargs.nsplits_ptr = reinterpret_cast<const index_t*>(args.tensors[S::NSPLITS].ptr);
     }
 
     typename T::Kernel{}(kargs);

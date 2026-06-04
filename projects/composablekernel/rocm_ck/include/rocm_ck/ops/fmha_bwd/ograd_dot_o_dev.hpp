@@ -37,15 +37,19 @@ namespace rocm_ck {
 /// Template chain (matches dispatcher codegen):
 ///   FmhaBwdOGradDotOSpec<Pipeline>
 ///     -> BlockFmhaBwdOGradDotO<PipelineProblem>
-///       -> BlockFmhaBwdOGradDotOPipelineProblem<OType, dOType, DType,
+///       -> BlockFmhaBwdOGradDotOPipelineProblem<OType, dOType, DType, LSEType,
 ///              bm0, hdim_v, is_group, Traits>
 ///         -> TileFmhaBwdOGradDotOTraits<spad, dvpad, block_per_cu>
+///
+/// LSEDataType is fixed to float to satisfy the sink-gradient atomicAdd
+/// static_assert in block_fmha_bwd_dot_do_o.hpp
 template <FmhaBwdOGradDotOSpec K>
 struct FmhaBwdOGradDotOTypes
 {
     using ODataType     = typename CkTypeMap<K.dtype>::type;
     using OGradDataType = ODataType;
     using DDataType     = float;
+    using LSEDataType   = float;
 
     using Traits =
         ck_tile::TileFmhaBwdOGradDotOTraits<K.pad_seqlen_q, K.pad_hdim_v, K.block_per_cu>;
@@ -54,6 +58,7 @@ struct FmhaBwdOGradDotOTypes
         ck_tile::BlockFmhaBwdOGradDotOPipelineProblem<ODataType,
                                                       OGradDataType,
                                                       DDataType,
+                                                      LSEDataType,
                                                       K.block_size,
                                                       K.hdim_v,
                                                       (K.mode == FmhaMode::GROUP),
@@ -69,6 +74,13 @@ struct FmhaBwdOGradDotOTypes
 /// Receives generic Args, unpacks tensor pointers and strides via named
 /// slot constants, then constructs CK Tile's Kargs via aggregate
 /// initialization. MakeKargs() is host-only, so we initialize directly.
+///
+/// Sink-token gradient (CK Tile #5504) is disabled in rocm_ck: lse_ptr,
+/// sink_ptr and d_sink_ptr are all passed as nullptr and nhead as 0. This is
+/// safe: the kernel only *loads* LSE when atomic_sink_grad_ptr != nullptr (i.e.
+/// when d_sink_ptr != nullptr), and the sink-score read is guarded by
+/// sink_ptr != nullptr -- so these null pointers are address-computed but never
+/// dereferenced. nhead only scales the (never-taken) sink index.
 ///
 /// Tensor layout in generic Args (set by host):
 ///   tensors[S::O]:  ptr=o_ptr,  strides=[stride_o, nhead_stride_o, batch_stride_o]
@@ -130,7 +142,16 @@ __device__ void runFmhaBwdOGradDotO(Args args)
              stride_o,                   // stride_o
              nhead_stride_do,            // nhead_stride_do
              nhead_stride_o,             // nhead_stride_o
-             nhead_stride_d},            // nhead_stride_d
+             // lse_ptr: nullptr is safe here -- the LSE load in the OGradDotO pipeline is
+             // gated on (atomic_sink_grad_ptr != nullptr), and we always pass d_sink_ptr =
+             // nullptr (sink-grad disabled), so LSE is never dereferenced. CK Tile still
+             // computes address arithmetic on it unconditionally; a follow-up upstream issue
+             // should skip that math when sink-grad is off so this nullptr goes away entirely.
+             nullptr,         // lse_ptr
+             nullptr,         // sink_ptr
+             nullptr,         // d_sink_ptr
+             0,               // nhead (only indexes sink_ptr -- 0 when disabled)
+             nhead_stride_d}, // nhead_stride_lsed (was nhead_stride_d; same value)
             // FmhaBwdOGradDotOGroupModeKargs extension
             reinterpret_cast<const int32_t*>( // seqstart_q_ptr
                 t_seqstart_q.ptr),
@@ -159,11 +180,20 @@ __device__ void runFmhaBwdOGradDotO(Args args)
              stride_o,                   // stride_o
              nhead_stride_do,            // nhead_stride_do
              nhead_stride_o,             // nhead_stride_o
-             nhead_stride_d},            // nhead_stride_d
+             // lse_ptr: nullptr is safe here -- the LSE load in the OGradDotO pipeline is
+             // gated on (atomic_sink_grad_ptr != nullptr), and we always pass d_sink_ptr =
+             // nullptr (sink-grad disabled), so LSE is never dereferenced. CK Tile still
+             // computes address arithmetic on it unconditionally; a follow-up upstream issue
+             // should skip that math when sink-grad is off so this nullptr goes away entirely.
+             nullptr,         // lse_ptr
+             nullptr,         // sink_ptr
+             nullptr,         // d_sink_ptr
+             0,               // nhead (only indexes sink_ptr -- 0 when disabled)
+             nhead_stride_d}, // nhead_stride_lsed (was nhead_stride_d; same value)
             // FmhaBwdOGradDotOBatchModeKargs extension
             batch_stride_do, // batch_stride_do
             batch_stride_o,  // batch_stride_o
-            batch_stride_d   // batch_stride_d
+            batch_stride_d   // batch_stride_lsed (was batch_stride_d; same value)
         };
         typename T::Kernel{}(kargs);
     }

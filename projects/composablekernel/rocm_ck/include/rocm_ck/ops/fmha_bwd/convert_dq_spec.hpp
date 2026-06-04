@@ -91,13 +91,29 @@ constexpr int SEQLEN_K   = 5; // [batch]   per-sequence K-lengths
 // are currently needed, but we reserve slot 0 for future use.
 // constexpr int RESERVED = 0;
 
-/// Number of tensor slots required for a given kernel configuration.
+// Workspace-derived slots
+constexpr int NSPLITS_BATCH             = 2;
+constexpr int NSPLITS_GROUP             = 6;
+constexpr int DQ_ACC_BATCH_OFFSET_GROUP = 7;
+
+constexpr int nsplitsSlot(FmhaBwdConvertDQSpec k)
+{
+    return (k.mode == FmhaMode::GROUP) ? NSPLITS_GROUP : NSPLITS_BATCH;
+}
+
+/// Minimum size of Args::tensors[] the host must populate (max_used_slot + 1)
+/// Slot layout (slot 2 is overloaded by mode):
+///   0 DQ_ACC                       -- always
+///   1 DQ                           -- always
+///   2 NSPLITS_BATCH / SEQSTART_Q   -- BATCH: nsplits ptr; GROUP: Q-seq starts
+///   3 SEQLEN_Q                     -- GROUP only
+///   4 SEQSTART_K                   -- GROUP only
+///   5 SEQLEN_K                     -- GROUP only
+///   6 NSPLITS_GROUP                -- GROUP only (pushed out by seq* slots)
+///   7 DQ_ACC_BATCH_OFFSET_GROUP    -- GROUP only (per-batch workspace offsets)
 constexpr int requiredTensors(FmhaBwdConvertDQSpec k)
 {
-    int n = 2; // DQ_ACC + DQ
-    if(k.mode == FmhaMode::GROUP)
-        n += 4; // SEQSTART_Q + SEQLEN_Q + SEQSTART_K + SEQLEN_K
-    return n;
+    return (k.mode == FmhaMode::GROUP) ? 8 : 3;
 }
 
 /// Number of scalar slots required for a given kernel configuration.

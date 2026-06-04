@@ -85,7 +85,8 @@ inline void validateArgs([[maybe_unused]] const Args& args, [[maybe_unused]] Fmh
     static constexpr const char* tensor_names[] = {
         "Q", "K", "V", "LSE", "DO", "D", "DQ_ACC", "DK", "DV",
         "BIAS", "DBIAS", "RANDVAL",
-        "SEQSTART_Q", "SEQSTART_K", "SEQLEN_Q", "SEQLEN_K"
+        "SEQSTART_Q", "SEQSTART_K", "SEQLEN_Q", "SEQLEN_K",
+        "NSPLITS", "DQ_ACC_BATCH_OFFSET"
     };
     // clang-format on
 
@@ -101,6 +102,10 @@ inline void validateArgs([[maybe_unused]] const Args& args, [[maybe_unused]] Fmh
             continue;
         // RANDVAL is populated only for dropout-enabled variants.
         if(i == S::RANDVAL && !k.has_dropout)
+            continue;
+        // Group-mode-only tensor slots: skip in BATCH mode.
+        if(k.mode != FmhaMode::GROUP &&
+           (i == S::SEQSTART_Q || i == S::SEQSTART_K || i == S::SEQLEN_Q || i == S::SEQLEN_K))
             continue;
         // SEQLEN_Q/SEQLEN_K may be left null in group mode -- CK Tile derives
         // per-batch lengths from SEQSTART_Q/SEQSTART_K when these are absent.
