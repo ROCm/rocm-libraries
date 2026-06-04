@@ -186,7 +186,6 @@ namespace TensileLite
         virtual std::string name() const = 0;
     };
 
-#ifdef TENSILE_DEFAULT_SERIALIZATION
     /**
  * Interface for deserializing a library file.
  */
@@ -206,7 +205,6 @@ namespace TensileLite
     template <typename MyProblem, typename MySolution = typename MyProblem::Solution>
     std::shared_ptr<SolutionLibrary<MyProblem, MySolution>>
         LoadLibraryData(std::vector<uint8_t> const& data);
-#endif
 } // namespace TensileLite
 TENSILE_HIDDEN_END
 

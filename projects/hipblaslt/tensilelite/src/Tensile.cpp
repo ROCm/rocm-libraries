@@ -29,14 +29,12 @@
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/ContractionSolution.hpp>
 
-#ifdef TENSILE_DEFAULT_SERIALIZATION
 #ifdef TENSILE_YAML
 #include <Tensile/llvm/Loading.hpp>
 #endif
 
 #ifdef TENSILE_MSGPACK
 #include <Tensile/msgpack/Loading.hpp>
-#endif
 #endif
 
 namespace TensileLite
@@ -48,7 +46,6 @@ namespace TensileLite
     TENSILE_API Solution::~Solution()               = default;
     TENSILE_API SolutionAdapter::~SolutionAdapter() = default;
 
-#ifdef TENSILE_DEFAULT_SERIALIZATION
 #ifdef TENSILE_MSGPACK
     std::map<int, std::string> LoadLibraryMapping(std::string const& filename)
     {
@@ -127,6 +124,5 @@ namespace TensileLite
             std::vector<uint8_t> const& data);
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC visibility pop
-#endif
 #endif
 } // namespace TensileLite
