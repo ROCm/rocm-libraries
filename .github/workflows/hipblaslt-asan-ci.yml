@@ -243,7 +243,7 @@ jobs:
         run: |
           export PATH="${GITHUB_WORKSPACE}/build/bin:${PATH}"
           export LD_LIBRARY_PATH="${GITHUB_WORKSPACE}/build/lib:${LD_LIBRARY_PATH:-}"
-          python3 ./build_tools/print_driver_gpu_info.py
+          timeout -k 10 120 python3 ./build_tools/print_driver_gpu_info.py || true
 
       - name: ASAN runtime environment
         run: |
