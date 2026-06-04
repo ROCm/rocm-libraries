@@ -28,7 +28,6 @@ concurrency:
 
 env:
   LLVM_PATH: /opt/rocm/llvm
-  CTEST_PARALLEL_LEVEL: 4
 
 jobs:
   miopen-build:
