@@ -12,6 +12,7 @@
 #include "mocks/MockKernelCompiler.hpp"
 #include "mocks/MockRunnableKernel.hpp"
 
+#include "../TestPlanCommon.hpp"
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
@@ -112,15 +113,6 @@ std::pair<flatbuffers::FlatBufferBuilder, RMSnormFwdPlan>
 
     RMSnormFwdParams params(attr, graph.getTensorMap());
     return {std::move(builder), RMSnormFwdPlan{std::move(params)}};
-}
-
-hipDeviceProp_t createTestDeviceProps(const char* archName = "gfx942")
-{
-    hipDeviceProp_t deviceProps = {};
-    deviceProps.multiProcessorCount = 60;
-    deviceProps.warpSize = 64;
-    std::snprintf(deviceProps.gcnArchName, sizeof(deviceProps.gcnArchName), "%s", archName);
-    return deviceProps;
 }
 
 } // namespace
