@@ -5825,6 +5825,15 @@ void host_bsric0(rocsparse_direction               direction,
     }
 }
 
+template <typename T>
+static inline T host_assign_ilu0_boost_value(const T& value, const T& boost_val)
+{
+    // Apply the boost magnitude along the direction of the original pivot so its
+    // sign (real) or phase (complex) is preserved, matching the device kernels.
+    const auto abs_value = std::abs(value);
+    return (abs_value > 0) ? (boost_val * (value / abs_value)) : boost_val;
+}
+
 template <typename T, typename U>
 void host_bsrilu0(rocsparse_direction               dir,
                   rocsparse_int                     mb,
@@ -5975,7 +5984,8 @@ void host_bsrilu0(rocsparse_direction               dir,
 
                 if(boost)
                 {
-                    diag = (boost_tol >= std::abs(diag)) ? boost_val : diag;
+                    diag = (boost_tol >= std::abs(diag)) ? host_assign_ilu0_boost_value(diag, boost_val)
+                                          : diag;
                     bsr_val[BSR_IND(j, bi, bi, dir)] = diag;
                 }
                 else
@@ -6268,7 +6278,9 @@ void host_csrilu0(rocsparse_int                     M,
 
                 if(boost)
                 {
-                    diag_val        = (boost_tol >= std::abs(diag_val)) ? boost_val : diag_val;
+                    diag_val        = (boost_tol >= std::abs(diag_val))
+                                          ? host_assign_ilu0_boost_value(diag_val, boost_val)
+                                          : diag_val;
                     csr_val[diag_j] = diag_val;
                 }
                 else
@@ -6337,7 +6349,8 @@ void host_csrilu0(rocsparse_int                     M,
             {
                 if(std::abs(csr_val[diag_pos]) <= boost_tol)
                 {
-                    csr_val[diag_pos] = boost_val;
+                    csr_val[diag_pos]
+                        = host_assign_ilu0_boost_value(csr_val[diag_pos], boost_val);
                 }
             }
             else

@@ -2758,36 +2758,48 @@ namespace rocsparse
     __device__ __forceinline__ double assign_ilu0_boost_value(const double& value,
                                                               const double& boost_value)
     {
-        return boost_value;
-        //  To wait for signed assignement like:
-        //  return std::signbit(value) ? -boost_value : boost_value;
+        // Preserve the sign of the original pivot when applying the boost
+        // magnitude. For a real pivot this yields copysign(boost_value, value),
+        // which keeps the factorization residual small.
+        const double abs_value = rocsparse::abs(value);
+        return (abs_value > static_cast<double>(0)) ? (boost_value * (value / abs_value))
+                                                    : boost_value;
     }
 
     template <>
     __device__ __forceinline__ float assign_ilu0_boost_value(const float& value,
                                                              const float& boost_value)
     {
-        return boost_value;
-        //  To wait for signed assignement like:
-        //  return std::signbit(value) ? -boost_value : boost_value;
+        // Preserve the sign of the original pivot when applying the boost
+        // magnitude. For a real pivot this yields copysign(boost_value, value),
+        // which keeps the factorization residual small.
+        const float abs_value = rocsparse::abs(value);
+        return (abs_value > static_cast<float>(0)) ? (boost_value * (value / abs_value))
+                                                   : boost_value;
     }
 
     template <>
     __device__ __forceinline__ rocsparse_float_complex assign_ilu0_boost_value(
         const rocsparse_float_complex& value, const rocsparse_float_complex& boost_value)
     {
-        return boost_value;
-        //  To wait for signed assignement like:
-        //  return ( value / std::abs(value) ) * boost_value;
+        // Preserve the phase of the original pivot when applying the boost
+        // magnitude: boost_value * value / |value|. Fall back to boost_value
+        // when the pivot is exactly zero (phase undefined).
+        const float abs_value = rocsparse::abs(value);
+        return (abs_value > static_cast<float>(0)) ? (boost_value * (value / abs_value))
+                                                   : boost_value;
     }
 
     template <>
     __device__ __forceinline__ rocsparse_double_complex assign_ilu0_boost_value(
         const rocsparse_double_complex& value, const rocsparse_double_complex& boost_value)
     {
-        return boost_value;
-        //  To wait for signed assignement like:
-        //  return ( value / std::abs(value) ) * boost_value;
+        // Preserve the phase of the original pivot when applying the boost
+        // magnitude: boost_value * value / |value|. Fall back to boost_value
+        // when the pivot is exactly zero (phase undefined).
+        const double abs_value = rocsparse::abs(value);
+        return (abs_value > static_cast<double>(0)) ? (boost_value * (value / abs_value))
+                                                    : boost_value;
     }
 
 }
