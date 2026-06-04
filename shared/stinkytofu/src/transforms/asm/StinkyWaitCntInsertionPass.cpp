@@ -85,6 +85,13 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
         // contributes its in-flight state to successors. PassContext
         // gating only applies to IR mutation below.
         WaitDataflow df(func, domInfo, rpo);
+
+        // Set the tensor counter to drain only for barriers or when there is only one wave.
+        const auto numWaves = passCtx.getGemmTileConfig().NumWaves;
+        df.setRawNeedsWait(CK_Tensor, [numWaves](const StinkyInstruction& i) {
+            return isBarrier(i) || numWaves == 1;
+        });
+
         df.solve();
         WaitInsertionPlan plan = df.materializePlan();
 
