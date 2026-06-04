@@ -5,7 +5,7 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Literal, Optional
+from typing import Dict, List, Literal, Optional
 
 
 @dataclass
@@ -90,7 +90,7 @@ class MetricsConfig:
 
     Attributes:
         tier: ``basic`` enables always-on probes. ``off`` disables all
-            metric collection — useful for clean A/B timing comparisons.
+            metric collection — useful for clean engine-comparison timing.
         emit_trace: ``pftrace`` or ``kineto`` — re-run benchmark under
             ``rocprofv3 --kernel-trace --memory-copy-trace`` and write a
             trace file. ``kineto`` falls back to pftrace if the rocpd
