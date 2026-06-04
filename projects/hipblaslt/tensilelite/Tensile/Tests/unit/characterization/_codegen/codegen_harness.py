@@ -236,3 +236,33 @@ def emit_kernels_from_logic(logic_path, splitGSU=False, canonical=True):
 def emit_one(logic_path, index=0, canonical=True):
     """Convenience: emit a single kernel's (basename, source, err)."""
     return emit_kernels_from_logic(logic_path, canonical=canonical)[index]
+
+
+def emit_helpers_from_logic(logic_path):
+    """Emit the *helper* kernels (beta-only, conversion, activation-enum, …) for
+    the solutions in ``logic_path``.
+
+    These are the HIP C++ kernels written into Kernels.cpp alongside the asm
+    GEMM kernels — a separate emit path (``KernelWriterBetaOnly`` /
+    ``KernelWriterConversion`` / ``KernelWriterModules``) from the assembly one.
+    Returns a sorted list of ``(name, err)`` tuples. The source is HIP C++ (no
+    MMA scheduler state) but we still key the golden on identity + return code
+    for consistency with the asm suites.
+    """
+    from Tensile.TensileCreateLibrary.Run import (
+        generateKernelObjectsFromSolutions,
+        generateKernelHelperObjects,
+    )
+
+    asm = get_assembler()
+    out = []
+    with _isolated_globals():
+        sols = _solutions_from_logic_unguarded(logic_path)
+        kernels = generateKernelObjectsFromSolutions(sols)
+        khos = generateKernelHelperObjects(kernels, str(asm.path), get_isa_info_map())
+        for ko in khos:
+            name = ko.getKernelName()
+            err, _src = ko.getSourceFileString()
+            ko.getHeaderFileString()  # exercise header emit too
+            out.append((name, err))
+    return sorted(out)
