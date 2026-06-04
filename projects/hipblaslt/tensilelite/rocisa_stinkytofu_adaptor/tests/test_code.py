@@ -1501,17 +1501,14 @@ class TestDummyClassesInheritItem(unittest.TestCase):
     ``isinstance``-based KernelWriter walks see dummies as
     composition nodes during the bring-up phase."""
 
-    def test_label_is_item(self):
-        self.assertIsInstance(Label(), Item)
-
     def test_macro_is_item(self):
         self.assertIsInstance(Macro(), Item)
 
-    # NB: ValueIf / ValueElseIf / ValueEndif AND ValueSet / RegSet used
-    # to be dummies and were tested here. They became real classes
-    # (see TestValueConditionals / TestValueSet* / TestRegSet* below);
-    # isinstance-Item coverage is preserved there alongside the rest
-    # of their behavioural tests.
+    # NB: ValueIf / ValueElseIf / ValueEndif AND ValueSet / RegSet AND
+    # Label used to be dummies and were tested here. They became real
+    # classes (see TestValueConditionals / TestValueSet* / TestRegSet*
+    # / TestLabel* below); isinstance-Item coverage is preserved
+    # there alongside the rest of their behavioural tests.
 
     def test_signaturecodemeta_is_item(self):
         self.assertIsInstance(SignatureCodeMeta(), Item)
@@ -1544,7 +1541,7 @@ class TestDummyClassesInheritItem(unittest.TestCase):
 class TestDummyInheritsItemDefaults(unittest.TestCase):
     """Methods inherited from Item (toString / countType / cap-proxies)
     take precedence over the dummy ``__getattr__`` no-op -- otherwise
-    a dummy Label dropped into a Module tree would silently break
+    a dummy Macro dropped into a Module tree would silently break
     prettyPrint / countType passes."""
 
     def test_dummy_toString_returns_name_from_item(self):
@@ -1552,7 +1549,7 @@ class TestDummyInheritsItemDefaults(unittest.TestCase):
         # args, so Item.name defaults to "". ``toString`` therefore
         # returns "" -- NOT the dummy ``__getattr__`` no-op which
         # would have returned None.
-        self.assertEqual(Label().toString(), "")
+        self.assertEqual(Macro().toString(), "")
 
     def test_dummy_str_returns_name_from_item(self):
         # ``str(dummy)`` must NOT return ``<DummyShim ...>`` (that's
@@ -1560,14 +1557,14 @@ class TestDummyInheritsItemDefaults(unittest.TestCase):
         # Item.toString → "" so that ``Module.toString`` (which
         # concatenates ``str(it)``) emits empty rather than the
         # debug-repr.
-        self.assertEqual(str(Label()), "")
+        self.assertEqual(str(Macro()), "")
 
     def test_dummy_countType_is_one_for_itself(self):
-        lbl = Label()
+        m = Macro()
         # Inherited from Item.countType: 1 if isinstance match.
-        self.assertEqual(lbl.countType(Label), 1)
-        self.assertEqual(lbl.countType(Item), 1)
-        self.assertEqual(lbl.countType(Module), 0)
+        self.assertEqual(m.countType(Macro), 1)
+        self.assertEqual(m.countType(Item), 1)
+        self.assertEqual(m.countType(Module), 0)
 
 
 class TestModuleCountTypeRecursion(unittest.TestCase):
@@ -1603,11 +1600,12 @@ class TestModuleCountTypeRecursion(unittest.TestCase):
         self.assertEqual(m.countType(TextBlock), 3)
 
     def test_countType_includes_dummy_descendants(self):
-        # Dummies inherit from Item; they MUST be visible to
-        # ``countType(Item)`` walks (the very reason for
-        # ``make_dummy_class(..., base=Item)``).
+        # Real and dummy Items both inherit from Item and MUST be
+        # visible to ``countType(Item)`` walks (the very reason for
+        # ``make_dummy_class(..., base=Item)`` for the still-dummy
+        # nodes, and for ``class Label(Item)`` for the real ones).
         m = Module()
-        m.add(Label())
+        m.add(Label(0, ""))
         m.add(Macro())
         m.add(TextBlock("x"))
         # 1 (Module) + 1 (Label) + 1 (Macro) + 1 (TextBlock) = 4.
@@ -2397,6 +2395,325 @@ class TestRegSetModuleIntegration(_VgprIdxIsolation, unittest.TestCase):
         # the plain ValueSet matches when targeting ValueSet exactly.
         self.assertEqual(m.countExactType(ValueSet), 1)
         self.assertEqual(m.countExactType(RegSet), 2)
+
+
+# ===========================================================================
+# Label -- branch / loop target leaf (real implementation).
+# ===========================================================================
+#
+# Mirror of ``rocisa::Label``. Tests cover the int / str payload
+# variants, the static ``getFormatting`` helper, the ``getLabelName``
+# accessor, ``toString`` formatting (alignment prefix, comment
+# suffix, ``outputNoComment`` gating), the ``HasVgprMSB`` side
+# effect (resets ``setVgprMsb(-1)`` after emission), and the
+# pickle / deepcopy / Module-integration round-trips.
+
+
+class _VgprMsbIsolation:
+    """setUp/tearDown helper for tests that exercise
+    ``Label.toString``'s ``setVgprMsb(-1)`` side effect.
+
+    Snapshots and restores:
+      * The ``HasVgprMSB`` cap on the active arch (so tests can flip
+        it on / off without leaking into siblings).
+      * The ``_vgpr_msb`` global (so tests can ``setVgprMsb(...)``
+        without leaking).
+
+    Also pumps ``rocIsa.init((12, 5, 0))`` so ``getAsmCaps()`` doesn't
+    raise the "init() or setKernel() must be called first" error
+    that gates every cap accessor.
+    """
+
+    def setUp(self) -> None:
+        from rocisa_stinkytofu_adaptor import base as _base  # noqa: WPS433
+        from rocisa_stinkytofu_adaptor import rocIsa  # noqa: WPS433
+        self._base = _base
+        rocIsa.getInstance().init((12, 5, 0))
+        self._caps = _base.getAsmCaps()
+        self._saved_hasvgprmsb = self._caps.get("HasVgprMSB", 0)
+        self._saved_vgpr_msb = _base.getVgprMsb()
+
+    def tearDown(self) -> None:
+        if self._saved_hasvgprmsb == 0:
+            self._caps.pop("HasVgprMSB", None)
+        else:
+            self._caps["HasVgprMSB"] = self._saved_hasvgprmsb
+        self._base.setVgprMsb(self._saved_vgpr_msb)
+
+
+class TestLabelConstruction(unittest.TestCase):
+    """``Label(label, comment, alignment=1)`` stores the three fields
+    verbatim and leaves ``Item.name`` empty (rocisa's ``Item("")``)."""
+
+    def test_int_label(self):
+        lbl = Label(5, "")
+        self.assertEqual(lbl.label, 5)
+        self.assertEqual(lbl.comment, "")
+        self.assertEqual(lbl.alignment, 1)
+        # Item.name is the EMPTY STRING -- the textual identity comes
+        # from getLabelName(), not from Item.name. Critical for
+        # rocisa's ``findNamedItem`` semantics: a Label is NEVER
+        # findable by its label payload through findNamedItem.
+        self.assertEqual(lbl.name, "")
+
+    def test_string_label(self):
+        lbl = Label("foo", "bar")
+        self.assertEqual(lbl.label, "foo")
+        self.assertEqual(lbl.comment, "bar")
+        self.assertEqual(lbl.alignment, 1)
+
+    def test_explicit_alignment(self):
+        lbl = Label(5, "x", 8)
+        self.assertEqual(lbl.alignment, 8)
+
+    def test_keyword_args(self):
+        # rocisa's nanobind binding (code.cpp:108-116) names the args
+        # ``label`` / ``comment`` / ``alignment`` -- KernelWriter
+        # (KernelWriterAssembly.py:2139) uses keyword form, so we
+        # must accept it.
+        lbl = Label(label="foo", comment="bar", alignment=4)
+        self.assertEqual(lbl.label, "foo")
+        self.assertEqual(lbl.comment, "bar")
+        self.assertEqual(lbl.alignment, 4)
+
+    def test_is_item(self):
+        # Item-subclass coverage that previously lived in
+        # ``TestDummyClassesInheritItem.test_label_is_item`` -- moved
+        # here now that Label is no longer a dummy.
+        self.assertIsInstance(Label(0, ""), Item)
+
+
+class TestLabelGetFormatting(unittest.TestCase):
+    """Static ``Label.getFormatting`` formats an ``int | str`` payload
+    into ``label_<text>``. Mirror of code.hpp:87-103."""
+
+    def test_int_payload(self):
+        self.assertEqual(Label.getFormatting(5), "label_5")
+
+    def test_string_payload(self):
+        self.assertEqual(Label.getFormatting("foo"), "label_foo")
+
+    def test_negative_int_payload(self):
+        # Negative int must NOT lose its sign -- the format string
+        # uses the default ``__format__`` which preserves it.
+        self.assertEqual(Label.getFormatting(-1), "label_-1")
+
+
+class TestLabelGetLabelName(unittest.TestCase):
+    """``Label.getLabelName`` is the public accessor branch
+    instructions reference -- forwards to ``getFormatting(self.label)``."""
+
+    def test_int_payload(self):
+        self.assertEqual(Label(5, "").getLabelName(), "label_5")
+
+    def test_string_payload(self):
+        self.assertEqual(Label("foo", "").getLabelName(), "label_foo")
+
+
+class TestLabelToString(_VgprMsbIsolation, unittest.TestCase):
+    """``Label.toString`` produces ``[.align <N>\\n]label_<x>:[  /// <c>]\\n``.
+
+    Mirror of code.hpp:110-127. Caps init is required because the
+    method reads ``getAsmCaps()["HasVgprMSB"]``; we suppress the
+    side effect for these formatting-focused tests by forcing the
+    cap to 0.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        # Disable the MSB side effect for pure formatting tests --
+        # it's covered separately in TestLabelMsbSideEffect.
+        self._caps["HasVgprMSB"] = 0
+
+    def test_basic_int(self):
+        self.assertEqual(Label(5, "").toString(), "label_5:\n")
+
+    def test_basic_string(self):
+        self.assertEqual(Label("L", "").toString(), "label_L:\n")
+
+    def test_with_comment(self):
+        # Two-space indent + ``///`` + single space + comment text,
+        # no padding (unlike ValueEndif which width-pads to col 50).
+        self.assertEqual(Label(5, "hi").toString(), "label_5:  /// hi\n")
+
+    def test_alignment_one_emits_no_prefix(self):
+        # ``alignment == 1`` is the default and is treated as "no
+        # prefix" -- the ``.align 1\n`` line is suppressed because
+        # alignment-of-1 is a no-op assembler directive.
+        self.assertEqual(Label(5, "", 1).toString(), "label_5:\n")
+
+    def test_alignment_only(self):
+        # ``alignment > 1`` prepends ``.align <N>\n`` to the label
+        # line. KernelWriter uses this for cache-line-aligned loop
+        # entries.
+        self.assertEqual(Label(5, "", 8).toString(), ".align 8\nlabel_5:\n")
+
+    def test_alignment_and_comment(self):
+        self.assertEqual(
+            Label(5, "hi", 8).toString(),
+            ".align 8\nlabel_5:  /// hi\n",
+        )
+
+    def test_outputNoComment_suppresses_comment(self):
+        # ``rocIsa.outputNoComment=True`` blanket-suppresses the
+        # ``  /// <comment>`` suffix while keeping the label line
+        # itself. Production builds rely on this to scrub
+        # human-readable annotations from the emitted asm.
+        from rocisa_stinkytofu_adaptor import rocIsa  # noqa: WPS433
+        opts = rocIsa.getInstance().getOutputOptions()
+        saved = opts.outputNoComment
+        try:
+            opts.outputNoComment = True
+            self.assertEqual(Label(5, "hi").toString(), "label_5:\n")
+            # Alignment is NOT a comment, must still be emitted.
+            self.assertEqual(
+                Label(5, "hi", 8).toString(),
+                ".align 8\nlabel_5:\n",
+            )
+        finally:
+            opts.outputNoComment = saved
+
+    def test_str_dunder_equals_toString(self):
+        # ``Module.toString`` concatenates ``str(it)``; ``__str__``
+        # must therefore go through Item.__str__ -> toString to match
+        # rocisa's binding (code.cpp:122).
+        lbl = Label(5, "hi")
+        self.assertEqual(str(lbl), lbl.toString())
+
+
+class TestLabelMsbSideEffect(_VgprMsbIsolation, unittest.TestCase):
+    """``Label.toString`` resets ``setVgprMsb(-1)`` on a HasVgprMSB
+    arch -- mirror of code.hpp:122-125. The semantic is "emitting a
+    label means we're entering a new basic block whose entry MSB is
+    not knowable", so callers must NOT rely on the pre-toString MSB
+    surviving the call."""
+
+    def test_msb_resets_when_HasVgprMSB(self):
+        self._caps["HasVgprMSB"] = 1
+        self._base.setVgprMsb(7)
+        Label(5, "").toString()
+        self.assertEqual(self._base.getVgprMsb(), -1)
+
+    def test_msb_unchanged_when_no_HasVgprMSB(self):
+        # Cap absent / zero ⇒ no side effect. The pre-toString MSB
+        # value MUST round-trip unchanged.
+        self._caps["HasVgprMSB"] = 0
+        self._base.setVgprMsb(7)
+        Label(5, "").toString()
+        self.assertEqual(self._base.getVgprMsb(), 7)
+
+    def test_msb_unchanged_before_toString(self):
+        # Reading ``label.label`` / ``label.comment`` / etc. must NOT
+        # trigger the side effect -- only ``toString`` does.
+        self._caps["HasVgprMSB"] = 1
+        self._base.setVgprMsb(7)
+        lbl = Label(5, "")
+        # Touch attributes; verify MSB still 7.
+        _ = (lbl.label, lbl.comment, lbl.alignment, lbl.getLabelName())
+        self.assertEqual(self._base.getVgprMsb(), 7)
+
+
+class TestLabelDeepCopy(unittest.TestCase):
+    """``copy.deepcopy(label)`` produces an isolated clone with every
+    field preserved. Mirror of code.cpp:123-127."""
+
+    def test_deepcopy_preserves_fields(self):
+        original = Label("foo", "bar", 8)
+        clone = copy.deepcopy(original)
+        self.assertEqual(clone.label, "foo")
+        self.assertEqual(clone.comment, "bar")
+        self.assertEqual(clone.alignment, 8)
+
+    def test_deepcopy_independent(self):
+        # Mutating the clone must NOT bleed back into the original.
+        original = Label(5, "hi", 4)
+        clone = copy.deepcopy(original)
+        clone.label = 99
+        clone.comment = "changed"
+        clone.alignment = 16
+        self.assertEqual(original.label, 5)
+        self.assertEqual(original.comment, "hi")
+        self.assertEqual(original.alignment, 4)
+
+    def test_deepcopy_preserves_patched_name(self):
+        # Item.name defaults to "" but a caller may patch it post-
+        # construction; deepcopy must round-trip the patched value.
+        original = Label(5, "hi")
+        original.name = "custom_name"
+        clone = copy.deepcopy(original)
+        self.assertEqual(clone.name, "custom_name")
+
+
+class TestLabelPickle(unittest.TestCase):
+    """Pickle round-trip uses the 4-tuple ``(name, label, comment,
+    alignment)`` shape from rocisa's ``__getstate__`` /
+    ``__setstate__`` (code.cpp:128-138)."""
+
+    def test_pickle_int_payload(self):
+        original = Label(5, "hi", 4)
+        clone = pickle.loads(pickle.dumps(original))
+        self.assertEqual(clone.label, 5)
+        self.assertEqual(clone.comment, "hi")
+        self.assertEqual(clone.alignment, 4)
+        self.assertEqual(clone.name, "")
+
+    def test_pickle_string_payload(self):
+        original = Label("foo", "bar", 1)
+        clone = pickle.loads(pickle.dumps(original))
+        self.assertEqual(clone.label, "foo")
+        self.assertEqual(clone.comment, "bar")
+        self.assertEqual(clone.alignment, 1)
+
+    def test_pickle_preserves_patched_name(self):
+        # ``__setstate__`` calls ``__init__`` (which resets name="")
+        # then patches name -- mirrors rocisa's placement-new +
+        # post-patch pattern. The tuple's name field must round-trip.
+        original = Label(5, "hi")
+        original.name = "custom"
+        clone = pickle.loads(pickle.dumps(original))
+        self.assertEqual(clone.name, "custom")
+
+
+class TestLabelModuleIntegration(_VgprMsbIsolation, unittest.TestCase):
+    """Real Label inside a real Module -- emission, parent linkage,
+    and findIndexByType all behave like any other Item."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self._caps["HasVgprMSB"] = 0  # disable side effect
+
+    def test_module_str_concatenates_label_lines(self):
+        m = Module()
+        m.add(Label("loop_top", ""))
+        m.add(TextBlock("v_mov_b32 v0, 0\n"))
+        m.add(Label(2, "exit", 8))
+        self.assertEqual(
+            str(m),
+            "label_loop_top:\nv_mov_b32 v0, 0\n.align 8\nlabel_2:  /// exit\n",
+        )
+
+    def test_label_parent_set_after_module_add(self):
+        # Module.add patches child.parent. Critical for Item walks
+        # that rely on upward navigation (e.g. tree-prefixed
+        # prettyPrint).
+        m = Module()
+        lbl = Label(5, "")
+        m.add(lbl)
+        self.assertIs(lbl.parent, m)
+
+    def test_findIndexByType_finds_label(self):
+        # ``findIndexByType(Label)`` must locate the real Label and
+        # NOT confuse it with siblings of a different concrete type.
+        m = Module()
+        m.add(TextBlock("a"))
+        m.add(Label("L", ""))
+        m.add(TextBlock("b"))
+        self.assertEqual(m.findIndexByType(Label), 1)
+
+
+# ===========================================================================
+# (end of Label tests)
+# ===========================================================================
 
 
 if __name__ == "__main__":

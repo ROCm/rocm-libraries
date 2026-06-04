@@ -79,8 +79,15 @@ What it does (real):
       call, so KernelWriter's in-process index map tracks the latest
       VGPR allocation as the asm text is emitted.
 
+    - ``Label`` — branch / loop target leaf. ``label_<id>:`` line plus
+      optional ``.align <N>`` prefix and ``  /// <comment>`` suffix.
+      ``getLabelName()`` returns the textual identity that branch
+      instructions reference (Item.name is intentionally empty).
+      ``toString()`` resets ``setVgprMsb(-1)`` on a HasVgprMSB arch to
+      reflect the basic-block boundary.
+
 Not yet done (dummy):
-    - Container nodes: ``KernelBody``, ``Label``, ``Macro``,
+    - Container nodes: ``KernelBody``, ``Macro``,
       ``StructuredModule``, ``BitfieldUnion``, ``SignatureCodeMeta``,
       ``SignatureBase``.
 
@@ -107,6 +114,7 @@ from .base import (
     Item,
     outputNoComment as _outputNoComment,
     setVgprIdx as _set_vgpr_idx,
+    setVgprMsb as _set_vgpr_msb,
 )
 
 _P = "rocisa.code"
@@ -429,6 +437,135 @@ class ValueEndif(Item):
 
     def __repr__(self) -> str:
         return f"ValueEndif({self.comment!r})"
+
+
+# ---------------------------------------------------------------------------
+# Label -- branch / loop target leaf.
+# ---------------------------------------------------------------------------
+#
+# Mirror of rocisa's ``Label``. Emits an assembler label line of the
+# form ``label_<name>:``, optionally preceded by ``.align <N>`` and
+# followed by ``  /// <comment>`` (the comment uses ``///`` not ``//``
+# so it survives later passes that strip ordinary ``//`` comments).
+#
+# KernelWriter creates Labels through ``LabelManager.getName(...)``
+# (or ``getUniqueName*``) to guarantee uniqueness, then pairs each
+# Label with one or more branch instructions (``s_branch``,
+# ``s_cbranch_*``) that target it. The Label's ``getLabelName()``
+# is the string those branches reference.
+#
+# Parity notes:
+#   * ``Item.name`` is the EMPTY STRING (matches rocisa's ``Item("")``
+#     ctor argument), NOT the label payload. The actual label text
+#     comes from ``getLabelName()`` -> ``getFormatting(self.label)``.
+#     This means ``findNamedItem("Label")`` does NOT match Labels --
+#     KernelWriter relies on ``getLabelName()`` for the textual
+#     identity instead.
+#   * The ``label`` field carries an ``int | str`` payload (``rocisa::
+#     Label`` uses ``std::variant<std::string, int>``). Python's union
+#     types make this transparent -- we just store the value as-is
+#     and dispatch in ``getFormatting`` via ``isinstance(label, int)``.
+#   * ``toString`` is intentionally side-effecting: when ``HasVgprMSB``
+#     is set, the active VGPR-MSB tracking is reset to ``-1``. The
+#     reasoning is that emitting a label means "we're entering a new
+#     basic block whose entry MSB state is not knowable at this point
+#     in the rocisa-side analysis" -- the next instruction must
+#     re-establish MSB explicitly. Consumers must NOT rely on the
+#     pre-toString value of ``getVgprMsb()`` surviving across a
+#     ``Label.toString()`` call when the cap is set.
+#   * Comment formatting: ``"  /// <comment>"`` (three slashes, two
+#     leading spaces). Suppressed entirely when ``outputNoComment``
+#     is set, matching rocisa.
+#   * ``alignment <= 1`` means "no .align prefix"; ``alignment > 1``
+#     emits a ``.align <N>\\n`` line BEFORE the label. KernelWriter
+#     uses ``alignment > 1`` for loop-entry labels (cache-line
+#     alignment) and the default ``alignment=1`` for ordinary
+#     branch targets.
+
+class Label(Item):
+    """``label_<id>:`` assembler label; mirror of ``rocisa::Label``.
+
+    Carries a ``label`` payload (``int | str``) plus an optional
+    ``comment`` and an ``alignment`` (default 1; ``> 1`` prepends
+    ``.align <N>\\n`` to the emission). See the section header above
+    for parity rules and the ``setVgprMsb(-1)`` side effect.
+    """
+
+    __slots__ = ("label", "comment", "alignment")
+
+    def __init__(self, label, comment: str, alignment: int = 1):
+        # ``Item.name`` is the EMPTY STRING (matches rocisa's
+        # ``Item("")``) -- the label's textual identity comes from
+        # ``getLabelName()``, not from Item.name.
+        super().__init__(name="")
+        self.label = label
+        self.comment: str = comment
+        self.alignment: int = alignment
+
+    @staticmethod
+    def getFormatting(label) -> str:  # noqa: N802 (matches rocisa public API)
+        """Format an ``int | str`` payload into ``label_<text>``.
+
+        rocisa ``Label::getFormatting`` is a static method visiting
+        the ``std::variant<string, int>`` and returning ``"label_"``
+        prefixed by the numeric or string value. Python's f-string
+        formatting handles both branches uniformly, so a single
+        format expression is enough -- the variant dispatch is
+        implicit in ``__format__``.
+        """
+        return f"label_{label}"
+
+    def getLabelName(self) -> str:  # noqa: N802 (matches rocisa public API)
+        """Return the full ``label_<...>`` text for this Label.
+
+        Equivalent to ``Label.getFormatting(self.label)``. Branch
+        instructions reference the result of this call (NOT
+        ``self.name`` or ``self.label`` directly).
+        """
+        return Label.getFormatting(self.label)
+
+    def toString(self) -> str:
+        body = self.getLabelName() + ":"
+        if self.alignment > 1:
+            body = f".align {self.alignment}\n" + body
+        if self.comment and not _outputNoComment():
+            body += "  /// " + self.comment
+        body += "\n"
+        # Side effect: emitting a label resets the in-process
+        # VGPR-MSB tracker. See section header note for the
+        # justification (entering a new basic block).
+        if self.getAsmCaps().get("HasVgprMSB", 0):
+            _set_vgpr_msb(-1)
+        return body
+
+    def __deepcopy__(self, memo):
+        clone = Label(self.label, self.comment, self.alignment)
+        # Item.name is "" by default but rocisa's copy ctor preserves
+        # whatever the original Item had -- patch it explicitly here
+        # so any caller-set ``label.name = ...`` round-trips.
+        clone.name = self.name
+        memo[id(self)] = clone
+        return clone
+
+    def __getstate__(self):
+        # 4-tuple matches rocisa pickle order:
+        # ``(name, label, comment, alignment)``.
+        return (self.name, self.label, self.comment, self.alignment)
+
+    def __setstate__(self, state) -> None:
+        # Rebuild via the public ctor (so any ctor-level invariants
+        # apply) then patch ``name`` -- mirrors rocisa's
+        # ``new(&self) Label(label, comment, alignment); self.name = name``
+        # placement-new pattern.
+        name, label, comment, alignment = state
+        self.__init__(label, comment, alignment)
+        self.name = name
+
+    def __repr__(self) -> str:
+        return (
+            f"Label({self.label!r}, comment={self.comment!r}, "
+            f"alignment={self.alignment})"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1121,11 +1258,11 @@ class Module(Item):
 #   * ``dummy.toString()`` / ``dummy.prettyPrint()`` /
 #     ``dummy.countType()`` / ``dummy.countExactType()`` resolve to the
 #     real Item methods (not the no-op ``__getattr__`` shim), so a
-#     dummy Label dropped into a Module tree still produces sensible
+#     dummy Macro dropped into a Module tree still produces sensible
 #     prettyPrint / count output during bring-up.
 #
 # Inheritance map (mirror of code.hpp):
-#   Label / Macro / SignatureCodeMeta / SignatureBase / KernelBody
+#   Macro / SignatureCodeMeta / SignatureBase / KernelBody
 #     -- ``: Item`` in C++ ⇒ ``base=Item`` here.
 #   StructuredModule -- ``: Module`` in C++ (code.hpp:469). Using
 #     ``base=Module`` here means KernelWriter's
@@ -1140,9 +1277,8 @@ class Module(Item):
 #     is the polymorphic root for the ``SrdUpperValue*`` family.
 #
 # Already real (above this block): TextBlock, Module, ValueIf,
-# ValueElseIf, ValueEndif, ValueSet, RegSet.
+# ValueElseIf, ValueEndif, ValueSet, RegSet, Label.
 
-Label = make_dummy_class(f"{_P}.Label", base=Item)
 Macro = make_dummy_class(f"{_P}.Macro", base=Item)
 StructuredModule = make_dummy_class(f"{_P}.StructuredModule", base=Module)
 BitfieldUnion = make_dummy_class(f"{_P}.BitfieldUnion")
