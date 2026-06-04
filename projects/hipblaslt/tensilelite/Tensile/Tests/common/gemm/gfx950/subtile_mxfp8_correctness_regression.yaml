@@ -63,17 +63,6 @@
 #     iter dep needed an explicit drain (matches the pattern that
 #     `TENSILE_STREAMK_DYNAMIC_GRID=4` was masking by skipping the
 #     partial-K work entirely).
-#
-# v3 base verification (2026-06-03, gfx950, host build_tmp tensilelite-client):
-#   branch:  users/bnemanich/mxfp8-on-tl-multiple-du-2-v3
-#   base:    origin/users/maemmett/tl-multiple-du-2 = 771c7db7313
-#            "Fix subtile_mxfp8 regressions from mis-gated VGPR free-list allocation"
-#            (PR 7781 with PR 7656 absorbed upstream; the previously-documented
-#             MT256x256 PLR=0 multi-DU vgprs=289 codegen-overflow is RESOLVED
-#             on this base.)
-#   result:
-#     subtile_mxfp8_correctness_regression.yaml — 5/5 PASS (MT256x256 / PLR=0 / WGM1 multi-DU; the previously-known vgprs=289 occupancy-overflow on this exact MT/PLR config has been RESOLVED by the new upstream base — see header note).
-#
 ########################################
 
 TestParameters:
