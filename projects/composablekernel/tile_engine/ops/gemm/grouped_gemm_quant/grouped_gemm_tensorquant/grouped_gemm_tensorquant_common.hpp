@@ -7,14 +7,14 @@
 #include "ck_tile/core.hpp"
 #include "ck_tile/host.hpp"
 #include "ck_tile/core/numeric/integer.hpp"
-#include "ck_tile/core/numeric/pk_int4.hpp"
+#include "common/utils.hpp"
 
 // Structure to hold kernel traits for dispatcher
 struct KernelTraits
 {
-    std::string pipeline;  // compv3, compv4, mem
-    std::string scheduler; // intrawave, interwave
-    std::string epilogue;  // cshuffle, default
+    std::string pipeline;  // compv3
+    std::string scheduler; // intrawave
+    std::string epilogue;  // cshuffle
     bool pad_m;
     bool pad_n;
     bool pad_k;
