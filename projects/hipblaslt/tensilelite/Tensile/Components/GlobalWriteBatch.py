@@ -1073,6 +1073,11 @@ class GlobalWriteBatchWriter:
     cvtTypeLabels = [Label(labels.getNameInc("GateCvtAll_%s"%g.toNameAbbrev()), "") for g in gateList]
     cvtTypeLabels.append(cvtEndLabel)
 
+    # Skip the whole gate cvt phase when the gate pointer is null (no-gate problem).
+    module.add(self.parentWriter.getSCMPKInstruction(
+        "EQU32", "SrdGate+2", 0, comment="gate disabled? (SrdGate num_records==0)"))
+    module.add(SCBranchSCC1(cvtEndLabel.getLabelName(), "skip gate cvt if disabled (null gate)"))
+
     # One wait for all prolog gate loads (multi-dtype already paid a blunt wait
     # per element previously; this hoists it to a single wait).
     module.add(SWaitCnt(vlcnt=0, comment="GateResidual: wait for prolog gate loads (branch-once cvt)"))
@@ -1395,6 +1400,12 @@ class GlobalWriteBatchWriter:
               comment="GateResidual: acc = gate*acc + gate (vi=%d)"%vi))
           return fmaMod
 
+        # Skip the gate FMA when the gate pointer is null (SrdGate num_records==0),
+        # so a no-gate problem can share this gate-capable kernel without zeroing D.
+        _gateSkipLabel = Label(self.parentWriter.labels.getNameInc("GateSkip_%u"%elementIdx), "")
+        gateModule.add(self.parentWriter.getSCMPKInstruction(
+            "EQU32", "SrdGate+2", 0, comment="gate disabled? (SrdGate num_records==0)"))
+        gateModule.add(SCBranchSCC1(_gateSkipLabel.getLabelName(), "skip gate if disabled (null gate)"))
         if len(gateList) == 1:
           # Single dtype: cvt the loaded value to f32 inline, then the uniform FMA.
           gateModule.add(self._emitGateCvt(dataGate, gateList[0]))
@@ -1404,6 +1415,7 @@ class GlobalWriteBatchWriter:
           # the cvt-all phase before this store loop (see _emitGateCvtAllPhase);
           # here only the dtype-free FMA remains.
           gateModule.add(_emit_gate_fma_uniform())
+        gateModule.add(_gateSkipLabel)
 
       if (self.kernel["ProblemType"]["UseE"] and not self.kernel["ProblemType"]["Gradient"]) and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
         vgprIdx   = self.ss.elementSumIdx[elementIdx] - self.parentWriter.states.c.startVgprValu

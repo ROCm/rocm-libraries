@@ -2325,7 +2325,7 @@ namespace TensileLite
 
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
-                    return problem.useGateResidual() == value;
+                    return !problem.useGateResidual() || value; // permissive: a no-gate problem may use a gate-capable kernel (kernel runtime-skips the null gate pointer)
                 }
 
                 virtual bool debugEval(ContractionProblemGemm const& problem,
