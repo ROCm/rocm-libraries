@@ -1292,62 +1292,81 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zlabrd(rocblas_handle handle,
     used in the blocked reduction to upper Hessenberg form (GEHRD).
 
     \details
-    The reduction is performed by ``nb`` Householder reflectors. Each Householder
-    matrix \f$H(i)\f$ is of the form
+    The reduced form is given by:
 
     \f[
-        H(i) = I - \text{tau}[i] \cdot v_i v_i'
+        B = Q'  A  Q
     \f]
 
-    where tau[\f$i\f$] is the Householder scalar and \f$v_i\f$ is the corresponding
-    Householder vector, with \f$v_i[0:k+i-1] = 0\f$ and \f$v_i[k+i] = 1\f$.
+    where the elements of B below the k-th subdiagonal are zero and Q is an orthogonal
+    matrix represented as the product of Householder matrices
 
-    LAHR2 returns the block reflector in compact WY form: a matrix \f$T\f$ and the
-    precomputed matrix
+    \f[
+        \begin{array}{cl}
+        Q = H(nb-1)H(n-2)\cdots H(1)
+        \end{array}
+    \f]
+
+    The reduction is performed by ``nb`` Householder reflectors. Each Householder
+    matrix \f$H(i)\f$ is given by
+
+    \f[
+        H(i) = I - \text{ipiv}[i] \cdot v_i^{} v_i'
+    \f]
+
+    where \f$\text{tau}_l[i]\f$ is the corresponding Householder scalar and the first \f$k+i\f$
+    elements of the Householder vector \f$v_i\f$ are zero, and \f$v_i[k+i] = 1\f$.
+
+    LAHR2 returns the triangular factor ``T`` that is upper triangular where
+
+    \f[
+        H = I - VTV'
+    \f]
+
+    and matrix ``Y`` that is given by
 
     \f[
         Y = A V T
     \f]
 
-    where \f$V\f$ is the n-by-nb matrix of Householder vectors. Together, \f$(V, T, Y)\f$
-    allow the unreduced trailing part of A to be updated via rank-nb operations
+    where the \f$i\f$th column of matrix ``V`` contains the Householder vector associated with \f$H(i)\f$.
+    Together, \f$(V, T, Y)\f$ allow the unreduced trailing part of A to be updated via rank-nb operations
     instead of nb individual rank-1 updates.
 
     @param[in]
     handle      rocblas_handle.
     @param[in]
-    n           rocblas_int. n >= 0.\n
+    n           rocblas_int. n >= 0.
                 The order of the matrix A.
     @param[in]
-    k           rocblas_int. k >= 1.\n
+    k           rocblas_int. 1 <= k < n.
                 The offset (1-based column index) at which the reduction begins.
     @param[in]
-    nb          rocblas_int. 1 <= nb <= n - k + 1.\n
+    nb          rocblas_int. 1 <= nb <= n - k + 1.
                 The number of columns to reduce.
     @param[inout]
-    A           pointer to type. Array on the GPU of dimension lda*n.\n
-                On entry, the n-by-n general matrix to reduce.
+    A           pointer to type. Array on the GPU of dimension lda*n.
+                On entry, the n-by-(n-k+1) matrix to be reduced.
                 On exit, the first nb Householder vectors are stored in the
-                lower triangle of the submatrix A(k:n-1, k:k+nb-1) (0-based),
+                lower triangle of the submatrix A(k:n-1, k:k+nb-1),
                 and the rest of A is updated accordingly.
     @param[in]
-    lda         rocblas_int. lda >= max(1, n).\n
+    lda         rocblas_int. lda >= max(1, n).
                 The leading dimension of A.
     @param[out]
-    tau         pointer to type. Array of nb scalars on the GPU.\n
-                The Householder scalars tau[0..nb-1].
+    tau         pointer to type. Array of nb scalars on the GPU.
+                The vector of all the Householder scalars.
     @param[out]
-    T           pointer to type. Array on the GPU of dimension ldt*nb.\n
-                The upper triangular T factor of the block reflector
-                \f$H = I - V T V'\f$.
+    T           pointer to type. Array on the GPU of dimension ldt*nb.
+                The upper triangular factor. T is upper triangular.
     @param[in]
-    ldt         rocblas_int. ldt >= nb.\n
+    ldt         rocblas_int. ldt >= nb.
                 The leading dimension of T.
     @param[out]
-    Y           pointer to type. Array on the GPU of dimension ldy*nb.\n
+    Y           pointer to type. Array on the GPU of dimension ldy*nb.
                 The n-by-nb matrix \f$Y = A V T\f$.
     @param[in]
-    ldy         rocblas_int. ldy >= n.\n
+    ldy         rocblas_int. ldy >= n.
                 The leading dimension of Y.
     ********************************************************************/
 
