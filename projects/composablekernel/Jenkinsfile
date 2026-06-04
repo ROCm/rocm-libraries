@@ -1934,10 +1934,6 @@ pipeline {
                                             -D GEMM_MULTI_ABD_LAYOUT="rcrr" \
                                             -D MX_GEMM_DATATYPE="fp4;fp8" \
                                             -D MX_GEMM_LAYOUT="rcr" \
-                                            -D MX_GEMM_CONFIG_FILE="default_ci_config.json" \
-                                            -D GEMM_TENSOR_QUANT_DATATYPE="fp8;bf8" \
-                                            -D GEMM_TENSOR_QUANT_LAYOUT="rcr" \
-                                            -D GEMM_TENSOR_QUANT_CONFIG_FILE="default_ci_config.json" \
                                             -D TILE_ENGINE_SAMPLING_TIER=daily .. && \
                                            ninja -j${nthreads()} benchmark_gemm_universal_all benchmark_gemm_preshuffle_all benchmark_gemm_multi_d_all benchmark_gemm_multi_abd_all benchmark_batched_contraction_all benchmark_grouped_gemm_rowcolquant_all benchmark_grouped_gemm_tensorquant_all  benchmark_gemm_rowcolquant_all && \
                                            python3 ../tile_engine/ops/gemm/gemm_universal/gemm_universal_benchmark.py . --problem-sizes "1024,1024,1024" --warmup 5 --repeat 5 --verbose --json results.json && \
