@@ -119,7 +119,7 @@ enum struct amd_buffer_coherence_enum
     slc     = 2,
     dlc     = 4,
     glc_dlc = glc | dlc,
-    // Temporary hack: Since __gfx<id>__ macros are resolved at preprocessor time. We need to define
+    // TODO: Since __gfx<id>__ macros are resolved at preprocessor time. We need to define
     // enumerators used in CK tile code that are defined for other archs. This is due to Two-Phase
     // Name Lookup in Cpp. With the addition of SFINAE guards that specialize on certain
     // architectures, during template parsing, non-dependent names are looked up. If these
