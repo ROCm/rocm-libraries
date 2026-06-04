@@ -102,9 +102,10 @@ def get_kernel_key(kernel):
 
 def merge_kernel_list(kernels, all_precisions):
     """Merge precision and architecture lists with kernel list. 
-    Check for duplicated kernel and invalid precision/arch entries."""
+    Check for duplicated kernel and invalid precision/arch entries.
+    Ensures that the batch ranges of the kernels are non-overlapping."""
 
-    r, s = list(), set()
+    r, d = list(), dict()
 
     all_archs = [member.value for member in config_arch.supported_arch]
     all_lds_configs = [member.value for member in config_arch.lds_config]
@@ -113,6 +114,16 @@ def merge_kernel_list(kernels, all_precisions):
     arch_err_msg = "Error: invalid architecture in kernel configuration: \n"
     prec_err_msg = "Error: invalid precision in kernel configuration: \n"
     dup_err_msg = "Error: duplicated entry in kernel configuration: \n"
+    batch_err_msg = "Error: invalid batch in kernel configuration: \n"
+    batch_range_err_msg = "Error: invalid batch range in kernel configuration: \n"
+
+    get_batch_range = lambda kernel: range(
+        kernel.batch_low
+        if hasattr(kernel, 'batch_low') else 1, kernel.batch_high
+        if hasattr(kernel, 'batch_high') else sys.maxsize)
+
+    is_empty_batch = lambda kernel: (not hasattr(kernel, 'batch_low') and
+                                     not hasattr(kernel, 'batch_high'))
 
     for kernel in kernels:
         if hasattr(kernel, 'precision'):
@@ -149,6 +160,23 @@ def merge_kernel_list(kernels, all_precisions):
                 # default lds size to 64KiB
                 kernel.lds_size_bytes = config_arch.lds_config.SIZE_64KiB.value
 
+        if hasattr(kernel, 'batch_low'):
+            if not (isinstance(kernel.batch_low, int)
+                    and kernel.batch_low >= 0):
+                print(batch_err_msg + str(kernel))
+                sys.exit(1)
+
+        if hasattr(kernel, 'batch_high'):
+            if not (isinstance(kernel.batch_high, int)
+                    and kernel.batch_high >= 0):
+                print(batch_err_msg + str(kernel))
+                sys.exit(1)
+
+        if hasattr(kernel, 'batch_low') and hasattr(kernel, 'batch_high'):
+            if kernel.batch_low > kernel.batch_high:
+                print(batch_range_err_msg + str(kernel))
+                sys.exit(1)
+
         for a in archs:
             if a not in all_archs:
                 print(arch_err_msg + str(kernel))
@@ -165,12 +193,32 @@ def merge_kernel_list(kernels, all_precisions):
                 key = (get_kernel_key(kernel_cpy), kernel_cpy.precision,
                        kernel_cpy.transform_type)
 
-                if key not in s:
-                    s.add(key)
+                # check if the key is already in the dictionary
+                if key not in d:
+                    # if the key is not in the dictionary, add it to the dictionary
+                    d[key] = list()
+                    # if the batch is not empty, add the batch to the list
+                    if not is_empty_batch(kernel_cpy):
+                        d[key].append(get_batch_range(kernel_cpy))
+
                     r.append(kernel_cpy)
                 else:
-                    print(dup_err_msg + str(kernel))
-                    sys.exit(1)
+                    # Check if the entry for the given key in the dictionary is empty,
+                    # and also the batch is empty. If both are true, then the kernel is a duplicate
+                    if not d[key] and is_empty_batch(kernel_cpy):
+                        print(dup_err_msg + str(kernel))
+                        sys.exit(1)
+                    else:
+                        new_range = get_batch_range(kernel_cpy)
+                        for curr_range in d[key]:
+                            # check if the new range intersects with the current range
+                            if new_range.start <= curr_range.stop and new_range.stop >= curr_range.start:
+                                print(batch_range_err_msg + str(kernel))
+                                sys.exit(1)
+                        # New range is disjoint with the current ranges, so add it to the list
+                        d[key].append(new_range)
+                        r.append(kernel_cpy)
+
     return r
 
 
@@ -268,6 +316,15 @@ class FFTKernel(BaseNode):
                                    None)
         if pp_factors_other is not None:
             f += ', {' + cjoin(pp_factors_other) + '}'
+        batch_low = getattr(self.function.meta, 'batch_low', None)
+        batch_high = getattr(self.function.meta, 'batch_high', None)
+        if batch_low is None and batch_high is not None:
+            f += ', ' + 'std::nullopt' + ', ' + str(batch_high)
+        else:
+            if batch_low is not None:
+                f += ', ' + str(batch_low)
+            if batch_high is not None:
+                f += ', ' + str(batch_high)
         f += ')'
         return f
 
@@ -348,14 +405,16 @@ def generate_cpu_function_pool_pieces(functions, pp_functions, num_files):
     if len(pp_functions) > 0:
         counter_f_pp_1 = 0
         skip_to_next_iter = False
-        # Cycles through each file per loop execution to distribute partial-pass kernels work amongst N files
+        # Cycles through each file per loop execution to
+        # distribute partial-pass kernels work amongst N files
         while True:
             if counter_f_pp_1 >= len(pp_functions):
                 break
             # get first pp kernel
             f_pp_1 = pp_functions[counter_f_pp_1]
 
-            # PPFMKey entry needs two kernels with same length, precision, arch, and transform_type but different pp_current_dim
+            # PPFMKey entry needs two kernels with same length, precision,
+            # arch, transform_type, and batch but different pp_current_dim
             counter_f_pp_2 = counter_f_pp_1 + 1
             if counter_f_pp_2 >= len(pp_functions):
                 break
@@ -367,16 +426,20 @@ def generate_cpu_function_pool_pieces(functions, pp_functions, num_files):
                         f_pp_1.meta.gcn_arch_name == f_pp_2.meta.gcn_arch_name
                         and f_pp_1.meta.transform_type
                         == f_pp_2.meta.transform_type
+                        and f_pp_1.meta.batch_low == f_pp_2.meta.batch_low
+                        and f_pp_1.meta.batch_high == f_pp_2.meta.batch_high
                         and f_pp_1.meta.pp_current_dim !=
                         f_pp_2.meta.pp_current_dim):
                     break
                 if (f_pp_1.meta.length != f_pp_2.meta.length or
                     (f_pp_1.meta.length == f_pp_2.meta.length and
-                     (f_pp_1.meta.precision != f_pp_2.meta.precision
-                      or f_pp_1.meta.gcn_arch_name != f_pp_2.meta.gcn_arch_name
-                      or f_pp_1.meta.transform_type !=
-                      f_pp_2.meta.transform_type))):
-                    # we hit a new kernel with different length/precision/arch/transform_type
+                     (f_pp_1.meta.precision != f_pp_2.meta.precision or
+                      f_pp_1.meta.gcn_arch_name != f_pp_2.meta.gcn_arch_name or
+                      f_pp_1.meta.transform_type != f_pp_2.meta.transform_type
+                      or f_pp_1.meta.batch_low != f_pp_2.meta.batch_low
+                      or f_pp_1.meta.batch_high != f_pp_2.meta.batch_high))):
+                    # we hit a new kernel with different
+                    # length/precision/arch/transform_type/batch
                     # start next iteration looking for the next pair
                     counter_f_pp_1 = counter_f_pp_2
                     skip_to_next_iter = True
@@ -456,6 +519,12 @@ def kernel_name(ns):
         postfix += f'_lds{ns.lds_size_bytes}'
 
     postfix += f'_{ns.gcn_arch_name}'
+
+    if hasattr(ns, 'batch_low'):
+        postfix += f'_blow{ns.batch_low}'
+
+    if hasattr(ns, 'batch_high'):
+        postfix += f'_bhigh{ns.batch_high}'
 
     return f'rocfft_len{length}{postfix}'
 
@@ -632,6 +701,9 @@ def generate_kernel_functions(precisions_type_dict, transform_type_dict,
             use_3steps_large_twd = getattr(kernel, 'use_3steps_large_twd',
                                            None)
 
+            batch_low = getattr(kernel, 'batch_low', None)
+            batch_high = getattr(kernel, 'batch_high', None)
+
             params = LaunchParams(transforms_per_block, workgroup_size,
                                   threads_per_transform, half_lds,
                                   direct_to_from_reg)
@@ -662,7 +734,9 @@ def generate_kernel_functions(precisions_type_dict, transform_type_dict,
                              pp_factors_curr=pp_factors_curr,
                              pp_factors_other=pp_factors_other,
                              pp_current_dim=pp_current_dim,
-                             pp_off_dim=pp_off_dim))
+                             pp_off_dim=pp_off_dim,
+                             batch_low=batch_low,
+                             batch_high=batch_high))
 
             if (scheme == 'CS_3D_PP' or scheme == 'CS_REAL_3D_PP'):
                 pp_kernel_functions.append(f)
