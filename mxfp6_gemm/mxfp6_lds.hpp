@@ -7,11 +7,11 @@
 #include "mxfp6_preprocess.hpp"
 #include <vector>
 namespace mxfp6 {
-// Tile-grouped scale layout: a wave's `group` consecutive 32-blocks AND its SUBS
+// Tile-grouped scale layout: a wave's `group` consecutive 32-blocks AND its K64_PER_TILE
 // k64 sub-slabs of one K-tile become contiguous per lane, so the kernel fetches a
-// whole K-tile's scales in ONE dwordx{SUBS} load (NDA=1). Layout:
-//   out[(((g*k_tiles+kt)*64 + lane)*SUBS + sub)*group_pad + j]
-//        = scale of (block g*group+j, k64 = kt*SUBS+sub)
+// whole K-tile's scales in ONE dwordx{K64_PER_TILE} load (NDA=1). Layout:
+//   out[(((g*k_tiles+kt)*64 + lane)*K64_PER_TILE + sub)*group_pad + j]
+//        = scale of (block g*group+j, k64 = kt*K64_PER_TILE+sub)
 struct TiledScale { std::vector<uint8_t> data; };
 static TiledScale tile_scale(const PreprocessedScale& ps, int group, int subs) {
     int group_pad = (group + 3) / 4 * 4;
@@ -79,9 +79,9 @@ __device__ __forceinline__ int asm_load_dword_nowait(const void* a) {
     return v;
 }
 
-// Wide no-wait loads: bring SUBS contiguous scale dwords for a whole K-tile in ONE
+// Wide no-wait loads: bring K64_PER_TILE contiguous scale dwords for a whole K-tile in ONE
 // instruction (tile-grouped scale layout) instead of one dword per sub. Cuts scale
-// vmem op count ~SUBS x. out[] gets the dwords. Only NW in {2,3,4} (gfx950 dwordx3).
+// vmem op count ~K64_PER_TILE x. out[] gets the dwords. Only NW in {2,3,4} (gfx950 dwordx3).
 __device__ __forceinline__ void asm_load_dwordxN_nowait(int* out, const void* a, int nw) {
     if (nw == 2) {
         int2 v; asm volatile("global_load_dwordx2 %0, %1, off" : "=v"(v) : "v"(a) : "memory");
@@ -106,8 +106,8 @@ __device__ __forceinline__ void issue_tile(char* smem, uint32_t lds_base, const 
 }
 
 // Double-buffered deep-K LDS GEMM: prefetch tile kt+1 while computing tile kt.
-// vmcnt(LPT) after issuing the prefetch drains cur's LPT loads (vmcnt decrements
-// in issue order) while nxt's LPT stay in flight -> real load/compute overlap.
+// vmcnt(LOADS_PER_TILE) after issuing the prefetch drains cur's LOADS_PER_TILE loads (vmcnt decrements
+// in issue order) while nxt's LOADS_PER_TILE stay in flight -> real load/compute overlap.
 template <int M_TILE, int N_TILE, int K_TILE, int WAVES_M, int WAVES_N, int MIN_OCC = 1,
           int SWZ = 0, bool DB = true, typename OutT = float>
 __global__ void __launch_bounds__(256, MIN_OCC)
@@ -117,16 +117,16 @@ __global__ void __launch_bounds__(256, MIN_OCC)
                 const uint8_t* __restrict__ sA_plain = nullptr,
                 const uint8_t* __restrict__ sB_plain = nullptr) {
     // sA_plain/sB_plain = lane-ordered (un-tiled) scales [tile][k64][64], used ONLY by
-    // the K-tail (k_iters not a multiple of SUBS). If k_iters % SUBS == 0 the tail is
+    // the K-tail (k_iters not a multiple of K64_PER_TILE). If k_iters % K64_PER_TILE == 0 the tail is
     // skipped and these may be null (back-compat with the K-padded callers).
     constexpr int KT_BYTES = K_TILE * 6 / 8;
-    constexpr int A_CPR    = KT_BYTES / 16;
-    constexpr int SUBS     = K_TILE / 64;
-    constexpr int MB = M_TILE / 32, NB = N_TILE / 32;
-    constexpr int M_PW = MB / WAVES_M, N_PW = NB / WAVES_N;
+    constexpr int ROW_CHUNKS    = KT_BYTES / 16;
+    constexpr int K64_PER_TILE     = K_TILE / 64;
+    constexpr int M_BLKS = M_TILE / 32, N_BLKS = N_TILE / 32;
+    constexpr int M_PW = M_BLKS / WAVES_M, N_PW = N_BLKS / WAVES_N;
     constexpr int A_BYTES = M_TILE * KT_BYTES, B_BYTES = N_TILE * KT_BYTES;
     constexpr int BUF = A_BYTES + B_BYTES;                 // one buffer's bytes
-    constexpr int LPT = (M_TILE * A_CPR + N_TILE * A_CPR) / 256;  // loads per tile
+    constexpr int LOADS_PER_TILE = (M_TILE * ROW_CHUNKS + N_TILE * ROW_CHUNKS) / 256;  // loads per tile
 
     extern __shared__ char smem[];
     int tid = threadIdx.x, wave = tid / 64, lane = tid % 64;
@@ -160,31 +160,31 @@ __global__ void __launch_bounds__(256, MIN_OCC)
     constexpr int SA_PAD = ((M_PW + 3) / 4) * 4, SB_PAD = ((N_PW + 3) / 4) * 4;
     constexpr int NDA = SA_PAD / 4, NDB = SB_PAD / 4;
     static_assert(NDA == 1 && NDB == 1, "tiled-scale path assumes <=4 blocks/wave");
-    constexpr int LPT_TOT = LPT + 2;  // glds + 1 wide A-scale + 1 wide B-scale load
+    constexpr int LPT_TOT = LOADS_PER_TILE + 2;  // glds + 1 wide A-scale + 1 wide B-scale load
     int sa_grp = wg_m * WAVES_M + wm, sb_grp = wg_n * WAVES_N + wn;
-    int k_tiles = k_iters / SUBS;
+    int k_tiles = k_iters / K64_PER_TILE;
 
     // Prefetch tile kt into LDS buffer `base` + scale regs sa/sb (asm, manual vmcnt).
-    // Scales use the TILE-GROUPED layout: a wave's SUBS k64 scales are contiguous per
-    // lane, so ONE dwordx{SUBS} load brings the whole tile's scales (vs SUBS loads).
+    // Scales use the TILE-GROUPED layout: a wave's K64_PER_TILE k64 scales are contiguous per
+    // lane, so ONE dwordx{K64_PER_TILE} load brings the whole tile's scales (vs K64_PER_TILE loads).
     // sa/sb are caller-named arrays (compile-time buf0/buf1) -> no dynamic index/spill.
     auto prefetch = [&](int kt, uint32_t base, int (*sa)[NDA], int (*sb)[NDB]) {
         int kb = kt * KT_BYTES;
-        issue_tile<M_TILE, KT_BYTES, A_CPR>(smem, base + 0, Ag, A_rs, kb, wave, lane);
-        issue_tile<N_TILE, KT_BYTES, A_CPR>(smem, base + A_BYTES, Bg, B_rs, kb, wave, lane);
+        issue_tile<M_TILE, KT_BYTES, ROW_CHUNKS>(smem, base + 0, Ag, A_rs, kb, wave, lane);
+        issue_tile<N_TILE, KT_BYTES, ROW_CHUNKS>(smem, base + A_BYTES, Bg, B_rs, kb, wave, lane);
         const char* pa = reinterpret_cast<const char*>(sA) +
-                         (size_t)((sa_grp * k_tiles + kt) * 64 + lane) * SUBS * SA_PAD;
+                         (size_t)((sa_grp * k_tiles + kt) * 64 + lane) * K64_PER_TILE * SA_PAD;
         const char* pb = reinterpret_cast<const char*>(sB) +
-                         (size_t)((sb_grp * k_tiles + kt) * 64 + lane) * SUBS * SB_PAD;
-        int ta[SUBS], tb[SUBS];
-        asm_load_dwordxN_nowait(ta, pa, SUBS);
-        asm_load_dwordxN_nowait(tb, pb, SUBS);
+                         (size_t)((sb_grp * k_tiles + kt) * 64 + lane) * K64_PER_TILE * SB_PAD;
+        int ta[K64_PER_TILE], tb[K64_PER_TILE];
+        asm_load_dwordxN_nowait(ta, pa, K64_PER_TILE);
+        asm_load_dwordxN_nowait(tb, pb, K64_PER_TILE);
 #pragma unroll
-        for (int sub = 0; sub < SUBS; sub++) { sa[sub][0] = ta[sub]; sb[sub][0] = tb[sub]; }
+        for (int sub = 0; sub < K64_PER_TILE; sub++) { sa[sub][0] = ta[sub]; sb[sub][0] = tb[sub]; }
     };
     auto compute = [&](uint32_t cur, const int (*sa)[NDA], const int (*sb)[NDB]) {
 #pragma unroll
-        for (int sub = 0; sub < SUBS; sub++) {
+        for (int sub = 0; sub < K64_PER_TILE; sub++) {
             v6i a[M_PW], b[N_PW];
             int sav[M_PW], sbv[N_PW];
 #pragma unroll
@@ -223,7 +223,7 @@ __global__ void __launch_bounds__(256, MIN_OCC)
     // STILL inserts its own vmcnt(0) before every ds_read (asm: 10x vmcnt(0) vs 2x
     // vmcnt(20)), so the explicit relative wait is a redundant extra. Suppressing the
     // compiler drain needs full-asm ds_read, disproven 6 ways in Step 21.
-    int sa0[SUBS][NDA], sa1[SUBS][NDA], sb0[SUBS][NDB], sb1[SUBS][NDB];
+    int sa0[K64_PER_TILE][NDA], sa1[K64_PER_TILE][NDA], sb0[K64_PER_TILE][NDB], sb1[K64_PER_TILE][NDB];
     if constexpr (DB) {
         // 2x-unrolled ping-pong: buf0 for even tiles, buf1 for odd. Compile-time
         // buffer/scale-array selection (no dynamic index). Prefetch next tile
@@ -249,7 +249,7 @@ __global__ void __launch_bounds__(256, MIN_OCC)
     } else {
         // Single LDS buffer (for K-tiles too deep to double-buffer within 160KB LDS,
         // e.g. 256x256 KT256). Load and compute serialize (no overlap) but the deep
-        // MFMA window amortizes; lets us reach valid SUBS|k_iters deep tiles.
+        // MFMA window amortizes; lets us reach valid K64_PER_TILE|k_iters deep tiles.
         for (int kt = 0; kt < k_tiles; kt++) {
             prefetch(kt, 0, sa0, sb0);
             wait_vmcnt(0); __syncthreads();
@@ -258,7 +258,7 @@ __global__ void __launch_bounds__(256, MIN_OCC)
         }
     }
 
-    // K-tail: remaining k64 when k_iters % SUBS != 0 (lets callers run arbitrary K
+    // K-tail: remaining k64 when k_iters % K64_PER_TILE != 0 (lets callers run arbitrary K
     // WITHOUT padded A/B buffers). Each leftover k64 is a 64-K slab (KT64, single
     // buffer, naive lane-ordered scales). MEASURED: ~2% SLOWER than K padding @8192^3
     // (1635 vs 1671) — the KT64 single-buffer tail is less efficient than letting the
@@ -266,7 +266,7 @@ __global__ void __launch_bounds__(256, MIN_OCC)
     // PADS K; this tail is the no-padded-buffers fallback. Gated to tiles whose KT64
     // cooperative load divides the WG evenly (256*3,512*3 ok; 128*3 not).
     if constexpr (M_TILE * 3 % 256 == 0 && N_TILE * 3 % 256 == 0)
-    for (int kc = k_tiles * SUBS; kc < k_iters; kc++) {
+    for (int kc = k_tiles * K64_PER_TILE; kc < k_iters; kc++) {
         load_tile_lds<M_TILE, 48, 3>(smem, 0, Ag, A_rs, kc * 48, wave, lane);
         load_tile_lds<N_TILE, 48, 3>(smem, M_TILE * 48, Bg, B_rs, kc * 48, wave, lane);
         wait_vmcnt(0); __syncthreads();
@@ -274,12 +274,12 @@ __global__ void __launch_bounds__(256, MIN_OCC)
         for (int mi = 0; mi < M_PW; mi++) {
             int blk = wm * M_PW + mi;
             v6i a = read_op<48>(smem, 0, blk, 0, lane);
-            int sav = sA_plain[(size_t)((wg_m * MB + blk) * k_iters + kc) * 64 + lane];
+            int sav = sA_plain[(size_t)((wg_m * M_BLKS + blk) * k_iters + kc) * 64 + lane];
 #pragma unroll
             for (int ni = 0; ni < N_PW; ni++) {
                 int bblk = wn * N_PW + ni;
                 v6i b = read_op<48>(smem, M_TILE * 48, bblk, 0, lane);
-                int sbv = sB_plain[(size_t)((wg_n * NB + bblk) * k_iters + kc) * 64 + lane];
+                int sbv = sB_plain[(size_t)((wg_n * N_BLKS + bblk) * k_iters + kc) * 64 + lane];
                 mfma_scale_f32_32x32x64_fp6<0>(acc[mi][ni], a, b, sav, sbv);
             }
         }

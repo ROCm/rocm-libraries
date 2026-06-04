@@ -1,6 +1,8 @@
 // Single-dispatch profiling driver for the v18 PRODUCTION kernel at 8192^3.
-// choose_tile(8192,8192) = TLDS (LDS deep-K), choose_swz = 16 -> lds_gemm_db
-// <256,256,192, 2,2, MIN_OCC=1, SWZ=16, DB=true>. K padded to a multiple of 192.
+// choose_tile(8192,8192) = TLDS (LDS deep-K). Production choose_swz for TLDS is
+// (N>M)?32:0, so 8192^3 (N==M) selects choose_swz(8192,8192)=0 (band off; a wide
+// N>M shape would be 32) -> lds_gemm_db<256,256,192, 2,2, MIN_OCC=1, SWZ=0, DB=true>.
+// K padded to a multiple of 192.
 //
 // Usage: ./profile_lds [warmup] [repeat]
 //   warmup=0 repeat=1  -> exactly ONE lds_gemm_db dispatch (for PMC/ATT/RCV capture)
@@ -18,7 +20,7 @@
 
 using namespace mxfp6;
 
-static constexpr int MT = 256, NT = 256, KT = 192, WM = 2, WN = 2, SWZ = 16;
+static constexpr int MT = 256, NT = 256, KT = 192, WM = 2, WN = 2, SWZ = 0;
 
 int main(int argc, char** argv) {
     int warmup = argc > 1 ? atoi(argv[1]) : 0;
@@ -69,7 +71,7 @@ int main(int argc, char** argv) {
         hipDeviceSynchronize();
         hipError_t e = hipGetLastError();
         if (e != hipSuccess) { printf("err %s\n", hipGetErrorString(e)); return 1; }
-        printf("single dispatch done (M=%d N=%d K=%d, Kp=%d, tile 256x256 KT192 swz16)\n", M, N, K, Kp);
+        printf("single dispatch done (M=%d N=%d K=%d, Kp=%d, tile 256x256 KT192 swz%d)\n", M, N, K, Kp, SWZ);
     } else {
         double best = 1e30;
         for (int r = 0; r < 4; r++) {
