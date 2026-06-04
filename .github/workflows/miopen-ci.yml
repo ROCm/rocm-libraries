@@ -95,6 +95,20 @@ jobs:
               -DGPU_TARGETS="gfx942"
             build_target: --target install --target all
 
+          # Runs miopen_gtest_check (binary listing + naming convention validation) using
+          # rocjitsu's KMD LD_PRELOAD interposer to satisfy HIP device init without a real GPU.
+          - name: MIOpen GTest Check (rocjitsu)
+            job_id: gtest-check-rocjitsu
+            cmake_extra_flags: >-
+              -DCMAKE_BUILD_TYPE=release
+              -DBUILD_DEV=OFF
+              -DMIOPEN_TEST_DISCRETE=OFF
+              -DMIOPEN_USE_MLIR=ON
+              -DMIOPEN_GPU_SYNC=OFF
+              -DCMAKE_PREFIX_PATH=/opt/rocm
+              -DGPU_TARGETS="gfx942"
+            build_target: --target miopen_gtest
+
     runs-on: azure-linux-scale-rocm
     steps:
       - name: Runner health status
@@ -154,6 +168,30 @@ jobs:
       - name: Build Tuna Fin
         if: matrix.job_id == 'tuna-fin-build'
         run: cmake --build build-fin --target install -j$(nproc)
+
+      - name: Checkout rocjitsu
+        if: matrix.job_id == 'gtest-check-rocjitsu'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ROCm/rocm-systems
+          path: rocm-systems
+          sparse-checkout: |
+            emulation/rocjitsu
+
+      - name: Build rocjitsu KMD
+        if: matrix.job_id == 'gtest-check-rocjitsu'
+        run: |
+          cmake -S rocm-systems/emulation/rocjitsu -B rocjitsu-build \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build rocjitsu-build --target rocjitsu_kmd_shim -j$(nproc)
+
+      - name: Run miopen_gtest_check (rocjitsu)
+        if: matrix.job_id == 'gtest-check-rocjitsu'
+        run: |
+          export RJ_CONFIG=$(pwd)/rocm-systems/emulation/rocjitsu/configs/amdgpu_cdna3_kmd.json
+          LD_PRELOAD=$(pwd)/rocjitsu-build/lib/rocjitsu/src/rocjitsu/kmd/librocjitsu_kmd.so \
+            ./build/bin/miopen_gtest --gtest_list_tests > test_list
+          python3 projects/miopen/test/gtest/check_names.py --list test_list
 
   miopen_build_summary:
     name: MIOpen CI Summary
