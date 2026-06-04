@@ -391,16 +391,17 @@ struct numeric<pk_bf6_t>
     // Value layout (positive):
     //   exp=000,mant=00 -> 0 (zero)
     //   exp=000,mant=01 -> smallest positive subnormal
-    //   exp=000,mant=11 -> largest positive subnormal (≈ 0.0625)
-    //   exp=001,mant=00 -> smallest positive normal (≈ 0.25)
-    //   exp=111,mant=11 -> largest positive normal (≈ 28.0)
+    //   exp=000,mant=11 -> largest positive subnormal (~= 0.0625)
+    //   exp=001,mant=00 -> smallest positive normal (~= 0.25)
+    //   exp=111,mant=11 -> largest positive normal (~= 28.0)
 
-    static constexpr uint8_t binary_min_normal    = 0b000100; // smallest positive normal (≈ 0.25)
-    static constexpr uint8_t binary_max_normal    = 0b011111; // largest positive normal (≈ 28.0)
-    static constexpr uint8_t binary_lowest_normal = 0b111111; // most negative normal (≈ -28.0)
+    static constexpr uint8_t binary_min_normal    = 0b000100; // smallest positive normal (~= 0.25)
+    static constexpr uint8_t binary_max_normal    = 0b011111; // largest positive normal (~= 28.0)
+    static constexpr uint8_t binary_lowest_normal = 0b111111; // most negative normal (~= -28.0)
     static constexpr uint8_t binary_min_subnorm   = 0b000001; // smallest positive subnormal
-    static constexpr uint8_t binary_max_subnorm = 0b000011; // largest positive subnormal (≈ 0.0625)
-    static constexpr uint8_t binary_zero = 0b000000;        // zero
+    static constexpr uint8_t binary_max_subnorm =
+        0b000011;                                    // largest positive subnormal (~= 0.0625)
+    static constexpr uint8_t binary_zero = 0b000000; // zero
 
     CK_TILE_HOST_DEVICE static constexpr pk_bf6_t min()
     {
@@ -1202,7 +1203,12 @@ struct pk_f6_legacy_t
         const int bit_offset = bit_pos % num_bits_vec_elem;
         const int overhang   = bit_offset + num_bits_elem - num_bits_vec_elem;
 
-        int32_t bits = pk.data_[arr_idx] >> bit_offset;
+        // Cast through uint32_t before shifting: data_[arr_idx] is int32_t, and a
+        // negative value (high bit set) would otherwise sign-extend on right shift,
+        // corrupting any element that places its low bits in the upper region of a
+        // word (e.g. fp6 1.0 = 0x08 at idx=10 puts bit 31 of data_[1] high; an
+        // arithmetic >> 28 returns 0xFFFFFFF8 instead of 0x8 -> read back as -4).
+        int32_t bits = static_cast<int32_t>(static_cast<uint32_t>(pk.data_[arr_idx]) >> bit_offset);
         if(overhang > 0 && (arr_idx + 1) < vector_size)
         {
             bits |= (pk.data_[arr_idx + 1] & ((1u << overhang) - 1)) << (num_bits_elem - overhang);
@@ -1214,6 +1220,27 @@ struct pk_f6_legacy_t
     CK_TILE_HOST_DEVICE int32_t unpack(const index_t i) const { return unpack(*this, i); }
 
     CK_TILE_HOST_DEVICE int32_t operator[](index_t i) const { return data_[i]; }
+
+    // Element-wise comparison of the packed storage. Two packed vectors are equal
+    // iff their underlying int32 storage arrays are bit-identical.
+    CK_TILE_HOST_DEVICE friend constexpr bool operator==(const pk_f6_legacy_t& x,
+                                                         const pk_f6_legacy_t& y)
+    {
+        for(index_t i = 0; i < vector_size; ++i)
+        {
+            if(x.data_[i] != y.data_[i])
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    CK_TILE_HOST_DEVICE friend constexpr bool operator!=(const pk_f6_legacy_t& x,
+                                                         const pk_f6_legacy_t& y)
+    {
+        return !(x == y);
+    }
 
     CK_TILE_HOST_DEVICE static float fp6_e2m3_to_float(int32_t fp6_bits)
     {
@@ -1331,6 +1358,15 @@ struct impl::ext_vector<pk_bf6x16_t, 2>
     static constexpr index_t N = 2;
     using value_type           = f6x16xN_tt<2, f6_kind::bf6>;
     using type                 = f6x16xN_tt<2, f6_kind::bf6>;
+};
+
+// Used as AVecType / BVecType for the gfx1250 16x16x128 mx-scale wmma kernel
+template <>
+struct impl::ext_vector<pk_fp6x16_t, 4>
+{
+    static constexpr index_t N = 4;
+    using value_type           = f6x16xN_tt<4, f6_kind::fp6>;
+    using type                 = f6x16xN_tt<4, f6_kind::fp6>;
 };
 
 // Arithmetic operations using float conversion

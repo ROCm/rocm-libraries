@@ -27,13 +27,14 @@ $LD_LIBRARY_PATH
 
 ## Profiling integration tests
 
-The four tests in `tests/integration/test_profiling.py` (`--pmc`,
-`--emit-trace`, `--perf`, `--roofline`) plus the combined
+The profiling smoke tests in `tests/integration/test_profiling.py`
+(`--pmc`, `--emit-trace`, `--perf`, `--roofline`) plus the combined
 `test_combined_pmc_perf_roofline_merge_into_one_extra_metrics` are
 **double-gated**: each carries a pytest marker (`rocprofv3`, `perf`, or
 `rocprof_compute`) AND an inline binary/host probe that calls
-`pytest.skip` when the precondition isn't met. Default `pytest`
-invocations therefore skip them silently, even on a GPU host.
+`pytest.skip` when the precondition isn't met. Strict payload tests also
+carry `profiling_strict` and are skipped unless pytest is run with
+`--profiling-strict`.
 
 ### Running them locally
 
@@ -51,8 +52,10 @@ pytest -m "rocprof_compute and not rocprofv3 and not perf" tests/integration/tes
 
 # Combined-source smoke (requires all three binaries + paranoid<=1)
 pytest -m "rocprofv3 and perf and rocprof_compute" tests/integration/test_profiling.py
+# Strict payload tests — require real profiler artifacts, not just
+# error/skip diagnostics. Run only on a known-good profiling host.
+pytest --profiling-strict -m profiling_strict tests/integration/test_profiling.py
 ```
-
 `perf` needs `apt install linux-tools-generic`. User-space counters
 (``cycles_user``, ``instructions_user``, ``ipc_user``) collect on a
 default host without privileges. Kernel-space counters
