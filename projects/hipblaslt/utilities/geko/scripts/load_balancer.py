@@ -31,21 +31,28 @@ from pathlib import Path
 
 from geko import logger, _set_log_level
 from geko.optim import run as optim_run
-from geko.utils import HIPBLASLT_PATH, parse_devices
+from geko.paths import resolve_hipblaslt_path
+from geko.utils import parse_devices
 
 
 def main(
     tuning_dir: str,
-    hipblaslt_path: str = HIPBLASLT_PATH,
+    hipblaslt_path: str | None = None,
     devices: str = "0,1,2,3,4,5,6,7",
     n_slots: int = 4,
     client_build_dir: str = "build_tmp",
     retry: bool = True,
     verbose: int = 1,
 ) -> None:
-    """Run GEMM optimization for all configs in a tuning directory across GPUs."""
-    
+    """Run GEMM optimization for all configs in a tuning directory across GPUs.
+
+    hipblaslt_path is auto-detected from this script's location (and
+    $GEKO_HIPBLASLT_PATH) when left as None.
+    """
+
     _set_log_level(verbose)
+
+    hipblaslt_path = resolve_hipblaslt_path(explicit=hipblaslt_path, anchor=__file__)
 
     devices_list = parse_devices(devices)
 
@@ -98,6 +105,16 @@ if __name__ == "__main__":
         help="tensilelite build directory for prebuilt client",
     )
     parser.add_argument(
+        "--hipblaslt",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help=(
+            "hipBLASLt checkout root (overrides auto-detection and $GEKO_HIPBLASLT_PATH). "
+            "Auto-detected from this script's location when omitted."
+        ),
+    )
+    parser.add_argument(
         "--no_retry",
         action="store_true",
         help="Do not retry failed operations",
@@ -114,6 +131,7 @@ if __name__ == "__main__":
 
     main(
         args.tuning_dir,
+        hipblaslt_path=args.hipblaslt,
         devices=args.devices,
         n_slots=args.n_slots,
         client_build_dir=args.client_build_dir,

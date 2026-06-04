@@ -65,9 +65,6 @@ hipBLASLt Logs → Search → Extract → Benchmark → Filter → Merge
 Runs hipblaslt-bench on a workload log without any tuning. Useful for measuring baseline performance or verifying results after integration.
 
 `./bin/geko --bench --workload-log hipblaslt-log-mask64.yaml --devices=0`
-
-> **hipBLASLt path is inferred.** GEKO lives inside the hipBLASLt checkout at `utilities/geko`, so it resolves the hipBLASLt root automatically. You no longer pass `--hipblaslt` (CLI) or a `hipblaslt_path` argument (scripts).
-
 ### Workload Input Options
 
 All three modes above accept exactly one of the following workload sources:
@@ -272,11 +269,12 @@ uses a `pyproject.toml` build, `tox.ini` for test environments, and a
 ```bash
 cd rocm-libraries/projects/hipblaslt/utilities/geko
 
-pip install .  # installs the geko console script + runtime deps (from requirements.txt); use pip install -e . for editable mode
+pip install .  # installs the geko console script + runtime deps (from requirements.txt)
 ```
 
-Because GEKO lives inside hipBLASLt, it infers the hipBLASLt root from its own
-location, so none of the entry points take a hipBLASLt path anymore.
+`pip install .` (non-editable) is recommended; developers who want live source edits can use `pip install -e .` (see developer setup below).
+
+> **hipBLASLt path** is auto-detected by the in-tree launchers (`./bin/geko`, `scripts/*.py`). To target a different build, pass `--hipblaslt PATH` on any entry point (see its `--help`) or set `GEKO_HIPBLASLT_PATH`; the installed `geko` command needs one of these.
 
 To set up a development environment (test runner, linters, `invoke`):
 

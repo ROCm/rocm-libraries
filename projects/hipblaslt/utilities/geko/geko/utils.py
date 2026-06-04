@@ -38,10 +38,6 @@ from datetime import datetime, timezone
 
 logger = logging.getLogger("GEKO")
 
-# GEKO ships inside hipBLASLt at <hipblaslt>/utilities/geko/geko/, so the
-# hipBLASLt checkout root is three levels above this file's parent.
-HIPBLASLT_PATH = Path(__file__).resolve().parents[3]
-
 
 def get_utc_timestamp() -> str:
     """Return an ISO-8601 UTC timestamp."""

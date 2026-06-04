@@ -22,4 +22,6 @@ except ImportError as e:
     raise SystemExit(1) from e
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    # _REPO_ROOT (<hipblaslt>/utilities/geko) anchors hipBLASLt root auto-detection;
+    # --hipblaslt / $GEKO_HIPBLASLT_PATH still take priority when set.
+    raise SystemExit(main(anchor=_REPO_ROOT))

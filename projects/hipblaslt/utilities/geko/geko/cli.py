@@ -45,9 +45,10 @@ import yaml
 from geko import logger, _set_log_level
 from geko.config_generator.load_input_config import load_prepared_config_from_yaml
 from geko.constants import SUPPORTED_ARCH
+from geko.paths import resolve_hipblaslt_path
 from geko.pipeline import run_bench, run_configure, run_optimize, run_search
 from geko.schemas import GemmConfig, GemmType
-from geko.utils import HIPBLASLT_PATH, parse_devices
+from geko.utils import parse_devices
 
 # Sample tuning YAML path shown when --list input is missing or invalid.
 _SAMPLE_GEMM_LIST_YAML = Path(__file__).resolve().parent / "config_generator" / "config.yaml"
@@ -107,6 +108,16 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Single GEMM: M N batch_count K, Tensile DataType / DestDataType / ComputeDataType "
             "(e.g. B B S), transA and transB each N or T (e.g. --inline 1024 1024 1 1024 B B S N T)"
+        ),
+    )
+    parser.add_argument(
+        "--hipblaslt",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help=(
+            "hipBLASLt checkout root (overrides auto-detection and $GEKO_HIPBLASLT_PATH). "
+            "Auto-detected from the launcher location when omitted."
         ),
     )
     parser.add_argument(
@@ -212,6 +223,7 @@ class CliArgs:
     gemm_config: str | None
     inline: tuple[int, int, int, int, str, str, str, str, str] | None
     arch: str | None
+    hipblaslt: str | None
     verbose: int
     devices: list[int]
     n_slots: int
@@ -276,6 +288,7 @@ def parse_cli_args(argv: Sequence[str] | None) -> CliArgs:
         gemm_config=gemm_config,
         inline=inline,
         arch=ns.arch,
+        hipblaslt=ns.hipblaslt,
         verbose=ns.verbose,
         devices=devices,
         n_slots=ns.n_slots,
@@ -290,14 +303,25 @@ def parse_cli_args(argv: Sequence[str] | None) -> CliArgs:
     )
 
 
-def dispatch(args: CliArgs) -> int:
-    """Materialize a run dir, build a workload YAML if needed, then bench or full tune."""
+def dispatch(args: CliArgs, anchor: str | None = None) -> int:
+    """Materialize a run dir, build a workload YAML if needed, then bench or full tune.
+
+    anchor is a path inside the hipBLASLt checkout (the launcher's location),
+    used to auto-detect the hipBLASLt root when --hipblaslt / the environment
+    variable are not set. The installed geko console script has no checkout
+    anchor, so it relies on --hipblaslt or $GEKO_HIPBLASLT_PATH.
+    """
+    hipblaslt_path = resolve_hipblaslt_path(
+        explicit=args.hipblaslt, anchor=anchor, require_built=True
+    )
+
     run_root = Path(args.workdir) if args.workdir is not None else _alloc_run_root()
     run_root.mkdir(parents=True, exist_ok=True)
     run_root_str = str(run_root.resolve())
 
     _set_log_level(args.verbose)
     logger.info(f"Run directory: {run_root_str}")
+    logger.info(f"hipBLASLt path: '{hipblaslt_path}'")
 
     log_path: Path
     if args.workload is not None:
@@ -329,7 +353,7 @@ def dispatch(args: CliArgs) -> int:
 
     if args.bench:
         return run_bench(
-            HIPBLASLT_PATH,
+            hipblaslt_path,
             str(log_path),
             run_root_str,
             devices=args.devices,
@@ -338,7 +362,7 @@ def dispatch(args: CliArgs) -> int:
         )
     if args.search:
         run_search(
-            HIPBLASLT_PATH,
+            hipblaslt_path,
             str(log_path),
             devices=args.devices,
             keep_thr=args.keep_thr,
@@ -352,7 +376,7 @@ def dispatch(args: CliArgs) -> int:
         return 0
     if args.tune:
         run_configure(
-            HIPBLASLT_PATH,
+            hipblaslt_path,
             str(log_path),
             devices=args.devices,
             keep_thr=args.keep_thr,
@@ -363,7 +387,7 @@ def dispatch(args: CliArgs) -> int:
             bench_freq=args.bench_freq,
         )
         run_optimize(
-            HIPBLASLT_PATH,
+            hipblaslt_path,
             workdir=run_root_str,
             devices=args.devices,
             n_slots=args.n_slots,
@@ -376,10 +400,15 @@ def dispatch(args: CliArgs) -> int:
     raise NotImplementedError("Expected --tune, --search, or --bench (parser bug?)")
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    """Console script entry: parse_cli_args → dispatch; maps SystemExit to int code."""
+def main(argv: Sequence[str] | None = None, anchor: str | None = None) -> int:
+    """Console script entry: parse_cli_args → dispatch; maps SystemExit to int code.
+
+    anchor is forwarded to dispatch for hipBLASLt root auto-detection;
+    in-tree launchers (bin/geko) pass their location, the installed console
+    script leaves it None and relies on --hipblaslt / the env var.
+    """
     try:
-        return dispatch(parse_cli_args(argv))
+        return dispatch(parse_cli_args(argv), anchor=anchor)
     except SystemExit as e:
         return e.code if isinstance(e.code, int) else 1
 

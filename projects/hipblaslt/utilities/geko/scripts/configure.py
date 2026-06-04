@@ -23,8 +23,8 @@
 import argparse
 
 from geko.constants import SUPPORTED_ARCH
+from geko.paths import resolve_hipblaslt_path
 from geko.pipeline import run_configure
-from geko.utils import HIPBLASLT_PATH
 
 
 def main() -> None:
@@ -85,6 +85,16 @@ def main() -> None:
         help="Working directory for intermediate files and configurations",
     )
     parser.add_argument(
+        "--hipblaslt",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help=(
+            "hipBLASLt checkout root (overrides auto-detection and $GEKO_HIPBLASLT_PATH). "
+            "Auto-detected from this script's location when omitted."
+        ),
+    )
+    parser.add_argument(
         "--verbose",
         "-v",
         type=int,
@@ -105,9 +115,10 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+    hipblaslt_path = resolve_hipblaslt_path(explicit=args.hipblaslt, anchor=__file__)
 
     run_configure(
-        HIPBLASLT_PATH,
+        hipblaslt_path,
         args.gemm_log,
         device=args.device,
         keep_thr=args.keep_thr,

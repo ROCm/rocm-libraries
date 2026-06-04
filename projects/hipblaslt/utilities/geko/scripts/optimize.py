@@ -22,8 +22,9 @@
 
 import argparse
 
+from geko.paths import resolve_hipblaslt_path
 from geko.pipeline import run_optimize
-from geko.utils import HIPBLASLT_PATH, parse_devices
+from geko.utils import parse_devices
 
 
 def main() -> None:
@@ -77,6 +78,16 @@ def main() -> None:
         help="Directory path for tensilelite client build",
     )
     parser.add_argument(
+        "--hipblaslt",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help=(
+            "hipBLASLt checkout root (overrides auto-detection and $GEKO_HIPBLASLT_PATH). "
+            "Auto-detected from this script's location when omitted."
+        ),
+    )
+    parser.add_argument(
         "--no_retry",
         action="store_true",
         help="Do not retry failed operations",
@@ -101,9 +112,12 @@ def main() -> None:
     )
     args = parser.parse_args()
     devices = parse_devices(args.devices)
+    hipblaslt_path = resolve_hipblaslt_path(
+        explicit=args.hipblaslt, anchor=__file__, require_built=True
+    )
 
     run_optimize(
-        HIPBLASLT_PATH,
+        hipblaslt_path,
         workdir=args.workdir,
         devices=devices,
         n_slots=args.n_slots,
