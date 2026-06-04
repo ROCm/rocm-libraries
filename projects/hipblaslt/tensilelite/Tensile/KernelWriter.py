@@ -219,6 +219,7 @@ class StateValues:
 
   numMfmaPerIter: int                    = 0
   SubTileIdx: int                       = 0
+  subtileLdsSwizzle: bool                = False
   numReadsIterCoalescedA: int            = 0
   numReadsIterCoalescedB: int            = 0
   numReadsIterCoalescedMXSA: int         = 0
@@ -6136,14 +6137,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # ISA version, such as 803
     version = tuple(kernel["ISA"])
     isgfx950 = kernel["ISA"][:2] == (9, 5)
-    # LDS swizzling for subtile bank-conflict avoidance (gfx950 only;
-    # gfx1250 TDM uses a different LDS layout without swizzling).
-    kernel["SubtileLdsSwizzle"] = kernel.get("UseSubtileImpl", False) and isgfx950
     ti = rocIsa.getInstance()
     ti.setKernel(version, kernel["WavefrontSize"])
 
     self.consts = ConstValues()
     self.states = StateValues(version=version, kernel=kernel, kernelName=getKernelNameMin(kernel, self.debugConfig.splitGSU))
+    # LDS swizzling for subtile bank-conflict avoidance (gfx950 only;
+    # gfx1250 TDM uses a different LDS layout without swizzling).
+    self.states.subtileLdsSwizzle = kernel.get("UseSubtileImpl", False) and isgfx950
     self.vgprs  = StateVgprs()
     self.sgprs  = collections.OrderedDict()
     self.codes  = CodeModules()

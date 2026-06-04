@@ -396,16 +396,15 @@ def _emitLRLDSSwap_1x2(tag, tile, ti, writer, kernel):
 # Legacy LR emit functions (moved from SubtileBasedKernel.py)
 ################################################################################
 
-def _computeLROffset(module, kernel, tileInfo, colOffset, rowOffset):
+def _computeLROffset(module, tileInfo, colOffset, rowOffset, swizzled):
   tc = tileInfo.tc
-  wavesize = kernel["WavefrontSize"]
   subIterKBytes = tileInfo.subIterKBytes
   loadWidth = tileInfo.loadWidthLR
   numMFMACols = int(tileInfo.mmaTileShape[1] * tileInfo.bpe) // loadWidth  # TN case only
   # Without LDS swizzling (e.g. TDM), the full DepthU tile is contiguous in LDS,
   # so the K-row is depthUBytes wide.  With swizzling, GR writes individual
   # subtile K-groups, so the effective K-row is subIterKBytes.
-  ldsKBytes = subIterKBytes if kernel.get("SubtileLdsSwizzle") else tileInfo.depthUBytes
+  ldsKBytes = subIterKBytes if swizzled else tileInfo.depthUBytes
   blockSize = ldsKBytes // loadWidth
 
   # Each ds_load_b128 fills REGS_PER_DS_READ VGPRs.  Tiles with more VGPRs
@@ -596,7 +595,7 @@ def _lraTileAssignment_legacy(writer, kernel):
   loadWidth = tileInfoA.loadWidthLR
   ldsRowBankSize = writer.states.archCaps["LDSBankCount"] * writer.states.archCaps["LDSBankWidth"]
   # With LDS swizzling (gfx950), K-row is one subtile group; without, full DepthU.
-  ldsKBytes = subIterKBytes if kernel.get("SubtileLdsSwizzle") else tileInfoA.depthUBytes
+  ldsKBytes = subIterKBytes if writer.states.subtileLdsSwizzle else tileInfoA.depthUBytes
   numRowsPerLDSBanks = ldsRowBankSize // ldsKBytes
   blockSize = ldsKBytes // loadWidth
   tmpVgpr = writer.vgprPool.checkOut(6)
@@ -605,7 +604,7 @@ def _lraTileAssignment_legacy(writer, kernel):
   module.add(VLShiftRightB32(dst=vgpr(lane16Group), shiftHex=hex(mi_m.bit_length()-1), src=vgpr(lane16Group), comment="lane16Group"))
   module.add(VAndB32(dst=vgpr(lane16), src0=vgpr("Serial"), src1=mi_m-1, comment="laneId %% 16"))
   module.add(VMovB32(dst=vgpr(colOffset), src=vgpr(lane16Group), comment="colOffset = lane16Group"))
-  if kernel.get("SubtileLdsSwizzle"):
+  if writer.states.subtileLdsSwizzle:
     module.add(VLShiftRightB32(dst=vgpr(rotation), shiftHex=hex(numRowsPerLDSBanks.bit_length()-1), src=vgpr(lane16), comment="lds_row_id"))
     module.add(VLShiftRightB32(dst=vgpr(rotation), shiftHex=hex(1), src=vgpr(rotation), comment="(lds_row_id //2 )"))
     module.add(VLShiftLeftB32(dst=vgpr(rotation), shiftHex=hex(1), src=vgpr(rotation), comment="rotation=(lds_row_id //2) * 2"))
@@ -617,8 +616,8 @@ def _lraTileAssignment_legacy(writer, kernel):
   # Without swizzling, the LDS M-row stride is depthUBytes (contiguous K row).
   # With swizzling, GR writes individual subtile K-groups, so subIterKBytes applies.
   module.add(VLShiftLeftB32(dst=vgpr(rowOffset), shiftHex=hex(ldsKBytes.bit_length()-1), src=vgpr(lane16), comment="offsetRow = %d*lane16" % ldsKBytes))
-  _computeLROffset(module, kernel, tileInfoA, colOffset, rowOffset)
-  _computeLROffset(module, kernel, tileInfoB, colOffset, rowOffset)
+  _computeLROffset(module, tileInfoA, colOffset, rowOffset, writer.states.subtileLdsSwizzle)
+  _computeLROffset(module, tileInfoB, colOffset, rowOffset, writer.states.subtileLdsSwizzle)
   writer.vgprPool.checkIn(tmpVgpr)
   _lraWavePartitioning_legacy(module, writer, kernel)
   for vgprId in range(len(tileInfoB.sharedVgprLROffset)):

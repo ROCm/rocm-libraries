@@ -99,6 +99,7 @@ def _create_writer_gfx1250(kernel):
         regCaps={"MaxSgpr": 106, "MaxVgpr": 256, "PhysicalMaxVgpr": 512},
         archCaps={"LDSBankCount": 64, "LDSBankWidth": 4},
         asmCaps={"HasMFMA": False},
+        subtileLdsSwizzle=False,
     )
     readSize = 2 * tiA.subtileSize
     numASubtiles = tiA.globalSubtileGrid[0] * tiA.globalSubtileGrid[1]

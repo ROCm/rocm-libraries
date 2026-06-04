@@ -159,7 +159,7 @@ class InstructionEmitter:
                     subtileK = k // self.subtileShapeK
                     subIterK_within = k % self.subtileShapeK
                     dstTile = vgprTiles[tile_map[tileId]]
-                    swizzled = bool(self.kernel.get("SubtileLdsSwizzle"))
+                    swizzled = self.writer.states.subtileLdsSwizzle
                     module.add(emitSingleDsRead(
                         ti, tileId, subtileK, subIterK_within, dstTile, swizzled=swizzled))
         elif tensor in ('SA', 'SB'):
