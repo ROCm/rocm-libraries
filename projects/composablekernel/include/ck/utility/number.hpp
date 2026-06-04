@@ -15,7 +15,7 @@ template <index_t N>
 using LongNumber = integral_constant<long_index_t, N>;
 
 // ---------------------------------------------------------------------------
-// is_number<T> — true if T is a specialization of Number (integral_constant<index_t, N>)
+// is_number<T> -- true if T is a specialization of Number (integral_constant<index_t, N>)
 // ---------------------------------------------------------------------------
 template <typename T>
 struct is_number : false_type
@@ -31,7 +31,7 @@ template <typename T>
 inline constexpr bool is_number_v = is_number<T>::value;
 
 // ---------------------------------------------------------------------------
-// is_long_number<T> — true if T is a specialization of LongNumber (integral_constant<long_index_t,
+// is_long_number<T> -- true if T is a specialization of LongNumber (integral_constant<long_index_t,
 // N>)
 // ---------------------------------------------------------------------------
 template <typename T>

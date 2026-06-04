@@ -400,7 +400,7 @@ void naive_conv_bwd_data_multi_abd(
         }
     }
 
-    // Create device pointer arrays (use original pointers directly — no packing)
+    // Create device pointer arrays (use original pointers directly, no packing)
     SimpleDeviceMem weis_ptrs_buf((NumBElementwise + 1) * sizeof(TWei*));
     SimpleDeviceMem outs_ptrs_buf((NumAElementwise + 1) * sizeof(TOut*));
     SimpleDeviceMem ds_ptrs_buf(NumDElementwise * sizeof(TD*));
