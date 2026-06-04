@@ -189,8 +189,7 @@ def build_coverage(
     """Build TensileLite with code coverage instrumentation.
 
     Builds rocisa, tensilelite-host, and client with LLVM coverage flags.
-    Run tests to generate .profraw files, then use merge_coverage.py to
-    combine with Python coverage.
+    Run tests with tox -e coverage-cpp to generate coverage reports.
     """
     if gpu_targets is None:
         gpu_targets = detect_gpu_arch()
