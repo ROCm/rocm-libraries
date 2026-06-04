@@ -9,6 +9,7 @@ import fnmatch
 import json
 import logging
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 import sys
 from therock_matrix import subtree_to_project_map, collect_projects_to_run
@@ -25,6 +26,20 @@ from amdgpu_family_matrix import BUILD_RUNNER_LABELS, select_weighted_label
 
 logging.basicConfig(level=logging.INFO)
 SCRIPT_DIR = Path(__file__).resolve().parent
+
+
+@dataclass
+class CIPlan:
+    """Result of resolving a CI event into work to run."""
+
+    projects: list
+    test_type: str
+    # Whether the hipDNN benchmark smoke gate runs at all.
+    run_benchmark: bool
+    # "hipdnn" -> run-id install (this run built hipDNN); "" -> latest-nightly.
+    # Forwarded verbatim to the reusable's projects_to_test input.
+    benchmark_projects: str
+
 
 # Paths matching any of these patterns are considered to have no influence over
 # build or test workflows so any related jobs can be skipped if all paths
@@ -203,11 +218,11 @@ def retrieve_projects(args):
         # runs the benchmark (nightly install), even though the build is skipped.
         if not contains_non_skippable_files:
             logging.info("Only skippable paths were modified, skipping CI")
-            return [], test_type, tool_changed, ""
+            return CIPlan([], test_type, tool_changed, "")
 
         if "skip-therockci" in pr_labels:
             logging.info("`skip-therockci` label was added, skipping CI")
-            return [], test_type, tool_changed, ""
+            return CIPlan([], test_type, tool_changed, "")
 
     subtrees = get_changed_path_projects(modified_paths)
 
@@ -240,22 +255,20 @@ def retrieve_projects(args):
     run_benchmark = hipdnn_built or tool_changed
     benchmark_projects = "hipdnn" if hipdnn_built else ""
 
-    return project_to_run, test_type, run_benchmark, benchmark_projects
+    return CIPlan(project_to_run, test_type, run_benchmark, benchmark_projects)
 
 
 def run(args):
     platform = args.get("platform")
-    project_to_run, test_type, run_benchmark, benchmark_projects = retrieve_projects(
-        args
-    )
+    plan = retrieve_projects(args)
     build_runs_on = select_build_runner(platform)
     set_github_output(
         {
-            f"{platform}_projects": json.dumps(project_to_run),
-            "test_type": test_type,
+            f"{platform}_projects": json.dumps(plan.projects),
+            "test_type": plan.test_type,
             "build_runs_on": build_runs_on,
-            "run_hipdnn_benchmark": "true" if run_benchmark else "false",
-            "hipdnn_benchmark_projects": benchmark_projects,
+            "run_hipdnn_benchmark": "true" if plan.run_benchmark else "false",
+            "hipdnn_benchmark_projects": plan.benchmark_projects,
         }
     )
 
