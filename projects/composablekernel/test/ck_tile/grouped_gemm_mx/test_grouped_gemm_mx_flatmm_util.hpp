@@ -100,7 +100,7 @@ class TestGroupedGemmMXFlatmm : public ::testing::Test
     using ScaleA = ck_tile::FlatmmScalePointer<ScaleGranularityM, ScaleGranularityK, ScaleType>;
     using ScaleB = ck_tile::FlatmmScalePointer<ScaleGranularityN, ScaleGranularityK, ScaleType>;
 
-    static constexpr index_t NumDTensor = 0;
+    static constexpr ck_tile::index_t NumDTensor = 0;
 
     template <typename InitType>
     static void fill_tensor(ck_tile::HostTensor<InitType>& tensor, bool is_a, int init_method)
@@ -349,16 +349,19 @@ class TestGroupedGemmMXFlatmm : public ::testing::Test
                                                        FlatmmConfig::TileParitionerGroupNum,
                                                        FlatmmConfig::TileParitionerM01>;
 
-        using GemmTraits = ck_tile::TileGemmTraits<FlatmmConfig::kPadM,
-                                                   FlatmmConfig::kPadN,
-                                                   FlatmmConfig::kPadK,
-                                                   ALayout,
-                                                   BLayout,
-                                                   CLayout,
-                                                   FlatmmConfig::NumWaveGroups>;
-
-        using GemmPipelineProblem = ck_tile::
-            GemmPipelineProblem<ADataType, BDataType, AccDataType, FlatmmShape, GemmTraits>;
+        using GemmTraits =
+            ck_tile::TileGemmUniversalTraits<FlatmmConfig::kPadM,
+                                             FlatmmConfig::kPadN,
+                                             FlatmmConfig::kPadK,
+                                             FlatmmConfig::DoubleSmemBuffer,
+                                             ALayout,
+                                             BLayout,
+                                             CLayout,
+                                             FlatmmConfig::TransposeC,
+                                             FlatmmConfig::UseStructuredSparsity,
+                                             /*Persistent=*/false,
+                                             FlatmmConfig::NumWaveGroups,
+                                             /*UseAsyncCopy=*/true>;
 
         using MXPipelineProblem =
             ck_tile::MXFlatmmPipelineProblem<ADataType,
@@ -368,9 +371,7 @@ class TestGroupedGemmMXFlatmm : public ::testing::Test
                                              GemmTraits,
                                              ck_tile::GemmPipelineScheduler::Default,
                                              true,
-                                             ck_tile::TailNumber::Even,
-                                             MXFlatmmArchTraits::BlockedXDLN_PerWarp,
-                                             FlatmmConfig::TiledMMAPermuteN>;
+                                             ck_tile::TailNumber::Even>;
 
         using MXFlatmmPipeline =
             typename MXFlatmmArchTraits::template MXFlatmmPipeline<MXPipelineProblem>;
