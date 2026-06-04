@@ -27,12 +27,6 @@
 
 namespace ck_tile {
 
-// Compute optimized pipeline
-// GlobalPrefetchStages: 2
-// LocalPreFillStages: 1
-// LocalPreFetchStages: 1
-// LocalSharedMemoryBuffer: 1
-
 template <typename Problem, typename Policy = GemmABQuantPipelineAgBgCrDefaultPolicy>
 struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCrCompV3<Problem>
 {
@@ -246,9 +240,6 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
             static_distributed_tensor<AQDataType, AQDstStaticTileDistribution>& aq_block_tile,
             const ADramWindow& a_dram_window)
         {
-
-            static_assert(std::is_same_v<ALayout, tensor_layout::gemm::RowMajor>,
-                          "Grouped fused A quantization currently supports RowMajor A only.");
             static_assert(std::is_same_v<ADataType, ck_tile::bf16_t>);
             // ADstStaticTileDist{} -> AReduceTileDist
             // Modify the window and match the temp tensor
@@ -256,23 +247,6 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
                 make_static_distributed_tensor<ADataType>(MakeAReduceTileDistribution());
             auto a_reduce_dram_window = MakeAReduceDramWindow(a_dram_window);
             load_tile(a_reduce, a_reduce_dram_window);
-
-            // ADRAM
-            // MPerBlock x KPerBlock
-            // = MPerBlock x (VecSize * ThreadPerK)
-            // = MPerBlock x (VecSize * warpsize / MPerWarp)
-
-            // a_reduce_tile:
-            // (MPerBlock * BlockAQPerK) x AQGroupSize::kK
-            //
-            // => aq_reduced
-            // (MPerBlock * BlockAQPerK) x 1
-            //
-            // => aq_dst
-            // MPerBlock x BlockAQPerK
-            //
-            // => a_dst
-            //
 
             // Define the reduce problem for quantization
             constexpr index_t MWarp = BlockGemmShape::BlockWarps::at(number<0>{});
@@ -400,21 +374,14 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
                 "A/B/BQ Dram block window should have the same data type as appropriate "
                 "([A|B|BQ]DataType) defined in Problem definition!");
 
-            // TODO: We only support RowMajor A, clean this
             constexpr bool is_a_col_major =
                 std::is_same_v<ALayout, tensor_layout::gemm::ColumnMajor>;
-            // constexpr bool is_aq_col_major =
-            //     std::is_same_v<AQLayout, tensor_layout::gemm::ColumnMajor>;
             constexpr bool is_b_row_major = std::is_same_v<BLayout, tensor_layout::gemm::RowMajor>;
             constexpr bool is_bq_row_major =
                 std::is_same_v<BQLayout, tensor_layout::gemm::RowMajor>;
 
-            // static_assert(is_a_col_major
-            //                   ? (KPerBlock == ADramBlockWindowTmp{}.get_window_lengths()[I0{}] &&
-            //                      MPerBlock == ADramBlockWindowTmp{}.get_window_lengths()[I1{}])
-            //                   : (MPerBlock == ADramBlockWindowTmp{}.get_window_lengths()[I0{}] &&
-            //                      KPerBlock == ADramBlockWindowTmp{}.get_window_lengths()[I1{}]),
-            //               "A block window has incorrect lengths for defined ALayout!");
+            static_assert(!is_a_col_major,
+                          "Grouped fused A quantization only supports RowMajor A.");
             static_assert(is_b_row_major
                               ? (KPerBlock == BDramBlockWindowTmp{}.get_window_lengths()[I0{}] &&
                                  NPerBlock == BDramBlockWindowTmp{}.get_window_lengths()[I1{}])
@@ -430,9 +397,8 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
                             KPerBlockBQ == BQDramBlockWindowTmp{}.get_window_lengths()[I1{}])),
                 "Bq block window has incorrect lengths for defined BqLayout!");
 
-            using ADramTileWindowStep = typename ADramBlockWindowTmp::BottomTensorIndex;
-            using BDramTileWindowStep = typename BDramBlockWindowTmp::BottomTensorIndex;
-            // using AQDramTileWindowStep = typename AQDramBlockWindowTmp::BottomTensorIndex;
+            using ADramTileWindowStep  = typename ADramBlockWindowTmp::BottomTensorIndex;
+            using BDramTileWindowStep  = typename BDramBlockWindowTmp::BottomTensorIndex;
             using BQDramTileWindowStep = typename BQDramBlockWindowTmp::BottomTensorIndex;
 
             // Note: A/B DataType PkInt4/PkFp4 gets converted during loading, before going to
@@ -448,7 +414,6 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
                 Base::GetAWindows(a_dram_block_window_tmp, a_lds_block, a_lds_load_tile_distr);
             auto&& [b_copy_dram_window, b_copy_lds_window, b_lds_gemm_window] =
                 Base::GetBWindows(b_dram_block_window_tmp, b_lds_block, b_lds_load_tile_distr);
-            // auto aq_copy_dram_window = Base::GetAQDramLoadWindow(aq_dram_block_window_tmp);
             auto bq_copy_dram_window = Base::GetBQDramLoadWindow(bq_dram_block_window_tmp);
 
             using ABlockTileDistr = decltype(a_copy_dram_window.get_tile_distribution());
@@ -457,8 +422,7 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
                 decltype(Policy::template MakeAQDramTileDistribution<Problem>());
             using BQBlockTileDistr = decltype(bq_copy_dram_window.get_tile_distribution());
 
-            using ABlockTile =
-                decltype(make_static_distributed_tensor<OverrideADataType>(ABlockTileDistr{}));
+            using ABlockTile = decltype(make_static_distributed_tensor<fp8_t>(ABlockTileDistr{}));
             using AQBlockTile =
                 decltype(make_static_distributed_tensor<AQDataType>(AQBlockTileDistr{}));
             using BBlockTile =
@@ -572,10 +536,6 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
                         Base::LocalPrefill(b_copy_lds_window, b_block_tile, b_element_func);
                     }
 
-                    // Base::GlobalPrefetch(a_block_tile, a_copy_dram_window,
-                    // a_dram_tile_window_step);
-                    // Base::GlobalPrefetch(b_block_tile, b_copy_dram_window,
-                    // b_dram_tile_window_step);
                     LoadAndQuantizeATile(
                         a_block_tile, aq_block_tile[(AQIdx + 2) % 3], a_copy_dram_window);
                     move_tile_window(a_copy_dram_window, a_dram_tile_window_step);
@@ -583,9 +543,6 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
                     LoadAndConvertBTile(b_block_tile, b_copy_dram_window);
                     move_tile_window(b_copy_dram_window, b_dram_tile_window_step);
 
-                    // Base::GlobalPrefetch(aq_block_tile[(currIdx + 1) % 2],
-                    //                      aq_copy_dram_window,
-                    //                      aq_dram_tile_window_step);
                     Base::GlobalPrefetch(bq_block_tile[(BQIdx + 1) % 2],
                                          bq_copy_dram_window,
                                          bq_dram_tile_window_step);
