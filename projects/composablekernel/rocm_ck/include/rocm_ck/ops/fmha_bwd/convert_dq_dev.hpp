@@ -14,9 +14,9 @@
 // Uses C++20 struct NTTPs: template <FmhaBwdConvertDQSpec K>.
 //
 // Compilation boundary:
-//   _spec.hpp — consteval factory + slot constants (both passes)
-//   _api.hpp  — host-only helpers: grid_size (host pass only, #error on device)
-//   _dev.hpp (this) — CK Tile bridge + __device__ code (device pass only, #error on host)
+//   _spec.hpp -- consteval factory + slot constants (both passes)
+//   _api.hpp  -- host-only helpers: grid_size (host pass only, #error on device)
+//   _dev.hpp (this) -- CK Tile bridge + __device__ code (device pass only, #error on host)
 
 #pragma once
 
@@ -30,8 +30,8 @@
 #include <rocm_ck/args.hpp>
 #include <rocm_ck/ck_type_map.hpp>
 
-#include "ck_tile/core.hpp"
-#include "ck_tile/ops/fmha.hpp"
+#include <ck_tile/core.hpp>
+#include <ck_tile/ops/fmha.hpp>
 
 namespace rocm_ck {
 
@@ -147,10 +147,10 @@ __device__ void runFmhaBwdConvertDQ(Args args)
     //   strides[2] = batch_stride_dq       (int32, batch mode only)
     //
     // CK Tile stores row strides as index_t (int32). Large strides that
-    // exceed INT32_MAX will be silently truncated — a known CK Tile
+    // exceed INT32_MAX will be silently truncated -- a known CK Tile
     // limitation. nhead_stride_dq_acc is long_index_t (int64) because
     // the accumulator buffer can be very large in deterministic mode
-    // (nsplits × seqlen_q × hdim_q × nhead).
+    // (nsplits x seqlen_q x hdim_q x nhead).
     const index_t stride_dq_acc            = static_cast<index_t>(t_dq_acc.strides[0]);
     const long_index_t nhead_stride_dq_acc = t_dq_acc.strides[1];
 

@@ -27,9 +27,9 @@
 #include <rocm_ck/args.hpp>
 #include <rocm_ck/ck_type_map.hpp>
 
-#include "ck_tile/core.hpp"
-#include "ck_tile/ops/fmha.hpp"
-#include "ck_tile/ops/epilogue.hpp"
+#include <ck_tile/core.hpp>
+#include <ck_tile/ops/fmha.hpp>
+#include <ck_tile/ops/epilogue.hpp>
 
 namespace rocm_ck {
 
@@ -37,7 +37,7 @@ namespace rocm_ck {
 // BiasEnum mapping helper
 // =========================================================================
 
-/// Map kpack's FmhaBiasType to CK Tile's BlockAttentionBiasEnum.
+/// Map rocm_ck's FmhaBiasType to CK Tile's BlockAttentionBiasEnum.
 consteval ck_tile::BlockAttentionBiasEnum biasTypeToCkEnum(FmhaBiasType bt)
 {
     switch(bt)
@@ -110,9 +110,17 @@ struct FmhaBwdDQDKDVTypes
     // targets (gfx10/11/12) the same NumWarps would yield BlockSize=128,
     // breaking the BlockTile arithmetic and warp-level intrinsics encoded
     // into the pipeline. Refuse to compile this bridge on non-gfx9 targets.
+#if defined(__AMDGCN_WAVEFRONT_SIZE__)
+    static_assert(__AMDGCN_WAVEFRONT_SIZE__ == 64,
+                  "FmhaBwdDQDKDV bridge requires wave64 (gfx9). The hardcoded "
+                  "BlockSize=256 / NumWarps=4 tile config assumes warp_size=64.");
+#elif defined(__AMDGCN_WAVEFRONT_SIZE)
     static_assert(__AMDGCN_WAVEFRONT_SIZE == 64,
                   "FmhaBwdDQDKDV bridge requires wave64 (gfx9). The hardcoded "
                   "BlockSize=256 / NumWarps=4 tile config assumes warp_size=64.");
+#elif !defined(__GFX9__)
+#error "Cannot determine wavefront size. This bridge requires gfx9 (wave64)."
+#endif
 
     // --- Tile shape (hardcoded for d128 gfx9 -- Config 4 from fmha_bwd.py) ---
     //

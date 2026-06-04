@@ -9,9 +9,9 @@
 // constants. No runtime code, no HIP dependency.
 //
 // Compilation boundary:
-//   _spec.hpp (this) — consteval factory + slot constants (both passes)
-//   _api.hpp         — host-only helpers: grid_size (host pass only, #error on device)
-//   _dev.hpp         — CK Tile bridge + __device__ code (device pass only, #error on host)
+//   _spec.hpp (this) -- consteval factory + slot constants (both passes)
+//   _api.hpp         -- host-only helpers: grid_size (host pass only, #error on device)
+//   _dev.hpp         -- CK Tile bridge + __device__ code (device pass only, #error on host)
 
 #pragma once
 

@@ -11,9 +11,9 @@
 // Uses C++20 struct NTTPs: template <FmhaBwdOGradDotOSpec K>.
 //
 // Compilation boundary:
-//   _spec.hpp — consteval factory + slot constants (both passes)
-//   _api.hpp  — host-only helpers: grid_size (host pass only, #error on device)
-//   _dev.hpp (this) — CK Tile bridge + __device__ code (device pass only, #error on host)
+//   _spec.hpp -- consteval factory + slot constants (both passes)
+//   _api.hpp  -- host-only helpers: grid_size (host pass only, #error on device)
+//   _dev.hpp (this) -- CK Tile bridge + __device__ code (device pass only, #error on host)
 
 #pragma once
 
@@ -27,8 +27,8 @@
 #include <rocm_ck/args.hpp>
 #include <rocm_ck/ck_type_map.hpp>
 
-#include "ck_tile/core.hpp"
-#include "ck_tile/ops/fmha.hpp"
+#include <ck_tile/core.hpp>
+#include <ck_tile/ops/fmha.hpp>
 
 namespace rocm_ck {
 
@@ -104,7 +104,7 @@ __device__ void runFmhaBwdOGradDotO(Args args)
     // O/DO: strides[0]=stride, strides[1]=nhead_stride, strides[2]=batch_stride
     // D:    strides[0]=nhead_stride, strides[1]=batch_stride
     // CK Tile stores row strides as index_t (int32). Large strides that
-    // exceed INT32_MAX will be silently truncated — a known CK Tile limitation.
+    // exceed INT32_MAX will be silently truncated -- a known CK Tile limitation.
     const index_t stride_o        = static_cast<index_t>(t_o.strides[0]);
     const index_t stride_do       = static_cast<index_t>(t_do.strides[0]);
     const index_t nhead_stride_o  = static_cast<index_t>(t_o.strides[1]);

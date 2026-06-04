@@ -1,10 +1,10 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
-// Variant registry for programmatic kernel selection.
+// Frozen spec table used by the FMHA BWD unit tests.
 // Host-only header -- no CK Tile dependency, no HIP dependency.
 //
-// Three kernel families, three variant arrays, three findVariant overloads.
+// Three kernel families, three variant arrays, three consteval name lookups.
 //
 // Include contract: this header includes only _spec.hpp (not _api.hpp).
 // Callers who need grid_size must include the _api.hpp header separately.
@@ -61,33 +61,6 @@ static constexpr FmhaBwdOGradDotOVariant ALL_OGRAD_DOT_O_VARIANTS[] = {
 
 static constexpr int ALL_OGRAD_DOT_O_VARIANTS_COUNT = std::size(ALL_OGRAD_DOT_O_VARIANTS);
 
-/// Find the best OGradDotO variant matching the given config.
-constexpr const FmhaBwdOGradDotOVariant* findVariant(FmhaBwdOGradDotOConfig cfg)
-{
-    const auto& sig  = cfg.signature;
-    const auto& algo = cfg.algorithm;
-
-    const FmhaBwdOGradDotOVariant* best_nopad  = nullptr;
-    const FmhaBwdOGradDotOVariant* best_padded = nullptr;
-
-    for(int i = 0; i < ALL_OGRAD_DOT_O_VARIANTS_COUNT; ++i)
-    {
-        const auto& v = ALL_OGRAD_DOT_O_VARIANTS[i];
-        if(v.spec.dtype != sig.dtype || v.spec.hdim_v != sig.hdim_v || v.spec.mode != sig.mode)
-            continue;
-
-        if(!v.spec.pad_seqlen_q && !v.spec.pad_hdim_v)
-            best_nopad = &ALL_OGRAD_DOT_O_VARIANTS[i];
-        else
-            best_padded = &ALL_OGRAD_DOT_O_VARIANTS[i];
-    }
-
-    if(!algo.pad_seqlen_q && !algo.pad_hdim_v && best_nopad)
-        return best_nopad;
-
-    return best_padded ? best_padded : best_nopad;
-}
-
 // =========================================================================
 // DqDkDv variants
 // =========================================================================
@@ -119,10 +92,9 @@ static constexpr FmhaBwdDQDKDVVariant ALL_DQDKDV_VARIANTS[] = {
     // Bottom-right causal: same compiled spec as _cmask. The mask_type is
     // selected at runtime via args.scalars[fmha_bwd_dqdkdv_slots::MASK_TYPE].
     //
-    // Lookup note: findVariant() matches on spec features alone, so it returns
-    // _cmask first for any has_mask=true query. _cmask_br and _swa are
-    // reachable only via fmha_bwd_dqdkdv_variant_spec("<exact name>") (consteval)
-    // or by iterating ALL_DQDKDV_VARIANTS (host).
+    // _cmask_br and _swa are reachable via name lookup
+    // (fmha_bwd_dqdkdv_variant_spec("<exact name>")) or by iterating
+    // ALL_DQDKDV_VARIANTS.
     {"fmha_bwd_dqdkdv_fp16_d128_batch_cmask_br", makeSpec(FmhaBwdDQDKDVConfig{
          .signature = {.dtype = DataType::FP16,
                        .hdim_q = 128, .hdim_v = 128,
@@ -246,31 +218,6 @@ static constexpr FmhaBwdDQDKDVVariant ALL_DQDKDV_VARIANTS[] = {
 
 static constexpr int ALL_DQDKDV_VARIANTS_COUNT = std::size(ALL_DQDKDV_VARIANTS);
 
-/// Find the best DqDkDv variant matching the given config.
-/// Matches on signature (dtype, hdim_q, hdim_v, mode) and feature flags.
-constexpr const FmhaBwdDQDKDVVariant* findVariant(FmhaBwdDQDKDVConfig cfg)
-{
-    const auto& sig  = cfg.signature;
-    const auto& algo = cfg.algorithm;
-
-    for(int i = 0; i < ALL_DQDKDV_VARIANTS_COUNT; ++i)
-    {
-        const auto& v = ALL_DQDKDV_VARIANTS[i];
-        if(v.spec.dtype != sig.dtype || v.spec.hdim_q != sig.hdim_q ||
-           v.spec.hdim_v != sig.hdim_v || v.spec.mode != sig.mode)
-            continue;
-
-        // Feature flags must match exactly
-        if(v.spec.has_mask != algo.has_mask || v.spec.has_dropout != algo.has_dropout ||
-           v.spec.is_deterministic != algo.is_deterministic || v.spec.bias_type != algo.bias_type ||
-           v.spec.has_bias_grad != algo.has_bias_grad)
-            continue;
-
-        return &ALL_DQDKDV_VARIANTS[i];
-    }
-    return nullptr;
-}
-
 // =========================================================================
 // ConvertDQ variants
 // =========================================================================
@@ -335,22 +282,6 @@ static constexpr FmhaBwdConvertDQVariant ALL_CONVERT_DQ_VARIANTS[] = {
 // clang-format on
 
 static constexpr int ALL_CONVERT_DQ_VARIANTS_COUNT = std::size(ALL_CONVERT_DQ_VARIANTS);
-
-/// Find the best ConvertDQ variant matching the given config.
-constexpr const FmhaBwdConvertDQVariant* findVariant(FmhaBwdConvertDQConfig cfg)
-{
-    const auto& sig = cfg.signature;
-
-    for(int i = 0; i < ALL_CONVERT_DQ_VARIANTS_COUNT; ++i)
-    {
-        const auto& v = ALL_CONVERT_DQ_VARIANTS[i];
-        if(v.spec.dtype != sig.dtype || v.spec.hdim_q != sig.hdim_q || v.spec.mode != sig.mode)
-            continue;
-
-        return &ALL_CONVERT_DQ_VARIANTS[i];
-    }
-    return nullptr;
-}
 
 // =========================================================================
 // Consteval name-based lookup (compile-time variant selection by name)

@@ -54,10 +54,20 @@ inline GridDim dqdkdv_grid_size(int batch, int nhead, int seqlen_k, int block_n0
             stderr, "rocm_ck::dqdkdv_grid_size: seqlen_k must be non-negative, got %d\n", seqlen_k);
         std::abort();
     }
+    if(batch <= 0)
+    {
+        std::fprintf(stderr, "rocm_ck::dqdkdv_grid_size: batch must be positive, got %d\n", batch);
+        std::abort();
+    }
+    if(nhead <= 0)
+    {
+        std::fprintf(stderr, "rocm_ck::dqdkdv_grid_size: nhead must be positive, got %d\n", nhead);
+        std::abort();
+    }
 #endif
-    return {static_cast<unsigned>((seqlen_k + block_n0 - 1) / block_n0),
-            static_cast<unsigned>(nhead),
-            static_cast<unsigned>(batch)};
+    const auto uk = static_cast<unsigned>(seqlen_k);
+    const auto ub = static_cast<unsigned>(block_n0);
+    return {(uk + ub - 1u) / ub, static_cast<unsigned>(nhead), static_cast<unsigned>(batch)};
 }
 
 // ---------------------------------------------------------------------------

@@ -7,9 +7,9 @@
 // Device code should include <rocm_ck/ops/fmha_bwd/ograd_dot_o_dev.hpp>.
 //
 // Compilation boundary:
-//   _spec.hpp — consteval factory + slot constants (both passes)
-//   _api.hpp (this) — host-only helpers: grid_size (host pass only, #error on device)
-//   _dev.hpp — CK Tile bridge + __device__ code (device pass only, #error on host)
+//   _spec.hpp -- consteval factory + slot constants (both passes)
+//   _api.hpp (this) -- host-only helpers: grid_size (host pass only, #error on device)
+//   _dev.hpp -- CK Tile bridge + __device__ code (device pass only, #error on host)
 
 #pragma once
 
@@ -55,10 +55,22 @@ inline GridDim ograd_dot_o_grid_size(int batch, int nhead, int seqlen_q, int blo
                      seqlen_q);
         std::abort();
     }
+    if(batch <= 0)
+    {
+        std::fprintf(
+            stderr, "rocm_ck::ograd_dot_o_grid_size: batch must be positive, got %d\n", batch);
+        std::abort();
+    }
+    if(nhead <= 0)
+    {
+        std::fprintf(
+            stderr, "rocm_ck::ograd_dot_o_grid_size: nhead must be positive, got %d\n", nhead);
+        std::abort();
+    }
 #endif
-    return {static_cast<unsigned>((seqlen_q + block_size - 1) / block_size),
-            static_cast<unsigned>(nhead),
-            static_cast<unsigned>(batch)};
+    const auto uq = static_cast<unsigned>(seqlen_q);
+    const auto ub = static_cast<unsigned>(block_size);
+    return {(uq + ub - 1u) / ub, static_cast<unsigned>(nhead), static_cast<unsigned>(batch)};
 }
 
 // ---------------------------------------------------------------------------

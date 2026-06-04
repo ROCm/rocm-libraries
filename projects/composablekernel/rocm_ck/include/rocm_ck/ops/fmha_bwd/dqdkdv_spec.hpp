@@ -241,11 +241,11 @@ consteval FmhaBwdDQDKDVSpec makeSpec(FmhaBwdDQDKDVConfig cfg)
     if(algo.pad_hdim_v != 0 && algo.pad_hdim_v != 1 && algo.pad_hdim_v != 8)
         throw "pad_hdim_v must be 0, 1, or 8";
 
-    // --- tile geometry (hardcoded for d128 gfx9 demo) ---
+    // --- tile geometry (d128 only; other hdims validate but aren't
+    //     dispatchable yet -- see #7538) ---
     // Config 4 from fmha_bwd.py: num_warps=4, warp_size=64, bn0=128.
-    // Production would derive these from architecture + hdim.
-    constexpr int demo_block_size = 256; // 4 warps * 64
-    constexpr int demo_block_n0   = 128; // kN0 = bn0
+    constexpr int default_block_size = 256; // 4 warps * 64
+    constexpr int default_block_n0   = 128; // kN0 = bn0
 
     // --- block_per_cu default ---
     int resolved_block_per_cu = algo.block_per_cu;
@@ -269,8 +269,8 @@ consteval FmhaBwdDQDKDVSpec makeSpec(FmhaBwdDQDKDVConfig cfg)
         .pad_hdim_q       = algo.pad_hdim_q,
         .pad_hdim_v       = algo.pad_hdim_v,
         .block_per_cu     = resolved_block_per_cu,
-        .block_size       = demo_block_size,
-        .block_n0         = demo_block_n0,
+        .block_size       = default_block_size,
+        .block_n0         = default_block_n0,
     };
 
     return k;

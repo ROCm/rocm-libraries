@@ -12,7 +12,7 @@
 // The mask_type and window sizes are runtime-parametrized via scalar slots.
 // Consteval tests verify the slot infrastructure, not the runtime values.
 
-#include "fmha_bwd_registry.hpp"
+#include "fmha_bwd_variants.hpp"
 
 #include <rocm_ck/ops/fmha_bwd/dqdkdv_spec.hpp>
 
@@ -173,24 +173,6 @@ TEST(FmhaBwdConsteval, MaskedSpec_RequiredTensors_UnchangedForGroup)
         .algorithm = {.has_mask = true, .pad_hdim_q = 8, .pad_hdim_v = 8}});
 
     EXPECT_EQ(S::requiredTensors(k), 16);
-}
-
-// ============================================================================
-// findVariant: SWA/CMaskBR are name-lookup only
-// ============================================================================
-
-TEST(FmhaBwdConsteval, VariantRegistry_FindReturnsBaseCMaskForMaskedQuery)
-{
-    // findVariant() matches on spec features alone, so it returns _cmask
-    // first for any has_mask=true query. SWA/CMaskBR are only reachable
-    // via fmha_bwd_dqdkdv_variant_spec("<exact name>") (consteval).
-    const auto* v = ::rocm_ck::findVariant(FmhaBwdDQDKDVConfig{
-        .signature =
-            {.dtype = DataType::FP16, .hdim_q = 128, .hdim_v = 128, .mode = FmhaMode::BATCH},
-        .algorithm = {.has_mask = true, .pad_hdim_q = 8, .pad_hdim_v = 8}});
-
-    ASSERT_NE(v, nullptr);
-    EXPECT_STREQ(v->name, "fmha_bwd_dqdkdv_fp16_d128_batch_cmask");
 }
 
 // ============================================================================
