@@ -47,7 +47,7 @@ for sphinx_var in ROCmDocs.SPHINX_VARS:
 
 extensions += [
     "sphinxcontrib.mermaid",
-    #"sphinxcontrib.bibtex",
+    "sphinxcontrib.bibtex",
 ]
 
 mermaid_output_format = "raw"
