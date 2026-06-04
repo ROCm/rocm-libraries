@@ -648,7 +648,6 @@ Arguments:
   - algo_method: c_int32
   - api_method: c_int32
   - use_user_args: c_bool
-  - prefetch_across_persistent: c_int32
   - rotating: c_int32
   - use_gpu_timer: c_bool
   - skip_slow_solution_ratio: c_float
@@ -758,7 +757,6 @@ Defaults:
   algo_method: 0
   api_method: 0
   use_user_args: false
-  prefetch_across_persistent: -1
   rotating: 0
   use_gpu_timer: false
   skip_slow_solution_ratio: 0.0

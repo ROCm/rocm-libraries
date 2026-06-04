@@ -127,7 +127,6 @@ void Arguments::init()
     use_ext_setproblem         = false;
     algo_method                = 0;
     use_user_args              = false;
-    prefetch_across_persistent = -1;
     rotating                   = 0;
     use_gpu_timer              = false;
     skip_slow_solution_ratio   = 0.0;

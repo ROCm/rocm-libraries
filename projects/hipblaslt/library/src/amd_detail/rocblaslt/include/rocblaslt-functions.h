@@ -258,11 +258,6 @@ std::string rocblaslt_get_kernel_name_from_algo(rocblaslt_handle             han
 std::string rocblaslt_get_solution_name_from_algo(rocblaslt_handle             handle,
                                                   const rocblaslt_matmul_algo& algo);
 
-int rocblaslt_get_streamk_from_algo(rocblaslt_handle handle, const rocblaslt_matmul_algo& algo);
-
-int rocblaslt_get_prefetch_across_persistent_from_algo(rocblaslt_handle             handle,
-                                                       const rocblaslt_matmul_algo& algo);
-
 #endif
 
 #endif /* _ROCBLASLT_FUNCTIONS_H_ */

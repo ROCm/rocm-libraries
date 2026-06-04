@@ -221,8 +221,6 @@ def passPostKernelInfoToLibrary(results, kernels, masterLibraries, splitGSU: boo
                     sol.sizeMapping.CUOccupancy = result.cuoccupancy
                     sol.sizeMapping.MathClocksUnrolledLoop = result.mathclk
                     sol.sizeMapping.PrefetchGlobalRead = sol.originalSolution._state['PrefetchGlobalRead']
-                    sol.sizeMapping.prefetchAcrossPersistent = sol.originalSolution._state.get(
-                        'PrefetchAcrossPersistent', 0)
                     sol.sizeMapping.NonTemporalA = sol.originalSolution._state['NonTemporalA']
                     sol.sizeMapping.NonTemporalB = sol.originalSolution._state['NonTemporalB']
                     sol.sizeMapping.NonTemporalD = sol.originalSolution._state['NonTemporalD']
@@ -252,8 +250,6 @@ def passPostKernelInfoToLibrary(results, kernels, masterLibraries, splitGSU: boo
                         sol.sizeMapping.CUOccupancy = result.cuoccupancy
                         sol.sizeMapping.MathClocksUnrolledLoop = result.mathclk
                         sol.sizeMapping.PrefetchGlobalRead = sol.originalSolution._state['PrefetchGlobalRead']
-                        sol.sizeMapping.prefetchAcrossPersistent = sol.originalSolution._state.get(
-                            'PrefetchAcrossPersistent', 0)
                         sol.sizeMapping.NonTemporalA = sol.originalSolution._state['NonTemporalA']
                         sol.sizeMapping.NonTemporalB = sol.originalSolution._state['NonTemporalB']
                         sol.sizeMapping.NonTemporalD = sol.originalSolution._state['NonTemporalD']

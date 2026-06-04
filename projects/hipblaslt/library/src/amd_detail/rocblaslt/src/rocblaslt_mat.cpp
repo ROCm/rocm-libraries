@@ -1544,14 +1544,3 @@ std::string rocblaslt_get_solution_name_from_algo(rocblaslt_handle             h
 {
     return getSolutionNameFromAlgoIndex(handle, algo);
 }
-
-int rocblaslt_get_streamk_from_algo(rocblaslt_handle handle, const rocblaslt_matmul_algo& algo)
-{
-    return getStreamKFromAlgoIndex(handle, algo);
-}
-
-int rocblaslt_get_prefetch_across_persistent_from_algo(rocblaslt_handle             handle,
-                                                       const rocblaslt_matmul_algo& algo)
-{
-    return getPrefetchAcrossPersistentFromAlgoIndex(handle, algo);
-}

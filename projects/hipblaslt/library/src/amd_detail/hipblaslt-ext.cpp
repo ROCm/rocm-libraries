@@ -1433,16 +1433,6 @@ namespace hipblaslt_ext
         return rocblaslt_get_kernel_name_from_algo((rocblaslt_handle)handle, *rocalgo);
     }
 
-    SolutionProperties getSolutionPropertiesFromAlgo(hipblasLtHandle_t      handle,
-                                                     hipblasLtMatmulAlgo_t& algo)
-    {
-        auto rocalgo = reinterpret_cast<const rocblaslt_matmul_algo*>(&algo);
-        return SolutionProperties{
-            rocblaslt_get_streamk_from_algo((rocblaslt_handle)handle, *rocalgo),
-            rocblaslt_get_prefetch_across_persistent_from_algo((rocblaslt_handle)handle, *rocalgo),
-        };
-    }
-
     hipblasStatus_t
         getAlgosFromIndex(hipblasLtHandle_t                              handle,
                           std::vector<int>&                              algoIndex,

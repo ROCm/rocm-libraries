@@ -16,6 +16,11 @@ from rocisa.register import RegisterPool
 from Tensile.KernelWriter import KernelWriter
 import Tensile.KernelWriterAssembly as kwa_module
 from Tensile.Components.StreamK import StreamKTwoTileDPFirst
+from Tensile.Common.GlobalParameters import defaultSolution
+from Tensile.Common.RequiredParameters import getRequiredParametersMin
+from Tensile.Common.ValidParameters import validParameters
+from Tensile.Contractions import SizeMapping
+from Tensile.SolutionStructs.Solution import validateParameterTypes
 
 
 def _module_with_comment(name, comment):
@@ -241,6 +246,14 @@ def _instruction_index(items, instruction_type, dst, src):
         and str(item.dst) == dst
         and [str(item_src) for item_src in item.srcs] == [src]
     )
+
+
+def test_pap_is_valid_solution_parameter():
+    assert validParameters["PrefetchAcrossPersistent"] == [0, 1]
+    assert defaultSolution["PrefetchAcrossPersistent"] == 0
+    assert "PrefetchAcrossPersistent" in getRequiredParametersMin()
+    assert "prefetchAcrossPersistent" in SizeMapping.StateKeys
+    validateParameterTypes({"PrefetchAcrossPersistent": 1})
 
 
 def test_classic_pap_primes_mx_first_pgr_group_before_marking_primed():
