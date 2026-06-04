@@ -178,6 +178,8 @@ if(TENSILELITE_ENABLE_HOST)
                     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT devel
                 FILE_SET tensilelite_generated_headers
                     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT devel
+                FILE_SET rocisa_public_headers
+                    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}" COMPONENT devel
             )
         elseif(DEFINED TENSILELITE_HOST_EXPORT_SET)
             # Fork build (HOST OFF): library-only co-export. The public headers are
