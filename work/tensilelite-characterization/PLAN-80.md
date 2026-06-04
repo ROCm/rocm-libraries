@@ -253,7 +253,8 @@ Then read this file's **Checklist** + **Progress log**, take the last
 - [x] **P1** gfx12xx family (gfx1201, gfx1250) + gfx908 (arcturus)
 - [x] **P1** checkpoint — TOTAL 47.82%→**59.81%**, 2477 passed/201 skipped, **0 failed** (master-baseline-P1.txt). Fixed a cross-suite global-state leak + emit nondeterminism (commit 06af9b1e6f6).
 - [x] **P2** feature/schedule sweep (DTL/DTV/I8/GSU/F4-MX/WaveSplitK/LSU/StreamK/GG/Grad/MX) + helper-kernel emit (BetaOnly/Conversion/Modules). Made goldens order-invariant ({basename,err}) after finding asm text is order-coupled via rocisa MMA scheduler state. **TOTAL 59.81%→65.92%**, 2478 passed/0 failed (master-baseline-P2.txt).
-- [ ] **P3** more codegen feature configs (sparse/activation-variety/edge + larger multi-solution files) → KWA/KW/Components/Solution residue
+- [x] **P3** StreamK (capped) + big-files (Origami-MX/I8/GG/GSU9/FreeSize) + helper emit. **TOTAL 65.92%→67.78%**, 2488 passed/0 failed (master-baseline-P3.txt).
+- [ ] **P4/P5** Run end-to-end emit + Activation variety + Solution derivation sweep → toward 80%
 - [ ] **P5** TensileCreateLibrary.Run end-to-end emit (tmp dir); Activation variety. LibraryLogic LogicAnalyzer = resistance (needs benchmark CSV/GPU)
 - [ ] **P2** ComponentStreamK
 - [ ] **P2** ComponentGlobalWriteBatch
