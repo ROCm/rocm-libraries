@@ -96,4 +96,4 @@ function(embed_kernel_sources OUTPUT_SRCS_CPP OUTPUT_SRCS_HPP OUTPUT_INCS_CPP OU
         @ONLY
     )
 
-   endfunction()
+endfunction()

@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include <optional>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
@@ -24,8 +23,7 @@ class HipKernelCompileOptions
 public:
     HipKernelCompileOptions(
         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* inputTensorAttrs,
-        const hipDeviceProp_t& deviceProps,
-        const std::optional<hip_kernel_utils::ActivationMode>& optActivationMode = std::nullopt)
+        const hipDeviceProp_t& deviceProps)
     {
         // Kernels use C++17 features (if constexpr, scoped-enum brace-init).
         _baseCompileOptions.emplace_back("-std=c++17");
@@ -35,13 +33,7 @@ public:
 
         // Add data type and layout options
         addDataTypeAndLayoutOptions(inputTensorAttrs);
-
-        // Add activation options if activation is fused
-        if(optActivationMode.has_value())
-        {
-            const int nrnOpId = static_cast<int>(optActivationMode.value());
-            add("HIP_PLUGIN_NRN_OP_ID", nrnOpId);
-        }
+        addArchName(deviceProps.gcnArchName);
     }
 
     ~HipKernelCompileOptions() = default;
@@ -119,7 +111,25 @@ private:
         add("HIP_PLUGIN_USE_BFP16",
             inputDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
         add("HIP_PLUGIN_USE_RNE_BFLOAT16", true);
+        add("HIP_PLUGIN_USE_FPMIX", false);
+        add("HIP_PLUGIN_USE_BFPMIX", false);
         add("HIP_PLUGIN_LAYOUT_NHWC", isLayoutNhwc);
+        add("HIP_PLUGIN_USE_AMDGCN", 0);
+    }
+
+    void addArchName(const std::string& archName)
+    {
+        const bool isGfx103X = (archName.find("gfx103") == 0);
+        add("HIP_PLUGIN_GFX103X", isGfx103X);
+
+        const bool isGfx110X = (archName.find("gfx110") == 0);
+        add("HIP_PLUGIN_GFX110X", isGfx110X);
+
+        const bool isGfx120X = (archName.find("gfx120") == 0);
+        add("HIP_PLUGIN_GFX120X", isGfx120X);
+
+        const bool isGfx115X = (archName.find("gfx115") == 0);
+        add("HIP_PLUGIN_GFX115X", isGfx115X);
     }
 
     void updateIfExists(const std::string& name, std::string value)
@@ -131,6 +141,7 @@ private:
         }
     }
 
+protected:
     std::vector<std::string> _baseCompileOptions;
     std::unordered_map<std::string, std::string> _mutableCompileOptionsMap;
 };
