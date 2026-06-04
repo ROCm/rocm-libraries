@@ -9624,13 +9624,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
     stOptLevel = kernel.get("_StinkyTofuOptLevel", 0)
     scheduleIterAlg = kernel.get("_ScheduleIterAlg", self.states.scheduleIterAlg)
     if stOptLevel != 3 or scheduleIterAlg != 0:
-      print(f"[postMainLoopBarrierCheckAndReset] skip: _StinkyTofuOptLevel={stOptLevel}, _ScheduleIterAlg={scheduleIterAlg} (expect 3 and 0)")
+      print2(f"[postMainLoopBarrierCheckAndReset] skip: _StinkyTofuOptLevel={stOptLevel}, _ScheduleIterAlg={scheduleIterAlg} (expect 3 and 0)")
       return
     if not kernel["enableTDMA"] or not kernel["enableTDMB"]:
-      print(f"[postMainLoopBarrierCheckAndReset] skip: enableTDMA={kernel['enableTDMA']}, enableTDMB={kernel['enableTDMB']} (both must be True)")
+      print2(f"[postMainLoopBarrierCheckAndReset] skip: enableTDMA={kernel['enableTDMA']}, enableTDMB={kernel['enableTDMB']} (both must be True)")
       return
     if numWaves == 1:
-      print(f"[postMainLoopBarrierCheckAndReset] skip: numWaves={numWaves} (must be > 1)")
+      print2(f"[postMainLoopBarrierCheckAndReset] skip: numWaves={numWaves} (must be > 1)")
       return
 
     # Pass-1: remove existing barriers first.
