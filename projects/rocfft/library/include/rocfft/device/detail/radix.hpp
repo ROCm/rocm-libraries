@@ -38,7 +38,7 @@
 // ---- butterfly constants ----
 
 #ifndef BUTTERFLY_CONSTANT_H
-#define C8Q  static_cast<real_type_t<T>>(0.70710678118654752440084436210485)
+#define C8Q static_cast<real_type_t<T>>(0.70710678118654752440084436210485)
 #define C16A static_cast<real_type_t<T>>(0.923879532511286738)
 #define C16B static_cast<real_type_t<T>>(0.382683432365089837)
 #endif

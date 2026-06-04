@@ -26,18 +26,18 @@
 
 namespace rocfft
 {
-namespace device
-{
+    namespace device
+    {
 
-/*! @brief Direction of a device FFT.
+        /*! @brief Direction of a device FFT.
  *  @note The transform is unnormalized: applying ::Forward followed by
  *        ::Inverse scales the data by the transform length.
  */
-enum class Direction
-{
-    Forward, //!< Forward transform (time/space to frequency).
-    Inverse, //!< Inverse transform (frequency to time/space).
-};
+        enum class Direction
+        {
+            Forward, //!< Forward transform (time/space to frequency).
+            Inverse, //!< Inverse transform (frequency to time/space).
+        };
 
-} // namespace device
+    } // namespace device
 } // namespace rocfft

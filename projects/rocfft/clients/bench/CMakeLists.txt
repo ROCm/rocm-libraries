@@ -167,3 +167,29 @@ endforeach()
 # it's not available in the standard library.
 include( ../../cmake/std-filesystem.cmake )
 target_link_std_experimental_filesystem( dyna-rocfft-bench )
+
+# ---------------------------------------------------------------------------
+# rocfft-device-bench: throughput benchmark for the header-only device FFT
+# library (<rocfft/device/fft.hpp>).  Intentionally depends only on HIP; it
+# does not link roc::rocfft, FFTW, or OpenMP.
+# ---------------------------------------------------------------------------
+add_executable( rocfft-device-bench device_fft_bench.cpp )
+
+target_include_directories( rocfft-device-bench
+  PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/include
+  )
+
+# Mirror the device library's -O3 device-code optimization level.
+target_compile_options( rocfft-device-bench PRIVATE
+  $<$<NOT:$<COMPILE_LANGUAGE:C>>:-Xarch_device -O3> )
+
+target_link_libraries( rocfft-device-bench PRIVATE hip::device )
+
+set_target_properties( rocfft-device-bench PROPERTIES
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+  RUNTIME_OUTPUT_DIRECTORY ${BENCH_OUT_DIR}
+  )
+
+rocm_install( TARGETS rocfft-device-bench COMPONENT benchmarks )

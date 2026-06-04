@@ -34,112 +34,112 @@
 
 namespace rocfft
 {
-namespace device
-{
-namespace detail
-{
+    namespace device
+    {
+        namespace detail
+        {
 
-/*! @brief Per-configuration Stockham parameters for a (length, precision) pair.
+            /*! @brief Per-configuration Stockham parameters for a (length, precision) pair.
  *  @details Primary template is intentionally undefined; only supported
  *  configurations are specialized, so an unsupported pair fails to instantiate.
  *  @tparam Length Transform length in complex elements.
  *  @tparam P      Numeric precision; see ::rocfft::device::Precision.
  */
-template <unsigned Length, Precision P>
-struct FFTDispatch;
+            template <unsigned Length, Precision P>
+            struct FFTDispatch;
 
-// ---- length 32: factors (4,8), max_radix=8 ----
+            // ---- length 32: factors (4,8), max_radix=8 ----
 
-template <>
-struct FFTDispatch<32, Precision::Single>
-{
-    static constexpr unsigned workgroup_size = 8;
-    static constexpr unsigned ept            = 4;
-    static constexpr unsigned max_radix      = 8;
-};
+            template <>
+            struct FFTDispatch<32, Precision::Single>
+            {
+                static constexpr unsigned workgroup_size = 8;
+                static constexpr unsigned ept            = 4;
+                static constexpr unsigned max_radix      = 8;
+            };
 
-template <>
-struct FFTDispatch<32, Precision::Double>
-{
-    static constexpr unsigned workgroup_size = 8;
-    static constexpr unsigned ept            = 4;
-    static constexpr unsigned max_radix      = 8;
-};
+            template <>
+            struct FFTDispatch<32, Precision::Double>
+            {
+                static constexpr unsigned workgroup_size = 8;
+                static constexpr unsigned ept            = 4;
+                static constexpr unsigned max_radix      = 8;
+            };
 
-// ---- length 64: factors (2,4,8), max_radix=8 ----
+            // ---- length 64: factors (2,4,8), max_radix=8 ----
 
-template <>
-struct FFTDispatch<64, Precision::Single>
-{
-    static constexpr unsigned workgroup_size = 32;
-    static constexpr unsigned ept            = 2;
-    static constexpr unsigned max_radix      = 8;
-};
+            template <>
+            struct FFTDispatch<64, Precision::Single>
+            {
+                static constexpr unsigned workgroup_size = 32;
+                static constexpr unsigned ept            = 2;
+                static constexpr unsigned max_radix      = 8;
+            };
 
-template <>
-struct FFTDispatch<64, Precision::Double>
-{
-    static constexpr unsigned workgroup_size = 32;
-    static constexpr unsigned ept            = 2;
-    static constexpr unsigned max_radix      = 8;
-};
+            template <>
+            struct FFTDispatch<64, Precision::Double>
+            {
+                static constexpr unsigned workgroup_size = 32;
+                static constexpr unsigned ept            = 2;
+                static constexpr unsigned max_radix      = 8;
+            };
 
-// ---- length 128: factors (16,8), max_radix=16 ----
+            // ---- length 128: factors (16,8), max_radix=16 ----
 
-template <>
-struct FFTDispatch<128, Precision::Single>
-{
-    static constexpr unsigned workgroup_size = 64;
-    static constexpr unsigned ept            = 2;
-    static constexpr unsigned max_radix      = 16;
-};
+            template <>
+            struct FFTDispatch<128, Precision::Single>
+            {
+                static constexpr unsigned workgroup_size = 64;
+                static constexpr unsigned ept            = 2;
+                static constexpr unsigned max_radix      = 16;
+            };
 
-template <>
-struct FFTDispatch<128, Precision::Double>
-{
-    static constexpr unsigned workgroup_size = 64;
-    static constexpr unsigned ept            = 2;
-    static constexpr unsigned max_radix      = 16;
-};
+            template <>
+            struct FFTDispatch<128, Precision::Double>
+            {
+                static constexpr unsigned workgroup_size = 64;
+                static constexpr unsigned ept            = 2;
+                static constexpr unsigned max_radix      = 16;
+            };
 
-// ---- length 256: factors (16,16), max_radix=16 ----
+            // ---- length 256: factors (16,16), max_radix=16 ----
 
-template <>
-struct FFTDispatch<256, Precision::Single>
-{
-    static constexpr unsigned workgroup_size = 128;
-    static constexpr unsigned ept            = 2;
-    static constexpr unsigned max_radix      = 16;
-};
+            template <>
+            struct FFTDispatch<256, Precision::Single>
+            {
+                static constexpr unsigned workgroup_size = 128;
+                static constexpr unsigned ept            = 2;
+                static constexpr unsigned max_radix      = 16;
+            };
 
-template <>
-struct FFTDispatch<256, Precision::Double>
-{
-    static constexpr unsigned workgroup_size = 128;
-    static constexpr unsigned ept            = 2;
-    static constexpr unsigned max_radix      = 16;
-};
+            template <>
+            struct FFTDispatch<256, Precision::Double>
+            {
+                static constexpr unsigned workgroup_size = 128;
+                static constexpr unsigned ept            = 2;
+                static constexpr unsigned max_radix      = 16;
+            };
 
-// ---- length 512: factors (8,8,8), max_radix=8 ----
+            // ---- length 512: factors (8,8,8), max_radix=8 ----
 
-template <>
-struct FFTDispatch<512, Precision::Single>
-{
-    static constexpr unsigned workgroup_size = 256;
-    static constexpr unsigned ept            = 2;
-    static constexpr unsigned max_radix      = 8;
-};
+            template <>
+            struct FFTDispatch<512, Precision::Single>
+            {
+                static constexpr unsigned workgroup_size = 256;
+                static constexpr unsigned ept            = 2;
+                static constexpr unsigned max_radix      = 8;
+            };
 
-template <>
-struct FFTDispatch<512, Precision::Double>
-{
-    static constexpr unsigned workgroup_size = 128;
-    static constexpr unsigned ept            = 4;
-    static constexpr unsigned max_radix      = 8;
-};
+            template <>
+            struct FFTDispatch<512, Precision::Double>
+            {
+                static constexpr unsigned workgroup_size = 128;
+                static constexpr unsigned ept            = 4;
+                static constexpr unsigned max_radix      = 8;
+            };
 
-} // namespace detail
-} // namespace device
+        } // namespace detail
+    } // namespace device
 } // namespace rocfft
 
 #endif // ROCFFT_DEVICE_DISPATCH_HPP

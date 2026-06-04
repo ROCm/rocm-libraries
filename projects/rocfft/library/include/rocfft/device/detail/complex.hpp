@@ -49,12 +49,12 @@ struct rocfft_complex
     Treal x;
     Treal y;
 
-    __device__ __host__ rocfft_complex()                      = default;
-    __device__ __host__ rocfft_complex(const rocfft_complex&) = default;
-    __device__ __host__ rocfft_complex(rocfft_complex&&)      = default;
+    __device__ __host__                 rocfft_complex()                       = default;
+    __device__ __host__                 rocfft_complex(const rocfft_complex&)  = default;
+    __device__ __host__                 rocfft_complex(rocfft_complex&&)       = default;
     __device__ __host__ rocfft_complex& operator=(const rocfft_complex& rhs) & = default;
-    __device__ __host__ rocfft_complex& operator=(rocfft_complex&& rhs) & = default;
-    __device__                          __host__ ~rocfft_complex()        = default;
+    __device__ __host__ rocfft_complex& operator=(rocfft_complex&& rhs) &      = default;
+    __device__                          __host__ ~rocfft_complex()             = default;
 
     __device__ __host__ constexpr rocfft_complex(Treal real, Treal imag)
         : x{real}
@@ -69,24 +69,64 @@ struct rocfft_complex
     {
     }
 
-    __device__ __host__ constexpr Treal real() const { return x; }
-    __device__ __host__ constexpr Treal imag() const { return y; }
+    __device__ __host__ constexpr Treal real() const
+    {
+        return x;
+    }
+    __device__ __host__ constexpr Treal imag() const
+    {
+        return y;
+    }
 
-    __forceinline__ __device__ __host__ rocfft_complex operator-() const { return {-x, -y}; }
-    __forceinline__ __device__ __host__ rocfft_complex operator+() const { return *this; }
+    __forceinline__ __device__ __host__ rocfft_complex operator-() const
+    {
+        return {-x, -y};
+    }
+    __forceinline__ __device__ __host__ rocfft_complex operator+() const
+    {
+        return *this;
+    }
 
-    __device__ __host__ auto& operator+=(const rocfft_complex& rhs) { return *this = {x + rhs.x, y + rhs.y}; }
-    __device__ __host__ auto  operator+(const rocfft_complex& rhs) const { auto lhs = *this; return lhs += rhs; }
-    __device__ __host__ auto& operator-=(const rocfft_complex& rhs) { return *this = {x - rhs.x, y - rhs.y}; }
-    __device__ __host__ auto  operator-(const rocfft_complex& rhs) const { auto lhs = *this; return lhs -= rhs; }
-    __device__ __host__ auto& operator*=(const rocfft_complex& rhs) { return *this = {x * rhs.x - y * rhs.y, y * rhs.x + x * rhs.y}; }
-    __device__ __host__ auto  operator*(const rocfft_complex& rhs) const { auto lhs = *this; return lhs *= rhs; }
+    __device__ __host__ auto& operator+=(const rocfft_complex& rhs)
+    {
+        return *this = {x + rhs.x, y + rhs.y};
+    }
+    __device__ __host__ auto operator+(const rocfft_complex& rhs) const
+    {
+        auto lhs = *this;
+        return lhs += rhs;
+    }
+    __device__ __host__ auto& operator-=(const rocfft_complex& rhs)
+    {
+        return *this = {x - rhs.x, y - rhs.y};
+    }
+    __device__ __host__ auto operator-(const rocfft_complex& rhs) const
+    {
+        auto lhs = *this;
+        return lhs -= rhs;
+    }
+    __device__ __host__ auto& operator*=(const rocfft_complex& rhs)
+    {
+        return *this = {x * rhs.x - y * rhs.y, y * rhs.x + x * rhs.y};
+    }
+    __device__ __host__ auto operator*(const rocfft_complex& rhs) const
+    {
+        auto lhs = *this;
+        return lhs *= rhs;
+    }
 
     template <typename U>
-    __device__ __host__ auto& operator*=(const U& rhs) { return (x *= Treal(rhs)), (y *= Treal(rhs)), *this; }
+    __device__ __host__ auto& operator*=(const U& rhs)
+    {
+        return (x *= Treal(rhs)), (y *= Treal(rhs)), *this;
+    }
 
     template <typename U>
-    __device__ __host__ auto operator*(const U& rhs) const { auto lhs = *this; return lhs *= Treal(rhs); }
+    __device__ __host__ auto operator*(const U& rhs) const
+    {
+        auto lhs = *this;
+        return lhs *= Treal(rhs);
+    }
 };
 
 template <typename U, typename Treal>
@@ -145,7 +185,7 @@ using complex_type_t = typename complex_type<T>::type;
 #ifndef DEVICE_ENUM_H
 enum StrideBin
 {
-    SB_UNIT,    //!< Unit stride between consecutive elements.
+    SB_UNIT, //!< Unit stride between consecutive elements.
     SB_NONUNIT, //!< Arbitrary (non-unit) stride between elements.
 };
 #endif // DEVICE_ENUM_H

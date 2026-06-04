@@ -28,37 +28,37 @@
 
 namespace rocfft
 {
-namespace device
-{
+    namespace device
+    {
 
-/*! @brief Numeric precision of a device FFT. */
-enum class Precision
-{
-    Single, //!< IEEE single precision (32-bit float).
-    Double, //!< IEEE double precision (64-bit double).
-};
+        /*! @brief Numeric precision of a device FFT. */
+        enum class Precision
+        {
+            Single, //!< IEEE single precision (32-bit float).
+            Double, //!< IEEE double precision (64-bit double).
+        };
 
-/*! @brief Maps a ::Precision value to its real and complex element types.
+        /*! @brief Maps a ::Precision value to its real and complex element types.
  *  @tparam P Precision tag to resolve. Specialized for each ::Precision value.
  */
-template <Precision P>
-struct precision_traits;
+        template <Precision P>
+        struct precision_traits;
 
-//! @brief ::Precision::Single specialization (float / rocfft_complex<float>).
-template <>
-struct precision_traits<Precision::Single>
-{
-    using real_type    = float;                 //!< Real scalar type.
-    using complex_type = rocfft_complex<float>; //!< Complex element type.
-};
+        //! @brief ::Precision::Single specialization (float / rocfft_complex<float>).
+        template <>
+        struct precision_traits<Precision::Single>
+        {
+            using real_type    = float; //!< Real scalar type.
+            using complex_type = rocfft_complex<float>; //!< Complex element type.
+        };
 
-//! @brief ::Precision::Double specialization (double / rocfft_complex<double>).
-template <>
-struct precision_traits<Precision::Double>
-{
-    using real_type    = double;                 //!< Real scalar type.
-    using complex_type = rocfft_complex<double>; //!< Complex element type.
-};
+        //! @brief ::Precision::Double specialization (double / rocfft_complex<double>).
+        template <>
+        struct precision_traits<Precision::Double>
+        {
+            using real_type    = double; //!< Real scalar type.
+            using complex_type = rocfft_complex<double>; //!< Complex element type.
+        };
 
-} // namespace device
+    } // namespace device
 } // namespace rocfft

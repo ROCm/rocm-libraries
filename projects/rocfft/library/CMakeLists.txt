@@ -70,5 +70,18 @@ set( rocfft_headers_public
 
 source_group( "Header Files\\Public" FILES ${rocfft_headers_public} )
 
+# Device-side, header-only FFT library (<rocfft/device/...>).  These headers are
+# consumed directly from the source tree at build time (via BUILD_INTERFACE on
+# the rocfft target); install the full header tree so packaged installs expose
+# the device API alongside the public rocFFT headers.  Only *.hpp are shipped
+# (the stockham generator script stays out of the package).
+rocm_install(
+  DIRECTORY   "${CMAKE_CURRENT_SOURCE_DIR}/include/rocfft/device"
+  DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/rocfft"
+  COMPONENT   devel
+  FILES_MATCHING
+    PATTERN "*.hpp"
+)
+
 # Build into subdirectories
 add_subdirectory( src )
