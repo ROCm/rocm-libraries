@@ -2,8 +2,8 @@
 // SPDX-License-Identifier:  MIT
 
 #include "BatchnormFwdInferenceWithVariancePlan.hpp"
+#include "BatchnormHipKernelCompileOptions.hpp"
 #include "engines/hip_mlops_engine/plans/PlanUtils.hpp"
-#include "hip/HipKernelCompileOptions.hpp"
 
 #include "hip/IKernelCompiler.hpp"
 
@@ -126,17 +126,6 @@ size_t BatchnormFwdInferenceWithVariancePlan::getWorkspaceSize(
 void BatchnormFwdInferenceWithVariancePlan::compile(const IKernelCompiler& kernelCompiler,
                                                     const hipDeviceProp_t& deviceProperties)
 {
-    // Determine data type configuration
-    auto xDataType = _inferenceParams.x()->data_type();
-    auto scaleDataType = _inferenceParams.scale()->data_type();
-
-    const bool useFp16Mix
-        = (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::HALF
-           && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
-    const bool useBfp16Mix
-        = (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16
-           && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
-
     // Extract dimensions from x tensor
     const auto* xDims = _inferenceParams.x()->dims();
     const auto* xStrides = _inferenceParams.x()->strides();
@@ -231,13 +220,6 @@ void BatchnormFwdInferenceWithVariancePlan::compile(const IKernelCompiler& kerne
         zgridsize = 1;
     }
 
-    // Detect GPU architecture
-    const std::string archName(deviceProperties.gcnArchName);
-    const bool isGfx103X = (archName.find("gfx103") == 0);
-    const bool isGfx110X = (archName.find("gfx110") == 0);
-    const bool isGfx120X = (archName.find("gfx120") == 0);
-    const bool isGfx115X = (archName.find("gfx115") == 0);
-
     // Get activation mode
     auto activationMode = hip_kernel_utils::ActivationMode::PASTHRU;
 
@@ -246,18 +228,26 @@ void BatchnormFwdInferenceWithVariancePlan::compile(const IKernelCompiler& kerne
         activationMode = (*_inferenceParams.optActivation()).mode;
     }
 
+    // Determine data type configuration
+    auto xDataType = _inferenceParams.x()->data_type();
+    auto scaleDataType = _inferenceParams.scale()->data_type();
+
+    const bool useFp16Mix
+        = (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::HALF
+           && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+    const bool useBfp16Mix
+        = (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16
+           && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+
     // Prepare compilation options
-    HipKernelCompileOptions options(_inferenceParams.x(), deviceProperties, activationMode);
-    options.add("HIP_PLUGIN_USE_FPMIX", useFp16Mix);
-    options.add("HIP_PLUGIN_USE_BFPMIX", useBfp16Mix);
-    options.add("HIP_PLUGIN_BN_GRP0", xlocalsize);
-    options.add("HIP_PLUGIN_BN_GRP1", ylocalsize);
-    options.add("HIP_PLUGIN_BN_GRP2", zlocalsize);
-    options.add("HIP_PLUGIN_BN_VEC_SIZE", vectorsize);
-    options.add("HIP_PLUGIN_BN_GFX103X", isGfx103X);
-    options.add("HIP_PLUGIN_BN_GFX110X", isGfx110X);
-    options.add("HIP_PLUGIN_BN_GFX120X", isGfx120X);
-    options.add("HIP_PLUGIN_BN_GFX115X", isGfx115X);
+    BatchnormHipKernelCompileOptions options(
+        _inferenceParams.x(), deviceProperties, activationMode);
+    options.update("HIP_PLUGIN_BN_GRP0", xlocalsize);
+    options.update("HIP_PLUGIN_BN_GRP1", ylocalsize);
+    options.update("HIP_PLUGIN_BN_GRP2", zlocalsize);
+    options.update("HIP_PLUGIN_BN_VEC_SIZE", vectorsize);
+    options.update("HIP_PLUGIN_USE_FPMIX", useFp16Mix);
+    options.update("HIP_PLUGIN_USE_BFPMIX", useBfp16Mix);
 
     // Compile kernel and configure launch dimensions
     _compiledProgram = kernelCompiler.compile("BatchNormFwdInferSpatial.cpp", options);
