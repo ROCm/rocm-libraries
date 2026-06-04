@@ -16,6 +16,7 @@
 import ctypes
 import os
 import re
+import shutil
 import sys
 import struct
 import subprocess
@@ -571,7 +572,9 @@ def assemble_kernel(asm_source, output_path, wavefront_size=64):
 
     try:
         subprocess.check_call(cmd)
-        os.rename(obj_path, output_path)
+        # shutil.move (not os.rename) so the temp .o in /tmp can land on a
+        # different filesystem than output_path without Errno 18 (EXDEV).
+        shutil.move(obj_path, output_path)
     finally:
         if os.path.exists(asm_path):
             os.unlink(asm_path)
