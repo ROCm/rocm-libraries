@@ -52,7 +52,6 @@ jobs:
       linux_package_targets: ${{ steps.configure_linux.outputs.package_targets }}
       windows_package_targets: ${{ steps.configure_windows.outputs.package_targets }}
       benchmark_mode: ${{ steps.linux_projects.outputs.benchmark_mode }}
-      benchmark_family: ${{ steps.benchmark_runner.outputs.benchmark_family }}
       benchmark_runs_on: ${{ steps.benchmark_runner.outputs.benchmark_runs_on }}
     steps:
       - name: Checkout code
@@ -149,7 +148,6 @@ jobs:
         env:
           BENCHMARK_FAMILY: gfx94X-dcgpu
         run: |
-          echo "benchmark_family=${BENCHMARK_FAMILY}" >> "$GITHUB_OUTPUT"
           echo "benchmark_runs_on=$(jq -r \
             --arg fam "${BENCHMARK_FAMILY}" \
             '.[] | select(.amdgpu_family==$fam) | .test_machine' \
@@ -226,7 +224,7 @@ jobs:
     with:
       therock_ref: ${{ needs.setup.outputs.therock_ref }}
       projects_to_test: ${{ needs.setup.outputs.benchmark_mode == 'run-id' && 'hipdnn' || '' }}
-      amdgpu_families: ${{ needs.setup.outputs.benchmark_family }}
+      amdgpu_families: "gfx94X-dcgpu"
       test_runs_on: ${{ needs.setup.outputs.benchmark_runs_on }}
       platform: "linux"
 
