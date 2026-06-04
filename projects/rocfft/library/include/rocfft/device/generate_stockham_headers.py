@@ -57,12 +57,14 @@ LICENSE = """\
 
 
 def run_dump_tool(
-    direction: str, precision: str, factors: str, wgs: int, tpt: int, arch: str = "gfx1201"
+    direction: str, precision: str, factors: str, wgs: int, tpt: int, arch: str | None = None
 ) -> str:
     """Run rocfft_stockham_source_dump and return stdout."""
     cmd = [
-        str(DUMP_TOOL), direction, precision, factors, str(wgs), str(tpt), "0", "0", arch
+        str(DUMP_TOOL), direction, precision, factors, str(wgs), str(tpt), "0", "0",
     ]
+    if arch:
+        cmd.append(arch)
     result = subprocess.run(cmd, capture_output=True, text=True, cwd=str(ROCFFT_ROOT))
     if result.returncode != 0:
         print(f"ERROR: {' '.join(cmd)}", file=sys.stderr)
@@ -193,7 +195,7 @@ def generate_header(
     wgs: int,
     tpt: int,
     precision: str,
-    arch: str = "gfx1201",
+    arch: str | None = None,
 ) -> str:
     """Generate a complete stockham header for one (length, precision) config."""
     ept = length // tpt
