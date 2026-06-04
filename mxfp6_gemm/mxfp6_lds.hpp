@@ -113,9 +113,14 @@ template <int M_TILE, int N_TILE, int K_TILE, int WAVES_M, int WAVES_N, int MIN_
 __global__ void __launch_bounds__(256, MIN_OCC)
     lds_gemm_db(const void* __restrict__ A, const void* __restrict__ B,
                 const uint8_t* __restrict__ sA, const uint8_t* __restrict__ sB,
-                OutT* __restrict__ D, int N, int k_iters, int A_rs, int B_rs,
+                OutT* __restrict__ D, int N, int k_iters, int A_row_bytes, int B_row_bytes,
                 const uint8_t* __restrict__ sA_plain = nullptr,
                 const uint8_t* __restrict__ sB_plain = nullptr) {
+    // A_row_bytes / B_row_bytes = FP6-packed row stride in BYTES = QuantizedMatrix::
+    // packed_row_bytes = fp6_packed_bytes(K) = K*6/8 (NOT K elements / K*4 floats).
+    // A is row-major [M][K]; B is column-major B^T[N][K] (preprocess_B), so both strides
+    // walk the K dimension and equal K*6/8. Used to address each row/column from global.
+    //
     // sA_plain/sB_plain = lane-ordered (un-tiled) scales [tile][k64][64], used ONLY by
     // the K-tail (k_iters not a multiple of K64_PER_TILE). If k_iters % K64_PER_TILE == 0 the tail is
     // skipped and these may be null (back-compat with the K-padded callers).
@@ -144,8 +149,8 @@ __global__ void __launch_bounds__(256, MIN_OCC)
         wg_m = blockIdx.x;
         wg_n = blockIdx.y;
     }
-    const char* Ag = reinterpret_cast<const char*>(A) + (size_t)(wg_m * M_TILE) * A_rs;
-    const char* Bg = reinterpret_cast<const char*>(B) + (size_t)(wg_n * N_TILE) * B_rs;
+    const char* Ag = reinterpret_cast<const char*>(A) + (size_t)(wg_m * M_TILE) * A_row_bytes;
+    const char* Bg = reinterpret_cast<const char*>(B) + (size_t)(wg_n * N_TILE) * B_row_bytes;
 
     AccTileA acc[M_PW][N_PW];
 #pragma unroll
@@ -170,8 +175,9 @@ __global__ void __launch_bounds__(256, MIN_OCC)
     // sa/sb are caller-named arrays (compile-time buf0/buf1) -> no dynamic index/spill.
     auto prefetch = [&](int kt, uint32_t base, int (*sa)[NDA], int (*sb)[NDB]) {
         int kb = kt * KT_BYTES;
-        issue_tile<M_TILE, KT_BYTES, ROW_CHUNKS>(smem, base + 0, Ag, A_rs, kb, wave, lane);
-        issue_tile<N_TILE, KT_BYTES, ROW_CHUNKS>(smem, base + A_BYTES, Bg, B_rs, kb, wave, lane);
+        issue_tile<M_TILE, KT_BYTES, ROW_CHUNKS>(smem, base + 0, Ag, A_row_bytes, kb, wave, lane);
+        issue_tile<N_TILE, KT_BYTES, ROW_CHUNKS>(smem, base + A_BYTES, Bg, B_row_bytes, kb, wave, lane);
+#ifndef NOSCALE
         const char* pa = reinterpret_cast<const char*>(sA) +
                          (size_t)((sa_grp * k_tiles + kt) * 64 + lane) * K64_PER_TILE * SA_PAD;
         const char* pb = reinterpret_cast<const char*>(sB) +
@@ -181,6 +187,9 @@ __global__ void __launch_bounds__(256, MIN_OCC)
         asm_load_dwordxN_nowait(tb, pb, K64_PER_TILE);
 #pragma unroll
         for (int sub = 0; sub < K64_PER_TILE; sub++) { sa[sub][0] = ta[sub]; sb[sub][0] = tb[sub]; }
+#else
+        (void)sa; (void)sb;
+#endif
     };
     auto compute = [&](uint32_t cur, const int (*sa)[NDA], const int (*sb)[NDB]) {
 #pragma unroll
@@ -223,6 +232,25 @@ __global__ void __launch_bounds__(256, MIN_OCC)
     // STILL inserts its own vmcnt(0) before every ds_read (asm: 10x vmcnt(0) vs 2x
     // vmcnt(20)), so the explicit relative wait is a redundant extra. Suppressing the
     // compiler drain needs full-asm ds_read, disproven 6 ways in Step 21.
+    // SYNC: the deep-K double buffer needs both RAW (fill-before-read) and WAR
+    // (read-before-refill) ordering across the block's 4 waves. The naive form uses 4
+    // __syncthreads/2 tiles (2 RAW + 2 WAR). The 2 WAR barriers cost ~6% @8192^3, BUT
+    // simply dropping them is a data race: the recycle prefetch issues an async
+    // global_load_lds that can overwrite a buffer while a slower wave still ds_reads it.
+    // The race is inter-wave skew, peaks at partial grid fill (WG~48-480), and corrupts
+    // real production shapes (e.g. 3072^2 swz0: 27/30 runs) -- NOT shape-gateable.
+    //   FIX = REORDERED double buffer (RDB) below: issue each recycle prefetch AFTER the
+    // RAW __syncthreads instead of before. Then ONE barrier per tile serves both roles --
+    // it sits between a buffer's last read (prior compute) and its async overwrite, which
+    // is exactly the read-before-refill ordering the WAR barriers gave, at 1 barrier/tile.
+    // Structurally correct on ALL shapes (no timing assumption); validated bit-exact vs the
+    // 4-barrier golden across the full race blast-radius (3072^2/6144x2048/4096x3072/5120^2,
+    // K up to 6144, >=30 invocations each, uniq=1) while the naive-drop control fired 27/30.
+    // Recovers a shape-dependent slice: +1.2~2.2% square, +3.5~7.9% rectangular (the shapes
+    // the dispatcher routes to TLDS), zero regression, identical VGPR/AGPR/LDS/occ/spill.
+    // (The remaining gap to the racy +6% is prefetch-before-barrier scheduling, which
+    // provably needs a WAR barrier in a 2-buffer pipeline; triple-buffer would remove WAR
+    // but only fits at KT128, whose shallower window nets -5%. See HANDOFF Step 28.)
     int sa0[K64_PER_TILE][NDA], sa1[K64_PER_TILE][NDA], sb0[K64_PER_TILE][NDB], sb1[K64_PER_TILE][NDB];
     if constexpr (DB) {
         // 2x-unrolled ping-pong: buf0 for even tiles, buf1 for odd. Compile-time
@@ -232,15 +260,13 @@ __global__ void __launch_bounds__(256, MIN_OCC)
         prefetch(0, 0, sa0, sb0);  // prologue: tile 0 -> buf0
         int kt = 0;
         for (; kt + 1 < k_tiles; kt += 2) {
-            prefetch(kt + 1, BUF, sa1, sb1);          // tile kt+1 -> buf1
-            wait_vmcnt(LPT_TOT); __syncthreads();
+            wait_vmcnt(LPT_TOT); __syncthreads();      // RAW(buf0) + WAR-guards buf1 recycle
+            prefetch(kt + 1, BUF, sa1, sb1);           // tile kt+1 -> buf1 (issued AFTER barrier)
             compute(0, sa0, sb0);                      // compute buf0
-            __syncthreads();
             bool pf = (kt + 2 < k_tiles);
-            if (pf) prefetch(kt + 2, 0, sa0, sb0);     // tile kt+2 -> buf0
-            wait_vmcnt(pf ? LPT_TOT : 0); __syncthreads();
+            wait_vmcnt(LPT_TOT); __syncthreads();      // RAW(buf1) + WAR-guards buf0 recycle
+            if (pf) prefetch(kt + 2, 0, sa0, sb0);     // tile kt+2 -> buf0 (issued AFTER barrier)
             compute(BUF, sa1, sb1);                    // compute buf1
-            __syncthreads();
         }
         if (kt < k_tiles) {                            // odd tail (buf0 already loaded)
             wait_vmcnt(0); __syncthreads();
@@ -267,8 +293,8 @@ __global__ void __launch_bounds__(256, MIN_OCC)
     // cooperative load divides the WG evenly (256*3,512*3 ok; 128*3 not).
     if constexpr (M_TILE * 3 % 256 == 0 && N_TILE * 3 % 256 == 0)
     for (int kc = k_tiles * K64_PER_TILE; kc < k_iters; kc++) {
-        load_tile_lds<M_TILE, 48, 3>(smem, 0, Ag, A_rs, kc * 48, wave, lane);
-        load_tile_lds<N_TILE, 48, 3>(smem, M_TILE * 48, Bg, B_rs, kc * 48, wave, lane);
+        load_tile_lds<M_TILE, 48, 3>(smem, 0, Ag, A_row_bytes, kc * 48, wave, lane);
+        load_tile_lds<N_TILE, 48, 3>(smem, M_TILE * 48, Bg, B_row_bytes, kc * 48, wave, lane);
         wait_vmcnt(0); __syncthreads();
 #pragma unroll
         for (int mi = 0; mi < M_PW; mi++) {
