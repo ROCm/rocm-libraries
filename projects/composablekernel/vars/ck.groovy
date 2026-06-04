@@ -1247,6 +1247,8 @@ def getPytorchTestsCmds() {
 }
 def getAiterTestsCmds() {
     return [
+        // Pre-compile FlyDSL MoE AOT cache before the tests.
+        "cd /home/jenkins/workspace/aiter && python3 aiter/aot/flydsl/moe.py",
         "python3 /home/jenkins/workspace/aiter/op_tests/test_gemm_a8w8.py",
         "python3 /home/jenkins/workspace/aiter/op_tests/test_gemm_a8w8_blockscale.py",
         "python3 /home/jenkins/workspace/aiter/op_tests/test_mha.py",
@@ -1441,7 +1443,7 @@ def runBuildCKAndTests(String arch) {
         case "gfx1250":
             gpuTarget = "gfx1250"
             extraSetupArgs = " -DDISABLE_DL_KERNELS=\"ON\""
-            extraBuildArgs = [docker_name: "${env.CK_DOCKERHUB_PRIVATE}:npi-mi450-latest", no_reboot: true]
+            extraBuildArgs = [docker_name: "${env.CK_DOCKERHUB_PRIVATE}:ck_ub24.04_gfx1250", no_reboot: true]
             break
         case "gfx10-1-generic":
         case "gfx10-3-generic":
