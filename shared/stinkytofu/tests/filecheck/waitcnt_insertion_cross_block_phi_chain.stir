@@ -1,0 +1,68 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
+#
+# Two-level cross-block PHI chain.
+#
+#                ^entry  : v0 = ds_load (token 0)   ; deep producer
+#                  |
+#               s_cbranch ^p2
+#                /     \
+#               v       v
+#             ^p1     ^p2
+#               \     /
+#                v   v
+#                ^mid                                ; PHI(v0) at first merge
+#                  |
+#               s_cbranch ^q2
+#                /     \
+#               v       v
+#             ^q1     ^q2
+#                \     /
+#                 v   v
+#                ^exit                               ; PHI(v0) at second merge
+#                v30 = ds_load (token 1)             ; local prefix in ^exit
+#                v_add_f32(v0)                       ; consumer
+#
+# The consumer in ^exit reads v0 through two stacked PHIs. The live DS
+# queue forwarded along entry -> mid -> exit holds {v0, v30}: v0 is the
+# oldest of 2, so the correct drain is:
+#   s_wait_dscnt 1
+#
+# This exercises the recursive PHI live-queue scan: a single-level scan
+# (or a static one-shot summary at ^mid) would lose the cross-block
+# producer by the time control reaches ^exit and emit no wait. The
+# non-zero count also distinguishes a correct compute from the
+# iteration-cap wait-* 0 fallback.
+#
+# CHECK-LABEL: @waitcnt_insertion_cross_block_phi_chain
+# CHECK-LABEL: ^exit:
+# CHECK: ds_load_b32
+# CHECK: s_wait_dscnt
+# CHECK-SAME: dlcnt = 1
+# CHECK-NEXT: v_add_f32
+
+st.func @waitcnt_insertion_cross_block_phi_chain() {
+^entry:
+  v0 = "st.ds_load_b32"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  SCC0 = "st.s_cmp_eq_u32"(s13, 0x1) { issueCycles = 1, latencyCycles = 2 }
+  "st.s_cbranch_scc1"("p2", SCC0) { issueCycles = 1, latencyCycles = 1 }
+  Successors: ^p1, ^p2
+^p1:
+  "st.s_branch"("mid")
+  Successors: ^mid
+^p2:
+  "st.s_branch"("mid")
+  Successors: ^mid
+^mid:
+  SCC1 = "st.s_cmp_eq_u32"(s14, 0x1) { issueCycles = 1, latencyCycles = 2 }
+  "st.s_cbranch_scc1"("q2", SCC1) { issueCycles = 1, latencyCycles = 1 }
+  Successors: ^q1, ^q2
+^q1:
+  "st.s_branch"("exit")
+  Successors: ^exit
+^q2:
+  "st.s_branch"("exit")
+  Successors: ^exit
+^exit:
+  v30 = "st.ds_load_b32"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [1] } }
+  v7 = "st.v_add_f32"(v0, v1) { issueCycles = 1, latencyCycles = 1 }
+}

@@ -1,0 +1,42 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
+#
+# Loop-carried DS RAW dependency with an in-block (local) prefix.
+#
+#   ^entry:  v[20:21] = ds_load (token 0)          ; prologue def of carried val
+#            s_branch ^loop
+#   ^loop:   v[30:31] = ds_load (token 1)          ; local prefix L1
+#            v[32:33] = ds_load (token 1)          ; local prefix L2
+#            v[34:35] = ds_load (token 1)          ; local prefix L3
+#            wmma reads v[20:27]                   ; consumes carried val (PHI)
+#            v[20:21] = ds_load (token 0)          ; carried producer (next iter)
+#            s_cbranch ^loop / ^exit
+#
+# In steady state the wmma consumes the carried ds_load from the PREVIOUS
+# iteration. At the wmma the DS FIFO holds {carried(prev), L1, L2, L3} so the
+# carried load is the oldest of 4 outstanding ops: the correct drain is
+#   s_wait_dscnt 3   (wait for the carried load; leave L1,L2,L3 outstanding).
+# The local prefix (L1,L2,L3) MUST be counted -- the wait depends on how many
+# DS ops were issued in this block before the consumer, not just the carried
+# producer's position at loop-body exit.
+#
+# CHECK-LABEL: @loop_carried_local_prefix
+# CHECK: ^loop
+# CHECK: s_wait_dscnt
+# CHECK-SAME: dlcnt = 3
+# CHECK-NEXT: v_wmma_f32_16x16x32_bf16
+
+st.func @loop_carried_local_prefix() {
+^entry:
+  v[20:21] = "st.ds_load_b64"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  "st.s_branch"("loop")
+  Successors: ^loop
+^loop:
+  v[30:31] = "st.ds_load_b64"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [1] } }
+  v[32:33] = "st.ds_load_b64"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [1] } }
+  v[34:35] = "st.ds_load_b64"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 32, gds = false }, mod.memtoken = { tokens = [1] } }
+  a[10:17] = "st.v_wmma_f32_16x16x32_bf16"(v[20:27], v[40:47], a[10:17]) { mod.mfma = { reuseA = false, reuseB = false } }
+  v[20:21] = "st.ds_load_b64"(v0) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 64, gds = false }, mod.memtoken = { tokens = [0] } }
+  "st.s_cbranch_scc1"("loop", SCC0)
+  Successors: ^loop, ^exit
+^exit:
+}

@@ -81,12 +81,12 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
         buildUseDefChain(func, domInfo, /*clearExisting=*/true, /*includePseudo=*/true);
         const auto& rpo = AM.getResult<BBIndexAnalysis>(func).rpo;
 
-        // The dataflow must see every block so a skipped pred still
-        // contributes its in-flight state to successors. PassContext
-        // gating only applies to IR mutation below.
+        // Dataflow must see every block so a skipped pred still contributes
+        // its in-flight state to successors. PassContext gating only applies
+        // to IR mutation below.
         WaitDataflow df(func, domInfo, rpo);
 
-        // Set the tensor counter to drain only for barriers or when there is only one wave.
+        // Tensor counter drains only at barriers or when there is a single wave.
         const auto numWaves = passCtx.getGemmTileConfig().NumWaves;
         df.setRawNeedsWait(CK_Tensor, [numWaves](const StinkyInstruction& i) {
             return isBarrier(i) || numWaves == 1;

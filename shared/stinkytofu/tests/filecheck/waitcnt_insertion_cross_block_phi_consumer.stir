@@ -1,0 +1,50 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
+#
+# Cross-block consumer with a local prefix.
+#
+#   ^entry:  v0  = ds_load (token 0)        ; producer (will become PHI source)
+#            s_cbranch ^p1 / ^p2
+#   ^p1:     v0  = ds_load (token 0)        ; alt producer
+#            s_branch ^after
+#   ^p2:     s_branch ^after
+#   ^after:                                  ; PHI(v0) merges entry/p1/p2
+#            v30 = ds_load (token 1)        ; local prefix L1
+#            v32 = ds_load (token 1)        ; local prefix L2
+#            v_add_f32(v0)                  ; consumer reads cross-block PHI
+#
+# The DS queue at the consumer holds {v0_carried, L1, L2}: v0 is the
+# oldest of 3 outstanding ops, so the correct drain is
+#   s_wait_dscnt 2  (wait for v0; leave L1,L2 outstanding).
+#
+# This pins the live-queue PHI-consumer scan (the consumer must count
+# the in-flight cross-block PHI source, not just the local prefix). A
+# regression that collapses cross-block PHI summaries would emit 0 here,
+# and a regression that hit the iteration cap would also emit 0 via the
+# wait-* 0 fallback, so the dlcnt = 2 check distinguishes both.
+#
+# CHECK-LABEL: @waitcnt_insertion_cross_block_phi_consumer
+# CHECK-LABEL: ^after:
+# CHECK: ds_load_b32
+# CHECK: ds_load_b32
+# CHECK: s_wait_dscnt
+# CHECK-SAME: dlcnt = 2
+# CHECK-NEXT: v_add_f32
+
+st.func @waitcnt_insertion_cross_block_phi_consumer() {
+^entry:
+  v0 = "st.ds_load_b32"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+  SCC0 = "st.s_cmp_eq_u32"(s13, 0x1) { issueCycles = 1, latencyCycles = 2 }
+  "st.s_cbranch_scc1"("p2", SCC0) { issueCycles = 1, latencyCycles = 1 }
+  Successors: ^p1, ^p2
+^p1:
+  v0 = "st.ds_load_b32"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 4, gds = false }, mod.memtoken = { tokens = [0] } }
+  "st.s_branch"("after")
+  Successors: ^after
+^p2:
+  "st.s_branch"("after")
+  Successors: ^after
+^after:
+  v30 = "st.ds_load_b32"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 16, gds = false }, mod.memtoken = { tokens = [1] } }
+  v32 = "st.ds_load_b32"(v10) { issueCycles = 1, latencyCycles = 52, mod.ds = { na = 1, offset = 20, gds = false }, mod.memtoken = { tokens = [1] } }
+  v7 = "st.v_add_f32"(v0, v1) { issueCycles = 1, latencyCycles = 1 }
+}

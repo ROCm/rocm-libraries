@@ -28,6 +28,7 @@
 
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/Function.hpp"
+#include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 
 #define DEBUG_TYPE "WaitDataflow"
@@ -197,7 +198,23 @@ DataflowState WaitDataflow::mergeFromPredecessors(BasicBlock& bb) const {
                 PerPredQueue q;
                 q.pred = p;
                 q.ops = predQ.ops;
-                entry.queues[c].push_back(std::move(q));
+                // Dedup identical (pred, ops) queues. A back-edge otherwise
+                // re-copies the same per-pred queue on every fixed-point
+                // iteration: the predecessor's exit already contains the
+                // queues it inherited from this block last round, so the
+                // queue COUNT grows by one each iteration and the state
+                // never stabilises (hitting the iteration cap and forcing
+                // the conservative s_wait_* 0 fallback). Identical queues
+                // yield identical countFrom() results, so collapsing them
+                // is loss-free and restores convergence.
+                bool dup = false;
+                for (const auto& existing : entry.queues[c]) {
+                    if (existing.pred == q.pred && existing.ops == q.ops) {
+                        dup = true;
+                        break;
+                    }
+                }
+                if (!dup) entry.queues[c].push_back(std::move(q));
             }
         }
         for (const auto& kv : predState.phiSummaries) {
@@ -309,6 +326,45 @@ void appendToAllPaths(std::vector<PerPredQueue>& qs, StinkyInstruction* op) {
     for (auto& q : qs) q.ops.push_back(op);
 }
 
+// Tightest current-queue wait for counter @p c contributed by a consumer's
+// (possibly nested) PHI source. Walks the PHI's incoming values down to the
+// leaf memops and scans the consumer's LIVE per-pred queues for them via
+// countFrom().
+//
+// This is what lets a loop-carried value be waited on correctly. The
+// precomputed PhiSummary records the carried producer's depth AT THE LOOP
+// HEADER MERGE -- where, on the back-edge path, the next-iteration reload
+// sits at the queue tail (countFrom == 1 => wait 0). Reading that frozen
+// scalar makes every downstream consumer drain to 0, even though many more
+// DS ops are issued between the header and the consumer. Scanning the live
+// queue instead counts those intervening ops (the leaf producer has flowed
+// through the merges/appends and now sits deeper), yielding the correct
+// "keep the pipeline full" wait. A leaf producer that has already drained
+// out of the queue contributes nothing (it is complete -> no wait), which
+// is exactly right. @p seen guards against PHI cycles.
+int phiCurrentQueueWait(StinkyInstruction* phi, CounterKind c, const DataflowState& state,
+                        std::unordered_set<StinkyInstruction*>& seen) {
+    if (!seen.insert(phi).second) return WaitCountSpec::kUnused;
+    int best = WaitCountSpec::kUnused;
+    auto tighten = [&](int w) {
+        if (w < 0) return;
+        if (best == WaitCountSpec::kUnused || w < best) best = w;
+    };
+    for (StinkyInstruction* src : phi->getSources()) {
+        if (src == nullptr) continue;
+        if (isPhi(*src)) {
+            tighten(phiCurrentQueueWait(src, c, state, seen));
+            continue;
+        }
+        if (classifyMemOp(*src) != c) continue;
+        for (const auto& q : state.queues[c]) {
+            int n = q.countFrom(src);
+            if (n > 0) tighten(n - 1);
+        }
+    }
+    return best;
+}
+
 }  // namespace
 
 void WaitDataflow::transferBlock(BasicBlock& bb, DataflowState& state) {
@@ -342,11 +398,11 @@ void WaitDataflow::transferBlock(BasicBlock& bb, DataflowState& state) {
             if (src == nullptr) continue;
 
             if (isPhi(*src)) {
-                auto it = state.phiSummaries.find(src);
-                if (it == state.phiSummaries.end()) continue;
                 for (int c = 0; c < CK_Count; ++c) {
                     if (!rawNeedsWait[c](*inst)) continue;
-                    tightenRequired(static_cast<CounterKind>(c), it->second.waits[c]);
+                    std::unordered_set<StinkyInstruction*> seen;
+                    int w = phiCurrentQueueWait(src, static_cast<CounterKind>(c), state, seen);
+                    tightenRequired(static_cast<CounterKind>(c), w);
                 }
                 continue;
             }
@@ -521,6 +577,21 @@ bool WaitDataflow::solve() {
             DataflowState entry = mergeFromPredecessors(*bb);
             DataflowState working = entry;
             transferBlock(*bb, working);
+
+            PASS_DEBUG({
+                for (int c = 0; c < CK_Count; ++c) {
+                    if (working.queues[c].empty()) continue;
+                    size_t tot = 0;
+                    size_t maxLen = 0;
+                    for (const auto& q : working.queues[c]) {
+                        tot += q.ops.size();
+                        maxLen = std::max(maxLen, q.ops.size());
+                    }
+                    std::cerr << "[WaitDataflow] iter=" << iter << " bb=" << bb << " counter=" << c
+                              << " nQueues=" << working.queues[c].size() << " totOps=" << tot
+                              << " maxLen=" << maxLen << "\n";
+                }
+            });
 
             if (!(result.exitState[bb] == working)) {
                 result.exitState[bb] = std::move(working);
