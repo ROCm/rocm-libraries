@@ -790,41 +790,65 @@ class LogicalScheduler:
         # For tensors with multiple K-chunks (e.g. BF16, nkg≥2) the LR and MFMA
         # in the same slot always differ in set_idx, so per-partition aliasing is
         # safe and saves VGPRs — keep it for those cases.
-        any_single_k_chunk = any(
-            numK // lr_grans[t].k == 1 for t in self.tensors)
-        use_global_pos = (numP > 1) and any_single_k_chunk
+        # Only single-k-chunk tensors (nkg=1) can collide between an LR and the
+        # MFMA in its slot, because their set_idx is driven entirely by the
+        # macro-tile index.  A same-MT LR (mtIteration=0) shares set_idx with
+        # the slot's MFMA — global positions are required.  A wrapping LR that
+        # targets the next MT (mtIteration=1) flips set_idx → per-partition
+        # aliasing is safe.  Inspect the placed LRs to decide.
+        single_k_tensors = {
+            t for t in self.tensors if numK // lr_grans[t].k == 1}
+        has_same_mt_wrap = False
+        if single_k_tensors and numP > 1:
+            for slots in self._partitions:
+                for slot in slots:
+                    for lr in slot.lrs:
+                        if (lr.tensor in single_k_tensors
+                                and lr.mtIteration == 0):
+                            has_same_mt_wrap = True
+                            break
+                    if has_same_mt_wrap:
+                        break
+                if has_same_mt_wrap:
+                    break
+        use_global_pos = (numP > 1) and has_same_mt_wrap
+
+        # Collapse a tensor to one VGPR set when nkg=1 and its per-partition
+        # tile ranges are pairwise disjoint — free positions exist for the
+        # wrap LR to ping-pong into. Shared-range tensors need the 2nd set.
+        single_buf_tensors = set()
+        if cfg.pgr != 0 and numP > 1:
+            for tensor in self.tensors:
+                if numK // lr_grans[tensor].k != 1:
+                    continue
+                side = TENSOR_SIDE[tensor]
+                ranges = [part_ranges[pi][side] for pi in range(numP)]
+                disjoint = all(
+                    ranges[i][1] <= ranges[j][0] or ranges[j][1] <= ranges[i][0]
+                    for i in range(numP) for j in range(i + 1, numP))
+                if disjoint:
+                    single_buf_tensors.add(tensor)
 
         # group_to_pos[tensor][group] = position (globally unique or local-within-partition)
         group_to_pos = {t: {} for t in self.tensors}
         max_groups = {t: 0 for t in self.tensors}
 
-        if use_global_pos:
-            # Global positions: each unique group across all partitions gets a
-            # distinct position index, so LR and MFMA tile IDs never collide.
+        # Single-buf tensors must use global positions so partition-disjoint
+        # tiles never alias to the same physical vgpr within the lone set.
+        for tensor in self.tensors:
+            side = TENSOR_SIDE[tensor]
+            gran = lr_grans[tensor]
+            tensor_global = use_global_pos or (tensor in single_buf_tensors)
             for pi in range(numP):
-                for tensor in self.tensors:
-                    side = TENSOR_SIDE[tensor]
-                    start, end = part_ranges[pi][side]
-                    gran = lr_grans[tensor]
-                    groups = sorted(set(
-                        (t // gran.mn) * gran.mn for t in range(start, end)))
+                start, end = part_ranges[pi][side]
+                groups = sorted(set(
+                    (t // gran.mn) * gran.mn for t in range(start, end)))
+                if tensor_global:
                     for g in groups:
                         if g not in group_to_pos[tensor]:
                             group_to_pos[tensor][g] = max_groups[tensor]
                             max_groups[tensor] += 1
-        else:
-            # Per-partition positions: each partition assigns local indices 0, 1, …
-            # to its own groups, and max_groups is the largest partition size.
-            # Groups shared across partitions (e.g. A-tensor tiles) get the same
-            # position in every partition, which is safe because any LR that touches
-            # those groups uses a different set_idx than the concurrent MFMA.
-            for pi in range(numP):
-                for tensor in self.tensors:
-                    side = TENSOR_SIDE[tensor]
-                    start, end = part_ranges[pi][side]
-                    gran = lr_grans[tensor]
-                    groups = sorted(set(
-                        (t // gran.mn) * gran.mn for t in range(start, end)))
+                else:
                     local_pos = 0
                     for g in groups:
                         if g not in group_to_pos[tensor]:
@@ -859,7 +883,10 @@ class LogicalScheduler:
                         for tensor in self.tensors:
                             gran = lr_grans[tensor]
                             nkg = num_k_groups[tensor]
-                            set_idx = 0 if pgr0 else (unroll_iter * nkg + k // gran.k) % 2
+                            if pgr0 or tensor in single_buf_tensors:
+                                set_idx = 0
+                            else:
+                                set_idx = (unroll_iter * nkg + k // gran.k) % 2
                             side = TENSOR_SIDE[tensor]
                             tileRange = (slot.mfma.tileA if side == 'A'
                                          else slot.mfma.tileB)
@@ -878,7 +905,10 @@ class LogicalScheduler:
                         nkg = num_k_groups[tensor]
                         target_mt = unroll_iter + lr.mtIteration
                         target_k = lr.tiles.subIterK_start
-                        set_idx = 0 if pgr0 else (target_mt * nkg + target_k // gran.k) % 2
+                        if pgr0 or tensor in single_buf_tensors:
+                            set_idx = 0
+                        else:
+                            set_idx = (target_mt * nkg + target_k // gran.k) % 2
 
                         tile_map = {}
                         for t in lr.tiles.tileId_list:
@@ -895,8 +925,11 @@ class LogicalScheduler:
         #        next LR overwrites it, so only 1 VGPR tile set is needed.
         # PGR≥1: next-iteration LRs are issued while current MFMAs run, so two
         #        iterations' tile data coexist in VGPRs → 2 VGPR tile sets needed.
-        num_sets = 1 if pgr0 else 2
-        self.tile_peaks = {t: num_sets * max_groups[t] for t in self.tensors}
+        def _num_sets_for(t):
+            if pgr0 or t in single_buf_tensors:
+                return 1
+            return 2
+        self.tile_peaks = {t: _num_sets_for(t) * max_groups[t] for t in self.tensors}
         self.unroll_factor = unroll_factor
         self.needs_unrolling = unroll_factor > 1
 
@@ -2609,6 +2642,18 @@ class LogicalScheduler:
         mainloop_total = _total_for(self.tile_peaks)
         _, flat_peaks = self._compute_flat_tail_tile_state()
         tail_total = _total_for(flat_peaks)
+        self._lastNumVgprBreakdown = {
+            'perTile': {
+                'A':  _tile_vgpr_count(tileInfoA, cfg.lrA),
+                'B':  _tile_vgpr_count(tileInfoB, cfg.lrB),
+                'SA': _tile_vgpr_count(scaleTileInfoA, cfg.lrSA) if (cfg.hasScale and scaleTileInfoA) else 0,
+                'SB': _tile_vgpr_count(scaleTileInfoB, cfg.lrSB) if (cfg.hasScale and scaleTileInfoB) else 0,
+            },
+            'mainloopPeaks': dict(self.tile_peaks),
+            'tailPeaks': dict(flat_peaks),
+            'mainloopTotal': mainloop_total,
+            'tailTotal': tail_total,
+        }
         return max(mainloop_total, tail_total)
 
     def allocVgprTiles(self, writer, tileInfoA, tileInfoB,
