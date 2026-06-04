@@ -276,13 +276,15 @@ class Executor:
         backend_name: str = ""
         torch_sync = None
 
-        # Set up torch sync for accurate E2E timing (needed regardless of GPU timer)
+        # Set up torch sync for accurate E2E timing when PyTorch has a GPU
+        # backend. CPU-only torch is valid for reference validation, but it
+        # must not trigger torch.cuda synchronization or event timing.
         try:
             import torch
 
             if torch.cuda.is_available():
                 torch_sync = torch.cuda.synchronize
-        except ImportError:
+        except Exception:
             torch_sync = None
 
         # Create GPU timer if requested and available

@@ -3,7 +3,9 @@
 
 """Tests for Timer and GPU timing utilities."""
 
+import sys
 import time
+import types
 
 import pytest
 
@@ -116,6 +118,18 @@ class TestBackendDetection:
         monkeypatch.setattr(timing_module, "_is_torch_available", lambda: True)
         backends = get_available_backends()
         assert is_gpu_timing_available() == (len(backends) > 0)
+
+    def test_cpu_only_torch_does_not_enable_gpu_timing(self, monkeypatch) -> None:
+        """CPU-only torch is importable but must not enable GPU timers."""
+        fake_torch = types.SimpleNamespace(
+            cuda=types.SimpleNamespace(is_available=lambda: False)
+        )
+        monkeypatch.setitem(sys.modules, "torch", fake_torch)
+
+        assert timing_module._is_torch_module_available() is True
+        assert timing_module._is_torch_gpu_available() is False
+        assert get_available_backends() == []
+        assert is_gpu_timing_available() is False
 
 
 class TestFactoryFunction:

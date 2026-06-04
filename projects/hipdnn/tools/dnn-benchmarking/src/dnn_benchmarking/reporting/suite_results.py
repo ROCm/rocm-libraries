@@ -566,7 +566,7 @@ def collect_environment_info() -> Dict[str, Any]:
             rocm_version = torch.version.hip
         if torch.cuda.is_available():
             gpu_model = torch.cuda.get_device_name(0)
-    except ImportError:
+    except Exception:
         pass
 
     try:

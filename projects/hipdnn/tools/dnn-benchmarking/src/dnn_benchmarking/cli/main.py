@@ -76,9 +76,9 @@ def main() -> int:
         parser.error("--graph is required unless --config provides graphs")
     reporter = Reporter()
 
-    if not gpu_is_available():
+    if args.backend == "hipdnn" and not gpu_is_available():
         reporter.print_error(
-            "No GPU detected. A GPU with ROCm or CUDA support is required."
+            "No GPU detected. The hipdnn backend requires a ROCm or CUDA GPU."
         )
         return 1
 

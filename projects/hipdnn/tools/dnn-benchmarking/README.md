@@ -28,11 +28,31 @@ bash setup.sh
 source /workspace/.venv/bin/activate  # or $DNN_BENCH_WORKSPACE/.venv/bin/activate
 ```
 
-This script handles everything automatically:
+The default `--torch-mode rocm` flow:
 1. Creates a virtual environment under `$DNN_BENCH_WORKSPACE` (defaults to `/workspace`)
-2. Detects the GPU architecture and installs ROCm-compatible PyTorch
-3. Builds hipDNN and the MIOpen provider (if not already installed, or with `--force-build`)
-4. Installs the hipDNN Python bindings from the hipDNN source tree
+2. Detects the GPU architecture and installs the matching ROCm PyTorch nightly wheel
+3. Discovers hipDNN from the venv-installed ROCm SDK libraries wheel
+4. Builds the local MIOpen provider if the selected ROCm prefix does not already contain it
+5. Installs the hipDNN Python bindings against the selected ROCm prefix
+
+The selected prefix is printed as `Using hipDNN/ROCm prefix: ...`; pass its
+`lib/hipdnn_plugins/engines` directory to `--plugin-path` when benchmarking.
+
+### Testing/CI Setup with CPU-Only PyTorch
+
+When ROCm/hipDNN artifacts are installed by CI, install CPU-only PyTorch on top
+so Python reference validation can use torch without pulling conflicting ROCm
+torch wheels:
+
+```bash
+bash setup.sh --torch-mode cpu --rocm-prefix /opt/rocm
+source /workspace/.venv/bin/activate
+```
+
+Use `--skip-torch-install --reuse-venv` when the target virtual environment
+already contains the desired torch package. CPU-only torch never enables
+PyTorch GPU kernel timing or the PyTorch GPU backend; those paths still require
+a ROCm/CUDA-enabled torch build and a visible GPU.
 
 ### CUDA Setup
 
@@ -42,7 +62,7 @@ pip install -e .
 ```
 
 **Note**: hipDNN Python bindings (`hipdnn_frontend`) must be installed separately for hipDNN benchmarking.
-**Note**: PyTorch is optional. Without it the tool still runs and reports host-side E2E timings (may not capture full GPU execution); with a ROCm/CUDA build installed, GPU kernel-event timings, accurate E2E via `torch.cuda.synchronize()`, `--backend pytorch`, and `--validate pytorch` become available.
+**Note**: PyTorch is optional. Without it the tool still runs and reports host-side E2E timings (may not capture full GPU execution); CPU-only PyTorch enables `--validate pytorch` reference computation, while ROCm/CUDA PyTorch also enables GPU kernel-event timings, accurate E2E via `torch.cuda.synchronize()`, and `--backend pytorch`.
 
 ## Usage
 
@@ -299,20 +319,21 @@ GPU tests require hipDNN Python bindings and ROCm libraries:
 ```bash
 source /workspace/.venv/bin/activate  # or $DNN_BENCH_WORKSPACE/.venv/bin/activate
 
-# Run tests with ROCm libraries available
-LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH pytest
+# Run tests with ROCm libraries available. Use the prefix printed by setup.sh.
+export HIPDNN_PREFIX=/opt/rocm
+LD_LIBRARY_PATH=$HIPDNN_PREFIX/lib:$LD_LIBRARY_PATH pytest
 ```
 
-**Note:** Set `LD_LIBRARY_PATH=/opt/rocm/lib` when running GPU tests to ensure hipdnn_frontend can load ROCm libraries.
+**Note:** Set `LD_LIBRARY_PATH=<selected-prefix>/lib` when running GPU tests to ensure hipdnn_frontend can load ROCm libraries.
 
 Strict profiling tests that require real profiler artifacts are skipped by
 default. Run them explicitly on a known-good profiling host:
 
 ```bash
-LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH pytest --profiling-strict -m profiling_strict
+LD_LIBRARY_PATH=$HIPDNN_PREFIX/lib:$LD_LIBRARY_PATH pytest --profiling-strict -m profiling_strict
 ```
 
 ## Limitations
 
-- CPU reference validation is not yet implemented (CPU reference plugin not yet available in Python bindings)
+- The `cpu_plugin` reference provider is not yet implemented in Python bindings; use `--validate pytorch` for CPU torch reference validation.
 - Engine comparison reports engines side by side only; use `--validate` for reference-output correctness checks.

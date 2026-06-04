@@ -11,8 +11,9 @@ def gpu_is_available() -> bool:
     try:
         import torch
 
-        return torch.cuda.is_available()
-    except ImportError:
+        if torch.cuda.is_available():
+            return True
+    except Exception:
         pass
     try:
         result = subprocess.run(

@@ -994,6 +994,32 @@ class TestNoGpuDetected:
         assert result == 1
         mock_resolve.assert_not_called()
 
+    @patch.object(MAIN_MODULE, "run_pytorch_cli", return_value=7)
+    @patch.object(MAIN_MODULE, "_resolve_graphs")
+    @patch.object(MAIN_MODULE, "gpu_is_available", return_value=False)
+    def test_pytorch_backend_reports_pytorch_gpu_error_itself(
+        self,
+        mock_gpu: MagicMock,
+        mock_resolve: MagicMock,
+        mock_run_pytorch: MagicMock,
+    ) -> None:
+        from dnn_benchmarking.cli.main import main
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            graph = Path(tmpdir) / "g.json"
+            graph.write_text(json.dumps({"name": "g", "nodes": [], "tensors": []}))
+            mock_resolve.return_value = ([], [str(graph)], None)
+            with patch(
+                "sys.argv",
+                ["dnn-benchmark", "--backend", "pytorch", "--graph", str(graph)],
+            ):
+                result = main()
+
+        assert result == 7
+        mock_gpu.assert_not_called()
+        mock_resolve.assert_called_once()
+        mock_run_pytorch.assert_called_once()
+
 
 class TestProfilingFlagParsing:
     """Argparse-layer coverage for the seven profiling flags. The

@@ -59,6 +59,9 @@ def run_pytorch_benchmark(
                 "PyTorch not available. Install with: pip install torch"
             )
             return 1
+        except Exception as e:
+            reporter.print_error(f"PyTorch GPU availability check failed: {e}")
+            return 1
 
         executor = PyTorchCudaExecutor(graph_json, config, device=device)
         executor.prepare()

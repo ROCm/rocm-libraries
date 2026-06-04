@@ -35,18 +35,29 @@ from types import TracebackType
 from typing import List, Literal, Optional, Type
 
 
-def _is_torch_available() -> bool:
-    """Check if PyTorch GPU support is available.
+def _is_torch_module_available() -> bool:
+    """Return True when the torch Python package can be imported."""
+    try:
+        import torch  # noqa: F401
 
-    Returns:
-        True if torch.cuda.is_available() returns True, False otherwise.
-    """
+        return True
+    except ImportError:
+        return False
+
+
+def _is_torch_gpu_available() -> bool:
+    """Return True when PyTorch can create CUDA/ROCm GPU work."""
     try:
         import torch
 
-        return torch.cuda.is_available()
-    except ImportError:
+        return bool(torch.cuda.is_available())
+    except Exception:
         return False
+
+
+def _is_torch_available() -> bool:
+    """Backward-compatible alias for PyTorch GPU timing availability."""
+    return _is_torch_gpu_available()
 
 
 def get_available_backends() -> List[str]:
@@ -144,7 +155,7 @@ class TorchGpuTimer(GpuTimerInterface):
         Raises:
             RuntimeError: If PyTorch GPU is not available.
         """
-        if not _is_torch_available():
+        if not _is_torch_gpu_available():
             raise RuntimeError("PyTorch GPU not available for GPU timing")
 
         import torch

@@ -157,8 +157,14 @@ class PyTorchCudaBufferManager:
         """Free all tensors."""
         self._tensors.clear()
         self._host_data.clear()
-        # Let PyTorch handle CUDA memory cleanup via garbage collection
-        torch.cuda.empty_cache()
+        # Let PyTorch handle CUDA memory cleanup via garbage collection.
+        # CPU-only torch installs expose the torch package but not a usable
+        # CUDA/ROCm backend; cleanup must remain a no-op there.
+        try:
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
 
     def __enter__(self) -> "PyTorchCudaBufferManager":
         """Context manager entry."""

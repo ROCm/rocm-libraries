@@ -11,12 +11,18 @@ from typing import Any, Dict, List, Set
 
 import numpy as np
 
-from ...execution import pytorch_ops
 from ..reference_provider import (
     ReferenceOutput,
     ReferenceProvider,
     ReferenceProviderRegistry,
 )
+
+
+def _get_pytorch_ops():
+    """Import PyTorch operation handlers only when the provider is used."""
+    from ...execution import pytorch_ops
+
+    return pytorch_ops
 
 
 @ReferenceProviderRegistry.register("pytorch")
@@ -59,7 +65,7 @@ class PyTorchReferenceProvider(ReferenceProvider):
         Returns:
             Set of operation type strings that have handlers.
         """
-        return pytorch_ops.get_supported_operations()
+        return _get_pytorch_ops().get_supported_operations()
 
     def supports_graph(self, graph_json: Dict[str, Any]) -> bool:
         """Check if all graph operations are supported.
@@ -70,7 +76,7 @@ class PyTorchReferenceProvider(ReferenceProvider):
         Returns:
             True if all node types have handlers.
         """
-        return pytorch_ops.supports_graph(graph_json)
+        return _get_pytorch_ops().supports_graph(graph_json)
 
     def get_unsupported_operations(self, graph_json: Dict[str, Any]) -> List[str]:
         """Get list of unsupported operation types in graph.
@@ -81,7 +87,7 @@ class PyTorchReferenceProvider(ReferenceProvider):
         Returns:
             List of unsupported operation type strings.
         """
-        return pytorch_ops.get_unsupported_operations(graph_json)
+        return _get_pytorch_ops().get_unsupported_operations(graph_json)
 
     def compute_reference(
         self,
@@ -122,7 +128,7 @@ class PyTorchReferenceProvider(ReferenceProvider):
             tensors[uid] = torch.from_numpy(data.copy()).cpu()
 
         # Execute graph using shared handlers (works on CPU tensors)
-        pytorch_ops.execute_graph(graph_json, tensors)
+        _get_pytorch_ops().execute_graph(graph_json, tensors)
 
         # Extract output tensors
         # Build set of output UIDs from all nodes
