@@ -3,7 +3,6 @@
 - Contributors: TBD
 - **Status**: Draft
 - **Implementation Version**: TBD
-- **Jira**: [ALMIOPEN-1918](https://amd-hub.atlassian.net/browse/ALMIOPEN-1918)
 
 ## Table of Contents
 
