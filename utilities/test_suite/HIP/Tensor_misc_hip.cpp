@@ -564,6 +564,19 @@ int main(int argc, char **argv)
         avgWallTime += wallTime;
     }
 
+    if(DEBUG_MODE)
+    {
+        // Misc uses F32, so filename is {func}_f32.bin
+        std::string binFileName = func + "_f32.bin";
+        CHECK_RETURN_STATUS(hipMemcpy(output, d_output, oBufferSizeInBytes, hipMemcpyDeviceToHost));
+        std::ofstream binFile(binFileName, std::ios::binary | std::ios::trunc);
+        if (binFile.is_open())
+        {
+            binFile.write(reinterpret_cast<const char*>((float*)output), oBufferSize * sizeof(float));
+            binFile.close();
+        }
+    }
+
     // compare outputs if qaMode is true
     if(qaMode)
     {

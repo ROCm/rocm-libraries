@@ -530,13 +530,14 @@ int main(int argc, char **argv)
 
     if(DEBUG_MODE)
     {
-        std::ofstream refFile;
-        std::string refFileName;
-        refFileName = func + "_host.csv";
-        refFile.open(refFileName);
-        for (int i = 0; i < oBufferSize; i++)
-            refFile << *((float*)output + i) << ",";
-        refFile.close();
+        // Misc uses F32, so filename is {func}_f32.bin
+        std::string binFileName = func + "_f32.bin";
+        std::ofstream binFile(binFileName, std::ios::binary | std::ios::trunc);
+        if (binFile.is_open())
+        {
+            binFile.write(reinterpret_cast<const char*>((float*)output), oBufferSize * sizeof(float));
+            binFile.close();
+        }
     }
 
     if(qaMode)

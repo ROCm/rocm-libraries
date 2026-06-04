@@ -65,21 +65,34 @@ include(CTest)
 
 # Per-test CTest TIMEOUT (seconds) for selected long-running suites; all other tests use DartConfiguration.tcl TimeOut.
 # Increased timeout for: rpp_qa_tests_tensor_image_host_qa_mode_0, rpp_qa_tests_tensor_misc_host_test_type_1, rpp_qa_tests_tensor_image_hip_qa_mode_0
+# Image qa_mode_0 CTests are omitted when USING_THE_ROCK is ON; misc test_type_1 timeouts apply whenever those tests are registered.
 set(RPP_CTEST_LONG_TEST_TIMEOUT_SEC 4000 CACHE STRING "CTest TIMEOUT override in seconds for long RPP tests (see set_tests_properties below).")
+
+# ROCm "TheRock" / sysdeps layout. When ON, CTest registers only golden QA (--qa_mode 1) for image/voxel to avoid
+# OpenCV imwrite-heavy unit paths (qa_mode 0). Misc performance CTests are unchanged — Tensor_misc_* has no extra deps.
+if(NOT DEFINED USING_THE_ROCK)
+    set(USING_THE_ROCK OFF)
+    if(DEFINED ROCM_PATH AND EXISTS "${ROCM_PATH}/lib/rocm_sysdeps/lib")
+        set(USING_THE_ROCK ON)
+    endif()
+endif()
+if(USING_THE_ROCK)
+    message("-- ${White}${PROJECT_NAME}: USING_THE_ROCK — CTest image/voxel QA limited to --qa_mode 1.${ColourReset}")
+endif()
 
 #[[
 List of high level dependency checks - for RPP QA tests in utilities/test_suite/CMakeLists.txt are below.
 (The utilities/test_suite/HOST and utilities/test_suite/HIP folders are also designed to be built separately, so list of checks for those are present in the files "utilities/test_suite/HOST/CMakeLists.txt" and "utilities/test_suite/HIP/CMakeLists.txt")
 - RPP (For ALL tests - to test any RPP functionalities)
 - Python3 (For ALL tests - to run any RPP tests)
-- Pandas (For ALL tests - to run and display rocprof performance test results)
+- Pandas (Optional - for pretty-printing consolidated rocprof CSV results; QA/unit drivers do not require it)
 - OpenMP (For ALL tests - to measure wall-times, and parallelize input tensor-image PKD3->PLN3 conversions across threads)
 - ROCm HIP (For ALL HIP tests - HIP to be installed and found to run all RPP GPU HIP backend API)
 - rpp_AUDIO_AUGMENTATIONS_SUPPORT from find_package(rpp) (For AUDIO tests - to decide if RPP Audio tests script even needs to be built and executed)
 - libsnd (For AUDIO tests - if rpp_AUDIO_AUGMENTATIONS_SUPPORT is enabled, to decide if RPP Audio tests script can be built and executed)
 - NIFTI (For VOXEL tests - to decide if RPP Voxel QA tests script can be built and executed)
-- OpenCV (For IMAGE and VOXEL tests - to decode image inputs and write images for unit test outputs)
-- TurboJPEG (For IMAGE tests - to decode image inputs)
+- OpenCV (Optional for IMAGE/VOXEL Tensor_* binaries — enables decoder_type 1, unit image dumps, voxel slice JPGs; golden --qa_mode 1 image QA uses packed .raw + .info when OpenCV is absent)
+- USING_THE_ROCK (optional): when the ROCm sysdeps/TheRock layout is detected, only --qa_mode 1 CTests are registered for image/voxel. Misc CTests are unchanged.
 ]]
 # Add find modules
 list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/lib/cmake)
@@ -116,7 +129,6 @@ find_library(libsnd_LIBS
     PATH_SUFFIXES lib lib64)
 find_package(OpenMP COMPONENTS CXX QUIET)
 find_package(OpenCV QUIET)
-find_package(TurboJpeg QUIET)
 
 # find required python3-pip imports
 execute_process(
@@ -126,14 +138,13 @@ execute_process(
     ERROR_QUIET
 )
 
-# Top-level guards: if any of these are missing, no RPP-ctests can be added at all.
+# Top-level guards: Python3 and OpenMP are required to register CTests. Pandas is optional (see warning below).
 if(NOT Python3_FOUND)
     message("-- ${Yellow}Warning: Skipping all RPP-ctest test sets since Python3 is not found!${ColourReset}")
     return()
 endif()
 if(NOT PANDAS_FOUND EQUAL 0)
-    message("-- ${Yellow}Warning: Skipping all RPP-ctest test sets since Pandas is not found!${ColourReset}")
-    return()
+    message("-- ${Yellow}Warning: Pandas not found — rocprof consolidated reports cannot be printed from Python; Tensor misc QA (and other suites) can still run without it.${ColourReset}")
 endif()
 if(NOT OpenMP_CXX_FOUND)
     message("-- ${Yellow}Warning: Skipping all RPP-ctest test sets since OpenMP is not found!${ColourReset}")
@@ -152,23 +163,22 @@ endfunction()
 
 message("-- ${White}${PROJECT_NAME}: Adding RPP HOST tests${ColourReset}")
 
-# HOST test set 1 - Tensor-Image QA tests
-if(TurboJpeg_FOUND AND OpenCV_FOUND)
-    rpp_add_qa_test(rpp_qa_tests_tensor_image_host_all     HOST/runImageTests.py --qa_mode 1 --batch_size 3)
-    # qa_mode 0 runs the full BitDepthTestMode matrix in runImageTests.py; qa_mode 1 only U8 and F32 for golden QA.
+# HOST test set 1 - Tensor-Image QA tests (packed .raw + .info for decoder_type 0; OpenCV optional for CTest — see qa_mode 0 below)
+rpp_add_qa_test(rpp_qa_tests_tensor_image_host_all     HOST/runImageTests.py --qa_mode 1 --batch_size 3)
+# qa_mode 0 exercises unit paths that dump outputs via OpenCV imwrite when QA flag is off in the binary.
+if(OpenCV_FOUND AND NOT USING_THE_ROCK)
     rpp_add_qa_test(rpp_qa_tests_tensor_image_host_qa_mode_0 HOST/runImageTests.py --qa_mode 0 --batch_size 3)
     set_tests_properties(rpp_qa_tests_tensor_image_host_qa_mode_0 PROPERTIES TIMEOUT ${RPP_CTEST_LONG_TEST_TIMEOUT_SEC})
-else()
-    message("-- ${Yellow}Warning: Skipping RPP-ctest 'HOST test set 1 - rpp_qa_tests_tensor_image_host_all' since TurboJpeg and/or OpenCV is not found!${ColourReset}")
 endif()
 
-# HOST test set 2 - Tensor-Voxel QA tests
-if(NIFTI_FOUND AND OpenCV_FOUND)
+# HOST test set 2 - Tensor-Voxel QA tests (NIfTI required; OpenCV optional — qa_mode 0 non-QA visualization uses OpenCV JPGs)
+if(NIFTI_FOUND)
     rpp_add_qa_test(rpp_qa_tests_tensor_voxel_host_all       HOST/runVoxelTests.py --qa_mode 1 --batch_size 3)
-    # qa_mode 0 runs U8 and F32 voxel unit tests; qa_mode 1 runs F32-only for golden QA.
-    rpp_add_qa_test(rpp_qa_tests_tensor_voxel_host_qa_mode_0 HOST/runVoxelTests.py --qa_mode 0 --batch_size 3)
+    if(OpenCV_FOUND AND NOT USING_THE_ROCK)
+        rpp_add_qa_test(rpp_qa_tests_tensor_voxel_host_qa_mode_0 HOST/runVoxelTests.py --qa_mode 0 --batch_size 3)
+    endif()
 else()
-    message("-- ${Yellow}Warning: Skipping RPP-ctest 'HOST test set 2 - rpp_qa_tests_tensor_voxel_host_all' since libniftiio and/or OpenCV is not found!${ColourReset}")
+    message("-- ${Yellow}Warning: Skipping RPP-ctest 'HOST test set 2 - rpp_qa_tests_tensor_voxel_host_all' since libniftiio is not found!${ColourReset}")
 endif()
 
 # HOST test set 3 - Tensor-Audio QA tests
@@ -183,6 +193,11 @@ rpp_add_qa_test(rpp_qa_tests_tensor_misc_host_all         HOST/runMiscTests.py -
 # runMiscTests.py uses a different bit-depth matrix for test_type 1 (performance) than for test_type 0 (unit); only misc needs both.
 rpp_add_qa_test(rpp_qa_tests_tensor_misc_host_test_type_1 HOST/runMiscTests.py --test_type 1 --batch_size 3)
 set_tests_properties(rpp_qa_tests_tensor_misc_host_test_type_1 PROPERTIES TIMEOUT ${RPP_CTEST_LONG_TEST_TIMEOUT_SEC})
+# Misc suite: Tensor_misc_* links only RPP + OpenMP (HIP adds HIP runtime). No OpenCV / NIFTI / libsnd. Pandas optional at runtime.
+set_tests_properties(
+    rpp_qa_tests_tensor_misc_host_all
+    rpp_qa_tests_tensor_misc_host_test_type_1
+    PROPERTIES LABELS "rpp_rocm_stack_only")
 
 # HIP backend is opt-in; bail out before the HIP test sets if not selected or HIP isn't installed.
 if(NOT rpp_BACKEND_TYPE STREQUAL "HIP")
@@ -205,23 +220,21 @@ endif()
 
 message("-- ${White}${PROJECT_NAME}: Adding RPP HIP tests${ColourReset}")
 
-# HIP test set 1 - Tensor-Image QA tests
-if(TurboJpeg_FOUND AND OpenCV_FOUND)
-    rpp_add_qa_test(rpp_qa_tests_tensor_image_hip_all       HIP/runImageTests.py --qa_mode 1 --batch_size 3)
-    # qa_mode 0 runs the full BitDepthTestMode matrix in runImageTests.py; qa_mode 1 only U8 and F32 for golden QA.
+# HIP test set 1 - Tensor-Image QA tests (packed .raw + .info for decoder_type 0)
+rpp_add_qa_test(rpp_qa_tests_tensor_image_hip_all       HIP/runImageTests.py --qa_mode 1 --batch_size 3)
+if(OpenCV_FOUND AND NOT USING_THE_ROCK)
     rpp_add_qa_test(rpp_qa_tests_tensor_image_hip_qa_mode_0 HIP/runImageTests.py --qa_mode 0 --batch_size 3)
     set_tests_properties(rpp_qa_tests_tensor_image_hip_qa_mode_0 PROPERTIES TIMEOUT ${RPP_CTEST_LONG_TEST_TIMEOUT_SEC})
-else()
-    message("-- ${Yellow}Warning: Skipping RPP-ctest 'HIP test set 1 - rpp_qa_tests_tensor_image_hip_all' since TurboJpeg and/or OpenCV is not found!${ColourReset}")
 endif()
 
 # HIP test set 2 - Tensor-Voxel QA tests
-if(NIFTI_FOUND AND OpenCV_FOUND)
+if(NIFTI_FOUND)
     rpp_add_qa_test(rpp_qa_tests_tensor_voxel_hip_all       HIP/runVoxelTests.py --qa_mode 1 --batch_size 3)
-    # qa_mode 0 runs U8 and F32 voxel unit tests; qa_mode 1 runs F32-only for golden QA.
-    rpp_add_qa_test(rpp_qa_tests_tensor_voxel_hip_qa_mode_0 HIP/runVoxelTests.py --qa_mode 0 --batch_size 3)
+    if(OpenCV_FOUND AND NOT USING_THE_ROCK)
+        rpp_add_qa_test(rpp_qa_tests_tensor_voxel_hip_qa_mode_0 HIP/runVoxelTests.py --qa_mode 0 --batch_size 3)
+    endif()
 else()
-    message("-- ${Yellow}Warning: Skipping RPP-ctest 'HIP test set 2 - rpp_qa_tests_tensor_voxel_hip_all' since libniftiio and/or OpenCV is not found!${ColourReset}")
+    message("-- ${Yellow}Warning: Skipping RPP-ctest 'HIP test set 2 - rpp_qa_tests_tensor_voxel_hip_all' since libniftiio is not found!${ColourReset}")
 endif()
 
 # HIP test set 3 - Tensor-Audio QA tests
@@ -235,3 +248,8 @@ endif()
 rpp_add_qa_test(rpp_qa_tests_tensor_misc_hip_all         HIP/runMiscTests.py --qa_mode 1 --batch_size 3)
 # runMiscTests.py uses a different bit-depth matrix for test_type 1 (performance) than for test_type 0 (unit); only misc needs both.
 rpp_add_qa_test(rpp_qa_tests_tensor_misc_hip_test_type_1 HIP/runMiscTests.py --test_type 1 --batch_size 3)
+set_tests_properties(rpp_qa_tests_tensor_misc_hip_test_type_1 PROPERTIES TIMEOUT ${RPP_CTEST_LONG_TEST_TIMEOUT_SEC})
+set_tests_properties(
+    rpp_qa_tests_tensor_misc_hip_all
+    rpp_qa_tests_tensor_misc_hip_test_type_1
+    PROPERTIES LABELS "rpp_rocm_stack_only")

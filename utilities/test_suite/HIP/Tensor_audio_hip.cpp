@@ -455,18 +455,17 @@ int main(int argc, char **argv)
             else
                 verify_non_silent_region_detection(detectedIndex, detectionLength, testCaseName, batchSize, scriptPath, dst);
 
-            /* Dump the outputs to csv files for debugging
-            Runs only if
-            1. DEBUG_MODE is enabled
-            2. Current iteration is 1st iteration
-            3. Test case is not 0 */
+            // If DEBUG_MODE is enabled, dump outputs to binary files for generating golden outputs
             if (DEBUG_MODE && iterCount == 0 && testCase != NON_SILENT_REGION_DETECTION)
             {
-                std::ofstream refFile;
-                refFile.open(func + ".csv");
-                for (int i = 0; i < oBufferSize; i++)
-                    refFile << *(outputf32 + i) << "\n";
-                refFile.close();
+                // Audio uses F32, so filename is {func}_f32.bin
+                std::string binFileName = func + "_f32.bin";
+                std::ofstream binFile(binFileName, std::ios::binary | std::ios::trunc);
+                if (binFile.is_open())
+                {
+                    binFile.write(reinterpret_cast<const char*>(outputf32), oBufferSize * sizeof(Rpp32f));
+                    binFile.close();
+                }
             }
         }
     }

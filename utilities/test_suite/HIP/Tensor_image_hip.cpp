@@ -25,9 +25,6 @@ SOFTWARE.
 #include <stdio.h>
 #include <dirent.h>
 #include <string.h>
-#include <opencv2/core/core.hpp>
-#include <opencv2/highgui/highgui.hpp>
-#include <opencv2/opencv.hpp>
 #include <iostream>
 #include <iomanip>
 #include <cstdlib>
@@ -40,7 +37,6 @@ SOFTWARE.
 #include <omp.h>
 #include <fstream>
 
-using namespace cv;
 using namespace std;
 
 int main(int argc, char **argv)
@@ -92,7 +88,7 @@ int main(int argc, char **argv)
         cout << "\ntest type - (0 = unit tests / 1 = performance tests) = " << argv[9];
         cout << "\nlayout type - (0 = PKD3/ 1 = PLN3/ 2 = PLN1) = " << argv[10];
         cout << "\nqa mode - 0/1 = " << argv[12];
-        cout << "\ndecoder type - (0 = TurboJPEG / 1 = OpenCV) = " << argv[13];
+        cout << "\ndecoder type - (0 = packed .rgb / 1 = OpenCV) = " << argv[13];
         cout << "\nbatch size = " << argv[14];
     }
 
@@ -102,6 +98,7 @@ int main(int argc, char **argv)
         cout << "\nUsage: <src1 folder> <src2 folder (place same as src1 folder for single image functionalities)> <dst folder> <u8 = 0 / f16 = 1 / f32 = 2 / u8->f16 = 3 / u8->f32 = 4 / i8 = 5 / u8->i8 = 6> <outputFormatToggle (pkd->pkd = 0 / pkd->pln = 1)> <case number = 0:87> <number of runs > 0> <layout type (0 = PKD3/ 1 = PLN3/ 2 = PLN1)> <qa mode (0/1)> <decoder type (0/1)> <batch size > 1> <roiList> <verbosity = 0/1>>\n";
         return -1;
     }
+
 
     if (layoutType == 2)
     {
@@ -181,7 +178,6 @@ int main(int argc, char **argv)
     Rpp64u ioBufferSize = 0;
     Rpp64u oBufferSize = 0;
     static int noOfImages = 0;
-    Mat image, imageSecond;
 
     // String ops on input path
     string inputPath = src;
@@ -242,10 +238,14 @@ int main(int argc, char **argv)
     if((testCase == YUV_TO_RGB || testCase == YUV_TO_RGB_CUBIC_V || testCase == YUV_TO_RGB_LINEAR_V))
         search_files_recursive(src, imageNames, imageNamesPath, ".yuv");
     else
-        search_files_recursive(src, imageNames, imageNamesPath, ".jpg");
+    {
+        const char* inputExt = (decoderType == 0) ? ".rgb" : ".jpg";
+        search_files_recursive(src, imageNames, imageNamesPath, inputExt);
+    }
     if(dualInputCase)
     {
-        search_files_recursive(srcSecond, imageNamesSecond, imageNamesPathSecond, ".jpg");
+        const char* inputExtSecond = (decoderType == 0) ? ".rgb" : ".jpg";
+        search_files_recursive(srcSecond, imageNamesSecond, imageNamesPathSecond, inputExtSecond);
         if(imageNames.size() != imageNamesSecond.size())
         {
             std::cerr << " \n The number of images in the input folders must be the same.";
@@ -299,7 +299,7 @@ int main(int argc, char **argv)
     if((testCase == YUV_TO_RGB || testCase == YUV_TO_RGB_CUBIC_V || testCase == YUV_TO_RGB_LINEAR_V))
         set_max_dimensions_yuv(imageNamesPath, maxHeight, maxWidth, imagesMixed);
     else
-        set_max_dimensions(imageNamesPath, maxHeight, maxWidth, imagesMixed);
+        set_max_dimensions(imageNamesPath, maxHeight, maxWidth, imagesMixed, decoderType);
     if(testCase == RICAP && imagesMixed)
     {
         std::cerr<<"\n RICAP only works with same dimension images";
@@ -686,7 +686,7 @@ int main(int argc, char **argv)
         if((testCase == YUV_TO_RGB || testCase == YUV_TO_RGB_CUBIC_V || testCase == YUV_TO_RGB_LINEAR_V))
             set_src_and_dst_roi_yuv(imagesPathStart, imagesPathEnd, roiTensorPtrSrc, roiTensorPtrDst, dstImgSizes);
         else
-            set_src_and_dst_roi(imagesPathStart, imagesPathEnd, roiTensorPtrSrc, roiTensorPtrDst, dstImgSizes);
+            set_src_and_dst_roi(imagesPathStart, imagesPathEnd, roiTensorPtrSrc, roiTensorPtrDst, dstImgSizes, decoderType);
 
         //Read images
         if((testCase == YUV_TO_RGB || testCase == YUV_TO_RGB_CUBIC_V || testCase == YUV_TO_RGB_LINEAR_V))
@@ -697,9 +697,22 @@ int main(int argc, char **argv)
         else
         {
             if(decoderType == 0)
-                read_image_batch_turbojpeg(inputu8, srcDescPtr, imagesPathStart);
+                read_image_batch_packed(inputu8, srcDescPtr, imagesPathStart);
+#if defined(RPP_TEST_SUITE_HAVE_OPENCV) && RPP_TEST_SUITE_HAVE_OPENCV
             else
                 read_image_batch_opencv(inputu8, srcDescPtr, imagesPathStart);
+#else
+            else if(decoderType == 1)
+            {
+                cerr << "\nError: decoder_type 1 (OpenCV) requested but Tensor_image was built without OpenCV (RPP_TEST_SUITE_HAVE_OPENCV). Aborting.\n";
+                exit(1);
+            }
+            else
+            {
+                cerr << "\nError: invalid decoder_type (expected 0 = packed .rgb or 1 = OpenCV). Aborting.\n";
+                exit(1);
+            }
+#endif
 
             // if the input layout requested is PLN3, convert PKD3 inputs to PLN3 for first and second input batch
             if (layoutType == 1)
@@ -708,9 +721,22 @@ int main(int argc, char **argv)
             if(dualInputCase)
             {
                 if(decoderType == 0)
-                    read_image_batch_turbojpeg(inputu8Second, srcDescPtr, imagesPathSecondStart);
+                    read_image_batch_packed(inputu8Second, srcDescPtr, imagesPathSecondStart);
+#if defined(RPP_TEST_SUITE_HAVE_OPENCV) && RPP_TEST_SUITE_HAVE_OPENCV
                 else
                     read_image_batch_opencv(inputu8Second, srcDescPtr, imagesPathSecondStart);
+#else
+                else if(decoderType == 1)
+                {
+                    cerr << "\nError: decoder_type 1 (OpenCV) requested but Tensor_image was built without OpenCV. Aborting.\n";
+                    exit(1);
+                }
+                else
+                {
+                    cerr << "\nError: invalid decoder_type (expected 0 = packed .rgb or 1 = OpenCV). Aborting.\n";
+                    exit(1);
+                }
+#endif
                 if (layoutType == 1)
                     convert_pkd3_to_pln3(inputu8Second, srcDescPtr);
             }
@@ -2300,14 +2326,70 @@ int main(int argc, char **argv)
                 // Reconvert other bit depths to 8u for output display purposes
                 convert_output_bitdepth_to_u8(output, outputu8, BitDepthTestMode, oBufferSize, outputBufferSize, dstDescPtr, invConversionFactor);
 
-                // if DEBUG_MODE is set to 1, the output of the first iteration will be dumped to csv files for debugging purposes.
+                // If DEBUG_MODE is set to 1 dump the outputs to binary files for debugging
                 if(DEBUG_MODE && iterCount == 0)
                 {
-                    std::ofstream refFile;
-                    refFile.open(func + ".csv");
-                    for (int i = 0; i < oBufferSize; i++)
-                        refFile << static_cast<int>(*(outputu8 + i)) << ",";
-                    refFile.close();
+                    // Build filename: {testCaseName}_{datatype}_{additional_details}.bin
+                    std::string binFileName = testCaseName;
+
+                    // For sobel_filter and color_to_greyscale:
+                    // PKD3/PLN3 inputs (c=3) share one file, PLN1 input (c=1) has separate file
+                    // since they produce different outputs (RGB->grayscale vs grayscale->grayscale)
+                    if (pln1OutTypeCase && srcDescPtr->c == 1)
+                    {
+                        binFileName += "_PLN1_to_PLN1";
+                    }
+
+                    // Add datatype suffix
+                    string dataType[4] = {"_u8", "_f32", "_f16", "_i8"};
+                    binFileName += dataType[dstDescPtr->dataType];
+
+                    // Add additional details if applicable
+                    if(testCase == RESIZE || testCase == ROTATE || testCase == WARP_AFFINE ||
+                       testCase == WARP_PERSPECTIVE || testCase == REMAP)
+                        binFileName += "_interpolationType" + interpolationTypeName;
+                    else if(testCase == NOISE)
+                        binFileName += "_noiseType" + noiseTypeName;
+                    else if(testCase == ERODE || testCase == DILATE || testCase == BOX_FILTER ||
+                            testCase == MEDIAN_FILTER || testCase == GAUSSIAN_FILTER || testCase == EMBOSS)
+                        binFileName += "_kernelSize" + std::to_string(additionalParam);
+                    else if(testCase == CHANNEL_PERMUTE)
+                        binFileName += "_permOrder" + std::to_string(additionalParam);
+                    else if(testCase == SOBEL_FILTER)
+                        binFileName += kernelSizeAndGradientName;
+
+                    binFileName += ".bin";
+
+                    // Determine write mode based on OUTPUT layout
+                    // PKD3: write to offset 0 (truncate) - PKD3 format for RGB section
+                    // PLN3: skip writing (compare_outputs_pln3 converts to PKD3 for comparison)
+                    // PLN1: append after PKD3 data (only if not a pln1OutTypeCase)
+                    // pln1OutTypeCases (sobel_filter, color_to_greyscale) always output grayscale, so always truncate
+
+                    // Skip writing for PLN3 (c=3, NCHW layout) since it would overwrite PKD3 data
+                    bool shouldSkipWrite = (!pln1OutTypeCase && dstDescPtr->layout == RpptLayout::NCHW && dstDescPtr->c == 3);
+
+                    if (!shouldSkipWrite)
+                    {
+                        std::ios_base::openmode mode = std::ios::trunc;
+                        if (!pln1OutTypeCase && dstDescPtr->layout == RpptLayout::NCHW && dstDescPtr->c == 1)
+                            mode = std::ios::app;
+
+                        // Write binary data based on data type
+                        std::ofstream binFile(binFileName, std::ios::binary | mode);
+                        if (binFile.is_open())
+                        {
+                            if (dstDescPtr->dataType == RpptDataType::U8)
+                                binFile.write(reinterpret_cast<const char*>(outputu8), oBufferSize * sizeof(Rpp8u));
+                            else if (dstDescPtr->dataType == RpptDataType::F32)
+                                binFile.write(reinterpret_cast<const char*>(static_cast<Rpp32f*>(output)), oBufferSize * sizeof(Rpp32f));
+                            else if (dstDescPtr->dataType == RpptDataType::F16)
+                                binFile.write(reinterpret_cast<const char*>(static_cast<Rpp16f*>(output)), oBufferSize * sizeof(Rpp16f));
+                            else if (dstDescPtr->dataType == RpptDataType::I8)
+                                binFile.write(reinterpret_cast<const char*>(static_cast<Rpp8s*>(output)), oBufferSize * sizeof(Rpp8s));
+                            binFile.close();
+                        }
+                    }
                 }
 
                 // if test case is slice and qaFlag is set, update the dstImgSizes with shapeTensor values
@@ -2383,7 +2465,13 @@ int main(int argc, char **argv)
                 }
                 // OpenCV dump (if testType is unit test and QA mode is not set)
                 if(!qaFlag)
+                {
+#if defined(RPP_TEST_SUITE_HAVE_OPENCV) && RPP_TEST_SUITE_HAVE_OPENCV
                     write_image_batch_opencv(dst, outputu8, dstDescPtr, imageNamesStart, dstImgSizes, MAX_IMAGE_DUMP);
+#else
+                    cerr << "\nWarning: image dump skipped (qa_mode off) — Tensor_image built without OpenCV.\n";
+#endif
+                }
             }
         }
     }

@@ -68,14 +68,13 @@ utilities/test_suite/HOST:
 Independent dependency-checks for Unit + Performance + QA tests in utilities/test_suite/HOST/CMakeLists.txt are:
 - RPP (For ALL tests - to test any RPP functionalities)
 - Python3 (For ALL tests - to run any RPP tests)
-- Pandas (For ALL tests - to run and display rocprof performance test results)
+- Pandas (Optional - to print consolidated rocprof CSV tables from Python; not required for QA/unit drivers or Tensor_misc HOST build)
 - OpenMP (For ALL tests - to measure wall-times, and parallelize input tensor-image PKD3->PLN3 conversions across threads)
 - RPP_AUDIO_AUGMENTATIONS_SUPPORT (For AUDIO tests - to decide if RPP Audio tests script even needs to be built and executed)
 - libsnd (For AUDIO tests - if RPP_AUDIO_AUGMENTATIONS_SUPPORT is enabled, to decide if RPP Audio tests script can be built and executed)
 - NIFTI (For VOXEL tests - to decide if RPP Voxel QA tests script can be built and executed)
-- OpenCV (For IMAGE and VOXEL tests - to decode image inputs and write images for unit test outputs)
-- TurboJPEG (For IMAGE tests - to decode image inputs)
-- Openpyxl (For IMAGE tests - to run and display QA performance test results)
+- OpenCV (Optional — enables decoder_type 1, unit image dumps, voxel slice JPGs; Tensor_image/voxel build without it when absent)
+- RGB inputs (decoder_type 0): Tensor-Image tests expect pre-decoded ``.rgb`` files with an embedded 24-byte header; Generate or refresh them with the scripts under ``utilities/test_suite/scripts/`` (see ``scripts/README.md``)
 ]]
 
 # find RPP
@@ -118,103 +117,97 @@ else()
             PATH_SUFFIXES lib lib64)
         find_package(OpenMP COMPONENTS CXX QUIET)
         find_package(OpenCV QUIET)
-        find_package(TurboJpeg QUIET)
         find_package(StdFilesystem QUIET)
 
-        # find required python3-pip imports
+        # find required python3 imports
         execute_process(
-            COMMAND ${Python3_EXECUTABLE} -m pip show pandas
-            RESULT_VARIABLE PANDAS_FOUND
+            COMMAND ${Python3_EXECUTABLE} -c "import pandas"
+            RESULT_VARIABLE PANDAS_RESULT
             OUTPUT_QUIET
             ERROR_QUIET
         )
-        execute_process(
-            COMMAND ${Python3_EXECUTABLE} -m pip show openpyxl
-            RESULT_VARIABLE OPENPYXL_FOUND
-            OUTPUT_QUIET
-            ERROR_QUIET
-        )
+        # execute_process returns 0 on success (pandas found), non-zero on failure (pandas not found)
+        if(PANDAS_RESULT EQUAL 0)
+            set(PANDAS_FOUND 1)
+        else()
+            set(PANDAS_FOUND 0)
+        endif()
 
         if(Python3_FOUND)
             message("-- ${Green}Python3 found at ${Python3_EXECUTABLE}${ColourReset}")
-            # Check pandas for all RPP rocprof performance test results
-            if (PANDAS_FOUND EQUAL 0)
-                message("-- ${Green}Pandas for Python3 found${ColourReset}")
+            if(NOT PANDAS_FOUND)
+                message("-- ${Yellow}Warning: Pandas not found (optional — needed only to print consolidated rocprof CSV tables from Python).${ColourReset}")
+            endif()
 
-                # include and link directories
-                include_directories(${ROCM_PATH}/include ${ROCM_PATH}/include/rpp /usr/local/include)
-                link_directories(${ROCM_PATH}/lib /usr/local/lib)
+            # include and link directories
+            include_directories(${ROCM_PATH}/include ${ROCM_PATH}/include/rpp /usr/local/include)
+            link_directories(${ROCM_PATH}/lib /usr/local/lib)
 
-                if(NOT APPLE)
-                    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} stdc++fs)
-                endif()
+            if(NOT APPLE)
+                set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} stdc++fs)
+            endif()
 
-                if(OpenMP_CXX_FOUND)
-                    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
-                    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} OpenMP::OpenMP_CXX)
-                    message("-- ${Green}${PROJECT_NAME} All Tensor HOST tests set to build with OpenMP${ColourReset}")
+            if(OpenMP_CXX_FOUND)
+                set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+                set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} OpenMP::OpenMP_CXX)
+                message("-- ${Green}${PROJECT_NAME} All Tensor HOST tests set to build with OpenMP${ColourReset}")
 
-                    # HOST test set 1 - RPP Tensor-Image HOST test suite
-                    if(TurboJpeg_FOUND)
-                        include_directories(${TurboJpeg_INCLUDE_DIRS})
-                        set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${TurboJpeg_LIBRARIES_DIR})
-                        message("-- ${Green}${PROJECT_NAME} Tensor-Image HOST tests set to build with TurboJpeg${ColourReset}")
-                        if(OpenCV_FOUND)
-                            include_directories(${OpenCV_INCLUDE_DIRS})
-                            message("-- ${Green}${PROJECT_NAME} Tensor-Image HOST tests set to build with OpenCV${ColourReset}")
-                            add_executable(Tensor_image_host Tensor_image_host.cpp)
-                            target_link_libraries(Tensor_image_host -lturbojpeg ${OpenCV_LIBS} ${LINK_LIBRARY_LIST})
-                            add_executable(Tensor_single_image_host Tensor_single_image_host.cpp)
-                            target_link_libraries(Tensor_single_image_host -lturbojpeg ${OpenCV_LIBS} ${LINK_LIBRARY_LIST})
-                        else()
-                            message("-- ${Yellow}Warning: OpenCV must be installed to install ${PROJECT_NAME} Tensor-Image tests successfully!${ColourReset}")
-                        endif(OpenCV_FOUND)
-                    else()
-                        message("-- ${Yellow}Warning: TurboJpeg must be installed to install ${PROJECT_NAME} Tensor-Image tests successfully!${ColourReset}")
-                    endif(TurboJpeg_FOUND)
-
-                    # HOST test set 2 - RPP Tensor-Voxel HOST test suite
-                    if(NIFTI_FOUND)
-                        message("-- ${Green}${PROJECT_NAME} Tensor-Voxel HOST tests set to build with libniftiio${ColourReset}")
-                        if(OpenCV_FOUND)
-                            include_directories(${OpenCV_INCLUDE_DIRS})
-                            message("-- ${Green}${PROJECT_NAME} Tensor-Voxel HOST tests set to build with OpenCV${ColourReset}")
-                            add_executable(Tensor_voxel_host Tensor_voxel_host.cpp)
-                            target_link_libraries(Tensor_voxel_host ${NIFTI_PACKAGE_PREFIX}NIFTI::${NIFTI_PACKAGE_PREFIX}niftiio ${OpenCV_LIBS} ${LINK_LIBRARY_LIST})
-                        else()
-                            message("-- ${Yellow}Warning: OpenCV must be installed to install ${PROJECT_NAME} Tensor-Voxel tests successfully!${ColourReset}")
-                        endif(OpenCV_FOUND)
-                    else()
-                        message("-- ${Yellow}Warning: libniftiio must be installed to install ${PROJECT_NAME} Tensor-Voxel tests successfully!${ColourReset}")
-                    endif(NIFTI_FOUND)
-
-                    # HOST test set 3 - RPP Tensor-Audio HOST test suite
-                    if(rpp_AUDIO_AUGMENTATIONS_SUPPORT)
-                        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DAUDIO_SUPPORT=1")
-                        message("-- ${Green}${PROJECT_NAME} Tensor-Audio HOST tests set to build with RPP_AUDIO_SUPPORT set to ON${ColourReset}")
-                        if(libsnd_LIBS)
-                            include_directories(${SndFile_INCLUDE_DIRS})
-                            link_directories(${SndFile_LIBRARIES_DIR} /usr/local/lib/)
-                            message("-- ${Green}${PROJECT_NAME} Tensor-Audio HOST tests set to build with libsnd${ColourReset}")
-                            add_executable(Tensor_audio_host Tensor_audio_host.cpp)
-                            target_link_libraries(Tensor_audio_host ${libsnd_LIBS} -lsndfile ${LINK_LIBRARY_LIST})
-                        else()
-                            message("-- ${Yellow}Warning: libsnd must be installed to install ${PROJECT_NAME} Tensor-Audio tests successfully!${ColourReset}")
-                        endif(libsnd_LIBS)
-                    else()
-                        message("-- ${Yellow}Warning: RPP_AUDIO_SUPPORT not found in RPP installation. It must be installed to build ${PROJECT_NAME} Tensor-Audio tests successfully!${ColourReset}")
-                    endif(rpp_AUDIO_AUGMENTATIONS_SUPPORT)
-
-                    # HOST test set 4 - RPP Tensor-Misc HOST test suite
-                    add_executable(Tensor_misc_host Tensor_misc_host.cpp)
-                    target_link_libraries(Tensor_misc_host ${LINK_LIBRARY_LIST})
-
+                # HOST test set 1 - RPP Tensor-Image HOST test suite (decoder_type 0: packed .raw + .info)
+                add_executable(Tensor_image_host Tensor_image_host.cpp)
+                target_link_libraries(Tensor_image_host ${LINK_LIBRARY_LIST})
+                if(OpenCV_FOUND)
+                    target_include_directories(Tensor_image_host PRIVATE ${OpenCV_INCLUDE_DIRS})
+                    target_link_libraries(Tensor_image_host ${OpenCV_LIBS})
+                    target_compile_definitions(Tensor_image_host PRIVATE RPP_TEST_SUITE_HAVE_OPENCV=1)
+                    message("-- ${Green}${PROJECT_NAME} Tensor-Image HOST tests set to build with OpenCV (decoder_type 1 and image dumps enabled)${ColourReset}")
                 else()
-                    message("-- ${Red}${PROJECT_NAME} Error: OpenMP must be installed to run any RPP tests successfully!${ColourReset}")
-                endif(OpenMP_CXX_FOUND)
+                    target_compile_definitions(Tensor_image_host PRIVATE RPP_TEST_SUITE_HAVE_OPENCV=0)
+                    message("-- ${Yellow}Warning: OpenCV not found — Tensor_image_host builds without OpenCV; decoder_type 1 / unit image dumps disabled.${ColourReset}")
+                endif()
+                message("-- ${White}Tensor_image_host -- Link Libraries: see target_link_libraries${ColourReset}")
+
+                # HOST test set 2 - RPP Tensor-Voxel HOST test suite
+                if(NIFTI_FOUND)
+                    message("-- ${Green}${PROJECT_NAME} Tensor-Voxel HOST tests set to build with libniftiio${ColourReset}")
+                    add_executable(Tensor_voxel_host Tensor_voxel_host.cpp)
+                    target_link_libraries(Tensor_voxel_host ${NIFTI_PACKAGE_PREFIX}NIFTI::${NIFTI_PACKAGE_PREFIX}niftiio ${LINK_LIBRARY_LIST})
+                    if(OpenCV_FOUND)
+                        target_include_directories(Tensor_voxel_host PRIVATE ${OpenCV_INCLUDE_DIRS})
+                        target_link_libraries(Tensor_voxel_host ${OpenCV_LIBS})
+                        target_compile_definitions(Tensor_voxel_host PRIVATE RPP_TEST_SUITE_HAVE_OPENCV=1)
+                        message("-- ${Green}${PROJECT_NAME} Tensor-Voxel HOST tests set to build with OpenCV (slice JPG dumps enabled)${ColourReset}")
+                    else()
+                        target_compile_definitions(Tensor_voxel_host PRIVATE RPP_TEST_SUITE_HAVE_OPENCV=0)
+                        message("-- ${Yellow}Warning: OpenCV not found — Tensor_voxel_host builds without OpenCV; F32 golden QA still runs; non-QA slice dumps disabled.${ColourReset}")
+                    endif()
+                else()
+                    message("-- ${Yellow}Warning: libniftiio must be installed to install ${PROJECT_NAME} Tensor-Voxel tests successfully!${ColourReset}")
+                endif(NIFTI_FOUND)
+
+                # HOST test set 3 - RPP Tensor-Audio HOST test suite
+                if(rpp_AUDIO_AUGMENTATIONS_SUPPORT)
+                    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DAUDIO_SUPPORT=1")
+                    message("-- ${Green}${PROJECT_NAME} Tensor-Audio HOST tests set to build with RPP_AUDIO_SUPPORT set to ON${ColourReset}")
+                    if(libsnd_LIBS)
+                        include_directories(${SndFile_INCLUDE_DIRS})
+                        link_directories(${SndFile_LIBRARIES_DIR} /usr/local/lib/)
+                        message("-- ${Green}${PROJECT_NAME} Tensor-Audio HOST tests set to build with libsnd${ColourReset}")
+                        add_executable(Tensor_audio_host Tensor_audio_host.cpp)
+                        target_link_libraries(Tensor_audio_host ${libsnd_LIBS} -lsndfile ${LINK_LIBRARY_LIST})
+                    else()
+                        message("-- ${Yellow}Warning: libsnd must be installed to install ${PROJECT_NAME} Tensor-Audio tests successfully!${ColourReset}")
+                    endif(libsnd_LIBS)
+                else()
+                    message("-- ${Yellow}Warning: RPP_AUDIO_SUPPORT not found in RPP installation. It must be installed to build ${PROJECT_NAME} Tensor-Audio tests successfully!${ColourReset}")
+                endif(rpp_AUDIO_AUGMENTATIONS_SUPPORT)
+
+                # HOST test set 4 - RPP Tensor-Misc HOST test suite
+                add_executable(Tensor_misc_host Tensor_misc_host.cpp)
+                target_link_libraries(Tensor_misc_host ${LINK_LIBRARY_LIST})
+
             else()
-                message("-- ${Red}${PROJECT_NAME} Error: Pandas for Python3 must be installed to run any RPP test_suite performance tests with profiling successfully${ColourReset}")
-            endif(PANDAS_FOUND EQUAL 0)
+                message("-- ${Red}${PROJECT_NAME} Error: OpenMP must be installed to run any RPP tests successfully!${ColourReset}")
+            endif(OpenMP_CXX_FOUND)
         else()
             message("-- ${Red}${PROJECT_NAME} Error: Python3 must be installed to run any RPP test_suite tests successfully${ColourReset}")
         endif(Python3_FOUND)

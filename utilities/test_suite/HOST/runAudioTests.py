@@ -180,8 +180,7 @@ os.makedirs(buildFolderPath + "/build")
 os.chdir(buildFolderPath + "/build")
 
 # Run cmake and make commands
-subprocess.call(["cmake", scriptPath], cwd=".")   # nosec
-subprocess.call(["make", "-j16"], cwd=".")    # nosec
+run_cmake_build(scriptPath)
 
 if qaMode and batchSize != 3:
     print("QA tests can only run with a batch size of 3.")

@@ -237,8 +237,7 @@ os.makedirs(buildFolderPath + "/build")
 os.chdir(buildFolderPath + "/build")
 
 # Run cmake and make commands
-subprocess.call(["cmake", scriptPath], cwd=".")   # nosec
-subprocess.call(["make", "-j16"], cwd=".")  # nosec
+run_cmake_build(scriptPath)
 
 # Create folders based on testType and profilingOption
 if testType == TestType.PERFORMANCE_TEST.value and profilingOption == "YES":

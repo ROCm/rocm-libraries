@@ -27,7 +27,6 @@ import argparse
 import sys
 import datetime
 import shutil
-import pandas as pd
 import signal
 from enum import Enum
 
@@ -246,6 +245,11 @@ voxelAugmentationGroupMap = {
     ]
 }
 
+def run_cmake_build(script_path):
+    """Configure and build using Ninja generator with parallel jobs matching CPU count."""
+    subprocess.check_call(["cmake", "-GNinja", script_path])   # nosec
+    subprocess.check_call(["cmake", "--build", ".", "--parallel", str(os.cpu_count())])    # nosec
+
 def get_case_number(map, case):
     # Check if the input is numeric (case number)
     if case.isdigit():
@@ -425,7 +429,7 @@ def print_qa_tests_summary(qaFilePath, supportedCaseList, nonQACaseList, fileNam
         resultsInfo = "\n\nFinal Results of Tests:"
         resultsInfo += "\n    - Total test cases including all subvariants REQUESTED = " + str(numLines)
         resultsInfo += "\n    - Total test cases including all subvariants PASSED = " + str(numPassed)
-        resultsInfo += "\n\nGeneral information on Tensor voxel test suite availability:"
+        resultsInfo += "\n\nGeneral information on " + fileName + " test suite availability:"
         resultsInfo += "\n    - Total augmentations supported in Tensor test suite = " + str(len(supportedCaseList))
         resultsInfo += "\n    - Total augmentations with golden output QA test support = " + str(len(supportedCaseList) - len(nonQACaseList))
         resultsInfo += "\n    - Total augmentations without golden output QA test support (due to randomization involved) = " + str(len(nonQACaseList))

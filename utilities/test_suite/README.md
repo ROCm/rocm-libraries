@@ -9,10 +9,7 @@ This repository contains four test suites for the RPP library: `image`/`voxel`/`
   sudo apt install cmake
   ```
 
-* Turbo JPEG
-  ```shell
-  sudo apt-get install libturbojpeg0-dev
-  ```
+* Pre-decoded image inputs: folders of `*.rgb` files with embedded headers. To build or refresh these from JPEGs, use the conversion script under `utilities/test_suite/scripts/` (see `utilities/test_suite/scripts/README.md`). The Tensor_image binaries only read the pre-generated files; they do not embed a JPEG decoder.
 
 * Nifti-Imaging - [nifti_clib](https://github.com/NIFTI-Imaging/nifti_clib)
   ```shell
@@ -45,11 +42,6 @@ This repository contains four test suites for the RPP library: `image`/`voxel`/`
   sudo apt install python3-pandas
   ```
 
-* Python: Openpyxl
-  ```shell
-  sudo apt install python3-openpyxl
-  ```
-
 >[!NOTE]
 > * All package installs are shown with the `apt` package manager. Use the appropriate package manager for your operating system.
 > * Run `sudo ldconfig` to configure dynamic run-time bindings
@@ -61,15 +53,15 @@ The image test suite can be executed under 2 backend scenarios - (HOST/HIP):
 
 ### Command Line Arguments (RPP Image Test Suite)
 The image test suite accepts the following command line arguments:
--   input_path1: The path to the input folder 1. Default is $cwd/../TEST_IMAGES/three_images_mixed_src1
--   input_path2: The path to the input folder 2. Default is $cwd/../TEST_IMAGES/three_images_mixed_src2
+-   input_path1: The path to the input folder 1. Default is $cwd/../TEST_IMAGES/three_images_mixed_src1_raw
+-   input_path2: The path to the input folder 2. Default is $cwd/../TEST_IMAGES/three_images_mixed_src2_raw
 -   case_start: The starting case number for the test range (0-102). Default is 0
 -   case_end: The ending case number for the test range (0-102). Default is 102
 -   test_type: The type of test to run (0 = Unit tests, 1 = Performance tests). Default is 0
 -   case_list: A list of specific case numbers to run. Must be used in conjunction with --test_type
 -   profiling: Run the tests with a profiler (YES/NO). Default is NO. This option is only available with HIP backend
 -   qa_mode: Output images from tests will be compared with golden outputs - (0 / 1). Default is 0
--   decoder_type: Type of Decoder to decode the input data - (0 = TurboJPEG / 1 = OpenCV). Default is 0
+-   decoder_type: Input loader — (0 = packed `.rgb` files with embedded headers / 1 = OpenCV image files). Default is 0
 -   num_runs: Specifies the number of runs for running the performance tests
 -   preserve_output: preserves the output images or performance logs generated from the previous test suite run - (0 = remove output images or performance logs / 1 = preserve output images or performance logs). Default is 1
 -   batch_size: Specifies the batch size to use for running tests. Default is 1
@@ -132,7 +124,7 @@ The image test suite includes:
 -   Unit and Performance tests are included for three layouts - PLN1 (1 channel planar NCHW), PLN3 (3 channel planar NCHW) and PKD3 (3 channel packed/interrleaved NHWC).
 -   Unit and Performance tests are included for various input/output bitdepths including U8/F32/F16/I8.
 -   Support for pixelwise output referencing against golden outputs, and functionality validation checking, by tolerance-based pass/fail criterions for each variant. (Current support only for U8 variants)
--   Support for TurboJPEG and OpenCV decoder for decoding input images
+-   Support for packed pre-decoded inputs (``decoder_type`` 0) and OpenCV file loading (``decoder_type`` 1) for input images
 
 ### Single Image Processing Mode (RPP Image Test Suite)
 The image test suite includes support for single image processing, which processes images one-by-one instead of in batches. This mode provides performance improvements for single image augmentations.
@@ -334,3 +326,12 @@ The miscellaneous test suite includes:
 -   Performance tests that execute the desired functionality and variant 100 times by default, and report max/min/avg RPP execution wall time.
 -   QA and Performance tests are included for one input/output bitdepth F32.
 -   Support for output referencing against golden outputs, and functionality validation checking, by tolerance-based pass/fail criterions for each variant.
+
+## Test Suite Utilities
+
+For detailed information on:
+- Converting JPEG images to `.rgb` format
+- Generating golden outputs for QA mode
+- Organizing reference outputs
+
+See [`scripts/README.md`](scripts/README.md)

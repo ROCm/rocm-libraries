@@ -25,9 +25,11 @@ SOFTWARE.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if defined(RPP_TEST_SUITE_HAVE_OPENCV) && RPP_TEST_SUITE_HAVE_OPENCV
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/opencv.hpp>
+#endif
 #include <iostream>
 #include <time.h>
 #include <omp.h>
@@ -45,7 +47,9 @@ typedef int16_t NIFTI_DATATYPE;
 
 #define MIN_HEADER_SIZE 348
 #define RPPRANGECHECK(value)     (value < -32768) ? -32768 : ((value < 32767) ? value : 32767)
+#ifndef DEBUG_MODE
 #define DEBUG_MODE 0
+#endif
 #define CUTOFF 1
 #define TOLERANCE 0.01
 #define MAX_IMAGE_DUMP 100
@@ -387,6 +391,7 @@ inline void write_nifti_file(nifti_1_header *niftiHeader, NIFTI_DATATYPE *niftiD
     fclose(fp);
 }
 
+#if defined(RPP_TEST_SUITE_HAVE_OPENCV) && RPP_TEST_SUITE_HAVE_OPENCV
 inline void write_image_from_nifti_opencv(uchar *niftiDataXYFrameU8, int niftiHeaderImageWidth, RpptRoiXyzwhd *roiGenericSrcPtr, uchar *outputBufferOpenCV, int zPlane, int Channel, int batchCount, string dst_path, string func, int index)
 {
     static int imageCount = 0;
@@ -405,6 +410,22 @@ inline void write_image_from_nifti_opencv(uchar *niftiDataXYFrameU8, int niftiHe
     cv::imwrite(fileName, matOutputImage);
     imageCount++;
 }
+#else
+/* OpenCV not linked: slice JPG dumps are disabled; NIfTI QA/compare paths do not use this. */
+inline void write_image_from_nifti_opencv(uchar *niftiDataXYFrameU8, int niftiHeaderImageWidth, RpptRoiXyzwhd *roiGenericSrcPtr, uchar *outputBufferOpenCV, int zPlane, int Channel, int batchCount, string dst_path, string func, int index)
+{
+    (void)niftiDataXYFrameU8;
+    (void)niftiHeaderImageWidth;
+    (void)roiGenericSrcPtr;
+    (void)outputBufferOpenCV;
+    (void)zPlane;
+    (void)Channel;
+    (void)batchCount;
+    (void)dst_path;
+    (void)func;
+    (void)index;
+}
+#endif
 
 // Convert default NIFTI_DATATYPE unstrided buffer to RpptDataType::F32 strided buffer
 template<typename T>

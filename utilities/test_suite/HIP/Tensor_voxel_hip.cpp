@@ -416,18 +416,31 @@ int main(int argc, char * argv[])
             cout << "GPU Backend Wall Time: " << wallTime <<" ms per batch";
             if(DEBUG_MODE)
             {
-                std::ofstream refFile;
-                std::string refFileName;
-                if(layoutType == 0)
-                    refFileName = testCaseName + "_nifti_hip_pkd3.csv";
-                else if(layoutType == 1)
-                    refFileName = testCaseName + "_nifti_hip_pln3.csv";
+                // Build filename: {testCaseName}_{datatype}_nifti.bin
+                std::string binFileName = testCaseName;
+
+                // Add datatype
+                if (BitDepthTestMode == U8_TO_U8)
+                    binFileName += "_u8";
                 else
-                    refFileName = testCaseName + "_nifti_hip_pln1.csv";
-                refFile.open(refFileName);
-                for (int i = 0; i < oBufferSize; i++)
-                    refFile << *(outputF32 + i) << ",";
-                refFile.close();
+                    binFileName += "_f32";
+
+                binFileName += "_nifti.bin";
+
+                // layoutType: 0=PKD3, 1=PLN3 (write to offset 0), 2=PLN1 (append)
+                std::ios_base::openmode mode = std::ios::trunc;
+                if(layoutType == 2)  // PLN1
+                    mode = std::ios::app;
+
+                std::ofstream binFile(binFileName, std::ios::binary | mode);
+                if (binFile.is_open())
+                {
+                    if (BitDepthTestMode == U8_TO_U8)
+                        binFile.write(reinterpret_cast<const char*>(outputU8), oBufferSize * sizeof(Rpp8u));
+                    else
+                        binFile.write(reinterpret_cast<const char*>(outputF32), oBufferSize * sizeof(Rpp32f));
+                    binFile.close();
+                }
             }
 
             if(BitDepthTestMode == U8_TO_U8)
@@ -520,6 +533,7 @@ int main(int argc, char * argv[])
 
                         write_nifti_file(&niftiHeaderTemp[batchCount], niftiDataArray[batchCount], index, i, dstPath, testCaseName);
 
+#if defined(RPP_TEST_SUITE_HAVE_OPENCV) && RPP_TEST_SUITE_HAVE_OPENCV
                         if(i == 0)
                         {
                             std::string command = "convert -delay 10 -loop 0 " + std::string(dstPath) + "/" + testCaseName + "_nifti_" + std::to_string(index) + "_zPlane_chn_0_*.jpg " + std::string(dstPath) + "/" + testCaseName + "_niftiOutput_" + std::to_string(index) + "_chn_" + std::to_string(i) + ".gif";
@@ -535,6 +549,7 @@ int main(int argc, char * argv[])
                             std::string command = "convert -delay 10 -loop 0 " + std::string(dstPath) + "/" + testCaseName + "_nifti_" + std::to_string(index) + "_zPlane_chn_2_*.jpg " + std::string(dstPath) + "/" + testCaseName + "_niftiOutput_" + std::to_string(index) + "_chn_" + std::to_string(i) + ".gif";
                             system(command.c_str());
                         }
+#endif
                         free(niftiDataU8);
                         free(outputBufferOpenCV);
                     }

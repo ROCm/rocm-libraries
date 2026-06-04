@@ -1,7 +1,7 @@
 """
 MIT License
 
-Copyright (c) 2019 - 2025 Advanced Micro Devices, Inc.
+Copyright (c) 2019 - 2026 Advanced Micro Devices, Inc.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -175,7 +175,7 @@ def rpp_test_suite_parser_and_validator():
     parser.add_argument('--test_type', type = int, default = 0, help = "Type of Test - (0 = Unit tests / 1 = Performance tests)")
     parser.add_argument('--case_list', nargs = "+", help = "A list of specific case numbers to run separated by spaces", required = False)
     parser.add_argument('--qa_mode', type = int, default = 0, help = "Run with qa_mode? Output images from tests will be compared with golden outputs - (0 / 1)", required = False)
-    parser.add_argument('--decoder_type', type = int, default = 0, help = "Type of Decoder to decode the input data - (0 = TurboJPEG / 1 = OpenCV)")
+    parser.add_argument('--decoder_type', type = int, default = 0, help = "Input loader — 0 = packed .rgb (default) / 1 = OpenCV (requires Tensor_image built with OpenCV)")
     parser.add_argument('--num_runs', type = int, default = 1, help = "Specifies the number of runs for running the performance tests")
     parser.add_argument('--preserve_output', type = int, default = 1, help = "preserves the output of the program - (0 = override output / 1 = preserve output )" )
     parser.add_argument('--batch_size', type = int, default = 1, help = "Specifies the batch size to use for running tests. Default is 1.")
@@ -204,7 +204,7 @@ def rpp_test_suite_parser_and_validator():
         print("QA mode must be in the 0 / 1. Aborting!")
         exit(0)
     elif args.decoder_type < 0 or args.decoder_type > 1:
-        print("Decoder Type must be in the 0/1 (0 = OpenCV / 1 = TurboJPEG). Aborting")
+        print("Decoder Type must be 0 or 1 (0 = packed .rgb / 1 = OpenCV; OpenCV requires Tensor_image built with OpenCV). Aborting")
         exit(0)
     elif args.case_list is not None and args.case_start > caseMin and args.case_end < caseMax:
         print("Invalid input! Please provide only 1 option between case_list, case_start and case_end")
@@ -306,8 +306,7 @@ os.makedirs(buildFolderPath + "/build")
 os.chdir(buildFolderPath + "/build")
 
 # Run cmake and make commands
-subprocess.call(["cmake", scriptPath], cwd=".")   # nosec
-subprocess.call(["make", "-j16"], cwd=".")    # nosec
+run_cmake_build(scriptPath)
 
 supportedCaseList = [key for key, values in imageAugmentationMap.items() if "HOST" in values]
 if testType == TestType.UNIT_TEST.value:

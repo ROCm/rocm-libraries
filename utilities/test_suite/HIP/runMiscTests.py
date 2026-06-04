@@ -252,8 +252,7 @@ os.makedirs(buildFolderPath + "/build")
 os.chdir(buildFolderPath + "/build")
 
 # Run cmake and make commands
-subprocess.call(["cmake", scriptPath], cwd=".")   # nosec
-subprocess.call(["make", "-j16"], cwd=".")    # nosec
+run_cmake_build(scriptPath)
 
 supportedCaseList = [key for key, values in miscAugmentationMap.items() if "HIP" in values]
 noCaseSupported = all(int(case) not in supportedCaseList for case in caseList)
