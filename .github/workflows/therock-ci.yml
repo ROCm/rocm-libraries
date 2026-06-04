@@ -147,11 +147,20 @@ jobs:
         id: benchmark_runner
         env:
           BENCHMARK_FAMILY: gfx94X-dcgpu
+          BENCHMARK_MODE: ${{ steps.linux_projects.outputs.benchmark_mode }}
         run: |
-          echo "benchmark_runs_on=$(jq -r \
+          runner="$(jq -r \
             --arg fam "${BENCHMARK_FAMILY}" \
             '.[] | select(.amdgpu_family==$fam) | .test_machine' \
-            <<<'${{ steps.configure_linux.outputs.package_targets }}')" >> "$GITHUB_OUTPUT"
+            <<<'${{ steps.configure_linux.outputs.package_targets }}')"
+          # A requested benchmark that resolves no runner must fail loudly, not
+          # skip green: an empty test_machine means the family was renamed or
+          # dropped from the matrix and the gate would silently vanish.
+          if [ "${BENCHMARK_MODE}" != "off" ] && [ -z "${runner}" ]; then
+            echo "::error::benchmark mode='${BENCHMARK_MODE}' but no runner resolved for ${BENCHMARK_FAMILY}; matrix family renamed or removed?"
+            exit 1
+          fi
+          echo "benchmark_runs_on=${runner}" >> "$GITHUB_OUTPUT"
 
   therock-ci-linux:
     name: Linux (${{ matrix.projects.projects_to_test }} | ${{ matrix.target_bundle.amdgpu_family }})
@@ -211,12 +220,12 @@ jobs:
     # Single benchmark entry point. !cancelled() lets the nightly (tool-only) case
     # run even though therock-ci-linux is skipped (skip != failure); the run-id
     # case additionally requires the build to have succeeded so this run's
-    # freshly-built artifacts exist to install. Also requires a resolved
-    # gfx94X-dcgpu runner.
+    # freshly-built artifacts exist to install. The runner is guaranteed non-empty
+    # whenever mode != 'off' (setup's Extract benchmark runner step hard-fails
+    # otherwise), so no benchmark_runs_on != '' clause is needed here.
     if: >-
       ${{ !cancelled() &&
           needs.setup.outputs.benchmark_mode != 'off' &&
-          needs.setup.outputs.benchmark_runs_on != '' &&
           (needs.setup.outputs.benchmark_mode == 'nightly' ||
            needs['therock-ci-linux'].result == 'success') }}
     uses: ./.github/workflows/hipdnn-tool-ci.yml
