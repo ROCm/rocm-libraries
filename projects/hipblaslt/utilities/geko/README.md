@@ -252,6 +252,8 @@ pip install -r requirements.txt
 invoke build --install-deps --clients --install-pkg --architecture gfx950 --skip-rocroller  # Replace gfx950 with your GPU architecture - If you need to work with MX datatypes, remove the rocroller flag - Remove the --install-pkg to build locally and to not sytem wide.
 ```
 
+> See the [hipBLASLt README](../../README.md) for full build prerequisites, supported architectures, and `install.sh` / `invoke build` options.
+
 ### 3. Install tensilelite dependencies
 ```bash
 cd rocm-libraries/projects/hipblaslt/tensilelite

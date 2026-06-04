@@ -9,26 +9,31 @@ Generates Tensile tuning configs (and related artifacts) from a YAML GEMM specif
 From the **geko repo root** ([`scripts/config_generator.py`](../../scripts/config_generator.py)):
 
 ```bash
-python3 scripts/config_generator.py <hipblaslt_path> [--config PATH] [--outputPath DIR] [--verbose 0|1] \
-  [--arch ARCH] [--gemm-log-path PATH]
+python3 scripts/config_generator.py [--hipblaslt PATH] [--config PATH] [--outputPath DIR] \
+  [--verbose 0|1] [--arch ARCH] [--gemm-log-path PATH] [--no-shell-scripts]
 ```
 
-- **Positional:** path to hipBLASLt checkout (must contain `tensilelite/`). Pass **`--config`** / **`-c`** for a tuning YAML, or omit it and pass **`--arch`** with **`--gemm-log-path`** (hipBLASLt-style workload / GEMM list YAML; parse-only, no benchmark run inside `load_prepared_config_from_yaml`).
+- **`--hipblaslt` PATH:** hipBLASLt checkout root (must contain `tensilelite/`). Optional — auto-detected from the script location (and `$GEKO_HIPBLASLT_PATH`) when omitted.
+- **`--config` / `-c`:** tuning YAML. Pass it, or omit it and pass **`--arch`** with **`--gemm-log-path`** (hipBLASLt-style workload / GEMM list YAML; parse-only, no benchmark run inside `load_prepared_config_from_yaml`).
 - **`--arch` / `--gemm-log-path`:** workload-only mode or overrides when a tuning YAML is present (CLI sets `SIZE_OPTION` to 2 when `--gemm-log-path` is passed).
 - **`--outputPath` / `-o`:** output directory (default `./`).
 - **`--verbose` / `-v`:** `0` = WARNING, `1` = INFO (default `1`).
+- **`--no-shell-scripts`:** emit YAML and config log only (skip per-entity `.sh` and `run_*_all.sh`).
 
-The driver prepends `hipblaslt_path/tensilelite` to `sys.path`. When shell scripts are enabled (default), it may build the Tensile client via `geko.utils.build_tensile_client` (optional YAML key `BUILD_DIR` overrides the build directory). YAML-only runs (`write_shell_scripts=False`) skip the client build.
+The driver prepends `hipblaslt_path/tensilelite` to `sys.path`. When shell scripts are enabled (default), it may build the Tensile client via `geko.utils.build_tensilelite_client` (optional YAML key `BUILD_DIR` overrides the build directory). YAML-only runs (`write_shell_scripts=False`) skip the client build.
 
 ### Python API
 
+`run` takes an already-prepared config **dict** (not a path). Build it with
+`load_prepared_config_from_yaml`, then call `run`:
+
 ```python
 from geko.config_generator.config_generator import run
+from geko.config_generator.load_input_config import load_prepared_config_from_yaml
 
-run(config_path, hipblaslt_path, output_path)
+config = load_prepared_config_from_yaml(config_path)  # or arch=..., gemm_log_path=...
+run(config, hipblaslt_path, output_path)              # write_shell_scripts=True by default
 ```
-
-Same three string arguments as the CLI.
 
 ### Tests
 
@@ -104,7 +109,7 @@ Current keys (from `ENV_UPDATABLE_KEYS`):
 Example (force `MI_FILTER` to `0` for one run):
 
 ```bash
-MI_FILTER=0 python3 scripts/config_generator.py /path/to/hipBLASLt --config geko/geko/config_generator/config.yaml
+MI_FILTER=0 python3 scripts/config_generator.py --hipblaslt /path/to/hipBLASLt --config geko/config_generator/config.yaml
 ```
 
 ### Other behavior
@@ -112,7 +117,7 @@ MI_FILTER=0 python3 scripts/config_generator.py /path/to/hipBLASLt --config geko
 - **`MAX_NUM_KERNELS_PER_CONFIG`:** In non-GA mode, caps merged kernels per file (default in `constants.py`; overridable in YAML). In GA mode it is set to effectively unlimited (`sys.maxsize`).
 - **`load_prepared_config`** / **`_prepare_config`** ([`load_input_config.py`](load_input_config.py)): `MACROTILE_OPT` requires `GA`; if `MACROTILE_OPT` is false, `MT_DU` is cleared to `None`.
 - **`get_sizes`** ([`sizes.py`](sizes.py)): `SIZE_OPTION=1` (grid) with `MACROTILE_OPT` and `GA` raises `NotImplementedError`.
-- **`BUILD_DIR`:** Optional; passed to `geko.utils.build_tensile_client` from [`scripts/config_generator.py`](../../scripts/config_generator.py) when generating shell scripts.
+- **`BUILD_DIR`:** Optional; passed to `geko.utils.build_tensilelite_client` from [`scripts/config_generator.py`](../../scripts/config_generator.py) when generating shell scripts.
 
 ---
 
@@ -125,7 +130,7 @@ Order matches [`config_generator.run`](config_generator.py):
 3. **`MIDesign`**, **`get_optimization_params`**, **`get_post_processor`** — per-run instances from config.
 4. **Per size:** **`generate_fork_params`** — MI groups from `MIDesign`, non-MI params/groups from optimization profile, optional post-processing, then `Groups` assembled ([`fork_param_generator.py`](fork_param_generator.py)); build **`ConfigEntry`**.
 5. **`do_cluster`** / **`do_merge`** — group sizes and merge fork params; respect kernel cap when not GA.
-6. **`geko.utils.build_tensile_client`** — when shell scripts are enabled, ensure prebuilt Tensile client path for generated `.sh` files.
+6. **`geko.utils.build_tensilelite_client`** — when shell scripts are enabled, ensure prebuilt Tensile client path for generated `.sh` files.
 7. **`ConfigSectionGenerator.build_config`** + **`EntityOutputWriter.write_entity_files_only`** / **`append_aggregate_metadata`** — one output bundle per merged entry.
 
 ```mermaid
@@ -162,7 +167,3 @@ flowchart LR
 ### Registries
 
 [`fork_params/__init__.py`](fork_params/__init__.py) picks heuristic vs GA classes from `config['ARCH']` and `config['GA']`. There is no generic fallback: an unregistered `ARCH` fails at optimization-param lookup (post-processor registry can return `None` only when the key is missing—generation still requires a registered optimization profile).
-
-## TODO
-
-3. Look into [`constants.py`](constants.py).
