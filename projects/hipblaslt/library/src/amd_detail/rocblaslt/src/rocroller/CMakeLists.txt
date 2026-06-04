@@ -3,8 +3,6 @@
 
 add_library(hipblaslt-rocroller OBJECT)
 
-# custom_kernels are assembled for gfx950 only; skip the subdir entirely on
-# builds that don't target gfx950 so we don't produce an unloadable .co.
 string(REGEX MATCHALL "gfx[a-z0-9]+" _rocroller_archs "${GPU_TARGETS}")
 if("gfx950" IN_LIST _rocroller_archs)
     add_subdirectory(custom_kernels)

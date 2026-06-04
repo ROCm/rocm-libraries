@@ -3,42 +3,10 @@ name: hipblaslt ASAN CI
 # Standalone hipblaslt ASAN smoke build. Opt-in via `ci:asan` label so we
 # do not burn the limited gfx90a runner pool on every PR. Scope:
 #
-#   - gfx90a only (cheap arch, small Tensile kernel set, fast TCL)
-#   - hipblaslt only (no rocblas/rocroller/hipblas/etc — their own ASAN
-#     issues we do not own)
-#   - full hipblaslt-test sharded 6 ways (gfx90a is fast enough)
-#   - non-blocking until suppression set stabilizes
-#
-# Self-contained (no `uses:` of therock-ci-linux / therock-test-packages),
-# mirroring the rocisa-ci.yml / stinkytofu-ci.yml conventions for
-# component-specific one-off workflows. Build + test steps are inlined
-# so this workflow does not touch any shared infrastructure.
-#
-# ASAN is scoped to the hipBLASLt subproject via TheRock's per-subproject
-# override `hipBLASLt_SANITIZER=ASAN`, NOT the global `THEROCK_SANITIZER`.
-# This is the whole point of this workflow's cost model: the global switch
-# instruments all ~30 subprojects, changing every compile command so ccache
-# misses across the board and the first run cold-rebuilds the entire stack.
-# The per-subproject override leaves every other subproject on regular flags
-# (ccache hits from the shared S3 cache) and instruments only hipBLASLt — so
-# we build & rebuild just the one component we own. See the Configure step
-# for the full rationale and the TheRock code path.
-#
-# Inside hipBLASLt's own sub-build, the generated toolchain stanza still does
-# `set(THEROCK_SANITIZER "ASAN")`, so hipblaslt's own ASAN gates and
-# TheRock's dlopen-validation skip fire correctly. That also keeps the
-# per-target helper at
-# projects/hipblaslt/cmake/hipblaslt_target_configure_sanitizers.cmake
-# a no-op (no duplicate -fsanitize=address flags), so we do not pass
-# HIPBLASLT_ENABLE_ASAN=ON.
-#
-# Arch caveat (gfx90a host-only ASAN):
-# TheRock's cmake/therock_sanitizers.cmake REGEX only appends `:xnack+`
-# to gfx942 and gfx950 for device-side ASAN. gfx90a is not matched, so
-# this build runs HOST-side ASAN only — good for hipblaslt host-runtime
-# / Tensile-init UB and leaks, not a substitute for device-side ASAN
-# coverage on MI300/MI350. Use the post-merge multi-arch ASAN workflow
-# (PR 7906) for device-side coverage.
+#   - gfx90a only
+#   - hipblaslt only
+#   - smoke hipblaslt-test
+#   - Does not gate
 
 on:
   pull_request:
@@ -56,9 +24,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # The `labeled` event fires for every label add/remove; this gate keeps
-  # the rest of the workflow inert unless ci:asan is actually present.
-  # workflow_dispatch (manual run) bypasses the gate.
   check_label:
     name: "Check ci:asan label"
     runs-on: ubuntu-24.04
@@ -112,10 +77,6 @@ jobs:
       AMDGPU_FAMILIES: gfx90a
       TEATIME_FORCE_INTERACTIVE: 0
       AWS_SHARED_CREDENTIALS_FILE: /home/awsconfig/credentials.ini
-      # Suffix routes S3 artifacts into their own path so this build does
-      # not collide with any non-ASAN gfx90a run and so the test side's
-      # is_asan() check (TheRock's github_actions_api.py) trips by
-      # detecting "asan" in ARTIFACT_GROUP.
       ARTIFACT_GROUP: gfx90a-asan
     steps:
       - name: "Check out rocm-libraries"
@@ -166,82 +127,17 @@ jobs:
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
           package_version: ADHOCBUILD
-          # Scope ASAN to the hipBLASLt subproject only.
-          #
-          # TheRock's cmake/therock_sanitizers.cmake selects the sanitizer per
-          # subproject as:
-          #     set(_sanitizer "${THEROCK_SANITIZER}")          # global default
-          #     if(DEFINED "${subproject_name}_SANITIZER")       # per-subproject
-          #       set(_sanitizer "${${subproject_name}_SANITIZER}")
-          #     endif()
-          # `subproject_name` is the therock_cmake_subproject_declare() target,
-          # which for hipblaslt is "hipBLASLt" (note casing) in
-          # math-libs/BLAS/CMakeLists.txt. By leaving the global
-          # THEROCK_SANITIZER unset and passing hipBLASLt_SANITIZER=ASAN, every
-          # OTHER subproject resolves to _sanitizer="" -> no instrumentation ->
-          # identical compile commands to the regular non-ASAN CI -> ccache hits
-          # from the shared S3 cache. Only hipBLASLt is instrumented and rebuilt
-          # cold; the ~30-subproject stack is NOT rebuilt under ASAN flags.
-          #
-          # Use a FULL configure (THEROCK_ENABLE_ALL defaults ON) and scope
-          # the work at BUILD time via `--target hipBLASLt` (see the build
-          # step) rather than by disabling feature groups. Disabling features
-          # to "only build BLAS" was tried and abandoned: it under-provisions
-          # hipBLASLt's transitive deps and breaks the configure/build in ways
-          # a full configure does not. Two concrete dead ends:
-          #   * THEROCK_ENABLE_ALL=OFF + THEROCK_ENABLE_BLAS=ON: rocprofiler-sdk
-          #     (pulled via hipBLASLt's marker deps) builds its own test kernel,
-          #     which can't find the HIP runtime under the trimmed set
-          #     ("clang++: error: cannot find HIP runtime ... --rocm-path").
-          #   * additionally THEROCK_FLAG_INCLUDE_PROFILER=OFF (to drop
-          #     rocprofiler-sdk): hipBLASLt's own configure then fails because
-          #     CMakeLists.txt:128 does find_library(NAMES roctx64) — it has a
-          #     hard dependency on roctracer's roctx, so the profiler cannot be
-          #     dropped.
-          # A full configure resolves every super-project package correctly
-          # (this exact config built green in 3h56m at ~80% ccache hits), and
-          # `--target hipBLASLt` still skips rocBLAS + ~20 unrelated
-          # subprojects, which is where the time goes.
-          #
-          # Disable rocprofiler-sdk's OWN tests. hipBLASLt pulls rocprofiler-sdk
-          # as a (marker) dep for roctx; TheRock wires its test toggle to the
-          # global BUILD_TESTING (forced ON by build_configure.py), so it builds
-          # a HIP test kernel (source/lib/tests/codeobj/syncthreads_kernel.bin)
-          # that compiles against the SHARED dist/rocm. Under `--target
-          # hipBLASLt` that shared dist isn't staged with the HIP runtime yet,
-          # so the kernel compile dies with "cannot find HIP runtime ...
-          # --rocm-path". The full `--target therock-archives` build avoids this
-          # only by staging order. We don't need rocprofiler-sdk's tests, so
-          # turn just them off via TheRock's per-subproject override variable
-          # `<target>_CMAKE_ARGS` (therock_subproject.cmake appends it LAST to
-          # the sub-build args, so it overrides the earlier =ON). hipBLASLt's
-          # own gtest stays ON (its HIPBLASLT_BUILD_TESTING is untouched).
           extra_cmake_options: "-DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../ -DhipBLASLt_SANITIZER=ASAN -Drocprofiler-sdk_CMAKE_ARGS=-DROCPROFILER_BUILD_TESTS=OFF"
           BUILD_DIR: build
         run: |
           python3 TheRock/build_tools/github_actions/build_configure.py
 
       - name: Build hipBLASLt
-        # Build ONLY the hipBLASLt subproject target, not therock-archives /
-        # therock-dist (which would build archives for every enabled artifact,
-        # i.e. the whole stack). The hipBLASLt target pulls in just its
-        # transitive build deps via the subproject graph: hipBLAS-common,
-        # rocRoller, the amd-llvm/hip toolchain and core runtime. It does NOT
-        # depend on rocBLAS/hipBLAS/fft/rand/sparse/solver/miopen, so those
-        # are never built. This is the actual "just build hipblaslt" lever —
-        # scoping the sanitizer alone does not shrink the build set. It also
-        # sidesteps the `therock-archives` target entirely.
         run: cmake --build TheRock/build --target hipBLASLt -- -k 0
 
       - name: Report
         if: ${{ !cancelled() }}
         run: |
-          # We build only the hipBLASLt subproject target, so the full-SDK
-          # dist/ and artifacts/ trees do not exist. Discover what the
-          # hipBLASLt subproject actually produced (its stage/ install tree
-          # and the gtest binary) so we can package it for the test job, and
-          # so the layout is visible in the log while this workflow is still
-          # being shaped.
           echo "hipBLASLt subproject dirs:"
           echo "--------------------------"
           find TheRock/build -maxdepth 5 -type d -path '*hipBLASLt*' \
@@ -260,23 +156,12 @@ jobs:
           echo "-------------"
           ccache -s -v || true
 
-      # The whole-stack S3 upload (post_build_upload.py) and its
-      # therock_manifest.json / artifact archives are gone: we build only the
-      # hipBLASLt subproject target, so no therock-archives / therock-dist
-      # outputs exist. Instead package the hipBLASLt subproject's own trees
-      # and publish them as a GitHub Actions artifact. This (a) lets us
-      # inspect the real on-disk layout while the test wiring is being shaped
-      # and (b) becomes the input the GPU test job consumes once wired.
       - name: Package hipBLASLt trees
         if: ${{ !cancelled() }}
         run: |
           set -uo pipefail
           mkdir -p upload
           found=0
-          # stage/ = hipBLASLt's own install (gtest 'test' component + the
-          #          per-base lib/hipblaslt/library/<gfx*> tree).
-          # dist/  = flattened tree with runtime deps (hip, rocRoller, ...).
-          # The test job will merge dist + stage to get a runnable tree.
           for kind in stage dist; do
             for d in $(find TheRock/build -maxdepth 6 -type d -path '*hipBLASLt*' -name "$kind" 2>/dev/null); do
               echo "Packaging $kind tree: $d"
@@ -299,14 +184,6 @@ jobs:
   test:
     name: "Test hipblaslt ASAN (smoke)"
     needs: [setup, build]
-    # Consumes the `hipblaslt-asan-trees` artifact the build job uploads (same
-    # run). The build's `dist/` tree is a self-contained, runnable layout —
-    # hipblaslt-test + libhipblaslt(ASAN) + the HIP/HSA/rocRoller runtime + the
-    # gfx90a Tensile kernels + the ASAN runtime (lib/llvm/.../libclang_rt.asan)
-    # — so we extract it into OUTPUT_ARTIFACTS_DIR and run against it directly.
-    # This replaces TheRock's setup_test_environment (an S3 whole-stack fetch
-    # this scoped build does not produce). The `setup`->`build` chain already
-    # enforces the ci:asan gate, so this job needs no extra `if:` guard.
     runs-on: linux-gfx90a-gpu-rocm
     timeout-minutes: 210
     container:
@@ -322,7 +199,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # smoke is ~30 cases — a single shard on one 90a runner is plenty.
         shard: [1]
     defaults:
       run:
@@ -332,13 +208,8 @@ jobs:
       ARTIFACT_RUN_ID: ${{ github.run_id }}
       OUTPUT_ARTIFACTS_DIR: "./build"
       THEROCK_BIN_DIR: "./build/bin"
-      # test_hipblaslt.py imports is_asan from
-      # build_tools/github_actions/github_actions_api.py, which lives in the
-      # TheRock checkout (NOT rocm-libraries). Point THEROCK_DIR at it.
       THEROCK_DIR: ${{ github.workspace }}
       AMDGPU_FAMILIES: gfx90a
-      # is_asan() in TheRock's github_actions_api.py keys off "asan" in
-      # ARTIFACT_GROUP; the suffix here trips it for the test driver.
       ARTIFACT_GROUP: gfx90a-asan
       TEST_COMPONENT: hipblaslt
     steps:
@@ -360,10 +231,6 @@ jobs:
           path: hipblaslt-asan-trees
 
       - name: Assemble runnable tree from dist
-        # dist/ is the flattened, self-contained tree (runtime deps + ASAN rt +
-        # gfx90a kernels). Extract it into OUTPUT_ARTIFACTS_DIR so THEROCK_BIN_DIR
-        # (./build/bin) resolves hipblaslt-test and its libs. Validated locally:
-        # this exact tree runs hipblaslt-test green under ASAN on gfx90a.
         run: |
           set -euo pipefail
           mkdir -p "${OUTPUT_ARTIFACTS_DIR}"
@@ -374,31 +241,14 @@ jobs:
       - name: Driver / GPU sanity check
         timeout-minutes: 3
         run: |
-          # Use python3: the no_rocm container ships python3 (not a `python`
-          # alias; the old setup_test_environment venv used to provide that).
-          # The dist tree ships amd-smi + rocminfo, so put them and their libs
-          # on the path for a real readout (the script returns 0 even if a tool
-          # is missing, so this stays non-fatal).
           export PATH="${GITHUB_WORKSPACE}/build/bin:${PATH}"
           export LD_LIBRARY_PATH="${GITHUB_WORKSPACE}/build/lib:${LD_LIBRARY_PATH:-}"
           python3 ./build_tools/print_driver_gpu_info.py
 
       - name: ASAN runtime environment
-        # ASAN_OPTIONS aligns with hipBLASLt's own test harness
-        # (projects/hipblaslt/CMakeLists.txt: detect_leaks=0,
-        # new_delete_type_mismatch=0) — both are KNOWN/suppressed findings in
-        # hipBLASLt+HIP+Tensile, so leaving them strict makes the gtest process
-        # exit non-zero (LSan at exit / new-delete abort) even when every test
-        # passes. We keep detect_odr_violation=0 + quarantine_size_mb=600 from
-        # the TheRock block. Use ':' (the ASAN delimiter), not ','. This matches
-        # the locally-proven-green config. Tighten later via a suppression file.
         run: |
           set -euo pipefail
           OUT="${GITHUB_WORKSPACE}/build"
-          # libclang_rt.asan-x86_64.so is a NEEDED lib of hipblaslt-test (built
-          # with -shared-libasan). Put its dir + the runtime lib dir on the
-          # loader path. Discover the clang resource dir so the LLVM major
-          # version is not hardcoded. (Locally verified this resolves the rt.)
           ASAN_RT_DIR="$(dirname "$(find "$OUT/lib/llvm/lib/clang" -name 'libclang_rt.asan-x86_64.so' | head -1)")"
           {
             echo "ASAN_OPTIONS=detect_odr_violation=0:quarantine_size_mb=600:detect_leaks=0:new_delete_type_mismatch=0"
@@ -413,14 +263,9 @@ jobs:
         env:
           SHARD_INDEX: ${{ matrix.shard }}
           TOTAL_SHARDS: 1
-          # smoke only: the obligation for the hipBLASLt ASAN smoke build.
-          # test_hipblaslt.py maps TEST_TYPE=quick -> --gtest_filter=*smoke*
-          # (the ~30 smoke-category cases), not the full suite.
           TEST_TYPE: quick
         run: |
           mkdir -p ./test_logs
-          # python3: the no_rocm container has no `python` alias (see the driver
-          # step note). test_hipblaslt.py + its is_asan import are pure stdlib.
           python3 rocm-libraries/test/therock/test_hipblaslt.py 2>&1 | tee ./test_logs/test_output.log
 
   summary:
@@ -444,7 +289,3 @@ jobs:
           fi
           echo "Build:  ${BUILD}"
           echo "Test:   ${TEST}"
-          # Intentionally do not fail; ASAN is non-blocking until the
-          # suppression set stabilizes. Promote to required by changing
-          # this to:
-          #   [[ "$BUILD" == "success" && "$TEST" == "success" ]] || exit 1

@@ -37,8 +37,6 @@ foreach(arch IN LISTS archs)
     )
     add_custom_target(matrix-transform-cp-${arch} ALL
         DEPENDS ${output_library}
-        # Co-locate matrix-transform artifacts in the per-base library/<arch>/ subdir
-        # alongside Tensile kernels. The _<arch> filename suffix is preserved.
         COMMAND ${CMAKE_COMMAND} -E make_directory "${HIPBLASLT_TENSILE_LIBPATH}/library/${arch}"
         COMMAND ${CMAKE_COMMAND} -E copy "${output_library}" "${HIPBLASLT_TENSILE_LIBPATH}/library/${arch}/hipblasltTransform_${arch}.hsaco"
     )

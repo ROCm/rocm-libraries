@@ -43,11 +43,6 @@
 
 namespace
 {
-    // Strict per-base layout: every matrix-transform code object lives at
-    //   <library_root>/<base-arch>/hipblasltTransform_<base-arch>.hsaco
-    // No flat fallback, no hard-coded /opt/rocm path — a missing file is a
-    // hard failure with a clear log so callers (and CI) see the missing arch
-    // rather than a silent load of the wrong file.
     std::optional<std::filesystem::path> transformCodeObjectPath()
     {
         int             deviceId{};
