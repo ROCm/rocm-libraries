@@ -47,11 +47,6 @@ target_include_directories(tensilelite-client-common
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
 )
 
-target_compile_definitions(tensilelite-client-common
-    PUBLIC
-        TENSILE_DEFAULT_SERIALIZATION
-)
-
 set_target_properties(tensilelite-client-common
     PROPERTIES
         POSITION_INDEPENDENT_CODE ON
