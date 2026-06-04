@@ -30,10 +30,8 @@ share one construction.
 import contextlib
 import copy
 import functools
-import os
 import re
 import shutil
-import sys
 
 # --- assembly canonicalization ---------------------------------------------
 
@@ -246,46 +244,6 @@ def emit_kernels_from_logic(logic_path, splitGSU=False, canonical=True, limit=No
 def emit_one(logic_path, index=0, canonical=True):
     """Convenience: emit a single kernel's (basename, source, err)."""
     return emit_kernels_from_logic(logic_path, canonical=canonical)[index]
-
-
-def run_create_library(logic_dir, out_dir, arch="gfx942", extra_args=()):
-    """Drive the full ``TensileCreateLibrary.run()`` pipeline CPU-only.
-
-    Parses the logic files under ``logic_dir``, generates + assembles kernels
-    (amdclang++; no GPU), writes the solution library, helper kernels and static
-    files into ``out_dir``. Exercises the create-library orchestration
-    (``run`` / ``writeSolutionsAndKernelsTCL`` / assemble / library write /
-    ``writeHelpers`` / ``copyStaticFiles`` / ``ParseArguments``).
-
-    Returns the sorted list of output file paths relative to ``out_dir``
-    (deterministic, path-stable) for snapshotting. Runs under global-state +
-    argv isolation so it does not leak.
-    """
-    from Tensile.TensileCreateLibrary.Run import run as _run
-
-    argv = [
-        "TensileCreateLibrary",
-        f"--architecture={arch}",
-        "--code-object-version=default",
-        "--jobs=1",
-        *extra_args,
-        str(logic_dir),
-        str(out_dir),
-        "HIP",
-    ]
-    saved_argv = sys.argv
-    with _isolated_globals():
-        try:
-            sys.argv = argv
-            _run()
-        finally:
-            sys.argv = saved_argv
-
-    out = []
-    for root, _dirs, files in os.walk(out_dir):
-        for fn in files:
-            out.append(os.path.relpath(os.path.join(root, fn), out_dir))
-    return sorted(out)
 
 
 def emit_helpers_from_logic(logic_path):
