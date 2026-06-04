@@ -1311,10 +1311,10 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zlabrd(rocblas_handle handle,
     matrix \f$H(i)\f$ is given by
 
     \f[
-        H(i) = I - \text{ipiv}[i] \cdot v_i^{} v_i'
+        H(i) = I - \text{tau}[i] \cdot v_i^{} v_i'
     \f]
 
-    where \f$\text{tau}_l[i]\f$ is the corresponding Householder scalar and the first \f$k+i\f$
+    where \f$\text{tau}[i]\f$ is the corresponding Householder scalar and the first \f$k+i\f$
     elements of the Householder vector \f$v_i\f$ are zero, and \f$v_i[k+i] = 1\f$.
 
     LAHR2 returns the triangular factor ``T`` that is upper triangular where

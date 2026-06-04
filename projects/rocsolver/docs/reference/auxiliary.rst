@@ -16,6 +16,7 @@ The auxiliary functions are divided into the following categories:
 * :ref:`householder`: Generation and application of Householder matrices.
 * :ref:`rotations`: Generation and application of Givens (plane) rotations.
 * :ref:`bidiag`: Computations specialized in bidiagonal matrices.
+* :ref:`hessenberg`: Computations specialized in Hessenberg matrices.
 * :ref:`tridiag`: Computations specialized in tridiagonal matrices.
 * :ref:`symmetric`: Computations specialized in symmetric matrices.
 * :ref:`orthonormal`: Generation and application of orthonormal matrices.
