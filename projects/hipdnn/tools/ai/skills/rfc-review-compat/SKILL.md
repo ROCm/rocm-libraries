@@ -63,7 +63,7 @@ For each sub-area produce: **strengths** (skip if none), **concerns** (graded `b
 
 ### Step 4 — Ask the user how to deliver the report
 
-Before writing, ask via `AskUserQuestion` how the user wants the report delivered. Question header: "Report output". Options:
+Before writing, ask the user how they want the report delivered. Offer these options:
 
 1. **On disk next to the RFC** — saved as `<rfc-dir>/review-compat-<YYYY-MM-DD>-<reviewer>.md`.
 2. **Inline in chat only** — printed in the conversation, nothing written to disk.
