@@ -20,19 +20,39 @@ fails (exit 1) if any of the known-incompatible constructs appear:
   3. os.environ access -- MicroPython's os has no environ; use os.getenv.
   4. match statements / async def / await -- not enabled in the embed build.
 
+The AST rules above only catch the KNOWN incompatibilities. When an mpy-cross
+binary is available (--mpy-cross, or the MPY_CROSS env var), each in-scope module
+is also compiled with it -- the actual MicroPython compiler -- so arbitrary
+unsupported syntax is caught too, across all modules (not just the closure the
+build already freezes). This is a superset-feature check: it validates the
+frozen / mpy modes; the AST PEP-448 rule covers the one display construct the
+reduced .py-mode runtime compiler additionally rejects.
+
 Usage:
-    check_compat.py <dir> [<dir> ...]
+    check_compat.py [--mpy-cross PATH] <dir> [<dir> ...]
 Each dir is walked recursively; examples/, dsl_docs/ and __pycache__ are skipped.
 """
 import ast
 import os
+import subprocess
 import sys
+import tempfile
 
 # Host-only modules: benchmark / sweep drivers that run on CPython and are never
 # frozen or loaded under MicroPython, so host features (os.environ, subprocess)
 # are legitimate there. Keyed by basename; keep this list short + justified.
 ALLOWLIST_BASENAMES = {
     "sweep_bench.py",  # standalone benchmark driver (hipcc subprocess + os.environ)
+}
+
+# Modules that pass the AST rules but are not yet mpy-cross-compatible for a
+# reason the AST rules don't model (e.g. a codegen function exceeding
+# MicroPython's 255-locals-per-function limit). They are NOT in any provider
+# closure today; listed here so the mpy-cross ratchet still guards every other
+# module while these stay visible as "to port for MicroPython". AST rules still
+# apply to them.
+KNOWN_MPY_CROSS_INCOMPATIBLE = {
+    "attention_tiled_2d.py",  # >255 locals in a codegen function (FMHA gfx950 instance)
 }
 
 SKIP_DIRS = {"__pycache__", "examples", "dsl_docs"}
@@ -134,27 +154,68 @@ def check_source(path, src):
     return violations
 
 
+def mpy_cross_error(mpy_cross, path, out_dir):
+    """Compile one module with mpy-cross (the real MicroPython compiler). Returns
+    an error string, or None on success. Only the compile result matters (the
+    .mpy output is discarded), so no special flags are needed."""
+    out = os.path.join(out_dir, "out.mpy")
+    proc = subprocess.run(
+        [mpy_cross, "-o", out, path],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    if proc.returncode == 0:
+        return None
+    lines = proc.stdout.strip().splitlines()
+    return lines[-1] if lines else f"mpy-cross exited {proc.returncode}"
+
+
 def main(argv):
-    dirs = argv[1:]
+    mpy_cross = os.environ.get("MPY_CROSS") or None
+    dirs = []
+    it = iter(argv[1:])
+    for arg in it:
+        if arg == "--mpy-cross":
+            mpy_cross = next(it, None)
+        elif arg.startswith("--mpy-cross="):
+            mpy_cross = arg.split("=", 1)[1]
+        else:
+            dirs.append(arg)
     if not dirs:
-        print("usage: check_compat.py <dir> [<dir> ...]", file=sys.stderr)
+        print(
+            "usage: check_compat.py [--mpy-cross PATH] <dir> [<dir> ...]",
+            file=sys.stderr,
+        )
         return 2
+
+    use_mpy_cross = bool(mpy_cross) and os.path.exists(mpy_cross)
+    if mpy_cross and not use_mpy_cross:
+        print(f"note: mpy-cross not found at {mpy_cross}; running AST checks only.")
 
     findings = []  # (path, lineno, message)
     scanned = 0
-    for root in dirs:
-        for dirpath, dirnames, filenames in os.walk(root):
-            dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
-            for fn in filenames:
-                if not fn.endswith(".py") or fn in ALLOWLIST_BASENAMES:
-                    continue
-                path = os.path.join(dirpath, fn)
-                with open(path, encoding="utf-8") as fh:
-                    src = fh.read()
-                scanned += 1
-                for lineno, msg in check_source(path, src):
-                    findings.append((path, lineno, msg))
+    with tempfile.TemporaryDirectory() as out_dir:
+        for root in dirs:
+            for dirpath, dirnames, filenames in os.walk(root):
+                dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+                for fn in filenames:
+                    if not fn.endswith(".py") or fn in ALLOWLIST_BASENAMES:
+                        continue
+                    path = os.path.join(dirpath, fn)
+                    with open(path, encoding="utf-8") as fh:
+                        src = fh.read()
+                    scanned += 1
+                    for lineno, msg in check_source(path, src):
+                        findings.append((path, lineno, msg))
+                    if use_mpy_cross and fn not in KNOWN_MPY_CROSS_INCOMPATIBLE:
+                        err = mpy_cross_error(mpy_cross, path, out_dir)
+                        if err is not None:
+                            findings.append(
+                                (path, 0, f"mpy-cross rejects this module: {err}")
+                            )
 
+    how = "AST + mpy-cross" if use_mpy_cross else "AST"
     if findings:
         findings.sort()
         print("MicroPython-compatibility lint FAILED:\n")
@@ -166,7 +227,7 @@ def main(argv):
         return 1
 
     print(
-        f"MicroPython-compatibility lint OK: {scanned} files, no incompatible constructs."
+        f"MicroPython-compatibility lint OK ({how}): {scanned} files, no incompatible constructs."
     )
     return 0
 

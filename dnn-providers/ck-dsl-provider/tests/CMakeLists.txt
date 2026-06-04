@@ -55,10 +55,16 @@ endif()
 # star-unpacking, os.environ, match/async -- creeps into the codegen sources.
 # Labelled unit_test so `ck-dsl-provider-unit-check` (ctest -L unit_test) runs it.
 # Tests.cmake (included above) provides Python3_EXECUTABLE.
+# --mpy-cross adds a compile pass with the real MicroPython compiler (built by
+# the embed build) to catch arbitrary unsupported syntax, not just the AST rules.
+# The lint degrades to AST-only if mpy-cross is absent (e.g. run before a build),
+# so this test has no build dependency; under unit-check the embed build has
+# already produced mpy-cross, so the full check runs.
 if(Python3_FOUND)
     add_test(NAME ck_dsl_provider_micropython_compat
              COMMAND ${Python3_EXECUTABLE}
                      ${CMAKE_CURRENT_SOURCE_DIR}/../micropython/check_compat.py
+                     --mpy-cross ${CKDSL_MPY_CROSS}
                      ${CK_DSL_PYTHON_PACKAGE_PATH}/ck_dsl
                      ${CK_DSL_PROVIDER_PYTHON_PACKAGE_PATH}/ck_dsl_provider
                      ${CMAKE_CURRENT_SOURCE_DIR}/../micropython/shims

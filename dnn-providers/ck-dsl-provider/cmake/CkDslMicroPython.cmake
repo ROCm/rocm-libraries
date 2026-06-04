@@ -123,4 +123,13 @@ function(ck_dsl_provider_configure_micropython)
         PARENT_SCOPE)
     set(CKDSL_MPY_COMGR_LIB "${CKDSL_AMD_COMGR_LIBRARY}" PARENT_SCOPE)
     set(CKDSL_MPY_COMPILE_DEFS "${_compileDefs}" PARENT_SCOPE)
+
+    # mpy-cross built by build_embed.sh (in CKDSL_MICROPYTHON_DIR if given, else the
+    # cloned checkout under the build dir). The compat lint uses it to compile-check
+    # every module with the real MicroPython compiler when it is available.
+    if(CKDSL_MICROPYTHON_DIR)
+        set(CKDSL_MPY_CROSS "${CKDSL_MICROPYTHON_DIR}/mpy-cross/build/mpy-cross" PARENT_SCOPE)
+    else()
+        set(CKDSL_MPY_CROSS "${_out}/micropython/mpy-cross/build/mpy-cross" PARENT_SCOPE)
+    endif()
 endfunction()
