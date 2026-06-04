@@ -1145,6 +1145,196 @@ void testing_aux_matmul_pref_get_attr(const Arguments& arg)
     // You might want to add more attribute tests here
 }
 
+void testing_aux_matmul_sm_count_target(const Arguments& arg)
+{
+    size_t                sizeWritten = 0;
+    hipblasLtMatmulDesc_t matmul      = nullptr;
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescCreate(&matmul, arg.compute_type, arg.scale_type));
+
+    // Default value must be 0 ("use all CUs the device exposes").
+    int32_t value_r = -1;
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(matmul,
+                                                          HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
+                                                          &value_r,
+                                                          sizeof(value_r),
+                                                          &sizeWritten),
+                          HIPBLAS_STATUS_SUCCESS);
+    ASSERT_TRUE(value_r == 0);
+    ASSERT_TRUE(sizeWritten == sizeof(int32_t));
+
+    // Round-trip set/get with a valid value.
+    int32_t value_set = 80;
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(matmul,
+                                                          HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
+                                                          &value_set,
+                                                          sizeof(value_set)),
+                          HIPBLAS_STATUS_SUCCESS);
+    value_r = 0;
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(matmul,
+                                                          HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
+                                                          &value_r,
+                                                          sizeof(value_r),
+                                                          &sizeWritten),
+                          HIPBLAS_STATUS_SUCCESS);
+    ASSERT_TRUE(value_r == value_set);
+
+    // Setting back to 0 (the "use all CUs" sentinel) must be accepted.
+    int32_t zero = 0;
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(
+                              matmul, HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET, &zero, sizeof(zero)),
+                          HIPBLAS_STATUS_SUCCESS);
+
+    // Negative values must be rejected and must leave the stored value unchanged.
+    int32_t negative = -5;
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(matmul,
+                                                          HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
+                                                          &negative,
+                                                          sizeof(negative)),
+                          HIPBLAS_STATUS_INVALID_VALUE);
+    value_r = -1;
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(matmul,
+                                                          HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
+                                                          &value_r,
+                                                          sizeof(value_r),
+                                                          &sizeWritten),
+                          HIPBLAS_STATUS_SUCCESS);
+    ASSERT_TRUE(value_r == 0); // unchanged (last successful set was 0)
+
+    // Undersized buffer is INVALID_VALUE for both set and get.
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(matmul,
+                                                          HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
+                                                          &value_set,
+                                                          sizeof(int32_t) / 2),
+                          HIPBLAS_STATUS_INVALID_VALUE);
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(matmul,
+                                                          HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET,
+                                                          &value_r,
+                                                          sizeof(int32_t) / 2,
+                                                          &sizeWritten),
+                          HIPBLAS_STATUS_INVALID_VALUE);
+
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescDestroy(matmul));
+}
+
+void testing_aux_matmul_dyn_persistent_tile_ext(const Arguments& arg)
+{
+    size_t                sizeWritten = 0;
+    hipblasLtMatmulDesc_t matmul      = nullptr;
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescCreate(&matmul, arg.compute_type, arg.scale_type));
+
+    // Default is disabled (0).
+    int32_t value_r = -1;
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(matmul,
+                                                          HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                                                          &value_r,
+                                                          sizeof(value_r),
+                                                          &sizeWritten),
+                          HIPBLAS_STATUS_SUCCESS);
+    ASSERT_TRUE(value_r == 0);
+
+    // Enable then disable.
+    int32_t enable = 1;
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(matmul,
+                                                          HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                                                          &enable,
+                                                          sizeof(enable)),
+                          HIPBLAS_STATUS_SUCCESS);
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(matmul,
+                                                          HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                                                          &value_r,
+                                                          sizeof(value_r),
+                                                          &sizeWritten),
+                          HIPBLAS_STATUS_SUCCESS);
+    ASSERT_TRUE(value_r == 1);
+
+    // Any nonzero value gets clamped to 1.
+    int32_t three = 3;
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(matmul,
+                                                          HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                                                          &three,
+                                                          sizeof(three)),
+                          HIPBLAS_STATUS_SUCCESS);
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(matmul,
+                                                          HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                                                          &value_r,
+                                                          sizeof(value_r),
+                                                          &sizeWritten),
+                          HIPBLAS_STATUS_SUCCESS);
+    ASSERT_TRUE(value_r == 1);
+
+    int32_t disable = 0;
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescSetAttribute(matmul,
+                                                          HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                                                          &disable,
+                                                          sizeof(disable)),
+                          HIPBLAS_STATUS_SUCCESS);
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulDescGetAttribute(matmul,
+                                                          HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                                                          &value_r,
+                                                          sizeof(value_r),
+                                                          &sizeWritten),
+                          HIPBLAS_STATUS_SUCCESS);
+    ASSERT_TRUE(value_r == 0);
+
+    CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescDestroy(matmul));
+}
+
+void testing_aux_matmul_pref_sm_count_target(const Arguments& arg)
+{
+    hipblaslt_local_preference pref;
+    EXPECT_HIPBLAS_STATUS(pref.status(), HIPBLAS_STATUS_SUCCESS);
+
+    int32_t value_r     = -1;
+    size_t  sizeWritten = 0;
+
+    // Default value must be 0.
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulPreferenceGetAttribute(pref,
+                                                                HIPBLASLT_MATMUL_PREF_SM_COUNT_TARGET,
+                                                                &value_r,
+                                                                sizeof(value_r),
+                                                                &sizeWritten),
+                          HIPBLAS_STATUS_SUCCESS);
+    ASSERT_TRUE(value_r == 0);
+    ASSERT_TRUE(sizeWritten == sizeof(int32_t));
+
+    // Round-trip set/get.
+    int32_t value_set = 132;
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulPreferenceSetAttribute(pref,
+                                                                HIPBLASLT_MATMUL_PREF_SM_COUNT_TARGET,
+                                                                &value_set,
+                                                                sizeof(value_set)),
+                          HIPBLAS_STATUS_SUCCESS);
+    value_r = 0;
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulPreferenceGetAttribute(pref,
+                                                                HIPBLASLT_MATMUL_PREF_SM_COUNT_TARGET,
+                                                                &value_r,
+                                                                sizeof(value_r),
+                                                                &sizeWritten),
+                          HIPBLAS_STATUS_SUCCESS);
+    ASSERT_TRUE(value_r == value_set);
+
+    // Negative values must be rejected.
+    int32_t negative = -42;
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulPreferenceSetAttribute(pref,
+                                                                HIPBLASLT_MATMUL_PREF_SM_COUNT_TARGET,
+                                                                &negative,
+                                                                sizeof(negative)),
+                          HIPBLAS_STATUS_INVALID_VALUE);
+
+    // Undersized buffer is INVALID_VALUE for both setter and getter.
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulPreferenceSetAttribute(pref,
+                                                                HIPBLASLT_MATMUL_PREF_SM_COUNT_TARGET,
+                                                                &value_set,
+                                                                sizeof(int32_t) / 2),
+                          HIPBLAS_STATUS_INVALID_VALUE);
+    EXPECT_HIPBLAS_STATUS(hipblasLtMatmulPreferenceGetAttribute(pref,
+                                                                HIPBLASLT_MATMUL_PREF_SM_COUNT_TARGET,
+                                                                &value_r,
+                                                                sizeof(int32_t) / 2,
+                                                                &sizeWritten),
+                          HIPBLAS_STATUS_INVALID_VALUE);
+}
+
 void testing_aux_matmul_alg_init_bad_arg(const Arguments& arg) {}
 
 void testing_aux_matmul_alg_init(const Arguments& arg) {}
