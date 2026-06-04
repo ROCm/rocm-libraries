@@ -244,6 +244,15 @@ _INTRINSIC_DECLS: Dict[str, str] = {
         "declare <8 x float> @llvm.amdgcn.wmma.f32.16x16x16.bf16.v8f32.v16i16("
         "<16 x i16>, <16 x i16>, <8 x float>)"
     ),
+    # RDNA3/3.5 (gfx11) integer WMMA — wave32 16x16x16 iu8. Operands are
+    # <4 x i32> (16 int8 packed 4-per-i32), accumulator/result <8 x i32>. The
+    # signature carries i1 signedness flags (unsignedA/unsignedB) before each
+    # matrix operand and a trailing i1 clamp. Emission goes through
+    # Gfx11RdnaBackend.emit_wmma. LLVM-lowered to v_wmma_i32_16x16x16_iu8.
+    "wmma.i32.16x16x16.iu8": (
+        "declare <8 x i32> @llvm.amdgcn.wmma.i32.16x16x16.iu8.v8i32.v4i32("
+        "i1, <4 x i32>, i1, <4 x i32>, <8 x i32>, i1)"
+    ),
     # RDNA4 (gfx12) WMMA — wave32 16x16x16. No cross-half operand duplication:
     # A/B are <8 x half> / <8 x i16> per lane (vs <16 x ...> on gfx11). Emission
     # goes through Gfx12RdnaBackend.emit_wmma.
@@ -1366,6 +1375,14 @@ class _Lowerer:
             f"  {smin_v} = call i32 @llvm.smin.i32(i32 127, i32 {smax_v})"
         )
         self._current().emit(f"  {op.result.name} = trunc i32 {smin_v} to i8")
+
+    def _op_arith_rint_f32(self, op: Op) -> None:
+        """Round an f32 to nearest integer (still f32), round-to-nearest-even."""
+        (v,) = op.operands
+        self._need("rint.f32")
+        self._current().emit(
+            f"  {op.result.name} = call float @llvm.rint.f32(float {self._operand(v)})"
+        )
 
     def _op_math_exp2(self, op: Op) -> None:
         (v,) = op.operands

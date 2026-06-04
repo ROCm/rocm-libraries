@@ -241,7 +241,7 @@ def make_gemm_manifest(
     default_shape: Sequence[int] = (3328, 4096, 4096),
     warmup_iters: int = 5,
     timed_iters: int = 100,
-    grid_order: str = "MN",
+    grid_order: str = "NM",
     args_signature: Optional[List[Dict[str, Any]]] = None,
     atoms: Iterable[str] = (),
     notes: str = "",
@@ -252,8 +252,10 @@ def make_gemm_manifest(
     `grid_order` chooses how the runner translates `(M_tiles, N_tiles)`
     to `(gx, gy)`:
       - `"MN"`: `gx = ceil(M/block_m)`, `gy = ceil(N/block_n)`
-      - `"NM"`: `gx = ceil(N/block_n)`, `gy = ceil(M/block_m)`
+      - `"NM"` (default): `gx = ceil(N/block_n)`, `gy = ceil(M/block_m)`
     Match what your kernel reads from `block_id.x` and `block_id.y`.
+    The default `"NM"` (block.x->N) is the universal-GEMM / host-launcher
+    convention; the gfx1151 WMMA GEMM passes `"MN"` to flip to block.x->M.
 
     `extra` lets you splice in kernel-specific fields (e.g. an MLIR
     config dump, a transform-DAG JSON, dispatcher metadata).

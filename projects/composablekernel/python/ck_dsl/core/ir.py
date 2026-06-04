@@ -92,9 +92,21 @@ _MMA_C_FRAG_LEN: Dict[str, int] = {
     "mfma_scale_f32_16x16x128_f8f6f4": 4,
     "wmma_f32_16x16x16_f16": 8,
     "wmma_f32_16x16x16_bf16": 8,
+    "wmma_i32_16x16x16_iu8": 8,
     "wmma_gfx12_f32_16x16x16_f16": 8,
     "wmma_gfx12_f32_16x16x16_bf16": 8,
 }
+
+# op_id -> accumulator/result *element* type. Float atoms accumulate in f32;
+# integer WMMA atoms (iu8/iu4) accumulate in i32. Used by ``IRBuilder.mma`` to
+# size the result vector element type when ``op`` is a bare op_id string; an
+# ``MmaOp`` object supplies its ``c_dtype`` directly and bypasses this table.
+_MMA_C_INT_OP_IDS = frozenset(
+    {
+        "wmma_i32_16x16x16_iu8",
+        "wmma_i32_16x16x16_iu4",
+    }
+)
 
 # op_id -> the ``result_name_hint`` the legacy ISA-named method used. Most atoms
 # used "acc"; a handful used distinct hints that must be preserved verbatim so
@@ -554,6 +566,19 @@ class IRBuilder:
         return self._op(
             "arith.trunc_f32_to_f16", [v], [F16], result_name_hint="t"
         ).result
+
+    def rint_f32(self, v: Value) -> Value:
+        """Round an f32 to the nearest integer (still f32), round-to-nearest-even.
+
+        Lowers to ``llvm.rint.f32`` (``rintf`` in HIP), which honours the
+        current rounding mode (RNE). Unlike :meth:`cvt_f32_to_i8_sat` this does
+        not narrow to i8, so it works for the full f32 integer range -- the
+        primitive an integer GEMM emulated via f16 WMMA needs to snap its
+        sub-ULP-noisy accumulator back to the exact integer before requant.
+        """
+        if v.type.name != "f32":
+            raise ValueError(f"rint_f32 expects f32 input, got {v.type.name}")
+        return self._op("arith.rint_f32", [v], [F32], result_name_hint="rint").result
 
     def cast_to_f32(self, v: Value) -> Value:
         if v.type.name == "f32":
@@ -1403,11 +1428,19 @@ class IRBuilder:
             if hasattr(op, "c_frag_len") and op.c_frag_len
             else _mma_c_frag_len(op_id)
         )
+        # Accumulator element type: integer WMMA atoms (iu8/iu4) accumulate in
+        # i32; everything else in f32. Prefer the atom's own c_dtype when ``op``
+        # is an MmaOp, else fall back to the op_id table.
+        c_dtype = getattr(op, "c_dtype", None)
+        is_int_acc = (
+            c_dtype == "i32" if c_dtype is not None else op_id in _MMA_C_INT_OP_IDS
+        )
+        c_elem = I32 if is_int_acc else F32
         hint = _MMA_RESULT_HINT.get(op_id, "acc")
         return self._op(
             "tile.mma",
             [a, b, c, *extra],
-            [VectorType(F32, c_frag_len)],
+            [VectorType(c_elem, c_frag_len)],
             attrs={"op_id": op_id},
             result_name_hint=hint,
         ).result
@@ -2838,6 +2871,7 @@ PURE_OP_NAMES = {
     "arith.cvt_f32_to_fp8",
     "arith.cvt_f32_to_bf8",
     "arith.cvt_f32_to_i8_sat",
+    "arith.rint_f32",
     "arith.cvt_pk_f32_fp8x4",
     "arith.cvt_pk_f32_bf8x4",
     "arith.cvt_pk_fp8_f32x4",

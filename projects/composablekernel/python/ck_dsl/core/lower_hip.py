@@ -1213,6 +1213,10 @@ class _Lowerer:
             f"({as_i32} > 127 ? 127 : {as_i32}));"
         )
 
+    def _op_arith_rint_f32(self, op: Op) -> None:
+        (v,) = op.operands
+        self._emit(f"float {_name(op.result)} = rintf({_name(v)});")
+
     def _op_arith_bitcast(self, op: Op) -> None:
         (v,) = op.operands
         tgt = _type_to_hip(op.result.type)

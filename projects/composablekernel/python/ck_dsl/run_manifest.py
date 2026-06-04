@@ -132,11 +132,11 @@ def _gemm_problem(
     A = rng.integers(-5, 6, size=(M, K), dtype=np.int16).astype(np.float16)
     B = rng.integers(-5, 6, size=(N, K), dtype=np.int16).astype(np.float16)
     C = np.empty((M, N), dtype=np.float16)
-    grid = (
-        (N + int(manifest["block_n"]) - 1) // int(manifest["block_n"]),
-        (M + int(manifest["block_m"]) - 1) // int(manifest["block_m"]),
-        1,
-    )
+    gx = (N + int(manifest["block_n"]) - 1) // int(manifest["block_n"])
+    gy = (M + int(manifest["block_m"]) - 1) // int(manifest["block_m"])
+    if manifest.get("grid_order") == "MN":
+        gx, gy = gy, gx
+    grid = (gx, gy, 1)
     block = (int(manifest["threads_per_block"]), 1, 1)
     flop = 2.0 * M * N * K
     bytes_xfer = 2.0 * (M * K + N * K + M * N)
@@ -160,6 +160,66 @@ def _gemm_problem(
         rt.memcpy_d2h(_as_u8_buffer(C), ptrs[2], _nbytes(C))
         ref = (A.astype(np.float32) @ B.astype(np.float32).T).astype(np.float16)
         diff = np.abs(C.astype(np.float32) - ref.astype(np.float32))
+        return float(diff.max()), int(np.count_nonzero(diff > 0)), C.size
+
+    return make_args, grid, block, flop, bytes_xfer, check
+
+
+def _gemm_iu8_problem(
+    manifest: dict, shape: Optional[Tuple[int, int, int]], verify: bool
+) -> tuple:
+    """Native integer WMMA GEMM (int8 in / i32 out): ``C = A @ B.T``, exact.
+
+    A (``M×K``) and B (``N×K``) are signed int8 row-major, packed 4-per-i32
+    along K (little-endian view: i32 slot ``j`` = K-bytes ``[4j..4j+3]``, which
+    is exactly the ``wmma_i32_16x16x16_iu8`` fragment slot order). The kernel
+    receives i32 pointers and the logical int8 ``K``. Integer WMMA does no
+    rounding, so verify expects ``max_abs_diff == 0`` against the int32 numpy
+    reference; random asymmetric inputs pin row vs col in the lane map.
+    """
+    np = _require_numpy()
+    if shape is None:
+        ds = manifest.get("default_shape", [256, 256, 256])
+        M, N, K = int(ds[0]), int(ds[1]), int(ds[2])
+    else:
+        M, N, K = shape
+    if K % 4:
+        raise ValueError(f"iu8 GEMM needs K multiple of 4 (i32 packing), got K={K}")
+    rng = np.random.default_rng(0xC0FFEE)
+    A = rng.integers(-128, 128, size=(M, K), dtype=np.int8)
+    B = rng.integers(-128, 128, size=(N, K), dtype=np.int8)
+    # Pack int8 rows into i32 (little-endian): K contiguous -> K//4 i32 columns.
+    A_p = np.ascontiguousarray(A).view(np.int32)
+    B_p = np.ascontiguousarray(B).view(np.int32)
+    C = np.empty((M, N), dtype=np.int32)
+    gx = (N + int(manifest["block_n"]) - 1) // int(manifest["block_n"])
+    gy = (M + int(manifest["block_m"]) - 1) // int(manifest["block_m"])
+    if manifest.get("grid_order") == "MN":
+        gx, gy = gy, gx
+    grid = (gx, gy, 1)
+    block = (int(manifest["threads_per_block"]), 1, 1)
+    flop = 2.0 * M * N * K
+    bytes_xfer = 1.0 * (M * K + N * K) + 4.0 * (M * N)
+
+    def make_args(rt: Runtime):
+        A_dev = rt.alloc(_nbytes(A_p))
+        B_dev = rt.alloc(_nbytes(B_p))
+        C_dev = rt.alloc(_nbytes(C))
+        rt.memcpy_h2d(A_dev, _as_u8_buffer(A_p), _nbytes(A_p))
+        rt.memcpy_h2d(B_dev, _as_u8_buffer(B_p), _nbytes(B_p))
+        rt.memset(C_dev, 0, _nbytes(C))
+        return struct.pack("<QQQiii", A_dev, B_dev, C_dev, M, N, K), (
+            A_dev,
+            B_dev,
+            C_dev,
+        )
+
+    def check(rt: Runtime, ptrs):
+        if not verify:
+            return 0.0, 0, C.size
+        rt.memcpy_d2h(_as_u8_buffer(C), ptrs[2], _nbytes(C))
+        ref = A.astype(np.int32) @ B.astype(np.int32).T
+        diff = np.abs(C.astype(np.int64) - ref.astype(np.int64))
         return float(diff.max()), int(np.count_nonzero(diff > 0)), C.size
 
     return make_args, grid, block, flop, bytes_xfer, check
@@ -204,9 +264,9 @@ def _matmul_nbits_problem(
     rng = np.random.default_rng(0x4B17)
     A = rng.integers(-4, 5, size=(M, K), dtype=np.int16).astype(np.float16)
     W = rng.integers(-8, 8, size=(N, K), dtype=np.int16)  # signed int4 [-8, 7]
-    scales = (rng.integers(1, 5, size=(N, K // group)).astype(np.float32) * 0.03125).astype(
-        np_scale
-    )
+    scales = (
+        rng.integers(1, 5, size=(N, K // group)).astype(np.float32) * 0.03125
+    ).astype(np_scale)
     low = (W[:, 0::2] & 0x0F).astype(np.uint8)
     high = (W[:, 1::2] & 0x0F).astype(np.uint8)
     packed = (low | (high << 4)).astype(np.uint8)
@@ -275,21 +335,29 @@ def _nbits_debug_dump(np, Cf, reff, diff, M, N, K, group):
     tol = 1e-2
     bad = diff > tol
     nbad = int(bad.sum())
-    print(f"[nbits-debug] shape M={M} N={N} K={K} group={group} "
-          f"bad={nbad}/{Cf.size} max={float(diff.max()):.4g}")
+    print(
+        f"[nbits-debug] shape M={M} N={N} K={K} group={group} "
+        f"bad={nbad}/{Cf.size} max={float(diff.max()):.4g}"
+    )
     if nbad == 0:
         return
     rows = np.where(bad.any(axis=1))[0]
     cols = np.where(bad.any(axis=0))[0]
-    print(f"[nbits-debug] bad rows (M): {rows[:32].tolist()}"
-          f"{' ...' if rows.size > 32 else ''} (count={rows.size})")
-    print(f"[nbits-debug] bad cols (N): {cols[:32].tolist()}"
-          f"{' ...' if cols.size > 32 else ''} (count={cols.size})")
+    print(
+        f"[nbits-debug] bad rows (M): {rows[:32].tolist()}"
+        f"{' ...' if rows.size > 32 else ''} (count={rows.size})"
+    )
+    print(
+        f"[nbits-debug] bad cols (N): {cols[:32].tolist()}"
+        f"{' ...' if cols.size > 32 else ''} (count={cols.size})"
+    )
     # Per-N-tile and per-M-tile histograms (16-wide WMMA tiles).
     col_counts = bad.sum(axis=0)
     nz_cols = np.where(col_counts > 0)[0]
-    print(f"[nbits-debug] bad-count by N col (nonzero): "
-          + ", ".join(f"n{c}:{int(col_counts[c])}" for c in nz_cols[:24]))
+    print(
+        "[nbits-debug] bad-count by N col (nonzero): "
+        + ", ".join(f"n{c}:{int(col_counts[c])}" for c in nz_cols[:24])
+    )
     # Inspect first few bad coords: ratio reveals dropped/extra scale factor.
     bi, bj = np.where(bad)
     print("[nbits-debug] sample bad coords (m,n): C, ref, ratio")
@@ -722,6 +790,10 @@ def run_manifest(
     kind = str(manifest["kind"])
     if kind == "gemm_fp16":
         make_args, grid, block, flop, bytes_xfer, check = _gemm_problem(
+            manifest, shape, verify
+        )
+    elif kind == "gemm_iu8":
+        make_args, grid, block, flop, bytes_xfer, check = _gemm_iu8_problem(
             manifest, shape, verify
         )
     elif kind == "batched_gemm_fp16":
