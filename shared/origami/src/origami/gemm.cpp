@@ -1650,18 +1650,11 @@ double compute_epilogue_latency(const problem_t& problem,
   const size_t grid_m                  = context.grid_m;
   const size_t grid_n                  = context.grid_n;
   const size_t num_output_tiles        = context.num_output_tiles;
-  // Effective store bandwidth depends on cache_hints_d.  Cached D writes
-  // (cache_hints_d < 4) land in L2 first and stream at L2 bandwidth
-  // (mem1_perf_ratio), which is ~2-3x HBM on gfx950.  Non-temporal D
-  // (cache_hints_d >= 4) bypasses L2 and is bottlenecked on HBM
-  // (mem3_perf_ratio).  Empirically, output-bound bf16 shapes (large M*N,
-  // small K) show ~2x slowdown on NTD4 vs NTD0; this branch captures the
-  // dominant cause without re-introducing the full removed NTD heuristic
-  // family.
-  const bool   d_nontemporal_epi = (config.cache_hints_d >= 4);
-  const double store_bw = d_nontemporal_epi
-      ? hardware.mem3_perf_ratio * context.mem_bw_limited
-      : hardware.mem1_perf_ratio * context.mem_bw_limited;
+  // Baseline store bandwidth is HBM (mem3); the caller applies the
+  // cache-hints-d dependent L2 advantage post-hoc in compute_tile_latency
+  // because the advantage's magnitude depends on the mainloop/epilogue
+  // store-rate ratio (see ntd_l2_help_factor below).
+  const double store_bw                = hardware.mem3_perf_ratio * context.mem_bw_limited;
   const double reduce_bw               = hardware.mem3_perf_ratio * context.write_mem_bw_limited;
   const bool debug                     = context.debug;
   const reduction_t reduction_strategy = context.reduction_strategy;
@@ -1916,6 +1909,169 @@ double compute_tile_latency(const problem_t& problem,
   double L_compute = static_cast<double>(compute_mt_compute_latency(problem, hardware, config));
   double L_mem     = compute_memory_latency(problem, hardware, config, context);
 
+  // ---------------------------------------------------------------------------
+  // Per-wave aspect pressure (per ORIGAMI_per_wave_aspect_model.md §3-§4).
+  //
+  // The MFMA-only L_compute above counts MFMAs and divides by parallel_mi_cu
+  // but doesn't see the wave/MIWT layout's secondary effects:
+  //   (a) compute body must hide LDS-read latency  (§3.1)
+  //   (b) VGPR / wave-slot occupancy gates memory-stall hiding  (§3.2)
+  //   (c) PGR pipeline needs a long-enough mainloop body          (§3.4)
+  //   (d) multi-wave WGs pack fewer WGs per CU                    (§3.5)
+  //
+  // Each pressure is a score in [0, 1]; the combined score is a throughput
+  // multiplier (lower score = effectively longer compute).  All four scores
+  // are applied to L_compute (the only term in our model that captures
+  // MFMA throughput), and the *multiplier* (= 1/score) is hard-capped at
+  // PER_WAVE_MAX_MULTIPLIER so that one badly-misranked term doesn't
+  // dominate the total predicted latency.
+  //
+  // Constants are starting points (the proposal acknowledges they need a
+  // fitting pass against a tuning corpus); enabled on gfx94x/gfx95x where
+  // the proposal's calibration anchor was collected.
+  // ---------------------------------------------------------------------------
+  if (hardware.arch == hardware_t::architecture_t::gfx950 ||
+      hardware.arch == hardware_t::architecture_t::gfx942) {
+    const size_t MT_M_pw   = config.mt.m;
+    const size_t MT_N_pw   = config.mt.n;
+    const size_t MI_M_pw   = std::max<size_t>(config.mi.m, 1);
+    const size_t MI_N_pw   = std::max<size_t>(config.mi.n, 1);
+    const size_t MI_K_pw   = std::max<size_t>(config.mi.k, 1);
+    const size_t MIWG_M_pw = std::max<size_t>(config.wave.m, 1);
+    const size_t MIWG_N_pw = std::max<size_t>(config.wave.n, 1);
+    const size_t MIWT_M_pw = std::max<size_t>(MT_M_pw / (MI_M_pw * MIWG_M_pw), 1);
+    const size_t MIWT_N_pw = std::max<size_t>(MT_N_pw / (MI_N_pw * MIWG_N_pw), 1);
+    const size_t waves_per_wg = MIWG_M_pw * MIWG_N_pw;
+
+    // ----------------------------------------- MFMA / LDS-read cycle costs
+    // cycles_per_mfma is dtype- and shape-dependent; for gfx950 BF16 the
+    // measured values are ~8 (MI16x16x32) and ~32 (MI32x32x16).  Default
+    // to those; for other dtypes, scale relative to the BF16 baseline.
+    const bool is_mi32 = (MI_M_pw >= 32 || MI_N_pw >= 32);
+    double cycles_per_mfma = is_mi32 ? 32.0 : 8.0;
+    if (a_bits != 16 || b_bits != 16) {
+      // f32 / xf32 emulation paths run heavier per-MFMA; bump 2x as a
+      // first-order correction until a per-dtype table is filled in.
+      cycles_per_mfma *= 2.0;
+    }
+    const double mfma_count   = static_cast<double>(MIWT_M_pw)
+                              * static_cast<double>(MIWT_N_pw);
+    const double mfma_cycles  = mfma_count * cycles_per_mfma;
+    constexpr size_t LRVW_PW  = 8;
+    const double lds_read_instr =
+        (static_cast<double>(MIWT_M_pw) + static_cast<double>(MIWT_N_pw))
+        * std::max(1.0, static_cast<double>(MI_K_pw) / static_cast<double>(LRVW_PW));
+    const double lds_read_cycles = lds_read_instr;  // 1 issue cycle/read
+
+    // ----------------------------------------- Per-thread VGPR estimate
+    // Per thread, per MFMA: A = MI_M*MI_K/64 * bytes/4; B = MI_K*MI_N/64*bytes/4;
+    // D (f32 accum) = MI_M*MI_N/64 * 4/4 = MI_M*MI_N/64.  Operand registers
+    // are shared across MIWT_M (A) and MIWT_N (B) MFMAs at the same K
+    // position, so the operand budget scales as MIWT_M + MIWT_N (not the
+    // MFMA-count product).  PGR>=2 double-buffers the operands.
+    const double a_bytes_pw = static_cast<double>(a_bits) / 8.0;
+    const double b_bytes_pw = static_cast<double>(b_bits) / 8.0;
+    const double a_vgpr_per_slice =
+        static_cast<double>(MI_M_pw * MI_K_pw) * a_bytes_pw / 64.0 / 4.0;
+    const double b_vgpr_per_slice =
+        static_cast<double>(MI_K_pw * MI_N_pw) * b_bytes_pw / 64.0 / 4.0;
+    constexpr double ACCUM_BYTES_PER_OUTPUT = 4.0;  // f32 accumulator
+    const double d_vgpr_per_mfma =
+        static_cast<double>(MI_M_pw * MI_N_pw) * ACCUM_BYTES_PER_OUTPUT / 64.0 / 4.0;
+    const double pgr_factor = (pgr >= 2) ? 2.0 : 1.0;
+    const double accum_vgpr   = mfma_count * d_vgpr_per_mfma;
+    const double operand_vgpr = (static_cast<double>(MIWT_M_pw) * a_vgpr_per_slice
+                              + static_cast<double>(MIWT_N_pw) * b_vgpr_per_slice)
+                              * pgr_factor;
+    constexpr double ADDRESS_CALC_VGPR = 30.0;
+    const double total_vgpr_pw = accum_vgpr + operand_vgpr + ADDRESS_CALC_VGPR;
+
+    // Occupancy stepwise (gfx95x VGPR allocation, granular).
+    double occupancy_waves;
+    if      (total_vgpr_pw <=  96.0) occupancy_waves = 4.0;
+    else if (total_vgpr_pw <= 128.0) occupancy_waves = 3.0;
+    else if (total_vgpr_pw <= 168.0) occupancy_waves = 2.0;
+    else if (total_vgpr_pw <= 256.0) occupancy_waves = 1.0;
+    else                              occupancy_waves = 0.5;
+    constexpr double TARGET_OCCUPANCY = 4.0;
+    const double occupancy_score = std::clamp(
+        occupancy_waves / TARGET_OCCUPANCY, 0.0, 1.0);
+
+    // ----------------------------------------- Scores
+    // §3.1 LDS-read latency hiding.
+    constexpr double LATENCY_HIDING_THRESHOLD = 1.5;
+    const double latency_hiding_score = std::clamp(
+        mfma_cycles
+        / (LATENCY_HIDING_THRESHOLD * std::max(lds_read_cycles, 1.0)),
+        0.0, 1.0);
+
+    // §3.4 Mainloop body length is intentionally NOT included here.  The
+    // proposal's body_score is a per-K-iter "is the MFMA chain long enough
+    // to hide a single global-load round trip" gate, but for normal
+    // problems with k_iters >> pgr the PGR steady-state pipeline already
+    // amortises the global-load latency across many iters — body_score
+    // ends up penalising perfectly-fine narrow-MIWT kernels (e.g. f32
+    // MIWT 1x3 gets a 3x penalty even though K=512 / MT_K=64 = 8 iters
+    // amortise fine).  A proper body_score would compare *total* mainloop
+    // cycles against global-load latency; until that's calibrated we omit
+    // the term.
+    //
+    // §3.5 WG slots per CU.
+    constexpr double THREAD_BUDGET_PER_CU   = 2048.0;
+    constexpr double TARGET_WG_SLOTS_PER_CU = 2.0;
+    const double wg_slots_per_cu = THREAD_BUDGET_PER_CU
+        / (64.0 * static_cast<double>(waves_per_wg));
+    const double wg_score = std::clamp(
+        wg_slots_per_cu / TARGET_WG_SLOTS_PER_CU, 0.0, 1.0);
+
+    // Occupancy only buys throughput by hiding *exposed* memory stalls — the
+    // part of a K-iter's memory latency that the PGR pipeline can't overlap
+    // behind compute.  For a compute-bound tile (L_compute >= L_mem) memory
+    // is fully hidden, so low occupancy costs nothing; the penalty must fade.
+    // Without this, a large-tile f32 GEMM (e.g. MT256x256 MIWT8x8) carries a
+    // big accumulator file -> low occupancy_score -> the ×1.5 cap compounds
+    // across every one of K/MT_K iters, and the model wrongly ranks the
+    // fastest compute kernel last (f32 4096^3 squares).
+    const double exposed_mem_frac = std::clamp(
+        (L_mem - L_compute) / std::max(L_mem, 1.0), 0.0, 1.0);
+    const double occupancy_score_eff =
+        1.0 - (1.0 - occupancy_score) * exposed_mem_frac;
+
+    // Combined score (§4) — three terms (latency_hiding × occupancy × wg).
+    double per_wave_score =
+        latency_hiding_score * occupancy_score_eff * wg_score;
+
+    // Cap the multiplier.  The proposal's score can drop to ~0.06 for a
+    // single-spill, single-wave-per-CU kernel, which would inflate compute
+    // by 16x — too aggressive given that real-world spill kernels lose
+    // ~30-50% throughput, not 16x.  Cap multiplier at 1.5x (i.e. the
+    // per-wave-aspect penalty contributes at most 50% extra L_compute).
+    constexpr double PER_WAVE_MAX_MULTIPLIER = 1.5;
+    constexpr double PER_WAVE_MIN_SCORE = 1.0 / PER_WAVE_MAX_MULTIPLIER;
+    per_wave_score = std::max(per_wave_score, PER_WAVE_MIN_SCORE);
+
+    L_compute /= per_wave_score;
+
+    if (debug) {
+      OLOG_DEBUG("per_wave MIWT_M: " << MIWT_M_pw);
+      OLOG_DEBUG("per_wave MIWT_N: " << MIWT_N_pw);
+      OLOG_DEBUG("per_wave waves_per_wg: " << waves_per_wg);
+      OLOG_DEBUG("per_wave mfma_cycles: " << mfma_cycles);
+      OLOG_DEBUG("per_wave lds_read_cycles: " << lds_read_cycles);
+      OLOG_DEBUG("per_wave latency_hiding_score: " << latency_hiding_score);
+      OLOG_DEBUG("per_wave total_vgpr: " << total_vgpr_pw);
+      OLOG_DEBUG("per_wave occupancy_waves: " << occupancy_waves);
+      OLOG_DEBUG("per_wave occupancy_score: " << occupancy_score);
+      OLOG_DEBUG("per_wave exposed_mem_frac: " << exposed_mem_frac);
+      OLOG_DEBUG("per_wave occupancy_score_eff: " << occupancy_score_eff);
+      OLOG_DEBUG("per_wave wg_slots_per_cu: " << wg_slots_per_cu);
+      OLOG_DEBUG("per_wave wg_score: " << wg_score);
+      OLOG_DEBUG("per_wave_score (combined): " << per_wave_score);
+      OLOG_DEBUG("per_wave L_compute (after /score): " << L_compute);
+    }
+  }
+
+
   // XF32 / BF16-from-f32 conversion, charged per main-loop iter.
   // TODO: gfx90a also lacks native TF32 and should get CVT overhead, but
   // enabling it changes rankings — address in a separate PR.
@@ -2033,9 +2189,19 @@ double compute_tile_latency(const problem_t& problem,
     const double L_tail_compute  = tail_fraction * L_compute * effective_tile_penalty;
     // Per-sub-iter bookkeeping (barrier / scalar branch / masked ds_read)
     // is wave-wide and does not have OOB-lane waste, so it is not
-    // ETP-scaled.
+    // ETP-scaled.  When the kernel is heavily compute-bound (high ETP from
+    // very low M*N utilization), the per-sub-iter branch/barrier pipelines
+    // behind the dominant MFMA chain — empirically the overhead acts more
+    // like a small constant than a per-sub-iter charge.  Fade overhead to
+    // ~20% of nominal once ETP exceeds ~10.
+    constexpr double TAIL_OVERHEAD_COMPUTE_BOUND_ETP = 10.0;
+    constexpr double TAIL_OVERHEAD_COMPUTE_BOUND_SCALE = 0.2;
+    const double tail_overhead_scale = (effective_tile_penalty > TAIL_OVERHEAD_COMPUTE_BOUND_ETP)
+        ? TAIL_OVERHEAD_COMPUTE_BOUND_SCALE
+        : 1.0;
     const double L_tail_overhead = heuristic.tail_loop_overhead
-                                 * static_cast<double>(tail_sub_iters);
+                                 * static_cast<double>(tail_sub_iters)
+                                 * tail_overhead_scale;
     L_tail = (L_tail_mem + L_tail_compute + L_tail_overhead) * eff_scale;
   }
 
@@ -2064,9 +2230,19 @@ double compute_tile_latency(const problem_t& problem,
 
   // DepthU waste — when the K elements one WG actually processes
   // (`k_effective`) is below MT_K, the kernel still pays for an MT_K-wide
-  // LDS allocation, register state, and prefetch pipeline that the K-loop
-  // never amortises.  Charge that as the equivalent of `(MT_K/k_eff - 1)`
-  // full mainloop iters' worth of work; zero when k_effective >= MT_K.
+  // LDS allocation, register state, and prefetch handshake that the
+  // K-loop never amortises.  Three complementary terms:
+  //
+  //   1. "Padding waste" — proportional to MT_K/k_eff - 1, fires whenever
+  //      the WG has unused K-slots in its DepthU window.
+  //   2. "Oversized-MT_K" — proportional to max(0, MT_K/K_problem - 1),
+  //      charges extra when MT_K exceeds the *entire* problem K so the
+  //      kernel sees at most one main iter (LDS/register/launch costs
+  //      that PGR can't hide).
+  //   3. "Exact one-iter" — when K == MT_K (k_iters == 1, tail == 0)
+  //      neither (1) nor (2) fires but HW still sees the K-loop as a
+  //      single fill+drain with no steady state.  Charge half a mainloop
+  //      iter's worth of cost to reflect that.
   const long k_effective = static_cast<long>(k_iters)
                          * static_cast<long>(MT_K)
                          + static_cast<long>(tail_k);
@@ -2074,13 +2250,30 @@ double compute_tile_latency(const problem_t& problem,
       ? std::max(0.0,
                  static_cast<double>(MT_K) / static_cast<double>(k_effective) - 1.0)
       : 0.0;
+  const double K_problem = static_cast<double>(K);
+  const double mt_k_oversize_ratio = (K_problem > 0.0)
+      ? std::max(0.0, static_cast<double>(MT_K) / K_problem - 1.0)
+      : 0.0;
+  // When k_iters == 1 and there's no tail, the kernel runs a single full
+  // K-iter with no PGR pipeline fill.  Penalising this case is only safe
+  // when the problem K is large enough that smaller MT_K alternatives
+  // would give a meaningful multi-iter K-loop (k_iters >= 2) — for very
+  // small K (e.g. K=32) MT_K=K is the natural pick and any penalty here
+  // flips the model to MT_K>K which then pays a much larger du_waste /
+  // oversize tax (NN 25x25x32, NN 105x491520x32, NN 128x368640x32, ...).
+  // Empirically K > 64 is the cleanest split: it covers Entry 0 (K=128
+  // MT_K=128 over-pick) without disturbing the K=32 regime.
+  constexpr size_t EXACT_ONE_ITER_K_MIN = 64;
+  const double exact_one_iter_ratio =
+      (k_iters == 1 && tail_k == 0 && K > EXACT_ONE_ITER_K_MIN) ? 2.0 : 0.0;
   const double L_main_per_iter = (pgr <= 1)
       ? (L_mem + L_compute * effective_tile_penalty) * eff_scale
             + L_cvt * effective_tile_penalty
       : std::max(L_mem, L_compute * effective_tile_penalty) * eff_scale
             + L_cvt * effective_tile_penalty;
   const double L_du_waste =
-      du_waste_ratio * (L_main_per_iter + K_ITER_LOOP_OVERHEAD);
+      (du_waste_ratio + mt_k_oversize_ratio + exact_one_iter_ratio)
+      * (L_main_per_iter + K_ITER_LOOP_OVERHEAD);
 
   // MainLoop subtotal.
   const double L_mainloop =
@@ -2088,15 +2281,208 @@ double compute_tile_latency(const problem_t& problem,
 
   // ---------------------------------------------------------------------------
   // 3. Epilogue (per-tile store; compute is already covered by NLL)
+  //
+  // `compute_epilogue_latency` returns a baseline assuming HBM store BW.
+  // Cached-D stores (cache_hints_d < 4) get an L2 bandwidth discount, but
+  // only as much as the kernel's epilogue is on the critical path.  When
+  // K is large the mainloop hides store latency and NTD vs cached-D
+  // differences fade; when K is thin / single-iter, stores dominate and
+  // the L2 BW advantage matters fully.  Blend factor is the
+  // store-rate-ratio remapped into [0, 1] across an empirical band.
   // ---------------------------------------------------------------------------
-  const double L_epilogue =
+  const double L_epilogue_hbm =
       compute_epilogue_latency(problem, hardware, config, context) * occupancy_factor;
 
+  double L_epilogue = L_epilogue_hbm;
+  double store_rate_ratio = 0.0;
+  double ntd_l2_help_factor = 0.0;
+  double l2_fit_factor = 1.0;
+
+  // Per-wave M-store width (in cache lines): the dominant NTD4 traffic
+  // driver per rocprof measurements (miwg_ntd_study/NTD_findings.md §4).
+  // Each wave's epilogue writes (MT_M / MIWG_M) M-rows per N-step.
+  // Cached-D coalesces these into 1× HBM transaction per output line
+  // (layout-independent).  Streaming NTD=4 issues per-wave HBM
+  // transactions; traffic scales linearly with per_wave_m_lines:
+  //   1 line  → 1.20× cached HBM traffic
+  //   4 lines → 2.04× cached HBM traffic
+  // Linear fit: ntd4_traffic_factor = 0.28 · lines + 0.92.
+  const size_t MIWG_M_ntd = std::max<size_t>(config.wave.m, 1);
+  const double per_wave_m_rows =
+      static_cast<double>(config.mt.m) / static_cast<double>(MIWG_M_ntd);
+  constexpr double CACHE_LINE_BYTES = 64.0;
+  const double per_wave_m_bytes = per_wave_m_rows * context.d_bytes;
+  const double per_wave_m_lines =
+      std::max(1.0, std::ceil(per_wave_m_bytes / CACHE_LINE_BYTES));
+  const double ntd4_traffic_factor =
+      std::clamp(0.28 * per_wave_m_lines + 0.92, 1.0, 2.5);
+
+  // Tiles/CU > 1 amplifies streaming-store contention.
+  const size_t tiles_per_cu_signal = context.active_cus > 0
+      ? std::max<size_t>(context.num_output_tiles
+            / std::max<size_t>(context.active_cus, 1), 1)
+      : 1;
+  // Partial-M edge-tile signal.
+  const size_t M_problem = problem.size.m;
+  const size_t MT_M_pr   = std::max<size_t>(config.mt.m, 1);
+  const bool partial_m = (M_problem % MT_M_pr) != 0;
+
+  // Per-batch working set for L2-fit (existing logic — needed for the
+  // cached-D thrash detection).
+  const double a_total_bytes_pb = static_cast<double>(problem.size.m)
+                                * static_cast<double>(problem.size.k)
+                                * context.a_bytes;
+  const double b_total_bytes_pb = static_cast<double>(problem.size.k)
+                                * static_cast<double>(problem.size.n)
+                                * context.b_bytes;
+  const double d_total_bytes_pb = static_cast<double>(problem.size.m)
+                                * static_cast<double>(problem.size.n)
+                                * context.d_bytes;
+  const double per_batch_ws = a_total_bytes_pb + b_total_bytes_pb + d_total_bytes_pb;
+  const double l2_cap = static_cast<double>(hardware.L2_capacity);
+  constexpr size_t L2_FIT_K_MIN = 64;
+  if (l2_cap > 0.0 && per_batch_ws > l2_cap &&
+      problem.size.k >= L2_FIT_K_MIN) {
+    const double overflow_ratio = per_batch_ws / l2_cap - 1.0;
+    l2_fit_factor = std::max(0.0, 1.0 - overflow_ratio / 6.0);
+  }
+
+  // Output-streaming L2-fit signal: does the per-batch working set fit in L2?
+  // Unlike l2_fit_factor above, this is intentionally K-independent — a huge
+  // output (D >> L2) thrashes the cache whether K is thin or deep, so the
+  // streaming(NTD4)-vs-cached(NTD0) trade-off must respond to it at any K.
+  double d_l2_fit = 1.0;  // 1.0 = fits L2; -> 0 as D >> L2
+  if (l2_cap > 0.0 && per_batch_ws > l2_cap) {
+    const double ws_overflow = per_batch_ws / l2_cap - 1.0;
+    d_l2_fit = std::max(0.0, 1.0 - ws_overflow / 6.0);
+  }
+
+  if (config.cache_hints_d < 4) {
+    // Cached-D path: L2 BW advantage gated on store_rate and l2_fit.
+    const double total_per_wg = L_mainloop + L_epilogue_hbm;
+    store_rate_ratio = (total_per_wg > 0.0) ? L_epilogue_hbm / total_per_wg : 0.0;
+    constexpr double STORE_RATE_LOW  = 0.05;
+    constexpr double STORE_RATE_HIGH = 0.30;
+    ntd_l2_help_factor = std::clamp(
+        (store_rate_ratio - STORE_RATE_LOW) / (STORE_RATE_HIGH - STORE_RATE_LOW),
+        0.0, 1.0);
+    ntd_l2_help_factor *= l2_fit_factor;
+    const double bw_speedup_max =
+        hardware.mem3_perf_ratio > 0.0
+            ? hardware.mem1_perf_ratio / hardware.mem3_perf_ratio
+            : 1.0;
+    const double bw_speedup = 1.0 + (bw_speedup_max - 1.0) * ntd_l2_help_factor;
+    L_epilogue = L_epilogue_hbm / std::max(bw_speedup, 1.0);
+    // L2-thrash tax on cached-D when the output working set exceeds L2.
+    // Cached stores into a D >> L2 footprint pay write-allocate (read-for-
+    // ownership) traffic and evict the A/B tiles the mainloop still needs,
+    // forcing HBM re-fetch — so cached-D loses its L2 advantage and then
+    // some.  Grows with cache overflow; capped at +50% (a fully thrashing
+    // cached store is ~the streaming cost plus the wasted RFO read).
+    if (l2_cap > 0.0 && per_batch_ws > 2.0 * l2_cap &&
+        problem.size.k >= L2_FIT_K_MIN &&
+        store_rate_ratio > 0.30) {
+      const double overflow_ratio = per_batch_ws / l2_cap - 2.0;
+      const double thrash_factor = std::clamp(overflow_ratio * 0.05, 0.0, 0.5);
+      L_epilogue *= 1.0 + thrash_factor;
+    }
+  } else {
+    // NTD=4 (streaming) path.
+    //
+    // The traffic / contention penalties below cost streaming stores
+    // *relative to a cache-coalesced store that lands in L2*.  That baseline
+    // only exists when the output actually fits in L2 (d_l2_fit -> 1).  When
+    // D >> L2 (d_l2_fit -> 0) the cached alternative would thrash and spill
+    // to HBM anyway, so streaming is the efficient choice and these
+    // penalties must fade to ~1.0 — otherwise the model wrongly avoids NTD4
+    // on exactly the huge-output shapes non-temporal stores exist for.
+    //
+    // The fade is restricted to the two regimes where measurement shows
+    // streaming actually wins for D >> L2:
+    //   * 16-bit output (bf16/fp16).  f32 huge-N outputs measure faster with
+    //     cached-D even when D >> L2 (wider stores write-combine well and the
+    //     L2 still absorbs a useful fraction), so f32 keeps the full penalty.
+    //   * M fills its tiles.  A single under-filled M-tile (M < MT_M, one
+    //     M-tile) streams masked/partial lines to HBM on every store — that
+    //     waste is real regardless of L2 fit, so it keeps the full penalty.
+    //     Multi-tile partial-M (M >> MT_M, only the last tile partial) is
+    //     diluted and handled by the partial_m_tile_waste term below.
+    const bool   d_is_16bit       = (context.d_bytes <= 2);
+    const size_t m_tiles_ntd      = math::safe_ceil_div(
+        problem.size.m, std::max<size_t>(config.mt.m, 1));
+    const bool   single_partial_m = (m_tiles_ntd <= 1)
+                                  && (problem.size.m < config.mt.m);
+    const double ntd4_pen_gate =
+        (d_is_16bit && !single_partial_m) ? d_l2_fit : 1.0;
+    const double traf = 1.0 + (ntd4_traffic_factor - 1.0) * ntd4_pen_gate;
+    L_epilogue = L_epilogue_hbm * traf;
+    // Tiles/CU > 1 amplifies streaming-store contention.
+    if (tiles_per_cu_signal >= 2) {
+      L_epilogue *= 1.0 + 0.15 * ntd4_pen_gate;
+    }
+    // Partial-M edge-tile route hurts streaming unless M-heavy + 1
+    // tile/CU.
+    if (partial_m) {
+      const bool m_heavy_save = (MIWG_M_ntd >= 4) && (tiles_per_cu_signal <= 1);
+      if (!m_heavy_save) {
+        L_epilogue *= 1.0 + 0.18 * ntd4_pen_gate;
+      }
+    }
+    // K-rich shapes still pay the existing modest epilogue penalty (D-store
+    // vs A/B-prefetch channel contention; independent of L2 fit).
+    constexpr long K_ITERS_RICH_THRESHOLD = 4;
+    if (k_iters > K_ITERS_RICH_THRESHOLD) {
+      const double k_rich_excess = static_cast<double>(k_iters)
+                                 / static_cast<double>(K_ITERS_RICH_THRESHOLD)
+                                 - 1.0;
+      const double k_rich_penalty = std::clamp(k_rich_excess * 0.05, 0.0, 0.25);
+      L_epilogue *= 1.0 + k_rich_penalty;
+    }
+  }
+
   // ---------------------------------------------------------------------------
-  // 4. Total tile latency
+  // 4. Partial-M-tile MIWG inefficiency
+  //
+  // When M overflows into a partial last tile, the wave-rows of an
+  // MIWG_M-heavy layout do mostly-masked work on that tile.  Only fires
+  // when there is more than one M-tile (single-tile partial-M is captured
+  // by the existing utilization term).  Multiplies L_mainloop and
+  // L_epilogue by a gentle factor proportional to the wave-row waste.
+  // ---------------------------------------------------------------------------
+  double partial_m_tile_waste = 0.0;
+  double m_overflow_inflation = 1.0;
+  {
+    const size_t M_problem    = problem.size.m;
+    const size_t MT_M_local   = config.mt.m;
+    const size_t ceil_M_tiles = math::safe_ceil_div(M_problem, MT_M_local);
+    if (ceil_M_tiles > 1 && (M_problem % MT_M_local) != 0) {
+      const size_t last_tile_M       = M_problem % MT_M_local;
+      const size_t MI_M_active       = std::max<size_t>(config.mi.m, 1);
+      const size_t miwg_m            = std::max<size_t>(config.wave.m, 1);
+      const size_t miwt_m_for_waste  = std::max<size_t>(MT_M_local / (MI_M_active * miwg_m), 1);
+      const size_t rows_per_wave_row = MI_M_active * miwt_m_for_waste;
+      const size_t wave_rows_needed  = math::safe_ceil_div(last_tile_M, rows_per_wave_row);
+      partial_m_tile_waste = std::max(
+          0.0,
+          1.0 - static_cast<double>(wave_rows_needed) / static_cast<double>(miwg_m));
+      // Empirical: a partial-tile wave-row that does masked work costs
+      // ~50% of a fully-useful wave-row in wall time (MFMA + ds_read still
+      // execute, but predicated stores / branch-skip recover some cycles).
+      // Averaged over ceil_M_tiles (only the last is partial).
+      constexpr double PARTIAL_TILE_WAVE_COST = 0.5;
+      m_overflow_inflation = 1.0
+          + PARTIAL_TILE_WAVE_COST * partial_m_tile_waste
+                / static_cast<double>(ceil_M_tiles);
+    }
+  }
+  const double L_mainloop_eff = L_mainloop * m_overflow_inflation;
+  const double L_epilogue_eff = L_epilogue * m_overflow_inflation;
+
+  // ---------------------------------------------------------------------------
+  // 5. Total tile latency
   // ---------------------------------------------------------------------------
   const double L_tile_fixed = heuristic.tile_fixed_overhead;
-  const double L_tile_total = L_prologue + L_mainloop + L_epilogue + L_tile_fixed;
+  const double L_tile_total = L_prologue + L_mainloop_eff + L_epilogue_eff + L_tile_fixed;
 
   if (debug) {
     OLOG_DEBUG("utilization: " << utilization);
@@ -2123,9 +2509,24 @@ double compute_tile_latency(const problem_t& problem,
     OLOG_DEBUG("L_loop_overhead: " << L_loop_overhead);
     OLOG_DEBUG("k_effective: " << k_effective);
     OLOG_DEBUG("du_waste_ratio: " << du_waste_ratio);
+    OLOG_DEBUG("mt_k_oversize_ratio: " << mt_k_oversize_ratio);
+    OLOG_DEBUG("exact_one_iter_ratio: " << exact_one_iter_ratio);
     OLOG_DEBUG("L_du_waste: " << L_du_waste);
     OLOG_DEBUG("L_mainloop: " << L_mainloop);
+    OLOG_DEBUG("L_epilogue_hbm: " << L_epilogue_hbm);
+    OLOG_DEBUG("per_wave_m_rows: " << per_wave_m_rows);
+    OLOG_DEBUG("per_wave_m_lines: " << per_wave_m_lines);
+    OLOG_DEBUG("ntd4_traffic_factor: " << ntd4_traffic_factor);
+    OLOG_DEBUG("tiles_per_cu_signal: " << tiles_per_cu_signal);
+    OLOG_DEBUG("partial_m: " << partial_m);
+    OLOG_DEBUG("store_rate_ratio: " << store_rate_ratio);
+    OLOG_DEBUG("d_l2_fit: " << d_l2_fit);
+    OLOG_DEBUG("ntd_l2_help_factor: " << ntd_l2_help_factor);
     OLOG_DEBUG("L_epilogue: " << L_epilogue);
+    OLOG_DEBUG("partial_m_tile_waste: " << partial_m_tile_waste);
+    OLOG_DEBUG("m_overflow_inflation: " << m_overflow_inflation);
+    OLOG_DEBUG("L_mainloop_eff: " << L_mainloop_eff);
+    OLOG_DEBUG("L_epilogue_eff: " << L_epilogue_eff);
     OLOG_DEBUG("L_tile_fixed: " << L_tile_fixed);
     OLOG_DEBUG("L_tile_total: " << L_tile_total);
   }
