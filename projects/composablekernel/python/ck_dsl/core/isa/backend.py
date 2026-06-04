@@ -303,6 +303,7 @@ BACKEND_REGISTRY: Dict[str, Callable[[ArchTarget], ISABackend]] = {
     "gfx950": Gfx950Backend,
     "gfx1151": Gfx11RdnaBackend,
     "gfx1201": Gfx12RdnaBackend,
+    "gfx11-generic": Gfx11RdnaBackend,
 }
 
 
