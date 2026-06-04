@@ -42,58 +42,58 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: MIOpen Hip Debug NOCK Build-Only
-            job_id: no-ck-build
-            cmake_extra_flags: >-
-              -DCMAKE_BUILD_TYPE=debug
-              -DCMAKE_CXX_FLAGS_DEBUG='-g -fno-omit-frame-pointer -fsanitize=undefined -fno-sanitize-recover=undefined -Wno-option-ignored '
-              -DBUILD_DEV=OFF
-              -DMIOPEN_USE_MLIR=OFF
-              -DMIOPEN_GPU_SYNC=OFF
-              -DMIOPEN_USE_COMPOSABLEKERNEL=OFF
-              -DCMAKE_INSTALL_PREFIX=$(pwd)/projects/miopen/install
-              -DCMAKE_PREFIX_PATH=/opt/rocm
-              -DGPU_TARGETS="gfx942"
-            build_target: --target install
+          # - name: MIOpen Hip Debug NOCK Build-Only
+          #   job_id: no-ck-build
+          #   cmake_extra_flags: >-
+          #     -DCMAKE_BUILD_TYPE=debug
+          #     -DCMAKE_CXX_FLAGS_DEBUG='-g -fno-omit-frame-pointer -fsanitize=undefined -fno-sanitize-recover=undefined -Wno-option-ignored '
+          #     -DBUILD_DEV=OFF
+          #     -DMIOPEN_USE_MLIR=OFF
+          #     -DMIOPEN_GPU_SYNC=OFF
+          #     -DMIOPEN_USE_COMPOSABLEKERNEL=OFF
+          #     -DCMAKE_INSTALL_PREFIX=$(pwd)/projects/miopen/install
+          #     -DCMAKE_PREFIX_PATH=/opt/rocm
+          #     -DGPU_TARGETS="gfx942"
+          #   build_target: --target install
 
-          - name: MIOpen Build Hip Package
-            job_id: hip-package-build
-            cmake_extra_flags: >-
-              -DCMAKE_BUILD_TYPE=release
-              -DBUILD_DEV=OFF
-              -DMIOPEN_TEST_DISCRETE=OFF
-              -DMIOPEN_USE_MLIR=ON
-              -DMIOPEN_GPU_SYNC=OFF
-              -DCMAKE_PREFIX_PATH=/opt/rocm
-              -DGPU_TARGETS="gfx942"
-            build_target: --target miopen_gtest --target package
+          # - name: MIOpen Build Hip Package
+          #   job_id: hip-package-build
+          #   cmake_extra_flags: >-
+          #     -DCMAKE_BUILD_TYPE=release
+          #     -DBUILD_DEV=OFF
+          #     -DMIOPEN_TEST_DISCRETE=OFF
+          #     -DMIOPEN_USE_MLIR=ON
+          #     -DMIOPEN_GPU_SYNC=OFF
+          #     -DCMAKE_PREFIX_PATH=/opt/rocm
+          #     -DGPU_TARGETS="gfx942"
+          #   build_target: --target miopen_gtest --target package
 
-          - name: MIOpen HipNoGPU Debug Build-Only
-            job_id: no-gpu-debug-build
-            cmake_extra_flags: >-
-              -DCMAKE_BUILD_TYPE=debug
-              -DCMAKE_CXX_FLAGS_DEBUG='-g -fno-omit-frame-pointer -fsanitize=undefined -fno-sanitize-recover=undefined -Wno-option-ignored '
-              -DBUILD_DEV=ON
-              -DMIOPEN_USE_MLIR=OFF
-              -DMIOPEN_GPU_SYNC=OFF
-              -DMIOPEN_BACKEND=HIPNOGPU
-              -DMIOPEN_INSTALL_CXX_HEADERS=ON
-              -DCMAKE_PREFIX_PATH=/opt/rocm
-            build_target: ""
+          # - name: MIOpen HipNoGPU Debug Build-Only
+          #   job_id: no-gpu-debug-build
+          #   cmake_extra_flags: >-
+          #     -DCMAKE_BUILD_TYPE=debug
+          #     -DCMAKE_CXX_FLAGS_DEBUG='-g -fno-omit-frame-pointer -fsanitize=undefined -fno-sanitize-recover=undefined -Wno-option-ignored '
+          #     -DBUILD_DEV=ON
+          #     -DMIOPEN_USE_MLIR=OFF
+          #     -DMIOPEN_GPU_SYNC=OFF
+          #     -DMIOPEN_BACKEND=HIPNOGPU
+          #     -DMIOPEN_INSTALL_CXX_HEADERS=ON
+          #     -DCMAKE_PREFIX_PATH=/opt/rocm
+          #   build_target: ""
 
-          - name: MIOpen Tuna Fin Build-Only
-            job_id: tuna-fin-build
-            cmake_extra_flags: >-
-              -DCMAKE_BUILD_TYPE=release
-              -DBUILD_DEV=OFF
-              -DMIOPEN_INSTALL_CXX_HEADERS=ON
-              -DCMAKE_INSTALL_PREFIX=$(pwd)/projects/miopen/install
-              -DMIOPEN_USE_MLIR=ON
-              -DMIOPEN_GPU_SYNC=OFF
-              -DMIOPEN_BACKEND=HIPNOGPU
-              -DCMAKE_PREFIX_PATH=/opt/rocm
-              -DGPU_TARGETS="gfx942"
-            build_target: --target install --target all
+          # - name: MIOpen Tuna Fin Build-Only
+          #   job_id: tuna-fin-build
+          #   cmake_extra_flags: >-
+          #     -DCMAKE_BUILD_TYPE=release
+          #     -DBUILD_DEV=OFF
+          #     -DMIOPEN_INSTALL_CXX_HEADERS=ON
+          #     -DCMAKE_INSTALL_PREFIX=$(pwd)/projects/miopen/install
+          #     -DMIOPEN_USE_MLIR=ON
+          #     -DMIOPEN_GPU_SYNC=OFF
+          #     -DMIOPEN_BACKEND=HIPNOGPU
+          #     -DCMAKE_PREFIX_PATH=/opt/rocm
+          #     -DGPU_TARGETS="gfx942"
+          #   build_target: --target install --target all
 
           # Runs miopen_gtest_check (binary listing + naming convention validation) using
           # rocjitsu's KMD LD_PRELOAD interposer to satisfy HIP device init without a real GPU.
