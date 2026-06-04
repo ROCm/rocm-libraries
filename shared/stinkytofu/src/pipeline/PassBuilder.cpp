@@ -89,7 +89,7 @@ bool PassBuilder::loadPlugin(const std::string& path) {
     HMODULE handle = LoadLibraryA(path.c_str());
     if (!handle) {
         std::cerr << "PassBuilder: failed to load plugin '" << path << "': error code "
-                  << GetLastError() << std::endl;
+                  << GetLastError() << '\n';
         return false;
     }
 
@@ -97,7 +97,7 @@ bool PassBuilder::loadPlugin(const std::string& path) {
     auto* registerFn = reinterpret_cast<RegisterFn>(GetProcAddress(handle, "registerPlugin"));
     if (!registerFn) {
         std::cerr << "PassBuilder: plugin '" << path << "' does not export registerPlugin()"
-                  << std::endl;
+                  << '\n';
         FreeLibrary(handle);
         return false;
     }
@@ -109,8 +109,7 @@ bool PassBuilder::loadPlugin(const std::string& path) {
 
     void* handle = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
     if (!handle) {
-        std::cerr << "PassBuilder: failed to load plugin '" << path << "': " << dlerror()
-                  << std::endl;
+        std::cerr << "PassBuilder: failed to load plugin '" << path << "': " << dlerror() << '\n';
         return false;
     }
 
@@ -118,7 +117,7 @@ bool PassBuilder::loadPlugin(const std::string& path) {
     auto* registerFn = reinterpret_cast<RegisterFn>(dlsym(handle, "registerPlugin"));
     if (!registerFn) {
         std::cerr << "PassBuilder: plugin '" << path
-                  << "' does not export registerPlugin(): " << dlerror() << std::endl;
+                  << "' does not export registerPlugin(): " << dlerror() << '\n';
         dlclose(handle);
         return false;
     }
