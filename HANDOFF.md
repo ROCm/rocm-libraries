@@ -6,6 +6,7 @@
 
 ## TL;DR — 当前状态（先读这段）
 
+- **最新（Step 28, 06-04）= RDB 重排双缓冲安全去 WAR barrier,8192³ +1.6%(1761→1790)零回归,所有形状可证明正确**(commit 9e30177)。机制:deep-K 循环 4 barrier/2tile,2 个 WAR 值 +6% 但裸删=inter-wave skew race(3072² 27/30 挂,无 shape-gate);RDB 把回收 prefetch 挪到 RAW barrier 后→1 barrier 兼担 RAW+WAR,结构性正确。waitcnt(vmcnt/lgkmcnt)数据依赖锁死删不掉。multi-agent 双 harness bit-exact 验证。FP16 生产口径 best @8192³ ≈ **1780–1790**。见 [[mxfp6_war_barrier_cost]]。
 - **生产 kernel = `mxfp6_gemm/test_pipeline_v18.cpp`**（v18 = v17 dispatcher + **LDS 深 K 范式**作为新 tile 候选 TLDS）。LDS kernel 在 `mxfp6_gemm/mxfp6_lds.hpp`。v17（`test_pipeline_v17.cpp`）保留作 LDS-free 基线。
 - **换范式成功（Step 23, 06-03）**：寄存器直读不再是天花板。**LDS 深 K 暂存**（256×256, KT192 双缓冲, 32×32×64, 深 K 窗口 1536cyc > load 880cyc）在大对齐方阵打赢 V17：**8192³ 1671(+3.1%)**、4096² +3.4%、8192×4096 +1.6%、4096×8192 +1.7%、2048×8192 +3.9%。dispatcher cost model 自动只在填满 CU 的大方阵选 LDS,小矩阵/V2 形状(5120/7680/9216)回退 V17。**12/12 OPT, 10/10 正确, 零回归**。
 - v17 部分(仍是非 LDS 形状的最优)：8192³ ~1620 N512[swz];非 2 幂 8192×5120 ≈ 1720 N640[V2]。
@@ -144,6 +145,20 @@ occ1 合并 VGPR 池（arch+acc=512）在 N512 只用 388/512，闲 124 arch VGP
 
 **结果: 无效。** 8192³ K-tail 1633→1627 (噪声内,6/6 仍正确)。asm 实锤机制: 即便加了显式 vmcnt(20),编译器**仍在每个 ds_read 前自插 vmcnt(0)** (kernel 内 **10× vmcnt(0) vs 我的 2× vmcnt(20)**) → 我的相对 wait 只是被后面的 vmcnt(0) 盖掉的冗余。要让 prefetch 真留在飞必须**压制编译器的 vmcnt(0)** = 全-asm ds_read,Step 21 已六法证伪 (race/无收益)。**确认: occ1 单 wave 的 overlap 已是编译器 vmcnt(0)-drain + 提前一 tile 预取的最优,无手动空间。** 已 revert,仅留 NOTE 注释。
 
+### Step 27 ✅/❌ HipKittens 论文系统调研:四条杠杆全证伪,深 K 冠军 (06-04, multi-agent)
+
+基于 HipKittens 论文 (arXiv:2511.08083) 用多 agent team 系统评估能否超越深 K。**生产范式零改动。** 基线校准: FP16 best-SWZ @8192³ ≈ **1741**。四条杠杆裁决: ① **XCD/chiplet grid swizzle ❌**(与 SWZ band 对抗,L2 miss 2.45×,宽形 −6%); ② **LDS bank-conflict ❌ red herring**(9.5% LDS-active,大部分 ds_read_b128 固有,上界 ≤3%,fix 是 47-61% 错值陷阱); ③ **8-wave wave-level ping-pong ❌ NO-GO**(best F16 1432 −17.8%; occ-2 达成但每 iter 强制 1× vmcnt(0) drain 删不掉,浅 KSTEP 每 8 MFMA drain vs 深 K 96-MFMA 窗口摊薄,27× barrier/12× drain); ④ **HK 4-wave 对标 ❌**(靠 sched_group_barrier 细交错——本栈已证伪 −88%——且无深 K)。**编译期 M/N/K 特化 ❌ 无收益**(−1.1%,latency-bound 下优化 issue/branch regime 是错档)。净结论: 深 K 仍冠军,机制 = 大 MFMA 窗口摊薄不可避免的 vmcnt(0) drain。见 memory [[mxfp6_hk_xcd_swizzle_disproven]] [[mxfp6_8wave_pingpong_nogo]] [[mxfp6_compiletime_dims_no_benefit]]。
+
+### Step 28 ✅ RDB 重排双缓冲:安全去 WAR barrier +1.6% (06-04, multi-agent)
+
+用户要求挖 wait_vmcnt/__syncthreads 的优化空间。定盘: deep-K 循环每 2 tile **4 个 __syncthreads** (2 RAW 填前读 + 2 WAR 读前覆写)。实测 (profile_lds 8192³ FP16): **去 2 个 WAR barrier +6%(1740→1846),去全 4 个 +20%(2095)**,但 **waitcnt 删不掉**(vmcnt(0)×10 / lgkmcnt(0)×28 三版 asm 恒等,数据依赖锁死 = occ-1 延迟地板)。
+
+**裸删 WAR = 数据竞争**(multi-agent 查实): 是 inter-wave skew,追踪 **WG 数**(部分填充 48–480 峰值,非宽高比),**无 principled shape 门控**(唯一 k_tiles≤2 无用); 真实生产形状 **3072² swz0 (144WG) 27/30 挂**。8192³ 测不出是因 1024WG 塞满 CU→4 wave lockstep→skew≈0,**"跑 N 次没错≠正确"** 的典型陷阱。
+
+**修复 = RDB**: 把回收 prefetch 从 RAW barrier **前**挪到**后** → 一个 barrier/tile 同时担保 RAW(本buf)+WAR(回收buf)(夹在"上次读"和"异步覆写"之间,结构性证明无时序假设),4→2 barrier/2tile。**所有形状正确**(双独立 harness bit-exact 验证,3072²/6144×2048/4096×3072/5120²/K6144 ≥30 invocation uniq=1,control 挂 27/30 + RAW/WAR 双 hazard 证明)。**隔离 A/B best-of-5: 8192³ 1761→1790 +1.6%,各形状 +0.3~2.0%(矩形/高瘦最高 +4.8%),零回归**,VGPR/AGPR/LDS/occ/spill 全不变。剩余到 racy +6% 的差距 = prefetch-before-barrier 调度,双缓冲里证明需要 WAR barrier(三缓冲消 WAR 但只配 KT128 净亏 −5%)。顺带修复并保留 NOSCALE(原 crash+只砍应用→真 scale-free,测出 scale 开销 ~3.5%)。已合并 commit。见 memory [[mxfp6_war_barrier_cost]]。
+
+⚠️ **本会话仓库事故**: 中途某次 reset(疑似 team/worktree 清理)把本地 HEAD 退回 stale fd40a316 + gc 掉 RDB 的 commit + 回退了未提交的 Step25-27 HANDOFF 草稿。内容零丢失(磁盘+NFS+备份),已 `reset --mixed` 对齐 origin/1a8954 重新合并提交,本 Step 27 prose 即从上下文恢复。
+
 ---
 
 ## 🔑 核心技术要点
@@ -213,9 +228,11 @@ mxfp6_gemm/
 2. ~~**Warp specialization(生产者-消费者)**~~ ❌ **已证伪(Step 24)**:机器全部跑通 (LDS flag ring + 跨-wave glds 可见性,6/6 正确) 但 **等强度输给对称双缓冲 −29%** (WS 1044 vs baseline 1473 @128×256 8-acc)。三因:producer 占 SIMD 损 MFMA 吞吐 + HIP 统一寄存器分配把 consumer 锁死 8-acc(16-acc 不可达) + spin/flag 开销。CDNA4 无 per-wave 寄存器重分配 (Hopper setmaxnreg),此路堵死。**这是 HANDOFF 此前标的"唯一上台阶前沿",现已穷尽 → 1671 是实用天花板。**
 3. ~~**Epilogue 输出类型**~~ ✅ **完成(Step 25, 含 dispatcher 端到端)**:`store_acc_t<OutT>` + 两个生产 kernel + 整个 v18 dispatcher 全链路 `typename OutT=float` 模板化,支持 F32/F16/BF16。float 零回归(10/10 correct);F16/BF16 端到端 8/8 correct。**生产 K-padded 路径里 F16/BF16 不慢甚至略快**(@8192³ F32 1675/F16 1709/BF16 1711);旧"慢 6%"只是 test_lds K-tail dev 路径产物,已订正。见 [[mxfp6-output-epilogue]]。
 4. **V2 路径也用双缓冲 / V2+LDS**(次要,低优):V2 双缓冲已证伪(Step 20 −1.8%);仅剩 V2+LDS-深K+混合acc 未试,但概率低(占满 256AGPR+深K operands 再加 acc_v 极可能 spill)、价值窄(只非2幂N,且 V2 本就是那些形状最优 1739)。
-5. **(若还想榨性能) 剩下的全是窄路**:LDS 命中 91→99% (swizzle 已近天花板)、persistent kernel + lifetime-aware rasterization (主要救非2幂的 grid-tail,pow2 已无 tail→窄)、或接受 18% 即实用上限。**无明显大杠杆剩余。** 真正上台阶需要的深复用解耦在 gfx950 结构性堵死(warp-spec 寄存器税 Step24 / 编译器 vmcnt(0) drain Step21+26),非调参可解。
+5. ~~**同步开销 (wait_vmcnt / __syncthreads)**~~ ✅ **完成(Step 28)**:RDB 重排双缓冲安全去 2 个 WAR barrier,+1.6% @8192³ 所有形状可证明正确。waitcnt 不可删(数据依赖)。剩余到 racy +6% 的部分结构性堵死(双缓冲 prefetch-before-barrier 必需 WAR)。
+6. **(若还想榨性能) 剩下的全是窄路**:LDS 命中 91→99% (swizzle 已近天花板)、persistent kernel + lifetime-aware rasterization (主要救非2幂的 grid-tail,pow2 已无 tail→窄)、scale 路径 ~3.5%(已 tile-grouped,空间窄)、或接受 ~19% 即实用上限。**无明显大杠杆剩余。** 真正上台阶需要的深复用解耦在 gfx950 结构性堵死(warp-spec 寄存器税 Step24 / 编译器 vmcnt(0) drain Step21+26),非调参可解。
 
 **已证伪、不要重试**：
+- **裸删 WAR barrier / 任何 shape-gate 去 WAR(Step 28)**:裸删 = inter-wave skew race(WG 48–480 部分填充峰值,3072² swz0 27/30 挂),无 principled 安全门控(唯一 k_tiles≤2 无用),8192³ 测不出是 lockstep 假象(UB)。正解只有 RDB(结构性 1 barrier 兼 RAW+WAR)。waitcnt(vmcnt/lgkmcnt)数据依赖删不掉。三缓冲消 WAR 仅配 KT128 净亏 −5%。
 - **深 K 这条线已穷尽(Step 23)**:对称 LDS 最优 = 256×256 KT192 双缓冲(1671);KT256 single(丢重叠)1224、KT256 DB 只能 8-acc(962-984)、KT128 DB(1465)、**A-LDS/B-direct hybrid 828**(编译器 vmcnt(0) drain 废掉混合)、**K-tail 比 padding 慢 2%**(1635 vs 1671)全更差。
 - **混合 glds(LDS)+ 直读(寄存器)**:编译器在 LDS 读前自动插 vmcnt(0) 全 drain → 直读侧暴露、串行。要么全 LDS 要么全寄存器。
 - **CK 的 16×16×128 MFMA**:FLOPs/指令半 + 操作数带宽/FLOP 翻倍,密度错;CK mxfp6 慢部分因此。坚持 32×32×64。
