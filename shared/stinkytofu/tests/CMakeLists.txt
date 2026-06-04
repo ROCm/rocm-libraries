@@ -79,6 +79,7 @@ set(UNIT_CORE_TEST_FILES
     unit/core/AnalysisManagerTest.cpp
     unit/core/BackendRegistryTest.cpp
     unit/core/ComgrProbeTest.cpp
+    unit/core/PassBuilderTest.cpp
 )
 
 # Common/Shared Tests

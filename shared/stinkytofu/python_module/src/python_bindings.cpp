@@ -75,7 +75,32 @@ NB_MODULE(_stinkytofu, m) {
         .def("getMetaDataU64", &StinkyAsmModule::getMetaDataU64, nb::arg("key"),
              "Get uint64 metadata from function by key")
         .def("runOptimizationPipeline", &StinkyAsmModule::runOptimizationPipeline,
-             "Run the optimization pipeline on this module");
+             "Run the optimization pipeline on this module")
+        .def("setPluginDataI64", &StinkyAsmModule::setPluginDataI64, nb::arg("key"),
+             nb::arg("value"), "Set an integer plugin data value accessible by plugin passes")
+        .def("getPluginDataI64", &StinkyAsmModule::getPluginDataI64, nb::arg("key"),
+             nb::arg("defaultVal") = 0, "Get an integer plugin data value")
+        .def("setPluginDataStr", &StinkyAsmModule::setPluginDataStr, nb::arg("key"),
+             nb::arg("value"), "Set a string plugin data value accessible by plugin passes")
+        .def("getPluginDataStr", &StinkyAsmModule::getPluginDataStr, nb::arg("key"),
+             nb::arg("defaultVal") = "", "Get a string plugin data value")
+        .def(
+            "registerPassAtExtensionPoint",
+            [](StinkyAsmModule& self, int ep, const std::string& passName) {
+                self.getPassBuilder().registerAtExtensionPoint(
+                    static_cast<PipelineExtensionPoint>(ep),
+                    [passName](PassManager& PM, StinkyAsmModule&) {
+                        PM.addPass(PassBuilder::createPassByName(passName));
+                    });
+            },
+            nb::arg("extensionPoint"), nb::arg("passName"),
+            "Register a named C++ pass at a pipeline extension point");
+
+    // Pipeline extension point constants
+    m.attr("EP_BeforeRegionPasses") = static_cast<int>(PipelineExtensionPoint::BeforeRegionPasses);
+    m.attr("EP_InnerRegionBegin") = static_cast<int>(PipelineExtensionPoint::InnerRegionBegin);
+    m.attr("EP_InnerRegionEnd") = static_cast<int>(PipelineExtensionPoint::InnerRegionEnd);
+    m.attr("EP_AfterRegionPasses") = static_cast<int>(PipelineExtensionPoint::AfterRegionPasses);
 
     // ========================================================================
     // Register Types
