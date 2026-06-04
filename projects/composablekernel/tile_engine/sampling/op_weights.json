@@ -12,5 +12,6 @@
     "grouped_gemm_rowcolquant": 0.04,
     "grouped_gemm_tensorquant": 0.04,
     "mx_gemm": 0.04
+    "gemm_tensor_quant": 0.05
   }
 }
