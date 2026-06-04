@@ -16,12 +16,11 @@ Architecture:
       ├── Used by validate_ml_vs_oracle.py
       └── Used by generate_instances.py
 
-Tile data is extracted from:
-  configs/grouped_conv/{forward,backward_data,backward_weight}/profiler/nhwgc_{bf16,fp32}.json
 """
 
 import sys
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -263,22 +262,222 @@ def get_wave_configs(
     return table.get((tile_m, tile_n, tile_k), [(1, 1, 1)])
 
 
+# =============================================================================
+# Curated Wave→Warp Tables (extracted from JSON profiler configs)
+# =============================================================================
+# Per-variant mapping: wave → list of warp_tile shapes observed in JSON.
+# Replaces the previous "all permissible warp tiles" computation (which crossed
+# every wave with every arch-supported warp shape). The curated list is still
+# filtered by divisibility and intersected with the arch/dtype-supported combos,
+# so per-dtype warp_tile_k correctness is preserved (e.g. fp32 k∈{4,8} vs
+# bf16/fp16 k∈{8,16}). Waves not in the map fall back to [] (no warp tiles).
+
+_FWD_WAVE_WARPS: Dict[Tuple[int, int, int], List[Tuple[int, int, int]]] = {
+    (1, 1, 1): [(16, 16, 4), (16, 16, 8), (16, 16, 16), (32, 32, 4), (32, 32, 8)],
+    (1, 2, 1): [(16, 16, 8), (16, 16, 16), (32, 32, 4), (32, 32, 8)],
+    (1, 4, 1): [(16, 16, 16), (32, 32, 8)],
+    (2, 1, 1): [(16, 16, 8), (16, 16, 16), (32, 32, 4), (32, 32, 8)],
+    (2, 1, 2): [(32, 32, 8)],
+    (2, 2, 1): [(16, 16, 8), (16, 16, 16), (32, 32, 4), (32, 32, 8)],
+    (4, 1, 1): [(16, 16, 16), (32, 32, 8)],
+}
+
+_BWD_DATA_WAVE_WARPS: Dict[Tuple[int, int, int], List[Tuple[int, int, int]]] = {
+    (1, 1, 1): [(16, 16, 8), (16, 16, 16), (32, 32, 8)],
+    (1, 2, 1): [(32, 32, 8)],
+    (2, 1, 1): [(32, 32, 8)],
+    (2, 2, 1): [(32, 32, 8)],
+    (4, 1, 1): [(16, 16, 4), (16, 16, 8), (16, 16, 16), (32, 32, 4), (32, 32, 8), (32, 32, 16)],
+}
+
+_BWD_WEIGHT_WAVE_WARPS: Dict[Tuple[int, int, int], List[Tuple[int, int, int]]] = {
+    (1, 1, 1): [(16, 16, 8), (16, 16, 16), (32, 32, 4), (32, 32, 8)],
+    (1, 2, 1): [(16, 16, 16), (32, 32, 4), (32, 32, 8)],
+    (1, 4, 1): [(16, 16, 16)],
+    (2, 1, 1): [(16, 16, 16), (32, 32, 4), (32, 32, 8)],
+    (2, 2, 1): [(16, 16, 16), (32, 32, 4), (32, 32, 8)],
+    (4, 1, 1): [(16, 16, 16), (32, 32, 8)],
+}
+
+
+# Finer (tile, wave) → warp_tile map (Model B), also extracted from JSON. When a
+# (tile, wave) key is present here it overrides the coarser wave-only map above,
+# tightening over-generation: the wave-only map crosses a wave's warp set with every
+# tile sharing that wave, whereas this map lists only the warp tiles actually
+# observed for that exact (tile, wave). Keys absent here fall back to the wave map.
+
+_FWD_TILE_WAVE_WARPS: Dict[Tuple[Tuple[int, int, int], Tuple[int, int, int]], List[Tuple[int, int, int]]] = {
+    ((16, 16, 64), (1, 1, 1)): [(16, 16, 8), (16, 16, 16)],
+    ((16, 16, 128), (1, 1, 1)): [(16, 16, 8), (16, 16, 16)],
+    ((16, 32, 64), (1, 2, 1)): [(16, 16, 8), (16, 16, 16)],
+    ((16, 64, 64), (1, 2, 1)): [(16, 16, 8), (16, 16, 16)],
+    ((16, 128, 64), (1, 2, 1)): [(16, 16, 8), (16, 16, 16)],
+    ((16, 256, 64), (1, 4, 1)): [(16, 16, 16)],
+    ((32, 16, 64), (2, 1, 1)): [(16, 16, 8), (16, 16, 16)],
+    ((32, 64, 16), (1, 1, 1)): [(32, 32, 4)],
+    ((32, 64, 32), (1, 1, 1)): [(32, 32, 8)],
+    ((32, 64, 64), (1, 2, 1)): [(32, 32, 8)],
+    ((32, 128, 16), (1, 2, 1)): [(32, 32, 4)],
+    ((32, 128, 32), (1, 2, 1)): [(32, 32, 8)],
+    ((32, 128, 64), (1, 2, 1)): [(32, 32, 8)],
+    ((32, 256, 64), (1, 4, 1)): [(32, 32, 8)],
+    ((64, 16, 16), (1, 1, 1)): [(16, 16, 4), (16, 16, 16)],
+    ((64, 16, 64), (2, 1, 1)): [(16, 16, 8), (16, 16, 16)],
+    ((64, 32, 16), (1, 1, 1)): [(32, 32, 4)],
+    ((64, 32, 32), (1, 1, 1)): [(32, 32, 8)],
+    ((64, 32, 64), (2, 1, 1)): [(32, 32, 8)],
+    ((64, 64, 8), (2, 1, 1)): [(32, 32, 8)],
+    ((64, 64, 16), (1, 1, 1)): [(32, 32, 4)],
+    ((64, 64, 32), (1, 1, 1)): [(32, 32, 8)],
+    ((64, 64, 32), (2, 2, 1)): [(16, 16, 8), (16, 16, 16)],
+    ((64, 64, 64), (2, 2, 1)): [(32, 32, 8)],
+    ((64, 128, 16), (1, 2, 1)): [(32, 32, 4)],
+    ((64, 128, 16), (2, 2, 1)): [(32, 32, 4)],
+    ((64, 128, 32), (1, 2, 1)): [(32, 32, 8)],
+    ((64, 128, 32), (2, 2, 1)): [(32, 32, 8)],
+    ((64, 128, 64), (2, 2, 1)): [(32, 32, 8)],
+    ((128, 16, 64), (2, 1, 1)): [(16, 16, 8), (16, 16, 16)],
+    ((128, 32, 16), (2, 1, 1)): [(32, 32, 4)],
+    ((128, 32, 32), (2, 1, 1)): [(32, 32, 8)],
+    ((128, 32, 32), (2, 1, 2)): [(32, 32, 8)],
+    ((128, 32, 64), (2, 1, 1)): [(32, 32, 8)],
+    ((128, 64, 8), (2, 1, 1)): [(32, 32, 8)],
+    ((128, 64, 8), (2, 2, 1)): [(32, 32, 8)],
+    ((128, 64, 16), (2, 1, 1)): [(32, 32, 4)],
+    ((128, 64, 16), (2, 2, 1)): [(32, 32, 4), (32, 32, 8)],
+    ((128, 64, 32), (2, 1, 1)): [(32, 32, 8)],
+    ((128, 64, 32), (2, 2, 1)): [(32, 32, 8)],
+    ((128, 64, 64), (2, 2, 1)): [(32, 32, 8)],
+    ((128, 128, 16), (1, 2, 1)): [(32, 32, 4)],
+    ((128, 128, 16), (2, 2, 1)): [(32, 32, 4)],
+    ((128, 128, 32), (1, 2, 1)): [(32, 32, 8)],
+    ((128, 128, 32), (2, 2, 1)): [(32, 32, 8)],
+    ((128, 128, 64), (2, 2, 1)): [(32, 32, 8)],
+    ((128, 192, 16), (2, 2, 1)): [(32, 32, 4)],
+    ((128, 256, 16), (2, 2, 1)): [(32, 32, 4)],
+    ((128, 256, 32), (2, 2, 1)): [(32, 32, 8)],
+    ((224, 256, 64), (2, 2, 1)): [(16, 16, 16)],
+    ((256, 16, 64), (4, 1, 1)): [(16, 16, 16)],
+    ((256, 32, 64), (4, 1, 1)): [(32, 32, 8)],
+    ((256, 64, 8), (2, 2, 1)): [(32, 32, 8)],
+    ((256, 128, 16), (2, 2, 1)): [(32, 32, 4)],
+    ((256, 128, 32), (2, 2, 1)): [(32, 32, 8)],
+    ((256, 224, 64), (2, 2, 1)): [(16, 16, 16)],
+    ((256, 256, 32), (2, 2, 1)): [(16, 16, 16), (32, 32, 8)],
+}
+
+_BWD_DATA_TILE_WAVE_WARPS: Dict[Tuple[Tuple[int, int, int], Tuple[int, int, int]], List[Tuple[int, int, int]]] = {
+    ((16, 64, 32), (1, 1, 1)): [(16, 16, 8), (16, 16, 16)],
+    ((32, 64, 32), (1, 1, 1)): [(32, 32, 8)],
+    ((32, 128, 32), (1, 2, 1)): [(32, 32, 8)],
+    ((64, 16, 16), (4, 1, 1)): [(16, 16, 4), (16, 16, 16)],
+    ((64, 16, 32), (1, 1, 1)): [(16, 16, 8), (16, 16, 16)],
+    ((64, 16, 32), (4, 1, 1)): [(16, 16, 8), (16, 16, 16)],
+    ((64, 16, 64), (4, 1, 1)): [(16, 16, 16)],
+    ((64, 32, 32), (1, 1, 1)): [(32, 32, 8)],
+    ((64, 64, 32), (1, 1, 1)): [(32, 32, 8)],
+    ((64, 128, 32), (1, 2, 1)): [(32, 32, 8)],
+    ((64, 128, 32), (2, 2, 1)): [(32, 32, 8)],
+    ((128, 32, 16), (4, 1, 1)): [(32, 32, 4), (32, 32, 8)],
+    ((128, 32, 32), (2, 1, 1)): [(32, 32, 8)],
+    ((128, 32, 32), (4, 1, 1)): [(32, 32, 8)],
+    ((128, 32, 64), (4, 1, 1)): [(32, 32, 16)],
+    ((128, 64, 32), (2, 1, 1)): [(32, 32, 8)],
+    ((128, 64, 32), (2, 2, 1)): [(32, 32, 8)],
+    ((128, 128, 32), (1, 2, 1)): [(32, 32, 8)],
+    ((128, 128, 32), (2, 2, 1)): [(32, 32, 8)],
+    ((128, 256, 32), (2, 2, 1)): [(32, 32, 8)],
+    ((256, 128, 32), (2, 2, 1)): [(32, 32, 8)],
+}
+
+_BWD_WEIGHT_TILE_WAVE_WARPS: Dict[Tuple[Tuple[int, int, int], Tuple[int, int, int]], List[Tuple[int, int, int]]] = {
+    ((16, 16, 32), (1, 1, 1)): [(16, 16, 8), (16, 16, 16)],
+    ((16, 16, 64), (1, 1, 1)): [(16, 16, 16)],
+    ((16, 32, 64), (1, 2, 1)): [(16, 16, 16)],
+    ((16, 64, 64), (1, 2, 1)): [(16, 16, 16)],
+    ((16, 128, 32), (1, 1, 1)): [(16, 16, 16)],
+    ((16, 128, 64), (1, 2, 1)): [(16, 16, 16)],
+    ((16, 256, 32), (1, 1, 1)): [(16, 16, 16)],
+    ((16, 256, 64), (1, 4, 1)): [(16, 16, 16)],
+    ((32, 16, 64), (2, 1, 1)): [(16, 16, 16)],
+    ((32, 32, 32), (1, 1, 1)): [(32, 32, 8)],
+    ((32, 64, 16), (1, 1, 1)): [(32, 32, 4)],
+    ((32, 64, 32), (1, 1, 1)): [(32, 32, 8)],
+    ((32, 128, 16), (1, 2, 1)): [(32, 32, 4)],
+    ((32, 128, 32), (1, 1, 1)): [(32, 32, 8)],
+    ((32, 128, 32), (1, 2, 1)): [(32, 32, 8)],
+    ((64, 16, 64), (2, 1, 1)): [(16, 16, 16)],
+    ((64, 32, 16), (1, 1, 1)): [(32, 32, 4)],
+    ((64, 32, 32), (1, 1, 1)): [(32, 32, 8)],
+    ((64, 64, 16), (1, 1, 1)): [(32, 32, 4)],
+    ((64, 64, 32), (1, 1, 1)): [(32, 32, 8)],
+    ((64, 64, 64), (2, 2, 1)): [(16, 16, 16), (32, 32, 8)],
+    ((64, 128, 16), (1, 2, 1)): [(32, 32, 4)],
+    ((64, 128, 16), (2, 2, 1)): [(32, 32, 4)],
+    ((64, 128, 32), (1, 2, 1)): [(32, 32, 8)],
+    ((64, 128, 32), (2, 2, 1)): [(32, 32, 8)],
+    ((64, 128, 64), (2, 2, 1)): [(32, 32, 8)],
+    ((128, 16, 64), (2, 1, 1)): [(16, 16, 16)],
+    ((128, 32, 16), (2, 1, 1)): [(32, 32, 4)],
+    ((128, 32, 32), (1, 1, 1)): [(32, 32, 8)],
+    ((128, 32, 32), (2, 1, 1)): [(32, 32, 8)],
+    ((128, 64, 16), (2, 1, 1)): [(32, 32, 4)],
+    ((128, 64, 16), (2, 2, 1)): [(32, 32, 4)],
+    ((128, 64, 32), (2, 1, 1)): [(32, 32, 8)],
+    ((128, 64, 32), (2, 2, 1)): [(32, 32, 8)],
+    ((128, 128, 16), (1, 2, 1)): [(32, 32, 4)],
+    ((128, 128, 16), (2, 2, 1)): [(32, 32, 4)],
+    ((128, 128, 32), (1, 2, 1)): [(32, 32, 8)],
+    ((128, 128, 32), (2, 2, 1)): [(32, 32, 8)],
+    ((128, 128, 64), (2, 2, 1)): [(32, 32, 8)],
+    ((128, 256, 16), (2, 2, 1)): [(32, 32, 4)],
+    ((128, 256, 32), (2, 2, 1)): [(32, 32, 8)],
+    ((256, 16, 64), (4, 1, 1)): [(16, 16, 16)],
+    ((256, 32, 64), (4, 1, 1)): [(32, 32, 8)],
+    ((256, 128, 16), (2, 2, 1)): [(32, 32, 4)],
+    ((256, 128, 32), (2, 2, 1)): [(32, 32, 8)],
+    ((256, 256, 32), (2, 2, 1)): [(32, 32, 8)],
+}
+
+
 def get_warp_tiles_for_wave(
     tile_m: int, tile_n: int, tile_k: int,
     wave_m: int, wave_n: int, wave_k: int,
-    dtype_key: str, arch: str = "gfx942",
+    dtype_key: str, arch: str = "gfx942", variant: str = "forward",
 ) -> List[Tuple[int, int, int]]:
-    """Compute valid warp_tile shapes from divisibility + arch constraints.
+    """Return curated warp_tile shapes for a (variant, wave), filtered for this tile.
 
-    Given a (tile, wave) pair, returns warp_tile shapes from
-    WARP_TILE_SUPPORTED_COMBINATIONS[arch][dtype_key] that satisfy:
-      tile_m % (wave_m * warp_tile_m) == 0
-      tile_n % (wave_n * warp_tile_n) == 0
+    Prefers the finer (tile, wave) → warp map when that exact key is present;
+    otherwise falls back to the coarser wave-only map. The result is then kept
+    only for shapes that:
+      - are arch/dtype-supported (WARP_TILE_SUPPORTED_COMBINATIONS[arch][dtype_key]),
+      - are not in _EXCLUDED_WARP_SHAPES,
+      - divide the macro tile: tile_m % (wave_m*warp_tile_m) == 0 and
+        tile_n % (wave_n*warp_tile_n) == 0.
     """
-    supported = WARP_TILE_SUPPORTED_COMBINATIONS.get(arch, {}).get(dtype_key, [])
+    tile = (tile_m, tile_n, tile_k)
+    wave = (wave_m, wave_n, wave_k)
+    fine_table = {
+        "forward": _FWD_TILE_WAVE_WARPS,
+        "bwd_data": _BWD_DATA_TILE_WAVE_WARPS,
+        "bwd_weight": _BWD_WEIGHT_TILE_WAVE_WARPS,
+    }.get(variant, {})
+    if (tile, wave) in fine_table:
+        curated = fine_table[(tile, wave)]
+    else:
+        curated = {
+            "forward": _FWD_WAVE_WARPS,
+            "bwd_data": _BWD_DATA_WAVE_WARPS,
+            "bwd_weight": _BWD_WEIGHT_WAVE_WARPS,
+        }.get(variant, {}).get(wave, [])
+    supported = {
+        (wt[0], wt[1], wt[2])
+        for wt in WARP_TILE_SUPPORTED_COMBINATIONS.get(arch, {}).get(dtype_key, [])
+    }
     return [
-        (wt[0], wt[1], wt[2]) for wt in supported
-        if (wt[0], wt[1], wt[2]) not in _EXCLUDED_WARP_SHAPES
+        wt for wt in curated
+        if wt not in _EXCLUDED_WARP_SHAPES
+        and wt in supported
         and tile_m % (wave_m * wt[0]) == 0
         and tile_n % (wave_n * wt[1]) == 0
     ]
@@ -288,66 +487,342 @@ def get_wave_warp_pairs(
     tile_m: int, tile_n: int, tile_k: int,
     variant: str, dtype_key: str, arch: str = "gfx942",
 ) -> List[Tuple[Tuple[int, int, int], Tuple[int, int, int]]]:
-    """Return (wave, warp_tile) pairs: curated waves x derived warp_tiles.
+    """Return (wave, warp_tile) pairs: curated waves x curated warp_tiles.
 
-    Combines curated wave configs (from profiler JSON) with mathematically
-    derived warp_tile shapes (from arch constraints + divisibility).
+    Combines curated wave configs with the curated per-variant wave→warp map
+    (both from profiler JSON), filtered by arch/dtype support and divisibility.
     """
     result = []
     for wave in get_wave_configs(tile_m, tile_n, tile_k, variant):
         for wt in get_warp_tiles_for_wave(
-            tile_m, tile_n, tile_k, *wave, dtype_key, arch,
+            tile_m, tile_n, tile_k, *wave, dtype_key, arch, variant,
         ):
             result.append((wave, wt))
     return result
 
 
 # =============================================================================
-# Vector Size Computation (tile + dtype based, wave/warp independent)
+# Vector Size Strategies (tile + dtype based, wave/warp independent)
 # =============================================================================
+#
+# Convolution GEMM tensors vectorize along different logical dimensions:
+#   Forward:    vec_a,vec_b → C (channels), vec_c → K (output channels)
+#   BWD data:   vec_a → K, vec_b,vec_c → C
+#   BWD weight: vec_a → K, vec_b,vec_c → C
+#
+# This creates asymmetric vec patterns in profiler configs (e.g. (8,8,4) for
+# forward where C supports vec=8 but K only supports vec=4). Each strategy
+# produces one (vec_a, vec_b, vec_c) triple from the dtype-determined max.
 
 
-def _ceil_pow2(n: int) -> int:
-    """Round up to the next power of 2 (or return n if already a power of 2)."""
-    if n <= 1:
-        return 1
-    p = 1
-    while p < n:
-        p <<= 1
-    return p
+class VecStrategy(Enum):
+    """Vectorization strategies for grouped convolution GEMM configs.
+
+    Each strategy produces a single (vec_a, vec_b, vec_c) triple derived
+    from the dtype-determined maximum vector sizes.
+    """
+    GENERIC = "generic"                          # (1, 1, 1) — minimum fallback
+    UNIFORM_MAX = "uniform_max"                  # (max, max, max) — balanced throughput
+    MAX_AB_HALF_C = "max_ab_half_c"              # (max, max, max/2) — fwd (8,8,4) pattern
+    MAX_A_MIN_BC = "max_a_min_bc"                # (max, 1, 1) — bwd (4,1,1)/(8,1,1) pattern
+    MIN_A_MAX_BC = "min_a_max_bc"                # (1, max, max) — bwd (1,4,4)/(1,8,8) pattern
+    HALF_UNIFORM = "half_uniform"                # (max/2, max/2, max/2) — (2,2,2) pattern
+    QUARTER_AB_MAX_C = "quarter_ab_max_c"        # (max/2, max/2, max) — fwd (4,4,8)/(1,1,8) pattern
+    MAX_AB_QUARTER_C = "max_ab_quarter_c"        # (max, max, max/4) — half (8,8,2), fp32 (4,4,1)
+    MAX_A_QUARTER_BC = "max_a_quarter_bc"        # (max, max/4, max/4) — half (8,2,2)
+    MIN_AB_MAX_C = "min_ab_max_c"                # (1, 1, max) — half (1,1,8), fp32 (1,1,4)
+    MAX_A_HALF_BC = "max_a_half_bc"              # (max, max/2, max/2) — fp32 (4,2,2)
+    MAX_AB_MIN_C = "max_ab_min_c"                # (max, max, 1) — half (8,8,1)
+    MIN_AB_QUARTER_C = "min_ab_quarter_c"        # (1, 1, max/4) — half (1,1,2)
+    MIN_A_MAX_B_HALF_C = "min_a_max_b_half_c"    # (1, max, max/2) — half (1,8,4), fp32 (1,4,2)
+    HALF_A_MAX_BC = "half_a_max_bc"              # (max/2, max, max) — fp32 (2,4,4)
+    HALF_A_MIN_BC = "half_a_min_bc"              # (max/2, 1, 1) — fp32 (2,1,1)
 
 
-def compute_vector_sizes(
-    tile_m: int, tile_n: int, tile_k: int,
-    dtype_class: str, variant: str,
-) -> List[Tuple[int, int, int]]:
-    """Compute valid (vec_a, vec_b, vec_c) from tile dims and dtype.
+def _max_vec(dtype_class: str) -> int:
+    """Return the maximum vector width for a dtype class."""
+    if dtype_class == "float":
+        return 4
+    elif dtype_class in ("half", "fp16", "bf16"):
+        return 8
+    else:
+        raise ValueError(f"Unknown dtype class: {dtype_class}")
 
-    This is wave/warp independent — vec sizes depend only on tile dimensions
-    and dtype class. Returns the largest valid uniform vec plus (1,1,1).
+
+def compute_vector_size(
+    strategy: VecStrategy,
+    dtype_class: str,
+) -> Tuple[int, int, int]:
+    """Compute a (vec_a, vec_b, vec_c) triple for a given strategy and dtype.
 
     Args:
-        dtype_class: "float" (fp32) or "half" (fp16/bf16)
-        variant: "forward", "bwd_data", "bwd_weight"
+        strategy: Which vectorization pattern to use.
+        dtype_class: "float" (fp32) or "half" (fp16/bf16).
+
+    Returns:
+        A single (vec_a, vec_b, vec_c) triple.
     """
-    max_ab = 4 if dtype_class == "float" else 8
-    max_c = 4 if dtype_class == "float" else 8
+    m = _max_vec(dtype_class)
+    h = max(1, m // 2)
+    q = max(1, m // 4)
 
-    a_dim = tile_k if variant == "bwd_data" else tile_m
-    min_a = _ceil_pow2(max(1, (a_dim + WARP_SIZE - 1) // WARP_SIZE))
-    min_b = _ceil_pow2(max(1, (tile_n + WARP_SIZE - 1) // WARP_SIZE))
+    if strategy == VecStrategy.GENERIC:
+        return (1, 1, 1)
+    elif strategy == VecStrategy.UNIFORM_MAX:
+        return (m, m, m)
+    elif strategy == VecStrategy.MAX_AB_HALF_C:
+        return (m, m, h)
+    elif strategy == VecStrategy.MAX_A_MIN_BC:
+        return (m, 1, 1)
+    elif strategy == VecStrategy.MIN_A_MAX_BC:
+        return (1, m, m)
+    elif strategy == VecStrategy.HALF_UNIFORM:
+        return (h, h, h)
+    elif strategy == VecStrategy.QUARTER_AB_MAX_C:
+        return (h, h, m)
+    elif strategy == VecStrategy.MAX_AB_QUARTER_C:
+        return (m, m, q)
+    elif strategy == VecStrategy.MAX_A_QUARTER_BC:
+        return (m, q, q)
+    elif strategy == VecStrategy.MIN_AB_MAX_C:
+        return (1, 1, m)
+    elif strategy == VecStrategy.MAX_A_HALF_BC:
+        return (m, h, h)
+    elif strategy == VecStrategy.MAX_AB_MIN_C:
+        return (m, m, 1)
+    elif strategy == VecStrategy.MIN_AB_QUARTER_C:
+        return (1, 1, q)
+    elif strategy == VecStrategy.MIN_A_MAX_B_HALF_C:
+        return (1, m, h)
+    elif strategy == VecStrategy.HALF_A_MAX_BC:
+        return (h, m, m)
+    elif strategy == VecStrategy.HALF_A_MIN_BC:
+        return (h, 1, 1)
+    else:
+        return (1, 1, 1)
 
-    valid_a = [v for v in [1, 2, 4, 8, 16] if min_a <= v <= max_ab]
-    valid_b = [v for v in [1, 2, 4, 8, 16] if min_b <= v <= max_ab]
-    valid_c = [v for v in [1, 2, 4, 8] if v <= max_c]
 
-    if not valid_a or not valid_b or not valid_c:
-        return [(1, 1, 1)]
+# =============================================================================
+# Per-Tile VecStrategy Tables (extracted from JSON profiler configs)
+# =============================================================================
+# Per-variant mapping: tile → {dtype_class → list[VecStrategy]}.
+# Tables are dtype-class-keyed (Step 7): each strategy's triple is only emitted
+# for the dtype class it was observed with in JSON, so no cross-dtype "bleed"
+# (e.g. emitting half (8,8,8) for a tile that only used fp32 (4,4,4)).
+# Derived per (variant, tile, dtype_class) via greedy set-cover over VecStrategy.
+# Tiles not in the table fall back to [GENERIC] (dtype-independent).
 
-    results = [(max(valid_a), max(valid_b), max(valid_c))]
-    if (1, 1, 1) not in results:
-        results.append((1, 1, 1))
-    return results
+_FWD_TILE_STRATEGIES: Dict[Tuple[int, int, int], Dict[str, List[VecStrategy]]] = {
+    (16, 16, 64): {"half": [VecStrategy.MAX_AB_HALF_C], "float": [VecStrategy.UNIFORM_MAX]},
+    (16, 16, 128): {"half": [VecStrategy.MAX_AB_HALF_C], "float": [VecStrategy.UNIFORM_MAX]},
+    (16, 32, 64): {"half": [VecStrategy.MAX_AB_HALF_C], "float": [VecStrategy.UNIFORM_MAX]},
+    (16, 64, 64): {"half": [VecStrategy.MAX_AB_HALF_C], "float": [VecStrategy.UNIFORM_MAX]},
+    (16, 128, 64): {"half": [VecStrategy.MAX_AB_HALF_C], "float": [VecStrategy.UNIFORM_MAX]},
+    (16, 256, 64): {"half": [VecStrategy.MAX_AB_HALF_C]},
+    (32, 16, 64): {"half": [VecStrategy.MAX_AB_QUARTER_C], "float": [VecStrategy.MAX_AB_HALF_C]},
+    (32, 64, 16): {"float": [VecStrategy.UNIFORM_MAX]},
+    (32, 64, 32): {"half": [VecStrategy.UNIFORM_MAX, VecStrategy.MIN_AB_MAX_C]},
+    (32, 64, 64): {"half": [VecStrategy.UNIFORM_MAX]},
+    (32, 128, 16): {"float": [VecStrategy.UNIFORM_MAX]},
+    (32, 128, 32): {"half": [VecStrategy.UNIFORM_MAX, VecStrategy.MIN_AB_MAX_C]},
+    (32, 128, 64): {"half": [VecStrategy.UNIFORM_MAX]},
+    (32, 256, 64): {"half": [VecStrategy.UNIFORM_MAX]},
+    (64, 16, 16): {"half": [VecStrategy.HALF_A_MIN_BC], "float": [VecStrategy.MAX_A_MIN_BC]},
+    (64, 16, 64): {"half": [VecStrategy.MAX_AB_QUARTER_C], "float": [VecStrategy.MAX_AB_HALF_C]},
+    (64, 32, 16): {"float": [VecStrategy.UNIFORM_MAX, VecStrategy.MAX_AB_QUARTER_C]},
+    (64, 32, 32): {"half": [VecStrategy.UNIFORM_MAX, VecStrategy.MIN_AB_MAX_C, VecStrategy.MAX_AB_MIN_C]},
+    (64, 32, 64): {"half": [VecStrategy.MAX_AB_HALF_C], "float": [VecStrategy.UNIFORM_MAX]},
+    (64, 64, 8): {"half": [VecStrategy.MIN_AB_MAX_C]},
+    (64, 64, 16): {"float": [VecStrategy.GENERIC, VecStrategy.UNIFORM_MAX]},
+    (64, 64, 32): {"half": [VecStrategy.GENERIC, VecStrategy.UNIFORM_MAX, VecStrategy.HALF_UNIFORM, VecStrategy.MIN_AB_MAX_C], "float": [VecStrategy.UNIFORM_MAX]},
+    (64, 64, 64): {"half": [VecStrategy.UNIFORM_MAX]},
+    (64, 128, 16): {"float": [VecStrategy.UNIFORM_MAX]},
+    (64, 128, 32): {"half": [VecStrategy.UNIFORM_MAX, VecStrategy.MIN_AB_MAX_C]},
+    (64, 128, 64): {"half": [VecStrategy.UNIFORM_MAX]},
+    (128, 16, 64): {"half": [VecStrategy.MAX_AB_QUARTER_C], "float": [VecStrategy.MAX_AB_HALF_C]},
+    (128, 32, 16): {"float": [VecStrategy.UNIFORM_MAX]},
+    (128, 32, 32): {"half": [VecStrategy.UNIFORM_MAX, VecStrategy.HALF_UNIFORM, VecStrategy.MIN_AB_MAX_C]},
+    (128, 32, 64): {"half": [VecStrategy.MAX_AB_HALF_C], "float": [VecStrategy.UNIFORM_MAX]},
+    (128, 64, 8): {"half": [VecStrategy.MIN_AB_MAX_C]},
+    (128, 64, 16): {"half": [VecStrategy.MIN_AB_MAX_C], "float": [VecStrategy.UNIFORM_MAX]},
+    (128, 64, 32): {"half": [VecStrategy.UNIFORM_MAX, VecStrategy.MIN_AB_MAX_C]},
+    (128, 64, 64): {"half": [VecStrategy.UNIFORM_MAX]},
+    (128, 128, 16): {"float": [VecStrategy.UNIFORM_MAX, VecStrategy.MIN_AB_MAX_C]},
+    (128, 128, 32): {"half": [VecStrategy.UNIFORM_MAX, VecStrategy.MIN_AB_MAX_C]},
+    (128, 128, 64): {"half": [VecStrategy.UNIFORM_MAX]},
+    (128, 192, 16): {"float": [VecStrategy.UNIFORM_MAX]},
+    (128, 256, 16): {"float": [VecStrategy.UNIFORM_MAX]},
+    (128, 256, 32): {"half": [VecStrategy.UNIFORM_MAX, VecStrategy.MIN_AB_MAX_C]},
+    (224, 256, 64): {"half": [VecStrategy.UNIFORM_MAX]},
+    (256, 16, 64): {"half": [VecStrategy.MAX_AB_QUARTER_C]},
+    (256, 32, 64): {"half": [VecStrategy.MAX_AB_HALF_C]},
+    (256, 64, 8): {"half": [VecStrategy.MIN_AB_MAX_C]},
+    (256, 128, 16): {"float": [VecStrategy.UNIFORM_MAX]},
+    (256, 128, 32): {"half": [VecStrategy.UNIFORM_MAX, VecStrategy.MIN_AB_MAX_C]},
+    (256, 224, 64): {"half": [VecStrategy.UNIFORM_MAX]},
+    (256, 256, 32): {"half": [VecStrategy.UNIFORM_MAX]},
+}
+
+
+_BWD_DATA_TILE_STRATEGIES: Dict[Tuple[int, int, int], Dict[str, List[VecStrategy]]] = {
+    (16, 64, 32): {"half": [VecStrategy.MAX_AB_HALF_C, VecStrategy.MAX_A_MIN_BC, VecStrategy.MIN_A_MAX_B_HALF_C], "float": [VecStrategy.UNIFORM_MAX, VecStrategy.MAX_A_MIN_BC, VecStrategy.MIN_A_MAX_BC]},
+    (32, 64, 32): {"half": [VecStrategy.UNIFORM_MAX], "float": [VecStrategy.UNIFORM_MAX]},
+    (32, 128, 32): {"half": [VecStrategy.UNIFORM_MAX], "float": [VecStrategy.UNIFORM_MAX]},
+    (64, 16, 16): {"half": [VecStrategy.HALF_A_MIN_BC], "float": [VecStrategy.MAX_A_MIN_BC]},
+    (64, 16, 32): {"half": [VecStrategy.MAX_AB_HALF_C, VecStrategy.MAX_A_MIN_BC, VecStrategy.MAX_A_QUARTER_BC, VecStrategy.MIN_A_MAX_B_HALF_C], "float": [VecStrategy.UNIFORM_MAX, VecStrategy.MAX_A_MIN_BC, VecStrategy.MIN_A_MAX_BC]},
+    (64, 32, 32): {"half": [VecStrategy.UNIFORM_MAX], "float": [VecStrategy.UNIFORM_MAX]},
+    (64, 64, 32): {"half": [VecStrategy.GENERIC, VecStrategy.UNIFORM_MAX], "float": [VecStrategy.GENERIC, VecStrategy.UNIFORM_MAX]},
+    (64, 128, 32): {"half": [VecStrategy.UNIFORM_MAX, VecStrategy.MIN_A_MAX_BC], "float": [VecStrategy.UNIFORM_MAX, VecStrategy.MIN_A_MAX_BC]},
+    (128, 32, 16): {"half": [VecStrategy.HALF_A_MIN_BC], "float": [VecStrategy.MAX_A_MIN_BC, VecStrategy.MAX_A_HALF_BC]},
+    (128, 32, 32): {"half": [VecStrategy.UNIFORM_MAX, VecStrategy.MAX_A_MIN_BC, VecStrategy.MAX_A_QUARTER_BC], "float": [VecStrategy.UNIFORM_MAX, VecStrategy.MAX_A_MIN_BC]},
+    (128, 64, 32): {"half": [VecStrategy.UNIFORM_MAX], "float": [VecStrategy.UNIFORM_MAX]},
+    (128, 128, 32): {"half": [VecStrategy.UNIFORM_MAX], "float": [VecStrategy.UNIFORM_MAX]},
+    (128, 256, 32): {"half": [VecStrategy.UNIFORM_MAX], "float": [VecStrategy.UNIFORM_MAX]},
+    (256, 128, 32): {"half": [VecStrategy.UNIFORM_MAX], "float": [VecStrategy.UNIFORM_MAX]},
+}
+
+
+_BWD_WEIGHT_TILE_STRATEGIES: Dict[Tuple[int, int, int], Dict[str, List[VecStrategy]]] = {
+    (16, 16, 32): {"half": [VecStrategy.GENERIC, VecStrategy.MIN_AB_QUARTER_C]},
+    (16, 16, 64): {"half": [VecStrategy.GENERIC, VecStrategy.HALF_UNIFORM, VecStrategy.HALF_A_MIN_BC]},
+    (16, 32, 64): {"half": [VecStrategy.GENERIC, VecStrategy.MAX_AB_HALF_C], "float": [VecStrategy.HALF_A_MAX_BC]},
+    (16, 64, 64): {"half": [VecStrategy.GENERIC, VecStrategy.MAX_AB_HALF_C, VecStrategy.MIN_A_MAX_B_HALF_C]},
+    (16, 128, 64): {"half": [VecStrategy.MIN_A_MAX_B_HALF_C]},
+    (16, 256, 32): {"half": [VecStrategy.MAX_AB_MIN_C]},
+    (16, 256, 64): {"half": [VecStrategy.MIN_A_MAX_B_HALF_C]},
+    (32, 16, 64): {"half": [VecStrategy.GENERIC, VecStrategy.HALF_A_MIN_BC], "float": [VecStrategy.MAX_A_HALF_BC]},
+    (32, 64, 16): {"float": [VecStrategy.UNIFORM_MAX, VecStrategy.MIN_A_MAX_BC]},
+    (32, 64, 32): {"half": [VecStrategy.UNIFORM_MAX]},
+    (32, 128, 16): {"float": [VecStrategy.UNIFORM_MAX]},
+    (32, 128, 32): {"half": [VecStrategy.UNIFORM_MAX, VecStrategy.MAX_AB_QUARTER_C, VecStrategy.MAX_AB_MIN_C]},
+    (64, 16, 64): {"half": [VecStrategy.GENERIC, VecStrategy.MAX_A_MIN_BC, VecStrategy.MAX_A_QUARTER_BC]},
+    (64, 32, 16): {"float": [VecStrategy.UNIFORM_MAX]},
+    (64, 32, 32): {"half": [VecStrategy.UNIFORM_MAX]},
+    (64, 64, 16): {"float": [VecStrategy.GENERIC, VecStrategy.UNIFORM_MAX]},
+    (64, 64, 32): {"half": [VecStrategy.UNIFORM_MAX]},
+    (64, 64, 64): {"half": [VecStrategy.GENERIC, VecStrategy.UNIFORM_MAX, VecStrategy.MAX_AB_HALF_C, VecStrategy.MAX_AB_QUARTER_C, VecStrategy.HALF_A_MIN_BC], "float": [VecStrategy.GENERIC, VecStrategy.UNIFORM_MAX, VecStrategy.MAX_A_MIN_BC, VecStrategy.MIN_A_MAX_BC]},
+    (64, 128, 16): {"float": [VecStrategy.UNIFORM_MAX]},
+    (64, 128, 32): {"half": [VecStrategy.UNIFORM_MAX]},
+    (64, 128, 64): {"half": [VecStrategy.UNIFORM_MAX]},
+    (128, 16, 64): {"half": [VecStrategy.MAX_A_MIN_BC, VecStrategy.MAX_A_QUARTER_BC]},
+    (128, 32, 16): {"float": [VecStrategy.UNIFORM_MAX, VecStrategy.MAX_A_MIN_BC]},
+    (128, 32, 32): {"half": [VecStrategy.UNIFORM_MAX, VecStrategy.MAX_AB_QUARTER_C, VecStrategy.MAX_A_QUARTER_BC, VecStrategy.MAX_AB_MIN_C]},
+    (128, 64, 16): {"float": [VecStrategy.UNIFORM_MAX]},
+    (128, 64, 32): {"half": [VecStrategy.UNIFORM_MAX]},
+    (128, 128, 16): {"float": [VecStrategy.UNIFORM_MAX]},
+    (128, 128, 32): {"half": [VecStrategy.UNIFORM_MAX]},
+    (128, 128, 64): {"half": [VecStrategy.MAX_AB_HALF_C, VecStrategy.HALF_UNIFORM]},
+    (128, 256, 16): {"float": [VecStrategy.UNIFORM_MAX]},
+    (128, 256, 32): {"half": [VecStrategy.UNIFORM_MAX]},
+    (256, 16, 64): {"half": [VecStrategy.MAX_A_MIN_BC, VecStrategy.MAX_A_QUARTER_BC]},
+    (256, 32, 64): {"half": [VecStrategy.UNIFORM_MAX]},
+    (256, 128, 16): {"float": [VecStrategy.UNIFORM_MAX]},
+    (256, 128, 32): {"half": [VecStrategy.UNIFORM_MAX]},
+    (256, 256, 32): {"half": [VecStrategy.MAX_AB_HALF_C, VecStrategy.HALF_UNIFORM]},
+}
+
+
+def get_vec_strategies(
+    tile_m: int, tile_n: int, tile_k: int, variant: str,
+    dtype_class: Optional[str] = None,
+) -> List[VecStrategy]:
+    """Return curated VecStrategy list for a tile+variant (from profiler JSON).
+
+    Tables are dtype-class-keyed. If ``dtype_class`` ("half"/"float") is given,
+    return only that dtype's strategies. If None, return the union across dtype
+    classes (preserving order, deduplicated). Falls back to [GENERIC] for tiles
+    not in the table.
+    """
+    table = {
+        "forward": _FWD_TILE_STRATEGIES,
+        "bwd_data": _BWD_DATA_TILE_STRATEGIES,
+        "bwd_weight": _BWD_WEIGHT_TILE_STRATEGIES,
+    }.get(variant, {})
+    entry = table.get((tile_m, tile_n, tile_k))
+    if entry is None:
+        return [VecStrategy.GENERIC]
+    if dtype_class is not None:
+        return entry.get(dtype_class, [])
+    # Union across dtype classes, deduplicated, order-preserving.
+    out: List[VecStrategy] = []
+    seen = set()
+    for dc in ("half", "float"):
+        for s in entry.get(dc, []):
+            if s not in seen:
+                seen.add(s)
+                out.append(s)
+    return out
+
+
+# =============================================================================
+# Explicit Per-Tile Vec Overrides (long tail — don't fit any strategy family)
+# =============================================================================
+# A small set of (variant, tile) → extra vec triples used by the JSON profiler
+# configs that no VecStrategy formula produces. These are added on top of the
+# strategy-derived vecs (superset semantics). Includes bwd_data's vec_a=16
+# (A vectorizes along K, beyond the dtype-class max) and a handful of
+# idiosyncratic per-tile triples.
+
+_EXTRA_VEC_TRIPLES: Dict[str, Dict[Tuple[int, int, int], Dict[str, List[Tuple[int, int, int]]]]] = {
+    "forward": {
+        (32, 64, 64): {"float": [(4, 4, 8)]},
+        (32, 128, 64): {"float": [(4, 4, 8)]},
+        (64, 64, 32): {"half": [(1, 2, 1), (2, 1, 2)], "float": [(1, 2, 1), (2, 1, 2)]},
+        (128, 128, 32): {"float": [(4, 4, 8)]},
+        (128, 128, 64): {"float": [(4, 4, 8)]},
+        (256, 128, 32): {"half": [(2, 2, 2)]},
+    },
+    "bwd_data": {
+        (64, 16, 32): {"float": [(8, 1, 1), (8, 2, 2)]},
+        (64, 16, 64): {"half": [(16, 1, 1), (16, 2, 2)]},
+        (128, 32, 16): {"half": [(4, 2, 2)]},
+        (128, 32, 32): {"float": [(8, 1, 1), (8, 2, 2)]},
+        (128, 32, 64): {"half": [(16, 1, 1), (16, 2, 2), (16, 8, 8)]},
+        (128, 256, 32): {"half": [(8, 4, 8)]},
+    },
+    "bwd_weight": {
+        (16, 16, 32): {"float": [(1, 1, 2)]},
+        (16, 16, 64): {"half": [(1, 4, 4)]},
+        (16, 32, 64): {"half": [(1, 2, 4), (1, 4, 4), (2, 1, 1), (2, 2, 4), (2, 4, 4)]},
+        (16, 64, 64): {"half": [(2, 1, 1), (2, 8, 4)]},
+        (16, 128, 32): {"half": [(4, 4, 1)]},
+        (16, 128, 64): {"half": [(2, 8, 4)]},
+        (16, 256, 64): {"half": [(2, 8, 4)]},
+        (32, 16, 64): {"half": [(1, 2, 2), (2, 1, 1), (2, 2, 2), (4, 2, 2)]},
+        (32, 32, 32): {"half": [(2, 2, 1), (2, 2, 2)]},
+        (32, 64, 32): {"half": [(2, 2, 1), (2, 8, 8), (4, 4, 1), (4, 4, 2)]},
+        (64, 16, 64): {"half": [(1, 2, 2)], "float": [(8, 2, 2)]},
+        (64, 32, 32): {"half": [(4, 4, 1), (4, 4, 2)]},
+        (64, 64, 32): {"half": [(2, 2, 2)]},
+        (64, 64, 64): {"half": [(1, 4, 4), (2, 2, 2), (2, 2, 4)]},
+        (128, 32, 32): {"float": [(8, 2, 2)]},
+    },
+}
+
+
+def get_extra_vec_triples(
+    tile_m: int, tile_n: int, tile_k: int, variant: str,
+    dtype_class: Optional[str] = None,
+) -> List[Tuple[int, int, int]]:
+    """Return explicit per-tile vec triples not produced by any VecStrategy.
+
+    Dtype-class-keyed (Step 7). If ``dtype_class`` is given, return only that
+    dtype's extra triples; if None, return the union across dtype classes.
+    Empty for tiles whose vecs are fully covered by strategies.
+    """
+    per_dc = _EXTRA_VEC_TRIPLES.get(variant, {}).get((tile_m, tile_n, tile_k))
+    if not per_dc:
+        return []
+    if dtype_class is not None:
+        return per_dc.get(dtype_class, [])
+    out: List[Tuple[int, int, int]] = []
+    seen = set()
+    for dc in ("half", "float"):
+        for tr in per_dc.get(dc, []):
+            if tr not in seen:
+                seen.add(tr)
+                out.append(tr)
+    return out
 
 
 # =============================================================================
@@ -357,16 +832,145 @@ def compute_vector_sizes(
 _COMPV4_SET: Set[Tuple[int, int, int]] = set(COMPV4_COMPATIBLE_TILES)
 
 
+# =============================================================================
+# Curated per-tile (pipeline, scheduler) map (extracted from JSON profiler configs)
+# =============================================================================
+# Per-variant mapping: tile → list of (pipeline, scheduler) pairs observed in JSON.
+# Preferred over the rule-based computation below; tiles absent here fall back to
+# the shape-based rules. This bounds pipeline/scheduler over-generation (the
+# rules emit every pipeline permissible for a shape, whereas JSON benchmarked
+# only a specific subset per tile).
+
+_FWD_TILE_PIPELINES: Dict[Tuple[int, int, int], List[Tuple[str, str]]] = {
+    (16, 16, 64): [('compv1', 'interwave'), ('compv1', 'intrawave'), ('mem', 'interwave'), ('mem', 'intrawave')],
+    (16, 16, 128): [('compv1', 'interwave'), ('compv1', 'intrawave'), ('mem', 'interwave'), ('mem', 'intrawave')],
+    (16, 32, 64): [('compv1', 'interwave'), ('compv1', 'intrawave'), ('mem', 'interwave'), ('mem', 'intrawave')],
+    (16, 64, 64): [('mem', 'interwave'), ('mem', 'intrawave')],
+    (16, 128, 64): [('mem', 'interwave'), ('mem', 'intrawave')],
+    (16, 256, 64): [('mem', 'interwave'), ('mem', 'intrawave')],
+    (32, 16, 64): [('compv1', 'interwave'), ('compv1', 'intrawave'), ('mem', 'interwave'), ('mem', 'intrawave')],
+    (32, 64, 16): [('compv1', 'intrawave')],
+    (32, 64, 32): [('compv1', 'intrawave')],
+    (32, 64, 64): [('mem', 'interwave'), ('mem', 'intrawave')],
+    (32, 128, 16): [('compv1', 'intrawave')],
+    (32, 128, 32): [('compv1', 'intrawave')],
+    (32, 128, 64): [('mem', 'interwave'), ('mem', 'intrawave')],
+    (32, 256, 64): [('mem', 'interwave'), ('mem', 'intrawave')],
+    (64, 16, 16): [('compv1', 'intrawave')],
+    (64, 16, 64): [('mem', 'interwave'), ('mem', 'intrawave')],
+    (64, 32, 16): [('compv1', 'intrawave')],
+    (64, 32, 32): [('compv1', 'intrawave')],
+    (64, 32, 64): [('mem', 'interwave'), ('mem', 'intrawave')],
+    (64, 64, 8): [('compv1', 'intrawave')],
+    (64, 64, 16): [('compv1', 'intrawave')],
+    (64, 64, 32): [('compv1', 'intrawave')],
+    (64, 64, 64): [('compv3', 'intrawave')],
+    (64, 128, 16): [('compv1', 'intrawave')],
+    (64, 128, 32): [('compv1', 'intrawave')],
+    (64, 128, 64): [('compv3', 'intrawave')],
+    (128, 16, 64): [('mem', 'interwave'), ('mem', 'intrawave')],
+    (128, 32, 16): [('compv1', 'intrawave')],
+    (128, 32, 32): [('compv1', 'interwave'), ('compv1', 'intrawave')],
+    (128, 32, 64): [('mem', 'interwave'), ('mem', 'intrawave')],
+    (128, 64, 8): [('compv1', 'intrawave')],
+    (128, 64, 16): [('compv1', 'intrawave')],
+    (128, 64, 32): [('compv1', 'intrawave')],
+    (128, 64, 64): [('compv3', 'intrawave')],
+    (128, 128, 16): [('compv1', 'intrawave')],
+    (128, 128, 32): [('compv1', 'intrawave'), ('compv4', 'intrawave')],
+    (128, 128, 64): [('compv1', 'interwave'), ('compv3', 'intrawave'), ('compv4', 'intrawave'), ('compv6', 'intrawave')],
+    (128, 192, 16): [('compv1', 'intrawave')],
+    (128, 256, 16): [('compv1', 'intrawave')],
+    (128, 256, 32): [('compv1', 'interwave'), ('compv1', 'intrawave')],
+    (224, 256, 64): [('compv3', 'intrawave')],
+    (256, 16, 64): [('mem', 'interwave'), ('mem', 'intrawave')],
+    (256, 32, 64): [('mem', 'interwave'), ('mem', 'intrawave')],
+    (256, 64, 8): [('compv1', 'intrawave')],
+    (256, 128, 16): [('compv1', 'intrawave')],
+    (256, 128, 32): [('compv1', 'interwave'), ('compv1', 'intrawave')],
+    (256, 224, 64): [('compv3', 'intrawave')],
+    (256, 256, 32): [('compv3', 'intrawave'), ('compv4', 'intrawave'), ('compv6', 'intrawave')],
+}
+
+_BWD_DATA_TILE_PIPELINES: Dict[Tuple[int, int, int], List[Tuple[str, str]]] = {
+    (16, 64, 32): [('compv1', 'intrawave')],
+    (32, 64, 32): [('compv1', 'intrawave')],
+    (32, 128, 32): [('compv1', 'intrawave')],
+    (64, 16, 16): [('compv1', 'intrawave')],
+    (64, 16, 32): [('compv1', 'intrawave')],
+    (64, 16, 64): [('compv1', 'intrawave')],
+    (64, 32, 32): [('compv1', 'intrawave')],
+    (64, 64, 32): [('compv1', 'intrawave')],
+    (64, 128, 32): [('compv1', 'intrawave')],
+    (128, 32, 16): [('compv1', 'intrawave')],
+    (128, 32, 32): [('compv1', 'intrawave')],
+    (128, 32, 64): [('compv1', 'intrawave')],
+    (128, 64, 32): [('compv1', 'intrawave')],
+    (128, 128, 32): [('compv1', 'intrawave')],
+    (128, 256, 32): [('compv1', 'intrawave')],
+    (256, 128, 32): [('compv1', 'intrawave')],
+}
+
+_BWD_WEIGHT_TILE_PIPELINES: Dict[Tuple[int, int, int], List[Tuple[str, str]]] = {
+    (16, 16, 32): [('compv1', 'intrawave'), ('compv6', 'intrawave'), ('mem', 'intrawave')],
+    (16, 16, 64): [('compv1', 'interwave'), ('compv1', 'intrawave'), ('mem', 'interwave'), ('mem', 'intrawave')],
+    (16, 32, 64): [('basic_async_v1', 'intrawave'), ('compv1', 'interwave'), ('compv1', 'intrawave'), ('mem', 'interwave'), ('mem', 'intrawave')],
+    (16, 64, 64): [('basic_async_v1', 'intrawave'), ('mem', 'interwave'), ('mem', 'intrawave')],
+    (16, 128, 32): [('compv1', 'intrawave')],
+    (16, 128, 64): [('mem', 'interwave'), ('mem', 'intrawave')],
+    (16, 256, 32): [('compv1', 'intrawave')],
+    (16, 256, 64): [('mem', 'interwave'), ('mem', 'intrawave')],
+    (32, 16, 64): [('compv1', 'interwave'), ('compv1', 'intrawave'), ('mem', 'interwave'), ('mem', 'intrawave')],
+    (32, 32, 32): [('compv1', 'intrawave'), ('compv6', 'intrawave'), ('mem', 'intrawave')],
+    (32, 64, 16): [('compv1', 'intrawave')],
+    (32, 64, 32): [('compv1', 'intrawave'), ('compv6', 'intrawave'), ('mem', 'intrawave')],
+    (32, 128, 16): [('compv1', 'intrawave')],
+    (32, 128, 32): [('compv1', 'intrawave'), ('compv6', 'intrawave'), ('mem', 'intrawave')],
+    (64, 16, 64): [('mem', 'interwave'), ('mem', 'intrawave')],
+    (64, 32, 16): [('compv1', 'intrawave')],
+    (64, 32, 32): [('compv1', 'intrawave'), ('compv6', 'intrawave'), ('mem', 'intrawave')],
+    (64, 64, 16): [('compv1', 'intrawave')],
+    (64, 64, 32): [('compv1', 'intrawave')],
+    (64, 64, 64): [('basic_async_v1', 'intrawave'), ('compv1', 'intrawave')],
+    (64, 128, 16): [('compv1', 'intrawave')],
+    (64, 128, 32): [('compv1', 'intrawave')],
+    (64, 128, 64): [('basic_async_v1', 'intrawave')],
+    (128, 16, 64): [('mem', 'interwave'), ('mem', 'intrawave')],
+    (128, 32, 16): [('compv1', 'intrawave')],
+    (128, 32, 32): [('compv1', 'intrawave'), ('compv6', 'intrawave'), ('mem', 'intrawave')],
+    (128, 64, 16): [('compv1', 'intrawave')],
+    (128, 64, 32): [('compv1', 'intrawave')],
+    (128, 128, 16): [('compv1', 'intrawave')],
+    (128, 128, 32): [('compv1', 'intrawave')],
+    (128, 128, 64): [('compv1', 'interwave'), ('compv3', 'intrawave'), ('compv4', 'intrawave'), ('compv6', 'intrawave')],
+    (128, 256, 16): [('compv1', 'intrawave')],
+    (128, 256, 32): [('compv1', 'intrawave')],
+    (256, 16, 64): [('mem', 'interwave'), ('mem', 'intrawave')],
+    (256, 32, 64): [('basic_async_v1', 'intrawave')],
+    (256, 128, 16): [('compv1', 'intrawave')],
+    (256, 128, 32): [('compv1', 'intrawave')],
+    (256, 256, 32): [('compv3', 'intrawave'), ('compv4', 'intrawave'), ('compv6', 'intrawave')],
+}
+
+
 def get_pipelines_for_tile(
     tile_m: int, tile_n: int, tile_k: int, variant: str,
 ) -> List[Tuple[str, str]]:
     """Return list of (pipeline, scheduler) pairs for a tile shape and variant.
 
-    Rule-based pipeline assignment — replaces cross-product with all variant
-    pipelines. Each tile gets only the pipelines that are appropriate for its
-    shape, reducing the config count significantly.
+    Prefers the curated per-tile map (from profiler JSON) when the tile is present;
+    otherwise falls back to the shape-based rules below. The curated map bounds
+    pipeline/scheduler over-generation; the rules cover tiles not seen in JSON.
     """
     tile_key = (tile_m, tile_n, tile_k)
+    curated = {
+        "forward": _FWD_TILE_PIPELINES,
+        "bwd_data": _BWD_DATA_TILE_PIPELINES,
+        "bwd_weight": _BWD_WEIGHT_TILE_PIPELINES,
+    }.get(variant, {})
+    if tile_key in curated:
+        return list(curated[tile_key])
+
     tile_area = tile_m * tile_n
     min_dim = min(tile_m, tile_n)
 

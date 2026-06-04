@@ -55,7 +55,10 @@ try:
         BWD_DATA_TILES,
         get_tiles_for_variant,
         get_wave_warp_pairs,
-        compute_vector_sizes,
+        VecStrategy,
+        compute_vector_size,
+        get_vec_strategies,
+        get_extra_vec_triples,
         get_pipelines_for_tile,
         get_specs_for_tile,
         VARIANT_FEATURES,
@@ -86,17 +89,34 @@ except ImportError:
     def get_tiles_for_variant(variant):
         return COMMON_TILES
 
+    from enum import Enum
+
+    class VecStrategy(Enum):
+        GENERIC = "generic"
+        UNIFORM = "uniform"
+        KEEP_AB_HALF_C = "keep_ab_half_c"
+        MAX_A_MIN_BC = "max_a_min_bc"
+        MIN_A_MAX_BC = "min_a_max_bc"
+        HALF_UNIFORM = "half_uniform"
+        REDUCED_AB_MAX_C = "reduced_ab_max_c"
+
     def get_wave_warp_pairs(tile_m, tile_n, tile_k, variant, dtype_key, arch="gfx942"):
         return []
 
-    def compute_vector_sizes(tile_m, tile_n, tile_k, dtype_class, variant):
-        return [(4, 8, 8), (1, 1, 1)]
+    def compute_vector_size(strategy, dtype_class):
+        return (1, 1, 1)
 
     def get_pipelines_for_tile(tile_m, tile_n, tile_k, variant):
         return [("compv1", "intrawave")]
 
     def get_specs_for_tile(tile_m, tile_n, tile_k, variant):
         return ["default"]
+
+    def get_vec_strategies(tile_m, tile_n, tile_k, variant, dtype_class=None):
+        return [VecStrategy.GENERIC]
+
+    def get_extra_vec_triples(tile_m, tile_n, tile_k, variant, dtype_class=None):
+        return []
 
     def get_depthwise_configs():
         return []
@@ -2163,10 +2183,19 @@ def get_default_configs(
         return sorted(pair_set)
 
     def _get_union_vecs(tile_m, tile_n, tile_k, variant_str):
-        """Get union of vec sizes across dtype classes (half + float)."""
+        """Get union of vec sizes for this tile across dtype classes.
+
+        Strategy tables are dtype-class-keyed (Step 7): a strategy's triple is
+        emitted only for the dtype class it was observed with, so we don't
+        generate e.g. half (8,8,8) for a tile that only used fp32 (4,4,4).
+        """
         vec_set: set = set()
         for dtype_class in ["half", "float"]:
-            vec_set.update(compute_vector_sizes(tile_m, tile_n, tile_k, dtype_class, variant_str))
+            for strategy in get_vec_strategies(tile_m, tile_n, tile_k, variant_str, dtype_class):
+                vec_set.add(compute_vector_size(strategy, dtype_class))
+            # Long-tail triples not produced by any strategy formula
+            for triple in get_extra_vec_triples(tile_m, tile_n, tile_k, variant_str, dtype_class):
+                vec_set.add(triple)
         return sorted(vec_set)
 
     def _emit_configs_for_tile(
