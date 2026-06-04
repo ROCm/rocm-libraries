@@ -140,9 +140,9 @@ namespace rocisa
         return createGPR("s", idx, regNum);
     }
 
-    std::shared_ptr<RegisterContainer> sgpr(const std::string& name, float regNum, bool isMacro)
+    std::shared_ptr<RegisterContainer> sgpr(const std::string& name, float regNum, bool isMacro, bool isOff)
     {
-        return createGPR("s", name, regNum, isMacro);
+        return createGPR("s", name, regNum, isMacro, false, isOff);
     }
 
     std::shared_ptr<RegisterContainer> accvgpr(const Holder& holder, float regNum)
@@ -206,10 +206,11 @@ void init_containers(nb::module_ m)
               nb::arg("idx"),
               nb::arg("regNum") = 1.f);
     m_con.def("sgpr",
-              nb::overload_cast<const std::string&, float, bool>(&rocisa::sgpr),
+              nb::overload_cast<const std::string&, float, bool, bool>(&rocisa::sgpr),
               nb::arg("name"),
               nb::arg("regNum")  = 1.f,
-              nb::arg("isMacro") = false);
+              nb::arg("isMacro") = false,
+              nb::arg("isOff")   = false);
 
     m_con.def("accvgpr",
               nb::overload_cast<const rocisa::Holder&, float>(&rocisa::accvgpr),

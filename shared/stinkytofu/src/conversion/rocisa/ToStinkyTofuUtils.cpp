@@ -97,6 +97,33 @@ stinkytofu::MUBUFScope convertMUBUFScope(rocisa::CacheScope scope) {
     }
 }
 
+// rocisa and StinkyTofu use the same ISA TH[2:0] encoding, but keep distinct enum
+// types; map explicitly rather than static_cast so the two stay decoupled. Note
+// TH_WB aliases TH_LU and TH_NT_WB aliases TH_RESERVED (same encoding), so only the
+// canonical labels appear here.
+stinkytofu::TemporalHint convertTemporalHint(rocisa::TemporalHint th) {
+    switch (th) {
+        case rocisa::TemporalHint::TH_RT:
+            return stinkytofu::TemporalHint::TH_RT;
+        case rocisa::TemporalHint::TH_NT:
+            return stinkytofu::TemporalHint::TH_NT;
+        case rocisa::TemporalHint::TH_HT:
+            return stinkytofu::TemporalHint::TH_HT;
+        case rocisa::TemporalHint::TH_LU:
+            return stinkytofu::TemporalHint::TH_LU;
+        case rocisa::TemporalHint::TH_NT_RT:
+            return stinkytofu::TemporalHint::TH_NT_RT;
+        case rocisa::TemporalHint::TH_RT_NT:
+            return stinkytofu::TemporalHint::TH_RT_NT;
+        case rocisa::TemporalHint::TH_NT_HT:
+            return stinkytofu::TemporalHint::TH_NT_HT;
+        case rocisa::TemporalHint::TH_RESERVED:
+            return stinkytofu::TemporalHint::TH_RESERVED;
+        default:
+            return stinkytofu::TemporalHint::TH_NONE;
+    }
+}
+
 stinkytofu::MUBUFModifiers convertMUBUFModifiers(const rocisa::MUBUFModifiers& rocMod,
                                                  const std::map<std::string, int>& asmCaps) {
     bool hasMUBUFConst = asmCaps.count("HasMUBUFConst") && asmCaps.at("HasMUBUFConst");
@@ -316,19 +343,6 @@ void addRegistersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
         return;
     }
 
-    // global_prefetch_b8 (gl2-prefetch) now emits two address operands:
-    // the 64-bit VGPR address (vaddr) and the absent scalar address (saddr).
-    // An absent saddr must be spelled "off" (not "null") for the AMDGPU
-    // assembler; represent it explicitly as a literal so the emitter reproduces
-    // "..., off".
-    if (stinkyInst->getUnifiedOpcode() == GFX::global_prefetch_b8) {
-        for (const InstructionInput& src : inst->getSrcParams()) {
-            StinkyRegister reg = toStinkyRegister(src, hasVgprMsb, archId);
-            stinkyInst->addSrcReg(reg.isValid() ? reg : StinkyRegister("off"));
-        }
-        return;
-    }
-
     // Add destination registers
     for (const InstructionInput& dst : inst->getDstParams()) {
         StinkyRegister reg = toStinkyRegister(dst, hasVgprMsb, archId);
@@ -497,35 +511,20 @@ void handleSMFMAModifiers(StinkyInstruction* stinkyInst, const std::string& inst
 }
 
 /// Helper to handle global_prefetch_b8 (gl2-prefetch) temporal-hint / cache-scope
-/// modifiers. rocisa keeps these in a private GLOBALModifiers field with no public
-/// accessor, so parse them from the emitted instruction string (same approach as
-/// the MFMA matrix-format extraction above). The suffix looks like:
-///   " th:TH_LOAD_NT scope:SCOPE_SE"
-/// The hint/scope are folded into GLOBALModifiers (StinkyTofu models all global_*
-/// op modifiers with a single struct, unlike rocisa's split GLOBAL/Global types).
-void handleGlobalPrefetchModifier(StinkyInstruction* stinkyInst, std::string_view instString) {
-    auto extractValue = [&](const char* prefix) -> std::string_view {
-        size_t pos = instString.find(prefix);
-        if (pos == std::string_view::npos) return {};
-        size_t valStart = pos + std::string_view(prefix).size();
-        // Stop at any whitespace (space/tab/newline). The modifier may be the
-        // last token, in which case rocisa's toString leaves a trailing '\n'
-        // that must not be captured as part of the value (else it fails to parse).
-        size_t valEnd = instString.find_first_of(" \t\r\n", valStart);
-        if (valEnd == std::string_view::npos) valEnd = instString.size();
-        return instString.substr(valStart, valEnd - valStart);
-    };
+/// modifiers. Read directly from rocisa's GLOBALModifiers (via getModifier()).
+void handleGlobalPrefetchModifier(StinkyInstruction* stinkyInst,
+                                  const rocisa::GlobalPrefetchB8* inst) {
+    const std::optional<rocisa::GLOBALModifiers>& gm = inst->getModifier();
+    if (!gm) return;
 
-    auto thVal = extractValue("th:");
-    auto scopeVal = extractValue("scope:");
-    if (thVal.empty() && scopeVal.empty()) return;
-
-    stinkytofu::TemporalHint th =
-        thVal.empty() ? stinkytofu::TemporalHint::TH_NONE : stinkytofu::parseTemporalHint(thVal);
-    stinkytofu::MUBUFScope scope = scopeVal.empty() ? stinkytofu::MUBUFScope::SCOPE_NONE
-                                                    : stinkytofu::parseMUBUFScope(scopeVal);
+    stinkytofu::TemporalHint th = convertTemporalHint(gm->th);
+    stinkytofu::MUBUFScope scope = convertMUBUFScope(gm->scope);
+    if (th == stinkytofu::TemporalHint::TH_NONE && scope == stinkytofu::MUBUFScope::SCOPE_NONE &&
+        gm->offset == 0) {
+        return;
+    }
     stinkyInst->addModifier<stinkytofu::GLOBALModifiers>(
-        stinkytofu::GLOBALModifiers(/*offset=*/0, th, scope));
+        stinkytofu::GLOBALModifiers(gm->offset, th, scope));
 }
 
 /// Helper to handle SWaitCnt instruction modifiers
@@ -682,7 +681,7 @@ void addModifiersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
 
             // global_prefetch_b8 (gl2-prefetch): temporal hint + cache scope.
             else HANDLE_INST_TYPE(rocisa::GlobalPrefetchB8,
-                                handleGlobalPrefetchModifier(stinkyInst, itemToString(inst)))
+                                handleGlobalPrefetchModifier(stinkyInst, typedInst))
         }
     // clang-format on
 

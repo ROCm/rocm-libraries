@@ -3409,6 +3409,11 @@ namespace rocisa
             return kStr;
         }
 
+        // Read-only access to the temporal-hint / cache-scope modifiers
+        // (gfx1250 gl2-prefetch). Lets consumers (e.g. the StinkyTofu converter)
+        // read them directly instead of re-parsing the emitted instruction string.
+        const std::optional<GLOBALModifiers>& getModifier() const { return gm; }
+
     private:
         std::shared_ptr<Container> v_addr;
         std::shared_ptr<Container> s_addr;

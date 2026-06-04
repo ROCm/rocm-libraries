@@ -230,7 +230,7 @@ class GL2PrefetchLoad(GL2Prefetch):
         for i in range(tp["gl2nlp"]):
             for j in range(tp["gl2nlc"]):
                 addrName = f"GL2PrefetchAddr{tc}_{i}_{j}"
-                mod.add(GlobalPrefetchB8(vgpr(addrName, 2), None, self.globalModifiers))
+                mod.add(GlobalPrefetchB8(vgpr(addrName, 2), sgpr("off", isOff=True), self.globalModifiers))
         return mod
 
     def incrementAddr(self, writer: "KernelWriterAssembly", kernel: Mapping, tp: Mapping) -> Module:

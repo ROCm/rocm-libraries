@@ -1423,7 +1423,7 @@ namespace rocisa
     std::shared_ptr<RegisterContainer> sgpr(const Holder& holder, float regNum = 1.f);
     std::shared_ptr<RegisterContainer> sgpr(int idx, float regNum = 1.f);
     std::shared_ptr<RegisterContainer>
-        sgpr(const std::string& name, float regNum = 1.f, bool isMacro = false);
+        sgpr(const std::string& name, float regNum = 1.f, bool isMacro = false, bool isOff = false);
     std::shared_ptr<RegisterContainer> accvgpr(const Holder& holder, float regNum = 1.f);
     std::shared_ptr<RegisterContainer> accvgpr(int idx, float regNum = 1.f);
     std::shared_ptr<RegisterContainer> accvgpr(const std::string& name, float regNum = 1.f);
