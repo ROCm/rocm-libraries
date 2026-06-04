@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cstring>
 #include <mutex>
 
 #include "python/EmbeddedInterpreter.hpp"
@@ -71,4 +72,34 @@ TEST(TestEmbeddedInterpreter, ImportsBuiltinModule) {
     EmbeddedInterpreter::ensureInitialized();
     EXPECT_TRUE(importSucceeds("sys"));
     EXPECT_TRUE(importSucceeds("sys")) << "interpreter lock must be reusable across calls";
+}
+
+// Driving the native comgr module with invalid LLVM IR must raise cleanly
+// (no crash) and free its resources -- exercises comgr_build_hsaco's error path
+// + modcomgr's error reporting. Under ASAN this also guards against the comgr /
+// modcomgr error-path leaks. comgr cross-compiles, so no GPU is needed.
+TEST(TestEmbeddedInterpreter, ComgrRejectsInvalidIr) {
+    EmbeddedInterpreter::ensureInitialized();
+    std::lock_guard<std::mutex> lock(EmbeddedInterpreter::interpreterMutex());
+    EmbeddedInterpreter::setCallStackTop(__builtin_frame_address(0));
+
+    const char* badIr = "this is not valid llvm ir";
+    const char* isa = "amdgcn-amd-amdhsa--gfx950";
+
+    bool raised = false;
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        mp_obj_t comgr =
+            mp_import_name(qstr_from_str("comgr"), mp_const_none, MP_OBJ_NEW_SMALL_INT(0));
+        mp_obj_t fn = mp_load_attr(comgr, qstr_from_str("build_hsaco"));
+        mp_obj_t args[3];
+        args[0] = mp_obj_new_str(badIr, std::strlen(badIr));
+        args[1] = mp_obj_new_str(isa, std::strlen(isa));
+        args[2] = mp_obj_new_list(0, nullptr);
+        (void)mp_call_function_n_kw(fn, 3, 0, args);
+        nlr_pop();  // reached only if comgr unexpectedly succeeded
+    } else {
+        raised = true;
+    }
+    EXPECT_TRUE(raised) << "comgr.build_hsaco must raise on invalid IR";
 }

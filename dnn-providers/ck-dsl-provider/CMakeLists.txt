@@ -142,3 +142,13 @@ install(TARGETS ck_dsl_provider_plugin EXPORT ck-dsl-provider-plugin
         LIBRARY DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
         RUNTIME DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
 )
+
+# On-disk distribution modes (py/mpy): ship the module bundle beside the plugin
+# .so, in the subdir EmbeddedInterpreter resolves via dladdr at runtime. Empty
+# in the default frozen mode (modules are baked into the .so, nothing to install).
+if(CKDSL_MPY_BUNDLE_DIR)
+    install(DIRECTORY ${CKDSL_MPY_BUNDLE_DIR}/
+            DESTINATION
+            ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/${CKDSL_MPY_BUNDLE_INSTALL_DIRNAME}
+    )
+endif()

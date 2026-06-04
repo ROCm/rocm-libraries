@@ -58,10 +58,13 @@ function(ck_dsl_provider_configure_micropython)
     set(_pkg "${_out}/micropython_embed")
     set(_buildEmbed "${_out}/build-embed")
 
-    # Source-of-truth inputs: changing any of these rebuilds the lib. (Changes
-    # to the ck_dsl/ck_dsl_provider .py trees are not individually tracked here;
-    # touch build_embed.sh or reconfigure to force a refresh.)
+    # Source-of-truth inputs: changing any of these rebuilds the lib. CONFIGURE_DEPENDS
+    # re-globs the ck_dsl / ck_dsl_provider trees at build time, so editing a frozen
+    # module's .py retriggers the embed build (no reconfigure needed).
     file(GLOB _shims "${_root}/micropython/shims/*.py")
+    file(GLOB_RECURSE _ckPy CONFIGURE_DEPENDS
+        "${CK_DSL_PYTHON_PACKAGE_PATH}/ck_dsl/*.py"
+        "${CK_DSL_PROVIDER_PYTHON_PACKAGE_PATH}/ck_dsl_provider/*.py")
     set(_deps
         "${_root}/micropython/build_embed.sh"
         "${_root}/micropython/build_bundle.py"
@@ -74,6 +77,7 @@ function(ck_dsl_provider_configure_micropython)
         "${_root}/src/micropython/embed_port.c"
         "${_root}/src/micropython/mpconfigport.h"
         ${_shims}
+        ${_ckPy}
     )
 
     set(_env
@@ -91,15 +95,22 @@ function(ck_dsl_provider_configure_micropython)
     # interpreter and the .a). Frozen bakes modules in; py/mpy load from disk and
     # bake the on-disk bundle dir for sys.path (the .a build sets CKDSL_ON_DISK
     # itself from CKDSL_MODE; here we mirror it for the C++ side + add the path).
+    # Subdir name the on-disk bundle installs into beside the plugin .so, and
+    # that EmbeddedInterpreter looks for via dladdr at runtime -- the two must
+    # agree, so both come from this one variable.
+    set(_bundleInstallDirname "ck_dsl_micropython")
     if(CKDSL_MICROPYTHON_MODE STREQUAL "frozen")
         set(_compileDefs MICROPY_MODULE_FROZEN_MPY=1 MICROPY_MODULE_FROZEN_STR=1)
+        set(_bundleDir "")
     else()
         if(CKDSL_MICROPYTHON_MODE STREQUAL "mpy")
             set(_bundleDir "${_out}/frozen_src_mpy")
         else()
             set(_bundleDir "${_out}/frozen_src")
         endif()
-        set(_compileDefs CKDSL_ON_DISK=1 "CKDSL_BUNDLE_DIR=\"${_bundleDir}\"")
+        set(_compileDefs CKDSL_ON_DISK=1
+            "CKDSL_BUNDLE_DIR=\"${_bundleDir}\""
+            "CKDSL_BUNDLE_INSTALL_DIRNAME=\"${_bundleInstallDirname}\"")
     endif()
 
     add_custom_command(
@@ -123,6 +134,11 @@ function(ck_dsl_provider_configure_micropython)
         PARENT_SCOPE)
     set(CKDSL_MPY_COMGR_LIB "${CKDSL_AMD_COMGR_LIBRARY}" PARENT_SCOPE)
     set(CKDSL_MPY_COMPILE_DEFS "${_compileDefs}" PARENT_SCOPE)
+    # On-disk modes only (empty in frozen mode): the bundle dir to install beside
+    # the plugin, and the subdir name to install it under. The top-level
+    # CMakeLists adds the install(DIRECTORY) rule from these.
+    set(CKDSL_MPY_BUNDLE_DIR "${_bundleDir}" PARENT_SCOPE)
+    set(CKDSL_MPY_BUNDLE_INSTALL_DIRNAME "${_bundleInstallDirname}" PARENT_SCOPE)
 
     # mpy-cross built by build_embed.sh (in CKDSL_MICROPYTHON_DIR if given, else the
     # cloned checkout under the build dir). The compat lint uses it to compile-check

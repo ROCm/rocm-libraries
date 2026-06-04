@@ -60,6 +60,7 @@ target_link_libraries(
     ck_dsl_provider_private
     PUBLIC hipdnn_plugin_sdk hipdnn_data_sdk hipdnn_flatbuffers_sdk ck_dsl_provider_impl
            "$<LINK_LIBRARY:WHOLE_ARCHIVE,${CKDSL_MPY_STATIC_LIB}>" ${CKDSL_MPY_COMGR_LIB} m
+           ${CMAKE_DL_LIBS}
 )
 
 # Shared library: the actual plugin loaded at runtime by hipDNN.
@@ -78,7 +79,7 @@ target_link_libraries(
 target_link_libraries(
     ck_dsl_provider_plugin
     PRIVATE -Wl,--whole-archive ${CKDSL_MPY_STATIC_LIB} -Wl,--no-whole-archive
-            ${CKDSL_MPY_COMGR_LIB} m
+            ${CKDSL_MPY_COMGR_LIB} m ${CMAKE_DL_LIBS}
 )
 
 if(NOT WIN32)

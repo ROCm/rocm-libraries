@@ -228,7 +228,12 @@ KernelArtifact callCompileLike(mp_obj_t module, const char* attr, const mp_obj_t
     } else {
         raiseFromMpException(MP_OBJ_FROM_PTR(nlr.ret_val), context);
     }
-    // --- nlr region done; safe to build C++ objects from the raw captures ---
+    // --- nlr region done; build C++ objects from the raw captures ---
+    // INVARIANT: the raw const char* captures above point into MicroPython string
+    // storage and stay valid only until the next MicroPython allocation (which can
+    // trigger GC). Everything from here to the memcpy/.assign() calls below must do
+    // NO MicroPython allocation -- only std::string/std::vector (C++ heap, which
+    // never triggers MicroPython GC). Do not insert any mp_* call into this region.
 
     if (hsacoLen > kHsacoMaxBytes) {
         throw hipdnn_plugin_sdk::HipdnnPluginException(

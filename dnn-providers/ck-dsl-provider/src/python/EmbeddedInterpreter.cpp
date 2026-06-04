@@ -12,6 +12,11 @@
 #include <mutex>
 #include <string>
 
+#if defined(CKDSL_ON_DISK) && CKDSL_ON_DISK
+#include <dlfcn.h>
+#include <sys/stat.h>
+#endif
+
 extern "C" {
 #include "port/micropython_embed.h"
 #include "py/stackctrl.h"
@@ -35,6 +40,31 @@ std::atomic<bool> _initialized{false};
 // never freed (the interpreter is never deinitialised).
 constexpr std::size_t kHeapBytes = 512ULL * 1024 * 1024;
 
+#if defined(CKDSL_ON_DISK) && CKDSL_ON_DISK
+// Resolve the on-disk module bundle. Prefer the installed layout: a directory
+// named CKDSL_BUNDLE_INSTALL_DIRNAME next to this plugin (located at runtime via
+// dladdr on a symbol in this binary). Fall back to the build-time path
+// CKDSL_BUNDLE_DIR for the dev / build-tree case -- the tests link the static
+// lib, so dladdr resolves to the test binary, which has no bundle beside it.
+std::string resolveBundleDir() {
+    Dl_info info;
+    if (dladdr(reinterpret_cast<void*>(&resolveBundleDir), &info) != 0 &&
+        info.dli_fname != nullptr) {
+        const std::string path = info.dli_fname;
+        const std::string::size_type slash = path.find_last_of('/');
+        if (slash != std::string::npos) {
+            const std::string candidate =
+                path.substr(0, slash) + "/" + CKDSL_BUNDLE_INSTALL_DIRNAME;
+            struct stat st;
+            if (stat(candidate.c_str(), &st) == 0 && (st.st_mode & S_IFDIR) != 0) {
+                return candidate;
+            }
+        }
+    }
+    return CKDSL_BUNDLE_DIR;
+}
+#endif
+
 void doInitialize() {
     char* heap = static_cast<char*>(std::malloc(kHeapBytes));
     if (heap == nullptr) {
@@ -50,20 +80,19 @@ void doInitialize() {
 
 #if defined(CKDSL_ON_DISK) && CKDSL_ON_DISK
     // On-disk modes: the ck_dsl/shims tree ships beside the plugin and is loaded
-    // from the filesystem. Put its (build-time-baked) absolute path on sys.path
-    // so `import ck_dsl_provider` resolves to those files. (A production install
-    // that relocates the bundle would override CKDSL_BUNDLE_DIR.)
+    // from the filesystem. Resolve it (installed dir next to the .so, else the
+    // build-time path) and put it on sys.path so `import ck_dsl_provider` resolves.
     {
-        const char* bundle = CKDSL_BUNDLE_DIR;
+        const std::string bundle = resolveBundleDir();
         nlr_buf_t nlr;
         if (nlr_push(&nlr) == 0) {
-            mp_obj_list_append(mp_sys_path, mp_obj_new_str(bundle, std::strlen(bundle)));
+            mp_obj_list_append(mp_sys_path, mp_obj_new_str(bundle.c_str(), bundle.size()));
             nlr_pop();
         } else {
             HIPDNN_PLUGIN_LOG_WARN("EmbeddedInterpreter: failed to add on-disk bundle to sys.path");
         }
+        HIPDNN_PLUGIN_LOG_INFO("EmbeddedInterpreter: on-disk module bundle " << bundle);
     }
-    HIPDNN_PLUGIN_LOG_INFO("EmbeddedInterpreter: on-disk module bundle " << CKDSL_BUNDLE_DIR);
 #endif
 
     _initialized.store(true, std::memory_order_release);

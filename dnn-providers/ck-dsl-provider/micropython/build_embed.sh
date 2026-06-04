@@ -114,6 +114,10 @@ else
     CFLAGS_COMMON+=(-DCKDSL_ON_DISK=1)
     if [ "$CKDSL_MODE" = "mpy" ]; then
         echo "== compiling on-disk modules to .mpy"
+        # Same mpy-cross the frozen path uses, so the .mpy bytecode format /
+        # config (small-int, MPZ digit size, qstr window) matches the embed
+        # runtime. Point mpy mode only at this build's mpy-cross, not an
+        # arbitrary one, or the .mpy may be rejected at load.
         MPY_CROSS="$MPY_DIR/mpy-cross/build/mpy-cross"
         MPY_OUT="$OUT_DIR/frozen_src_mpy"
         rm -rf "$MPY_OUT"

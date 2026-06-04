@@ -19,20 +19,37 @@ static mp_obj_t mod_comgr_build_hsaco(mp_obj_t ir_in, mp_obj_t isa_in, mp_obj_t 
     size_t n;
     mp_obj_t* items;
     mp_obj_get_array(opts_in, &n, &items);
-    const char** opts = (const char**)malloc(sizeof(char*) * (n ? n : 1));
+    // GC-managed array: if mp_obj_str_get_str() raises on a non-str option mid
+    // loop (longjmp), the GC reclaims it -- a malloc'd array would leak.
+    const char** opts = m_new(const char*, n ? n : 1);
     for (size_t i = 0; i < n; i++) {
         opts[i] = mp_obj_str_get_str(items[i]);
     }
 
     unsigned char* out = NULL;
     size_t out_len = 0;
-    int rc = comgr_build_hsaco(ir, ir_len, isa, opts, n, &out, &out_len);
-    free(opts);
+    char err[256];
+    err[0] = '\0';
+    int rc = comgr_build_hsaco(ir, ir_len, isa, opts, n, &out, &out_len, err, sizeof(err));
     if (rc != 0) {
-        if (out) free(out);
-        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("comgr build_hsaco failed"));
+        if (out != NULL) {
+            free(out);
+        }
+        mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("comgr build_hsaco failed: %s"),
+                          err[0] != '\0' ? err : "unknown");
     }
-    mp_obj_t res = mp_obj_new_bytes(out, out_len);
+
+    // Copy the comgr buffer into a MicroPython bytes object, freeing `out` on
+    // every path -- mp_obj_new_bytes can raise (OOM) before we reach the free.
+    nlr_buf_t nlr;
+    mp_obj_t res;
+    if (nlr_push(&nlr) == 0) {
+        res = mp_obj_new_bytes(out, out_len);
+        nlr_pop();
+    } else {
+        free(out);
+        nlr_jump(nlr.ret_val);
+    }
     free(out);
     return res;
 }
