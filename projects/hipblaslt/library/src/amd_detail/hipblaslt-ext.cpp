@@ -1493,7 +1493,7 @@ namespace hipblaslt_ext
 
     /* This function is introduced for supporting rocblas hipblaslt integration
      * This function is invoked from hipblaslt_host.cpp (runHipblasltContractionProblem())
-     * when there rocblas already knows the solution index. This function checks if the 
+     * when rocblas already knows the solution index. This function checks if the 
      * kernel corresponding to the solution index is supported on a given GPU and
      * returns the workspace size required for the kernel.
      */
