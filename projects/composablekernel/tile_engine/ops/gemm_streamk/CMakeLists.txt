@@ -315,6 +315,7 @@ else()
         if(_gs_n_combos GREATER 0)
             math(EXPR GEMM_STREAMK_MAX_INSTANCES
                 "${GEMM_STREAMK_MAX_INSTANCES} / ${_gs_n_combos}")
+            set(GEMM_STREAMK_MAX_INSTANCES "${GEMM_STREAMK_MAX_INSTANCES}" CACHE STRING "" FORCE)
             message(STATUS "  gemm_streamk: per-combo budget = ${GEMM_STREAMK_MAX_INSTANCES} (${_gs_n_combos} combos)")
         endif()
     endif()
