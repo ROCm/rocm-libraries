@@ -81,19 +81,30 @@ std::unordered_set<StinkyInstruction*> collectMemOpDeps(StinkyInstruction* consu
 /// Set / tighten a specific counter field in @p spec.
 void setCounter(WaitCountSpec& spec, CounterKind c, int w) {
     switch (c) {
-        case CK_DS:     spec.dsCount     = w; break;
-        case CK_Buffer: spec.bufferCount = w; break;
-        case CK_Tensor: spec.tensorCount = w; break;
-        default: break;
+        case CK_DS:
+            spec.dsCount = w;
+            break;
+        case CK_Buffer:
+            spec.bufferCount = w;
+            break;
+        case CK_Tensor:
+            spec.tensorCount = w;
+            break;
+        default:
+            break;
     }
 }
 
 int getCounter(const WaitCountSpec& spec, CounterKind c) {
     switch (c) {
-        case CK_DS:     return spec.dsCount;
-        case CK_Buffer: return spec.bufferCount;
-        case CK_Tensor: return spec.tensorCount;
-        default: return WaitCountSpec::kUnused;
+        case CK_DS:
+            return spec.dsCount;
+        case CK_Buffer:
+            return spec.bufferCount;
+        case CK_Tensor:
+            return spec.tensorCount;
+        default:
+            return WaitCountSpec::kUnused;
     }
 }
 

@@ -45,6 +45,7 @@
 
 #include <array>
 #include <deque>
+#include <functional>
 #include <unordered_map>
 #include <vector>
 
@@ -83,8 +84,7 @@ struct PerPredQueue {
 /// equal to WaitCountSpec::kUnused means the PHI imposes no constraint on
 /// that counter (e.g. all incoming sources were VALU).
 struct PhiSummary {
-    int waits[CK_Count] = {WaitCountSpec::kUnused, WaitCountSpec::kUnused,
-                           WaitCountSpec::kUnused};
+    int waits[CK_Count] = {WaitCountSpec::kUnused, WaitCountSpec::kUnused, WaitCountSpec::kUnused};
 
     bool operator==(const PhiSummary& other) const {
         for (int c = 0; c < CK_Count; ++c) {
@@ -117,14 +117,30 @@ struct DataflowResult {
 
 class WaitDataflow {
    public:
-    WaitDataflow(Function& func, const DominanceInfo& domInfo,
-                 const std::vector<BasicBlock*>& rpo);
+    /// Predicate deciding whether a RAW dependency carried on a given counter
+    /// must be drained at consumer @p inst. This is the per-counter "constraint
+    /// to emit a wait": return true to force the dataflow to consider draining
+    /// this counter for @p inst, false to skip it.
+    using RawWaitPredicate = std::function<bool(const StinkyInstruction& inst)>;
+
+    WaitDataflow(Function& func, const DominanceInfo& domInfo, const std::vector<BasicBlock*>& rpo);
 
     /// Solve to a fixed point. Returns true on convergence; false if the
     /// iteration cap was hit (in which case the conservative plan that
     /// materializePlan() returns forces s_wait_* 0 at every emitting
     /// anchor).
     bool solve();
+
+    /// Override the per-counter RAW-wait constraint used by transferBlock.
+    /// Must be called before solve(). Passing an empty predicate restores
+    /// counter @p c to its built-in default (DS/buffer drain at every
+    /// consumer; tensor drains only at a barrier).
+    ///
+    /// Example -- make the tensor counter also drain at any DS op:
+    ///   df.setRawNeedsWait(CK_Tensor, [](const StinkyInstruction& i) {
+    ///       return isBarrier(i) || isDSRead(i) || isDSWrite(i);
+    ///   });
+    void setRawNeedsWait(CounterKind c, RawWaitPredicate pred);
 
     /// Materialise the conservative per-consumer wait plan from the
     /// converged dataflow state. Optimizers run after this and may rewrite
@@ -143,6 +159,11 @@ class WaitDataflow {
    private:
     const std::vector<BasicBlock*>& rpo;
     DataflowResult result;
+
+    /// Per-counter RAW-wait constraint, indexed by CounterKind. Seeded with
+    /// the built-in defaults by the constructor; overridable via
+    /// setRawNeedsWait(). Always non-empty during solve().
+    std::array<RawWaitPredicate, CK_Count> rawNeedsWait;
 
     /// Plan recorded by the last transfer pass: each block's list of
     /// (anchor, WaitCountSpec) pairs in program order. Populated by

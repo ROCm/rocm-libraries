@@ -41,10 +41,61 @@ namespace waitcnt {
 
 namespace {
 
+// ---------------------------------------------------------------------------
+// Per-counter policy
+//
+// Everything that is *specific to one hardware counter* lives in this table
+// so the dataflow transfer (transferBlock) stays counter-agnostic. To add a
+// counter, or to change WHEN a counter drains, edit this table -- not the
+// transfer loop.
+//
+// Fields:
+//   isProducer    `inst` issues an async op tracked by this counter, so it
+//                 is enqueued and can be the source of a RAW SSA edge. This
+//                 is the single source of truth for classifyMemOp().
+//   rawNeedsWait  DEFAULT for: given a RAW dependency carried on this
+//                 counter, does the consumer `inst` actually require a drain
+//                 here? Most counters realise their hazard at the direct
+//                 consumer (always true). The tensor counter is special: a
+//                 tensor_load_to_lds writes LDS asynchronously and the
+//                 hazard only becomes observable past a barrier, so only a
+//                 barrier anchors a tlcnt wait. Callers can override this
+//                 per counter at runtime via WaitDataflow::setRawNeedsWait();
+//                 the value here is just the seed.
+//
+// Future per-counter knobs (e.g. anti-dep scans, conservative untagged
+// fallbacks) can migrate here behind their own function-pointer fields so
+// transferBlock never grows another `if (c == CK_Foo)`.
+// ---------------------------------------------------------------------------
+struct CounterPolicy {
+    bool (*isProducer)(const StinkyInstruction&);
+    bool (*rawNeedsWait)(const StinkyInstruction&);
+};
+
+const CounterPolicy& defaultCounterPolicy(CounterKind c) {
+    // Indexed by CounterKind; row order MUST match the enum. Captureless
+    // lambdas decay to plain function pointers, so this stays a constant
+    // table with no per-call allocation.
+    static const CounterPolicy kPolicies[CK_Count] = {
+        // CK_DS: ds_read / ds_write / ds_atomic; every consumer drains.
+        {[](const StinkyInstruction& i) { return isDSRead(i) || isDSWrite(i) || isDSAtomic(i); },
+         [](const StinkyInstruction&) { return true; }},
+        // CK_Buffer: global/buffer load+store; every consumer drains.
+        {[](const StinkyInstruction& i) { return isGlobalMemLoad(i) || isGlobalMemStore(i); },
+         [](const StinkyInstruction&) { return true; }},
+        // CK_Tensor: tensor_load_to_lds; every consumer drains.
+        {[](const StinkyInstruction& i) { return isTensorLoad(i); },
+         [](const StinkyInstruction& i) { return true; }},
+    };
+    return kPolicies[c];
+}
+
 CounterKind classifyMemOp(const StinkyInstruction& inst) {
-    if (isDSRead(inst) || isDSWrite(inst) || isDSAtomic(inst)) return CK_DS;
-    if (isGlobalMemLoad(inst) || isGlobalMemStore(inst)) return CK_Buffer;
-    if (isTensorLoad(inst)) return CK_Tensor;
+    for (int c = 0; c < CK_Count; ++c) {
+        if (defaultCounterPolicy(static_cast<CounterKind>(c)).isProducer(inst)) {
+            return static_cast<CounterKind>(c);
+        }
+    }
     return CK_Count;
 }
 
@@ -110,6 +161,16 @@ WaitDataflow::WaitDataflow(Function& /*func*/, const DominanceInfo& /*domInfo*/,
     : rpo(rpo) {
     const unsigned n = static_cast<unsigned>(rpo.size());
     iterationCap = std::min<unsigned>(64u, std::max<unsigned>(8u, 2u * n));
+
+    // Seed each counter's RAW-wait constraint with the built-in default
+    // from the policy table; callers may override via setRawNeedsWait().
+    for (int c = 0; c < CK_Count; ++c) {
+        rawNeedsWait[c] = defaultCounterPolicy(static_cast<CounterKind>(c)).rawNeedsWait;
+    }
+}
+
+void WaitDataflow::setRawNeedsWait(CounterKind c, RawWaitPredicate pred) {
+    rawNeedsWait[c] = pred ? std::move(pred) : defaultCounterPolicy(c).rawNeedsWait;
 }
 
 DataflowState WaitDataflow::mergeFromPredecessors(BasicBlock& bb) const {
@@ -284,6 +345,7 @@ void WaitDataflow::transferBlock(BasicBlock& bb, DataflowState& state) {
                 auto it = state.phiSummaries.find(src);
                 if (it == state.phiSummaries.end()) continue;
                 for (int c = 0; c < CK_Count; ++c) {
+                    if (!rawNeedsWait[c](*inst)) continue;
                     tightenRequired(static_cast<CounterKind>(c), it->second.waits[c]);
                 }
                 continue;
@@ -295,6 +357,11 @@ void WaitDataflow::transferBlock(BasicBlock& bb, DataflowState& state) {
             // consuming ds_load's vreg output) needs the wait even though
             // both live on the same hardware FIFO. Same-pipeline only
             // skips ANTI-deps; see scanDsAntiDeps below.
+
+            // Per-counter emit constraint (e.g. tlcnt only drains at a
+            // barrier). Overridable via WaitDataflow::setRawNeedsWait();
+            // defaults come from defaultCounterPolicy().
+            if (!rawNeedsWait[c](*inst)) continue;
 
             for (const auto& q : state.queues[c]) {
                 int n = q.countFrom(src);
@@ -322,8 +389,7 @@ void WaitDataflow::transferBlock(BasicBlock& bb, DataflowState& state) {
         // Conservative fallbacks live below: if either side lacks
         // MemTokenData we cannot prove disjointness and force wait 0.
         auto scanDsAntiDeps = [&](const StinkyInstruction& anchor,
-                                  const std::vector<int>& anchorTokens,
-                                  bool barrierMode) {
+                                  const std::vector<int>& anchorTokens, bool barrierMode) {
             for (const auto& q : state.queues[CK_DS]) {
                 const int qsize = static_cast<int>(q.ops.size());
                 for (int idx = 0; idx < qsize; ++idx) {
@@ -334,8 +400,8 @@ void WaitDataflow::transferBlock(BasicBlock& bb, DataflowState& state) {
                     if (!barrierMode && !isDSRead(*op) && !isDSAtomic(*op)) continue;
                     if (isOnSamePipeline(anchor, *op)) continue;
                     auto* opTokens = op->getModifier<MemTokenData>();
-                    bool overlap = (opTokens == nullptr) ||
-                                   hasTokenOverlap(opTokens->tokens, anchorTokens);
+                    bool overlap =
+                        (opTokens == nullptr) || hasTokenOverlap(opTokens->tokens, anchorTokens);
                     if (!overlap) continue;
                     tightenRequired(CK_DS, qsize - idx - 1);
                 }
@@ -403,10 +469,17 @@ void WaitDataflow::transferBlock(BasicBlock& bb, DataflowState& state) {
             if (!emit[c].needsNewWait(required[c])) continue;
 
             switch (c) {
-                case CK_DS:     spec.dsCount     = required[c]; break;
-                case CK_Buffer: spec.bufferCount = required[c]; break;
-                case CK_Tensor: spec.tensorCount = required[c]; break;
-                default: break;
+                case CK_DS:
+                    spec.dsCount = required[c];
+                    break;
+                case CK_Buffer:
+                    spec.bufferCount = required[c];
+                    break;
+                case CK_Tensor:
+                    spec.tensorCount = required[c];
+                    break;
+                default:
+                    break;
             }
             emit[c].recordEmittedWait(required[c]);
             trimQueues(state.queues[c], required[c]);
