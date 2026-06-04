@@ -2554,6 +2554,8 @@ class Solution(collections.abc.Mapping):
       if state["TDMInst"] and state["EnableMatrixInstruction"] and not state["ProblemType"]["Sparse"]:
         # Stage 1: decide iterate-mode per tensor.
         if iterModeMask == -1:
+          state.pop("_TDMIterateModeA", None)
+          state.pop("_TDMIterateModeB", None)
           for tc in ["A", "B"]:
             if not state["UnrollMajorLDS%s" % tc]:
               continue
@@ -2562,6 +2564,8 @@ class Solution(collections.abc.Mapping):
             lbspp = roundUpToNearestMultiple(int(state["_DepthU%s" % tc] * bpe_tc * vw), 256)
             if lbspp > 1024:
               state["_TDMIterateMode%s" % tc] = True
+          # Resolve -1 into the concrete mask for kernel naming. backupValues
+          # restores -1 before each DepthU candidate, so this overwrite is safe.
           state["TDMIterateMode"] = (1 if state.get("_TDMIterateModeA", False) else 0) | \
                                     (2 if state.get("_TDMIterateModeB", False) else 0)
         else:

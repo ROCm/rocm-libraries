@@ -18106,8 +18106,10 @@ class KernelWriterAssembly(KernelWriter):
     `bytes_per_row = round(DepthU * bpe)` fit in one LDS pad block."""
     lbspp = kernel["LdsBlockSizePerPad%s" % tc]
     bytes_per_row = int(round(du * dtype.numBytes()))
-    assert lbspp % bytes_per_row == 0, \
-        f"TDM iterate: LBSPP({lbspp}) not multiple of bytes_per_row({bytes_per_row})"
+    if bytes_per_row == 0 or lbspp % bytes_per_row != 0:
+      raise RuntimeError(
+          f"TDM iterate {tc}: LdsBlockSizePerPad({lbspp}) not a multiple of "
+          f"bytes_per_row({bytes_per_row}=round(DepthU*bpe)).")
     return lbspp // bytes_per_row
 
   def _emitTdmIterateInit(self, mod, kernel, tc, dtype, du, mt, perIssueLoadRowDivisor,
@@ -18123,10 +18125,12 @@ class KernelWriterAssembly(KernelWriter):
     iter_count = rows_per_il // tile_dim1
     lds_inc = (lbspp + pad_bytes) >> dss
 
-    assert rows_per_il % tile_dim1 == 0, \
-        f"TDM iterate: rows_per_issueLoad({rows_per_il}) % tile_dim1({tile_dim1}) != 0"
-    assert 0 < iter_count <= 256, \
-        f"TDM iterate: iter_count({iter_count}) exceeds HW max of 256 (field encodes n-1, 0~255)"
+    if tile_dim1 == 0 or rows_per_il % tile_dim1 != 0:
+      raise RuntimeError(
+          f"TDM iterate {tc}: rows_per_issueLoad({rows_per_il}) not divisible by tile_dim1({tile_dim1}).")
+    if not (0 < iter_count <= 256):
+      raise RuntimeError(
+          f"TDM iterate {tc}: iter_count({iter_count}) outside HW range 1~256 (field encodes n-1).")
 
     # global_inc field = tile_dim1 * strideN * bpe >> dss.
     with self.allocTmpSgpr(2) as tmp:
