@@ -39,7 +39,6 @@ import pytest
 
 from Tensile.TensileCreateLibrary.Run import (
     _baseArchs,
-    _singleArchDir,
     libraryDir,
     libraryRoot,
     tensileLibraryFile,
@@ -103,58 +102,6 @@ def test_baseArchs_sortsForDeterminism():
 
 def test_baseArchs_emptyInput():
     assert _baseArchs([]) == []
-
-
-# ---------------------------------------------------------------------------
-# _singleArchDir: fallback used by auxiliary tooling that has no arch in hand
-# ---------------------------------------------------------------------------
-def test_singleArchDir_returnsLoneSubdir(tmp_path):
-    lib = tmp_path / "library"
-    lib.mkdir()
-    (lib / "gfx942").mkdir()
-    assert _singleArchDir(tmp_path) == lib / "gfx942"
-
-
-def test_singleArchDir_acceptsStringPath(tmp_path):
-    lib = tmp_path / "library"
-    lib.mkdir()
-    (lib / "gfx950").mkdir()
-    assert _singleArchDir(str(tmp_path)) == lib / "gfx950"
-
-
-def test_singleArchDir_ignoresNonGfxEntries(tmp_path):
-    # Auxiliary metadata (caches, source dirs) lives alongside the gfx
-    # subdir; only the gfx* directory should be picked.
-    lib = tmp_path / "library"
-    lib.mkdir()
-    (lib / "gfx942").mkdir()
-    (lib / "cache").mkdir()
-    (lib / "TensileLibrary.dat").write_text("")
-    assert _singleArchDir(tmp_path) == lib / "gfx942"
-
-
-def test_singleArchDir_raisesOnMissingRoot(tmp_path):
-    with pytest.raises(FileNotFoundError, match="library root does not exist"):
-        _singleArchDir(tmp_path)
-
-
-def test_singleArchDir_raisesOnZeroGfxSubdirs(tmp_path):
-    lib = tmp_path / "library"
-    lib.mkdir()
-    with pytest.raises(RuntimeError, match="expected exactly one gfx subdir"):
-        _singleArchDir(tmp_path)
-
-
-def test_singleArchDir_raisesOnMultipleGfxSubdirs(tmp_path):
-    # The whole point of this helper is to fail loudly when the caller's
-    # single-arch assumption is wrong -- if it silently picked one, the
-    # auxiliary tool would write to the wrong arch's directory.
-    lib = tmp_path / "library"
-    lib.mkdir()
-    (lib / "gfx942").mkdir()
-    (lib / "gfx950").mkdir()
-    with pytest.raises(RuntimeError, match="Caller must pass the arch explicitly"):
-        _singleArchDir(tmp_path)
 
 
 # ---------------------------------------------------------------------------

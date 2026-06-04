@@ -45,7 +45,7 @@ from Tensile.Common import ensurePath, print1, printExit, printWarning, ClientEx
 from Tensile.Common.Architectures import isaToGfx
 from Tensile.Common.GlobalParameters import globalParameters
 from Tensile.Common.TimingInstrumentation import timing_context
-from .TensileCreateLibrary import copyStaticFiles, libraryDir, _singleArchDir
+from .TensileCreateLibrary import copyStaticFiles, libraryDir
 from .ParallelExecution import detectAvailableGpus, runClientParallel
 from .Contractions import FreeIndex, BatchIndex
 from .Contractions import ProblemType as ContractionsProblemType
@@ -770,12 +770,19 @@ def writeClientConfig(
 
 def CreateBenchmarkClientParametersForSizes(libraryRootPath, problemSizes, dataFilePath, configFile, deviceId, gfxName, problemTypeDict=None, archs=None):
 
-    # Benchmarking always operates on a single arch at a time. If the caller
-    # didn't tell us which, scan library/ for the lone gfx subdir.
+    # Benchmarking operates on a single arch at a time. Resolve the per-base
+    # dir from the arch the caller already holds (archs, else gfxName) via the
+    # same prescription used to write it; an unknown arch is a hard error, not
+    # a filesystem guess.
     if archs:
         libraryPath = libraryDir(libraryRootPath, archs[0])
+    elif gfxName:
+        libraryPath = libraryDir(libraryRootPath, gfxName)
     else:
-        libraryPath = _singleArchDir(libraryRootPath)
+        raise RuntimeError(
+            "CreateBenchmarkClientParametersForSizes: arch is required; "
+            "pass archs=[...] or a non-empty gfxName"
+        )
     libraryFiles = [os.path.join(str(libraryPath), f) for f in os.listdir(libraryPath)]
     codeObjectFiles = [f for f in libraryFiles if f.endswith("co")]
 

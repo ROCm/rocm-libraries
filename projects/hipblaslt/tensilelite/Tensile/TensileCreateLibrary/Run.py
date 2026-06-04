@@ -109,27 +109,6 @@ def _baseArchs(archs: Collection[str]) -> List[str]:
     return sorted({a.split(":")[0] for a in archs})
 
 
-def _singleArchDir(outputPath: Union[str, Path]) -> Path:
-    """Resolve the per-base subdir under library/ when the arch is not known.
-
-    For auxiliary tooling (benchmark, summation generation) that assumes a
-    single-arch context but never gets the arch threaded through, scan
-    library/ for its sole gfx subdirectory. Raises if zero or more than one
-    is present — those cases require the caller to pass the arch explicitly.
-    """
-    root = libraryRoot(outputPath)
-    if not root.is_dir():
-        raise FileNotFoundError(f"library root does not exist: {root}")
-    subdirs = [p for p in root.iterdir() if p.is_dir() and p.name.startswith("gfx")]
-    if len(subdirs) != 1:
-        raise RuntimeError(
-            f"_singleArchDir: expected exactly one gfx subdir under {root}, "
-            f"found {len(subdirs)}: {[p.name for p in subdirs]}. "
-            "Caller must pass the arch explicitly."
-        )
-    return subdirs[0]
-
-
 def tensileLibraryFile(outputPath: Union[str, Path], arch: str, library_format: str = "msgpack") -> Path:
     """The canonical TensileLibrary path for one base arch under outputPath.
 

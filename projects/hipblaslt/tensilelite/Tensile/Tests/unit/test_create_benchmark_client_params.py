@@ -26,19 +26,20 @@
 
 The helper resolves the per-arch library subdirectory used by the
 benchmark client and synthesizes the `libraryFile` path that
-writeClientConfigIni now requires. Two branches exist:
+writeClientConfigIni now requires. The arch is resolved by prescription
+from the value the caller already holds:
 
   1. `archs` provided → `libraryDir(libraryRootPath, archs[0])` strips
      target features at the first colon, so cooked variants like
      `gfx942:sramecc+:xnack+` collapse to `library/gfx942/`.
 
-  2. `archs=None` → `_singleArchDir(libraryRootPath)` scans the library
-     tree for the lone gfx* subdir. This is the path TheRock-driven
-     benchmark runs hit when the caller did not thread the arch through.
+  2. `archs=None` but `gfxName` set → `libraryDir(libraryRootPath, gfxName)`.
 
-Both branches must compose the libraryFile as
-`<resolved_per_base_dir>/TensileLibrary.{dat,yaml}` and pass it
-positionally to writeClientConfigIni (which asserts non-empty).
+  3. neither → RuntimeError (no filesystem guessing).
+
+Branches 1-2 compose the libraryFile as
+`<resolved_per_base_dir>/TensileLibrary.{dat,yaml}` and pass it as the
+`libraryFile` keyword arg to writeClientConfigIni.
 """
 
 import json
@@ -154,12 +155,11 @@ def test_archs_provided_yaml_extension(tmp_path, captured_call, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Branch B: archs=None falls back to _singleArchDir
+# Branch B: archs=None resolves from gfxName (else raises)
 # ---------------------------------------------------------------------------
-def test_archs_none_falls_back_to_singleArchDir(tmp_path, captured_call, monkeypatch):
-    """When the caller omits archs, the helper must scan library/ for the
-    lone gfx subdir (the auxiliary-tooling path) and compose libraryFile
-    relative to that found dir."""
+def test_archs_none_uses_gfxName(tmp_path, captured_call, monkeypatch):
+    """When the caller omits archs but provides gfxName, resolve the per-base
+    dir from gfxName via libraryDir (the prescription) -- no filesystem scan."""
     _global_params(monkeypatch)
     _make_library_tree(tmp_path, "gfx950", "msgpack")
 
@@ -178,14 +178,13 @@ def test_archs_none_falls_back_to_singleArchDir(tmp_path, captured_call, monkeyp
     assert libraryFile == os.path.join(str(tmp_path), "library", "gfx950", "TensileLibrary.dat")
 
 
-def test_archs_none_raises_when_multiple_gfx_subdirs(tmp_path, monkeypatch):
-    """The _singleArchDir fallback fails loudly when the caller's single-
-    arch assumption is wrong, so the helper surfaces the same."""
+def test_no_arch_raises(tmp_path, monkeypatch):
+    """With neither archs nor a non-empty gfxName, the helper fails loudly
+    rather than guessing the arch from the filesystem."""
     _global_params(monkeypatch)
     (tmp_path / "library" / "gfx942").mkdir(parents=True)
-    (tmp_path / "library" / "gfx950").mkdir(parents=True)
 
-    with pytest.raises(RuntimeError, match="Caller must pass the arch explicitly"):
+    with pytest.raises(RuntimeError, match="arch is required"):
         CreateBenchmarkClientParametersForSizes(
             libraryRootPath=str(tmp_path),
             problemSizes=None,
