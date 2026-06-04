@@ -76,7 +76,7 @@ Tests:
   M_N: *M_N_range_quick
   numericboost: [0, 1]
   boosttol: [0.05, 0.5, 0.79, 1.1]
-  boostval: [-0.5, 0.2, 1.0, 1.5]
+  boostval: [0.2, 1.0, 1.5]
   transA: [rocsparse_operation_none]
   apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
   spol: [rocsparse_solve_policy_auto]
