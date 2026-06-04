@@ -5984,8 +5984,9 @@ void host_bsrilu0(rocsparse_direction               dir,
 
                 if(boost)
                 {
-                    diag = (boost_tol >= std::abs(diag)) ? host_assign_ilu0_boost_value(diag, boost_val)
-                                          : diag;
+                    diag                             = (boost_tol >= std::abs(diag))
+                                                           ? host_assign_ilu0_boost_value(diag, boost_val)
+                                                           : diag;
                     bsr_val[BSR_IND(j, bi, bi, dir)] = diag;
                 }
                 else
@@ -6349,8 +6350,7 @@ void host_csrilu0(rocsparse_int                     M,
             {
                 if(std::abs(csr_val[diag_pos]) <= boost_tol)
                 {
-                    csr_val[diag_pos]
-                        = host_assign_ilu0_boost_value(csr_val[diag_pos], boost_val);
+                    csr_val[diag_pos] = host_assign_ilu0_boost_value(csr_val[diag_pos], boost_val);
                 }
             }
             else
