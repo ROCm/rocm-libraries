@@ -1424,12 +1424,18 @@ def fmha_compile_flags(arch: str, hipcc: str = "", family: str = "") -> List[str
     ]
     if arch.startswith("gfx9"):
         flags.append("-DCK_TILE_FMHA_FWD_FAST_EXP2=1")
-        flags.append("-DCK_TILE_USE_OCP_FP8")
-        flags.append("-DCK_GFX950_SUPPORT")
-        flags.append("-DCK_USE_GFX950")
-        flags.append("-DCK_USE_GFX94")
         flags.append("-DCK_USE_XDL")
         flags.append("-DCK_TILE_USE_WMMA=0")
+        if arch.startswith("gfx95"):
+            # CDNA4 (gfx950/MI350): native OCP fp8 (e4m3fn) MFMA.
+            flags.append("-DCK_TILE_USE_OCP_FP8")
+            flags.append("-DCK_GFX950_SUPPORT")
+            flags.append("-DCK_USE_GFX950")
+            flags.append("-DCK_USE_GFX94")
+        else:
+            # CDNA3 (gfx942/MI300): native FNUZ fp8 (e4m3fnuz) MFMA. Forcing
+            # OCP fp8 + gfx950 codepaths here yields non-finite (NaN) output.
+            flags.append("-DCK_USE_GFX94")
     else:
         flags.append("-DCK_TILE_FMHA_FWD_FAST_EXP2=0")
 
