@@ -23,7 +23,6 @@
    - [6.3 Autotuning API on Graph](#63-autotuning-api-on-graph)
    - [6.4 Benchmarking Flows](#64-benchmarking-flows)
    - [6.5 Config File Output](#65-config-file-output)
-   - [6.6 Checkpoint/Resume](#66-checkpointresume)
 7. [Porting Guide: cuDNN to hipDNN](#7-porting-guide-cudnn--hipdnn)
 8. [Complete Example](#8-complete-example)
 9. [Risks and Mitigations](#9-risks-and-mitigations)
@@ -61,7 +60,6 @@ Deep learning operations can be computed by many algorithms, each with different
 5. **Knob variant autotuning**: Benchmark the same engine with different knob configurations
 6. **cuDNN API parity**: Match cuDNN's autotuning support, then extend
 7. **Extensible ranking**: User-provided ranking function for custom criteria
-8. **Checkpoint/resume**: Resume interrupted autotuning sessions
 
 ---
 
@@ -94,7 +92,7 @@ Deep learning operations can be computed by many algorithms, each with different
 │  │ • EXHAUSTIVE    │    │ • Append to existing file               │  │
 │  │   mode          │    │ • Replace matching (op, tensors)        │  │
 │  │ • Strategies    │    │ • Autotune metadata                     │  │
-│  │ • Checkpoint    │    └─────────────────────────────────────────┘  │
+│  │                 │    └─────────────────────────────────────────┘  │
 │  └─────────────────┘                                                 │
 └──────────────────────────────────────────────────────────────────────┘
 
@@ -163,8 +161,6 @@ struct AutotuneConfig {
     // No effect in AUTO mode.
     bool continueOnPrimingFailure = false;
 
-    // Checkpoint/resume (empty = no checkpointing)
-    std::filesystem::path checkpointFile = {};
 };
 
 struct AutotuneStorageConfig {
@@ -642,20 +638,6 @@ The config file is a lightweight engine *selection* hint; plan serialization is 
 2. Normalization
 3. Pointwise (lowest priority)
 
-### 6.6 Checkpoint/Resume
-
-Plan-spec path only; `checkpointFile` is ignored on the compiled-plan path.
-
-When `checkpointFile` is set:
-1. Check if the file exists
-2. If it exists: validate session ID (`hash(graphSig + devSig + configHash + workspaceSize + planSpecListHash)`), skip completed plan specs
-3. After each plan spec: atomically write updated results (rename-on-write)
-4. After all plan specs complete: write final results
-
-Stale checkpoints (session ID mismatch, including changed plan specs) are discarded. The hash is strict: the checkpoint is discarded if anything changes (GPU architecture, driver version, library version). The user is responsible for ensuring consistent environments when resuming.
-
----
-
 ## 7. Porting Guide: cuDNN → hipDNN
 
 For API mapping, key differences, and complete porting examples, see Appendix A. For concrete use cases, see Appendix B.
@@ -718,7 +700,6 @@ int main() {
          .strategy = hipdnn_frontend::AutotuneStrategy::RUN_UNTIL_STABLE,
          .maxIterations = 50,
          .stabilityThreshold = 0.03f,
-         .checkpointFile = "autotune.ckpt"},
         {.filePath = "autotune_results.json"},
         &results);
 
@@ -740,7 +721,6 @@ int main() {
 | **Cartesian product growth** | Error at 10,000 plan specs per `add_engine_sweep()` call, warning at 1,000. Validate-then-store rejects invalid knobs early. |
 | **Config file format changes** | Backward-compatible: `matchOperation()` ignores unknown fields. |
 | **Config file conflicts on append** | Same (op, tensors) entries are replaced, preventing stale entries. |
-| **Checkpoint session validation** | Stale checkpoints (session ID mismatch) are discarded; start fresh. |
 
 ---
 
@@ -1350,7 +1330,6 @@ hipDNN provides both approaches:
 | Config file output (`AutotuneStorageConfig`) | None |
 | Knob variant autotuning (`EngineVariant`, `EngineSweepSpec`, `add_engine_*()`) | Limited `create_execution_plan(id, knob_map)` |
 | Custom ranking function (`AutotuneRankingFn`) | None |
-| Checkpoint/resume (plan-spec path only) | None |
 
 ---
 
@@ -1634,29 +1613,4 @@ export HIPDNN_HEUR_CONFIG_PATH=autotune_results.json
 # Production: use the combined file
 export HIPDNN_HEUR_CONFIG_PATH=my_overrides.json
 ./my_training_app
-```
-
-### Checkpoint/Resume
-
-Plan-spec path only (see § 6.6).
-
-**18. Resume interrupted autotuning.** On restart, completed specs are skipped; stale checkpoints auto-discarded.
-
-```cpp
-graph->autotune(handle, variantPack, workspace, maxWorkspaceSize,
-    {.mode = TuneMode::EXHAUSTIVE,
-     .checkpointFile = "autotune.ckpt"},
-    {.filePath = "autotune_results.json"});
-// If interrupted and restarted, the same call resumes from where it left off.
-```
-
-**19. CI/CD time-budgeted autotuning.** All plan specs eventually benchmarked across multiple CI runs.
-
-```cpp
-// CI job (may time out):
-graph->autotune(handle, variantPack, workspace, maxWorkspaceSize,
-    {.mode = TuneMode::EXHAUSTIVE,
-     .checkpointFile = "/ci/artifacts/autotune.ckpt"},
-    {.filePath = "/ci/artifacts/autotune_results.json"});
-// Next CI run picks up where the previous one left off.
 ```
