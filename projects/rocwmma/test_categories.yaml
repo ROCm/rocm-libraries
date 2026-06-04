@@ -61,12 +61,14 @@ test_categories:
       - "comprehensive"
 
   full:
-    description: "rocWMMA full test suite"
+    description: "rocWMMA full test suite - includes flaky/problematic tests excluded from lower tiers"
     test_patterns:
       - ".*"
-    exclude:
-      - ".*unpack_util_test.*"
-      - ".*contamination_test.*"
-      - ".*map_util_test.*"
+    # No exclude list: 'full' is the absolute superset and is the only way
+    # to exercise tests that are flaky under current infrastructure
+    # (unpack_util_test, contamination_test, map_util_test). These remain
+    # excluded from quick/standard/comprehensive so routine CI stays green;
+    # `ctest -L full` is the opt-in path for running them. See PR #7535
+    # review thread for context.
     labels:
       - "full"
