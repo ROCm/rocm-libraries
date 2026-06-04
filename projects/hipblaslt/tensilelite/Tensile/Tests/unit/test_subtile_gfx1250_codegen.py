@@ -242,7 +242,7 @@ class TestGfx1250SubtileCodegen:
         tiB.allocOffsetRegisters(writer, kernel)
         module = globalReadPtrUpdates(tc, writer, kernel)
         asm = str(module)
-        assert "s_add_u32" in asm
+        assert "s_add_u64" in asm
         assert "sync descriptor global addr" in asm
 
     # -- emitSingleBufferLoad TDM path --

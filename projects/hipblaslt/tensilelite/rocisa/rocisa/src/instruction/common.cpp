@@ -327,6 +327,18 @@ void common_inst(nb::module_ m_common)
         .def("__deepcopy__",
              [](const rocisa::SOrB64& self, const nb::dict&) { return new rocisa::SOrB64(self); });
 
+    nb::class_<rocisa::SAddU64, rocisa::CommonInstruction>(m_common, "SAddU64")
+        .def(nb::init<const std::shared_ptr<rocisa::Container>&,
+                      const InstructionInput&,
+                      const InstructionInput&,
+                      const std::string&>(),
+             nb::arg("dst"),
+             nb::arg("src0"),
+             nb::arg("src1"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__",
+             [](const rocisa::SAddU64& self, const nb::dict&) { return new rocisa::SAddU64(self); });
+
     nb::class_<rocisa::SSubU64, rocisa::CommonInstruction>(m_common, "SSubU64")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
                       const InstructionInput&,

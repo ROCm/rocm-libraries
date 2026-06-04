@@ -24,7 +24,7 @@ from rocisa.container import DPPModifiers, EXEC, MUBUFModifiers, VCC, vgpr, sgpr
 from rocisa.enum import RegisterType
 from rocisa.instruction import (
     BufferLoadB128,
-    SAddCU32, SAddU32, SAndB32, SMovB32, SMovB64, SMulI32, SNop, SOrB32, SXorB32,
+    SAddCU32, SAddU32, SAddU64, SAndB32, SMovB32, SMovB64, SMulI32, SNop, SOrB32, SXorB32,
     SCBranchSCC1, SCmpEQU32, SEndpgm,
     SLShiftLeftB64, SLShiftRightB32,
     VAddU32, VAndB32, VCmpXEqU32,
@@ -528,8 +528,7 @@ def _emitGRPtrUpdate_TLU0(tag, tile, ti, writer, kernel):
     module = Module(f"TDM GR Ptr Update ({tc})")
     inc = int(ti.depthUBytes)
     module.addComment0("TDM addr update: %s += %u" % (tc, inc))
-    module.add(SAddU32(dst=sgpr("Address%s" % tc), src0=sgpr("Address%s" % tc), src1=inc))
-    module.add(SAddCU32(dst=sgpr("Address%s+1" % tc), src0=sgpr("Address%s+1" % tc), src1=0))
+    module.add(SAddU64(dst=sgpr("Address%s" % tc, 2), src0=sgpr("Address%s" % tc, 2), src1=inc))
     group0 = "tdm%sGroup0" % tc
     module.add(SMovB64(dst=sgpr("%s+2" % group0, 2), src=sgpr("Address%s" % tc, 2), comment="sync descriptor global addr"))
     module.add(SOrB32(dst=sgpr("%s+3" % group0), src0=sgpr("%s+3" % group0), src1=hex(2 << 30), comment="restore type field"))
@@ -1051,10 +1050,8 @@ def tdmGlobalOffsetSubtile(writer, kernel, tP):
                                                      comment="Batch: Stride*WG"))
       mod.add(SLShiftLeftB64(dst=sgpr(tmp, 2), src=sgpr(tmp, 2),
                               shiftHex=int(log2(bpe)), comment="scale by bpe"))
-      mod.add(SAddU32(dst=sgpr(f"Address{tc}"), src0=sgpr(tmp), src1=sgpr(f"Address{tc}"),
-                       comment="+= batch(lo)"))
-      mod.add(SAddCU32(dst=sgpr(f"Address{tc}+1"), src0=sgpr(tmp+1), src1=sgpr(f"Address{tc}+1"),
-                        comment="+= batch(hi)"))
+      mod.add(SAddU64(dst=sgpr(f"Address{tc}", 2), src0=sgpr(tmp, 2), src1=sgpr(f"Address{tc}", 2),
+                       comment="+= batch"))
 
   return mod
 
