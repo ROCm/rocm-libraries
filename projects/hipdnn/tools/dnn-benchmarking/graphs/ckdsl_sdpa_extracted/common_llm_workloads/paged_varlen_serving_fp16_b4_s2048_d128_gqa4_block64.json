@@ -1,0 +1,187 @@
+{
+    "name": "ckdsl_sdpa_common_Fp16_PagedVarlenServing_GQA4_B4_S2048_D128_Block64",
+    "_comment": "PyTorch reference unsupported: graph uses seq_len_q/seq_len_kv tensors for varlen SDPA and page_table_k/page_table_v tensors for paged KV; current dnn-benchmarking PyTorch SDPA reference does not emulate varlen or paged KV.",
+    "compute_data_type": "float",
+    "io_data_type": "half",
+    "intermediate_data_type": "half",
+    "tensors": [
+        {
+            "uid": 1,
+            "name": "query",
+            "dims": [
+                4,
+                32,
+                2048,
+                128
+            ],
+            "strides": [
+                8388608,
+                128,
+                4096,
+                1
+            ],
+            "data_type": "half",
+            "virtual": false
+        },
+        {
+            "uid": 2,
+            "name": "key",
+            "dims": [
+                4,
+                8,
+                2048,
+                128
+            ],
+            "strides": [
+                2097152,
+                128,
+                1024,
+                1
+            ],
+            "data_type": "half",
+            "virtual": false
+        },
+        {
+            "uid": 3,
+            "name": "value",
+            "dims": [
+                4,
+                8,
+                2048,
+                128
+            ],
+            "strides": [
+                2097152,
+                128,
+                1024,
+                1
+            ],
+            "data_type": "half",
+            "virtual": false
+        },
+        {
+            "uid": 4,
+            "name": "output",
+            "dims": [
+                4,
+                32,
+                2048,
+                128
+            ],
+            "strides": [
+                8388608,
+                128,
+                4096,
+                1
+            ],
+            "data_type": "half",
+            "virtual": false
+        },
+        {
+            "uid": 7,
+            "name": "seq_len_q",
+            "dims": [
+                4
+            ],
+            "strides": [
+                1
+            ],
+            "data_type": "int32",
+            "virtual": false
+        },
+        {
+            "uid": 8,
+            "name": "seq_len_kv",
+            "dims": [
+                4
+            ],
+            "strides": [
+                1
+            ],
+            "data_type": "int32",
+            "virtual": false
+        },
+        {
+            "uid": 11,
+            "name": "page_table_k",
+            "dims": [
+                4,
+                32
+            ],
+            "strides": [
+                32,
+                1
+            ],
+            "data_type": "int32",
+            "virtual": false
+        },
+        {
+            "uid": 12,
+            "name": "page_table_v",
+            "dims": [
+                4,
+                32
+            ],
+            "strides": [
+                32,
+                1
+            ],
+            "data_type": "int32",
+            "virtual": false
+        }
+    ],
+    "nodes": [
+        {
+            "name": "sdpa_node",
+            "type": "SdpaAttributes",
+            "compute_data_type": "float",
+            "inputs": {
+                "q_tensor_uid": 1,
+                "k_tensor_uid": 2,
+                "v_tensor_uid": 3,
+                "attn_mask_tensor_uid": null,
+                "scale_tensor_uid": null,
+                "seq_len_q_tensor_uid": 7,
+                "seq_len_kv_tensor_uid": 8,
+                "seed_tensor_uid": null,
+                "offset_tensor_uid": null,
+                "dropout_mask_tensor_uid": null,
+                "dropout_scale_tensor_uid": null,
+                "page_table_k_tensor_uid": 11,
+                "page_table_v_tensor_uid": 12,
+                "block_mask_tensor_uid": null,
+                "sink_token_tensor_uid": null,
+                "descale_q_tensor_uid": null,
+                "descale_k_tensor_uid": null,
+                "descale_v_tensor_uid": null,
+                "descale_s_tensor_uid": null,
+                "scale_s_tensor_uid": null,
+                "scale_o_tensor_uid": null
+            },
+            "outputs": {
+                "o_tensor_uid": 4,
+                "stats_tensor_uid": null,
+                "max_tensor_uid": null,
+                "sum_exp_tensor_uid": null,
+                "rng_dump_tensor_uid": null,
+                "amax_s_tensor_uid": null,
+                "amax_o_tensor_uid": null
+            },
+            "attributes": {
+                "generate_stats": null,
+                "alibi_mask": false,
+                "padding_mask": false,
+                "causal_mask": true,
+                "causal_mask_bottom_right": false,
+                "dropout_probability": null,
+                "attn_scale_value": 0.08838834764831843,
+                "left_bound": null,
+                "right_bound": null,
+                "max_seq_len_kv": 2048,
+                "diagonal_alignment": "TOP_LEFT",
+                "mma_core_mode": "UNSET",
+                "implementation": "AUTO"
+            }
+        }
+    ]
+}

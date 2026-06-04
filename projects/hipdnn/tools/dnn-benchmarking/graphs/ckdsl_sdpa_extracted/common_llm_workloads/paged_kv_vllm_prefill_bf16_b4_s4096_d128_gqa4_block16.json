@@ -1,0 +1,163 @@
+{
+    "name": "ckdsl_sdpa_common_Bf16_VllmPagedKvPrefill_GQA4_B4_S4096_D128_Block16",
+    "_comment": "PyTorch reference unsupported: graph uses page_table_k/page_table_v tensors for paged KV; current dnn-benchmarking PyTorch SDPA reference only supports dense K/V tensors.",
+    "compute_data_type": "float",
+    "io_data_type": "bfloat16",
+    "intermediate_data_type": "bfloat16",
+    "tensors": [
+        {
+            "uid": 1,
+            "name": "query",
+            "dims": [
+                4,
+                32,
+                4096,
+                128
+            ],
+            "strides": [
+                16777216,
+                128,
+                4096,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false
+        },
+        {
+            "uid": 2,
+            "name": "key",
+            "dims": [
+                4,
+                8,
+                4096,
+                128
+            ],
+            "strides": [
+                4194304,
+                128,
+                1024,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false
+        },
+        {
+            "uid": 3,
+            "name": "value",
+            "dims": [
+                4,
+                8,
+                4096,
+                128
+            ],
+            "strides": [
+                4194304,
+                128,
+                1024,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false
+        },
+        {
+            "uid": 4,
+            "name": "output",
+            "dims": [
+                4,
+                32,
+                4096,
+                128
+            ],
+            "strides": [
+                16777216,
+                128,
+                4096,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false
+        },
+        {
+            "uid": 11,
+            "name": "page_table_k",
+            "dims": [
+                4,
+                256
+            ],
+            "strides": [
+                256,
+                1
+            ],
+            "data_type": "int32",
+            "virtual": false
+        },
+        {
+            "uid": 12,
+            "name": "page_table_v",
+            "dims": [
+                4,
+                256
+            ],
+            "strides": [
+                256,
+                1
+            ],
+            "data_type": "int32",
+            "virtual": false
+        }
+    ],
+    "nodes": [
+        {
+            "name": "sdpa_node",
+            "type": "SdpaAttributes",
+            "compute_data_type": "float",
+            "inputs": {
+                "q_tensor_uid": 1,
+                "k_tensor_uid": 2,
+                "v_tensor_uid": 3,
+                "attn_mask_tensor_uid": null,
+                "scale_tensor_uid": null,
+                "seq_len_q_tensor_uid": null,
+                "seq_len_kv_tensor_uid": null,
+                "seed_tensor_uid": null,
+                "offset_tensor_uid": null,
+                "dropout_mask_tensor_uid": null,
+                "dropout_scale_tensor_uid": null,
+                "page_table_k_tensor_uid": 11,
+                "page_table_v_tensor_uid": 12,
+                "block_mask_tensor_uid": null,
+                "sink_token_tensor_uid": null,
+                "descale_q_tensor_uid": null,
+                "descale_k_tensor_uid": null,
+                "descale_v_tensor_uid": null,
+                "descale_s_tensor_uid": null,
+                "scale_s_tensor_uid": null,
+                "scale_o_tensor_uid": null
+            },
+            "outputs": {
+                "o_tensor_uid": 4,
+                "stats_tensor_uid": null,
+                "max_tensor_uid": null,
+                "sum_exp_tensor_uid": null,
+                "rng_dump_tensor_uid": null,
+                "amax_s_tensor_uid": null,
+                "amax_o_tensor_uid": null
+            },
+            "attributes": {
+                "generate_stats": null,
+                "alibi_mask": false,
+                "padding_mask": false,
+                "causal_mask": true,
+                "causal_mask_bottom_right": false,
+                "dropout_probability": null,
+                "attn_scale_value": 0.08838834764831843,
+                "left_bound": null,
+                "right_bound": null,
+                "max_seq_len_kv": 4096,
+                "diagonal_alignment": "TOP_LEFT",
+                "mma_core_mode": "UNSET",
+                "implementation": "AUTO"
+            }
+        }
+    ]
+}

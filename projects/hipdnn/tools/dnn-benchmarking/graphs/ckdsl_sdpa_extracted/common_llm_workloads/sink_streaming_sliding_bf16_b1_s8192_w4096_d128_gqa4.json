@@ -1,0 +1,147 @@
+{
+    "name": "ckdsl_sdpa_common_Bf16_SinkStreamingSliding_GQA4_B1_S8192_W4096_D128",
+    "_comment": "PyTorch reference unsupported: graph uses sink_token plus sliding-window bounds; current dnn-benchmarking PyTorch SDPA reference does not emulate attention sinks or sliding-window bounds.",
+    "compute_data_type": "float",
+    "io_data_type": "bfloat16",
+    "intermediate_data_type": "bfloat16",
+    "tensors": [
+        {
+            "uid": 1,
+            "name": "query",
+            "dims": [
+                1,
+                32,
+                8192,
+                128
+            ],
+            "strides": [
+                33554432,
+                128,
+                4096,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false
+        },
+        {
+            "uid": 2,
+            "name": "key",
+            "dims": [
+                1,
+                8,
+                8192,
+                128
+            ],
+            "strides": [
+                8388608,
+                128,
+                1024,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false
+        },
+        {
+            "uid": 3,
+            "name": "value",
+            "dims": [
+                1,
+                8,
+                8192,
+                128
+            ],
+            "strides": [
+                8388608,
+                128,
+                1024,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false
+        },
+        {
+            "uid": 4,
+            "name": "output",
+            "dims": [
+                1,
+                32,
+                8192,
+                128
+            ],
+            "strides": [
+                33554432,
+                128,
+                4096,
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false
+        },
+        {
+            "uid": 20,
+            "name": "sink_token",
+            "dims": [
+                32
+            ],
+            "strides": [
+                1
+            ],
+            "data_type": "bfloat16",
+            "virtual": false
+        }
+    ],
+    "nodes": [
+        {
+            "name": "sdpa_node",
+            "type": "SdpaAttributes",
+            "compute_data_type": "float",
+            "inputs": {
+                "q_tensor_uid": 1,
+                "k_tensor_uid": 2,
+                "v_tensor_uid": 3,
+                "attn_mask_tensor_uid": null,
+                "scale_tensor_uid": null,
+                "seq_len_q_tensor_uid": null,
+                "seq_len_kv_tensor_uid": null,
+                "seed_tensor_uid": null,
+                "offset_tensor_uid": null,
+                "dropout_mask_tensor_uid": null,
+                "dropout_scale_tensor_uid": null,
+                "page_table_k_tensor_uid": null,
+                "page_table_v_tensor_uid": null,
+                "block_mask_tensor_uid": null,
+                "sink_token_tensor_uid": 20,
+                "descale_q_tensor_uid": null,
+                "descale_k_tensor_uid": null,
+                "descale_v_tensor_uid": null,
+                "descale_s_tensor_uid": null,
+                "scale_s_tensor_uid": null,
+                "scale_o_tensor_uid": null
+            },
+            "outputs": {
+                "o_tensor_uid": 4,
+                "stats_tensor_uid": null,
+                "max_tensor_uid": null,
+                "sum_exp_tensor_uid": null,
+                "rng_dump_tensor_uid": null,
+                "amax_s_tensor_uid": null,
+                "amax_o_tensor_uid": null
+            },
+            "attributes": {
+                "generate_stats": null,
+                "alibi_mask": false,
+                "padding_mask": false,
+                "causal_mask": true,
+                "causal_mask_bottom_right": false,
+                "dropout_probability": null,
+                "attn_scale_value": 0.08838834764831843,
+                "left_bound": 4096,
+                "right_bound": 0,
+                "max_seq_len_kv": null,
+                "diagonal_alignment": "TOP_LEFT",
+                "mma_core_mode": "UNSET",
+                "implementation": "AUTO"
+            }
+        }
+    ]
+}
