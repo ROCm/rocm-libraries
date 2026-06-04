@@ -534,7 +534,7 @@ def test_256x256_fp4_partition_1x1():
     )
 
 
-def make_256x256_fp8(pgr=2):
+def make_256x256_fp8(pgr=2, partSizeM=0, partSizeN=0):
     from unittest.mock import MagicMock
     dtype = MagicMock()
     dtype.numBytes.return_value = 1
@@ -560,7 +560,44 @@ def make_256x256_fp8(pgr=2):
         lrB=ReadGranularity(mn=1, k=1),
         grA=ReadGranularity(mn=tiA.subtileShape[0], k=tiA.subtileShape[1]),
         grB=ReadGranularity(mn=tiB.subtileShape[0], k=tiB.subtileShape[1]),
+        partitionSizeM=partSizeM,
+        partitionSizeN=partSizeN,
         pgr=pgr,
+    )
+
+
+def make_256x256_fp8_partition_4x8():
+    return make_256x256_fp8(partSizeM=4, partSizeN=8)
+
+
+def make_288x256_fp8_partition_5x8():
+    from unittest.mock import MagicMock
+    dtype = MagicMock()
+    dtype.numBytes.return_value = 1
+    kernel = {
+        "DepthU": 128, "_DepthUA": 128, "_DepthUB": 128,
+        "MacroTileA": 288, "MacroTileB": 256,
+        "MacroTile0": 288, "MacroTile1": 256,
+        "MatrixInstM": 16, "MatrixInstN": 16, "MatrixInstK": 128,
+        "MIWaveGroup": [2, 2], "WavefrontSize": 64,
+        "SourceSwap": False, "MIArchVgpr": False,
+        "NonTemporalA": 0, "NonTemporalB": 0,
+        "NonTemporalMXSA": 0, "NonTemporalMXSB": 0,
+        "ProblemType": {"DataTypeA": dtype, "DataTypeB": dtype,
+                        "ComputeDataType": MagicMock(**{"numBytes.return_value": 4})},
+    }
+    tiA = TileInfo(AB_B8, 'A', None, kernel)
+    tiB = TileInfo(AB_B8, 'B', None, kernel)
+    return SchedulerConfig(
+        numMFMATilesM=tiA.localMMATileGrid[0],
+        numMFMATilesN=tiB.localMMATileGrid[0],
+        numSubIterK=tiA.localMMATileGrid[1],
+        lrA=ReadGranularity(mn=1, k=1),
+        lrB=ReadGranularity(mn=1, k=1),
+        grA=ReadGranularity(mn=tiA.subtileShape[0], k=tiA.subtileShape[1]),
+        grB=ReadGranularity(mn=tiB.subtileShape[0], k=tiB.subtileShape[1]),
+        partitionSizeM=5,
+        partitionSizeN=8,
     )
 
 

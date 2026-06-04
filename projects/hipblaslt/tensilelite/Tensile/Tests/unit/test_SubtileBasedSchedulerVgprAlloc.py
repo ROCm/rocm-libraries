@@ -26,6 +26,8 @@ from test_SubtileBasedSchedulerRef import (
     make_256x256_fp4_pgr0,
     make_256x256_fp4_pgr1,
     make_128x128_fp4_pgr1,
+    make_256x256_fp8_partition_4x8,
+    make_288x256_fp8_partition_5x8,
 )
 from Tensile.Components.Subtile.LogicalScheduler import LogicalScheduler
 
@@ -37,13 +39,27 @@ def _vgpr_map(make):
     return sched.print_vgpr()
 
 
-def _check(make, expected):
-    actual = _vgpr_map(make)
+def _run(make):
+    cfg = make()
+    sched = LogicalScheduler(cfg)
+    sched.assign_vgpr_tiles()
+    return sched
+
+
+def _check(make, expected, expected_peaks=None):
+    sched = _run(make)
+    actual = sched.print_vgpr()
     assert actual == expected, (
         f"VGPR tile allocation mismatch.\n"
         f"--- Expected ---\n{expected}\n"
         f"--- Actual ---\n{actual}"
     )
+    if expected_peaks is not None:
+        assert sched.tile_peaks == expected_peaks, (
+            f"tile_peaks mismatch.\n"
+            f"  expected: {expected_peaks}\n"
+            f"  actual:   {sched.tile_peaks}"
+        )
 
 
 EXPECTED_VGPR_256X256_BF16 = """\
@@ -63,7 +79,8 @@ MAINLOOP:
 
 
 def test_vgpr_256x256_bf16():
-    _check(make_256x256_bf16, EXPECTED_VGPR_256X256_BF16)
+    _check(make_256x256_bf16, EXPECTED_VGPR_256X256_BF16,
+           expected_peaks={'A': 16, 'B': 16})
 
 
 EXPECTED_VGPR_384X256_BF16 = """\
@@ -90,7 +107,8 @@ MAINLOOP:
 
 
 def test_vgpr_384x256_bf16():
-    _check(make_384x256_bf16, EXPECTED_VGPR_384X256_BF16)
+    _check(make_384x256_bf16, EXPECTED_VGPR_384X256_BF16,
+           expected_peaks={'A': 12, 'B': 16})
 
 
 EXPECTED_VGPR_320X320_BF16 = """\
@@ -138,7 +156,8 @@ MAINLOOP:
 
 
 def test_vgpr_320x320_bf16():
-    _check(make_320x320_bf16, EXPECTED_VGPR_320X320_BF16)
+    _check(make_320x320_bf16, EXPECTED_VGPR_320X320_BF16,
+           expected_peaks={'A': 20, 'B': 4})
 
 
 EXPECTED_VGPR_256X256_BF16_PGR0 = """\
@@ -158,7 +177,8 @@ MAINLOOP:
 
 
 def test_vgpr_256x256_bf16_pgr0():
-    _check(make_256x256_bf16_pgr0, EXPECTED_VGPR_256X256_BF16_PGR0)
+    _check(make_256x256_bf16_pgr0, EXPECTED_VGPR_256X256_BF16_PGR0,
+           expected_peaks={'A': 8, 'B': 8})
 
 
 EXPECTED_VGPR_128X128_BF16 = """\
@@ -186,7 +206,8 @@ MAINLOOP:
 
 
 def test_vgpr_128x128_bf16():
-    _check(make_128x128_bf16, EXPECTED_VGPR_128X128_BF16)
+    _check(make_128x128_bf16, EXPECTED_VGPR_128X128_BF16,
+           expected_peaks={'A': 8, 'B': 8})
 
 
 EXPECTED_VGPR_128X96_BF16_PGR1_WG4X1 = """\
@@ -214,7 +235,8 @@ MAINLOOP:
 
 
 def test_vgpr_128x96_bf16_pgr1_wg4x1():
-    _check(make_128x96_bf16_pgr1_wg4x1, EXPECTED_VGPR_128X96_BF16_PGR1_WG4X1)
+    _check(make_128x96_bf16_pgr1_wg4x1, EXPECTED_VGPR_128X96_BF16_PGR1_WG4X1,
+           expected_peaks={'A': 4, 'B': 12})
 
 
 EXPECTED_VGPR_256X256_FP4 = """\
@@ -248,7 +270,8 @@ MAINLOOP (unroll 1):
 
 
 def test_vgpr_256x256_fp4():
-    _check(make_256x256_fp4, EXPECTED_VGPR_256X256_FP4)
+    _check(make_256x256_fp4, EXPECTED_VGPR_256X256_FP4,
+           expected_peaks={'A': 16, 'B': 16, 'SA': 8, 'SB': 8})
 
 
 EXPECTED_VGPR_128X128_FP4 = """\
@@ -280,7 +303,8 @@ MAINLOOP:
 
 
 def test_vgpr_128x128_fp4():
-    _check(make_128x128_fp4, EXPECTED_VGPR_128X128_FP4)
+    _check(make_128x128_fp4, EXPECTED_VGPR_128X128_FP4,
+           expected_peaks={'A': 8, 'B': 8, 'SA': 4, 'SB': 4})
 
 
 EXPECTED_VGPR_256X256_FP4_PGR0 = """\
@@ -302,7 +326,75 @@ MAINLOOP:
 
 
 def test_vgpr_256x256_fp4_pgr0():
-    _check(make_256x256_fp4_pgr0, EXPECTED_VGPR_256X256_FP4_PGR0)
+    _check(make_256x256_fp4_pgr0, EXPECTED_VGPR_256X256_FP4_PGR0,
+           expected_peaks={'A': 8, 'B': 8, 'SA': 4, 'SB': 4})
+
+
+EXPECTED_VGPR_256X256_FP8_PARTITION_4X8 = """\
+needsUnrolling: True, unrollFactor: 2
+vgprTiles: A: 8, B: 16
+MAINLOOP (unroll 0):
+  Partition 0:
+    subIterK=0:
+      MFMAs (MT n, subIterK 0  ) A : [0-3] , B : [0-7] A:{0: 0, 1: 1, 2: 2, 3: 3}, B:{0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 7}
+      LR A  (MT n, subIterK [0]) [4-7] tiles:{4: 4, 5: 5, 6: 6, 7: 7}
+  Partition 1:
+    subIterK=0:
+      MFMAs (MT n, subIterK 0  ) A : [4-7] , B : [0-7] A:{4: 4, 5: 5, 6: 6, 7: 7}, B:{0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 7}
+      LR A  (MT n+1, subIterK [0]) [0-3] tiles:{0: 0, 1: 1, 2: 2, 3: 3}
+      LR B  (MT n+1, subIterK [0]) [0-7] tiles:{0: 8, 1: 9, 2: 10, 3: 11, 4: 12, 5: 13, 6: 14, 7: 15}
+MAINLOOP (unroll 1):
+  Partition 0:
+    subIterK=0:
+      MFMAs (MT n, subIterK 0  ) A : [0-3] , B : [0-7] A:{0: 0, 1: 1, 2: 2, 3: 3}, B:{0: 8, 1: 9, 2: 10, 3: 11, 4: 12, 5: 13, 6: 14, 7: 15}
+      LR A  (MT n, subIterK [0]) [4-7] tiles:{4: 4, 5: 5, 6: 6, 7: 7}
+  Partition 1:
+    subIterK=0:
+      MFMAs (MT n, subIterK 0  ) A : [4-7] , B : [0-7] A:{4: 4, 5: 5, 6: 6, 7: 7}, B:{0: 8, 1: 9, 2: 10, 3: 11, 4: 12, 5: 13, 6: 14, 7: 15}
+      LR A  (MT n+1, subIterK [0]) [0-3] tiles:{0: 0, 1: 1, 2: 2, 3: 3}
+      LR B  (MT n+1, subIterK [0]) [0-7] tiles:{0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 7}
+"""
+
+
+def test_vgpr_256x256_fp8_partition_4x8():
+    """A: disjoint partition ranges → single-buffer (8 vgprs).
+    B: shared across partitions → double-buffer (16 vgprs)."""
+    _check(make_256x256_fp8_partition_4x8,
+           EXPECTED_VGPR_256X256_FP8_PARTITION_4X8,
+           expected_peaks={'A': 8, 'B': 16})
+
+
+EXPECTED_VGPR_288X256_FP8_PARTITION_5X8 = """\
+needsUnrolling: True, unrollFactor: 2
+vgprTiles: A: 9, B: 16
+MAINLOOP (unroll 0):
+  Partition 0:
+    subIterK=0:
+      MFMAs (MT n, subIterK 0  ) A : [0-4] , B : [0-7] A:{0: 0, 1: 1, 2: 2, 3: 3, 4: 4}, B:{0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 7}
+      LR A  (MT n, subIterK [0]) [5-8] tiles:{5: 5, 6: 6, 7: 7, 8: 8}
+  Partition 1:
+    subIterK=0:
+      MFMAs (MT n, subIterK 0  ) A : [5-8] , B : [0-7] A:{5: 5, 6: 6, 7: 7, 8: 8}, B:{0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 7}
+      LR A  (MT n+1, subIterK [0]) [0-4] tiles:{0: 0, 1: 1, 2: 2, 3: 3, 4: 4}
+      LR B  (MT n+1, subIterK [0]) [0-7] tiles:{0: 8, 1: 9, 2: 10, 3: 11, 4: 12, 5: 13, 6: 14, 7: 15}
+MAINLOOP (unroll 1):
+  Partition 0:
+    subIterK=0:
+      MFMAs (MT n, subIterK 0  ) A : [0-4] , B : [0-7] A:{0: 0, 1: 1, 2: 2, 3: 3, 4: 4}, B:{0: 8, 1: 9, 2: 10, 3: 11, 4: 12, 5: 13, 6: 14, 7: 15}
+      LR A  (MT n, subIterK [0]) [5-8] tiles:{5: 5, 6: 6, 7: 7, 8: 8}
+  Partition 1:
+    subIterK=0:
+      MFMAs (MT n, subIterK 0  ) A : [5-8] , B : [0-7] A:{5: 5, 6: 6, 7: 7, 8: 8}, B:{0: 8, 1: 9, 2: 10, 3: 11, 4: 12, 5: 13, 6: 14, 7: 15}
+      LR A  (MT n+1, subIterK [0]) [0-4] tiles:{0: 0, 1: 1, 2: 2, 3: 3, 4: 4}
+      LR B  (MT n+1, subIterK [0]) [0-7] tiles:{0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 7}
+"""
+
+
+def test_vgpr_288x256_fp8_partition_5x8():
+    """Asymmetric A partition (5+4 tiles): A still single-buffer (9 vgprs)."""
+    _check(make_288x256_fp8_partition_5x8,
+           EXPECTED_VGPR_288X256_FP8_PARTITION_5X8,
+           expected_peaks={'A': 9, 'B': 16})
 
 
 @pytest.mark.parametrize(
