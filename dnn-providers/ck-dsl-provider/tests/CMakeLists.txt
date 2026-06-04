@@ -49,3 +49,19 @@ if(NOT TEST ck_dsl_provider_unit_tests_direct)
     add_test(NAME ck_dsl_provider_unit_tests_direct
              COMMAND ck_dsl_provider_unit_tests)
 endif()
+
+# MicroPython-compatibility lint (source-only; no build/GPU needed): fails if a
+# Python construct the embed build can't run -- a bare @dataclass field, PEP-448
+# star-unpacking, os.environ, match/async -- creeps into the codegen sources.
+# Labelled unit_test so `ck-dsl-provider-unit-check` (ctest -L unit_test) runs it.
+# Tests.cmake (included above) provides Python3_EXECUTABLE.
+if(Python3_FOUND)
+    add_test(NAME ck_dsl_provider_micropython_compat
+             COMMAND ${Python3_EXECUTABLE}
+                     ${CMAKE_CURRENT_SOURCE_DIR}/../micropython/check_compat.py
+                     ${CK_DSL_PYTHON_PACKAGE_PATH}/ck_dsl
+                     ${CK_DSL_PROVIDER_PYTHON_PACKAGE_PATH}/ck_dsl_provider
+                     ${CMAKE_CURRENT_SOURCE_DIR}/../micropython/shims
+    )
+    set_tests_properties(ck_dsl_provider_micropython_compat PROPERTIES LABELS "unit_test")
+endif()
