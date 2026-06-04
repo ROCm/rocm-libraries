@@ -2,9 +2,14 @@
 // SPDX-License-Identifier:  MIT
 
 #include "engines/hip_mlops_engine/plans/batchnorm/BatchnormFwdTrainingPlan.hpp"
+#include "mocks/MockCompiledProgram.hpp"
+#include "mocks/MockKernelCompiler.hpp"
+#include "mocks/MockRunnableKernel.hpp"
 #include <gtest/gtest.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+
+#include "../TestPlanCommon.hpp"
 
 namespace hip_kernel_provider::batchnorm::test
 {
@@ -810,6 +815,101 @@ TEST(TestBatchnormFwdTrainingActivParams, RejectsUnsupportedSwishFwdActivation)
 
     EXPECT_THROW(BatchnormFwdTrainingParams(*bnAttrs, *activAttrs, graph.getTensorMap()),
                  hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+namespace
+{
+
+std::pair<flatbuffers::FlatBufferBuilder, BatchnormFwdTrainingPlan>
+    createPlanFromGraph(const std::vector<int64_t>& strides = {150528, 50176, 224, 1},
+                        const std::vector<int64_t>& dims = {1, 3, 224, 224},
+                        bool withMeanVariance = true,
+                        bool withRunningStats = true)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(
+        withMeanVariance,
+        withRunningStats,
+        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
+        strides,
+        dims);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& bnNode = graph.getNode(0);
+    const auto* bnAttrs = bnNode.attributes_as_BatchnormAttributes();
+
+    const auto& activNode = graph.getNode(1);
+    auto* activAttrs = activNode.attributes_as_PointwiseAttributes();
+
+    BatchnormFwdTrainingParams params(*bnAttrs, *activAttrs, graph.getTensorMap());
+    return {std::move(builder), BatchnormFwdTrainingPlan{std::move(params)}};
+}
+
+} // namespace
+
+TEST(TestBatchnormFwdTrainingActivPlan, CompileDefaultSetsCorrectDefines)
+{
+    const MockKernelCompiler mockCompiler;
+
+    std::vector<std::string> capturedOptions;
+    EXPECT_CALL(mockCompiler, compile(::testing::_, ::testing::_))
+        .WillOnce([&](const std::string&, const std::vector<std::string>& options) {
+            capturedOptions = options;
+            auto kernel = std::make_unique<MockRunnableKernel>();
+            EXPECT_CALL(*kernel, setBlockSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
+            EXPECT_CALL(*kernel, setGridSize(::testing::_, ::testing::_, ::testing::_)).Times(1);
+            auto program = std::make_unique<MockCompiledProgram>();
+            EXPECT_CALL(*program, getKernel(::testing::_))
+                .WillOnce(::testing::Return(::testing::ByMove(std::move(kernel))));
+            return program;
+        });
+
+    auto [fbb, plan] = createPlanFromGraph();
+    auto deviceProps = createTestDeviceProps();
+
+    plan.compile(mockCompiler, deviceProps);
+
+    auto hasOption = [&](const std::string& opt) {
+        return std::find(capturedOptions.begin(), capturedOptions.end(), opt)
+               != capturedOptions.end();
+    };
+
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP32=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP16=0"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_BFP16=0"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FPMIX=0"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_BFPMIX=0"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_SAVE_MEAN_VARIANCE=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_RUNNING_RESULT=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_N=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_C=3"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_HW=50176"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_INHW=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_NHW=50176"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_CHW=150528"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_NCHW=150528"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP0_FINAL=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP1_FINAL=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP2_FINAL=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP0=1024"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP1=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP2=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_NGRPS=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_NGRPS2=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_N_ELEMENTS=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_MAXN=65"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_AMDGCN=0"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LOOP_UNROLL_MAXN=768"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LDS_SIZE=1024"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_VEC_SIZE=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LOOP_UNROLL_MAXHW=2500"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_NODPP=0"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LDSGCN_SIZE=16"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_USESAVED=0"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_VECTORIZE=0"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_STASH_METHOD=0"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_VARIANT=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_NRN_OP_ID=3"));
 }
 
 } // namespace hip_kernel_provider::batchnorm::test

@@ -53,7 +53,7 @@ __device__ __forceinline__ void BNFwdInferSpatialImpl(unsigned int tidx,
             inhat[i] = scale[i] * inhat[i] + bias[i];
             inhat[i] = hip_kernel_provider::applyActivation<
                 FLOAT_ACCUM,
-                static_cast<hip_kernel_provider::ActivationMode>(HIP_PLUGIN_NRN_OP_ID)>(
+                static_cast<hip_kernel_provider::ActivationMode>(HIP_PLUGIN_BN_NRN_OP_ID)>(
                 inhat[i], alpha, beta);
 
             value[i] = CVT_ACCUM2FLOAT(inhat[i]);
