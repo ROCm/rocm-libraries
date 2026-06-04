@@ -163,10 +163,14 @@ class InstructionEmitter:
             ti = self.tileInfoMap[tensor]
             vgprTiles = self.vgprTilesA if tensor == 'A' else self.vgprTilesB
             lrGran = self.config.lrA if tensor == 'A' else self.config.lrB
-            # `per_uid_k` folds k into the uid-local subtile coordinate;
-            # only valid under multi-DU. Under single-DU (numUnroll==1)
-            # per_uid_k collapses to grGran.k and would zero out every
-            # subtileK index, so use the unmodulated k instead.
+            # `per_uid_k` (= numSubIterK / numUnroll) folds k into a
+            # uid-local subtile coordinate so multi-DU (numUnroll > 1)
+            # uids each iterate [0, per_uid_k). Under single-DU
+            # (numUnroll == 1) per_uid_k == numSubIterK and the modulo
+            # is a no-op for in-window k, but it ALIASES wrap-LRs that
+            # use k >= numSubIterK to address the alternate LDS half
+            # (PGR>=1 prefetch target) back to k=0 — losing the half
+            # offset. Skip the modulo in that case.
             nUnroll = self.config.numUnroll.get(tensor, 1)
             per_uid_k = self._per_uid_k[tensor] if nUnroll > 1 else None
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, lrGran.mn):
@@ -525,10 +529,11 @@ class InstructionEmitter:
                                 dst=vgpr(v), src0=vgpr(v), src1=vgpr(maskVgprs[i]),
                                 comment=f"mask {label}[{i}] (K=[{i*kStride},{i*kStride+kStride-1}])"))
 
-            # Scale-mask reuse: AND the scale vgprs with the data mask we
-            # built. Redundant when host zero-padding is in effect (0x00
-            # AND 0 = 0x00) but kept to mirror the BF16 path and stay
-            # explicit under any input pattern.
+            # Scale-mask reuse (non-BF16 hasScale only): AND the scale
+            # vgprs with the data mask we just built. Redundant when
+            # host zero-padding leaves OOB scale bytes at 0x00 (0x00
+            # AND 0 = 0x00) but kept to stay explicit under any input
+            # pattern.
             scaleStride = self.config.lrSA.k if self.hasScale else 0
             if (not isBF16) and self.hasScale \
                     and (self.vgprTilesSA or self.vgprTilesSB) \

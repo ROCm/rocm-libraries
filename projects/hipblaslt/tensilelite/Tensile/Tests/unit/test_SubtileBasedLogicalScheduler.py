@@ -2825,6 +2825,146 @@ class TestIntegration:
         finally:
             sched.deallocVgprTiles(writer)
 
+    def test_tailloop_no_data_kmask_for_mx_scale_fp4(self):
+        """MX-scaled (hasScale) tail loop must NOT emit the per-vgpr data
+        K-mask V_AND chain over A/B tile vgprs — the scale tensor's host
+        zero-padding underflows OOB lanes via v_mfma_scale, and the gfx950
+        cmp→cndmask→AND chain corrupts the v_mfma_scale operand bypass.
+        Scale-mask reuse (AND on scale vgprs) is still emitted."""
+        kernel = create_kernel(256, 256, fp4=True)
+        writer, tiA, tiB, scaleTiA, scaleTiB, dTileInfo = make_writer_and_tileinfos(kernel, fp4=True)
+        cfg = make_cfg_256x256_fp4()  # hasScale = True
+        assert cfg.hasScale
+        sched = LogicalScheduler(cfg)
+        sched.build()
+        sched.allocVgprTiles(writer, tiA, tiB,
+                             scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
+        try:
+            sched.populate_instructions(
+                writer, kernel,
+                tileInfoA=tiA, tileInfoB=tiB,
+                dtileInfo=dTileInfo,
+                scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB,
+            )
+            asm = str(sched.emitTailLoop(writer, kernel))
+            # Data K-mask V_AND chain emits comments like "mask A[i] (K=...)".
+            assert "mask A[" not in asm, \
+                "MX-scaled tail loop must not emit data K-mask over A vgprs"
+            assert "mask B[" not in asm, \
+                "MX-scaled tail loop must not emit data K-mask over B vgprs"
+            # Scale-mask reuse should still fire (cndmask result is reused
+            # against scale vgprs even though it's a host-padding no-op).
+            assert "mask scale vgpr" in asm, \
+                "MX-scaled tail loop should still apply mask to scale vgprs"
+        finally:
+            sched.deallocVgprTiles(writer)
+
+    def test_tailloop_data_kmask_emitted_for_no_scale_bf16(self):
+        """Plain non-scale (BF16) tail loop must still emit the data K-mask
+        V_AND chain — the scale-mask gate above only applies to hasScale."""
+        kernel = create_kernel(256, 256, fp4=False)
+        writer, tiA, tiB, scaleTiA, scaleTiB, dTileInfo = make_writer_and_tileinfos(kernel, fp4=False)
+        cfg = make_cfg_bf16(256, 256)
+        assert not cfg.hasScale
+        sched = LogicalScheduler(cfg)
+        sched.build()
+        sched.allocVgprTiles(writer, tiA, tiB)
+        try:
+            sched.populate_instructions(
+                writer, kernel,
+                tileInfoA=tiA, tileInfoB=tiB,
+                dtileInfo=dTileInfo,
+                tensorParametersA=MagicMock(),
+                tensorParametersB=MagicMock(),
+            )
+            asm = str(sched.emitTailLoop(writer, kernel))
+            assert "mask A[" in asm or "mask B[" in asm, \
+                "non-scale tail loop must keep data K-mask V_AND chain"
+        finally:
+            sched.deallocVgprTiles(writer)
+
+    def test_pgr2_tail_lw_align_emitted_fp4(self):
+        """PGR=2 + tail loop: each NLL exit must emit s_xor_b32 to re-align
+        LocalWriteBaseAddr{A,B,MXSA,MXSB} parity with the LR vgpr (PRELOOP's
+        unbalanced +1 LW swap left LW pointing at the half NOT being read)."""
+        kernel = create_kernel(256, 256, fp4=True)
+        writer, tiA, tiB, scaleTiA, scaleTiB, dTileInfo = make_writer_and_tileinfos(kernel, fp4=True)
+        cfg = make_cfg_256x256_fp4(pgr=2)
+        sched = LogicalScheduler(cfg)
+        sched.build()
+        sched.allocVgprTiles(writer, tiA, tiB,
+                             scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
+        try:
+            sched.populate_instructions(
+                writer, kernel,
+                tileInfoA=tiA, tileInfoB=tiB,
+                dtileInfo=dTileInfo,
+                scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB,
+            )
+            asm = str(sched.emitMainAndExitLoops(writer, kernel))
+            assert "PGR=2 tail entry: re-align LW_base" in asm, \
+                "PGR=2 must emit LW_base parity re-align before tail entry"
+            # Both A/B and (since hasScale) MX scale tensors must be re-aligned.
+            for tc in ('A', 'B', 'MXSA', 'MXSB'):
+                assert f"PGR=2 tail align: parity-swap LW_base for {tc}" in asm, \
+                    f"missing PGR=2 LW_base re-align for {tc}"
+            # Re-align must happen BEFORE the SBranch to SkipToEnd at NLL_C{last}
+            align_pos = asm.find("PGR=2 tail align: parity-swap LW_base for A")
+            skip_branch_pos = asm.find("skip other exit paths", align_pos)
+            assert skip_branch_pos != -1 and align_pos < skip_branch_pos, \
+                "PGR=2 LW_base re-align must precede the NLL_C{last} → SkipToEnd branch"
+        finally:
+            sched.deallocVgprTiles(writer)
+
+    @pytest.mark.parametrize("pgr", [0, 1])
+    def test_no_pgr2_tail_lw_align_for_pgr_lt_2(self, pgr):
+        """PGR=0/1: NLL keeps gr_inc/lr_inc (PGR=1) or has no body (PGR=0),
+        so no LW_base re-align fix-up is needed at tail entry."""
+        kernel = create_kernel(256, 256, fp4=True)
+        writer, tiA, tiB, scaleTiA, scaleTiB, dTileInfo = make_writer_and_tileinfos(kernel, fp4=True)
+        cfg = make_cfg_256x256_fp4(pgr=pgr)
+        sched = LogicalScheduler(cfg)
+        sched.build()
+        sched.allocVgprTiles(writer, tiA, tiB,
+                             scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
+        try:
+            sched.populate_instructions(
+                writer, kernel,
+                tileInfoA=tiA, tileInfoB=tiB,
+                dtileInfo=dTileInfo,
+                scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB,
+            )
+            asm = str(sched.emitMainAndExitLoops(writer, kernel))
+            assert "PGR=2 tail entry: re-align LW_base" not in asm, \
+                f"PGR={pgr} must NOT emit the PGR=2 LW_base re-align"
+            assert "PGR=2 tail align" not in asm, \
+                f"PGR={pgr} must NOT emit any PGR=2 align XOR"
+        finally:
+            sched.deallocVgprTiles(writer)
+
+    def test_pgr2_no_tail_lw_align_when_no_tail_loop(self):
+        """PGR=2 + NoTailLoop: helper short-circuits, no LW_base re-align emitted."""
+        kernel = create_kernel(256, 256, fp4=True)
+        kernel["NoTailLoop"] = True
+        writer, tiA, tiB, scaleTiA, scaleTiB, dTileInfo = make_writer_and_tileinfos(kernel, fp4=True)
+        cfg = make_cfg_256x256_fp4(pgr=2)
+        sched = LogicalScheduler(cfg)
+        sched.build()
+        sched.allocVgprTiles(writer, tiA, tiB,
+                             scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
+        try:
+            sched.populate_instructions(
+                writer, kernel,
+                tileInfoA=tiA, tileInfoB=tiB,
+                dtileInfo=dTileInfo,
+                scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB,
+            )
+            asm = str(sched.emitMainAndExitLoops(writer, kernel))
+            assert "PGR=2 tail align" not in asm, \
+                "NoTailLoop must short-circuit the LW_base re-align helper"
+        finally:
+            sched.deallocVgprTiles(writer)
+
     @pytest.mark.parametrize("pgr", [1, 2])
     def test_nll_scale_vgprs_differ_across_unroll_copies(self, pgr):
         """NLL for each unroll copy must use distinct scale VGPRs matching LR loads."""
