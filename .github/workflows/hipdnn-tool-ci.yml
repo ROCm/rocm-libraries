@@ -60,9 +60,6 @@ jobs:
       HIPDNN_BUILT: ${{ contains(inputs.projects_to_test, 'hipdnn') }}
       RUN_GITHUB_REPO: ${{ github.repository }}
       ARTIFACT_RUN_ID: ${{ github.run_id }}
-      GRAPH_GLOB: projects/hipdnn/tools/dnn-benchmarking/graphs/*.json
-      WARMUP: "1"
-      ITERS: "1"
       VENV_DIR: ${{ github.workspace }}/.venv
       # Container runs non-root, so the default /opt/rocm is not writable.
       ROCM_PATH: ${{ github.workspace }}/therock
@@ -174,7 +171,9 @@ jobs:
 
       - name: Run dnn-benchmarking pytest suite
         working-directory: rocm-libraries/projects/hipdnn/tools/dnn-benchmarking
-        # torch is not installed, so the two pytorch-backend tests fail at COLLECTION
+        # The benchmark smoke gate is a plain gpu/amd pytest in the suite, so it
+        # runs here automatically (it skips when no GPU/plugin is present). torch
+        # is not installed, so the two pytorch-backend tests fail at COLLECTION
         # (module-top import, before the -m filter) — ignore them by path.
         run: |
           python -m pytest -ra -m "not nvidia and not slow" \
@@ -186,21 +185,6 @@ jobs:
         run: |
           pip install -e .[test]
           python -m pytest -ra
-
-      - name: Run benchmark smoke
-        working-directory: rocm-libraries
-        run: |
-          test -d "${ROCM_PATH}/lib/hipdnn_plugins/engines" || {
-            echo "::error::plugin engine dir ${ROCM_PATH}/lib/hipdnn_plugins/engines missing — prebuilt artifact layout changed"; exit 1; }
-          python -m dnn_benchmarking \
-            --graph "${GRAPH_GLOB}" \
-            --warmup "${WARMUP}" --iters "${ITERS}" \
-            --plugin-path "${ROCM_PATH}/lib/hipdnn_plugins/engines" \
-            --output results.json
-
-      - name: Gate-check results.json
-        working-directory: rocm-libraries
-        run: python3 projects/hipdnn/tools/dnn-benchmarking/ci/check_results.py results.json
 
       - name: Post-job GPU process cleanup (Windows)
         if: ${{ always() && runner.os == 'Windows' }}

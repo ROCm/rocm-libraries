@@ -191,11 +191,18 @@ def skip_if_no_gpu():
 def _find_plugin_path() -> str:
     """Find the hipDNN engine plugin directory.
 
-    Searches worktree build dir and standard install locations.
-    Returns the path as a string, or None if not found.
+    Searches a ROCM_PATH override, the worktree build dir, and standard install
+    locations. Returns the path as a string, or None if not found.
     """
+    import os
+
     project_root = Path(__file__).parent.parent
-    candidates = [
+    candidates = []
+    # CI installs prebuilt ROCm to a non-default prefix (container runs non-root).
+    rocm_path = os.environ.get("ROCM_PATH")
+    if rocm_path:
+        candidates.append(Path(rocm_path) / "lib" / "hipdnn_plugins" / "engines")
+    candidates += [
         # Worktree/superbuild: relative to dnn-benchmarking tool
         project_root.parent.parent.parent.parent
         / "dnn-providers"
