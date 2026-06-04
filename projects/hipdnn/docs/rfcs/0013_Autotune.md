@@ -304,7 +304,7 @@ Error get_estimated_max_workspace_size(int64_t& maxSize) const;
 ```
 
 **Workspace sizing**:
-1. **Plan-spec path**: `get_estimated_max_workspace_size()` returns a pre-compile estimate. Allocate this size and pass it to the Tier 2 `autotune()` overload. All plan specs are compiled regardless of their estimated workspace size — `autotune()` does not pre-filter by estimate. After compilation, plans whose actual workspace exceeds the provided `workspaceSize` are skipped (not executed). Users who want to avoid compiling engines with large workspace estimates should filter `EngineConfigInfo` entries before calling `add_engine_configs()` (see example below).
+1. **Plan-spec path**: `get_estimated_max_workspace_size()` returns a pre-compile estimate. Allocate this size and pass it to the general `autotune()` overload. All plan specs are compiled regardless of their estimated workspace size — `autotune()` does not pre-filter by estimate. After compilation, plans whose actual workspace exceeds the provided `workspaceSize` are skipped (not executed). Users who want to avoid compiling engines with large workspace estimates should filter `EngineConfigInfo` entries before calling `add_engine_configs()` (see example below).
 2. **Compiled-plan path**: Use `get_autotune_workspace_size()` for the accurate post-compile maximum.
 3. After autotuning, `execute()` only needs the winner's `workspaceSize`, which may be smaller.
 
@@ -315,7 +315,7 @@ for (auto& c : configs) {
     if (c.estimatedWorkspaceSize <= myBudget)
         graph->add_engine_configs({c});
 }
-graph->autotune(handle, variantPack, workspace, myBudget, config);  // Tier 2
+graph->autotune(handle, variantPack, workspace, myBudget, config);  // General overload
 ```
 This avoids compiling engines whose _estimated_ workspace exceeds the budget.
 
@@ -415,11 +415,13 @@ Graph& deselect_engines(const std::vector<int64_t>& engine_ids);
 
 All filtering methods return `Graph&` for method chaining. They operate on whichever collection is populated: `_planSpecs` (plan-spec path) or `_compiledPlans` (compiled-plan path).
 
+> **Index invalidation**: `deselect_*` methods remove entries from the underlying collection, causing indices to shift. Any previously cached indices (e.g., from `get_execution_plan_count()` or `execute_plan_at_index()`) are invalidated after each call. Re-query `get_execution_plan_count()` after deselection. This differs from cuDNN, which marks plans as "barred" without removing them (see also § A.3 point 5).
+
 ### 6.3 Autotuning API on Graph
 
-Three tiers of `autotune()` overloads (each with UID-based and tensor-attribute-based variants, 6 overloads total):
+Three groups of `autotune()` overloads (each with UID-based and tensor-attribute-based variants, 6 overloads total):
 
-**Tier 1 -- hipDNN overloads with no workspace-size parameter (for compiled plans only):**
+**Compiled-plan overloads; hipDNN overloads with no workspace-size parameter (for compiled plans only):**
 ```cpp
 Error autotune(hipdnnHandle_t handle,
                const std::unordered_map<int64_t, void*>& variantPack,
@@ -430,7 +432,7 @@ Error autotune(hipdnnHandle_t handle,
 ```
 Compiled-plan path only. Returns an error if plan specs exist. No workspace-size filtering, assumes the caller has allocated workspace to the maximum reported by compiled plans (via `get_autotune_workspace_size()`).
 
-**Tier 2 -- hipDNN overloads with required workspace-size parameter:**
+**General overloads; hipDNN overloads with required workspace-size parameter:**
 ```cpp
 Error autotune(hipdnnHandle_t handle,
                const std::unordered_map<int64_t, void*>& variantPack,
@@ -442,7 +444,7 @@ Error autotune(hipdnnHandle_t handle,
 ```
 Works with both paths. `workspaceSize` is the caller's allocated workspace buffer size. All plan specs are compiled regardless of estimated workspace size. Workspace sizes of compiled plans are typically the same or smaller than estimated, but can be larger. Plans whose actual (post-compile) workspace exceeds `workspaceSize` are skipped with a warning log if the pre-compile estimate indicated the plan would fit. Skipped plans are captured in `AutotuneResult` with both the estimated and actual workspace sizes. To avoid compiling engines with large estimated workspace sizes, pre-filter `EngineConfigInfo` before `add_engine_configs()` (see § 6.2.3).
 
-**Tier 3 -- cuDNN-compatible forwarding overloads:**
+**cuDNN-compatible overloads; forwarding overloads matching cuDNN's signature:**
 ```cpp
 // UID-based
 Error autotune(hipdnnHandle_t handle,
@@ -456,9 +458,9 @@ Error autotune(hipdnnHandle_t handle,
                void* workspace,
                void* user_impl = nullptr);
 ```
-Forward to Tier 1 with defaults (AUTO, RUN_UNTIL_STABLE, no file output, no results). Compiled-plan path only.
+Forward to the compiled-plan overloads with defaults (AUTO, RUN_UNTIL_STABLE, no file output, no results). Compiled-plan path only.
 
-All tiers benchmark execution plans and select the best. Subsequent `execute()` calls use the winning plan. Pass a non-null `results` pointer to get ranked results; omit or pass `nullptr` to discard them. If `storageConfig.filePath` is non-empty, results are also written to the config file.
+All overload groups benchmark execution plans and select the best. Subsequent `execute()` calls use the winning plan. Pass a non-null `results` pointer to get ranked results; omit or pass `nullptr` to discard them. If `storageConfig.filePath` is non-empty, results are also written to the config file.
 
 **Two data paths**: `autotune()` accepts candidates from either of two mutually exclusive paths (see § 6.2.1) and auto-detects which to use:
 
@@ -709,7 +711,7 @@ int main() {
     std::unordered_map<int64_t, void*> variantPack;
     // ... populate ...
 
-    // Autotune with convergence-based strategy, persist to config file (Tier 2 overload)
+    // Autotune with convergence-based strategy, persist to config file (general overload)
     std::vector<hipdnn_frontend::AutotuneResult> results;
     auto err = graph->autotune(handle, variantPack, workspace, maxWorkspaceSize,
         {.mode = hipdnn_frontend::TuneMode::EXHAUSTIVE,
@@ -1270,10 +1272,10 @@ Both select the winner and mutate graph state for `execute()`. cuDNN returns `er
 // cuDNN - no access to results:
 graph.autotune(handle, variant_pack, workspace);
 
-// hipDNN - results pointer omitted (Tier 1, compiled-plan path):
+// hipDNN - results pointer omitted (compiled-plan overload):
 auto err = graph.autotune(handle, variant_pack, workspace, config);
 
-// hipDNN - with access to all results (Tier 1, compiled-plan path):
+// hipDNN - with access to all results (compiled-plan overload):
 std::vector<AutotuneResult> results;
 auto err = graph.autotune(handle, variant_pack, workspace, config, storageConfig, &results);
 for (const auto& r : results)
@@ -1314,16 +1316,16 @@ cuDNN hardcodes a convergence-based algorithm. hipDNN's defaults match cuDNN's b
 // cuDNN - hardcoded convergence-based parameters:
 graph.autotune(handle, variant_pack, workspace);
 
-// hipDNN - equivalent default behavior (Tier 3, compiled-plan path):
+// hipDNN - equivalent default behavior (cuDNN-compatible overload):
 graph.autotune(handle, variant_pack, workspace);
 
-// hipDNN - compiled-plan path with explicit configuration overrides (Tier 1):
+// hipDNN - compiled-plan path with explicit configuration overrides (compiled-plan overload):
 graph.autotune(handle, variant_pack, workspace,
     {.strategy = AutotuneStrategy::RUN_UNTIL_STABLE,
      .maxIterations = 100,
      .stabilityThreshold = 0.02f});
 
-// hipDNN - plan-spec path with EXHAUSTIVE mode (Tier 2):
+// hipDNN - plan-spec path with EXHAUSTIVE mode (general overload):
 graph.autotune(handle, variant_pack, workspace, workspaceSize,
     {.mode = TuneMode::EXHAUSTIVE,
      .stabilityThreshold = 0.02f});
