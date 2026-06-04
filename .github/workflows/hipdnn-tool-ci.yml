@@ -52,8 +52,12 @@ permissions:
 jobs:
   benchmark:
     name: hipDNN benchmark smoke (${{ inputs.amdgpu_families }})
-    # Defensive self-guard; the caller already gates on the same condition.
-    if: ${{ contains(inputs.projects_to_test, 'hipdnn') }}
+    # Runs in two modes (see the ROCm-fetch step):
+    #   * hipDNN built this run (projects_to_test contains 'hipdnn') -> install the
+    #     PR's OWN freshly-built artifacts by run-id.
+    #   * hipDNN NOT built this run -> install the latest nightly dist tarball, so a
+    #     tool-only PR still exercises the python tool against a real ROCm.
+    # No self-guard on projects_to_test: the caller decides when to invoke the job.
     runs-on: ${{ inputs.test_runs_on }}
     timeout-minutes: 60
     container:
@@ -72,7 +76,9 @@ jobs:
     env:
       AMDGPU_FAMILY: ${{ inputs.amdgpu_families }}
       AMDGPU_TARGETS: gfx942
-      # The artifacts to install are THIS run's own build outputs.
+      # When this run built hipDNN, install its OWN build outputs by run-id;
+      # otherwise fall back to the latest nightly dist tarball.
+      HIPDNN_BUILT: ${{ contains(inputs.projects_to_test, 'hipdnn') }}
       RUN_GITHUB_REPO: ${{ github.repository }}
       ARTIFACT_RUN_ID: ${{ github.run_id }}
       # Committed sample graphs, NOT the DVC Workloads suite: this is a tool-health
@@ -136,13 +142,15 @@ jobs:
           # over committed sample graphs, so no dvc is needed.
           pip install boto3 pyzstd cmake ninja
 
-      - name: Fetch prebuilt ROCm by run-id (this run's own build)
+      - name: Fetch prebuilt ROCm (this run's build, or latest nightly fallback)
         run: |
-          # ARTIFACT_RUN_ID is github.run_id — the therock-ci run that just built
-          # hipDNN in the therock-build-linux job this job depends on. Because the
-          # caller only invokes this job when the matrix built hipDNN, the hipdnn /
-          # miopenprovider / tests slices are guaranteed present, so no slice-aware
-          # resolver is needed.
+          # Two install modes:
+          #
+          # HIPDNN_BUILT=true (this run built hipDNN): install the run's OWN
+          # artifacts by run-id. ARTIFACT_RUN_ID is github.run_id — the therock-ci
+          # run that just built hipDNN in the therock-build-linux job this job
+          # depends on. The hipdnn / miopenprovider / tests slices are present in
+          # this run, so no slice-aware resolver is needed.
           #
           # --miopenprovider is REQUIRED: the MIOpen engine plugin
           # (lib/hipdnn_plugins/engines/libmiopen_plugin.so) ships in the
@@ -151,13 +159,27 @@ jobs:
           # pass_combinations=0. --flatten (set by install_rocm_from_artifacts for
           # run-id installs) strips the ml-libs/<comp>/stage prefix so the engine
           # lands at ${ROCM_PATH}/lib/hipdnn_plugins/engines/.
-          python3 TheRock/build_tools/install_rocm_from_artifacts.py \
-            --run-id "${ARTIFACT_RUN_ID}" \
-            --run-github-repo "${RUN_GITHUB_REPO}" \
-            --amdgpu-family "${AMDGPU_FAMILY}" \
-            --amdgpu-targets "${AMDGPU_TARGETS}" \
-            --output-dir "${ROCM_PATH}" \
-            --hipdnn --miopenprovider --tests --blas --miopen
+          #
+          # HIPDNN_BUILT=false (tool-only PR; hipDNN not rebuilt): there is no
+          # per-slice artifact set for this run, so install the latest nightly dist
+          # tarball instead (--latest-release, built daily from main). The slice
+          # flags do not apply to the release path — the dist tarball is monolithic
+          # and is expected to carry the hipDNN plugin + frontend bindings.
+          if [ "${HIPDNN_BUILT}" = "true" ]; then
+            python3 TheRock/build_tools/install_rocm_from_artifacts.py \
+              --run-id "${ARTIFACT_RUN_ID}" \
+              --run-github-repo "${RUN_GITHUB_REPO}" \
+              --amdgpu-family "${AMDGPU_FAMILY}" \
+              --amdgpu-targets "${AMDGPU_TARGETS}" \
+              --output-dir "${ROCM_PATH}" \
+              --hipdnn --miopenprovider --tests --blas --miopen
+          else
+            python3 TheRock/build_tools/install_rocm_from_artifacts.py \
+              --latest-release \
+              --amdgpu-family "${AMDGPU_FAMILY}" \
+              --amdgpu-targets "${AMDGPU_TARGETS}" \
+              --output-dir "${ROCM_PATH}"
+          fi
 
       - name: Driver / GPU sanity check
         timeout-minutes: 3
