@@ -773,9 +773,9 @@ std::string EngineHeuristicDescriptor::toString() const
             }
             str += hipdnn_data_sdk::utilities::formatEngineIdHex(_policyOrder[i]);
         }
-        str += "]";
+        str += ']';
     }
-    str += "}";
+    str += '}';
     return str;
 }
 

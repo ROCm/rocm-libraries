@@ -9209,9 +9209,6 @@ class KernelWriterAssembly(KernelWriter):
           idx1 = idxOuter
           if loopSwap:
             idx0, idx1 = idx1, idx0
-          # Effective inner/outer indices after optional loopSwap (HalfPLRA).
-          idxI = idx1 if loopSwap else idx0  # inner dimension index
-          idxO = idx0 if loopSwap else idx1  # outer dimension index
           accIdx   = idx1 * kernel["MIWaveTile"][0] + idx0
           accStart = accIdx * accs_per_wave
           accEnd   = accStart + accs_per_wave - 1
@@ -9222,39 +9219,6 @@ class KernelWriterAssembly(KernelWriter):
           bStr_base = self.generateSrcStrForMFMA(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInputB, m, u, iui, idxB, unrollLoopIdx)
           aStr     = vgpr(aStr_base, vgprPerInputA)
           bStr     = vgpr(bStr_base, vgprPerInputB)
-          # Precisely setting reuse bit (index-driven, but robust to loopSwap):
-          # - A can be reused iff its idxA stays constant across the next MMA.
-          # - B can be reused iff its idxB stays constant across the next MMA.
-          # For inner-loop progression, the varying index is:
-          #   - idx0 when loopSwap is False
-          #   - idx1 when loopSwap is True
-          # For outer-loop progression (when inner==1), the varying index is:
-          #   - idx1 when loopSwap is False
-          #   - idx0 when loopSwap is True
-          reuseA = False
-          reuseB = False
-          if kernel["MIWaveTile"][outer] == 1 and kernel["MIWaveTile"][inner] == 1:
-            pass
-          elif kernel["MIWaveTile"][outer] > 1 and kernel["MIWaveTile"][inner] == 1:
-            # Only outer loop advances between MMAs.
-            varying_is_idx0 = bool(loopSwap)  # when loopSwap, idx0==idxOuter
-            # A uses idx0 when tile01Idx=True; else uses idx1
-            a_uses_varying = (tPB["tile01Idx"] and varying_is_idx0) or ((not tPB["tile01Idx"]) and (not varying_is_idx0))
-            b_uses_varying = ((not tPB["tile01Idx"]) and varying_is_idx0) or (tPB["tile01Idx"] and (not varying_is_idx0))
-            # If operand does NOT use the varying index, it's constant across outer progression.
-            a_const = not a_uses_varying
-            b_const = not b_uses_varying
-            reuseA = a_const and (idxO < (kernel["MIWaveTile"][outer] - 1))
-            reuseB = b_const and (idxO < (kernel["MIWaveTile"][outer] - 1))
-          else:
-            # Inner loop advances between consecutive MMAs.
-            varying_is_idx0 = (not loopSwap)  # when not loopSwap, idx0==idxInner
-            a_uses_varying = (tPB["tile01Idx"] and varying_is_idx0) or ((not tPB["tile01Idx"]) and (not varying_is_idx0))
-            b_uses_varying = ((not tPB["tile01Idx"]) and varying_is_idx0) or (tPB["tile01Idx"] and (not varying_is_idx0))
-            a_const = not a_uses_varying
-            b_const = not b_uses_varying
-            reuseA = a_const and (idxI < (kernel["MIWaveTile"][inner] - 1))
-            reuseB = b_const and (idxI < (kernel["MIWaveTile"][inner] - 1))
 
           if not tail and tPA["bpe"] == 0.75 and kernel["enableLDSTrA"]:
             if idxInner not in shiftedIndicesA:
@@ -9380,10 +9344,6 @@ class KernelWriterAssembly(KernelWriter):
               miInScale0InstType = miInScaleAInstType
               miInScale1InstType = miInScaleBInstType
 
-            # matrix_a_reuse / matrix_b_reuse apply to MFMA src0/src1, not logical A/B tensors.
-            swapReuse = tPB["tile01Idx"] == kernel["SourceSwap"]
-            mfmaReuseA = reuseB if swapReuse else reuseA
-            mfmaReuseB = reuseA if swapReuse else reuseB
 
             variant = [kernel["MatrixInstM"], kernel["MatrixInstN"], kernel["MatrixInstK"], kernel["MatrixInstB"]]
 
@@ -9455,12 +9415,12 @@ class KernelWriterAssembly(KernelWriter):
                                       mxScaleAType=miInScale0InstType, mxScaleBType=miInScale1InstType, variant=variant, \
                                       acc=self.accVgprReadWriteIndex(kernel, (accStart+accStoreCIdx), (accEnd-accStart+1)), \
                                       a=src0, b=src1, **acc2_args, \
-                                      mxsa=srcMX0, mxsb=srcMX1, block=block, reuseA=mfmaReuseA, reuseB=mfmaReuseB, \
+                                      mxsa=srcMX0, mxsb=srcMX1, block=block, \
                                       comment="left value = %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)))
               else:
                 imod.add(MFMAInstruction(instType=miInInstType, accType=miOutInstType, variant=variant, mfma1k=mfma_1k, \
                                       acc=self.accVgprReadWriteIndex(kernel, (accStart+accStoreCIdx), (accEnd-accStart+1)), \
-                                      a=src0, b=src1, **acc2_args, neg=neg_flag, reuseA=mfmaReuseA, reuseB=mfmaReuseB,\
+                                      a=src0, b=src1, **acc2_args, neg=neg_flag,\
                                       comment="left value = %s[%u+%u:%u+%u]" % (accumRegType, accStart, accStoreCIdx, accEnd, accStoreCIdx)))
             prevAccIdx = accIdx
 
