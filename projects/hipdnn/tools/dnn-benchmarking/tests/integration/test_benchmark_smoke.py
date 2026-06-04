@@ -3,32 +3,21 @@
 
 """CI benchmark smoke gate.
 
-Runs ``python -m dnn_benchmarking`` over the committed sample graphs and asserts
-the tool-health gate (``ci/check_results.py``): at least one graph/engine
-combination ran successfully and none errored. Living in the suite keeps the CI
-workflow a plain pytest invocation instead of hardcoding CLI args + a separate
-gate script.
-
-Like the other GPU integration tests this skips when no GPU/plugin is present,
-so a local ``pytest -m "not gpu"`` never needs hardware.
+Runs the committed sample graphs in-process and asserts the tool exercised
+something: at least one graph/engine combination passed and none errored.
+Skips when no GPU/plugin is present.
 """
 
-import importlib.util
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
 
+from dnn_benchmarking.config.benchmark_config import SuiteConfig
+from dnn_benchmarking.execution import suite_runner
+
 pytestmark = [pytest.mark.gpu, pytest.mark.amd]
 
 _TOOL_ROOT = Path(__file__).resolve().parents[2]
-
-_spec = importlib.util.spec_from_file_location(
-    "ci_check_results", _TOOL_ROOT / "ci" / "check_results.py"
-)
-check_results = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(check_results)
 
 
 def _skip_if_no_rocm() -> None:
@@ -51,30 +40,22 @@ def _skip_if_no_rocm() -> None:
         pytest.skip(f"hipdnn_frontend not available or no GPU: {e}")
 
 
-def test_benchmark_smoke_gate(tmp_path, plugin_path):
+def test_benchmark_smoke_gate(plugin_path):
     _skip_if_no_rocm()
 
-    results = tmp_path / "results.json"
-    proc = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "dnn_benchmarking",
-            "--graph",
-            "graphs/*.json",
-            "--warmup",
-            "1",
-            "--iters",
-            "1",
-            "--plugin-path",
-            plugin_path,
-            "--output",
-            str(results),
-        ],
-        cwd=_TOOL_ROOT,
-        capture_output=True,
-        text=True,
-    )
+    graph_paths = sorted((_TOOL_ROOT / "graphs").glob("*.json"))
+    assert graph_paths, "no sample graphs found under graphs/"
 
-    ok, message = check_results.evaluate(results)
-    assert ok, f"{message}\n--- benchmark stderr ---\n{proc.stderr}"
+    config = SuiteConfig(warmup_iters=1, benchmark_iters=1, plugin_paths=[plugin_path])
+    result = suite_runner.run(graph_paths, config)
+    meta = result.metadata
+
+    assert meta.error_combinations == 0, (
+        f"benchmark smoke gate FAILED: error_combinations={meta.error_combinations} "
+        "-- at least one graph/engine combination errored at runtime"
+    )
+    assert meta.pass_combinations > 0, (
+        "benchmark smoke gate FAILED: pass_combinations=0 -- nothing ran "
+        "successfully (all combinations skipped/unsupported; check the plugin "
+        "path and that engines are installed)"
+    )

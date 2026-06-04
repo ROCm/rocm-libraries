@@ -30,10 +30,12 @@ from ..metrics import (
 from ..metrics._diagnostic import warn_once
 from ..reporting.reporter import Reporter
 from ..reporting.statistics import BenchmarkStats
+from ..graph.loader import GraphLoader
 from ..reporting.suite_results import (
     CorrectnessResult,
     GraphResult,
     ProviderEngineResult,
+    SuiteResult,
 )
 from ..validation.reference_provider import (
     ReferenceProvider,
@@ -704,3 +706,39 @@ def run_single_provider_engine(
             rtol=config.rtol, atol=config.atol, error_message=error_msg
         )
         return result
+
+
+def run(
+    graph_paths: List[Path],
+    config: SuiteConfig,
+    *,
+    reporter: Optional[Reporter] = None,
+) -> SuiteResult:
+    """Run the suite in-process and return the aggregated SuiteResult.
+
+    Creates the hipDNN handle, wires the plugin path, then loads and
+    benchmarks each graph across every ranked engine. Reporter is optional;
+    pass None for a silent run.
+    """
+    import hipdnn_frontend as hipdnn
+
+    set_plugin_path(hipdnn, config.plugin_path)
+    handle = hipdnn.Handle()
+
+    loader = GraphLoader()
+    graph_results: List[GraphResult] = []
+    for graph_path in graph_paths:
+        graph_json = loader.load_json(graph_path)
+        loader.validate(graph_json)
+        tensor_infos = loader.extract_tensor_info(graph_json)
+        graph_results.append(
+            run_graph_all_providers(
+                graph_path,
+                graph_json,
+                tensor_infos,
+                config,
+                handle,
+                reporter=reporter,
+            )
+        )
+    return SuiteResult.from_graph_results(graph_results, total_graphs=len(graph_paths))
