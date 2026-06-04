@@ -1,0 +1,230 @@
+# The fused-MoE mega-kernel, from the math up
+
+This is the algorithm the kernel implements and *why* it is one kernel. The
+README is the optimization history; this file is the specification, the data
+layout, and the precise per-threadgroup steps.
+
+## 0. Notation
+
+| symbol | meaning |
+|---|---|
+| `T` | tokens in the batch |
+| `E` | number of experts |
+| `K` | top-k (experts chosen per token) |
+| `H` | hidden (model) dim — the gate/up contraction and the down output |
+| `I` | intermediate dim — the gate/up output and the down contraction |
+| `X` | activations, `[T, H]` |
+| `Wg, Wu` | gate / up weights, `[E, I, H]` (row = output `I`, contracted over `H`) |
+| `Wd` | down weights, `[E, H, I]` (row = output `H`, contracted over `I`) |
+| `Y` | output, `[T, H]` |
+| `tile_m` | tokens per m-block a threadgroup processes (16) |
+| `tile_n` | intermediate columns a threadgroup owns (`tile_n_inter`, 256) |
+| `GROUP_K` | block-scale group size, 128 |
+| `e4m3` | fp8 format; `FP8_MAX = 448` |
+
+All matmuls accumulate in f32. fp8 operands carry **per-128-block scales**.
+
+## 1. What a fused MoE computes (the specification)
+
+A router picks, per token `t`, a set of `K` experts with weights `w_{t,e}`. For
+each chosen `(t, e)` the token runs that expert's FFN, and the results are
+combined by the routing weights:
+
+```
+Hidden_{t}   = silu( X_t · Wg_e^T ) ⊙ ( X_t · Wu_e^T )      # [I]
+FFN_{t,e}    = Hidden_{t} · Wd_e^T                           # [H]
+Y_t          = Σ_{e ∈ topk(t)}  w_{t,e} · FFN_{t,e}          # [H]
+```
+
+`silu(x) = x · σ(x)`, `σ(x) = 1/(1+e^{-x})`. The `⊙` is element-wise (SwiGLU).
+
+The naïve realization is a pipeline of separate kernels (gate GEMM, up GEMM,
+silu, down GEMM, reduce) that writes `Hidden` to HBM and reads it back. **The
+mega-kernel does the whole per-token FFN in one launch and never spills `Hidden`
+to HBM.**
+
+## 2. Block-scale fp8 (the quantization lemma)
+
+Weights and activations are fp8 e4m3 with one f32 scale per 128-element block.
+For a block `b`, a stored fp8 value `q` represents `q · s_b`. A dot product over
+a 128-block therefore dequantizes once, at the block boundary:
+
+```
+Σ_k (a_k · s_a) (b_k · s_b)  =  s_a · s_b · Σ_k a_k b_k
+```
+
+so the MFMA runs on raw fp8 and the f32 accumulator is multiplied by
+`s_a · s_b` **after** each 128-wide K-block — never per element. This is why the
+K=128 MFMA atom (§8.1) aligns perfectly with the scale granularity: one MFMA =
+one block = one dequant.
+
+The intermediate `Hidden` is produced in f32 and must be fp8 to feed the down
+GEMM, so it is **dynamically quantized** (§5.4): per (row, 128-inter-block) take
+`amax`, set `s = max(amax, ε)/448`, store `q = round(h / s)`, and keep `s` for
+the down dequant.
+
+## 3. The fusion idea (the heart)
+
+Keep `Hidden` on chip. One threadgroup owns:
+
+- `tile_m` sorted tokens of **one** expert (an *m-block*), and
+- a `tile_n` slice of the intermediate dim `I`.
+
+It computes that slice of `Hidden` for those tokens entirely in registers/LDS,
+then immediately consumes it in the down GEMM. Because each threadgroup owns only
+a `tile_n` slice of `I`, its down GEMM contracts only that slice and therefore
+produces a **partial** sum over the full output `H`. Those partials — across the
+`I`-slices (grid.x) and across the `K` experts a token was routed to — are
+combined by **atomic add** into `Y`. Atomics make the contribution order
+irrelevant, which is what lets the kernel be embarrassingly parallel over
+`(I-slice, m-block)`.
+
+## 4. From spec to kernel: who computes what
+
+**Sorted / de-padded layout.** The router output is sorted so each expert's
+tokens are contiguous, then grouped into `tile_m`-row *m-blocks*. Only **active**
+blocks are emitted: `num_m_blocks = Σ_e ceil(count_e / tile_m)`. `BlockExpertIds[b]`
+gives the expert for block `b`; `SortedTokenIds[b·tile_m + r]` gives the real
+output-row token id for slot `r` (or `-1` for padding tail rows, which are
+masked out of the atomic write); `SortedWeights` carries `w_{t,e}`.
+
+**Grid.** `grid = (I / tile_n, num_m_blocks)`. Block = 256 threads (4 waves).
+A threadgroup `(bx, by)` handles intermediate slice `bx` and m-block `by`.
+
+**What lives where.**
+
+| state | location |
+|---|---|
+| X tile `[tile_m, H]` | LDS (loaded once, reused by gate and up) |
+| gate / up accumulators | f32 registers (AGPR/VGPR) |
+| `Hidden` slice `[tile_m, tile_n]` | LDS (fp8, after dynamic quant) |
+| down accumulator | f32 registers |
+| `Y` | HBM, written by atomic add |
+
+## 5. One threadgroup, step by step
+
+Let `e = BlockExpertIds[by]`, the expert this block serves. The contraction `H`
+is walked in `GROUP_K=128` chunks.
+
+### 5.1 — Load the X tile to LDS
+Stream the `[tile_m, H]` activation tile straight from HBM into LDS with
+direct-to-LDS loads (`buffer_load … lds`), bypassing the VGPR round-trip, and
+read it back in the MFMA-input layout. X is loaded **once** and reused by both
+the gate and up GEMMs.
+
+### 5.2 — Gate and up GEMMs (shared A)
+For each 128-block `c` along `H`:
+
+```
+gate_acc += MFMA_16x16x128( X[:, c],  Wg_e[bx-slice, c] )   # f32
+up_acc   += MFMA_16x16x128( X[:, c],  Wu_e[bx-slice, c] )
+```
+
+both consuming the same X block. After each block, dequant the new contribution
+by `s_X[c] · s_Wg[e, slice, c]` (and `s_Wu`) per the §2 lemma.
+
+### 5.3 — SiLU·up (the activation)
+In f32 registers, element-wise:
+
+```
+h = silu(gate_acc) · up_acc          # [tile_m, tile_n], f32
+```
+
+### 5.4 — Dynamic-quantize `Hidden` to fp8
+Per (row, 128-inter-block): `amax = max|h|` (computed by a cross-lane reduction
+of the values already live in registers — no LDS re-read), `s_h = max(amax, ε)/448`,
+`q = round(h / s_h)`. Stage `q` (fp8) into the `Hidden` LDS buffer and keep `s_h`
+for the down dequant. (Folding the amax into this pass — rather than a separate
+sweep over LDS — is one of the kept levers.)
+
+### 5.5 — Reshape `Hidden` in LDS
+The gate/up MFMA leaves `Hidden` in the MFMA **C-output** lane layout, but the
+down GEMM needs it as an MFMA **A-input**. A small LDS transpose (a swizzled
+write/read pair) reshapes it so the down GEMM can read it directly.
+
+### 5.6 — Down GEMM (contract the I-slice this block owns)
+For each 128-block `c` along this threadgroup's `tile_n` slice of `I`:
+
+```
+down_acc += MFMA_16x16x128( Hidden[:, c],  Wd_e[:, slice·tile_n + c] )
+```
+
+dequantized by `s_h · s_Wd[e, …, c]`. Because the block owns only `tile_n` of
+`I`, `down_acc` is a **partial** sum over the full output `H`.
+
+### 5.7 — Weight and atomic-accumulate
+For each output row `r` of the block with token id `t = SortedTokenIds[by·tile_m+r]`
+(skip if `t = -1`):
+
+```
+Y[t, :]  +=  w_{t,e} · down_acc[r, :]        # atomic add, f32
+```
+
+The atomic add merges (a) the partial sums from the other `I`-slices (other `bx`)
+and (b) the contributions of the other experts the token was routed to.
+
+## 6. The output / epilogue
+
+There is no separate reduction kernel. `Y` is zeroed once before the launch;
+every threadgroup atomic-adds its weighted partial. After the launch `Y` holds
+`Σ_{e∈topk} w_{t,e} · FFN_{t,e}` exactly. A final cast produces the bf16 output.
+
+## 7. The sorted, active-block grid (the structural win)
+
+A fixed grid over *all* experts would launch `tile_m`-row blocks for inactive
+experts (pure padding) — at decode that is the dominant waste. Emitting only the
+`num_m_blocks` *active* blocks (and skipping `-1` padding rows in §5.7) makes the
+launched work proportional to real tokens. At `T=1` this shrinks the grid from
+`(I/tile_n, E)` to `(I/tile_n, 2)` — the single biggest decode lever.
+
+## 8. Implementation details worth the math
+
+### 8.1 K=128 hero atom
+The MFMA is `f32 = 16×16×128` over fp8 (`mfma_scale_f32_16x16x128_f8f6f4`, scale
+exponents pinned to 0 = unscaled). K=128 per instruction means **4× fewer K-loop
+trips** than a 16×16×32 atom, and — by §2 — one MFMA covers exactly one 128-wide
+scale block, so dequant is one f32 multiply per MFMA.
+
+### 8.2 The `m_tile_base` condition (a correctness requirement)
+When a block spans more than one MFMA m-tile (an expert with `> tile_m` tokens,
+or `tile_m > 16`), the down GEMM's LDS A-read must offset by the real m-tile
+index `mi·16`, not a constant 0. Reading row 0–15 for every m-tile silently
+corrupts tokens 16+. The parity gate therefore includes a skewed expert with
+`> tile_m` tokens.
+
+### 8.3 Persistent dispatch
+Optionally launch a fixed resident grid and loop each threadgroup over several
+`(bx, by)` work-items, re-initializing the accumulators / quant scales / barriers
+per item. The atomic-add in §5.7 makes work-item order irrelevant, so this is a
+pure scheduling change that amortizes per-launch overhead.
+
+## 9. The whole kernel in pseudo-code
+
+```
+Y = 0
+for each threadgroup (bx, by):                  # grid = (I/tile_n, num_active_m_blocks)
+    e   = BlockExpertIds[by]
+    Xs  = load X[block by rows, :] -> LDS        # [tile_m, H], reused
+    gate_acc = up_acc = 0
+    for c in range(0, H, 128):                    # gate + up, shared A
+        gate_acc += MFMA(Xs[:,c], Wg[e, bx-slice, c]);  dequant by s_X·s_Wg
+        up_acc   += MFMA(Xs[:,c], Wu[e, bx-slice, c]);  dequant by s_X·s_Wu
+    h   = silu(gate_acc) * up_acc                 # f32, [tile_m, tile_n]
+    s_h = max(amax_per_block(h), eps)/448         # in-register amax
+    Hs  = quantize(h, s_h) -> LDS (fp8); reshape Hs to MFMA-A layout
+    down_acc = 0
+    for c in range(0, tile_n, 128):               # down: contract this I-slice
+        down_acc += MFMA(Hs[:,c], Wd[e, :, bx·tile_n + c]); dequant by s_h·s_Wd
+    for r in range(tile_m):                        # weight + scatter
+        t = SortedTokenIds[by*tile_m + r]
+        if t != -1:
+            atomic_add(Y[t, :], SortedWeights[...] * down_acc[r, :])
+cast Y -> bf16
+```
+
+## 10. Where the algorithm ends and tuning begins
+
+The algorithm above is fixed; the README's levers (tiling, prefetch depth,
+scheduling cadence, active grid, persistent loop) change *only* how these steps
+are scheduled onto the hardware, never what is computed. Correctness is pinned by
+the hardened parity gate (§8.2); performance is the per-threadgroup schedule.
