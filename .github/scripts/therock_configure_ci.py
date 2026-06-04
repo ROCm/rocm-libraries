@@ -174,6 +174,11 @@ def select_build_runner(platform: str) -> str:
     return select_weighted_label(labels_config, context_name)
 
 
+def is_hipdnn_tool_path(path: str) -> bool:
+    """The dnn-benchmarking / dnn-convert-shapes tools live under this prefix."""
+    return fnmatch.fnmatch(path, "projects/hipdnn/tools/*")
+
+
 def retrieve_projects(args):
     # For pushes and pull_requests, we only want to test changed projects
     base_ref = args.get("base_ref")
@@ -182,6 +187,11 @@ def retrieve_projects(args):
     # by default, we select standard tests
     test_type = "standard"
 
+    # The hipDNN benchmark smoke gate runs whenever a hipDNN tool changed (nightly
+    # install) or hipDNN itself was built this run (run-id install). tool_changed
+    # is independent of the skippable early-returns below.
+    tool_changed = any(is_hipdnn_tool_path(p) for p in (modified_paths or []))
+
     # Check if CI should be skipped based on modified paths
     # (only for push and pull_request events, not workflow_dispatch or nightly)
     if args.get("is_push") or args.get("is_pull_request"):
@@ -189,14 +199,15 @@ def retrieve_projects(args):
         contains_non_skippable_files = check_for_non_skippable_path(paths_set)
         pr_labels = get_pr_labels(args)
 
-        # If only skippable paths were modified, skip CI
+        # If only skippable paths were modified, skip CI. A tool-only PR still
+        # runs the benchmark (nightly install), even though the build is skipped.
         if not contains_non_skippable_files:
             logging.info("Only skippable paths were modified, skipping CI")
-            return [], test_type
+            return [], test_type, tool_changed, ""
 
         if "skip-therockci" in pr_labels:
             logging.info("`skip-therockci` label was added, skipping CI")
-            return [], test_type
+            return [], test_type, tool_changed, ""
 
     subtrees = get_changed_path_projects(modified_paths)
 
@@ -223,18 +234,28 @@ def retrieve_projects(args):
 
     project_to_run = collect_projects_to_run(subtrees)
 
-    return project_to_run, test_type
+    # run-id mode when this run actually builds hipDNN; otherwise nightly. The
+    # mode is carried to the reusable as projects_to_test ("hipdnn" vs "").
+    hipdnn_built = any("hipdnn" in p["projects_to_test"] for p in project_to_run)
+    run_benchmark = hipdnn_built or tool_changed
+    benchmark_projects = "hipdnn" if hipdnn_built else ""
+
+    return project_to_run, test_type, run_benchmark, benchmark_projects
 
 
 def run(args):
     platform = args.get("platform")
-    project_to_run, test_type = retrieve_projects(args)
+    project_to_run, test_type, run_benchmark, benchmark_projects = retrieve_projects(
+        args
+    )
     build_runs_on = select_build_runner(platform)
     set_github_output(
         {
             f"{platform}_projects": json.dumps(project_to_run),
             "test_type": test_type,
             "build_runs_on": build_runs_on,
+            "run_hipdnn_benchmark": "true" if run_benchmark else "false",
+            "hipdnn_benchmark_projects": benchmark_projects,
         }
     )
 

@@ -51,6 +51,9 @@ jobs:
       test_type: ${{ steps.linux_projects.outputs.test_type }}
       linux_package_targets: ${{ steps.configure_linux.outputs.package_targets }}
       windows_package_targets: ${{ steps.configure_windows.outputs.package_targets }}
+      run_hipdnn_benchmark: ${{ steps.linux_projects.outputs.run_hipdnn_benchmark }}
+      hipdnn_benchmark_projects: ${{ steps.linux_projects.outputs.hipdnn_benchmark_projects }}
+      benchmark_runs_on: ${{ steps.benchmark_runner.outputs.benchmark_runs_on }}
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -137,6 +140,17 @@ jobs:
         id: configure_windows
         run: python ./TheRock/build_tools/github_actions/fetch_package_targets.py
 
+      # The benchmark runs on the gfx94X-dcgpu test machine regardless of which
+      # families the build matrix carried, so extract that runner label directly
+      # from the resolved Linux package targets (available even on a tool-only PR
+      # where the build matrix is empty).
+      - name: Extract gfx94X-dcgpu benchmark runner
+        id: benchmark_runner
+        run: |
+          echo "benchmark_runs_on=$(jq -r \
+            '.[] | select(.amdgpu_family=="gfx94X-dcgpu") | .test_machine' \
+            <<<'${{ steps.configure_linux.outputs.package_targets }}')" >> "$GITHUB_OUTPUT"
+
   therock-ci-linux:
     name: Linux (${{ matrix.projects.projects_to_test }} | ${{ matrix.target_bundle.amdgpu_family }})
     permissions:
@@ -186,6 +200,32 @@ jobs:
       test_runs_on: ${{ matrix.target_bundle.test_machine }}
       build_runs_on: ${{ needs.setup.outputs.windows_build_runs_on }}
 
+  hipdnn-benchmark:
+    name: hipDNN benchmark (${{ needs.setup.outputs.hipdnn_benchmark_projects == '' && 'nightly' || 'run-id' }})
+    permissions:
+      contents: read
+      id-token: write
+    needs: [setup, therock-ci-linux]
+    # Single benchmark entry point. !cancelled() lets the tool-only case run even
+    # though therock-ci-linux is skipped (skip != failure); the run-id case
+    # (projects == 'hipdnn') additionally requires the build to have succeeded so
+    # this run's freshly-built artifacts exist to install. Also requires a
+    # resolved gfx94X-dcgpu runner.
+    if: >-
+      ${{ !cancelled() &&
+          needs.setup.outputs.run_hipdnn_benchmark == 'true' &&
+          needs.setup.outputs.benchmark_runs_on != '' &&
+          (needs.setup.outputs.hipdnn_benchmark_projects == '' ||
+           needs['therock-ci-linux'].result == 'success') }}
+    uses: ./.github/workflows/hipdnn-tool-ci.yml
+    secrets: inherit
+    with:
+      therock_ref: ${{ needs.setup.outputs.therock_ref }}
+      projects_to_test: ${{ needs.setup.outputs.hipdnn_benchmark_projects }}
+      amdgpu_families: "gfx94X-dcgpu"
+      test_runs_on: ${{ needs.setup.outputs.benchmark_runs_on }}
+      platform: "linux"
+
   therock_ci_summary:
     name: TheRock CI Summary
     if: always()
@@ -193,6 +233,7 @@ jobs:
       - setup
       - therock-ci-linux
       - therock-ci-windows
+      - hipdnn-benchmark
     runs-on: ubuntu-24.04
     steps:
       - name: Output failed jobs

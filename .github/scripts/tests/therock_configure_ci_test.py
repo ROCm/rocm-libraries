@@ -19,7 +19,7 @@ class ConfigureCITest(unittest.TestCase):
         mock_process.stdout = "projects/rocprim/src/main.cpp\nprojects/hipcub/src/main.cpp\nprojects/rocwmma/src/main.cpp"
         mock_run.return_value = mock_process
 
-        project_to_run, test_type = therock_configure_ci.retrieve_projects(args)
+        project_to_run, test_type, _, _ = therock_configure_ci.retrieve_projects(args)
         self.assertIn("rocprim", str(project_to_run))
         self.assertIn("hipcub", str(project_to_run))
         self.assertIn("rocwmma", str(project_to_run))
@@ -33,7 +33,7 @@ class ConfigureCITest(unittest.TestCase):
         mock_process.stdout = ""
         mock_run.return_value = mock_process
 
-        project_to_run, test_type = therock_configure_ci.retrieve_projects(args)
+        project_to_run, test_type, _, _ = therock_configure_ci.retrieve_projects(args)
         self.assertEqual(len(project_to_run), 0)
 
     @patch("subprocess.run")
@@ -47,7 +47,7 @@ class ConfigureCITest(unittest.TestCase):
         mock_process.stdout = ""
         mock_run.return_value = mock_process
 
-        project_to_run, test_type = therock_configure_ci.retrieve_projects(args)
+        project_to_run, test_type, _, _ = therock_configure_ci.retrieve_projects(args)
         self.assertIn("rocprim", str(project_to_run))
         self.assertIn("hipcub", str(project_to_run))
         self.assertEqual(test_type, "full")
@@ -63,7 +63,7 @@ class ConfigureCITest(unittest.TestCase):
         mock_process.stdout = ""
         mock_run.return_value = mock_process
 
-        project_to_run, test_type = therock_configure_ci.retrieve_projects(args)
+        project_to_run, test_type, _, _ = therock_configure_ci.retrieve_projects(args)
         self.assertEqual(len(project_to_run), 0)
 
     @patch("subprocess.run")
@@ -74,7 +74,7 @@ class ConfigureCITest(unittest.TestCase):
         mock_process.stdout = ""
         mock_run.return_value = mock_process
 
-        project_to_run, test_type = therock_configure_ci.retrieve_projects(args)
+        project_to_run, test_type, _, _ = therock_configure_ci.retrieve_projects(args)
         self.assertGreaterEqual(len(project_to_run), 5)
         self.assertEqual(test_type, "full")
 
@@ -86,7 +86,7 @@ class ConfigureCITest(unittest.TestCase):
         mock_process.stdout = ""
         mock_run.return_value = mock_process
 
-        project_to_run, test_type = therock_configure_ci.retrieve_projects(args)
+        project_to_run, test_type, _, _ = therock_configure_ci.retrieve_projects(args)
         self.assertEqual(len(project_to_run), 0)
 
     @patch("subprocess.run")
@@ -99,7 +99,7 @@ class ConfigureCITest(unittest.TestCase):
         mock_process.stdout = "projects/rocprim/src/main.cpp"
         mock_run.return_value = mock_process
 
-        project_to_run, test_type = therock_configure_ci.retrieve_projects(args)
+        project_to_run, test_type, _, _ = therock_configure_ci.retrieve_projects(args)
         self.assertIn("rocprim", str(project_to_run))
         self.assertEqual(test_type, "full")
 
@@ -196,7 +196,7 @@ class ConfigureCITest(unittest.TestCase):
             "projects/rocprim/.gitignore",
         ]
 
-        projects, test_type = therock_configure_ci.retrieve_projects(
+        projects, test_type, _, _ = therock_configure_ci.retrieve_projects(
             {"is_pull_request": True, "base_ref": "HEAD^"}
         )
 
@@ -207,7 +207,7 @@ class ConfigureCITest(unittest.TestCase):
     def test_retrieve_projects_runs_ci_for_non_skippable_paths(self, mock_get_modified):
         mock_get_modified.return_value = ["README.md", "projects/rocprim/src/main.cpp"]
 
-        projects, test_type = therock_configure_ci.retrieve_projects(
+        projects, test_type, _, _ = therock_configure_ci.retrieve_projects(
             {"is_pull_request": True, "base_ref": "HEAD^"}
         )
 
@@ -222,7 +222,7 @@ class ConfigureCITest(unittest.TestCase):
             "projects/hipcub/src/main.cpp",
         ]
 
-        projects, test_type = therock_configure_ci.retrieve_projects(
+        projects, test_type, _, _ = therock_configure_ci.retrieve_projects(
             {"is_pull_request": True, "base_ref": "HEAD^"}
         )
 
@@ -239,7 +239,7 @@ class ConfigureCITest(unittest.TestCase):
             "projects/hipdnn/.cursor/rules/ai-rules.mdc",
         ]
 
-        projects, test_type = therock_configure_ci.retrieve_projects(
+        projects, test_type, _, _ = therock_configure_ci.retrieve_projects(
             {"is_pull_request": True, "base_ref": "HEAD^"}
         )
 
@@ -250,13 +250,60 @@ class ConfigureCITest(unittest.TestCase):
     def test_retrieve_projects_runs_ci_for_workflow_paths(self, mock_get_modified):
         mock_get_modified.return_value = [".github/workflows/therock-ci.yml"]
 
-        projects, test_type = therock_configure_ci.retrieve_projects(
+        projects, test_type, _, _ = therock_configure_ci.retrieve_projects(
             {"is_pull_request": True, "base_ref": "HEAD^"}
         )
 
         # All projects should be tested with smoke tests.. make sure we get at least 4 projects
         self.assertGreaterEqual(len(projects), 5)
         self.assertEqual(test_type, "smoke")
+
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_benchmark_tool_only_runs_nightly(self, mock_get_modified):
+        # A tool-only PR is skippable (no build) but still runs the benchmark in
+        # nightly mode: run_benchmark true, benchmark_projects empty.
+        mock_get_modified.return_value = [
+            "projects/hipdnn/tools/dnn-benchmarking/src/main.py",
+        ]
+
+        projects, _, run_benchmark, benchmark_projects = (
+            therock_configure_ci.retrieve_projects(
+                {"is_pull_request": True, "base_ref": "HEAD^"}
+            )
+        )
+
+        self.assertEqual(projects, [])
+        self.assertTrue(run_benchmark)
+        self.assertEqual(benchmark_projects, "")
+
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_benchmark_hipdnn_change_runs_run_id(self, mock_get_modified):
+        # A hipDNN code change builds hipDNN this run -> run-id mode.
+        mock_get_modified.return_value = [
+            "projects/hipdnn/backend/src/engine.cpp",
+        ]
+
+        _, _, run_benchmark, benchmark_projects = (
+            therock_configure_ci.retrieve_projects(
+                {"is_pull_request": True, "base_ref": "HEAD^"}
+            )
+        )
+
+        self.assertTrue(run_benchmark)
+        self.assertEqual(benchmark_projects, "hipdnn")
+
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_benchmark_unrelated_change_does_not_run(self, mock_get_modified):
+        mock_get_modified.return_value = ["projects/rocprim/src/main.cpp"]
+
+        _, _, run_benchmark, benchmark_projects = (
+            therock_configure_ci.retrieve_projects(
+                {"is_pull_request": True, "base_ref": "HEAD^"}
+            )
+        )
+
+        self.assertFalse(run_benchmark)
+        self.assertEqual(benchmark_projects, "")
 
 
 if __name__ == "__main__":
