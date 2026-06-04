@@ -328,6 +328,39 @@ class TestDiscoveryFailure:
         assert result.results[0].status == "error"
         assert "No engines discovered" in result.results[0].error_message
 
+    def test_input_generation_exception_recorded_as_graph_error(self):
+        """Bad tensor metadata during shared input generation does not abort the suite."""
+        with (
+            patch("dnn_benchmarking.execution.suite_runner.Executor") as mock_exec_cls,
+            patch(
+                "dnn_benchmarking.execution.suite_runner._get_reference_provider",
+                return_value=None,
+            ),
+            patch(
+                "dnn_benchmarking.execution.suite_runner.generate_input_data",
+                side_effect=ValueError("bad tensor strides"),
+            ),
+        ):
+            mock_exec_cls.side_effect = _make_exec_factory(engine_ids=[7])
+
+            result = run_graph_all_providers(
+                graph_path=Path("test.json"),
+                graph_json=_make_graph_json(),
+                tensor_infos=[_make_tensor_info(1)],
+                config=_make_config(),
+                handle=MagicMock(),
+            )
+
+        assert len(result.results) == 1
+        r = result.results[0]
+        assert r.status == "error"
+        assert r.provider == "unknown"
+        assert "Input data generation failed" in r.error_message
+        assert "bad tensor strides" in r.error_message
+        assert r.correctness is not None
+        assert r.correctness.passed is False
+        assert result.engine_ids == [7]
+
     @patch("dnn_benchmarking.execution.suite_runner.Executor")
     def test_no_engines_unsupported_error_recorded_as_skipped(self, mock_exec_cls):
         """UnsupportedGraphError during discovery is recorded as skipped."""

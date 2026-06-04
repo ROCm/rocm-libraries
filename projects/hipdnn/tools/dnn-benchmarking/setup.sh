@@ -185,7 +185,8 @@ if [ "$BUILT_HIPDNN" -eq 1 ] || needs_install "$HIPBLASLT_PLUGIN"; then
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
         -DCMAKE_PREFIX_PATH="$INSTALL_DIR" \
-        -DHIPDNN_SKIP_TESTS=ON
+        -DHIPDNN_SKIP_TESTS=ON \
+        -DENABLE_CLANG_TIDY=OFF
     cmake --build "$HIPBLASLT_BUILD_DIR"
     cmake --install "$HIPBLASLT_BUILD_DIR"
 fi
@@ -199,6 +200,8 @@ if [ "$BUILT_HIPDNN" -eq 1 ] || needs_install "$HIP_KERNEL_PLUGIN"; then
         -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
         -DCMAKE_PREFIX_PATH="$INSTALL_DIR" \
         -DHIPKERNELPROVIDER_ENABLE_TESTS=OFF \
+        -DENABLE_CLANG_FORMAT=OFF \
+        -DENABLE_CLANG_TIDY=OFF \
         -DENABLE_ASM_SDPA_ENGINE=ON
     cmake --build "$HIP_KERNEL_BUILD_DIR"
     cmake --install "$HIP_KERNEL_BUILD_DIR"

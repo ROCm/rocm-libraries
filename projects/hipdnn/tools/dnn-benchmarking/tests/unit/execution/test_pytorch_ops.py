@@ -318,6 +318,80 @@ class TestPyTorchOpsNewHandlers:
         expected = torch.nn.grad.conv2d_weight(x, (1, 1, 2, 2), dy)
         torch.testing.assert_close(tensors[3], expected)
 
+    def test_grouped_conv_fwd_matches_torch(self) -> None:
+        graph_json = {
+            "nodes": [
+                {
+                    "type": "ConvolutionFwdAttributes",
+                    "inputs": {"x_tensor_uid": 1, "w_tensor_uid": 2},
+                    "outputs": {"y_tensor_uid": 3},
+                    "parameters": {
+                        "conv_mode": "CROSS_CORRELATION",
+                        "pre_padding": [0, 0],
+                        "post_padding": [0, 0],
+                        "stride": [1, 1],
+                        "dilation": [1, 1],
+                    },
+                }
+            ]
+        }
+        x = torch.arange(64, dtype=torch.float32).reshape(1, 4, 4, 4) / 10
+        w = torch.arange(108, dtype=torch.float32).reshape(6, 2, 3, 3) / 20
+        tensors = {1: x, 2: w}
+        pytorch_ops.execute_graph(graph_json, tensors)
+
+        torch.testing.assert_close(
+            tensors[3], torch.nn.functional.conv2d(x, w, groups=2)
+        )
+
+    def test_grouped_conv_dgrad_and_wgrad_match_torch(self) -> None:
+        params = {
+            "conv_mode": "CROSS_CORRELATION",
+            "pre_padding": [0, 0],
+            "post_padding": [0, 0],
+            "stride": [1, 1],
+            "dilation": [1, 1],
+        }
+        dgrad_graph = {
+            "tensors": [{"uid": 3, "dims": [1, 4, 4, 4]}],
+            "nodes": [
+                {
+                    "type": "ConvolutionBwdAttributes",
+                    "inputs": {"dy_tensor_uid": 1, "w_tensor_uid": 2},
+                    "outputs": {"dx_tensor_uid": 3},
+                    "parameters": params,
+                }
+            ],
+        }
+        wrw_graph = {
+            "tensors": [{"uid": 4, "dims": [6, 2, 3, 3]}],
+            "nodes": [
+                {
+                    "type": "ConvolutionWrwAttributes",
+                    "inputs": {"x_tensor_uid": 3, "dy_tensor_uid": 1},
+                    "outputs": {"dw_tensor_uid": 4},
+                    "parameters": params,
+                }
+            ],
+        }
+        dy = torch.arange(24, dtype=torch.float32).reshape(1, 6, 2, 2) / 10
+        w = torch.arange(108, dtype=torch.float32).reshape(6, 2, 3, 3) / 20
+        x = torch.arange(64, dtype=torch.float32).reshape(1, 4, 4, 4) / 30
+
+        dgrad_tensors = {1: dy, 2: w}
+        pytorch_ops.execute_graph(dgrad_graph, dgrad_tensors)
+        torch.testing.assert_close(
+            dgrad_tensors[3],
+            torch.nn.grad.conv2d_input((1, 4, 4, 4), w, dy, groups=2),
+        )
+
+        wrw_tensors = {1: dy, 3: x}
+        pytorch_ops.execute_graph(wrw_graph, wrw_tensors)
+        torch.testing.assert_close(
+            wrw_tensors[4],
+            torch.nn.grad.conv2d_weight(x, (6, 2, 3, 3), dy, groups=2),
+        )
+
     def test_batchnorm_backward_outputs_expected_reductions(self) -> None:
         graph_json = {
             "nodes": [

@@ -550,7 +550,27 @@ def run_graph_all_providers(
         )
     engine_selections = config.engine_selections_for(engine_ids)
     ref_provider = _get_reference_provider(config, graph_json)
-    graph_input_data = generate_input_data(tensor_infos, config.seed)
+    try:
+        graph_input_data = generate_input_data(tensor_infos, config.seed)
+    except (ValueError, RuntimeError, OSError, TypeError, OverflowError) as e:
+        msg = f"Input data generation failed: {e}"
+        rtol, atol = _fallback_tolerance_for_config(config)
+        return GraphResult(
+            graph_name=graph_name,
+            graph_path=str(graph_path),
+            results=[
+                ProviderEngineResult(
+                    provider="unknown",
+                    engine_id=0,
+                    status="error",
+                    error_message=msg,
+                    correctness=CorrectnessResult.failed(
+                        rtol=rtol, atol=atol, error_message=msg
+                    ),
+                )
+            ],
+            engine_ids=engine_ids,
+        )
     reference_outputs: Optional[Dict[int, ReferenceOutput]] = None
     reference_error: Optional[str] = None
 
