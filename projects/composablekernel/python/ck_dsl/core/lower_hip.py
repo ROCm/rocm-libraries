@@ -997,6 +997,21 @@ class _Lowerer:
                 f"({cpp_t})__builtin_amdgcn_rcpf((float){_name(v)});"
             )
 
+    def _op_math_rcp_fast(self, op: Op) -> None:
+        # Identical to math.rcp on HIP: the builtin already lowers to v_rcp_f32.
+        (v,) = op.operands
+        tname = op.result.type.name
+        cpp_t = _type_to_hip(op.result.type)
+        if tname == "f32":
+            self._emit(
+                f"{cpp_t} {_name(op.result)} = __builtin_amdgcn_rcpf({_name(v)});"
+            )
+        else:
+            self._emit(
+                f"{cpp_t} {_name(op.result)} = "
+                f"({cpp_t})__builtin_amdgcn_rcpf((float){_name(v)});"
+            )
+
     def _op_math_sqrt(self, op: Op) -> None:
         self._math1(op, "sqrtf")
 

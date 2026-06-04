@@ -32,7 +32,7 @@ reworking the kernel builders.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
+from typing import Dict, Tuple
 
 from ..core.arch import ArchTarget, LayoutMap, MmaOp
 from ..core.ir import (
@@ -235,6 +235,42 @@ class MfmaAtom:
             dtype_in="fp8e4m3",
             dtype_out="f32",
             name="mfma_f32_32x32x16_fp8",
+        )
+
+    @classmethod
+    def fp8_16x16x128(cls) -> "MfmaAtom":
+        """Unscaled FP8 (e4m3) MFMA hero atom, 16x16 output, K=128 per atom.
+
+        This is the dense, *unscaled* wide-K f8 MFMA — the throughput
+        ceiling for fp8 GEMM (4x the K of :meth:`fp8_16x16x32`, so 4x
+        fewer K-trips). gfx950 exposes the K=128 f8 MFMA only through the
+        ``f8f6f4`` instruction whose LLVM intrinsic is
+        ``llvm.amdgcn.mfma.scale.f32.16x16x128.f8f6f4`` (there is NO plain
+        ``mfma.f32.16x16x128.fp8.fp8`` — only the sparse ``smfmac`` and the
+        scaled ``f8f6f4`` exist). The lowering pins the in-instruction E8M0
+        scale operands to 0 (exponent 0 => scale factor 2^0 == 1.0), and
+        the format selectors ``cbsz=0`` / ``blgp=0`` (fp8e4m3 for both A
+        and B), making the instruction numerically equivalent to a plain
+        unscaled fp8 MFMA. This is the block-scale design's intended use:
+        the per-block dequant is applied to the f32 accumulator afterward,
+        NOT in-instruction.
+
+        Per-lane on wave64: A = ``<32 x fp8e4m3>`` (32 f8 bytes = 256 bits
+        = ``<8 x i32>`` at the intrinsic boundary), B same, C =
+        ``<4 x float>``. K = 128 f8 elements per atom.
+        Output layout: same as :meth:`fp8_16x16x32` -- 4 floats per lane,
+        row = ``(m_blk * 4 + i)``, col = ``n_in_atom``.
+        """
+        return cls(
+            m=16,
+            n=16,
+            k=128,
+            a_per_lane=32,
+            b_per_lane=32,
+            c_per_lane=4,
+            dtype_in="fp8e4m3",
+            dtype_out="f32",
+            name="mfma_f32_16x16x128_fp8",
         )
 
     @classmethod
@@ -635,8 +671,7 @@ class WmmaAtom:
         """
         if self.name not in _WMMA_OP_ID_NAMES:
             raise NotImplementedError(
-                f"no WMMA dispatch for atom {self.dtype_in} "
-                f"{self.m}x{self.n}x{self.k}"
+                f"no WMMA dispatch for atom {self.dtype_in} {self.m}x{self.n}x{self.k}"
             )
         return b.mma(self.name, a, bb, c)
 
@@ -802,6 +837,7 @@ MFMA_FP8_ATOMS: Tuple[MfmaAtom, ...] = (
     MfmaAtom.fp8_32x32x16(),
     MfmaAtom.bf8_16x16x32(),
     MfmaAtom.bf8_32x32x16(),
+    MfmaAtom.fp8_16x16x128(),
 )
 
 # P52: MX fp4 / fp6 atoms (gfx950+).

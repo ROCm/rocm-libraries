@@ -89,6 +89,7 @@ _MMA_C_FRAG_LEN: Dict[str, int] = {
     "mfma_f32_4x4x4_f16": 4,
     "mfma_f32_16x16x128_fp4": 4,
     "mfma_f32_16x16x96_fp6": 4,
+    "mfma_f32_16x16x128_fp8": 4,
     "mfma_scale_f32_16x16x128_f8f6f4": 4,
     "wmma_f32_16x16x16_f16": 8,
     "wmma_f32_16x16x16_bf16": 8,
@@ -103,6 +104,7 @@ _MMA_RESULT_HINT: Dict[str, str] = {
     "mfma_f32_32x32x16_bf16": "acc32",
     "mfma_f32_16x16x128_fp4": "acc4",
     "mfma_f32_16x16x96_fp6": "acc6",
+    "mfma_f32_16x16x128_fp8": "acc128",
     "mfma_scale_f32_16x16x128_f8f6f4": "mxacc",
 }
 
@@ -514,6 +516,17 @@ class IRBuilder:
 
     def rcp(self, a: Value) -> Value:
         return self._op("math.rcp", [a], [a.type], result_name_hint="rcp").result
+
+    def rcp_fast(self, a: Value) -> Value:
+        """Fast (~1 ulp) hardware reciprocal: ``v_rcp_f32`` directly.
+
+        Unlike :meth:`rcp` (which lowers to an IEEE-correct ``fdiv 1.0, x`` and
+        gets expanded to the full ``v_div_scale``/``v_div_fmas``/``v_div_fixup``
+        sequence in the LLVM backend), this maps straight to
+        ``llvm.amdgcn.rcp.f32`` -- the same single-instruction reciprocal aiter
+        uses in its SiLU sigmoid. f32 only.
+        """
+        return self._op("math.rcp_fast", [a], [a.type], result_name_hint="rcpf").result
 
     def sqrt(self, a: Value) -> Value:
         return self._op("math.sqrt", [a], [a.type], result_name_hint="sqrt").result
@@ -1535,6 +1548,103 @@ class IRBuilder:
     def mfma_f32_32x32x16_bf8(self, a: Value, b: Value, c: Value) -> Value:
         return self.mma("mfma_f32_32x32x16_bf8", a, b, c)
 
+    def inline_asm(
+        self,
+        template: str,
+        constraints: str,
+        operands: "Sequence[Value]" = (),
+        result_type: Optional[Type] = None,
+        *,
+        sideeffect: bool = True,
+        convergent: bool = False,
+        result_name_hint: str = "asm",
+    ) -> Optional[Value]:
+        """General AMDGPU inline-asm IR op (ADDITIVE, golden-safe).
+
+        Emits an LLVM ``call <ty> asm sideeffect[ convergent] "<template>",
+        "<constraints>"(<typed operands>)`` at lowering time. This is the
+        deterministic way to pin a machine instruction's operand register
+        classes (e.g. force AGPR srcA/srcB on an MFMA via the ``a``
+        constraint) which the typed intrinsics do not let us control.
+
+        Args:
+          template: the asm text with ``$0`` (output, if any) then ``$1..$N``
+            inputs in the order they appear in ``operands`` (after the output).
+          constraints: LLVM constraint string, e.g. ``"=v,0,a,a"``. AMDGPU
+            letters: ``v``=VGPR, ``a``=AGPR, ``s``=SGPR in; ``=v``/``=a``/``=s``
+            outputs; a digit (``0``) ties an input to that output.
+          operands: the input Values, in constraint order (after the output).
+          result_type: result Type, or ``None`` for a void asm.
+          sideeffect: emit ``sideeffect`` (default True; prevents DCE/dup).
+          convergent: also emit ``convergent`` (cannot be moved across waves).
+
+        Returns the result Value, or ``None`` for a void asm.
+        """
+        rt = [result_type] if result_type is not None else []
+        op = self._op(
+            "tile.inline_asm",
+            list(operands),
+            rt,
+            attrs={
+                "template": str(template),
+                "constraints": str(constraints),
+                "sideeffect": bool(sideeffect),
+                "convergent": bool(convergent),
+            },
+            result_name_hint=result_name_hint,
+        )
+        return op.result if result_type is not None else None
+
+    def inline_asm_multi(
+        self,
+        template: str,
+        constraints: str,
+        operands: "Sequence[Value]" = (),
+        *,
+        result_types: "Sequence[Type]" = (),
+        sideeffect: bool = True,
+        convergent: bool = False,
+        result_name_hint: str = "asm",
+    ):
+        """Multi-output AMDGPU inline-asm op (ADDITIVE, golden-safe).
+
+        Same as :meth:`inline_asm` but for an asm with N (> 1) outputs, which
+        LLVM models as a *literal struct* return (``{ <ty0>, <ty1>, ... }``)
+        that the lowering unpacks with ``extractvalue`` (the precedent is
+        :meth:`permlane32_swap`'s ``{ i32, i32 }`` asm). Returns a list of N
+        result Values in declaration order. ``$0..$(N-1)`` are the outputs;
+        inputs follow in ``operands`` order starting at ``$N``.
+
+        Used by the nuclear clustered MFMA helper
+        (:func:`helpers.asm.mfma_f8f6f4_agpr_cluster`) so a whole gate/up
+        MFMA burst is one asm node (one schedule fence) rather than N.
+        """
+        rts = list(result_types)
+        if len(rts) <= 1:
+            r = self.inline_asm(
+                template,
+                constraints,
+                operands,
+                result_type=(rts[0] if rts else None),
+                sideeffect=sideeffect,
+                convergent=convergent,
+                result_name_hint=result_name_hint,
+            )
+            return [r] if rts else []
+        op = self._op(
+            "tile.inline_asm",
+            list(operands),
+            rts,
+            attrs={
+                "template": str(template),
+                "constraints": str(constraints),
+                "sideeffect": bool(sideeffect),
+                "convergent": bool(convergent),
+            },
+            result_name_hint=result_name_hint,
+        )
+        return list(op.results)
+
     def mfma_scale_f32_16x16x128_f8f6f4(
         self,
         a: Value,
@@ -2463,6 +2573,66 @@ class IRBuilder:
             attrs={"dwords": int(dwords), "aux": int(coherency)},
         )
 
+    def global_load_lds(
+        self,
+        src_ptr: Value,
+        byte_off: Value,
+        lds_addr: Value,
+        size_bytes: int,
+        coherency: int = 0,
+    ) -> None:
+        """Direct DRAM->LDS DMA via ``llvm.amdgcn.global.load.lds``.
+
+        This is the *flat/global* (non-buffer-descriptor) sibling of
+        :meth:`async_buffer_load_lds`. It bypasses the VGPR round-trip
+        entirely: each lane issues ``global_load_lds_dword{,x4}`` which
+        streams ``size_bytes`` directly from ``src_ptr + byte_off`` (a
+        ``ptr addrspace(1)``) into the wave-uniform LDS address
+        ``lds_addr`` (an i64, biased per-wave by the caller). No buffer
+        resource descriptor is required.
+
+        Parameters
+        ----------
+        src_ptr
+            Global (``addrspace(1)``) base pointer.
+        byte_off
+            i32 per-lane byte offset into ``src_ptr``; folded as an i8
+            GEP so the lane's source address is ``src_ptr + byte_off``.
+        lds_addr
+            i64 LDS (``addrspace(3)``) destination address. The intrinsic
+            writes lane-contiguously starting here, so multi-wave kernels
+            MUST bias this by ``wave_id * wave_bytes`` (see
+            :meth:`smem_ptr_add`) or waves stomp each other.
+        size_bytes
+            Bytes per lane: 1, 2, 4 (``global_load_lds_dword``) or — on
+            gfx950 — 12 / 16 (``global_load_lds_dwordx3/x4``). 16-byte is
+            the wide direct-to-LDS path the pyisa reference uses.
+        coherency
+            AUX-bit cache-coherence hint (0..3): :data:`CACHE_ALL`,
+            :data:`CACHE_GLOBAL`, :data:`CACHE_STREAM`,
+            :data:`NON_TEMPORAL`. ``CACHE_ALL`` is the right hint for
+            reused weights so they stay resident in L2.
+
+        Completion is signalled via the VMEM counter, exactly like
+        :meth:`async_buffer_load_lds`; consumers must place an
+        ``s_waitcnt(vmcnt=0)`` before reading the LDS. This only WINS
+        when coupled to software-prefetch (the next-tile DMA must be in
+        flight during the current MFMAs); issued alone on a
+        barrier-bound loop it regresses.
+        """
+        if size_bytes not in (1, 2, 4, 12, 16):
+            raise ValueError(
+                f"global_load_lds size_bytes must be 1, 2, 4, 12, or 16 "
+                f"(got {size_bytes})"
+            )
+        if coherency not in (0, 1, 2, 3):
+            raise ValueError(f"coherency must be 0..3 (got {coherency})")
+        self._op(
+            "tile.global_load_lds",
+            [src_ptr, byte_off, lds_addr],
+            attrs={"size_bytes": int(size_bytes), "aux": int(coherency)},
+        )
+
     # ----- f32 LDS ops (cshuffle epilogue) -----
 
     def smem_alloc_f32(
@@ -2799,6 +2969,7 @@ PURE_OP_NAMES = {
     "arith.cvt_fp8_to_f32",
     "math.exp2",
     "math.rcp",
+    "math.rcp_fast",
     "math.sqrt",
     "math.rsqrt",
     "math.tanh",

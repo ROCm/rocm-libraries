@@ -1237,6 +1237,84 @@ above). Measurement discipline: this box auto-clocks ±25–30%, so **only
 same-session interleaved ratios are valid** — bench the candidate and the
 reference back-to-back in one process.
 
+### 8.7 What a good hot-loop schedule looks like
+
+ck_dsl declares ops + dependencies and hands instruction scheduling to the
+backend; on gfx950 the scheduling *hints* are dropped (§8.4, §21.8), so you
+cannot place instructions directly. You can still shape the schedule indirectly:
+the **order, spacing, and dependency structure of the ops you emit** is the
+backend's starting point, and inside a fenced region (see the "hard scheduling
+fence" bullet below) it is largely what survives. The levers below are what an
+assembly-grade scheduler would do for the hot loop — emit toward them, and
+crucially **assert the result** with `probe_isa_inspect.py` /
+`probe_intrinsic_counts.py`, because a hint that did nothing and one that helped
+both read as "no perf delta".
+
+- **Size prefetch to cover the load latency.** A global/VMEM load has far higher
+  latency than an LDS read — high enough that a single unhidden one stalls the
+  matrix unit across many MFMAs. Pick prefetch depth so the independent MFMA work
+  between *issuing* a load and *consuming* it actually covers that latency
+  (`SoftwarePipeline(num_buffers=…)` / `helpers/pipeline.py::recommend_prefetch_stages`),
+  rather than sweeping blind. A depth that leaves the MFMA unit waiting on VMEM is
+  the *memory-bound* signal of §3.3.
+- **Never read-then-immediately-MFMA (operand prefetch).** Don't consume a
+  just-loaded value in the very next matrix op — its inputs may not have landed,
+  and the unit stalls. In the inner `kk` loop, emit the `smem_load_*` for fragment
+  `kk+1` *before* the MFMAs of `kk`. This is §8.5 "avoid immediate use of a
+  just-loaded value" made mechanical, and the same idea as the §17.4 "early-V"
+  reorder one level up.
+- **Spread `ds_read`s evenly; avoid long bursts.** Aim for a roughly even
+  LDS-read-per-MFMA ratio across the loop body instead of front-loading every
+  read, and don't emit long back-to-back runs of LDS reads. Drive
+  `SchedulePolicy.emit_after_mfma_step(ds_read_count=…, mfma_count=…)` to
+  distribute reads across MFMA steps; hand-authored loops should interleave a few
+  reads between MFMAs. (On gfx950 the emitted `sched_group_barrier` is dropped, so
+  what actually carries is the *IR emission order*, not the hint.)
+- **Roughly one global/async load per MFMA.** Interleave VMEM with compute — issue
+  about one `async_buffer_load_lds` per MFMA-step region so loads overlap matrix
+  work, instead of clumping all loads at the top of the loop. Matches §8.5
+  "interleave … global loads".
+- **Budget VALU *under* MFMA latency — it is not free past the budget.** A matrix
+  op opens a window where only a bounded amount of VALU co-issues alongside it;
+  beyond that, VALU serializes behind the matrix unit. For fused/attention paths
+  keep per-MFMA VALU (softmax rescale, fp8 cvt, scaling) under that budget — this
+  is the mechanism behind the §17.x finding that *"FP8 dequant adds VALU work,
+  which **was** the bottleneck"*. Verify the `valu`/`trans` sub-buckets per MFMA in
+  `probe_isa_inspect.py`.
+- **Balance the loop boundary.** Don't let two matrix ops abut across the backedge
+  with nothing to overlap them — if the last op of the iteration is an MFMA and
+  the first of the next is too, the unit stalls at the seam. Make sure the backedge
+  carries independent work (the next-tile load) between them. Scheduler-side
+  reading of the §8.6 "single-barrier depth-2 prefetch" win.
+- **Every wait / store / barrier is a hard scheduling fence.** The backend cannot
+  move anything across a store, branch, barrier, or `s_waitcnt`. An over-eager
+  `b.s_waitcnt(...)` or a mid-loop store fences the scheduler; place the
+  **minimum** wait **as late as legal** (§8.1, §8.3) and prefer one combined wait
+  over several.
+- **Wait for the count you need, not zero (partial waits).** If you need the
+  result of the k-th-oldest of N in-flight loads, wait `vmcnt = N − k` and keep the
+  newer loads in flight, instead of draining to `vmcnt=0` every iteration. ck_dsl
+  exposes this as `SoftwarePipeline(overlap_vmcnt=True)` →
+  `s_waitcnt(vmcnt=prefetch_depth)`; use it for depth≥2 pipelines (cf. §8.6
+  single-barrier depth-2; `gemm_wsp3`'s `keep_vmcnt`).
+- **Emit FMA, not mul+add; keep constant chains short.** Author scale/bias as
+  `b.fma(...)` and pre-multiply constant scales in Python so the chain starts
+  short, rather than relying on the backend to fuse `v_mul`+`v_add` and fold the
+  constants. Verify the epilogue/softmax ISA shows `v_fma_f32`, not `v_mul`+`v_add`
+  pairs.
+
+**gfx1151 (RDNA) note.** RDNA hides dependent-VALU latency with `s_delay_alu`
+(inserted by the backend); long *dependent* VALU chains cost delay slots. Keep
+them short and break dependencies where you can; spot-check `s_delay_alu` density
+in the lowered ISA.
+
+**Verify, don't assume.** Each lever above changes an ISA-visible quantity
+(per-iter `ds_read`/`mfma` interleave, `vmcnt`/`lgkmcnt` values, `valu`-per-MFMA,
+`v_fma` vs `v_mul`+`v_add`). Treat those as the *acceptance test* for the schedule
+you intended, exactly as §8.4 says for `iglp_opt`: a no-op and an
+applied-but-useless change both read as "no perf delta", so check the histogram,
+not the clock. See §10.5 (limits vs hand assembly) and §21.8 (gfx950 caveats).
+
 ---
 
 ## 9. Epilogue Optimization
