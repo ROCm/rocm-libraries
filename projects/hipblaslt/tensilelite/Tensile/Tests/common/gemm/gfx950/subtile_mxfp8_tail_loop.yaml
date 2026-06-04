@@ -87,6 +87,17 @@
 # Root cause + fix narrative is in the smoke yaml docstring; the patch
 # touches `Components/Subtile/InstructionEmitter.py:emit_lr` and
 # `Components/Subtile/LogicalScheduler.py:build_nll`.
+#
+# v3 base verification (2026-06-03, gfx950, host build_tmp tensilelite-client):
+#   branch:  users/bnemanich/mxfp8-on-tl-multiple-du-2-v3
+#   base:    origin/users/maemmett/tl-multiple-du-2 = 771c7db7313
+#            "Fix subtile_mxfp8 regressions from mis-gated VGPR free-list allocation"
+#            (PR 7781 with PR 7656 absorbed upstream; the previously-documented
+#             MT256x256 PLR=0 multi-DU vgprs=289 codegen-overflow is RESOLVED
+#             on this base.)
+#   result:
+#     subtile_mxfp8_tail_loop.yaml — 96/96 PASS (full PGR×PLR×K tail-loop sweep).
+#
 ########################################
 
 TestParameters:

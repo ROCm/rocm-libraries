@@ -36,6 +36,17 @@
 #     The drain fix is a no-op for this kernel (numPartitions=1 picks
 #     the single-partition candidate before VGPR pressure forces the
 #     5-partition split that triggered the bug on MIWT=10 cases).
+#
+# v3 base verification (2026-06-03, gfx950, host build_tmp tensilelite-client):
+#   branch:  users/bnemanich/mxfp8-on-tl-multiple-du-2-v3
+#   base:    origin/users/maemmett/tl-multiple-du-2 = 771c7db7313
+#            "Fix subtile_mxfp8 regressions from mis-gated VGPR free-list allocation"
+#            (PR 7781 with PR 7656 absorbed upstream; the previously-documented
+#             MT256x256 PLR=0 multi-DU vgprs=289 codegen-overflow is RESOLVED
+#             on this base.)
+#   result:
+#     subtile_mxfp8_correctness_regression_mt192x256_plr1_wgm4.yaml — 6/6 PASS.
+#
 ########################################
 
 TestParameters:
