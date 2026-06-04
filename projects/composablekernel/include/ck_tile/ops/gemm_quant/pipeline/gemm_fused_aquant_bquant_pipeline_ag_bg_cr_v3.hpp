@@ -241,8 +241,8 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
             const ADramWindow& a_dram_window)
         {
             static_assert(std::is_same_v<ADataType, ck_tile::bf16_t>);
-            // ADstStaticTileDist{} -> AReduceTileDist
-            // Modify the window and match the temp tensor
+
+            // A data is loaded into a reduce distribution to enable quantization
             auto a_reduce =
                 make_static_distributed_tensor<ADataType>(MakeAReduceTileDistribution());
             auto a_reduce_dram_window = MakeAReduceDramWindow(a_dram_window);
@@ -346,9 +346,9 @@ struct FusedAQuantBQuantGemmPipelineAgBgCrCompV3 : public BaseGemmPipelineAgBgCr
                   typename BElementFunction>
         CK_TILE_DEVICE auto
         operator()(const ADramBlockWindowTmp& a_dram_block_window_tmp,
-                   const AElementFunction& a_element_func,
+                   [[maybe_unused]] const AElementFunction& a_element_func,
                    const BDramBlockWindowTmp& b_dram_block_window_tmp,
-                   const BElementFunction& b_element_func,
+                   [[maybe_unused]] const BElementFunction& b_element_func,
                    [[maybe_unused]] const AQDramBlockWindowTmp& aq_dram_block_window_tmp,
                    const BQDramBlockWindowTmp& bq_dram_block_window_tmp,
                    [[maybe_unused]] index_t m,
