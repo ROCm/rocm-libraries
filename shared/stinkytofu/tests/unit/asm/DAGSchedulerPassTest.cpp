@@ -255,11 +255,11 @@ TEST_F(DAGSchedulerPassTest, IndependentWMMAFirst_ThenDsThenVALU) {
 }
 
 // ---------------------------------------------------------------------------
-// Property: ds_load burst limit — after a WMMA fires,
-// its latency window is filled with non-WMMA. With 5 ds_loads and VALU
-// all ready, at most 4 consecutive ds_loads appear before VALU interleaves.
+// Property: per-WMMA-window DS cap — after a WMMA fires,
+// at most floor((latency - issue) / 2) = 3 ds_loads can issue in its window
+// because back-to-back ds_load issue cost doubles.
 // ---------------------------------------------------------------------------
-TEST_F(DAGSchedulerPassTest, DSBurstLimit_VALUInterleaveAfter4) {
+TEST_F(DAGSchedulerPassTest, DSWindowCap_VALUInterleaveAfter3) {
     const int addrReg = 80;
     // 5 independent ds_loads (LDS pseudo-reg makes them movable in DAG)
     createMovableDsLoad(0, addrReg, 1);
@@ -292,14 +292,14 @@ TEST_F(DAGSchedulerPassTest, DSBurstLimit_VALUInterleaveAfter4) {
         }
     }
 
-    EXPECT_LE(maxConsecutiveDs, 4) << "Burst limit violated: found " << maxConsecutiveDs
-                                   << " consecutive ds_loads (VALU should interleave after 4)";
+    EXPECT_LE(maxConsecutiveDs, 3) << "DS window cap violated: found " << maxConsecutiveDs
+                                   << " consecutive ds_loads (max 3 per WMMA window)";
 }
 
 // ---------------------------------------------------------------------------
 // Property: all original instructions are preserved.
 // ---------------------------------------------------------------------------
-TEST_F(DAGSchedulerPassTest, DSBurst_InstructionCountPreserved) {
+TEST_F(DAGSchedulerPassTest, DSWindowCap_InstructionCountPreserved) {
     const int addrReg = 100;
     // 6 independent ds_loads (LDS pseudo-reg makes them movable in DAG)
     for (int i = 0; i < 6; i++) createMovableDsLoad(i * 4, addrReg, i + 1);
