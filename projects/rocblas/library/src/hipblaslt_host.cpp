@@ -108,8 +108,7 @@ namespace
         if(status != expect)
         {
             rocblas_internal_ostream msg;
-            std::cout << "Received unexpected hipBLAS status: " << status
-                      << std::endl;
+            std::cout << "Received unexpected hipBLAS status: " << status << std::endl;
             print_if_verbose(msg << "rocBLAS error received at " << __FILE__ << ":" << __LINE__
                                  << std::endl);
             return rocblas_status_internal_error;
@@ -152,7 +151,7 @@ namespace
         std::conditional_t<std::is_same_v<T, rocblas_double_complex>,
                            std::complex<double>,
                            std::conditional_t<std::is_same_v<T, int8_t>, int32_t, T>>>;
-    
+
     /****************************************************************
      * Construct a HipBlasLT GEMM from a RocblasContractionProblem *
      ****************************************************************/
@@ -470,7 +469,7 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
                                               rocblas_gemm_algo                            algo,
                                               int32_t solution_index)
 {
-#if defined(HIPBLASLT_VERSION_MAJOR) && HIPBLASLT_VERSION_MAJOR >= 1 \
+#if defined(HIPBLASLT_VERSION_MAJOR) && HIPBLASLT_VERSION_MAJOR >= 1    \
     && defined(HIPBLASLT_VERSION_MINOR) && HIPBLASLT_VERSION_MINOR >= 4 \
     && defined(HIPBLASLT_VERSION_PATCH) && HIPBLASLT_VERSION_PATCH >= 1
     hipblasLtHandle_t& handle     = *(prob.handle->getHipblasLtHandle());
@@ -587,7 +586,7 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
                                               sizeof(max_workspace_size)),
         HIPBLAS_STATUS_SUCCESS);
     hipblasLtMatmulHeuristicResult_t heuristicResult;
-    bool solution_query = algo == rocblas_gemm_algo_solution_index
+    bool                             solution_query = algo == rocblas_gemm_algo_solution_index
                           && prob.flags & rocblas_gemm_flags_check_solution_index;
     std::vector<hipblasLtMatmulHeuristicResult_t> heuristicResults;
     if(algo == rocblas_gemm_algo_solution_index && solution_index > 0)
@@ -622,16 +621,16 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
     if(heuristicResult.algo.data[0] != 0)
     {
         EXPECT_HIPBLAS_STATUS(hipblaslt_ext::isSolutionSupported(&heuristicResult,
-                                                                  handle,
-                                                                  matmulDesc,
-                                                                  prob.alpha,
-                                                                  matA,
-                                                                  matB,
-                                                                  prob.beta,
-                                                                  matC,
-                                                                  matD,
-                                                                  &workspaceSize,
-                                                                  &returnedAlgoCount),
+                                                                 handle,
+                                                                 matmulDesc,
+                                                                 prob.alpha,
+                                                                 matA,
+                                                                 matB,
+                                                                 prob.beta,
+                                                                 matC,
+                                                                 matD,
+                                                                 &workspaceSize,
+                                                                 &returnedAlgoCount),
                               HIPBLAS_STATUS_SUCCESS);
     }
     else
@@ -659,14 +658,14 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
     if(prob.alpha != nullptr)
     {
         auto tmp = *prob.alpha;
-        alpha = tmp;
+        alpha    = tmp;
     }
     else
         return rocblas_status_invalid_value;
     if(prob.beta != nullptr)
     {
         auto tmp = *prob.beta;
-        beta = tmp;
+        beta     = tmp;
     }
     else
         return rocblas_status_invalid_value;
@@ -677,7 +676,8 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
         std::vector<Ti*> B(batch_count, nullptr);
         std::vector<To*> C(batch_count, nullptr);
         std::vector<To*> D(batch_count, nullptr);
-        auto addOffset = []<typename T1, typename T2>(std::vector<T1*>& vec, T2* batch_ptr, int batch_count, size_t offset){
+        auto             addOffset = []<typename T1, typename T2>(
+                             std::vector<T1*>& vec, T2* batch_ptr, int batch_count, size_t offset) {
             THROW_IF_HIP_ERROR(hipMemcpy(
                 (void*)(&vec[0]), batch_ptr, sizeof(void*) * batch_count, hipMemcpyDeviceToHost));
             for(int batch = 0; batch < batch_count; batch++)
@@ -703,7 +703,7 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
             addOffset(D, prob.batch_D, batch_count, prob.buffer_offset_d);
         else
             return rocblas_status_invalid_value;
- 
+
         EXPECT_HIPBLAS_STATUS(
             hipblasLtMatmul(handle,
                             matmulDesc,
@@ -751,7 +751,7 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
     EXPECT_HIPBLAS_STATUS(hipblasLtMatmulPreferenceDestroy(pref), HIPBLAS_STATUS_SUCCESS);
     if(workspaceSize > 0)
         THROW_IF_HIP_ERROR(hipFree(workspace));
-#else        
+#else
     bool solution_query = algo == rocblas_gemm_algo_solution_index
                           && prob.flags & rocblas_gemm_flags_check_solution_index;
 
