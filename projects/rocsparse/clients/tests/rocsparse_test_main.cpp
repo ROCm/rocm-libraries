@@ -22,6 +22,7 @@
  *
  * ************************************************************************ */
 
+#include "rocsparse-debugging.h"
 #include "rocsparse_clients_envariables.hpp"
 #include "rocsparse_data.hpp"
 #include "rocsparse_parse_data.hpp"
@@ -120,14 +121,14 @@ int main(int argc, char** argv)
         return status;
     }
 
-    //  rocsparse_hip_debug_reset(handle);
-
     // Get user device id from command line
     int dev = 0;
 
     // Override for showSkipped: -1 = auto, 0 = hide, 1 = show
-    int         showSkippedOverride = -1;
+    int showSkippedOverride = -1;
+#ifdef ROCSPARSE_DEBUGGING
     const char* hip_debug_filename{};
+#endif
     for(int i = 1; i < argc; ++i)
     {
         if(strcmp(argv[i], "--device") == 0 && argc > i + 1)
@@ -150,6 +151,7 @@ int main(int argc, char** argv)
         {
             showSkippedOverride = 0;
         }
+#ifdef ROCSPARSE_DEBUGGING
         else if(strcmp(argv[i], "--test-hip-debug-o") == 0)
         {
             if(i + 1 >= argc || !argv[i + 1][0])
@@ -170,14 +172,16 @@ int main(int argc, char** argv)
             rocsparse_clients_test::hip_debug_t::instance().enable();
             rocsparse_clients_test::hip_debug_t::instance().set_non_permissive(true);
         }
+#endif
     }
 
+#ifdef ROCSPARSE_DEBUGGING
     if(rocsparse_clients_test::hip_debug_t::instance().enabled())
     {
         rocsparse_clients_test::hip_debug_t::instance().set_hip_debug_report_filename(
             (hip_debug_filename) ? hip_debug_filename : "rocsparse_hip_debug.json");
     }
-
+#endif
     // Device query
     int devs;
     if(hipGetDeviceCount(&devs) != hipSuccess)
@@ -313,6 +317,7 @@ int main(int argc, char** argv)
     //
     // Check function properties.
     //
+#ifdef ROCSPARSE_DEBUGGING
     auto& hip_debug = rocsparse_clients_test::hip_debug_t::instance();
     if(hip_debug.enabled())
     {
@@ -331,6 +336,7 @@ int main(int argc, char** argv)
         }
         return ret;
     }
+#endif
 
     auto& reproducibility = rocsparse_reproducibility_t::instance();
     if(reproducibility.config().is_enabled())

@@ -45,7 +45,6 @@ def runCI =
 
         def gfilter = "*quick*:*pre_checkin*"
         commonGroovy.runTestCommand(platform, project, gfilter, true)
-	commonGroovy.runHipDebugTestCommand(platform, project, gfilter)
     }
 
     def packageCommand =

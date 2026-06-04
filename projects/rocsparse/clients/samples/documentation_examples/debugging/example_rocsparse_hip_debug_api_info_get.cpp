@@ -54,7 +54,9 @@ int main()
     rocsparse_handle handle;
     ROCSPARSE_CHECK(rocsparse_create_handle(&handle));
 
+#ifdef ROCSPARSE_DEBUGGING
     ROCSPARSE_CHECK(rocsparse_hip_debug_enable());
+#endif
 
     float *        dx, *dy;
     rocsparse_int* dx_ind;
@@ -64,9 +66,13 @@ int main()
     HIP_CHECK(hipMemset(dx, 0, sizeof(float)));
     HIP_CHECK(hipMemset(dx_ind, 0, sizeof(rocsparse_int)));
 
+#ifdef ROCSPARSE_DEBUGGING
     ROCSPARSE_CHECK(rocsparse_hip_debug_start(handle, p_error));
+#endif
+
     ROCSPARSE_CHECK(rocsparse_sgthr(handle, 1, dy, dx, dx_ind, rocsparse_index_base_zero));
 
+#ifdef ROCSPARSE_DEBUGGING
     int64_t count;
     ROCSPARSE_CHECK(rocsparse_hip_debug_api_info_get(handle,
                                                      rocsparse_hip_debug_api_hipLaunchKernelGGL,
@@ -77,6 +83,7 @@ int main()
 
     fprintf(stdout, "rocsparse_hip_debug_api_hipLaunchKernelGGL: %ld\n", count);
     ROCSPARSE_CHECK(rocsparse_hip_debug_disable());
+#endif
 
     ROCSPARSE_CHECK(rocsparse_destroy_handle(handle));
     return 0;

@@ -24,6 +24,11 @@
 #ifndef ROCSPARSE_HIP_DEBUG_H
 #define ROCSPARSE_HIP_DEBUG_H
 
+//
+// API conditional to the existence of ROCSPARSE_DEBUGGING
+//
+#ifdef ROCSPARSE_DEBUGGING
+
 #include "../../rocsparse-types.h"
 #include "rocsparse/rocsparse-export.h"
 
@@ -211,5 +216,7 @@ ROCSPARSE_EXPORT rocsparse_status rocsparse_hip_debug_info_get(rocsparse_handle 
 #ifdef __cplusplus
 }
 #endif
+
+#endif // ROCSPARSE_DEBUGGING
 
 #endif // ROCSPARSE_SCTR_H

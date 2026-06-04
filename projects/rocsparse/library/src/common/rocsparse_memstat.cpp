@@ -24,7 +24,6 @@
 #ifdef ROCSPARSE_WITH_MEMSTAT
 
 #include "rocsparse_memstat.hpp"
-#include "rocsparse-auxiliary.h"
 #include "rocsparse-types.h"
 #include "rocsparse_control.hpp"
 #include "rocsparse_envariables.hpp"
@@ -85,7 +84,7 @@ static std::string relfilename(const char* tag_)
 
 static double get_time_us(void)
 {
-    std::ignore = rocsparse_hipDeviceSynchronize();
+    std::ignore = hipDeviceSynchronize();
     auto now    = std::chrono::steady_clock::now();
     auto duration
         = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
@@ -342,13 +341,13 @@ hipError_t memstat_allocator<MODE>::install_guards(void* d_, size_t size, void**
             }
 
             // Copy guard to device memory before allocated memory
-            err = rocsparse_hipMemcpy(d, guard, sizeof(guard), kind_transfer);
+            err = hipMemcpy(d, guard, sizeof(guard), kind_transfer);
             if(err != hipSuccess)
             {
                 return err;
             }
 
-            err = rocsparse_hipMemcpy(d + PAD, guard, sizeof(guard), kind_transfer);
+            err = hipMemcpy(d + PAD, guard, sizeof(guard), kind_transfer);
             if(err != hipSuccess)
             {
                 return err;
@@ -358,7 +357,7 @@ hipError_t memstat_allocator<MODE>::install_guards(void* d_, size_t size, void**
             d += 2 * PAD;
 
             // Copy guard to device memory after allocated memory
-            err = rocsparse_hipMemcpy(d + size, guard, sizeof(guard), kind_transfer);
+            err = hipMemcpy(d + size, guard, sizeof(guard), kind_transfer);
             if(err != hipSuccess)
             {
                 return err;
@@ -391,13 +390,13 @@ hipError_t memstat_allocator<MODE>::install_guards_async(void*       d_,
             }
 
             // Copy guard to device memory before allocated memory
-            err = rocsparse_hipMemcpyAsync(d, guard, sizeof(guard), kind_transfer, stream);
+            err = hipMemcpyAsync(d, guard, sizeof(guard), kind_transfer, stream);
             if(err != hipSuccess)
             {
                 return err;
             }
 
-            err = rocsparse_hipMemcpyAsync(d + PAD, guard, sizeof(guard), kind_transfer, stream);
+            err = hipMemcpyAsync(d + PAD, guard, sizeof(guard), kind_transfer, stream);
             if(err != hipSuccess)
             {
                 return err;
@@ -407,7 +406,7 @@ hipError_t memstat_allocator<MODE>::install_guards_async(void*       d_,
             d += 2 * PAD;
 
             // Copy guard to device memory after allocated memory
-            err = rocsparse_hipMemcpyAsync(d + size, guard, sizeof(guard), kind_transfer, stream);
+            err = hipMemcpyAsync(d + size, guard, sizeof(guard), kind_transfer, stream);
             if(err != hipSuccess)
             {
                 return err;
@@ -589,14 +588,14 @@ hipError_t memstat_allocator<MODE>::check_guards(char* d, size_t size)
             }
             char host[PAD], guard[PAD];
             // Copy device memory after allocated memory to host
-            err = rocsparse_hipMemcpy(guard, d - 2 * PAD, sizeof(guard), kind_transfer);
+            err = hipMemcpy(guard, d - 2 * PAD, sizeof(guard), kind_transfer);
             if(err != hipSuccess)
             {
                 return err;
             }
 
             // Copy device memory after allocated memory to host
-            err = rocsparse_hipMemcpy(host, d + size, sizeof(guard), kind_transfer);
+            err = hipMemcpy(host, d + size, sizeof(guard), kind_transfer);
             if(err != hipSuccess)
             {
                 return err;
@@ -612,7 +611,7 @@ hipError_t memstat_allocator<MODE>::check_guards(char* d, size_t size)
             d -= PAD;
 
             // Copy device memory after allocated memory to host
-            err = rocsparse_hipMemcpy(host, d, sizeof(guard), kind_transfer);
+            err = hipMemcpy(host, d, sizeof(guard), kind_transfer);
             if(err != hipSuccess)
             {
                 return err;

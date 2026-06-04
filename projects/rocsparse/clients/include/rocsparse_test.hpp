@@ -373,6 +373,8 @@ struct rocsparse_test_invalid
     }
 };
 
+#ifdef ROCSPARSE_DEBUGGING
 #include "rocsparse_clients_test_hip_debug_wrappers.hpp"
+#endif
 
 #endif // ROCSPARSE_TEST_HPP

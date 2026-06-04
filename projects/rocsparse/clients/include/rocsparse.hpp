@@ -75,7 +75,10 @@
 
 #else
 
+#ifdef ROCSPARSE_DEBUGGING
+
 #include "rocsparse_clients_test_hip_debug_wrappers.hpp"
+
 #define REAL_TEMPLATE(NAME_, ...)                                      \
     template <typename T>                                              \
     using rocsparse_##NAME_##_fn = rocsparse_status (*)(__VA_ARGS__);  \
@@ -117,6 +120,48 @@
     template <>                                                                          \
     inline rocsparse_##NAME_##_fn<rocsparse_double_complex>                              \
         rocsparse_##NAME_<rocsparse_double_complex> = rocsparse_wrap_z##NAME_##_t::apply
+
+#else
+
+#define REAL_TEMPLATE(NAME_, ...)                                                       \
+    template <typename T>                                                               \
+    using rocsparse_##NAME_##_fn = rocsparse_status (*)(__VA_ARGS__);                   \
+    template <typename T>                                                               \
+    inline rocsparse_##NAME_##_fn<T> rocsparse_##NAME_;                                 \
+    template <>                                                                         \
+    inline rocsparse_##NAME_##_fn<float> rocsparse_##NAME_<float> = rocsparse_s##NAME_; \
+    template <>                                                                         \
+    inline rocsparse_##NAME_##_fn<double> rocsparse_##NAME_<double> = rocsparse_d##NAME_
+
+#define COMPLEX_TEMPLATE(NAME_, ...)                                     \
+    template <typename T>                                                \
+    using rocsparse_##NAME_##_fn = rocsparse_status (*)(__VA_ARGS__);    \
+    template <typename T>                                                \
+    inline rocsparse_##NAME_##_fn<T> rocsparse_##NAME_;                  \
+    template <>                                                          \
+    inline rocsparse_##NAME_##_fn<rocsparse_float_complex>               \
+        rocsparse_##NAME_<rocsparse_float_complex> = rocsparse_c##NAME_; \
+    template <>                                                          \
+    inline rocsparse_##NAME_##_fn<rocsparse_double_complex>              \
+        rocsparse_##NAME_<rocsparse_double_complex> = rocsparse_z##NAME_
+
+#define REAL_COMPLEX_TEMPLATE(NAME_, ...)                                                 \
+    template <typename T>                                                                 \
+    using rocsparse_##NAME_##_fn = rocsparse_status (*)(__VA_ARGS__);                     \
+    template <typename T>                                                                 \
+    inline rocsparse_##NAME_##_fn<T> rocsparse_##NAME_;                                   \
+    template <>                                                                           \
+    inline rocsparse_##NAME_##_fn<float> rocsparse_##NAME_<float> = rocsparse_s##NAME_;   \
+    template <>                                                                           \
+    inline rocsparse_##NAME_##_fn<double> rocsparse_##NAME_<double> = rocsparse_d##NAME_; \
+    template <>                                                                           \
+    inline rocsparse_##NAME_##_fn<rocsparse_float_complex>                                \
+        rocsparse_##NAME_<rocsparse_float_complex> = rocsparse_c##NAME_;                  \
+    template <>                                                                           \
+    inline rocsparse_##NAME_##_fn<rocsparse_double_complex>                               \
+        rocsparse_##NAME_<rocsparse_double_complex> = rocsparse_z##NAME_
+
+#endif
 
 #endif
 

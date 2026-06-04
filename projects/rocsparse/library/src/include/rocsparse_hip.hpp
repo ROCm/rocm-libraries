@@ -26,6 +26,31 @@
 
 #include "rocsparse-debugging.h"
 
+#ifndef ROCSPARSE_DEBUGGING
+
+#ifndef ROCSPARSE_WITH_MEMSTAT
+#define rocsparse_hipFree(P_) hipFree((P_))
+#define rocsparse_hipFreeAsync(P_, S_) hipFreeAsync((P_), (S_))
+#define rocsparse_hipMalloc(P, SIZE) hipMalloc(reinterpret_cast<void**>((P)), (SIZE))
+#define rocsparse_hipMallocAsync(P, SIZE, STREAM) \
+    hipMallocAsync(reinterpret_cast<void**>((P)), (SIZE), (STREAM))
+#endif
+#define rocsparse_hipMemcpyAsync(TARGET, SOURCE, SIZE, KIND, STREAM) \
+    hipMemcpyAsync((TARGET), (SOURCE), (SIZE), (KIND), (STREAM))
+#define rocsparse_hipMemcpy(TARGET, SOURCE, SIZE, KIND) \
+    hipMemcpy((TARGET), (SOURCE), (SIZE), (KIND))
+#define rocsparse_hipMemsetAsync(TARGET, VALUE, SIZE, STREAM) \
+    hipMemsetAsync((TARGET), (VALUE), (SIZE), (STREAM))
+#define rocsparse_hipMemset(TARGET, VAKUE, SIZE, KIND) hipMemset((TARGET), (VALUE), (SIZE))
+#define rocsparse_hipDeviceSynchronize() hipDeviceSynchronize()
+#define rocsparse_hipStreamSynchronize(STREAM) hipStreamSynchronize((STREAM))
+#define rocsparse_hipMemcpy2DAsync(TARGET, TPITCH, SOURCE, SPITCH, WIDTH, HEIGHT, KIND, STREAM) \
+    hipMemcpy2DAsync((TARGET), (TPITCH), (SOURCE), (SPITCH), (WIDTH), (HEIGHT), (KIND), (STREAM))
+#define rocsparse_hipLaunchKernelGGL(K, G, T, M, S, ...) \
+    hipLaunchKernelGGL((K), (G), (T), (M), (S), __VA_ARGS__)
+
+#else
+
 namespace rocsparse
 {
     namespace hip
@@ -157,3 +182,5 @@ namespace rocsparse
         rocsparse::hip::tag_hipLaunchKernelGGL(local_S, __FUNCTION__, __FILE__, __LINE__); \
         hipLaunchKernelGGL((K), (G), (T), (M), local_S, __VA_ARGS__);                      \
     } while(false)
+
+#endif

@@ -54,25 +54,30 @@ int main()
     rocsparse_handle handle;
     ROCSPARSE_CHECK(rocsparse_create_handle(&handle));
 
+#ifdef ROCSPARSE_DEBUGGING
     ROCSPARSE_CHECK(rocsparse_hip_debug_enable());
-
+#endif
     float *        dx, *dy;
     rocsparse_int* dx_ind;
-    hipMalloc((void**)&dx, sizeof(float));
-    hipMalloc((void**)&dy, sizeof(float));
-    hipMalloc((void**)&dx_ind, sizeof(rocsparse_int));
-    hipMemset(dx, 0, sizeof(float));
-    hipMemset(dx_ind, 0, sizeof(rocsparse_int));
+    HIP_CHECK(hipMalloc((void**)&dx, sizeof(float)));
+    HIP_CHECK(hipMalloc((void**)&dy, sizeof(float)));
+    HIP_CHECK(hipMalloc((void**)&dx_ind, sizeof(rocsparse_int)));
+    HIP_CHECK(hipMemset(dx, 0, sizeof(float)));
+    HIP_CHECK(hipMemset(dx_ind, 0, sizeof(rocsparse_int)));
+
+#ifdef ROCSPARSE_DEBUGGING
     ROCSPARSE_CHECK(rocsparse_hip_debug_start(handle, p_error));
+#endif
     ROCSPARSE_CHECK(rocsparse_sgthr(handle, 1, dy, dx, dx_ind, rocsparse_index_base_zero));
 
+#ifdef ROCSPARSE_DEBUGGING
     rocsparse_hip_debug_api_history api_history;
     ROCSPARSE_CHECK(rocsparse_hip_debug_info_get(
         handle, rocsparse_hip_debug_info_api, &api_history, sizeof(api_history), p_error));
 
     fprintf(stdout, "api_history: %d\n", api_history);
     ROCSPARSE_CHECK(rocsparse_hip_debug_disable());
-
+#endif
     ROCSPARSE_CHECK(rocsparse_destroy_handle(handle));
     return 0;
 }
