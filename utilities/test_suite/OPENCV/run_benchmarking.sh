@@ -82,11 +82,40 @@ else
 fi
 
 # Build the benchmark
-echo "Step 3: Building benchmark..."
+echo "Step 3: Building benchmark with parallel threads..."
 echo "--------------------------------------"
-rm -rf build
-mkdir -p build
-cd build
+rm -rf build_enabled_pthreads
+mkdir -p build_enabled_pthreads
+cd build_enabled_pthreads
+cmake .. -DENABLE_PARALLEL_THREADS=ON
+make -j$(nproc)
+cd ..
+echo "✓ Build complete"
+echo ""
+
+# Run the benchmark
+echo "========================================"
+echo "Starting Benchmark"
+echo "========================================"
+echo ""
+echo "This will take several minutes..."
+echo "Running 100 iterations of 50+ operations on 128 1080p images"
+echo ""
+
+./build_enabled_pthreads/opencv_vs_rpp_host_benchmarking
+
+echo ""
+echo "========================================"
+echo "Benchmark Complete with parallel threads!"
+echo "========================================"
+
+
+# Build the benchmark
+echo "Step 3: Building benchmark without parallel threads..."
+echo "--------------------------------------"
+rm -rf build_disabled_pthreads
+mkdir -p build_disabled_pthreads
+cd build_disabled_pthreads
 cmake .. -DENABLE_PARALLEL_THREADS=OFF
 make -j$(nproc)
 cd ..
@@ -102,9 +131,9 @@ echo "This will take several minutes..."
 echo "Running 100 iterations of 50+ operations on 128 1080p images"
 echo ""
 
-./build/opencv_vs_rpp_host_benchmarking
+./build_disabled_pthreads/opencv_vs_rpp_host_benchmarking
 
 echo ""
 echo "========================================"
-echo "Benchmark Complete!"
+echo "Benchmark Complete without parallel threads!"
 echo "========================================"
