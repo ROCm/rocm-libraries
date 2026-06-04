@@ -16,6 +16,8 @@
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 
+#include "../TestPlanCommon.hpp"
+
 namespace hip_kernel_provider::batchnorm::test
 {
 
@@ -183,15 +185,6 @@ std::pair<flatbuffers::FlatBufferBuilder, BatchnormFwdTrainingPlan>
     return {std::move(builder), BatchnormFwdTrainingPlan{std::move(params)}};
 }
 
-hipDeviceProp_t createTestDeviceProps(const char* archName = "gfx942")
-{
-    hipDeviceProp_t deviceProps = {};
-    deviceProps.multiProcessorCount = 60;
-    deviceProps.warpSize = 64;
-    std::snprintf(deviceProps.gcnArchName, sizeof(deviceProps.gcnArchName), "%s", archName);
-    return deviceProps;
-}
-
 } // namespace
 
 // ============================================================================
@@ -342,15 +335,35 @@ TEST(TestBatchnormFwdTrainingPlan, CompileDefaultSetsCorrectDefines)
 
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP32=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FP16=0"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_BFP16=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_FPMIX=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_BFPMIX=0"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_SAVE_MEAN_VARIANCE=1"));
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_RUNNING_RESULT=0"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_SAVE_MEAN_VARIANCE=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_RUNNING_RESULT=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_N=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_C=3"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_HW=50176"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_INHW=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_NHW=50176"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_CHW=150528"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_NCHW=150528"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP0_FINAL=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP1_FINAL=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_GRP2_FINAL=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_N_ELEMENTS=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_MAXN=65"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_USE_AMDGCN=0"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LOOP_UNROLL_MAXN=768"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LDS_SIZE=1024"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_VEC_SIZE=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LOOP_UNROLL_MAXHW=2500"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_NODPP=0"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_LDSGCN_SIZE=16"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_USESAVED=0"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_VECTORIZE=0"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_STASH_METHOD=0"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_VARIANT=1"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_NRN_OP_ID=0"));
 }
 
 // NOTE: Missing tests for FP16 and BFP16 mix options since createValidBatchnormFwdTrainingGraph
@@ -453,7 +466,7 @@ TEST(TestBatchnormFwdTrainingPlan, HasNoSaveStatsSetsCorrectDefines)
                != capturedOptions.end();
     };
 
-    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_SAVE_MEAN_VARIANCE=0"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_SAVE_MEAN_VARIANCE=0"));
 }
 
 } // namespace hip_kernel_provider::batchnorm::test

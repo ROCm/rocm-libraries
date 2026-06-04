@@ -10,8 +10,8 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
 #include "BatchnormCommon.hpp"
+#include "BatchnormHipKernelCompileOptions.hpp"
 #include "HipKernelUtils.hpp"
-#include "hip/HipKernelCompileOptions.hpp"
 #include "hip/IKernelCompiler.hpp"
 
 namespace hip_kernel_provider::batchnorm
@@ -31,14 +31,9 @@ struct ProblemDims
     bool useFp16Mix = false;
     bool useBfp16Mix = false;
     bool useFp32 = true;
-    bool isGfx103X = false;
-    bool isGfx110X = false;
-    bool isGfx115X = false;
-    bool isGfx120X = false;
 };
 
-static ProblemDims extractProblemDims(const BatchnormBwdParams& params,
-                                      const hipDeviceProp_t& deviceProperties)
+static ProblemDims extractProblemDims(const BatchnormBwdParams& params)
 {
     ProblemDims dims{};
 
@@ -78,13 +73,6 @@ static ProblemDims extractProblemDims(const BatchnormBwdParams& params,
     dims.inChw = static_cast<unsigned int>(dims.c) * dims.inCstride;
     dims.inNchw = static_cast<unsigned int>(dims.n) * dims.inChw;
     dims.isLayoutNHWC = hip_kernel_utils::isChannelLastLayout(params.x());
-
-    const std::string archName(deviceProperties.gcnArchName);
-    dims.isGfx103X = archName.find("gfx103") == 0;
-    dims.isGfx110X = archName.find("gfx110") == 0;
-    dims.isGfx115X = archName.find("gfx115") == 0;
-    dims.isGfx120X = archName.find("gfx120") == 0;
-
     return dims;
 }
 
@@ -209,7 +197,7 @@ size_t BatchnormBwdPlan::getWorkspaceSize([[maybe_unused]] const HipKernelHandle
 void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
                                const hipDeviceProp_t& deviceProperties)
 {
-    const auto dims = extractProblemDims(_params, deviceProperties);
+    const auto dims = extractProblemDims(_params);
 
     if(_params.optActivation().has_value())
     {
@@ -282,24 +270,20 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
         activationMode = (*_params.optActivation()).mode;
     }
 
-    HipKernelCompileOptions options(_params.x(), deviceProperties, activationMode);
-    options.add("HIP_PLUGIN_USE_FPMIX", dims.useFp16Mix);
-    options.add("HIP_PLUGIN_USE_BFPMIX", dims.useBfp16Mix);
+    BatchnormHipKernelCompileOptions options(_params.x(), deviceProperties, activationMode);
+    options.update("HIP_PLUGIN_USE_FPMIX", dims.useFp16Mix);
+    options.update("HIP_PLUGIN_USE_BFPMIX", dims.useBfp16Mix);
     // Not using FP16 and BFP16 paths due to affine data type requirements
     options.update("HIP_PLUGIN_USE_FP16", 0);
     options.update("HIP_PLUGIN_USE_BFP16", 0);
-    options.add("HIP_PLUGIN_BN_GFX103X", dims.isGfx103X);
-    options.add("HIP_PLUGIN_BN_GFX110X", dims.isGfx110X);
-    options.add("HIP_PLUGIN_BN_GFX115X", dims.isGfx115X);
-    options.add("HIP_PLUGIN_BN_GFX120X", dims.isGfx120X);
-    options.add("HIP_PLUGIN_BN_USESAVED", _usesSavedStats);
-    options.add("HIP_PLUGIN_BN_N", dims.n);
-    options.add("HIP_PLUGIN_BN_C", dims.c);
-    options.add("HIP_PLUGIN_BN_HW", dims.inCstride);
-    options.add("HIP_PLUGIN_BN_NHW", dims.inNhw);
-    options.add("HIP_PLUGIN_BN_CHW", dims.inChw);
-    options.add("HIP_PLUGIN_BN_NCHW", dims.inNchw);
-    options.add("HIP_PLUGIN_BN_VARIANT", _kernelVariant);
+    options.update("HIP_PLUGIN_BN_USESAVED", _usesSavedStats);
+    options.update("HIP_PLUGIN_BN_N", dims.n);
+    options.update("HIP_PLUGIN_BN_C", dims.c);
+    options.update("HIP_PLUGIN_BN_HW", dims.inCstride);
+    options.update("HIP_PLUGIN_BN_NHW", dims.inNhw);
+    options.update("HIP_PLUGIN_BN_CHW", dims.inChw);
+    options.update("HIP_PLUGIN_BN_NCHW", dims.inNchw);
+    options.update("HIP_PLUGIN_BN_VARIANT", _kernelVariant);
 
     if(_kernelVariant != 2)
     {
@@ -312,12 +296,12 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
         xgridsize = dims.c * xlocalsize;
         ldsSize = static_cast<unsigned int>(xlocalsize);
 
-        options.add("HIP_PLUGIN_BN_GRP0", xlocalsize);
-        options.add("HIP_PLUGIN_BN_GRP1", ylocalsize);
-        options.add("HIP_PLUGIN_BN_GRP2", zlocalsize);
-        options.add("HIP_PLUGIN_BN_LDS_SIZE", ldsSize);
-        options.add("HIP_PLUGIN_BN_MAXN", 65);
-        options.add("HIP_PLUGIN_BN_VEC_SIZE", config.vectorsize);
+        options.update("HIP_PLUGIN_BN_GRP0", xlocalsize);
+        options.update("HIP_PLUGIN_BN_GRP1", ylocalsize);
+        options.update("HIP_PLUGIN_BN_GRP2", zlocalsize);
+        options.update("HIP_PLUGIN_BN_LDS_SIZE", ldsSize);
+        options.update("HIP_PLUGIN_BN_MAXN", 65);
+        options.update("HIP_PLUGIN_BN_VEC_SIZE", config.vectorsize);
 
         _compiledProgram = kernelCompiler.compile("BatchNormBwdSpatial.cpp", options);
         _runnableKernels.push_back(_compiledProgram->getKernel("BatchNormBwdSpatial"));
@@ -362,18 +346,19 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
         }
         ldsSize = static_cast<unsigned int>(xlocalsize * ylocalsize * zlocalsize);
 
-        options.add("HIP_PLUGIN_BN_GRP0", xlocalsize);
-        options.add("HIP_PLUGIN_BN_GRP1", ylocalsize);
-        options.add("HIP_PLUGIN_BN_GRP2", zlocalsize);
+        options.update("HIP_PLUGIN_BN_GRP0", xlocalsize);
+        options.update("HIP_PLUGIN_BN_GRP1", ylocalsize);
+        options.update("HIP_PLUGIN_BN_GRP2", zlocalsize);
+        options.update("HIP_PLUGIN_BN_N_ELEMENTS", config.nelements);
+        options.update("HIP_PLUGIN_BN_LDS_SIZE", ldsSize);
+        options.update("HIP_PLUGIN_BN_VEC_SIZE", config.vectorsize);
+        options.update("HIP_PLUGIN_BN_STASH_METHOD", stashMethod);
+
+        options.add("HIP_PLUGIN_BN_NGRPS", ygridsize / ylocalsize);
+        options.add("HIP_PLUGIN_BN_NGRPS2", zgridsize / zlocalsize);
         options.add("HIP_PLUGIN_BN_GRP0_FINAL", xlocalsizeFinal);
         options.add("HIP_PLUGIN_BN_GRP1_FINAL", ylocalsizeFinal);
         options.add("HIP_PLUGIN_BN_GRP2_FINAL", zlocalsizeFinal);
-        options.add("HIP_PLUGIN_BN_NGRPS", ygridsize / ylocalsize);
-        options.add("HIP_PLUGIN_BN_NGRPS2", zgridsize / zlocalsize);
-        options.add("HIP_PLUGIN_BN_N_ELEMENTS", config.nelements);
-        options.add("HIP_PLUGIN_BN_LDS_SIZE", ldsSize);
-        options.add("HIP_PLUGIN_BN_VEC_SIZE", config.vectorsize);
-        options.add("HIP_PLUGIN_BN_STASH_METHOD", stashMethod);
 
         _compiledProgram = kernelCompiler.compile("BatchNormBwdSpatial.cpp", options);
         _runnableKernels.push_back(
