@@ -369,7 +369,7 @@ std::string PointwiseOperationDescriptor::toString() const
            + (_data.softplus_beta ? std::to_string(*_data.softplus_beta) : "nullopt");
     str += ", compute_data_type=";
     str += hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(_computeDataType);
-    str += "}";
+    str += '}';
     return str;
 }
 

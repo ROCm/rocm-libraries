@@ -3,7 +3,11 @@
 
 include(GenerateExportHeader)
 
-# Configure version header
+# Configure version header. Build-time feature flags consumed by
+# #cmakedefine in hipsparse-version.h.in must be set (or unset) prior to
+# this configure_file() call.
+set(HIPSPARSE_WITH_SPMV_BSR ${HIPSPARSE_ENABLE_SPMV_BSR})
+
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/hipsparse-version.h.in"
     "${PROJECT_BINARY_DIR}/include/hipsparse/hipsparse-version.h"
