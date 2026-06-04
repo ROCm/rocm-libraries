@@ -346,7 +346,7 @@ void init_containers(nb::module_ m)
     nb::class_<rocisa::GLOBALModifiers, rocisa::Container>(m_con, "GLOBALModifiers")
         .def(nb::init<int, const rocisa::TemporalHint, const rocisa::CacheScope>(),
              nb::arg("offset") = 0,
-             nb::arg("th")     = 0,
+             nb::arg("th")     = -1,
              nb::arg("scope")  = 0)
         .def("__str__", &rocisa::GLOBALModifiers::toString)
         .def("__deepcopy__",
