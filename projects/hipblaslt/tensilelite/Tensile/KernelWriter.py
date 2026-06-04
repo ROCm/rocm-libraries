@@ -2988,6 +2988,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     module.addComment2("End setupNewTile")
 
+    if kernel["enableTDMA"] or kernel["enableTDMB"]:
+      self.states.tokenMgr.verifyTokens(module, "prefetch (setupNewTile)", self.states.kernelName)
     return module
 
   ##############################################################################
@@ -3524,6 +3526,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
         NLLindexLast = (NLLindex == NLLnum - 1)
         module.add(self.closeLoop(kernel, tensorParametersA, tensorParametersB, -2, finalLoop, skipCondJumpCounter=u, NLLindexLast=NLLindexLast))
 
+    if kernel["enableTDMA"] or kernel["enableTDMB"]:
+      self.states.tokenMgr.verifyTokens(module, "noLoadLoopBody", self.states.kernelName)
     return module
 
   ##############################################################################
@@ -4413,6 +4417,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # initC (no EPS, no HalfPLR): closeLoop(finalLoop=False) does dec + exit-check
           module.add(self.closeLoop(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx, finalLoop=False, oddLabel=False))
 
+    if kernel["enableTDMA"] or kernel["enableTDMB"]:
+      self.states.tokenMgr.verifyTokens(module, "loopBody", self.states.kernelName)
     return module
 
   ##############################################################################
