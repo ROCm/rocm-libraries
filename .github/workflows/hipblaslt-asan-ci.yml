@@ -373,13 +373,15 @@ jobs:
 
       - name: Driver / GPU sanity check
         timeout-minutes: 3
-        # Informational only — must never block the smoke test. Do NOT put the
-        # dist's amd-smi on PATH: `amd-smi static` hangs in this container and
-        # trips the timeout (print_driver_gpu_info.py's own TODO #2964). Left off
-        # PATH, the script logs the tools as absent and returns 0 in seconds.
-        # `|| true` is belt-and-suspenders so a sanity probe can't fail the job.
         run: |
-          python3 ./build_tools/print_driver_gpu_info.py || true
+          # Use python3: the no_rocm container ships python3 (not a `python`
+          # alias; the old setup_test_environment venv used to provide that).
+          # The dist tree ships amd-smi + rocminfo, so put them and their libs
+          # on the path for a real readout (the script returns 0 even if a tool
+          # is missing, so this stays non-fatal).
+          export PATH="${GITHUB_WORKSPACE}/build/bin:${PATH}"
+          export LD_LIBRARY_PATH="${GITHUB_WORKSPACE}/build/lib:${LD_LIBRARY_PATH:-}"
+          python3 ./build_tools/print_driver_gpu_info.py
 
       - name: ASAN runtime environment
         # ASAN_OPTIONS aligns with hipBLASLt's own test harness
