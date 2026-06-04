@@ -1608,12 +1608,13 @@ static bool DimensionSplitInField(size_t length, size_t dimIdx, const rocfft_fie
 
 // Construct a single-device execPlan - fill out the provided
 // execPlan with nodes to implement the FFT.
-template <bool probe_solution_map = true>
-rocfft_plan_t::BuildSingleDevicePlan(NodeMetaData&                  rootPlanData,
-                                     rocfft_location_t              location,
-                                     const std::optional<LoadOps>&  loadOps,
-                                     const std::optional<StoreOps>& storeOps,
-                                     bool                           partOfMultiPlan)
+template <bool probe_solution_map>
+std::unique_ptr<ExecPlan>
+    rocfft_plan_t::BuildSingleDevicePlan(NodeMetaData&                  rootPlanData,
+                                         rocfft_location_t              location,
+                                         const std::optional<LoadOps>&  loadOps,
+                                         const std::optional<StoreOps>& storeOps,
+                                         bool                           partOfMultiPlan)
 {
     const auto local_comm_rank = desc.get_local_comm_rank();
 
