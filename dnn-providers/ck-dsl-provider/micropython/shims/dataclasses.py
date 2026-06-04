@@ -107,7 +107,10 @@ def _make_eq(fields):
 
     def __eq__(self, other):
         if type(self) is not type(other):
-            return NotImplemented
+            # CPython returns NotImplemented here to defer to other.__eq__;
+            # MicroPython has no NotImplemented builtin, and the shim compares by
+            # exact type anyway, so a mismatched type is simply not equal.
+            return False
         for n in names:
             if getattr(self, n) != getattr(other, n):
                 return False

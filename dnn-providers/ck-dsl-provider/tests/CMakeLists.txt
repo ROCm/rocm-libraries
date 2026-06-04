@@ -16,6 +16,7 @@ add_executable(
     CompileServiceBridgeTest.cpp
     DeviceArchTest.cpp
     EmbeddedInterpreterTest.cpp
+    ShimBehaviorTest.cpp
     ConvImplicitGemmAdapterTest.cpp
     ConvImplicitGemmPlanBuilderTest.cpp
     GraphSignatureTest.cpp
