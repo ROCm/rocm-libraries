@@ -1198,6 +1198,9 @@ class GlobalWriteBatchWriter:
           # the elementSumIdx has indicated the VGPRs from LSU.
           # Don't use the ValuC prefix here.
           enableValuC = False
+        elif enableValuC:
+          # elementSumIdx is an absolute vgpr index; ValuC+N uses offset from startVgprValu.
+          gradientInput = gradientInput - self.parentWriter.states.c.startVgprValu
       if self.kernel["ActivationFuncCall"]:
         if (activationCDataType == self.kernel["ProblemType"]["DestDataType"]) and \
           (activationCDataType != self.kernel["ProblemType"]["ComputeDataType"]) and ((self.kernel["ProblemType"]["UseScaleCD"] == False) or (self.kernel["ProblemType"]["UseScaleAlphaVec"] == False)):
