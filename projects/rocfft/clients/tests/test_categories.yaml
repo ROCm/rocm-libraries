@@ -56,3 +56,4 @@ execution_settings:
     standard: 3600       # 1 hour  
     comprehensive: 14400 # 4 hours 
     full: 43200          # 12 hours 
+    ffm-quick: 7200      # 2 hours
