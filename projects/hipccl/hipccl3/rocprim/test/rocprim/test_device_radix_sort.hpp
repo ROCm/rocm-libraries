@@ -1291,17 +1291,8 @@ inline void sort_keys_large_sizes()
 
     hipStream_t stream = 0;
 
-    // Currently, CI enforces a hard limit of 96 GB on memory allocations.
-    // Temporarily use sizes that will require less space than the limit.
-    // On Windows, sizes above 2^34 (that are still under the 96 GB limit)
-    // can hang due to issues that we can't currently catch by examining
-    // the hipMalloc return value or querying available memory. Workaround
-    // this for now by setting a different maximum size for that platform.
-#if defined(_WIN32)
-    const size_t max_pow2 = 34;
-#else
     const size_t max_pow2 = 35;
-#endif
+
     rocprim::detail::target_arch arch;
     HIP_CHECK(rocprim::detail::host_target_arch(stream, arch));
 
@@ -1310,18 +1301,9 @@ inline void sort_keys_large_sizes()
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
-        // QA is also testing on APU platforms with only 32GB of system memory
-        // shared amongst the host and device.  Trim maximum size under these
-        // conditions.  This is a temporary coding workaround until we come up
-        // with a properly-engineered memory management system for the unit tests.
-        bool is_apu = test_utils::is_apu(arch);
-        if (is_apu && test_utils::get_total_system_memory(true) <= test_utils::minimum_memory_required_bytes
-            && size >= (size_t{1} << 33))
-        {
-            std::cout << "Insufficient APU sytstem memory. Skipping test for size = " << size << std::endl;
-            break;
-        }
+        test_utils::MemCheck memcheck;
 
+        MEMCHECK_OR_BREAK_ALLOC_DEVICE(key_type, size)
         common::device_ptr<key_type> d_keys;
         if(!d_keys.resize_with_memory_check(size))
         {
@@ -1330,6 +1312,7 @@ inline void sort_keys_large_sizes()
         }
 
         // Generate data
+        MEMCHECK_OR_BREAK_ALLOC_HOST(key_type, size)
         std::vector<key_type> keys_input(size);
         std::iota(keys_input.begin(), keys_input.end(), 0);
         d_keys.store(keys_input);
@@ -1343,8 +1326,9 @@ inline void sort_keys_large_sizes()
                                            start_bit,
                                            end_bit,
                                            stream));
-
         ASSERT_GT(temporary_storage_bytes, 0U);
+
+        MEMCHECK_OR_BREAK_ALLOC_DEVICE_BYTES(temporary_storage_bytes)
         common::device_ptr<void> d_temporary_storage;
         if(!d_temporary_storage.resize_with_memory_check(temporary_storage_bytes))
         {
@@ -1361,6 +1345,7 @@ inline void sort_keys_large_sizes()
                                            end_bit,
                                            stream));
 
+        MEMCHECK_OR_BREAK_ALLOC_HOST_BYTES(d_keys.msize())
         const auto keys_output = d_keys.load();
 
         // Check if output values are as expected
