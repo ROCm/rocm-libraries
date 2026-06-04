@@ -873,7 +873,7 @@ std::string SdpaFwdOperationDescriptor::toString() const
     str += ", implementation=" + std::to_string(static_cast<int>(_data.implementation));
     str += ", compute_data_type=";
     str += hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(_computeDataType);
-    str += "}";
+    str += '}';
     return str;
 }
 
