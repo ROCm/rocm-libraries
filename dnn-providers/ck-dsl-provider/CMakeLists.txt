@@ -58,7 +58,7 @@ find_package(hip REQUIRED)
 # pybind11. ck_dsl + ck_dsl_provider are frozen into a static library
 # (libckdsl_micropython.a) that the plugin links; comgr is exposed to the
 # interpreter as a native module. See cmake/CkDslMicroPython.cmake and
-# micropython/build_embed.sh. The actual setup happens after the ck_dsl Python
+# micropython/build_embed.py. The actual setup happens after the ck_dsl Python
 # paths are resolved (below), then is consumed by src/CMakeLists.txt.
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/CkDslMicroPython.cmake)
 
@@ -99,7 +99,7 @@ file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
 
 # Resolve absolute paths to the in-tree ck_dsl Python package and the
 # provider-local ck_dsl_provider package. These feed the MicroPython freeze
-# pipeline (build_embed.sh) so it transforms + freezes the right trees.
+# pipeline (build_embed.py) so it transforms + freezes the right trees.
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/CkDslProviderPaths.cmake)
 ck_dsl_provider_resolve_python_paths()
 

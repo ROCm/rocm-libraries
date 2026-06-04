@@ -10,7 +10,7 @@ import os
 import shutil
 import sys
 
-# Paths are supplied by the CMake freeze pipeline (build_embed.sh) via the environment:
+# Paths are supplied by the CMake freeze pipeline (build_embed.py) via the environment:
 #   BUNDLE_DIR - transformed bundle (ck_dsl + ck_dsl_provider) from build_bundle.py
 #   SHIMS_DIR  - vendored shims/ (functools/itertools/etc. the embed port lacks)
 #   FROZEN_DIR - output dir for the frozen module set

@@ -59,8 +59,8 @@ add_dependencies(ck_dsl_provider_private ${CKDSL_MPY_BUILD_TARGET})
 target_link_libraries(
     ck_dsl_provider_private
     PUBLIC hipdnn_plugin_sdk hipdnn_data_sdk hipdnn_flatbuffers_sdk ck_dsl_provider_impl
-           "$<LINK_LIBRARY:WHOLE_ARCHIVE,${CKDSL_MPY_STATIC_LIB}>" ${CKDSL_MPY_COMGR_LIB} m
-           ${CMAKE_DL_LIBS}
+           "$<LINK_LIBRARY:WHOLE_ARCHIVE,${CKDSL_MPY_STATIC_LIB}>" ${CKDSL_MPY_COMGR_LIB}
+           $<$<NOT:$<PLATFORM_ID:Windows>>:m> ${CMAKE_DL_LIBS}
 )
 
 # Shared library: the actual plugin loaded at runtime by hipDNN.
@@ -74,12 +74,15 @@ target_link_libraries(
 # Link the embedded-MicroPython archive whole: the frozen-module table and the
 # native `comgr` module's MP_REGISTER_MODULE record are reached only via
 # generated tables / the import machinery, so members must not be dropped by the
-# archive's pull-on-demand resolution. --exclude-libs=ALL (below) still hides
-# every one of these symbols from the plugin's dynamic export.
+# archive's pull-on-demand resolution. The $<LINK_LIBRARY:WHOLE_ARCHIVE,...>
+# generator expression emits the right flag per linker (GNU --whole-archive,
+# lld/MSVC /WHOLEARCHIVE) so this also works on Windows. --exclude-libs=ALL
+# (below, non-Windows) still hides these symbols from the dynamic export; libm is
+# Unix-only (math is in the CRT on Windows).
 target_link_libraries(
     ck_dsl_provider_plugin
-    PRIVATE -Wl,--whole-archive ${CKDSL_MPY_STATIC_LIB} -Wl,--no-whole-archive
-            ${CKDSL_MPY_COMGR_LIB} m ${CMAKE_DL_LIBS}
+    PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,${CKDSL_MPY_STATIC_LIB}>"
+            ${CKDSL_MPY_COMGR_LIB} $<$<NOT:$<PLATFORM_ID:Windows>>:m> ${CMAKE_DL_LIBS}
 )
 
 if(NOT WIN32)

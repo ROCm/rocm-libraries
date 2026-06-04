@@ -4,7 +4,7 @@
 # Build the embedded-MicroPython static library the provider links instead of
 # CPython/pybind11. The heavy lifting (MicroPython checkout, mpy-cross, the
 # ck_dsl bundle transform, module freezing, and compiling the embed C sources)
-# lives in micropython/build_embed.sh; this module wraps it in a CMake custom
+# lives in micropython/build_embed.py; this module wraps it in a CMake custom
 # command so the .a is (re)built as part of the normal build graph.
 #
 # Sets in the caller's scope:
@@ -13,7 +13,7 @@
 #   CKDSL_MPY_INCLUDE_DIRS  include dirs for TUs that touch the MicroPython API
 #   CKDSL_MPY_COMGR_LIB     resolved libamd_comgr to link
 #   CKDSL_MPY_COMPILE_DEFS  compile definitions every MicroPython-API TU must see
-#                           (must match what build_embed.sh compiles the .a with)
+#                           (must match what build_embed.py compiles the .a with)
 #
 # Distribution toggle (plan §module-loading): CKDSL_MICROPYTHON_MODE selects how
 # ck_dsl ships:
@@ -31,7 +31,7 @@ set(CKDSL_MICROPYTHON_MODE "frozen" CACHE STRING
 set_property(CACHE CKDSL_MICROPYTHON_MODE PROPERTY STRINGS frozen py mpy)
 
 # Optional pre-existing MicroPython checkout (offline / reproducible builds).
-# When unset, build_embed.sh clones the pinned commit under the build dir.
+# When unset, build_embed.py clones the pinned commit under the build dir.
 set(CKDSL_MICROPYTHON_DIR "" CACHE PATH
     "Existing MicroPython source checkout (empty = clone pinned commit)")
 
@@ -47,7 +47,11 @@ function(ck_dsl_provider_configure_micropython)
     endif()
     message(STATUS "CK DSL provider MicroPython mode: ${CKDSL_MICROPYTHON_MODE}")
 
-    find_program(BASH_PROGRAM bash REQUIRED)
+    # The embed build is a cross-platform Python driver (no bash, no GNU make),
+    # so it works on Windows. Python is already a build-time requirement.
+    if(NOT Python3_EXECUTABLE)
+        find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    endif()
     find_library(CKDSL_AMD_COMGR_LIBRARY amd_comgr REQUIRED
                  HINTS ${ROCM_PATH}/lib ${ROCM_PATH}/lib64)
     message(STATUS "CK DSL provider amd_comgr: ${CKDSL_AMD_COMGR_LIBRARY}")
@@ -66,10 +70,9 @@ function(ck_dsl_provider_configure_micropython)
         "${CK_DSL_PYTHON_PACKAGE_PATH}/ck_dsl/*.py"
         "${CK_DSL_PROVIDER_PYTHON_PACKAGE_PATH}/ck_dsl_provider/*.py")
     set(_deps
-        "${_root}/micropython/build_embed.sh"
+        "${_root}/micropython/build_embed.py"
         "${_root}/micropython/build_bundle.py"
         "${_root}/micropython/build_frozen.py"
-        "${_root}/micropython/gen.mk"
         "${_root}/micropython/manifest.py"
         "${_root}/src/micropython/comgr_compile.c"
         "${_root}/src/micropython/comgr_compile.h"
@@ -116,7 +119,7 @@ function(ck_dsl_provider_configure_micropython)
     add_custom_command(
         OUTPUT "${_lib}"
         COMMAND ${CMAKE_COMMAND} -E env ${_env}
-                ${BASH_PROGRAM} "${_root}/micropython/build_embed.sh"
+                ${Python3_EXECUTABLE} "${_root}/micropython/build_embed.py"
         DEPENDS ${_deps}
         COMMENT "Building embedded MicroPython static library (${CKDSL_MICROPYTHON_MODE})"
         VERBATIM
@@ -140,7 +143,7 @@ function(ck_dsl_provider_configure_micropython)
     set(CKDSL_MPY_BUNDLE_DIR "${_bundleDir}" PARENT_SCOPE)
     set(CKDSL_MPY_BUNDLE_INSTALL_DIRNAME "${_bundleInstallDirname}" PARENT_SCOPE)
 
-    # mpy-cross built by build_embed.sh (in CKDSL_MICROPYTHON_DIR if given, else the
+    # mpy-cross built by build_embed.py (in CKDSL_MICROPYTHON_DIR if given, else the
     # cloned checkout under the build dir). The compat lint uses it to compile-check
     # every module with the real MicroPython compiler when it is available.
     if(CKDSL_MICROPYTHON_DIR)

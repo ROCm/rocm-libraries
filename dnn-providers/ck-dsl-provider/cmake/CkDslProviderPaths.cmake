@@ -7,7 +7,7 @@
 #   2. The provider-local ck_dsl_provider Python package
 #      (dnn-providers/ck-dsl-provider/python/).
 #
-# These paths feed the MicroPython freeze pipeline (micropython/build_embed.sh
+# These paths feed the MicroPython freeze pipeline (micropython/build_embed.py
 # via cmake/CkDslMicroPython.cmake): build_bundle.py transforms these two trees
 # and build_frozen.py freezes the resulting closure into the plugin, so ck_dsl
 # resolves with no filesystem / sys.path at runtime.

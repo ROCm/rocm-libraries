@@ -275,11 +275,18 @@ How `ck_dsl` ships into the plugin is selected at configure time with
 | `mpy` | pre-compiled `.mpy` bytecode beside the plugin | Like `py`, but smaller / faster to load. |
 
 All three modes are built from the same source by the embed build
-(`micropython/build_embed.sh`, wired via `cmake/CkDslMicroPython.cmake`).
-The on-disk modes load through the embed port's filesystem importer; the
-bundle path is baked at build time and a relocating install would
-override it. `CKDSL_MICROPYTHON_DIR` can point the build at an existing
-MicroPython checkout instead of cloning the pinned commit.
+(`micropython/build_embed.py`, wired via `cmake/CkDslMicroPython.cmake`).
+That driver is a **cross-platform Python script** — it needs only Python
+and a C compiler (no `bash`, no GNU `make`), so it builds on Windows as
+well as Linux/macOS. It drives MicroPython's own build tools directly to
+generate the qstr/genhdr headers and (frozen mode) `frozen_content.c`.
+`mpy-cross` (needed by `frozen`/`mpy`, not `py`) is taken from a
+build-supplied binary, then `pip install mpy-cross`, then a native build,
+in that order. The on-disk modes load through the embed port's filesystem
+importer and are installed beside the plugin (resolved at runtime via
+`dladdr`). `CKDSL_MICROPYTHON_DIR` can point the build at an existing
+MicroPython checkout instead of cloning the pinned commit; `MPY_CROSS` /
+`CKDSL_MPY_CROSS_BIN` can supply an explicit `mpy-cross`.
 
 The `ck_dsl` source is kept directly MicroPython-compatible (it is no
 longer rewritten at build time): every `@dataclass` field is explicit

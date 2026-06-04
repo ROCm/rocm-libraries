@@ -13,7 +13,7 @@
 import os
 import shutil
 
-# Paths supplied by the CMake freeze pipeline (build_embed.sh) via the environment.
+# Paths supplied by the CMake freeze pipeline (build_embed.py) via the environment.
 SRC = os.environ["CK_DSL_SRC"]
 PROVIDER_SRC = os.environ["CK_DSL_PROVIDER_SRC"]
 BUNDLE_DIR = os.environ["BUNDLE_DIR"]

@@ -69,7 +69,7 @@
 #define MICROPY_COMP_RETURN_IF_EXPR (1)
 #endif
 
-// extmod modules ck_dsl needs (compiled in via build.sh, scanned via gen.mk).
+// extmod modules ck_dsl needs (compiled in via build_embed.py).
 #define MICROPY_PY_RE (1)
 #define MICROPY_PY_RE_MATCH_GROUPS (1)
 #define MICROPY_PY_RE_MATCH_SPAN_START_END (1)
