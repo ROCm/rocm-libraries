@@ -390,10 +390,12 @@ typedef enum rocblaslt_matmul_desc_attributes_
     ROCBLASLT_MATMUL_DESC_BIAS_BATCH_STRIDE          = 23,
     ROCBLASLT_MATMUL_DESC_A_SCALE_MODE               = 31,
     ROCBLASLT_MATMUL_DESC_B_SCALE_MODE               = 32,
+    ROCBLASLT_MATMUL_DESC_SM_COUNT_TARGET            = 33,
     ROCBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT   = 100,
     ROCBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_B_EXT,
     ROCBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT,
     ROCBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT,
+    ROCBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT    = 104,
     ROCBLASLT_MATMUL_DESC_MAX,
 } rocblaslt_matmul_desc_attributes;
 
@@ -409,7 +411,8 @@ typedef enum rocblaslt_matmul_preference_attributes_
 {
     ROCBLASLT_MATMUL_PREF_SEARCH_MODE         = 0,
     ROCBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES = 1,
-    ROCBLASLT_MATMUL_PREF_MAX                 = 2
+    ROCBLASLT_MATMUL_PREF_SM_COUNT_TARGET     = 2,
+    ROCBLASLT_MATMUL_PREF_MAX                 = 3
 } rocblaslt_matmul_preference_attributes;
 
 /********************************************************************************
