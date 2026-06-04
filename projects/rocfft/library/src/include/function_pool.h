@@ -29,6 +29,7 @@
 #include "../device/kernels/common.h"
 #include "function_map_key.h"
 #include <functional>
+#include <map>
 #include <optional>
 #include <sstream>
 #include <unordered_map>
@@ -108,9 +109,6 @@ struct FFTKernel
 
     PartialPassParams pp_params;
 
-    std::optional<size_t> batch_low;
-    std::optional<size_t> batch_high;
-
     FFTKernel()                 = default;
     FFTKernel(const FFTKernel&) = default;
 
@@ -129,9 +127,7 @@ struct FFTKernel
               unsigned int                off_dim            = 0,
               unsigned int                pp_tpt             = 0,
               std::vector<unsigned int>&& pp_factors_curr    = std::vector<unsigned int>(),
-              std::vector<unsigned int>&& pp_factors_other   = std::vector<unsigned int>(),
-              std::optional<size_t>&&     batch_low          = std::nullopt,
-              std::optional<size_t>&&     batch_high         = std::nullopt)
+              std::vector<unsigned int>&& pp_factors_other   = std::vector<unsigned int>())
         : factors(factors)
         , transforms_per_block(tpb)
         , workgroup_size(wgs)
@@ -141,8 +137,6 @@ struct FFTKernel
         , direct_to_from_reg(direct_to_from_reg)
         , aot_rtc(aot_rtc)
         , pp_params(scheme, current_dim, off_dim, pp_tpt, pp_factors_curr, pp_factors_other)
-        , batch_low(batch_low)
-        , batch_high(batch_high)
     {
     }
 
@@ -154,8 +148,6 @@ struct FFTKernel
         , use_3steps_large_twd(config.use_3steps_large_twd)
         , half_lds(config.half_lds)
         , direct_to_from_reg(config.direct_to_from_reg)
-        , batch_low(config.batch_low)
-        , batch_high(config.batch_high)
     {
     }
 
@@ -169,15 +161,13 @@ struct FFTKernel
         config.half_lds              = half_lds;
         config.direct_to_from_reg    = direct_to_from_reg;
         config.factors               = factors;
-        config.batch_low             = batch_low;
-        config.batch_high            = batch_high;
 
         return config;
     }
 };
 
-typedef std::unordered_multimap<FMKey, FMKey, SimpleHash>       FPKeyMap;
-typedef std::unordered_multimap<PPFMKey, PPFMKey, SimpleHashPP> PPFPKeyMap;
+typedef std::unordered_multimap<FMKey, FMKey, SimpleHash> FPKeyMap;
+typedef std::multimap<PPFMKey, PPFMKey>                   PPFPKeyMap;
 
 typedef std::unordered_multimap<FMKey, FFTKernel, SimpleHash>                    FPMap;
 typedef std::unordered_multimap<PPFMKey, std::array<FFTKernel, 2>, SimpleHashPP> PPFPMap;
@@ -233,37 +223,28 @@ class function_pool
     {
         // NOTE: The kernels obtainable from equal_range(key) are guaranteed to have non-overlapping
         // batch ranges. This is enforced by the kernel-generator.py script. So we can simply check
-        // if the input batch is within the range of the kernel. If the input batch is not within range
-        //  but there is a kernel that matches the key and has no specified batch_low and batch_high,
-        // then we return the key to that kernel.
-        auto range = fmap.equal_range(key);
-        auto best  = fmap.end();
-        for(auto it = range.first; it != range.second; ++it)
+        // if the input batch is within the range stored in each mapped key. If the input batch is
+        // not within range but there is a kernel that matches the key and has no specified batch
+        // range, then we return the key to that kernel.
+        auto key_copy      = key;
+        key_copy.batch_low = key_copy.batch_high = batch;
+        const auto end                           = fmap.upper_bound(key_copy);
+        auto       start                         = fmap.lower_bound(key_copy);
+        if(start != fmap.begin())
+            start--;
+
+        auto best = fmap.end();
+        auto cc   = 0;
+        for(auto it = start; it != end; ++it)
         {
-            if((it->second.kernel_config_1.batch_low != it->second.kernel_config_2.batch_low)
-               || (it->second.kernel_config_1.batch_high != it->second.kernel_config_2.batch_high))
-                throw std::runtime_error(
-                    "Batch low and high values for the two partial-pass kernels "
-                    "are not the same");
-
-            // get batch configuration from the pair
-            const auto batch_low  = it->second.kernel_config_1.batch_low;
-            const auto batch_high = it->second.kernel_config_1.batch_high;
-
-            // check if the input batch is within the range of the kernel
-            if((batch_low.has_value() || batch_high.has_value())
-               && ((batch_low.has_value() ? batch >= batch_low.value() : true)
-                   && (batch_high.has_value() ? batch <= batch_high.value() : true)))
+            std::cout << "batch = " << batch << ", cc = " << cc++ << std::endl;
+            // check if the input batch is within the mapped key's batch range
+            if(!key_copy.is_included_in_range_of(it->second))
+                continue;
+            std::cout << "\tincluded " << std::endl;
+            if(best == fmap.end() || it->second.batch_range() < best->second.batch_range())
             {
-                // found exact match within the range
-                best = it;
-                break; // return the best kernel
-            }
-            else if(!batch_low.has_value() && !batch_high.has_value())
-            {
-                // currently the best match, but may need to check
-                // other kernels to see if there is an exact match
-                // within the range
+                // better match found
                 best = it;
             }
         }
@@ -529,6 +510,8 @@ static void insert_default_entry(const PPFMKey&   def_key,
 
     simple_key.kernel_config_1 = KernelConfig::EmptyConfig();
     simple_key.kernel_config_2 = KernelConfig::EmptyConfig();
+    simple_key.batch_low       = 1;
+    simple_key.batch_high      = std::numeric_limits<unsigned int>::max();
 
     def_key_pool.emplace(simple_key, def_key_with_lds);
 

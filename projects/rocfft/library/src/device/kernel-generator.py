@@ -64,6 +64,9 @@ LaunchParams = namedtuple(
     ]
 )  # load from global mem to registers directly and store from registers to global mem.
 
+BATCH_LOW_DEFAULT = 1
+BATCH_HIGH_DEFAULT = 2**32 - 1
+
 #
 # CMake helpers
 #
@@ -119,8 +122,9 @@ def merge_kernel_list(kernels, all_precisions):
 
     get_batch_range = lambda kernel: range(
         kernel.batch_low
-        if hasattr(kernel, 'batch_low') else 1, kernel.batch_high
-        if hasattr(kernel, 'batch_high') else sys.maxsize)
+        if hasattr(kernel, 'batch_low') else BATCH_LOW_DEFAULT,
+        kernel.batch_high
+        if hasattr(kernel, 'batch_high') else BATCH_HIGH_DEFAULT)
 
     is_empty_batch = lambda kernel: (not hasattr(kernel, 'batch_low') and
                                      not hasattr(kernel, 'batch_high'))
@@ -316,15 +320,6 @@ class FFTKernel(BaseNode):
                                    None)
         if pp_factors_other is not None:
             f += ', {' + cjoin(pp_factors_other) + '}'
-        batch_low = getattr(self.function.meta, 'batch_low', None)
-        batch_high = getattr(self.function.meta, 'batch_high', None)
-        if batch_low is None and batch_high is not None:
-            f += ', ' + 'std::nullopt' + ', ' + str(batch_high)
-        else:
-            if batch_low is not None:
-                f += ', ' + str(batch_low)
-            if batch_high is not None:
-                f += ', ' + str(batch_high)
         f += ')'
         return f
 
@@ -464,14 +459,20 @@ def generate_cpu_function_pool_pieces(functions, pp_functions, num_files):
             transform_type = f_pp_1.meta.transform_type
             scheme = f_pp_1.meta.scheme
             arch_name = f_pp_1.meta.gcn_arch_name
+            batch_low = getattr(f_pp_1.meta, 'batch_low', None)
+            batch_high = getattr(f_pp_1.meta, 'batch_high', None)
+
+            pp_key_args = [length[0], length[1], length[2], precisions[precision],
+                transform_types[transform_type],
+                scheme,
+                batch_low if batch_low is not None else BATCH_LOW_DEFAULT,
+                batch_high if batch_high is not None else BATCH_HIGH_DEFAULT,
+                'pp_kernel_1.get_kernel_config()', 'pp_kernel_2.get_kernel_config()',
+                ''.join(['"', arch_name, '"'])]
+            
+
             key = Call(name='PPFMKey',
-                       arguments=ArgumentList(
-                           length[0], length[1], length[2],
-                           precisions[precision],
-                           transform_types[transform_type], scheme,
-                           'pp_kernel_1.get_kernel_config()',
-                           'pp_kernel_2.get_kernel_config()',
-                           ''.join(['"', arch_name, '"']))).inline()
+                       arguments=ArgumentList(*pp_key_args)).inline()
             piece_contents[curr_file] += function_map.insert_pp(
                 key, var_pp_kernel_1, var_pp_kernel_2, 'std::get<1>(def_keys)',
                 'std::get<1>(function_maps)', f_pp_1.meta.lds_size_bytes)
