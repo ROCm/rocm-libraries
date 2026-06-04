@@ -1,8 +1,18 @@
 # MXFP8 SubtileImpl tail-loop sweep.
 #
+#
 # Mirrors the F4BS TN tail sweep in subtile_mxfp4.yaml on the MXFP8
 # MT128x128 path: K = 32..512 step 32 (MX block granularity) at M=N=256,
-# DepthU in {256, 512}, PGR in {0, 1, 2}, PLR in {0, 1}.
+# DepthU in {256, 512}, PGR in {0, 1, 2}, PLR in {0, 1}.#
+# v3 base verification (2026-06-03, gfx950, host build_tmp tensilelite-client):
+#   branch:  users/bnemanich/mxfp8-on-tl-multiple-du-2-v3
+#   base:    origin/users/maemmett/tl-multiple-du-2 = 771c7db7313
+#            "Fix subtile_mxfp8 regressions from mis-gated VGPR free-list allocation"
+#            (PR 7781 with PR 7656 absorbed upstream; the previously-documented
+#             MT256x256 PLR=0 multi-DU vgprs=289 codegen-overflow is RESOLVED
+#             on this base.)
+#   result:
+#     subtile_mxfp8_tail_loop.yaml — 96/96 PASS (full PGR×PLR×K tail-loop sweep).
 
 TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250]
