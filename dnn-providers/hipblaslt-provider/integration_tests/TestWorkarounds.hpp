@@ -53,7 +53,7 @@
 #define HIPBLASLT_GFX12_FP16_TT_BIAS_SKIP_MSG                                    \
     "[hipBLASLt gfx12 FP16 T-T + bias] hipblasLtMatmulAlgoGetHeuristic returns " \
     "no solutions for FP16 with transA=T, transB=T and any bias-fused "          \
-    "epilogue on gfx12 — see "                                                   \
+    "epilogue on gfx12 — see "                                                 \
     "https://github.com/ROCm/rocm-libraries/issues/8033"
 
 namespace hipblaslt_plugin::test_utilities
