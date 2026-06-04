@@ -588,9 +588,8 @@ struct WeightPreshufflePipelineAGmemBGmemCRegV2
             const auto smem01 = make_array(reinterpret_cast<uint8_t*>(p_smem_ping),
                                            reinterpret_cast<uint8_t*>(p_smem_pong));
 
-            constexpr index_t NumLdsBuffers = DoubleSmemBuffer ? 2 : 1;
-            static_assert(!Problem::Async || DoubleSmemBuffer,
-                          "Async preshuffle pipeline requires double LDS buffering.");
+            constexpr index_t NumLdsBuffers = 2;
+            static_assert(DoubleSmemBuffer, "preshuffle pipeline requires double LDS buffering.");
 
             // A tile in LDS
             auto a_copy_dram_window =

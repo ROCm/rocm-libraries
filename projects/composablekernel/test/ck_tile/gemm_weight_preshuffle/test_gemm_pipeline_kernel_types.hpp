@@ -38,7 +38,7 @@ using KernelTypesWeightPreshuffleAsync = ::testing::Types<
      std::tuple<    Row,     Col,     Row,       F8,        F8,          F32,       F16,             Default,        WeightPreshuffleV2, std::true_type>,
      std::tuple<    Row,     Col,     Row,       F8,        BF8,         F32,       F16,             Default,        WeightPreshuffleV2, std::true_type>,
      std::tuple<    Row,     Col,     Row,       F8,        I4,          F32,       F16,             Default,        WeightPreshuffleV2, std::true_type>
-#endif     
+#endif
      >;
 
 using KernelTypesWeightPreshuffle = ::testing::Types<

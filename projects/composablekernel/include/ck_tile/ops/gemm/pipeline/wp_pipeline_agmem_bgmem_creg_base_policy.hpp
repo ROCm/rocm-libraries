@@ -60,7 +60,7 @@ struct UniversalWeightPreshufflePipelineAgBgCrPolicy
         }
     }
 
-    // The swizzle factor is defined base on the number of contiguous lanes
+    // The swizzle factor is defined based on the number of contiguous lanes
     // in the instruction.
     template <typename Problem>
     static constexpr auto get_swizzle_factor = [](auto kpack) {
@@ -94,6 +94,10 @@ struct UniversalWeightPreshufflePipelineAgBgCrPolicy
         constexpr index_t MPerXdl  = TileShape::WarpTile::at(I0);
 
         constexpr index_t M3 = get_swizzle_factor<Problem>(KPack);
+        static_assert(M3 > 0,
+                      "Invalid swizzle factor (M3==0). Check WarpTileK, KPack, and NumAccess.");
+        static_assert((WaveSize % (K1 * M3)) == 0,
+                      "WaveSize must be divisible by K1*M3 for the async LDS layout.");
         constexpr index_t M2 = WaveSize / K1 / M3;
         constexpr index_t M1 = MPerXdl / (M2 * M3);
         constexpr index_t M0 = MPerBlock / (M1 * M2 * M3);

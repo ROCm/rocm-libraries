@@ -56,10 +56,11 @@ struct BlockWeightPreshuffleASmemBRegCReg
                                              ? DsReadPreload
                                              : MIterPerWarp * KIterPerWarp;
 
-    static constexpr index_t WarpTileK       = WarpTile::at(I2);
-    static constexpr index_t K1              = Problem::VectorLoadSize / sizeof(ADataType);
-    static constexpr index_t WaveSize        = get_warp_size();
-    static constexpr index_t Bload_num_perK  = NPerBlock * WarpTileK / NWarp / K1 / WaveSize;
+    static constexpr index_t WarpTileK      = WarpTile::at(I2);
+    static constexpr index_t K1             = Problem::VectorLoadSize / sizeof(ADataType);
+    static constexpr index_t WaveSize       = get_warp_size();
+    static constexpr index_t Bload_num_perK = NPerBlock * WarpTileK / NWarp / K1 / WaveSize;
+    // Total number of buffer_load instructions for B (controls s_waitcnt vmcnt for async case)
     static constexpr index_t Bload_total_num = Bload_num_perK * KIterPerWarp;
 
     using AWarpTensor = typename WarpGemm::AWarpTensor;
@@ -233,6 +234,9 @@ struct BlockWeightPreshuffleASmemBRegCReg
             {
                 if constexpr(Problem::Async)
                 {
+                    // vmcnt is equal to buffer_load instructions for B
+                    // it means that we wait only for buffer load instructions for A
+                    // because those are the one using async load to lds
                     s_waitcnt<Bload_total_num>();
                 }
                 block_sync_lds();
