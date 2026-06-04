@@ -1,28 +1,17 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# hipDNN tool CI (ALMIOPEN-1848) — reusable workflow.
+# hipDNN tool CI (ALMIOPEN-1848) — platform-agnostic reusable workflow.
 #
-# Invoked as a job from therock-ci-linux.yml, AFTER therock-build-linux, so it
-# runs inside the SAME therock-ci run that built the hipDNN artifacts. That is the
-# whole point of this shape: it installs the PR's OWN freshly-built ROCm by
-# `github.run_id` (install_rocm_from_artifacts --run-id) — no cross-run artifact
-# resolution, no slice-aware run-id scan. hipDNN is built CONDITIONALLY
-# (therock_configure_ci only builds changed subtrees), but the caller gates this
-# job on the build matrix actually carrying hipDNN (projects_to_test contains
-# "hipdnn") and on the gfx94X-dcgpu family, so it runs only when there are hipDNN
-# artifacts in this very run to exercise.
+# Invoked from therock-ci-{linux,windows}.yml after the matching therock-build
+# job, so it installs the PR's OWN freshly-built ROCm by github.run_id. Tool-only
+# PRs (hipDNN not rebuilt this run) fall back to the latest nightly dist tarball.
+# Runs the dnn-benchmarking + dnn-convert-shapes pytest suites and a benchmark
+# smoke run over the committed sample graphs (tool-health gate, not perf).
 #
-# Exercises the hipDNN python tools against the prebuilt artifacts on a gfx942 GPU:
-#   * dnn-benchmarking pytest suite (GPU tests run for real; CUDA/slow excluded)
-#   * dnn-convert-shapes pytest suite (CPU-only)
-#   * dnn_benchmarking smoke run over the committed sample graphs, gated on the
-#     tool running end-to-end (non-zero exit, zero passes, or any errored
-#     combination fails). It does NOT validate performance or correctness.
-#
-# Fork policy is owned by the caller (therock-ci): this reusable workflow never
-# defines its own pull_request trigger, so untrusted fork code only reaches the
-# GPU runner if the parent pipeline already admitted it.
+# UNVERIFIED on Windows: plugin lands at lib/hipdnn_plugins/engines/ as a .dll
+# with deps on PATH; --tests slice ships the frontend bindings; a Windows GPU
+# runner exists for the family.
 
 name: hipDNN Tool CI
 
@@ -30,19 +19,23 @@ on:
   workflow_call:
     inputs:
       therock_ref:
-        description: "TheRock ref to check out build_tools from (script version, incl. pack_frontend_wheel.py)."
+        description: "TheRock ref to check out build_tools from (incl. pack_frontend_wheel.py)."
         type: string
         required: true
       projects_to_test:
-        description: "Build matrix projects_to_test string; the benchmark job runs only when it contains 'hipdnn'."
+        description: "Build matrix projects_to_test; selects run-id vs latest-nightly install mode."
         type: string
         required: true
       amdgpu_families:
-        description: "TheRock artifact family for install_rocm_from_artifacts.py (e.g. gfx94X-dcgpu)."
+        description: "TheRock artifact family (e.g. gfx94X-dcgpu, gfx110X-dgpu)."
         type: string
         required: true
       test_runs_on:
         description: "GPU test runner label."
+        type: string
+        required: true
+      platform:
+        description: '"linux" or "windows".'
         type: string
         required: true
 
@@ -52,49 +45,34 @@ permissions:
 jobs:
   benchmark:
     name: hipDNN benchmark smoke (${{ inputs.amdgpu_families }})
-    # Runs in two modes (see the ROCm-fetch step):
-    #   * hipDNN built this run (projects_to_test contains 'hipdnn') -> install the
-    #     PR's OWN freshly-built artifacts by run-id.
-    #   * hipDNN NOT built this run -> install the latest nightly dist tarball, so a
-    #     tool-only PR still exercises the python tool against a real ROCm.
-    # No self-guard on projects_to_test: the caller decides when to invoke the job.
     runs-on: ${{ inputs.test_runs_on }}
     timeout-minutes: 60
+    # null (not '') is what GitHub treats as "no container": Linux runs in the
+    # no_rocm container, Windows on the host VM.
     container:
-      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
-      options: --ipc host
-        --group-add video
-        --device /dev/kfd
-        --device /dev/dri
-        --group-add 993
-        --group-add 992
-        --group-add 110
-        --env-file /etc/podinfo/gha-gpu-isolation-settings
+      image: ${{ inputs.platform == 'linux' && 'ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98' || null }}
+      options: ${{ inputs.platform == 'linux' && '--ipc host --group-add video --device /dev/kfd --device /dev/dri --group-add 993 --group-add 992 --group-add 110 --env-file /etc/podinfo/gha-gpu-isolation-settings' || null }}
     defaults:
       run:
         shell: bash
     env:
       AMDGPU_FAMILY: ${{ inputs.amdgpu_families }}
-      AMDGPU_TARGETS: gfx942
-      # When this run built hipDNN, install its OWN build outputs by run-id;
-      # otherwise fall back to the latest nightly dist tarball.
       HIPDNN_BUILT: ${{ contains(inputs.projects_to_test, 'hipdnn') }}
       RUN_GITHUB_REPO: ${{ github.repository }}
       ARTIFACT_RUN_ID: ${{ github.run_id }}
-      # Committed sample graphs, NOT the DVC Workloads suite: this is a tool-health
-      # smoke gate, so a handful of small graphs keeps it fast. The large DVC
-      # Workloads suite is for offline perf runs, not presubmit.
       GRAPH_GLOB: projects/hipdnn/tools/dnn-benchmarking/graphs/*.json
       WARMUP: "1"
       ITERS: "1"
       VENV_DIR: ${{ github.workspace }}/.venv
-      # The container runs as a NON-root user, so the default /opt/rocm is not
-      # writable (install_rocm_from_artifacts.py mkdir -> PermissionError). Install
-      # into a workspace-relative dir instead, matching the sibling component-test
-      # jobs (setup_test_environment uses ./build).
+      # Container runs non-root, so the default /opt/rocm is not writable.
       ROCM_PATH: ${{ github.workspace }}/therock
+      # Linux .so discovery; ignored on Windows (which uses PATH instead).
       LD_LIBRARY_PATH: ${{ github.workspace }}/therock/lib
     steps:
+      - name: Configure git for long paths (Windows)
+        if: ${{ runner.os == 'Windows' }}
+        run: git config --global core.longpaths true
+
       - name: Fetch TheRock build_tools for pre-job cleanup
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -102,7 +80,16 @@ jobs:
           sparse-checkout: build_tools
           path: prejob
 
-      - name: Pre-job GPU process cleanup
+      # GPU test runners are persistent/shared, so clear stray GPU processes from
+      # the previous tenant before, and ours after.
+      - name: Pre-job GPU process cleanup (Windows)
+        if: ${{ runner.os == 'Windows' }}
+        timeout-minutes: 5
+        shell: powershell
+        run: . '${{ github.workspace }}\prejob\build_tools\github_actions\cleanup_processes.ps1'
+
+      - name: Pre-job GPU process cleanup (Linux)
+        if: ${{ runner.os == 'Linux' }}
         timeout-minutes: 5
         run: bash ./prejob/build_tools/github_actions/cleanup_processes.sh
 
@@ -119,11 +106,8 @@ jobs:
           sparse-checkout: build_tools
           path: TheRock
 
-      # The no_rocm_image container's system python3 lacks the python3-venv
-      # package (`python3 -m venv` -> "ensurepip is not available") and the job
-      # runs as a NON-root user, so apt-get cannot install it. Use setup-python,
-      # which ships its own Python with a working ensurepip — same approach as
-      # the sibling therock-test-packages job that runs in this container.
+      # The no_rocm container's system python3 lacks python3-venv and the job runs
+      # non-root, so use setup-python (ships a working ensurepip).
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
@@ -132,52 +116,37 @@ jobs:
       - name: Set up Python venv + base deps
         run: |
           python -m venv "$VENV_DIR"
+          if [ "$RUNNER_OS" = "Windows" ]; then VENV_BIN="$VENV_DIR/Scripts"; else VENV_BIN="$VENV_DIR/bin"; fi
           # shellcheck disable=SC1091
-          source "$VENV_DIR/bin/activate"
-          echo "$VENV_DIR/bin" >> "$GITHUB_PATH"
+          source "$VENV_BIN/activate"
+          echo "$VENV_BIN" >> "$GITHUB_PATH"
           echo "VIRTUAL_ENV=$VENV_DIR" >> "$GITHUB_ENV"
-          pip install --upgrade pip
-          # boto3 + pyzstd are needed by install_rocm_from_artifacts.py (pyzstd
-          # decompresses the zstd-compressed artifact slices). The benchmark runs
-          # over committed sample graphs, so no dvc is needed.
+          python -m pip install --upgrade pip
+          # boto3 + pyzstd: install_rocm_from_artifacts.py decompresses zstd slices.
           pip install boto3 pyzstd cmake ninja
+
+      - name: Put ROCm bin on PATH for DLL discovery (Windows)
+        if: ${{ runner.os == 'Windows' }}
+        run: echo "${ROCM_PATH}/bin" >> "$GITHUB_PATH"
 
       - name: Fetch prebuilt ROCm (this run's build, or latest nightly fallback)
         run: |
-          # Two install modes:
-          #
-          # HIPDNN_BUILT=true (this run built hipDNN): install the run's OWN
-          # artifacts by run-id. ARTIFACT_RUN_ID is github.run_id — the therock-ci
-          # run that just built hipDNN in the therock-build-linux job this job
-          # depends on. The hipdnn / miopenprovider / tests slices are present in
-          # this run, so no slice-aware resolver is needed.
-          #
-          # --miopenprovider is REQUIRED: the MIOpen engine plugin
-          # (lib/hipdnn_plugins/engines/libmiopen_plugin.so) ships in the
-          # miopenprovider slice, NOT hipdnn_lib. Without it the plugin dir is empty
-          # and every combination is skipped -> the gate fails with
-          # pass_combinations=0. --flatten (set by install_rocm_from_artifacts for
-          # run-id installs) strips the ml-libs/<comp>/stage prefix so the engine
-          # lands at ${ROCM_PATH}/lib/hipdnn_plugins/engines/.
-          #
-          # HIPDNN_BUILT=false (tool-only PR; hipDNN not rebuilt): there is no
-          # per-slice artifact set for this run, so install the latest nightly dist
-          # tarball instead (--latest-release, built daily from main). The slice
-          # flags do not apply to the release path — the dist tarball is monolithic
-          # and is expected to carry the hipDNN plugin + frontend bindings.
+          # --miopenprovider is REQUIRED: the MIOpen engine plugin ships in that
+          # slice, not hipdnn_lib; without it the plugin dir is empty and the gate
+          # fails with pass_combinations=0. --amdgpu-targets omitted (optional; the
+          # family resolves the artifacts). Tool-only PRs have no per-slice set ->
+          # --latest-release monolithic tarball (slice flags do not apply).
           if [ "${HIPDNN_BUILT}" = "true" ]; then
             python3 TheRock/build_tools/install_rocm_from_artifacts.py \
               --run-id "${ARTIFACT_RUN_ID}" \
               --run-github-repo "${RUN_GITHUB_REPO}" \
               --amdgpu-family "${AMDGPU_FAMILY}" \
-              --amdgpu-targets "${AMDGPU_TARGETS}" \
               --output-dir "${ROCM_PATH}" \
               --hipdnn --miopenprovider --tests --blas --miopen
           else
             python3 TheRock/build_tools/install_rocm_from_artifacts.py \
               --latest-release \
               --amdgpu-family "${AMDGPU_FAMILY}" \
-              --amdgpu-targets "${AMDGPU_TARGETS}" \
               --output-dir "${ROCM_PATH}"
           fi
 
@@ -187,14 +156,11 @@ jobs:
 
       - name: Repack + install prebuilt hipdnn_frontend wheel
         run: |
-          # The hipdnn_frontend Python bindings ship PREBUILT inside the --tests
-          # artifact slice. install_rocm_from_artifacts.py --flatten lands the staged
-          # files at ${ROCM_PATH}/share/hipdnn/python/hipdnn_frontend. Repack them into
-          # a wheel with TheRock's repack script and install — do NOT compile in-job.
-          # The repack script lives on the TheRock ref passed in via therock_ref.
+          # The frontend bindings ship PREBUILT in the --tests slice; repack into a
+          # wheel — do NOT compile in-job.
           PKG_DIR="${ROCM_PATH}/share/hipdnn/python/hipdnn_frontend"
           if [ ! -d "${PKG_DIR}" ]; then
-            echo "::error::Prebuilt hipdnn_frontend bindings not found at ${PKG_DIR}. The TheRock hipDNN-python-wheel publishing dependency (which ships the bindings into the --tests slice) is not present on this run. Ensure the publishing change has landed and the build matrix includes the --tests slice."
+            echo "::error::Prebuilt hipdnn_frontend bindings not found at ${PKG_DIR}. Ensure the TheRock hipDNN-python-wheel publishing dependency landed and the build matrix includes the --tests slice."
             exit 1
           fi
           pip install build wheel
@@ -204,23 +170,12 @@ jobs:
           pip install --no-deps wheelhouse/hipdnn_frontend-*.whl
 
       - name: Install benchmark tool deps
-        # The [test] extra brings pytest + pytest-cov for the pytest step below;
-        # the smoke run itself needs only the core deps (numpy + psutil).
         run: pip install -e "rocm-libraries/projects/hipdnn/tools/dnn-benchmarking[test]"
 
       - name: Run dnn-benchmarking pytest suite
         working-directory: rocm-libraries/projects/hipdnn/tools/dnn-benchmarking
-        # Tool test suite on the GPU runner. GPU/amd tests run for real here; they
-        # self-skip via conftest if no GPU/plugin. Profiler-marker tests mock their
-        # binaries, so no rocprofv3/perf/rocprof-compute install is needed. Exclude
-        # 'nvidia' (CUDA-only) and 'slow' to keep the gate fast.
-        #
-        # torch is NOT installed in this job (the smoke run uses hipdnn_frontend +
-        # numpy and degrades GPU timing to CPU wall-clock when torch is absent).
-        # The two pytorch-backend integration tests import torch at module top, so
-        # they would fail at COLLECTION (before the -m marker filter runs) — ignore
-        # them by path. test_gpu_timing_cuda is CUDA-only anyway; test_pytorch_benchmark
-        # covers the separate --backend pytorch path, not exercised by the smoke gate.
+        # torch is not installed, so the two pytorch-backend tests fail at COLLECTION
+        # (module-top import, before the -m filter) — ignore them by path.
         run: |
           python -m pytest -ra -m "not nvidia and not slow" \
             --ignore=tests/integration/test_pytorch_benchmark.py \
@@ -228,15 +183,12 @@ jobs:
 
       - name: Run dnn-convert-shapes pytest suite
         working-directory: rocm-libraries/projects/hipdnn/tools/dnn-convert-shapes
-        # CPU-only shape-converter tests; pytest ships in the package's [test] extra.
         run: |
           pip install -e .[test]
           python -m pytest -ra
 
       - name: Run benchmark smoke
         working-directory: rocm-libraries
-        # Runs over the committed sample graphs (graphs/*.json); no DVC pull. This
-        # is a fast tool-health gate, not a perf run.
         run: |
           test -d "${ROCM_PATH}/lib/hipdnn_plugins/engines" || {
             echo "::error::plugin engine dir ${ROCM_PATH}/lib/hipdnn_plugins/engines missing — prebuilt artifact layout changed"; exit 1; }
@@ -250,7 +202,13 @@ jobs:
         working-directory: rocm-libraries
         run: python3 projects/hipdnn/tools/dnn-benchmarking/ci/check_results.py results.json
 
-      - name: Post-job GPU process cleanup
-        if: always()
+      - name: Post-job GPU process cleanup (Windows)
+        if: ${{ always() && runner.os == 'Windows' }}
+        timeout-minutes: 5
+        shell: powershell
+        run: . '${{ github.workspace }}\TheRock\build_tools\github_actions\cleanup_processes.ps1'
+
+      - name: Post-job GPU process cleanup (Linux)
+        if: ${{ always() && runner.os == 'Linux' }}
         timeout-minutes: 5
         run: bash ./TheRock/build_tools/github_actions/cleanup_processes.sh
