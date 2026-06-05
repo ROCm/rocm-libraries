@@ -13,6 +13,7 @@
 #include <string>
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
+#include <hipdnn_test_sdk/utilities/ArchMatch.hpp>
 
 #include <nlohmann/json.hpp>
 
@@ -199,14 +200,11 @@ inline std::optional<std::string> checkArchCompatibility(const BundleMetadata& m
     {
         return std::nullopt;
     }
-    // Match if currentArch starts with gpuArchitecture followed by ':' or end-of-string.
-    // e.g., metadata "gfx942" matches device "gfx942:sramecc+:xnack-".
+    // Strict match: golden data is arch-locked, so data generated on gfx942
+    // must not run on gfx940. e.g. metadata "gfx942" matches device
+    // "gfx942:sramecc+:xnack-" but not "gfx940".
     const auto& metaArch = *meta.gpuArchitecture;
-    const bool archMatches
-        = currentArch.size() >= metaArch.size()
-          && currentArch.compare(0, metaArch.size(), metaArch) == 0
-          && (currentArch.size() == metaArch.size() || currentArch[metaArch.size()] == ':');
-    if(!archMatches)
+    if(!archMatches(currentArch, metaArch, ArchMatchMode::Strict))
     {
         return "Golden data generated on " + *meta.gpuArchitecture + " but current GPU is "
                + currentArch;
