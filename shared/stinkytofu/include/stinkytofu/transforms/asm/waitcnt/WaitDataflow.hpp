@@ -32,9 +32,11 @@
 // only sound choice (a single union or intersection would either drop
 // deps still in flight on one path or over-drain every path).
 //
-// Block exit is collapsed to a single union queue per counter so
-// successors treat us as one predecessor. The optimizer layer can still
-// read each pred's collapsed exit queue to recover per-pred path lengths.
+// Per-pred queues are KEPT at block exit (not collapsed) so the optimizer
+// layer can read each predecessor's path length for shallow-pred
+// promotion. Each queue is capped at the hardware counter window
+// (kMaxInFlight) so a self-loop with an undrained counter still reaches a
+// fixed point instead of growing the queue every iteration.
 //
 // PHIs of pseudo-reg memtokens are summarised into a PhiSummary so
 // downstream consumers look up a single representative wait per counter.
@@ -46,7 +48,9 @@
 #include <array>
 #include <deque>
 #include <functional>
+#include <set>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "stinkytofu/transforms/asm/waitcnt/WaitPlan.hpp"
@@ -66,9 +70,10 @@ enum CounterKind { CK_DS = 0, CK_Buffer = 1, CK_Tensor = 2, CK_Count = 3 };
 /// predecessor it was seeded from. For an op OP at index I in a queue of
 /// size N, the wait value is N - I - 1.
 ///
-/// At block entry there is one entry per CFG predecessor. At block exit
-/// the per-pred queues are collapsed to a single entry (pred = the block
-/// itself) so successors see this block as one predecessor.
+/// At block entry there is one entry per CFG predecessor; these are kept
+/// (not collapsed) at block exit so a successor's mergeFromPredecessors can
+/// recover each predecessor's path length. Queue length is capped at the
+/// hardware counter window so the lattice has finite height.
 struct PerPredQueue {
     BasicBlock* pred = nullptr;
     std::deque<StinkyInstruction*> ops;
@@ -98,7 +103,7 @@ struct PhiSummary {
 /// so the solver can detect convergence on exit while merging into entry.
 ///
 /// queues[c] is a list of per-pred queues at block entry, mutated during
-/// transferBlock, and collapsed to a single union entry at block exit.
+/// transferBlock, and kept per-pred (not collapsed) at block exit.
 struct DataflowState {
     std::array<std::vector<PerPredQueue>, CK_Count> queues;
     std::unordered_map<StinkyInstruction*, PhiSummary> phiSummaries;
@@ -174,13 +179,27 @@ class WaitDataflow {
     bool capHit = false;
     unsigned iterationCap = 0;
 
+    /// (block, counter) pairs whose per-pred queue overflowed the hardware
+    /// in-flight window (kMaxInFlight) during a solver sweep -- i.e. the
+    /// counter was issued past its window without draining and
+    /// appendToAllPaths had to drop the oldest (provably-complete) ops.
+    /// Cleared at the start of every sweep so that, at the fixed point, it
+    /// holds exactly the steady-state overflows. Surfaced by solve() as a
+    /// non-fatal warning; it never changes the emitted plan.
+    std::set<std::pair<const BasicBlock*, CounterKind>> overflowSites;
+
+    /// Emit a non-fatal diagnostic (in RPO order) for every (block, counter)
+    /// in overflowSites. Called by solve() once the fixed point is reached.
+    void reportCounterOverflow() const;
+
     /// Build entry state for BB by seeding one per-pred queue per CFG
-    /// predecessor (skipping self-preds, whose collapsed exit may contain
-    /// loads issued AFTER the consumer on the loop body).
+    /// predecessor, including self-preds (back-edges): at the fixed point a
+    /// back-edge's exit is the loop body's true exit, which is what the
+    /// header must see. Identical (pred, ops) queues are deduplicated.
     DataflowState mergeFromPredecessors(BasicBlock& bb) const;
 
-    /// Walk BB in program order, mutating STATE. After the walk the
-    /// per-pred queues are collapsed to a single union per counter.
+    /// Walk BB in program order, mutating STATE. Per-pred queues are kept
+    /// (not collapsed) at exit; each is capped at kMaxInFlight.
     void transferBlock(BasicBlock& bb, DataflowState& state);
 };
 

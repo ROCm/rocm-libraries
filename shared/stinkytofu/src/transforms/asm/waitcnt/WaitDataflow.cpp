@@ -42,6 +42,8 @@ namespace waitcnt {
 
 namespace {
 
+constexpr size_t kMaxInFlight = 64;
+
 // ---------------------------------------------------------------------------
 // Per-counter policy
 //
@@ -161,7 +163,13 @@ WaitDataflow::WaitDataflow(Function& /*func*/, const DominanceInfo& /*domInfo*/,
                            const std::vector<BasicBlock*>& rpo)
     : rpo(rpo) {
     const unsigned n = static_cast<unsigned>(rpo.size());
-    iterationCap = std::min<unsigned>(64u, std::max<unsigned>(8u, 2u * n));
+    // A self-loop that never drains a counter fills its per-pred queue one op
+    // per fixed-point iteration up to kMaxInFlight before the lattice
+    // stabilises, so the cap floor must clear that window for the fixed point
+    // to be reached. The solver breaks early on convergence, so this only
+    // affects genuinely slow / non-convergent inputs.
+    const unsigned floor = static_cast<unsigned>(kMaxInFlight) + 8u;
+    iterationCap = std::min<unsigned>(256u, std::max<unsigned>(floor, 2u * n));
 
     // Seed each counter's RAW-wait constraint with the built-in default
     // from the policy table; callers may override via setRawNeedsWait().
@@ -320,10 +328,36 @@ void trimQueues(std::vector<PerPredQueue>& qs, int keep) {
 // Append a local in-block memop to every per-pred queue. Local ops are in
 // flight on every CFG path through this block, so they join every path's
 // tail. If no per-pred queue exists yet, create a synthetic one
-// (pred == nullptr) so the in-block prefix is still tracked.
-void appendToAllPaths(std::vector<PerPredQueue>& qs, StinkyInstruction* op) {
+// (pred == nullptr) so the in-block prefix is still tracked. The queue is
+// capped at kMaxInFlight so an undrained counter cannot grow it forever.
+// Returns true if the cap had to drop an op -- i.e. the queue exceeded the
+// hardware in-flight window -- so the caller can flag the overflow for an
+// end-of-solve diagnostic.
+bool appendToAllPaths(std::vector<PerPredQueue>& qs, StinkyInstruction* op) {
     if (qs.empty()) qs.push_back(PerPredQueue{});
-    for (auto& q : qs) q.ops.push_back(op);
+    bool dropped = false;
+    for (auto& q : qs) {
+        q.ops.push_back(op);
+        while (q.ops.size() > kMaxInFlight) {
+            q.ops.pop_front();
+            dropped = true;
+        }
+    }
+    return dropped;
+}
+
+// Human-readable name for a counter, for diagnostics.
+const char* counterName(CounterKind c) {
+    switch (c) {
+        case CK_DS:
+            return "ds (dscnt)";
+        case CK_Buffer:
+            return "buffer (loadcnt/storecnt)";
+        case CK_Tensor:
+            return "tensor (tlcnt)";
+        default:
+            return "?";
+    }
 }
 
 // Tightest current-queue wait for counter @p c contributed by a consumer's
@@ -546,7 +580,11 @@ void WaitDataflow::transferBlock(BasicBlock& bb, DataflowState& state) {
         // snapshot of the queue excludes its own consumer).
         CounterKind self = classifyMemOp(*inst);
         if (self != CK_Count) {
-            appendToAllPaths(state.queues[self], inst);
+            if (appendToAllPaths(state.queues[self], inst)) {
+                // Counter issued past its hardware in-flight window without
+                // draining; the oldest provably-complete op was dropped.
+                overflowSites.emplace(&bb, self);
+            }
             emit[self].recordNewOp();
         }
     }
@@ -555,7 +593,30 @@ void WaitDataflow::transferBlock(BasicBlock& bb, DataflowState& state) {
     // union queue would lose per-pred position info and force downstream
     // consumers to compute strictly conservative (over-deep) waits. Each
     // successor's mergeFromPredecessors copies all queues across,
-    // retagging them as via-this-pred.
+    // retagging them as via-this-pred. The per-pred queue length cap
+    // (kMaxInFlight, applied in appendToAllPaths) is what bounds the
+    // lattice in place of the old exit-collapse, so a self-loop with an
+    // undrained counter still converges.
+}
+
+void WaitDataflow::reportCounterOverflow() const {
+    // One line per (block, counter) that overflowed the in-flight window in
+    // the converged transfer pass, emitted in deterministic RPO order.
+    // Non-fatal: the dropped ops are provably complete, so the plan stays
+    // correct, but a counter pinned at the full window is a strong hint of a
+    // missing drain (real RAW hazard) or dead async loads.
+    for (BasicBlock* bb : rpo) {
+        for (int c = 0; c < CK_Count; ++c) {
+            if (overflowSites.find({bb, static_cast<CounterKind>(c)}) == overflowSites.end())
+                continue;
+            std::cerr << "[WaitDataflow] warning: block '" << bb->getLabel() << "' overflowed the "
+                      << counterName(static_cast<CounterKind>(c))
+                      << " in-flight window (kMaxInFlight=" << kMaxInFlight
+                      << "): the counter was issued past its hardware window without draining, so "
+                         "the oldest provably-complete op(s) were dropped. Confirm a drain (barrier "
+                         "/ wait) is not required here.\n";
+        }
+    }
 }
 
 bool WaitDataflow::solve() {
@@ -573,6 +634,10 @@ bool WaitDataflow::solve() {
 
     for (unsigned iter = 0; iter < iterationCap; ++iter) {
         bool changed = false;
+        // Cleared each sweep so that, at the fixed point, overflowSites holds
+        // exactly the steady-state overflows (the converged sweep re-runs
+        // every block's transfer and re-detects any sustained overflow).
+        overflowSites.clear();
         for (BasicBlock* bb : rpo) {
             DataflowState entry = mergeFromPredecessors(*bb);
             DataflowState working = entry;
@@ -599,7 +664,12 @@ bool WaitDataflow::solve() {
             }
             result.entryState[bb] = std::move(entry);
         }
-        if (!changed) return true;
+        if (!changed) {
+            // Fixed point reached: surface any counter that overflowed its
+            // hardware in-flight window (issued past the cap without draining).
+            reportCounterOverflow();
+            return true;
+        }
     }
 
     capHit = true;
