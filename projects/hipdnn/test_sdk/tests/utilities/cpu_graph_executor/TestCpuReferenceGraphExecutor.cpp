@@ -1,6 +1,10 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <cstdint>
+#include <vector>
+
+#include <flatbuffers/flatbuffers.h>
 #include <gtest/gtest.h>
 
 #include <hipdnn_frontend/Graph.hpp>
@@ -27,6 +31,7 @@
 #include <hipdnn_data_sdk/utilities/ShallowTensor.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_data_sdk/utilities/TensorView.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/serialized_graph_and_plan_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/Seeds.hpp>
@@ -41,6 +46,23 @@ using namespace hipdnn_sdk_test_utils;
 using namespace hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 using hipdnn_data_sdk::types::bfloat16;
 using hipdnn_data_sdk::types::half;
+
+namespace
+{
+
+// Wraps an inner graph buffer (and optional plan bytes) into an "HDGP"
+// SerializedGraphAndPlan container, returning the released buffer.
+flatbuffers::DetachedBuffer makeGraphAndPlanContainer(const std::vector<uint8_t>* graphBytes,
+                                                      const std::vector<uint8_t>* planBytes)
+{
+    flatbuffers::FlatBufferBuilder builder;
+    auto root = hipdnn_flatbuffers_sdk::data_objects::CreateSerializedGraphAndPlanDirect(
+        builder, graphBytes, planBytes);
+    hipdnn_flatbuffers_sdk::data_objects::FinishSerializedGraphAndPlanBuffer(builder, root);
+    return builder.Release();
+}
+
+} // namespace
 
 class TestCpuReferenceGraphExecutor
 {
@@ -536,6 +558,44 @@ TEST(TestCpuReferenceGraphExecutor, PointwiseBinaryAdd)
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
     CpuReferenceGraphExecutor().execute(
         serializedGraph.data(), serializedGraph.size(), variantPack);
+}
+
+TEST(TestCpuReferenceGraphExecutor, ExecutesGraphFromContainerBlob)
+{
+    // Guards the regression from review thread r3364940415: the executor must
+    // peel an "HDGP" SerializedGraphAndPlan container before wrapping the graph.
+    // Before fromSerializedBlob() was used, execute() constructed the
+    // GraphWrapper directly from the container bytes and threw "Graph is not
+    // valid".
+    const std::vector<int64_t> inputDims = {1, 3, 2, 2};
+    const std::vector<int64_t> outputDims = {1, 3, 2, 2};
+
+    auto [graph, tensorBundle, variantPack]
+        = buildPointwiseBinaryGraph(inputDims,
+                                    inputDims,
+                                    outputDims,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    hipdnn_frontend::PointwiseMode::ADD,
+                                    1,
+                                    TensorLayout::NCHW);
+
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+
+    // A graph-only container (no plan) must execute.
+    auto graphOnly = makeGraphAndPlanContainer(&serializedGraph, nullptr);
+    EXPECT_NO_THROW(
+        CpuReferenceGraphExecutor().execute(graphOnly.data(), graphOnly.size(), variantPack));
+
+    // A graph+plan container must also execute; the plan blob is ignored by the
+    // reference executor.
+    const std::vector<uint8_t> dummyPlan = {0x01, 0x02, 0x03, 0x04};
+    auto graphAndPlan = makeGraphAndPlanContainer(&serializedGraph, &dummyPlan);
+    EXPECT_NO_THROW(
+        CpuReferenceGraphExecutor().execute(graphAndPlan.data(), graphAndPlan.size(), variantPack));
 }
 
 TEST(TestCpuReferenceGraphExecutor, BlockScaleDequantizeAllFloats)

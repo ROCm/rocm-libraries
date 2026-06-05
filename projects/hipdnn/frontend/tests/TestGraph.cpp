@@ -60,10 +60,17 @@ public:
         return _sub_nodes;
     }
 
-    // True when a finalized execution plan is attached to the graph.
+    // True when an execution plan descriptor is attached (created) to the graph.
+    // The plan may not yet be finalized; use isExecutionPlanFinalized() for that.
     bool hasExecutionPlan() const
     {
         return _executionPlanDesc && _executionPlanDesc->valid();
+    }
+
+    // True only once the attached execution plan has been finalized (build_plans()/build()).
+    bool isExecutionPlanFinalized() const
+    {
+        return _executionPlanFinalized;
     }
 
     // Test seams for the capability-gated serialize path. Setting the captured
@@ -6898,13 +6905,16 @@ INSTANTIATE_TEST_SUITE_P(GraphTopologies,
 
 namespace
 {
-// Drives a GraphTestUtils to a state with both a valid (lowered) graph
-// descriptor and a finalized execution plan: build_operation_graph() then
-// create_execution_plans() + build_plans(). The serialize plan branch requires
-// both descriptors valid, which the deserialize-attach path cannot supply.
+// Drives a GraphTestUtils to a state with a valid (lowered) graph descriptor and
+// an execution plan: build_operation_graph() then create_execution_plans(), and
+// (when buildPlans is true) build_plans() to finalize the plan. The serialize
+// plan branch requires both descriptors valid and the plan finalized, which the
+// deserialize-attach path cannot supply. Pass buildPlans=false to stop after the
+// plan descriptor is created but before it is finalized.
 void buildGraphWithExecutionPlan(GraphTestUtils& graph,
                                  ::testing::NiceMock<Mock_hipdnn_backend>& mockBackend,
-                                 hipdnnHandle_t handle)
+                                 hipdnnHandle_t handle,
+                                 bool buildPlans = true)
 {
     using ::testing::_;
     using ::testing::Return;
@@ -6990,8 +7000,18 @@ void buildGraphWithExecutionPlan(GraphTestUtils& graph,
 
     const std::vector<HeuristicMode> heurModes = {HeuristicMode::FALLBACK};
     ASSERT_TRUE(graph.create_execution_plans(heurModes).is_good());
+
+    if(!buildPlans)
+    {
+        // Plan descriptor created but intentionally left unfinalized.
+        ASSERT_TRUE(graph.hasExecutionPlan());
+        ASSERT_FALSE(graph.isExecutionPlanFinalized());
+        return;
+    }
+
     ASSERT_TRUE(graph.build_plans().is_good());
     ASSERT_TRUE(graph.hasExecutionPlan());
+    ASSERT_TRUE(graph.isExecutionPlanFinalized());
 }
 
 // Installs backendGetAttribute ON_CALL defaults that reconstruct a single
@@ -7146,6 +7166,7 @@ TEST_F(TestGraph, SerializeWithPlanUsesComboContainerApi)
     ::testing::FLAGS_gmock_verbose = "error";
     GraphTestUtils graph;
     buildGraphWithExecutionPlan(graph, *_mockBackend, _handle);
+    EXPECT_TRUE(graph.isExecutionPlanFinalized());
     // Select an engine and report the serialization note so serialize() takes
     // the combo path (two-call count/fill behavior-note query).
     graph.setSelectedEngineId(10);
@@ -7200,6 +7221,53 @@ TEST_F(TestGraph, SerializeWithPlanUsesComboContainerApi)
 
     EXPECT_TRUE(err.is_good()) << err.get_message();
     EXPECT_EQ(data, fakeContainerBytes);
+}
+
+// A plan descriptor was created (create_execution_plans()) but never finalized
+// via build_plans()/build(): serialize() must gate on the finalized state and
+// fall back to the bare graph serializer (byte-identical to a graph that never
+// had a plan). The combo container API and the engine capability query are both
+// short-circuited because the plan is not finalized. This guards against
+// embedding an unfinalized plan (PR #7975 review feedback): serialize must gate
+// on the finalized/compiled-plan state, not merely on plan-descriptor validity.
+TEST_F(TestGraph, SerializeWithUnfinalizedPlanUsesGraphSerializer)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    GraphTestUtils graph;
+    buildGraphWithExecutionPlan(graph, *_mockBackend, _handle, /*buildPlans=*/false);
+    EXPECT_FALSE(graph.isExecutionPlanFinalized());
+
+    // Select an engine that, if queried, would advertise support. This proves the
+    // graph-only fallback is forced by the finalization gate, not by a missing
+    // engine id or an unsupported engine.
+    graph.setSelectedEngineId(10);
+
+    const std::vector<uint8_t> fakeGraphBytes = {0x01, 0x02, 0x03};
+
+    ON_CALL(*_mockBackend, backendGetSerializedBinaryGraphExt(_, _, _, _))
+        .WillByDefault([&fakeGraphBytes](hipdnnBackendDescriptor_t,
+                                         size_t requestedSize,
+                                         size_t* graphByteSize,
+                                         uint8_t* data) {
+            *graphByteSize = fakeGraphBytes.size();
+            if(data != nullptr && requestedSize >= fakeGraphBytes.size())
+            {
+                std::memcpy(data, fakeGraphBytes.data(), fakeGraphBytes.size());
+            }
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // The combo container API and the engine capability query must both be
+    // skipped: the unfinalized-plan gate short-circuits before either is reached.
+    EXPECT_CALL(*_mockBackend, backendGetSerializedBinaryGraphAndPlanExt(_, _, _, _, _)).Times(0);
+    EXPECT_CALL(*_mockBackend, backendGetAttribute(_, HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE, _, _, _, _))
+        .Times(0);
+
+    std::vector<uint8_t> data;
+    auto err = graph.serialize(data);
+
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    EXPECT_EQ(data, fakeGraphBytes);
 }
 
 // The combo size-query succeeds but reports a zero-length blob: serialize fails

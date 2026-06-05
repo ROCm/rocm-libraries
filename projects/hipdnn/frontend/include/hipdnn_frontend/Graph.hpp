@@ -188,6 +188,12 @@ protected:
     /// can assert plan presence.
     std::unique_ptr<detail::ScopedHipdnnBackendDescriptor> _executionPlanDesc;
 
+    /// The execution plan is finalized only after build_plans()/build(); a plan
+    /// descriptor that has merely been created is valid but not yet finalized and
+    /// carries no execution context. serialize() gates the combined graph+plan
+    /// container on this so an unfinalized plan is never embedded.
+    bool _executionPlanFinalized = false;
+
     /// Engine id backing the current execution plan: captured at plan build, or
     /// recovered from the plan on deserialize. Queried at serialize time for
     /// execution-plan-serialization support. Reset when the plan is dropped.
@@ -225,8 +231,9 @@ private:
                     "serialize() overload for auto-lowering."};
         }
 
-        const bool planValid = _executionPlanDesc && _executionPlanDesc->valid();
-        const bool planSerializable = planValid && _selectedEngineId.has_value()
+        const bool planFinalized
+            = _executionPlanDesc && _executionPlanDesc->valid() && _executionPlanFinalized;
+        const bool planSerializable = planFinalized && _selectedEngineId.has_value()
                                       && engineSupportsPlanSerialization(*_selectedEngineId);
         if(planSerializable)
         {
@@ -255,13 +262,21 @@ private:
             return {};
         }
 
-        if(planValid)
+        if(planFinalized)
         {
             // Plan exists but its engine cannot serialize it; fall through to the
             // byte-identical legacy bare-graph blob so legacy consumers keep working.
             HIPDNN_FE_LOG_WARN(
                 "Execution plan was not captured during serialization: the engine "
                 "does not support execution plan serialization; serializing the graph only.");
+        }
+        else if(_executionPlanDesc && _executionPlanDesc->valid())
+        {
+            // Plan descriptor was created but never finalized, so it carries no
+            // execution context to embed; serialize the graph only.
+            HIPDNN_FE_LOG_INFO("Execution plan has not been finalized; call build_plans() (or "
+                               "build()) before serialize() to embed it. Serializing the graph "
+                               "only.");
         }
 
         size_t graphByteSize = 0;
@@ -382,6 +397,7 @@ private:
         // Create execution plan descriptor
         _executionPlanDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(
             HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR);
+        _executionPlanFinalized = false;
 
         if(!_executionPlanDesc->valid())
         {
@@ -1022,6 +1038,7 @@ protected:
         resetGraphDesc();
         _engineConfigDesc.reset();
         _executionPlanDesc.reset();
+        _executionPlanFinalized = false;
         _selectedEngineId.reset();
         return {};
     }
@@ -1225,6 +1242,7 @@ public:
 
         _executionPlanDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(
             HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR);
+        _executionPlanFinalized = false;
 
         if(!_executionPlanDesc->valid())
         {
@@ -1445,6 +1463,7 @@ public:
         setGraphDesc(std::move(graphDesc), handle != nullptr);
         _engineConfigDesc.reset();
         _executionPlanDesc.reset();
+        _executionPlanFinalized = false;
         _selectedEngineId.reset();
 
         int flags = 0;
@@ -1463,6 +1482,8 @@ public:
                         handle, &plan, data.data(), data.size()),
                     "Failed to deserialize embedded execution plan");
                 _executionPlanDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(plan);
+                // A deserialized compiled plan is finalized by construction and can be re-serialized.
+                _executionPlanFinalized = true;
                 // Recover the engine backing the attached plan for the serialize capability gate.
                 _selectedEngineId = detail::getExecutionPlanEngineId(_executionPlanDesc->get());
             }
@@ -1556,6 +1577,8 @@ public:
             "Failed to deserialize compiled plan");
 
         _executionPlanDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(executionPlan);
+        // A deserialized compiled plan is finalized by construction and can be re-serialized.
+        _executionPlanFinalized = true;
         // Recover the engine backing the attached plan for the serialize capability gate.
         _selectedEngineId = detail::getExecutionPlanEngineId(_executionPlanDesc->get());
         _engineConfigDesc.reset();
@@ -1721,6 +1744,7 @@ public:
         setGraphDesc(std::move(graphDesc), handle != nullptr);
         _engineConfigDesc.reset();
         _executionPlanDesc.reset();
+        _executionPlanFinalized = false;
         _selectedEngineId.reset();
         return {};
     }
@@ -1819,6 +1843,8 @@ public:
         HIPDNN_RETURN_ON_BACKEND_FAILURE(
             detail::hipdnnBackend()->backendFinalize(_executionPlanDesc->get()),
             "Failed to finalize execution plan descriptor");
+
+        _executionPlanFinalized = true;
 
         return {ErrorCode::OK, ""};
     }

@@ -5,6 +5,8 @@
 #include "HipdnnException.hpp"
 #include <flatbuffers/flatbuffers.h>
 #include <flatbuffers/verifier.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/SerializedGraphContainer.hpp>
 
 namespace hipdnn_backend
 {
@@ -16,14 +18,29 @@ void convertSerializedGraphToGraph(
     size_t size,
     std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT>& graphOut)
 {
-    flatbuffers::Verifier verifier(buffer, size);
+    // Peel the graph blob out of the buffer first: this accepts either a bare
+    // serialized Graph (passthrough) or an "HDGP" container that embeds the
+    // graph. The SDK throws std exceptions on malformed input; translate to the
+    // backend status code callers expect.
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::SerializedBlobView view;
+    try
+    {
+        view = hipdnn_flatbuffers_sdk::flatbuffer_utilities::extractGraphBlob(buffer, size);
+    }
+    catch(const std::exception&)
+    {
+        throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
+                              "Invalid buffer: unable to extract graph from serialized data.");
+    }
+
+    flatbuffers::Verifier verifier(view.data, view.size);
     if(!verifier.VerifyBuffer<hipdnn_flatbuffers_sdk::data_objects::Graph>())
     {
         throw HipdnnException(HIPDNN_STATUS_BAD_PARAM,
                               "Invalid buffer: unable to verify the flatbuffer schema.");
     }
 
-    auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(buffer);
+    auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(view.data);
     if(graph == nullptr)
     {
         throw HipdnnException(HIPDNN_STATUS_INTERNAL_ERROR,
@@ -35,40 +52,23 @@ void convertSerializedGraphToGraph(
 
 bool isGraphAndPlanContainer(const uint8_t* blob, size_t size)
 {
-    // SerializedGraphAndPlanBufferHasIdentifier() reads the 4-byte file
-    // identifier at bytes [4, 8) without bounds-checking, so the buffer must
-    // be at least 8 bytes (sizeof(flatbuffers::uoffset_t) + the 4-byte
-    // identifier) before we may inspect it.
-    if(blob == nullptr || size < 8)
-    {
-        return false;
-    }
-
-    return hipdnn_flatbuffers_sdk::data_objects::SerializedGraphAndPlanBufferHasIdentifier(blob);
+    return hipdnn_flatbuffers_sdk::flatbuffer_utilities::isGraphAndPlanContainer(blob, size);
 }
 
 const hipdnn_flatbuffers_sdk::data_objects::SerializedGraphAndPlan*
     verifyAndGetGraphAndPlanContainer(const uint8_t* blob, size_t size)
 {
-    // Defense-in-depth: verifies independently of any prior
-    // isGraphAndPlanContainer() check, so this helper is safe to call alone.
-    flatbuffers::Verifier verifier(blob, size);
-    if(!hipdnn_flatbuffers_sdk::data_objects::VerifySerializedGraphAndPlanBuffer(verifier))
+    try
+    {
+        return hipdnn_flatbuffers_sdk::flatbuffer_utilities::verifyGraphAndPlanContainer(blob,
+                                                                                         size);
+    }
+    catch(const std::exception&)
     {
         throw HipdnnException(
             HIPDNN_STATUS_BAD_PARAM,
             "Invalid buffer: unable to verify the serialized graph-and-plan container.");
     }
-
-    const auto* container = hipdnn_flatbuffers_sdk::data_objects::GetSerializedGraphAndPlan(blob);
-    if(container == nullptr)
-    {
-        throw HipdnnException(
-            HIPDNN_STATUS_INTERNAL_ERROR,
-            "Invalid buffer: unable to read the serialized graph-and-plan container root.");
-    }
-
-    return container;
 }
 
 } // namespace flatbuffer_utilities

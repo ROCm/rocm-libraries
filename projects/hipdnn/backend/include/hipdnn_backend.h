@@ -477,9 +477,12 @@ typedef enum
  * is non-null its serialized execution plan is embedded alongside the graph;
  * when it is null the container carries the graph only (a graph-only container,
  * still tagged with the container identifier). The resulting blob can be
- * inspected with hipdnnBackendGetSerializedBinaryContents_ext() and is accepted
- * by both hipdnnBackendCreateAndDeserializeGraph_ext() and
- * hipdnnBackendCreateAndDeserializeExecutionPlan_ext().
+ * inspected with hipdnnBackendGetSerializedBinaryContents_ext(). It is always
+ * accepted by hipdnnBackendCreateAndDeserializeGraph_ext(), which reads the
+ * embedded graph. It is accepted by
+ * hipdnnBackendCreateAndDeserializeExecutionPlan_ext() only when it carries an
+ * execution plan; a graph-only container passed to that API fails with
+ * HIPDNN_STATUS_BAD_PARAM.
  *
  * Uses the standard two-call pattern: call first with @p serializedBlob set to
  * @c nullptr to query the required buffer size, then call again with a
