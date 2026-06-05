@@ -170,6 +170,11 @@ class TestValidationConfig:
         with pytest.raises(ValueError, match="Invalid provider"):
             ValidationConfig(provider="invalid_provider")
 
+    def test_removed_cpu_plugin_provider_raises(self) -> None:
+        """Test that the removed cpu_plugin provider is rejected."""
+        with pytest.raises(ValueError, match="Invalid provider"):
+            ValidationConfig(provider="cpu_plugin")
+
     def test_negative_rtol_raises(self) -> None:
         """Test that negative rtol raises ValueError."""
         with pytest.raises(ValueError, match="rtol must be non-negative"):

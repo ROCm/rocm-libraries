@@ -41,13 +41,15 @@ The default `--torch-mode rocm` flow assumes no system ROCm installation:
    `$DNN_BENCH_WORKSPACE`, or `/workspace`)
 2. Detects the GPU architecture and installs the matching ROCm PyTorch nightly wheel
 3. Discovers hipDNN from the torch wheel's bundled ROCm SDK libraries
-4. Builds the local MIOpen provider if the selected ROCm prefix does not already contain it
-5. Installs the hipDNN Python bindings against the selected ROCm prefix
+4. Builds the local MIOpen provider if `libmiopen_plugin.so` is absent, using
+   the bundled ROCm SDK devel wheel for compiler/toolchain discovery when
+   needed
+5. Installs the hipDNN Python bindings against the selected ROCm SDK libraries
 
 The selected prefix is printed as `Using hipDNN/ROCm prefix: ...`; pass its
 `lib/hipdnn_plugins/engines` directory to `--plugin-path` when benchmarking.
 If GPU architecture detection is unavailable on the setup host, pass
-`--gpu-arch gfx90a` or `--gpu-arch gfx942`.
+`--gpu-arch gfx90a`, `--gpu-arch gfx942`, or `--gpu-arch gfx950`.
 
 ### Testing/CI Setup with CPU-Only PyTorch
 

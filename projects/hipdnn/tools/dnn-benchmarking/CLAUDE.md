@@ -28,12 +28,13 @@ Pass `/opt/rocm/lib/hipdnn_plugins/engines/` to `--plugin-path` when running ben
 
 ### ROCm PyTorch Setup
 
-`setup.sh` auto-detects the GPU architecture and installs PyTorch from the matching ROCm nightly index (`https://rocm.nightlies.amd.com/v2-staging/{arch}-dcgpu/`). Supported architectures:
+`setup.sh` auto-detects the GPU architecture and installs PyTorch from the matching ROCm nightly index. Supported architectures:
 
-| GPU | Architecture |
-|-----|-------------|
-| MI200/MI210/MI250 | gfx90X |
-| MI300X/MI300A | gfx94X |
+| GPU | `--gpu-arch` | Torch index bucket |
+|-----|--------------|--------------------|
+| MI200/MI210/MI250 | `gfx90a` | `gfx90X-dcgpu` |
+| MI300X/MI300A | `gfx942` | `gfx94X-dcgpu` |
+| MI350 | `gfx950` | `gfx950-dcgpu` |
 
 ## Running Tests
 
