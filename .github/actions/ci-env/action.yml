@@ -6,9 +6,11 @@ outputs:
     description: "TheRock commit hash to use"
     # TEST PIN: users/davidd-amd/reland-origami — re-lands origami in TheRock
     # (#3820, reverted by #4901) + the doc-component SDK-accounting fix + Phase 2
-    # hipBLASLt/hipSPARSELt origami dep wiring, so this stack's find_package(origami)
-    # resolves in TheRock CI. Repoint to the merged-to-TheRock-main commit before merge.
-    value: "c4b36f5a57708fa36808e8e67494019fc1c77c71" # 2026-06-03 reland-origami (off TheRock main + origami)
+    # hipBLASLt/hipSPARSELt origami dep wiring + IGNORE_PACKAGES nanobind on the
+    # origami subproject, so this stack's find_package(origami) resolves and the
+    # origami Python bindings configure cleanly in TheRock CI. Repoint to the
+    # merged-to-TheRock-main commit before merge.
+    value: "1265d1dfa7f178f80ebf07ba666f5d469a4c18ff" # 2026-06-05 reland-origami HEAD (off TheRock main + origami + nanobind exemption)
   docker-image:
     description: "Docker container image for Linux builds"
     value: "ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:48492540591673fdc8d51beb89bde41e7ba13cbb528f643c0a481ba42c4058f2"
