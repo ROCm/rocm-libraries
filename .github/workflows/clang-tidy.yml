@@ -269,7 +269,7 @@ jobs:
           # TODO: remove -DMIOPEN_USE_MLIR=OFF once rocMLIR is removed from MIOpen
           cmake -S projects/miopen -B build-miopen -G Ninja \
             -DMIOPEN_BACKEND=HIP \
-            -DBUILD_DEV=On \
+            -DBUILD_DEV=ON \
             -DMIOPEN_USE_MLIR=OFF \
             -DCLANG_TIDY_EXE=/usr/bin/clang-tidy-21 \
             -DCMAKE_PREFIX_PATH="/opt/rocm;/tmp/miopen-deps" \
