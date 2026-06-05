@@ -56,7 +56,7 @@
 #include "stinkytofu/transforms/asm/StinkyRemoveNopPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
-#include "stinkytofu/transforms/asm/SwPrefetchInsertionPass.hpp"
+#include "stinkytofu/transforms/asm/SwInstructionPrefetchRelStaticPass.hpp"
 
 namespace stinkytofu {
 namespace {
@@ -187,8 +187,8 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     pm.addPass(createEstimateAsmCyclesPass());
     // Whole-kernel reuse on final instruction order (O0 and O1+; after scheduler + VGPR MSB).
     pm.addPass(createSetMatrixReusePass());
-    if (moduleOptions.EnableSwPrefetchInsertion) {
-        pm.addPass(createSwPrefetchInsertionPass(module));
+    if (moduleOptions.EnableSwInstructionPrefetchRelStatic) {
+        pm.addPass(createSwInstructionPrefetchRelStaticPass(module));
     }
     // When StinkyTofuCostOutputDir is set, dump pass debug (per-instruction + summary) to
     // <outputDir>/<kernel>/accumulate_instruction_size_pass_debug.txt (same layout as Backend).

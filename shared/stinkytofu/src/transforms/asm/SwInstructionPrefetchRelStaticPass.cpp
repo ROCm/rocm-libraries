@@ -20,7 +20,7 @@
  * THE SOFTWARE.
  *
  * ************************************************************************ */
-#include "stinkytofu/transforms/asm/SwPrefetchInsertionPass.hpp"
+#include "stinkytofu/transforms/asm/SwInstructionPrefetchRelStaticPass.hpp"
 
 #include <cctype>
 #include <cmath>
@@ -58,14 +58,13 @@ constexpr int64_t kSwPrefetchSpacingBytes = int64_t(32) * 128;
 /// (often `s_add_i32` / `s_add_u32` / `s_addc_u32` with label relocations)
 /// combine that pair with addends to build a final PC (branch target, table
 /// address, etc.).  The hardware and relocations assume a contiguous encoding
-/// from getpc through those adds; inserting **`s_mov_b32` +
-/// `s_prefetch_inst_pc_rel`** **between** getpc and the fixups shifts layout
-/// and invalidates the address arithmetic.  While the forward window is open, a
-/// naive “insert before this instruction” for any of its **N** real insns
-/// (`s_getpc_b64` plus **N−1** followers) would interpose bytes in that chain
-/// (worst case: **between** getpc and the first fixup).  The pass
-/// **redirects** such P(k): emit mov+prefetch **before** `s_getpc_b64` and
-/// re-walk byte sizes.
+/// from getpc through those adds; inserting **`s_prefetch_inst_pc_rel`**
+/// **between** getpc and the fixups shifts layout and invalidates the address
+/// arithmetic.  While the forward window is open, a naive “insert before this
+/// instruction” for any of its **N** real insns (`s_getpc_b64` plus **N−1**
+/// followers) would interpose bytes in that chain (worst case: **between**
+/// getpc and the first fixup).  The pass **redirects** such P(k): emit prefetch
+/// **before** `s_getpc_b64` and re-walk byte sizes.
 ///
 /// **Window size (constants below).**  **N** =
 /// `kSwPrefetchForwardWindowRealInsnCount` counts real Stinky insns with
@@ -96,97 +95,70 @@ bool swPrefetchLabelNameExists(BasicBlock& bb, const std::string& name) {
     return false;
 }
 
-/// Default SGPR when ModuleOptions::SwPrefetchScratchSgpr is unset (< 0).
-constexpr unsigned kSwPrefetchPcRelDefaultScratchSgprIdx = 102;
-constexpr int32_t kSwPrefetchPcRelSlengthImm = 31;
+/// klength simm5: 31 => 32 instruction cache lines (128 B each), same as CK `INST_PREFETCH`.
+constexpr int32_t kSwPrefetchPcRelKlengthImm = 31;
 
-/// \brief Build **`s_mov_b32`** (scratch + imm **31**) and
-/// **`s_prefetch_inst_pc_rel`**, attach
-///        both **before** \p anchorIt.  Emitted order toward the anchor: …,
-///        prefetch, mov,
-///        `*anchorIt`.
+static void addSwPrefetchInstPcRelOperands(StinkyInstruction& prefetchInst) {
+    prefetchInst.addSrcReg(StinkyRegister(0));
+    prefetchInst.addSrcReg(StinkyRegister("null"));
+    prefetchInst.addSrcReg(StinkyRegister(kSwPrefetchPcRelKlengthImm));
+}
+
+/// \brief Emit **`s_prefetch_inst_pc_rel`** (`koffset=0`, `null`, `klength=31`)
+///        **before** \p anchorIt.
 ///
-/// **Sizing.**  Literal/base bytes use **`getEffectiveBaseSizeInBytes`** /
-/// **`getLiteralExtraBytes`** at the mov’s global PC **`blockGlobalByteOffset +
-/// blockLocalByteOffsetWhereMovStarts`**, then at the prefetch’s global PC
-/// after **`movB`**. \p labelOff / \p asmSetSymbols are passed through for
-/// PC-relative literal rules (caller may already map pseudo-labels used by this
-/// pair).
+/// **Sizing.**  Uses **`getEffectiveBaseSizeInBytes`** /
+/// **`getLiteralExtraBytes`** at **`blockGlobalByteOffset +
+/// blockLocalByteOffsetWherePrefetchStarts`**. \p labelOff / \p asmSetSymbols are
+/// passed through for PC-relative literal rules.
 ///
-/// \param blockLocalByteOffsetWhereMovStarts  Block-local offset from block
-/// start to the mov’s
-///        first byte **before** this insert—usually the walk’s **`totalBytes`**
-///        at \p anchorIt, or
-///        **`nextMovLocal`** when stacking redirects **before**
-///        **`s_getpc_b64`** (includes bytes of prior mov+prefetch pairs already
-///        placed at that anchor).
-/// \param walkTotalBytes  Incremented by **`movB + pfB`** so a live forward
-/// walk stays aligned;
-///        pass a stack **`dummyWalk`** (e.g. **`0`**) when the caller will
-///        rewind **`totalBytes`** and re-walk and only needs the **return**
-///        value.
+/// \param blockLocalByteOffsetWherePrefetchStarts  Block-local offset to the
+///        prefetch’s first byte before this insert—usually the walk’s
+///        **`totalBytes`** at \p anchorIt, or **`nextPrefetchLocal`** when
+///        stacking redirects before **`s_getpc_b64`**.
+/// \param walkTotalBytes  Incremented by the prefetch size; pass **`dummyWalk`**
+///        when the caller re-walks **`totalBytes`** separately.
 ///
-/// \return **`movB + pfB`**, or **0** if **`s_mov_b32`** or
-/// **`s_prefetch_inst_pc_rel`** has no
+/// \return Prefetch size in bytes, or **0** if **`s_prefetch_inst_pc_rel`** has no
 ///         **`HwInstDesc`** for \p archId.
 int64_t insertSwPrefetchInstPcRelBefore(
-    BasicBlock& bb, IRList::iterator anchorIt, GfxArchID archId, unsigned scratchSgprIdx,
-    AsmIRBuilder& builder, std::unordered_map<std::string, int64_t>* labelOff,
-    int64_t blockGlobalByteOffset, int64_t blockLocalByteOffsetWhereMovStarts,
-    int64_t& walkTotalBytes, const std::unordered_map<std::string, int64_t>* asmSetSymbols) {
+    BasicBlock& bb, IRList::iterator anchorIt, GfxArchID archId, AsmIRBuilder& builder,
+    std::unordered_map<std::string, int64_t>* labelOff, int64_t blockGlobalByteOffset,
+    int64_t blockLocalByteOffsetWherePrefetchStarts, int64_t& walkTotalBytes,
+    const std::unordered_map<std::string, int64_t>* asmSetSymbols) {
     const HwInstDesc* pfMc = getMCIDByUOp(GFX::s_prefetch_inst_pc_rel, archId);
     if (pfMc == nullptr) return 0;
-    const HwInstDesc* movMc = getMCIDByUOp(GFX::s_mov_b32, archId);
-    if (movMc == nullptr) return 0;
-
-    // Program order: s_mov_b32 then s_prefetch_inst_pc_rel (insert before anchor,
-    // last insertIR sits closest to anchor — insert mov first, then prefetch).
-    StinkyInstruction* movInst = builder.create(movMc);
-    movInst->addDestReg(StinkyRegister(RegType::S, scratchSgprIdx, 1));
-    movInst->addSrcReg(StinkyRegister(kSwPrefetchPcRelSlengthImm));
 
     StinkyInstruction* prefetchInst = builder.create(pfMc);
-    prefetchInst->addSrcReg(StinkyRegister(0));
-    prefetchInst->addSrcReg(StinkyRegister(RegType::S, scratchSgprIdx, 1));
-    prefetchInst->addSrcReg(StinkyRegister(0));
+    addSwPrefetchInstPcRelOperands(*prefetchInst);
 
-    int64_t curLocal = blockLocalByteOffsetWhereMovStarts;
-
-    const int64_t gMov = blockGlobalByteOffset + curLocal;
-    const int movB = getEffectiveBaseSizeInBytes(*movInst) +
-                     getLiteralExtraBytes(*movInst, labelOff, gMov, asmSetSymbols);
-    curLocal += movB;
-
-    const int64_t gPf = blockGlobalByteOffset + curLocal;
+    const int64_t gPf = blockGlobalByteOffset + blockLocalByteOffsetWherePrefetchStarts;
     const int pfB = getEffectiveBaseSizeInBytes(*prefetchInst) +
                     getLiteralExtraBytes(*prefetchInst, labelOff, gPf, asmSetSymbols);
 
-    walkTotalBytes += movB;
     walkTotalBytes += pfB;
 
-    bb.insertIR(anchorIt, movInst);
     bb.insertIR(anchorIt, prefetchInst);
-    return static_cast<int64_t>(movB) + static_cast<int64_t>(pfB);
+    return static_cast<int64_t>(pfB);
 }
 
-/// One mov+prefetch pair before \p anchorIt (`s_getpc_b64`), chaining \p
-/// nextMovLocal, then re-walk \p windowIters so \p totalBytes matches IR (same
-/// as end-of-window batch flush, but per P(k) hit inside the forward window).
+/// One prefetch before \p anchorIt (`s_getpc_b64`), chaining \p nextPrefetchLocal,
+/// then re-walk \p windowIters so \p totalBytes matches IR (same as end-of-window
+/// batch flush, but per P(k) hit inside the forward window).
 void insertPrefetchBeforeGetpcAndRewalkWindow(
     BasicBlock& bb, IRList::iterator anchorIt, const std::vector<IRList::iterator>& windowIters,
-    int64_t totalBytesAtGetpcStart, int64_t& nextMovLocal, int64_t blockGlobalByteOffset,
-    GfxArchID archId, unsigned scratchSgprIdx, AsmIRBuilder& builder,
-    std::unordered_map<std::string, int64_t>& labelOff, int64_t& totalBytes, std::ostream* dbgOut,
+    int64_t totalBytesAtGetpcStart, int64_t& nextPrefetchLocal, int64_t blockGlobalByteOffset,
+    GfxArchID archId, AsmIRBuilder& builder, std::unordered_map<std::string, int64_t>& labelOff,
+    int64_t& totalBytes, std::ostream* dbgOut,
     const std::unordered_map<std::string, int64_t>* asmSetSymbols) {
     int64_t dummyWalk = 0;
-    const int64_t d = insertSwPrefetchInstPcRelBefore(bb, anchorIt, archId, scratchSgprIdx, builder,
-                                                      &labelOff, blockGlobalByteOffset,
-                                                      nextMovLocal, dummyWalk, asmSetSymbols);
-    nextMovLocal += d;
-    // Block-local offset at start of s_getpc_b64 after stacked pairs: equals
-    // totalBytes + inserted bytes.
-    totalBytes = nextMovLocal;
-    const int64_t bytesInsertedBeforeGetpc = nextMovLocal - totalBytesAtGetpcStart;
+    const int64_t d = insertSwPrefetchInstPcRelBefore(bb, anchorIt, archId, builder, &labelOff,
+                                                      blockGlobalByteOffset, nextPrefetchLocal,
+                                                      dummyWalk, asmSetSymbols);
+    nextPrefetchLocal += d;
+    // Block-local offset at start of s_getpc_b64 after stacked prefetches.
+    totalBytes = nextPrefetchLocal;
+    const int64_t bytesInsertedBeforeGetpc = nextPrefetchLocal - totalBytesAtGetpcStart;
     for (const IRList::iterator& wit : windowIters) {
         StinkyInstruction& winst = getStinkyInst(wit);
         const int64_t gBefore = blockGlobalByteOffset + totalBytes;
@@ -196,46 +168,31 @@ void insertPrefetchBeforeGetpcAndRewalkWindow(
     }
 
     if (dbgOut != nullptr) {
-        *dbgOut << "[SwPrefetchInsertionPass] getpc-window redirect insert: bb=\"" << bb.getLabel()
-                << "\", window_insn_count=" << windowIters.size()
+        *dbgOut << "[SwInstructionPrefetchRelStaticPass] getpc-window redirect insert: bb=\""
+                << bb.getLabel() << "\", window_insn_count=" << windowIters.size()
                 << ", cumulative_bytes_before_getpc=" << bytesInsertedBeforeGetpc << "\n";
     }
 }
 
-void appendSwPrefetchInstPcRel(BasicBlock& bb, GfxArchID archId, unsigned scratchSgprIdx,
-                               AsmIRBuilder& builder,
+void appendSwPrefetchInstPcRel(BasicBlock& bb, GfxArchID archId, AsmIRBuilder& builder,
                                std::unordered_map<std::string, int64_t>* labelOff,
                                int64_t blockGlobalByteOffset, int64_t& totalBytes,
                                const std::unordered_map<std::string, int64_t>* asmSetSymbols) {
     const HwInstDesc* pfMc = getMCIDByUOp(GFX::s_prefetch_inst_pc_rel, archId);
     if (pfMc == nullptr) return;
-    const HwInstDesc* movMc = getMCIDByUOp(GFX::s_mov_b32, archId);
-    if (movMc == nullptr) return;
-
-    StinkyInstruction* movInst = builder.create(movMc);
-    movInst->addDestReg(StinkyRegister(RegType::S, scratchSgprIdx, 1));
-    movInst->addSrcReg(StinkyRegister(kSwPrefetchPcRelSlengthImm));
 
     StinkyInstruction* prefetchInst = builder.create(pfMc);
-    prefetchInst->addSrcReg(StinkyRegister(0));
-    prefetchInst->addSrcReg(StinkyRegister(RegType::S, scratchSgprIdx, 1));
-    prefetchInst->addSrcReg(StinkyRegister(0));
-
-    const int64_t gMov = blockGlobalByteOffset + totalBytes;
-    const int movB = getEffectiveBaseSizeInBytes(*movInst) +
-                     getLiteralExtraBytes(*movInst, labelOff, gMov, asmSetSymbols);
-    totalBytes += movB;
+    addSwPrefetchInstPcRelOperands(*prefetchInst);
 
     const int64_t gPf = blockGlobalByteOffset + totalBytes;
     const int pfB = getEffectiveBaseSizeInBytes(*prefetchInst) +
                     getLiteralExtraBytes(*prefetchInst, labelOff, gPf, asmSetSymbols);
     totalBytes += pfB;
 
-    bb.appendIR(movInst);
     bb.appendIR(prefetchInst);
 }
 
-/// \brief Place software prefetch (`s_mov_b32` + `s_prefetch_inst_pc_rel`) at
+/// \brief Place software prefetch (`s_prefetch_inst_pc_rel`) at
 /// fixed **global**
 ///        byte boundaries P(k), using one forward IR walk per basic block.
 ///
@@ -268,7 +225,7 @@ void appendSwPrefetchInstPcRel(BasicBlock& bb, GfxArchID archId, unsigned scratc
 /// instructions (so the protected region is
 /// `kSwPrefetchForwardWindowRealInsnCount` real insns: getpc plus the following
 /// N-1).  While the guard is active, a P(k) that would normally insert *before*
-/// the current instruction is redirected: mov+prefetch go **before** the queued
+/// the current instruction is redirected: prefetch goes **before** the queued
 /// `s_getpc_b64`, the window is re-walked from that getpc so `totalBytes` and
 /// literal layout stay consistent, and the current instruction's size is
 /// absorbed by that rewalk when applicable.  When the guard expires (or the BB
@@ -277,20 +234,20 @@ void appendSwPrefetchInstPcRel(BasicBlock& bb, GfxArchID archId, unsigned scratc
 /// **Post-walk flush.**  Any P(k) that lies in `[blockGlobalByteOffset,
 /// blockEndGlobal]` but never fell strictly inside some instruction's
 /// `(globalPcBefore, globalPcAfter]` (e.g. only labels, alignment, or P exactly
-/// at a boundary with no spanning op) is satisfied by appending mov+ prefetch
-/// at the **end** of the block.
+/// at a boundary with no spanning op) is satisfied by appending prefetch at the
+/// **end** of the block.
 ///
 /// \param allowSwPrefetchInsertion  If false, perform the identical walk
 /// (including getpc-window
 ///        logic and `kNext` updates) so sizes and decisions match the inserting
-///        path, but do not emit mov/prefetch IR or mutate the BB.  The pass
+///        path, but do not emit prefetch IR or mutate the BB.  The pass
 ///        uses this with loop detection
 ///        (`findLoopForBB` / `detectLoops`) to skip natural loop bodies while
 ///        keeping global layout accounting aligned.  Compiler "unrolled" loops
 ///        are not tagged separately here; use label heuristics or other
 ///        metadata if you need unroll-specific behavior.
 void insertSwPrefetchLabels(BasicBlock& bb, int64_t blockGlobalByteOffset, GfxArchID archId,
-                            unsigned scratchSgprIdx, std::ostream* dbgOut,
+                            std::ostream* dbgOut,
                             const std::unordered_map<std::string, int64_t>* asmSetSymbols,
                             bool allowSwPrefetchInsertion = true) {
     std::unordered_map<std::string, int64_t> labelOff;
@@ -304,9 +261,9 @@ void insertSwPrefetchLabels(BasicBlock& bb, int64_t blockGlobalByteOffset, GfxAr
     int64_t totalBytesAtGetpcStart = 0;
     /// Program order: getpc then next (N-1) real insns; |vector| ≤ N.
     std::vector<IRList::iterator> getpcWindowIters;
-    /// Mov encoding start before getpc; equals G at window open, then increases
-    /// per stacked pair.
-    int64_t nextMovBlockOffsetBeforeGetpc = 0;
+    /// Prefetch encoding start before getpc; equals G at window open, then grows
+    /// per stacked prefetch at that anchor.
+    int64_t nextPrefetchBlockOffsetBeforeGetpc = 0;
 
     AsmIRBuilder builder(bb, archId);
 
@@ -337,7 +294,7 @@ void insertSwPrefetchLabels(BasicBlock& bb, int64_t blockGlobalByteOffset, GfxAr
             getpcWindowIters.clear();
             getpcWindowIters.push_back(it);
             totalBytesAtGetpcStart = totalBytes;
-            nextMovBlockOffsetBeforeGetpc = totalBytesAtGetpcStart;
+            nextPrefetchBlockOffsetBeforeGetpc = totalBytesAtGetpcStart;
             getpcPcRelChainGuardRemaining = kSwPrefetchForwardWindowInsnsAfterGetpc;
         } else if (!getpcWindowIters.empty() && getpcPcRelChainGuardRemaining > 0u) {
             if (getpcWindowIters.size() <
@@ -381,14 +338,13 @@ void insertSwPrefetchLabels(BasicBlock& bb, int64_t blockGlobalByteOffset, GfxAr
                     labelOff[name] = globalPcAfter;
                     if (getpcPcRelChainGuardRemaining == 0u) {
                         (void)insertSwPrefetchInstPcRelBefore(
-                            bb, it, archId, scratchSgprIdx, builder, &labelOff,
-                            blockGlobalByteOffset, walkOffsetAtInstStart, totalBytes,
-                            asmSetSymbols);
+                            bb, it, archId, builder, &labelOff, blockGlobalByteOffset,
+                            walkOffsetAtInstStart, totalBytes, asmSetSymbols);
                     } else if (!getpcWindowIters.empty()) {
                         insertPrefetchBeforeGetpcAndRewalkWindow(
                             bb, getpcWindowIters.front(), getpcWindowIters, totalBytesAtGetpcStart,
-                            nextMovBlockOffsetBeforeGetpc, blockGlobalByteOffset, archId,
-                            scratchSgprIdx, builder, labelOff, totalBytes, dbgOut, asmSetSymbols);
+                            nextPrefetchBlockOffsetBeforeGetpc, blockGlobalByteOffset, archId,
+                            builder, labelOff, totalBytes, dbgOut, asmSetSymbols);
                         redirectRewalkAbsorbedCurrentInstSizes = true;
                     }
                 }
@@ -427,61 +383,26 @@ void insertSwPrefetchLabels(BasicBlock& bb, int64_t blockGlobalByteOffset, GfxAr
                 // StinkyInstruction* lbl = builder.createLabel(name, 1);
                 // bb.appendIR(lbl);
                 labelOff[name] = blockEndGlobal;
-                appendSwPrefetchInstPcRel(bb, archId, scratchSgprIdx, builder, &labelOff,
-                                          blockGlobalByteOffset, totalBytes, asmSetSymbols);
+                appendSwPrefetchInstPcRel(bb, archId, builder, &labelOff, blockGlobalByteOffset,
+                                          totalBytes, asmSetSymbols);
             }
         }
         ++kNext;
     }
 }
 
-/// Debug-only: where SW prefetch would be placed using pseudo labels
-/// `label_SWprefetch_<k>`. Uses the same layout walk as
-/// accumulateInstructionSize (literal/label-aware).
-void debugPrintSwPrefetchProposals(std::ostream& os, BasicBlock& bb, int64_t blockGlobalByteOffset,
-                                   const std::unordered_map<std::string, int64_t>* asmSetSymbols) {
-    std::unordered_map<std::string, int64_t> labelOff;
-    std::vector<IRList::iterator> instIters;
-    std::vector<int64_t> localStart;
-    int64_t totalBytes = 0;
+/// Debug-only: list P(k) grid boundaries that fall in this basic block.
+/// Per-instruction placement (including emitted `s_prefetch_inst_pc_rel`) is
+/// already printed by **`accumulateInstructionSize`** above (global **`total=`**).
+void debugPrintSwPrefetchGrid(std::ostream& os, const std::string& bbLabel,
+                              int64_t blockGlobalStart, int64_t blockBytes) {
+    const int64_t blockEndGlobal = blockGlobalStart + blockBytes;
 
-    for (IRList::iterator it = bb.begin(); it != bb.end(); ++it) {
-        IRBase* node = it.getNodePtr();
-        addAlignmentPaddingFromDirectiveNode(node, blockGlobalByteOffset, totalBytes, &os);
-        if (node->getType() == IRBase::IRType::StinkyAsmDirective) continue;
-        if (node->getType() != IRBase::IRType::StinkyTofu) continue;
-
-        StinkyInstruction& inst = getStinkyInst(it);
-        if (inst.getUnifiedOpcode() == GFX::PHI) continue;
-        if (inst.getUnifiedOpcode() == GFX::LABEL) {
-            if (const LabelData* ld = inst.getModifier<LabelData>()) {
-                addAlignmentPaddingForLabelInstruction(inst, blockGlobalByteOffset, totalBytes,
-                                                       &os);
-                labelOff[ld->label] = blockGlobalByteOffset + totalBytes;
-            }
-            continue;
-        }
-
-        const int64_t pcLocalBefore = totalBytes;
-        const int baseSize = getEffectiveBaseSizeInBytes(inst);
-        const int64_t globalPcBefore = blockGlobalByteOffset + totalBytes;
-        const int literalExtra =
-            getLiteralExtraBytes(inst, &labelOff, globalPcBefore, asmSetSymbols);
-        const int instBytes = baseSize + literalExtra;
-
-        instIters.push_back(it);
-        localStart.push_back(pcLocalBefore);
-        totalBytes += instBytes;
-    }
-
-    const int64_t L = totalBytes;
-    const int64_t blockEndGlobal = blockGlobalByteOffset + L;
-
-    os << "[SwPrefetchInsertionPass] SW prefetch proposals (pseudo labels "
+    os << "[SwInstructionPrefetchRelStaticPass] SW prefetch grid (pseudo labels "
           "label_SWprefetch_<k>), "
           "basic block \""
-       << bb.getLabel() << "\" blockGlobalStart=" << blockGlobalByteOffset << " blockSize=" << L
-       << "\n";
+       << bbLabel << "\" blockGlobalStart=" << blockGlobalStart << " blockSize=" << blockBytes
+       << " P(k)=" << kSwPrefetchFirstGlobalByte << "+k*" << kSwPrefetchSpacingBytes << "\n";
 
     if (blockEndGlobal < kSwPrefetchFirstGlobalByte) {
         os << "  (none: block end " << blockEndGlobal << " < first threshold "
@@ -492,79 +413,24 @@ void debugPrintSwPrefetchProposals(std::ostream& os, BasicBlock& bb, int64_t blo
     for (int64_t k = 0;; ++k) {
         const int64_t P = kSwPrefetchFirstGlobalByte + k * kSwPrefetchSpacingBytes;
         if (P > blockEndGlobal) break;
-        if (P < blockGlobalByteOffset) continue;
+        if (P < blockGlobalStart) continue;
 
-        const std::string pseudoLabel = std::string("label_SWprefetch_") + std::to_string(k);
-
-        size_t found = static_cast<size_t>(-1);
-        for (size_t i = 0; i < localStart.size(); ++i) {
-            const int64_t insnGlobalStart = blockGlobalByteOffset + localStart[i];
-            StinkyInstruction& instProbe = getStinkyInst(instIters[i]);
-            const int baseSz = getEffectiveBaseSizeInBytes(instProbe);
-            const int litEx =
-                getLiteralExtraBytes(instProbe, &labelOff, insnGlobalStart, asmSetSymbols);
-            const int iBytes = baseSz + litEx;
-            const int64_t insnGlobalEndExcl = insnGlobalStart + iBytes;
-            if (insnGlobalStart < P && P <= insnGlobalEndExcl) {
-                found = i;
-                break;
-            }
-        }
-
-        if (found != static_cast<size_t>(-1)) {
-            StinkyInstruction& inst = getStinkyInst(instIters[found]);
-            const int64_t insnGlobalStart = blockGlobalByteOffset + localStart[found];
-
-            int cost;
-            if (isMFMA(inst) || isWMMA(inst))
-                cost = inst.latencyCycles;
-            else
-                cost = inst.issueCycles;
-
-            const int baseSize = getEffectiveBaseSizeInBytes(inst);
-            const int literalExtra =
-                getLiteralExtraBytes(inst, &labelOff, insnGlobalStart, asmSetSymbols);
-            const int instBytes = baseSize + literalExtra;
-            const int64_t totalAfterLocal = localStart[found] + instBytes;
-
-            os << "  [SW prefetch pseudo=\"" << pseudoLabel << "\" k=" << k
-               << " global_insert_P=" << P
-               << " placement=before_instruction_span insn_global_pc=" << insnGlobalStart << "]\n";
-            os << "  [cost=" << cost << " cycles, size=" << baseSize;
-            if (literalExtra != 0)
-                os << "+" << literalExtra << "(literal)=" << instBytes << " bytes";
-            else
-                os << " bytes";
-            os << ", total=" << totalAfterLocal << " bytes";
-            os << ", opcode=" << inst.getUnifiedOpcode() << " (isa=" << inst.getISAOpcode()
-               << ")] ";
-            inst.dump(os);
-            os << "\n";
-        } else {
-            os << "  [SW prefetch pseudo=\"" << pseudoLabel << "\" k=" << k
-               << " global_insert_P=" << P
-               << " placement=append_after_last_instruction block_end_global=" << blockEndGlobal
-               << " block_total_local=" << L << " bytes]\n";
-            os << "  [no anchor instruction; prefetch would be emitted after last "
-                  "insn in this block]\n";
-        }
+        os << "  [label_SWprefetch_" << k << " k=" << k << " global_P=" << P
+           << " local_P=" << (P - blockGlobalStart)
+           << " (see accumulate dump: insn with total=" << P << ")]\n";
     }
 }
 
-class SwPrefetchInsertionPass : public StinkyInstPass {
+class SwInstructionPrefetchRelStaticPass : public StinkyInstPass {
    public:
     static char ID;
 
     const char* getName() const override {
-        return "SwPrefetchInsertionPass";
+        return "SwInstructionPrefetchRelStaticPass";
     }
 
     PassID getPassID() const override {
-        return &SwPrefetchInsertionPass::ID;
-    }
-
-    void setSwPrefetchScratchSgpr(unsigned idx) {
-        m_swPrefetchScratchSgpr = idx;
+        return &SwInstructionPrefetchRelStaticPass::ID;
     }
 
     /// When true, `insertSwPrefetchLabels` walks each BB as usual but does not
@@ -587,14 +453,15 @@ class SwPrefetchInsertionPass : public StinkyInstPass {
         const int64_t blockGlobalStart = m_byteOffsetBase;
         const bool allowIns =
             !m_skipSwPrefetchInNaturalLoopBodies || (findLoopForBB(m_loops, &bb) == nullptr);
-        insertSwPrefetchLabels(bb, blockGlobalStart, archId, m_swPrefetchScratchSgpr,
-                               m_debug ? m_debugStream : nullptr, &m_asmSetSymbols, allowIns);
+        insertSwPrefetchLabels(bb, blockGlobalStart, archId, m_debug ? m_debugStream : nullptr,
+                               &m_asmSetSymbols, allowIns);
 
         int blockCount = 0;
         int64_t blockBytes = 0;
         if (m_debug) {
-            *m_debugStream << "[SwPrefetchInsertionPass] BasicBlock: " << bb.getLabel() << "\n";
-            *m_debugStream << "[SwPrefetchInsertionPass] IR after SW prefetch label "
+            *m_debugStream << "[SwInstructionPrefetchRelStaticPass] BasicBlock: " << bb.getLabel()
+                           << "\n";
+            *m_debugStream << "[SwInstructionPrefetchRelStaticPass] IR after SW prefetch label "
                               "insertion:\n";
             // bb.dump(*m_debugStream);
             *m_debugStream << "\n";
@@ -603,7 +470,7 @@ class SwPrefetchInsertionPass : public StinkyInstPass {
             accumulateInstructionSize(bb, m_labelByteOffset, m_debug ? m_debugStream : nullptr,
                                       &blockCount, &blockBytes, m_byteOffsetBase, &m_asmSetSymbols);
         if (m_debug)
-            debugPrintSwPrefetchProposals(*m_debugStream, bb, m_byteOffsetBase, &m_asmSetSymbols);
+            debugPrintSwPrefetchGrid(*m_debugStream, bb.getLabel(), blockGlobalStart, blockBytes);
         m_totalInstructionCount += blockCount;
         m_totalBytes += blockBytes;
         m_byteOffsetBase += blockBytes;
@@ -632,11 +499,11 @@ class SwPrefetchInsertionPass : public StinkyInstPass {
 
         int blocksProcessed = 0;
         if (m_debug) {
-            *m_debugStream << "[SwPrefetchInsertionPass] processAllBlocks="
+            *m_debugStream << "[SwInstructionPrefetchRelStaticPass] processAllBlocks="
                            << (m_processAllBlocks ? "true" : "false") << ", function has "
                            << totalBlocksInFunction << " basic block(s)\n";
             dumpAsmSetSymbolMap(*m_debugStream, m_asmSetSymbols);
-            *m_debugStream << "[SwPrefetchInsertionPass] blocks to process:\n";
+            *m_debugStream << "[SwInstructionPrefetchRelStaticPass] blocks to process:\n";
         }
 
         for (BasicBlock& bb : func) {
@@ -652,15 +519,16 @@ class SwPrefetchInsertionPass : public StinkyInstPass {
         }
 
         if (m_debug) {
-            *m_debugStream << "[SwPrefetchInsertionPass] processed " << blocksProcessed << " / "
-                           << totalBlocksInFunction << " basic block(s)\n";
-            *m_debugStream << "[SwPrefetchInsertionPass] total instruction count = "
+            *m_debugStream << "[SwInstructionPrefetchRelStaticPass] processed " << blocksProcessed
+                           << " / " << totalBlocksInFunction << " basic block(s)\n";
+            *m_debugStream << "[SwInstructionPrefetchRelStaticPass] total instruction count = "
                            << m_totalInstructionCount << "\n";
-            *m_debugStream << "[SwPrefetchInsertionPass] total cycles = " << m_totalCycles << "\n";
-            *m_debugStream << "[SwPrefetchInsertionPass] total size = " << m_totalBytes
+            *m_debugStream << "[SwInstructionPrefetchRelStaticPass] total cycles = "
+                           << m_totalCycles << "\n";
+            *m_debugStream << "[SwInstructionPrefetchRelStaticPass] total size = " << m_totalBytes
                            << " bytes\n";
             if (!m_labelByteOffset.empty()) {
-                *m_debugStream << "[SwPrefetchInsertionPass] label -> byte offset:\n";
+                *m_debugStream << "[SwInstructionPrefetchRelStaticPass] label -> byte offset:\n";
                 for (const auto& kv : m_labelByteOffset)
                     *m_debugStream << "  \"" << kv.first << "\" -> " << kv.second << " bytes\n";
             }
@@ -693,32 +561,21 @@ class SwPrefetchInsertionPass : public StinkyInstPass {
     std::string m_debugOutputPath;
     std::ofstream m_debugFile;
     std::ostream* m_debugStream = &std::cerr;
-    /// Matches kernel `SwPrefetchScratch` / ModuleOptions::SwPrefetchScratchSgpr
-    /// (else default 102).
-    unsigned m_swPrefetchScratchSgpr = kSwPrefetchPcRelDefaultScratchSgprIdx;
 };
 
-char SwPrefetchInsertionPass::ID = 0;
+char SwInstructionPrefetchRelStaticPass::ID = 0;
 }  // namespace
 
 namespace stinkytofu {
-std::unique_ptr<Pass> createSwPrefetchInsertionPass(const std::string& debugOutputPath) {
-    auto p = std::make_unique<SwPrefetchInsertionPass>();
-    p->setSwPrefetchScratchSgpr(kSwPrefetchPcRelDefaultScratchSgprIdx);
+std::unique_ptr<Pass> createSwInstructionPrefetchRelStaticPass(const std::string& debugOutputPath) {
+    auto p = std::make_unique<SwInstructionPrefetchRelStaticPass>();
     p->setDebugOutputPath(debugOutputPath);
     if (!debugOutputPath.empty()) p->setDebug(true);
     return p;
 }
 
-std::unique_ptr<Pass> createSwPrefetchInsertionPass(StinkyAsmModule& module) {
-    auto p = std::make_unique<SwPrefetchInsertionPass>();
-    {
-        const auto& opt = module.getModuleOptions();
-        const unsigned scratch = (opt.SwPrefetchScratchSgpr >= 0)
-                                     ? static_cast<unsigned>(opt.SwPrefetchScratchSgpr)
-                                     : kSwPrefetchPcRelDefaultScratchSgprIdx;
-        p->setSwPrefetchScratchSgpr(scratch);
-    }
+std::unique_ptr<Pass> createSwInstructionPrefetchRelStaticPass(StinkyAsmModule& module) {
+    auto p = std::make_unique<SwInstructionPrefetchRelStaticPass>();
     if (!module.getOutputDir().empty()) {
         const std::string costBasename =
             module.getOutputName().empty() ? module.getName() : module.getOutputName();

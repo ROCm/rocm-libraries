@@ -220,7 +220,10 @@ struct STINKYTOFU_EXPORT StinkyRegister {
         : dataType(Type::Register),
           reg{stringToRegType(typeStr), regIdx, regNum, offset, false, false} {}
 
-    StinkyRegister(const std::string& str) : dataType(Type::LiteralString), literalValue(str) {}
+    StinkyRegister(const std::string& str) : dataType(Type::LiteralString), literalValue(str) {
+        // LiteralString uses literalValue only; zero the union so copy/move stay defined.
+        reg = {RegType::UNKNOWN, 0, 0, 0, false, false};
+    }
 
     StinkyRegister(int literalInt) : dataType(Type::LiteralInt), literalInt(literalInt) {}
 
