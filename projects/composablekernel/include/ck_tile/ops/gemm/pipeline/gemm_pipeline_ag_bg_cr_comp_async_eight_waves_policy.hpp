@@ -106,6 +106,7 @@ struct GemmPipelineAgBgCrCompAsyncEightWavesPolicy
     static_assert(warp_num * warp_size == BlockSize, "Wrong!");
 
     static_assert(sizeof(ADataType) == sizeof(BDataType), "Wrong!");
+    static_assert(sizeof(ADataType) == sizeof(ComputeDataType));
     static constexpr index_t ElementSize = sizeof(ComputeDataType);
     static constexpr index_t K2          = Problem::VectorLoadSize / ElementSize * PackedSize;
     // We define kDramLoadPackElems as 128 for fp6 because K2 == 16, so in this way we have correct

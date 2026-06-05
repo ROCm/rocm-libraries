@@ -63,6 +63,7 @@ struct GemmPipelineAgBgCrEightWavesImplBase : public GemmPipelineAgBgCrImplBase<
                                        DstBlockTile& dst_block_tile,
                                        SrcTileWindow& lds_tile_window) const
     {
+        // swizzle factor limitation
         using static_move_ys =
             std::conditional_t<std::is_same_v<DataType, pk_fp6x16_t>, false_type, true_type>;
         lds_tile_window.set_bottom_tensor_view_data_ptr(smem);
@@ -74,6 +75,7 @@ struct GemmPipelineAgBgCrEightWavesImplBase : public GemmPipelineAgBgCrImplBase<
                                        DstBlockTile& dst_block_tile,
                                        SrcTileWindow& lds_tile_window) const
     {
+        // swizzle factor limitation
         using static_move_ys =
             std::conditional_t<std::is_same_v<DataType, pk_fp6x16_t>, false_type, true_type>;
         lds_tile_window.set_bottom_tensor_view_data_ptr(smem);
