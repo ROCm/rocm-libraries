@@ -22,7 +22,29 @@
 #
 ################################################################################
 
+"""Build-only test phase for YAML kernel configs.
+
+This module is activated by the ``--build-only`` pytest flag and is excluded
+from collection in all other modes by the ``pytest_ignore_collect`` hook in
+``conftest.py``.
+
+Role in the split-CI workflow::
+
+    build (this file)  -->  artifact (.tar.gz)  -->  run (test_config_run.py)
+
+This phase compiles kernels and packs the results into a per-config .tar.gz
+artifact written to ``--artifact-dir``. It does not require a GPU — kernel
+compilation is CPU-only — and is intended to run on a CPU-heavy CI node.
+The artifact is uploaded by CI and consumed by the run phase on a GPU node.
+
+For local single-machine testing (build + run in one pytest session) see
+``test_config.py``, which calls ``_build`` and ``_run`` via isolated
+subprocesses to exercise the same artifact round-trip.
+"""
+
 import os
+
+import py
 import pytest
 
 from Tensile import Tensile
@@ -30,20 +52,24 @@ from Tensile import Tensile
 from artifact_helpers import artifact_name_for_config, compress_output
 
 
-def test_config_build(tensile_args, config, tmpdir, pytestconfig):
-    """Build kernels without benchmarking. Produces a .tar.gz artifact.
+def _build(config: str, output_dir: str, artifact_dir: str, tensile_args: list[str]) -> None:
+    """Build kernels and compress the result to artifact_dir.
 
-    Only runs when --build-only is passed. Does not require the target GPU.
-    The compressed artifact is written to --artifact-dir so it persists
-    after the test for CI to upload.
+    Callable from both the pytest wrapper below and from test_config.py via
+    subprocess (where it runs in a clean process to avoid global-state bleed).
     """
-    if not pytestconfig.getoption("--build-only"):
-        pytest.skip("requires --build-only")
+    Tensile.Tensile([config, output_dir, "--build-only", *tensile_args])
+    compress_output(output_dir, dest_dir=artifact_dir, name=artifact_name_for_config(config))
 
-    artifact_dir = pytestconfig.getoption("--artifact-dir")
-    output_dir = os.path.join(tmpdir.strpath, "output")
-    args = [config, output_dir, "--build-only", *tensile_args]
-    Tensile.Tensile(args)
 
-    artifact_name = artifact_name_for_config(config)
-    compress_output(output_dir, dest_dir=artifact_dir, name=artifact_name)
+def test_config_build(tensile_args: list[str], config: str, tmpdir: py.path.local, pytestconfig: pytest.Config) -> None:
+    """Pytest wrapper: build kernels for one YAML config and emit a .tar.gz artifact.
+
+    Activated only when ``--build-only`` is passed; collection is skipped in all
+    other modes by ``conftest.pytest_ignore_collect``. Does not require a GPU.
+
+    The artifact is written to ``--artifact-dir`` (not ``tmpdir``) so it
+    survives after the test and can be uploaded by CI for the run phase.
+    """
+    output_dir = os.path.join(tmpdir.strpath, artifact_name_for_config(config))
+    _build(config, output_dir, pytestconfig.getoption("--artifact-dir"), tensile_args)

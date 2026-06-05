@@ -22,7 +22,30 @@
 #
 ################################################################################
 
+"""Run-only test phase for YAML kernel configs.
+
+This module is activated by the ``--use-cache`` pytest flag and is excluded
+from collection in all other modes by the ``pytest_ignore_collect`` hook in
+``conftest.py``.
+
+Role in the split-CI workflow::
+
+    build (test_config_build.py)  -->  artifact (.tar.gz)  -->  run (this file)
+
+This phase extracts a pre-built artifact from ``--artifact-dir`` and benchmarks
+the cached kernels on the target GPU. It requires a GPU and an artifact
+previously produced by ``test_config_build.py``. The artifact is extracted into
+``tmpdir`` rather than back into ``--artifact-dir``, so the shared artifact
+directory is never modified by the run phase.
+
+For local single-machine testing (build + run in one pytest session) see
+``test_config.py``, which calls ``_build`` and ``_run`` via isolated
+subprocesses to exercise the same artifact round-trip.
+"""
+
 import os
+
+import py
 import pytest
 
 from Tensile import Tensile
@@ -30,24 +53,29 @@ from Tensile import Tensile
 from artifact_helpers import artifact_name_for_config, extract_artifact
 
 
-def test_config_run(tensile_args, config, tmpdir, pytestconfig):
-    """Run benchmarks using a previously built cache.
+def _run(config: str, output_dir: str, artifact_dir: str, tensile_args: list[str]) -> None:
+    """Extract a pre-built artifact and run benchmarks against it.
 
-    Only runs when --use-cache is passed. Requires the target GPU and
-    --artifact-dir pointing to where build artifacts are stored.
-    Extracts the artifact into tmpdir so --artifact-dir is not modified.
+    Callable from both the pytest wrapper below and from test_config.py via
+    subprocess (where it runs in a clean process to avoid global-state bleed).
     """
-    if not pytestconfig.getoption("--use-cache"):
-        pytest.skip("requires --use-cache")
-
-    artifact_dir = pytestconfig.getoption("--artifact-dir")
     artifact_name = artifact_name_for_config(config)
     tarball = os.path.join(artifact_dir, artifact_name + ".tar.gz")
-    assert os.path.isfile(tarball), \
-        f"Artifact tarball not found: {tarball}"
-
-    output_dir = os.path.join(tmpdir.strpath, artifact_name)
+    assert os.path.isfile(tarball), f"Artifact tarball not found: {tarball}"
     extract_artifact(tarball, output_dir)
+    Tensile.Tensile([config, output_dir, "--use-cache", *tensile_args])
 
-    args = [config, output_dir, "--use-cache", *tensile_args]
-    Tensile.Tensile(args)
+
+def test_config_run(tensile_args: list[str], config: str, tmpdir: py.path.local, pytestconfig: pytest.Config) -> None:
+    """Pytest wrapper: extract a pre-built artifact and benchmark on the GPU.
+
+    Activated only when ``--use-cache`` is passed; collection is skipped in all
+    other modes by ``conftest.pytest_ignore_collect``. Requires a GPU.
+
+    ``--artifact-dir`` must point to the directory where ``test_config_build``
+    wrote the artifact. The artifact is extracted into ``tmpdir`` so the shared
+    artifact directory is not modified by this phase.
+    """
+    artifact_name = artifact_name_for_config(config)
+    output_dir = os.path.join(tmpdir.strpath, artifact_name)
+    _run(config, output_dir, pytestconfig.getoption("--artifact-dir"), tensile_args)
