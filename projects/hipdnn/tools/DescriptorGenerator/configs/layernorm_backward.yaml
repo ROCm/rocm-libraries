@@ -5,7 +5,7 @@ operation:
   fbs_generated_header: "layernorm_backward_attributes_generated.h"
 
   descriptor_type:
-    enum_name: "HIPDNN_BACKEND_OPERATION_LAYERNORM_BACKWARD_DESCRIPTOR"
+    enum_name: "HIPDNN_BACKEND_OPERATION_LAYERNORM_BACKWARD_DESCRIPTOR_EXT"
 
   operation_attr_prefix: "HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD"
 

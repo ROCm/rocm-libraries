@@ -17,7 +17,8 @@ inline Error createLayernormBackwardOperation(
     std::vector<ScopedHipdnnBackendDescriptor>& operations)
 {
     // Create operation descriptor
-    ScopedHipdnnBackendDescriptor opDesc(HIPDNN_BACKEND_OPERATION_LAYERNORM_BACKWARD_DESCRIPTOR);
+    ScopedHipdnnBackendDescriptor opDesc(
+        HIPDNN_BACKEND_OPERATION_LAYERNORM_BACKWARD_DESCRIPTOR_EXT);
     if(!opDesc.valid())
     {
         return {ErrorCode::HIPDNN_BACKEND_ERROR,

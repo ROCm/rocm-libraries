@@ -324,7 +324,7 @@ std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::NodeT>
 
 hipdnnBackendDescriptorType_t LayernormBackwardOperationDescriptor::getStaticType()
 {
-    return HIPDNN_BACKEND_OPERATION_LAYERNORM_BACKWARD_DESCRIPTOR;
+    return HIPDNN_BACKEND_OPERATION_LAYERNORM_BACKWARD_DESCRIPTOR_EXT;
 }
 
 std::string LayernormBackwardOperationDescriptor::toString() const

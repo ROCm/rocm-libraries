@@ -142,7 +142,7 @@ TEST_F(TestLayernormBackwardOperationFromNode, CreatesValidFinalizedDescriptor)
 
     ASSERT_NE(desc, nullptr);
     ASSERT_TRUE(desc->isFinalized());
-    ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_OPERATION_LAYERNORM_BACKWARD_DESCRIPTOR);
+    ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_OPERATION_LAYERNORM_BACKWARD_DESCRIPTOR_EXT);
     EXPECT_EQ(desc->getData().dy_tensor_uid, K_LAYERNORMBACKWARD_TENSOR_DY_UID);
 }
 

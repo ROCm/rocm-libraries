@@ -321,6 +321,6 @@ typedef enum
      * gradient (DX), scale gradient and mean gradient tensors, a backward
      * layernorm operator, and a compute data type
      */
-    HIPDNN_BACKEND_OPERATION_LAYERNORM_BACKWARD_DESCRIPTOR = 35,
+    HIPDNN_BACKEND_OPERATION_LAYERNORM_BACKWARD_DESCRIPTOR_EXT = 35,
 
 } hipdnnBackendDescriptorType_t;

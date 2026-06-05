@@ -165,7 +165,7 @@ TEST_F(TestLayernormBackwardOperationDescriptor, CreateDescriptor)
     auto desc = getDescriptor();
     ASSERT_NE(desc, nullptr);
     ASSERT_FALSE(desc->isFinalized());
-    ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_OPERATION_LAYERNORM_BACKWARD_DESCRIPTOR);
+    ASSERT_EQ(desc->getType(), HIPDNN_BACKEND_OPERATION_LAYERNORM_BACKWARD_DESCRIPTOR_EXT);
 }
 
 TEST_F(TestLayernormBackwardOperationDescriptor, FinalizeWithRequiredAttributes)

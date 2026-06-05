@@ -1261,7 +1261,7 @@ typedef enum
 
     /**
      * @name Layernorm Backward Operation Attributes (3600-3699)
-     * Attributes for HIPDNN_BACKEND_OPERATION_LAYERNORM_BACKWARD_DESCRIPTOR
+     * Attributes for HIPDNN_BACKEND_OPERATION_LAYERNORM_BACKWARD_DESCRIPTOR_EXT
      * @{
      */
 
