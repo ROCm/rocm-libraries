@@ -395,7 +395,13 @@ rocsparse_status rocsparse_csrsv_clear(rocsparse_handle          handle,
 *  This routine supports execution in a hipGraph context. When the handle stream is in
 *  hipGraph capture, device memory used for singularity detection must already be present in
 *  \p info (for example, from a prior call to \p rocsparse_csrsv_solve outside capture).
-*  Otherwise, the routine returns \ref rocsparse_status_not_implemented.
+*  The warm-up call must use the same configuration (same \p m, \p nnz, \p trans,
+*  \p descr, and \p info) as the subsequent captured calls so that the correct amount
+*  of singularity-detection memory is pre-allocated.
+*  If this precondition is not met, the routine returns
+*  \ref rocsparse_status_not_implemented and the in-progress hipGraph capture is
+*  invalidated; the caller must call \p hipStreamEndCapture to discard it, perform
+*  the warm-up solve outside capture, then start a new capture.
 *
 *  @param[in]
 *  handle      handle to the rocSPARSE library context queue.
