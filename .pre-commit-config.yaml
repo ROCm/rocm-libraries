@@ -46,10 +46,9 @@ exclude: |
     # Binary files
     projects/hipdnn/.*\.bin$|
     # Generated hipDNN FlatBuffers headers
-    projects/hipdnn/data_sdk/include/hipdnn_data_sdk/data_objects/.*_generated\.h|
     projects/hipdnn/flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/data_objects/.*_generated\.h|
-    # Reference data
-    projects/hipdnn/hipdnn_reference_data/.*|
+    # Reference data (auto-generated)
+    dnn-providers/integration-tests/golden_reference_data/.*|
     # Generated files (see rocrand/tools/ _generator.cpp files)
     projects/rocrand/library/.*constants\.(cpp|h)|
     projects/rocrand/library/.*precomputed\.(cpp|h)

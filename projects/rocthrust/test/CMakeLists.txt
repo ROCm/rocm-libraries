@@ -98,6 +98,10 @@ function(add_rocthrust_test TEST)
         PROPERTIES
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test/"
     )
+
+    # Track test target globally for category labels
+    set_property(GLOBAL APPEND PROPERTY ROCTHRUST_TEST_TARGETS ${TEST_TARGET})
+
     if(AMDGPU_TEST_TARGETS)
         foreach(AMDGPU_TARGET IN LISTS AMDGPU_TEST_TARGETS)
             add_test("${AMDGPU_TARGET}-${TEST_TARGET}" ${TEST_TARGET})
@@ -341,6 +345,30 @@ if(BUILD_HIPSTDPAR_TEST)
             )
         endif()
     endif()
+endif()
+
+# ****************************************************************************
+# Test Filter Standardization
+# ****************************************************************************
+
+if(EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+    include("${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+
+    message(STATUS "Applying test categories for rocthrust")
+    get_property(_rt_test_targets GLOBAL PROPERTY ROCTHRUST_TEST_TARGETS)
+    foreach(_rt_t IN LISTS _rt_test_targets)
+        get_target_property(_rt_dir ${_rt_t} RUNTIME_OUTPUT_DIRECTORY)
+        apply_test_category_labels(${_rt_t}
+            "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
+            "${_rt_dir}" "${INSTALL_TEST_FILE}")
+    endforeach()
+else()
+    message(
+        STATUS
+        "Shared CTest categories not found at "
+        "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake - "
+        "skipping rocthrust test category labels"
+    )
 endif()
 
 rocm_install(

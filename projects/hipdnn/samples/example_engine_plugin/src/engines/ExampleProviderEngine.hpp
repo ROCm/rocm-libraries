@@ -1,4 +1,4 @@
-// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
 #pragma once
@@ -21,9 +21,11 @@ namespace example_provider
 ///
 /// This engine contains no operation-specific logic. It manages a collection
 /// of PlanBuilders and delegates all work (applicability checks, knob
-/// reporting, workspace sizing, and plan creation) to them. Typically,
-/// customized behavior can be added by writing your own PlanBuilder,
-/// not by modifying this class.
+/// reporting, workspace sizing, and plan creation) to them. The typical
+/// pattern is one PlanBuilder per engine (1:1), but multiple PlanBuilders
+/// can be added to a single engine via addPlanBuilder() if needed.
+/// Typically, customized behavior can be added by writing your own
+/// PlanBuilder, not by modifying this class.
 class ExampleProviderEngine : public hipdnn_plugin_sdk::IEngine<ExampleProviderHandle,
                                                                 ExampleProviderSettings,
                                                                 ExampleProviderContext>
@@ -33,22 +35,23 @@ public:
 
     int64_t id() const override;
 
-    bool isApplicable(ExampleProviderHandle& handle,
-                      const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
+    bool isApplicable(
+        ExampleProviderHandle& handle,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const override;
 
     void getDetails(ExampleProviderHandle& handle,
-                    const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
+                    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
                     hipdnnPluginConstData_t& detailsOut) const override;
 
-    size_t getMaxWorkspaceSize(
-        const ExampleProviderHandle& handle,
-        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-        const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig) const override;
+    size_t getMaxWorkspaceSize(const ExampleProviderHandle& handle,
+                               const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+                               const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig&
+                                   engineConfig) const override;
 
     void initializeExecutionContext(
         const ExampleProviderHandle& handle,
-        const hipdnn_data_sdk::flatbuffer_utilities::IGraph& opGraph,
-        const hipdnn_data_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
         ExampleProviderContext& executionContext) const override;
 
     void addPlanBuilder(

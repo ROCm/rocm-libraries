@@ -157,7 +157,7 @@ def initConversionKernelObjects(solution, isaInfoMap):
   if solution["GlobalSplitUAlgorithm"] == "SingleBuffer":
     genPGRPostKernels = False
     gsuList = [1]
-  elif solution["GlobalSplitUAlgorithm"] == "MultipleBufferSingleKernel":
+  elif solution["GlobalSplitUAlgorithm"] == "MultipleBufferSingleKernel" and solution["AdaptiveGemmGSUA"] == 0:
     return conversionKernelObjects
   for vw in loadVectorWidth:
     for globalSplitU in gsuList:

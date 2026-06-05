@@ -22,7 +22,7 @@ GlobalParameters:
   NumElementsToValidate: -1
   NumWarmups: 0
   EnqueuesPerSync: 0
-  SyncsPerBenchmark: 1
+  SyncsPerBenchmark: 0
   NumBenchmarks: 1
   # KernelTime: False
   MinKForGSU: 1
@@ -48,8 +48,8 @@ BenchmarkProblems:
       DestDataType: H
       ComputeDataType: s
       HighPrecisionAccumulate:  True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Sparse: 2
       Batched: True

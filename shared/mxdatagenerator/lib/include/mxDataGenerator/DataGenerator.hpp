@@ -11,7 +11,15 @@
 #include <random>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <variant>
+
+// `<bit>` provides std::endian (C++20). Used by read_data_bits_le's
+// little-endian static_assert. Guarded so this header still compiles
+// against pre-C++20 toolchains that don't ship the header.
+#if __has_include(<bit>)
+#    include <bit>
+#endif
 
 #include <omp.h>
 
@@ -21,6 +29,11 @@ namespace DGen
 
     constexpr index_t SPRINKLE_BLOCK_MIN = 3;
     constexpr index_t SPRINKLE_BLOCK_MAX = 15;
+
+    // Default PRNG seed shared by every DataGenerator backend (CPU and GPU)
+    // so equivalent generates with no explicit setSeed produce reproducible
+    // streams. Single source of truth - bumping this changes both backends.
+    inline constexpr uint32_t kDefaultSeed = 1713573848u;
 
     //
     // Defining Data Initialization Modes
@@ -132,6 +145,80 @@ namespace DGen
         }
     };
 
+    // Constant-value fills: every element dequantizes to the named value
+    // (scale=1.0). NaN/Inf are broadcast via setNaN/setInf, which routes
+    // to the data byte for F8 E5M2 and to the scale byte for F4/F6.
+    // Inf only exists for F8 E5M2; the generator throws otherwise.
+    struct Twos
+    {
+        std::string toString() const
+        {
+            return "Twos";
+        }
+    };
+
+    struct NegOnes
+    {
+        std::string toString() const
+        {
+            return "NegOnes";
+        }
+    };
+
+    struct MaxVals
+    {
+        std::string toString() const
+        {
+            return "MaxVals";
+        }
+    };
+
+    struct DenormMins
+    {
+        std::string toString() const
+        {
+            return "DenormMins";
+        }
+    };
+
+    struct DenormMaxs
+    {
+        std::string toString() const
+        {
+            return "DenormMaxs";
+        }
+    };
+
+    struct NaNs
+    {
+        std::string toString() const
+        {
+            return "NaNs";
+        }
+    };
+
+    struct Infs
+    {
+        std::string toString() const
+        {
+            return "Infs";
+        }
+    };
+
+    // Uniform-integer fill in [lo, hi], converted via satConvertToType (so
+    // out-of-range values saturate). Caller picks the range because the
+    // appropriate magnitude is data-type dependent.
+    struct RandInt
+    {
+        int lo = -10;
+        int hi = 10;
+
+        std::string toString() const
+        {
+            return "RandInt(" + std::to_string(lo) + ", " + std::to_string(hi) + ")";
+        }
+    };
+
     using DataInitMode = std::variant<Bounded,
                                       BoundedAlternatingSign,
                                       Unbounded,
@@ -144,7 +231,15 @@ namespace DGen
                                       Checkerboard,
                                       ScaledDiagonal,
                                       TrigonometricFromFloat,
-                                      NormalFromFloat>;
+                                      NormalFromFloat,
+                                      Twos,
+                                      NegOnes,
+                                      MaxVals,
+                                      DenormMins,
+                                      DenormMaxs,
+                                      NaNs,
+                                      Infs,
+                                      RandInt>;
 
     inline std::string toString(DataInitMode const& initMode)
     {
@@ -199,7 +294,7 @@ namespace DGen
         std::vector<uint8_t> getScaleBytes() const;
 
         // set rng seed
-        void setSeed(uint seed);
+        void setSeed(uint32_t seed);
 
         // get reference double vector.
         std::vector<double> getReferenceDouble() const; // Hopefully won't overflow to NaN/Inf
@@ -210,7 +305,7 @@ namespace DGen
     private:
         DataGeneratorOptions m_options;
 
-        uint                   m_seed = 1713573848;
+        uint32_t               m_seed = kDefaultSeed;
         std::vector<Generator> m_gen;
         const int              m_num_threads = std::min(32, omp_get_max_threads());
 
@@ -254,6 +349,19 @@ namespace DGen
                                              const float                 mean,
                                              const float                 std_dev);
 
+        // Broadcasts the low `m_dataDesc.byte_size` bytes of `bits` to every
+        // element with a neutral 1.0 scale. uint64_t fits every supported DTYPE.
+        void generate_data_constant_bits(uint64_t bits);
+        void generate_data_twos();
+        void generate_data_neg_ones();
+        void generate_data_max_vals();
+        void generate_data_denorm_mins();
+        void generate_data_denorm_maxs();
+        void generate_data_nans();
+        void generate_data_infs();
+
+        void generate_data_rand_int(int lo, int hi);
+
         uint32_t scale_block_mean(const std::vector<uint32_t>& scales,
                                   std::vector<uint64_t>&       data,
                                   index_t                      block_size);
@@ -275,6 +383,48 @@ namespace DGen
 
     template <class... Ts>
     overload(Ts...) -> overload<Ts...>;
+
+    template <typename DTYPE>
+    inline constexpr bool hasFullRangeScale()
+    {
+        if constexpr(isScaled<DTYPE>())
+            return DTYPE::scaleInfo.mantissaBits > 0;
+        else
+            return false;
+    }
+
+    template <typename DTYPE>
+    using scale_info_t = std::remove_cv_t<decltype(DTYPE::scaleInfo)>;
+
+    template <typename DTYPE>
+    inline std::vector<uint8_t> enumerateDataBytesForScale(uint8_t scale,
+                                                           double  min,
+                                                           double  max,
+                                                           bool    requireNonzero,
+                                                           bool    requireSign = false,
+                                                           bool    negative    = false)
+    {
+        const auto dataBits = DTYPE::dataInfo.signBits + DTYPE::dataInfo.exponentBits
+                              + DTYPE::dataInfo.mantissaBits;
+        const uint64_t maxData = (ONE << dataBits) - 1;
+
+        std::vector<uint8_t> candidates;
+        for(uint64_t raw = 0; raw <= maxData; raw++)
+        {
+            const auto data  = static_cast<uint8_t>(raw);
+            const auto value = toDouble<DTYPE>(&scale, &data, 0, 0);
+            if(!std::isfinite(value))
+                continue;
+            if(requireNonzero && value == 0.0)
+                continue;
+            if(requireSign && value != 0.0 && std::signbit(value) != negative)
+                continue;
+            if(value >= min && value <= max)
+                candidates.push_back(data);
+        }
+
+        return candidates;
+    }
 
     template <typename DTYPE>
     inline void DataGenerator<DTYPE>::dispatch_generate_data(const std::vector<index_t>& size,
@@ -300,12 +450,20 @@ namespace DGen
                             },
                             [&](const NormalFromFloat& n) {
                                 generate_data_normal_from_float(size, n.mean, n.std_dev);
-                            }},
+                            },
+                            [&](const Twos&) { generate_data_twos(); },
+                            [&](const NegOnes&) { generate_data_neg_ones(); },
+                            [&](const MaxVals&) { generate_data_max_vals(); },
+                            [&](const DenormMins&) { generate_data_denorm_mins(); },
+                            [&](const DenormMaxs&) { generate_data_denorm_maxs(); },
+                            [&](const NaNs&) { generate_data_nans(); },
+                            [&](const Infs&) { generate_data_infs(); },
+                            [&](const RandInt& r) { generate_data_rand_int(r.lo, r.hi); }},
                    m_options.initMode);
     }
 
     template <typename DTYPE>
-    inline void DataGenerator<DTYPE>::setSeed(uint seed)
+    inline void DataGenerator<DTYPE>::setSeed(uint32_t seed)
     {
         m_seed = seed;
     }
@@ -582,7 +740,7 @@ namespace DGen
         }
 
         // maximum requested value cannot be represented as non-zero number in target type
-        if(min_exp > std::max(max_pos_exp, max_neg_exp))
+        if(min_exp > std::max(max_pos_exp, max_neg_exp) && !hasFullRangeScale<DTYPE>())
         {
             // if zero within bounds -> return zeros
             if(min <= 0 && 0 <= max)
@@ -595,6 +753,76 @@ namespace DGen
                 throw std::invalid_argument("Invalid bounds: the max magnitude bound cannot be "
                                             "represented as a non-zero "
                                             "number and zero is not include in the bounds.");
+        }
+
+        // The requested range falls entirely below the type's minimum representable scale.
+        // This can happen when the scale format has a narrow exponent range (e.g. E4M3, E5M3)
+        // and the requested bounds are smaller than any value the type can represent.
+        // Since zero is within bounds, generate zeros.
+        if(max_scale < min_scale && !hasFullRangeScale<DTYPE>())
+        {
+            if(min <= 0 && 0 <= max)
+            {
+                post_sprinkle(size, min_exp);
+                return;
+            }
+            else
+                throw std::invalid_argument("Invalid bounds: the requested range is not "
+                                            "representable by this type's scale format.");
+        }
+
+        if constexpr(hasFullRangeScale<DTYPE>())
+        {
+            using scaleInfo = scale_info_t<DTYPE>;
+
+            std::vector<std::vector<uint8_t>> data_candidates(256);
+            std::vector<uint8_t>              scale_candidates;
+            for(const auto scale : enumerateFiniteNonzeroScaleBytes<scaleInfo>())
+            {
+                auto candidates = enumerateDataBytesForScale<DTYPE>(scale, min, max, true);
+                if(!candidates.empty())
+                {
+                    data_candidates[scale] = std::move(candidates);
+                    scale_candidates.push_back(scale);
+                }
+            }
+
+            if(scale_candidates.empty())
+            {
+                if(min <= 0 && 0 <= max)
+                {
+                    post_sprinkle(size, min_exp);
+                    return;
+                }
+                throw std::invalid_argument("Invalid bounds: no finite non-zero scaled value can "
+                                            "represent the requested range.");
+            }
+
+            const auto numBlocks = m_dataDesc.array_size / block_size;
+#pragma omp parallel for num_threads(m_num_threads)
+            for(index_t scale_i = 0; scale_i < numBlocks; scale_i++)
+            {
+                const auto tid = omp_get_thread_num();
+                std::uniform_int_distribution<size_t> scale_dist(0, scale_candidates.size() - 1);
+                const uint8_t                         stored_scale
+                    = scale_candidates[scale_dist(m_gen[tid])];
+                std::memcpy(&m_scaleBytes[scale_i * m_scaleDesc.byte_size],
+                            &stored_scale,
+                            m_scaleDesc.byte_size);
+
+                const auto& candidates = data_candidates[stored_scale];
+                std::uniform_int_distribution<size_t> data_dist(0, candidates.size() - 1);
+                for(index_t block_i = 0; block_i < block_size; block_i++)
+                {
+                    const auto data_i = scale_i * block_size + block_i;
+                    const auto result = candidates[data_dist(m_gen[tid])];
+                    std::memcpy(&m_dataBytes[data_i * m_dataDesc.byte_size],
+                                &result,
+                                m_dataDesc.byte_size);
+                }
+            }
+            post_sprinkle(size, min_exp);
+            return;
         }
 
         std::uniform_int_distribution<> scale_dist(min_scale, max_scale);
@@ -624,9 +852,10 @@ namespace DGen
 
             if constexpr(isScaled<DTYPE>())
             {
-                ub_block_scale      = scale_dist(m_gen[tid]);
-                int32_t block_scale = ub_block_scale + scaleBias;
-                std::memcpy(&m_scaleBytes[scale_i], &block_scale, m_scaleDesc.byte_size);
+                ub_block_scale = scale_dist(m_gen[tid]);
+                int32_t stored_scale
+                    = (ub_block_scale + scaleBias) << getScaleMantissaBits<DTYPE>();
+                std::memcpy(&m_scaleBytes[scale_i], &stored_scale, m_scaleDesc.byte_size);
             }
 
             for(index_t block_i = 0; block_i < block_size; block_i++)
@@ -754,6 +983,69 @@ namespace DGen
         max_exp   = std::min(exp_of_max, max_exp);
         max_scale = std::min(exp_of_max, max_scale);
 
+        // The requested |max| falls below the type's minimum representable scale: return zeros.
+        if(max_scale < getScaleUnBiasedEMin<DTYPE>() && !hasFullRangeScale<DTYPE>())
+        {
+            post_sprinkle(size, isScaled<DTYPE>() ? -F64BIAS : -F32BIAS);
+            return;
+        }
+
+        if constexpr(hasFullRangeScale<DTYPE>())
+        {
+            using scaleInfo = scale_info_t<DTYPE>;
+
+            std::vector<std::vector<uint8_t>> pos_data_candidates(256);
+            std::vector<std::vector<uint8_t>> neg_data_candidates(256);
+            std::vector<uint8_t>              scale_candidates;
+            for(const auto scale : enumerateFiniteNonzeroScaleBytes<scaleInfo>())
+            {
+                auto pos_candidates
+                    = enumerateDataBytesForScale<DTYPE>(scale, -max, max, true, true, false);
+                auto neg_candidates
+                    = enumerateDataBytesForScale<DTYPE>(scale, -max, max, true, true, true);
+                if(!pos_candidates.empty() && !neg_candidates.empty())
+                {
+                    pos_data_candidates[scale] = std::move(pos_candidates);
+                    neg_data_candidates[scale] = std::move(neg_candidates);
+                    scale_candidates.push_back(scale);
+                }
+            }
+
+            if(scale_candidates.empty())
+            {
+                post_sprinkle(size, isScaled<DTYPE>() ? -F64BIAS : -F32BIAS);
+                return;
+            }
+
+            const auto numBlocks = m_dataDesc.array_size / block_size;
+#pragma omp parallel for num_threads(m_num_threads)
+            for(index_t scale_i = 0; scale_i < numBlocks; scale_i++)
+            {
+                const auto tid = omp_get_thread_num();
+                std::uniform_int_distribution<size_t> scale_dist(0, scale_candidates.size() - 1);
+                const uint8_t                         stored_scale
+                    = scale_candidates[scale_dist(m_gen[tid])];
+                std::memcpy(&m_scaleBytes[scale_i * m_scaleDesc.byte_size],
+                            &stored_scale,
+                            m_scaleDesc.byte_size);
+
+                for(index_t block_i = 0; block_i < block_size; block_i++)
+                {
+                    const auto data_i     = scale_i * block_size + block_i;
+                    const bool negative   = static_cast<bool>(data_i % 2);
+                    const auto& candidates = negative ? neg_data_candidates[stored_scale]
+                                                      : pos_data_candidates[stored_scale];
+                    std::uniform_int_distribution<size_t> data_dist(0, candidates.size() - 1);
+                    const auto result = candidates[data_dist(m_gen[tid])];
+                    std::memcpy(&m_dataBytes[data_i * m_dataDesc.byte_size],
+                                &result,
+                                m_dataDesc.byte_size);
+                }
+            }
+            post_sprinkle(size, isScaled<DTYPE>() ? -F64BIAS : -F32BIAS);
+            return;
+        }
+
         std::uniform_int_distribution<> scale_dist(getScaleUnBiasedEMin<DTYPE>(), max_scale);
 
         // other setup
@@ -785,9 +1077,10 @@ namespace DGen
             //
             if constexpr(isScaled<DTYPE>())
             {
-                ub_block_scale = scale_dist(m_gen[tid]);
-                block_scale    = ub_block_scale + getScaleBias<DTYPE>();
-                std::memcpy(&m_scaleBytes[scale_i], &block_scale, m_scaleDesc.byte_size);
+                ub_block_scale      = scale_dist(m_gen[tid]);
+                block_scale         = ub_block_scale + getScaleBias<DTYPE>();
+                int32_t stored_scale = block_scale << getScaleMantissaBits<DTYPE>();
+                std::memcpy(&m_scaleBytes[scale_i], &stored_scale, m_scaleDesc.byte_size);
             }
 
             for(index_t block_i = 0; block_i < block_size; block_i++)
@@ -870,6 +1163,52 @@ namespace DGen
         const uint64_t max             = (ONE << m_dataDesc.bit_size) - 1;
         const auto     numBlocks       = m_dataDesc.array_size / block_size;
 
+        if constexpr(hasFullRangeScale<DTYPE>())
+        {
+            using scaleInfo = scale_info_t<DTYPE>;
+
+            const auto scale_candidates = enumerateFiniteNonzeroScaleBytes<scaleInfo>();
+#pragma omp parallel for num_threads(m_num_threads)
+            for(index_t scale_i = 0; scale_i < numBlocks; scale_i++)
+            {
+                const auto tid = omp_get_thread_num();
+                std::uniform_int_distribution<size_t> scale_dist(0, scale_candidates.size() - 1);
+                const uint8_t                         stored_scale
+                    = scale_candidates[scale_dist(m_gen[tid])];
+                std::memcpy(&m_scaleBytes[scale_i * m_scaleDesc.byte_size],
+                            &stored_scale,
+                            m_scaleDesc.byte_size);
+
+                std::uniform_int_distribution<uint64_t> data_dist(0, max);
+                for(index_t block_i = 0; block_i < block_size; block_i++)
+                {
+                    const auto data_i = scale_i * block_size + block_i;
+
+                    uint64_t d;
+                    do
+                    {
+                        d = data_dist(m_gen[tid]);
+                    } while((!m_options.includeNaN
+                             && isNaN<DTYPE>(&stored_scale,
+                                             reinterpret_cast<uint8_t*>(&d),
+                                             0,
+                                             0))
+                            || (!m_options.includeInf
+                                && isInf<DTYPE>(&stored_scale,
+                                                reinterpret_cast<uint8_t*>(&d),
+                                                0,
+                                                0)));
+
+                    std::memcpy(&m_dataBytes[data_i * m_dataDesc.byte_size],
+                                &d,
+                                m_dataDesc.byte_size);
+                }
+            }
+
+            post_sprinkle(size, isScaled<DTYPE>() ? -F64BIAS : -F32BIAS);
+            return;
+        }
+
 #pragma omp parallel for num_threads(m_num_threads)
         for(index_t scale_i = 0; scale_i < numBlocks; scale_i++)
         {
@@ -935,8 +1274,9 @@ namespace DGen
 
                     std::uniform_int_distribution<> scale_dist(scaleMin, scaleMax);
 
-                    const auto s = scale_dist(m_gen[tid]);
-                    std::memcpy(&m_scaleBytes[scale_i], &s, m_scaleDesc.byte_size);
+                    const auto biased_exp = scale_dist(m_gen[tid]);
+                    const int32_t stored  = biased_exp << getScaleMantissaBits<DTYPE>();
+                    std::memcpy(&m_scaleBytes[scale_i], &stored, m_scaleDesc.byte_size);
 
                     // reset per block values
                     max_exp = std::numeric_limits<int32_t>::min();
@@ -1000,6 +1340,177 @@ namespace DGen
         for(index_t i = 0; i < m_scaleDesc.array_size; i++)
         {
             std::memcpy(&m_scaleBytes[i * m_scaleDesc.byte_size], &s_one[0], m_scaleDesc.byte_size);
+        }
+    }
+
+    // Broadcasts the low `byte_size` bytes of `bits` to every data element and
+    // a neutral 1.0 scale to every block. setOne supplies the per-DTYPE scale=1.0
+    // encoding (E8M0_127, E5M3 0x78, E4M3 0x38).
+    template <typename DTYPE>
+    inline void DataGenerator<DTYPE>::generate_data_constant_bits(uint64_t bits)
+    {
+        if(m_dataDesc.byte_size > sizeof(bits))
+            throw std::runtime_error(
+                "DataGenerator::generate_data_constant_bits: data byte_size "
+                "exceeds 8; widen the bits carrier before adding such a type.");
+
+        std::vector<uint8_t> s_one(m_scaleDesc.byte_size, 0x00);
+        std::vector<uint8_t> d_dummy(m_dataDesc.byte_size, 0x00);
+        setOne<DTYPE>(s_one.data(), d_dummy.data(), 0, 0, /*subNormal=*/false);
+
+#pragma omp parallel for num_threads(m_num_threads)
+        for(index_t i = 0; i < m_dataDesc.array_size; i++)
+        {
+            std::memcpy(
+                &m_dataBytes[i * m_dataDesc.byte_size], &bits, m_dataDesc.byte_size);
+        }
+
+#pragma omp parallel for num_threads(m_num_threads)
+        for(index_t i = 0; i < m_scaleDesc.array_size; i++)
+        {
+            std::memcpy(&m_scaleBytes[i * m_scaleDesc.byte_size], &s_one[0], m_scaleDesc.byte_size);
+        }
+    }
+
+    template <typename DTYPE>
+    inline void DataGenerator<DTYPE>::generate_data_twos()
+    {
+        generate_data_constant_bits(satConvertToType<DTYPE>(2.0f));
+    }
+
+    template <typename DTYPE>
+    inline void DataGenerator<DTYPE>::generate_data_neg_ones()
+    {
+        generate_data_constant_bits(satConvertToType<DTYPE>(-1.0f));
+    }
+
+    // Reads the low `byte_size` bytes of `src` into a uint64_t (little-endian).
+    // The memcpy-into-low-bytes idiom only matches the byte order in `src`
+    // when the host is little-endian; ROCm targets all are, but make the
+    // assumption explicit so a future big-endian port doesn't quietly
+    // miscompile.
+    inline uint64_t read_data_bits_le(uint8_t const* src, index_t byte_size)
+    {
+#if __cpp_lib_endian >= 201907L
+        static_assert(std::endian::native == std::endian::little,
+                      "read_data_bits_le: implementation assumes a "
+                      "little-endian host (matches all current ROCm targets).");
+#endif
+        uint64_t bits = 0;
+        std::memcpy(&bits, src, byte_size);
+        return bits;
+    }
+
+    template <typename DTYPE>
+    inline void DataGenerator<DTYPE>::generate_data_max_vals()
+    {
+        std::vector<uint8_t> d_max(m_dataDesc.byte_size, 0x00);
+        setDataMax<DTYPE>(d_max.data(), 0, /*subNormal=*/false, /*positive=*/true);
+        generate_data_constant_bits(read_data_bits_le(d_max.data(), m_dataDesc.byte_size));
+    }
+
+    template <typename DTYPE>
+    inline void DataGenerator<DTYPE>::generate_data_denorm_maxs()
+    {
+        std::vector<uint8_t> d_max(m_dataDesc.byte_size, 0x00);
+        setDataMax<DTYPE>(d_max.data(), 0, /*subNormal=*/true, /*positive=*/true);
+        generate_data_constant_bits(read_data_bits_le(d_max.data(), m_dataDesc.byte_size));
+    }
+
+    template <typename DTYPE>
+    inline void DataGenerator<DTYPE>::generate_data_denorm_mins()
+    {
+        // Smallest non-zero subnormal (mantissa LSB) is 0x1 across every
+        // supported DTYPE.
+        generate_data_constant_bits(uint64_t{0x1});
+    }
+
+    template <typename DTYPE>
+    inline void DataGenerator<DTYPE>::generate_data_nans()
+    {
+        std::vector<uint8_t> s_nan(m_scaleDesc.byte_size, 0x00);
+        std::vector<uint8_t> d_nan(m_dataDesc.byte_size, 0x00);
+        setOne<DTYPE>(s_nan.data(), d_nan.data(), 0, 0, /*subNormal=*/false);
+        setNaN<DTYPE>(s_nan.data(), d_nan.data(), 0, 0);
+
+#pragma omp parallel for num_threads(m_num_threads)
+        for(index_t i = 0; i < m_dataDesc.array_size; i++)
+        {
+            std::memcpy(&m_dataBytes[i * m_dataDesc.byte_size], &d_nan[0], m_dataDesc.byte_size);
+        }
+
+#pragma omp parallel for num_threads(m_num_threads)
+        for(index_t i = 0; i < m_scaleDesc.array_size; i++)
+        {
+            std::memcpy(&m_scaleBytes[i * m_scaleDesc.byte_size], &s_nan[0], m_scaleDesc.byte_size);
+        }
+    }
+
+    template <typename DTYPE>
+    inline void DataGenerator<DTYPE>::generate_data_infs()
+    {
+        // Throw rather than silently produce ones via setInf's documented
+        // no-op for types that lack an Inf encoding. (bf16/fp16/f32 and
+        // F8 E5M2 do have one; F8 E4M3 and the MX FP4 / FP6 variants
+        // don't.)
+        if constexpr(!DTYPE::dataInfo.hasInf)
+        {
+            throw std::runtime_error(
+                "DataGenerator: Inf init mode is not supported because this "
+                "data type has no Inf representation.");
+        }
+        else
+        {
+            std::vector<uint8_t> s_inf(m_scaleDesc.byte_size, 0x00);
+            std::vector<uint8_t> d_inf(m_dataDesc.byte_size, 0x00);
+            setOne<DTYPE>(s_inf.data(), d_inf.data(), 0, 0, /*subNormal=*/false);
+            setInf<DTYPE>(s_inf.data(), d_inf.data(), 0, 0);
+
+#pragma omp parallel for num_threads(m_num_threads)
+            for(index_t i = 0; i < m_dataDesc.array_size; i++)
+            {
+                std::memcpy(
+                    &m_dataBytes[i * m_dataDesc.byte_size], &d_inf[0], m_dataDesc.byte_size);
+            }
+
+#pragma omp parallel for num_threads(m_num_threads)
+            for(index_t i = 0; i < m_scaleDesc.array_size; i++)
+            {
+                std::memcpy(
+                    &m_scaleBytes[i * m_scaleDesc.byte_size], &s_inf[0], m_scaleDesc.byte_size);
+            }
+        }
+    }
+
+    template <typename DTYPE>
+    inline void DataGenerator<DTYPE>::generate_data_rand_int(int lo, int hi)
+    {
+        if(lo > hi)
+            throw std::invalid_argument(
+                "DataGenerator::generate_data_rand_int: lo must be <= hi");
+
+        std::vector<uint8_t> s_one(m_scaleDesc.byte_size, 0x00);
+        std::vector<uint8_t> d_dummy(m_dataDesc.byte_size, 0x00);
+        setOne<DTYPE>(s_one.data(), d_dummy.data(), 0, 0, /*subNormal=*/false);
+
+#pragma omp parallel for num_threads(m_num_threads)
+        for(index_t i = 0; i < m_scaleDesc.array_size; i++)
+        {
+            std::memcpy(&m_scaleBytes[i * m_scaleDesc.byte_size], &s_one[0], m_scaleDesc.byte_size);
+        }
+
+        // satConvertToType saturates out-of-range values rather than wrapping.
+        // `uniform_int_distribution<int>` is stateless across calls so it's
+        // shared between threads (operator() takes the per-thread engine by
+        // ref). Hoisting matches generate_data_rand etc.
+        std::uniform_int_distribution<int> dist(lo, hi);
+#pragma omp parallel for num_threads(m_num_threads)
+        for(index_t i = 0; i < m_dataDesc.array_size; i++)
+        {
+            int const      tid  = omp_get_thread_num();
+            int const      v    = dist(m_gen[tid]);
+            uint64_t const bits = satConvertToType<DTYPE>(static_cast<float>(v));
+            std::memcpy(&m_dataBytes[i * m_dataDesc.byte_size], &bits, m_dataDesc.byte_size);
         }
     }
 
@@ -1326,8 +1837,11 @@ namespace DGen
 
                 if constexpr(isScaled<DTYPE>())
                 {
-                    temp_data[block_i]  = result;
-                    temp_scale[block_i] = scale;
+                    temp_data[block_i] = result;
+                    if constexpr(hasFullRangeScale<DTYPE>())
+                        temp_scale[block_i] = scale << getScaleMantissaBits<DTYPE>();
+                    else
+                        temp_scale[block_i] = scale;
                 }
                 else
                 {
@@ -1407,8 +1921,11 @@ namespace DGen
 
                 if constexpr(isScaled<DTYPE>())
                 {
-                    temp_data[block_i]  = result;
-                    temp_scale[block_i] = scale;
+                    temp_data[block_i] = result;
+                    if constexpr(hasFullRangeScale<DTYPE>())
+                        temp_scale[block_i] = scale << getScaleMantissaBits<DTYPE>();
+                    else
+                        temp_scale[block_i] = scale;
                 }
                 else
                 {
@@ -1453,6 +1970,71 @@ namespace DGen
         const auto dataUnbiasedEMin = getDataUnBiasedEMin<DTYPE>();
         const auto dataHasInf       = getDataHasInf<DTYPE>();
         const auto dataHasNan       = getDataHasNan<DTYPE>();
+
+        if constexpr(hasFullRangeScale<DTYPE>())
+        {
+            using scaleInfo = scale_info_t<DTYPE>;
+
+            const auto scale_candidates = enumerateFiniteNonzeroScaleBytes<scaleInfo>();
+
+            double  avg_scale = 0.0;
+            index_t n         = 0;
+            for(index_t i = 0; i < static_cast<index_t>(block_size); i++)
+            {
+                auto s = scales[i];
+                auto d = data[i];
+
+                const auto ref = toDouble<DTYPE>(
+                    reinterpret_cast<uint8_t*>(&s), reinterpret_cast<uint8_t*>(&d), 0, 0);
+                if(std::isfinite(ref) && ref != 0.0)
+                {
+                    avg_scale += getScaleValue<scaleInfo>(static_cast<uint8_t>(s));
+                    n++;
+                }
+            }
+
+            const uint8_t block_scale
+                = n == 0 ? static_cast<uint8_t>(getScaleBias<DTYPE>()
+                                                << getScaleMantissaBits<DTYPE>())
+                         : nearestFiniteScaleByte<scaleInfo>(avg_scale / n, scale_candidates);
+            const double block_scale_value = getScaleValue<scaleInfo>(block_scale);
+
+            for(index_t i = 0; i < static_cast<index_t>(block_size); i++)
+            {
+                auto s = scales[i];
+                auto d = data[i];
+
+                const auto ref = toDouble<DTYPE>(
+                    reinterpret_cast<uint8_t*>(&s), reinterpret_cast<uint8_t*>(&d), 0, 0);
+                if(std::isnan(ref))
+                {
+                    if(!m_options.includeNaN)
+                        throw std::runtime_error("Internal Error");
+                    setNaN<DTYPE>(
+                        reinterpret_cast<uint8_t*>(&s), reinterpret_cast<uint8_t*>(&d), 0, 0);
+                }
+                else if(std::isinf(ref))
+                {
+                    if(!m_options.includeInf)
+                        throw std::runtime_error("Internal Error");
+                    setInf<DTYPE>(
+                        reinterpret_cast<uint8_t*>(&s), reinterpret_cast<uint8_t*>(&d), 0, 0);
+                }
+                else if(ref == 0.0)
+                {
+                    setZero<DTYPE>(
+                        reinterpret_cast<uint8_t*>(&s), reinterpret_cast<uint8_t*>(&d), 0, 0);
+                }
+                else
+                {
+                    d = satConvertToType<DTYPE>(static_cast<float>(ref / block_scale_value));
+                }
+
+                data[i] = d;
+            }
+
+            return block_scale;
+        }
 
         //
         // compute block scale
@@ -1591,7 +2173,7 @@ namespace DGen
             data[i] = d;
         }
 
-        return block_scale;
+        return static_cast<uint32_t>(block_scale) << getScaleMantissaBits<DTYPE>();
     }
 
     template <typename DTYPE>
@@ -1737,14 +2319,30 @@ namespace DGen
                         const auto target_scale_i = target_data_i / block_size;
 
                         // get scale
-                        uint32_t biased_scale = 0;
+                        uint32_t stored_scale = 0;
                         if constexpr(isScaled<DTYPE>())
-                            std::memcpy(&biased_scale,
+                            std::memcpy(&stored_scale,
                                         &m_scaleBytes[target_scale_i * m_scaleDesc.byte_size],
                                         m_scaleDesc.byte_size);
 
-                        int32_t unbiased_scale = biased_scale - getScaleBias<DTYPE>();
-                        int32_t exp_bound      = unbiased_scale + getDataUnBiasedEMin<DTYPE>();
+                        int32_t exp_bound = 0;
+                        if constexpr(hasFullRangeScale<DTYPE>())
+                        {
+                            using scaleInfo       = scale_info_t<DTYPE>;
+                            const auto scaleValue = getScaleValue<scaleInfo>(
+                                static_cast<uint8_t>(stored_scale));
+                            if(!std::isfinite(scaleValue) || scaleValue <= 0.0)
+                                continue;
+                            exp_bound = static_cast<int32_t>(std::floor(std::log2(scaleValue)))
+                                        + getDataUnBiasedEMin<DTYPE>();
+                        }
+                        else
+                        {
+                            int32_t unbiased_scale
+                                = static_cast<int32_t>(stored_scale >> getScaleMantissaBits<DTYPE>())
+                                  - getScaleBias<DTYPE>();
+                            exp_bound = unbiased_scale + getDataUnBiasedEMin<DTYPE>();
+                        }
 
                         if(unbiased_min_exp < exp_bound)
                         {

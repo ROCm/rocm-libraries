@@ -22,8 +22,11 @@
 #
 ################################################################################
 
+import hashlib
+import json
 import os
 import shutil
+import yaml
 import sys
 import time
 import itertools
@@ -31,14 +34,14 @@ import itertools
 from copy import deepcopy
 from joblib import Parallel, delayed
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List, Optional, TypedDict
 
 from Tensile import CUSTOM_KERNEL_PATH, SolutionLibrary, LibraryIO
 from Tensile.KernelWriter import DebugConfig
 from Tensile.KernelHelperNaming import KernelHelperEnum, initHelperKernelObjects
 from Tensile.Toolchain.Component import Assembler
 from Tensile.SolutionStructs.Problem import ProblemType, ProblemSizes
-from Tensile.SolutionStructs.Solution import Solution
+from Tensile.SolutionStructs.Solution import Solution, printTypeMismatchSummary
 from Tensile.SolutionStructs.Validators.MatrixInstruction import matrixInstructionToMIParameters, \
                                                                  validateMIParameters
 from Tensile.SolutionStructs.Naming import getKeyNoInternalArgs, getSolutionNameMin, getKernelNameMin
@@ -58,6 +61,94 @@ from Tensile.Common.Architectures import isaToGfx, gfxToVariants
 from Tensile.Common.GlobalParameters import globalParameters, startTime
 from Tensile.Common.TimingInstrumentation import timing_context
 
+_CACHE_FIELDS = {
+    "ConstantParams": "constantParams",
+    "ForkParams": "forkParams",
+    "ParamGroups": "paramGroups",
+    "CustomKernels": "customKernels",
+    "InternalSupportParams": "internalSupportParams",
+    "CustomKernelWildcard": "customKernelWildcard",
+}
+
+# 12 hex chars = 48 bits. Birthday-collision likely around 2^24 (~16M) entries
+# in one caches/ dir; tuning sweeps produce <<1k entries, so collision risk is
+# negligible. Lookup re-validates by content so a collision becomes a recompile,
+# never a wrong-cache hit.
+_CACHE_KEY_LEN = 12
+
+
+def _cacheDataMatches(cacheData, benchmarkStep):
+    """Check if cached data matches the current benchmark step parameters."""
+    return all(cacheData[f] == getattr(benchmarkStep, attr) for f, attr in _CACHE_FIELDS.items())
+
+
+def _computeCacheKey(benchmarkStep):
+    """Compute a deterministic hash from the cache-relevant parameter fields."""
+    cacheFields = {f: getattr(benchmarkStep, attr) for f, attr in _CACHE_FIELDS.items()}
+    canonical = json.dumps(cacheFields, sort_keys=True, default=str)
+    return hashlib.sha256(canonical.encode()).hexdigest()[:_CACHE_KEY_LEN]
+
+
+class CacheEntry(TypedDict):
+    CodeObjectFiles: List[str]
+    LibraryFile: str
+
+
+def _readCacheIfValid(cachePath, benchmarkStep, mismatchMessage) -> Optional[CacheEntry]:
+    """Return the cache entry from cachePath iff its params match benchmarkStep, else None.
+
+    Returning None triggers a recompile, which is the right thing for any
+    cache.yaml that doesn't contain everything --use-cache needs (including
+    legacy caches written before LibraryFile was persisted).
+    """
+    if not os.path.isfile(cachePath):
+        return None
+    try:
+        c = LibraryIO.read(cachePath)
+    except (OSError, yaml.YAMLError) as e:
+        printWarning(f"Ignoring unreadable cache entry {cachePath}: {e}")
+        return None
+    try:
+        if _cacheDataMatches(c, benchmarkStep):
+            return {"CodeObjectFiles": c["CodeObjectFiles"], "LibraryFile": c["LibraryFile"]}
+    except KeyError as e:
+        printWarning(f"Ignoring incompatible cache entry {cachePath} (missing field {e})")
+        return None
+    printWarning(mismatchMessage.format(path=cachePath))
+    return None
+
+
+def _loadCacheIfMatches(cacheDir, benchmarkStep) -> Optional[CacheEntry]:
+    """Return the cache entry from the hash-keyed cacheDir/cache.yaml iff matching, else None."""
+    cachePath = os.path.join(cacheDir, "cache.yaml")
+    # Hash matched but content didn't: collision. Loser will be overwritten on the next write.
+    return _readCacheIfValid(
+        cachePath, benchmarkStep,
+        "Cache hash collision at {path}; will overwrite on recompile",
+    )
+
+
+# TODO(2026-05-04): Remove the legacy single cache.yaml fallback after a transition
+# period of ~3 months (i.e. on/after 2026-08-04). It exists only so users with
+# pre-multi-cache output dirs from develop don't pay one extra recompile after
+# upgrading. See PR #6583.
+def _loadLegacyCacheIfMatches(stepBaseDir, benchmarkStep) -> Optional[CacheEntry]:
+    """Return the cache entry from the pre-multi-cache stepBaseDir/cache.yaml
+    iff matching. Legacy caches written before LibraryFile was persisted are
+    treated as invalid (KeyError → None → recompile)."""
+    cachePath = os.path.join(stepBaseDir, "cache.yaml")
+    return _readCacheIfValid(
+        cachePath, benchmarkStep,
+        "Legacy cache at {path} does not match config; will recompile",
+    )
+
+
+def _resetCacheDir(cacheDir):
+    """Wipe and recreate cacheDir so a write fully replaces any prior content."""
+    if os.path.exists(cacheDir):
+        shutil.rmtree(cacheDir)
+    os.makedirs(cacheDir)
+
 
 def _generate_single_solution(perm, problemType, constantParams, assembler, debugConfig, isaInfoMap):
     """Helper function to generate a single solution from a permutation."""
@@ -70,10 +161,13 @@ def _generate_single_solution(perm, problemType, constantParams, assembler, debu
         solution.update(perm)
 
         mi = solution["MatrixInstruction"]
-        wavefrontSize = solution["WavefrontSize"]
         workgroup = solution["WorkGroup"]
         ptype = solution["ProblemType"]
         isa = solution["ISA"]
+
+        if solution["WavefrontSize"] == -1:
+            solution["WavefrontSize"] = 32 if isaInfoMap[isa].archCaps["HasWave32"] else 64
+        wavefrontSize = solution["WavefrontSize"]
 
         if len(mi) == 9:
             miParams = matrixInstructionToMIParameters(mi, isa, wavefrontSize, ptype, workgroup, isaInfoMap)
@@ -274,6 +368,7 @@ def writeBenchmarkFiles(
                             errorTolerant=True,
                             generateSourcesAndExit=globalParameters["GenerateSourcesAndExit"], # put in debug config
                             compress=False,
+                            removeTemporaries=not globalParameters["KeepBuildTmp"],
                         )
     # ^ this is where solutions is mutated
     with timing_context("python_kernel_bench_postprocess"):
@@ -303,6 +398,7 @@ def writeBenchmarkFiles(
 
         codeObjectFiles = [os.path.relpath(f, sourcePath) \
                 for f in codeObjectFiles]
+        libraryFileRel = os.path.relpath(newLibraryFileFull, sourcePath)
 
         with timing_context("python_benchpost_client_config"):
             if "TileAwareSelection" in problemType and problemType["TileAwareSelection"]:
@@ -330,17 +426,19 @@ def writeBenchmarkFiles(
                 writeClientConfig(True, solutions, idealProblemSizes, biasTypeArgs, \
                                   factorDimArgs, activationArgs, icacheFlushArgs, stepName, stepBaseDir, \
                                   newLibrary, codeObjectFiles, True, deviceId, gfxName, \
-                                  libraryFile=newLibraryFileFull, probSolMap=probSolMap)
+                                  libraryFile=newLibraryFileFull, probSolMap=probSolMap,
+                                  sourceDir=str(sourcePath))
             else:
                 writeClientConfig(True, solutions, problemSizes, biasTypeArgs, \
                                   factorDimArgs, activationArgs, icacheFlushArgs, stepName, stepBaseDir, \
                                   newLibrary, codeObjectFiles, False, deviceId, gfxName, \
-                                  libraryFile=newLibraryFileFull, probSolMap=probSolMap)
+                                  libraryFile=newLibraryFileFull, probSolMap=probSolMap,
+                                  sourceDir=str(sourcePath))
 
     if len(solutions) == 0:
         printExit("write solutions and kernels results 0 valid soultion.")
 
-    return codeObjectFiles
+    return codeObjectFiles, libraryFileRel
 
 
 def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSizeGroupIdx, useCache,
@@ -409,25 +507,33 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
         solutionsFileName = resultsFileBase + ".yaml"
 
         # check if a solution cache exists and if it matches our solution parameters
-        cachePath = os.path.join(stepBaseDir, "cache.yaml")
-        sourcePath = ensurePath(shortNamePath / "source")
+        cacheKey = _computeCacheKey(benchmarkStep)
+        cacheDir = os.path.join(stepBaseDir, "caches", cacheKey)
+        sourcePath = Path(cacheDir) / "source"
 
         with timing_context("python_cache_check"):
             cacheValid = False
-            if useCache and os.path.isfile(cachePath):
-                c = LibraryIO.read(cachePath)
-                if c["ConstantParams"] == benchmarkStep.constantParams and \
-                        c["ForkParams"] == benchmarkStep.forkParams and \
-                        c["ParamGroups"] == benchmarkStep.paramGroups and \
-                        c["CustomKernels"] == benchmarkStep.customKernels and \
-                        c["InternalSupportParams"] == benchmarkStep.internalSupportParams and \
-                        c["CustomKernelWildcard"] == benchmarkStep.customKernelWildcard:
+            cachedLibraryFile = None
+            if useCache:
+                cacheEntry = _loadCacheIfMatches(cacheDir, benchmarkStep)
+                if cacheEntry is None:
+                    # TODO(2026-05-04): Drop legacy fallback after ~2026-08-04 (see _loadLegacyCacheIfMatches).
+                    cacheEntry = _loadLegacyCacheIfMatches(stepBaseDir, benchmarkStep)
+                    if cacheEntry is not None:
+                        cacheDir = stepBaseDir
+                        sourcePath = shortNamePath / "source"
+                if cacheEntry is not None:
                     cacheValid = True
-                    codeObjectFiles = c["CodeObjectFiles"]
-                else:
+                    codeObjectFiles = cacheEntry["CodeObjectFiles"]
+                    cachedLibraryFile = cacheEntry["LibraryFile"]
+                elif os.path.isdir(os.path.join(stepBaseDir, "caches")) \
+                        or os.path.isfile(os.path.join(stepBaseDir, "cache.yaml")):
                     printWarning("Cache data does not match config: redoing solution generation")
 
         if not cacheValid:
+            # New compiles always go to the hash-keyed dir, never overwrite legacy in place.
+            _resetCacheDir(cacheDir)
+            ensurePath(sourcePath)
             # enumerate benchmark permutations and create resulting solution objects
             with timing_context("python_solution_generation"):
                 with timing_context("python_solgen_fork_permutations"):
@@ -470,7 +576,7 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
             # write benchmarkFiles (kernel generation and compilation)
             prevCount = len(solutions)
             with timing_context("python_kernel_compilation"):
-                codeObjectFiles = writeBenchmarkFiles(stepBaseDir, solutions, \
+                codeObjectFiles, libraryFileRel = writeBenchmarkFiles(stepBaseDir, solutions, \
                         benchmarkStep.problemSizes, benchmarkStep.biasTypeArgs, \
                         benchmarkStep.factorDimArgs, benchmarkStep.activationArgs, \
                         benchmarkStep.icacheFlushArgs, shortName, [], asmToolchain, srcToolchain, \
@@ -479,8 +585,10 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
 
             # write cache data
             with timing_context("python_write_cache"):
+                cachePath = os.path.join(cacheDir, "cache.yaml")
                 cacheData = {
                     "CodeObjectFiles": codeObjectFiles,
+                    "LibraryFile": libraryFileRel,
                     "ConstantParams": benchmarkStep.constantParams,
                     "ForkParams": benchmarkStep.forkParams,
                     "ParamGroups": benchmarkStep.paramGroups,
@@ -508,11 +616,20 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
             conProblemType = ContractionsProblemType.FromOriginalState(ssProblemType)
             outFile = os.path.join(sourcePath, "ClientParameters.ini")
 
+            libraryFile = os.path.join(str(sourcePath), cachedLibraryFile)
+            if not os.path.isfile(libraryFile):
+                printExit(
+                    f"cache.yaml refers to a library file that no longer "
+                    f"exists on disk: {libraryFile}. The cache directory may "
+                    f"have been partially deleted; remove the parent caches/ "
+                    f"directory and re-run without --use-cache.")
+
             writeClientConfigIni(True, benchmarkStep.problemSizes, benchmarkStep.biasTypeArgs,
                                  benchmarkStep.factorDimArgs, benchmarkStep.activationArgs,
                                  benchmarkStep.icacheFlushArgs, conProblemType,
                                  sourcePath, codeObjectFiles, resultsFileName,
-                                 outFile, deviceId, gfxName, probSolMap=probSolMap)
+                                 outFile, deviceId, gfxName,
+                                 libraryFile=libraryFile, probSolMap=probSolMap)
 
         # I think the size portion of this yaml could be removed,
         # but for now it's needed, so we update it even in the cache case
@@ -526,7 +643,10 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
         elif not os.path.exists(resultsFileName) or globalParameters["ForceRedoBenchmarkProblems"]:
             libraryLogicPath = None
             forBenchmark = True
-            returncode = runClient(libraryLogicPath, forBenchmark, enableTileSelection, srcToolchain.compiler, cCompiler, shortNamePath)
+            configPaths = [str(sourcePath / "ClientParameters.ini")]
+            if enableTileSelection:
+                configPaths.append(str(sourcePath / "ClientParameters_Granularity.ini"))
+            returncode = runClient(libraryLogicPath, forBenchmark, enableTileSelection, srcToolchain.compiler, cCompiler, shortNamePath, configPaths=configPaths)
 
             if returncode:
                 benchmarkTestFails += 1
@@ -564,8 +684,6 @@ def main(
     Args:
         buildOnly: If True, generate and build kernels but skip benchmarking.
     """
-    getClientExecutablePath()
-
     if config is None:
         print(f'No config specified in {globalParameters["ConfigPath"]}, built client only')
         return
@@ -639,6 +757,9 @@ def main(
             else:
                 print1("# {}_{:02d} already benchmarked; skipping." \
                         .format(str(problemTypeObj), idx) )
+
+    # Print summary of any parameter type mismatches found during ProblemType creation
+    printTypeMismatchSummary()
 
     if globalParameters["ExitOnFails"] and totalTestFails:
         sys.exit(1)

@@ -272,8 +272,22 @@ typedef enum rocblaslt_status_
     rocblaslt_status_not_initialized         = 10, /**< descriptor has not been initialized. */
     rocblaslt_status_type_mismatch           = 11, /**< index types do not match. */
     rocblaslt_status_requires_sorted_storage = 12, /**< sorted storage required. */
-    rocblaslt_status_continue                = 13 /**< nothing preventing function to proceed. */
+    rocblaslt_status_continue                = 13  /**< nothing preventing function to proceed. */
 } rocblaslt_status;
+
+/*! \ingroup types_module
+ *  \brief Bitmask controlling the post-GEMM NaN-check feature.
+ *
+ *  Set the env var \c HIPBLASLT_CHECK_NUMERICS to one of these values to
+ *  enable scanning of every \c hipblasLtMatmul output (D) for NaN. The env
+ *  var also accepts case-insensitive words: "none"/"off", "info", "warn".
+ */
+typedef enum hipblaslt_check_numerics_mode_
+{
+    hipblaslt_check_numerics_mode_no_check = 0, /**< feature disabled (default). */
+    hipblaslt_check_numerics_mode_info     = 1, /**< always print check results. */
+    hipblaslt_check_numerics_mode_warn     = 2, /**< print only when NaN is found. */
+} hipblaslt_check_numerics_mode;
 
 /*! \ingroup types_module
  *  \brief Specify the compute precision modes of the matrix
@@ -328,7 +342,8 @@ typedef enum rocblaslt_matrix_layout_attribute_
     ROCBLASLT_MATRIX_LAYOUT_ROWS  = 4,
     ROCBLASLT_MATRIX_LAYOUT_COLS  = 5,
     ROCBLASLT_MATRIX_LAYOUT_LD    = 6,
-    ROCBLASLT_MATRIX_LAYOUT_MAX   = 7
+    ROCBLASLT_MATRIX_LAYOUT_BATCH_MODE = 7,
+    ROCBLASLT_MATRIX_LAYOUT_MAX   = 8
 } rocblaslt_matrix_layout_attribute;
 
 typedef enum
@@ -372,12 +387,15 @@ typedef enum rocblaslt_matmul_desc_attributes_
     ROCBLASLT_MATMUL_DESC_POINTER_MODE               = 13,
     ROCBLASLT_MATMUL_DESC_AMAX_D_POINTER             = 14,
     ROCBLASLT_MATMUL_DESC_EPILOGUE_AUX_DATA_TYPE     = 22,
+    ROCBLASLT_MATMUL_DESC_BIAS_BATCH_STRIDE          = 23,
     ROCBLASLT_MATMUL_DESC_A_SCALE_MODE               = 31,
     ROCBLASLT_MATMUL_DESC_B_SCALE_MODE               = 32,
+    ROCBLASLT_MATMUL_DESC_SM_COUNT_TARGET            = 33,
     ROCBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT   = 100,
     ROCBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_B_EXT,
     ROCBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT,
     ROCBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT,
+    ROCBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT    = 104,
     ROCBLASLT_MATMUL_DESC_MAX,
 } rocblaslt_matmul_desc_attributes;
 
@@ -393,7 +411,8 @@ typedef enum rocblaslt_matmul_preference_attributes_
 {
     ROCBLASLT_MATMUL_PREF_SEARCH_MODE         = 0,
     ROCBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES = 1,
-    ROCBLASLT_MATMUL_PREF_MAX                 = 2
+    ROCBLASLT_MATMUL_PREF_SM_COUNT_TARGET     = 2,
+    ROCBLASLT_MATMUL_PREF_MAX                 = 3
 } rocblaslt_matmul_preference_attributes;
 
 /********************************************************************************
@@ -565,6 +584,8 @@ struct RocblasltContractionProblem
     void*       Synchronizer;
     bool        swizzleA;
     bool        swizzleB;
+    hipblasLtBatchMode_t batchMode;   
+    int32_t bias_stride; 
 
     // gemm_ex
     // gemm_strided_batched_ex
@@ -625,7 +646,9 @@ struct RocblasltContractionProblem
                                 hipStream_t            stream,
                                 void*                  Synchronizer,
                                 bool                   swizzleA,
-                                bool                   swizzleB);
+                                bool                   swizzleB,
+                                hipblasLtBatchMode_t   batchMode,
+                                int32_t                bias_stride);
 };
 
 namespace rocblaslt

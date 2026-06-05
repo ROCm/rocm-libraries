@@ -31,6 +31,11 @@ from Tensile.SolutionStructs.Solution import (
     resetTypeMismatchCollector,
     printTypeMismatchSummary,
 )
+from Tensile.SolutionStructs.Problem import (
+    validateProblemTypeParameterTypes,
+    _expectedProblemTypeParamTypes,
+    _defaultProblemType,
+)
 from Tensile.Common.ValidParameters import validParameters
 
 
@@ -295,58 +300,65 @@ class TestPrintTypeMismatchSummary:
         result = printTypeMismatchSummary()
         assert result == 3
 
-    def test_outputs_warning_to_stderr(self, capsys):
-        """Summary should be printed to stderr, not stdout."""
+    def test_outputs_warning_to_stdout(self, capsys):
+        """Summary should be printed to stdout so it appears in build logs."""
         validateParameterTypes({"UseCustomMainLoopSchedule": False}, srcFile="test.yaml")
         printTypeMismatchSummary()
         captured = capsys.readouterr()
-        assert captured.out == ""
-        assert "WARNING" in captured.err
+        assert captured.err == ""
+        assert "WARNING" in captured.out
 
     def test_output_contains_param_name(self, capsys):
         validateParameterTypes({"UseCustomMainLoopSchedule": False})
         printTypeMismatchSummary()
         captured = capsys.readouterr()
-        assert "UseCustomMainLoopSchedule" in captured.err
+        assert "UseCustomMainLoopSchedule" in captured.out
 
     def test_output_contains_actual_type(self, capsys):
         validateParameterTypes({"UseCustomMainLoopSchedule": False})
         printTypeMismatchSummary()
         captured = capsys.readouterr()
-        assert "bool" in captured.err
+        assert "bool" in captured.out
 
     def test_output_contains_expected_type(self, capsys):
         validateParameterTypes({"UseCustomMainLoopSchedule": False})
         printTypeMismatchSummary()
         captured = capsys.readouterr()
-        assert "int" in captured.err
+        assert "int" in captured.out
 
     def test_output_contains_solution_count(self, capsys):
         validateParameterTypes({"UseCustomMainLoopSchedule": False}, srcFile="a.yaml")
         validateParameterTypes({"UseCustomMainLoopSchedule": True}, srcFile="b.yaml")
         printTypeMismatchSummary()
         captured = capsys.readouterr()
-        assert "2 solutions" in captured.err
+        assert "2 solutions" in captured.out
 
     def test_output_contains_file_count(self, capsys):
         validateParameterTypes({"UseCustomMainLoopSchedule": False}, srcFile="a.yaml")
         validateParameterTypes({"UseCustomMainLoopSchedule": True}, srcFile="b.yaml")
         printTypeMismatchSummary()
         captured = capsys.readouterr()
-        assert "2 files" in captured.err
+        assert "2 files" in captured.out
 
     def test_output_contains_fix_message(self, capsys):
         validateParameterTypes({"UseCustomMainLoopSchedule": False})
         printTypeMismatchSummary()
         captured = capsys.readouterr()
-        assert "Fix these to prevent future build failures" in captured.err
+        assert "Fix these to prevent future build failures" in captured.out
 
-    def test_no_output_when_clean(self, capsys):
-        """When there are no mismatches, nothing should be printed."""
+    def test_no_output_when_clean_no_files(self, capsys):
+        """When there are no mismatches and no files, nothing should be printed."""
         printTypeMismatchSummary()
         captured = capsys.readouterr()
         assert captured.out == ""
         assert captured.err == ""
+
+    def test_clean_message_when_no_mismatches(self, capsys):
+        """When files were checked but no mismatches found, print confirmation."""
+        printTypeMismatchSummary(numFiles=42)
+        captured = capsys.readouterr()
+        assert "42" in captured.out
+        assert "no type mismatches found" in captured.out
 
     def test_multiple_param_types_in_output(self, capsys):
         """Multiple different mismatched params should all appear in output."""
@@ -354,5 +366,128 @@ class TestPrintTypeMismatchSummary:
         validateParameterTypes({"BufferLoad": 0})
         printTypeMismatchSummary()
         captured = capsys.readouterr()
-        assert "UseCustomMainLoopSchedule" in captured.err
-        assert "BufferLoad" in captured.err
+        assert "UseCustomMainLoopSchedule" in captured.out
+        assert "BufferLoad" in captured.out
+
+
+class TestValidateProblemTypeParameterTypes:
+    """Tests for the validateProblemTypeParameterTypes function."""
+
+    def setup_method(self):
+        """Reset the collector before each test."""
+        resetTypeMismatchCollector()
+
+    # --- Passing cases (no mismatches collected) ---
+
+    def test_bool_param_with_bool_value_passes(self):
+        """TransposeA: False (bool) should not collect a mismatch."""
+        state = {"TransposeA": False}
+        validateProblemTypeParameterTypes(state)
+        assert len(_typeMismatchCollector) == 0
+
+    def test_bool_param_with_true_passes(self):
+        """TransposeA: True (bool) should not collect a mismatch."""
+        state = {"TransposeA": True}
+        validateProblemTypeParameterTypes(state)
+        assert len(_typeMismatchCollector) == 0
+
+    def test_usebeta_bool_param_with_bool_passes(self):
+        """UseBeta: True (bool) should not collect a mismatch."""
+        state = {"UseBeta": True}
+        validateProblemTypeParameterTypes(state)
+        assert len(_typeMismatchCollector) == 0
+
+    def test_int_param_with_int_value_passes(self):
+        """UseBias: 1 (int) should not collect a mismatch."""
+        state = {"UseBias": 1}
+        validateProblemTypeParameterTypes(state)
+        assert len(_typeMismatchCollector) == 0
+
+    def test_mxblock_int_param_passes(self):
+        """MXBlockA: 16 (int) should not collect a mismatch."""
+        state = {"MXBlockA": 16}
+        validateProblemTypeParameterTypes(state)
+        assert len(_typeMismatchCollector) == 0
+
+    def test_unknown_param_ignored(self):
+        """Parameters not in _defaultProblemType should be silently skipped."""
+        state = {"UnknownProblemTypeParam": "anything"}
+        validateProblemTypeParameterTypes(state)
+        assert len(_typeMismatchCollector) == 0
+
+    def test_empty_state_passes(self):
+        """Empty state should not collect any mismatches."""
+        validateProblemTypeParameterTypes({})
+        assert len(_typeMismatchCollector) == 0
+
+    # --- Failing cases (mismatches collected) ---
+
+    def test_bool_param_with_int_value_collects_mismatch(self):
+        """TransposeA: 0 (int) should collect a bool-vs-int mismatch."""
+        state = {"TransposeA": 0}
+        validateProblemTypeParameterTypes(state)
+        assert len(_typeMismatchCollector) == 1
+        key = ("TransposeA", "int", "bool")
+        assert key in _typeMismatchCollector
+
+    def test_bool_param_with_int_one_collects_mismatch(self):
+        """UseBeta: 1 (int) should collect a bool-vs-int mismatch."""
+        state = {"UseBeta": 1}
+        validateProblemTypeParameterTypes(state)
+        assert len(_typeMismatchCollector) == 1
+        key = ("UseBeta", "int", "bool")
+        assert key in _typeMismatchCollector
+
+    def test_int_param_with_bool_collects_mismatch(self):
+        """UseBias: True (bool) should collect an int-vs-bool mismatch."""
+        state = {"UseBias": True}
+        validateProblemTypeParameterTypes(state)
+        assert len(_typeMismatchCollector) == 1
+        key = ("UseBias", "bool", "int")
+        assert key in _typeMismatchCollector
+
+    def test_mxblock_with_bool_collects_mismatch(self):
+        """MXBlockA: False (bool) should collect an int-vs-bool mismatch."""
+        state = {"MXBlockA": False}
+        validateProblemTypeParameterTypes(state)
+        assert len(_typeMismatchCollector) == 1
+        key = ("MXBlockA", "bool", "int")
+        assert key in _typeMismatchCollector
+
+    def test_collector_tracks_srcfile(self):
+        """srcFile should be recorded in the collector entry."""
+        state = {"TransposeA": 0}
+        validateProblemTypeParameterTypes(state, srcFile="problem_config.yaml")
+        key = ("TransposeA", "int", "bool")
+        assert "problem_config.yaml" in _typeMismatchCollector[key]["files"]
+
+    def test_collector_tracks_values(self):
+        """Different values should be collected in the values set."""
+        validateProblemTypeParameterTypes({"TransposeA": 0})
+        validateProblemTypeParameterTypes({"TransposeA": 1})
+        key = ("TransposeA", "int", "bool")
+        assert "0" in _typeMismatchCollector[key]["values"]
+        assert "1" in _typeMismatchCollector[key]["values"]
+
+    def test_multiple_params_collect_separately(self):
+        """Different parameters should create separate collector entries."""
+        state = {"TransposeA": 0, "UseBeta": 1, "UseBias": True}
+        validateProblemTypeParameterTypes(state)
+        assert len(_typeMismatchCollector) == 3
+
+    def test_accumulates_with_solution_params(self):
+        """ProblemType and Solution mismatches should accumulate together."""
+        validateParameterTypes({"UseCustomMainLoopSchedule": False})
+        validateProblemTypeParameterTypes({"TransposeA": 0})
+        assert len(_typeMismatchCollector) == 2
+
+    def test_precomputed_problemtype_types(self):
+        """_expectedProblemTypeParamTypes should be precomputed correctly."""
+        assert "TransposeA" in _expectedProblemTypeParamTypes
+        assert _expectedProblemTypeParamTypes["TransposeA"] == {bool}
+        assert "UseBeta" in _expectedProblemTypeParamTypes
+        assert _expectedProblemTypeParamTypes["UseBeta"] == {bool}
+        assert "UseBias" in _expectedProblemTypeParamTypes
+        assert _expectedProblemTypeParamTypes["UseBias"] == {int}
+        assert "MXBlockA" in _expectedProblemTypeParamTypes
+        assert _expectedProblemTypeParamTypes["MXBlockA"] == {int}

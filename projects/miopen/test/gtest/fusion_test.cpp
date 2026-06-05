@@ -33,8 +33,7 @@
 #include "tensor_holder.hpp"
 #include "get_handle.hpp"
 #include "cba.hpp"
-#include "gtest_conv_desc_guard.hpp"
-#include "gtest_tensor_desc_guard.hpp"
+#include "gtest_desc_guard.hpp"
 #include "../lib_env_var.hpp"
 
 #if MIOPEN_BACKEND_HIP

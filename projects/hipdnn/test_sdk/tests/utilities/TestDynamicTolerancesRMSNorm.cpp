@@ -303,7 +303,7 @@ TEST(TestCalculateRMSNormFwdTolerance, DetectsFailure)
     EXPECT_GT(tol, 1e-6f);
 
     auto validator = hipdnn_test_sdk::utilities::createAllCloseValidator(
-        hipdnn_data_sdk::data_objects::DataType::FLOAT, tol, 0);
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, tol, 0);
 
     bool valid = validator->allClose(*baseline, *actualPassing);
     EXPECT_TRUE(valid);
