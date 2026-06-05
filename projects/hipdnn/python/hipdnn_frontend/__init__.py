@@ -9,22 +9,33 @@ enabling GPU-accelerated deep neural network operations through a
 high-level Python interface.
 """
 
-# Preload hipDNN backend library when installed via ROCm wheels.
-# The Python extension (hipdnn_frontend_python.so) depends on libhipdnn_backend.so
-# which lives in a separate wheel package directory — not on LD_LIBRARY_PATH.
-# rocm_sdk.preload_libraries loads it with RTLD_GLOBAL so the extension finds it.
+# Preload ROCm libraries when installed via ROCm wheels. The compiled extension
+# (hipdnn_frontend_python) and hipdnn_backend live in separate wheel package
+# directories, not on LD_LIBRARY_PATH. rocm_sdk loads them by absolute path so
+# the extension resolves them at import time.
 try:
     import rocm_sdk
 except ImportError:
     rocm_sdk = None
 
 if rocm_sdk is not None:
+    import platform
+
+    # On Windows, CPython >= 3.8 loads extension modules with
+    # LOAD_LIBRARY_SEARCH_DEFAULT_DIRS, which excludes PATH. The extension and
+    # hipdnn_backend.dll resolve their ROCm runtime imports (amdhip64, hiprtc,
+    # amd_comgr) by base name, so those DLLs must already be in the process. The
+    # runtime libs are listed before hipdnn so they load first.
+    preload_shortnames = ["hipdnn"]
+    if platform.system() == "Windows":
+        preload_shortnames = ["amd_comgr", "amdhip64", "hiprtc", "hipdnn"]
+
     try:
-        rocm_sdk.preload_libraries("hipdnn")
+        rocm_sdk.initialize_process(preload_shortnames=preload_shortnames)
     except Exception:
-        # Preload is best-effort: the library may already be on LD_LIBRARY_PATH
-        # (e.g., source builds, system installs). If it's truly missing, the
-        # extension import below will fail with a clear dlopen error.
+        # Preload is best-effort: the libraries may already be resolvable
+        # (source builds, system installs, LD_LIBRARY_PATH). A genuine miss
+        # surfaces as a clear dlopen/ImportError below.
         pass
 
 # Import everything from the compiled extension module
