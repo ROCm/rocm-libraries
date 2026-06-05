@@ -90,8 +90,8 @@ if AMDGPU_FAMILIES == "gfx1151" and platform == "windows":
 test_filter = []
 if test_type == "quick":
     test_filter.append("--gtest_filter=*smoke*")
-elif test_type == "quick":
-    test_filter.append("--gtest_filter=*quick*")
+elif test_type == "pre_checkin":
+    test_filter.append("--gtest_filter=*pre_checkin*")
 
 cmd = [f"{THEROCK_BIN_DIR}/hipblaslt-test"] + test_filter
 
