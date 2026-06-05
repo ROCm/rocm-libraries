@@ -307,39 +307,21 @@ struct TestParams
                 grid_size = Kernel::GridSize(hargs.m, hargs.n, 1);
             }
 
-            // auto rotating_mem_ptr0    =
-            // std::make_unique<ck_tile::RotatingMemWrapper<DTypes::ADataType, DTypes::BDataType>>(
-            //         as0,
-            //         bs0,
-            //         stream_config_perf.rotating_count_,
-            //         data.xs.host->get_element_space_size_in_bytes(),
-            //         data.vs.host->get_element_space_size_in_bytes());
-            // auto rotating_mem_ptr1 =
-            // std::make_unique<ck_tile::RotatingMemWrapper<DTypes::ADataType, DTypes::BDataType>>(
-            //         as1,
-            //         bs1,
-            //         stream_config_perf.rotating_count_,
-            //         data.xs.host->get_element_space_size_in_bytes(),
-            //         data.vs.host->get_element_space_size_in_bytes());
-            // rotating_mem_ptr0->Print();
-            // rotating_mem_ptr1->Print();
-
-            // auto preprocess = [&](auto) {
-            //     ck_tile::flush_icache();
-            //     // rotating_mem_ptr0->Next();
-            //     // rotating_mem_ptr1->Next();
-            //     // clear_gemm_output();
-            // };
-            // auto preprocess = []() {};
-
             if(stream_config.log_level_ > 0)
             {
+                constexpr auto maj_str = [](bool is_row_major) -> std::string {
+                    return is_row_major ? " (Row major)" : " (Col major)";
+                };
+
+                auto [m_, n_, k_] = shape.mnk_lengths();
                 std::cout << "Launching kernel with args: \n"
                           << "  grid:  " << grid_size.x << ", " << grid_size.y << ", "
                           << grid_size.z << " \n " << "  block: " << block_size.x << ", "
                           << block_size.y << ", " << block_size.z << " \n"
-                          << "  shape: " << shape << " \n " << "  block_per_cu: " << BlockPerCu_
-                          << " \n ";
+                          << "  block_per_cu: " << BlockPerCu_ << " \n"
+                          << "  A: " << m_ << " x " << k_ << maj_str(shape.a_is_row_major) << "\n"
+                          << "  B: " << k_ << " x " << n_ << maj_str(shape.b_is_row_major) << "\n"
+                          << "  C: " << m_ << " x " << n_ << maj_str(shape.c_is_row_major) << "\n";
             }
 
             auto kernel_callable =
