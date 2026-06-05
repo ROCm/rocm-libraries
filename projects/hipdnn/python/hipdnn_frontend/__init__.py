@@ -17,75 +17,64 @@ _IS_WINDOWS = platform.system() == "Windows"
 # ROCm runtime libraries the compiled extension and hipdnn_backend link against.
 # On Windows every dependent DLL (runtime, runtime compiler, and engine-provider
 # deps) resolves by base name under a restricted loader search, so all must be
-# in the process beforehand. On Linux, RPATH/ldconfig pull the transitive deps
-# once libhipdnn itself is loadable, so only hipdnn needs to be located.
-_ROCM_CORE_SHORTNAMES = (
-    ["amd_comgr", "amdhip64", "hiprtc", "hipdnn"] if _IS_WINDOWS else ["hipdnn"]
+# preloaded into the process. On Linux, RPATH/ldconfig pull the transitive deps
+# once libhipdnn itself is located, so only hipdnn needs to be named.
+_ROCM_WHEEL_SHORTNAMES = (
+    ["amd_comgr", "amdhip64", "hiprtc", "hipdnn", "hipblaslt", "miopen"]
+    if _IS_WINDOWS
+    else ["hipdnn"]
 )
-# Engine provider plugins are loaded by absolute path at handle-create time, but
-# their transitive ROCm deps resolve by base name under the same restricted
-# Windows search, so preload them too. Optional: a distribution may ship only one.
-_ROCM_PROVIDER_SHORTNAMES = ["hipblaslt", "miopen"] if _IS_WINDOWS else []
 
 
-def _preload_via_rocm_sdk():
-    """Wheel install: ROCm libs ship as sibling rocm_sdk packages, off the
-    loader path. rocm_sdk resolves them by absolute path and preloads them so
-    the extension's by-name imports resolve at import time. Raises ImportError
-    when rocm_sdk is not installed (i.e. this is not a ROCm-wheel environment).
+def _preload_via_rocm_sdk() -> bool:
+    """Wheel-install path. ROCm libs ship inside sibling _rocm_sdk_* packages,
+    off the loader path; their package names carry a build-time version nonce and
+    GPU target family, so only rocm_sdk knows their absolute locations. Use its
+    public API rather than reimplementing that discovery.
+
+    Returns True when rocm_sdk is installed and drove the preload (i.e. this is a
+    ROCm-wheel environment), False otherwise so the caller can fall back.
     """
-    import rocm_sdk
+    try:
+        import rocm_sdk
+    except ImportError:
+        return False
 
-    # Core first so a missing optional provider can never block it. Each group is
-    # best-effort: initialize_process raises if a requested wheel/DLL is absent,
-    # but the library may still be resolvable by other means, and a genuine miss
-    # surfaces as a clear ImportError from the extension import below.
-    for shortnames in (_ROCM_CORE_SHORTNAMES, _ROCM_PROVIDER_SHORTNAMES):
-        if not shortnames:
-            continue
-        try:
-            rocm_sdk.initialize_process(preload_shortnames=shortnames)
-        except Exception:
-            pass
+    # Best-effort: initialize_process raises if a requested library is absent
+    # (ModuleNotFoundError for a missing provider wheel, FileNotFoundError for a
+    # missing DLL), but it may still be resolvable by other means; a genuine miss
+    # surfaces as a clear ImportError from the extension import below. Core libs
+    # lead the list so a missing optional provider cannot block them.
+    try:
+        rocm_sdk.initialize_process(preload_shortnames=_ROCM_WHEEL_SHORTNAMES)
+    except Exception:
+        pass
+    return True
 
 
-def _preload_via_rocm_path():
-    """Non-wheel installs (system .deb / /opt/rocm, and build/artifact trees):
-    locate the ROCm library directory from the standard ROCM_PATH/ROCM_HOME env
-    vars and make its libraries resolvable for the extension import.
+def _register_rocm_path_dir() -> None:
+    """Non-wheel installs: a system /opt/rocm, a .deb, the Windows HIP SDK, or a
+    build/artifact tree, where the runtime sits in one directory named by the
+    standard ROCM_PATH/HIP_PATH/ROCM_HOME env vars.
 
-    On Windows the directory is registered via os.add_dll_directory: extension
-    modules load with LOAD_LIBRARY_SEARCH_DEFAULT_DIRS, which excludes PATH and
-    has no RPATH equivalent. On Linux libhipdnn is ctypes-preloaded with
-    RTLD_GLOBAL so its RPATH pulls the transitive ROCm deps and the soname is
-    already resolved when the extension imports; LD_LIBRARY_PATH cannot be set
-    from here because the dynamic loader reads it once at process start.
+    On Windows that directory's bin/ must be registered via os.add_dll_directory:
+    extension modules load with LOAD_LIBRARY_SEARCH_DEFAULT_DIRS, which excludes
+    PATH and has no RPATH equivalent. On Linux the dynamic loader already
+    searches RPATH/ldconfig/LD_LIBRARY_PATH, so there is nothing to do.
     """
-    for var in ("ROCM_PATH", "ROCM_HOME"):
-        root = os.environ.get(var)
-        if not (root and os.path.isdir(root)):
-            continue
-        lib_dir = os.path.join(root, "bin" if _IS_WINDOWS else "lib")
-        if not os.path.isdir(lib_dir):
-            return
-        if _IS_WINDOWS:
-            os.add_dll_directory(lib_dir)
-        else:
-            import ctypes
-            from glob import glob
-
-            # Base symlink sorts before its versioned aliases; loading any of
-            # them registers the lib under its soname for the extension.
-            matches = sorted(glob(os.path.join(lib_dir, "libhipdnn.so*")))
-            if matches:
-                ctypes.CDLL(matches[0], mode=ctypes.RTLD_GLOBAL)
+    if not _IS_WINDOWS:
         return
+    for var in ("ROCM_PATH", "HIP_PATH", "ROCM_HOME"):
+        root = os.environ.get(var)
+        if root:
+            bin_dir = os.path.join(root, "bin")
+            if os.path.isdir(bin_dir):
+                os.add_dll_directory(bin_dir)
+                return
 
 
-try:
-    _preload_via_rocm_sdk()
-except ImportError:
-    _preload_via_rocm_path()
+if not _preload_via_rocm_sdk():
+    _register_rocm_path_dir()
 
 # Import everything from the compiled extension module
 try:
@@ -97,10 +86,12 @@ except ImportError as e:
         from .hipdnn_frontend_python import *
     except ImportError:
         raise ImportError(
-            "Could not import the hipdnn_frontend_python compiled extension. "
-            "Please ensure the package is properly installed.\n"
-            f"Original error: {e}"
-        )
+            "Could not load the hipdnn_frontend_python compiled extension. Its "
+            "ROCm dependencies were not found. Install the ROCm wheels "
+            "(`pip install rocm[libraries]`), or set ROCM_PATH/HIP_PATH to a "
+            "ROCm install or build tree (on Windows the directory containing the "
+            f"ROCm DLLs under bin/).\nOriginal error: {e}"
+        ) from e
 
 # Package metadata
 __version__ = "0.1.0"
