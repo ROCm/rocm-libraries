@@ -182,6 +182,9 @@ endif()
 string(REPLACE "," ";" GPU_TARGETS "${GPU_TARGETS}")
 # Filter out target flags as rocFFT builds generic code for each target.
 list(TRANSFORM GPU_TARGETS REPLACE ":[^;]+" "")
+# Always build amdgcnspirv for when clients run on future or past targets
+# that are not explicitly supported
+list(APPEND GPU_TARGETS amdgcnspirv)
 list(REMOVE_DUPLICATES GPU_TARGETS)
 rocm_check_target_ids(GPU_TARGETS TARGETS "${GPU_TARGETS}")
   

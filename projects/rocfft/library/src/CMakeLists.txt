@@ -560,6 +560,7 @@ if ( ROCFFT_KERNEL_CACHE_ENABLE )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1152 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1153 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx1200 )
+  list( REMOVE_ITEM GPU_TARGETS_AOT amdgcnspirv )
 
   # build separate kernel cache for each target
   foreach( arch IN ITEMS ${GPU_TARGETS_AOT} )
