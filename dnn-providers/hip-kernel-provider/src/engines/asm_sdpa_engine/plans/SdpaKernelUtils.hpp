@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "SdpaBwdParams.hpp"
+
 #include <cstddef>
 #include <hip/hip_runtime.h>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
@@ -56,13 +58,23 @@ constexpr size_t sdpaBwdDBufferSize(size_t batch, size_t headsQ, size_t seqLenQ)
 
 /// dq_acc buffer: FP32 accumulator for dQ, shape [B, H_q, S_q, D_qk] in FP32.
 /// Only needed for a32-accumulator kernels; a16 kernels write dQ in BF16 directly.
-// TODO(Task I8.2): POC assumes a32 accumulator — always allocates FP32 dq_acc buffer.
-// For a16 accumulator kernels, dQ is written directly in BF16 (no dq_acc buffer needed,
-// no dq_convert kernel launched). Provider should check accumulator type and skip
-// dq_acc allocation for a16.
 constexpr size_t sdpaBwdDqAccBufferSize(size_t batch, size_t headsQ, size_t seqLenQ, size_t headDim)
 {
     return alignUp(batch * headsQ * seqLenQ * headDim * sizeof(float), K_WORKSPACE_ALIGNMENT_BYTES);
+}
+
+/// Total backward workspace size, accounting for accumulator type.
+/// - A32: D buffer (FP32) + dq_acc buffer (FP32)
+/// - A16: D buffer (FP32) only — a16 kernels write dQ directly in BF16
+constexpr size_t sdpaBwdWorkspaceSize(
+    size_t batch, size_t headsQ, size_t seqLenQ, size_t headDim, AccumulatorType accType)
+{
+    size_t size = sdpaBwdDBufferSize(batch, headsQ, seqLenQ);
+    if(accType == AccumulatorType::A32)
+    {
+        size += sdpaBwdDqAccBufferSize(batch, headsQ, seqLenQ, headDim);
+    }
+    return size;
 }
 
 // =============================================================================

@@ -23,13 +23,16 @@ TIER_ORDER = ["quick", "standard", "comprehensive", "full"]
 
 # Matches the test name in CTest add_test() invocations. Supports both
 # the short form `add_test(<name> <command> [args...])` and the long form
-# `add_test(NAME <name> COMMAND <command> [args...])`. Test names are
-# CMake identifiers (alphanumeric, _, -). Anything fancier (quoted names,
-# bracket arguments) is uncommon for hand-rolled CTestTestfiles and not
-# worth supporting here.
+# `add_test(NAME <name> COMMAND <command> [args...])`. Test names may be
+# either bare CMake identifiers (alphanumeric, _, -) or double-quoted
+# strings (which is how callers spell test names containing spaces, e.g.
+# `add_test("foo smoke" ...)` in rocWMMA's hand-rolled install
+# CTestTestfile.cmake fragments). Bracket arguments ([=[ ... ]=]) are
+# uncommon in hand-rolled CTestTestfiles and not supported here.
 _ADD_TEST_NAME_RE = re.compile(
-    r"^\s*add_test\s*\(\s*(?:NAME\s+)?([A-Za-z_][A-Za-z0-9_\-]*)",
-    re.IGNORECASE | re.MULTILINE,
+    r"""^\s*add_test\s*\(\s*(?:NAME\s+)?
+        (?:"(?P<quoted>[^"]+)"|(?P<bare>[A-Za-z_][A-Za-z0-9_\-]*))""",
+    re.IGNORECASE | re.MULTILINE | re.VERBOSE,
 )
 
 
@@ -51,7 +54,7 @@ def scan_add_test_names(path):
     names = []
     seen = set()
     for match in _ADD_TEST_NAME_RE.finditer(text):
-        name = match.group(1)
+        name = match.group("quoted") or match.group("bare")
         if name not in seen:
             seen.add(name)
             names.append(name)
@@ -296,7 +299,9 @@ def generate_cmake_install(categories, general_excludes, test_names):
         if not labels_list:
             continue
         labels_str = ";".join(labels_list)
-        lines.append(f'set_tests_properties({test} PROPERTIES LABELS "{labels_str}")')
+        # Quote the test name so names containing spaces (e.g. rocWMMA's
+        # "<target> smoke" install entries) survive ctest's tokeniser.
+        lines.append(f'set_tests_properties("{test}" PROPERTIES LABELS "{labels_str}")')
     lines.append("")
     return "\n".join(lines) + "\n"
 
@@ -414,11 +419,12 @@ def main():
         "--explicit-tests",
         default=None,
         help="Semicolon-separated list of test names known at parse time. "
-        "When provided, regex patterns are expanded against this list and "
-        "the emitted code uses explicit per-test set_property() calls. "
-        "Required for install-tree CTestTestfile.cmake files because "
-        "ctest's script interpreter does not support "
-        "get_property(DIRECTORY ... PROPERTY TESTS).",
+        "Regex patterns are expanded against this list, avoiding ctest's "
+        "unsupported get_property(DIRECTORY ... PROPERTY TESTS) loop. "
+        "Combined with install_test_file, emits one set_tests_properties() "
+        "line per test (the only label form ctest --print-labels / -L "
+        "honour in installed CTestTestfile.cmake fragments); otherwise "
+        "emits per-test set_property(TEST ...) calls.",
     )
     args = parser.parse_args()
 

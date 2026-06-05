@@ -219,6 +219,16 @@ inline std::map<std::string, int>
                                         "v_wmma_f32_16x16x128_f8f6f4 v[0:7], v[16:31], v[16:31], v[0:7]",
                                         isDebug);
 
+    // InitCIterWmma replaces the v_mov initC with a WMMA using src C = immediate 0
+    rv["HasWMMA_AccImmZero"] = tryAssembler(isaVersion,
+                                            assemblerPath,
+                                            "v_wmma_f32_16x16x32_bf16 v[0:7], v[8:15], v[8:15], 0",
+                                            isDebug)
+                                && tryAssembler(isaVersion,
+                                                assemblerPath,
+                                                "v_wmma_f32_16x16x4_f32 v[0:7], v[8:9], v[8:9], 0",
+                                                isDebug);
+
     rv["HasAdd_PC_i64"] = false;
 
     rv["HasSWMMAC"] = tryAssembler(isaVersion, 
@@ -411,7 +421,33 @@ inline std::map<std::string, int>
                        "buffer_load_dwordx4 v[10:13], v[0], s[0:3], 0, offen offset:0, nt",
                        isDebug);
 
+    // gfx1250 replaces the bare 'nt' bit with a 3-bit Temporal Hint
+    // (th:TH_LOAD_*/TH_STORE_*) and adds a per-op Non-Volatile (nv) bit.
+    // (Volatile and Non-Volatile Memory Access).  Probe both with the buffer_*
+    // form because gfx12 supports the same modifier syntax for buffer / global / flat.
+    rv["HasTHModifier"]
+        = tryAssembler(
+              isaVersion,
+              assemblerPath,
+              "buffer_load_dwordx4 v[10:13], v[0], s[0:3], 0 offen offset:0 th:TH_LOAD_NT",
+              isDebug)
+          || tryAssembler(
+              isaVersion,
+              assemblerPath,
+              "buffer_load_dwordx4 v[10:13], v[0], s[0:3], null offen offset:0 th:TH_LOAD_NT",
+              isDebug);
+    rv["HasNVModifier"]
+        = tryAssembler(isaVersion,
+                       assemblerPath,
+                       "buffer_load_dwordx4 v[10:13], v[0], s[0:3], 0 offen offset:0 nv",
+                       isDebug)
+          || tryAssembler(isaVersion,
+                          assemblerPath,
+                          "buffer_load_dwordx4 v[10:13], v[0], s[0:3], null offen offset:0 nv",
+                          isDebug);
+
     rv["HasNewBarrier"] = tryAssembler(isaVersion, assemblerPath, "s_barrier_wait -1", isDebug);
+    rv["HasClusterBarrier"] = tryAssembler(isaVersion, assemblerPath, "s_barrier_wait -3", isDebug);
     rv["HasTDM"] = tryAssembler(isaVersion, assemblerPath, "tensor_load_to_lds s[0:3], s[4:11]", isDebug);
 
     rv["s_delay_alu"]
