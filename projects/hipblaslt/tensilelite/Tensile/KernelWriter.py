@@ -9633,6 +9633,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
       print2(f"[postMainLoopBarrierCheckAndReset] skip: numWaves={numWaves} (must be > 1)")
       return
 
+    removedCount = 0
+    insertedCount = 0
+
     # Pass-1: remove existing barriers first.
     modulesToScan = [rootModule]
     while modulesToScan:
@@ -9643,6 +9646,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           modulesToScan.append(item)
           keptItems.append(item)
         elif isinstance(item, SBarrier):
+          removedCount += 1
           continue
         else:
           keptItems.append(item)
@@ -9666,16 +9670,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       return None
 
     def _getTokenList(inst: Instruction):
-      # Prefer generic token API if present; fallback to mem-token API.
-      if hasattr(inst, "getToken"):
-        tokenObj = inst.getToken()
-        if tokenObj is not None:
-          if isinstance(tokenObj, (list, tuple)):
-            return list(tokenObj)
-          if hasattr(tokenObj, "tokens"):
-            return list(tokenObj.tokens)
-          return [tokenObj]
-
+      # This pass only relies on the existing mem-token API.
       if hasattr(inst, "getMemToken"):
         memTokenObj = inst.getMemToken()
         if memTokenObj is not None and hasattr(memTokenObj, "tokens"):
@@ -9709,6 +9704,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
         access = _classifyTokenAccess(item)
         tokens = _getTokenList(item)
+        if access is None and tokens:
+          print2(f"[postMainLoopBarrierCheckAndReset] WARNING: instruction {type(item).__name__} has tokens {tokens} but no classified access — barrier may be missing")
         if access is None or not tokens:
           rewrittenItems.append(item)
           continue
@@ -9727,6 +9724,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           barrier = SBarrier(comment=f"auto token transition barrier, {syncComments}")
           barrier.setMemToken(MemTokenData(uniqueTokens))
           rewrittenItems.append(barrier)
+          insertedCount += 1
 
         nextState = "writing" if access == "write" else "reading"
         for token in tokens:
@@ -9737,6 +9735,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       mod.setItems(rewrittenItems)
 
     _rewriteModuleInOrder(rootModule)
+    print2(f"[postMainLoopBarrierCheckAndReset] removed {removedCount} barriers, inserted {insertedCount} barriers")
     return
 
   ##############################################################################
