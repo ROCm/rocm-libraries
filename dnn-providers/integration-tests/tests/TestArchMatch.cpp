@@ -16,36 +16,36 @@ using hipdnn_test_sdk::utilities::ArchMatchMode;
 
 TEST(TestArchMatchStrict, MatchesBareArchExactly)
 {
-    EXPECT_TRUE(archMatches("gfx942", "gfx942", ArchMatchMode::STRICT));
+    EXPECT_TRUE(archMatches("gfx942", "gfx942", ArchMatchMode::PREFIX));
 }
 
 TEST(TestArchMatchStrict, MatchesBaseArchAgainstFeatureSuffix)
 {
-    EXPECT_TRUE(archMatches("gfx942:sramecc+:xnack-", "gfx942", ArchMatchMode::STRICT));
+    EXPECT_TRUE(archMatches("gfx942:sramecc+:xnack-", "gfx942", ArchMatchMode::PREFIX));
 }
 
 TEST(TestArchMatchStrict, MatchesFullFeatureStringExactly)
 {
     EXPECT_TRUE(
-        archMatches("gfx942:sramecc+:xnack-", "gfx942:sramecc+:xnack-", ArchMatchMode::STRICT));
+        archMatches("gfx942:sramecc+:xnack-", "gfx942:sramecc+:xnack-", ArchMatchMode::PREFIX));
 }
 
 TEST(TestArchMatchStrict, RejectsPartialArchName)
 {
     // "gfx94" is a prefix of "gfx942" but not a complete base arch: the next
     // char is '2', not ':'.
-    EXPECT_FALSE(archMatches("gfx942:sramecc+:xnack-", "gfx94", ArchMatchMode::STRICT));
+    EXPECT_FALSE(archMatches("gfx942:sramecc+:xnack-", "gfx94", ArchMatchMode::PREFIX));
 }
 
 TEST(TestArchMatchStrict, RejectsDifferentArch)
 {
-    EXPECT_FALSE(archMatches("gfx1100", "gfx942", ArchMatchMode::STRICT));
+    EXPECT_FALSE(archMatches("gfx1100", "gfx942", ArchMatchMode::PREFIX));
 }
 
 TEST(TestArchMatchStrict, RejectsDifferingFeatureFlags)
 {
     EXPECT_FALSE(
-        archMatches("gfx942:sramecc-:xnack-", "gfx942:sramecc+:xnack-", ArchMatchMode::STRICT));
+        archMatches("gfx942:sramecc-:xnack-", "gfx942:sramecc+:xnack-", ArchMatchMode::PREFIX));
 }
 
 // ---------------------------------------------------------------------------
@@ -56,30 +56,30 @@ TEST(TestArchMatchStrict, RejectsDifferingFeatureFlags)
 
 TEST(TestArchMatchLoose, MatchesBaseArchAgainstFeatureSuffix)
 {
-    EXPECT_TRUE(archMatches("gfx942:sramecc+:xnack-", "gfx942", ArchMatchMode::LOOSE));
+    EXPECT_TRUE(archMatches("gfx942:sramecc+:xnack-", "gfx942", ArchMatchMode::SUBSTRING));
 }
 
 TEST(TestArchMatchLoose, MatchesFamilyPrefix)
 {
     // "gfx10" is meant to cover the whole gfx10xx family.
-    EXPECT_TRUE(archMatches("gfx1030", "gfx10", ArchMatchMode::LOOSE));
-    EXPECT_TRUE(archMatches("gfx1100", "gfx11", ArchMatchMode::LOOSE));
+    EXPECT_TRUE(archMatches("gfx1030", "gfx10", ArchMatchMode::SUBSTRING));
+    EXPECT_TRUE(archMatches("gfx1100", "gfx11", ArchMatchMode::SUBSTRING));
 }
 
 TEST(TestArchMatchLoose, RejectsNonSubstring)
 {
     // A more-qualified candidate is a literal substring search: "gfx942:xnack-"
     // does not appear in "gfx942:sramecc+:xnack-".
-    EXPECT_FALSE(archMatches("gfx942:sramecc+:xnack-", "gfx942:xnack-", ArchMatchMode::LOOSE));
+    EXPECT_FALSE(archMatches("gfx942:sramecc+:xnack-", "gfx942:xnack-", ArchMatchMode::SUBSTRING));
 }
 
 TEST(TestArchMatchLoose, RejectsDifferentArch)
 {
-    EXPECT_FALSE(archMatches("gfx942:sramecc+:xnack-", "gfx1100", ArchMatchMode::LOOSE));
+    EXPECT_FALSE(archMatches("gfx942:sramecc+:xnack-", "gfx1100", ArchMatchMode::SUBSTRING));
 }
 
 TEST(TestArchMatchLoose, FailsAgainstEmptyDeviceArch)
 {
     // Empty device arch (could not be queried) must not match a real candidate.
-    EXPECT_FALSE(archMatches("", "gfx942", ArchMatchMode::LOOSE));
+    EXPECT_FALSE(archMatches("", "gfx942", ArchMatchMode::SUBSTRING));
 }
