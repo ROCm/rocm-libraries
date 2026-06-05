@@ -248,7 +248,7 @@ def DefaultWGM(writer, kernel, sgprWGM):
 
     module.add(SCmpGtI32(src0=sgpr(tmpWGM), src1=1, comment="WGM > 1 ?"))
     module.add(SCBranchSCC1(labelName=wgmLabelPositive.getLabelName(), comment="branch if WGM > 1"))
-    with writer.allocTmpSgprList(nums=[2,1,1], tag="wgmXCC_tmpSgprInfoList") as tmpSgprInfoList:
+    with writer.allocTmpSgprList(nums=[2,1,1], tag="DefaultWGM_tmpSgprInfoList") as tmpSgprInfoList:
         wgmDivisor = tmpSgprInfoList[0].idx
         wgmDivisor2 = tmpSgprInfoList[0].idx + 1
         blockId2 = tmpSgprInfoList[1].idx

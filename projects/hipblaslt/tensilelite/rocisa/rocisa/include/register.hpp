@@ -243,7 +243,7 @@ namespace rocisa
                     if(m_pool[i].status != Status::Available)
                     {
                         throw std::runtime_error(
-                            "RegisterPool::removeFromCheckOut(" + std::to_string(start) + ") is not in Available state");
+                            "RegisterPool::removeFromCheckOut(" + std::to_string(start) + ", " + std::to_string(size) + ", " + tag + ") is not in Available state");
                     }
                     m_pool[i].status = Status::InUse;
                     m_pool[i].tag    = tag;
