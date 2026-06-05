@@ -147,7 +147,7 @@ def _path_env_dlls(stem: str) -> List[str]:
         return []
     found: List[str] = []
     seen_dirs = set()
-    for d in os.environ.get("PATH", "").split(os.pathsep):
+    for d in os.getenv("PATH", "").split(os.pathsep):
         if not d or d in seen_dirs:
             continue
         seen_dirs.add(d)
