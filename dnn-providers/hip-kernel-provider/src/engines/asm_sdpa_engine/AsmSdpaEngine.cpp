@@ -27,8 +27,7 @@ int64_t AsmSdpaEngine::staticId()
 }
 
 bool AsmSdpaEngine::isApplicable(
-    HipKernelHandle& handle,
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
+    Handle& handle, const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     for(const auto& pb : _planBuilders)
     {
@@ -41,7 +40,7 @@ bool AsmSdpaEngine::isApplicable(
 }
 
 void AsmSdpaEngine::getDetails(
-    HipKernelHandle& handle,
+    Handle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
     hipdnnPluginConstData_t& detailsOut) const
 {
@@ -59,7 +58,7 @@ void AsmSdpaEngine::getDetails(
 }
 
 size_t AsmSdpaEngine::getMaxWorkspaceSize(
-    const HipKernelHandle& handle,
+    const Handle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /*engineConfig*/) const
 {
@@ -67,7 +66,7 @@ size_t AsmSdpaEngine::getMaxWorkspaceSize(
     {
         if(pb->isApplicable(handle, opGraph))
         {
-            return pb->getMaxWorkspaceSize(handle, opGraph, HipKernelSettings{});
+            return pb->getMaxWorkspaceSize(handle, opGraph, Settings{});
         }
     }
 
@@ -76,12 +75,12 @@ size_t AsmSdpaEngine::getMaxWorkspaceSize(
 }
 
 void AsmSdpaEngine::initializeExecutionContext(
-    const HipKernelHandle& handle,
+    const Handle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& engineConfig,
-    HipKernelContext& executionContext) const
+    Context& executionContext) const
 {
-    executionContext.setExecutionSettings(HipKernelSettings{});
+    executionContext.setExecutionSettings(Settings{});
 
     for(const auto& pb : _planBuilders)
     {
