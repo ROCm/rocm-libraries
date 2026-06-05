@@ -16,6 +16,17 @@ cd rocm-libraries/projects/hipblaslt/tensilelite
 tox -e py3 -- Tensile/Tests -m common
 ```
 
+To run only the smoke subset, use the `smoke` marker. The smoke suite is a
+small architecture-validation suite for TensileLite codegen: it builds
+`tensilelite-client`, runs YAML tests marked `smoke`, and checks that codegen
+plus GPU execution works at all on the target architecture without running the
+full common integration suite.
+
+```
+cd rocm-libraries/projects/hipblaslt/tensilelite
+tox -e py3 -- Tensile/Tests -m smoke
+```
+
 Subsequently, you can run just the Tensile unit tests via:
 
 ```
