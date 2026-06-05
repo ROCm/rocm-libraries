@@ -7,7 +7,7 @@
 #include <memory>
 
 #include "test_gemm_quant_fixtures.hpp"
-#include "test_gemm_quant_fusedaquant_standalone_fixtures.hpp"
+#include "test_gemm_quant_fusedaquant_fixtures.hpp"
 
 using RowMajor    = ck_tile::tensor_layout::gemm::RowMajor;
 using ColumnMajor = ck_tile::tensor_layout::gemm::ColumnMajor;

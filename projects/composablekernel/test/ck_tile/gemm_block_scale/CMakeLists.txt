@@ -82,10 +82,10 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx12")
     target_compile_options(test_tile_gemm_quant_abquant_eightwaves_padded_stride PRIVATE ${TEST_GEMM_COMPILE_OPTIONS})
 
     # ABQuant FusedAQuant tests
-    add_gtest_executable(test_tile_gemm_quant_abquant_fusedaquant_standalone
-        test_gemm_quant_abquant_fusedaquant_standalone.cpp
+    add_gtest_executable(test_tile_gemm_quant_abquant_fusedaquant
+        test_gemm_quant_abquant_fusedaquant.cpp
     )
-    target_compile_options(test_tile_gemm_quant_abquant_fusedaquant_standalone PRIVATE ${TEST_GEMM_COMPILE_OPTIONS})
+    target_compile_options(test_tile_gemm_quant_abquant_fusedaquant PRIVATE ${TEST_GEMM_COMPILE_OPTIONS})
 
     # ABQuant split-K tests
     add_gtest_executable(test_tile_gemm_quant_abquant_splitk_decode
