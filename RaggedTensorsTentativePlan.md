@@ -42,6 +42,15 @@ The design below reflects this constraint consistently.
 
 ## Option A — `RaggedTensor<T, IndexT>` as a self-owning `TensorBase<T>` subclass (retained for analysis, **not recommended**)
 
+Option A requires **two** new tensor types, not one:
+
+1. `RaggedTensor<T, IndexT>` — the owning ragged tensor, used in the user's stack frame (Flow 1, Stage 1.2) and in the test-harness's `GraphTensorBundle` and `virtualTensors` vector (Flow 2, Stages 2.1 and 2.5). Owns its own `MigratableMemory`. Described below as *Type 1*.
+2. `ShallowRaggedTensor<T, IndexT>` — a non-owning ragged-aware view over a `void*` plus dims/strides/physicalElementCount plus aux refs. Constructed at Flow 2 Stage 2.6 (plan layer) and at Stage 2.9 (output validation, in the seq_lens-wrap fallback strategy), where the data is only addressable through the variant pack and no owning ragged tensor is available. The peer of `ShallowTensor<T>` in the existing data_sdk, adapted to ragged semantics. Described below as *Type 2*.
+
+The two types share the same iteration / index machinery and the same aux-tensor semantics — they differ only in whether they own their underlying memory.
+
+### Type 1 — `RaggedTensor<T, IndexT>` (owning)
+
 **Class shape (packed-only, after this iteration's scope reduction)**
 
 ```cpp
@@ -121,12 +130,73 @@ The test harness's `verifyGraph` validation loop compares ragged output tensors 
 
 The sentinel-skip approach (recommended below) avoids this cost entirely in both A and C.
 
+### Type 2 — `ShallowRaggedTensor<T, IndexT>` (non-owning view)
+
+A non-owning ragged-aware wrapper that turns a raw `void*` (from the variant pack) into a `TensorBase<T>` the CPU references can read and write. The peer of the existing `ShallowTensor<T>` in `data_sdk`, adapted to ragged semantics.
+
+**Why it is necessary for Option A.** The test-harness flow at Stage 2.6 (per-op plan execute) and Stage 2.9 (output validation, in the seq_lens-wrap fallback strategy) does not have an owning `RaggedTensor` to read from — the variant pack carries `void*` only, and the typed view has to be reconstructed on the fly from cached dims/strides/physicalElementCount plus the aux runtime tensors. The existing `ShallowTensor<T>` knows nothing about ragged semantics and walks `prod(dims)` elements, which is wrong for ragged primaries. `ShallowRaggedTensor` is the ragged-aware peer.
+
+```cpp
+template <typename T, typename IndexT = int32_t>
+class ShallowRaggedTensor : public TensorBase<T>
+{
+public:
+    // Non-owning: ptr is borrowed from the variant pack; the caller guarantees lifetime
+    // for the duration of any access.
+    ShallowRaggedTensor(void*                     ptr,
+                        std::vector<int64_t>      paddedDims,
+                        std::vector<int64_t>      strides,
+                        size_t                    physicalElementCount,
+                        RaggedIndexTensor<IndexT> raggedOffset,                 // required
+                        RaggedIndexTensor<IndexT> seqLens = nullptr);          // optional
+
+    // ITensor / TensorBase<T> overrides:
+    //   dims()         -> paddedDims         (dims()[1] == S_max)
+    //   strides()      -> strides
+    //   elementSpace() -> physicalElementCount
+    //   elementCount() -> sum-of-seqLens if seqLens, else physicalElementCount
+    //   isPacked()     -> false
+    //   rawHostData()  -> the borrowed ptr
+    //   rawDeviceData() -> not supported (these wrappers exist only for CPU-side use)
+    //   memory()       -> existing ShallowTensor's pattern (a MigratableMemory wrapper
+    //                     over the borrowed ptr, no ownership)
+    //   begin/end      -> RaggedCompositeIndex strategy (walks `[0, ragged_offset[B])`
+    //                     when seqLens == nullptr; walks valid-only when seqLens is set)
+
+    bool hasRaggedOffset() const;            // always true in this iteration
+    bool hasSeqLens()      const;
+    const TensorBase<IndexT>* raggedOffset() const;
+    const TensorBase<IndexT>* seqLens()      const;
+    int64_t validSeqLen(int64_t b) const;
+
+private:
+    void*                       _ptr;
+    std::vector<int64_t>        _paddedDims;
+    std::vector<int64_t>        _strides;
+    size_t                      _physicalElementCount;
+    RaggedIndexTensor<IndexT>   _raggedOffset;   // required, non-null
+    RaggedIndexTensor<IndexT>   _seqLens;        // nullable
+};
+```
+
+**Where it is constructed**:
+
+- **Stage 2.6 (plan layer)**: built inside per-op plan `execute(variantPack)` for each ragged input/output. The plan reads `(ptr, dims, strides, physicalCount)` from its cached `SdpaFwdParams`-like struct, looks up the aux runtime tensors in the bundle by UID, and constructs the view. The view's lifetime is bounded by the `execute` call; it goes out of scope and is destroyed once the CPU reference returns. Same pattern as the existing `createShallowTensor<T>(...)` helper in `FlatbufferTensorAttributesUtils.hpp` — generalized to take aux refs.
+- **Stage 2.9 (validation loop, seq_lens-wrap fallback only)**: built inside `verifyGraph` for each ragged output, attaching the `seq_lens` looked up from the producing node's op attributes (e.g. `SdpaAttributes::seq_len_q_tensor_uid()`). Lifetime is bounded by the per-output validator call.
+
+  This use is avoided entirely under the sentinel-skip strategy (recommended), which doesn't need any per-output view.
+
+**Note: the alternative is to skip `ShallowRaggedTensor` and widen `CpuFpReferenceSdpa::forward`'s signature** to take the aux pointers + dims as extra arguments alongside the existing `TensorBase<T>&` for the primary. That keeps Option A to a single new type (just `RaggedTensor`) but makes the CPU reference's signature much wider and forces every existing op's reference to take the same widening even when only some of their ops are ragged. **The two-type design is cleaner and is what this plan describes.**
+
+The cost of `ShallowRaggedTensor` is small in absolute terms (it's a thin non-owning wrapper sharing all its index/iteration machinery with `RaggedTensor`), but it is a new public type in the data_sdk and brings A's new-type count to 2, equal to Option C's.
+
 **Summary of A's case**
 
 A satisfies every functional requirement in the RFC. The original framing ("A's central cost is the triplicated wiring / reconciler") is overweighted now that the reconciler is degenerate and the seq_lens constraint has neutralized A's "free valid-element iteration" advantage. A's remaining real costs at the test-harness layer are:
 
 - Two-pass bundle allocation in `generateBundles`.
 - `unique_ptr → shared_ptr` shift in `GraphTensorBundle`.
+- A second new type, `ShallowRaggedTensor<T, IndexT>`, for the plan-layer (Stage 2.6) and seq_lens-wrap (Stage 2.9) construction sites.
 - Additional `RaggedTensor` infrastructure if seq_lens-bounded output validation is chosen (avoided by sentinel-skip).
 
 A's remaining advantage over C is the **user-facing single-object ergonomic**: a user (in a sample like `BnInference.cpp`) holds one owning `RaggedTensor` value rather than C's split `(IrregularTensor storage, optional RaggedView)` pair.
@@ -353,7 +423,7 @@ The recommendation to adopt sentinel-skip neutralizes Stage 2.9 as a place where
 | Iterator-strategy refactor on `ITensor` | Required | Required |
 | Ctor-time structural validation | At `RaggedTensor` ctor | At `RaggedView` ctor (and at `IrregularTensor` ctor for storage) |
 | Risk of "view disagrees with its underlying" | N/A | Impossible by construction (no redundant shape args) |
-| New types | 1 | 2 |
+| New types | **2** (`RaggedTensor` + `ShallowRaggedTensor`) | 2 (`IrregularTensor` + `RaggedView`) |
 | Wide call-site changes outside the plan layer | None | None |
 
 ---
