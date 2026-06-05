@@ -99,11 +99,13 @@ def main():
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--arch", default="gfx950")
     parser.add_argument("--rule-set", default="tests",
-                        choices=["profiler", "tests", "default"],
+                        choices=["profiler", "tests", "tiny", "default"],
                         help="Rule set: 'profiler' (full JSON-derived "
                              "per-(variant,ndim,datatype) rules), 'tests' "
-                             "(~20% stratified subset of profiler), or 'default' "
-                             "(original hand-curated heuristics)")
+                             "(~20% stratified subset of profiler), 'tiny' "
+                             "(minimal >=10-config subset of tests with every "
+                             "variant represented), or 'default' (original "
+                             "hand-curated heuristics)")
 
     args = parser.parse_args()
     cfg = VARIANT_CONFIG[args.variant]

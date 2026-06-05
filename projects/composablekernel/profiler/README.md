@@ -303,7 +303,38 @@ cmake                                                                           
   ..
 ```
 
-By default, the Dispatcher generates a smaller `tests` set of kernels. To generate a full `profiler` set of 
-kernels, use CMake flag `-D DISPATCHER_CONFIG_SET=profiler` at the configuration step.
+The Dispatcher codegen selects which kernel instances to generate via the rule set chosen with the CMake
+flag `-D DISPATCHER_RULE_SET=<rule-set>` at the configuration step. Four rule sets are available:
+
+| Rule set | Description |
+|---|---|
+| `tests` (default) | A smaller, stratified ~20% subset of the `profiler` rule set, for faster builds. |
+| `profiler` | The full rule set (all per-(variant, ndim, datatype) instances), derived from old CK configurations |
+| `tiny` | A minimal subset of the `tests` rule set (at least 10 configs, with every feature category represented), for quick development/iteration builds. |
+| `default` | The original heuristic rules (datatype-agnostic). |
+
+For example, to generate the full `profiler` set of kernels:
+```bash
+cmake -D DISPATCHER_RULE_SET=profiler <other options> ..
+```
 
 To build only the CK Tile profiler, one can use an additional flag `-DCK_PROFILER_OP_FILTER="_tile"`.
+
+All togteher, we have a CMake configure command
+
+```bash
+cmake                                                                                             \
+  -D CMAKE_PREFIX_PATH=/opt/rocm                                                                  \
+  -D CMAKE_CXX_COMPILER=/opt/rocm/bin/hipcc                                                       \
+  -D CMAKE_BUILD_TYPE=Release                                                                     \
+  -D GPU_TARGETS="gfx942"                                                                         \
+  -D CK_EXPERIMENTAL_BUILDER=ON                                                                   \
+  -D CK_TILE_DISPATCHER=ON                                                                        \
+  -D CMAKE_CXX_STANDARD=20                                                                        \
+  -D DISPATCHER_RULE_SET=profiler                                                                 \
+  -D CK_PROFILER_OP_FILTER="_tile"                                                                \
+  -G Ninja                                                                                        \
+  ..
+```
+
+to generate a full set of kernel instances for comprehensive benchmarking.

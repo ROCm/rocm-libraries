@@ -102,3 +102,58 @@ def get_configs(
     all_configs = get_profiler_configs(arch, variants, ndims, datatypes)
     test_configs = _select_test_configs(all_configs)
     return test_configs
+
+
+def _select_tiny_configs(configs, min_count: int = 10) -> List:
+    """Select a minimal set of configs for quick development builds.
+
+    Uses the same category mechanism as ``_select_test_configs``
+    (``_classify_config`` folds the feature category and datatype together, so a
+    represented category also represents its variant), but maximally trimmed
+    down: pick a single config per category, then round-robin fill up to
+    ``min_count`` so the set is at least ``min_count`` configs (or all available,
+    if fewer). Every feature category present in ``configs`` is represented.
+    """
+    from collections import OrderedDict
+
+    by_category: "OrderedDict[str, list]" = OrderedDict()
+    for cfg in configs:
+        by_category.setdefault(_classify_config(cfg), []).append(cfg)
+
+    selected: List = []
+    # One per category first so every category (and thus variant) is represented.
+    for cfgs in by_category.values():
+        if cfgs:
+            selected.append(cfgs[0])
+
+    # Fill up to min_count round-robin across categories.
+    idx = 1
+    while len(selected) < min_count:
+        added = False
+        for cfgs in by_category.values():
+            if idx < len(cfgs):
+                selected.append(cfgs[idx])
+                added = True
+                if len(selected) >= min_count:
+                    break
+        if not added:
+            break  # all configs exhausted
+        idx += 1
+
+    return selected
+
+
+def get_tiny_configs(
+    arch: str,
+    variants: List,
+    ndims: List[int],
+    datatypes: List[str],
+) -> List:
+    """Build the "tiny" rule set: a minimal subset of the "tests" rule set.
+
+    Returns at least 10 configs (or all available, if fewer), with every feature
+    category represented (same category mechanism as the "tests" rule set, but
+    maximally trimmed). Intended for fast development/iteration builds.
+    """
+    test_configs = get_configs(arch, variants, ndims, datatypes)
+    return _select_tiny_configs(test_configs)

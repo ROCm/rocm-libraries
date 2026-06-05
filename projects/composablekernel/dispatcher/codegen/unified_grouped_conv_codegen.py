@@ -1769,6 +1769,7 @@ _RULE_SET_MODULES = {
     "default": "grouped_config_rules",
     "profiler": "grouped_config_rules_profiler",
     "tests": "grouped_config_rules_testing",
+    "tiny": "grouped_config_rules_tiny",
 }
 
 
@@ -1790,7 +1791,9 @@ def get_default_configs(
         datatypes: Data type strings (e.g., ["fp16", "bf16", "fp32"]).
         rule_set: "profiler" (full JSON-derived per-(variant,ndim,datatype)
                   rules, the default), "tests" (~20% stratified subset of
-                  profiler), or "default" (original heuristic rules).
+                  profiler), "tiny" (minimal >=10-config subset of tests with
+                  every variant represented), or "default" (original heuristic
+                  rules).
     """
     if variants is None:
         variants = [GroupedConvVariant.FORWARD]
@@ -2261,7 +2264,7 @@ def main():
         "-d",
         type=str,
         nargs="+",
-        default=["fp16"],
+        default=["fp16", "bf16", "fp32"],
         choices=["fp16", "bf16", "fp32"],
         help="Data types to generate",
     )
@@ -2270,8 +2273,8 @@ def main():
         "-v",
         type=str,
         nargs="+",
-        default=["all"],
-        choices=["forward", "bwd_data", "bwd_weight", "all"],
+        default=["forward", "bwd_data", "bwd_weight"],
+        choices=["forward", "bwd_data", "bwd_weight"],
         help="Grouped convolution variants",
     )
     parser.add_argument(
@@ -2279,7 +2282,7 @@ def main():
         "-n",
         type=int,
         nargs="+",
-        default=[2],
+        default=[2, 3],
         choices=[1, 2, 3],
         help="Spatial dimensions",
     )
@@ -2302,7 +2305,7 @@ def main():
         "-r",
         type=str,
         default="default",
-        choices=["default", "profiler", "tests"],
+        choices=["default", "profiler", "tests", "tiny"],
         help="Rule-set used in the instance generation",
     )
 
@@ -2398,14 +2401,11 @@ def main():
 
     # Map variant strings to enums
     variant_map = {
-        "forward": [GroupedConvVariant.FORWARD],
-        "bwd_data": [GroupedConvVariant.BACKWARD_DATA],
-        "bwd_weight": [GroupedConvVariant.BACKWARD_WEIGHT],
-        "all": [GroupedConvVariant.FORWARD, GroupedConvVariant.BACKWARD_DATA, GroupedConvVariant.BACKWARD_WEIGHT],
+        "forward": GroupedConvVariant.FORWARD,
+        "bwd_data": GroupedConvVariant.BACKWARD_DATA,
+        "bwd_weight": GroupedConvVariant.BACKWARD_WEIGHT,
     }
-    requested_variants = []
-    for v in args.variant:
-        requested_variants.extend(variant_map[v])
+    requested_variants = [variant_map[v] for v in args.variant]
 
     # Validate --instance-id requires --config-file
     if args.instance_id is not None and args.config_file is None:
