@@ -595,7 +595,9 @@ struct GridwiseGemmMultipleD_xdl_cshuffle
 #if !defined(__HIPCC_RTC__) || !defined(CK_CODE_GEN_RTC)
         if(!is_xdl_wmma_k_supported<AComputeDataType, KPerBlock>())
         {
-            ck::LogInfo("CheckValidity failed: xdlops with KPerBlock=", KPerBlock, " is not supported for AComputeDataType.");
+            ck::LogInfo("CheckValidity failed: xdlops with KPerBlock=",
+                        KPerBlock,
+                        " is not supported for AComputeDataType.");
             return false;
         }
 

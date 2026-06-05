@@ -1262,12 +1262,12 @@ struct GridwiseGemmMultiD_xdl_cshuffle_v3
                  karg.M * karg.N * sizeof(CDataType) <= TwoGB))
             {
                 ck::LogInfo("CheckValidity failed: tensor size exceeds 2GB limit.",
-                        " A_bytes=",
-                        karg.M * karg.K * sizeof(ADataType),
-                        " B_bytes=",
-                        karg.N * karg.K * sizeof(BDataType),
-                        " C_bytes=",
-                        karg.M * karg.N * sizeof(CDataType));
+                            " A_bytes=",
+                            karg.M * karg.K * sizeof(ADataType),
+                            " B_bytes=",
+                            karg.N * karg.K * sizeof(BDataType),
+                            " C_bytes=",
+                            karg.M * karg.N * sizeof(CDataType));
                 return false;
             }
         }
