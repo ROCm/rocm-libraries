@@ -374,8 +374,9 @@ struct StreamKKernel
             {
                 BaseGemm(kargs, tile_idx, num_loop_sk, i_k_a, i_k_b, k_size, smem_ptr_0);
             }
-            else if(TilePartitioner::ReductionStrategy == StreamKReductionStrategy::Linear ||
-                    TilePartitioner::ReductionStrategy == StreamKReductionStrategy::Tree)
+            else if constexpr(TilePartitioner::ReductionStrategy ==
+                                  StreamKReductionStrategy::Linear ||
+                              TilePartitioner::ReductionStrategy == StreamKReductionStrategy::Tree)
             {
                 const auto c_macro_tile_idx =
                     kargs.tile_partitioner.get_output_tile_index(tile_idx);
@@ -517,7 +518,7 @@ struct StreamKKernel
             else
             {
                 static_assert(
-                    "An implementation does not exist for the chosen reduction strategy.");
+                    false, "An implementation does not exist for the chosen reduction strategy.");
             }
 
             // Prepare for next Stream-K loop iteration.
