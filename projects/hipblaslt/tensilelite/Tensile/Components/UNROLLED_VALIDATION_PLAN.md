@@ -434,20 +434,22 @@ Zero existing tests need re-pinning. There are no standalone `test_cumulative_is
 
 ---
 
-## 10. Beads (one per commit; all blocking `r62g`)
+## 10. Beads (filed, all P0, chained to block `r62g`)
 
-Implementation chain. Each bead cites the relevant plan section + has explicit `br dep add` dependencies on its predecessors.
+| Step | Bead | Title | Depends on |
+|---|---|---|---|
+| C1   | `rocm-libraries-5tf9` | Delete exemption + ML_MAT_COUNT constant + PrefetchGlobalRead assertion | — |
+| C3a  | `rocm-libraries-abgv` | `UnrolledCapture` materializer + tests (no validator wiring) | 5tf9 |
+| C3b  | `rocm-libraries-wg77` | `DataflowGraph.nodes` refactor → ordered sequence + byte-key reverse index | abgv |
+| C3c  | `rocm-libraries-1rsy` | `build_dataflow_graph` rewrite consuming `UnrolledCapture` | abgv + wg77 |
+| C3d  | `rocm-libraries-xxj4` | `edge_keys()` byte-key basis migration | 1rsy |
+| C3e  | `rocm-libraries-67us` | `compare_graphs` symmetric direction + `EdgeRoutedDifferentlyFailure` classifier | xxj4 |
+| C3f  | `rocm-libraries-i190` | `diagnose_missing_edge` Phase 0/1 migration | 1rsy + wg77 |
+| C3g  | `rocm-libraries-ktwt` | `cumulative_issue_cycles` + remaining `body_label` consumers migration | 1rsy |
+| C3h  | `rocm-libraries-si5f` | n7og xfail removal + new cross-iter/cross-body unit tests | xxj4 + 67us + i190 |
+| C4   | `rocm-libraries-5ryl` | Re-fixture (b)-class tests | si5f |
 
-- **C1** — Delete exemption + introduce `ML_MAT_COUNT` constant + PrefetchGlobalRead assertion (§5 Commit 1). No predecessors. Filed below.
-- **C3a** — `UnrolledCapture` materializer + tests, no validator wiring (§5 Commit 3a). Depends on: C1 (to consume the `ML_MAT_COUNT` constant).
-- **C3b** — `DataflowGraph.nodes` refactor to ordered sequence + byte-key reverse index (§5 Commit 3b). Depends on: C3a (the sequence-of-iters shape determines what the ordered sequence looks like).
-- **C3c** — `build_dataflow_graph` rewrite consuming `UnrolledCapture` (§5 Commit 3c). Depends on: C3a + C3b.
-- **C3d** — `edge_keys()` byte-key basis migration (§5 Commit 3d). Depends on: C3c (needs the new walk producing the right edge metadata).
-- **C3e** — `compare_graphs` symmetric direction + `EdgeRoutedDifferentlyFailure` classifier (§5 Commit 3e). Depends on: C3d (needs byte-key edge_keys). **This is the renamed `rocm-libraries-67us`.**
-- **C3f** — `diagnose_missing_edge` Phase 0/1 migration (§5 Commit 3f). Depends on: C3c + C3b (needs unrolled positions and byte-key reverse index).
-- **C3g** — `cumulative_issue_cycles` + remaining `body_label` consumers migration (§5 Commit 3g). Depends on: C3c.
-- **C3h** — n7og xfail removal + new cross-iter / cross-body unit tests (§5 Commit 3h). Depends on: C3d + C3e + C3f (validator must be correct end-to-end before xfail removal lands).
-- **C4** — Re-fixture (b)-class tests (§5 Commit 4). Depends on: C3h.
+C4 (`5ryl`) → blocks `r62g`. `br dep cycles` returns 0.
 
 **Closed during planning:** `rocm-libraries-tne8` — its original scope (thread iteration counts through `FourPartCapture`) was dissolved by the user-corrected hardcoded-constant-with-assertion design. The constant + assertion fold into C1.
 
